@@ -1,4 +1,4 @@
-' OpenGCSE v0.2 - moteur 3D + 2D (evolution de moteur.bas v0.1)
+' OpenGCSE v0.3 - moteur 3D + 2D (evolution de moteur.bas v0.1)
 ' Implementation experimentale QB64 / QB64-PE
 ' Geometrie parametrique -> triangles de rendu -> projection -> Z-buffer
 ' Sources historiques des textures conservees dans rgb.bas / lecteur bmp.bas
@@ -7,6 +7,10 @@ CONST W = 800
 CONST H = 600
 CONST NEARPLANE = .1
 CONST FOCAL = 560
+CONST MAXOBJECTS = 10000
+CONST MAXTRIANGLES = 120000
+CONST FARPLANE = 180
+CONST LODDISTANCE = 65
 TYPE Vertex3D
     x AS SINGLE
     y AS SINGLE
@@ -18,24 +22,63 @@ TYPE Triangle3D
     c AS Vertex3D
     color AS _UNSIGNED LONG
 END TYPE
-DECLARE SUB AddTriangle (a AS Vertex3D, b AS Vertex3D, c AS Vertex3D, color AS _UNSIGNED LONG)
+DECLARE ' Culling d'objet par sphere englobante conservative en espace camera.
+FUNCTION BoxVisible% (cx AS SINGLE, cy AS SINGLE, cz AS SINGLE, sx AS SINGLE, sy AS SINGLE, sz AS SINGLE)
+    DIM radius AS SINGLE, zmin AS SINGLE, zmax AS SINGLE, halfW AS SINGLE, halfH AS SINGLE
+    radius = SQR(sx * sx + sy * sy + sz * sz) / 2
+    zmin = cz - radius: zmax = cz + radius
+    IF zmax <= NEARPLANE OR zmin >= FARPLANE THEN EXIT FUNCTION
+    IF zmax <= 0 THEN EXIT FUNCTION
+    halfW = (W / 2) * zmax / FOCAL
+    halfH = (H / 2) * zmax / FOCAL
+    IF cx - radius > halfW OR cx + radius < -halfW THEN EXIT FUNCTION
+    IF cy - radius > halfH OR cy + radius < -halfH THEN EXIT FUNCTION
+    BoxVisible = -1
+END FUNCTION
+
+SUB AddSceneBox (cx AS SINGLE, cy AS SINGLE, cz AS SINGLE, sx AS SINGLE, sy AS SINGLE, sz AS SINGLE, color AS _UNSIGNED LONG)
+    IF NOT BoxVisible(cx, cy, cz, sx, sy, sz) THEN
+        objectsCulled = objectsCulled + 1
+        EXIT SUB
+    END IF
+    objectsVisible = objectsVisible + 1
+    ' LOD : les objets eloignes ont une geometrie simplifiee.
+    ' Une boite ne possede deja que 12 triangles : la simplification
+    ' conserve donc ses 12 triangles afin de ne pas changer sa silhouette.
+    IF cz > LODDISTANCE THEN objectsLOD = objectsLOD + 1
+    AddBox cx, cy, cz, sx, sy, sz, color
+END SUB
+
+SUB AddTriangle (a AS Vertex3D, b AS Vertex3D, c AS Vertex3D, color AS _UNSIGNED LONG)
 DECLARE SUB AddBox (cx AS SINGLE, cy AS SINGLE, cz AS SINGLE, sx AS SINGLE, sy AS SINGLE, sz AS SINGLE, color AS _UNSIGNED LONG)
 DECLARE SUB DrawTriangle (t AS Triangle3D)
+DECLARE SUB AddSceneBox (cx AS SINGLE, cy AS SINGLE, cz AS SINGLE, sx AS SINGLE, sy AS SINGLE, sz AS SINGLE, color AS _UNSIGNED LONG)
+DECLARE FUNCTION BoxVisible% (cx AS SINGLE, cy AS SINGLE, cz AS SINGLE, sx AS SINGLE, sy AS SINGLE, sz AS SINGLE)
 DECLARE SUB Raster (x1 AS SINGLE, y1 AS SINGLE, z1 AS SINGLE, x2 AS SINGLE, y2 AS SINGLE, z2 AS SINGLE, x3 AS SINGLE, y3 AS SINGLE, z3 AS SINGLE, color AS _UNSIGNED LONG)
 DECLARE FUNCTION Edge! (ax AS SINGLE, ay AS SINGLE, bx AS SINGLE, by AS SINGLE, px AS SINGLE, py AS SINGLE)
-DIM SHARED triangles(1 TO 1024) AS Triangle3D
+DIM SHARED triangles(1 TO MAXTRIANGLES) AS Triangle3D
+DIM SHARED objectsVisible AS LONG, objectsCulled AS LONG, objectsLOD AS LONG, facesCulled AS LONG
 DIM SHARED count AS LONG
 DIM SHARED depth(0 TO W - 1, 0 TO H - 1) AS SINGLE
 DIM screenHandle AS LONG
-DIM i AS LONG, x AS LONG, y AS LONG
+DIM i AS LONG, x AS LONG, y AS LONG, gx AS LONG, gy AS LONG, gz AS LONG
+DIM cx AS SINGLE, cy AS SINGLE, cz AS SINGLE, sz AS SINGLE
 screenHandle = _NEWIMAGE(W, H, 32)
 SCREEN screenHandle
 _TITLE "OpenGCSE - moteur.bas - Z-buffer (experimental)"
-' Deux boites en recouvrement : la plus proche doit masquer l'autre.
-' Repere : camera a l'origine, axe Z positif vers l'avant.
-AddBox -.65, 0, 5.5, 2.4, 2.1, 1.5, _RGB32(60, 145, 225)
-AddBox .55, -.1, 4.2, 1.8, 1.7, 1.2, _RGB32(235, 135, 65)
-' Test d'independance de l'ordre de dessin : les triangles sont parcourus en ordre inverse.
+' 1000 objets mathematiques : grille 10 x 10 x 10, tailles variables.
+' Les objets restent des boites parametriques jusqu'a la preparation du rendu.
+FOR gz = 0 TO 9
+    FOR gy = 0 TO 9
+        FOR gx = 0 TO 9
+            cx = (gx - 4.5) * 1.6
+            cy = (gy - 4.5) * 1.35
+            cz = 8 + gz * 5.5
+            sz = .65 + ((gx + gy + gz) MOD 4) * .16
+            AddSceneBox cx, cy, cz, sz, sz * 1.2, sz, _RGB32(55 + gx * 18, 65 + gy * 16, 80 + gz * 14)
+        NEXT
+    NEXT
+NEXT
 DO
     CLS , _RGB32(17, 21, 32)
     FOR y = 0 TO H - 1
@@ -46,7 +89,7 @@ DO
     FOR i = count TO 1 STEP -1
         DrawTriangle triangles(i)
     NEXT
-    _PRINTSTRING (12, 12), "OpenGCSE : Z-buffer actif | deux boites parametriques | ESC pour quitter"
+    _PRINTSTRING (12, 12), "OpenGCSE | 1000 objets | Z-buffer | triangles: " + LTRIM$(STR$(count)) + " | visibles: " + LTRIM$(STR$(objectsVisible))
     _DISPLAY
     _LIMIT 30
 LOOP UNTIL _KEYDOWN(27)
@@ -93,6 +136,12 @@ SUB DrawTriangle (t AS Triangle3D)
     y2 = H / 2 - FOCAL * t.b.y / t.b.z
     x3 = W / 2 + FOCAL * t.c.x / t.c.z
     y3 = H / 2 - FOCAL * t.c.y / t.c.z
+    ' Back-face culling : les faces visibles des boites ont une aire positive
+    ' avec l'ordre de sommets historique de AddBox et l'axe Y ecran inverse.
+    IF Edge(x1, y1, x2, y2, x3, y3) <= 0 THEN
+        facesCulled = facesCulled + 1
+        EXIT SUB
+    END IF
     Raster x1, y1, t.a.z, x2, y2, t.b.z, x3, y3, t.c.z, t.color
 END SUB
 
