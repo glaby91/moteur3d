@@ -72,7 +72,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}input[type=checkbox]{acc
 <label>Élévation caméra <span id="elevationValue">18°</span><input id="elevation" type="range" min="-5" max="50" value="18"></label>
 <label>Champ horizontal <span id="fovValue">70°</span><input id="fov" type="range" min="35" max="105" value="70"></label>
 <label>Précision du rendu
-<select id="renderScale"><option value="1" selected>Native — 1 rayon par pixel</option><option value="0.5">Rapide — moitié largeur/hauteur (×4 moins de rayons)</option></select>
+<select id="renderScale"><option value="1" selected>Native — 1 rayon par pixel</option><option value="0.75">Équilibré — 75 % par axe, détails mieux préservés</option><option value="0.5">Rapide — moitié largeur/hauteur (×4 moins de rayons)</option></select>
 </label>
 <label>Ciel / nuages <select id="skyMode"><option value="fast" selected>Rapide — grille atmosphérique</option><option value="reference">Exact — calcul par pixel</option></select></label><label>Traitement de couleur <select id="shadingMode"><option value="fast" selected>Optimisé — ombres et brouillard</option><option value="reference">V9 — référence intacte</option></select></label>
 <label>Filtrage texture
@@ -89,7 +89,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}input[type=checkbox]{acc
 <label>Budget de calcul par rafraîchissement <select id="budget"><option value="8">8 ms</option><option value="14" selected>14 ms</option><option value="24">24 ms</option><option value="40">40 ms</option></select></label>
 <div class="row"><button class="primary" id="renderButton">↻ Recalculer l'image</button><button id="resetButton">Caméra initiale</button></div>
 <div class="notice" id="textureStatus">Textures : préparation des mipmaps…</div>
-<div class="notice">En résolution native, un rayon est lancé pour chaque pixel affiché. Le mode rapide, facultatif, calcule à la moitié de la largeur et de la hauteur puis agrandit l’image : il lance un rayon par pixel calculé et non par pixel affiché, soit quatre fois moins de rayons.</div><div class="notice">Le rendu peut comparer les mêmes rayons caméra et les mêmes primitives en mode original ou optimisé. La surface de projection est sphérique : chaque direction de vue est radiale, donc normale à cette surface. Les directions sont réparties pour obtenir une perspective naturelle 16:10 sans effet fisheye marqué.</div>
+<div class="notice">En résolution native, un rayon est lancé pour chaque pixel affiché. Les modes Équilibré et Rapide réduisent respectivement les deux axes à 75 % ou 50 %, puis agrandissent l’image : un rayon est lancé par pixel réellement calculé, et non par pixel affiché. Le mode natif conserve strictement un rayon par pixel affiché.</div><div class="notice">Le rendu peut comparer les mêmes rayons caméra et les mêmes primitives en mode original ou optimisé. La surface de projection est sphérique : chaque direction de vue est radiale, donc normale à cette surface. Les directions sont réparties pour obtenir une perspective naturelle 16:10 sans effet fisheye marqué.</div>
 <div class="notice">Le moteur recherche uniquement le premier impact d'un rayon caméra. Les ombres utilisent une **carte de profondeur calculée séparément pour l'unique lumière**, sans rayon secondaire lancé depuis les pixels caméra. Z caméra par rasterisation : aucun.</div>
 </div></section>
 </div></main>
