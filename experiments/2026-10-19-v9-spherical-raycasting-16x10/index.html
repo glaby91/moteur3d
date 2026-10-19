@@ -258,7 +258,7 @@ function hitPrimitive(o,ox,oy,oz,dx,dy,dz,maxT){
 }
 function traceClosest(ox,oy,oz,dx,dy,dz,result,track=true){
  stats.rays+=track?1:0;
- let near=dy<-.000001?-oy/dy:Infinity,id=(near>.0001?1:0);
+ let near=dy<-.000001?-oy/dy:Infinity,id=(Number.isFinite(near)&&near>.0001?1:0);
  if(id===0)near=Infinity;
  if(bvhRoot>=0){
   let top=0;bvhStack[top++]=bvhRoot;
