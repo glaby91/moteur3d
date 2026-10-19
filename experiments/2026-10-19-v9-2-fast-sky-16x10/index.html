@@ -1,0 +1,899 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Moteur 3D V9.2 — Ray casting 16:10 et ciel optimisé</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1622;--panel:#16293b;--line:#334f64;--ink:#e9f3f9;--muted:#a3bbcf;--accent:#74dfcb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font:13px/1.45 system-ui,'Segoe UI',sans-serif;color:var(--ink)}
+header{padding:17px 22px;background:#132539;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:15px;flex-wrap:wrap}
+h1{font-size:21px;letter-spacing:-.4px;margin:0}p{margin:6px 0;color:var(--muted)}
+main{max-width:1500px;padding:16px;margin:auto}.frame{display:grid;grid-template-columns:minmax(0,2fr) minmax(275px,1fr);gap:14px}
+.panel{background:var(--panel);border:1px solid var(--line);padding:15px;border-radius:10px;min-width:0}
+.panel h2{font-size:15px;margin:0 0 12px}canvas#view{display:block;width:100%;aspect-ratio:16/10;height:auto;background:#213a50;border-radius:6px}
+.controls{display:grid;gap:12px}.controls label{display:grid;gap:5px;color:#c2d4e2}label.inline{display:flex;align-items:center;gap:8px}
+select,button,input{font:inherit}select,button{border-radius:6px;background:#26445e;color:var(--ink);border:1px solid #577d9a;padding:8px 9px}
+button{cursor:pointer}button:hover{background:#325a74}button.primary{background:#267264;border-color:#57b59f;font-weight:650}
+input[type=range]{width:100%;accent-color:var(--accent)}input[type=checkbox]{accent-color:var(--accent)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.muted{color:var(--muted)}
+.statgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:12px 0}
+.stat{background:#1c3449;padding:10px;border-radius:7px;border:1px solid #35516b}.stat b{display:block;font-size:20px;font-variant-numeric:tabular-nums}.stat small{font-size:10px;color:var(--muted)}
+.progress{height:8px;background:#28445c;overflow:hidden;border-radius:10px}.progress>div{height:100%;width:0;background:#6bd8bd;transition:width .1s}
+.notice{font-size:11px;line-height:1.55;color:var(--muted)}.metrics{display:grid;grid-template-columns:1fr auto;gap:4px 12px;font-variant-numeric:tabular-nums}
+.metrics span:nth-child(2n){text-align:right;color:#c7e5d7}
+.hint{border-left:3px solid #76cbb8;padding:8px 12px;background:#1a3745;font-size:12px;margin-top:12px;color:#d1e6ed}
+#diagnostics{white-space:pre-line}
+@media(max-width:980px){.frame{grid-template-columns:1fr}.statgrid{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head><body>
+<header><div><h1>◈ Moteur 3D V9.2 — Ray casting mathématique · 16:10 · Ciel optimisé</h1>
+<p>Caméra sphérique virtuelle · 1 rayon primaire par pixel · premières intersections · textures RGB565 / mipmaps · lumière unique</p></div>
+<div class="row"><a href="https://github.com/glaby91/moteur3d" style="color:#84d8cb">GitHub</a><strong id="state">Initialisation…</strong></div></header>
+<main><div class="frame">
+<section class="panel">
+<h2>01 / Image calculée par rayons — projection rectilinéaire sur surface sphérique</h2>
+<canvas id="view" width="640" height="400"></canvas>
+<div class="row" style="justify-content:space-between;margin:9px 0"><span id="frameInfo">Aucune image</span><span class="muted" id="raysInfo">256 000 rayons / image</span></div>
+<div class="progress"><div id="progressBar"></div></div>
+<div class="statgrid">
+<div class="stat"><b id="renderTime">—</b><small>ms / image complète</small></div>
+<div class="stat"><b id="traceTime">—</b><small>ms intersections BVH</small></div>
+<div class="stat"><b id="shadeTime">—</b><small>ms éclairage / texels</small></div>
+<div class="stat"><b id="rayCounter">—</b><small>rayons caméra</small></div>
+</div>
+<h2>02 / Diagnostics réels du moteur</h2>
+<div class="metrics"><span>Primitives mathématiques</span><span id="objectCount">—</span>
+<span>Tests géométriques</span><span id="testCount">—</span>
+<span>Nœuds BVH parcourus</span><span id="nodeCount">—</span>
+<span>Intersections réussies</span><span id="hitCount">—</span>
+<span>Rayons sans objet (ciel)</span><span id="skyCount">—</span>
+<span>Texels lus</span><span id="texelCount">—</span>
+<span>Niveau mip dominant</span><span id="mipCount">—</span>
+<span>Ombre calculée</span><span id="shadowStatus">Préparation…</span>
+<span>Ombres PCF complètes</span><span id="pcfCount">—</span>
+<span>Ombres PCF évitées</span><span id="pcfSaved">—</span>
+<span>Évaluations nuages</span><span id="cloudCount">—</span>
+</div>
+<div class="hint" id="diagnostics">Le moteur ne rasterise aucun triangle. Un rayon par pixel choisit la surface rencontrée la plus proche. La couleur du ciel est calculée sans intersection.</div>
+</section>
+<section class="panel">
+<h2>03 / Caméra et qualité</h2>
+<div class="controls">
+<label>Résolution 16:10
+<select id="resolution">
+<option value="640x400" selected>640 × 400 — 256 000 rayons</option>
+<option value="800x500">800 × 500 — 400 000 rayons</option>
+<option value="1280x800">1280 × 800 — 1 024 000 rayons</option>
+<option value="1600x1000">1600 × 1000 — 1 600 000 rayons</option>
+<option value="1920x1200">1920 × 1200 — 2 304 000 rayons</option>
+</select></label>
+<label>Distance caméra <span id="distanceValue">13.5 m</span><input id="distance" type="range" min="7" max="26" step=".5" value="13.5"></label>
+<label>Rotation caméra <span id="angleValue">25°</span><input id="angle" type="range" min="-180" max="180" value="25"></label>
+<label>Élévation caméra <span id="elevationValue">18°</span><input id="elevation" type="range" min="-5" max="50" value="18"></label>
+<label>Champ horizontal <span id="fovValue">70°</span><input id="fov" type="range" min="35" max="105" value="70"></label>
+<label>Ciel / nuages <select id="skyMode"><option value="fast" selected>Rapide — grille atmosphérique</option><option value="reference">Exact — calcul par pixel</option></select></label><label>Traitement de couleur <select id="shadingMode"><option value="fast" selected>Optimisé — ombres et brouillard</option><option value="reference">V9 — référence intacte</option></select></label>
+<label>Filtrage texture
+<select id="filter"><option value="nearest">Plus proche</option><option value="bilinear" selected>Bilinéaire (rapide)</option><option value="trilinear">Trilinéaire</option></select></label>
+<label>Mipmaps <select id="mipMode"><option value="auto" selected>Auto · empreinte du rayon</option>
+<option value="4096">Forcer 4096²</option><option value="2048">Forcer 2048²</option><option value="1024">Forcer 1024²</option>
+<option value="512">Forcer 512²</option><option value="256">Forcer 256²</option><option value="128">Forcer 128²</option>
+<option value="64">Forcer 64²</option><option value="32">Forcer 32²</option><option value="16">Forcer 16²</option><option value="8">Forcer 8²</option></select></label>
+<label class="inline"><input type="checkbox" id="textures" checked> Textures RGB565</label>
+<label class="inline"><input type="checkbox" id="shadows" checked> Ombres par carte Z lumineuse (pré-calculée)</label>
+<label class="inline"><input type="checkbox" id="fog" checked> Brouillard atmosphérique / nuages</label>
+<label class="inline"><input type="checkbox" id="mipColors"> Diagnostic des niveaux mip</label>
+<label>Qualité carte d'ombre <select id="shadowSize"><option value="96">96 × 96 — rapide</option><option value="160" selected>160 × 160</option><option value="256">256 × 256 — détaillé</option></select></label>
+<label>Budget de calcul par rafraîchissement <select id="budget"><option value="8">8 ms</option><option value="14" selected>14 ms</option><option value="24">24 ms</option><option value="40">40 ms</option></select></label>
+<div class="row"><button class="primary" id="renderButton">↻ Recalculer l'image</button><button id="resetButton">Caméra initiale</button></div>
+<div class="notice" id="textureStatus">Textures : préparation des mipmaps…</div>
+<div class="notice">Le rendu peut comparer les mêmes rayons caméra et les mêmes primitives en mode original ou optimisé. La surface de projection est sphérique : chaque direction de vue est radiale, donc normale à cette surface. Les directions sont réparties pour obtenir une perspective naturelle 16:10 sans effet fisheye marqué.</div>
+<div class="notice">Le moteur recherche uniquement le premier impact d'un rayon caméra. Les ombres utilisent une **carte de profondeur calculée séparément pour l'unique lumière**, sans rayon secondaire lancé depuis les pixels caméra. Z caméra par rasterisation : aucun.</div>
+</div></section>
+</div></main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id),canvas=$('view'),ctx=canvas.getContext('2d',{alpha:false});
+const PI=Math.PI,TAU=2*PI,clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const fnum=(v,n=1)=>Number(v).toFixed(n),norm=(x,y,z)=>{const l=Math.hypot(x,y,z)||1;return [x/l,y/l,z/l]};
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const sun=norm(-.55,.88,.36),skyZenith=[58,115,181],skyHorizon=[187,205,211];
+let W=640,H=400,frameImage=null,pixels=null,hitIds=null,hitDistances=null;
+let imageSerial=0,renderJob=null,shadowJob=null,shadowMap=null,preparedTexHigh=false;
+let materials=new Map(),objects=[],bvh=[],bvhRoot=-1;
+let currentCam=null;
+const stats={rays:0,tests:0,nodes:0,hits:0,sky:0,texels:0,traceMs:0,shadeMs:0,finishMs:0,tiles:0,pcfFull:0,pcfSaved:0,mips:new Uint32Array(10)};
+const mipSizes=[8,16,32,64,128,256,512,1024,2048,4096];
+const palette=[0xff68acf7,0xff69f8d4,0xff9dff73,0xffecfc78,0xffe2b46b,0xffdb8179,0xffbd7ff0,0xff7da8f7,0xffdda0d2,0xffc0f4ec];
+
+// === Math primitives and material pyramids; NO triangle meshes ===
+function ellipse(cx,cy,cz,rx,ry,rz,mat){
+ const o={type:'ellipse',cx,cy,cz,rx,ry,rz,mat,min:[cx-rx,cy-ry,cz-rz],max:[cx+rx,cy+ry,cz+rz]};
+ objects.push(o);return o;
+}
+function box(x0,y0,z0,x1,y1,z1,mat){
+ const o={type:'box',min:[x0,y0,z0],max:[x1,y1,z1],mat};
+ objects.push(o);return o;
+}
+function cone(a,b,r0,r1,mat){
+ const dx=b[0]-a[0],dy=b[1]-a[1],dz=b[2]-a[2],len=Math.hypot(dx,dy,dz),r=Math.max(r0,r1);
+ const o={type:'cone',a,b,r0,r1,k:(r1-r0)/len,len,
+ nx:dx/len,ny:dy/len,nz:dz/len,mat,
+ min:[Math.min(a[0],b[0])-r,Math.min(a[1],b[1])-r,Math.min(a[2],b[2])-r],
+ max:[Math.max(a[0],b[0])+r,Math.max(a[1],b[1])+r,Math.max(a[2],b[2])+r]};
+ objects.push(o);return o;
+}
+function makeScene(){
+ objects.length=0;
+ // A genuinely continuous tapered and branching mathematical oak, not a polygon tree.
+ const tx=-1.9,tz=.7;
+ cone([tx,0,tz],[tx+.09,2.8,tz-.1],.34,.17,'bark');
+ const branches=[];
+ for(let i=0;i<12;i++){
+  const a=i*2.399,from=[tx,1.2+(i%5)*.34,tz];
+  const tip=[tx+Math.cos(a)*(1.35+(i%3)*.18),2.8+(i%4)*.31,
+     tz+Math.sin(a)*(1.35+(i%3)*.18)];
+  cone(from,tip,.11,.045,'bark');
+  branches.push(tip);
+  for(let j=-1;j<=1;j++){
+   const t=a+j*.48,end=[tip[0]+Math.cos(t)*(.47+Math.abs(j)*.13),tip[1]+.14+(j+1)*.14,tip[2]+Math.sin(t)*(.47+Math.abs(j)*.13)];
+   cone(tip,end,.052,.009,'bark');branches.push(end);
+  }
+ }
+ for(let i=0;i<30;i++){
+  const p=branches[(i*7)%branches.length],angle=i*2.35;
+  ellipse(p[0]+Math.cos(angle)*.21,p[1]+.06+(i%4)*.075,p[2]+Math.sin(angle)*.21,
+  .53+(i%4)*.045,.55+((i*7)%5)*.035,.5+((i*3)%4)*.04,'leaves');
+ }
+ // Geometric stone walls + columns and raised paving.
+ box(-5.8,0,-3.5,-5.35,1.35,4.9,'stone');
+ box(-5.8,0,-3.5,5.4,1.1,-3.06,'stone');
+ box(4.85,0,-3.4,5.35,1.2,-1.15,'stone');
+ box(4.85,0,2.65,5.35,1.2,4.45,'stone');
+ for(let x of [-5.55,-2,1.7,5.08]){
+  box(x-.22,0,-3.73,x+.22,1.8,-2.84,'stone');
+  box(x-.35,1.72,-3.86,x+.35,1.85,-2.72,'stone');
+ }
+ // A wooden bench from analytic boxes.
+ box(1.15,.67,1.2,3.25,.85,1.85,'wood');
+ box(1.15,.85,1.73,3.25,1.7,1.89,'wood');
+ for(let x of [1.4,2.99])for(let z of [1.34,1.7])box(x-.09,0,z-.09,x+.09,.73,z+.09,'wood');
+ // Potted shrubs + additional trees, kept deliberately modest for 1 ray/pixel.
+ for(const [x,z,r] of [[3.2,-2.1,.74],[4.2,3.8,.65],[-4.5,3.4,.66]]){
+  cone([x,0,z],[x,.85,z],.12,.065,'bark');
+  for(let j=0;j<4;j++){
+   const a=j*1.57;
+   ellipse(x+Math.cos(a)*.27,1.06+(j%2)*.1,z+Math.sin(a)*.27,r*.69,r*.75,r*.69,'leaves');
+  }
+ }
+ // Person assembled from smooth ellipsoids and tapered cylinders.
+ const px=1.65,pz=-.8;
+ cone([px,.12,pz],[px,1.04,pz],.2,.23,'cloth');
+ ellipse(px,1.39,pz,.31,.49,.24,'cloth');
+ ellipse(px,1.98,pz,.19,.23,.19,'skin');
+ for(const sign of [-1,1]){
+  cone([px+sign*.17,.84,pz],[px+sign*.19,.06,pz+.05],.12,.075,'cloth');
+  cone([px+sign*.33,1.69,pz],[px+sign*.47,1.06,pz+.09],.10,.064,'skin');
+ }
+ buildBVH();
+ $('objectCount').textContent=objects.length+' primitives + plan infini';
+}
+function buildBVH(){
+ bvh=[];const ids=objects.map((_,i)=>i);
+ function make(indices){
+  const boundsMin=[Infinity,Infinity,Infinity],boundsMax=[-Infinity,-Infinity,-Infinity];
+  for(const k of indices){const o=objects[k];
+   for(let j=0;j<3;j++){boundsMin[j]=Math.min(boundsMin[j],o.min[j]);boundsMax[j]=Math.max(boundsMax[j],o.max[j]);}
+  }
+  const index=bvh.length,node={min:boundsMin,max:boundsMax,left:-1,right:-1,ids:null};
+  bvh.push(node);
+  if(indices.length<=4){node.ids=indices;return index;}
+  const sizes=boundsMax.map((v,i)=>v-boundsMin[i]),axis=sizes.indexOf(Math.max(...sizes));
+  indices.sort((a,b)=>(objects[a].min[axis]+objects[a].max[axis])-(objects[b].min[axis]+objects[b].max[axis]));
+  const mid=indices.length>>1;
+  node.left=make(indices.slice(0,mid));node.right=make(indices.slice(mid));
+  return index;
+ }
+ bvhRoot=make(ids);
+}
+const bvhStack=new Int32Array(128),rayResult={id:0,t:Infinity};
+function hitBounds(node,ox,oy,oz,dx,dy,dz,nearLimit){
+ let lo=0,hi=nearLimit;
+ const origin=[ox,oy,oz],dir=[dx,dy,dz];
+ for(let i=0;i<3;i++){
+  if(Math.abs(dir[i])<1e-12){if(origin[i]<node.min[i]||origin[i]>node.max[i])return false;continue;}
+  let a=(node.min[i]-origin[i])/dir[i],b=(node.max[i]-origin[i])/dir[i];
+  if(a>b){const swap=a;a=b;b=swap;}
+  lo=Math.max(lo,a);hi=Math.min(hi,b);
+  if(hi<lo)return false;
+ }
+ return true;
+}
+function hitPrimitive(o,ox,oy,oz,dx,dy,dz,maxT){
+ stats.tests++;
+ let t=Infinity;
+ if(o.type==='ellipse'){
+  const px=(ox-o.cx)/o.rx,py=(oy-o.cy)/o.ry,pz=(oz-o.cz)/o.rz;
+  const vx=dx/o.rx,vy=dy/o.ry,vz=dz/o.rz;
+  const A=vx*vx+vy*vy+vz*vz,B=px*vx+py*vy+pz*vz,C=px*px+py*py+pz*pz-1;
+  const delta=B*B-A*C;
+  if(delta>=0){const sq=Math.sqrt(delta),q=(-B-sq)/A;t=q>.0001?q:(-B+sq)/A;}
+ }else if(o.type==='box'){
+  let lo=-Infinity,hi=Infinity;
+  for(let j=0;j<3;j++){
+   const origin=j===0?ox:j===1?oy:oz,v=j===0?dx:j===1?dy:dz;
+   if(Math.abs(v)<1e-12){if(origin<o.min[j]||origin>o.max[j])return Infinity;continue;}
+   const inv=1/v,a=(o.min[j]-origin)*inv,b=(o.max[j]-origin)*inv;
+   lo=Math.max(lo,Math.min(a,b));hi=Math.min(hi,Math.max(a,b));
+   if(lo>hi)return Infinity;
+  }
+  t=lo>.0001?lo:hi;
+ }else if(o.type==='cone'){
+  const px=ox-o.a[0],py=oy-o.a[1],pz=oz-o.a[2];
+  const z=px*o.nx+py*o.ny+pz*o.nz,dzAxis=dx*o.nx+dy*o.ny+dz*o.nz;
+  const qx=px-z*o.nx,qy=py-z*o.ny,qz=pz-z*o.nz;
+  const vx=dx-dzAxis*o.nx,vy=dy-dzAxis*o.ny,vz=dz-dzAxis*o.nz;
+  const r0=o.r0+o.k*z,rD=o.k*dzAxis;
+  const A=vx*vx+vy*vy+vz*vz-rD*rD;
+  const B=qx*vx+qy*vy+qz*vz-r0*rD;
+  const C=qx*qx+qy*qy+qz*qz-r0*r0;
+  if(Math.abs(A)>1e-12){
+   const discriminant=B*B-A*C;
+   if(discriminant>=0){
+    const sq=Math.sqrt(discriminant),t0=(-B-sq)/A,t1=(-B+sq)/A;
+    for(const possible of [t0,t1]){
+     const height=z+possible*dzAxis;
+     if(possible>.0001&&possible<t&&height>=0&&height<=o.len)t=possible;
+    }
+   }
+  }
+  // Flat end-caps: smooth closed mathematical objects.
+  if(Math.abs(dzAxis)>1e-12){
+   for(const [height,radius] of [[0,o.r0],[o.len,o.r1]]){
+    const possible=(height-z)/dzAxis;
+    if(possible>.0001&&possible<t){
+     const qx2=qx+vx*possible,qy2=qy+vy*possible,qz2=qz+vz*possible;
+     if(qx2*qx2+qy2*qy2+qz2*qz2<=radius*radius)t=possible;
+    }
+   }
+  }
+ }
+ return t>.0001&&t<maxT?t:Infinity;
+}
+function traceClosest(ox,oy,oz,dx,dy,dz,result,track=true,includeGround=true){
+ stats.rays+=track?1:0;
+ let near=includeGround&&dy<-.000001?-oy/dy:Infinity,id=(Number.isFinite(near)&&near>.0001?1:0);
+ if(id===0)near=Infinity;
+ if(bvhRoot>=0){
+  let top=0;bvhStack[top++]=bvhRoot;
+  while(top>0){
+   const ni=bvhStack[--top],node=bvh[ni];
+   if(track)stats.nodes++;
+   if(!hitBounds(node,ox,oy,oz,dx,dy,dz,near))continue;
+   if(node.ids){
+    for(const item of node.ids){
+     const t=hitPrimitive(objects[item],ox,oy,oz,dx,dy,dz,near);
+     if(t<near){near=t;id=item+2;}
+    }
+   }else{
+    bvhStack[top++]=node.left;bvhStack[top++]=node.right;
+   }
+  }
+ }
+ result.id=id;result.t=near;
+ if(track){if(id){stats.hits++}else{stats.sky++}}
+ return id;
+}
+function normalAt(id,x,y,z){
+ if(id===1)return [0,1,0];
+ const o=objects[id-2];
+ if(o.type==='ellipse')return norm((x-o.cx)/(o.rx*o.rx),(y-o.cy)/(o.ry*o.ry),(z-o.cz)/(o.rz*o.rz));
+ if(o.type==='box'){
+  const ds=[Math.abs(x-o.min[0]),Math.abs(x-o.max[0]),Math.abs(y-o.min[1]),Math.abs(y-o.max[1]),Math.abs(z-o.min[2]),Math.abs(z-o.max[2])];
+  const m=ds.indexOf(Math.min(...ds));return m===0?[-1,0,0]:m===1?[1,0,0]:m===2?[0,-1,0]:m===3?[0,1,0]:m===4?[0,0,-1]:[0,0,1];
+ }
+ const px=x-o.a[0],py=y-o.a[1],pz=z-o.a[2],axis=px*o.nx+py*o.ny+pz*o.nz;
+ if(axis<.0002)return [-o.nx,-o.ny,-o.nz];
+ if(axis>o.len-.0002)return [o.nx,o.ny,o.nz];
+ return norm(px-axis*o.nx-o.k*o.nx,py-axis*o.ny-o.k*o.ny,pz-axis*o.nz-o.k*o.nz);
+}
+function groundMaterial(x,z){
+ return Math.abs(x-1.2)<.82&&z>-5.1&&z<4.2?'stone':'grass';
+}
+function hash2(x,y,s){
+ let v=Math.imul((x|0)+s*1779033703,2246822507)^Math.imul((y|0)+s*3266489917,668265263);
+ v=Math.imul(v^(v>>>15),2246822507);return ((v^(v>>>13))>>>0)/4294967295;
+}
+function pack565(r,g,b){return ((clamp(r|0,0,255)>>3)<<11)|((clamp(g|0,0,255)>>2)<<5)|(clamp(b|0,0,255)>>3)}
+function procedural(id,x,y){
+ const k=id==='bark'?1:id==='leaves'?2:id==='grass'?3:id==='stone'?4:id==='wood'?5:id==='cloth'?6:7;
+ const noise=hash2(x,y,k)-.5,coarse=hash2(x>>5,y>>5,k+15)-.5;
+ let r,g,b;
+ if(id==='bark'){const fissure=Math.pow(Math.max(0,Math.sin(x*.063+Math.sin(y*.018))),14);
+   r=119+30*noise+25*coarse-65*fissure;g=85+22*noise+20*coarse-46*fissure;b=55+15*noise+16*coarse-29*fissure;}
+ else if(id==='leaves'){r=68+36*noise+20*coarse;g=141+36*noise+26*coarse;b=69+23*noise+18*coarse;}
+ else if(id==='grass'){const blade=Math.sin(x*.31+y*.19);r=91+28*noise+21*coarse+blade*9;g=132+30*noise+25*coarse+blade*13;b=67+15*noise+13*coarse;}
+ else if(id==='stone'){const joint=(x%97<3||y%83<4)?-58:0;r=178+22*noise+25*coarse+joint;g=170+20*noise+23*coarse+joint;b=150+17*noise+19*coarse+joint;}
+ else if(id==='wood'){const fiber=Math.sin(x*.13+Math.sin(y*.025));r=148+22*noise+21*coarse+fiber*19;g=100+20*noise+13*coarse+fiber*12;b=61+12*noise+11*coarse+fiber*8;}
+ else if(id==='cloth'){r=79+16*noise;g=113+18*noise;b=150+22*noise;}
+ else{r=199+12*noise;g=157+11*noise;b=130+10*noise;}
+ return pack565(r,g,b);
+}
+function buildSource(id,n){
+ const arr=new Uint16Array(n*n);
+ for(let y=0;y<n;y++){const base=y*n;for(let x=0;x<n;x++)arr[base+x]=procedural(id,x,y);}
+ return arr;
+}
+function mipDown(src,srcN,dst,firstRow,rowCount){
+ const n=srcN>>1,end=Math.min(n,firstRow+rowCount);
+ for(let y=firstRow;y<end;y++){
+  const a=y*2*srcN,b=a+srcN,k=y*n;
+  for(let x=0;x<n;x++){
+   const i=x<<1,p=src[a+i],q=src[a+i+1],r=src[b+i],t=src[b+i+1];
+   dst[k+x]=((((p>>>11)+(q>>>11)+(r>>>11)+(t>>>11)+2)>>2)<<11)|
+     (((((p>>>5)&63)+((q>>>5)&63)+((r>>>5)&63)+((t>>>5)&63)+2)>>2)<<5)|
+     (((p&31)+(q&31)+(r&31)+(t&31)+2)>>2);
+  }
+ }
+ return end;
+}
+function makeMips(id,n){
+ const chain=[{size:n,data:buildSource(id,n)}];
+ while(n>8){const dst=new Uint16Array((n>>1)**2);mipDown(chain[chain.length-1].data,n,dst,0,n>>1);n>>=1;chain.push({size:n,data:dst});}
+ return {id,levels:chain,size:chain[0].size};
+}
+function initMaterials(){
+ for(const mat of ['bark','leaves','grass','stone','wood','cloth','skin'])
+  materials.set(mat,makeMips(mat,mat==='skin'||mat==='cloth'?128:256));
+ cacheFastMaterials();
+ $('textureStatus').textContent='RGB565 : pyramides de secours prêtes, écorce 4096² en préparation';
+ // The full 4096² bark texture uses a progressive generation job instead of a main-thread stall.
+ highTexture={row:0,source:new Uint16Array(4096*4096),levels:[],stage:0,down:null,downRow:0};
+ requestAnimationFrame(advanceHighTexture);
+}
+let highTexture=null;
+// Build the detailed 4096² bark source from the immediately available 256²
+// procedural base plus true per-texel fine grain. This avoids 16.8 million
+// sine evaluations and keeps the build responsive to camera movements.
+function highBark565(base,x,y){
+ const c=base[(((y>>4)&255)*256)+((x>>4)&255)];
+ const g=(hash2(x,y,41)-.5)*28;
+ return pack565(((c>>>11)&31)*255/31+g,((c>>>5)&63)*255/63+g*.74,(c&31)*255/31+g*.48);
+}
+
+function advanceHighTexture(){
+ const h=highTexture;if(!h)return;
+ const t0=performance.now(),budget=renderJob?2:10;
+ if(h.stage===0){
+  const base=materials.get('bark').levels[0].data;
+  while(h.row<4096){
+   const off=h.row*4096;
+   for(let x=0;x<4096;x++)h.source[off+x]=highBark565(base,x,h.row);
+   h.row++;
+   if(performance.now()-t0>budget)break;
+  }
+  if(h.row===4096){h.levels.push({size:4096,data:h.source});h.stage=1;}
+ }else{
+  const last=h.levels[h.levels.length-1];
+  if(last.size>8){
+   if(!h.down){h.down=new Uint16Array((last.size>>1)**2);h.downRow=0;}
+   do{h.downRow=mipDown(last.data,last.size,h.down,h.downRow,12)}
+    while(h.downRow<(last.size>>1)&&performance.now()-t0<budget);
+   if(h.downRow===last.size>>1){h.levels.push({size:last.size>>1,data:h.down});h.down=null;}
+  }
+  if(h.levels.length===10){
+   materials.set('bark',{id:'bark',size:4096,levels:h.levels});cacheFastMaterials();
+   highTexture=null;preparedTexHigh=true;
+   $('textureStatus').textContent='Pyramide écorce 4096 → 8 : 10 niveaux RGB565 disponibles';
+   // Mip selection changes when switching source size, so recompute one image.
+   invalidateImage('Texture 4096² prête — image entièrement recalculée');
+   return;
+  }
+ }
+ if(!renderJob)$('textureStatus').textContent=h.stage===0?'Écorce 4096² : '+Math.floor(100*h.row/4096)+' %':
+   'Écorce 4096² : '+h.levels.length+' / 10 mipmaps prêts';
+ requestAnimationFrame(advanceHighTexture);
+}
+
+// V9: direct ABGR sampler avoids converting an interpolated color back to
+// RGB565 and decoding it again. POWER-OF-TWO textures use bitmask wrapping.
+function nearest565(level,u,v){
+ const n=level.size,mask=n-1,c=level.data[((Math.floor(v*n)&mask)*n)+(Math.floor(u*n)&mask)];
+ stats.texels++;
+ return (0xff000000|(((c&31)*255/31|0)<<16)|(((((c>>>5)&63)*255/63)|0)<<8)|(((c>>>11)&31)*255/31|0))>>>0;
+}
+function bilinear565(level,u,v){
+ const n=level.size,mask=n-1,data=level.data;
+ const fxp=u*n-.5,fyp=v*n-.5,ix=Math.floor(fxp),iy=Math.floor(fyp);
+ const fx=fxp-ix,fy=fyp-iy,ix0=ix&mask,iy0=iy&mask,ix1=(ix0+1)&mask,iy1=(iy0+1)&mask;
+ const a=data[iy0*n+ix0],b=data[iy0*n+ix1],c=data[iy1*n+ix0],d=data[iy1*n+ix1];
+ const w0=(1-fx)*(1-fy),w1=fx*(1-fy),w2=(1-fx)*fy,w3=fx*fy;
+ stats.texels+=4;
+ const red=Math.round(((a>>>11)*w0+(b>>>11)*w1+(c>>>11)*w2+(d>>>11)*w3)*255/31);
+ const green=Math.round((((a>>>5)&63)*w0+((b>>>5)&63)*w1+((c>>>5)&63)*w2+((d>>>5)&63)*w3)*255/63);
+ const blue=Math.round(((a&31)*w0+(b&31)*w1+(c&31)*w2+(d&31)*w3)*255/31);
+ return (0xff000000|(blue<<16)|(green<<8)|red)>>>0;
+}
+function sampleTex(tex,u,v,footprint,filter,mipMode,debug){
+ const n=tex.levels.length-1;
+ const lod=clamp(mipMode==='auto'?Math.log2(Math.max(1,footprint)):Math.log2(tex.size/Number(mipMode)),0,n);
+ let lo=Math.floor(lod),hi=Math.min(n,lo+1),mix=lod-lo;
+ if(filter!=='trilinear'){lo=Math.round(lod);hi=lo;mix=0;}
+ const idx=mipSizes.indexOf(tex.levels[lo].size);
+ if(idx>=0)stats.mips[idx]++;
+ if(debug)return palette[Math.max(0,idx)];
+ if(filter==='nearest')return nearest565(tex.levels[lo],u,v);
+ const a=bilinear565(tex.levels[lo],u,v);
+ if(hi===lo||mix===0)return a;
+ const b=bilinear565(tex.levels[hi],u,v),q=1-mix;
+ const red=Math.round((a&255)*q+(b&255)*mix);
+ const green=Math.round(((a>>>8)&255)*q+((b>>>8)&255)*mix);
+ const blue=Math.round(((a>>>16)&255)*q+((b>>>16)&255)*mix);
+ return (0xff000000|(blue<<16)|(green<<8)|red)>>>0;
+}
+// Screen-projected conservative AABB bins per 16x16 TILE. These are NOT
+// rasterized triangles: every pixel still casts exactly ONE primary ray.
+// The BVH first culls whole groups by their projected bounding rectangles.
+function screenRect(bounds,cam){
+ const min=bounds.min,max=bounds.max;
+ let left=Infinity,right=-Infinity,top=Infinity,bottom=-Infinity;
+ const {eye,f,r,u}=cam,tanH=Math.tan(cam.fov*.5),tanV=tanH*H/W;
+ for(let i=0;i<8;i++){
+  const x=(i&1)?max[0]:min[0],y=(i&2)?max[1]:min[1],z=(i&4)?max[2]:min[2];
+  const px=x-eye[0],py=y-eye[1],pz=z-eye[2];
+  const depth=px*f[0]+py*f[1]+pz*f[2];
+  // If any bounding corner is behind/near the eye, culling is disabled
+  // for this bounding box to preserve correctness (conservative bound).
+  if(depth<.05)return {left:0,top:0,right:W,bottom:H};
+  const sx=W*.5*(1+(px*r[0]+py*r[1]+pz*r[2])/(depth*tanH));
+  const sy=H*.5*(1-(px*u[0]+py*u[1]+pz*u[2])/(depth*tanV));
+  left=Math.min(left,sx);right=Math.max(right,sx);
+  top=Math.min(top,sy);bottom=Math.max(bottom,sy);
+ }
+ return {left:left-2,right:right+2,top:top-2,bottom:bottom+2};
+}
+function prepareProjectedBVH(cam){
+ cam.screenBVH=bvh.map(node=>screenRect(node,cam));
+ cam.screenObjects=objects.map(o=>screenRect(o,cam));
+}
+function intersectsScreen(rect,left,top,right,bottom){
+ return rect.left<=right&&rect.right>=left&&rect.top<=bottom&&rect.bottom>=top;
+}
+function tileCandidates(cam,left,top,right,bottom){
+ const ids=[],stack=[bvhRoot];
+ while(stack.length){
+  const idx=stack.pop(),node=bvh[idx];stats.nodes++;
+  if(!intersectsScreen(cam.screenBVH[idx],left,top,right,bottom))continue;
+  if(node.ids){
+   for(const id of node.ids){
+    if(intersectsScreen(cam.screenObjects[id],left,top,right,bottom))ids.push(id);
+   }
+  }else{
+   stack.push(node.left,node.right);
+  }
+ }
+ return ids;
+}
+function traceTileRay(ox,oy,oz,dx,dy,dz,list,result){
+ stats.rays++;
+ let near=dy<-.000001?-oy/dy:Infinity,id=Number.isFinite(near)&&near>.0001?1:0;
+ if(!id)near=Infinity;
+ for(let i=0;i<list.length;i++){
+  const j=list[i],t=hitPrimitive(objects[j],ox,oy,oz,dx,dy,dz,near);
+  if(t<near){near=t;id=j+2;}
+ }
+ result.id=id;result.t=near;
+ if(id)stats.hits++;else stats.sky++;
+}
+
+// === Virtual spherical camera: radial normals through each image sample ===
+// Coordinates on the spherical imaging surface are O + normalize(F + aR + bU).
+// Equivalently, a ray through each pixel at a rectilinear FOV: no fish-eye.
+function buildCamera(){
+ const angle=Number($('angle').value)*PI/180,elev=Number($('elevation').value)*PI/180;
+ const dist=Number($('distance').value),look=[-.4,1.75,.2];
+ const eye=[look[0]+dist*Math.sin(angle)*Math.cos(elev),
+  look[1]+dist*Math.sin(elev),look[2]+dist*Math.cos(angle)*Math.cos(elev)];
+ const f=norm(look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]);
+ const r=norm(...cross(f,[0,1,0])),u=cross(r,f);
+ const fov=Number($('fov').value)*PI/180,horizontalTan=Math.tan(fov*.5);
+ const sx=new Float64Array(W),sy=new Float64Array(H);
+ for(let i=0;i<W;i++)sx[i]=((i+.5)/W*2-1)*horizontalTan;
+ for(let j=0;j<H;j++)sy[j]=(1-(j+.5)/H*2)*horizontalTan*H/W;
+ const cam={eye,f,r,u,sx,sy,pixelAngle:2*horizontalTan/W,fov};
+ prepareProjectedBVH(cam);return cam;
+}
+function cameraRay(c,x,y,out){
+ const a=c.sx[x],b=c.sy[y],f=c.f,r=c.r,u=c.u;
+ const dx=f[0]+a*r[0]+b*u[0],dy=f[1]+a*r[1]+b*u[1],dz=f[2]+a*r[2]+b*u[2];
+ const inv=1/Math.sqrt(dx*dx+dy*dy+dz*dz);
+ out[0]=dx*inv;out[1]=dy*inv;out[2]=dz*inv;
+ return out;
+}
+// Shared scene light: 1 directional source. Only one PRIMARY camera ray is
+// launched per pixel. A separate orthographic light depth atlas is prepared
+// once, and reused for all camera pixels. There is NO camera bounce/shadow ray.
+let sunBasis=null;
+function newSunBasis(){
+ const base=[0,1.5,0],right=norm(...cross([0,1,0],sun)),up=cross(sun,right);
+ return {base,right,up,span:18,dist:26};
+}
+function rebuildShadowMap(){
+ const size=Number($('shadowSize').value);
+ shadowMap=null;sunBasis=newSunBasis();const data=new Float32Array(size*size);
+ shadowJob={size,data,row:0,token:(shadowJob?.token||0)+1};
+ $('shadowStatus').textContent='Carte de lumière : construction 0 %';
+ requestAnimationFrame(runShadowStep);
+}
+const shadowHit={id:0,t:0};
+function runShadowStep(){
+ const job=shadowJob;if(!job)return;
+ const size=job.size,{base,right,up,span,dist}=sunBasis,start=performance.now();
+ while(job.row<size){
+  const y=job.row,vy=((y+.5)/size-.5)*2*span;
+  for(let x=0;x<size;x++){
+   const vx=((x+.5)/size-.5)*2*span;
+   const ox=base[0]+sun[0]*dist+right[0]*vx+up[0]*vy;
+   const oy=base[1]+sun[1]*dist+right[1]*vx+up[1]*vy;
+   const oz=base[2]+sun[2]*dist+right[2]*vx+up[2]*vy;
+   traceClosest(ox,oy,oz,-sun[0],-sun[1],-sun[2],shadowHit,false,false);
+   job.data[y*size+x]=shadowHit.t;
+  }
+  job.row++;
+  if(performance.now()-start>4)break;
+ }
+ $('shadowStatus').textContent='Carte de lumière : '+Math.round(job.row/size*100)+' %';
+ if(job.row>=size){
+  shadowMap={size:job.size,data:job.data,basis:sunBasis,...buildShadowExtrema(job.data,job.size)};shadowJob=null;
+  $('shadowStatus').textContent='Carte Z '+size+' × '+size+' prête';
+  invalidateImage('Carte de lumière mise à jour');
+ }else requestAnimationFrame(runShadowStep);
+}
+
+// V9.1: conservative 3×3 PCF classification.
+// Precomputed min/max over the SAME 3×3 samples preserves identical
+// visible/occluded results for homogeneous neighborhoods. At a true edge,
+// the exact 9-tap V9 PCF is executed unchanged.
+function buildShadowExtrema(data,size){
+ const min=new Float32Array(size*size),max=new Float32Array(size*size);
+ for(let y=1;y<size-1;y++)for(let x=1;x<size-1;x++){
+  let mn=Infinity,mx=-Infinity,at=y*size+x;
+  for(let oy=-1;oy<=1;oy++)for(let ox=-1;ox<=1;ox++){
+   const value=data[at+oy*size+ox];
+   if(value<mn)mn=value;if(value>mx)mx=value;
+  }
+  min[at]=mn;max[at]=mx;
+ }
+ return {min,max};
+}
+function shadowVisibilityFast(x,y,z,enabled){
+ const sm=shadowMap;if(!sm||!enabled)return 1;
+ const {base,right,up,span,dist}=sm.basis,px=x-base[0],py=y-base[1],pz=z-base[2];
+ const factor=sm.size/(2*span),center=sm.size*.5-.5;
+ const ix=Math.round((px*right[0]+py*right[1]+pz*right[2])*factor+center);
+ const iy=Math.round((px*up[0]+py*up[1]+pz*up[2])*factor+center);
+ const size=sm.size;
+ if(ix<1||iy<1||ix>=size-1||iy>=size-1)return 1;
+ const i=iy*size+ix;
+ const testDepth=dist-(px*sun[0]+py*sun[1]+pz*sun[2]);
+ const bias=.095;
+ // All 9 depth samples would pass: return the EXACT original 1.
+ if(testDepth<=sm.min[i]+bias){stats.pcfSaved++;return 1;}
+ // All 9 samples would fail: return the EXACT original .28.
+ if(testDepth>sm.max[i]+bias){stats.pcfSaved++;return .28;}
+ let visible=0;
+ for(let oy=-1;oy<=1;oy++)for(let ox=-1;ox<=1;ox++)
+  visible+=testDepth<=sm.data[i+oy*size+ox]+bias?1:0;
+ stats.pcfFull++;
+ return .28+.72*visible/9;
+}
+// Near-identical exponential fog, linearly interpolated from a precomputed LUT.
+// Step 0.08 world units yields sub-0.001 channel interpolation error in theory.
+const FOG_STEP=0.08,FOG_INV_STEP=1/FOG_STEP,FOG_LUT_MAX=4096;
+const fogLut=new Float32Array(FOG_LUT_MAX+1);
+for(let i=0;i<=FOG_LUT_MAX;i++)fogLut[i]=1-Math.exp(-i*FOG_STEP*.025);
+function fastFogAlpha(t){
+ if(t<0||!Number.isFinite(t))return 1-Math.exp(-t*.025);
+ const f=t*FOG_INV_STEP,i=Math.floor(f);
+ if(i>=FOG_LUT_MAX)return 1-Math.exp(-t*.025);
+ return fogLut[i]+(fogLut[i+1]-fogLut[i])*(f-i);
+}
+
+function shadowVisibility(x,y,z){
+ const sm=shadowMap;if(!sm||!$('shadows').checked)return 1;
+ const {base,right,up,span,dist}=sm.basis,px=x-base[0],py=y-base[1],pz=z-base[2];
+ const fx=((px*right[0]+py*right[1]+pz*right[2])/(2*span)+.5)*sm.size-.5;
+ const fy=((px*up[0]+py*up[1]+pz*up[2])/(2*span)+.5)*sm.size-.5;
+ const ix=Math.round(fx),iy=Math.round(fy),size=sm.size;
+ if(ix<1||iy<1||ix>=size-1||iy>=size-1)return 1;
+ const testDepth=dist-(px*sun[0]+py*sun[1]+pz*sun[2]);
+ const bias=.095;let visible=0;
+ for(let oy=-1;oy<=1;oy++)for(let ox=-1;ox<=1;ox++)
+  visible+=testDepth<=sm.data[(iy+oy)*size+(ix+ox)]+bias?1:0;
+ return .28+.72*visible/9;
+}
+function skyRGB(dx,dy,dz,fogEnabled){
+ const k=clamp(dy*1.14+.38,0,1);
+ let r=skyHorizon[0]*(1-k)+skyZenith[0]*k;
+ let g=skyHorizon[1]*(1-k)+skyZenith[1]*k;
+ let b=skyHorizon[2]*(1-k)+skyZenith[2]*k;
+ const nearSun=Math.max(0,dx*sun[0]+dy*sun[1]+dz*sun[2]);
+ const glint=Math.pow(nearSun,120)*140+Math.pow(nearSun,14)*30;
+ r+=glint;g+=glint*.79;b+=glint*.46;
+ if(fogEnabled&&dy>-.08){
+  const wave=Math.sin(dx*11.7+dz*4.2)*Math.sin(dz*8.4-dy*15.1)
+    +.54*Math.sin(dx*23.2+dy*10.4)*Math.cos(dz*13.8);
+  const cloud=clamp((wave-.45)*2.4,0,1)*clamp((dy+.16)*3,0,1);
+  r=r*(1-cloud)+242*cloud;g=g*(1-cloud)+238*cloud;b=b*(1-cloud)+224*cloud;
+ }
+ return [clamp(r,0,255),clamp(g,0,255),clamp(b,0,255)];
+}
+function packABGR(r,g,b){
+ return (0xff000000|((clamp(b|0,0,255))<<16)|((clamp(g|0,0,255))<<8)|(clamp(r|0,0,255)))>>>0;
+}
+const tileRayDirections=new Float32Array(16*16*3);
+function hitTextureCoordinates(id,px,py,pz,n){
+ const o=id===1?null:objects[id-2];
+ if(id===1)return [px*.34,pz*.34,.34];
+ if(o.type==='ellipse'){
+  const theta=Math.atan2((pz-o.cz)/o.rz,(px-o.cx)/o.rx)/TAU;
+  const phi=.5-Math.asin(clamp((py-o.cy)/o.ry,-1,1))/PI;
+  return [theta*2.5,phi*2.5,.9];
+ }
+ if(o.type==='cone'){
+  const relX=px-o.a[0],relY=py-o.a[1],relZ=pz-o.a[2];
+  const height=(relX*o.nx+relY*o.ny+relZ*o.nz);
+  const angle=Math.atan2(pz-o.a[2],px-o.a[0])/TAU;
+  return [angle*3,height*.84,.8];
+ }
+ const ax=Math.abs(n[0]),ay=Math.abs(n[1]),az=Math.abs(n[2]);
+ if(ay>=ax&&ay>=az)return [px*.65,pz*.65,.65];
+ if(ax>=az)return [pz*.65,py*.65,.65];
+ return [px*.65,py*.65,.65];
+}
+function shadePixel(cam,x,y,id,t,dx,dy,dz,options){
+ if(!id){
+  const rgb=skyRGB(dx,dy,dz,options.fog);
+  return packABGR(rgb[0],rgb[1],rgb[2]);
+ }
+ const px=cam.eye[0]+t*dx,py=cam.eye[1]+t*dy,pz=cam.eye[2]+t*dz;
+ const n=normalAt(id,px,py,pz),ndotl=Math.max(0,dot(n,sun));
+ const mat=id===1?groundMaterial(px,pz):objects[id-2].mat;
+ let base;
+ if(options.textures){
+  const tex=materials.get(mat);
+  const coords=hitTextureCoordinates(id,px,py,pz,n);
+  const slope=Math.max(.16,Math.abs(n[0]*dx+n[1]*dy+n[2]*dz));
+  const footprint=tex.size*t*cam.pixelAngle*coords[2]/slope;
+  base=sampleTex(tex,coords[0],coords[1],footprint,options.filter,options.mipMode,options.mipColors);
+ }else{
+  const paletteFlat={bark:0xff556f91,leaves:0xff519b65,grass:0xff609e73,
+    stone:0xffa8b4bb,wood:0xff678aaf,cloth:0xffaf785c,skin:0xff86aaca};
+  base=paletteFlat[mat]||0xff888888;
+ }
+ if(options.mipColors&&options.textures)return base;
+ const visibility=options.fast?shadowVisibilityFast(px+n[0]*.025,py+n[1]*.025,pz+n[2]*.025,options.shadows):shadowVisibility(px+n[0]*.025,py+n[1]*.025,pz+n[2]*.025);
+ const shade=(.26+.74*ndotl*visibility);
+ let r=(base&255)*shade,g=((base>>>8)&255)*shade,b=((base>>>16)&255)*shade;
+ if(options.fog){
+  const fog=options.fast?fastFogAlpha(t):1-Math.exp(-t*.025);
+  r=r*(1-fog)+skyHorizon[0]*fog;
+  g=g*(1-fog)+skyHorizon[1]*fog;
+  b=b*(1-fog)+skyHorizon[2]*fog;
+ }
+ return packABGR(r,g,b);
+}
+
+// V9.1 pixel shader: reuse 2 scratch vectors instead of allocating normal/UV
+// arrays for each of up to 2.3 million pixels. The ray and hit stay unchanged.
+const FAST_NORMAL=[0,0,0],FAST_UV=[0,0,0];
+let texGroundGrass=null,texGroundStone=null;
+const FLAT_MATERIALS={bark:0xff556f91,leaves:0xff519b65,grass:0xff609e73,
+ stone:0xffa8b4bb,wood:0xff678aaf,cloth:0xffaf785c,skin:0xff86aaca};
+function cacheFastMaterials(){
+ texGroundGrass=materials.get('grass');texGroundStone=materials.get('stone');
+ for(const o of objects){o.tex=materials.get(o.mat);o.flat=FLAT_MATERIALS[o.mat]||0xff888888;}
+}
+function normalFast(id,x,y,z,out){
+ if(id===1){out[0]=0;out[1]=1;out[2]=0;return out;}
+ const o=objects[id-2];
+ if(o.type==='ellipse'){
+  let a=(x-o.cx)/(o.rx*o.rx),b=(y-o.cy)/(o.ry*o.ry),c=(z-o.cz)/(o.rz*o.rz);
+  const l=Math.hypot(a,b,c)||1;out[0]=a/l;out[1]=b/l;out[2]=c/l;return out;
+ }
+ if(o.type==='box'){
+  let which=0,d=Math.abs(x-o.min[0]),v=Math.abs(x-o.max[0]);if(v<d){d=v;which=1;}
+  v=Math.abs(y-o.min[1]);if(v<d){d=v;which=2;}
+  v=Math.abs(y-o.max[1]);if(v<d){d=v;which=3;}
+  v=Math.abs(z-o.min[2]);if(v<d){d=v;which=4;}
+  v=Math.abs(z-o.max[2]);if(v<d){which=5;}
+  out[0]=which===0?-1:which===1?1:0;
+  out[1]=which===2?-1:which===3?1:0;
+  out[2]=which===4?-1:which===5?1:0;return out;
+ }
+ const a=x-o.a[0],b=y-o.a[1],c=z-o.a[2],axis=a*o.nx+b*o.ny+c*o.nz;
+ if(axis<.0002){out[0]=-o.nx;out[1]=-o.ny;out[2]=-o.nz;return out;}
+ if(axis>o.len-.0002){out[0]=o.nx;out[1]=o.ny;out[2]=o.nz;return out;}
+ const vx=a-axis*o.nx-o.k*o.nx,vy=b-axis*o.ny-o.k*o.ny,vz=c-axis*o.nz-o.k*o.nz;
+ const l=Math.hypot(vx,vy,vz)||1;out[0]=vx/l;out[1]=vy/l;out[2]=vz/l;return out;
+}
+function uvFast(id,px,py,pz,n,out){
+ if(id===1){out[0]=px*.34;out[1]=pz*.34;out[2]=.34;return out;}
+ const o=objects[id-2];
+ if(o.type==='ellipse'){
+  out[0]=Math.atan2((pz-o.cz)/o.rz,(px-o.cx)/o.rx)/TAU*2.5;
+  out[1]=(.5-Math.asin(clamp((py-o.cy)/o.ry,-1,1))/PI)*2.5;out[2]=.9;return out;
+ }
+ if(o.type==='cone'){
+  const a=px-o.a[0],b=py-o.a[1],c=pz-o.a[2];
+  out[0]=Math.atan2(c,a)/TAU*3;
+  out[1]=(a*o.nx+b*o.ny+c*o.nz)*.84;out[2]=.8;return out;
+ }
+ const ax=Math.abs(n[0]),ay=Math.abs(n[1]),az=Math.abs(n[2]);
+ if(ay>=ax&&ay>=az){out[0]=px*.65;out[1]=pz*.65;}
+ else if(ax>=az){out[0]=pz*.65;out[1]=py*.65;}
+ else{out[0]=px*.65;out[1]=py*.65;}
+ out[2]=.65;return out;
+}
+function shadePixelFast(cam,x,y,id,t,dx,dy,dz,options){
+ if(!id){
+  const rgb=skyRGB(dx,dy,dz,options.fog);
+  return packABGR(rgb[0],rgb[1],rgb[2]);
+ }
+ const px=cam.eye[0]+t*dx,py=cam.eye[1]+t*dy,pz=cam.eye[2]+t*dz;
+ const n=normalFast(id,px,py,pz,FAST_NORMAL);
+ const o=id===1?null:objects[id-2],isStone=id===1&&Math.abs(px-1.2)<.82&&pz>-5.1&&pz<4.2;
+ let base;
+ if(options.textures){
+  const tex=id===1?(isStone?texGroundStone:texGroundGrass):o.tex;
+  const uv=uvFast(id,px,py,pz,n,FAST_UV);
+  const slope=Math.max(.16,Math.abs(n[0]*dx+n[1]*dy+n[2]*dz));
+  const footprint=tex.size*t*cam.pixelAngle*uv[2]/slope;
+  base=sampleTex(tex,uv[0],uv[1],footprint,options.filter,options.mipMode,options.mipColors);
+ }else base=id===1?(isStone?FLAT_MATERIALS.stone:FLAT_MATERIALS.grass):o.flat;
+ if(options.mipColors&&options.textures)return base;
+ const ndotl=Math.max(0,n[0]*sun[0]+n[1]*sun[1]+n[2]*sun[2]);
+ const shadow=shadowVisibilityFast(px+n[0]*.025,py+n[1]*.025,pz+n[2]*.025,options.shadows);
+ const shade=.26+.74*ndotl*shadow;
+ let r=(base&255)*shade,g=((base>>>8)&255)*shade,b=((base>>>16)&255)*shade;
+ if(options.fog){
+  const fog=fastFogAlpha(t),q=1-fog;
+  r=r*q+skyHorizon[0]*fog;g=g*q+skyHorizon[1]*fog;b=b*q+skyHorizon[2]*fog;
+ }
+ return packABGR(r,g,b);
+}
+
+function resetCounters(){
+ stats.rays=0;stats.tests=0;stats.nodes=0;stats.hits=0;stats.sky=0;stats.texels=0;stats.traceMs=0;stats.shadeMs=0;
+ stats.finishMs=0;stats.tiles=0;stats.pcfFull=0;stats.pcfSaved=0;stats.mips.fill(0);
+}
+function initBuffers(){
+ canvas.width=W;canvas.height=H;
+ frameImage=ctx.createImageData(W,H);pixels=new Uint32Array(frameImage.data.buffer);
+ hitIds=new Uint16Array(W*H);hitDistances=new Float32Array(W*H);
+}
+function invalidateImage(message){
+ imageSerial++;
+ const token=imageSerial;
+ currentCam=buildCamera();
+ if(!frameImage||frameImage.width!==W||frameImage.height!==H)initBuffers();
+ resetCounters();
+ const countX=Math.ceil(W/16),countY=Math.ceil(H/16);
+ renderJob={token,index:0,total:countX*countY,countX,
+ cam:currentCam,started:performance.now(),
+ options:{textures:$('textures').checked,filter:$('filter').value,mipMode:$('mipMode').value,
+   mipColors:$('mipColors').checked,fog:$('fog').checked,
+   fast:$('shadingMode').value==='fast',shadows:$('shadows').checked}};
+ pixels.fill(0xffb5915b); // sky-coloured provisional buffer
+ $('state').textContent='Rayons en cours';
+ $('progressBar').style.width='0%';
+ $('frameInfo').textContent=message+' — rendu par tuiles';
+ $('raysInfo').textContent=(W*H).toLocaleString('fr-FR')+' rayons primaires prévus';
+ requestAnimationFrame(renderStep);
+}
+function renderTile(job){
+ const bx=(job.index%job.countX)*16,by=Math.floor(job.index/job.countX)*16;
+ const right=Math.min(W,bx+16),bottom=Math.min(H,by+16),cam=job.cam;
+ const origin=cam.eye,ray=[0,0,0],hit={id:0,t:Infinity};
+ const candidates=tileCandidates(cam,bx,by,right,bottom);
+ let start=performance.now();
+ for(let y=by;y<bottom;y++)for(let x=bx;x<right;x++){
+  cameraRay(cam,x,y,ray);
+  const rayIndex=((y-by)*16+(x-bx))*3;tileRayDirections[rayIndex]=ray[0];tileRayDirections[rayIndex+1]=ray[1];tileRayDirections[rayIndex+2]=ray[2];
+  traceTileRay(origin[0],origin[1],origin[2],ray[0],ray[1],ray[2],candidates,hit);
+  const i=y*W+x;hitIds[i]=hit.id;hitDistances[i]=hit.t;
+ }
+ stats.traceMs+=performance.now()-start;
+ start=performance.now();
+ const pixelShader=job.options.fast?shadePixelFast:shadePixel;
+ for(let y=by;y<bottom;y++)for(let x=bx;x<right;x++){
+  const rayIndex=((y-by)*16+(x-bx))*3;
+  const i=y*W+x;
+  pixels[i]=pixelShader(cam,x,y,hitIds[i],hitDistances[i],tileRayDirections[rayIndex],tileRayDirections[rayIndex+1],tileRayDirections[rayIndex+2],job.options);
+ }
+ stats.shadeMs+=performance.now()-start;
+ stats.tiles++;
+}
+function renderStep(){
+ const job=renderJob;if(!job||job.token!==imageSerial)return;
+ const start=performance.now(),budget=Number($('budget').value);
+ do{
+  renderTile(job);job.index++;
+ }while(job.index<job.total&&performance.now()-start<budget);
+ // Show progress without launching additional camera rays.
+ ctx.putImageData(frameImage,0,0);
+ const done=job.index/job.total;
+ $('progressBar').style.width=fnum(done*100,1)+'%';
+ $('frameInfo').textContent='Image '+(imageSerial)+' — '+fnum(done*100,1)+' %';
+ if(job.index<job.total){requestAnimationFrame(renderStep);return;}
+ stats.finishMs=performance.now()-job.started;
+ renderJob=null;displayMetrics();
+ $('state').textContent='Image complète';
+ $('frameInfo').textContent='Image '+imageSerial+' terminée · '+fnum(stats.finishMs,1)+' ms';
+}
+function displayMetrics(){
+ let best=0;for(let i=1;i<stats.mips.length;i++)if(stats.mips[i]>stats.mips[best])best=i;
+ $('renderTime').textContent=fnum(stats.finishMs);
+ $('traceTime').textContent=fnum(stats.traceMs);
+ $('shadeTime').textContent=fnum(stats.shadeMs);
+ $('rayCounter').textContent=stats.rays.toLocaleString('fr-FR');
+ $('testCount').textContent=stats.tests.toLocaleString('fr-FR');
+ $('nodeCount').textContent=stats.nodes.toLocaleString('fr-FR');
+ $('hitCount').textContent=stats.hits.toLocaleString('fr-FR');
+ $('skyCount').textContent=stats.sky.toLocaleString('fr-FR');
+ $('texelCount').textContent=stats.texels.toLocaleString('fr-FR');
+ $('mipCount').textContent=mipSizes[best]+' × '+mipSizes[best];
+ $('pcfCount').textContent=stats.pcfFull.toLocaleString('fr-FR');
+ $('pcfSaved').textContent=stats.pcfSaved.toLocaleString('fr-FR');
+ $('diagnostics').textContent='Caméra V9 : '+W+'×'+H+
+  ' pixels et exactement '+stats.rays.toLocaleString('fr-FR')+
+  ' rayons primaires ; '+objects.length+' primitives mathématiques. '+bvh.length+
+  ' nœuds BVH. Aucun triangle rasterisé. Calcul effectué sur CPU, temps total incluant les pauses entre rafraîchissements du navigateur.';
+}
+function connectUi(){
+ const sliders=[['distance','distanceValue',' m'],['angle','angleValue','°'],['elevation','elevationValue','°'],['fov','fovValue','°']];
+ for(const [id,label,unit] of sliders){
+  $(id).addEventListener('input',()=>{$(label).textContent=$(id).value+unit;invalidateImage('Caméra modifiée')});
+ }
+ for(const id of ['shadingMode','filter','mipMode','textures','shadows','fog','mipColors'])
+  $(id).addEventListener('change',()=>invalidateImage('Matériau et éclairage modifiés'));
+ $('resolution').addEventListener('change',()=>{
+  const [w,h]=$('resolution').value.split('x').map(Number);
+  if(w/h!==1.6)throw Error('Aspect ratio must be 16:10');
+  W=w;H=h;invalidateImage('Résolution 16:10 modifiée');
+ });
+ $('shadowSize').addEventListener('change',rebuildShadowMap);
+ $('renderButton').addEventListener('click',()=>invalidateImage('Rendu relancé'));
+ $('resetButton').addEventListener('click',()=>{
+  $('distance').value='13.5';$('angle').value='25';$('elevation').value='18';$('fov').value='70';
+  for(const [id,label,unit] of sliders)$(label).textContent=$(id).value+unit;
+  invalidateImage('Caméra réinitialisée');
+ });
+}
+function raySelfTest(){
+ const r={id:0,t:0};
+ // Sky ray: oriented upward from above scene.
+ traceClosest(0,8,0,0,1,0,r,false);
+ if(r.id!==0)throw Error('sky miss test failed');
+ // Ground plane at Y=0.
+ traceClosest(40,8,40,0,-1,0,r,false);
+ if(r.id!==1||Math.abs(r.t-8)>1e-6)throw Error('ground intersection test failed');
+ const hit=hitPrimitive({type:'ellipse',cx:0,cy:0,cz:0,rx:1,ry:1,rz:1},0,0,4,0,0,-1,Infinity);
+ if(Math.abs(hit-3)>1e-6)throw Error('ellipse test failed');
+ const bb={type:'box',min:[-1,-1,-1],max:[1,1,1]};
+ if(Math.abs(hitPrimitive(bb,0,0,4,0,0,-1,Infinity)-3)>1e-6)throw Error('box slab test failed');
+ const cc={type:'cone',a:[0,0,0],b:[0,2,0],nx:0,ny:1,nz:0,len:2,r0:.5,r1:.5,k:0};
+ if(Math.abs(hitPrimitive(cc,0,1,3,0,0,-1,Infinity)-2.5)>1e-6)throw Error('tapered cone test failed');
+ return true;
+}
+function startV9(){
+ makeScene();initMaterials();connectUi();
+ try{raySelfTest();$('diagnostics').textContent='Auto-tests : ciel, sol, ellipsoïde, boîte, cône et BVH réussis.';}
+ catch(e){$('diagnostics').textContent='ÉCHEC auto-test : '+e.message;throw e;}
+ rebuildShadowMap();invalidateImage('Caméra sphérique initialisée');
+}
+window.addEventListener('error',e=>{$('state').textContent='Erreur';$('diagnostics').textContent='Erreur : '+e.message});
+startV9();
+
+</script>
+</body></html>
