@@ -344,6 +344,7 @@ function makeMips(id,n){
 function initMaterials(){
  for(const mat of ['bark','leaves','grass','stone','wood','cloth','skin'])
   materials.set(mat,makeMips(mat,mat==='skin'||mat==='cloth'?128:256));
+ cacheFastMaterials();
  $('textureStatus').textContent='RGB565 : pyramides de secours prêtes, écorce 4096² en préparation';
  // The full 4096² bark texture uses a progressive generation job instead of a main-thread stall.
  highTexture={row:0,source:new Uint16Array(4096*4096),levels:[],stage:0,down:null,downRow:0};
@@ -380,7 +381,7 @@ function advanceHighTexture(){
    if(h.downRow===last.size>>1){h.levels.push({size:last.size>>1,data:h.down});h.down=null;}
   }
   if(h.levels.length===10){
-   materials.set('bark',{id:'bark',size:4096,levels:h.levels});
+   materials.set('bark',{id:'bark',size:4096,levels:h.levels});cacheFastMaterials();
    highTexture=null;preparedTexHigh=true;
    $('textureStatus').textContent='Pyramide écorce 4096 → 8 : 10 niveaux RGB565 disponibles';
    // Mip selection changes when switching source size, so recompute one image.
@@ -681,6 +682,86 @@ function shadePixel(cam,x,y,id,t,dx,dy,dz,options){
  }
  return packABGR(r,g,b);
 }
+
+// V9.1 pixel shader: reuse 2 scratch vectors instead of allocating normal/UV
+// arrays for each of up to 2.3 million pixels. The ray and hit stay unchanged.
+const FAST_NORMAL=[0,0,0],FAST_UV=[0,0,0];
+let texGroundGrass=null,texGroundStone=null;
+const FLAT_MATERIALS={bark:0xff556f91,leaves:0xff519b65,grass:0xff609e73,
+ stone:0xffa8b4bb,wood:0xff678aaf,cloth:0xffaf785c,skin:0xff86aaca};
+function cacheFastMaterials(){
+ texGroundGrass=materials.get('grass');texGroundStone=materials.get('stone');
+ for(const o of objects){o.tex=materials.get(o.mat);o.flat=FLAT_MATERIALS[o.mat]||0xff888888;}
+}
+function normalFast(id,x,y,z,out){
+ if(id===1){out[0]=0;out[1]=1;out[2]=0;return out;}
+ const o=objects[id-2];
+ if(o.type==='ellipse'){
+  let a=(x-o.cx)/(o.rx*o.rx),b=(y-o.cy)/(o.ry*o.ry),c=(z-o.cz)/(o.rz*o.rz);
+  const l=Math.hypot(a,b,c)||1;out[0]=a/l;out[1]=b/l;out[2]=c/l;return out;
+ }
+ if(o.type==='box'){
+  let which=0,d=Math.abs(x-o.min[0]),v=Math.abs(x-o.max[0]);if(v<d){d=v;which=1;}
+  v=Math.abs(y-o.min[1]);if(v<d){d=v;which=2;}
+  v=Math.abs(y-o.max[1]);if(v<d){d=v;which=3;}
+  v=Math.abs(z-o.min[2]);if(v<d){d=v;which=4;}
+  v=Math.abs(z-o.max[2]);if(v<d){which=5;}
+  out[0]=which===0?-1:which===1?1:0;
+  out[1]=which===2?-1:which===3?1:0;
+  out[2]=which===4?-1:which===5?1:0;return out;
+ }
+ const a=x-o.a[0],b=y-o.a[1],c=z-o.a[2],axis=a*o.nx+b*o.ny+c*o.nz;
+ if(axis<.0002){out[0]=-o.nx;out[1]=-o.ny;out[2]=-o.nz;return out;}
+ if(axis>o.len-.0002){out[0]=o.nx;out[1]=o.ny;out[2]=o.nz;return out;}
+ const vx=a-axis*o.nx-o.k*o.nx,vy=b-axis*o.ny-o.k*o.ny,vz=c-axis*o.nz-o.k*o.nz;
+ const l=Math.hypot(vx,vy,vz)||1;out[0]=vx/l;out[1]=vy/l;out[2]=vz/l;return out;
+}
+function uvFast(id,px,py,pz,n,out){
+ if(id===1){out[0]=px*.34;out[1]=pz*.34;out[2]=.34;return out;}
+ const o=objects[id-2];
+ if(o.type==='ellipse'){
+  out[0]=Math.atan2((pz-o.cz)/o.rz,(px-o.cx)/o.rx)/TAU*2.5;
+  out[1]=(.5-Math.asin(clamp((py-o.cy)/o.ry,-1,1))/PI)*2.5;out[2]=.9;return out;
+ }
+ if(o.type==='cone'){
+  const a=px-o.a[0],b=py-o.a[1],c=pz-o.a[2];
+  out[0]=Math.atan2(c,a)/TAU*3;
+  out[1]=(a*o.nx+b*o.ny+c*o.nz)*.84;out[2]=.8;return out;
+ }
+ const ax=Math.abs(n[0]),ay=Math.abs(n[1]),az=Math.abs(n[2]);
+ if(ay>=ax&&ay>=az){out[0]=px*.65;out[1]=pz*.65;}
+ else if(ax>=az){out[0]=pz*.65;out[1]=py*.65;}
+ else{out[0]=px*.65;out[1]=py*.65;}
+ out[2]=.65;return out;
+}
+function shadePixelFast(cam,x,y,id,t,dx,dy,dz,options){
+ if(!id){
+  const rgb=skyRGB(dx,dy,dz,options.fog);
+  return packABGR(rgb[0],rgb[1],rgb[2]);
+ }
+ const px=cam.eye[0]+t*dx,py=cam.eye[1]+t*dy,pz=cam.eye[2]+t*dz;
+ const n=normalFast(id,px,py,pz,FAST_NORMAL);
+ const o=id===1?null:objects[id-2],isStone=id===1&&Math.abs(px-1.2)<.82&&pz>-5.1&&pz<4.2;
+ let base;
+ if(options.textures){
+  const tex=id===1?(isStone?texGroundStone:texGroundGrass):o.tex;
+  const uv=uvFast(id,px,py,pz,n,FAST_UV);
+  const slope=Math.max(.16,Math.abs(n[0]*dx+n[1]*dy+n[2]*dz));
+  const footprint=tex.size*t*cam.pixelAngle*uv[2]/slope;
+  base=sampleTex(tex,uv[0],uv[1],footprint,options.filter,options.mipMode,options.mipColors);
+ }else base=id===1?(isStone?FLAT_MATERIALS.stone:FLAT_MATERIALS.grass):o.flat;
+ if(options.mipColors&&options.textures)return base;
+ const ndotl=Math.max(0,n[0]*sun[0]+n[1]*sun[1]+n[2]*sun[2]);
+ const shadow=shadowVisibilityFast(px+n[0]*.025,py+n[1]*.025,pz+n[2]*.025,options.shadows);
+ const shade=.26+.74*ndotl*shadow;
+ let r=(base&255)*shade,g=((base>>>8)&255)*shade,b=((base>>>16)&255)*shade;
+ if(options.fog){
+  const fog=fastFogAlpha(t),q=1-fog;
+  r=r*q+skyHorizon[0]*fog;g=g*q+skyHorizon[1]*fog;b=b*q+skyHorizon[2]*fog;
+ }
+ return packABGR(r,g,b);
+}
+
 function resetCounters(){
  stats.rays=0;stats.tests=0;stats.nodes=0;stats.hits=0;stats.sky=0;stats.texels=0;stats.traceMs=0;stats.shadeMs=0;
  stats.finishMs=0;stats.tiles=0;stats.pcfFull=0;stats.pcfSaved=0;stats.mips.fill(0);
@@ -723,10 +804,11 @@ function renderTile(job){
  }
  stats.traceMs+=performance.now()-start;
  start=performance.now();
+ const pixelShader=job.options.fast?shadePixelFast:shadePixel;
  for(let y=by;y<bottom;y++)for(let x=bx;x<right;x++){
   const rayIndex=((y-by)*16+(x-bx))*3;
   const i=y*W+x;
-  pixels[i]=shadePixel(cam,x,y,hitIds[i],hitDistances[i],tileRayDirections[rayIndex],tileRayDirections[rayIndex+1],tileRayDirections[rayIndex+2],job.options);
+  pixels[i]=pixelShader(cam,x,y,hitIds[i],hitDistances[i],tileRayDirections[rayIndex],tileRayDirections[rayIndex+1],tileRayDirections[rayIndex+2],job.options);
  }
  stats.shadeMs+=performance.now()-start;
  stats.tiles++;
