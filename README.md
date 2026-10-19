@@ -30,3 +30,10 @@ Le stuttering ne se manifeste plus d'après l'essai utilisateur. Le compteur « 
 - [Diagnostic et protocole de test](experiments/2026-10-19-shadow-stabilized-v4/README.md)
 
 L'image géométrique reste identique à V3. Les ombres utilisent maintenant **deux cartes Z de la même et unique lumière**, avec interpolation continue des tests de profondeur pour limiter les sauts. Le mode « Ombres stabilisées » est activé par défaut et désactivable pour comparer; les performances en navigateur réel restent à mesurer.
+
+## Nouvelle expérience V5 — Z-buffer caméra (19 octobre 2026)
+
+- [Ouvrir le simulateur V5 : visibilité caméra par pixel et ombres V4](experiments/2026-10-19-camera-z-v5/index.html)
+- [Notes de développement, protocole et limites V5](experiments/2026-10-19-camera-z-v5/README.md)
+
+**Nouveau mode par défaut : Z caméra logiciel par pixel**, pour corriger les triangles du fond affichés devant les objets lorsque les triangles étaient triés par profondeur moyenne. Le tampon couleur et le tampon Z sont communs au sol, au décor et au personnage. Une seule lumière Z stabilisée est conservée. L'ancien mode V4 reste sélectionnable pour comparaison. La V5 nécessite encore une optimisation de la rasterisation et un essai visuel dans un vrai navigateur.
