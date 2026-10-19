@@ -916,6 +916,131 @@ function zColorFor(hex,f){
  const r=Math.min(255,Math.round(c[0]*k)),g=Math.min(255,Math.round(c[1]*k)),b=Math.min(255,Math.round(c[2]*k));
  return (0xff000000|(b<<16)|(g<<8)|r)>>>0;
 }
+
+// V8.1 software optimization: 16×16 screen blocks only share the MIP choice.
+// Per-pixel depth, barycentrics, UV perspective correction and RGB565 lookup
+// remain exact. Switching to V8 reference makes an A/B benchmark possible.
+const FAST_RASTER_TILE=16;
+function fastBilinearPacked(level,u,v){
+ const size=level.size,mask=size-1,data=level.data;
+ const fxpos=u*size-.5,fypos=v*size-.5;
+ const ix=Math.floor(fxpos),iy=Math.floor(fypos),fx=fxpos-ix,fy=fypos-iy;
+ const x0=ix&mask,y0=iy&mask,x1=(x0+1)&mask,y1=(y0+1)&mask;
+ const a=data[y0*size+x0],b=data[y0*size+x1],c=data[y1*size+x0],d=data[y1*size+x1];
+ const w00=(1-fx)*(1-fy),w10=fx*(1-fy),w01=(1-fx)*fy,w11=fx*fy;
+ const r=Math.min(255,Math.round(((a>>>11)*w00+(b>>>11)*w10+(c>>>11)*w01+(d>>>11)*w11)*255/31));
+ const g=Math.min(255,Math.round((((a>>>5)&63)*w00+((b>>>5)&63)*w10+((c>>>5)&63)*w01+((d>>>5)&63)*w11)*255/63));
+ const bl=Math.min(255,Math.round(((a&31)*w00+(b&31)*w10+(c&31)*w01+(d&31)*w11)*255/31));
+ return (0xff000000|(bl<<16)|(g<<8)|r)>>>0;
+}
+function makeFastMipState(tex,lod,lighting){
+ const n=tex.levels.length-1;
+ lod=Math.min(n,Math.max(0,lod));
+ let lo=Math.floor(lod),hi=Math.min(n,lo+1),mix=lod-lo;
+ if(textureFilter!=='trilinear'){lo=Math.round(lod);hi=lo;mix=0;}
+ const level=tex.levels[lo],size=level.size,filter=textureFilter;
+ const idx=TEXTURE_SIZES.indexOf(size),debugColor=mipPalette[Math.max(0,idx)];
+ return {lo:level,hi:tex.levels[hi],mix,filter,light:Math.min(1.5,Math.max(0,lighting)),
+  debug:mipDebug,debugColor,index:idx,lod,
+  reads:filter==='nearest'?1:hi===lo?4:8};
+}
+function fastTexturePixel(st,u,v){
+ textureStats.samples++;textureStats.texels+=st.reads;
+ if(st.index>=0)textureStats.bySize[st.index]++;
+ textureStats.lodSum+=st.lod;
+ if(st.lod<textureStats.lodMin)textureStats.lodMin=st.lod;
+ if(st.lod>textureStats.lodMax)textureStats.lodMax=st.lod;
+ if(st.debug)return st.debugColor;
+ let pixel;
+ if(st.filter==='nearest'){
+  const n=st.lo.size,data=st.lo.data,mask=n-1;
+  const texel=data[((Math.floor(v*n)&mask)*n)+(Math.floor(u*n)&mask)];
+  const r=((texel>>>11)&31)*255/31,g=((texel>>>5)&63)*255/63,b=(texel&31)*255/31;
+  pixel=(0xff000000|(Math.round(b)<<16)|(Math.round(g)<<8)|Math.round(r))>>>0;
+ }else{
+  pixel=fastBilinearPacked(st.lo,u,v);
+  if(st.mix>0){
+   const p=fastBilinearPacked(st.hi,u,v),mix=st.mix,k=1-mix;
+   const r=Math.round((pixel&255)*k+(p&255)*mix);
+   const g=Math.round(((pixel>>>8)&255)*k+((p>>>8)&255)*mix);
+   const b=Math.round(((pixel>>>16)&255)*k+((p>>>16)&255)*mix);
+   pixel=(0xff000000|(b<<16)|(g<<8)|r)>>>0;
+  }
+ }
+ if(st.light!==1){
+  const f=st.light,r=Math.min(255,Math.round((pixel&255)*f));
+  const g=Math.min(255,Math.round(((pixel>>>8)&255)*f));
+  const b=Math.min(255,Math.round(((pixel>>>16)&255)*f));
+  return (0xff000000|(b<<16)|(g<<8)|r)>>>0;
+ }
+ return pixel;
+}
+function zRasterOptimized(a,b,c,col,tag,w,h,depth,pixels,tags,m,texSpec=null){
+ if(!texSpec||!texturesEnabled)return zRasterReference(a,b,c,col,tag,w,h,depth,pixels,tags,m,texSpec);
+ const ax=a[0],ay=a[1],bx=b[0],by=b[1],cx=c[0],cy=c[1];
+ const area=(bx-ax)*(cy-ay)-(by-ay)*(cx-ax);
+ if(!Number.isFinite(area)||Math.abs(area)<1e-8||a[2]<=0||b[2]<=0||c[2]<=0)return;
+ const x0=Math.max(0,Math.floor(Math.min(ax,bx,cx))),x1=Math.min(w-1,Math.ceil(Math.max(ax,bx,cx)));
+ const y0=Math.max(0,Math.floor(Math.min(ay,by,cy))),y1=Math.min(h-1,Math.ceil(Math.max(ay,by,cy)));
+ if(x0>x1||y0>y1)return;
+ const inv=1/area,one=1/a[2],two=1/b[2],three=1/c[2];
+ const d0x=(by-cy)*inv,d0y=(cx-bx)*inv,d1x=(cy-ay)*inv,d1y=(ax-cx)*inv;
+ const u0=texSpec.uv0[0]*one,u1=texSpec.uv1[0]*two,u2=texSpec.uv2[0]*three;
+ const v0=texSpec.uv0[1]*one,v1=texSpec.uv1[1]*two,v2=texSpec.uv2[1]*three;
+ const dUdx=(u0-u2)*d0x+(u1-u2)*d1x,dUdy=(u0-u2)*d0y+(u1-u2)*d1y;
+ const dVdx=(v0-v2)*d0x+(v1-v2)*d1x,dVdy=(v0-v2)*d0y+(v1-v2)*d1y;
+ const dZdx=(one-three)*d0x+(two-three)*d1x,dZdy=(one-three)*d0y+(two-three)*d1y;
+ const tex=texSpec.texture,size=tex.size;
+ let forcedLod=-1;
+ if(textureLodOverride!=='auto')
+  forcedLod=Math.max(0,Math.min(tex.levels.length-1,Math.log2(tex.size/Number(textureLodOverride))));
+ for(let tileY=y0>>4;tileY<=y1>>4;tileY++){
+  const sy=Math.max(y0,tileY<<4),ey=Math.min(y1,(tileY<<4)+15);
+  for(let tileX=x0>>4;tileX<=x1>>4;tileX++){
+   const sx=Math.max(x0,tileX<<4),ex=Math.min(x1,(tileX<<4)+15);
+   // MIP chosen ONCE for every 16×16 block, not once for each fragment.
+   const mx=(sx+ex+1)*.5,my=(sy+ey+1)*.5;
+   const ww0=((bx-mx)*(cy-my)-(by-my)*(cx-mx))*inv;
+   const ww1=((cx-mx)*(ay-my)-(cy-my)*(ax-mx))*inv;
+   const ww2=1-ww0-ww1,invZm=ww0*one+ww1*two+ww2*three;
+   if(invZm<=0)continue;
+   let lod=forcedLod;
+   if(lod<0){
+    const uu=(ww0*u0+ww1*u1+ww2*u2)/invZm;
+    const vv=(ww0*v0+ww1*v1+ww2*v2)/invZm;
+    const duDx=(dUdx-uu*dZdx)/invZm,dvDx=(dVdx-vv*dZdx)/invZm;
+    const duDy=(dUdy-uu*dZdy)/invZm,dvDy=(dVdy-vv*dZdy)/invZm;
+    const footprint=size*size*Math.max(duDx*duDx+dvDx*dvDx,duDy*duDy+dvDy*dvDy);
+    lod=footprint>1?.5*Math.log2(footprint):0;
+   }
+   textureStats.lodEvaluations++;textureStats.tileBlocks++;
+   const sampler=makeFastMipState(tex,lod,texSpec.lighting);
+   const rowW0=((bx-(sx+.5))*(cy-(sy+.5))-(by-(sy+.5))*(cx-(sx+.5)))*inv;
+   const rowW1=((cx-(sx+.5))*(ay-(sy+.5))-(cy-(sy+.5))*(ax-(sx+.5)))*inv;
+   for(let y=sy;y<=ey;y++){
+    let w0=rowW0+(y-sy)*d0y,w1=rowW1+(y-sy)*d1y,base=y*w;
+    for(let x=sx;x<=ex;x++){
+     const w2=1-w0-w1;
+     if(w0>=-1e-8&&w1>=-1e-8&&w2>=-1e-8){
+      const invZ=w0*one+w1*two+w2*three,j=base+x;m.tests++;
+      if(invZ>depth[j]+1e-8){
+       depth[j]=invZ;tags[j]=tag;
+       const u=(w0*u0+w1*u1+w2*u2)/invZ,v=(w0*v0+w1*v1+w2*v2)/invZ;
+       pixels[j]=fastTexturePixel(sampler,u,v);m.writes++;
+      }
+     }
+     w0+=d0x;w1+=d1x;
+    }
+   }
+  }
+ }
+ m.triangles++;
+}
+// Compatibility wrapper used by camera Z regression tests.
+function zRaster(...args){
+ return (rasterPipeline==='fast'?zRasterOptimized:zRasterReference)(...args);
+}
+
 function zRasterReference(a,b,c,col,tag,w,h,depth,pixels,tags,m,texSpec=null){
  const ax=a[0],ay=a[1],bx=b[0],by=b[1],cx=c[0],cy=c[1];
  const area=(bx-ax)*(cy-ay)-(by-ay)*(cx-ax);
