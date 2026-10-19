@@ -1,0 +1,30 @@
+MOTEUR3D CPC6128 RASTER Z80 / VERSIONING.TXT
+DATE: 2026-10-19
+BRANCHE: raster
+ARCHITECTURE: Mode 0, 160x200, 16 couleurs pleines, pas de texture
+
+V0.1.0 — PREMIER RASTERISEUR Z80 D'ESSAI
+  CPC_RASTER_MODE0.asm
+  - 8 poses preprojetees de deux objets cuboides 3D.
+  - 24 triangles de couleur pleine par pose.
+  - Rasterisation effective sur le Z80 par aretes 8.8 et spans.
+  - 2 pixels voisins par octet Mode0: precision horizontale 80.
+  - Pas de Z-buffer: painter order precalcule pour chaque pose.
+  - RAM de base pour programme, ecran, pile et buffers.
+  - RAM etendue bancs 4/5/6/7: deux poses par banc.
+  - Pas de ROM / firmware / interruptions pendant le rendu.
+  - Pas de textures, pas de sampling UV, pas de mipmaps.
+  - Tests statiques: 8*24 triangles, 200 adresses CRTC correctes,
+    aucune coordonnee span hors ecran dans les huit poses.
+  - Assemblage, affichage reel et FPS NON TESTES.
+
+PERFORMANCES
+  - Objectif exploratoire du moteur raster Z80 : 8-12 FPS
+    pour 30-60 triangles legers, sans validation experimentale.
+  - Cette version particuliere n'a pas encore de FPS mesure.
+  - Attention aux 16 000 octets de fond recopie a chaque frame.
+
+A VENIR
+  - RASM + emulateur CPC; mesure cycles/Z80 et validation hardware.
+  - Faces cachees et recuperation des regions modifiees pour eviter
+    l'effacement complet; projection dynamique / clipping.
