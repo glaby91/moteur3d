@@ -409,6 +409,62 @@ function sampleTex(tex,u,v,footprint,filter,mipMode,debug){
 }
 
 
+
+// Screen-projected conservative AABB bins per 16x16 TILE. These are NOT
+// rasterized triangles: every pixel still casts exactly ONE primary ray.
+// The BVH first culls whole groups by their projected bounding rectangles.
+function screenRect(bounds,cam){
+ const min=bounds.min,max=bounds.max;
+ let left=Infinity,right=-Infinity,top=Infinity,bottom=-Infinity;
+ const {eye,f,r,u}=cam,tanH=Math.tan(cam.fov*.5),tanV=tanH*H/W;
+ for(let i=0;i<8;i++){
+  const x=(i&1)?max[0]:min[0],y=(i&2)?max[1]:min[1],z=(i&4)?max[2]:min[2];
+  const px=x-eye[0],py=y-eye[1],pz=z-eye[2];
+  const depth=px*f[0]+py*f[1]+pz*f[2];
+  // If any bounding corner is behind/near the eye, culling is disabled
+  // for this bounding box to preserve correctness (conservative bound).
+  if(depth<.05)return {left:0,top:0,right:W,bottom:H};
+  const sx=W*.5*(1+(px*r[0]+py*r[1]+pz*r[2])/(depth*tanH));
+  const sy=H*.5*(1-(px*u[0]+py*u[1]+pz*u[2])/(depth*tanV));
+  left=Math.min(left,sx);right=Math.max(right,sx);
+  top=Math.min(top,sy);bottom=Math.max(bottom,sy);
+ }
+ return {left:left-2,right:right+2,top:top-2,bottom:bottom+2};
+}
+function prepareProjectedBVH(cam){
+ cam.screenBVH=bvh.map(node=>screenRect(node,cam));
+ cam.screenObjects=objects.map(o=>screenRect(o,cam));
+}
+function intersectsScreen(rect,left,top,right,bottom){
+ return rect.left<=right&&rect.right>=left&&rect.top<=bottom&&rect.bottom>=top;
+}
+function tileCandidates(cam,left,top,right,bottom){
+ const ids=[],stack=[bvhRoot];
+ while(stack.length){
+  const idx=stack.pop(),node=bvh[idx];stats.nodes++;
+  if(!intersectsScreen(cam.screenBVH[idx],left,top,right,bottom))continue;
+  if(node.ids){
+   for(const id of node.ids){
+    if(intersectsScreen(cam.screenObjects[id],left,top,right,bottom))ids.push(id);
+   }
+  }else{
+   stack.push(node.left,node.right);
+  }
+ }
+ return ids;
+}
+function traceTileRay(ox,oy,oz,dx,dy,dz,list,result){
+ stats.rays++;
+ let near=dy<-.000001?-oy/dy:Infinity,id=Number.isFinite(near)&&near>.0001?1:0;
+ if(!id)near=Infinity;
+ for(let i=0;i<list.length;i++){
+  const j=list[i],t=hitPrimitive(objects[j],ox,oy,oz,dx,dy,dz,near);
+  if(t<near){near=t;id=j+2;}
+ }
+ result.id=id;result.t=near;
+ if(id)stats.hits++;else stats.sky++;
+}
+
 // === Virtual spherical camera: radial normals through each image sample ===
 // Coordinates on the spherical imaging surface are O + normalize(F + aR + bU).
 // Equivalently, a ray through each pixel at a rectilinear FOV: no fish-eye.
@@ -423,7 +479,8 @@ function buildCamera(){
  const sx=new Float64Array(W),sy=new Float64Array(H);
  for(let i=0;i<W;i++)sx[i]=((i+.5)/W*2-1)*horizontalTan;
  for(let j=0;j<H;j++)sy[j]=(1-(j+.5)/H*2)*horizontalTan*H/W;
- return {eye,f,r,u,sx,sy,pixelAngle:2*horizontalTan/W,fov};
+ const cam={eye,f,r,u,sx,sy,pixelAngle:2*horizontalTan/W,fov};
+ prepareProjectedBVH(cam);return cam;
 }
 function cameraRay(c,x,y,out){
  const a=c.sx[x],b=c.sy[y],f=c.f,r=c.r,u=c.u;
@@ -585,10 +642,11 @@ function renderTile(job){
  const bx=(job.index%job.countX)*16,by=Math.floor(job.index/job.countX)*16;
  const right=Math.min(W,bx+16),bottom=Math.min(H,by+16),cam=job.cam;
  const origin=cam.eye,ray=[0,0,0],hit={id:0,t:Infinity};
+ const candidates=tileCandidates(cam,bx,by,right,bottom);
  let start=performance.now();
  for(let y=by;y<bottom;y++)for(let x=bx;x<right;x++){
   cameraRay(cam,x,y,ray);
-  traceClosest(origin[0],origin[1],origin[2],ray[0],ray[1],ray[2],hit,true);
+  traceTileRay(origin[0],origin[1],origin[2],ray[0],ray[1],ray[2],candidates,hit);
   const i=y*W+x;hitIds[i]=hit.id;hitDistances[i]=hit.t;
  }
  stats.traceMs+=performance.now()-start;
