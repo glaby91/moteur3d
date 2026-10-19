@@ -23,3 +23,10 @@ Le stuttering ne se manifeste plus d'après l'essai utilisateur. Le compteur « 
 
 **Une seule lumière avec ombres Z est active.** Le Z-buffer caméra et l'éclairage multi-sources ne sont pas encore implémentés. Cette expérience est distincte de la version anti-stuttering stable du 18 octobre.
 
+
+## Révision expérimentale V4 — stabilisation des ombres (19 octobre 2026)
+
+- [Ouvrir le code du simulateur V4](experiments/2026-10-19-shadow-stabilized-v4/index.html)
+- [Diagnostic et protocole de test](experiments/2026-10-19-shadow-stabilized-v4/README.md)
+
+L'image géométrique reste identique à V3. Les ombres utilisent maintenant **deux cartes Z de la même et unique lumière**, avec interpolation continue des tests de profondeur pour limiter les sauts. Le mode « Ombres stabilisées » est activé par défaut et désactivable pour comparer; les performances en navigateur réel restent à mesurer.
