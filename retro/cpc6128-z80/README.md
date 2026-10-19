@@ -72,4 +72,4 @@ Ces ordres de grandeur sont **des objectifs exploratoires**, fortement dépendan
 - Effacement partiel des zones modifiées, synchronisation avec le VBL et double tampon vidéo si la mémoire disponible le permet.
 - Instrumentation précise du temps par frame, sur émulateur CPC à synchronisation fidèle.
 
-Le **raycaster 80 rayons du CPC6128** reste séparément dans la branche [`raycasting`](../../../../tree/raycasting/retro/cpc6128-z80/) ; les deux architectures peuvent être comparées ultérieurement.
+Le **raycaster 80 rayons du CPC6128** reste séparément dans la branche [`raycasting`](https://github.com/glaby91/moteur3d/tree/raycasting/retro/cpc6128-z80) ; les deux architectures peuvent être comparées ultérieurement.
