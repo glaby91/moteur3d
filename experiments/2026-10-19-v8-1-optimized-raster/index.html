@@ -21,7 +21,7 @@
 <label><input type="checkbox" id="overview" checked> Vue droite</label>
 <label>Préparation complète <select id="tileBudget" disabled><option value="0" selected>Désactivée dans le rendu temps réel</option></select></label>
 <label><input type="checkbox" id="texturesEnabled" checked> Textures RGB565</label>
-<label>Raster <select id="rasterPipeline"><option value="fast" selected>Optimisé — LOD par bloc 16×16</option><option value="reference">Référence V8 — LOD par pixel</option></select></label><label>Filtrage <select id="textureFilter"><option value="nearest">Plus proche</option><option value="bilinear">Bilinéaire</option><option value="trilinear" selected>Trilinéaire</option></select></label>
+<label>Raster <select id="rasterPipeline"><option value="fast" selected>Optimisé — géométrie native + LOD 16×16</option><option value="reference">Référence V8 — LOD par pixel</option></select></label><label>Filtrage <select id="textureFilter"><option value="nearest">Plus proche</option><option value="bilinear">Bilinéaire</option><option value="trilinear" selected>Trilinéaire</option></select></label>
 <label><input type="checkbox" id="mipDebug"> Afficher les niveaux mip par couleur</label>
 <label>Forcer mip <select id="textureLodOverride"><option value="auto" selected>Auto (projection)</option><option value="4096">4096 × 4096</option><option value="2048">2048 × 2048</option><option value="1024">1024 × 1024</option><option value="512">512 × 512</option><option value="256">256 × 256</option><option value="128">128 × 128</option><option value="64">64 × 64</option><option value="32">32 × 32</option><option value="16">16 × 16</option><option value="8">8 × 8</option></select></label>
 <label><input type="checkbox" id="tileOverlay"> Montrer grille 16×16</label>
@@ -64,7 +64,7 @@
 <div id="mipGallery" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(76px,1fr));gap:8px;margin-top:12px">
 <div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview8" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>8²</div><div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview16" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>16²</div><div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview32" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>32²</div><div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview64" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>64²</div><div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview128" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>128²</div><div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview256" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>256²</div><div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview512" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>512²</div><div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview1024" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>1024²</div><div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview2048" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>2048²</div><div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview4096" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>4096²</div>
 </div>
-<p class="notice">Au départ, une texture provisoire est disponible. La texture 4096² et sa pyramide sont générées en plusieurs étapes pour éviter de bloquer volontairement l'affichage. Les autres matériaux utilisent des tailles adaptées. Le sélecteur « Raster » compare les deux algorithmes à géométrie et éclairage identiques. RGB565 = 2 octets par texel ; la couleur finale reste un framebuffer RGBA.</p></section>
+<p class="notice">Au départ, une texture provisoire est disponible. La texture 4096² et sa pyramide sont générées en plusieurs étapes pour éviter de bloquer volontairement l'affichage. Les autres matériaux utilisent des tailles adaptées. Le sélecteur « Raster » compare les deux algorithmes sur une géométrie de forme identique : le mode optimisé supprime les subdivisions coplanaires redondantes du tracé, tout en conservant les 28 416 triangles V8 en mémoire et la version originale comme référence. RGB565 = 2 octets par texel ; la couleur finale reste un framebuffer RGBA.</p></section>
 <section class="panel" style="margin-top:12px"><h2>Performances — mesures glissantes</h2><div class="kpis"><div class="kpi"><b id="fps">—</b><span>FPS réels navigateur</span></div><div class="kpi"><b id="ms">—</b><span>ms calcul / affichage</span></div><div class="kpi"><b id="drawms">—</b><span>ms tracé géométrie</span></div><div class="kpi"><b id="tri">—</b><span>triangles tracés / image</span></div><div class="kpi"><b id="calls">—</b><span>commandes de tracé / image</span></div><div class="kpi"><b id="ops">—</b><span>opérations 3D estimées</span></div></div>
 <div class="grid-3"><section><h3 class="section-title">Temps par poste (ms/image)</h3><div id="bars"></div><div id="bottleneck" class="log" style="margin-top:12px">Initialisation du profilage…</div></section>
 <section><h3 class="section-title">Prédictions & travail évité</h3><div class="statline"><span>Prévisions validées : <strong id="valid">0</strong></span><span>Invalidées : <strong id="invalid">0</strong></span></div><div class="statline"><span>Faces du personnage réutilisées : <strong id="faceReuse">0</strong></span></div>
@@ -1198,11 +1198,16 @@ function renderZCamera(){
  const ground=[[-13,-.035,-13],[13,-.035,-13],[13,-.035,13],[-13,-.035,13]];
  zCollect(projected,[ground[0],ground[1],ground[2]],camera,Z_GROUND,1,{kind:'ground',normal:[0,1,0],lighting:1});
  zCollect(projected,[ground[0],ground[2],ground[3]],camera,Z_GROUND,1,{kind:'ground',normal:[0,1,0],lighting:1});
+ // Native triangles are geometrically IDENTICAL to coplanar children;
+ // rendering the originals keeps exact curved surfaces and Z occlusion.
+ // The V8 reference path still renders all 28,416 submitted triangles.
+ const cameraMesh=rasterPipeline==='fast'?shadowGeometry:mesh;
+ const cameraActor=rasterPipeline==='fast'?actorShadowGeometry:manMesh;
  let shadeParent=null,shadeFactor=1;
- for(let i=0;i<mesh.length;i++){
-  const tr=mesh[i],parent=tr.parent||tr;
+ for(let i=0;i<cameraMesh.length;i++){
+  const tr=cameraMesh[i],parent=tr.parent||tr;
   if(parent!==shadeParent){
-   const cached=currentFaceLight(i),shade=cached===null?surfaceShade(parent,light):cached;
+   const cached=rasterPipeline==='fast'?null:currentFaceLight(i),shade=cached===null?surfaceShade(parent,light):cached;
    const vis=lm?visibilityFromLight(parent.center,lm,.12):1;
    shadeFactor=parent.k==='leaves'&&lm?.first?.depth?
      .30+(shade-.30)*(.65+.35*vis):(.30+(shade-.30)*vis);
@@ -1212,7 +1217,7 @@ function renderZCamera(){
  }
  const actorPos=[st.x,0,st.z];
  let actorParent=null,actorShade=1;
- for(const tr of manMesh){
+ for(const tr of cameraActor){
   const vertices=tr.v.map(v=>manTransform(v,actorPos,st.heading,st.walk));
   const parent=tr.parent||tr;
   if(parent!==actorParent){
@@ -1240,7 +1245,7 @@ function renderZCamera(){
   ctx.stroke();ctx.restore();
  }
  if(frame%7===0){const t=performance.now();p.snap+=snapshot()}
- zMetrics={...m,ground:zMetrics.ground};p.triProjected=mesh.length+manMesh.length+2;
+ zMetrics={...m,ground:zMetrics.ground};p.triProjected=cameraMesh.length+cameraActor.length+2;
  p.drawn=m.triangles;p.calls=1;stats.full++;return p;
 }
 function zCamTest(){
