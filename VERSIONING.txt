@@ -1,0 +1,31 @@
+MOTEUR3D / BRANCHE RASTER — VERSIONING
+Date de reference : 2026-10-19
+Branche GitHub : raster
+Statut : sauvegarde independante du moteur de rasterisation.
+
+RASTER 1.0.0 — SNAPSHOT HTML
+  engine/index.html
+  Copie autonome et figee de V8.1 (experiments/2026-10-19-v8-1-optimized-raster/index.html).
+  16:10, Z-buffer camera par pixel, rendu de surfaces par triangles.
+  Raster a deux passes : profondeur puis couleur uniquement sur pixels visibles.
+  Ombres par carte de lumiere, textures RGB565 et mipmaps.
+  Modes V8 reference, tuiles, accelere, statistiques d'image.
+
+QB64-RASTER 1.0.1 — PORT EXPERIMENTAL
+  qb64/raster/RasterEngine.bas
+  Programme autonome 16:10 : 320x200 interne ou 640x400 interne,
+  agrandi/ecran 640x400. Moteur logiciel : barycentriques,
+  Z-buffer, UV corriges par perspective, triangles de sol, arbre et banc.
+  Controles : A/D, +/- , H, ESC.
+  1.0.1 : correction de creation des vertices par SUB MakeVtx
+          (QB64 n'autorise pas FUNCTION AS TYPE en retour).
+  Les ombres lumineuses stabilisees, l'interface HTML et le simulateur
+  28 416 triangles NE SONT PAS integralement portes en QB64.
+  Statut : source non compilee en absence de compilateur QB64-PE ici.
+
+CONSERVATION
+  Branche master et experiences anterieures non supprimees.
+  Le snapshot HTML fige les sources, independamment d'une evolution future
+  des repertoires experiments/ sur master.
+
+Note : VERSIONING.txt constitue la chronologie de CETTE branche.
