@@ -44,3 +44,10 @@ L'image géométrique reste identique à V3. Les ombres utilisent maintenant **d
 - [Compte rendu technique et mesures du test](experiments/2026-10-19-camera-z-v6-24100-triangles/README.md)
 
 Toute la géométrie de la scène V5 est divisée en dix triangles coplanaires par triangle initial, sans déformation des objets : 2 310 → 23 100 triangles du décor et 100 → 1 000 triangles du personnage. Un seul éclairage Z est conservé. Le premier essai logiciel à 320 × 240 fonctionne, mais le surcoût CPU est élevé ; priorité ensuite à la rasterisation tuilée et à l'optimisation des shadow-maps.
+
+## Dernière expérimentation V6 — 10 fois plus de triangles (19 octobre 2026)
+
+- [Simulateur HTML V6 : 24 100 triangles, caméra Z et lumière Z](experiments/2026-10-19-geometry-x10-v6/index.html)
+- [Résultats des tests de charge et limites](experiments/2026-10-19-geometry-x10-v6/README.md)
+
+Par rapport à V5 (2 410 triangles), le décor et le personnage sont réellement subdivisés en **24 100 triangles**. La scène conserve ses silhouettes et sa géométrie, afin d'isoler le coût lié au nombre de primitives. Le sélecteur « Maillage » compare ×1 et ×10, avec 320×240 au démarrage par prudence. Le Z-buffer caméra par pixel et l'unique source lumineuse à ombres Z restent actifs. Tests d'occlusion et de couverture réussis ; performances sur navigateur réel à mesurer et optimisations CPU nécessaires.
