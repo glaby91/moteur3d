@@ -101,7 +101,313 @@ let currentCam=null;
 const stats={rays:0,tests:0,nodes:0,hits:0,sky:0,texels:0,traceMs:0,shadeMs:0,finishMs:0,tiles:0,mips:new Uint32Array(10)};
 const mipSizes=[8,16,32,64,128,256,512,1024,2048,4096];
 const palette=[0xff68acf7,0xff69f8d4,0xff9dff73,0xffecfc78,0xffe2b46b,0xffdb8179,0xffbd7ff0,0xff7da8f7,0xffdda0d2,0xffc0f4ec];
-/*__V9_SCENE__*/
+
+// === Math primitives and material pyramids; NO triangle meshes ===
+function ellipse(cx,cy,cz,rx,ry,rz,mat){
+ const o={type:'ellipse',cx,cy,cz,rx,ry,rz,mat,min:[cx-rx,cy-ry,cz-rz],max:[cx+rx,cy+ry,cz+rz]};
+ objects.push(o);return o;
+}
+function box(x0,y0,z0,x1,y1,z1,mat){
+ const o={type:'box',min:[x0,y0,z0],max:[x1,y1,z1],mat};
+ objects.push(o);return o;
+}
+function cone(a,b,r0,r1,mat){
+ const dx=b[0]-a[0],dy=b[1]-a[1],dz=b[2]-a[2],len=Math.hypot(dx,dy,dz),r=Math.max(r0,r1);
+ const o={type:'cone',a,b,r0,r1,k:(r1-r0)/len,len,
+ nx:dx/len,ny:dy/len,nz:dz/len,mat,
+ min:[Math.min(a[0],b[0])-r,Math.min(a[1],b[1])-r,Math.min(a[2],b[2])-r],
+ max:[Math.max(a[0],b[0])+r,Math.max(a[1],b[1])+r,Math.max(a[2],b[2])+r]};
+ objects.push(o);return o;
+}
+function makeScene(){
+ objects.length=0;
+ // A genuinely continuous tapered and branching mathematical oak, not a polygon tree.
+ const tx=-1.9,tz=.7;
+ cone([tx,0,tz],[tx+.09,2.8,tz-.1],.34,.17,'bark');
+ const branches=[];
+ for(let i=0;i<12;i++){
+  const a=i*2.399,from=[tx,1.2+(i%5)*.34,tz];
+  const tip=[tx+Math.cos(a)*(1.35+(i%3)*.18),2.8+(i%4)*.31,
+     tz+Math.sin(a)*(1.35+(i%3)*.18)];
+  cone(from,tip,.11,.045,'bark');
+  branches.push(tip);
+  for(let j=-1;j<=1;j++){
+   const t=a+j*.48,end=[tip[0]+Math.cos(t)*(.47+Math.abs(j)*.13),tip[1]+.14+(j+1)*.14,tip[2]+Math.sin(t)*(.47+Math.abs(j)*.13)];
+   cone(tip,end,.052,.009,'bark');branches.push(end);
+  }
+ }
+ for(let i=0;i<30;i++){
+  const p=branches[(i*7)%branches.length],angle=i*2.35;
+  ellipse(p[0]+Math.cos(angle)*.21,p[1]+.06+(i%4)*.075,p[2]+Math.sin(angle)*.21,
+  .53+(i%4)*.045,.55+((i*7)%5)*.035,.5+((i*3)%4)*.04,'leaves');
+ }
+ // Geometric stone walls + columns and raised paving.
+ box(-5.8,0,-3.5,-5.35,1.35,4.9,'stone');
+ box(-5.8,0,-3.5,5.4,1.1,-3.06,'stone');
+ box(4.85,0,-3.4,5.35,1.2,-1.15,'stone');
+ box(4.85,0,2.65,5.35,1.2,4.45,'stone');
+ for(let x of [-5.55,-2,1.7,5.08]){
+  box(x-.22,0,-3.73,x+.22,1.8,-2.84,'stone');
+  box(x-.35,1.72,-3.86,x+.35,1.85,-2.72,'stone');
+ }
+ // A wooden bench from analytic boxes.
+ box(1.15,.67,1.2,3.25,.85,1.85,'wood');
+ box(1.15,.85,1.73,3.25,1.7,1.89,'wood');
+ for(let x of [1.4,2.99])for(let z of [1.34,1.7])box(x-.09,0,z-.09,x+.09,.73,z+.09,'wood');
+ // Potted shrubs + additional trees, kept deliberately modest for 1 ray/pixel.
+ for(const [x,z,r] of [[3.2,-2.1,.74],[4.2,3.8,.65],[-4.5,3.4,.66]]){
+  cone([x,0,z],[x,.85,z],.12,.065,'bark');
+  for(let j=0;j<4;j++){
+   const a=j*1.57;
+   ellipse(x+Math.cos(a)*.27,1.06+(j%2)*.1,z+Math.sin(a)*.27,r*.69,r*.75,r*.69,'leaves');
+  }
+ }
+ // Person assembled from smooth ellipsoids and tapered cylinders.
+ const px=1.65,pz=-.8;
+ cone([px,.12,pz],[px,1.04,pz],.2,.23,'cloth');
+ ellipse(px,1.39,pz,.31,.49,.24,'cloth');
+ ellipse(px,1.98,pz,.19,.23,.19,'skin');
+ for(const sign of [-1,1]){
+  cone([px+sign*.17,.84,pz],[px+sign*.19,.06,pz+.05],.12,.075,'cloth');
+  cone([px+sign*.33,1.69,pz],[px+sign*.47,1.06,pz+.09],.10,.064,'skin');
+ }
+ buildBVH();
+ $('objectCount').textContent=objects.length+' primitives + plan infini';
+}
+function buildBVH(){
+ bvh=[];const ids=objects.map((_,i)=>i);
+ function make(indices){
+  const boundsMin=[Infinity,Infinity,Infinity],boundsMax=[-Infinity,-Infinity,-Infinity];
+  for(const k of indices){const o=objects[k];
+   for(let j=0;j<3;j++){boundsMin[j]=Math.min(boundsMin[j],o.min[j]);boundsMax[j]=Math.max(boundsMax[j],o.max[j]);}
+  }
+  const index=bvh.length,node={min:boundsMin,max:boundsMax,left:-1,right:-1,ids:null};
+  bvh.push(node);
+  if(indices.length<=4){node.ids=indices;return index;}
+  const sizes=boundsMax.map((v,i)=>v-boundsMin[i]),axis=sizes.indexOf(Math.max(...sizes));
+  indices.sort((a,b)=>(objects[a].min[axis]+objects[a].max[axis])-(objects[b].min[axis]+objects[b].max[axis]));
+  const mid=indices.length>>1;
+  node.left=make(indices.slice(0,mid));node.right=make(indices.slice(mid));
+  return index;
+ }
+ bvhRoot=make(ids);
+}
+const bvhStack=new Int32Array(128),rayResult={id:0,t:Infinity};
+function hitBounds(node,ox,oy,oz,dx,dy,dz,nearLimit){
+ let lo=0,hi=nearLimit;
+ const origin=[ox,oy,oz],dir=[dx,dy,dz];
+ for(let i=0;i<3;i++){
+  if(Math.abs(dir[i])<1e-12){if(origin[i]<node.min[i]||origin[i]>node.max[i])return false;continue;}
+  let a=(node.min[i]-origin[i])/dir[i],b=(node.max[i]-origin[i])/dir[i];
+  if(a>b){const swap=a;a=b;b=swap;}
+  lo=Math.max(lo,a);hi=Math.min(hi,b);
+  if(hi<lo)return false;
+ }
+ return true;
+}
+function hitPrimitive(o,ox,oy,oz,dx,dy,dz,maxT){
+ stats.tests++;
+ let t=Infinity;
+ if(o.type==='ellipse'){
+  const px=(ox-o.cx)/o.rx,py=(oy-o.cy)/o.ry,pz=(oz-o.cz)/o.rz;
+  const vx=dx/o.rx,vy=dy/o.ry,vz=dz/o.rz;
+  const A=vx*vx+vy*vy+vz*vz,B=px*vx+py*vy+pz*vz,C=px*px+py*py+pz*pz-1;
+  const delta=B*B-A*C;
+  if(delta>=0){const sq=Math.sqrt(delta),q=(-B-sq)/A;t=q>.0001?q:(-B+sq)/A;}
+ }else if(o.type==='box'){
+  let lo=-Infinity,hi=Infinity;
+  for(let j=0;j<3;j++){
+   const origin=j===0?ox:j===1?oy:oz,v=j===0?dx:j===1?dy:dz;
+   if(Math.abs(v)<1e-12){if(origin<o.min[j]||origin>o.max[j])return Infinity;continue;}
+   const inv=1/v,a=(o.min[j]-origin)*inv,b=(o.max[j]-origin)*inv;
+   lo=Math.max(lo,Math.min(a,b));hi=Math.min(hi,Math.max(a,b));
+   if(lo>hi)return Infinity;
+  }
+  t=lo>.0001?lo:hi;
+ }else if(o.type==='cone'){
+  const px=ox-o.a[0],py=oy-o.a[1],pz=oz-o.a[2];
+  const z=px*o.nx+py*o.ny+pz*o.nz,dzAxis=dx*o.nx+dy*o.ny+dz*o.nz;
+  const qx=px-z*o.nx,qy=py-z*o.ny,qz=pz-z*o.nz;
+  const vx=dx-dzAxis*o.nx,vy=dy-dzAxis*o.ny,vz=dz-dzAxis*o.nz;
+  const r0=o.r0+o.k*z,rD=o.k*dzAxis;
+  const A=vx*vx+vy*vy+vz*vz-rD*rD;
+  const B=qx*vx+qy*vy+qz*vz-r0*rD;
+  const C=qx*qx+qy*qy+qz*qz-r0*r0;
+  if(Math.abs(A)>1e-12){
+   const discriminant=B*B-A*C;
+   if(discriminant>=0){
+    const sq=Math.sqrt(discriminant),t0=(-B-sq)/A,t1=(-B+sq)/A;
+    for(const possible of [t0,t1]){
+     const height=z+possible*dzAxis;
+     if(possible>.0001&&possible<t&&height>=0&&height<=o.len)t=possible;
+    }
+   }
+  }
+  // Flat end-caps: smooth closed mathematical objects.
+  if(Math.abs(dzAxis)>1e-12){
+   for(const [height,radius] of [[0,o.r0],[o.len,o.r1]]){
+    const possible=(height-z)/dzAxis;
+    if(possible>.0001&&possible<t){
+     const qx2=qx+vx*possible,qy2=qy+vy*possible,qz2=qz+vz*possible;
+     if(qx2*qx2+qy2*qy2+qz2*qz2<=radius*radius)t=possible;
+    }
+   }
+  }
+ }
+ return t>.0001&&t<maxT?t:Infinity;
+}
+function traceClosest(ox,oy,oz,dx,dy,dz,result,track=true){
+ stats.rays+=track?1:0;
+ let near=dy<-.000001?-oy/dy:Infinity,id=(near>.0001?1:0);
+ if(id===0)near=Infinity;
+ if(bvhRoot>=0){
+  let top=0;bvhStack[top++]=bvhRoot;
+  while(top>0){
+   const ni=bvhStack[--top],node=bvh[ni];
+   if(track)stats.nodes++;
+   if(!hitBounds(node,ox,oy,oz,dx,dy,dz,near))continue;
+   if(node.ids){
+    for(const item of node.ids){
+     const t=hitPrimitive(objects[item],ox,oy,oz,dx,dy,dz,near);
+     if(t<near){near=t;id=item+2;}
+    }
+   }else{
+    bvhStack[top++]=node.left;bvhStack[top++]=node.right;
+   }
+  }
+ }
+ result.id=id;result.t=near;
+ if(track){if(id){stats.hits++}else{stats.sky++}}
+ return id;
+}
+function normalAt(id,x,y,z){
+ if(id===1)return [0,1,0];
+ const o=objects[id-2];
+ if(o.type==='ellipse')return norm((x-o.cx)/(o.rx*o.rx),(y-o.cy)/(o.ry*o.ry),(z-o.cz)/(o.rz*o.rz));
+ if(o.type==='box'){
+  const ds=[Math.abs(x-o.min[0]),Math.abs(x-o.max[0]),Math.abs(y-o.min[1]),Math.abs(y-o.max[1]),Math.abs(z-o.min[2]),Math.abs(z-o.max[2])];
+  const m=ds.indexOf(Math.min(...ds));return m===0?[-1,0,0]:m===1?[1,0,0]:m===2?[0,-1,0]:m===3?[0,1,0]:m===4?[0,0,-1]:[0,0,1];
+ }
+ const px=x-o.a[0],py=y-o.a[1],pz=z-o.a[2],axis=px*o.nx+py*o.ny+pz*o.nz;
+ if(axis<.0002)return [-o.nx,-o.ny,-o.nz];
+ if(axis>o.len-.0002)return [o.nx,o.ny,o.nz];
+ return norm(px-axis*o.nx-o.k*o.nx,py-axis*o.ny-o.k*o.ny,pz-axis*o.nz-o.k*o.nz);
+}
+function groundMaterial(x,z){
+ return Math.abs(x-1.2)<.82&&z>-5.1&&z<4.2?'stone':'grass';
+}
+function hash2(x,y,s){
+ let v=Math.imul((x|0)+s*1779033703,2246822507)^Math.imul((y|0)+s*3266489917,668265263);
+ v=Math.imul(v^(v>>>15),2246822507);return ((v^(v>>>13))>>>0)/4294967295;
+}
+function pack565(r,g,b){return ((clamp(r|0,0,255)>>3)<<11)|((clamp(g|0,0,255)>>2)<<5)|(clamp(b|0,0,255)>>3)}
+function procedural(id,x,y){
+ const k=id==='bark'?1:id==='leaves'?2:id==='grass'?3:id==='stone'?4:id==='wood'?5:id==='cloth'?6:7;
+ const noise=hash2(x,y,k)-.5,coarse=hash2(x>>5,y>>5,k+15)-.5;
+ let r,g,b;
+ if(id==='bark'){const fissure=Math.pow(Math.max(0,Math.sin(x*.063+Math.sin(y*.018))),14);
+   r=119+30*noise+25*coarse-65*fissure;g=85+22*noise+20*coarse-46*fissure;b=55+15*noise+16*coarse-29*fissure;}
+ else if(id==='leaves'){r=68+36*noise+20*coarse;g=141+36*noise+26*coarse;b=69+23*noise+18*coarse;}
+ else if(id==='grass'){const blade=Math.sin(x*.31+y*.19);r=91+28*noise+21*coarse+blade*9;g=132+30*noise+25*coarse+blade*13;b=67+15*noise+13*coarse;}
+ else if(id==='stone'){const joint=(x%97<3||y%83<4)?-58:0;r=178+22*noise+25*coarse+joint;g=170+20*noise+23*coarse+joint;b=150+17*noise+19*coarse+joint;}
+ else if(id==='wood'){const fiber=Math.sin(x*.13+Math.sin(y*.025));r=148+22*noise+21*coarse+fiber*19;g=100+20*noise+13*coarse+fiber*12;b=61+12*noise+11*coarse+fiber*8;}
+ else if(id==='cloth'){r=79+16*noise;g=113+18*noise;b=150+22*noise;}
+ else{r=199+12*noise;g=157+11*noise;b=130+10*noise;}
+ return pack565(r,g,b);
+}
+function buildSource(id,n){
+ const arr=new Uint16Array(n*n);
+ for(let y=0;y<n;y++){const base=y*n;for(let x=0;x<n;x++)arr[base+x]=procedural(id,x,y);}
+ return arr;
+}
+function mipDown(src,srcN,dst,firstRow,rowCount){
+ const n=srcN>>1,end=Math.min(n,firstRow+rowCount);
+ for(let y=firstRow;y<end;y++){
+  const a=y*2*srcN,b=a+srcN,k=y*n;
+  for(let x=0;x<n;x++){
+   const i=x<<1,p=src[a+i],q=src[a+i+1],r=src[b+i],t=src[b+i+1];
+   dst[k+x]=((((p>>>11)+(q>>>11)+(r>>>11)+(t>>>11)+2)>>2)<<11)|
+     (((((p>>>5)&63)+((q>>>5)&63)+((r>>>5)&63)+((t>>>5)&63)+2)>>2)<<5)|
+     (((p&31)+(q&31)+(r&31)+(t&31)+2)>>2);
+  }
+ }
+ return end;
+}
+function makeMips(id,n){
+ const chain=[{size:n,data:buildSource(id,n)}];
+ while(n>8){const dst=new Uint16Array((n>>1)**2);mipDown(chain[chain.length-1].data,n,dst,0,n>>1);n>>=1;chain.push({size:n,data:dst});}
+ return {id,levels:chain,size:chain[0].size};
+}
+function initMaterials(){
+ for(const mat of ['bark','leaves','grass','stone','wood','cloth','skin'])
+  materials.set(mat,makeMips(mat,mat==='skin'||mat==='cloth'?128:256));
+ $('textureStatus').textContent='RGB565 : pyramides de secours prêtes, écorce 4096² en préparation';
+ // The full 4096² bark texture uses a progressive generation job instead of a main-thread stall.
+ highTexture={row:0,source:new Uint16Array(4096*4096),levels:[],stage:0,down:null,downRow:0};
+ requestAnimationFrame(advanceHighTexture);
+}
+let highTexture=null;
+function advanceHighTexture(){
+ const h=highTexture;if(!h)return;
+ const t0=performance.now();
+ if(h.stage===0){
+  while(h.row<4096){
+   const off=h.row*4096;
+   for(let x=0;x<4096;x++)h.source[off+x]=procedural('bark',x,h.row);
+   h.row++;
+   if(performance.now()-t0>3)break;
+  }
+  if(h.row===4096){h.levels.push({size:4096,data:h.source});h.stage=1;}
+ }else{
+  const last=h.levels[h.levels.length-1];
+  if(last.size>8){
+   if(!h.down){h.down=new Uint16Array((last.size>>1)**2);h.downRow=0;}
+   do{h.downRow=mipDown(last.data,last.size,h.down,h.downRow,12)}
+    while(h.downRow<(last.size>>1)&&performance.now()-t0<3);
+   if(h.downRow===last.size>>1){h.levels.push({size:last.size>>1,data:h.down});h.down=null;}
+  }
+  if(h.levels.length===10){
+   materials.set('bark',{id:'bark',size:4096,levels:h.levels});
+   highTexture=null;preparedTexHigh=true;
+   $('textureStatus').textContent='Pyramide écorce 4096 → 8 : 10 niveaux RGB565 disponibles';
+   // Mip selection changes when switching source size, so recompute one image.
+   if(!renderJob)invalidateImage('Texture 4096² prête');
+   return;
+  }
+ }
+ if(!renderJob)$('textureStatus').textContent=h.stage===0?'Écorce 4096² : '+Math.floor(100*h.row/4096)+' %':
+   'Écorce 4096² : '+h.levels.length+' / 10 mipmaps prêts';
+ requestAnimationFrame(advanceHighTexture);
+}
+function sampleTex(tex,u,v,footprint,filter,mipMode,debug){
+ let lod=mipMode==='auto'?Math.log2(Math.max(1,footprint)):Math.log2(tex.size/Number(mipMode));
+ lod=clamp(lod,0,tex.levels.length-1);
+ let lo=Math.floor(lod),hi=Math.min(tex.levels.length-1,lo+1),mix=lod-lo;
+ if(filter!=='trilinear'){lo=Math.round(lod);hi=lo;mix=0;}
+ const chosen=tex.levels[lo],activeIndex=mipSizes.indexOf(chosen.size);
+ if(activeIndex>=0)stats.mips[activeIndex]++;
+ if(debug)return palette[Math.max(0,activeIndex)];
+ const color=(level)=>{
+  const n=level.size,mask=n-1,data=level.data;
+  if(filter==='nearest'){
+   stats.texels++;return data[((Math.floor(v*n)&mask)*n)+(Math.floor(u*n)&mask)];
+  }
+  const fxp=u*n-.5,fyp=v*n-.5,x=Math.floor(fxp),y=Math.floor(fyp);
+  const fx=fxp-x,fy=fyp-y,x0=x&mask,y0=y&mask,x1=(x0+1)&mask,y1=(y0+1)&mask;
+  const a=data[y0*n+x0],b=data[y0*n+x1],c=data[y1*n+x0],d=data[y1*n+x1],w00=(1-fx)*(1-fy),w10=fx*(1-fy),w01=(1-fx)*fy,w11=fx*fy;
+  stats.texels+=4;
+  const r=((a>>>11)*w00+(b>>>11)*w10+(c>>>11)*w01+(d>>>11)*w11)*255/31;
+  const g=(((a>>>5)&63)*w00+((b>>>5)&63)*w10+((c>>>5)&63)*w01+((d>>>5)&63)*w11)*255/63;
+  const bl=((a&31)*w00+(b&31)*w10+(c&31)*w01+(d&31)*w11)*255/31;
+  return ((Math.round(r/255*31)<<11)|(Math.round(g/255*63)<<5)|Math.round(bl/255*31))&65535;
+ };
+ const a=color(chosen),b=hi!==lo?color(tex.levels[hi]):a;
+ const red=((a>>>11)&31)*(1-mix)+((b>>>11)&31)*mix;
+ const green=((a>>>5)&63)*(1-mix)+((b>>>5)&63)*mix;
+ const blue=(a&31)*(1-mix)+(b&31)*mix;
+ return (0xff000000|(Math.round(blue*255/31)<<16)|(Math.round(green*255/63)<<8)|Math.round(red*255/31))>>>0;
+}
+
 /*__V9_RENDER__*/
 </script>
 </body></html>
