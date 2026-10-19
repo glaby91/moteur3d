@@ -1,0 +1,1156 @@
+<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Moteur 3D V8 — Textures RGB565 et mipmaps 8 à 4096</title>
+<style>
+:root{color-scheme:dark;--bg:#0b131e;--panel:#152436;--border:#31485e;--ink:#eef5fc;--mute:#9bb2c8;--accent:#65d2e4;--green:#71d8a8;--amber:#f2bb65;--purple:#ab9aed}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.4 system-ui,-apple-system,'Segoe UI',sans-serif}header{padding:15px 19px;border-bottom:1px solid #24374a;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}header h1{font-size:21px;margin:0 0 3px;letter-spacing:-.5px}header p{margin:0;color:var(--mute)}button,select,input{font:inherit}button,select{border-radius:6px;background:#243d57;border:1px solid #52718e;color:var(--ink);padding:7px 11px}button{cursor:pointer}button:hover{background:#30516e}button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #8cdbea}button.primary{background:#24675f;border-color:#55b29d;font-weight:650}button.primary:hover{background:#318476}button.danger{background:#65433f;border-color:#ab7266}button:disabled{opacity:.5;cursor:default}label{display:flex;gap:7px;align-items:center;white-space:nowrap}input[type=range]{accent-color:var(--accent);width:116px}input[type=checkbox]{accent-color:#69c9b6}.page{padding:12px 14px 25px;max-width:1670px;margin:auto}.views{display:grid;grid-template-columns:1fr 1fr;gap:12px}.panel{background:var(--panel);border:1px solid var(--border);border-radius:9px;min-width:0;padding:12px}.panel h2{font-size:14px;margin:0 0 9px;display:flex;align-items:center;justify-content:space-between;gap:6px}.panel small,.muted{color:var(--mute)}canvas.view{width:100%;height:auto;aspect-ratio:4 / 3;border-radius:5px;background:#132538;display:block}.canvas-foot{margin-top:7px;display:flex;justify-content:space-between;gap:10px;color:var(--mute);font-size:11px}.controlbar{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:12px}.section-title{font-size:14px;font-weight:700;margin:0 0 9px}.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:12px}.kpis{display:grid;grid-template-columns:repeat(6,minmax(75px,1fr));gap:8px}.kpi{padding:10px;background:#21364a;border-radius:7px;border:1px solid #30495e}.kpi b{display:block;font-variant-numeric:tabular-nums;font-size:20px;line-height:1.15}.kpi span{display:block;font-size:10px;color:var(--mute);margin-top:4px}.barrow{display:grid;grid-template-columns:110px 1fr 55px;align-items:center;gap:8px;margin:7px 0;font-size:12px}.track{height:11px;border-radius:6px;background:#283b4e;overflow:hidden}.fill{height:100%;background:#6cc8d9;width:0;transition:width .2s}.barrow .value{text-align:right;color:#b9d2e5;font-variant-numeric:tabular-nums}.buffers{display:grid;grid-template-columns:repeat(16,minmax(0,1fr));gap:4px}.slot{padding:5px 0;font-size:10px;line-height:1;text-align:center;border-radius:4px;background:#283647;border:1px solid #344658;color:#afc3d8;position:relative}.slot.history{background:#3b405e;border-color:#63618f;color:#fff}.slot.display{background:#216451;border-color:#55c8a4;color:#fff}.slot.pred2{background:#245b85;border-color:#60b6e1;color:#fff}.slot.pred4{background:#73562d;border-color:#dda656;color:#fff}.slot.pred5{background:#613d51;border-color:#be7b9f;color:#fff}.futures{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px;margin-top:10px}.future{background:#1c3044;border:1px solid #344e64;padding:5px;border-radius:6px;min-width:0}.future canvas{width:100%;display:block;aspect-ratio:4/3;background:#172638;border-radius:3px}.future .top{display:flex;justify-content:space-between;font-size:11px;margin-bottom:5px;font-weight:650}.future .sub{font-size:10px;color:var(--mute);margin-top:4px;min-height:28px}.log{min-height:39px;color:#bfdfec;background:#182c3e;padding:8px;border-radius:6px;border:1px solid #2f4b63}.notice{font-size:11px;line-height:1.5;color:#aabfd2;margin:9px 0 0}.legend{display:flex;gap:10px;flex-wrap:wrap;font-size:10px;color:var(--mute);margin-top:8px}.dot{display:inline-block;height:8px;width:8px;border-radius:2px;margin-right:4px}.statline{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;font-size:12px;color:#c5d7e6}.statline strong{color:#f1cb86;font-variant-numeric:tabular-nums}#comparison{white-space:pre-line;color:#bcd5e3;font-size:12px;line-height:1.6}.status{padding:4px 9px;border-radius:99px;border:1px solid #56768c;color:#aed9de;font-size:11px}.hint{font-size:11px;color:var(--mute)}@media(max-width:1150px){.grid-3{grid-template-columns:1fr 1fr}.grid-3>.panel:last-child{grid-column:1/-1}.kpis{grid-template-columns:repeat(3,1fr)}}@media(max-width:760px){.views,.grid-3{grid-template-columns:1fr}.grid-3>.panel:last-child{grid-column:auto}.buffers{grid-template-columns:repeat(8,1fr)}.futures{grid-template-columns:repeat(3,1fr)}header h1{font-size:18px}.kpis{grid-template-columns:repeat(2,1fr)}}
+</style></head><body>
+<header><div><h1>◈ Moteur 3D V8 — Textures adaptatives · Z caméra</h1><p>Cour interactive · textures RGB565 8→4096 · LOD automatique · deux Z-buffers</p></div><div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap"><button id="popout">↗ Fenêtre séparée</button><span class="status" id="runState">Démarrage…</span></div></header>
+<div class="page">
+<div class="views"><section class="panel"><h2><span>01 / Image vue par la caméra</span><small id="renderBadge">Rendu en cours…</small></h2><canvas class="view" id="main" width="640" height="480"></canvas><div class="canvas-foot"><span id="frameStatus">Image de référence</span><span id="imageCounter">—</span></div></section>
+<section class="panel"><h2><span>02 / Scène extérieure — géométrie et anticipation</span><small>10 images/s</small></h2><canvas class="view" id="outside" width="640" height="480"></canvas><div class="canvas-foot"><span>Œil · écran · arbre · personnage · source mobile</span><span>Trajectoire N à N+5</span></div></section></div>
+<section class="panel" style="margin-top:12px"><h2>V8 — Textures adaptatives, arbre détaillé et ombres diffuses</h2><p id="densityStatus" class="statline">Subdivision en cours…</p><p class="notice">La forme de l’arbre est réellement plus riche : tronc et branches courbes et effilées, 32 volumes de feuillage ellipsoïdaux 14×7. Les autres objets et le personnage conservent leur subdivision V6. Les ombres projetées disposent d’un filtre PCF 4×4 réglable. L'option supplémentaire adoucit seulement la couleur aux frontières des objets ; elle ne modifie pas le Z-buffer et ne remplace pas un MSAA matériel. La simulation reste à une seule lumière. En cas de cadence trop basse, choisir 320 × 240 pour comparer les coûts de rendu.</p></section><section class="panel" style="margin-top:12px"><h2>Commandes de la simulation</h2><div class="controlbar">
+<label>Mode <select id="mode"><option value="zcam" selected>V8 — Z caméra · textures + mipmaps</option><option value="stable">V4 — Stable (tri moyen)</option><option value="tiles">V4 — Tuiles anti-stuttering</option><option value="temporal" disabled>Reprojection Z (désactivée pour collision)</option><option value="classic">Classique (tout recalculer)</option></select></label>
+<label>Résolution <select id="resolution"><option value="320x240">320 × 240</option><option value="640x480" selected>640 × 480</option><option value="800x600">800 × 600</option></select></label>
+<label>Anticipation <select id="horizon"><option value="1">1 image</option><option value="2">2 images</option><option value="3">3 images</option><option value="4">4 images</option><option value="5" selected>5 images</option></select></label>
+<label style="display:none">Image clé Z tous les <select id="keyEvery"><option value="2">2 affichages</option><option value="3" selected>3 affichages</option><option value="4">4 affichages</option></select></label>
+<label><input type="checkbox" id="orbit" checked> Rotation caméra</label>
+<label><input type="checkbox" id="sun" checked> Lumière mobile</label>
+<label><input type="checkbox" id="shadows" checked> Ombres Z lumière</label><label>Shadow-map <select id="shadowResolution"><option value="128">128 × 128 rapide</option><option value="192" selected>192 × 192 normal</option><option value="256">256 × 256 qualité</option></select></label><label><input type="checkbox" id="stableShadows" checked> Ombres stabilisées (interpolation Z)</label><label>Douceur ombres <select id="shadowSoftness"><option value="1.3">Faible</option><option value="2.3" selected>Douces</option><option value="3.2">Très douces</option></select></label><label><input type="checkbox" id="contourAA" checked> Adoucir aussi les silhouettes</label>
+<label><input type="checkbox" id="temporalLight" checked> Lumière mémorisée N+1 à N+5</label>
+<label><input type="checkbox" id="cacheStatic" checked> Cache image si caméra + acteur fixes</label>
+<label><input type="checkbox" id="overview" checked> Vue droite</label>
+<label>Préparation complète <select id="tileBudget" disabled><option value="0" selected>Désactivée dans le rendu temps réel</option></select></label>
+<label><input type="checkbox" id="texturesEnabled" checked> Textures RGB565</label>
+<label>Filtrage <select id="textureFilter"><option value="nearest">Plus proche</option><option value="bilinear">Bilinéaire</option><option value="trilinear" selected>Trilinéaire</option></select></label>
+<label><input type="checkbox" id="mipDebug"> Afficher les niveaux mip par couleur</label>
+<label><input type="checkbox" id="tileOverlay"> Montrer grille 16×16</label>
+<label><input type="checkbox" id="tileReuse" checked> Réutiliser zones inchangées</label>
+<label>Vitesse personnage <input id="speed" type="range" min="0" max="100" value="55"><span id="speedLabel">55 %</span></label>
+<button id="reverse" class="danger">↶ Inverser sa direction</button>
+<button id="turn">↻ Changer de parcours</button>
+<button id="collisionTest" class="danger">▣ Tester le mur</button>
+<button id="patrol">↗ Reprendre la patrouille</button>
+<label><input type="checkbox" id="autoWalk" checked> Patrouille automatique</label>
+<button id="pause">⏸ Pause</button>
+<button id="reset">↻ Réinitialiser</button>
+<button id="compare" class="primary">Comparer les modes</button><button id="benchmarkTiles" class="primary">Benchmark sans présentation vidéo</button>
+</div><p class="notice">OMBRES V3 : shadow-map directionnelle réelle et unique pour les ombres du sol, des objets et du personnage. STABILITÉ : chaque triangle (y compris le personnage) est projeté depuis la même caméra. La lumière et sa direction sont enregistrées par triangle pour les cinq images futures ; les valeurs N et N+1 sont interpolées sans décaler l’image. La collision est contrôlée dans le plan XZ contre les volumes du décor. Le personnage est inclus dans le tri de profondeur commun aux murs. Commandes WASD / flèches pour marcher manuellement. Pré-rendu corrigé : lorsque la caméra ou la lumière bougent, retour immédiat au rendu géométrique stable ; aucune préconstruction complète simultanée au rafraîchissement. Les tuiles 16×16 sont réutilisées lorsque la caméra et la lumière sont fixes, seules les tuiles occupées par le personnage sont actualisées. La préparation d’images futures complètes reste disponible dans le benchmark mais pas dans la boucle temps réel. Le moteur conserve les prévisions lumineuses et les mouvements N+1 à N+5. La reprojection Z reste désactivée.</p></section>
+<section class="panel" style="margin-top:12px"><h2>Profil du rendu adaptatif — tuiles 16 × 16</h2>
+<div class="kpis" style="grid-template-columns:repeat(auto-fit,minmax(125px,1fr))">
+<div class="kpi"><b id="tileStatus">—</b><span>Images futures entièrement préparées (désactivées)</span></div>
+<div class="kpi"><b id="tileDone">0</b><span>Tuiles calculées en avance / image</span></div>
+<div class="kpi"><b id="tileSync">0</b><span>Tuiles terminées à l’échéance</span></div>
+<div class="kpi"><b id="tileReused">0</b><span>Tuiles copiées valides / image</span></div>
+<div class="kpi"><b id="tileHit">0 %</b><span>Images futures utilisées</span></div>
+<div class="kpi"><b id="tilePrepTime">0 ms</b><span>Coût pré-rendu / image</span></div><div class="kpi"><b id="jankCount">0</b><span>Images espacées de plus de 30 ms</span></div><div class="kpi"><b id="jankP95">—</b><span>Intervalle inter-images P95</span></div></div>
+<div id="tileProgress" class="statline" style="font-variant-numeric:tabular-nums">N+1 : — · N+2 : — · N+3 à N+5 : prévisions légères</div>
+<div class="notice">Les tuiles complètes sont réellement tracées dans des images de travail. Les tuiles encore manquantes sont finies à l’échéance ; le compteur mesure <strong>également</strong> ce coût, pour ne pas confondre déplacement de charge et économie réelle. Réutilisation stricte si caméra et lumière identiques, sans déplacement approximatif des pixels.</div></section>
+<section class="panel" style="margin-top:12px"><h2>Lumière unique — carte de profondeur Z</h2>
+<div class="views" style="grid-template-columns:1fr 2fr;align-items:start"><div>
+<canvas id="shadowDepthPreview" width="192" height="192" style="width:100%;max-width:220px;aspect-ratio:1;background:#060b11;border:1px solid #44647d;border-radius:6px"></canvas>
+<p class="notice">Vue de profondeur depuis la lumière. Noir : absence de géométrie projetée.</p></div><div>
+<div class="statline"><span>Source active : <strong>1</strong></span><span>Limites futures : <strong>32 sources / 8 par tuile / 4 ombres dynamiques</strong></span></div>
+<div class="statline"><span>Reconstructions Z : <strong id="shadowBuilds">0</strong></span><span>Cartes de décor construites : <strong id="shadowStaticBuilds">0</strong></span><span>Tests Z cumulés : <strong id="shadowTests">0</strong></span></div>
+<p class="notice" id="shadowState">Initialisation de la carte Z...</p>
+<p class="notice">Lumière directionnelle mobile : deux cartes Z de la même lumière (aux directions voisines), dont les visibilités sont interpolées sans saut brutal. Le décor est mémorisé et la carte suivante se prépare progressivement. Les surfaces et le sol interrogent réellement ce Z-buffer. Les ombres projetées approximatives ont été supprimées.</p>
+<p class="notice"><strong>Limite :</strong> le rendu caméra reste en Canvas 2D avec tri moyen des triangles, sans Z-buffer caméra. Le cache partiel des tuiles doit être invalidé quand un objet mobile peut modifier son ombre, afin de ne pas laisser d'ombres fantômes.</p></div></div></section>
+<section class="panel" style="margin-top:12px"><h2>V5 — Tampon Z caméra (rendu opaque correct)</h2><div class="views" style="grid-template-columns:1fr 2fr;align-items:start">
+<div><canvas id="zCameraPreview" width="160" height="120" style="width:100%;max-width:220px;aspect-ratio:4/3;background:#060b11;border:1px solid #47647b;border-radius:6px"></canvas><p class="notice">Profondeur caméra : blanc proche, noir vide.</p></div>
+<div><p class="statline" id="zCameraStats">Initialisation du Z caméra…</p><p class="notice">Auto-test occultation : <strong id="zSelfTest">Non exécuté</strong></p><p class="notice">Le sol, les murs, les arbres et le personnage sont rasterisés en pixels avec une profondeur interpolée et un test Z exact. Le triangle le plus proche gagne, indépendamment de l’ordre des faces. Une seule lumière conserve les ombres Z stabilisées V4.</p><p class="notice"><strong>Référence visuelle :</strong> rasterisation CPU complète sans optimisation tuilée ni MSAA. Choisir « V4 — Tuiles » pour comparer les temps et l’image. À résolution supérieure, ce mode peut coûter davantage de calcul.</p></div></div></section>
+<section class="panel" style="margin-top:12px"><h2>V8 — Textures et mipmaps 8 × 8 à 4096 × 4096</h2>
+<p class="notice">Texture de démonstration : écorce de l'arbre. Toutes les résolutions sont réellement stockées en RGB565 et utilisées par le rendu dès que leur génération est terminée. Le choix s'appuie sur l'empreinte UV projetée en pixels et l'inclinaison de la surface, pas sur la seule distance en mètres.</p>
+<div class="statline"><span id="textureBuildStatus">Préparation des textures…</span><span id="textureMemory">Mémoire : —</span><span id="textureActiveMip">Mip dominant : —</span><span id="textureSampleStats">Échantillons : —</span></div>
+<div id="mipGallery" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(76px,1fr));gap:8px;margin-top:12px">
+<div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview8" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>8²</div><div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview16" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>16²</div><div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview32" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>32²</div><div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview64" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>64²</div><div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview128" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>128²</div><div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview256" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>256²</div><div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview512" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>512²</div><div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview1024" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>1024²</div><div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview2048" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>2048²</div><div style="text-align:center;font-size:11px;color:#a8c3d8"><canvas id="mipPreview4096" width="64" height="64" style="display:block;width:100%;max-width:92px;margin:auto;aspect-ratio:1;background:#172638;border:1px solid #3b5c76;image-rendering:pixelated"></canvas>4096²</div>
+</div>
+<p class="notice">Au départ, une texture provisoire est disponible. La texture 4096² et sa pyramide sont générées en plusieurs étapes pour éviter de bloquer volontairement l'affichage. Les autres matériaux utilisent des tailles adaptées. RGB565 = 2 octets par texel ; la couleur finale reste un framebuffer RGBA.</p></section>
+<section class="panel" style="margin-top:12px"><h2>Performances — mesures glissantes</h2><div class="kpis"><div class="kpi"><b id="fps">—</b><span>FPS réels navigateur</span></div><div class="kpi"><b id="ms">—</b><span>ms calcul / affichage</span></div><div class="kpi"><b id="drawms">—</b><span>ms tracé géométrie</span></div><div class="kpi"><b id="tri">—</b><span>triangles tracés / image</span></div><div class="kpi"><b id="calls">—</b><span>commandes de tracé / image</span></div><div class="kpi"><b id="ops">—</b><span>opérations 3D estimées</span></div></div>
+<div class="grid-3"><section><h3 class="section-title">Temps par poste (ms/image)</h3><div id="bars"></div><div id="bottleneck" class="log" style="margin-top:12px">Initialisation du profilage…</div></section>
+<section><h3 class="section-title">Prédictions & travail évité</h3><div class="statline"><span>Prévisions validées : <strong id="valid">0</strong></span><span>Invalidées : <strong id="invalid">0</strong></span></div><div class="statline"><span>Faces du personnage réutilisées : <strong id="faceReuse">0</strong></span></div>
+<div class="statline"><span>Éclairages réutilisés / image : <strong id="lightHits">0</strong></span><span>Échantillons lumineux prévus : <strong id="lightSamples">0</strong></span></div>
+<div class="statline"><span>Prévisions lumineuses reprises : <strong id="lightReuseForecast">0</strong></span><span>Nouvelles prévisions : <strong id="lightNewForecast">0</strong></span></div>
+<div class="statline"><span>Recalculs exacts luminosité (cumul) : <strong id="lightExact">0</strong></span><span>Fonds statiques réemployés : <strong id="staticReuse">0</strong></span></div>
+<div class="statline"><span>Direction future de la lumière : <strong id="lightDir">—</strong></span></div><div class="statline"><span>Images réellement reprojetées : <strong id="reused">0</strong></span><span>Images complètes : <strong id="full">0</strong></span></div><div class="statline"><span>Triangles décor non retracés* : <strong id="saved">0</strong></span></div><div class="statline"><span>Écritures RGB565 : <strong id="pixelwrites">0</strong></span></div><div class="statline"><span>Lectures RGB565 : <strong id="pixelreads">0</strong></span></div><p class="notice">*Uniquement dans le mode expérimental Z, hors calcul du tampon de profondeur et correction des pixels découverts. En mode stable, la géométrie est recalculée et nous ne prétendons pas économiser le tracé.</p></section>
+<section><h3 class="section-title">Comparaison contrôlée</h3><div id="comparison" class="log">Clique sur « Comparer les modes » pour mesurer la référence et la construction stable sur cette machine. Les valeurs reflètent cette machine.</div><p class="notice">Les « opérations » restent une estimation analytique (transformations, comparaisons et sommets), pas des instructions CPU mesurées. Canvas effectue un travail interne non comptabilisé. En mode V5, la caméra dispose maintenant d'un vrai Z-buffer par pixel. Les modes hérités V4 conservent le tri Canvas et permettent de comparer les deux algorithmes. Les collisions sont géométriques et indépendantes de cet ordre de dessin.</p></section></div></section>
+<div class="grid-3"><section class="panel"><h2>32 framebuffers — mémoire temporelle</h2><div id="buffers" class="buffers"></div><div class="legend"><span><i class="dot" style="background:#3b405e"></i>Historique (26)</span><span><i class="dot" style="background:#216451"></i>Image affichée (1)</span><span><i class="dot" style="background:#245b85"></i>Prévisions détaillées (2)</span><span><i class="dot" style="background:#73562d"></i>Prévisions légères (2)</span><span><i class="dot" style="background:#613d51"></i>Bruit N+5 (1)</span></div><p class="notice" id="memory">32 × RGB565 : calcul en cours…</p></section>
+<section class="panel"><h2>5 images futures — degrés de préparation</h2><div class="futures" id="futurecards"></div><p class="notice">Chaque prévision conserve une intensité et une direction lumineuse par triangle. Les miniatures sont indicatives : les zones bruitées ne sont jamais affichées comme des pixels fiables.</p></section>
+<section class="panel"><h2>Diagnostic, collisions et validation</h2><div class="log" id="diagnostic">Construction de la scène…</div><div class="statline"><span>Triangles décor : <strong id="treeCount">—</strong></span><span>Personnage : <strong id="actorCount">—</strong></span></div><div class="statline"><span>Collisions physiques : <strong id="collisions">0</strong></span><span>Statut : <strong id="collisionState">Libre</strong></span></div><div class="statline"><span>Obstacles solides : <strong id="obstacleCount">0</strong></span><span>Parcours : <strong id="walkState">Patrouille</strong></span></div><div class="statline"><span>Angle caméra : <strong id="camAngle">—</strong></span><span>Lumière : <strong id="sunPos">—</strong></span></div><div class="statline"><span>Triangles totaux : <strong id="totalTris">—</strong></span></div><div class="statline"><span>Cadence simulation : <strong>30 Hz</strong></span><span>Vue extérieure : <strong>10 Hz</strong></span></div><p class="notice">32 buffers couleur RGB565 sont réservés ; les 5 prévisions portent en plus des tableaux Float32 de luminosité et de direction par triangle (métadonnées, non images complètes). Les instructions CPU exactes ne sont pas comptables en JavaScript. Le balayage vidéo n’est pas simulé.</p></section></div>
+</div>
+<script>
+'use strict';
+const $=id=>document.getElementById(id), canvas=$('main'),ctx=canvas.getContext('2d',{alpha:false}),out=$('outside'),og=out.getContext('2d',{alpha:false});
+let W=640,H=480,background=document.createElement('canvas'),bg=background.getContext('2d',{alpha:false}),baseYaw=0,baseLight=0,baseReady=false,baseCamera=null,baseDepth=null,basePixels=null,reprojectColors=null,reprojectDepth=null,debugHoles=0,debugReprojectionPixels=0;
+let mode='zcam',horizon=5,keyEvery=3,orbitEnabled=true,sunEnabled=true,shadowsEnabled=true,overviewEnabled=true,paused=false,temporalLightEnabled=true,cacheStaticEnabled=true;
+let frame=0,simStep=0,simAccum=0,lastClock=performance.now(),lastUi=0,lastOverview=0,lastFps=performance.now(),fpsCounter=0,fps=0;
+let time=0,yaw=3.34,solar=0,actorSpeed=.95;
+const actorRadius=.26;
+const routeA=[[.8,-2.7],[2.1,-3.5],[4.5,-3.3],[5.2,-1.0],[5.2,4.2],[3.2,4.4],[.1,4.3],[-1.0,3.6],[-3.5,3.4],[-4.8,1.4],[-5.1,-1.8],[-4.1,-3.5],[-1.8,-3.9]];
+const routeB=[[1.3,-2.8],[2.1,-3.7],[4.8,-3.6],[5.4,-1.3],[5.4,4.35],[3.4,4.55],[.1,4.3],[-2.2,3.7],[-4.7,2.1],[-4.8,-2.5],[-2.4,-4.1]];
+let route=routeA,actor={x:.8,z:-2.7,heading:0,idx:1,walk:0},patrolDir=1,autoWalk=true,collisionTest=false,collisions=0,collisionLabel='Libre',keyDown=new Set(),waypointVariant=0;
+let solidObjects=[];
+let lastActor={x:0,z:0},predictive=[],currentForecast=null,forecastsValid=0,forecastsInvalid=0,baselineCaptured=0,facesReused=0,unaccountedForecastMs=0,forecastProjectionOps=0;
+let lastOpExact=0,lastOpSamples=0;let lightingBank=null,currentLighting=null,lightExact=0,lightSampleCount=0,lightForecastReuse=0,lightForecastNew=0,spentLighting=null,staticReuse=0,staticCacheValid=false,staticCacheYaw=0,staticCacheSolar=0,staticCacheShadow=false,staticCacheActorX=0,staticCacheActorZ=0;
+const stats={full:0,reused:0,saved:0,pixelwrites:0,pixelreads:0},rolling={},stages=[['proj','Projection'],['cameraZ','Raster Z caméra'],['texture','Textures/LOD'],['edgeAA','Contours (post AA)'],['shadowZ','Z de la lumière'],['shadow','Ombres vues caméra'],['sort','Tri des faces'],['draw','Tracé objets'],['copy','Reprojection'],['char','Personnage'],['forecast','Prévisions N+1/2'],['snap','Mémoire RGB565'],['overview','Vue extérieure'],['tiles','Pré-rendu tuiles / image']];
+const vec=(x,y,z)=>[x,y,z], add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]],sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],mul=(a,k)=>[a[0]*k,a[1]*k,a[2]*k],dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],norm=a=>{let n=Math.hypot(...a)||1;return mul(a,1/n)};
+
+// === Z-LIGHT V3 : ONE DIRECTIONAL LIGHT, EXTENSIBLE REGISTRY ================
+// Future plans: 32 active lights, max 8 per tile, 4 shadow casters.
+// Only the FIRST enabled directional light renders in this experiment.
+// Future point lights will need six cube-map depth faces (not implemented).
+const LIGHT_CAPACITY={active:32,perTile:8,shadowCasters:4};
+const lightingScene={lights:[{id:'key-01',type:'directional',enabled:true,castsShadows:true,shadowResolution:192}],shadowMaps:new Map(),staticDepthMaps:new Map()};
+let shadowResolution=192,shadowBuilds=0,shadowDepthWrites=0,shadowTests=0;
+const activeLight=()=>lightingScene.lights.find(l=>l.enabled);
+function projectLight(p,m){
+ const v=sub(p,m.center);return [(dot(v,m.right)/m.extent+.5)*(m.size-1),
+ (.5-dot(v,m.up)/m.extent)*(m.size-1),dot(v,m.forward)+m.offset];
+}
+function rasterShadow(a,b,c,m){
+ const n=m.size,d=m.depth,x0=a[0],y0=a[1],x1=b[0],y1=b[1],x2=c[0],y2=c[1];
+ const area=(x1-x0)*(y2-y0)-(y1-y0)*(x2-x0);
+ if(Math.abs(area)<1e-8)return;
+ const minX=Math.max(0,Math.floor(Math.min(x0,x1,x2))),maxX=Math.min(n-1,Math.ceil(Math.max(x0,x1,x2)));
+ const minY=Math.max(0,Math.floor(Math.min(y0,y1,y2))),maxY=Math.min(n-1,Math.ceil(Math.max(y0,y1,y2)));
+ if(minX>maxX||minY>maxY)return;const inv=1/area;
+ for(let y=minY;y<=maxY;y++)for(let x=minX;x<=maxX;x++){
+  const px=x+.5,py=y+.5;
+  const w0=((x1-px)*(y2-py)-(y1-py)*(x2-px))*inv;if(w0<0)continue;
+  const w1=((x2-px)*(y0-py)-(y2-py)*(x0-px))*inv;if(w1<0)continue;
+  const w2=1-w0-w1;if(w2<0)continue;
+  const z=w0*a[2]+w1*b[2]+w2*c[2],idx=y*n+x;
+  if(z<d[idx]){d[idx]=z;m.writes++;}
+ }
+}
+// Shadow stability: snap the light to two neighbouring *world-space* direction
+// keyframes, then interpolate VISIBILITY continuously (not pixels or 3D objects).
+// This avoids the one-frame jumps of the v3 quantized, single depth map.
+const SHADOW_ANGLE_STEP=.042;
+const SHADOW_STATIC_BUDGET_TRIS=220;
+let stableShadows=true,shadowStaticRebuilds=0,shadowCacheHits=0,shadowMapTransition=0;
+let upcomingStaticJob=null;
+function shadowPhase(L){
+ const wrapped=Math.atan2(L[2],L[0]);
+ return wrapped+Math.round((solar-wrapped)/(2*Math.PI))*2*Math.PI;
+}
+function newStaticLightMap(bin){
+ const phase=bin*SHADOW_ANGLE_STEP;
+ const forward=norm(mul(lightPos(phase),-1));
+ const right=norm(cross(forward,[0,1,0])),up=cross(right,forward),n=shadowResolution;
+ const map={key:'static/'+bin,bin,size:n,center:[0,1,0],extent:20,offset:25,forward,right,up,
+   depth:new Float32Array(n*n),triangles:shadowGeometry.length,writes:0,done:0,ready:false};
+ map.depth.fill(Infinity);return map;
+}
+function rasterStaticChunk(map,count=SHADOW_STATIC_BUDGET_TRIS){
+ const limit=Math.min(shadowGeometry.length,map.done+count);
+ for(;map.done<limit;map.done++){
+  const tr=shadowGeometry[map.done];
+  rasterShadow(projectLight(tr.v[0],map),projectLight(tr.v[1],map),projectLight(tr.v[2],map),map);
+ }
+ map.ready=map.done===mesh.length;
+ if(map.ready)shadowStaticRebuilds++;
+}
+function getStaticLightMap(id,bin){
+ const key=id+'/'+bin;
+ let stat=lightingScene.staticDepthMaps.get(key);
+ if(!stat){
+  // Complete required map synchronously only on first use. New future maps
+  // are progressively filled between frames via prepareUpcomingShadowMap().
+  stat=upcomingStaticJob&&upcomingStaticJob.key===key?upcomingStaticJob.map:newStaticLightMap(bin);
+  if(!stat.ready)rasterStaticChunk(stat,shadowGeometry.length-stat.done);
+  lightingScene.staticDepthMaps.set(key,stat);
+ }else shadowCacheHits++;
+ return stat;
+}
+function prepareUpcomingShadowMap(phase){
+ if(!stableShadows||!shadowsEnabled)return;
+ const light=activeLight();if(!light)return;
+ const nextBin=Math.floor(phase/SHADOW_ANGLE_STEP)+2, key=light.id+'/'+nextBin;
+ if(lightingScene.staticDepthMaps.has(key))return;
+ if(!upcomingStaticJob||upcomingStaticJob.key!==key)upcomingStaticJob={key,map:newStaticLightMap(nextBin)};
+ rasterStaticChunk(upcomingStaticJob.map);
+ if(upcomingStaticJob.map.ready){
+  lightingScene.staticDepthMaps.set(key,upcomingStaticJob.map);
+  upcomingStaticJob=null;
+ }
+}
+function trimShadowCache(lightId,bin){
+ for(const key of lightingScene.staticDepthMaps.keys()){
+  if(!key.startsWith(lightId+'/'))continue;
+  const entryBin=Number(key.slice(lightId.length+1));
+  if(entryBin<bin-1||entryBin>bin+2)lightingScene.staticDepthMaps.delete(key);
+ }
+ for(const key of lightingScene.shadowMaps.keys()){
+  if(key.startsWith('dynamic/')){
+   const parts=key.split('/');
+   if(parts[1]===lightId&&(Number(parts[2])<bin-1||Number(parts[2])>bin+2))
+     lightingScene.shadowMaps.delete(key);
+  }
+ }
+}
+function dynamicLightMap(id,bin,st){
+ const stateKey=[st.x,st.z,st.heading,st.walk].join('/');
+ const key='dynamic/'+id+'/'+bin+'/'+stateKey;
+ const cached=lightingScene.shadowMaps.get(key);
+ if(cached)return cached;
+ const stat=getStaticLightMap(id,bin);
+ const start=performance.now(),map={...stat,id,key,
+   depth:new Float32Array(stat.depth),writes:0,triangles:shadowGeometry.length+actorShadowGeometry.length};
+ const p=[st.x,0,st.z];
+ for(const tr of actorShadowGeometry){
+  const a=tr.v.map(x=>projectLight(manTransform(x,p,st.heading,st.walk),map));
+  rasterShadow(a[0],a[1],a[2],map);
+ }
+ map.buildMs=performance.now()-start;shadowDepthWrites+=map.writes;
+ // Only the most recent actor pose for each direction is retained.
+ const prefix='dynamic/'+id+'/'+bin+'/';
+ for(const k of lightingScene.shadowMaps.keys())if(k.startsWith(prefix))lightingScene.shadowMaps.delete(k);
+ lightingScene.shadowMaps.set(key,map);return map;
+}
+function ensureLightDepth(L,st){
+ const light=activeLight();if(!light||!light.castsShadows)return null;
+ const t0=performance.now(),phase=shadowPhase(L),bin=Math.floor(phase/SHADOW_ANGLE_STEP);
+ const blend=Math.min(1,Math.max(0,phase/SHADOW_ANGLE_STEP-bin));
+ trimShadowCache(light.id,bin);
+ const first=dynamicLightMap(light.id,bin,st);
+ const second=stableShadows?dynamicLightMap(light.id,bin+1,st):null;
+ const combined={first,second,mix:stableShadows?blend:0,
+  size:first.size,depth:first.depth,triangles:first.triangles,writes:first.writes+(second?second.writes:0),
+  buildMs:performance.now()-t0,phase,bin};
+ shadowBuilds++;shadowMapTransition=combined.mix;
+ lightingScene.shadowMaps.set(light.id,combined);
+ prepareUpcomingShadowMap(phase);
+ return combined;
+}
+
+let shadowSoftness=2.3;
+function visibilitySingle(p,m,bias=.10){
+ const vx=p[0]-m.center[0],vy=p[1]-m.center[1],vz=p[2]-m.center[2],n=m.size;
+ const x=((vx*m.right[0]+vy*m.right[1]+vz*m.right[2])/m.extent+.5)*(n-1);
+ const y=(.5-(vx*m.up[0]+vy*m.up[1]+vz*m.up[2])/m.extent)*(n-1);
+ if(x<4||y<4||x>n-5||y>n-5)return 1;
+ const z=vx*m.forward[0]+vy*m.forward[1]+vz*m.forward[2]+m.offset;
+ // World-anchored 4×4 tent-weighted PCF: continuous soft shadow edge.
+ // No image-wide blur: camera visibility and Z depth remain unmodified.
+ const ix=Math.floor(x)-1,iy=Math.floor(y)-1,d=m.depth;
+ let lit=0,weight=0,tests=0;
+ for(let j=0;j<4;j++){
+  const sy=iy+j,wy=Math.max(0,1-Math.abs(sy+.5-y)/shadowSoftness);
+  if(wy===0)continue;
+  const row=sy*n;
+  for(let k=0;k<4;k++){
+   const sx=ix+k,wx=Math.max(0,1-Math.abs(sx+.5-x)/shadowSoftness);
+   if(wx===0)continue;
+   const w=wx*wy;if(z<=d[row+sx]+bias)lit+=w;
+   weight+=w;tests++;
+  }
+ }
+ shadowTests+=tests;return weight?lit/weight:1;
+}
+
+function visibilityFromLight(p,m,bias=.10){
+ if(!m)return 1;
+ const v0=visibilitySingle(p,m.first,bias);
+ if(!m.second)return v0;
+ const v1=visibilitySingle(p,m.second,bias);
+ return v0+(v1-v0)*m.mix;
+}
+function lightFactor(brightness,point,map){
+ return .30+(brightness-.30)*visibilityFromLight(point,map,.12);
+}
+const groundZCanvas=document.createElement('canvas'),groundZCtx=groundZCanvas.getContext('2d');
+// Explicit interpolation when scaling the lower-resolution screen shadow mask.
+function drawGroundFromLightZ(target,c,map){
+ // Rasterized receivers on the ground, sampled against the LIGHT depth buffer.
+ const w=Math.max(1,Math.ceil(c.w/6)),h=Math.max(1,Math.ceil(c.h/6));
+ if(groundZCanvas.width!==w)groundZCanvas.width=w;
+ if(groundZCanvas.height!==h)groundZCanvas.height=h;
+ const img=groundZCtx.createImageData(w,h),d=img.data;
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+  const sx=(x+.5)*c.w/w,sy=(y+.5)*c.h/h;
+  const vx=(sx-c.w/2)/c.f,vy=(sy-c.h/2)/c.f;
+  const ry=c.forward[1]+vx*c.right[1]-vy*c.up[1];if(ry>=-.001)continue;
+  const t=(-.035-c.eye[1])/ry;if(t<=0)continue;
+  const px=c.eye[0]+t*(c.forward[0]+vx*c.right[0]-vy*c.up[0]);
+  const pz=c.eye[2]+t*(c.forward[2]+vx*c.right[2]-vy*c.up[2]);
+  if(Math.abs(px)>13||Math.abs(pz)>13)continue;
+  const occlusion=1-visibilityFromLight([px,.016,pz],map,.085);
+  if(occlusion<=0)continue;
+  const j=4*(y*w+x);d[j]=24;d[j+1]=33;d[j+2]=26;d[j+3]=Math.round(125*occlusion);
+ }
+ groundZCtx.putImageData(img,0,0);target.save();target.imageSmoothingEnabled=true;target.imageSmoothingQuality='high';target.drawImage(groundZCanvas,0,0,c.w,c.h);target.restore();
+}
+function updateShadowPreview(){
+ const light=activeLight(),map=light&&lightingScene.shadowMaps.get(light.id);
+ if(!map)return;
+ const cv=$('shadowDepthPreview'),c=cv.getContext('2d'),n=map.size;
+ if(cv.width!==n||cv.height!==n){cv.width=n;cv.height=n}
+ const im=c.createImageData(n,n),d=im.data;let min=Infinity,max=-Infinity;
+ for(const z of map.depth)if(Number.isFinite(z)){if(z<min)min=z;if(z>max)max=z}
+ const scale=max>min?210/(max-min):1;
+ for(let i=0;i<map.depth.length;i++){
+  const v=Number.isFinite(map.depth[i])?Math.round(25+(map.depth[i]-min)*scale):0,j=4*i;
+  d[j]=v;d[j+1]=v;d[j+2]=v;d[j+3]=255;
+ }
+ c.putImageData(im,0,0);
+ $('shadowState').textContent=n+'×'+n+' · '+map.triangles+' triangles · '+map.writes.toLocaleString('fr-FR')+' écritures Z · '+map.buildMs.toFixed(2)+' ms · transition '+Math.round(map.mix*100)+' %';
+}
+
+const mesh=[],treeMesh=[],manMesh=[],shadowGeometry=[],actorShadowGeometry=[],colors=new Map();let rndState=20261018;function rand(){rndState=(Math.imul(rndState,1664525)+1013904223)>>>0;return rndState/4294967296}
+function triangle(target,a,b,c,color,kind){const n=norm(cross(sub(b,a),sub(c,a)));target.push({v:[a,b,c],c:color,k:kind,n,center:mul(add(add(a,b),c),1/3)})}
+function quad(target,a,b,c,d,color,kind){triangle(target,a,b,c,color,kind);triangle(target,a,c,d,color,kind)}
+function tube(target,a,b,r,n,color,kind='wood'){let axis=norm(sub(b,a)),u=norm(cross(axis,[0,0,1]));if(Math.hypot(...cross(axis,[0,0,1]))<.15)u=[1,0,0];let v=cross(axis,u);for(let j=0;j<n;j++){let p=k=>add(mul(u,r*Math.cos(2*Math.PI*k/n)),mul(v,r*Math.sin(2*Math.PI*k/n)));quad(target,add(a,p(j)),add(a,p(j+1)),add(b,p(j+1)),add(b,p(j)),color,kind)}}
+function bush(center,r){let lat=4,lon=9,rows=[];for(let j=0;j<=lat;j++){const a=Math.PI*j/lat,row=[];for(let k=0;k<lon;k++){const t=2*Math.PI*k/lon,R=r*(.84+.28*rand());row.push([center[0]+R*Math.sin(a)*Math.cos(t),center[1]+R*Math.cos(a),center[2]+R*Math.sin(a)*Math.sin(t)])}rows.push(row)}let palette=['#548d4b','#77a65c','#3c7b43','#91b86f','#579c52','#4a8f5b'];for(let j=0;j<lat;j++)for(let k=0;k<lon;k++)quad(mesh,rows[j][k],rows[j][(k+1)%lon],rows[j+1][(k+1)%lon],rows[j+1][k],palette[Math.floor(rand()*palette.length)],'leaves')}
+
+const TREE_LOBE_COUNT=32;
+function treeTaper(a,b,r0,r1,sides,color){
+ const axis=norm(sub(b,a));
+ let u=norm(cross(axis,[0,0,1]));
+ if(Math.abs(dot(axis,[0,0,1]))>.94)u=norm(cross(axis,[0,1,0]));
+ const v=norm(cross(axis,u));
+ for(let j=0;j<sides;j++){
+  const point=(k,r,o)=>add(o,add(mul(u,r*Math.cos(k*2*Math.PI/sides)),mul(v,r*Math.sin(k*2*Math.PI/sides))));
+  quad(treeMesh,point(j,r0,a),point(j+1,r0,a),point(j+1,r1,b),point(j,r1,b),color,'treewood');
+ }
+}
+function treeCurved(a,b,r0,r1,n,color,bend){
+ const mid=add(mul(add(a,b),.5),bend),rm=.52*(r0+r1);
+ treeTaper(a,mid,r0,rm,n,color);treeTaper(mid,b,rm,r1,n,color);
+}
+function crownLobe(c,r,seed){
+ const rows=[],lat=7,lon=14,phase=seed*2.39996;
+ const rx=r*(.82+.2*rand()),ry=r*(.94+.22*rand()),rz=r*(.8+.24*rand());
+ for(let j=0;j<=lat;j++){
+  const a=Math.PI*j/lat,row=[];
+  for(let k=0;k<lon;k++){
+   const phi=2*Math.PI*k/lon;
+   const swell=1+.045*Math.sin(3*phi+phase)*Math.sin(a)**2+.035*Math.sin(2*a+2*phi+phase);
+   row.push([c[0]+rx*Math.sin(a)*Math.cos(phi)*swell,c[1]+ry*Math.cos(a)*swell,
+   c[2]+rz*Math.sin(a)*Math.sin(phi)*swell]);
+  }rows.push(row);
+ }
+ const palette=['#477e42','#548d4b','#609850','#72a75a','#528b4d','#7cb15f','#609553'];
+ for(let j=0;j<lat;j++)for(let k=0;k<lon;k++){
+  const next=(k+1)%lon,color=palette[(j+Math.floor(k/3)+seed)%palette.length];
+  quad(treeMesh,rows[j][k],rows[j][next],rows[j+1][next],rows[j+1][k],color,'leaves');
+ }
+}
+function buildDetailedTree(){
+ treeMesh.length=0;let a=[0,0,0],ends=[];
+ for(let j=1;j<=5;j++){
+  const b=[.035*Math.sin(j*.66),j*.55,.035*Math.sin(j*.9)];
+  treeTaper(a,b,.31-(j-1)*.031,.31-j*.031,14,j%2?'#77583d':'#805e43');a=b;
+ }
+ for(let i=0;i<13;i++){
+  const ang=i*2.399,from=[0,1.31+(i%5)*.29,0];
+  const to=[Math.cos(ang)*(1.10+(i%3)*.32),2.92+(i%4)*.29,
+    Math.sin(ang)*(1.10+(i%3)*.32)];
+  treeCurved(from,to,.12,.068,9,'#836044',[Math.cos(ang+.9)*.1,.04,Math.sin(ang+.9)*.1]);
+  for(let j=0;j<3;j++){
+   const phi=ang+(j-1)*.52;
+   const twig=add(to,[Math.cos(phi)*(.58+.10*rand()),.18+j*.17,Math.sin(phi)*(.58+.10*rand())]);
+   treeCurved(to,twig,.052,.014,7,'#71533d',
+     [Math.cos(phi+.7)*.045,.045,Math.sin(phi+.7)*.045]);
+   ends.push(twig);
+  }
+ }
+ for(let i=0;i<TREE_LOBE_COUNT;i++){
+  const p=ends[(i*7)%ends.length],angle=i*2.31;
+  const center=[p[0]+Math.cos(angle)*(.08+.24*rand()),
+    p[1]+(rand()-.35)*.4,p[2]+Math.sin(angle)*(.08+.24*rand())];
+  crownLobe(center,.44+.16*rand(),i);
+ }
+}
+
+function cube(target,x,y,z,w,h,d,color,kind){let a=[x-w/2,y,z-d/2],b=[x+w/2,y,z-d/2],c=[x+w/2,y,z+d/2],e=[x-w/2,y,z+d/2],f=add(a,[0,h,0]),g=add(b,[0,h,0]),i=add(c,[0,h,0]),j=add(e,[0,h,0]);quad(target,a,b,g,f,color,kind);quad(target,b,c,i,g,color,kind);quad(target,c,e,j,i,color,kind);quad(target,e,a,f,j,color,kind);quad(target,f,g,i,j,color,kind);quad(target,e,c,b,a,color,kind)}
+
+// V6 stress test: tessellation 10x of EVERY triangle.
+// 3x3 barycentric subdivision gives 9 coplanar triangles; bisect the first
+// subtriangle into two to get EXACTLY 10. Winding, color, silhouette, and
+// parent material are preserved. This intentionally ADDS NO detail.
+const BASE_TRI_COUNT={decor:2310,actor:100};
+function splitIntoTen(tr,out){
+ const start=out.length;
+ const [a,b,c]=tr.v;
+ const pt=(i,j)=>{const u=i/3,v=j/3;return [
+  a[0]*(1-u-v)+b[0]*u+c[0]*v,
+  a[1]*(1-u-v)+b[1]*u+c[1]*v,
+  a[2]*(1-u-v)+b[2]*u+c[2]*v];};
+ let first=true;
+ function put(p,q,r){
+  if(first){
+   first=false;
+   const mid=[(p[0]+q[0])/2,(p[1]+q[1])/2,(p[2]+q[2])/2];
+   triangle(out,p,mid,r,tr.c,tr.k);triangle(out,mid,q,r,tr.c,tr.k);
+  }else triangle(out,p,q,r,tr.c,tr.k);
+ }
+ for(let i=0;i<3;i++)for(let j=0;j<3-i;j++){
+  const p=pt(i,j),q=pt(i+1,j),r=pt(i,j+1);
+  put(p,q,r);
+  if(i+j<2)put(q,pt(i+1,j+1),r);
+ }
+ for(let k=start;k<out.length;k++)out[k].parent=tr;
+}
+
+function tessellateSceneTenfold(){
+ const baseProps=mesh.length,tree=treeMesh.length,actor=manMesh.length;
+ shadowGeometry.length=0;shadowGeometry.push(...mesh,...treeMesh);
+ actorShadowGeometry.length=0;actorShadowGeometry.push(...manMesh);
+ const decor=[],persons=[],detailed=[];
+ for(const tr of mesh)splitIntoTen(tr,decor);
+ // Use 3-way triangular subdivision for the genuinely higher-detail tree,
+ // vs old 10-way coplanar subdivisions of a low-detail tree.
+ for(const tr of treeMesh){
+  const m=tr.center,first=detailed.length;
+  triangle(detailed,tr.v[0],tr.v[1],m,tr.c,tr.k);
+  triangle(detailed,tr.v[1],tr.v[2],m,tr.c,tr.k);
+  triangle(detailed,tr.v[2],tr.v[0],m,tr.c,tr.k);
+  for(let k=first;k<detailed.length;k++)detailed[k].parent=tr;
+ }
+ decor.push(...detailed);
+ for(const tr of manMesh)splitIntoTen(tr,persons);
+ if(detailed.length!==tree*3||persons.length!==actor*10||decor.length!==baseProps*10+tree*3)
+  throw Error('V7 subdivision count mismatch');
+ mesh.splice(0,mesh.length,...decor);manMesh.splice(0,manMesh.length,...persons);
+ $('densityStatus').textContent='Arbre : '+tree.toLocaleString('fr-FR')+
+ ' triangles vraiment modelés ('+(TREE_LOBE_COUNT*7*14*2).toLocaleString('fr-FR')+' feuillage), '+
+ detailed.length.toLocaleString('fr-FR')+' après subdivision ; autres objets : '+
+ (baseProps*10).toLocaleString('fr-FR')+' ; personnage : '+manMesh.length.toLocaleString('fr-FR')+
+ ' ; total : '+(mesh.length+manMesh.length).toLocaleString('fr-FR');
+}
+
+function build(){mesh.length=0;manMesh.length=0;rndState=20261018;buildDetailedTree();
+
+// Ensemble de cour : deux murs, un banc, des rochers, deux arbustes, un petit portail et des dalles.
+cube(mesh,3.1,0,1.8,3.4,2.4,.24,'#c4b4a1','wall');
+cube(mesh,-3.05,0,-1.55,2.85,1.65,.30,'#b4a897','wall');
+cube(mesh,-3.25,0,1.3,.9,.9,.9,'#9ca5a5','stone');
+// Banc avec pieds, assise et dossier.
+cube(mesh,2.75,.43,-2.18,1.8,.13,.68,'#98704f','bench');
+cube(mesh,2.1,.10,-2.18,.14,.39,.58,'#6d6c66','bench');
+cube(mesh,3.4,.10,-2.18,.14,.39,.58,'#6d6c66','bench');
+cube(mesh,2.75,.56,-2.48,1.8,.55,.12,'#98704f','bench');
+// Rochers et bacs plantés.
+cube(mesh,-1.75,0,-2.15,.85,.54,.85,'#b78f72','planter');bush([-1.75,.80,-2.15],.53);
+cube(mesh,1.45,0,3.10,.8,.48,.8,'#b78f72','planter');bush([1.45,.79,3.10],.45);
+cube(mesh,-4.05,0,.0,.70,.45,.7,'#9b9e98','stone');
+cube(mesh,4.0,0,2.7,.65,.34,.65,'#919b95','stone');
+// Colonnes du portail et linteau (volume traversable seulement sous l'arche).
+cube(mesh,-.55,0,-4.6,.35,2.25,.35,'#a8aca3','pillar');
+cube(mesh,.55,0,-4.6,.35,2.25,.35,'#a8aca3','pillar');
+cube(mesh,0,2.13,-4.6,1.55,.35,.38,'#9da79c','arch');
+// Pierres plates décoratives du sentier (pas des obstacles).
+for(let j=0;j<19;j++){let z=-3.85+j*.40,x=.12+.28*Math.sin(j*.67);quad(mesh,[x-.35,.012,z-.14],[x+.35,.012,z-.14],[x+.35,.012,z+.14],[x-.35,.012,z+.14],j%3?'#b9b4a0':'#aaa999','path')}
+// Les volumes de collision viennent des mêmes dimensions que la géométrie.
+solidObjects=[
+ {name:'Tronc',x:0,z:0,r:.42},
+ {name:'Mur est',x:3.1,z:1.8,w:3.4,d:.24},
+ {name:'Mur nord',x:-3.05,z:-1.55,w:2.85,d:.30},
+ {name:'Rocher',x:-3.25,z:1.3,w:.9,d:.9},
+ {name:'Banc',x:2.75,z:-2.18,w:1.8,d:.68},
+ {name:'Bac ouest',x:-1.75,z:-2.15,w:.85,d:.85},
+ {name:'Bac sud',x:1.45,z:3.10,w:.8,d:.8},
+ {name:'Pierre ouest',x:-4.05,z:0,w:.70,d:.7},
+ {name:'Pierre est',x:4,z:2.7,w:.65,d:.65},
+ {name:'Pilier gauche',x:-.55,z:-4.6,w:.35,d:.35},
+ {name:'Pilier droit',x:.55,z:-4.6,w:.35,d:.35}];
+// Personnage : silhouette schématique à facettes, animée par transformation rigide.
+tube(manMesh,[0,.10,0],[0,1.0,0],.19,8,'#396e9b','person');cube(manMesh,0,.98,0,.39,.46,.28,'#396e9b','person');cube(manMesh,0,1.45,0,.31,.36,.30,'#ddb48f','person');cube(manMesh,0,1.73,-.01,.35,.10,.32,'#553d36','person');
+tube(manMesh,[-.22,1.30,0],[-.30,.82,0],.08,6,'#ddb48f','person');tube(manMesh,[.22,1.30,0],[.29,.85,0],.08,6,'#ddb48f','person');tube(manMesh,[-.11,.54,0],[-.13,.05,0],.10,6,'#3e4e63','person');tube(manMesh,[.11,.54,0],[.12,.05,0],.10,6,'#3e4e63','person');
+tessellateSceneTenfold();$('treeCount').textContent=mesh.length.toLocaleString('fr-FR');$('actorCount').textContent=manMesh.length.toLocaleString('fr-FR');$('obstacleCount').textContent=solidObjects.length;$('totalTris').textContent=(mesh.length+manMesh.length).toLocaleString('fr-FR')}
+build();
+let slots=[],historicalIdx=0,slotsChanged=0;
+function memoryAlloc(){slots=Array.from({length:32},(_,i)=>({rgb:new Uint16Array(W*H),role:i===31?'display':i>=26?'future':'history',stamp:-1,valid:false,pose:null,lighting:i>=26&&i<31?new Float32Array(mesh.length*4):null,lightDirection:null,lightPosition:null}));historicalIdx=0;stats.pixelwrites=0;stats.pixelreads=0;const size=32*W*H*2,lightSize=5*mesh.length*4*4;$('memory').textContent=`32 images RGB565 : ${(size/1048576).toFixed(2)} Mio. Métadonnées futures lumière (L, direction XYZ pour ${mesh.length} faces × 5) : ${(lightSize/1024).toFixed(1)} Kio. 26 historiques, 1 affichage, 5 prévisions. Les pixels futurs non calculés restent invalides.`;refreshSlots()}
+function refreshSlots(){const grid=$('buffers');grid.innerHTML='';for(let i=0;i<32;i++){let el=document.createElement('div'),sl=slots[i];el.className='slot '+(i===31?'display':i>=26?(i<=27?'pred2':i<=29?'pred4':'pred5'):(sl.valid?'history':''));el.textContent=String(i).padStart(2,'0');el.title=i===31?'Image affichée, représentée dans Canvas':i>=26?`Prévision N+${i-25} — ${sl.valid?'données partielles':'non initialisée'}`:`Historique ${sl.valid?'image '+sl.stamp:'vide'}`;grid.appendChild(el)}}
+function snapshot(){const start=performance.now();const data=ctx.getImageData(0,0,W,H).data,b=slots[historicalIdx].rgb;for(let p=0,k=0;p<b.length;p++,k+=4){b[p]=((data[k]>>3)<<11)|((data[k+1]>>2)<<5)|(data[k+2]>>3)}slots[historicalIdx].valid=true;slots[historicalIdx].stamp=frame;historicalIdx=(historicalIdx+1)%26;stats.pixelwrites+=W*H;return performance.now()-start}
+function cameraParameters(atYaw=yaw,w=W,h=H){const eye=[Math.sin(atYaw)*8.4,4.1,Math.cos(atYaw)*8.4],target=[0,1.68,0],forward=norm(sub(target,eye)),right=norm(cross(forward,[0,1,0])),up=cross(right,forward),f=h*.96;return {eye,target,forward,right,up,f,w,h}}
+function project(p,c){const v=sub(p,c.eye),z=dot(v,c.forward);if(z<=.11)return null;return [c.w/2+dot(v,c.right)*c.f/z,c.h/2-dot(v,c.up)*c.f/z,z]}
+function lightPos(atSolar=solar){return [Math.cos(atSolar)*4.7,5.15+Math.sin(atSolar*.6)*.45,Math.sin(atSolar)*4.7]}
+function surfaceShade(tr,light){const d=norm(light);return Math.max(.30,Math.min(1.12,.47+.58*Math.abs(dot(tr.n,d))))}
+// Deux échantillons exacts encadrent une courte période. On garde par triangle
+// la luminosité ET le vecteur de lumière (XYZ). Les N+1…N+5 sont interpolés.
+// Ne jamais confondre cette cache d'éclairage avec une reprojection d'image.
+const LIGHT_RATE=.09,LIGHT_SPAN=12/30,LIGHT_REFRESH=6;
+function writeLightValues(dst,angle){const L=lightPos(angle);for(let i=0;i<mesh.length;i++){
+ const tr=mesh[i],j=i*4,dx=L[0],dy=L[1],dz=L[2],r=1/Math.max(1e-8,Math.hypot(dx,dy,dz));
+ const x=dx*r,y=dy*r,z=dz*r;dst[j]=Math.max(.30,Math.min(1.12,.47+.58*Math.abs(tr.n[0]*x+tr.n[1]*y+tr.n[2]*z)));
+ dst[j+1]=x;dst[j+2]=y;dst[j+3]=z;
+ }lightExact+=mesh.length;}
+function buildLightingBank(force=false){if(lightingBank&&!force&&simStep-lightingBank.created<LIGHT_REFRESH)return;
+ const start=solar,end=solar+(sunEnabled?LIGHT_RATE*LIGHT_SPAN:0),a=new Float32Array(mesh.length*4),b=new Float32Array(mesh.length*4);
+ writeLightValues(a,start);if(end!==start)writeLightValues(b,end);else b.set(a);
+ const delta=new Float32Array(a.length);for(let i=0;i<delta.length;i++)delta[i]=b[i]-a[i];
+ lightingBank={a,delta,start,end,created:simStep};
+}
+function copyLightingAtAngle(target,angle){if(!lightingBank)buildLightingBank(true);
+ const bank=lightingBank,den=bank.end-bank.start,t=den!==0?(angle-bank.start)/den:0;
+ for(let i=0;i<target.length;i++)target[i]=bank.a[i]+t*bank.delta[i];
+ lightSampleCount+=mesh.length;
+}
+function invalidateLighting(){lightingBank=null;currentLighting=null;staticCacheValid=false;spentLighting=null;}
+function currentLightFraction(){return Math.min(1,Math.max(0,simAccum*30));}
+function currentFaceLight(i){if(mode==='classic'||!temporalLightEnabled||!currentLighting||!predictive[0]||!predictive[0].lighting)return null;
+ const j=i*4,t=currentLightFraction(),a=currentLighting[j],b=predictive[0].lighting[j];return a+(b-a)*t;
+}
+function shadeHex(hex,f){let rgb=colors.get(hex);if(!rgb){let n=parseInt(hex.slice(1),16);rgb=[n>>16,(n>>8)&255,n&255];colors.set(hex,rgb)}return `rgb(${Math.min(255,Math.round(rgb[0]*f))},${Math.min(255,Math.round(rgb[1]*f))},${Math.min(255,Math.round(rgb[2]*f))})`}
+function poly(ctx,ps,color,stroke=false){ctx.beginPath();ctx.moveTo(ps[0][0],ps[0][1]);ctx.lineTo(ps[1][0],ps[1][1]);ctx.lineTo(ps[2][0],ps[2][1]);ctx.closePath();ctx.fillStyle=color;ctx.fill();if(stroke){ctx.strokeStyle='rgba(14,24,31,.3)';ctx.stroke()}}
+function shadowGround(tr,L){let v=[];for(const p of tr.v){let den=L[1]-p[1];if(den<.12)return null;let k=L[1]/den;v.push([L[0]+(p[0]-L[0])*k,.014,L[2]+(p[2]-L[2])*k])}return v}
+// Mur : face avant approximativement dans le plan z=1.68, réception de l'ombre si lumière derrière l'objet.
+const wallPlane=1.68,wallMinX=1.4,wallMaxX=4.8,wallMinY=0,wallMaxY=2.4;
+function shadowWall(tr,L){let v=[];for(const p of tr.v){let den=p[2]-L[2];if(Math.abs(den)<1e-5)return null;let k=(wallPlane-L[2])/den;if(k<=1.002||k>60)return null;v.push([L[0]+(p[0]-L[0])*k,L[1]+(p[1]-L[1])*k,wallPlane-.013])}return v}
+function clipNearPlane(vertices,c,near=.14){const result=[];for(let i=0;i<vertices.length;i++){const a=vertices[i],b=vertices[(i+1)%vertices.length];const da=dot(sub(a,c.eye),c.forward)-near,db=dot(sub(b,c.eye),c.forward)-near;if(da>=0)result.push(a);if((da>=0)!==(db>=0)){let t=da/(da-db);result.push(add(a,mul(sub(b,a),t)))}}return result}
+function clipWallRegion(poly){let arr=poly;const rules=[{axis:0,limit:wallMinX,keep:v=>v>=wallMinX},{axis:0,limit:wallMaxX,keep:v=>v<=wallMaxX},{axis:1,limit:wallMinY,keep:v=>v>=wallMinY},{axis:1,limit:wallMaxY,keep:v=>v<=wallMaxY}];for(const rule of rules){if(!arr.length)return [];const out=[];for(let i=0;i<arr.length;i++){const a=arr[i],b=arr[(i+1)%arr.length],aa=rule.keep(a[rule.axis]),bb=rule.keep(b[rule.axis]);if(aa)out.push(a);if(aa!==bb){let t=(rule.limit-a[rule.axis])/(b[rule.axis]-a[rule.axis]);out.push(add(a,mul(sub(b,a),t)))}}arr=out}return arr}
+function screenVertices(tr,c){let p0=project(tr.v[0],c),p1=project(tr.v[1],c),p2=project(tr.v[2],c);if(!p0||!p1||!p2)return null;
+if((p0[0]<-80&&p1[0]<-80&&p2[0]<-80)||(p0[0]>c.w+80&&p1[0]>c.w+80&&p2[0]>c.w+80)||(p0[1]<-80&&p1[1]<-80&&p2[1]<-80)||(p0[1]>c.h+80&&p1[1]>c.h+80&&p2[1]>c.h+80))return null;
+return [p0,p1,p2]}
+function baseRender(target,c,L,withShadows,profile,actorOverride=null,forceDirectLighting=false,clipBounds=null){let ta=performance.now();target.fillStyle='#a2c4dc';target.fillRect(0,0,c.w,c.h);const objects=[];
+const renderActorState=actorOverride||displayActor();
+let depthLight=null;
+if(withShadows){const tz=performance.now();depthLight=ensureLightDepth(L,renderActorState);profile.shadowZ+=performance.now()-tz;}
+let floorPts=clipNearPlane([[-13,-.035,-13],[13,-.035,-13],[13,-.035,13],[-13,-.035,13]],c).map(v=>project(v,c));if(floorPts.length>=3&&floorPts.every(Boolean)){target.beginPath();target.moveTo(...floorPts[0].slice(0,2));for(let i=1;i<floorPts.length;i++)target.lineTo(...floorPts[i].slice(0,2));target.closePath();target.fillStyle='#829d79';target.fill()}
+if(withShadows&&depthLight){const tz=performance.now();drawGroundFromLightZ(target,c,depthLight);profile.shadow+=performance.now()-tz;}
+let projected=0,lightHits=0;for(let i=0;i<mesh.length;i++){const tr=mesh[i],ps=screenVertices(tr,c);projected+=3;if(!ps)continue;
+ const cached=forceDirectLighting?null:currentFaceLight(i);if(cached!==null)lightHits++;
+ else {lightExact++; profile.lightDirect++;}
+ objects.push({ps,depth:(ps[0][2]+ps[1][2]+ps[2][2])/3,c:shadeHex(tr.c,depthLight?(.30+((cached!==null?cached:surfaceShade(tr,L))-.30)*(tr.k==='leaves'?.65+.35*visibilityFromLight(tr.center,depthLight,.12):visibilityFromLight(tr.center,depthLight,.12))):(cached!==null?cached:surfaceShade(tr,L))),type:'object'})}
+ profile.lightHits+=lightHits;
+// Le personnage participe au MÊME tri de profondeur que les murs et les arbres.
+// Cela corrige l'erreur de l'ancien prototype qui le dessinait toujours au premier plan.
+const actorStart=performance.now(),st=renderActorState,walkPhase=st.walk;
+for(let i=0;i<manMesh.length;i++){
+ const tr=manMesh[i],world=tr.v.map(v=>manTransform(v,[st.x,0,st.z],st.heading,walkPhase));
+ const projected=screenVertices({v:world},c);if(!projected)continue;
+ const shift={n:tr.n,center:[st.x+tr.center[0],tr.center[1],st.z+tr.center[2]]};
+ objects.push({ps:projected,depth:(projected[0][2]+projected[1][2]+projected[2][2])/3,c:shadeHex(tr.c,depthLight?lightFactor(surfaceShade(shift,L),mul(add(add(world[0],world[1]),world[2]),1/3),depthLight):surfaceShade(shift,L)),type:'actor'});
+}
+profile.char+=performance.now()-actorStart;profile.triProjected+=manMesh.length;
+profile.proj+=performance.now()-ta;profile.triProjected+=mesh.length;let ts=performance.now();
+// Legacy planar projected shadows removed. Real Z-tested shadows are rendered
+// to floor receivers and modulate object lighting above.
+ts=performance.now();objects.sort((a,b)=>b.depth-a.depth);profile.sort+=performance.now()-ts;ts=performance.now();for(const f of objects){if(clipBounds){const q=f.ps;if(Math.max(q[0][0],q[1][0],q[2][0])<clipBounds.left||Math.min(q[0][0],q[1][0],q[2][0])>clipBounds.right||Math.max(q[0][1],q[1][1],q[2][1])<clipBounds.top||Math.min(q[0][1],q[1][1],q[2][1])>clipBounds.bottom)continue;}poly(target,f.ps,f.c);profile.calls++;profile.drawn++;if(f.type==='shadow')profile.shadowDrawn++;if(f.type==='actor')profile.actorDrawn++}profile.draw+=performance.now()-ts;
+return objects.length}
+// Collision continue dans le plan XZ : disque-personnage contre rectangles et troncs.
+function touching(x,z,r=actorRadius){
+ if(Math.abs(x)>7.8||Math.abs(z)>7.8)return {name:'Limite de la scène'};
+ for(const o of solidObjects){
+  if(o.r!==undefined){if(Math.hypot(x-o.x,z-o.z)<r+o.r)return o;}
+  else{const px=Math.max(o.x-o.w*.5,Math.min(x,o.x+o.w*.5)),pz=Math.max(o.z-o.d*.5,Math.min(z,o.z+o.d*.5));
+   if((x-px)**2+(z-pz)**2<r*r-.0000001)return o;}
+ }return null;
+}
+function moveWithCollision(state,dx,dz,count){
+ // Plusieurs sous-pas empêchent de traverser un mur étroit à grande vitesse.
+ const steps=Math.max(1,Math.ceil(Math.hypot(dx,dz)/.09));let hit=null,moved=0;
+ for(let k=0;k<steps;k++){
+  let xx=dx/steps,zz=dz/steps,tryX=touching(state.x+xx,state.z),tryZ=null;
+  if(!tryX){state.x+=xx;moved+=Math.abs(xx)}else hit=tryX;
+  tryZ=touching(state.x,state.z+zz);
+  if(!tryZ){state.z+=zz;moved+=Math.abs(zz)}else hit=tryZ;
+ }
+ if(hit&&count){collisions++;collisionLabel=hit.name}
+ else if(count)collisionLabel='Libre';
+ return {hit, moved};
+}
+const freshActor=()=>({x:.8,z:-2.7,heading:0,idx:1,walk:0});
+function cloneActor(a){return {x:a.x,z:a.z,heading:a.heading,idx:a.idx,walk:a.walk}}
+function advanceActor(a,dt,count=false){
+ let dx=0,dz=0,active=false;
+ const walkInputs=[keyDown.has('KeyW')||keyDown.has('ArrowUp'),keyDown.has('KeyS')||keyDown.has('ArrowDown'),keyDown.has('KeyA')||keyDown.has('ArrowLeft'),keyDown.has('KeyD')||keyDown.has('ArrowRight')];
+ if(walkInputs.some(Boolean)){const ix=Number(walkInputs[3])-Number(walkInputs[2]),iz=Number(walkInputs[1])-Number(walkInputs[0]);const r=Math.hypot(ix,iz)||1;dx=ix/r*actorSpeed*dt;dz=iz/r*actorSpeed*dt;active=true;}
+ else if(collisionTest){const gx=3.1,gz=3.5,l=Math.hypot(gx-a.x,gz-a.z);if(l>.04){dx=(gx-a.x)/l*actorSpeed*dt;dz=(gz-a.z)/l*actorSpeed*dt;active=true;}}
+ else if(autoWalk){let dest=route[a.idx%route.length],len=Math.hypot(dest[0]-a.x,dest[1]-a.z);if(len<.18){a.idx=(a.idx+patrolDir+route.length)%route.length;dest=route[a.idx];len=Math.hypot(dest[0]-a.x,dest[1]-a.z)}if(len>.001){dx=(dest[0]-a.x)/len*actorSpeed*dt;dz=(dest[1]-a.z)/len*actorSpeed*dt;active=true;}}
+ if(active){const oldX=a.x,oldZ=a.z,result=moveWithCollision(a,dx,dz,count);const realX=a.x-oldX,realZ=a.z-oldZ,dist=Math.hypot(realX,realZ);if(dist>.00001){a.heading=Math.atan2(realZ,realX);a.walk+=dist*6;}if(result.hit&&count&&collisionTest){$('walkState').textContent='Test du mur (collision)';}}
+ return a;
+}
+function displayActor(){const a=cloneActor(actor);if(!paused&&simAccum>0)advanceActor(a,Math.min(simAccum,1/30),false);return a}
+function posAt(st=actor){return [st.x,0,st.z]}
+function manTransform(v,position,heading,walkingPhase){const a=heading+Math.PI/2,xx=v[0],zz=v[2],animated=[xx,v[1],zz];
+animated[1]+=Math.sin(walkingPhase)*.012;return [position[0]+xx*Math.cos(a)-zz*Math.sin(a),animated[1],position[2]+xx*Math.sin(a)+zz*Math.cos(a)]}
+function actorProjected(st,atYaw,atSolar,walkingPhase){let c=cameraParameters(atYaw),p=[st.x,0,st.z],L=lightPos(atSolar),faces=[];
+ for(let id=0;id<manMesh.length;id++){const tr=manMesh[id];let points=tr.v.map(v=>project(manTransform(v,p,st.heading,walkingPhase),c));if(points.some(v=>!v))continue;faces.push({id,ps:points,z:(points[0][2]+points[1][2]+points[2][2])/3,color:shadeHex(tr.c,surfaceShade(tr,L))})}
+ faces.sort((a,b)=>b.z-a.z);return faces}
+function interpolatedForecastFaces(a,b,t){if(!a||!b||!a.faces||!b.faces)return null;const others=new Map(b.faces.map(f=>[f.id,f]));const faces=[];for(const f of a.faces){const q=others.get(f.id);if(!q)continue;const ps=[];for(let v=0;v<3;v++)ps.push([f.ps[v][0]+(q.ps[v][0]-f.ps[v][0])*t,f.ps[v][1]+(q.ps[v][1]-f.ps[v][1])*t,f.ps[v][2]+(q.ps[v][2]-f.ps[v][2])*t]);faces.push({ps,z:f.z+(q.z-f.z)*t,color:f.color})}faces.sort((x,y)=>y.z-x.z);return faces.length?faces:null}
+function drawActorProjected(target,faces,scale=1){if(scale!==1){target.save();target.scale(scale,scale)}for(const f of faces)poly(target,f.ps,f.color);if(scale!==1)target.restore();return faces.length}
+function drawCharacter(target,c,L,profile,forecastFaces){const ts=performance.now();const faceList=forecastFaces||actorProjected(displayActor(),renderPose().yaw,renderPose().sun,time*5+simAccum*5);profile.char+=performance.now()-ts;let d=performance.now();const count=drawActorProjected(target,faceList);profile.char+=performance.now()-d;profile.calls+=count;profile.drawn+=count;profile.actorDrawn+=count;profile.triProjected+=forecastFaces?0:manMesh.length;return count}
+function drawSun(target,c,L){let q=project(L,c);if(!q)return;const r=Math.max(3,Math.min(14,70/q[2]));target.beginPath();target.arc(q[0],q[1],r+6,0,7);target.fillStyle='rgba(255,210,118,.20)';target.fill();target.beginPath();target.arc(q[0],q[1],r,0,7);target.fillStyle='#ffe3a0';target.fill()}
+function newProfile(){return {proj:0,cameraZ:0,texture:0,edgeAA:0,shadowZ:0,shadow:0,sort:0,draw:0,copy:0,char:0,forecast:0,snap:0,overview:0,tiles:0,triProjected:0,drawn:0,calls:0,shadowDrawn:0,actorDrawn:0,lightHits:0,lightDirect:0,staticHit:false,reprojected:false}}
+function completeRender(target,withActor=true){let p=newProfile(),c=cameraParameters(),L=lightPos();baseRender(target,c,L,shadowsEnabled,p);if(withActor)drawSun(target,c,L);return p}
+// Le prototype précédent utilisait un décalage global de l'image (dx,dy) :
+// cela faisait bondir l'arbre à chaque image clé. Le rendu stable n'utilise PLUS
+// cette approximation. Le chemin Z ci-dessous est une vraie reprojection 3D
+// effectuée à partir des profondeurs du framebuffer de référence.
+function renderPose(){return {yaw:yaw+(!paused&&orbitEnabled?.16*simAccum:0),sun:solar+(!paused&&sunEnabled?.09*simAccum:0)}}
+function depthTriangle(a,b,c,dest,w,h){
+ const x0=a[0],y0=a[1],x1=b[0],y1=b[1],x2=c[0],y2=c[1];
+ const area=(x1-x0)*(y2-y0)-(y1-y0)*(x2-x0);if(!Number.isFinite(area)||Math.abs(area)<1e-5)return;
+ const minX=Math.max(0,Math.floor(Math.min(x0,x1,x2))),maxX=Math.min(w-1,Math.ceil(Math.max(x0,x1,x2)));
+ const minY=Math.max(0,Math.floor(Math.min(y0,y1,y2))),maxY=Math.min(h-1,Math.ceil(Math.max(y0,y1,y2)));
+ const inv=1/area,ia=1/a[2],ib=1/b[2],ic=1/c[2];
+ for(let yy=minY;yy<=maxY;yy++){const y=yy+.5;let row=yy*w;for(let xx=minX;xx<=maxX;xx++){
+ const x=xx+.5,b1=((x-x0)*(y2-y0)-(y-y0)*(x2-x0))*inv;
+ const b2=((x1-x0)*(y-y0)-(y1-y0)*(x-x0))*inv;
+ const b0=1-b1-b2;if(b0<-.0001||b1<-.0001||b2<-.0001)continue;
+ const zz=1/(b0*ia+b1*ib+b2*ic);const k=row+xx;if(zz<dest[k])dest[k]=zz;
+ }}
+}
+function buildReferenceDepth(cam){
+ const depth=new Float32Array(W*H);depth.fill(Infinity);
+ const floor=clipNearPlane([[-13,-.035,-13],[13,-.035,-13],[13,-.035,13],[-13,-.035,13]],cam);
+ if(floor.length>=3){const points=floor.map(q=>project(q,cam));for(let j=1;j+1<points.length;j++)if(points[0]&&points[j]&&points[j+1])depthTriangle(points[0],points[j],points[j+1],depth,W,H)}
+ for(const tr of mesh){const clipped=clipNearPlane(tr.v,cam);if(clipped.length<3)continue;
+ const pts=clipped.map(q=>project(q,cam));for(let j=1;j+1<pts.length;j++)if(pts[0]&&pts[j]&&pts[j+1])depthTriangle(pts[0],pts[j],pts[j+1],depth,W,H)}
+ return depth;
+}
+function beginReprojectionKeyframe(cam,L,p){
+ const t=performance.now();baseRender(bg,cam,L,shadowsEnabled,p);baseCamera=cam;baseYaw=renderPose().yaw;baseLight=renderPose().sun;
+ baseDepth=buildReferenceDepth(cam);basePixels=new Uint32Array(bg.getImageData(0,0,W,H).data.buffer.slice(0));
+ reprojectColors=new Uint32Array(W*H);reprojectDepth=new Float32Array(W*H);baseReady=true;stats.full++;
+ p.copy+=performance.now()-t-p.proj-p.shadow-p.sort-p.draw;
+}
+function reprojectFromDepth(targetCam,p){
+ const t=performance.now(),ref=baseCamera,zold=baseDepth,src=basePixels;
+ const outColor=reprojectColors,outZ=reprojectDepth;outColor.fill(0xffdcc4a2);outZ.fill(Infinity); // ciel de fond, en couleur little-endian BGRA
+ const T=sub(ref.eye,targetCam.eye),bx=dot(T,targetCam.right),by=dot(T,targetCam.up),bz=dot(T,targetCam.forward);
+ const rx=dot(ref.right,targetCam.right),ux=dot(ref.up,targetCam.right),fx=dot(ref.forward,targetCam.right);
+ const ry=dot(ref.right,targetCam.up),uy=dot(ref.up,targetCam.up),fy=dot(ref.forward,targetCam.up);
+ const rz=dot(ref.right,targetCam.forward),uz=dot(ref.up,targetCam.forward),fz=dot(ref.forward,targetCam.forward);
+ const w=W,h=H,cx=w*.5,cy=h*.5,invf=1/ref.f;
+ let hits=0;
+ for(let y=0;y<h;y++){let v=(cy-y-.5)*invf,row=y*w;for(let x=0;x<w;x++){
+ const id=row+x,d=zold[id];if(!Number.isFinite(d))continue;
+ const u=(x+.5-cx)*invf,X=bx+d*(rx*u+ux*v+fx),Y=by+d*(ry*u+uy*v+fy),Z=bz+d*(rz*u+uz*v+fz);
+ if(Z<=.12)continue;const px=cx+targetCam.f*X/Z-.5,py=cy-targetCam.f*Y/Z-.5;
+ const ix=Math.floor(px),iy=Math.floor(py);if(ix < -1||iy < -1||ix>=w||iy>=h)continue;
+ const col=src[id];
+ // Splat local de 2x2, test Z. Les trous dus aux zones découvertes restent marqués.
+ for(let sy=iy;sy<=iy+1;sy++){if(sy<0||sy>=h)continue;let dstrow=sy*w;for(let sx=ix;sx<=ix+1;sx++){
+ if(sx<0||sx>=w)continue;const j=dstrow+sx;if(Z<outZ[j]){outZ[j]=Z;outColor[j]=col;hits++}
+ }}
+ }}
+ // Réparation locale limitée des très petits trous ; les grandes zones découvertes
+ // signalent qu'une nouvelle image géométrique serait nécessaire.
+ let holes=0,repairs=0;for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){
+ const i=y*w+x;if(Number.isFinite(outZ[i]))continue;
+ let near=0,chosen=0;for(let off of [-1,1,-w,w]){const j=i+off;if(Number.isFinite(outZ[j])&&(near===0||outZ[j]<near)){near=outZ[j];chosen=outColor[j]}}
+ if(near){outColor[i]=chosen;repairs++}else holes++;
+ }
+ const im=new ImageData(new Uint8ClampedArray(outColor.buffer),w,h);ctx.putImageData(im,0,0);
+ debugHoles=holes;debugReprojectionPixels=hits;stats.pixelreads+=W*H;p.copy+=performance.now()-t;
+ p.reprojected=true;stats.reused++;stats.saved+=mesh.length;
+}
+
+// V5 CAMERA Z RASTER : full opaque framebuffer, perspective-correct depth.
+let zImage=null,zColor=null,zDepth=null,zSurface=null,zMetrics={tests:0,writes:0,triangles:0,ground:0};
+const Z_SKY=0xffdcc4a2,Z_GROUND=0xff799d82; // RGBA little-endian 0xAABBGGRR.
+function zInit(){
+ if(zImage&&zImage.width===W&&zImage.height===H)return;
+ zImage=ctx.createImageData(W,H);zColor=new Uint32Array(zImage.data.buffer);
+ zDepth=new Float32Array(W*H);zSurface=new Uint8Array(W*H);
+}
+function zColorFor(hex,f){
+ let c=colors.get(hex);
+ if(!c){let n=parseInt(hex.substring(1),16);c=[n>>>16,(n>>>8)&255,n&255];colors.set(hex,c)}
+ const k=Math.max(0,Math.min(1.4,f));
+ const r=Math.min(255,Math.round(c[0]*k)),g=Math.min(255,Math.round(c[1]*k)),b=Math.min(255,Math.round(c[2]*k));
+ return (0xff000000|(b<<16)|(g<<8)|r)>>>0;
+}
+function zRaster(a,b,c,col,tag,w,h,depth,pixels,tags,m){
+ const ax=a[0],ay=a[1],bx=b[0],by=b[1],cx=c[0],cy=c[1];
+ const area=(bx-ax)*(cy-ay)-(by-ay)*(cx-ax);
+ if(!Number.isFinite(area)||Math.abs(area)<1e-8||a[2]<=0||b[2]<=0||c[2]<=0)return;
+ const x0=Math.max(0,Math.floor(Math.min(ax,bx,cx))),x1=Math.min(w-1,Math.ceil(Math.max(ax,bx,cx)));
+ const y0=Math.max(0,Math.floor(Math.min(ay,by,cy))),y1=Math.min(h-1,Math.ceil(Math.max(ay,by,cy)));
+ if(x0>x1||y0>y1)return;
+ const inv=1/area,one=1/a[2],two=1/b[2],three=1/c[2];
+ // The barycentric derivatives use the same orientation as the signed area.
+ const d0x=(by-cy)*inv,d0y=(cx-bx)*inv;
+ const d1x=(cy-ay)*inv,d1y=(ax-cx)*inv;
+ let row0=((bx-(x0+.5))*(cy-(y0+.5))-(by-(y0+.5))*(cx-(x0+.5)))*inv;
+ let row1=((cx-(x0+.5))*(ay-(y0+.5))-(cy-(y0+.5))*(ax-(x0+.5)))*inv;
+ // d0x = (by-cy)/area, d0y=(cx-bx)/area; d1x=(cy-ay)/area.
+ for(let y=y0;y<=y1;y++){
+  let w0=row0,w1=row1;const offset=y*w;
+  for(let x=x0;x<=x1;x++){
+   const w2=1-w0-w1;
+   if(w0>=-1e-8&&w1>=-1e-8&&w2>=-1e-8){
+    const invZ=w0*one+w1*two+w2*three,j=offset+x;m.tests++;
+    if(invZ>depth[j]+1e-8){depth[j]=invZ;pixels[j]=col;tags[j]=tag;m.writes++;}
+   }
+   w0+=d0x;w1+=d1x;
+  }
+  row0+=d0y;row1+=d1y;
+ }
+ m.triangles++;
+}
+function zCollect(faces,vertices,camera,col,tag){
+ const clipped=clipNearPlane(vertices,camera,.16);
+ if(clipped.length<3)return;
+ const pp=clipped.map(v=>project(v,camera));
+ if(pp.some(v=>!v))return;
+ for(let j=1;j+1<pp.length;j++)faces.push({a:pp[0],b:pp[j],c:pp[j+1],col,tag});
+}
+const groundSampleCache={w:0,h:0,visibility:null,xIndex:null,xFrac:null,yIndex:null,yFrac:null};
+function prepareGroundGrid(width,height){
+ const w=Math.ceil(width/5),h=Math.ceil(height/5);
+ if(groundSampleCache.w===w&&groundSampleCache.h===h)return;
+ groundSampleCache.w=w;groundSampleCache.h=h;
+ groundSampleCache.visibility=new Float32Array(w*h);
+ groundSampleCache.xIndex=new Int32Array(width);groundSampleCache.xFrac=new Float32Array(width);
+ groundSampleCache.yIndex=new Int32Array(height);groundSampleCache.yFrac=new Float32Array(height);
+ for(let x=0;x<width;x++){
+  const q=Math.max(0,Math.min(w-1,(x+.5)*w/width-.5));
+  const base=Math.min(w-2,Math.floor(q));
+  groundSampleCache.xIndex[x]=base;groundSampleCache.xFrac[x]=q-base;
+ }
+ for(let y=0;y<height;y++){
+  const q=Math.max(0,Math.min(h-1,(y+.5)*h/height-.5));
+  const base=Math.min(h-2,Math.floor(q));
+  groundSampleCache.yIndex[y]=base;groundSampleCache.yFrac[y]=q-base;
+ }
+}
+function zGroundShadows(camera,map,profile){
+ if(!map)return;
+ const start=performance.now(),w=W,h=H,invF=1/camera.f;
+ prepareGroundGrid(w,h);
+ const sw=groundSampleCache.w,sh=groundSampleCache.h,visibility=groundSampleCache.visibility;
+ // Cast rays only on a coarser camera grid (typically 128×96 at 640×480).
+ // Bilinear reconstruction is applied strictly to Z-visible ground pixels.
+ for(let y=0;y<sh;y++){
+  const vv=((y+.5)*h/sh-h/2)*invF,vy=camera.forward[1]-vv*camera.up[1];
+  for(let x=0;x<sw;x++){
+   const i=y*sw+x,uu=((x+.5)*w/sw-w/2)*invF,dy=vy+uu*camera.right[1];
+   if(dy>=-.001){visibility[i]=1;continue}
+   const t=(-.035-camera.eye[1])/dy;
+   if(t<=0){visibility[i]=1;continue}
+   const wx=camera.eye[0]+t*(camera.forward[0]+uu*camera.right[0]-vv*camera.up[0]);
+   const wz=camera.eye[2]+t*(camera.forward[2]+uu*camera.right[2]-vv*camera.up[2]);
+   visibility[i]=Math.abs(wx)<=13&&Math.abs(wz)<=13?
+    visibilityFromLight([wx,.016,wz],map,.085):1;
+  }
+ }
+ const xi=groundSampleCache.xIndex,xf=groundSampleCache.xFrac;
+ const yi=groundSampleCache.yIndex,yf=groundSampleCache.yFrac;
+ let visibleGround=0;
+ for(let y=0;y<h;y++){
+  const dy=yf[y],base=yi[y]*sw,row=y*w;
+  for(let x=0;x<w;x++){
+   const idx=row+x;if(zSurface[idx]!==1)continue;
+   const ix=xi[x],dx=xf[x],p=base+ix;
+   const a=visibility[p]+(visibility[p+1]-visibility[p])*dx;
+   const b=visibility[p+sw]+(visibility[p+sw+1]-visibility[p+sw])*dx;
+   const lit=a+(b-a)*dy,scale=1-.44*(1-lit);
+   const r=Math.round(130*scale),g=Math.round(157*scale),blue=Math.round(121*scale);
+   zColor[idx]=(0xff000000|(blue<<16)|(g<<8)|r)>>>0;visibleGround++;
+  }
+ }
+ zMetrics.ground=visibleGround;profile.shadow+=performance.now()-start;
+}
+
+let contourAA=true;
+function smoothCameraSilhouettes(){
+ // Lightweight camera silhouette AA, not real multisampling.
+ // The depth buffer remains exact. Only RGB at material boundaries is blended.
+ const before=zColor.slice(),w=W,h=H,tags=zSurface;
+ let affected=0;
+ for(let y=1;y<h-1;y++){
+  const row=y*w;
+  for(let x=1;x<w-1;x++){
+   const i=row+x,tag=tags[i],left=i-1,right=i+1,up=i-w,down=i+w;
+   const neighbours=[left,right,up,down];let r=0,g=0,b=0,n=0;
+   for(const j of neighbours){
+    if(tags[j]===tag||!(tag===2||tags[j]===2))continue;
+    const v=before[j];r+=v&255;g+=(v>>>8)&255;b+=(v>>>16)&255;n++;
+   }
+   if(n===0)continue;
+   const old=before[i],f=.22;
+   const red=Math.round((old&255)*(1-f)+(r/n)*f);
+   const green=Math.round(((old>>>8)&255)*(1-f)+(g/n)*f);
+   const blue=Math.round(((old>>>16)&255)*(1-f)+(b/n)*f);
+   zColor[i]=(0xff000000|(blue<<16)|(green<<8)|red)>>>0;
+   affected++;
+  }
+ }
+ return affected;
+}
+
+function renderZCamera(){
+ const p=newProfile(),pose=renderPose(),camera=cameraParameters(pose.yaw),light=lightPos(pose.sun),st=displayActor();
+ zInit();zDepth.fill(0);zSurface.fill(0);zColor.fill(Z_SKY);
+ let lm=null;if(shadowsEnabled){let now=performance.now();lm=ensureLightDepth(light,st);p.shadowZ+=performance.now()-now;}
+ const projected=[],t0=performance.now();
+ // The camera ground shares the SAME per-pixel depth test as all other objects.
+ const ground=[[-13,-.035,-13],[13,-.035,-13],[13,-.035,13],[-13,-.035,13]];
+ zCollect(projected,[ground[0],ground[1],ground[2]],camera,Z_GROUND,1);
+ zCollect(projected,[ground[0],ground[2],ground[3]],camera,Z_GROUND,1);
+ let shadeParent=null,shadeFactor=1;
+ for(let i=0;i<mesh.length;i++){
+  const tr=mesh[i],parent=tr.parent||tr;
+  if(parent!==shadeParent){
+   const cached=currentFaceLight(i),shade=cached===null?surfaceShade(parent,light):cached;
+   const vis=lm?visibilityFromLight(parent.center,lm,.12):1;
+   shadeFactor=parent.k==='leaves'&&lm?.first?.depth?
+     .30+(shade-.30)*(.65+.35*vis):(.30+(shade-.30)*vis);
+   shadeParent=parent;
+  }
+  zCollect(projected,tr.v,camera,zColorFor(tr.c,shadeFactor),2);
+ }
+ const actorPos=[st.x,0,st.z];
+ let actorParent=null,actorShade=1;
+ for(const tr of manMesh){
+  const vertices=tr.v.map(v=>manTransform(v,actorPos,st.heading,st.walk));
+  const parent=tr.parent||tr;
+  if(parent!==actorParent){
+   const anchor=manTransform(parent.center,actorPos,st.heading,st.walk);
+   const shade=surfaceShade(parent,light),vis=lm?visibilityFromLight(anchor,lm,.12):1;
+   actorShade=.30+(shade-.30)*vis;actorParent=parent;
+  }
+  zCollect(projected,vertices,camera,zColorFor(tr.c,actorShade),2);
+ }
+ p.proj=performance.now()-t0;
+ const m={tests:0,writes:0,triangles:0},tr=performance.now();
+ for(const f of projected)zRaster(f.a,f.b,f.c,f.col,f.tag,W,H,zDepth,zColor,zSurface,m);
+ p.cameraZ=performance.now()-tr;zGroundShadows(camera,lm,p);
+ if(contourAA){const aaStart=performance.now();smoothCameraSilhouettes();p.edgeAA=performance.now()-aaStart;}
+ const tc=performance.now();ctx.putImageData(zImage,0,0);p.copy=performance.now()-tc;
+ const ls=project(light,camera);
+ if(ls){const x=Math.floor(ls[0]),y=Math.floor(ls[1]);
+  if(x>=0&&x<W&&y>=0&&y<H&&zDepth[y*W+x]<1/ls[2]-1e-6)drawSun(ctx,camera,light);
+ }
+ if($('tileOverlay').checked){
+  ctx.save();ctx.strokeStyle='rgba(178,234,242,.22)';ctx.lineWidth=.4;ctx.beginPath();
+  for(let x=0;x<=W;x+=16){ctx.moveTo(x,0);ctx.lineTo(x,H)}
+  for(let y=0;y<=H;y+=16){ctx.moveTo(0,y);ctx.lineTo(W,y)}
+  ctx.stroke();ctx.restore();
+ }
+ if(frame%7===0){const t=performance.now();p.snap+=snapshot()}
+ zMetrics={...m,ground:zMetrics.ground};p.triProjected=mesh.length+manMesh.length+2;
+ p.drawn=m.triangles;p.calls=1;stats.full++;return p;
+}
+function zCamTest(){
+ const n=40,d=new Float32Array(n*n),rgba=new Uint32Array(n*n),surf=new Uint8Array(n*n);
+ const a=[5,5,5],b=[34,5,5],c=[5,34,5];
+ const x=[5,5,2],y=[34,5,2],z=[5,34,2],m={tests:0,writes:0,triangles:0};
+ zRaster(a,b,c,0xff123456,2,n,n,d,rgba,surf,m);
+ zRaster(x,y,z,0xffabcdef,2,n,n,d,rgba,surf,m);
+ if(rgba[12*n+12]!==0xffabcdef)throw Error('Z camera: near face should be visible');
+ d.fill(0);rgba.fill(0);
+ zRaster(x,y,z,0xffabcdef,2,n,n,d,rgba,surf,m);
+ zRaster(a,b,c,0xff123456,2,n,n,d,rgba,surf,m);
+ if(rgba[12*n+12]!==0xffabcdef)throw Error('Z camera: face order must not matter');
+ return m;
+}
+function zPreview(){
+ if(mode!=='zcam'||!zDepth)return;
+ const cv=$('zCameraPreview'),dw=160,dh=120;
+ if(cv.width!==dw)cv.width=dw;if(cv.height!==dh)cv.height=dh;
+ const gc=cv.getContext('2d'),im=gc.createImageData(dw,dh),rgba=im.data;
+ for(let y=0;y<dh;y++)for(let x=0;x<dw;x++){
+  const sx=Math.min(W-1,Math.floor((x+.5)*W/dw)),sy=Math.min(H-1,Math.floor((y+.5)*H/dh));
+  const v=zDepth[sy*W+sx],g=v>0?Math.round(25+220*Math.min(1,v*3)):0,j=4*(y*dw+x);
+  rgba[j]=g;rgba[j+1]=g;rgba[j+2]=g;rgba[j+3]=255;
+ }
+ gc.putImageData(im,0,0);
+ $('zCameraStats').textContent='Caméra '+W+'×'+H+' · '+zMetrics.triangles+' faces rasterisées · '+zMetrics.tests.toLocaleString('fr-FR')+' tests Z · '+zMetrics.writes.toLocaleString('fr-FR')+' écritures Z · '+zMetrics.ground.toLocaleString('fr-FR')+' points de sol éclairés';
+}
+
+function drawFrame(){
+ if(mode==='zcam')return renderZCamera();
+ if(mode==='tiles')return tileFrame();
+ const p=newProfile(),pose=renderPose(),cam=cameraParameters(pose.yaw),light=lightPos(pose.sun);
+ const needsReference=mode==='classic'||mode==='stable'||!baseReady||frame%keyEvery===0;
+ ctx.setTransform(1,0,0,1,0,0);
+ if(mode==='temporal'){
+   if(needsReference){beginReprojectionKeyframe(cam,light,p);const t=performance.now();ctx.drawImage(background,0,0);p.copy+=performance.now()-t;}
+   else{reprojectFromDepth(cam,p);}
+ }else{
+   // Rendu temporel STABLE : les surfaces sont projetées avec la pose interpolée exacte.
+   // On privilégie l'image correcte plutôt qu'un gain fictif par déplacement 2D.
+   const staticHit=mode==='stable'&&cacheStaticEnabled&&staticCacheValid&&
+     Math.abs(staticCacheYaw-pose.yaw)<1e-10&&Math.abs(staticCacheSolar-pose.sun)<1e-10&&staticCacheShadow===shadowsEnabled&&
+    Math.abs(staticCacheActorX-actor.x)<1e-8&&Math.abs(staticCacheActorZ-actor.z)<1e-8;
+   if(staticHit){p.staticHit=true;staticReuse++;}
+   else{baseRender(bg,cam,light,shadowsEnabled,p);baseReady=true;stats.full++;staticCacheValid=true;staticCacheYaw=pose.yaw;staticCacheSolar=pose.sun;staticCacheShadow=shadowsEnabled;staticCacheActorX=actor.x;staticCacheActorZ=actor.z;}
+   const t=performance.now();ctx.drawImage(background,0,0);p.copy+=performance.now()-t;
+ }
+ // Le personnage utilise LA MÊME pose caméra que l'arbre. Pas de mélange
+ // entre sommets prédits à 30 Hz et sommets visibles à fréquence variable.
+ drawSun(ctx,cam,light);
+ if(frame%7===0){const ts=performance.now();p.snap+=snapshot()}
+ return p;
+}
+function drawExternal(){let start=performance.now(),w=out.width,h=out.height;og.fillStyle='#101f2f';og.fillRect(0,0,w,h);og.strokeStyle='#284357';og.lineWidth=1;const diagnosticCam={...cameraParameters(2.65, w,h),eye:[-10,8,11]};let from=diagnosticCam.eye,to=[0,1.3,0],f=norm(sub(to,from)),r=norm(cross(f,[0,1,0])),u=cross(r,f),proj=p=>{const v=sub(p,from),z=dot(v,f);return z>.1?[w/2+dot(v,r)*h*.93/z,h/2-dot(v,u)*h*.93/z,z]:null};
+const lineGroups=new Map();function ln(a,b,color,width=1){let p=proj(a),q=proj(b);if(!p||!q)return;const key=color+'|'+width;let group=lineGroups.get(key);if(!group){group=[];lineGroups.set(key,group)}group.push([p[0],p[1],q[0],q[1]])}function flushLines(){for(const [key,segs] of lineGroups){let [color,width]=key.split('|');og.strokeStyle=color;og.lineWidth=Number(width);og.beginPath();for(const s of segs){og.moveTo(s[0],s[1]);og.lineTo(s[2],s[3])}og.stroke()}}
+for(let i=-9;i<=9;i+=1.5){ln([i,0,-9],[i,0,9],'#314e59');ln([-9,0,i],[9,0,i],'#314e59')}
+// Lightweight diagnostic: sample the tree mesh rather than fully rendering it a second time.
+for(let i=0;i<mesh.length;i+=12){let tr=mesh[i];if(tr.k!=='wood'&&tr.k!=='leaves')continue;ln(tr.v[0],tr.v[1],tr.k==='wood'?'#ab8063':'#65af78',.9);ln(tr.v[1],tr.v[2],tr.k==='wood'?'#ab8063':'#65af78',.9)}
+for(const tr of mesh){if(tr.k!=='wall'&&tr.k!=='stone'&&tr.k!=='bench'&&tr.k!=='planter'&&tr.k!=='pillar')continue;for(let i=0;i<3;i++)ln(tr.v[i],tr.v[(i+1)%3],'#b8a78c',1)}
+for(const o of solidObjects){const sz=o.r?o.r*2:o.w,dep=o.r?o.r*2:o.d,x=o.x,z=o.z,y=.035;
+ ln([x-sz/2,y,z-dep/2],[x+sz/2,y,z-dep/2],'#ed9474',1);
+ ln([x+sz/2,y,z-dep/2],[x+sz/2,y,z+dep/2],'#ed9474',1);
+ ln([x+sz/2,y,z+dep/2],[x-sz/2,y,z+dep/2],'#ed9474',1);
+ ln([x-sz/2,y,z+dep/2],[x-sz/2,y,z-dep/2],'#ed9474',1)}
+for(let j=0;j<route.length;j++)ln([route[j][0],.04,route[j][1]],[route[(j+1)%route.length][0],.04,route[(j+1)%route.length][1]],'#6cb0da',1);
+const c=cameraParameters(),eye=c.eye,forward=c.forward,right=c.right,up=c.up,fc=add(eye,mul(forward,1.18)),halfW=.69,halfH=.50;let corner=(sx,sy)=>add(fc,add(mul(right,sx*halfW),mul(up,sy*halfH)));let scr=[corner(-1,-1),corner(1,-1),corner(1,1),corner(-1,1)];for(let j=0;j<4;j++){ln(scr[j],scr[(j+1)%4],'#68d9ef',2);ln(eye,scr[j],'#d8b86e',1)}flushLines();let ep=proj(eye);if(ep){og.fillStyle='#f5d482';og.beginPath();og.arc(ep[0],ep[1],5,0,7);og.fill()}
+let L=lightPos(),lp=proj(L);if(lp){og.beginPath();og.arc(lp[0],lp[1],11,0,7);og.fillStyle='rgba(251,204,118,.19)';og.fill();og.beginPath();og.arc(lp[0],lp[1],5,0,7);og.fillStyle='#ffe19e';og.fill()}
+const actorPoint=posAt(displayActor()),pp=proj([actorPoint[0],1.0,actorPoint[2]]);if(pp){og.beginPath();og.arc(pp[0],pp[1],7,0,7);og.fillStyle='#ebae7b';og.fill()}
+for(let k=0;k<predictive.length;k++){let pred=predictive[k],q=proj([pred.x,1,pred.z]);if(q){og.strokeStyle=k<2?'#80c2f5':'#d6aa6c';og.lineWidth=1.4;og.beginPath();og.arc(q[0],q[1],4,0,7);og.stroke();og.fillStyle='#d8e6f3';og.font='11px system-ui';og.fillText('+'+(k+1),q[0]+5,q[1]-5)}}
+og.font='11px system-ui';og.fillStyle='#b1cadf';og.fillText('Caméra + écran de projection',12,21);og.fillText('Cyan : parcours · orange : collisions · +1…+5 : prévisions',12,37);og.fillText('Soleil (jaune) · arbre (vert) · personnage (orange)',12,53);
+return performance.now()-start}
+const FUTURE_W=126,FUTURE_H=95;let futureCtx=[];
+function initFuture(){let a=$('futurecards');a.innerHTML='';futureCtx=[];for(let k=1;k<=5;k++){const card=document.createElement('div');card.className='future';card.innerHTML=`<div class="top"><span>N+${k}</span><span id="conf${k}">—</span></div><canvas id="prev${k}" width="${FUTURE_W}" height="${FUTURE_H}"></canvas><div class="sub" id="fdesc${k}">En préparation</div>`;a.appendChild(card);futureCtx.push(card.querySelector('canvas').getContext('2d'))}}
+initFuture();
+function noisePreview(k){let c=futureCtx[k-1],im=c.createImageData(FUTURE_W,FUTURE_H),d=im.data;for(let y=0;y<FUTURE_H;y++)for(let x=0;x<FUTURE_W;x++){let i=(y*FUTURE_W+x)*4;let n=((Math.imul(x+1,1597334677)^Math.imul(y+simStep+3,3812015801)^Math.imul(k,826366247))>>>0)%33;d[i]=30+n;d[i+1]=45+n;d[i+2]=59+n;d[i+3]=255}c.putImageData(im,0,0)}
+function updatePreviews(){if(mode==='tiles'||mode==='zcam'){
+  const tick=tileCurrentTick();for(let k=1;k<=5;k++){
+    const gc=futureCtx[k-1],job=tileJobs.get(tick+k),forecastData=predictive[k-1];noisePreview(k);
+    if(job&&job.ready){gc.drawImage(job.cv,0,0,FUTURE_W,FUTURE_H);$('conf'+k).textContent='image prête';$('fdesc'+k).textContent=`${job.prepared} zones calculées · ${job.reused} zones reprises`;}
+    else if(job){gc.save();gc.globalAlpha=.8;gc.drawImage(job.cv,0,0,FUTURE_W,FUTURE_H);gc.restore();$('conf'+k).textContent='construction';$('fdesc'+k).textContent=`Pré-rendu ${job.done}/${job.total} tuiles`;}
+    else {$('conf'+k).textContent='prévision légère';$('fdesc'+k).textContent=forecastData?'Mouvement, lumière et direction':'Non préparée';}
+  }return;
+ }if(!baseReady)return;for(let k=1;k<=5;k++){let c=futureCtx[k-1],f=predictive[k-1];noisePreview(k);if(f&&k<=2){c.save();c.globalAlpha=.91;c.drawImage(background,0,0,FUTURE_W,FUTURE_H);c.restore();let faces=f.faces||[];c.save();c.scale(FUTURE_W/W,FUTURE_H/H);for(const face of faces)poly(c,face.ps,face.color);c.restore();$('fdesc'+k).textContent=`Lumière + direction stockées · ${(f.sun*180/Math.PI).toFixed(1)}°`; $('conf'+k).textContent=mode==='tiles'?'pose +1/+2':'détaillée'}else if(f&&k<=4){c.save();c.globalAlpha=.36;c.drawImage(background,0,0,FUTURE_W,FUTURE_H);c.restore();let cc=cameraParameters(f.yaw),pp=project([f.x,1,f.z],cc);if(pp){c.fillStyle='#f4cb86';c.beginPath();c.arc(pp[0]*FUTURE_W/W,pp[1]*FUTURE_H/H,4,0,7);c.fill()}$('fdesc'+k).textContent=`Lumière + direction stockées · ${(f.sun*180/Math.PI).toFixed(1)}°`; $('conf'+k).textContent='probable'}else{$('fdesc'+k).textContent=f?`Lumière + direction stockées · ${(f.sun*180/Math.PI).toFixed(1)}°`:'Aucune prévision';$('conf'+k).textContent='spéculative'}}}
+function invalidateForecast(reason){currentForecast=null;spentLighting=null;if(predictive.length){forecastsInvalid+=predictive.length;$('diagnostic').textContent=`Prédictions invalidées (${predictive.length}) : ${reason}. Reconstruction à partir de l'état réel.`;predictive=[];for(let i=26;i<31;i++)slots[i].valid=false}}
+function forecast(){
+ const started=performance.now(),hz=+($('horizon').value)||5,oldForecast=predictive;horizon=hz;predictive=[];
+ if(temporalLightEnabled){buildLightingBank();if(!currentLighting){currentLighting=new Float32Array(mesh.length*4);copyLightingAtAngle(currentLighting,solar)}}
+ let predictedActor=cloneActor(actor);
+ for(let k=1;k<=hz;k++){
+  advanceActor(predictedActor,1/30,false);
+  const tt=k/30,pyaw=yaw+(orbitEnabled?.16*tt:0),psun=solar+(sunEnabled?LIGHT_RATE*tt:0);
+  const slot=slots[25+k],position=lightPos(psun),globalDir=norm(sub(position,[0,1.5,0]));
+  let v={step:simStep+k,x:predictedActor.x,z:predictedActor.z,heading:predictedActor.heading,
+   yaw:pyaw,sun:psun,faces:null,lighting:null,lightPosition:position,lightDirection:globalDir,
+   quality:k<=2?'detailed':k<=4?'coarse':'noise'};
+  if(k<=2)v.faces=actorProjected(predictedActor,pyaw,psun,time*5+k/6);
+  if(temporalLightEnabled){
+   const reusable=oldForecast.find(f=>f.step===simStep+k&&f.lighting&&Math.abs(f.sun-psun)<1e-9);
+   if(reusable){v.lighting=reusable.lighting;lightForecastReuse++;}
+   else{v.lighting=spentLighting||new Float32Array(mesh.length*4);spentLighting=null;copyLightingAtAngle(v.lighting,psun);lightForecastNew++;}
+   slot.lighting=v.lighting;
+  }
+  predictive.push(v);slot.valid=true;slot.pose={x:v.x,z:v.z,yaw:pyaw,sun:psun};slot.stamp=simStep+k;
+  slot.lightDirection=globalDir;slot.lightPosition=position;
+ }
+ for(let k=hz+1;k<=5;k++){slots[25+k].valid=false;slots[25+k].lightDirection=null;}
+ spentLighting=null;unaccountedForecastMs+=performance.now()-started;
+ forecastProjectionOps+=Math.min(hz,2)*manMesh.length*35;
+}
+function step(dt=1/30){
+ time+=dt;simStep++;advanceActor(actor,dt,true);
+ if(orbitEnabled)yaw+=.16*dt;if(sunEnabled)solar+=.09*dt;
+ if(predictive.length){const old=predictive.shift();spentLighting=old&&old.lighting?old.lighting:null;
+  if(old&&old.step===simStep&&Math.hypot(old.x-actor.x,old.z-actor.z)<.015&&Math.abs(old.sun-solar)<.000001){forecastsValid++;currentForecast=old;if(temporalLightEnabled&&old.lighting){if(!currentLighting)currentLighting=new Float32Array(mesh.length*4);currentLighting.set(old.lighting)}}
+  else if(old){forecastsInvalid++;currentForecast=null}}
+ if(temporalLightEnabled&&(!lightingBank||simStep-lightingBank.created>=LIGHT_REFRESH))buildLightingBank(true);forecast();
+}
+function updateOptions(){mode=$('mode').value;horizon=+$('horizon').value;keyEvery=+$('keyEvery').value;orbitEnabled=$('orbit').checked;sunEnabled=$('sun').checked;shadowsEnabled=$('shadows').checked;shadowResolution=+$('shadowResolution').value;lightingScene.lights[0].shadowResolution=shadowResolution;stableShadows=$('stableShadows').checked;shadowSoftness=+$('shadowSoftness').value;contourAA=$('contourAA').checked;upcomingStaticJob=null;lightingScene.shadowMaps.clear();lightingScene.staticDepthMaps.clear();overviewEnabled=$('overview').checked;temporalLightEnabled=$('temporalLight').checked;cacheStaticEnabled=$('cacheStatic').checked;invalidateLighting();actorSpeed=+(parseFloat($('speed').value)*.018).toFixed(3);autoWalk=$('autoWalk').checked;$('speedLabel').textContent=$('speed').value+' %';baseReady=false;baseDepth=null;invalidateForecast('modification des paramètres');forecast()}
+for(let id of ['mode','horizon','keyEvery','orbit','sun','shadows','temporalLight','cacheStatic','overview','speed','autoWalk','shadowResolution','stableShadows','shadowSoftness','contourAA'])$(id).addEventListener('change',()=>{tileInvalidate('configuration');updateOptions()});
+$('resolution').addEventListener('change',()=>{tileInvalidate('résolution');const [w,h]=$('resolution').value.split('x').map(Number);W=w;H=h;canvas.width=w;canvas.height=h;background.width=w;background.height=h;out.width=w;out.height=h;baseReady=false;baseDepth=null;memoryAlloc();invalidateLighting();invalidateForecast('changement de résolution');forecast()});
+$('reverse').onclick=()=>{tileInvalidate('demi-tour');patrolDir*=-1;actor.idx=(actor.idx+patrolDir*2+route.length*2)%route.length;collisionTest=false;invalidateForecast('inversion de direction');forecast()};
+$('turn').onclick=()=>{tileInvalidate('parcours');waypointVariant=1-waypointVariant;route=waypointVariant?routeB:routeA;actor.idx=nearestWaypoint(actor);collisionTest=false;invalidateForecast('changement de parcours');forecast()};
+$('collisionTest').onclick=()=>{tileInvalidate('collision');actor.x=3.1;actor.z=-.15;actor.idx=0;collisionTest=true;autoWalk=false;$('autoWalk').checked=false;invalidateForecast('test de collision contre le mur');forecast()};
+$('patrol').onclick=()=>{tileInvalidate('patrouille');collisionTest=false;autoWalk=true;$('autoWalk').checked=true;actor.idx=nearestWaypoint(actor);invalidateForecast('reprise de patrouille');forecast()};
+function nearestWaypoint(a){let best=0,d=Infinity;for(let i=0;i<route.length;i++){const dd=(a.x-route[i][0])**2+(a.z-route[i][1])**2;if(dd<d){d=dd;best=i}}return best}
+function walkingKey(e){if(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){e.preventDefault();if(e.type==='keydown'){if(!keyDown.has(e.code)){keyDown.add(e.code);tileInvalidate('commande clavier');invalidateForecast('commande manuelle');forecast()}}else{keyDown.delete(e.code);tileInvalidate('commande clavier');invalidateForecast('fin commande');forecast()}}}
+window.addEventListener('keydown',walkingKey);window.addEventListener('keyup',walkingKey);
+$('popout').onclick=()=>window.open(window.location.href,'_blank','noopener');
+$('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'▶ Reprendre':'⏸ Pause';$('runState').textContent=paused?'Simulation en pause':'Simulation active'};
+$('reset').onclick=()=>{tileInvalidate('réinitialisation');actor=freshActor();route=routeA;patrolDir=1;collisionTest=false;autoWalk=true;$('autoWalk').checked=true;collisions=0;collisionLabel='Libre';solar=0;yaw=3.34;time=0;simStep=0;frame=0;for(const k of Object.keys(stats))stats[k]=0;lightExact=0;lightSampleCount=0;lastOpExact=0;lastOpSamples=0;lightForecastReuse=0;lightForecastNew=0;staticReuse=0;shadowBuilds=0;shadowDepthWrites=0;shadowTests=0;shadowStaticRebuilds=0;shadowCacheHits=0;upcomingStaticJob=null;lightingScene.shadowMaps.clear();lightingScene.staticDepthMaps.clear();for(const k in rolling)delete rolling[k];forecastsValid=0;forecastsInvalid=0;facesReused=0;baseReady=false;baseDepth=null;memoryAlloc();invalidateLighting();forecast();$('diagnostic').textContent='Scène réinitialisée.'};
+// -----------------------------------------------------------------------------
+// PREDICTIVE TILES, v2. A full changing frame is rasterized ONCE, not 1,200 times.
+// If camera+sun remain exactly fixed, only character-affected 16px tiles are
+// rerendered; the rest of the last validated image is copied. The anticipated
+// actor participates in the same per-frame depth sort as stationary objects.
+// Future images are tied to deterministic 60Hz sampling times, no 2D warping.
+// -----------------------------------------------------------------------------
+const TILE=16;
+let tileEpoch=0,tileJobs=new Map(),tilePresented=null;let lastFrameCost=18,lastPrepCost=10,lastUiPreview=0;let jankCount=0,jankIntervals=[],stableFallbackCount=0;
+let tileLastStatus='Initialisation',tileDiagnostic='Pré-rendu non démarré';
+const tileCount={displayed:0,used:0,miss:0,expired:0,invalid:0,prepared:0,forced:0,reused:0,drawCalls:0,prepMs:0,geomMs:0,finishMs:0,frames:0};
+let lastTileFrame={ahead:0,sync:0,reused:0,prep:0,geom:0,draw:0,calls:0};
+function tileInvalidate(reason){tileEpoch++;tileJobs.clear();tilePresented=null;tileCount.invalid++;tileDiagnostic='Prévisions invalidées : '+reason+'.';}
+function tileClock(){return simStep/30+simAccum}
+function tileCurrentTick(){return Math.floor(tileClock()*60+1e-6)}
+function tilePoseAt(tick){const t=tick/60-simStep/30;
+ return {yaw:yaw+(orbitEnabled?.16*t:0),sun:solar+(sunEnabled?.09*t:0)};}
+function tileActorAt(tick){let a=cloneActor(actor),delta=tick/60-simStep/30;
+ if(delta>0)advanceActor(a,Math.min(.15,delta),false);return a}
+function tileActorBounds(actorSt,pose){const cam=cameraParameters(pose.yaw);let left=Infinity,top=Infinity,right=-Infinity,bottom=-Infinity;
+ for(const tr of manMesh)for(const v of tr.v){const q=project(manTransform(v,[actorSt.x,0,actorSt.z],actorSt.heading,actorSt.walk),cam);
+ if(q){left=Math.min(left,q[0]);top=Math.min(top,q[1]);right=Math.max(right,q[0]);bottom=Math.max(bottom,q[1]);}}
+ return {left,top,right,bottom};
+}
+function tileCreateJob(tick){const begin=performance.now(),pose=tilePoseAt(tick),person=tileActorAt(tick);
+ const cv=document.createElement('canvas');cv.width=W;cv.height=H;
+ const total=Math.ceil(W/TILE)*Math.ceil(H/TILE);
+ const same=$('tileReuse').checked&&tilePresented&&(!shadowsEnabled||(Math.abs(tilePresented.person.x-person.x)<1e-8&&Math.abs(tilePresented.person.z-person.z)<1e-8&&Math.abs(tilePresented.person.walk-person.walk)<1e-8))&&tilePresented.epoch===tileEpoch&&tilePresented.signature===`${W}/${H}/${shadowsEnabled}`&&
+  Math.abs(tilePresented.pose.yaw-pose.yaw)<1e-11&&Math.abs(tilePresented.pose.sun-pose.sun)<1e-11;
+ const job={tick,epoch:tileEpoch,pose,person,cv,gc:cv.getContext('2d',{alpha:false}),total,done:0,ready:false,
+  prepared:0,forced:0,reused:0,ms:0,drawCalls:0,geometryMs:0,signature:`${W}/${H}/${shadowsEnabled}`,same,
+  dirty:[],dirtyBounds:null};
+ if(same){
+  const old=tilePresented;
+  job.gc.drawImage(old.cv,0,0);
+  const a=tileActorBounds(person,pose),b=tileActorBounds(old.person,old.pose);
+  const left=Math.max(0,Math.floor((Math.min(a.left,b.left)-3)/TILE)),top=Math.max(0,Math.floor((Math.min(a.top,b.top)-3)/TILE));
+  const right=Math.min(Math.ceil(W/TILE)-1,Math.floor((Math.max(a.right,b.right)+3)/TILE));
+  const bottom=Math.min(Math.ceil(H/TILE)-1,Math.floor((Math.max(a.bottom,b.bottom)+3)/TILE));
+  const nx=Math.ceil(W/TILE);
+  for(let ty=top;ty<=bottom;ty++)for(let tx=left;tx<=right;tx++)job.dirty.push(ty*nx+tx);
+  job.reused=total-job.dirty.length;
+  job.dirtyBounds={left:left*TILE,top:top*TILE,right:Math.min(W,(right+1)*TILE),bottom:Math.min(H,(bottom+1)*TILE)};
+ }else{
+  // The whole frame has changed; use ONE Canvas draw pass (O(triangles)),
+  // not O(tiles × triangles). Tile bitmap is still kept for validation.
+  job.dirty.length=total;for(let i=0;i<total;i++)job.dirty[i]=i;
+ }
+ job.done=job.reused;job.ready=(job.dirty.length===0);
+ job.geometryMs=performance.now()-begin;
+ return job;
+}
+function tileJobPaint(job,early){if(job.ready)return 0;
+ const start=performance.now(),cam=cameraParameters(job.pose.yaw),L=lightPos(job.pose.sun),profile=newProfile();
+ // A clipping rectangle lets Canvas keep the correct painter's order and
+ // depth presentation without drawing 1,200 separate paths per triangle.
+ if(job.same&&job.dirtyBounds){const b=job.dirtyBounds;job.gc.save();job.gc.beginPath();job.gc.rect(b.left,b.top,b.right-b.left,b.bottom-b.top);job.gc.clip();}
+ baseRender(job.gc,cam,L,shadowsEnabled,profile,job.person,true,job.same?job.dirtyBounds:null);
+ if(job.same&&job.dirtyBounds)job.gc.restore();
+ job.ms+=performance.now()-start;job.drawCalls+=profile.calls;tileCount.drawCalls+=profile.calls;
+ const count=job.dirty.length;job.done=job.total;job.ready=true;
+ if(early){job.prepared=count;tileCount.prepared+=count;}else{job.forced=count;tileCount.forced+=count;}
+ return performance.now()-start;
+}
+function tileIsValid(job,tick){if(!job||job.epoch!==tileEpoch||job.tick!==tick)return false;
+ const pose=tilePoseAt(tick),a=tileActorAt(tick);
+ return Math.abs(pose.yaw-job.pose.yaw)<1e-8&&Math.abs(pose.sun-job.pose.sun)<1e-8&&
+ Math.abs(a.x-job.person.x)<.0008&&Math.abs(a.z-job.person.z)<.0008&&Math.abs(a.heading-job.person.heading)<.001&&Math.abs(a.walk-job.person.walk)<.005;
+}
+function tileFrame(){
+ const p=newProfile(), pose=renderPose(), cam=cameraParameters(pose.yaw), L=lightPos(pose.sun);
+ const person=displayActor();
+ const canReuse=!orbitEnabled&&!sunEnabled&&$('tileReuse').checked&&tilePresented&&(!shadowsEnabled||(Math.abs(tilePresented.person.x-person.x)<1e-8&&Math.abs(tilePresented.person.z-person.z)<1e-8&&Math.abs(tilePresented.person.walk-person.walk)<1e-8))&&
+   tilePresented.epoch===tileEpoch&&tilePresented.signature===`${W}/${H}/${shadowsEnabled}`&&
+   Math.abs(tilePresented.pose.yaw-pose.yaw)<1e-10&&Math.abs(tilePresented.pose.sun-pose.sun)<1e-10;
+ let cv,gc,bounds=null,reused=0;
+ if(canReuse){
+   cv=tilePresented.cv;gc=tilePresented.gc;
+   const a=tileActorBounds(person,pose),b=tileActorBounds(tilePresented.person,pose);
+   const nx=Math.ceil(W/TILE), ny=Math.ceil(H/TILE);
+   const left=Math.max(0,Math.floor((Math.min(a.left,b.left)-4)/TILE)),top=Math.max(0,Math.floor((Math.min(a.top,b.top)-4)/TILE));
+   const right=Math.min(nx-1,Math.floor((Math.max(a.right,b.right)+4)/TILE));
+   const bottom=Math.min(ny-1,Math.floor((Math.max(a.bottom,b.bottom)+4)/TILE));
+   if(right>=left&&bottom>=top){
+     bounds={left:left*TILE,top:top*TILE,right:Math.min(W,(right+1)*TILE),bottom:Math.min(H,(bottom+1)*TILE)};
+     reused=nx*ny-(right-left+1)*(bottom-top+1);
+   }else reused=nx*ny;
+ }else{
+   cv=document.createElement('canvas');cv.width=W;cv.height=H;gc=cv.getContext('2d',{alpha:false});
+ }
+ if(reused<Math.ceil(W/TILE)*Math.ceil(H/TILE)){
+   if(bounds){gc.save();gc.beginPath();gc.rect(bounds.left,bounds.top,bounds.right-bounds.left,bounds.bottom-bounds.top);gc.clip();}
+   baseRender(gc,cam,L,shadowsEnabled,p,person,true,bounds);
+   if(bounds)gc.restore();
+ }
+ tilePresented={cv,gc,epoch:tileEpoch,signature:`${W}/${H}/${shadowsEnabled}`,pose,person:{...person}};
+ ctx.setTransform(1,0,0,1,0,0);const cp0=performance.now();ctx.drawImage(cv,0,0);p.copy+=performance.now()-cp0;
+ drawSun(ctx,cam,L);
+ if($('tileOverlay').checked){ctx.save();ctx.strokeStyle='rgba(178,234,242,.25)';ctx.lineWidth=.4;ctx.beginPath();for(let x=0;x<=W;x+=TILE){ctx.moveTo(x,0);ctx.lineTo(x,H)}for(let y=0;y<=H;y+=TILE){ctx.moveTo(0,y);ctx.lineTo(W,y)}ctx.stroke();ctx.restore();}
+ const total=Math.ceil(W/TILE)*Math.ceil(H/TILE);lastTileFrame={ahead:0,sync:total-reused,reused,prep:0,geom:0,draw:p.draw,calls:p.calls};
+ tileCount.displayed++;tileCount.reused+=reused;
+ if(reused){tileCount.used++;tileLastStatus=`Cache stable : ${reused}/${total} tuiles réutilisées, ${total-reused} mises à jour`;}
+ else{stats.full++;tileLastStatus=orbitEnabled||sunEnabled?'Caméra ou lumière en mouvement : rendu géométrique exact sans pré-calcul concurrent':'Première image : référence exacte';}
+ tileDiagnostic=reused?`Géométrie et lumière identiques ; seuls ${total-reused} blocs du personnage sont redessinés.`:
+   'Pour éviter les pauses, le rendu futur complet Canvas est désactivé pendant la simulation. Les prévisions N+1 à N+5 restent géométriques et lumineuses.';
+ stats.reused+=reused?1:0;
+ return p;
+}
+function prepareTiles(budgetMS){if(mode!=='tiles'||paused||orbitEnabled||sunEnabled||budgetMS<=0)return;
+ const start=performance.now(),tick=tileCurrentTick();
+ // Common browser cadence < 60 FPS: +2 may be displayed before +1.
+ const candidates=[tick+1,tick+2];
+ for(const t of candidates){if(performance.now()-start>=budgetMS)break;
+  let job=tileJobs.get(t);
+  if(!job){const a=performance.now();job=tileCreateJob(t);tileJobs.set(t,job);tileCount.geomMs+=performance.now()-a;}
+  if(!job.ready){const elapsed=performance.now()-start;
+    // Un appel de dessin complet n'est PAS fractionnable. On ne l'autorise
+    // que si le dernier rendu + la dernière préparation tiennent dans 16 ms.
+    if(lastFrameCost+lastPrepCost+3<16.0&&budgetMS-elapsed>=lastPrepCost+1){
+       const cost=tileJobPaint(job,true);lastPrepCost=lastPrepCost*.8+cost*.2;
+    }
+   }
+ }
+ tileCount.prepMs+=performance.now()-start;tileCount.frames++;
+}
+function tileUpdateUi(){const tick=tileCurrentTick(),one=tileJobs.get(tick+1),two=tileJobs.get(tick+2);
+ const info=j=>j?(j.ready?`${j.total}/${j.total} — prête`:`${j.reused}/${j.total} — partielle`):'non commencée';
+ $('tileStatus').textContent=[one,two].filter(j=>j&&j.ready).length+'/2';
+ $('tileDone').textContent=lastTileFrame.ahead.toLocaleString('fr-FR');$('tileSync').textContent=lastTileFrame.sync.toLocaleString('fr-FR');
+ $('tileReused').textContent=lastTileFrame.reused.toLocaleString('fr-FR');
+ $('tileHit').textContent=(tileCount.displayed?Math.round(100*tileCount.used/tileCount.displayed):0)+' %';
+ $('tilePrepTime').textContent=(tileCount.frames?tileCount.prepMs/tileCount.frames:0).toFixed(2)+' ms';$('jankCount').textContent=jankCount.toLocaleString('fr-FR');const sorted=[...jankIntervals].sort((a,b)=>a-b);$('jankP95').textContent=sorted.length?sorted[Math.min(sorted.length-1,Math.floor(sorted.length*.95))].toFixed(1)+' ms':'—';
+ $('tileProgress').textContent=`N+1 : ${info(one)} · N+2 : ${info(two)} · N+3 à N+5 : mouvement et lumière · manquées : ${tileCount.miss} · périmées : ${tileCount.expired} · appels Canvas anticipés : ${tileCount.drawCalls.toLocaleString('fr-FR')}`;
+}
+$('tileReuse').addEventListener('change',()=>tileInvalidate('réutilisation des tuiles'));
+$('benchmarkTiles').onclick=async()=>{
+ if(benchmarking)return;benchmarking=true;const wasPaused=paused,oldMode=mode,oldLight=temporalLightEnabled;
+ paused=true;$('benchmarkTiles').disabled=true;$('comparison').textContent='Benchmark hors présentation en cours…';
+ await new Promise(res=>requestAnimationFrame(res));
+ try{
+  const cv=document.createElement('canvas');cv.width=W;cv.height=H;const gc=cv.getContext('2d',{alpha:false});
+  const cam=cameraParameters(),L=lightPos(),reps=6;
+  function bench(currentMode){mode=currentMode;temporalLightEnabled=currentMode!=='classic';let samples=[],tri=0;
+   for(let k=0;k<reps;k++){const p=newProfile(),t=performance.now();baseRender(gc,cam,L,shadowsEnabled,p);samples.push(performance.now()-t);tri+=p.drawn;}
+   return {ms:samples.slice(1).reduce((a,b)=>a+b,0)/(reps-1),tri:Math.round(tri/reps)};}
+  const base=bench('classic'),light=bench('stable');mode='tiles';
+  let samples=[],prepared=0;for(let k=0;k<reps;k++){const t=performance.now();const job=tileCreateJob(tileCurrentTick()+2);tileJobPaint(job,true);samples.push(performance.now()-t);prepared=job.prepared;}
+  const avg=samples.slice(1).reduce((a,b)=>a+b,0)/(reps-1);
+  $('comparison').textContent=`BENCHMARK SANS PRÉSENTATION VIDÉO · ${W}×${H} · 6 essais (premier écarté)\n`+
+  `Normal : ${base.ms.toFixed(2)} ms/calcul · ${base.tri} polygones soumis au tracé\n`+
+  `Lumière prévisionnelle : ${light.ms.toFixed(2)} ms/calcul (sans coût de ses prévisions)\n`+
+  `Préparation image future (complète, avec ${prepared} zones 16×16 validées) : ${avg.toFixed(2)} ms\n`+
+  `Une image déjà préparée peut être présentée par une copie Canvas rapide, mais les ${avg.toFixed(2)} ms précédentes ONT BIEN été dépensées avant l'affichage.\n`+
+  `Gain de calcul véritable uniquement pour les zones réutilisées sans nouveau tracé ; les chiffres de cycles FPGA ne sont pas déduits de Canvas.`;
+ }catch(e){$('comparison').textContent='Erreur : '+e.message;}
+ finally{mode=oldMode;temporalLightEnabled=oldLight;paused=wasPaused;benchmarking=false;$('benchmarkTiles').disabled=false;}
+};
+const barroot=$('bars');for(const [k,label] of stages){let el=document.createElement('div');el.className='barrow';el.innerHTML=`<span>${label}</span><div class="track"><div class="fill" id="bar-${k}"></div></div><span class="value" id="v-${k}">—</span>`;barroot.appendChild(el)}
+function smoothing(name,value){const a=.16;rolling[name]=rolling[name]===undefined?value:(1-a)*rolling[name]+a*value}
+function updateUi(){let total=0,highest=0,label='';for(let [key,name] of stages){let ms=rolling[key]||0;total+=ms;if(ms>highest){highest=ms;label=name}}for(const [key] of stages){const val=rolling[key]||0;$('bar-'+key).style.width=(total?val/total*100:0).toFixed(1)+'%';$('v-'+key).textContent=val.toFixed(2)}
+$('fps').textContent=fps.toFixed(1);$('ms').textContent=(rolling.total||0).toFixed(2);$('drawms').textContent=(rolling.draw||0).toFixed(2);$('tri').textContent=Math.round(rolling.drawn||0).toLocaleString('fr-FR');$('calls').textContent=Math.round(rolling.calls||0).toLocaleString('fr-FR');$('ops').textContent=Math.round(rolling.operations||0).toLocaleString('fr-FR');
+$('bottleneck').textContent=`Poste le plus coûteux : ${label} — ${highest.toFixed(2)} ms. Les timings des polygones Canvas ne capturent pas toutes les instructions internes du navigateur.`;
+$('valid').textContent=forecastsValid.toLocaleString('fr-FR');$('faceReuse').textContent=facesReused.toLocaleString('fr-FR');$('invalid').textContent=forecastsInvalid.toLocaleString('fr-FR');$('full').textContent=stats.full.toLocaleString('fr-FR');$('reused').textContent=stats.reused.toLocaleString('fr-FR');$('saved').textContent=stats.saved.toLocaleString('fr-FR');$('pixelwrites').textContent=stats.pixelwrites.toLocaleString('fr-FR');$('pixelreads').textContent=stats.pixelreads.toLocaleString('fr-FR');
+$('lightHits').textContent=Math.round(rolling.lightHits||0).toLocaleString('fr-FR');
+$('lightSamples').textContent=lightSampleCount.toLocaleString('fr-FR');
+$('lightReuseForecast').textContent=lightForecastReuse.toLocaleString('fr-FR');$('lightNewForecast').textContent=lightForecastNew.toLocaleString('fr-FR');
+$('lightExact').textContent=lightExact.toLocaleString('fr-FR');
+$('staticReuse').textContent=staticReuse.toLocaleString('fr-FR');$('collisions').textContent=collisions.toLocaleString('fr-FR');$('collisionState').textContent=collisionLabel;$('walkState').textContent=collisionTest?'Essai mur':autoWalk?'Patrouille':'Manuel';
+updateShadowPreview();$('shadowStaticBuilds').textContent=shadowStaticRebuilds.toLocaleString('fr-FR');$('shadowBuilds').textContent=shadowBuilds.toLocaleString('fr-FR');$('shadowTests').textContent=shadowTests.toLocaleString('fr-FR');const future=predictive[0];$('lightDir').textContent=future?future.lightDirection.map(n=>n.toFixed(2)).join(' / '):'—';
+$('camAngle').textContent=(yaw*180/Math.PI%360).toFixed(1)+'°';$('sunPos').textContent=solar.toFixed(2)+' rad';$('imageCounter').textContent=`Image ${frame.toLocaleString('fr-FR')}`;refreshSlots();}
+let benchmarking=false;function measureBaseline(){const p=newProfile(),tmp=document.createElement('canvas');tmp.width=W;tmp.height=H;const gc=tmp.getContext('2d',{alpha:false});const t0=performance.now();baseRender(gc,cameraParameters(),lightPos(),shadowsEnabled,p);return {ms:performance.now()-t0,p}}
+$('compare').onclick=async()=>{
+ if(benchmarking)return;benchmarking=true;const oldPause=paused,oldMode=mode,oldTemporal=temporalLightEnabled;
+ paused=true;$('compare').disabled=true;$('comparison').textContent='Comparaison en cours (caméra figée)…';
+ await new Promise(resolve=>requestAnimationFrame(resolve));
+ try{
+  const cam=cameraParameters(),L=lightPos(),runs=5;
+  // Deux appels géométriquement identiques ; seule la source de luminosité change.
+  const bench=(useCache)=>{
+   mode=useCache?'stable':'classic';temporalLightEnabled=useCache;
+   let tSum=0,projSum=0,drawSum=0;
+   const c=document.createElement('canvas');c.width=W;c.height=H;const gc=c.getContext('2d',{alpha:false});
+   for(let k=0;k<runs;k++){
+    const p=newProfile(),t=performance.now();baseRender(gc,cam,L,shadowsEnabled,p);
+    tSum+=performance.now()-t;projSum+=p.proj;drawSum+=p.draw;
+   }
+   return {total:tSum/runs,proj:projSum/runs,draw:drawSum/runs};
+  };
+  const direct=bench(false),memo=bench(true);
+  $('comparison').textContent=`Lumière recalculée : ${direct.total.toFixed(2)} ms/image (projection ${direct.proj.toFixed(2)}, tracé ${direct.draw.toFixed(2)}).\nLumière mémorisée : ${memo.total.toFixed(2)} ms/image (projection ${memo.proj.toFixed(2)}, tracé ${memo.draw.toFixed(2)}).\nSurcoût de préparation des prévisions : comptabilisé dans « Prévisions N+1/2 », hors ce microtest.\nRéemploi du tracé : seulement avec caméra ET lumière fixes.\nIl s'agit de mesures du navigateur, PAS d'un compte d'instructions CPU.`;
+ }catch(e){$('comparison').textContent='Erreur : '+e.message}
+ finally{mode=oldMode;temporalLightEnabled=oldTemporal;benchmarking=false;paused=oldPause;$('compare').disabled=false;}
+};
+function animate(now){let rawDt=Math.max(0,(now-lastClock));let dt=Math.min(.08,rawDt/1000);lastClock=now;if(frame>0&&!benchmarking&&!paused){if(rawDt>30)jankCount++;jankIntervals.push(rawDt);if(jankIntervals.length>180)jankIntervals.shift();}if(!paused&&!benchmarking){simAccum+=dt;while(simAccum>=1/30){step();simAccum-=1/30}const start=performance.now();const p=drawFrame();p.forecast=unaccountedForecastMs;unaccountedForecastMs=0;p.forecastOps=forecastProjectionOps;forecastProjectionOps=0;frame++;if(mode==='tiles'){p.tiles=0;} /* Pré-calcul complet hors boucle temps réel */ let external=0;if(overviewEnabled&&now-lastOverview>100){external=drawExternal();lastOverview=now;}p.overview=external;const total=performance.now()-start;lastFrameCost=.7*lastFrameCost+.3*total;
+const exactOps=Math.max(0,lightExact-lastOpExact),sampleOps=Math.max(0,lightSampleCount-lastOpSamples);lastOpExact=lightExact;lastOpSamples=lightSampleCount;for(const [key] of stages)smoothing(key,p[key]);smoothing('total',total);smoothing('drawn',p.drawn);smoothing('calls',p.calls);smoothing('lightHits',p.lightHits);smoothing('operations',p.triProjected*35+p.drawn*12+p.shadowDrawn*18+p.forecastOps+(p.reprojected?W*H:0)+exactOps*18+sampleOps*5+p.lightHits*3);fpsCounter++;
+$('frameStatus').textContent=mode==='zcam'?`V5 : ${zMetrics.writes.toLocaleString('fr-FR')} écritures Z caméra`:mode==='tiles'?tileLastStatus:p.reprojected?'Reprojection Z expérimentale':p.staticHit?'Image entière réutilisée (scène fixe)':temporalLightEnabled?'Géométrie exacte · lumière interpolée N/N+1':'Géométrie exacte · éclairage direct';$('renderBadge').textContent=mode==='zcam'?'V5 · Z CAMÉRA PAR PIXEL':mode==='tiles'?'TUILES 16×16 · GÉOMÉTRIE EXACTE':p.reprojected?'REPROJECTION Z · TEST':'PROJECTION STABLE';if(now-lastFps>=1000){fps=fpsCounter*1000/(now-lastFps);fpsCounter=0;lastFps=now}
+if(now-lastUi>450){lastUi=now;updateUi();zPreview();tileUpdateUi();if(now-lastUiPreview>1500){lastUiPreview=now;updatePreviews();}$('runState').textContent='Simulation active';$('diagnostic').textContent=mode==='zcam'?`V5 : ${zMetrics.tests.toLocaleString('fr-FR')} tests Z caméra ; ombres Z V4 préservées. Rendu logiciel non tuilé.`:mode==='tiles'?tileDiagnostic:p.reprojected?`Reprojection Z : ${debugReprojectionPixels.toLocaleString('fr-FR')} écritures testées, ${debugHoles.toLocaleString('fr-FR')} pixels sans profondeur reprojetée (ciel compris). Les nouvelles surfaces visibles exigent encore un vrai rendu.`:`Mode stable : ${p.lightHits} luminosités par face réutilisées ; vecteurs de lumière N+1 à N+5 mémorisés. ${p.staticHit?'Scène entière reprise.':'Projection géométrique complète conservée.'}`}}requestAnimationFrame(animate)}
+background.width=W;background.height=H;memoryAlloc();forecast();try{const result=zCamTest();$('zSelfTest').textContent=`OK — faces occultées dans les deux ordres (${result.tests} tests Z)`;}catch(e){$('zSelfTest').textContent='ÉCHEC : '+e.message;}$('runState').textContent='Simulation active';requestAnimationFrame(animate);
+window.addEventListener('error',e=>{$('diagnostic').textContent='Erreur JavaScript : '+e.message;$('runState').textContent='Erreur'});
+</script></body></html>
