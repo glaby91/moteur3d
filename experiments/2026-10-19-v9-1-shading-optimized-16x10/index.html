@@ -101,7 +101,7 @@ let W=640,H=400,frameImage=null,pixels=null,hitIds=null,hitDistances=null;
 let imageSerial=0,renderJob=null,shadowJob=null,shadowMap=null,preparedTexHigh=false;
 let materials=new Map(),objects=[],bvh=[],bvhRoot=-1;
 let currentCam=null;
-const stats={rays:0,tests:0,nodes:0,hits:0,sky:0,texels:0,traceMs:0,shadeMs:0,finishMs:0,tiles:0,mips:new Uint32Array(10)};
+const stats={rays:0,tests:0,nodes:0,hits:0,sky:0,texels:0,traceMs:0,shadeMs:0,finishMs:0,tiles:0,pcfFull:0,pcfSaved:0,mips:new Uint32Array(10)};
 const mipSizes=[8,16,32,64,128,256,512,1024,2048,4096];
 const palette=[0xff68acf7,0xff69f8d4,0xff9dff73,0xffecfc78,0xffe2b46b,0xffdb8179,0xffbd7ff0,0xff7da8f7,0xffdda0d2,0xffc0f4ec];
 
@@ -542,11 +542,61 @@ function runShadowStep(){
  }
  $('shadowStatus').textContent='Carte de lumière : '+Math.round(job.row/size*100)+' %';
  if(job.row>=size){
-  shadowMap={size:job.size,data:job.data,basis:sunBasis};shadowJob=null;
+  shadowMap={size:job.size,data:job.data,basis:sunBasis,...buildShadowExtrema(job.data,job.size)};shadowJob=null;
   $('shadowStatus').textContent='Carte Z '+size+' × '+size+' prête';
   invalidateImage('Carte de lumière mise à jour');
  }else requestAnimationFrame(runShadowStep);
 }
+
+// V9.1: conservative 3×3 PCF classification.
+// Precomputed min/max over the SAME 3×3 samples preserves identical
+// visible/occluded results for homogeneous neighborhoods. At a true edge,
+// the exact 9-tap V9 PCF is executed unchanged.
+function buildShadowExtrema(data,size){
+ const min=new Float32Array(size*size),max=new Float32Array(size*size);
+ for(let y=1;y<size-1;y++)for(let x=1;x<size-1;x++){
+  let mn=Infinity,mx=-Infinity,at=y*size+x;
+  for(let oy=-1;oy<=1;oy++)for(let ox=-1;ox<=1;ox++){
+   const value=data[at+oy*size+ox];
+   if(value<mn)mn=value;if(value>mx)mx=value;
+  }
+  min[at]=mn;max[at]=mx;
+ }
+ return {min,max};
+}
+function shadowVisibilityFast(x,y,z,enabled){
+ const sm=shadowMap;if(!sm||!enabled)return 1;
+ const {base,right,up,span,dist}=sm.basis,px=x-base[0],py=y-base[1],pz=z-base[2];
+ const factor=sm.size/(2*span),center=sm.size*.5-.5;
+ const ix=Math.round((px*right[0]+py*right[1]+pz*right[2])*factor+center);
+ const iy=Math.round((px*up[0]+py*up[1]+pz*up[2])*factor+center);
+ const size=sm.size;
+ if(ix<1||iy<1||ix>=size-1||iy>=size-1)return 1;
+ const i=iy*size+ix;
+ const testDepth=dist-(px*sun[0]+py*sun[1]+pz*sun[2]);
+ const bias=.095;
+ // All 9 depth samples would pass: return the EXACT original 1.
+ if(testDepth<=sm.min[i]+bias){stats.pcfSaved++;return 1;}
+ // All 9 samples would fail: return the EXACT original .28.
+ if(testDepth>sm.max[i]+bias){stats.pcfSaved++;return .28;}
+ let visible=0;
+ for(let oy=-1;oy<=1;oy++)for(let ox=-1;ox<=1;ox++)
+  visible+=testDepth<=sm.data[i+oy*size+ox]+bias?1:0;
+ stats.pcfFull++;
+ return .28+.72*visible/9;
+}
+// Near-identical exponential fog, linearly interpolated from a precomputed LUT.
+// Step 0.08 world units yields sub-0.001 channel interpolation error in theory.
+const FOG_STEP=0.08,FOG_INV_STEP=1/FOG_STEP,FOG_LUT_MAX=4096;
+const fogLut=new Float32Array(FOG_LUT_MAX+1);
+for(let i=0;i<=FOG_LUT_MAX;i++)fogLut[i]=1-Math.exp(-i*FOG_STEP*.025);
+function fastFogAlpha(t){
+ if(t<0||!Number.isFinite(t))return 1-Math.exp(-t*.025);
+ const f=t*FOG_INV_STEP,i=Math.floor(f);
+ if(i>=FOG_LUT_MAX)return 1-Math.exp(-t*.025);
+ return fogLut[i]+(fogLut[i+1]-fogLut[i])*(f-i);
+}
+
 function shadowVisibility(x,y,z){
  const sm=shadowMap;if(!sm||!$('shadows').checked)return 1;
  const {base,right,up,span,dist}=sm.basis,px=x-base[0],py=y-base[1],pz=z-base[2];
@@ -620,10 +670,11 @@ function shadePixel(cam,x,y,id,t,dx,dy,dz,options){
   base=paletteFlat[mat]||0xff888888;
  }
  if(options.mipColors&&options.textures)return base;
- const shade=(.26+.74*ndotl*shadowVisibility(px+n[0]*.025,py+n[1]*.025,pz+n[2]*.025));
+ const visibility=options.fast?shadowVisibilityFast(px+n[0]*.025,py+n[1]*.025,pz+n[2]*.025,options.shadows):shadowVisibility(px+n[0]*.025,py+n[1]*.025,pz+n[2]*.025);
+ const shade=(.26+.74*ndotl*visibility);
  let r=(base&255)*shade,g=((base>>>8)&255)*shade,b=((base>>>16)&255)*shade;
  if(options.fog){
-  const fog=1-Math.exp(-t*.025);
+  const fog=options.fast?fastFogAlpha(t):1-Math.exp(-t*.025);
   r=r*(1-fog)+skyHorizon[0]*fog;
   g=g*(1-fog)+skyHorizon[1]*fog;
   b=b*(1-fog)+skyHorizon[2]*fog;
@@ -632,7 +683,7 @@ function shadePixel(cam,x,y,id,t,dx,dy,dz,options){
 }
 function resetCounters(){
  stats.rays=0;stats.tests=0;stats.nodes=0;stats.hits=0;stats.sky=0;stats.texels=0;stats.traceMs=0;stats.shadeMs=0;
- stats.finishMs=0;stats.tiles=0;stats.mips.fill(0);
+ stats.finishMs=0;stats.tiles=0;stats.pcfFull=0;stats.pcfSaved=0;stats.mips.fill(0);
 }
 function initBuffers(){
  canvas.width=W;canvas.height=H;
@@ -649,7 +700,8 @@ function invalidateImage(message){
  renderJob={token,index:0,total:countX*countY,countX,
  cam:currentCam,started:performance.now(),
  options:{textures:$('textures').checked,filter:$('filter').value,mipMode:$('mipMode').value,
-   mipColors:$('mipColors').checked,fog:$('fog').checked}};
+   mipColors:$('mipColors').checked,fog:$('fog').checked,
+   fast:$('shadingMode').value==='fast',shadows:$('shadows').checked}};
  pixels.fill(0xffb5915b); // sky-coloured provisional buffer
  $('state').textContent='Rayons en cours';
  $('progressBar').style.width='0%';
@@ -708,6 +760,8 @@ function displayMetrics(){
  $('skyCount').textContent=stats.sky.toLocaleString('fr-FR');
  $('texelCount').textContent=stats.texels.toLocaleString('fr-FR');
  $('mipCount').textContent=mipSizes[best]+' × '+mipSizes[best];
+ $('pcfCount').textContent=stats.pcfFull.toLocaleString('fr-FR');
+ $('pcfSaved').textContent=stats.pcfSaved.toLocaleString('fr-FR');
  $('diagnostics').textContent='Caméra V9 : '+W+'×'+H+
   ' pixels et exactement '+stats.rays.toLocaleString('fr-FR')+
   ' rayons primaires ; '+objects.length+' primitives mathématiques. '+bvh.length+
@@ -718,7 +772,7 @@ function connectUi(){
  for(const [id,label,unit] of sliders){
   $(id).addEventListener('input',()=>{$(label).textContent=$(id).value+unit;invalidateImage('Caméra modifiée')});
  }
- for(const id of ['filter','mipMode','textures','shadows','fog','mipColors'])
+ for(const id of ['shadingMode','filter','mipMode','textures','shadows','fog','mipColors'])
   $(id).addEventListener('change',()=>invalidateImage('Matériau et éclairage modifiés'));
  $('resolution').addEventListener('change',()=>{
   const [w,h]=$('resolution').value.split('x').map(Number);
