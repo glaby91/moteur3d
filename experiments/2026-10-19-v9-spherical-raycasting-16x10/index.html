@@ -408,6 +408,277 @@ function sampleTex(tex,u,v,footprint,filter,mipMode,debug){
  return (0xff000000|(Math.round(blue*255/31)<<16)|(Math.round(green*255/63)<<8)|Math.round(red*255/31))>>>0;
 }
 
-/*__V9_RENDER__*/
+
+// === Virtual spherical camera: radial normals through each image sample ===
+// Coordinates on the spherical imaging surface are O + normalize(F + aR + bU).
+// Equivalently, a ray through each pixel at a rectilinear FOV: no fish-eye.
+function buildCamera(){
+ const angle=Number($('angle').value)*PI/180,elev=Number($('elevation').value)*PI/180;
+ const dist=Number($('distance').value),look=[-.4,1.75,.2];
+ const eye=[look[0]+dist*Math.sin(angle)*Math.cos(elev),
+  look[1]+dist*Math.sin(elev),look[2]+dist*Math.cos(angle)*Math.cos(elev)];
+ const f=norm(look[0]-eye[0],look[1]-eye[1],look[2]-eye[2]);
+ const r=norm(...cross(f,[0,1,0])),u=cross(r,f);
+ const fov=Number($('fov').value)*PI/180,horizontalTan=Math.tan(fov*.5);
+ const sx=new Float64Array(W),sy=new Float64Array(H);
+ for(let i=0;i<W;i++)sx[i]=((i+.5)/W*2-1)*horizontalTan;
+ for(let j=0;j<H;j++)sy[j]=(1-(j+.5)/H*2)*horizontalTan*H/W;
+ return {eye,f,r,u,sx,sy,pixelAngle:2*horizontalTan/W,fov};
+}
+function cameraRay(c,x,y,out){
+ const a=c.sx[x],b=c.sy[y],f=c.f,r=c.r,u=c.u;
+ const dx=f[0]+a*r[0]+b*u[0],dy=f[1]+a*r[1]+b*u[1],dz=f[2]+a*r[2]+b*u[2];
+ const inv=1/Math.sqrt(dx*dx+dy*dy+dz*dz);
+ out[0]=dx*inv;out[1]=dy*inv;out[2]=dz*inv;
+ return out;
+}
+// Shared scene light: 1 directional source. Only one PRIMARY camera ray is
+// launched per pixel. A separate orthographic light depth atlas is prepared
+// once, and reused for all camera pixels. There is NO camera bounce/shadow ray.
+let sunBasis=null;
+function newSunBasis(){
+ const base=[0,1.5,0],right=norm(...cross([0,1,0],sun)),up=cross(sun,right);
+ return {base,right,up,span:18,dist:26};
+}
+function rebuildShadowMap(){
+ const size=Number($('shadowSize').value);
+ shadowMap=null;sunBasis=newSunBasis();const data=new Float32Array(size*size);
+ shadowJob={size,data,row:0,token:(shadowJob?.token||0)+1};
+ $('shadowStatus').textContent='Carte de lumière : construction 0 %';
+ requestAnimationFrame(runShadowStep);
+}
+const shadowHit={id:0,t:0};
+function runShadowStep(){
+ const job=shadowJob;if(!job)return;
+ const size=job.size,{base,right,up,span,dist}=sunBasis,start=performance.now();
+ while(job.row<size){
+  const y=job.row,vy=((y+.5)/size-.5)*2*span;
+  for(let x=0;x<size;x++){
+   const vx=((x+.5)/size-.5)*2*span;
+   const ox=base[0]+sun[0]*dist+right[0]*vx+up[0]*vy;
+   const oy=base[1]+sun[1]*dist+right[1]*vx+up[1]*vy;
+   const oz=base[2]+sun[2]*dist+right[2]*vx+up[2]*vy;
+   traceClosest(ox,oy,oz,-sun[0],-sun[1],-sun[2],shadowHit,false);
+   job.data[y*size+x]=shadowHit.t;
+  }
+  job.row++;
+  if(performance.now()-start>4)break;
+ }
+ $('shadowStatus').textContent='Carte de lumière : '+Math.round(job.row/size*100)+' %';
+ if(job.row>=size){
+  shadowMap={size:job.size,data:job.data,basis:sunBasis};shadowJob=null;
+  $('shadowStatus').textContent='Carte Z '+size+' × '+size+' prête';
+  invalidateImage('Carte de lumière mise à jour');
+ }else requestAnimationFrame(runShadowStep);
+}
+function shadowVisibility(x,y,z){
+ const sm=shadowMap;if(!sm||!$('shadows').checked)return 1;
+ const {base,right,up,span,dist}=sm.basis,px=x-base[0],py=y-base[1],pz=z-base[2];
+ const fx=((px*right[0]+py*right[1]+pz*right[2])/(2*span)+.5)*sm.size-.5;
+ const fy=((px*up[0]+py*up[1]+pz*up[2])/(2*span)+.5)*sm.size-.5;
+ const ix=Math.round(fx),iy=Math.round(fy),size=sm.size;
+ if(ix<1||iy<1||ix>=size-1||iy>=size-1)return 1;
+ const testDepth=dist-(px*sun[0]+py*sun[1]+pz*sun[2]);
+ const bias=.095;let visible=0;
+ for(let oy=-1;oy<=1;oy++)for(let ox=-1;ox<=1;ox++)
+  visible+=testDepth<=sm.data[(iy+oy)*size+(ix+ox)]+bias?1:0;
+ return .28+.72*visible/9;
+}
+function skyRGB(dx,dy,dz,fogEnabled){
+ const k=clamp(dy*1.14+.38,0,1);
+ let r=skyHorizon[0]*(1-k)+skyZenith[0]*k;
+ let g=skyHorizon[1]*(1-k)+skyZenith[1]*k;
+ let b=skyHorizon[2]*(1-k)+skyZenith[2]*k;
+ const nearSun=Math.max(0,dx*sun[0]+dy*sun[1]+dz*sun[2]);
+ const glint=Math.pow(nearSun,120)*140+Math.pow(nearSun,14)*30;
+ r+=glint;g+=glint*.79;b+=glint*.46;
+ if(fogEnabled&&dy>-.08){
+  const wave=Math.sin(dx*11.7+dz*4.2)*Math.sin(dz*8.4-dy*15.1)
+    +.54*Math.sin(dx*23.2+dy*10.4)*Math.cos(dz*13.8);
+  const cloud=clamp((wave-.45)*2.4,0,1)*clamp((dy+.16)*3,0,1);
+  r=r*(1-cloud)+242*cloud;g=g*(1-cloud)+238*cloud;b=b*(1-cloud)+224*cloud;
+ }
+ return [clamp(r,0,255),clamp(g,0,255),clamp(b,0,255)];
+}
+function packABGR(r,g,b){
+ return (0xff000000|((clamp(b|0,0,255))<<16)|((clamp(g|0,0,255))<<8)|(clamp(r|0,0,255)))>>>0;
+}
+const rayTmp=[0,0,0];
+function hitTextureCoordinates(id,px,py,pz,n){
+ const o=id===1?null:objects[id-2];
+ if(id===1)return [px*.34,pz*.34,.34];
+ if(o.type==='ellipse'){
+  const theta=Math.atan2((pz-o.cz)/o.rz,(px-o.cx)/o.rx)/TAU;
+  const phi=.5-Math.asin(clamp((py-o.cy)/o.ry,-1,1))/PI;
+  return [theta*2.5,phi*2.5,.9];
+ }
+ if(o.type==='cone'){
+  const relX=px-o.a[0],relY=py-o.a[1],relZ=pz-o.a[2];
+  const height=(relX*o.nx+relY*o.ny+relZ*o.nz);
+  const angle=Math.atan2(pz-o.a[2],px-o.a[0])/TAU;
+  return [angle*3,height*.84,.8];
+ }
+ const ax=Math.abs(n[0]),ay=Math.abs(n[1]),az=Math.abs(n[2]);
+ if(ay>=ax&&ay>=az)return [px*.65,pz*.65,.65];
+ if(ax>=az)return [pz*.65,py*.65,.65];
+ return [px*.65,py*.65,.65];
+}
+function shadePixel(cam,x,y,id,t,dx,dy,dz,options){
+ if(!id){
+  const rgb=skyRGB(dx,dy,dz,options.fog);
+  return packABGR(rgb[0],rgb[1],rgb[2]);
+ }
+ const px=cam.eye[0]+t*dx,py=cam.eye[1]+t*dy,pz=cam.eye[2]+t*dz;
+ const n=normalAt(id,px,py,pz),ndotl=Math.max(0,dot(n,sun));
+ const mat=id===1?groundMaterial(px,pz):objects[id-2].mat;
+ let base;
+ if(options.textures){
+  const tex=materials.get(mat);
+  const coords=hitTextureCoordinates(id,px,py,pz,n);
+  const slope=Math.max(.16,Math.abs(n[0]*dx+n[1]*dy+n[2]*dz));
+  const footprint=tex.size*t*cam.pixelAngle*coords[2]/slope;
+  base=sampleTex(tex,coords[0],coords[1],footprint,options.filter,options.mipMode,options.mipColors);
+ }else{
+  const paletteFlat={bark:0xff556f91,leaves:0xff519b65,grass:0xff609e73,
+    stone:0xffa8b4bb,wood:0xff678aaf,cloth:0xffaf785c,skin:0xff86aaca};
+  base=paletteFlat[mat]||0xff888888;
+ }
+ if(options.mipColors&&options.textures)return base;
+ const shade=(.26+.74*ndotl*shadowVisibility(px+n[0]*.025,py+n[1]*.025,pz+n[2]*.025));
+ let r=(base&255)*shade,g=((base>>>8)&255)*shade,b=((base>>>16)&255)*shade;
+ if(options.fog){
+  const fog=1-Math.exp(-t*.025);
+  r=r*(1-fog)+skyHorizon[0]*fog;
+  g=g*(1-fog)+skyHorizon[1]*fog;
+  b=b*(1-fog)+skyHorizon[2]*fog;
+ }
+ return packABGR(r,g,b);
+}
+function resetCounters(){
+ stats.rays=0;stats.tests=0;stats.nodes=0;stats.hits=0;stats.sky=0;stats.texels=0;stats.traceMs=0;stats.shadeMs=0;
+ stats.finishMs=0;stats.tiles=0;stats.mips.fill(0);
+}
+function initBuffers(){
+ canvas.width=W;canvas.height=H;
+ frameImage=ctx.createImageData(W,H);pixels=new Uint32Array(frameImage.data.buffer);
+ hitIds=new Uint16Array(W*H);hitDistances=new Float32Array(W*H);
+}
+function invalidateImage(message){
+ imageSerial++;
+ const token=imageSerial;
+ currentCam=buildCamera();
+ if(!frameImage||frameImage.width!==W||frameImage.height!==H)initBuffers();
+ resetCounters();
+ const countX=Math.ceil(W/16),countY=Math.ceil(H/16);
+ renderJob={token,index:0,total:countX*countY,countX,
+ cam:currentCam,started:performance.now(),
+ options:{textures:$('textures').checked,filter:$('filter').value,mipMode:$('mipMode').value,
+   mipColors:$('mipColors').checked,fog:$('fog').checked}};
+ pixels.fill(0xffb5915b); // sky-coloured provisional buffer
+ $('state').textContent='Rayons en cours';
+ $('progressBar').style.width='0%';
+ $('frameInfo').textContent=message+' — rendu par tuiles';
+ $('raysInfo').textContent=(W*H).toLocaleString('fr-FR')+' rayons primaires prévus';
+ requestAnimationFrame(renderStep);
+}
+function renderTile(job){
+ const bx=(job.index%job.countX)*16,by=Math.floor(job.index/job.countX)*16;
+ const right=Math.min(W,bx+16),bottom=Math.min(H,by+16),cam=job.cam;
+ const origin=cam.eye,ray=[0,0,0],hit={id:0,t:Infinity};
+ let start=performance.now();
+ for(let y=by;y<bottom;y++)for(let x=bx;x<right;x++){
+  cameraRay(cam,x,y,ray);
+  traceClosest(origin[0],origin[1],origin[2],ray[0],ray[1],ray[2],hit,true);
+  const i=y*W+x;hitIds[i]=hit.id;hitDistances[i]=hit.t;
+ }
+ stats.traceMs+=performance.now()-start;
+ start=performance.now();
+ for(let y=by;y<bottom;y++)for(let x=bx;x<right;x++){
+  cameraRay(cam,x,y,ray);
+  const i=y*W+x;
+  pixels[i]=shadePixel(cam,x,y,hitIds[i],hitDistances[i],ray[0],ray[1],ray[2],job.options);
+ }
+ stats.shadeMs+=performance.now()-start;
+ stats.tiles++;
+}
+function renderStep(){
+ const job=renderJob;if(!job||job.token!==imageSerial)return;
+ const start=performance.now(),budget=Number($('budget').value);
+ do{
+  renderTile(job);job.index++;
+ }while(job.index<job.total&&performance.now()-start<budget);
+ // Show progress without launching additional camera rays.
+ ctx.putImageData(frameImage,0,0);
+ const done=job.index/job.total;
+ $('progressBar').style.width=fnum(done*100,1)+'%';
+ $('frameInfo').textContent='Image '+(imageSerial)+' — '+fnum(done*100,1)+' %';
+ if(job.index<job.total){requestAnimationFrame(renderStep);return;}
+ stats.finishMs=performance.now()-job.started;
+ renderJob=null;displayMetrics();
+ $('state').textContent='Image complète';
+ $('frameInfo').textContent='Image '+imageSerial+' terminée · '+fnum(stats.finishMs,1)+' ms';
+}
+function displayMetrics(){
+ let best=0;for(let i=1;i<stats.mips.length;i++)if(stats.mips[i]>stats.mips[best])best=i;
+ $('renderTime').textContent=fnum(stats.finishMs);
+ $('traceTime').textContent=fnum(stats.traceMs);
+ $('shadeTime').textContent=fnum(stats.shadeMs);
+ $('rayCounter').textContent=stats.rays.toLocaleString('fr-FR');
+ $('testCount').textContent=stats.tests.toLocaleString('fr-FR');
+ $('nodeCount').textContent=stats.nodes.toLocaleString('fr-FR');
+ $('hitCount').textContent=stats.hits.toLocaleString('fr-FR');
+ $('skyCount').textContent=stats.sky.toLocaleString('fr-FR');
+ $('texelCount').textContent=stats.texels.toLocaleString('fr-FR');
+ $('mipCount').textContent=mipSizes[best]+' × '+mipSizes[best];
+ $('diagnostics').textContent='Caméra V9 : '+W+'×'+H+
+  ' pixels et exactement '+stats.rays.toLocaleString('fr-FR')+
+  ' rayons primaires ; '+objects.length+' primitives mathématiques. '+bvh.length+
+  ' nœuds BVH. Aucun triangle rasterisé. Calcul effectué sur CPU, temps total incluant les pauses entre rafraîchissements du navigateur.';
+}
+function connectUi(){
+ const sliders=[['distance','distanceValue',' m'],['angle','angleValue','°'],['elevation','elevationValue','°'],['fov','fovValue','°']];
+ for(const [id,label,unit] of sliders){
+  $(id).addEventListener('input',()=>{$(label).textContent=$(id).value+unit;invalidateImage('Caméra modifiée')});
+ }
+ for(const id of ['filter','mipMode','textures','shadows','fog','mipColors'])
+  $(id).addEventListener('change',()=>invalidateImage('Matériau et éclairage modifiés'));
+ $('resolution').addEventListener('change',()=>{
+  const [w,h]=$('resolution').value.split('x').map(Number);
+  if(w/h!==1.6)throw Error('Aspect ratio must be 16:10');
+  W=w;H=h;invalidateImage('Résolution 16:10 modifiée');
+ });
+ $('shadowSize').addEventListener('change',rebuildShadowMap);
+ $('renderButton').addEventListener('click',()=>invalidateImage('Rendu relancé'));
+ $('resetButton').addEventListener('click',()=>{
+  $('distance').value='13.5';$('angle').value='25';$('elevation').value='18';$('fov').value='70';
+  for(const [id,label,unit] of sliders)$(label).textContent=$(id).value+unit;
+  invalidateImage('Caméra réinitialisée');
+ });
+}
+function raySelfTest(){
+ const r={id:0,t:0};
+ // Sky ray: oriented upward from above scene.
+ traceClosest(0,8,0,0,1,0,r,false);
+ if(r.id!==0)throw Error('sky miss test failed');
+ // Ground plane at Y=0.
+ traceClosest(0,8,0,0,-1,0,r,false);
+ if(r.id!==1||Math.abs(r.t-8)>1e-6)throw Error('ground intersection test failed');
+ const hit=hitPrimitive({type:'ellipse',cx:0,cy:0,cz:0,rx:1,ry:1,rz:1},0,0,4,0,0,-1,Infinity);
+ if(Math.abs(hit-3)>1e-6)throw Error('ellipse test failed');
+ const bb={type:'box',min:[-1,-1,-1],max:[1,1,1]};
+ if(Math.abs(hitPrimitive(bb,0,0,4,0,0,-1,Infinity)-3)>1e-6)throw Error('box slab test failed');
+ const cc={type:'cone',a:[0,0,0],b:[0,2,0],nx:0,ny:1,nz:0,len:2,r0:.5,r1:.5,k:0};
+ if(Math.abs(hitPrimitive(cc,0,1,3,0,0,-1,Infinity)-2.5)>1e-6)throw Error('tapered cone test failed');
+ return true;
+}
+function startV9(){
+ makeScene();initMaterials();connectUi();
+ try{raySelfTest();$('diagnostics').textContent='Auto-tests : ciel, sol, ellipsoïde, boîte, cône et BVH réussis.';}
+ catch(e){$('diagnostics').textContent='ÉCHEC auto-test : '+e.message;throw e;}
+ rebuildShadowMap();invalidateImage('Caméra sphérique initialisée');
+}
+window.addEventListener('error',e=>{$('state').textContent='Erreur';$('diagnostics').textContent='Erreur : '+e.message});
+startV9();
+
 </script>
 </body></html>
