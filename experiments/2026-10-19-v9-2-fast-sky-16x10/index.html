@@ -71,6 +71,9 @@ input[type=range]{width:100%;accent-color:var(--accent)}input[type=checkbox]{acc
 <label>Rotation caméra <span id="angleValue">25°</span><input id="angle" type="range" min="-180" max="180" value="25"></label>
 <label>Élévation caméra <span id="elevationValue">18°</span><input id="elevation" type="range" min="-5" max="50" value="18"></label>
 <label>Champ horizontal <span id="fovValue">70°</span><input id="fov" type="range" min="35" max="105" value="70"></label>
+<label>Précision du rendu
+<select id="renderScale"><option value="1" selected>Native — 1 rayon par pixel</option><option value="0.5">Rapide — moitié largeur/hauteur (×4 moins de rayons)</option></select>
+</label>
 <label>Ciel / nuages <select id="skyMode"><option value="fast" selected>Rapide — grille atmosphérique</option><option value="reference">Exact — calcul par pixel</option></select></label><label>Traitement de couleur <select id="shadingMode"><option value="fast" selected>Optimisé — ombres et brouillard</option><option value="reference">V9 — référence intacte</option></select></label>
 <label>Filtrage texture
 <select id="filter"><option value="nearest">Plus proche</option><option value="bilinear" selected>Bilinéaire (rapide)</option><option value="trilinear">Trilinéaire</option></select></label>
@@ -86,7 +89,7 @@ input[type=range]{width:100%;accent-color:var(--accent)}input[type=checkbox]{acc
 <label>Budget de calcul par rafraîchissement <select id="budget"><option value="8">8 ms</option><option value="14" selected>14 ms</option><option value="24">24 ms</option><option value="40">40 ms</option></select></label>
 <div class="row"><button class="primary" id="renderButton">↻ Recalculer l'image</button><button id="resetButton">Caméra initiale</button></div>
 <div class="notice" id="textureStatus">Textures : préparation des mipmaps…</div>
-<div class="notice">Le rendu peut comparer les mêmes rayons caméra et les mêmes primitives en mode original ou optimisé. La surface de projection est sphérique : chaque direction de vue est radiale, donc normale à cette surface. Les directions sont réparties pour obtenir une perspective naturelle 16:10 sans effet fisheye marqué.</div>
+<div class="notice">En résolution native, un rayon est lancé pour chaque pixel affiché. Le mode rapide, facultatif, calcule à la moitié de la largeur et de la hauteur puis agrandit l’image : il lance un rayon par pixel calculé et non par pixel affiché, soit quatre fois moins de rayons.</div><div class="notice">Le rendu peut comparer les mêmes rayons caméra et les mêmes primitives en mode original ou optimisé. La surface de projection est sphérique : chaque direction de vue est radiale, donc normale à cette surface. Les directions sont réparties pour obtenir une perspective naturelle 16:10 sans effet fisheye marqué.</div>
 <div class="notice">Le moteur recherche uniquement le premier impact d'un rayon caméra. Les ombres utilisent une **carte de profondeur calculée séparément pour l'unique lumière**, sans rayon secondaire lancé depuis les pixels caméra. Z caméra par rasterisation : aucun.</div>
 </div></section>
 </div></main>
@@ -98,7 +101,8 @@ const fnum=(v,n=1)=>Number(v).toFixed(n),norm=(x,y,z)=>{const l=Math.hypot(x,y,z
 const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 const sun=norm(-.55,.88,.36),skyZenith=[58,115,181],skyHorizon=[187,205,211];
-let W=640,H=400,frameImage=null,pixels=null,hitIds=null,hitDistances=null;
+let W=640,H=400,displayW=640,displayH=400,renderScale=1,frameImage=null,pixels=null,hitIds=null,hitDistances=null;
+let scaledCanvas=null,scaledContext=null;
 let imageSerial=0,renderJob=null,shadowJob=null,shadowMap=null,preparedTexHigh=false;
 let materials=new Map(),objects=[],bvh=[],bvhRoot=-1;
 let currentCam=null;
@@ -768,11 +772,19 @@ function resetCounters(){
  stats.finishMs=0;stats.tiles=0;stats.pcfFull=0;stats.pcfSaved=0;stats.cloudEvaluations=0;stats.mips.fill(0);
 }
 function initBuffers(){
- canvas.width=W;canvas.height=H;
- frameImage=ctx.createImageData(W,H);pixels=new Uint32Array(frameImage.data.buffer);
+ canvas.width=displayW;canvas.height=displayH;
+ if(renderScale!==1){
+  if(!scaledCanvas){scaledCanvas=document.createElement('canvas');scaledContext=scaledCanvas.getContext('2d',{alpha:false});}
+  scaledCanvas.width=W;scaledCanvas.height=H;
+ }
+ frameImage=(renderScale===1?ctx:scaledContext).createImageData(W,H);pixels=new Uint32Array(frameImage.data.buffer);
  hitIds=new Uint16Array(W*H);hitDistances=new Float32Array(W*H);
 }
 function invalidateImage(message){
+ const requested=$('resolution').value.split('x').map(Number);
+ displayW=requested[0];displayH=requested[1];
+ renderScale=+$('renderScale').value;const nextW=Math.round(displayW*renderScale),nextH=Math.round(displayH*renderScale);
+ if(W!==nextW||H!==nextH){W=nextW;H=nextH;frameImage=null;}
  imageSerial++;
  const token=imageSerial;
  currentCam=buildCamera();
@@ -788,7 +800,7 @@ function invalidateImage(message){
  $('state').textContent='Rayons en cours';
  $('progressBar').style.width='0%';
  $('frameInfo').textContent=message+' — rendu par tuiles';
- $('raysInfo').textContent=(W*H).toLocaleString('fr-FR')+' rayons primaires prévus';
+ $('raysInfo').textContent=(W*H).toLocaleString('fr-FR')+' rayons pour '+displayW+' × '+displayH+' affichés';
  requestAnimationFrame(renderStep);
 }
 
@@ -865,7 +877,12 @@ function renderStep(){
   renderTile(job);job.index++;
  }while(job.index<job.total&&performance.now()-start<budget);
  // Show progress without launching additional camera rays.
- ctx.putImageData(frameImage,0,0);
+ if(renderScale===1)ctx.putImageData(frameImage,0,0);
+ else{
+  scaledContext.putImageData(frameImage,0,0);
+  ctx.imageSmoothingEnabled=true;
+  ctx.drawImage(scaledCanvas,0,0,displayW,displayH);
+ }
  const done=job.index/job.total;
  $('progressBar').style.width=fnum(done*100,1)+'%';
  $('frameInfo').textContent='Image '+(imageSerial)+' — '+fnum(done*100,1)+' %';
@@ -892,7 +909,7 @@ function displayMetrics(){
  $('cloudCount').textContent=stats.cloudEvaluations.toLocaleString('fr-FR');
  $('diagnostics').textContent='Caméra V9 : '+W+'×'+H+
   ' pixels et exactement '+stats.rays.toLocaleString('fr-FR')+
-  ' rayons primaires ; '+objects.length+' primitives mathématiques. '+bvh.length+
+  ' rayons primaires pour '+displayW+'×'+displayH+' pixels affichés (calcul '+W+'×'+H+') ; '+objects.length+' primitives mathématiques. '+bvh.length+
   ' nœuds BVH. Aucun triangle rasterisé. Calcul effectué sur CPU, temps total incluant les pauses entre rafraîchissements du navigateur.';
 }
 function connectUi(){
@@ -900,7 +917,7 @@ function connectUi(){
  for(const [id,label,unit] of sliders){
   $(id).addEventListener('input',()=>{$(label).textContent=$(id).value+unit;invalidateImage('Caméra modifiée')});
  }
- for(const id of ['skyMode','shadingMode','filter','mipMode','textures','shadows','fog','mipColors'])
+ for(const id of ['renderScale','skyMode','shadingMode','filter','mipMode','textures','shadows','fog','mipColors'])
   $(id).addEventListener('change',()=>invalidateImage('Matériau et éclairage modifiés'));
  $('resolution').addEventListener('change',()=>{
   const [w,h]=$('resolution').value.split('x').map(Number);
