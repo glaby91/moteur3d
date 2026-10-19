@@ -102,7 +102,7 @@ let W=640,H=400,frameImage=null,pixels=null,hitIds=null,hitDistances=null;
 let imageSerial=0,renderJob=null,shadowJob=null,shadowMap=null,preparedTexHigh=false;
 let materials=new Map(),objects=[],bvh=[],bvhRoot=-1;
 let currentCam=null;
-const stats={rays:0,tests:0,nodes:0,hits:0,sky:0,texels:0,traceMs:0,shadeMs:0,finishMs:0,tiles:0,pcfFull:0,pcfSaved:0,mips:new Uint32Array(10)};
+const stats={rays:0,tests:0,nodes:0,hits:0,sky:0,texels:0,traceMs:0,shadeMs:0,finishMs:0,tiles:0,pcfFull:0,pcfSaved:0,cloudEvaluations:0,mips:new Uint32Array(10)};
 const mipSizes=[8,16,32,64,128,256,512,1024,2048,4096];
 const palette=[0xff68acf7,0xff69f8d4,0xff9dff73,0xffecfc78,0xffe2b46b,0xffdb8179,0xffbd7ff0,0xff7da8f7,0xffdda0d2,0xffc0f4ec];
 
@@ -765,7 +765,7 @@ function shadePixelFast(cam,x,y,id,t,dx,dy,dz,options){
 
 function resetCounters(){
  stats.rays=0;stats.tests=0;stats.nodes=0;stats.hits=0;stats.sky=0;stats.texels=0;stats.traceMs=0;stats.shadeMs=0;
- stats.finishMs=0;stats.tiles=0;stats.pcfFull=0;stats.pcfSaved=0;stats.mips.fill(0);
+ stats.finishMs=0;stats.tiles=0;stats.pcfFull=0;stats.pcfSaved=0;stats.cloudEvaluations=0;stats.mips.fill(0);
 }
 function initBuffers(){
  canvas.width=W;canvas.height=H;
@@ -783,7 +783,7 @@ function invalidateImage(message){
  cam:currentCam,started:performance.now(),
  options:{textures:$('textures').checked,filter:$('filter').value,mipMode:$('mipMode').value,
    mipColors:$('mipColors').checked,fog:$('fog').checked,
-   fast:$('shadingMode').value==='fast',shadows:$('shadows').checked}};
+   fast:$('shadingMode').value==='fast',shadows:$('shadows').checked,skyFast:$('skyMode').value==='fast'}};
  pixels.fill(0xffb5915b); // sky-coloured provisional buffer
  $('state').textContent='Rayons en cours';
  $('progressBar').style.width='0%';
@@ -791,6 +791,41 @@ function invalidateImage(message){
  $('raysInfo').textContent=(W*H).toLocaleString('fr-FR')+' rayons primaires prévus';
  requestAnimationFrame(renderStep);
 }
+
+// V9.2: sky-only 4px angular cache. Rays are still traced ONCE per pixel
+// and intersections are identical. Sky shading samples a 5x5 grid for each
+// 16x16 tile (25 instead of as many as 256 expensive cloud evaluations).
+const SKY_GRID_STEP=4,SKY_GRID_SIDE=5;
+const SKY_PIXELS=new Uint32Array(SKY_GRID_SIDE*SKY_GRID_SIDE);
+const SKY_RAY=[0,0,0];
+function skyGridRay(cam,x,y,out){
+ const sx=((x+.5)/W*2-1)*Math.tan(cam.fov*.5);
+ const sy=(1-(y+.5)/H*2)*Math.tan(cam.fov*.5)*H/W;
+ const f=cam.f,r=cam.r,u=cam.u;
+ const dx=f[0]+sx*r[0]+sy*u[0],dy=f[1]+sx*r[1]+sy*u[1],dz=f[2]+sx*r[2]+sy*u[2];
+ const inv=1/Math.sqrt(dx*dx+dy*dy+dz*dz);
+ out[0]=dx*inv;out[1]=dy*inv;out[2]=dz*inv;return out;
+}
+function prepareSkyGrid(cam,bx,by,fog){
+ for(let j=0;j<SKY_GRID_SIDE;j++)for(let i=0;i<SKY_GRID_SIDE;i++){
+  skyGridRay(cam,bx+i*SKY_GRID_STEP,by+j*SKY_GRID_STEP,SKY_RAY);
+  const color=skyRGB(SKY_RAY[0],SKY_RAY[1],SKY_RAY[2],fog);
+  SKY_PIXELS[j*SKY_GRID_SIDE+i]=packABGR(color[0],color[1],color[2]);
+  stats.cloudEvaluations++;
+ }
+}
+function skyInterpolated(localX,localY){
+ const cx=localX>>2,cy=localY>>2;
+ const fx=(localX&3)*.25,fy=(localY&3)*.25;
+ const a=SKY_PIXELS[cy*5+cx],b=SKY_PIXELS[cy*5+cx+1],
+  c=SKY_PIXELS[(cy+1)*5+cx],d=SKY_PIXELS[(cy+1)*5+cx+1];
+ const f0=(1-fx)*(1-fy),f1=fx*(1-fy),f2=(1-fx)*fy,f3=fx*fy;
+ const red=Math.round((a&255)*f0+(b&255)*f1+(c&255)*f2+(d&255)*f3);
+ const green=Math.round(((a>>>8)&255)*f0+((b>>>8)&255)*f1+((c>>>8)&255)*f2+((d>>>8)&255)*f3);
+ const blue=Math.round(((a>>>16)&255)*f0+((b>>>16)&255)*f1+((c>>>16)&255)*f2+((d>>>16)&255)*f3);
+ return (0xff000000|(blue<<16)|(green<<8)|red)>>>0;
+}
+
 function renderTile(job){
  const bx=(job.index%job.countX)*16,by=Math.floor(job.index/job.countX)*16;
  const right=Math.min(W,bx+16),bottom=Math.min(H,by+16),cam=job.cam;
@@ -806,10 +841,19 @@ function renderTile(job){
  stats.traceMs+=performance.now()-start;
  start=performance.now();
  const pixelShader=job.options.fast?shadePixelFast:shadePixel;
+ const fastSky=job.options.skyFast;
+ let skyReady=false;
+ if(fastSky){
+  let skyVisible=false;
+  for(let y=by;y<bottom&&!skyVisible;y++)for(let x=bx;x<right;x++){
+   if(hitIds[y*W+x]===0){skyVisible=true;break;}
+  }
+  if(skyVisible){prepareSkyGrid(cam,bx,by,job.options.fog);skyReady=true;}
+ }
  for(let y=by;y<bottom;y++)for(let x=bx;x<right;x++){
   const rayIndex=((y-by)*16+(x-bx))*3;
   const i=y*W+x;
-  pixels[i]=pixelShader(cam,x,y,hitIds[i],hitDistances[i],tileRayDirections[rayIndex],tileRayDirections[rayIndex+1],tileRayDirections[rayIndex+2],job.options);
+  pixels[i]=skyReady&&hitIds[i]===0?skyInterpolated(x-bx,y-by):pixelShader(cam,x,y,hitIds[i],hitDistances[i],tileRayDirections[rayIndex],tileRayDirections[rayIndex+1],tileRayDirections[rayIndex+2],job.options);
  }
  stats.shadeMs+=performance.now()-start;
  stats.tiles++;
@@ -845,6 +889,7 @@ function displayMetrics(){
  $('mipCount').textContent=mipSizes[best]+' × '+mipSizes[best];
  $('pcfCount').textContent=stats.pcfFull.toLocaleString('fr-FR');
  $('pcfSaved').textContent=stats.pcfSaved.toLocaleString('fr-FR');
+ $('cloudCount').textContent=stats.cloudEvaluations.toLocaleString('fr-FR');
  $('diagnostics').textContent='Caméra V9 : '+W+'×'+H+
   ' pixels et exactement '+stats.rays.toLocaleString('fr-FR')+
   ' rayons primaires ; '+objects.length+' primitives mathématiques. '+bvh.length+
@@ -855,7 +900,7 @@ function connectUi(){
  for(const [id,label,unit] of sliders){
   $(id).addEventListener('input',()=>{$(label).textContent=$(id).value+unit;invalidateImage('Caméra modifiée')});
  }
- for(const id of ['shadingMode','filter','mipMode','textures','shadows','fog','mipColors'])
+ for(const id of ['skyMode','shadingMode','filter','mipMode','textures','shadows','fog','mipColors'])
   $(id).addEventListener('change',()=>invalidateImage('Matériau et éclairage modifiés'));
  $('resolution').addEventListener('change',()=>{
   const [w,h]=$('resolution').value.split('x').map(Number);
