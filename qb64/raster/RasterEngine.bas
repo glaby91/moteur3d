@@ -17,7 +17,7 @@ TYPE Triangle
     c AS Vertex
     material AS INTEGER
 END TYPE
-DECLARE FUNCTION Vtx (x AS SINGLE, y AS SINGLE, z AS SINGLE, u AS SINGLE, v AS SINGLE) AS Vertex
+DECLARE SUB MakeVtx (dst AS Vertex, x AS SINGLE, y AS SINGLE, z AS SINGLE, u AS SINGLE, v AS SINGLE)
 DECLARE SUB PushTri (a AS Vertex, b AS Vertex, c AS Vertex, mat AS INTEGER)
 DECLARE SUB PushQuad (a AS Vertex, b AS Vertex, c AS Vertex, d AS Vertex, mat AS INTEGER)
 DECLARE SUB BuildScene ()
@@ -65,11 +65,9 @@ LOOP
 _FREEIMAGE offscreen
 SYSTEM
 
-FUNCTION Vtx (x AS SINGLE, y AS SINGLE, z AS SINGLE, u AS SINGLE, v AS SINGLE) AS Vertex
-    DIM t AS Vertex
-    t.x = x: t.y = y: t.z = z: t.u = u: t.v = v
-    Vtx = t
-END FUNCTION
+SUB MakeVtx (dst AS Vertex, x AS SINGLE, y AS SINGLE, z AS SINGLE, u AS SINGLE, v AS SINGLE)
+    dst.x = x: dst.y = y: dst.z = z: dst.u = u: dst.v = v
+END SUB
 
 SUB PushTri (a AS Vertex, b AS Vertex, c AS Vertex, mat AS INTEGER)
     IF countFaces >= UBOUND(faces) THEN EXIT SUB
@@ -90,16 +88,17 @@ SUB SphereMesh (x AS SINGLE, y AS SINGLE, z AS SINGLE, rx AS SINGLE, ry AS SINGL
         p0 = -PI / 2 + PI * j / 8: p1 = -PI / 2 + PI * (j + 1) / 8
         FOR i = 0 TO 11
             t0 = 2 * PI * i / 12: t1 = 2 * PI * (i + 1) / 12
-            a = Vtx(x + rx * COS(p0) * COS(t0), y + ry * SIN(p0), z + rz * COS(p0) * SIN(t0), i / 12, j / 8)
-            b = Vtx(x + rx * COS(p0) * COS(t1), y + ry * SIN(p0), z + rz * COS(p0) * SIN(t1), (i + 1) / 12, j / 8)
-            c = Vtx(x + rx * COS(p1) * COS(t1), y + ry * SIN(p1), z + rz * COS(p1) * SIN(t1), (i + 1) / 12, (j + 1) / 8)
-            d = Vtx(x + rx * COS(p1) * COS(t0), y + ry * SIN(p1), z + rz * COS(p1) * SIN(t0), i / 12, (j + 1) / 8)
+            MakeVtx a, x + rx * COS(p0) * COS(t0), y + ry * SIN(p0), z + rz * COS(p0) * SIN(t0), i / 12, j / 8
+            MakeVtx b, x + rx * COS(p0) * COS(t1), y + ry * SIN(p0), z + rz * COS(p0) * SIN(t1), (i + 1) / 12, j / 8
+            MakeVtx c, x + rx * COS(p1) * COS(t1), y + ry * SIN(p1), z + rz * COS(p1) * SIN(t1), (i + 1) / 12, (j + 1) / 8
+            MakeVtx d, x + rx * COS(p1) * COS(t0), y + ry * SIN(p1), z + rz * COS(p1) * SIN(t0), i / 12, (j + 1) / 8
             PushQuad a, b, c, d, mat
         NEXT i
     NEXT j
 END SUB
 
 SUB BuildScene
+    DIM q1 AS Vertex, q2 AS Vertex, q3 AS Vertex, q4 AS Vertex
     DIM x AS INTEGER, z AS INTEGER, j AS INTEGER
     DIM a AS SINGLE, b AS SINGLE, lo AS SINGLE, hi AS SINGLE, r1 AS SINGLE, r2 AS SINGLE
     DIM ax AS SINGLE, bx AS SINGLE, az AS SINGLE, bz AS SINGLE
@@ -107,7 +106,11 @@ SUB BuildScene
     ' Ground: true triangles, no Canvas tricks; UV coordinates are world-aligned.
     FOR x = -8 TO 7
         FOR z = -8 TO 7
-            PushQuad Vtx(x, 0, z, x / 2, z / 2), Vtx(x + 1, 0, z, (x + 1) / 2, z / 2), Vtx(x + 1, 0, z + 1, (x + 1) / 2, (z + 1) / 2), Vtx(x, 0, z + 1, x / 2, (z + 1) / 2), 1
+            MakeVtx q1, x, 0, z, x / 2, z / 2
+            MakeVtx q2, x + 1, 0, z, (x + 1) / 2, z / 2
+            MakeVtx q3, x + 1, 0, z + 1, (x + 1) / 2, (z + 1) / 2
+            MakeVtx q4, x, 0, z + 1, x / 2, (z + 1) / 2
+            PushQuad q1, q2, q3, q4, 1
         NEXT z
     NEXT x
     ' Genuine polygon mesh trunk with rings (cylinder as triangles).
@@ -115,15 +118,31 @@ SUB BuildScene
         lo = 2 * PI * j / 12: hi = 2 * PI * (j + 1) / 12
         ax = -1.7 + .28 * COS(lo): az = .4 + .28 * SIN(lo)
         bx = -1.7 + .28 * COS(hi): bz = .4 + .28 * SIN(hi)
-        PushQuad Vtx(ax, 0, az, j / 12, 0), Vtx(bx, 0, bz, (j + 1) / 12, 0), Vtx(-1.7 + .18 * COS(hi), 2.7, .4 + .18 * SIN(hi), (j + 1) / 12, 1), Vtx(-1.7 + .18 * COS(lo), 2.7, .4 + .18 * SIN(lo), j / 12, 1), 2
+        MakeVtx q1, ax, 0, az, j / 12, 0
+        MakeVtx q2, bx, 0, bz, (j + 1) / 12, 0
+        MakeVtx q3, -1.7 + .18 * COS(hi), 2.7, .4 + .18 * SIN(hi), (j + 1) / 12, 1
+        MakeVtx q4, -1.7 + .18 * COS(lo), 2.7, .4 + .18 * SIN(lo), j / 12, 1
+        PushQuad q1, q2, q3, q4, 2
     NEXT j
     SphereMesh -1.7, 3.1, .4, 1.28, 1.16, 1.1, 3
     SphereMesh -2.35, 2.76, .35, .73, .74, .72, 3
     SphereMesh -1.04, 2.85, .66, .82, .74, .79, 3
     ' Stone wall and a flat wooden bench.
-    PushQuad Vtx(-6, 0, -3, 0, 0), Vtx(6, 0, -3, 4, 0), Vtx(6, 1.5, -3, 4, 1), Vtx(-6, 1.5, -3, 0, 1), 4
-    PushQuad Vtx(1.1, .8, 1.2, 0, 0), Vtx(3.4, .8, 1.2, 1, 0), Vtx(3.4, .8, 1.8, 1, 1), Vtx(1.1, .8, 1.8, 0, 1), 2
-    PushQuad Vtx(1.1, .8, 1.8, 0, 0), Vtx(3.4, .8, 1.8, 1, 0), Vtx(3.4, 1.55, 1.8, 1, 1), Vtx(1.1, 1.55, 1.8, 0, 1), 2
+    MakeVtx q1, -6, 0, -3, 0, 0
+    MakeVtx q2, 6, 0, -3, 4, 0
+    MakeVtx q3, 6, 1.5, -3, 4, 1
+    MakeVtx q4, -6, 1.5, -3, 0, 1
+    PushQuad q1, q2, q3, q4, 4
+    MakeVtx q1, 1.1, .8, 1.2, 0, 0
+    MakeVtx q2, 3.4, .8, 1.2, 1, 0
+    MakeVtx q3, 3.4, .8, 1.8, 1, 1
+    MakeVtx q4, 1.1, .8, 1.8, 0, 1
+    PushQuad q1, q2, q3, q4, 2
+    MakeVtx q1, 1.1, .8, 1.8, 0, 0
+    MakeVtx q2, 3.4, .8, 1.8, 1, 0
+    MakeVtx q3, 3.4, 1.55, 1.8, 1, 1
+    MakeVtx q4, 1.1, 1.55, 1.8, 0, 1
+    PushQuad q1, q2, q3, q4, 2
 END SUB
 
 SUB Project (p AS Vertex, sx AS SINGLE, sy AS SINGLE, iz AS SINGLE)
