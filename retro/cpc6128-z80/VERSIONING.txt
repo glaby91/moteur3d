@@ -1,0 +1,22 @@
+CPC6128-Z80 RAYCASTING / VERSIONING.TXT
+BRANCHE: raycasting
+FORMAT: assembleur Z80, CPC6128 128 Ko
+DATE : 2026-10-19
+SOURCE : CPC_RAY80.asm
+
+V0.1.0 - EXPERIMENTAL / PROPOSITION INITIALE
+ - 80 rayons horizontaux (1 rayon / octet CPC Mode 1, 4 pixels).
+ - Sol et ciel en couleur pleine, murs de profondeur variable.
+ - Recherche carte 16x16 en point fixe 8.8, 63 marches maximum.
+ - ROM basse / ROM haute desactivees via Gate Array &8D.
+ - Interruptions Z80 desactivees et aucun appel firmware.
+ - RAM4 carte, RAM5 table de hauteur, RAM6 motif, RAM7 cache.
+ - Adresses ecran via table de 200 lignes CPC.
+ - ORG &8000, chargement initial possible par BASIC, RESET pour sortir.
+ - PAS un port complet du moteur V9.2.
+ - Compilation assembleur / execution sous emulateur PAS ENCORE TESTEES.
+
+FUTUR V0.2.0
+ - Vrai DDA de tuiles et rotation par LUT sinus/cosinus.
+ - Textures 8x8 / 16x16 et mesure du temps image.
+ - Controle clavier via PPI sans firmware.
