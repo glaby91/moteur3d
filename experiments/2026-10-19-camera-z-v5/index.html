@@ -525,8 +525,6 @@ function zRaster(a,b,c,col,tag,w,h,depth,pixels,tags,m){
  const y0=Math.max(0,Math.floor(Math.min(ay,by,cy))),y1=Math.min(h-1,Math.ceil(Math.max(ay,by,cy)));
  if(x0>x1||y0>y1)return;
  const inv=1/area,one=1/a[2],two=1/b[2],three=1/c[2];
- const dx0=(by-cy)*-inv,dy0=(cx-bx)*inv;
- const dx1=(cy-ay)*-inv,dy1=(ax-cx)*inv;
  // The barycentric derivatives use the same orientation as the signed area.
  const d0x=(by-cy)*inv,d0y=(cx-bx)*inv;
  const d1x=(cy-ay)*inv,d1y=(ax-cx)*inv;
@@ -554,25 +552,61 @@ function zCollect(faces,vertices,camera,col,tag){
  if(pp.some(v=>!v))return;
  for(let j=1;j+1<pp.length;j++)faces.push({a:pp[0],b:pp[j],c:pp[j+1],col,tag});
 }
+const groundSampleCache={w:0,h:0,visibility:null,xIndex:null,xFrac:null,yIndex:null,yFrac:null};
+function prepareGroundGrid(width,height){
+ const w=Math.ceil(width/5),h=Math.ceil(height/5);
+ if(groundSampleCache.w===w&&groundSampleCache.h===h)return;
+ groundSampleCache.w=w;groundSampleCache.h=h;
+ groundSampleCache.visibility=new Float32Array(w*h);
+ groundSampleCache.xIndex=new Int32Array(width);groundSampleCache.xFrac=new Float32Array(width);
+ groundSampleCache.yIndex=new Int32Array(height);groundSampleCache.yFrac=new Float32Array(height);
+ for(let x=0;x<width;x++){
+  const q=Math.max(0,Math.min(w-1,(x+.5)*w/width-.5));
+  const base=Math.min(w-2,Math.floor(q));
+  groundSampleCache.xIndex[x]=base;groundSampleCache.xFrac[x]=q-base;
+ }
+ for(let y=0;y<height;y++){
+  const q=Math.max(0,Math.min(h-1,(y+.5)*h/height-.5));
+  const base=Math.min(h-2,Math.floor(q));
+  groundSampleCache.yIndex[y]=base;groundSampleCache.yFrac[y]=q-base;
+ }
+}
 function zGroundShadows(camera,map,profile){
  if(!map)return;
- const start=performance.now(),invF=1/camera.f,w=W,h=H;
- let count=0;
- for(let y=0;y<h;y++){
-  const vv=(y+.5-h/2)*invF,yy=camera.forward[1]-vv*camera.up[1],row=y*w;
-  for(let x=0;x<w;x++){
-   const i=row+x;if(zSurface[i]!==1)continue;
-   const uu=(x+.5-w/2)*invF,ry=yy+uu*camera.right[1];
-   if(ry>=-.001)continue;
-   const t=(-.035-camera.eye[1])/ry;if(t<=0)continue;
+ const start=performance.now(),w=W,h=H,invF=1/camera.f;
+ prepareGroundGrid(w,h);
+ const sw=groundSampleCache.w,sh=groundSampleCache.h,visibility=groundSampleCache.visibility;
+ // Cast rays only on a coarser camera grid (typically 128×96 at 640×480).
+ // Bilinear reconstruction is applied strictly to Z-visible ground pixels.
+ for(let y=0;y<sh;y++){
+  const vv=((y+.5)*h/sh-h/2)*invF,vy=camera.forward[1]-vv*camera.up[1];
+  for(let x=0;x<sw;x++){
+   const i=y*sw+x,uu=((x+.5)*w/sw-w/2)*invF,dy=vy+uu*camera.right[1];
+   if(dy>=-.001){visibility[i]=1;continue}
+   const t=(-.035-camera.eye[1])/dy;
+   if(t<=0){visibility[i]=1;continue}
    const wx=camera.eye[0]+t*(camera.forward[0]+uu*camera.right[0]-vv*camera.up[0]);
    const wz=camera.eye[2]+t*(camera.forward[2]+uu*camera.right[2]-vv*camera.up[2]);
-   const lit=visibilityFromLight([wx,.016,wz],map,.085),k=1-.44*(1-lit);
-   const r=Math.round(130*k),g=Math.round(157*k),b=Math.round(121*k);
-   zColor[i]=(0xff000000|(b<<16)|(g<<8)|r)>>>0;count++;
+   visibility[i]=Math.abs(wx)<=13&&Math.abs(wz)<=13?
+    visibilityFromLight([wx,.016,wz],map,.085):1;
   }
  }
- zMetrics.ground=count;profile.shadow+=performance.now()-start;
+ const xi=groundSampleCache.xIndex,xf=groundSampleCache.xFrac;
+ const yi=groundSampleCache.yIndex,yf=groundSampleCache.yFrac;
+ let visibleGround=0;
+ for(let y=0;y<h;y++){
+  const dy=yf[y],base=yi[y]*sw,row=y*w;
+  for(let x=0;x<w;x++){
+   const idx=row+x;if(zSurface[idx]!==1)continue;
+   const ix=xi[x],dx=xf[x],p=base+ix;
+   const a=visibility[p]+(visibility[p+1]-visibility[p])*dx;
+   const b=visibility[p+sw]+(visibility[p+sw+1]-visibility[p+sw])*dx;
+   const lit=a+(b-a)*dy,scale=1-.44*(1-lit);
+   const r=Math.round(130*scale),g=Math.round(157*scale),blue=Math.round(121*scale);
+   zColor[idx]=(0xff000000|(blue<<16)|(g<<8)|r)>>>0;visibleGround++;
+  }
+ }
+ zMetrics.ground=visibleGround;profile.shadow+=performance.now()-start;
 }
 function renderZCamera(){
  const p=newProfile(),pose=renderPose(),camera=cameraParameters(pose.yaw),light=lightPos(pose.sun),st=displayActor();
