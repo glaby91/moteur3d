@@ -2,7 +2,15 @@
 
 Moteur 3D expérimental (archives QBasic + démonstrations HTML/JavaScript).
 
-## Version expérimentale actuelle — V9, ray casting sphérique 16:10 (19 octobre 2026)
+## Version expérimentale actuelle — V9.1, ombrage CPU optimisé (19 octobre 2026)
+
+**[Ouvrir la V9.1 — ray casting 16:10 et éclairage accéléré](experiments/2026-10-19-v9-1-shading-optimized-16x10/index.html)** · **[Documentation, comparaison et mesures V9.1](experiments/2026-10-19-v9-1-shading-optimized-16x10/README.md)**
+
+À la suite d'une mesure **1920×1200 : 1 371,3 ms par image, dont 1 005,8 ms d'éclairage et textures** dans le navigateur utilisateur, la V9.1 conserve **exactement un rayon primaire par pixel** et la caméra sphérique 16:10 de la V9. Elle améliore le calcul de couleur par **courts-circuits rigoureux du PCF 3×3 dans les zones d'ombre ou de lumière homogènes**, **brouillard exponentiel tabulé** et **suppression d'allocations par pixel pour normales et UV**, avec matériaux mis en cache. Un sélecteur permet de revenir au shader **V9 de référence** pour une comparaison A/B en vrai navigateur. À 1920×1200 dans un banc JavaScript simulé, la passe couleur passe de **5 824 ms à 5 039 ms** (−13,5 %), sans changement de rayons ou d'intersections ; les couleurs diffèrent au maximum de 1/255 sur 148 pixels. **Le gain réel sur le poste utilisateur reste à mesurer.**
+
+---
+
+## Version précédente — V9, ray casting sphérique 16:10 (19 octobre 2026)
 
 **[Ouvrir le code HTML autonome du simulateur V9](experiments/2026-10-19-v9-spherical-raycasting-16x10/index.html)** · [Documentation V9, tests et limites](experiments/2026-10-19-v9-spherical-raycasting-16x10/README.md)
 
