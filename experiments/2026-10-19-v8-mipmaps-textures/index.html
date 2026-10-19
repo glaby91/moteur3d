@@ -641,6 +641,267 @@ function reprojectFromDepth(targetCam,p){
 // V5 CAMERA Z RASTER : full opaque framebuffer, perspective-correct depth.
 let zImage=null,zColor=null,zDepth=null,zSurface=null,zMetrics={tests:0,writes:0,triangles:0,ground:0};
 const Z_SKY=0xffdcc4a2,Z_GROUND=0xff799d82; // RGBA little-endian 0xAABBGGRR.
+
+// =============================================================================
+// V8: REAL RGB565 TEXTURE MIP PYRAMIDS (8x8 ... 4096x4096)
+// Sourced procedurally in this standalone HTML so no external assets are needed.
+// Texture UV is interpolated perspective-correctly only AFTER camera Z wins.
+// MIP LOD is selected from per-pixel UV screen derivatives (distance + slope).
+// =============================================================================
+let texturesEnabled=true,textureFilter='trilinear',mipDebug=false,textureLodOverride='auto';
+const TEXTURE_SIZES=[8,16,32,64,128,256,512,1024,2048,4096];
+const textureLibrary=new Map();
+const mipPalette=[0xff5555ff,0xff55c6ff,0xff55ffff,0xff55ff7a,0xffb6ff55,
+ 0xffffff55,0xffffc655,0xffff8055,0xffff55a9,0xffbf55ff]; // ABGR
+let textureJob=null,textureGenerationDone=false,lastMipGalleryId='',textureTotalBytes=0;
+const textureStats={samples:0,texels:0,bySize:new Uint32Array(10),lodSum:0,lodMin:Infinity,lodMax:0};
+function resetTextureStats(){
+ textureStats.samples=0;textureStats.texels=0;textureStats.bySize.fill(0);
+ textureStats.lodSum=0;textureStats.lodMin=Infinity;textureStats.lodMax=0;
+}
+function pack565(r,g,b){
+ return ((Math.min(31,Math.max(0,r>>3))<<11)|
+ (Math.min(63,Math.max(0,g>>2))<<5)|Math.min(31,Math.max(0,b>>3)))&65535;
+}
+function texNoise(x,y,seed){
+ let v=Math.imul((x|0)+seed*741103597,1597334677)^Math.imul((y|0)+seed*108121,3812015801);
+ v=Math.imul(v^(v>>>16),2246822507);
+ return ((v^(v>>>13))>>>0)/4294967295;
+}
+function texelProcedural(id,x,y,size){
+ const seed=id==='bark'?1:id==='leaves'?2:id==='grass'?3:id==='stone'?4:5;
+ const grain=texNoise(x,y,seed)-.5;
+ const coarse=texNoise(x>>5,y>>5,seed+12)-.5;
+ let r,g,b;
+ if(id==='bark'){
+  const wr= Math.sin(x*.048 + 1.8*Math.sin(y*.011)+coarse*.9);
+  const fissure=Math.pow(Math.max(0,wr),11);
+  r=111+34*grain+25*coarse-55*fissure;
+  g=81+24*grain+16*coarse-36*fissure;
+  b=55+17*grain+12*coarse-23*fissure;
+ }else if(id==='leaves'){
+  const vein=Math.abs(Math.sin(x*.085+y*.025));
+  r=64+35*grain+18*coarse+13*vein;
+  g=133+40*grain+22*coarse+20*vein;
+  b=67+28*grain+14*coarse;
+ }else if(id==='grass'){
+  const blade=Math.sin(x*.32+y*.19);
+  r=96+27*grain+16*coarse+9*blade;
+  g=129+36*grain+26*coarse+8*blade;
+  b=70+19*grain+18*coarse;
+ }else if(id==='stone'){
+  const joints=((x%113<4)||(y%79<4))?-.3:0;
+  r=182+24*grain+25*coarse+35*joints;
+  g=169+22*grain+23*coarse+36*joints;
+  b=152+17*grain+21*coarse+40*joints;
+ }else{
+  const fiber=Math.sin(x*.12+2*Math.sin(y*.02));
+  r=136+27*grain+20*coarse+17*fiber;
+  g=96+20*grain+16*coarse+10*fiber;
+  b=66+15*grain+13*coarse+8*fiber;
+ }
+ return pack565(r,g,b);
+}
+function makeRGB565Source(id,size){
+ const data=new Uint16Array(size*size);
+ for(let y=0;y<size;y++)for(let x=0;x<size;x++)data[y*size+x]=texelProcedural(id,x,y,size);
+ return data;
+}
+function downsampleRGB565Rows(src,srcSize,dst,firstRow,count){
+ const next=srcSize>>1,end=Math.min(next,firstRow+count);
+ for(let y=firstRow;y<end;y++){
+  const a=(y*2)*srcSize,b=a+srcSize,dy=y*next;
+  for(let x=0;x<next;x++){
+   const n=x<<1,p=src[a+n],q=src[a+n+1],r=src[b+n],t=src[b+n+1];
+   const R=(((p>>>11)+(q>>>11)+(r>>>11)+(t>>>11)+2)>>2);
+   const G=((((p>>>5)&63)+((q>>>5)&63)+((r>>>5)&63)+((t>>>5)&63)+2)>>2);
+   const B=(((p&31)+(q&31)+(r&31)+(t&31)+2)>>2);
+   dst[dy+x]=(R<<11)|(G<<5)|B;
+  }
+ }
+ return end;
+}
+function createMipChainSync(name,size){
+ const levels=[{size,data:makeRGB565Source(name,size)}];
+ let current=size;
+ while(current>8){
+  const next=current>>1,data=new Uint16Array(next*next);
+  downsampleRGB565Rows(levels[levels.length-1].data,current,data,0,next);
+  levels.push({size:next,data});current=next;
+ }
+ return {id:name,size,levels,ready:true};
+}
+function countTextureMemory(){
+ let bytes=0;for(const tex of textureLibrary.values())
+  for(const level of tex.levels)bytes+=level.data.byteLength;
+ if(textureJob){bytes+=textureJob.source.byteLength;
+  for(const level of textureJob.levels)if(level.data!==textureJob.source)bytes+=level.data.byteLength;}
+ textureTotalBytes=bytes;return bytes;
+}
+function initTextureSystem(){
+ for(const name of ['bark','leaves','grass','stone','wood'])
+  textureLibrary.set(name,createMipChainSync(name,256));
+ textureGenerationDone=false;
+ // Construct an actual 4096x4096 RGB565 image in bounded slices.
+ // The fallback 256x256 material remains in use during construction.
+ textureJob={id:'bark',baseSize:4096,source:new Uint16Array(4096*4096),
+  row:0,mode:'base',levels:[],nextData:null,nextRow:0};
+ $('textureBuildStatus').textContent='4096² RGB565 : génération progressive démarrée (écorce)';
+ countTextureMemory();
+ requestAnimationFrame(progressTextureBuild);
+}
+function progressTextureBuild(){
+ const job=textureJob;if(!job)return;
+ const start=performance.now(),maxMs=3.0;
+ if(job.mode==='base'){
+  while(job.row<job.baseSize){
+   const y=job.row++,offset=y*job.baseSize;
+   for(let x=0;x<job.baseSize;x++)job.source[offset+x]=texelProcedural(job.id,x,y,job.baseSize);
+   if(job.row%4===0&&performance.now()-start>=maxMs)break;
+  }
+  if(job.row>=job.baseSize){
+   job.levels=[{size:4096,data:job.source}];
+   job.mode='mip';
+  }
+ }else{
+  let last=job.levels[job.levels.length-1];
+  if(last.size>8){
+   const next=last.size>>1;
+   if(!job.nextData){job.nextData=new Uint16Array(next*next);job.nextRow=0}
+   while(job.nextRow<next){
+    job.nextRow=downsampleRGB565Rows(last.data,last.size,job.nextData,job.nextRow,16);
+    if(performance.now()-start>=maxMs)break;
+   }
+   if(job.nextRow===next){
+    job.levels.push({size:next,data:job.nextData});
+    job.nextData=null;
+   }
+  }
+  if(job.levels[job.levels.length-1].size===8){
+   textureLibrary.set(job.id,{id:job.id,size:4096,levels:job.levels,ready:true});
+   textureJob=null;textureGenerationDone=true;lastMipGalleryId='';
+   countTextureMemory();
+   $('textureBuildStatus').textContent='Pyramide 4096 → 8 : prête, 10 niveaux RGB565';
+   drawMipGallery();return;
+  }
+ }
+ requestAnimationFrame(progressTextureBuild);
+}
+function materialTexture(kind){
+ if(kind==='treewood'||kind==='wood')return textureLibrary.get('bark');
+ if(kind==='leaves')return textureLibrary.get('leaves');
+ if(kind==='ground')return textureLibrary.get('grass');
+ if(kind==='wall'||kind==='pillar'||kind==='arch'||kind==='planter'||kind==='stone'||kind==='path')
+  return textureLibrary.get('stone');
+ if(kind==='bench')return textureLibrary.get('wood');
+ return null;
+}
+function uvFromWorld(v,normal,kind){
+ if(kind==='ground'||kind==='path')return [v[0]*.35,v[2]*.35];
+ const nx=Math.abs(normal[0]),ny=Math.abs(normal[1]),nz=Math.abs(normal[2]);
+ let a,b;
+ if(ny>=nx&&ny>=nz){a=v[0];b=v[2]}
+ else if(nx>=nz){a=v[2];b=v[1]}
+ else{a=v[0];b=v[1]}
+ const k=kind==='treewood'||kind==='wood'?.58:kind==='leaves'?1.2:.48;
+ return [a*k,b*k];
+}
+function rgba565(c){
+ return [((c>>>11)&31)*255/31,((c>>>5)&63)*255/63,(c&31)*255/31];
+}
+function rgb565Nearest(level,u,v){
+ const size=level.size,data=level.data;
+ const x=(u-Math.floor(u))*size,y=(v-Math.floor(v))*size;
+ textureStats.texels++;return data[(Math.floor(y)%size)*size+(Math.floor(x)%size)];
+}
+function rgb565Bilinear(level,u,v){
+ const size=level.size,data=level.data;
+ const x=(u-Math.floor(u))*size-.5,y=(v-Math.floor(v))*size-.5;
+ const fx=x-Math.floor(x),fy=y-Math.floor(y),ix=Math.floor(x),iy=Math.floor(y);
+ const x0=(ix%size+size)%size,y0=(iy%size+size)%size,x1=(x0+1)%size,y1=(y0+1)%size;
+ const a=data[y0*size+x0],b=data[y0*size+x1],c=data[y1*size+x0],d=data[y1*size+x1];
+ const w00=(1-fx)*(1-fy),w10=fx*(1-fy),w01=(1-fx)*fy,w11=fx*fy;
+ textureStats.texels+=4;
+ const r=((a>>>11)*w00+(b>>>11)*w10+(c>>>11)*w01+(d>>>11)*w11);
+ const g=(((a>>>5)&63)*w00+((b>>>5)&63)*w10+((c>>>5)&63)*w01+((d>>>5)&63)*w11);
+ const bl=((a&31)*w00+(b&31)*w10+(c&31)*w01+(d&31)*w11);
+ return [r*255/31,g*255/63,bl*255/31];
+}
+function colorFromMip(tex,u,v,footprint,lighting){
+ if(!tex)return 0xff000000;
+ let lod=Math.max(0,Math.min(tex.levels.length-1,Math.log2(Math.max(1,footprint))));
+ if(textureLodOverride!=='auto'){
+  const wanted=Number(textureLodOverride);
+  lod=Math.max(0,Math.min(tex.levels.length-1,Math.log2(tex.size/wanted)));
+ }
+ let low=Math.floor(lod),high=Math.min(tex.levels.length-1,low+1),mix=lod-low;
+ if(textureFilter==='nearest'){low=Math.round(lod);high=low;mix=0}
+ if(textureFilter==='bilinear'){low=Math.round(lod);high=low;mix=0}
+ const level=tex.levels[low],level2=tex.levels[high];
+ let rgb;
+ if(textureFilter==='nearest')rgb=rgba565(rgb565Nearest(level,u,v));
+ else{
+  rgb=rgb565Bilinear(level,u,v);
+  if(textureFilter==='trilinear'&&high!==low){
+   const second=rgb565Bilinear(level2,u,v);
+   rgb=[rgb[0]+(second[0]-rgb[0])*mix,
+     rgb[1]+(second[1]-rgb[1])*mix,rgb[2]+(second[2]-rgb[2])*mix];
+  }
+ }
+ const active=level.size,idx=TEXTURE_SIZES.indexOf(active);
+ if(idx>=0)textureStats.bySize[idx]++;
+ textureStats.samples++;textureStats.lodSum+=lod;
+ textureStats.lodMin=Math.min(textureStats.lodMin,lod);
+ textureStats.lodMax=Math.max(textureStats.lodMax,lod);
+ if(mipDebug)return mipPalette[idx<0?0:idx];
+ const f=Math.max(0,Math.min(1.5,lighting));
+ return (0xff000000|(Math.min(255,Math.round(rgb[2]*f))<<16)|
+ (Math.min(255,Math.round(rgb[1]*f))<<8)|Math.min(255,Math.round(rgb[0]*f)))>>>0;
+}
+function drawMipGallery(){
+ const tex=textureLibrary.get('bark');if(!tex)return;
+ const key=tex.size;if(lastMipGalleryId===key)return;lastMipGalleryId=key;
+ for(const size of TEXTURE_SIZES){
+  const cv=$('mipPreview'+size),gc=cv.getContext('2d');
+  const img=gc.createImageData(64,64),bytes=img.data;
+  const level=tex.levels.find(x=>x.size===size);
+  if(level){
+   for(let y=0;y<64;y++)for(let x=0;x<64;x++){
+    const c=level.data[Math.floor(y*size/64)*size+Math.floor(x*size/64)];
+    const j=(y*64+x)*4;bytes[j]=((c>>>11)&31)*255/31;
+    bytes[j+1]=((c>>>5)&63)*255/63;bytes[j+2]=(c&31)*255/31;bytes[j+3]=255;
+   }
+  }else{
+   for(let i=0;i<bytes.length;i+=4){bytes[i]=20;bytes[i+1]=33;bytes[i+2]=48;bytes[i+3]=255}
+  }
+  gc.putImageData(img,0,0);
+ }
+}
+function updateTextureUi(){
+ if(!textureLibrary.size)return;
+ const mem=countTextureMemory();
+ $('textureMemory').textContent='RAM RGB565 : '+(mem/1048576).toFixed(1)+' Mio';
+ const samples=textureStats.samples,hist=textureStats.bySize;
+ let best=0;
+ for(let i=1;i<hist.length;i++)if(hist[i]>hist[best])best=i;
+ $('textureActiveMip').textContent='Mip dominant : '+(samples?TEXTURE_SIZES[best]+'×'+TEXTURE_SIZES[best]:'aucun pixel texturé');
+ $('textureSampleStats').textContent=samples.toLocaleString('fr-FR')+
+  ' pixels texturés · '+textureStats.texels.toLocaleString('fr-FR')+' lectures texels';
+ if(textureJob)$('textureBuildStatus').textContent=textureJob.mode==='base'?
+  'Bark 4096² : '+Math.round(100*textureJob.row/4096)+' % généré':
+  'Construction mipmaps : '+textureJob.levels.length+' / 10 niveaux';
+ drawMipGallery();
+}
+function testMipSampler(){
+ const tex=createMipChainSync('bark',64);
+ if(tex.levels.length!==4||tex.levels[3].size!==8)throw Error('mip ladder 64->8 invalid');
+ for(const [x,y] of [[.12,.33],[.95,-.11]]){
+  const c=colorFromMip(tex,x,y,64,1);
+  if(!Number.isFinite(c))throw Error('mip sample invalid');
+ }
+ return {levels:tex.levels.map(x=>x.size),samples:textureStats.samples};
+}
+
 function zInit(){
  if(zImage&&zImage.width===W&&zImage.height===H)return;
  zImage=ctx.createImageData(W,H);zColor=new Uint32Array(zImage.data.buffer);
