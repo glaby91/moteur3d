@@ -1,0 +1,38 @@
+MOTEUR3D / BRANCHE RAYCASTING — VERSIONING
+Date de reference : 2026-10-19
+Branche GitHub : raycasting
+Statut : sauvegarde independante de l'architecture de lancer de rayons.
+
+RAYCAST 1.0.0 — SNAPSHOT HTML
+  engine/index.html
+  Copie autonome et figee de V9.2 (experiments/2026-10-19-v9-2-fast-sky-16x10/index.html).
+  16:10, un rayon primaire par pixel CALCULE.
+  Objets mathematiques : ellipsoides, boites, cones, plan.
+  BVH avec filtrage par tuiles 16x16, ombres Z pre-calculees,
+  textures RGB565 et mipmaps 8x8 a 4096x4096.
+  Precision native, equilibree (75%) ou rapide (50%).
+  En mode reduit, moins de rayons que le nombre de pixels affiches.
+
+QB64-RAYCAST 1.0.0 — PORT EXPERIMENTAL
+  qb64/raycasting/RayCastingEngine.bas
+  Veritable recherche de premiere intersection analytique sur spheres,
+  boites et plan de sol, sans raster de triangles.
+  Un rayon par pixel interne : 320x200 (defaut), 640x400 (option).
+  Controles : A/D, +/- , H, ESC.
+  Ombre au sol simplifiee / contact predefini, pas de shadow atlas.
+  Pas de BVH dans le port QB64 pour la version demonstration.
+  Statut : source non compilee en absence de compilateur QB64-PE ici.
+
+CPC6128 Z80 — V0.1.0 (ULTRA LEGER / POUR LE FUN)
+  retro/cpc6128-z80/CPC_RAY80.asm
+  retro/cpc6128-z80/README.md
+  80 rayons de colonne, 2.5D, Mode1 CPC 320x200,
+  banques 4/5/6/7 accessibles via 4000-7FFF,
+  ROM bas/haut OFF, interruptions desactivees.
+  Aucune compilation / verification emulateur realiser sur cette machine.
+
+CONSERVATION
+  Branche master et experiences anterieures non supprimees.
+  Snapshot HTML fige dans engine/index.html.
+
+Note : VERSIONING.txt constitue la chronologie de CETTE branche.
