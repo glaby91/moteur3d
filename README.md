@@ -134,3 +134,13 @@ Par rapport à V5 (2 410 triangles), le décor et le personnage sont réellement
 - [Compte rendu et mesures V7](experiments/2026-10-19-camera-z-v7-soft-shadows-detailed-tree/README.md)
 
 L'arbre comporte 7 972 triangles originaux réellement modelés et 32 volumes ellipsoïdaux de feuillage. La caméra en rend 28 416 pour la scène complète. Les contours des ombres sont adoucis avec PCF 4 × 4 à trois niveaux, et les silhouettes disposent d'un lissage colorimétrique optionnel sans changer les profondeurs. Le tampon Z lumière traite les 8 422 triangles natifs pertinents, avec une source directionnelle unique. Fluidité et rendu à valider visuellement en navigateur.
+
+---
+
+## Nouveauté rétro : raster CPC6128 à couleurs pleines (Z80, Mode 0)
+
+- [Code assembleur Mode 0](retro/cpc6128-z80/CPC_RASTER_MODE0.asm)
+- [Documentation et fonctionnement 128 Ko](retro/cpc6128-z80/README.md)
+- [Versioning CPC](retro/cpc6128-z80/VERSIONING.txt)
+
+Démonstration de rasterisation de 24 triangles sans textures, en 16 couleurs avec huit poses précalculées, dans la branche `raster`. **Source non assemblée et performances non mesurées**. La branche `raycasting` conserve séparément son mini-moteur Z80 par rayons.
