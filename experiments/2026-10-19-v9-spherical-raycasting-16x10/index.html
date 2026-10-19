@@ -347,15 +347,25 @@ function initMaterials(){
  requestAnimationFrame(advanceHighTexture);
 }
 let highTexture=null;
+// Build the detailed 4096² bark source from the immediately available 256²
+// procedural base plus true per-texel fine grain. This avoids 16.8 million
+// sine evaluations and keeps the build responsive to camera movements.
+function highBark565(base,x,y){
+ const c=base[(((y>>4)&255)*256)+((x>>4)&255)];
+ const g=(hash2(x,y,41)-.5)*28;
+ return pack565(((c>>>11)&31)*255/31+g,((c>>>5)&63)*255/63+g*.74,(c&31)*255/31+g*.48);
+}
+
 function advanceHighTexture(){
  const h=highTexture;if(!h)return;
- const t0=performance.now();
+ const t0=performance.now(),budget=renderJob?2:10;
  if(h.stage===0){
+  const base=materials.get('bark').levels[0].data;
   while(h.row<4096){
    const off=h.row*4096;
-   for(let x=0;x<4096;x++)h.source[off+x]=procedural('bark',x,h.row);
+   for(let x=0;x<4096;x++)h.source[off+x]=highBark565(base,x,h.row);
    h.row++;
-   if(performance.now()-t0>3)break;
+   if(performance.now()-t0>budget)break;
   }
   if(h.row===4096){h.levels.push({size:4096,data:h.source});h.stage=1;}
  }else{
@@ -363,7 +373,7 @@ function advanceHighTexture(){
   if(last.size>8){
    if(!h.down){h.down=new Uint16Array((last.size>>1)**2);h.downRow=0;}
    do{h.downRow=mipDown(last.data,last.size,h.down,h.downRow,12)}
-    while(h.downRow<(last.size>>1)&&performance.now()-t0<3);
+    while(h.downRow<(last.size>>1)&&performance.now()-t0<budget);
    if(h.downRow===last.size>>1){h.levels.push({size:last.size>>1,data:h.down});h.down=null;}
   }
   if(h.levels.length===10){
