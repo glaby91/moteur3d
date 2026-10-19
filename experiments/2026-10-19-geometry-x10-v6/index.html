@@ -6,11 +6,11 @@
 </style></head><body>
 <header><div><h1>◈ Moteur 3D V6 — 24 100 triangles, double Z</h1><p>10 fois plus de triangles réels · Z caméra + ombres lumineuses V4 · test de performance</p></div><div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap"><button id="popout">↗ Fenêtre séparée</button><span class="status" id="runState">Démarrage…</span></div></header>
 <div class="page">
-<div class="views"><section class="panel"><h2><span>01 / Image vue par la caméra</span><small id="renderBadge">Rendu en cours…</small></h2><canvas class="view" id="main" width="640" height="480"></canvas><div class="canvas-foot"><span id="frameStatus">Image de référence</span><span id="imageCounter">—</span></div></section>
-<section class="panel"><h2><span>02 / Scène extérieure — géométrie et anticipation</span><small>10 images/s</small></h2><canvas class="view" id="outside" width="640" height="480"></canvas><div class="canvas-foot"><span>Œil · écran · arbre · personnage · source mobile</span><span>Trajectoire N à N+5</span></div></section></div>
+<div class="views"><section class="panel"><h2><span>01 / Image vue par la caméra</span><small id="renderBadge">Rendu en cours…</small></h2><canvas class="view" id="main" width="320" height="240"></canvas><div class="canvas-foot"><span id="frameStatus">Image de référence</span><span id="imageCounter">—</span></div></section>
+<section class="panel"><h2><span>02 / Scène extérieure — géométrie et anticipation</span><small>10 images/s</small></h2><canvas class="view" id="outside" width="320" height="240"></canvas><div class="canvas-foot"><span>Œil · écran · arbre · personnage · source mobile</span><span>Trajectoire N à N+5</span></div></section></div>
 <section class="panel" style="margin-top:12px"><h2>Commandes de la simulation</h2><div class="controlbar">
 <label>Mode <select id="mode"><option value="zcam" selected>V5 — Z caméra par pixel</option><option value="stable">V4 — Stable (tri moyen)</option><option value="tiles">V4 — Tuiles anti-stuttering</option><option value="temporal" disabled>Reprojection Z (désactivée pour collision)</option><option value="classic">Classique (tout recalculer)</option></select></label>
-<label>Maillage <select id="meshDensity"><option value="1">×1 — 2 410 triangles</option><option value="10" selected>×10 — 24 100 triangles</option></select></label><label>Résolution <select id="resolution"><option value="320x240">320 × 240</option><option value="640x480" selected>640 × 480</option><option value="800x600">800 × 600</option></select></label>
+<label>Maillage <select id="meshDensity"><option value="1">×1 — 2 410 triangles</option><option value="10" selected>×10 — 24 100 triangles</option></select></label><label>Résolution <select id="resolution"><option value="320x240" selected>320 × 240</option><option value="640x480">640 × 480</option><option value="800x600">800 × 600</option></select></label>
 <label>Anticipation <select id="horizon"><option value="1">1 image</option><option value="2">2 images</option><option value="3">3 images</option><option value="4">4 images</option><option value="5" selected>5 images</option></select></label>
 <label style="display:none">Image clé Z tous les <select id="keyEvery"><option value="2">2 affichages</option><option value="3" selected>3 affichages</option><option value="4">4 affichages</option></select></label>
 <label><input type="checkbox" id="orbit" checked> Rotation caméra</label>
@@ -53,7 +53,7 @@
 <p class="notice"><strong>Limite :</strong> le rendu caméra reste en Canvas 2D avec tri moyen des triangles, sans Z-buffer caméra. Le cache partiel des tuiles doit être invalidé quand un objet mobile peut modifier son ombre, afin de ne pas laisser d'ombres fantômes.</p></div></div></section>
 <section class="panel" style="margin-top:12px"><h2>V6 — Stress-test géométrique ×10</h2>
 <p class="statline" id="densityStatus">Génération de 24 100 triangles…</p>
-<p class="notice">Les triangles sont réellement subdivisés en 10 faces coplanaires, sans changer les silhouettes et collisions. Ce test multiplie les primitives traitées par les Z-buffers, sans ajouter de détails courbes. Comparer ×1 et ×10 dans « Maillage » avec la même résolution.</p>
+<p class="notice">Les triangles sont réellement subdivisés en 10 faces coplanaires, sans changer les silhouettes et collisions. Ce test multiplie les primitives traitées par les Z-buffers, sans ajouter de détails courbes. Comparer ×1 et ×10 dans « Maillage » avec la même résolution. Démarrage volontaire en 320 × 240 pour limiter les pauses CPU ; 640 × 480 et 800 × 600 restent disponibles.</p>
 <p class="notice">Résultat du contrôle d'aire : <strong id="densityCheck">En cours</strong></p>
 </section>
 <section class="panel" style="margin-top:12px"><h2>V5 — Tampon Z caméra (rendu opaque correct)</h2><div class="views" style="grid-template-columns:1fr 2fr;align-items:start">
@@ -74,7 +74,7 @@
 <script>
 'use strict';
 const $=id=>document.getElementById(id), canvas=$('main'),ctx=canvas.getContext('2d',{alpha:false}),out=$('outside'),og=out.getContext('2d',{alpha:false});
-let W=640,H=480,background=document.createElement('canvas'),bg=background.getContext('2d',{alpha:false}),baseYaw=0,baseLight=0,baseReady=false,baseCamera=null,baseDepth=null,basePixels=null,reprojectColors=null,reprojectDepth=null,debugHoles=0,debugReprojectionPixels=0;
+let W=320,H=240,background=document.createElement('canvas'),bg=background.getContext('2d',{alpha:false}),baseYaw=0,baseLight=0,baseReady=false,baseCamera=null,baseDepth=null,basePixels=null,reprojectColors=null,reprojectDepth=null,debugHoles=0,debugReprojectionPixels=0;
 let mode='zcam',horizon=5,keyEvery=3,orbitEnabled=true,sunEnabled=true,shadowsEnabled=true,overviewEnabled=true,paused=false,temporalLightEnabled=true,cacheStaticEnabled=true;
 let frame=0,simStep=0,simAccum=0,lastClock=performance.now(),lastUi=0,lastOverview=0,lastFps=performance.now(),fpsCounter=0,fps=0;
 let time=0,yaw=3.34,solar=0,actorSpeed=.95;
