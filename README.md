@@ -51,3 +51,10 @@ Toute la géométrie de la scène V5 est divisée en dix triangles coplanaires p
 - [Résultats des tests de charge et limites](experiments/2026-10-19-geometry-x10-v6/README.md)
 
 Par rapport à V5 (2 410 triangles), le décor et le personnage sont réellement subdivisés en **24 100 triangles**. La scène conserve ses silhouettes et sa géométrie, afin d'isoler le coût lié au nombre de primitives. Le sélecteur « Maillage » compare ×1 et ×10, avec 320×240 au démarrage par prudence. Le Z-buffer caméra par pixel et l'unique source lumineuse à ombres Z restent actifs. Tests d'occlusion et de couverture réussis ; performances sur navigateur réel à mesurer et optimisations CPU nécessaires.
+
+## V7 — Arbre détaillé et ombres plus diffuses (19 octobre 2026)
+
+- [Simulateur V7 : arbre haute géométrie et ombres PCF adoucies](experiments/2026-10-19-camera-z-v7-soft-shadows-detailed-tree/index.html)
+- [Compte rendu et mesures V7](experiments/2026-10-19-camera-z-v7-soft-shadows-detailed-tree/README.md)
+
+L'arbre comporte 7 972 triangles originaux réellement modelés et 32 volumes ellipsoïdaux de feuillage. La caméra en rend 28 416 pour la scène complète. Les contours des ombres sont adoucis avec PCF 4 × 4 à trois niveaux, et les silhouettes disposent d'un lissage colorimétrique optionnel sans changer les profondeurs. Le tampon Z lumière traite les 8 422 triangles natifs pertinents, avec une source directionnelle unique. Fluidité et rendu à valider visuellement en navigateur.
