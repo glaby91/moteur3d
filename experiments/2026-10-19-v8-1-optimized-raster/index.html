@@ -944,12 +944,12 @@ function makeFastMipState(tex,lod,lighting){
   debug:mipDebug,debugColor,index:idx,lod,
   reads:filter==='nearest'?1:hi===lo?4:8};
 }
-function fastTexturePixel(st,u,v){
- textureStats.samples++;textureStats.texels+=st.reads;
+function fastTexturePixel(st,u,v,recordStats=true){
+ if(recordStats){textureStats.samples++;textureStats.texels+=st.reads;
  if(st.index>=0)textureStats.bySize[st.index]++;
  textureStats.lodSum+=st.lod;
  if(st.lod<textureStats.lodMin)textureStats.lodMin=st.lod;
- if(st.lod>textureStats.lodMax)textureStats.lodMax=st.lod;
+ if(st.lod>textureStats.lodMax)textureStats.lodMax=st.lod;}
  if(st.debug)return st.debugColor;
  let pixel;
  if(st.filter==='nearest'){
@@ -1115,23 +1115,37 @@ function zShadeDeferred(faces,owners,w,h,depth,pixels){
  const block=FAST_RASTER_TILE;
  for(let by=0;by<h;by+=block)for(let bx=0;bx<w;bx+=block){
   const ymax=Math.min(h,by+block),xmax=Math.min(w,bx+block);
-  const tileStates=new Map();
+  const tileStates=new Map();let recentId=-2,recentEntry=null;
   for(let y=by;y<ymax;y++){
    const row=y*w;
    for(let x=bx;x<xmax;x++){
     const i=row+x,id=owners[i];if(id<0)continue;
     const face=faces[id],spec=face.texSpec;
     if(!spec||!texturesEnabled){pixels[i]=face.col;continue;}
-    let value=tileStates.get(id);
-    if(!value){
-     const plane=uvFacePlane(face),sampler=createDeferredSampler(face,plane,bx,by,xmax-1,ymax-1);
-     value={plane,sampler};tileStates.set(id,value);
+    let value;
+    if(id===recentId)value=recentEntry;
+    else{
+     value=tileStates.get(id);
+     if(!value){
+      const plane=uvFacePlane(face),sampler=createDeferredSampler(face,plane,bx,by,xmax-1,ymax-1);
+      value={plane,sampler,hits:0};tileStates.set(id,value);
+     }
+     recentId=id;recentEntry=value;
     }
     const plane=value.plane,dx=x+.5-plane.ax,dy=y+.5-plane.ay,invZ=depth[i];
     const u=(plane.u0+plane.dUdx*dx+plane.dUdy*dy)/invZ;
     const v=(plane.v0+plane.dVdx*dx+plane.dVdy*dy)/invZ;
-    pixels[i]=fastTexturePixel(value.sampler,u,v);
+    pixels[i]=fastTexturePixel(value.sampler,u,v,false);value.hits++;
    }
+  }
+  // Aggregate texture stats ONCE per visible face per tile (not per pixel).
+  for(const item of tileStates.values()){
+   const st=item.sampler,count=item.hits;
+   textureStats.samples+=count;textureStats.texels+=count*st.reads;
+   if(st.index>=0)textureStats.bySize[st.index]+=count;
+   textureStats.lodSum+=count*st.lod;
+   textureStats.lodMin=Math.min(textureStats.lodMin,st.lod);
+   textureStats.lodMax=Math.max(textureStats.lodMax,st.lod);
   }
  }
 }
