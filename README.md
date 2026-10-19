@@ -1,5 +1,24 @@
 # moteur3d
-moteur 3D 2D Qbasic
+
+Moteur 3D expérimental (archives QBasic + démonstrations HTML/JavaScript).
+
+## Version de référence actuelle — V7 (19 octobre 2026)
+
+**[Ouvrir le simulateur V7 — arbre détaillé et ombres diffuses](experiments/2026-10-19-camera-z-v7-soft-shadows-detailed-tree/index.html)**
+
+[Documentation et tests V7](experiments/2026-10-19-camera-z-v7-soft-shadows-detailed-tree/README.md)
+
+- Scène : **28 416 triangles côté caméra**, dont un arbre procédural avec **7 972 triangles de géométrie native**.
+- Occlusion : **Z-buffer caméra par pixel** ; une seule source directionnelle avec Z-buffer lumineux stabilisé.
+- Ombres : filtrage spatial **PCF 4 × 4** et choix de diffusion **Faible / Douces / Très douces**.
+- Contours géométriques : adoucissement colorimétrique optionnel **sans altérer le Z-buffer** ; il ne s'agit pas encore de MSAA 4×.
+- Optimisation lumineuse : **8 422 triangles natifs** utilisés pour les cartes Z des ombres, sans retrait de géométrie du rendu caméra.
+- Statut : tests automatisés de fonctionnement et d'occultation réussis ; fluidité et qualité visuelle à confirmer dans un navigateur réel.
+
+**Historique :** les expériences V1 à V6 ci-dessous sont archivées comme points de comparaison ; leurs mentions de « dernière version » reflètent la date de chaque expérimentation, pas la version recommandée aujourd'hui.
+
+---
+
 
 ## Simulateur HTML expérimental (18 octobre 2026)
 
