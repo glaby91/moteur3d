@@ -661,7 +661,7 @@ function raySelfTest(){
  traceClosest(0,8,0,0,1,0,r,false);
  if(r.id!==0)throw Error('sky miss test failed');
  // Ground plane at Y=0.
- traceClosest(0,8,0,0,-1,0,r,false);
+ traceClosest(40,8,40,0,-1,0,r,false);
  if(r.id!==1||Math.abs(r.t-8)>1e-6)throw Error('ground intersection test failed');
  const hit=hitPrimitive({type:'ellipse',cx:0,cy:0,cz:0,rx:1,ry:1,rz:1},0,0,4,0,0,-1,Infinity);
  if(Math.abs(hit-3)>1e-6)throw Error('ellipse test failed');
