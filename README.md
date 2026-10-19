@@ -37,3 +37,10 @@ L'image géométrique reste identique à V3. Les ombres utilisent maintenant **d
 - [Notes de développement, protocole et limites V5](experiments/2026-10-19-camera-z-v5/README.md)
 
 **Nouveau mode par défaut : Z caméra logiciel par pixel**, pour corriger les triangles du fond affichés devant les objets lorsque les triangles étaient triés par profondeur moyenne. Le tampon couleur et le tampon Z sont communs au sol, au décor et au personnage. Une seule lumière Z stabilisée est conservée. L'ancien mode V4 reste sélectionnable pour comparaison. La V5 nécessite encore une optimisation de la rasterisation et un essai visuel dans un vrai navigateur.
+
+## V6 — Test de charge géométrique ×10 (19 octobre 2026)
+
+- [Simulateur V6 : 24 100 triangles, Z caméra et lumière Z stabilisée](experiments/2026-10-19-camera-z-v6-24100-triangles/index.html)
+- [Compte rendu technique et mesures du test](experiments/2026-10-19-camera-z-v6-24100-triangles/README.md)
+
+Toute la géométrie de la scène V5 est divisée en dix triangles coplanaires par triangle initial, sans déformation des objets : 2 310 → 23 100 triangles du décor et 100 → 1 000 triangles du personnage. Un seul éclairage Z est conservé. Le premier essai logiciel à 320 × 240 fonctionne, mais le surcoût CPU est élevé ; priorité ensuite à la rasterisation tuilée et à l'optimisation des shadow-maps.
