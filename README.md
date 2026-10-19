@@ -1,3 +1,21 @@
+# moteur3d — branche de sauvegarde raster
+
+**Architecture : rasterisation des triangles et Z-buffer caméra.**
+
+Cette branche constitue une **sauvegarde isolée** du moteur V8.1, avec une adaptation QB64 indépendante.
+
+- [Snapshot HTML V8.1 figé](engine/index.html)
+- [Source QB64 RasterEngine.bas](qb64/raster/RasterEngine.bas)
+- [Documentation QB64](qb64/raster/README.md)
+- [Historique et numéro de version — VERSIONING.txt](VERSIONING.txt)
+- [Guide de cette branche](BRANCH_README.md)
+
+Les autres prototypes hérités de `master` restent présents dans `experiments/`, mais `engine/index.html` est **la version de référence figée de cette branche**.
+
+---
+
+## Historique général hérité du dépôt
+
 # moteur3d
 
 Moteur 3D expérimental (archives QBasic + démonstrations HTML/JavaScript).
