@@ -2,7 +2,15 @@
 
 Moteur 3D expérimental (archives QBasic + démonstrations HTML/JavaScript).
 
-## Dernière version expérimentale — V8.1, rasteriseur CPU optimisé (19 octobre 2026)
+## Version expérimentale actuelle — V9, ray casting sphérique 16:10 (19 octobre 2026)
+
+**[Ouvrir le code HTML autonome du simulateur V9](experiments/2026-10-19-v9-spherical-raycasting-16x10/index.html)** · [Documentation V9, tests et limites](experiments/2026-10-19-v9-spherical-raycasting-16x10/README.md)
+
+La V9 explore une nouvelle architecture : **un seul rayon primaire par pixel**, format **16:10** (640×400 par défaut, puis 800×500, 1280×800, 1600×1000 et 1920×1200), caméra **sphérique mathématique à perspective rectilinéaire**, objets analytiques (ellipsoïdes, boîtes, cônes effilés, plan de sol), première intersection uniquement, et aucune rasterisation de triangles. La scène comporte **119 primitives**, organisées en **63 nœuds BVH** et présélectionnées par tuiles 16×16. Couleurs RGB565, filtrage bilinéaire et pyramide d'écorce **4096²→8²** sont conservés ; une unique lumière et une carte Z d'ombre orthographique indépendante apportent l'éclairage. Le rendu est progressif et ses coûts sont instrumentés. **Cette V9 CPU est expérimentale, sans performance navigateur validée et pas encore plus rapide que V8.1.**
+
+---
+
+## Version précédente — V8.1, rasteriseur CPU optimisé (19 octobre 2026)
 
 **[Ouvrir le simulateur V8.1 — raster optimisé Z puis textures visibles](experiments/2026-10-19-v8-1-optimized-raster/index.html)** · [rapport et tests V8.1](experiments/2026-10-19-v8-1-optimized-raster/README.md)
 
