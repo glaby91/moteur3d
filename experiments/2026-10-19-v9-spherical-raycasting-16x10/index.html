@@ -379,37 +379,43 @@ function advanceHighTexture(){
    'Écorce 4096² : '+h.levels.length+' / 10 mipmaps prêts';
  requestAnimationFrame(advanceHighTexture);
 }
-function sampleTex(tex,u,v,footprint,filter,mipMode,debug){
- let lod=mipMode==='auto'?Math.log2(Math.max(1,footprint)):Math.log2(tex.size/Number(mipMode));
- lod=clamp(lod,0,tex.levels.length-1);
- let lo=Math.floor(lod),hi=Math.min(tex.levels.length-1,lo+1),mix=lod-lo;
- if(filter!=='trilinear'){lo=Math.round(lod);hi=lo;mix=0;}
- const chosen=tex.levels[lo],activeIndex=mipSizes.indexOf(chosen.size);
- if(activeIndex>=0)stats.mips[activeIndex]++;
- if(debug)return palette[Math.max(0,activeIndex)];
- const color=(level)=>{
-  const n=level.size,mask=n-1,data=level.data;
-  if(filter==='nearest'){
-   stats.texels++;return data[((Math.floor(v*n)&mask)*n)+(Math.floor(u*n)&mask)];
-  }
-  const fxp=u*n-.5,fyp=v*n-.5,x=Math.floor(fxp),y=Math.floor(fyp);
-  const fx=fxp-x,fy=fyp-y,x0=x&mask,y0=y&mask,x1=(x0+1)&mask,y1=(y0+1)&mask;
-  const a=data[y0*n+x0],b=data[y0*n+x1],c=data[y1*n+x0],d=data[y1*n+x1],w00=(1-fx)*(1-fy),w10=fx*(1-fy),w01=(1-fx)*fy,w11=fx*fy;
-  stats.texels+=4;
-  const r=((a>>>11)*w00+(b>>>11)*w10+(c>>>11)*w01+(d>>>11)*w11)*255/31;
-  const g=(((a>>>5)&63)*w00+((b>>>5)&63)*w10+((c>>>5)&63)*w01+((d>>>5)&63)*w11)*255/63;
-  const bl=((a&31)*w00+(b&31)*w10+(c&31)*w01+(d&31)*w11)*255/31;
-  return ((Math.round(r/255*31)<<11)|(Math.round(g/255*63)<<5)|Math.round(bl/255*31))&65535;
- };
- const a=color(chosen),b=hi!==lo?color(tex.levels[hi]):a;
- const red=((a>>>11)&31)*(1-mix)+((b>>>11)&31)*mix;
- const green=((a>>>5)&63)*(1-mix)+((b>>>5)&63)*mix;
- const blue=(a&31)*(1-mix)+(b&31)*mix;
- return (0xff000000|(Math.round(blue*255/31)<<16)|(Math.round(green*255/63)<<8)|Math.round(red*255/31))>>>0;
+
+// V9: direct ABGR sampler avoids converting an interpolated color back to
+// RGB565 and decoding it again. POWER-OF-TWO textures use bitmask wrapping.
+function nearest565(level,u,v){
+ const n=level.size,mask=n-1,c=level.data[((Math.floor(v*n)&mask)*n)+(Math.floor(u*n)&mask)];
+ stats.texels++;
+ return (0xff000000|(((c&31)*255/31|0)<<16)|(((((c>>>5)&63)*255/63)|0)<<8)|(((c>>>11)&31)*255/31|0))>>>0;
 }
-
-
-
+function bilinear565(level,u,v){
+ const n=level.size,mask=n-1,data=level.data;
+ const fxp=u*n-.5,fyp=v*n-.5,ix=Math.floor(fxp),iy=Math.floor(fyp);
+ const fx=fxp-ix,fy=fyp-iy,ix0=ix&mask,iy0=iy&mask,ix1=(ix0+1)&mask,iy1=(iy0+1)&mask;
+ const a=data[iy0*n+ix0],b=data[iy0*n+ix1],c=data[iy1*n+ix0],d=data[iy1*n+ix1];
+ const w0=(1-fx)*(1-fy),w1=fx*(1-fy),w2=(1-fx)*fy,w3=fx*fy;
+ stats.texels+=4;
+ const red=Math.round(((a>>>11)*w0+(b>>>11)*w1+(c>>>11)*w2+(d>>>11)*w3)*255/31);
+ const green=Math.round((((a>>>5)&63)*w0+((b>>>5)&63)*w1+((c>>>5)&63)*w2+((d>>>5)&63)*w3)*255/63);
+ const blue=Math.round(((a&31)*w0+(b&31)*w1+(c&31)*w2+(d&31)*w3)*255/31);
+ return (0xff000000|(blue<<16)|(green<<8)|red)>>>0;
+}
+function sampleTex(tex,u,v,footprint,filter,mipMode,debug){
+ const n=tex.levels.length-1;
+ const lod=clamp(mipMode==='auto'?Math.log2(Math.max(1,footprint)):Math.log2(tex.size/Number(mipMode)),0,n);
+ let lo=Math.floor(lod),hi=Math.min(n,lo+1),mix=lod-lo;
+ if(filter!=='trilinear'){lo=Math.round(lod);hi=lo;mix=0;}
+ const idx=mipSizes.indexOf(tex.levels[lo].size);
+ if(idx>=0)stats.mips[idx]++;
+ if(debug)return palette[Math.max(0,idx)];
+ if(filter==='nearest')return nearest565(tex.levels[lo],u,v);
+ const a=bilinear565(tex.levels[lo],u,v);
+ if(hi===lo||mix===0)return a;
+ const b=bilinear565(tex.levels[hi],u,v),q=1-mix;
+ const red=Math.round((a&255)*q+(b&255)*mix);
+ const green=Math.round(((a>>>8)&255)*q+((b>>>8)&255)*mix);
+ const blue=Math.round(((a>>>16)&255)*q+((b>>>16)&255)*mix);
+ return (0xff000000|(blue<<16)|(green<<8)|red)>>>0;
+}
 // Screen-projected conservative AABB bins per 16x16 TILE. These are NOT
 // rasterized triangles: every pixel still casts exactly ONE primary ray.
 // The BVH first culls whole groups by their projected bounding rectangles.
@@ -560,7 +566,7 @@ function skyRGB(dx,dy,dz,fogEnabled){
 function packABGR(r,g,b){
  return (0xff000000|((clamp(b|0,0,255))<<16)|((clamp(g|0,0,255))<<8)|(clamp(r|0,0,255)))>>>0;
 }
-const rayTmp=[0,0,0];
+const tileRayDirections=new Float32Array(16*16*3);
 function hitTextureCoordinates(id,px,py,pz,n){
  const o=id===1?null:objects[id-2];
  if(id===1)return [px*.34,pz*.34,.34];
@@ -646,15 +652,16 @@ function renderTile(job){
  let start=performance.now();
  for(let y=by;y<bottom;y++)for(let x=bx;x<right;x++){
   cameraRay(cam,x,y,ray);
+  const rayIndex=((y-by)*16+(x-bx))*3;tileRayDirections[rayIndex]=ray[0];tileRayDirections[rayIndex+1]=ray[1];tileRayDirections[rayIndex+2]=ray[2];
   traceTileRay(origin[0],origin[1],origin[2],ray[0],ray[1],ray[2],candidates,hit);
   const i=y*W+x;hitIds[i]=hit.id;hitDistances[i]=hit.t;
  }
  stats.traceMs+=performance.now()-start;
  start=performance.now();
  for(let y=by;y<bottom;y++)for(let x=bx;x<right;x++){
-  cameraRay(cam,x,y,ray);
+  const rayIndex=((y-by)*16+(x-bx))*3;
   const i=y*W+x;
-  pixels[i]=shadePixel(cam,x,y,hitIds[i],hitDistances[i],ray[0],ray[1],ray[2],job.options);
+  pixels[i]=shadePixel(cam,x,y,hitIds[i],hitDistances[i],tileRayDirections[rayIndex],tileRayDirections[rayIndex+1],tileRayDirections[rayIndex+2],job.options);
  }
  stats.shadeMs+=performance.now()-start;
  stats.tiles++;
