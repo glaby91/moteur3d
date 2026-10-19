@@ -85,7 +85,7 @@ const vec=(x,y,z)=>[x,y,z], add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]],sub=(a,b)
 // Only the FIRST enabled directional light renders in this experiment.
 // Future point lights will need six cube-map depth faces (not implemented).
 const LIGHT_CAPACITY={active:32,perTile:8,shadowCasters:4};
-const lightingScene={lights:[{id:'key-01',type:'directional',enabled:true,castsShadows:true,shadowResolution:192}],shadowMaps:new Map()};
+const lightingScene={lights:[{id:'key-01',type:'directional',enabled:true,castsShadows:true,shadowResolution:192}],shadowMaps:new Map(),staticDepthMaps:new Map()};
 let shadowResolution=192,shadowBuilds=0,shadowDepthWrites=0,shadowTests=0;
 const activeLight=()=>lightingScene.lights.find(l=>l.enabled);
 function projectLight(p,m){
@@ -110,33 +110,43 @@ function rasterShadow(a,b,c,m){
 }
 function ensureLightDepth(L,st){
  const light=activeLight();if(!light||!light.castsShadows)return null;
- const key=[shadowResolution,...L,st.x,st.z,st.heading,st.walk].join('/');
+ // Static courtyard is rasterized once per quantized direction. Actor only
+ // updates are small incremental Z-buffer passes, not 2,310 static triangles.
+ const angle=Math.atan2(L[2],L[0]),staticKey=shadowResolution+'/'+Math.round(angle*150);
+ const key=staticKey+'/'+[st.x,st.z,st.heading,st.walk].join('/');
  const prev=lightingScene.shadowMaps.get(light.id);if(prev&&prev.key===key)return prev;
- const start=performance.now(),n=shadowResolution,forward=norm(mul(L,-1));
- const right=norm(cross(forward,[0,1,0])),up=cross(right,forward);
- const m={id:light.id,key,size:n,center:[0,1,0],extent:30,offset:25,
-  forward,right,up,depth:new Float32Array(n*n),writes:0,triangles:0};
- m.depth.fill(Infinity);
- for(const tr of mesh){
-  rasterShadow(projectLight(tr.v[0],m),projectLight(tr.v[1],m),projectLight(tr.v[2],m),m);
-  m.triangles++;
+ const start=performance.now(),n=shadowResolution;
+ let stat=lightingScene.staticDepthMaps.get(light.id);
+ if(!stat||stat.key!==staticKey){
+  const forward=norm(mul(L,-1)),right=norm(cross(forward,[0,1,0])),up=cross(right,forward);
+  stat={key:staticKey,size:n,center:[0,1,0],extent:20,offset:25,
+   forward,right,up,depth:new Float32Array(n*n),writes:0,triangles:mesh.length};
+  stat.depth.fill(Infinity);
+  for(const tr of mesh)rasterShadow(projectLight(tr.v[0],stat),projectLight(tr.v[1],stat),projectLight(tr.v[2],stat),stat);
+  lightingScene.staticDepthMaps.set(light.id,stat);
  }
+ const m={...stat,id:light.id,key,depth:new Float32Array(stat.depth),writes:0,triangles:stat.triangles+manMesh.length};
  const p=[st.x,0,st.z];
  for(const tr of manMesh){
   const v=tr.v.map(x=>projectLight(manTransform(x,p,st.heading,st.walk),m));
-  rasterShadow(v[0],v[1],v[2],m);m.triangles++;
+  rasterShadow(v[0],v[1],v[2],m);
  }
  m.buildMs=performance.now()-start;shadowBuilds++;shadowDepthWrites+=m.writes;
+ m.staticRebuilt=stat.key===staticKey&&(!prev||!prev.key.startsWith(staticKey+'/'));
  lightingScene.shadowMaps.set(light.id,m);return m;
 }
 function visibilityFromLight(p,m,bias=.1){
  if(!m)return 1;
- const q=projectLight(p,m),x=q[0],y=q[1],z=q[2];
- if(x<1||y<1||x>=m.size-2||y>=m.size-2)return 1;
- const ix=Math.floor(x),iy=Math.floor(y),n=m.size;
- const ids=[iy*n+ix,iy*n+ix+1,(iy+1)*n+ix,(iy+1)*n+ix+1];
- let lit=0;for(const id of ids)lit+=z<=m.depth[id]+bias?1:0;
- shadowTests+=4;return lit/4;
+ // Allocation-free PCF (4 comparisons) for each receiver sample.
+ const vx=p[0]-m.center[0],vy=p[1]-m.center[1],vz=p[2]-m.center[2],n=m.size;
+ const x=((vx*m.right[0]+vy*m.right[1]+vz*m.right[2])/m.extent+.5)*(n-1);
+ const y=(.5-(vx*m.up[0]+vy*m.up[1]+vz*m.up[2])/m.extent)*(n-1);
+ if(x<1||y<1||x>=n-2||y>=n-2)return 1;
+ const z=vx*m.forward[0]+vy*m.forward[1]+vz*m.forward[2]+m.offset;
+ const idx=Math.floor(y)*n+Math.floor(x),d=m.depth;
+ const visible=(z<=d[idx]+bias?1:0)+(z<=d[idx+1]+bias?1:0)
+ +(z<=d[idx+n]+bias?1:0)+(z<=d[idx+n+1]+bias?1:0);
+ shadowTests+=4;return visible*.25;
 }
 function lightFactor(brightness,point,map){
  return .30+(brightness-.30)*visibilityFromLight(point,map,.11);
@@ -144,7 +154,7 @@ function lightFactor(brightness,point,map){
 const groundZCanvas=document.createElement('canvas'),groundZCtx=groundZCanvas.getContext('2d');
 function drawGroundFromLightZ(target,c,map){
  // Rasterized receivers on the ground, sampled against the LIGHT depth buffer.
- const w=Math.max(1,Math.ceil(c.w/4)),h=Math.max(1,Math.ceil(c.h/4));
+ const w=Math.max(1,Math.ceil(c.w/6)),h=Math.max(1,Math.ceil(c.h/6));
  if(groundZCanvas.width!==w)groundZCanvas.width=w;
  if(groundZCanvas.height!==h)groundZCanvas.height=h;
  const img=groundZCtx.createImageData(w,h),d=img.data;
@@ -232,13 +242,13 @@ function snapshot(){const start=performance.now();const data=ctx.getImageData(0,
 function cameraParameters(atYaw=yaw,w=W,h=H){const eye=[Math.sin(atYaw)*8.4,4.1,Math.cos(atYaw)*8.4],target=[0,1.68,0],forward=norm(sub(target,eye)),right=norm(cross(forward,[0,1,0])),up=cross(right,forward),f=h*.96;return {eye,target,forward,right,up,f,w,h}}
 function project(p,c){const v=sub(p,c.eye),z=dot(v,c.forward);if(z<=.11)return null;return [c.w/2+dot(v,c.right)*c.f/z,c.h/2-dot(v,c.up)*c.f/z,z]}
 function lightPos(atSolar=solar){return [Math.cos(atSolar)*4.7,5.15+Math.sin(atSolar*.6)*.45,Math.sin(atSolar)*4.7]}
-function surfaceShade(tr,light){const d=norm(sub(light,tr.center));return Math.max(.30,Math.min(1.12,.47+.58*Math.abs(dot(tr.n,d))))}
+function surfaceShade(tr,light){const d=norm(light);return Math.max(.30,Math.min(1.12,.47+.58*Math.abs(dot(tr.n,d))))}
 // Deux échantillons exacts encadrent une courte période. On garde par triangle
 // la luminosité ET le vecteur de lumière (XYZ). Les N+1…N+5 sont interpolés.
 // Ne jamais confondre cette cache d'éclairage avec une reprojection d'image.
 const LIGHT_RATE=.09,LIGHT_SPAN=12/30,LIGHT_REFRESH=6;
 function writeLightValues(dst,angle){const L=lightPos(angle);for(let i=0;i<mesh.length;i++){
- const tr=mesh[i],j=i*4,dx=L[0]-tr.center[0],dy=L[1]-tr.center[1],dz=L[2]-tr.center[2],r=1/Math.max(1e-8,Math.hypot(dx,dy,dz));
+ const tr=mesh[i],j=i*4,dx=L[0],dy=L[1],dz=L[2],r=1/Math.max(1e-8,Math.hypot(dx,dy,dz));
  const x=dx*r,y=dy*r,z=dz*r;dst[j]=Math.max(.30,Math.min(1.12,.47+.58*Math.abs(tr.n[0]*x+tr.n[1]*y+tr.n[2]*z)));
  dst[j+1]=x;dst[j+2]=y;dst[j+3]=z;
  }lightExact+=mesh.length;}
@@ -492,7 +502,7 @@ function step(dt=1/30){
   else if(old){forecastsInvalid++;currentForecast=null}}
  if(temporalLightEnabled&&(!lightingBank||simStep-lightingBank.created>=LIGHT_REFRESH))buildLightingBank(true);forecast();
 }
-function updateOptions(){mode=$('mode').value;horizon=+$('horizon').value;keyEvery=+$('keyEvery').value;orbitEnabled=$('orbit').checked;sunEnabled=$('sun').checked;shadowsEnabled=$('shadows').checked;shadowResolution=+$('shadowResolution').value;lightingScene.lights[0].shadowResolution=shadowResolution;lightingScene.shadowMaps.clear();overviewEnabled=$('overview').checked;temporalLightEnabled=$('temporalLight').checked;cacheStaticEnabled=$('cacheStatic').checked;invalidateLighting();actorSpeed=+(parseFloat($('speed').value)*.018).toFixed(3);autoWalk=$('autoWalk').checked;$('speedLabel').textContent=$('speed').value+' %';baseReady=false;baseDepth=null;invalidateForecast('modification des paramètres');forecast()}
+function updateOptions(){mode=$('mode').value;horizon=+$('horizon').value;keyEvery=+$('keyEvery').value;orbitEnabled=$('orbit').checked;sunEnabled=$('sun').checked;shadowsEnabled=$('shadows').checked;shadowResolution=+$('shadowResolution').value;lightingScene.lights[0].shadowResolution=shadowResolution;lightingScene.shadowMaps.clear();lightingScene.staticDepthMaps.clear();overviewEnabled=$('overview').checked;temporalLightEnabled=$('temporalLight').checked;cacheStaticEnabled=$('cacheStatic').checked;invalidateLighting();actorSpeed=+(parseFloat($('speed').value)*.018).toFixed(3);autoWalk=$('autoWalk').checked;$('speedLabel').textContent=$('speed').value+' %';baseReady=false;baseDepth=null;invalidateForecast('modification des paramètres');forecast()}
 for(let id of ['mode','horizon','keyEvery','orbit','sun','shadows','temporalLight','cacheStatic','overview','speed','autoWalk','shadowResolution'])$(id).addEventListener('change',()=>{tileInvalidate('configuration');updateOptions()});
 $('resolution').addEventListener('change',()=>{tileInvalidate('résolution');const [w,h]=$('resolution').value.split('x').map(Number);W=w;H=h;canvas.width=w;canvas.height=h;background.width=w;background.height=h;out.width=w;out.height=h;baseReady=false;baseDepth=null;memoryAlloc();invalidateLighting();invalidateForecast('changement de résolution');forecast()});
 $('reverse').onclick=()=>{tileInvalidate('demi-tour');patrolDir*=-1;actor.idx=(actor.idx+patrolDir*2+route.length*2)%route.length;collisionTest=false;invalidateForecast('inversion de direction');forecast()};
@@ -504,7 +514,7 @@ function walkingKey(e){if(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','Ar
 window.addEventListener('keydown',walkingKey);window.addEventListener('keyup',walkingKey);
 $('popout').onclick=()=>window.open(window.location.href,'_blank','noopener');
 $('pause').onclick=()=>{paused=!paused;$('pause').textContent=paused?'▶ Reprendre':'⏸ Pause';$('runState').textContent=paused?'Simulation en pause':'Simulation active'};
-$('reset').onclick=()=>{tileInvalidate('réinitialisation');actor=freshActor();route=routeA;patrolDir=1;collisionTest=false;autoWalk=true;$('autoWalk').checked=true;collisions=0;collisionLabel='Libre';solar=0;yaw=3.34;time=0;simStep=0;frame=0;for(const k of Object.keys(stats))stats[k]=0;lightExact=0;lightSampleCount=0;lastOpExact=0;lastOpSamples=0;lightForecastReuse=0;lightForecastNew=0;staticReuse=0;shadowBuilds=0;shadowDepthWrites=0;shadowTests=0;lightingScene.shadowMaps.clear();for(const k in rolling)delete rolling[k];forecastsValid=0;forecastsInvalid=0;facesReused=0;baseReady=false;baseDepth=null;memoryAlloc();invalidateLighting();forecast();$('diagnostic').textContent='Scène réinitialisée.'};
+$('reset').onclick=()=>{tileInvalidate('réinitialisation');actor=freshActor();route=routeA;patrolDir=1;collisionTest=false;autoWalk=true;$('autoWalk').checked=true;collisions=0;collisionLabel='Libre';solar=0;yaw=3.34;time=0;simStep=0;frame=0;for(const k of Object.keys(stats))stats[k]=0;lightExact=0;lightSampleCount=0;lastOpExact=0;lastOpSamples=0;lightForecastReuse=0;lightForecastNew=0;staticReuse=0;shadowBuilds=0;shadowDepthWrites=0;shadowTests=0;lightingScene.shadowMaps.clear();lightingScene.staticDepthMaps.clear();for(const k in rolling)delete rolling[k];forecastsValid=0;forecastsInvalid=0;facesReused=0;baseReady=false;baseDepth=null;memoryAlloc();invalidateLighting();forecast();$('diagnostic').textContent='Scène réinitialisée.'};
 // -----------------------------------------------------------------------------
 // PREDICTIVE TILES, v2. A full changing frame is rasterized ONCE, not 1,200 times.
 // If camera+sun remain exactly fixed, only character-affected 16px tiles are
