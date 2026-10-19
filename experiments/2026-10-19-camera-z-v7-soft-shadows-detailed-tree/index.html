@@ -8,14 +8,14 @@
 <div class="page">
 <div class="views"><section class="panel"><h2><span>01 / Image vue par la caméra</span><small id="renderBadge">Rendu en cours…</small></h2><canvas class="view" id="main" width="640" height="480"></canvas><div class="canvas-foot"><span id="frameStatus">Image de référence</span><span id="imageCounter">—</span></div></section>
 <section class="panel"><h2><span>02 / Scène extérieure — géométrie et anticipation</span><small>10 images/s</small></h2><canvas class="view" id="outside" width="640" height="480"></canvas><div class="canvas-foot"><span>Œil · écran · arbre · personnage · source mobile</span><span>Trajectoire N à N+5</span></div></section></div>
-<section class="panel" style="margin-top:12px"><h2>V7 — Géométrie d’arbre réelle + ombres diffuses</h2><p id="densityStatus" class="statline">Subdivision en cours…</p><p class="notice">La forme de l’arbre est réellement plus riche : tronc et branches courbes et effilées, 32 volumes de feuillage ellipsoïdaux 14×7. Les autres objets et le personnage conservent leur subdivision V6. Les ombres projetées disposent d’un filtre PCF 4×4 réglable, sans floutage des objets. La simulation reste à une seule lumière. En cas de cadence trop basse, choisir 320 × 240 pour comparer les coûts de rendu.</p></section><section class="panel" style="margin-top:12px"><h2>Commandes de la simulation</h2><div class="controlbar">
+<section class="panel" style="margin-top:12px"><h2>V7 — Géométrie d’arbre réelle + ombres diffuses</h2><p id="densityStatus" class="statline">Subdivision en cours…</p><p class="notice">La forme de l’arbre est réellement plus riche : tronc et branches courbes et effilées, 32 volumes de feuillage ellipsoïdaux 14×7. Les autres objets et le personnage conservent leur subdivision V6. Les ombres projetées disposent d’un filtre PCF 4×4 réglable. L'option supplémentaire adoucit seulement la couleur aux frontières des objets ; elle ne modifie pas le Z-buffer et ne remplace pas un MSAA matériel. La simulation reste à une seule lumière. En cas de cadence trop basse, choisir 320 × 240 pour comparer les coûts de rendu.</p></section><section class="panel" style="margin-top:12px"><h2>Commandes de la simulation</h2><div class="controlbar">
 <label>Mode <select id="mode"><option value="zcam" selected>V7 — Z caméra · arbre détaillé</option><option value="stable">V4 — Stable (tri moyen)</option><option value="tiles">V4 — Tuiles anti-stuttering</option><option value="temporal" disabled>Reprojection Z (désactivée pour collision)</option><option value="classic">Classique (tout recalculer)</option></select></label>
 <label>Résolution <select id="resolution"><option value="320x240">320 × 240</option><option value="640x480" selected>640 × 480</option><option value="800x600">800 × 600</option></select></label>
 <label>Anticipation <select id="horizon"><option value="1">1 image</option><option value="2">2 images</option><option value="3">3 images</option><option value="4">4 images</option><option value="5" selected>5 images</option></select></label>
 <label style="display:none">Image clé Z tous les <select id="keyEvery"><option value="2">2 affichages</option><option value="3" selected>3 affichages</option><option value="4">4 affichages</option></select></label>
 <label><input type="checkbox" id="orbit" checked> Rotation caméra</label>
 <label><input type="checkbox" id="sun" checked> Lumière mobile</label>
-<label><input type="checkbox" id="shadows" checked> Ombres Z lumière</label><label>Shadow-map <select id="shadowResolution"><option value="128">128 × 128 rapide</option><option value="192" selected>192 × 192 normal</option><option value="256">256 × 256 qualité</option></select></label><label><input type="checkbox" id="stableShadows" checked> Ombres stabilisées (interpolation Z)</label><label>Douceur ombres <select id="shadowSoftness"><option value="1.3">Faible</option><option value="2.3" selected>Douces</option><option value="3.2">Très douces</option></select></label>
+<label><input type="checkbox" id="shadows" checked> Ombres Z lumière</label><label>Shadow-map <select id="shadowResolution"><option value="128">128 × 128 rapide</option><option value="192" selected>192 × 192 normal</option><option value="256">256 × 256 qualité</option></select></label><label><input type="checkbox" id="stableShadows" checked> Ombres stabilisées (interpolation Z)</label><label>Douceur ombres <select id="shadowSoftness"><option value="1.3">Faible</option><option value="2.3" selected>Douces</option><option value="3.2">Très douces</option></select></label><label><input type="checkbox" id="contourAA" checked> Adoucir aussi les silhouettes</label>
 <label><input type="checkbox" id="temporalLight" checked> Lumière mémorisée N+1 à N+5</label>
 <label><input type="checkbox" id="cacheStatic" checked> Cache image si caméra + acteur fixes</label>
 <label><input type="checkbox" id="overview" checked> Vue droite</label>
@@ -80,7 +80,7 @@ let route=routeA,actor={x:.8,z:-2.7,heading:0,idx:1,walk:0},patrolDir=1,autoWalk
 let solidObjects=[];
 let lastActor={x:0,z:0},predictive=[],currentForecast=null,forecastsValid=0,forecastsInvalid=0,baselineCaptured=0,facesReused=0,unaccountedForecastMs=0,forecastProjectionOps=0;
 let lastOpExact=0,lastOpSamples=0;let lightingBank=null,currentLighting=null,lightExact=0,lightSampleCount=0,lightForecastReuse=0,lightForecastNew=0,spentLighting=null,staticReuse=0,staticCacheValid=false,staticCacheYaw=0,staticCacheSolar=0,staticCacheShadow=false,staticCacheActorX=0,staticCacheActorZ=0;
-const stats={full:0,reused:0,saved:0,pixelwrites:0,pixelreads:0},rolling={},stages=[['proj','Projection'],['cameraZ','Raster Z caméra'],['shadowZ','Z de la lumière'],['shadow','Ombres vues caméra'],['sort','Tri des faces'],['draw','Tracé objets'],['copy','Reprojection'],['char','Personnage'],['forecast','Prévisions N+1/2'],['snap','Mémoire RGB565'],['overview','Vue extérieure'],['tiles','Pré-rendu tuiles / image']];
+const stats={full:0,reused:0,saved:0,pixelwrites:0,pixelreads:0},rolling={},stages=[['proj','Projection'],['cameraZ','Raster Z caméra'],['edgeAA','Contours (post AA)'],['shadowZ','Z de la lumière'],['shadow','Ombres vues caméra'],['sort','Tri des faces'],['draw','Tracé objets'],['copy','Reprojection'],['char','Personnage'],['forecast','Prévisions N+1/2'],['snap','Mémoire RGB565'],['overview','Vue extérieure'],['tiles','Pré-rendu tuiles / image']];
 const vec=(x,y,z)=>[x,y,z], add=(a,b)=>[a[0]+b[0],a[1]+b[1],a[2]+b[2]],sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]],mul=(a,k)=>[a[0]*k,a[1]*k,a[2]*k],dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2],cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]],norm=a=>{let n=Math.hypot(...a)||1;return mul(a,1/n)};
 
 // === Z-LIGHT V3 : ONE DIRECTIONAL LIGHT, EXTENSIBLE REGISTRY ================
@@ -562,7 +562,7 @@ function interpolatedForecastFaces(a,b,t){if(!a||!b||!a.faces||!b.faces)return n
 function drawActorProjected(target,faces,scale=1){if(scale!==1){target.save();target.scale(scale,scale)}for(const f of faces)poly(target,f.ps,f.color);if(scale!==1)target.restore();return faces.length}
 function drawCharacter(target,c,L,profile,forecastFaces){const ts=performance.now();const faceList=forecastFaces||actorProjected(displayActor(),renderPose().yaw,renderPose().sun,time*5+simAccum*5);profile.char+=performance.now()-ts;let d=performance.now();const count=drawActorProjected(target,faceList);profile.char+=performance.now()-d;profile.calls+=count;profile.drawn+=count;profile.actorDrawn+=count;profile.triProjected+=forecastFaces?0:manMesh.length;return count}
 function drawSun(target,c,L){let q=project(L,c);if(!q)return;const r=Math.max(3,Math.min(14,70/q[2]));target.beginPath();target.arc(q[0],q[1],r+6,0,7);target.fillStyle='rgba(255,210,118,.20)';target.fill();target.beginPath();target.arc(q[0],q[1],r,0,7);target.fillStyle='#ffe3a0';target.fill()}
-function newProfile(){return {proj:0,cameraZ:0,shadowZ:0,shadow:0,sort:0,draw:0,copy:0,char:0,forecast:0,snap:0,overview:0,tiles:0,triProjected:0,drawn:0,calls:0,shadowDrawn:0,actorDrawn:0,lightHits:0,lightDirect:0,staticHit:false,reprojected:false}}
+function newProfile(){return {proj:0,cameraZ:0,edgeAA:0,shadowZ:0,shadow:0,sort:0,draw:0,copy:0,char:0,forecast:0,snap:0,overview:0,tiles:0,triProjected:0,drawn:0,calls:0,shadowDrawn:0,actorDrawn:0,lightHits:0,lightDirect:0,staticHit:false,reprojected:false}}
 function completeRender(target,withActor=true){let p=newProfile(),c=cameraParameters(),L=lightPos();baseRender(target,c,L,shadowsEnabled,p);if(withActor)drawSun(target,c,L);return p}
 // Le prototype précédent utilisait un décalage global de l'image (dx,dy) :
 // cela faisait bondir l'arbre à chaque image clé. Le rendu stable n'utilise PLUS
@@ -734,6 +734,34 @@ function zGroundShadows(camera,map,profile){
  }
  zMetrics.ground=visibleGround;profile.shadow+=performance.now()-start;
 }
+
+let contourAA=true;
+function smoothCameraSilhouettes(){
+ // Lightweight camera silhouette AA, not real multisampling.
+ // The depth buffer remains exact. Only RGB at material boundaries is blended.
+ const before=zColor.slice(),w=W,h=H,tags=zSurface;
+ let affected=0;
+ for(let y=1;y<h-1;y++){
+  const row=y*w;
+  for(let x=1;x<w-1;x++){
+   const i=row+x,tag=tags[i],left=i-1,right=i+1,up=i-w,down=i+w;
+   const neighbours=[left,right,up,down];let r=0,g=0,b=0,n=0;
+   for(const j of neighbours){
+    if(tags[j]===tag||!(tag===2||tags[j]===2))continue;
+    const v=before[j];r+=v&255;g+=(v>>>8)&255;b+=(v>>>16)&255;n++;
+   }
+   if(n===0)continue;
+   const old=before[i],f=.22;
+   const red=Math.round((old&255)*(1-f)+(r/n)*f);
+   const green=Math.round(((old>>>8)&255)*(1-f)+(g/n)*f);
+   const blue=Math.round(((old>>>16)&255)*(1-f)+(b/n)*f);
+   zColor[i]=(0xff000000|(blue<<16)|(green<<8)|red)>>>0;
+   affected++;
+  }
+ }
+ return affected;
+}
+
 function renderZCamera(){
  const p=newProfile(),pose=renderPose(),camera=cameraParameters(pose.yaw),light=lightPos(pose.sun),st=displayActor();
  zInit();zDepth.fill(0);zSurface.fill(0);zColor.fill(Z_SKY);
@@ -771,6 +799,7 @@ function renderZCamera(){
  const m={tests:0,writes:0,triangles:0},tr=performance.now();
  for(const f of projected)zRaster(f.a,f.b,f.c,f.col,f.tag,W,H,zDepth,zColor,zSurface,m);
  p.cameraZ=performance.now()-tr;zGroundShadows(camera,lm,p);
+ if(contourAA){const aaStart=performance.now();smoothCameraSilhouettes();p.edgeAA=performance.now()-aaStart;}
  const tc=performance.now();ctx.putImageData(zImage,0,0);p.copy=performance.now()-tc;
  const ls=project(light,camera);
  if(ls){const x=Math.floor(ls[0]),y=Math.floor(ls[1]);
@@ -902,8 +931,8 @@ function step(dt=1/30){
   else if(old){forecastsInvalid++;currentForecast=null}}
  if(temporalLightEnabled&&(!lightingBank||simStep-lightingBank.created>=LIGHT_REFRESH))buildLightingBank(true);forecast();
 }
-function updateOptions(){mode=$('mode').value;horizon=+$('horizon').value;keyEvery=+$('keyEvery').value;orbitEnabled=$('orbit').checked;sunEnabled=$('sun').checked;shadowsEnabled=$('shadows').checked;shadowResolution=+$('shadowResolution').value;lightingScene.lights[0].shadowResolution=shadowResolution;stableShadows=$('stableShadows').checked;shadowSoftness=+$('shadowSoftness').value;upcomingStaticJob=null;lightingScene.shadowMaps.clear();lightingScene.staticDepthMaps.clear();overviewEnabled=$('overview').checked;temporalLightEnabled=$('temporalLight').checked;cacheStaticEnabled=$('cacheStatic').checked;invalidateLighting();actorSpeed=+(parseFloat($('speed').value)*.018).toFixed(3);autoWalk=$('autoWalk').checked;$('speedLabel').textContent=$('speed').value+' %';baseReady=false;baseDepth=null;invalidateForecast('modification des paramètres');forecast()}
-for(let id of ['mode','horizon','keyEvery','orbit','sun','shadows','temporalLight','cacheStatic','overview','speed','autoWalk','shadowResolution','stableShadows','shadowSoftness'])$(id).addEventListener('change',()=>{tileInvalidate('configuration');updateOptions()});
+function updateOptions(){mode=$('mode').value;horizon=+$('horizon').value;keyEvery=+$('keyEvery').value;orbitEnabled=$('orbit').checked;sunEnabled=$('sun').checked;shadowsEnabled=$('shadows').checked;shadowResolution=+$('shadowResolution').value;lightingScene.lights[0].shadowResolution=shadowResolution;stableShadows=$('stableShadows').checked;shadowSoftness=+$('shadowSoftness').value;contourAA=$('contourAA').checked;upcomingStaticJob=null;lightingScene.shadowMaps.clear();lightingScene.staticDepthMaps.clear();overviewEnabled=$('overview').checked;temporalLightEnabled=$('temporalLight').checked;cacheStaticEnabled=$('cacheStatic').checked;invalidateLighting();actorSpeed=+(parseFloat($('speed').value)*.018).toFixed(3);autoWalk=$('autoWalk').checked;$('speedLabel').textContent=$('speed').value+' %';baseReady=false;baseDepth=null;invalidateForecast('modification des paramètres');forecast()}
+for(let id of ['mode','horizon','keyEvery','orbit','sun','shadows','temporalLight','cacheStatic','overview','speed','autoWalk','shadowResolution','stableShadows','shadowSoftness','contourAA'])$(id).addEventListener('change',()=>{tileInvalidate('configuration');updateOptions()});
 $('resolution').addEventListener('change',()=>{tileInvalidate('résolution');const [w,h]=$('resolution').value.split('x').map(Number);W=w;H=h;canvas.width=w;canvas.height=h;background.width=w;background.height=h;out.width=w;out.height=h;baseReady=false;baseDepth=null;memoryAlloc();invalidateLighting();invalidateForecast('changement de résolution');forecast()});
 $('reverse').onclick=()=>{tileInvalidate('demi-tour');patrolDir*=-1;actor.idx=(actor.idx+patrolDir*2+route.length*2)%route.length;collisionTest=false;invalidateForecast('inversion de direction');forecast()};
 $('turn').onclick=()=>{tileInvalidate('parcours');waypointVariant=1-waypointVariant;route=waypointVariant?routeB:routeA;actor.idx=nearestWaypoint(actor);collisionTest=false;invalidateForecast('changement de parcours');forecast()};
