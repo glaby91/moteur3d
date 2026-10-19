@@ -48,3 +48,17 @@ Les ombres V4 étaient visuellement plus stables, mais des triangles masqués ap
 5. Préparer l'antialiasing adaptatif à 4 échantillons sur silhouettes et très petits triangles.
 
 **Important :** la V4 reste disponible sans modification dans le dossier voisin.
+
+## Tests complémentaires automatisés (19 octobre 2026)
+
+Dans le banc d'exécution JavaScript avec Canvas simulé :
+
+| Résolution | Pixels couverts | Tests Z | Écritures Z |
+| --- | ---: | ---: | ---: |
+| 320 × 240 | 53 490 | 136 005 | 92 008 |
+| 640 × 480 | 214 004 | 543 668 | 367 949 |
+| 800 × 600 | 334 359 | 849 708 | 574 981 |
+
+L'entièreté du décor a été rendue à 320 × 240 une fois dans l'ordre de triangles original, puis avec l'ordre des 2 310 triangles du décor complètement inversé. **Résultat : 0 pixel couleur différent sur 76 800**, avec l'éclairage direct recalculé de façon identique. Ce test valide l'absence de dépendance à l'ordre des faces pour cette scène et cette pose, mais ne remplace pas une inspection visuelle des silhouettes.
+
+Temps dans cet environnement simulé (comprennent le rendu Z, les ombres et la projection) : environ 147 ms (320×240), 266 ms (640×480), 388 ms (800×600). **Ces durées ne sont pas des FPS mesurés dans Firefox ou Chrome.** Il faudra optimiser le rendu logiciel avant de poursuivre sur une mise à jour interactive rapide.
