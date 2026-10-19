@@ -35,3 +35,17 @@ REFERENCES GIT (SHA DES COMMITS CREES)
   Archive HTML raster : 1afccd13e7082cdbb1849b9e223c7457bc4e38c1
   Port QB64 corrige : 5e2d09b3ca5877d419768634188b9185d10296b8
   Mise a jour accueil branche : c18ff2afad40e33f4526504eabd4e0087b92e8ad
+
+CPC6128-Z80-RASTER 0.1.0 — NOUVEAU MODE 0 / 16 COULEURS PLEINES
+  retro/cpc6128-z80/CPC_RASTER_MODE0.asm
+  retro/cpc6128-z80/README.md
+  retro/cpc6128-z80/VERSIONING.txt
+  24 triangles pleins sur huit poses 3D preprojetees,
+  parcours d'aretes en 8.8 et spans horizontaux.
+  Pas de texture, pas de Z-buffer pixel, tri painter offline.
+  16 encres, 160x200 Mode0, deux pixels identiques / octet.
+  ROMs/interruptions desactivees pendant l'animation.
+  RAM4..RAM7 contiennent les poses, 2 par banque.
+  Validation statique des tables, aucune compilation ni FPS verifies.
+  Source initiale publiee: commit 927b3a59519e5210bf8a3ff1d22e1a20f827f0e1.
+  Estimation 8–12 FPS pour scenes legeres = objectif, NON mesure.
