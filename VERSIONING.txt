@@ -29,3 +29,9 @@ CONSERVATION
   des repertoires experiments/ sur master.
 
 Note : VERSIONING.txt constitue la chronologie de CETTE branche.
+
+REFERENCES GIT (SHA DES COMMITS CREES)
+  Base initiale commune master : ec7a9778f223a15548b0777d20ec24d2d3e5a475
+  Archive HTML raster : 1afccd13e7082cdbb1849b9e223c7457bc4e38c1
+  Port QB64 corrige : 5e2d09b3ca5877d419768634188b9185d10296b8
+  Mise a jour accueil branche : c18ff2afad40e33f4526504eabd4e0087b92e8ad
