@@ -2,7 +2,15 @@
 
 Moteur 3D expérimental (archives QBasic + démonstrations HTML/JavaScript).
 
-## Version expérimentale actuelle — V9.1, ombrage CPU optimisé (19 octobre 2026)
+## Version expérimentale actuelle — V9.2, rendu 16:10 plus rapide (19 octobre 2026)
+
+**[Ouvrir V9.2 — ray casting 16:10, ciel optimisé et précision réglable](experiments/2026-10-19-v9-2-fast-sky-16x10/index.html)** · [Documentation et tests V9.2](experiments/2026-10-19-v9-2-fast-sky-16x10/README.md)
+
+La V9.2 conserve les **primitives mathématiques, le BVH, les ombres Z, les textures RGB565 et le format 16:10**. Le ciel et les nuages sont calculés sur une **grille angulaire de 2 à 4 pixels**, interpolée, avec comparaison au ciel original ; les rayons et les intersections caméra ne changent pas en mode natif. Une commande explicite permet de choisir entre **Native (100 % : 1 rayon par pixel affiché)**, **Équilibré (75 % des axes, agrandi)** ou **Rapide (50 % des axes, agrandi : 4 fois moins de rayons)**. Le mode natif reste le défaut pour respecter la contrainte « un rayon par pixel ». À 1920×1200 affiché, le test de simulation CPU a mesuré 10 932 ms en Native contre 2 915 ms en Rapide (**environnement JS/Canvas simulé, pas des mesures de Firefox**). Les compromis de netteté sont documentés.
+
+---
+
+## Version précédente — V9.1, ombrage CPU optimisé (19 octobre 2026)
 
 **[Ouvrir la V9.1 — ray casting 16:10 et éclairage accéléré](experiments/2026-10-19-v9-1-shading-optimized-16x10/index.html)** · **[Documentation, comparaison et mesures V9.1](experiments/2026-10-19-v9-1-shading-optimized-16x10/README.md)**
 
