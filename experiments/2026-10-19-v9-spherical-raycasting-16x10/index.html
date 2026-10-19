@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Moteur 3D V9 — Caméra sphérique, ray casting 16:10</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1622;--panel:#16293b;--line:#334f64;--ink:#e9f3f9;--muted:#a3bbcf;--accent:#74dfcb}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);font:13px/1.45 system-ui,'Segoe UI',sans-serif;color:var(--ink)}
+header{padding:17px 22px;background:#132539;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:15px;flex-wrap:wrap}
+h1{font-size:21px;letter-spacing:-.4px;margin:0}p{margin:6px 0;color:var(--muted)}
+main{max-width:1500px;padding:16px;margin:auto}.frame{display:grid;grid-template-columns:minmax(0,2fr) minmax(275px,1fr);gap:14px}
+.panel{background:var(--panel);border:1px solid var(--line);padding:15px;border-radius:10px;min-width:0}
+.panel h2{font-size:15px;margin:0 0 12px}canvas#view{display:block;width:100%;aspect-ratio:16/10;height:auto;background:#213a50;border-radius:6px}
+.controls{display:grid;gap:12px}.controls label{display:grid;gap:5px;color:#c2d4e2}label.inline{display:flex;align-items:center;gap:8px}
+select,button,input{font:inherit}select,button{border-radius:6px;background:#26445e;color:var(--ink);border:1px solid #577d9a;padding:8px 9px}
+button{cursor:pointer}button:hover{background:#325a74}button.primary{background:#267264;border-color:#57b59f;font-weight:650}
+input[type=range]{width:100%;accent-color:var(--accent)}input[type=checkbox]{accent-color:var(--accent)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.muted{color:var(--muted)}
+.statgrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin:12px 0}
+.stat{background:#1c3449;padding:10px;border-radius:7px;border:1px solid #35516b}.stat b{display:block;font-size:20px;font-variant-numeric:tabular-nums}.stat small{font-size:10px;color:var(--muted)}
+.progress{height:8px;background:#28445c;overflow:hidden;border-radius:10px}.progress>div{height:100%;width:0;background:#6bd8bd;transition:width .1s}
+.notice{font-size:11px;line-height:1.55;color:var(--muted)}.metrics{display:grid;grid-template-columns:1fr auto;gap:4px 12px;font-variant-numeric:tabular-nums}
+.metrics span:nth-child(2n){text-align:right;color:#c7e5d7}
+.hint{border-left:3px solid #76cbb8;padding:8px 12px;background:#1a3745;font-size:12px;margin-top:12px;color:#d1e6ed}
+#diagnostics{white-space:pre-line}
+@media(max-width:980px){.frame{grid-template-columns:1fr}.statgrid{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head><body>
+<header><div><h1>◈ Moteur 3D V9 — Ray casting mathématique · 16:10</h1>
+<p>Caméra sphérique virtuelle · 1 rayon primaire par pixel · premières intersections · textures RGB565 / mipmaps · lumière unique</p></div>
+<div class="row"><a href="https://github.com/glaby91/moteur3d" style="color:#84d8cb">GitHub</a><strong id="state">Initialisation…</strong></div></header>
+<main><div class="frame">
+<section class="panel">
+<h2>01 / Image calculée par rayons — projection rectilinéaire sur surface sphérique</h2>
+<canvas id="view" width="640" height="400"></canvas>
+<div class="row" style="justify-content:space-between;margin:9px 0"><span id="frameInfo">Aucune image</span><span class="muted" id="raysInfo">256 000 rayons / image</span></div>
+<div class="progress"><div id="progressBar"></div></div>
+<div class="statgrid">
+<div class="stat"><b id="renderTime">—</b><small>ms / image complète</small></div>
+<div class="stat"><b id="traceTime">—</b><small>ms intersections BVH</small></div>
+<div class="stat"><b id="shadeTime">—</b><small>ms éclairage / texels</small></div>
+<div class="stat"><b id="rayCounter">—</b><small>rayons caméra</small></div>
+</div>
+<h2>02 / Diagnostics réels du moteur</h2>
+<div class="metrics"><span>Primitives mathématiques</span><span id="objectCount">—</span>
+<span>Tests géométriques</span><span id="testCount">—</span>
+<span>Nœuds BVH parcourus</span><span id="nodeCount">—</span>
+<span>Intersections réussies</span><span id="hitCount">—</span>
+<span>Rayons sans objet (ciel)</span><span id="skyCount">—</span>
+<span>Texels lus</span><span id="texelCount">—</span>
+<span>Niveau mip dominant</span><span id="mipCount">—</span>
+<span>Ombre calculée</span><span id="shadowStatus">Préparation…</span>
+</div>
+<div class="hint" id="diagnostics">Le moteur ne rasterise aucun triangle. Un rayon par pixel choisit la surface rencontrée la plus proche. La couleur du ciel est calculée sans intersection.</div>
+</section>
+<section class="panel">
+<h2>03 / Caméra et qualité</h2>
+<div class="controls">
+<label>Résolution 16:10
+<select id="resolution">
+<option value="640x400" selected>640 × 400 — 256 000 rayons</option>
+<option value="800x500">800 × 500 — 400 000 rayons</option>
+<option value="1280x800">1280 × 800 — 1 024 000 rayons</option>
+<option value="1600x1000">1600 × 1000 — 1 600 000 rayons</option>
+<option value="1920x1200">1920 × 1200 — 2 304 000 rayons</option>
+</select></label>
+<label>Distance caméra <span id="distanceValue">13.5 m</span><input id="distance" type="range" min="7" max="26" step=".5" value="13.5"></label>
+<label>Rotation caméra <span id="angleValue">25°</span><input id="angle" type="range" min="-180" max="180" value="25"></label>
+<label>Élévation caméra <span id="elevationValue">18°</span><input id="elevation" type="range" min="-5" max="50" value="18"></label>
+<label>Champ horizontal <span id="fovValue">70°</span><input id="fov" type="range" min="35" max="105" value="70"></label>
+<label>Filtrage texture
+<select id="filter"><option value="nearest">Plus proche</option><option value="bilinear" selected>Bilinéaire (rapide)</option><option value="trilinear">Trilinéaire</option></select></label>
+<label>Mipmaps <select id="mipMode"><option value="auto" selected>Auto · empreinte du rayon</option>
+<option value="4096">Forcer 4096²</option><option value="2048">Forcer 2048²</option><option value="1024">Forcer 1024²</option>
+<option value="512">Forcer 512²</option><option value="256">Forcer 256²</option><option value="128">Forcer 128²</option>
+<option value="64">Forcer 64²</option><option value="32">Forcer 32²</option><option value="16">Forcer 16²</option><option value="8">Forcer 8²</option></select></label>
+<label class="inline"><input type="checkbox" id="textures" checked> Textures RGB565</label>
+<label class="inline"><input type="checkbox" id="shadows" checked> Ombres par carte Z lumineuse (pré-calculée)</label>
+<label class="inline"><input type="checkbox" id="fog" checked> Brouillard atmosphérique / nuages</label>
+<label class="inline"><input type="checkbox" id="mipColors"> Diagnostic des niveaux mip</label>
+<label>Qualité carte d'ombre <select id="shadowSize"><option value="96">96 × 96 — rapide</option><option value="160" selected>160 × 160</option><option value="256">256 × 256 — détaillé</option></select></label>
+<label>Budget de calcul par rafraîchissement <select id="budget"><option value="8">8 ms</option><option value="14" selected>14 ms</option><option value="24">24 ms</option><option value="40">40 ms</option></select></label>
+<div class="row"><button class="primary" id="renderButton">↻ Recalculer l'image</button><button id="resetButton">Caméra initiale</button></div>
+<div class="notice" id="textureStatus">Textures : préparation des mipmaps…</div>
+<div class="notice">La surface de projection est sphérique : chaque direction de vue est radiale, donc normale à cette surface. Les directions sont réparties pour obtenir une perspective naturelle 16:10 sans effet fisheye marqué.</div>
+<div class="notice">Le moteur recherche uniquement le premier impact d'un rayon caméra. Les ombres utilisent une **carte de profondeur calculée séparément pour l'unique lumière**, sans rayon secondaire lancé depuis les pixels caméra. Z caméra par rasterisation : aucun.</div>
+</div></section>
+</div></main>
+<script>
+'use strict';
+const $=id=>document.getElementById(id),canvas=$('view'),ctx=canvas.getContext('2d',{alpha:false});
+const PI=Math.PI,TAU=2*PI,clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const fnum=(v,n=1)=>Number(v).toFixed(n),norm=(x,y,z)=>{const l=Math.hypot(x,y,z)||1;return [x/l,y/l,z/l]};
+const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+const sun=norm(-.55,.88,.36),skyZenith=[58,115,181],skyHorizon=[187,205,211];
+let W=640,H=400,frameImage=null,pixels=null,hitIds=null,hitDistances=null;
+let imageSerial=0,renderJob=null,shadowJob=null,shadowMap=null,preparedTexHigh=false;
+let materials=new Map(),objects=[],bvh=[],bvhRoot=-1;
+let currentCam=null;
+const stats={rays:0,tests:0,nodes:0,hits:0,sky:0,texels:0,traceMs:0,shadeMs:0,finishMs:0,tiles:0,mips:new Uint32Array(10)};
+const mipSizes=[8,16,32,64,128,256,512,1024,2048,4096];
+const palette=[0xff68acf7,0xff69f8d4,0xff9dff73,0xffecfc78,0xffe2b46b,0xffdb8179,0xffbd7ff0,0xff7da8f7,0xffdda0d2,0xffc0f4ec];
+/*__V9_SCENE__*/
+/*__V9_RENDER__*/
+</script>
+</body></html>
