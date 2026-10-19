@@ -2,7 +2,14 @@
 
 Moteur 3D expérimental (archives QBasic + démonstrations HTML/JavaScript).
 
-## Version expérimentale actuelle — V8, textures adaptatives (19 octobre 2026)
+## Dernière version expérimentale — V8.1, rasteriseur CPU optimisé (19 octobre 2026)
+
+**[Ouvrir le simulateur V8.1 — raster optimisé Z puis textures visibles](experiments/2026-10-19-v8-1-optimized-raster/index.html)** · [rapport et tests V8.1](experiments/2026-10-19-v8-1-optimized-raster/README.md)
+
+À la suite d'une mesure utilisateur de **200 ms pour la rasterisation à 800 × 600**, la V8.1 conserve les textures RGB565, les mipmaps 8²–4096², le Z-buffer caméra et les ombres Z, mais rasterise les **8 422 triangles natifs** au lieu de 28 416 triangles dont beaucoup étaient subdivisés de manière coplanaire. Une passe Z identifie les faces visibles avant d'échantillonner les textures. Le niveau de mip est évalué par tuile 16×16 et face. Un sélecteur permet de comparer **Accéléré / Intermédiaire / Référence V8**, avec affichage séparé des temps **Z + textures**. Les tests automatisés confirment des profondeurs et occultations inchangées ; le gain réel doit être mesuré en navigateur.
+
+---
+## Version précédente — V8, textures adaptatives (19 octobre 2026)
 
 **[Ouvrir V8 — textures RGB565 + mipmaps 8 à 4096](experiments/2026-10-19-v8-mipmaps-textures/index.html)** · [documentation, mesures et limites](experiments/2026-10-19-v8-mipmaps-textures/README.md)
 
