@@ -1,3 +1,23 @@
+# moteur3d — branche de sauvegarde raycasting
+
+**Architecture : lancer de rayons analytique, première intersection et objets mathématiques.**
+
+Cette branche constitue une **sauvegarde isolée** du moteur V9.2, avec adaptations QB64 et assembleur CPC6128.
+
+- [Snapshot HTML V9.2 figé](engine/index.html)
+- [Source QB64 RayCastingEngine.bas](qb64/raycasting/RayCastingEngine.bas)
+- [Documentation QB64](qb64/raycasting/README.md)
+- [CPC6128 : source assembleur Z80](retro/cpc6128-z80/CPC_RAY80.asm)
+- [CPC6128 : architecture 128 Ko et désactivation firmware](retro/cpc6128-z80/README.md)
+- [Historique et numéro de version — VERSIONING.txt](VERSIONING.txt)
+- [Guide de cette branche](BRANCH_README.md)
+
+Les autres prototypes hérités de `master` restent présents dans `experiments/`, mais `engine/index.html` est **la version de référence figée de cette branche**.
+
+---
+
+## Historique général hérité du dépôt
+
 # moteur3d
 
 Moteur 3D expérimental (archives QBasic + démonstrations HTML/JavaScript).
