@@ -36,3 +36,10 @@ CONSERVATION
   Snapshot HTML fige dans engine/index.html.
 
 Note : VERSIONING.txt constitue la chronologie de CETTE branche.
+
+REFERENCES GIT (SHA DES COMMITS CREES)
+  Base initiale commune master : ec7a9778f223a15548b0777d20ec24d2d3e5a475
+  Archive HTML raycasting : 4abf59de0a1f9e48f3edc488d319d881cd2cd16a
+  Port QB64 raycasting : 3bb270e28e312271ba5db5c70ddd73750c26880c
+  Source Z80 CPC : ff6f42ea4d0bc634013803ebb59e8070c6d748b6
+  Mise a jour accueil branche : 85c8728e1cfdf347d50cced464aa1aa4fe5c4d6c
