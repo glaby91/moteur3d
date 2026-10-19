@@ -807,8 +807,8 @@ function invalidateImage(message){
 // V9.2: sky-only 4px angular cache. Rays are still traced ONCE per pixel
 // and intersections are identical. Sky shading samples a 5x5 grid for each
 // 16x16 tile (25 instead of as many as 256 expensive cloud evaluations).
-const SKY_GRID_STEP=4,SKY_GRID_SIDE=5;
-const SKY_PIXELS=new Uint32Array(SKY_GRID_SIDE*SKY_GRID_SIDE);
+const SKY_PIXELS=new Uint32Array(81); // 9x9 max at 2px step; 5x5 at 4px step
+let skyGridStep=4,skyGridSide=5;
 const SKY_RAY=[0,0,0];
 function skyGridRay(cam,x,y,out){
  const sx=((x+.5)/W*2-1)*Math.tan(cam.fov*.5);
@@ -819,18 +819,20 @@ function skyGridRay(cam,x,y,out){
  out[0]=dx*inv;out[1]=dy*inv;out[2]=dz*inv;return out;
 }
 function prepareSkyGrid(cam,bx,by,fog){
- for(let j=0;j<SKY_GRID_SIDE;j++)for(let i=0;i<SKY_GRID_SIDE;i++){
-  skyGridRay(cam,bx+i*SKY_GRID_STEP,by+j*SKY_GRID_STEP,SKY_RAY);
+ skyGridStep=W<=800?2:4;skyGridSide=16/skyGridStep+1;
+ for(let j=0;j<skyGridSide;j++)for(let i=0;i<skyGridSide;i++){
+  skyGridRay(cam,bx+i*skyGridStep,by+j*skyGridStep,SKY_RAY);
   const color=skyRGB(SKY_RAY[0],SKY_RAY[1],SKY_RAY[2],fog);
-  SKY_PIXELS[j*SKY_GRID_SIDE+i]=packABGR(color[0],color[1],color[2]);
+  SKY_PIXELS[j*skyGridSide+i]=packABGR(color[0],color[1],color[2]);
   stats.cloudEvaluations++;
  }
 }
 function skyInterpolated(localX,localY){
- const cx=localX>>2,cy=localY>>2;
- const fx=(localX&3)*.25,fy=(localY&3)*.25;
- const a=SKY_PIXELS[cy*5+cx],b=SKY_PIXELS[cy*5+cx+1],
-  c=SKY_PIXELS[(cy+1)*5+cx],d=SKY_PIXELS[(cy+1)*5+cx+1];
+ const step=skyGridStep,side=skyGridSide;
+ const cx=Math.floor(localX/step),cy=Math.floor(localY/step);
+ const fx=(localX-cx*step)/step,fy=(localY-cy*step)/step;
+ const a=SKY_PIXELS[cy*side+cx],b=SKY_PIXELS[cy*side+cx+1],
+  c=SKY_PIXELS[(cy+1)*side+cx],d=SKY_PIXELS[(cy+1)*side+cx+1];
  const f0=(1-fx)*(1-fy),f1=fx*(1-fy),f2=(1-fx)*fy,f3=fx*fy;
  const red=Math.round((a&255)*f0+(b&255)*f1+(c&255)*f2+(d&255)*f3);
  const green=Math.round(((a>>>8)&255)*f0+((b>>>8)&255)*f1+((c>>>8)&255)*f2+((d>>>8)&255)*f3);
@@ -881,6 +883,7 @@ function renderStep(){
  else{
   scaledContext.putImageData(frameImage,0,0);
   ctx.imageSmoothingEnabled=true;
+  if('imageSmoothingQuality' in ctx)ctx.imageSmoothingQuality='high';
   ctx.drawImage(scaledCanvas,0,0,displayW,displayH);
  }
  const done=job.index/job.total;
