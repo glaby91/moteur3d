@@ -127,13 +127,13 @@ function newStaticLightMap(bin){
  const forward=norm(mul(lightPos(phase),-1));
  const right=norm(cross(forward,[0,1,0])),up=cross(right,forward),n=shadowResolution;
  const map={key:'static/'+bin,bin,size:n,center:[0,1,0],extent:20,offset:25,forward,right,up,
-   depth:new Float32Array(n*n),triangles:mesh.length,writes:0,done:0,ready:false};
+   depth:new Float32Array(n*n),triangles:shadowGeometry.length,writes:0,done:0,ready:false};
  map.depth.fill(Infinity);return map;
 }
 function rasterStaticChunk(map,count=SHADOW_STATIC_BUDGET_TRIS){
- const limit=Math.min(mesh.length,map.done+count);
+ const limit=Math.min(shadowGeometry.length,map.done+count);
  for(;map.done<limit;map.done++){
-  const tr=mesh[map.done];
+  const tr=shadowGeometry[map.done];
   rasterShadow(projectLight(tr.v[0],map),projectLight(tr.v[1],map),projectLight(tr.v[2],map),map);
  }
  map.ready=map.done===mesh.length;
@@ -146,7 +146,7 @@ function getStaticLightMap(id,bin){
   // Complete required map synchronously only on first use. New future maps
   // are progressively filled between frames via prepareUpcomingShadowMap().
   stat=upcomingStaticJob&&upcomingStaticJob.key===key?upcomingStaticJob.map:newStaticLightMap(bin);
-  if(!stat.ready)rasterStaticChunk(stat,mesh.length-stat.done);
+  if(!stat.ready)rasterStaticChunk(stat,shadowGeometry.length-stat.done);
   lightingScene.staticDepthMaps.set(key,stat);
  }else shadowCacheHits++;
  return stat;
@@ -184,9 +184,9 @@ function dynamicLightMap(id,bin,st){
  if(cached)return cached;
  const stat=getStaticLightMap(id,bin);
  const start=performance.now(),map={...stat,id,key,
-   depth:new Float32Array(stat.depth),writes:0,triangles:mesh.length+manMesh.length};
+   depth:new Float32Array(stat.depth),writes:0,triangles:shadowGeometry.length+actorShadowGeometry.length};
  const p=[st.x,0,st.z];
- for(const tr of manMesh){
+ for(const tr of actorShadowGeometry){
   const a=tr.v.map(x=>projectLight(manTransform(x,p,st.heading,st.walk),map));
   rasterShadow(a[0],a[1],a[2],map);
  }
@@ -285,7 +285,7 @@ function updateShadowPreview(){
  $('shadowState').textContent=n+'×'+n+' · '+map.triangles+' triangles · '+map.writes.toLocaleString('fr-FR')+' écritures Z · '+map.buildMs.toFixed(2)+' ms · transition '+Math.round(map.mix*100)+' %';
 }
 
-const mesh=[],treeMesh=[],manMesh=[],colors=new Map();let rndState=20261018;function rand(){rndState=(Math.imul(rndState,1664525)+1013904223)>>>0;return rndState/4294967296}
+const mesh=[],treeMesh=[],manMesh=[],shadowGeometry=[],actorShadowGeometry=[],colors=new Map();let rndState=20261018;function rand(){rndState=(Math.imul(rndState,1664525)+1013904223)>>>0;return rndState/4294967296}
 function triangle(target,a,b,c,color,kind){const n=norm(cross(sub(b,a),sub(c,a)));target.push({v:[a,b,c],c:color,k:kind,n,center:mul(add(add(a,b),c),1/3)})}
 function quad(target,a,b,c,d,color,kind){triangle(target,a,b,c,color,kind);triangle(target,a,c,d,color,kind)}
 function tube(target,a,b,r,n,color,kind='wood'){let axis=norm(sub(b,a)),u=norm(cross(axis,[0,0,1]));if(Math.hypot(...cross(axis,[0,0,1]))<.15)u=[1,0,0];let v=cross(axis,u);for(let j=0;j<n;j++){let p=k=>add(mul(u,r*Math.cos(2*Math.PI*k/n)),mul(v,r*Math.sin(2*Math.PI*k/n)));quad(target,add(a,p(j)),add(a,p(j+1)),add(b,p(j+1)),add(b,p(j)),color,kind)}}
@@ -359,6 +359,7 @@ function cube(target,x,y,z,w,h,d,color,kind){let a=[x-w/2,y,z-d/2],b=[x+w/2,y,z-
 // parent material are preserved. This intentionally ADDS NO detail.
 const BASE_TRI_COUNT={decor:2310,actor:100};
 function splitIntoTen(tr,out){
+ const start=out.length;
  const [a,b,c]=tr.v;
  const pt=(i,j)=>{const u=i/3,v=j/3;return [
   a[0]*(1-u-v)+b[0]*u+c[0]*v,
@@ -377,19 +378,23 @@ function splitIntoTen(tr,out){
   put(p,q,r);
   if(i+j<2)put(q,pt(i+1,j+1),r);
  }
+ for(let k=start;k<out.length;k++)out[k].parent=tr;
 }
 
 function tessellateSceneTenfold(){
  const baseProps=mesh.length,tree=treeMesh.length,actor=manMesh.length;
+ shadowGeometry.length=0;shadowGeometry.push(...mesh,...treeMesh);
+ actorShadowGeometry.length=0;actorShadowGeometry.push(...manMesh);
  const decor=[],persons=[],detailed=[];
  for(const tr of mesh)splitIntoTen(tr,decor);
  // Use 3-way triangular subdivision for the genuinely higher-detail tree,
  // vs old 10-way coplanar subdivisions of a low-detail tree.
  for(const tr of treeMesh){
-  const m=tr.center;
+  const m=tr.center,first=detailed.length;
   triangle(detailed,tr.v[0],tr.v[1],m,tr.c,tr.k);
   triangle(detailed,tr.v[1],tr.v[2],m,tr.c,tr.k);
   triangle(detailed,tr.v[2],tr.v[0],m,tr.c,tr.k);
+  for(let k=first;k<detailed.length;k++)detailed[k].parent=tr;
  }
  decor.push(...detailed);
  for(const tr of manMesh)splitIntoTen(tr,persons);
@@ -738,19 +743,29 @@ function renderZCamera(){
  const ground=[[-13,-.035,-13],[13,-.035,-13],[13,-.035,13],[-13,-.035,13]];
  zCollect(projected,[ground[0],ground[1],ground[2]],camera,Z_GROUND,1);
  zCollect(projected,[ground[0],ground[2],ground[3]],camera,Z_GROUND,1);
+ let shadeParent=null,shadeFactor=1;
  for(let i=0;i<mesh.length;i++){
-  const tr=mesh[i],cached=currentFaceLight(i),shade=cached===null?surfaceShade(tr,light):cached;
-  const vis=lm?visibilityFromLight(tr.center,lm,.12):1;
-  const factor=tr.k==='leaves'&&lm?.first?.depth?
-    .30+(shade-.30)*(.65+.35*vis):(.30+(shade-.30)*vis);
-  zCollect(projected,tr.v,camera,zColorFor(tr.c,factor),2);
+  const tr=mesh[i],parent=tr.parent||tr;
+  if(parent!==shadeParent){
+   const cached=currentFaceLight(i),shade=cached===null?surfaceShade(parent,light):cached;
+   const vis=lm?visibilityFromLight(parent.center,lm,.12):1;
+   shadeFactor=parent.k==='leaves'&&lm?.first?.depth?
+     .30+(shade-.30)*(.65+.35*vis):(.30+(shade-.30)*vis);
+   shadeParent=parent;
+  }
+  zCollect(projected,tr.v,camera,zColorFor(tr.c,shadeFactor),2);
  }
  const actorPos=[st.x,0,st.z];
+ let actorParent=null,actorShade=1;
  for(const tr of manMesh){
   const vertices=tr.v.map(v=>manTransform(v,actorPos,st.heading,st.walk));
-  const centroid=mul(add(add(vertices[0],vertices[1]),vertices[2]),1/3);
-  const shade=surfaceShade(tr,light),vis=lm?visibilityFromLight(centroid,lm,.12):1;
-  zCollect(projected,vertices,camera,zColorFor(tr.c,.30+(shade-.30)*vis),2);
+  const parent=tr.parent||tr;
+  if(parent!==actorParent){
+   const anchor=manTransform(parent.center,actorPos,st.heading,st.walk);
+   const shade=surfaceShade(parent,light),vis=lm?visibilityFromLight(anchor,lm,.12):1;
+   actorShade=.30+(shade-.30)*vis;actorParent=parent;
+  }
+  zCollect(projected,vertices,camera,zColorFor(tr.c,actorShade),2);
  }
  p.proj=performance.now()-t0;
  const m={tests:0,writes:0,triangles:0},tr=performance.now();
