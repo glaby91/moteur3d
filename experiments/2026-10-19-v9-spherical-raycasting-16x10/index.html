@@ -371,7 +371,7 @@ function advanceHighTexture(){
    highTexture=null;preparedTexHigh=true;
    $('textureStatus').textContent='Pyramide écorce 4096 → 8 : 10 niveaux RGB565 disponibles';
    // Mip selection changes when switching source size, so recompute one image.
-   if(!renderJob)invalidateImage('Texture 4096² prête');
+   invalidateImage('Texture 4096² prête — image entièrement recalculée');
    return;
   }
  }
