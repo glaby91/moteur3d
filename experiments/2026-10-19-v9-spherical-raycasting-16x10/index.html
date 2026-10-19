@@ -256,9 +256,9 @@ function hitPrimitive(o,ox,oy,oz,dx,dy,dz,maxT){
  }
  return t>.0001&&t<maxT?t:Infinity;
 }
-function traceClosest(ox,oy,oz,dx,dy,dz,result,track=true){
+function traceClosest(ox,oy,oz,dx,dy,dz,result,track=true,includeGround=true){
  stats.rays+=track?1:0;
- let near=dy<-.000001?-oy/dy:Infinity,id=(Number.isFinite(near)&&near>.0001?1:0);
+ let near=includeGround&&dy<-.000001?-oy/dy:Infinity,id=(Number.isFinite(near)&&near>.0001?1:0);
  if(id===0)near=Infinity;
  if(bvhRoot>=0){
   let top=0;bvhStack[top++]=bvhRoot;
@@ -521,7 +521,7 @@ function runShadowStep(){
    const ox=base[0]+sun[0]*dist+right[0]*vx+up[0]*vy;
    const oy=base[1]+sun[1]*dist+right[1]*vx+up[1]*vy;
    const oz=base[2]+sun[2]*dist+right[2]*vx+up[2]*vy;
-   traceClosest(ox,oy,oz,-sun[0],-sun[1],-sun[2],shadowHit,false);
+   traceClosest(ox,oy,oz,-sun[0],-sun[1],-sun[2],shadowHit,false,false);
    job.data[y*size+x]=shadowHit.t;
   }
   job.row++;
