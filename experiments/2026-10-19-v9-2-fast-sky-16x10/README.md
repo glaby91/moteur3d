@@ -25,8 +25,9 @@ Le sélecteur **Précision du rendu** conserve par défaut le mode :
 
 - **Native — 1 rayon par pixel affiché.** À 1920×1200, **2 304 000 rayons** caméra par image, entièrement conforme au principe du projet.
 
-Et propose en option :
+Et propose deux compromis facultatifs :
 
+- **Équilibré — 75 % de la largeur et de la hauteur.** À 1920×1200 affiché, la résolution interne est **1440×900**, soit **1 296 000 rayons**. Le redimensionnement est moins marqué qu'en mode Rapide.
 - **Rapide — moitié largeur/hauteur.** À 1920×1200 affiché, calcul du rendu en **960×600**, donc **576 000 rayons primaires**, puis agrandissement 2× par Canvas avec interpolation. Le format d'affichage reste 16:10. **Ce mode n'envoie pas un rayon pour chaque pixel affiché**, mais bien **un rayon pour chacun des pixels calculés**. La perte de netteté est assumée et clairement signalée dans l'interface. Le mode natif reste toujours accessible.
 
 La géométrie mathématique, le BVH, les textures, les ombres, la lumière et les quatre autres résolutions d'affichage ne changent pas. Tous les compteurs de rayons reflètent la résolution **interne réellement calculée**, pas la résolution d'affichage.
@@ -62,7 +63,7 @@ La géométrie mathématique, le BVH, les textures, les ombres, la lumière et l
 
 1. Ouvrir `index.html` en Firefox et choisir **1920×1200**.
 2. Choisir **Ciel / nuages : Rapide**.
-3. En **Précision du rendu**, comparer **Native** puis **Rapide**.
+3. En **Précision du rendu**, comparer **Native**, **Équilibré** puis **Rapide**.
 4. Relever « ms / image complète », « ms intersections BVH », « ms éclairage / texels », le nombre de rayons et la netteté de l'écorce / du banc / des feuilles.
 5. Revenir au mode Native si les détails deviennent trop flous ; le mode Rapide n'est **pas équivalent** à un vrai 1920×1200.
 
