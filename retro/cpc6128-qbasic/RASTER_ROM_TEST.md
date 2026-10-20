@@ -29,3 +29,7 @@ Ceci est un test à risques : une interception de `#0038` peut affecter le firmw
 L'utilisateur observe **des couleurs très aléatoires** : tantôt jaune, tantôt rouge, mais souvent écran blanc. **Raster non validé** : le code utilise une phase d'interruption 0..5 sans ancrage VSYNC certifié ni association ligne écran/diagnostic. La modification suivante (commit `5a404283f95f19cebc37f452323b017578061a75`) inverse le chaînage firmware et les écritures de palette, compilation GitHub Actions réussie, mais **elle ne garantit PAS la synchronisation verticale** et n'est pas confirmée en WinAPE.
 
 Prochaine correction : calage fiable sur début de trame (VSYNC / compteur Gate Array), bande fixe précisément positionnée et restauration du firmware ; tester ensuite avant coloration de lignes syntaxiques. Garder v0.4.1 de secours.
+
+## Défaut menu confirmé sur capture WinAPE
+
+À partir de « Execution », la sélection n'était pas alignée avec les intitulés, indépendamment du défaut raster. Le menu statique commence aux colonnes (1-based) `2, 11, 20, 31, 42, 52, 61, 70`, tandis que `MENU_HEAD_X` indiquait auparavant `2, 11, 20, 32, 44, 54, 63, 73`. Correction faite dans `QEDIT_ROM.asm` (commit `36f3b85e825ed6a16b4440e2f74d2bb50472cdd8`). À recontrôler visuellement dans WinAPE. Les bandes raster aléatoires restent un défaut séparé.
