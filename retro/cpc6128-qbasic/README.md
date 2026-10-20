@@ -7,9 +7,10 @@
 | Version | Statut | Notes |
 |---|---|---|
 | **v0.3.2** | **Stable, testée par l'utilisateur dans WinAPE** | Menus rapides, clavier fluide, 50 lignes défilantes, sauvegarde et sortie ESC |
-| **v0.4.1** | **Bêta, compilation et tests statiques réussis — WinAPE encore à tester** | Correction de l'affichage des lignes 1 à 1 500 et du champ Col, sur la base tokenisée v0.4.0 |
+| **v0.4.1** | **Vérifiée dans WinAPE pour la navigation jusqu'à 1500 et la modification du programme** | Correction de l'affichage des lignes et du champ Col
+| **v0.4.2** | **Bêta, compilation et tests statiques réussis — WinAPE encore à tester** | Ctrl+G / Recherche → Aller à la ligne |
 
-La version stable est conservée sur la branche `qbasic-cpc6128-v0.3.2-stable`. La V0.4.0 bêta est conservée sur la branche `qbasic-cpc6128-v0.4.0-beta`. Le fichier `editor/QEDIT.ROM` sur `qbasic-cpc6128` est la **V0.4.1 bêta corrigée**.
+La version stable est conservée sur la branche `qbasic-cpc6128-v0.3.2-stable`. La V0.4.0 bêta est conservée sur la branche `qbasic-cpc6128-v0.4.0-beta`. Le fichier `editor/QEDIT.ROM` sur `qbasic-cpc6128` est la **V0.4.2 bêta (Ctrl+G)**. La V0.4.1 testée avec 1500 lignes est sauvegardée sur la branche `qbasic-cpc6128-v0.4.1-tested`.
 
 ## Installer et démarrer dans WinAPE
 
@@ -21,6 +22,15 @@ MEMORY &5FFF
 ```
 
 Commandes : `Ctrl+T` pour les menus, flèches pour naviguer, `Ctrl+S` pour sauver `DEMO.BAS` au format ASCII, `Ctrl+O` pour relire `DEMO.BAS`, `Ctrl+N` pour un nouveau programme, `ESC` pour quitter, `Ctrl+L` pour le test de 50 lignes et **`Ctrl+K` pour générer 1 500 lignes de démonstration**. Les deux raccourcis de test remplacent le document ouvert.
+
+## Nouveautés V0.4.2 — saut direct à une ligne
+
+- **Ctrl+G** ouvre une saisie du numéro de ligne ; on peut entrer **1 à 1500** et confirmer par **Entrée**.
+- La même commande se trouve sous **Recherche → Aller à la ligne**.
+- Le nombre doit correspondre à une ligne qui existe dans le document ; sinon QEDIT signale l'erreur.
+- **Retour arrière** efface un chiffre et **ESC** annule sans quitter l'éditeur.
+- La page est centrée autour de la ligne cible lorsque possible. Un seul rechargement des 21 lignes du cache est effectué, sans simuler des centaines d'appuis sur les flèches.
+- **Test WinAPE demandé** : Ctrl+K pour remplir le document, puis Ctrl+G vers 1000 et 1500 ; modifier une ligne, refaire Ctrl+G vers la première, puis revenir vérifier la conservation du texte.
 
 ## Nouveautés V0.4.1 — correction de la barre d'état
 
@@ -58,7 +68,7 @@ La limite de **1 500 lignes dépend du volume total de texte compressé**. Elle 
 4. Modifier une ligne, changer de page, revenir dessus et vérifier la conservation du texte.
 5. Tester `Ctrl+S` / `Ctrl+O` avec un document court, puis avec un document long.
 
-**Limites de cette bêta :** records en ajout seul, donc des modifications répétées consomment progressivement la RAM paginée ; pas encore de compaction mémoire automatique ; pas de moteur d'exécution QBasic. **La V0.4.1 n'est pas déclarée stable sans validation WinAPE.**
+**Limites de cette bêta :** records en ajout seul, donc des modifications répétées consomment progressivement la RAM paginée ; pas encore de compaction mémoire automatique ; pas de moteur d'exécution QBasic. **La V0.4.2 n'est pas déclarée stable sans validation de Ctrl+G dans WinAPE.**
 
 ## Sources et reproductibilité
 
@@ -73,4 +83,4 @@ Avec RASM v3.2.4bis, depuis le dossier `editor/` :
 rasm QEDIT_ROM.asm -ob QEDIT.ROM
 ```
 
-SHA-256 du binaire V0.4.1 bêta corrigée (16 384 octets) : `796730034591b2fafa5fb975453013ecf8137181ed7342c1361a414f7bc69119`.
+SHA-256 du binaire V0.4.2 bêta (16 384 octets) : `503f815beb059ec88249af986a9a42773fb11eb3e276f1df29f1ea7962466e46`.
