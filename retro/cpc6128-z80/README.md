@@ -77,3 +77,8 @@ Le **raycaster 80 rayons du CPC6128** reste séparément dans la branche [`rayca
 ## Étape suivante : conception V0.2 Fast Registers
 
 Une [spécification détaillée d'optimisation Z80](OPTIMISATION_V02_FAST_REGISTERS.md) a été ajoutée : jeu secondaire `BC'/DE'/HL'` comme cache de calcul, `EXX` pour interpoler les arêtes, écriture vidéo rapide par `PUSH`, effacement partiel et LUTs trigonométriques. **Proposition seulement : aucune V0.2 compilée, aucun nouveau FPS mesuré.**
+
+
+## V0.2 — Implémentation Fast Registers du raster Z80 (20 octobre 2026)
+
+La conception V0.2 est maintenant matérialisée par une [nouvelle source Z80 V0.2](CPC_RASTER_V02_FAST_REGISTERS.asm) et sa [documentation de validation](README_V02_FAST_REGISTERS.md). Le moteur compte 12 triangles visibles, utilise `EXX` pour stocker X/pente d'une arête dans `HL'/DE'`, accélère les spans longs par `PUSH BC` et n'efface qu'une zone vidéo limitée. La V0.1 `CPC_RASTER_MODE0.asm` reste inchangée. **Compilation et FPS réels non encore vérifiés**.
