@@ -117,7 +117,8 @@ EDITOR_START:
         CALL DEMO_DOCUMENT
         CALL CACHE_BUILD
         CALL SCREEN_INIT
-        CALL RASTER_INSTALL
+        ; RASTER_INSTALL disabled: WinAPE CRTC0 reports repeated resets.
+        ; Keep raster source for diagnosis, preserve stable editor IRQs.
 FULL_REDRAW:
         CALL COMMIT_DIRTY
         JR NC,FULL_REDRAW_UNCOMMITTED
