@@ -1532,7 +1532,7 @@ MENU_WINDOW_EXEC:
 
 ; Popup locations max 58 so items do not wrap at column 80.
 MENU_HEAD_X:
-        DB 2,11,20,32,44,54,63,73
+        DB 2,11,20,31,42,52,61,70
 MENU_POP_X:
         DB 2,11,20,32,44,54,58,58
 MENU_COUNTS:
