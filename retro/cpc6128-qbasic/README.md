@@ -7,9 +7,9 @@
 | Version | Statut | Notes |
 |---|---|---|
 | **v0.3.2** | **Stable, testée par l'utilisateur dans WinAPE** | Menus rapides, clavier fluide, 50 lignes défilantes, sauvegarde et sortie ESC |
-| **v0.4.0** | **Bêta, compilation et tests statiques réussis — WinAPE encore à tester** | Tokens QBasic, stockage variable dans les banques mémoire, index de 1 500 lignes |
+| **v0.4.1** | **Bêta, compilation et tests statiques réussis — WinAPE encore à tester** | Correction de l'affichage des lignes 1 à 1 500 et du champ Col, sur la base tokenisée v0.4.0 |
 
-La version stable est conservée sur la branche `qbasic-cpc6128-v0.3.2-stable`. Le fichier `editor/QEDIT.ROM` sur `qbasic-cpc6128` est la **V0.4.0 bêta**.
+La version stable est conservée sur la branche `qbasic-cpc6128-v0.3.2-stable`. La V0.4.0 bêta est conservée sur la branche `qbasic-cpc6128-v0.4.0-beta`. Le fichier `editor/QEDIT.ROM` sur `qbasic-cpc6128` est la **V0.4.1 bêta corrigée**.
 
 ## Installer et démarrer dans WinAPE
 
@@ -22,7 +22,13 @@ MEMORY &5FFF
 
 Commandes : `Ctrl+T` pour les menus, flèches pour naviguer, `Ctrl+S` pour sauver `DEMO.BAS` au format ASCII, `Ctrl+O` pour relire `DEMO.BAS`, `Ctrl+N` pour un nouveau programme, `ESC` pour quitter, `Ctrl+L` pour le test de 50 lignes et **`Ctrl+K` pour générer 1 500 lignes de démonstration**. Les deux raccourcis de test remplacent le document ouvert.
 
-## Nouveautés V0.4.0 bêta
+## Nouveautés V0.4.1 — correction de la barre d'état
+
+La capture WinAPE de la V0.4.0 montrait le libellé **Col:** partiellement effacé et un numéro de ligne incorrect. Deux causes ont été corrigées : le code rafraîchissait la colonne en position 17 au lieu de 20, et la conversion Z80 des nombres à quatre chiffres utilisait une mauvaise détection de retenue.
+
+La ligne est désormais affichée sur **quatre colonnes (10–13)**, la colonne sur **trois colonnes (20–22)**, sans effacer `Col:` ou `INS`. Contrôles statiques effectués notamment sur les lignes 1, 999, 1000 et 1500. **Test réel dans WinAPE encore nécessaire.**
+
+## Architecture introduite en V0.4.0 bêta
 
 - **66 tokens** pour les mots-clés QBasic courants : `PRINT`, `FOR`, `NEXT`, `DIM`, `IF`, `THEN`, `AS`, `INTEGER`, `CLS`, etc. Les chaînes et les commentaires restent du texte.
 - **Lignes de longueur variable** : un record en RAM contient un octet de longueur, suivi du texte compacté.
@@ -48,11 +54,11 @@ La limite de **1 500 lignes dépend du volume total de texte compressé**. Elle 
 
 1. Installer la nouvelle ROM ; vérifier la saisie, les menus (`Ctrl+T`) et `ESC`.
 2. Tester `Ctrl+L` et faire défiler 50 lignes.
-3. Tester **`Ctrl+K`**, puis descendre jusqu'aux lignes **22, 128, 256, 512 et 1500** ; remonter en haut.
+3. Tester **`Ctrl+K`**, puis descendre jusqu'aux lignes **22, 128, 256, 512, 999, 1000 et 1500** ; vérifier que `Ligne:`, `Col:` et `INS` restent lisibles, puis remonter en haut.
 4. Modifier une ligne, changer de page, revenir dessus et vérifier la conservation du texte.
 5. Tester `Ctrl+S` / `Ctrl+O` avec un document court, puis avec un document long.
 
-**Limites de cette bêta :** records en ajout seul, donc des modifications répétées consomment progressivement la RAM paginée ; pas encore de compaction mémoire automatique ; pas de moteur d'exécution QBasic. **La V0.4 n'est pas déclarée stable sans validation WinAPE.**
+**Limites de cette bêta :** records en ajout seul, donc des modifications répétées consomment progressivement la RAM paginée ; pas encore de compaction mémoire automatique ; pas de moteur d'exécution QBasic. **La V0.4.1 n'est pas déclarée stable sans validation WinAPE.**
 
 ## Sources et reproductibilité
 
@@ -67,4 +73,4 @@ Avec RASM v3.2.4bis, depuis le dossier `editor/` :
 rasm QEDIT_ROM.asm -ob QEDIT.ROM
 ```
 
-SHA-256 du binaire V0.4.0 bêta (16 384 octets) : `0de84c30a21f95c4bd653a7852691a0bfe786431e41aa4605d190e1a1e5f056f`.
+SHA-256 du binaire V0.4.1 bêta corrigée (16 384 octets) : `796730034591b2fafa5fb975453013ecf8137181ed7342c1361a414f7bc69119`.
