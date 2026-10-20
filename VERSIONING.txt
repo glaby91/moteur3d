@@ -55,3 +55,15 @@ CONCEPTION Z80 RASTER V0.2 — 2026-10-20 (NON IMPLEMENTEE)
   Cache dans les jeux alternatifs BC'/DE'/HL', AF', spans PUSH SP,
   effacement localise, projections par LUT et culling.
   Le code V0.1 n'a pas ete remplace; FPS non mesures.
+
+
+CPC6128-Z80-RASTER 0.2.0 — NOUVELLE SOURCE IMPLEMENTEE (2026-10-20)
+  retro/cpc6128-z80/CPC_RASTER_V02_FAST_REGISTERS.asm
+  retro/cpc6128-z80/README_V02_FAST_REGISTERS.md
+  La conception V0.2 Fast Registers est maintenant codee dans un nouveau fichier.
+  Cache registres alternatifs HL'/DE' via EXX, grands spans PUSH BC via SP,
+  effacement de rectangle partiel, 12 triangles visibles/pose,
+  8 poses reparties dans les 4 banques supplementaires.
+  Nettoyage du fond: 3660-3720 octets/image au lieu de 16000 (76,9 % en moins).
+  Source V0.1 preservee. Validation statique uniquement: pas de compilation,
+  ni rendu sur emulateur ni mesure FPS Z80 pour cette V0.2.
