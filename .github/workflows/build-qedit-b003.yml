@@ -20,6 +20,7 @@ jobs:
           cd retro/cpc6128-qbasic/editor
           /tmp/rasm-src/rasm.exe QEDIT_ROM.asm -ob QEDIT_V042_B003.ROM | tee build-b003.log
           test "$(stat -c%s QEDIT_V042_B003.ROM)" -eq 16384
+          python3 -c 'p="QEDIT_V042_B003.ROM"; b=open(p,"rb").read(); used=len(b.rstrip(bytes([255]))); print(f"CODE_ET_DONNEES={used} octets; REMPLISSAGE={len(b)-used} octets; CODE_FIN={hex(0xC000+used)}")'
       - uses: actions/upload-artifact@v4
         with:
           name: QEDIT-v0.4.2-B003-DIAGNOSTICS
