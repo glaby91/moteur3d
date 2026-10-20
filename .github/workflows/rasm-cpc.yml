@@ -1,0 +1,42 @@
+name: Assemble CPC6128 with RASM
+on:
+  push:
+    branches: [raster]
+    paths:
+      - ".github/workflows/rasm-cpc.yml"
+      - "retro/cpc6128-z80/*.asm"
+  workflow_dispatch:
+jobs:
+  assemble:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build upstream RASM assembler
+        shell: bash
+        run: |
+          git clone --depth 1 --branch v3.2.4bis https://github.com/EdouardBERGE/rasm.git /tmp/rasm-src
+          make -C /tmp/rasm-src release
+          find /tmp/rasm-src -maxdepth 2 -type f -executable -iname '*rasm*' -ls
+      - name: Assemble both versions
+        shell: bash
+        run: |
+          mkdir -p build/rasm
+          RASM="$(find /tmp/rasm-src -maxdepth 2 -type f -executable -iname '*rasm*' | head -n 1)"
+          test -n "$RASM"
+          set +e
+          "$RASM" retro/cpc6128-z80/CPC_RASTER_MODE0.asm -ob build/rasm/CPC_RASTER_V01.bin 2>&1 | tee build/rasm/V01.log
+          echo "${PIPESTATUS[0]}" > build/rasm/V01.exit
+          "$RASM" retro/cpc6128-z80/CPC_RASTER_V02_FAST_REGISTERS.asm -ob build/rasm/CPC_RASTER_V02.bin 2>&1 | tee build/rasm/V02.log
+          echo "${PIPESTATUS[0]}" > build/rasm/V02.exit
+          ls -lh build/rasm
+          test "$(cat build/rasm/V01.exit)" = 0 && test "$(cat build/rasm/V02.exit)" = 0
+      - name: Upload binaries and assembler diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpc6128-rasm-build
+          path: build/rasm/
+          if-no-files-found: warn
