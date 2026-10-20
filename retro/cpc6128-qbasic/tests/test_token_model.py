@@ -55,6 +55,31 @@ for logical_line in range(1498, -1, -1):
     assert top + row == logical_line
 assert top == row == 0
 
-expected = "0de84c30a21f95c4bd653a7852691a0bfe786431e41aa4605d190e1a1e5f056f"
+expected = "796730034591b2fafa5fb975453013ecf8137181ed7342c1361a414f7bc69119"
 assert hashlib.sha256(rom).hexdigest() == expected
 print("PASS: ROM 16K / SHA, 66 tokens, RAM windows, 1500-line index, viewport logic")
+
+# Regression v0.4.1: fixed display fields must not overwrite labels.
+assert "LD HL,#1118" not in source, "old v0.4 fast cursor field overwrote Col:"
+assert "LD HL,#1418\n        CALL CLEAR_COL_DIGITS" in source
+assert 'LD HL,#0A18\n        CALL CLEAR_DIGITS' in source
+assert 'LD B,3\nCLEAR_STATUS_FIELD:' in source
+assert 'PDEC_THOUSANDS:\n        OR A\n        SBC HL,DE' in source
+assert 'PDEC_HUNDREDS:\n        OR A\n        SBC HL,DE' in source
+assert 'PDEC_TENS:\n        OR A\n        SBC HL,DE' in source
+static = "Ligne:       Col:     INS  |  MODE 2  |  1500 lignes max"
+assert static[9:13] == " "*4
+assert static[13:17] == "Col:"
+assert static[19:22] == " "*3
+assert static[22:25] == "INS"
+for row in [1,9,10,99,100,999,1000,1001,1499,1500]:
+    num=row
+    digits=[]
+    seen=False
+    for unit in [1000,100,10]:
+        d,num=divmod(num,unit)
+        seen = seen or bool(d)
+        digits.append(str(d) if seen else " ")
+    digits.append(str(num))
+    assert int("".join(digits)) == row
+print("PASS: status 4-digit lines 1..1500, fixed Col/INS field geometry")
