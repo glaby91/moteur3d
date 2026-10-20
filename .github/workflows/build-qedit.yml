@@ -1,13 +1,6 @@
-name: QEDIT CPC6128 ROM — RASM
+name: QEDIT legacy v0.3.2 (manual only)
 
 on:
-  push:
-    branches:
-      - qbasic-cpc6128
-    paths:
-      - '.github/workflows/build-qedit.yml'
-      - 'retro/cpc6128-qbasic/editor/QEDIT_v032.patch.gz.b64'
-      - 'retro/cpc6128-qbasic/editor/QEDIT_ROM.asm'
   workflow_dispatch:
 
 permissions:
