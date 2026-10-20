@@ -23,3 +23,9 @@ Le fichier `QEDIT.ROM` déjà présent dans la branche de départ est **l'ancien
 ## Réserves importantes
 
 Ceci est un test à risques : une interception de `#0038` peut affecter le firmware ou le timing disque, et le déphasage des bandes dépend du cycle des interruptions. Le prototype teste que l'interception IM1 et le chaînage du firmware sont possibles. Aucun test WinAPE ni vérification de compilation n'est encore affirmé. Privilégier un snapshot WinAPE et garder la ROM v0.4.1 de secours. **Pas de validation syntaxique active.**
+
+## Retour WinAPE utilisateur, 20 octobre 2026
+
+L'utilisateur observe **des couleurs très aléatoires** : tantôt jaune, tantôt rouge, mais souvent écran blanc. **Raster non validé** : le code utilise une phase d'interruption 0..5 sans ancrage VSYNC certifié ni association ligne écran/diagnostic. La modification suivante (commit `5a404283f95f19cebc37f452323b017578061a75`) inverse le chaînage firmware et les écritures de palette, compilation GitHub Actions réussie, mais **elle ne garantit PAS la synchronisation verticale** et n'est pas confirmée en WinAPE.
+
+Prochaine correction : calage fiable sur début de trame (VSYNC / compteur Gate Array), bande fixe précisément positionnée et restauration du firmware ; tester ensuite avant coloration de lignes syntaxiques. Garder v0.4.1 de secours.
