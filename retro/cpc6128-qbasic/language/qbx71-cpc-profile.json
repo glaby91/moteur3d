@@ -1368,6 +1368,30 @@
       "syntax_status": "requires_specification"
     },
     {
+      "name": "DEF FN",
+      "profile": "native",
+      "group": "compound_syntax",
+      "stage": "grammar_only",
+      "origin": "Microsoft BASIC PDS 7.1",
+      "syntax_status": "requires_specification"
+    },
+    {
+      "name": "DEF SEG",
+      "profile": "unsupported",
+      "group": "compound_syntax",
+      "stage": "grammar_only",
+      "origin": "Microsoft BASIC PDS 7.1",
+      "syntax_status": "requires_specification"
+    },
+    {
+      "name": "DEF USR",
+      "profile": "native",
+      "group": "compound_syntax",
+      "stage": "grammar_only",
+      "origin": "Microsoft BASIC PDS 7.1",
+      "syntax_status": "requires_specification"
+    },
+    {
       "name": "DEFCUR",
       "profile": "native",
       "group": "types",
@@ -1433,6 +1457,46 @@
       "syntax_status": "requires_specification"
     },
     {
+      "name": "END FUNCTION",
+      "profile": "native",
+      "group": "compound_syntax",
+      "stage": "grammar_only",
+      "origin": "Microsoft BASIC PDS 7.1",
+      "syntax_status": "requires_specification"
+    },
+    {
+      "name": "END IF",
+      "profile": "native",
+      "group": "compound_syntax",
+      "stage": "grammar_only",
+      "origin": "Microsoft BASIC PDS 7.1",
+      "syntax_status": "requires_specification"
+    },
+    {
+      "name": "END SELECT",
+      "profile": "native",
+      "group": "compound_syntax",
+      "stage": "grammar_only",
+      "origin": "Microsoft BASIC PDS 7.1",
+      "syntax_status": "requires_specification"
+    },
+    {
+      "name": "END SUB",
+      "profile": "native",
+      "group": "compound_syntax",
+      "stage": "grammar_only",
+      "origin": "Microsoft BASIC PDS 7.1",
+      "syntax_status": "requires_specification"
+    },
+    {
+      "name": "END TYPE",
+      "profile": "native",
+      "group": "compound_syntax",
+      "stage": "grammar_only",
+      "origin": "Microsoft BASIC PDS 7.1",
+      "syntax_status": "requires_specification"
+    },
+    {
       "name": "ENVIRON",
       "profile": "unsupported",
       "group": "filesystem",
@@ -1469,6 +1533,38 @@
       "profile": "native",
       "group": "control",
       "stage": "catalogued_not_tokenized",
+      "origin": "Microsoft BASIC PDS 7.1",
+      "syntax_status": "requires_specification"
+    },
+    {
+      "name": "EXIT DO",
+      "profile": "native",
+      "group": "compound_syntax",
+      "stage": "grammar_only",
+      "origin": "Microsoft BASIC PDS 7.1",
+      "syntax_status": "requires_specification"
+    },
+    {
+      "name": "EXIT FOR",
+      "profile": "native",
+      "group": "compound_syntax",
+      "stage": "grammar_only",
+      "origin": "Microsoft BASIC PDS 7.1",
+      "syntax_status": "requires_specification"
+    },
+    {
+      "name": "EXIT FUNCTION",
+      "profile": "native",
+      "group": "compound_syntax",
+      "stage": "grammar_only",
+      "origin": "Microsoft BASIC PDS 7.1",
+      "syntax_status": "requires_specification"
+    },
+    {
+      "name": "EXIT SUB",
+      "profile": "native",
+      "group": "compound_syntax",
+      "stage": "grammar_only",
       "origin": "Microsoft BASIC PDS 7.1",
       "syntax_status": "requires_specification"
     },
@@ -1558,6 +1654,14 @@
       "profile": "native",
       "group": "input",
       "stage": "catalogued_not_tokenized",
+      "origin": "Microsoft BASIC PDS 7.1",
+      "syntax_status": "requires_specification"
+    },
+    {
+      "name": "LINE INPUT",
+      "profile": "adapted",
+      "group": "compound_syntax",
+      "stage": "grammar_only",
       "origin": "Microsoft BASIC PDS 7.1",
       "syntax_status": "requires_specification"
     },
@@ -1683,6 +1787,46 @@
       "syntax_status": "requires_specification"
     },
     {
+      "name": "ON ERROR",
+      "profile": "native",
+      "group": "compound_syntax",
+      "stage": "grammar_only",
+      "origin": "Microsoft BASIC PDS 7.1",
+      "syntax_status": "requires_specification"
+    },
+    {
+      "name": "ON KEY",
+      "profile": "native",
+      "group": "compound_syntax",
+      "stage": "grammar_only",
+      "origin": "Microsoft BASIC PDS 7.1",
+      "syntax_status": "requires_specification"
+    },
+    {
+      "name": "ON PLAY",
+      "profile": "native",
+      "group": "compound_syntax",
+      "stage": "grammar_only",
+      "origin": "Microsoft BASIC PDS 7.1",
+      "syntax_status": "requires_specification"
+    },
+    {
+      "name": "ON STRIG",
+      "profile": "native",
+      "group": "compound_syntax",
+      "stage": "grammar_only",
+      "origin": "Microsoft BASIC PDS 7.1",
+      "syntax_status": "requires_specification"
+    },
+    {
+      "name": "ON TIMER",
+      "profile": "native",
+      "group": "compound_syntax",
+      "stage": "grammar_only",
+      "origin": "Microsoft BASIC PDS 7.1",
+      "syntax_status": "requires_specification"
+    },
+    {
       "name": "OUT",
       "profile": "adapted",
       "group": "memory",
@@ -1797,14 +1941,6 @@
       "syntax_status": "requires_specification"
     },
     {
-      "name": "SEG",
-      "profile": "native",
-      "group": "memory",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
       "name": "SETINDEX",
       "profile": "unsupported",
       "group": "isam",
@@ -1891,14 +2027,6 @@
       "name": "UNLOCK",
       "profile": "adapted",
       "group": "files",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "USR",
-      "profile": "native",
-      "group": "control",
       "stage": "catalogued_not_tokenized",
       "origin": "Microsoft BASIC PDS 7.1",
       "syntax_status": "requires_specification"
