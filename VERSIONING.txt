@@ -67,3 +67,10 @@ CPC6128-Z80-RASTER 0.2.0 — NOUVELLE SOURCE IMPLEMENTEE (2026-10-20)
   Nettoyage du fond: 3660-3720 octets/image au lieu de 16000 (76,9 % en moins).
   Source V0.1 preservee. Validation statique uniquement: pas de compilation,
   ni rendu sur emulateur ni mesure FPS Z80 pour cette V0.2.
+
+
+2026-10-20 — ARCHIVAGE DES MESURES STATIQUES COMPARATIVES Z80
+  retro/cpc6128-z80/COMPARATIF_V01_V02.md
+  V0.1 et V0.2 conservees sur branche raster. Le tableau explique
+  les diminutions du nombre d'iterations / octets ecrits par image.
+  Les anciennes predictions x3 a x4 de performances n'ont PAS ete mesurees.
