@@ -1,55 +1,70 @@
-# QBasic CPC6128 — QEDIT v0.3.2
+# QBasic CPC6128 — éditeur QEDIT
 
-Éditeur QBasic sans numéros de ligne, pour Amstrad CPC6128 Z80, au format ROM d'extension **16 Ko**. Affichage **Mode 2 standard 80 × 25**.
+Éditeur de programmes QBasic **sans numéros de ligne**, en assembleur Z80 et en ROM d'extension **16 Ko**, conçu pour le **CPC6128 (128 Ko RAM)**.
 
-## État de validation
+## Versions et validation
 
-- **v0.2 :** démarrage de `|QEDIT`, saisie et sauvegarde `Ctrl+S` testés par l'utilisateur dans WinAPE.
-- **v0.3.1 :** menus rapides et retour au BASIC avec `ESC` testés et validés par l'utilisateur dans WinAPE.
-- **v0.3.2 :** optimisations de navigation/scrolling compilées avec RASM v3.2.4bis et contrôlées par SHA-256 ; **le comportement réel de cette nouvelle version dans WinAPE doit encore être validé**.
+| Version | Statut | Notes |
+|---|---|---|
+| **v0.3.2** | **Stable, testée par l'utilisateur dans WinAPE** | Menus rapides, clavier fluide, 50 lignes défilantes, sauvegarde et sortie ESC |
+| **v0.4.0** | **Bêta, compilation et tests statiques réussis — WinAPE encore à tester** | Tokens QBasic, stockage variable dans les banques mémoire, index de 1 500 lignes |
 
-## Installer la ROM dans WinAPE
+La version stable est conservée sur la branche `qbasic-cpc6128-v0.3.2-stable`. Le fichier `editor/QEDIT.ROM` sur `qbasic-cpc6128` est la **V0.4.0 bêta**.
 
-Placer [QEDIT.ROM](editor/QEDIT.ROM) dans **Upper ROM 1**, sans remplacer BASIC 1.1 en ROM 0 ni AMSDOS en ROM 7. Redémarrer le CPC6128. Depuis BASIC :
+## Installer et démarrer dans WinAPE
+
+Installer `editor/QEDIT.ROM` comme **Upper ROM 1** sous **Settings → Memory**. Conserver BASIC 1.1 (ROM 0) et AMSDOS (ROM 7). Redémarrer l'émulateur :
 
 ```basic
 MEMORY &5FFF
 |QEDIT
 ```
 
-## Nouveautés v0.3.2 : rapidité et défilement
+Commandes : `Ctrl+T` pour les menus, flèches pour naviguer, `Ctrl+S` pour sauver `DEMO.BAS` au format ASCII, `Ctrl+O` pour relire `DEMO.BAS`, `Ctrl+N` pour un nouveau programme, `ESC` pour quitter, `Ctrl+L` pour le test de 50 lignes et **`Ctrl+K` pour générer 1 500 lignes de démonstration**. Les deux raccourcis de test remplacent le document ouvert.
 
-- Les flèches mettent à jour **l'ancien caractère du curseur, les chiffres de la barre d'état et le nouveau curseur**. Il n'y a plus de réaffichage de 76 caractères par déplacement normal.
-- En quittant l'écran de 21 lignes vers le bas ou le haut, le firmware **SCR SW ROLL (#BC50)** fait défiler uniquement la région de texte : colonnes 2 à 77, lignes 3 à 23. Une seule nouvelle ligne est réimprimée.
-- Le compteur de colonne ne recouvre plus le mot **INS** dans la barre d'état.
-- Ajout d'un **programme de 50 lignes** dans la ROM, sans numéro de ligne en début de code. Ce programme est également fourni comme fichier [LONG_DEMO_test.bas](editor/LONG_DEMO_test.bas).
+## Nouveautés V0.4.0 bêta
 
-### Test dans WinAPE, sans préparer de disquette
+- **66 tokens** pour les mots-clés QBasic courants : `PRINT`, `FOR`, `NEXT`, `DIM`, `IF`, `THEN`, `AS`, `INTEGER`, `CLS`, etc. Les chaînes et les commentaires restent du texte.
+- **Lignes de longueur variable** : un record en RAM contient un octet de longueur, suivi du texte compacté.
+- **1 500 entrées de ligne**, indexées par un numéro logique 16 bits, sans numéros de ligne dans le code.
+- **RAM paginée** : quatre banques CPC6128 de 16 Ko (configurations Gate Array `C4` à `C7`) pour une capacité brute d'environ 64 Ko de données tokenisées.
+- **Tampon rapide de 21 lignes** dans la RAM principale pour conserver la navigation et le défilement efficaces.
+- **Sauvegarde ASCII** : les tokens sont décompressés avant enregistrement dans un fichier `.BAS`, puis réencodés à l'ouverture.
 
-1. Lancer l'éditeur avec `|QEDIT`.
-2. Appuyer sur **Ctrl+L** (ou `Ctrl+T` → **Options** → **Test 50 lignes**). **Attention : ce test remplace le contenu en cours ; sauvegardez-le avant.**
-3. Appuyer ou maintenir **flèche bas** au-delà de la **ligne 21**, puis jusqu'à **ligne 50**. L'en-tête et la barre inférieure doivent rester fixes et le défilement ne doit présenter ni duplications ni trous.
-4. Remonter jusqu'à **ligne 1** avec **flèche haut**.
-5. Vérifier **gauche/droite**, puis `Ctrl+T` (menus), `Ctrl+S` (sauvegarde de `DEMO.BAS` si souhaitée) et `ESC` (retour au BASIC).
+### Plan mémoire
 
-Le trajet de la ligne 1 à la ligne 50 exige théoriquement **29 défilements d'une ligne** ; le retour nécessite 29 défilements inverses. Ce parcours a été vérifié par un test logique statique, **pas** par une exécution dans WinAPE.
+| Zone | Utilisation |
+|---|---|
+| `#6000–#668F` | Cache des 21 lignes × 80 octets |
+| `#8800–#8867` | États, positions 16 bits, sélection de banque |
+| `#8A00` / `#8B00` | Tampons de 76–80 octets de codage/décodage |
+| `#9000–#97FF` | Buffer disque AMSDOS (2 Ko) |
+| `#9800–#A993` | Index 1 500 × 3 octets |
+| Banques 4, 5, 6, 7 à `#4000–#7FFF` | Contenu compact, jusqu'à 64 Ko bruts |
 
-## Contrôles conservés
+La limite de **1 500 lignes dépend du volume total de texte compressé**. Elle n'est pas une garantie de 1 500 lignes longues de 76 caractères.
 
-`Ctrl+T` menus, `Ctrl+S` sauvegarde, `Ctrl+O` ouvre `DEMO.BAS`, `Ctrl+N` nouveau programme, `Ctrl+L` démo 50 lignes, `ESC` quitte avec restauration de l'affichage BASIC.
+## Tester V0.4.0 dans WinAPE
 
-## Compilation
+1. Installer la nouvelle ROM ; vérifier la saisie, les menus (`Ctrl+T`) et `ESC`.
+2. Tester `Ctrl+L` et faire défiler 50 lignes.
+3. Tester **`Ctrl+K`**, puis descendre jusqu'aux lignes **22, 128, 256, 512 et 1500** ; remonter en haut.
+4. Modifier une ligne, changer de page, revenir dessus et vérifier la conservation du texte.
+5. Tester `Ctrl+S` / `Ctrl+O` avec un document court, puis avec un document long.
+
+**Limites de cette bêta :** records en ajout seul, donc des modifications répétées consomment progressivement la RAM paginée ; pas encore de compaction mémoire automatique ; pas de moteur d'exécution QBasic. **La V0.4 n'est pas déclarée stable sans validation WinAPE.**
+
+## Sources et reproductibilité
+
+- [Source principale](editor/QEDIT_ROM.asm)
+- [Moteur RAM paginée et tokens](editor/QEDIT_V04_CORE.asm)
+- [Format des tokens](TOKEN_SPEC.md)
+- [Compilation GitHub Actions V0.4](../../.github/workflows/build-qedit-v040.yml)
+
+Avec RASM v3.2.4bis, depuis le dossier `editor/` :
 
 ```sh
-rasm retro/cpc6128-qbasic/editor/QEDIT_ROM.asm -ob retro/cpc6128-qbasic/editor/QEDIT.ROM
+rasm QEDIT_ROM.asm -ob QEDIT.ROM
 ```
 
-Empreinte SHA-256 du binaire compilé (16384 octets) :
-
-```
-11422563767479f58c980405a19db17249a0330425ab4532e7a1509e2edefa4b
-```
-
-[Workflow de compilation RASM](../../.github/workflows/build-qedit.yml).
-
-**Limites :** exécution QBasic et débogage non encore implémentés, noms de fichier non éditables, pas d'overscan ; la V0.3.2 nécessite encore un test réel sous WinAPE pour confirmer la fluidité et le défilement.
+SHA-256 du binaire V0.4.0 bêta (16 384 octets) : `0de84c30a21f95c4bd653a7852691a0bfe786431e41aa4605d190e1a1e5f056f`.
