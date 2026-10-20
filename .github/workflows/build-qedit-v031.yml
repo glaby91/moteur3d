@@ -1,0 +1,47 @@
+name: QEDIT v0.3.1 fast menu ROM
+on:
+  push:
+    branches: [qbasic-cpc6128]
+    paths:
+      - '.github/workflows/build-qedit-v031.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch QEDIT assembler source
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 -d retro/cpc6128-qbasic/editor/QEDIT_v031.patch.gz.b64 | gzip -dc >/tmp/qedit.patch
+          patch -p1 </tmp/qedit.patch
+          rm retro/cpc6128-qbasic/editor/QEDIT_v031.patch.gz.b64
+          grep -q 'QEDIT editor ROM v0.3.1' retro/cpc6128-qbasic/editor/QEDIT_ROM.asm
+      - name: Build and validate exact ROM
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch v3.2.4bis https://github.com/EdouardBERGE/rasm.git /tmp/rasm-src
+          make -C /tmp/rasm-src release
+          /tmp/rasm-src/rasm.exe retro/cpc6128-qbasic/editor/QEDIT_ROM.asm -ob retro/cpc6128-qbasic/editor/QEDIT.ROM | tee retro/cpc6128-qbasic/editor/build.log
+          test "$(stat -c%s retro/cpc6128-qbasic/editor/QEDIT.ROM)" -eq 16384
+          echo 'acc3bf65f8f7297312fa80b55e2c0c83c7d95d69216ebec99f1df7aaad51ae50  retro/cpc6128-qbasic/editor/QEDIT.ROM' | sha256sum -c -
+      - name: Publish v0.3.1 binaries and source to branch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A retro/cpc6128-qbasic/editor/
+          git commit -m 'perf(qbasic): draw only changed popup items in QEDIT v0.3.1'
+          git push origin HEAD:qbasic-cpc6128
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QEDIT-CPC6128-v0.3.1
+          path: |
+            retro/cpc6128-qbasic/editor/QEDIT_ROM.asm
+            retro/cpc6128-qbasic/editor/QEDIT.ROM
+            retro/cpc6128-qbasic/editor/build.log
