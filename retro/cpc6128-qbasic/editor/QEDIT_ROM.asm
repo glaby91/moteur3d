@@ -444,97 +444,7 @@ COPY_ROM_NEXT:
         INC HL
         INC DE
         DJNZ COPY_ROM_NEXT
-COPY_
-
-; ================================================================
-; MODE 2 RASTER EXPERIMENT -- first stage: fixed horizontal bands.
-; ISR is copied to main RAM (#8C00) so it also survives upper ROM
-; changes to AMSDOS during file operations. Retains firmware IM1
-; processing by chaining to original #0038 JP target.
-; 300-Hz firmware interrupts ~52 scanlines apart: coarse strips only!
-; DOES NOT analyse BASIC syntax or colour individual keywords.
-; ================================================================
-RASTER_PHASE    EQU #8870
-RASTER_OLD_JUMP EQU #8872
-RASTER_RAM      EQU #8C00
-RASTER_INSTALL:
-        DI
-        LD A,(#0038)
-        CP #C3                   ; CPC standard IM1 JP handler
-        JR NZ,RASTER_INSTALL_FAIL
-        LD HL,(#0039)
-        LD (RASTER_OLD_JUMP),HL
-        LD HL,RASTER_ISR
-        LD DE,RASTER_RAM
-        LD BC,RASTER_ISR_END-RASTER_ISR
-        LDIR
-        LD HL,(RASTER_OLD_JUMP)
-        LD (RASTER_RAM+RASTER_CHAIN-RASTER_ISR+1),HL
-        XOR A
-        LD (RASTER_PHASE),A
-        LD A,#C3
-        LD (#0038),A
-        LD HL,RASTER_RAM
-        LD (#0039),HL
-RASTER_INSTALL_FAIL:
-        EI
-        RET
-
-RASTER_REMOVE:
-        DI
-        LD A,(#0038)
-        CP #C3
-        JR NZ,RASTER_REMOVE_DONE
-        LD HL,(#0039)
-        LD DE,RASTER_RAM
-        OR A
-        SBC HL,DE
-        JR NZ,RASTER_REMOVE_DONE
-        LD HL,(RASTER_OLD_JUMP)
-        LD (#0039),HL
-RASTER_REMOVE_DONE:
-        EI
-        RET
-
-; Executed from #8C00 in the permanent base RAM; no CALL into ROM.
-RASTER_ISR:
-        PUSH AF
-        PUSH BC
-        LD A,(RASTER_PHASE)
-        INC A
-        CP 6
-        JR C,RASTER_PHASE_OK
-        XOR A
-RASTER_PHASE_OK:
-        LD (RASTER_PHASE),A
-        ; Three palette areas: normal, diagnostic red, status yellow.
-        CP 2
-        JR C,RASTER_WHITE
-        CP 4
-        JR C,RASTER_RED
-        CP 5
-        JR Z,RASTER_WHITE
-        LD A,#4A               ; GA bright yellow
-        JR RASTER_SET
-RASTER_RED:
-        LD A,#4C               ; GA bright red
-        JR RASTER_SET
-RASTER_WHITE:
-        LD A,#4B               ; GA white
-RASTER_SET:
-        LD BC,#7F00
-        PUSH AF
-        LD A,1                 ; select ink 1
-        OUT (C),A
-        POP AF
-        OUT (C),A
-        POP BC
-        POP AF
-RASTER_CHAIN:
-        JP #0000               ; patched in copied RAM, firmware handler
-RASTER_ISR_END:
-
-ROM_END:
+COPY_ROM_END:
         LD A,(HL)
         CP #FF
         JR Z,COPY_ROM_PAD
@@ -1778,6 +1688,94 @@ DEMO_TEXT:
         DB '    PRINT texte; i',0
         DB 'NEXT i',0
         DB 'END',255
+
+; ================================================================
+; MODE 2 RASTER EXPERIMENT -- first stage: fixed horizontal bands.
+; ISR is copied to main RAM (#8C00) so it also survives upper ROM
+; changes to AMSDOS during file operations. Retains firmware IM1
+; processing by chaining to original #0038 JP target.
+; 300-Hz firmware interrupts ~52 scanlines apart: coarse strips only!
+; DOES NOT analyse BASIC syntax or colour individual keywords.
+; ================================================================
+RASTER_PHASE    EQU #8870
+RASTER_OLD_JUMP EQU #8872
+RASTER_RAM      EQU #8C00
+RASTER_INSTALL:
+        DI
+        LD A,(#0038)
+        CP #C3                   ; CPC standard IM1 JP handler
+        JR NZ,RASTER_INSTALL_FAIL
+        LD HL,(#0039)
+        LD (RASTER_OLD_JUMP),HL
+        LD HL,RASTER_ISR
+        LD DE,RASTER_RAM
+        LD BC,RASTER_ISR_END-RASTER_ISR
+        LDIR
+        LD HL,(RASTER_OLD_JUMP)
+        LD (RASTER_RAM+RASTER_CHAIN-RASTER_ISR+1),HL
+        XOR A
+        LD (RASTER_PHASE),A
+        LD A,#C3
+        LD (#0038),A
+        LD HL,RASTER_RAM
+        LD (#0039),HL
+RASTER_INSTALL_FAIL:
+        EI
+        RET
+
+RASTER_REMOVE:
+        DI
+        LD A,(#0038)
+        CP #C3
+        JR NZ,RASTER_REMOVE_DONE
+        LD HL,(#0039)
+        LD DE,RASTER_RAM
+        OR A
+        SBC HL,DE
+        JR NZ,RASTER_REMOVE_DONE
+        LD HL,(RASTER_OLD_JUMP)
+        LD (#0039),HL
+RASTER_REMOVE_DONE:
+        EI
+        RET
+
+; Executed from #8C00 in the permanent base RAM; no CALL into ROM.
+RASTER_ISR:
+        PUSH AF
+        PUSH BC
+        LD A,(RASTER_PHASE)
+        INC A
+        CP 6
+        JR C,RASTER_PHASE_OK
+        XOR A
+RASTER_PHASE_OK:
+        LD (RASTER_PHASE),A
+        ; Three palette areas: normal, diagnostic red, status yellow.
+        CP 2
+        JR C,RASTER_WHITE
+        CP 4
+        JR C,RASTER_RED
+        CP 5
+        JR Z,RASTER_WHITE
+        LD A,#4A               ; GA bright yellow
+        JR RASTER_SET
+RASTER_RED:
+        LD A,#4C               ; GA bright red
+        JR RASTER_SET
+RASTER_WHITE:
+        LD A,#4B               ; GA white
+RASTER_SET:
+        LD BC,#7F00
+        PUSH AF
+        LD A,1                 ; select ink 1
+        OUT (C),A
+        POP AF
+        OUT (C),A
+        POP BC
+        POP AF
+RASTER_CHAIN:
+        JP #0000               ; patched in copied RAM, firmware handler
+RASTER_ISR_END:
 
 ROM_END:
         DEFS #10000-$,#FF
