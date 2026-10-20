@@ -1,4 +1,4 @@
-; QBasic CPC6128 -- QEDIT editor ROM v0.3.1 (fast incremental menu redraw)
+; QBasic CPC6128 -- QEDIT editor ROM v0.3.2 (fast editor navigation and single-line scrolling)
 ; Compatible Amstrad CPC6128 expansion ROM, standard MODE 2 (80x25).
 ; Install as upper ROM slot 1; from BASIC: MEMORY &5FFF : |QEDIT
 ; MEMORY must be set BEFORE launch to protect #6000..#97FF.
@@ -15,6 +15,7 @@ SCR_GET_BORDER  EQU #BC3B
 SCR_SET_INK     EQU #BC32
 SCR_SET_BORDER  EQU #BC38
 TXT_SET_CURSOR  EQU #BB75
+SCR_SW_ROLL    EQU #BC50  ; firmware software scroll of an arbitrary screen rectangle
 TXT_OUTPUT      EQU #BB5A
 TXT_WR_CHAR     EQU #BB5D
 TXT_SET_PEN     EQU #BB90
@@ -108,6 +109,8 @@ WAIT_KEY:
         JP Z,BACKSPACE
         CP 16              ; CLR: delete under cursor
         JP Z,DELETE_CHAR
+        CP 12              ; Ctrl+L loads built-in 50-line scrolling test
+        JP Z,LOAD_LONG_DEMO
         CP 20              ; Ctrl+T toggles interactive menus (WinAPE reserves PC F10)
         JP Z,MENU_START
         CP 19              ; CTRL+S save
@@ -131,7 +134,7 @@ WAIT_KEY:
         JP INSERT_CHAR
 
 
-; Fast redraw path after an edit or movement: only affected document row and status.
+ ; Modified text: redraw only the affected editor row and the two status numbers.
 MAIN_LOOP:
         LD A,(CUR_LINE)
         LD B,A
@@ -145,9 +148,78 @@ MAIN_LOOP:
         CALL TXT_SET_CURSOR
         LD A,(CUR_LINE)
         CALL DRAW_DOCUMENT_ROW
-        CALL DRAW_STATUS
+        JP NAV_FAST
+
+; Navigation never changes the document bitmap; the old cursor character
+; was restored in WAIT_KEY. Avoid re-rendering 76 glyphs for a cursor move.
+NAV_FAST:
+        CALL UPDATE_POSITION_FAST
         CALL PAINT_CURSOR
         JP WAIT_KEY
+
+; Only two 3-digit fields need changing; keep the rest of the status bar.
+UPDATE_POSITION_FAST:
+        LD HL,#0A18
+        CALL CLEAR_DIGITS
+        LD A,(CUR_LINE)
+        INC A
+        LD HL,#0A18
+        CALL PRINT_DECIMAL
+        LD HL,#1118
+        CALL CLEAR_DIGITS
+        LD A,(CUR_COL)
+        INC A
+        LD HL,#1118
+        JP PRINT_DECIMAL
+CLEAR_DIGITS:
+        CALL TXT_SET_CURSOR
+        LD B,3
+CLEAR_DIGITS_LOOP:
+        PUSH BC
+        LD A,32
+        CALL TXT_WR_CHAR
+        POP BC
+        DJNZ CLEAR_DIGITS_LOOP
+        RET
+
+; Fast viewport scroll: use CPC firmware's rectangle scroll, not the
+; slow complete 21x76 character redraw. SCR_SW_ROLL accepts A=paper,
+; B=1 scroll up, B=0 scroll down, HL=top left, DE=bottom right,
+; all coordinates are zero based (see CPC6128 OS sources).
+; Editor rows are screen 3..23 and columns 2..77, 1 based.
+SCROLL_ONE_DOWN:
+        LD A,0
+        LD B,1
+        LD HL,#0102
+        LD DE,#4C16
+        CALL SCR_SW_ROLL
+        LD HL,#0217       ; col 2, row 23: new last visible line
+        CALL TXT_SET_CURSOR
+        LD A,(TOP_LINE)
+        ADD A,VIEW_LINES-1
+        CALL DRAW_DOCUMENT_ROW
+        JP NAV_FAST
+SCROLL_ONE_UP:
+        XOR A
+        LD B,0
+        LD HL,#0102
+        LD DE,#4C16
+        CALL SCR_SW_ROLL
+        LD HL,#0203       ; col 2, row 3: new first visible line
+        CALL TXT_SET_CURSOR
+        LD A,(TOP_LINE)
+        CALL DRAW_DOCUMENT_ROW
+        JP NAV_FAST
+
+; Regression test: built-in program deliberately taller than the screen.
+; Activating it never touches the disk; existing Ctrl+S/O remain unchanged.
+LOAD_LONG_DEMO:
+        CALL NEW_DOCUMENT
+        LD HL,LONG_DEMO_TEXT
+        LD DE,DOC_BASE
+        LD B,0
+        CALL DEMO_COPY
+        JP FULL_REDRAW
 
 ; Erase the highlighted character in old location, without changing RAM.
 ERASE_CURSOR:
@@ -412,7 +484,7 @@ DRAW_STATUS:
         CALL PRINT_DECIMAL
         LD A,(CUR_COL)
         INC A
-        LD HL,#1718
+        LD HL,#1118
         CALL PRINT_DECIMAL
         RET
 
@@ -576,50 +648,50 @@ BACKSPACE:
 MOVE_LEFT:
         LD A,(CUR_COL)
         OR A
-        JP Z,MAIN_LOOP
+        JP Z,NAV_FAST
         DEC A
         LD (CUR_COL),A
-        JP MAIN_LOOP
+        JP NAV_FAST
 MOVE_RIGHT:
         LD A,(CUR_COL)
         CP MAX_COL
-        JP NC,MAIN_LOOP
+        JP NC,NAV_FAST
         INC A
         LD (CUR_COL),A
-        JP MAIN_LOOP
+        JP NAV_FAST
 MOVE_UP:
         LD A,(CUR_LINE)
         OR A
-        JP Z,MAIN_LOOP
+        JP Z,NAV_FAST
         DEC A
         LD (CUR_LINE),A
         LD B,A
         LD A,(TOP_LINE)
         CP B
-        JP C,MAIN_LOOP
-        JP Z,MAIN_LOOP
+        JP C,NAV_FAST
+        JP Z,NAV_FAST
         LD A,B
         LD (TOP_LINE),A
-        JP FULL_REDRAW
+        JP SCROLL_ONE_UP
 MOVE_DOWN:
         LD A,(CUR_LINE)
         INC A
         LD B,A
         LD A,(DOC_LINES)
         CP B
-        JP Z,MAIN_LOOP
-        JP C,MAIN_LOOP
+        JP Z,NAV_FAST
+        JP C,NAV_FAST
         LD A,B
         LD (CUR_LINE),A
         LD B,A
         LD A,(TOP_LINE)
         ADD A,VIEW_LINES
         CP B
-        JP NZ,MAIN_LOOP
+        JP NZ,NAV_FAST
         LD A,(TOP_LINE)
         INC A
         LD (TOP_LINE),A
-        JP FULL_REDRAW
+        JP SCROLL_ONE_DOWN
 
 ; Splits current line. Moves lower text lines downward; supports 120 lines.
 ; Non-interactive: usable by file loader without unnecessary redraws.
@@ -1195,7 +1267,11 @@ MENU_UNIMPLEMENTED:
 MENU_OPTIONS_EXEC:
         LD A,(MENU_ITEM)
         OR A
-        JP NZ,SHOW_HELP
+        JR Z,MENU_OPT_REDRAW
+        CP 1
+        JP Z,SHOW_HELP
+        JP LOAD_LONG_DEMO
+MENU_OPT_REDRAW:
         CALL SCREEN_INIT
         JP FULL_REDRAW
 MENU_WINDOW_EXEC:
@@ -1211,7 +1287,7 @@ MENU_HEAD_X:
 MENU_POP_X:
         DB 2,11,20,32,44,54,58,58
 MENU_COUNTS:
-        DB 4,4,2,2,2,2,2,2
+        DB 4,4,2,2,2,3,2,2
 MENU_HEAD_NAMES:
         DW HEAD_FILE,HEAD_EDIT,HEAD_SEARCH,HEAD_RUN
         DW HEAD_DEBUG,HEAD_OPTIONS,HEAD_WINDOW,HEAD_HELP
@@ -1238,7 +1314,7 @@ ITEMS_RUN:
 ITEMS_DEBUG:
         DW DEBUG_STEP,DEBUG_VARS
 ITEMS_OPTIONS:
-        DW OPT_MODE2,OPT_HELP
+        DW OPT_MODE2,OPT_HELP,OPT_LONG
 ITEMS_WINDOW:
         DW WIN_EDITOR,WIN_VARS
 ITEMS_HELP:
@@ -1260,6 +1336,7 @@ DEBUG_STEP:     DB ' Pas a pas          ',0
 DEBUG_VARS:     DB ' Etat variables     ',0
 OPT_MODE2:      DB ' Reafficher Mode 2  ',0
 OPT_HELP:       DB ' Raccourcis         ',0
+OPT_LONG:       DB ' Test 50 lignes     ',0
 WIN_EDITOR:     DB ' Editeur            ',0
 WIN_VARS:       DB ' Variables          ',0
 HELP_KEYS:      DB ' Raccourcis         ',0
@@ -1276,9 +1353,9 @@ TITLE_TEXT:
 STATUS_TEXT:
         DB 'Ligne:     Col:      INS  |  MODE 2  |  120 lignes max                   ',0
 FOOTER_TEXT:
-        DB ' Ctrl+T Menus   Ctrl+S Sauv.   Ctrl+O Ouvrir   Ctrl+N Nouveau   Esc Quitter ',0
+        DB ' Ctrl+T Menus  Ctrl+L Test long  Ctrl+S Sauv.  Ctrl+O Ouvrir  Esc Quitter ',0
 MSG_HELP:
-        DB 'Ctrl+T menus; Fleches naviguer; Enter valider; Ctrl+S/O/N; Esc quitter      ',0
+        DB 'Ctrl+T menus; Ctrl+L test 50 lignes; Ctrl+S/O/N; Esc quitter                ',0
 MSG_NO_RUN:
         DB 'Execution QBasic: ROM moteur non encore installee. Tapez une touche.       ',0
 MSG_SAVED:
@@ -1295,6 +1372,57 @@ MSG_LOAD_ERROR:
         DB 'Erreur ouverture DEMO.BAS.                                                  ',0
 FILE_NAME:
         DB 'DEMO.BAS'
+LONG_DEMO_TEXT:
+        DB 'REM QEDIT CPC6128 - TEST DEFILEMENT LONG',0
+        DB 'DIM i AS INTEGER',0
+        DB 'CLS',0
+        DB 'PRINT "TEST DEFILEMENT SUR 50 LIGNES"',0
+        DB 'PRINT "DESCENDRE AU-DELA DE LA PAGE 21"',0
+        DB 'FOR i = 1 TO 2',0
+        DB '    PRINT "--- PASSAGE ---"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 01"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 02"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 03"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 04"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 05"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 06"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 07"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 08"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 09"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 10"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 11"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 12"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 13"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 14"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 15"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 16"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 17"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 18"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 19"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 20"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 21"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 22"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 23"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 24"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 25"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 26"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 27"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 28"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 29"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 30"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 31"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 32"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 33"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 34"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 35"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 36"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 37"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 38"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 39"',0
+        DB '    PRINT "TEST DEFILEMENT - SECTION 40"',0
+        DB 'NEXT i',0
+        DB 'PRINT "FIN DU TEST - REMONTER AVEC FLECHE HAUT"',0
+        DB 'END',255
 DEMO_TEXT:
         DB 'DIM i AS INTEGER',0
         DB 'DIM texte AS STRING',0
