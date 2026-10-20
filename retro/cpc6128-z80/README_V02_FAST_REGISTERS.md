@@ -57,3 +57,8 @@ J'ai interprété les enregistrements de triangles des versions V0.1 et V0.2 ave
 ### Vérification complémentaire du noyau de remplissage
 
 L'émulation logique des spans sur les huit poses donne **846 segments longs** traités par la méthode `PUSH BC` et **1 807 segments courts**, pour **17 181 écritures d'octets de triangles**. Les contenus octet par octet de ces deux routines concordent avec le remplissage de référence. Aucune écriture de triangle hors VRAM CPC `&C000–&FFFF` n'a été relevée dans la simulation des données. Cela valide les plages d'adresses et l'ordre des écritures, **mais pas la durée, l'assemblage ni l'exécution sur le matériel**.
+
+
+## Mise à jour — compilation RASM effectuée le 20 octobre 2026
+
+Les deux versions **ont maintenant été assemblées avec succès**, à l'aide de **RASM 3.2.4bis** compilé depuis le dépôt officiel sur un environnement GitHub Actions Ubuntu. Les sources `.asm` ont été corrigées pour remplacer les littéraux hexadécimaux `&xx` par `#xx`, pris en charge par RASM. Résultats du [run GitHub Actions](https://github.com/glaby91/moteur3d/actions/runs/39394874757) : **V0.1 = 5 069 octets**, **V0.2 = 3 160 octets**, codes de sortie **0** ; les binaires et logs sont dans l'artefact `cpc6128-rasm-build`. **La compilation ne prouve pas le fonctionnement en émulateur CPC, qui reste à tester ; les FPS ne sont toujours pas mesurés.**
