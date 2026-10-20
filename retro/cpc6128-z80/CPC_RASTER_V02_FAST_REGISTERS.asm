@@ -308,12 +308,46 @@ SpanGood:
         LD A,B
         SUB C
         INC A
-        LD B,A
+        LD (SpanLength),A
+        CP 8
+        JR NC,LongSpan
+        ; Short spans: ordinary VRAM bytes, no SP setup overhead
+        LD C,A
         LD A,(Ink)
-WriteSpan:
+ShortSpan:
         LD (HL),A
         INC HL
-        DJNZ WriteSpan
+        DEC C
+        JR NZ,ShortSpan
+        JR AdvanceY
+LongSpan:
+        ; Odd width: first byte goes by normal LD before paired writes
+        LD A,(SpanLength)
+        AND 1
+        JR Z,LongEven
+        LD A,(Ink)
+        LD (HL),A
+        INC HL
+LongEven:
+        LD A,(SpanLength)
+        SRL A                   ; pairs
+        LD (PairCount),A
+        ADD A,A
+        LD E,A
+        LD D,0
+        ADD HL,DE               ; HL = end-exclusive address
+        LD A,(Ink)
+        LD B,A
+        LD C,A                  ; identical pen in both bytes of BC
+        LD A,(PairCount)
+        LD D,A
+        LD (SavedSP),SP
+        LD SP,HL
+LongPush:
+        PUSH BC                 ; 2 bytes per PUSH
+        DEC D
+        JR NZ,LongPush
+        LD SP,(SavedSP)         ; restore real stack before any RET
 
 AdvanceY:
         LD A,(CurrentY)
@@ -383,6 +417,8 @@ EdgeEnd:        DB 0
 EdgeX:          DW 0
 StepX:          DW 0
 SavedSP:        DW 0
+SpanLength:     DB 0
+PairCount:      DB 0
 ClearY:         DB 0
 ClearPairs:     DB 0
 DirtyLeft:      DB 0
