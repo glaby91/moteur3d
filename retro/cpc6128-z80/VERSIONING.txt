@@ -38,3 +38,22 @@ V0.2.0 — PROPOSITION / SPECIFICATION NON IMPLEMENTEE (2026-10-20)
   - Tables cosinus et reciproques, backface culling, sommets partages.
   - Budget T-states theorique, mesure CPC indispensable.
   - NE PAS CONSIDERER CE DOCUMENT COMME DU CODE V0.2 IMPLEMENTE.
+
+
+V0.2.0 — CODE SOURCE ASSEMBLEUR IMPLEMENTE (2026-10-20)
+  CPC_RASTER_V02_FAST_REGISTERS.asm
+  README_V02_FAST_REGISTERS.md
+  - V0.1 intacte.
+  - Culling precalcule: 12 triangles visibles / pose au lieu de 24.
+  - 8 poses de 264 octets, 2 poses dans chacune des banques RAM4..RAM7.
+  - EXX avec HL' (position X 8.8) / DE' (pente X 8.8) pour le coeur des aretes.
+  - Deux routines: spans courts par LD (HL),A; spans longs via PUSH BC,
+    SP temporairement dirige vers l'ecran, restaure avant RET.
+  - Fond efface une seule fois au lancement, puis rectangles anciens+nouveaux.
+  - 3660 a 3720 octets de fond par image au lieu de 16000.
+  - Comparaison statique des 8 images: dirty erase identique au full erase;
+    faibles differences du culling V0.1 sur trois orientations.
+  - Jumps relatifs controles par estimation statique.
+  - Compilateur RASM et emulateur CPC NON DISPONIBLES : pas de FPS verifies.
+  - Commit initial du code V0.2: d66b10e8bc88324221358ece2a23b79be4356c53
+  - Code V0.2 optimise (EXX + dirty + SP): c617dd8d027b9b6bd76839b19512bbd4d6fa979e
