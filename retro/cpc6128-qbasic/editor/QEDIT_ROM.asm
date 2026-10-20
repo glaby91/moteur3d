@@ -157,6 +157,14 @@ WAIT_KEY:
         JP Z,LOAD_STRESS_1500
         CP 7               ; Ctrl+G: jump to logical source line
         JP Z,GOTO_LINE
+        CP 2               ; Ctrl+B: beginning of document
+        JP Z,NAV_BEGIN
+        CP 5               ; Ctrl+E: end of document
+        JP Z,NAV_END
+        CP 21              ; Ctrl+U: page up 21 rows
+        JP Z,NAV_PAGE_UP
+        CP 4               ; Ctrl+D: page down 21 rows
+        JP Z,NAV_PAGE_DOWN
         CP 20              ; Ctrl+T toggles interactive menus (WinAPE reserves PC F10)
         JP Z,MENU_START
         CP 19              ; CTRL+S save
@@ -1196,6 +1204,45 @@ NO_RUNTIME:
 ; Esc cancels without exiting; Backspace edits the input.
 ; The viewport is rebuilt ONLY on confirmation, not for each digit.
 ; ------------------------------------------------------------
+; Fast document navigation through existing GOTO target logic.
+; Ctrl+B = Begin, Ctrl+E = End, Ctrl+U = Page Up, Ctrl+D = Page Down.
+NAV_BEGIN:
+        LD HL,1
+        JR NAV_TO_TARGET
+NAV_END:
+        LD HL,(DOC_LINES)
+        JR NAV_TO_TARGET
+NAV_PAGE_UP:
+        CALL CURRENT_ABS_INDEX
+        LD DE,VIEW_LINES
+        OR A
+        SBC HL,DE
+        JR NC,NAV_PAGE_UP_OK
+        LD HL,0
+NAV_PAGE_UP_OK:
+        INC HL
+        JR NAV_TO_TARGET
+NAV_PAGE_DOWN:
+        CALL CURRENT_ABS_INDEX
+        LD DE,VIEW_LINES
+        ADD HL,DE
+        LD DE,(DOC_LINES)
+        OR A
+        SBC HL,DE
+        JR C,NAV_PAGE_DOWN_OK
+        JR Z,NAV_PAGE_DOWN_OK
+        LD HL,(DOC_LINES)
+        JR NAV_TO_TARGET
+NAV_PAGE_DOWN_OK:
+        LD HL,(TOP_LINE)
+        LD DE,(CUR_LINE)
+        ADD HL,DE
+        LD DE,VIEW_LINES+1
+        ADD HL,DE
+NAV_TO_TARGET:
+        LD (GOTO_TARGET),HL
+        JP GOTO_ACCEPT
+
 GOTO_LINE:
         LD HL,#0118
         LD DE,MSG_GOTO_PROMPT
@@ -1690,7 +1737,7 @@ MENU_WINDOW_EXEC:
 
 ; Popup locations max 58 so items do not wrap at column 80.
 MENU_HEAD_X:
-        DB 2,11,20,32,44,54,63,73
+        DB 2,11,20,31,42,52,61,70
 MENU_POP_X:
         DB 2,11,20,32,44,54,58,58
 MENU_COUNTS:
