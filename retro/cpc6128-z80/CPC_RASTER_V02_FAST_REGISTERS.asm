@@ -216,7 +216,7 @@ DirtyFillLoop:
         LD A,(ClearY)
         INC A
         LD (ClearY),A
-        JR ClearDirtyRow
+        JP ClearDirtyRow
 
 ; Triangle in IX, record structure:
 ;   +0 ink (packed mode0 pen), +1 ymin, +2 ymax excl., +3 reserve
@@ -275,7 +275,7 @@ DrawSpans:
         LD H,&30
         LD A,(HL)
         CP &FF
-        JR Z,AdvanceY
+        JP Z,AdvanceY
         LD (LeftByte),A
         LD H,&31
         LD A,(HL)
@@ -285,7 +285,7 @@ DrawSpans:
         CP B
         JR C,SpanGood
         JR Z,SpanGood
-        JR AdvanceY
+        JP AdvanceY
 SpanGood:
         LD A,(CurrentY)
         LD L,A
@@ -319,7 +319,7 @@ ShortSpan:
         INC HL
         DEC C
         JR NZ,ShortSpan
-        JR AdvanceY
+        JP AdvanceY
 LongSpan:
         ; Odd width: first byte goes by normal LD before paired writes
         LD A,(SpanLength)
@@ -353,7 +353,7 @@ AdvanceY:
         LD A,(CurrentY)
         INC A
         LD (CurrentY),A
-        JR DrawSpans
+        JP DrawSpans
 
 ; HL points to 6-byte edge: y0,y1,x0.8.8,dx/dy.8.8.
 ; For every scanline update min and max byte-column X.
