@@ -33,3 +33,7 @@ Prochaine correction : calage fiable sur début de trame (VSYNC / compteur Gate 
 ## Défaut menu confirmé sur capture WinAPE
 
 À partir de « Execution », la sélection n'était pas alignée avec les intitulés, indépendamment du défaut raster. Le menu statique commence aux colonnes (1-based) `2, 11, 20, 31, 42, 52, 61, 70`, tandis que `MENU_HEAD_X` indiquait auparavant `2, 11, 20, 32, 44, 54, 63, 73`. Correction faite dans `QEDIT_ROM.asm` (commit `36f3b85e825ed6a16b4440e2f74d2bb50472cdd8`). À recontrôler visuellement dans WinAPE. Les bandes raster aléatoires restent un défaut séparé.
+
+## 20 octobre — redémarrages répétés, WinAPE CRTC Type 0
+
+Le test réel de la ROM raster provoque des redémarrages en boucle avec CRTC 0. Défaut critique : **version raster non utilisable**. Pour isoler et éliminer le hook dangereux, le commit `cebe4b13c0e2ed046608f0ca48574cc1c558ff4d` désactive l'appel à `RASTER_INSTALL` au lancement, tout en gardant le code expérimental inactif. C'est un **build de diagnostic sans raster**, pas une ROM raster corrigée. Ne pas déclarer le problème de raster résolu. Repenser l'interception d'interruption et vérifier le respect du firmware CPC avant réactivation.
