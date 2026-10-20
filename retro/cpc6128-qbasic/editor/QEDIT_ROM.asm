@@ -258,6 +258,12 @@ SCROLL_ONE_DOWN:
         ADD HL,DE
         LD DE,DOC_BASE+(VIEW_LINES-1)*LINE_BYTES
         CALL LOAD_LOGICAL_LINE
+        LD HL,TOK_ERRORS+1
+        LD DE,TOK_ERRORS
+        LD BC,VIEW_LINES-1
+        LDIR
+        LD A,(TOK_INVALID_FLAG)
+        LD (TOK_ERRORS+VIEW_LINES-1),A
         XOR A
         LD B,1
         LD HL,#0102
@@ -276,6 +282,12 @@ SCROLL_ONE_UP:
         LD HL,(TOP_LINE)
         LD DE,DOC_BASE
         CALL LOAD_LOGICAL_LINE
+        LD HL,TOK_ERRORS+VIEW_LINES-2
+        LD DE,TOK_ERRORS+VIEW_LINES-1
+        LD BC,VIEW_LINES-1
+        LDDR
+        LD A,(TOK_INVALID_FLAG)
+        LD (TOK_ERRORS),A
         XOR A
         LD B,0
         LD HL,#0102
@@ -615,6 +627,8 @@ SHOW_TEXT:
 ; Minimal line diagnostics; A=0 valid/unchecked, 1 unclosed quote,
 ; 2 unbalanced parentheses. Ignore quote contents and REM/' comments.
 ; Scan 76 visible characters of one cached source line (HL).
+TOK_INVALID_FLAG EQU #8888
+TOK_ERRORS EQU #8890    ; 21 per-row invalid-token flags
 LINE_DIAG EQU #8885
 DIAG_QUOTES EQU #8886
 DIAG_DEPTH EQU #8887
@@ -677,10 +691,27 @@ CLM_BAD_PAREN:
         RET
 
 DRAW_DOCUMENT_ROW:
+        PUSH AF
         CALL LINE_POINTER
         PUSH HL
         CALL CHECK_LINE_MINIMAL
         LD (LINE_DIAG),A
+        POP HL
+        POP AF
+        PUSH HL
+        LD E,A
+        LD D,0
+        LD HL,TOK_ERRORS
+        ADD HL,DE
+        LD A,(HL)
+        OR A
+        JR Z,ROW_TOKEN_OK
+        LD A,(LINE_DIAG)
+        OR A
+        JR NZ,ROW_TOKEN_OK
+        LD A,3
+        LD (LINE_DIAG),A
+ROW_TOKEN_OK:
         POP HL
         LD B,76
 DRAW_DOC_LOOP:
@@ -699,7 +730,13 @@ DRAW_DOC_LOOP:
         LD A,(LINE_DIAG)
         OR A
         JR Z,LINE_DIAG_BLANK
+        CP 3
+        JR Z,LINE_DIAG_TOKEN
         LD A,'!'
+        CALL TXT_WR_CHAR
+        RET
+LINE_DIAG_TOKEN:
+        LD A,'T'
         CALL TXT_WR_CHAR
         RET
 LINE_DIAG_BLANK:
