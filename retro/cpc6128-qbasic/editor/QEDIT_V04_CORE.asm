@@ -361,7 +361,7 @@ MATCH_SKIP:
         LD A,(TOK_IDX)
         INC A
         LD (TOK_IDX),A
-        JR MATCH_NEXT_WORD
+        JP MATCH_NEXT_WORD
 MATCH_FAIL:
         OR A
         RET
