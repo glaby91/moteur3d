@@ -75,3 +75,13 @@ VERIFICATION COMPLEMENTAIRE V0.2 :
   - Estimation illustrative ancienne : 275 ms -> 75 ms (~x3.67),
     N'EST PAS un benchmark ni un gain de temps verifie.
   - RASM et emulateur materiel encore necessaires pour mesurer les FPS.
+
+
+2026-10-20 — ASSEMBLAGE RASM 3.2.4bis REUSSI
+  GitHub Actions : .github/workflows/rasm-cpc.yml
+  Run: https://github.com/glaby91/moteur3d/actions/runs/39394874757
+  CPC_RASTER_MODE0.asm -> CPC_RASTER_V01.bin : 5069 octets, exit code 0.
+  CPC_RASTER_V02_FAST_REGISTERS.asm -> CPC_RASTER_V02.bin : 3160 octets, exit code 0.
+  Binaries et logs dans artifact GitHub Actions 'cpc6128-rasm-build'.
+  Correction reelle du source pour syntaxe hexadecimale RASM: #xxxx au lieu de &xxxx.
+  ATTENTION: assembleur OK; execution CPC, couleurs et FPS NON TESTES.
