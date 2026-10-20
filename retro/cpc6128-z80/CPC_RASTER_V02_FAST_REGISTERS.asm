@@ -10,6 +10,12 @@
 ;
 ; LOAD &8000 depuis BASIC, puis CALL &8000. DI / firmware et ROMs OFF.
 ; Pour quitter : RESET matériel. Pas d'appels OS pendant l'animation.
+; Optimisation V0.2: HL'/DE' servent de cache X/gradient, EXX par
+; ligne; les grands spans sont ecrits par PUSH BC via SP temporaire,
+; avec restauration obligatoire de la pile; les dirty rectangles
+; evitent un effacement complet a chaque image. Tous les 24 triangles
+; V0.1 restent en archive. Ce moteur traite 12 faces triangulees.
+;
 ; La logique de projection 3D se trouve dans la generation des tables :
 ; les matrices 3D ne sont PAS recalculees sur ce Z80.
 ;
@@ -432,7 +438,7 @@ HardwareColours:
         DB &43,&47,&46,&45,&55,&4D,&4F,&53
 
 ; Double cubes stylisés, rotation préprojetée sur huit angles,
-; 24 triangles par pose, triés par distance à la caméra pour Painter.
+; 12 triangles des faces visibles par pose, tries par distance (Painter).
 ; Vertices projetés en 80 colonnes vidéo, 200 lignes.
 ; Source générée mathématiquement lors de la production du fichier.
 Pose0:
