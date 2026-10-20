@@ -109,3 +109,33 @@ Raccourcis de référence de la base : `Ctrl+T` menus, `Ctrl+S` sauvegarder `DEM
 ## 9. Consigne pour toute reprise du projet
 
 **Lire d'abord ce dossier et le README de la branche visée**, comparer le commit de la ROM testée aux sources à modifier, consulter les workflows et leurs logs ; ne pas confondre les deux branches v0.4.2. Demander seulement les résultats d'essai encore inconnus ; ne pas recommencer la tokenisation existante. Documenter à chaque version le commit, la taille binaire ROM, les tests réels et les défauts connus. Le but n'est pas uniquement esthétique : **éditeur QBasic rapide et fiable, pouvant gérer de grands programmes sur un vrai CPC 6128**.
+
+
+## Journal des versions et essais WinAPE — 20 octobre 2026
+
+**Référence de travail validée : QEDIT v0.4.2 B001**, branche `qedit-v0.4.2-versioned-rom`, fichier `QEDIT_V042_B001.ROM`, compilation GitHub Actions #39499725866, artefact #12298919037. Cette identification B001 apparaît aussi dans la ligne de titre de l'éditeur. Ne jamais remplacer cette version de référence par une expérience non validée.
+
+| Version / branche | Modifications | État constaté |
+| --- | --- | --- |
+| v0.3.2 stable / `qbasic-cpc6128-v0.3.2-stable` | Éditeur initial | Point de référence historique. |
+| v0.4.1 / `qbasic-cpc6128-v0.4.1-tested` | 1500 lignes, magasin tokenisé et cache de 21 lignes | Navigation/édition déjà testées. Sauvegarde de 1500 lignes non validée. |
+| v0.4.2 initiale / `qbasic-cpc6128` | Ctrl+G, sauts de ligne | Le code existait, plusieurs problèmes d'affichage/usage ont nécessité des corrections. |
+| Raster expérimental / `qedit-rom-raster-v0.4.2-experimental` | Palette par interruptions | Redémarrages WinAPE CRTC 0, fonctionnalité désactivée ; ne pas fusionner. |
+| Navigation / `qedit-v0.4.2-navigation-safe` | Ctrl+B/E/U/D/G, WAIT, correction d'indexation des lignes du cache | L'utilisateur confirme que WAIT fonctionne. Des sauts affichaient des caractères incohérents à cause de l'index absolu utilisé à la place du numéro de ligne de cache ; correctif compilé. |
+| **B001** / `qedit-v0.4.2-versioned-rom` | Nom de ROM et titre avec version/build, navigation et WAIT | **L'utilisateur confirme que Ctrl+E fonctionne** ; WAIT confirmé fonctionnel. La sauvegarde `Ctrl+S` fait redémarrer le CPC, même sur le petit programme de démonstration. |
+| Sauvegarde diagnostic / `qedit-save-diagnostic-v0.4.2` | Ctrl+S ouvre un fichier test et tente d'écrire `OK` | **Redémarrage CPC confirmé**, même sans sauvegarder de lignes du document. L'appel firmware, non la tokenisation d'un long programme, est suspect. |
+| **B002** / `qedit-v0.4.2-b002-save-bridge` | Relais RAM des appels disque, tentative de resélection de ROM | **Redémarrage CPC toujours confirmé** avec `Ctrl+S`. Échec : ne PAS déclarer la sauvegarde corrigée, ne pas substituer B002 à B001 comme référence. |
+
+### Diagnostic sauvegarde confirmé
+- Dans WinAPE, le BASIC standard parvient à enregistrer un fichier avec `SAVE "ESSAI.BAS"` : le lecteur, la disquette et AMSDOS fonctionnent dans le BASIC.
+- Dans QEDIT, `Ctrl+S` provoque un **reset**, même pour le document de démonstration et pour le diagnostic consistant à écrire seulement `OK`.
+- Le changement de ROM avec un relais RAM essayé dans B002 n'a **pas** éliminé le plantage. Il est insuffisant ou erroné ; ne pas reconduire automatiquement cette solution.
+- Vérifier soigneusement la convention d'appel des vecteurs `CAS_OUT_OPEN` / `CAS_OUT_CHAR` / `CAS_OUT_CLOSE`, les paramètres et registres préservés, le contexte ROM supérieure et les conflits de plages RAM lors de l'activation d'AMSDOS ; distinguer hypothèses et causes démontrées.
+- Stratégie conseillée : B003 distincte, instrumentation avant/après `CAS_OUT_OPEN`, test minimal non destructif sur disquette d'essai, inspection rigoureuse des adresses/du code. La présence d'une ROM de 16 Ko compilée **ne vaut pas** validation sous WinAPE.
+- Ne pas faire utiliser la sauvegarde QEDIT pour des programmes importants tant que `Ctrl+S` et un rechargement `Ctrl+O` n'ont pas été vérifiés sur de petits puis de grands programmes.
+
+### Discipline versioning
+- Chaque distribution aura un nom unique : `QEDIT_V042_B001.ROM`, `QEDIT_V042_B002.ROM`, puis `QEDIT_V042_B003.ROM`.
+- Afficher `QEDIT v0.4.2 Bxxx` dans l'éditeur et fournir l'artefact ZIP correspondant, avec statut « compilé », « testé WinAPE » et problèmes connus explicites.
+- Conserver sur GitHub branches historiques et expérimentales, et partir de B001 pour toute modification future du clavier ou de l'affichage.
+- Priorité : fiabiliser la sauvegarde sans faire régresser Ctrl+E, Ctrl+G, déplacements page haut/bas, 1500 lignes et WAIT.
