@@ -1,4 +1,4 @@
-; QBasic CPC6128 -- QEDIT editor ROM v0.4.2 build 001 (navigation cache correction)
+; QBasic CPC6128 -- QEDIT editor ROM v0.4.2 build 002 (navigation cache correction)
 ; Compatible Amstrad CPC6128 expansion ROM, standard MODE 2 (80x25).
 ; Install as upper ROM slot 1; from BASIC: MEMORY &5FFF : |QEDIT
 ; MEMORY must be set BEFORE launch to protect #6000..#A993.
@@ -130,6 +130,7 @@ EDITOR_START:
         CALL CACHE_BUILD
         CALL SCREEN_INIT
         CALL INSTALL_NAV_KEYS
+        CALL INSTALL_DISK_BRIDGE
 FULL_REDRAW:
         CALL COMMIT_DIRTY
         JR NC,FULL_REDRAW_UNCOMMITTED
@@ -565,6 +566,76 @@ RNK_LOOP:
         DEC C
         JR NZ,RNK_LOOP
         RET
+
+; Save/Load ROM-bank-safe bridge: firmware disk service may page in ROM 7
+; while QEDIT occupies upper ROM slot 1. Execute the firmware CALL and
+; bank restoration from ordinary RAM, not from disappearing upper ROM.
+; The bridge lives at #8E00..#8E7F; outside cache and I/O buffer.
+DISK_BRIDGE_RAM EQU #8E00
+INSTALL_DISK_BRIDGE:
+        LD HL,DISK_BRIDGE_SOURCE
+        LD DE,DISK_BRIDGE_RAM
+        LD BC,DISK_BRIDGE_END-DISK_BRIDGE_SOURCE
+        LDIR
+        RET
+DISK_BRIDGE_SOURCE:
+DB_OUT_OPEN:
+        CALL CAS_OUT_OPEN
+        PUSH AF
+        LD C,1
+        CALL #B90F
+        POP AF
+        RET
+DB_OUT_CHAR:
+        CALL CAS_OUT_CHAR
+        PUSH AF
+        LD C,1
+        CALL #B90F
+        POP AF
+        RET
+DB_OUT_CLOSE:
+        CALL CAS_OUT_CLOSE
+        PUSH AF
+        LD C,1
+        CALL #B90F
+        POP AF
+        RET
+DB_OUT_ABANDON:
+        CALL CAS_OUT_ABANDON
+        PUSH AF
+        LD C,1
+        CALL #B90F
+        POP AF
+        RET
+DB_IN_OPEN:
+        CALL CAS_IN_OPEN
+        PUSH AF
+        LD C,1
+        CALL #B90F
+        POP AF
+        RET
+DB_IN_CHAR:
+        CALL CAS_IN_CHAR
+        PUSH AF
+        LD C,1
+        CALL #B90F
+        POP AF
+        RET
+DB_IN_CLOSE:
+        CALL CAS_IN_CLOSE
+        PUSH AF
+        LD C,1
+        CALL #B90F
+        POP AF
+        RET
+DISK_BRIDGE_END:
+DISK_OUT_OPEN EQU DISK_BRIDGE_RAM+DB_OUT_OPEN-DISK_BRIDGE_SOURCE
+DISK_OUT_CHAR EQU DISK_BRIDGE_RAM+DB_OUT_CHAR-DISK_BRIDGE_SOURCE
+DISK_OUT_CLOSE EQU DISK_BRIDGE_RAM+DB_OUT_CLOSE-DISK_BRIDGE_SOURCE
+DISK_OUT_ABANDON EQU DISK_BRIDGE_RAM+DB_OUT_ABANDON-DISK_BRIDGE_SOURCE
+DISK_IN_OPEN EQU DISK_BRIDGE_RAM+DB_IN_OPEN-DISK_BRIDGE_SOURCE
+DISK_IN_CHAR EQU DISK_BRIDGE_RAM+DB_IN_CHAR-DISK_BRIDGE_SOURCE
+DISK_IN_CLOSE EQU DISK_BRIDGE_RAM+DB_IN_CLOSE-DISK_BRIDGE_SOURCE
 
 SCREEN_INIT:
         LD A,2
@@ -1118,7 +1189,7 @@ SAVE_FILE:
         LD HL,FILE_NAME_RAM
         LD B,8
         LD DE,IO_BUFFER
-        CALL CAS_OUT_OPEN
+        CALL DISK_OUT_OPEN
         JP NC,FILE_SAVE_OPEN_ERROR
         LD HL,0
         LD (SAVE_INDEX),HL
@@ -1145,7 +1216,7 @@ SAVE_CHARS:
         LD A,(HL)
         PUSH HL
         PUSH BC
-        CALL CAS_OUT_CHAR
+        CALL DISK_OUT_CHAR
         POP BC
         POP HL
         JR NC,SAVE_ABORT
@@ -1153,10 +1224,10 @@ SAVE_CHARS:
         DJNZ SAVE_CHARS
 SAVE_NEWLINE:
         LD A,13
-        CALL CAS_OUT_CHAR
+        CALL DISK_OUT_CHAR
         JR NC,SAVE_ABORT
         LD A,10
-        CALL CAS_OUT_CHAR
+        CALL DISK_OUT_CHAR
         JR NC,SAVE_ABORT
         LD HL,(SAVE_INDEX)
         INC HL
@@ -1165,12 +1236,12 @@ SAVE_NEWLINE:
         OR A
         SBC HL,DE
         JR NZ,SAVE_NEXT_ROW
-        CALL CAS_OUT_CLOSE
+        CALL DISK_OUT_CLOSE
         JP NC,FILE_SAVE_CLOSE_ERROR
         LD HL,MSG_SAVED
         JP SHOW_MESSAGE
 SAVE_ABORT:
-        CALL CAS_OUT_ABANDON
+        CALL DISK_OUT_ABANDON
         LD HL,MSG_SAVE_WRITE_ERROR
         JP SHOW_MESSAGE
 FILE_SAVE_OPEN_ERROR:
@@ -1187,14 +1258,14 @@ LOAD_FILE:
         LD HL,FILE_NAME_RAM
         LD B,8
         LD DE,IO_BUFFER
-        CALL CAS_IN_OPEN
+        CALL DISK_IN_OPEN
         JP NC,FILE_LOAD_ERROR
         CALL NEW_DOCUMENT
         LD HL,0
         LD (SAVE_INDEX),HL
         CALL INIT_IMPORT_LINE
 LOAD_BYTE:
-        CALL CAS_IN_CHAR
+        CALL DISK_IN_CHAR
         JR NC,LOAD_DONE
         CP 10
         JR Z,LOAD_BYTE
@@ -1226,12 +1297,12 @@ LOAD_NEWLINE:
         JR LOAD_BYTE
 LOAD_DONE:
         CALL STORE_IMPORT_LINE
-        CALL CAS_IN_CLOSE
+        CALL DISK_IN_CLOSE
         CALL CACHE_BUILD
         LD HL,MSG_LOADED
         JP SHOW_MESSAGE
 LOAD_LIMIT:
-        CALL CAS_IN_CLOSE
+        CALL DISK_IN_CLOSE
         CALL CACHE_BUILD
         LD HL,MSG_LIMIT
         JP SHOW_MESSAGE
@@ -1887,7 +1958,7 @@ MSG_ABOUT:      DB 'QEDIT v0.4.2 - CPC6128 16Ko ROM - edition sans numeros de li
 HEADER_TEXT:
         DB ' Fichier  Edition  Recherche  Execution  Debogage  Options  Fenetre  Aide   ',0
 TITLE_TEXT:
-        DB '                         [ DEMO.BAS ]        QEDIT v0.4.2 B001',0
+        DB '                         [ DEMO.BAS ]        QEDIT v0.4.2 B002',0
 STATUS_TEXT:
         DB 'Ligne:       Col:     INS  |  MODE 2  |  1500 lignes max                 ',0
 FOOTER_TEXT:
