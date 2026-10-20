@@ -8,6 +8,8 @@
 ; Licensed MIT. Source: retro/cpc6128-qbasic/editor/QEDIT_ROM.asm
 
 KM_WAIT_KEY     EQU #BB18
+KM_GET_CONTROL  EQU #BB36
+KM_SET_CONTROL  EQU #BB33
 SCR_SET_MODE    EQU #BC0E
 SCR_GET_MODE    EQU #BC11
 SCR_GET_INK     EQU #BC35
@@ -93,6 +95,7 @@ GOTO_TARGET     EQU #8876    ; 16-bit 1-based input; then 0-based index
 GOTO_CHAR       EQU #8878
 GOTO_CAND_TOP   EQU #8879    ; 16-bit
 GOTO_MAX_TOP    EQU #887B    ; 16-bit
+KEY_OLD_CTRL    EQU #8880    ; 5 prior CTRL translations
 
 
         ORG #C000
@@ -126,6 +129,7 @@ EDITOR_START:
         CALL DEMO_DOCUMENT
         CALL CACHE_BUILD
         CALL SCREEN_INIT
+        CALL INSTALL_NAV_KEYS
 FULL_REDRAW:
         CALL COMMIT_DIRTY
         JR NC,FULL_REDRAW_UNCOMMITTED
@@ -365,6 +369,7 @@ SAVE_DISPLAY_STATE:
         RET
 
 EXIT_EDITOR:
+        CALL RESTORE_NAV_KEYS
         CALL TXT_CUR_OFF
         LD A,(SAVED_MODE)
         CALL SCR_SET_MODE       ; firmware resets text streams and clears screen
@@ -499,6 +504,67 @@ WAIT_HIDE:
         JP SHOW_TEXT
 WAIT_TEXT: DB 'WAIT',0
 WAIT_BLANK: DB '    ',0
+
+; Amstrad CPC key matrix (row*8 + column), firmware CTRL translation.
+; G=52 B=54 E=58 U=42 D=61; make shortcuts deterministic in WinAPE.
+; Store previous mappings, restore when leaving QEDIT.
+NAV_KEY_SCAN: DB 52,54,58,42,61
+NAV_KEY_CODE: DB 7,2,5,21,4
+INSTALL_NAV_KEYS:
+        LD DE,NAV_KEY_SCAN
+        LD HL,KEY_OLD_CTRL
+        LD C,5
+INK_LOOP:
+        LD A,(DE)
+        PUSH BC
+        PUSH DE
+        PUSH HL
+        CALL KM_GET_CONTROL
+        POP HL
+        LD (HL),A
+        POP DE
+        POP BC
+        INC HL
+        INC DE
+        DEC C
+        JR NZ,INK_LOOP
+        LD DE,NAV_KEY_SCAN
+        LD HL,NAV_KEY_CODE
+        LD C,5
+INK_SET:
+        LD A,(DE)
+        LD B,(HL)
+        PUSH BC
+        PUSH DE
+        PUSH HL
+        CALL KM_SET_CONTROL
+        POP HL
+        POP DE
+        POP BC
+        INC HL
+        INC DE
+        DEC C
+        JR NZ,INK_SET
+        RET
+RESTORE_NAV_KEYS:
+        LD DE,NAV_KEY_SCAN
+        LD HL,KEY_OLD_CTRL
+        LD C,5
+RNK_LOOP:
+        LD A,(DE)
+        LD B,(HL)
+        PUSH BC
+        PUSH DE
+        PUSH HL
+        CALL KM_SET_CONTROL
+        POP HL
+        POP DE
+        POP BC
+        INC HL
+        INC DE
+        DEC C
+        JR NZ,RNK_LOOP
+        RET
 
 SCREEN_INIT:
         LD A,2
