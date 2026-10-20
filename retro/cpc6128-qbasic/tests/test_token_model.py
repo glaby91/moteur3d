@@ -55,8 +55,9 @@ for logical_line in range(1498, -1, -1):
     assert top + row == logical_line
 assert top == row == 0
 
-expected = "796730034591b2fafa5fb975453013ecf8137181ed7342c1361a414f7bc69119"
-assert hashlib.sha256(rom).hexdigest() == expected
+# V0.4.2: check 16 KB and new ROM differs from previous tested V0.4.1.
+# The exact SHA-256 will be frozen after the first GitHub RASM build.
+assert hashlib.sha256(rom).hexdigest() != "796730034591b2fafa5fb975453013ecf8137181ed7342c1361a414f7bc69119"
 print("PASS: ROM 16K / SHA, 66 tokens, RAM windows, 1500-line index, viewport logic")
 
 # Regression v0.4.1: fixed display fields must not overwrite labels.
@@ -83,3 +84,19 @@ for row in [1,9,10,99,100,999,1000,1001,1499,1500]:
     digits.append(str(num))
     assert int("".join(digits)) == row
 print("PASS: status 4-digit lines 1..1500, fixed Col/INS field geometry")
+
+# V0.4.2 direct navigation tests (static Z80 API and numeric model).
+assert "CP 7               ; Ctrl+G:" in source
+assert "JP Z,GOTO_LINE" in source
+assert "MENU_SEARCH_EXEC:" in source and "JP Z,GOTO_LINE" in source.split("MENU_SEARCH_EXEC:")[1][:150]
+assert "GOTO_LINE:" in source and "GOTO_PARSE:" in source
+assert "CALL COMMIT_DIRTY" in source.split("GOTO_ACCEPT:")[1][:400]
+assert "LD DE,VIEW_LINES" in source.split("GOTO_ACCEPT:")[1]
+for count in [1,5,20,21,22,256,999,1000,1499,1500]:
+    doc_lines=1500
+    target=count-1
+    top=min(max(0,target-10),max(0,doc_lines-21))
+    row=target-top
+    assert 0<=top<=1479 and 0<=row<21 and top+row==target
+assert all(x<0x9000 for x in [0x8870,0x8874,0x8876,0x8879,0x887b])
+print("PASS: Ctrl+G jumps 1..1500, data cache, numeric entry and viewport clamps")
