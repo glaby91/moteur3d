@@ -19,6 +19,8 @@ INDEX_ADDRESS:
 
 ; Input HL=logical line, DE=destination plain-text row.
 LOAD_LOGICAL_LINE:
+        XOR A
+        LD (TOK_INVALID_FLAG),A
         LD (REQUEST_INDEX),HL
         LD (REQUEST_DEST),DE
         LD H,D
@@ -170,6 +172,13 @@ CACHE_LOOP:
         EX DE,HL
         POP HL
         CALL LOAD_LOGICAL_LINE
+        LD A,(TMP_ROW)
+        LD E,A
+        LD D,0
+        LD HL,TOK_ERRORS
+        ADD HL,DE
+        LD A,(TOK_INVALID_FLAG)
+        LD (HL),A
         LD A,(TMP_ROW)
         INC A
         LD (TMP_ROW),A
@@ -419,6 +428,8 @@ DECODE_WORD:
         INC HL
         JR DECODE_WORD
 DECODE_UNKNOWN:
+        LD A,1
+        LD (TOK_INVALID_FLAG),A
         LD A,'?'
 DECODE_RAW:
         CALL DECODE_ONE_CHAR
