@@ -55,9 +55,8 @@ for logical_line in range(1498, -1, -1):
     assert top + row == logical_line
 assert top == row == 0
 
-# V0.4.2: check 16 KB and new ROM differs from previous tested V0.4.1.
-# The exact SHA-256 will be frozen after the first GitHub RASM build.
-assert hashlib.sha256(rom).hexdigest() != "796730034591b2fafa5fb975453013ecf8137181ed7342c1361a414f7bc69119"
+# V0.4.2 exact reproducibility, checked by GitHub RASM and this regression.
+assert hashlib.sha256(rom).hexdigest() == "503f815beb059ec88249af986a9a42773fb11eb3e276f1df29f1ea7962466e46"
 print("PASS: ROM 16K / SHA, 66 tokens, RAM windows, 1500-line index, viewport logic")
 
 # Regression v0.4.1: fixed display fields must not overwrite labels.
