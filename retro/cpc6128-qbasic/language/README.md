@@ -19,3 +19,11 @@ La source commune initiale est [qbx71-cpc-profile.json](qbx71-cpc-profile.json).
 
 ## État
 B005 est à ce stade **une préparation documentaire et structurée**, pas une nouvelle ROM compilée. QEDIT B004 n'est pas altérée.
+
+
+## Inventaire étendu au 21 octobre 2026
+Le fichier JSON contient désormais **128 tokens attribués** et **110 entrées candidates ou constructions de grammaire** non encore tokenisées : fonctions absentes (DEFINT, MKI$, CVI, SEEK...), opérateurs (XOR, EQV, IMP), commandes dépendantes de DOS, extensions CPC et expressions composées (END IF, LINE INPUT, ON ERROR).
+
+Chaque entrée reçoit une catégorie de compatibilité et un état de réalisation. Des exemples de signatures sont inclus pour les instructions déjà étudiées. **Ne pas interpréter 110 candidats comme 110 tokens nouveaux** : certains noms sont des modes d'instruction (OUTPUT, APPEND), des familles de bibliothèques ou des suites lexicales. L'annexe alphabétique exhaustive du manuel Microsoft reste à valider avant toute attribution définitive d'IDs.
+
+**Pas de ROM B005 à télécharger à ce stade** : les travaux publiés sont le catalogue et le profil. Les IDs historiques 0x80–0xFF sont préservés. Les tests WinAPE de B004, ainsi que la sauvegarde, ne sont pas validés.
