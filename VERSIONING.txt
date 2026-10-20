@@ -74,3 +74,11 @@ CPC6128-Z80-RASTER 0.2.0 — NOUVELLE SOURCE IMPLEMENTEE (2026-10-20)
   V0.1 et V0.2 conservees sur branche raster. Le tableau explique
   les diminutions du nombre d'iterations / octets ecrits par image.
   Les anciennes predictions x3 a x4 de performances n'ont PAS ete mesurees.
+
+
+2026-10-20 — VALIDATION ASSEMBLAGE RASM SUR GITHUB ACTIONS
+  Run https://github.com/glaby91/moteur3d/actions/runs/39394874757
+  V0.1 : binaire 5069 octets, RASM 3.2.4bis sans erreur.
+  V0.2 : binaire 3160 octets, RASM 3.2.4bis sans erreur.
+  Artefact 'cpc6128-rasm-build' : fichiers BIN et LOG.
+  Sources V0.1 et V0.2 corriges #hex (RASM); execution et FPS non verifies.
