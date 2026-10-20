@@ -1,0 +1,522 @@
+; ============================================================
+; QEDIT v0.4 banked token document engine.
+; 1500 entries at #9800 (bank id + little endian record address).
+; Four 16K CPC6128 expanded banks C4-C7 map at #4000-#7FFF.
+; Each compact record: byte token_length, then token_length bytes.
+; Records are immutable, modified lines append; an old record is retired.
+; ROM contains token dictionary; screen cache stays at #6000.
+; ============================================================
+
+; Get pointer to index entry for logical line HL (0..1499): #9800+3*HL.
+INDEX_ADDRESS:
+        PUSH HL
+        ADD HL,HL
+        POP DE
+        ADD HL,DE
+        LD DE,INDEX_BASE
+        ADD HL,DE
+        RET
+
+; Input HL=logical line, DE=destination plain-text row.
+LOAD_LOGICAL_LINE:
+        LD (REQUEST_INDEX),HL
+        LD (REQUEST_DEST),DE
+        LD H,D
+        LD L,E
+        LD (HL),32
+        INC DE
+        LD BC,75
+        LDIR
+        LD HL,(REQUEST_INDEX)
+        CALL INDEX_ADDRESS
+        LD A,(HL)
+        CP #FF
+        RET Z
+        LD (TOK_TMP),A
+        INC HL
+        LD E,(HL)
+        INC HL
+        LD D,(HL)
+        EX DE,HL
+        ; HL=bank address, bank selector in TOK_TMP.
+        PUSH HL
+        LD A,(TOK_TMP)
+        CALL SELECT_EXP_BANK
+        POP HL
+        LD A,(HL)
+        LD (DECODE_LEN),A
+        INC HL
+        LD E,A
+        LD D,0
+        LD BC,0
+        LD C,E
+        LD DE,ENC_BUF
+        LDIR
+        CALL SELECT_BASE_BANK
+        JP DECODE_LINE
+
+; Carry set on success. Input HL=logical line and DE=plain-text ptr.
+WRITE_LOGICAL_LINE:
+        LD (REQUEST_INDEX),HL
+        LD (REQUEST_SOURCE),DE
+        CALL ENCODE_LINE
+        LD A,(ENC_LEN)
+        OR A
+        JR NZ,WRITE_NONEMPTY
+        LD HL,(REQUEST_INDEX)
+        CALL INDEX_ADDRESS
+        LD (HL),#FF
+        SCF
+        RET
+WRITE_NONEMPTY:
+        LD E,A
+        INC E                 ; include length header
+        LD D,0
+        LD HL,(STORE_ADDR)
+        ADD HL,DE
+        LD A,H
+        CP #80
+        JR C,WRITE_FITS
+        LD A,(STORE_BANK)
+        INC A
+        CP 4
+        JR NC,WRITE_FULL
+        LD (STORE_BANK),A
+        LD HL,#4000
+        LD (STORE_ADDR),HL
+WRITE_FITS:
+        LD HL,(STORE_ADDR)
+        LD (DECODE_PTR),HL   ; remember record start
+        LD A,(ENC_LEN)
+        LD E,A
+        LD D,0
+        INC DE
+        ADD HL,DE
+        LD (STORE_ADDR),HL
+        LD A,(STORE_BANK)
+        CALL SELECT_EXP_BANK
+        LD HL,(DECODE_PTR)
+        LD A,(ENC_LEN)
+        LD (HL),A
+        INC HL
+        EX DE,HL
+        LD HL,ENC_BUF
+        LD A,(ENC_LEN)
+        LD C,A
+        LD B,0
+        LDIR
+        CALL SELECT_BASE_BANK
+        LD HL,(REQUEST_INDEX)
+        CALL INDEX_ADDRESS
+        LD A,(STORE_BANK)
+        LD (HL),A
+        INC HL
+        LD DE,(DECODE_PTR)
+        LD (HL),E
+        INC HL
+        LD (HL),D
+        SCF
+        RET
+WRITE_FULL:
+        LD A,1
+        LD (STORE_ERROR),A
+        OR A
+        RET
+
+; 7Fxx Gate Array memory config. Input A=0..3 => C4..C7.
+SELECT_EXP_BANK:
+        ADD A,#C4
+        LD BC,#7F00
+        OUT (C),A
+        RET
+SELECT_BASE_BANK:
+        LD A,#C0
+        LD BC,#7F00
+        OUT (C),A
+        RET
+
+; Flush current row only when it has changed, preserving fast cursor motion.
+COMMIT_DIRTY:
+        LD A,(DIRTY_FLAG)
+        OR A
+        SCF
+        RET Z
+        CALL CURRENT_ABS_INDEX
+        LD A,(CUR_LINE)
+        PUSH HL
+        CALL LINE_POINTER
+        EX DE,HL
+        POP HL
+        CALL WRITE_LOGICAL_LINE
+        RET NC
+        XOR A
+        LD (DIRTY_FLAG),A
+        SCF
+        RET
+
+; Rebuild screen cache from packed store; screen is not drawn here.
+CACHE_BUILD:
+        XOR A
+        LD (TMP_ROW),A
+CACHE_LOOP:
+        LD HL,(TOP_LINE)
+        LD A,(TMP_ROW)
+        LD E,A
+        LD D,0
+        ADD HL,DE
+        PUSH HL
+        LD A,(TMP_ROW)
+        CALL LINE_POINTER
+        EX DE,HL
+        POP HL
+        CALL LOAD_LOGICAL_LINE
+        LD A,(TMP_ROW)
+        INC A
+        LD (TMP_ROW),A
+        CP VIEW_LINES
+        JR NZ,CACHE_LOOP
+        RET
+
+; ENCODE_LINE: tokenize keywords outside strings, REM and apostrophe comments.
+; The raw source is always exactly 76 visible characters, padded spaces.
+ENCODE_LINE:
+        LD HL,(REQUEST_SOURCE)
+        LD DE,75
+        ADD HL,DE
+        LD B,76
+ENC_TRIM:
+        LD A,(HL)
+        CP 32
+        JR NZ,ENC_TRIM_DONE
+        DEC HL
+        DJNZ ENC_TRIM
+ENC_TRIM_DONE:
+        LD A,B
+        LD (ENC_LEFT),A
+        LD HL,ENC_BUF
+        LD (ENC_PTR),HL
+        XOR A
+        LD (ENC_QUOTED),A
+        LD (ENC_PREV_WORD),A
+        LD HL,(REQUEST_SOURCE)
+        LD (ENC_SOURCE),HL
+ENC_LOOP:
+        LD A,(ENC_LEFT)
+        OR A
+        JR Z,ENC_FINISH
+        LD HL,(ENC_SOURCE)
+        LD A,(HL)
+        CP 34                    ; double quote
+        JR Z,ENC_RAW
+        CP 39                    ; apostrophe comment
+        JR Z,ENC_RAW
+        LD A,(ENC_QUOTED)
+        OR A
+        JR NZ,ENC_RAW
+        LD A,(ENC_PREV_WORD)
+        OR A
+        JR NZ,ENC_RAW
+        CALL MATCH_KEYWORD
+        JR C,ENC_LOOP
+ENC_RAW:
+        LD HL,(ENC_SOURCE)
+        LD A,(HL)
+        LD (TMP_CHAR),A
+        CP 34
+        JR NZ,ENC_CHECK_COMMENT
+        LD A,(ENC_QUOTED)
+        CP 2
+        JR Z,ENC_EMIT_RAW
+        XOR 1
+        LD (ENC_QUOTED),A
+        JR ENC_EMIT_RAW
+ENC_CHECK_COMMENT:
+        CP 39
+        JR NZ,ENC_EMIT_RAW
+        LD A,(ENC_QUOTED)
+        OR A
+        JR NZ,ENC_EMIT_RAW
+        LD A,2
+        LD (ENC_QUOTED),A
+ENC_EMIT_RAW:
+        LD A,(TMP_CHAR)
+        LD HL,(ENC_PTR)
+        LD (HL),A
+        INC HL
+        LD (ENC_PTR),HL
+        LD HL,(ENC_SOURCE)
+        INC HL
+        LD (ENC_SOURCE),HL
+        LD A,(ENC_LEFT)
+        DEC A
+        LD (ENC_LEFT),A
+        LD A,(TMP_CHAR)
+        CALL IS_WORD_CHAR
+        LD A,0
+        JR NC,ENC_PREV_STORE
+        INC A
+ENC_PREV_STORE:
+        LD (ENC_PREV_WORD),A
+        JR ENC_LOOP
+ENC_FINISH:
+        LD HL,(ENC_PTR)
+        LD DE,ENC_BUF
+        OR A
+        SBC HL,DE
+        LD A,L
+        LD (ENC_LEN),A
+        RET
+
+; MATCH_KEYWORD: use ROM table; only at word boundaries.
+; success => emit one token and advance input by exact keyword length.
+MATCH_KEYWORD:
+        XOR A
+        LD (TOK_IDX),A
+MATCH_NEXT_WORD:
+        LD A,(TOK_IDX)
+        CP TOKEN_COUNT
+        JR NC,MATCH_FAIL
+        LD L,A
+        LD H,0
+        ADD HL,HL
+        LD DE,TOKEN_POINTERS
+        ADD HL,DE
+        LD E,(HL)
+        INC HL
+        LD D,(HL)
+        LD (TOK_WORD_PTR),DE
+        LD HL,(ENC_SOURCE)
+        LD B,0
+MATCH_CHAR:
+        LD A,(DE)
+        OR A
+        JR Z,MATCH_BOUNDARY
+        LD C,A
+        LD A,(ENC_LEFT)
+        CP B
+        JR Z,MATCH_SKIP
+        LD A,(HL)
+        CP 'a'
+        JR C,MATCH_COMPARE
+        CP 'z'+1
+        JR NC,MATCH_COMPARE
+        SUB 32
+MATCH_COMPARE:
+        CP C
+        JR NZ,MATCH_SKIP
+        INC HL
+        INC DE
+        INC B
+        JR MATCH_CHAR
+MATCH_BOUNDARY:
+        LD A,(ENC_LEFT)
+        CP B
+        JR Z,MATCH_ACCEPT
+        LD A,(HL)
+        CALL IS_WORD_CHAR
+        JR C,MATCH_SKIP
+MATCH_ACCEPT:
+        LD A,(TOK_IDX)
+        ADD A,#80
+        LD HL,(ENC_PTR)
+        LD (HL),A
+        INC HL
+        LD (ENC_PTR),HL
+        LD HL,(ENC_SOURCE)
+        LD E,B
+        LD D,0
+        ADD HL,DE
+        LD (ENC_SOURCE),HL
+        LD A,(ENC_LEFT)
+        SUB B
+        LD (ENC_LEFT),A
+        LD A,1
+        LD (ENC_PREV_WORD),A
+        LD A,(TOK_IDX)
+        CP TOKEN_REM
+        JR NZ,MATCH_SUCCESS
+        LD A,2
+        LD (ENC_QUOTED),A
+MATCH_SUCCESS:
+        SCF
+        RET
+MATCH_SKIP:
+        LD A,(TOK_IDX)
+        INC A
+        LD (TOK_IDX),A
+        JR MATCH_NEXT_WORD
+MATCH_FAIL:
+        OR A
+        RET
+
+; Word characters prevent substitution inside names PRINTED, MY_FOR or X$.
+; Carry=1 if ASCII letter/digit/underscore/dollar.
+IS_WORD_CHAR:
+        CP 'A'
+        JR C,WORD_LOWER
+        CP 'Z'+1
+        JR C,WORD_YES
+WORD_LOWER:
+        CP 'a'
+        JR C,WORD_DIGIT
+        CP 'z'+1
+        JR C,WORD_YES
+WORD_DIGIT:
+        CP '0'
+        JR C,WORD_OTHER
+        CP '9'+1
+        JR C,WORD_YES
+WORD_OTHER:
+        CP '_'
+        JR Z,WORD_YES
+        CP '$'
+        JR Z,WORD_YES
+        OR A
+        RET
+WORD_YES:
+        SCF
+        RET
+
+; Decode ENC_BUF[DECODE_LEN] into REQUEST_DEST, padded to 76 columns.
+DECODE_LINE:
+        LD HL,ENC_BUF
+        LD (DECODE_PTR),HL
+        LD HL,(REQUEST_DEST)
+        LD (DECODE_DEST),HL
+        XOR A
+        LD (ENC_QUOTED),A       ; expanded char count
+DECODE_LOOP:
+        LD A,(DECODE_LEN)
+        OR A
+        RET Z
+        DEC A
+        LD (DECODE_LEN),A
+        LD HL,(DECODE_PTR)
+        LD A,(HL)
+        INC HL
+        LD (DECODE_PTR),HL
+        CP #80
+        JR C,DECODE_RAW
+        SUB #80
+        CP TOKEN_COUNT
+        JR NC,DECODE_UNKNOWN
+        LD L,A
+        LD H,0
+        ADD HL,HL
+        LD DE,TOKEN_POINTERS
+        ADD HL,DE
+        LD E,(HL)
+        INC HL
+        LD D,(HL)
+        EX DE,HL
+DECODE_WORD:
+        LD A,(HL)
+        OR A
+        JR Z,DECODE_LOOP
+        PUSH HL
+        CALL DECODE_ONE_CHAR
+        POP HL
+        INC HL
+        JR DECODE_WORD
+DECODE_UNKNOWN:
+        LD A,'?'
+DECODE_RAW:
+        CALL DECODE_ONE_CHAR
+        JR DECODE_LOOP
+DECODE_ONE_CHAR:
+        LD (TOK_TMP),A
+        LD A,(ENC_QUOTED)
+        CP 76
+        RET NC
+        INC A
+        LD (ENC_QUOTED),A
+        LD HL,(DECODE_DEST)
+        LD A,(TOK_TMP)
+        LD (HL),A
+        INC HL
+        LD (DECODE_DEST),HL
+        RET
+
+; Immutable dictionary v1: token values 80h...; keep IDs stable for ROM 2.
+; Important: avoid inventing line-number tokens; QBasic source is numberless.
+TOKEN_POINTERS:
+        DW TK_PRINT,TK_FOR,TK_NEXT,TK_IF,TK_THEN,TK_ELSE,TK_END
+        DW TK_DIM,TK_AS,TK_INTEGER,TK_STRING,TK_CLS,TK_INPUT
+        DW TK_TO,TK_STEP,TK_WHILE,TK_WEND,TK_DO,TK_LOOP
+        DW TK_UNTIL,TK_SUB,TK_FUNCTION,TK_RETURN,TK_SELECT,TK_CASE
+        DW TK_EXIT,TK_REM,TK_AND,TK_OR,TK_NOT,TK_MOD,TK_GOTO
+        DW TK_GOSUB,TK_RANDOMIZE,TK_RND,TK_LEN,TK_MID
+        DW TK_LEFT,TK_RIGHT,TK_CHR,TK_ASC,TK_SLEEP,TK_BEEP
+        DW TK_COLOR,TK_LOCATE,TK_OPEN,TK_CLOSE,TK_WRITE
+        DW TK_READ,TK_DATA,TK_RESTORE,TK_SHARED,TK_STATIC
+        DW TK_BYVAL,TK_CONST,TK_DOUBLE,TK_SINGLE,TK_LONG
+        DW TK_REDIM,TK_PRESERVE,TK_OPTION,TK_BASE,TK_ON
+        DW TK_ERROR,TK_RESUME,TK_TIMER
+TOKEN_COUNT EQU 66
+TOKEN_REM EQU 26
+TK_PRINT:     DB 'PRINT',0
+TK_FOR:       DB 'FOR',0
+TK_NEXT:      DB 'NEXT',0
+TK_IF:        DB 'IF',0
+TK_THEN:      DB 'THEN',0
+TK_ELSE:      DB 'ELSE',0
+TK_END:       DB 'END',0
+TK_DIM:       DB 'DIM',0
+TK_AS:        DB 'AS',0
+TK_INTEGER:   DB 'INTEGER',0
+TK_STRING:    DB 'STRING',0
+TK_CLS:       DB 'CLS',0
+TK_INPUT:     DB 'INPUT',0
+TK_TO:        DB 'TO',0
+TK_STEP:      DB 'STEP',0
+TK_WHILE:     DB 'WHILE',0
+TK_WEND:      DB 'WEND',0
+TK_DO:        DB 'DO',0
+TK_LOOP:      DB 'LOOP',0
+TK_UNTIL:     DB 'UNTIL',0
+TK_SUB:       DB 'SUB',0
+TK_FUNCTION:  DB 'FUNCTION',0
+TK_RETURN:    DB 'RETURN',0
+TK_SELECT:    DB 'SELECT',0
+TK_CASE:      DB 'CASE',0
+TK_EXIT:      DB 'EXIT',0
+TK_REM:       DB 'REM',0
+TK_AND:       DB 'AND',0
+TK_OR:        DB 'OR',0
+TK_NOT:       DB 'NOT',0
+TK_MOD:       DB 'MOD',0
+TK_GOTO:      DB 'GOTO',0
+TK_GOSUB:     DB 'GOSUB',0
+TK_RANDOMIZE: DB 'RANDOMIZE',0
+TK_RND:       DB 'RND',0
+TK_LEN:       DB 'LEN',0
+TK_MID:       DB 'MID$',0
+TK_LEFT:      DB 'LEFT$',0
+TK_RIGHT:     DB 'RIGHT$',0
+TK_CHR:       DB 'CHR$',0
+TK_ASC:       DB 'ASC',0
+TK_SLEEP:     DB 'SLEEP',0
+TK_BEEP:      DB 'BEEP',0
+TK_COLOR:     DB 'COLOR',0
+TK_LOCATE:    DB 'LOCATE',0
+TK_OPEN:      DB 'OPEN',0
+TK_CLOSE:     DB 'CLOSE',0
+TK_WRITE:     DB 'WRITE',0
+TK_READ:      DB 'READ',0
+TK_DATA:      DB 'DATA',0
+TK_RESTORE:   DB 'RESTORE',0
+TK_SHARED:    DB 'SHARED',0
+TK_STATIC:    DB 'STATIC',0
+TK_BYVAL:     DB 'BYVAL',0
+TK_CONST:     DB 'CONST',0
+TK_DOUBLE:    DB 'DOUBLE',0
+TK_SINGLE:    DB 'SINGLE',0
+TK_LONG:      DB 'LONG',0
+TK_REDIM:     DB 'REDIM',0
+TK_PRESERVE:  DB 'PRESERVE',0
+TK_OPTION:    DB 'OPTION',0
+TK_BASE:      DB 'BASE',0
+TK_ON:        DB 'ON',0
+TK_ERROR:     DB 'ERROR',0
+TK_RESUME:    DB 'RESUME',0
+TK_TIMER:     DB 'TIMER',0

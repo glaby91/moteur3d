@@ -1,7 +1,7 @@
-; QBasic CPC6128 -- QEDIT editor ROM v0.3.2 (fast editor navigation and single-line scrolling)
+; QBasic CPC6128 -- QEDIT editor ROM v0.4.0 (tokenized expanded RAM prototype)
 ; Compatible Amstrad CPC6128 expansion ROM, standard MODE 2 (80x25).
 ; Install as upper ROM slot 1; from BASIC: MEMORY &5FFF : |QEDIT
-; MEMORY must be set BEFORE launch to protect #6000..#97FF.
+; MEMORY must be set BEFORE launch to protect #6000..#A993.
 ; Editor occupies upper ROM window #C000..#FFFF; user text in RAM.
 ; Does NOT implement QBasic runtime, syntax colouring or overscan yet.
 ;
@@ -30,15 +30,15 @@ CAS_OUT_CLOSE   EQU #BC8F
 CAS_OUT_CHAR    EQU #BC95
 CAS_OUT_ABANDON EQU #BC92
 
-DOC_BASE        EQU #6000
+DOC_BASE        EQU #6000    ; only 21 visible plain-text lines live here
 LINE_BYTES      EQU 80
-MAX_LINES       EQU 120
+MAX_LINES       EQU 1500
 MAX_COL         EQU 75       ; columns 0..75 => 76 editable characters
 VIEW_LINES      EQU 21       ; screen rows 3..23
 CUR_LINE        EQU #8800
 CUR_COL         EQU #8801
-TOP_LINE        EQU #8802
-DOC_LINES       EQU #8803
+TOP_LINE        EQU #8840    ; 16-bit absolute first visible line
+DOC_LINES       EQU #8842    ; 16-bit logical number of lines
 PENDING         EQU #8804
 TMP_ROW         EQU #8805
 TMP_COUNT       EQU #8806
@@ -57,6 +57,34 @@ SAVED_BORDER_B  EQU #881C
 SAVED_BORDER_C  EQU #881D
 FILE_NAME_RAM   EQU #8810    ; 8 bytes, accessible when AMSDOS selects upper ROM 7
 IO_BUFFER       EQU #9000    ; 2048 bytes for AMSDOS/cassette streams
+INDEX_BASE      EQU #9800    ; 1500 entries x3 bytes (bank/address)
+ENC_BUF         EQU #8A00    ; max 76 bytes of tokenized line
+TEMP_LINE       EQU #8B00    ; 80-byte scratch / disk line
+DIRTY_FLAG      EQU #8844
+STORE_BANK      EQU #8845    ; bank 0..3 => GA C4..C7
+STORE_ADDR      EQU #8846    ; next append address [#4000,#8000]
+REQUEST_INDEX   EQU #8848    ; two-byte absolute logical index
+REQUEST_SOURCE  EQU #884A
+REQUEST_DEST    EQU #884C
+ENC_LEN         EQU #884E
+ENC_LEFT        EQU #884F
+ENC_QUOTED      EQU #8850
+ENC_PREV_WORD   EQU #8851
+ENC_PTR         EQU #8852
+ENC_SOURCE      EQU #8854
+TOK_IDX         EQU #8856
+TOK_WORD_PTR    EQU #8857
+TOK_MATCH_LEN   EQU #8859
+TOK_TMP         EQU #885A
+DECODE_LEN      EQU #885B
+DECODE_PTR      EQU #885C
+DECODE_DEST     EQU #885E
+STORE_ERROR     EQU #8860
+IO_COL          EQU #8861
+SAVE_INDEX      EQU #8862
+DEMO_SOURCE     EQU #8864
+STRESS_INDEX    EQU #8866
+
 
         ORG #C000
         DB 1,0,1,0          ; background ROM, mark, version, revision
@@ -87,8 +115,13 @@ EDITOR_START:
         CALL SAVE_DISPLAY_STATE
         CALL NEW_DOCUMENT
         CALL DEMO_DOCUMENT
+        CALL CACHE_BUILD
         CALL SCREEN_INIT
 FULL_REDRAW:
+        CALL COMMIT_DIRTY
+        JR NC,FULL_REDRAW_UNCOMMITTED
+        CALL CACHE_BUILD
+FULL_REDRAW_UNCOMMITTED:
         CALL REDRAW_SCREEN
 WAIT_KEY:
         CALL KM_WAIT_KEY
@@ -111,6 +144,8 @@ WAIT_KEY:
         JP Z,DELETE_CHAR
         CP 12              ; Ctrl+L loads built-in 50-line scrolling test
         JP Z,LOAD_LONG_DEMO
+        CP 11              ; Ctrl+K 1500-line tokenized bank stress test
+        JP Z,LOAD_STRESS_1500
         CP 20              ; Ctrl+T toggles interactive menus (WinAPE reserves PC F10)
         JP Z,MENU_START
         CP 19              ; CTRL+S save
@@ -137,11 +172,6 @@ WAIT_KEY:
  ; Modified text: redraw only the affected editor row and the two status numbers.
 MAIN_LOOP:
         LD A,(CUR_LINE)
-        LD B,A
-        LD A,(TOP_LINE)
-        LD C,A
-        LD A,B
-        SUB C
         ADD A,3
         LD L,A
         LD H,2
@@ -161,10 +191,10 @@ NAV_FAST:
 UPDATE_POSITION_FAST:
         LD HL,#0A18
         CALL CLEAR_DIGITS
-        LD A,(CUR_LINE)
-        INC A
-        LD HL,#0A18
-        CALL PRINT_DECIMAL
+        CALL CURRENT_ABS_INDEX
+        INC HL
+        LD DE,#0A18
+        CALL PRINT_DECIMAL_16
         LD HL,#1118
         CALL CLEAR_DIGITS
         LD A,(CUR_COL)
@@ -173,7 +203,7 @@ UPDATE_POSITION_FAST:
         JP PRINT_DECIMAL
 CLEAR_DIGITS:
         CALL TXT_SET_CURSOR
-        LD B,3
+        LD B,4
 CLEAR_DIGITS_LOOP:
         PUSH BC
         LD A,32
@@ -187,38 +217,81 @@ CLEAR_DIGITS_LOOP:
 ; B=1 scroll up, B=0 scroll down, HL=top left, DE=bottom right,
 ; all coordinates are zero based (see CPC6128 OS sources).
 ; Editor rows are screen 3..23 and columns 2..77, 1 based.
+
+; Fast viewport scroll: shift 20 cached rows (1600 RAM bytes), fetch only
+; the entering token line from a paged 16K RAM bank, scroll the VRAM rectangle.
 SCROLL_ONE_DOWN:
-        LD A,0
+        LD HL,DOC_BASE+LINE_BYTES
+        LD DE,DOC_BASE
+        LD BC,(VIEW_LINES-1)*LINE_BYTES
+        LDIR
+        LD HL,(TOP_LINE)
+        LD DE,VIEW_LINES-1
+        ADD HL,DE
+        LD DE,DOC_BASE+(VIEW_LINES-1)*LINE_BYTES
+        CALL LOAD_LOGICAL_LINE
+        XOR A
         LD B,1
         LD HL,#0102
         LD DE,#4C16
         CALL SCR_SW_ROLL
-        LD HL,#0217       ; col 2, row 23: new last visible line
+        LD HL,#0217
         CALL TXT_SET_CURSOR
-        LD A,(TOP_LINE)
-        ADD A,VIEW_LINES-1
+        LD A,VIEW_LINES-1
         CALL DRAW_DOCUMENT_ROW
         JP NAV_FAST
 SCROLL_ONE_UP:
+        LD HL,DOC_BASE+(VIEW_LINES-1)*LINE_BYTES-1
+        LD DE,DOC_BASE+VIEW_LINES*LINE_BYTES-1
+        LD BC,(VIEW_LINES-1)*LINE_BYTES
+        LDDR
+        LD HL,(TOP_LINE)
+        LD DE,DOC_BASE
+        CALL LOAD_LOGICAL_LINE
         XOR A
         LD B,0
         LD HL,#0102
         LD DE,#4C16
         CALL SCR_SW_ROLL
-        LD HL,#0203       ; col 2, row 3: new first visible line
+        LD HL,#0203
         CALL TXT_SET_CURSOR
-        LD A,(TOP_LINE)
+        XOR A
         CALL DRAW_DOCUMENT_ROW
         JP NAV_FAST
 
-; Regression test: built-in program deliberately taller than the screen.
-; Activating it never touches the disk; existing Ctrl+S/O remain unchanged.
+; The built-in demo is written into paged compact storage, not displayed from
+; ROM directly.  Existing Ctrl+L behavior (50 rows) remains available.
 LOAD_LONG_DEMO:
         CALL NEW_DOCUMENT
         LD HL,LONG_DEMO_TEXT
-        LD DE,DOC_BASE
-        LD B,0
-        CALL DEMO_COPY
+        CALL BUILD_ROM_DEMO
+        JP FULL_REDRAW
+
+; Exercises all 1500 logical line indices and the 4-bank token store.
+; Repeat a short QBasic line to keep stress data within 64 KiB.
+LOAD_STRESS_1500:
+        CALL NEW_DOCUMENT
+        LD HL,STRESS_TEXT
+        LD (DEMO_SOURCE),HL
+        LD HL,0
+        LD (STRESS_INDEX),HL
+STRESS_LOOP:
+        LD HL,(DEMO_SOURCE)
+        CALL COPY_ROM_LINE_TO_TEMP
+        LD HL,(STRESS_INDEX)
+        LD DE,TEMP_LINE
+        CALL WRITE_LOGICAL_LINE
+        JP NC,STRESS_DONE
+        LD HL,(STRESS_INDEX)
+        INC HL
+        LD (STRESS_INDEX),HL
+        LD DE,MAX_LINES
+        OR A
+        SBC HL,DE
+        JR NZ,STRESS_LOOP
+STRESS_DONE:
+        LD HL,(STRESS_INDEX)
+        LD (DOC_LINES),HL
         JP FULL_REDRAW
 
 ; Erase the highlighted character in old location, without changing RAM.
@@ -232,11 +305,6 @@ ERASE_CURSOR:
 ; HL = video cursor position for current document character.
 CURSOR_POSITION:
         LD A,(CUR_LINE)
-        LD B,A
-        LD A,(TOP_LINE)
-        LD C,A
-        LD A,B
-        SUB C
         ADD A,3
         LD L,A
         LD A,(CUR_COL)
@@ -303,47 +371,93 @@ RESET_FILE:
         JP FULL_REDRAW
 
 ; Clear 9600 bytes of RAM document, set one logical line.
+
+; New document: only an index of 1500 x3 bytes is cleared; the 64K data
+; banks do not need to be wiped, because the index is authoritative.
 NEW_DOCUMENT:
-        LD HL,DOC_BASE
-        LD DE,DOC_BASE+1
-        LD BC,MAX_LINES*LINE_BYTES-1
-        LD (HL),32
+        LD HL,INDEX_BASE
+        LD DE,INDEX_BASE+1
+        LD BC,MAX_LINES*3-1
+        LD (HL),#FF
         LDIR
+        LD HL,#4000
+        LD (STORE_ADDR),HL
         XOR A
+        LD (STORE_BANK),A
+        LD (DIRTY_FLAG),A
+        LD (STORE_ERROR),A
         LD (CUR_LINE),A
         LD (CUR_COL),A
-        LD (TOP_LINE),A
-        INC A
-        LD (DOC_LINES),A
+        LD HL,0
+        LD (TOP_LINE),HL
+        INC HL
+        LD (DOC_LINES),HL
         RET
 
-; Load demonstration lines directly from ROM, one NUL-terminated line each.
 DEMO_DOCUMENT:
         LD HL,DEMO_TEXT
-        LD DE,DOC_BASE
-        LD B,0
-DEMO_COPY:
-        LD A,(HL)
+        JP BUILD_ROM_DEMO
+
+; HL -> ROM demo with 0-separated lines and FF at end.
+BUILD_ROM_DEMO:
+        LD (DEMO_SOURCE),HL
+        LD HL,0
+        LD (STRESS_INDEX),HL
+DEMO_BUILD_NEXT:
+        LD HL,(DEMO_SOURCE)
+        CALL COPY_ROM_LINE_TO_TEMP
+        LD (DEMO_SOURCE),HL
+        LD HL,(STRESS_INDEX)
+        LD DE,TEMP_LINE
+        CALL WRITE_LOGICAL_LINE
+        RET NC
+        LD HL,(STRESS_INDEX)
         INC HL
-        CP 255
-        JR Z,DEMO_DONE
+        LD (STRESS_INDEX),HL
+        LD (DOC_LINES),HL
+        LD HL,(DEMO_SOURCE)
+        LD A,(HL)
+        CP #FF
+        RET Z
+        JR DEMO_BUILD_NEXT
+
+; Entry HL = ROM line start, copy <=76 chars to fixed scratch; returns HL
+; at next line or FF terminator.  Built-in demos always use NUL lines.
+COPY_ROM_LINE_TO_TEMP:
+        LD DE,TEMP_LINE
+        LD B,76
+COPY_ROM_NEXT:
+        LD A,(HL)
         OR A
-        JR Z,DEMO_END_LINE
+        JR Z,COPY_ROM_END
+        CP #FF
+        JR Z,COPY_ROM_END
+        LD (DE),A
+        INC HL
+        INC DE
+        DJNZ COPY_ROM_NEXT
+COPY_ROM_END:
+        LD A,(HL)
+        CP #FF
+        JR Z,COPY_ROM_PAD
+        OR A
+        JR Z,COPY_ROM_ADVANCE
+COPY_ROM_SKIP:
+        INC HL
+        LD A,(HL)
+        OR A
+        JR NZ,COPY_ROM_SKIP
+COPY_ROM_ADVANCE:
+        INC HL
+COPY_ROM_PAD:
+        LD A,B
+        OR A
+        RET Z
+COPY_ROM_SPACES:
+        LD A,32
         LD (DE),A
         INC DE
-        JR DEMO_COPY
-DEMO_END_LINE:
-        INC B
-        PUSH HL
-        LD A,B
-        CALL LINE_POINTER
-        EX DE,HL
-        POP HL
-        JR DEMO_COPY
-DEMO_DONE:
-        LD A,B
-        INC A
-        LD (DOC_LINES),A
+        DJNZ COPY_ROM_SPACES
         RET
 
 SCREEN_INIT:
@@ -391,14 +505,10 @@ SHOW_TEXT:
         JP PRINT_STRING
 
 ; print fixed 80 characters (spaces already stored in RAM)
+
+; The viewport has only 21 plain-text cache lines.  Banked RAM is consulted
+; on page turns, not for ordinary cursor movements or text rendering.
 DRAW_DOCUMENT_ROW:
-        ; A=actual document row
-        LD B,A
-        LD A,(DOC_LINES)
-        CP B
-        JR Z,DRAW_BLANK_LINE
-        JR C,DRAW_BLANK_LINE
-        LD A,B
         CALL LINE_POINTER
         LD B,76
 DRAW_DOC_LOOP:
@@ -410,15 +520,6 @@ DRAW_DOC_LOOP:
         POP HL
         INC HL
         DJNZ DRAW_DOC_LOOP
-        RET
-DRAW_BLANK_LINE:
-        LD B,76
-DRAW_BLANK_LOOP:
-        LD A,32
-        PUSH BC
-        CALL TXT_WR_CHAR
-        POP BC
-        DJNZ DRAW_BLANK_LOOP
         RET
 
 REDRAW_SCREEN:
@@ -474,18 +575,88 @@ DRAW_ROWS:
         CALL TXT_SET_PEN
         JP PAINT_CURSOR
 
+
 DRAW_STATUS:
         LD HL,#0118
         LD DE,STATUS_TEXT
         CALL SHOW_TEXT
-        LD A,(CUR_LINE)
-        INC A
         LD HL,#0A18
-        CALL PRINT_DECIMAL
+        CALL CLEAR_DIGITS
+        CALL CURRENT_ABS_INDEX
+        INC HL
+        LD DE,#0A18
+        CALL PRINT_DECIMAL_16
+        LD HL,#1418
+        CALL CLEAR_DIGITS
         LD A,(CUR_COL)
         INC A
-        LD HL,#1118
+        LD HL,#1418
         CALL PRINT_DECIMAL
+        RET
+
+; Four-digit decimal position for 16-bit logical line number (0..1500).
+; Input HL=value, DE=screen coordinates (D=column, E=row).
+PRINT_DECIMAL_16:
+        PUSH HL
+        EX DE,HL
+        CALL TXT_SET_CURSOR
+        POP HL
+        LD DE,-1000
+        LD B,0
+PDEC_THOUSANDS:
+        ADD HL,DE
+        JR C,PDEC_THOUSANDS_END
+        INC B
+        JR PDEC_THOUSANDS
+PDEC_THOUSANDS_END:
+        LD DE,1000
+        ADD HL,DE
+        LD A,B
+        ADD A,'0'
+        PUSH HL
+        CALL TXT_OUTPUT
+        POP HL
+        LD DE,-100
+        LD B,0
+PDEC_HUNDREDS:
+        ADD HL,DE
+        JR C,PDEC_HUNDREDS_END
+        INC B
+        JR PDEC_HUNDREDS
+PDEC_HUNDREDS_END:
+        LD DE,100
+        ADD HL,DE
+        LD A,B
+        ADD A,'0'
+        PUSH HL
+        CALL TXT_OUTPUT
+        POP HL
+        LD DE,-10
+        LD B,0
+PDEC_TENS:
+        ADD HL,DE
+        JR C,PDEC_TENS_END
+        INC B
+        JR PDEC_TENS
+PDEC_TENS_END:
+        LD DE,10
+        ADD HL,DE
+        LD A,B
+        ADD A,'0'
+        PUSH HL
+        CALL TXT_OUTPUT
+        POP HL
+        LD A,L
+        ADD A,'0'
+        CALL TXT_OUTPUT
+        RET
+
+CURRENT_ABS_INDEX:
+        LD HL,(TOP_LINE)
+        LD A,(CUR_LINE)
+        LD E,A
+        LD D,0
+        ADD HL,DE
         RET
 
 PAINT_CURSOR:
@@ -552,7 +723,7 @@ SKIP_TENS:
         CALL TXT_OUTPUT
         RET
 
-; Input A=line index [0..119] => HL=DOC_BASE+80*A.
+; Input A=viewport row [0..20] => HL=DOC_BASE+80*A.
 LINE_POINTER:
         LD L,A
         LD H,0
@@ -607,12 +778,12 @@ INSERT_CHAR:
         LD A,(CUR_COL)
         INC A
         LD (CUR_COL),A
-        JP MAIN_LOOP
+        JP SET_DIRTY_AND_REDRAW
 INSERT_LAST:
         CALL POSITION_POINTER
         LD A,(PENDING)
         LD (HL),A
-        JP MAIN_LOOP
+        JP SET_DIRTY_AND_REDRAW
 
 DELETE_CHAR:
         LD A,(CUR_COL)
@@ -631,11 +802,11 @@ DELETE_CHAR:
         LDIR
         LD A,32
         LD (DE),A
-        JP MAIN_LOOP
+        JP SET_DIRTY_AND_REDRAW
 DELETE_LAST:
         CALL POSITION_POINTER
         LD (HL),32
-        JP MAIN_LOOP
+        JP SET_DIRTY_AND_REDRAW
 
 BACKSPACE:
         LD A,(CUR_COL)
@@ -659,128 +830,164 @@ MOVE_RIGHT:
         INC A
         LD (CUR_COL),A
         JP NAV_FAST
+
+SET_DIRTY_AND_REDRAW:
+        LD A,1
+        LD (DIRTY_FLAG),A
+        JP MAIN_LOOP
+
 MOVE_UP:
+        CALL CURRENT_ABS_INDEX
+        LD A,H
+        OR L
+        JP Z,NAV_FAST
+        CALL COMMIT_DIRTY
+        JP NC,STORE_ERROR_MESSAGE
         LD A,(CUR_LINE)
         OR A
-        JP Z,NAV_FAST
+        JR Z,MOVE_UP_SCROLL
         DEC A
         LD (CUR_LINE),A
-        LD B,A
-        LD A,(TOP_LINE)
-        CP B
-        JP C,NAV_FAST
-        JP Z,NAV_FAST
-        LD A,B
-        LD (TOP_LINE),A
+        JP NAV_FAST
+MOVE_UP_SCROLL:
+        LD HL,(TOP_LINE)
+        DEC HL
+        LD (TOP_LINE),HL
         JP SCROLL_ONE_UP
+
 MOVE_DOWN:
+        CALL CURRENT_ABS_INDEX
+        INC HL
+        LD DE,(DOC_LINES)
+        OR A
+        SBC HL,DE
+        JP NC,NAV_FAST
+        CALL COMMIT_DIRTY
+        JP NC,STORE_ERROR_MESSAGE
         LD A,(CUR_LINE)
+        CP VIEW_LINES-1
+        JR Z,MOVE_DOWN_SCROLL
         INC A
-        LD B,A
-        LD A,(DOC_LINES)
-        CP B
-        JP Z,NAV_FAST
-        JP C,NAV_FAST
-        LD A,B
         LD (CUR_LINE),A
-        LD B,A
-        LD A,(TOP_LINE)
-        ADD A,VIEW_LINES
-        CP B
-        JP NZ,NAV_FAST
-        LD A,(TOP_LINE)
-        INC A
-        LD (TOP_LINE),A
+        JP NAV_FAST
+MOVE_DOWN_SCROLL:
+        LD HL,(TOP_LINE)
+        INC HL
+        LD (TOP_LINE),HL
         JP SCROLL_ONE_DOWN
 
-; Splits current line. Moves lower text lines downward; supports 120 lines.
-; Non-interactive: usable by file loader without unnecessary redraws.
+; Split logical line: save its suffix, commit the shortened source,
+; move the three-byte index records, then create a new tokenized record.
 NEWLINE:
-        CALL SPLIT_LINE
-        JP FULL_REDRAW
-SPLIT_LINE:
-        LD A,(DOC_LINES)
-        CP MAX_LINES
-        RET NC
-        DEC A
-        LD (TMP_ROW),A
-SHIFT_ROWS:
-        LD A,(TMP_ROW)
-        LD B,A
-        LD A,(CUR_LINE)
-        CP B
-        JR NC,SHIFT_DONE
-        LD A,B
-        CALL LINE_POINTER
-        LD DE,LINE_BYTES-1
-        ADD HL,DE
-        LD D,H
-        LD E,L
-        LD BC,LINE_BYTES
-        PUSH HL
-        LD HL,LINE_BYTES
-        ADD HL,DE
-        EX DE,HL             ; HL = source+79, DE = destination+79
-        POP HL
-        LDDR
-        LD A,(TMP_ROW)
-        DEC A
-        LD (TMP_ROW),A
-        JR SHIFT_ROWS
-SHIFT_DONE:
-        LD A,(DOC_LINES)
-        INC A
-        LD (DOC_LINES),A
-        ; New inserted line is first cleared entirely.
-        LD A,(CUR_LINE)
-        INC A
-        CALL LINE_POINTER
-        LD B,LINE_BYTES
-CLEAR_NEW_ROW:
-        LD (HL),32
-        INC HL
-        DJNZ CLEAR_NEW_ROW
-        ; Transfer current line's suffix to the next line.
+        LD HL,(DOC_LINES)
+        LD DE,MAX_LINES
+        OR A
+        SBC HL,DE
+        JP NC,NEWLINE_FULL
+NEWLINE_CAPACITY_OK:
+        ; TEMP_LINE receives the suffix; source suffix becomes spaces.
+        CALL POSITION_POINTER
+        LD DE,TEMP_LINE
         LD A,(CUR_COL)
-        LD E,A
-        LD A,MAX_COL+1
-        SUB E
-        LD (TMP_COUNT),A
-        CALL POSITION_POINTER
-        PUSH HL
-        LD A,(CUR_LINE)
-        INC A
-        CALL LINE_POINTER
-        EX DE,HL
-        POP HL
-        LD A,(TMP_COUNT)
-        LD C,A
-        LD B,0
-        LDIR
-        ; Blank suffix in original line.
-        CALL POSITION_POINTER
-        LD A,(TMP_COUNT)
         LD B,A
-BLANK_SPLIT:
+        LD A,76
+        SUB B
+        LD B,A
+NL_COPY_SUFFIX:
+        LD A,(HL)
+        LD (DE),A
         LD (HL),32
         INC HL
-        DJNZ BLANK_SPLIT
+        INC DE
+        DJNZ NL_COPY_SUFFIX
+        ; Pad the unfilled tail of TEMP_LINE with spaces.
+        LD A,(CUR_COL)
+        LD B,A
+        LD A,B
+        OR A
+        JR Z,NL_NO_PAD
+NL_PAD:
+        LD A,32
+        LD (DE),A
+        INC DE
+        DJNZ NL_PAD
+NL_NO_PAD:
+        LD A,1
+        LD (DIRTY_FLAG),A
+        CALL COMMIT_DIRTY
+        JP NC,STORE_ERROR_MESSAGE
+        CALL CURRENT_ABS_INDEX
+        INC HL
+        LD (REQUEST_INDEX),HL
+        CALL INDEX_INSERT_EMPTY
+        LD HL,(REQUEST_INDEX)
+        LD DE,TEMP_LINE
+        CALL WRITE_LOGICAL_LINE
+        JP NC,STORE_ERROR_MESSAGE
+        ; The cursor moves to inserted line; rebuild viewport.
         LD A,(CUR_LINE)
+        CP VIEW_LINES-1
+        JR NZ,NL_MOVE_VISIBLE
+        LD HL,(TOP_LINE)
+        INC HL
+        LD (TOP_LINE),HL
+        JR NL_FINISH
+NL_MOVE_VISIBLE:
         INC A
         LD (CUR_LINE),A
+NL_FINISH:
         XOR A
         LD (CUR_COL),A
-        ; update top line if needed
-        LD A,(CUR_LINE)
-        LD B,A
-        LD A,(TOP_LINE)
-        ADD A,VIEW_LINES
-        CP B
-        RET NZ
-        LD A,(TOP_LINE)
-        INC A
-        LD (TOP_LINE),A
+        JP FULL_REDRAW
+NEWLINE_FULL:
+        LD HL,MSG_LIMIT
+        JP SHOW_MESSAGE
+
+; Insert an empty line at absolute REQUEST_INDEX and shift following
+; compact *indices* (not banked data) by 3 bytes each.
+INDEX_INSERT_EMPTY:
+        LD HL,(DOC_LINES)
+        CALL INDEX_ADDRESS
+        LD DE,2
+        ADD HL,DE                 ; last byte in destination slot [count]
+        PUSH HL
+        LD DE,-3
+        ADD HL,DE                 ; last byte in source slot [count-1]
+        POP DE                    ; DE = destination end, HL = source end
+        PUSH HL
+        LD HL,(DOC_LINES)
+        LD DE,(REQUEST_INDEX)
+        OR A
+        SBC HL,DE                 ; number of indices to shift
+        PUSH HL
+        ADD HL,HL
+        POP DE
+        ADD HL,DE                 ; 3 * number of entries
+        LD B,H
+        LD C,L
+        POP HL                    ; source end
+        LD A,B
+        OR C
+        JR Z,INSERT_IDX_DONE
+        ; Recalculate destination pointer (avoid DE from count calculation).
+        PUSH HL
+        LD DE,3
+        ADD HL,DE
+        EX DE,HL
+        POP HL
+        LDDR
+INSERT_IDX_DONE:
+        LD HL,(REQUEST_INDEX)
+        CALL INDEX_ADDRESS
+        LD (HL),#FF
+        LD HL,(DOC_LINES)
+        INC HL
+        LD (DOC_LINES),HL
         RET
+
+STORE_ERROR_MESSAGE:
+        LD HL,MSG_STORE_FULL
+        JP SHOW_MESSAGE
 
 ; Copy ROM-resident filename to stable RAM before AMSDOS switches upper ROM.
 ; All bytes supplied to CAS_OUT_OPEN/CAS_IN_OPEN must be readable with ROM 7 active.
@@ -791,23 +998,25 @@ PREPARE_DISK_NAME:
         LDIR
         RET
 
-; SAVE DEMO.BAS as ASCII, each line trimmed, CR LF separators.
+
+; Save compressed program as readable DOS-compatible ASCII .BAS.
 SAVE_FILE:
+        CALL COMMIT_DIRTY
+        JP NC,STORE_ERROR_MESSAGE
         CALL PREPARE_DISK_NAME
         LD HL,FILE_NAME_RAM
         LD B,8
         LD DE,IO_BUFFER
         CALL CAS_OUT_OPEN
         JP NC,FILE_SAVE_OPEN_ERROR
-        XOR A
-        LD (TMP_ROW),A
+        LD HL,0
+        LD (SAVE_INDEX),HL
 SAVE_NEXT_ROW:
-        LD A,(TMP_ROW)
-        CALL LINE_POINTER
-        PUSH HL
-        LD DE,MAX_COL
-        ADD HL,DE
-        LD B,MAX_COL+1
+        LD HL,(SAVE_INDEX)
+        LD DE,TEMP_LINE
+        CALL LOAD_LOGICAL_LINE
+        LD HL,TEMP_LINE+75
+        LD B,76
 TRIM_SAVE:
         LD A,(HL)
         CP 32
@@ -817,8 +1026,7 @@ TRIM_SAVE:
 SAVE_TRIM_DONE:
         LD A,B
         LD (TMP_COUNT),A
-        POP HL
-        LD A,(TMP_COUNT)
+        LD HL,TEMP_LINE
         OR A
         JR Z,SAVE_NEWLINE
         LD B,A
@@ -839,19 +1047,18 @@ SAVE_NEWLINE:
         LD A,10
         CALL CAS_OUT_CHAR
         JR NC,SAVE_ABORT
-        LD A,(TMP_ROW)
-        INC A
-        LD (TMP_ROW),A
-        LD B,A
-        LD A,(DOC_LINES)
-        CP B
+        LD HL,(SAVE_INDEX)
+        INC HL
+        LD (SAVE_INDEX),HL
+        LD DE,(DOC_LINES)
+        OR A
+        SBC HL,DE
         JR NZ,SAVE_NEXT_ROW
         CALL CAS_OUT_CLOSE
         JP NC,FILE_SAVE_CLOSE_ERROR
         LD HL,MSG_SAVED
         JP SHOW_MESSAGE
 SAVE_ABORT:
-        ; Do not turn a failed write into a successful close of a partial file.
         CALL CAS_OUT_ABANDON
         LD HL,MSG_SAVE_WRITE_ERROR
         JP SHOW_MESSAGE
@@ -862,7 +1069,8 @@ FILE_SAVE_CLOSE_ERROR:
         LD HL,MSG_SAVE_CLOSE_ERROR
         JP SHOW_MESSAGE
 
-; LOAD DEMO.BAS ASCII; truncates text at 76 chars and 120 lines.
+; Parse ASCII .BAS into independent variable-length tokenized lines,
+; up to 1500 lines / 64 KiB bank store. No line numbers required.
 LOAD_FILE:
         CALL PREPARE_DISK_NAME
         LD HL,FILE_NAME_RAM
@@ -871,6 +1079,9 @@ LOAD_FILE:
         CALL CAS_IN_OPEN
         JP NC,FILE_LOAD_ERROR
         CALL NEW_DOCUMENT
+        LD HL,0
+        LD (SAVE_INDEX),HL
+        CALL INIT_IMPORT_LINE
 LOAD_BYTE:
         CALL CAS_IN_CHAR
         JR NC,LOAD_DONE
@@ -891,35 +1102,65 @@ LOAD_SPACE:
         CALL IMPORT_CHAR
         JR LOAD_BYTE
 LOAD_NEWLINE:
-        LD A,(DOC_LINES)
-        CP MAX_LINES
-        JR NC,LOAD_DONE
-        CALL SPLIT_LINE
+        CALL STORE_IMPORT_LINE
+        JR NC,LOAD_LIMIT
+        LD HL,(SAVE_INDEX)
+        INC HL
+        LD (SAVE_INDEX),HL
+        LD DE,MAX_LINES
+        OR A
+        SBC HL,DE
+        JR NC,LOAD_LIMIT
+        CALL INIT_IMPORT_LINE
         JR LOAD_BYTE
 LOAD_DONE:
+        CALL STORE_IMPORT_LINE
         CALL CAS_IN_CLOSE
-        XOR A
-        LD (TOP_LINE),A
-        LD (CUR_LINE),A
-        LD (CUR_COL),A
+        CALL CACHE_BUILD
         LD HL,MSG_LOADED
+        JP SHOW_MESSAGE
+LOAD_LIMIT:
+        CALL CAS_IN_CLOSE
+        CALL CACHE_BUILD
+        LD HL,MSG_LIMIT
         JP SHOW_MESSAGE
 FILE_LOAD_ERROR:
         LD HL,MSG_LOAD_ERROR
         JP SHOW_MESSAGE
 
-; Import char in A, append to current line during loading (no insertion shift).
+INIT_IMPORT_LINE:
+        LD HL,TEMP_LINE
+        LD DE,TEMP_LINE+1
+        LD BC,75
+        LD (HL),32
+        LDIR
+        XOR A
+        LD (IO_COL),A
+        RET
 IMPORT_CHAR:
         LD (TMP_CHAR),A
-        LD A,(CUR_COL)
-        CP MAX_COL+1
+        LD A,(IO_COL)
+        CP 76
         RET NC
-        CALL POSITION_POINTER
+        LD E,A
+        LD D,0
+        LD HL,TEMP_LINE
+        ADD HL,DE
         LD A,(TMP_CHAR)
         LD (HL),A
-        LD A,(CUR_COL)
+        LD A,(IO_COL)
         INC A
-        LD (CUR_COL),A
+        LD (IO_COL),A
+        RET
+STORE_IMPORT_LINE:
+        LD HL,(SAVE_INDEX)
+        LD DE,TEMP_LINE
+        CALL WRITE_LOGICAL_LINE
+        RET NC
+        LD HL,(SAVE_INDEX)
+        INC HL
+        LD (DOC_LINES),HL
+        SCF
         RET
 
 NO_RUNTIME:
@@ -937,6 +1178,9 @@ SHOW_MESSAGE:
         CALL KM_WAIT_KEY
         JP FULL_REDRAW
 
+
+; TOKENIZED STORE ENGINE inserted below.
+INCLUDE "QEDIT_V04_CORE.asm"
 
 ; ------------------------------------------------------------
 ; QEDIT v0.3: firmware text-mode popup menus, 8 headings.
@@ -1071,15 +1315,6 @@ MENU_ERASE_ROW:
         LD L,A
         CALL TXT_SET_CURSOR
         LD A,(MENU_DRAW_INDEX)
-        LD B,A
-        LD A,(TOP_LINE)
-        ADD A,B
-        LD B,A
-        LD A,(DOC_LINES)
-        CP B
-        JR C,MENU_ERASE_BLANK
-        JR Z,MENU_ERASE_BLANK
-        LD A,B
         CALL LINE_POINTER
         PUSH HL
         LD A,(MENU_SEL)
@@ -1344,22 +1579,26 @@ HELP_ABOUT:     DB ' A propos           ',0
 MSG_SEARCH:     DB 'Recherche: fonction prevue pour version suivante. Tapez une touche.        ',0
 MSG_VARIABLES:  DB 'Fenetre Variables: disponible avec le moteur QBasic. Tapez une touche.     ',0
 MSG_NOT_READY:  DB 'Cette commande sera ajoutee avec la ROM execution. Tapez une touche.       ',0
-MSG_ABOUT:      DB 'QEDIT v0.3.1 - CPC6128 16Ko ROM - edition sans numeros de ligne.            ',0
+MSG_ABOUT:      DB 'QEDIT v0.4 - CPC6128 16Ko ROM - edition sans numeros de ligne.            ',0
 
 HEADER_TEXT:
         DB ' Fichier  Edition  Recherche  Execution  Debogage  Options  Fenetre  Aide   ',0
 TITLE_TEXT:
-        DB '                         [ DEMO.BAS ]        QBasic CPC6128 v0.3.1',0
+        DB '                         [ DEMO.BAS ]        QBasic CPC6128 v0.4',0
 STATUS_TEXT:
-        DB 'Ligne:     Col:      INS  |  MODE 2  |  120 lignes max                   ',0
+        DB 'Ligne:       Col:     INS  |  MODE 2  |  1500 lignes max                 ',0
 FOOTER_TEXT:
-        DB ' Ctrl+T Menus  Ctrl+L Test long  Ctrl+S Sauv.  Ctrl+O Ouvrir  Esc Quitter ',0
+        DB ' Ctrl+T Menus  Ctrl+L Test 50  Ctrl+K Test 1500  Ctrl+S Sauv  Esc Quitter ',0
 MSG_HELP:
-        DB 'Ctrl+T menus; Ctrl+L test 50 lignes; Ctrl+S/O/N; Esc quitter                ',0
+        DB 'Ctrl+T menus; Ctrl+L 50 lignes; Ctrl+K 1500 lignes; Ctrl+S/O/N; Esc     ',0
 MSG_NO_RUN:
         DB 'Execution QBasic: ROM moteur non encore installee. Tapez une touche.       ',0
 MSG_SAVED:
         DB 'DEMO.BAS enregistre. Tapez une touche.                                       ',0
+MSG_LIMIT:
+        DB 'Limite 1500 lignes / memoire compacte atteinte. Tapez une touche.              ',0
+MSG_STORE_FULL:
+        DB 'Memoire paginee pleine: enregistrer puis reouvrir pour compacter.            ',0
 MSG_LOADED:
         DB 'DEMO.BAS charge. Tapez une touche.                                           ',0
 MSG_SAVE_OPEN_ERROR:
@@ -1372,6 +1611,8 @@ MSG_LOAD_ERROR:
         DB 'Erreur ouverture DEMO.BAS.                                                  ',0
 FILE_NAME:
         DB 'DEMO.BAS'
+STRESS_TEXT:
+        DB 'PRINT "1500 LIGNES TOKENISEES"',0
 LONG_DEMO_TEXT:
         DB 'REM QEDIT CPC6128 - TEST DEFILEMENT LONG',0
         DB 'DIM i AS INTEGER',0
