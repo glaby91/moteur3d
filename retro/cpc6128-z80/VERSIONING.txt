@@ -28,3 +28,13 @@ A VENIR
   - RASM + emulateur CPC; mesure cycles/Z80 et validation hardware.
   - Faces cachees et recuperation des regions modifiees pour eviter
     l'effacement complet; projection dynamique / clipping.
+
+V0.2.0 — PROPOSITION / SPECIFICATION NON IMPLEMENTEE (2026-10-20)
+  OPTIMISATION_V02_FAST_REGISTERS.md
+  - Architecture cache chaud BC'/DE'/HL' + AF', EXX/EX AF,AF'.
+  - Interpolation 8.8 d'aretes dans registres secondaires.
+  - Spans courts deroules, spans longs par PUSH BC et SP sauvegarde.
+  - Dirty rectangles pour eviter l'effacement total 16K ecran.
+  - Tables cosinus et reciproques, backface culling, sommets partages.
+  - Budget T-states theorique, mesure CPC indispensable.
+  - NE PAS CONSIDERER CE DOCUMENT COMME DU CODE V0.2 IMPLEMENTE.
