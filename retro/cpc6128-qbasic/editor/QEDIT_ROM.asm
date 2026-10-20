@@ -1,4 +1,4 @@
-; QBasic CPC6128 -- QEDIT editor ROM v0.3 (menus + BASIC display restoration)
+; QBasic CPC6128 -- QEDIT editor ROM v0.3.1 (fast incremental menu redraw)
 ; Compatible Amstrad CPC6128 expansion ROM, standard MODE 2 (80x25).
 ; Install as upper ROM slot 1; from BASIC: MEMORY &5FFF : |QEDIT
 ; MEMORY must be set BEFORE launch to protect #6000..#97FF.
@@ -46,6 +46,7 @@ SAVED_MODE      EQU #8808
 MENU_SEL        EQU #8809
 MENU_ITEM       EQU #880A
 MENU_DRAW_INDEX EQU #880B
+MENU_OLD_ITEM   EQU #880E
 MENU_PTR        EQU #880C  ; word
 SAVED_INK0_B    EQU #8818
 SAVED_INK0_C    EQU #8819
@@ -877,10 +878,18 @@ MENU_START:
         LD (MENU_ITEM),A
         JP MENU_DRAW
 
+; Fast menu painter: DO NOT redraw the 21-line editor. Only the
+; menu bar and the menu items are touched. Left/right first restores
+; the small overlay underneath the previous menu.
 MENU_DRAW:
-        CALL REDRAW_SCREEN
-        CALL ERASE_CURSOR
-        ; Highlight selected menu heading in normal paper / reversed pen.
+        LD A,1
+        CALL TXT_SET_PAPER
+        XOR A
+        CALL TXT_SET_PEN
+        LD HL,#0101
+        LD DE,HEADER_TEXT
+        CALL SHOW_TEXT
+        ; Print the highlighted heading in editor colors.
         XOR A
         CALL TXT_SET_PAPER
         LD A,1
@@ -903,7 +912,40 @@ MENU_DRAW:
         LD D,(HL)
         POP HL
         CALL SHOW_TEXT
-        ; Menu options use a pale inverted background to stand out.
+        XOR A
+        LD (MENU_DRAW_INDEX),A
+MENU_PAINT_NEXT:
+        LD A,(MENU_DRAW_INDEX)
+        LD B,A
+        CALL MENU_COUNT
+        CP B
+        JP Z,MENU_WAIT
+        LD A,(MENU_DRAW_INDEX)
+        CALL MENU_PAINT_ONE
+        LD A,(MENU_DRAW_INDEX)
+        INC A
+        LD (MENU_DRAW_INDEX),A
+        JR MENU_PAINT_NEXT
+
+; Paint just one 20-character popup item.  In UP/DOWN navigation
+; only two items (old and new selection) must be rewritten.
+MENU_PAINT_ONE:
+        LD (MENU_DRAW_INDEX),A
+        LD B,A
+        LD A,(MENU_ITEM)
+        CP B
+        JR Z,MENU_PAINT_SELECTED
+        LD A,1
+        CALL TXT_SET_PAPER
+        XOR A
+        CALL TXT_SET_PEN
+        JR MENU_PAINT_ITEM
+MENU_PAINT_SELECTED:
+        XOR A
+        CALL TXT_SET_PAPER
+        LD A,1
+        CALL TXT_SET_PEN
+MENU_PAINT_ITEM:
         LD A,(MENU_SEL)
         CALL MENU_INDEX_HL
         ADD HL,HL
@@ -913,35 +955,14 @@ MENU_DRAW:
         INC HL
         LD D,(HL)
         EX DE,HL
-        LD (MENU_PTR),HL
-        XOR A
-        LD (MENU_DRAW_INDEX),A
-MENU_PAINT_NEXT:
         LD A,(MENU_DRAW_INDEX)
-        LD B,A
-        CALL MENU_COUNT
-        CP B
-        JR Z,MENU_WAIT
-        LD A,(MENU_ITEM)
-        CP B
-        JR Z,MENU_HIGHLIGHT_ITEM
-        LD A,1
-        CALL TXT_SET_PAPER
-        XOR A
-        CALL TXT_SET_PEN
-        JR MENU_PAINT_TEXT
-MENU_HIGHLIGHT_ITEM:
-        XOR A
-        CALL TXT_SET_PAPER
-        LD A,1
-        CALL TXT_SET_PEN
-MENU_PAINT_TEXT:
-        LD HL,(MENU_PTR)
+        ADD A,A
+        LD E,A
+        LD D,0
+        ADD HL,DE
         LD E,(HL)
         INC HL
         LD D,(HL)
-        INC HL
-        LD (MENU_PTR),HL
         PUSH DE
         LD A,(MENU_SEL)
         CALL MENU_INDEX_HL
@@ -954,10 +975,84 @@ MENU_PAINT_TEXT:
         LD L,A
         POP DE
         CALL SHOW_TEXT
+        RET
+
+; Restore only the 4 x 20 character document rectangle covered by
+; the previous popup (not the whole text window). This is called
+; before changing MENU_SEL, so it knows the OLD popup x coordinate.
+MENU_ERASE_POPUP:
+        XOR A
+        CALL TXT_SET_PAPER
+        LD A,1
+        CALL TXT_SET_PEN
+        XOR A
+        LD (MENU_DRAW_INDEX),A
+MENU_ERASE_ROW:
+        LD A,(MENU_SEL)
+        CALL MENU_INDEX_HL
+        LD DE,MENU_POP_X
+        ADD HL,DE
+        LD A,(HL)
+        LD H,A
+        LD A,(MENU_DRAW_INDEX)
+        ADD A,3
+        LD L,A
+        CALL TXT_SET_CURSOR
+        LD A,(MENU_DRAW_INDEX)
+        LD B,A
+        LD A,(TOP_LINE)
+        ADD A,B
+        LD B,A
+        LD A,(DOC_LINES)
+        CP B
+        JR C,MENU_ERASE_BLANK
+        JR Z,MENU_ERASE_BLANK
+        LD A,B
+        CALL LINE_POINTER
+        PUSH HL
+        LD A,(MENU_SEL)
+        CALL MENU_INDEX_HL
+        LD DE,MENU_POP_X
+        ADD HL,DE
+        LD A,(HL)
+        SUB 2                   ; document first char is screen x=2
+        LD E,A
+        LD D,0
+        POP HL
+        ADD HL,DE
+        LD B,20
+MENU_ERASE_TEXT:
+        LD A,(HL)
+        PUSH HL
+        PUSH BC
+        CALL TXT_WR_CHAR
+        POP BC
+        POP HL
+        INC HL
+        DJNZ MENU_ERASE_TEXT
+        JR MENU_ERASE_NEXT
+MENU_ERASE_BLANK:
+        LD B,20
+MENU_ERASE_SPACES:
+        LD A,32
+        PUSH BC
+        CALL TXT_WR_CHAR
+        POP BC
+        DJNZ MENU_ERASE_SPACES
+MENU_ERASE_NEXT:
         LD A,(MENU_DRAW_INDEX)
         INC A
         LD (MENU_DRAW_INDEX),A
-        JR MENU_PAINT_NEXT
+        CP 4
+        JR C,MENU_ERASE_ROW
+        RET
+
+MENU_REDRAW_SELECTION:
+        LD A,(MENU_OLD_ITEM)
+        CALL MENU_PAINT_ONE
+        LD A,(MENU_ITEM)
+        CALL MENU_PAINT_ONE
+        JP MENU_WAIT
 
 MENU_WAIT:
         CALL KM_WAIT_KEY
@@ -993,6 +1088,7 @@ MENU_COUNT:
         RET
 
 MENU_LEFT:
+        CALL MENU_ERASE_POPUP
         LD A,(MENU_SEL)
         OR A
         JR NZ,MENU_LEFT_DEC
@@ -1004,6 +1100,7 @@ MENU_LEFT_DEC:
         LD (MENU_ITEM),A
         JP MENU_DRAW
 MENU_RIGHT:
+        CALL MENU_ERASE_POPUP
         LD A,(MENU_SEL)
         INC A
         CP 8
@@ -1016,14 +1113,17 @@ MENU_RIGHT_OK:
         JP MENU_DRAW
 MENU_UP:
         LD A,(MENU_ITEM)
+        LD (MENU_OLD_ITEM),A
         OR A
         JR NZ,MENU_UP_DEC
         CALL MENU_COUNT
 MENU_UP_DEC:
         DEC A
         LD (MENU_ITEM),A
-        JP MENU_DRAW
+        JP MENU_REDRAW_SELECTION
 MENU_DOWN:
+        LD A,(MENU_ITEM)
+        LD (MENU_OLD_ITEM),A
         CALL MENU_COUNT
         LD B,A
         LD A,(MENU_ITEM)
@@ -1033,7 +1133,7 @@ MENU_DOWN:
         XOR A
 MENU_DOWN_OK:
         LD (MENU_ITEM),A
-        JP MENU_DRAW
+        JP MENU_REDRAW_SELECTION
 
 ; Dispatch implemented actions. Functions belonging to the future
 ; interpreter ROM show an explicit message instead of silently failing.
@@ -1167,12 +1267,12 @@ HELP_ABOUT:     DB ' A propos           ',0
 MSG_SEARCH:     DB 'Recherche: fonction prevue pour version suivante. Tapez une touche.        ',0
 MSG_VARIABLES:  DB 'Fenetre Variables: disponible avec le moteur QBasic. Tapez une touche.     ',0
 MSG_NOT_READY:  DB 'Cette commande sera ajoutee avec la ROM execution. Tapez une touche.       ',0
-MSG_ABOUT:      DB 'QEDIT v0.3 - CPC6128 16Ko ROM - edition sans numeros de ligne.            ',0
+MSG_ABOUT:      DB 'QEDIT v0.3.1 - CPC6128 16Ko ROM - edition sans numeros de ligne.            ',0
 
 HEADER_TEXT:
         DB ' Fichier  Edition  Recherche  Execution  Debogage  Options  Fenetre  Aide   ',0
 TITLE_TEXT:
-        DB '                         [ DEMO.BAS ]        QBasic CPC6128 v0.3',0
+        DB '                         [ DEMO.BAS ]        QBasic CPC6128 v0.3.1',0
 STATUS_TEXT:
         DB 'Ligne:     Col:      INS  |  MODE 2  |  120 lignes max                   ',0
 FOOTER_TEXT:
