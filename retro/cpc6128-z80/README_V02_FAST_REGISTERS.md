@@ -53,3 +53,7 @@ J'ai interprété les enregistrements de triangles des versions V0.1 et V0.2 ave
 - Envisager le clipping, l'occlusion entre objets, la synchronisation avec le VBL et un vrai double tampon vidéo.
 
 **Ne pas confondre** la V0.2 *programmée* avec une V0.2 *validée sur matériel*. Le programme assembleur est archivé, mais **aucun binaire .BIN ou .DSK testé n'est encore produit**.
+
+### Vérification complémentaire du noyau de remplissage
+
+L'émulation logique des spans sur les huit poses donne **846 segments longs** traités par la méthode `PUSH BC` et **1 807 segments courts**, pour **17 181 écritures d'octets de triangles**. Les contenus octet par octet de ces deux routines concordent avec le remplissage de référence. Aucune écriture de triangle hors VRAM CPC `&C000–&FFFF` n'a été relevée dans la simulation des données. Cela valide les plages d'adresses et l'ordre des écritures, **mais pas la durée, l'assemblage ni l'exécution sur le matériel**.
