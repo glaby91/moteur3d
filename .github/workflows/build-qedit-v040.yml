@@ -1,4 +1,4 @@
-name: QEDIT v0.4 tokenized ROM (CPC6128)
+name: QEDIT v0.4.1 status fix and tokenized ROM (CPC6128)
 on:
   push:
     branches: [qbasic-cpc6128]
@@ -22,7 +22,7 @@ jobs:
             patch -p1 < QEDIT_v040.patch
             rm "$STAGE" QEDIT_v040.patch
           fi
-          grep -q 'editor ROM v0.4.0' retro/cpc6128-qbasic/editor/QEDIT_ROM.asm
+          grep -q 'editor ROM v0.4.1' retro/cpc6128-qbasic/editor/QEDIT_ROM.asm
           grep -q 'TOKEN_COUNT EQU 66' retro/cpc6128-qbasic/editor/QEDIT_V04_CORE.asm
           grep -q 'MAX_LINES       EQU 1500' retro/cpc6128-qbasic/editor/QEDIT_ROM.asm
       - name: Build RASM v3.2.4bis and verify ROM hash
@@ -34,7 +34,7 @@ jobs:
           cd retro/cpc6128-qbasic/editor
           /tmp/rasm-src/rasm.exe QEDIT_ROM.asm -ob QEDIT.ROM | tee build.log
           test "$(stat -c%s QEDIT.ROM)" -eq 16384
-          echo "0de84c30a21f95c4bd653a7852691a0bfe786431e41aa4605d190e1a1e5f056f  QEDIT.ROM" | sha256sum -c -
+          echo "796730034591b2fafa5fb975453013ecf8137181ed7342c1361a414f7bc69119  QEDIT.ROM" | sha256sum -c -
       - name: Static regression checks
         run: python3 retro/cpc6128-qbasic/tests/test_token_model.py
       - name: Publish beta source and binary to qbasic branch
@@ -45,12 +45,12 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A retro/cpc6128-qbasic/editor
           if ! git diff --cached --quiet; then
-            git commit -m "feat(qbasic): publish v0.4 beta tokenized banked 1500-line editor"
+            git commit -m "feat(qbasic): publish v0.4.1 beta tokenized banked 1500-line editor"
             git push origin HEAD:qbasic-cpc6128
           fi
       - uses: actions/upload-artifact@v4
         with:
-          name: QEDIT-CPC6128-v0.4.0-beta
+          name: QEDIT-CPC6128-v0.4.1-beta
           path: |
             retro/cpc6128-qbasic/editor/QEDIT_ROM.asm
             retro/cpc6128-qbasic/editor/QEDIT_V04_CORE.asm
