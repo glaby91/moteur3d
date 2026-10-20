@@ -332,42 +332,44 @@ StepEdge:
         INC HL
         LD E,(HL)
         INC HL
-        LD D,(HL)
-        LD (EdgeX),DE
+        LD D,(HL)               ; DE = X initial in 8.8
         INC HL
-        LD E,(HL)
+        LD C,(HL)
         INC HL
-        LD D,(HL)
-        LD (StepX),DE
-EdgeLoop:
+        LD B,(HL)               ; BC = slope in 8.8
+        ; One EXX pair to transfer both hot values per EDGE.
+        ; No per-scanline RAM fetch of X or slope thereafter.
+        PUSH DE
+        PUSH BC
+        EXX
+        POP DE                  ; DE' = slope
+        POP HL                  ; HL' = current X
+        EXX
         LD A,(EdgeY)
-        LD B,A
+        LD C,A                  ; current scanline Y
         LD A,(EdgeEnd)
-        CP B
+        SUB C
         RET Z
-        RET C
-        LD L,B
+        LD B,A                  ; number of scanlines
+EdgeLoopFast:
+        EXX
+        LD A,H                  ; integer X in HL'
+        ADD HL,DE               ; alternate HL' += DE'
+        EXX
+        LD L,C
         LD H,&30
-        LD A,(EdgeX+1)           ; signed fixed high byte, clamped by pose tool
         CP (HL)
-        JR NC,EdgeNoLeft
+        JR NC,FastNoLeft
         LD (HL),A
-EdgeNoLeft:
+FastNoLeft:
         LD H,&31
-        LD A,(EdgeX+1)
-        LD B,(HL)
-        CP B
-        JR C,EdgeNoRight
+        CP (HL)
+        JR C,FastNoRight
         LD (HL),A
-EdgeNoRight:
-        LD HL,(EdgeX)
-        LD DE,(StepX)
-        ADD HL,DE
-        LD (EdgeX),HL
-        LD A,(EdgeY)
-        INC A
-        LD (EdgeY),A
-        JR EdgeLoop
+FastNoRight:
+        INC C
+        DJNZ EdgeLoopFast
+        RET
 
 FrameIndex:     DB 0
 InitBank:       DB 0
