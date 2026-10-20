@@ -1,4 +1,4 @@
-; QBasic CPC6128 -- QEDIT editor ROM v0.2 (AMSDOS filename RAM fix)
+; QBasic CPC6128 -- QEDIT editor ROM v0.3 (menus + BASIC display restoration)
 ; Compatible Amstrad CPC6128 expansion ROM, standard MODE 2 (80x25).
 ; Install as upper ROM slot 1; from BASIC: MEMORY &5FFF : |QEDIT
 ; MEMORY must be set BEFORE launch to protect #6000..#97FF.
@@ -9,6 +9,9 @@
 
 KM_WAIT_KEY     EQU #BB18
 SCR_SET_MODE    EQU #BC0E
+SCR_GET_MODE    EQU #BC11
+SCR_GET_INK     EQU #BC35
+SCR_GET_BORDER  EQU #BC3B
 SCR_SET_INK     EQU #BC32
 SCR_SET_BORDER  EQU #BC38
 TXT_SET_CURSOR  EQU #BB75
@@ -39,6 +42,17 @@ PENDING         EQU #8804
 TMP_ROW         EQU #8805
 TMP_COUNT       EQU #8806
 TMP_CHAR        EQU #8807
+SAVED_MODE      EQU #8808
+MENU_SEL        EQU #8809
+MENU_ITEM       EQU #880A
+MENU_DRAW_INDEX EQU #880B
+MENU_PTR        EQU #880C  ; word
+SAVED_INK0_B    EQU #8818
+SAVED_INK0_C    EQU #8819
+SAVED_INK1_B    EQU #881A
+SAVED_INK1_C    EQU #881B
+SAVED_BORDER_B  EQU #881C
+SAVED_BORDER_C  EQU #881D
 FILE_NAME_RAM   EQU #8810    ; 8 bytes, accessible when AMSDOS selects upper ROM 7
 IO_BUFFER       EQU #9000    ; 2048 bytes for AMSDOS/cassette streams
 
@@ -68,6 +82,7 @@ ROM_INIT:
 
 EDITOR_START:
         ; BASIC must have reserved DOC_BASE..IO_BUFFER+2047 using MEMORY &5FFF.
+        CALL SAVE_DISPLAY_STATE
         CALL NEW_DOCUMENT
         CALL DEMO_DOCUMENT
         CALL SCREEN_INIT
@@ -92,6 +107,8 @@ WAIT_KEY:
         JP Z,BACKSPACE
         CP 16              ; CLR: delete under cursor
         JP Z,DELETE_CHAR
+        CP 20              ; Ctrl+T toggles interactive menus (WinAPE reserves PC F10)
+        JP Z,MENU_START
         CP 19              ; CTRL+S save
         JP Z,SAVE_FILE
         CP 15              ; CTRL+O open
@@ -155,7 +172,55 @@ CURSOR_POSITION:
         CALL TXT_SET_CURSOR
         RET
 
+; Mode, palette and border must be saved *before* enabling MODE 2.
+; SCR_SET_MODE clears the editor display on exit, restoring BASIC's mode.
+SAVE_DISPLAY_STATE:
+        CALL SCR_GET_MODE
+        LD (SAVED_MODE),A
+        XOR A
+        CALL SCR_GET_INK
+        LD A,B
+        LD (SAVED_INK0_B),A
+        LD A,C
+        LD (SAVED_INK0_C),A
+        LD A,1
+        CALL SCR_GET_INK
+        LD A,B
+        LD (SAVED_INK1_B),A
+        LD A,C
+        LD (SAVED_INK1_C),A
+        CALL SCR_GET_BORDER
+        LD A,B
+        LD (SAVED_BORDER_B),A
+        LD A,C
+        LD (SAVED_BORDER_C),A
+        RET
+
 EXIT_EDITOR:
+        CALL TXT_CUR_OFF
+        LD A,(SAVED_MODE)
+        CALL SCR_SET_MODE       ; firmware resets text streams and clears screen
+        LD A,(SAVED_INK0_B)
+        LD B,A
+        LD A,(SAVED_INK0_C)
+        LD C,A
+        XOR A
+        CALL SCR_SET_INK
+        LD A,(SAVED_INK1_B)
+        LD B,A
+        LD A,(SAVED_INK1_C)
+        LD C,A
+        LD A,1
+        CALL SCR_SET_INK
+        LD A,(SAVED_BORDER_B)
+        LD B,A
+        LD A,(SAVED_BORDER_C)
+        LD C,A
+        CALL SCR_SET_BORDER
+        XOR A
+        CALL TXT_SET_PAPER
+        LD A,1
+        CALL TXT_SET_PEN
         CALL TXT_CUR_ON
         RET
 
@@ -799,16 +864,321 @@ SHOW_MESSAGE:
         CALL KM_WAIT_KEY
         JP FULL_REDRAW
 
+
+; ------------------------------------------------------------
+; QEDIT v0.3: firmware text-mode popup menus, 8 headings.
+; ROM contains labels and commands; no menu data allocated inside document RAM.
+; The CPC6128 has no native PC F10 key; WinAPE intercepts F10 to fullscreen.
+; Ctrl+T is the portable menu accelerator.
+; ------------------------------------------------------------
+MENU_START:
+        XOR A
+        LD (MENU_SEL),A
+        LD (MENU_ITEM),A
+        JP MENU_DRAW
+
+MENU_DRAW:
+        CALL REDRAW_SCREEN
+        CALL ERASE_CURSOR
+        ; Highlight selected menu heading in normal paper / reversed pen.
+        XOR A
+        CALL TXT_SET_PAPER
+        LD A,1
+        CALL TXT_SET_PEN
+        LD A,(MENU_SEL)
+        CALL MENU_INDEX_HL
+        LD DE,MENU_HEAD_X
+        ADD HL,DE
+        LD A,(HL)
+        LD H,A
+        LD L,1
+        PUSH HL
+        LD A,(MENU_SEL)
+        CALL MENU_INDEX_HL
+        LD DE,MENU_HEAD_NAMES
+        ADD HL,HL
+        ADD HL,DE
+        LD E,(HL)
+        INC HL
+        LD D,(HL)
+        POP HL
+        CALL SHOW_TEXT
+        ; Menu options use a pale inverted background to stand out.
+        LD A,(MENU_SEL)
+        CALL MENU_INDEX_HL
+        ADD HL,HL
+        LD DE,MENU_LISTS
+        ADD HL,DE
+        LD E,(HL)
+        INC HL
+        LD D,(HL)
+        EX DE,HL
+        LD (MENU_PTR),HL
+        XOR A
+        LD (MENU_DRAW_INDEX),A
+MENU_PAINT_NEXT:
+        LD A,(MENU_DRAW_INDEX)
+        LD B,A
+        CALL MENU_COUNT
+        CP B
+        JR Z,MENU_WAIT
+        LD A,(MENU_ITEM)
+        CP B
+        JR Z,MENU_HIGHLIGHT_ITEM
+        LD A,1
+        CALL TXT_SET_PAPER
+        XOR A
+        CALL TXT_SET_PEN
+        JR MENU_PAINT_TEXT
+MENU_HIGHLIGHT_ITEM:
+        XOR A
+        CALL TXT_SET_PAPER
+        LD A,1
+        CALL TXT_SET_PEN
+MENU_PAINT_TEXT:
+        LD HL,(MENU_PTR)
+        LD E,(HL)
+        INC HL
+        LD D,(HL)
+        INC HL
+        LD (MENU_PTR),HL
+        PUSH DE
+        LD A,(MENU_SEL)
+        CALL MENU_INDEX_HL
+        LD DE,MENU_POP_X
+        ADD HL,DE
+        LD A,(HL)
+        LD H,A
+        LD A,(MENU_DRAW_INDEX)
+        ADD A,3
+        LD L,A
+        POP DE
+        CALL SHOW_TEXT
+        LD A,(MENU_DRAW_INDEX)
+        INC A
+        LD (MENU_DRAW_INDEX),A
+        JR MENU_PAINT_NEXT
+
+MENU_WAIT:
+        CALL KM_WAIT_KEY
+        CP #F2     ; left
+        JP Z,MENU_LEFT
+        CP #F3     ; right
+        JP Z,MENU_RIGHT
+        CP #F0     ; up
+        JP Z,MENU_UP
+        CP #F1     ; down
+        JP Z,MENU_DOWN
+        CP 13      ; ENTER
+        JP Z,MENU_EXECUTE
+        CP #FC     ; ESC = close menus (only if menu open)
+        JP Z,FULL_REDRAW
+        CP 20      ; Ctrl+T = toggle menus
+        JP Z,FULL_REDRAW
+        JP MENU_WAIT
+
+; A = selected heading, return HL = index (0..7).
+MENU_INDEX_HL:
+        LD L,A
+        LD H,0
+        RET
+
+; Return A = number of commands for selected heading.
+MENU_COUNT:
+        LD A,(MENU_SEL)
+        CALL MENU_INDEX_HL
+        LD DE,MENU_COUNTS
+        ADD HL,DE
+        LD A,(HL)
+        RET
+
+MENU_LEFT:
+        LD A,(MENU_SEL)
+        OR A
+        JR NZ,MENU_LEFT_DEC
+        LD A,8
+MENU_LEFT_DEC:
+        DEC A
+        LD (MENU_SEL),A
+        XOR A
+        LD (MENU_ITEM),A
+        JP MENU_DRAW
+MENU_RIGHT:
+        LD A,(MENU_SEL)
+        INC A
+        CP 8
+        JR C,MENU_RIGHT_OK
+        XOR A
+MENU_RIGHT_OK:
+        LD (MENU_SEL),A
+        XOR A
+        LD (MENU_ITEM),A
+        JP MENU_DRAW
+MENU_UP:
+        LD A,(MENU_ITEM)
+        OR A
+        JR NZ,MENU_UP_DEC
+        CALL MENU_COUNT
+MENU_UP_DEC:
+        DEC A
+        LD (MENU_ITEM),A
+        JP MENU_DRAW
+MENU_DOWN:
+        CALL MENU_COUNT
+        LD B,A
+        LD A,(MENU_ITEM)
+        INC A
+        CP B
+        JR C,MENU_DOWN_OK
+        XOR A
+MENU_DOWN_OK:
+        LD (MENU_ITEM),A
+        JP MENU_DRAW
+
+; Dispatch implemented actions. Functions belonging to the future
+; interpreter ROM show an explicit message instead of silently failing.
+MENU_EXECUTE:
+        LD A,(MENU_SEL)
+        OR A
+        JP Z,MENU_FILE_EXEC
+        CP 1
+        JP Z,MENU_EDIT_EXEC
+        CP 2
+        JP Z,MENU_SEARCH_EXEC
+        CP 3
+        JP Z,NO_RUNTIME
+        CP 4
+        JP Z,MENU_UNIMPLEMENTED
+        CP 5
+        JP Z,MENU_OPTIONS_EXEC
+        CP 6
+        JP Z,MENU_WINDOW_EXEC
+        ; Help
+        LD A,(MENU_ITEM)
+        OR A
+        JP Z,SHOW_HELP
+        LD HL,MSG_ABOUT
+        JP SHOW_MESSAGE
+
+MENU_FILE_EXEC:
+        LD A,(MENU_ITEM)
+        OR A
+        JP Z,RESET_FILE
+        CP 1
+        JP Z,LOAD_FILE
+        CP 2
+        JP Z,SAVE_FILE
+        JP EXIT_EDITOR
+
+MENU_EDIT_EXEC:
+        LD A,(MENU_ITEM)
+        OR A
+        JP Z,NEWLINE
+        CP 1
+        JP Z,DELETE_CHAR
+        CP 2
+        JR Z,MENU_HOME
+        LD A,MAX_COL
+        LD (CUR_COL),A
+        JP FULL_REDRAW
+MENU_HOME:
+        XOR A
+        LD (CUR_COL),A
+        JP FULL_REDRAW
+
+MENU_SEARCH_EXEC:
+        LD HL,MSG_SEARCH
+        JP SHOW_MESSAGE
+MENU_UNIMPLEMENTED:
+        LD HL,MSG_NOT_READY
+        JP SHOW_MESSAGE
+MENU_OPTIONS_EXEC:
+        LD A,(MENU_ITEM)
+        OR A
+        JP NZ,SHOW_HELP
+        CALL SCREEN_INIT
+        JP FULL_REDRAW
+MENU_WINDOW_EXEC:
+        LD A,(MENU_ITEM)
+        OR A
+        JP Z,FULL_REDRAW
+        LD HL,MSG_VARIABLES
+        JP SHOW_MESSAGE
+
+; Popup locations max 58 so items do not wrap at column 80.
+MENU_HEAD_X:
+        DB 2,11,20,32,44,54,63,73
+MENU_POP_X:
+        DB 2,11,20,32,44,54,58,58
+MENU_COUNTS:
+        DB 4,4,2,2,2,2,2,2
+MENU_HEAD_NAMES:
+        DW HEAD_FILE,HEAD_EDIT,HEAD_SEARCH,HEAD_RUN
+        DW HEAD_DEBUG,HEAD_OPTIONS,HEAD_WINDOW,HEAD_HELP
+MENU_LISTS:
+        DW ITEMS_FILE,ITEMS_EDIT,ITEMS_SEARCH,ITEMS_RUN
+        DW ITEMS_DEBUG,ITEMS_OPTIONS,ITEMS_WINDOW,ITEMS_HELP
+HEAD_FILE:    DB 'Fichier',0
+HEAD_EDIT:    DB 'Edition',0
+HEAD_SEARCH:  DB 'Recherche',0
+HEAD_RUN:     DB 'Execution',0
+HEAD_DEBUG:   DB 'Debogage',0
+HEAD_OPTIONS: DB 'Options',0
+HEAD_WINDOW:  DB 'Fenetre',0
+HEAD_HELP:    DB 'Aide',0
+
+ITEMS_FILE:
+        DW FILE_NEW,FILE_OPEN,FILE_SAVE,FILE_EXIT
+ITEMS_EDIT:
+        DW EDIT_NEWLINE,EDIT_DELETE,EDIT_HOME,EDIT_END
+ITEMS_SEARCH:
+        DW SEARCH_FIND,SEARCH_NEXT
+ITEMS_RUN:
+        DW RUN_EXEC,RUN_STOP
+ITEMS_DEBUG:
+        DW DEBUG_STEP,DEBUG_VARS
+ITEMS_OPTIONS:
+        DW OPT_MODE2,OPT_HELP
+ITEMS_WINDOW:
+        DW WIN_EDITOR,WIN_VARS
+ITEMS_HELP:
+        DW HELP_KEYS,HELP_ABOUT
+
+FILE_NEW:       DB ' Nouveau            ',0
+FILE_OPEN:      DB ' Ouvrir DEMO.BAS    ',0
+FILE_SAVE:      DB ' Enregistrer        ',0
+FILE_EXIT:      DB ' Quitter            ',0
+EDIT_NEWLINE:   DB ' Inserer ligne      ',0
+EDIT_DELETE:    DB ' Supprimer caract.  ',0
+EDIT_HOME:      DB ' Debut de ligne     ',0
+EDIT_END:       DB ' Fin de ligne       ',0
+SEARCH_FIND:    DB ' Rechercher         ',0
+SEARCH_NEXT:    DB ' Suivant            ',0
+RUN_EXEC:       DB ' Executer           ',0
+RUN_STOP:       DB ' Arret              ',0
+DEBUG_STEP:     DB ' Pas a pas          ',0
+DEBUG_VARS:     DB ' Etat variables     ',0
+OPT_MODE2:      DB ' Reafficher Mode 2  ',0
+OPT_HELP:       DB ' Raccourcis         ',0
+WIN_EDITOR:     DB ' Editeur            ',0
+WIN_VARS:       DB ' Variables          ',0
+HELP_KEYS:      DB ' Raccourcis         ',0
+HELP_ABOUT:     DB ' A propos           ',0
+MSG_SEARCH:     DB 'Recherche: fonction prevue pour version suivante. Tapez une touche.        ',0
+MSG_VARIABLES:  DB 'Fenetre Variables: disponible avec le moteur QBasic. Tapez une touche.     ',0
+MSG_NOT_READY:  DB 'Cette commande sera ajoutee avec la ROM execution. Tapez une touche.       ',0
+MSG_ABOUT:      DB 'QEDIT v0.3 - CPC6128 16Ko ROM - edition sans numeros de ligne.            ',0
+
 HEADER_TEXT:
         DB ' Fichier  Edition  Recherche  Execution  Debogage  Options  Fenetre  Aide   ',0
 TITLE_TEXT:
-        DB '                         [ DEMO.BAS ]        QBasic CPC6128 v0.2',0
+        DB '                         [ DEMO.BAS ]        QBasic CPC6128 v0.3',0
 STATUS_TEXT:
         DB 'Ligne:     Col:      INS  |  MODE 2  |  120 lignes max                   ',0
 FOOTER_TEXT:
-        DB ' Ctrl+S Enregistrer  Ctrl+O Ouvrir  Ctrl+N Nouveau  Ctrl+H Aide  Esc Quitter ',0
+        DB ' Ctrl+T Menus   Ctrl+S Sauv.   Ctrl+O Ouvrir   Ctrl+N Nouveau   Esc Quitter ',0
 MSG_HELP:
-        DB 'Fleches naviguer; Enter inserer ligne; DEL effacer; Ctrl+S/O/N; ESC quitter ',0
+        DB 'Ctrl+T menus; Fleches naviguer; Enter valider; Ctrl+S/O/N; Esc quitter      ',0
 MSG_NO_RUN:
         DB 'Execution QBasic: ROM moteur non encore installee. Tapez une touche.       ',0
 MSG_SAVED:
