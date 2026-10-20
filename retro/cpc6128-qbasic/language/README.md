@@ -27,3 +27,19 @@ Le fichier JSON contient désormais **128 tokens attribués** et **110 entrées 
 Chaque entrée reçoit une catégorie de compatibilité et un état de réalisation. Des exemples de signatures sont inclus pour les instructions déjà étudiées. **Ne pas interpréter 110 candidats comme 110 tokens nouveaux** : certains noms sont des modes d'instruction (OUTPUT, APPEND), des familles de bibliothèques ou des suites lexicales. L'annexe alphabétique exhaustive du manuel Microsoft reste à valider avant toute attribution définitive d'IDs.
 
 **Pas de ROM B005 à télécharger à ce stade** : les travaux publiés sont le catalogue et le profil. Les IDs historiques 0x80–0xFF sont préservés. Les tests WinAPE de B004, ainsi que la sauvegarde, ne sont pas validés.
+
+## B005 ROM réellement compilée
+
+- Code éditeur : `QEDIT_V042_B005.ROM` (ROM de 16384 octets).
+- Code et données utilisés : **9650 octets** ; remplissage libre : **6734 octets**.
+- 196 mots-clés tokenisés, soit 128 identifiants historiques + 68 nouveaux ; la table de compatibilité JSON est synchronisée.
+- Encodage ancien : un octet `0x80..0xFF`. Encodage nouveau : deux octets `0x01, index` avec `index=0..67`. Le préfixe `0x01` ne figure pas dans le texte éditable ASCII standard.
+- Les déclarations de syntaxes composées telles que `END IF` sont analysables à partir de plusieurs tokens élémentaires, sans imposer un token composé ; l'analyse grammaticale détaillée n'est pas réalisée.
+- Les fonctions propres au PC/DOS, les extensions CPC et les constructions signalées « non supportées » sont classées dans le profil ; leur prise en charge effective par l'éditeur et le futur compilateur reste à développer.
+- QCOMP n'est **pas** implémenté ; le répertoire JSON fournit une base de correspondance commune, pas encore un générateur de ROM compilateur.
+- Test automatique : compilation RASM réussie, taille vérifiée ; **aucune validation WinAPE de la B005**. La sauvegarde `Ctrl+S` reste défectueuse.
+- Tests prioritaires WinAPE : édition des tokens historiques, `CHDIR`, `CURRENCY`, `XOR`, `MODE`, `PLOT`, déplacement à une ligne précise, retour début/fin et indicateur WAIT. Contrôler l'intégrité du texte après chaque déplacement.
+
+## Limites de complétude
+
+Il reste 43 entrées candidates/constructions dans le profil et l'audit systématique des annexes Microsoft PDS 7.1 n'est pas achevé. Toute affirmation de compatibilité intégrale 7.1 serait prématurée. Les IDs historiques doivent rester stables lors de futures additions.
