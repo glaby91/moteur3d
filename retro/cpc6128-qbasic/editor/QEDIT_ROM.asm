@@ -1712,7 +1712,7 @@ RASTER_INSTALL:
         LD BC,RASTER_ISR_END-RASTER_ISR
         LDIR
         LD HL,(RASTER_OLD_JUMP)
-        LD (RASTER_RAM+RASTER_CHAIN-RASTER_ISR+1),HL
+        LD (RASTER_RAM+RASTER_CHAIN_CALL-RASTER_ISR+1),HL
         XOR A
         LD (RASTER_PHASE),A
         LD A,#C3
@@ -1741,8 +1741,15 @@ RASTER_REMOVE_DONE:
 
 ; Executed from #8C00 in the permanent base RAM; no CALL into ROM.
 RASTER_ISR:
+        ; Let the CPC firmware service the 300 Hz interrupt first.
+        ; This ensures the firmware cannot overwrite our raster ink
+        ; immediately after the colour change.
         PUSH AF
         PUSH BC
+        PUSH DE
+        PUSH HL
+        CALL RASTER_CHAIN_CALL
+        ; Gate Array palette modifications run only after firmware ISR.
         LD A,(RASTER_PHASE)
         INC A
         CP 6
@@ -1750,31 +1757,34 @@ RASTER_ISR:
         XOR A
 RASTER_PHASE_OK:
         LD (RASTER_PHASE),A
-        ; Three palette areas: normal, diagnostic red, status yellow.
         CP 2
         JR C,RASTER_WHITE
         CP 4
         JR C,RASTER_RED
         CP 5
         JR Z,RASTER_WHITE
-        LD A,#4A               ; GA bright yellow
+        LD A,#4A
         JR RASTER_SET
 RASTER_RED:
-        LD A,#4C               ; GA bright red
+        LD A,#4C
         JR RASTER_SET
 RASTER_WHITE:
-        LD A,#4B               ; GA white
+        LD A,#4B
 RASTER_SET:
         LD BC,#7F00
         PUSH AF
-        LD A,1                 ; select ink 1
+        LD A,1
         OUT (C),A
         POP AF
         OUT (C),A
+        POP HL
+        POP DE
         POP BC
         POP AF
-RASTER_CHAIN:
-        JP #0000               ; patched in copied RAM, firmware handler
+        EI
+        RETI
+RASTER_CHAIN_CALL:
+        JP #0000               ; original firmware handler address patched in RAM
 RASTER_ISR_END:
 
 ROM_END:
