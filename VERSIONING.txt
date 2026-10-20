@@ -49,3 +49,9 @@ CPC6128-Z80-RASTER 0.1.0 — NOUVEAU MODE 0 / 16 COULEURS PLEINES
   Validation statique des tables, aucune compilation ni FPS verifies.
   Source initiale publiee: commit 927b3a59519e5210bf8a3ff1d22e1a20f827f0e1.
   Estimation 8–12 FPS pour scenes legeres = objectif, NON mesure.
+
+CONCEPTION Z80 RASTER V0.2 — 2026-10-20 (NON IMPLEMENTEE)
+  retro/cpc6128-z80/OPTIMISATION_V02_FAST_REGISTERS.md
+  Cache dans les jeux alternatifs BC'/DE'/HL', AF', spans PUSH SP,
+  effacement localise, projections par LUT et culling.
+  Le code V0.1 n'a pas ete remplace; FPS non mesures.
