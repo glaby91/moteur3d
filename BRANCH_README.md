@@ -17,3 +17,5 @@ L'autre famille est isolée sur la branche `raycasting`.
 - **[Versioning autonome CPC6128](retro/cpc6128-z80/VERSIONING.txt)**.
 
 Cette version CPC est une démonstration expérimentale ; elle doit encore être assemblée et mesurée sous émulateur ou sur CPC6128 réel. Le chiffre de 8–12 FPS est une **cible à vérifier**, pas une mesure obtenue.
+
+**Conception suivante :** [optimisation Z80 V0.2 avec cache de registres secondaires](retro/cpc6128-z80/OPTIMISATION_V02_FAST_REGISTERS.md) — spécification non encore implémentée.
