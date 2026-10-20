@@ -1,0 +1,68 @@
+name: QEDIT CPC6128 ROM — RASM
+
+on:
+  push:
+    branches:
+      - qbasic-cpc6128
+    paths:
+      - '.github/workflows/build-qedit.yml'
+      - 'retro/cpc6128-qbasic/editor/QEDIT_ROM.asm.gz.b64'
+      - 'retro/cpc6128-qbasic/editor/QEDIT_ROM.asm'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-rom:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out qbasic branch
+        uses: actions/checkout@v4
+
+      - name: Restore validated source once from transfer package
+        run: |
+          set -euo pipefail
+          STAGED=retro/cpc6128-qbasic/editor/QEDIT_ROM.asm.gz.b64
+          SOURCE=retro/cpc6128-qbasic/editor/QEDIT_ROM.asm
+          if test -f "$STAGED"; then
+            base64 --decode "$STAGED" | gzip -dc > "$SOURCE"
+            rm "$STAGED"
+          fi
+          test -s "$SOURCE"
+          grep -q 'QEDIT editor ROM v0.2' "$SOURCE"
+
+      - name: Compile RASM v3.2.4bis
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch v3.2.4bis https://github.com/EdouardBERGE/rasm.git /tmp/rasm-src
+          make -C /tmp/rasm-src release
+          /tmp/rasm-src/rasm.exe retro/cpc6128-qbasic/editor/QEDIT_ROM.asm \
+            -ob retro/cpc6128-qbasic/editor/QEDIT.ROM \
+            | tee retro/cpc6128-qbasic/editor/build.log
+          test "$(stat -c%s retro/cpc6128-qbasic/editor/QEDIT.ROM)" -eq 16384
+          echo "eca1db1c27cc5e877161381aec359165a479b8ac6c07b8da4e8d247dab6632d8  retro/cpc6128-qbasic/editor/QEDIT.ROM" \
+            | sha256sum -c -
+
+      - name: Publish original assembly and validated binary
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A retro/cpc6128-qbasic/editor/
+          if ! git diff --cached --quiet; then
+            git commit -m 'feat(qbasic): publish validated QEDIT v0.2 Z80 source and 16K ROM'
+            git push origin HEAD:qbasic-cpc6128
+          fi
+
+      - name: Archive reproducible editor ROM
+        uses: actions/upload-artifact@v4
+        with:
+          name: QEDIT-CPC6128-v0.2
+          path: |
+            retro/cpc6128-qbasic/editor/QEDIT_ROM.asm
+            retro/cpc6128-qbasic/editor/QEDIT.ROM
+            retro/cpc6128-qbasic/editor/build.log
+            retro/cpc6128-qbasic/README.md
+          if-no-files-found: error
