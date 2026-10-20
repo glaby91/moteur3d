@@ -132,6 +132,7 @@ FULL_REDRAW:
         CALL CACHE_BUILD
 FULL_REDRAW_UNCOMMITTED:
         CALL REDRAW_SCREEN
+        CALL WAIT_HIDE
 WAIT_KEY:
         CALL KM_WAIT_KEY
         PUSH AF
@@ -295,6 +296,7 @@ LOAD_LONG_DEMO:
 ; Exercises all 1500 logical line indices and the 4-bank token store.
 ; Repeat a short QBasic line to keep stress data within 64 KiB.
 LOAD_STRESS_1500:
+        CALL WAIT_SHOW
         CALL NEW_DOCUMENT
         LD HL,STRESS_TEXT
         LD (DEMO_SOURCE),HL
@@ -484,6 +486,19 @@ COPY_ROM_SPACES:
         INC DE
         DJNZ COPY_ROM_SPACES
         RET
+
+; WAIT overlay below Aide, screen row 2, columns 73-76.
+; Only used around slower operations; not on each keystroke.
+WAIT_SHOW:
+        LD HL,#4902
+        LD DE,WAIT_TEXT
+        JP SHOW_TEXT
+WAIT_HIDE:
+        LD HL,#4902
+        LD DE,WAIT_BLANK
+        JP SHOW_TEXT
+WAIT_TEXT: DB 'WAIT',0
+WAIT_BLANK: DB '    ',0
 
 SCREEN_INIT:
         LD A,2
@@ -1341,6 +1356,7 @@ GOTO_RANGE_ERROR:
         JP SHOW_MESSAGE
 
 GOTO_ACCEPT:
+        CALL WAIT_SHOW
         ; Save pending changes before discarding the current 21-line cache.
         CALL COMMIT_DIRTY
         JP NC,STORE_ERROR_MESSAGE
