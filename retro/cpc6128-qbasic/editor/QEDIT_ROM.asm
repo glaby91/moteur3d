@@ -1,4 +1,4 @@
-; QBasic CPC6128 -- QEDIT editor ROM v0.4.1 (status display fix)
+; QBasic CPC6128 -- QEDIT editor ROM v0.4.2 (Ctrl+G go to line)
 ; Compatible Amstrad CPC6128 expansion ROM, standard MODE 2 (80x25).
 ; Install as upper ROM slot 1; from BASIC: MEMORY &5FFF : |QEDIT
 ; MEMORY must be set BEFORE launch to protect #6000..#A993.
@@ -84,6 +84,15 @@ IO_COL          EQU #8861
 SAVE_INDEX      EQU #8862
 DEMO_SOURCE     EQU #8864
 STRESS_INDEX    EQU #8866
+; Go-to-line input state. #8870..#887A lies outside the paged RAM window
+; and outside all token/storage state, so bank switches cannot corrupt it.
+GOTO_BUF        EQU #8870    ; four ASCII digits
+GOTO_COUNT      EQU #8874
+GOTO_REMAIN     EQU #8875
+GOTO_TARGET     EQU #8876    ; 16-bit 1-based input; then 0-based index
+GOTO_CHAR       EQU #8878
+GOTO_CAND_TOP   EQU #8879    ; 16-bit
+GOTO_MAX_TOP    EQU #887B    ; 16-bit
 
 
         ORG #C000
@@ -146,6 +155,8 @@ WAIT_KEY:
         JP Z,LOAD_LONG_DEMO
         CP 11              ; Ctrl+K 1500-line tokenized bank stress test
         JP Z,LOAD_STRESS_1500
+        CP 7               ; Ctrl+G: jump to logical source line
+        JP Z,GOTO_LINE
         CP 20              ; Ctrl+T toggles interactive menus (WinAPE reserves PC F10)
         JP Z,MENU_START
         CP 19              ; CTRL+S save
@@ -1178,6 +1189,152 @@ STORE_IMPORT_LINE:
 NO_RUNTIME:
         LD HL,MSG_NO_RUN
         JP SHOW_MESSAGE
+;
+; ------------------------------------------------------------
+; V0.4.2: direct navigation to any logical line (1..DOC_LINES).
+; Ctrl+G opens a 4-digit input on status row 24. Enter confirms,
+; Esc cancels without exiting; Backspace edits the input.
+; The viewport is rebuilt ONLY on confirmation, not for each digit.
+; ------------------------------------------------------------
+GOTO_LINE:
+        LD HL,#0118
+        LD DE,MSG_GOTO_PROMPT
+        CALL SHOW_TEXT
+        XOR A
+        LD (GOTO_COUNT),A
+GOTO_READ:
+        CALL KM_WAIT_KEY
+        CP #FC                 ; ESC: cancel dialog, keep editor running
+        JP Z,FULL_REDRAW
+        CP 13
+        JP Z,GOTO_ENTER
+        CP 127
+        JP Z,GOTO_BACKSPACE
+        CP '0'
+        JR C,GOTO_READ
+        CP '9'+1
+        JR NC,GOTO_READ
+        LD (GOTO_CHAR),A
+        LD A,(GOTO_COUNT)
+        CP 4
+        JR NC,GOTO_READ
+        LD E,A
+        LD D,0
+        LD HL,GOTO_BUF
+        ADD HL,DE
+        LD A,(GOTO_CHAR)
+        LD (HL),A
+        LD A,(GOTO_COUNT)
+        ADD A,30              ; field starts at column 30
+        LD H,A
+        LD L,24
+        CALL TXT_SET_CURSOR
+        LD A,(GOTO_CHAR)
+        CALL TXT_WR_CHAR
+        LD A,(GOTO_COUNT)
+        INC A
+        LD (GOTO_COUNT),A
+        JP GOTO_READ
+GOTO_BACKSPACE:
+        LD A,(GOTO_COUNT)
+        OR A
+        JP Z,GOTO_READ
+        DEC A
+        LD (GOTO_COUNT),A
+        ADD A,30
+        LD H,A
+        LD L,24
+        CALL TXT_SET_CURSOR
+        LD A,32
+        CALL TXT_WR_CHAR
+        JP GOTO_READ
+
+GOTO_ENTER:
+        LD A,(GOTO_COUNT)
+        OR A
+        JP Z,FULL_REDRAW
+        LD (GOTO_REMAIN),A
+        LD HL,0
+        LD (GOTO_TARGET),HL
+        LD DE,GOTO_BUF
+GOTO_PARSE:
+        PUSH DE
+        LD HL,(GOTO_TARGET)
+        LD D,H
+        LD E,L
+        ADD HL,HL             ; times 2
+        ADD HL,HL             ; times 4
+        ADD HL,DE             ; times 5
+        ADD HL,HL             ; times 10
+        POP DE
+        LD A,(DE)
+        SUB '0'
+        LD C,A
+        LD B,0
+        ADD HL,BC
+        LD (GOTO_TARGET),HL
+        INC DE
+        LD A,(GOTO_REMAIN)
+        DEC A
+        LD (GOTO_REMAIN),A
+        JR NZ,GOTO_PARSE
+
+        ; Accept a one-based number in [1, DOC_LINES], never 0.
+        LD HL,(GOTO_TARGET)
+        LD A,H
+        OR L
+        JP Z,GOTO_RANGE_ERROR
+        LD DE,(DOC_LINES)
+        OR A
+        SBC HL,DE
+        JR C,GOTO_ACCEPT
+        JR Z,GOTO_ACCEPT
+GOTO_RANGE_ERROR:
+        LD HL,MSG_GOTO_RANGE
+        JP SHOW_MESSAGE
+
+GOTO_ACCEPT:
+        ; Save pending changes before discarding the current 21-line cache.
+        CALL COMMIT_DIRTY
+        JP NC,STORE_ERROR_MESSAGE
+        LD HL,(GOTO_TARGET)
+        DEC HL
+        LD (GOTO_TARGET),HL       ; logical target 0..1499
+        LD DE,10
+        OR A
+        SBC HL,DE                 ; desired top = max(target-10, 0)
+        JR NC,GOTO_CAND_READY
+        LD HL,0
+GOTO_CAND_READY:
+        LD (GOTO_CAND_TOP),HL
+        LD HL,(DOC_LINES)
+        LD DE,VIEW_LINES
+        OR A
+        SBC HL,DE                 ; max top = max(DOC_LINES-21,0)
+        JR NC,GOTO_MAX_READY
+        LD HL,0
+GOTO_MAX_READY:
+        LD (GOTO_MAX_TOP),HL
+        LD DE,(GOTO_CAND_TOP)
+        OR A
+        SBC HL,DE                 ; compare max-top vs desired-top
+        JR NC,GOTO_SET_CAND
+        LD HL,(GOTO_MAX_TOP)
+        JR GOTO_SET_TOP
+GOTO_SET_CAND:
+        LD HL,(GOTO_CAND_TOP)
+GOTO_SET_TOP:
+        LD (TOP_LINE),HL
+        EX DE,HL                 ; DE = top
+        LD HL,(GOTO_TARGET)
+        OR A
+        SBC HL,DE                ; 0..20 screen row
+        LD A,L
+        LD (CUR_LINE),A
+        XOR A
+        LD (CUR_COL),A
+        JP FULL_REDRAW
+
 SHOW_HELP:
         LD HL,MSG_HELP
 SHOW_MESSAGE:
@@ -1506,6 +1663,9 @@ MENU_HOME:
         JP FULL_REDRAW
 
 MENU_SEARCH_EXEC:
+        LD A,(MENU_ITEM)
+        OR A
+        JP Z,GOTO_LINE
         LD HL,MSG_SEARCH
         JP SHOW_MESSAGE
 MENU_UNIMPLEMENTED:
@@ -1534,7 +1694,7 @@ MENU_HEAD_X:
 MENU_POP_X:
         DB 2,11,20,32,44,54,58,58
 MENU_COUNTS:
-        DB 4,4,2,2,2,3,2,2
+        DB 4,4,3,2,2,3,2,2
 MENU_HEAD_NAMES:
         DW HEAD_FILE,HEAD_EDIT,HEAD_SEARCH,HEAD_RUN
         DW HEAD_DEBUG,HEAD_OPTIONS,HEAD_WINDOW,HEAD_HELP
@@ -1555,7 +1715,7 @@ ITEMS_FILE:
 ITEMS_EDIT:
         DW EDIT_NEWLINE,EDIT_DELETE,EDIT_HOME,EDIT_END
 ITEMS_SEARCH:
-        DW SEARCH_FIND,SEARCH_NEXT
+        DW SEARCH_GOTO,SEARCH_FIND,SEARCH_NEXT
 ITEMS_RUN:
         DW RUN_EXEC,RUN_STOP
 ITEMS_DEBUG:
@@ -1575,6 +1735,7 @@ EDIT_NEWLINE:   DB ' Inserer ligne      ',0
 EDIT_DELETE:    DB ' Supprimer caract.  ',0
 EDIT_HOME:      DB ' Debut de ligne     ',0
 EDIT_END:       DB ' Fin de ligne       ',0
+SEARCH_GOTO:    DB ' Aller a la ligne    ',0
 SEARCH_FIND:    DB ' Rechercher         ',0
 SEARCH_NEXT:    DB ' Suivant            ',0
 RUN_EXEC:       DB ' Executer           ',0
@@ -1588,21 +1749,23 @@ WIN_EDITOR:     DB ' Editeur            ',0
 WIN_VARS:       DB ' Variables          ',0
 HELP_KEYS:      DB ' Raccourcis         ',0
 HELP_ABOUT:     DB ' A propos           ',0
+MSG_GOTO_PROMPT: DB 'Aller a la ligne (1-1500):                                       Esc=Annuler',0
+MSG_GOTO_RANGE: DB 'Numero de ligne inexistant. Tapez une touche pour continuer.               ',0
 MSG_SEARCH:     DB 'Recherche: fonction prevue pour version suivante. Tapez une touche.        ',0
 MSG_VARIABLES:  DB 'Fenetre Variables: disponible avec le moteur QBasic. Tapez une touche.     ',0
 MSG_NOT_READY:  DB 'Cette commande sera ajoutee avec la ROM execution. Tapez une touche.       ',0
-MSG_ABOUT:      DB 'QEDIT v0.4.1 - CPC6128 16Ko ROM - edition sans numeros de ligne.            ',0
+MSG_ABOUT:      DB 'QEDIT v0.4.2 - CPC6128 16Ko ROM - edition sans numeros de ligne.            ',0
 
 HEADER_TEXT:
         DB ' Fichier  Edition  Recherche  Execution  Debogage  Options  Fenetre  Aide   ',0
 TITLE_TEXT:
-        DB '                         [ DEMO.BAS ]        QBasic CPC6128 v0.4.1',0
+        DB '                         [ DEMO.BAS ]        QBasic CPC6128 v0.4.2',0
 STATUS_TEXT:
         DB 'Ligne:       Col:     INS  |  MODE 2  |  1500 lignes max                 ',0
 FOOTER_TEXT:
-        DB ' Ctrl+T Menus  Ctrl+L Test 50  Ctrl+K Test 1500  Ctrl+S Sauv  Esc Quitter ',0
+        DB ' Ctrl+T Menus  Ctrl+G Ligne  Ctrl+K Test 1500  Ctrl+S Sauv  Esc Quitter ',0
 MSG_HELP:
-        DB 'Ctrl+T menus; Ctrl+L 50 lignes; Ctrl+K 1500 lignes; Ctrl+S/O/N; Esc     ',0
+        DB 'Ctrl+T menus; Ctrl+G ligne; Ctrl+K 1500 lignes; Ctrl+S/O/N; Esc     ',0
 MSG_NO_RUN:
         DB 'Execution QBasic: ROM moteur non encore installee. Tapez une touche.       ',0
 MSG_SAVED:
