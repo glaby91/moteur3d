@@ -1,14 +1,14 @@
 {
-  "schema": "qbasic-cpc-language-profile-v2",
+  "schema": "qbasic-cpc-language-profile-v3",
   "target": "Microsoft BASIC PDS 7.1 (QBX) adapted to Amstrad CPC6128",
-  "token_encoding": "one-byte IDs 0x80..0xFF; extension format not yet designed",
+  "token_encoding": "0x80..0xFF = legacy token IDs 128..255; 0x01 followed by 0..67 = new IDs 256..323; internal token index 0..195.",
   "statuses": [
     "native",
     "adapted",
     "extension",
     "unsupported"
   ],
-  "notes": "Existing 128 token IDs fixed. additional_candidates is an extended inventory under review, NOT a fully verified complete reserved-words appendix. Compound constructs, functions and commands may share lexical tokens. Syntax example fields are partial; full parser signatures pending.",
+  "notes": "196 tokenized entries. Token IDs 0x80..0xFF unchanged, extended IDs two-byte escape 0x01 + 0..67. Remaining candidate entries are catalogued but not encoded. Compiler QCOMP has not been implemented.",
   "tokens": [
     {
       "id": 128,
@@ -1161,6 +1161,618 @@
       "syntax_example": null,
       "compiler_status": "not_implemented",
       "source": "qedit-v0.4.2-b004-qbx71-tokens"
+    },
+    {
+      "id": 256,
+      "name": "CHDIR",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 257,
+      "name": "CLEAR",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 258,
+      "name": "CURDIR$",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 259,
+      "name": "CURRENCY",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": "CURRENCY"
+    },
+    {
+      "id": 260,
+      "name": "CVC",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 261,
+      "name": "CVD",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 262,
+      "name": "CVI",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 263,
+      "name": "CVL",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 264,
+      "name": "CVS",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 265,
+      "name": "DATE$",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": "DATE$"
+    },
+    {
+      "id": 266,
+      "name": "DEF",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 267,
+      "name": "DEFCUR",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 268,
+      "name": "DEFDBL",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 269,
+      "name": "DEFINT",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": "DEFINT letter-range[,letter-range]"
+    },
+    {
+      "id": 270,
+      "name": "DEFLNG",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 271,
+      "name": "DEFSNG",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 272,
+      "name": "DEFSTR",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 273,
+      "name": "EQV",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 274,
+      "name": "ERL",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 275,
+      "name": "ERR",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 276,
+      "name": "FIELD",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 277,
+      "name": "FILES",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 278,
+      "name": "FRE",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 279,
+      "name": "FREEFILE",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 280,
+      "name": "IMP",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 281,
+      "name": "INP",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 282,
+      "name": "KILL",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 283,
+      "name": "LET",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 284,
+      "name": "LIGHTPEN",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 285,
+      "name": "LOC",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 286,
+      "name": "LOCK",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 287,
+      "name": "LSET",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 288,
+      "name": "MKC$",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 289,
+      "name": "MKD$",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 290,
+      "name": "MKDIR",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 291,
+      "name": "MKI$",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 292,
+      "name": "MKL$",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 293,
+      "name": "MKS$",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 294,
+      "name": "NAME",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 295,
+      "name": "OUT",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 296,
+      "name": "PALETTE",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 297,
+      "name": "PMAP",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 298,
+      "name": "RESET",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 299,
+      "name": "RMDIR",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 300,
+      "name": "RSET",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 301,
+      "name": "RUN",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 302,
+      "name": "SADD",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 303,
+      "name": "SEEK",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 304,
+      "name": "STICK",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 305,
+      "name": "STRIG",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 306,
+      "name": "TIME$",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": "TIME$"
+    },
+    {
+      "id": 307,
+      "name": "UNLOCK",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 308,
+      "name": "VARPTR",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 309,
+      "name": "XOR",
+      "profile": "native",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 310,
+      "name": "SHELL",
+      "profile": "unsupported",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": "SHELL [command$]"
+    },
+    {
+      "id": 311,
+      "name": "ENVIRON$",
+      "profile": "unsupported",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 312,
+      "name": "SYSTEM",
+      "profile": "unsupported",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 313,
+      "name": "CHAIN",
+      "profile": "unsupported",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 314,
+      "name": "BLOAD",
+      "profile": "unsupported",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 315,
+      "name": "BSAVE",
+      "profile": "unsupported",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 316,
+      "name": "MODE",
+      "profile": "extension",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 317,
+      "name": "INK",
+      "profile": "extension",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 318,
+      "name": "BORDER",
+      "profile": "extension",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 319,
+      "name": "PEN",
+      "profile": "extension",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 320,
+      "name": "PAPER",
+      "profile": "extension",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 321,
+      "name": "PLOT",
+      "profile": "extension",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 322,
+      "name": "SYMBOL",
+      "profile": "extension",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
+    },
+    {
+      "id": 323,
+      "name": "TAG",
+      "profile": "adapted",
+      "stage": "token_only",
+      "compiler_status": "not_implemented",
+      "encoding": "extended_01",
+      "syntax_example": null
     }
   ],
   "additional_candidates": [
@@ -1237,132 +1849,9 @@
       "syntax_status": "requires_specification"
     },
     {
-      "name": "BLOAD",
-      "profile": "unsupported",
-      "group": "memory",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "BORDER",
-      "profile": "extension",
-      "reason": "CPC hardware border",
-      "group": "cpc",
-      "origin": "Amstrad CPC extension",
-      "stage": "catalogued_not_tokenized",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "BSAVE",
-      "profile": "unsupported",
-      "group": "memory",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "CHAIN",
-      "profile": "unsupported",
-      "group": "control",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "CHDIR",
-      "profile": "adapted",
-      "group": "filesystem",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "CLEAR",
-      "profile": "native",
-      "group": "control",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
       "name": "CREATEINDEX",
       "profile": "unsupported",
       "group": "isam",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "CURDIR$",
-      "profile": "adapted",
-      "group": "filesystem",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "CURRENCY",
-      "profile": "native",
-      "group": "types",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification",
-      "syntax_example": "CURRENCY"
-    },
-    {
-      "name": "CVC",
-      "profile": "native",
-      "group": "strings",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "CVD",
-      "profile": "native",
-      "group": "functions",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "CVI",
-      "profile": "native",
-      "group": "functions",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "CVL",
-      "profile": "native",
-      "group": "functions",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "CVS",
-      "profile": "native",
-      "group": "functions",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "DATE$",
-      "profile": "adapted",
-      "group": "functions",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification",
-      "syntax_example": "DATE$"
-    },
-    {
-      "name": "DEF",
-      "profile": "native",
-      "group": "control",
       "stage": "catalogued_not_tokenized",
       "origin": "Microsoft BASIC PDS 7.1",
       "syntax_status": "requires_specification"
@@ -1388,55 +1877,6 @@
       "profile": "native",
       "group": "compound_syntax",
       "stage": "grammar_only",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "DEFCUR",
-      "profile": "native",
-      "group": "types",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "DEFDBL",
-      "profile": "native",
-      "group": "types",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "DEFINT",
-      "profile": "native",
-      "group": "types",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification",
-      "syntax_example": "DEFINT letter-range[,letter-range]"
-    },
-    {
-      "name": "DEFLNG",
-      "profile": "native",
-      "group": "types",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "DEFSNG",
-      "profile": "native",
-      "group": "types",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "DEFSTR",
-      "profile": "native",
-      "group": "types",
-      "stage": "catalogued_not_tokenized",
       "origin": "Microsoft BASIC PDS 7.1",
       "syntax_status": "requires_specification"
     },
@@ -1505,38 +1945,6 @@
       "syntax_status": "requires_specification"
     },
     {
-      "name": "ENVIRON$",
-      "profile": "unsupported",
-      "group": "filesystem",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "EQV",
-      "profile": "native",
-      "group": "control",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "ERL",
-      "profile": "native",
-      "group": "control",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "ERR",
-      "profile": "native",
-      "group": "control",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
       "name": "EXIT DO",
       "profile": "native",
       "group": "compound_syntax",
@@ -1569,90 +1977,9 @@
       "syntax_status": "requires_specification"
     },
     {
-      "name": "FIELD",
-      "profile": "adapted",
-      "group": "files",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "FILES",
-      "profile": "adapted",
-      "group": "files",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
       "name": "FN",
       "profile": "native",
       "group": "control",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "FRE",
-      "profile": "native",
-      "group": "functions",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "FREEFILE",
-      "profile": "adapted",
-      "group": "files",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "IMP",
-      "profile": "native",
-      "group": "control",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "INK",
-      "profile": "extension",
-      "reason": "CPC hardware ink",
-      "group": "cpc",
-      "origin": "Amstrad CPC extension",
-      "stage": "catalogued_not_tokenized",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "INP",
-      "profile": "adapted",
-      "group": "memory",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "KILL",
-      "profile": "adapted",
-      "group": "files",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "LET",
-      "profile": "native",
-      "group": "control",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "LIGHTPEN",
-      "profile": "native",
-      "group": "input",
       "stage": "catalogued_not_tokenized",
       "origin": "Microsoft BASIC PDS 7.1",
       "syntax_status": "requires_specification"
@@ -1663,87 +1990,6 @@
       "group": "compound_syntax",
       "stage": "grammar_only",
       "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "LOC",
-      "profile": "adapted",
-      "group": "files",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "LOCK",
-      "profile": "adapted",
-      "group": "files",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "LSET",
-      "profile": "adapted",
-      "group": "files",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "MKC$",
-      "profile": "native",
-      "group": "strings",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "MKD$",
-      "profile": "native",
-      "group": "strings",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "MKDIR",
-      "profile": "adapted",
-      "group": "filesystem",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "MKI$",
-      "profile": "native",
-      "group": "strings",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "MKL$",
-      "profile": "native",
-      "group": "strings",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "MKS$",
-      "profile": "native",
-      "group": "strings",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "MODE",
-      "profile": "extension",
-      "reason": "CPC display mode",
-      "group": "cpc",
-      "origin": "Amstrad CPC extension",
-      "stage": "catalogued_not_tokenized",
       "syntax_status": "requires_specification"
     },
     {
@@ -1774,14 +2020,6 @@
       "name": "MOVEPREVIOUS",
       "profile": "unsupported",
       "group": "isam",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "NAME",
-      "profile": "adapted",
-      "group": "files",
       "stage": "catalogued_not_tokenized",
       "origin": "Microsoft BASIC PDS 7.1",
       "syntax_status": "requires_specification"
@@ -1827,14 +2065,6 @@
       "syntax_status": "requires_specification"
     },
     {
-      "name": "OUT",
-      "profile": "adapted",
-      "group": "memory",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
       "name": "OUTPUT",
       "profile": "native",
       "group": "files",
@@ -1843,98 +2073,8 @@
       "syntax_status": "requires_specification"
     },
     {
-      "name": "PALETTE",
-      "profile": "adapted",
-      "group": "graphics",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "PAPER",
-      "profile": "extension",
-      "reason": "CPC firmware background",
-      "group": "cpc",
-      "origin": "Amstrad CPC extension",
-      "stage": "catalogued_not_tokenized",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "PEN",
-      "profile": "extension",
-      "group": "cpc",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Amstrad CPC extension",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "PLOT",
-      "profile": "extension",
-      "reason": "CPC pixel plot",
-      "group": "cpc",
-      "origin": "Amstrad CPC extension",
-      "stage": "catalogued_not_tokenized",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "PMAP",
-      "profile": "adapted",
-      "group": "graphics",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
       "name": "RANDOM",
       "profile": "native",
-      "group": "files",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "RESET",
-      "profile": "native",
-      "group": "files",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "RMDIR",
-      "profile": "adapted",
-      "group": "filesystem",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "RSET",
-      "profile": "adapted",
-      "group": "files",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "RUN",
-      "profile": "native",
-      "group": "control",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "SADD",
-      "profile": "native",
-      "group": "strings",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "SEEK",
-      "profile": "adapted",
       "group": "files",
       "stage": "catalogued_not_tokenized",
       "origin": "Microsoft BASIC PDS 7.1",
@@ -1949,63 +2089,12 @@
       "syntax_status": "requires_specification"
     },
     {
-      "name": "SHELL",
-      "profile": "unsupported",
-      "group": "filesystem",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification",
-      "syntax_example": "SHELL [command$]"
-    },
-    {
       "name": "SSEG",
       "profile": "unsupported",
       "group": "strings",
       "stage": "catalogued_not_tokenized",
       "origin": "Microsoft BASIC PDS 7.1",
       "syntax_status": "requires_specification"
-    },
-    {
-      "name": "STICK",
-      "profile": "adapted",
-      "group": "input",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "STRIG",
-      "profile": "adapted",
-      "group": "declarations",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "SYMBOL",
-      "profile": "extension",
-      "reason": "CPC user-defined characters",
-      "group": "cpc",
-      "origin": "Amstrad CPC extension",
-      "stage": "catalogued_not_tokenized",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "SYSTEM",
-      "profile": "unsupported",
-      "group": "control",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "TIME$",
-      "profile": "adapted",
-      "group": "functions",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification",
-      "syntax_example": "TIME$"
     },
     {
       "name": "TROFF",
@@ -2024,33 +2113,9 @@
       "syntax_status": "requires_specification"
     },
     {
-      "name": "UNLOCK",
-      "profile": "adapted",
-      "group": "files",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "VARPTR",
-      "profile": "native",
-      "group": "memory",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
       "name": "VARSEG",
       "profile": "unsupported",
       "group": "memory",
-      "stage": "catalogued_not_tokenized",
-      "origin": "Microsoft BASIC PDS 7.1",
-      "syntax_status": "requires_specification"
-    },
-    {
-      "name": "XOR",
-      "profile": "native",
-      "group": "control",
       "stage": "catalogued_not_tokenized",
       "origin": "Microsoft BASIC PDS 7.1",
       "syntax_status": "requires_specification"
