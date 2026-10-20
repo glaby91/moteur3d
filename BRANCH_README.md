@@ -19,3 +19,11 @@ L'autre famille est isolée sur la branche `raycasting`.
 Cette version CPC est une démonstration expérimentale ; elle doit encore être assemblée et mesurée sous émulateur ou sur CPC6128 réel. Le chiffre de 8–12 FPS est une **cible à vérifier**, pas une mesure obtenue.
 
 **Conception suivante :** [optimisation Z80 V0.2 avec cache de registres secondaires](retro/cpc6128-z80/OPTIMISATION_V02_FAST_REGISTERS.md) — spécification non encore implémentée.
+
+
+## Raster Z80 V0.2 Fast Registers — implémenté
+
+- [Nouveau moteur assembleur CPC6128 V0.2](retro/cpc6128-z80/CPC_RASTER_V02_FAST_REGISTERS.asm) : 12 triangles visibles, registres secondaires via `EXX`, remplissage par `PUSH BC`, fond vidéo partiellement restauré.
+- [Tests statiques, mémoire et différences d'image](retro/cpc6128-z80/README_V02_FAST_REGISTERS.md).
+
+La V0.1 est conservée pour comparaison. **Pas de FPS mesuré ni de validation assembleur/matériel**.
