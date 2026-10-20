@@ -1112,16 +1112,16 @@ PREPARE_DISK_NAME:
 
 
 ; Save compressed program as readable DOS-compatible ASCII .BAS.
-; Diagnostic only: Ctrl+S saves exactly one short test record to QTEST.TXT.
+; Diagnostic only: Ctrl+S saves exactly one short test record to QTEST.TX.
 ; It MUST NOT overwrite DEMO.BAS or save the current document.
 SAVE_FILE:
         CALL WAIT_SHOW
         LD HL,DIAG_NAME
         LD DE,FILE_NAME_RAM
-        LD BC,9
+        LD BC,8
         LDIR
         LD HL,FILE_NAME_RAM
-        LD B,9
+        LD B,8
         LD DE,IO_BUFFER
         CALL CAS_OUT_OPEN
         JP NC,FILE_SAVE_OPEN_ERROR
@@ -1151,8 +1151,8 @@ FILE_SAVE_OPEN_ERROR:
 FILE_SAVE_CLOSE_ERROR:
         LD HL,MSG_SAVE_CLOSE_ERROR
         JP SHOW_MESSAGE
-DIAG_NAME: DB 'QTEST.TXT'
-MSG_DIAG_SAVED: DB 'Diagnostic: QTEST.TXT OK. DEMO.BAS non modifie. Appuyer touche.            ',0
+DIAG_NAME: DB 'QTEST.TX'
+MSG_DIAG_SAVED: DB 'Diagnostic: QTEST.TX OK. DEMO.BAS non modifie. Appuyer touche.            ',0
 
 ; Parse ASCII .BAS into independent variable-length tokenized lines,
 ; up to 1500 lines / 64 KiB bank store. No line numbers required.
