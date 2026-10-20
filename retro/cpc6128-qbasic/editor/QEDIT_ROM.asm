@@ -655,10 +655,9 @@ DRAW_ROWS:
         LD L,A
         LD H,2
         CALL TXT_SET_CURSOR
+        ; The viewport cache contains 21 rows starting at TOP_LINE.
+        ; Draw using a relative cache row, not an absolute source line.
         LD A,(TMP_ROW)
-        LD B,A
-        LD A,(TOP_LINE)
-        ADD A,B
         CALL DRAW_DOCUMENT_ROW
         LD A,(TMP_ROW)
         INC A
