@@ -73,3 +73,7 @@ Ces ordres de grandeur sont **des objectifs exploratoires**, fortement dépendan
 - Instrumentation précise du temps par frame, sur émulateur CPC à synchronisation fidèle.
 
 Le **raycaster 80 rayons du CPC6128** reste séparément dans la branche [`raycasting`](https://github.com/glaby91/moteur3d/tree/raycasting/retro/cpc6128-z80) ; les deux architectures peuvent être comparées ultérieurement.
+
+## Étape suivante : conception V0.2 Fast Registers
+
+Une [spécification détaillée d'optimisation Z80](OPTIMISATION_V02_FAST_REGISTERS.md) a été ajoutée : jeu secondaire `BC'/DE'/HL'` comme cache de calcul, `EXX` pour interpoler les arêtes, écriture vidéo rapide par `PUSH`, effacement partiel et LUTs trigonométriques. **Proposition seulement : aucune V0.2 compilée, aucun nouveau FPS mesuré.**
