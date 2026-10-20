@@ -1,4 +1,4 @@
-; QBasic CPC6128 -- QEDIT editor ROM v0.4.1 (status display fix)
+; QBasic CPC6128 -- QEDIT ROM v0.4.2 experimental raster stripes
 ; Compatible Amstrad CPC6128 expansion ROM, standard MODE 2 (80x25).
 ; Install as upper ROM slot 1; from BASIC: MEMORY &5FFF : |QEDIT
 ; MEMORY must be set BEFORE launch to protect #6000..#A993.
@@ -117,6 +117,7 @@ EDITOR_START:
         CALL DEMO_DOCUMENT
         CALL CACHE_BUILD
         CALL SCREEN_INIT
+        CALL RASTER_INSTALL
 FULL_REDRAW:
         CALL COMMIT_DIRTY
         JR NC,FULL_REDRAW_UNCOMMITTED
@@ -344,6 +345,7 @@ SAVE_DISPLAY_STATE:
         RET
 
 EXIT_EDITOR:
+        CALL RASTER_REMOVE
         CALL TXT_CUR_OFF
         LD A,(SAVED_MODE)
         CALL SCR_SET_MODE       ; firmware resets text streams and clears screen
@@ -442,7 +444,96 @@ COPY_ROM_NEXT:
         INC HL
         INC DE
         DJNZ COPY_ROM_NEXT
-COPY_ROM_END:
+COPY_
+; ================================================================
+; MODE 2 RASTER EXPERIMENT -- first stage: fixed horizontal bands.
+; ISR is copied to main RAM (#8C00) so it also survives upper ROM
+; changes to AMSDOS during file operations. Retains firmware IM1
+; processing by chaining to original #0038 JP target.
+; 300-Hz firmware interrupts ~52 scanlines apart: coarse strips only!
+; DOES NOT analyse BASIC syntax or colour individual keywords.
+; ================================================================
+RASTER_PHASE    EQU #8870
+RASTER_OLD_JUMP EQU #8872
+RASTER_RAM      EQU #8C00
+RASTER_INSTALL:
+        DI
+        LD A,(#0038)
+        CP #C3                   ; CPC standard IM1 JP handler
+        JR NZ,RASTER_INSTALL_FAIL
+        LD HL,(#0039)
+        LD (RASTER_OLD_JUMP),HL
+        LD HL,RASTER_ISR
+        LD DE,RASTER_RAM
+        LD BC,RASTER_ISR_END-RASTER_ISR
+        LDIR
+        LD HL,(RASTER_OLD_JUMP)
+        LD (RASTER_RAM+RASTER_CHAIN-RASTER_ISR+1),HL
+        XOR A
+        LD (RASTER_PHASE),A
+        LD A,#C3
+        LD (#0038),A
+        LD HL,RASTER_RAM
+        LD (#0039),HL
+RASTER_INSTALL_FAIL:
+        EI
+        RET
+
+RASTER_REMOVE:
+        DI
+        LD A,(#0038)
+        CP #C3
+        JR NZ,RASTER_REMOVE_DONE
+        LD HL,(#0039)
+        LD DE,RASTER_RAM
+        OR A
+        SBC HL,DE
+        JR NZ,RASTER_REMOVE_DONE
+        LD HL,(RASTER_OLD_JUMP)
+        LD (#0039),HL
+RASTER_REMOVE_DONE:
+        EI
+        RET
+
+; Executed from #8C00 in the permanent base RAM; no CALL into ROM.
+RASTER_ISR:
+        PUSH AF
+        PUSH BC
+        LD A,(RASTER_PHASE)
+        INC A
+        CP 6
+        JR C,RASTER_PHASE_OK
+        XOR A
+RASTER_PHASE_OK:
+        LD (RASTER_PHASE),A
+        ; Three palette areas: normal, diagnostic red, status yellow.
+        CP 2
+        JR C,RASTER_WHITE
+        CP 4
+        JR C,RASTER_RED
+        CP 5
+        JR Z,RASTER_WHITE
+        LD A,#4A               ; GA bright yellow
+        JR RASTER_SET
+RASTER_RED:
+        LD A,#4C               ; GA bright red
+        JR RASTER_SET
+RASTER_WHITE:
+        LD A,#4B               ; GA white
+RASTER_SET:
+        LD BC,#7F00
+        PUSH AF
+        LD A,1                 ; select ink 1
+        OUT (C),A
+        POP AF
+        OUT (C),A
+        POP BC
+        POP AF
+RASTER_CHAIN:
+        JP #0000               ; patched in copied RAM, firmware handler
+RASTER_ISR_END:
+
+ROM_END:
         LD A,(HL)
         CP #FF
         JR Z,COPY_ROM_PAD
@@ -1591,12 +1682,12 @@ HELP_ABOUT:     DB ' A propos           ',0
 MSG_SEARCH:     DB 'Recherche: fonction prevue pour version suivante. Tapez une touche.        ',0
 MSG_VARIABLES:  DB 'Fenetre Variables: disponible avec le moteur QBasic. Tapez une touche.     ',0
 MSG_NOT_READY:  DB 'Cette commande sera ajoutee avec la ROM execution. Tapez une touche.       ',0
-MSG_ABOUT:      DB 'QEDIT v0.4.1 - CPC6128 16Ko ROM - edition sans numeros de ligne.            ',0
+MSG_ABOUT:      DB 'QEDIT v0.4.2 - CPC6128 16Ko ROM - edition sans numeros de ligne.            ',0
 
 HEADER_TEXT:
         DB ' Fichier  Edition  Recherche  Execution  Debogage  Options  Fenetre  Aide   ',0
 TITLE_TEXT:
-        DB '                         [ DEMO.BAS ]        QBasic CPC6128 v0.4.1',0
+        DB '                         [ DEMO.BAS ]        QBasic CPC6128 v0.4.2',0
 STATUS_TEXT:
         DB 'Ligne:       Col:     INS  |  MODE 2  |  1500 lignes max                 ',0
 FOOTER_TEXT:
