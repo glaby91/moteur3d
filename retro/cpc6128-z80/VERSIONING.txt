@@ -57,3 +57,10 @@ V0.2.0 — CODE SOURCE ASSEMBLEUR IMPLEMENTE (2026-10-20)
   - Compilateur RASM et emulateur CPC NON DISPONIBLES : pas de FPS verifies.
   - Commit initial du code V0.2: d66b10e8bc88324221358ece2a23b79be4356c53
   - Code V0.2 optimise (EXX + dirty + SP): c617dd8d027b9b6bd76839b19512bbd4d6fa979e
+
+VERIFICATION COMPLEMENTAIRE V0.2 :
+  846 spans longs (PUSH BC) et 1807 spans courts (LD),
+  17181 octets video de triangles sur 8 poses.
+  Emulation logique des deux mecanismes identique au remplissage de reference.
+  Toutes les adresses tests sont dans C000-FFFF.
+  Pas de temps CPU reel chronometre.
