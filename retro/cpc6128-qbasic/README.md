@@ -1,49 +1,47 @@
-# QBasic CPC6128 — éditeur QEDIT v0.2
+# QBasic CPC6128 — QEDIT v0.3
 
-Éditeur BASIC **sans numéros de ligne**, développé en assembleur Z80, au format **ROM d'extension 16 Ko** pour l'Amstrad CPC6128.
+Éditeur QBasic sans numéros de ligne, réalisé en Z80 sous forme de ROM d'extension **16 Ko**. Interface légère en **Mode 2 standard 80 × 25**.
 
-## État réel
+## Fonctionnement confirmé et validation
 
-- **Validé par l'utilisateur sur WinAPE** : la commande `|QEDIT` démarre l'éditeur ; la sauvegarde `Ctrl+S` fonctionne après la correction de v0.2.
-- **Compilé sous RASM** : image ROM de 16 384 octets ; code source et ROM présents dans `retro/cpc6128-qbasic/editor/`.
-- **À tester** : chargement `Ctrl+O` et comportement sur matériel physique.
-- **Défauts connus** : `ESC` rend la main au BASIC sans réinitialiser correctement l'écran ; la barre de menus est décorative et non interactive.
-- **Non implémentés** : interpréteur QBasic, exécution `RUN`, coloration syntaxique, overscan et menus déroulants (prévus ultérieurement).
+- **QEDIT v0.2** : lancement `|QEDIT` et sauvegarde `Ctrl+S` validés par l'utilisateur dans WinAPE.
+- **QEDIT v0.3** : ROM compilée par RASM v3.2.4bis, image 16 384 octets, empreinte SHA-256 vérifiée ; **menus et nouvelle sortie ESC pas encore testés en émulation par l'utilisateur**.
+- L'édition, les déplacements, les fichiers `DEMO.BAS`, les zones RAM et les routines AMSDOS restent issus de la v0.2.
 
 ## Installation WinAPE
 
-1. Dans **Settings > Memory**, choisir l'emplacement **Upper ROM 1** et y sélectionner `editor/QEDIT.ROM`.
-2. Conserver les ROMs d'origine **OS6128**, **BASIC 1.1 (ROM 0)** et **AMSDOS (ROM 7)**.
-3. Redémarrer le CPC6128, puis depuis le BASIC :
+1. Dans **Settings → Memory**, installez `editor/QEDIT.ROM` dans **Upper ROM 1**.
+2. Conservez les ROMs originales **OS6128**, **BASIC 1.1 (ROM 0)** et **AMSDOS (ROM 7)**.
+3. Redémarrez et tapez :
 
 ```basic
 MEMORY &5FFF
 |QEDIT
 ```
 
-La commande MEMORY réserve la RAM utilisée par l'éditeur avant son lancement.
+Le `MEMORY` protège la zone RAM `#6000–#97FF` utilisée pour le programme et les buffers.
 
-## Contrôles implémentés
+## Changements v0.3
 
-`Ctrl+S` : sauvegarde `DEMO.BAS`. `Ctrl+O` : ouverture de `DEMO.BAS`. `Ctrl+N` : nouveau document. Flèches : déplacement. Entrée : nouvelle ligne. Suppr : effacement. `ESC` : retour au BASIC (écran non restauré dans cette version).
+- **Sortie ESC corrigée** : mémorise le mode graphique et les encres 0/1 ainsi que la bordure, puis restaure ces paramètres au retour BASIC. L'écran QEDIT est effacé ; le contenu précédent du BASIC n'est pas sauvegardé.
+- **Menus interactifs** : Fichier, Édition, Recherche, Exécution, Débogage, Options, Fenêtre, Aide.
+- **Ctrl+T** ouvre les menus ; flèches gauche/droite changent de rubrique ; haut/bas choisissent une option ; Entrée confirme ; ESC ferme un menu sans quitter QEDIT.
+- Dans WinAPE, la touche **F10 est réservée par l'émulateur** au plein écran. `Ctrl+T` est le raccourci utilisable dans QEDIT.
+- Actions fonctionnelles : nouveau document, ouvrir, enregistrer, quitter, insérer une ligne, effacer un caractère, début/fin de ligne, réaffichage Mode 2, aide, à-propos.
+- Les entrées Recherche, Exécution, Débogage et Variables affichent un message explicite tant que le moteur QBasic n'existe pas.
 
-## Architecture
+## Commandes directes
 
-- **ROM** d'extension mappée à `#C000–#FFFF`, code de l'éditeur compilé pour ce segment.
-- **RAM** `#6000` et au-dessus réservée par `MEMORY &5FFF`, buffer de texte et zone de travail.
-- Mode 2 standard **80 × 25**, sans overscan pour la version initiale.
-- Correction v0.2 : nom `DEMO.BAS` copié en RAM `#8810` avant les appels AMSDOS, afin de ne pas faire référence à la ROM 1 lorsqu'AMSDOS commute sur la ROM 7.
+`Ctrl+S` : enregistrer `DEMO.BAS` ; `Ctrl+O` : ouvrir ; `Ctrl+N` : nouveau ; `Ctrl+H` : aide ; `Ctrl+T` : menus ; `ESC` hors menu : sortir.
 
-## Compilation
+## Code et compilation
 
-Avec **RASM v3.2.4bis**, depuis la racine du dépôt :
+- Source : [QEDIT_ROM.asm](editor/QEDIT_ROM.asm).
+- ROM compilée : [QEDIT.ROM](editor/QEDIT.ROM).
+- Workflow : [build-qedit.yml](../../.github/workflows/build-qedit.yml).
+- Empreinte SHA-256 de référence : `52af91a4776513e878faad74a6fbcbcdc9112ba1005062baaeb62ff35fe5c5ff`.
+- `rasm retro/cpc6128-qbasic/editor/QEDIT_ROM.asm -ob retro/cpc6128-qbasic/editor/QEDIT.ROM`
 
-```sh
-rasm retro/cpc6128-qbasic/editor/QEDIT_ROM.asm -ob retro/cpc6128-qbasic/editor/QEDIT.ROM
-```
+## Limites
 
-SHA-256 de la ROM v0.2 attendue : `eca1db1c27cc5e877161381aec359165a479b8ac6c07b8da4e8d247dab6632d8`.
-
-Le workflow `.github/workflows/build-qedit.yml` vérifie automatiquement cette compilation. Licence source indiquée : MIT.
-
-L'éditeur et la ROM d'exécution QBasic seront développés séparément ; cette branche est réservée au projet QBasic CPC6128.
+Pas de ROM d'exécution QBasic, de coloration syntaxique, de menus à la souris ni d'overscan pour le moment. Le comportement de ESC et des huit menus dans WinAPE doit encore être testé. Le mode vidéo et certaines couleurs sont restaurés, pas le contenu de l'écran précédent.
