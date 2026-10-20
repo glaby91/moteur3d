@@ -35,11 +35,12 @@ Start:
         OUT (C),A
         CALL InitPalette
         CALL CopyBankedPoses
+        CALL ClearBackdrop         ; whole 16KB cleared just once
         XOR A
         LD (FrameIndex),A
 
 FrameLoop:
-        CALL ClearBackdrop
+        CALL ClearDirty
         LD A,(FrameIndex)
         SRL A
         ADD A,&C4
@@ -140,6 +141,82 @@ FillClearRow:
         INC IX
         DJNZ ClearNextRow
         RET
+
+; Fast redraw of just old/new bounding rectangles.
+; left bound even, right bound odd => even number of VRAM bytes
+; (2 Mode0 pixels per byte), so every pair is one PUSH BC.
+ClearDirty:
+        LD A,(FrameIndex)
+        ADD A,A
+        ADD A,A
+        LD E,A
+        LD D,0
+        LD HL,DirtyBounds
+        ADD HL,DE
+        LD A,(HL)
+        LD (DirtyLeft),A
+        INC HL
+        LD A,(HL)
+        LD (DirtyRight),A
+        INC HL
+        LD A,(HL)
+        LD (ClearY),A
+        INC HL
+        LD A,(HL)
+        LD (DirtyBottom),A
+        LD A,(DirtyRight)
+        INC A
+        LD B,A
+        LD A,(DirtyLeft)
+        LD C,A
+        LD A,B
+        SUB C
+        SRL A
+        LD (ClearPairs),A
+ClearDirtyRow:
+        LD A,(ClearY)
+        LD B,A
+        LD A,(DirtyBottom)
+        CP B
+        RET Z
+        RET C
+        LD L,B
+        LD H,0
+        ADD HL,HL
+        LD DE,ScreenLines
+        ADD HL,DE
+        LD E,(HL)
+        INC HL
+        LD D,(HL)
+        EX DE,HL
+        LD A,(DirtyRight)
+        INC A
+        LD E,A
+        LD D,0
+        ADD HL,DE
+        LD A,(ClearY)
+        CP 100
+        JR C,DirtySky
+        LD A,&30
+        JR DirtySetColour
+DirtySky:
+        LD A,&03
+DirtySetColour:
+        LD B,A
+        LD C,A
+        LD A,(ClearPairs)
+        LD D,A
+        LD (SavedSP),SP
+        LD SP,HL
+DirtyFillLoop:
+        PUSH BC                 ; 2 bytes per push; SP moves backwards
+        DEC D
+        JR NZ,DirtyFillLoop
+        LD SP,(SavedSP)         ; always before JR/CALL/RET
+        LD A,(ClearY)
+        INC A
+        LD (ClearY),A
+        JR ClearDirtyRow
 
 ; Triangle in IX, record structure:
 ;   +0 ink (packed mode0 pen), +1 ymin, +2 ymax excl., +3 reserve
@@ -303,6 +380,12 @@ EdgeY:          DB 0
 EdgeEnd:        DB 0
 EdgeX:          DW 0
 StepX:          DW 0
+SavedSP:        DW 0
+ClearY:         DB 0
+ClearPairs:     DB 0
+DirtyLeft:      DB 0
+DirtyRight:     DB 0
+DirtyBottom:    DB 0
 
 ; Palette Gate Array: valeurs hardware couleur 0x40+code.
 ; Codes indicatifs : rendu reel dependra du CPC et du moniteur.
