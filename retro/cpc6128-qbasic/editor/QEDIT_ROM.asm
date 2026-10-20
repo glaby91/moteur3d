@@ -1112,63 +1112,34 @@ PREPARE_DISK_NAME:
 
 
 ; Save compressed program as readable DOS-compatible ASCII .BAS.
+; Diagnostic only: Ctrl+S saves exactly one short test record to QTEST.TXT.
+; It MUST NOT overwrite DEMO.BAS or save the current document.
 SAVE_FILE:
-        CALL COMMIT_DIRTY
-        JP NC,STORE_ERROR_MESSAGE
-        CALL PREPARE_DISK_NAME
+        CALL WAIT_SHOW
+        LD HL,DIAG_NAME
+        LD DE,FILE_NAME_RAM
+        LD BC,9
+        LDIR
         LD HL,FILE_NAME_RAM
-        LD B,8
+        LD B,9
         LD DE,IO_BUFFER
         CALL CAS_OUT_OPEN
         JP NC,FILE_SAVE_OPEN_ERROR
-        LD HL,0
-        LD (SAVE_INDEX),HL
-SAVE_NEXT_ROW:
-        LD HL,(SAVE_INDEX)
-        LD DE,TEMP_LINE
-        CALL LOAD_LOGICAL_LINE
-        LD HL,TEMP_LINE+75
-        LD B,76
-TRIM_SAVE:
-        LD A,(HL)
-        CP 32
-        JR NZ,SAVE_TRIM_DONE
-        DEC HL
-        DJNZ TRIM_SAVE
-SAVE_TRIM_DONE:
-        LD A,B
-        LD (TMP_COUNT),A
-        LD HL,TEMP_LINE
-        OR A
-        JR Z,SAVE_NEWLINE
-        LD B,A
-SAVE_CHARS:
-        LD A,(HL)
-        PUSH HL
-        PUSH BC
+        LD A,'O'
         CALL CAS_OUT_CHAR
-        POP BC
-        POP HL
         JR NC,SAVE_ABORT
-        INC HL
-        DJNZ SAVE_CHARS
-SAVE_NEWLINE:
+        LD A,'K'
+        CALL CAS_OUT_CHAR
+        JR NC,SAVE_ABORT
         LD A,13
         CALL CAS_OUT_CHAR
         JR NC,SAVE_ABORT
         LD A,10
         CALL CAS_OUT_CHAR
         JR NC,SAVE_ABORT
-        LD HL,(SAVE_INDEX)
-        INC HL
-        LD (SAVE_INDEX),HL
-        LD DE,(DOC_LINES)
-        OR A
-        SBC HL,DE
-        JR NZ,SAVE_NEXT_ROW
         CALL CAS_OUT_CLOSE
         JP NC,FILE_SAVE_CLOSE_ERROR
-        LD HL,MSG_SAVED
+        LD HL,MSG_DIAG_SAVED
         JP SHOW_MESSAGE
 SAVE_ABORT:
         CALL CAS_OUT_ABANDON
@@ -1180,6 +1151,8 @@ FILE_SAVE_OPEN_ERROR:
 FILE_SAVE_CLOSE_ERROR:
         LD HL,MSG_SAVE_CLOSE_ERROR
         JP SHOW_MESSAGE
+DIAG_NAME: DB 'QTEST.TXT'
+MSG_DIAG_SAVED: DB 'Diagnostic: QTEST.TXT OK. DEMO.BAS non modifie. Appuyer touche.            ',0
 
 ; Parse ASCII .BAS into independent variable-length tokenized lines,
 ; up to 1500 lines / 64 KiB bank store. No line numbers required.
