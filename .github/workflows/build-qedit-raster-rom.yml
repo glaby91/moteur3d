@@ -1,0 +1,34 @@
+name: QEDIT experimental raster ROM build
+on:
+  push:
+    branches: [qedit-rom-raster-v0.4.2-experimental]
+    paths:
+      - 'retro/cpc6128-qbasic/editor/QEDIT_ROM.asm'
+      - 'retro/cpc6128-qbasic/editor/QEDIT_V04_CORE.asm'
+      - '.github/workflows/build-qedit-raster-rom.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-rom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build RASM
+        run: |
+          git clone --depth 1 --branch v3.2.4bis https://github.com/EdouardBERGE/rasm.git /tmp/rasm-src
+          make -C /tmp/rasm-src release
+      - name: Assemble and check ROM
+        run: |
+          set -euo pipefail
+          cd retro/cpc6128-qbasic/editor
+          /tmp/rasm-src/rasm.exe QEDIT_ROM.asm -ob QEDIT.ROM | tee raster-build.log
+          test "$(stat -c%s QEDIT.ROM)" -eq 16384
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QEDIT-v0.4.2-raster-ROM-WinAPE
+          path: |
+            retro/cpc6128-qbasic/editor/QEDIT.ROM
+            retro/cpc6128-qbasic/editor/QEDIT_ROM.asm
+            retro/cpc6128-qbasic/editor/raster-build.log
+          if-no-files-found: error
