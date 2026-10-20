@@ -82,3 +82,8 @@ Une [spécification détaillée d'optimisation Z80](OPTIMISATION_V02_FAST_REGIST
 ## V0.2 — Implémentation Fast Registers du raster Z80 (20 octobre 2026)
 
 La conception V0.2 est maintenant matérialisée par une [nouvelle source Z80 V0.2](CPC_RASTER_V02_FAST_REGISTERS.asm) et sa [documentation de validation](README_V02_FAST_REGISTERS.md). Le moteur compte 12 triangles visibles, utilise `EXX` pour stocker X/pente d'une arête dans `HL'/DE'`, accélère les spans longs par `PUSH BC` et n'efface qu'une zone vidéo limitée. La V0.1 `CPC_RASTER_MODE0.asm` reste inchangée. **Compilation et FPS réels non encore vérifiés**.
+
+
+## Comparaison chiffrée V0.1 / V0.2
+
+Le [rapport de comparaison des deux moteurs](COMPARATIF_V01_V02.md) conserve les comptes d'opérations calculés sur huit orientations et les hypothèses de FPS, clairement identifiées **non mesurées**. La V0.2 réalise environ **−77 % d'effacement de fond** et **−50 % de triangles**, mais le gain réel de temps par image doit être instrumenté sur CPC.
