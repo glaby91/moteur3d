@@ -445,6 +445,7 @@ COPY_ROM_NEXT:
         INC DE
         DJNZ COPY_ROM_NEXT
 COPY_
+
 ; ================================================================
 ; MODE 2 RASTER EXPERIMENT -- first stage: fixed horizontal bands.
 ; ISR is copied to main RAM (#8C00) so it also survives upper ROM
