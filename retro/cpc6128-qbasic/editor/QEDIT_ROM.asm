@@ -1,4 +1,4 @@
-; QBasic CPC6128 -- QEDIT editor ROM v0.4.0 (tokenized expanded RAM prototype)
+; QBasic CPC6128 -- QEDIT editor ROM v0.4.1 (status display fix)
 ; Compatible Amstrad CPC6128 expansion ROM, standard MODE 2 (80x25).
 ; Install as upper ROM slot 1; from BASIC: MEMORY &5FFF : |QEDIT
 ; MEMORY must be set BEFORE launch to protect #6000..#A993.
@@ -187,7 +187,9 @@ NAV_FAST:
         CALL PAINT_CURSOR
         JP WAIT_KEY
 
-; Only two 3-digit fields need changing; keep the rest of the status bar.
+; Status layout on 80-column MODE 2 screen: line at columns 10-13
+; (four digits); "Col:" starts at 14; column at 20-22 (three digits).
+; Do not clear into the static "Col:" / "INS" captions while navigating.
 UPDATE_POSITION_FAST:
         LD HL,#0A18
         CALL CLEAR_DIGITS
@@ -195,15 +197,19 @@ UPDATE_POSITION_FAST:
         INC HL
         LD DE,#0A18
         CALL PRINT_DECIMAL_16
-        LD HL,#1118
-        CALL CLEAR_DIGITS
+        LD HL,#1418
+        CALL CLEAR_COL_DIGITS
         LD A,(CUR_COL)
         INC A
-        LD HL,#1118
+        LD HL,#1418
         JP PRINT_DECIMAL
 CLEAR_DIGITS:
-        CALL TXT_SET_CURSOR
         LD B,4
+        JR CLEAR_STATUS_FIELD
+CLEAR_COL_DIGITS:
+        LD B,3
+CLEAR_STATUS_FIELD:
+        CALL TXT_SET_CURSOR
 CLEAR_DIGITS_LOOP:
         PUSH BC
         LD A,32
@@ -587,69 +593,75 @@ DRAW_STATUS:
         LD DE,#0A18
         CALL PRINT_DECIMAL_16
         LD HL,#1418
-        CALL CLEAR_DIGITS
+        CALL CLEAR_COL_DIGITS
         LD A,(CUR_COL)
         INC A
         LD HL,#1418
         CALL PRINT_DECIMAL
         RET
 
-; Four-digit decimal position for 16-bit logical line number (0..1500).
-; Input HL=value, DE=screen coordinates (D=column, E=row).
+; Print a 16-bit positive line number 1..1500 in a FIXED 4-column
+; right-aligned field. Leading blanks are printed so adjacent labels survive.
+; Input: HL=number, DE=screen cursor (D=column, E=row).
+; Subtraction must use SBC HL,DE with carry test; the previous v0.4.0
+; version inverted the ADD/borrow test and produced wrong/missing numbers.
 PRINT_DECIMAL_16:
         PUSH HL
         EX DE,HL
         CALL TXT_SET_CURSOR
         POP HL
-        LD DE,-1000
+        LD C,0                ; have any nonzero digits been printed?
+        LD DE,1000
         LD B,0
 PDEC_THOUSANDS:
-        ADD HL,DE
+        OR A
+        SBC HL,DE
         JR C,PDEC_THOUSANDS_END
         INC B
         JR PDEC_THOUSANDS
 PDEC_THOUSANDS_END:
-        LD DE,1000
-        ADD HL,DE
-        LD A,B
-        ADD A,'0'
-        PUSH HL
-        CALL TXT_OUTPUT
-        POP HL
-        LD DE,-100
+        ADD HL,DE             ; restore remainder after oversubtraction
+        CALL PDEC_LEADING
+        LD DE,100
         LD B,0
 PDEC_HUNDREDS:
-        ADD HL,DE
+        OR A
+        SBC HL,DE
         JR C,PDEC_HUNDREDS_END
         INC B
         JR PDEC_HUNDREDS
 PDEC_HUNDREDS_END:
-        LD DE,100
         ADD HL,DE
-        LD A,B
-        ADD A,'0'
-        PUSH HL
-        CALL TXT_OUTPUT
-        POP HL
-        LD DE,-10
+        CALL PDEC_LEADING
+        LD DE,10
         LD B,0
 PDEC_TENS:
-        ADD HL,DE
+        OR A
+        SBC HL,DE
         JR C,PDEC_TENS_END
         INC B
         JR PDEC_TENS
 PDEC_TENS_END:
-        LD DE,10
         ADD HL,DE
+        CALL PDEC_LEADING
+        LD A,L                ; remainder 0..9
+        ADD A,'0'
+        JP TXT_OUTPUT
+PDEC_LEADING:
+        LD A,B
+        OR A
+        JR NZ,PDEC_HAVE_DIGIT
+        LD A,C
+        OR A
+        JR NZ,PDEC_PRINT_ZERO
+        LD A,32               ; blank until first nonzero digit
+        JP TXT_OUTPUT
+PDEC_HAVE_DIGIT:
+        LD C,1
+PDEC_PRINT_ZERO:
         LD A,B
         ADD A,'0'
-        PUSH HL
-        CALL TXT_OUTPUT
-        POP HL
-        LD A,L
-        ADD A,'0'
-        CALL TXT_OUTPUT
-        RET
+        JP TXT_OUTPUT
 
 CURRENT_ABS_INDEX:
         LD HL,(TOP_LINE)
@@ -1579,12 +1591,12 @@ HELP_ABOUT:     DB ' A propos           ',0
 MSG_SEARCH:     DB 'Recherche: fonction prevue pour version suivante. Tapez une touche.        ',0
 MSG_VARIABLES:  DB 'Fenetre Variables: disponible avec le moteur QBasic. Tapez une touche.     ',0
 MSG_NOT_READY:  DB 'Cette commande sera ajoutee avec la ROM execution. Tapez une touche.       ',0
-MSG_ABOUT:      DB 'QEDIT v0.4 - CPC6128 16Ko ROM - edition sans numeros de ligne.            ',0
+MSG_ABOUT:      DB 'QEDIT v0.4.1 - CPC6128 16Ko ROM - edition sans numeros de ligne.            ',0
 
 HEADER_TEXT:
         DB ' Fichier  Edition  Recherche  Execution  Debogage  Options  Fenetre  Aide   ',0
 TITLE_TEXT:
-        DB '                         [ DEMO.BAS ]        QBasic CPC6128 v0.4',0
+        DB '                         [ DEMO.BAS ]        QBasic CPC6128 v0.4.1',0
 STATUS_TEXT:
         DB 'Ligne:       Col:     INS  |  MODE 2  |  1500 lignes max                 ',0
 FOOTER_TEXT:
