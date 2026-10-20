@@ -1,0 +1,29 @@
+name: Build safe QEDIT v0.4.1 menu correction
+on:
+  push:
+    branches: [qedit-v0.4.1-menu-safe-diagnostic]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-rom:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build assembler RASM
+        run: |
+          git clone --depth 1 --branch v3.2.4bis https://github.com/EdouardBERGE/rasm.git /tmp/rasm-src
+          make -C /tmp/rasm-src release
+      - name: Build and check ROM
+        run: |
+          set -euo pipefail
+          cd retro/cpc6128-qbasic/editor
+          /tmp/rasm-src/rasm.exe QEDIT_ROM.asm -ob QEDIT.ROM | tee build-safe.log
+          test "$(stat -c%s QEDIT.ROM)" -eq 16384
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QEDIT-v041-MENUS-SAFE-WINAPE
+          path: |
+            retro/cpc6128-qbasic/editor/QEDIT.ROM
+            retro/cpc6128-qbasic/editor/build-safe.log
+          if-no-files-found: error
