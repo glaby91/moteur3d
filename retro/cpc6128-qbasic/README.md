@@ -1,5 +1,7 @@
 # QBasic CPC6128 — éditeur QEDIT
 
+> **Reprise du projet :** consulter [PROJECT_HANDOFF.md](PROJECT_HANDOFF.md) pour l'architecture, les branches, la mémoire, les validations WinAPE et les prochaines étapes. La branche raster expérimentale est distincte de la v0.4.2 avec Ctrl+G.
+
 Éditeur de programmes QBasic **sans numéros de ligne**, en assembleur Z80 et en ROM d'extension **16 Ko**, conçu pour le **CPC6128 (128 Ko RAM)**.
 
 ## Versions et validation
