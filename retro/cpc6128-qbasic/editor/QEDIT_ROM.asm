@@ -1,4 +1,4 @@
-; QBasic CPC6128 -- QEDIT editor ROM v0.4.2 build 001 (navigation cache correction)
+; QBasic CPC6128 -- QEDIT editor ROM v0.4.2 build 003 (navigation cache correction)
 ; Compatible Amstrad CPC6128 expansion ROM, standard MODE 2 (80x25).
 ; Install as upper ROM slot 1; from BASIC: MEMORY &5FFF : |QEDIT
 ; MEMORY must be set BEFORE launch to protect #6000..#A993.
@@ -158,8 +158,6 @@ WAIT_KEY:
         JP Z,DELETE_CHAR
         CP 12              ; Ctrl+L loads built-in 50-line scrolling test
         JP Z,LOAD_LONG_DEMO
-        CP 11              ; Ctrl+K 1500-line tokenized bank stress test
-        JP Z,LOAD_STRESS_1500
         CP 7               ; Ctrl+G: jump to logical source line
         JP Z,GOTO_LINE
         CP 2               ; Ctrl+B: beginning of document
@@ -614,8 +612,76 @@ SHOW_TEXT:
 
 ; The viewport has only 21 plain-text cache lines.  Banked RAM is consulted
 ; on page turns, not for ordinary cursor movements or text rendering.
+; Minimal line diagnostics; A=0 valid/unchecked, 1 unclosed quote,
+; 2 unbalanced parentheses. Ignore quote contents and REM/' comments.
+; Scan 76 visible characters of one cached source line (HL).
+LINE_DIAG EQU #8885
+DIAG_QUOTES EQU #8886
+DIAG_DEPTH EQU #8887
+CHECK_LINE_MINIMAL:
+        XOR A
+        LD (DIAG_QUOTES),A
+        LD (DIAG_DEPTH),A
+        LD B,76
+CLM_SCAN:
+        LD A,(HL)
+        CP 39
+        JR Z,CLM_APOSTROPHE
+        CP 34
+        JR NZ,CLM_OUTSIDE
+        LD A,(DIAG_QUOTES)
+        XOR 1
+        LD (DIAG_QUOTES),A
+        JR CLM_NEXT
+CLM_APOSTROPHE:
+        LD A,(DIAG_QUOTES)
+        OR A
+        JR Z,CLM_DONE
+        JR CLM_NEXT
+CLM_OUTSIDE:
+        LD A,(DIAG_QUOTES)
+        OR A
+        JR NZ,CLM_NEXT
+        LD A,(HL)
+        CP '('
+        JR NZ,CLM_CLOSE
+        LD A,(DIAG_DEPTH)
+        INC A
+        LD (DIAG_DEPTH),A
+        JR CLM_NEXT
+CLM_CLOSE:
+        CP ')'
+        JR NZ,CLM_NEXT
+        LD A,(DIAG_DEPTH)
+        OR A
+        JR Z,CLM_BAD_PAREN
+        DEC A
+        LD (DIAG_DEPTH),A
+CLM_NEXT:
+        INC HL
+        DJNZ CLM_SCAN
+CLM_DONE:
+        LD A,(DIAG_QUOTES)
+        OR A
+        JR NZ,CLM_BAD_QUOTE
+        LD A,(DIAG_DEPTH)
+        OR A
+        JR NZ,CLM_BAD_PAREN
+        XOR A
+        RET
+CLM_BAD_QUOTE:
+        LD A,1
+        RET
+CLM_BAD_PAREN:
+        LD A,2
+        RET
+
 DRAW_DOCUMENT_ROW:
         CALL LINE_POINTER
+        PUSH HL
+        CALL CHECK_LINE_MINIMAL
+        LD (LINE_DIAG),A
+        POP HL
         LD B,76
 DRAW_DOC_LOOP:
         LD A,(HL)
@@ -626,6 +692,19 @@ DRAW_DOC_LOOP:
         POP HL
         INC HL
         DJNZ DRAW_DOC_LOOP
+        ; 76 chars start at col 2: after them cursor is col 78.
+        ; Put diagnostic at col 79, keeping source text untouched.
+        LD A,32
+        CALL TXT_WR_CHAR
+        LD A,(LINE_DIAG)
+        OR A
+        JR Z,LINE_DIAG_BLANK
+        LD A,'!'
+        CALL TXT_WR_CHAR
+        RET
+LINE_DIAG_BLANK:
+        LD A,32
+        CALL TXT_WR_CHAR
         RET
 
 REDRAW_SCREEN:
@@ -1887,13 +1966,13 @@ MSG_ABOUT:      DB 'QEDIT v0.4.2 - CPC6128 16Ko ROM - edition sans numeros de li
 HEADER_TEXT:
         DB ' Fichier  Edition  Recherche  Execution  Debogage  Options  Fenetre  Aide   ',0
 TITLE_TEXT:
-        DB '                         [ DEMO.BAS ]        QEDIT v0.4.2 B001',0
+        DB '                         [ DEMO.BAS ]        QEDIT v0.4.2 B003',0
 STATUS_TEXT:
         DB 'Ligne:       Col:     INS  |  MODE 2  |  1500 lignes max                 ',0
 FOOTER_TEXT:
-        DB ' Ctrl+T Menus  Ctrl+G Ligne  Ctrl+K Test 1500  Ctrl+S Sauv  Esc Quitter ',0
+        DB ' Ctrl+T Menus  Ctrl+G Ligne  Ctrl+B Debut  Ctrl+E Fin  Ctrl+S Sauv  Esc Quitter ',0
 MSG_HELP:
-        DB 'Ctrl+T menus; Ctrl+G ligne; Ctrl+K 1500 lignes; Ctrl+S/O/N; Esc     ',0
+        DB 'Ctrl+T menus; Ctrl+G ligne; Ctrl+S/O/N; Esc     ',0
 MSG_NO_RUN:
         DB 'Execution QBasic: ROM moteur non encore installee. Tapez une touche.       ',0
 MSG_SAVED:
