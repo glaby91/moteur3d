@@ -655,10 +655,9 @@ DRAW_ROWS:
         LD L,A
         LD H,2
         CALL TXT_SET_CURSOR
+        ; DRAW_DOCUMENT_ROW indexes the 21-row cache, NOT absolute line.
+        ; TOP_LINE is already accounted for by CACHE_BUILD.
         LD A,(TMP_ROW)
-        LD B,A
-        LD A,(TOP_LINE)
-        ADD A,B
         CALL DRAW_DOCUMENT_ROW
         LD A,(TMP_ROW)
         INC A
