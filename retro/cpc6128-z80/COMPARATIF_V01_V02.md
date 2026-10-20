@@ -64,3 +64,8 @@ Le ratio central de ces hypothèses est **275 / 75 ≈ 3,67 fois**, mais **il ne
 - [Architecture proposée initialement](OPTIMISATION_V02_FAST_REGISTERS.md)
 
 **État :** sauvegarde GitHub des deux sources et du comparatif effectuée ; benchmark matériel encore à réaliser.
+
+
+## Vérification de compilation — 20 octobre 2026
+
+La V0.1 (**5 069 octets**) et la V0.2 (**3 160 octets**) sont maintenant **assemblées avec succès sous RASM 3.2.4bis** dans [GitHub Actions](https://github.com/glaby91/moteur3d/actions/runs/39394874757). Correction appliquée aux deux sources : syntaxe hexadécimale RASM `#xxxx`. Les précédentes mentions « non assemblé » décrivent l'état antérieur à cette vérification. **Toujours aucune exécution graphique ni mesure de FPS CPC6128.**
