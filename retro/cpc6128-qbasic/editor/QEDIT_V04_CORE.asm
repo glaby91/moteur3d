@@ -284,7 +284,7 @@ MATCH_KEYWORD:
 MATCH_NEXT_WORD:
         LD A,(TOK_IDX)
         CP TOKEN_COUNT
-        JR NC,MATCH_FAIL
+        JP NC,MATCH_FAIL
         LD L,A
         LD H,0
         ADD HL,HL
