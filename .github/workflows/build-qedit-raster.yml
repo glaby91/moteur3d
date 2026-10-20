@@ -1,0 +1,37 @@
+name: Build QEDIT MODE2 raster demo
+on:
+  push:
+    branches: [qedit-raster-mode2-demo]
+    paths:
+      - 'retro/cpc6128-qbasic/raster-demo/**'
+      - '.github/workflows/build-qedit-raster.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-raster:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build RASM assembler
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --depth 1 --branch v3.2.4bis https://github.com/EdouardBERGE/rasm.git /tmp/rasm-src
+          make -C /tmp/rasm-src release
+      - name: Compile raster demo
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd retro/cpc6128-qbasic/raster-demo
+          /tmp/rasm-src/rasm.exe RASTER.asm -ob RASTER.BIN | tee build.log
+          test -s RASTER.BIN
+          test "$(stat -c%s RASTER.BIN)" -lt 32768
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QEDIT-MODE2-RASTER-WINAPE
+          path: |
+            retro/cpc6128-qbasic/raster-demo/RASTER.BIN
+            retro/cpc6128-qbasic/raster-demo/DEMO.BAS
+            retro/cpc6128-qbasic/raster-demo/README.md
+          if-no-files-found: error
