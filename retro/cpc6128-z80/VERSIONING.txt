@@ -64,3 +64,14 @@ VERIFICATION COMPLEMENTAIRE V0.2 :
   Emulation logique des deux mecanismes identique au remplissage de reference.
   Toutes les adresses tests sont dans C000-FFFF.
   Pas de temps CPU reel chronometre.
+
+
+2026-10-20 — SAUVEGARDE COMPARATIVE V0.1 / V0.2
+  COMPARATIF_V01_V02.md
+  - Tableau sur 8 poses : lignes de triangles V0.1 652.5 -> V0.2 331.6,
+    iterations d'aretes 1305 -> 663.3, octets de triangles 4284.5 -> 2147.6.
+  - Effacement du fond par image 16000 -> 3690 octets (moyenne).
+  - Somme simplifiee ecritures fond+triangles : -71.2 %.
+  - Estimation illustrative ancienne : 275 ms -> 75 ms (~x3.67),
+    N'EST PAS un benchmark ni un gain de temps verifie.
+  - RASM et emulateur materiel encore necessaires pour mesurer les FPS.
