@@ -34,8 +34,7 @@ jobs:
           cd retro/cpc6128-qbasic/editor
           /tmp/rasm-src/rasm.exe QEDIT_ROM.asm -ob QEDIT.ROM | tee build.log
           test "$(stat -c%s QEDIT.ROM)" -eq 16384
-          sha256sum QEDIT.ROM
-          test "$(sha256sum QEDIT.ROM | cut -d " " -f 1)" != "796730034591b2fafa5fb975453013ecf8137181ed7342c1361a414f7bc69119"
+          echo "503f815beb059ec88249af986a9a42773fb11eb3e276f1df29f1ea7962466e46  QEDIT.ROM" | sha256sum -c -
       - name: Static regression checks
         run: python3 retro/cpc6128-qbasic/tests/test_token_model.py
       - name: Publish beta source and binary to qbasic branch
