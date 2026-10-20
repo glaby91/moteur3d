@@ -151,3 +151,6 @@ Démonstration de rasterisation de 24 triangles sans textures, en 16 couleurs av
 [Source V0.2 implémentée](retro/cpc6128-z80/CPC_RASTER_V02_FAST_REGISTERS.asm) · [Tests statiques et détails](retro/cpc6128-z80/README_V02_FAST_REGISTERS.md) · [V0.1 conservée](retro/cpc6128-z80/CPC_RASTER_MODE0.asm).
 
 Le nouveau rasteriseur CPC6128 Mode0 (16 couleurs pleines, sans textures) utilise réellement `HL'/DE'` via `EXX`, `PUSH BC` pour les segments vidéo longs, effacement régional et 12 faces triangulées visibles sur 24. Environ **77 % de travail de restauration du fond en moins**, validé par simulation de 8 poses ; toujours **aucun FPS réel mesuré**, faute d'assembleur/émulateur local.
+
+
+**Comparatif archivé :** [Raster CPC6128 V0.1 contre V0.2 — métriques sur huit poses](retro/cpc6128-z80/COMPARATIF_V01_V02.md). **−76,9 % d'effacement du fond et −50 % de triangles**, vérifiés statiquement ; rapport de vitesse Z80 **non mesuré**.
