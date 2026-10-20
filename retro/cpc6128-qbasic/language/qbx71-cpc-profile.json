@@ -1,0 +1,829 @@
+{
+  "schema": "qbasic-cpc-language-profile-v1",
+  "target": "Microsoft BASIC PDS 7.1 (QBX) adapted to Amstrad CPC6128",
+  "token_encoding": "one-byte IDs 0x80..0xFF; extension format not yet designed",
+  "statuses": [
+    "native",
+    "adapted",
+    "extension",
+    "unsupported"
+  ],
+  "notes": "native means intended for CPC implementation, not currently compiled; all entries stage token_only. Canonical inventory of currently assigned IDs. No claim of complete QBX7.1 vocabulary.",
+  "tokens": [
+    {
+      "id": 128,
+      "name": "PRINT",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 129,
+      "name": "FOR",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 130,
+      "name": "NEXT",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 131,
+      "name": "IF",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 132,
+      "name": "THEN",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 133,
+      "name": "ELSE",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 134,
+      "name": "END",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 135,
+      "name": "DIM",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 136,
+      "name": "AS",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 137,
+      "name": "INTEGER",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 138,
+      "name": "STRING",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 139,
+      "name": "CLS",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 140,
+      "name": "INPUT",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 141,
+      "name": "TO",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 142,
+      "name": "STEP",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 143,
+      "name": "WHILE",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 144,
+      "name": "WEND",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 145,
+      "name": "DO",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 146,
+      "name": "LOOP",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 147,
+      "name": "UNTIL",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 148,
+      "name": "SUB",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 149,
+      "name": "FUNCTION",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 150,
+      "name": "RETURN",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 151,
+      "name": "SELECT",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 152,
+      "name": "CASE",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 153,
+      "name": "EXIT",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 154,
+      "name": "REM",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 155,
+      "name": "AND",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 156,
+      "name": "OR",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 157,
+      "name": "NOT",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 158,
+      "name": "MOD",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 159,
+      "name": "GOTO",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 160,
+      "name": "GOSUB",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 161,
+      "name": "RANDOMIZE",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 162,
+      "name": "RND",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 163,
+      "name": "LEN",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 164,
+      "name": "MID$",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 165,
+      "name": "LEFT$",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 166,
+      "name": "RIGHT$",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 167,
+      "name": "CHR$",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 168,
+      "name": "ASC",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 169,
+      "name": "SLEEP",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 170,
+      "name": "BEEP",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 171,
+      "name": "COLOR",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 172,
+      "name": "LOCATE",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 173,
+      "name": "OPEN",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 174,
+      "name": "CLOSE",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 175,
+      "name": "WRITE",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 176,
+      "name": "READ",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 177,
+      "name": "DATA",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 178,
+      "name": "RESTORE",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 179,
+      "name": "SHARED",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 180,
+      "name": "STATIC",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 181,
+      "name": "BYVAL",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 182,
+      "name": "CONST",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 183,
+      "name": "DOUBLE",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 184,
+      "name": "SINGLE",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 185,
+      "name": "LONG",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 186,
+      "name": "REDIM",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 187,
+      "name": "PRESERVE",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 188,
+      "name": "OPTION",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 189,
+      "name": "BASE",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 190,
+      "name": "ON",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 191,
+      "name": "ERROR",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 192,
+      "name": "RESUME",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 193,
+      "name": "TIMER",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 194,
+      "name": "ABS",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 195,
+      "name": "SGN",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 196,
+      "name": "INT",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 197,
+      "name": "FIX",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 198,
+      "name": "SQR",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 199,
+      "name": "SIN",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 200,
+      "name": "COS",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 201,
+      "name": "TAN",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 202,
+      "name": "ATN",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 203,
+      "name": "LOG",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 204,
+      "name": "EXP",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 205,
+      "name": "SCREEN",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 206,
+      "name": "PSET",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 207,
+      "name": "PRESET",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 208,
+      "name": "LINE",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 209,
+      "name": "CIRCLE",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 210,
+      "name": "PAINT",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 211,
+      "name": "DRAW",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 212,
+      "name": "POINT",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 213,
+      "name": "VIEW",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 214,
+      "name": "WINDOW",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 215,
+      "name": "GET",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 216,
+      "name": "PUT",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 217,
+      "name": "PCOPY",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 218,
+      "name": "INSTR",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 219,
+      "name": "VAL",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 220,
+      "name": "STR$",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 221,
+      "name": "STRING$",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 222,
+      "name": "SPACE$",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 223,
+      "name": "UCASE$",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 224,
+      "name": "LCASE$",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 225,
+      "name": "LTRIM$",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 226,
+      "name": "RTRIM$",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 227,
+      "name": "HEX$",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 228,
+      "name": "OCT$",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 229,
+      "name": "INKEY$",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 230,
+      "name": "INPUT$",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 231,
+      "name": "CSRLIN",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 232,
+      "name": "POS",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 233,
+      "name": "WIDTH",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 234,
+      "name": "KEY",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 235,
+      "name": "ELSEIF",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 236,
+      "name": "STOP",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 237,
+      "name": "SWAP",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 238,
+      "name": "CALL",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 239,
+      "name": "DECLARE",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 240,
+      "name": "TYPE",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 241,
+      "name": "COMMON",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 242,
+      "name": "ERASE",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 243,
+      "name": "LBOUND",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 244,
+      "name": "UBOUND",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 245,
+      "name": "PEEK",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 246,
+      "name": "POKE",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 247,
+      "name": "SOUND",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 248,
+      "name": "PLAY",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 249,
+      "name": "CINT",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 250,
+      "name": "CLNG",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 251,
+      "name": "CSNG",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 252,
+      "name": "CDBL",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 253,
+      "name": "CSTR",
+      "profile": "native",
+      "stage": "token_only"
+    },
+    {
+      "id": 254,
+      "name": "EOF",
+      "profile": "adapted",
+      "stage": "token_only"
+    },
+    {
+      "id": 255,
+      "name": "LOF",
+      "profile": "adapted",
+      "stage": "token_only"
+    }
+  ],
+  "additional_candidates": [
+    {
+      "name": "SHELL",
+      "profile": "unsupported",
+      "reason": "No DOS shell on CPC"
+    },
+    {
+      "name": "ENVIRON$",
+      "profile": "unsupported",
+      "reason": "No DOS environment variables"
+    },
+    {
+      "name": "MODE",
+      "profile": "extension",
+      "reason": "CPC display mode"
+    },
+    {
+      "name": "INK",
+      "profile": "extension",
+      "reason": "CPC hardware ink"
+    },
+    {
+      "name": "BORDER",
+      "profile": "extension",
+      "reason": "CPC hardware border"
+    },
+    {
+      "name": "PEN",
+      "profile": "extension",
+      "reason": "CPC firmware pen"
+    },
+    {
+      "name": "PAPER",
+      "profile": "extension",
+      "reason": "CPC firmware background"
+    },
+    {
+      "name": "PLOT",
+      "profile": "extension",
+      "reason": "CPC pixel plot"
+    },
+    {
+      "name": "SYMBOL",
+      "profile": "extension",
+      "reason": "CPC user-defined characters"
+    }
+  ]
+}
