@@ -154,3 +154,6 @@ Le nouveau rasteriseur CPC6128 Mode0 (16 couleurs pleines, sans textures) utilis
 
 
 **Comparatif archivé :** [Raster CPC6128 V0.1 contre V0.2 — métriques sur huit poses](retro/cpc6128-z80/COMPARATIF_V01_V02.md). **−76,9 % d'effacement du fond et −50 % de triangles**, vérifiés statiquement ; rapport de vitesse Z80 **non mesuré**.
+
+
+**Assemblage RASM réalisé (20 octobre 2026) :** [GitHub Actions — compilations V0.1 et V0.2](https://github.com/glaby91/moteur3d/actions/runs/39394874757). Binaires de **5 069 et 3 160 octets**, artefact `cpc6128-rasm-build`. La validation sur émulateur et les FPS restent à faire.
