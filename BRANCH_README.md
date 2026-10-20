@@ -27,3 +27,6 @@ Cette version CPC est une démonstration expérimentale ; elle doit encore être
 - [Tests statiques, mémoire et différences d'image](retro/cpc6128-z80/README_V02_FAST_REGISTERS.md).
 
 La V0.1 est conservée pour comparaison. **Pas de FPS mesuré ni de validation assembleur/matériel**.
+
+
+**Comparatif de performances conservé :** [V0.1 vs V0.2 (comptes d'opérations et hypothèses FPS)](retro/cpc6128-z80/COMPARATIF_V01_V02.md). Les prévisions de cadence ne sont pas des benchmarks.
