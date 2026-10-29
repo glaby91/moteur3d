@@ -78,3 +78,44 @@ Le banc synthétique de cette archive reste utile comme mesure de saturation, ma
 - Version moteur de départ : V9.2 sur `master`.
 - Banc T0 : 29 octobre 2026.
 - Document PDF du protocole T0 : conservé avec les livrables du projet.
+
+
+## Diagnostic des goulots V9.2 à partir des captures moteur
+
+Capture de diagnostic native communiquée : **1920 × 1200**, soit 2 304 000 rayons primaires ; **119 primitives mathématiques** plus le plan infini. Réglages comparés par Rodolphe : bilinéaire sur les trois mesures de précision.
+
+| Compteur | Valeur observée | Lecture |
+|---|---:|---|
+| Image complète | 1 529,3 ms | Temps de référence de cette capture, incluant les pauses de rafraîchissement navigateur |
+| Intersections BVH | 377,3 ms | Environ 24,7 % du temps complet |
+| Éclairage / texels | 875,2 ms | Environ 57,2 % ; premier poste mesuré |
+| Temps hors boucles trace + shading | 276,8 ms | Environ 18,1 % : orchestration, préparation, présentation et pauses navigateur ; ce n’est pas une mesure isolée du Canvas |
+| Tests géométriques | 2 524 416 | Environ 1,10 test par rayon : le rejet BVH est déjà efficace dans cette scène |
+| Nœuds BVH parcourus | 129 128 | Environ 14,3 visites par tuile 16 × 16 à 1920 × 1200 |
+| Intersections réussies | 1 472 482 | 63,9 % des rayons |
+| Rayons ciel | 831 518 | 36,1 % des rayons |
+| Texels lus | 5 889 928 | Quatre lectures par intersection, cohérent avec l’échantillonnage bilinéaire |
+| Évaluations nuages | 83 475 | L’échantillonnage en grille évite une évaluation par rayon ciel |
+| PCF complet / évité | 415 677 / 881 224 | La classification accélérée évite déjà de nombreuses évaluations d’ombre |
+
+### Classement provisoire
+
+1. **Éclairage et échantillonnage texture** : 875 ms, soit le poste dominant dans cette capture. Le chemin par pixel fait les calculs de matériau, texture, ombre et brouillard. Optimiser uniquement la BVH ne traitera pas la majorité du temps mesuré.
+2. **Nombre de pixels/rayons** : le nombre de rayons reste directement lié à la résolution interne. Dans les captures de Rodolphe, le mode 75 % par axe lance 1 296 000 rayons et termine en 964,7 ms ; le mode 50 % lance 576 000 rayons et termine en 425,4 ms. La baisse de résolution interne est donc le levier déjà démontré le plus net, avec une reconstruction d’image à contrôler visuellement.
+3. **Coût des ombres** : le PCF complet concerne 415 677 pixels. Son temps propre n’est pas séparé dans les compteurs ; il faut instrumenter ce poste avant de décider s’il faut réduire ou modifier la qualité d’ombre.
+4. **Orchestration et présentation** : environ 277 ms ne sont pas couverts par les compteurs trace/shading. `finishMs` inclut explicitement les pauses entre rafraîchissements du navigateur. Il faut séparer temps CPU actif, attente `requestAnimationFrame`, copie `putImageData` et agrandissement de résolution.
+5. **BVH** : elle ne ressort pas comme premier goulot sur cette scène : 377 ms face à 875 ms pour shading/texels, avec environ 1,1 test géométrique moyen par rayon. Elle reste à mesurer sur une scène plus complexe, mais ce n’est pas la priorité de la prochaine optimisation.
+
+### Écart entre séries à résoudre
+
+La capture de diagnostics indique 1 529,3 ms pour l’image native ; la série de concurrence du même jour affiche 3 758 ms sans worker. Ces valeurs diffèrent d’un facteur 2,46. Les paramètres exacts, l’échauffement, la charge Windows, le budget de rafraîchissement et les conditions d’exécution ne sont donc pas encore suffisamment contrôlés pour fusionner les temps absolus. Les pourcentages trace/shading ci-dessus viennent de la capture de diagnostics ; les écarts relatifs entre 0/1/2/3 workers viennent uniquement de la même série worker.
+
+### Ordre d’optimisation retenu
+
+- Instrumenter à part texture, ombres, brouillard, temps CPU actif, attente navigateur et présentation.
+- Garder la BVH comme elle est jusqu’à preuve qu’elle devient dominante sur des scènes plus lourdes.
+- Prototyper l’anticipation et la réutilisation N→N+1 avec l’image réelle, ses identifiants de surface et ses profondeurs.
+- Mesurer le taux de pixels réutilisés, les trous/occlusions recalculés, le coût de correction et la qualité visuelle.
+- Comparer les modes natif, 75 % et 50 % avec la même scène et les mêmes réglages ; ensuite seulement sélectionner l’architecture matérielle pour 4K/100 FPS.
+
+Les temps et ratios de cette section sont des observations de captures, non des benchmarks reproductibles instrumentés sur la machine cible.
