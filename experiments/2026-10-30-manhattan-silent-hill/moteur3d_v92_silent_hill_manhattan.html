@@ -301,30 +301,52 @@ function makeScene(){
  roundBox(tx+.58,.38,tz-1.78,tx+.96,.67,tz-1.74,.09,'lamp');
  roundBox(tx-.94,.28,tz+1.68,tx+.94,.42,tz+1.78,.06,'metal');
 
- // Large bloodsucker: hunched torso, long limbs, claws and facial tendrils.
+ // Lean bloodsucker, assembled from the same analytical primitives as the
+ // street. A raised arm and swept-back curling tendrils give it a readable,
+ // moving silhouette without importing a mesh or an external model.
  const mx=1.65,mz=-4.6;
- ellipse(mx,2.1,mz,.64,1.03,.47,'mutant');
- ellipse(mx-.08,2.78,mz+.12,.49,.44,.42,'mutant');
- ellipse(mx,3.28,mz+.24,.34,.39,.32,'mutant');
- ellipse(mx,3.31,mz+.49,.23,.18,.12,'claw');
- cone([mx-.32,1.5,mz],[mx-.48,.73,mz+.12],.24,.15,'mutant');
- cone([mx-.48,.73,mz+.12],[mx-.6,.12,mz+.32],.15,.075,'mutant');
- cone([mx+.3,1.52,mz],[mx+.5,.77,mz+.08],.23,.14,'mutant');
- cone([mx+.5,.77,mz+.08],[mx+.62,.12,mz+.3],.14,.075,'mutant');
- cone([mx-.43,2.65,mz],[mx-.91,2.15,mz+.05],.24,.17,'mutant');
- cone([mx-.91,2.15,mz+.05],[mx-1.12,1.22,mz+.32],.17,.09,'mutant');
- cone([mx+.42,2.63,mz],[mx+.86,2.12,mz+.04],.23,.16,'mutant');
- cone([mx+.86,2.12,mz+.04],[mx+1.02,1.18,mz+.32],.16,.085,'mutant');
- for(const sign of [-1,1])for(let claw=0;claw<3;claw++){
-  const x=mx+sign*(1+claw*.07),z=mz+.35+claw*.08;
-  cone([x,1.25,z],[x+sign*.055,.72,z+.13],.065,.012,'claw');
+ ellipse(mx,2.02,mz,.37,.91,.34,'mutant');                 // narrow torso
+ ellipse(mx-.03,2.73,mz+.09,.34,.34,.31,'mutant');        // sloped shoulders
+ ellipse(mx+.02,3.26,mz+.17,.24,.30,.25,'mutant');        // head under tendrils
+ ellipse(mx+.02,3.22,mz+.39,.17,.13,.08,'claw');          // shadowed face
+ // Long, spare legs, slightly bent as it advances through the fog.
+ cone([mx-.21,1.43,mz],[mx-.40,.78,mz+.10],.15,.105,'mutant');
+ cone([mx-.40,.78,mz+.10],[mx-.49,.10,mz+.35],.105,.055,'mutant');
+ cone([mx+.20,1.43,mz],[mx+.43,.77,mz+.08],.15,.10,'mutant');
+ cone([mx+.43,.77,mz+.08],[mx+.52,.10,mz+.34],.10,.052,'mutant');
+ // One arm reaches high; tapered forearm and separated claws make the pose
+ // legible at distance. The other arm hangs almost to the knee.
+ cone([mx-.27,2.72,mz],[mx-.61,2.36,mz+.02],.15,.115,'mutant');
+ cone([mx-.61,2.36,mz+.02],[mx-.76,1.48,mz+.24],.115,.065,'mutant');
+ cone([mx+.28,2.72,mz],[mx+.51,3.20,mz+.01],.145,.105,'mutant');
+ cone([mx+.51,3.20,mz+.01],[mx+.82,4.12,mz+.12],.105,.071,'mutant');
+ cone([mx+.82,4.12,mz+.12],[mx+1.08,4.93,mz+.22],.071,.045,'mutant');
+ for(let finger=0;finger<4;finger++){
+  const spread=(finger-1.5)*.10;
+  cone([mx+1.08+spread,4.91,mz+.22],[mx+1.14+spread*1.5,5.22-(finger%2)*.12,mz+.29],.047,.008,'claw');
  }
+ for(let finger=0;finger<3;finger++){
+  const spread=(finger-1)*.075;
+  cone([mx-.76+spread,1.49,mz+.24],[mx-.84+spread,1.05-(finger%2)*.09,mz+.39],.045,.008,'claw');
+ }
+ // Smooth-looking whiplash curves made from short tapered cone segments.
+ // The points form broad curls around the head rather than a static hair fringe.
+ function tendril(points,radius,phase=0){
+  for(let i=0;i<points.length-1;i++){
+   const taper=1-i/(points.length-1),r0=radius*(.36+.64*taper),r1=radius*(.29+.64*taper);
+   cone(points[i],points[i+1],r0,r1,'mutant');
+  }
+ }
+ const hx=mx+.02,hy=3.36,hz=mz+.2;
+ tendril([[hx-.08,hy,hz],[hx-.42,3.72,hz-.05],[hx-.92,4.15,hz-.03],[hx-1.55,4.24,hz+.04],[hx-1.92,4.02,hz+.15],[hx-1.84,3.72,hz+.25]],.095);
+ tendril([[hx-.15,hy+.02,hz],[hx-.54,3.42,hz-.18],[hx-.88,3.72,hz-.31],[hx-1.18,4.12,hz-.24],[hx-1.52,4.30,hz-.08],[hx-1.70,4.10,hz+.10]],.078);
+ tendril([[hx+.02,hy+.02,hz],[hx+.42,3.70,hz-.06],[hx+.82,4.08,hz-.12],[hx+1.22,4.35,hz-.10],[hx+1.49,4.13,hz+.03],[hx+1.35,3.86,hz+.19]],.09);
+ tendril([[hx+.08,hy-.04,hz],[hx+.45,3.22,hz-.20],[hx+.82,3.46,hz-.31],[hx+1.16,3.78,hz-.25],[hx+1.48,3.74,hz-.08],[hx+1.58,3.48,hz+.11]],.07);
+ // Fine face tendrils drop in front of the head and separate in the wind.
  for(let i=0;i<5;i++){
-  const spread=(i-2)*.13,y=3.27-Math.abs(i-2)*.035;
-  cone([mx+spread,y,mz+.55],[mx+spread*1.45,y-.58-(i%2)*.14,mz+.84],.075,.012,'mutant');
+  const spread=(i-2)*.095,y=3.35-Math.abs(i-2)*.025;
+  tendril([[hx+spread,y,hz+.12],[hx+spread*1.15,3.06,hz+.28],[hx+spread*1.35,2.83-(i%2)*.12,hz+.38]],.055);
  }
- ellipse(mx-.15,3.43,mz+.57,.055,.035,.018,'claw');
- ellipse(mx+.15,3.43,mz+.57,.055,.035,.018,'claw');
  // Van fades into the fog behind the creature.
  roundBox(-1.65,0,-10.8,1.55,1.45,-8.2,.18,'concrete');
  roundBox(-1.35,1.45,-10.55,1.25,2.45,-8.5,.14,'glass');
