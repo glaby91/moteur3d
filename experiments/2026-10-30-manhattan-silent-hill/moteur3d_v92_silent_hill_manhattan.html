@@ -248,7 +248,10 @@ function makeScene(){
    }
   }
  }
- fireEscape(-6,1,3,-1);fireEscape(6,-5,3,1);fireEscape(-6,-9,2,-1);
+ // Platforms and ladders face into the avenue; the old side signs hid them
+ // behind the walls from the player's street-level camera.
+ fireEscape(-6,1,3,1);fireEscape(6,-5,3,-1);fireEscape(-6,-9,2,1);
+ fireEscape(6,-12,2,-1);fireEscape(-5.8,-19,4,1);fireEscape(5.8,-25,4,-1);
  // Street lamps with amber lenses.
  for(const [x,z] of [[-5.65,4.8],[5.65,-1.6],[-5.65,-9.5]]){
   cone([x,0,z],[x,5.2,z],.13,.075,'metal');
@@ -259,6 +262,26 @@ function makeScene(){
   cone([x,0,z],[x,.64,z],.23,.18,'rust');ellipse(x,.63,z,.24,.12,.24,'rust');
   cone([x-.27,.32,z],[x-.48,.32,z],.10,.08,'rust');
   cone([x+.27,.32,z],[x+.48,.32,z],.10,.08,'rust');
+ }
+ // Street furniture: parking meters, litter bins, newspaper boxes and bollards.
+ for(const [x,z] of [[-5.48,1.2],[5.48,-3.9],[-5.48,-12.2],[5.48,-20.6]]){
+  cone([x,0,z],[x,.98,z],.045,.032,'metal');
+  roundBox(x-.16,.87,z-.13,x+.16,1.16,z+.13,.08,'sign');
+  ellipse(x,1.04,z+.14,.06,.08,.025,'lamp');
+ }
+ for(const [x,z] of [[-5.58,-2.7],[5.58,-14.1]]){
+  cone([x,0,z],[x,.82,z],.22,.2,'metal');
+  ellipse(x,.83,z,.23,.07,.23,'concrete');
+  for(let rib=0;rib<5;rib++)roundBox(x-.18+rib*.075,.25,z-.205,x-.14+rib*.075,.67,z-.19,.018,'rust');
+ }
+ for(const [x,z,mat] of [[-5.55,-4.4,'neon'],[5.55,-9.8,'sign']]){
+  roundBox(x-.24,.04,z-.27,x+.24,.88,z+.27,.12,'metal');
+  roundBox(x-.19,.23,z-.29,x+.19,.73,z-.27,.07,mat);
+  roundBox(x-.2,.88,z-.3,x+.2,.96,z+.3,.04,'concrete');
+ }
+ for(const [x,z] of [[-5.55,-1.1],[-5.55,-15.8],[5.55,-5.6],[5.55,-22.8]]){
+  cone([x,0,z],[x,.62,z],.085,.075,'metal');
+  ellipse(x,.62,z,.105,.07,.105,'lamp');
  }
  // Abandoned yellow cab. Windows, wheels, lights and roof sign are separate surfaces.
  const tx=-2.35,tz=1.45;
@@ -398,6 +421,13 @@ function makeScene(){
   ellipse(x,.38,z,.48,.34,.36,'rubber');
   ellipse(x+.28,.28,z+.13,.25,.22,.24,'rubber');
   for(let i=0;i<3;i++)box(x-.65+i*.19,.025,z-.55+i*.16,x-.48+i*.19,.15,z-.39+i*.16,'debris');
+ }
+ // Small facade service details: drain elbows, junction cabinets and conduit.
+ for(const [side,z] of [[-1,-4.4],[1,-8.4],[-1,-18.8],[1,-23.6]]){
+  const face=z<-15?(side<0?-5.72:5.72):(side<0?-5.9:5.9);
+  roundBox(face-.08,.3,z-.36,face+.08,1.65,z+.36,.09,'metal');
+  roundBox(face-.12,1.68,z-.22,face+.12,2.38,z+.22,.1,'sign');
+  for(let cable=0; cable<3; cable++)cone([face,2.5+ cable*.09,z-.18],[face,3.8+cable*.12,z-.18],.018,.014,'rust');
  }
 
  // Extra ribs and shoulder spines break up the bloodsucker's smooth silhouette.
