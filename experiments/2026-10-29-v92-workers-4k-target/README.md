@@ -79,7 +79,7 @@ Le banc synthétique de cette archive reste utile comme mesure de saturation, ma
 
 - [Hypothèse de rendu par événements de visibilité](CONCEPTION_RENDERING_PAR_FRONTIERES.md) — piste prioritaire pour changer la représentation du calcul.
 - [Diagnostic PDF des goulots T0](diagnostic_goulots_moteur3d_v92_T0_2026-10-29.pdf).
-- [Simulation HTML de la carte de visibilité](moteur3d_v92_simulation_carte_visibilite.html) et [notice PDF T0](notice_simulation_carte_visibilite_V92_T0_2026-10-29.pdf).
+- [Simulation HTML de la carte de visibilité](moteur3d_v92_simulation_carte_visibilite.html) et [notice PDF T0](notice_simulation_carte_visibilite_V92_T0_2026-10-29.pdf). La section 06 simule maintenant la reconstruction couleur ; voir aussi la [notice PDF de reconstruction](notice_simulation_reconstruction_visibility_V92_T0_2026-10-29.pdf).
 - [Enregistrement PDF des résultats de la première exécution](enregistrement_carte_visibilite_V92_T0_2026-10-29.pdf).
 - [Piste secondaire des feuilles de surface](CONCEPTION_FEUILLES_SURFACE_PLIEES.md), conservée comme réflexion exploratoire.
 
@@ -175,3 +175,17 @@ Les faux stables diminuent de 81,1 % et leur part dans la surface proposée pass
 Les deux exécutions de l’essai 2 affichent 19,0 ms puis 14,9 ms (moyenne observée : 16,95 ms ; écart : 4,1 ms). L’ancien chrono global ne sépare pas le classement du contrôle exhaustif ; ces temps ne décrivent donc pas le coût du renderer envisagé. La dernière version HTML sépare classement, validation exhaustive et durée totale ; relancer l’analyse avec cette version pour relever ces temps distinctement. La validation exhaustive est le contrôle contre l’image complète, pas le coût du renderer envisagé.
 
 Ces résultats restent issus de captures ponctuelles. L’identité de la scène et des autres réglages doit être confirmée pour faire une comparaison stricte, et la qualité couleur/contours n’est pas encore mesurée. Voir [l’enregistrement PDF comparatif essai 2](enregistrement_carte_visibilite_V92_T0_2026-10-29_essai2.pdf).
+
+
+## Prototype d’image reconstruite par carte de visibilité
+
+La section 06 de la simulation produit une candidate visible après le calcul de la carte :
+
+- cinq sondes couleur par tuile stable : quatre coins et centre ;
+- interpolation bilinéaire des coins, corrigée par l’écart de la sonde centrale ;
+- copie des pixels V9.2 de référence pour les tuiles incertaines ;
+- comparaison candidate/référence avec erreur moyenne maximale RGB, part des pixels stables dépassant 8 niveaux et visualisation des écarts.
+
+Cette simulation permet d’observer les défauts couleur de l’interpolation, mais **ne calcule pas encore une vraie image N+1**. Les zones incertaines sont copiées gratuitement depuis le rendu complet déjà disponible ; le temps affiché est le coût CPU de reconstruction/comparaison sur les buffers existants, pas un temps de rendu. Cette limite rend la qualité mesurée optimiste et le temps impropre à conclure à un gain de FPS.
+
+La section 05 reste le contrôle géométrique de stabilité et l’estimation théorique du nombre de rayons. La version V9.2 du renderer est inchangée.
