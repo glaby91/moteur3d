@@ -28,6 +28,11 @@ input[type=range]{width:100%;accent-color:var(--accent)}input[type=checkbox]{acc
 canvas#visibilityMap{display:block;width:100%;max-height:470px;object-fit:contain;background:#0b1622;border:1px solid #35516b;border-radius:6px}
 .vm-grid{display:grid;grid-template-columns:1.2fr 1fr;gap:14px;align-items:start}
 @media(max-width:900px){.vm-grid{grid-template-columns:1fr}}
+.recon-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px}
+.recon-grid figure{margin:0;min-width:0}
+.recon-grid canvas{display:block;width:100%;aspect-ratio:16/10;height:auto;background:#0b1622;border:1px solid #35516b;border-radius:6px}
+.recon-grid figcaption{font-size:11px;color:var(--muted);margin-top:5px}
+@media(max-width:900px){.recon-grid{grid-template-columns:1fr}}
 </style>
 </head><body>
 <header><div><h1>◈ Moteur 3D V9.2 — Ray casting mathématique · 16:10 · Ciel optimisé</h1>
@@ -128,6 +133,22 @@ canvas#visibilityMap{display:block;width:100%;max-height:470px;object-fit:contai
 <div class="hint" id="vmNote">En attente d’une image V9.2 complète. L’estimation de rayons suppose qu’une tuile stable peut être remplie à partir de sa surface et de sa profondeur interpolée ; le coût de remplissage et l’erreur couleur restent à mesurer.</div>
 </div></div>
 </section>
+<section class="panel" id="reconstructionPanel" style="margin-top:14px">
+<h2>06 / Simulation — reconstruction et comparaison de l’image</h2>
+<p class="notice">Pour chaque tuile déclarée stable, le prototype reconstruit les couleurs à partir de cinq sondes (quatre coins et centre). Les tuiles incertaines reprennent les pixels de référence V9.2 pour isoler l’erreur de reconstruction des zones stables. Cette copie de référence est un repli idéal : son coût n’est pas simulé comme un nouveau rendu.</p>
+<div class="row"><button class="primary" id="vmReconstruct" disabled>Reconstruire l’image candidate</button><span class="muted" id="vmReconStatus">Analysez d’abord une image terminée.</span></div>
+<div class="recon-grid">
+<figure><canvas id="vmCandidate" width="640" height="400"></canvas><figcaption>Image candidate : interpolation des sondes dans les tuiles stables, référence recopiée dans les tuiles incertaines.</figcaption></figure>
+<figure><canvas id="vmErrorImage" width="640" height="400"></canvas><figcaption>Écart couleur avec V9.2 : noir = identique, jaune/rouge = écart croissant.</figcaption></figure>
+</div>
+<div class="statgrid" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+<div class="stat"><b id="vmReconTime">—</b><small>ms reconstruction + comparaison CPU</small></div>
+<div class="stat"><b id="vmColorMae">—</b><small>erreur couleur moyenne, zones stables (0–255)</small></div>
+<div class="stat"><b id="vmBadColor">—</b><small>pixels stables avec écart &gt; 8 niveaux</small></div>
+<div class="stat"><b id="vmFallback">—</b><small>surface recopiée depuis la référence</small></div>
+</div>
+<div class="hint" id="vmReconNote">Cette simulation mesure la qualité de l’interpolation couleur sur une image existante. Elle ne mesure pas le temps d’un futur moteur N+1 et ne compte pas le coût du repli exact.</div>
+</section>
 </main>
 <script>
 'use strict';
@@ -140,6 +161,7 @@ const sun=norm(-.55,.88,.36),skyZenith=[58,115,181],skyHorizon=[187,205,211];
 let W=640,H=400,displayW=640,displayH=400,renderScale=1,frameImage=null,pixels=null,hitIds=null,hitDistances=null;
 let scaledCanvas=null,scaledContext=null;
 let imageSerial=0,renderJob=null,shadowJob=null,shadowMap=null,preparedTexHigh=false,predictiveBench=null;
+let visibilityMapState=null;
 let materials=new Map(),objects=[],bvh=[],bvhRoot=-1;
 let currentCam=null;
 const stats={rays:0,tests:0,nodes:0,hits:0,sky:0,texels:0,traceMs:0,shadeMs:0,finishMs:0,tiles:0,pcfFull:0,pcfSaved:0,cloudEvaluations:0,mips:new Uint32Array(10)};
@@ -1050,6 +1072,7 @@ async function runPredictiveSeries(){
 function visibilityMapAnalyze(){
  const mapCanvas=$('visibilityMap'),mctx=mapCanvas.getContext('2d');
  if(!hitIds||!hitDistances||!frameImage){$('vmNote').textContent='Aucun buffer d’image disponible.';return}
+ $('vmReconstruct').disabled=true;$('vmReconStatus').textContent='Carte en cours de calcul…';
  const started=performance.now(),tile=+$('vmTile').value,tol=+$('vmTolerance').value;
  const cols=Math.ceil(W/tile),rows=Math.ceil(H/tile),mapData=mctx.createImageData(cols,rows);
  const count=cols*rows,classes=new Uint8Array(count),expectedIds=new Uint16Array(count),cornerDepths=new Float64Array(count*4);
@@ -1085,6 +1108,7 @@ function visibilityMapAnalyze(){
   }
  }
  const validateMs=performance.now()-validationStarted;
+ visibilityMapState={tile,cols,rows,classes};
  mapCanvas.width=cols;mapCanvas.height=rows;mctx.putImageData(mapData,0,0);
  const full=W*H,saved=Math.max(0,full-estimatedRays),elapsed=performance.now()-started;
  $('vmStable').textContent=(stableArea/full*100).toFixed(1)+' %';
@@ -1097,10 +1121,57 @@ function visibilityMapAnalyze(){
  $('vmClassifyTime').textContent=classifyMs.toFixed(1)+' ms';
  $('vmValidateTime').textContent=validateMs.toFixed(1)+' ms';
  $('vmTime').textContent=elapsed.toFixed(1)+' ms';
+ $('vmReconstruct').disabled=false;
+ $('vmReconStatus').textContent='Carte prête. La reconstruction utilise les sondes couleur et les pixels de référence des tuiles incertaines.';
  $('vmNote').textContent=`${cols*rows} tuiles. ${falseStable.toLocaleString('fr-FR')} faux stables parmi ${verifiedArea.toLocaleString('fr-FR')} pixels géométriques vérifiés contre le rendu complet. Le temps de validation parcourt ces pixels de référence ; il ne fait pas partie du renderer proposé. L’estimation de rayons n’inclut pas le coût de remplissage couleur.`;
+}
+function reconstructVisibilityImage(){
+ const state=visibilityMapState;if(!state||!frameImage)return;
+ const started=performance.now(),source=frameImage.data,candidate=$('vmCandidate'),errorCanvas=$('vmErrorImage');
+ candidate.width=W;candidate.height=H;errorCanvas.width=W;errorCanvas.height=H;
+ const out=candidate.getContext('2d').createImageData(W,H),errOut=errorCanvas.getContext('2d').createImageData(W,H),dest=out.data,heat=errOut.data;
+ let stablePixels=0,fallbackPixels=0,sumMaxError=0,above8=0;
+ const sample=(x,y,c)=>source[(y*W+x)*4+c];
+ for(let ty=0;ty<state.rows;ty++)for(let tx=0;tx<state.cols;tx++){
+  const ti=ty*state.cols+tx,tile=state.tile,x0=tx*tile,y0=ty*tile,x1=Math.min(W-1,x0+tile-1),y1=Math.min(H-1,y0+tile-1),xm=(x0+x1)>>1,ym=(y0+y1)>>1;
+  const stable=state.classes[ti]===0||state.classes[ti]===3;
+  if(!stable){
+   for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){const p=(y*W+x)*4;dest[p]=source[p];dest[p+1]=source[p+1];dest[p+2]=source[p+2];dest[p+3]=255;fallbackPixels++;}
+   continue;
+  }
+  const wxm=x1===x0?0:4*((xm-x0)/(x1-x0))*(1-(xm-x0)/(x1-x0));
+  const wym=y1===y0?0:4*((ym-y0)/(y1-y0))*(1-(ym-y0)/(y1-y0));
+  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+   const fx=x1===x0?0:(x-x0)/(x1-x0),fy=y1===y0?0:(y-y0)/(y1-y0),wx=4*fx*(1-fx),wy=4*fy*(1-fy);
+   const p=(y*W+x)*4,centerWeight=wxm*wym?(wx*wy)/(wxm*wym):0;
+   const fxm=x1===x0?0:(xm-x0)/(x1-x0),fym=y1===y0?0:(ym-y0)/(y1-y0);
+   let maxErr=0;
+   for(let c=0;c<3;c++){
+    const c00=sample(x0,y0,c),c10=sample(x1,y0,c),c01=sample(x0,y1,c),c11=sample(x1,y1,c),cc=sample(xm,ym,c);
+    const bilinear=(c00*(1-fx)+c10*fx)*(1-fy)+(c01*(1-fx)+c11*fx)*fy;
+    const centerBase=(c00*(1-fxm)+c10*fxm)*(1-fym)+(c01*(1-fxm)+c11*fxm)*fym;
+    const value=clamp(Math.round(bilinear+(cc-centerBase)*centerWeight),0,255);dest[p+c]=value;maxErr=Math.max(maxErr,Math.abs(value-source[p+c]));
+   }
+   dest[p+3]=255;stablePixels++;sumMaxError+=maxErr;if(maxErr>8)above8++;
+  }
+ }
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+  const p=(y*W+x)*4,d=Math.max(Math.abs(dest[p]-source[p]),Math.abs(dest[p+1]-source[p+1]),Math.abs(dest[p+2]-source[p+2]));
+  const r=Math.min(255,d*4),g=Math.max(0,Math.min(220,(d-24)*3)),b=Math.max(0,Math.min(80,(d-80)*.8));
+  heat[p]=r;heat[p+1]=g;heat[p+2]=b;heat[p+3]=255;
+ }
+ const elapsed=performance.now()-started;
+ candidate.getContext('2d').putImageData(out,0,0);errorCanvas.getContext('2d').putImageData(errOut,0,0);
+ $('vmReconTime').textContent=elapsed.toFixed(1)+' ms';
+ $('vmColorMae').textContent=(stablePixels?sumMaxError/stablePixels:0).toFixed(2);
+ $('vmBadColor').textContent=(stablePixels?100*above8/stablePixels:0).toFixed(1)+' %';
+ $('vmFallback').textContent=(100*fallbackPixels/(W*H)).toFixed(1)+' %';
+ $('vmReconStatus').textContent='Image candidate reconstruite et comparée à la référence V9.2.';
+ $('vmReconNote').textContent=`Simulation sur ${W.toLocaleString('fr-FR')} × ${H.toLocaleString('fr-FR')} pixels. Les tuiles incertaines (${fallbackPixels.toLocaleString('fr-FR')} pixels) sont copiées depuis l’image V9.2 déjà calculée : ce repli rend la comparaison optimiste et son coût n’est pas inclus. Le temps affiché mesure uniquement interpolation, copie et comparaison couleur sur les buffers existants ; ce n’est pas un temps de rendu N+1.`;
 }
 function initVisibilityMap(){
  $('vmAnalyze').addEventListener('click',visibilityMapAnalyze);
+ $('vmReconstruct').addEventListener('click',reconstructVisibilityImage);
  $('vmTile').addEventListener('change',()=>{if(frameImage)visibilityMapAnalyze()});
  $('vmTolerance').addEventListener('change',()=>{if(frameImage)visibilityMapAnalyze()});
 }
