@@ -294,6 +294,78 @@ function makeScene(){
  box(-1.65,0,-10.8,1.55,1.45,-8.2,'concrete');
  box(-1.35,1.45,-10.55,1.25,2.45,-8.5,'glass');
  for(const x of [-1.1,1.0])ellipse(x,.43,-9.8,.18,.39,.39,'rubber');
+
+ // Recessed street-facing windows: individual panes, sills and occasional
+ // sickly occupied rooms make the canyon read as buildings, not one texture.
+ const windowRows=[
+  {z:[-4.0,-6.5,-9.0,-11.5],floors:5},
+  {z:[-16.0,-18.7,-21.4,-24.1,-26.8],floors:8}
+ ];
+ for(const side of [-1,1])for(const block of windowRows)for(const z of block.z){
+  for(let floor=0;floor<block.floors;floor++){
+   const y=1.1+floor*1.72,face=side<0?-5.94:5.94;
+   const paneMat=((Math.floor((z+40)*7)+floor*11+(side+1)*5)%13===0)?'windowlit':'windowdark';
+   box(face-.035,y,z-.43,face+.035,y+1.12,z+.43,'metal');
+   box(face-.06,y+.09,z-.34,face+.06,y+1.01,z+.34,paneMat);
+   box(face-.095,y-.08,z-.48,face+.095,y+.01,z+.48,'concrete');
+  }
+ }
+ // Ground-floor storefronts, battered signs and striped awnings.
+ for(const [side,z,labelMat] of [[-1,-5.2,'sign'],[1,-5.2,'rust'],[-1,-17.2,'rust'],[1,-17.2,'sign']]){
+  const face=side<0?-5.9:5.9;
+  box(face-.12,.82,z-1.2,face+.12,1.84,z+1.2,'metal');
+  box(face-.17,1.02,z-1.08,face+.17,1.67,z+1.08,'windowdark');
+  box(face-.23,1.92,z-1.32,face+.23,2.3,z+1.32,labelMat);
+  for(let stripe=0;stripe<6;stripe++){
+   const zz=z-.98+stripe*.39;
+   box(face-.58,1.72,zz,face-.12,1.83,zz+.18,(stripe&1)?'paint':'rust');
+  }
+ }
+ // Roofline water tanks and ducts give distant silhouettes extra depth.
+ for(const [x,z,top] of [[-8.3,-12,12.4],[9.0,-12,12.1],[-7.8,-28,20.2],[8.7,-28,19.2]]){
+  box(x-.78,top,z-.72,x+.78,top+1.8,z+.72,'rust');
+  ellipse(x,top+1.8,z,.78,.22,.72,'metal');
+  for(const dx of [-.52,.52])cone([x+dx,top-.1,z-.48],[x+dx,top,z-.48],.045,.045,'metal');
+ }
+ // Sagging overhead wires across the avenue, visible against the fog.
+ for(const z of [-3.2,-8.4,-13.8,-20.4]){
+  cone([-5.75,6.2,z],[5.75,5.75,z+.45],.018,.018,'metal');
+  cone([-5.75,6.35,z+.12],[5.75,5.9,z+.58],.014,.014,'rust');
+ }
+ // Traffic signal, battered street-name blade and a fallen barrier.
+ cone([4.7,0,2.1],[4.7,4.5,2.1],.095,.065,'metal');
+ box(4.36,3.45,1.91,5.04,4.42,2.29,'rust');
+ for(let light=0;light<3;light++)ellipse(4.7,4.17-light*.29,2.31,.13,.105,.055,light===0?'rust':light===1?'lamp':'windowdark');
+ box(4.18,3.06,1.89,5.18,3.24,2.34,'sign');
+ box(-4.85,.08,-1.2,-2.95,.2,-.97,'rust');
+ cone([-4.65,.18,-1.18],[-4.6,.48,-1.16],.045,.025,'metal');
+ cone([-3.2,.18,-1.18],[-3.25,.48,-1.16],.045,.025,'metal');
+ // Manholes, oily puddles, paper boxes and torn street debris.
+ ellipse(-3.8,.025,-4.1,.68,.018,.38,'metal');
+ ellipse(2.9,.028,-7.4,.95,.022,.48,'puddle');
+ ellipse(-1.2,.026,-13.1,.7,.018,.34,'puddle');
+ ellipse(3.8,.027,1.2,.55,.02,.3,'puddle');
+ for(const [x,z] of [[-4.35,-7.8],[3.75,-10.2],[-2.9,-16.5],[4.1,-3.4]]){
+  box(x-.28,.02,z-.2,x+.27,.34,z+.2,'debris');
+  box(x-.25,.34,z-.18,x+.24,.57,z+.17,'debris');
+  box(x-.42,.02,z-.24,x-.29,.39,z+.24,'wood');
+ }
+ // Two collapsed trash bags and scattered masonry beside the curb.
+ for(const [x,z] of [[-5.55,-6.8],[5.46,-18.4]]){
+  ellipse(x,.38,z,.48,.34,.36,'rubber');
+  ellipse(x+.28,.28,z+.13,.25,.22,.24,'rubber');
+  for(let i=0;i<3;i++)box(x-.65+i*.19,.025,z-.55+i*.16,x-.48+i*.19,.15,z-.39+i*.16,'debris');
+ }
+
+ // Extra ribs and shoulder spines break up the bloodsucker's smooth silhouette.
+ for(let rib=0;rib<4;rib++){
+  const y=1.55+rib*.29;
+  cone([mx-.45,y,mz-.18],[mx+.45,y+.04,mz-.18],.035,.035,'claw');
+ }
+ for(let spike=0;spike<5;spike++){
+  const x=mx-.38+spike*.19;
+  cone([x,2.84,mz-.28],[x-.08,3.24+(spike%2)*.12,mz-.36],.12,.012,'mutant');
+ }
  buildBVH();
  $('objectCount').textContent=objects.length+' primitives + plan infini';
 }
@@ -444,6 +516,23 @@ function procedural(id,x,y){
   if(lit){r=153+22*noise;g=132+20*noise;b=98+18*noise;}
   else{r=30+12*noise;g=43+14*noise;b=51+16*noise;}
   if(wx<3||wy<4){r+=25;g+=24;b+=21;}
+ }else if(id==='windowdark'){
+  r=20+9*noise;g=34+13*noise;b=42+15*noise;
+  if(x%64<3||y%64<3){r+=28;g+=27;b+=23;}
+ }else if(id==='windowlit'){
+  const pulse=hash2(x>>4,y>>4,144)>.38?1:.45;
+  r=178*pulse+15*noise;g=135*pulse+13*noise;b=83*pulse+10*noise;
+  if(x%64<3||y%64<3){r+=20;g+=19;b+=15;}
+ }else if(id==='sign'){
+  const grime=hash2(x>>3,y>>3,145)>.7?-34:0;
+  r=117+18*noise+grime;g=83+15*noise+grime;b=60+13*noise+grime;
+  if(y%48<3){r-=28;g-=25;b-=20;}
+ }else if(id==='puddle'){
+  r=26+8*noise;g=39+12*noise;b=46+14*noise;
+  if(hash2(x>>3,y>>3,146)>.87){r+=24;g+=27;b+=24;}
+ }else if(id==='debris'){
+  const chip=hash2(x>>2,y>>2,147)>.55?25:-18;
+  r=91+18*noise+chip;g=86+17*noise+chip;b=79+16*noise+chip;
  }else if(id==='taxi'){
   r=204+20*noise+12*coarse;g=149+23*noise+12*coarse;b=37+13*noise;
   if(y%128>63&&y%128<86){r=31+8*noise;g=34+8*noise;b=34+8*noise;}
@@ -491,7 +580,7 @@ function makeMips(id,n){
  return {id,levels:chain,size:chain[0].size};
 }
 function initMaterials(){
- const urban=['brick','concrete','glass','asphalt','taxi','paint','metal','rust','rubber','lamp','mutant','claw','stone','wood','cloth','skin','bark','leaves','grass'];
+ const urban=['brick','concrete','glass','asphalt','taxi','paint','metal','rust','rubber','lamp','mutant','claw','stone','wood','cloth','skin','bark','leaves','grass','windowdark','windowlit','sign','puddle','debris'];
  for(const mat of urban)materials.set(mat,makeMips(mat,['mutant','skin','cloth'].includes(mat)?128:256));
  cacheFastMaterials();
  $('textureStatus').textContent='Textures urbaines RGB565 : pyramides mipmap prêtes';
