@@ -216,7 +216,7 @@ La section 07 du simulateur teste une candidate sans utiliser le rendu complet N
 3. re-shader les surfaces reprojetées jugées sûres ;
 4. retracer par BVH les trous, bords et zones douteuses avec les rayons de la nouvelle caméra ;
 5. sauvegarder la candidate et son temps complet (projection, garde des bords, shading, rayons de correction) ;
-6. seulement ensuite, calculer le rendu V9.2 complet et comparer les pixels, profondeurs/couleurs et temps.
+6. seulement ensuite, calculer le rendu V9.2 complet et comparer les couleurs pixel par pixel ainsi que le temps candidat au temps du rendu complet.
 
 Les bords sont écartés de la réutilisation avec une marge calculée selon le déplacement angulaire. Cette garde est une heuristique ; l’image complète postérieure sert à révéler les erreurs restantes, mais ne corrige pas la candidate.
 
