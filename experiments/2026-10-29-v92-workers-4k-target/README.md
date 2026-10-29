@@ -128,3 +128,27 @@ La capture de diagnostics indique 1 529,3 ms pour l’image native ; la série d
 - Comparer les modes natif, 75 % et 50 % avec la même scène et les mêmes réglages ; ensuite seulement sélectionner l’architecture matérielle pour 4K/100 FPS.
 
 Les temps et ratios de cette section sont des observations de captures, non des benchmarks reproductibles instrumentés sur la machine cible.
+
+
+## Première exécution de la carte — capture Firefox
+
+Réglage : image 1920 × 1200, tuile 16 × 16, tolérance profondeur 2 cm, référence complète de 2 304 000 rayons.
+
+| Mesure | Résultat |
+|---|---:|
+| Tuiles stables | 6 527 / 9 000 |
+| Tuiles frontière/incertaines | 2 473 / 9 000 |
+| Pixels proposés stables | 72,5 % (1 670 912 pixels) |
+| Faux stables contre la référence complète | 36 154 pixels |
+| Erreur maximale de profondeur dans les tuiles stables | 0,3470 m |
+| Budget théorique de rayons selon le modèle de la carte | 665 723 / 2 304 000 |
+| Réduction théorique de rayons | 71,1 % |
+| Durée affichée par la première simulation | 14,1 ms |
+
+### Interprétation et correction de l’outil
+
+La carte trouve de grandes régions uniformes, mais les 36 154 faux stables et l’écart maximal de 0,347 m montrent que le réglage 16 × 16 / 2 cm laisse passer des erreurs. La réduction de 71,1 % concerne un **compte théorique de rayons**, pas une accélération mesurée. Elle n’inclut ni la génération des régions, ni le remplissage/couleur, ni les artefacts visuels.
+
+La première durée de 14,1 ms mélangeait classement des tuiles et validation exhaustive contre le rendu complet. Le simulateur a été corrigé pour afficher séparément ces deux durées ; la validation exhaustive sert à mesurer les faux stables et ne représente pas le coût du renderer envisagé.
+
+Prochain essai conseillé : **8 × 8 et tolérance 5 mm**, puis comparer faux stables, surface stable et coût de classement. Une carte ne sera jugée exploitable qu’après mesure de l’erreur couleur, pas seulement profondeur.
