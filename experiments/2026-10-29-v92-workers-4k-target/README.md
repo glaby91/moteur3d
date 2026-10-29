@@ -79,6 +79,7 @@ Le banc synthétique de cette archive reste utile comme mesure de saturation, ma
 
 - [Hypothèse de rendu par événements de visibilité](CONCEPTION_RENDERING_PAR_FRONTIERES.md) — piste prioritaire pour changer la représentation du calcul.
 - [Diagnostic PDF des goulots T0](diagnostic_goulots_moteur3d_v92_T0_2026-10-29.pdf).
+- [Simulation HTML de la carte de visibilité](moteur3d_v92_simulation_carte_visibilite.html) et [notice PDF T0](notice_simulation_carte_visibilite_V92_T0_2026-10-29.pdf).
 - [Piste secondaire des feuilles de surface](CONCEPTION_FEUILLES_SURFACE_PLIEES.md), conservée comme réflexion exploratoire.
 
 ## Référence
