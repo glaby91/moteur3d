@@ -151,6 +151,27 @@ canvas#visibilityMap{display:block;width:100%;max-height:470px;object-fit:contai
 </div>
 <div class="hint" id="vmReconNote">Cette simulation mesure la qualité de l’interpolation couleur sur une image existante. Elle ne mesure pas le temps d’un futur moteur N+1 et ne compte pas le coût du repli exact.</div>
 </section>
+<section class="panel" id="temporalPanel" style="margin-top:14px">
+<h2>07 / Essai temporel — reprojection de N vers N+1</h2>
+<p class="notice">Le bouton conserve les surfaces touchées de l’image N, déplace légèrement la caméra, puis calcule N+1 entièrement avec V9.2. Le rendu N+1 sert de vérité de contrôle : il révèle les pixels réutilisables, les occultations et les erreurs. Cette validation hors ligne ne mesure pas encore le temps d’un moteur qui produirait N+1 sans connaître sa référence.</p>
+<div class="controls">
+<label>Déplacement angulaire de caméra <select id="temporalDelta"><option value="0.1">0,1° — très faible</option><option value="0.25">0,25° — faible</option><option value="0.5" selected>0,5° — moyen</option><option value="1">1° — marqué</option><option value="2">2° — fort</option></select></label>
+<label>Tolérance profondeur pour accepter un pixel <select id="temporalTolerance"><option value="0.005">5 mm — stricte</option><option value="0.02" selected>2 cm — moyenne</option><option value="0.05">5 cm — souple</option><option value="0.1">10 cm — large</option></select></label>
+<button class="primary" id="temporalRun">Capturer N et calculer N+1</button>
+</div>
+<div class="recon-grid">
+<figure><canvas id="temporalCandidate" width="640" height="400"></canvas><figcaption>Image N+1 candidate : reprojection des surfaces de N, shader recalculé, rendu V9.2 recopié pour les pixels rejetés.</figcaption></figure>
+<figure><canvas id="temporalError" width="640" height="400"></canvas><figcaption>Écart couleur sur les pixels réutilisés : noir = même couleur, jaune/rouge = écart croissant.</figcaption></figure>
+</div>
+<div class="statgrid" style="grid-template-columns:repeat(4,minmax(0,1fr))">
+<div class="stat"><b id="temporalReuse">—</b><small>pixels réutilisés sans BVH</small></div>
+<div class="stat"><b id="temporalFallback">—</b><small>pixels en repli sur la référence</small></div>
+<div class="stat"><b id="temporalErrorMean">—</b><small>erreur couleur moyenne réutilisée (0–255)</small></div>
+<div class="stat"><b id="temporalCandidateTime">—</b><small>ms reprojection + validation CPU</small></div>
+</div>
+<div class="metrics"><span>Rayons BVH évités estimés</span><span id="temporalRaysSaved">—</span><span>Pixels rejetés par surface/profondeur</span><span id="temporalRejected">—</span><span>Déplacement appliqué</span><span id="temporalApplied">—</span></div>
+<div class="hint" id="temporalStatus">Attente d’un rendu V9.2 complet. Gardez la même résolution et les mêmes réglages pendant l’essai.</div>
+</section>
 </main>
 <script>
 'use strict';
@@ -162,7 +183,7 @@ const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 const sun=norm(-.55,.88,.36),skyZenith=[58,115,181],skyHorizon=[187,205,211];
 let W=640,H=400,displayW=640,displayH=400,renderScale=1,frameImage=null,pixels=null,hitIds=null,hitDistances=null;
 let scaledCanvas=null,scaledContext=null;
-let imageSerial=0,renderJob=null,shadowJob=null,shadowMap=null,preparedTexHigh=false,predictiveBench=null,completedRenderOptions=null;
+let imageSerial=0,renderJob=null,shadowJob=null,shadowMap=null,preparedTexHigh=false,predictiveBench=null,completedRenderOptions=null,completedCamera=null,temporalPending=false;
 let visibilityMapState=null;
 let materials=new Map(),objects=[],bvh=[],bvhRoot=-1;
 let currentCam=null;
@@ -952,11 +973,13 @@ function renderStep(){
  if(job.index<job.total){requestAnimationFrame(renderStep);return;}
  stats.finishMs=performance.now()-job.started;
  completedRenderOptions=job.options;
+ completedCamera=job.cam;
  renderJob=null;displayMetrics();
  $('state').textContent='Image complète';
  $('frameInfo').textContent='Image '+imageSerial+' terminée · '+fnum(stats.finishMs,1)+' ms';
  if(typeof onPrimaryImageComplete==='function')onPrimaryImageComplete(stats.finishMs);
  if(typeof visibilityMapAnalyze==='function')visibilityMapAnalyze();
+ if(temporalPending)runTemporalValidation();
 }
 function displayMetrics(){
  let best=0;for(let i=1;i<stats.mips.length;i++)if(stats.mips[i]>stats.mips[best])best=i;
@@ -1195,11 +1218,59 @@ function reconstructVisibilityImage(){
  $('vmReconStatus').textContent=mode==='surface'?'Image reconstruite par patches de surface et re-shading pixel par pixel.':'Image reconstruite par interpolation RGB des cinq sondes.';
  $('vmReconNote').textContent=mode==='surface'?`Mode patch : ${validPatches.toLocaleString('fr-FR')} tuiles stables ont un plan local ajusté aux trois coins. Le matériau, les UV, l’éclairage et la texture sont réévalués pixel par pixel ; ${fallbackPixels.toLocaleString('fr-FR')} pixels incertains sont repris gratuitement depuis l’image de référence. Les profondeurs de coins viennent de cette image, donc ce test isole le coût BVH et l’erreur d’un patch local pour la même caméra ; il ne simule pas N+1.`:`Mode RGB : les couleurs stables viennent des cinq sondes et les tuiles incertaines (${fallbackPixels.toLocaleString('fr-FR')} pixels) sont copiées gratuitement depuis la référence. Cette variante efface les détails fins.`;
 }
+function cloneCamera(cam){return {eye:cam.eye.slice(),f:cam.f.slice(),r:cam.r.slice(),u:cam.u.slice(),sx:cam.sx,sy:cam.sy,pixelAngle:cam.pixelAngle,fov:cam.fov};}
+function runTemporalExperiment(){
+ if(!frameImage||!hitIds||!hitDistances||renderJob||!completedCamera){$('temporalStatus').textContent='Attendez la fin d’un rendu complet avant de lancer cet essai.';return;}
+ const oldAngle=+$('angle').value,delta=+$('temporalDelta').value,next=clamp(oldAngle+delta,-180,180);
+ if(next===oldAngle){$('temporalStatus').textContent='La rotation est déjà à sa limite. Changez d’abord la caméra.';return;}
+ const [rw,rh]=$('resolution').value.split('x').map(Number),scale=+$('renderScale').value;
+ temporalPending=true;
+ window.temporalSource={w:W,h:H,angle:oldAngle,delta:next-oldAngle,cam:cloneCamera(completedCamera),options:{...completedRenderOptions},ids:hitIds.slice(),distances:hitDistances.slice()};
+ $('angle').value=String(next);$('angleValue').textContent=next+'°';
+ $('temporalRun').disabled=true;$('temporalStatus').textContent=`Image N conservée (${W} × ${H}). Calcul complet de N+1 à ${next}° en cours…`;
+ invalidateImage(`Image N+1 · déplacement caméra ${(next-oldAngle).toFixed(2)}°`);
+ if(W!==Math.round(rw*scale)||H!==Math.round(rh*scale)){temporalPending=false;window.temporalSource=null;$('temporalRun').disabled=false;$('temporalStatus').textContent='La résolution a changé pendant la préparation ; relancez après le rendu complet.';}
+}
+function runTemporalValidation(){
+ const prev=window.temporalSource;temporalPending=false;$('temporalRun').disabled=false;
+ if(!prev||prev.w!==W||prev.h!==H){$('temporalStatus').textContent='Comparaison annulée : la résolution N et N+1 ne correspond pas.';window.temporalSource=null;return;}
+ const started=performance.now(),count=W*H,newCam=completedCamera,tol=+$('temporalTolerance').value;
+ const projectedIds=new Uint16Array(count),projectedViewZ=new Float32Array(count),projectedT=new Float32Array(count);projectedViewZ.fill(Infinity);projectedT.fill(Infinity);
+ const oldRay=[0,0,0],newRay=[0,0,0],point=[0,0,0],eye=prev.cam.eye;
+ const tanH=Math.tan(newCam.fov*.5),tanV=tanH*H/W;
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+  const si=y*W+x,id=prev.ids[si],t=prev.distances[si];if(id===0||!Number.isFinite(t)||t<=0)continue;
+  cameraRay(prev.cam,x,y,oldRay);point[0]=eye[0]+t*oldRay[0];point[1]=eye[1]+t*oldRay[1];point[2]=eye[2]+t*oldRay[2];
+  const vx=point[0]-newCam.eye[0],vy=point[1]-newCam.eye[1],vz=point[2]-newCam.eye[2],viewZ=vx*newCam.f[0]+vy*newCam.f[1]+vz*newCam.f[2];if(viewZ<=1e-6)continue;
+  const nx=(vx*newCam.r[0]+vy*newCam.r[1]+vz*newCam.r[2])/(viewZ*tanH),ny=(vx*newCam.u[0]+vy*newCam.u[1]+vz*newCam.u[2])/(viewZ*tanV);
+  const px=Math.round((nx+1)*W*.5-.5),py=Math.round((1-ny)*H*.5-.5);if(px<0||px>=W||py<0||py>=H)continue;
+  const ti=py*W+px;if(viewZ>=projectedViewZ[ti])continue;
+  cameraRay(newCam,px,py,newRay);const cosine=dot(newRay,newCam.f);if(cosine<=1e-6)continue;
+  projectedViewZ[ti]=viewZ;projectedT[ti]=viewZ/cosine;projectedIds[ti]=id;
+ }
+ const candidate=$('temporalCandidate'),errorCanvas=$('temporalError');candidate.width=W;candidate.height=H;errorCanvas.width=W;errorCanvas.height=H;
+ const out=candidate.getContext('2d').createImageData(W,H),heat=errorCanvas.getContext('2d').createImageData(W,H),words=new Uint32Array(out.data.buffer),ref=frameImage.data,opts=completedRenderOptions||prev.options;
+ const savedStats={};for(const k of Object.keys(stats))savedStats[k]=k==='mips'?stats.mips.slice():stats[k];
+ let reused=0,rejected=0,sumMaxErr=0,errPixels=0;const ray=[0,0,0];
+ for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+  const i=y*W+x,p=i*4,id=projectedIds[i],valid=id!==0&&hitIds[i]===id&&Math.abs(projectedT[i]-hitDistances[i])<=tol;
+  if(valid){cameraRay(newCam,x,y,ray);words[i]=(opts.fast?shadePixelFast:shadePixel)(newCam,x,y,id,projectedT[i],ray[0],ray[1],ray[2],opts);const d=Math.max(Math.abs(out.data[p]-ref[p]),Math.abs(out.data[p+1]-ref[p+1]),Math.abs(out.data[p+2]-ref[p+2]));sumMaxErr+=d;errPixels++;reused++;}
+  else{words[i]=(0xff000000|(ref[p+2]<<16)|(ref[p+1]<<8)|ref[p])>>>0;if(id!==0)rejected++;}
+ }
+ for(let i=0;i<count;i++){const p=i*4,d=Math.max(Math.abs(out.data[p]-ref[p]),Math.abs(out.data[p+1]-ref[p+1]),Math.abs(out.data[p+2]-ref[p+2]));heat[p]=Math.min(255,d*4);heat[p+1]=Math.max(0,Math.min(220,(d-24)*3));heat[p+2]=Math.max(0,Math.min(80,(d-80)*.8));heat[p+3]=255;}
+ const elapsed=performance.now()-started;
+ for(const k of Object.keys(savedStats)){if(k==='mips')stats.mips.set(savedStats.mips);else stats[k]=savedStats[k];}
+ candidate.getContext('2d').putImageData(out,0,0);errorCanvas.getContext('2d').putImageData(heat,0,0);
+ $('temporalReuse').textContent=(100*reused/count).toFixed(1)+' %';$('temporalFallback').textContent=(100*(count-reused)/count).toFixed(1)+' %';$('temporalErrorMean').textContent=(errPixels?sumMaxErr/errPixels:0).toFixed(2);$('temporalCandidateTime').textContent=elapsed.toFixed(1)+' ms';$('temporalRaysSaved').textContent=reused.toLocaleString('fr-FR')+' / '+count.toLocaleString('fr-FR');$('temporalRejected').textContent=rejected.toLocaleString('fr-FR');$('temporalApplied').textContent=prev.angle+'° → '+$('angle').value+'°';
+ $('temporalStatus').textContent=`N+1 rendu en ${fnum(stats.finishMs,1)} ms par V9.2. ${reused.toLocaleString('fr-FR')} pixels passent le contrôle ID + profondeur (± ${(tol*100).toLocaleString('fr-FR')} cm) et sont re-shadés sans BVH ; ${rejected.toLocaleString('fr-FR')} surfaces projetées sont rejetées. Les pixels non réutilisés sont recopiés de la référence déjà calculée : le temps affiché n’est donc pas un gain de temps de production.`;
+ window.temporalSource=null;
+}
 function initVisibilityMap(){
  $('vmAnalyze').addEventListener('click',visibilityMapAnalyze);
  $('vmReconstruct').addEventListener('click',reconstructVisibilityImage);
  $('vmTile').addEventListener('change',()=>{if(frameImage)visibilityMapAnalyze()});
  $('vmTolerance').addEventListener('change',()=>{if(frameImage)visibilityMapAnalyze()});
+ $('temporalRun').addEventListener('click',runTemporalExperiment);
 }
 
 initPredictiveBench();
