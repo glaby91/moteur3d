@@ -188,3 +188,19 @@ La section 06 compare deux candidates à partir d’une carte calculée sur le r
 Le mode patch teste la qualité du modèle local et le coût de shading sans traversée BVH, avec identifiants et profondeurs de coins issus du rendu complet déjà calculé. Il **ne calcule pas encore une vraie image N+1**. Le repli exact est gratuit ; le temps affiché n’est pas un temps de rendu complet ni une mesure de gain FPS. Ces limites rendent la qualité globale optimiste.
 
 La section 05 reste le contrôle géométrique de stabilité et l’estimation théorique du nombre de rayons. La version V9.2 du renderer est inchangée.
+
+
+## Première capture du mode patch surface + shader
+
+Capture Firefox de la section 06, image 640 × 400 :
+
+| Indicateur | Résultat |
+|---|---:|
+| Tuiles stables avec plan local ajusté | 391 tuiles de surface |
+| Pixels repris de la référence complète | 125 184 (48,9 %) |
+| Surface reconstruite par patch | 130 816 pixels (51,1 %, calcul dérivé) |
+| Erreur couleur moyenne, zones stables | 0,06 / 255 |
+| Pixels stables avec écart supérieur à 8 | 0,0 % affiché |
+| Temps reconstruction + comparaison CPU | 109,0 ms |
+
+La carte d’écart est presque noire et la candidate conserve les textures. Le résultat visuel est très encourageant pour les tuiles stables. Il reste toutefois conditionné par les identifiants et profondeurs issus de l’image complète V9.2 ; près de la moitié de l’image est recopiée gratuitement depuis cette référence. Le temps de 109 ms ne mesure pas un rendu complet ni une vraie image N+1. Les paramètres de taille de tuile et de tolérance ne sont pas visibles sur la capture ; ils restent à confirmer avant répétition. Voir l’[enregistrement PDF T0](enregistrement_reconstruction_patch_visibility_V92_T0_2026-10-29.pdf).
