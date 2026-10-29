@@ -180,7 +180,7 @@ const PI=Math.PI,TAU=2*PI,clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const fnum=(v,n=1)=>Number(v).toFixed(n),norm=(x,y,z)=>{const l=Math.hypot(x,y,z)||1;return [x/l,y/l,z/l]};
 const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
-const sun=norm(-.55,.88,.36),skyZenith=[76,91,105],skyHorizon=[143,154,159];
+const sun=norm(-.55,.88,.36),skyZenith=[49,66,82],skyHorizon=[111,127,135];
 let W=640,H=400,displayW=640,displayH=400,renderScale=1,frameImage=null,pixels=null,hitIds=null,hitDistances=null;
 let scaledCanvas=null,scaledContext=null;
 let imageSerial=0,renderJob=null,shadowJob=null,shadowMap=null,preparedTexHigh=false,predictiveBench=null,completedRenderOptions=null,completedCamera=null,temporalStage=null,temporalJob=null,temporalCandidateResult=null;
@@ -200,6 +200,12 @@ function box(x0,y0,z0,x1,y1,z1,mat){
  const o={type:'box',min:[x0,y0,z0],max:[x1,y1,z1],mat};
  objects.push(o);return o;
 }
+function roundBox(x0,y0,z0,x1,y1,z1,radius,mat){
+ const min=[x0,y0,z0],max=[x1,y1,z1],r=Math.max(.001,Math.min(radius,(x1-x0)*.49,(y1-y0)*.49,(z1-z0)*.49));
+ const o={type:'roundbox',min,max,r,center:[(x0+x1)*.5,(y0+y1)*.5,(z0+z1)*.5],
+  core:[(x1-x0)*.5-r,(y1-y0)*.5-r,(z1-z0)*.5-r],mat};
+ objects.push(o);return o;
+}
 function cone(a,b,r0,r1,mat){
  const dx=b[0]-a[0],dy=b[1]-a[1],dz=b[2]-a[2],len=Math.hypot(dx,dy,dz),r=Math.max(r0,r1);
  const o={type:'cone',a,b,r0,r1,k:(r1-r0)/len,len,
@@ -212,14 +218,14 @@ function makeScene(){
  objects.length=0;
  // The avenue runs down -Z. Large analytic boxes form a Manhattan canyon;
  // every visible pixel is still found by the engine's ray/BVH path.
- box(-12,0,-15,-6,12,-3,'brick');
- box(-13,0,-3,-6,9,11,'brick');
- box(-11,0,-31,-5.8,19,-15,'concrete');
- box(6,0,-15,12,11,-3,'brick');
- box(6,0,-3,13,9,11,'brick');
- box(5.8,0,-31,12,18,-15,'glass');
- box(-4.9,0,-27,-2.6,22,-21,'glass');
- box(2.3,0,-25,4.7,17,-20,'concrete');
+ roundBox(-12,0,-15,-6,12,-3,.2,'concrete');
+ roundBox(-13,0,-3,-6,9,11,.22,'concrete');
+ roundBox(-11,0,-31,-5.8,19,-15,.28,'glass');
+ roundBox(6,0,-15,12,11,-3,.2,'concrete');
+ roundBox(6,0,-3,13,9,11,.22,'concrete');
+ roundBox(5.8,0,-31,12,18,-15,.28,'glass');
+ roundBox(-4.9,0,-27,-2.6,22,-21,.32,'glass');
+ roundBox(2.3,0,-25,4.7,17,-20,.32,'concrete');
  // Curbs and the city ground bands.
  box(-5.25,0,-30,-5.02,.22,12,'concrete');
  box(5.02,0,-30,5.25,.22,12,'concrete');
@@ -256,17 +262,21 @@ function makeScene(){
  }
  // Abandoned yellow cab. Windows, wheels, lights and roof sign are separate surfaces.
  const tx=-2.35,tz=1.45;
- box(tx-1.05,.43,tz-1.72,tx+1.05,1.22,tz+1.72,'taxi');
- box(tx-.84,1.22,tz-.91,tx+.84,1.94,tz+.79,'taxi');
- box(tx-.74,1.31,tz-.79,tx+.74,1.82,tz-.04,'glass');
- box(tx-.74,1.31,tz+.08,tx+.74,1.82,tz+.66,'glass');
+ roundBox(tx-1.05,.43,tz-1.72,tx+1.05,1.22,tz+1.72,.17,'taxi');
+ roundBox(tx-.84,1.22,tz-.91,tx+.84,1.94,tz+.79,.16,'taxi');
+ roundBox(tx-.74,1.31,tz-.79,tx+.74,1.82,tz-.04,.075,'glass');
+ roundBox(tx-.74,1.31,tz+.08,tx+.74,1.82,tz+.66,.075,'glass');
  box(tx-1.1,.68,tz-.22,tx-1.05,.9,tz+.19,'metal');
  box(tx+1.05,.68,tz-.22,tx+1.1,.9,tz+.19,'metal');
  for(const side of [-1,1])for(const z of [tz-.98,tz+.99])ellipse(tx+side*.98,.43,z,.18,.37,.37,'rubber');
  box(tx-.88,.36,tz-1.73,tx-.52,.59,tz-1.77,'lamp');box(tx+.52,.36,tz-1.73,tx+.88,.59,tz-1.77,'lamp');
  box(tx-.88,.38,tz+1.72,tx-.55,.62,tz+1.76,'rust');box(tx+.55,.38,tz+1.72,tx+.88,.62,tz+1.76,'rust');
- box(tx-.43,1.94,tz-.27,tx+.43,2.15,tz+.12,'paint');
+ roundBox(tx-.43,1.94,tz-.27,tx+.43,2.15,tz+.12,.08,'paint');
  box(tx-1.06,.83,tz-.04,tx-1.055,.99,tz+.24,'paint');
+ roundBox(tx-.57,.48,tz-1.78,tx+.57,.8,tz-1.73,.09,'metal');
+ roundBox(tx-.96,.38,tz-1.78,tx-.58,.67,tz-1.74,.09,'lamp');
+ roundBox(tx+.58,.38,tz-1.78,tx+.96,.67,tz-1.74,.09,'lamp');
+ roundBox(tx-.94,.28,tz+1.68,tx+.94,.42,tz+1.78,.06,'metal');
 
  // Large bloodsucker: hunched torso, long limbs, claws and facial tendrils.
  const mx=1.65,mz=-4.6;
@@ -290,35 +300,61 @@ function makeScene(){
   const spread=(i-2)*.13,y=3.27-Math.abs(i-2)*.035;
   cone([mx+spread,y,mz+.55],[mx+spread*1.45,y-.58-(i%2)*.14,mz+.84],.075,.012,'mutant');
  }
+ ellipse(mx-.15,3.43,mz+.57,.055,.035,.018,'claw');
+ ellipse(mx+.15,3.43,mz+.57,.055,.035,.018,'claw');
  // Van fades into the fog behind the creature.
- box(-1.65,0,-10.8,1.55,1.45,-8.2,'concrete');
- box(-1.35,1.45,-10.55,1.25,2.45,-8.5,'glass');
+ roundBox(-1.65,0,-10.8,1.55,1.45,-8.2,.18,'concrete');
+ roundBox(-1.35,1.45,-10.55,1.25,2.45,-8.5,.14,'glass');
  for(const x of [-1.1,1.0])ellipse(x,.43,-9.8,.18,.39,.39,'rubber');
 
  // Recessed street-facing windows: individual panes, sills and occasional
  // sickly occupied rooms make the canyon read as buildings, not one texture.
  const windowRows=[
-  {z:[-4.0,-6.5,-9.0,-11.5],floors:5},
-  {z:[-16.0,-18.7,-21.4,-24.1,-26.8],floors:8}
+  {z:[-4.1,-7.2,-10.3],floors:4},
+  {z:[-16.5,-19.5,-22.5,-25.5],floors:7}
  ];
  for(const side of [-1,1])for(const block of windowRows)for(const z of block.z){
   for(let floor=0;floor<block.floors;floor++){
-   const y=1.1+floor*1.72,face=z<-15?(side<0?-5.74:5.74):(side<0?-5.94:5.94);
-   const paneMat=((Math.floor((z+40)*7)+floor*11+(side+1)*5)%13===0)?'windowlit':'windowdark';
-   box(face-.035,y,z-.43,face+.035,y+1.12,z+.43,'metal');
-   box(face-.06,y+.09,z-.34,face+.06,y+1.01,z+.34,paneMat);
-   box(face-.095,y-.08,z-.48,face+.095,y+.01,z+.48,'concrete');
+   const y=1.25+floor*1.8,face=z<-15?(side<0?-5.73:5.73):(side<0?-5.91:5.91);
+   const lit=((Math.floor((z+40)*5)+floor*7+(side+1)*3)%9===0);
+   const front=face+(side<0?.055:-.055);
+   roundBox(front-.055,y,z-.69,front+.055,y+1.28,z+.69,.11,lit?'windowlit':'windowdark');
+   box(front-.1,y-.07,z-.72,front+.1,y+.025,z+.72,'concrete');
   }
+ }
+ // Contemporary facade rhythm: broad corner fins, soft floor bands and
+ // shallow AC pods add depth without returning to a tiny tiled grid.
+ for(const side of [-1,1]){
+  for(const z of [-4.7,-8.6,-16.8,-20.8,-24.8]){
+   const face=z<-15?(side<0?-5.69:5.69):(side<0?-5.87:5.87);
+   roundBox(face-.11,.35,z-.09,face+.11,10.8,z+.09,.08,'metal');
+   for(let level=0;level<4;level++){
+    const y=2.35+level*1.8;
+    roundBox(face-.14,y,z-.74,face+.14,y+.38,z+.74,.13,'concrete');
+    roundBox(face-.18,y+.06,z-.65,face+.18,y+.28,z+.65,.1,'windowdark');
+   }
+  }
+  for(const z of [-6.1,-10.3,-18.2,-22.2,-26.2])for(let floor=0;floor<4;floor++){
+   const face=z<-15?(side<0?-5.69:5.69):(side<0?-5.87:5.87),y=1.65+floor*1.8;
+   roundBox(face-.16,y,z-.39,face+.16,y+.48,z+.39,.12,'metal');
+   ellipse(face+(side<0?.17:-.17),y+.24,z,.025,.15,.15,'metal');
+  }
+ }
+ // A few warm window strips and battered vertical neon markers glow through fog.
+ for(const [side,z] of [[-1,-7.2],[1,-10.3],[-1,-19.5],[1,-25.5]]){
+  const face=z<-15?(side<0?-5.66:5.66):(side<0?-5.84:5.84);
+  roundBox(face-.035,2.0,z-.075,face+.035,6.8,z+.075,.06,'neon');
+  for(let lamp=0;lamp<3;lamp++)roundBox(face-.045,2.25+lamp*1.45,z-.095,face+.045,2.36+lamp*1.45,z+.095,.045,'lamp');
  }
  // Ground-floor storefronts, battered signs and striped awnings.
  for(const [side,z,labelMat] of [[-1,-5.2,'sign'],[1,-5.2,'rust'],[-1,-17.2,'rust'],[1,-17.2,'sign']]){
   const face=z<-15?(side<0?-5.7:5.7):(side<0?-5.9:5.9);
-  box(face-.12,.82,z-1.2,face+.12,1.84,z+1.2,'metal');
-  box(face-.17,1.02,z-1.08,face+.17,1.67,z+1.08,'windowdark');
-  box(face-.23,1.92,z-1.32,face+.23,2.3,z+1.32,labelMat);
+  roundBox(face-.12,.82,z-1.2,face+.12,1.84,z+1.2,.1,'metal');
+  roundBox(face-.17,1.02,z-1.08,face+.17,1.67,z+1.08,.11,'windowdark');
+  roundBox(face-.23,1.92,z-1.32,face+.23,2.3,z+1.32,.13,labelMat);
   for(let stripe=0;stripe<6;stripe++){
    const zz=z-.98+stripe*.39;
-   box(face-.58,1.72,zz,face-.12,1.83,zz+.18,(stripe&1)?'paint':'rust');
+   roundBox(face-.58,1.72,zz,face-.12,1.83,zz+.18,.045,(stripe&1)?'paint':'rust');
   }
  }
  // Roofline water tanks and ducts give distant silhouettes extra depth.
@@ -327,6 +363,13 @@ function makeScene(){
   ellipse(x,top+1.8,z,.78,.22,.72,'metal');
   for(const dx of [-.52,.52])cone([x+dx,top-.1,z-.48],[x+dx,top,z-.48],.045,.045,'metal');
  }
+ // Rooftop HVAC boxes, exhaust fans and slim antennas break up the skyline.
+ for(const [x,z,y] of [[-9.3,-8,12.1],[9.9,-8,11.1],[-8.8,-23,19.1],[9.5,-23,18.1]]){
+  roundBox(x-.72,y,z-.62,x+.72,y+.92,z+.62,.16,'metal');
+  ellipse(x,y+.94,z,.48,.09,.42,'concrete');
+  for(let vent=0;vent<4;vent++)roundBox(x-.48+vent*.32,y+.3,z-.66,x-.34+vent*.32,y+.72,z-.61,.025,'rust');
+  cone([x+.55,y+.92,z+.45],[x+.58,y+2.4,z+.48],.025,.012,'metal');
+ }
  // Sagging overhead wires across the avenue, visible against the fog.
  for(const z of [-3.2,-8.4,-13.8,-20.4]){
   cone([-5.75,6.2,z],[5.75,5.75,z+.45],.018,.018,'metal');
@@ -334,9 +377,9 @@ function makeScene(){
  }
  // Traffic signal, battered street-name blade and a fallen barrier.
  cone([4.7,0,2.1],[4.7,4.5,2.1],.095,.065,'metal');
- box(4.36,3.45,1.91,5.04,4.42,2.29,'rust');
+ roundBox(4.36,3.45,1.91,5.04,4.42,2.29,.12,'rust');
  for(let light=0;light<3;light++)ellipse(4.7,4.17-light*.29,2.31,.13,.105,.055,light===0?'rust':light===1?'lamp':'windowdark');
- box(4.18,3.06,1.89,5.18,3.24,2.34,'sign');
+ roundBox(4.18,3.06,1.89,5.18,3.24,2.34,.08,'sign');
  box(-4.85,.08,-1.2,-2.95,.2,-.97,'rust');
  cone([-4.65,.18,-1.18],[-4.6,.48,-1.16],.045,.025,'metal');
  cone([-3.2,.18,-1.18],[-3.25,.48,-1.16],.045,.025,'metal');
@@ -419,6 +462,24 @@ function hitPrimitive(o,ox,oy,oz,dx,dy,dz,maxT){
    if(lo>hi)return Infinity;
   }
   t=lo>.0001?lo:hi;
+ }else if(o.type==='roundbox'){
+  let lo=-Infinity,hi=maxT;
+  for(let j=0;j<3;j++){
+   const origin=j===0?ox:j===1?oy:oz,v=j===0?dx:j===1?dy:dz;
+   if(Math.abs(v)<1e-12){if(origin<o.min[j]||origin>o.max[j])return Infinity;continue;}
+   const inv=1/v,a=(o.min[j]-origin)*inv,b=(o.max[j]-origin)*inv;
+   lo=Math.max(lo,Math.min(a,b));hi=Math.min(hi,Math.max(a,b));if(lo>hi)return Infinity;
+  }
+  t=Math.max(lo,.0001);let roundedHit=false;
+  for(let step=0;step<64&&t<hi;step++){
+   const px=ox+t*dx-o.center[0],py=oy+t*dy-o.center[1],pz=oz+t*dz-o.center[2];
+   const qx=Math.abs(px)-o.core[0],qy=Math.abs(py)-o.core[1],qz=Math.abs(pz)-o.core[2];
+   const ax=Math.max(qx,0),ay=Math.max(qy,0),az=Math.max(qz,0);
+   const distance=Math.hypot(ax,ay,az)+Math.min(Math.max(qx,qy,qz),0)-o.r;
+   if(distance<.001){roundedHit=true;break;}
+   t+=Math.max(distance*.82,.0005);
+  }
+  if(!roundedHit||t>=hi)return Infinity;
  }else if(o.type==='cone'){
   const px=ox-o.a[0],py=oy-o.a[1],pz=oz-o.a[2];
   const z=px*o.nx+py*o.ny+pz*o.nz,dzAxis=dx*o.nx+dy*o.ny+dz*o.nz;
@@ -479,6 +540,7 @@ function normalAt(id,x,y,z){
  if(id===1)return [0,1,0];
  const o=objects[id-2];
  if(o.type==='ellipse')return norm((x-o.cx)/(o.rx*o.rx),(y-o.cy)/(o.ry*o.ry),(z-o.cz)/(o.rz*o.rz));
+ if(o.type==='roundbox')return roundedBoxNormal(o,x,y,z);
  if(o.type==='box'){
   const ds=[Math.abs(x-o.min[0]),Math.abs(x-o.max[0]),Math.abs(y-o.min[1]),Math.abs(y-o.max[1]),Math.abs(z-o.min[2]),Math.abs(z-o.max[2])];
   const m=ds.indexOf(Math.min(...ds));return m===0?[-1,0,0]:m===1?[1,0,0]:m===2?[0,-1,0]:m===3?[0,1,0]:m===4?[0,0,-1]:[0,0,1];
@@ -487,6 +549,13 @@ function normalAt(id,x,y,z){
  if(axis<.0002)return [-o.nx,-o.ny,-o.nz];
  if(axis>o.len-.0002)return [o.nx,o.ny,o.nz];
  return norm(px-axis*o.nx-o.k*o.nx,py-axis*o.ny-o.k*o.ny,pz-axis*o.nz-o.k*o.nz);
+}
+function roundedBoxNormal(o,x,y,z){
+ const p=[x-o.center[0],y-o.center[1],z-o.center[2]],q=p.map((v,i)=>Math.abs(v)-o.core[i]);
+ const v=q.map(a=>Math.max(a,0)),len=Math.hypot(v[0],v[1],v[2]);
+ if(len>1e-8)return norm(Math.sign(p[0])*v[0],Math.sign(p[1])*v[1],Math.sign(p[2])*v[2]);
+ const axis=q.indexOf(Math.max(q[0],q[1],q[2]));
+ return axis===0?[Math.sign(p[0]),0,0]:axis===1?[0,Math.sign(p[1]),0]:[0,0,Math.sign(p[2])];
 }
 function groundMaterial(x,z){
  return Math.abs(x)<5.02?'asphalt':'concrete';
@@ -512,10 +581,10 @@ function procedural(id,x,y){
   if(window){r=frame?78:25+18*noise;g=frame?82:37+20*noise;b=frame?83:47+21*noise;}
   else{r=100+24*noise+15*coarse+mortar;g=70+18*noise+12*coarse+mortar;b=64+17*noise+11*coarse+mortar;}
  }else if(id==='glass'){
-  const wx=x%24,wy=y%38,lit=hash2(Math.floor(x/24),Math.floor(y/38),92)>.68&&wx>3&&wx<21&&wy>4&&wy<34;
-  if(lit){r=153+22*noise;g=132+20*noise;b=98+18*noise;}
-  else{r=30+12*noise;g=43+14*noise;b=51+16*noise;}
-  if(wx<3||wy<4){r+=25;g+=24;b+=21;}
+  const wx=x%64,wy=y%96,lit=hash2(Math.floor(x/64),Math.floor(y/96),92)>.73&&wx>4&&wx<60&&wy>5&&wy<91;
+  if(lit){r=142+24*noise;g=130+22*noise;b=108+20*noise;}
+  else{r=25+11*noise;g=43+14*noise;b=54+18*noise;}
+  if(wx<4||wy<5){r+=31;g+=32;b+=34;}
  }else if(id==='windowdark'){
   r=20+9*noise;g=34+13*noise;b=42+15*noise;
   if(x%64<3||y%64<3){r+=28;g+=27;b+=23;}
@@ -525,8 +594,12 @@ function procedural(id,x,y){
   if(x%64<3||y%64<3){r+=20;g+=19;b+=15;}
  }else if(id==='sign'){
   const grime=hash2(x>>3,y>>3,145)>.7?-34:0;
-  r=117+18*noise+grime;g=83+15*noise+grime;b=60+13*noise+grime;
+  r=87+18*noise+grime;g=104+17*noise+grime;b=112+18*noise+grime;
   if(y%48<3){r-=28;g-=25;b-=20;}
+ }else if(id==='neon'){
+  const pulse=hash2(x>>3,y>>3,151)>.12?1:.48;
+  r=41+18*noise;g=164*pulse+16*noise;b=188*pulse+18*noise;
+  if(x%32<3){r=88;g=194;b=205;}
  }else if(id==='puddle'){
   r=26+8*noise;g=39+12*noise;b=46+14*noise;
   if(hash2(x>>3,y>>3,146)>.87){r+=24;g+=27;b+=24;}
@@ -580,7 +653,7 @@ function makeMips(id,n){
  return {id,levels:chain,size:chain[0].size};
 }
 function initMaterials(){
- const urban=['brick','concrete','glass','asphalt','taxi','paint','metal','rust','rubber','lamp','mutant','claw','stone','wood','cloth','skin','bark','leaves','grass','windowdark','windowlit','sign','puddle','debris'];
+ const urban=['brick','concrete','glass','asphalt','taxi','paint','metal','rust','rubber','lamp','mutant','claw','stone','wood','cloth','skin','bark','leaves','grass','windowdark','windowlit','sign','puddle','debris','neon'];
  for(const mat of urban)materials.set(mat,makeMips(mat,['mutant','skin','cloth'].includes(mat)?128:256));
  cacheFastMaterials();
  $('textureStatus').textContent='Textures urbaines RGB565 : pyramides mipmap prêtes';
@@ -824,7 +897,7 @@ function shadowVisibilityFast(x,y,z,enabled){
 }
 // Near-identical exponential fog, linearly interpolated from a precomputed LUT.
 // Step 0.08 world units yields sub-0.001 channel interpolation error in theory.
-const FOG_STEP=0.08,FOG_INV_STEP=1/FOG_STEP,FOG_LUT_MAX=4096,FOG_DENSITY=.052;
+const FOG_STEP=0.08,FOG_INV_STEP=1/FOG_STEP,FOG_LUT_MAX=4096,FOG_DENSITY=.038;
 const fogLut=new Float32Array(FOG_LUT_MAX+1);
 for(let i=0;i<=FOG_LUT_MAX;i++)fogLut[i]=1-Math.exp(-i*FOG_STEP*FOG_DENSITY);
 function fastFogAlpha(t){
@@ -853,8 +926,8 @@ function skyRGB(dx,dy,dz,fogEnabled){
  let g=skyHorizon[1]*(1-k)+skyZenith[1]*k;
  let b=skyHorizon[2]*(1-k)+skyZenith[2]*k;
  const nearSun=Math.max(0,dx*sun[0]+dy*sun[1]+dz*sun[2]);
- const glint=Math.pow(nearSun,100)*22+Math.pow(nearSun,18)*5;
- r+=glint;g+=glint*.79;b+=glint*.46;
+ const glint=Math.pow(nearSun,92)*12+Math.pow(nearSun,28)*2.2;
+ r+=glint;g+=glint*.82;b+=glint*.62;
  if(fogEnabled&&dy>-.08){
   const wave=Math.sin(dx*11.7+dz*4.2)*Math.sin(dz*8.4-dy*15.1)
     +.54*Math.sin(dx*23.2+dy*10.4)*Math.cos(dz*13.8);
@@ -906,13 +979,20 @@ function shadePixel(cam,x,y,id,t,dx,dy,dz,options){
     stone:0xffa8b4bb,wood:0xff678aaf,cloth:0xffaf785c,skin:0xff86aaca,
     brick:0xff684744,concrete:0xff777e80,glass:0xff263744,asphalt:0xff30363a,
     taxi:0xffc99526,paint:0xffaaa391,metal:0xff394247,rust:0xff74452f,
-    rubber:0xff202324,lamp:0xffbd8841,mutant:0xff574d4e,claw:0xff252222};
+    rubber:0xff202324,lamp:0xffbd8841,mutant:0xff574d4e,claw:0xff252222,
+    windowdark:0xff18242a,windowlit:0xffd6aa6c,sign:0xff687b84,neon:0xff32b8c9,puddle:0xff18272e,debris:0xff69635c};
   base=paletteFlat[mat]||0xff888888;
  }
  if(options.mipColors&&options.textures)return base;
  const visibility=options.fast?shadowVisibilityFast(px+n[0]*.025,py+n[1]*.025,pz+n[2]*.025,options.shadows):shadowVisibility(px+n[0]*.025,py+n[1]*.025,pz+n[2]*.025);
  const shade=(.26+.74*ndotl*visibility);
  let r=(base&255)*shade,g=((base>>>8)&255)*shade,b=((base>>>16)&255)*shade;
+ const glow=mat==='neon'?.95:mat==='lamp'?.52:mat==='windowlit'?.34:0;
+ if(glow){r+=(base&255)*glow;g+=((base>>>8)&255)*glow;b+=((base>>>16)&255)*glow;}
+ const specular=mat==='puddle'?.52:mat==='glass'?.3:mat==='metal'?.2:mat==='taxi'?.12:0;
+ if(specular){const rx=2*ndotl*n[0]-sun[0],ry=2*ndotl*n[1]-sun[1],rz=2*ndotl*n[2]-sun[2];
+  const shine=Math.pow(Math.max(0,-(dx*rx+dy*ry+dz*rz)),mat==='puddle'?22:34)*specular*visibility;
+  r+=178*shine;g+=202*shine;b+=214*shine;}
  if(options.fog){
   const fog=options.fast?fastFogAlpha(t):1-Math.exp(-t*FOG_DENSITY);
   r=r*(1-fog)+skyHorizon[0]*fog;
@@ -930,7 +1010,8 @@ const FLAT_MATERIALS={bark:0xff556f91,leaves:0xff519b65,grass:0xff609e73,
  stone:0xffa8b4bb,wood:0xff678aaf,cloth:0xffaf785c,skin:0xff86aaca,
  brick:0xff684744,concrete:0xff777e80,glass:0xff263744,asphalt:0xff30363a,
  taxi:0xffc99526,paint:0xffaaa391,metal:0xff394247,rust:0xff74452f,
- rubber:0xff202324,lamp:0xffbd8841,mutant:0xff574d4e,claw:0xff252222};
+ rubber:0xff202324,lamp:0xffbd8841,mutant:0xff574d4e,claw:0xff252222,
+ windowdark:0xff18242a,windowlit:0xffd6aa6c,sign:0xff687b84,neon:0xff32b8c9,puddle:0xff18272e,debris:0xff69635c};
 function cacheFastMaterials(){
  texGroundGrass=materials.get('grass');texGroundStone=materials.get('stone');
  texGroundAsphalt=materials.get('asphalt');texGroundConcrete=materials.get('concrete');
@@ -942,6 +1023,15 @@ function normalFast(id,x,y,z,out){
  if(o.type==='ellipse'){
   let a=(x-o.cx)/(o.rx*o.rx),b=(y-o.cy)/(o.ry*o.ry),c=(z-o.cz)/(o.rz*o.rz);
   const l=Math.hypot(a,b,c)||1;out[0]=a/l;out[1]=b/l;out[2]=c/l;return out;
+ }
+ if(o.type==='roundbox'){
+  const px=x-o.center[0],py=y-o.center[1],pz=z-o.center[2];
+  const qx=Math.abs(px)-o.core[0],qy=Math.abs(py)-o.core[1],qz=Math.abs(pz)-o.core[2];
+  const vx=Math.max(qx,0)*Math.sign(px),vy=Math.max(qy,0)*Math.sign(py),vz=Math.max(qz,0)*Math.sign(pz),len=Math.hypot(vx,vy,vz);
+  if(len>1e-8){out[0]=vx/len;out[1]=vy/len;out[2]=vz/len;return out;}
+  if(qx>=qy&&qx>=qz){out[0]=Math.sign(px);out[1]=0;out[2]=0;}
+  else if(qy>=qz){out[0]=0;out[1]=Math.sign(py);out[2]=0;}
+  else{out[0]=0;out[1]=0;out[2]=Math.sign(pz);}return out;
  }
  if(o.type==='box'){
   let which=0,d=Math.abs(x-o.min[0]),v=Math.abs(x-o.max[0]);if(v<d){d=v;which=1;}
@@ -998,6 +1088,12 @@ function shadePixelFast(cam,x,y,id,t,dx,dy,dz,options){
  const shadow=shadowVisibilityFast(px+n[0]*.025,py+n[1]*.025,pz+n[2]*.025,options.shadows);
  const shade=.26+.74*ndotl*shadow;
  let r=(base&255)*shade,g=((base>>>8)&255)*shade,b=((base>>>16)&255)*shade;
+ const glow=o.mat==='neon'?.95:o.mat==='lamp'?.52:o.mat==='windowlit'?.34:0;
+ if(glow){r+=(base&255)*glow;g+=((base>>>8)&255)*glow;b+=((base>>>16)&255)*glow;}
+ const specular=o.mat==='puddle'?.52:o.mat==='glass'?.3:o.mat==='metal'?.2:o.mat==='taxi'?.12:0;
+ if(specular){const rx=2*ndotl*n[0]-sun[0],ry=2*ndotl*n[1]-sun[1],rz=2*ndotl*n[2]-sun[2];
+  const shine=Math.pow(Math.max(0,-(dx*rx+dy*ry+dz*rz)),o.mat==='puddle'?22:34)*specular*shadow;
+  r+=178*shine;g+=202*shine;b+=214*shine;}
  if(options.fog){
   const fog=fastFogAlpha(t),q=1-fog;
   r=r*q+skyHorizon[0]*fog;g=g*q+skyHorizon[1]*fog;b=b*q+skyHorizon[2]*fog;
