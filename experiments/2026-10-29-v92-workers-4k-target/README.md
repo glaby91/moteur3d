@@ -47,7 +47,7 @@ La série est indicative, issue d’une seule exécution communiquée par captur
 
 V9.2 est un ray caster CPU JavaScript : primitives mathématiques, BVH, textures RGB565 avec mipmaps, carte de profondeur pour l’unique lumière et un rayon caméra primaire par pixel calculé. Le banc T0 ne répartit pas ce vrai travail sur les workers.
 
-L’anticipation N+1 doit exploiter les données inchangées de la scène N. Le futur prototype devra traiter explicitement :
+Deux pistes sont maintenant distinguées : la cache de feuilles de surface (exploratoire) et une représentation plus radicale par régions de visibilité. La piste prioritaire devient la seconde : remplacer la question « quel impact pour chaque pixel ? » par « où la surface visible change-t-elle ? ». Voir [la conception du rendu par frontières](CONCEPTION_RENDERING_PAR_FRONTIERES.md). Le prototype devra traiter explicitement :
 
 1. un instantané cohérent de la scène, des matériaux, de l’éclairage et de la BVH ;
 2. les paramètres de caméra candidats N+1/N+2 ;
@@ -61,7 +61,9 @@ Une expérience antérieure de reprojection temporelle a produit des artefacts e
 
 ## Prochain jalon
 
-Construire un prototype mesurant le **vrai coût et le vrai bénéfice** :
+Prototyper le rendu par événements de visibilité sur une scène réduite (sol + boîte, puis ellipse/cone) et mesurer si la construction des régions coûte moins que les rayons qu’elle évite. La cache de surfaces restera une piste auxiliaire si le test est concluant. La méthode est détaillée dans [CONCEPTION_RENDERING_PAR_FRONTIERES.md](CONCEPTION_RENDERING_PAR_FRONTIERES.md).
+
+Ensuite, mesurer le **vrai coût et le vrai bénéfice** de la réutilisation temporelle :
 
 - rendre N avec le moteur V9.2 ;
 - préparer des candidates N+1/N+2 avec le même moteur et le même instantané de scène ;
