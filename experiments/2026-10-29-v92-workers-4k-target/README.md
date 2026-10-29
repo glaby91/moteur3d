@@ -168,10 +168,10 @@ Réglage : image 1920 × 1200, tuile 8 × 8, tolérance profondeur 5 mm, référ
 | Faux stables / pixels proposés | 2,16 % | 0,61 % |
 | Erreur maximale de profondeur stable | 0,3470 m | 0,1031 m |
 | Rayons estimés | 665 723 (71,1 % évités) | 1 262 237 (45,2 % évités) |
-| Durée affichée | 14,1 ms | 19,0 ms |
+| Durée affichée | 14,1 ms | 19,0 puis 14,9 ms (2 exécutions) |
 
 Les faux stables diminuent de 81,1 % et leur part dans la surface proposée passe de 2,16 % à 0,61 %. La surface proposée baisse de 72,5 % à 49,0 % ; le gain théorique de rayons évités passe de 71,1 % à 45,2 %. L’erreur maximale de profondeur reste de 0,1031 m, environ 20,6 fois la tolérance choisie.
 
-La capture de l’essai 2 affiche toujours l’ancien chrono global. Les 14,1 ms et 19,0 ms ne sont donc pas comparables. La dernière version HTML sépare classement, validation exhaustive et durée totale ; relancer l’analyse avec cette version pour relever ces temps distinctement. La validation exhaustive est le contrôle contre l’image complète, pas le coût du renderer envisagé.
+Les deux exécutions de l’essai 2 affichent 19,0 ms puis 14,9 ms (moyenne observée : 16,95 ms ; écart : 4,1 ms). L’ancien chrono global ne sépare pas le classement du contrôle exhaustif ; ces temps ne décrivent donc pas le coût du renderer envisagé. La dernière version HTML sépare classement, validation exhaustive et durée totale ; relancer l’analyse avec cette version pour relever ces temps distinctement. La validation exhaustive est le contrôle contre l’image complète, pas le coût du renderer envisagé.
 
 Ces résultats restent issus de captures ponctuelles. L’identité de la scène et des autres réglages doit être confirmée pour faire une comparaison stricte, et la qualité couleur/contours n’est pas encore mesurée. Voir [l’enregistrement PDF comparatif essai 2](enregistrement_carte_visibilite_V92_T0_2026-10-29_essai2.pdf).
