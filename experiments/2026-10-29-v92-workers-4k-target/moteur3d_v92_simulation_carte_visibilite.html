@@ -124,7 +124,7 @@ canvas#visibilityMap{display:block;width:100%;max-height:470px;object-fit:contai
 <div class="stat"><b id="vmRays">—</b><small>rayons estimés pour la carte</small></div>
 <div class="stat"><b id="vmSaved">—</b><small>rayons évités estimés</small></div>
 </div>
-<div class="metrics"><span>Tuiles stables</span><span id="vmStableTiles">—</span><span>Tuiles de frontière/incertaines</span><span id="vmDirtyTiles">—</span><span>Erreur max profondeur stable</span><span id="vmMaxError">—</span><span>Temps d’analyse de la carte</span><span id="vmTime">—</span></div>
+<div class="metrics"><span>Tuiles stables</span><span id="vmStableTiles">—</span><span>Tuiles de frontière/incertaines</span><span id="vmDirtyTiles">—</span><span>Erreur max profondeur stable</span><span id="vmMaxError">—</span><span>Temps de classement</span><span id="vmClassifyTime">—</span><span>Temps de validation exhaustive</span><span id="vmValidateTime">—</span><span>Durée totale de simulation</span><span id="vmTime">—</span></div>
 <div class="hint" id="vmNote">En attente d’une image V9.2 complète. L’estimation de rayons suppose qu’une tuile stable peut être remplie à partir de sa surface et de sa profondeur interpolée ; le coût de remplissage et l’erreur couleur restent à mesurer.</div>
 </div></div>
 </section>
@@ -1052,48 +1052,52 @@ function visibilityMapAnalyze(){
  if(!hitIds||!hitDistances||!frameImage){$('vmNote').textContent='Aucun buffer d’image disponible.';return}
  const started=performance.now(),tile=+$('vmTile').value,tol=+$('vmTolerance').value;
  const cols=Math.ceil(W/tile),rows=Math.ceil(H/tile),mapData=mctx.createImageData(cols,rows);
- let stableTiles=0,dirtyTiles=0,stableArea=0,falseStable=0,maxError=0,estimatedRays=0;
+ const count=cols*rows,classes=new Uint8Array(count),expectedIds=new Uint16Array(count),cornerDepths=new Float64Array(count*4);
+ let stableTiles=0,dirtyTiles=0,stableArea=0,estimatedRays=0;
  const colorsByClass=[[35,145,105],[225,163,60],[205,78,72],[65,132,190]];
  for(let ty=0;ty<rows;ty++)for(let tx=0;tx<cols;tx++){
-  const x0=tx*tile,y0=ty*tile,x1=Math.min(W-1,x0+tile-1),y1=Math.min(H-1,y0+tile-1),xm=(x0+x1)>>1,ym=(y0+y1)>>1;
+  const tileIndex=ty*cols+tx,x0=tx*tile,y0=ty*tile,x1=Math.min(W-1,x0+tile-1),y1=Math.min(H-1,y0+tile-1),xm=(x0+x1)>>1,ym=(y0+y1)>>1;
   const coords=[[x0,y0],[x1,y0],[x0,y1],[x1,y1],[xm,ym]];
-  const ids=coords.map(([x,y])=>hitIds[y*W+x]);
-  const ds=coords.map(([x,y])=>hitDistances[y*W+x]);
-  const allSame=ids.every(id=>id===ids[0]);
-  const sky=allSame&&ids[0]===0;
-  const cornerMean=(ds[0]+ds[1]+ds[2]+ds[3])*.25;
-  const centerError=sky?0:Math.abs(ds[4]-cornerMean);
-  const isStable=allSame&&(sky||centerError<=tol);
-  let cls, color;
-  const area=(x1-x0+1)*(y1-y0+1);
-  if(isStable){
-   stableTiles++;stableArea+=area;cls=sky?3:0;color=colorsByClass[cls];estimatedRays+=5;
-   if(!sky){
-    for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
-     const fx=x1===x0?0:(x-x0)/(x1-x0),fy=y1===y0?0:(y-y0)/(y1-y0);
-     const top=ds[0]*(1-fx)+ds[1]*fx,bot=ds[2]*(1-fx)+ds[3]*fx,pred=top*(1-fy)+bot*fy;
-     const i=y*W+x,err=Math.abs(hitDistances[i]-pred);
-     if(hitIds[i]!==ids[0]||err>tol)falseStable++;
-     if(hitIds[i]===ids[0]&&Number.isFinite(err))maxError=Math.max(maxError,err);
-    }
-   }
-  }else{
-   dirtyTiles++;cls=allSame?2:1;color=colorsByClass[cls];estimatedRays+=area;
-  }
-  const k=(ty*cols+tx)*4;mapData.data[k]=color[0];mapData.data[k+1]=color[1];mapData.data[k+2]=color[2];mapData.data[k+3]=255;
+  const ids=coords.map(([x,y])=>hitIds[y*W+x]),ds=coords.map(([x,y])=>hitDistances[y*W+x]);
+  const allSame=ids.every(id=>id===ids[0]),sky=allSame&&ids[0]===0;
+  const centerError=sky?0:Math.abs(ds[4]-(ds[0]+ds[1]+ds[2]+ds[3])*.25);
+  const isStable=allSame&&(sky||centerError<=tol),area=(x1-x0+1)*(y1-y0+1);
+  let cls,color;
+  if(isStable){stableTiles++;stableArea+=area;cls=sky?3:0;color=colorsByClass[cls];estimatedRays+=5;}
+  else{dirtyTiles++;cls=allSame?2:1;color=colorsByClass[cls];estimatedRays+=area;}
+  classes[tileIndex]=cls;expectedIds[tileIndex]=ids[0];
+  for(let k=0;k<4;k++)cornerDepths[tileIndex*4+k]=ds[k];
+  const out=tileIndex*4;mapData.data[out]=color[0];mapData.data[out+1]=color[1];mapData.data[out+2]=color[2];mapData.data[out+3]=255;
  }
- mapCanvas.width=cols;mapCanvas.height=rows;
- mctx.putImageData(mapData,0,0);
+ const classifyMs=performance.now()-started;
+ const validationStarted=performance.now();let falseStable=0,verifiedArea=0,maxError=0;
+ for(let ty=0;ty<rows;ty++)for(let tx=0;tx<cols;tx++){
+  const ti=ty*cols+tx;if(classes[ti]!==0)continue;
+  const x0=tx*tile,y0=ty*tile,x1=Math.min(W-1,x0+tile-1),y1=Math.min(H-1,y0+tile-1),id=expectedIds[ti],base=ti*4;
+  verifiedArea+=(x1-x0+1)*(y1-y0+1);
+  const d0=cornerDepths[base],d1=cornerDepths[base+1],d2=cornerDepths[base+2],d3=cornerDepths[base+3];
+  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+   const fx=x1===x0?0:(x-x0)/(x1-x0),fy=y1===y0?0:(y-y0)/(y1-y0);
+   const pred=(d0*(1-fx)+d1*fx)*(1-fy)+(d2*(1-fx)+d3*fx)*fy;
+   const i=y*W+x,err=Math.abs(hitDistances[i]-pred);
+   if(hitIds[i]!==id||err>tol)falseStable++;
+   if(hitIds[i]===id&&Number.isFinite(err))maxError=Math.max(maxError,err);
+  }
+ }
+ const validateMs=performance.now()-validationStarted;
+ mapCanvas.width=cols;mapCanvas.height=rows;mctx.putImageData(mapData,0,0);
  const full=W*H,saved=Math.max(0,full-estimatedRays),elapsed=performance.now()-started;
  $('vmStable').textContent=(stableArea/full*100).toFixed(1)+' %';
- $('vmFalse').textContent=falseStable.toLocaleString('fr-FR')+' / '+stableArea.toLocaleString('fr-FR');
+ $('vmFalse').textContent=falseStable.toLocaleString('fr-FR')+' / '+verifiedArea.toLocaleString('fr-FR');
  $('vmRays').textContent=estimatedRays.toLocaleString('fr-FR')+' / '+full.toLocaleString('fr-FR');
  $('vmSaved').textContent=(saved/full*100).toFixed(1)+' %';
  $('vmStableTiles').textContent=stableTiles.toLocaleString('fr-FR');
  $('vmDirtyTiles').textContent=dirtyTiles.toLocaleString('fr-FR');
  $('vmMaxError').textContent=maxError.toFixed(4)+' m';
+ $('vmClassifyTime').textContent=classifyMs.toFixed(1)+' ms';
+ $('vmValidateTime').textContent=validateMs.toFixed(1)+' ms';
  $('vmTime').textContent=elapsed.toFixed(1)+' ms';
- $('vmNote').textContent=`Carte issue de ${cols*rows} tuiles. ${falseStable.toLocaleString('fr-FR')} pixels des tuiles déclarées stables dépassent la tolérance ou changent de surface selon la référence complète. L’estimation de rayons n’inclut pas le coût de génération des frontières ni du remplissage de couleur.`;
+ $('vmNote').textContent=`${cols*rows} tuiles. ${falseStable.toLocaleString('fr-FR')} faux stables parmi ${verifiedArea.toLocaleString('fr-FR')} pixels géométriques vérifiés contre le rendu complet. Le temps de validation parcourt ces pixels de référence ; il ne fait pas partie du renderer proposé. L’estimation de rayons n’inclut pas le coût de remplissage couleur.`;
 }
 function initVisibilityMap(){
  $('vmAnalyze').addEventListener('click',visibilityMapAnalyze);
