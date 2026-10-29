@@ -303,7 +303,7 @@ function makeScene(){
  ];
  for(const side of [-1,1])for(const block of windowRows)for(const z of block.z){
   for(let floor=0;floor<block.floors;floor++){
-   const y=1.1+floor*1.72,face=side<0?-5.94:5.94;
+   const y=1.1+floor*1.72,face=z<-15?(side<0?-5.74:5.74):(side<0?-5.94:5.94);
    const paneMat=((Math.floor((z+40)*7)+floor*11+(side+1)*5)%13===0)?'windowlit':'windowdark';
    box(face-.035,y,z-.43,face+.035,y+1.12,z+.43,'metal');
    box(face-.06,y+.09,z-.34,face+.06,y+1.01,z+.34,paneMat);
@@ -312,7 +312,7 @@ function makeScene(){
  }
  // Ground-floor storefronts, battered signs and striped awnings.
  for(const [side,z,labelMat] of [[-1,-5.2,'sign'],[1,-5.2,'rust'],[-1,-17.2,'rust'],[1,-17.2,'sign']]){
-  const face=side<0?-5.9:5.9;
+  const face=z<-15?(side<0?-5.7:5.7):(side<0?-5.9:5.9);
   box(face-.12,.82,z-1.2,face+.12,1.84,z+1.2,'metal');
   box(face-.17,1.02,z-1.08,face+.17,1.67,z+1.08,'windowdark');
   box(face-.23,1.92,z-1.32,face+.23,2.3,z+1.32,labelMat);
