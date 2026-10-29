@@ -1074,7 +1074,7 @@ function shadePixelFast(cam,x,y,id,t,dx,dy,dz,options){
  }
  const px=cam.eye[0]+t*dx,py=cam.eye[1]+t*dy,pz=cam.eye[2]+t*dz;
  const n=normalFast(id,px,py,pz,FAST_NORMAL);
- const o=id===1?null:objects[id-2],groundMat=id===1?groundMaterial(px,pz):null;
+ const o=id===1?null:objects[id-2],groundMat=id===1?groundMaterial(px,pz):null,material=id===1?groundMat:o.mat;
  let base;
  if(options.textures){
   const tex=id===1?(groundMat==='asphalt'?texGroundAsphalt:texGroundConcrete):o.tex;
@@ -1088,11 +1088,11 @@ function shadePixelFast(cam,x,y,id,t,dx,dy,dz,options){
  const shadow=shadowVisibilityFast(px+n[0]*.025,py+n[1]*.025,pz+n[2]*.025,options.shadows);
  const shade=.26+.74*ndotl*shadow;
  let r=(base&255)*shade,g=((base>>>8)&255)*shade,b=((base>>>16)&255)*shade;
- const glow=o.mat==='neon'?.95:o.mat==='lamp'?.52:o.mat==='windowlit'?.34:0;
+ const glow=material==='neon'?.95:material==='lamp'?.52:material==='windowlit'?.34:0;
  if(glow){r+=(base&255)*glow;g+=((base>>>8)&255)*glow;b+=((base>>>16)&255)*glow;}
- const specular=o.mat==='puddle'?.52:o.mat==='glass'?.3:o.mat==='metal'?.2:o.mat==='taxi'?.12:0;
+ const specular=material==='puddle'?.52:material==='glass'?.3:material==='metal'?.2:material==='taxi'?.12:0;
  if(specular){const rx=2*ndotl*n[0]-sun[0],ry=2*ndotl*n[1]-sun[1],rz=2*ndotl*n[2]-sun[2];
-  const shine=Math.pow(Math.max(0,-(dx*rx+dy*ry+dz*rz)),o.mat==='puddle'?22:34)*specular*shadow;
+  const shine=Math.pow(Math.max(0,-(dx*rx+dy*ry+dz*rz)),material==='puddle'?22:34)*specular*shadow;
   r+=178*shine;g+=202*shine;b+=214*shine;}
  if(options.fog){
   const fog=fastFogAlpha(t),q=1-fog;
