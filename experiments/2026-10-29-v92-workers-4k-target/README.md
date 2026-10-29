@@ -224,21 +224,21 @@ Les bords sont écartés de la réutilisation avec une marge calculée selon le 
 
 Une première capture Edge en 640 × 400, mouvement 0,5° et tolérance 2 cm a donné 48,4 % (123 849) de pixels réutilisés, une erreur moyenne 0,84/255 et 151,0 ms de reprojection/validation. Cette ancienne version calculait d’abord le rendu complet N+1, puis s’en servait pour vérifier chaque pixel et recopier gratuitement les 51,6 % restants. Ces chiffres illustrent l’intérêt potentiel, mais ne sont pas la mesure du nouvel algorithme candidate-d’abord.
 
-### Mesures candidate-d’abord — deux captures Edge
+### Mesures candidate-d’abord — trois captures Edge
 
-Même résolution (1920 × 1200, 2 304 000 pixels), tolérance de profondeur 2 cm, garde des bords de 8 pixels et déplacement de 0,5° dans les deux essais.
+Même résolution (1920 × 1200, 2 304 000 pixels), tolérance de profondeur 2 cm, garde des bords de 8 pixels et déplacement de 0,5° pour les trois essais.
 
-| Indicateur | Essai 1 · 25° → 25,5° | Essai 2 · 51° → 51,5° |
-|---|---:|---:|
-| Pixels réutilisés sans BVH | 615 145 (26,7 %) | 591 730 (25,7 %) |
-| Rayons caméra réellement retracés | 1 688 855 (73,3 %) | 1 712 270 (74,3 %) |
-| Erreur couleur des pixels réutilisés | moyenne 0,92/255 ; 0,2 % > 8 ; maximum 88 | moyenne 0,98/255 ; 0,5 % > 8 ; maximum 89 |
-| Temps de la candidate complète | 3 485,4 ms | 3 774,3 ms |
-| Temps du rendu V9.2 de référence | 1 413,2 ms | 1 543,1 ms |
-| Écart | +146,6 % (2,47× plus lente) | +144,6 % (2,45× plus lente) |
+| Indicateur | Essai 1 · 25° → 25,5° | Essai 2 · 51° → 51,5° | Essai 3 · 52° → 52,5° |
+|---|---:|---:|---:|
+| Pixels réutilisés sans BVH | 615 145 (26,7 %) | 591 730 (25,7 %) | 693 524 (30,1 %) |
+| Rayons caméra réellement retracés | 1 688 855 (73,3 %) | 1 712 270 (74,3 %) | 1 610 476 (69,9 %) |
+| Erreur couleur des pixels réutilisés | moyenne 0,92/255 ; 0,2 % > 8 ; max 88 | moyenne 0,98/255 ; 0,5 % > 8 ; max 89 | moyenne 0,83/255 ; 0,2 % > 8 ; max 90 |
+| Candidate complète | 3 485,4 ms | 3 774,3 ms | 3 814,5 ms |
+| Rendu V9.2 de référence | 1 413,2 ms | 1 543,1 ms | 1 526,0 ms |
+| Écart | +146,6 % (2,47× plus lente) | +144,6 % (2,45× plus lente) | +150,0 % (2,50× plus lente) |
 
-Les deux points de vue donnent presque le même résultat : environ un quart des pixels est réutilisé, tandis que près des trois quarts des rayons restent retracés par BVH. La moyenne d’erreur des pixels conservés reste proche de 1/255, avec quelques erreurs locales au-dessus de 8 niveaux. Mais la candidate complète reste environ 2,5 fois plus lente que V9.2. La projection, la garde de sécurité et le recalcul des zones incertaines coûtent donc plus que les rayons économisés. **Aucun gain de performance n’est démontré** par cette méthode sur ces captures.
+Les trois captures réutilisent de 25,7 à 30,1 % des pixels ; la troisième obtient la meilleure couverture. L’erreur moyenne des pixels conservés reste inférieure à 1/255, avec quelques erreurs locales au-dessus de 8 niveaux. Mais 69,9 à 74,3 % des rayons sont retracés et la candidate complète prend 2,45 à 2,50 fois le temps de V9.2. La projection, la garde de sécurité et le recalcul des zones incertaines coûtent davantage que les rayons économisés. **Aucun gain de performance n’est démontré.**
 
-Le résultat antérieur de 48,4 % réutilisés et 151 ms est une mesure oracle et ne se compare pas : le rendu complet N+1 était calculé avant la candidate, puis les pixels de repli étaient copiés gratuitement. Les deux présents essais construisent d’abord la candidate, puis utilisent le rendu complet uniquement pour la valider.
+Le résultat antérieur de 48,4 % réutilisés et 151 ms est une mesure oracle et ne se compare pas : le rendu complet N+1 était calculé avant la candidate, puis les pixels de repli étaient copiés gratuitement. Les trois présents essais construisent d’abord la candidate, puis utilisent le rendu complet uniquement pour la valider.
 
 Cette expérience ne modifie pas le renderer V9.2. Elle invalide cette implémentation simple comme accélérateur en l’état ; une suite utile doit changer la représentation ou le coût du calcul, puis refaire la comparaison avec un protocole identique.
