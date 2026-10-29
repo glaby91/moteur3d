@@ -153,23 +153,23 @@ canvas#visibilityMap{display:block;width:100%;max-height:470px;object-fit:contai
 </section>
 <section class="panel" id="temporalPanel" style="margin-top:14px">
 <h2>07 / Essai temporel — reprojection de N vers N+1</h2>
-<p class="notice">Le bouton conserve les surfaces touchées de l’image N, déplace légèrement la caméra, puis calcule N+1 entièrement avec V9.2. Le rendu N+1 sert de vérité de contrôle : il révèle les pixels réutilisables, les occultations et les erreurs. Cette validation hors ligne ne mesure pas encore le temps d’un moteur qui produirait N+1 sans connaître sa référence.</p>
+<p class="notice">Le banc calcule d’abord une candidate N+1 sans consulter son rendu de référence : il reprojette les surfaces sûres et retrace par BVH les trous et zones de bord incertaines. Ensuite seulement, il calcule une image V9.2 complète pour mesurer l’erreur. Le temps candidat inclut la reprojection, le re-shading et les rayons BVH de correction ; le rendu de contrôle est chronométré séparément.</p>
 <div class="controls">
 <label>Déplacement angulaire de caméra <select id="temporalDelta"><option value="0.1">0,1° — très faible</option><option value="0.25">0,25° — faible</option><option value="0.5" selected>0,5° — moyen</option><option value="1">1° — marqué</option><option value="2">2° — fort</option></select></label>
 <label>Tolérance profondeur pour accepter un pixel <select id="temporalTolerance"><option value="0.005">5 mm — stricte</option><option value="0.02" selected>2 cm — moyenne</option><option value="0.05">5 cm — souple</option><option value="0.1">10 cm — large</option></select></label>
 <button class="primary" id="temporalRun">Capturer N et calculer N+1</button>
 </div>
 <div class="recon-grid">
-<figure><canvas id="temporalCandidate" width="640" height="400"></canvas><figcaption>Image N+1 candidate : reprojection des surfaces de N, shader recalculé, rendu V9.2 recopié pour les pixels rejetés.</figcaption></figure>
+<figure><canvas id="temporalCandidate" width="640" height="400"></canvas><figcaption>Image N+1 candidate : surfaces de N reprojetées et re-shadées ; rayons BVH réels pour les trous et bords douteux.</figcaption></figure>
 <figure><canvas id="temporalError" width="640" height="400"></canvas><figcaption>Écart couleur sur les pixels réutilisés : noir = même couleur, jaune/rouge = écart croissant.</figcaption></figure>
 </div>
 <div class="statgrid" style="grid-template-columns:repeat(4,minmax(0,1fr))">
 <div class="stat"><b id="temporalReuse">—</b><small>pixels réutilisés sans BVH</small></div>
-<div class="stat"><b id="temporalFallback">—</b><small>pixels en repli sur la référence</small></div>
+<div class="stat"><b id="temporalFallback">—</b><small>pixels retracés par BVH</small></div>
 <div class="stat"><b id="temporalErrorMean">—</b><small>erreur couleur moyenne réutilisée (0–255)</small></div>
 <div class="stat"><b id="temporalCandidateTime">—</b><small>ms reprojection + validation CPU</small></div>
 </div>
-<div class="metrics"><span>Rayons BVH évités estimés</span><span id="temporalRaysSaved">—</span><span>Pixels rejetés par surface/profondeur</span><span id="temporalRejected">—</span><span>Déplacement appliqué</span><span id="temporalApplied">—</span></div>
+<div class="metrics"><span>Pixels réutilisés sans rayon BVH</span><span id="temporalRaysSaved">—</span><span>Rayons réellement retracés</span><span id="temporalRejected">—</span><span>Temps rendu V9.2 complet de contrôle</span><span id="temporalReferenceTime">—</span><span>Écart de temps candidat / V9.2</span><span id="temporalTimeDelta">—</span><span>Déplacement appliqué</span><span id="temporalApplied">—</span></div>
 <div class="hint" id="temporalStatus">Attente d’un rendu V9.2 complet. Gardez la même résolution et les mêmes réglages pendant l’essai.</div>
 </section>
 </main>
@@ -183,7 +183,7 @@ const dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
 const sun=norm(-.55,.88,.36),skyZenith=[58,115,181],skyHorizon=[187,205,211];
 let W=640,H=400,displayW=640,displayH=400,renderScale=1,frameImage=null,pixels=null,hitIds=null,hitDistances=null;
 let scaledCanvas=null,scaledContext=null;
-let imageSerial=0,renderJob=null,shadowJob=null,shadowMap=null,preparedTexHigh=false,predictiveBench=null,completedRenderOptions=null,completedCamera=null,temporalPending=false;
+let imageSerial=0,renderJob=null,shadowJob=null,shadowMap=null,preparedTexHigh=false,predictiveBench=null,completedRenderOptions=null,completedCamera=null,temporalStage=null,temporalJob=null,temporalCandidateResult=null;
 let visibilityMapState=null;
 let materials=new Map(),objects=[],bvh=[],bvhRoot=-1;
 let currentCam=null;
@@ -979,7 +979,7 @@ function renderStep(){
  $('frameInfo').textContent='Image '+imageSerial+' terminée · '+fnum(stats.finishMs,1)+' ms';
  if(typeof onPrimaryImageComplete==='function')onPrimaryImageComplete(stats.finishMs);
  if(typeof visibilityMapAnalyze==='function')visibilityMapAnalyze();
- if(temporalPending)runTemporalValidation();
+ if(temporalStage==='reference')finishTemporalValidation();
 }
 function displayMetrics(){
  let best=0;for(let i=1;i<stats.mips.length;i++)if(stats.mips[i]>stats.mips[best])best=i;
@@ -1224,46 +1224,92 @@ function runTemporalExperiment(){
  const oldAngle=+$('angle').value,delta=+$('temporalDelta').value,next=clamp(oldAngle+delta,-180,180);
  if(next===oldAngle){$('temporalStatus').textContent='La rotation est déjà à sa limite. Changez d’abord la caméra.';return;}
  const [rw,rh]=$('resolution').value.split('x').map(Number),scale=+$('renderScale').value;
- temporalPending=true;
  window.temporalSource={w:W,h:H,angle:oldAngle,delta:next-oldAngle,cam:cloneCamera(completedCamera),options:{...completedRenderOptions},ids:hitIds.slice(),distances:hitDistances.slice()};
  $('angle').value=String(next);$('angleValue').textContent=next+'°';
- $('temporalRun').disabled=true;$('temporalStatus').textContent=`Image N conservée (${W} × ${H}). Calcul complet de N+1 à ${next}° en cours…`;
- invalidateImage(`Image N+1 · déplacement caméra ${(next-oldAngle).toFixed(2)}°`);
- if(W!==Math.round(rw*scale)||H!==Math.round(rh*scale)){temporalPending=false;window.temporalSource=null;$('temporalRun').disabled=false;$('temporalStatus').textContent='La résolution a changé pendant la préparation ; relancez après le rendu complet.';}
+ if(W!==Math.round(rw*scale)||H!==Math.round(rh*scale)){window.temporalSource=null;$('temporalStatus').textContent='La résolution a changé pendant la préparation ; relancez après le rendu complet.';return;}
+ $('temporalRun').disabled=true;$('temporalStatus').textContent=`Image N conservée. Candidate N+1 à ${next}° : reprojection, puis rayons BVH de correction…`;
+ $('state').textContent='Candidate temporelle en calcul';$('frameInfo').textContent='N+1 candidat · BVH limité aux zones incertaines';$('progressBar').style.width='0%';
+ resetCounters();temporalStage='candidate';
+ const started=performance.now(),cam=buildCamera(),options={textures:$('textures').checked,filter:$('filter').value,mipMode:$('mipMode').value,mipColors:$('mipColors').checked,fog:$('fog').checked,fast:$('shadingMode').value==='fast',shadows:$('shadows').checked,skyFast:$('skyMode').value==='fast'};
+ temporalJob={stage:'project',row:0,started,w:W,h:H,count:W*H,cam,options,source:window.temporalSource,
+  projectedIds:new Uint16Array(W*H),projectedZ:new Float32Array(W*H),seeds:new Uint8Array(W*H),unsafe:null,horizontal:null,
+  out:null,outWords:null,reusedMask:null,reused:0,ray:[0,0,0],oldRay:[0,0,0],newRay:[0,0,0],point:[0,0,0],tile:0,tileIds:new Uint16Array(256),tileTs:new Float32Array(256)};
+ temporalJob.projectedZ.fill(Infinity);
+ requestAnimationFrame(temporalCandidateStep);
 }
-function runTemporalValidation(){
- const prev=window.temporalSource;temporalPending=false;$('temporalRun').disabled=false;
- if(!prev||prev.w!==W||prev.h!==H){$('temporalStatus').textContent='Comparaison annulée : la résolution N et N+1 ne correspond pas.';window.temporalSource=null;return;}
- const started=performance.now(),count=W*H,newCam=completedCamera,tol=+$('temporalTolerance').value;
- const projectedIds=new Uint16Array(count),projectedViewZ=new Float32Array(count),projectedT=new Float32Array(count);projectedViewZ.fill(Infinity);projectedT.fill(Infinity);
- const oldRay=[0,0,0],newRay=[0,0,0],point=[0,0,0],eye=prev.cam.eye;
- const tanH=Math.tan(newCam.fov*.5),tanV=tanH*H/W;
- for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-  const si=y*W+x,id=prev.ids[si],t=prev.distances[si];if(id===0||!Number.isFinite(t)||t<=0)continue;
-  cameraRay(prev.cam,x,y,oldRay);point[0]=eye[0]+t*oldRay[0];point[1]=eye[1]+t*oldRay[1];point[2]=eye[2]+t*oldRay[2];
-  const vx=point[0]-newCam.eye[0],vy=point[1]-newCam.eye[1],vz=point[2]-newCam.eye[2],viewZ=vx*newCam.f[0]+vy*newCam.f[1]+vz*newCam.f[2];if(viewZ<=1e-6)continue;
-  const nx=(vx*newCam.r[0]+vy*newCam.r[1]+vz*newCam.r[2])/(viewZ*tanH),ny=(vx*newCam.u[0]+vy*newCam.u[1]+vz*newCam.u[2])/(viewZ*tanV);
-  const px=Math.round((nx+1)*W*.5-.5),py=Math.round((1-ny)*H*.5-.5);if(px<0||px>=W||py<0||py>=H)continue;
-  const ti=py*W+px;if(viewZ>=projectedViewZ[ti])continue;
-  cameraRay(newCam,px,py,newRay);const cosine=dot(newRay,newCam.f);if(cosine<=1e-6)continue;
-  projectedViewZ[ti]=viewZ;projectedT[ti]=viewZ/cosine;projectedIds[ti]=id;
+function temporalCandidateStep(){
+ const j=temporalJob;if(!j||temporalStage!=='candidate')return;
+ const count=j.count,w=j.w,h=j.h,old=j.source,cam=j.cam,ray=j.oldRay,point=j.point,eye=old.cam.eye;
+ if(j.stage==='project'){
+  const end=Math.min(h,j.row+24),tanH=Math.tan(cam.fov*.5),tanV=tanH*h/w;
+  for(let y=j.row;y<end;y++)for(let x=0;x<w;x++){
+   const si=y*w+x,id=old.ids[si],t=old.distances[si];if(id===0||!Number.isFinite(t)||t<=0)continue;
+   cameraRay(old.cam,x,y,ray);point[0]=eye[0]+t*ray[0];point[1]=eye[1]+t*ray[1];point[2]=eye[2]+t*ray[2];
+   const vx=point[0]-cam.eye[0],vy=point[1]-cam.eye[1],vz=point[2]-cam.eye[2],z=vx*cam.f[0]+vy*cam.f[1]+vz*cam.f[2];if(z<=1e-6)continue;
+   const nx=(vx*cam.r[0]+vy*cam.r[1]+vz*cam.r[2])/(z*tanH),ny=(vx*cam.u[0]+vy*cam.u[1]+vz*cam.u[2])/(z*tanV);
+   const px=Math.round((nx+1)*w*.5-.5),py=Math.round((1-ny)*h*.5-.5);if(px<0||px>=w||py<0||py>=h)continue;
+   const ti=py*w+px;if(z>=j.projectedZ[ti])continue;j.projectedZ[ti]=z;j.projectedIds[ti]=id;
+  }
+  j.row=end;$('progressBar').style.width=(end/h*25).toFixed(1)+'%';
+  if(end<h){requestAnimationFrame(temporalCandidateStep);return;}
+  j.stage='classify';j.row=0;$('temporalStatus').textContent='Reprojection terminée ; repérage des bords et des trous à sécuriser…';requestAnimationFrame(temporalCandidateStep);return;
  }
- const candidate=$('temporalCandidate'),errorCanvas=$('temporalError');candidate.width=W;candidate.height=H;errorCanvas.width=W;errorCanvas.height=H;
- const out=candidate.getContext('2d').createImageData(W,H),heat=errorCanvas.getContext('2d').createImageData(W,H),words=new Uint32Array(out.data.buffer),ref=frameImage.data,opts=completedRenderOptions||prev.options;
- const savedStats={};for(const k of Object.keys(stats))savedStats[k]=k==='mips'?stats.mips.slice():stats[k];
- let reused=0,rejected=0,sumMaxErr=0,errPixels=0;const ray=[0,0,0];
- for(let y=0;y<H;y++)for(let x=0;x<W;x++){
-  const i=y*W+x,p=i*4,id=projectedIds[i],valid=id!==0&&hitIds[i]===id&&Math.abs(projectedT[i]-hitDistances[i])<=tol;
-  if(valid){cameraRay(newCam,x,y,ray);words[i]=(opts.fast?shadePixelFast:shadePixel)(newCam,x,y,id,projectedT[i],ray[0],ray[1],ray[2],opts);const d=Math.max(Math.abs(out.data[p]-ref[p]),Math.abs(out.data[p+1]-ref[p+1]),Math.abs(out.data[p+2]-ref[p+2]));sumMaxErr+=d;errPixels++;reused++;}
-  else{words[i]=(0xff000000|(ref[p+2]<<16)|(ref[p+1]<<8)|ref[p])>>>0;if(id!==0)rejected++;}
+ if(j.stage==='classify'){
+  const end=Math.min(h-1,j.row+32),edgeTol=Math.max(.08,4*(+$('temporalTolerance').value));
+  for(let y=Math.max(1,j.row);y<end;y++)for(let x=1;x<w-1;x++){
+   const i=y*w+x,id=j.projectedIds[i];if(!id)continue;
+   const neighbors=[i-1,i+1,i-w,i+w];
+   for(const n of neighbors){if(j.projectedIds[n]!==id||Math.abs(j.projectedZ[n]-j.projectedZ[i])>edgeTol){j.seeds[i]=1;break;}}
+  }
+  j.row=end;$('progressBar').style.width=(25+end/h*15).toFixed(1)+'%';
+  if(end<h-1){requestAnimationFrame(temporalCandidateStep);return;}
+  j.guard=clamp(Math.ceil(Math.abs(old.delta)*PI/180*w/(2*Math.tan(cam.fov*.5)))+1,1,8);j.horizontal=new Uint8Array(count);j.unsafe=new Uint8Array(count);j.row=0;j.stage='dilateX';requestAnimationFrame(temporalCandidateStep);return;
  }
- for(let i=0;i<count;i++){const p=i*4,d=Math.max(Math.abs(out.data[p]-ref[p]),Math.abs(out.data[p+1]-ref[p+1]),Math.abs(out.data[p+2]-ref[p+2]));heat[p]=Math.min(255,d*4);heat[p+1]=Math.max(0,Math.min(220,(d-24)*3));heat[p+2]=Math.max(0,Math.min(80,(d-80)*.8));heat[p+3]=255;}
- const elapsed=performance.now()-started;
- for(const k of Object.keys(savedStats)){if(k==='mips')stats.mips.set(savedStats.mips);else stats[k]=savedStats[k];}
- candidate.getContext('2d').putImageData(out,0,0);errorCanvas.getContext('2d').putImageData(heat,0,0);
- $('temporalReuse').textContent=(100*reused/count).toFixed(1)+' %';$('temporalFallback').textContent=(100*(count-reused)/count).toFixed(1)+' %';$('temporalErrorMean').textContent=(errPixels?sumMaxErr/errPixels:0).toFixed(2);$('temporalCandidateTime').textContent=elapsed.toFixed(1)+' ms';$('temporalRaysSaved').textContent=reused.toLocaleString('fr-FR')+' / '+count.toLocaleString('fr-FR');$('temporalRejected').textContent=rejected.toLocaleString('fr-FR');$('temporalApplied').textContent=prev.angle+'° → '+$('angle').value+'°';
- $('temporalStatus').textContent=`N+1 rendu en ${fnum(stats.finishMs,1)} ms par V9.2. ${reused.toLocaleString('fr-FR')} pixels passent le contrôle ID + profondeur (± ${(tol*100).toLocaleString('fr-FR')} cm) et sont re-shadés sans BVH ; ${rejected.toLocaleString('fr-FR')} surfaces projetées sont rejetées. Les pixels non réutilisés sont recopiés de la référence déjà calculée : le temps affiché n’est donc pas un gain de temps de production.`;
- window.temporalSource=null;
+ if(j.stage==='dilateX'){
+  const end=Math.min(h,j.row+64),g=j.guard;
+  for(let y=j.row;y<end;y++){const base=y*w;let sum=0;for(let x=0;x<=g&&x<w;x++)sum+=j.seeds[base+x];for(let x=0;x<w;x++){if(x>0){const add=x+g;if(add<w)sum+=j.seeds[base+add];const rem=x-g-1;if(rem>=0)sum-=j.seeds[base+rem];}j.horizontal[base+x]=sum?1:0;}}
+  j.row=end;$('progressBar').style.width=(40+end/h*10).toFixed(1)+'%';if(end<h){requestAnimationFrame(temporalCandidateStep);return;}j.row=0;j.stage='dilateY';requestAnimationFrame(temporalCandidateStep);return;
+ }
+ if(j.stage==='dilateY'){
+  const end=Math.min(w,j.row+64),g=j.guard;
+  for(let x=j.row;x<end;x++){let sum=0;for(let y=0;y<=g&&y<h;y++)sum+=j.horizontal[y*w+x];for(let y=0;y<h;y++){if(y>0){const add=y+g;if(add<h)sum+=j.horizontal[add*w+x];const rem=y-g-1;if(rem>=0)sum-=j.horizontal[rem*w+x];}j.unsafe[y*w+x]=sum?1:0;}}
+  j.row=end;$('progressBar').style.width=(50+end/w*10).toFixed(1)+'%';if(end<w){requestAnimationFrame(temporalCandidateStep);return;}j.horizontal=null;j.seeds=null;j.out=$('temporalCandidate').getContext('2d').createImageData(w,h);j.outWords=new Uint32Array(j.out.data.buffer);j.reusedMask=new Uint8Array(count);j.row=0;j.stage='render';j.tile=0;$('temporalStatus').textContent=`Bords sécurisés sur ${j.guard} px ; re-shading des surfaces conservées et retracé BVH des zones incertaines…`;requestAnimationFrame(temporalCandidateStep);return;
+ }
+ if(j.stage==='render'){
+  const frameStart=performance.now(),budget=Number($('budget').value),countX=Math.ceil(w/16),total=countX*Math.ceil(h/16),shader=j.options.fast?shadePixelFast:shadePixel;
+  do{
+   const tile=j.tile++,bx=(tile%countX)*16,by=Math.floor(tile/countX)*16,right=Math.min(w,bx+16),bottom=Math.min(h,by+16),ids=j.tileIds,ts=j.tileTs,hit={id:0,t:Infinity};
+   const candidates=tileCandidates(cam,bx,by,right,bottom);let sky=false,traceStart=performance.now();
+   for(let y=by;y<bottom;y++)for(let x=bx;x<right;x++){
+    const i=y*w+x,k=(y-by)*16+(x-bx),id=j.projectedIds[i];cameraRay(cam,x,y,j.ray);
+    if(id&&!j.unsafe[i]){const cosine=dot(j.ray,cam.f),t=cosine>1e-6?j.projectedZ[i]/cosine:NaN;if(Number.isFinite(t)&&t>0){ids[k]=id;ts[k]=t;j.reusedMask[i]=1;j.reused++;}else{traceTileRay(cam.eye[0],cam.eye[1],cam.eye[2],j.ray[0],j.ray[1],j.ray[2],candidates,hit);ids[k]=hit.id;ts[k]=hit.t;}}
+    else{traceTileRay(cam.eye[0],cam.eye[1],cam.eye[2],j.ray[0],j.ray[1],j.ray[2],candidates,hit);ids[k]=hit.id;ts[k]=hit.t;}
+    if(ids[k]===0)sky=true;
+   }
+   stats.traceMs+=performance.now()-traceStart;const shadeStart=performance.now();let skyReady=false;
+   if(j.options.skyFast&&sky){prepareSkyGrid(cam,bx,by,j.options.fog);skyReady=true;}
+   for(let y=by;y<bottom;y++)for(let x=bx;x<right;x++){const i=y*w+x,k=(y-by)*16+(x-bx);cameraRay(cam,x,y,j.ray);j.outWords[i]=skyReady&&ids[k]===0?skyInterpolated(x-bx,y-by):shader(cam,x,y,ids[k],ts[k],j.ray[0],j.ray[1],j.ray[2],j.options);}
+   stats.shadeMs+=performance.now()-shadeStart;stats.tiles++;
+  }while(j.tile<total&&performance.now()-frameStart<budget);
+  $('progressBar').style.width=(60+j.tile/total*40).toFixed(1)+'%';$('frameInfo').textContent='N+1 candidat · '+(j.tile/total*100).toFixed(1)+' %';
+  if(j.tile<total){requestAnimationFrame(temporalCandidateStep);return;}
+  const elapsed=performance.now()-j.started,candidate=$('temporalCandidate');candidate.width=w;candidate.height=h;candidate.getContext('2d').putImageData(j.out,0,0);
+  temporalCandidateResult={w,h,bytes:j.out.data,reusedMask:j.reusedMask,reused:j.reused,elapsed,traceMs:stats.traceMs,shadeMs:stats.shadeMs,rays:stats.rays,tests:stats.tests,nodes:stats.nodes,angle:old.angle,delta:old.delta,guard:j.guard};
+  j.out=null;j.outWords=null;j.projectedIds=null;j.projectedZ=null;j.unsafe=null;j.reusedMask=null;j.source=null;temporalJob=null;window.temporalSource=null;temporalStage='reference';
+  $('state').textContent='Candidate prête · vérification V9.2';$('temporalStatus').textContent=`Candidate calculée sans oracle en ${elapsed.toFixed(1)} ms ; lancement du rendu V9.2 complet pour contrôler l’erreur…`;
+  invalidateImage('Référence complète N+1 · contrôle différé de la candidate');return;
+ }
+}
+function finishTemporalValidation(){
+ const result=temporalCandidateResult;if(!result||result.w!==W||result.h!==H){temporalStage=null;temporalCandidateResult=null;$('temporalRun').disabled=false;$('temporalStatus').textContent='Comparaison différée annulée : la résolution ne correspond pas.';return;}
+ temporalStage=null;$('temporalRun').disabled=false;const ref=frameImage.data,candidate=result.bytes,heatCanvas=$('temporalError');heatCanvas.width=W;heatCanvas.height=H;
+ const heat=heatCanvas.getContext('2d').createImageData(W,H),hdata=heat.data;let sum=0,n=0,above8=0,maxErr=0;
+ for(let i=0;i<W*H;i++){const p=i*4,d=Math.max(Math.abs(candidate[p]-ref[p]),Math.abs(candidate[p+1]-ref[p+1]),Math.abs(candidate[p+2]-ref[p+2]));if(result.reusedMask[i]){sum+=d;n++;if(d>8)above8++;maxErr=Math.max(maxErr,d);}hdata[p]=Math.min(255,d*4);hdata[p+1]=Math.max(0,Math.min(220,(d-24)*3));hdata[p+2]=Math.max(0,Math.min(80,(d-80)*.8));hdata[p+3]=255;}
+ heatCanvas.getContext('2d').putImageData(heat,0,0);
+ const full=W*H,referenceMs=stats.finishMs,deltaPct=referenceMs?100*(result.elapsed/referenceMs-1):0;
+ $('temporalReuse').textContent=(100*result.reused/full).toFixed(1)+' %';$('temporalFallback').textContent=(100*(full-result.reused)/full).toFixed(1)+' %';$('temporalErrorMean').textContent=(n?sum/n:0).toFixed(2);$('temporalCandidateTime').textContent=result.elapsed.toFixed(1)+' ms';$('temporalRaysSaved').textContent=result.reused.toLocaleString('fr-FR')+' / '+full.toLocaleString('fr-FR');$('temporalRejected').textContent=result.rays.toLocaleString('fr-FR')+' / '+full.toLocaleString('fr-FR');$('temporalReferenceTime').textContent=referenceMs.toFixed(1)+' ms';$('temporalTimeDelta').textContent=(deltaPct>=0?'+':'')+deltaPct.toFixed(1)+' %';$('temporalApplied').textContent=result.angle+'° → '+(result.angle+result.delta)+'°';
+ $('temporalStatus').textContent=`Candidate N+1 calculée avant le rendu de contrôle : ${result.reused.toLocaleString('fr-FR')} pixels re-shadés sans rayon BVH, ${result.rays.toLocaleString('fr-FR')} rayons caméra réellement retracés ; bords sécurisés sur ${result.guard} px. Temps candidat ${result.elapsed.toFixed(1)} ms contre ${referenceMs.toFixed(1)} ms pour V9.2 complet (${deltaPct>=0?'+':''}${deltaPct.toFixed(1)} %). Erreur moyenne des pixels réutilisés : ${(n?sum/n:0).toFixed(2)}/255 ; ${n?(100*above8/n).toFixed(1):'0.0'} % dépassent 8 niveaux, erreur max ${maxErr}/255. La référence n’a été consultée qu’après la production de la candidate.`;
+ $('temporalRun').disabled=false;$('state').textContent='Comparaison terminée';temporalCandidateResult=null;
 }
 function initVisibilityMap(){
  $('vmAnalyze').addEventListener('click',visibilityMapAnalyze);
