@@ -75,6 +75,12 @@ Ensuite, mesurer le **vrai coût et le vrai bénéfice** de la réutilisation te
 
 Le banc synthétique de cette archive reste utile comme mesure de saturation, mais ne doit pas servir de critère de sélection final.
 
+## Notes de conception et rapport
+
+- [Hypothèse de rendu par événements de visibilité](CONCEPTION_RENDERING_PAR_FRONTIERES.md) — piste prioritaire pour changer la représentation du calcul.
+- [Diagnostic PDF des goulots T0](diagnostic_goulots_moteur3d_v92_T0_2026-10-29.pdf).
+- [Piste secondaire des feuilles de surface](CONCEPTION_FEUILLES_SURFACE_PLIEES.md), conservée comme réflexion exploratoire.
+
 ## Référence
 
 - Version moteur de départ : V9.2 sur `master`.
