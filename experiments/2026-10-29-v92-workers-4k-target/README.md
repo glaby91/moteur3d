@@ -204,3 +204,19 @@ Capture Firefox de la section 06, image 640 × 400 :
 | Temps reconstruction + comparaison CPU | 109,0 ms |
 
 La carte d’écart est presque noire et la candidate conserve les textures. Le résultat visuel est très encourageant pour les tuiles stables. Il reste toutefois conditionné par les identifiants et profondeurs issus de l’image complète V9.2 ; près de la moitié de l’image est recopiée gratuitement depuis cette référence. Le temps de 109 ms ne mesure pas un rendu complet ni une vraie image N+1. Les paramètres de taille de tuile et de tolérance ne sont pas visibles sur la capture ; ils restent à confirmer avant répétition. Voir l’[enregistrement PDF T0](enregistrement_reconstruction_patch_visibility_V92_T0_2026-10-29.pdf).
+
+
+## Essai N→N+1 par reprojection de visibilité — prêt à mesurer
+
+La section 07 du simulateur ajoute un essai avec un petit déplacement angulaire (0,1° à 2°) :
+
+1. conserver une copie des identifiants de surface, profondeurs, caméra et réglages de l’image N ;
+2. déplacer la caméra et rendre N+1 entièrement avec le moteur V9.2 ;
+3. reprojeter les impacts de N vers N+1 avec un z-buffer ;
+4. accepter un pixel seulement si l’identifiant de surface correspond au rendu de référence N+1 et si l’écart de profondeur respecte la tolérance choisie ;
+5. re-shader les pixels acceptés sans retraversée de la BVH, puis afficher les pixels rejetés depuis l’image complète de référence ;
+6. mesurer couverture réutilisée, pixels rejetés, erreur couleur et coût CPU de la reprojection/validation.
+
+**Limite de mesure :** le rendu complet N+1 est calculé avant la validation et sert d’oracle pour détecter les occultations et les erreurs. Les pixels de repli sont copiés gratuitement depuis cette référence. Le temps affiché et le taux de réutilisation ne constituent donc pas un gain net ni un benchmark de production ; ils caractérisent la couverture et la qualité possible de la reprojection dans cette scène. Les résultats ne sont pas encore relevés : lancer le fichier dans Firefox, attendre les textures et le rendu complet, puis cliquer « Capturer N et calculer N+1 ».
+
+Le prototype n’altère pas le renderer V9.2. Il teste le mouvement de caméra uniquement ; aucune animation d’objet, modification de matériau ou mouvement de lumière n’est simulé.
