@@ -206,17 +206,24 @@ Capture Firefox de la section 06, image 640 × 400 :
 La carte d’écart est presque noire et la candidate conserve les textures. Le résultat visuel est très encourageant pour les tuiles stables. Il reste toutefois conditionné par les identifiants et profondeurs issus de l’image complète V9.2 ; près de la moitié de l’image est recopiée gratuitement depuis cette référence. Le temps de 109 ms ne mesure pas un rendu complet ni une vraie image N+1. Les paramètres de taille de tuile et de tolérance ne sont pas visibles sur la capture ; ils restent à confirmer avant répétition. Voir l’[enregistrement PDF T0](enregistrement_reconstruction_patch_visibility_V92_T0_2026-10-29.pdf).
 
 
-## Essai N→N+1 par reprojection de visibilité — prêt à mesurer
 
-La section 07 du simulateur ajoute un essai avec un petit déplacement angulaire (0,1° à 2°) :
+## Essai N→N+1 par reprojection de visibilité
 
-1. conserver une copie des identifiants de surface, profondeurs, caméra et réglages de l’image N ;
-2. déplacer la caméra et rendre N+1 entièrement avec le moteur V9.2 ;
-3. reprojeter les impacts de N vers N+1 avec un z-buffer ;
-4. accepter un pixel seulement si l’identifiant de surface correspond au rendu de référence N+1 et si l’écart de profondeur respecte la tolérance choisie ;
-5. re-shader les pixels acceptés sans retraversée de la BVH, puis afficher les pixels rejetés depuis l’image complète de référence ;
-6. mesurer couverture réutilisée, pixels rejetés, erreur couleur et coût CPU de la reprojection/validation.
+La section 07 du simulateur teste une candidate sans utiliser le rendu complet N+1 pendant sa construction :
 
-**Limite de mesure :** le rendu complet N+1 est calculé avant la validation et sert d’oracle pour détecter les occultations et les erreurs. Les pixels de repli sont copiés gratuitement depuis cette référence. Le temps affiché et le taux de réutilisation ne constituent donc pas un gain net ni un benchmark de production ; ils caractérisent la couverture et la qualité possible de la reprojection dans cette scène. Première exécution communiquée dans Edge : en 640 × 400 (256 000 pixels), déplacement 0,5° et tolérance 2 cm, 48,4 % des pixels (123 849) sont réutilisés sans BVH, 51,6 % (environ 132 151) sont repris de la référence, l’erreur couleur moyenne des pixels réutilisés est de 0,84/255 et la reprojection + validation CPU affiche 151,0 ms. La carte d’écart paraît presque noire. Il s’agit d’une exécution unique sur la scène et les réglages courants.
+1. conserver les identifiants, profondeurs et caméra de l’image N ;
+2. déplacer la caméra et reprojeter les impacts de N avec un z-buffer ;
+3. re-shader les surfaces reprojetées jugées sûres ;
+4. retracer par BVH les trous, bords et zones douteuses avec les rayons de la nouvelle caméra ;
+5. sauvegarder la candidate et son temps complet (projection, garde des bords, shading, rayons de correction) ;
+6. seulement ensuite, calculer le rendu V9.2 complet et comparer les pixels, profondeurs/couleurs et temps.
 
-Le prototype n’altère pas le renderer V9.2. Il teste le mouvement de caméra uniquement ; aucune animation d’objet, modification de matériau ou mouvement de lumière n’est simulé.
+Les bords sont écartés de la réutilisation avec une marge calculée selon le déplacement angulaire. Cette garde est une heuristique ; l’image complète postérieure sert à révéler les erreurs restantes, mais ne corrige pas la candidate.
+
+### Mesure préliminaire, ancienne version avec oracle
+
+Une première capture Edge en 640 × 400, mouvement 0,5° et tolérance 2 cm a donné 48,4 % (123 849) de pixels réutilisés, une erreur moyenne 0,84/255 et 151,0 ms de reprojection/validation. Cette ancienne version calculait d’abord le rendu complet N+1, puis s’en servait pour vérifier chaque pixel et recopier gratuitement les 51,6 % restants. Ces chiffres illustrent l’intérêt potentiel, mais ne sont pas la mesure du nouvel algorithme candidate-d’abord.
+
+La nouvelle version vient d’être publiée et n’a pas encore été mesurée par l’utilisateur. Refaire la capture avec le fichier mis à jour ; relever taux de réutilisation, rayons BVH réellement retracés, erreur couleur sur les pixels réutilisés, temps candidat et temps de référence V9.2. Si le temps candidat baisse, répéter à plusieurs angles et résolutions avant de tirer une conclusion, notamment pour 4K/100 FPS.
+
+Cette expérience ne modifie pas le renderer V9.2. Le candidat est construit avant l’image de contrôle ; la comparaison complète arrive après et ne participe pas à son temps mesuré.
