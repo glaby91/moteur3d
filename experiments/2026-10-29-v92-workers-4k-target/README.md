@@ -179,13 +179,12 @@ Ces résultats restent issus de captures ponctuelles. L’identité de la scène
 
 ## Prototype d’image reconstruite par carte de visibilité
 
-La section 06 de la simulation produit une candidate visible après le calcul de la carte :
+La section 06 compare deux candidates à partir d’une carte calculée sur le rendu terminé :
 
-- cinq sondes couleur par tuile stable : quatre coins et centre ;
-- interpolation bilinéaire des coins, corrigée par l’écart de la sonde centrale ;
-- copie des pixels V9.2 de référence pour les tuiles incertaines ;
-- comparaison candidate/référence avec erreur moyenne maximale RGB, part des pixels stables dépassant 8 niveaux et visualisation des écarts.
+- **Interpolation RGB** : les quatre couleurs de coin sont interpolées avec correction par la sonde centrale. L’image test a montré un lissage marqué des textures.
+- **Patch de surface + shader V9.2** : trois coins définissent un plan local ; chaque pixel intersecte ce plan, puis recalcule UV, texture, éclairage et ombres par le shader du moteur.
+- Dans les deux modes, les tuiles incertaines recopient les pixels V9.2 de référence. L’outil compare l’erreur couleur et produit une carte d’écart.
 
-Cette simulation permet d’observer les défauts couleur de l’interpolation, mais **ne calcule pas encore une vraie image N+1**. Les zones incertaines sont copiées gratuitement depuis le rendu complet déjà disponible ; le temps affiché est le coût CPU de reconstruction/comparaison sur les buffers existants, pas un temps de rendu. Cette limite rend la qualité mesurée optimiste et le temps impropre à conclure à un gain de FPS.
+Le mode patch teste la qualité du modèle local et le coût de shading sans traversée BVH, avec identifiants et profondeurs de coins issus du rendu complet déjà calculé. Il **ne calcule pas encore une vraie image N+1**. Le repli exact est gratuit ; le temps affiché n’est pas un temps de rendu complet ni une mesure de gain FPS. Ces limites rendent la qualité globale optimiste.
 
 La section 05 reste le contrôle géométrique de stabilité et l’estimation théorique du nombre de rayons. La version V9.2 du renderer est inchangée.
