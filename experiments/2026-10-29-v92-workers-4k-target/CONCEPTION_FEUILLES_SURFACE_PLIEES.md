@@ -2,14 +2,12 @@
 
 **Projet :** moteur 3D V9.2  
 **Date :** 2026-10-29  
-**État :** concept à prototyper, pas encore implémenté ni validé  
+**État :** piste secondaire archivée, pas encore implémentée ni validée  
 **Objectif :** réduire le coût des images successives vers une sortie 4K à au moins 100 images/s.
 
 ## Intuition
 
-Une image écran est une feuille plane : quand la caméra bouge, les mêmes surfaces glissent dans cette feuille, certaines se découvrent et d'autres disparaissent. Une reprojection classique déplace les anciens pixels, puis tente de combler les trous.
-
-La piste proposée consiste à « plier » cette feuille selon les surfaces visibles. Deux pixels éloignés à l'écran peuvent représenter des points voisins d'une même surface 3D. On les rattache alors à une même feuille de surface, plutôt qu'à leur seule position écran.
+Cette piste est née d'une interprétation littérale de l'image du pliage évoquée dans la discussion. Rodolphe a précisé qu'il s'agissait d'une métaphore pour encourager une idée hors du cadre, et non d'une spécification de méthode. Elle est conservée comme hypothèse technique secondaire ; la recherche prioritaire est maintenant le rendu par événements de visibilité.
 
 ## Représentation
 
