@@ -203,6 +203,11 @@ function ellipse(cx,cy,cz,rx,ry,rz,mat){
  const o={type:'ellipse',cx,cy,cz,rx,ry,rz,mat,min:[cx-rx,cy-ry,cz-rz],max:[cx+rx,cy+ry,cz+rz]};
  objects.push(o);return o;
 }
+function tiltedEllipseX(cx,cy,cz,rx,ry,rz,angleX,mat){
+ const c=Math.cos(angleX),s=Math.sin(angleX),ey=Math.sqrt(ry*ry*c*c+rz*rz*s*s),ez=Math.sqrt(ry*ry*s*s+rz*rz*c*c);
+ const o={type:'tiltedEllipseX',cx,cy,cz,rx,ry,rz,c,s,mat,min:[cx-rx,cy-ey,cz-ez],max:[cx+rx,cy+ey,cz+ez]};
+ objects.push(o);return o;
+}
 function box(x0,y0,z0,x1,y1,z1,mat){
  const o={type:'box',min:[x0,y0,z0],max:[x1,y1,z1],mat};
  objects.push(o);return o;
@@ -318,8 +323,8 @@ function makeScene(){
  // street. A raised arm and swept-back curling tendrils give it a readable,
  // moving silhouette without importing a mesh or an external model.
  const mx=1.65,mz=-4.6;
- ellipse(mx,2.02,mz,.37,.91,.34,'mutant');                 // narrow torso
- ellipse(mx-.03,2.73,mz+.09,.34,.34,.31,'mutant');        // sloped shoulders
+ tiltedEllipseX(mx,2.02,mz,.37,.91,.34,.34,'mutant');     // narrow, forward-leaning torso
+ tiltedEllipseX(mx-.03,2.73,mz+.09,.34,.34,.31,.18,'mutant'); // sloped shoulders
  ellipse(mx+.02,3.26,mz+.17,.24,.30,.25,'mutant');        // head under tendrils
  ellipse(mx+.02,3.22,mz+.39,.17,.13,.08,'claw');          // shadowed face
  // Long, spare legs, slightly bent as it advances through the fog.
@@ -521,6 +526,11 @@ function hitPrimitive(o,ox,oy,oz,dx,dy,dz,maxT){
   const A=vx*vx+vy*vy+vz*vz,B=px*vx+py*vy+pz*vz,C=px*px+py*py+pz*pz-1;
   const delta=B*B-A*C;
   if(delta>=0){const sq=Math.sqrt(delta),q=(-B-sq)/A;t=q>.0001?q:(-B+sq)/A;}
+ }else if(o.type==='tiltedEllipseX'){
+  const px=(ox-o.cx)/o.rx,wy=oy-o.cy,wz=oz-o.cz,py=(wy*o.c+wz*o.s)/o.ry,pz=(-wy*o.s+wz*o.c)/o.rz,
+   vx=dx/o.rx,vy=(dy*o.c+dz*o.s)/o.ry,vz=(-dy*o.s+dz*o.c)/o.rz,
+   A=vx*vx+vy*vy+vz*vz,B=px*vx+py*vy+pz*vz,C=px*px+py*py+pz*pz-1,delta=B*B-A*C;
+  if(delta>=0){const sq=Math.sqrt(delta),t0=(-B-sq)/A,t1=(-B+sq)/A;t=t0>.0001?t0:t1;}
  }else if(o.type==='box'){
   let lo=-Infinity,hi=Infinity;
   for(let j=0;j<3;j++){
@@ -620,6 +630,11 @@ function normalAt(id,x,y,z){
  if(id===1)return [0,1,0];
  const o=objects[id-2];
  if(o.type==='ellipse')return norm((x-o.cx)/(o.rx*o.rx),(y-o.cy)/(o.ry*o.ry),(z-o.cz)/(o.rz*o.rz));
+ if(o.type==='tiltedEllipseX'){
+  const px=(x-o.cx)/o.rx,wy=y-o.cy,wz=z-o.cz,py=(wy*o.c+wz*o.s)/o.ry,pz=(-wy*o.s+wz*o.c)/o.rz,
+   nx=px/o.rx,ny=py/o.ry,nz=pz/o.rz;
+  return norm(nx,ny*o.c-nz*o.s,ny*o.s+nz*o.c);
+ }
  if(o.type==='capsule'){
   const ba=[o.b[0]-o.a[0],o.b[1]-o.a[1],o.b[2]-o.a[2]],p=[x-o.a[0],y-o.a[1],z-o.a[2]],h=clamp(dot(p,ba)/o.len2,0,1);
   return norm(p[0]-ba[0]*h,p[1]-ba[1]*h,p[2]-ba[2]*h);
@@ -1033,6 +1048,11 @@ function hitTextureCoordinates(id,px,py,pz,n){
   const phi=.5-Math.asin(clamp((py-o.cy)/o.ry,-1,1))/PI;
   return [theta*2.5,phi*2.5,.9];
  }
+ if(o.type==='tiltedEllipseX'){
+  const wy=py-o.cy,wz=pz-o.cz,ly=wy*o.c+wz*o.s,lz=-wy*o.s+wz*o.c,
+   theta=Math.atan2(lz/o.rz,(px-o.cx)/o.rx)/TAU,phi=.5-Math.asin(clamp(ly/o.ry,-1,1))/PI;
+  return [theta*2.5,phi*2.5,.9];
+ }
  if(o.type==='capsule'){
   const dx=px-o.a[0],dy=py-o.a[1],dz=pz-o.a[2],ba=[o.b[0]-o.a[0],o.b[1]-o.a[1],o.b[2]-o.a[2]],
    h=clamp((dx*ba[0]+dy*ba[1]+dz*ba[2])/o.len2,0,1);
@@ -1124,6 +1144,11 @@ function normalFast(id,x,y,z,out){
   let a=(x-o.cx)/(o.rx*o.rx),b=(y-o.cy)/(o.ry*o.ry),c=(z-o.cz)/(o.rz*o.rz);
   const l=Math.hypot(a,b,c)||1;out[0]=a/l;out[1]=b/l;out[2]=c/l;return out;
  }
+ if(o.type==='tiltedEllipseX'){
+  const gx=(x-o.cx)/(o.rx*o.rx),wy=y-o.cy,wz=z-o.cz,ly=(wy*o.c+wz*o.s)/(o.ry*o.ry),lz=(-wy*o.s+wz*o.c)/(o.rz*o.rz),
+   ny=ly*o.c-lz*o.s,nz=ly*o.s+lz*o.c,l=Math.hypot(gx,ny,nz)||1;
+  out[0]=gx/l;out[1]=ny/l;out[2]=nz/l;return out;
+ }
  if(o.type==='capsule'){
   const ax=o.b[0]-o.a[0],ay=o.b[1]-o.a[1],az=o.b[2]-o.a[2],px=x-o.a[0],py=y-o.a[1],pz=z-o.a[2],
    h=clamp((px*ax+py*ay+pz*az)/o.len2,0,1),nx=px-ax*h,ny=py-ay*h,nz=pz-az*h,l=Math.hypot(nx,ny,nz)||1;
@@ -1160,6 +1185,10 @@ function uvFast(id,px,py,pz,n,out){
  if(o.type==='ellipse'){
   out[0]=Math.atan2((pz-o.cz)/o.rz,(px-o.cx)/o.rx)/TAU*2.5;
   out[1]=(.5-Math.asin(clamp((py-o.cy)/o.ry,-1,1))/PI)*2.5;out[2]=.9;return out;
+ }
+ if(o.type==='tiltedEllipseX'){
+  const wy=py-o.cy,wz=pz-o.cz,ly=wy*o.c+wz*o.s,lz=-wy*o.s+wz*o.c;
+  out[0]=Math.atan2(lz/o.rz,(px-o.cx)/o.rx)/TAU*2.5;out[1]=(.5-Math.asin(clamp(ly/o.ry,-1,1))/PI)*2.5;out[2]=.9;return out;
  }
  if(o.type==='capsule'){
   const ax=o.b[0]-o.a[0],ay=o.b[1]-o.a[1],az=o.b[2]-o.a[2],x=px-o.a[0],y=py-o.a[1],z=pz-o.a[2],
