@@ -654,7 +654,7 @@ function makeScene(){
   for(const side of [-1,1]){
    for(let lamp=0;lamp<3;lamp++)tbox(side*(.57+lamp*.075),.62,1.67,side*(.61+lamp*.075),.75,1.70,.014,'taillight');
    for(const [localZ,offset] of [[-1.22,1.05],[1.18,1.07]]){
-    const wx=X(cx+side*offset*scale),wy=Y(.58),wz=Z(cz+localZ),face=wx+side*.07*scale;
+    const wx=X(cx+side*offset),wy=Y(.58),wz=Z(cz+localZ),face=wx+side*.07*scale;
     torusWheelMesh(wx,wy,wz,.25*scale,.086*scale,'rubber',48,14);
     ellipse(face,wy,wz,.018*scale,.182*scale,.182*scale,'wheelMetal');
     for(let spoke=0;spoke<8;spoke++){
