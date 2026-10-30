@@ -328,23 +328,23 @@ function makeScene(){
  ellipse(mx+.02,3.26,mz+.17,.24,.30,.25,'mutant');        // head under tendrils
  ellipse(mx+.02,3.22,mz+.39,.17,.13,.08,'claw');          // shadowed face
  // Long, spare legs, slightly bent as it advances through the fog.
- capsule([mx-.21,1.43,mz],[mx-.40,.78,mz+.10],.115,'mutant');
- capsule([mx-.40,.78,mz+.10],[mx-.49,.10,mz+.35],.073,'mutant');
- capsule([mx+.20,1.43,mz],[mx+.43,.77,mz+.08],.112,'mutant');
- capsule([mx+.43,.77,mz+.08],[mx+.52,.10,mz+.34],.07,'mutant');
+ capsule([mx-.21,1.43,mz],[mx-.40,.78,mz+.10],.092,'mutant');
+ capsule([mx-.40,.78,mz+.10],[mx-.49,.10,mz+.35],.058,'mutant');
+ capsule([mx+.20,1.43,mz],[mx+.43,.77,mz+.08],.090,'mutant');
+ capsule([mx+.43,.77,mz+.08],[mx+.52,.10,mz+.34],.056,'mutant');
  // One arm reaches high; tapered forearm and separated claws make the pose
  // legible at distance. The other arm hangs almost to the knee.
- capsule([mx-.27,2.72,mz],[mx-.61,2.36,mz+.02],.13,'mutant');
- capsule([mx-.61,2.36,mz+.02],[mx-.76,1.48,mz+.24],.083,'mutant');
- capsule([mx+.28,2.72,mz],[mx+.51,3.20,mz+.01],.12,'mutant');
- capsule([mx+.51,3.20,mz+.01],[mx+.82,4.12,mz+.12],.086,'mutant');
- capsule([mx+.82,4.12,mz+.12],[mx+1.08,4.93,mz+.22],.060,'mutant');
- ellipse(mx+1.08,5.01,mz+.23,.13,.16,.12,'mutant'); // palm reads separately from forearm
+ capsule([mx-.27,2.72,mz],[mx-.61,2.36,mz+.02],.10,'mutant');
+ capsule([mx-.61,2.36,mz+.02],[mx-.76,1.48,mz+.24],.065,'mutant');
+ capsule([mx+.28,2.72,mz],[mx+.48,3.10,mz+.01],.087,'mutant');
+ capsule([mx+.48,3.10,mz+.01],[mx+.72,3.72,mz+.12],.062,'mutant');
+ capsule([mx+.72,3.72,mz+.12],[mx+.91,4.18,mz+.22],.042,'mutant');
+ ellipse(mx+.91,4.25,mz+.23,.105,.13,.10,'mutant'); // palm reads separately from forearm
  for(let finger=0;finger<5;finger++){
-  const spread=(finger-2)*.075,fan=Math.abs(finger-2)*.055;
-  cone([mx+1.08+spread*.22,5.08,mz+.27],[mx+1.08+spread*1.65,5.30-fan,mz+.34],.042,.006,'claw');
+  const spread=(finger-2)*.060,fan=Math.abs(finger-2)*.045;
+  cone([mx+.91+spread*.22,4.30,mz+.27],[mx+.91+spread*1.55,4.48-fan,mz+.34],.032,.005,'claw');
  }
- cone([mx+1.01,4.98,mz+.24],[mx+.86,5.08,mz+.31],.048,.007,'claw'); // hooked thumb
+ cone([mx+.86,4.24,mz+.24],[mx+.73,4.34,mz+.31],.036,.006,'claw'); // hooked thumb
  for(let finger=0;finger<3;finger++){
   const spread=(finger-1)*.075;
   cone([mx-.76+spread,1.49,mz+.24],[mx-.84+spread,1.05-(finger%2)*.09,mz+.39],.045,.008,'claw');
@@ -369,14 +369,14 @@ function makeScene(){
   }
  }
  const hx=mx+.02,hy=3.36,hz=mz+.2;
- tendril([[hx-.08,hy,hz],[hx-.42,3.72,hz-.05],[hx-.92,4.15,hz-.03],[hx-1.55,4.24,hz+.04],[hx-1.92,4.02,hz+.15],[hx-1.84,3.72,hz+.25]],.062);
- tendril([[hx-.15,hy+.02,hz],[hx-.54,3.42,hz-.18],[hx-.88,3.72,hz-.31],[hx-1.18,4.12,hz-.24],[hx-1.52,4.30,hz-.08],[hx-1.70,4.10,hz+.10]],.052);
- tendril([[hx+.02,hy+.02,hz],[hx+.42,3.70,hz-.06],[hx+.82,4.08,hz-.12],[hx+1.22,4.35,hz-.10],[hx+1.49,4.13,hz+.03],[hx+1.35,3.86,hz+.19]],.06);
- tendril([[hx+.08,hy-.04,hz],[hx+.45,3.22,hz-.20],[hx+.82,3.46,hz-.31],[hx+1.16,3.78,hz-.25],[hx+1.48,3.74,hz-.08],[hx+1.58,3.48,hz+.11]],.047);
+ tendril([[hx-.08,hy,hz],[hx-.42,3.72,hz-.05],[hx-.92,4.15,hz-.03],[hx-1.55,4.24,hz+.04],[hx-1.92,3.82,hz+.15],[hx-1.84,3.52,hz+.25]],.043);
+ tendril([[hx-.15,hy+.02,hz],[hx-.54,3.42,hz-.18],[hx-.88,3.72,hz-.31],[hx-1.18,4.12,hz-.24],[hx-1.52,4.02,hz-.08],[hx-1.70,3.82,hz+.10]],.037);
+ tendril([[hx+.02,hy+.02,hz],[hx+.42,3.70,hz-.06],[hx+.82,4.08,hz-.12],[hx+1.22,4.35,hz-.10],[hx+1.49,3.88,hz+.03],[hx+1.35,3.62,hz+.19]],.042);
+ tendril([[hx+.08,hy-.04,hz],[hx+.45,3.22,hz-.20],[hx+.82,3.46,hz-.31],[hx+1.16,3.78,hz-.25],[hx+1.48,3.52,hz-.08],[hx+1.58,3.28,hz+.11]],.034);
  // Fine face tendrils drop in front of the head and separate in the wind.
  for(let i=0;i<5;i++){
   const spread=(i-2)*.095,y=3.35-Math.abs(i-2)*.025;
-  tendril([[hx+spread,y,hz+.12],[hx+spread*1.15,3.06,hz+.28],[hx+spread*1.35,2.83-(i%2)*.12,hz+.38]],.037);
+  tendril([[hx+spread,y,hz+.12],[hx+spread*1.15,3.06,hz+.28],[hx+spread*1.35,2.83-(i%2)*.12,hz+.38]],.026);
  }
  // Van fades into the fog behind the creature.
  roundBox(-1.65,0,-10.8,1.55,1.45,-8.2,.18,'concrete');
