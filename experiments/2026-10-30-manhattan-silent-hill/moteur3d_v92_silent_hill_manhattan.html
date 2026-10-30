@@ -214,6 +214,12 @@ function cone(a,b,r0,r1,mat){
  max:[Math.max(a[0],b[0])+r,Math.max(a[1],b[1])+r,Math.max(a[2],b[2])+r]};
  objects.push(o);return o;
 }
+function capsule(a,b,r,mat){
+ const o={type:'capsule',a,b,r,len2:dot([b[0]-a[0],b[1]-a[1],b[2]-a[2]],[b[0]-a[0],b[1]-a[1],b[2]-a[2]]),mat,
+  min:[Math.min(a[0],b[0])-r,Math.min(a[1],b[1])-r,Math.min(a[2],b[2])-r],
+  max:[Math.max(a[0],b[0])+r,Math.max(a[1],b[1])+r,Math.max(a[2],b[2])+r]};
+ objects.push(o);return o;
+}
 function makeScene(){
  objects.length=0;
  // The avenue runs down -Z. Large analytic boxes form a Manhattan canyon;
@@ -310,17 +316,17 @@ function makeScene(){
  ellipse(mx+.02,3.26,mz+.17,.24,.30,.25,'mutant');        // head under tendrils
  ellipse(mx+.02,3.22,mz+.39,.17,.13,.08,'claw');          // shadowed face
  // Long, spare legs, slightly bent as it advances through the fog.
- cone([mx-.21,1.43,mz],[mx-.40,.78,mz+.10],.15,.105,'mutant');
- cone([mx-.40,.78,mz+.10],[mx-.49,.10,mz+.35],.105,.055,'mutant');
- cone([mx+.20,1.43,mz],[mx+.43,.77,mz+.08],.15,.10,'mutant');
- cone([mx+.43,.77,mz+.08],[mx+.52,.10,mz+.34],.10,.052,'mutant');
+ capsule([mx-.21,1.43,mz],[mx-.40,.78,mz+.10],.115,'mutant');
+ capsule([mx-.40,.78,mz+.10],[mx-.49,.10,mz+.35],.073,'mutant');
+ capsule([mx+.20,1.43,mz],[mx+.43,.77,mz+.08],.112,'mutant');
+ capsule([mx+.43,.77,mz+.08],[mx+.52,.10,mz+.34],.07,'mutant');
  // One arm reaches high; tapered forearm and separated claws make the pose
  // legible at distance. The other arm hangs almost to the knee.
- cone([mx-.27,2.72,mz],[mx-.61,2.36,mz+.02],.15,.115,'mutant');
- cone([mx-.61,2.36,mz+.02],[mx-.76,1.48,mz+.24],.115,.065,'mutant');
- cone([mx+.28,2.72,mz],[mx+.51,3.20,mz+.01],.145,.105,'mutant');
- cone([mx+.51,3.20,mz+.01],[mx+.82,4.12,mz+.12],.105,.071,'mutant');
- cone([mx+.82,4.12,mz+.12],[mx+1.08,4.93,mz+.22],.071,.045,'mutant');
+ capsule([mx-.27,2.72,mz],[mx-.61,2.36,mz+.02],.13,'mutant');
+ capsule([mx-.61,2.36,mz+.02],[mx-.76,1.48,mz+.24],.083,'mutant');
+ capsule([mx+.28,2.72,mz],[mx+.51,3.20,mz+.01],.12,'mutant');
+ capsule([mx+.51,3.20,mz+.01],[mx+.82,4.12,mz+.12],.086,'mutant');
+ capsule([mx+.82,4.12,mz+.12],[mx+1.08,4.93,mz+.22],.060,'mutant');
  for(let finger=0;finger<4;finger++){
   const spread=(finger-1.5)*.10;
   cone([mx+1.08+spread,4.91,mz+.22],[mx+1.14+spread*1.5,5.22-(finger%2)*.12,mz+.29],.047,.008,'claw');
@@ -331,21 +337,32 @@ function makeScene(){
  }
  // Smooth-looking whiplash curves made from short tapered cone segments.
  // The points form broad curls around the head rather than a static hair fringe.
- function tendril(points,radius,phase=0){
+ function tendril(points,radius){
+  // Catmull-Rom interpolation turns the sparse design knots into a fluid
+  // centerline; short, overlapping tapered cones keep the ray/BVH primitive
+  // model while avoiding the obvious branch-like kinks in the close view.
+  const sample=(p0,p1,p2,p3,t)=>p1.map((v,k)=>.5*((2*v)+(-p0[k]+p2[k])*t+
+   (2*p0[k]-5*v+4*p2[k]-p3[k])*t*t+(-p0[k]+3*v-3*p2[k]+p3[k])*t*t*t));
+  const steps=4,total=(points.length-1)*steps;
+  let prev=points[0],prevU=0;
   for(let i=0;i<points.length-1;i++){
-   const taper=1-i/(points.length-1),r0=radius*(.36+.64*taper),r1=radius*(.29+.64*taper);
-   cone(points[i],points[i+1],r0,r1,'mutant');
+   const p0=points[Math.max(0,i-1)],p1=points[i],p2=points[i+1],p3=points[Math.min(points.length-1,i+2)];
+   for(let s=1;s<=steps;s++){
+    const u=(i+s/steps)/(points.length-1),next=sample(p0,p1,p2,p3,s/steps),
+     taper=1-u,r0=radius*(.24+.76*(1-prevU)),r1=radius*(.24+.76*taper);
+    cone(prev,next,r0,r1,'mutant');prev=next;prevU=u;
+   }
   }
  }
  const hx=mx+.02,hy=3.36,hz=mz+.2;
- tendril([[hx-.08,hy,hz],[hx-.42,3.72,hz-.05],[hx-.92,4.15,hz-.03],[hx-1.55,4.24,hz+.04],[hx-1.92,4.02,hz+.15],[hx-1.84,3.72,hz+.25]],.095);
- tendril([[hx-.15,hy+.02,hz],[hx-.54,3.42,hz-.18],[hx-.88,3.72,hz-.31],[hx-1.18,4.12,hz-.24],[hx-1.52,4.30,hz-.08],[hx-1.70,4.10,hz+.10]],.078);
- tendril([[hx+.02,hy+.02,hz],[hx+.42,3.70,hz-.06],[hx+.82,4.08,hz-.12],[hx+1.22,4.35,hz-.10],[hx+1.49,4.13,hz+.03],[hx+1.35,3.86,hz+.19]],.09);
- tendril([[hx+.08,hy-.04,hz],[hx+.45,3.22,hz-.20],[hx+.82,3.46,hz-.31],[hx+1.16,3.78,hz-.25],[hx+1.48,3.74,hz-.08],[hx+1.58,3.48,hz+.11]],.07);
+ tendril([[hx-.08,hy,hz],[hx-.42,3.72,hz-.05],[hx-.92,4.15,hz-.03],[hx-1.55,4.24,hz+.04],[hx-1.92,4.02,hz+.15],[hx-1.84,3.72,hz+.25]],.062);
+ tendril([[hx-.15,hy+.02,hz],[hx-.54,3.42,hz-.18],[hx-.88,3.72,hz-.31],[hx-1.18,4.12,hz-.24],[hx-1.52,4.30,hz-.08],[hx-1.70,4.10,hz+.10]],.052);
+ tendril([[hx+.02,hy+.02,hz],[hx+.42,3.70,hz-.06],[hx+.82,4.08,hz-.12],[hx+1.22,4.35,hz-.10],[hx+1.49,4.13,hz+.03],[hx+1.35,3.86,hz+.19]],.06);
+ tendril([[hx+.08,hy-.04,hz],[hx+.45,3.22,hz-.20],[hx+.82,3.46,hz-.31],[hx+1.16,3.78,hz-.25],[hx+1.48,3.74,hz-.08],[hx+1.58,3.48,hz+.11]],.047);
  // Fine face tendrils drop in front of the head and separate in the wind.
  for(let i=0;i<5;i++){
   const spread=(i-2)*.095,y=3.35-Math.abs(i-2)*.025;
-  tendril([[hx+spread,y,hz+.12],[hx+spread*1.15,3.06,hz+.28],[hx+spread*1.35,2.83-(i%2)*.12,hz+.38]],.055);
+  tendril([[hx+spread,y,hz+.12],[hx+spread*1.15,3.06,hz+.28],[hx+spread*1.35,2.83-(i%2)*.12,hz+.38]],.037);
  }
  // Van fades into the fog behind the creature.
  roundBox(-1.65,0,-10.8,1.55,1.45,-8.2,.18,'concrete');
@@ -417,8 +434,8 @@ function makeScene(){
  }
  // Sagging overhead wires across the avenue, visible against the fog.
  for(const z of [-3.2,-8.4,-13.8,-20.4]){
-  cone([-5.75,6.2,z],[5.75,5.75,z+.45],.018,.018,'metal');
-  cone([-5.75,6.35,z+.12],[5.75,5.9,z+.58],.014,.014,'rust');
+  capsule([-5.75,6.2,z],[5.75,5.75,z+.45],.012,'metal');
+  capsule([-5.75,6.35,z+.12],[5.75,5.9,z+.58],.009,'rust');
  }
  // Traffic signal, battered street-name blade and a fallen barrier.
  cone([4.7,0,2.1],[4.7,4.5,2.1],.095,.065,'metal');
@@ -452,15 +469,6 @@ function makeScene(){
   for(let cable=0; cable<3; cable++)cone([face,2.5+ cable*.09,z-.18],[face,3.8+cable*.12,z-.18],.018,.014,'rust');
  }
 
- // Extra ribs and shoulder spines break up the bloodsucker's smooth silhouette.
- for(let rib=0;rib<4;rib++){
-  const y=1.55+rib*.29;
-  cone([mx-.45,y,mz-.18],[mx+.45,y+.04,mz-.18],.035,.035,'claw');
- }
- for(let spike=0;spike<5;spike++){
-  const x=mx-.38+spike*.19;
-  cone([x,2.84,mz-.28],[x-.08,3.24+(spike%2)*.12,mz-.36],.12,.012,'mutant');
- }
  buildBVH();
  $('objectCount').textContent=objects.length+' primitives + plan infini';
 }
@@ -532,6 +540,17 @@ function hitPrimitive(o,ox,oy,oz,dx,dy,dz,maxT){
    t+=Math.max(distance*.82,.0005);
   }
   if(!roundedHit||t>=hi)return Infinity;
+ }else if(o.type==='capsule'){
+  const ba=[o.b[0]-o.a[0],o.b[1]-o.a[1],o.b[2]-o.a[2]],oa=[ox-o.a[0],oy-o.a[1],oz-o.a[2]],
+   baba=o.len2,rdba=dot([dx,dy,dz],ba),oaba=dot(oa,ba),rdoa=dot([dx,dy,dz],oa),oaoa=dot(oa,oa),
+   A=baba*dot([dx,dy,dz],[dx,dy,dz])-rdba*rdba,B=baba*rdoa-oaba*rdba,C=baba*oaoa-oaba*oaba-o.r*o.r*baba,h=B*B-A*C;
+  if(A>1e-12&&h>=0){const tc=(-B-Math.sqrt(h))/A,y=oaba+tc*rdba;if(tc>.0001&&y>0&&y<baba)t=tc;}
+  const ray2=dot([dx,dy,dz],[dx,dy,dz]);
+  for(const c of [o.a,o.b]){
+   const q=[ox-c[0],oy-c[1],oz-c[2]],bb=dot(q,[dx,dy,dz]),cc=dot(q,q)-o.r*o.r,disc=bb*bb-ray2*cc;
+   if(disc>=0){const s=Math.sqrt(disc),t0=(-bb-s)/ray2,t1=(-bb+s)/ray2;
+    if(t0>.0001&&t0<t)t=t0;else if(t1>.0001&&t1<t)t=t1;}
+  }
  }else if(o.type==='cone'){
   const px=ox-o.a[0],py=oy-o.a[1],pz=oz-o.a[2];
   const z=px*o.nx+py*o.ny+pz*o.nz,dzAxis=dx*o.nx+dy*o.ny+dz*o.nz;
@@ -592,6 +611,10 @@ function normalAt(id,x,y,z){
  if(id===1)return [0,1,0];
  const o=objects[id-2];
  if(o.type==='ellipse')return norm((x-o.cx)/(o.rx*o.rx),(y-o.cy)/(o.ry*o.ry),(z-o.cz)/(o.rz*o.rz));
+ if(o.type==='capsule'){
+  const ba=[o.b[0]-o.a[0],o.b[1]-o.a[1],o.b[2]-o.a[2]],p=[x-o.a[0],y-o.a[1],z-o.a[2]],h=clamp(dot(p,ba)/o.len2,0,1);
+  return norm(p[0]-ba[0]*h,p[1]-ba[1]*h,p[2]-ba[2]*h);
+ }
  if(o.type==='roundbox')return roundedBoxNormal(o,x,y,z);
  if(o.type==='box'){
   const ds=[Math.abs(x-o.min[0]),Math.abs(x-o.max[0]),Math.abs(y-o.min[1]),Math.abs(y-o.max[1]),Math.abs(z-o.min[2]),Math.abs(z-o.max[2])];
@@ -622,7 +645,8 @@ function procedural(id,x,y){
  let r,g,b;
  if(id==='asphalt'){
   const crack=((x%97<2&&hash2(x>>1,y,71)>.72)||(y%113<2&&hash2(x,y>>1,72)>.76))?-34:0;
-  r=45+20*noise+15*coarse+crack;g=51+19*noise+13*coarse+crack;b=55+18*noise+12*coarse+crack;
+  const wet=hash2(x>>3,y>>3,208)>.62?-11:0,grit=hash2(x>>1,y>>1,209)>.97?17:0;
+  r=45+20*noise+15*coarse+crack+wet+grit;g=51+19*noise+13*coarse+crack+wet+grit;b=55+18*noise+12*coarse+crack+wet+grit;
  }else if(id==='concrete'||id==='stone'){
   const joint=(x%64<2||y%48<2)?-48:0;
   r=111+22*noise+18*coarse+joint;g=119+22*noise+18*coarse+joint;b=121+20*noise+17*coarse+joint;
@@ -1000,6 +1024,11 @@ function hitTextureCoordinates(id,px,py,pz,n){
   const phi=.5-Math.asin(clamp((py-o.cy)/o.ry,-1,1))/PI;
   return [theta*2.5,phi*2.5,.9];
  }
+ if(o.type==='capsule'){
+  const dx=px-o.a[0],dy=py-o.a[1],dz=pz-o.a[2],ba=[o.b[0]-o.a[0],o.b[1]-o.a[1],o.b[2]-o.a[2]],
+   h=clamp((dx*ba[0]+dy*ba[1]+dz*ba[2])/o.len2,0,1);
+  return [Math.atan2(dz-ba[2]*h,dx-ba[0]*h)/TAU,(h*Math.sqrt(o.len2)+Math.asin(clamp((dy-ba[1]*h)/o.r,-1,1))*o.r)*.55,.72];
+ }
  if(o.type==='cone'){
   const relX=px-o.a[0],relY=py-o.a[1],relZ=pz-o.a[2];
   const height=(relX*o.nx+relY*o.ny+relZ*o.nz);
@@ -1041,9 +1070,9 @@ function shadePixel(cam,x,y,id,t,dx,dy,dz,options){
  let r=(base&255)*shade,g=((base>>>8)&255)*shade,b=((base>>>16)&255)*shade;
  const glow=mat==='neon'?.95:mat==='lamp'?.52:mat==='windowlit'?.34:0;
  if(glow){r+=(base&255)*glow;g+=((base>>>8)&255)*glow;b+=((base>>>16)&255)*glow;}
- const specular=mat==='puddle'?.52:mat==='glass'?.3:mat==='metal'?.2:mat==='taxi'?.12:0;
- if(specular){const rx=2*ndotl*n[0]-sun[0],ry=2*ndotl*n[1]-sun[1],rz=2*ndotl*n[2]-sun[2];
-  const shine=Math.pow(Math.max(0,-(dx*rx+dy*ry+dz*rz)),mat==='puddle'?22:34)*specular*visibility;
+ const specular=mat==='puddle'?.64:mat==='glass'?.27:mat==='metal'?.24:mat==='taxi'?.2:mat==='mutant'?.16:mat==='asphalt'?.16:0;
+ if(specular){const rx=2*ndotl*n[0]-sun[0],ry=2*ndotl*n[1]-sun[1],rz=2*ndotl*n[2]-sun[2],power=mat==='puddle'?18:mat==='asphalt'?13:mat==='mutant'?24:34;
+  const shine=Math.pow(Math.max(0,-(dx*rx+dy*ry+dz*rz)),power)*specular*visibility;
   r+=178*shine;g+=202*shine;b+=214*shine;}
  if(options.fog){
   const fog=options.fast?fastFogAlpha(t):1-Math.exp(-t*FOG_DENSITY);
@@ -1076,6 +1105,11 @@ function normalFast(id,x,y,z,out){
   let a=(x-o.cx)/(o.rx*o.rx),b=(y-o.cy)/(o.ry*o.ry),c=(z-o.cz)/(o.rz*o.rz);
   const l=Math.hypot(a,b,c)||1;out[0]=a/l;out[1]=b/l;out[2]=c/l;return out;
  }
+ if(o.type==='capsule'){
+  const ax=o.b[0]-o.a[0],ay=o.b[1]-o.a[1],az=o.b[2]-o.a[2],px=x-o.a[0],py=y-o.a[1],pz=z-o.a[2],
+   h=clamp((px*ax+py*ay+pz*az)/o.len2,0,1),nx=px-ax*h,ny=py-ay*h,nz=pz-az*h,l=Math.hypot(nx,ny,nz)||1;
+  out[0]=nx/l;out[1]=ny/l;out[2]=nz/l;return out;
+ }
  if(o.type==='roundbox'){
   const px=x-o.center[0],py=y-o.center[1],pz=z-o.center[2];
   const qx=Math.abs(px)-o.core[0],qy=Math.abs(py)-o.core[1],qz=Math.abs(pz)-o.core[2];
@@ -1107,6 +1141,11 @@ function uvFast(id,px,py,pz,n,out){
  if(o.type==='ellipse'){
   out[0]=Math.atan2((pz-o.cz)/o.rz,(px-o.cx)/o.rx)/TAU*2.5;
   out[1]=(.5-Math.asin(clamp((py-o.cy)/o.ry,-1,1))/PI)*2.5;out[2]=.9;return out;
+ }
+ if(o.type==='capsule'){
+  const ax=o.b[0]-o.a[0],ay=o.b[1]-o.a[1],az=o.b[2]-o.a[2],x=px-o.a[0],y=py-o.a[1],z=pz-o.a[2],
+   h=clamp((x*ax+y*ay+z*az)/o.len2,0,1),rx=x-ax*h,ry=y-ay*h,rz=z-az*h;
+  out[0]=Math.atan2(rz,rx)/TAU;out[1]=(h*Math.sqrt(o.len2)+Math.asin(clamp(ry/o.r,-1,1))*o.r)*.55;out[2]=.72;return out;
  }
  if(o.type==='cone'){
   const a=px-o.a[0],b=py-o.a[1],c=pz-o.a[2];
@@ -1142,9 +1181,9 @@ function shadePixelFast(cam,x,y,id,t,dx,dy,dz,options){
  let r=(base&255)*shade,g=((base>>>8)&255)*shade,b=((base>>>16)&255)*shade;
  const glow=material==='neon'?.95:material==='lamp'?.52:material==='windowlit'?.34:0;
  if(glow){r+=(base&255)*glow;g+=((base>>>8)&255)*glow;b+=((base>>>16)&255)*glow;}
- const specular=material==='puddle'?.52:material==='glass'?.3:material==='metal'?.2:material==='taxi'?.12:0;
- if(specular){const rx=2*ndotl*n[0]-sun[0],ry=2*ndotl*n[1]-sun[1],rz=2*ndotl*n[2]-sun[2];
-  const shine=Math.pow(Math.max(0,-(dx*rx+dy*ry+dz*rz)),material==='puddle'?22:34)*specular*shadow;
+ const specular=material==='puddle'?.64:material==='glass'?.27:material==='metal'?.24:material==='taxi'?.2:material==='mutant'?.16:material==='asphalt'?.16:0;
+ if(specular){const rx=2*ndotl*n[0]-sun[0],ry=2*ndotl*n[1]-sun[1],rz=2*ndotl*n[2]-sun[2],power=material==='puddle'?18:material==='asphalt'?13:material==='mutant'?24:34;
+  const shine=Math.pow(Math.max(0,-(dx*rx+dy*ry+dz*rz)),power)*specular*shadow;
   r+=178*shine;g+=202*shine;b+=214*shine;}
  if(options.fog){
   const fog=fastFogAlpha(t),q=1-fog;
