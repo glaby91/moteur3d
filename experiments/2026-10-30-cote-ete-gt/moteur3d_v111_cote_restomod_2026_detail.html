@@ -1519,12 +1519,12 @@ function raySelfTest(){
  return true;
 }
 function startV9(){
- makeScene();initMaterials();connectUi();
+ makeScene();buildBVH();initMaterials();connectUi();
  try{raySelfTest();$('diagnostics').textContent='Auto-tests : ciel, sol, ellipsoïde, boîte, cône et BVH réussis.';}
  catch(e){$('diagnostics').textContent='ÉCHEC auto-test : '+e.message;throw e;}
  rebuildShadowMap();invalidateImage('Caméra sphérique initialisée');
 }
-window.addEventListener('error',e=>{$('state').textContent='Erreur';$('diagnostics').textContent='Erreur : '+e.message});
+window.addEventListener('error',e=>{$('state').textContent='Erreur de rendu';$('frameInfo').textContent='Erreur de rendu : '+e.message;$('diagnostics').textContent='Erreur JavaScript : '+e.message});
 
 function onPrimaryImageComplete(ms){
  const b=predictiveBench;if(!b||!b.active)return;b.mainMs=ms;finishPredictiveTrialIfReady(b);
