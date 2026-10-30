@@ -184,9 +184,9 @@ const sun=norm(-.55,.88,.36),skyZenith=[49,66,82],skyHorizon=[111,127,135];
 // Warm street lamps supplement the cool moon/sun fill. They intentionally
 // cast soft local light without another shadow-map pass.
 const pointLights=[
- {x:-4.85,y:5.08,z:4.8,r:9,intensity:1.8,color:[255,166,91]},
- {x:4.8,y:5.08,z:-1.6,r:8,intensity:1.55,color:[255,159,79]},
- {x:-4.85,y:5.08,z:-9.5,r:8,intensity:1.35,color:[255,174,105]}
+ {x:-4.85,y:5.08,z:4.8,r:12,intensity:2.7,color:[255,160,80]},
+ {x:4.8,y:5.08,z:-1.6,r:11,intensity:2.5,color:[255,151,67]},
+ {x:-4.85,y:5.08,z:-9.5,r:11,intensity:2.1,color:[255,169,91]}
 ];
 let W=640,H=400,displayW=640,displayH=400,renderScale=1,frameImage=null,pixels=null,hitIds=null,hitDistances=null;
 let scaledCanvas=null,scaledContext=null;
@@ -334,10 +334,12 @@ function makeScene(){
  capsule([mx+.28,2.72,mz],[mx+.51,3.20,mz+.01],.12,'mutant');
  capsule([mx+.51,3.20,mz+.01],[mx+.82,4.12,mz+.12],.086,'mutant');
  capsule([mx+.82,4.12,mz+.12],[mx+1.08,4.93,mz+.22],.060,'mutant');
- for(let finger=0;finger<4;finger++){
-  const spread=(finger-1.5)*.10;
-  cone([mx+1.08+spread,4.91,mz+.22],[mx+1.14+spread*1.5,5.22-(finger%2)*.12,mz+.29],.047,.008,'claw');
+ ellipse(mx+1.08,5.01,mz+.23,.13,.16,.12,'mutant'); // palm reads separately from forearm
+ for(let finger=0;finger<5;finger++){
+  const spread=(finger-2)*.075,fan=Math.abs(finger-2)*.055;
+  cone([mx+1.08+spread*.22,5.08,mz+.27],[mx+1.08+spread*1.65,5.30-fan,mz+.34],.042,.006,'claw');
  }
+ cone([mx+1.01,4.98,mz+.24],[mx+.86,5.08,mz+.31],.048,.007,'claw'); // hooked thumb
  for(let finger=0;finger<3;finger++){
   const spread=(finger-1)*.075;
   cone([mx-.76+spread,1.49,mz+.24],[mx-.84+spread,1.05-(finger%2)*.09,mz+.39],.045,.008,'claw');
