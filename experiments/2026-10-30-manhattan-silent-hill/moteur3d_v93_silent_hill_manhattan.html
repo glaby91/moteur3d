@@ -318,6 +318,31 @@ function makeScene(){
  roundBox(tx-.96,.38,tz-1.78,tx-.58,.67,tz-1.74,.09,'lamp');
  roundBox(tx+.58,.38,tz-1.78,tx+.96,.67,tz-1.74,.09,'lamp');
  roundBox(tx-.94,.28,tz+1.68,tx+.94,.42,tz+1.78,.06,'metal');
+ // Taxi bodywork: side glazing, door seams, handles, mirrors, grille and wheel hubs.
+ for(const side of [-1,1]){
+  const face=tx+side*1.055;
+  for(const z of [tz-.63,tz+.48]){
+   roundBox(face-side*.025,1.34,z-.43,face+side*.025,1.78,z+.43,.07,'glass');
+   box(face-side*.035,1.29,z-.48,face+side*.035,1.33,z+.48,'metal');
+  }
+  for(const z of [tz-.02,tz+.68]){
+   box(face-side*.018,.55,z,face+side*.018,1.18,z+.018,'rust');
+   roundBox(face,1.02,z-.13,face+side*.045,1.08,z+.13,.025,'metal');
+  }
+  cone([face,1.50,tz-.68],[face+side*.22,1.57,tz-.82],.07,.035,'metal');
+  roundBox(face+side*.18,1.52,tz-.90,face+side*.23,1.63,tz-.73,.045,'glass');
+  for(const z of [tz-.98,tz+.99]){
+   ellipse(tx+side*1.012,.43,z,.095,.20,.20,'metal');
+   ellipse(tx+side*1.025,.43,z,.047,.11,.11,'rust');
+  }
+ }
+ box(tx-.43,.62,tz-1.755,tx+.43,.88,tz-1.755,'metal');
+ for(let slat=0;slat<7;slat++)box(tx-.34+slat*.11,.66,tz-1.765,tx-.30+slat*.11,.84,tz-1.77,'rust');
+ roundBox(tx-1.02,.34,tz-1.82,tx+1.02,.49,tz-1.76,.06,'metal');
+ // Hood panel seams and a broken taxi roof light with a dark base.
+ box(tx-.82,1.225,tz-1.43,tx+.82,1.245,tz-1.42,'rust');
+ roundBox(tx-.25,2.14,tz-.24,tx+.25,2.25,tz+.12,.035,'lamp');
+ box(tx-.25,2.245,tz-.22,tx+.25,2.26,tz+.10,'rust');
 
  // Lean bloodsucker, assembled from the same analytical primitives as the
  // street. A raised arm and swept-back curling tendrils give it a readable,
@@ -378,6 +403,20 @@ function makeScene(){
   const spread=(i-2)*.095,y=3.35-Math.abs(i-2)*.025;
   tendril([[hx+spread,y,hz+.12],[hx+spread*1.15,3.06,hz+.28],[hx+spread*1.35,2.83-(i%2)*.12,hz+.38]],.026);
  }
+ // Layered anatomical ridges break up the smooth primitive silhouette.
+ for(let rib=0;rib<5;rib++){
+  const y=1.48+rib*.22,w=.24-.018*rib;
+  capsule([mx-w,y,mz-.286],[mx+w,y+.025,mz-.286],.026,'claw');
+ }
+ for(const side of [-1,1]){
+  capsule([mx+side*.25,2.48,mz-.18],[mx+side*.37,2.13,mz-.20],.045,'claw');
+  capsule([mx+side*.33,2.1,mz-.17],[mx+side*.31,1.78,mz-.19],.022,'claw');
+ }
+ // Fine extra whips trail behind the main curls to give the silhouette depth.
+ tendril([[hx-.22,3.43,hz-.02],[hx-.78,3.58,hz-.22],[hx-1.28,3.92,hz-.36],[hx-1.66,3.72,hz-.31]],.022);
+ tendril([[hx+.18,3.48,hz-.04],[hx+.72,3.58,hz-.24],[hx+1.20,3.91,hz-.38],[hx+1.72,3.70,hz-.26]],.023);
+ tendril([[hx-.03,3.31,hz+.06],[hx-.36,3.04,hz-.14],[hx-.62,2.86,hz-.28]],.018);
+
  // Van fades into the fog behind the creature.
  roundBox(-1.65,0,-10.8,1.55,1.45,-8.2,.18,'concrete');
  roundBox(-1.35,1.45,-10.55,1.25,2.45,-8.5,.14,'glass');
@@ -396,6 +435,12 @@ function makeScene(){
    const front=face+(side<0?.055:-.055);
    roundBox(front-.055,y,z-.69,front+.055,y+1.28,z+.69,.11,lit?'windowlit':'windowdark');
    box(front-.1,y-.07,z-.72,front+.1,y+.025,z+.72,'concrete');
+   // Window casing, central mullion and transom catch light at street distance.
+   box(front-.13,y+.02,z-.75,front+.13,y+1.28,z-.68,'metal');
+   box(front-.13,y+.02,z+.68,front+.13,y+1.28,z+.75,'metal');
+   box(front-.14,y+.61,z-.68,front+.14,y+.67,z+.68,'metal');
+   box(front-.14,y+1.27,z-.75,front+.14,y+1.36,z+.75,'concrete');
+   box(front-.14,y+.02,z-.75,front+.14,y+.10,z+.75,'rust');
   }
  }
  // Contemporary facade rhythm: broad corner fins, soft floor bands and
@@ -414,6 +459,18 @@ function makeScene(){
    const face=z<-15?(side<0?-5.69:5.69):(side<0?-5.87:5.87),y=1.65+floor*1.8;
    roundBox(face-.16,y,z-.39,face+.16,y+.48,z+.39,.12,'metal');
    ellipse(face+(side<0?.17:-.17),y+.24,z,.025,.15,.15,'metal');
+  }
+ }
+ // Exposed rain pipes, clamps, junction boxes and cable runs add building scale.
+ for(const side of [-1,1])for(const z of [-3.8,-11.5,-16.1,-27.2]){
+  const face=z<-15?(side<0?-5.68:5.68):(side<0?-5.86:5.86);
+  const px=face+(side<0?.11:-.11);
+  capsule([px,.12,z],[px,10.4,z+.06],.055,'rust');
+  for(let clampY=1;clampY<10;clampY+=2.4)
+   roundBox(px-.10,clampY,z-.13,px+.10,clampY+.10,z+.20,.035,'metal');
+  for(let boxY of [1.1,4.7,8.2]){
+   roundBox(px-.16,boxY,z-.32,px+.16,boxY+.42,z+.32,.05,'metal');
+   roundBox(px-.18,boxY+.08,z-.34,px+.18,boxY+.29,z-.31,.025,'sign');
   }
  }
  // A few warm window strips and battered vertical neon markers glow through fog.
@@ -464,6 +521,17 @@ function makeScene(){
  ellipse(2.9,.028,-7.4,.95,.022,.48,'puddle');
  ellipse(-1.2,.026,-13.1,.7,.018,.34,'puddle');
  ellipse(3.8,.027,1.2,.55,.02,.3,'puddle');
+ for(const [x,z] of [[-3.8,-4.1],[2.9,-7.4],[-1.2,-13.1],[3.8,1.2]]){
+  for(let groove=-3;groove<=3;groove++)box(x-.50,.045,z+groove*.085,x+.50,.052,z+groove*.085+.018,'rust');
+ }
+ for(const [x,z] of [[-4.75,-6.2],[4.72,-11.8],[-2.2,-18.3],[2.4,-2.5]]){
+  roundBox(x-.24,.025,z-.42,x+.24,.045,z+.42,.055,'metal');
+  for(let bar=0;bar<8;bar++)box(x-.19+bar*.055,.048,z-.34,x-.16+bar*.055,.06,z+.34,'rust');
+ }
+ for(const [x,z] of [[-1.8,-3.2],[1.4,-9.3],[-3.0,-12.4],[2.0,-17.8],[.2,2.4]]){
+  box(x-.46,.012,z-.30,x+.48,.022,z+.32,'asphalt');
+  for(let crack=0;crack<3;crack++)box(x-.28+crack*.13,.024,z-.18,x-.24+crack*.13,.027,z+.15,'rust');
+ }
  for(const [x,z] of [[-4.35,-7.8],[3.75,-10.2],[-2.9,-16.5],[4.1,-3.4]]){
   box(x-.28,.02,z-.2,x+.27,.34,z+.2,'debris');
   box(x-.25,.34,z-.18,x+.24,.57,z+.17,'debris');
@@ -754,7 +822,7 @@ function makeMips(id,n){
 }
 function initMaterials(){
  const urban=['brick','concrete','glass','asphalt','taxi','paint','metal','rust','rubber','lamp','mutant','claw','stone','wood','cloth','skin','bark','leaves','grass','windowdark','windowlit','sign','puddle','debris','neon'];
- for(const mat of urban)materials.set(mat,makeMips(mat,['mutant','skin','cloth'].includes(mat)?128:256));
+ for(const mat of urban)materials.set(mat,makeMips(mat,['mutant','skin','cloth'].includes(mat)?512:512));
  cacheFastMaterials();
  $('textureStatus').textContent='Textures urbaines RGB565 : pyramides mipmap prêtes';
  preparedTexHigh=true;
