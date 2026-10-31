@@ -23,13 +23,13 @@ const ctx = {
   document: { getElementById: () => ({ getContext: () => ({}) }) },
 };
 vm.createContext(ctx);
-vm.runInContext(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\nmakeScene(); buildBVH(); globalThis.__scene = { objects, bvh, bvhRoot, sun, skyZenith, skyHorizon, pointLights, materials };`, ctx, { timeout: 180000 });
+vm.runInContext(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\nmakeScene(); buildBVH(); globalThis.__scene = { objects, bvh, bvhRoot, sun, skyZenith, skyHorizon, pointLights, materials };`, ctx, { timeout: 1800000 });
 const scene = ctx.__scene;
 const objects = scene.objects;
 const bvh = scene.bvh;
 const mats = [...new Set(objects.map(o => o.mat))];
 // Preserve exactly the source engine's 512x512 RGB565 material pyramids.
-vm.runInContext(`for (const id of ${JSON.stringify(mats)}) materials.set(id, makeMips(id, 512));`, ctx, { timeout: 180000 });
+vm.runInContext(`for (const id of ${JSON.stringify(mats)}) materials.set(id, makeMips(id, 512));`, ctx, { timeout: 1800000 });
 
 const types = { triangle: 0, box: 1, roundbox: 2, capsule: 3, cone: 4, ellipse: 5 };
 const matIndex = new Map(mats.map((m, i) => [m, i]));
