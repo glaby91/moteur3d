@@ -435,13 +435,19 @@ function makeScene(){
  }
  makePalm(7.55,-18,1.0,.24);makePalm(8.15,-36,.88,-.20);makePalm(7.25,-57,.74,.18);
  makePalm(8.0,-82,.72,-.16);makePalm(7.35,-106,.67,.19);makePalm(8.1,-130,.62,-.13);makePalm(7.5,-154,.58,.16);
- // Lampadaires côtiers : mats sombres le jour, diffuseurs chauds commandés par l’heure dans le rendu natif.
+ // Lampadaires LED à tête plate et bras courbe, inspirés de la référence produit.
  for(let z=-12;z>-180;z-=18){
   const x=5.82;
-  capsule([x,.04,z],[x,4.55,z],.09,'metal');
-  capsule([x,4.48,z],[x-.70,4.48,z],.055,'metal');
-  roundBox(x-.95,4.34,z-.17,x-.54,4.48,z+.17,.055,'lamp');
-  roundBox(x-.99,4.29,z-.20,x-.48,4.34,z+.20,.025,'metal');
+  cone([x,.06,z],[x,4.42,z],.13,.045,'metal');
+  roundBox(x-.17,.06,z-.17,x+.17,.17,z+.17,.035,'metal');
+  capsule([x,4.20,z],[x,4.48,z],.060,'metal');
+  capsule([x,4.48,z],[x-.12,4.67,z],.055,'metal');
+  capsule([x-.12,4.67,z],[x-.38,4.77,z],.052,'metal');
+  capsule([x-.38,4.77,z],[x-1.12,4.77,z],.050,'metal');
+  // Corps aluminium aplati avec diffuseur inférieur.
+  roundBox(x-1.28,4.65,z-.18,x-.55,4.80,z+.18,.095,'metal');
+  roundBox(x-1.22,4.60,z-.145,x-.62,4.66,z+.145,.060,'lamp');
+  roundBox(x-.69,4.67,z-.17,x-.54,4.76,z+.17,.040,'metal');
  }
  // A single small weathered coastal marker keeps the road readable at distance.
  roundBox(-4.62,.12,-24,-4.50,1.42,-23.88,.04,'metal');
