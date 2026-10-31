@@ -32,4 +32,4 @@ L’interface permet de régler la résolution de sortie, l’échelle de calcul
 
 Le workflow GitHub Actions exporte la scène, compile le programme Win32 en C++17 avec MSVC, puis crée l’artefact `Moteur3D-V14-Natif-Scene-V1314.zip`. L’archive contient l’exécutable et son fichier de scène de 196 Mio ; extraire les deux fichiers dans le même dossier avant de lancer l’exécutable.
 
-Le moteur reste logiciel : les calculs de rayons, intersections, textures et éclairage sont effectués par le CPU. Le réglage CPU propose de 1 à 16 threads et démarre sur 16. Les curseurs n’affichent pas de graduations pour éviter de confondre les repères avec des poignées supplémentaires.
+Le moteur reste logiciel : les calculs de rayons, intersections, textures et éclairage sont effectués par le CPU. Le réglage CPU propose de 1 à 16 threads et démarre sur 16. Les curseurs utilisent le style sans graduations. Les diagnostics sont en français, condensés et placés dans la hauteur visible de la fenêtre.
