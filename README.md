@@ -4,13 +4,17 @@ Moteur 3D expérimental (archives QBasic + démonstrations HTML/JavaScript).
 
 ## Parcours détaillé du moteur 3D — branche côte d’été (30–31 octobre 2026)
 
-### Version de travail actuelle : V13.16
+### Version de travail actuelle : V14 native
 
-**[Ouvrir le moteur V13.16 — workers CPU logiciels](experiments/2026-10-30-cote-ete-gt/moteur3d_v1316_cpu_workers_2026.html)** · [Télécharger le lanceur Windows V13.16](https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v1315-windows.yml) · [V13.14 — référence Full HD mesurée](experiments/2026-10-30-cote-ete-gt/moteur3d_v1314_fhd_upscale_2026.html) · [Architecture CPU / FPGA](docs/CPU_FPGA_RENDER_BACKEND.md) · [Dossier des versions](experiments/2026-10-30-cote-ete-gt/)
+**[Source C++ natif](experiments/2026-10-30-cote-ete-gt/native_v14/moteur3d_v14_native.cpp)** · [Compilation Windows et exécutable](https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v14-native-windows.yml) · [Référence navigateur V13.16](experiments/2026-10-30-cote-ete-gt/moteur3d_v1316_cpu_workers_2026.html) · [Architecture CPU / FPGA](docs/CPU_FPGA_RENDER_BACKEND.md)
 
-Cette branche est une démonstration **HTML/JavaScript autonome de lancer de rayons sur CPU**, affichée dans Canvas. Elle assemble une caméra à perspective rectilinéaire, des intersections de primitives et de surfaces, un BVH pour accélérer les rayons caméra, des textures, l’éclairage et des ombres par carte de profondeur. Ce n’est pas un jeu avec moteur physique : la conduite, les collisions entre voitures et l’animation physique des dépassements ne sont pas implémentées.
+La V14 est une application **C++17 native Windows**. Elle dessine directement dans une fenêtre Win32; le moteur calcule une image avec lancer de rayons logiciel, BVH et tuiles parallèles sur CPU. Elle ne lance ni navigateur, ni WebView, ni code HTML, ni API GPU. Les flèches déplacent la caméra; les touches + et − règlent le nombre de threads. Le binaire est produit par GitHub Actions.
 
-La V13.15 a séparé le moteur de son backend via une API de frame et de tuiles. La V13.16 conserve cette architecture et exécute réellement les tuiles 16 × 16 en parallèle avec des **Web Workers CPU**. Chaque worker reçoit la scène, le BVH, les matériaux, les textures et les réglages, puis calcule les mêmes intersections, ombres et shaders logiciels. Le mode Auto utilise jusqu’à quatre workers selon la capacité logique annoncée par le navigateur; un choix manuel est aussi disponible. Les compteurs de travail sont additionnés entre les workers, et le temps total mesuré est le temps mural de la frame. Si les workers ne peuvent pas démarrer, le rendu reprend sur le thread principal. Cela reste du rendu logiciel: aucune API de rendu 3D matériel n’est utilisée. Le `.exe` Windows est un lanceur compilé qui extrait la page HTML et l’ouvre dans le navigateur par défaut; le calcul parallèle s’exécute dans ce navigateur, pas dans un moteur natif autonome. La nouvelle structure permet de remplacer plus tard le backend CPU par du code natif ou une interface matérielle de type FPGA, sans prétendre que cette étape existe déjà.
+La V14 est le premier port natif: le modèle et le décor sont encore une reconstruction simplifiée du design détaillé de la V13.16. Les temps de l’aperçu Linux ne prédisent pas les performances Windows; le gain doit être comparé sur le PC cible avec une résolution et une scène identiques.
+
+### Implémentation de référence navigateur — V13.16
+
+La version V13.16 reste une démonstration HTML/JavaScript autonome de lancer de rayons sur CPU, affichée dans Canvas. Elle sépare le moteur de son backend via une API de frame et de tuiles, puis calcule réellement les tuiles 16 × 16 avec des Web Workers CPU. Ce moteur navigateur historique reste utile comme référence visuelle, mais son lanceur Windows est seulement un wrapper qui ouvre la page HTML.
 
 La V13.14 propose une sortie **Full HD (1920 × 1080)** et plusieurs résolutions internes. Le mode réduit recommandé calcule **1680 × 945**, puis agrandit l’image en 1920 × 1080. Il lance **1 587 600 rayons au lieu de 2 073 600**, soit **23,4 % de rayons en moins**. Cette économie de rayons ne garantit pas la même baisse du temps total : elle dépend aussi du BVH, des textures, des ombres et du navigateur.
 
@@ -36,7 +40,8 @@ L’agrandissement Canvas lisse l’image, mais ne recrée pas les détails abse
 | **V13.11–V13.12** | Essai de parcours BVH en tableaux typés, abandonné après une hausse du temps mesuré. Retour au parcours scalaire, ajout d’une construction BVH SAH à 12 compartiments et de compteurs de travail : tests AABB, tests géométriques, lectures de texels et accès à la carte d’ombre. Sur une capture utilisateur V13.12 à 640 × 400 : 559 612 tests géométriques, 3 045 933 nœuds BVH visités, 5 990 398 tests AABB et 474,3 ms au total. |
 | **V13.13–V13.14** | Ajout de la sortie Full HD 16:9, distincte de la résolution interne. La V13.14 propose le calcul interne à 1680 × 945, agrandi en 1920 × 1080, soit 23,4 % de rayons en moins que le natif. Plusieurs niveaux restent sélectionnables pour comparer qualité et coût. |
 | **V13.15** | Introduction d’une frontière de backend CPU versionnée avec démarrage, rendu par tuile et fin de frame; le calcul demeure alors mono-thread. |
-| **V13.16** | Parallélisation réelle des tuiles 16 × 16 par Web Workers CPU; choix Auto ou manuel du nombre de workers, agrégation des compteurs de tous les workers et reprise mono-thread si leur initialisation échoue. Le rendu reste logiciel. Le lanceur Windows compilé embarque la page HTML et l’ouvre dans le navigateur. Aucun gain de temps n’est annoncé avant comparaison sur une même machine et avec les mêmes réglages. |
+| **V13.16** | Référence navigateur parallèle par Web Workers. Ancien lanceur Windows: ouvre la page HTML, sans moteur natif intégré. |
+| **V14 native** | Premier exécutable autonome C++17/Win32: scène côtière reconstruite, lancer de rayons CPU, BVH, rendu par tuiles et multi-threading; image dessinée directement dans une fenêtre native, sans navigateur ni GPU. Le portage du design détaillé reste à poursuivre. |
 
 ### Bancs d’essai et éléments non intégrés
 
