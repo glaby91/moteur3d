@@ -399,7 +399,7 @@ function makeScene(){
  }
  // Palmiers côtiers : troncs légèrement courbés, anneaux d’écorce et palmes pennées.
  function makePalm(baseX,baseZ,scale,lean){
-  const trunkHeight=6.1*scale,points=[];
+  const trunkHeight=5.5*scale,points=[];
   for(let k=0;k<=8;k++){
    const t=k/8;points.push([baseX+lean*t*t, trunkHeight*t, baseZ+.16*scale*t]);
   }
@@ -407,25 +407,25 @@ function makeScene(){
    const t0=k/8,t1=(k+1)/8,r0=.205*scale*(1-.58*t0),r1=.205*scale*(1-.58*t1);
    cone(points[k],points[k+1],r0,r1,'bark');
   }
-  for(let ring=1;ring<=10;ring++){
+  for(let ring=1;ring<=8;ring++){
    const t=ring/12,p=points[Math.min(7,Math.floor(t*8))],r=.205*scale*(1-.58*t);
    ellipsoidMesh(p[0],trunkHeight*t,p[2],r,.018*scale,r,'wood',12,6);
   }
   const crown=points[8],crownY=trunkHeight;
   // Small central spear and nine radial fronds.
   cone([crown[0],crownY-.08*scale,crown[2]],[crown[0]+lean*.08,crownY+.62*scale,crown[2]],.095*scale,.018*scale,'leaves');
-  for(let frond=0;frond<9;frond++){
-   const angle=frond*TAU/9+.18,dx=Math.cos(angle),dz=Math.sin(angle),sideX=-dz,sideZ=dx,length=2.55*scale;
-   const at=t=>[crown[0]+dx*length*t+lean*.12*t,crownY+.18*scale*Math.sin(PI*t)-.72*scale*t*t,crown[2]+dz*length*t];
+  for(let frond=0;frond<12;frond++){
+   const angle=frond*TAU/12+.18,dx=Math.cos(angle),dz=Math.sin(angle),sideX=-dz,sideZ=dx,length=3.05*scale;
+   const at=t=>[crown[0]+dx*length*t+lean*.12*t,crownY+.20*scale*Math.sin(PI*t)-.98*scale*t*t,crown[2]+dz*length*t];
    let previous=at(0);
-   for(let seg=1;seg<=5;seg++){
-    const t=seg/5,next=at(t);cone(previous,next,.043*scale*(1-(seg-1)/6),.012*scale,'wood');previous=next;
+   for(let seg=1;seg<=6;seg++){
+    const t=seg/6,next=at(t);cone(previous,next,.055*scale*(1-(seg-1)/7),.016*scale,'wood');previous=next;
    }
-   for(let leaf=1;leaf<=6;leaf++){
-    const t=leaf/7,start=at(t),blade=(.63-.25*t)*scale,drop=(.12+.25*t)*scale;
+   for(let leaf=1;leaf<=9;leaf++){
+    const t=leaf/10,start=at(t),blade=(.82-.30*t)*scale,drop=(.10+.30*t)*scale;
     for(const side of [-1,1]){
      const end=[start[0]+side*sideX*blade,start[1]-drop,start[2]+side*sideZ*blade];
-     cone(start,end,.026*scale,.0025*scale,(leaf+frond)%3===0?'grass':'leaves');
+     cone(start,end,.043*scale,.005*scale,(leaf+frond)%3===0?'grass':'leaves');
     }
    }
   }
@@ -435,6 +435,14 @@ function makeScene(){
  }
  makePalm(7.55,-18,1.0,.24);makePalm(8.15,-36,.88,-.20);makePalm(7.25,-57,.74,.18);
  makePalm(8.0,-82,.72,-.16);makePalm(7.35,-106,.67,.19);makePalm(8.1,-130,.62,-.13);makePalm(7.5,-154,.58,.16);
+ // Lampadaires côtiers : mats sombres le jour, diffuseurs chauds commandés par l’heure dans le rendu natif.
+ for(let z=14;z>-170;z-=18){
+  const x=-5.38;
+  capsule([x,.04,z],[x,4.55,z],.09,'metal');
+  capsule([x,4.48,z],[x+.70,4.48,z],.055,'metal');
+  roundBox(x+.50,4.34,z-.17,x+.88,4.48,z+.17,.055,'lamp');
+  roundBox(x+.43,4.29,z-.20,x+.92,4.34,z+.20,.025,'metal');
+ }
  // A single small weathered coastal marker keeps the road readable at distance.
  roundBox(-4.62,.12,-24,-4.50,1.42,-23.88,.04,'metal');
  roundBox(-4.83,1.10,-24.04,-4.28,1.48,-23.72,.08,'sign');
