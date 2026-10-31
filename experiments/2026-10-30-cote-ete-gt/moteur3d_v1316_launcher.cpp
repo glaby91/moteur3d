@@ -1,4 +1,5 @@
 #define WIN32_LEAN_AND_MEAN
+// V13.16 embeds the HTML renderer; its software ray tracing runs on CPU Web Workers.
 #include <windows.h>
 #include <shellapi.h>
 #include <string>
