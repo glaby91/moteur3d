@@ -47,7 +47,7 @@ const vecs = (...vs) => vs.flat();
 file.write('M3D1314', offset, 'ascii'); offset += 8;
 putU32(1); putU32(objects.length); putU32(bvh.length); putI32(scene.bvhRoot);
 putU32(objects.length); putU32(mats.length); putU32(mats.length); putU32(512);
-for (const mat of mats) { file.write(mat, offset, 24, 'utf8'); offset += 24; }
+for (const mat of mats) { file.fill(0, offset, offset + 24); file.write(mat, offset, 24, 'utf8'); offset += 24; }
 
 for (const o of objects) {
   const ti = types[o.type];
