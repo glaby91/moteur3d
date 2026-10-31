@@ -1,0 +1,37 @@
+name: Build Moteur 3D V13.15 Windows launcher
+
+on:
+  push:
+    branches:
+      - experiment/manhattan-silent-hill-2026-10-30
+    paths:
+      - experiments/2026-10-30-cote-ete-gt/moteur3d_v1315_cpu_backend_2026.html
+      - experiments/2026-10-30-cote-ete-gt/moteur3d_v1315_launcher.cpp
+      - experiments/2026-10-30-cote-ete-gt/moteur3d_v1315_launcher.rc
+      - .github/workflows/build-moteur3d-v1315-windows.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Compile Windows launcher with embedded HTML
+        shell: cmd
+        working-directory: experiments/2026-10-30-cote-ete-gt
+        run: |
+          rc /nologo /fo moteur3d_v1315_launcher.res moteur3d_v1315_launcher.rc
+          cl /nologo /O2 /EHsc /std:c++17 /DUNICODE /D_UNICODE /c moteur3d_v1315_launcher.cpp
+          link /nologo /SUBSYSTEM:WINDOWS moteur3d_v1315_launcher.obj moteur3d_v1315_launcher.res shell32.lib user32.lib /OUT:Moteur3D_V13.15.exe
+      - name: Upload executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moteur3D-V13.15-Windows
+          path: experiments/2026-10-30-cote-ete-gt/Moteur3D_V13.15.exe
+          if-no-files-found: error
