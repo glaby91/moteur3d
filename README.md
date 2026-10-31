@@ -2,7 +2,49 @@
 
 Moteur 3D expérimental (archives QBasic + démonstrations HTML/JavaScript).
 
-## Version expérimentale actuelle — V9.2, rendu 16:10 plus rapide (19 octobre 2026)
+## Parcours détaillé du moteur 3D — branche côte d’été (30–31 octobre 2026)
+
+### Version de travail actuelle : V13.14
+
+**[Ouvrir le moteur V13.14](experiments/2026-10-30-cote-ete-gt/moteur3d_v1314_fhd_upscale_2026.html)** · [V13.12 — base de mesure BVH](experiments/2026-10-30-cote-ete-gt/moteur3d_v1312_cote_restomod_2026.html) · [Dossier des versions de la branche](experiments/2026-10-30-cote-ete-gt/)
+
+Cette branche est une démonstration **HTML/JavaScript autonome de lancer de rayons sur CPU**, affichée dans Canvas. Elle assemble une caméra à perspective rectilinéaire, des intersections de primitives et de surfaces, un BVH pour accélérer les rayons caméra, des textures, l’éclairage et des ombres par carte de profondeur. Ce n’est pas un jeu avec moteur physique : la conduite, les collisions entre voitures et l’animation physique des dépassements ne sont pas implémentées.
+
+La V13.14 propose une sortie **Full HD (1920 × 1080)** et plusieurs résolutions internes. Le mode réduit recommandé calcule **1680 × 945**, puis agrandit l’image en 1920 × 1080. Il lance **1 587 600 rayons au lieu de 2 073 600**, soit **23,4 % de rayons en moins**. Cette économie de rayons ne garantit pas la même baisse du temps total : elle dépend aussi du BVH, des textures, des ombres et du navigateur.
+
+**Comparaison utilisateur V13.14, Full HD et mêmes réglages :** le mode natif (1920 × 1080) lance 2 073 600 rayons et prend **4 882,9 ms** ; le mode équilibré (1680 × 945, agrandi en Full HD) lance 1 587 600 rayons et prend **4 429,6 ms**. Les rayons diminuent de **23,4 %**, mais le temps total baisse de **9,3 %** (453,3 ms). Le temps BVH passe de 2 868,5 à 2 545,5 ms (−11,3 %) et l’éclairage/textures de 1 151,4 à 989,7 ms (−14,0 %). En équilibré, le moteur a compté 3 799 490 tests géométriques, 20 233 042 nœuds BVH visités, 39 623 644 tests AABB, 4 712 540 texels lus et 7 557 852 lectures de profondeur d’ombre. La charge moyenne par rayon reste proche : 25,0 tests AABB, 2,4 tests géométriques, 3,0 texels et 4,8 lectures d’ombre. Ce relevé provient des deux captures du poste utilisateur ; les millisecondes dépendent du navigateur et de l’ordonnancement.
+
+L’agrandissement Canvas lisse l’image, mais ne recrée pas les détails absents du calcul interne. L’anti-crénelage FXAA en post-traitement et le calcul fovéé (davantage de détails au centre, réduction légère aux bords) restent des pistes, non des fonctions intégrées à la V13.14.
+
+### Étapes de conception et de construction
+
+| Versions | Étapes réalisées |
+|---|---|
+| **V9.2** | Base de rendu logiciel 16:10 : rayons caméra, primitives analytiques, BVH, textures RGB565, mipmaps, ombres par carte Z, rendu progressif et compteurs de coût. Le ciel et les nuages peuvent être évalués sur une grille angulaire interpolée. Le réglage de résolution interne propose des compromis entre précision et nombre de rayons. |
+| **V9.3** | Création de la scène urbaine Manhattan/Silent Hill : façades, mobilier de rue, escaliers de secours, chaussée humide, éclairages locaux chauds, brume et créature organique à silhouette élancée, bras levé et appendices courbés. |
+| **V9.4–V9.8** | Ajout de maillages lissés et augmentation du niveau de détail. Construction d’un coupé GT classique dans la scène ; amélioration du vitrage fastback et de la géométrie de la créature. |
+| **V9.9–V10.5** | Intégration plus complète de la carrosserie et de l’habitacle ; vitrage arrière raccordé au pavillon ; corrections de proportions et de silhouette avec une caisse GT plus longue, basse et large. |
+| **V11.0–V11.2** | Remplacement de la scène urbaine par une route côtière estivale. Conception d’un coupé restomod 2026 à partir du fastback initial, avec carrosserie cuivre, pavillon effilé, lunette plongeante, phares ronds, pneus et jantes détaillés. La V11.2 est décrite dans le projet avec une coque d’environ 93 000 triangles. |
+| **V11.3–V11.9** | Corrections successives du modèle : placement des roues, léger débord latéral, dégagement des pneus dans les ailes, arches continues, vitre latérale arrière et raccords des vitrages ; détails de carrosserie, pneus et jantes. |
+| **V12.0** | Révision des volumes : coffre raccourci, arrière plus massif, arches élargies et grille avant mieux alignée. |
+| **V13.0–V13.1** | Reprise du design fastback d’origine avec une interprétation Manta/Cayman restomod. Refonte des raccords pare-brise/pavillon/vitres/lunette/coffre ; correction des pointes d’ailes et de la hauteur apparente des pneus. |
+| **V13.2–V13.5** | Ajout des éléments de scène côtière : soleil bas, deux sources lumineuses locales, éclairage de route, mer et vagues, palmiers et trois voitures rouge, violette et orange. Une capture de rendu V13.5 est archivée dans le dossier. |
+| **V13.6–V13.8** | Optimisation du lancer de rayons : passage des rayons caméra par le BVH spatial, réutilisation des inverses de direction et stockage scalaire des bornes de nœuds. La capture utilisateur V13.7 indique 3 889,4 ms à 640 × 400 ; celle de V13.8 indique 3 351,5 ms. Ces temps dépendent du poste et des réglages. |
+| **V13.9–V13.10** | Une représentation compacte des bornes a d’abord causé une erreur de rendu ; la version suivante a corrigé les limites de projection. La régression reste dans l’historique, pas dans la version courante. |
+| **V13.11–V13.12** | Essai de parcours BVH en tableaux typés, abandonné après une hausse du temps mesuré. Retour au parcours scalaire, ajout d’une construction BVH SAH à 12 compartiments et de compteurs de travail : tests AABB, tests géométriques, lectures de texels et accès à la carte d’ombre. Sur une capture utilisateur V13.12 à 640 × 400 : 559 612 tests géométriques, 3 045 933 nœuds BVH visités, 5 990 398 tests AABB et 474,3 ms au total. |
+| **V13.13–V13.14** | Ajout de la sortie Full HD 16:9, distincte de la résolution interne. La V13.14 propose le calcul interne à 1680 × 945, agrandi en 1920 × 1080, soit 23,4 % de rayons en moins que le natif. Plusieurs niveaux restent sélectionnables pour comparer qualité et coût. |
+
+### Bancs d’essai et éléments non intégrés
+
+Les pages HTML comportent aussi des panneaux de diagnostic et d’expérimentation : compteurs de parcours BVH, carte des régions de visibilité, comparaison entre interpolation RGB et patches de surface, essai de reprojection d’une image N vers N+1, et charge de workers concurrents.
+
+Ces panneaux servent à comparer des méthodes. La carte de visibilité vérifie ses zones par comparaison avec l’image complète ; les patches et la reprojection restent des prototypes ; les images N+1 du banc workers sont synthétiques et ne sont pas produites par le moteur principal. Ils ne constituent donc pas des optimisations intégrées ni des gains validés.
+
+Les versions V1 à V9.2 et les expériences historiques sont conservées plus bas dans ce README. Pour comparer des performances, il faut garder le même navigateur, le même poste, la même caméra, les mêmes options d’éclairage et d’ombre et comparer les compteurs avec une résolution interne identique. Les millisecondes ne sont comparables que sur le même environnement.
+
+---
+
+## Référence historique — V9.2, rendu 16:10 plus rapide (19 octobre 2026)
 
 **[Ouvrir V9.2 — ray casting 16:10, ciel optimisé et précision réglable](experiments/2026-10-19-v9-2-fast-sky-16x10/index.html)** · [Documentation et tests V9.2](experiments/2026-10-19-v9-2-fast-sky-16x10/README.md)
 
