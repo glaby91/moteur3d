@@ -356,11 +356,17 @@ function makeScene(){
  capsule([5.34,.29,23],[5.34,.29,-242],.025,'metal');
  // Sable clair sur l’estran, puis surface d’océan ondulée à relief doux.
  // Le maillage reste au-dessus du plan d’eau de fond et reçoit la lumière spéculaire.
- const waveCols=23,waveRows=113,waveX0=12.0,waveZ0=-260,waveDx=1.45,waveDz=2.5;
- const waveHeight=(x,z)=>.08+.92*(.5+.5*Math.sin(x*.33+Math.sin(z*.035)*1.35+z*.045))+.30*(.5+.5*Math.sin(x*.71-z*.105));
+ const waveCols=31,waveRows=113,waveX0=12.0,waveZ0=-260,waveDx=1.45,waveDz=2.5;
+ // Houle croisée : longues ondulations, vagues secondaires et crêtes plus raides.
+ const wavePhase=(x,z)=>x*.235+z*.043+1.05*Math.sin(z*.026);
+ const waveCrest=(x,z)=>Math.sin(wavePhase(x,z)+.42*Math.sin(x*.48-z*.078));
+ const waveHeight=(x,z)=>{
+  const p=wavePhase(x,z),q=x*.48-z*.078+Math.sin(z*.062)*.55;
+  return .58+.34*Math.sin(p)+.12*Math.sin(q)+.06*Math.sin(x*.91+z*.17)+.24*Math.pow(Math.max(0,waveCrest(x,z)),6);
+ };
  const waveVertex=(x,z)=>{
-  const e=.05,dx=(waveHeight(x+e,z)-waveHeight(x-e,z))/(2*e),dz=(waveHeight(x,z+e)-waveHeight(x,z-e))/(2*e);
-  return {p:[x,waveHeight(x,z),z],n:norm(-dx,1,-dz),uv:[x*.34,z*.34]};
+  const e=.12,dx=(waveHeight(x+e,z)-waveHeight(x-e,z))/(2*e),dz=(waveHeight(x,z+e)-waveHeight(x,z-e))/(2*e);
+  return {p:[x,waveHeight(x,z),z],n:norm(-dx,1,-dz),uv:[x*.34,z*.34],crest:waveCrest(x,z)};
  };
  const waveGrid=[];
  for(let j=0;j<=waveRows;j++){
@@ -368,27 +374,38 @@ function makeScene(){
  }
  for(let j=0;j<waveRows;j++)for(let i=0;i<waveCols;i++){
   const a=waveGrid[j][i],b=waveGrid[j][i+1],c=waveGrid[j+1][i+1],d=waveGrid[j+1][i];
-  meshTriangle(a,b,d,'sea');meshTriangle(b,c,d,'sea');
+  const crest=(a.crest+b.crest+c.crest+d.crest)*.25,height=(a.p[1]+b.p[1]+c.p[1]+d.p[1])*.25;
+  const mat=(crest>.88&&height>.94)||(i===0&&crest>.48)?'foam':'sea';
+  meshTriangle(a,b,d,mat);meshTriangle(b,c,d,mat);
  }
- // Chaîne de montagnes lointaines au-delà de l’océan, visible depuis la route.
- const mountainFace=(a,b,c,mat)=>{
-  const ab=[b[0]-a[0],b[1]-a[1],b[2]-a[2]],ac=[c[0]-a[0],c[1]-a[1],c[2]-a[2]],n=norm(...cross(ab,ac));
-  const v=p=>({p,n,uv:[p[0]*.12,p[2]*.12]});
-  meshTriangle(v(a),v(b),v(c),mat);
- };
- const mountainRange=(baseX,z0,z1,step,minH,maxH,mat,seed)=>{
-  let i=0;
-  for(let z=z0;z<z1;z+=step,i++){
-   const end=Math.min(z+step,z1),mid=(z+end)*.5;
-   const peakX=baseX+5+hash2(i,0,seed)*6,height=minH+hash2(i,1,seed)*(maxH-minH);
-   const a=[baseX,0,z],b=[baseX,0,end],c=[baseX+15,0,end],d=[baseX+15,0,z],peak=[peakX,height,mid];
-   const shade=i%4===0?'mountainLight':mat;
-   mountainFace(a,peak,b,shade);mountainFace(b,peak,c,shade);
-   mountainFace(c,peak,d,mat);mountainFace(d,peak,a,mat);
+ // Relief continu à deux plans, avec sommets arrondis et crêtes irrégulières.
+ const makeMountainRange=(baseX,width,z0,z1,maxHeight,seed,mat)=>{
+  const profiles=[];
+  for(let k=0,z=z0-24;z<z1+24;k++,z+=18){
+   profiles.push({z,a:.48+hash2(k,seed,41)*.52,w:8+hash2(k,seed+7,83)*7});
+  }
+  const heightAt=(x,z)=>{
+   const t=clamp((x-baseX)/width,0,1),crossSection=Math.pow(Math.max(0,Math.sin(PI*t)),.92);
+   let ridge=.08;
+   for(const peak of profiles){const d=(z-peak.z)/peak.w;ridge+=peak.a*Math.exp(-.5*d*d);}
+   const variation=.94+.045*Math.sin(z*.16+seed)+.025*Math.sin(z*.39+seed*1.7);
+   return maxHeight*crossSection*Math.min(1.12,ridge)*variation;
+  };
+  const nx=Math.ceil(width/2.4),nz=Math.ceil((z1-z0)/3.5),dx=width/nx,dz=(z1-z0)/nz,grid=[];
+  for(let j=0;j<=nz;j++){
+   const row=[];for(let i=0;i<=nx;i++){
+    const x=baseX+i*dx,z=z0+j*dz,e=.28,y=heightAt(x,z);
+    const sx=(heightAt(x+e,z)-heightAt(x-e,z))/(2*e),sz=(heightAt(x,z+e)-heightAt(x,z-e))/(2*e);
+    row.push({p:[x,y,z],n:norm(-sx,1,-sz),uv:[x*.08,z*.055]});
+   }grid.push(row);
+  }
+  for(let j=0;j<nz;j++)for(let i=0;i<nx;i++){
+   const a=grid[j][i],b=grid[j][i+1],c=grid[j+1][i+1],d=grid[j+1][i];
+   meshTriangle(a,d,b,mat);meshTriangle(b,d,c,mat);
   }
  };
- mountainRange(58,-280,40,17,5,12,'mountain',303);
- mountainRange(76,-280,40,23,10,20,'mountainFar',571);
+ makeMountainRange(55,38,-280,40,11.5,303,'mountain');
+ makeMountainRange(76,51,-280,40,17.5,571,'mountainFar');
  for(const [x,z,r] of [[-6,-3,.58],[-6.7,-18,.44],[-5.8,-35,.68],[6.2,-12,.32]])
   ellipsoidMesh(x,.18,z,r,.17,r*.72,'stone',16,10);
  // Rochers de plage dispersés de façon irrégulière, avec tailles et groupes variés.
@@ -716,34 +733,43 @@ function makeScene(){
   const dims=style==='compact'?{length:3.9,width:1.78,roofRear:-.72,roofFront:.48,roof:1.39}
    :style==='wagon'?{length:4.85,width:1.88,roofRear:-1.68,roofFront:.52,roof:1.48}
    :{length:4.45,width:1.84,roofRear:-1.05,roofFront:.50,roof:1.43};
-  const L=dims.length*scale,W=dims.width*scale,front=cz+L*.5,rear=cz-L*.5;
-  const y=v=>v*scale;
-  roundBox(cx-W*.5,y(.29),rear,cx+W*.5,y(.91),front,.17*scale,paint);
-  roundBox(cx-W*.43,y(.68),cz+L*.12,cx+W*.43,y(1.00),front-.12*scale,.12*scale,paint);
-  roundBox(cx-W*.42,y(.65),rear+.10*scale,cx+W*.42,y(.94),cz-L*.30,.10*scale,paint);
+  const L=dims.length*scale,W=dims.width*scale,front=cz+L*.5,rear=cz-L*.5,y=v=>v*scale;
+  // Carrosserie profilée en sections lissées, avec capot et épaules plus arrondis.
+  const body=[
+   [rear,.62,.54,.34,.77],[rear+.18*scale,.80,.72,.29,.91],
+   [cz-L*.30,.91,.79,.28,.99],[cz-L*.12,.94,.83,.28,1.02],
+   [cz+L*.12,.90,.80,.29,1.00],[front-.28*scale,.82,.73,.31,.96],
+   [front,.55,.49,.39,.78]
+  ].map(([z,bw,tw,bottom,top])=>[z,bw*scale,tw*scale,y(bottom),y(top)]);
+  loftedSmoothMesh(cx,body,paint,4,5);
   const cabRear=cz+dims.roofRear*scale,cabFront=cz+dims.roofFront*scale;
-  roundBox(cx-W*.37,y(1.00),cabRear,cx+W*.37,y(dims.roof),cabFront,.16*scale,paint);
-  // Vitrages lisibles et distincts sur les trois silhouettes de tourisme.
-  roundBox(cx-W*.29,y(1.04),cz+L*.20,cx+W*.29,y(1.30),cz+L*.31,.045*scale,'carGlass');
-  roundBox(cx-W*.29,y(1.03),cz-L*.38,cx+W*.29,y(1.27),cz-L*.29,.045*scale,'carGlass');
+  const cabin=[
+   [cabRear,.42,.34,y(.86),y(1.13)],[cabRear+.16*scale,.57,.49,y(.88),y(1.34)],
+   [cz-.10*scale,.59,.52,y(.89),y(dims.roof)],[cabFront-.12*scale,.51,.43,y(.91),y(dims.roof-.02)],
+   [cabFront,.35,.29,y(.94),y(1.16)]
+  ];
+  loftedSmoothMesh(cx,cabin,'carGlass',3,5);
+  // Bandeau de toit peint et vitrages latéraux intégrés à la silhouette.
+  roundBox(cx-W*.27,y(dims.roof-.045),cabRear+.18*scale,cx+W*.27,y(dims.roof+.015),cabFront-.15*scale,.08*scale,paint);
   for(const side of [-1,1]){
-   roundBox(Math.min(cx+side*W*.365,cx+side*W*.39),y(1.04),cabRear+.14*scale,Math.max(cx+side*W*.365,cx+side*W*.39),y(1.29),cabFront-.16*scale,.045*scale,'carGlass');
-   capsule([cx+side*W*.48,y(.53),cz-L*.12],[cx+side*W*.48,y(.53),cz+L*.18],.012*scale,'metal');
+   const x0=Math.min(cx+side*W*.34,cx+side*W*.38),x1=Math.max(cx+side*W*.34,cx+side*W*.38);
+   roundBox(x0,y(1.01),cabRear+.23*scale,x1,y(1.25),cabFront-.22*scale,.045*scale,'carGlass');
+   capsule([cx+side*W*.48,y(.53),cz-L*.12],[cx+side*W*.48,y(.53),cz+L*.18],.010*scale,'metal');
    for(const axle of [-.33,.33]){
     const wz=cz+axle*L,wx=cx+side*W*.47;
-    ellipsoidMesh(wx,y(.37),wz,.15*scale,.31*scale,.32*scale,'rubber',14,8);
-    ellipsoidMesh(wx+side*.11*scale,y(.37),wz,.035*scale,.17*scale,.17*scale,'wheelMetal',12,8);
+    ellipsoidMesh(wx,y(.37),wz,.15*scale,.31*scale,.32*scale,'rubber',18,10);
+    ellipsoidMesh(wx+side*.11*scale,y(.37),wz,.032*scale,.17*scale,.17*scale,'wheelMetal',14,8);
    }
-   ellipsoidMesh(cx+side*W*.29,y(.69),front-.015*scale,.12*scale,.09*scale,.05*scale,'led',12,8);
-   roundBox(Math.min(cx+side*W*.31,cx+side*W*.44),y(.63),rear+.01*scale,Math.max(cx+side*W*.31,cx+side*W*.44),y(.82),rear+.06*scale,.035*scale,'taillight');
-   roundBox(Math.min(cx+side*W*.51,cx+side*W*.63),y(.90),cz+.18*scale,Math.max(cx+side*W*.51,cx+side*W*.63),y(1.04),cz+.34*scale,.045*scale,'metal');
+   ellipsoidMesh(cx+side*W*.29,y(.69),front-.015*scale,.12*scale,.085*scale,.05*scale,'led',14,9);
+   roundBox(Math.min(cx+side*W*.31,cx+side*W*.44),y(.63),rear+.01*scale,
+    Math.max(cx+side*W*.31,cx+side*W*.44),y(.82),rear+.06*scale,.035*scale,'taillight');
+   roundBox(Math.min(cx+side*W*.51,cx+side*W*.63),y(.90),cz+.18*scale,
+    Math.max(cx+side*W*.51,cx+side*W*.63),y(1.04),cz+.34*scale,.045*scale,'metal');
   }
   roundBox(cx-W*.29,y(.43),front,cx+W*.29,y(.55),front+.06*scale,.045*scale,'metal');
   roundBox(cx-W*.29,y(.43),rear-.06*scale,cx+W*.29,y(.55),rear,.045*scale,'metal');
   roundBox(cx-W*.17,y(.68),front+.005*scale,cx+W*.17,y(.81),front+.035*scale,.035*scale,'windowdark');
  }
- addTrafficCar(2.12,-13.0,.84,'sportsRed');
- addTrafficCar(-2.10,-20.0,.70,'sportsViolet');
  addStandardCar(2.15,-35,.95,'sedan','carSilver');
  addStandardCar(-2.0,-48,.94,'compact','carBlue');
  addStandardCar(2.1,-61,.90,'wagon','carGreen');
@@ -1007,15 +1033,30 @@ function procedural(id,x,y){
   r=28+28*wave+spark;g=103+48*wave+spark;b=139+48*wave+spark;
   if(wave>.94){r+=8;g+=12;b+=12;}
  }else if(id==='sand'){
-  const grain=hash2(x>>1,y>>1,242)>.75?12:-5;
-  r=184+16*noise+grain;g=163+15*noise+grain;b=119+13*noise+grain;
+  const ripple=Math.sin(y*.031+Math.sin(x*.017)*2.1+Math.sin(y*.009+x*.013))*.5+.5;
+  const grain=hash2(x>>1,y>>1,242)>.76?8:-3,patch=coarse*14+(ripple-.5)*11;
+  r=181+14*noise+patch+grain;g=159+13*noise+patch*.92+grain;b=116+12*noise+patch*.72+grain*.72;
+ }else if(id==='foam'){
+  const fleck=hash2(x,y,461)>.84?12:-4;
+  r=205+12*noise+fleck;g=222+10*noise+fleck;b=225+9*noise+fleck;
  }else if(id==='asphalt'){
-  const crack=((x%97<2&&hash2(x>>1,y,71)>.72)||(y%113<2&&hash2(x,y>>1,72)>.76))?-34:0;
-  const wet=hash2(x>>3,y>>3,208)>.62?-11:0,grit=hash2(x>>1,y>>1,209)>.97?17:0;
-  r=45+20*noise+15*coarse+crack+wet+grit;g=51+19*noise+13*coarse+crack+wet+grit;b=55+18*noise+12*coarse+crack+wet+grit;
+  const aggregate=hash2(x>>2,y>>2,208)>.72?7:-3,grain=hash2(x,y,209)>.978?16:0;
+  const seam=(Math.sin(y*.043+Math.sin(x*.012)*2.6)+.36*Math.sin(y*.11+x*.027))*.5;
+  const damp=hash2(x>>4,y>>4,211)>.78?-9:0,v=20*noise+15*coarse+aggregate+grain+damp+seam*3;
+  r=43+v;g=49+v*.96;b=53+v*.91;
  }else if(id==='concrete'||id==='stone'){
   const joint=(x%64<2||y%48<2)?-48:0;
   r=111+22*noise+18*coarse+joint;g=119+22*noise+18*coarse+joint;b=121+20*noise+17*coarse+joint;
+ }else if(id==='mountain'||id==='mountainFar'){
+  const strata=Math.sin(y*.061+Math.sin(x*.018)*1.7)+.38*Math.sin(y*.157+x*.021);
+  const fractured=hash2(x>>3,y>>3,id==='mountain'?451:452)>.91?9:-3;
+  if(id==='mountain'){
+   const v=16*noise+13*coarse+strata*4+fractured;
+   r=105+v;g=112+v*.97;b=120+v*.91;
+  }else{
+   const v=10*noise+9*coarse+strata*2.2+fractured*.34;
+   r=123+v;g=135+v;b=148+v*1.08;
+  }
  }else if(id==='brick'){
   const row=Math.floor(y/48),shift=(row&1)*21,cx=(x+shift)%64,cy=y%48;
   const mortar=(cx<3||cy<3)?-44:0,wx=(x+shift)%64,wy=cy;
@@ -1460,7 +1501,7 @@ function shadePixel(cam,x,y,id,t,dx,dy,dz,options){
   const paletteFlat={bark:0xff556f91,leaves:0xff519b65,grass:0xff609e73,
     stone:0xffa8b4bb,mountain:0xff503d35,mountainLight:0xff604b40,mountainFar:0xff695446,wood:0xff678aaf,cloth:0xffaf785c,skin:0xff86aaca,
     brick:0xff684744,concrete:0xff777e80,glass:0xff263744,asphalt:0xff30363a,
-    taxi:0xffc99526,sportsPaint:0xffc84d20,sportsRed:0xffb51e19,sportsViolet:0xff7030a8,carSilver:0xffc1b7ac,carBlue:0xffad7042,carGreen:0xff697e50,wheelMetal:0xff9aabb5,led:0xffe5f5ff,taillight:0xffb02020,carGlass:0xff5d7785,paint:0xffaaa391,sea:0xff287d9a,sand:0xffc6ad7b,metal:0xff394247,rust:0xff74452f,
+    taxi:0xffc99526,sportsPaint:0xffc84d20,sportsRed:0xffb51e19,sportsViolet:0xff7030a8,carSilver:0xffc1b7ac,carBlue:0xffad7042,carGreen:0xff697e50,wheelMetal:0xff9aabb5,led:0xffe5f5ff,taillight:0xffb02020,carGlass:0xff5d7785,paint:0xffaaa391,sea:0xff287d9a,sand:0xffc6ad7b,foam:0xffe2e1d8,metal:0xff394247,rust:0xff74452f,
     rubber:0xff202324,lamp:0xffbd8841,mutant:0xff574d4e,claw:0xff252222,wound:0xff171227,scar:0xff625f6f,
     windowdark:0xff18242a,windowlit:0xffd6aa6c,sign:0xff687b84,neon:0xff32b8c9,puddle:0xff18272e,debris:0xff69635c};
   base=paletteFlat[mat]||0xff888888;
