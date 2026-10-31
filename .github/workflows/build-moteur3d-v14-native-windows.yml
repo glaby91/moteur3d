@@ -24,7 +24,7 @@ jobs:
         shell: cmd
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: |
-          cl /nologo /O2 /EHsc /std:c++17 /DUNICODE /D_UNICODE /c moteur3d_v14_native.cpp
+          cl /nologo /O2 /EHsc /std:c++17 /utf-8 /DUNICODE /D_UNICODE /c moteur3d_v14_native.cpp
           link /nologo /SUBSYSTEM:WINDOWS moteur3d_v14_native.obj user32.lib gdi32.lib comctl32.lib /OUT:Moteur3D_V14_Natif.exe
       - name: Upload native executable
         uses: actions/upload-artifact@v4
