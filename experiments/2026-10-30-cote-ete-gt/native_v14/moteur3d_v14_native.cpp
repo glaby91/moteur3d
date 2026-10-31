@@ -155,7 +155,7 @@ static int buildNode(Scene&s,int start,int count){
 static void buildBVH(Scene&s){s.order.resize(s.objs.size());for(int i=0;i<int(s.order.size());i++)s.order[i]=i;s.bvh.reserve(s.objs.size()*2);s.root=buildNode(s,0,int(s.order.size()));}
 static bool closest(const Scene&s,const Ray&r,Hit&best,std::atomic<uint64_t>*tests=nullptr){
  bool found=false;std::array<int,128> stack{};int top=0;if(s.root>=0)stack[top++]=s.root;
- while(top){const Node&n=s.bvh[stack[--top]];float near;if(tests)tests->fetch_add(1,std::memory_order_relaxed);if(!boxHit(r,n.mn,n.mx,best.t,near))continue;
+ while(top){const Node&n=s.bvh[stack[--top]];float tNear;if(tests)tests->fetch_add(1,std::memory_order_relaxed);if(!boxHit(r,n.mn,n.mx,best.t,tNear))continue;
   if(n.count){for(int i=n.start;i<n.start+n.count;i++){if(tests)tests->fetch_add(1,std::memory_order_relaxed);Hit h;if(intersect(r,s.objs[s.order[i]],best.t,h)){best=h;found=true;}}}
   else{if(top<126){stack[top++]=n.left;stack[top++]=n.right;}}
  }
