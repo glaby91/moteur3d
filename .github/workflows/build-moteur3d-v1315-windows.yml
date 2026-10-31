@@ -8,7 +8,7 @@ on:
       - experiments/2026-10-30-cote-ete-gt/moteur3d_v1316_cpu_workers_2026.html
       - experiments/2026-10-30-cote-ete-gt/moteur3d_v1316_launcher.cpp
       - experiments/2026-10-30-cote-ete-gt/moteur3d_v1316_launcher.rc
-      - .github/workflows/build-moteur3d-v1316-windows.yml
+      - .github/workflows/build-moteur3d-v1315-windows.yml
   workflow_dispatch:
 
 permissions:
