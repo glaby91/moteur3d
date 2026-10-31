@@ -1,0 +1,34 @@
+name: Build Moteur 3D V14 native Windows
+
+on:
+  push:
+    branches:
+      - experiment/manhattan-silent-hill-2026-10-30
+    paths:
+      - experiments/2026-10-30-cote-ete-gt/native_v14/moteur3d_v14_native.cpp
+      - .github/workflows/build-moteur3d-v14-native-windows.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Configure MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+      - name: Compile standalone native renderer
+        shell: cmd
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          cl /nologo /O2 /EHsc /std:c++17 /DUNICODE /D_UNICODE /c moteur3d_v14_native.cpp
+          link /nologo /SUBSYSTEM:WINDOWS moteur3d_v14_native.obj user32.lib gdi32.lib /OUT:Moteur3D_V14_Natif.exe
+      - name: Upload native executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moteur3D-V14-Natif-Windows
+          path: experiments/2026-10-30-cote-ete-gt/native_v14/Moteur3D_V14_Natif.exe
+          if-no-files-found: error
