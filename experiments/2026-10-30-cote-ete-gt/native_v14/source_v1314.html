@@ -200,7 +200,7 @@ let materials=new Map(),objects=[],bvh=[],bvhRoot=-1;
 let currentCam=null;
 const stats={rays:0,tests:0,aabbTests:0,nodes:0,hits:0,sky:0,texels:0,shadowDepthReads:0,traceMs:0,shadeMs:0,finishMs:0,tiles:0,pcfFull:0,pcfSaved:0,cloudEvaluations:0,mips:new Uint32Array(10)};
 const mipSizes=[8,16,32,64,128,256,512,1024,2048,4096];
-const isSportsPaint=m=>m==='sportsPaint'||m==='sportsRed'||m==='sportsViolet';
+const isSportsPaint=m=>m==='sportsPaint'||m==='sportsRed'||m==='sportsViolet'||m==='carSilver'||m==='carBlue'||m==='carGreen';
 const palette=[0xff68acf7,0xff69f8d4,0xff9dff73,0xffecfc78,0xffe2b46b,0xffdb8179,0xffbd7ff0,0xff7da8f7,0xffdda0d2,0xffc0f4ec];
 
 // === Analytic primitives, smooth triangle meshes and RGB565 material pyramids ===
@@ -345,33 +345,61 @@ function flatQuadMesh(points,mat,desired){
 function makeScene(){
  objects.length=0;
  // Long coastal road, with the shoreline running along its right side.
- box(-4.85,-.03,-180,4.85,-.005,24,'asphalt');
- for(let z=19;z>-166;z-=5.8)roundBox(-.075,.008,z-.1,.075,.024,z+2.3,.035,'paint');
+ box(-4.85,-.03,-260,4.85,-.005,24,'asphalt');
+ for(let z=19;z>-246;z-=5.8)roundBox(-.075,.008,z-.1,.075,.024,z+2.3,.035,'paint');
  // Pale shoulder and sparse, low guardrail toward the water.
  box(4.86,-.012,-180,5.55,.012,24,'sand');
- for(let z=20;z>-162;z-=5.5){
+ for(let z=20;z>-242;z-=5.5){
   cone([5.34,.02,z],[5.34,.73,z],.055,.045,'metal');
  }
- capsule([5.34,.66,23],[5.34,.66,-165],.045,'metal');
- capsule([5.34,.29,23],[5.34,.29,-165],.025,'metal');
+ capsule([5.34,.66,23],[5.34,.66,-242],.045,'metal');
+ capsule([5.34,.29,23],[5.34,.29,-242],.025,'metal');
  // Sable clair sur l’estran, puis surface d’océan ondulée à relief doux.
  // Le maillage reste au-dessus du plan d’eau de fond et reçoit la lumière spéculaire.
- const waveCols=23,waveRows=83,waveX0=9.42,waveZ0=-180,waveDx=1.45,waveDz=2.5;
- const waveHeight=(x,z)=>.025+.12*(.5+.5*Math.sin(x*.72+Math.sin(z*.105)*1.35+z*.067));
+ const waveCols=23,waveRows=113,waveX0=12.0,waveZ0=-260,waveDx=1.45,waveDz=2.5;
+ const waveHeight=(x,z)=>.08+.92*(.5+.5*Math.sin(x*.33+Math.sin(z*.035)*1.35+z*.045))+.30*(.5+.5*Math.sin(x*.71-z*.105));
  const waveVertex=(x,z)=>{
   const e=.05,dx=(waveHeight(x+e,z)-waveHeight(x-e,z))/(2*e),dz=(waveHeight(x,z+e)-waveHeight(x,z-e))/(2*e);
   return {p:[x,waveHeight(x,z),z],n:norm(-dx,1,-dz),uv:[x*.34,z*.34]};
  };
  const waveGrid=[];
  for(let j=0;j<=waveRows;j++){
-  const row=[];for(let i=0;i<=waveCols;i++)row.push(waveVertex(waveX0+i*waveDx,waveZ0+j*waveDz));waveGrid.push(row);
+  const row=[];for(let i=0;i<=waveCols;i++){const z=waveZ0+j*waveDz,x=waveX0+.55*Math.sin(z*.08)+.30*Math.sin(z*.21)+i*waveDx;row.push(waveVertex(x,z));}waveGrid.push(row);
  }
  for(let j=0;j<waveRows;j++)for(let i=0;i<waveCols;i++){
   const a=waveGrid[j][i],b=waveGrid[j][i+1],c=waveGrid[j+1][i+1],d=waveGrid[j+1][i];
   meshTriangle(a,b,d,'sea');meshTriangle(b,c,d,'sea');
  }
+ // Chaîne de montagnes lointaines au-delà de l’océan, visible depuis la route.
+ const mountainFace=(a,b,c,mat)=>{
+  const ab=[b[0]-a[0],b[1]-a[1],b[2]-a[2]],ac=[c[0]-a[0],c[1]-a[1],c[2]-a[2]],n=norm(...cross(ab,ac));
+  const v=p=>({p,n,uv:[p[0]*.12,p[2]*.12]});
+  meshTriangle(v(a),v(b),v(c),mat);
+ };
+ const mountainRange=(baseX,z0,z1,step,minH,maxH,mat,seed)=>{
+  let i=0;
+  for(let z=z0;z<z1;z+=step,i++){
+   const end=Math.min(z+step,z1),mid=(z+end)*.5;
+   const peakX=baseX+5+hash2(i,0,seed)*6,height=minH+hash2(i,1,seed)*(maxH-minH);
+   const a=[baseX,0,z],b=[baseX,0,end],c=[baseX+15,0,end],d=[baseX+15,0,z],peak=[peakX,height,mid];
+   const shade=i%4===0?'mountainLight':mat;
+   mountainFace(a,peak,b,shade);mountainFace(b,peak,c,shade);
+   mountainFace(c,peak,d,mat);mountainFace(d,peak,a,mat);
+  }
+ };
+ mountainRange(58,-280,40,17,5,12,'mountain',303);
+ mountainRange(76,-280,40,23,10,20,'mountainFar',571);
  for(const [x,z,r] of [[-6,-3,.58],[-6.7,-18,.44],[-5.8,-35,.68],[6.2,-12,.32]])
   ellipsoidMesh(x,.18,z,r,.17,r*.72,'stone',16,10);
+ // Rochers de plage dispersés de façon irrégulière, avec tailles et groupes variés.
+ for(let i=0;i<76;i++){
+  const z=-250+hash2(i,2,37)*270,shore=12+.55*Math.sin(z*.08)+.30*Math.sin(z*.21);
+  let x=5.72+hash2(i,1,71)*Math.max(1.4,shore-5.95);
+  if(z>-13&&z<-3&&x>5.75&&x<8.55)x=8.8+hash2(i,3,77)*1.0;
+  const rx=.16+hash2(i,4,37)*.48,rz=.14+hash2(i,5,37)*.46,ry=.10+hash2(i,6,37)*.22;
+  ellipsoidMesh(x,ry*.78,z,rx,ry,rz,'stone',10+(i%3)*2,6+(i%2));
+  if(i%9===0)ellipsoidMesh(x+rx*.45,ry*.56,z+rz*.32,rx*.48,ry*.65,rz*.58,'stone',10,6);
+ }
  // Design du décor : petit belvédère en bois sombre posé au bord de l’eau,
  // avec deux bornes lumineuses discrètes, une chaude et une froide.
  roundBox(5.92,.055,-12.15,8.42,.14,-3.48,.055,'wood');
@@ -434,14 +462,20 @@ function makeScene(){
   }
  }
  makePalm(7.55,-18,1.0,.24);makePalm(8.15,-36,.88,-.20);makePalm(7.25,-57,.74,.18);
- makePalm(8.0,-82,.72,-.16);makePalm(7.35,-106,.67,.19);makePalm(8.1,-130,.62,-.13);makePalm(7.5,-154,.58,.16);
- // Lampadaires côtiers : mats sombres le jour, diffuseurs chauds commandés par l’heure dans le rendu natif.
- for(let z=14;z>-170;z-=18){
-  const x=-5.38;
-  capsule([x,.04,z],[x,4.55,z],.09,'metal');
-  capsule([x,4.48,z],[x+.70,4.48,z],.055,'metal');
-  roundBox(x+.50,4.34,z-.17,x+.88,4.48,z+.17,.055,'lamp');
-  roundBox(x+.43,4.29,z-.20,x+.92,4.34,z+.20,.025,'metal');
+ makePalm(8.0,-82,.72,-.16);makePalm(7.35,-106,.67,.19);makePalm(8.1,-130,.62,-.13);makePalm(7.5,-154,.58,.16);makePalm(8.05,-180,.54,-.16);makePalm(7.4,-207,.49,.14);makePalm(8.1,-234,.45,-.12);
+ // Lampadaires LED à tête plate et bras courbe, inspirés de la référence produit.
+ for(let z=-12;z>-260;z-=18){
+  const x=5.82;
+  cone([x,.06,z],[x,4.42,z],.13,.045,'metal');
+  roundBox(x-.17,.06,z-.17,x+.17,.17,z+.17,.035,'metal');
+  capsule([x,4.20,z],[x,4.48,z],.060,'metal');
+  capsule([x,4.48,z],[x-.12,4.67,z],.055,'metal');
+  capsule([x-.12,4.67,z],[x-.38,4.77,z],.052,'metal');
+  capsule([x-.38,4.77,z],[x-1.12,4.77,z],.050,'metal');
+  // Corps aluminium aplati avec diffuseur inférieur.
+  roundBox(x-1.28,4.65,z-.18,x-.55,4.80,z+.18,.095,'metal');
+  roundBox(x-1.22,4.60,z-.145,x-.62,4.66,z+.145,.060,'lamp');
+  roundBox(x-.69,4.67,z-.17,x-.54,4.76,z+.17,.040,'metal');
  }
  // A single small weathered coastal marker keeps the road readable at distance.
  roundBox(-4.62,.12,-24,-4.50,1.42,-23.88,.04,'metal');
@@ -452,7 +486,7 @@ function makeScene(){
 
  // V13.14 — silhouette redessinée d’un seul trait depuis le fastback Manta initial.
  // Long capot, habitacle reculé, pavillon bas, lunette plongeante et épaules arrière larges.
- const tx=-2.05,tz=-4.5;
+ const tx=-2.05,tz=-13.5;
  const carX=v=>tx-(v-tx)*1.08,carY=v=>Math.max(.02,v*.92-.15),carZ=v=>tz-(v-tz)*1.28;
  const carPoint=p=>[carX(p[0]),carY(p[1]),carZ(p[2])];
  const carLoftedSmoothMesh=(cx,stations,mat,longSteps=2,crossSteps=2)=>{
@@ -678,8 +712,41 @@ function makeScene(){
    }
   }
  }
- addTrafficCar(2.12,-3.25,.84,'sportsRed');
- addTrafficCar(-2.10,-10.7,.70,'sportsViolet');
+ function addStandardCar(cx,cz,scale,style,paint){
+  const dims=style==='compact'?{length:3.9,width:1.78,roofRear:-.72,roofFront:.48,roof:1.39}
+   :style==='wagon'?{length:4.85,width:1.88,roofRear:-1.68,roofFront:.52,roof:1.48}
+   :{length:4.45,width:1.84,roofRear:-1.05,roofFront:.50,roof:1.43};
+  const L=dims.length*scale,W=dims.width*scale,front=cz+L*.5,rear=cz-L*.5;
+  const y=v=>v*scale;
+  roundBox(cx-W*.5,y(.29),rear,cx+W*.5,y(.91),front,.17*scale,paint);
+  roundBox(cx-W*.43,y(.68),cz+L*.12,cx+W*.43,y(1.00),front-.12*scale,.12*scale,paint);
+  roundBox(cx-W*.42,y(.65),rear+.10*scale,cx+W*.42,y(.94),cz-L*.30,.10*scale,paint);
+  const cabRear=cz+dims.roofRear*scale,cabFront=cz+dims.roofFront*scale;
+  roundBox(cx-W*.37,y(1.00),cabRear,cx+W*.37,y(dims.roof),cabFront,.16*scale,paint);
+  // Vitrages lisibles et distincts sur les trois silhouettes de tourisme.
+  roundBox(cx-W*.29,y(1.04),cz+L*.20,cx+W*.29,y(1.30),cz+L*.31,.045*scale,'carGlass');
+  roundBox(cx-W*.29,y(1.03),cz-L*.38,cx+W*.29,y(1.27),cz-L*.29,.045*scale,'carGlass');
+  for(const side of [-1,1]){
+   roundBox(Math.min(cx+side*W*.365,cx+side*W*.39),y(1.04),cabRear+.14*scale,Math.max(cx+side*W*.365,cx+side*W*.39),y(1.29),cabFront-.16*scale,.045*scale,'carGlass');
+   capsule([cx+side*W*.48,y(.53),cz-L*.12],[cx+side*W*.48,y(.53),cz+L*.18],.012*scale,'metal');
+   for(const axle of [-.33,.33]){
+    const wz=cz+axle*L,wx=cx+side*W*.47;
+    ellipsoidMesh(wx,y(.37),wz,.15*scale,.31*scale,.32*scale,'rubber',14,8);
+    ellipsoidMesh(wx+side*.11*scale,y(.37),wz,.035*scale,.17*scale,.17*scale,'wheelMetal',12,8);
+   }
+   ellipsoidMesh(cx+side*W*.29,y(.69),front-.015*scale,.12*scale,.09*scale,.05*scale,'led',12,8);
+   roundBox(Math.min(cx+side*W*.31,cx+side*W*.44),y(.63),rear+.01*scale,Math.max(cx+side*W*.31,cx+side*W*.44),y(.82),rear+.06*scale,.035*scale,'taillight');
+   roundBox(Math.min(cx+side*W*.51,cx+side*W*.63),y(.90),cz+.18*scale,Math.max(cx+side*W*.51,cx+side*W*.63),y(1.04),cz+.34*scale,.045*scale,'metal');
+  }
+  roundBox(cx-W*.29,y(.43),front,cx+W*.29,y(.55),front+.06*scale,.045*scale,'metal');
+  roundBox(cx-W*.29,y(.43),rear-.06*scale,cx+W*.29,y(.55),rear,.045*scale,'metal');
+  roundBox(cx-W*.17,y(.68),front+.005*scale,cx+W*.17,y(.81),front+.035*scale,.035*scale,'windowdark');
+ }
+ addTrafficCar(2.12,-13.0,.84,'sportsRed');
+ addTrafficCar(-2.10,-20.0,.70,'sportsViolet');
+ addStandardCar(2.15,-35,.95,'sedan','carSilver');
+ addStandardCar(-2.0,-48,.94,'compact','carBlue');
+ addStandardCar(2.1,-61,.90,'wagon','carGreen');
 }
 
 function buildBVH(){
@@ -922,7 +989,7 @@ function roundedBoxNormal(o,x,y,z){
  return axis===0?[Math.sign(p[0]),0,0]:axis===1?[0,Math.sign(p[1]),0]:[0,0,Math.sign(p[2])];
 }
 function groundMaterial(x,z){
- if(x>9.4)return 'sea';
+ if(x>12.0+.55*Math.sin(z*.08)+.30*Math.sin(z*.21))return 'sea';
  if(x>4.84)return 'sand';
  if(x< -4.85)return 'sand';
  return 'asphalt';
@@ -1391,9 +1458,9 @@ function shadePixel(cam,x,y,id,t,dx,dy,dz,options){
   base=sampleTex(tex,coords[0],coords[1],footprint,options.filter,options.mipMode,options.mipColors);
  }else{
   const paletteFlat={bark:0xff556f91,leaves:0xff519b65,grass:0xff609e73,
-    stone:0xffa8b4bb,wood:0xff678aaf,cloth:0xffaf785c,skin:0xff86aaca,
+    stone:0xffa8b4bb,mountain:0xff503d35,mountainLight:0xff604b40,mountainFar:0xff695446,wood:0xff678aaf,cloth:0xffaf785c,skin:0xff86aaca,
     brick:0xff684744,concrete:0xff777e80,glass:0xff263744,asphalt:0xff30363a,
-    taxi:0xffc99526,sportsPaint:0xffc84d20,sportsRed:0xffb51e19,sportsViolet:0xff7030a8,wheelMetal:0xff9aabb5,led:0xffe5f5ff,taillight:0xffb02020,carGlass:0xff5d7785,paint:0xffaaa391,sea:0xff287d9a,sand:0xffc6ad7b,metal:0xff394247,rust:0xff74452f,
+    taxi:0xffc99526,sportsPaint:0xffc84d20,sportsRed:0xffb51e19,sportsViolet:0xff7030a8,carSilver:0xffc1b7ac,carBlue:0xffad7042,carGreen:0xff697e50,wheelMetal:0xff9aabb5,led:0xffe5f5ff,taillight:0xffb02020,carGlass:0xff5d7785,paint:0xffaaa391,sea:0xff287d9a,sand:0xffc6ad7b,metal:0xff394247,rust:0xff74452f,
     rubber:0xff202324,lamp:0xffbd8841,mutant:0xff574d4e,claw:0xff252222,wound:0xff171227,scar:0xff625f6f,
     windowdark:0xff18242a,windowlit:0xffd6aa6c,sign:0xff687b84,neon:0xff32b8c9,puddle:0xff18272e,debris:0xff69635c};
   base=paletteFlat[mat]||0xff888888;
