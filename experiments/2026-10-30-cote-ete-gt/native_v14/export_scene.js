@@ -2,7 +2,6 @@
 // The generated binary contains the engine's actual primitives, smooth vertex
 // normals, UVs, SAH BVH, and RGB565 mip chains. No scene is regenerated here.
 const fs = require('fs');
-const vm = require('vm');
 const path = require('path');
 
 const htmlPath = process.argv[2] || path.join(__dirname, 'source_v1314.html');
@@ -17,19 +16,15 @@ const materialStart = script.indexOf('function hash2(');
 const materialEnd = script.indexOf('function screenRect(');
 if (materialStart < 0 || materialEnd < 0) throw new Error('Les fonctions texture V13.14 sont introuvables.');
 
-const ctx = {
-  console, Math, Number, Float64Array, Float32Array, Uint32Array, Uint16Array,
-  Int32Array, Map, Set, Infinity, performance: { now: () => 0 },
-  document: { getElementById: () => ({ getContext: () => ({}) }) },
-};
-vm.createContext(ctx);
-vm.runInContext(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\nmakeScene(); buildBVH(); globalThis.__scene = { objects, bvh, bvhRoot, sun, skyZenith, skyHorizon, pointLights, materials };`, ctx, { timeout: 1800000 });
-const scene = ctx.__scene;
+// Run the source script in the main V8 context. The isolated vm context is
+// dramatically slower for this 1.25M-object scene, especially while building
+// its SAH BVH. Only the DOM canvas stub is supplied; no browser is involved.
+globalThis.document = { getElementById: () => ({ getContext: () => ({}) }) };
+eval(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\nmakeScene(); buildBVH(); const __mats = [...new Set(objects.map(o => o.mat))]; for (const id of __mats) materials.set(id, makeMips(id, 512)); globalThis.__scene = { objects, bvh, bvhRoot, sun, skyZenith, skyHorizon, pointLights, materials, mats: __mats };`);
+const scene = globalThis.__scene;
 const objects = scene.objects;
 const bvh = scene.bvh;
-const mats = [...new Set(objects.map(o => o.mat))];
-// Preserve exactly the source engine's 512x512 RGB565 material pyramids.
-vm.runInContext(`for (const id of ${JSON.stringify(mats)}) materials.set(id, makeMips(id, 512));`, ctx, { timeout: 1800000 });
+const mats = scene.mats;
 
 const types = { triangle: 0, box: 1, roundbox: 2, capsule: 3, cone: 4, ellipse: 5 };
 const matIndex = new Map(mats.map((m, i) => [m, i]));
@@ -79,7 +74,7 @@ for (const { node, start, count } of packedNodes) {
 for (const id of order) putU32(id);
 
 for (const mat of mats) {
-  const tex = vm.runInContext(`materials.get(${JSON.stringify(mat)})`, ctx);
+  const tex = scene.materials.get(mat);
   putU32(tex.levels.length);
   for (const level of tex.levels) {
     putU32(level.size);
