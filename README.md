@@ -4,11 +4,13 @@ Moteur 3D expérimental (archives QBasic + démonstrations HTML/JavaScript).
 
 ## Parcours détaillé du moteur 3D — branche côte d’été (30–31 octobre 2026)
 
-### Version de travail actuelle : V13.14
+### Version de travail actuelle : V13.15
 
-**[Ouvrir le moteur V13.14](experiments/2026-10-30-cote-ete-gt/moteur3d_v1314_fhd_upscale_2026.html)** · [V13.12 — base de mesure BVH](experiments/2026-10-30-cote-ete-gt/moteur3d_v1312_cote_restomod_2026.html) · [Dossier des versions de la branche](experiments/2026-10-30-cote-ete-gt/)
+**[Ouvrir le moteur V13.15 — backend CPU](experiments/2026-10-30-cote-ete-gt/moteur3d_v1315_cpu_backend_2026.html)** · [V13.14 — référence Full HD mesurée](experiments/2026-10-30-cote-ete-gt/moteur3d_v1314_fhd_upscale_2026.html) · [Architecture CPU / FPGA](docs/CPU_FPGA_RENDER_BACKEND.md) · [Dossier des versions](experiments/2026-10-30-cote-ete-gt/)
 
 Cette branche est une démonstration **HTML/JavaScript autonome de lancer de rayons sur CPU**, affichée dans Canvas. Elle assemble une caméra à perspective rectilinéaire, des intersections de primitives et de surfaces, un BVH pour accélérer les rayons caméra, des textures, l’éclairage et des ombres par carte de profondeur. Ce n’est pas un jeu avec moteur physique : la conduite, les collisions entre voitures et l’animation physique des dépassements ne sont pas implémentées.
+
+La V13.15 introduit une interface de backend versionnée (début de frame, rendu par tuile, fin de frame) et route le calcul par le backend de référence **CPU logiciel**. Le rendu reste identique et sur un seul thread JavaScript ; le nombre de threads logiques rapporté par le navigateur est affiché à titre indicatif, sans prétendre les utiliser. Cette étape prépare la séparation entre moteur, backend CPU natif multithreadé et éventuelle carte FPGA, mais n’ajoute pas encore de parallélisme ni de gain de vitesse.
 
 La V13.14 propose une sortie **Full HD (1920 × 1080)** et plusieurs résolutions internes. Le mode réduit recommandé calcule **1680 × 945**, puis agrandit l’image en 1920 × 1080. Il lance **1 587 600 rayons au lieu de 2 073 600**, soit **23,4 % de rayons en moins**. Cette économie de rayons ne garantit pas la même baisse du temps total : elle dépend aussi du BVH, des textures, des ombres et du navigateur.
 
@@ -33,6 +35,7 @@ L’agrandissement Canvas lisse l’image, mais ne recrée pas les détails abse
 | **V13.9–V13.10** | Une représentation compacte des bornes a d’abord causé une erreur de rendu ; la version suivante a corrigé les limites de projection. La régression reste dans l’historique, pas dans la version courante. |
 | **V13.11–V13.12** | Essai de parcours BVH en tableaux typés, abandonné après une hausse du temps mesuré. Retour au parcours scalaire, ajout d’une construction BVH SAH à 12 compartiments et de compteurs de travail : tests AABB, tests géométriques, lectures de texels et accès à la carte d’ombre. Sur une capture utilisateur V13.12 à 640 × 400 : 559 612 tests géométriques, 3 045 933 nœuds BVH visités, 5 990 398 tests AABB et 474,3 ms au total. |
 | **V13.13–V13.14** | Ajout de la sortie Full HD 16:9, distincte de la résolution interne. La V13.14 propose le calcul interne à 1680 × 945, agrandi en 1920 × 1080, soit 23,4 % de rayons en moins que le natif. Plusieurs niveaux restent sélectionnables pour comparer qualité et coût. |
+| **V13.15** | Première frontière logicielle de backend : API versionnée début/rendu-tile/fin de frame, backend actif clairement identifié comme référence CPU. Le moteur reste sur un thread dans le navigateur. La détection réelle des capacités et le multithread natif sont les étapes suivantes ; aucun gain n’est revendiqué pour cette version. |
 
 ### Bancs d’essai et éléments non intégrés
 
