@@ -345,18 +345,18 @@ function flatQuadMesh(points,mat,desired){
 function makeScene(){
  objects.length=0;
  // Long coastal road, with the shoreline running along its right side.
- box(-4.85,-.03,-180,4.85,-.005,24,'asphalt');
- for(let z=19;z>-166;z-=5.8)roundBox(-.075,.008,z-.1,.075,.024,z+2.3,.035,'paint');
+ box(-4.85,-.03,-260,4.85,-.005,24,'asphalt');
+ for(let z=19;z>-246;z-=5.8)roundBox(-.075,.008,z-.1,.075,.024,z+2.3,.035,'paint');
  // Pale shoulder and sparse, low guardrail toward the water.
  box(4.86,-.012,-180,5.55,.012,24,'sand');
- for(let z=20;z>-162;z-=5.5){
+ for(let z=20;z>-242;z-=5.5){
   cone([5.34,.02,z],[5.34,.73,z],.055,.045,'metal');
  }
- capsule([5.34,.66,23],[5.34,.66,-165],.045,'metal');
- capsule([5.34,.29,23],[5.34,.29,-165],.025,'metal');
+ capsule([5.34,.66,23],[5.34,.66,-242],.045,'metal');
+ capsule([5.34,.29,23],[5.34,.29,-242],.025,'metal');
  // Sable clair sur l’estran, puis surface d’océan ondulée à relief doux.
  // Le maillage reste au-dessus du plan d’eau de fond et reçoit la lumière spéculaire.
- const waveCols=23,waveRows=83,waveX0=9.42,waveZ0=-180,waveDx=1.45,waveDz=2.5;
+ const waveCols=23,waveRows=113,waveX0=12.0,waveZ0=-260,waveDx=1.45,waveDz=2.5;
  const waveHeight=(x,z)=>.025+.12*(.5+.5*Math.sin(x*.72+Math.sin(z*.105)*1.35+z*.067));
  const waveVertex=(x,z)=>{
   const e=.05,dx=(waveHeight(x+e,z)-waveHeight(x-e,z))/(2*e),dz=(waveHeight(x,z+e)-waveHeight(x,z-e))/(2*e);
@@ -364,7 +364,7 @@ function makeScene(){
  };
  const waveGrid=[];
  for(let j=0;j<=waveRows;j++){
-  const row=[];for(let i=0;i<=waveCols;i++)row.push(waveVertex(waveX0+i*waveDx,waveZ0+j*waveDz));waveGrid.push(row);
+  const row=[];for(let i=0;i<=waveCols;i++){const z=waveZ0+j*waveDz,x=waveX0+.55*Math.sin(z*.08)+.30*Math.sin(z*.21)+i*waveDx;row.push(waveVertex(x,z));}waveGrid.push(row);
  }
  for(let j=0;j<waveRows;j++)for(let i=0;i<waveCols;i++){
   const a=waveGrid[j][i],b=waveGrid[j][i+1],c=waveGrid[j+1][i+1],d=waveGrid[j+1][i];
@@ -372,6 +372,15 @@ function makeScene(){
  }
  for(const [x,z,r] of [[-6,-3,.58],[-6.7,-18,.44],[-5.8,-35,.68],[6.2,-12,.32]])
   ellipsoidMesh(x,.18,z,r,.17,r*.72,'stone',16,10);
+ // Rochers de plage dispersés de façon irrégulière, avec tailles et groupes variés.
+ for(let i=0;i<76;i++){
+  const z=-250+hash2(i,2,37)*270,shore=12+.55*Math.sin(z*.08)+.30*Math.sin(z*.21);
+  let x=5.72+hash2(i,1,71)*Math.max(1.4,shore-5.95);
+  if(z>-13&&z<-3&&x>5.75&&x<8.55)x=8.8+hash2(i,3,77)*1.0;
+  const rx=.16+hash2(i,4,37)*.48,rz=.14+hash2(i,5,37)*.46,ry=.10+hash2(i,6,37)*.22;
+  ellipsoidMesh(x,ry*.78,z,rx,ry,rz,'stone',10+(i%3)*2,6+(i%2));
+  if(i%9===0)ellipsoidMesh(x+rx*.45,ry*.56,z+rz*.32,rx*.48,ry*.65,rz*.58,'stone',10,6);
+ }
  // Design du décor : petit belvédère en bois sombre posé au bord de l’eau,
  // avec deux bornes lumineuses discrètes, une chaude et une froide.
  roundBox(5.92,.055,-12.15,8.42,.14,-3.48,.055,'wood');
@@ -434,9 +443,9 @@ function makeScene(){
   }
  }
  makePalm(7.55,-18,1.0,.24);makePalm(8.15,-36,.88,-.20);makePalm(7.25,-57,.74,.18);
- makePalm(8.0,-82,.72,-.16);makePalm(7.35,-106,.67,.19);makePalm(8.1,-130,.62,-.13);makePalm(7.5,-154,.58,.16);
+ makePalm(8.0,-82,.72,-.16);makePalm(7.35,-106,.67,.19);makePalm(8.1,-130,.62,-.13);makePalm(7.5,-154,.58,.16);makePalm(8.05,-180,.54,-.16);makePalm(7.4,-207,.49,.14);makePalm(8.1,-234,.45,-.12);
  // Lampadaires LED à tête plate et bras courbe, inspirés de la référence produit.
- for(let z=-12;z>-180;z-=18){
+ for(let z=-12;z>-260;z-=18){
   const x=5.82;
   cone([x,.06,z],[x,4.42,z],.13,.045,'metal');
   roundBox(x-.17,.06,z-.17,x+.17,.17,z+.17,.035,'metal');
@@ -928,7 +937,7 @@ function roundedBoxNormal(o,x,y,z){
  return axis===0?[Math.sign(p[0]),0,0]:axis===1?[0,Math.sign(p[1]),0]:[0,0,Math.sign(p[2])];
 }
 function groundMaterial(x,z){
- if(x>9.4)return 'sea';
+ if(x>12.0+.55*Math.sin(z*.08)+.30*Math.sin(z*.21))return 'sea';
  if(x>4.84)return 'sand';
  if(x< -4.85)return 'sand';
  return 'asphalt';
