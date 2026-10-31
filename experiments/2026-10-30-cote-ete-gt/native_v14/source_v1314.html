@@ -345,18 +345,18 @@ function flatQuadMesh(points,mat,desired){
 function makeScene(){
  objects.length=0;
  // Long coastal road, with the shoreline running along its right side.
- box(-4.85,-.03,-90,4.85,-.005,24,'asphalt');
- for(let z=19;z>-76;z-=5.8)roundBox(-.075,.008,z-.1,.075,.024,z+2.3,.035,'paint');
+ box(-4.85,-.03,-180,4.85,-.005,24,'asphalt');
+ for(let z=19;z>-166;z-=5.8)roundBox(-.075,.008,z-.1,.075,.024,z+2.3,.035,'paint');
  // Pale shoulder and sparse, low guardrail toward the water.
- box(4.86,-.012,-90,5.55,.012,24,'sand');
- for(let z=20;z>-72;z-=5.5){
+ box(4.86,-.012,-180,5.55,.012,24,'sand');
+ for(let z=20;z>-162;z-=5.5){
   cone([5.34,.02,z],[5.34,.73,z],.055,.045,'metal');
  }
- capsule([5.34,.66,23],[5.34,.66,-75],.045,'metal');
- capsule([5.34,.29,23],[5.34,.29,-75],.025,'metal');
+ capsule([5.34,.66,23],[5.34,.66,-165],.045,'metal');
+ capsule([5.34,.29,23],[5.34,.29,-165],.025,'metal');
  // Sable clair sur l’estran, puis surface d’océan ondulée à relief doux.
  // Le maillage reste au-dessus du plan d’eau de fond et reçoit la lumière spéculaire.
- const waveCols=23,waveRows=47,waveX0=9.42,waveZ0=-90,waveDx=1.45,waveDz=2.5;
+ const waveCols=23,waveRows=83,waveX0=9.42,waveZ0=-180,waveDx=1.45,waveDz=2.5;
  const waveHeight=(x,z)=>.025+.12*(.5+.5*Math.sin(x*.72+Math.sin(z*.105)*1.35+z*.067));
  const waveVertex=(x,z)=>{
   const e=.05,dx=(waveHeight(x+e,z)-waveHeight(x-e,z))/(2*e),dz=(waveHeight(x,z+e)-waveHeight(x,z-e))/(2*e);
@@ -434,6 +434,7 @@ function makeScene(){
   }
  }
  makePalm(7.55,-18,1.0,.24);makePalm(8.15,-36,.88,-.20);makePalm(7.25,-57,.74,.18);
+ makePalm(8.0,-82,.72,-.16);makePalm(7.35,-106,.67,.19);makePalm(8.1,-130,.62,-.13);makePalm(7.5,-154,.58,.16);
  // A single small weathered coastal marker keeps the road readable at distance.
  roundBox(-4.62,.12,-24,-4.50,1.42,-23.88,.04,'metal');
  roundBox(-4.83,1.10,-24.04,-4.28,1.48,-23.72,.08,'sign');
