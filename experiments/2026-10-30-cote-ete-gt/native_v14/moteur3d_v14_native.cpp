@@ -18,6 +18,7 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <commctrl.h>
 #endif
 
 // Moteur 3D natif V14 : lancer de rayons logiciel, BVH et rendu parallèle par tuiles.
