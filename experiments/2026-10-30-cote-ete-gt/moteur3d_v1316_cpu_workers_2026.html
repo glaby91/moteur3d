@@ -1874,7 +1874,7 @@ function gaussPose(s){return [gauss()*s,gauss()*s,gauss()*s*.65]}
 function poseDistance(a,b,s){return Math.sqrt(((a[0]-b[0])/s)**2+((a[1]-b[1])/s)**2+((a[2]-b[2])/(s*.65))**2)}
 function initPredictiveBench(){
  const cpuSel=$('cpuThreads'),cpuCores=logicalCpuCount(),limitCpu=Math.max(1,Math.min(8,cpuCores));
- cpuSel.innerHTML='<option value="0">Auto — jusqu’à '+Math.max(1,Math.min(4,cores))+' workers</option>';
+ cpuSel.innerHTML='<option value="0">Auto — jusqu’à '+Math.max(1,Math.min(4,cpuCores))+' workers</option>';
  for(const n of [1,2,4,6,8])if(n<=limitCpu){const o=document.createElement('option');o.value=n;o.textContent=n+' worker'+(n===1?'':'s');cpuSel.append(o);}
  cpuSel.value='0';cpuSel.addEventListener('change',()=>{stopCpuWorkers();installCpuWorkers();invalidateImage('Threads CPU modifiés');});
  const sel=$('wbMax'),cores=navigator.hardwareConcurrency||4,limit=Math.max(1,Math.min(8,cores-1));
