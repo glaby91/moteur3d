@@ -1,215 +1,119 @@
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <commctrl.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
-#include <cstdlib>
-#include <cwchar>
-#include <condition_variable>
+#include <cstring>
+#include <fstream>
+#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
-#include <commctrl.h>
-#endif
 
-// Moteur 3D natif V14 : lancer de rayons logiciel, BVH et rendu parallèle par tuiles.
-// Aucun navigateur, WebView, WebGL ou API de rendu 3D matériel.
+// Native software port of the actual V13.14 scene and ray engine. The binary
+// sidecar is exported by executing V13.14's own makeScene(), buildBVH(), and
+// RGB565 mipmap code. No substitute car/road scene is generated at runtime.
 namespace m3d {
-constexpr float PI=3.14159265358979323846f, INF=1e30f;
-struct V { float x=0,y=0,z=0; V operator+(V b)const{return{x+b.x,y+b.y,z+b.z};} V operator-(V b)const{return{x-b.x,y-b.y,z-b.z};} V operator-()const{return{-x,-y,-z};} V operator*(float s)const{return{x*s,y*s,z*s};} V operator/(float s)const{return{x/s,y/s,z/s};} };
-inline V operator*(float s,V a){return a*s;} inline float dot(V a,V b){return a.x*b.x+a.y*b.y+a.z*b.z;} inline V cross(V a,V b){return{a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};} inline float len(V a){return std::sqrt(dot(a,a));} inline V norm(V a){float l=len(a);return l>1e-12f?a/l:V{0,1,0};} inline V had(V a,V b){return{a.x*b.x,a.y*b.y,a.z*b.z};} inline V clampv(V a,float lo=0,float hi=1){return{std::clamp(a.x,lo,hi),std::clamp(a.y,lo,hi),std::clamp(a.z,lo,hi)};}
-struct Ray{V o,d;};
-struct Mat{V color;float rough=.7f,metal=0,emission=0;};
-enum class Kind:uint8_t{Sphere,Ellipsoid,Box,Triangle,Cylinder};
-struct Obj{Kind kind;int mat;V a,b,c;float r=0;V mn,mx;};
-struct Node{V mn,mx;int left=-1,right=-1,start=0,count=0;};
-struct Hit{float t=INF;V p,n;int mat=-1;};
-struct Cam{V eye,forward,right,up;float tanHalf,aspect;};
-struct Light{V p,color;float power,radius;};
-struct Scene{std::vector<Mat> mats;std::vector<Obj> objs;std::vector<int> order;std::vector<Node> bvh;std::vector<Light> lights;V sunDir;int root=-1;};
-
-static V color(float r,float g,float b){return{r/255.f,g/255.f,b/255.f};}
-static void bounds(Obj&o){
- if(o.kind==Kind::Sphere){o.mn=o.a-V{o.r,o.r,o.r};o.mx=o.a+V{o.r,o.r,o.r};}
- else if(o.kind==Kind::Ellipsoid){o.mn=o.a-o.b;o.mx=o.a+o.b;}
- else if(o.kind==Kind::Box){o.mn={std::min(o.a.x,o.b.x),std::min(o.a.y,o.b.y),std::min(o.a.z,o.b.z)};o.mx={std::max(o.a.x,o.b.x),std::max(o.a.y,o.b.y),std::max(o.a.z,o.b.z)};}
- else if(o.kind==Kind::Triangle){o.mn={std::min({o.a.x,o.b.x,o.c.x}),std::min({o.a.y,o.b.y,o.c.y}),std::min({o.a.z,o.b.z,o.c.z})};o.mx={std::max({o.a.x,o.b.x,o.c.x}),std::max({o.a.y,o.b.y,o.c.y}),std::max({o.a.z,o.b.z,o.c.z})};}
- else {V e={o.r,o.r,o.r};o.mn={std::min(o.a.x,o.b.x)-e.x,std::min(o.a.y,o.b.y)-e.y,std::min(o.a.z,o.b.z)-e.z};o.mx={std::max(o.a.x,o.b.x)+e.x,std::max(o.a.y,o.b.y)+e.y,std::max(o.a.z,o.b.z)+e.z};}
- const float e=.001f;o.mn=o.mn-V{e,e,e};o.mx=o.mx+V{e,e,e};
-}
-static int mat(Scene&s,V c,float rough=.75f,float metal=0,float em=0){s.mats.push_back({c,rough,metal,em});return int(s.mats.size()-1);}
-static void add(Scene&s,Kind k,int m,V a,V b={},V c={},float r=0){Obj o{k,m,a,b,c,r};bounds(o);s.objs.push_back(o);}
-static void sphere(Scene&s,int m,V p,float r){add(s,Kind::Sphere,m,p,{}, {},r);}
-static void ellipsoid(Scene&s,int m,V p,V radii){add(s,Kind::Ellipsoid,m,p,radii);}
-static void box(Scene&s,int m,V a,V b){add(s,Kind::Box,m,a,b);}
-static void tri(Scene&s,int m,V a,V b,V c){add(s,Kind::Triangle,m,a,b,c);}
-static void quad(Scene&s,int m,V a,V b,V c,V d){tri(s,m,a,b,c);tri(s,m,a,c,d);}
-static void cylinder(Scene&s,int m,V a,V b,float r){add(s,Kind::Cylinder,m,a,b,{},r);}
-static void torus(Scene&s,int m,V center,float xSide,float major,float minor){
- constexpr int N=20,M=6;V v[N][M];
- for(int i=0;i<N;i++){float a=2*PI*i/N;for(int j=0;j<M;j++){float b=2*PI*j/M;float rr=major+minor*std::cos(b);v[i][j]={center.x+xSide+minor*std::sin(b),center.y+rr*std::cos(a),center.z+rr*std::sin(a)};}}
- for(int i=0;i<N;i++)for(int j=0;j<M;j++){int ni=(i+1)%N,nj=(j+1)%M;quad(s,m,v[i][j],v[ni][j],v[ni][nj],v[i][nj]);}
-}
-
-static void addCar(Scene&s,V pos,int paint,bool detail){
- const int rubber=mat(s,color(22,23,24),.94f),rim=mat(s,color(160,173,181),.28f,.78f),dark=mat(s,color(14,23,29),.32f,.18f),chrome=mat(s,color(156,162,161),.3f,.7f),glass=mat(s,color(38,62,75),.19f,.22f),lamp=mat(s,color(255,218,158),.18f,0,1.2f),tail=mat(s,color(210,28,18),.28f,0,.22f),grill=mat(s,color(18,22,24),.6f,.22f),body=paint;
- auto P=[&](float x,float y,float z){return V{pos.x+x,pos.y+y,pos.z+z};};
- // Sculpted lower shell and long tapered hood/trunk.
- box(s,body,P(-.83f,.37f,-2.18f),P(.83f,.86f,2.03f));
- ellipsoid(s,body,P(0,.66f,-1.34f),{.87f,.23f,1.02f});
- ellipsoid(s,body,P(0,.69f,1.55f),{.72f,.22f,.57f});
- // Fastback roof, front/rear screens and two framed side windows.
- const float x=.67f;
- quad(s,body,P(-x,1.87f,-.43f),P(x,1.87f,-.43f),P(x,1.87f,.68f),P(-x,1.87f,.68f));
- quad(s,glass,P(-.69f,1.77f,-.48f),P(.69f,1.77f,-.48f),P(.75f,.96f,-1.20f),P(-.75f,.96f,-1.20f));
- quad(s,glass,P(.68f,1.78f,.72f),P(-.68f,1.78f,.72f),P(-.76f,1.02f,1.78f),P(.76f,1.02f,1.78f));
- for(float side:{-1.f,1.f}){
-  quad(s,glass,P(side*.78f,.99f,-.91f),P(side*.68f,1.75f,-.35f),P(side*.68f,1.75f,.60f),P(side*.78f,1.02f,1.36f));
-  cylinder(s,body,P(side*.80f,.96f,-.97f),P(side*.69f,1.82f,-.39f),.035f);
-  cylinder(s,body,P(side*.69f,1.82f,.63f),P(side*.79f,1.03f,1.48f),.04f);
-  cylinder(s,body,P(side*.78f,1.02f,1.36f),P(side*.75f,.88f,1.96f),.05f);
+constexpr float PI=3.14159265358979323846f, INF=std::numeric_limits<float>::infinity();
+struct V { float x=0,y=0,z=0; V operator+(V b)const{return{x+b.x,y+b.y,z+b.z};} V operator-(V b)const{return{x-b.x,y-b.y,z-b.z};} V operator*(float s)const{return{x*s,y*s,z*s};} V operator/(float s)const{return{x/s,y/s,z/s};} };
+inline float dot(V a,V b){return a.x*b.x+a.y*b.y+a.z*b.z;} inline V cross(V a,V b){return{a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};} inline float length(V a){return std::sqrt(dot(a,a));} inline V norm(V a){float l=length(a);return l>1e-20f?a/l:V{0,1,0};} inline float clampf(float x,float a,float b){return std::max(a,std::min(b,x));}
+enum class Kind:uint8_t{Triangle=0,Box=1,RoundBox=2,Capsule=3,Cone=4,Ellipse=5};
+struct Obj { Kind kind{}; uint8_t mat=0; V mn,mx,a,b,c,n0,n1,n2,uv0,uv1,uv2,center,core; float r=0,r1=0,k=0,len=0,len2=0; };
+struct Node { V mn,mx; int32_t left=-1,right=-1,start=0,count=0; };
+struct Level { uint32_t size=0; std::vector<uint16_t> p; };
+struct Material { std::string name; std::vector<Level> mip; };
+struct Scene { std::vector<Obj> obj; std::vector<Node> node; std::vector<uint32_t> order; std::vector<Material> mat; int32_t root=-1; };
+struct Ray { V o,d; };
+struct Hit { float t=INF; V p,n; int mat=-1,id=-1; };
+struct Camera { V eye,f,r,u; float tanHalf=0,aspect=1,pixelAngle=0; };
+struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,depthReads=0,shadowRays=0; double ms=0,postMs=0; unsigned threads=1; };
+struct Light { V p; float radius,intensity; V color; };
+const V sun=norm({.70f,.05f,-.714f}); const V skyZenith={126,170,209},skyHorizon={244,185,134};
+const std::array<Light,2> pointLights{{{{6.35f,.72f,-4.2f},11.5f,3.2f,{255,166,92}},{{8.05f,.72f,-11.6f},11.5f,2.5f,{128,194,255}}}};
+static bool readBytes(std::ifstream&f,void*p,size_t n){return bool(f.read((char*)p,(std::streamsize)n));}
+static bool readU8(std::ifstream&f,uint8_t&v){return readBytes(f,&v,1);} static bool readU16(std::ifstream&f,uint16_t&v){uint8_t b[2];if(!readBytes(f,b,2))return false;v=uint16_t(b[0]|(b[1]<<8));return true;} static bool readU32(std::ifstream&f,uint32_t&v){uint8_t b[4];if(!readBytes(f,b,4))return false;v=uint32_t(b[0])|(uint32_t(b[1])<<8)|(uint32_t(b[2])<<16)|(uint32_t(b[3])<<24);return true;} static bool readI32(std::ifstream&f,int32_t&v){uint32_t q;if(!readU32(f,q))return false;v=(int32_t)q;return true;} static bool readF(std::ifstream&f,float&v){uint32_t q;if(!readU32(f,q))return false;std::memcpy(&v,&q,4);return true;} static bool readV(std::ifstream&f,V&v){return readF(f,v.x)&&readF(f,v.y)&&readF(f,v.z);}
+static bool loadScene(const wchar_t*path,Scene&s,std::wstring&error){
+ std::ifstream f(std::filesystem::path(path),std::ios::binary);if(!f){error=L"Fichier moteur3d_v1314_scene.bin introuvable à côté du programme.";return false;}
+ char magic[8]{};uint32_t version=0,no=0,nn=0,nord=0,nm=0,nt=0,texSize=0;int32_t root=-1;
+ if(!readBytes(f,magic,8)||std::memcmp(magic,"M3D1314",7)||!readU32(f,version)||!readU32(f,no)||!readU32(f,nn)||!readI32(f,root)||!readU32(f,nord)||!readU32(f,nm)||!readU32(f,nt)||!readU32(f,texSize)||version!=1||no>2000000||nn>2000000||nord!=no){error=L"Le fichier de scène n'est pas un export V13.14 valide.";return false;}
+ s.root=root;s.obj.resize(no);s.node.resize(nn);s.order.resize(nord);s.mat.resize(nm);
+ for(auto&m:s.mat){char name[24]{};if(!readBytes(f,name,24)){error=L"Table de matériaux tronquée.";return false;}m.name=name;}
+ for(auto&o:s.obj){uint8_t kind,mi;uint16_t reserved;if(!readU8(f,kind)||!readU8(f,mi)||!readU16(f,reserved)||kind>5||mi>=nm||!readV(f,o.mn)||!readV(f,o.mx)){error=L"Géométrie tronquée.";return false;}o.kind=(Kind)kind;o.mat=mi;
+  if(kind==0){if(!readV(f,o.a)||!readV(f,o.b)||!readV(f,o.c)||!readV(f,o.n0)||!readV(f,o.n1)||!readV(f,o.n2)||!readF(f,o.uv0.x)||!readF(f,o.uv0.y)||!readF(f,o.uv1.x)||!readF(f,o.uv1.y)||!readF(f,o.uv2.x)||!readF(f,o.uv2.y)){error=L"Triangle incomplet.";return false;}o.uv0.z=o.uv1.z=o.uv2.z=0;}
+  else if(kind==2){if(!readF(f,o.r)||!readV(f,o.center)||!readV(f,o.core))return false;}
+  else if(kind==3){if(!readV(f,o.a)||!readV(f,o.b)||!readF(f,o.r)||!readF(f,o.len2))return false;}
+  else if(kind==4){if(!readV(f,o.a)||!readV(f,o.b)||!readF(f,o.r)||!readF(f,o.r1)||!readF(f,o.k)||!readF(f,o.len)||!readF(f,o.n0.x)||!readF(f,o.n0.y)||!readF(f,o.n0.z))return false;}
+  else if(kind==5){if(!readV(f,o.a)||!readF(f,o.b.x)||!readF(f,o.b.y)||!readF(f,o.b.z))return false;}
  }
- // Roof rails and door seams.
- cylinder(s,body,P(-.67f,1.88f,-.43f),P(-.67f,1.88f,.68f),.045f);cylinder(s,body,P(.67f,1.88f,-.43f),P(.67f,1.88f,.68f),.045f);
- for(float side:{-1.f,1.f}){
-  cylinder(s,chrome,P(side*.835f,.63f,-.62f),P(side*.835f,.63f,1.12f),.012f);
-  box(s,grill,P(side*.838f,.50f,-.12f),P(side*.85f,.74f,.42f));
-  box(s,dark,P(side*.842f,.90f,.08f),P(side*.854f,.95f,.37f));
- }
- // Front grille, paired round lamps and bumpers, front faces toward -Z.
- box(s,grill,P(-.51f,.48f,-2.245f),P(.51f,.73f,-2.205f));
- for(int k=0;k<5;k++)box(s,chrome,P(-.46f,.50f+k*.045f,-2.26f),P(.46f,.51f+k*.045f,-2.245f));
- box(s,chrome,P(-.82f,.34f,-2.27f),P(.82f,.40f,-2.17f));
- for(float side:{-1.f,1.f})for(float dx:{.55f,.72f})sphere(s,lamp,P(side*dx,.66f,-2.21f),.105f);
- // Rear lamp strip and bumpers.
- box(s,chrome,P(-.78f,.37f,2.08f),P(.78f,.44f,2.16f));
- for(float side:{-1.f,1.f})for(int i=0;i<3;i++)box(s,tail,P(side*.68f,.57f+i*.055f,2.055f),P(side*.78f,.60f+i*.055f,2.09f));
- // Four tires sit just outside the fenders; detailed multi-spoke alloy wheels.
- for(float side:{-1.f,1.f})for(float z:{-1.36f,1.31f}){
-  V c=P(side*.91f,.43f,z);ellipsoid(s,rubber,c,{.17f,.355f,.355f});ellipsoid(s,rim,P(side*1.105f,.43f,z),{.045f,.225f,.225f});
-  torus(s,rim,c,side*.17f,.276f,.028f);ellipsoid(s,body,P(side*1.19f,.43f,z),{.035f,.074f,.074f});
-  if(detail)torus(s,body,c,-side*.08f,.385f,.042f); // rolled fender lip around each wheel
-  if(detail)for(int k=0;k<10;k++){float a=2*PI*k/10;V end=P(side*1.18f,.43f+.205f*std::cos(a),z+.205f*std::sin(a));cylinder(s,rim,P(side*1.18f,.43f,z),end,.018f);}
- }
- if(detail){
-  // Two restrained hood vents and side exhaust.
-  for(float side:{-1.f,1.f}){box(s,grill,P(side*.43f,.94f,-1.4f),P(side*.66f,.96f,-.99f));for(int k=0;k<3;k++)box(s,chrome,P(side*.45f,.965f,-1.35f+k*.1f),P(side*.63f,.976f,-1.32f+k*.1f));cylinder(s,chrome,P(side*.87f,.30f,-.7f),P(side*.87f,.30f,.85f),.035f);}
- }
+ for(auto&n:s.node){if(!readV(f,n.mn)||!readV(f,n.mx)||!readI32(f,n.left)||!readI32(f,n.right)||!readI32(f,n.start)||!readI32(f,n.count)){error=L"BVH incomplet.";return false;}}
+ for(auto&i:s.order)if(!readU32(f,i)||i>=no){error=L"Ordre BVH incorrect.";return false;}
+ for(auto&m:s.mat){uint32_t levels;if(!readU32(f,levels)||levels>10){error=L"Pyramide de texture incorrecte.";return false;}m.mip.resize(levels);for(auto&l:m.mip){uint32_t size;if(!readU32(f,size)||!size||size>4096){error=L"Niveau mip incorrect.";return false;}l.size=size;l.p.resize(size_t(size)*size);for(auto&v:l.p)if(!readU16(f,v)){error=L"Texture RGB565 tronquée.";return false;}}}
+ return true;
 }
-
-static void palm(Scene&s,V base,float h){
- int trunk=mat(s,color(75,53,37),.9f),leaf=mat(s,color(37,75,47),.9f),leaf2=mat(s,color(64,100,50),.85f);
- V top=base+V{.09f,h,0};cylinder(s,trunk,base,top,.095f);
- for(int k=0;k<8;k++){float a=2*PI*k/8;V end=top+V{std::cos(a)*1.5f,-.36f,std::sin(a)*1.5f};V mid=top+V{std::cos(a)*.68f,-.10f,std::sin(a)*.68f};cylinder(s,leaf2,top,mid,.025f);for(int j=0;j<5;j++){float t=.2f+j*.15f;V p=top+(end-top)*t;V q=p+V{-std::sin(a)*.22f,-.12f,std::cos(a)*.22f};tri(s,j%2?leaf:leaf2,p,q,p+V{std::cos(a)*.34f,-.08f,std::sin(a)*.34f});tri(s,j%2?leaf:leaf2,p,q,p+V{-std::cos(a)*.34f,-.08f,-std::sin(a)*.34f});}}
+static bool boundsHit(const Ray&r,const Node&n,float limit,float&near){float lo=0,hi=limit;for(int k=0;k<3;k++){float o=k==0?r.o.x:k==1?r.o.y:r.o.z,d=k==0?r.d.x:k==1?r.d.y:r.d.z,a=k==0?n.mn.x:k==1?n.mn.y:n.mn.z,b=k==0?n.mx.x:k==1?n.mx.y:n.mx.z;if(std::abs(d)<1e-12f){if(o<a||o>b)return false;}else{float x=(a-o)/d,y=(b-o)/d;if(x>y)std::swap(x,y);lo=std::max(lo,x);hi=std::min(hi,y);if(hi<lo)return false;}}near=lo;return hi>=0;}
+static bool objectBoundsHit(const Ray&r,const Obj&o,float limit){Node n{o.mn,o.mx};float near;return boundsHit(r,n,limit,near);}
+static bool intersect(const Ray&r,const Obj&o,float limit,float&t){t=INF;
+ if(o.kind==Kind::Triangle){V e1=o.b-o.a,e2=o.c-o.a,p=cross(r.d,e2);float det=dot(e1,p);if(std::abs(det)<1e-10f)return false;float inv=1/det;V q=r.o-o.a;float u=dot(q,p)*inv;if(u<0||u>1)return false;V z=cross(q,e1);float v=dot(r.d,z)*inv;if(v<0||u+v>1)return false;t=dot(e2,z)*inv;}
+ else if(o.kind==Kind::Ellipse){V p={(r.o.x-o.a.x)/o.b.x,(r.o.y-o.a.y)/o.b.y,(r.o.z-o.a.z)/o.b.z},d={r.d.x/o.b.x,r.d.y/o.b.y,r.d.z/o.b.z};float A=dot(d,d),B=dot(p,d),C=dot(p,p)-1,D=B*B-A*C;if(D<0||A<1e-15f)return false;float q=(-B-std::sqrt(D))/A;t=q>.0001f?q:(-B+std::sqrt(D))/A;}
+ else if(o.kind==Kind::Box||o.kind==Kind::RoundBox){float lo=-INF,hi=limit;for(int k=0;k<3;k++){float org=k==0?r.o.x:k==1?r.o.y:r.o.z,d=k==0?r.d.x:k==1?r.d.y:r.d.z,mn=k==0?o.mn.x:k==1?o.mn.y:o.mn.z,mx=k==0?o.mx.x:k==1?o.mx.y:o.mx.z;if(std::abs(d)<1e-12f){if(org<mn||org>mx)return false;}else{float a=(mn-org)/d,b=(mx-org)/d;if(a>b)std::swap(a,b);lo=std::max(lo,a);hi=std::min(hi,b);if(lo>hi)return false;}}
+  if(o.kind==Kind::Box)t=lo>.0001f?lo:hi;else{t=std::max(lo,.0001f);bool hit=false;for(int i=0;i<64&&t<hi;i++){V p=r.o+r.d*t-o.center;float x=std::abs(p.x)-o.core.x,y=std::abs(p.y)-o.core.y,z=std::abs(p.z)-o.core.z;float d=std::sqrt(std::max(x,0.f)*std::max(x,0.f)+std::max(y,0.f)*std::max(y,0.f)+std::max(z,0.f)*std::max(z,0.f))+std::min(std::max(x,std::max(y,z)),0.f)-o.r;if(d<.001f){hit=true;break;}t+=std::max(d*.82f,.0005f);}if(!hit||t>=hi)return false;}}
+ else if(o.kind==Kind::Capsule){V ba=o.b-o.a,oa=r.o-o.a;float baba=o.len2,rdba=dot(r.d,ba),oaba=dot(oa,ba),rdoa=dot(r.d,oa),oaoa=dot(oa,oa),A=baba*dot(r.d,r.d)-rdba*rdba,B=baba*rdoa-oaba*rdba,C=baba*oaoa-oaba*oaba-o.r*o.r*baba,h=B*B-A*C;if(A>1e-12f&&h>=0){float tc=(-B-std::sqrt(h))/A,y=oaba+tc*rdba;if(tc>.0001f&&y>0&&y<baba)t=tc;}for(V c:{o.a,o.b}){V q=r.o-c;float bb=dot(q,r.d),cc=dot(q,q)-o.r*o.r,disc=bb*bb-dot(r.d,r.d)*cc;if(disc>=0){float sq=std::sqrt(disc),t0=(-bb-sq)/dot(r.d,r.d),t1=(-bb+sq)/dot(r.d,r.d);if(t0>.0001f&&t0<t)t=t0;else if(t1>.0001f&&t1<t)t=t1;}}}
+ else {V p=r.o-o.a;float z=dot(p,o.n0),zd=dot(r.d,o.n0);V q=p-o.n0*z,v=r.d-o.n0*zd;float r0=o.r+o.k*z,rd=o.k*zd,A=dot(v,v)-rd*rd,B=dot(q,v)-r0*rd,C=dot(q,q)-r0*r0;if(std::abs(A)>1e-12f){float D=B*B-A*C;if(D>=0){float s=std::sqrt(D);for(float t0:{(-B-s)/A,(-B+s)/A}){float h=z+t0*zd;if(t0>.0001f&&t0<t&&h>=0&&h<=o.len)t=t0;}}}if(std::abs(zd)>1e-12f)for(auto cap:{std::pair<float,float>{0,o.r},std::pair<float,float>{o.len,o.r1}}){float t0=(cap.first-z)/zd;if(t0>.0001f&&t0<t){V vq=q+v*t0;if(dot(vq,vq)<=cap.second*cap.second)t=t0;}}}
+ return t>.0001f&&t<limit;
 }
-static void addScene(Scene&s){
- int road=mat(s,color(37,43,44),.97f),sidewalk=mat(s,color(135,127,105),.9f),rail=mat(s,color(44,49,48),.56f,.4f),sand=mat(s,color(181,156,111),.9f),sea=mat(s,color(29,103,130),.24f,.16f),white=mat(s,color(216,213,191),.8f),lampMat=mat(s,color(255,188,112),.22f,0,1.7f);
- int orange=mat(s,color(218,83,34),.30f,.38f),red=mat(s,color(205,35,30),.32f,.35f),purple=mat(s,color(126,42,164),.34f,.30f);
- // Broad coastal asphalt, tiled sidewalk and ocean plane.
- box(s,road,-V{7,.12f,95},V{7,0,40});
- box(s,sidewalk,{-9,-.01f,-80},{-7,.08f,38});
- box(s,sand,{-50,-.18f,-100},{-9,-.02f,45});
- // Ocean sheet is represented by a large box surface with low rolling wave ridges.
- box(s,sea,{-60,-.35f,-130},{-9.05f,-.10f,70});
- int wave=mat(s,color(48,133,154),.3f,.13f);
- for(int k=0;k<18;k++){float z=-42+k*5.1f;box(s,wave,{-53,-.055f,z},{-9.1f,-.025f,z+.045f});}
- // Broken lane markings.
- for(int k=-12;k<12;k++)box(s,white,{-.045f,.006f,k*5.f-2},{.045f,.012f,k*5.f});
- // Guardrail, posts and coastal promenade lamps.
- for(int k=-24;k<=8;k++){
-  float z=k*3.4f;cylinder(s,rail,{-7.15f,.13f,z},{-7.15f,.94f,z},.055f);
-  cylinder(s,rail,{-7.18f,.72f,z-1.7f},{-7.18f,.72f,z+1.7f},.055f);
-  if(k%6==0){int pole=mat(s,color(40,42,39),.6f,.25f);cylinder(s,pole,{-8.2f,.1f,z},{-8.2f,3.2f,z},.065f);cylinder(s,pole,{-8.2f,3.05f,z},{-7.75f,3.05f,z},.04f);sphere(s,lampMat,{-7.72f,3.02f,z},.16f);s.lights.push_back({{-7.72f,2.95f,z},color(255,171,96),18,4.3f});}
- }
- palm(s,{-10,.05f,-24},5.0f);palm(s,{-11,.05f,-8},7.0f);palm(s,{-10,.05f,11},5.7f);
- // Three same-direction restomod coupes; offset lanes suggest an overtake.
- addCar(s,{0,.03f,-10.0f},orange,true);addCar(s,{2.25f,.03f,-2.0f},purple,false);addCar(s,{-2.25f,.03f,-6.5f},red,false);
- s.sunDir=norm(V{-.82f,.20f,.53f});
+static V normalAt(const Obj&o,V p){if(o.kind==Kind::Triangle){V e1=o.b-o.a,e2=o.c-o.a,q=p-o.a;float d00=dot(e1,e1),d01=dot(e1,e2),d11=dot(e2,e2),d20=dot(q,e1),d21=dot(q,e2),den=d00*d11-d01*d01,inv=std::abs(den)>1e-20f?1/den:0,b1=(d11*d20-d01*d21)*inv,b2=(d00*d21-d01*d20)*inv,b0=1-b1-b2;return norm(o.n0*b0+o.n1*b1+o.n2*b2);}if(o.kind==Kind::Ellipse)return norm({(p.x-o.a.x)/(o.b.x*o.b.x),(p.y-o.a.y)/(o.b.y*o.b.y),(p.z-o.a.z)/(o.b.z*o.b.z)});if(o.kind==Kind::Box){float d[6]={std::abs(p.x-o.mn.x),std::abs(p.x-o.mx.x),std::abs(p.y-o.mn.y),std::abs(p.y-o.mx.y),std::abs(p.z-o.mn.z),std::abs(p.z-o.mx.z)};int k=int(std::min_element(d,d+6)-d);return k==0?V{-1,0,0}:k==1?V{1,0,0}:k==2?V{0,-1,0}:k==3?V{0,1,0}:k==4?V{0,0,-1}:V{0,0,1};}if(o.kind==Kind::RoundBox){V q=p-o.center;float x=std::abs(q.x)-o.core.x,y=std::abs(q.y)-o.core.y,z=std::abs(q.z)-o.core.z;V v{std::max(x,0.f)*(q.x>=0?1.f:-1.f),std::max(y,0.f)*(q.y>=0?1.f:-1.f),std::max(z,0.f)*(q.z>=0?1.f:-1.f)};if(length(v)>1e-8f)return norm(v);if(x>=y&&x>=z)return{q.x>=0?1.f:-1.f,0,0};if(y>=z)return{0,q.y>=0?1.f:-1.f,0};return{0,0,q.z>=0?1.f:-1.f};}if(o.kind==Kind::Capsule){V ba=o.b-o.a,q=p-o.a;float h=clampf(dot(q,ba)/o.len2,0,1);return norm(q-ba*h);}V q=p-o.a;float ax=dot(q,o.n0);if(ax<.0002f)return o.n0*-1;if(ax>o.len-.0002f)return o.n0;return norm(q-o.n0*(ax+o.k*ax));}
+static void closest(const Scene&s,const Ray&r,Hit&best,Stats*st,bool ground=true){best.t=INF;best.id=-1;best.mat=-1;int top=0;std::array<int32_t,128> stack{};std::array<float,128> near{};if(s.root>=0){if(st)st->aabb++;float q;if(boundsHit(r,s.node[s.root],INF,q)){stack[top]=s.root;near[top++]=q;}}
+ while(top){int slot=--top;int idx=stack[slot];if(near[slot]>best.t)continue;const Node&n=s.node[idx];if(st)st->nodes++;if(n.count){for(int i=n.start;i<n.start+n.count;i++){uint32_t oi=s.order[i];const Obj&o=s.obj[oi];if(st)st->tests++;float t;if(intersect(r,o,best.t,t)){best.t=t;best.id=(int)oi;best.mat=o.mat;}}}else{if(st)st->aabb+=2;float a=INF,b=INF;bool ha=boundsHit(r,s.node[n.left],best.t,a),hb=boundsHit(r,s.node[n.right],best.t,b);if(ha&&hb){if(a<b){if(top<126){stack[top]=n.right;near[top++]=b;stack[top]=n.left;near[top++]=a;}}else if(top<126){stack[top]=n.left;near[top++]=a;stack[top]=n.right;near[top++]=b;}}else if(ha&&top<128){stack[top]=n.left;near[top++]=a;}else if(hb&&top<128){stack[top]=n.right;near[top++]=b;}}}
+ if(ground&&r.d.y<-.000001f){float t=-r.o.y/r.d.y;if(t>.0001f&&t<best.t){V p=r.o+r.d*t;best={t,p,{0,1,0},-1,-2};}}
 }
-
-static bool boxHit(const Ray&r,V mn,V mx,float maxT,float&nearT){float lo=.0005f,hi=maxT;for(int k=0;k<3;k++){float o=k==0?r.o.x:k==1?r.o.y:r.o.z,d=k==0?r.d.x:k==1?r.d.y:r.d.z,a=k==0?mn.x:k==1?mn.y:mn.z,b=k==0?mx.x:k==1?mx.y:mx.z;if(std::abs(d)<1e-9f){if(o<a||o>b)return false;}else{float x=(a-o)/d,y=(b-o)/d;if(x>y)std::swap(x,y);lo=std::max(lo,x);hi=std::min(hi,y);if(hi<lo)return false;}}nearT=lo;return hi>.0005f;}
-static bool intersect(const Ray&r,const Obj&o,float maxT,Hit&h){
- float t=INF;V n;
- if(o.kind==Kind::Sphere){V q=r.o-o.a;float A=dot(r.d,r.d),B=dot(q,r.d),C=dot(q,q)-o.r*o.r,D=B*B-A*C;if(D<0)return false;float root=std::sqrt(D);t=(-B-root)/A;if(t<.0005f)t=(-B+root)/A;if(t<.0005f)return false;n=norm((r.o+r.d*t-o.a)/o.r);}
- else if(o.kind==Kind::Ellipsoid){V q=r.o-o.a,iv={1/o.b.x,1/o.b.y,1/o.b.z},qo=had(q,iv),rd=had(r.d,iv);float A=dot(rd,rd),B=dot(qo,rd),C=dot(qo,qo)-1,D=B*B-A*C;if(D<0)return false;float root=std::sqrt(D);t=(-B-root)/A;if(t<.0005f)t=(-B+root)/A;if(t<.0005f)return false;V p=r.o+r.d*t;n=norm({(p.x-o.a.x)/(o.b.x*o.b.x),(p.y-o.a.y)/(o.b.y*o.b.y),(p.z-o.a.z)/(o.b.z*o.b.z)});}
- else if(o.kind==Kind::Box){if(!boxHit(r,o.mn,o.mx,maxT,t))return false;V p=r.o+r.d*t;float eps=.002f;if(std::abs(p.x-o.mn.x)<eps)n={-1,0,0};else if(std::abs(p.x-o.mx.x)<eps)n={1,0,0};else if(std::abs(p.y-o.mn.y)<eps)n={0,-1,0};else if(std::abs(p.y-o.mx.y)<eps)n={0,1,0};else if(std::abs(p.z-o.mn.z)<eps)n={0,0,-1};else n={0,0,1};}
- else if(o.kind==Kind::Triangle){V e1=o.b-o.a,e2=o.c-o.a,p=cross(r.d,e2);float det=dot(e1,p);if(std::abs(det)<1e-8f)return false;float inv=1/det;V q=r.o-o.a;float u=dot(q,p)*inv;if(u<0||u>1)return false;V vq=cross(q,e1);float v=dot(r.d,vq)*inv;if(v<0||u+v>1)return false;t=dot(e2,vq)*inv;if(t<.0005f||t>=maxT)return false;n=norm(cross(e1,e2));if(dot(n,r.d)>0)n=n*-1;}
- else {V ba=o.b-o.a,oa=r.o-o.a;float baba=dot(ba,ba),bard=dot(ba,r.d),baoa=dot(ba,oa),rdoa=dot(r.d,oa),oaoa=dot(oa,oa),A=baba*dot(r.d,r.d)-bard*bard,B=baba*rdoa-baoa*bard,C=baba*oaoa-baoa*baoa-o.r*o.r*baba,D=B*B-A*C;if(D<0||std::abs(A)<1e-9f)return false;t=(-B-std::sqrt(D))/A;float y=baoa+t*bard;if(t<.0005f||y<0||y>baba)return false;V p=r.o+r.d*t,axis=o.a+ba*(y/baba);n=norm(p-axis);}
- if(t>=maxT)return false;h={t,r.o+r.d*t,n,o.mat};return true;
+static int groundMaterial(const Scene&s,V p){for(size_t i=0;i<s.mat.size();i++){auto&n=s.mat[i].name;if((p.x>9.4f&&n=="sea")||((p.x>4.84f||p.x< -4.85f)&&n=="sand")||(p.x<=4.84f&&p.x>=-4.85f&&n=="asphalt"))return (int)i;}return 0;}
+struct ShadowMap { int size=160; float span=30,dist=42; V base={0,1.5f,0},right,up;std::vector<float>d,min,max; };
+static ShadowMap buildShadow(const Scene&s,Stats&st){ShadowMap m;m.right=norm(cross({0,1,0},sun));m.up=cross(m.right,sun);m.d.resize(m.size*m.size);for(int y=0;y<m.size;y++){float vy=((y+.5f)/m.size-.5f)*2*m.span;for(int x=0;x<m.size;x++){float vx=((x+.5f)/m.size-.5f)*2*m.span;V o=m.base+sun*m.dist+m.right*vx+m.up*vy;Ray r{o,sun*-1};Hit h;closest(s,r,h,&st,false);m.d[y*m.size+x]=h.t;}}m.min.assign(m.d.size(),INF);m.max.assign(m.d.size(),-INF);for(int y=0;y<m.size;y++)for(int x=0;x<m.size;x++){float lo=INF,hi=-INF;for(int j=-1;j<=1;j++)for(int i=-1;i<=1;i++){float v=m.d[std::clamp(y+j,0,m.size-1)*m.size+std::clamp(x+i,0,m.size-1)];lo=std::min(lo,v);hi=std::max(hi,v);}m.min[y*m.size+x]=lo;m.max[y*m.size+x]=hi;}return m;}
+static float visibility(const ShadowMap&m,V p,Stats*st){V q=p-m.base;float fac=m.size/(2*m.span),center=m.size*.5f-.5f;int x=(int)std::lround(dot(q,m.right)*fac+center),y=(int)std::lround(dot(q,m.up)*fac+center);if(x<1||y<1||x>=m.size-1||y>=m.size-1)return 1;int ix=y*m.size+x;float td=m.dist-dot(q,sun),bias=.095f;if(st)st->depthReads++;if(td<=m.min[ix]+bias)return 1;if(st)st->depthReads++;if(td>m.max[ix]+bias)return .28f;float v=0;for(int j=-1;j<=1;j++)for(int i=-1;i<=1;i++){if(st)st->depthReads++;v+=td<=m.d[(y+j)*m.size+x+i]+bias?1.f:0.f;}return .28f+.72f*v/9;}
+static V uvAt(const Obj&o,V p,V n){if(o.kind==Kind::Triangle){V e1=o.b-o.a,e2=o.c-o.a,q=p-o.a;float d00=dot(e1,e1),d01=dot(e1,e2),d11=dot(e2,e2),d20=dot(q,e1),d21=dot(q,e2),inv=1/(d00*d11-d01*d01),b1=(d11*d20-d01*d21)*inv,b2=(d00*d21-d01*d20)*inv,b0=1-b1-b2;return{o.uv0.x*b0+o.uv1.x*b1+o.uv2.x*b2,o.uv0.y*b0+o.uv1.y*b1+o.uv2.y*b2,.8f};}if(o.kind==Kind::Ellipse){return{std::atan2((p.z-o.a.z)/o.b.z,(p.x-o.a.x)/o.b.x)/(2*PI)*2.5f,(.5f-std::asin(clampf((p.y-o.a.y)/o.b.y,-1,1))/PI)*2.5f,.9f};}if(o.kind==Kind::Capsule){V ba=o.b-o.a,q=p-o.a;float h=clampf(dot(q,ba)/o.len2,0,1);V radial=q-ba*h;return{std::atan2(radial.z,radial.x)/(2*PI),(h*std::sqrt(o.len2)+std::asin(clampf(radial.y/o.r,-1,1))*o.r)*.55f,.72f};}if(o.kind==Kind::Cone){V q=p-o.a;return{std::atan2(q.z,q.x)/(2*PI)*3,dot(q,o.n0)*.84f,.8f};}float scale=.65f,ax=std::abs(n.x),ay=std::abs(n.y),az=std::abs(n.z);if(ay>=ax&&ay>=az)return{p.x*scale,p.z*scale,scale};if(ax>=az)return{p.z*scale,p.y*scale,scale};return{p.x*scale,p.y*scale,scale};}
+static V texSample(const Material&m,float u,float v,float footprint,Stats&st){if(m.mip.empty())return{128,128,128};float lod=clampf(std::log2(std::max(1.f,footprint)),0.f,(float)m.mip.size()-1);int lo=(int)std::lround(lod);auto sample=[&](const Level&l){int n=(int)l.size,mask=n-1;float fxp=u*n-.5f,fyp=v*n-.5f;int ix=(int)std::floor(fxp),iy=(int)std::floor(fyp);float ax=fxp-ix,ay=fyp-iy;int x0=ix&mask,y0=iy&mask,x1=(x0+1)&mask,y1=(y0+1)&mask;uint16_t a=l.p[y0*n+x0],b=l.p[y0*n+x1],c=l.p[y1*n+x0],d=l.p[y1*n+x1];float w0=(1-ax)*(1-ay),w1=ax*(1-ay),w2=(1-ax)*ay,w3=ax*ay;st.texels+=4;float r=(((a>>11)*w0+(b>>11)*w1+(c>>11)*w2+(d>>11)*w3)*255/31),g=((((a>>5&63)*w0+(b>>5&63)*w1+(c>>5&63)*w2+(d>>5&63)*w3)*255/63)),bl=(((a&31)*w0+(b&31)*w1+(c&31)*w2+(d&31)*w3)*255/31);return V{r,g,bl};};return sample(m.mip[lo]);}
+static V sky(V d,bool fog){float k=clampf(d.y*1.14f+.38f,0,1);V c=skyHorizon*(1-k)+skyZenith*k;float near=std::max(0.f,dot(d,sun)),g=std::pow(near,92)*12+std::pow(near,28)*2.2f;c=c+V{g,g*.82f,g*.62f};if(near>.99975f)c={255,244,215};else if(near>.9985f)c=c+V{36,30,20};if(fog&&d.y>-.08f){float w=std::sin(d.x*11.7f+d.z*4.2f)*std::sin(d.z*8.4f-d.y*15.1f)+.54f*std::sin(d.x*23.2f+d.y*10.4f)*std::cos(d.z*13.8f),cloud=clampf((w-.45f)*2.4f,0,1)*clampf((d.y+.16f)*3,0,1);c=c*(1-cloud)+V{174,182,186}*cloud;}return c;}
+static V shade(const Scene&s,const ShadowMap&sm,const Camera&cam,const Ray&r,const Hit&h,Stats&st,bool fog=true){if(h.id==-1)return sky(r.d,fog);V p=h.p,n=h.n;int mi=h.id==-2?groundMaterial(s,p):h.mat;const std::string&mat=s.mat[mi].name;V uv;float footprint=1;const Obj*o=h.id>=0?&s.obj[h.id]:nullptr;if(h.id==-2){uv={p.x*.34f,p.z*.34f,.34f};}else{uv=uvAt(*o,p,n);float slope=std::max(.16f,std::abs(dot(n,r.d)));footprint=512*h.t*cam.pixelAngle*uv.z/slope;}V base=texSample(s.mat[mi],uv.x,uv.y,footprint,st);float ndotl=std::max(0.f,dot(n,sun)),vis=visibility(sm,p+n*.025f,&st),shade=mat.rfind("sports",0)==0?.68f+.32f*ndotl*vis:.50f+.50f*ndotl*vis;V c=base*shade;float glow=mat=="led"?.32f:mat=="lamp"?.52f:0;if(glow)c=c+base*glow;float spec=mat=="sea"?.46f:mat=="glass"?.27f:mat=="metal"?.24f:mat.rfind("sports",0)==0?.68f:mat=="wheelMetal"?.34f:mat=="carGlass"?.52f:mat=="asphalt"?.16f:0;if(spec){V refl=n*(2*ndotl)-sun;float power=mat=="sea"?25:mat=="asphalt"?13:mat.rfind("sports",0)==0?30:mat=="wheelMetal"?42:mat=="carGlass"?38:34;float shine=std::pow(std::max(0.f,-dot(r.d,refl)),power)*spec*vis;c=c+V{178,202,214}*shine;}
+ for(const auto&l:pointLights){V q=l.p-p;float d2=dot(q,q),r2=l.radius*l.radius;if(d2>=r2||d2<1e-5f)continue;float d=std::sqrt(d2);V ld=q/d;float edge=1-d/l.radius,energy=edge*edge*l.intensity,lam=std::max(0.f,dot(n,ld)),diff=energy*lam*.24f;c=c+V{l.color.x,l.color.y,l.color.z}*diff;float wet=mat=="asphalt"?.25f:mat.rfind("sports",0)==0?.18f:0;if(wet){V half=norm(ld-r.d);float sp=std::pow(std::max(0.f,dot(n,half)),mat=="asphalt"?18:38)*energy*wet;c=c+V{l.color.x,l.color.y,l.color.z}*sp;}}
+ if(fog){float f=1-std::exp(-h.t*.038f);c=c*(1-f)+skyHorizon*f;}return{clampf(c.x,0,255),clampf(c.y,0,255),clampf(c.z,0,255)};}
+static Camera camera(float angleDeg,float elevationDeg,float distance,int w,int h){float a=angleDeg*PI/180,e=elevationDeg*PI/180;V look{0,1,-4.35f};Camera c;c.eye={look.x+distance*std::sin(a)*std::cos(e),look.y+distance*std::sin(e),look.z+distance*std::cos(a)*std::cos(e)};c.f=norm(look-c.eye);c.r=norm(cross(c.f,{0,1,0}));c.u=cross(c.r,c.f);c.tanHalf=std::tan(25*PI/180);c.aspect=float(w)/h;c.pixelAngle=2*c.tanHalf/w;return c;}
+static uint32_t pack(V c){uint32_t r=(uint32_t)clampf(c.x,0,255),g=(uint32_t)clampf(c.y,0,255),b=(uint32_t)clampf(c.z,0,255);return 0xff000000u|(b<<16)|(g<<8)|r;}
+static Stats render(const Scene&s,const ShadowMap&sm,const Camera&cam,int w,int h,std::vector<uint32_t>&pixels,unsigned threads,const std::atomic<uint64_t>&generation,uint64_t token){auto start=std::chrono::steady_clock::now();std::atomic<int>next{0};std::atomic<uint64_t>tests{0},aabb{0},nodes{0},hits{0},skies{0},texels{0},depth{0};int nx=(w+15)/16,ny=(h+15)/16,total=nx*ny;auto worker=[&]{Stats local;for(;;){if(generation.load()!=token)return;int tile=next.fetch_add(1);if(tile>=total)break;int bx=(tile%nx)*16,by=(tile/nx)*16;for(int y=by;y<std::min(h,by+16);y++)for(int x=bx;x<std::min(w,bx+16);x++){float sx=(2*(x+.5f)/w-1)*cam.tanHalf,sy=(1-2*(y+.5f)/h)*cam.tanHalf/cam.aspect;Ray r{cam.eye,norm(cam.f+cam.r*sx+cam.u*sy)};Hit hit;closest(s,r,hit,&local);local.rays++;if(hit.id==-1)local.sky++;else local.hits++;V c=shade(s,sm,cam,r,hit,local);pixels[size_t(y)*w+x]=pack(c);}}tests.fetch_add(local.tests);aabb.fetch_add(local.aabb);nodes.fetch_add(local.nodes);hits.fetch_add(local.hits);skies.fetch_add(local.sky);texels.fetch_add(local.texels);depth.fetch_add(local.depthReads);};threads=std::max(1u,std::min(threads,(unsigned)total));std::vector<std::thread>pool;for(unsigned i=0;i<threads;i++)pool.emplace_back(worker);for(auto&t:pool)t.join();Stats st;st.rays=size_t(w)*h;st.tests=tests;st.aabb=aabb;st.nodes=nodes;st.hits=hits;st.sky=skies;st.texels=texels;st.depthReads=depth;st.threads=threads;st.ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();return st;}
+static std::vector<uint32_t> upscaleBilinear(const std::vector<uint32_t>&src,int sw,int sh,int dw,int dh){std::vector<uint32_t>out(size_t(dw)*dh);for(int y=0;y<dh;y++){float fy=(y+.5f)*sh/dh-.5f;int y0=std::clamp((int)std::floor(fy),0,sh-1),y1=std::min(y0+1,sh-1);float ay=clampf(fy-std::floor(fy),0,1);for(int x=0;x<dw;x++){float fx=(x+.5f)*sw/dw-.5f;int x0=std::clamp((int)std::floor(fx),0,sw-1),x1=std::min(x0+1,sw-1);float ax=clampf(fx-std::floor(fx),0,1);uint32_t a=src[size_t(y0)*sw+x0],b=src[size_t(y0)*sw+x1],c=src[size_t(y1)*sw+x0],d=src[size_t(y1)*sw+x1],v=0xff000000;for(int shift:{0,8,16}){float p=((a>>shift)&255)*(1-ax)*(1-ay)+((b>>shift)&255)*ax*(1-ay)+((c>>shift)&255)*(1-ax)*ay+((d>>shift)&255)*ax*ay;v|=(uint32_t)std::lround(p)<<shift;}out[size_t(y)*dw+x]=v;}}return out;}
 }
-static int buildNode(Scene&s,int start,int count){
- Node n;n.mn={INF,INF,INF};n.mx={-INF,-INF,-INF};V cmn=n.mn,cmx=n.mx;
- for(int i=start;i<start+count;i++){const Obj&o=s.objs[s.order[i]];n.mn={std::min(n.mn.x,o.mn.x),std::min(n.mn.y,o.mn.y),std::min(n.mn.z,o.mn.z)};n.mx={std::max(n.mx.x,o.mx.x),std::max(n.mx.y,o.mx.y),std::max(n.mx.z,o.mx.z)};V c=(o.mn+o.mx)*.5f;cmn={std::min(cmn.x,c.x),std::min(cmn.y,c.y),std::min(cmn.z,c.z)};cmx={std::max(cmx.x,c.x),std::max(cmx.y,c.y),std::max(cmx.z,c.z)};}
- int id=int(s.bvh.size());s.bvh.push_back(n);if(count<=6){s.bvh[id].start=start;s.bvh[id].count=count;return id;}
- V ext=cmx-cmn;int axis=ext.y>ext.x?1:0;if((axis==0?ext.x:ext.y)<ext.z)axis=2;
- int mid=start+count/2;std::nth_element(s.order.begin()+start,s.order.begin()+mid,s.order.begin()+start+count,[&](int a,int b){V ca=(s.objs[a].mn+s.objs[a].mx)*.5f,cb=(s.objs[b].mn+s.objs[b].mx)*.5f;return axis==0?ca.x<cb.x:axis==1?ca.y<cb.y:ca.z<cb.z;});
- int l=buildNode(s,start,mid-start),r=buildNode(s,mid,start+count-mid);s.bvh[id].left=l;s.bvh[id].right=r;return id;
-}
-static void buildBVH(Scene&s){s.order.resize(s.objs.size());for(int i=0;i<int(s.order.size());i++)s.order[i]=i;s.bvh.reserve(s.objs.size()*2);s.root=buildNode(s,0,int(s.order.size()));}
-static bool closest(const Scene&s,const Ray&r,Hit&best,std::atomic<uint64_t>*tests=nullptr){
- bool found=false;std::array<int,128> stack{};int top=0;if(s.root>=0)stack[top++]=s.root;
- while(top){const Node&n=s.bvh[stack[--top]];float tNear;if(tests)tests->fetch_add(1,std::memory_order_relaxed);if(!boxHit(r,n.mn,n.mx,best.t,tNear))continue;
-  if(n.count){for(int i=n.start;i<n.start+n.count;i++){if(tests)tests->fetch_add(1,std::memory_order_relaxed);Hit h;if(intersect(r,s.objs[s.order[i]],best.t,h)){best=h;found=true;}}}
-  else{if(top<126){stack[top++]=n.left;stack[top++]=n.right;}}
- }
- // Analytic road and ocean planes.
- if(std::abs(r.d.y)>1e-8f){float t=-r.o.y/r.d.y;if(t>.0005f&&t<best.t){V p=r.o+r.d*t;if(std::abs(p.x)<7.1f&&p.z<42&&p.z>-100){V n={0,1,0};if(r.d.y>0)n=n*-1;best={t,p,n,0};found=true;}}
-  float seaY=-.06f; t=(seaY-r.o.y)/r.d.y;if(t>.0005f&&t<best.t){V p=r.o+r.d*t;if(p.x<-9&&p.z<70&&p.z>-130){best={t,p,{0,1,0},1};found=true;}}}
- return found;
-}
-static bool occluded(const Scene&s,Ray r,float maxT){Hit h;h.t=maxT;return closest(s,r,h);}
-static V sky(V d){float t=std::clamp((d.y+.01f)/.22f,0.f,1.f);V c=color(224,177,145)*(1-t)+color(92,166,226)*t;V sun=norm(V{-.82f,.20f,.53f});float a=dot(d,sun);if(a>.999f)c=c*.10f+color(255,232,189)*.90f;else if(a>.992f)c=c+color(255,192,118)*((a-.992f)*22);return c;}
-static V shade(const Scene&s,const Ray&r,const Hit&h){
- if(h.mat<0)return sky(r.d);V base=s.mats[h.mat].color;float rough=s.mats[h.mat].rough;V n=h.n,p=h.p;
- if(h.mat==0){float checker=(int(std::floor(p.x*3.2f))+int(std::floor(p.z*3.2f)))&1;base=checker?color(31,36,37):color(35,39,40);float dash=std::abs(p.x)<.05f&&std::fmod(std::abs(p.z+2.5f),5.f)<2.5f;if(dash)base=color(153,150,132);}
- if(h.mat==1){float wave=.5f+.5f*std::sin(p.z*1.1f+std::sin(p.x*.24f)*3.f);base=color(12,88,129)*(1-wave*.26f)+color(40,159,190)*(wave*.26f);}
- V sun=norm(s.sunDir),view=norm(r.o-p);float diff=std::max(0.f,dot(n,sun));float sh=1.f;
- // Keep the expensive BVH shadow ray for the directional sun only. Local lamps
- // intentionally use unshadowed diffuse fill, as in the previous software build.
- if(diff>.01f&&h.mat>=2){Ray sr{p+n*.012f,sun};if(occluded(s,sr,45.f))sh=.32f;}
- V result=base*(.16f+diff*.55f*sh);
- for(const Light&l:s.lights){V delta=l.p-p;float d=len(delta);if(d>=l.radius)continue;V ld=delta/(d>1e-4f?d:1);float fall=std::pow(std::max(0.f,1-d/l.radius),2)*l.power;float lam=std::max(0.f,dot(n,ld));if(lam>0)result=result+had(base,l.color)*(fall*lam*.035f);}
- V hvec=norm(sun+view);float spec=std::pow(std::max(0.f,dot(n,hvec)),std::max(3.f,96*(1-rough)));result=result+color(255,218,173)*(spec*(.18f+diff*.24f)*sh);
- float fog=std::clamp((h.t-34.f)/120.f,0.f,.65f);result=result*(1-fog)+color(166,177,181)*fog;
- return clampv(result,0,1);
-}
-static Ray cameraRay(const Cam&c,int x,int y,int w,int h){float sx=(2*(x+.5f)/w-1)*c.tanHalf,sy=(1-2*(y+.5f)/h)*c.tanHalf/c.aspect;return{c.eye,norm(c.forward+c.right*sx+c.up*sy)};}
-static uint32_t pack(V c){c=clampv(c);auto enc=[](float x){x=x/(1+x*.2f);x=std::pow(std::clamp(x,0.f,1.f),1/2.2f);return uint32_t(x*255+.5f);};return 0xff000000u|(enc(c.x)<<16)|(enc(c.y)<<8)|enc(c.z);}
-struct RenderStats{uint64_t rayTests=0;double ms=0;unsigned threads=1;};
-static RenderStats render(const Scene&s,const Cam&cam,int w,int h,std::vector<uint32_t>&pixels,unsigned threads,const std::atomic<uint64_t>&cancel,uint64_t token){
- auto start=std::chrono::steady_clock::now();std::atomic<int> next{0};std::atomic<uint64_t> tests{0};int nx=(w+15)/16,ny=(h+15)/16,total=nx*ny;
- auto worker=[&]{for(;;){if(cancel.load(std::memory_order_relaxed)!=token)return;int ti=next.fetch_add(1);if(ti>=total)return;int x0=(ti%nx)*16,y0=(ti/nx)*16;
-  for(int y=y0;y<std::min(y0+16,h);y++)for(int x=x0;x<std::min(x0+16,w);x++){Ray r=cameraRay(cam,x,y,w,h);Hit hit;closest(s,r,hit,&tests);V c=shade(s,r,hit);pixels[size_t(y)*w+x]=pack(c);}
- }};
- threads=std::max(1u,std::min(threads,unsigned(total)));std::vector<std::thread> pool;pool.reserve(threads);for(unsigned i=0;i<threads;i++)pool.emplace_back(worker);for(auto&t:pool)t.join();
- RenderStats q;q.rayTests=tests.load();q.ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();q.threads=threads;return q;
-}
-static Cam camera(float angleDeg,float elevDeg,float distance,float aspect){float a=angleDeg*PI/180,e=elevDeg*PI/180;V target{0,1.0f,-5.6f};V eye=target+V{distance*std::sin(a)*std::cos(e),distance*std::sin(e),distance*std::cos(a)*std::cos(e)};Cam c;c.eye=eye;c.forward=norm(target-eye);c.right=norm(cross(c.forward,{0,1,0}));c.up=cross(c.right,c.forward);c.tanHalf=std::tan(50*PI/360);c.aspect=aspect;return c;}
-}
-
 #ifdef _WIN32
-static constexpr UINT WM_RENDERED=WM_APP+1;
-enum{ID_RES=101,ID_THREADS=102,ID_RENDER=103,ID_HOME=104,ID_FRONT=105,ID_REAR=106,ID_THREADLABEL=107};
-static int gW=1280,gH=720,gReqW=1280,gReqH=720;static std::vector<uint32_t> gPixels;static std::mutex gPixelsMutex,gRequestMutex;static std::condition_variable gRequestCv;static std::atomic<uint64_t> gGeneration{0};static std::thread gCoordinator;static HWND gWindow=nullptr,gResolution=nullptr,gThreadSlider=nullptr,gThreadLabel=nullptr,gStatus=nullptr,gTimeLabel=nullptr,gRayLabel=nullptr,gBvhLabel=nullptr,gObjectLabel=nullptr;static HFONT gFont=nullptr;static m3d::Scene gScene;static float gAngle=137,gElevation=7,gDistance=17;static m3d::RenderStats gStats;static unsigned gThreads=std::max(1u,std::min(16u,std::thread::hardware_concurrency()>1?std::thread::hardware_concurrency()-1:1u));static bool gStop=false,gPending=false;
-static void queueRender(){++gGeneration;{std::lock_guard<std::mutex> lock(gRequestMutex);gPending=true;}if(gStatus)SetWindowTextW(gStatus,L"Calcul logiciel CPU en cours — rendu multithreadé par tuiles…");gRequestCv.notify_one();}
-static void renderWorker(){for(;;){std::unique_lock<std::mutex> lk(gRequestMutex);gRequestCv.wait(lk,[]{return gStop||gPending;});if(gStop)return;gPending=false;uint64_t token=gGeneration.load();int w=gReqW,h=gReqH;float angle=gAngle,elev=gElevation,dist=gDistance;unsigned threads=gThreads;lk.unlock();std::vector<uint32_t> frame(size_t(w)*h);auto stats=m3d::render(gScene,m3d::camera(angle,elev,dist,float(w)/h),w,h,frame,threads,gGeneration,token);if(gGeneration.load()!=token)continue;{std::lock_guard<std::mutex> lock(gPixelsMutex);gW=w;gH=h;gPixels.swap(frame);gStats=stats;}PostMessageW(gWindow,WM_RENDERED,0,0);}}
-static HWND child(HWND parent,const wchar_t* cls,const wchar_t* text,DWORD style,int id){HWND c=CreateWindowExW(0,cls,text,WS_CHILD|WS_VISIBLE|style,0,0,0,0,parent,(HMENU)(INT_PTR)id,GetModuleHandleW(nullptr),nullptr);if(gFont)SendMessageW(c,WM_SETFONT,(WPARAM)gFont,TRUE);return c;}
-static void layout(HWND h){RECT r;GetClientRect(h,&r);int w=r.right-r.left,hh=r.bottom-r.top,panel=std::clamp(w/3,355,440),left=w-panel;MoveWindow(gResolution,left+22,76,panel-44,250,TRUE);MoveWindow(gThreadSlider,left+22,176,panel-44,34,TRUE);MoveWindow(gThreadLabel,left+22,213,panel-44,24,TRUE);MoveWindow(GetDlgItem(h,ID_RENDER),left+22,260,panel-44,38,TRUE);MoveWindow(GetDlgItem(h,ID_HOME),left+22,308,(panel-52)/2,34,TRUE);MoveWindow(GetDlgItem(h,ID_FRONT),left+30+(panel-52)/2,308,(panel-52)/2,34,TRUE);MoveWindow(GetDlgItem(h,ID_REAR),left+22,350,panel-44,34,TRUE);MoveWindow(gStatus,left+22,405,panel-44,44,TRUE);MoveWindow(gTimeLabel,left+22,490,panel-44,32,TRUE);MoveWindow(gRayLabel,left+22,526,panel-44,30,TRUE);MoveWindow(gBvhLabel,left+22,560,panel-44,48,TRUE);MoveWindow(gObjectLabel,left+22,616,panel-44,48,TRUE);InvalidateRect(h,nullptr,FALSE);}
-static void drawText(HDC dc,int x,int y,const wchar_t*s,COLORREF c,int size=16,bool bold=false){HFONT f=CreateFontW(-size,0,0,0,bold?FW_BOLD:FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH|FF_DONTCARE,L"Segoe UI");HFONT old=(HFONT)SelectObject(dc,f);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,c);TextOutW(dc,x,y,s,(int)wcslen(s));SelectObject(dc,old);DeleteObject(f);}
-static void setStatLabels(){m3d::RenderStats stats;int w,h;{std::lock_guard<std::mutex> lock(gPixelsMutex);stats=gStats;w=gW;h=gH;}wchar_t b[160];swprintf_s(b,L"Dernier rendu : %.1f ms  |  %u threads",stats.ms,stats.threads);SetWindowTextW(gTimeLabel,b);swprintf_s(b,L"Pixels calculés : %d × %d  (%llu rayons)",w,h,(unsigned long long)w*h);SetWindowTextW(gRayLabel,b);swprintf_s(b,L"Tests BVH : %llu  |  ≈ %.1f par rayon",(unsigned long long)stats.rayTests,double(stats.rayTests)/std::max(1,w*h));SetWindowTextW(gBvhLabel,b);swprintf_s(b,L"Géométrie : %llu primitives, dont triangles de détail",(unsigned long long)gScene.objs.size());SetWindowTextW(gObjectLabel,b);SetWindowTextW(gStatus,L"Image terminée — rendu logiciel CPU, sans accélération graphique matérielle.");}
-static void applyResolution(){int ix=(int)SendMessageW(gResolution,CB_GETCURSEL,0,0);int w=ix==0?960:ix==1?1280:ix==2?1680:1920,h=ix==0?540:ix==1?720:ix==2?945:1080;{std::lock_guard<std::mutex> lock(gRequestMutex);gReqW=w;gReqH=h;}queueRender();}
-static void setCamera(float angle,float elevation,float distance){std::lock_guard<std::mutex> lock(gRequestMutex);gAngle=angle;gElevation=elevation;gDistance=distance;}
-static LRESULT CALLBACK windowProc(HWND h,UINT m,WPARAM w,LPARAM l){switch(m){case WM_CREATE:{gWindow=h;INITCOMMONCONTROLSEX ic{sizeof(ic),ICC_BAR_CLASSES};InitCommonControlsEx(&ic);gFont=CreateFontW(-16,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH|FF_DONTCARE,L"Segoe UI");gResolution=child(h,L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL,ID_RES);SendMessageW(gResolution,CB_ADDSTRING,0,(LPARAM)L"Rapide — 960 × 540");SendMessageW(gResolution,CB_ADDSTRING,0,(LPARAM)L"Équilibré — 1280 × 720");SendMessageW(gResolution,CB_ADDSTRING,0,(LPARAM)L"Précis — 1680 × 945");SendMessageW(gResolution,CB_ADDSTRING,0,(LPARAM)L"Natif — 1920 × 1080");SendMessageW(gResolution,CB_SETCURSEL,1,0);gThreadSlider=child(h,TRACKBAR_CLASSW,L"",TBS_AUTOTICKS,ID_THREADS);SendMessageW(gThreadSlider,TBM_SETRANGE,TRUE,MAKELONG(1,(short)std::min(32u,std::max(1u,std::thread::hardware_concurrency()))));SendMessageW(gThreadSlider,TBM_SETPOS,TRUE,gThreads);gThreadLabel=child(h,L"STATIC",L"",0,ID_THREADLABEL);child(h,L"BUTTON",L"Calculer l’image",BS_PUSHBUTTON,ID_RENDER);child(h,L"BUTTON",L"Vue initiale",BS_PUSHBUTTON,ID_HOME);child(h,L"BUTTON",L"Vue avant",BS_PUSHBUTTON,ID_FRONT);child(h,L"BUTTON",L"Vue arrière",BS_PUSHBUTTON,ID_REAR);gStatus=child(h,L"STATIC",L"Initialisation du rendu…",SS_LEFT,108);gTimeLabel=child(h,L"STATIC",L"Dernier rendu : —",SS_LEFT,109);gRayLabel=child(h,L"STATIC",L"Pixels calculés : —",SS_LEFT,110);gBvhLabel=child(h,L"STATIC",L"Tests BVH : —",SS_LEFT,111);gObjectLabel=child(h,L"STATIC",L"Géométrie : —",SS_LEFT,112);gCoordinator=std::thread(renderWorker);layout(h);SendMessageW(gResolution,CB_SETCURSEL,1,0);queueRender();SendMessageW(gThreadSlider,TBM_SETPOS,TRUE,gThreads);wchar_t b[80];swprintf_s(b,L"Threads CPU utilisés : %u",gThreads);SetWindowTextW(gThreadLabel,b);return 0;}case WM_SIZE:layout(h);return 0;case WM_COMMAND:if(LOWORD(w)==ID_RES&&HIWORD(w)==CBN_SELCHANGE){applyResolution();return 0;}if(LOWORD(w)==ID_RENDER){queueRender();return 0;}if(LOWORD(w)==ID_HOME){setCamera(137,7,17);SendMessageW(gResolution,CB_SETCURSEL,1,0);applyResolution();return 0;}if(LOWORD(w)==ID_FRONT){setCamera(137,7,17);queueRender();return 0;}if(LOWORD(w)==ID_REAR){setCamera(43,9,17);queueRender();return 0;}break;case WM_HSCROLL:if((HWND)l==gThreadSlider){unsigned t=(unsigned)SendMessageW(gThreadSlider,TBM_GETPOS,0,0);{std::lock_guard<std::mutex> lock(gRequestMutex);gThreads=t;}wchar_t b[80];swprintf_s(b,L"Threads CPU utilisés : %u",t);SetWindowTextW(gThreadLabel,b);if(LOWORD(w)==TB_ENDTRACK||LOWORD(w)==TB_THUMBPOSITION){queueRender();}return 0;}break;case WM_KEYDOWN:{if(w==VK_ESCAPE){DestroyWindow(h);return 0;}float angle,elev,dist;{std::lock_guard<std::mutex> lock(gRequestMutex);angle=gAngle;elev=gElevation;dist=gDistance;}if(w==VK_LEFT)angle-=5;else if(w==VK_RIGHT)angle+=5;else if(w==VK_UP)elev=std::min(35.f,elev+3);else if(w==VK_DOWN)elev=std::max(-3.f,elev-3);else return 0;setCamera(angle,elev,dist);queueRender();return 0;}case WM_RENDERED:{setStatLabels();InvalidateRect(h,nullptr,FALSE);return 0;}case WM_CTLCOLORSTATIC:{HDC dc=(HDC)w;SetTextColor(dc,RGB(221,232,241));SetBkColor(dc,RGB(24,43,60));return (LRESULT)GetStockObject(NULL_BRUSH);}case WM_CTLCOLORBTN:{HDC dc=(HDC)w;SetTextColor(dc,RGB(233,241,247));SetBkColor(dc,RGB(43,78,101));return (LRESULT)GetStockObject(NULL_BRUSH);}case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);RECT r;GetClientRect(h,&r);int ww=r.right,hh=r.bottom,panel=std::clamp(ww/3,355,440),left=ww-panel;HBRUSH bg=CreateSolidBrush(RGB(12,25,37)),pn=CreateSolidBrush(RGB(24,43,60)),canvas=CreateSolidBrush(RGB(3,9,14));RECT all{0,0,ww,hh};FillRect(dc,&all,bg);RECT pr{left,0,ww,hh};FillRect(dc,&pr,pn);drawText(dc,20,18,L"MOTEUR 3D V14  |  RENDU LOGICIEL CPU",RGB(232,241,248),20,true);drawText(dc,20,43,L"Côte d’été · fastback restomod · mer · palmiers · trois voitures",RGB(153,183,202),14);drawText(dc,left+22,20,L"PILOTAGE DU RENDU",RGB(232,241,248),18,true);drawText(dc,left+22,51,L"Qualité de sortie",RGB(180,204,220),14);drawText(dc,left+22,143,L"Nombre de threads CPU",RGB(180,204,220),14);drawText(dc,left+22,235,L"Actions",RGB(180,204,220),14);drawText(dc,left+22,465,L"DIAGNOSTICS",RGB(232,241,248),17,true);RECT cr{20,74,left-20,hh-20};FillRect(dc,&cr,canvas);{std::lock_guard<std::mutex> lock(gPixelsMutex);if(!gPixels.empty()){BITMAPINFO bi{};bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);bi.bmiHeader.biWidth=gW;bi.bmiHeader.biHeight=-gH;bi.bmiHeader.biPlanes=1;bi.bmiHeader.biBitCount=32;bi.bmiHeader.biCompression=BI_RGB;int cw=cr.right-cr.left,ch=cr.bottom-cr.top;float scale=std::min(float(cw)/gW,float(ch)/gH);int dw=(int)(gW*scale),dh=(int)(gH*scale),x=cr.left+(cw-dw)/2,y=cr.top+(ch-dh)/2;SetStretchBltMode(dc,HALFTONE);StretchDIBits(dc,x,y,dw,dh,0,0,gW,gH,gPixels.data(),&bi,DIB_RGB_COLORS,SRCCOPY);}else drawText(dc,cr.left+40,cr.top+40,L"Calcul du premier rendu…",RGB(220,230,240),18);}DeleteObject(bg);DeleteObject(pn);DeleteObject(canvas);EndPaint(h,&ps);return 0;}case WM_DESTROY:{gGeneration++;{std::lock_guard<std::mutex> lock(gRequestMutex);gStop=true;}gRequestCv.notify_one();if(gCoordinator.joinable())gCoordinator.join();if(gFont)DeleteObject(gFont);PostQuitMessage(0);return 0;}}return DefWindowProcW(h,m,w,l);}
-int WINAPI wWinMain(HINSTANCE inst,HINSTANCE,PWSTR,int show){m3d::addScene(gScene);m3d::buildBVH(gScene);WNDCLASSEXW wc{sizeof(wc)};wc.lpfnWndProc=windowProc;wc.hInstance=inst;wc.hCursor=LoadCursor(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);wc.lpszClassName=L"Moteur3DV14Native";RegisterClassExW(&wc);HWND h=CreateWindowExW(0,wc.lpszClassName,L"Moteur 3D V14 — application native CPU",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,1480,900,nullptr,nullptr,inst,nullptr);if(!h)return 1;ShowWindow(h,show);UpdateWindow(h);MSG msg;while(GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}return int(msg.wParam);}
-#else
-int main(int argc,char**argv){int w=1280,h=720;std::string out="moteur3d_v14_native.ppm";if(argc>1)out=argv[1];if(argc>3){w=std::max(320,std::atoi(argv[2]));h=std::max(180,std::atoi(argv[3]));}m3d::Scene s;m3d::addScene(s);m3d::buildBVH(s);std::vector<uint32_t> p(size_t(w)*h);std::atomic<uint64_t> cancel{0};unsigned n=std::max(1u,std::thread::hardware_concurrency());auto stats=m3d::render(s,m3d::camera(137,7,17,float(w)/h),w,h,p,n,cancel,0);FILE*f=std::fopen(out.c_str(),"wb");if(!f){std::perror("output");return 1;}std::fprintf(f,"P6\n%d %d\n255\n",w,h);for(uint32_t v:p){unsigned char rgb[3]={uint8_t((v>>16)&255),uint8_t((v>>8)&255),uint8_t(v&255)};std::fwrite(rgb,1,3,f);}std::fclose(f);std::cout<<"CPU software render: "<<w<<"x"<<h<<", "<<stats.threads<<" threads, "<<stats.rayTests<<" BVH tests, "<<stats.ms<<" ms, "<<out<<"\n";}
+namespace {
+using namespace m3d;
+constexpr UINT WM_FRAME=WM_APP+11;
+enum{ID_RES=101,ID_SCALE,ID_THREADS,ID_RENDER,ID_HOME,ID_FRONT,ID_REAR,ID_DIST,ID_ANGLE,ID_ELEV,ID_FOV};
+static Scene scene;static ShadowMap shadows;static Stats lastStats;
+static std::vector<uint32_t> frame;static std::mutex frameMutex,reqMutex;static std::condition_variable reqCv;static std::atomic<uint64_t> generation{1};static std::thread coordinator;static bool stopping=false,pending=false;
+static int outW=1920,outH=1080,renderW=1680,renderH=945,frameW=1920,frameH=1080;
+static float camDist=12,camAngle=-43,camElev=7,camFov=50;
+static unsigned workers=std::max(1u,std::thread::hardware_concurrency()>1?std::thread::hardware_concurrency()-1:1u);
+static HWND win=nullptr,resCombo=nullptr,scaleCombo=nullptr,threadBar=nullptr,threadLabel=nullptr,distBar=nullptr,angleBar=nullptr,elevBar=nullptr,fovBar=nullptr,statusLabel=nullptr,timeLabel=nullptr,rayLabel=nullptr,bvhLabel=nullptr,geoLabel=nullptr;static HFONT font=nullptr;
+static HWND child(HWND p,const wchar_t*c,const wchar_t*t,DWORD s,int id){HWND h=CreateWindowExW(0,c,t,WS_CHILD|WS_VISIBLE|s,0,0,100,24,p,(HMENU)(INT_PTR)id,GetModuleHandleW(nullptr),nullptr);if(font)SendMessageW(h,WM_SETFONT,(WPARAM)font,TRUE);return h;}
+static void set(HWND h,const wchar_t*t){if(h)SetWindowTextW(h,t);}
+static void requestRender(){++generation;{std::lock_guard<std::mutex>l(reqMutex);pending=true;}set(statusLabel,L"Rendu CPU en cours, calcul par tuiles…");reqCv.notify_one();}
+static void renderLoop(){for(;;){std::unique_lock<std::mutex>l(reqMutex);reqCv.wait(l,[]{return stopping||pending;});if(stopping)return;pending=false;uint64_t tok=generation.load();int w=renderW,h=renderH,ow=outW,oh=outH;float d=camDist,a=camAngle,e=camElev,f=camFov;unsigned nt=workers;l.unlock();std::vector<uint32_t>p(size_t(w)*h);Camera c=camera(a,e,d,w,h);c.tanHalf=std::tan(f*PI/360);c.pixelAngle=2*c.tanHalf/w;Stats q=render(scene,shadows,c,w,h,p,nt,generation,tok);if(generation.load()!=tok)continue;auto post=std::chrono::steady_clock::now();if(w!=ow||h!=oh)p=upscaleBilinear(p,w,h,ow,oh);q.postMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-post).count();q.ms+=q.postMs;if(generation.load()!=tok)continue;{std::lock_guard<std::mutex>g(frameMutex);frame.swap(p);lastStats=q;frameW=ow;frameH=oh;}PostMessageW(win,WM_FRAME,0,0);}}
+static void updateStats(){wchar_t b[300];swprintf_s(b,L"CPU total : %.1f ms (rendu %.1f + post-traitement %.1f)  |  %u threads",lastStats.ms-lastStats.postMs,lastStats.ms-lastStats.postMs,lastStats.postMs,lastStats.threads);set(timeLabel,b);swprintf_s(b,L"Rayons : %llu  |  surfaces : %llu  |  ciel : %llu",(unsigned long long)lastStats.rays,(unsigned long long)lastStats.hits,(unsigned long long)lastStats.sky);set(rayLabel,b);swprintf_s(b,L"Tests objets : %llu  |  noeuds BVH : %llu  |  tests AABB : %llu",(unsigned long long)lastStats.tests,(unsigned long long)lastStats.nodes,(unsigned long long)lastStats.aabb);set(bvhLabel,b);auto tris=std::count_if(scene.obj.begin(),scene.obj.end(),[](const Obj&o){return o.kind==Kind::Triangle;});swprintf_s(b,L"Scène V13.14 : %llu objets, %llu triangles  |  texels lus : %llu",(unsigned long long)scene.obj.size(),(unsigned long long)tris,(unsigned long long)lastStats.texels);set(geoLabel,b);set(statusLabel,L"Terminé — scène réelle, normales, UV, textures RGB565, BVH V13.14.");}
+static void readTracks(){std::lock_guard<std::mutex>l(reqMutex);camDist=SendMessageW(distBar,TBM_GETPOS,0,0)*.5f;camAngle=(float)SendMessageW(angleBar,TBM_GETPOS,0,0);camElev=(float)SendMessageW(elevBar,TBM_GETPOS,0,0);camFov=(float)SendMessageW(fovBar,TBM_GETPOS,0,0);}
+static void setView(float a,float e,float d){SendMessageW(angleBar,TBM_SETPOS,TRUE,(LPARAM)a);SendMessageW(elevBar,TBM_SETPOS,TRUE,(LPARAM)e);SendMessageW(distBar,TBM_SETPOS,TRUE,(LPARAM)(d*2));readTracks();requestRender();}
+static void resolution(){int i=(int)SendMessageW(resCombo,CB_GETCURSEL,0,0);outW=i==0?1920:i==1?1600:1280;outH=i==0?1080:i==1?900:720;int q=(int)SendMessageW(scaleCombo,CB_GETCURSEL,0,0);float s=q==0?1.f:q==1?.875f:q==2?.75f:q==3?2.f/3.f:.5f;{std::lock_guard<std::mutex>l(reqMutex);renderW=(int)std::lround(outW*s);renderH=(int)std::lround(outH*s);}requestRender();}
+static void track(HWND parent,int id,int mn,int mx,int v){HWND h=child(parent,TRACKBAR_CLASSW,L"",TBS_AUTOTICKS,id);SendMessageW(h,TBM_SETRANGE,TRUE,MAKELONG(mn,mx));SendMessageW(h,TBM_SETPOS,TRUE,v);if(id==ID_DIST)distBar=h;else if(id==ID_ANGLE)angleBar=h;else if(id==ID_ELEV)elevBar=h;else fovBar=h;}
+static void text(HDC dc,int x,int y,const wchar_t*s,int size=14,bool bold=false){HFONT f=CreateFontW(-size,0,0,0,bold?FW_BOLD:FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH|FF_DONTCARE,L"Segoe UI");HFONT o=(HFONT)SelectObject(dc,f);SetBkMode(dc,TRANSPARENT);SetTextColor(dc,RGB(224,235,243));TextOutW(dc,x,y,s,(int)wcslen(s));SelectObject(dc,o);DeleteObject(f);}
+static void layout(HWND h){RECT r;GetClientRect(h,&r);int w=r.right,H=r.bottom,p=std::clamp(w/3,410,500),x=w-p;MoveWindow(resCombo,x+20,64,p-40,220,TRUE);MoveWindow(scaleCombo,x+20,117,p-40,220,TRUE);MoveWindow(distBar,x+20,178,p-40,30,TRUE);MoveWindow(angleBar,x+20,232,p-40,30,TRUE);MoveWindow(elevBar,x+20,286,p-40,30,TRUE);MoveWindow(fovBar,x+20,340,p-40,30,TRUE);MoveWindow(threadBar,x+20,402,p-40,30,TRUE);MoveWindow(threadLabel,x+20,430,p-40,24,TRUE);MoveWindow(GetDlgItem(h,ID_RENDER),x+20,462,p-40,36,TRUE);MoveWindow(GetDlgItem(h,ID_HOME),x+20,506,(p-46)/2,32,TRUE);MoveWindow(GetDlgItem(h,ID_FRONT),x+26+(p-46)/2,506,(p-46)/2,32,TRUE);MoveWindow(GetDlgItem(h,ID_REAR),x+20,546,p-40,32,TRUE);MoveWindow(statusLabel,x+20,592,p-40,45,TRUE);MoveWindow(timeLabel,x+20,650,p-40,26,TRUE);MoveWindow(rayLabel,x+20,680,p-40,42,TRUE);MoveWindow(bvhLabel,x+20,726,p-40,48,TRUE);MoveWindow(geoLabel,x+20,778,p-40,62,TRUE);InvalidateRect(h,nullptr,FALSE);}
+static LRESULT CALLBACK wnd(HWND h,UINT m,WPARAM w,LPARAM l){switch(m){case WM_CREATE:{win=h;INITCOMMONCONTROLSEX ic{sizeof(ic),ICC_BAR_CLASSES};InitCommonControlsEx(&ic);font=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,CLEARTYPE_QUALITY,DEFAULT_PITCH|FF_DONTCARE,L"Segoe UI");resCombo=child(h,L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL,ID_RES);for(auto s:{L"Full HD — 1920 × 1080",L"1600 × 900",L"1280 × 720"})SendMessageW(resCombo,CB_ADDSTRING,0,(LPARAM)s);SendMessageW(resCombo,CB_SETCURSEL,0,0);scaleCombo=child(h,L"COMBOBOX",L"",CBS_DROPDOWNLIST|WS_VSCROLL,ID_SCALE);for(auto s:{L"Natif — tous pixels",L"Équilibré — 87,5 % par axe",L"Détails — 75 % par axe",L"Rapide — 66,7 % par axe",L"Très rapide — 50 % par axe"})SendMessageW(scaleCombo,CB_ADDSTRING,0,(LPARAM)s);SendMessageW(scaleCombo,CB_SETCURSEL,1,0);track(h,ID_DIST,9,48,24);track(h,ID_ANGLE,-180,180,-43);track(h,ID_ELEV,-5,50,7);track(h,ID_FOV,35,105,50);threadBar=child(h,TRACKBAR_CLASSW,L"",TBS_AUTOTICKS,ID_THREADS);SendMessageW(threadBar,TBM_SETRANGE,TRUE,MAKELONG(1,(short)std::max(1u,std::thread::hardware_concurrency())));SendMessageW(threadBar,TBM_SETPOS,TRUE,workers);threadLabel=child(h,L"STATIC",L"",0,0);child(h,L"BUTTON",L"Calculer l’image",BS_PUSHBUTTON,ID_RENDER);child(h,L"BUTTON",L"Vue initiale",BS_PUSHBUTTON,ID_HOME);child(h,L"BUTTON",L"Vue avant",BS_PUSHBUTTON,ID_FRONT);child(h,L"BUTTON",L"Vue arrière",BS_PUSHBUTTON,ID_REAR);statusLabel=child(h,L"STATIC",L"Chargement…",0,0);timeLabel=child(h,L"STATIC",L"Temps CPU : —",0,0);rayLabel=child(h,L"STATIC",L"Rayons : —",0,0);bvhLabel=child(h,L"STATIC",L"BVH : —",0,0);geoLabel=child(h,L"STATIC",L"Scène : —",0,0);layout(h);coordinator=std::thread(renderLoop);requestRender();return 0;}case WM_SIZE:layout(h);return 0;case WM_COMMAND:if((LOWORD(w)==ID_RES||LOWORD(w)==ID_SCALE)&&HIWORD(w)==CBN_SELCHANGE){resolution();return 0;}if(LOWORD(w)==ID_RENDER){requestRender();return 0;}if(LOWORD(w)==ID_HOME){setView(-43,7,12);return 0;}if(LOWORD(w)==ID_FRONT){setView(-10,4,10);return 0;}if(LOWORD(w)==ID_REAR){setView(-145,7,12);return 0;}break;case WM_HSCROLL:{HWND c=(HWND)l;if(c==threadBar){unsigned count=(unsigned)std::max(1,(int)SendMessageW(threadBar,TBM_GETPOS,0,0));{std::lock_guard<std::mutex>lk(reqMutex);workers=count;}wchar_t b[64];swprintf_s(b,L"Threads CPU : %u",count);set(threadLabel,b);if(LOWORD(w)==TB_ENDTRACK||LOWORD(w)==TB_THUMBPOSITION)requestRender();return 0;}if(c==distBar||c==angleBar||c==elevBar||c==fovBar){if(LOWORD(w)==TB_ENDTRACK||LOWORD(w)==TB_THUMBPOSITION){readTracks();requestRender();}return 0;}break;}case WM_FRAME:updateStats();InvalidateRect(h,nullptr,FALSE);return 0;case WM_CTLCOLORSTATIC:{HDC dc=(HDC)w;SetTextColor(dc,RGB(224,235,243));SetBkColor(dc,RGB(24,43,60));return(LRESULT)GetStockObject(NULL_BRUSH);}case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);RECT r;GetClientRect(h,&r);int W=r.right,H=r.bottom,p=std::clamp(W/3,410,500),left=W-p;HBRUSH bg=CreateSolidBrush(RGB(10,22,33)),pn=CreateSolidBrush(RGB(24,43,60)),cv=CreateSolidBrush(RGB(4,12,17));RECT all{0,0,W,H},pr{left,0,W,H};FillRect(dc,&all,bg);FillRect(dc,&pr,pn);text(dc,20,16,L"MOTEUR 3D V13.14  |  RENDU LOGICIEL CPU",20,true);text(dc,20,42,L"Scène et géométrie exactes exportées du moteur V13.14",13);text(dc,left+20,16,L"PILOTAGE DU RENDU",18,true);text(dc,left+20,43,L"Résolution de sortie",13);text(dc,left+20,96,L"Précision du calcul interne",13);text(dc,left+20,151,L"Distance caméra",13);text(dc,left+20,205,L"Rotation caméra",13);text(dc,left+20,259,L"Élévation caméra",13);text(dc,left+20,313,L"Champ horizontal",13);text(dc,left+20,377,L"Threads CPU",13);text(dc,left+20,616,L"DIAGNOSTICS MESURÉS",16,true);RECT cr{20,74,left-20,H-18};FillRect(dc,&cr,cv);{std::lock_guard<std::mutex>g(frameMutex);if(!frame.empty()){BITMAPINFO bi{};bi.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);bi.bmiHeader.biWidth=frameW;bi.bmiHeader.biHeight=-frameH;bi.bmiHeader.biPlanes=1;bi.bmiHeader.biBitCount=32;bi.bmiHeader.biCompression=BI_RGB;int cw=cr.right-cr.left,ch=cr.bottom-cr.top;float z=std::min(float(cw)/frameW,float(ch)/frameH);int dw=(int)(frameW*z),dh=(int)(frameH*z),x=cr.left+(cw-dw)/2,y=cr.top+(ch-dh)/2;SetStretchBltMode(dc,HALFTONE);StretchDIBits(dc,x,y,dw,dh,0,0,frameW,frameH,frame.data(),&bi,DIB_RGB_COLORS,SRCCOPY);}else text(dc,cr.left+40,cr.top+40,L"Calcul de la scène V13.14…",18);}DeleteObject(bg);DeleteObject(pn);DeleteObject(cv);EndPaint(h,&ps);return 0;}case WM_DESTROY:generation++;{std::lock_guard<std::mutex>g(reqMutex);stopping=true;}reqCv.notify_all();if(coordinator.joinable())coordinator.join();if(font)DeleteObject(font);PostQuitMessage(0);return 0;}return DefWindowProcW(h,m,w,l);}
+}
+int WINAPI wWinMain(HINSTANCE inst,HINSTANCE,PWSTR,int show){wchar_t exe[MAX_PATH];GetModuleFileNameW(nullptr,exe,MAX_PATH);std::wstring path=exe;path=path.substr(0,path.find_last_of(L"\\/")+1)+L"moteur3d_v1314_scene.bin";std::wstring error;if(!m3d::loadScene(path.c_str(),scene,error)){MessageBoxW(nullptr,error.c_str(),L"Moteur 3D V13.14",MB_ICONERROR);return 1;}m3d::Stats build;shadows=m3d::buildShadow(scene,build);WNDCLASSEXW wc{sizeof(wc)};wc.lpfnWndProc=wnd;wc.hInstance=inst;wc.hCursor=LoadCursor(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);wc.lpszClassName=L"Moteur3DTrueNative";RegisterClassExW(&wc);HWND h=CreateWindowExW(0,wc.lpszClassName,L"Moteur 3D V13.14 — application native CPU",WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,1480,900,nullptr,nullptr,inst,nullptr);if(!h)return 1;ShowWindow(h,show);UpdateWindow(h);MSG msg;while(GetMessageW(&msg,nullptr,0,0)>0){TranslateMessage(&msg);DispatchMessageW(&msg);}return(int)msg.wParam;}
 #endif
