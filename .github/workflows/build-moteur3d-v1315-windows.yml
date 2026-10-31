@@ -1,14 +1,14 @@
-name: Build Moteur 3D V13.15 Windows launcher
+name: Build Moteur 3D V13.16 Windows launcher
 
 on:
   push:
     branches:
       - experiment/manhattan-silent-hill-2026-10-30
     paths:
-      - experiments/2026-10-30-cote-ete-gt/moteur3d_v1315_cpu_backend_2026.html
-      - experiments/2026-10-30-cote-ete-gt/moteur3d_v1315_launcher.cpp
-      - experiments/2026-10-30-cote-ete-gt/moteur3d_v1315_launcher.rc
-      - .github/workflows/build-moteur3d-v1315-windows.yml
+      - experiments/2026-10-30-cote-ete-gt/moteur3d_v1316_cpu_workers_2026.html
+      - experiments/2026-10-30-cote-ete-gt/moteur3d_v1316_launcher.cpp
+      - experiments/2026-10-30-cote-ete-gt/moteur3d_v1316_launcher.rc
+      - .github/workflows/build-moteur3d-v1316-windows.yml
   workflow_dispatch:
 
 permissions:
@@ -26,12 +26,12 @@ jobs:
         shell: cmd
         working-directory: experiments/2026-10-30-cote-ete-gt
         run: |
-          rc /nologo /fo moteur3d_v1315_launcher.res moteur3d_v1315_launcher.rc
-          cl /nologo /O2 /EHsc /std:c++17 /DUNICODE /D_UNICODE /c moteur3d_v1315_launcher.cpp
-          link /nologo /SUBSYSTEM:WINDOWS moteur3d_v1315_launcher.obj moteur3d_v1315_launcher.res shell32.lib user32.lib /OUT:Moteur3D_V13.15.exe
+          rc /nologo /fo moteur3d_v1316_launcher.res moteur3d_v1316_launcher.rc
+          cl /nologo /O2 /EHsc /std:c++17 /DUNICODE /D_UNICODE /c moteur3d_v1316_launcher.cpp
+          link /nologo /SUBSYSTEM:WINDOWS moteur3d_v1316_launcher.obj moteur3d_v1316_launcher.res shell32.lib user32.lib /OUT:Moteur3D_V13.16.exe
       - name: Upload executable
         uses: actions/upload-artifact@v4
         with:
-          name: Moteur3D-V13.15-Windows
-          path: experiments/2026-10-30-cote-ete-gt/Moteur3D_V13.15.exe
+          name: Moteur3D-V13.16-Windows
+          path: experiments/2026-10-30-cote-ete-gt/Moteur3D_V13.16.exe
           if-no-files-found: error
