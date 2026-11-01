@@ -1,6 +1,13 @@
 // Sole scene definition shared by the HTML preview and native exporter (V13.14).
 // Geometry helpers such as box(), roundBox(), cone(), capsule() and meshTriangle()
 // are provided by source_v1314.html and are available when makeScene() runs.
+// Increase tessellation so generated meshes contain about 50% more triangles.
+const M3D_SCENE_DETAIL_GAIN = Math.sqrt(1.5);
+const m3dSceneDetailSteps = n => Math.max(3, Math.round((n || 1) * M3D_SCENE_DETAIL_GAIN));
+function m3dSceneEllipsoid(...args){ args[7]=m3dSceneDetailSteps(args[7] ?? 20); args[8]=m3dSceneDetailSteps(args[8] ?? 14); return ellipsoidMesh(...args); }
+function m3dSceneLoft(...args){ args[3]=m3dSceneDetailSteps(args[3] ?? 2); args[4]=m3dSceneDetailSteps(args[4] ?? 2); return loftedSmoothMesh(...args); }
+function m3dSceneTorus(...args){ args[6]=m3dSceneDetailSteps(args[6] ?? 64); args[7]=m3dSceneDetailSteps(args[7] ?? 14); return torusWheelMesh(...args); }
+
 function makeScene(){
  objects.length=0;
  // Long coastal road, with the shoreline running along its right side.
@@ -19,7 +26,7 @@ function makeScene(){
  capsule([8.22,.29,23],[8.22,.29,-242],.025,'metal');
  // Sable clair sur l’estran, puis surface d’océan ondulée à relief doux.
  // Le maillage reste au-dessus du plan d’eau de fond et reçoit la lumière spéculaire.
- const waveCols=31,waveRows=113,waveX0=12.0,waveZ0=-260,waveDx=1.45,waveDz=2.5;
+ const waveCols=Math.round(31*M3D_SCENE_DETAIL_GAIN),waveRows=Math.round(113*M3D_SCENE_DETAIL_GAIN),waveX0=12.0,waveZ0=-260,waveDx=1.45,waveDz=2.5;
  // Houle croisée : longues ondulations, vagues secondaires et crêtes plus raides.
  const wavePhase=(x,z)=>x*.235+z*.043+1.05*Math.sin(z*.026);
  const waveCrest=(x,z)=>Math.sin(wavePhase(x,z)+.42*Math.sin(x*.48-z*.078));
@@ -54,7 +61,7 @@ function makeScene(){
    const variation=.94+.045*Math.sin(z*.16+seed)+.025*Math.sin(z*.39+seed*1.7);
    return maxHeight*crossSection*Math.min(1.12,ridge)*variation;
   };
-  const nx=Math.ceil(width/2.4),nz=Math.ceil((z1-z0)/3.5),dx=width/nx,dz=(z1-z0)/nz,grid=[];
+  const nx=Math.round(Math.ceil(width/2.4)*M3D_SCENE_DETAIL_GAIN),nz=Math.round(Math.ceil((z1-z0)/3.5)*M3D_SCENE_DETAIL_GAIN),dx=width/nx,dz=(z1-z0)/nz,grid=[];
   for(let j=0;j<=nz;j++){
    const row=[];for(let i=0;i<=nx;i++){
     const x=baseX+i*dx,z=z0+j*dz,e=.28,y=heightAt(x,z);
@@ -70,15 +77,15 @@ function makeScene(){
  makeMountainRange(55,38,-280,40,11.5,303,'mountain');
  makeMountainRange(76,51,-280,40,17.5,571,'mountainFar');
  for(const [x,z,r] of [[-6,-3,.58],[-6.7,-18,.44],[-5.8,-35,.68],[6.2,-12,.32]])
-  ellipsoidMesh(x,.18,z,r,.17,r*.72,'stone',16,10);
+  m3dSceneEllipsoid(x,.18,z,r,.17,r*.72,'stone',16,10);
  // Rochers de plage dispersés de façon irrégulière, avec tailles et groupes variés.
  for(let i=0;i<76;i++){
   const z=-250+hash2(i,2,37)*270,shore=12+.55*Math.sin(z*.08)+.30*Math.sin(z*.21);
   let x=8.70+hash2(i,1,71)*Math.max(1.0,shore-9.0);
   if(z>-13&&z<-3&&x>8.65&&x<9.30)x=9.45+hash2(i,3,77)*.65;
   const rx=.16+hash2(i,4,37)*.48,rz=.14+hash2(i,5,37)*.46,ry=.10+hash2(i,6,37)*.22;
-  ellipsoidMesh(x,ry*.78,z,rx,ry,rz,'stone',10+(i%3)*2,6+(i%2));
-  if(i%9===0)ellipsoidMesh(x+rx*.45,ry*.56,z+rz*.32,rx*.48,ry*.65,rz*.58,'stone',10,6);
+  m3dSceneEllipsoid(x,ry*.78,z,rx,ry,rz,'stone',10+(i%3)*2,6+(i%2));
+  if(i%9===0)m3dSceneEllipsoid(x+rx*.45,ry*.56,z+rz*.32,rx*.48,ry*.65,rz*.58,'stone',10,6);
  }
  // Promenade continue dans cette zone : la dalle en bois surélevée et ses deux bornes basses ont été retirées.
  // Bancs en bois et acier, orientés vers la mer et espacés le long de la promenade.
@@ -101,7 +108,7 @@ function makeScene(){
  for(let z=-26;z>-248;z-=34)makeBench(6.42,z);
  // Quelques rochers bas et touffes d’oyats pour donner une échelle au rivage.
  for(const [x,y,z,rx,rz] of [[9.15,.10,-2.2,.34,.48],[9.55,.13,-5.2,.48,.34],[9.75,.11,-10.8,.38,.52],[9.10,.09,-13.6,.28,.42],[-6.0,.12,-10.5,.43,.36]])
-  ellipsoidMesh(x,y,z,rx,.14,rz,'stone',18,10);
+  m3dSceneEllipsoid(x,y,z,rx,.14,rz,'stone',18,10);
  for(const [x,z] of [[8.90,-6.2],[8.92,-9.0],[9.55,-2.5],[9.45,-13.3],[-5.7,-5.4],[-5.9,-15.2],[-6.0,-25.0]]){
   for(let stem=0;stem<4;stem++){
    const dx=(stem-1.5)*.075,lean=(stem%2?1:-1)*.13,height=.36+(stem%3)*.09;
@@ -120,7 +127,7 @@ function makeScene(){
   }
   for(let ring=1;ring<=8;ring++){
    const t=ring/12,p=points[Math.min(7,Math.floor(t*8))],r=.205*scale*(1-.58*t);
-   ellipsoidMesh(p[0],trunkHeight*t,p[2],r,.018*scale,r,'wood',12,6);
+   m3dSceneEllipsoid(p[0],trunkHeight*t,p[2],r,.018*scale,r,'wood',12,6);
   }
   const crown=points[8],crownY=trunkHeight;
   // Small central spear and nine radial fronds.
@@ -141,7 +148,7 @@ function makeScene(){
    }
   }
   for(let fruit=0;fruit<4;fruit++){
-   const a=fruit*TAU/4;ellipsoidMesh(crown[0]+Math.cos(a)*.13*scale,crownY-.18*scale,crown[2]+Math.sin(a)*.13*scale,.075*scale,.09*scale,.075*scale,'wood',10,8);
+   const a=fruit*TAU/4;m3dSceneEllipsoid(crown[0]+Math.cos(a)*.13*scale,crownY-.18*scale,crown[2]+Math.sin(a)*.13*scale,.075*scale,.09*scale,.075*scale,'wood',10,8);
   }
  }
  makePalm(9.75,-18,1.0,.24);makePalm(10.25,-36,.88,-.20);makePalm(9.45,-57,.74,.18);
@@ -189,7 +196,7 @@ function makeScene(){
    sample.push(archSideBottom(dz,sample[3]));expanded.push(sample);
   }
   expanded.sort((a,b)=>a[0]-b[0]);
-  return loftedSmoothMesh(carX(cx),expanded.map(p=>[carZ(tz+p[0]),p[1]*1.12,p[2]*1.12,carY(p[3]),carY(p[4]),carY(p[5])]),mat,longSteps,crossSteps);
+  return m3dSceneLoft(carX(cx),expanded.map(p=>[carZ(tz+p[0]),p[1]*1.12,p[2]*1.12,carY(p[3]),carY(p[4]),carY(p[5])]),mat,longSteps,crossSteps);
  };
  const carFlatQuadMesh=(pts,mat,n)=>flatQuadMesh(pts.map(carPoint),mat,n);
  const carCapsule=(a,b,r,mat)=>capsule(carPoint(a),carPoint(b),r,mat);
@@ -224,7 +231,7 @@ function makeScene(){
   [-.12,.80,.59,1.52,1.64],[.16,.79,.58,1.50,1.62],[.42,.73,.53,1.47,1.54],
   [.60,.69,.48,1.31,1.39],[.79,.66,.43,1.14,1.22],[.99,.67,.39,.99,1.07],[1.12,.69,.36,.94,1.01]]
   .map(([z,bw,tw,bottom,top])=>[carZ(tz+z),bw*1.08,tw*1.08,carY(bottom),carY(top)]);
- loftedSmoothMesh(carX(tx),roofSections,'sportsPaint',24,16);
+ m3dSceneLoft(carX(tx),roofSections,'sportsPaint',24,16);
  // Pare-brise large et lunette de hayon plongeante dans le fastback.
  carFlatQuadMesh([[tx-.66,1.055,tz-1.02],[tx-.55,1.57,tz-.61],
   [tx+.55,1.57,tz-.61],[tx+.66,1.055,tz-1.02]],'carGlass',[0,0,1]);
@@ -313,7 +320,7 @@ function makeScene(){
  // Pneus à hauteur d’aile, débord léger sur les flancs, jantes forgées à 10 branches.
  for(const side of [-1,1])for(const [z,wheelOffset] of [[tz-1.22,1.05],[tz+1.18,1.07]]){
   const wheelX=tx+side*wheelOffset,faceX=wheelX+side*.074,wy=.58;
-  torusWheelMesh(carX(wheelX),carY(wy),carZ(z),.25,.09,'rubber',96,28);
+  m3dSceneTorus(carX(wheelX),carY(wy),carZ(z),.25,.09,'rubber',96,28);
   carEllipse(faceX-side*.05,wy,z,.018,.184,.184,'metal');
   for(let spoke=0;spoke<10;spoke++){
    const a=spoke*TAU/10;
@@ -359,12 +366,12 @@ function makeScene(){
    return value;
   };
   const shell=bodyStations.map(([z,bw,tw,bottom,top])=>[Z(cz+z),bw*1.12*scale,tw*1.12*scale,Y(bottom),Y(top),Y(sideBottom(z,bottom))]);
-  loftedSmoothMesh(cx,shell,paint,19,12);
+  m3dSceneLoft(cx,shell,paint,19,12);
   const roof=[[ -.61,.77,.56,1.49,1.60],[-.42,.79,.58,1.51,1.63],[-.12,.80,.59,1.52,1.64],
    [.16,.79,.58,1.50,1.62],[.42,.73,.53,1.47,1.54],[.60,.69,.48,1.31,1.39],
    [.79,.66,.43,1.14,1.22],[.99,.67,.39,.99,1.07],[1.12,.69,.36,.94,1.01]]
    .map(([z,bw,tw,bottom,top])=>[Z(cz+z),bw*1.08*scale,tw*1.08*scale,Y(bottom),Y(top)]);
-  loftedSmoothMesh(cx,roof,paint,15,10);
+  m3dSceneLoft(cx,roof,paint,15,10);
   flatQuadMesh([P([cx-.66,1.055,cz-1.02]),P([cx-.55,1.57,cz-.61]),P([cx+.55,1.57,cz-.61]),P([cx+.66,1.055,cz-1.02])],'carGlass',[0,0,1]);
   flatQuadMesh([P([cx-.51,1.53,cz+.42]),P([cx-.68,.99,cz+1.22]),P([cx+.68,.99,cz+1.22]),P([cx+.51,1.53,cz+.42])],'carGlass',[0,.82,-.57]);
   for(const side of [-1,1]){
@@ -385,7 +392,7 @@ function makeScene(){
    for(let lamp=0;lamp<3;lamp++)tbox(side*(.57+lamp*.075),.62,1.67,side*(.61+lamp*.075),.75,1.70,.014,'taillight');
    for(const [localZ,offset] of [[-1.22,1.05],[1.18,1.07]]){
     const wx=X(cx+side*offset),wy=Y(.58),wz=Z(cz+localZ),face=wx+side*.07*scale;
-    torusWheelMesh(wx,wy,wz,.25*scale,.086*scale,'rubber',48,14);
+    m3dSceneTorus(wx,wy,wz,.25*scale,.086*scale,'rubber',48,14);
     ellipse(face,wy,wz,.018*scale,.182*scale,.182*scale,'wheelMetal');
     for(let spoke=0;spoke<8;spoke++){
      const a=spoke*TAU/8;
@@ -407,14 +414,14 @@ function makeScene(){
    [cz+L*.12,.90,.80,.29,1.00],[front-.28*scale,.82,.73,.31,.96],
    [front,.55,.49,.39,.78]
   ].map(([z,bw,tw,bottom,top])=>[z,bw*scale,tw*scale,y(bottom),y(top)]);
-  loftedSmoothMesh(cx,body,paint,4,5);
+  m3dSceneLoft(cx,body,paint,4,5);
   const cabRear=cz+dims.roofRear*scale,cabFront=cz+dims.roofFront*scale;
   const cabin=[
    [cabRear,.42,.34,y(.86),y(1.13)],[cabRear+.16*scale,.57,.49,y(.88),y(1.34)],
    [cz-.10*scale,.59,.52,y(.89),y(dims.roof)],[cabFront-.12*scale,.51,.43,y(.91),y(dims.roof-.02)],
    [cabFront,.35,.29,y(.94),y(1.16)]
   ];
-  loftedSmoothMesh(cx,cabin,'carGlass',3,5);
+  m3dSceneLoft(cx,cabin,'carGlass',3,5);
   // Bandeau de toit peint et vitrages latéraux intégrés à la silhouette.
   roundBox(cx-W*.27,y(dims.roof-.045),cabRear+.18*scale,cx+W*.27,y(dims.roof+.015),cabFront-.15*scale,.08*scale,paint);
   for(const side of [-1,1]){
@@ -423,10 +430,10 @@ function makeScene(){
    capsule([cx+side*W*.48,y(.53),cz-L*.12],[cx+side*W*.48,y(.53),cz+L*.18],.010*scale,'metal');
    for(const axle of [-.33,.33]){
     const wz=cz+axle*L,wx=cx+side*W*.47;
-    ellipsoidMesh(wx,y(.37),wz,.15*scale,.31*scale,.32*scale,'rubber',18,10);
-    ellipsoidMesh(wx+side*.11*scale,y(.37),wz,.032*scale,.17*scale,.17*scale,'wheelMetal',14,8);
+    m3dSceneEllipsoid(wx,y(.37),wz,.15*scale,.31*scale,.32*scale,'rubber',18,10);
+    m3dSceneEllipsoid(wx+side*.11*scale,y(.37),wz,.032*scale,.17*scale,.17*scale,'wheelMetal',14,8);
    }
-   ellipsoidMesh(cx+side*W*.29,y(.69),front-.015*scale,.12*scale,.085*scale,.05*scale,'led',14,9);
+   m3dSceneEllipsoid(cx+side*W*.29,y(.69),front-.015*scale,.12*scale,.085*scale,.05*scale,'led',14,9);
    roundBox(Math.min(cx+side*W*.31,cx+side*W*.44),y(.63),rear+.01*scale,
     Math.max(cx+side*W*.31,cx+side*W*.44),y(.82),rear+.06*scale,.035*scale,'taillight');
    roundBox(Math.min(cx+side*W*.51,cx+side*W*.63),y(.90),cz+.18*scale,
