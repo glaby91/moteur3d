@@ -307,7 +307,7 @@ private:
             Camera cam = camera(cfg.angle, cfg.elevation, cfg.distance, cfg.renderW, cfg.renderH);
             cam.tanHalf = std::tan(cfg.fov * PI / 360.f);
             cam.focusDistance = cfg.distance;
-            cam.apertureRadius = cfg.distance * .010f;
+            cam.apertureRadius = cfg.distance * .001f;
             cam.pixelAngle = 2 * cam.tanHalf / (cfg.renderW * (cfg.samples == 16 ? 4.f : cfg.samples == 4 ? 2.f : 1.f));
             unsigned samples = cfg.samples;
             if (cfg.dof && samples < 16) samples = 16;
