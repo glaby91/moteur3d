@@ -698,6 +698,10 @@ function procedural(id,x,y){
  else if(id==='grass'){r=71+18*noise;g=91+20*noise;b=64+14*noise;}
  else if(id==='wood'){r=89+18*noise;g=65+13*noise;b=45+10*noise;}
  else if(id==='cloth'){r=58+16*noise;g=72+18*noise;b=83+20*noise;}
+ }else if(id==='carSilver'){
+  const grain=(hash2(x,y,272)-.5)*8,brush=Math.sin(y*.11+Math.sin(x*.012)*.8)*1.7;
+  const flake=hash2(x>>1,y>>1,271)>.985?4:0;
+  r=151+grain+brush+flake;g=155+grain+brush+flake;b=160+grain+brush+flake;
  else{r=130+18*noise;g=124+17*noise;b=119+16*noise;}
  return pack565(r,g,b);
 }
