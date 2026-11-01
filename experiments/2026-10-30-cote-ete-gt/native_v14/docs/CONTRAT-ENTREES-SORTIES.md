@@ -1,7 +1,7 @@
 # Contrat d’entrées et de sorties — Moteur 3D natif x64
 
-**Version du document :** 1.0  
-**Identifiant de build :** 261101-0857  
+**Version du document :** 1.1  
+**Identifiant de build :** 261101-0816  
 **Scène source :** V13.14  
 **Révision GitHub :** injectée au build (SHA court du commit)  
 **Branche GitHub :** `experiment/manhattan-silent-hill-2026-10-30`  
@@ -9,13 +9,20 @@
 
 Ce document définit les données attendues par chaque partie du moteur et les résultats qu’elle doit fournir. Il s’applique au découpage modulaire reconstruit par `assemble_native.js`.
 
+
+### Scène modifiable / Editable scene
+
+**FR —** La géométrie est centralisée dans `scene_coastal_v1314.js`. Modifiez uniquement ce fichier pour changer les objets, leurs matériaux déclarés, leurs dimensions ou leur placement. Les fonctions de rendu restent dans `source_v1314.html`; ses primitives géométriques sont utilisées par la définition de scène. L’aperçu HTML charge le fichier de scène externe, et `export_scene.js` combine ce même fichier avec le moteur V13.14 pour produire la scène native. Gardez ces deux chemins de chargement synchronisés si le nom ou l’emplacement du module change.
+
+**EN —** Scene geometry is centralized in `scene_coastal_v1314.js`. Edit only this file to change objects, declared materials, dimensions, or placement. Rendering functions remain in `source_v1314.html`; its geometry helpers are used by the scene definition. The HTML preview loads the external scene file, and `export_scene.js` combines that same file with the V13.14 engine to produce the native scene. Keep both loading paths synchronized if the module name or location changes.
+
 ## 1. Contrat global de l’application
 
 ### Français
 
 **Entrée obligatoire à l’exécution :** `moteur3d_v1314_scene.bin`, placé dans le même dossier que l’exécutable. L’application ne prend pas d’arguments de ligne de commande; elle déduit le chemin de la scène à partir du chemin de son propre EXE.
 
-Le fichier binaire doit provenir de `export_scene.js` exécuté sur `source_v1314.html`. Il contient la géométrie réelle V13.14, les normales, UV, matériaux, mipmaps RGB565 et le BVH. Le moteur natif ne crée pas de scène de remplacement.
+Le fichier binaire doit provenir de `export_scene.js` exécuté sur `source_v1314.html`. Il contient la géométrie réelle V13.14, les normales, UV, matériaux, mipmaps RGB565 et le BVH. Le moteur natif ne crée pas de scène de remplacement. La scène comprend notamment la promenade pavée élargie, ses bancs orientés vers la mer, les lampadaires et les vagues.
 
 Le format commence par l’identifiant `M3D1314`, la version de format `1), les nombres d’objets, de nœuds BVH, d’indices et de matériaux, puis la racine du BVH et la taille de texture. Les matériaux ont un nom UTF-8 de 24 octets. Les objets ont un type, un indice de matériau, des limites et les paramètres propres à leur primitive. Les nœuds BVH contiennent leurs limites et leurs liens; la liste des indices et les mipmaps suivent.
 
@@ -36,7 +43,7 @@ Les réglages d’entrée sont fournis par l’interface :
 
 **Required runtime input:** `moteur3d_v1314_scene.bin`, placed beside the executable. The application accepts no command-line arguments; it derives the scene path from its own executable path.
 
-The binary must be produced by running `export_scene.js` on `source_v1314.html`. It contains the actual V13.14 geometry, normals, UVs, materials, RGB565 mipmaps and BVH. The native renderer does not create a substitute scene.
+The binary must be produced by running `export_scene.js` on `source_v1314.html`. It contains the actual V13.14 geometry, normals, UVs, materials, RGB565 mipmaps and BVH. The native renderer does not create a substitute scene. The scene includes the widened paved promenade, benches facing the sea, street lamps and waves.
 
 The file begins with the `M3D1314` signature, format version `1`, object, BVH-node, index and material counts, then the BVH root and texture size. Materials have a 24-byte UTF-8 name. Objects have a primitive type, material index, bounds and primitive-specific parameters. BVH nodes contain their bounds and links; the index list and mipmaps follow.
 
@@ -111,6 +118,6 @@ Inputs supplied by the user interface:
 
 ## 3. Sorties de compilation / Build outputs
 
-Le workflow exporte `moteur3d_v1314_scene.bin`, reconstruit le source, compile l’EXE x64 puis crée `Moteur3D-Natif-x64-261101-0857.zip`. L’archive contient l’EXE et le fichier scène requis. Le SHA du commit et la branche sont injectés dans l’interface et les propriétés Windows; le numéro de run GitHub Actions reste séparé.
+Le workflow exporte `moteur3d_v1314_scene.bin`, reconstruit le source, compile l’EXE x64 puis crée `Moteur3D-Natif-x64-261101-0816.zip`. L’archive contient l’EXE et le fichier scène requis. Le SHA du commit et la branche sont injectés dans l’interface et les propriétés Windows; le numéro de run GitHub Actions reste séparé.
 
-The workflow exports `moteur3d_v1314_scene.bin`, reconstructs the source, compiles the x64 EXE and creates `Moteur3D-Natif-x64-261101-0857.zip`. The archive contains the EXE and required scene file. The commit SHA and branch are embedded in the UI and Windows file properties; the GitHub Actions run number remains separate.
+The workflow exports `moteur3d_v1314_scene.bin`, reconstructs the source, compiles the x64 EXE and creates `Moteur3D-Natif-x64-261101-0816.zip`. The archive contains the EXE and required scene file. The commit SHA and branch are embedded in the UI and Windows file properties; the GitHub Actions run number remains separate.

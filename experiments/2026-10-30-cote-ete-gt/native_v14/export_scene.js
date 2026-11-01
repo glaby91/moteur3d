@@ -6,7 +6,10 @@ const path = require('path');
 
 const htmlPath = process.argv[2] || path.join(__dirname, 'source_v1314.html');
 const outPath = process.argv[3] || path.join(__dirname, 'moteur3d_v1314_scene.bin');
+const scenePath = process.argv[4] || path.join(__dirname, 'scene_coastal_v1314.js');
 const html = fs.readFileSync(htmlPath, 'utf8');
+const sceneSource = fs.readFileSync(scenePath, 'utf8');
+if (!sceneSource.includes('function makeScene')) throw new Error('La fonction makeScene() est absente du fichier de scène.');
 const match = html.match(/<script>([\s\S]*?)<\/script>/);
 if (!match) throw new Error('Script principal absent de V13.14.');
 const script = match[1];
@@ -20,7 +23,7 @@ if (materialStart < 0 || materialEnd < 0) throw new Error('Les fonctions texture
 // dramatically slower for this 1.25M-object scene, especially while building
 // its SAH BVH. Only the DOM canvas stub is supplied; no browser is involved.
 globalThis.document = { getElementById: () => ({ getContext: () => ({}) }) };
-eval(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\nmakeScene(); buildBVH(); const __mats = [...new Set(objects.map(o => o.mat))]; for (const id of __mats) materials.set(id, makeMips(id, 512)); globalThis.__scene = { objects, bvh, bvhRoot, sun, skyZenith, skyHorizon, pointLights, materials, mats: __mats };`);
+eval(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\n${sceneSource}\nmakeScene(); buildBVH(); const __mats = [...new Set(objects.map(o => o.mat))]; for (const id of __mats) materials.set(id, makeMips(id, 512)); globalThis.__scene = { objects, bvh, bvhRoot, sun, skyZenith, skyHorizon, pointLights, materials, mats: __mats };`);
 const scene = globalThis.__scene;
 const objects = scene.objects;
 const bvh = scene.bvh;
@@ -85,4 +88,4 @@ if (offset !== totalBytes) throw new Error(`Taille binaire inattendue: ${offset}
 fs.writeFileSync(outPath, file);
 const counts = {};
 for (const o of objects) counts[o.type] = (counts[o.type] || 0) + 1;
-console.log(JSON.stringify({ source: path.basename(htmlPath), objects: objects.length, triangles: counts.triangle, bvhNodes: bvh.length, bvhOrder: order.length, materials: mats, bytes: fs.statSync(outPath).size, counts }, null, 2));
+console.log(JSON.stringify({ source: path.basename(htmlPath), scene: path.basename(scenePath), objects: objects.length, triangles: counts.triangle, bvhNodes: bvh.length, bvhOrder: order.length, materials: mats, bytes: fs.statSync(outPath).size, counts }, null, 2));

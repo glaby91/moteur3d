@@ -18,7 +18,7 @@ void updateLighting(float hour){
  pointLights.clear();
  if(lampFactor>.005f){
   pointLights.push_back({{6.35f,.72f,-4.2f},11.5f,3.2f*lampFactor,{255,166,92}});
-  pointLights.push_back({{8.05f,.72f,-11.6f},11.5f,2.5f*lampFactor,{255,194,126}});
+  pointLights.push_back({{7.65f,.72f,-11.6f},11.5f,2.5f*lampFactor,{255,194,126}});
   for(int i=0;i<14;i++)pointLights.push_back({{4.87f,4.58f,-12.f-18.f*i},14.f,5.8f*lampFactor,{255,151,72}});
   // Phares chauds des trois voitures, assez bas pour éclairer la chaussée.
   pointLights.push_back({{-2.05f,.53f,-9.95f},8.f,1.8f*lampFactor,{255,218,172}});

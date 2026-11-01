@@ -10,6 +10,7 @@ on:
       - experiments/2026-10-30-cote-ete-gt/native_v14/src/**
       - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/source_v1314.html
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_coastal_v1314.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/version.h
       - experiments/2026-10-30-cote-ete-gt/native_v14/build_info.h
       - experiments/2026-10-30-cote-ete-gt/native_v14/moteur3d_v14_native.rc
@@ -46,7 +47,7 @@ jobs:
       - name: Export actual V13.14 scene, BVH and textures
         shell: pwsh
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
-        run: node export_scene.js source_v1314.html moteur3d_v1314_scene.bin
+        run: node export_scene.js source_v1314.html moteur3d_v1314_scene.bin scene_coastal_v1314.js
       - name: Reconstruct the native source from modules
         shell: pwsh
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
@@ -57,15 +58,15 @@ jobs:
         run: |
           cl /nologo /O2 /EHsc /std:c++17 /utf-8 /DUNICODE /D_UNICODE /c moteur3d_v14_native.cpp
           rc /nologo moteur3d_v14_native.rc
-          link /nologo /SUBSYSTEM:WINDOWS moteur3d_v14_native.obj moteur3d_v14_native.res user32.lib gdi32.lib comctl32.lib /OUT:Moteur3D-Natif-x64-261101-0857.exe
+          link /nologo /SUBSYSTEM:WINDOWS moteur3d_v14_native.obj moteur3d_v14_native.res user32.lib gdi32.lib comctl32.lib /OUT:Moteur3D-Natif-x64-261101-0816.exe
       - name: Package executable with the exported V13.14 scene
         shell: pwsh
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
-        run: Compress-Archive -Path Moteur3D-Natif-x64-261101-0857.exe,moteur3d_v1314_scene.bin -DestinationPath Moteur3D-Natif-x64-261101-0857.zip -CompressionLevel Optimal
+        run: Compress-Archive -Path Moteur3D-Natif-x64-261101-0816.exe,moteur3d_v1314_scene.bin -DestinationPath Moteur3D-Natif-x64-261101-0816.zip -CompressionLevel Optimal
       - name: Upload Windows x64 application
         uses: actions/upload-artifact@v4
         with:
-          name: Moteur3D-Natif-x64-261101-0857
-          path: experiments/2026-10-30-cote-ete-gt/native_v14/Moteur3D-Natif-x64-261101-0857.zip
+          name: Moteur3D-Natif-x64-261101-0816
+          path: experiments/2026-10-30-cote-ete-gt/native_v14/Moteur3D-Natif-x64-261101-0816.zip
           if-no-files-found: error
           retention-days: 30
