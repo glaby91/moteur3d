@@ -1,4 +1,4 @@
-name: Build native Moteur 3D from V13.14 scene
+name: Build native Moteur 3D — Rev 1 Branch 3
 
 on:
   push:
@@ -8,6 +8,9 @@ on:
       - experiments/2026-10-30-cote-ete-gt/native_v14/moteur3d_v14_native.cpp
       - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/source_v1314.html
+      - experiments/2026-10-30-cote-ete-gt/native_v14/version.h
+      - experiments/2026-10-30-cote-ete-gt/native_v14/moteur3d_v14_native.rc
+      - experiments/2026-10-30-cote-ete-gt/native_v14/README.md
   workflow_dispatch:
 
 permissions:
@@ -26,20 +29,21 @@ jobs:
         shell: pwsh
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: node export_scene.js source_v1314.html moteur3d_v1314_scene.bin
-      - name: Compile native CPU application
+      - name: Compile native x64 application and Windows version resource
         shell: cmd
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: |
           cl /nologo /O2 /EHsc /std:c++17 /utf-8 /DUNICODE /D_UNICODE /c moteur3d_v14_native.cpp
-          link /nologo /SUBSYSTEM:WINDOWS moteur3d_v14_native.obj user32.lib gdi32.lib comctl32.lib /OUT:Moteur3D_V14_Natif.exe
+          rc /nologo moteur3d_v14_native.rc
+          link /nologo /SUBSYSTEM:WINDOWS moteur3d_v14_native.obj moteur3d_v14_native.res user32.lib gdi32.lib comctl32.lib /OUT:Moteur3D-Natif-x64-Rev1-Branch3-261101-0850.exe
       - name: Package executable with the exported V13.14 scene
         shell: pwsh
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
-        run: Compress-Archive -Path Moteur3D_V14_Natif.exe,moteur3d_v1314_scene.bin -DestinationPath Moteur3D-V14-Natif-Scene-V1314.zip -CompressionLevel Optimal
-      - name: Upload Windows application
+        run: Compress-Archive -Path Moteur3D-Natif-x64-Rev1-Branch3-261101-0850.exe,moteur3d_v1314_scene.bin -DestinationPath Moteur3D-Natif-x64-Rev1-Branch3-261101-0850.zip -CompressionLevel Optimal
+      - name: Upload Windows x64 application
         uses: actions/upload-artifact@v4
         with:
-          name: Moteur3D-V14-Natif-Scene-V1314
-          path: experiments/2026-10-30-cote-ete-gt/native_v14/Moteur3D-V14-Natif-Scene-V1314.zip
+          name: Moteur3D-Natif-x64-Rev1-Branch3-261101-0850
+          path: experiments/2026-10-30-cote-ete-gt/native_v14/Moteur3D-Natif-x64-Rev1-Branch3-261101-0850.zip
           if-no-files-found: error
           retention-days: 30
