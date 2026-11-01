@@ -80,22 +80,7 @@ function makeScene(){
   ellipsoidMesh(x,ry*.78,z,rx,ry,rz,'stone',10+(i%3)*2,6+(i%2));
   if(i%9===0)ellipsoidMesh(x+rx*.45,ry*.56,z+rz*.32,rx*.48,ry*.65,rz*.58,'stone',10,6);
  }
- // Design du décor : petit belvédère en bois sombre posé au bord de l’eau,
- // avec deux bornes lumineuses discrètes, une chaude et une froide.
- roundBox(5.72,.055,-12.15,7.96,.14,-3.48,.055,'wood');
- for(let plank=0;plank<14;plank++){
-  const z=-12.0+plank*.61;
-  roundBox(5.78,.142,z-.025,7.90,.158,z+.025,.012,'wood');
- }
- for(const [x,z] of [[5.92,-11.9],[7.76,-11.9],[5.92,-3.75],[7.76,-3.75]])
-  capsule([x,-.04,z],[x,.075,z],.045,'wood');
- // Deux luminaires de belvédère : source ponctuelle assortie à chaque diffuseur.
- for(const [x,z,mat] of [[6.35,-4.2,'lamp'],[7.65,-11.6,'led']]){
-  roundBox(x-.13,.15,z-.13,x+.13,.24,z+.13,.035,'metal');
-  roundBox(x-.075,.24,z-.075,x+.075,.59,z+.075,.025,'metal');
-  roundBox(x-.076,.58,z-.076,x+.076,.69,z+.076,.018,mat);
-  roundBox(x-.10,.69,z-.10,x+.10,.73,z+.10,.018,'metal');
- }
+ // Promenade continue dans cette zone : la dalle en bois surélevée et ses deux bornes basses ont été retirées.
  // Bancs en bois et acier, orientés vers la mer et espacés le long de la promenade.
  const makeBench=(x,z)=>{
   for(let slat=0;slat<4;slat++){
