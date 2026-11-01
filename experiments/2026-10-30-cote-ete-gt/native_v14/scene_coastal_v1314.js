@@ -231,7 +231,7 @@ function makeScene(){
   [1.42,1.00,.85,.42,.96],[1.62,.88,.74,.44,.86],[1.70,.70,.58,.46,.78]
  ];
  // Capot, flancs, épaules et coffre : une coque principale, sans doublon de toit.
- carLoftedSmoothMesh(tx,bodyStations,'sportsPaint',34,20);
+ carLoftedSmoothMesh(tx,bodyStations,'carSilver',34,20);
  const atBodyZ=z=>{
   let i=0;while(i<bodyStations.length-2&&bodyStations[i+1][0]<z)i++;
   const a=bodyStations[i],b=bodyStations[i+1],u=clamp((z-a[0])/(b[0]-a[0]),0,1);
@@ -251,7 +251,7 @@ function makeScene(){
   [-.12,.80,.59,1.52,1.64],[.16,.79,.58,1.50,1.62],[.42,.73,.53,1.47,1.54],
   [.60,.69,.48,1.31,1.39],[.79,.66,.43,1.14,1.22],[.99,.67,.39,.99,1.07],[1.12,.69,.36,.94,1.01]]
   .map(([z,bw,tw,bottom,top])=>[carZ(tz+z),bw*1.08,tw*1.08,carY(bottom),carY(top)]);
- m3dSceneLoft(carX(tx),roofSections,'sportsPaint',24,16);
+ m3dSceneLoft(carX(tx),roofSections,'carSilver',24,16);
  // Pare-brise large et lunette de hayon plongeante dans le fastback.
  carFlatQuadMesh([[tx-.66,1.055,tz-1.02],[tx-.55,1.57,tz-.61],
   [tx+.55,1.57,tz-.61],[tx+.66,1.055,tz-1.02]],'carGlass',[0,0,1]);
@@ -325,7 +325,7 @@ function makeScene(){
  // Arrière court et musclé, petit bec intégré et feux triples.
  carCapsule([tx-.82,.98,tz+1.16],[tx-.78,.91,tz+1.58],.014,'metal');
  carCapsule([tx+.82,.98,tz+1.16],[tx+.78,.91,tz+1.58],.014,'metal');
- carRoundBox(tx-.84,.57,tz+1.63,tx+.84,.82,tz+1.68,.045,'sportsPaint');
+ carRoundBox(tx-.84,.57,tz+1.63,tx+.84,.82,tz+1.68,.045,'carSilver');
  for(const side of [-1,1]){
   for(let lamp=0;lamp<3;lamp++)carRoundBox(Math.min(tx+side*(.57+lamp*.075),tx+side*(.61+lamp*.075)),.65,tz+1.68,
    Math.max(tx+side*(.57+lamp*.075),tx+side*(.61+lamp*.075)),.78,tz+1.70,.018,'taillight');
@@ -354,7 +354,7 @@ function makeScene(){
     [faceX,wy+.236*Math.cos(b),z+.236*Math.sin(b)],.011,'wheelMetal');
   }
   carEllipse(faceX+side*.008,wy,z,.018,.077,.077,'wheelMetal');
-  carEllipse(faceX+side*.014,wy,z,.012,.044,.044,'sportsPaint');
+  carEllipse(faceX+side*.014,wy,z,.012,.044,.044,'carSilver');
   for(let lug=0;lug<5;lug++){
    const a=lug*TAU/5;
    carEllipse(faceX+side*.014,wy+.061*Math.cos(a),z+.061*Math.sin(a),.008,.009,.009,'metal');
