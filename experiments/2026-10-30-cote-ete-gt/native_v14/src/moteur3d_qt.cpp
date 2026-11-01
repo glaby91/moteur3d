@@ -14,6 +14,7 @@
 #include <QImage>
 #include <QLabel>
 #include <QMainWindow>
+#include <QMenuBar>
 #include <QMetaObject>
 #include <QMessageBox>
 #include <QPainter>
