@@ -6,7 +6,7 @@ static bool readU8(std::ifstream&f,uint8_t&v){return readBytes(f,&v,1);} static 
 bool loadScene(const wchar_t*path,Scene&s,std::wstring&error){
  std::ifstream f(std::filesystem::path(path),std::ios::binary);if(!f){error=L"Fichier moteur3d_v1314_scene.bin introuvable à côté du programme.";return false;}
  char magic[8]{};uint32_t version=0,no=0,nn=0,nord=0,nm=0,nt=0,texSize=0;int32_t root=-1;
- if(!readBytes(f,magic,8)||std::memcmp(magic,"M3D1314",7)||!readU32(f,version)||!readU32(f,no)||!readU32(f,nn)||!readI32(f,root)||!readU32(f,nord)||!readU32(f,nm)||!readU32(f,nt)||!readU32(f,texSize)||version!=1||no>2000000||nn>2000000||nord!=no){error=L"Le fichier de scène n'est pas un export V13.14 valide.";return false;}
+ if(!readBytes(f,magic,8)||std::memcmp(magic,"M3D1314",7)||!readU32(f,version)||!readU32(f,no)||!readU32(f,nn)||!readI32(f,root)||!readU32(f,nord)||!readU32(f,nm)||!readU32(f,nt)||!readU32(f,texSize)||version!=1||no>4200000||nn>4200000||nord!=no){error=L"Le fichier de scène n'est pas un export V13.14 valide.";return false;}
  s.root=root;s.obj.resize(no);s.node.resize(nn);s.order.resize(nord);s.mat.resize(nm);
  for(auto&m:s.mat){char name[24]{};if(!readBytes(f,name,24)){error=L"Table de matériaux tronquée.";return false;}m.name=name;}
  for(auto&o:s.obj){uint8_t kind,mi;uint16_t reserved;if(!readU8(f,kind)||!readU8(f,mi)||!readU16(f,reserved)||kind>5||mi>=nm||!readV(f,o.mn)||!readV(f,o.mx)){error=L"Géométrie tronquée.";return false;}o.kind=(Kind)kind;o.mat=mi;
