@@ -6,7 +6,7 @@ Moteur 3D expérimental (archives QBasic + démonstrations HTML/JavaScript).
 
 ### Version de travail actuelle : V14 native
 
-**[Source C++ natif](experiments/2026-10-30-cote-ete-gt/native_v14/moteur3d_v14_native.cpp)** · [Compilation Windows et exécutable](https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v14-native-windows.yml) · [Référence navigateur V13.16](experiments/2026-10-30-cote-ete-gt/moteur3d_v1316_cpu_workers_2026.html) · [Architecture CPU / FPGA](docs/CPU_FPGA_RENDER_BACKEND.md)
+**[Source C++ natif](experiments/2026-10-30-cote-ete-gt/native_v14/moteur3d_v14_native.cpp)** · [Compilation Windows et exécutable](https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v14-native-windows.yml) · [Référence navigateur V13.16](experiments/2026-10-30-cote-ete-gt/moteur3d_v1316_cpu_workers_2026.html) · [Architecture CPU / FPGA](docs/CPU_FPGA_RENDER_BACKEND.md) · [Choix mémoire et carte FPGA](docs/FPGA_MEMORY_AND_BOARD_SELECTION.md)
 
 La V14 est une application **C++17 native Windows**, avec une fenêtre Win32 et un panneau de commandes. L’interface propose quatre résolutions (960 × 540, 1280 × 720, 1680 × 945 et 1920 × 1080), le réglage du nombre de threads CPU, un recalcul explicite et trois vues caméra. Les diagnostics affichent la durée, le nombre de rayons, les tests de traversée et le nombre de primitives. Les flèches déplacent aussi la caméra au clavier. Le moteur calcule l’image en logiciel par lancer de rayons, BVH et tuiles CPU parallèles; il ne lance ni navigateur, ni WebView, ni code HTML, ni API GPU. Le binaire Windows 64 bits est produit par GitHub Actions.
 
@@ -86,7 +86,7 @@ La V9 explore une nouvelle architecture : **un seul rayon primaire par pixel**, 
 ---
 ## Version précédente — V8, textures adaptatives (19 octobre 2026)
 
-**[Ouvrir V8 — textures RGB565 + mipmaps 8 à 4096](experiments/2026-10-19-v8-mipmaps-textures/index.html)** · [documentation, mesures et limites](experiments/2026-10-19-v8-mipmaps-textures/README.md)
+**[Ouvrir V8 — textures RGB565 + mipmaps 8 à 4096](experiments/2026-10-19-v8-mipmaps-textures/index.html)** · [documentation, mesures et limites V8](experiments/2026-10-19-v8-mipmaps-textures/README.md)
 
 Le moteur V8 utilise toujours les **28 416 triangles de V7**, son **Z-buffer caméra** et sa **source lumineuse Z stabilisée**. Les textures procédurales de l'écorce, du feuillage, de l'herbe, de la pierre et du bois sont échantillonnées par UV perspective-correctes. L'écorce possède une pyramide RGB565 **4096² → 8² (10 niveaux réels)**, construite progressivement ; les autres matériaux possèdent une pyramide 256² → 8². La sélection du mip dépend des dérivées UV par pixel (donc distance, taille apparente et inclinaison), avec filtres nearest/bilinéaire/trilinéaire, diagnostic coloré des niveaux et contrôle de la distance caméra 4–22 m. **C'est un prototype CPU, pas un rendu FPGA validé.**
 
@@ -103,7 +103,7 @@ Le moteur V8 utilise toujours les **28 416 triangles de V7**, son **Z-buffer cam
 - Ombres : filtrage spatial **PCF 4 × 4** et choix de diffusion **Faible / Douces / Très douces**.
 - Contours géométriques : adoucissement colorimétrique optionnel **sans altérer le Z-buffer** ; il ne s'agit pas encore de MSAA 4×.
 - Optimisation lumineuse : **8 422 triangles natifs** utilisés pour les cartes Z des ombres, sans retrait de géométrie du rendu caméra.
-- Statut : tests automatisés de fonctionnement et d'occultation réussis ; fluidité et qualité visuelle à confirmer dans un navigateur réel.
+- Statut : tests automatisés de fonctionnement et d'occultation réussis ; fluidité et qualité visuelle à confirmer dans un navigateur.
 
 **Historique :** les expériences V1 à V6 ci-dessous sont archivées comme points de comparaison ; leurs mentions de « dernière version » reflètent la date de chaque expérimentation, pas la version recommandée aujourd'hui.
 
@@ -135,7 +135,7 @@ Le stuttering ne se manifeste plus d'après l'essai utilisateur. Le compteur « 
 
 ## Révision expérimentale V4 — stabilisation des ombres (19 octobre 2026)
 
-- [Ouvrir le code du simulateur V4](experiments/2026-10-19-shadow-stabilized-v4/index.html)
+- [Ouvrir le simulateur V4](experiments/2026-10-19-shadow-stabilized-v4/index.html)
 - [Diagnostic et protocole de test](experiments/2026-10-19-shadow-stabilized-v4/README.md)
 
 L'image géométrique reste identique à V3. Les ombres utilisent maintenant **deux cartes Z de la même et unique lumière**, avec interpolation continue des tests de profondeur pour limiter les sauts. Le mode « Ombres stabilisées » est activé par défaut et désactivable pour comparer; les performances en navigateur réel restent à mesurer.
