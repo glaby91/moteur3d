@@ -46,3 +46,8 @@ L’ordre de reconstruction/compilation est : scène → éclairage → intersec
 Le ZIP de chaque exécution porte son numéro de run et son SHA court; il contient l’exécutable x64, `moteur3d_v1314_scene.bin` et `build-manifest.json` avec la provenance et les statistiques d’export. Extraire les deux fichiers dans le même dossier, puis lancer le fichier EXE.
 
 Le workflow GitHub injecte la révision, la branche et le numéro de run, charge `scene_coastal_v1314.js` avec le moteur de `source_v1314.html`, reconstruit le fichier source et compile avec MSVC. Pour compiler une autre scène, passez son fichier JS au troisième argument de `export_scene.js` et chargez ce même module dans l’aperçu HTML. Le mode **Ultra** conserve les ombres adoucies et les réflexions à un rebond sur l’eau, la peinture et les vitrages.
+
+
+Le mode FSAA 16× utilise un motif tourné et stratifié de 16 rayons par pixel, afin de réduire les motifs d’aliasing d’une grille régulière. La profondeur de champ est optionnelle : elle échantillonne une ouverture de lentille et impose au moins 4 rayons par pixel; le mode FSAA 16× conserve ses 16 rayons. L’ouverture et le plan de mise au point sont calculés à partir de la distance caméra. Ces effets augmentent le temps CPU.
+
+Le rendu reprend ainsi deux idées du T-Buffer (échantillonnage spatial et profondeur de champ), sous forme logicielle. La scène ne contenant aucune animation d’objet, le flou de mouvement temporel n’est pas activé : il nécessite plusieurs positions d’un objet pendant l’exposition. Les ombres filtrées PCF et les reflets multi-échantillonnés de l’eau étaient déjà pris en charge.

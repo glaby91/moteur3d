@@ -79,3 +79,13 @@ La scène est définie dans `scene_coastal_v1314.js`. `export_scene.js` exécute
 Scene geometry lives in `scene_coastal_v1314.js`. `export_scene.js` evaluates it with the V13.14 engine and writes the textures and BVH to `moteur3d_v1314_scene.bin`. `assemble_native.js` reconstructs the C++ program from `src/`, and the Windows workflow compiles the x64 app with MSVC.
 
 Voir aussi [CONTRAT-ENTREES-SORTIES.md](CONTRAT-ENTREES-SORTIES.md) pour les formats et échanges propres à chaque module.
+
+
+Le mode FSAA 16× utilise un motif décalé et stratifié de 16 rayons par pixel, afin de réduire les motifs d’aliasing d’une grille régulière. La profondeur de champ est optionnelle : elle échantillonne une ouverture de lentille et impose au moins 4 rayons par pixel; le mode FSAA 16× conserve ses 16 rayons. L’ouverture et le plan de mise au point sont calculés à partir de la distance caméra. Ces effets augmentent le temps CPU.
+
+Le rendu reprend ainsi deux idées du T-Buffer (échantillonnage spatial et profondeur de champ), sous forme logicielle. La scène ne contenant aucune animation d’objet, le flou de mouvement temporel n’est pas activé : il nécessite plusieurs positions d’un objet pendant l’exposition. Les ombres filtrées PCF et les reflets multi-échantillonnés de l’eau étaient déjà pris en charge.
+
+
+The FSAA 16× mode uses a shifted, stratified pattern of 16 rays per pixel to reduce regular-grid aliasing. Optional depth of field samples a lens aperture and requires at least four rays per pixel; FSAA 16× continues to use sixteen. Aperture and focus distance are derived from camera distance. These effects increase CPU render time.
+
+This software renderer borrows two T-Buffer ideas: spatial sampling and depth of field. Temporal motion blur is not enabled because this scene has no animated objects; it requires an object's positions during the exposure. Filtered PCF shadows and multi-sampled water reflections were already supported.
