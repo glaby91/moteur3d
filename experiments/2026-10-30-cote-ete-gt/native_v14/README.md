@@ -1,8 +1,8 @@
-# Moteur 3D natif x64 — build 261101-2200
+# Moteur 3D natif x64 — build 261101-1901
 
 ## Repères de version
 
-- **Date/heure de compilation :** `261101-2200` (format `AAMMJJ-HHMM`).
+- **Date/heure de compilation :** `261101-1901` (format `AAMMJJ-HHMM`, heure UTC).
 - **Révision GitHub :** SHA court du commit, injecté à la compilation.
 - **Branche GitHub :** nom exact de la branche, injecté à la compilation.
 - **Scène et géométrie source :** V13.14.
@@ -26,10 +26,11 @@ Les sources de travail sont séparées dans `src/` afin que chaque partie puisse
 
 - `src/m3d_scene.cpp` : lecture et validation de l’export V13.14.
 - `src/m3d_lighting.cpp` : soleil, ciel et sources lumineuses pilotés par l’heure.
-- `src/m3d_intersection.cpp` : intersections des primitives, calcul des normales et parcours BVH.
-- `src/m3d_shading.cpp` : carte d’ombres, textures, bump mapping procédural, éclairage de surface et réflexions.
+- `src/m3d_intersection.cpp` : intersections des primitives, calcul des normales et parcours BVH avec directions inverses mises en cache par rayon.
+- `src/m3d_shading.cpp` : carte d’ombres, textures, bump mapping procédural, éclairage de surface et réflexions réglées par matériau.
 - `src/m3d_render.cpp` : caméra, lancer de rayons et rendu parallèle par tuiles.
 - `src/m3d_post.cpp` : mise à l’échelle bilinéaire, réduction 2× et lissage adaptatif des contours du résultat.
+- `src/m3d_physics.h` : contrat indépendant du rendu pour un backend physique; le point d’intégration PhysX est réservé, sans SDK lié ni simulation active dans ce build.
 - `src/moteur3d_win32.cpp` : interface native, réglages et orchestration.
 - `m3d_engine.h` : types et fonctions partagés entre les modules.
 
@@ -55,6 +56,6 @@ Le lissage des contours est un post-traitement CPU local. Les textures conserven
 
 ## Voiture 1970s Coupe
 
-Le fichier source CC0 est dans `assets/1970s-coupe/1970s-coupe.glb`. L’exporteur extrait le maillage glTF (positions, normales, UV et matériaux), applique son placement déclaré dans `scene_coastal_v1314.js`, puis l’ajoute au BVH de la scène. Les textures de couleur de carrosserie et de pneus sont préconverties en chaînes RGB565 512→8 afin que le workflow Windows n’ait pas besoin d’un décodeur JPEG. Le moteur applique son éclairage et ses reflets natifs au matériau carrosserie; son format de scène ne prend pas encore en charge les textures métalliques, de rugosité et de normales du GLB.
+Le fichier source CC0 est dans `assets/1970s-coupe/1970s-coupe.glb`. L’exporteur extrait le maillage glTF (positions, normales, UV et matériaux), applique son placement déclaré dans `scene_coastal_v1314.js`, puis l’ajoute au BVH de la scène. Les textures de couleur de carrosserie et de pneus sont préconverties en chaînes RGB565 512→8 afin que le workflow Windows n’ait pas besoin d’un décodeur JPEG. Le moteur applique son éclairage et ses reflets natifs au matériau carrosserie; les pourcentages de réflexion se règlent dans la source de scène et sont enregistrés dans le format binaire V2. Les textures métalliques, de rugosité et de normales du GLB ne sont pas encore importées.
 
 La source est publiée sous CC0 1.0 : https://grab3d.com/models/vehicles/1970s-coupe/.

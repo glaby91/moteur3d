@@ -28,7 +28,7 @@ globalThis.__m3dAppendClassicCar = (objects, placement) => {
   const file = path.resolve(__dirname, placement.source);
   globalThis.__m3dImportedCarTriangles = addGlbCar(objects, file, placement);
 };
-eval(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\n${sceneSource}\nmakeScene(); globalThis.__m3dAppendClassicCar(objects, M3D_IMPORTED_CAR); buildBVH(); const __mats = [...new Set(objects.map(o => o.mat))]; for (const id of __mats) materials.set(id, makeMips(id, 512)); globalThis.__scene = { objects, bvh, bvhRoot, sun, skyZenith, skyHorizon, pointLights, materials, mats: __mats };`);
+eval(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\n${sceneSource}\nmakeScene(); globalThis.__m3dAppendClassicCar(objects, M3D_IMPORTED_CAR); buildBVH(); const __mats = [...new Set(objects.map(o => o.mat))]; for (const id of __mats) materials.set(id, makeMips(id, 512)); globalThis.__scene = { objects, bvh, bvhRoot, sun, skyZenith, skyHorizon, pointLights, materials, mats: __mats, reflectivityPercent: M3D_MATERIAL_REFLECTIVITY_PERCENT };`);
 const scene = globalThis.__scene;
 const objects = scene.objects;
 const bvh = scene.bvh;
@@ -39,7 +39,7 @@ scene.materials.set('classicTire', { levels: readRgb565MipChain(path.join(__dirn
 const types = { triangle: 0, box: 1, roundbox: 2, capsule: 3, cone: 4, ellipse: 5 };
 const matIndex = new Map(mats.map((m, i) => [m, i]));
 const floatCount = o => o.type === 'triangle' ? 24 : o.type === 'roundbox' ? 7 : o.type === 'capsule' ? 8 : o.type === 'cone' ? 13 : o.type === 'ellipse' ? 6 : 0;
-let totalBytes = 40 + mats.length * 28 + objects.reduce((n, o) => n + 28 + floatCount(o) * 4, 0) + bvh.length * 40 + objects.length * 4;
+let totalBytes = 40 + mats.length * 32 + objects.reduce((n, o) => n + 28 + floatCount(o) * 4, 0) + bvh.length * 40 + objects.length * 4;
 for (const id of mats) {
   const size = 512;
   for (let n = size; ; n >>= 1) { totalBytes += 4 + n * n * 2; if (n <= 8) break; }
@@ -55,9 +55,14 @@ function putF32s(a) { for (const v of a) putF32(v); }
 const vecs = (...vs) => vs.flat();
 
 file.write('M3D1314', offset, 'ascii'); offset += 8;
-putU32(1); putU32(objects.length); putU32(bvh.length); putI32(scene.bvhRoot);
+putU32(2); putU32(objects.length); putU32(bvh.length); putI32(scene.bvhRoot);
 putU32(objects.length); putU32(mats.length); putU32(mats.length); putU32(512);
-for (const mat of mats) { file.fill(0, offset, offset + 24); file.write(mat, offset, 24, 'utf8'); offset += 24; }
+for (const mat of mats) {
+  const reflectivity = scene.reflectivityPercent[mat] ?? 0;
+  if (!Number.isInteger(reflectivity) || reflectivity < 0 || reflectivity > 100) throw new Error(`Réflectivité invalide pour ${mat}: ${reflectivity}`);
+  file.fill(0, offset, offset + 24); file.write(mat, offset, 24, 'utf8'); offset += 24;
+  putU8(reflectivity); putU8(0); putU16(0);
+}
 
 for (const o of objects) {
   const ti = types[o.type];
@@ -95,4 +100,4 @@ if (offset !== totalBytes) throw new Error(`Taille binaire inattendue: ${offset}
 fs.writeFileSync(outPath, file);
 const counts = {};
 for (const o of objects) counts[o.type] = (counts[o.type] || 0) + 1;
-console.log(JSON.stringify({ source: path.basename(htmlPath), scene: path.basename(scenePath), objects: objects.length, triangles: counts.triangle, bvhNodes: bvh.length, bvhOrder: order.length, materials: mats, importedCarTriangles: globalThis.__m3dImportedCarTriangles || 0, bytes: fs.statSync(outPath).size, counts }, null, 2));
+console.log(JSON.stringify({ source: path.basename(htmlPath), scene: path.basename(scenePath), objects: objects.length, triangles: counts.triangle, bvhNodes: bvh.length, bvhOrder: order.length, materials: mats.map(name => ({ name, reflectivityPercent: scene.reflectivityPercent[name] ?? 0 })), importedCarTriangles: globalThis.__m3dImportedCarTriangles || 0, bytes: fs.statSync(outPath).size, counts }, null, 2));

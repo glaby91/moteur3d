@@ -1,7 +1,7 @@
 # Contrat d’entrées et de sorties — Moteur 3D natif x64
 
 **Version du document :** 1.2  
-**Identifiant de build :** 261101-2200
+**Identifiant de build :** 261101-1901
 **Scène source :** V13.14  
 **Révision GitHub :** injectée au build (SHA court du commit)  
 **Branche GitHub :** `experiment/manhattan-silent-hill-2026-10-30`  
@@ -24,7 +24,7 @@ Ce document définit les données attendues par chaque partie du moteur et les r
 
 Le fichier binaire doit provenir de `export_scene.js` exécuté sur `source_v1314.html`. Il contient la géométrie réelle V13.14, les normales, UV, matériaux, mipmaps RGB565 et le BVH. Le moteur natif ne crée pas de scène de remplacement. La scène comprend notamment la promenade pavée élargie, neuf bancs, quatre parasols et serviettes, quatre poubelles, des mouettes, des lampadaires et les vagues.
 
-Le format commence par 8 octets de signature `M3D1314`, puis des entiers little-endian : version, nombre d’objets, nombre de nœuds BVH, racine BVH, nombre d’indices d’ordre, nombre de matériaux, nombre de textures et dimension de texture. Suivent les noms de matériaux UTF-8 sur 24 octets, les objets, les nœuds BVH, l’ordre des objets et les mipmaps RGB565.
+Le format commence par 8 octets de signature `M3D1314`, puis des entiers little-endian : version, nombre d’objets, nombre de nœuds BVH, racine BVH, nombre d’indices d’ordre, nombre de matériaux, nombre de textures et dimension de texture. En V2, chaque entrée de matériau contient son nom UTF-8 sur 24 octets, son pourcentage de réflexion (0–100) et trois octets réservés; la V1 ne contenait que le nom. Suivent les objets, les nœuds BVH, l’ordre des objets et les mipmaps RGB565. Le chargeur prend en charge les V1 et V2.
 
 Le chargeur vérifie la signature, la version, les limites de quantités, la racine et le graphe BVH (liens, cycles, portée des feuilles et couverture complète des objets), les bornes finies, les matériaux et indices, ainsi que les mipmaps attendus (7 niveaux de 512×512 à 8×8). Il rejette les données manquantes ou supplémentaires avec un message explicite et convertit les erreurs d’allocation en erreur de chargement.
 
@@ -45,7 +45,7 @@ Les réglages d’entrée sont fournis par l’interface :
 
 The binary must be produced by running `export_scene.js` on `source_v1314.html`. It contains the actual V13.14 geometry, normals, UVs, materials, RGB565 mipmaps and BVH. The native renderer does not create a substitute scene. The scene includes the widened paved promenade, benches facing the sea, street lamps and waves.
 
-The file begins with an 8-byte `M3D1314` signature, followed by little-endian integers for version, object count, BVH-node count, BVH root, order-index count, material count, texture count and texture dimension. It then stores 24-byte UTF-8 material names, objects, BVH nodes, object order and RGB565 mipmaps.
+The file begins with an 8-byte `M3D1314` signature, followed by little-endian integers for version, object count, BVH-node count, BVH root, order-index count, material count, texture count and texture dimension. V2 stores each 24-byte UTF-8 material name, its 0–100 reflection percentage and three reserved bytes; V1 stores only the name. Both versions then store objects, BVH nodes, object order and RGB565 mipmaps. The loader accepts V1 and V2.
 
 The loader validates the signature, version, count limits, root and BVH graph (links, cycles, leaf ranges, and complete object coverage), finite bounds, material indices, and the fixed seven mip levels from 512×512 to 8×8. Missing, truncated, trailing or invalid data returns a clear error; allocation failures are caught.
 
@@ -67,6 +67,12 @@ Inputs supplied by the user interface:
 **Entrée / Input :** définitions communes des vecteurs, rayons, impacts, objets, matériaux, scène, caméra, lumières, statistiques et carte d’ombres. / Shared definitions for vectors, rays, hits, objects, materials, scene, camera, lights, statistics and shadow map.
 
 **Sortie / Output :** déclarations et types utilisés par tous les modules; aucune donnée de scène n’est chargée par cet en-tête. / Declarations and types used by all modules; this header loads no scene data.
+
+### `src/m3d_physics.h` — Contrat backend physique / Physics backend contract
+
+**Entrée / Input :** descriptions de corps (masse, pose, vitesse et options de collision), demandes d’initialisation, d’étape de simulation et de lecture/écriture de pose. / Body descriptions (mass, pose, velocity, and collision options), initialization, simulation-step, and pose read/write requests.
+
+**Sortie / Output :** interface indépendante du rendu (`Backend`) et choix `Disabled` / `PhysX`. `physXAvailable()` retourne `false` jusqu’à ce que l’adaptateur et le SDK soient ajoutés; aucun calcul physique n’est effectué dans cette révision. / Renderer-independent `Backend` interface and `Disabled` / `PhysX` selection. `physXAvailable()` returns `false` until the adapter and SDK are added; this revision performs no physics simulation.
 
 ### `m3d_scene.cpp` — Chargement de scène / Scene loading
 

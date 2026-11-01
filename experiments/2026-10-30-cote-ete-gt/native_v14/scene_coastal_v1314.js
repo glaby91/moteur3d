@@ -8,6 +8,13 @@ function m3dSceneEllipsoid(...args){ args[7]=m3dSceneDetailSteps(args[7] ?? 20);
 function m3dSceneLoft(...args){ args[3]=m3dSceneDetailSteps(args[3] ?? 2); args[4]=m3dSceneDetailSteps(args[4] ?? 2); return loftedSmoothMesh(...args); }
 function m3dSceneTorus(...args){ args[6]=m3dSceneDetailSteps(args[6] ?? 64); args[7]=m3dSceneDetailSteps(args[7] ?? 14); return torusWheelMesh(...args); }
 
+// Maximum reflection contribution per material, in percent (0–100).
+// Angular Fresnel shaping remains in the renderer; these values tune its strength.
+const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
+ sea:51, glass:42, carGlass:42, metal:35, wheelMetal:55, carSilver:95, classicBody:29,
+ carBlue:29, carGreen:29, sportsRed:29, sportsViolet:29, sportsPaint:29
+});
+
 // 1970s Coupe CC0 imported during the native scene export. Its original +Z
 // front is mapped toward the road's negative Z direction.
 const M3D_IMPORTED_CAR = Object.freeze({

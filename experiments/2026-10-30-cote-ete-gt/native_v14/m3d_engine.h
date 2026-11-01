@@ -16,6 +16,7 @@
 #include <string>
 #include <thread>
 #include <vector>
+#include "src/m3d_physics.h"
 namespace m3d {
 constexpr float PI=3.14159265358979323846f, INF=std::numeric_limits<float>::infinity();
 struct V { float x=0,y=0,z=0; V operator+(V b)const{return{x+b.x,y+b.y,z+b.z};} V operator-(V b)const{return{x-b.x,y-b.y,z-b.z};} V operator*(float s)const{return{x*s,y*s,z*s};} V operator/(float s)const{return{x/s,y/s,z/s};} };
@@ -24,7 +25,7 @@ enum class Kind:uint8_t{Triangle=0,Box=1,RoundBox=2,Capsule=3,Cone=4,Ellipse=5};
 struct Obj { Kind kind{}; uint8_t mat=0; V mn,mx,a,b,c,n0,n1,n2,uv0,uv1,uv2,center,core; float r=0,r1=0,k=0,len=0,len2=0; };
 struct Node { V mn,mx; int32_t left=-1,right=-1,start=0,count=0; };
 struct Level { uint32_t size=0; std::vector<uint16_t> p; };
-struct Material { std::string name; std::vector<Level> mip; };
+struct Material { std::string name; uint8_t reflectivityPercent=0; std::vector<Level> mip; };
 struct Scene { std::vector<Obj> obj; std::vector<Node> node; std::vector<uint32_t> order; std::vector<Material> mat; int32_t root=-1; };
 struct Ray { V o,d; };
 struct Hit { float t=INF; V p,n; int mat=-1,id=-1; };

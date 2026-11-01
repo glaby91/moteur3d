@@ -4,6 +4,10 @@ int main(){
  using namespace m3d;Scene scene;std::wstring error;
  if(!loadScene(L"moteur3d_v1314_scene.bin",scene,error)){std::wcerr<<L"Chargement scène échoué: "<<error<<L"\n";return 1;}
  if(scene.obj.empty()||scene.node.empty()||scene.mat.empty()||scene.root<0)return 2;
+ const auto sea=std::find_if(scene.mat.begin(),scene.mat.end(),[](const Material&m){return m.name=="sea";});
+ const auto car=std::find_if(scene.mat.begin(),scene.mat.end(),[](const Material&m){return m.name=="carSilver";});
+ const auto metal=std::find_if(scene.mat.begin(),scene.mat.end(),[](const Material&m){return m.name=="metal";});
+ if(sea==scene.mat.end()||sea->reflectivityPercent!=51||car==scene.mat.end()||car->reflectivityPercent!=95||metal==scene.mat.end()||metal->reflectivityPercent!=35||physics::physXAvailable())return 6;
  const auto triangles=std::count_if(scene.obj.begin(),scene.obj.end(),[](const Obj&o){return o.kind==Kind::Triangle;});
  if(!triangles||scene.order.size()!=scene.obj.size())return 3;
  updateLighting(12.f);Stats shadowStats;auto shadows=buildShadow(scene,shadowStats);
