@@ -1,8 +1,8 @@
 // Sole scene definition shared by the HTML preview and native exporter (V13.14).
 // Geometry helpers such as box(), roundBox(), cone(), capsule() and meshTriangle()
 // are provided by source_v1314.html and are available when makeScene() runs.
-// Tessellate smooth meshes to target roughly four million scene triangles.
-const M3D_SCENE_DETAIL_GAIN = 2.0; // cible proche de 4 millions de triangles
+// Increase tessellation so generated meshes contain about 50% more triangles.
+const M3D_SCENE_DETAIL_GAIN = Math.sqrt(1.5);
 const m3dSceneDetailSteps = n => Math.max(3, Math.round((n || 1) * M3D_SCENE_DETAIL_GAIN));
 function m3dSceneEllipsoid(...args){ args[7]=m3dSceneDetailSteps(args[7] ?? 20); args[8]=m3dSceneDetailSteps(args[8] ?? 14); return ellipsoidMesh(...args); }
 function m3dSceneLoft(...args){ args[3]=m3dSceneDetailSteps(args[3] ?? 2); args[4]=m3dSceneDetailSteps(args[4] ?? 2); return loftedSmoothMesh(...args); }

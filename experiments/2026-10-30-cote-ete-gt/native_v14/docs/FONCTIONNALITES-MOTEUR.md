@@ -59,11 +59,11 @@ Rendering distributes 16 × 16 pixel tiles across 1–16 CPU threads. A generati
 
 ## Scène actuelle et limites / Current scene and limitations
 
-La scène de référence comprend route côtière, promenade pavée, bordure, garde-corps, neuf bancs, lampadaires, palmiers, plage, rochers, oyats, parasols, serviettes, poubelles, mouettes et voitures. L’export validé contient **4 145 865 triangles**, **4 149 799 objets** et **2 471 927 nœuds BVH**; le binaire non compressé mesure **650 830 504 octets**. Le chargeur accepte jusqu’à **4 200 000 objets et nœuds BVH**.
+La scène de référence comprend route côtière, promenade pavée, bordure, garde-corps, neuf bancs, lampadaires, palmiers, plage, rochers, oyats, parasols, serviettes, poubelles, mouettes et voitures. L’export contient environ **1,54 million de triangles** et **1,55 million d’objets**; le build publie les comptes exacts. Le chargeur accepte jusqu’à **4 200 000 objets et nœuds BVH**.
 
 Le rendu est CPU et aucun pipeline GPU n’est présent dans ce code natif. L’application ne propose pas encore d’éditeur de scène interactif, de physique ou d’animation. Les changements de décor s’effectuent dans `scene_coastal_v1314.js`, puis nécessitent un nouvel export. Le temps d’image dépend du processeur, de la résolution, du mode interne, des ombres et des réflexions; le nombre de triangles n’est pas un benchmark de FPS. Le fichier `moteur3d_v1314_scene.bin` doit rester dans le même dossier que l’EXE.
 
-The reference scene includes a coastal road and paved promenade, curb, guardrail, nine benches, streetlights, palms, beach, rocks, beach grass, parasols, towels, bins, gulls, and cars. The validated export contains **4,145,865 triangles**, **4,149,799 objects**, and **2,471,927 BVH nodes**; the uncompressed binary is **650,830,504 bytes**. The loader accepts up to **4,200,000 objects and BVH nodes**.
+The reference scene includes a coastal road and paved promenade, curb, guardrail, nine benches, streetlights, palms, beach, rocks, beach grass, parasols, towels, bins, gulls, and cars. The export contains about **1.54 million triangles** and **1.55 million objects**; each build reports exact counts. The loader accepts up to **4,200,000 objects and BVH nodes**.
 
 This native code renders on the CPU and has no GPU pipeline. The application has no interactive scene editor, physics, or animation yet. Edit `scene_coastal_v1314.js` and export again to change the scenery. Frame time depends on the processor, output size, internal scale, shadows, and reflections; triangle count is not an FPS benchmark. Keep `moteur3d_v1314_scene.bin` beside the EXE.
 
