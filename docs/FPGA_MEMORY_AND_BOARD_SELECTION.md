@@ -17,15 +17,15 @@
 | Option | Mémoire et compatibilité | Coût / état | Conclusion |
 |---|---|---|---|
 | AMD Artix-7 XC7A100T | Contrôleur mémoire externe DDR3 documenté ; pas de contrôleur GDDR6 intégré. | Composant affiché autour de 112–147 € selon le boîtier et le distributeur ; prix du PCB PCIe assemblé non confirmé. | Option de prototype économique seulement si l’on accepte DDR3. Ne satisfait pas la demande GDDR. |
-| Achronix Speedster7t | Contrôleurs GDDR6 intégrés ; la carte VectorPath S7t-VG6 est une cible commerciale possible. | Aucun prix public vérifié pour une carte complète à 1 000–1 500 € ni pour la puce à moins de 200 €. Le fabricant de la carte indique que ses outils ne sont plus maintenus pour les versions récentes des outils FPGA et systèmes d’exploitation. | Seule piste GDDR6 identifiée, mais pas une référence d’achat acceptable sans devis et vérification de la chaîne logicielle. |
+| Achronix Speedster7t / VectorPath 815 | La VectorPath 815 utilise le Speedster 7t1500 avec 32 Go de GDDR6, 16 canaux mémoire et PCIe Gen5 ×16. | Achronix publie la fiche technique actuelle mais pas de prix public. Le modèle S7t-VG6 précédent avait un MSRP de 8 495 $US ; BittWare le classe désormais comme ancien et ne recommande pas son achat pour un nouveau projet. | Meilleure candidate GDDR6 à chiffrer. La VP815 ne respecte pas encore les budgets annoncés tant qu’un devis n’a pas démontré le contraire ; vérifier runtime, pilote standard et conditions d’approvisionnement avant sélection. |
 | AMD Alveo U55C | HBM2 intégrée au boîtier, 16 Go et 460 Go/s ; ce n’est pas de la GDDR. | Prix affiché par AMD : 4 747 $US pour la carte. | Écartée : hors budget et mémoire différente de la GDDR demandée. |
 | AMD Alveo U50 | HBM2, pas GDDR. | AMD a fixé au 30 octobre 2026 la date limite de commandes finales, sous réserve de disponibilité. | Écartée pour une nouvelle cible durable. |
 
 ## Décision provisoire
 
-**Ne pas figer de référence de carte aujourd’hui.** Les contraintes « puce ≤ 200 € », « carte ≤ 1 500 € » et « mémoire GDDR » ne sont pas toutes satisfaites par une solution dont le prix, le support logiciel et l’approvisionnement ont été vérifiés.
+**Ne pas figer de référence d’achat aujourd’hui.** La candidate concrète à chiffrer pour respecter la préférence GDDR6 est la VectorPath 815. Le prix public n’étant pas disponible, les limites « puce FPGA ≤ 200 € » et « carte complète ≤ 1 500 € » restent non démontrées et paraissent incompatibles avec cette classe de matériel. Le S7t-VG6 à 8 495 $US sert uniquement de repère historique : c’est un produit ancien, non recommandé pour les nouvelles conceptions.
 
-La cible de conception conserve donc une interface mémoire indépendante du matériel. Le moteur pourra être testé sur le backend CPU ; une carte DDR peut servir à une mise au point FPGA seulement si l’écart avec la cible GDDR est explicitement accepté. La cible GDDR6 ne sera verrouillée qu’après obtention d’un devis pour la carte complète et confirmation du runtime, des pilotes standards, du support des outils et du fonctionnement multi-cartes.
+La cible de conception conserve une interface mémoire indépendante du matériel. Le moteur reste testable sur le backend CPU. Une carte DDR moins chère peut servir au bring-up du pipeline seulement si l’écart avec GDDR6 est explicitement accepté. Le choix final GDDR6 dépend d’un devis VP815 et de la confirmation du runtime, des pilotes standards, du support des outils et du fonctionnement multi-cartes.
 
 ## Interface mémoire à préserver dans l’architecture
 
@@ -59,7 +59,9 @@ Aucun temps de rendu FPGA n’est estimé ici : aucune carte de cette architectu
 - [AMD Artix-7 — interfaces mémoire de la série 7](https://docs.amd.com/r/en-US/conversion-methodology/External-Memory-Interfaces)
 - [DigiKey France — XC7A100T-1FTG256C, prix affiché](https://www.digikey.fr/en/products/detail/amd/XC7A100T-1FTG256C/3925807)
 - [Achronix — Speedster7t et mémoire GDDR6](https://careers.achronix.com/high-speed-interfaces)
-- [BittWare — VectorPath S7t-VG6, statut des outils](https://www.bittware.com/products/s7t-vg6/)
+- [Achronix — VectorPath 815, carte actuelle avec 32 Go de GDDR6](https://www.achronix.com/vectorpath-815-accelerator)
+- [Achronix — MSRP du modèle précédent S7t-VG6 : 8 495 $US](https://www.achronix.com/press-releases/achronix-vectorpath-accelerator-card-achieves-pcie-50-16-compliance-32-gts)
+- [BittWare — statut ancien et fin du support logiciel du S7t-VG6](https://www.bittware.com/products/s7t-vg6/)
 - [AMD — fiche U55C](https://docs.amd.com/r/en-US/ds978-u55c/Product-Details)
 - [AMD — prix U55C affiché dans la boutique](https://shop-us-en.amd.com/adaptive-embedded-computing/data-center-accelerator-cards/)
 - [AMD — avis de fin de commandes U50](https://docs.amd.com/v/u/en-US/XCN26004)
