@@ -3,6 +3,7 @@
 // normals, UVs, SAH BVH, and RGB565 mip chains. No scene is regenerated here.
 const fs = require('fs');
 const path = require('path');
+const { addGlbCar, readRgb565MipChain } = require('./gltf_scene_import');
 
 const htmlPath = process.argv[2] || path.join(__dirname, 'source_v1314.html');
 const outPath = process.argv[3] || path.join(__dirname, 'moteur3d_v1314_scene.bin');
@@ -23,11 +24,17 @@ if (materialStart < 0 || materialEnd < 0) throw new Error('Les fonctions texture
 // dramatically slower for this 1.25M-object scene, especially while building
 // its SAH BVH. Only the DOM canvas stub is supplied; no browser is involved.
 globalThis.document = { getElementById: () => ({ getContext: () => ({}) }) };
-eval(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\n${sceneSource}\nmakeScene(); buildBVH(); const __mats = [...new Set(objects.map(o => o.mat))]; for (const id of __mats) materials.set(id, makeMips(id, 512)); globalThis.__scene = { objects, bvh, bvhRoot, sun, skyZenith, skyHorizon, pointLights, materials, mats: __mats };`);
+globalThis.__m3dAppendClassicCar = (objects, placement) => {
+  const file = path.resolve(__dirname, placement.source);
+  globalThis.__m3dImportedCarTriangles = addGlbCar(objects, file, placement);
+};
+eval(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\n${sceneSource}\nmakeScene(); globalThis.__m3dAppendClassicCar(objects, M3D_IMPORTED_CAR); buildBVH(); const __mats = [...new Set(objects.map(o => o.mat))]; for (const id of __mats) materials.set(id, makeMips(id, 512)); globalThis.__scene = { objects, bvh, bvhRoot, sun, skyZenith, skyHorizon, pointLights, materials, mats: __mats };`);
 const scene = globalThis.__scene;
 const objects = scene.objects;
 const bvh = scene.bvh;
 const mats = scene.mats;
+scene.materials.set('classicBody', { levels: readRgb565MipChain(path.join(__dirname, 'assets/1970s-coupe/classic_body.rgb565mip')) });
+scene.materials.set('classicTire', { levels: readRgb565MipChain(path.join(__dirname, 'assets/1970s-coupe/classic_tire.rgb565mip')) });
 
 const types = { triangle: 0, box: 1, roundbox: 2, capsule: 3, cone: 4, ellipse: 5 };
 const matIndex = new Map(mats.map((m, i) => [m, i]));
@@ -88,4 +95,4 @@ if (offset !== totalBytes) throw new Error(`Taille binaire inattendue: ${offset}
 fs.writeFileSync(outPath, file);
 const counts = {};
 for (const o of objects) counts[o.type] = (counts[o.type] || 0) + 1;
-console.log(JSON.stringify({ source: path.basename(htmlPath), scene: path.basename(scenePath), objects: objects.length, triangles: counts.triangle, bvhNodes: bvh.length, bvhOrder: order.length, materials: mats, bytes: fs.statSync(outPath).size, counts }, null, 2));
+console.log(JSON.stringify({ source: path.basename(htmlPath), scene: path.basename(scenePath), objects: objects.length, triangles: counts.triangle, bvhNodes: bvh.length, bvhOrder: order.length, materials: mats, importedCarTriangles: globalThis.__m3dImportedCarTriangles || 0, bytes: fs.statSync(outPath).size, counts }, null, 2));

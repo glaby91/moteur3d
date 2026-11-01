@@ -14,7 +14,7 @@ Le contrat bilingue des entrées/sorties, module par module, est documenté dans
 
 ## Source de scène modifiable
 
-Toute la géométrie de décor est définie dans `scene_coastal_v1314.js`. Pour modifier la route, la promenade, les bancs, les rochers, les palmiers ou leur placement, éditez ce fichier uniquement. `source_v1314.html` fournit les primitives et l’aperçu HTML; l’exporteur natif charge le même fichier de scène. La promenade côtière fait environ 3,1 unités de largeur. La scène actuelle comprend neuf bancs, quatre parasols et serviettes, quatre poubelles, des mouettes, des lampadaires et des vagues; l’export courant validé contient 1 537 833 triangles, 1 541 767 objets et 920 433 nœuds BVH.
+Toute la géométrie de décor est définie dans `scene_coastal_v1314.js`. Pour modifier la route, la promenade, les bancs, les rochers, les palmiers ou leur placement, éditez ce fichier uniquement. `source_v1314.html` fournit les primitives et l’aperçu HTML; l’exporteur natif charge le même fichier de scène. La promenade côtière fait environ 3,1 unités de largeur. La scène actuelle comprend neuf bancs, quatre parasols et serviettes, quatre poubelles, des mouettes, des lampadaires et des vagues. Le coupé 1970s Coupe de Grab3D est intégré comme maillage glTF CC0 dans la scène native; l’export courant validé contient 1 537 833 triangles, 1 541 767 objets et 920 433 nœuds BVH.
 
 ## Fonctionnalités détaillées
 
@@ -51,3 +51,10 @@ Le workflow GitHub injecte la révision, la branche et le numéro de run, charge
 Le mode FSAA 16× utilise un motif tourné et stratifié de 16 rayons par pixel, afin de réduire les motifs d’aliasing d’une grille régulière. La profondeur de champ est optionnelle : elle échantillonne une ouverture de lentille et impose au moins 4 rayons par pixel; le mode FSAA 16× conserve ses 16 rayons. L’ouverture et le plan de mise au point sont calculés à partir de la distance caméra. Ces effets augmentent le temps CPU.
 
 Le rendu reprend ainsi deux idées du T-Buffer (échantillonnage spatial et profondeur de champ), sous forme logicielle. La scène ne contenant aucune animation d’objet, le flou de mouvement temporel n’est pas activé : il nécessite plusieurs positions d’un objet pendant l’exposition. Les ombres filtrées PCF et les reflets multi-échantillonnés de l’eau étaient déjà pris en charge.
+
+
+## Voiture 1970s Coupe
+
+Le fichier source CC0 est dans `assets/1970s-coupe/1970s-coupe.glb`. L’exporteur extrait le maillage glTF (positions, normales, UV et matériaux), applique son placement déclaré dans `scene_coastal_v1314.js`, puis l’ajoute au BVH de la scène. Les textures de couleur de carrosserie et de pneus sont préconverties en chaînes RGB565 512→8 afin que le workflow Windows n’ait pas besoin d’un décodeur JPEG. Le moteur applique son éclairage et ses reflets natifs au matériau carrosserie; son format de scène ne prend pas encore en charge les textures métalliques, de rugosité et de normales du GLB.
+
+La source est publiée sous CC0 1.0 : https://grab3d.com/models/vehicles/1970s-coupe/.

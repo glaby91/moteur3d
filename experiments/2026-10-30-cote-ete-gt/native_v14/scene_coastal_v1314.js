@@ -8,6 +8,14 @@ function m3dSceneEllipsoid(...args){ args[7]=m3dSceneDetailSteps(args[7] ?? 20);
 function m3dSceneLoft(...args){ args[3]=m3dSceneDetailSteps(args[3] ?? 2); args[4]=m3dSceneDetailSteps(args[4] ?? 2); return loftedSmoothMesh(...args); }
 function m3dSceneTorus(...args){ args[6]=m3dSceneDetailSteps(args[6] ?? 64); args[7]=m3dSceneDetailSteps(args[7] ?? 14); return torusWheelMesh(...args); }
 
+// 1970s Coupe CC0 imported during the native scene export. Its original +Z
+// front is mapped toward the road's negative Z direction.
+const M3D_IMPORTED_CAR = Object.freeze({
+ source: 'assets/1970s-coupe/1970s-coupe.glb',
+ position: [2.02, 0, -14.4],
+ scale: 1
+});
+
 function makeScene(){
  objects.length=0;
  // Long coastal road, with the shoreline running along its right side.
