@@ -19,3 +19,5 @@ Stats render(const Scene&s,const ShadowMap&sm,const Camera&cam,int w,int h,std::
   }}rays.fetch_add(local.rays);tests.fetch_add(local.tests);aabb.fetch_add(local.aabb);nodes.fetch_add(local.nodes);hits.fetch_add(local.hits);skies.fetch_add(local.sky);texels.fetch_add(local.texels);depth.fetch_add(local.depthReads);};
  threads=std::max(1u,std::min(threads,(unsigned)total));std::vector<std::thread>pool;for(unsigned i=0;i<threads;i++)pool.emplace_back(worker);for(auto&t:pool)t.join();Stats st;st.rays=rays;st.tests=tests;st.aabb=aabb;st.nodes=nodes;st.hits=hits;st.sky=skies;st.texels=texels;st.depthReads=depth;st.threads=threads;st.ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();return st;
 }
+
+}
