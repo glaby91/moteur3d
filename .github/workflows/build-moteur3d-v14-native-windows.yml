@@ -8,6 +8,7 @@ on:
       - experiments/2026-10-30-cote-ete-gt/native_v14/assemble_native.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/m3d_engine.h
       - experiments/2026-10-30-cote-ete-gt/native_v14/src/**
+      - experiments/2026-10-30-cote-ete-gt/native_v14/tests/**
       - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/source_v1314.html
       - experiments/2026-10-30-cote-ete-gt/native_v14/scene_coastal_v1314.js
@@ -31,7 +32,7 @@ jobs:
         uses: actions/checkout@v4
       - name: Configure MSVC
         uses: ilammy/msvc-dev-cmd@v1
-      - name: Inject GitHub revision and branch into build metadata
+      - name: Inject GitHub revision, branch and run into build metadata
         shell: pwsh
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: |
@@ -43,30 +44,63 @@ jobs:
           #define M3D_GIT_REVISION_WIDE L"$revision"
           #define M3D_GIT_BRANCH_ANSI "$branch"
           #define M3D_GIT_BRANCH_WIDE L"$branch"
+          #define M3D_GIT_RUN_WIDE L"$env:GITHUB_RUN_NUMBER"
           "@ | Set-Content -Path build_info.h -Encoding ascii
-      - name: Export actual V13.14 scene, BVH and textures
+      - name: Export scene and write provenance manifest
         shell: pwsh
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
-        run: node export_scene.js source_v1314.html moteur3d_v1314_scene.bin scene_coastal_v1314.js
-      - name: Reconstruct the native source from modules
+        run: |
+          $exportJson = node export_scene.js source_v1314.html moteur3d_v1314_scene.bin scene_coastal_v1314.js | Out-String
+          if ($LASTEXITCODE -ne 0) { throw "Scene export failed." }
+          $sceneStats = $exportJson | ConvertFrom-Json
+          $manifest = [ordered]@{
+            build_id = "261101-0819"
+            run_number = [int]$env:GITHUB_RUN_NUMBER
+            commit = $env:GITHUB_SHA
+            branch = $env:GITHUB_REF_NAME
+            scene_version = "V13.14"
+            generated_utc = (Get-Date).ToUniversalTime().ToString("o")
+            scene = $sceneStats
+          }
+          $manifest | ConvertTo-Json -Depth 6 | Set-Content build-manifest.json -Encoding utf8
+      - name: Reconstruct native source from modules
         shell: pwsh
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: node assemble_native.js
-      - name: Compile reconstructed native x64 source and Windows version resource
-        shell: cmd
-        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
-        run: |
-          cl /nologo /O2 /EHsc /std:c++17 /utf-8 /DUNICODE /D_UNICODE /c moteur3d_v14_native.cpp
-          rc /nologo moteur3d_v14_native.rc
-          link /nologo /SUBSYSTEM:WINDOWS moteur3d_v14_native.obj moteur3d_v14_native.res user32.lib gdi32.lib comctl32.lib /OUT:Moteur3D-Natif-x64-261101-0819.exe
-      - name: Package executable with the exported V13.14 scene
+      - name: Compile and run native loader/render smoke test
         shell: pwsh
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
-        run: Compress-Archive -Path Moteur3D-Natif-x64-261101-0819.exe,moteur3d_v1314_scene.bin -DestinationPath Moteur3D-Natif-x64-261101-0819.zip -CompressionLevel Optimal
+        run: |
+          cl /nologo /O2 /EHsc /std:c++17 /utf-8 tests/native_smoke.cpp src/m3d_scene.cpp src/m3d_lighting.cpp src/m3d_intersection.cpp src/m3d_shading.cpp src/m3d_render.cpp src/m3d_post.cpp /Fe:native_smoke.exe
+          if ($LASTEXITCODE -ne 0) { throw "Smoke test compilation failed." }
+          .\native_smoke.exe
+          if ($LASTEXITCODE -ne 0) { throw "Native smoke test failed." }
+      - name: Compile native x64 app and Windows version resource
+        shell: pwsh
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          $revision = $env:GITHUB_SHA.Substring(0, 12)
+          $artifact = "Moteur3D-Natif-x64-run$env:GITHUB_RUN_NUMBER-$revision"
+          cl /nologo /O2 /EHsc /std:c++17 /utf-8 /DUNICODE /D_UNICODE /c moteur3d_v14_native.cpp
+          if ($LASTEXITCODE -ne 0) { throw "Native C++ compilation failed." }
+          rc /nologo moteur3d_v14_native.rc
+          if ($LASTEXITCODE -ne 0) { throw "Windows resource compilation failed." }
+          link /nologo /SUBSYSTEM:WINDOWS moteur3d_v14_native.obj moteur3d_v14_native.res user32.lib gdi32.lib comctl32.lib "/OUT:$artifact.exe"
+          if ($LASTEXITCODE -ne 0) { throw "Native application link failed." }
+      - name: Package executable, scene and manifest
+        id: package
+        shell: pwsh
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          $revision = $env:GITHUB_SHA.Substring(0, 12)
+          $artifact = "Moteur3D-Natif-x64-run$env:GITHUB_RUN_NUMBER-$revision"
+          Compress-Archive -Path "$artifact.exe",moteur3d_v1314_scene.bin,build-manifest.json -DestinationPath "$artifact.zip" -CompressionLevel Optimal
+          "artifact_name=$artifact" >> $env:GITHUB_OUTPUT
+          "zip_path=experiments/2026-10-30-cote-ete-gt/native_v14/$artifact.zip" >> $env:GITHUB_OUTPUT
       - name: Upload Windows x64 application
         uses: actions/upload-artifact@v4
         with:
-          name: Moteur3D-Natif-x64-261101-0819
-          path: experiments/2026-10-30-cote-ete-gt/native_v14/Moteur3D-Natif-x64-261101-0819.zip
+          name: ${{ steps.package.outputs.artifact_name }}
+          path: ${{ steps.package.outputs.zip_path }}
           if-no-files-found: error
           retention-days: 30

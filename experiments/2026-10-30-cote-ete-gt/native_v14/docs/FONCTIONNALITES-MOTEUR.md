@@ -54,9 +54,9 @@ At 200%, the renderer doubles both internal dimensions (four times as many pixel
 
 Le rendu répartit les pixels en tuiles de 16 × 16 entre 1 et 16 threads. Une nouvelle demande invalide les travaux précédents par un identifiant de génération; le calcul reste séparé de l’interface Windows.
 
-Après le rendu, l’interface affiche le temps CPU et le post-traitement, le nombre de threads, les rayons, impacts, rayons de ciel, tests d’intersection, nœuds BVH visités, tests AABB, objets, triangles et texels échantillonnés.
+Après le rendu, l’interface affiche séparément le temps de rendu, la reconstruction éventuelle de la carte d’ombres, le post-traitement et le total, le nombre de threads, les rayons, impacts, rayons de ciel, tests d’intersection, nœuds BVH visités, tests AABB, objets, triangles et texels échantillonnés.
 
-Rendering distributes 16 × 16 pixel tiles across 1–16 CPU threads. A generation token cancels stale work when a new render is requested, while a separate coordinator keeps the UI responsive. Diagnostics report render and post-processing time, threads, rays, hits, sky rays, intersection tests, visited BVH nodes, AABB tests, objects, triangles, and sampled texels.
+Rendering distributes 16 × 16 pixel tiles across 1–16 CPU threads. A generation token cancels stale work when a new render is requested, while a separate coordinator keeps the UI responsive. Diagnostics report render time, shadow-map build time when rebuilt, post-processing time, and total time, threads, rays, hits, sky rays, intersection tests, visited BVH nodes, AABB tests, objects, triangles, and sampled texels.
 
 ## Scène actuelle et limites / Current scene and limitations
 

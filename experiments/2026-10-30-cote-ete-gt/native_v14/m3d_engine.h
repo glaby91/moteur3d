@@ -29,7 +29,7 @@ struct Scene { std::vector<Obj> obj; std::vector<Node> node; std::vector<uint32_
 struct Ray { V o,d; };
 struct Hit { float t=INF; V p,n; int mat=-1,id=-1; };
 struct Camera { V eye,f,r,u; float tanHalf=0,aspect=1,pixelAngle=0; };
-struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,depthReads=0,shadowRays=0; double ms=0,postMs=0; unsigned threads=1; };
+struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,depthReads=0,shadowRays=0; double ms=0,postMs=0,shadowMs=0; unsigned threads=1; };
 struct Light { V p; float radius,intensity; V color; };
 struct ShadowMap { int size=1024; float span=30,dist=42; V base={0,1.5f,0},right,up;std::vector<float>d,min,max; };
 extern V sun,skyZenith,skyHorizon,sunTint;

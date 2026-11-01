@@ -24,9 +24,9 @@ Ce document définit les données attendues par chaque partie du moteur et les r
 
 Le fichier binaire doit provenir de `export_scene.js` exécuté sur `source_v1314.html`. Il contient la géométrie réelle V13.14, les normales, UV, matériaux, mipmaps RGB565 et le BVH. Le moteur natif ne crée pas de scène de remplacement. La scène comprend notamment la promenade pavée élargie, neuf bancs, quatre parasols et serviettes, quatre poubelles, des mouettes, des lampadaires et les vagues.
 
-Le format commence par l’identifiant `M3D1314`, la version de format `1), les nombres d’objets, de nœuds BVH, d’indices et de matériaux, puis la racine du BVH et la taille de texture. Les matériaux ont un nom UTF-8 de 24 octets. Les objets ont un type, un indice de matériau, des limites et les paramètres propres à leur primitive. Les nœuds BVH contiennent leurs limites et leurs liens; la liste des indices et les mipmaps suivent.
+Le format commence par 8 octets de signature `M3D1314`, puis des entiers little-endian : version, nombre d’objets, nombre de nœuds BVH, racine BVH, nombre d’indices d’ordre, nombre de matériaux, nombre de textures et dimension de texture. Suivent les noms de matériaux UTF-8 sur 24 octets, les objets, les nœuds BVH, l’ordre des objets et les mipmaps RGB565.
 
-Le chargeur vérifie notamment la signature et la version, limite les objets et nœuds à 4 200 000, exige que le nombre d’indices BVH soit égal au nombre d’objets, vérifie chaque indice et limite une pyramide de mipmaps à 10 niveaux. Un fichier absent, tronqué ou invalide doit produire un message explicite et arrêter le rendu.
+Le chargeur vérifie la signature, la version, les limites de quantités, la racine et le graphe BVH (liens, cycles, portée des feuilles et couverture complète des objets), les bornes finies, les matériaux et indices, ainsi que les mipmaps attendus (7 niveaux de 512×512 à 8×8). Il rejette les données manquantes ou supplémentaires avec un message explicite et convertit les erreurs d’allocation en erreur de chargement.
 
 Les réglages d’entrée sont fournis par l’interface :
 
@@ -37,7 +37,7 @@ Les réglages d’entrée sont fournis par l’interface :
 - Threads CPU : 1–16.
 - Brouillard : activé ou désactivé.
 
-**Sortie à l’exécution :** une image calculée en mémoire, redimensionnée à la résolution choisie et affichée dans la fenêtre. Le programme ne sauvegarde pas spontanément de PNG ou de JPEG. L’interface publie aussi les temps de rendu et de post-traitement, le nombre de rayons, d’impacts, de tests BVH/AABB, de nœuds visités, de texels et de threads.
+**Sortie à l’exécution :** une image calculée en mémoire, redimensionnée à la résolution choisie et affichée dans la fenêtre. Le programme ne sauvegarde pas spontanément de PNG ou de JPEG. L’interface publie les temps de rendu, de reconstruction des ombres, de post-traitement et le total, ainsi que les rayons, impacts, tests BVH/AABB, nœuds visités, texels et threads.
 
 ### English
 
@@ -45,9 +45,9 @@ Les réglages d’entrée sont fournis par l’interface :
 
 The binary must be produced by running `export_scene.js` on `source_v1314.html`. It contains the actual V13.14 geometry, normals, UVs, materials, RGB565 mipmaps and BVH. The native renderer does not create a substitute scene. The scene includes the widened paved promenade, benches facing the sea, street lamps and waves.
 
-The file begins with the `M3D1314` signature, format version `1`, object, BVH-node, index and material counts, then the BVH root and texture size. Materials have a 24-byte UTF-8 name. Objects have a primitive type, material index, bounds and primitive-specific parameters. BVH nodes contain their bounds and links; the index list and mipmaps follow.
+The file begins with an 8-byte `M3D1314` signature, followed by little-endian integers for version, object count, BVH-node count, BVH root, order-index count, material count, texture count and texture dimension. It then stores 24-byte UTF-8 material names, objects, BVH nodes, object order and RGB565 mipmaps.
 
-The loader checks the signature and version, caps objects and nodes at 4,200,000, requires the BVH index count to equal the object count, validates each index and limits each mip chain to 10 levels. Missing, truncated or invalid input must produce a clear error and stop rendering.
+The loader validates the signature, version, count limits, root and BVH graph (links, cycles, leaf ranges, and complete object coverage), finite bounds, material indices, and the fixed seven mip levels from 512×512 to 8×8. Missing, truncated, trailing or invalid data returns a clear error; allocation failures are caught.
 
 Inputs supplied by the user interface:
 
@@ -58,7 +58,7 @@ Inputs supplied by the user interface:
 - CPU threads: 1–16.
 - Fog: enabled or disabled.
 
-**Runtime output:** an in-memory rendered image, resized to the selected output resolution and displayed in the window. The program does not automatically save a PNG or JPEG. The UI also reports render and post-processing times, ray, hit, BVH/AABB test, node, texel and thread counts.
+**Runtime output:** an in-memory rendered image, resized to the selected output resolution and displayed in the window. The program does not automatically save a PNG or JPEG. The UI also reports render, shadow-map rebuild, post-processing and total times, along with ray, hit, BVH/AABB test, node, texel and thread counts.
 
 ## 2. Contrat par module / Module contracts
 

@@ -14,7 +14,7 @@ Le contrat bilingue des entrées/sorties, module par module, est documenté dans
 
 ## Source de scène modifiable
 
-Toute la géométrie de décor est définie dans `scene_coastal_v1314.js`. Pour modifier la route, la promenade, les bancs, les rochers, les palmiers ou leur placement, éditez ce fichier uniquement. `source_v1314.html` fournit les primitives et l’aperçu HTML; l’exporteur natif charge le même fichier de scène. La promenade côtière fait environ 3,1 unités de largeur. La scène actuelle comprend neuf bancs, quatre parasols et serviettes, quatre poubelles, des mouettes, des lampadaires et des vagues; l’export contient 4 145 865 triangles et 4 149 799 objets.
+Toute la géométrie de décor est définie dans `scene_coastal_v1314.js`. Pour modifier la route, la promenade, les bancs, les rochers, les palmiers ou leur placement, éditez ce fichier uniquement. `source_v1314.html` fournit les primitives et l’aperçu HTML; l’exporteur natif charge le même fichier de scène. La promenade côtière fait environ 3,1 unités de largeur. La scène actuelle comprend neuf bancs, quatre parasols et serviettes, quatre poubelles, des mouettes, des lampadaires et des vagues; l’export courant validé contient 1 537 833 triangles, 1 541 767 objets et 920 433 nœuds BVH.
 
 ## Fonctionnalités détaillées
 
@@ -43,6 +43,6 @@ L’ordre de reconstruction/compilation est : scène → éclairage → intersec
 
 ## Téléchargement et compilation
 
-L’archive `Moteur3D-Natif-x64-261101-0819.zip` contient l’exécutable x64 et `moteur3d_v1314_scene.bin`. Extraire les deux fichiers dans le même dossier, puis lancer le fichier EXE.
+Le ZIP de chaque exécution porte son numéro de run et son SHA court; il contient l’exécutable x64, `moteur3d_v1314_scene.bin` et `build-manifest.json` avec la provenance et les statistiques d’export. Extraire les deux fichiers dans le même dossier, puis lancer le fichier EXE.
 
-Le workflow GitHub injecte la révision et la branche, charge `scene_coastal_v1314.js` avec le moteur de `source_v1314.html`, reconstruit le fichier source et compile avec MSVC. Pour compiler une autre scène, passez son fichier JS au troisième argument de `export_scene.js` et chargez ce même module dans l’aperçu HTML. Le mode **Ultra** conserve les ombres adoucies et les réflexions à un rebond sur l’eau, la peinture et les vitrages.
+Le workflow GitHub injecte la révision, la branche et le numéro de run, charge `scene_coastal_v1314.js` avec le moteur de `source_v1314.html`, reconstruit le fichier source et compile avec MSVC. Pour compiler une autre scène, passez son fichier JS au troisième argument de `export_scene.js` et chargez ce même module dans l’aperçu HTML. Le mode **Ultra** conserve les ombres adoucies et les réflexions à un rebond sur l’eau, la peinture et les vitrages.
