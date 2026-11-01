@@ -1,9 +1,9 @@
 #include <windows.h>
 #include "version.h"
-
+#include "build_info.h"
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION M3D_REVISION,M3D_BRANCH,0,0
- PRODUCTVERSION M3D_REVISION,M3D_BRANCH,0,0
+ FILEVERSION 1,0,0,857
+ PRODUCTVERSION 1,0,0,857
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS VOS_NT_WINDOWS32
@@ -15,13 +15,15 @@ BEGIN
   BLOCK "040c04B0"
   BEGIN
    VALUE "CompanyName", "Moteur 3D\0"
-   VALUE "FileDescription", "Moteur 3D natif x64 — Rev 1, Branch 3, build 261101-0850\0"
-   VALUE "FileVersion", M3D_RELEASE_ID_ANSI "\0"
+   VALUE "FileDescription", "Moteur 3D natif x64 — build 261101-0857\0"
+   VALUE "FileVersion", "1.0.0.857\0"
    VALUE "InternalName", "Moteur3D_Natif_x64\0"
-   VALUE "OriginalFilename", "Moteur3D-Natif-x64-Rev1-Branch3-261101-0850.exe\0"
+   VALUE "OriginalFilename", "Moteur3D-Natif-x64-261101-0857.exe\0"
    VALUE "ProductName", "Moteur 3D natif x64\0"
    VALUE "ProductVersion", M3D_RELEASE_ID_ANSI "\0"
    VALUE "SpecialBuild", M3D_BUILD_ID_ANSI "\0"
+   VALUE "Comments", "Git revision " M3D_GIT_REVISION_ANSI " | branche " M3D_GIT_BRANCH_ANSI "\0"
+   VALUE "PrivateBuild", "Git " M3D_GIT_REVISION_ANSI " | " M3D_GIT_BRANCH_ANSI "\0"
   END
  END
  BLOCK "VarFileInfo"

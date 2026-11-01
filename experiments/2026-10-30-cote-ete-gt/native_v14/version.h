@@ -1,7 +1,6 @@
 #pragma once
-#define M3D_REVISION 1
-#define M3D_BRANCH 3
-#define M3D_BUILD_ID_ANSI "261101-0850"
-#define M3D_BUILD_ID_WIDE L"261101-0850"
-#define M3D_RELEASE_ID_ANSI "Rev 1 | Branch 3 | 261101-0850"
-#define M3D_RELEASE_ID_WIDE L"Rev 1 | Branch 3 | 261101-0850"
+#include "build_info.h"
+#define M3D_BUILD_ID_ANSI "261101-0857"
+#define M3D_BUILD_ID_WIDE L"261101-0857"
+#define M3D_RELEASE_ID_ANSI "Build 261101-0857"
+#define M3D_RELEASE_ID_WIDE L"Build 261101-0857"

@@ -1,16 +1,20 @@
-name: Build native Moteur 3D — Rev 1 Branch 3
+name: Build native Moteur 3D — GitHub revision and branch
 
 on:
   push:
     branches:
       - experiment/manhattan-silent-hill-2026-10-30
     paths:
-      - experiments/2026-10-30-cote-ete-gt/native_v14/moteur3d_v14_native.cpp
+      - experiments/2026-10-30-cote-ete-gt/native_v14/assemble_native.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/m3d_engine.h
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/**
       - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/source_v1314.html
       - experiments/2026-10-30-cote-ete-gt/native_v14/version.h
+      - experiments/2026-10-30-cote-ete-gt/native_v14/build_info.h
       - experiments/2026-10-30-cote-ete-gt/native_v14/moteur3d_v14_native.rc
       - experiments/2026-10-30-cote-ete-gt/native_v14/README.md
+      - experiments/2026-10-30-cote-ete-gt/native_v14/docs/**
       - .github/workflows/build-moteur3d-v14-native-windows.yml
   workflow_dispatch:
 
@@ -26,25 +30,42 @@ jobs:
         uses: actions/checkout@v4
       - name: Configure MSVC
         uses: ilammy/msvc-dev-cmd@v1
+      - name: Inject GitHub revision and branch into build metadata
+        shell: pwsh
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          $revision = $env:GITHUB_SHA.Substring(0, 12)
+          $branch = $env:GITHUB_REF_NAME
+          @"
+          #pragma once
+          #define M3D_GIT_REVISION_ANSI "$revision"
+          #define M3D_GIT_REVISION_WIDE L"$revision"
+          #define M3D_GIT_BRANCH_ANSI "$branch"
+          #define M3D_GIT_BRANCH_WIDE L"$branch"
+          "@ | Set-Content -Path build_info.h -Encoding ascii
       - name: Export actual V13.14 scene, BVH and textures
         shell: pwsh
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: node export_scene.js source_v1314.html moteur3d_v1314_scene.bin
-      - name: Compile native x64 application and Windows version resource
+      - name: Reconstruct the native source from modules
+        shell: pwsh
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: node assemble_native.js
+      - name: Compile reconstructed native x64 source and Windows version resource
         shell: cmd
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: |
           cl /nologo /O2 /EHsc /std:c++17 /utf-8 /DUNICODE /D_UNICODE /c moteur3d_v14_native.cpp
           rc /nologo moteur3d_v14_native.rc
-          link /nologo /SUBSYSTEM:WINDOWS moteur3d_v14_native.obj moteur3d_v14_native.res user32.lib gdi32.lib comctl32.lib /OUT:Moteur3D-Natif-x64-Rev1-Branch3-261101-0850.exe
+          link /nologo /SUBSYSTEM:WINDOWS moteur3d_v14_native.obj moteur3d_v14_native.res user32.lib gdi32.lib comctl32.lib /OUT:Moteur3D-Natif-x64-261101-0857.exe
       - name: Package executable with the exported V13.14 scene
         shell: pwsh
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
-        run: Compress-Archive -Path Moteur3D-Natif-x64-Rev1-Branch3-261101-0850.exe,moteur3d_v1314_scene.bin -DestinationPath Moteur3D-Natif-x64-Rev1-Branch3-261101-0850.zip -CompressionLevel Optimal
+        run: Compress-Archive -Path Moteur3D-Natif-x64-261101-0857.exe,moteur3d_v1314_scene.bin -DestinationPath Moteur3D-Natif-x64-261101-0857.zip -CompressionLevel Optimal
       - name: Upload Windows x64 application
         uses: actions/upload-artifact@v4
         with:
-          name: Moteur3D-Natif-x64-Rev1-Branch3-261101-0850
-          path: experiments/2026-10-30-cote-ete-gt/native_v14/Moteur3D-Natif-x64-Rev1-Branch3-261101-0850.zip
+          name: Moteur3D-Natif-x64-261101-0857
+          path: experiments/2026-10-30-cote-ete-gt/native_v14/Moteur3D-Natif-x64-261101-0857.zip
           if-no-files-found: error
           retention-days: 30
