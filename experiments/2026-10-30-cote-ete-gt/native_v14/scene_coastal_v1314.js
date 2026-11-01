@@ -2,7 +2,7 @@
 // Geometry helpers such as box(), roundBox(), cone(), capsule() and meshTriangle()
 // are provided by source_v1314.html and are available when makeScene() runs.
 // Increase tessellation so generated meshes contain about 50% more triangles.
-const M3D_SCENE_DETAIL_GAIN = Math.sqrt(1.5);
+const M3D_SCENE_DETAIL_GAIN = 2.0; // cible proche de 4 millions de triangles
 const m3dSceneDetailSteps = n => Math.max(3, Math.round((n || 1) * M3D_SCENE_DETAIL_GAIN));
 function m3dSceneEllipsoid(...args){ args[7]=m3dSceneDetailSteps(args[7] ?? 20); args[8]=m3dSceneDetailSteps(args[8] ?? 14); return ellipsoidMesh(...args); }
 function m3dSceneLoft(...args){ args[3]=m3dSceneDetailSteps(args[3] ?? 2); args[4]=m3dSceneDetailSteps(args[4] ?? 2); return loftedSmoothMesh(...args); }
@@ -106,6 +106,26 @@ function makeScene(){
   }
  };
  for(let z=-26;z>-248;z-=34)makeBench(6.42,z);
+ // Deux assises supplémentaires, décalées entre les groupes existants.
+ makeBench(6.42,-77);makeBench(6.42,-213);
+ // Poubelles compactes le long de la promenade, à distance des bancs et des mâts.
+ for(const z of [-43,-95,-145,-215]){
+  roundBox(7.34,.06,z-.22,7.72,.78,z+.22,.07,'metal');
+  roundBox(7.30,.72,z-.25,7.76,.82,z+.25,.06,'rust');
+  roundBox(7.42,.31,z-.226,7.64,.50,z-.218,.025,'sign');
+ }
+ // Parasols et serviettes sur le sable, espacés des palmiers.
+ for(const [x,z,color,towel] of [[10.95,-27,'sportsRed','cloth'],[10.95,-73,'carBlue','sportsViolet'],[10.85,-119,'sportsViolet','cloth'],[10.95,-193,'sportsRed','carBlue']]){
+  capsule([x,.04,z],[x,1.82,z],.035,'metal');
+  cone([x,2.28,z],[x,1.86,z],.045,.72,color);
+  m3dSceneEllipsoid(x,2.29,z,.07,.045,.07,'metal',10,6);
+  roundBox(x-.77,.045,z+.48,x-.04,.065,z+1.25,.035,towel);
+ }
+ // Mouettes stylisées au-dessus de la mer.
+ for(const [x,y,z,span] of [[14.5,7.8,-44,.52],[17.0,9.1,-103,.68],[13.7,6.9,-171,.46],[19.0,8.4,-222,.58]]){
+  capsule([x-span,y-.10,z],[x,y,z],.018,'cloth');
+  capsule([x,y,z],[x+span,y-.10,z],.018,'cloth');
+ }
  // Quelques rochers bas et touffes d’oyats pour donner une échelle au rivage.
  for(const [x,y,z,rx,rz] of [[9.15,.10,-2.2,.34,.48],[9.55,.13,-5.2,.48,.34],[9.75,.11,-10.8,.38,.52],[9.10,.09,-13.6,.28,.42],[-6.0,.12,-10.5,.43,.36]])
   m3dSceneEllipsoid(x,y,z,rx,.14,rz,'stone',18,10);
