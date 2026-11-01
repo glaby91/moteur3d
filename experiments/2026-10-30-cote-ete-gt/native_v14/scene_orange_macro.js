@@ -56,9 +56,9 @@ function makeScene() {
   // A small, flat lance-shaped leaf laid toward the camera so its silhouette
   // reads clearly in the macro framing instead of becoming a thin spike.
   const leafBase = [cx - .015, 2.14, cz + .015];
-  const leafMid = [cx - .18, 2.30, cz + .12];
-  const leafTip = [cx - .38, 2.43, cz + .25];
-  const side = [-.075, .020, -.075];
+  const leafMid = [cx - .10, 2.22, cz + .06];
+  const leafTip = [cx - .22, 2.30, cz + .15];
+  const side = [-.042, .012, -.042];
   const left = [leafMid[0] + side[0], leafMid[1] + side[1], leafMid[2] + side[2]];
   const right = [leafMid[0] - side[0], leafMid[1] - side[1], leafMid[2] - side[2]];
   const leafNormal = norm(-.10, .90, .42);
