@@ -1,6 +1,6 @@
 # Contrat d’entrées et de sorties — Moteur 3D natif x64
 
-**Version du document :** 1.1  
+**Version du document :** 1.2  
 **Identifiant de build :** 261101-0819  
 **Scène source :** V13.14  
 **Révision GitHub :** injectée au build (SHA court du commit)  
@@ -22,11 +22,11 @@ Ce document définit les données attendues par chaque partie du moteur et les r
 
 **Entrée obligatoire à l’exécution :** `moteur3d_v1314_scene.bin`, placé dans le même dossier que l’exécutable. L’application ne prend pas d’arguments de ligne de commande; elle déduit le chemin de la scène à partir du chemin de son propre EXE.
 
-Le fichier binaire doit provenir de `export_scene.js` exécuté sur `source_v1314.html`. Il contient la géométrie réelle V13.14, les normales, UV, matériaux, mipmaps RGB565 et le BVH. Le moteur natif ne crée pas de scène de remplacement. La scène comprend notamment la promenade pavée élargie, ses bancs orientés vers la mer, les lampadaires et les vagues.
+Le fichier binaire doit provenir de `export_scene.js` exécuté sur `source_v1314.html`. Il contient la géométrie réelle V13.14, les normales, UV, matériaux, mipmaps RGB565 et le BVH. Le moteur natif ne crée pas de scène de remplacement. La scène comprend notamment la promenade pavée élargie, neuf bancs, quatre parasols et serviettes, quatre poubelles, des mouettes, des lampadaires et les vagues.
 
 Le format commence par l’identifiant `M3D1314`, la version de format `1), les nombres d’objets, de nœuds BVH, d’indices et de matériaux, puis la racine du BVH et la taille de texture. Les matériaux ont un nom UTF-8 de 24 octets. Les objets ont un type, un indice de matériau, des limites et les paramètres propres à leur primitive. Les nœuds BVH contiennent leurs limites et leurs liens; la liste des indices et les mipmaps suivent.
 
-Le chargeur vérifie notamment la signature et la version, limite les objets et nœuds à 2 000 000, exige que le nombre d’indices BVH soit égal au nombre d’objets, vérifie chaque indice et limite une pyramide de mipmaps à 10 niveaux. Un fichier absent, tronqué ou invalide doit produire un message explicite et arrêter le rendu.
+Le chargeur vérifie notamment la signature et la version, limite les objets et nœuds à 4 200 000, exige que le nombre d’indices BVH soit égal au nombre d’objets, vérifie chaque indice et limite une pyramide de mipmaps à 10 niveaux. Un fichier absent, tronqué ou invalide doit produire un message explicite et arrêter le rendu.
 
 Les réglages d’entrée sont fournis par l’interface :
 
@@ -47,7 +47,7 @@ The binary must be produced by running `export_scene.js` on `source_v1314.html`.
 
 The file begins with the `M3D1314` signature, format version `1`, object, BVH-node, index and material counts, then the BVH root and texture size. Materials have a 24-byte UTF-8 name. Objects have a primitive type, material index, bounds and primitive-specific parameters. BVH nodes contain their bounds and links; the index list and mipmaps follow.
 
-The loader checks the signature and version, caps objects and nodes at 2,000,000, requires the BVH index count to equal the object count, validates each index and limits each mip chain to 10 levels. Missing, truncated or invalid input must produce a clear error and stop rendering.
+The loader checks the signature and version, caps objects and nodes at 4,200,000, requires the BVH index count to equal the object count, validates each index and limits each mip chain to 10 levels. Missing, truncated or invalid input must produce a clear error and stop rendering.
 
 Inputs supplied by the user interface:
 
