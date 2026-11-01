@@ -30,7 +30,7 @@ Le chargeur vérifie la signature, la version, les limites de quantités, la rac
 
 Les réglages d’entrée sont fournis par l’interface :
 
-- Résolution de sortie : 1920×1080, 1600×900 ou 1280×720.
+- Résolution de sortie : 1920×1080 (par défaut), 1600×900, 1280×720 ou 3840×2160 (4K UHD).
 - Précision interne : 100 %, 87,5 %, 75 %, 66,7 %, 50 % ou 200 % par axe.
 - Caméra : distance, rotation (−180° à 180°), élévation (−5° à 50°) et champ horizontal (35° à 105°).
 - Heure : positions 0–32, converties en 06:00–22:00 par pas de 30 minutes.
@@ -51,7 +51,7 @@ The loader validates the signature, version, count limits, root and BVH graph (l
 
 Inputs supplied by the user interface:
 
-- Output resolution: 1920×1080, 1600×900 or 1280×720.
+- Output resolution: 1920×1080 (default), 1600×900, 1280×720, or 3840×2160 (4K UHD).
 - Internal scale: 100%, 87.5%, 75%, 66.7%, 50% or 200% per axis.
 - Camera: distance, rotation (−180° to 180°), elevation (−5° to 50°) and horizontal field of view (35° to 105°).
 - Time: slider positions 0–32 map to 06:00–22:00 in 30-minute steps.

@@ -18,6 +18,8 @@ Ce document décrit l’application Windows native et les modules C++ compilés 
 - Les ombres disposent de leur propre carte de profondeur de 1024 × 1024 pixels, filtrée en PCF 5 × 5. Des bornes min/max réduisent les lectures.
 - Le BVH est créé lors de l’export, puis parcouru de l’impact le plus proche au plus éloigné.
 
+4K UHD output is available while Full HD remains the default. At 4K output, the selected internal scale still controls render cost; 200% calculates at 7680 × 4320 and can be substantially slower on a CPU. / La sortie 4K UHD est disponible, Full HD restant le réglage initial. En 4K, l’échelle interne choisie détermine toujours le coût; le mode 200 % calcule en 7680 × 4320 et peut être nettement plus lent sur CPU.
+
 The perspective camera traces one ray per internal pixel and keeps the nearest hit. BVH bounds skip unnecessary intersections. Main-view depth comes from ray intersections rather than a traditional raster Z-buffer. Shadows use a separate 1024 × 1024 depth map with 5 × 5 PCF filtering and min/max bounds. The six native geometry types are triangle, box, rounded box, capsule, cone, and ellipsoid; triangle meshes carry smooth vertex normals and UVs.
 
 ## Matériaux, textures et lumière / Materials, textures, and lighting
@@ -37,7 +39,7 @@ Procedural material textures are built into RGB565 mip chains from 512 × 512 to
 
 | Réglage | Valeurs |
 |---|---|
-| Résolution de sortie | 1920 × 1080, 1600 × 900, 1280 × 720 |
+| Résolution de sortie | 1920 × 1080 (par défaut), 1600 × 900, 1280 × 720, 3840 × 2160 (4K UHD) |
 | Résolution interne par axe | 100 %, 87,5 %, 75 %, 66,7 %, 50 %, 200 % |
 | Caméra | Distance; rotation −180° à 180°; élévation −5° à 50°; champ horizontal 35° à 105° |
 | Heure | 33 positions entre 06:00 et 22:00 |
