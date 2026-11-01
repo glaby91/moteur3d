@@ -10,4 +10,22 @@ std::vector<uint32_t> upscaleBilinear(const std::vector<uint32_t>&src,int sw,int
  threads=std::max(1u,std::min(threads,(unsigned)dh));if(threads==1)work();else{std::vector<std::thread>pool;pool.reserve(threads-1);for(unsigned i=1;i<threads;i++)pool.emplace_back(work);work();for(auto&t:pool)t.join();}return out;
 }
 std::vector<uint32_t> downsample2x(const std::vector<uint32_t>&src,int sw,int sh,unsigned threads){int dw=sw/2,dh=sh/2;std::vector<uint32_t>out(size_t(dw)*dh);std::atomic<int>next{0};auto work=[&]{for(;;){int by=next.fetch_add(8);if(by>=dh)break;for(int y=by;y<std::min(dh,by+8);y++)for(int x=0;x<dw;x++){uint32_t a=src[size_t(y*2)*sw+x*2],b=src[size_t(y*2)*sw+x*2+1],c=src[size_t(y*2+1)*sw+x*2],d=src[size_t(y*2+1)*sw+x*2+1],v=0xff000000;for(int shf:{0,8,16})v|=(uint32_t)((((a>>shf)&255)+((b>>shf)&255)+((c>>shf)&255)+((d>>shf)&255)+2)/4)<<shf;out[size_t(y)*dw+x]=v;}}};threads=std::max(1u,std::min(threads,(unsigned)dh));if(threads==1)work();else{std::vector<std::thread>pool;pool.reserve(threads-1);for(unsigned i=1;i<threads;i++)pool.emplace_back(work);work();for(auto&t:pool)t.join();}return out;}
+
+std::vector<uint32_t> antialiasEdges4(const std::vector<uint32_t>&src,int w,int h,unsigned threads){
+ if(w<3||h<3||src.size()<size_t(w)*h)return src;
+ std::vector<uint32_t>out=src;std::atomic<int>next{1};
+ auto luminance=[](uint32_t p){return .299f*((p>>16)&255)+.587f*((p>>8)&255)+.114f*(p&255);};
+ auto work=[&]{for(;;){int y=next.fetch_add(1);if(y>=h-1)break;for(int x=1;x<w-1;x++){
+  size_t i=size_t(y)*w+x;uint32_t c=src[i],n=src[i-w],s=src[i+w],e=src[i+1],west=src[i-1];
+  float lc=luminance(c),ln=luminance(n),ls=luminance(s),le=luminance(e),lw=luminance(west);
+  float lo=std::min({lc,ln,ls,le,lw}),hi=std::max({lc,ln,ls,le,lw}),range=hi-lo;
+  float threshold=std::max(20.f,hi*.15f);if(range<=threshold)continue;
+  // Edge pixels are softened toward the mean of their four cardinal neighbours.
+  // The contrast gate leaves flat regions and low-contrast texture detail intact.
+  constexpr float mix=.45f;uint32_t result=0xff000000;
+  for(int shift:{0,8,16}){float center=(c>>shift)&255,neighborMean=(((n>>shift)&255)+((s>>shift)&255)+((e>>shift)&255)+((west>>shift)&255))*.25f;float value=center*(1.f-mix)+neighborMean*mix;result|=(uint32_t)std::lround(value)<<shift;}
+  out[i]=result;
+ }} };
+ threads=std::max(1u,std::min(threads,(unsigned)(h-2)));if(threads==1)work();else{std::vector<std::thread>pool;pool.reserve(threads-1);for(unsigned i=1;i<threads;i++)pool.emplace_back(work);work();for(auto&t:pool)t.join();}return out;
+}
 }

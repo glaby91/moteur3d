@@ -1,7 +1,7 @@
 # Contrat d’entrées et de sorties — Moteur 3D natif x64
 
 **Version du document :** 1.2  
-**Identifiant de build :** 261101-0819  
+**Identifiant de build :** 261101-2200
 **Scène source :** V13.14  
 **Révision GitHub :** injectée au build (SHA court du commit)  
 **Branche GitHub :** `experiment/manhattan-silent-hill-2026-10-30`  
@@ -31,7 +31,7 @@ Le chargeur vérifie la signature, la version, les limites de quantités, la rac
 Les réglages d’entrée sont fournis par l’interface :
 
 - Résolution de sortie : 1920×1080 (par défaut), 1600×900, 1280×720 ou 3840×2160 (4K UHD).
-- Précision interne : 100 %, 87,5 %, 75 %, 66,7 %, 50 %, SSAA 4× (200 % par axe) ou FSAA 16× (grille 4×4).
+- Précision interne : 100 %, 87,5 %, 75 %, 66,7 %, 50 %, lissage local des contours à 4 voisins (par défaut) ou FSAA 16×.
 - Caméra : distance, rotation (−180° à 180°), élévation (−5° à 50°) et champ horizontal (35° à 105°).
 - Heure : positions 0–32, converties en 06:00–22:00 par pas de 30 minutes.
 - Threads CPU : 1–32.
@@ -52,7 +52,7 @@ The loader validates the signature, version, count limits, root and BVH graph (l
 Inputs supplied by the user interface:
 
 - Output resolution: 1920×1080 (default), 1600×900, 1280×720, or 3840×2160 (4K UHD).
-- Internal scale: 100%, 87.5%, 75%, 66.7%, 50% or 200% per axis.
+- Internal scale: 100%, 87.5%, 75%, 66.7%, 50%, four-neighbour edge smoothing (default), or FSAA 16×.
 - Camera: distance, rotation (−180° to 180°), elevation (−5° to 50°) and horizontal field of view (35° to 105°).
 - Time: slider positions 0–32 map to 06:00–22:00 in 30-minute steps.
 - CPU threads: 1–32.
@@ -98,11 +98,11 @@ Inputs supplied by the user interface:
 
 **Sortie / Output :** `render` remplit un tampon de `largeur × hauteur` pixels 32 bits et retourne `Stats`. Un jeton de génération périmé interrompt le travail après un changement de réglage. / `render` fills a 32-bit pixel buffer of `width × height` and returns `Stats`. A stale generation token cancels work after settings change.
 
-### `m3d_post.cpp` — Mise à l’échelle / Scaling
+### `m3d_post.cpp` — Mise à l’échelle et contours / Scaling and edges
 
 **Entrée / Input :** tampon source, dimensions source et cible, nombre de threads. / Source buffer, source and destination dimensions, thread count.
 
-**Sortie / Output :** nouveau tampon aux dimensions cibles : `upscaleBilinear` pour interpolation bilinéaire, `downsample2x` pour le filtre de réduction 2× du mode Ultra. / New destination-sized buffer: `upscaleBilinear` for bilinear scaling and `downsample2x` for Ultra mode’s 2× downsampling filter.
+**Sortie / Output :** nouveau tampon aux dimensions cibles : `upscaleBilinear` pour interpolation bilinéaire, `downsample2x` pour réduction 2× et `antialiasEdges4` pour adoucir sélectivement les pixels de fort contraste avec leurs quatre voisins. / New destination-sized buffer: `upscaleBilinear` for bilinear interpolation, `downsample2x` for 2× reduction, and `antialiasEdges4` to selectively soften high-contrast pixels using their four neighbours.
 
 ### `moteur3d_win32.cpp` — Interface et orchestration / UI and orchestration
 
@@ -118,9 +118,9 @@ Inputs supplied by the user interface:
 
 ## 3. Sorties de compilation / Build outputs
 
-Le workflow exporte `moteur3d_v1314_scene.bin`, reconstruit le source, compile l’EXE x64 puis crée `Moteur3D-Natif-x64-261101-0819.zip`. L’archive contient l’EXE et le fichier scène requis. Le SHA du commit et la branche sont injectés dans l’interface et les propriétés Windows; le numéro de run GitHub Actions reste séparé.
+Le workflow exporte `moteur3d_v1314_scene.bin`, reconstruit le source, compile l’EXE x64 puis crée une archive identifiée par son numéro de run et son SHA court. L’archive contient l’EXE et le fichier scène requis. Le SHA du commit et la branche sont injectés dans l’interface et les propriétés Windows; le numéro de run GitHub Actions reste séparé.
 
-The workflow exports `moteur3d_v1314_scene.bin`, reconstructs the source, compiles the x64 EXE and creates `Moteur3D-Natif-x64-261101-0819.zip`. The archive contains the EXE and required scene file. The commit SHA and branch are embedded in the UI and Windows file properties; the GitHub Actions run number remains separate.
+The workflow exports `moteur3d_v1314_scene.bin`, reconstructs the source, compiles the x64 EXE and creates an archive identified by its run number and short SHA. The archive contains the EXE and required scene file. The commit SHA and branch are embedded in the UI and Windows file properties; the GitHub Actions run number remains separate.
 
 
 ## Annexe A — Bibliothèques de textures CC0 / Appendix A — CC0 texture libraries

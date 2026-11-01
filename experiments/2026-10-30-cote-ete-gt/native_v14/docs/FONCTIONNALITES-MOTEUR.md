@@ -40,7 +40,7 @@ Procedural material textures are built into RGB565 mip chains from 512 × 512 to
 | Réglage | Valeurs |
 |---|---|
 | Résolution de sortie | 1920 × 1080 (par défaut), 1600 × 900, 1280 × 720, 3840 × 2160 (4K UHD) |
-| Précision interne | 100 %, 87,5 %, 75 %, 66,7 %, 50 %, SSAA 4× (200 % par axe), FSAA 16× (grille 4×4) |
+| Précision interne | 100 %, 87,5 %, 75 %, 66,7 %, 50 %, lissage des contours à 4 voisins (par défaut), FSAA 16× |
 | Caméra | Distance; rotation −180° à 180°; élévation −5° à 50°; champ horizontal 35° à 105° |
 | Heure | 33 positions entre 06:00 et 22:00 |
 | Threads CPU | 1 à 32 |
@@ -48,9 +48,9 @@ Procedural material textures are built into RGB565 mip chains from 512 × 512 to
 | Vues rapides | Initiale, avant, arrière |
 | Rendu | Recalcul de l’image à la demande et lors des changements de réglage |
 
-Le mode SSAA 4× double largeur et hauteur, puis réduit par moyenne 2 × 2. Le mode FSAA 16× lance 16 rayons par pixel sur une grille 4 × 4 et moyenne leur couleur sans créer de grande image intermédiaire. C’est un anti-crénelage logiciel par suréchantillonnage, dans l’esprit de l’ancien rendu 3dfx; aucun matériel ou pilote Glide n’est utilisé. Les autres échelles internes sont adaptées par interpolation bilinéaire.
+Le lissage des contours calcule d’abord l’image à la résolution choisie, détecte les fortes transitions de luminance et adoucit localement ces pixels par un mélange avec leurs quatre voisins directs. Les zones sans contraste marqué restent inchangées. Le mode natif sans lissage et le FSAA 16× restent sélectionnables. Le SSAA 4× est retiré de l’interface; les échelles internes inférieures sont adaptées par interpolation bilinéaire.
 
-SSAA 4× doubles both internal dimensions and downsamples with a 2 × 2 average. FSAA 16× traces 16 rays per output pixel on a 4 × 4 grid and averages their colors without allocating a large intermediate image. This is software supersampling in the spirit of classic 3dfx rendering; it does not use 3dfx hardware or Glide. Other internal scales are resized with bilinear interpolation.
+Edge smoothing renders at the selected output resolution, detects strong luminance transitions, and locally softens those pixels by mixing them with their four direct neighbours. Areas without marked contrast remain unchanged. Native rendering without smoothing and FSAA 16× remain selectable. SSAA 4× has been removed from the UI; lower internal scales are resized with bilinear interpolation.
 
 At 200%, the renderer doubles both internal dimensions (four times as many pixels), then reduces the result with a 2 × 2 average. Other internal sizes that differ from the output are enlarged with bilinear interpolation.
 
@@ -81,11 +81,11 @@ Scene geometry lives in `scene_coastal_v1314.js`. `export_scene.js` evaluates it
 Voir aussi [CONTRAT-ENTREES-SORTIES.md](CONTRAT-ENTREES-SORTIES.md) pour les formats et échanges propres à chaque module.
 
 
-Le mode FSAA 16× utilise un motif décalé et stratifié de 16 rayons par pixel, afin de réduire les motifs d’aliasing d’une grille régulière. La profondeur de champ est optionnelle : elle échantillonne une ouverture de lentille et impose au moins 4 rayons par pixel; le mode FSAA 16× conserve ses 16 rayons. L’ouverture et le plan de mise au point sont calculés à partir de la distance caméra. Ces effets augmentent le temps CPU.
+Le mode FSAA 16× utilise un motif décalé et stratifié de 16 rayons par pixel. La profondeur de champ optionnelle échantillonne une ouverture de lentille et impose au moins 4 rayons par pixel; en FSAA 16×, les 16 rayons sont conservés. Ces effets augmentent le temps CPU.
 
 Le rendu reprend ainsi deux idées du T-Buffer (échantillonnage spatial et profondeur de champ), sous forme logicielle. La scène ne contenant aucune animation d’objet, le flou de mouvement temporel n’est pas activé : il nécessite plusieurs positions d’un objet pendant l’exposition. Les ombres filtrées PCF et les reflets multi-échantillonnés de l’eau étaient déjà pris en charge.
 
 
-The FSAA 16× mode uses a shifted, stratified pattern of 16 rays per pixel to reduce regular-grid aliasing. Optional depth of field samples a lens aperture and requires at least four rays per pixel; FSAA 16× continues to use sixteen. Aperture and focus distance are derived from camera distance. These effects increase CPU render time.
+FSAA 16× uses a shifted, stratified pattern of 16 rays per pixel. Optional depth of field samples a lens aperture and requires at least four rays per pixel; FSAA 16× keeps all sixteen. These effects increase CPU render time.
 
 This software renderer borrows two T-Buffer ideas: spatial sampling and depth of field. Temporal motion blur is not enabled because this scene has no animated objects; it requires an object's positions during the exposure. Filtered PCF shadows and multi-sampled water reflections were already supported.

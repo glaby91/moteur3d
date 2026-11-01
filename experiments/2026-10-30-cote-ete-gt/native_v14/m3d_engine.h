@@ -45,4 +45,5 @@ Camera camera(float angleDeg,float elevationDeg,float distance,int w,int h);
 Stats render(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,unsigned threads,bool fog,const std::atomic<uint64_t>& generation,uint64_t token,unsigned samplesPerPixel=1,bool depthOfField=false);
 std::vector<uint32_t> upscaleBilinear(const std::vector<uint32_t>& src,int sw,int sh,int dw,int dh,unsigned threads);
 std::vector<uint32_t> downsample2x(const std::vector<uint32_t>& src,int sw,int sh,unsigned threads);
+std::vector<uint32_t> antialiasEdges4(const std::vector<uint32_t>& src,int w,int h,unsigned threads);
 }
