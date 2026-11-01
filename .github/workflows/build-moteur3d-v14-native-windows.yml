@@ -11,6 +11,7 @@ on:
       - experiments/2026-10-30-cote-ete-gt/native_v14/version.h
       - experiments/2026-10-30-cote-ete-gt/native_v14/moteur3d_v14_native.rc
       - experiments/2026-10-30-cote-ete-gt/native_v14/README.md
+      - .github/workflows/build-moteur3d-v14-native-windows.yml
   workflow_dispatch:
 
 permissions:
