@@ -40,7 +40,7 @@ Procedural material textures are built into RGB565 mip chains from 512 × 512 to
 | Réglage | Valeurs |
 |---|---|
 | Résolution de sortie | 1920 × 1080 (par défaut), 1600 × 900, 1280 × 720, 3840 × 2160 (4K UHD) |
-| Résolution interne par axe | 100 %, 87,5 %, 75 %, 66,7 %, 50 %, 200 % |
+| Précision interne | 100 %, 87,5 %, 75 %, 66,7 %, 50 %, SSAA 4× (200 % par axe), FSAA 16× (grille 4×4) |
 | Caméra | Distance; rotation −180° à 180°; élévation −5° à 50°; champ horizontal 35° à 105° |
 | Heure | 33 positions entre 06:00 et 22:00 |
 | Threads CPU | 1 à 32 |
@@ -48,7 +48,9 @@ Procedural material textures are built into RGB565 mip chains from 512 × 512 to
 | Vues rapides | Initiale, avant, arrière |
 | Rendu | Recalcul de l’image à la demande et lors des changements de réglage |
 
-Le mode 200 % double la largeur et la hauteur internes (quatre fois le nombre de pixels), puis réduit l’image par moyenne 2 × 2. Les autres résolutions internes différentes de la sortie sont agrandies par interpolation bilinéaire.
+Le mode SSAA 4× double largeur et hauteur, puis réduit par moyenne 2 × 2. Le mode FSAA 16× lance 16 rayons par pixel sur une grille 4 × 4 et moyenne leur couleur sans créer de grande image intermédiaire. C’est un anti-crénelage logiciel par suréchantillonnage, dans l’esprit de l’ancien rendu 3dfx; aucun matériel ou pilote Glide n’est utilisé. Les autres échelles internes sont adaptées par interpolation bilinéaire.
+
+SSAA 4× doubles both internal dimensions and downsamples with a 2 × 2 average. FSAA 16× traces 16 rays per output pixel on a 4 × 4 grid and averages their colors without allocating a large intermediate image. This is software supersampling in the spirit of classic 3dfx rendering; it does not use 3dfx hardware or Glide. Other internal scales are resized with bilinear interpolation.
 
 At 200%, the renderer doubles both internal dimensions (four times as many pixels), then reduces the result with a 2 × 2 average. Other internal sizes that differ from the output are enlarged with bilinear interpolation.
 

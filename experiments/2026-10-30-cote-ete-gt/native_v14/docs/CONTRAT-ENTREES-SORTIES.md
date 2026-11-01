@@ -31,7 +31,7 @@ Le chargeur vérifie la signature, la version, les limites de quantités, la rac
 Les réglages d’entrée sont fournis par l’interface :
 
 - Résolution de sortie : 1920×1080 (par défaut), 1600×900, 1280×720 ou 3840×2160 (4K UHD).
-- Précision interne : 100 %, 87,5 %, 75 %, 66,7 %, 50 % ou 200 % par axe.
+- Précision interne : 100 %, 87,5 %, 75 %, 66,7 %, 50 %, SSAA 4× (200 % par axe) ou FSAA 16× (grille 4×4).
 - Caméra : distance, rotation (−180° à 180°), élévation (−5° à 50°) et champ horizontal (35° à 105°).
 - Heure : positions 0–32, converties en 06:00–22:00 par pas de 30 minutes.
 - Threads CPU : 1–32.
