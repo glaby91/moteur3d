@@ -1,8 +1,8 @@
-# Moteur 3D natif x64 — build 261102-0001
+# Moteur 3D natif x64 — build 261102-0002
 
 ## Repères de version
 
-- **Date/heure de compilation :** `261102-0001` (format `AAMMJJ-HHMM`, heure UTC).
+- **Date/heure de compilation :** `261102-0002` (format `AAMMJJ-HHMM`, heure UTC).
 - **Révision GitHub :** SHA court du commit, injecté à la compilation.
 - **Branche GitHub :** nom exact de la branche, injecté à la compilation.
 - **Scène et géométrie source :** V13.14.
@@ -51,6 +51,8 @@ Le workflow GitHub injecte la révision, la branche et le numéro de run, charge
 
 
 Le lissage des contours fonctionne à la résolution de sortie : les pixels présentant une forte transition de luminance sont adoucis en mélangeant leur couleur avec celles des quatre voisins directs. Le SSAA 4× est retiré de l’interface; le FSAA 16× reste disponible comme mode coûteux de comparaison. La case **AA contours** active le lissage quatre voisins après mise à l’échelle, indépendamment des modes Natif, Équilibré, Détails, Rapide et Très rapide; elle est cochée par défaut. La profondeur de champ reste optionnelle et passe à 16 rayons par pixel, avec une ouverture réduite pour limiter les images fantômes.
+
+Le menu **Scène → Ouvrir une scène…** permet de charger un fichier `.bin` exporté par `export_scene.js`. Le chargement et la reconstruction des ombres se font sur le thread de rendu; la scène active reste conservée si le fichier choisi ne peut pas être chargé.
 
 Le lissage des contours est un post-traitement CPU local. Les textures conservent leurs mipmaps de 512×512 à 8×8 et leur interpolation bilinéaire à quatre texels.
 

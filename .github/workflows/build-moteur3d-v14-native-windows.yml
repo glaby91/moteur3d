@@ -54,7 +54,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Scene export failed." }
           $sceneStats = $exportJson | ConvertFrom-Json
           $manifest = [ordered]@{
-            build_id = "261102-0001"
+            build_id = "261102-0002"
             run_number = [int]$env:GITHUB_RUN_NUMBER
             commit = $env:GITHUB_SHA
             branch = $env:GITHUB_REF_NAME
@@ -85,7 +85,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Native C++ compilation failed." }
           rc /nologo moteur3d_v14_native.rc
           if ($LASTEXITCODE -ne 0) { throw "Windows resource compilation failed." }
-          link /nologo /SUBSYSTEM:WINDOWS moteur3d_v14_native.obj moteur3d_v14_native.res user32.lib gdi32.lib comctl32.lib "/OUT:$artifact.exe"
+          link /nologo /SUBSYSTEM:WINDOWS moteur3d_v14_native.obj moteur3d_v14_native.res user32.lib gdi32.lib comctl32.lib comdlg32.lib "/OUT:$artifact.exe"
           if ($LASTEXITCODE -ne 0) { throw "Native application link failed." }
       - name: Package executable, scene and manifest
         id: package

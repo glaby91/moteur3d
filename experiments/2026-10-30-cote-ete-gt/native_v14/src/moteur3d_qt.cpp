@@ -2,10 +2,13 @@
 #include "version.h"
 
 #include <QApplication>
+#include <QAction>
 #include <QByteArray>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QImage>
@@ -91,6 +94,7 @@ private:
     ShadowMap shadows_;
     int shadowHour_ = -1;
     RenderSettings settings_;
+    QString pendingScenePath_;
     std::mutex requestMutex_;
     std::condition_variable requestCv_;
     std::atomic<uint64_t> generation_{1};
@@ -111,6 +115,12 @@ private:
     }
 
     void buildUi() {
+        auto* sceneMenu = menuBar()->addMenu(QStringLiteral("Scène"));
+        auto* openSceneAction = sceneMenu->addAction(QStringLiteral("Ouvrir une scène…"));
+        connect(openSceneAction, &QAction::triggered, this, [this] {
+            const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Ouvrir une scène"), QCoreApplication::applicationDirPath(), QStringLiteral("Scènes moteur 3D (*.bin);;Tous les fichiers (*.*)"));
+            if (!path.isEmpty()) queueSceneLoad(path);
+        });
         auto* central = new QWidget(this);
         auto* root = new QHBoxLayout(central);
         root->setContentsMargins(12, 12, 12, 12);
@@ -232,6 +242,13 @@ private:
         threadLabel_->setText(QStringLiteral("Threads CPU : %1").arg(settings_.threads));
     }
 
+    void queueSceneLoad(const QString& path) {
+        generation_.fetch_add(1);
+        { std::lock_guard<std::mutex> lock(requestMutex_); pendingScenePath_ = path; pending_ = true; }
+        status_->setText(QStringLiteral("Chargement de la scène…"));
+        requestCv_.notify_one();
+    }
+
     void requestRender() {
         generation_.fetch_add(1);
         { std::lock_guard<std::mutex> lock(requestMutex_); pending_ = true; }
@@ -247,11 +264,35 @@ private:
             pending_ = false;
             const uint64_t token = generation_.load();
             const RenderSettings cfg = settings_;
+            const QString loadPath = std::move(pendingScenePath_);
+            pendingScenePath_.clear();
             lock.unlock();
 
             const int hourValue = 6 + cfg.hourStep / 2;
             const float hour = 6.f + cfg.hourStep * .5f;
             double shadowMs = 0;
+            if (!loadPath.isEmpty()) {
+                Scene candidate;
+                std::wstring error;
+#ifdef _WIN32
+                const std::filesystem::path nativePath(loadPath.toStdWString());
+#else
+                const QByteArray encodedPath = loadPath.toUtf8();
+                const std::filesystem::path nativePath(std::string(encodedPath.constData(), size_t(encodedPath.size())));
+#endif
+                if (!loadScene(nativePath, candidate, error)) {
+                    if (generation_.load() == token) {
+                        const QString message = QString::fromStdWString(error);
+                        QMetaObject::invokeMethod(this, [this, message] { QMessageBox::warning(this, QStringLiteral("Impossible de charger la scène"), message); status_->setText(QStringLiteral("Échec du chargement; la scène précédente est conservée.")); }, Qt::QueuedConnection);
+                    }
+                    continue;
+                }
+                if (generation_.load() != token) continue;
+                scene_ = std::move(candidate);
+                shadowHour_ = -1;
+                const QString loadedName = QFileInfo(loadPath).fileName();
+                QMetaObject::invokeMethod(this, [this, loadedName] { setWindowTitle(QStringLiteral("Moteur 3D natif x64 — ") + QString::fromWCharArray(M3D_RELEASE_ID_WIDE) + QStringLiteral(" — ") + loadedName); }, Qt::QueuedConnection);
+            }
             if (cfg.hourStep != shadowHour_) {
                 updateLighting(hour);
                 Stats lightStats;
