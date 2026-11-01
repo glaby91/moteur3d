@@ -1,8 +1,8 @@
-# Moteur 3D natif x64 — build 261101-1901
+# Moteur 3D natif x64 — build 261102-0001
 
 ## Repères de version
 
-- **Date/heure de compilation :** `261101-1901` (format `AAMMJJ-HHMM`, heure UTC).
+- **Date/heure de compilation :** `261102-0001` (format `AAMMJJ-HHMM`, heure UTC).
 - **Révision GitHub :** SHA court du commit, injecté à la compilation.
 - **Branche GitHub :** nom exact de la branche, injecté à la compilation.
 - **Scène et géométrie source :** V13.14.
@@ -50,7 +50,7 @@ Le ZIP de chaque exécution porte son numéro de run et son SHA court; il contie
 Le workflow GitHub injecte la révision, la branche et le numéro de run, charge `scene_coastal_v1314.js` avec le moteur de `source_v1314.html`, reconstruit le fichier source et compile avec MSVC. Pour compiler une autre scène, passez son fichier JS au troisième argument de `export_scene.js` et chargez ce même module dans l’aperçu HTML. Le mode **Ultra** conserve les ombres adoucies et les réflexions à un rebond sur l’eau, la peinture et les vitrages.
 
 
-Le lissage des contours fonctionne à la résolution de sortie : les pixels présentant une forte transition de luminance sont adoucis en mélangeant leur couleur avec celles des quatre voisins directs. Le SSAA 4× est retiré de l’interface; le FSAA 16× reste disponible comme mode coûteux de comparaison. La profondeur de champ reste optionnelle et ajoute des échantillons de rayon.
+Le lissage des contours fonctionne à la résolution de sortie : les pixels présentant une forte transition de luminance sont adoucis en mélangeant leur couleur avec celles des quatre voisins directs. Le SSAA 4× est retiré de l’interface; le FSAA 16× reste disponible comme mode coûteux de comparaison. La case **AA contours** active le lissage quatre voisins après mise à l’échelle, indépendamment des modes Natif, Équilibré, Détails, Rapide et Très rapide; elle est cochée par défaut. La profondeur de champ reste optionnelle et passe à 16 rayons par pixel, avec une ouverture réduite pour limiter les images fantômes.
 
 Le lissage des contours est un post-traitement CPU local. Les textures conservent leurs mipmaps de 512×512 à 8×8 et leur interpolation bilinéaire à quatre texels.
 

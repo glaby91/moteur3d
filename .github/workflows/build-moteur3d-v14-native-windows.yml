@@ -54,7 +54,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "Scene export failed." }
           $sceneStats = $exportJson | ConvertFrom-Json
           $manifest = [ordered]@{
-            build_id = "261101-1901"
+            build_id = "261102-0001"
             run_number = [int]$env:GITHUB_RUN_NUMBER
             commit = $env:GITHUB_SHA
             branch = $env:GITHUB_REF_NAME

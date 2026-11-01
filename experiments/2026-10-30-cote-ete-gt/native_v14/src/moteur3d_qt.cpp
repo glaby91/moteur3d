@@ -101,7 +101,7 @@ private:
     QComboBox *resolution_ = nullptr, *quality_ = nullptr;
     QSlider *distance_ = nullptr, *angle_ = nullptr, *elevation_ = nullptr, *fov_ = nullptr;
     QSlider *threads_ = nullptr, *hour_ = nullptr;
-    QCheckBox *fog_ = nullptr, *dof_ = nullptr;
+    QCheckBox *fog_ = nullptr, *dof_ = nullptr, *edgeAa_ = nullptr;
 
     static QSlider* slider(Qt::Orientation orientation, int min, int max, int value, QWidget* parent) {
         auto* s = new QSlider(orientation, parent);
@@ -146,8 +146,8 @@ private:
         resolution_ = new QComboBox(panel);
         resolution_->addItems({QStringLiteral("Full HD — 1920 × 1080"), QStringLiteral("1600 × 900"), QStringLiteral("1280 × 720"), QStringLiteral("4K UHD — 3840 × 2160")});
         quality_ = new QComboBox(panel);
-        quality_->addItems({QStringLiteral("Natif — sans lissage"), QStringLiteral("Équilibré — 87,5 % par axe"), QStringLiteral("Détails — 75 % par axe"), QStringLiteral("Rapide — 66,7 % par axe"), QStringLiteral("Très rapide — 50 % par axe"), QStringLiteral("Lissage des contours — 4 voisins"), QStringLiteral("FSAA 16× — motif stratifié 4×4")});
-        quality_->setCurrentIndex(5);
+        quality_->addItems({QStringLiteral("Natif — 100 % par axe"), QStringLiteral("Équilibré — 87,5 % par axe"), QStringLiteral("Détails — 75 % par axe"), QStringLiteral("Rapide — 66,7 % par axe"), QStringLiteral("Très rapide — 50 % par axe"), QStringLiteral("FSAA 16× — motif stratifié 4×4")});
+        quality_->setCurrentIndex(0);
         controls->addWidget(new QLabel(QStringLiteral("Résolution de sortie"), panel)); controls->addWidget(resolution_);
         controls->addWidget(new QLabel(QStringLiteral("Précision du calcul interne"), panel)); controls->addWidget(quality_);
 
@@ -167,7 +167,9 @@ private:
         auto* checks = new QHBoxLayout;
         fog_ = new QCheckBox(QStringLiteral("Brouillard atmosphérique"), panel);
         dof_ = new QCheckBox(QStringLiteral("DOF"), panel);
-        checks->addWidget(fog_); checks->addWidget(dof_); checks->addStretch();
+        edgeAa_ = new QCheckBox(QStringLiteral("AA contours (4 voisins)"), panel);
+        edgeAa_->setChecked(true);
+        checks->addWidget(fog_); checks->addWidget(dof_); checks->addWidget(edgeAa_); checks->addStretch();
         controls->addLayout(checks);
         auto* renderButton = new QPushButton(QStringLiteral("Calculer l’image"), panel);
         controls->addWidget(renderButton);
@@ -196,6 +198,7 @@ private:
         }
         connect(fog_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
         connect(dof_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
+        connect(edgeAa_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
         connect(renderButton, &QPushButton::clicked, this, [this] { readSettings(); requestRender(); });
         connect(home, &QPushButton::clicked, this, [this] { distance_->setValue(24); angle_->setValue(-43); elevation_->setValue(7); fov_->setValue(50); readSettings(); requestRender(); });
         connect(front, &QPushButton::clicked, this, [this] { distance_->setValue(20); angle_->setValue(-10); elevation_->setValue(4); readSettings(); requestRender(); });
@@ -216,8 +219,8 @@ private:
         const float scale = qi == 0 ? 1.f : qi == 1 ? .875f : qi == 2 ? .75f : qi == 3 ? (2.f / 3.f) : qi == 4 ? .5f : 1.f;
         settings_.renderW = int(std::lround(settings_.outW * scale));
         settings_.renderH = int(std::lround(settings_.outH * scale));
-        settings_.samples = qi == 6 ? 16u : 1u;
-        settings_.edgeAa = qi == 5;
+        settings_.samples = qi == 5 ? 16u : 1u;
+        settings_.edgeAa = edgeAa_->isChecked();
         settings_.distance = distance_->value() * .5f;
         settings_.angle = float(angle_->value());
         settings_.elevation = float(elevation_->value());
@@ -262,10 +265,10 @@ private:
             Camera cam = camera(cfg.angle, cfg.elevation, cfg.distance, cfg.renderW, cfg.renderH);
             cam.tanHalf = std::tan(cfg.fov * PI / 360.f);
             cam.focusDistance = cfg.distance;
-            cam.apertureRadius = cfg.distance * .018f;
+            cam.apertureRadius = cfg.distance * .010f;
             cam.pixelAngle = 2 * cam.tanHalf / (cfg.renderW * (cfg.samples == 16 ? 4.f : cfg.samples == 4 ? 2.f : 1.f));
             unsigned samples = cfg.samples;
-            if (cfg.dof && samples < 4) samples = 4;
+            if (cfg.dof && samples < 16) samples = 16;
             Stats st = m3d::render(scene_, shadows_, cam, cfg.renderW, cfg.renderH, pixels, cfg.threads, cfg.fog, generation_, token, samples, cfg.dof);
             if (generation_.load() != token) continue;
             const auto postStart = std::chrono::steady_clock::now();

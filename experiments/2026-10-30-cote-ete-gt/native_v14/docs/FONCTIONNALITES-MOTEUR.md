@@ -41,7 +41,7 @@ Procedural material textures are built into RGB565 mip chains from 512 × 512 to
 | Réglage | Valeurs |
 |---|---|
 | Résolution de sortie | 1920 × 1080 (par défaut), 1600 × 900, 1280 × 720, 3840 × 2160 (4K UHD) |
-| Précision interne | 100 %, 87,5 %, 75 %, 66,7 %, 50 %, lissage des contours à 4 voisins (par défaut), FSAA 16× |
+| Précision interne | 100 %, 87,5 %, 75 %, 66,7 %, 50 %, FSAA 16×; case AA contours indépendante |
 | Caméra | Distance; rotation −180° à 180°; élévation −5° à 50°; champ horizontal 35° à 105° |
 | Heure | 33 positions entre 06:00 et 22:00 |
 | Threads CPU | 1 à 32 |
@@ -49,9 +49,9 @@ Procedural material textures are built into RGB565 mip chains from 512 × 512 to
 | Vues rapides | Initiale, avant, arrière |
 | Rendu | Recalcul de l’image à la demande et lors des changements de réglage |
 
-Le lissage des contours calcule d’abord l’image à la résolution choisie, détecte les fortes transitions de luminance et adoucit localement ces pixels par un mélange avec leurs quatre voisins directs. Les zones sans contraste marqué restent inchangées. Le mode natif sans lissage et le FSAA 16× restent sélectionnables. Le SSAA 4× est retiré de l’interface; les échelles internes inférieures sont adaptées par interpolation bilinéaire.
+La case AA contours applique, après mise à l’échelle, un filtre de quatre voisins à l’image de sortie, quel que soit le mode interne choisi. Elle peut être cochée ou décochée pour Natif, Équilibré, Détails, Rapide, Très rapide et FSAA 16×; elle est activée par défaut. Le filtre détecte les fortes transitions de luminance et adoucit localement ces pixels, tandis que les zones sans contraste marqué restent inchangées. Le SSAA 4× est retiré de l’interface; les échelles internes inférieures sont adaptées par interpolation bilinéaire.
 
-Edge smoothing renders at the selected output resolution, detects strong luminance transitions, and locally softens those pixels by mixing them with their four direct neighbours. Areas without marked contrast remain unchanged. Native rendering without smoothing and FSAA 16× remain selectable. SSAA 4× has been removed from the UI; lower internal scales are resized with bilinear interpolation.
+The AA contours checkbox applies a four-neighbour filter to the output image after scaling, regardless of the selected internal mode. It can be enabled or disabled for Native, Balanced, Details, Fast, Very Fast and FSAA 16×; it is enabled by default. The filter detects strong luminance transitions and locally softens those pixels, while areas without marked contrast remain unchanged. SSAA 4× has been removed from the UI; lower internal scales are resized with bilinear interpolation.
 
 At 200%, the renderer doubles both internal dimensions (four times as many pixels), then reduces the result with a 2 × 2 average. Other internal sizes that differ from the output are enlarged with bilinear interpolation.
 
@@ -82,11 +82,11 @@ Scene geometry and per-material reflection percentages live in `scene_coastal_v1
 Voir aussi [CONTRAT-ENTREES-SORTIES.md](CONTRAT-ENTREES-SORTIES.md) pour les formats et échanges propres à chaque module.
 
 
-Le mode FSAA 16× utilise un motif décalé et stratifié de 16 rayons par pixel. La profondeur de champ optionnelle échantillonne une ouverture de lentille et impose au moins 4 rayons par pixel; en FSAA 16×, les 16 rayons sont conservés. Ces effets augmentent le temps CPU.
+Le mode FSAA 16× utilise un motif décalé et stratifié de 16 rayons par pixel. La profondeur de champ optionnelle échantillonne une ouverture de lentille réduite avec 16 rayons par pixel, pour fondre les échantillons en un flou régulier plutôt qu’en images fantômes. Le DOF impose 16 rayons par pixel; le FSAA 16× et le DOF partagent ces 16 rayons.
 
 Le rendu reprend ainsi deux idées du T-Buffer (échantillonnage spatial et profondeur de champ), sous forme logicielle. La scène ne contenant aucune animation d’objet, le flou de mouvement temporel n’est pas activé : il nécessite plusieurs positions d’un objet pendant l’exposition. Les ombres filtrées PCF et les reflets multi-échantillonnés de l’eau étaient déjà pris en charge.
 
 
-FSAA 16× uses a shifted, stratified pattern of 16 rays per pixel. Optional depth of field samples a lens aperture and requires at least four rays per pixel; FSAA 16× keeps all sixteen. These effects increase CPU render time.
+FSAA 16× uses a shifted, stratified pattern of 16 rays per pixel. Optional depth of field samples a reduced lens aperture with 16 rays per pixel to blend into a smooth blur instead of visible ghost copies. DOF enforces 16 rays per pixel; FSAA 16× and DOF share those 16 rays.
 
 This software renderer borrows two T-Buffer ideas: spatial sampling and depth of field. Temporal motion blur is not enabled because this scene has no animated objects; it requires an object's positions during the exposure. Filtered PCF shadows and multi-sampled water reflections were already supported.
