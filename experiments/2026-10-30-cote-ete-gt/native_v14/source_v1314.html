@@ -607,6 +607,15 @@ function procedural(id,x,y){
  }else if(id==='foam'){
   const fleck=hash2(x,y,461)>.84?12:-4;
   r=205+12*noise+fleck;g=222+10*noise+fleck;b=225+9*noise+fleck;
+ }else if(id==='orange'){
+  const broad=hash2(x>>4,y>>4,733)-.5,freckle=hash2(x,y,739),pore=hash2(x>>1,y>>1,743)>.976?-17:0;
+  const warm=Math.sin(x*.021+Math.sin(y*.017)*1.6)*Math.sin(y*.026+x*.009);
+  r=224+10*noise+9*broad+5*warm+pore+(freckle>.997?14:0);
+  g=103+8*noise+7*broad+7*warm+pore*.62+(freckle>.997?9:0);
+  b=20+5*noise+4*broad+2*warm+pore*.24+(freckle>.997?3:0);
+ }else if(id==='orangeStage'){
+  const grain=hash2(x>>2,y>>2,751)>.68?4:-2,cloud=(hash2(x>>5,y>>5,757)-.5)*7;
+  r=209+8*noise+cloud+grain;g=197+8*noise+cloud+grain;b=173+8*noise+cloud*.8+grain*.6;
  }else if(id==='asphalt'){
   const aggregate=hash2(x>>2,y>>2,208)>.72?7:-3,grain=hash2(x,y,209)>.978?16:0;
   const seam=(Math.sin(y*.043+Math.sin(x*.012)*2.6)+.36*Math.sin(y*.11+x*.027))*.5;
@@ -729,7 +738,7 @@ function makeMips(id,n){
  return {id,levels:chain,size:chain[0].size};
 }
 function initMaterials(){
- const urban=['brick','concrete','glass','sea','sand','asphalt','taxi','paint','metal','rust','rubber','lamp','mutant','claw','stone','wood','cloth','skin','bark','leaves','grass','windowdark','windowlit','sign','puddle','debris','neon','sportsPaint','sportsRed','sportsViolet','wheelMetal','led','taillight','carGlass','wound','scar'];
+ const urban=['brick','concrete','glass','sea','sand','asphalt','taxi','paint','metal','rust','rubber','lamp','mutant','claw','stone','wood','cloth','skin','bark','leaves','grass','windowdark','windowlit','sign','puddle','debris','neon','sportsPaint','sportsRed','sportsViolet','wheelMetal','led','taillight','carGlass','wound','scar','orange','orangeStage'];
  for(const mat of urban)materials.set(mat,makeMips(mat,['mutant','skin','cloth'].includes(mat)?512:512));
  cacheFastMaterials();
  $('textureStatus').textContent='Textures côtières RGB565 : pyramides mipmap prêtes';
