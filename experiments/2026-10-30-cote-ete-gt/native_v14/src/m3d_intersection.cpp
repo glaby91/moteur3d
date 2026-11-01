@@ -10,7 +10,6 @@ static bool boundsHit(const Ray&r,const RayBoxCache&c,const Node&n,float limit,f
  if(c.parallel&4){if(r.o.z<n.mn.z||r.o.z>n.mx.z)return false;}else if(c.negative&4){z0=(n.mx.z-r.o.z)*c.inv.z;z1=(n.mn.z-r.o.z)*c.inv.z;}else{z0=(n.mn.z-r.o.z)*c.inv.z;z1=(n.mx.z-r.o.z)*c.inv.z;}
  float lo=std::max(0.f,std::max(x0,std::max(y0,z0))),hi=std::min(limit,std::min(x1,std::min(y1,z1)));if(hi<lo)return false;nearDist=lo;return hi>=0;
 }
-static bool objectBoundsHit(const Ray&r,const Obj&o,float limit){Node n{o.mn,o.mx};float nearDist;return boundsHit(r,makeRayBoxCache(r),n,limit,nearDist);}
 static bool intersect(const Ray&r,const Obj&o,float limit,float&t){t=INF;
  if(o.kind==Kind::Triangle){V e1=o.b-o.a,e2=o.c-o.a,p=cross(r.d,e2);float det=dot(e1,p);if(std::abs(det)<1e-10f)return false;float inv=1/det;V q=r.o-o.a;float u=dot(q,p)*inv;if(u<0||u>1)return false;V z=cross(q,e1);float v=dot(r.d,z)*inv;if(v<0||u+v>1)return false;t=dot(e2,z)*inv;}
  else if(o.kind==Kind::Ellipse){V p={(r.o.x-o.a.x)/o.b.x,(r.o.y-o.a.y)/o.b.y,(r.o.z-o.a.z)/o.b.z},d={r.d.x/o.b.x,r.d.y/o.b.y,r.d.z/o.b.z};float A=dot(d,d),B=dot(p,d),C=dot(p,p)-1,D=B*B-A*C;if(D<0||A<1e-15f)return false;float q=(-B-std::sqrt(D))/A;t=q>.0001f?q:(-B+std::sqrt(D))/A;}
