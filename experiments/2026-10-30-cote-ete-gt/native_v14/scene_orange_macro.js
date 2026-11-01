@@ -53,9 +53,20 @@ function makeScene() {
     cone(start, tip, .028, .004, 'leaves');
   }
 
-  // A single small leaf beside the stem, kept out of the main peel area.
-  const leafBase = [cx + .055, 2.15, cz - .02];
-  const leafTip = [cx + .39, 2.27, cz - .12];
-  cone(leafBase, leafTip, .048, .006, 'leaves');
-  capsule(leafBase, leafTip, .009, 'wood');
+  // A small, flat lance-shaped leaf laid toward the camera so its silhouette
+  // reads clearly in the macro framing instead of becoming a thin spike.
+  const leafBase = [cx - .015, 2.14, cz + .015];
+  const leafMid = [cx - .18, 2.30, cz + .12];
+  const leafTip = [cx - .38, 2.43, cz + .25];
+  const side = [-.075, .020, -.075];
+  const left = [leafMid[0] + side[0], leafMid[1] + side[1], leafMid[2] + side[2]];
+  const right = [leafMid[0] - side[0], leafMid[1] - side[1], leafMid[2] - side[2]];
+  const leafNormal = norm(-.10, .90, .42);
+  const vertex = p => ({ p, n: leafNormal, uv: [0, 0] });
+  const a = vertex(leafBase), m = vertex(leafMid), t = vertex(leafTip), l = vertex(left), r = vertex(right);
+  meshTriangle(a, l, m, 'leaves');
+  meshTriangle(a, m, r, 'leaves');
+  meshTriangle(m, l, t, 'leaves');
+  meshTriangle(m, t, r, 'leaves');
+  capsule(leafBase, leafTip, .008, 'wood');
 }
