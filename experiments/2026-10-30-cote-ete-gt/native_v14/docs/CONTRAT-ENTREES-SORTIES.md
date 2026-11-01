@@ -34,7 +34,7 @@ Les réglages d’entrée sont fournis par l’interface :
 - Précision interne : 100 %, 87,5 %, 75 %, 66,7 %, 50 % ou 200 % par axe.
 - Caméra : distance, rotation (−180° à 180°), élévation (−5° à 50°) et champ horizontal (35° à 105°).
 - Heure : positions 0–32, converties en 06:00–22:00 par pas de 30 minutes.
-- Threads CPU : 1–16.
+- Threads CPU : 1–32.
 - Brouillard : activé ou désactivé.
 
 **Sortie à l’exécution :** une image calculée en mémoire, redimensionnée à la résolution choisie et affichée dans la fenêtre. Le programme ne sauvegarde pas spontanément de PNG ou de JPEG. L’interface publie les temps de rendu, de reconstruction des ombres, de post-traitement et le total, ainsi que les rayons, impacts, tests BVH/AABB, nœuds visités, texels et threads.
@@ -55,7 +55,7 @@ Inputs supplied by the user interface:
 - Internal scale: 100%, 87.5%, 75%, 66.7%, 50% or 200% per axis.
 - Camera: distance, rotation (−180° to 180°), elevation (−5° to 50°) and horizontal field of view (35° to 105°).
 - Time: slider positions 0–32 map to 06:00–22:00 in 30-minute steps.
-- CPU threads: 1–16.
+- CPU threads: 1–32.
 - Fog: enabled or disabled.
 
 **Runtime output:** an in-memory rendered image, resized to the selected output resolution and displayed in the window. The program does not automatically save a PNG or JPEG. The UI also reports render, shadow-map rebuild, post-processing and total times, along with ray, hit, BVH/AABB test, node, texel and thread counts.

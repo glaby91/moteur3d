@@ -41,7 +41,7 @@ Procedural material textures are built into RGB565 mip chains from 512 × 512 to
 | Résolution interne par axe | 100 %, 87,5 %, 75 %, 66,7 %, 50 %, 200 % |
 | Caméra | Distance; rotation −180° à 180°; élévation −5° à 50°; champ horizontal 35° à 105° |
 | Heure | 33 positions entre 06:00 et 22:00 |
-| Threads CPU | 1 à 16 |
+| Threads CPU | 1 à 32 |
 | Brouillard | Activé / désactivé |
 | Vues rapides | Initiale, avant, arrière |
 | Rendu | Recalcul de l’image à la demande et lors des changements de réglage |
@@ -52,11 +52,11 @@ At 200%, the renderer doubles both internal dimensions (four times as many pixel
 
 ## Parallélisme et diagnostics / Parallelism and diagnostics
 
-Le rendu répartit les pixels en tuiles de 16 × 16 entre 1 et 16 threads. Une nouvelle demande invalide les travaux précédents par un identifiant de génération; le calcul reste séparé de l’interface Windows.
+Le rendu répartit les pixels en tuiles de 16 × 16 entre 1 et 32 threads. Une nouvelle demande invalide les travaux précédents par un identifiant de génération; le calcul reste séparé de l’interface Windows.
 
 Après le rendu, l’interface affiche séparément le temps de rendu, la reconstruction éventuelle de la carte d’ombres, le post-traitement et le total, le nombre de threads, les rayons, impacts, rayons de ciel, tests d’intersection, nœuds BVH visités, tests AABB, objets, triangles et texels échantillonnés.
 
-Rendering distributes 16 × 16 pixel tiles across 1–16 CPU threads. A generation token cancels stale work when a new render is requested, while a separate coordinator keeps the UI responsive. Diagnostics report render time, shadow-map build time when rebuilt, post-processing time, and total time, threads, rays, hits, sky rays, intersection tests, visited BVH nodes, AABB tests, objects, triangles, and sampled texels.
+Rendering distributes 16 × 16 pixel tiles across 1–32 CPU threads. A generation token cancels stale work when a new render is requested, while a separate coordinator keeps the UI responsive. Diagnostics report render time, shadow-map build time when rebuilt, post-processing time, and total time, threads, rays, hits, sky rays, intersection tests, visited BVH nodes, AABB tests, objects, triangles, and sampled texels.
 
 ## Scène actuelle et limites / Current scene and limitations
 
