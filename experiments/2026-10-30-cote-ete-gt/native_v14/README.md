@@ -1,8 +1,8 @@
-# Moteur 3D natif x64 — build 261101-0816
+# Moteur 3D natif x64 — build 261101-0819
 
 ## Repères de version
 
-- **Date/heure de compilation :** `261101-0816` (format `AAMMJJ-HHMM`).
+- **Date/heure de compilation :** `261101-0819` (format `AAMMJJ-HHMM`).
 - **Révision GitHub :** SHA court du commit, injecté à la compilation.
 - **Branche GitHub :** nom exact de la branche, injecté à la compilation.
 - **Scène et géométrie source :** V13.14.
@@ -10,7 +10,7 @@
 
 La révision et la branche apparaissent dans l’interface et les propriétés Windows de l’exécutable. `build_info.h` fournit des valeurs de secours pour une compilation locale; le workflow GitHub le régénère à chaque build.
 
-Le contrat bilingue des entrées/sorties, module par module, est documenté dans [CONTRAT-ENTREES-SORTIES.md](docs/CONTRAT-ENTREES-SORTIES-261101-0816.md).
+Le contrat bilingue des entrées/sorties, module par module, est documenté dans [CONTRAT-ENTREES-SORTIES.md](docs/CONTRAT-ENTREES-SORTIES.md).
 
 ## Source de scène modifiable
 
@@ -39,6 +39,6 @@ L’ordre de reconstruction/compilation est : scène → éclairage → intersec
 
 ## Téléchargement et compilation
 
-L’archive `Moteur3D-Natif-x64-261101-0816.zip` contient l’exécutable x64 et `moteur3d_v1314_scene.bin`. Extraire les deux fichiers dans le même dossier, puis lancer le fichier EXE.
+L’archive `Moteur3D-Natif-x64-261101-0819.zip` contient l’exécutable x64 et `moteur3d_v1314_scene.bin`. Extraire les deux fichiers dans le même dossier, puis lancer le fichier EXE.
 
-Le workflow GitHub injecte la révision et la branche, exporte la scène depuis `source_v1314.html`, reconstruit le fichier source et compile avec MSVC. Le mode **Ultra** conserve les ombres adoucies et les réflexions à un rebond sur l’eau, la peinture et les vitrages.
+Le workflow GitHub injecte la révision et la branche, charge `scene_coastal_v1314.js` avec le moteur de `source_v1314.html`, reconstruit le fichier source et compile avec MSVC. Pour compiler une autre scène, passez son fichier JS au troisième argument de `export_scene.js` et chargez ce même module dans l’aperçu HTML. Le mode **Ultra** conserve les ombres adoucies et les réflexions à un rebond sur l’eau, la peinture et les vitrages.

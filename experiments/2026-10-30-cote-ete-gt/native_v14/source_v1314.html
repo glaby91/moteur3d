@@ -343,7 +343,7 @@ function flatQuadMesh(points,mat,desired){
  const v=points.map((p,i)=>({p,n:normal,uv:[[0,0],[1,0],[1,1],[0,1]][i]}));
  meshTriangle(v[0],v[1],v[2],mat);meshTriangle(v[0],v[2],v[3],mat);
 }
-// 3D geometry is loaded from scene_coastal_v1314.js before this engine script.function buildBVH(){
+function buildBVH(){
  bvh=[];const ids=objects.map((_,i)=>i),BINS=12;
  function area(x0,y0,z0,x1,y1,z1){
   const dx=Math.max(0,x1-x0),dy=Math.max(0,y1-y0),dz=Math.max(0,z1-z0);

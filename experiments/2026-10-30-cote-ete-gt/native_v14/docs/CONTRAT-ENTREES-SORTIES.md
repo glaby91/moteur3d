@@ -1,7 +1,7 @@
 # Contrat d’entrées et de sorties — Moteur 3D natif x64
 
 **Version du document :** 1.1  
-**Identifiant de build :** 261101-0816  
+**Identifiant de build :** 261101-0819  
 **Scène source :** V13.14  
 **Révision GitHub :** injectée au build (SHA court du commit)  
 **Branche GitHub :** `experiment/manhattan-silent-hill-2026-10-30`  
@@ -118,6 +118,22 @@ Inputs supplied by the user interface:
 
 ## 3. Sorties de compilation / Build outputs
 
-Le workflow exporte `moteur3d_v1314_scene.bin`, reconstruit le source, compile l’EXE x64 puis crée `Moteur3D-Natif-x64-261101-0816.zip`. L’archive contient l’EXE et le fichier scène requis. Le SHA du commit et la branche sont injectés dans l’interface et les propriétés Windows; le numéro de run GitHub Actions reste séparé.
+Le workflow exporte `moteur3d_v1314_scene.bin`, reconstruit le source, compile l’EXE x64 puis crée `Moteur3D-Natif-x64-261101-0819.zip`. L’archive contient l’EXE et le fichier scène requis. Le SHA du commit et la branche sont injectés dans l’interface et les propriétés Windows; le numéro de run GitHub Actions reste séparé.
 
-The workflow exports `moteur3d_v1314_scene.bin`, reconstructs the source, compiles the x64 EXE and creates `Moteur3D-Natif-x64-261101-0816.zip`. The archive contains the EXE and required scene file. The commit SHA and branch are embedded in the UI and Windows file properties; the GitHub Actions run number remains separate.
+The workflow exports `moteur3d_v1314_scene.bin`, reconstructs the source, compiles the x64 EXE and creates `Moteur3D-Natif-x64-261101-0819.zip`. The archive contains the EXE and required scene file. The commit SHA and branch are embedded in the UI and Windows file properties; the GitHub Actions run number remains separate.
+
+
+## Annexe A — Bibliothèques de textures CC0 / Appendix A — CC0 texture libraries
+
+| Matière / Material | Sources ciblées / Suggested sources | Utilisation conseillée / Suggested use |
+|---|---|---|
+| Bois / Wood | [Poly Haven — bois](https://polyhaven.com/textures?c=wood), [ambientCG](https://ambientcg.com/) | Planches, bancs, mobilier; base color/albedo, avec normal et roughness si disponibles. / Planks and benches; albedo, plus normal and roughness maps when available. |
+| Métal / Metal | [Poly Haven — métal](https://polyhaven.com/textures?c=metal), [ambientCG](https://ambientcg.com/) | Acier peint, tôle, métal rouillé; régler la réflexion par matériau. / Painted steel, sheet metal, rust; tune reflectivity per material. |
+| Béton et asphalte / Concrete and asphalt | [Poly Haven — textures](https://polyhaven.com/textures), [ambientCG](https://ambientcg.com/) | Chaussée, trottoir, bordures; privilégier les matériaux « outdoor », usés ou mouillés. / Road, pavement and curb; prefer outdoor, worn or wet surfaces. |
+| Pierre, sable et sol / Stone, sand and ground | [Poly Haven — textures](https://polyhaven.com/textures) | Roches, plage, gravier et terrain; utiliser des UV à grande échelle pour éviter les répétitions visibles. / Rocks, beach, gravel and terrain; use world-scale UVs to avoid obvious tiling. |
+| Feuilles / Leaves | [Poly Haven — sol couvert de feuilles](https://polyhaven.com/a/leaves_forest_ground), [Poly Haven — textures organiques](https://polyhaven.com/textures?c=organic) | Litière et sols végétalisés. Ce ne sont pas des feuilles détourées pour les palmiers; chercher un modèle botanique avec textures et licence précisées. / Leaf litter and vegetated ground. These are not cutout palm fronds; use a botanical model with explicit texture and license instead. |
+| Eau et vagues / Water and waves | [ProcTexture — normal map de vagues](https://proctexture.com/textures/water/normal-maps/wave-normal-map) | Source de vagues annoncée CC0; la carte normale aide à produire du relief de surface. Mouvement, écume et réfraction restent à gérer par le shader. / Wave source is marked CC0; the normal map helps create surface detail. Motion, foam and refraction still require shader support. |
+
+**Licence / License.** Poly Haven publie ses textures CC0; ambientCG indique CC0 1.0 pour ses ressources. La carte de vagues ProcTexture indique également CC0 sur sa page. Re-vérifier la licence de chaque asset et conserver une copie du fichier de licence ou de la page de téléchargement dans le dossier de l’asset. / Poly Haven textures are CC0; ambientCG states CC0 1.0 for its assets. The ProcTexture wave page also marks that texture CC0. Re-check each asset’s license and keep a copy of its license file or download page with the asset.
+
+**Compatibilité moteur / Engine compatibility.** Ces bibliothèques fournissent souvent plusieurs cartes PBR (albedo, normal, roughness, height et occlusion). Le pipeline natif actuel n’importe pas automatiquement tout cet ensemble : il faudra étendre l’importeur et le format matériau pour exploiter les cartes autres que la couleur. Commencer par la couleur de base, puis ajouter normal/roughness au shader lors d’une évolution dédiée. / These libraries often provide several PBR maps (albedo, normal, roughness, height and occlusion). The current native pipeline does not automatically import the full set; the importer and material format need extending to use maps beyond color. Start with base color, then add normal/roughness support in a dedicated shader change.
