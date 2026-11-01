@@ -71,7 +71,7 @@ jobs:
         shell: pwsh
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: |
-          cl /nologo /O2 /EHsc /std:c++17 /utf-8 tests/native_smoke.cpp src/m3d_scene.cpp src/m3d_lighting.cpp src/m3d_intersection.cpp src/m3d_shading.cpp src/m3d_render.cpp src/m3d_post.cpp /Fe:native_smoke.exe
+          cl /nologo /O2 /EHsc /std:c++17 /utf-8 /I. tests/native_smoke.cpp src/m3d_scene.cpp src/m3d_lighting.cpp src/m3d_intersection.cpp src/m3d_shading.cpp src/m3d_render.cpp src/m3d_post.cpp /Fe:native_smoke.exe
           if ($LASTEXITCODE -ne 0) { throw "Smoke test compilation failed." }
           .\native_smoke.exe
           if ($LASTEXITCODE -ne 0) { throw "Native smoke test failed." }
