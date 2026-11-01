@@ -23,9 +23,11 @@
 
 ## Décision provisoire
 
-**Ne pas figer de référence d’achat aujourd’hui.** La candidate concrète à chiffrer pour respecter la préférence GDDR6 est la VectorPath 815. Le prix public n’étant pas disponible, les limites « puce FPGA ≤ 200 € » et « carte complète ≤ 1 500 € » restent non démontrées et paraissent incompatibles avec cette classe de matériel. Le S7t-VG6 à 8 495 $US sert uniquement de repère historique : c’est un produit ancien, non recommandé pour les nouvelles conceptions.
+**Statut de travail : rester sur la simulation logicielle CPU.** Aucun FPGA ni carte mémoire n’est sélectionné pour achat ou en cours de développement. Le rendu CPU natif reste la référence; les simulations servent à valider l’ordonnancement, les transferts estimés et le découpage des blocs sans présenter ces résultats comme des mesures matérielles.
 
-La cible de conception conserve une interface mémoire indépendante du matériel. Le moteur reste testable sur le backend CPU. Une carte DDR moins chère peut servir au bring-up du pipeline seulement si l’écart avec GDDR6 est explicitement accepté. Le choix final GDDR6 dépend d’un devis VP815 et de la confirmation du runtime, des pilotes standards, du support des outils et du fonctionnement multi-cartes.
+La mémoire et la carte FPGA restent une étude future. GDDR6 demeure une option à réexaminer, et la VectorPath 815 une candidate à chiffrer si le projet passe un jour au prototype physique. Son prix public n’est pas disponible; les limites « puce FPGA ≤ 200 € » et « carte complète ≤ 1 500 € » ne sont donc pas validées. Le S7t-VG6 à 8 495 $US est uniquement un repère historique d’une carte précédente, classée ancienne par son fabricant.
+
+Si le projet reprend la voie matérielle, garder une interface mémoire indépendante (DDR/GDDR/HBM), demander un devis complet, puis confirmer le runtime standard, le support des outils, le pilote, l’approvisionnement et le fonctionnement multi-cartes avant de sélectionner une carte.
 
 ## Interface mémoire à préserver dans l’architecture
 
