@@ -32,6 +32,7 @@ Les sources de travail sont séparées dans `src/` afin que chaque partie puisse
 - `src/m3d_post.cpp` : mise à l’échelle bilinéaire, réduction 2× et lissage adaptatif des contours du résultat.
 - `src/m3d_physics.h` : contrat indépendant du rendu pour un backend physique; le point d’intégration PhysX est réservé, sans SDK lié ni simulation active dans ce build.
 - `src/moteur3d_win32.cpp` : interface native, réglages et orchestration.
+- `src/moteur3d_qt.cpp` : interface multiplateforme Qt Widgets et orchestration du rendu.
 - `m3d_engine.h` : types et fonctions partagés entre les modules.
 
 `assemble_native.js` reconstruit, dans un ordre déterministe, le fichier monolithique `moteur3d_v14_native.cpp`. C’est ce fichier reconstruit que MSVC compile : les sources modulaires restent la référence de travail et l’exécutable utilise le même parcours de rendu.
@@ -52,6 +53,22 @@ Le workflow GitHub injecte la révision, la branche et le numéro de run, charge
 Le lissage des contours fonctionne à la résolution de sortie : les pixels présentant une forte transition de luminance sont adoucis en mélangeant leur couleur avec celles des quatre voisins directs. Le SSAA 4× est retiré de l’interface; le FSAA 16× reste disponible comme mode coûteux de comparaison. La profondeur de champ reste optionnelle et ajoute des échantillons de rayon.
 
 Le lissage des contours est un post-traitement CPU local. Les textures conservent leurs mipmaps de 512×512 à 8×8 et leur interpolation bilinéaire à quatre texels.
+
+## Interface Qt multiplateforme
+
+Une cible Qt Widgets partage maintenant le même moteur de rendu C++ que l’application Win32. La cible `moteur3d_qt` est construite avec CMake sous Windows ou Linux; elle reprend les contrôles de résolution, de qualité, de caméra, d’heure, de threads, de brouillard et de profondeur de champ. L’interface Win32 existante reste disponible via le workflow Windows historique pendant la transition.
+
+Dépendances : CMake 3.20 ou plus récent, un compilateur C++17, Node.js et Qt 6 Widgets. Sous Ubuntu/Debian, installez `build-essential`, `cmake`, `nodejs` et `qt6-base-dev`. Sous Windows, installez Node.js, Qt 6 avec le composant Qt Widgets et CMake.
+
+Depuis ce dossier, exportez d’abord la scène, puis configurez et compilez avec :
+
+```sh
+node export_scene.js source_v1314.html moteur3d_v1314_scene.bin scene_coastal_v1314.js
+cmake -S . -B build -DCMAKE_PREFIX_PATH="/chemin/vers/Qt/6.x/gcc_64"
+cmake --build build --config Release
+```
+
+Sur une distribution Linux où Qt 6 est installé dans les chemins système, `-DCMAKE_PREFIX_PATH=...` peut être omis. Sur Windows, indiquez le répertoire Qt correspondant à votre compilateur, par exemple `.../Qt/6.x/msvc2022_64`. Lancez `moteur3d_qt` avec `moteur3d_v1314_scene.bin` dans le même dossier; `cmake --install build --prefix dist` prépare ce dossier et y copie la scène si elle est présente.
 
 
 ## Voiture 1970s Coupe

@@ -1,0 +1,51 @@
+name: Build Moteur 3D Qt — Windows and Linux
+
+on:
+  push:
+    branches:
+      - experiment/manhattan-silent-hill-2026-10-30
+    paths:
+      - experiments/2026-10-30-cote-ete-gt/native_v14/CMakeLists.txt
+      - experiments/2026-10-30-cote-ete-gt/native_v14/m3d_engine.h
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/**
+      - experiments/2026-10-30-cote-ete-gt/native_v14/version.h
+      - experiments/2026-10-30-cote-ete-gt/native_v14/build_info.h
+      - .github/workflows/build-moteur3d-v14-qt.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt 6 on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake qt6-base-dev
+
+      - name: Install Qt 6 on Windows
+        if: runner.os == 'Windows'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+
+      - name: Configure Qt application
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compile Qt application
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: cmake --build build --config Release --parallel

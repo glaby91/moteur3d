@@ -21,8 +21,20 @@ static bool intersect(const Ray&r,const Obj&o,float limit,float&t){t=INF;
  return t>.0001f&&t<limit;
 }
 static V normalAt(const Obj&o,V p){if(o.kind==Kind::Triangle){V e1=o.b-o.a,e2=o.c-o.a,q=p-o.a;float d00=dot(e1,e1),d01=dot(e1,e2),d11=dot(e2,e2),d20=dot(q,e1),d21=dot(q,e2),den=d00*d11-d01*d01,inv=std::abs(den)>1e-20f?1/den:0,b1=(d11*d20-d01*d21)*inv,b2=(d00*d21-d01*d20)*inv,b0=1-b1-b2;return norm(o.n0*b0+o.n1*b1+o.n2*b2);}if(o.kind==Kind::Ellipse)return norm({(p.x-o.a.x)/(o.b.x*o.b.x),(p.y-o.a.y)/(o.b.y*o.b.y),(p.z-o.a.z)/(o.b.z*o.b.z)});if(o.kind==Kind::Box){float d[6]={std::abs(p.x-o.mn.x),std::abs(p.x-o.mx.x),std::abs(p.y-o.mn.y),std::abs(p.y-o.mx.y),std::abs(p.z-o.mn.z),std::abs(p.z-o.mx.z)};int k=int(std::min_element(d,d+6)-d);return k==0?V{-1,0,0}:k==1?V{1,0,0}:k==2?V{0,-1,0}:k==3?V{0,1,0}:k==4?V{0,0,-1}:V{0,0,1};}if(o.kind==Kind::RoundBox){V q=p-o.center;float x=std::abs(q.x)-o.core.x,y=std::abs(q.y)-o.core.y,z=std::abs(q.z)-o.core.z;V v{std::max(x,0.f)*(q.x>=0?1.f:-1.f),std::max(y,0.f)*(q.y>=0?1.f:-1.f),std::max(z,0.f)*(q.z>=0?1.f:-1.f)};if(length(v)>1e-8f)return norm(v);if(x>=y&&x>=z)return{q.x>=0?1.f:-1.f,0,0};if(y>=z)return{0,q.y>=0?1.f:-1.f,0};return{0,0,q.z>=0?1.f:-1.f};}if(o.kind==Kind::Capsule){V ba=o.b-o.a,q=p-o.a;float h=clampf(dot(q,ba)/o.len2,0,1);return norm(q-ba*h);}V q=p-o.a;float ax=dot(q,o.n0);if(ax<.0002f)return o.n0*-1;if(ax>o.len-.0002f)return o.n0;return norm(q-o.n0*(ax+o.k));}
-void closest(const Scene&s,const Ray&r,Hit&best,Stats*st,bool ground){best=Hit{};best.id=-1;best.mat=-1;if(ground&&r.d.y<-.000001f){float t=-r.o.y/r.d.y;if(t>.0001f){V p=r.o+r.d*t;best={t,p,{0,1,0},-1,-2};}}const RayBoxCache box=makeRayBoxCache(r);int top=0;std::array<int32_t,128> stack{};std::array<float,128> nearDist{};if(s.root>=0){if(st)st->aabb++;float q;if(boundsHit(r,box,s.node[s.root],best.t,q)){stack[top]=s.root;nearDist[top++]=q;}}
- while(top){int slot=--top;int idx=stack[slot];if(nearDist[slot]>best.t)continue;const Node&n=s.node[idx];if(st)st->nodes++;if(n.count){for(int i=n.start;i<n.start+n.count;i++){uint32_t oi=s.order[i];const Obj&o=s.obj[oi];if(st)st->tests++;float t;if(intersect(r,o,best.t,t)){best.t=t;best.id=(int)oi;best.mat=o.mat;}}}else{if(st)st->aabb+=2;float a=INF,b=INF;bool ha=boundsHit(r,box,s.node[n.left],best.t,a),hb=boundsHit(r,box,s.node[n.right],best.t,b);if(ha&&hb){if(a<b){if(top<126){stack[top]=n.right;nearDist[top++]=b;stack[top]=n.left;nearDist[top++]=a;}}else if(top<126){stack[top]=n.left;nearDist[top++]=a;stack[top]=n.right;nearDist[top++]=b;}}else if(ha&&top<128){stack[top]=n.left;nearDist[top++]=a;}else if(hb&&top<128){stack[top]=n.right;nearDist[top++]=b;}}}
+void closest(const Scene&s,const Ray&r,Hit&best,Stats*st,bool ground){
+ best=Hit{};best.id=-1;best.mat=-1;
+ if(ground&&r.d.y<-.000001f){float t=-r.o.y/r.d.y;if(t>.0001f){V p=r.o+r.d*t;best={t,p,{0,1,0},-1,-2};}}
+ const RayBoxCache box=makeRayBoxCache(r);
+ struct Entry{int32_t index;float nearDist;};
+ std::array<Entry,128> stack{};int top=0;std::vector<Entry> overflow;
+ auto push=[&](Entry e){if(overflow.empty()&&top<(int)stack.size())stack[top++]=e;else overflow.push_back(e);};
+ auto pop=[&](){if(!overflow.empty()){Entry e=overflow.back();overflow.pop_back();return e;}return stack[--top];};
+ if(s.root>=0){if(st)st->aabb++;float q;if(boundsHit(r,box,s.node[s.root],best.t,q))push({s.root,q});}
+ while(top||!overflow.empty()){
+  Entry entry=pop();int idx=entry.index;if(entry.nearDist>best.t)continue;const Node&n=s.node[idx];if(st)st->nodes++;
+  if(n.count){for(int i=n.start;i<n.start+n.count;i++){uint32_t oi=s.order[i];const Obj&o=s.obj[oi];if(st)st->tests++;float t;if(intersect(r,o,best.t,t)){best.t=t;best.id=(int)oi;best.mat=o.mat;}}}
+  else{if(st)st->aabb+=2;float a=INF,b=INF;bool ha=boundsHit(r,box,s.node[n.left],best.t,a),hb=boundsHit(r,box,s.node[n.right],best.t,b);if(ha&&hb){if(a<b){push({n.right,b});push({n.left,a});}else{push({n.left,a});push({n.right,b});}}else if(ha)push({n.left,a});else if(hb)push({n.right,b});}
+ }
  if(best.id>=0){best.p=r.o+r.d*best.t;best.n=normalAt(s.obj[best.id],best.p);}
 }
 int groundMaterial(const Scene&s,V p){float shore=12.f+.55f*std::sin(p.z*.08f)+.30f*std::sin(p.z*.21f);for(size_t i=0;i<s.mat.size();i++){auto&n=s.mat[i].name;if((p.x>shore&&n=="sea")||((p.x>4.84f||p.x< -4.85f)&&p.x<=shore&&n=="sand")||(p.x<=4.84f&&p.x>=-4.85f&&n=="asphalt"))return (int)i;}return 0;}

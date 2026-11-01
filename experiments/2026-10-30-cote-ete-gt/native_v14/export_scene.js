@@ -54,7 +54,7 @@ function putF32(v) { file.writeFloatLE(v, offset); offset += 4; }
 function putF32s(a) { for (const v of a) putF32(v); }
 const vecs = (...vs) => vs.flat();
 
-file.write('M3D1314', offset, 'ascii'); offset += 8;
+file.fill(0, offset, offset + 8); file.write('M3D1314', offset, 'ascii'); offset += 8;
 putU32(2); putU32(objects.length); putU32(bvh.length); putI32(scene.bvhRoot);
 putU32(objects.length); putU32(mats.length); putU32(mats.length); putU32(512);
 for (const mat of mats) {

@@ -11,13 +11,13 @@ static uint8_t defaultReflectivityPercent(const std::string& name){if(name=="sea
 static bool readV(std::ifstream& f,V& v){return readF(f,v.x)&&readF(f,v.y)&&readF(f,v.z);}
 static bool validBounds(V a,V b){return a.x<=b.x&&a.y<=b.y&&a.z<=b.z;}
 static bool fail(std::wstring& e,const wchar_t* m){e=m;return false;}
-bool loadScene(const wchar_t* path,Scene& s,std::wstring& error){
+bool loadScene(const std::filesystem::path& path,Scene& s,std::wstring& error){
  error.clear();
  try{
-  std::ifstream f(std::filesystem::path(path),std::ios::binary);
+  std::ifstream f(path,std::ios::binary);
   if(!f)return fail(error,L"Fichier moteur3d_v1314_scene.bin introuvable à côté du programme.");
   char magic[8]{};uint32_t version=0,no=0,nn=0,nord=0,nm=0,nt=0,texSize=0;int32_t root=-1;
-  if(!readBytes(f,magic,8)||std::memcmp(magic,"M3D1314",7)||!readU32(f,version)||!readU32(f,no)||!readU32(f,nn)||!readI32(f,root)||!readU32(f,nord)||!readU32(f,nm)||!readU32(f,nt)||!readU32(f,texSize))
+  if(!readBytes(f,magic,8)||std::memcmp(magic,"M3D1314",7)||magic[7]!='\0'||!readU32(f,version)||!readU32(f,no)||!readU32(f,nn)||!readI32(f,root)||!readU32(f,nord)||!readU32(f,nm)||!readU32(f,nt)||!readU32(f,texSize))
    return fail(error,L"En-tête de scène absent ou tronqué.");
   if((version!=1&&version!=2)||!no||no>4200000||!nn||nn>4200000||nord!=no||!nm||nm>256||nt!=nm||texSize!=512||root<0||(uint32_t)root>=nn)
    return fail(error,L"En-tête de scène V13.14 invalide (version, quantités ou racine BVH).");
