@@ -16,6 +16,7 @@ static V bumpNormal(const std::string&mat,V p,V n,float pixelFootprint){
  else if(mat=="wood"){amp=.0007f;f1=90.f;f2=140.f;}
  else if(mat=="brick"){amp=.0012f;f1=58.f;f2=96.f;}
  else if(mat=="sea"){amp=.00055f;f1=160.f;f2=230.f;}
+ else if(mat=="orange"){amp=.00115f;f1=54.f;f2=103.f;}
  else return n;
  const V d1=norm({.76f,.45f,.47f}),d2=norm({-.22f,.92f,.32f});
  const float a=dot(p,d1)*f1,b=dot(p,d2)*f2;
