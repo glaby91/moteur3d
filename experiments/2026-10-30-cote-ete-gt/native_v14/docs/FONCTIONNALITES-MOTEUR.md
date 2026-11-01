@@ -27,10 +27,11 @@ The perspective camera traces one ray per internal pixel and keeps the nearest h
 - L’heure couvre 06:00–22:00 par pas de 30 minutes et fait évoluer le ciel, le soleil, l’ambiance et les lampes.
 - Les lampadaires et les phares de voitures contribuent comme sources locales à portée limitée.
 - L’ombrage combine lumière diffuse et reflets spéculaires réglés selon le matériau.
+- Un bump mapping procédural perturbe les normales d’ombrage de l’asphalte, du sable, du béton, de la pierre, du bois, de la brique et de la mer. Son intensité diminue avec la distance pour limiter le scintillement; les silhouettes et le nombre de triangles restent inchangés.
 - La mer, les peintures de voiture et les vitrages peuvent recevoir une réflexion secondaire à un rebond.
 - Le brouillard optionnel atténue les objets selon la distance; le ciel reçoit aussi un motif nuageux procédural.
 
-Procedural material textures are built into RGB565 mip chains from 512 × 512 to 8 × 8; sampling is bilinear within the selected mip level. Time of day ranges from 06:00 to 22:00 in 30-minute steps and changes the sky, sun, ambient light, and lamps. Streetlights and car headlights are local lights. Shading combines diffuse and material-dependent specular light. The sea, car paint, and glass support one-bounce reflections. Optional fog attenuates distant geometry and adds procedural clouds to the sky.
+Procedural material textures are built into RGB565 mip chains from 512 × 512 to 8 × 8; sampling is bilinear within the selected mip level. Time of day ranges from 06:00 to 22:00 in 30-minute steps and changes the sky, sun, ambient light, and lamps. Streetlights and car headlights are local lights. Shading combines diffuse and material-dependent specular light. Procedural bump mapping perturbs shading normals on asphalt, sand, concrete, stone, wood, brick, and sea; it fades with distance and does not change silhouettes or triangle count. The sea, car paint, and glass support one-bounce reflections. Optional fog attenuates distant geometry and adds procedural clouds to the sky.
 
 ## Contrôles de l’interface / UI controls
 
@@ -61,11 +62,11 @@ Rendering distributes 16 × 16 pixel tiles across 1–16 CPU threads. A generati
 
 La scène de référence comprend route côtière, promenade pavée, bordure, garde-corps, neuf bancs, lampadaires, palmiers, plage, rochers, oyats, parasols, serviettes, poubelles, mouettes et voitures. L’export validé contient **1 537 833 triangles**, **1 541 767 objets** et **920 433 nœuds BVH**; le binaire non compressé mesure **254 942 648 octets**. Le chargeur accepte jusqu’à **4 200 000 objets et nœuds BVH**.
 
-Le rendu est CPU et aucun pipeline GPU n’est présent dans ce code natif. L’application ne propose pas encore d’éditeur de scène interactif, de physique ou d’animation. Les changements de décor s’effectuent dans `scene_coastal_v1314.js`, puis nécessitent un nouvel export. Le temps d’image dépend du processeur, de la résolution, du mode interne, des ombres et des réflexions; le nombre de triangles n’est pas un benchmark de FPS. Le fichier `moteur3d_v1314_scene.bin` doit rester dans le même dossier que l’EXE.
+Le bump mapping actuel est procédural et intégré à l’ombrage; le moteur ne charge pas encore de fichiers de normal map. Le rendu est CPU et aucun pipeline GPU n’est présent dans ce code natif. L’application ne propose pas encore d’éditeur de scène interactif, de physique ou d’animation. Les changements de décor s’effectuent dans `scene_coastal_v1314.js`, puis nécessitent un nouvel export. Le temps d’image dépend du processeur, de la résolution, du mode interne, des ombres et des réflexions; le nombre de triangles n’est pas un benchmark de FPS. Le fichier `moteur3d_v1314_scene.bin` doit rester dans le même dossier que l’EXE.
 
 The reference scene includes a coastal road and paved promenade, curb, guardrail, nine benches, streetlights, palms, beach, rocks, beach grass, parasols, towels, bins, gulls, and cars. The validated export contains **1,537,833 triangles**, **1,541,767 objects**, and **920,433 BVH nodes**; the uncompressed binary is **254,942,648 bytes**. The loader accepts up to **4,200,000 objects and BVH nodes**.
 
-This native code renders on the CPU and has no GPU pipeline. The application has no interactive scene editor, physics, or animation yet. Edit `scene_coastal_v1314.js` and export again to change the scenery. Frame time depends on the processor, output size, internal scale, shadows, and reflections; triangle count is not an FPS benchmark. Keep `moteur3d_v1314_scene.bin` beside the EXE.
+Bump detail is procedural and built into shading; the engine does not yet load external normal-map files. This native code renders on the CPU and has no GPU pipeline. The application has no interactive scene editor, physics, or animation yet. Edit `scene_coastal_v1314.js` and export again to change the scenery. Frame time depends on the processor, output size, internal scale, shadows, and reflections; triangle count is not an FPS benchmark. Keep `moteur3d_v1314_scene.bin` beside the EXE.
 
 ## Modules et compilation / Modules and build flow
 

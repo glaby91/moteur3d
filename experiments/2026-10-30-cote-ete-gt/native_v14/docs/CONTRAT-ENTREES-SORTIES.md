@@ -90,7 +90,7 @@ Inputs supplied by the user interface:
 
 **Entrée / Input :** scène, carte d’ombres, caméra, rayon, impact, statistiques et indicateur de brouillard; l’état lumineux a déjà été préparé par `m3d_lighting.cpp`. / Scene, shadow map, camera, ray, hit, statistics and fog flag; lighting state is prepared by `m3d_lighting.cpp`.
 
-**Sortie / Output :** couleur RGB calculée pour un rayon; ajoute au besoin les contributions des lumières, ombres, textures et réflexions. `buildShadow` produit la carte d’ombres de la scène. / Computed RGB color for a ray, including applicable lights, shadows, textures and reflections. `buildShadow` returns the scene’s shadow map.
+**Sortie / Output :** couleur RGB calculée pour un rayon; ajoute au besoin les contributions des lumières, ombres, textures, bump mapping procédural et réflexions. Le bump mapping perturbe la normale d’ombrage avec un relief mathématique dépendant du matériau et s’atténue avec la distance; il ne modifie pas la géométrie. `buildShadow` produit la carte d’ombres de la scène. / Computed RGB color for a ray, including applicable lights, shadows, textures, procedural bump mapping and reflections. Bump mapping perturbs the shading normal with material-specific procedural relief and fades with distance; it does not alter geometry. `buildShadow` returns the scene’s shadow map.
 
 ### `m3d_render.cpp` — Caméra et rendu / Camera and rendering
 

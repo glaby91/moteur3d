@@ -27,7 +27,7 @@ Les sources de travail sont séparées dans `src/` afin que chaque partie puisse
 - `src/m3d_scene.cpp` : lecture et validation de l’export V13.14.
 - `src/m3d_lighting.cpp` : soleil, ciel et sources lumineuses pilotés par l’heure.
 - `src/m3d_intersection.cpp` : intersections des primitives, calcul des normales et parcours BVH.
-- `src/m3d_shading.cpp` : carte d’ombres, textures, éclairage de surface et réflexions.
+- `src/m3d_shading.cpp` : carte d’ombres, textures, bump mapping procédural, éclairage de surface et réflexions.
 - `src/m3d_render.cpp` : caméra, lancer de rayons et rendu parallèle par tuiles.
 - `src/m3d_post.cpp` : mise à l’échelle bilinéaire et réduction 2× du résultat.
 - `src/moteur3d_win32.cpp` : interface native, réglages et orchestration.
