@@ -4,7 +4,7 @@
 // not a low-poly/blockout city. Edit this file to revise the scene.
 
 const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
-  raptureGlass: 0, sea: 45, puddle: 38, metal: 48, neon: 12,
+  raptureGlass: 0, sea: 45, puddle: 38, metal: 48, wheelMetal: 78, neon: 12,
   windowlit: 4, lamp: 2, raptureStone: 4, raptureBronze: 24, concrete: 3, brick: 2
 });
 // Thin glazing transmits straight-through rays; Fresnel-like reflections are
@@ -345,8 +345,33 @@ function makeScene() {
   // Set the bathysphere back between the avenue bridges so it reads as a
   // station destination rather than an oversized object blocking the entrance.
   const bx=0,by=4.4,bz=-35,br=3.7,platformY=by-br-.10;
-  ellipsoidMesh(bx,by,bz,br,br,br,'wheelMetal',64,48);
-  ellipsoidMesh(bx,by,bz,br*.94,br*.94,br*.94,'metal',64,48);
+  // The pressure hull is a true double shell. Remove polygon apertures at the
+  // three viewports so their glazing and the lit cabin behind it are visible.
+  function bathysphereHull(radius, material, segments=96, rows=64) {
+    const apertures=[
+      {dir:[0,0,-1],cos:.968},
+      {dir:[1,0,0],cos:.985},
+      {dir:[-1,0,0],cos:.985}
+    ],grid=[];
+    for(let iy=0;iy<=rows;iy++) {
+      const theta=iy/rows*Math.PI,row=[];
+      for(let ix=0;ix<=segments;ix++) {
+        const phi=ix/segments*Math.PI*2,sn=Math.sin(theta),u=[sn*Math.cos(phi),Math.cos(theta),sn*Math.sin(phi)];
+        row.push({p:[bx+u[0]*radius,by+u[1]*radius,bz+u[2]*radius],n:u,uv:[ix/segments*4,iy/rows*4],dir:u});
+      }
+      grid.push(row);
+    }
+    const open=dir=>apertures.some(a=>dir[0]*a.dir[0]+dir[1]*a.dir[1]+dir[2]*a.dir[2]>a.cos);
+    for(let iy=0;iy<rows;iy++)for(let ix=0;ix<segments;ix++) {
+      const a=grid[iy][ix],b=grid[iy+1][ix],c=grid[iy+1][ix+1],d=grid[iy][ix+1];
+      const n0=[a.dir[0]+b.dir[0]+d.dir[0],a.dir[1]+b.dir[1]+d.dir[1],a.dir[2]+b.dir[2]+d.dir[2]],l0=Math.hypot(...n0)||1;
+      const n1=[d.dir[0]+b.dir[0]+c.dir[0],d.dir[1]+b.dir[1]+c.dir[1],d.dir[2]+b.dir[2]+c.dir[2]],l1=Math.hypot(...n1)||1;
+      if(!open(n0.map(v=>v/l0)))meshTriangle(a,b,d,material);
+      if(!open(n1.map(v=>v/l1)))meshTriangle(d,b,c,material);
+    }
+  }
+  bathysphereHull(br,'wheelMetal');
+  bathysphereHull(br*.94,'metal');
   // Shell rings, longitudinal ribs, access hatch, bolts and viewport bezels.
   for(let latitude=-3;latitude<=3;latitude++) {
     const theta=(latitude/4)*Math.PI*.5,rr=br*Math.cos(theta),yy=by+br*Math.sin(theta);
@@ -376,6 +401,23 @@ function makeScene() {
     }
   }
   ellipsoidMesh(0,portY,portZ+.04,.57,.57,.08,'raptureGlass',40,28);
+  // Amber instrument bulkhead, cabin lamp and gauge relief sit several metres
+  // behind the real opening, creating depth through the transparent viewport.
+  const cabinZ=bz+1.55, cabinR=.83, cabinCenter={p:[bx,by+.15,cabinZ],n:[0,0,-1],uv:[.5,.5]};
+  for(let i=0;i<48;i++) {
+    const a0=i*Math.PI*2/48,a1=(i+1)*Math.PI*2/48;
+    const v=a=>({p:[bx+Math.cos(a)*cabinR,by+.15+Math.sin(a)*cabinR,cabinZ],n:[0,0,-1],uv:[.5+.5*Math.cos(a),.5+.5*Math.sin(a)]});
+    meshTriangle(cabinCenter,v(a0),v(a1),'windowlit');
+    capsule([bx+Math.cos(a0)*.91,by+.15+Math.sin(a0)*.91,cabinZ-.025],[bx+Math.cos(a1)*.91,by+.15+Math.sin(a1)*.91,cabinZ-.025],.045,'raptureBronze');
+  }
+  ellipsoidMesh(bx,by+.82,bz+1.22,.20,.27,.20,'lamp',18,12);
+  // Three recessed analog instruments and their pointers.
+  for(const [gx,gy,gr] of [[-.39,by+.18,.18],[0,by+.18,.22],[.39,by+.18,.18]]) {
+    ellipsoidMesh(gx,gy,bz+1.47,gr,gr,.035,'metal',20,14);
+    ellipsoidMesh(gx,gy,bz+1.425,gr*.75,gr*.75,.025,'wheelMetal',18,12);
+    capsule([gx,gy,bz+1.39],[gx+gr*.43,gy+gr*.19,bz+1.39],.018,'raptureBronze');
+  }
+  M3D_SCENE_LIGHTS.push([bx,by+.72,bz+1.22,7.5,1.35,255,151,76]);
   for(let i=0;i<16;i++) {
     const a=i*Math.PI*2/16;
     ellipsoidMesh(Math.cos(a)*.91,portY+Math.sin(a)*.91,portZ-.06,.075,.075,.055,'led',10,8);
@@ -390,7 +432,7 @@ function makeScene() {
                 [x,by+Math.cos(a1)*r,bz+Math.sin(a1)*r],.055,'metal');
       }
     }
-    ellipsoidMesh(x,by,bz,.42,.42,.42,'raptureGlass',32,22);
+    ellipsoidMesh(x,by,bz,.09,.42,.42,'raptureGlass',32,22);
     for(let k=0;k<8;k++) {
       const a=k*Math.PI/4;
       ellipsoidMesh(x*1.03,by+Math.cos(a)*.56,bz+Math.sin(a)*.56,.06,.06,.06,'raptureBronze',8,6);
@@ -418,6 +460,27 @@ function makeScene() {
     capsule([side*1.58,platformY+.55,bz-1.5],[side*1.58,by-.45,bz-3.36],.060,'raptureBronze');
     capsule([side*1.58,platformY+.15,bz-1.5],[side*1.58,platformY+.15,bz-3.36],.045,'metal');
   }
+
+  // Platinum Rapture commemorative token in a lit display case. The raised
+  // circular R and milled double rim make the coin recognizable at scene scale.
+  const tx=6.3,ty=1.72,tz=-25.8;
+  roundBox(tx-1.05,.06,tz-.72,tx+1.05,.52,tz+.72,.15,'raptureStone');
+  roundBox(tx-1.12,.48,tz-.78,tx+1.12,.61,tz+.78,.07,'raptureBronze');
+  roundBox(tx-1.00,.61,tz-.68,tx+1.00,2.65,tz+.68,.12,'raptureGlass');
+  ellipsoidMesh(tx,ty,tz,.70,.70,.12,'wheelMetal',48,32);
+  for(const radius of [.58,.49])for(let i=0;i<56;i++) {
+    const a0=i*Math.PI*2/56,a1=(i+1)*Math.PI*2/56;
+    capsule([tx+Math.cos(a0)*radius,ty+Math.sin(a0)*radius,tz-.105],[tx+Math.cos(a1)*radius,ty+Math.sin(a1)*radius,tz-.105],.023,'raptureBronze');
+  }
+  const coinStroke=(x0,y0,x1,y1)=>capsule([tx+x0,ty+y0,tz-.135],[tx+x1,ty+y1,tz-.135],.038,'metal');
+  coinStroke(-.19,-.27,-.19,.28); coinStroke(-.19,.28,.12,.28);
+  coinStroke(.12,.28,.23,.17); coinStroke(.23,.17,.23,.02);
+  coinStroke(.23,.02,.10,-.08); coinStroke(.10,-.08,-.19,-.08); coinStroke(-.02,-.08,.25,-.28);
+  for(let i=0;i<16;i++) {
+    const a=i*Math.PI/8;
+    ellipsoidMesh(tx+Math.cos(a)*.64,ty+Math.sin(a)*.64,tz-.105,.027,.027,.018,'raptureBronze',8,6);
+  }
+  M3D_SCENE_LIGHTS.push([tx,2.28,tz-.55,5.5,.52,150,205,238]);
   // Bathysphere mooring cables and pulley blocks.
   for(const side of [-1,1]) {
     capsule([side*6.0,by+1.8,bz],[side*6.0,by+9.0,bz],.095,'metal');

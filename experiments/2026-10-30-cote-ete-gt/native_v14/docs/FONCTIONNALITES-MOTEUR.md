@@ -29,8 +29,8 @@ The perspective camera traces one ray per internal pixel and keeps the nearest h
 - L’heure couvre 06:00–22:00 par pas de 30 minutes et fait évoluer le ciel, le soleil, l’ambiance et les lampes.
 - Les lampadaires et les phares de voitures contribuent comme sources locales à portée limitée.
 - Les scènes V4 peuvent embarquer jusqu’à 256 lumières ponctuelles (position, couleur, portée, intensité) avec atténuation quadratique. Elles éclairent la scène, mais ne génèrent pas encore d’ombres propres. Les lumières globales historiques restent disponibles.
-- L’étude Rapture utilise 42 lumières locales, quatre lustres suspendus, appliques murales, kiosques lumineux, garde-corps éclairés, tuyauteries détaillées et jardinières marines. Les matériaux Art déco gardent des cartes couleur, normales et rugosité intégrées au binaire.
-- Son export courant contient 207 661 objets (148 203 triangles); le preset d’ouverture Qt adopte une vue oblique depuis l’avenue.
+- L’étude Rapture utilise 44 lumières locales, dont une lampe visible dans la cabine de la bathysphère et un éclairage de vitrine. Les vrais trous de hublot traversent les deux couches de coque; lampe et instruments ambrés sont placés derrière la vitre avant. Un jeton de platine frappé d’un « R » est exposé devant la station.
+- Son nouvel export contient 226 942 objets (167 311 triangles), 119 899 nœuds BVH et 44 lumières; le binaire fait 45,3 Mo. Le preset d’ouverture Qt adopte une vue oblique depuis l’avenue.
 - Les matériaux portent une réflexion de 0 à 100 %. Une réflexion secondaire à un rebond et une lobe spéculaire directe utilisent la réflexion et la rugosité. Les matériaux V4 peuvent aussi définir transmission et indice de réfraction.
 - Les rayons transparents utilisent Fresnel-Schlick et une déviation par réfraction, traversent jusqu’à huit couches et composent la teinte du verre avec l’arrière-plan. Les surfaces transmissives ne bloquent pas la carte d’ombres opaque. Le verre reste une surface mince : pas de dispersion, absorption spectrale ni volume épais.
 - Les chaînes mip RGB565 acceptent couleur, normales tangentielles et rugosité. La scène Rapture génère des cartes normales/rugosité procédurales pour pierre, bronze et verre; l’orange utilise ses cartes dédiées. Le bump procédural reste le repli sans normal map.
@@ -44,7 +44,7 @@ Procedural material textures are built into RGB565 mip chains from 512 × 512 to
 
 V4 scenes can embed up to 256 point lights with position, color, radius and intensity. They use quadratic attenuation but do not yet cast shadows. Materials support reflectivity, normal and roughness maps. Transparent rays use Schlick Fresnel and surface refraction, traverse up to eight layers, and do not block the opaque shadow map. Glass remains a thin-surface approximation without thick-volume refraction, dispersion or spectral absorption. The optional CPU bloom extracts highlights above 185 and applies a separable 11-tap blur; this is not HDR.
 
-The Rapture study uses 42 local lights, four suspended chandeliers, wall sconces, illuminated kiosks and railings, detailed pipework, and marine planters. Its Art Deco materials include embedded color, normal and roughness maps.
+The Rapture study uses 44 local lights. The bathysphere has true apertures through both hull layers, with a warm cabin lamp and instruments behind the forward viewport. A platinum Rapture token is displayed in a lit case. The scene also has chandeliers, wall sconces, illuminated kiosks and railings, detailed pipework, and marine planters.
 Its current export contains 207,661 objects (148,203 triangles); the Qt opening preset uses an oblique view from the avenue.
 
 ## Contrôles de l’interface / UI controls

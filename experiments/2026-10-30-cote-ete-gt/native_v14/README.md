@@ -1,8 +1,8 @@
-# Moteur 3D natif x64 — build 261102-0006
+# Moteur 3D natif x64 — build 261102-0007
 
 ## Repères de version
 
-- **Version :** `261102-0006`.
+- **Version :** `261102-0007`.
 - **Révision GitHub :** SHA court du commit, injecté à la compilation.
 - **Branche GitHub :** nom exact de la branche, injecté à la compilation.
 - **Scène et géométrie source :** V13.14.
@@ -16,7 +16,7 @@ La carte d’architecture, l’inventaire des fonctions exposées, leur statut e
 
 ## Sources de scène modifiables
 
-Les décors restent des sources indépendantes : `scene_coastal_v1314.js`, `scene_orange_macro.js` et l’étude Rapture `scene_rapture.js`. Chaque fichier décrit géométrie, placement et matériaux; `source_v1314.html` fournit les primitives et l’aperçu, tandis que `export_scene.js` produit un binaire natif. Rapture comprend maintenant **42 lumières locales**, quatre lustres, appliques, kiosques vitrés, tuyauteries à vannes, garde-corps lumineux et jardinières marines, en plus de ses façades, du dôme et de la bathysphère. Son export actuel contient **207 661 objets**, dont **148 203 triangles**. La caméra d’ouverture Qt adopte une vue oblique depuis l’avenue pour éviter le cadrage extérieur et symétrique. Ses matériaux pierre, bronze et verre ont des cartes couleur, normale et rugosité; le verre utilise Fresnel/réfraction et l’interface Qt peut activer le bloom doux. Les lumières locales n’ont pas encore d’ombres et le verre reste une approximation mince. La scène côtière comprend le coupé CC0; son export de référence contient 1 537 833 triangles, 1 541 767 objets et 920 433 nœuds BVH.
+Les décors restent des sources indépendantes : `scene_coastal_v1314.js`, `scene_orange_macro.js` et l’étude Rapture `scene_rapture.js`. Chaque fichier décrit géométrie, placement et matériaux; `source_v1314.html` fournit les primitives et l’aperçu, tandis que `export_scene.js` produit un binaire natif. Rapture conserve ses façades Art déco, son dôme vitré, ses 42 éclairages urbains et sa bathysphère, désormais percée de vrais hublots sur un double coque. La cabine ambrée avec lampe et instruments se voit à travers le hublot avant. Un jeton commémoratif argenté avec un « R » en relief est présenté dans une vitrine éclairée. Le nouvel export contient **226 942 objets**, dont **167 311 triangles**, **119 899 nœuds BVH** et **44 lumières locales**; le binaire fait **45,3 Mo**. Les matériaux pierre, bronze et verre ont des cartes couleur, normale et rugosité; le verre utilise Fresnel/réfraction et l’interface Qt peut activer le bloom doux. Les lumières locales n’ont pas encore d’ombres et le verre reste une approximation mince. La scène côtière comprend le coupé CC0; son export de référence contient 1 537 833 triangles, 1 541 767 objets et 920 433 nœuds BVH.
 
 ## Fonctionnalités détaillées
 
