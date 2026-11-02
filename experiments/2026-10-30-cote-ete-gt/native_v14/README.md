@@ -12,6 +12,8 @@ La révision et la branche apparaissent dans l’interface et les propriétés W
 
 Le contrat bilingue des entrées/sorties, module par module, est documenté dans [CONTRAT-ENTREES-SORTIES.md](docs/CONTRAT-ENTREES-SORTIES.md).
 
+La carte d’architecture, l’inventaire des fonctions exposées, leur statut et les blocs restant à développer sont suivis dans [ETAT-MODULES-ET-FONCTIONS.md](docs/ETAT-MODULES-ET-FONCTIONS.md). Ce fichier est la référence de reprise du projet; il sépare ce qui est implémenté, préparatoire et planifié.
+
 ## Sources de scène modifiables
 
 Les décors restent des sources indépendantes : `scene_coastal_v1314.js`, `scene_orange_macro.js` et l’étude Rapture `scene_rapture.js`. Chaque fichier décrit géométrie, placement et matériaux; `source_v1314.html` fournit les primitives et l’aperçu, tandis que `export_scene.js` produit un binaire natif. Rapture comprend maintenant **42 lumières locales**, quatre lustres, appliques, kiosques vitrés, tuyauteries à vannes, garde-corps lumineux et jardinières marines, en plus de ses façades, du dôme et de la bathysphère. Son export actuel contient **207 661 objets**, dont **148 203 triangles**. La caméra d’ouverture Qt adopte une vue oblique depuis l’avenue pour éviter le cadrage extérieur et symétrique. Ses matériaux pierre, bronze et verre ont des cartes couleur, normale et rugosité; le verre utilise Fresnel/réfraction et l’interface Qt peut activer le bloom doux. Les lumières locales n’ont pas encore d’ombres et le verre reste une approximation mince. La scène côtière comprend le coupé CC0; son export de référence contient 1 537 833 triangles, 1 541 767 objets et 920 433 nœuds BVH.
@@ -37,7 +39,7 @@ Les sources de travail sont séparées dans `src/` afin que chaque partie puisse
 - `src/moteur3d_qt.cpp` : interface multiplateforme Qt Widgets et orchestration du rendu.
 - `m3d_engine.h` : types et fonctions partagés entre les modules.
 
-`assemble_native.js` reconstruit, dans un ordre déterministe, le fichier monolithique `moteur3d_v14_native.cpp`. C’est ce fichier reconstruit que MSVC compile : les sources modulaires restent la référence de travail et l’exécutable utilise le même parcours de rendu.
+La cible actuellement livrée est `moteur3d_qt`. CMake compile directement les six modules C++ du moteur et l’interface Qt; le workflow `build-moteur3d-v14-qt.yml` vérifie la compilation Windows et Linux. `moteur3d_win32.cpp` est conservé comme ancienne interface, mais n’est pas inclus dans cette cible ni dans le workflow courant.
 
 ## Ordonnancement
 
@@ -49,7 +51,7 @@ L’ordre de reconstruction/compilation est : scène → éclairage → intersec
 
 Le ZIP de chaque exécution porte son numéro de run et son SHA court; il contient l’exécutable x64, les scènes côtière et orange macro, le module JS de la scène orange et `build-manifest.json` avec la provenance et les statistiques d’export. Extraire l’EXE et la scène à ouvrir dans le même dossier.
 
-Le workflow GitHub injecte la révision, la branche et le numéro de run, charge `scene_coastal_v1314.js` avec le moteur de `source_v1314.html`, reconstruit le fichier source et compile avec MSVC. Pour compiler une autre scène, passez son fichier JS au troisième argument de `export_scene.js` et chargez ce même module dans l’aperçu HTML. Le mode **Ultra** conserve les ombres adoucies et les réflexions à un rebond sur l’eau, la peinture et les vitrages.
+Le workflow GitHub exporte les scènes côtière et Rapture, configure CMake avec Qt 6, puis compile et empaquette `moteur3d_qt` sur Windows et Linux. Le run 14, commit `8993a4f`, a réussi sur les deux systèmes. Pour compiler une autre scène, passez son fichier JS au troisième argument de `export_scene.js`, puis ouvrez le binaire produit dans le menu **Scène → Ouvrir une scène…**.
 
 
 Le lissage des contours fonctionne à la résolution de sortie : les pixels présentant une forte transition de luminance sont adoucis en mélangeant leur couleur avec celles des quatre voisins directs. Le SSAA 4× est retiré de l’interface; le FSAA 16× reste disponible comme mode coûteux de comparaison. La case **AA contours** active le lissage quatre voisins après mise à l’échelle, indépendamment des modes Natif, Équilibré, Détails, Rapide et Très rapide; elle est cochée par défaut. La profondeur de champ reste optionnelle et passe à 16 rayons par pixel, avec une ouverture réduite pour limiter les images fantômes.
@@ -62,7 +64,7 @@ Le lissage des contours et le bloom sont des post-traitements CPU. Les textures 
 
 ## Interface Qt multiplateforme
 
-Une cible Qt Widgets partage le moteur de rendu C++ avec l’application Win32. La cible `moteur3d_qt` se construit avec CMake sous Windows ou Linux; elle propose résolution, qualité, caméra, heure, threads, brouillard, profondeur de champ, AA contours et bloom doux. Le preset de caméra Rapture et son activation automatique du bloom sont intégrés à cette interface Qt. L’interface Win32 existante reste disponible via le workflow Windows historique.
+L’interface Qt Widgets est l’interface livrée et utilise le moteur C++ commun. La cible `moteur3d_qt` se construit avec CMake sous Windows ou Linux; elle propose résolution, qualité, caméra, heure, threads, brouillard, profondeur de champ, AA contours, bloom doux, ouverture de scène et pré-calcul rotatif. Le preset de caméra Rapture et son activation automatique du bloom sont intégrés à Qt. Le fichier Win32 historique reste dans les sources, mais n’est pas compilé par le workflow actuel.
 
 Dépendances : CMake 3.20 ou plus récent, un compilateur C++17, Node.js et Qt 6 Widgets. Sous Ubuntu/Debian, installez `build-essential`, `cmake`, `nodejs` et `qt6-base-dev`. Sous Windows, installez Node.js, Qt 6 avec le composant Qt Widgets et CMake.
 

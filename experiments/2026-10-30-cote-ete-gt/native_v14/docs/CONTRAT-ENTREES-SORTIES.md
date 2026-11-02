@@ -7,7 +7,7 @@
 **Branche GitHub :** `experiment/manhattan-silent-hill-2026-10-30`  
 **Run GitHub Actions :** identifiant CI séparé, attribué par GitHub
 
-Ce document définit les données attendues par chaque partie du moteur et les résultats qu’elle doit fournir. Il s’applique au découpage modulaire reconstruit par `assemble_native.js`.
+Ce document définit, en termes concrets, ce que chaque module reçoit, ce qu’il retourne ou modifie, et ce que le module suivant est en droit d’attendre. Il décrit la cible réellement compilée : les six modules moteur C++ et l’interface Qt Widgets, construits directement par CMake sous Windows et Linux.
 
 
 ### Scène modifiable / Editable scene
@@ -64,73 +64,95 @@ Inputs supplied by the user interface:
 
 ## 2. Contrat par module / Module contracts
 
-### `m3d_engine.h` — Types partagés / Shared types
+Chaque entrée précise les préconditions. Chaque sortie précise ce que le module garantit au suivant. Les helpers privés sont regroupés selon le travail qu’ils réalisent; ils ne constituent pas des interfaces publiques séparées.
 
-**Entrée / Input :** définitions communes des vecteurs, rayons, impacts, objets, matériaux, scène, caméra, lumières, statistiques et carte d’ombres. / Shared definitions for vectors, rays, hits, objects, materials, scene, camera, lights, statistics and shadow map.
+### `m3d_engine.h` — Types et primitives communes / Shared types and math
 
-**Sortie / Output :** déclarations et types utilisés par tous les modules; aucune donnée de scène n’est chargée par cet en-tête. / Declarations and types used by all modules; this header loads no scene data.
+**Entrée :** aucune entrée d’exécution; l’en-tête définit les données et signatures communes. Les vecteurs `V` représentent des coordonnées 3D flottantes; `Ray` porte une origine et une direction; `Hit` porte distance, position, normale, matériau et identifiant. `Scene` regroupe objets, BVH, ordre, matériaux, lumières et racine.
 
-### `src/m3d_physics.h` — Contrat backend physique / Physics backend contract
+**Sortie garantie :** types compatibles entre modules et fonctions inline `dot`, `cross`, `length`, `norm`, `clampf`. `loadScene(const wchar_t*, ...)` adapte le chemin Windows à l’API `std::filesystem`. Aucun stockage ni calcul de scène n’est exécuté par cet en-tête.
 
-**Entrée / Input :** descriptions de corps (masse, pose, vitesse et options de collision), demandes d’initialisation, d’étape de simulation et de lecture/écriture de pose. / Body descriptions (mass, pose, velocity, and collision options), initialization, simulation-step, and pose read/write requests.
+### `m3d_scene.cpp` — Lecture et validation / Loading and validation
 
-**Sortie / Output :** interface indépendante du rendu (`Backend`) et choix `Disabled` / `PhysX`. `physXAvailable()` retourne `false` jusqu’à ce que l’adaptateur et le SDK soient ajoutés; aucun calcul physique n’est effectué dans cette révision. / Renderer-independent `Backend` interface and `Disabled` / `PhysX` selection. `physXAvailable()` returns `false` until the adapter and SDK are added; this revision performs no physics simulation.
+**Fonction :** `loadScene(path, Scene&, error)`.
 
-### `m3d_scene.cpp` — Chargement de scène / Scene loading
+**Entrée :** chemin vers un binaire V3/V4 complet; `Scene&` reçoit le résultat; `error` reçoit le détail d’échec. Les sous-lecteurs lisent les nombres little-endian et refusent les flottants non finis.
 
-**Entrée / Input :** chemin du binaire V13.14; flux conforme au format décrit plus haut. / Path to the V13.14 binary; stream conforming to the format above.
+**Sortie garantie :** `true` signifie que le graphe BVH, les indices, bornes, matériaux et mipmaps sont validés et que les tableaux de `Scene` sont utilisables. `false` signifie qu’aucune scène ne doit être rendue et que `error` explique l’échec. Le chargeur accepte V3 et V4; les champs absents de V3 gardent leurs valeurs par défaut.
 
-**Sortie / Output :** `loadScene(path, Scene&, error)` remplit la scène et retourne `true`; en échec, retourne `false` et renseigne `error`. / `loadScene(path, Scene&, error)` fills the scene and returns `true`; on failure it returns `false` and sets `error`.
+### `m3d_lighting.cpp` — Éclairage global et sources locales / Lighting
 
-### `m3d_lighting.cpp` — Éclairage selon l’heure / Time-of-day lighting
+**Fonction :** `updateLighting(hour)`.
 
-**Entrée / Input :** heure entre 6 et 22, en heures décimales. / Time from 6 to 22, expressed in decimal hours.
+**Entrée :** heure décimale de la journée dans l’intervalle utilisé par l’interface, 6 à 22 h. Les lumières ponctuelles de scène doivent déjà être dans la scène chargée.
 
-**Sortie / Output :** met à jour le soleil, les couleurs du ciel, l’intensité jour/nuit et la liste des lumières ponctuelles. / Updates the sun, sky colors, day/night intensity and point-light list.
+**Sortie garantie :** état global actualisé (`sun`, couleurs du ciel, `daylight`, `lampFactor`, `pointLights`), consommé en lecture par ombrage et génération d’ombres. La fonction ne touche ni à la caméra ni aux pixels.
 
-### `m3d_intersection.cpp` — Géométrie et BVH / Geometry and BVH
+### `m3d_intersection.cpp` — Rayon, primitives et BVH / Intersections
 
-**Entrée / Input :** scène chargée, rayon (origine et direction), limite de distance et option d’intersection avec le sol. / Loaded scene, ray (origin and direction), distance limit and ground-intersection option.
+**Fonctions :** `closest(scene, ray, best, stats, ground, ignoreObject, ignoreTransparent)` et `groundMaterial(scene, point)`.
 
-**Sortie / Output :** primitive la plus proche sous forme de `Hit` (distance, position, normale, matériau, identifiant) et compteurs de parcours dans `Stats`. / Nearest primitive as a `Hit` (distance, position, normal, material, identifier) and traversal counters in `Stats`.
+**Entrée :** scène validée, rayon normalisé ou de longueur connue, distance maximale initiale dans `best.t`, options de sol/ignorance et compteur `Stats` optionnel. Le cache privé précalcule les inverses de direction pour les tests AABB.
 
-### `m3d_shading.cpp` — Ombres, textures et matériaux / Shadows, textures and materials
+**Sortie garantie :** si un impact plus proche existe, `best` devient le `Hit` le plus proche avant la limite; sinon le meilleur impact entrant est conservé. `Stats` reçoit les compteurs effectués. `groundMaterial` retourne l’indice du matériau de sol déterminé par le point. Les six types géométriques sont testés dans ce module.
 
-**Entrée / Input :** scène, carte d’ombres, caméra, rayon, impact, statistiques et indicateur de brouillard; l’état lumineux a déjà été préparé par `m3d_lighting.cpp`. / Scene, shadow map, camera, ray, hit, statistics and fog flag; lighting state is prepared by `m3d_lighting.cpp`.
+### `m3d_shading.cpp` — Ombres, matériaux et couleur / Shading
 
-**Sortie / Output :** couleur RGB calculée pour un rayon; ajoute au besoin les contributions des lumières globales et de scène, ombres, textures, normal maps, bump mapping procédural, réflexions et transmission réfractée par Fresnel. Les rayons traversent jusqu’à huit surfaces transparentes et composent leur teinte avec l’arrière-plan; ces surfaces ne bloquent pas la carte d’ombres opaque. Les normal maps tangentiels modifient la normale d’ombrage des triangles texturés sans changer leur géométrie. Le bump mapping perturbe aussi la normale, avec un relief procédural dépendant du matériau et atténué avec la distance. `buildShadow` produit la carte d’ombres solaire de la scène; les lumières ponctuelles n’ont pas encore d’ombres propres. / Computed RGB color for a ray, including global and scene lights, shadows, textures, tangent-space normal maps, procedural bump mapping, reflections and Fresnel refraction. `buildShadow` returns the sun shadow map; point lights do not yet cast shadows. Rays pass through up to eight transparent surfaces and composite their tint with the background; these surfaces do not block the opaque shadow map. Normal maps change shading normals on textured triangles without changing geometry. Procedural bump also perturbs shading normals and fades with distance. `buildShadow` returns the scene’s shadow map.
+**Fonctions :** `buildShadow(scene, stats)`, `shade(scene, shadow, camera, ray, hit, stats, fog, reflections)`, `traceColor(scene, shadow, camera, ray, stats, fog)`.
 
-### `m3d_render.cpp` — Caméra et rendu / Camera and rendering
+**Entrée :** scène et état d’éclairage initialisés; pour `shade`, impact `Hit` issu de `closest`; pour `traceColor`, rayon de caméra et paramètres de brouillard. `buildShadow` reçoit une scène valide et un compteur.
 
-**Entrée / Input :** scène, carte d’ombres, caméra, largeur/hauteur internes, nombre de threads, brouillard et jeton d’annulation de rendu. / Scene, shadow map, camera, internal width/height, thread count, fog and render-cancellation token.
+**Sortie garantie :** `buildShadow` retourne la carte solaire de profondeur et ses bornes min/max; `shade` retourne la contribution RGB locale d’un impact; `traceColor` retourne la couleur RGB du rayon, ciel compris. Normal/rugosité, UV, bump, spéculaire, réflexion et transmission sont consommés ici. Un échec de correspondance de texture utilise les replis du matériau; les lumières ponctuelles n’ont pas d’ombres dédiées.
 
-**Sortie / Output :** `render` remplit un tampon de `largeur × hauteur` pixels 32 bits et retourne `Stats`. Un jeton de génération périmé interrompt le travail après un changement de réglage. / `render` fills a 32-bit pixel buffer of `width × height` and returns `Stats`. A stale generation token cancels work after settings change.
+### `m3d_render.cpp` — Caméra, échantillonnage et image / Camera and render
 
-Les interfaces publient uniquement un tampon complet, après le rendu, la mise à l’échelle et les effets de sortie, si son jeton de génération est encore courant. L’image affichée reste intacte pendant le calcul. / The frontends publish only a complete buffer after rendering, scaling and output effects, provided its generation token is still current. The displayed image remains unchanged during calculation.
+**Fonctions :** `camera(angle, elevation, distance, width, height)` et `render(scene, shadow, camera, width, height, pixels, threads, fog, generation, token, samplesPerPixel, depthOfField)`.
 
-### `m3d_post.cpp` — Mise à l’échelle et contours / Scaling and edges
+**Entrée :** scène et ombres prêtes, dimensions internes positives, vecteur pixel dimensionné pour `width × height`, 1–32 threads, options d’échantillonnage/DOF et couple génération-token. `camera` reçoit les angles en degrés et les dimensions pour l’aspect.
 
-**Entrée / Input :** tampon source, dimensions, nombre de threads et intensité du bloom. / Source buffer, dimensions, thread count and bloom strength.
+**Sortie garantie :** `camera` renvoie œil, base caméra, champ et aspect. Si le jeton reste courant, `render` remplit le tampon 32 bits et retourne `Stats` (temps, threads, rayons, intersections, texels, etc.); si la génération change, les travailleurs s’arrêtent et le demandeur ne doit pas publier cette image. Les tuiles sont 16×16; le module exécute sur CPU.
 
-**Sortie / Output :** nouveau tampon aux dimensions cibles : `upscaleBilinear` pour interpolation bilinéaire, `downsample2x` pour réduction 2× et `antialiasEdges4` pour adoucir sélectivement les pixels de fort contraste avec leurs quatre voisins et `bloomGlow` pour ajouter un halo doux aux hautes lumières. / New destination-sized buffer: `upscaleBilinear` for bilinear interpolation, `downsample2x` for 2× reduction, `antialiasEdges4` for selective edge smoothing, and `bloomGlow` for soft highlight halos.
+### `m3d_post.cpp` — Échelle, AA contours et bloom / Post-processing
 
-### `moteur3d_win32.cpp` — Interface et orchestration / UI and orchestration
+**Fonctions :** `upscaleBilinear(src, sw, sh, dw, dh, threads)`, `downsample2x(src, sw, sh, threads)`, `antialiasEdges4(src, w, h, threads)`, `bloomGlow(src, w, h, threads, strength)`.
 
-**Entrée / Input :** événements Windows, curseurs, listes de résolution/précision, case de brouillard et fichier scène chargé. / Windows events, sliders, resolution/quality lists, fog checkbox and loaded scene file.
+**Entrée :** tampon source complet au format pixel 32 bits, dimensions cohérentes, nombre de threads; `upscaleBilinear` reçoit dimensions de sortie, `downsample2x` exige une image réductible par 2, `bloomGlow` reçoit sa force.
 
-**Sortie / Output :** requêtes de rendu, affichage de l’image et des diagnostics, contrôles de caméra et messages d’erreur. / Render requests, displayed image and diagnostics, camera controls and error messages.
+**Sortie garantie :** nouveau tampon indépendant; la source n’est pas modifiée. L’appelant applique la chaîne correspondant au mode choisi : échelle interne, AA quatre voisins si coché, bloom si actif. Le résultat final n’est remis à Qt qu’après fin de toute la chaîne.
 
-### `assemble_native.js` — Reconstruction source / Source reconstruction
+### `moteur3d_qt.cpp` — Interface, orchestration et publication / Qt frontend
 
-**Entrée / Input :** les fichiers C++ modulaires dans l’ordre déclaré dans le script. / Modular C++ files in the order declared by the script.
+**Fonctions/méthodes :** `ImageView::setFrame/paintEvent`, `MainWindow::buildUi`, `readSettings`, `openSceneFile`, `requestRender`, `renderLoop`, `setVideoControlsEnabled`, `queueNextVideoFrame`, `ellipseOrbitPose`.
 
-**Sortie / Output :** le fichier unique `moteur3d_v14_native.cpp`, reconstruit de façon déterministe puis compilé par MSVC. / The single `moteur3d_v14_native.cpp` file, deterministically reconstructed and then compiled by MSVC.
+**Entrée :** événements utilisateur, chemin de scène, options d’image, réglages de caméra/heure/threads, signaux d’annulation et résultats du travailleur.
 
-## 3. Sorties de compilation / Build outputs
+**Sortie garantie :** réglages transmis au moteur; chargement de scène annoncé en cas de succès ou erreur sans remplacer la scène active; seuls un tampon complet et correspondant à la dernière génération sont affichés. Le tampon antérieur reste visible pendant le calcul. L’aperçu rotatif pré-calcule 180 images à 2° dans sa fenêtre dédiée, affiche sa progression, puis lit les images mémorisées; la fermeture libère le cache et restaure l’image standard.
 
-Le workflow exporte `moteur3d_v1314_scene.bin`, reconstruit le source, compile l’EXE x64 puis crée une archive identifiée par son numéro de run et son SHA court. L’archive contient l’EXE et le fichier scène requis. Le SHA du commit et la branche sont injectés dans l’interface et les propriétés Windows; le numéro de run GitHub Actions reste séparé.
+### `src/moteur3d_win32.cpp` — Ancien frontend / Legacy frontend
 
-The workflow exports `moteur3d_v1314_scene.bin`, reconstructs the source, compiles the x64 EXE and creates an archive identified by its run number and short SHA. The archive contains the EXE and required scene file. The commit SHA and branch are embedded in the UI and Windows file properties; the GitHub Actions run number remains separate.
+**Entrée/sortie :** ancien code de fenêtre Win32 et appels au moteur commun.
+
+**État :** fichier conservé à titre historique; il n’appartient pas à `m3d_core`, n’est pas construit par CMake et n’est pas livré par le workflow actuel. L’interface compilée et distribuée est Qt Widgets.
+
+### `src/m3d_physics.h` — Contrat physique préparatoire / Physics placeholder
+
+**Entrée prévue :** `BodyDesc` (pose, vitesse, masse, options), puis appels de `Backend` (`initialize`, `createBody`, `step`, lecture/écriture de pose, `removeBody`, `shutdown`).
+
+**Sortie actuelle :** interface déclarée seulement; `physXAvailable()` vaut `false`, aucun backend n’est instancié, aucun corps ou pas de simulation n’existe dans l’exécutable courant.
+
+### `export_scene.js` et fichiers de scène — Fabrication des données / Scene build
+
+**Entrée :** moteur/primitives exposés par `source_v1314.html`, un module de scène JS, puis un chemin de sortie `.bin`.
+
+**Sortie garantie :** binaire V4 contenant géométrie, matériaux/textures, normales, rugosité, lumières et BVH, plus des statistiques d’export écrites sur la sortie standard. `loadScene` est le consommateur correspondant. Les édits de scène passent par les fichiers JS puis nécessitent un nouvel export.
+
+## 3. Contrat de compilation et livraison / Build contract
+
+**Entrée :** sources C++17, `CMakeLists.txt`, scènes JS/HTML, Node.js, CMake, Threads et Qt 6 Widgets. Le workflow exporte les binaires côtière et Rapture avant configuration.
+
+**Sortie :** `m3d_core` compilé depuis les six modules ci-dessus, exécutable `moteur3d_qt` et paquet Windows ou Linux contenant les scènes et documents. Le runner Windows ajoute les bibliothèques Qt nécessaires; sous Linux, le runtime Qt 6 est une dépendance système. Provenance SHA/branche/run enregistrée par CI.
+
+**Vérification de référence :** compilation Qt des deux plateformes réussie au run 14 pour le commit indiqué en tête du document. Cette vérification confirme la compilation et la mise en paquet; elle ne signifie pas que les blocs indiqués « préparatoires » ou « absents » sont implémentés.
 
 
 ## Annexe A — Bibliothèques de textures CC0 / Appendix A — CC0 texture libraries

@@ -1,6 +1,6 @@
 # Fonctionnalités du moteur 3D natif x64 — V13.14
 
-Ce document décrit l’application Windows native et les modules C++ compilés de la branche `experiment/manhattan-silent-hill-2026-10-30`. Il distingue les fonctions réellement présentes des limites actuelles.
+Ce document décrit l’application Qt Widgets compilée pour Windows et Linux ainsi que les modules C++ de la branche `experiment/manhattan-silent-hill-2026-10-30`. Il distingue les fonctions présentes des limites actuelles. Pour les contrats entrée/sortie et l’état précis de chaque bloc, voir [ETAT-MODULES-ET-FONCTIONS.md](ETAT-MODULES-ET-FONCTIONS.md) et [CONTRAT-ENTREES-SORTIES.md](CONTRAT-ENTREES-SORTIES.md).
 
 ## Résumé / Overview
 
@@ -92,9 +92,9 @@ The orange and Rapture materials use color/normal/roughness maps embedded in V4 
 
 ## Modules et compilation / Modules and build flow
 
-Les scènes sont définies dans `scene_coastal_v1314.js`, `scene_orange_macro.js` et `scene_rapture.js`. `export_scene.js` produit géométrie, textures PBR, lumières de scène et BVH dans des binaires V4, rétrocompatibles à la lecture avec V3. `assemble_native.js` reconstruit le programme C++ depuis `src/`, puis les workflows compilent l’application native Windows et l’interface Qt.
+Les scènes sont définies dans `scene_coastal_v1314.js`, `scene_orange_macro.js` et `scene_rapture.js`. `export_scene.js` produit géométrie, textures PBR, lumières de scène et BVH dans des binaires V4, rétrocompatibles à la lecture avec V3. CMake compile directement les six modules moteur et l’interface Qt; le workflow courant produit des paquets Windows et Linux. `moteur3d_win32.cpp` reste une source historique non compilée par ce workflow.
 
-Scenes are defined in `scene_coastal_v1314.js`, `scene_orange_macro.js`, and `scene_rapture.js`. `export_scene.js` writes geometry, PBR textures, scene lights and the BVH to V4; the loader remains backward compatible with V3. `assemble_native.js` reconstructs the C++ program from `src/`; workflows compile the native Windows application and Qt frontend.
+Scenes are defined in `scene_coastal_v1314.js`, `scene_orange_macro.js`, and `scene_rapture.js`. `export_scene.js` writes geometry, PBR textures, scene lights and the BVH to V4; the loader remains backward compatible with V3. CMake directly builds the six engine modules and Qt frontend; the current workflow packages Windows and Linux builds. `moteur3d_win32.cpp` remains a legacy source and is not compiled by this workflow.
 
 Voir aussi [CONTRAT-ENTREES-SORTIES.md](CONTRAT-ENTREES-SORTIES.md) pour les formats et échanges propres à chaque module.
 
