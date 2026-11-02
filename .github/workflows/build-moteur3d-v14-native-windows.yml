@@ -10,6 +10,8 @@ on:
       - experiments/2026-10-30-cote-ete-gt/native_v14/src/**
       - experiments/2026-10-30-cote-ete-gt/native_v14/tests/**
       - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_orange_macro.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/assets/orange_texturecan/**
       - experiments/2026-10-30-cote-ete-gt/native_v14/source_v1314.html
       - experiments/2026-10-30-cote-ete-gt/native_v14/scene_coastal_v1314.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/version.h
@@ -53,14 +55,20 @@ jobs:
           $exportJson = node export_scene.js source_v1314.html moteur3d_v1314_scene.bin scene_coastal_v1314.js | Out-String
           if ($LASTEXITCODE -ne 0) { throw "Scene export failed." }
           $sceneStats = $exportJson | ConvertFrom-Json
+          $env:M3D_SKIP_IMPORTED_CAR = "1"
+          $orangeJson = node export_scene.js source_v1314.html moteur3d_orange_macro.bin scene_orange_macro.js | Out-String
+          Remove-Item Env:M3D_SKIP_IMPORTED_CAR
+          if ($LASTEXITCODE -ne 0) { throw "Orange scene export failed." }
+          $orangeStats = $orangeJson | ConvertFrom-Json
           $manifest = [ordered]@{
-            build_id = "261102-0002"
+            build_id = "261102-0004"
             run_number = [int]$env:GITHUB_RUN_NUMBER
             commit = $env:GITHUB_SHA
             branch = $env:GITHUB_REF_NAME
             scene_version = "V13.14"
             generated_utc = (Get-Date).ToUniversalTime().ToString("o")
             scene = $sceneStats
+            orange_scene = $orangeStats
           }
           $manifest | ConvertTo-Json -Depth 6 | Set-Content build-manifest.json -Encoding utf8
       - name: Reconstruct native source from modules
@@ -94,7 +102,7 @@ jobs:
         run: |
           $revision = $env:GITHUB_SHA.Substring(0, 12)
           $artifact = "Moteur3D-Natif-x64-run$env:GITHUB_RUN_NUMBER-$revision"
-          Compress-Archive -Path "$artifact.exe",moteur3d_v1314_scene.bin,build-manifest.json -DestinationPath "$artifact.zip" -CompressionLevel Optimal
+          Compress-Archive -Path "$artifact.exe",moteur3d_v1314_scene.bin,moteur3d_orange_macro.bin,scene_orange_macro.js,build-manifest.json -DestinationPath "$artifact.zip" -CompressionLevel Optimal
           "artifact_name=$artifact" >> $env:GITHUB_OUTPUT
           "zip_path=experiments/2026-10-30-cote-ete-gt/native_v14/$artifact.zip" >> $env:GITHUB_OUTPUT
       - name: Upload Windows x64 application

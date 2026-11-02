@@ -7,6 +7,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QDialog>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -22,6 +23,7 @@
 #include <QSlider>
 #include <QSplitter>
 #include <QThread>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -106,7 +108,11 @@ private:
     QComboBox *resolution_ = nullptr, *quality_ = nullptr;
     QSlider *distance_ = nullptr, *angle_ = nullptr, *elevation_ = nullptr, *fov_ = nullptr;
     QSlider *threads_ = nullptr, *hour_ = nullptr;
-    QCheckBox *fog_ = nullptr, *dof_ = nullptr, *edgeAa_ = nullptr;
+    QCheckBox *fog_ = nullptr, *dof_ = nullptr, *edgeAa_ = nullptr, *orbitPreview_ = nullptr;
+    QDialog *orbitDialog_ = nullptr;
+    ImageView *orbitImage_ = nullptr;
+    QTimer orbitTimer_;
+    int savedResolution_ = 0, savedQuality_ = 0, savedAngle_ = -43;
 
     static QSlider* slider(Qt::Orientation orientation, int min, int max, int value, QWidget* parent) {
         auto* s = new QSlider(orientation, parent);
@@ -182,6 +188,8 @@ private:
         edgeAa_->setChecked(true);
         checks->addWidget(fog_); checks->addWidget(dof_); checks->addWidget(edgeAa_); checks->addStretch();
         controls->addLayout(checks);
+        orbitPreview_ = new QCheckBox(QStringLiteral("Aperçu rotatif — 800 × 600"), panel);
+        controls->addWidget(orbitPreview_);
         auto* renderButton = new QPushButton(QStringLiteral("Calculer l’image"), panel);
         controls->addWidget(renderButton);
         auto* views = new QHBoxLayout;
@@ -210,6 +218,13 @@ private:
         connect(fog_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
         connect(dof_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
         connect(edgeAa_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
+        connect(orbitPreview_, &QCheckBox::toggled, this, [this](bool enabled) { setOrbitPreview(enabled); });
+        connect(&orbitTimer_, &QTimer::timeout, this, [this] {
+            if (!orbitPreview_->isChecked()) return;
+            int angle = angle_->value() + 8;
+            if (angle > 180) angle -= 360;
+            angle_->setValue(angle);
+        });
         connect(renderButton, &QPushButton::clicked, this, [this] { readSettings(); requestRender(); });
         connect(home, &QPushButton::clicked, this, [this] { distance_->setValue(24); angle_->setValue(-43); elevation_->setValue(7); fov_->setValue(50); readSettings(); requestRender(); });
         connect(front, &QPushButton::clicked, this, [this] { distance_->setValue(20); angle_->setValue(-10); elevation_->setValue(4); readSettings(); requestRender(); });
@@ -219,6 +234,36 @@ private:
             QString mode = h < 9 ? QStringLiteral("Matin") : h < 16 ? QStringLiteral("Midi") : h < 20 ? QStringLiteral("Coucher de soleil") : QStringLiteral("Nuit");
             hourLabel_->setText(QStringLiteral("Heure : %1:%2 — %3").arg(int(h), 2, 10, QLatin1Char('0')).arg((step % 2) ? QStringLiteral("30") : QStringLiteral("00"), mode));
         });
+    }
+
+    void setOrbitPreview(bool enabled) {
+        if (enabled) {
+            savedResolution_ = resolution_->currentIndex();
+            savedQuality_ = quality_->currentIndex();
+            savedAngle_ = angle_->value();
+            resolution_->setEnabled(false); quality_->setEnabled(false); dof_->setEnabled(false);
+            orbitDialog_ = new QDialog(this);
+            orbitDialog_->setWindowTitle(QStringLiteral("Aperçu rotatif — 800 × 600"));
+            orbitDialog_->resize(800, 600);
+            auto *layout = new QVBoxLayout(orbitDialog_);
+            layout->setContentsMargins(0, 0, 0, 0);
+            orbitImage_ = new ImageView(orbitDialog_);
+            orbitImage_->setMinimumSize(0, 0);
+            layout->addWidget(orbitImage_);
+            connect(orbitDialog_, &QDialog::finished, this, [this] {
+                QMetaObject::invokeMethod(this, [this] {
+                    if (orbitPreview_ && orbitPreview_->isChecked()) orbitPreview_->setChecked(false);
+                }, Qt::QueuedConnection);
+            });
+            orbitDialog_->show();
+        } else {
+            orbitTimer_.stop();
+            if (orbitDialog_) { orbitDialog_->close(); delete orbitDialog_; orbitDialog_ = nullptr; orbitImage_ = nullptr; }
+            resolution_->setEnabled(true); quality_->setEnabled(true); dof_->setEnabled(true);
+            resolution_->setCurrentIndex(savedResolution_); quality_->setCurrentIndex(savedQuality_);
+            angle_->setValue(savedAngle_);
+        }
+        readSettings(); requestRender();
     }
 
     void readSettings() {
@@ -239,7 +284,12 @@ private:
         settings_.threads = unsigned(threads_->value());
         settings_.hourStep = hour_->value();
         settings_.fog = fog_->isChecked();
-        settings_.dof = dof_->isChecked();
+        settings_.dof = dof_->isChecked() && !orbitPreview_->isChecked();
+        if (orbitPreview_->isChecked()) {
+            settings_.outW = 800; settings_.outH = 600;
+            settings_.renderW = 400; settings_.renderH = 300;
+            settings_.samples = 1;
+        }
         threadLabel_->setText(QStringLiteral("Threads CPU : %1").arg(settings_.threads));
     }
 
@@ -329,10 +379,13 @@ private:
                 .arg(st.threads).arg(st.ms - st.postMs - st.shadowMs, 0, 'f', 1).arg(st.shadowMs, 0, 'f', 1).arg(st.postMs, 0, 'f', 1).arg(st.ms, 0, 'f', 1)
                 .arg(qulonglong(st.rays)).arg(qulonglong(st.hits)).arg(qulonglong(st.sky)).arg(qulonglong(st.tests)).arg(qulonglong(st.nodes)).arg(qulonglong(st.aabb))
                 .arg(qulonglong(scene_.obj.size())).arg(qulonglong(count)).arg(qulonglong(st.texels));
-            QMetaObject::invokeMethod(this, [this, image = std::move(image), diag, hourValue] {
+            QMetaObject::invokeMethod(this, [this, image = std::move(image), diag, hourValue, token] {
+                if (generation_.load() != token) return;
                 image_->setFrame(image);
+                if (orbitImage_) orbitImage_->setFrame(image);
                 stats_->setText(diag);
                 status_->setText(QStringLiteral("Terminé — ") + QString::fromWCharArray(M3D_RELEASE_ID_WIDE) + QStringLiteral(" — ") + QString::number(hourValue) + QStringLiteral(" h"));
+                if (orbitPreview_->isChecked()) orbitTimer_.start(40);
             }, Qt::QueuedConnection);
         }
     }

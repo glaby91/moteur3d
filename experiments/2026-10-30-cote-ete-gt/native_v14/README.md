@@ -1,8 +1,8 @@
-# Moteur 3D natif x64 — build 261102-0002
+# Moteur 3D natif x64 — build 261102-0004
 
 ## Repères de version
 
-- **Date/heure de compilation :** `261102-0002` (format `AAMMJJ-HHMM`, heure UTC).
+- **Version :** `261102-0004`.
 - **Révision GitHub :** SHA court du commit, injecté à la compilation.
 - **Branche GitHub :** nom exact de la branche, injecté à la compilation.
 - **Scène et géométrie source :** V13.14.
@@ -45,7 +45,7 @@ L’ordre de reconstruction/compilation est : scène → éclairage → intersec
 
 ## Téléchargement et compilation
 
-Le ZIP de chaque exécution porte son numéro de run et son SHA court; il contient l’exécutable x64, `moteur3d_v1314_scene.bin` et `build-manifest.json` avec la provenance et les statistiques d’export. Extraire les deux fichiers dans le même dossier, puis lancer le fichier EXE.
+Le ZIP de chaque exécution porte son numéro de run et son SHA court; il contient l’exécutable x64, les scènes côtière et orange macro, le module JS de la scène orange et `build-manifest.json` avec la provenance et les statistiques d’export. Extraire l’EXE et la scène à ouvrir dans le même dossier.
 
 Le workflow GitHub injecte la révision, la branche et le numéro de run, charge `scene_coastal_v1314.js` avec le moteur de `source_v1314.html`, reconstruit le fichier source et compile avec MSVC. Pour compiler une autre scène, passez son fichier JS au troisième argument de `export_scene.js` et chargez ce même module dans l’aperçu HTML. Le mode **Ultra** conserve les ombres adoucies et les réflexions à un rebond sur l’eau, la peinture et les vitrages.
 
@@ -53,6 +53,8 @@ Le workflow GitHub injecte la révision, la branche et le numéro de run, charge
 Le lissage des contours fonctionne à la résolution de sortie : les pixels présentant une forte transition de luminance sont adoucis en mélangeant leur couleur avec celles des quatre voisins directs. Le SSAA 4× est retiré de l’interface; le FSAA 16× reste disponible comme mode coûteux de comparaison. La case **AA contours** active le lissage quatre voisins après mise à l’échelle, indépendamment des modes Natif, Équilibré, Détails, Rapide et Très rapide; elle est cochée par défaut. La profondeur de champ reste optionnelle et passe à 16 rayons par pixel, avec une ouverture réduite pour limiter les images fantômes.
 
 Le menu **Scène → Ouvrir une scène…** permet de charger un fichier `.bin` exporté par `export_scene.js`. Le chargement et la reconstruction des ombres se font sur le thread de rendu; la scène active reste conservée si le fichier choisi ne peut pas être chargé.
+
+La case **Aperçu rotatif — 800 × 600** ouvre une seconde fenêtre qui calcule en 400 × 300 et fait tourner la caméra autour de la scène. Les images sont assemblées dans un tampon et publiées après le rendu et les effets de sortie; l’image terminée précédente reste visible pendant le calcul. La scène orange utilise des cartes CC0 de couleur, normale tangentielle et rugosité incluses dans le binaire V3.
 
 Le lissage des contours est un post-traitement CPU local. Les textures conservent leurs mipmaps de 512×512 à 8×8 et leur interpolation bilinéaire à quatre texels.
 
@@ -75,6 +77,6 @@ Sur une distribution Linux où Qt 6 est installé dans les chemins système, `-D
 
 ## Voiture 1970s Coupe
 
-Le fichier source CC0 est dans `assets/1970s-coupe/1970s-coupe.glb`. L’exporteur extrait le maillage glTF (positions, normales, UV et matériaux), applique son placement déclaré dans `scene_coastal_v1314.js`, puis l’ajoute au BVH de la scène. Les textures de couleur de carrosserie et de pneus sont préconverties en chaînes RGB565 512→8 afin que le workflow Windows n’ait pas besoin d’un décodeur JPEG. Le moteur applique son éclairage et ses reflets natifs au matériau carrosserie; les pourcentages de réflexion se règlent dans la source de scène et sont enregistrés dans le format binaire V2. Les textures métalliques, de rugosité et de normales du GLB ne sont pas encore importées.
+Le fichier source CC0 est dans `assets/1970s-coupe/1970s-coupe.glb`. L’exporteur extrait le maillage glTF (positions, normales, UV et matériaux), applique son placement déclaré dans `scene_coastal_v1314.js`, puis l’ajoute au BVH de la scène. Les textures de couleur de carrosserie et de pneus sont préconverties en chaînes RGB565 512→8 afin que le workflow Windows n’ait pas besoin d’un décodeur JPEG. Le moteur applique son éclairage et ses reflets natifs au matériau carrosserie; les pourcentages de réflexion se règlent dans la source de scène. Le format V3 transporte aussi les cartes couleur, normales et rugosité; la scène orange les utilise.
 
 La source est publiée sous CC0 1.0 : https://grab3d.com/models/vehicles/1970s-coupe/.

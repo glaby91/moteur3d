@@ -2,8 +2,8 @@
 #include "version.h"
 #include "build_info.h"
 VS_VERSION_INFO VERSIONINFO
- FILEVERSION 1,0,0,819
- PRODUCTVERSION 1,0,0,819
+ FILEVERSION 1,0,0,4
+ PRODUCTVERSION 1,0,0,4
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0x0L
  FILEOS VOS_NT_WINDOWS32
@@ -15,10 +15,10 @@ BEGIN
   BLOCK "040c04B0"
   BEGIN
    VALUE "CompanyName", "Moteur 3D\0"
-   VALUE "FileDescription", "Moteur 3D natif x64 — build 261102-0002\0"
-   VALUE "FileVersion", "1.0.0.859\0"
+   VALUE "FileDescription", "Moteur 3D natif x64 — build 261102-0004\0"
+   VALUE "FileVersion", "1.0.0.4\0"
    VALUE "InternalName", "Moteur3D_Natif_x64\0"
-   VALUE "OriginalFilename", "Moteur3D-Natif-x64-261102-0002.exe\0"
+   VALUE "OriginalFilename", "Moteur3D-Natif-x64-261102-0004.exe\0"
    VALUE "ProductName", "Moteur 3D natif x64\0"
    VALUE "ProductVersion", M3D_RELEASE_ID_ANSI "\0"
    VALUE "SpecialBuild", M3D_BUILD_ID_ANSI "\0"

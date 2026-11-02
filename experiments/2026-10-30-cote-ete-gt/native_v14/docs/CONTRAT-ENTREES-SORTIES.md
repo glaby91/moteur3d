@@ -22,11 +22,11 @@ Ce document définit les données attendues par chaque partie du moteur et les r
 
 **Entrée obligatoire à l’exécution :** `moteur3d_v1314_scene.bin`, placé dans le même dossier que l’exécutable. L’application ne prend pas d’arguments de ligne de commande; elle déduit le chemin de la scène à partir du chemin de son propre EXE.
 
-Le fichier binaire doit provenir de `export_scene.js` exécuté sur `source_v1314.html`. Il contient la géométrie réelle V13.14, les normales, UV, matériaux, mipmaps RGB565 et le BVH. Le moteur natif ne crée pas de scène de remplacement. La scène comprend notamment la promenade pavée élargie, neuf bancs, quatre parasols et serviettes, quatre poubelles, des mouettes, des lampadaires et les vagues.
+Le fichier binaire doit provenir de `export_scene.js` exécuté sur `source_v1314.html`. Il contient la géométrie réelle V13.14, les normales, UV, matériaux, mipmaps RGB565 couleur, normales et rugosité, ainsi que le BVH. Le moteur natif ne crée pas de scène de remplacement. La scène comprend notamment la promenade pavée élargie, neuf bancs, quatre parasols et serviettes, quatre poubelles, des mouettes, des lampadaires et les vagues.
 
-Le format commence par 8 octets de signature `M3D1314`, puis des entiers little-endian : version, nombre d’objets, nombre de nœuds BVH, racine BVH, nombre d’indices d’ordre, nombre de matériaux, nombre de textures et dimension de texture. En V2, chaque entrée de matériau contient son nom UTF-8 sur 24 octets, son pourcentage de réflexion (0–100) et trois octets réservés; la V1 ne contenait que le nom. Suivent les objets, les nœuds BVH, l’ordre des objets et les mipmaps RGB565. Le chargeur prend en charge les V1 et V2.
+Le format commence par 8 octets de signature `M3D1314`, puis des entiers little-endian : version, nombre d’objets, nombre de nœuds BVH, racine BVH, nombre d’indices d’ordre, nombre de matériaux, nombre de textures et dimension de texture. En V3, chaque matériau contient son nom UTF-8 sur 24 octets, son pourcentage de réflexion (0–100), puis les mipmaps RGB565 de couleur, de normale et de rugosité; les chaînes normales et rugosité peuvent être vides. Le chargeur attend le format V3.
 
-Le chargeur vérifie la signature, la version, les limites de quantités, la racine et le graphe BVH (liens, cycles, portée des feuilles et couverture complète des objets), les bornes finies, les matériaux et indices, ainsi que les mipmaps attendus (7 niveaux de 512×512 à 8×8). Il rejette les données manquantes ou supplémentaires avec un message explicite et convertit les erreurs d’allocation en erreur de chargement.
+Le chargeur vérifie la signature, la version, les limites de quantités, la racine et le graphe BVH (liens, cycles, portée des feuilles et couverture complète des objets), les bornes finies, les matériaux et indices, ainsi que les chaînes de mipmaps attendues (7 niveaux de 512×512 à 8×8). Il rejette les données manquantes ou supplémentaires avec un message explicite et convertit les erreurs d’allocation en erreur de chargement.
 
 Les réglages d’entrée sont fournis par l’interface :
 
@@ -43,9 +43,9 @@ Les réglages d’entrée sont fournis par l’interface :
 
 **Required runtime input:** `moteur3d_v1314_scene.bin`, placed beside the executable. The application accepts no command-line arguments; it derives the scene path from its own executable path.
 
-The binary must be produced by running `export_scene.js` on `source_v1314.html`. It contains the actual V13.14 geometry, normals, UVs, materials, RGB565 mipmaps and BVH. The native renderer does not create a substitute scene. The scene includes the widened paved promenade, benches facing the sea, street lamps and waves.
+The binary must be produced by running `export_scene.js` on `source_v1314.html`. It contains the actual V13.14 geometry, normals, UVs, materials, color/normal/roughness RGB565 mipmaps and BVH. The native renderer does not create a substitute scene. The scene includes the widened paved promenade, benches facing the sea, street lamps and waves.
 
-The file begins with an 8-byte `M3D1314` signature, followed by little-endian integers for version, object count, BVH-node count, BVH root, order-index count, material count, texture count and texture dimension. V2 stores each 24-byte UTF-8 material name, its 0–100 reflection percentage and three reserved bytes; V1 stores only the name. Both versions then store objects, BVH nodes, object order and RGB565 mipmaps. The loader accepts V1 and V2.
+The file begins with an 8-byte `M3D1314` signature, followed by little-endian integers for version, object count, BVH-node count, BVH root, order-index count, material count, texture count and texture dimension. V3 stores each 24-byte UTF-8 material name, its 0–100 reflection percentage, then RGB565 color, normal and roughness mip chains; normal and roughness chains may be empty. The loader requires V3.
 
 The loader validates the signature, version, count limits, root and BVH graph (links, cycles, leaf ranges, and complete object coverage), finite bounds, material indices, and the fixed seven mip levels from 512×512 to 8×8. Missing, truncated, trailing or invalid data returns a clear error; allocation failures are caught.
 
@@ -96,13 +96,15 @@ Inputs supplied by the user interface:
 
 **Entrée / Input :** scène, carte d’ombres, caméra, rayon, impact, statistiques et indicateur de brouillard; l’état lumineux a déjà été préparé par `m3d_lighting.cpp`. / Scene, shadow map, camera, ray, hit, statistics and fog flag; lighting state is prepared by `m3d_lighting.cpp`.
 
-**Sortie / Output :** couleur RGB calculée pour un rayon; ajoute au besoin les contributions des lumières, ombres, textures, bump mapping procédural et réflexions. Le bump mapping perturbe la normale d’ombrage avec un relief mathématique dépendant du matériau et s’atténue avec la distance; il ne modifie pas la géométrie. `buildShadow` produit la carte d’ombres de la scène. / Computed RGB color for a ray, including applicable lights, shadows, textures, procedural bump mapping and reflections. Bump mapping perturbs the shading normal with material-specific procedural relief and fades with distance; it does not alter geometry. `buildShadow` returns the scene’s shadow map.
+**Sortie / Output :** couleur RGB calculée pour un rayon; ajoute au besoin les contributions des lumières, ombres, textures, normal maps, bump mapping procédural et réflexions. Les normal maps tangentiels modifient la normale d’ombrage des triangles texturés sans changer leur géométrie. Le bump mapping perturbe aussi la normale, avec un relief procédural dépendant du matériau et atténué avec la distance. `buildShadow` produit la carte d’ombres de la scène. / Computed RGB color for a ray, including applicable lights, shadows, textures, tangent-space normal maps, procedural bump mapping and reflections. Normal maps change shading normals on textured triangles without changing geometry. Procedural bump also perturbs shading normals and fades with distance. `buildShadow` returns the scene’s shadow map.
 
 ### `m3d_render.cpp` — Caméra et rendu / Camera and rendering
 
 **Entrée / Input :** scène, carte d’ombres, caméra, largeur/hauteur internes, nombre de threads, brouillard et jeton d’annulation de rendu. / Scene, shadow map, camera, internal width/height, thread count, fog and render-cancellation token.
 
 **Sortie / Output :** `render` remplit un tampon de `largeur × hauteur` pixels 32 bits et retourne `Stats`. Un jeton de génération périmé interrompt le travail après un changement de réglage. / `render` fills a 32-bit pixel buffer of `width × height` and returns `Stats`. A stale generation token cancels work after settings change.
+
+Les interfaces publient uniquement un tampon complet, après le rendu, la mise à l’échelle et les effets de sortie, si son jeton de génération est encore courant. L’image affichée reste intacte pendant le calcul. / The frontends publish only a complete buffer after rendering, scaling and output effects, provided its generation token is still current. The displayed image remains unchanged during calculation.
 
 ### `m3d_post.cpp` — Mise à l’échelle et contours / Scaling and edges
 

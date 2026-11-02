@@ -28,7 +28,7 @@ The perspective camera traces one ray per internal pixel and keeps the nearest h
 - Pour ce build, les matériaux disposent de chaînes mip RGB565 allant de 512 × 512 à 8 × 8, avec échantillonnage bilinéaire dans le niveau choisi.
 - L’heure couvre 06:00–22:00 par pas de 30 minutes et fait évoluer le ciel, le soleil, l’ambiance et les lampes.
 - Les lampadaires et les phares de voitures contribuent comme sources locales à portée limitée.
-- Chaque matériau porte un pourcentage de réflexion de 0 à 100, exporté dans le format de scène V2. L’ombrage module cette force par un profil angulaire de type Fresnel. Les valeurs de la scène sont notamment : mer 51 %, verre 42 %, métal 35 %, peinture courante 29 % et carrosserie argentée 95 %.
+- Chaque matériau porte un pourcentage de réflexion de 0 à 100, exporté dans le format de scène V3. L’ombrage module cette force par un profil angulaire de type Fresnel. Les valeurs de la scène sont notamment : mer 51 %, verre 42 %, métal 35 %, peinture courante 29 % et carrosserie argentée 95 %.
 - L’ombrage combine lumière diffuse, reflets spéculaires et réflexions secondaires à un rebond selon les matériaux qui les activent.
 - Un bump mapping procédural perturbe les normales d’ombrage de l’asphalte, du sable, du béton, de la pierre, du bois, de la brique et de la mer. Son intensité diminue avec la distance pour limiter le scintillement; les silhouettes et le nombre de triangles restent inchangés.
 - La mer, les peintures de voiture et les vitrages peuvent recevoir une réflexion secondaire à un rebond.
@@ -47,7 +47,10 @@ Procedural material textures are built into RGB565 mip chains from 512 × 512 to
 | Threads CPU | 1 à 32 |
 | Brouillard | Activé / désactivé |
 | Vues rapides | Initiale, avant, arrière |
+| Aperçu rotatif | Fenêtre 800 × 600, calcul 400 × 300 et rotation automatique autour de la scène |
 | Rendu | Recalcul de l’image à la demande et lors des changements de réglage |
+
+Chaque image est calculée dans un tampon privé; l’interface ne l’affiche qu’une fois le rendu et le post-traitement terminés. L’image complète précédente reste visible pendant le calcul. Fermer l’aperçu rotatif arrête la rotation et restaure les réglages précédents.
 
 La case AA contours applique, après mise à l’échelle, un filtre de quatre voisins à l’image de sortie, quel que soit le mode interne choisi. Elle peut être cochée ou décochée pour Natif, Équilibré, Détails, Rapide, Très rapide et FSAA 16×; elle est activée par défaut. Le filtre détecte les fortes transitions de luminance et adoucit localement ces pixels, tandis que les zones sans contraste marqué restent inchangées. Le SSAA 4× est retiré de l’interface; les échelles internes inférieures sont adaptées par interpolation bilinéaire.
 
@@ -63,21 +66,23 @@ Après le rendu, l’interface affiche séparément le temps de rendu, la recons
 
 Rendering distributes 16 × 16 pixel tiles across 1–32 CPU threads. A generation token cancels stale work when a new render is requested, while a separate coordinator keeps the UI responsive. Diagnostics report render time, shadow-map build time when rebuilt, post-processing time, and total time, threads, rays, hits, sky rays, intersection tests, visited BVH nodes, AABB tests, objects, triangles, and sampled texels.
 
+The separate orbit preview renders at 400 × 300 into an 800 × 600 window and rotates the camera around the scene. Each complete image is published only after rendering and post-processing finish; the previous complete frame stays visible during calculation. Closing the preview stops the rotation and restores the previous settings.
+
 ## Scène actuelle et limites / Current scene and limitations
 
 La scène de référence comprend route côtière, promenade pavée, bordure, garde-corps, neuf bancs, lampadaires, palmiers, plage, rochers, oyats, parasols, serviettes, poubelles, mouettes et voitures. L’export validé contient **1 537 833 triangles**, **1 541 767 objets** et **920 433 nœuds BVH**; le binaire non compressé mesure **254 942 648 octets**. Le chargeur accepte jusqu’à **4 200 000 objets et nœuds BVH**.
 
-Le bump mapping actuel est procédural et intégré à l’ombrage; le moteur ne charge pas encore de fichiers de normal map. Le rendu est CPU et aucun pipeline GPU n’est présent dans ce code natif. Le contrat de backend physique est préparé dans `src/m3d_physics.h` et réserve un adaptateur PhysX; aucun SDK PhysX n’est lié et aucune simulation ne tourne dans ce build. L’application ne propose pas encore d’éditeur de scène interactif ou d’animation. Les changements de décor et les pourcentages de réflexion s’effectuent dans `scene_coastal_v1314.js`, puis nécessitent un nouvel export. Le chargeur conserve la compatibilité avec les scènes binaires V1 en leur attribuant les valeurs de réflexion par défaut. Le temps d’image dépend du processeur, de la résolution, du mode interne, des ombres et des réflexions; le nombre de triangles n’est pas un benchmark de FPS. Le fichier `moteur3d_v1314_scene.bin` doit rester dans le même dossier que l’EXE.
+La peau de l’orange utilise des textures CC0 de couleur, une normal map tangentielle et une carte de rugosité; le bump procédural reste disponible pour les matériaux sans normal map. Les cartes sont intégrées sous forme de mipmaps au format scène V3. Le rendu est CPU et aucun pipeline GPU n’est présent dans ce code natif. Le contrat de backend physique est préparé dans `src/m3d_physics.h` et réserve un adaptateur PhysX; aucun SDK PhysX n’est lié et aucune simulation ne tourne dans ce build. L’application ne propose pas encore d’éditeur de scène interactif ou d’animation. Les changements de décor et les pourcentages de réflexion s’effectuent dans les fichiers de scène, puis nécessitent un nouvel export. Le chargeur attend le format V3; les scènes doivent être réexportées. Le temps d’image dépend du processeur, de la résolution, du mode interne, des ombres et des réflexions; le nombre de triangles n’est pas un benchmark de FPS. Le fichier de scène utilisé doit rester dans le même dossier que l’EXE.
 
 The reference scene includes a coastal road and paved promenade, curb, guardrail, nine benches, streetlights, palms, beach, rocks, beach grass, parasols, towels, bins, gulls, and cars. The validated export contains **1,537,833 triangles**, **1,541,767 objects**, and **920,433 BVH nodes**; the uncompressed binary is **254,942,648 bytes**. The loader accepts up to **4,200,000 objects and BVH nodes**.
 
-Bump detail is procedural and built into shading; the engine does not yet load external normal-map files. This native code renders on the CPU and has no GPU pipeline. A backend contract in `src/m3d_physics.h` reserves a PhysX adapter, but the PhysX SDK is not linked and no simulation runs in this build. Edit `scene_coastal_v1314.js` to tune per-material reflection percentages, then export again. The loader remains compatible with V1 scene binaries and supplies their default reflection values. The application has no interactive scene editor or animation yet. Frame time depends on the processor, output size, internal scale, shadows, and reflections; triangle count is not an FPS benchmark. Keep `moteur3d_v1314_scene.bin` beside the EXE.
+The orange peel uses CC0 color, tangent-space normal, and roughness maps; procedural bump remains available to materials without a normal map. These maps are packed as mip chains in scene format V3. This native code renders on the CPU and has no GPU pipeline. A backend contract in `src/m3d_physics.h` reserves a PhysX adapter, but the PhysX SDK is not linked and no simulation runs in this build. Edit the scene files to tune geometry and per-material reflection percentages, then export again. The loader requires format V3, so scenes must be re-exported. The application has no interactive scene editor or animation yet. Frame time depends on the processor, output size, internal scale, shadows, and reflections; triangle count is not an FPS benchmark. Keep the selected scene binary beside the EXE.
 
 ## Modules et compilation / Modules and build flow
 
-La scène est définie dans `scene_coastal_v1314.js`. `export_scene.js` exécute cette scène avec le moteur V13.14 et produit textures et BVH dans `moteur3d_v1314_scene.bin`. `assemble_native.js` reconstruit le programme C++ depuis `src/`, puis le workflow Windows compile l’application x64 avec MSVC.
+Les scènes sont définies dans `scene_coastal_v1314.js` et `scene_orange_macro.js`. `export_scene.js` produit géométrie, textures PBR et BVH dans des binaires V3. `assemble_native.js` reconstruit le programme C++ depuis `src/`, puis les workflows compilent l’application native Windows et l’interface Qt.
 
-Scene geometry and per-material reflection percentages live in `scene_coastal_v1314.js`. `export_scene.js` evaluates it with the V13.14 engine and writes textures, material properties, and the BVH to scene format V2 in `moteur3d_v1314_scene.bin`. The loader also accepts V1. `assemble_native.js` reconstructs the C++ program from `src/`, and the Windows workflow compiles the x64 app with MSVC.
+Scenes are defined in `scene_coastal_v1314.js` and `scene_orange_macro.js`. `export_scene.js` writes geometry, PBR textures and the BVH to V3 scene binaries. `assemble_native.js` reconstructs the C++ program from `src/`; workflows compile the native Windows application and Qt frontend.
 
 Voir aussi [CONTRAT-ENTREES-SORTIES.md](CONTRAT-ENTREES-SORTIES.md) pour les formats et échanges propres à chaque module.
 
