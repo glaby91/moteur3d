@@ -20,6 +20,8 @@ Les décors restent des sources indépendantes : `scene_coastal_v1314.js`, `scen
 
 Voir [FONCTIONNALITES-MOTEUR.md](docs/FONCTIONNALITES-MOTEUR.md) pour l’inventaire des capacités, réglages, limites et diagnostics, en français et en anglais.
 
+L’audit du build `261102-0005`, les évolutions récentes, les résultats des compilations Windows/Linux et les limites identifiées sont consignés dans [AUDIT-TECHNIQUE-261102-0005.md](docs/AUDIT-TECHNIQUE-261102-0005.md).
+
 ## Modules du moteur
 
 Les sources de travail sont séparées dans `src/` afin que chaque partie puisse évoluer indépendamment :
