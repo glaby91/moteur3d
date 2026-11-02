@@ -46,6 +46,21 @@ jobs:
           target: desktop
           arch: win64_msvc2022_64
 
+      - name: Inject GitHub build provenance
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          revision="${GITHUB_SHA:0:12}"
+          branch="$GITHUB_REF_NAME"
+          cat > build_info.h <<EOF
+          #pragma once
+          #define M3D_GIT_REVISION_ANSI "$revision"
+          #define M3D_GIT_REVISION_WIDE L"$revision"
+          #define M3D_GIT_BRANCH_ANSI "$branch"
+          #define M3D_GIT_BRANCH_WIDE L"$branch"
+          #define M3D_GIT_RUN_WIDE L"$GITHUB_RUN_NUMBER"
+          EOF
+
       - name: Export runtime scenes
         shell: bash
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
