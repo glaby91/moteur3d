@@ -1,7 +1,7 @@
 # Contrat d’entrées et de sorties — Moteur 3D natif x64
 
 **Version du document :** 1.3
-**Identifiant de build de référence :** 261102-0005
+**Identifiant de build de référence :** 261102-0006
 **Scène source :** V13.14  
 **Révision GitHub :** injectée au build (SHA court du commit)  
 **Branche GitHub :** `experiment/manhattan-silent-hill-2026-10-30`  

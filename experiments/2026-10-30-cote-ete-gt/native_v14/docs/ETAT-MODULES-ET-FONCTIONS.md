@@ -1,7 +1,7 @@
 # État des modules et des fonctions
 
-**Référence de reprise :** build `261102-0005`, branche `experiment/manhattan-silent-hill-2026-10-30`, commit `8993a4faef822757d68f0a2ca0ab718d7972769f`.
-**Dernière compilation vérifiée :** GitHub Actions run 14, Qt Windows et Qt Linux réussis : https://github.com/glaby91/moteur3d/actions/runs/41413327310.
+**Référence de reprise :** build `261102-0006`, branche `experiment/manhattan-silent-hill-2026-10-30`; la révision est injectée à chaque build.
+**Dernière compilation vérifiée :** GitHub Actions run 17, Qt Windows et Qt Linux réussis pour le build `261102-0005` : https://github.com/glaby91/moteur3d/actions/runs/41419784745. Le build `261102-0006` sera vérifié par le prochain workflow.
 
 Ce document sert de carte de suivi. Les API listées ci-dessous existent dans les sources. « Implémenté » signifie présent dans le code et compilé par la cible Qt; « préparatoire » désigne un contrat sans exécution; « à faire » désigne un bloc absent. Les helpers privés restent regroupés par responsabilité dans leur module.
 
@@ -16,7 +16,7 @@ Ce document sert de carte de suivi. Les API listées ci-dessous existent dans le
 | Module | Fonctions publiques et rôle | État actuel |
 |---|---|---|
 | `m3d_engine.h` | Contrats/types communs `V`, `Ray`, `Hit`, `Obj`, `Node`, `Material`, `Scene`, `Camera`, `Stats`, `Light`, `ShadowMap`; opérations vectorielles `dot`, `cross`, `length`, `norm`, `clampf`; déclarations des entrées de chaque étape. | Implémenté; les types sont partagés, ce n’est pas un module d’exécution. |
-| `src/m3d_scene.cpp` | `loadScene(path, Scene&, error)` charge les formats V3/V4, contrôle les limites, matériaux, textures/mipmaps, références et graphe BVH. Helpers privés : lecture little-endian, vecteurs/valeurs finies, validation des bornes et erreurs. | Implémenté et rétrocompatible V3/V4. |
+| `src/m3d_scene.cpp` | `loadScene(path, Scene&, error)` charge les formats V3/V4, contrôle les limites, matériaux, textures/mipmaps, références et graphe BVH; prépare aussi les arêtes et constantes barycentriques des triangles en mémoire. Helpers privés : lecture little-endian, vecteurs/valeurs finies, validation des bornes et erreurs. | Implémenté et rétrocompatible V3/V4; données d’accélération dérivées du binaire, sans changement de format. |
 | `src/m3d_lighting.cpp` | `updateLighting(hour)` met à jour soleil, ciel, ambiance jour/nuit, facteur des lampes et liste des sources locales. | Implémenté; lumières locales jusqu’à 256 dans le format V4. Elles n’ont pas encore d’ombres propres. |
 | `src/m3d_intersection.cpp` | `closest(...)` cherche l’impact le plus proche dans le BVH; `groundMaterial(scene, point)` choisit le matériau du sol. Helpers : cache d’inverses de direction, intersection rayon/AABB, intersection des primitives et calcul de normale. Primitives : triangle, boîte, boîte arrondie, capsule, cône, ellipsoïde. | Implémenté; BVH préconstruit à l’export. |
 | `src/m3d_shading.cpp` | `buildShadow(scene, stats)` crée la carte d’ombres solaire; `shade(...)` calcule l’éclairage d’un impact; `traceColor(...)` gère les rebonds/transmissions et la couleur finale du rayon. Helpers : ciel/brouillard, visibilité PCF, échantillonnage des mipmaps, UV, normal map, bump, rugosité, réflexion et réfraction Fresnel. | Implémenté CPU; ombres des sources ponctuelles et éclairage global indirect absents. Verre simplifié en surface mince. |

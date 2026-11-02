@@ -1,8 +1,8 @@
-# Moteur 3D natif x64 — build 261102-0005
+# Moteur 3D natif x64 — build 261102-0006
 
 ## Repères de version
 
-- **Version :** `261102-0005`.
+- **Version :** `261102-0006`.
 - **Révision GitHub :** SHA court du commit, injecté à la compilation.
 - **Branche GitHub :** nom exact de la branche, injecté à la compilation.
 - **Scène et géométrie source :** V13.14.
@@ -22,7 +22,7 @@ Les décors restent des sources indépendantes : `scene_coastal_v1314.js`, `scen
 
 Voir [FONCTIONNALITES-MOTEUR.md](docs/FONCTIONNALITES-MOTEUR.md) pour l’inventaire des capacités, réglages, limites et diagnostics, en français et en anglais.
 
-L’audit du build `261102-0005`, les évolutions récentes, les résultats des compilations Windows/Linux et les limites identifiées sont consignés dans [AUDIT-TECHNIQUE-261102-0005.md](docs/AUDIT-TECHNIQUE-261102-0005.md).
+L’audit du build `261102-0005` reste dans [AUDIT-TECHNIQUE-261102-0005.md](docs/AUDIT-TECHNIQUE-261102-0005.md). L’optimisation ciblée du BVH issue du benchmark et ses mesures de référence sont décrites dans [OPTIMISATION-BVH-261102-0006.md](docs/OPTIMISATION-BVH-261102-0006.md).
 
 ## Modules du moteur
 
@@ -30,7 +30,7 @@ Les sources de travail sont séparées dans `src/` afin que chaque partie puisse
 
 - `src/m3d_scene.cpp` : lecture/validation des binaires V3 historiques et V4.
 - `src/m3d_lighting.cpp` : soleil, ciel et sources lumineuses pilotés par l’heure.
-- `src/m3d_intersection.cpp` : intersections des primitives, calcul des normales et parcours BVH avec directions inverses mises en cache par rayon.
+- `src/m3d_intersection.cpp` : intersections des primitives, calcul des normales et parcours BVH avec directions inverses par rayon et données de triangle préparées au chargement.
 - `src/m3d_shading.cpp` : ombres solaires, lumières globales et propres à la scène, cartes normales/rugosité, bump, réflexions et transmission réfractée par Fresnel.
 - `src/m3d_render.cpp` : caméra, lancer de rayons et rendu parallèle par tuiles.
 - `src/m3d_post.cpp` : mise à l’échelle, lissage adaptatif des contours et bloom doux optionnel.

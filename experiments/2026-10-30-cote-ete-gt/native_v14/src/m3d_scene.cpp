@@ -26,7 +26,7 @@ bool loadScene(const std::filesystem::path& path,Scene& s,std::wstring& error){
    uint8_t kind=0,mi=0;uint16_t reserved=0;
    if(!readU8(f,kind)||!readU8(f,mi)||!readU16(f,reserved)||kind>5||mi>=nm||!readV(f,o.mn)||!readV(f,o.mx)||!validBounds(o.mn,o.mx))return fail(error,L"En-tête d’objet invalide ou géométrie tronquée.");
    o.kind=(Kind)kind;o.mat=mi;
-   if(kind==0){if(!readV(f,o.a)||!readV(f,o.b)||!readV(f,o.c)||!readV(f,o.n0)||!readV(f,o.n1)||!readV(f,o.n2)||!readF(f,o.uv0.x)||!readF(f,o.uv0.y)||!readF(f,o.uv1.x)||!readF(f,o.uv1.y)||!readF(f,o.uv2.x)||!readF(f,o.uv2.y))return fail(error,L"Triangle incomplet ou non fini.");o.uv0.z=o.uv1.z=o.uv2.z=0;}
+   if(kind==0){if(!readV(f,o.a)||!readV(f,o.b)||!readV(f,o.c)||!readV(f,o.n0)||!readV(f,o.n1)||!readV(f,o.n2)||!readF(f,o.uv0.x)||!readF(f,o.uv0.y)||!readF(f,o.uv1.x)||!readF(f,o.uv1.y)||!readF(f,o.uv2.x)||!readF(f,o.uv2.y))return fail(error,L"Triangle incomplet ou non fini.");o.center=o.b-o.a;o.core=o.c-o.a;o.uv0.z=dot(o.center,o.center);o.uv1.z=dot(o.center,o.core);o.uv2.z=dot(o.core,o.core);const float denom=o.uv0.z*o.uv2.z-o.uv1.z*o.uv1.z;o.len2=std::abs(denom)>1e-20f?1.f/denom:0.f;}
    else if(kind==2){if(!readF(f,o.r)||!readV(f,o.center)||!readV(f,o.core)||o.r<0||o.core.x<0||o.core.y<0||o.core.z<0)return fail(error,L"Boîte arrondie invalide ou tronquée.");}
    else if(kind==3){if(!readV(f,o.a)||!readV(f,o.b)||!readF(f,o.r)||!readF(f,o.len2)||o.r<0||o.len2<=0)return fail(error,L"Capsule invalide ou tronquée.");}
    else if(kind==4){if(!readV(f,o.a)||!readV(f,o.b)||!readF(f,o.r)||!readF(f,o.r1)||!readF(f,o.k)||!readF(f,o.len)||!readF(f,o.n0.x)||!readF(f,o.n0.y)||!readF(f,o.n0.z)||o.r<0||o.r1<0||o.len<=0)return fail(error,L"Cône invalide ou tronqué.");}
