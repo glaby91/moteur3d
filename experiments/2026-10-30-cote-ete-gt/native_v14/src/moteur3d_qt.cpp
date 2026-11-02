@@ -20,6 +20,7 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QPushButton>
+#include <QSignalBlocker>
 #include <QSlider>
 #include <QSplitter>
 #include <QThread>
@@ -43,7 +44,7 @@ struct RenderSettings {
     float distance = 12.f, angle = -43.f, elevation = 7.f, fov = 50.f;
     unsigned threads = 16, samples = 1;
     int hourStep = 12;
-    bool fog = false, dof = false, edgeAa = true;
+    bool fog = false, dof = false, edgeAa = true, bloom = false;
 };
 
 class ImageView final : public QWidget {
@@ -108,11 +109,12 @@ private:
     QComboBox *resolution_ = nullptr, *quality_ = nullptr;
     QSlider *distance_ = nullptr, *angle_ = nullptr, *elevation_ = nullptr, *fov_ = nullptr;
     QSlider *threads_ = nullptr, *hour_ = nullptr;
-    QCheckBox *fog_ = nullptr, *dof_ = nullptr, *edgeAa_ = nullptr, *orbitPreview_ = nullptr;
+    QCheckBox *fog_ = nullptr, *dof_ = nullptr, *edgeAa_ = nullptr, *bloom_ = nullptr, *orbitPreview_ = nullptr;
     QDialog *orbitDialog_ = nullptr;
     ImageView *orbitImage_ = nullptr;
     QTimer orbitTimer_;
     int savedResolution_ = 0, savedQuality_ = 0, savedAngle_ = -43;
+    bool raptureScene_ = false;
 
     static QSlider* slider(Qt::Orientation orientation, int min, int max, int value, QWidget* parent) {
         auto* s = new QSlider(orientation, parent);
@@ -185,8 +187,9 @@ private:
         fog_ = new QCheckBox(QStringLiteral("Brouillard atmosphérique"), panel);
         dof_ = new QCheckBox(QStringLiteral("DOF"), panel);
         edgeAa_ = new QCheckBox(QStringLiteral("AA contours (4 voisins)"), panel);
+        bloom_ = new QCheckBox(QStringLiteral("Bloom doux"), panel);
         edgeAa_->setChecked(true);
-        checks->addWidget(fog_); checks->addWidget(dof_); checks->addWidget(edgeAa_); checks->addStretch();
+        checks->addWidget(fog_); checks->addWidget(dof_); checks->addWidget(edgeAa_); checks->addWidget(bloom_); checks->addStretch();
         controls->addLayout(checks);
         orbitPreview_ = new QCheckBox(QStringLiteral("Aperçu rotatif — 800 × 600"), panel);
         controls->addWidget(orbitPreview_);
@@ -218,6 +221,7 @@ private:
         connect(fog_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
         connect(dof_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
         connect(edgeAa_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
+        connect(bloom_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
         connect(orbitPreview_, &QCheckBox::toggled, this, [this](bool enabled) { setOrbitPreview(enabled); });
         connect(&orbitTimer_, &QTimer::timeout, this, [this] {
             if (!orbitPreview_->isChecked()) return;
@@ -226,7 +230,10 @@ private:
             angle_->setValue(angle);
         });
         connect(renderButton, &QPushButton::clicked, this, [this] { readSettings(); requestRender(); });
-        connect(home, &QPushButton::clicked, this, [this] { distance_->setValue(24); angle_->setValue(-43); elevation_->setValue(7); fov_->setValue(50); readSettings(); requestRender(); });
+        connect(home, &QPushButton::clicked, this, [this] {
+            if (raptureScene_) setRaptureCamera();
+            else { distance_->setValue(24); angle_->setValue(-43); elevation_->setValue(7); fov_->setValue(50); readSettings(); requestRender(); }
+        });
         connect(front, &QPushButton::clicked, this, [this] { distance_->setValue(20); angle_->setValue(-10); elevation_->setValue(4); readSettings(); requestRender(); });
         connect(rear, &QPushButton::clicked, this, [this] { distance_->setValue(24); angle_->setValue(-145); elevation_->setValue(7); readSettings(); requestRender(); });
         connect(hour_, &QSlider::valueChanged, this, [this](int step) {
@@ -277,6 +284,7 @@ private:
         settings_.renderH = int(std::lround(settings_.outH * scale));
         settings_.samples = qi == 5 ? 16u : 1u;
         settings_.edgeAa = edgeAa_->isChecked();
+        settings_.bloom = bloom_->isChecked();
         settings_.distance = distance_->value() * .5f;
         settings_.angle = float(angle_->value());
         settings_.elevation = float(elevation_->value());
@@ -298,6 +306,16 @@ private:
         { std::lock_guard<std::mutex> lock(requestMutex_); pendingScenePath_ = path; pending_ = true; }
         status_->setText(QStringLiteral("Chargement de la scène…"));
         requestCv_.notify_one();
+    }
+
+    void setRaptureCamera() {
+        const QSignalBlocker blockDistance(distance_), blockAngle(angle_), blockElevation(elevation_), blockFov(fov_);
+        distance_->setValue(48);
+        angle_->setValue(-18);
+        elevation_->setValue(6);
+        fov_->setValue(82);
+        readSettings();
+        requestRender();
     }
 
     void requestRender() {
@@ -342,7 +360,14 @@ private:
                 scene_ = std::move(candidate);
                 shadowHour_ = -1;
                 const QString loadedName = QFileInfo(loadPath).fileName();
-                QMetaObject::invokeMethod(this, [this, loadedName] { setWindowTitle(QStringLiteral("Moteur 3D natif x64 — ") + QString::fromWCharArray(M3D_RELEASE_ID_WIDE) + QStringLiteral(" — ") + loadedName); }, Qt::QueuedConnection);
+                QMetaObject::invokeMethod(this, [this, loadedName] {
+                    setWindowTitle(QStringLiteral("Moteur 3D natif x64 — ") + QString::fromWCharArray(M3D_RELEASE_ID_WIDE) + QStringLiteral(" — ") + loadedName);
+                    raptureScene_ = loadedName.contains(QStringLiteral("rapture"), Qt::CaseInsensitive);
+                    const QSignalBlocker blockBloom(bloom_);
+                    bloom_->setChecked(raptureScene_);
+                    if (raptureScene_) setRaptureCamera();
+                    else { readSettings(); requestRender(); }
+                }, Qt::QueuedConnection);
             }
             if (cfg.hourStep != shadowHour_) {
                 updateLighting(hour);
@@ -367,6 +392,7 @@ private:
             if (cfg.renderW == cfg.outW * 2 && cfg.renderH == cfg.outH * 2) pixels = downsample2x(pixels, cfg.renderW, cfg.renderH, cfg.threads);
             else if (cfg.renderW != cfg.outW || cfg.renderH != cfg.outH) pixels = upscaleBilinear(pixels, cfg.renderW, cfg.renderH, cfg.outW, cfg.outH, cfg.threads);
             if (cfg.edgeAa) pixels = antialiasEdges4(pixels, cfg.outW, cfg.outH, cfg.threads);
+            if (cfg.bloom) pixels = bloomGlow(pixels, cfg.outW, cfg.outH, cfg.threads);
             st.postMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - postStart).count();
             st.shadowMs = shadowMs;
             st.ms += st.postMs + shadowMs;

@@ -14,7 +14,7 @@ Stats render(const Scene&s,const ShadowMap&sm,const Camera&cam,int w,int h,std::
     float fx=x+ox,fy=y+oy,rayX=(2*fx/w-1)*cam.tanHalf,rayY=(1-2*fy/h)*cam.tanHalf/cam.aspect;
     Ray r{cam.eye,norm(cam.f+cam.r*rayX+cam.u*rayY)};
     if(depthOfField&&cam.apertureRadius>0){const float golden=2.39996323f,rad=cam.apertureRadius*std::sqrt((sampleIndex+.5f)/sampleCount),ang=sampleIndex*golden;V lens=cam.eye+cam.r*(rad*std::cos(ang))+cam.u*(rad*std::sin(ang));float focusT=cam.focusDistance/std::max(.05f,dot(r.d,cam.f));V focal=cam.eye+r.d*focusT;r={lens,norm(focal-lens)};}
-    Hit hit;closest(s,r,hit,&local);local.rays++;if(hit.id==-1)local.sky++;else local.hits++;accumulated=accumulated+shade(s,sm,cam,r,hit,local,fog);
+    accumulated=accumulated+traceColor(s,sm,cam,r,local,fog);
    }pixels[size_t(y)*w+x]=pack(accumulated*(1.f/sampleCount));
   }}rays.fetch_add(local.rays);tests.fetch_add(local.tests);aabb.fetch_add(local.aabb);nodes.fetch_add(local.nodes);hits.fetch_add(local.hits);skies.fetch_add(local.sky);texels.fetch_add(local.texels);depth.fetch_add(local.depthReads);};
  threads=std::max(1u,std::min(threads,(unsigned)total));std::vector<std::thread>pool;for(unsigned i=0;i<threads;i++)pool.emplace_back(worker);for(auto&t:pool)t.join();Stats st;st.rays=rays;st.tests=tests;st.aabb=aabb;st.nodes=nodes;st.hits=hits;st.sky=skies;st.texels=texels;st.depthReads=depth;st.threads=threads;st.ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();return st;

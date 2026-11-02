@@ -28,13 +28,24 @@ The perspective camera traces one ray per internal pixel and keeps the nearest h
 - Pour ce build, les matériaux disposent de chaînes mip RGB565 allant de 512 × 512 à 8 × 8, avec échantillonnage bilinéaire dans le niveau choisi.
 - L’heure couvre 06:00–22:00 par pas de 30 minutes et fait évoluer le ciel, le soleil, l’ambiance et les lampes.
 - Les lampadaires et les phares de voitures contribuent comme sources locales à portée limitée.
-- Chaque matériau porte un pourcentage de réflexion de 0 à 100, exporté dans le format de scène V3. L’ombrage module cette force par un profil angulaire de type Fresnel. Les valeurs de la scène sont notamment : mer 51 %, verre 42 %, métal 35 %, peinture courante 29 % et carrosserie argentée 95 %.
+- Les scènes V4 peuvent embarquer jusqu’à 256 lumières ponctuelles (position, couleur, portée, intensité) avec atténuation quadratique. Elles éclairent la scène, mais ne génèrent pas encore d’ombres propres. Les lumières globales historiques restent disponibles.
+- L’étude Rapture utilise 42 lumières locales, quatre lustres suspendus, appliques murales, kiosques lumineux, garde-corps éclairés, tuyauteries détaillées et jardinières marines. Les matériaux Art déco gardent des cartes couleur, normales et rugosité intégrées au binaire.
+- Son export courant contient 207 661 objets (148 203 triangles); le preset d’ouverture Qt adopte une vue oblique depuis l’avenue.
+- Les matériaux portent une réflexion de 0 à 100 %. Une réflexion secondaire à un rebond et une lobe spéculaire directe utilisent la réflexion et la rugosité. Les matériaux V4 peuvent aussi définir transmission et indice de réfraction.
+- Les rayons transparents utilisent Fresnel-Schlick et une déviation par réfraction, traversent jusqu’à huit couches et composent la teinte du verre avec l’arrière-plan. Les surfaces transmissives ne bloquent pas la carte d’ombres opaque. Le verre reste une surface mince : pas de dispersion, absorption spectrale ni volume épais.
+- Les chaînes mip RGB565 acceptent couleur, normales tangentielles et rugosité. La scène Rapture génère des cartes normales/rugosité procédurales pour pierre, bronze et verre; l’orange utilise ses cartes dédiées. Le bump procédural reste le repli sans normal map.
 - L’ombrage combine lumière diffuse, reflets spéculaires et réflexions secondaires à un rebond selon les matériaux qui les activent.
 - Un bump mapping procédural perturbe les normales d’ombrage de l’asphalte, du sable, du béton, de la pierre, du bois, de la brique et de la mer. Son intensité diminue avec la distance pour limiter le scintillement; les silhouettes et le nombre de triangles restent inchangés.
 - La mer, les peintures de voiture et les vitrages peuvent recevoir une réflexion secondaire à un rebond.
+- Le bloom CPU optionnel extrait les hautes lumières au-dessus de 185, floute en deux passes séparables à 11 taps et les réinjecte à faible intensité. Il adoucit les néons et fenêtres; il ne constitue pas un pipeline HDR.
 - Le brouillard optionnel atténue les objets selon la distance; le ciel reçoit aussi un motif nuageux procédural.
 
 Procedural material textures are built into RGB565 mip chains from 512 × 512 to 8 × 8; sampling is bilinear within the selected mip level. Time of day ranges from 06:00 to 22:00 in 30-minute steps and changes the sky, sun, ambient light, and lamps. Streetlights and car headlights are local lights. Shading combines diffuse and material-dependent specular light. Procedural bump mapping perturbs shading normals on asphalt, sand, concrete, stone, wood, brick, and sea; it fades with distance and does not change silhouettes or triangle count. The sea, car paint, and glass support one-bounce reflections. Optional fog attenuates distant geometry and adds procedural clouds to the sky.
+
+V4 scenes can embed up to 256 point lights with position, color, radius and intensity. They use quadratic attenuation but do not yet cast shadows. Materials support reflectivity, normal and roughness maps. Transparent rays use Schlick Fresnel and surface refraction, traverse up to eight layers, and do not block the opaque shadow map. Glass remains a thin-surface approximation without thick-volume refraction, dispersion or spectral absorption. The optional CPU bloom extracts highlights above 185 and applies a separable 11-tap blur; this is not HDR.
+
+The Rapture study uses 42 local lights, four suspended chandeliers, wall sconces, illuminated kiosks and railings, detailed pipework, and marine planters. Its Art Deco materials include embedded color, normal and roughness maps.
+Its current export contains 207,661 objects (148,203 triangles); the Qt opening preset uses an oblique view from the avenue.
 
 ## Contrôles de l’interface / UI controls
 
@@ -46,6 +57,7 @@ Procedural material textures are built into RGB565 mip chains from 512 × 512 to
 | Heure | 33 positions entre 06:00 et 22:00 |
 | Threads CPU | 1 à 32 |
 | Brouillard | Activé / désactivé |
+| Bloom doux | Optionnel; activé automatiquement pour un fichier dont le nom contient `rapture` |
 | Vues rapides | Initiale, avant, arrière |
 | Aperçu rotatif | Fenêtre 800 × 600, calcul 400 × 300 et rotation automatique autour de la scène |
 | Rendu | Recalcul de l’image à la demande et lors des changements de réglage |
@@ -72,17 +84,17 @@ The separate orbit preview renders at 400 × 300 into an 800 × 600 window and r
 
 La scène de référence comprend route côtière, promenade pavée, bordure, garde-corps, neuf bancs, lampadaires, palmiers, plage, rochers, oyats, parasols, serviettes, poubelles, mouettes et voitures. L’export validé contient **1 537 833 triangles**, **1 541 767 objets** et **920 433 nœuds BVH**; le binaire non compressé mesure **254 942 648 octets**. Le chargeur accepte jusqu’à **4 200 000 objets et nœuds BVH**.
 
-La peau de l’orange utilise des textures CC0 de couleur, une normal map tangentielle et une carte de rugosité; le bump procédural reste disponible pour les matériaux sans normal map. Les cartes sont intégrées sous forme de mipmaps au format scène V3. Le rendu est CPU et aucun pipeline GPU n’est présent dans ce code natif. Le contrat de backend physique est préparé dans `src/m3d_physics.h` et réserve un adaptateur PhysX; aucun SDK PhysX n’est lié et aucune simulation ne tourne dans ce build. L’application ne propose pas encore d’éditeur de scène interactif ou d’animation. Les changements de décor et les pourcentages de réflexion s’effectuent dans les fichiers de scène, puis nécessitent un nouvel export. Le chargeur attend le format V3; les scènes doivent être réexportées. Le temps d’image dépend du processeur, de la résolution, du mode interne, des ombres et des réflexions; le nombre de triangles n’est pas un benchmark de FPS. Le fichier de scène utilisé doit rester dans le même dossier que l’EXE.
+L’orange et les matériaux Rapture utilisent des cartes couleur/normale/rugosité intégrées au format scène V4; les scènes V3 restent lisibles. Le rendu reste CPU et RGB 8 bits, sans illumination globale ni pipeline GPU. Les lumières ponctuelles n’ont pas d’ombres; le bloom ne remplace pas le HDR. Le contrat PhysX est réservé mais aucun SDK n’est lié et aucune simulation ne tourne. L’application ne propose pas encore d’éditeur interactif ni d’animation. Les changements de décor ou de matériau nécessitent un nouvel export. Le temps d’image dépend du processeur, de la résolution, des ombres, lumières et réflexions; le nombre de triangles n’est pas un benchmark de FPS.
 
 The reference scene includes a coastal road and paved promenade, curb, guardrail, nine benches, streetlights, palms, beach, rocks, beach grass, parasols, towels, bins, gulls, and cars. The validated export contains **1,537,833 triangles**, **1,541,767 objects**, and **920,433 BVH nodes**; the uncompressed binary is **254,942,648 bytes**. The loader accepts up to **4,200,000 objects and BVH nodes**.
 
-The orange peel uses CC0 color, tangent-space normal, and roughness maps; procedural bump remains available to materials without a normal map. These maps are packed as mip chains in scene format V3. This native code renders on the CPU and has no GPU pipeline. A backend contract in `src/m3d_physics.h` reserves a PhysX adapter, but the PhysX SDK is not linked and no simulation runs in this build. Edit the scene files to tune geometry and per-material reflection percentages, then export again. The loader requires format V3, so scenes must be re-exported. The application has no interactive scene editor or animation yet. Frame time depends on the processor, output size, internal scale, shadows, and reflections; triangle count is not an FPS benchmark. Keep the selected scene binary beside the EXE.
+The orange and Rapture materials use color/normal/roughness maps embedded in V4 scenes; V3 scenes remain readable. This renderer is CPU-based and RGB 8-bit, with no global illumination or GPU pipeline. Point lights do not cast shadows, and bloom is not HDR. The PhysX backend is reserved but no SDK is linked and no simulation runs. Scene edits require a new export. There is no interactive scene editor or animation yet. Frame time depends on processor, output size, shadows, lights and reflections; triangle count is not an FPS benchmark.
 
 ## Modules et compilation / Modules and build flow
 
-Les scènes sont définies dans `scene_coastal_v1314.js` et `scene_orange_macro.js`. `export_scene.js` produit géométrie, textures PBR et BVH dans des binaires V3. `assemble_native.js` reconstruit le programme C++ depuis `src/`, puis les workflows compilent l’application native Windows et l’interface Qt.
+Les scènes sont définies dans `scene_coastal_v1314.js`, `scene_orange_macro.js` et `scene_rapture.js`. `export_scene.js` produit géométrie, textures PBR, lumières de scène et BVH dans des binaires V4, rétrocompatibles à la lecture avec V3. `assemble_native.js` reconstruit le programme C++ depuis `src/`, puis les workflows compilent l’application native Windows et l’interface Qt.
 
-Scenes are defined in `scene_coastal_v1314.js` and `scene_orange_macro.js`. `export_scene.js` writes geometry, PBR textures and the BVH to V3 scene binaries. `assemble_native.js` reconstructs the C++ program from `src/`; workflows compile the native Windows application and Qt frontend.
+Scenes are defined in `scene_coastal_v1314.js`, `scene_orange_macro.js`, and `scene_rapture.js`. `export_scene.js` writes geometry, PBR textures, scene lights and the BVH to V4; the loader remains backward compatible with V3. `assemble_native.js` reconstructs the C++ program from `src/`; workflows compile the native Windows application and Qt frontend.
 
 Voir aussi [CONTRAT-ENTREES-SORTIES.md](CONTRAT-ENTREES-SORTIES.md) pour les formats et échanges propres à chaque module.
 

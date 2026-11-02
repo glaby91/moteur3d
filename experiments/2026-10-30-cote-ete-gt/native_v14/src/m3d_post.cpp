@@ -28,4 +28,16 @@ std::vector<uint32_t> antialiasEdges4(const std::vector<uint32_t>&src,int w,int 
  }} };
  threads=std::max(1u,std::min(threads,(unsigned)(h-2)));if(threads==1)work();else{std::vector<std::thread>pool;pool.reserve(threads-1);for(unsigned i=1;i<threads;i++)pool.emplace_back(work);work();for(auto&t:pool)t.join();}return out;
 }
+
+std::vector<uint32_t> bloomGlow(const std::vector<uint32_t>&src,int w,int h,unsigned threads,float strength){
+ if(w<1||h<1||src.size()<size_t(w)*h||strength<=0)return src;
+ struct RGB{float r=0,g=0,b=0;};
+ const size_t count=size_t(w)*h;std::vector<RGB> bright(count),horizontal(count);std::vector<uint32_t>out=src;
+ constexpr int radius=5,weightSum=(radius+1)*(radius+1);
+ auto parallel=[&](auto&&fn,int rows){std::atomic<int>next{0};auto work=[&]{for(;;){int y0=next.fetch_add(8);if(y0>=rows)break;for(int y=y0;y<std::min(rows,y0+8);y++)fn(y);}};threads=std::max(1u,std::min(threads,(unsigned)rows));if(threads==1)work();else{std::vector<std::thread>pool;pool.reserve(threads-1);for(unsigned i=1;i<threads;i++)pool.emplace_back(work);work();for(auto&t:pool)t.join();}};
+ parallel([&](int y){for(int x=0;x<w;x++){uint32_t p=src[size_t(y)*w+x];bright[size_t(y)*w+x]={std::max(0.f,float((p>>16)&255)-185.f),std::max(0.f,float((p>>8)&255)-185.f),std::max(0.f,float(p&255)-185.f)};}},h);
+ parallel([&](int y){for(int x=0;x<w;x++){RGB sum;for(int k=-radius;k<=radius;k++){int sx=std::clamp(x+k,0,w-1),weight=radius+1-std::abs(k);const RGB q=bright[size_t(y)*w+sx];sum.r+=q.r*weight;sum.g+=q.g*weight;sum.b+=q.b*weight;}horizontal[size_t(y)*w+x]={sum.r/weightSum,sum.g/weightSum,sum.b/weightSum};}},h);
+ parallel([&](int y){for(int x=0;x<w;x++){RGB sum;for(int k=-radius;k<=radius;k++){int sy=std::clamp(y+k,0,h-1),weight=radius+1-std::abs(k);const RGB q=horizontal[size_t(sy)*w+x];sum.r+=q.r*weight;sum.g+=q.g*weight;sum.b+=q.b*weight;}const RGB q={sum.r/weightSum,sum.g/weightSum,sum.b/weightSum};const uint32_t p=src[size_t(y)*w+x];auto add=[&](int shift,float glow){return std::min(255.f,float((p>>shift)&255)+glow*strength);};out[size_t(y)*w+x]=0xff000000u|(uint32_t(add(16,q.r))<<16)|(uint32_t(add(8,q.g))<<8)|uint32_t(add(0,q.b));}},h);
+ return out;
+}
 }

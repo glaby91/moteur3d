@@ -624,6 +624,15 @@ function procedural(id,x,y){
  }else if(id==='concrete'||id==='stone'){
   const joint=(x%64<2||y%48<2)?-48:0;
   r=111+22*noise+18*coarse+joint;g=119+22*noise+18*coarse+joint;b=121+20*noise+17*coarse+joint;
+ }else if(id==='raptureGlass'){
+  const seam=(x%128<2||y%128<2)?-8:0, wave=Math.sin(x*.018+Math.sin(y*.013)*1.2)*3;
+  r=32+4*noise+seam;g=91+8*noise+wave+seam;b=111+9*noise+wave*1.3+seam;
+ }else if(id==='raptureStone'){
+  const joint=(x%72<2||y%56<2)?-30:0, veining=Math.sin(x*.035+Math.sin(y*.021)*1.4)*4;
+  r=38+14*noise+10*coarse+joint+veining*.5;g=70+19*noise+12*coarse+joint+veining;b=76+20*noise+13*coarse+joint+veining*1.2;
+ }else if(id==='raptureBronze'){
+  const edge=(x%48<2||y%48<2)?23:0, patina=hash2(x>>3,y>>3,763)>.72?-11:0;
+  r=129+18*noise+edge+patina;g=86+15*noise+edge*.72+patina;b=48+11*noise+edge*.30+patina*.45;
  }else if(id==='mountain'||id==='mountainFar'){
   const strata=Math.sin(y*.061+Math.sin(x*.018)*1.7)+.38*Math.sin(y*.157+x*.021);
   const fractured=hash2(x>>3,y>>3,id==='mountain'?451:452)>.91?9:-3;
@@ -738,7 +747,7 @@ function makeMips(id,n){
  return {id,levels:chain,size:chain[0].size};
 }
 function initMaterials(){
- const urban=['brick','concrete','glass','sea','sand','asphalt','taxi','paint','metal','rust','rubber','lamp','mutant','claw','stone','wood','cloth','skin','bark','leaves','grass','windowdark','windowlit','sign','puddle','debris','neon','sportsPaint','sportsRed','sportsViolet','wheelMetal','led','taillight','carGlass','wound','scar','orange','orangeStage'];
+const urban=['brick','concrete','glass','sea','sand','asphalt','taxi','paint','metal','rust','rubber','lamp','mutant','claw','stone','raptureStone','raptureBronze','raptureGlass','wood','cloth','skin','bark','leaves','grass','windowdark','windowlit','sign','puddle','debris','neon','sportsPaint','sportsRed','sportsViolet','wheelMetal','led','taillight','carGlass','wound','scar','orange','orangeStage'];
  for(const mat of urban)materials.set(mat,makeMips(mat,['mutant','skin','cloth'].includes(mat)?512:512));
  cacheFastMaterials();
  $('textureStatus').textContent='Textures côtières RGB565 : pyramides mipmap prêtes';
@@ -1125,7 +1134,7 @@ const FLAT_MATERIALS={bark:0xff556f91,leaves:0xff519b65,grass:0xff609e73,
  brick:0xff684744,concrete:0xff777e80,glass:0xff263744,asphalt:0xff30363a,
  taxi:0xffc99526,sportsPaint:0xffc84d20,sportsRed:0xffb51e19,sportsViolet:0xff7030a8,wheelMetal:0xff9aabb5,led:0xffe5f5ff,taillight:0xffb02020,carGlass:0xff5d7785,paint:0xffaaa391,sea:0xff287d9a,sand:0xffc6ad7b,metal:0xff394247,rust:0xff74452f,
  rubber:0xff202324,lamp:0xffbd8841,mutant:0xff574d4e,claw:0xff252222,wound:0xff171227,scar:0xff625f6f,
- windowdark:0xff18242a,windowlit:0xffd6aa6c,sign:0xff687b84,neon:0xff32b8c9,puddle:0xff18272e,debris:0xff69635c};
+ windowdark:0xff18242a,windowlit:0xffd6aa6c,sign:0xff687b84,neon:0xff32b8c9,puddle:0xff18272e,debris:0xff69635c,raptureStone:0xff4c685f,raptureBronze:0xff80592f,raptureGlass:0xff375b6f};
 function cacheFastMaterials(){
  texGroundGrass=materials.get('grass');texGroundStone=materials.get('stone');
  texGroundAsphalt=materials.get('asphalt');texGroundConcrete=materials.get('concrete');

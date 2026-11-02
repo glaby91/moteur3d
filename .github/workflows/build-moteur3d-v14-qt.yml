@@ -6,7 +6,11 @@ on:
       - experiment/manhattan-silent-hill-2026-10-30
     paths:
       - experiments/2026-10-30-cote-ete-gt/native_v14/CMakeLists.txt
+      - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/m3d_engine.h
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_rapture.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_coastal_v1314.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/source_v1314.html
       - experiments/2026-10-30-cote-ete-gt/native_v14/src/**
       - experiments/2026-10-30-cote-ete-gt/native_v14/version.h
       - experiments/2026-10-30-cote-ete-gt/native_v14/build_info.h
@@ -42,10 +46,40 @@ jobs:
           target: desktop
           arch: win64_msvc2022_64
 
+      - name: Export runtime scenes
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          node export_scene.js source_v1314.html moteur3d_v1314_scene.bin scene_coastal_v1314.js
+          M3D_SKIP_IMPORTED_CAR=1 node export_scene.js source_v1314.html scene_rapture.bin scene_rapture.js
+
       - name: Configure Qt application
+        shell: bash
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Compile Qt application
+        shell: bash
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: cmake --build build --config Release --parallel
+
+      - name: Install Qt runtime and package scenes
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          cmake --install build --config Release --prefix dist
+          cp moteur3d_v1314_scene.bin scene_rapture.bin scene_rapture.js README.md dist/
+          cp -r docs dist/
+
+      - name: Deploy Qt DLLs on Windows
+        if: runner.os == 'Windows'
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: windeployqt --release --compiler-runtime --dir dist dist/moteur3d_qt.exe
+
+      - name: Upload Windows/Linux application package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moteur3D-Qt-${{ matrix.os }}-build-261102-0005
+          path: experiments/2026-10-30-cote-ete-gt/native_v14/dist
+          if-no-files-found: error
+          retention-days: 30

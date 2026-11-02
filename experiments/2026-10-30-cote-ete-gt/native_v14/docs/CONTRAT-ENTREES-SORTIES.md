@@ -1,7 +1,7 @@
 # Contrat d’entrées et de sorties — Moteur 3D natif x64
 
-**Version du document :** 1.2  
-**Identifiant de build :** 261101-1901
+**Version du document :** 1.3
+**Identifiant de build de référence :** 261102-0005
 **Scène source :** V13.14  
 **Révision GitHub :** injectée au build (SHA court du commit)  
 **Branche GitHub :** `experiment/manhattan-silent-hill-2026-10-30`  
@@ -12,9 +12,9 @@ Ce document définit les données attendues par chaque partie du moteur et les r
 
 ### Scène modifiable / Editable scene
 
-**FR —** La géométrie est centralisée dans `scene_coastal_v1314.js`. Modifiez uniquement ce fichier pour changer les objets, leurs matériaux déclarés, leurs dimensions ou leur placement. Les fonctions de rendu restent dans `source_v1314.html`; ses primitives géométriques sont utilisées par la définition de scène. L’aperçu HTML charge le fichier de scène externe, et `export_scene.js` combine ce même fichier avec le moteur V13.14 pour produire la scène native. Gardez ces deux chemins de chargement synchronisés si le nom ou l’emplacement du module change.
+**FR —** Les scènes sont définies séparément dans `scene_coastal_v1314.js`, `scene_orange_macro.js` et `scene_rapture.js`. Modifiez le fichier concerné pour changer objets, matériaux, dimensions, placement et lumières locales. Les fonctions de rendu restent dans `source_v1314.html`; ses primitives géométriques sont utilisées par les définitions. `export_scene.js` combine le moteur V13.14 et le module de scène choisi pour produire un binaire V4. Le chargeur natif conserve la lecture des fichiers V3 existants.
 
-**EN —** Scene geometry is centralized in `scene_coastal_v1314.js`. Edit only this file to change objects, declared materials, dimensions, or placement. Rendering functions remain in `source_v1314.html`; its geometry helpers are used by the scene definition. The HTML preview loads the external scene file, and `export_scene.js` combines that same file with the V13.14 engine to produce the native scene. Keep both loading paths synchronized if the module name or location changes.
+**EN —** Scenes are defined separately in `scene_coastal_v1314.js`, `scene_orange_macro.js`, and `scene_rapture.js`. Edit the relevant file to change objects, materials, dimensions, placement, and local lights. Rendering functions remain in `source_v1314.html`; its geometry helpers are used by the scene definitions. `export_scene.js` combines the V13.14 engine and selected scene module to produce a V4 binary. The native loader still reads existing V3 files.
 
 ## 1. Contrat global de l’application
 
@@ -24,7 +24,7 @@ Ce document définit les données attendues par chaque partie du moteur et les r
 
 Le fichier binaire doit provenir de `export_scene.js` exécuté sur `source_v1314.html`. Il contient la géométrie réelle V13.14, les normales, UV, matériaux, mipmaps RGB565 couleur, normales et rugosité, ainsi que le BVH. Le moteur natif ne crée pas de scène de remplacement. La scène comprend notamment la promenade pavée élargie, neuf bancs, quatre parasols et serviettes, quatre poubelles, des mouettes, des lampadaires et les vagues.
 
-Le format commence par 8 octets de signature `M3D1314`, puis des entiers little-endian : version, nombre d’objets, nombre de nœuds BVH, racine BVH, nombre d’indices d’ordre, nombre de matériaux, nombre de textures et dimension de texture. En V3, chaque matériau contient son nom UTF-8 sur 24 octets, son pourcentage de réflexion (0–100), puis les mipmaps RGB565 de couleur, de normale et de rugosité; les chaînes normales et rugosité peuvent être vides. Le chargeur attend le format V3.
+Le format commence par 8 octets de signature `M3D1314`, puis des entiers little-endian : version, nombre d’objets, nombre de nœuds BVH, racine BVH, nombre d’indices d’ordre, nombre de matériaux, nombre de textures et dimension de texture. Le chargeur lit les scènes V3 historiques et V4. En V4, chaque matériau contient son nom UTF-8 sur 24 octets, réflexion et transmission (0–100), puis un indice de réfraction en millièmes dans le champ de 16 bits (0 signifie valeur par défaut), suivi des mipmaps RGB565 couleur, normale tangentielle et rugosité. Après les matériaux, V4 ajoute un nombre de lumières ponctuelles (maximum 256), puis pour chaque lumière position XYZ, portée, intensité et couleur RGB en flottants 32 bits. V3 n’a pas ces champs et conserve ses matériaux opaques et son indice par défaut.
 
 Le chargeur vérifie la signature, la version, les limites de quantités, la racine et le graphe BVH (liens, cycles, portée des feuilles et couverture complète des objets), les bornes finies, les matériaux et indices, ainsi que les chaînes de mipmaps attendues (7 niveaux de 512×512 à 8×8). Il rejette les données manquantes ou supplémentaires avec un message explicite et convertit les erreurs d’allocation en erreur de chargement.
 
@@ -36,6 +36,7 @@ Les réglages d’entrée sont fournis par l’interface :
 - Heure : positions 0–32, converties en 06:00–22:00 par pas de 30 minutes.
 - Threads CPU : 1–32.
 - Brouillard : activé ou désactivé.
+- Bloom doux : option Qt optionnelle; activée automatiquement au chargement d’une scène nommée avec `rapture`.
 
 **Sortie à l’exécution :** une image calculée en mémoire, redimensionnée à la résolution choisie et affichée dans la fenêtre. Le programme ne sauvegarde pas spontanément de PNG ou de JPEG. L’interface publie les temps de rendu, de reconstruction des ombres, de post-traitement et le total, ainsi que les rayons, impacts, tests BVH/AABB, nœuds visités, texels et threads.
 
@@ -45,7 +46,7 @@ Les réglages d’entrée sont fournis par l’interface :
 
 The binary must be produced by running `export_scene.js` on `source_v1314.html`. It contains the actual V13.14 geometry, normals, UVs, materials, color/normal/roughness RGB565 mipmaps and BVH. The native renderer does not create a substitute scene. The scene includes the widened paved promenade, benches facing the sea, street lamps and waves.
 
-The file begins with an 8-byte `M3D1314` signature, followed by little-endian integers for version, object count, BVH-node count, BVH root, order-index count, material count, texture count and texture dimension. V3 stores each 24-byte UTF-8 material name, its 0–100 reflection percentage, then RGB565 color, normal and roughness mip chains; normal and roughness chains may be empty. The loader requires V3.
+The file begins with an 8-byte `M3D1314` signature, followed by little-endian integers for version, object count, BVH-node count, BVH root, order-index count, material count, texture count and texture dimension. The loader reads historical V3 and V4. In V4, each 24-byte UTF-8 material record stores reflectivity, transmission and refractive index in thousandths in the 16-bit field (zero means default), followed by RGB565 color, tangent-space normal and roughness mip chains. After materials, V4 stores a point-light count (maximum 256), followed by each light’s XYZ position, radius, intensity and RGB color as 32-bit floats. V3 has no light records and retains opaque materials and the default index.
 
 The loader validates the signature, version, count limits, root and BVH graph (links, cycles, leaf ranges, and complete object coverage), finite bounds, material indices, and the fixed seven mip levels from 512×512 to 8×8. Missing, truncated, trailing or invalid data returns a clear error; allocation failures are caught.
 
@@ -57,6 +58,7 @@ Inputs supplied by the user interface:
 - Time: slider positions 0–32 map to 06:00–22:00 in 30-minute steps.
 - CPU threads: 1–32.
 - Fog: enabled or disabled.
+- Soft bloom: optional Qt UI control; enabled automatically when a scene filename contains `rapture`.
 
 **Runtime output:** an in-memory rendered image, resized to the selected output resolution and displayed in the window. The program does not automatically save a PNG or JPEG. The UI also reports render, shadow-map rebuild, post-processing and total times, along with ray, hit, BVH/AABB test, node, texel and thread counts.
 
@@ -96,7 +98,7 @@ Inputs supplied by the user interface:
 
 **Entrée / Input :** scène, carte d’ombres, caméra, rayon, impact, statistiques et indicateur de brouillard; l’état lumineux a déjà été préparé par `m3d_lighting.cpp`. / Scene, shadow map, camera, ray, hit, statistics and fog flag; lighting state is prepared by `m3d_lighting.cpp`.
 
-**Sortie / Output :** couleur RGB calculée pour un rayon; ajoute au besoin les contributions des lumières, ombres, textures, normal maps, bump mapping procédural et réflexions. Les normal maps tangentiels modifient la normale d’ombrage des triangles texturés sans changer leur géométrie. Le bump mapping perturbe aussi la normale, avec un relief procédural dépendant du matériau et atténué avec la distance. `buildShadow` produit la carte d’ombres de la scène. / Computed RGB color for a ray, including applicable lights, shadows, textures, tangent-space normal maps, procedural bump mapping and reflections. Normal maps change shading normals on textured triangles without changing geometry. Procedural bump also perturbs shading normals and fades with distance. `buildShadow` returns the scene’s shadow map.
+**Sortie / Output :** couleur RGB calculée pour un rayon; ajoute au besoin les contributions des lumières globales et de scène, ombres, textures, normal maps, bump mapping procédural, réflexions et transmission réfractée par Fresnel. Les rayons traversent jusqu’à huit surfaces transparentes et composent leur teinte avec l’arrière-plan; ces surfaces ne bloquent pas la carte d’ombres opaque. Les normal maps tangentiels modifient la normale d’ombrage des triangles texturés sans changer leur géométrie. Le bump mapping perturbe aussi la normale, avec un relief procédural dépendant du matériau et atténué avec la distance. `buildShadow` produit la carte d’ombres solaire de la scène; les lumières ponctuelles n’ont pas encore d’ombres propres. / Computed RGB color for a ray, including global and scene lights, shadows, textures, tangent-space normal maps, procedural bump mapping, reflections and Fresnel refraction. `buildShadow` returns the sun shadow map; point lights do not yet cast shadows. Rays pass through up to eight transparent surfaces and composite their tint with the background; these surfaces do not block the opaque shadow map. Normal maps change shading normals on textured triangles without changing geometry. Procedural bump also perturbs shading normals and fades with distance. `buildShadow` returns the scene’s shadow map.
 
 ### `m3d_render.cpp` — Caméra et rendu / Camera and rendering
 
@@ -108,9 +110,9 @@ Les interfaces publient uniquement un tampon complet, après le rendu, la mise �
 
 ### `m3d_post.cpp` — Mise à l’échelle et contours / Scaling and edges
 
-**Entrée / Input :** tampon source, dimensions source et cible, nombre de threads. / Source buffer, source and destination dimensions, thread count.
+**Entrée / Input :** tampon source, dimensions, nombre de threads et intensité du bloom. / Source buffer, dimensions, thread count and bloom strength.
 
-**Sortie / Output :** nouveau tampon aux dimensions cibles : `upscaleBilinear` pour interpolation bilinéaire, `downsample2x` pour réduction 2× et `antialiasEdges4` pour adoucir sélectivement les pixels de fort contraste avec leurs quatre voisins. / New destination-sized buffer: `upscaleBilinear` for bilinear interpolation, `downsample2x` for 2× reduction, and `antialiasEdges4` to selectively soften high-contrast pixels using their four neighbours.
+**Sortie / Output :** nouveau tampon aux dimensions cibles : `upscaleBilinear` pour interpolation bilinéaire, `downsample2x` pour réduction 2× et `antialiasEdges4` pour adoucir sélectivement les pixels de fort contraste avec leurs quatre voisins et `bloomGlow` pour ajouter un halo doux aux hautes lumières. / New destination-sized buffer: `upscaleBilinear` for bilinear interpolation, `downsample2x` for 2× reduction, `antialiasEdges4` for selective edge smoothing, and `bloomGlow` for soft highlight halos.
 
 ### `moteur3d_win32.cpp` — Interface et orchestration / UI and orchestration
 
