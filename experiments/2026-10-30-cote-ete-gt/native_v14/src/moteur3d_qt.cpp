@@ -7,7 +7,9 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
+#include <QCloseEvent>
 #include <QDialog>
+#include <QFile>
 #include <QFormLayout>
 #include <QFileDialog>
 #include <QFrame>
@@ -21,6 +23,11 @@
 #include <QMessageBox>
 #include <QPainter>
 #include <QPushButton>
+#include <QProgressBar>
+#include <QTableWidget>
+#include <QHeaderView>
+#include <QTextStream>
+#include <QSpinBox>
 #include <QSlider>
 #include <QScrollArea>
 #include <QSplitter>
@@ -49,6 +56,122 @@ struct RenderSettings {
 };
 
 struct CameraPose { float distance, angle, elevation; };
+
+struct BenchmarkRow {
+    unsigned threads = 1;
+    double renderMs = 0, postMs = 0, totalMs = 0;
+    uint64_t rays = 0, tests = 0, nodes = 0, aabb = 0, hits = 0, texels = 0;
+};
+
+class BenchmarkDialog final : public QDialog {
+public:
+    explicit BenchmarkDialog(QWidget* parent = nullptr) : QDialog(parent) {
+        setWindowTitle(QStringLiteral("Benchmark — moteur 3D CPU"));
+        resize(850, 600);
+        setStyleSheet("QDialog{background:#0b1923;color:#e0ebf3;} QLabel{color:#e0ebf3;} QGroupBox{border:1px solid #345267;margin-top:10px;padding:8px;color:#e0ebf3;} QComboBox,QSpinBox,QPushButton{padding:5px;}");
+        auto* root = new QVBoxLayout(this);
+        auto* title = new QLabel(QStringLiteral("BENCHMARK DU MOTEUR"), this);
+        title->setStyleSheet("font-size:18px;font-weight:700;color:#f0a45d");
+        root->addWidget(title);
+        sceneLabel_ = new QLabel(this); root->addWidget(sceneLabel_);
+        auto* settings = new QHBoxLayout;
+        resolution_ = new QComboBox(this);
+        resolution_->addItems({QStringLiteral("Réglage courant"), QStringLiteral("1280 × 720"), QStringLiteral("Full HD — 1920 × 1080"), QStringLiteral("4K UHD — 3840 × 2160")});
+        repeats_ = new QSpinBox(this); repeats_->setRange(1, 7); repeats_->setValue(3);
+        settings->addWidget(new QLabel(QStringLiteral("Résolution :"), this)); settings->addWidget(resolution_);
+        settings->addSpacing(16); settings->addWidget(new QLabel(QStringLiteral("Répétitions mesurées :"), this)); settings->addWidget(repeats_);
+        settings->addWidget(new QLabel(QStringLiteral("+ 1 passe d’échauffement"), this)); settings->addStretch();
+        root->addLayout(settings);
+        auto* threads = new QHBoxLayout;
+        threads->addWidget(new QLabel(QStringLiteral("Comparer les threads :"), this));
+        for (unsigned n : {1u, 2u, 4u, 8u, 16u, 32u}) {
+            auto* check = new QCheckBox(QString::number(n), this); check->setChecked(n <= 8);
+            threadChecks_.push_back({n, check}); threads->addWidget(check);
+        }
+        threads->addStretch(); root->addLayout(threads);
+        progress_ = new QProgressBar(this); progress_->setRange(0, 100); progress_->setValue(0);
+        status_ = new QLabel(QStringLiteral("Prêt — mêmes scène, qualité, caméra, heure et effets pour chaque mesure."), this);
+        root->addWidget(status_); root->addWidget(progress_);
+        table_ = new QTableWidget(0, 11, this);
+        table_->setHorizontalHeaderLabels({QStringLiteral("Threads"), QStringLiteral("Rendu médian (ms)"), QStringLiteral("Post (ms)"), QStringLiteral("Total (ms)"), QStringLiteral("Gain"), QStringLiteral("Rayons"), QStringLiteral("Tests BVH"), QStringLiteral("Nœuds"), QStringLiteral("AABB"), QStringLiteral("Impacts"), QStringLiteral("Texels")});
+        table_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
+        table_->horizontalHeader()->setStretchLastSection(true);
+        table_->setAlternatingRowColors(true); root->addWidget(table_, 1);
+        diagnosis_ = new QLabel(QStringLiteral("Le diagnostic apparaîtra après la première série."), this);
+        diagnosis_->setWordWrap(true); diagnosis_->setStyleSheet("color:#9fd5c5;padding:6px;background:#142735");
+        root->addWidget(diagnosis_);
+        auto* actions = new QHBoxLayout;
+        run_ = new QPushButton(QStringLiteral("Lancer le benchmark"), this);
+        export_ = new QPushButton(QStringLiteral("Exporter CSV…"), this); export_->setEnabled(false);
+        close_ = new QPushButton(QStringLiteral("Fermer"), this);
+        actions->addWidget(run_); actions->addWidget(export_); actions->addStretch(); actions->addWidget(close_); root->addLayout(actions);
+        connect(close_, &QPushButton::clicked, this, &QDialog::reject);
+        connect(export_, &QPushButton::clicked, this, [this] { exportCsv(); });
+    }
+    void setScene(const QString& name, size_t objects, size_t triangles) {
+        sceneLabel_->setText(QStringLiteral("Scène : %1   |   %2 objets   |   %3 triangles").arg(name).arg(qulonglong(objects)).arg(qulonglong(triangles)));
+    }
+    QPushButton* runButton() const { return run_; }
+    std::vector<unsigned> selectedThreads() const {
+        std::vector<unsigned> out; for (const auto& item : threadChecks_) if (item.second->isChecked()) out.push_back(item.first); return out;
+    }
+    int repeats() const { return repeats_->value(); }
+    int resolutionIndex() const { return resolution_->currentIndex(); }
+    void setRunning(bool running) {
+        running_ = running; run_->setEnabled(!running); export_->setEnabled(!running && !rows_.empty());
+        resolution_->setEnabled(!running); repeats_->setEnabled(!running);
+        for (const auto& item : threadChecks_) item.second->setEnabled(!running);
+        close_->setText(running ? QStringLiteral("Benchmark en cours…") : QStringLiteral("Fermer"));
+        close_->setEnabled(!running);
+    }
+    void setProgress(int value, const QString& text) { progress_->setValue(value); status_->setText(text); }
+    void setRows(std::vector<BenchmarkRow> rows, double shadowMs, int width, int height, unsigned samples, QString settingsSummary = {}) {
+        rows_ = std::move(rows); shadowMs_ = shadowMs; width_ = width; height_ = height; samples_ = samples; settingsSummary_ = std::move(settingsSummary);
+        table_->setRowCount(int(rows_.size()));
+        const double baseline = rows_.empty() ? 0 : rows_.front().totalMs;
+        for (int i = 0; i < int(rows_.size()); ++i) {
+            const auto& row = rows_[size_t(i)];
+            const QStringList values{QString::number(row.threads), QString::number(row.renderMs, 'f', 1), QString::number(row.postMs, 'f', 1), QString::number(row.totalMs, 'f', 1),
+                baseline > 0 ? QStringLiteral("%1×").arg(baseline / std::max(.001, row.totalMs), 0, 'f', 2) : QStringLiteral("—"),
+                QString::number(qulonglong(row.rays)), QString::number(qulonglong(row.tests)), QString::number(qulonglong(row.nodes)), QString::number(qulonglong(row.aabb)), QString::number(qulonglong(row.hits)), QString::number(qulonglong(row.texels))};
+            for (int c = 0; c < values.size(); ++c) table_->setItem(i, c, new QTableWidgetItem(values[c]));
+        }
+        if (rows_.size() >= 2) {
+            const auto& slow = rows_.front(); const auto& fast = rows_.back();
+            const double postShare = fast.totalMs > 0 ? fast.postMs / fast.totalMs : 0;
+            const double scaling = fast.totalMs > 0 ? slow.totalMs / fast.totalMs : 1;
+            QString advice;
+            if (postShare >= .25) advice = QStringLiteral("Le post-traitement pèse %1 % du temps au réglage le plus rapide : examiner d’abord le redimensionnement et l’AA contours.").arg(int(postShare * 100));
+            else advice = QStringLiteral("Le rendu CPU domine : les prochaines cibles sont l’intersection BVH et l’ombrage par rayon.");
+            if (scaling < 1.5) advice += QStringLiteral(" Le passage de %1 à %2 threads n’apporte que %3× : rechercher la partie sérielle, la contention ou la saturation mémoire.").arg(slow.threads).arg(fast.threads).arg(scaling, 0, 'f', 2);
+            else advice += QStringLiteral(" Gain de parallélisme mesuré : %1× entre %2 et %3 threads.").arg(scaling, 0, 'f', 2).arg(slow.threads).arg(fast.threads);
+            const double testsPerRay = fast.rays ? double(fast.tests) / fast.rays : 0;
+            advice += QStringLiteral(" Moyenne : %1 tests d’objet par rayon; comparer cette valeur entre scènes pour suivre le coût BVH.").arg(testsPerRay, 0, 'f', 2);
+            diagnosis_->setText(advice);
+        } else if (!rows_.empty()) {
+            diagnosis_->setText(QStringLiteral("Une seule configuration mesurée : ajoutez plusieurs valeurs de threads pour isoler le coût du parallélisme."));
+        }
+        export_->setEnabled(!rows_.empty());
+    }
+    void closeEvent(QCloseEvent* event) override { if (running_) { event->ignore(); return; } QDialog::closeEvent(event); }
+private:
+    QLabel *sceneLabel_ = nullptr, *status_ = nullptr, *diagnosis_ = nullptr;
+    QComboBox* resolution_ = nullptr; QSpinBox* repeats_ = nullptr;
+    QProgressBar* progress_ = nullptr; QTableWidget* table_ = nullptr;
+    QPushButton *run_ = nullptr, *export_ = nullptr, *close_ = nullptr;
+    std::vector<std::pair<unsigned, QCheckBox*>> threadChecks_;
+    std::vector<BenchmarkRow> rows_; double shadowMs_ = 0; int width_ = 0, height_ = 0; unsigned samples_ = 1; bool running_ = false; QString settingsSummary_;
+    void exportCsv() {
+        const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Exporter les résultats du benchmark"), QStringLiteral("benchmark_moteur3d.csv"), QStringLiteral("CSV (*.csv)"));
+        if (path.isEmpty()) return;
+        QFile file(path); if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) { QMessageBox::warning(this, QStringLiteral("Export CSV"), QStringLiteral("Impossible d’écrire ce fichier.")); return; }
+        QTextStream out(&file); out.setEncoding(QStringConverter::Utf8);
+        out << "# scene=" << sceneLabel_->text() << "\n# settings=" << settingsSummary_ << "\n";
+        out << "# resolution=" << width_ << "x" << height_ << "; samples=" << samples_ << "; shadow_build_ms=" << QString::number(shadowMs_, 'f', 3) << "\n";
+        out << "threads;render_median_ms;post_median_ms;total_median_ms;rays;BVH_tests;BVH_nodes;AABB_tests;hits;texels\n";
+        for (const auto& r : rows_) out << r.threads << ';' << QString::number(r.renderMs, 'f', 3) << ';' << QString::number(r.postMs, 'f', 3) << ';' << QString::number(r.totalMs, 'f', 3) << ';' << r.rays << ';' << r.tests << ';' << r.nodes << ';' << r.aabb << ';' << r.hits << ';' << r.texels << '\n';
+    }
+};
 static CameraPose ellipseOrbitPose(float distance, float angleDeg, float elevationDeg, float phaseDeg) {
     const float a0 = angleDeg * PI / 180.f;
     const float e0 = elevationDeg * PI / 180.f;
@@ -116,6 +239,9 @@ public:
         auto* fileMenu = menuBar()->addMenu(QStringLiteral("Scène"));
         auto* openScene = fileMenu->addAction(QStringLiteral("Ouvrir une scène…"));
         connect(openScene, &QAction::triggered, this, [this] { openSceneFile(); });
+        auto* toolsMenu = menuBar()->addMenu(QStringLiteral("Outils"));
+        benchmarkAction_ = toolsMenu->addAction(QStringLiteral("Benchmark du moteur…"));
+        connect(benchmarkAction_, &QAction::triggered, this, [this] { openBenchmark(); });
         updateLighting(12.f);
         Stats initialShadowStats;
         shadows_ = buildShadow(scene_, initialShadowStats);
@@ -126,11 +252,13 @@ public:
 
     ~MainWindow() override {
         generation_.fetch_add(1);
+        benchmarkGeneration_.fetch_add(1);
         {
             std::lock_guard<std::mutex> lock(requestMutex_);
             stopping_ = true;
         }
         requestCv_.notify_one();
+        if (benchmarkThread_.joinable()) benchmarkThread_.join();
         if (coordinator_.joinable()) coordinator_.join();
     }
 
@@ -144,8 +272,10 @@ private:
     std::mutex requestMutex_;
     std::condition_variable requestCv_;
     std::atomic<uint64_t> generation_{1};
+    std::atomic<uint64_t> benchmarkGeneration_{1};
     std::thread coordinator_;
-    bool stopping_ = false, pending_ = false;
+    std::thread benchmarkThread_;
+    bool stopping_ = false, pending_ = false, benchmarking_ = false;
     ImageView* image_ = nullptr;
     QLabel *status_ = nullptr, *stats_ = nullptr, *hourLabel_ = nullptr, *threadLabel_ = nullptr;
     QComboBox *resolution_ = nullptr, *quality_ = nullptr;
@@ -154,6 +284,7 @@ private:
     QCheckBox *fog_ = nullptr, *dof_ = nullptr, *edgeAa_ = nullptr, *videoPreview_ = nullptr;
     QPushButton *renderButton_ = nullptr, *homeButton_ = nullptr, *frontButton_ = nullptr, *rearButton_ = nullptr;
     VideoPreviewWindow* videoWindow_ = nullptr;
+    QAction* benchmarkAction_ = nullptr;
     QTimer* videoPlaybackTimer_ = nullptr;
     std::vector<QImage> videoFrames_;
     size_t videoFrameIndex_ = 0, videoPlaybackIndex_ = 0;
@@ -339,6 +470,112 @@ private:
         requestRender();
     }
 
+    void openBenchmark() {
+        if (videoPreview_->isChecked()) return;
+        if (benchmarkThread_.joinable()) benchmarkThread_.join();
+        const auto objects = scene_.obj.size();
+        const auto triangles = std::count_if(scene_.obj.begin(), scene_.obj.end(), [](const Obj& o) { return o.kind == Kind::Triangle; });
+        BenchmarkDialog dialog(this);
+        dialog.setScene(currentScenePath_, objects, size_t(triangles));
+        connect(dialog.runButton(), &QPushButton::clicked, &dialog, [this, &dialog] {
+            readSettings();
+            RenderSettings cfg;
+            { std::lock_guard<std::mutex> lock(requestMutex_); cfg = settings_; }
+            const int baseOutW = cfg.outW, baseOutH = cfg.outH;
+            switch (dialog.resolutionIndex()) {
+                case 1: cfg.outW = 1280; cfg.outH = 720; break;
+                case 2: cfg.outW = 1920; cfg.outH = 1080; break;
+                case 3: cfg.outW = 3840; cfg.outH = 2160; break;
+                default: break;
+            }
+            const float scaleX = float(cfg.renderW) / std::max(1, baseOutW);
+            const float scaleY = float(cfg.renderH) / std::max(1, baseOutH);
+            cfg.renderW = std::max(1, int(std::lround(cfg.outW * scaleX)));
+            cfg.renderH = std::max(1, int(std::lround(cfg.outH * scaleY)));
+            cfg.videoPreview = false;
+            auto threadCounts = dialog.selectedThreads();
+            std::sort(threadCounts.begin(), threadCounts.end());
+            if (threadCounts.empty()) { QMessageBox::information(&dialog, QStringLiteral("Benchmark"), QStringLiteral("Sélectionnez au moins un nombre de threads.")); return; }
+            const int repeats = dialog.repeats();
+            const QString settingsSummary = QStringLiteral("quality_scale=%1x%2; threads_requested=%3; hour_step=%4; fog=%5; dof=%6; edge_aa=%7; camera_distance=%8; camera_angle=%9; camera_elevation=%10; fov=%11")
+                .arg(scaleX, 0, 'f', 4).arg(scaleY, 0, 'f', 4).arg([&] { QStringList v; for (unsigned n : threadCounts) v << QString::number(n); return v.join(','); }())
+                .arg(cfg.hourStep).arg(cfg.fog ? 1 : 0).arg(cfg.dof ? 1 : 0).arg(cfg.edgeAa ? 1 : 0)
+                .arg(cfg.distance, 0, 'f', 2).arg(cfg.angle, 0, 'f', 1).arg(cfg.elevation, 0, 'f', 1).arg(cfg.fov, 0, 'f', 1);
+            dialog.setRows({}, 0, cfg.outW, cfg.outH, cfg.samples);
+            dialog.setRunning(true); dialog.setProgress(0, QStringLiteral("Préparation du benchmark…"));
+            const uint64_t token = benchmarkGeneration_.fetch_add(1) + 1;
+            generation_.fetch_add(1); // stop the current display render cleanly before taking the scene lock
+            {
+                std::lock_guard<std::mutex> lock(requestMutex_);
+                benchmarking_ = true;
+                pending_ = false;
+            }
+            requestCv_.notify_one();
+            benchmarkThread_ = std::thread([this, &dialog, cfg, threadCounts, repeats, token, settingsSummary] {
+                std::vector<BenchmarkRow> rows;
+                double shadowMs = 0;
+                std::unique_lock<std::mutex> sceneLock(sceneMutex_);
+                if (benchmarkGeneration_.load() != token) return;
+                updateLighting(6.f + cfg.hourStep * .5f);
+                Stats shadowStats;
+                auto shadowStart = std::chrono::steady_clock::now();
+                ShadowMap benchShadows = buildShadow(scene_, shadowStats);
+                shadowMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - shadowStart).count();
+                const int totalPasses = int(threadCounts.size()) * (repeats + 1);
+                int done = 0;
+                for (unsigned threadCount : threadCounts) {
+                    std::vector<double> renderTimes, postTimes, totalTimes;
+                    BenchmarkRow row; row.threads = threadCount;
+                    for (int repetition = -1; repetition < repeats; ++repetition) {
+                        if (benchmarkGeneration_.load() != token) break;
+                        std::vector<uint32_t> pixels(size_t(cfg.renderW) * cfg.renderH);
+                        Camera cam = camera(cfg.angle, cfg.elevation, cfg.distance, cfg.renderW, cfg.renderH);
+                        cam.tanHalf = std::tan(cfg.fov * PI / 360.f); cam.focusDistance = cfg.distance;
+                        cam.apertureRadius = cfg.distance * .018f;
+                        cam.pixelAngle = 2 * cam.tanHalf / (cfg.renderW * (cfg.samples == 16 ? 4.f : cfg.samples == 4 ? 2.f : 1.f));
+                        unsigned samples = cfg.samples; if (cfg.dof && samples < 4) samples = 4;
+                        const auto start = std::chrono::steady_clock::now();
+                        Stats st = m3d::render(scene_, benchShadows, cam, cfg.renderW, cfg.renderH, pixels, threadCount, cfg.fog, benchmarkGeneration_, token, samples, cfg.dof);
+                        if (benchmarkGeneration_.load() != token) break;
+                        const double renderMs = st.ms;
+                        const auto postStart = std::chrono::steady_clock::now();
+                        if (cfg.renderW == cfg.outW * 2 && cfg.renderH == cfg.outH * 2) pixels = downsample2x(pixels, cfg.renderW, cfg.renderH, threadCount);
+                        else if (cfg.renderW != cfg.outW || cfg.renderH != cfg.outH) pixels = upscaleBilinear(pixels, cfg.renderW, cfg.renderH, cfg.outW, cfg.outH, threadCount);
+                        if (cfg.edgeAa) pixels = antialiasEdges4(pixels, cfg.outW, cfg.outH, threadCount);
+                        const double postMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - postStart).count();
+                        const double totalMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+                        if (repetition >= 0) {
+                            renderTimes.push_back(renderMs); postTimes.push_back(postMs); totalTimes.push_back(totalMs);
+                            row.rays += st.rays; row.tests += st.tests; row.nodes += st.nodes; row.aabb += st.aabb; row.hits += st.hits; row.texels += st.texels;
+                        }
+                        ++done;
+                        const int progress = int(100.0 * done / std::max(1, totalPasses));
+                        QMetaObject::invokeMethod(&dialog, [&dialog, progress, threadCount, repetition, repeats] {
+                            const QString phase = repetition < 0 ? QStringLiteral("Échauffement") : QStringLiteral("Mesure %1/%2").arg(repetition + 1).arg(repeats);
+                            dialog.setProgress(progress, QStringLiteral("%1 thread(s) — %2 — buffer de résultat séparé").arg(threadCount).arg(phase));
+                        }, Qt::QueuedConnection);
+                    }
+                    if (renderTimes.empty()) break;
+                    auto median = [](std::vector<double>& values) { std::sort(values.begin(), values.end()); return values[values.size() / 2]; };
+                    row.renderMs = median(renderTimes); row.postMs = median(postTimes); row.totalMs = median(totalTimes);
+                    row.rays /= uint64_t(renderTimes.size()); row.tests /= uint64_t(renderTimes.size()); row.nodes /= uint64_t(renderTimes.size());
+                    row.aabb /= uint64_t(renderTimes.size()); row.hits /= uint64_t(renderTimes.size()); row.texels /= uint64_t(renderTimes.size());
+                    rows.push_back(row);
+                }
+                sceneLock.unlock();
+                { std::lock_guard<std::mutex> lock(requestMutex_); benchmarking_ = false; }
+                QMetaObject::invokeMethod(&dialog, [this, &dialog, rows = std::move(rows), shadowMs, cfg, token, settingsSummary] () mutable {
+                    if (benchmarkGeneration_.load() != token) return;
+                    dialog.setRows(std::move(rows), shadowMs, cfg.outW, cfg.outH, cfg.samples, settingsSummary);
+                    dialog.setProgress(100, QStringLiteral("Terminé — comparaison médiane. Ombres (passe unique) : %1 ms.").arg(shadowMs, 0, 'f', 1));
+                    dialog.setRunning(false);
+                    requestCv_.notify_one();
+                }, Qt::QueuedConnection);
+            });
+        });
+        dialog.exec();
+    }
+
     void setVideoControlsEnabled(bool enabled) {
         resolution_->setEnabled(enabled); quality_->setEnabled(enabled);
         distance_->setEnabled(enabled); angle_->setEnabled(enabled); elevation_->setEnabled(enabled); fov_->setEnabled(enabled);
@@ -408,7 +645,7 @@ private:
     void renderLoop() {
         for (;;) {
             std::unique_lock<std::mutex> lock(requestMutex_);
-            requestCv_.wait(lock, [this] { return stopping_ || pending_; });
+            requestCv_.wait(lock, [this] { return stopping_ || (pending_ && !benchmarking_); });
             if (stopping_) return;
             pending_ = false;
             const uint64_t token = generation_.load();
