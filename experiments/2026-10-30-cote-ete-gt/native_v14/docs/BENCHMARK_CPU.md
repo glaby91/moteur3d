@@ -10,7 +10,7 @@ La fenêtre **Outils → Benchmark du moteur** sert à repérer la partie qui m�
 - **Compteurs de charge** : rayons, tests d’objets BVH, nœuds BVH, tests AABB, impacts et lectures de texels.
 - **Gain de parallélisme** : comparaison du temps total médian entre la plus petite et la plus grande configuration de threads sélectionnée.
 
-Chaque configuration passe d’abord par un échauffement, exclu des résultats, puis par 1 à 7 répétitions. Le tableau utilise la médiane. Les mesures se font dans un buffer séparé et ne remplacent pas l’image de la fenêtre principale.
+Chaque configuration passe d’abord par un échauffement, exclu des résultats, puis par 1 à 7 répétitions. Le tableau utilise la médiane statistique (moyenne des deux valeurs centrales si le nombre de répétitions est pair). Les mesures se font dans un buffer séparé et ne remplacent pas l’image de la fenêtre principale. Les longues séries peuvent être annulées; les résultats déjà mesurés sont conservés.
 
 ## Lire le diagnostic
 

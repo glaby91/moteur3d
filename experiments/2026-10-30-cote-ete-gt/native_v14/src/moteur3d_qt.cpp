@@ -103,8 +103,9 @@ public:
         auto* actions = new QHBoxLayout;
         run_ = new QPushButton(QStringLiteral("Lancer le benchmark"), this);
         export_ = new QPushButton(QStringLiteral("Exporter CSV…"), this); export_->setEnabled(false);
+        cancel_ = new QPushButton(QStringLiteral("Annuler"), this); cancel_->setEnabled(false);
         close_ = new QPushButton(QStringLiteral("Fermer"), this);
-        actions->addWidget(run_); actions->addWidget(export_); actions->addStretch(); actions->addWidget(close_); root->addLayout(actions);
+        actions->addWidget(run_); actions->addWidget(export_); actions->addWidget(cancel_); actions->addStretch(); actions->addWidget(close_); root->addLayout(actions);
         connect(close_, &QPushButton::clicked, this, &QDialog::reject);
         connect(export_, &QPushButton::clicked, this, [this] { exportCsv(); });
     }
@@ -112,6 +113,7 @@ public:
         sceneLabel_->setText(QStringLiteral("Scène : %1   |   %2 objets   |   %3 triangles").arg(name).arg(qulonglong(objects)).arg(qulonglong(triangles)));
     }
     QPushButton* runButton() const { return run_; }
+    QPushButton* cancelButton() const { return cancel_; }
     std::vector<unsigned> selectedThreads() const {
         std::vector<unsigned> out; for (const auto& item : threadChecks_) if (item.second->isChecked()) out.push_back(item.first); return out;
     }
@@ -119,11 +121,13 @@ public:
     int resolutionIndex() const { return resolution_->currentIndex(); }
     void setRunning(bool running) {
         running_ = running; run_->setEnabled(!running); export_->setEnabled(!running && !rows_.empty());
+        cancel_->setEnabled(running);
         resolution_->setEnabled(!running); repeats_->setEnabled(!running);
         for (const auto& item : threadChecks_) item.second->setEnabled(!running);
         close_->setText(running ? QStringLiteral("Benchmark en cours…") : QStringLiteral("Fermer"));
         close_->setEnabled(!running);
     }
+    void setCancelling() { cancel_->setEnabled(false); status_->setText(QStringLiteral("Annulation demandée — arrêt au prochain point d’interruption…")); }
     void setProgress(int value, const QString& text) { progress_->setValue(value); status_->setText(text); }
     void setRows(std::vector<BenchmarkRow> rows, double shadowMs, int width, int height, unsigned samples, QString settingsSummary = {}) {
         rows_ = std::move(rows); shadowMs_ = shadowMs; width_ = width; height_ = height; samples_ = samples; settingsSummary_ = std::move(settingsSummary);
@@ -158,7 +162,7 @@ private:
     QLabel *sceneLabel_ = nullptr, *status_ = nullptr, *diagnosis_ = nullptr;
     QComboBox* resolution_ = nullptr; QSpinBox* repeats_ = nullptr;
     QProgressBar* progress_ = nullptr; QTableWidget* table_ = nullptr;
-    QPushButton *run_ = nullptr, *export_ = nullptr, *close_ = nullptr;
+    QPushButton *run_ = nullptr, *export_ = nullptr, *cancel_ = nullptr, *close_ = nullptr;
     std::vector<std::pair<unsigned, QCheckBox*>> threadChecks_;
     std::vector<BenchmarkRow> rows_; double shadowMs_ = 0; int width_ = 0, height_ = 0; unsigned samples_ = 1; bool running_ = false; QString settingsSummary_;
     void exportCsv() {
@@ -477,7 +481,12 @@ private:
         const auto triangles = std::count_if(scene_.obj.begin(), scene_.obj.end(), [](const Obj& o) { return o.kind == Kind::Triangle; });
         BenchmarkDialog dialog(this);
         dialog.setScene(currentScenePath_, objects, size_t(triangles));
+        connect(dialog.cancelButton(), &QPushButton::clicked, &dialog, [this, &dialog] {
+            benchmarkGeneration_.fetch_add(1);
+            dialog.setCancelling();
+        });
         connect(dialog.runButton(), &QPushButton::clicked, &dialog, [this, &dialog] {
+            if (benchmarkThread_.joinable()) benchmarkThread_.join();
             readSettings();
             RenderSettings cfg;
             { std::lock_guard<std::mutex> lock(requestMutex_); cfg = settings_; }
@@ -503,19 +512,31 @@ private:
                 .arg(cfg.distance, 0, 'f', 2).arg(cfg.angle, 0, 'f', 1).arg(cfg.elevation, 0, 'f', 1).arg(cfg.fov, 0, 'f', 1);
             dialog.setRows({}, 0, cfg.outW, cfg.outH, cfg.samples);
             dialog.setRunning(true); dialog.setProgress(0, QStringLiteral("Préparation du benchmark…"));
-            const uint64_t token = benchmarkGeneration_.fetch_add(1) + 1;
-            generation_.fetch_add(1); // stop the current display render cleanly before taking the scene lock
+            uint64_t token = 0;
             {
                 std::lock_guard<std::mutex> lock(requestMutex_);
                 benchmarking_ = true;
                 pending_ = false;
+                // Publish the render cancellation and the benchmark gate atomically with
+                // respect to renderLoop's pending-work check.
+                generation_.fetch_add(1);
+                token = benchmarkGeneration_.fetch_add(1) + 1;
             }
             requestCv_.notify_one();
             benchmarkThread_ = std::thread([this, &dialog, cfg, threadCounts, repeats, token, settingsSummary] {
                 std::vector<BenchmarkRow> rows;
                 double shadowMs = 0;
                 std::unique_lock<std::mutex> sceneLock(sceneMutex_);
-                if (benchmarkGeneration_.load() != token) return;
+                if (benchmarkGeneration_.load() != token) {
+                    sceneLock.unlock();
+                    { std::lock_guard<std::mutex> lock(requestMutex_); benchmarking_ = false; }
+                    QMetaObject::invokeMethod(&dialog, [&dialog] {
+                        dialog.setProgress(0, QStringLiteral("Benchmark annulé avant le début des mesures."));
+                        dialog.setRunning(false);
+                    }, Qt::QueuedConnection);
+                    requestCv_.notify_one();
+                    return;
+                }
                 updateLighting(6.f + cfg.hourStep * .5f);
                 Stats shadowStats;
                 auto shadowStart = std::chrono::steady_clock::now();
@@ -524,6 +545,7 @@ private:
                 const int totalPasses = int(threadCounts.size()) * (repeats + 1);
                 int done = 0;
                 for (unsigned threadCount : threadCounts) {
+                    if (benchmarkGeneration_.load() != token) break;
                     std::vector<double> renderTimes, postTimes, totalTimes;
                     BenchmarkRow row; row.threads = threadCount;
                     for (int repetition = -1; repetition < repeats; ++repetition) {
@@ -556,7 +578,11 @@ private:
                         }, Qt::QueuedConnection);
                     }
                     if (renderTimes.empty()) break;
-                    auto median = [](std::vector<double>& values) { std::sort(values.begin(), values.end()); return values[values.size() / 2]; };
+                    auto median = [](std::vector<double>& values) {
+                        std::sort(values.begin(), values.end());
+                        const size_t mid = values.size() / 2;
+                        return values.size() % 2 ? values[mid] : (values[mid - 1] + values[mid]) * .5;
+                    };
                     row.renderMs = median(renderTimes); row.postMs = median(postTimes); row.totalMs = median(totalTimes);
                     row.rays /= uint64_t(renderTimes.size()); row.tests /= uint64_t(renderTimes.size()); row.nodes /= uint64_t(renderTimes.size());
                     row.aabb /= uint64_t(renderTimes.size()); row.hits /= uint64_t(renderTimes.size()); row.texels /= uint64_t(renderTimes.size());
@@ -564,10 +590,11 @@ private:
                 }
                 sceneLock.unlock();
                 { std::lock_guard<std::mutex> lock(requestMutex_); benchmarking_ = false; }
-                QMetaObject::invokeMethod(&dialog, [this, &dialog, rows = std::move(rows), shadowMs, cfg, token, settingsSummary] () mutable {
-                    if (benchmarkGeneration_.load() != token) return;
+                const bool cancelled = benchmarkGeneration_.load() != token;
+                QMetaObject::invokeMethod(&dialog, [this, &dialog, rows = std::move(rows), shadowMs, cfg, settingsSummary, cancelled] () mutable {
                     dialog.setRows(std::move(rows), shadowMs, cfg.outW, cfg.outH, cfg.samples, settingsSummary);
-                    dialog.setProgress(100, QStringLiteral("Terminé — comparaison médiane. Ombres (passe unique) : %1 ms.").arg(shadowMs, 0, 'f', 1));
+                    if (cancelled) dialog.setProgress(0, QStringLiteral("Benchmark annulé — résultats partiels conservés. Ombres : %1 ms.").arg(shadowMs, 0, 'f', 1));
+                    else dialog.setProgress(100, QStringLiteral("Terminé — comparaison médiane. Ombres (passe unique) : %1 ms.").arg(shadowMs, 0, 'f', 1));
                     dialog.setRunning(false);
                     requestCv_.notify_one();
                 }, Qt::QueuedConnection);
