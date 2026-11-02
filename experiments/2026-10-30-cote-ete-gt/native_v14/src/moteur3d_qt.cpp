@@ -1,27 +1,28 @@
 #include "m3d_engine.h"
 #include "version.h"
 
-#include <QApplication>
 #include <QAction>
+#include <QApplication>
 #include <QByteArray>
 #include <QCheckBox>
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDialog>
-#include <QFileDialog>
-#include <QFileInfo>
 #include <QFormLayout>
+#include <QFileDialog>
+#include <QFrame>
 #include <QHBoxLayout>
 #include <QImage>
 #include <QLabel>
 #include <QMainWindow>
+#include <QMenu>
 #include <QMenuBar>
 #include <QMetaObject>
 #include <QMessageBox>
 #include <QPainter>
 #include <QPushButton>
-#include <QSignalBlocker>
 #include <QSlider>
+#include <QScrollArea>
 #include <QSplitter>
 #include <QThread>
 #include <QTimer>
@@ -44,8 +45,24 @@ struct RenderSettings {
     float distance = 12.f, angle = -43.f, elevation = 7.f, fov = 50.f;
     unsigned threads = 16, samples = 1;
     int hourStep = 12;
-    bool fog = false, dof = false, edgeAa = true, bloom = false;
+    bool fog = false, dof = false, edgeAa = true, videoPreview = false;
 };
+
+struct CameraPose { float distance, angle, elevation; };
+static CameraPose ellipseOrbitPose(float distance, float angleDeg, float elevationDeg, float phaseDeg) {
+    const float a0 = angleDeg * PI / 180.f;
+    const float e0 = elevationDeg * PI / 180.f;
+    const float horizontal0 = distance * std::cos(e0);
+    const float height0 = distance * std::sin(e0);
+    const float theta = phaseDeg * PI / 180.f;
+    const float tangentRadius = horizontal0 * .9f;
+    const float x = std::sin(a0) * horizontal0 * std::cos(theta) + std::cos(a0) * tangentRadius * std::sin(theta);
+    const float z = std::cos(a0) * horizontal0 * std::cos(theta) - std::sin(a0) * tangentRadius * std::sin(theta);
+    const float horizontal = std::sqrt(x * x + z * z);
+    const float lift = horizontal0 * .22f * (1.f - std::cos(theta)) * .5f;
+    const float height = height0 + lift;
+    return {std::sqrt(horizontal * horizontal + height * height), std::atan2(x, z) * 180.f / PI, std::atan2(height, horizontal) * 180.f / PI};
+}
 
 class ImageView final : public QWidget {
 public:
@@ -69,12 +86,36 @@ private:
     QImage image_;
 };
 
+class VideoPreviewWindow final : public QDialog {
+public:
+    explicit VideoPreviewWindow(QWidget* parent = nullptr) : QDialog(parent, Qt::Window) {
+        setWindowTitle(QStringLiteral("Aperçu rotatif — 800 × 600"));
+        auto* layout = new QVBoxLayout(this);
+        layout->setContentsMargins(8, 8, 8, 8);
+        image_ = new ImageView(this);
+        image_->setMinimumSize(800, 600);
+        layout->addWidget(image_);
+        status_ = new QLabel(QStringLiteral("En attente du pré-calcul"), this);
+        layout->addWidget(status_);
+        resize(824, 654);
+    }
+    void setFrame(const QImage& image) { image_->setFrame(image); status_->setText(QStringLiteral("Lecture des images pré-calculées")); }
+    void setStatus(const QString& text) { status_->setText(text); }
+private:
+    ImageView* image_ = nullptr;
+    QLabel* status_ = nullptr;
+};
+
 class MainWindow final : public QMainWindow {
 public:
-    explicit MainWindow(Scene loadedScene) : scene_(std::move(loadedScene)) {
+    explicit MainWindow(Scene loadedScene, QString scenePath) : scene_(std::move(loadedScene)), currentScenePath_(std::move(scenePath)) {
         setWindowTitle(QStringLiteral("Moteur 3D natif x64 — ") + QString::fromWCharArray(M3D_RELEASE_ID_WIDE));
         resize(1480, 900);
+        setMinimumSize(1000, 620);
         buildUi();
+        auto* fileMenu = menuBar()->addMenu(QStringLiteral("Scène"));
+        auto* openScene = fileMenu->addAction(QStringLiteral("Ouvrir une scène…"));
+        connect(openScene, &QAction::triggered, this, [this] { openSceneFile(); });
         updateLighting(12.f);
         Stats initialShadowStats;
         shadows_ = buildShadow(scene_, initialShadowStats);
@@ -96,9 +137,10 @@ public:
 private:
     Scene scene_;
     ShadowMap shadows_;
+    std::mutex sceneMutex_;
+    QString currentScenePath_;
     int shadowHour_ = -1;
     RenderSettings settings_;
-    QString pendingScenePath_;
     std::mutex requestMutex_;
     std::condition_variable requestCv_;
     std::atomic<uint64_t> generation_{1};
@@ -109,12 +151,14 @@ private:
     QComboBox *resolution_ = nullptr, *quality_ = nullptr;
     QSlider *distance_ = nullptr, *angle_ = nullptr, *elevation_ = nullptr, *fov_ = nullptr;
     QSlider *threads_ = nullptr, *hour_ = nullptr;
-    QCheckBox *fog_ = nullptr, *dof_ = nullptr, *edgeAa_ = nullptr, *bloom_ = nullptr, *orbitPreview_ = nullptr;
-    QDialog *orbitDialog_ = nullptr;
-    ImageView *orbitImage_ = nullptr;
-    QTimer orbitTimer_;
-    int savedResolution_ = 0, savedQuality_ = 0, savedAngle_ = -43;
-    bool raptureScene_ = false;
+    QCheckBox *fog_ = nullptr, *dof_ = nullptr, *edgeAa_ = nullptr, *videoPreview_ = nullptr;
+    QPushButton *renderButton_ = nullptr, *homeButton_ = nullptr, *frontButton_ = nullptr, *rearButton_ = nullptr;
+    VideoPreviewWindow* videoWindow_ = nullptr;
+    QTimer* videoPlaybackTimer_ = nullptr;
+    std::vector<QImage> videoFrames_;
+    size_t videoFrameIndex_ = 0, videoPlaybackIndex_ = 0;
+    bool videoBuilding_ = false, videoPlaying_ = false;
+    float videoAngle_ = 0.f;
 
     static QSlider* slider(Qt::Orientation orientation, int min, int max, int value, QWidget* parent) {
         auto* s = new QSlider(orientation, parent);
@@ -124,12 +168,6 @@ private:
     }
 
     void buildUi() {
-        auto* sceneMenu = menuBar()->addMenu(QStringLiteral("Scène"));
-        auto* openSceneAction = sceneMenu->addAction(QStringLiteral("Ouvrir une scène…"));
-        connect(openSceneAction, &QAction::triggered, this, [this] {
-            const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Ouvrir une scène"), QCoreApplication::applicationDirPath(), QStringLiteral("Scènes moteur 3D (*.bin);;Tous les fichiers (*.*)"));
-            if (!path.isEmpty()) queueSceneLoad(path);
-        });
         auto* central = new QWidget(this);
         auto* root = new QHBoxLayout(central);
         root->setContentsMargins(12, 12, 12, 12);
@@ -154,7 +192,7 @@ private:
         leftLayout->addWidget(hour_);
         leftLayout->addLayout(hourMarks);
 
-        auto* panel = new QWidget(split);
+        auto* panel = new QWidget;
         panel->setMinimumWidth(380);
         panel->setMaximumWidth(520);
         panel->setStyleSheet("QWidget{background:#182b3c;color:#e0ebf3;} QLabel{background:transparent;} QComboBox,QPushButton{background:#f0f0f0;color:#111;padding:5px;} QSlider{background:transparent;}");
@@ -165,7 +203,7 @@ private:
         resolution_ = new QComboBox(panel);
         resolution_->addItems({QStringLiteral("Full HD — 1920 × 1080"), QStringLiteral("1600 × 900"), QStringLiteral("1280 × 720"), QStringLiteral("4K UHD — 3840 × 2160")});
         quality_ = new QComboBox(panel);
-        quality_->addItems({QStringLiteral("Natif — 100 % par axe"), QStringLiteral("Équilibré — 87,5 % par axe"), QStringLiteral("Détails — 75 % par axe"), QStringLiteral("Rapide — 66,7 % par axe"), QStringLiteral("Très rapide — 50 % par axe"), QStringLiteral("FSAA 16× — motif stratifié 4×4")});
+        quality_->addItems({QStringLiteral("Natif — 100 %"), QStringLiteral("Équilibré — 87,5 % par axe"), QStringLiteral("Détails — 75 % par axe"), QStringLiteral("Rapide — 66,7 % par axe"), QStringLiteral("Très rapide — 50 % par axe"), QStringLiteral("FSAA 16× — motif stratifié 4×4")});
         quality_->setCurrentIndex(0);
         controls->addWidget(new QLabel(QStringLiteral("Résolution de sortie"), panel)); controls->addWidget(resolution_);
         controls->addWidget(new QLabel(QStringLiteral("Précision du calcul interne"), panel)); controls->addWidget(quality_);
@@ -186,21 +224,30 @@ private:
         auto* checks = new QHBoxLayout;
         fog_ = new QCheckBox(QStringLiteral("Brouillard atmosphérique"), panel);
         dof_ = new QCheckBox(QStringLiteral("DOF"), panel);
-        edgeAa_ = new QCheckBox(QStringLiteral("AA contours (4 voisins)"), panel);
-        bloom_ = new QCheckBox(QStringLiteral("Bloom doux"), panel);
-        edgeAa_->setChecked(true);
-        checks->addWidget(fog_); checks->addWidget(dof_); checks->addWidget(edgeAa_); checks->addWidget(bloom_); checks->addStretch();
+        edgeAa_ = new QCheckBox(QStringLiteral("AA contours"), panel); edgeAa_->setChecked(true);
+        checks->addWidget(fog_); checks->addWidget(dof_); checks->addWidget(edgeAa_); checks->addStretch();
         controls->addLayout(checks);
-        orbitPreview_ = new QCheckBox(QStringLiteral("Aperçu rotatif — 800 × 600"), panel);
-        controls->addWidget(orbitPreview_);
-        auto* renderButton = new QPushButton(QStringLiteral("Calculer l’image"), panel);
-        controls->addWidget(renderButton);
+        videoPreview_ = new QCheckBox(QStringLiteral("Mode vidéo — aperçu rotatif 800 × 600"), panel);
+        controls->addWidget(videoPreview_);
+        videoWindow_ = new VideoPreviewWindow(this);
+        videoPlaybackTimer_ = new QTimer(this);
+        videoPlaybackTimer_->setInterval(50);
+        connect(videoPlaybackTimer_, &QTimer::timeout, this, [this] {
+            if (!videoPreview_->isChecked() || !videoPlaying_ || videoFrames_.empty()) { videoPlaybackTimer_->stop(); return; }
+            videoPlaybackIndex_ = (videoPlaybackIndex_ + 1) % videoFrames_.size();
+            videoWindow_->setFrame(videoFrames_[videoPlaybackIndex_]);
+        });
+        connect(videoWindow_, &QDialog::finished, this, [this](int) {
+            if (videoPreview_->isChecked()) videoPreview_->setChecked(false);
+        });
+        renderButton_ = new QPushButton(QStringLiteral("Calculer l’image"), panel);
+        controls->addWidget(renderButton_);
         auto* views = new QHBoxLayout;
-        auto* home = new QPushButton(QStringLiteral("Vue initiale"), panel);
-        auto* front = new QPushButton(QStringLiteral("Vue avant"), panel);
-        auto* rear = new QPushButton(QStringLiteral("Vue arrière"), panel);
-        views->addWidget(home); views->addWidget(front);
-        controls->addLayout(views); controls->addWidget(rear);
+        homeButton_ = new QPushButton(QStringLiteral("Vue initiale"), panel);
+        frontButton_ = new QPushButton(QStringLiteral("Vue avant"), panel);
+        rearButton_ = new QPushButton(QStringLiteral("Vue arrière"), panel);
+        views->addWidget(homeButton_); views->addWidget(frontButton_);
+        controls->addLayout(views); controls->addWidget(rearButton_);
         status_ = new QLabel(QStringLiteral("Prêt"), panel);
         auto* diagTitle = new QLabel(QStringLiteral("DIAGNOSTICS MESURÉS"), panel);
         diagTitle->setStyleSheet("font-size:15px;font-weight:700");
@@ -208,7 +255,14 @@ private:
         stats_->setWordWrap(true);
         controls->addWidget(status_); controls->addWidget(diagTitle); controls->addWidget(stats_); controls->addStretch();
 
-        split->addWidget(left); split->addWidget(panel); split->setStretchFactor(0, 1); split->setStretchFactor(1, 0);
+        auto* panelScroll = new QScrollArea(split);
+        panelScroll->setWidgetResizable(true);
+        panelScroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        panelScroll->setMinimumWidth(380);
+        panelScroll->setMaximumWidth(520);
+        panelScroll->setFrameShape(QFrame::NoFrame);
+        panelScroll->setWidget(panel);
+        split->addWidget(left); split->addWidget(panelScroll); split->setStretchFactor(0, 1); split->setStretchFactor(1, 0);
         root->addWidget(split);
         setCentralWidget(central);
 
@@ -221,21 +275,33 @@ private:
         connect(fog_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
         connect(dof_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
         connect(edgeAa_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
-        connect(bloom_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
-        connect(orbitPreview_, &QCheckBox::toggled, this, [this](bool enabled) { setOrbitPreview(enabled); });
-        connect(&orbitTimer_, &QTimer::timeout, this, [this] {
-            if (!orbitPreview_->isChecked()) return;
-            int angle = angle_->value() + 8;
-            if (angle > 180) angle -= 360;
-            angle_->setValue(angle);
+        connect(videoPreview_, &QCheckBox::toggled, this, [this](bool enabled) {
+            setVideoControlsEnabled(!enabled);
+            if (enabled) {
+                videoFrames_.clear();
+                videoFrames_.reserve(180);
+                videoFrameIndex_ = videoPlaybackIndex_ = 0;
+                videoAngle_ = 0.f;
+                videoBuilding_ = true;
+                videoPlaying_ = false;
+                videoWindow_->setStatus(QStringLiteral("Calcul vidéo — image 1 / 180 — caméra 0° / 360°"));
+                videoWindow_->show(); videoWindow_->raise();
+            } else {
+                videoPlaybackTimer_->stop();
+                videoBuilding_ = videoPlaying_ = false;
+                videoFrameIndex_ = videoPlaybackIndex_ = 0;
+                std::vector<QImage>().swap(videoFrames_);
+                videoAngle_ = 0.f;
+                videoWindow_->hide();
+            }
+            readSettings();
+            requestRender();
+            if (enabled) status_->setText(QStringLiteral("Calcul vidéo — image 1 / 180 — caméra 0° / 360°"));
         });
-        connect(renderButton, &QPushButton::clicked, this, [this] { readSettings(); requestRender(); });
-        connect(home, &QPushButton::clicked, this, [this] {
-            if (raptureScene_) setRaptureCamera();
-            else { distance_->setValue(24); angle_->setValue(-43); elevation_->setValue(7); fov_->setValue(50); readSettings(); requestRender(); }
-        });
-        connect(front, &QPushButton::clicked, this, [this] { distance_->setValue(20); angle_->setValue(-10); elevation_->setValue(4); readSettings(); requestRender(); });
-        connect(rear, &QPushButton::clicked, this, [this] { distance_->setValue(24); angle_->setValue(-145); elevation_->setValue(7); readSettings(); requestRender(); });
+        connect(renderButton_, &QPushButton::clicked, this, [this] { readSettings(); requestRender(); });
+        connect(homeButton_, &QPushButton::clicked, this, [this] { distance_->setValue(24); angle_->setValue(-43); elevation_->setValue(7); fov_->setValue(50); readSettings(); requestRender(); });
+        connect(frontButton_, &QPushButton::clicked, this, [this] { distance_->setValue(20); angle_->setValue(-10); elevation_->setValue(4); readSettings(); requestRender(); });
+        connect(rearButton_, &QPushButton::clicked, this, [this] { distance_->setValue(24); angle_->setValue(-145); elevation_->setValue(7); readSettings(); requestRender(); });
         connect(hour_, &QSlider::valueChanged, this, [this](int step) {
             float h = 6.f + step * .5f;
             QString mode = h < 9 ? QStringLiteral("Matin") : h < 16 ? QStringLiteral("Midi") : h < 20 ? QStringLiteral("Coucher de soleil") : QStringLiteral("Nuit");
@@ -243,79 +309,93 @@ private:
         });
     }
 
-    void setOrbitPreview(bool enabled) {
-        if (enabled) {
-            savedResolution_ = resolution_->currentIndex();
-            savedQuality_ = quality_->currentIndex();
-            savedAngle_ = angle_->value();
-            resolution_->setEnabled(false); quality_->setEnabled(false); dof_->setEnabled(false);
-            orbitDialog_ = new QDialog(this);
-            orbitDialog_->setWindowTitle(QStringLiteral("Aperçu rotatif — 800 × 600"));
-            orbitDialog_->resize(800, 600);
-            auto *layout = new QVBoxLayout(orbitDialog_);
-            layout->setContentsMargins(0, 0, 0, 0);
-            orbitImage_ = new ImageView(orbitDialog_);
-            orbitImage_->setMinimumSize(0, 0);
-            layout->addWidget(orbitImage_);
-            connect(orbitDialog_, &QDialog::finished, this, [this] {
-                QMetaObject::invokeMethod(this, [this] {
-                    if (orbitPreview_ && orbitPreview_->isChecked()) orbitPreview_->setChecked(false);
-                }, Qt::QueuedConnection);
-            });
-            orbitDialog_->show();
-        } else {
-            orbitTimer_.stop();
-            if (orbitDialog_) { orbitDialog_->close(); delete orbitDialog_; orbitDialog_ = nullptr; orbitImage_ = nullptr; }
-            resolution_->setEnabled(true); quality_->setEnabled(true); dof_->setEnabled(true);
-            resolution_->setCurrentIndex(savedResolution_); quality_->setCurrentIndex(savedQuality_);
-            angle_->setValue(savedAngle_);
+    void openSceneFile() {
+        const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Ouvrir une scène"), currentScenePath_, QStringLiteral("Scènes Moteur 3D (*.bin);;Tous les fichiers (*.*)"));
+        if (path.isEmpty()) return;
+        Scene loaded;
+        std::wstring error;
+#ifdef _WIN32
+        const std::filesystem::path nativePath(path.toStdWString());
+#else
+        const QByteArray encodedPath = path.toUtf8();
+        const std::filesystem::path nativePath(std::string(encodedPath.constData(), size_t(encodedPath.size())));
+#endif
+        if (!loadScene(nativePath, loaded, error)) {
+            QMessageBox::critical(this, QStringLiteral("Ouverture de scène impossible"), QString::fromWCharArray(error.c_str()));
+            return;
         }
-        readSettings(); requestRender();
+        generation_.fetch_add(1);
+        {
+            std::lock_guard<std::mutex> guard(sceneMutex_);
+            scene_ = std::move(loaded);
+            const int hourStep = hour_->value();
+            const float hour = 6.f + hourStep * .5f;
+            updateLighting(hour);
+            Stats build;
+            shadows_ = buildShadow(scene_, build);
+            shadowHour_ = hourStep;
+        }
+        currentScenePath_ = path;
+        requestRender();
+    }
+
+    void setVideoControlsEnabled(bool enabled) {
+        resolution_->setEnabled(enabled); quality_->setEnabled(enabled);
+        distance_->setEnabled(enabled); angle_->setEnabled(enabled); elevation_->setEnabled(enabled); fov_->setEnabled(enabled);
+        threads_->setEnabled(enabled); hour_->setEnabled(enabled); fog_->setEnabled(enabled); dof_->setEnabled(enabled); edgeAa_->setEnabled(enabled);
+        renderButton_->setEnabled(enabled); homeButton_->setEnabled(enabled); frontButton_->setEnabled(enabled); rearButton_->setEnabled(enabled);
+        menuBar()->setEnabled(enabled);
     }
 
     void readSettings() {
         std::lock_guard<std::mutex> lock(requestMutex_);
         const int ri = resolution_->currentIndex();
-        settings_.outW = ri == 0 ? 1920 : ri == 1 ? 1600 : ri == 2 ? 1280 : 3840;
-        settings_.outH = ri == 0 ? 1080 : ri == 1 ? 900 : ri == 2 ? 720 : 2160;
+        const bool video = videoPreview_->isChecked();
+        settings_.outW = video ? 800 : ri == 0 ? 1920 : ri == 1 ? 1600 : ri == 2 ? 1280 : 3840;
+        settings_.outH = video ? 600 : ri == 0 ? 1080 : ri == 1 ? 900 : ri == 2 ? 720 : 2160;
         const int qi = quality_->currentIndex();
         const float scale = qi == 0 ? 1.f : qi == 1 ? .875f : qi == 2 ? .75f : qi == 3 ? (2.f / 3.f) : qi == 4 ? .5f : 1.f;
         settings_.renderW = int(std::lround(settings_.outW * scale));
         settings_.renderH = int(std::lround(settings_.outH * scale));
         settings_.samples = qi == 5 ? 16u : 1u;
         settings_.edgeAa = edgeAa_->isChecked();
-        settings_.bloom = bloom_->isChecked();
+        settings_.videoPreview = video;
         settings_.distance = distance_->value() * .5f;
         settings_.angle = float(angle_->value());
         settings_.elevation = float(elevation_->value());
+        if (video) {
+            const CameraPose pose = ellipseOrbitPose(settings_.distance, settings_.angle, settings_.elevation, videoAngle_);
+            settings_.distance = pose.distance;
+            settings_.angle = pose.angle;
+            settings_.elevation = pose.elevation;
+        }
         settings_.fov = float(fov_->value());
         settings_.threads = unsigned(threads_->value());
         settings_.hourStep = hour_->value();
         settings_.fog = fog_->isChecked();
-        settings_.dof = dof_->isChecked() && !orbitPreview_->isChecked();
-        if (orbitPreview_->isChecked()) {
-            settings_.outW = 800; settings_.outH = 600;
-            settings_.renderW = 400; settings_.renderH = 300;
-            settings_.samples = 1;
-        }
+        settings_.dof = dof_->isChecked();
         threadLabel_->setText(QStringLiteral("Threads CPU : %1").arg(settings_.threads));
     }
 
-    void queueSceneLoad(const QString& path) {
-        generation_.fetch_add(1);
-        { std::lock_guard<std::mutex> lock(requestMutex_); pendingScenePath_ = path; pending_ = true; }
-        status_->setText(QStringLiteral("Chargement de la scène…"));
-        requestCv_.notify_one();
-    }
-
-    void setRaptureCamera() {
-        const QSignalBlocker blockDistance(distance_), blockAngle(angle_), blockElevation(elevation_), blockFov(fov_);
-        distance_->setValue(48);
-        angle_->setValue(-18);
-        elevation_->setValue(6);
-        fov_->setValue(82);
+    void queueNextVideoFrame() {
+        if (!videoPreview_->isChecked() || !videoBuilding_) return;
+        if (videoFrameIndex_ >= 180) {
+            videoBuilding_ = false;
+            videoPlaying_ = true;
+            videoPlaybackIndex_ = 0;
+            videoWindow_->setFrame(videoFrames_.front());
+            status_->setText(QStringLiteral("Mode vidéo — boucle de 360° pré-calculée"));
+            videoPlaybackTimer_->start();
+            return;
+        }
+        videoAngle_ = float(videoFrameIndex_ * 2);
+        const size_t imageNumber = videoFrameIndex_ + 1;
+        const QString progress = QStringLiteral("Calcul vidéo — image %1 / 180 — caméra %2° / 360°")
+            .arg(qulonglong(imageNumber)).arg(int(videoAngle_));
+        videoWindow_->setStatus(progress);
         readSettings();
         requestRender();
+        status_->setText(progress);
     }
 
     void requestRender() {
@@ -333,42 +413,12 @@ private:
             pending_ = false;
             const uint64_t token = generation_.load();
             const RenderSettings cfg = settings_;
-            const QString loadPath = std::move(pendingScenePath_);
-            pendingScenePath_.clear();
             lock.unlock();
+            std::unique_lock<std::mutex> sceneLock(sceneMutex_);
 
             const int hourValue = 6 + cfg.hourStep / 2;
             const float hour = 6.f + cfg.hourStep * .5f;
             double shadowMs = 0;
-            if (!loadPath.isEmpty()) {
-                Scene candidate;
-                std::wstring error;
-#ifdef _WIN32
-                const std::filesystem::path nativePath(loadPath.toStdWString());
-#else
-                const QByteArray encodedPath = loadPath.toUtf8();
-                const std::filesystem::path nativePath(std::string(encodedPath.constData(), size_t(encodedPath.size())));
-#endif
-                if (!loadScene(nativePath, candidate, error)) {
-                    if (generation_.load() == token) {
-                        const QString message = QString::fromStdWString(error);
-                        QMetaObject::invokeMethod(this, [this, message] { QMessageBox::warning(this, QStringLiteral("Impossible de charger la scène"), message); status_->setText(QStringLiteral("Échec du chargement; la scène précédente est conservée.")); }, Qt::QueuedConnection);
-                    }
-                    continue;
-                }
-                if (generation_.load() != token) continue;
-                scene_ = std::move(candidate);
-                shadowHour_ = -1;
-                const QString loadedName = QFileInfo(loadPath).fileName();
-                QMetaObject::invokeMethod(this, [this, loadedName] {
-                    setWindowTitle(QStringLiteral("Moteur 3D natif x64 — ") + QString::fromWCharArray(M3D_RELEASE_ID_WIDE) + QStringLiteral(" — ") + loadedName);
-                    raptureScene_ = loadedName.contains(QStringLiteral("rapture"), Qt::CaseInsensitive);
-                    const QSignalBlocker blockBloom(bloom_);
-                    bloom_->setChecked(raptureScene_);
-                    if (raptureScene_) setRaptureCamera();
-                    else { readSettings(); requestRender(); }
-                }, Qt::QueuedConnection);
-            }
             if (cfg.hourStep != shadowHour_) {
                 updateLighting(hour);
                 Stats lightStats;
@@ -382,17 +432,16 @@ private:
             Camera cam = camera(cfg.angle, cfg.elevation, cfg.distance, cfg.renderW, cfg.renderH);
             cam.tanHalf = std::tan(cfg.fov * PI / 360.f);
             cam.focusDistance = cfg.distance;
-            cam.apertureRadius = cfg.distance * .001f;
+            cam.apertureRadius = cfg.distance * .018f;
             cam.pixelAngle = 2 * cam.tanHalf / (cfg.renderW * (cfg.samples == 16 ? 4.f : cfg.samples == 4 ? 2.f : 1.f));
             unsigned samples = cfg.samples;
-            if (cfg.dof && samples < 16) samples = 16;
+            if (cfg.dof && samples < 4) samples = 4;
             Stats st = m3d::render(scene_, shadows_, cam, cfg.renderW, cfg.renderH, pixels, cfg.threads, cfg.fog, generation_, token, samples, cfg.dof);
             if (generation_.load() != token) continue;
             const auto postStart = std::chrono::steady_clock::now();
             if (cfg.renderW == cfg.outW * 2 && cfg.renderH == cfg.outH * 2) pixels = downsample2x(pixels, cfg.renderW, cfg.renderH, cfg.threads);
             else if (cfg.renderW != cfg.outW || cfg.renderH != cfg.outH) pixels = upscaleBilinear(pixels, cfg.renderW, cfg.renderH, cfg.outW, cfg.outH, cfg.threads);
             if (cfg.edgeAa) pixels = antialiasEdges4(pixels, cfg.outW, cfg.outH, cfg.threads);
-            if (cfg.bloom) pixels = bloomGlow(pixels, cfg.outW, cfg.outH, cfg.threads);
             st.postMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - postStart).count();
             st.shadowMs = shadowMs;
             st.ms += st.postMs + shadowMs;
@@ -401,17 +450,24 @@ private:
             QImage image(reinterpret_cast<const uchar*>(pixels.data()), cfg.outW, cfg.outH, cfg.outW * int(sizeof(uint32_t)), QImage::Format_ARGB32);
             image = image.copy();
             const auto count = std::count_if(scene_.obj.begin(), scene_.obj.end(), [](const Obj& o) { return o.kind == Kind::Triangle; });
+            const auto objectCount = scene_.obj.size();
+            sceneLock.unlock();
             const QString diag = QStringLiteral("CPU %1 | rendu %2 ms | ombres %3 ms | post %4 ms | total %5 ms\nRayons : %6 | impacts : %7 | ciel : %8\nTests : %9 | nœuds BVH : %10 | AABB : %11\nObjets : %12 | triangles : %13 | texels : %14")
                 .arg(st.threads).arg(st.ms - st.postMs - st.shadowMs, 0, 'f', 1).arg(st.shadowMs, 0, 'f', 1).arg(st.postMs, 0, 'f', 1).arg(st.ms, 0, 'f', 1)
                 .arg(qulonglong(st.rays)).arg(qulonglong(st.hits)).arg(qulonglong(st.sky)).arg(qulonglong(st.tests)).arg(qulonglong(st.nodes)).arg(qulonglong(st.aabb))
-                .arg(qulonglong(scene_.obj.size())).arg(qulonglong(count)).arg(qulonglong(st.texels));
-            QMetaObject::invokeMethod(this, [this, image = std::move(image), diag, hourValue, token] {
-                if (generation_.load() != token) return;
-                image_->setFrame(image);
-                if (orbitImage_) orbitImage_->setFrame(image);
+                .arg(qulonglong(objectCount)).arg(qulonglong(count)).arg(qulonglong(st.texels));
+            QMetaObject::invokeMethod(this, [this, image = std::move(image), diag, hourValue, token, videoFrame = cfg.videoPreview] {
+                if (generation_.load() != token || videoPreview_->isChecked() != videoFrame) return;
                 stats_->setText(diag);
-                status_->setText(QStringLiteral("Terminé — ") + QString::fromWCharArray(M3D_RELEASE_ID_WIDE) + QStringLiteral(" — ") + QString::number(hourValue) + QStringLiteral(" h"));
-                if (orbitPreview_->isChecked()) orbitTimer_.start(40);
+                if (videoFrame) {
+                    if (!videoBuilding_) return;
+                    videoFrames_.push_back(image);
+                    ++videoFrameIndex_;
+                    queueNextVideoFrame();
+                } else {
+                    image_->setFrame(image);
+                    status_->setText(QStringLiteral("Terminé — ") + QString::fromWCharArray(M3D_RELEASE_ID_WIDE) + QStringLiteral(" — ") + QString::number(hourValue) + QStringLiteral(" h"));
+                }
             }, Qt::QueuedConnection);
         }
     }
@@ -420,7 +476,8 @@ private:
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
-    const QString scenePath = QCoreApplication::applicationDirPath() + QStringLiteral("/moteur3d_v1314_scene.bin");
+    const QString defaultScenePath = QCoreApplication::applicationDirPath() + QStringLiteral("/moteur3d_v1314_scene.bin");
+    const QString scenePath = argc > 1 ? QString::fromLocal8Bit(argv[1]) : defaultScenePath;
     Scene scene;
     std::wstring error;
 #ifdef _WIN32
@@ -433,7 +490,7 @@ int main(int argc, char** argv) {
         QMessageBox::critical(nullptr, QStringLiteral("Moteur 3D natif"), QString::fromWCharArray(error.c_str()));
         return 1;
     }
-    MainWindow window(std::move(scene));
+    MainWindow window(std::move(scene), scenePath);
     window.show();
     return app.exec();
 }
