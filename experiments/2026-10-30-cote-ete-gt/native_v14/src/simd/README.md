@@ -8,4 +8,4 @@ Les noyaux AVX2 sont séparés sous `src/simd/avx2/`. Le détecteur x64 valide l
 - `bvh_bounds.cpp` : tests simultanés des deux enfants BVH; actif pour chaque nœud interne sur le chemin AVX2.
 - Les matériaux, textures, réflexions, autres primitives et le DOF conservent leur chemin scalaire; les rayons secondaires et d’ombres utilisent les noyaux BVH AVX2 lorsqu’ils sont compatibles.
 
-Les réflexions spéculaires de proximité restent scalaires, tandis que leur éclairage diffus est accumulé par paquets de huit. Les performances doivent être mesurées par scène et qualité avant d’étendre le SIMD aux autres étapes.
+Les réflexions spéculaires de proximité restent scalaires, tandis que leur éclairage diffus est accumulé par paquets de huit. La lecture des mipmaps couleur, normal et rugosité utilise le noyau d’interpolation AVX2. Les performances doivent être mesurées par scène et qualité avant d’étendre le SIMD aux autres étapes.
