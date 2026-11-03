@@ -1,4 +1,4 @@
-# Bathysphère Rapture et navigation interactive — build 261103-0003
+# Bathysphère Rapture et navigation interactive — build 261103-0004
 
 ## Modifications
 
@@ -42,3 +42,7 @@ Le build est versionné en `261103-0002`. Le workflow Windows/Linux se relance s
 ## Correction géométrique et reflets — build 261103-0003
 
 La capture réelle du build 261103-0001 montre une coque coupée par le cadrage, des fragments/surfaces qui semblent traverser le hublot et un reflet trop présent sur la coque. Le build 261103-0003 augmente la tessellation de la sphère, retire toute face de maillage dont les sommets ou points médians traversent la découpe du hublot, réduit la réflectivité de `wheelMetal` de 78 % à 30 % dans la scène Rapture et recule le cadrage de départ (distance 22 → 28). Ces ajustements restent à confirmer par une nouvelle capture réelle.
+
+## Parcours vidéo rotatif — build 261103-0004
+
+Les captures du mode vidéo du build 261103-0001 montrent des vues où la coque ou une surface sombre remplit presque toute l’image. En mode vidéo Rapture, le parcours applique maintenant une distance orbitale minimale de 18 unités afin de garder la caméra au-delà de la bathysphère et des parois proches. Cette modification doit être vérifiée avec une nouvelle boucle pré-calculée.

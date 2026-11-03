@@ -785,7 +785,9 @@ private:
         settings_.angle = float(angle_->value());
         settings_.elevation = float(elevation_->value());
         if (video) {
-            const CameraPose pose = ellipseOrbitPose(settings_.distance, settings_.angle, settings_.elevation, videoAngle_);
+            // Keep the Rapture turntable outside the bathysphere and nearby walls.
+            const float orbitDistance=isRaptureScene()?std::max(settings_.distance,18.f):settings_.distance;
+            const CameraPose pose = ellipseOrbitPose(orbitDistance, settings_.angle, settings_.elevation, videoAngle_);
             settings_.distance = pose.distance;
             settings_.angle = pose.angle;
             settings_.elevation = pose.elevation;
