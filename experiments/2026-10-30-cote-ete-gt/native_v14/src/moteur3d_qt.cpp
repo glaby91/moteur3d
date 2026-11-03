@@ -411,12 +411,12 @@ private:
         const float step=std::max(.15f,distance*.055f);
         const V forward{-std::sin(angle),0.f,-std::cos(angle)},right{std::cos(angle),0.f,-std::sin(angle)};
         switch(key) {
-            case Qt::Key_W: cameraTarget_=cameraTarget_+forward*step; break;
+            case Qt::Key_Z: cameraTarget_=cameraTarget_+forward*step; break;
             case Qt::Key_S: cameraTarget_=cameraTarget_-forward*step; break;
-            case Qt::Key_A: cameraTarget_=cameraTarget_-right*step; break;
+            case Qt::Key_Q: cameraTarget_=cameraTarget_-right*step; break;
             case Qt::Key_D: cameraTarget_=cameraTarget_+right*step; break;
             case Qt::Key_R: cameraTarget_.y+=step; break;
-            case Qt::Key_F: cameraTarget_.y-=step; break;
+            case Qt::Key_X: cameraTarget_.y-=step; break;
             default: return false;
         }
         beginNavigation(); readSettings(); navigationIdleTimer_->start(450); return true;
@@ -434,7 +434,7 @@ private:
         auto* info = new QLabel(QStringLiteral("Scène V13.14  |  Git ") + QString::fromUtf8(M3D_GIT_REVISION_ANSI) + QStringLiteral("  |  branche ") + QString::fromUtf8(M3D_GIT_BRANCH_ANSI) + QStringLiteral("  |  rendu CPU parallèle"), left);
         info->setStyleSheet("color:#d4e1eb");
         image_ = new ImageView(left);
-        auto* navigationInfo = new QLabel(QStringLiteral("Navigation : glisser gauche pour tourner, glisser droit pour se déplacer, molette pour zoomer, WASD + R/F pour avancer et monter."), left);
+        auto* navigationInfo = new QLabel(QStringLiteral("Navigation : glisser gauche pour tourner, glisser droit pour se déplacer, molette pour zoomer. AZERTY : Z/Q/S/D pour avancer/gauche/reculer/droite, R/X pour monter/descendre."), left);
         navigationInfo->setWordWrap(true);
         navigationInfo->setStyleSheet("color:#b8cbd8;font-size:11px;");
         hourLabel_ = new QLabel(QStringLiteral("Heure : 12:00 — Midi"), left);
