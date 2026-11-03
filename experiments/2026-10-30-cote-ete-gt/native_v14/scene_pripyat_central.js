@@ -49,70 +49,156 @@ function makeScene() {
     box(x, 0.036, 72, x + 1.25, 0.043, 77, 'concrete');
   }
 
-  // Long, low connecting gallery behind the open square.
-  box(-9, 0, -24, 12, 6.2, -18.2, 'concrete');
-  box(-9.4, 6.1, -24.4, 12.4, 6.55, -17.8, 'stone');
-  for (let x = -7.5; x < 11; x += 2.3) {
-    box(x, 0.5, -18.12, x + 1.25, 3.2, -17.92, 'windowdark');
-    box(x - 0.12, 3.25, -18.25, x + 1.38, 3.42, -17.9, 'concrete');
+  // The low connector is kept as context between the hero building and the hotel.
+  box(30.2,0.0,-24.0,40.2,5.8,-18.6,'concrete');
+  box(30.0,5.65,-24.2,40.4,6.05,-18.4,'stone');
+  for(let x=31.0;x<39.5;x+=2.05){
+    box(x,0.65,-18.78,x+1.25,3.4,-18.58,'glass');
+    box(x-0.10,0.48,-18.83,x+1.35,0.62,-18.52,'stone');
   }
-  box(-1.2, 0.05, -17.9, 4.2, 2.8, -17.45, 'glass');
-  box(-1.5, 2.8, -18.0, 4.5, 3.05, -17.4, 'sign');
 
-  // Palace of Culture Energetik — broad low mass, recessed glass entrance,
-  // vertical concrete fins and a stepped roofline.
-  box(-43, 0, -47, -7, 15.6, -19.5, 'concrete');
-  box(-40.5, 0.02, -19.6, -8.8, 8.8, -17.3, 'concrete');
-  box(-41.5, 8.8, -19.2, -8.0, 9.45, -17.0, 'stone');
-  box(-39, 9.45, -44.5, -11, 16.2, -19.5, 'concrete');
-  box(-36, 16.2, -41, -14, 17.1, -21, 'stone');
-  // Deep entrance glazing and rhythm of monumental columns.
-  box(-39.8, 0.65, -17.31, -9.4, 7.9, -17.05, 'windowdark');
-  for (let x = -38.5; x <= -10.8; x += 3.95) {
-    box(x, 0.1, -17.0, x + 0.75, 8.55, -16.28, 'concrete');
-    box(x - 0.18, 0.08, -16.94, x + 0.91, 0.38, -16.12, 'stone');
-    box(x - 0.14, 8.38, -16.96, x + 0.89, 8.72, -16.1, 'stone');
-  }
-  box(-41, 8.55, -17.1, -8, 9.15, -16.25, 'concrete');
-  // Side wings and long rows of dark window openings.
-  for (let x = -41; x <= -11; x += 4.25) {
-    box(x, 10.05, -19.45, x + 2.2, 13.0, -19.18, 'windowdark');
-    box(x - 0.16, 9.82, -19.58, x + 2.36, 10.02, -19.1, 'stone');
-    box(x - 0.16, 13.02, -19.58, x + 2.36, 13.2, -19.1, 'stone');
-  }
-  // Entrance steps and broad forecourt.
-  for (let step = 0; step < 6; step++) {
-    const y = 0.05 + step * 0.18;
-    box(-34.5 + step * 0.4, y, -16.4 + step * 0.58,
-        -14.5 - step * 0.4, y + 0.18, -15.95 + step * 0.58, 'stone');
-  }
-  box(-34.8, 1.2, -12.8, -14.2, 1.45, -11.9, 'concrete');
+  // Hero asset: the Palace of Culture Energetik is the only fully developed building.
+  // Approximate envelope: 81 x 24 m, 11.4 m main roof and a 14 m stair tower.
+  // The outer shell is deliberately split into walls and slabs so the camera can enter.
+  const ex0=-50.5, ex1=30.5, front=-18.8, back=-43.4;
+  box(ex0,0,back,ex0+1.2,9.4,front,'concrete');
+  box(ex1-1.2,0,back,ex1,9.4,front,'concrete');
+  box(ex0,0,back,ex1,9.4,back+1.2,'concrete');
+  box(ex0,0,-20.2,-46.8,9.4,front,'concrete');
+  box(25.5,0,-20.2,ex1,9.4,front,'concrete');
+  box(-46.8,8.8,-20.2,25.5,9.4,front,'stone');
+  box(-42.0,9.4,-41.8,20.5,11.35,-20.4,'concrete');
+  box(20.5,9.4,-40.8,30.5,14.0,-22.2,'concrete'); // stair tower
+  box(-43.0,11.25,-42.5,18.4,11.75,-20.1,'stone');
 
-  // Hotel Polissya — taller central slab with two stepped wings and a rooftop sign.
-  box(13.2, 0, -43, 42.2, 18.4, -18.7, 'concrete');
-  box(19.0, 18.4, -41.4, 36.4, 23.2, -21.0, 'concrete');
-  box(20.2, 23.2, -38.8, 35.4, 24.0, -23.2, 'stone');
-  box(12.7, 0.12, -18.75, 42.6, 0.52, -18.15, 'stone');
-  for (let floor = 0; floor < 6; floor++) {
-    const y = 2.1 + floor * 2.72;
-    const x0 = floor < 2 ? 15.2 : 19.4;
-    const x1 = floor < 2 ? 40.2 : 36.1;
-    for (let x = x0; x < x1; x += 2.45) {
-      box(x, y, -18.62, x + 1.28, y + 1.62, -18.35, floor === 3 && x % 2 < 1 ? 'windowlit' : 'windowdark');
-      box(x - 0.12, y - 0.13, -18.72, x + 1.4, y + 0.04, -18.27, 'stone');
-      box(x - 0.12, y + 1.68, -18.72, x + 1.4, y + 1.82, -18.27, 'concrete');
+  // Three readable levels. Slabs wrap the foyer atrium and the open stair core.
+  box(-49.2,0.05,-42.2,29.2,0.38,-20.1,'stone');
+  function floorPlate(y){
+    const t=y,b=y+0.24;
+    box(-49.2,t,-42.2,-15,b,-20.1,'concrete');
+    box(-15,t,-42.2,8,b,-35.8,'concrete');
+    box(-15,t,-26.5,8,b,-20.1,'concrete');
+    box(-15,t,-35.8,-7,b,-26.5,'concrete');
+    box(6,t,-35.8,8,b,-26.5,'concrete');
+    box(8,t,-42.2,18,b,-20.1,'concrete');
+    box(18,t,-42.2,20,b,-20.1,'concrete');
+    box(27,t,-42.2,29.2,b,-20.1,'concrete');
+    box(20,t,-42.2,27,b,-38.0,'concrete');
+    box(20,t,-23.0,27,b,-20.1,'concrete');
+  }
+  floorPlate(3.25); floorPlate(6.35);
+
+  // Large curtain wall and open central doors: sunlight can reach the foyer.
+  box(-46.5,0.8,-19.95,-3.2,8.55,-19.72,'glass');
+  box(3.2,0.8,-19.95,25.3,8.55,-19.72,'glass');
+  box(-3.0,2.25,-19.94,3.0,8.5,-19.72,'glass');
+  for(let x=-45.8;x<25;x+=2.65) box(x,0.92,-19.68,x+0.08,8.42,-19.62,'metal');
+  for(let y=2.2;y<8.4;y+=2.15) box(-46.3,y,-19.67,25.1,y+0.07,-19.62,'metal');
+  // Replace several lower panes with dark openings for an abandoned, walk-in entrance.
+  for(const [x,w] of [[-8.6,2.1],[5.3,2.0],[15.9,2.4]])
+    box(x,0.22,-19.66,x+w,2.12,-19.60,'windowdark');
+
+  // Rear and end glazing, deep reveals, and long horizontal concrete bands.
+  for(let x=-45.5;x<18;x+=6.2){
+    box(x,1.0,-42.10,x+3.5,2.65,-41.98,((Math.floor((x+45.5)/6.2)%4)===1)?'windowdark':'glass');
+    box(x,4.1,-42.10,x+3.5,5.85,-41.98,'glass');
+    box(x,7.1,-42.10,x+3.5,8.75,-41.98,'windowdark');
+  }
+  for(const y of [3.05,6.15,9.05]) box(-49.2,y,-42.16,29.2,y+0.18,-41.92,'stone');
+
+  // Interior room partitions: a long corridor serves rooms on both sides at each level.
+  function doorwayWall(x0,x1,z,y,h,mat){
+    const mid=(x0+x1)*0.5, door=1.55, thick=0.18;
+    box(x0,y,z,mid-door*.5,y+h,z+thick,mat);
+    box(mid+door*.5,y,z,x1,y+h,z+thick,mat);
+    box(mid-door*.5,y+2.15,z,mid+door*.5,y+h,z+thick,'concrete');
+  }
+  for(let level=0;level<3;level++){
+    const y=0.38+level*3.1, h=2.72;
+    for(const [x0,x1] of [[-48.7,-38.0],[-38.0,-27.0],[-27.0,-15.8],[8.2,17.6]]){
+      // Low corridor walls and room dividers; the first-floor rear hall stays open as an auditorium.
+      box(x0,y,-34.0,x0+0.16,y+h,-27.0,'concrete');
+      box(x0,y,-27.0,x0+0.16,y+h,-20.1,'concrete');
+      box(x1-0.16,y,-27.0,x1,y+h,-20.1,'concrete');
+      if(level>0){
+        box(x0,y,-42.1,x0+0.16,y+h,-34.0,'concrete');
+        box(x1-0.16,y,-42.1,x1,y+h,-34.0,'concrete');
+      }
+      doorwayWall(x0,x1,-27.12,y,h,'concrete');
+      doorwayWall(x0,x1,-34.10,y,h,'concrete');
+      box(x1-0.16,y,-34.0,x1,y+h,-27.0,'concrete');
+    }
+    // Broken plaster and fallen ceiling sections are broad, readable shapes.
+    box(-46.0,y+2.25,-26.92,-42.5,y+2.42,-26.72,'debris');
+    box(-25.0,y+2.36,-34.28,-21.8,y+2.51,-34.08,'debris');
+  }
+
+  // Ground floor: foyer, abandoned auditorium, stage, and a few large room fixtures.
+  for(let x=-12;x<=7;x+=6) capsule([x,0.38,-33.5],[x,8.9,-33.5],0.28,'stone');
+  box(-47.2,0.42,-41.4,-18.0,0.68,-35.0,'wood'); // auditorium stage
+  for(let row=0;row<5;row++) for(let seat=0;seat<9;seat++){
+    const x=-45.0+seat*3.0, z=-40.8+row*1.0;
+    roundBox(x,0.46,z,x+0.75,0.95,z+0.62,0.16,'rust');
+    box(x+0.08,0.48,z+0.38,x+0.67,1.25,z+0.58,'wood');
+  }
+  // A ruined reception desk, scattered panels and tall foyer openings.
+  box(-4.8,0.42,-24.8,4.2,1.25,-23.8,'wood');
+  box(-3.8,1.25,-24.45,3.0,1.42,-24.15,'stone');
+  for(const p of [[-11,0.40,-25.5,-8,0.55,-24.8],[7,0.40,-31.8,9,0.60,-30.8],
+                  [-20,0.40,-39.6,-17,0.57,-38.8],[12,3.55,-24.8,15,3.72,-24.1]])
+    box(...p,'debris');
+
+  // Upper rooms retain a few recognizable large-scale fixtures and rubble.
+  for(let level=1;level<3;level++){
+    const y=0.42+level*3.1;
+    for(const x of [-43,-32,-21,12]){
+      box(x-1.4,y,-24.6,x+1.4,y+0.72,-23.8,'wood');
+      box(x+1.8,y,-25.2,x+2.65,y+2.2,-24.3,'debris');
+      box(x-3.2,y,-38.5,x-1.2,y+1.9,-37.8,'wood');
     }
   }
-  // Recessed hotel entrance, canopy and roof lettering plaque (geometry only).
-  box(24.0, 0.4, -18.65, 31.2, 4.3, -18.3, 'windowdark');
-  box(22.8, 4.0, -20.0, 32.4, 4.35, -17.1, 'stone');
-  box(21.0, 24.0, -24.0, 34.8, 24.7, -22.9, 'sign');
+  // Stairs wind through the open east core; landings meet all three floors and the roof.
+  for(let flight=0;flight<3;flight++){
+    const baseY=0.45+flight*3.1, baseZ=-40.5+flight*0.4;
+    for(let step=0;step<11;step++){
+      const y=baseY+step*0.255, z=baseZ+step*1.42;
+      box(21.0,y,z,25.7,y+0.18,z+1.35,'stone');
+    }
+    box(20.0,baseY+2.7,-24.8,27.0,baseY+3.0,-21.2,'concrete');
+  }
+  box(20.0,9.4,-22.2,27.0,13.3,-21.0,'windowdark'); // rooftop stair door
+
+  // Roof access, low parapet, vents, weeds, and an open atrium that admits direct sun.
+  box(-49.2,9.4,-42.2,-15,9.7,-20.1,'concrete');
+  box(-15,9.4,-42.2,8,9.7,-35.8,'concrete');
+  box(-15,9.4,-26.5,8,9.7,-20.1,'concrete');
+  box(-15,9.4,-35.8,-7,9.7,-26.5,'concrete');
+  box(6,9.4,-35.8,8,9.7,-26.5,'concrete');
+  box(8,9.4,-42.2,18,9.7,-20.1,'concrete');
+  box(18,9.4,-42.2,20,9.7,-20.1,'concrete');
+  box(27,9.4,-42.2,29.2,9.7,-20.1,'concrete');
+  box(20,9.4,-42.2,27,9.7,-38,'concrete');
+  box(20,9.4,-23,27,9.7,-20.1,'concrete');
+  for(const [x0,x1,z0,z1] of [[-49.2,29.2,-42.2,-41.2],[-49.2,29.2,-20.4,-19.6],[-49.2,-48.3,-42.2,-20.0],[28.3,29.2,-42.2,-20.0]])
+    box(x0,9.7,z0,x1,10.55,z1,'concrete');
+  for(const [x,z,h] of [[-36,-38,1.2],[-7,-40,1.8],[12,-22,1.1],[17,-39,1.4]])
+    box(x,9.7,z,x+1.4,9.7+h,z+1.2,'rust');
+  for(let x=-44;x<27;x+=9) ellipsoidMesh(x,9.85,-20.8,1.0,0.12,0.55,'grass',8,6);
+
+  // The Polissya hotel stays a quiet contextual mass; Energetik owns the detail budget.
+  box(40.0,0.0,-42.0,63.0,15.5,-20.0,'concrete');
+  box(43.5,15.5,-39.0,59.5,20.0,-22.5,'concrete');
+  for(let floor=0;floor<5;floor++){
+    const y=1.8+floor*2.65;
+    for(let x=42.0;x<61.0;x+=3.1)
+      box(x,y,-19.92,x+1.45,y+1.55,-19.78,(floor===2&&x>51)?'windowlit':'windowdark');
+  }
 
   // Repeated small windows add depth to the visible west side of Energetik.
   for (let z = -43; z <= -22; z += 4.2) {
-    for (let y = 2.2; y < 13; y += 3.0) {
-      box(-43.08, y, z, -42.78, y + 1.5, z + 1.7, 'windowdark');
-      box(-43.16, y - 0.12, z - 0.12, -42.72, y + 1.62, z + 1.82, 'stone');
+    for (let y = 2.0; y < 8.4; y += 2.9) {
+      box(-50.58, y, z, -50.28, y + 1.5, z + 1.7, 'windowdark');
+      box(-50.66, y - 0.12, z - 0.12, -50.22, y + 1.62, z + 1.82, 'stone');
     }
   }
   // Two surrounding apartment slabs establish the next urban blocks without
@@ -134,9 +220,9 @@ function makeScene() {
       box(x, height * 0.56, frontZ - 0.2, x + 1.3, height * 0.56 + 1.25, frontZ + 0.08, 'windowlit');
     }
   }
-  apartment(-60, -34, -47, -10, 6, -10.0);
+  apartment(-64, -34, -57, -10, 6, -10.0);
   apartment(46, -37, 60, -12, 7, -12.0);
-  apartment(-60, 20, -47, 52, 5, 20.0);
+  apartment(-64, 20, -57, 52, 5, 20.0);
   apartment(47, 18, 60, 50, 6, 18.0);
 
   // Broken low walls, concrete planters and street furniture around the square.
@@ -228,7 +314,7 @@ function makeScene() {
   }
 
   // Facade fragments and modest local lighting keep the central landmarks readable.
-  for (const x of [-38,-31,-24,-17,-10,17,24,31,38]) {
+  for (const x of [-43,-33,-23,-13,-3,7,17,27,37,47]) {
     M3D_SCENE_LIGHTS.push([x,5,-15.8,12,0.20,236,204,157]);
   }
 }

@@ -9,6 +9,7 @@
 #include <QCoreApplication>
 #include <QCloseEvent>
 #include <QDialog>
+#include <QElapsedTimer>
 #include <QFile>
 #include <QFormLayout>
 #include <QFileDialog>
@@ -263,40 +264,45 @@ static CameraPose ellipseOrbitPose(float distance, float angleDeg, float elevati
 }
 
 static CameraPose guidedPripyatTour(float progress, V& look) {
-    // Camera targets run only through the stage built in scene_pripyat_central.js.
-    // A closed Catmull-Rom path gives the preview a smooth, repeatable walk.
+    // 90-second guided tour: exterior, foyer, rooms on all three levels,
+    // the stair core, then a 10.8-second rooftop sun hold.
+    if (progress >= .88f) {
+        look={17.f,11.45f,-34.f};
+        return {3.0f,-44.f,-27.f};
+    }
+    progress=std::clamp(progress/.88f,0.f,.999999f);
     static constexpr V route[] = {
-        { 0.f,1.6f,56.f }, { 0.f,1.6f,38.f }, { -5.f,1.6f,22.f },
-        { -13.f,1.6f,8.f }, { -19.f,1.6f,-2.f }, { -12.f,1.6f,7.f },
-        { 2.f,1.6f,17.f }, { 18.f,1.6f,14.f }, { 27.f,1.6f,1.f },
-        { 17.f,1.6f,-1.f }, { 6.f,1.6f,18.f }, { 0.f,1.6f,38.f },
-        { 0.f,1.6f,56.f }
+        { 0.f,1.6f,48.f }, { 0.f,1.6f,25.f }, { 0.f,1.6f,2.f },
+        { 0.f,1.6f,-17.f }, { 0.f,1.6f,-28.f }, { -18.f,1.6f,-31.f },
+        { -33.f,1.6f,-23.f }, { -34.f,1.6f,-38.f },
+        { -3.f,1.6f,-31.f }, { -3.f,4.7f,-31.f },
+        { -33.f,4.7f,-23.f }, { -42.f,4.7f,-38.f },
+        { -3.f,4.7f,-31.f }, { -3.f,7.8f,-31.f },
+        { -33.f,7.8f,-23.f }, { -39.f,7.8f,-38.f },
+        { 15.f,7.8f,-31.f }, { 22.f,10.f,-31.f },
+        { 19.f,10.5f,-34.f }
     };
-    constexpr int count = int(sizeof(route) / sizeof(route[0]));
-    progress = std::max(0.f, std::min(.999999f, progress));
-    const float scaled = progress * float(count - 1);
-    const int i = std::min(count - 2, int(scaled));
-    const float t = scaled - float(i);
-    const V& p0 = route[std::max(0, i - 1)];
-    const V& p1 = route[i];
-    const V& p2 = route[i + 1];
-    const V& p3 = route[std::min(count - 1, i + 2)];
-    auto curve = [t](float a, float b, float c, float d) {
+    constexpr int count=int(sizeof(route)/sizeof(route[0]));
+    const float scaled=progress*float(count-1);
+    const int i=std::min(count-2,int(scaled));
+    const float t=scaled-float(i);
+    const V& p0=route[std::max(0,i-1)];
+    const V& p1=route[i];
+    const V& p2=route[i+1];
+    const V& p3=route[std::min(count-1,i+2)];
+    auto curve=[t](float a,float b,float c,float d){
         const float t2=t*t,t3=t2*t;
         return .5f*((2.f*b)+(-a+c)*t+(2.f*a-5.f*b+4.f*c-d)*t2+(-a+3.f*b-3.f*c+d)*t3);
     };
-    auto tangent = [t](float a, float b, float c, float d) {
+    auto tangent=[t](float a,float b,float c,float d){
         const float t2=t*t;
         return .5f*((-a+c)+2.f*(2.f*a-5.f*b+4.f*c-d)*t+3.f*(-a+3.f*b-3.f*c+d)*t2);
     };
-    look = {curve(p0.x,p1.x,p2.x,p3.x),
-            curve(p0.y,p1.y,p2.y,p3.y),
-            curve(p0.z,p1.z,p2.z,p3.z)};
-    const float dx=tangent(p0.x,p1.x,p2.x,p3.x);
-    const float dz=tangent(p0.z,p1.z,p2.z,p3.z);
+    look={curve(p0.x,p1.x,p2.x,p3.x),curve(p0.y,p1.y,p2.y,p3.y),curve(p0.z,p1.z,p2.z,p3.z)};
+    const float dx=tangent(p0.x,p1.x,p2.x,p3.x),dz=tangent(p0.z,p1.z,p2.z,p3.z);
     const float speed=std::max(.001f,std::sqrt(dx*dx+dz*dz));
     const float angle=std::atan2(-dx/speed,-dz/speed)*180.f/PI;
-    return {8.5f, angle, 7.f};
+    return {3.0f,angle,0.f};
 }
 
 class ImageView final : public QWidget {
@@ -435,6 +441,7 @@ private:
     VideoPreviewWindow* videoWindow_ = nullptr;
     QAction* benchmarkAction_ = nullptr;
     QTimer* videoPlaybackTimer_ = nullptr;
+    QElapsedTimer tourTimer_;
     std::vector<QImage> videoFrames_;
     size_t videoFrameIndex_ = 0, videoPlaybackIndex_ = 0;
     bool videoBuilding_ = false, videoPlaying_ = false;
@@ -471,8 +478,8 @@ private:
         if(navigationPreviewTimer_) navigationPreviewTimer_->stop();
         if(navigationIdleTimer_) navigationIdleTimer_->stop();
         if(isPripyatScene()) {
-            cameraTarget_={0.f,1.6f,56.f}; setCameraSliders(17,0,0,55);
-            if(videoPreview_) videoPreview_->setText(QStringLiteral("Parcours automatique — place centrale (800 × 600)"));
+            cameraTarget_={0.f,1.6f,48.f}; setCameraSliders(17,0,0,55);
+            if(videoPreview_) videoPreview_->setText(QStringLiteral("Visite Energetik — extérieur, intérieur et toit (1 min 30)"));
             if(videoWindow_) videoWindow_->setWindowTitle(QStringLiteral("Parcours automatique — Pripiat"));
         } else if(isRaptureScene()) {
             cameraTarget_={0.f,4.4f,-35.f}; setCameraSliders(28,180,10,52);
@@ -685,13 +692,15 @@ private:
                 videoFrameIndex_ = videoPlaybackIndex_ = 0;
                 videoAngle_ = 0.f;
                 videoBuilding_ = true;
+                if (isPripyatScene()) tourTimer_.start();
                 videoPlaying_ = false;
                 videoWindow_->setStatus(isPripyatScene()
-                    ? QStringLiteral("Parcours automatique en cours — place centrale")
+                    ? QStringLiteral("Visite Energetik — départ extérieur, pièces, étages puis toit · 1 min 30")
                     : QStringLiteral("Calcul vidéo — image 1 / 180 — caméra 0° / 360°"));
                 videoWindow_->show(); videoWindow_->raise();
             } else {
                 videoPlaybackTimer_->stop();
+                tourTimer_.invalidate();
                 videoBuilding_ = videoPlaying_ = false;
                 videoFrameIndex_ = videoPlaybackIndex_ = 0;
                 std::vector<QImage>().swap(videoFrames_);
@@ -702,7 +711,7 @@ private:
             readSettings();
             requestRender();
             if (enabled) status_->setText(isPripyatScene()
-                ? QStringLiteral("Parcours automatique en cours — place centrale")
+                ? QStringLiteral("Visite Energetik — départ extérieur, pièces, étages puis toit · 1 min 30")
                 : QStringLiteral("Calcul vidéo — image 1 / 180 — caméra 0° / 360°"));
         });
         connect(renderButton_, &QPushButton::clicked, this, [this] { readSettings(); requestRender(); });
@@ -965,14 +974,13 @@ private:
         settings_.elevation = float(elevation_->value());
         if (video && isPripyatScene()) {
             V tourTarget{};
-            const float progress = videoFrameCount() > 1
-                ? float(videoFrameIndex_) / float(videoFrameCount() - 1) : 0.f;
-            const CameraPose pose = guidedPripyatTour(progress, tourTarget);
-            cameraTarget_ = tourTarget;
-            settings_.distance = pose.distance;
-            settings_.angle = pose.angle;
-            settings_.elevation = pose.elevation;
-        } else if (video) {
+            const float progress=std::clamp(float(tourTimer_.elapsed())/90000.f,0.f,1.f);
+            const CameraPose pose=guidedPripyatTour(progress,tourTarget);
+            cameraTarget_=tourTarget;
+            settings_.distance=pose.distance;
+            settings_.angle=pose.angle;
+            settings_.elevation=pose.elevation;
+        }        } else if (video) {
             // Preserve the established orbit preview for all existing scenes.
             const float orbitDistance=isRaptureScene()?std::max(settings_.distance,18.f):settings_.distance;
             const CameraPose pose = ellipseOrbitPose(orbitDistance, settings_.angle, settings_.elevation, videoAngle_);
@@ -984,7 +992,7 @@ private:
         settings_.threads = unsigned(threads_->value());
         const int simdSelection = simdMode_->currentIndex();
         settings_.avx2 = avx2FmaAvailable() && (simdSelection == 1 || simdSelection == 0);
-        settings_.hourStep = hour_->value();
+        settings_.hourStep = (video && isPripyatScene()) ? 6 : hour_->value();
         settings_.fog = fog_->isChecked();
         settings_.dof = dof_->isChecked() && !navigationActive_;
         threadLabel_->setText(settings_.directX11
@@ -994,31 +1002,36 @@ private:
 
     void queueNextVideoFrame() {
         if (!videoPreview_->isChecked() || !videoBuilding_) return;
-        const int frameCount = videoFrameCount();
-        if (isPripyatScene()) {
-            // Pripyat advances one camera waypoint after each completed render;
-            // it streams frames instead of pre-rendering a large video into RAM.
-            if (videoFrameIndex_ >= size_t(frameCount)) videoFrameIndex_ = 0;
-        } else if (videoFrameIndex_ >= size_t(frameCount)) {
-            videoBuilding_ = false;
-            videoPlaying_ = true;
-            videoPlaybackIndex_ = 0;
+        const int frameCount=videoFrameCount();
+        if(isPripyatScene()){
+            const qint64 elapsed=std::max<qint64>(0,tourTimer_.elapsed());
+            if(elapsed>=90000){
+                videoBuilding_=false;
+                videoWindow_->setStatus(QStringLiteral("Visite terminée — pause sur le toit"));
+                status_->setText(QStringLiteral("Visite Energetik terminée — 1 min 30"));
+                return;
+            }
+            const int seconds=int(elapsed/1000);
+            videoWindow_->setStatus(QStringLiteral("Energetik — extérieur → intérieur → toit — %1:%2 / 1:30")
+                .arg(seconds/60).arg(seconds%60,2,10,QChar('0')));
+        } else if(videoFrameIndex_>=size_t(frameCount)){
+            videoBuilding_=false;
+            videoPlaying_=true;
+            videoPlaybackIndex_=0;
             videoWindow_->setFrame(videoFrames_.front());
             status_->setText(QStringLiteral("Mode vidéo — boucle de 360° pré-calculée"));
             videoPlaybackTimer_->start();
             return;
         }
-        videoAngle_ = isPripyatScene() ? 0.f : float(videoFrameIndex_ * 2);
-        const size_t imageNumber = videoFrameIndex_ + 1;
-        const QString progress = isPripyatScene()
-            ? QStringLiteral("Parcours automatique — place centrale — image %1 / %2")
-                .arg(qulonglong(imageNumber)).arg(frameCount)
-            : QStringLiteral("Calcul vidéo — image %1 / %2 — caméra %3° / 360°")
-                .arg(qulonglong(imageNumber)).arg(frameCount).arg(int(videoAngle_));
-        videoWindow_->setStatus(progress);
+        videoAngle_=isPripyatScene()?0.f:float(videoFrameIndex_*2);
+        if(!isPripyatScene()){
+            const QString progress=QStringLiteral("Calcul vidéo — image %1 / %2 — caméra %3° / 360°")
+                .arg(qulonglong(videoFrameIndex_+1)).arg(frameCount).arg(int(videoAngle_));
+            videoWindow_->setStatus(progress);
+            status_->setText(progress);
+        }
         readSettings();
         requestRender();
-        status_->setText(progress);
     }
 
     void requestRender() {
@@ -1134,7 +1147,7 @@ private:
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
-    const QString defaultScenePath = QCoreApplication::applicationDirPath() + QStringLiteral("/moteur3d_v1314_scene.bin");
+    const QString defaultScenePath = QCoreApplication::applicationDirPath() + QStringLiteral("/scene_pripyat_central.bin");
     const QString scenePath = argc > 1 ? QString::fromLocal8Bit(argv[1]) : defaultScenePath;
     Scene scene;
     std::wstring error;

@@ -1,37 +1,36 @@
-# Pripiat — place centrale
+# Pripiat — Palais de la Culture Energetik
 
-Cette scène utilise le moteur natif V14 et son exporteur V4. Elle constitue le **premier secteur** parcourable automatiquement : la place centrale, le Palais de la Culture Energetik, l’hôtel Polissya et les abords immédiats.
+Le développement de cette branche se concentre désormais sur **un seul bâtiment détaillé : le Palais de la Culture Energetik**. La place et l’hôtel Polissya restent en arrière-plan pour situer le bâtiment. Les autres scènes du moteur restent conservées sur GitHub.
 
-## Plans et références photographiques
+## Références
 
-- Atlas cartographique de Pripiat fourni par Rodolphe : plan d’urbanisme 1988 et plan général (fichier conservé dans la Library).
-- [Plan OpenStreetMap de Pripiat](https://commons.wikimedia.org/wiki/File:Map_of_Pripyat.svg)
-- [Plan des microdistricts de Pripiat](https://commons.wikimedia.org/wiki/File:Map_of_Pripyat_microdistricts.svg)
+- [Modèle photogrammétrique et présentation du Palais Energetik — Google Arts & Culture / Skeiron](https://artsandculture.google.com/story/palace-of-culture-energetik-skeiron/ggUh4kq6wkwB7w?hl=en)
+- [Photos Wikimedia Commons — Palais de la Culture Energetik](https://commons.wikimedia.org/wiki/Category:Palace_of_culture_in_Prypyat)
 - [Photos Wikimedia Commons — bâtiments de Pripiat](https://commons.wikimedia.org/wiki/Category:Buildings_in_Pripyat)
-- [Photos Wikimedia Commons — intérieurs de bâtiments](https://commons.wikimedia.org/wiki/Category:Building_interiors_in_Pripyat)
-- [Panoramas de Pripiat](https://commons.wikimedia.org/wiki/Category:Panoramas_of_Pripyat)
+- [Photos Wikimedia Commons — intérieurs](https://commons.wikimedia.org/wiki/Category:Building_interiors_in_Pripyat)
+- [Plan de la ville sur Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Map_of_Pripyat.svg)
 
-Le script `tools/pripyat/build_reference_index.py` prépare un CSV de liens vers les pages et originaux, avec auteur et licence, jusqu’à 500 références. Il ne copie pas les images dans le dépôt. Les pages de fichiers restent la source de vérité pour les droits. Les références intégrées doivent être de véritables photos documentaires ; les images générées de cette conversation restent des pistes de composition, pas des preuves historiques.
+Les photos documentaires servent à vérifier la silhouette, les façades et l’état du bâtiment. Les images générées sont des repères de composition, pas des références historiques. Les plans et dimensions restent approximatifs et doivent être confrontés aux sources visuelles.
 
-## Construction actuelle
+## Démo visée
 
-Source de scène : `experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js`.
+Le parcours automatique dure **1 min 30** :
 
-Le premier passage contient :
+1. approche extérieure du bâtiment sous un soleil matinal franc ;
+2. entrée par le foyer vitré ;
+3. découverte du foyer, de l’auditorium et des pièces modélisées ;
+4. passage par les niveaux et la cage d’escalier ;
+5. sortie sur le toit, avec une pause finale d’environ 11 secondes face au soleil.
 
-- une place pavée avec joints, reprises de dalles, flaques et végétation spontanée ;
-- les volumes et façades principales d’Energetik et de l’hôtel Polissya ;
-- des fenêtres, colonnes, marches, galerie de liaison et bâtiments résidentiels de bordure ;
-- des bancs, jardinières, peupliers, jeunes arbres et lampadaires ;
-- un parcours automatique qui traverse uniquement cette zone.
+Le moteur affiche les images à sa cadence de rendu. La durée est pilotée sur 90 secondes ; un rendu CPU lent peut réduire le nombre d’images affichées pendant la visite.
 
-C’est un premier assemblage géométrique procédural. Les proportions et détails de façade devront être confrontés aux plans et aux photos documentaires avant d’étendre la ville aux secteurs voisins.
+## Construction
 
-Le catalogue des surfaces et les trois niveaux prévus sont détaillés dans [PRIPYAT-MATERIALS-CATALOGUE.md](PRIPYAT-MATERIALS-CATALOGUE.md).\n\n## Parcours automatique
+Source : `experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js`.
 
-Dans le moteur, ouvrir `scene_pripyat_central.bin`, choisir le moteur de rendu disponible, puis cocher **Parcours automatique — place centrale (800 × 600)**. Le point de vue suit une boucle à travers la place et ses façades ; chaque nouvelle image s’affiche dès qu’elle est rendue. Le trajet suit la vitesse réelle du rendu. Les autres scènes conservent leur aperçu rotatif habituel.
+Le modèle répartit le travail sur des éléments visibles à l’échelle de la visite : volume long et bas, tour d’escalier, colonnade, façade vitrée, foyer traversant, salles, dalles d’étage, escalier, auditorium et toiture accessible. La géométrie est reconstruite pour permettre la caméra intérieure ; ce n’est pas un relevé complet de chaque pièce historique.
 
-Le parcours ne prétend pas couvrir la ville entière : il correspond à la zone effectivement modélisée dans cette première étape.
+L’exporteur produit des cartes de couleur, de normale et de rugosité procédurales pour le béton, la pierre, l’asphalte, la brique, la rouille et les feuilles, avec mipmaps jusqu’à 512 × 512. Les détails de surface et l’éclairage restent à valider visuellement dans l’exécutable.
 
 ## Export et compilation
 
@@ -43,16 +42,4 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --config Release --parallel
 ```
 
-Le workflow Windows ajoute la scène au paquet de l’application. Le fichier binaire exporté n’est pas versionné ; la source JavaScript reste la référence modifiable.
-
-## Matériaux et qualité
-
-La scène utilise les matériaux existants du moteur : béton, pierre, asphalte, vitrage, métal, bois, rouille, végétation, éclairages, débris et flaques. Leur réglage de réflexion/transmission est dans la source de scène. Les chaînes de texture du moteur vont jusqu’à 512 × 512 avec mipmaps.
-
-| Niveau | Cible pour le secteur |
-|---|---|
-| Économique | Textures procédurales existantes, végétation et mobilier simplifiés, parcours fluide. |
-| Standard | Cartes couleur, normale et rugosité 512 × 512 dédiées au béton, au pavage, au verre et à la végétation ; façades et mobilier plus détaillés. |
-| Détaillé | Même plafond de texture, mais variantes par surface, dégâts localisés, cadres et éléments architecturaux plus fins ; mesurer le coût sur les scènes complètes. |
-
-Le premier export utilise la palette existante et la géométrie de base. Les cartes PBR dédiées à Pripiat et les niveaux de détail restent à produire et valider dans le moteur.
+Le workflow Windows exporte la scène et l’ajoute au paquet de l’application. Le fichier binaire est généré à la compilation ; la source JavaScript reste modifiable.

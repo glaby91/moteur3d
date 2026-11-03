@@ -105,10 +105,78 @@ function makeRapturePbr(kind) {
   };
   return { normal: makeMips(normal), roughness: makeMips(roughness) };
 }
+
+function makePripyatPbr(kind) {
+  const size=512, color=new Uint16Array(size*size), normal=new Uint16Array(size*size), roughness=new Uint16Array(size*size);
+  const hash=(x,y)=>{let h=Math.imul((x|0)^0x9e3779b9,0x85ebca6b)^Math.imul((y|0)^0xc2b2ae35,0x27d4eb2f);h=Math.imul(h^(h>>>15),0x85ebca6b);return (h^(h>>>13))>>>0;};
+  const noise=(x,y,shift,salt=0)=>hash((x>>shift)+salt,(y>>shift)-salt)/2147483647.5-1;
+  const heightAt=(x,y)=>{
+    const broad=noise(x,y,5), mid=noise(x,y,3), grain=noise(x,y,1);
+    if(kind==='stone') return broad*.11+mid*.045+grain*.012;
+    if(kind==='asphalt') return broad*.025+mid*.018+grain*.03;
+    if(kind==='leaves') return broad*.08+mid*.12+grain*.04;
+    return broad*.10+mid*.055+grain*.018;
+  };
+  const palettes={
+    concrete:[145,140,126], stone:[119,113,100], asphalt:[57,59,54],
+    brick:[132,91,69], rust:[112,62,39], leaves:[55,76,43]
+  };
+  const base=palettes[kind]||[128,128,128];
+  for(let y=0;y<size;y++) for(let x=0;x<size;x++){
+    const i=y*size+x, broad=noise(x,y,5), mid=noise(x,y,3), grain=noise(x,y,1);
+    let variation=broad*15+mid*10+grain*5;
+    if(kind==='concrete'){
+      const wash=Math.max(0,Math.sin(x*.045+noise(x,y,6)*2.2))**10*(.35+.65*Math.max(0,noise(x,y,5)));
+      variation-=wash*30;
+    } else if(kind==='stone'){
+      const gx=(x+((Math.floor(y/72)%2)*36))%96, gy=y%72;
+      const seam=(gx<2.4||gy<2.4||gx>94||gy>70)?-34:0;
+      const edge=Math.min(gx,96-gx,gy,72-gy);
+      variation+=seam+Math.max(0,1-edge/13)*-8;
+    } else if(kind==='asphalt'){
+      const aggregate=hash(x>>1,y>>1)%100;
+      variation+=(aggregate>94?18:aggregate<9?-9:0);
+      const crack=(Math.abs(Math.sin(x*.021+Math.sin(y*.016)*2.1))<.012 && noise(x,y,4)>.1)?-38:0;
+      variation+=crack;
+    } else if(kind==='brick'){
+      const row=(y+Math.floor(x/128)*18)%64, col=(x+Math.floor(y/64)%2*64)%128;
+      variation+=(row<4||col<4)?-34:Math.abs(noise(x,y,4))*5;
+    } else if(kind==='rust'){
+      const streak=Math.max(0,Math.sin(x*.12+noise(x,y,5)*2))**14*Math.max(0,Math.sin(y*.018));
+      variation-=streak*25;
+    } else if(kind==='leaves'){
+      variation+=Math.max(0,grain)*12;
+    }
+    const tint=(k,amount)=>Math.max(0,Math.min(255,base[k]+variation*amount));
+    color[i]=pack565(tint(0,1),tint(1,kind==='rust'?.76:kind==='leaves'?.95:.98),tint(2,kind==='rust'?.54:kind==='leaves'?.72:.88));
+    const dx=(heightAt(x+1,y)-heightAt(x-1,y))*1.2, dy=(heightAt(x,y+1)-heightAt(x,y-1))*1.2;
+    const inv=1/Math.hypot(dx,dy,1);
+    normal[i]=pack565(128-dx*inv*127,128-dy*inv*127,128+inv*127);
+    const r=(kind==='asphalt'?226:kind==='leaves'?218:kind==='rust'?205:kind==='stone'?218:232)+grain*10;
+    roughness[i]=pack565(r,r,r);
+  }
+  const makeMips=baseMap=>{
+    const levels=[{size,data:baseMap}];let prev=baseMap,prevSize=size;
+    while(prevSize>8){
+      const n=prevSize>>1,data=new Uint16Array(n*n);
+      for(let y=0;y<n;y++)for(let x=0;x<n;x++){
+        const ps=[prev[(y*2)*prevSize+x*2],prev[(y*2)*prevSize+x*2+1],prev[(y*2+1)*prevSize+x*2],prev[(y*2+1)*prevSize+x*2+1]];
+        const ch=k=>Math.round(ps.reduce((sum,p)=>sum+(k===0?p>>11:k===1?(p>>5)&63:p&31),0)/4);
+        data[y*n+x]=(ch(0)<<11)|(ch(1)<<5)|ch(2);
+      }
+      levels.push({size:n,data});prev=data;prevSize=n;
+    }
+    return levels;
+  };
+  return {color:makeMips(color),normal:makeMips(normal),roughness:makeMips(roughness)};
+}
+const generatedPripyatPbr=new Map(mats.filter(name=>['concrete','stone','asphalt','brick','rust','leaves'].includes(name)).map(name=>[name,makePripyatPbr(name)]));
+for(const [name,pbr] of generatedPripyatPbr) scene.materials.set(name,{levels:pbr.color});
+
 const generatedPbr = new Map(['raptureStone', 'raptureBronze', 'raptureGlass'].map(name => [name, makeRapturePbr(name)]));
 function materialPbr(name) {
   if (name === 'orange') return orangePbr;
-  return generatedPbr.get(name) || null;
+  return generatedPripyatPbr.get(name) || generatedPbr.get(name) || null;
 }
 
 const types = { triangle: 0, box: 1, roundbox: 2, capsule: 3, cone: 4, ellipse: 5 };
