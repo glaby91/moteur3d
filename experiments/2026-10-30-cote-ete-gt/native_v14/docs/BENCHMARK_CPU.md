@@ -24,3 +24,6 @@ L’export CSV conserve la scène, les paramètres, la résolution, le nombre d�
 ## Limites actuelles
 
 Le temps « rendu CPU » est encore agrégé : l’exécutable ne chronomètre pas séparément intersection, ombrage et échantillonnage de texture. Le diagnostic indique donc quelle grande étape attaquer; un profilage interne plus fin pourra ensuite départager ces sous-fonctions sans pénaliser toutes les mesures de référence.
+
+
+Depuis le build 261103-0013, le benchmark transmet au rendu CPU le mode SIMD actuellement choisi dans l’interface. Les comparaisons de threads reflètent ainsi bien ce mode; pour comparer AVX2 et x64 standard, garder la même scène, la même résolution, les mêmes effets, le même nombre de threads et le même protocole de répétitions.

@@ -715,7 +715,7 @@ private:
                         cam.pixelAngle = 2 * cam.tanHalf / (cfg.renderW * (cfg.samples == 16 ? 4.f : cfg.samples == 4 ? 2.f : 1.f));
                         unsigned samples = cfg.samples; if (cfg.dof && samples < 4) samples = 4;
                         const auto start = std::chrono::steady_clock::now();
-                        Stats st = m3d::render(scene_, benchShadows, cam, cfg.renderW, cfg.renderH, pixels, threadCount, cfg.fog, benchmarkGeneration_, token, samples, cfg.dof);
+                        Stats st = m3d::render(scene_, benchShadows, cam, cfg.renderW, cfg.renderH, pixels, threadCount, cfg.fog, benchmarkGeneration_, token, samples, cfg.dof, cfg.avx2);
                         if (benchmarkGeneration_.load() != token) break;
                         const double renderMs = st.ms;
                         const auto postStart = std::chrono::steady_clock::now();
