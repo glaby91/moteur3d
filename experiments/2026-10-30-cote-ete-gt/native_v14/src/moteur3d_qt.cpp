@@ -364,7 +364,7 @@ private:
         navigationActive_=false;
         if(navigationPreviewTimer_) navigationPreviewTimer_->stop();
         if(navigationIdleTimer_) navigationIdleTimer_->stop();
-        if(isRaptureScene()) { cameraTarget_={0.f,4.4f,-35.f}; setCameraSliders(22,180,10,52); }
+        if(isRaptureScene()) { cameraTarget_={0.f,4.4f,-35.f}; setCameraSliders(28,180,10,52); }
         else { cameraTarget_={0.f,1.f,-8.f}; setCameraSliders(24,-43,7,50); }
     }
 

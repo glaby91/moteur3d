@@ -4,7 +4,7 @@
 // not a low-poly/blockout city. Edit this file to revise the scene.
 
 const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
-  raptureGlass: 0, sea: 45, puddle: 38, metal: 48, wheelMetal: 78, neon: 12,
+  raptureGlass: 0, sea: 45, puddle: 38, metal: 48, wheelMetal: 30, neon: 12,
   windowlit: 4, lamp: 2, raptureStone: 4, raptureBronze: 24, concrete: 3, brick: 2
 });
 // Thin glazing transmits straight-through rays; Fresnel-like reflections are
@@ -347,7 +347,7 @@ function makeScene() {
   const bx=0,by=4.4,bz=-35,br=3.7,platformY=by-br-.10;
   // The pressure hull is a true double shell. Remove polygon apertures at the
   // three viewports so their glazing and the lit cabin behind it are visible.
-  function bathysphereHull(radius, material, segments=96, rows=64) {
+  function bathysphereHull(radius, material, segments=160, rows=112) {
     const apertures=[
       {dir:[0,0,-1],cos:.890},
       {dir:[1,0,0],cos:.975},
@@ -362,12 +362,14 @@ function makeScene() {
       grid.push(row);
     }
     const open=dir=>apertures.some(a=>dir[0]*a.dir[0]+dir[1]*a.dir[1]+dir[2]*a.dir[2]>a.cos);
+    const meanDirection=(...dirs)=>{const v=[0,0,0];for(const d of dirs)for(let k=0;k<3;k++)v[k]+=d[k];const l=Math.hypot(...v)||1;return v.map(x=>x/l);};
+    const triangleTouchesOpening=(a,b,c)=>[a.dir,b.dir,c.dir,meanDirection(a.dir,b.dir),meanDirection(b.dir,c.dir),meanDirection(c.dir,a.dir),meanDirection(a.dir,b.dir,c.dir)].some(open);
     for(let iy=0;iy<rows;iy++)for(let ix=0;ix<segments;ix++) {
       const a=grid[iy][ix],b=grid[iy+1][ix],c=grid[iy+1][ix+1],d=grid[iy][ix+1];
       const n0=[a.dir[0]+b.dir[0]+d.dir[0],a.dir[1]+b.dir[1]+d.dir[1],a.dir[2]+b.dir[2]+d.dir[2]],l0=Math.hypot(...n0)||1;
       const n1=[d.dir[0]+b.dir[0]+c.dir[0],d.dir[1]+b.dir[1]+c.dir[1],d.dir[2]+b.dir[2]+c.dir[2]],l1=Math.hypot(...n1)||1;
-      if(!open(n0.map(v=>v/l0)))meshTriangle(a,b,d,material);
-      if(!open(n1.map(v=>v/l1)))meshTriangle(d,b,c,material);
+      if(!triangleTouchesOpening(a,b,d))meshTriangle(a,b,d,material);
+      if(!triangleTouchesOpening(d,b,c))meshTriangle(d,b,c,material);
     }
   }
   bathysphereHull(br,'wheelMetal');
