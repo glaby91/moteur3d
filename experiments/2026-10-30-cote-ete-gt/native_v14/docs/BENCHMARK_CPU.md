@@ -34,3 +34,8 @@ Depuis le build 261103-0013, le benchmark transmet au rendu CPU le mode SIMD act
 Le mode AVX2 + FMA3 est sélectionné uniquement si le processeur et le système d'exploitation exposent les deux capacités. Le benchmark transmet le mode sélectionné au rendu. Pour comparer les modes, garder identiques la scène, la résolution, les effets, les threads et les répétitions, puis alterner les modes afin de limiter l'effet de la chauffe et de la variation de fréquence. Comparer les médianes, pas un seul rendu.
 
 Dans le build 261103-0015, les calculs vectoriels de rayons, triangles, éclairage et post-traitement utilisent FMA3. Le test AABB des deux enfants BVH reste scalaire : la version AVX2 précédente vectorisait seulement deux boîtes et réextrayait aussitôt les valeurs, ce qui a un coût probable à chaque nœud, mais n'a pas été mesuré isolément. Le ralentissement global a été mesuré sur i5-7200U. Cette correction ne présume pas d'un gain; le résultat doit être confirmé par la comparaison sur le processeur cible.
+
+
+## Environnement sous-marin de Rapture
+
+Le build 261103-0016 donne à la scène Rapture un fond d'eau profonde bleu pétrole, indépendant de l'heure affichée, et ajoute des reliefs abyssaux lointains derrière la ville. Le ciel reste inchangé dans les autres scènes. Le profil est activé par la présence du matériau propre à Rapture, sans modifier le format des fichiers de scène.

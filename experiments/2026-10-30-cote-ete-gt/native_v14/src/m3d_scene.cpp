@@ -50,6 +50,7 @@ bool loadScene(const std::filesystem::path& path,Scene& s,std::wstring& error){
   for(auto& m:tmp.mat)if(!readMap(m.normalMip)||!readMap(m.roughnessMip))return fail(error,L"Cartes PBR absentes, tronquées ou de taille invalide.");
   if(version>=4){uint32_t lightCount=0;if(!readU32(f,lightCount)||lightCount>256)return fail(error,L"Table de lumières invalide ou tronquée.");tmp.lights.resize(lightCount);for(auto& l:tmp.lights){if(!readV(f,l.p)||!readF(f,l.radius)||!readF(f,l.intensity)||!readV(f,l.color)||l.radius<=0||l.radius>10000||l.intensity<0||l.intensity>10000||l.color.x<0||l.color.y<0||l.color.z<0||l.color.x>255||l.color.y>255||l.color.z>255)return fail(error,L"Paramètre d’une lumière de scène invalide ou tronqué.");}}
   if(f.peek()!=std::char_traits<char>::eof())return fail(error,L"Le fichier contient des données supplémentaires après la scène.");
+  tmp.underwaterEnvironment=std::any_of(tmp.mat.begin(),tmp.mat.end(),[](const Material& m){return m.name=="raptureGlass";});
   s=std::move(tmp);return true;
  }catch(const std::bad_alloc&){return fail(error,L"Mémoire insuffisante pour charger la scène.");}
  catch(const std::exception&){return fail(error,L"Erreur inattendue pendant le chargement de la scène.");}

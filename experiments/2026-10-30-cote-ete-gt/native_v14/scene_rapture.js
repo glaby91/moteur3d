@@ -249,9 +249,14 @@ function makeScene() {
   tower(-8,-76,0,8.0,58,21,1);
   tower(9,-78,0,8.6,61,22,0);
   tower(0,-83,0,6.2,64,23,0);
-  // Open water remains visible between the staggered downtown towers.
-  // Leave the horizon open; a vertical sea backdrop would cut across the
-  // glass dome and erase the skyline at the renderer's usual camera angles.
+  // Open water between the staggered towers fades into the dark blue of the abyss.
+  // These low ridges sit beyond the city so they read as a distant ocean floor,
+  // without cutting across the bathysphere or its skyline.
+  for(const [x,y,z,rx,ry,rz] of [
+    [-60,5,-107,28,14,8], [57,7,-114,31,17,9],
+    [-30,-6,-132,34,12,10], [28,-7,-139,39,13,11],
+    [2,-13,-157,48,11,13]
+  ]) ellipsoidMesh(x,y,z,rx,ry,rz,'sea',30,16);
 
   // --- Monumental entrance portals and cross-street bridges --------------
   function bridge(z, y, width, height) {
