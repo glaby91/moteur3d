@@ -20,16 +20,16 @@ Le workflow CI compile les cibles Qt Windows/Linux et réexporte les scènes. Le
 
 ## Écart visuel constaté — 2026-11-03
 
-La maquette artistique de la bathysphère et la capture réelle de l’application ne correspondent pas. La maquette montre une coque détaillée, un grand hublot ouvert sur une cabine lumineuse et un véhicule proche de la caméra. La capture disponible du build 261102-0007 montre une sphère lisse, vue de loin; elle précède les changements décrits ci-dessus et ne valide donc pas le rendu du build 261103-0001.
+La maquette artistique et le rendu du moteur ne correspondent pas. Une capture réelle du build 261103-0001 a été fournie le 3 novembre 2026. Elle montre une coque très proche de la caméra, coupée en haut et sur les côtés. Le hublot occupe une grande partie de l’image; la cabine et ses instruments ne sont pas clairement visibles et semblent masqués par une surface intérieure. Le résultat ne rejoint donc pas encore la maquette de référence.
 
-Le build 261103-0001 a été compilé sous Windows et Linux, mais aucune capture de son rendu réel n’a encore été vérifiée. L’intégration visuelle reste à confirmer.
+La capture confirme que le build 261103-0001 a bien rendu la scène Rapture, mais elle révèle un échec de validation visuelle : le cadrage doit laisser voir la bathysphère entière et l’ouverture doit révéler la cabine. Le build 261103-0002 modifie les commandes clavier AZERTY seulement; il ne corrige pas encore ces défauts visuels.
 
-### Vérification à faire
+### Suite de validation
 
-- Ouvrir le paquet Windows 261103-0001 et charger `scene_rapture.bin`.
-- Enregistrer une capture non retouchée avec le cadrage initial.
-- Comparer la silhouette de la coque, l’ouverture avant, la visibilité de la cabine et la taille du véhicule dans l’image.
-- Corriger la géométrie ou le cadrage si ces éléments ne sont pas visibles comme prévu, puis joindre une nouvelle capture réelle au suivi.
+- Ouvrir le paquet Windows 261103-0002 et charger `scene_rapture.bin`.
+- Vérifier les commandes Z/Q/S/D, R et X.
+- Reprendre une capture non retouchée du cadrage initial après correction du cadrage et de l’intérieur du hublot.
+- Comparer la silhouette, les rivets, l’ouverture avant, la cabine éclairée et la taille du véhicule avec la maquette.
 
 ## Commandes caméra AZERTY — 2026-11-03
 
