@@ -9,7 +9,7 @@ void boundsHitPairAvx2(const Ray&r,const Node&a,const Node&b,float limit,float*o
  const float bv[6]={b.mn.x,b.mn.y,b.mn.z,b.mx.x,b.mx.y,b.mx.z};
  bool outside[2]={false,false};
  for(int lane=0;lane<6;lane++){
-  const int ax=lane%3,which=lane/3;const Node&n=which?b:a;
+  const int ax=lane%3,which=lane/3;
   const float origin=org[lane],d=dir[lane];const float lo=which?bv[ax]:av[ax],hi=which?bv[3+ax]:av[3+ax];
   inv[lane]=std::abs(d)<1e-12f?0.f:1.f/d;parallel[lane]=std::abs(d)<1e-12f?-1.f:0.f;mn[lane]=lo;mx[lane]=hi;
   if(parallel[lane]!=0.f&&(origin<lo||origin>hi))outside[which]=true;
