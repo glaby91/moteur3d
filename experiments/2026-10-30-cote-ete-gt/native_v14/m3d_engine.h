@@ -54,6 +54,7 @@ bool avx2Available() noexcept;
 void primaryRays8Avx2(const Camera&,int,int,int,int,float,float,Ray*) noexcept;
 bool intersectTriangles8Avx2(const Scene&,const Ray&,const uint32_t*,float,float*) noexcept;
 void boundsHitPairAvx2(const Ray&,const Node&,const Node&,float,float*,bool*) noexcept;
+V accumulatePointLightsAvx2(const Light*,size_t,V,V,float) noexcept;
 std::vector<uint32_t> antialiasEdges4(const std::vector<uint32_t>& src,int w,int h,unsigned threads,bool useAvx2=false);
 std::vector<uint32_t> antialiasEdges4Avx2(const std::vector<uint32_t>& src,int w,int h,unsigned threads);
 std::vector<uint32_t> bloomGlow(const std::vector<uint32_t>& src,int w,int h,unsigned threads,float strength=0.22f);
