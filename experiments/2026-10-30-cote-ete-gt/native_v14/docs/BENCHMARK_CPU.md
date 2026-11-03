@@ -48,3 +48,10 @@ Le build 261103-0016 donne à la scène Rapture un fond d'eau profonde bleu pét
 La comparaison complète présente, pour chaque configuration, les paquets de 8 rayons générés, les paquets de 8 triangles effectivement traités par le noyau AVX2, les échantillons de texture interpolés par ce noyau et les blocs de 8 lumières traités. Le CSV conserve les mêmes compteurs.
 
 Ces nombres indiquent si le chemin vectorisé est réellement emprunté; ils ne mesurent pas à eux seuls le temps économisé. Par exemple, un nombre faible de paquets triangulaires signale que la structure des feuilles BVH et le mélange des primitives limitent ce noyau. Le benchmark alterne désormais le mode qui passe en premier entre les configurations de threads et d’un lancement à l’autre, afin de réduire le biais thermique et la variation de fréquence.
+
+
+## Build 261103-0021 — rejet anticipé des boîtes AABB
+
+Le CSV du build 0020 montre que le rendu reste dominant et que le noyau SIMD d’intersection des triangles ne reçoit aucun paquet. Le compteur AABB est élevé. Le build 0021 teste donc une optimisation indépendante du SIMD : l’intersection rayon-boîte met à jour l’intervalle de distance au fil des axes et abandonne immédiatement le test lorsqu’un axe rend la boîte impossible. Cela évite de calculer les intervalles des axes restants pour les boîtes rejetées.
+
+Cette modification conserve l’ordre des calculs par axe, les limites du rayon et le traitement des directions parallèles. Elle ne change ni les données de scène ni le résultat géométrique attendu. **Aucun gain n’est présumé** : le benchmark comparatif x64/AVX2 du même poste doit vérifier les temps de rendu et les compteurs.

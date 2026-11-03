@@ -4,11 +4,14 @@ namespace m3d {
 struct RayBoxCache{V inv;uint8_t parallel=0,negative=0;};
 static RayBoxCache makeRayBoxCache(const Ray&r){RayBoxCache c;const float d[3]={r.d.x,r.d.y,r.d.z};float inv[3]{};for(int k=0;k<3;k++){if(std::abs(d[k])<1e-12f){c.parallel|=(uint8_t)(1u<<k);inv[k]=0;}else{inv[k]=1.f/d[k];if(d[k]<0)c.negative|=(uint8_t)(1u<<k);}}c.inv={inv[0],inv[1],inv[2]};return c;}
 static bool boundsHit(const Ray&r,const RayBoxCache&c,const Node&n,float limit,float&nearDist){
- float x0=-INF,x1=INF,y0=-INF,y1=INF,z0=-INF,z1=INF;
- if(c.parallel&1){if(r.o.x<n.mn.x||r.o.x>n.mx.x)return false;}else if(c.negative&1){x0=(n.mx.x-r.o.x)*c.inv.x;x1=(n.mn.x-r.o.x)*c.inv.x;}else{x0=(n.mn.x-r.o.x)*c.inv.x;x1=(n.mx.x-r.o.x)*c.inv.x;}
- if(c.parallel&2){if(r.o.y<n.mn.y||r.o.y>n.mx.y)return false;}else if(c.negative&2){y0=(n.mx.y-r.o.y)*c.inv.y;y1=(n.mn.y-r.o.y)*c.inv.y;}else{y0=(n.mn.y-r.o.y)*c.inv.y;y1=(n.mx.y-r.o.y)*c.inv.y;}
- if(c.parallel&4){if(r.o.z<n.mn.z||r.o.z>n.mx.z)return false;}else if(c.negative&4){z0=(n.mx.z-r.o.z)*c.inv.z;z1=(n.mn.z-r.o.z)*c.inv.z;}else{z0=(n.mn.z-r.o.z)*c.inv.z;z1=(n.mx.z-r.o.z)*c.inv.z;}
- float lo=std::max(0.f,std::max(x0,std::max(y0,z0))),hi=std::min(limit,std::min(x1,std::min(y1,z1)));if(hi<lo)return false;nearDist=lo;return hi>=0;
+ float lo=0.f,hi=limit;
+ if(c.parallel&1){if(r.o.x<n.mn.x||r.o.x>n.mx.x)return false;}
+ else{float a,b;if(c.negative&1){a=(n.mx.x-r.o.x)*c.inv.x;b=(n.mn.x-r.o.x)*c.inv.x;}else{a=(n.mn.x-r.o.x)*c.inv.x;b=(n.mx.x-r.o.x)*c.inv.x;}lo=std::max(lo,a);hi=std::min(hi,b);if(hi<lo)return false;}
+ if(c.parallel&2){if(r.o.y<n.mn.y||r.o.y>n.mx.y)return false;}
+ else{float a,b;if(c.negative&2){a=(n.mx.y-r.o.y)*c.inv.y;b=(n.mn.y-r.o.y)*c.inv.y;}else{a=(n.mn.y-r.o.y)*c.inv.y;b=(n.mx.y-r.o.y)*c.inv.y;}lo=std::max(lo,a);hi=std::min(hi,b);if(hi<lo)return false;}
+ if(c.parallel&4){if(r.o.z<n.mn.z||r.o.z>n.mx.z)return false;}
+ else{float a,b;if(c.negative&4){a=(n.mx.z-r.o.z)*c.inv.z;b=(n.mn.z-r.o.z)*c.inv.z;}else{a=(n.mn.z-r.o.z)*c.inv.z;b=(n.mx.z-r.o.z)*c.inv.z;}lo=std::max(lo,a);hi=std::min(hi,b);if(hi<lo)return false;}
+ nearDist=lo;return true;
 }
 static bool intersect(const Ray&r,const Obj&o,float limit,float&t){t=INF;
  if(o.kind==Kind::Triangle){const V e1=o.len2>0?o.center:o.b-o.a,e2=o.len2>0?o.core:o.c-o.a,p=cross(r.d,e2);float det=dot(e1,p);if(std::abs(det)<1e-10f)return false;float inv=1/det;V q=r.o-o.a;float u=dot(q,p)*inv;if(u<0||u>1)return false;V z=cross(q,e1);float v=dot(r.d,z)*inv;if(v<0||u+v>1)return false;t=dot(e2,z)*inv;}
