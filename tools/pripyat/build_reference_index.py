@@ -4,10 +4,10 @@
 import argparse
 import csv
 import html
+import os
 import re
 import sys
 import time
-from urllib.parse import quote
 
 try:
     import requests
@@ -40,7 +40,7 @@ def clean(value):
     if not value:
         return ""
     value = re.sub(r"<[^>]+>", " ", str(value))
-    return re.sub(r"\\s+", " ", html.unescape(value)).strip()
+    return re.sub(r"\s+", " ", html.unescape(value)).strip()
 
 
 def theme(title):
@@ -69,7 +69,6 @@ def search_titles(session, query, limit):
             "gsrnamespace": 6, "gsrsearch": query,
             "gsrlimit": min(50, limit - len(found)),
             "prop": "imageinfo", "iiprop": "url|mime|extmetadata",
-            "iiurlwidth": 1200,
         }
         params.update(continuation)
         response = session.get(API, params=params, timeout=45)
@@ -141,6 +140,9 @@ def main():
             break
 
     rows.sort(key=lambda row: (row["theme"], row["title"].casefold()))
+    output_dir = os.path.dirname(args.output)
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
     with open(args.output, "w", newline="", encoding="utf-8-sig") as stream:
         writer = csv.DictWriter(stream, fieldnames=FIELDS)
         writer.writeheader()
