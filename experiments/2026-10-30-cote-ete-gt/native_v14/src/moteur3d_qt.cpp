@@ -293,7 +293,7 @@ public:
         benchmarkAction_ = toolsMenu->addAction(QStringLiteral("Benchmark du moteur…"));
         connect(benchmarkAction_, &QAction::triggered, this, [this] { openBenchmark(); });
         updateLighting(12.f);
-        Stats initialShadowStats;
+        Stats initialShadowStats; initialShadowStats.avx2 = settings_.avx2;
         shadows_ = buildShadow(scene_, initialShadowStats);
         shadowHour_ = 12;
         coordinator_ = std::thread([this] { renderLoop(); });
@@ -856,7 +856,7 @@ private:
             double shadowMs = 0;
             if (cfg.hourStep != shadowHour_) {
                 updateLighting(hour);
-                Stats lightStats;
+                Stats lightStats; lightStats.avx2 = cfg.avx2;
                 const auto start = std::chrono::steady_clock::now();
                 shadows_ = buildShadow(scene_, lightStats);
                 shadowMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
@@ -871,7 +871,7 @@ private:
             cam.pixelAngle = 2 * cam.tanHalf / (cfg.renderW * (cfg.samples == 16 ? 4.f : cfg.samples == 4 ? 2.f : 1.f));
             unsigned samples = cfg.samples;
             if (cfg.dof && samples < 4) samples = 4;
-            Stats st = m3d::render(scene_, shadows_, cam, cfg.renderW, cfg.renderH, pixels, cfg.threads, cfg.fog, generation_, token, samples, cfg.dof);
+            Stats st = m3d::render(scene_, shadows_, cam, cfg.renderW, cfg.renderH, pixels, cfg.threads, cfg.fog, generation_, token, samples, cfg.dof, cfg.avx2);
             if (generation_.load() != token) continue;
             const auto postStart = std::chrono::steady_clock::now();
             if (cfg.renderW == cfg.outW * 2 && cfg.renderH == cfg.outH * 2) pixels = downsample2x(pixels, cfg.renderW, cfg.renderH, cfg.threads);
