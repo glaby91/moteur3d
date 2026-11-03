@@ -1,6 +1,6 @@
 // Rapture scene study — V13.14 scene-only source.
 // Detailed Art Deco street, dome, bathysphere station and street furniture.
-// No characters. Geometry is deliberately assembled from modeled scene parts,
+// A procedural Big Daddy guardian joins the modeled scene parts.
 // not a low-poly/blockout city. Edit this file to revise the scene.
 
 const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
@@ -769,6 +769,100 @@ function makeScene() {
       roundBox(fx+.26,yy,z-1.38,fx+.33,yy+.045,z+1.38,.018,k%2?'lamp':'metal');
     }
   }
+
+
+  // --- Big Daddy guardian: brass pressure suit and illuminated viewport ----
+  // Full procedural character, built from the scene's native primitives so it
+  // is exported into the same BVH and rendered by the CPU engine.
+  function bigDaddy(x, groundY, z) {
+    const helmetY=groundY+3.23, helmetZ=z+.03;
+    // Heavy boots, articulated legs and knee guards.
+    for(const side of [-1,1]) {
+      const sx=x+side*.48;
+      roundBox(sx-.39,groundY,z-.42,sx+.39,groundY+.48,z+.62,.16,'wheelMetal');
+      roundBox(sx-.28,groundY+.42,z-.23,sx+.28,groundY+.63,z+.43,.10,'raptureBronze');
+      capsule([sx,groundY+.48,z],[sx+side*.03,groundY+1.02,z-.03],.22,'metal');
+      ellipsoidMesh(sx+side*.03,groundY+1.08,z+.02,.36,.32,.34,'raptureBronze',20,14);
+      ellipsoidMesh(sx+side*.03,groundY+1.08,z+.35,.25,.21,.08,'wheelMetal',16,10);
+      capsule([sx+side*.03,groundY+1.22,z-.02],[x+side*.34,groundY+1.83,z-.02],.27,'wheelMetal');
+      roundBox(x+side*.34-.30,groundY+1.52,z-.35,x+side*.34+.30,groundY+1.82,z+.34,.12,'raptureBronze');
+    }
+    // Broad torso and reinforced belly plate.
+    ellipsoidMesh(x,groundY+2.12,z,.83,.78,.52,'raptureStone',32,22);
+    roundBox(x-.68,groundY+1.82,z+.39,x+.68,groundY+2.17,z+.59,.16,'wheelMetal');
+    roundBox(x-.62,groundY+2.19,z+.40,x+.62,groundY+2.29,z+.56,.06,'raptureBronze');
+    roundBox(x-.60,groundY+1.65,z+.40,x+.60,groundY+1.76,z+.56,.06,'raptureBronze');
+    // Riveted collar and spherical diving helmet.
+    for(let i=0;i<48;i++) {
+      const a0=i*Math.PI*2/48,a1=(i+1)*Math.PI*2/48;
+      capsule([x+Math.cos(a0)*.67,groundY+2.86,z+Math.sin(a0)*.57],
+              [x+Math.cos(a1)*.67,groundY+2.86,z+Math.sin(a1)*.57],.085,'raptureBronze');
+    }
+    ellipsoidMesh(x,helmetY,helmetZ,.82,.78,.76,'wheelMetal',36,24);
+    ellipsoidMesh(x,helmetY,helmetZ+.70,.50,.50,.11,'raptureBronze',32,20);
+    ellipsoidMesh(x,helmetY,helmetZ+.79,.405,.405,.075,'raptureGlass',36,24);
+    // Circular protective bars and bolts around the glowing porthole.
+    for(const radius of [.47,.545]) for(let i=0;i<56;i++) {
+      const a0=i*Math.PI*2/56,a1=(i+1)*Math.PI*2/56;
+      capsule([x+Math.cos(a0)*radius,helmetY+Math.sin(a0)*radius,helmetZ+.835],
+              [x+Math.cos(a1)*radius,helmetY+Math.sin(a1)*radius,helmetZ+.835],
+              radius>.5?.052:.034,radius>.5?'wheelMetal':'raptureBronze');
+    }
+    for(let i=0;i<12;i++) {
+      const a=i*Math.PI/6;
+      ellipsoidMesh(x+Math.cos(a)*.52,helmetY+Math.sin(a)*.52,helmetZ+.87,.058,.058,.045,'metal',10,8);
+    }
+    // Twin caged work lamps and small forehead marker.
+    for(const side of [-1,1]) {
+      ellipsoidMesh(x+side*.69,helmetY+.03,helmetZ+.43,.20,.24,.20,'metal',18,12);
+      ellipsoidMesh(x+side*.69,helmetY+.03,helmetZ+.56,.125,.16,.12,'lamp',16,10);
+    }
+    ellipsoidMesh(x,helmetY+.66,helmetZ+.15,.105,.13,.11,'led',12,8);
+    // Shoulder housings, left hydraulic arm and claw.
+    for(const side of [-1,1]) {
+      ellipsoidMesh(x+side*.94,groundY+2.35,z,.46,.48,.46,'raptureBronze',24,16);
+      ellipsoidMesh(x+side*1.02,groundY+2.33,z+.12,.30,.31,.32,'wheelMetal',20,14);
+    }
+    capsule([x-.98,groundY+2.20,z],[x-1.17,groundY+1.73,z+.03],.27,'wheelMetal');
+    ellipsoidMesh(x-1.17,groundY+1.72,z+.03,.32,.32,.32,'raptureBronze',18,12);
+    capsule([x-1.17,groundY+1.66,z+.03],[x-1.20,groundY+1.08,z+.10],.22,'metal');
+    roundBox(x-1.43,groundY+.82,z-.08,x-0.97,groundY+1.14,z+.38,.13,'wheelMetal');
+    for(const side of [-1,1]) capsule([x-1.2+side*.18,groundY+.92,z+.20],[x-1.2+side*.25,groundY+.64,z+.38],.075,'raptureBronze');
+    // Right arm is a thick industrial drill with a ribbed rotating sleeve.
+    capsule([x+.99,groundY+2.22,z],[x+1.28,groundY+1.89,z+.03],.31,'metal');
+    ellipsoidMesh(x+1.30,groundY+1.88,z+.03,.37,.38,.38,'raptureBronze',20,14);
+    capsule([x+1.30,groundY+1.88,z+.03],[x+1.70,groundY+1.82,z+.04],.34,'wheelMetal');
+    for(let i=0;i<4;i++) {
+      const xx=x+1.43+i*.15;
+      ellipsoidMesh(xx,groundY+1.83,z+.04,.075,.34-i*.035,.34-i*.035,'raptureBronze',16,10);
+    }
+    const drillStart=x+1.72,drillEnd=x+2.43,drillY=groundY+1.82,drillZ=z+.04;
+    cone([drillStart,drillY,drillZ],[drillEnd,drillY,drillZ],.29,.035,'metal');
+    for(let i=0;i<32;i++) {
+      const a0=i*Math.PI*2/32,a1=(i+1)*Math.PI*2/32;
+      const t0=i/32,t1=(i+1)/32,xx0=drillStart+t0*.58,xx1=drillStart+t1*.58;
+      const r0=.25*(1-t0)+.10*t0,r1=.25*(1-t1)+.10*t1;
+      capsule([xx0,drillY+Math.cos(a0)*r0,drillZ+Math.sin(a0)*r0],
+              [xx1,drillY+Math.cos(a1)*r1,drillZ+Math.sin(a1)*r1],.045,'raptureBronze');
+    }
+    // Air tanks and thick hose loops on the back silhouette.
+    for(const side of [-1,1]) {
+      ellipsoidMesh(x+side*.53,groundY+2.12,z-.52,.25,.73,.28,'wheelMetal',18,12);
+      for(let j=0;j<20;j++) {
+        const a0=Math.PI*j/20,a1=Math.PI*(j+1)/20;
+        capsule([x+side*.58+Math.cos(a0)*.40,groundY+2.28+Math.sin(a0)*.34,z-.49],
+                [x+side*.58+Math.cos(a1)*.40,groundY+2.28+Math.sin(a1)*.34,z-.49],.055,'metal');
+      }
+    }
+    // Buckles and warm work lights anchor the character to the bathysphere dock.
+    for(const side of [-1,1]) {
+      roundBox(x+side*.47-.09,groundY+1.92,z+.57,x+side*.47+.09,groundY+2.12,z+.62,.045,'raptureBronze');
+      ellipsoidMesh(x+side*.47,groundY+1.06,z+.42,.10,.13,.07,'lamp',12,8);
+    }
+    M3D_SCENE_LIGHTS.push([x,helmetY,z+.95,4.5,.42,84,194,214]);
+  }
+  // Stands beside the bathysphere, leaving its main porthole unobstructed.
+  bigDaddy(4.15,platformY+.18,-34.7);
 
   // --- Aquatic silhouettes beyond the dome -------------------------------
   // A few distant fish meshes establish the outside water; no humanoid figures.
