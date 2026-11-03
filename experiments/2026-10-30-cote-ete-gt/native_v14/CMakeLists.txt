@@ -15,6 +15,8 @@ set(M3D_CORE_SOURCES
     src/m3d_shading.cpp
     src/m3d_render.cpp
     src/m3d_post.cpp
+    src/m3d_post_avx2.cpp
+    src/m3d_simd.cpp
 )
 
 add_library(m3d_core STATIC ${M3D_CORE_SOURCES})
@@ -25,9 +27,11 @@ qt_add_executable(moteur3d_qt WIN32 src/moteur3d_qt.cpp)
 target_link_libraries(moteur3d_qt PRIVATE m3d_core Qt6::Widgets)
 
 if(MSVC)
+    set_source_files_properties(src/m3d_post_avx2.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
     target_compile_options(m3d_core PRIVATE /O2 /EHsc /utf-8)
     target_compile_options(moteur3d_qt PRIVATE /O2 /EHsc /utf-8)
 else()
+    set_source_files_properties(src/m3d_post_avx2.cpp PROPERTIES COMPILE_OPTIONS "-mavx2")
     target_compile_options(m3d_core PRIVATE -O2 -Wall -Wextra -Wpedantic)
     target_compile_options(moteur3d_qt PRIVATE -O2 -Wall -Wextra -Wpedantic)
 endif()

@@ -58,7 +58,8 @@ struct RenderSettings {
     float distance = 12.f, angle = -43.f, elevation = 7.f, fov = 50.f;
     float targetX = 0.f, targetY = 1.f, targetZ = -8.f;
     bool navigationPreview = false;
-    unsigned threads = 16, samples = 1;
+    unsigned threads = std::max(1u, std::thread::hardware_concurrency()), samples = 1;
+    bool avx2 = false;
     int hourStep = 12;
     bool fog = false, dof = false, edgeAa = true, videoPreview = false;
 };
@@ -327,7 +328,7 @@ private:
     bool stopping_ = false, pending_ = false, benchmarking_ = false;
     ImageView* image_ = nullptr;
     QLabel *status_ = nullptr, *stats_ = nullptr, *hourLabel_ = nullptr, *threadLabel_ = nullptr;
-    QComboBox *resolution_ = nullptr, *quality_ = nullptr;
+    QComboBox *resolution_ = nullptr, *quality_ = nullptr, *simdMode_ = nullptr;
     QSlider *distance_ = nullptr, *angle_ = nullptr, *elevation_ = nullptr, *fov_ = nullptr;
     QSlider *threads_ = nullptr, *hour_ = nullptr;
     QCheckBox *fog_ = nullptr, *dof_ = nullptr, *edgeAa_ = nullptr, *videoPreview_ = nullptr;
@@ -472,13 +473,21 @@ private:
         angle_ = slider(Qt::Horizontal, -180, 180, -43, panel);
         elevation_ = slider(Qt::Horizontal, -5, 50, 7, panel);
         fov_ = slider(Qt::Horizontal, 35, 105, 50, panel);
-        threads_ = slider(Qt::Horizontal, 1, 32, 16, panel);
+        const unsigned detectedThreads = std::max(1u, std::thread::hardware_concurrency());
+        const int defaultThreads = int(std::min(32u, detectedThreads));
+        threads_ = slider(Qt::Horizontal, 1, 32, defaultThreads, panel);
         form->addRow(QStringLiteral("Distance caméra"), distance_);
         form->addRow(QStringLiteral("Rotation caméra"), angle_);
         form->addRow(QStringLiteral("Élévation caméra"), elevation_);
         form->addRow(QStringLiteral("Champ horizontal"), fov_);
         threadLabel_ = new QLabel(QStringLiteral("Threads CPU : 16"), panel);
         form->addRow(threadLabel_, threads_);
+        simdMode_ = new QComboBox(panel);
+        simdMode_->addItems({QStringLiteral("Automatique (AVX2 si disponible)"), QStringLiteral("AVX2 activé"), QStringLiteral("Désactivé — x64 standard")});
+        simdMode_->setCurrentIndex(0);
+        simdMode_->setToolTip(QStringLiteral("Le mode AVX2 est utilisé uniquement si le processeur et le système le prennent en charge."));
+        if (!avx2Available()) simdMode_->setItemData(1, 0, Qt::UserRole - 1);
+        form->addRow(QStringLiteral("Optimisation SIMD"), simdMode_);
         controls->addLayout(form);
         auto* checks = new QHBoxLayout;
         fog_ = new QCheckBox(QStringLiteral("Brouillard atmosphérique"), panel);
@@ -541,6 +550,7 @@ private:
         connect(fog_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
         connect(dof_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
         connect(edgeAa_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
+        connect(simdMode_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) { readSettings(); requestRender(); });
         connect(videoPreview_, &QCheckBox::toggled, this, [this](bool enabled) {
             setVideoControlsEnabled(!enabled);
             if (enabled) {
@@ -711,7 +721,7 @@ private:
                         const auto postStart = std::chrono::steady_clock::now();
                         if (cfg.renderW == cfg.outW * 2 && cfg.renderH == cfg.outH * 2) pixels = downsample2x(pixels, cfg.renderW, cfg.renderH, threadCount);
                         else if (cfg.renderW != cfg.outW || cfg.renderH != cfg.outH) pixels = upscaleBilinear(pixels, cfg.renderW, cfg.renderH, cfg.outW, cfg.outH, threadCount);
-                        if (cfg.edgeAa) pixels = antialiasEdges4(pixels, cfg.outW, cfg.outH, threadCount);
+                        if (cfg.edgeAa) pixels = antialiasEdges4(pixels, cfg.outW, cfg.outH, threadCount, cfg.avx2);
                         const double postMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - postStart).count();
                         const double totalMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
                         if (repetition >= 0) {
@@ -754,7 +764,7 @@ private:
     void setVideoControlsEnabled(bool enabled) {
         resolution_->setEnabled(enabled); quality_->setEnabled(enabled);
         distance_->setEnabled(enabled); angle_->setEnabled(enabled); elevation_->setEnabled(enabled); fov_->setEnabled(enabled);
-        threads_->setEnabled(enabled); hour_->setEnabled(enabled); fog_->setEnabled(enabled); dof_->setEnabled(enabled); edgeAa_->setEnabled(enabled);
+        threads_->setEnabled(enabled); hour_->setEnabled(enabled); simdMode_->setEnabled(enabled); fog_->setEnabled(enabled); dof_->setEnabled(enabled); edgeAa_->setEnabled(enabled);
         renderButton_->setEnabled(enabled); homeButton_->setEnabled(enabled); frontButton_->setEnabled(enabled); rearButton_->setEnabled(enabled);
         image_->setEnabled(enabled);
         menuBar()->setEnabled(enabled);
@@ -794,10 +804,12 @@ private:
         }
         settings_.fov = float(fov_->value());
         settings_.threads = unsigned(threads_->value());
+        const int simdSelection = simdMode_->currentIndex();
+        settings_.avx2 = avx2Available() && (simdSelection == 1 || simdSelection == 0);
         settings_.hourStep = hour_->value();
         settings_.fog = fog_->isChecked();
         settings_.dof = dof_->isChecked() && !navigationActive_;
-        threadLabel_->setText(QStringLiteral("Threads CPU : %1").arg(settings_.threads));
+        threadLabel_->setText(QStringLiteral("Threads CPU : %1 — SIMD : %2").arg(settings_.threads).arg(settings_.avx2 ? QStringLiteral("AVX2") : QStringLiteral("x64 standard")));
     }
 
     void queueNextVideoFrame() {
@@ -864,7 +876,7 @@ private:
             const auto postStart = std::chrono::steady_clock::now();
             if (cfg.renderW == cfg.outW * 2 && cfg.renderH == cfg.outH * 2) pixels = downsample2x(pixels, cfg.renderW, cfg.renderH, cfg.threads);
             else if (cfg.renderW != cfg.outW || cfg.renderH != cfg.outH) pixels = upscaleBilinear(pixels, cfg.renderW, cfg.renderH, cfg.outW, cfg.outH, cfg.threads);
-            if (cfg.edgeAa) pixels = antialiasEdges4(pixels, cfg.outW, cfg.outH, cfg.threads);
+            if (cfg.edgeAa) pixels = antialiasEdges4(pixels, cfg.outW, cfg.outH, cfg.threads, cfg.avx2);
             st.postMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - postStart).count();
             st.shadowMs = shadowMs;
             st.ms += st.postMs + shadowMs;

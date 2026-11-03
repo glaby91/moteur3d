@@ -11,7 +11,7 @@ std::vector<uint32_t> upscaleBilinear(const std::vector<uint32_t>&src,int sw,int
 }
 std::vector<uint32_t> downsample2x(const std::vector<uint32_t>&src,int sw,int sh,unsigned threads){int dw=sw/2,dh=sh/2;std::vector<uint32_t>out(size_t(dw)*dh);std::atomic<int>next{0};auto work=[&]{for(;;){int by=next.fetch_add(8);if(by>=dh)break;for(int y=by;y<std::min(dh,by+8);y++)for(int x=0;x<dw;x++){uint32_t a=src[size_t(y*2)*sw+x*2],b=src[size_t(y*2)*sw+x*2+1],c=src[size_t(y*2+1)*sw+x*2],d=src[size_t(y*2+1)*sw+x*2+1],v=0xff000000;for(int shf:{0,8,16})v|=(uint32_t)((((a>>shf)&255)+((b>>shf)&255)+((c>>shf)&255)+((d>>shf)&255)+2)/4)<<shf;out[size_t(y)*dw+x]=v;}}};threads=std::max(1u,std::min(threads,(unsigned)dh));if(threads==1)work();else{std::vector<std::thread>pool;pool.reserve(threads-1);for(unsigned i=1;i<threads;i++)pool.emplace_back(work);work();for(auto&t:pool)t.join();}return out;}
 
-std::vector<uint32_t> antialiasEdges4(const std::vector<uint32_t>&src,int w,int h,unsigned threads){
+static std::vector<uint32_t> antialiasEdges4Scalar(const std::vector<uint32_t>&src,int w,int h,unsigned threads){
  if(w<3||h<3||src.size()<size_t(w)*h)return src;
  std::vector<uint32_t>out=src;std::atomic<int>next{1};
  auto luminance=[](uint32_t p){return .299f*(p&255)+.587f*((p>>8)&255)+.114f*((p>>16)&255);};
@@ -27,6 +27,11 @@ std::vector<uint32_t> antialiasEdges4(const std::vector<uint32_t>&src,int w,int 
   out[i]=result;
  }} };
  threads=std::max(1u,std::min(threads,(unsigned)(h-2)));if(threads==1)work();else{std::vector<std::thread>pool;pool.reserve(threads-1);for(unsigned i=1;i<threads;i++)pool.emplace_back(work);work();for(auto&t:pool)t.join();}return out;
+}
+
+std::vector<uint32_t> antialiasEdges4(const std::vector<uint32_t>&src,int w,int h,unsigned threads,bool useAvx2){
+ if(useAvx2 && avx2Available()) return antialiasEdges4Avx2(src,w,h,threads);
+ return antialiasEdges4Scalar(src,w,h,threads);
 }
 
 std::vector<uint32_t> bloomGlow(const std::vector<uint32_t>&src,int w,int h,unsigned threads,float strength){
