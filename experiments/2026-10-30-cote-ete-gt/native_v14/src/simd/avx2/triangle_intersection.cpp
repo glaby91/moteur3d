@@ -12,12 +12,12 @@ bool intersectTriangles8Avx2(const Scene&s,const Ray&r,const uint32_t*ids,float 
  __m256 ax=f(a0,0),ay=f(a0,1),az=f(a0,2),u1x=f(e10,0),u1y=f(e10,1),u1z=f(e10,2),u2x=f(e20,0),u2y=f(e20,1),u2z=f(e20,2);
  __m256 dx=_mm256_set1_ps(r.d.x),dy=_mm256_set1_ps(r.d.y),dz=_mm256_set1_ps(r.d.z);
  __m256 px=_mm256_sub_ps(_mm256_mul_ps(dy,u2z),_mm256_mul_ps(dz,u2y)),py=_mm256_sub_ps(_mm256_mul_ps(dz,u2x),_mm256_mul_ps(dx,u2z)),pz=_mm256_sub_ps(_mm256_mul_ps(dx,u2y),_mm256_mul_ps(dy,u2x));
- __m256 det=_mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(u1x,px),_mm256_mul_ps(u1y,py)),_mm256_mul_ps(u1z,pz)),inv=_mm256_div_ps(_mm256_set1_ps(1.f),det);
+ __m256 det=_mm256_fmadd_ps(u1z,pz,_mm256_fmadd_ps(u1y,py,_mm256_mul_ps(u1x,px))),inv=_mm256_div_ps(_mm256_set1_ps(1.f),det);
  __m256 qx=_mm256_sub_ps(_mm256_set1_ps(r.o.x),ax),qy=_mm256_sub_ps(_mm256_set1_ps(r.o.y),ay),qz=_mm256_sub_ps(_mm256_set1_ps(r.o.z),az);
- __m256 u=_mm256_mul_ps(_mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(qx,px),_mm256_mul_ps(qy,py)),_mm256_mul_ps(qz,pz)),inv);
+ __m256 u=_mm256_mul_ps(_mm256_fmadd_ps(qz,pz,_mm256_fmadd_ps(qy,py,_mm256_mul_ps(qx,px))),inv);
  __m256 zx=_mm256_sub_ps(_mm256_mul_ps(qy,u1z),_mm256_mul_ps(qz,u1y)),zy=_mm256_sub_ps(_mm256_mul_ps(qz,u1x),_mm256_mul_ps(qx,u1z)),zz=_mm256_sub_ps(_mm256_mul_ps(qx,u1y),_mm256_mul_ps(qy,u1x));
- __m256 v=_mm256_mul_ps(_mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(dx,zx),_mm256_mul_ps(dy,zy)),_mm256_mul_ps(dz,zz)),inv);
- __m256 t=_mm256_mul_ps(_mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(u2x,zx),_mm256_mul_ps(u2y,zy)),_mm256_mul_ps(u2z,zz)),inv);
+ __m256 v=_mm256_mul_ps(_mm256_fmadd_ps(dz,zz,_mm256_fmadd_ps(dy,zy,_mm256_mul_ps(dx,zx))),inv);
+ __m256 t=_mm256_mul_ps(_mm256_fmadd_ps(u2z,zz,_mm256_fmadd_ps(u2y,zy,_mm256_mul_ps(u2x,zx))),inv);
  __m256 ad=_mm256_andnot_ps(_mm256_set1_ps(-0.f),det),m=_mm256_cmp_ps(ad,_mm256_set1_ps(1e-10f),_CMP_GE_OQ);
  m=_mm256_and_ps(m,_mm256_cmp_ps(u,_mm256_setzero_ps(),_CMP_GE_OQ));m=_mm256_and_ps(m,_mm256_cmp_ps(u,_mm256_set1_ps(1),_CMP_LE_OQ));m=_mm256_and_ps(m,_mm256_cmp_ps(v,_mm256_setzero_ps(),_CMP_GE_OQ));m=_mm256_and_ps(m,_mm256_cmp_ps(_mm256_add_ps(u,v),_mm256_set1_ps(1),_CMP_LE_OQ));m=_mm256_and_ps(m,_mm256_cmp_ps(t,_mm256_set1_ps(.0001f),_CMP_GT_OQ));m=_mm256_and_ps(m,_mm256_cmp_ps(t,_mm256_set1_ps(limit),_CMP_LT_OQ));
  alignas(32)float ts[8],ms[8];_mm256_store_ps(ts,t);_mm256_store_ps(ms,m);for(int k=0;k<8;k++)out[k]=ms[k]!=0?ts[k]:INF;return true;

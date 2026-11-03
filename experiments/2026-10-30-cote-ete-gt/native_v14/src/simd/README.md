@@ -1,14 +1,7 @@
 # SIMD du moteur
 
-Les noyaux AVX2 sont séparés sous `src/simd/avx2/`. Le détecteur x64 valide les capacités CPU et l’état OS avant dispatch. Le chemin standard reste compilé et sélectionnable.
+Les noyaux AVX2 utilisent les instructions AVX2 et FMA3 sur les lots de rayons primaires, les intersections de triangles, l'éclairage par lots de lumières et le post-traitement. Le mode n'est activé que si le processeur expose AVX2 et FMA, et si le système d'exploitation sauvegarde correctement l'état étendu du processeur.
 
-- `post.cpp` : AA contours.
-- `ray_generation.cpp` : rayon caméra par groupes de huit, hors DOF.
-- `triangle_intersection.cpp` : intersections de huit triangles homogènes d’une feuille BVH.
-- `bvh_bounds.cpp` : tests simultanés des deux enfants BVH; actif pour chaque nœud interne sur le chemin AVX2.
-- Les matériaux, textures, réflexions, autres primitives et le DOF conservent leur chemin scalaire; les rayons secondaires et d’ombres utilisent les noyaux BVH AVX2 lorsqu’ils sont compatibles.
+Le parcours BVH garde ses deux tests AABB en scalaire. L'ancien noyau AVX2 préparait six coordonnées, exécutait les opérations vectorielles puis réextrayait deux résultats scalaires pour chaque nœud visité; ce format ne correspondait pas au parcours actuel, qui traite un rayon à la fois. Un parcours BVH par paquets de rayons permettrait d'exploiter les voies AVX2 plus efficacement, mais demande une refonte distincte.
 
-Les réflexions spéculaires de proximité restent scalaires, tandis que leur éclairage diffus est accumulé par paquets de huit. La lecture des mipmaps couleur, normal et rugosité utilise le noyau d’interpolation AVX2. Les performances doivent être mesurées par scène et qualité avant d’étendre le SIMD aux autres étapes.
-
-
-Build 261103-0012 : le mode x64 standard est sélectionné par défaut après une comparaison utilisateur sur i5-7200U (4 threads, mêmes compteurs de rayons et de parcours BVH) : 8 066,9 ms en x64 standard contre 11 139,9 ms avec AVX2, soit environ 38 % de temps en plus pour AVX2. Ces captures correspondent à une mesure par mode; il faut confirmer par plusieurs répétitions médianes avant de conclure sur la performance générale. Les options automatique et AVX2 forcé restent disponibles pour les mesures et le profilage.
+Les tests communiqués sur i5-7200U indiquaient que le mode AVX2 ralentissait la scène d'environ 30 %. Cette version ajoute FMA3 dans les calculs vectoriels utiles et retire le noyau AABB au format inadapté, dont le coût doit être isolé par un profilage avant d'attribuer précisément le ralentissement global. Le mode x64 standard reste sélectionné par défaut : le gain doit être mesuré sur la même scène et avec les mêmes paramètres avant de changer ce choix.

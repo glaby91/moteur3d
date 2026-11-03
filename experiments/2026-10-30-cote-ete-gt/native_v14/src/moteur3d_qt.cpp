@@ -483,10 +483,10 @@ private:
         threadLabel_ = new QLabel(QStringLiteral("Threads CPU : 16"), panel);
         form->addRow(threadLabel_, threads_);
         simdMode_ = new QComboBox(panel);
-        simdMode_->addItems({QStringLiteral("Automatique (AVX2 si disponible)"), QStringLiteral("AVX2 activé"), QStringLiteral("Désactivé — x64 standard")});
+        simdMode_->addItems({QStringLiteral("Automatique (AVX2 + FMA3 si disponibles)"), QStringLiteral("AVX2 + FMA3 activé"), QStringLiteral("Désactivé — x64 standard")});
         simdMode_->setCurrentIndex(2);
-        simdMode_->setToolTip(QStringLiteral("AVX2 est utilisé uniquement si le processeur et le système le prennent en charge. Après la comparaison du build 0011 sur i5-7200U, le mode x64 standard est sélectionné par défaut; AVX2 reste disponible pour les essais."));
-        if (!avx2Available()) simdMode_->setItemData(1, 0, Qt::UserRole - 1);
+        simdMode_->setToolTip(QStringLiteral("AVX2 + FMA3 requiert le support CPU et système. Les tests précédents ont montré un ralentissement sur i5-7200U; le x64 standard reste le réglage initial en attendant une comparaison médiane après ces corrections."));
+        if (!avx2FmaAvailable()) simdMode_->setItemData(1, 0, Qt::UserRole - 1);
         form->addRow(QStringLiteral("Optimisation SIMD"), simdMode_);
         controls->addLayout(form);
         auto* checks = new QHBoxLayout;
@@ -805,11 +805,11 @@ private:
         settings_.fov = float(fov_->value());
         settings_.threads = unsigned(threads_->value());
         const int simdSelection = simdMode_->currentIndex();
-        settings_.avx2 = avx2Available() && (simdSelection == 1 || simdSelection == 0);
+        settings_.avx2 = avx2FmaAvailable() && (simdSelection == 1 || simdSelection == 0);
         settings_.hourStep = hour_->value();
         settings_.fog = fog_->isChecked();
         settings_.dof = dof_->isChecked() && !navigationActive_;
-        threadLabel_->setText(QStringLiteral("Threads CPU : %1 — SIMD : %2").arg(settings_.threads).arg(settings_.avx2 ? QStringLiteral("AVX2") : QStringLiteral("x64 standard")));
+        threadLabel_->setText(QStringLiteral("Threads CPU : %1 — SIMD : %2").arg(settings_.threads).arg(settings_.avx2 ? QStringLiteral("AVX2 + FMA3") : QStringLiteral("x64 standard")));
     }
 
     void queueNextVideoFrame() {

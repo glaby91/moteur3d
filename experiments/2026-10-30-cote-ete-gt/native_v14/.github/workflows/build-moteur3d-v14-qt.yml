@@ -1,0 +1,100 @@
+name: Build Moteur 3D Qt — Windows and Linux
+
+on:
+  push:
+    branches:
+      - experiment/manhattan-silent-hill-2026-10-30
+    paths:
+      - experiments/2026-10-30-cote-ete-gt/native_v14/CMakeLists.txt
+      - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/m3d_engine.h
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_rapture.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_coastal_v1314.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/source_v1314.html
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/**
+      - experiments/2026-10-30-cote-ete-gt/native_v14/version.h
+      - experiments/2026-10-30-cote-ete-gt/native_v14/build_info.h
+      - .github/workflows/build-moteur3d-v14-qt.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt 6 on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake qt6-base-dev
+
+      - name: Install Qt 6 on Windows
+        if: runner.os == 'Windows'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+
+      - name: Inject GitHub build provenance
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          revision="${GITHUB_SHA:0:12}"
+          branch="$GITHUB_REF_NAME"
+          cat > build_info.h <<EOF
+          #pragma once
+          #define M3D_GIT_REVISION_ANSI "$revision"
+          #define M3D_GIT_REVISION_WIDE L"$revision"
+          #define M3D_GIT_BRANCH_ANSI "$branch"
+          #define M3D_GIT_BRANCH_WIDE L"$branch"
+          #define M3D_GIT_RUN_WIDE L"$GITHUB_RUN_NUMBER"
+          EOF
+
+      - name: Export runtime scenes
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          node export_scene.js source_v1314.html moteur3d_v1314_scene.bin scene_coastal_v1314.js
+          M3D_SKIP_IMPORTED_CAR=1 node export_scene.js source_v1314.html scene_rapture.bin scene_rapture.js
+
+      - name: Configure Qt application
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compile Qt application
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: cmake --build build --config Release --parallel
+
+      - name: Install Qt runtime and package scenes
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          cmake --install build --config Release --prefix dist
+          cp moteur3d_v1314_scene.bin scene_rapture.bin scene_rapture.js README.md dist/
+          cp -r docs dist/
+
+      - name: Deploy Qt DLLs on Windows
+        if: runner.os == 'Windows'
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: windeployqt --release --compiler-runtime --dir dist dist/moteur3d_qt.exe
+
+      - name: Upload Windows/Linux application package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moteur3D-Qt-${{ matrix.os }}-build-261103-0015
+          path: experiments/2026-10-30-cote-ete-gt/native_v14/dist
+          if-no-files-found: error
+          retention-days: 30

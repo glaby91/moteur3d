@@ -19,7 +19,6 @@ set(M3D_CORE_SOURCES
     src/simd/avx2/post.cpp
     src/simd/avx2/ray_generation.cpp
     src/simd/avx2/triangle_intersection.cpp
-    src/simd/avx2/bvh_bounds.cpp
     src/simd/avx2/lighting.cpp
     src/simd/avx2/texture_sampling.cpp
 )
@@ -32,11 +31,11 @@ qt_add_executable(moteur3d_qt WIN32 src/moteur3d_qt.cpp)
 target_link_libraries(moteur3d_qt PRIVATE m3d_core Qt6::Widgets)
 
 if(MSVC)
-    set_source_files_properties(src/simd/avx2/post.cpp src/simd/avx2/ray_generation.cpp src/simd/avx2/triangle_intersection.cpp src/simd/avx2/bvh_bounds.cpp src/simd/avx2/lighting.cpp src/simd/avx2/texture_sampling.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
+    set_source_files_properties(src/simd/avx2/post.cpp src/simd/avx2/ray_generation.cpp src/simd/avx2/triangle_intersection.cpp src/simd/avx2/lighting.cpp src/simd/avx2/texture_sampling.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
     target_compile_options(m3d_core PRIVATE /O2 /EHsc /utf-8)
     target_compile_options(moteur3d_qt PRIVATE /O2 /EHsc /utf-8)
 else()
-    set_source_files_properties(src/simd/avx2/post.cpp src/simd/avx2/ray_generation.cpp src/simd/avx2/triangle_intersection.cpp src/simd/avx2/bvh_bounds.cpp src/simd/avx2/lighting.cpp src/simd/avx2/texture_sampling.cpp PROPERTIES COMPILE_OPTIONS "-mavx2")
+    set_source_files_properties(src/simd/avx2/post.cpp src/simd/avx2/ray_generation.cpp src/simd/avx2/triangle_intersection.cpp src/simd/avx2/lighting.cpp src/simd/avx2/texture_sampling.cpp PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma")
     target_compile_options(m3d_core PRIVATE -O2 -Wall -Wextra -Wpedantic)
     target_compile_options(moteur3d_qt PRIVATE -O2 -Wall -Wextra -Wpedantic)
 endif()

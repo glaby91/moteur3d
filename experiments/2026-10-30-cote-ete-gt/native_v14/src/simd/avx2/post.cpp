@@ -8,13 +8,13 @@ inline __m256 channel(__m256i p, int shift) {
     return _mm256_cvtepi32_ps(_mm256_and_si256(_mm256_srli_epi32(p, shift), mask));
 }
 inline __m256 luminance(__m256i p) {
-    return _mm256_add_ps(_mm256_add_ps(_mm256_mul_ps(channel(p, 16), _mm256_set1_ps(.299f)),
-                                        _mm256_mul_ps(channel(p, 8), _mm256_set1_ps(.587f))),
-                         _mm256_mul_ps(channel(p, 0), _mm256_set1_ps(.114f)));
+    return _mm256_fmadd_ps(channel(p, 0), _mm256_set1_ps(.114f),
+                         _mm256_fmadd_ps(channel(p, 8), _mm256_set1_ps(.587f),
+                                         _mm256_mul_ps(channel(p, 16), _mm256_set1_ps(.299f))));
 }
 inline __m256i roundedChannel(__m256 center, __m256 neighbours) {
-    __m256 value = _mm256_add_ps(_mm256_mul_ps(center, _mm256_set1_ps(.55f)),
-                                 _mm256_mul_ps(neighbours, _mm256_set1_ps(.45f)));
+    __m256 value = _mm256_fmadd_ps(neighbours, _mm256_set1_ps(.45f),
+                                   _mm256_mul_ps(center, _mm256_set1_ps(.55f)));
     value = _mm256_min_ps(_mm256_set1_ps(255.f), _mm256_max_ps(_mm256_setzero_ps(), value));
     return _mm256_cvttps_epi32(_mm256_add_ps(value, _mm256_set1_ps(.5f)));
 }
