@@ -9,6 +9,8 @@ La fenêtre **Outils → Benchmark du moteur** sert à repérer la partie qui m�
 - **Construction des ombres** : passe unique d’initialisation, affichée séparément du temps par image.
 - **Compteurs de charge** : rayons, tests d’objets BVH, nœuds BVH, tests AABB, impacts et lectures de texels.
 - **Gain de parallélisme** : comparaison du temps total médian entre la plus petite et la plus grande configuration de threads sélectionnée.
+- **Comparaison SIMD** : choix du mode courant, x64 standard, AVX2 + FMA3 ou comparaison complète des deux; chaque mode suit exactement la même série de threads.
+- **Barres de débit relatif** : chaque barre indique le facteur de performance par rapport au x64 standard avec le plus petit nombre de threads mesuré. La colonne « Gain SIMD » compare AVX2 + FMA3 au x64 standard à nombre de threads identique.
 
 Chaque configuration passe d’abord par un échauffement, exclu des résultats, puis par 1 à 7 répétitions. Le tableau utilise la médiane statistique (moyenne des deux valeurs centrales si le nombre de répétitions est pair). Les mesures se font dans un buffer séparé et ne remplacent pas l’image de la fenêtre principale. Les longues séries peuvent être annulées; les résultats déjà mesurés sont conservés.
 
@@ -19,14 +21,14 @@ Chaque configuration passe d’abord par un échauffement, exclu des résultats,
 - Un gain faible quand le nombre de threads augmente indique qu’il faut chercher une charge sérielle, un coût de synchronisation ou une saturation mémoire avant d’ajouter des threads.
 - Le ratio **tests BVH / rayons** permet de comparer le coût de recherche entre scènes et versions. Les compteurs seuls ne désignent pas automatiquement la fonction fautive : ils servent à orienter le prochain profilage ciblé.
 
-L’export CSV conserve la scène, les paramètres, la résolution, le nombre d’échantillons, les mesures et les compteurs afin de comparer plusieurs exécutions.
+L’export CSV conserve la scène, le build, le système et l’architecture, le nombre de processeurs logiques, la disponibilité AVX2/FMA3, le mode choisi, le nombre de répétitions, les réglages, la résolution, les mesures, le débit relatif et les compteurs.
 
 ## Limites actuelles
 
 Le temps « rendu CPU » est encore agrégé : l’exécutable ne chronomètre pas séparément intersection, ombrage et échantillonnage de texture. Le diagnostic indique donc quelle grande étape attaquer; un profilage interne plus fin pourra ensuite départager ces sous-fonctions sans pénaliser toutes les mesures de référence.
 
 
-Depuis le build 261103-0013, le benchmark transmet au rendu CPU le mode SIMD actuellement choisi dans l’interface. Les comparaisons de threads reflètent ainsi bien ce mode; pour comparer AVX2 et x64 standard, garder la même scène, la même résolution, les mêmes effets, le même nombre de threads et le même protocole de répétitions.
+Le benchmark transmet au rendu le mode sélectionné et peut lancer x64 standard et AVX2 + FMA3 dans une seule série. Les résultats sont affichés en valeurs et en barres relatives; les médianes de rendu, de post-traitement et le temps de construction des ombres restent distincts.
 
 
 ## Comparer les modes SIMD

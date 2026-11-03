@@ -40,6 +40,7 @@
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <QSysInfo>
 
 #include <algorithm>
 #include <atomic>
@@ -68,6 +69,7 @@ struct CameraPose { float distance, angle, elevation; };
 
 struct BenchmarkRow {
     unsigned threads = 1;
+    bool avx2 = false;
     double renderMs = 0, postMs = 0, totalMs = 0;
     uint64_t rays = 0, tests = 0, nodes = 0, aabb = 0, hits = 0, texels = 0;
 };
@@ -76,7 +78,7 @@ class BenchmarkDialog final : public QDialog {
 public:
     explicit BenchmarkDialog(QWidget* parent = nullptr) : QDialog(parent) {
         setWindowTitle(QStringLiteral("Benchmark — moteur 3D CPU"));
-        resize(850, 600);
+        resize(1040, 680);
         setStyleSheet("QDialog{background:#0b1923;color:#e0ebf3;} QLabel{color:#e0ebf3;} QGroupBox{border:1px solid #345267;margin-top:10px;padding:8px;color:#e0ebf3;} QComboBox,QSpinBox,QPushButton{padding:5px;}");
         auto* root = new QVBoxLayout(this);
         auto* title = new QLabel(QStringLiteral("BENCHMARK DU MOTEUR"), this);
@@ -87,10 +89,20 @@ public:
         resolution_ = new QComboBox(this);
         resolution_->addItems({QStringLiteral("Réglage courant"), QStringLiteral("1280 × 720"), QStringLiteral("Full HD — 1920 × 1080"), QStringLiteral("4K UHD — 3840 × 2160")});
         repeats_ = new QSpinBox(this); repeats_->setRange(1, 7); repeats_->setValue(3);
+        simdMode_ = new QComboBox(this);
+        simdMode_->addItems({QStringLiteral("Mode choisi dans le moteur"), QStringLiteral("x64 standard"), QStringLiteral("AVX2 + FMA3"), QStringLiteral("Comparaison complète : x64 / AVX2 + FMA3")});
+        const bool avxAvailable = avx2FmaAvailable();
+        if (!avxAvailable) {
+            simdMode_->setItemData(2, 0, Qt::UserRole - 1);
+            simdMode_->setItemData(3, 0, Qt::UserRole - 1);
+            simdMode_->setCurrentIndex(1);
+        } else {
+            simdMode_->setCurrentIndex(3);
+        }
         settings->addWidget(new QLabel(QStringLiteral("Résolution :"), this)); settings->addWidget(resolution_);
-        settings->addSpacing(16); settings->addWidget(new QLabel(QStringLiteral("Répétitions mesurées :"), this)); settings->addWidget(repeats_);
-        settings->addWidget(new QLabel(QStringLiteral("+ 1 passe d’échauffement"), this)); settings->addStretch();
-        root->addLayout(settings);
+        settings->addSpacing(12); settings->addWidget(new QLabel(QStringLiteral("SIMD :"), this)); settings->addWidget(simdMode_, 1);
+        settings->addSpacing(12); settings->addWidget(new QLabel(QStringLiteral("Répétitions :"), this)); settings->addWidget(repeats_);
+        settings->addWidget(new QLabel(QStringLiteral("+ 1 échauffement"), this)); root->addLayout(settings);
         auto* threads = new QHBoxLayout;
         threads->addWidget(new QLabel(QStringLiteral("Comparer les threads :"), this));
         for (unsigned n : {1u, 2u, 4u, 8u, 16u, 32u}) {
@@ -99,10 +111,10 @@ public:
         }
         threads->addStretch(); root->addLayout(threads);
         progress_ = new QProgressBar(this); progress_->setRange(0, 100); progress_->setValue(0);
-        status_ = new QLabel(QStringLiteral("Prêt — mêmes scène, qualité, caméra, heure et effets pour chaque mesure."), this);
+        status_ = new QLabel(QStringLiteral("Prêt — chaque mode garde les mêmes scène, caméra, qualité et effets."), this);
         root->addWidget(status_); root->addWidget(progress_);
-        table_ = new QTableWidget(0, 11, this);
-        table_->setHorizontalHeaderLabels({QStringLiteral("Threads"), QStringLiteral("Rendu médian (ms)"), QStringLiteral("Post (ms)"), QStringLiteral("Total (ms)"), QStringLiteral("Gain"), QStringLiteral("Rayons"), QStringLiteral("Tests BVH"), QStringLiteral("Nœuds"), QStringLiteral("AABB"), QStringLiteral("Impacts"), QStringLiteral("Texels")});
+        table_ = new QTableWidget(0, 7, this);
+        table_->setHorizontalHeaderLabels({QStringLiteral("Mode SIMD"), QStringLiteral("Threads"), QStringLiteral("Rendu médian (ms)"), QStringLiteral("Post (ms)"), QStringLiteral("Total (ms)"), QStringLiteral("Gain SIMD"), QStringLiteral("Débit relatif (× réf.)")});
         table_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
         table_->horizontalHeader()->setStretchLastSection(true);
         table_->setAlternatingRowColors(true); root->addWidget(table_, 1);
@@ -128,61 +140,103 @@ public:
     }
     int repeats() const { return repeats_->value(); }
     int resolutionIndex() const { return resolution_->currentIndex(); }
+    int requestedSimdMode() const { return simdMode_->currentIndex(); }
     void setRunning(bool running) {
         running_ = running; run_->setEnabled(!running); export_->setEnabled(!running && !rows_.empty());
         cancel_->setEnabled(running);
-        resolution_->setEnabled(!running); repeats_->setEnabled(!running);
+        resolution_->setEnabled(!running); repeats_->setEnabled(!running); simdMode_->setEnabled(!running);
         for (const auto& item : threadChecks_) item.second->setEnabled(!running);
         close_->setText(running ? QStringLiteral("Benchmark en cours…") : QStringLiteral("Fermer"));
         close_->setEnabled(!running);
     }
     void setCancelling() { cancel_->setEnabled(false); status_->setText(QStringLiteral("Annulation demandée — arrêt au prochain point d’interruption…")); }
     void setProgress(int value, const QString& text) { progress_->setValue(value); status_->setText(text); }
-    void setRows(std::vector<BenchmarkRow> rows, double shadowMs, int width, int height, unsigned samples, QString settingsSummary = {}) {
-        rows_ = std::move(rows); shadowMs_ = shadowMs; width_ = width; height_ = height; samples_ = samples; settingsSummary_ = std::move(settingsSummary);
-        table_->setRowCount(int(rows_.size()));
-        const double baseline = rows_.empty() ? 0 : rows_.front().totalMs;
+    void setRows(std::vector<BenchmarkRow> rows, double shadowMs, int width, int height, unsigned samples,
+                 unsigned repetitions = 0, QString modeSummary = {}, QString settingsSummary = {}) {
+        rows_ = std::move(rows); shadowMs_ = shadowMs; width_ = width; height_ = height; samples_ = samples;
+        repetitionsMeasured_ = repetitions; modeSummary_ = std::move(modeSummary); settingsSummary_ = std::move(settingsSummary);
+        table_->clearContents(); table_->setRowCount(int(rows_.size()));
+        if (rows_.empty()) { diagnosis_->setText(QStringLiteral("Aucune mesure disponible.")); export_->setEnabled(false); return; }
+        const auto baseIt = std::find_if(rows_.begin(), rows_.end(), [](const BenchmarkRow& r) { return !r.avx2; });
+        const BenchmarkRow& referenceRow = (baseIt == rows_.end() ? rows_.front() : *baseIt);
+        const double referenceMs = referenceRow.totalMs;
+        double maxRelative = 1.0;
+        for (const auto& row : rows_) if (row.totalMs > 0) maxRelative = std::max(maxRelative, referenceMs / row.totalMs);
+        QStringList modesMeasured;
+        for (const auto& row : rows_) { const QString name = row.avx2 ? QStringLiteral("AVX2 + FMA3") : QStringLiteral("x64 standard"); if (!modesMeasured.contains(name)) modesMeasured << name; }
         for (int i = 0; i < int(rows_.size()); ++i) {
             const auto& row = rows_[size_t(i)];
-            const QStringList values{QString::number(row.threads), QString::number(row.renderMs, 'f', 1), QString::number(row.postMs, 'f', 1), QString::number(row.totalMs, 'f', 1),
-                baseline > 0 ? QStringLiteral("%1×").arg(baseline / std::max(.001, row.totalMs), 0, 'f', 2) : QStringLiteral("—"),
-                QString::number(qulonglong(row.rays)), QString::number(qulonglong(row.tests)), QString::number(qulonglong(row.nodes)), QString::number(qulonglong(row.aabb)), QString::number(qulonglong(row.hits)), QString::number(qulonglong(row.texels))};
-            for (int c = 0; c < values.size(); ++c) table_->setItem(i, c, new QTableWidgetItem(values[c]));
+            const QString modeName = row.avx2 ? QStringLiteral("AVX2 + FMA3") : QStringLiteral("x64 standard");
+            const auto standardIt = std::find_if(rows_.begin(), rows_.end(), [&row](const BenchmarkRow& r) { return !r.avx2 && r.threads == row.threads; });
+            const QString simdGain = row.avx2 && standardIt != rows_.end()
+                ? QStringLiteral("%1×").arg(standardIt->totalMs / std::max(.001, row.totalMs), 0, 'f', 2)
+                : QStringLiteral("—");
+            const double relative = referenceMs / std::max(.001, row.totalMs);
+            const QStringList values{modeName, QString::number(row.threads), QString::number(row.renderMs, 'f', 1),
+                QString::number(row.postMs, 'f', 1), QString::number(row.totalMs, 'f', 1), simdGain, QString()};
+            for (int c = 0; c < 6; ++c) table_->setItem(i, c, new QTableWidgetItem(values[c]));
+            auto* bar = new QProgressBar(table_); bar->setRange(0, 100);
+            bar->setValue(int(std::lround(100.0 * relative / maxRelative)));
+            bar->setFormat(QStringLiteral("%1×").arg(relative, 0, 'f', 2));
+            bar->setToolTip(QStringLiteral("Référence : %1, %2 thread(s)").arg(referenceRow.avx2 ? QStringLiteral("AVX2 + FMA3") : QStringLiteral("x64 standard")).arg(referenceRow.threads));
+            bar->setStyleSheet("QProgressBar{border:1px solid #426276;border-radius:3px;text-align:center;color:#f1f6f9;background:#102330;min-width:145px;} QProgressBar::chunk{background:#12a86b;}");
+            table_->setCellWidget(i, 6, bar);
         }
-        if (rows_.size() >= 2) {
-            const auto& slow = rows_.front(); const auto& fast = rows_.back();
-            const double postShare = fast.totalMs > 0 ? fast.postMs / fast.totalMs : 0;
-            const double scaling = fast.totalMs > 0 ? slow.totalMs / fast.totalMs : 1;
-            QString advice;
-            if (postShare >= .25) advice = QStringLiteral("Le post-traitement pèse %1 % du temps au réglage le plus rapide : examiner d’abord le redimensionnement et l’AA contours.").arg(int(postShare * 100));
-            else advice = QStringLiteral("Le rendu CPU domine : les prochaines cibles sont l’intersection BVH et l’ombrage par rayon.");
-            if (scaling < 1.5) advice += QStringLiteral(" Le passage de %1 à %2 threads n’apporte que %3× : rechercher la partie sérielle, la contention ou la saturation mémoire.").arg(slow.threads).arg(fast.threads).arg(scaling, 0, 'f', 2);
-            else advice += QStringLiteral(" Gain de parallélisme mesuré : %1× entre %2 et %3 threads.").arg(scaling, 0, 'f', 2).arg(slow.threads).arg(fast.threads);
-            const double testsPerRay = fast.rays ? double(fast.tests) / fast.rays : 0;
-            advice += QStringLiteral(" Moyenne : %1 tests d’objet par rayon; comparer cette valeur entre scènes pour suivre le coût BVH.").arg(testsPerRay, 0, 'f', 2);
-            diagnosis_->setText(advice);
-        } else if (!rows_.empty()) {
-            diagnosis_->setText(QStringLiteral("Une seule configuration mesurée : ajoutez plusieurs valeurs de threads pour isoler le coût du parallélisme."));
+        QStringList advice{QStringLiteral("%1 répétitions mesurées par configuration, médiane affichée; échauffement exclu. Ombres : %2 ms pour la passe unique.")
+            .arg(repetitionsMeasured_).arg(shadowMs_, 0, 'f', 1)};
+        if (modesMeasured.size() > 1) {
+            for (const auto& row : rows_) if (row.avx2) {
+                const auto ref = std::find_if(rows_.begin(), rows_.end(), [&row](const BenchmarkRow& r) { return !r.avx2 && r.threads == row.threads; });
+                if (ref != rows_.end()) advice << QStringLiteral("À %1 threads, AVX2 + FMA3 : %2× par rapport à x64 standard (%3 ms contre %4 ms).")
+                    .arg(row.threads).arg(ref->totalMs / std::max(.001, row.totalMs), 0, 'f', 2).arg(row.totalMs, 0, 'f', 1).arg(ref->totalMs, 0, 'f', 1);
+            }
         }
-        export_->setEnabled(!rows_.empty());
+        for (const QString& modeName : modesMeasured) {
+            std::vector<const BenchmarkRow*> group;
+            for (const auto& row : rows_) if ((row.avx2 ? QStringLiteral("AVX2 + FMA3") : QStringLiteral("x64 standard")) == modeName) group.push_back(&row);
+            if (group.size() >= 2) {
+                const double scaling = group.front()->totalMs / std::max(.001, group.back()->totalMs);
+                advice << QStringLiteral("%1 : %2× entre %3 et %4 threads.")
+                    .arg(modeName).arg(scaling, 0, 'f', 2).arg(group.front()->threads).arg(group.back()->threads);
+            }
+        }
+        if (!settingsSummary_.isEmpty()) advice << QStringLiteral("Réglages : %1.").arg(settingsSummary_);
+        diagnosis_->setText(advice.join(QStringLiteral(" ")));
+        export_->setEnabled(true);
     }
     void closeEvent(QCloseEvent* event) override { if (running_) { event->ignore(); return; } QDialog::closeEvent(event); }
 private:
     QLabel *sceneLabel_ = nullptr, *status_ = nullptr, *diagnosis_ = nullptr;
-    QComboBox* resolution_ = nullptr; QSpinBox* repeats_ = nullptr;
+    QComboBox *resolution_ = nullptr, *simdMode_ = nullptr; QSpinBox* repeats_ = nullptr;
     QProgressBar* progress_ = nullptr; QTableWidget* table_ = nullptr;
     QPushButton *run_ = nullptr, *export_ = nullptr, *cancel_ = nullptr, *close_ = nullptr;
     std::vector<std::pair<unsigned, QCheckBox*>> threadChecks_;
-    std::vector<BenchmarkRow> rows_; double shadowMs_ = 0; int width_ = 0, height_ = 0; unsigned samples_ = 1; bool running_ = false; QString settingsSummary_;
+    std::vector<BenchmarkRow> rows_; double shadowMs_ = 0; int width_ = 0, height_ = 0;
+    unsigned samples_ = 1, repetitionsMeasured_ = 0; bool running_ = false; QString settingsSummary_, modeSummary_;
     void exportCsv() {
         const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Exporter les résultats du benchmark"), QStringLiteral("benchmark_moteur3d.csv"), QStringLiteral("CSV (*.csv)"));
         if (path.isEmpty()) return;
         QFile file(path); if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) { QMessageBox::warning(this, QStringLiteral("Export CSV"), QStringLiteral("Impossible d’écrire ce fichier.")); return; }
         QTextStream out(&file); out.setEncoding(QStringConverter::Utf8);
-        out << "# scene=" << sceneLabel_->text() << "\n# settings=" << settingsSummary_ << "\n";
-        out << "# resolution=" << width_ << "x" << height_ << "; samples=" << samples_ << "; shadow_build_ms=" << QString::number(shadowMs_, 'f', 3) << "\n";
-        out << "threads;render_median_ms;post_median_ms;total_median_ms;rays;BVH_tests;BVH_nodes;AABB_tests;hits;texels\n";
-        for (const auto& r : rows_) out << r.threads << ';' << QString::number(r.renderMs, 'f', 3) << ';' << QString::number(r.postMs, 'f', 3) << ';' << QString::number(r.totalMs, 'f', 3) << ';' << r.rays << ';' << r.tests << ';' << r.nodes << ';' << r.aabb << ';' << r.hits << ';' << r.texels << '\n';
+        out << "# build=" << M3D_BUILD_ID_ANSI << "; scene=" << sceneLabel_->text() << "\n";
+        out << "# cpu_arch=" << QSysInfo::currentCpuArchitecture() << "; os=" << QSysInfo::productType() << " " << QSysInfo::productVersion()
+            << "; logical_processors=" << std::thread::hardware_concurrency() << "; avx2_fma_available=" << (avx2FmaAvailable() ? 1 : 0) << "\n";
+        out << "# simd_selection=" << modeSummary_ << "; repetitions=" << repetitionsMeasured_ << "; warmup=1\n";
+        out << "# settings=" << settingsSummary_ << "\n";
+        out << "# resolution=" << width_ << "x" << height_ << "; samples_per_pixel=" << samples_ << "; shadow_build_ms=" << QString::number(shadowMs_, 'f', 3) << "\n";
+        out << "simd;threads;render_median_ms;post_median_ms;total_median_ms;speedup_vs_reference;simd_gain_vs_x64_same_threads;rays;BVH_tests;BVH_nodes;AABB_tests;hits;texels\n";
+        const auto baseIt = std::find_if(rows_.begin(), rows_.end(), [](const BenchmarkRow& r) { return !r.avx2; });
+        const double referenceMs = rows_.empty() ? 0 : (baseIt == rows_.end() ? rows_.front() : *baseIt).totalMs;
+        for (const auto& r : rows_) {
+            const QString modeName = r.avx2 ? QStringLiteral("avx2_fma3") : QStringLiteral("x64");
+            const double relative = referenceMs / std::max(.001, r.totalMs);
+            const auto standard = std::find_if(rows_.begin(), rows_.end(), [&r](const BenchmarkRow& x) { return !x.avx2 && x.threads == r.threads; });
+            const QString simdGain = r.avx2 && standard != rows_.end() ? QString::number(standard->totalMs / std::max(.001, r.totalMs), 'f', 4) : QString();
+            out << modeName << ';' << r.threads << ';' << QString::number(r.renderMs, 'f', 3) << ';'
+                << QString::number(r.postMs, 'f', 3) << ';' << QString::number(r.totalMs, 'f', 3) << ';'
+                << QString::number(relative, 'f', 4) << ';' << simdGain << ';' << r.rays << ';' << r.tests << ';' << r.nodes << ';'
+                << r.aabb << ';' << r.hits << ';' << r.texels << '\n';
+        }
     }
 };
 static CameraPose ellipseOrbitPose(float distance, float angleDeg, float elevationDeg, float phaseDeg) {
@@ -664,11 +718,31 @@ private:
             std::sort(threadCounts.begin(), threadCounts.end());
             if (threadCounts.empty()) { QMessageBox::information(&dialog, QStringLiteral("Benchmark"), QStringLiteral("Sélectionnez au moins un nombre de threads.")); return; }
             const int repeats = dialog.repeats();
-            const QString settingsSummary = QStringLiteral("quality_scale=%1x%2; threads_requested=%3; hour_step=%4; fog=%5; dof=%6; edge_aa=%7; camera_distance=%8; camera_angle=%9; camera_elevation=%10; fov=%11")
-                .arg(scaleX, 0, 'f', 4).arg(scaleY, 0, 'f', 4).arg([&] { QStringList v; for (unsigned n : threadCounts) v << QString::number(n); return v.join(','); }())
+            const bool avxAvailable = avx2FmaAvailable();
+            const int selectedMode = dialog.requestedSimdMode();
+            std::vector<bool> simdModes;
+            switch (selectedMode) {
+                case 0: simdModes.push_back(cfg.avx2 && avxAvailable); break;
+                case 1: simdModes.push_back(false); break;
+                case 2:
+                    if (!avxAvailable) { QMessageBox::information(&dialog, QStringLiteral("Benchmark"), QStringLiteral("AVX2 + FMA3 n’est pas disponible sur ce processeur.")); return; }
+                    simdModes.push_back(true); break;
+                case 3:
+                    if (!avxAvailable) { QMessageBox::information(&dialog, QStringLiteral("Benchmark"), QStringLiteral("La comparaison complète nécessite AVX2 + FMA3.")); return; }
+                    simdModes = {false, true}; break;
+                default: simdModes.push_back(false); break;
+            }
+            const QString modeSummary = selectedMode == 3 ? QStringLiteral("Comparaison complète x64 / AVX2 + FMA3")
+                : selectedMode == 2 ? QStringLiteral("AVX2 + FMA3")
+                : selectedMode == 1 ? QStringLiteral("x64 standard")
+                : QStringLiteral("Mode choisi dans le moteur (%1)").arg(cfg.avx2 && avxAvailable ? QStringLiteral("AVX2 + FMA3") : QStringLiteral("x64 standard"));
+            const QString settingsSummary = QStringLiteral("output=%1x%2; internal=%3x%4; samples=%5; threads=%6; hour=%7; fog=%8; dof=%9; edge_aa=%10; camera=%11/%12/%13; fov=%14; arch=%15; logical_processors=%16")
+                .arg(cfg.outW).arg(cfg.outH).arg(cfg.renderW).arg(cfg.renderH).arg(cfg.samples)
+                .arg([&] { QStringList v; for (unsigned n : threadCounts) v << QString::number(n); return v.join(','); }())
                 .arg(cfg.hourStep).arg(cfg.fog ? 1 : 0).arg(cfg.dof ? 1 : 0).arg(cfg.edgeAa ? 1 : 0)
-                .arg(cfg.distance, 0, 'f', 2).arg(cfg.angle, 0, 'f', 1).arg(cfg.elevation, 0, 'f', 1).arg(cfg.fov, 0, 'f', 1);
-            dialog.setRows({}, 0, cfg.outW, cfg.outH, cfg.samples);
+                .arg(cfg.distance, 0, 'f', 2).arg(cfg.angle, 0, 'f', 1).arg(cfg.elevation, 0, 'f', 1).arg(cfg.fov, 0, 'f', 1)
+                .arg(QSysInfo::currentCpuArchitecture()).arg(std::thread::hardware_concurrency());
+            dialog.setRows({}, 0, cfg.outW, cfg.outH, cfg.samples, 0, modeSummary, settingsSummary);
             dialog.setRunning(true); dialog.setProgress(0, QStringLiteral("Préparation du benchmark…"));
             uint64_t token = 0;
             {
@@ -681,7 +755,7 @@ private:
                 token = benchmarkGeneration_.fetch_add(1) + 1;
             }
             requestCv_.notify_one();
-            benchmarkThread_ = std::thread([this, &dialog, cfg, threadCounts, repeats, token, settingsSummary] {
+            benchmarkThread_ = std::thread([this, &dialog, cfg, threadCounts, simdModes, repeats, token, modeSummary, settingsSummary] {
                 std::vector<BenchmarkRow> rows;
                 double shadowMs = 0;
                 std::unique_lock<std::mutex> sceneLock(sceneMutex_);
@@ -700,59 +774,63 @@ private:
                 auto shadowStart = std::chrono::steady_clock::now();
                 ShadowMap benchShadows = buildShadow(scene_, shadowStats);
                 shadowMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - shadowStart).count();
-                const int totalPasses = int(threadCounts.size()) * (repeats + 1);
+                const int totalPasses = int(simdModes.size() * threadCounts.size()) * (repeats + 1);
                 int done = 0;
-                for (unsigned threadCount : threadCounts) {
-                    if (benchmarkGeneration_.load() != token) break;
-                    std::vector<double> renderTimes, postTimes, totalTimes;
-                    BenchmarkRow row; row.threads = threadCount;
-                    for (int repetition = -1; repetition < repeats; ++repetition) {
+                for (bool useAvx2 : simdModes) {
+                    for (unsigned threadCount : threadCounts) {
                         if (benchmarkGeneration_.load() != token) break;
-                        std::vector<uint32_t> pixels(size_t(cfg.renderW) * cfg.renderH);
-                        Camera cam = camera(cfg.angle, cfg.elevation, cfg.distance, cfg.renderW, cfg.renderH, V{cfg.targetX,cfg.targetY,cfg.targetZ});
-                        cam.tanHalf = std::tan(cfg.fov * PI / 360.f); cam.focusDistance = cfg.distance;
-                        cam.apertureRadius = cfg.distance * .018f;
-                        cam.pixelAngle = 2 * cam.tanHalf / (cfg.renderW * (cfg.samples == 16 ? 4.f : cfg.samples == 4 ? 2.f : 1.f));
-                        unsigned samples = cfg.samples; if (cfg.dof && samples < 4) samples = 4;
-                        const auto start = std::chrono::steady_clock::now();
-                        Stats st = m3d::render(scene_, benchShadows, cam, cfg.renderW, cfg.renderH, pixels, threadCount, cfg.fog, benchmarkGeneration_, token, samples, cfg.dof, cfg.avx2);
-                        if (benchmarkGeneration_.load() != token) break;
-                        const double renderMs = st.ms;
-                        const auto postStart = std::chrono::steady_clock::now();
-                        if (cfg.renderW == cfg.outW * 2 && cfg.renderH == cfg.outH * 2) pixels = downsample2x(pixels, cfg.renderW, cfg.renderH, threadCount);
-                        else if (cfg.renderW != cfg.outW || cfg.renderH != cfg.outH) pixels = upscaleBilinear(pixels, cfg.renderW, cfg.renderH, cfg.outW, cfg.outH, threadCount);
-                        if (cfg.edgeAa) pixels = antialiasEdges4(pixels, cfg.outW, cfg.outH, threadCount, cfg.avx2);
-                        const double postMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - postStart).count();
-                        const double totalMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-                        if (repetition >= 0) {
-                            renderTimes.push_back(renderMs); postTimes.push_back(postMs); totalTimes.push_back(totalMs);
-                            row.rays += st.rays; row.tests += st.tests; row.nodes += st.nodes; row.aabb += st.aabb; row.hits += st.hits; row.texels += st.texels;
+                        std::vector<double> renderTimes, postTimes, totalTimes;
+                        BenchmarkRow row; row.threads = threadCount; row.avx2 = useAvx2;
+                        for (int repetition = -1; repetition < repeats; ++repetition) {
+                            if (benchmarkGeneration_.load() != token) break;
+                            std::vector<uint32_t> pixels(size_t(cfg.renderW) * cfg.renderH);
+                            Camera cam = camera(cfg.angle, cfg.elevation, cfg.distance, cfg.renderW, cfg.renderH, V{cfg.targetX,cfg.targetY,cfg.targetZ});
+                            cam.tanHalf = std::tan(cfg.fov * PI / 360.f); cam.focusDistance = cfg.distance;
+                            cam.apertureRadius = cfg.distance * .018f;
+                            cam.pixelAngle = 2 * cam.tanHalf / (cfg.renderW * (cfg.samples == 16 ? 4.f : cfg.samples == 4 ? 2.f : 1.f));
+                            unsigned samples = cfg.samples; if (cfg.dof && samples < 4) samples = 4;
+                            const auto start = std::chrono::steady_clock::now();
+                            Stats st = m3d::render(scene_, benchShadows, cam, cfg.renderW, cfg.renderH, pixels, threadCount, cfg.fog, benchmarkGeneration_, token, samples, cfg.dof, useAvx2);
+                            if (benchmarkGeneration_.load() != token) break;
+                            const double renderMs = st.ms;
+                            const auto postStart = std::chrono::steady_clock::now();
+                            if (cfg.renderW == cfg.outW * 2 && cfg.renderH == cfg.outH * 2) pixels = downsample2x(pixels, cfg.renderW, cfg.renderH, threadCount);
+                            else if (cfg.renderW != cfg.outW || cfg.renderH != cfg.outH) pixels = upscaleBilinear(pixels, cfg.renderW, cfg.renderH, cfg.outW, cfg.outH, threadCount);
+                            if (cfg.edgeAa) pixels = antialiasEdges4(pixels, cfg.outW, cfg.outH, threadCount, useAvx2);
+                            const double postMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - postStart).count();
+                            const double totalMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+                            if (repetition >= 0) {
+                                renderTimes.push_back(renderMs); postTimes.push_back(postMs); totalTimes.push_back(totalMs);
+                                row.rays += st.rays; row.tests += st.tests; row.nodes += st.nodes; row.aabb += st.aabb; row.hits += st.hits; row.texels += st.texels;
+                            }
+                            ++done;
+                            const int progress = int(100.0 * done / std::max(1, totalPasses));
+                            const QString modeName = useAvx2 ? QStringLiteral("AVX2 + FMA3") : QStringLiteral("x64 standard");
+                            QMetaObject::invokeMethod(&dialog, [&dialog, progress, threadCount, repetition, repeats, modeName] {
+                                const QString phase = repetition < 0 ? QStringLiteral("Échauffement") : QStringLiteral("Mesure %1/%2").arg(repetition + 1).arg(repeats);
+                                dialog.setProgress(progress, QStringLiteral("%1 — %2 thread(s) — %3 — buffer séparé").arg(modeName).arg(threadCount).arg(phase));
+                            }, Qt::QueuedConnection);
                         }
-                        ++done;
-                        const int progress = int(100.0 * done / std::max(1, totalPasses));
-                        QMetaObject::invokeMethod(&dialog, [&dialog, progress, threadCount, repetition, repeats] {
-                            const QString phase = repetition < 0 ? QStringLiteral("Échauffement") : QStringLiteral("Mesure %1/%2").arg(repetition + 1).arg(repeats);
-                            dialog.setProgress(progress, QStringLiteral("%1 thread(s) — %2 — buffer de résultat séparé").arg(threadCount).arg(phase));
-                        }, Qt::QueuedConnection);
+                        if (renderTimes.empty()) break;
+                        auto median = [](std::vector<double>& values) {
+                            std::sort(values.begin(), values.end());
+                            const size_t mid = values.size() / 2;
+                            return values.size() % 2 ? values[mid] : (values[mid - 1] + values[mid]) * .5;
+                        };
+                        row.renderMs = median(renderTimes); row.postMs = median(postTimes); row.totalMs = median(totalTimes);
+                        row.rays /= uint64_t(renderTimes.size()); row.tests /= uint64_t(renderTimes.size()); row.nodes /= uint64_t(renderTimes.size());
+                        row.aabb /= uint64_t(renderTimes.size()); row.hits /= uint64_t(renderTimes.size()); row.texels /= uint64_t(renderTimes.size());
+                        rows.push_back(row);
                     }
-                    if (renderTimes.empty()) break;
-                    auto median = [](std::vector<double>& values) {
-                        std::sort(values.begin(), values.end());
-                        const size_t mid = values.size() / 2;
-                        return values.size() % 2 ? values[mid] : (values[mid - 1] + values[mid]) * .5;
-                    };
-                    row.renderMs = median(renderTimes); row.postMs = median(postTimes); row.totalMs = median(totalTimes);
-                    row.rays /= uint64_t(renderTimes.size()); row.tests /= uint64_t(renderTimes.size()); row.nodes /= uint64_t(renderTimes.size());
-                    row.aabb /= uint64_t(renderTimes.size()); row.hits /= uint64_t(renderTimes.size()); row.texels /= uint64_t(renderTimes.size());
-                    rows.push_back(row);
+                    if (benchmarkGeneration_.load() != token) break;
                 }
                 sceneLock.unlock();
                 { std::lock_guard<std::mutex> lock(requestMutex_); benchmarking_ = false; }
                 const bool cancelled = benchmarkGeneration_.load() != token;
-                QMetaObject::invokeMethod(&dialog, [this, &dialog, rows = std::move(rows), shadowMs, cfg, settingsSummary, cancelled] () mutable {
-                    dialog.setRows(std::move(rows), shadowMs, cfg.outW, cfg.outH, cfg.samples, settingsSummary);
+                QMetaObject::invokeMethod(&dialog, [this, &dialog, rows = std::move(rows), shadowMs, cfg, repeats, modeSummary, settingsSummary, cancelled] () mutable {
+                    dialog.setRows(std::move(rows), shadowMs, cfg.outW, cfg.outH, cfg.samples, unsigned(repeats), modeSummary, settingsSummary);
                     if (cancelled) dialog.setProgress(0, QStringLiteral("Benchmark annulé — résultats partiels conservés. Ombres : %1 ms.").arg(shadowMs, 0, 'f', 1));
-                    else dialog.setProgress(100, QStringLiteral("Terminé — comparaison médiane. Ombres (passe unique) : %1 ms.").arg(shadowMs, 0, 'f', 1));
+                    else dialog.setProgress(100, QStringLiteral("Terminé — médianes par mode et threads. Ombres (passe unique) : %1 ms.").arg(shadowMs, 0, 'f', 1));
                     dialog.setRunning(false);
                     requestCv_.notify_one();
                 }, Qt::QueuedConnection);

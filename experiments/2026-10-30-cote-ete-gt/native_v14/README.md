@@ -1,8 +1,8 @@
-# Moteur 3D natif x64 — build 261103-0018
+# Moteur 3D natif x64 — build 261103-0019
 
 ## Repères de version
 
-- **Build natif :** `261103-0018`.
+- **Build natif :** `261103-0019`.
 - **Révision GitHub :** SHA court du commit, injecté à la compilation.
 - **Branche GitHub :** nom exact de la branche, injecté à la compilation.
 - **Scène et géométrie source :** V13.14.
@@ -88,3 +88,6 @@ Le fichier source CC0 est dans `assets/1970s-coupe/1970s-coupe.glb`. L’exporte
 La source est publiée sous CC0 1.0 : https://grab3d.com/models/vehicles/1970s-coupe/.
 
 Le build `261103-0018` découpe des ouvertures circulaires dans les deux couches de la coque de la bathysphère. Les hublots avant et latéraux sont alignés sur ces ouvertures; les nervures et sangles s'interrompent à leur bord pour laisser les ouvertures dégagées.
+
+
+Le build `261103-0019` ajoute au benchmark le choix du mode SIMD, la comparaison x64 / AVX2 + FMA3, les barres de débit relatif et un export CSV enrichi avec le mode, les répétitions, l’architecture et les compteurs par configuration.
