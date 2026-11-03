@@ -62,3 +62,12 @@ Cette modification conserve l’ordre des calculs par axe, les limites du rayon 
 Le build 0021 a réduit le rendu d’environ 12–16 % sur le relevé fourni en raccourcissant le test AABB. Le CSV garde toutefois zéro paquet SIMD de triangles. Le code AVX2 sait traiter huit triangles, mais le constructeur BVH imposait auparavant une coupure inconditionnelle dès quatre primitives : le chemin ne pouvait donc jamais être appelé.
 
 Le build 0022 conserve des feuilles homogènes de triangles jusqu’à huit primitives, ce qui rend le noyau AVX2 atteignable. L’exporteur affiche le nombre de feuilles candidates dans les logs CI. Cela peut réduire la profondeur du BVH, mais peut aussi augmenter le nombre de triangles testés par rayon : aucun gain n’est présumé. Comparer le rendu x64 et AVX2/FMA3, les paquets triangles, les compteurs BVH/AABB et le temps total avant de garder cette politique.
+
+
+## Build 261103-0023 — SIMD entre feuilles sœurs
+
+Le benchmark du build 0022 a confirmé 1 076 768 paquets triangles AVX2, mais l’élargissement des feuilles a augmenté les tests d’objets d’environ 33 % et n’a pas accéléré le rendu. Le build 0023 revient à l’arbre à petites feuilles et repère au chargement les nœuds internes dont les deux enfants feuilles contiennent huit triangles au total.
+
+En mode AVX2 seulement, si les deux boîtes enfants sont toutes deux traversées par le rayon et qu’aucun triangle n’est filtré, le moteur teste leur groupe de huit triangles en un paquet et évite de pousser puis visiter les deux feuilles. Si une boîte manque ou qu’un objet doit être ignoré, il reprend le parcours normal. Le mode x64 garde ainsi le même arbre et le même chemin d’intersection.
+
+Le build-time exporter compte les paires candidates. Le benchmark doit confirmer que le noyau est effectivement appelé et que le temps AVX2 baisse sans gonfler le nombre de tests.

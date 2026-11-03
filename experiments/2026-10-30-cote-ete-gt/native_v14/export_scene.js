@@ -55,14 +55,14 @@ eval(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\n${sc
 const scene = globalThis.__scene;
 const objects = scene.objects;
 const bvh = scene.bvh;
-const leafStats = { leaves: 0, triangleLeaves8: 0, trianglesInLeaves: 0, maxLeaf: 0 };
-for (const node of bvh) if (node.ids) {
-  leafStats.leaves++;
-  leafStats.maxLeaf = Math.max(leafStats.maxLeaf, node.ids.length);
-  if (node.ids.length === 8 && node.ids.every(id => objects[id].type === 'triangle')) leafStats.triangleLeaves8++;
-  if (node.ids.every(id => objects[id].type === 'triangle')) leafStats.trianglesInLeaves += node.ids.length;
+const bvhStats = { leaves: 0, trianglePairCandidates: 0, maxLeaf: 0 };
+for (const node of bvh) {
+  if (node.ids) { bvhStats.leaves++; bvhStats.maxLeaf = Math.max(bvhStats.maxLeaf, node.ids.length); continue; }
+  const left = bvh[node.left], right = bvh[node.right];
+  if (!left?.ids || !right?.ids || left.ids.length + right.ids.length !== 8) continue;
+  if ([...left.ids, ...right.ids].every(id => objects[id].type === 'triangle')) bvhStats.trianglePairCandidates++;
 }
-console.log(`BVH leaves: ${leafStats.leaves}; max leaf: ${leafStats.maxLeaf}; 8-triangle SIMD candidates: ${leafStats.triangleLeaves8}; triangles in homogeneous leaves: ${leafStats.trianglesInLeaves}`);
+console.log(`BVH leaves: ${bvhStats.leaves}; max leaf: ${bvhStats.maxLeaf}; SIMD sibling-pair candidates: ${bvhStats.trianglePairCandidates}`);
 const mats = scene.mats;
 const orangePbr = readPbrMipChain(path.join(__dirname, 'assets/orange_texturecan/orange_peel_512.m3dpbr'));
 scene.materials.set('orange', { levels: orangePbr.color });

@@ -356,8 +356,7 @@ function buildBVH(){
   }
   const index=bvh.length,node={minX:boundsMin[0],minY:boundsMin[1],minZ:boundsMin[2],maxX:boundsMax[0],maxY:boundsMax[1],maxZ:boundsMax[2],left:-1,right:-1,ids:null};
   bvh.push(node);
-  const triangleOnly=indices.length<=8&&indices.every(k=>objects[k].type==='triangle');
-  if(indices.length<=4||triangleOnly){node.ids=indices;return index;}
+  if(indices.length<=4){node.ids=indices;return index;}
   let bestAxis=-1,bestSplit=-1,bestCost=Infinity;
   for(let axis=0;axis<3;axis++){
    let cMin=Infinity,cMax=-Infinity;

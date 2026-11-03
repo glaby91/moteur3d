@@ -43,6 +43,14 @@ bool loadScene(const std::filesystem::path& path,Scene& s,std::wstring& error){
    else{if(n.left<0||n.right<0||(uint32_t)n.left>=nn||(uint32_t)n.right>=nn||n.left==n.right)return fail(error,L"Liens de nœud BVH invalides.");stack.push_back(n.right);stack.push_back(n.left);}
   }
   if(std::find(seenNodes.begin(),seenNodes.end(),0)!=seenNodes.end()||std::find(seenObjects.begin(),seenObjects.end(),0)!=seenObjects.end()||std::find(seenOrder.begin(),seenOrder.end(),0)!=seenOrder.end())return fail(error,L"Le BVH ne couvre pas tous les nœuds et objets.");
+  for(auto& n:tmp.node)if(!n.count){
+   const Node& l=tmp.node[n.left];const Node& r=tmp.node[n.right];
+   if(l.count<=0||r.count<=0||l.count+r.count!=8)continue;
+   bool triangles=true;
+   for(int32_t k=0;k<l.count&&triangles;k++)triangles=tmp.obj[tmp.order[l.start+k]].kind==Kind::Triangle;
+   for(int32_t k=0;k<r.count&&triangles;k++)triangles=tmp.obj[tmp.order[r.start+k]].kind==Kind::Triangle;
+   n.simdTrianglePair=triangles;
+  }
   for(auto& m:tmp.mat){uint32_t levels=0;if(!readU32(f,levels)||levels!=7)return fail(error,L"Pyramide de texture invalide (7 niveaux attendus).");m.mip.resize(levels);uint32_t expected=512;
    for(auto& l:m.mip){uint32_t size=0;if(!readU32(f,size)||size!=expected)return fail(error,L"Taille de niveau mip invalide.");l.size=size;l.p.resize(size_t(size)*size);for(auto& v:l.p)if(!readU16(f,v))return fail(error,L"Texture RGB565 tronquée.");expected>>=1;}
   }
