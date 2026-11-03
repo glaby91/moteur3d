@@ -6,7 +6,7 @@ Moteur 3D expérimental (archives QBasic + démonstrations HTML/JavaScript).
 
 ### Version de travail actuelle : V14 native
 
-Le build Qt courant ajoute un aperçu GPU rasterisé facultatif **Direct3D 11** (Windows), tandis que le ray tracing CPU reste le mode complet par défaut. La résolution initiale est **1366 × 768**, adaptée au Vostro ; les résolutions supérieures restent disponibles. L’aperçu GPU simplifie l’éclairage et ne calcule pas les effets raytracés CPU. Voir [la note Direct3D 11](experiments/2026-10-30-cote-ete-gt/native_v14/docs/DIRECTX11-GPU-PREVIEW.md).
+Le build Qt courant ajoute un affichage GPU temps réel facultatif **Direct3D 11** (Windows), tandis que le ray tracing CPU reste le mode complet par défaut. La résolution initiale est **1366 × 768**, adaptée au Vostro ; les résolutions supérieures restent disponibles. L’affichage GPU simplifie l’éclairage et ne calcule pas les effets raytracés CPU. Voir [la note Direct3D 11](experiments/2026-10-30-cote-ete-gt/native_v14/docs/DIRECTX11-GPU-PREVIEW.md).
 
 **[Application native Qt](experiments/2026-10-30-cote-ete-gt/native_v14/)** · [Build Windows/Linux et téléchargements](https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v14-qt.yml) · [Référence navigateur V13.16](experiments/2026-10-30-cote-ete-gt/moteur3d_v1316_cpu_workers_2026.html) · [Architecture CPU / FPGA](docs/CPU_FPGA_RENDER_BACKEND.md) · [Choix mémoire et carte FPGA](docs/FPGA_MEMORY_AND_BOARD_SELECTION.md)
 

@@ -524,9 +524,9 @@ private:
         resolution_ = new QComboBox(panel);
         resolution_->addItems({QStringLiteral("Vostro — 1366 × 768"), QStringLiteral("Full HD — 1920 × 1080"), QStringLiteral("1600 × 900"), QStringLiteral("1280 × 720"), QStringLiteral("4K UHD — 3840 × 2160")});
         renderer_ = new QComboBox(panel);
-        renderer_->addItems({QStringLiteral("CPU — ray tracing complet"), QStringLiteral("GPU — DirectX 11 (aperçu rapide)")});
+        renderer_->addItems({QStringLiteral("CPU — ray tracing complet"), QStringLiteral("GPU — DirectX 11 (affichage temps réel)")});
         renderer_->setCurrentIndex(0);
-        renderer_->setToolTip(QStringLiteral("DirectX 11 rasterise la géométrie sur le GPU pour un aperçu rapide. Ombres par rayons, DOF, réflexions et réfraction restent disponibles dans le rendu CPU complet."));
+        renderer_->setToolTip(QStringLiteral("DirectX 11 rasterise la scène sur le GPU pour une navigation réactive. L’éclairage est simplifié ; ombres par rayons, DOF, réflexions et réfraction restent dans le rendu CPU complet."));
 #ifndef _WIN32
         renderer_->setItemData(1, 0, Qt::UserRole - 1);
         renderer_->setItemData(1, QStringLiteral("DirectX 11 est disponible uniquement sous Windows."), Qt::ToolTipRole);
@@ -879,6 +879,7 @@ private:
         settings_.outW = video ? 800 : ri == 0 ? 1366 : ri == 1 ? 1920 : ri == 2 ? 1600 : ri == 3 ? 1280 : 3840;
         settings_.outH = video ? 600 : ri == 0 ? 768 : ri == 1 ? 1080 : ri == 2 ? 900 : ri == 3 ? 720 : 2160;
         settings_.directX11 = renderer_->currentIndex() == 1;
+        if (navigationPreviewTimer_) navigationPreviewTimer_->setInterval(settings_.directX11 ? 50 : 350);
         threads_->setEnabled(!settings_.directX11);
         simdMode_->setEnabled(!settings_.directX11);
         fog_->setEnabled(!settings_.directX11);
@@ -893,7 +894,8 @@ private:
         settings_.targetX=cameraTarget_.x; settings_.targetY=cameraTarget_.y; settings_.targetZ=cameraTarget_.z;
         settings_.navigationPreview=navigationActive_;
         if(settings_.navigationPreview) {
-            const float scale=std::min(1.f,std::min(480.f/std::max(1,settings_.outW),270.f/std::max(1,settings_.outH)));
+            const float previewW=settings_.directX11?1024.f:480.f,previewH=settings_.directX11?576.f:270.f;
+            const float scale=std::min(1.f,std::min(previewW/std::max(1,settings_.outW),previewH/std::max(1,settings_.outH)));
             settings_.renderW=std::max(1,int(std::lround(settings_.outW*scale)));
             settings_.renderH=std::max(1,int(std::lround(settings_.outH*scale)));
             settings_.samples=1u; settings_.edgeAa=false;
@@ -917,7 +919,7 @@ private:
         settings_.fog = fog_->isChecked();
         settings_.dof = dof_->isChecked() && !navigationActive_;
         threadLabel_->setText(settings_.directX11
-            ? QStringLiteral("DirectX 11 — aperçu GPU")
+            ? QStringLiteral("DirectX 11 — affichage temps réel")
             : QStringLiteral("Threads CPU : %1 — SIMD : %2").arg(settings_.threads).arg(settings_.avx2 ? QStringLiteral("AVX2 + FMA3") : QStringLiteral("x64 standard")));
     }
 
