@@ -1,10 +1,11 @@
 # SIMD du moteur
 
-Les noyaux AVX2 sont séparés sous `src/simd/avx2/`. Le détecteur x64 valide les capacités CPU et l’état OS avant de les appeler. Le chemin standard reste compilé et sélectionnable.
+Les noyaux AVX2 sont séparés sous `src/simd/avx2/`. Le détecteur x64 valide les capacités CPU et l’état OS avant dispatch. Le chemin standard reste compilé et sélectionnable.
 
-- `post.cpp` : AA des contours.
-- `ray_generation.cpp` : rayons caméra normalisés par paquets de huit, hors DOF.
-- `triangle_intersection.cpp` : Möller–Trumbore sur huit triangles d’une même feuille BVH.
-- Le parcours BVH, les matériaux, textures, réflexions et le DOF gardent leurs branches scalaires. Les requêtes d’ombres et de réflexion profitent du test AVX2 des triangles, car elles partagent `closest()`.
+- `post.cpp` : AA contours.
+- `ray_generation.cpp` : rayon caméra par groupes de huit, hors DOF.
+- `triangle_intersection.cpp` : intersections de huit triangles homogènes d’une feuille BVH.
+- `bvh_bounds.cpp` : tests simultanés des deux enfants BVH; actif pour chaque nœud interne sur le chemin AVX2.
+- Les matériaux, textures, réflexions, autres primitives et le DOF conservent leur chemin scalaire; les rayons secondaires et d’ombres utilisent les noyaux BVH AVX2 lorsqu’ils sont compatibles.
 
-Les optimisations seront mesurées séparément; la présence d’AVX2 n’implique pas que chaque opération divergente soit vectorisée.
+Les performances doivent être mesurées par scène et qualité avant d’étendre le SIMD aux autres étapes.
