@@ -1,4 +1,4 @@
-# Bathysphère Rapture et navigation interactive — build 261103-0005
+# Bathysphère Rapture et navigation interactive — build 261103-0006
 
 ## Modifications
 
@@ -50,3 +50,7 @@ Les captures du mode vidéo du build 261103-0001 montrent des vues où la coque 
 ## Fixation des hublots — build 261103-0005
 
 Retour utilisateur : le hublot avant semblait décollé de la sphère. Les bagues, boulons, attaches et éclairages du hublot avant suivent maintenant la profondeur de la surface sphérique; les bagues et le vitrage des hublots latéraux utilisent également leur position sur la coque. Une capture réelle doit confirmer le raccord visuel.
+
+## Démarrage Windows sans console — build 261103-0006
+
+Le lancement affichait une fenêtre console avant l’interface Qt. La cible passe maintenant par `qt_add_executable(... WIN32 ...)` pour demander le sous-système graphique Windows. Les identifiants ANSI/Wide du build et de la version sont également alignés sur `261103-0006`; cela corrige l’ancien titre qui restait affiché en `0001`.

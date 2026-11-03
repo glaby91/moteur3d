@@ -21,7 +21,7 @@ add_library(m3d_core STATIC ${M3D_CORE_SOURCES})
 target_include_directories(m3d_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(m3d_core PUBLIC Threads::Threads)
 
-add_executable(moteur3d_qt src/moteur3d_qt.cpp)
+qt_add_executable(moteur3d_qt WIN32 src/moteur3d_qt.cpp)
 target_link_libraries(moteur3d_qt PRIVATE m3d_core Qt6::Widgets)
 
 if(MSVC)

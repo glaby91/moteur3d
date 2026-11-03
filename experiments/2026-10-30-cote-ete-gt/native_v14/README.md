@@ -1,8 +1,8 @@
-# Moteur 3D natif x64 — build 261103-0005
+# Moteur 3D natif x64 — build 261103-0006
 
 ## Repères de version
 
-- **Version :** `261103-0005`.
+- **Version :** `261103-0006`.
 - **Révision GitHub :** SHA court du commit, injecté à la compilation.
 - **Branche GitHub :** nom exact de la branche, injecté à la compilation.
 - **Scène et géométrie source :** V13.14.
