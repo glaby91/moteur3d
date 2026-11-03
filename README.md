@@ -6,9 +6,11 @@ Moteur 3D expérimental (archives QBasic + démonstrations HTML/JavaScript).
 
 ### Version de travail actuelle : V14 native
 
-**[Source C++ natif](experiments/2026-10-30-cote-ete-gt/native_v14/moteur3d_v14_native.cpp)** · [Compilation Windows et exécutable](https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v14-native-windows.yml) · [Référence navigateur V13.16](experiments/2026-10-30-cote-ete-gt/moteur3d_v1316_cpu_workers_2026.html) · [Architecture CPU / FPGA](docs/CPU_FPGA_RENDER_BACKEND.md) · [Choix mémoire et carte FPGA](docs/FPGA_MEMORY_AND_BOARD_SELECTION.md)
+Le build Qt courant ajoute un aperçu GPU rasterisé facultatif **Direct3D 11** (Windows), tandis que le ray tracing CPU reste le mode complet par défaut. La résolution initiale est **1366 × 768**, adaptée au Vostro ; les résolutions supérieures restent disponibles. L’aperçu GPU simplifie l’éclairage et ne calcule pas les effets raytracés CPU. Voir [la note Direct3D 11](experiments/2026-10-30-cote-ete-gt/native_v14/docs/DIRECTX11-GPU-PREVIEW.md).
 
-La V14 est une application **C++17 native Windows**, avec une fenêtre Win32 et un panneau de commandes. L’interface propose quatre résolutions (960 × 540, 1280 × 720, 1680 × 945 et 1920 × 1080), le réglage du nombre de threads CPU, un recalcul explicite et trois vues caméra. Les diagnostics affichent la durée, le nombre de rayons, les tests de traversée et le nombre de primitives. Les flèches déplacent aussi la caméra au clavier. Le moteur calcule l’image en logiciel par lancer de rayons, BVH et tuiles CPU parallèles; il ne lance ni navigateur, ni WebView, ni code HTML, ni API GPU. Le binaire Windows 64 bits est produit par GitHub Actions.
+**[Application native Qt](experiments/2026-10-30-cote-ete-gt/native_v14/)** · [Build Windows/Linux et téléchargements](https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v14-qt.yml) · [Référence navigateur V13.16](experiments/2026-10-30-cote-ete-gt/moteur3d_v1316_cpu_workers_2026.html) · [Architecture CPU / FPGA](docs/CPU_FPGA_RENDER_BACKEND.md) · [Choix mémoire et carte FPGA](docs/FPGA_MEMORY_AND_BOARD_SELECTION.md)
+
+La V14 Qt est une application **C++17 native Windows/Linux** avec un panneau de commandes. Le ray tracing CPU utilise un BVH et des tuiles parallèles ; sous Windows, un aperçu raster facultatif exploite Direct3D 11. Les diagnostics distinguent le mode GPU du rendu CPU complet. Le binaire Windows 64 bits est produit par GitHub Actions.
 
 La V14 est le premier port natif: le modèle et le décor sont encore une reconstruction simplifiée du design détaillé de la V13.16. Les temps de l’aperçu Linux ne prédisent pas les performances Windows; le gain doit être comparé sur le PC cible avec une résolution et une scène identiques.
 

@@ -16,6 +16,7 @@ set(M3D_CORE_SOURCES
     src/m3d_render.cpp
     src/m3d_post.cpp
     src/m3d_simd.cpp
+    src/m3d_directx11.cpp
     src/simd/avx2/post.cpp
     src/simd/avx2/ray_generation.cpp
     src/simd/avx2/triangle_intersection.cpp
@@ -24,6 +25,9 @@ set(M3D_CORE_SOURCES
 )
 
 add_library(m3d_core STATIC ${M3D_CORE_SOURCES})
+if(WIN32)
+    target_link_libraries(m3d_core PUBLIC d3d11 dxgi d3dcompiler)
+endif()
 target_include_directories(m3d_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(m3d_core PUBLIC Threads::Threads)
 

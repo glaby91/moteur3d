@@ -30,7 +30,8 @@ Le chargeur vérifie la signature, la version, les limites de quantités, la rac
 
 Les réglages d’entrée sont fournis par l’interface :
 
-- Résolution de sortie : 1920×1080 (par défaut), 1600×900, 1280×720 ou 3840×2160 (4K UHD).
+- Résolution de sortie : 1366×768 (par défaut, résolution native du Vostro), 1920×1080, 1600×900, 1280×720 ou 3840×2160 (4K UHD).
+- Backend : ray tracing CPU complet par défaut ; aperçu raster facultatif Direct3D 11 sous Windows. Ce dernier n’inclut pas les ombres par rayons, la profondeur de champ ni les réflexions/réfraction du rendu CPU.
 - Précision interne : 100 %, 87,5 %, 75 %, 66,7 %, 50 %, lissage local des contours à 4 voisins (par défaut) ou FSAA 16×.
 - Caméra : distance, rotation (−180° à 180°), élévation (−5° à 50°) et champ horizontal (35° à 105°).
 - Heure : positions 0–32, converties en 06:00–22:00 par pas de 30 minutes.
@@ -52,7 +53,8 @@ The loader validates the signature, version, count limits, root and BVH graph (l
 
 Inputs supplied by the user interface:
 
-- Output resolution: 1920×1080 (default), 1600×900, 1280×720, or 3840×2160 (4K UHD).
+- Output resolution: 1366×768 (default, Vostro native resolution), 1920×1080, 1600×900, 1280×720, or 3840×2160 (4K UHD).
+- Backend: full CPU ray tracing by default; optional Direct3D 11 raster preview on Windows. The preview omits ray-traced shadows, depth of field, and the CPU renderer's reflections/refraction.
 - Internal scale: 100%, 87.5%, 75%, 66.7%, 50%, four-neighbour edge smoothing (default), or FSAA 16×.
 - Camera: distance, rotation (−180° to 180°), elevation (−5° to 50°) and horizontal field of view (35° to 105°).
 - Time: slider positions 0–32 map to 06:00–22:00 in 30-minute steps.

@@ -18,7 +18,7 @@ Ce document décrit l’application Qt Widgets compilée pour Windows et Linux a
 - Les ombres disposent de leur propre carte de profondeur de 1024 × 1024 pixels, filtrée en PCF 5 × 5. Des bornes min/max réduisent les lectures.
 - Le BVH est créé lors de l’export, puis parcouru de l’impact le plus proche au plus éloigné. Les inverses de direction du rayon sont calculés une seule fois et réutilisés lors des tests AABB de chaque nœud.
 
-4K UHD output is available while Full HD remains the default. At 4K output, the selected internal scale still controls render cost; 200% calculates at 7680 × 4320 and can be substantially slower on a CPU. / La sortie 4K UHD est disponible, Full HD restant le réglage initial. En 4K, l’échelle interne choisie détermine toujours le coût; le mode 200 % calcule en 7680 × 4320 et peut être nettement plus lent sur CPU.
+4K UHD output remains available. The default output is now 1366 × 768 for the Vostro display; Full HD and higher resolutions can still be selected. An optional Windows Direct3D 11 raster preview uses the GPU; the full CPU ray tracer remains the default and supports ray shadows, depth of field, reflections and refraction. / La sortie 4K UHD reste disponible. La résolution initiale est maintenant 1366 × 768 pour l’écran du Vostro ; Full HD et les résolutions supérieures restent sélectionnables. Un aperçu raster facultatif utilise le GPU Direct3D 11 sous Windows ; le raytracer CPU complet reste le mode initial et conserve les ombres par rayons, la profondeur de champ, les réflexions et la réfraction.
 
 The perspective camera traces one ray per internal pixel and keeps the nearest hit. BVH bounds skip unnecessary intersections. Main-view depth comes from ray intersections rather than a traditional raster Z-buffer. Shadows use a separate 1024 × 1024 depth map with 5 × 5 PCF filtering and min/max bounds. The six native geometry types are triangle, box, rounded box, capsule, cone, and ellipsoid; triangle meshes carry smooth vertex normals and UVs.
 
@@ -51,7 +51,7 @@ Its current export contains 207,661 objects (148,203 triangles); the Qt opening 
 
 | Réglage | Valeurs |
 |---|---|
-| Résolution de sortie | 1920 × 1080 (par défaut), 1600 × 900, 1280 × 720, 3840 × 2160 (4K UHD) |
+| Résolution de sortie | 1366 × 768 (par défaut, Vostro), 1920 × 1080, 1600 × 900, 1280 × 720, 3840 × 2160 (4K UHD) |
 | Précision interne | 100 %, 87,5 %, 75 %, 66,7 %, 50 %, FSAA 16×; case AA contours indépendante |
 | Caméra | Distance, rotation et élévation; molette pour zoomer; orbite par glisser gauche; déplacement du point visé par glisser droit et touches WASD/R/F |
 | Heure | 33 positions entre 06:00 et 22:00 |
