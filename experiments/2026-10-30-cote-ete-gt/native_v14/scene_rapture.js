@@ -349,7 +349,7 @@ function makeScene() {
   // three viewports so their glazing and the lit cabin behind it are visible.
   function bathysphereHull(radius, material, segments=96, rows=64) {
     const apertures=[
-      {dir:[0,0,-1],cos:.910},
+      {dir:[0,0,-1],cos:.890},
       {dir:[1,0,0],cos:.975},
       {dir:[-1,0,0],cos:.975}
     ],grid=[];
@@ -372,7 +372,7 @@ function makeScene() {
   }
   bathysphereHull(br,'wheelMetal');
   bathysphereHull(br*.94,'metal');
-  const portY=by+.15,portZ=bz-br-.06,frontPortRadius=1.53;
+  const portY=by+.15,portZ=bz-br-.06,frontPortRadius=1.65;
   // Shell rings, longitudinal ribs, access hatch, bolts and viewport bezels.
   for(let latitude=-3;latitude<=3;latitude++) {
     const theta=(latitude/4)*Math.PI*.5,rr=br*Math.cos(theta),yy=by+br*Math.sin(theta);
@@ -783,4 +783,3 @@ function makeScene() {
     ellipsoidMesh(x,.03,z,.10,.035,.10,'raptureBronze',12,8);
   }
 }
-  // Side portholes and hatch hardware.

@@ -357,7 +357,7 @@ private:
 
     void setCameraSliders(int distanceHalf,int angle,int elevation,int fov) {
         const QSignalBlocker b0(distance_),b1(angle_),b2(elevation_),b3(fov_);
-        distance_->setValue(distanceHalf); angle_->setValue(angle_); elevation_->setValue(elevation); fov_->setValue(fov);
+        distance_->setValue(distanceHalf); angle_->setValue(angle); elevation_->setValue(elevation); fov_->setValue(fov);
     }
 
     void applySceneCameraPreset() {
