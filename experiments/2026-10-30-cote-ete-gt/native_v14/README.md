@@ -1,8 +1,8 @@
-# Moteur 3D natif x64 — build 261102-0007
+# Moteur 3D natif x64 — build 261103-0001
 
 ## Repères de version
 
-- **Version :** `261102-0007`.
+- **Version :** `261103-0001`.
 - **Révision GitHub :** SHA court du commit, injecté à la compilation.
 - **Branche GitHub :** nom exact de la branche, injecté à la compilation.
 - **Scène et géométrie source :** V13.14.
@@ -16,7 +16,7 @@ La carte d’architecture, l’inventaire des fonctions exposées, leur statut e
 
 ## Sources de scène modifiables
 
-Les décors restent des sources indépendantes : `scene_coastal_v1314.js`, `scene_orange_macro.js` et l’étude Rapture `scene_rapture.js`. Chaque fichier décrit géométrie, placement et matériaux; `source_v1314.html` fournit les primitives et l’aperçu, tandis que `export_scene.js` produit un binaire natif. Rapture conserve ses façades Art déco, son dôme vitré, ses 42 éclairages urbains et sa bathysphère, désormais percée de vrais hublots sur un double coque. La cabine ambrée avec lampe et instruments se voit à travers le hublot avant. Un jeton commémoratif argenté avec un « R » en relief est présenté dans une vitrine éclairée. Le nouvel export contient **226 942 objets**, dont **167 311 triangles**, **119 899 nœuds BVH** et **44 lumières locales**; le binaire fait **45,3 Mo**. Les matériaux pierre, bronze et verre ont des cartes couleur, normale et rugosité; le verre utilise Fresnel/réfraction et l’interface Qt peut activer le bloom doux. Les lumières locales n’ont pas encore d’ombres et le verre reste une approximation mince. La scène côtière comprend le coupé CC0; son export de référence contient 1 537 833 triangles, 1 541 767 objets et 920 433 nœuds BVH.
+Les décors restent des sources indépendantes : `scene_coastal_v1314.js`, `scene_orange_macro.js` et l’étude Rapture `scene_rapture.js`. Chaque fichier décrit géométrie, placement et matériaux; `source_v1314.html` fournit les primitives et l’aperçu, tandis que `export_scene.js` produit un binaire natif. La bathysphère Rapture reçoit une coque segmentée et rivetée, un grand hublot avant réellement ouvert dans les deux enveloppes, des hublots latéraux élargis et un poste de pilotage ambré visible avec instruments et commandes. L’ouverture de `scene_rapture.bin` sélectionne un cadrage rapproché face à la bathysphère. La vue se pilote par glisser gauche (orbite), glisser droit (déplacement), molette (zoom) et touches WASD/R/F; pendant les mouvements, l’image est recalculée en aperçu 480 × 270, puis à la qualité et à la résolution choisies après 450 ms d’arrêt. Le jeton commémoratif argenté avec un « R » en relief reste dans sa vitrine. Les matériaux pierre, bronze et verre ont des cartes couleur, normale et rugosité; le verre utilise Fresnel/réfraction et les lumières locales n’ont pas encore d’ombres propres.
 
 ## Fonctionnalités détaillées
 

@@ -53,16 +53,16 @@ Its current export contains 207,661 objects (148,203 triangles); the Qt opening 
 |---|---|
 | Résolution de sortie | 1920 × 1080 (par défaut), 1600 × 900, 1280 × 720, 3840 × 2160 (4K UHD) |
 | Précision interne | 100 %, 87,5 %, 75 %, 66,7 %, 50 %, FSAA 16×; case AA contours indépendante |
-| Caméra | Distance; rotation −180° à 180°; élévation −5° à 50°; champ horizontal 35° à 105° |
+| Caméra | Distance, rotation et élévation; molette pour zoomer; orbite par glisser gauche; déplacement du point visé par glisser droit et touches WASD/R/F |
 | Heure | 33 positions entre 06:00 et 22:00 |
 | Threads CPU | 1 à 32 |
 | Brouillard | Activé / désactivé |
 | Bloom doux | Optionnel; activé automatiquement pour un fichier dont le nom contient `rapture` |
 | Vues rapides | Initiale, avant, arrière |
 | Aperçu rotatif | Fenêtre 800 × 600, calcul 400 × 300 et rotation automatique autour de la scène |
-| Rendu | Recalcul de l’image à la demande et lors des changements de réglage |
+| Rendu | Aperçu interne 480 × 270 pendant la navigation, puis qualité/résolution choisies après 450 ms d’arrêt |
 
-Chaque image est calculée dans un tampon privé; l’interface ne l’affiche qu’une fois le rendu et le post-traitement terminés. L’image complète précédente reste visible pendant le calcul. Fermer l’aperçu rotatif arrête la rotation et restaure les réglages précédents.
+Chaque image est calculée dans un tampon privé; l’interface ne l’affiche qu’une fois le rendu et le post-traitement terminés. L’image précédente reste visible pendant le calcul. Pendant la navigation, l’application rend un aperçu interne plafonné à 480 × 270, sans DOF ni AA contours; après 450 ms sans entrée caméra, elle revient automatiquement à la qualité, à la résolution, au DOF et à l’AA choisis. Fermer l’aperçu rotatif arrête la rotation et restaure les réglages précédents.
 
 La case AA contours applique, après mise à l’échelle, un filtre de quatre voisins à l’image de sortie, quel que soit le mode interne choisi. Elle peut être cochée ou décochée pour Natif, Équilibré, Détails, Rapide, Très rapide et FSAA 16×; elle est activée par défaut. Le filtre détecte les fortes transitions de luminance et adoucit localement ces pixels, tandis que les zones sans contraste marqué restent inchangées. Le SSAA 4× est retiré de l’interface; les échelles internes inférieures sont adaptées par interpolation bilinéaire.
 
@@ -92,7 +92,7 @@ The orange and Rapture materials use color/normal/roughness maps embedded in V4 
 
 ## Modules et compilation / Modules and build flow
 
-Les scènes sont définies dans `scene_coastal_v1314.js`, `scene_orange_macro.js` et `scene_rapture.js`. `export_scene.js` produit géométrie, textures PBR, lumières de scène et BVH dans des binaires V4, rétrocompatibles à la lecture avec V3. CMake compile directement les six modules moteur et l’interface Qt; le workflow courant produit des paquets Windows et Linux. `moteur3d_win32.cpp` reste une source historique non compilée par ce workflow.
+La bathysphère Rapture utilise désormais une coque à rivets, un grand hublot avant avec cabine visible et des hublots latéraux élargis. L’ouverture de `scene_rapture.bin` place automatiquement la caméra face au véhicule, à courte distance. Les scènes sont définies dans `scene_coastal_v1314.js`, `scene_orange_macro.js` et `scene_rapture.js`. `export_scene.js` produit géométrie, textures PBR, lumières de scène et BVH dans des binaires V4, rétrocompatibles à la lecture avec V3. CMake compile directement les six modules moteur et l’interface Qt; le workflow courant produit des paquets Windows et Linux. `moteur3d_win32.cpp` reste une source historique non compilée par ce workflow.
 
 Scenes are defined in `scene_coastal_v1314.js`, `scene_orange_macro.js`, and `scene_rapture.js`. `export_scene.js` writes geometry, PBR textures, scene lights and the BVH to V4; the loader remains backward compatible with V3. CMake directly builds the six engine modules and Qt frontend; the current workflow packages Windows and Linux builds. `moteur3d_win32.cpp` remains a legacy source and is not compiled by this workflow.
 

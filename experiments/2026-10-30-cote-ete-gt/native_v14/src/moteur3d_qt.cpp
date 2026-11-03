@@ -15,6 +15,11 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QImage>
+#include <QKeyEvent>
+#include <QMouseEvent>
+#include <QWheelEvent>
+#include <QFileInfo>
+#include <QSignalBlocker>
 #include <QLabel>
 #include <QMainWindow>
 #include <QMenu>
@@ -40,6 +45,7 @@
 #include <atomic>
 #include <condition_variable>
 #include <filesystem>
+#include <functional>
 #include <mutex>
 #include <thread>
 
@@ -50,6 +56,8 @@ struct RenderSettings {
     int outW = 1920, outH = 1080;
     int renderW = 1920, renderH = 1080;
     float distance = 12.f, angle = -43.f, elevation = 7.f, fov = 50.f;
+    float targetX = 0.f, targetY = 1.f, targetZ = -8.f;
+    bool navigationPreview = false;
     unsigned threads = 16, samples = 1;
     int hourStep = 12;
     bool fog = false, dof = false, edgeAa = true, videoPreview = false;
@@ -194,25 +202,60 @@ static CameraPose ellipseOrbitPose(float distance, float angleDeg, float elevati
 class ImageView final : public QWidget {
 public:
     explicit ImageView(QWidget* parent = nullptr) : QWidget(parent) {
-        setMinimumSize(480, 320);
-        setAutoFillBackground(false);
+        setMinimumSize(480, 320); setAutoFillBackground(false);
+        setFocusPolicy(Qt::StrongFocus); setMouseTracking(true);
     }
     void setFrame(QImage image) { image_ = std::move(image); update(); }
+    void setNavigationHandlers(std::function<void(int,int,bool)> drag, std::function<void(int)> zoom,
+                               std::function<bool(int)> move, std::function<void()> release) {
+        dragHandler_ = std::move(drag); zoomHandler_ = std::move(zoom);
+        moveHandler_ = std::move(move); releaseHandler_ = std::move(release);
+    }
 protected:
     void paintEvent(QPaintEvent*) override {
-        QPainter p(this);
-        p.fillRect(rect(), QColor(4, 12, 17));
+        QPainter p(this); p.fillRect(rect(), QColor(4, 12, 17));
         if (image_.isNull()) return;
-        QSize fit = image_.size();
-        fit.scale(size(), Qt::KeepAspectRatio);
-        QRect target(QPoint((width() - fit.width()) / 2, (height() - fit.height()) / 2), fit);
-        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
-        p.drawImage(target, image_);
+        QSize fit=image_.size(); fit.scale(size(), Qt::KeepAspectRatio);
+        QRect target(QPoint((width()-fit.width())/2,(height()-fit.height())/2),fit);
+        p.setRenderHint(QPainter::SmoothPixmapTransform,true); p.drawImage(target,image_);
+    }
+    void mousePressEvent(QMouseEvent* event) override {
+        if(event->button()==Qt::LeftButton || event->button()==Qt::RightButton) {
+            pressedButton_=event->button(); lastMouse_=event->position().toPoint(); dragged_=false;
+            setCursor(Qt::ClosedHandCursor); setFocus(Qt::MouseFocusReason); event->accept(); return;
+        }
+        QWidget::mousePressEvent(event);
+    }
+    void mouseMoveEvent(QMouseEvent* event) override {
+        if(pressedButton_!=Qt::NoButton && (event->buttons() & pressedButton_)) {
+            const QPoint current=event->position().toPoint(), delta=current-lastMouse_; lastMouse_=current;
+            if(!delta.isNull() && dragHandler_) { dragged_=true; dragHandler_(delta.x(),delta.y(),pressedButton_==Qt::RightButton); }
+            event->accept(); return;
+        }
+        QWidget::mouseMoveEvent(event);
+    }
+    void mouseReleaseEvent(QMouseEvent* event) override {
+        if(event->button()==pressedButton_) {
+            pressedButton_=Qt::NoButton; unsetCursor();
+            if(dragged_ && releaseHandler_) releaseHandler_();
+            dragged_=false; event->accept(); return;
+        }
+        QWidget::mouseReleaseEvent(event);
+    }
+    void wheelEvent(QWheelEvent* event) override {
+        if(zoomHandler_) zoomHandler_(event->angleDelta().y()); event->accept();
+    }
+    void keyPressEvent(QKeyEvent* event) override {
+        if(moveHandler_ && moveHandler_(event->key())) { event->accept(); return; }
+        QWidget::keyPressEvent(event);
     }
 private:
-    QImage image_;
+    QImage image_; QPoint lastMouse_; Qt::MouseButton pressedButton_=Qt::NoButton; bool dragged_=false;
+    std::function<void(int,int,bool)> dragHandler_;
+    std::function<void(int)> zoomHandler_;
+    std::function<bool(int)> moveHandler_;
+    std::function<void()> releaseHandler_;
 };
-
 class VideoPreviewWindow final : public QDialog {
 public:
     explicit VideoPreviewWindow(QWidget* parent = nullptr) : QDialog(parent, Qt::Window) {
@@ -240,6 +283,8 @@ public:
         resize(1480, 900);
         setMinimumSize(1000, 620);
         buildUi();
+        applySceneCameraPreset();
+        readSettings();
         auto* fileMenu = menuBar()->addMenu(QStringLiteral("Scène"));
         auto* openScene = fileMenu->addAction(QStringLiteral("Ouvrir une scène…"));
         connect(openScene, &QAction::triggered, this, [this] { openSceneFile(); });
@@ -294,12 +339,87 @@ private:
     size_t videoFrameIndex_ = 0, videoPlaybackIndex_ = 0;
     bool videoBuilding_ = false, videoPlaying_ = false;
     float videoAngle_ = 0.f;
+    V cameraTarget_{0.f,1.f,-8.f};
+    bool navigationActive_ = false;
+    QTimer* navigationPreviewTimer_ = nullptr;
+    QTimer* navigationIdleTimer_ = nullptr;
 
     static QSlider* slider(Qt::Orientation orientation, int min, int max, int value, QWidget* parent) {
         auto* s = new QSlider(orientation, parent);
         s->setRange(min, max);
         s->setValue(value);
         return s;
+    }
+
+    bool isRaptureScene() const {
+        return QFileInfo(currentScenePath_).fileName().contains(QStringLiteral("rapture"),Qt::CaseInsensitive);
+    }
+
+    void setCameraSliders(int distanceHalf,int angle,int elevation,int fov) {
+        const QSignalBlocker b0(distance_),b1(angle_),b2(elevation_),b3(fov_);
+        distance_->setValue(distanceHalf); angle_->setValue(angle_); elevation_->setValue(elevation); fov_->setValue(fov);
+    }
+
+    void applySceneCameraPreset() {
+        navigationActive_=false;
+        if(navigationPreviewTimer_) navigationPreviewTimer_->stop();
+        if(navigationIdleTimer_) navigationIdleTimer_->stop();
+        if(isRaptureScene()) { cameraTarget_={0.f,4.4f,-35.f}; setCameraSliders(22,180,10,52); }
+        else { cameraTarget_={0.f,1.f,-8.f}; setCameraSliders(24,-43,7,50); }
+    }
+
+    void beginNavigation() {
+        navigationActive_=true;
+        if(navigationPreviewTimer_ && !navigationPreviewTimer_->isActive()) navigationPreviewTimer_->start();
+        if(navigationIdleTimer_) navigationIdleTimer_->start(450);
+    }
+
+    void finishNavigation() {
+        if(!navigationActive_) return;
+        navigationActive_=false;
+        if(navigationPreviewTimer_) navigationPreviewTimer_->stop();
+        readSettings(); requestRender();
+    }
+
+    void handleCameraDrag(int dx,int dy,bool pan) {
+        if(!dx && !dy) return;
+        beginNavigation();
+        if(pan) {
+            const float distance=distance_->value()*.5f, angle=angle_->value()*PI/180.f;
+            const float elevation=elevation_->value()*PI/180.f, fov=fov_->value()*PI/180.f;
+            const float scale=std::max(.001f,distance*2.f*std::tan(fov*.5f)/std::max(1,image_->height()));
+            const V right{std::cos(angle),0.f,-std::sin(angle)};
+            const V up{-std::sin(angle)*std::sin(elevation),std::cos(elevation),-std::cos(angle)*std::sin(elevation)};
+            cameraTarget_=cameraTarget_+right*(-float(dx)*scale)+up*(float(dy)*scale);
+        } else {
+            setCameraSliders(distance_->value(),angle_->value()-int(std::lround(dx*.32f)),
+                std::max(-10,std::min(65,elevation_->value()+int(std::lround(dy*.24f)))),fov_->value());
+        }
+        readSettings(); navigationIdleTimer_->start(450);
+    }
+
+    void handleCameraZoom(int delta) {
+        if(!delta) return;
+        beginNavigation();
+        const int increments=std::max(1,int(std::lround(std::abs(delta)/120.f)))*2*(delta>0?-1:1);
+        distance_->setValue(distance_->value()+increments);
+        readSettings(); navigationIdleTimer_->start(450);
+    }
+
+    bool handleCameraKey(int key) {
+        const float distance=distance_->value()*.5f,angle=angle_->value()*PI/180.f;
+        const float step=std::max(.15f,distance*.055f);
+        const V forward{-std::sin(angle),0.f,-std::cos(angle)},right{std::cos(angle),0.f,-std::sin(angle)};
+        switch(key) {
+            case Qt::Key_W: cameraTarget_=cameraTarget_+forward*step; break;
+            case Qt::Key_S: cameraTarget_=cameraTarget_-forward*step; break;
+            case Qt::Key_A: cameraTarget_=cameraTarget_-right*step; break;
+            case Qt::Key_D: cameraTarget_=cameraTarget_+right*step; break;
+            case Qt::Key_R: cameraTarget_.y+=step; break;
+            case Qt::Key_F: cameraTarget_.y-=step; break;
+            default: return false;
+        }
+        beginNavigation(); readSettings(); navigationIdleTimer_->start(450); return true;
     }
 
     void buildUi() {
@@ -314,6 +434,9 @@ private:
         auto* info = new QLabel(QStringLiteral("Scène V13.14  |  Git ") + QString::fromUtf8(M3D_GIT_REVISION_ANSI) + QStringLiteral("  |  branche ") + QString::fromUtf8(M3D_GIT_BRANCH_ANSI) + QStringLiteral("  |  rendu CPU parallèle"), left);
         info->setStyleSheet("color:#d4e1eb");
         image_ = new ImageView(left);
+        auto* navigationInfo = new QLabel(QStringLiteral("Navigation : glisser gauche pour tourner, glisser droit pour se déplacer, molette pour zoomer, WASD + R/F pour avancer et monter."), left);
+        navigationInfo->setWordWrap(true);
+        navigationInfo->setStyleSheet("color:#b8cbd8;font-size:11px;");
         hourLabel_ = new QLabel(QStringLiteral("Heure : 12:00 — Midi"), left);
         hour_ = slider(Qt::Horizontal, 0, 32, 12, left);
         auto* hourMarks = new QHBoxLayout;
@@ -323,6 +446,7 @@ private:
         leftLayout->addWidget(title);
         leftLayout->addWidget(info);
         leftLayout->addWidget(image_, 1);
+        leftLayout->addWidget(navigationInfo);
         leftLayout->addWidget(hourLabel_);
         leftLayout->addWidget(hour_);
         leftLayout->addLayout(hourMarks);
@@ -344,7 +468,7 @@ private:
         controls->addWidget(new QLabel(QStringLiteral("Précision du calcul interne"), panel)); controls->addWidget(quality_);
 
         auto* form = new QFormLayout;
-        distance_ = slider(Qt::Horizontal, 9, 48, 24, panel);
+        distance_ = slider(Qt::Horizontal, 6, 80, 24, panel);
         angle_ = slider(Qt::Horizontal, -180, 180, -43, panel);
         elevation_ = slider(Qt::Horizontal, -5, 50, 7, panel);
         fov_ = slider(Qt::Horizontal, 35, 105, 50, panel);
@@ -403,7 +527,14 @@ private:
 
         connect(resolution_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) { readSettings(); requestRender(); });
         connect(quality_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) { readSettings(); requestRender(); });
-        for (auto* s : {distance_, angle_, elevation_, fov_, threads_, hour_}) {
+        for (auto* s : {distance_, angle_, elevation_, fov_}) {
+            connect(s, &QSlider::sliderReleased, this, [this] { beginNavigation(); });
+            connect(s, &QSlider::valueChanged, this, [this, s](int) {
+                if (s->isSliderDown()) { beginNavigation(); readSettings(); }
+                else if (!navigationActive_) { readSettings(); requestRender(); }
+            });
+        }
+        for (auto* s : {threads_, hour_}) {
             connect(s, &QSlider::sliderReleased, this, [this] { readSettings(); requestRender(); });
             connect(s, &QSlider::valueChanged, this, [this, s](int) { if (!s->isSliderDown()) { readSettings(); requestRender(); } });
         }
@@ -434,14 +565,29 @@ private:
             if (enabled) status_->setText(QStringLiteral("Calcul vidéo — image 1 / 180 — caméra 0° / 360°"));
         });
         connect(renderButton_, &QPushButton::clicked, this, [this] { readSettings(); requestRender(); });
-        connect(homeButton_, &QPushButton::clicked, this, [this] { distance_->setValue(24); angle_->setValue(-43); elevation_->setValue(7); fov_->setValue(50); readSettings(); requestRender(); });
-        connect(frontButton_, &QPushButton::clicked, this, [this] { distance_->setValue(20); angle_->setValue(-10); elevation_->setValue(4); readSettings(); requestRender(); });
-        connect(rearButton_, &QPushButton::clicked, this, [this] { distance_->setValue(24); angle_->setValue(-145); elevation_->setValue(7); readSettings(); requestRender(); });
+        connect(homeButton_, &QPushButton::clicked, this, [this] { applySceneCameraPreset(); readSettings(); requestRender(); });
+        connect(frontButton_, &QPushButton::clicked, this, [this] {
+            if (isRaptureScene()) setCameraSliders(16,180,7,48); else setCameraSliders(20,-10,4,50);
+            readSettings(); requestRender();
+        });
+        connect(rearButton_, &QPushButton::clicked, this, [this] {
+            if (isRaptureScene()) setCameraSliders(24,0,9,55); else setCameraSliders(24,-145,7,50);
+            readSettings(); requestRender();
+        });
         connect(hour_, &QSlider::valueChanged, this, [this](int step) {
             float h = 6.f + step * .5f;
             QString mode = h < 9 ? QStringLiteral("Matin") : h < 16 ? QStringLiteral("Midi") : h < 20 ? QStringLiteral("Coucher de soleil") : QStringLiteral("Nuit");
             hourLabel_->setText(QStringLiteral("Heure : %1:%2 — %3").arg(int(h), 2, 10, QLatin1Char('0')).arg((step % 2) ? QStringLiteral("30") : QStringLiteral("00"), mode));
         });
+        navigationPreviewTimer_ = new QTimer(this); navigationPreviewTimer_->setInterval(350);
+        connect(navigationPreviewTimer_, &QTimer::timeout, this, [this] { if (navigationActive_) { readSettings(); requestRender(); } });
+        navigationIdleTimer_ = new QTimer(this); navigationIdleTimer_->setSingleShot(true);
+        connect(navigationIdleTimer_, &QTimer::timeout, this, [this] { finishNavigation(); });
+        image_->setNavigationHandlers(
+            [this](int dx,int dy,bool pan) { handleCameraDrag(dx,dy,pan); },
+            [this](int delta) { handleCameraZoom(delta); },
+            [this](int key) { return handleCameraKey(key); },
+            [this] { navigationIdleTimer_->start(450); });
     }
 
     void openSceneFile() {
@@ -471,6 +617,8 @@ private:
             shadowHour_ = hourStep;
         }
         currentScenePath_ = path;
+        applySceneCameraPreset();
+        readSettings();
         requestRender();
     }
 
@@ -551,7 +699,7 @@ private:
                     for (int repetition = -1; repetition < repeats; ++repetition) {
                         if (benchmarkGeneration_.load() != token) break;
                         std::vector<uint32_t> pixels(size_t(cfg.renderW) * cfg.renderH);
-                        Camera cam = camera(cfg.angle, cfg.elevation, cfg.distance, cfg.renderW, cfg.renderH);
+                        Camera cam = camera(cfg.angle, cfg.elevation, cfg.distance, cfg.renderW, cfg.renderH, V{cfg.targetX,cfg.targetY,cfg.targetZ});
                         cam.tanHalf = std::tan(cfg.fov * PI / 360.f); cam.focusDistance = cfg.distance;
                         cam.apertureRadius = cfg.distance * .018f;
                         cam.pixelAngle = 2 * cam.tanHalf / (cfg.renderW * (cfg.samples == 16 ? 4.f : cfg.samples == 4 ? 2.f : 1.f));
@@ -608,6 +756,7 @@ private:
         distance_->setEnabled(enabled); angle_->setEnabled(enabled); elevation_->setEnabled(enabled); fov_->setEnabled(enabled);
         threads_->setEnabled(enabled); hour_->setEnabled(enabled); fog_->setEnabled(enabled); dof_->setEnabled(enabled); edgeAa_->setEnabled(enabled);
         renderButton_->setEnabled(enabled); homeButton_->setEnabled(enabled); frontButton_->setEnabled(enabled); rearButton_->setEnabled(enabled);
+        image_->setEnabled(enabled);
         menuBar()->setEnabled(enabled);
     }
 
@@ -624,6 +773,14 @@ private:
         settings_.samples = qi == 5 ? 16u : 1u;
         settings_.edgeAa = edgeAa_->isChecked();
         settings_.videoPreview = video;
+        settings_.targetX=cameraTarget_.x; settings_.targetY=cameraTarget_.y; settings_.targetZ=cameraTarget_.z;
+        settings_.navigationPreview=navigationActive_;
+        if(settings_.navigationPreview) {
+            const float scale=std::min(1.f,std::min(480.f/std::max(1,settings_.outW),270.f/std::max(1,settings_.outH)));
+            settings_.renderW=std::max(1,int(std::lround(settings_.outW*scale)));
+            settings_.renderH=std::max(1,int(std::lround(settings_.outH*scale)));
+            settings_.samples=1u; settings_.edgeAa=false;
+        }
         settings_.distance = distance_->value() * .5f;
         settings_.angle = float(angle_->value());
         settings_.elevation = float(elevation_->value());
@@ -637,7 +794,7 @@ private:
         settings_.threads = unsigned(threads_->value());
         settings_.hourStep = hour_->value();
         settings_.fog = fog_->isChecked();
-        settings_.dof = dof_->isChecked();
+        settings_.dof = dof_->isChecked() && !navigationActive_;
         threadLabel_->setText(QStringLiteral("Threads CPU : %1").arg(settings_.threads));
     }
 
@@ -693,7 +850,7 @@ private:
             }
 
             std::vector<uint32_t> pixels(size_t(cfg.renderW) * cfg.renderH);
-            Camera cam = camera(cfg.angle, cfg.elevation, cfg.distance, cfg.renderW, cfg.renderH);
+            Camera cam = camera(cfg.angle, cfg.elevation, cfg.distance, cfg.renderW, cfg.renderH, V{cfg.targetX,cfg.targetY,cfg.targetZ});
             cam.tanHalf = std::tan(cfg.fov * PI / 360.f);
             cam.focusDistance = cfg.distance;
             cam.apertureRadius = cfg.distance * .018f;

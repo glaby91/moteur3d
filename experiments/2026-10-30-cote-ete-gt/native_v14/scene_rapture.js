@@ -349,9 +349,9 @@ function makeScene() {
   // three viewports so their glazing and the lit cabin behind it are visible.
   function bathysphereHull(radius, material, segments=96, rows=64) {
     const apertures=[
-      {dir:[0,0,-1],cos:.968},
-      {dir:[1,0,0],cos:.985},
-      {dir:[-1,0,0],cos:.985}
+      {dir:[0,0,-1],cos:.910},
+      {dir:[1,0,0],cos:.975},
+      {dir:[-1,0,0],cos:.975}
     ],grid=[];
     for(let iy=0;iy<=rows;iy++) {
       const theta=iy/rows*Math.PI,row=[];
@@ -372,13 +372,16 @@ function makeScene() {
   }
   bathysphereHull(br,'wheelMetal');
   bathysphereHull(br*.94,'metal');
+  const portY=by+.15,portZ=bz-br-.06,frontPortRadius=1.53;
   // Shell rings, longitudinal ribs, access hatch, bolts and viewport bezels.
   for(let latitude=-3;latitude<=3;latitude++) {
     const theta=(latitude/4)*Math.PI*.5,rr=br*Math.cos(theta),yy=by+br*Math.sin(theta);
     for(let i=0;i<64;i++) {
       const a0=i*Math.PI*2/64,a1=(i+1)*Math.PI*2/64;
-      capsule([bx+Math.cos(a0)*rr,yy,bz+Math.sin(a0)*rr],
-              [bx+Math.cos(a1)*rr,yy,bz+Math.sin(a1)*rr],.060,'raptureBronze');
+      const p0=[bx+Math.cos(a0)*rr,yy,bz+Math.sin(a0)*rr],p1=[bx+Math.cos(a1)*rr,yy,bz+Math.sin(a1)*rr];
+      const mid=[(p0[0]+p1[0])*.5,(p0[1]+p1[1])*.5,(p0[2]+p1[2])*.5];
+      if(!(mid[2]<bz-2.8 && mid[0]*mid[0]+(mid[1]-portY)*(mid[1]-portY)<frontPortRadius*frontPortRadius))
+        capsule(p0,p1,.060,'raptureBronze');
     }
   }
   for(let i=0;i<16;i++) {
@@ -387,52 +390,74 @@ function makeScene() {
       const phi=-Math.PI*.48+j*Math.PI*.96/18;
       pts.push([bx+Math.cos(a)*br*Math.cos(phi),by+br*Math.sin(phi),bz+Math.sin(a)*br*Math.cos(phi)]);
     }
-    for(let j=0;j<pts.length-1;j++) capsule(pts[j],pts[j+1],.043,'metal');
-    const p=pts[9];
-    ellipsoidMesh(p[0],p[1],p[2],.085,.085,.085,'raptureBronze',12,8);
-  }
-  // Prominent forward porthole, beveled circular rings and radial bolts.
-  const portY=by+.15,portZ=bz-br-.06;
-  for(const r of [.98,.78,.61]) {
-    for(let i=0;i<48;i++) {
-      const a0=i*Math.PI*2/48,a1=(i+1)*Math.PI*2/48;
-      capsule([Math.cos(a0)*r,portY+Math.sin(a0)*r,portZ],
-              [Math.cos(a1)*r,portY+Math.sin(a1)*r,portZ],.075,r>.8?'wheelMetal':'metal');
+    for(let j=0;j<pts.length-1;j++) {
+      const p0=pts[j],p1=pts[j+1],mid=[(p0[0]+p1[0])*.5,(p0[1]+p1[1])*.5,(p0[2]+p1[2])*.5];
+      if(!(mid[2]<bz-2.8 && mid[0]*mid[0]+(mid[1]-portY)*(mid[1]-portY)<frontPortRadius*frontPortRadius))
+        capsule(p0,p1,.043,'metal');
+    }
+    for(const j of [3,6,12,15]) {
+      const p=pts[j];
+      if(!(p[2]<bz-2.8 && p[0]*p[0]+(p[1]-portY)*(p[1]-portY)<frontPortRadius*frontPortRadius))
+        ellipsoidMesh(p[0],p[1],p[2],.072,.072,.072,'raptureBronze',12,8);
     }
   }
-  ellipsoidMesh(0,portY,portZ+.04,.57,.57,.08,'raptureGlass',40,28);
-  // Amber instrument bulkhead, cabin lamp and gauge relief sit several metres
-  // behind the real opening, creating depth through the transparent viewport.
-  const cabinZ=bz+1.55, cabinR=.83, cabinCenter={p:[bx,by+.15,cabinZ],n:[0,0,-1],uv:[.5,.5]};
-  for(let i=0;i<48;i++) {
-    const a0=i*Math.PI*2/48,a1=(i+1)*Math.PI*2/48;
+  // Oversized forward viewport exposes the amber cabin from the station approach.
+  for(const r of [1.48,1.28,1.08]) {
+    for(let i=0;i<64;i++) {
+      const a0=i*Math.PI*2/64,a1=(i+1)*Math.PI*2/64;
+      capsule([Math.cos(a0)*r,portY+Math.sin(a0)*r,portZ],[Math.cos(a1)*r,portY+Math.sin(a1)*r,portZ],.105,r>1.35?'wheelMetal':'raptureBronze');
+    }
+  }
+  for(let i=0;i<20;i++) {
+    const a=i*Math.PI*2/20;
+    ellipsoidMesh(Math.cos(a)*1.42,portY+Math.sin(a)*1.42,portZ-.035,.078,.078,.065,'raptureBronze',12,8);
+  }
+  for(const [x,y] of [[0,1.34],[1.34,0],[0,-1.34],[-1.34,0]]) {
+    capsule([x*.91,portY+y*.91,portZ-.05],[x*1.12,portY+y*1.12,portZ-.07],.11,'metal');
+    ellipsoidMesh(x*1.12,portY+y*1.12,portZ-.08,.13,.13,.11,'wheelMetal',14,10);
+  }
+  ellipsoidMesh(0,portY,portZ+.035,1.02,1.02,.085,'raptureGlass',56,40);
+  // The instrument bulkhead is placed several metres behind the glazing.
+  const cabinZ=bz+1.55,cabinR=1.22,cabinCenter={p:[bx,by+.15,cabinZ],n:[0,0,-1],uv:[.5,.5]};
+  for(let i=0;i<64;i++) {
+    const a0=i*Math.PI*2/64,a1=(i+1)*Math.PI*2/64;
     const v=a=>({p:[bx+Math.cos(a)*cabinR,by+.15+Math.sin(a)*cabinR,cabinZ],n:[0,0,-1],uv:[.5+.5*Math.cos(a),.5+.5*Math.sin(a)]});
     meshTriangle(cabinCenter,v(a0),v(a1),'windowlit');
-    capsule([bx+Math.cos(a0)*.91,by+.15+Math.sin(a0)*.91,cabinZ-.025],[bx+Math.cos(a1)*.91,by+.15+Math.sin(a1)*.91,cabinZ-.025],.045,'raptureBronze');
+    capsule([bx+Math.cos(a0)*1.30,by+.15+Math.sin(a0)*1.30,cabinZ-.025],[bx+Math.cos(a1)*1.30,by+.15+Math.sin(a1)*1.30,cabinZ-.025],.055,'raptureBronze');
   }
-  ellipsoidMesh(bx,by+.82,bz+1.22,.20,.27,.20,'lamp',18,12);
-  // Three recessed analog instruments and their pointers.
-  for(const [gx,gy,gr] of [[-.39,by+.18,.18],[0,by+.18,.22],[.39,by+.18,.18]]) {
-    ellipsoidMesh(gx,gy,bz+1.47,gr,gr,.035,'metal',20,14);
-    ellipsoidMesh(gx,gy,bz+1.425,gr*.75,gr*.75,.025,'wheelMetal',18,12);
-    capsule([gx,gy,bz+1.39],[gx+gr*.43,gy+gr*.19,bz+1.39],.018,'raptureBronze');
+  ellipsoidMesh(bx,by+.78,bz+1.22,.24,.31,.22,'lamp',20,14);
+  for(const [gx,gy,gr] of [[-.59,by+.16,.25],[0,by+.16,.30],[.59,by+.16,.25]]) {
+    ellipsoidMesh(gx,gy,bz+1.47,gr,gr,.045,'metal',24,16);
+    ellipsoidMesh(gx,gy,bz+1.415,gr*.78,gr*.78,.030,'wheelMetal',22,16);
+    capsule([gx,gy,bz+1.37],[gx+gr*.42,gy+gr*.18,bz+1.37],.024,'raptureBronze');
   }
-  M3D_SCENE_LIGHTS.push([bx,by+.72,bz+1.22,7.5,1.35,255,151,76]);
+  for(const [lx,lean] of [[-.40,-.10],[0,.05],[.40,.13]]) {
+    capsule([lx,by-.73,bz+1.43],[lx+lean,by-.20,bz+1.38],.048,'metal');
+    ellipsoidMesh(lx+lean,by-.17,bz+1.37,.085,.075,.085,'raptureBronze',12,8);
+  }
+  M3D_SCENE_LIGHTS.push([bx,by+.82,bz+1.22,8.0,1.85,255,151,76]);
   for(let i=0;i<16;i++) {
-    const a=i*Math.PI*2/16;
-    ellipsoidMesh(Math.cos(a)*.91,portY+Math.sin(a)*.91,portZ-.06,.075,.075,.055,'led',10,8);
+    const a=i*Math.PI/8;
+    ellipsoidMesh(Math.cos(a)*1.39,portY+Math.sin(a)*1.39,portZ-.09,.070,.070,.052,'lamp',10,8);
+  }
+  // Access hatch on the upper shell, with a raised rim and locking bolts.
+  ellipsoidMesh(bx,by+br*.94,bz,.94,.32,.94,'metal',40,24);
+  ellipsoidMesh(bx,by+br+.14,bz,.88,.11,.88,'wheelMetal',40,24);
+  for(let i=0;i<12;i++) {
+    const a=i*Math.PI/6;
+    ellipsoidMesh(Math.cos(a)*.78,by+br+.18,bz+Math.sin(a)*.78,.075,.07,.075,'raptureBronze',10,8);
   }
   // Side portholes and hatch hardware.
   for(const side of [-1,1]) {
     const x=side*(br*.76);
-    for(const r of [.62,.47]) {
+    for(const r of [.78,.59,.44]) {
       for(let i=0;i<36;i++) {
         const a0=i*Math.PI*2/36,a1=(i+1)*Math.PI*2/36;
         capsule([x,by+Math.cos(a0)*r,bz+Math.sin(a0)*r],
                 [x,by+Math.cos(a1)*r,bz+Math.sin(a1)*r],.055,'metal');
       }
     }
-    ellipsoidMesh(x,by,bz,.09,.42,.42,'raptureGlass',32,22);
+    ellipsoidMesh(x,by,bz,.11,.62,.62,'raptureGlass',40,28);
     for(let k=0;k<8;k++) {
       const a=k*Math.PI/4;
       ellipsoidMesh(x*1.03,by+Math.cos(a)*.56,bz+Math.sin(a)*.56,.06,.06,.06,'raptureBronze',8,6);
@@ -758,3 +783,4 @@ function makeScene() {
     ellipsoidMesh(x,.03,z,.10,.035,.10,'raptureBronze',12,8);
   }
 }
+  // Side portholes and hatch hardware.
