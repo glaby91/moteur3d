@@ -350,14 +350,68 @@ function makeScene() {
   // Set the bathysphere back between the avenue bridges so it reads as a
   // station destination rather than an oversized object blocking the entrance.
   const bx=0,by=4.4,bz=-35,br=3.7,platformY=by-br-.10;
-  // The pressure hull is a true double shell. Remove polygon apertures at the
-  // three viewports so their glazing and the lit cabin behind it are visible.
+  // Each shell is cut with a spherical clipping boundary, so every viewport
+  // is a circular opening instead of a jagged group of missing latitude/longitude faces.
+  const portY=by,portZ=bz-br-.06,frontPortRadius=1.65,frontHoleRadius=1.68,sideHoleRadius=.78;
+  const hullFrontZ=r=>bz-Math.sqrt(Math.max(.01,br*br-r*r));
   function bathysphereHull(radius, material, segments=160, rows=112) {
     const apertures=[
-      {dir:[0,0,-1],cos:.890},
-      {dir:[1,0,0],cos:.975},
-      {dir:[-1,0,0],cos:.975}
+      {dir:[0,0,-1],cos:Math.sqrt(Math.max(0,1-(frontHoleRadius/radius)**2))},
+      {dir:[1,0,0],cos:Math.sqrt(Math.max(0,1-(sideHoleRadius/radius)**2))},
+      {dir:[-1,0,0],cos:Math.sqrt(Math.max(0,1-(sideHoleRadius/radius)**2))}
     ],grid=[];
+    const dotDir=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+    const unit=v=>{const len=Math.hypot(...v)||1;return v.map(x=>x/len);};
+    const uvLerp=(a,b,t)=>{
+      let du=b.uv[0]-a.uv[0];
+      if(du>2)du-=4; else if(du< -2)du+=4;
+      return [a.uv[0]+du*t,a.uv[1]+(b.uv[1]-a.uv[1])*t];
+    };
+    const mixVertex=(a,b,t)=>{
+      const dir=unit(a.dir.map((v,k)=>v+(b.dir[k]-v)*t));
+      return {p:[bx+dir[0]*radius,by+dir[1]*radius,bz+dir[2]*radius],n:dir,uv:uvLerp(a,b,t),dir};
+    };
+    const midpoint=(a,b)=>mixVertex(a,b,.5);
+    const boundary=(a,b,cap)=>{
+      let lo=0,hi=1;
+      const startOutside=dotDir(a.dir,cap.dir)<=cap.cos;
+      for(let step=0;step<20;step++){
+        const t=(lo+hi)*.5,dir=unit(a.dir.map((v,k)=>v+(b.dir[k]-v)*t));
+        const outside=dotDir(dir,cap.dir)<=cap.cos;
+        if(outside===startOutside)lo=t;else hi=t;
+      }
+      return mixVertex(a,b,(lo+hi)*.5);
+    };
+    const clip=(poly,cap)=>{
+      const out=[];
+      if(!poly.length)return out;
+      let a=poly[poly.length-1],aOutside=dotDir(a.dir,cap.dir)<=cap.cos;
+      for(const b of poly){
+        const bOutside=dotDir(b.dir,cap.dir)<=cap.cos;
+        if(aOutside!==bOutside)out.push(boundary(a,b,cap));
+        if(bOutside)out.push(b);
+        a=b;aOutside=bOutside;
+      }
+      return out;
+    };
+    const needsSplit=(a,b,c,cap)=>{
+      if(dotDir(a.dir,cap.dir)>cap.cos||dotDir(b.dir,cap.dir)>cap.cos||dotDir(c.dir,cap.dir)>cap.cos)return false;
+      const ab=midpoint(a,b).dir,bc=midpoint(b,c).dir,ca=midpoint(c,a).dir,center=unit(a.dir.map((v,k)=>v+b.dir[k]+c.dir[k]));
+      return [ab,bc,ca,center].some(d=>dotDir(d,cap.dir)>cap.cos);
+    };
+    const emitTriangle=(a,b,c,depth=0)=>{
+      const splitCap=apertures.find(cap=>needsSplit(a,b,c,cap));
+      if(splitCap){
+        if(depth>=5)return;
+        const ab=midpoint(a,b),bc=midpoint(b,c),ca=midpoint(c,a);
+        emitTriangle(a,ab,ca,depth+1);emitTriangle(ab,b,bc,depth+1);
+        emitTriangle(ca,bc,c,depth+1);emitTriangle(ab,bc,ca,depth+1);
+        return;
+      }
+      let poly=[a,b,c];
+      for(const cap of apertures)poly=clip(poly,cap);
+      for(let k=1;k+1<poly.length;k++)meshTriangle(poly[0],poly[k],poly[k+1],material);
+    };
     for(let iy=0;iy<=rows;iy++) {
       const theta=iy/rows*Math.PI,row=[];
       for(let ix=0;ix<=segments;ix++) {
@@ -366,22 +420,13 @@ function makeScene() {
       }
       grid.push(row);
     }
-    const open=dir=>apertures.some(a=>dir[0]*a.dir[0]+dir[1]*a.dir[1]+dir[2]*a.dir[2]>a.cos);
-    const meanDirection=(...dirs)=>{const v=[0,0,0];for(const d of dirs)for(let k=0;k<3;k++)v[k]+=d[k];const l=Math.hypot(...v)||1;return v.map(x=>x/l);};
-    const triangleTouchesOpening=(a,b,c)=>[a.dir,b.dir,c.dir,meanDirection(a.dir,b.dir),meanDirection(b.dir,c.dir),meanDirection(c.dir,a.dir),meanDirection(a.dir,b.dir,c.dir)].some(open);
-    for(let iy=0;iy<rows;iy++)for(let ix=0;ix<segments;ix++) {
+    for(let iy=0;iy<rows;iy++)for(let ix=0;ix<segments;ix++){
       const a=grid[iy][ix],b=grid[iy+1][ix],c=grid[iy+1][ix+1],d=grid[iy][ix+1];
-      const n0=[a.dir[0]+b.dir[0]+d.dir[0],a.dir[1]+b.dir[1]+d.dir[1],a.dir[2]+b.dir[2]+d.dir[2]],l0=Math.hypot(...n0)||1;
-      const n1=[d.dir[0]+b.dir[0]+c.dir[0],d.dir[1]+b.dir[1]+c.dir[1],d.dir[2]+b.dir[2]+c.dir[2]],l1=Math.hypot(...n1)||1;
-      if(!triangleTouchesOpening(a,b,d))meshTriangle(a,b,d,material);
-      if(!triangleTouchesOpening(d,b,c))meshTriangle(d,b,c,material);
+      emitTriangle(a,b,d);emitTriangle(d,b,c);
     }
   }
   bathysphereHull(br,'wheelMetal');
   bathysphereHull(br*.94,'metal');
-  const portY=by+.15,portZ=bz-br-.06,frontPortRadius=1.65;
-  // Follow the pressure hull's spherical surface so the bezel seats against the shell.
-  const hullFrontZ=r=>bz-Math.sqrt(Math.max(.01,br*br-r*r));
   // Shell rings, longitudinal ribs, access hatch, bolts and viewport bezels.
   for(let latitude=-3;latitude<=3;latitude++) {
     const theta=(latitude/4)*Math.PI*.5,rr=br*Math.cos(theta),yy=by+br*Math.sin(theta);
@@ -430,10 +475,10 @@ function makeScene() {
   }
   ellipsoidMesh(0,portY,portZ+.035,1.02,1.02,.085,'raptureGlass',56,40);
   // The instrument bulkhead is placed several metres behind the glazing.
-  const cabinZ=bz+1.55,cabinR=1.22,cabinCenter={p:[bx,by+.15,cabinZ],n:[0,0,-1],uv:[.5,.5]};
+  const cabinZ=bz+1.55,cabinR=1.22,cabinCenter={p:[bx,portY,cabinZ],n:[0,0,-1],uv:[.5,.5]};
   for(let i=0;i<64;i++) {
     const a0=i*Math.PI*2/64,a1=(i+1)*Math.PI*2/64;
-    const v=a=>({p:[bx+Math.cos(a)*cabinR,by+.15+Math.sin(a)*cabinR,cabinZ],n:[0,0,-1],uv:[.5+.5*Math.cos(a),.5+.5*Math.sin(a)]});
+    const v=a=>({p:[bx+Math.cos(a)*cabinR,portY+Math.sin(a)*cabinR,cabinZ],n:[0,0,-1],uv:[.5+.5*Math.cos(a),.5+.5*Math.sin(a)]});
     meshTriangle(cabinCenter,v(a0),v(a1),'windowlit');
     capsule([bx+Math.cos(a0)*1.30,by+.15+Math.sin(a0)*1.30,cabinZ-.025],[bx+Math.cos(a1)*1.30,by+.15+Math.sin(a1)*1.30,cabinZ-.025],.055,'raptureBronze');
   }

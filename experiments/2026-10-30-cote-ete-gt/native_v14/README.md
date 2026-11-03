@@ -1,8 +1,8 @@
-# Moteur 3D natif x64 — build 261103-0006
+# Moteur 3D natif x64 — build 261103-0017
 
 ## Repères de version
 
-- **Version :** `261103-0006`.
+- **Build natif :** `261103-0017`.
 - **Révision GitHub :** SHA court du commit, injecté à la compilation.
 - **Branche GitHub :** nom exact de la branche, injecté à la compilation.
 - **Scène et géométrie source :** V13.14.
@@ -49,9 +49,9 @@ L’ordre de reconstruction/compilation est : scène → éclairage → intersec
 
 ## Téléchargement et compilation
 
-Le ZIP de chaque exécution porte son numéro de run et son SHA court; il contient l’exécutable x64, les scènes côtière et orange macro, le module JS de la scène orange et `build-manifest.json` avec la provenance et les statistiques d’export. Extraire l’EXE et la scène à ouvrir dans le même dossier.
+Le paquet Qt contient l’exécutable, la scène côtière, la scène Rapture et son fichier source JS, ainsi que la documentation. La révision Git, la branche et le numéro de run sont intégrés à l’application.
 
-Le workflow GitHub exporte les scènes côtière et Rapture, configure CMake avec Qt 6, puis compile et empaquette `moteur3d_qt` sur Windows et Linux. Le run 14, commit `8993a4f`, a réussi sur les deux systèmes. Pour compiler une autre scène, passez son fichier JS au troisième argument de `export_scene.js`, puis ouvrez le binaire produit dans le menu **Scène → Ouvrir une scène…**.
+Le workflow GitHub exporte les scènes côtière et Rapture, configure CMake avec Qt 6, puis compile et empaquette `moteur3d_qt` sur Windows et Linux. Le build 261103-0017 recoupe les hublots dans les deux épaisseurs de coque avec des contours circulaires alignés sur les cadres. Pour compiler une autre scène, passez son fichier JS au troisième argument de `export_scene.js`, puis ouvrez le binaire produit dans le menu **Scène → Ouvrir une scène…**.
 
 
 Le lissage des contours fonctionne à la résolution de sortie : les pixels présentant une forte transition de luminance sont adoucis en mélangeant leur couleur avec celles des quatre voisins directs. Le SSAA 4× est retiré de l’interface; le FSAA 16× reste disponible comme mode coûteux de comparaison. La case **AA contours** active le lissage quatre voisins après mise à l’échelle, indépendamment des modes Natif, Équilibré, Détails, Rapide et Très rapide; elle est cochée par défaut. La profondeur de champ reste optionnelle et passe à 16 rayons par pixel, avec une ouverture réduite pour limiter les images fantômes.
@@ -87,4 +87,4 @@ Le fichier source CC0 est dans `assets/1970s-coupe/1970s-coupe.glb`. L’exporte
 
 La source est publiée sous CC0 1.0 : https://grab3d.com/models/vehicles/1970s-coupe/.
 
-Le build `261103-0005` fait suivre les bagues, boulons et fixations des hublots avant et latéraux par la courbure de la coque sphérique pour supprimer leur effet de pièce flottante.
+Le build `261103-0017` découpe des ouvertures circulaires dans les deux couches de la coque de la bathysphère. Les hublots avant et latéraux sont alignés sur ces ouvertures; la coque ne passe plus derrière leurs vitres.
