@@ -375,6 +375,8 @@ function makeScene() {
   bathysphereHull(br,'wheelMetal');
   bathysphereHull(br*.94,'metal');
   const portY=by+.15,portZ=bz-br-.06,frontPortRadius=1.65;
+  // Follow the pressure hull's spherical surface so the bezel seats against the shell.
+  const hullFrontZ=r=>bz-Math.sqrt(Math.max(.01,br*br-r*r));
   // Shell rings, longitudinal ribs, access hatch, bolts and viewport bezels.
   for(let latitude=-3;latitude<=3;latitude++) {
     const theta=(latitude/4)*Math.PI*.5,rr=br*Math.cos(theta),yy=by+br*Math.sin(theta);
@@ -404,19 +406,22 @@ function makeScene() {
     }
   }
   // Oversized forward viewport exposes the amber cabin from the station approach.
-  for(const r of [1.48,1.28,1.08]) {
+  for(const r of [1.62,1.38,1.14]) {
+    const ringZ=hullFrontZ(r)-.075;
     for(let i=0;i<64;i++) {
       const a0=i*Math.PI*2/64,a1=(i+1)*Math.PI*2/64;
-      capsule([Math.cos(a0)*r,portY+Math.sin(a0)*r,portZ],[Math.cos(a1)*r,portY+Math.sin(a1)*r,portZ],.105,r>1.35?'wheelMetal':'raptureBronze');
+      capsule([Math.cos(a0)*r,portY+Math.sin(a0)*r,ringZ],[Math.cos(a1)*r,portY+Math.sin(a1)*r,ringZ],.105,r>1.4?'wheelMetal':'raptureBronze');
     }
   }
+  const boltR=1.56,boltZ=hullFrontZ(boltR)-.12;
   for(let i=0;i<20;i++) {
     const a=i*Math.PI*2/20;
-    ellipsoidMesh(Math.cos(a)*1.42,portY+Math.sin(a)*1.42,portZ-.035,.078,.078,.065,'raptureBronze',12,8);
+    ellipsoidMesh(Math.cos(a)*boltR,portY+Math.sin(a)*boltR,boltZ,.078,.078,.065,'raptureBronze',12,8);
   }
   for(const [x,y] of [[0,1.34],[1.34,0],[0,-1.34],[-1.34,0]]) {
-    capsule([x*.91,portY+y*.91,portZ-.05],[x*1.12,portY+y*1.12,portZ-.07],.11,'metal');
-    ellipsoidMesh(x*1.12,portY+y*1.12,portZ-.08,.13,.13,.11,'wheelMetal',14,10);
+    const r0=Math.hypot(x*.91,y*.91),r1=Math.hypot(x*1.12,y*1.12);
+    capsule([x*.91,portY+y*.91,hullFrontZ(r0)-.10],[x*1.12,portY+y*1.12,hullFrontZ(r1)-.10],.11,'metal');
+    ellipsoidMesh(x*1.12,portY+y*1.12,hullFrontZ(r1)-.14,.13,.13,.11,'wheelMetal',14,10);
   }
   ellipsoidMesh(0,portY,portZ+.035,1.02,1.02,.085,'raptureGlass',56,40);
   // The instrument bulkhead is placed several metres behind the glazing.
@@ -438,9 +443,10 @@ function makeScene() {
     ellipsoidMesh(lx+lean,by-.17,bz+1.37,.085,.075,.085,'raptureBronze',12,8);
   }
   M3D_SCENE_LIGHTS.push([bx,by+.82,bz+1.22,8.0,1.85,255,151,76]);
+  const lampR=1.39,lampZ=hullFrontZ(lampR)-.12;
   for(let i=0;i<16;i++) {
     const a=i*Math.PI/8;
-    ellipsoidMesh(Math.cos(a)*1.39,portY+Math.sin(a)*1.39,portZ-.09,.070,.070,.052,'lamp',10,8);
+    ellipsoidMesh(Math.cos(a)*lampR,portY+Math.sin(a)*lampR,lampZ,.070,.070,.052,'lamp',10,8);
   }
   // Access hatch on the upper shell, with a raised rim and locking bolts.
   ellipsoidMesh(bx,by+br*.94,bz,.94,.32,.94,'metal',40,24);
@@ -451,20 +457,23 @@ function makeScene() {
   }
   // Side portholes and hatch hardware.
   for(const side of [-1,1]) {
-    const x=side*(br*.76);
+    const surfaceX=r=>side*(Math.sqrt(Math.max(.01,br*br-r*r))+.06);
     for(const r of [.78,.59,.44]) {
+      const x=surfaceX(r);
       for(let i=0;i<36;i++) {
         const a0=i*Math.PI*2/36,a1=(i+1)*Math.PI*2/36;
         capsule([x,by+Math.cos(a0)*r,bz+Math.sin(a0)*r],
                 [x,by+Math.cos(a1)*r,bz+Math.sin(a1)*r],.055,'metal');
       }
     }
-    ellipsoidMesh(x,by,bz,.11,.62,.62,'raptureGlass',40,28);
+    const glassX=surfaceX(.62);
+    ellipsoidMesh(glassX,by,bz,.11,.62,.62,'raptureGlass',40,28);
     for(let k=0;k<8;k++) {
-      const a=k*Math.PI/4;
-      ellipsoidMesh(x*1.03,by+Math.cos(a)*.56,bz+Math.sin(a)*.56,.06,.06,.06,'raptureBronze',8,6);
+      const a=k*Math.PI/4,r=.56,x=surfaceX(r);
+      ellipsoidMesh(x,by+Math.cos(a)*r,bz+Math.sin(a)*r,.06,.06,.06,'raptureBronze',8,6);
     }
-    capsule([side*3.03,by-1.05,bz],[side*3.03,by+1.05,bz],.055,'metal');
+    const strapX=surfaceX(0);
+    capsule([strapX,by-1.05,bz],[strapX,by+1.05,bz],.055,'metal');
   }
   // Docking platform, curved supports, gangway, stairs, rails and chains.
   roundBox(-7.4,platformY-.36,bz-1.55,7.4,platformY-.08,bz+1.55,.30,'raptureStone');

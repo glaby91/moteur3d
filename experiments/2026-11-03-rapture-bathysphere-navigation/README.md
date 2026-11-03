@@ -1,4 +1,4 @@
-# Bathysphère Rapture et navigation interactive — build 261103-0004
+# Bathysphère Rapture et navigation interactive — build 261103-0005
 
 ## Modifications
 
@@ -46,3 +46,7 @@ La capture réelle du build 261103-0001 montre une coque coupée par le cadrage,
 ## Parcours vidéo rotatif — build 261103-0004
 
 Les captures du mode vidéo du build 261103-0001 montrent des vues où la coque ou une surface sombre remplit presque toute l’image. En mode vidéo Rapture, le parcours applique maintenant une distance orbitale minimale de 18 unités afin de garder la caméra au-delà de la bathysphère et des parois proches. Cette modification doit être vérifiée avec une nouvelle boucle pré-calculée.
+
+## Fixation des hublots — build 261103-0005
+
+Retour utilisateur : le hublot avant semblait décollé de la sphère. Les bagues, boulons, attaches et éclairages du hublot avant suivent maintenant la profondeur de la surface sphérique; les bagues et le vitrage des hublots latéraux utilisent également leur position sur la coque. Une capture réelle doit confirmer le raccord visuel.

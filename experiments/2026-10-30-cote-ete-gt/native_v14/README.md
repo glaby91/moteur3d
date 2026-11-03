@@ -1,8 +1,8 @@
-# Moteur 3D natif x64 — build 261103-0004
+# Moteur 3D natif x64 — build 261103-0005
 
 ## Repères de version
 
-- **Version :** `261103-0004`.
+- **Version :** `261103-0005`.
 - **Révision GitHub :** SHA court du commit, injecté à la compilation.
 - **Branche GitHub :** nom exact de la branche, injecté à la compilation.
 - **Scène et géométrie source :** V13.14.
@@ -86,3 +86,5 @@ Sur une distribution Linux où Qt 6 est installé dans les chemins système, `-D
 Le fichier source CC0 est dans `assets/1970s-coupe/1970s-coupe.glb`. L’exporteur extrait le maillage glTF (positions, normales, UV et matériaux), applique son placement déclaré dans `scene_coastal_v1314.js`, puis l’ajoute au BVH de la scène. Les textures de couleur de carrosserie et de pneus sont préconverties en chaînes RGB565 512→8 afin que le workflow Windows n’ait pas besoin d’un décodeur JPEG. Le moteur applique son éclairage et ses reflets natifs au matériau carrosserie; les pourcentages de réflexion se règlent dans la source de scène. Le format V4 transporte les cartes couleur, normale et rugosité; les scènes V3 historiques restent lisibles.
 
 La source est publiée sous CC0 1.0 : https://grab3d.com/models/vehicles/1970s-coupe/.
+
+Le build `261103-0005` fait suivre les bagues, boulons et fixations des hublots avant et latéraux par la courbure de la coque sphérique pour supprimer leur effet de pièce flottante.
