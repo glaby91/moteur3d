@@ -30,7 +30,7 @@ static std::vector<uint32_t> antialiasEdges4Scalar(const std::vector<uint32_t>&s
 }
 
 std::vector<uint32_t> antialiasEdges4(const std::vector<uint32_t>&src,int w,int h,unsigned threads,bool useAvx2){
- if(useAvx2 && avx2Available()) return antialiasEdges4Avx2(src,w,h,threads);
+ if(useAvx2 && avx2FmaAvailable()) return antialiasEdges4Avx2(src,w,h,threads);
  return antialiasEdges4Scalar(src,w,h,threads);
 }
 
