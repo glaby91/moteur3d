@@ -17,3 +17,16 @@
 4. Arrêter l’entrée caméra : le rendu complet doit remplacer l’aperçu après 450 ms.
 
 Le workflow CI compile les cibles Qt Windows/Linux et réexporte les scènes. Les temps dépendent du processeur et de la résolution sélectionnée.
+
+## Écart visuel constaté — 2026-11-03
+
+La maquette artistique de la bathysphère et la capture réelle de l’application ne correspondent pas. La maquette montre une coque détaillée, un grand hublot ouvert sur une cabine lumineuse et un véhicule proche de la caméra. La capture disponible du build 261102-0007 montre une sphère lisse, vue de loin; elle précède les changements décrits ci-dessus et ne valide donc pas le rendu du build 261103-0001.
+
+Le build 261103-0001 a été compilé sous Windows et Linux, mais aucune capture de son rendu réel n’a encore été vérifiée. L’intégration visuelle reste à confirmer.
+
+### Vérification à faire
+
+- Ouvrir le paquet Windows 261103-0001 et charger `scene_rapture.bin`.
+- Enregistrer une capture non retouchée avec le cadrage initial.
+- Comparer la silhouette de la coque, l’ouverture avant, la visibilité de la cabine et la taille du véhicule dans l’image.
+- Corriger la géométrie ou le cadrage si ces éléments ne sont pas visibles comme prévu, puis joindre une nouvelle capture réelle au suivi.
