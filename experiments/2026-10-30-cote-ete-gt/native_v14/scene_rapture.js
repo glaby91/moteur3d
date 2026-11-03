@@ -354,6 +354,12 @@ function makeScene() {
   // is a circular opening instead of a jagged group of missing latitude/longitude faces.
   const portY=by,portZ=bz-br-.06,frontPortRadius=1.65,frontHoleRadius=1.68,sideHoleRadius=.78;
   const hullFrontZ=r=>bz-Math.sqrt(Math.max(.01,br*br-r*r));
+  const inHullAperture=(p,margin=.07)=>{
+    const d=[(p[0]-bx)/br,(p[1]-by)/br,(p[2]-bz)/br];
+    const frontCos=Math.sqrt(Math.max(0,1-((frontHoleRadius+margin)/br)**2));
+    const sideCos=Math.sqrt(Math.max(0,1-((sideHoleRadius+margin)/br)**2));
+    return -d[2]>frontCos||d[0]>sideCos||-d[0]>sideCos;
+  };
   function bathysphereHull(radius, material, segments=160, rows=112) {
     const apertures=[
       {dir:[0,0,-1],cos:Math.sqrt(Math.max(0,1-(frontHoleRadius/radius)**2))},
@@ -434,7 +440,7 @@ function makeScene() {
       const a0=i*Math.PI*2/64,a1=(i+1)*Math.PI*2/64;
       const p0=[bx+Math.cos(a0)*rr,yy,bz+Math.sin(a0)*rr],p1=[bx+Math.cos(a1)*rr,yy,bz+Math.sin(a1)*rr];
       const mid=[(p0[0]+p1[0])*.5,(p0[1]+p1[1])*.5,(p0[2]+p1[2])*.5];
-      if(!(mid[2]<bz-2.8 && mid[0]*mid[0]+(mid[1]-portY)*(mid[1]-portY)<frontPortRadius*frontPortRadius))
+      if(!inHullAperture(mid))
         capsule(p0,p1,.060,'raptureBronze');
     }
   }
@@ -446,12 +452,12 @@ function makeScene() {
     }
     for(let j=0;j<pts.length-1;j++) {
       const p0=pts[j],p1=pts[j+1],mid=[(p0[0]+p1[0])*.5,(p0[1]+p1[1])*.5,(p0[2]+p1[2])*.5];
-      if(!(mid[2]<bz-2.8 && mid[0]*mid[0]+(mid[1]-portY)*(mid[1]-portY)<frontPortRadius*frontPortRadius))
+      if(!inHullAperture(mid))
         capsule(p0,p1,.043,'metal');
     }
     for(const j of [3,6,12,15]) {
       const p=pts[j];
-      if(!(p[2]<bz-2.8 && p[0]*p[0]+(p[1]-portY)*(p[1]-portY)<frontPortRadius*frontPortRadius))
+      if(!inHullAperture(p))
         ellipsoidMesh(p[0],p[1],p[2],.072,.072,.072,'raptureBronze',12,8);
     }
   }
@@ -523,7 +529,8 @@ function makeScene() {
       ellipsoidMesh(x,by+Math.cos(a)*r,bz+Math.sin(a)*r,.06,.06,.06,'raptureBronze',8,6);
     }
     const strapX=surfaceX(0);
-    capsule([strapX,by-1.05,bz],[strapX,by+1.05,bz],.055,'metal');
+    for(const [y0,y1] of [[-1.05,-.88],[.88,1.05]])
+      capsule([strapX,by+y0,bz],[strapX,by+y1,bz],.055,'metal');
   }
   // Docking platform, curved supports, gangway, stairs, rails and chains.
   roundBox(-7.4,platformY-.36,bz-1.55,7.4,platformY-.08,bz+1.55,.30,'raptureStone');
