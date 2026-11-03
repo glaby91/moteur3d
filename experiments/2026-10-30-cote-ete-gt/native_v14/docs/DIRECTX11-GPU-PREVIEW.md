@@ -1,6 +1,6 @@
 # Aperçu GPU Direct3D 11
 
-Le build 261103-0025 ajoute un backend Direct3D 11 facultatif à l’application Qt Windows.
+Le build 261103-0026 ajoute un backend Direct3D 11 facultatif à l’application Qt Windows.
 
 - **CPU — ray tracing complet** reste le mode initial et la référence visuelle.
 - **GPU — DirectX 11 (affichage temps réel)** rasterise la géométrie, les textures et le sol sur le GPU matériel détecté par Direct3D 11. Pendant les déplacements, l’image est recalculée toutes les 50 ms au maximum, à une résolution de preview plafonnée à 1024 × 576 ; à l’arrêt, le rendu sélectionné est recalculé à la résolution de sortie.

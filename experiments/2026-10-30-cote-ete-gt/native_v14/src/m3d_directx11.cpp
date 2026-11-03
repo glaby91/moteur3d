@@ -46,7 +46,7 @@ VSOut VSMain(VSIn i) {
     float depth = (farPlane / (farPlane - nearPlane)) * z - (farPlane * nearPlane) / (farPlane - nearPlane);
     // Keep the real camera-space z in w and clip space. Using safeZ here would
     // pull geometry behind the near plane onto the near plane instead of clipping it.
-    o.p = float4(nx * safeZ, ny * safeZ, depth * z, z);
+    o.p = float4(nx * safeZ, ny * safeZ, depth, z);
     o.n = i.n; o.uv = i.uv; o.mat = min(i.mat, materialCount - 1);
     return o;
 }
