@@ -484,8 +484,8 @@ private:
         form->addRow(threadLabel_, threads_);
         simdMode_ = new QComboBox(panel);
         simdMode_->addItems({QStringLiteral("Automatique (AVX2 si disponible)"), QStringLiteral("AVX2 activé"), QStringLiteral("Désactivé — x64 standard")});
-        simdMode_->setCurrentIndex(0);
-        simdMode_->setToolTip(QStringLiteral("Le mode AVX2 est utilisé uniquement si le processeur et le système le prennent en charge."));
+        simdMode_->setCurrentIndex(2);
+        simdMode_->setToolTip(QStringLiteral("AVX2 est utilisé uniquement si le processeur et le système le prennent en charge. Après la comparaison du build 0011 sur i5-7200U, le mode x64 standard est sélectionné par défaut; AVX2 reste disponible pour les essais."));
         if (!avx2Available()) simdMode_->setItemData(1, 0, Qt::UserRole - 1);
         form->addRow(QStringLiteral("Optimisation SIMD"), simdMode_);
         controls->addLayout(form);
