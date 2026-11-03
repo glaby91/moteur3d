@@ -53,6 +53,14 @@ globalThis.__m3dAppendClassicCar = (objects, placement) => {
 const optionalCar = process.env.M3D_SKIP_IMPORTED_CAR === '1' ? '' : 'globalThis.__m3dAppendClassicCar(objects, M3D_IMPORTED_CAR);';
 eval(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\n${sceneSource}\nmakeScene(); ${optionalCar} buildBVH(); const __mats = [...new Set(objects.map(o => o.mat))]; for (const id of __mats) materials.set(id, makeMips(id, 512)); globalThis.__scene = { objects, bvh, bvhRoot, sun, skyZenith, skyHorizon, pointLights, materials, mats: __mats, reflectivityPercent: M3D_MATERIAL_REFLECTIVITY_PERCENT, transmissionPercent: typeof M3D_MATERIAL_TRANSMISSION_PERCENT === "undefined" ? {} : M3D_MATERIAL_TRANSMISSION_PERCENT, refractiveIndex: typeof M3D_MATERIAL_IOR === "undefined" ? {} : M3D_MATERIAL_IOR, sceneLights: typeof M3D_SCENE_LIGHTS === "undefined" ? [] : M3D_SCENE_LIGHTS };`);
 const scene = globalThis.__scene;
+const leafStats = { leaves: 0, triangleLeaves8: 0, trianglesInLeaves: 0, maxLeaf: 0 };
+for (const node of bvh) if (node.ids) {
+  leafStats.leaves++;
+  leafStats.maxLeaf = Math.max(leafStats.maxLeaf, node.ids.length);
+  if (node.ids.length === 8 && node.ids.every(id => objects[id].type === 'triangle')) leafStats.triangleLeaves8++;
+  if (node.ids.every(id => objects[id].type === 'triangle')) leafStats.trianglesInLeaves += node.ids.length;
+}
+console.log(`BVH leaves: ${leafStats.leaves}; max leaf: ${leafStats.maxLeaf}; 8-triangle SIMD candidates: ${leafStats.triangleLeaves8}; triangles in homogeneous leaves: ${leafStats.trianglesInLeaves}`);
 const objects = scene.objects;
 const bvh = scene.bvh;
 const mats = scene.mats;

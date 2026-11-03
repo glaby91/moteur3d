@@ -55,3 +55,10 @@ Ces nombres indiquent si le chemin vectorisé est réellement emprunté; ils ne 
 Le CSV du build 0020 montre que le rendu reste dominant et que le noyau SIMD d’intersection des triangles ne reçoit aucun paquet. Le compteur AABB est élevé. Le build 0021 teste donc une optimisation indépendante du SIMD : l’intersection rayon-boîte met à jour l’intervalle de distance au fil des axes et abandonne immédiatement le test lorsqu’un axe rend la boîte impossible. Cela évite de calculer les intervalles des axes restants pour les boîtes rejetées.
 
 Cette modification conserve l’ordre des calculs par axe, les limites du rayon et le traitement des directions parallèles. Elle ne change ni les données de scène ni le résultat géométrique attendu. **Aucun gain n’est présumé** : le benchmark comparatif x64/AVX2 du même poste doit vérifier les temps de rendu et les compteurs.
+
+
+## Build 261103-0022 — feuilles de triangles pour AVX2
+
+Le build 0021 a réduit le rendu d’environ 12–16 % sur le relevé fourni en raccourcissant le test AABB. Le CSV garde toutefois zéro paquet SIMD de triangles. Le code AVX2 sait traiter huit triangles, mais le constructeur BVH imposait auparavant une coupure inconditionnelle dès quatre primitives : le chemin ne pouvait donc jamais être appelé.
+
+Le build 0022 conserve des feuilles homogènes de triangles jusqu’à huit primitives, ce qui rend le noyau AVX2 atteignable. L’exporteur affiche le nombre de feuilles candidates dans les logs CI. Cela peut réduire la profondeur du BVH, mais peut aussi augmenter le nombre de triangles testés par rayon : aucun gain n’est présumé. Comparer le rendu x64 et AVX2/FMA3, les paquets triangles, les compteurs BVH/AABB et le temps total avant de garder cette politique.
