@@ -72,13 +72,14 @@ struct BenchmarkRow {
     bool avx2 = false;
     double renderMs = 0, postMs = 0, totalMs = 0;
     uint64_t rays = 0, tests = 0, nodes = 0, aabb = 0, hits = 0, texels = 0;
+    uint64_t simdRayPackets = 0, simdTrianglePackets = 0, simdTextureSamples = 0, simdLightBatches = 0;
 };
 
 class BenchmarkDialog final : public QDialog {
 public:
     explicit BenchmarkDialog(QWidget* parent = nullptr) : QDialog(parent) {
         setWindowTitle(QStringLiteral("Benchmark — moteur 3D CPU"));
-        resize(1040, 680);
+        resize(1220, 690);
         setStyleSheet("QDialog{background:#0b1923;color:#e0ebf3;} QLabel{color:#e0ebf3;} QGroupBox{border:1px solid #345267;margin-top:10px;padding:8px;color:#e0ebf3;} QComboBox,QSpinBox,QPushButton{padding:5px;}");
         auto* root = new QVBoxLayout(this);
         auto* title = new QLabel(QStringLiteral("BENCHMARK DU MOTEUR"), this);
@@ -113,8 +114,9 @@ public:
         progress_ = new QProgressBar(this); progress_->setRange(0, 100); progress_->setValue(0);
         status_ = new QLabel(QStringLiteral("Prêt — chaque mode garde les mêmes scène, caméra, qualité et effets."), this);
         root->addWidget(status_); root->addWidget(progress_);
-        table_ = new QTableWidget(0, 7, this);
-        table_->setHorizontalHeaderLabels({QStringLiteral("Mode SIMD"), QStringLiteral("Threads"), QStringLiteral("Rendu médian (ms)"), QStringLiteral("Post (ms)"), QStringLiteral("Total (ms)"), QStringLiteral("Gain SIMD"), QStringLiteral("Débit relatif (× réf.)")});
+        table_ = new QTableWidget(0, 8, this);
+        table_->setHorizontalHeaderLabels({QStringLiteral("Mode SIMD"), QStringLiteral("Threads"), QStringLiteral("Rendu médian (ms)"), QStringLiteral("Post (ms)"), QStringLiteral("Total (ms)"), QStringLiteral("Gain SIMD"), QStringLiteral("Débit relatif (× réf.)"), QStringLiteral("Dispatch AVX2 : rayon / triangle / texture / lumière")});
+        table_->horizontalHeaderItem(7)->setToolTip(QStringLiteral("Paquets de 8 rayons, groupes de 8 triangles, échantillons de texture et lots de 8 lumières réellement passés par les noyaux AVX2."));
         table_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
         table_->horizontalHeader()->setStretchLastSection(true);
         table_->setAlternatingRowColors(true); root->addWidget(table_, 1);
@@ -175,6 +177,9 @@ public:
             const QStringList values{modeName, QString::number(row.threads), QString::number(row.renderMs, 'f', 1),
                 QString::number(row.postMs, 'f', 1), QString::number(row.totalMs, 'f', 1), simdGain, QString()};
             for (int c = 0; c < 6; ++c) table_->setItem(i, c, new QTableWidgetItem(values[c]));
+            auto compactCount = [](uint64_t n) { return n >= 1000000 ? QString::number(double(n) / 1000000.0, 'f', 1) + QStringLiteral("M") : n >= 1000 ? QString::number(double(n) / 1000.0, 'f', 1) + QStringLiteral("k") : QString::number(qulonglong(n)); };
+            const QString dispatch = row.avx2 ? QStringLiteral("R %1 · T %2 · Tex %3 · L %4").arg(compactCount(row.simdRayPackets), compactCount(row.simdTrianglePackets), compactCount(row.simdTextureSamples), compactCount(row.simdLightBatches)) : QStringLiteral("—");
+            table_->setItem(i, 7, new QTableWidgetItem(dispatch));
             auto* bar = new QProgressBar(table_); bar->setRange(0, 100);
             bar->setValue(int(std::lround(100.0 * relative / maxRelative)));
             bar->setFormat(QStringLiteral("%1×").arg(relative, 0, 'f', 2));
@@ -224,7 +229,7 @@ private:
         out << "# simd_selection=" << modeSummary_ << "; repetitions=" << repetitionsMeasured_ << "; warmup=1\n";
         out << "# settings=" << settingsSummary_ << "\n";
         out << "# resolution=" << width_ << "x" << height_ << "; samples_per_pixel=" << samples_ << "; shadow_build_ms=" << QString::number(shadowMs_, 'f', 3) << "\n";
-        out << "simd;threads;render_median_ms;post_median_ms;total_median_ms;speedup_vs_reference;simd_gain_vs_x64_same_threads;rays;BVH_tests;BVH_nodes;AABB_tests;hits;texels\n";
+        out << "simd;threads;render_median_ms;post_median_ms;total_median_ms;speedup_vs_reference;simd_gain_vs_x64_same_threads;simd_ray_packets;simd_triangle_packets;simd_texture_samples;simd_light_batches;rays;BVH_tests;BVH_nodes;AABB_tests;hits;texels\n";
         const auto baseIt = std::find_if(rows_.begin(), rows_.end(), [](const BenchmarkRow& r) { return !r.avx2; });
         const double referenceMs = rows_.empty() ? 0 : (baseIt == rows_.end() ? rows_.front() : *baseIt).totalMs;
         for (const auto& r : rows_) {
@@ -234,8 +239,9 @@ private:
             const QString simdGain = r.avx2 && standard != rows_.end() ? QString::number(standard->totalMs / std::max(.001, r.totalMs), 'f', 4) : QString();
             out << modeName << ';' << r.threads << ';' << QString::number(r.renderMs, 'f', 3) << ';'
                 << QString::number(r.postMs, 'f', 3) << ';' << QString::number(r.totalMs, 'f', 3) << ';'
-                << QString::number(relative, 'f', 4) << ';' << simdGain << ';' << r.rays << ';' << r.tests << ';' << r.nodes << ';'
-                << r.aabb << ';' << r.hits << ';' << r.texels << '\n';
+                << QString::number(relative, 'f', 4) << ';' << simdGain << ';'
+                << r.simdRayPackets << ';' << r.simdTrianglePackets << ';' << r.simdTextureSamples << ';' << r.simdLightBatches << ';'
+                << r.rays << ';' << r.tests << ';' << r.nodes << ';' << r.aabb << ';' << r.hits << ';' << r.texels << '\n';
         }
     }
 };
@@ -776,8 +782,12 @@ private:
                 shadowMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - shadowStart).count();
                 const int totalPasses = int(simdModes.size() * threadCounts.size()) * (repeats + 1);
                 int done = 0;
-                for (bool useAvx2 : simdModes) {
-                    for (unsigned threadCount : threadCounts) {
+                unsigned threadPass = 0;
+                for (unsigned threadCount : threadCounts) {
+                    const bool reverseModeOrder = ((threadPass++ + unsigned(token & 1u)) % 2u) != 0;
+                    for (size_t modeOrder = 0; modeOrder < simdModes.size(); ++modeOrder) {
+                        const size_t modeIndex = reverseModeOrder ? simdModes.size() - 1 - modeOrder : modeOrder;
+                        const bool useAvx2 = simdModes[modeIndex];
                         if (benchmarkGeneration_.load() != token) break;
                         std::vector<double> renderTimes, postTimes, totalTimes;
                         BenchmarkRow row; row.threads = threadCount; row.avx2 = useAvx2;
@@ -802,6 +812,7 @@ private:
                             if (repetition >= 0) {
                                 renderTimes.push_back(renderMs); postTimes.push_back(postMs); totalTimes.push_back(totalMs);
                                 row.rays += st.rays; row.tests += st.tests; row.nodes += st.nodes; row.aabb += st.aabb; row.hits += st.hits; row.texels += st.texels;
+                                row.simdRayPackets += st.simdRayPackets; row.simdTrianglePackets += st.simdTrianglePackets; row.simdTextureSamples += st.simdTextureSamples; row.simdLightBatches += st.simdLightBatches;
                             }
                             ++done;
                             const int progress = int(100.0 * done / std::max(1, totalPasses));
@@ -820,6 +831,7 @@ private:
                         row.renderMs = median(renderTimes); row.postMs = median(postTimes); row.totalMs = median(totalTimes);
                         row.rays /= uint64_t(renderTimes.size()); row.tests /= uint64_t(renderTimes.size()); row.nodes /= uint64_t(renderTimes.size());
                         row.aabb /= uint64_t(renderTimes.size()); row.hits /= uint64_t(renderTimes.size()); row.texels /= uint64_t(renderTimes.size());
+                        row.simdRayPackets /= uint64_t(renderTimes.size()); row.simdTrianglePackets /= uint64_t(renderTimes.size()); row.simdTextureSamples /= uint64_t(renderTimes.size()); row.simdLightBatches /= uint64_t(renderTimes.size());
                         rows.push_back(row);
                     }
                     if (benchmarkGeneration_.load() != token) break;

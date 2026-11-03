@@ -41,3 +41,10 @@ Dans le build 261103-0015, les calculs vectoriels de rayons, triangles, éclaira
 ## Environnement sous-marin de Rapture
 
 Le build 261103-0016 donne à la scène Rapture un fond d'eau profonde bleu pétrole, indépendant de l'heure affichée, et ajoute des reliefs abyssaux lointains derrière la ville. Le ciel reste inchangé dans les autres scènes. Le profil est activé par la présence du matériau propre à Rapture, sans modifier le format des fichiers de scène.
+
+
+## Diagnostiquer l’activité AVX2
+
+La comparaison complète présente, pour chaque configuration, les paquets de 8 rayons générés, les paquets de 8 triangles effectivement traités par le noyau AVX2, les échantillons de texture interpolés par ce noyau et les blocs de 8 lumières traités. Le CSV conserve les mêmes compteurs.
+
+Ces nombres indiquent si le chemin vectorisé est réellement emprunté; ils ne mesurent pas à eux seuls le temps économisé. Par exemple, un nombre faible de paquets triangulaires signale que la structure des feuilles BVH et le mélange des primitives limitent ce noyau. Le benchmark alterne désormais le mode qui passe en premier entre les configurations de threads et d’un lancement à l’autre, afin de réduire le biais thermique et la variation de fréquence.

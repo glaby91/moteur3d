@@ -30,7 +30,7 @@ struct Level { uint32_t size=0; std::vector<uint16_t> p; };
 struct Ray { V o,d; };
 struct Hit { float t=INF; V p,n; int mat=-1,id=-1; };
 struct Camera { V eye,f,r,u; float tanHalf=0,aspect=1,pixelAngle=0,focusDistance=12,apertureRadius=0; };
-struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,depthReads=0,shadowRays=0; double ms=0,postMs=0,shadowMs=0; unsigned threads=1; bool avx2=false; };
+struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,depthReads=0,shadowRays=0; uint64_t simdRayPackets=0,simdTrianglePackets=0,simdTextureSamples=0,simdLightBatches=0; double ms=0,postMs=0,shadowMs=0; unsigned threads=1; bool avx2=false; };
 struct Light { V p; float radius,intensity; V color; };
 struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPercent=0; float refractiveIndex=1.5f; std::vector<Level> mip,normalMip,roughnessMip; };
 struct Scene { bool underwaterEnvironment=false; std::vector<Obj> obj; std::vector<Node> node; std::vector<uint32_t> order; std::vector<Material> mat; std::vector<Light> lights; int32_t root=-1; };
