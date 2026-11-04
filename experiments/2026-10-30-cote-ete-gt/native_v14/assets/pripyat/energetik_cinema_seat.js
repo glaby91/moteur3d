@@ -33,18 +33,11 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
     componentStart = end;
   };
 
-  // Floor shoes, four anchor bolts, and the two substantial side frames.
+  // Two upright wooden standards carry the seat and back. The row preview
+  // adds one continuous mounting tube shared by all three seats.
   for (const side of [-1,1]) {
-    B(side*.215-.075,.018,-.11,side*.215+.075,.085,.32,.025,metal);
-    for (const dx of [-.043,.043]) for (const dz of [-.065,.265])
-      E(side*.215+dx,.089,dz,.018,.009,.018,metal);
-    C([side*.215,.055,-.035],[side*.215,.47,.045],.027,metal);
-    C([side*.215,.055,.27],[side*.215,.46,.19],.027,metal);
-    C([side*.215,.13,-.02],[side*.215,.37,.25],.018,metal);
-    B(side*.255-.048,.30,.005,side*.255+.048,.67,.20,.028,wood);
-    B(side*.255-.030,.34,.030,side*.255+.030,.62,.16,.018,metal);
-    // Short tabs connect the seat and back to the frame; circular hinge pins
-    // make the folding mechanism readable from a close camera.
+    B(side*.255-.048,.055,.005,side*.255+.048,.70,.20,.028,wood);
+    // Metal hinge plates and pins remain visible at the folding joint.
     Q(side*.197,.44,.055,side*.233,.51,.15,metal);
     E(side*.236,.475,.115,.018,.043,.043,metal);
     E(side*.252,.475,.115,.008,.022,.022,piping);
