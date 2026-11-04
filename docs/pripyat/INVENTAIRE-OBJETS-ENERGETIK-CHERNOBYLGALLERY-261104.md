@@ -1,6 +1,6 @@
 # Inventaire photographique des objets — Palais Energetik
 
-**État :** inventaire V1, fondé sur les 8 vues principales et les 92 miniatures de la galerie basse. Les miniatures ont été parcourues par séquences ; les objets décrits comme « confirmés » sont reconnaissables dans les vues observées ou nommés par la galerie. Les objets seulement déduits du texte ou de la fonction de la salle restent marqués comme à vérifier.
+**État :** inventaire V1 photo par photo, fondé sur les 8 vues principales et les 92 photos liées par la galerie basse, ouvertes en grand format. Les objets « confirmés » sont visibles dans les photos ou nommés par les légendes. Les objets déduits de la fonction d’une salle ou trop petits pour être identifiés restent marqués comme à vérifier.
 
 **Référence :** [The Chernobyl Gallery — Palace of Culture “Energetik”](https://www.chernobylgallery.com/galleries/palace-of-culture/). Les miniatures portent un filigrane du site : elles servent à l’identification et à la modélisation de référence, pas comme textures à redistribuer. Conserver les liens et vérifier les droits avant d’intégrer une image au projet.
 
