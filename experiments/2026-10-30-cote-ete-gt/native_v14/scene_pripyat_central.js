@@ -192,6 +192,9 @@ function makeScene() {
   }
   for(let level=0;level<3;level++){
     const y=0.38+level*3.1, h=2.72;
+    // A real return wall frames the foyer stair and gives the side-room door
+    // a proper opening; the mural is mounted on its hall-facing surface.
+    sideDoorWall(8.38,-34.8,-26.2,y,h,'concrete');
     for(const [x0,x1] of [[-48.7,-38.0],[-38.0,-27.0],[-27.0,-15.8],[8.2,17.6]]){
       // Low corridor walls and room dividers; the first-floor rear hall stays open as an auditorium.
       sideDoorWall(x0,-34.0,-27.0,y,h,'concrete');
@@ -266,7 +269,7 @@ function makeScene() {
   // Large foyer fresco on the inside return beside the ceremonial stair. It
   // combines surviving Soviet-era colour fields, a central figure and flaked
   // edges, based on the supplied Energetik interior photographs.
-  const frescoX=8.15;
+  const frescoX=8.32;
   box(frescoX,3.72,-34.35,frescoX+0.08,6.32,-25.35,'plaster');
   box(frescoX+0.08,3.82,-34.22,frescoX+0.14,6.22,-25.48,'mural');
   // Surviving painted geometry sits just proud of the wall, like a worn mural
