@@ -9,6 +9,8 @@ Le développement de cette branche se concentre désormais sur **un seul bâtime
 - [Photos Wikimedia Commons — bâtiments de Pripiat](https://commons.wikimedia.org/wiki/Category:Buildings_in_Pripyat)
 - [Photos Wikimedia Commons — intérieurs](https://commons.wikimedia.org/wiki/Category:Building_interiors_in_Pripyat)
 - [Plan de la ville sur Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Map_of_Pripyat.svg)
+- [Palais de la culture Energetik — Wikipédia (français)](https://fr.wikipedia.org/wiki/Palais_de_la_culture_Energetik) — repère général sur les fonctions et l’état du bâtiment; l’article signale lui-même que ses sources sont incomplètes.
+- [Photographies de Pripiat — Getty Images](https://www.gettyimages.fr/photos/pripyat) — vues d’ensemble et d’environnement urbain; les images restent des références visuelles et ne sont pas intégrées comme textures.
 
 Les photos documentaires servent à vérifier la silhouette, les façades et l’état du bâtiment. Les images générées sont des repères de composition, pas des références historiques. Les plans et dimensions restent approximatifs et doivent être confrontés aux sources visuelles.
 

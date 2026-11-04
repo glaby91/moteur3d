@@ -90,6 +90,14 @@ Cette passe ne prétend pas être une reconstruction photogrammétrique ni une v
 
 La scène est prête pour un contrôle sur le build Windows à 1366 × 768. Le niveau visuel UT2004 est le repère à atteindre, pas un résultat déclaré sans capture native. Vérifier en priorité la silhouette des rangées, la profondeur de scène, les faces du tuf, le contraste des lampes et l’absence de trous de géométrie.
 
+## Huitième passe — lecture du plateau et cadrage
+
+- La capture du build `261104-0010` montre que les bandes verticales devant l’écran ressemblent à une grille et masquent le fond de scène. Les plis sont déplacés vers les côtés de l’ouverture et modélisés en volume arrondi.
+- Le plateau en bois est ramené à une largeur plus crédible, avec des lames séparées et quelques manques. Cela réduit l’effet de grande boîte brune au fond de la salle.
+- Les assises et dossiers sont remplacés par des volumes elliptiques rembourrés; les supports et accoudoirs restent distincts en métal et bois. La silhouette des sièges est plus douce que les anciens dossiers cubiques.
+- Le preset 04 est recentré dans l’axe de la salle, placé à l’intérieur de la paroi arrière et réglé avec une focale plus large. Il doit montrer le plateau, l’écran, les rangées et les murs dans une seule vue.
+- Cette correction vise la lecture de la composition observée sur la capture. Elle ne permet pas encore de revendiquer une qualité UT2004 : la validation se fait sur la nouvelle capture native.
+
 ## Cinquième passe — fresque longue, cage et vues directes
 
 - La fresque du foyer s’étend maintenant sur près de 18 m de mur, en deux pans qui laissent libre la porte du niveau. Les formes peintes, figures et fragments couvrent une longueur de mur au lieu d’un tableau isolé.
@@ -104,3 +112,11 @@ La scène est prête pour un contrôle sur le build Windows à 1366 × 768. Le n
 - Le béton et la pierre utilisent une échelle UV plus serrée, cohérente entre CPU et DirectX, afin que les textures de 1024 px gardent leurs détails à 1366 × 768.
 - La fresque longue dispose maintenant d’un mur continu de part et d’autre de la porte et d’un cadrage plus large centré sur les deux pans. La vue 03 reste le contrôle dédié au grand escalier.
 - La comparaison sur le portable reste à faire à résolution native : netteté des surfaces, lecture des marches, fresque visible, couleurs et temps d’image.
+
+## Prototype isolé — siège rabattable
+
+- Le retour photo du 4 novembre précise le modèle de référence : siège de salle à assise rabattable, dossier assez droit, flancs et accoudoirs épais, structure métallique apparente.
+- Le prototype propre est maintenant un objet partagé, défini dans `assets/pripyat/energetik_cinema_seat.js` et appelé depuis la scène de l’auditorium comme depuis `scene_energetik_seat_preview.js`.
+- Le prototype de validation est volontairement isolé : un siège, un sol neutre et un éclairage simple. L’assise peut être exportée ouverte ou rabattue; la première intégration dans les rangées utilise la position rabattue. Aucun effet de dégradation n’est appliqué au prototype.
+- L’export autonome recalcule seulement la petite scène, son BVH et ses matériaux. Le binaire `.bin` s’ouvre dans l’application existante via **Scène → Ouvrir une scène…**; l’itération sur la forme ne demande donc pas de recompiler le moteur.
+- La photo de la façade lointaine sert de référence au contexte extérieur et à la végétation; elle ne change pas le périmètre du prototype siège.

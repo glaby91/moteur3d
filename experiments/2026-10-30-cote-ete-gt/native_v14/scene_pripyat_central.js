@@ -5,7 +5,7 @@
 const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
   concrete: 2, plaster: 1, mural: 1, volcanicTuff: 3, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
   asphalt: 3, stone: 5, metal: 18, rust: 7, leaves: 2, grass: 1,
-  bark: 1, wood: 4, sign: 3, debris: 2, puddle: 28, seatFabric: 1, curtain: 1, cinemaScreen: 0
+  bark: 1, wood: 4, sign: 3, debris: 2, puddle: 28, seatFabric: 1, seatFabricClean: 1, seatTrim: 2, curtain: 1, cinemaScreen: 0
 });
 const M3D_MATERIAL_TRANSMISSION_PERCENT = Object.freeze({ glass: 62 });
 const M3D_MATERIAL_IOR = Object.freeze({ glass: 1.48 });
@@ -291,17 +291,26 @@ function makeScene() {
   }
   // Stage has a deep proscenium, tuff returns, broken timber deck and layered
   // curtains. Vertical folds and ripped edges keep it from reading as flat boxes.
-  box(-47.6,0.38,-41.72,-18.0,0.93,-38.48,'wood');
-  box(-47.6,0.16,-38.62,-18.0,0.92,-38.43,'wood');
+  box(-43.5,0.38,-41.72,-21.5,0.91,-38.48,'wood');
+  box(-43.5,0.16,-38.62,-21.5,0.89,-38.43,'wood');
+  for(let z=-41.58;z<-38.58;z+=0.19){
+    const missing=Math.sin(z*4.7)>0.87;
+    if(!missing) box(-43.38,0.91,z,-21.62,0.98,z+0.145,(Math.floor((z+42)*10)%6===0)?'debris':'wood');
+  }
   box(-45.6,0.90,-41.80,-20.0,3.55,-41.62,'volcanicTuff');
   box(-42.0,1.06,-41.58,-24.0,3.34,-41.48,'rust');
   box(-41.68,1.20,-41.46,-24.32,3.10,-41.39,'cinemaScreen');
   box(-45.2,0.88,-41.42,-42.15,3.60,-41.30,'curtain');
   box(-23.85,0.88,-41.42,-20.8,3.60,-41.30,'curtain');
   box(-45.35,3.34,-41.43,-20.65,3.62,-41.29,'curtain');
-  for(let x=-45.0;x<=-20.9;x+=0.38){
-    const fold=Math.sin(x*1.7)*0.035;
-    box(x,0.95,-41.28+fold,x+0.085,3.46,-41.24+fold,(Math.floor((x+45)*10)%4===0)?'seatFabric':'curtain');
+  // Keep the draped folds at the sides of the opening; the previous full-span
+  // strips sat in front of the screen and read as a cage of vertical bars.
+  for(const [start,end] of [[-45.0,-42.0],[-24.0,-20.9]]){
+    for(let x=start;x<=end;x+=0.42){
+      const fold=Math.sin(x*1.7)*0.045;
+      const torn=Math.sin(x*3.1)>0.72;
+      capsule([x,0.92,-41.18+fold],[x+0.05,torn?2.35:3.45,-41.18+fold],0.095,(Math.floor((x+45)*10)%5===0)?'seatFabric':'curtain');
+    }
   }
   for(const [x,y,w,h] of [[-44.7,1.0,0.42,0.78],[-43.0,2.1,0.34,0.56],[-22.6,1.25,0.50,0.94],[-20.8,2.4,0.44,0.56]])
     box(x,y,-41.22,x+w,y+h,-41.17,'debris');
@@ -317,10 +326,9 @@ function makeScene() {
     box(x,y,z,x+0.22,y+0.54,z+0.36,'metal');
     box(x+0.04,y+0.05,z-0.02,x+0.25,y+0.47,z+0.38,'windowdark');
   }
-  // Twelve stepped seating rows. Four separated banks, broad cross-aisles,
-  // realistic seat scale and a few collapsed/wrecked chairs break repetition.
+  // Twelve stepped seating rows use the shared, clean chair asset. Keeping the
+  // chair geometry in one module lets its preview and this room stay in sync.
   const bankCenters=[-45.0,-37.5,-29.8,-22.3], rowCount=12, seatsPerBank=10, seatPitch=0.58;
-  const brokenSeats=new Set(["0:0:2","1:1:7","2:0:4","3:2:8","4:3:3","5:1:1","6:2:6","7:0:8","8:3:5","9:2:1","10:1:8","11:3:2"]);
   for(let row=0;row<rowCount;row++){
     const z=-37.70+row*0.94, platformTop=0.15*(row+1);
     for(let bank=0;bank<bankCenters.length;bank++){
@@ -329,23 +337,8 @@ function makeScene() {
       const bankRight=center+(seatsPerBank-1)*seatPitch*0.5+0.34;
       box(bankLeft,0.04,z-0.38,bankRight,platformTop,z+0.42,(row%4===0)?'concrete':'stone');
       for(let seat=0;seat<seatsPerBank;seat++){
-        const x=center+(seat-(seatsPerBank-1)*0.5)*seatPitch, y=platformTop, key=`${row}:${bank}:${seat}`;
-        const collapsed=brokenSeats.has(key);
-        if(collapsed){
-          box(x-0.26,y+0.04,z-0.12,x+0.24,y+0.16,z+0.22,'seatFabric');
-          capsule([x-0.22,y+0.05,z-0.25],[x+0.18,y+0.10,z+0.16],0.035,'rust');
-          continue;
-        }
-        const fabric=(row+bank+seat)%7===0?'curtain':'seatFabric';
-        for(const side of [-1,1]){
-          capsule([x+side*0.22,y+0.08,z+0.14],[x+side*0.22,y+0.49,z+0.14],0.024,'metal');
-          capsule([x+side*0.22,y+0.45,z+0.14],[x+side*0.22,y+0.93,z+0.25],0.023,'metal');
-          capsule([x+side*0.34,y+0.55,z-0.22],[x+side*0.34,y+0.68,z+0.12],0.032,'wood');
-        }
-        box(x-0.22,y+0.43,z+0.10,x+0.22,y+0.49,z+0.18,'metal');
-        roundBox(x-0.27,y+0.49,z-0.12,x+0.27,y+0.70,z+0.22,0.055,fabric);
-        roundBox(x-0.275,y+0.68,z+0.14,x+0.275,y+1.23,z+0.28,0.065,fabric);
-        box(x-0.21,y+1.13,z+0.13,x+0.21,y+1.16,z+0.145,'rust');
+        const x=center+(seat-(seatsPerBank-1)*0.5)*seatPitch;
+        buildEnergetikCinemaSeat({ box, capsule, roundBox }, x, platformTop, z, { folded: true });
       }
     }
   }

@@ -1,0 +1,60 @@
+name: Export Energetik cinema seat preview
+
+on:
+  push:
+    branches:
+      - pripiat
+    paths:
+      - experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_cinema_seat.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_energetik_seat_preview.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/source_v1314.html
+      - experiments/2026-10-30-cote-ete-gt/native_v14/gltf_scene_import.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/assets/orange_texturecan/orange_peel_512.m3dpbr
+      - experiments/2026-10-30-cote-ete-gt/native_v14/assets/1970s-coupe/classic_body.rgb565mip
+      - experiments/2026-10-30-cote-ete-gt/native_v14/assets/1970s-coupe/classic_tire.rgb565mip
+      - .github/workflows/export-energetik-seat.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-seat:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Export standalone chair scene
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: M3D_SKIP_IMPORTED_CAR=1 node export_scene.js source_v1314.html scene_energetik_seat_preview.bin scene_energetik_seat_preview.js
+
+      - name: Package load instructions
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          cat > scene_energetik_seat_preview.txt <<'EOF'
+          Aperçu du siège rabattable du Palais Energetik
+
+          Ouvrir le moteur déjà installé, puis choisir Scène > Ouvrir une scène…
+          et sélectionner scene_energetik_seat_preview.bin.
+          Le fichier est autonome : il contient un seul siège, son sol de présentation et ses matériaux.
+          Aucun recompile du moteur n'est requis pour modifier le modèle et réexporter cette scène.
+          EOF
+
+      - name: Upload standalone scene
+        uses: actions/upload-artifact@v4
+        with:
+          name: energetik-seat-preview
+          path: |
+            experiments/2026-10-30-cote-ete-gt/native_v14/scene_energetik_seat_preview.bin
+            experiments/2026-10-30-cote-ete-gt/native_v14/scene_energetik_seat_preview.txt
+          if-no-files-found: error
+          retention-days: 30
