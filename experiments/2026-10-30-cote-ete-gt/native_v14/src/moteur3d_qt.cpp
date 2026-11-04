@@ -854,8 +854,8 @@ private:
         renderer_->setItemData(2, QStringLiteral("DirectX 11 est disponible uniquement sous Windows."), Qt::ToolTipRole);
 #endif
         quality_ = new QComboBox(panel);
-        quality_->addItems({QStringLiteral("Natif — 100 %"), QStringLiteral("Équilibré — 87,5 % par axe"), QStringLiteral("Détails — 75 % par axe"), QStringLiteral("Rapide — 66,7 % par axe"), QStringLiteral("Très rapide — 50 % par axe"), QStringLiteral("FSAA 16× — motif stratifié 4×4"), QStringLiteral("Haute définition — 2× interne (SSAA CPU)"), QStringLiteral("CPU hors-ligne — 64 spp / 3 rebonds GI (expérimental)")});
-        quality_->setToolTip(QStringLiteral("Le mode CPU hors-ligne échantillonne chaque pixel de façon stochastique et calcule l’éclairage indirect diffus. Le temps de calcul augmente fortement avec la résolution."));
+        quality_->addItems({QStringLiteral("Natif — 100 %"), QStringLiteral("Équilibré — 87,5 % par axe"), QStringLiteral("Détails — 75 % par axe"), QStringLiteral("Rapide — 66,7 % par axe"), QStringLiteral("Très rapide — 50 % par axe"), QStringLiteral("FSAA 16× — motif stratifié 4×4"), QStringLiteral("Haute définition — 2× interne (SSAA CPU)"), QStringLiteral("CPU hors-ligne PBR/HDR — 64 spp / 3 rebonds")});
+        quality_->setToolTip(QStringLiteral("Le mode hors-ligne utilise un BRDF PBR GGX en lumière linéaire, un tone mapping ACES et un débruitage bilatéral CPU. Le temps de calcul augmente fortement avec la résolution."));
         quality_->setCurrentIndex(6);
         controls->addWidget(new QLabel(QStringLiteral("Résolution de sortie"), panel)); controls->addWidget(resolution_);
         controls->addWidget(new QLabel(QStringLiteral("Moteur de rendu"), panel)); controls->addWidget(renderer_);
@@ -1250,7 +1250,7 @@ private:
         const int qi = quality_->currentIndex();
         settings_.offlinePathTrace = qi == 7;
         settings_.directX11 = renderer_->currentIndex() == 2 && !settings_.offlinePathTrace;
-        if (rendererStatus_ && qi == 7) rendererStatus_->setText(QStringLiteral("Mode hors-ligne CPU — 64 échantillons/pixel et 3 rebonds diffus."));
+        if (rendererStatus_ && qi == 7) rendererStatus_->setText(QStringLiteral("CPU hors-ligne PBR/HDR — 64 spp, 3 rebonds et débruitage."));
         if (navigationPreviewTimer_) navigationPreviewTimer_->setInterval(settings_.directX11 ? 50 : 350);
         threads_->setEnabled(!settings_.directX11);
         simdMode_->setEnabled(!settings_.directX11);
@@ -1413,6 +1413,7 @@ private:
             const auto postStart = std::chrono::steady_clock::now();
             if (cfg.renderW == cfg.outW * 2 && cfg.renderH == cfg.outH * 2) pixels = downsample2x(pixels, cfg.renderW, cfg.renderH, cfg.threads);
             else if (cfg.renderW != cfg.outW || cfg.renderH != cfg.outH) pixels = upscaleBilinear(pixels, cfg.renderW, cfg.renderH, cfg.outW, cfg.outH, cfg.threads);
+            if (cfg.offlinePathTrace) pixels = denoiseBilateral(pixels, cfg.outW, cfg.outH, cfg.threads);
             if (cfg.edgeAa) pixels = antialiasEdges4(pixels, cfg.outW, cfg.outH, cfg.threads, cfg.avx2);
             if (cfg.dust && isPripyatScene()) applyDustOverlay(scene_, cam, cfg.outW, cfg.outH, cfg.hourStep, pixels);
             st.postMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - postStart).count();
