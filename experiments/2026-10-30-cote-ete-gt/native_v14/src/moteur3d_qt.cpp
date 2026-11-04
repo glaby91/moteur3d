@@ -980,7 +980,7 @@ private:
             settings_.distance=pose.distance;
             settings_.angle=pose.angle;
             settings_.elevation=pose.elevation;
-        }        } else if (video) {
+        } else if (video) {
             // Preserve the established orbit preview for all existing scenes.
             const float orbitDistance=isRaptureScene()?std::max(settings_.distance,18.f):settings_.distance;
             const CameraPose pose = ellipseOrbitPose(orbitDistance, settings_.angle, settings_.elevation, videoAngle_);
