@@ -14,6 +14,8 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
   const C = (a,b,r,mat) => capsule([X(a[0]),Y(a[1]),Z(a[2])],[X(b[0]),Y(b[1]),Z(b[2])],r*scale,mat);
   const E = (cx,cy,cz,rx,ry,rz,mat) => ellipse(X(cx),Y(cy),Z(cz),rx*scale,ry*scale,rz*scale,mat);
   const Q = (x0,y0,z0,x1,y1,z1,mat) => box(Math.min(X(x0),X(x1)),Math.min(Y(y0),Y(y1)),Math.min(Z(z0),Z(z1)),Math.max(X(x0),X(x1)),Math.max(Y(y0),Y(y1)),Math.max(Z(z0),Z(z1)),mat);
+  const padFrontZ = (px,py,cx,cy,cz,rx,ry,rz) => cz-rz*Math.sqrt(Math.max(.035,1-((px-cx)/rx)**2-((py-cy)/ry)**2))-.002;
+  const padTopY = (px,pz,cx,cz,rx,rz,ry) => cy+ry*Math.sqrt(Math.max(.035,1-((px-cx)/rx)**2-((pz-cz)/rz)**2));
   const folded = options.folded === true;
   const objectStart = Array.isArray(api.objects) ? api.objects.length : null;
   const components = [];
@@ -57,18 +59,18 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
   B(-.282,.49,.205,.282,1.17,.365,.040,wood);
   B(-.258,.515,.178,.258,1.145,.215,.032,wood);
   B(-.235,.545,.145,.235,1.105,.238,.046,fabric);
-  B(-.205,.575,.129,.205,1.075,.153,.034,fabric);
+  E(0,.825,.166,.222,.270,.050,fabric);
   B(-.270,.515,.207,-.245,1.14,.231,.009,piping);
   B(.245,.515,.207,.270,1.14,.231,.009,piping);
   B(-.235,.515,.214,.235,.548,.237,.008,piping);
   B(-.235,1.105,.214,.235,1.14,.237,.008,piping);
   // Tailored vertical channels and two cross seams on the front face.
   for (const dx of [-.135,-.068,0,.068,.135])
-    C([dx,.625,.126],[dx,1.015,.126],.0045,piping);
-  for (const yy of [.72,.91]) C([-.19,yy,.125],[.19,yy,.125],.0045,piping);
+    C([dx,.625,padFrontZ(dx,.625,0,.825,.166,.222,.270,.050)],[dx,1.015,padFrontZ(dx,1.015,0,.825,.166,.222,.270,.050)],.0045,piping);
+  for (const yy of [.72,.91]) C([-.19,yy,padFrontZ(-.19,yy,0,.825,.166,.222,.270,.050)],[.19,yy,padFrontZ(.19,yy,0,.825,.166,.222,.270,.050)],.0045,piping);
   // Small upholstery buttons: subdued, evenly aligned, and not decorative.
   for (const dx of [-.145,-.072,.072,.145]) for (const yy of [.675,.965])
-    E(dx,yy,.119,.009,.009,.004,wood);
+    E(dx,yy,padFrontZ(dx,yy,0,.825,.166,.222,.270,.050)-.002,.009,.009,.004,piping);
   finishComponent('backrest', 'rigid');
 
   // Seat board and padded face. The folded version stands upright in front of
@@ -76,9 +78,10 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
   if (folded) {
     B(-.255,.485,-.214,.255,.925,-.095,.035,wood);
     B(-.232,.515,-.238,.232,.895,-.161,.042,fabric);
-    B(-.210,.545,-.245,.210,.865,-.226,.020,fabric);
+    E(0,.705,-.215,.216,.174,.046,fabric);
     for (const dx of [-.145,-.072,.072,.145])
-      C([dx,.565,-.244],[dx,.845,-.244],.0045,piping);
+      C([dx,.590,padFrontZ(dx,.590,0,.705,-.215,.216,.174,.046)],[dx,.820,padFrontZ(dx,.820,0,.705,-.215,.216,.174,.046)],.0045,piping);
+    C([-.155,.715,padFrontZ(-.155,.715,0,.705,-.215,.216,.174,.046)],[.155,.715,padFrontZ(.155,.715,0,.705,-.215,.216,.174,.046)],.004,piping);
     C([-.245,.49,-.115],[.245,.49,-.115],.022,metal);
     for (const side of [-1,1]) {
       E(side*.245,.49,-.115,.024,.024,.024,metal);
@@ -89,9 +92,11 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
   } else {
     B(-.265,.435,-.245,.265,.565,.205,.045,wood);
     B(-.242,.48,-.254,.242,.605,.17,.050,fabric);
-    B(-.210,.505,-.266,.210,.575,-.230,.020,fabric);
-    for (const dx of [-.15,-.075,0,.075,.15])
-      C([dx,.515,-.26],[dx,.565,.13],.0045,piping);
+    E(0,.560,-.045,.215,.052,.180,fabric);
+    for (const dx of [-.15,-.075,0,.075,.15]) {
+      const z0=-.20,z1=.11;
+      C([dx,padTopY(dx,z0,0,-.045,.215,.180,.052),z0],[dx,padTopY(dx,z1,0,-.045,.215,.180,.052),z1],.0045,piping);
+    }
     C([-.245,.455,.165],[.245,.455,.165],.020,metal);
   }
   finishComponent('seat_pan', 'hinged_rigid');
