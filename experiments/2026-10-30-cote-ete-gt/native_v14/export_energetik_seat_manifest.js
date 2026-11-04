@@ -1,19 +1,40 @@
-// Generate the object/component and future-physics description beside the
-// standalone seat .bin. This metadata is not consumed by today's renderer.
+// Generate object/component and future-physics metadata for the Energetik row preview.
+// The metadata is not consumed by today's renderer.
 const fs = require('fs');
 const path = require('path');
 const buildSeat = require('./assets/pripyat/energetik_cinema_seat.js');
 const physicsProfiles = require('./energetik_seat_physics_profiles.json');
 const output = process.argv[2] || path.join(__dirname, 'scene_energetik_seat_preview.assets.json');
-// Preview scene object 0 is the neutral floor; mirror it so component ranges
-// in this manifest line up with the static .bin's object table.
+
+// Match scene_energetik_seat_preview.js exactly. Object 0 is the neutral floor.
 const objects = [{ kind: 'box', args: ['preview floor'] }];
 const record = kind => (...args) => objects.push({ kind, args });
-const seat = buildSeat({
+const api = {
   objects,
   box: record('box'), roundBox: record('roundbox'),
   capsule: record('capsule'), ellipse: record('ellipse')
-}, 0, 0, 0, { folded: true });
+};
+const seatCenters = [-0.82, 0, 0.82];
+const seats = seatCenters.map((centerX, index) => ({
+  index: index + 1,
+  centerX,
+  instance: buildSeat(api, centerX, 0, 0, { folded: true })
+}));
+const supportStart = objects.length;
+api.capsule([-1.25, 0.13, 0.27], [1.25, 0.13, 0.27], 0.038, 'seatSteel');
+for (const postX of [-1.23, -0.41, 0.41, 1.23]) {
+  api.roundBox(postX - 0.045, 0.08, 0.19, postX + 0.045, 0.52, 0.28, 0.025, 'seatWood');
+}
+const components = seats.flatMap(({ index, instance }) =>
+  instance.components.map(component => ({ ...component, id: `seat_${index}_${component.id}` }))
+);
+components.push({
+  id: 'shared_mounting_rail',
+  role: 'rigid',
+  firstObject: supportStart,
+  objectCount: objects.length - supportStart,
+  materialProfileIds: ['seat_steel', 'seat_shell_wood']
+});
 const valid = value => Number.isFinite(value) && value > 0;
 const withCalculatedProperties = profile => {
   const m = profile.measurements;
@@ -31,28 +52,36 @@ const withCalculatedProperties = profile => {
     }
   };
 };
-
+const joints = seats.flatMap(({ index, instance }) =>
+  instance.joints.map(joint => ({ ...joint, id: `seat_${index}_${joint.id}`, part: `seat_${index}_${joint.part}` }))
+);
+const deformableParts = seats.flatMap(({ index, instance }) =>
+  instance.deformableParts.map(part => ({ ...part, id: `seat_${index}_${part.id}`, component: `seat_${index}_${part.component}` }))
+);
 const manifest = {
   schema: 'm3d-asset-manifest-v1',
-  asset: seat.asset,
+  asset: 'energetik-folding-cinema-seat-row',
   units: 'metres',
-  pose: { folded: seat.folded, seatPanAngleDegrees: seat.joints[0].currentAngleDegrees },
+  pose: { seatCount: seats.length, folded: true },
   geometry: {
-    objectCount: seat.objectRange[1] - seat.objectRange[0],
-    sceneObjectRange: seat.objectRange,
-    primitiveCounts: objects.reduce((acc, item) => { acc[item.kind] = (acc[item.kind] || 0) + 1; return acc; }, {}),
-    components: seat.components
+    objectCount: objects.length - 1,
+    sceneObjectRange: [1, objects.length],
+    primitiveCounts: objects.slice(1).reduce((acc, item) => { acc[item.kind] = (acc[item.kind] || 0) + 1; return acc; }, {}),
+    components
   },
   materialProperties: {
     ...physicsProfiles,
     profiles: physicsProfiles.profiles.map(withCalculatedProperties)
   },
-  joints: seat.joints,
-  deformableParts: seat.deformableParts,
+  joints,
+  deformableParts,
   rendererStatus: {
-    current: 'The .bin contains static geometry in the selected pose.',
-    future: 'The manifest identifies rigid parts, the seat-pan revolute joint, and foam-backed pads. Runtime articulation and deformation require engine support.'
+    current: 'The .bin contains static geometry for three folded seats and their shared mounting structure.',
+    future: 'The manifest identifies each rigid seat, seat-pan hinge and foam-backed pad. Runtime articulation and deformation require engine support.'
   }
 };
 fs.writeFileSync(output, JSON.stringify(manifest, null, 2));
-console.log(JSON.stringify({ output, components: seat.components, primitiveCounts: manifest.geometry.primitiveCounts, objectCount: manifest.geometry.objectCount }, null, 2));
+console.log(JSON.stringify({
+  output, seatCount: seats.length, components: components.length,
+  primitiveCounts: manifest.geometry.primitiveCounts, objectCount: manifest.geometry.objectCount
+}, null, 2));
