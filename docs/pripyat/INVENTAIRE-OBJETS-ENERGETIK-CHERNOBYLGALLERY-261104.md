@@ -20,7 +20,8 @@ Energetik
 │   ├── Poteaux, poutres et retombées — confirmé
 │   ├── Portes / ouvertures intérieures — confirmé, état variable
 │   ├── Escaliers — signalés par le texte; formes à relever sur les vues dédiées
-│   └── Arbres et végétation ayant pénétré les niveaux — confirmé
+│   ├── Arbres et végétation ayant pénétré les niveaux — confirmé
+│   └── Plante à feuilles jaunes dans une salle — photo 69; plante confirmée par l’utilisateur, espèce et contenant non déterminés
 ├── 03. Gymnase / salle sportive
 │   ├── Grand sol sportif avec lignes peintes — confirmé
 │   ├── Marquages et inscriptions murales — confirmés
@@ -175,7 +176,7 @@ Les numéros suivent l’ordre des miniatures de la galerie basse. Les vues lié
 | 66 | `palace-culture-2469.jpg` | Livres ouverts et fermés, couverture illustrée et document typographié | Étude de petites piles de livres; typographie à garder floue sauf référence lisible licenciée | papier, carton, encre mate | Élevée |
 | 67 | `palace-culture-2470-2.jpg` | Livres illustrés, cahiers et pages ouvertes au sol | Papier déformé, couvertures colorées et poussière | papier/carton, débris | Élevée |
 | 68 | `palace-culture-2471-2.jpg` | Journaux avec portrait imprimé, livres et photographies | Documents d’archives/documentaires; la photo imprimée ne prouve pas la présence d’un portrait peint dans cette pièce | papier jauni, encre, couverture | Élevée |
-| 69 | `palace-culture-2474.jpg` | Table ou pupitre poussiéreux devant rideau/porte et mur peint | Surface de travail isolée; petit objet jaune sur la table, fonction non identifiée | bois peint, poussière, métal | Moyenne |
+| 69 | `palace-culture-2474.jpg` | Plante à feuilles jaunes derrière une table ou un pupitre poussiéreux | Feuillage et tiges visibles; plante confirmée par l’utilisateur; espèce, pot et éventuel support masqué restent à vérifier | feuilles jaunies, tiges sèches, poussière; contenant à identifier | Élevée pour « plante », faible pour espèce/contenant |
 | 70 | `palace-culture-3855.jpg` | Livres, brochures, papiers et textile rouge entassés parmi les débris | Amas de bibliothèque/archives; plusieurs formats de livres et feuilles | papier, textile, gravats | Élevée |
 | 71 | `palace-culture-3856.jpg` | Livre fermé isolé sur une table, couverture portant un titre cyrillique | Objet de premier plan à modéliser comme livre; titre translittéré à vérifier avant d’en faire un texte | papier/carton, table en bois peint | Élevée |
 | 72 | `palace-culture-3857.jpg` | Livres et textiles mélangés à des déchets, papiers et petites boîtes | Amas d’objets divers; boîtes/tissus seulement des formes génériques à cette échelle | papier, tissu, carton, débris | Élevée |
