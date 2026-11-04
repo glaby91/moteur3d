@@ -1,6 +1,6 @@
 # Cahier de reconstruction — Palais Energetik
 
-État de travail : correction du trajet préparée pour le build `261104-0006`. La reconstruction reste un blockout détaillé, à valider visuellement sur Windows ; les volumes et certains intérieurs doivent encore gagner en fidélité.
+État de travail : passe de scène préparée pour le build `261104-0007`. La reconstruction reste un blockout détaillé, à valider visuellement sur Windows ; les volumes et certains intérieurs doivent encore gagner en fidélité.
 
 ## Références prioritaires
 
@@ -54,10 +54,17 @@ L’emplacement exact des pièces, portes et couloirs devra être déduit des vu
 
 ## Validation restante
 
-1. Compiler le paquet Windows `261104-0006`.
+1. Compiler le paquet Windows `261104-0007`.
 2. Comparer la façade DirectX et CPU à la maquette Skeiron et aux photos : silhouette, ouvertures, matériaux, couleur et lumière.
-3. Examiner le foyer, l’auditorium et le gymnase à plusieurs points de vue.
+3. Examiner le foyer, la fresque, l’auditorium et le gymnase à plusieurs points de vue.
 4. Vérifier les déplacements aux portes, coursives, escaliers et transitions de niveau, ainsi que la visite guidée autour de 21 secondes.
 5. Mesurer le temps d’image DirectX à 1366 × 768 après la mise à jour des textures.
+
+## Quatrième passe — détails de scène
+
+- Le linteau avant reçoit des éclats d’enduit et de pierre, des zones de béton mis à nu et des coulures de rouille. La grande façade reste ouverte, sans vitrages.
+- Le retour intérieur du foyer reçoit une fresque murale en relief : pigments rouges, bleus et ocre écaillés, figure centrale et motif végétal. Elle est placée près du grand escalier pour être visible pendant la visite.
+- Une trame de plafond métallique, des dalles tombées et quelques câbles pendants rendent les dégâts intérieurs lisibles depuis le hall.
+- Les éléments ajoutés utilisent les matériaux du moteur et une géométrie légère, sans intégrer les photos de référence au binaire.
 
 Cette passe ne prétend pas être une reconstruction photogrammétrique ni une validation visuelle finale.

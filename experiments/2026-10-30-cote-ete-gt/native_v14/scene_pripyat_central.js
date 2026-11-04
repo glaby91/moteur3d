@@ -86,6 +86,26 @@ function makeScene() {
     box(x-0.48,8.25,-20.42,x+0.48,8.62,-19.28,'stone');
     box(x-0.58,8.62,-20.50,x+0.58,8.78,-19.20,'concrete');
   }
+  // Exposed aggregate, broken cladding and rust runoff on the street-facing
+  // lintel. The patch layout is irregular so the facade reads as weathered
+  // cast concrete rather than a clean repeating block texture.
+  const facadeScars=[
+    [-44.8,7.65,2.4,0.72],[-41.2,8.10,1.15,0.48],[-36.7,7.42,2.05,0.88],
+    [-30.4,8.00,1.40,0.56],[-24.1,7.54,2.25,0.78],[-17.5,8.18,1.05,0.45],
+    [-10.3,7.60,1.72,0.66],[-3.8,8.04,2.00,0.50],[3.8,7.46,1.54,0.86],
+    [10.9,7.92,2.28,0.56],[18.3,7.50,1.50,0.72],[23.0,8.13,1.12,0.50]
+  ];
+  for(let i=0;i<facadeScars.length;i++){
+    const [x,y,w,h]=facadeScars[i], m=i%3===0?'brick':i%3===1?'plaster':'stone';
+    box(x,y,-20.99,x+w,y+h,-20.91,m);
+    box(x+0.16,y-0.24,-20.99,x+0.26,y+0.02,-20.90,'rust');
+    if(i%2===0) box(x+w-0.24,y+h-0.10,-20.99,x+w+0.28,y+h+0.03,-20.90,'concrete');
+  }
+  // A few cracked panel edges and exposed anchor bars make damage legible at
+  // normal exploration distance without turning every surface into rubble.
+  for(const [x,y,len] of [[-39.3,8.9,0.82],[-27.0,8.7,0.58],[-8.6,8.82,0.72],[12.2,8.72,0.64]]){
+    capsule([x,y,-21.0],[x+len,y-0.16,-21.0],0.035,'rust');
+  }
   // Broad ceremonial approach: six shallow steps and damaged handrails.
   for (let step=0; step<6; step++) {
     const y=0.12+step*0.105, z=-22.2+step*0.42;
@@ -243,11 +263,55 @@ function makeScene() {
     box(x1+0.13,y+h*0.50,z+0.18,x1+0.19,y+h*0.50+0.10,z+w*0.46,'stone');
     box(x1+0.13,y+0.24,z+w*0.57,x1+0.19,y+0.36,z+w-0.24,'plaster');
   }
+  // Large foyer fresco on the inside return beside the ceremonial stair. It
+  // combines surviving Soviet-era colour fields, a central figure and flaked
+  // edges, based on the supplied Energetik interior photographs.
+  const frescoX=8.15;
+  box(frescoX,3.72,-34.35,frescoX+0.08,6.32,-25.35,'plaster');
+  box(frescoX+0.08,3.82,-34.22,frescoX+0.14,6.22,-25.48,'mural');
+  // Surviving painted geometry sits just proud of the wall, like a worn mural
+  // rather than a clean poster. Broad forms remain recognizable at a glance.
+  box(frescoX+0.15,4.02,-33.98,frescoX+0.19,4.42,-25.76,'sportsPaint');
+  box(frescoX+0.15,5.55,-33.90,frescoX+0.19,5.82,-25.80,'sportsViolet');
+  ellipsoidMesh(frescoX+0.20,5.13,-26.45,0.055,0.57,0.57,'sportsRed',14,10);
+  // Figure: ochre head, blue coat, one raised arm and a pale sleeve.
+  ellipsoidMesh(frescoX+0.23,5.12,-30.25,0.065,0.28,0.27,'taxi',12,8);
+  box(frescoX+0.16,4.36,-30.76,frescoX+0.23,4.91,-29.75,'sportsViolet');
+  capsule([frescoX+0.21,4.78,-30.02],[frescoX+0.21,5.22,-29.52],0.105,'sportsPaint');
+  capsule([frescoX+0.21,4.77,-30.47],[frescoX+0.21,5.48,-30.93],0.10,'sportsPaint');
+  capsule([frescoX+0.21,5.48,-30.93],[frescoX+0.21,5.78,-31.21],0.075,'sportsRed');
+  // A stylized wheat / energy motif and broken mosaic fragments.
+  for(let i=0;i<6;i++){
+    const z=-33.3+i*0.52, y=4.25+i*0.20;
+    capsule([frescoX+0.22,y,z],[frescoX+0.22,y+0.54,z-0.38],0.045,i%2?'taxi':'sportsPaint');
+    ellipsoidMesh(frescoX+0.24,y+0.37,z-0.25,0.045,0.13,0.20,i%2?'sportsPaint':'taxi',8,6);
+  }
+  for(let i=0;i<24;i++){
+    const z=-34.05+(i*37%83)/10, y=3.90+(i*19%21)/10;
+    if(y>4.35&&y<5.85&&z>-31.0&&z<-29.3) continue;
+    const mat=['sportsRed','sportsPaint','sportsViolet','taxi','sea'][i%5];
+    box(frescoX+0.17,y,z,frescoX+0.22,y+0.08+(i%3)*0.06,z+0.12+(i%4)*0.05,mat);
+  }
+  // Peeling plaster exposes pale substrate around the painted field.
+  for(const [y,z,w,h] of [[5.94,-34.08,0.54,0.34],[5.82,-25.83,0.36,0.46],
+                           [3.91,-33.94,0.62,0.21],[4.16,-25.93,0.44,0.32]])
+    box(frescoX+0.23,y,z,frescoX+0.26,y+h,z+w,'stone');
   // Ceiling failures and exposed glazing frames leave specific traces of decay.
   for(const [x,z,w,d] of [[-39,-30,4.2,2.1],[-27,-23,3.0,1.5],[12,-29,3.6,2.0]]){
     box(x,8.36,z,x+w,8.52,z+d,'windowdark');
     box(x-0.2,8.40,z-0.18,x+w+0.26,8.58,z+0.22,'debris');
   }
+  // Broken suspended ceiling at the foyer perimeter: surviving metal T-rails,
+  // missing panels, hanging cable and collapsed tile fragments.
+  for(const z of [-39.8,-37.2,-23.4,-21.4])
+    box(-13.8,8.28,z,7.2,8.34,z+0.055,'metal');
+  for(const x of [-12.8,-9.6,-6.4,-3.2,0,3.2,6.4])
+    box(x,8.28,-40.1,x+0.05,8.34,-21.2,'metal');
+  for(const [x,z,w,d] of [[-12.3,-39.4,2.0,1.3],[-7.2,-38.8,1.4,0.9],
+                           [1.1,-23.1,2.2,1.2],[4.0,-37.8,1.6,1.1]])
+    box(x,8.22,z,x+w,8.30,z+d,'debris');
+  for(const [x,z] of [[-10.6,-36.4],[-2.0,-22.4],[5.1,-35.0]])
+    capsule([x,8.30,z],[x+0.06,7.42,z+0.18],0.018,'rust');
   for(const [x,y] of [[-31.6,1.0],[-20.8,4.1],[8.4,7.1],[14.6,1.0]]){
     box(x,y,-42.24,x+3.5,y+1.65,-42.08,'windowdark');
     box(x+0.08,y+0.06,-42.30,x+0.18,y+1.56,-42.16,'rust');
