@@ -1,6 +1,6 @@
 // Minimal scene for inspecting or benchmarking the reusable cinema seat.
 const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
-  concrete: 2, seatPreviewFloor: 2, seatFabricClean: 1, seatTrim: 2, metal: 18, seatSteel: 22, wood: 4, seatWood: 5
+  concrete: 2, seatPreviewFloor: 2, seatFabricClean: 1, seatTrim: 2, metal: 18, seatSteel: 34, wood: 4, seatWood: 8
 });
 const M3D_SCENE_LIGHTS = [];
 
