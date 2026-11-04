@@ -1,1 +1,18 @@
-YªçŠx-®éÜj×¢ëiºÚ+Š§j[h‘éÜ¢éíënÓ¢Ö¥¢ëiºÙbë5{¶êÚ$z{-®éÜj×
+{
+  "scene": "Palais de la Culture Energetik â€” Pripiat",
+  "schema_version": 1,
+  "annex": "docs/pripyat/VUES-ENERGETIK.md",
+  "notes": "target is the camera look target in metres; distance is the orbit radius; angle and elevation are degrees; hour_step maps to 06:00 + 30 minutes per step.",
+  "views": [
+    { "name": "01 â€” FaÃ§ade et colonnade", "target": [0.0, 5.2, -30.0], "distance": 16.0, "angle": 0.0, "elevation": 7.0, "fov": 50.0, "hour_step": 12 },
+    { "name": "02 â€” Foyer et fresque longue", "target": [8.2, 5.0, -31.4], "distance": 14.0, "angle": -90.0, "elevation": 4.0, "fov": 70.0, "hour_step": 12 },
+    { "name": "03 â€” Grand escalier", "target": [2.5, 3.0, -29.2], "distance": 4.5, "angle": -90.0, "elevation": 8.0, "fov": 52.0, "hour_step": 12 },
+    { "name": "04 â€” CinÃ©ma / auditorium", "target": [-32.5, 1.8, -39.0], "distance": 5.0, "angle": 0.0, "elevation": 4.0, "fov": 52.0, "hour_step": 12 },
+    { "name": "05 â€” Mezzanine", "target": [-4.0, 4.9, -31.0], "distance": 6.0, "angle": -90.0, "elevation": 5.0, "fov": 55.0, "hour_step": 12 },
+    { "name": "06 â€” Salle de club, Ã©tage", "target": [-32.0, 7.8, -30.0], "distance": 5.5, "angle": 0.0, "elevation": 4.0, "fov": 52.0, "hour_step": 12 },
+    { "name": "07 â€” Cage dâ€™escalier, niveau 1", "target": [23.5, 4.8, -31.5], "distance": 4.5, "angle": 0.0, "elevation": 3.0, "fov": 52.0, "hour_step": 12 },
+    { "name": "08 â€” Cage et porte du toit", "target": [23.5, 10.7, -23.4], "distance": 4.0, "angle": 180.0, "elevation": 2.0, "fov": 52.0, "hour_step": 12 },
+    { "name": "09 â€” Toit, panorama de Pripiat", "target": [0.0, 11.3, -23.5], "distance": 15.0, "angle": 0.0, "elevation": 24.0, "fov": 58.0, "hour_step": 12 },
+    { "name": "10 â€” FaÃ§ade de nuit", "target": [0.0, 5.0, -30.0], "distance": 17.0, "angle": 0.0, "elevation": 5.0, "fov": 52.0, "hour_step": 32 }
+  ]
+}
