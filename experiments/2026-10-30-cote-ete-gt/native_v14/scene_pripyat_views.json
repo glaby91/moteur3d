@@ -7,7 +7,7 @@
     { "name": "01 — Façade et colonnade", "target": [0.0, 5.2, -30.0], "distance": 16.0, "angle": 0.0, "elevation": 7.0, "fov": 50.0, "hour_step": 12 },
     { "name": "02 — Foyer et fresque longue", "target": [8.2, 5.0, -31.4], "distance": 14.0, "angle": -90.0, "elevation": 4.0, "fov": 70.0, "hour_step": 12 },
     { "name": "03 — Grand escalier", "target": [2.5, 3.0, -29.2], "distance": 4.5, "angle": -90.0, "elevation": 8.0, "fov": 52.0, "hour_step": 12 },
-    { "name": "04 — Cinéma / auditorium", "target": [-32.5, 1.8, -39.0], "distance": 5.0, "angle": 0.0, "elevation": 4.0, "fov": 52.0, "hour_step": 12 },
+    { "name": "04 — Cinéma / auditorium", "target": [-32.5, 2.45, -33.2], "distance": 8.7, "angle": 0.0, "elevation": 5.0, "fov": 66.0, "hour_step": 12 },
     { "name": "05 — Mezzanine", "target": [-4.0, 4.9, -31.0], "distance": 6.0, "angle": -90.0, "elevation": 5.0, "fov": 55.0, "hour_step": 12 },
     { "name": "06 — Salle de club, étage", "target": [-32.0, 7.8, -30.0], "distance": 5.5, "angle": 0.0, "elevation": 4.0, "fov": 52.0, "hour_step": 12 },
     { "name": "07 — Cage d’escalier, niveau 1", "target": [23.5, 4.8, -31.5], "distance": 4.5, "angle": 0.0, "elevation": 3.0, "fov": 52.0, "hour_step": 12 },

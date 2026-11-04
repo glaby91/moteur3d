@@ -117,16 +117,20 @@ function makePripyatPbr(kind) {
     if(kind==='leaves') return broad*.08+mid*.12+grain*.04;
     if(kind==='plaster') return broad*.20+mid*.11+grain*.035;
     if(kind==='mural') return broad*.13+mid*.09+grain*.035;
+    if(kind==='volcanicTuff') return broad*.18+mid*.12+grain*.055;
     if(kind==='wood'||kind==='bark') return broad*.07+Math.sin(y*.08+noise(x,y,5))* .035+grain*.018;
+    if(kind==='seatFabric'||kind==='curtain') return broad*.045+mid*.035+grain*.018;
+    if(kind==='cinemaScreen') return broad*.07+mid*.035+grain*.012;
     if(kind==='debris') return broad*.18+mid*.10+grain*.07;
     if(kind==='grass') return broad*.11+mid*.14+grain*.05;
     return broad*.10+mid*.055+grain*.018;
   };
   const palettes={
     concrete:[145,140,126], stone:[119,113,100], asphalt:[57,59,54],
-    plaster:[166,159,143], mural:[179,151,112],
+    plaster:[166,159,143], mural:[179,151,112], volcanicTuff:[145,96,79],
     brick:[132,91,69], rust:[112,62,39], leaves:[65,91,48],
-    wood:[91,67,45], bark:[70,55,38], debris:[104,97,83], grass:[88,99,54]
+    wood:[91,67,45], bark:[70,55,38], debris:[104,97,83], grass:[88,99,54],
+    seatFabric:[76,43,41], curtain:[69,43,42], cinemaScreen:[119,117,108]
   };
   const base=palettes[kind]||[128,128,128];
   for(let y=0;y<size;y++) for(let x=0;x<size;x++){
@@ -155,6 +159,19 @@ function makePripyatPbr(kind) {
       variation-=streak*25;
     } else if(kind==='leaves'){
       variation+=Math.max(0,grain)*12;
+    } else if(kind==='volcanicTuff'){
+      const bw=166,bh=118,row=Math.floor(y/bh),offset=(row&1)*83;
+      const bx=(x+offset)%bw,by=y%bh;
+      const blockX=Math.floor((x+offset)/bw), blockY=row;
+      const edge=Math.min(bx,bw-bx,by,bh-by);
+      const joint=(edge<3.2+Math.abs(noise(x,y,5))*2)?-34:edge<8?-8:0;
+      const blockTone=(hash(blockX,blockY)%19)-9;
+      const porous=(hash(x>>2,y>>2)%100<11)?-10:0;
+      const spallField=noise(x,y,4)*.58+noise(x,y,2)*.30+grain*.12;
+      const spall=spallField>.69&&edge<15;
+      variation+=joint+blockTone+porous;
+      if(spall) variation-=25+Math.max(0,mid)*12;
+      if(hash(blockX+91,blockY-33)%100<18&&bx>bw-13&&edge<12) variation-=18;
     } else if(kind==='plaster'){
       const damp=Math.max(0,Math.sin(x*.031+noise(x,y,6)*1.8))*Math.max(0,Math.sin(y*.017));
       const peelField=noise(x,y,4)*.58+noise(x,y,2)*.30+grain*.12;
@@ -168,6 +185,17 @@ function makePripyatPbr(kind) {
       const grainLine=Math.abs(Math.sin(y*.08+noise(x,y,5)*1.2));
       variation-=Math.max(0,.25-grainLine)*24;
       variation+=noise(x,y,6)*9;
+    } else if(kind==='seatFabric'){
+      const worn=Math.max(0,noise(x,y,4)*.65+noise(x,y,2)*.35-.48);
+      variation+=worn*18;
+      if(hash(x>>2,y>>2)%100<2) variation-=15;
+    } else if(kind==='curtain'){
+      const fold=Math.abs(Math.sin(x*.11+noise(x,y,5)*.7));
+      variation-=Math.max(0,.24-fold)*17;
+      variation-=Math.max(0,noise(x,y,4)*.65+noise(x,y,2)*.35-.57)*24;
+    } else if(kind==='cinemaScreen'){
+      variation-=Math.max(0,noise(x,y,4)*.60+noise(x,y,2)*.40-.53)*28;
+      variation+=Math.sin(x*.018)*3;
     } else if(kind==='debris'){
       const chip=hash(x>>3,y>>3)%100;
       variation+=chip<16?15:chip>86?-20:0;
@@ -176,6 +204,11 @@ function makePripyatPbr(kind) {
       variation+=cluster*18+Math.max(0,grain)*8;
     }
     let pigment=base;
+    if(kind==='volcanicTuff'){
+      const spallField=noise(x,y,4)*.58+noise(x,y,2)*.30+grain*.12;
+      if(spallField>.69&&Math.min((x%166),166-(x%166),(y%118),118-(y%118))<15) pigment=[119,114,104];
+      else if(hash(x>>4,y>>4)%100<5) pigment=[168,115,90];
+    }
     if(kind==='mural'){
       const region=(Math.sin(x*.011+Math.sin(y*.006)*1.7+noise(x,y,5)*.8)+1)*.5;
       pigment=region<.22?[39,132,159]:region<.46?[55,103,164]:region<.69?[196,91,51]:[205,178,112];
@@ -187,7 +220,7 @@ function makePripyatPbr(kind) {
     const dx=(heightAt(x+1,y)-heightAt(x-1,y))*1.2, dy=(heightAt(x,y+1)-heightAt(x,y-1))*1.2;
     const inv=1/Math.hypot(dx,dy,1);
     normal[i]=pack565(128-dx*inv*127,128-dy*inv*127,128+inv*127);
-    const roughBase=kind==='asphalt'?232:kind==='leaves'||kind==='grass'?224:kind==='rust'?218:kind==='stone'?222:kind==='wood'||kind==='bark'?214:kind==='debris'?236:kind==='plaster'||kind==='mural'?228:232;
+    const roughBase=kind==='asphalt'?232:kind==='leaves'||kind==='grass'?224:kind==='rust'?218:kind==='stone'?222:kind==='wood'||kind==='bark'?214:kind==='debris'?236:kind==='plaster'||kind==='mural'?228:kind==='volcanicTuff'?238:kind==='seatFabric'||kind==='curtain'?244:kind==='cinemaScreen'?228:232;
     const r=roughBase+grain*10+Math.abs(mid)*4;
     roughness[i]=pack565(r,r,r);
   }
@@ -206,7 +239,7 @@ function makePripyatPbr(kind) {
   };
   return {color:makeMips(color),normal:makeMips(normal),roughness:makeMips(roughness)};
 }
-const generatedPripyatPbr=new Map(mats.filter(name=>['concrete','plaster','mural','stone','asphalt','brick','rust','leaves','grass','wood','bark','debris'].includes(name)).map(name=>[name,makePripyatPbr(name)]));
+const generatedPripyatPbr=new Map(mats.filter(name=>['concrete','plaster','mural','volcanicTuff','stone','asphalt','brick','rust','leaves','grass','wood','bark','debris','seatFabric','curtain','cinemaScreen'].includes(name)).map(name=>[name,makePripyatPbr(name)]));
 for(const [name,pbr] of generatedPripyatPbr) scene.materials.set(name,{levels:pbr.color});
 
 const generatedPbr = new Map(['raptureStone', 'raptureBronze', 'raptureGlass'].map(name => [name, makeRapturePbr(name)]));

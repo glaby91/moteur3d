@@ -79,6 +79,17 @@ L’emplacement exact des pièces, portes et couloirs devra être déduit des vu
 
 Cette passe ne prétend pas être une reconstruction photogrammétrique ni une validation visuelle finale.
 
+## Septième passe — salle cinéma de référence visuelle
+
+- La salle cinéma/auditorium devient le premier espace traité comme une composition complète : volume double hauteur, scène profonde, proscenium, écran en retrait, rideaux, poutres apparentes et plafond suspendu partiellement effondré.
+- Le premier plancher est ouvert au-dessus du public, tout en gardant la dalle sur les ailes et le couloir arrière pour raccorder les autres niveaux.
+- Le parement caractéristique en tuf volcanique rouge rosé reçoit une carte procédurale dédiée : joints, pores, éclats et sous-couche de béton visible. Les murs présentent des manques irréguliers et coulures aux ancrages.
+- Les rangées de sièges ont une élévation progressive, plusieurs blocs séparés par des allées, des piètements tubulaires, des accoudoirs, des coussins déchirés et quelques sièges effondrés. Des débris restent concentrés dans les passages.
+- Les sources chaudes de plafond et de paroi donnent une lecture plus claire des rangées et du fond de scène. Le cadrage 04 vise désormais le centre du volume à hauteur de regard.
+- Correction des panneaux acoustiques côté ouest : leurs bornes sont normalisées, ce qui évite des boîtes à largeur négative dans le générateur de scène.
+
+La scène est prête pour un contrôle sur le build Windows à 1366 × 768. Le niveau visuel UT2004 est le repère à atteindre, pas un résultat déclaré sans capture native. Vérifier en priorité la silhouette des rangées, la profondeur de scène, les faces du tuf, le contraste des lampes et l’absence de trous de géométrie.
+
 ## Cinquième passe — fresque longue, cage et vues directes
 
 - La fresque du foyer s’étend maintenant sur près de 18 m de mur, en deux pans qui laissent libre la porte du niveau. Les formes peintes, figures et fragments couvrent une longueur de mur au lieu d’un tableau isolé.

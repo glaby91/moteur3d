@@ -3,9 +3,9 @@
 // Documentary-photo references and map sources are listed in docs/pripyat/README.md.
 
 const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
-  concrete: 2, plaster: 1, mural: 1, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
+  concrete: 2, plaster: 1, mural: 1, volcanicTuff: 3, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
   asphalt: 3, stone: 5, metal: 18, rust: 7, leaves: 2, grass: 1,
-  bark: 1, wood: 4, sign: 3, debris: 2, puddle: 28
+  bark: 1, wood: 4, sign: 3, debris: 2, puddle: 28, seatFabric: 1, curtain: 1, cinemaScreen: 0
 });
 const M3D_MATERIAL_TRANSMISSION_PERCENT = Object.freeze({ glass: 62 });
 const M3D_MATERIAL_IOR = Object.freeze({ glass: 1.48 });
@@ -149,9 +149,15 @@ function makeScene() {
 
   // Three readable levels. Slabs wrap the foyer atrium and the open stair core.
   box(-49.2,0.05,-42.2,29.2,0.38,-20.1,'stone');
-  function floorPlate(y){
+  function floorPlate(y, openAuditorium=false){
     const t=y,b=y+0.24;
-    box(-49.2,t,-42.2,-15,b,-20.1,'concrete');
+    if(openAuditorium){
+      // Keep the west-side audience hall open through the first upper slab.
+      // Narrow side strips and a rear cross-corridor still connect the upper floor.
+      box(-49.2,t,-42.2,-47.5,b,-25.2,'concrete');
+      box(-17.3,t,-42.2,-15,b,-25.2,'concrete');
+      box(-49.2,t,-25.2,-15,b,-20.1,'concrete');
+    } else box(-49.2,t,-42.2,-15,b,-20.1,'concrete');
     box(-15,t,-42.2,8,b,-35.8,'concrete');
     box(-15,t,-26.5,8,b,-20.1,'concrete');
     box(-15,t,-35.8,-7,b,-26.5,'concrete');
@@ -162,7 +168,7 @@ function makeScene() {
     box(20,t,-42.2,27,b,-38.0,'concrete');
     box(20,t,-23.0,27,b,-20.1,'concrete');
   }
-  floorPlate(3.25); floorPlate(6.35);
+  floorPlate(3.25,true); floorPlate(6.35);
 
   // Open facade bays expose the deep galleries and interior structure, not glass.
   // Keep only damaged railings at the balcony edges, with irregular missing sections.
@@ -177,8 +183,11 @@ function makeScene() {
 
   // Rear and end glazing, deep reveals, and long horizontal concrete bands.
   for(let x=-45.5;x<18;x+=6.2){
-    box(x,1.0,-42.10,x+3.5,2.65,-41.98,((Math.floor((x+45.5)/6.2)%4)===1)?'windowdark':'glass');
-    box(x,4.1,-42.10,x+3.5,5.85,-41.98,'glass');
+    const inAuditorium=x>=-47.5&&x<=-17.3;
+    if(!inAuditorium){
+      box(x,1.0,-42.10,x+3.5,2.65,-41.98,((Math.floor((x+45.5)/6.2)%4)===1)?'windowdark':'glass');
+      box(x,4.1,-42.10,x+3.5,5.85,-41.98,'glass');
+    }
     box(x,7.1,-42.10,x+3.5,8.75,-41.98,'windowdark');
   }
   for(const y of [3.05,6.15,9.05]) box(-49.2,y,-42.16,29.2,y+0.18,-41.92,'stone');
@@ -206,6 +215,8 @@ function makeScene() {
     box(8.38,y,-42.2,8.54,y+h,-34.8,'concrete');
     box(8.38,y,-26.2,8.54,y+h,-20.1,'concrete');
     for(const [x0,x1] of [[-48.7,-38.0],[-38.0,-27.0],[-27.0,-15.8],[8.2,17.6]]){
+      // The west wing is the double-height auditorium, not a stack of small boxes.
+      if(x0< -15.8) continue;
       // Low corridor walls and room dividers; the first-floor rear hall stays open as an auditorium.
       sideDoorWall(x0,-34.0,-27.0,y,h,'concrete');
       sideDoorWall(x0,-27.0,-20.1,y,h,'concrete');
@@ -233,11 +244,127 @@ function makeScene() {
 
   // Ground floor: foyer, abandoned auditorium, stage, and a few large room fixtures.
   for(let x=-12;x<=7;x+=6) capsule([x,0.38,-33.5],[x,8.9,-33.5],0.28,'stone');
-  box(-47.2,0.42,-41.4,-18.0,0.68,-35.0,'wood'); // auditorium stage
-  for(let row=0;row<5;row++) for(let seat=0;seat<9;seat++){
-    const x=-45.0+seat*3.0, z=-40.8+row*1.0;
-    roundBox(x,0.46,z,x+0.75,0.95,z+0.62,0.16,'rust');
-    box(x+0.08,0.48,z+0.38,x+0.67,1.25,z+0.58,'wood');
+  // Hero cinema: a two-storey volume, not a low box. The first upper slab is
+  // cut away above the audience; concrete girders still carry the room's roof.
+  // The recovered Pripyat finish is red/rose volcanic tuff, now visible under
+  // missing panels instead of a generic repeating grey wall.
+  const hallFloor=0.38, hallTop=6.35;
+  box(-49.18,hallFloor,-41.98,-48.94,hallTop,-24.96,'volcanicTuff');
+  box(-16.04,hallFloor,-41.98,-15.80,hallTop,-31.52,'volcanicTuff');
+  box(-16.04,hallFloor,-29.48,-15.80,hallTop,-24.96,'volcanicTuff'); // doorway to the hall
+  box(-49.18,hallFloor,-42.00,-15.80,hallTop,-41.78,'volcanicTuff');
+  // Structural girders, exposed services and broken suspended ceiling panels.
+  for(const z of [-39.9,-36.5,-33.1,-29.7,-26.3]){
+    box(-48.6,5.74,z-0.28,-16.3,6.17,z+0.28,'concrete');
+    box(-48.6,5.62,z-0.34,-16.3,5.76,z-0.25,'rust');
+  }
+  for(const x of [-44.0,-36.5,-29.0,-21.5])
+    box(x-0.22,5.80,-40.9,x+0.22,6.18,-25.2,'concrete');
+  for(const [x,z,w,d] of [[-45.5,-38.7,4.1,1.5],[-39.0,-34.3,3.2,1.2],[-29.4,-28.8,4.0,1.7],[-21.6,-36.4,2.9,1.1]]){
+    box(x,6.18,z,x+w,6.23,z+d,'windowdark'); // lost ceiling cassette
+    box(x-0.16,5.96,z-0.10,x+w+0.20,6.04,z+d+0.14,'debris');
+  }
+  // Tuff panels are layered over the structural wall. Missing cladding exposes
+  // rough concrete, with irregular edges and rust tracks at failed anchors.
+  for(const [x,z,w,h] of [
+    [-48.90,-39.0,0.74,0.96],[-48.90,-34.0,0.52,1.16],[-48.90,-28.4,0.88,0.76],
+    [-15.78,-38.0,0.86,0.82],[-15.78,-34.8,0.48,1.22],[-15.78,-27.0,0.92,0.72],
+    [-35.5,-41.74,1.10,0.58],[-27.0,-41.74,0.64,0.92],[-43.4,-41.74,0.78,0.62]
+  ]){
+    const vertical=x> -18.0&&x< -15.0;
+    if(vertical) box(x,1.0,z,x+0.035,1.0+h,z+w,'concrete');
+    else box(x,1.0,z,x+w,1.0+h,z+0.035,'concrete');
+  }
+  for(const side of [-1,1]){
+    const wallX=side<0?-48.86:-15.76;
+    for(let i=0;i<10;i++){
+      const z=-40.5+i*1.48;
+      if(side>0&&z>-32.3&&z<-29.1) continue;
+      const y=1.20+(i%3)*0.64, height=1.02+(i%2)*0.28;
+      const x2=wallX+side*0.045;
+      box(Math.min(wallX,x2),y,z,Math.max(wallX,x2),y+height,z+0.74,(i%4===0)?'plaster':'volcanicTuff');
+      if(i%3===1){
+        const x3=wallX+side*0.05,x4=wallX+side*0.10;
+        box(Math.min(x3,x4),y+height*0.43,z+0.70,Math.max(x3,x4),y+height*0.47,z+0.82,'rust');
+      }
+    }
+  }
+  // Stage has a deep proscenium, tuff returns, broken timber deck and layered
+  // curtains. Vertical folds and ripped edges keep it from reading as flat boxes.
+  box(-47.6,0.38,-41.72,-18.0,0.93,-38.48,'wood');
+  box(-47.6,0.16,-38.62,-18.0,0.92,-38.43,'wood');
+  box(-45.6,0.90,-41.80,-20.0,3.55,-41.62,'volcanicTuff');
+  box(-42.0,1.06,-41.58,-24.0,3.34,-41.48,'rust');
+  box(-41.68,1.20,-41.46,-24.32,3.10,-41.39,'cinemaScreen');
+  box(-45.2,0.88,-41.42,-42.15,3.60,-41.30,'curtain');
+  box(-23.85,0.88,-41.42,-20.8,3.60,-41.30,'curtain');
+  box(-45.35,3.34,-41.43,-20.65,3.62,-41.29,'curtain');
+  for(let x=-45.0;x<=-20.9;x+=0.38){
+    const fold=Math.sin(x*1.7)*0.035;
+    box(x,0.95,-41.28+fold,x+0.085,3.46,-41.24+fold,(Math.floor((x+45)*10)%4===0)?'seatFabric':'curtain');
+  }
+  for(const [x,y,w,h] of [[-44.7,1.0,0.42,0.78],[-43.0,2.1,0.34,0.56],[-22.6,1.25,0.50,0.94],[-20.8,2.4,0.44,0.56]])
+    box(x,y,-41.22,x+w,y+h,-41.17,'debris');
+  // Side-wall acoustic absorbers, oxidized mounting rails and damaged speakers.
+  for(const side of [-1,1]) for(let i=0;i<7;i++){
+    const z=-39.4+i*1.92, x=side<0?-48.78:-15.84;
+    if(side>0&&z>-32.3&&z<-29.1) continue;
+    const panelX=x+side*0.07, railX=x+side*0.08;
+    if(i%5!==2) box(Math.min(x,panelX),3.55+(i%2)*0.42,z,Math.max(x,panelX),4.92+(i%3)*0.10,z+0.92,(i%3===0)?'wood':'curtain');
+    box(Math.min(x,railX),3.42,z,Math.max(x,railX),3.49,z+1.06,'rust');
+  }
+  for(const [x,y,z] of [[-48.5,4.95,-37.2],[-15.96,4.85,-26.4],[-15.96,4.92,-38.5]]){
+    box(x,y,z,x+0.22,y+0.54,z+0.36,'metal');
+    box(x+0.04,y+0.05,z-0.02,x+0.25,y+0.47,z+0.38,'windowdark');
+  }
+  // Twelve stepped seating rows. Four separated banks, broad cross-aisles,
+  // realistic seat scale and a few collapsed/wrecked chairs break repetition.
+  const bankCenters=[-45.0,-37.5,-29.8,-22.3], rowCount=12, seatsPerBank=10, seatPitch=0.58;
+  const brokenSeats=new Set(["0:0:2","1:1:7","2:0:4","3:2:8","4:3:3","5:1:1","6:2:6","7:0:8","8:3:5","9:2:1","10:1:8","11:3:2"]);
+  for(let row=0;row<rowCount;row++){
+    const z=-37.70+row*0.94, platformTop=0.15*(row+1);
+    for(let bank=0;bank<bankCenters.length;bank++){
+      const center=bankCenters[bank];
+      const bankLeft=center-(seatsPerBank-1)*seatPitch*0.5-0.34;
+      const bankRight=center+(seatsPerBank-1)*seatPitch*0.5+0.34;
+      box(bankLeft,0.04,z-0.38,bankRight,platformTop,z+0.42,(row%4===0)?'concrete':'stone');
+      for(let seat=0;seat<seatsPerBank;seat++){
+        const x=center+(seat-(seatsPerBank-1)*0.5)*seatPitch, y=platformTop, key=`${row}:${bank}:${seat}`;
+        const collapsed=brokenSeats.has(key);
+        if(collapsed){
+          box(x-0.26,y+0.04,z-0.12,x+0.24,y+0.16,z+0.22,'seatFabric');
+          capsule([x-0.22,y+0.05,z-0.25],[x+0.18,y+0.10,z+0.16],0.035,'rust');
+          continue;
+        }
+        const fabric=(row+bank+seat)%7===0?'curtain':'seatFabric';
+        for(const side of [-1,1]){
+          capsule([x+side*0.22,y+0.08,z+0.14],[x+side*0.22,y+0.49,z+0.14],0.024,'metal');
+          capsule([x+side*0.22,y+0.45,z+0.14],[x+side*0.22,y+0.93,z+0.25],0.023,'metal');
+          capsule([x+side*0.34,y+0.55,z-0.22],[x+side*0.34,y+0.68,z+0.12],0.032,'wood');
+        }
+        box(x-0.22,y+0.43,z+0.10,x+0.22,y+0.49,z+0.18,'metal');
+        roundBox(x-0.27,y+0.49,z-0.12,x+0.27,y+0.70,z+0.22,0.055,fabric);
+        roundBox(x-0.275,y+0.68,z+0.14,x+0.275,y+1.23,z+0.28,0.065,fabric);
+        box(x-0.21,y+1.13,z+0.13,x+0.21,y+1.16,z+0.145,'rust');
+      }
+    }
+  }
+  // Debris field: broken timber, tuff chips, torn fabric and fallen ceiling
+  // rails are concentrated in the aisles; keep the exits and front row clear.
+  for(const [x,z,w,d,h,mat] of [
+    [-40.0,-33.0,0.82,0.22,0.08,'debris'],[-32.4,-31.5,0.42,0.72,0.06,'wood'],
+    [-41.1,-27.8,0.74,0.20,0.05,'plaster'],[-25.9,-28.4,0.27,0.82,0.06,'debris'],
+    [-18.8,-35.6,0.64,0.20,0.05,'wood'],[-48.0,-30.4,0.55,0.42,0.08,'debris'],
+    [-19.2,-26.2,0.32,0.48,0.07,'plaster'],[-34.7,-38.3,1.35,0.12,0.035,'rust'],
+    [-24.8,-32.1,0.46,0.56,0.05,'volcanicTuff'],[-44.5,-29.4,0.62,0.37,0.045,'seatFabric'],
+    [-36.2,-26.0,0.82,0.20,0.035,'wood'],[-29.0,-38.1,0.38,0.72,0.05,'debris']
+  ]) roundBox(x,0.06,z,x+w,0.06+h,z+d,0.025,mat);
+  for(const [x,z] of [[-47.7,-36.6],[-15.9,-35.0],[-48.4,-26.0],[-17.2,-39.2]])
+    M3D_SCENE_LIGHTS.push([x,4.8,z,6.6,0.62,246,177,112]);
+  for(const [x,z,working] of [[-44.0,-38.8,true],[-37.0,-35.2,true],[-29.7,-31.6,false],[-22.3,-27.8,true],[-37.2,-27.6,true]]){
+    box(x-0.72,5.32,z-0.18,x+0.72,5.47,z+0.18,'metal');
+    box(x-0.58,5.30,z-0.12,x+0.58,5.39,z+0.12,working?'lamp':'windowdark');
+    if(working) M3D_SCENE_LIGHTS.push([x,5.04,z,8.8,1.08,255,203,158]);
   }
   // A ruined reception desk, scattered panels and tall foyer openings.
   box(-4.8,0.42,-24.8,4.2,1.25,-23.8,'wood');
@@ -331,6 +458,7 @@ function makeScene() {
   for(const [x,z] of [[-10.6,-36.4],[-2.0,-22.4],[5.1,-35.0]])
     capsule([x,8.30,z],[x+0.06,7.42,z+0.18],0.018,'rust');
   for(const [x,y] of [[-31.6,1.0],[-20.8,4.1],[8.4,7.1],[14.6,1.0]]){
+    if(x< -17.3) continue; // no window frames behind the auditorium screen
     box(x,y,-42.24,x+3.5,y+1.65,-42.08,'windowdark');
     box(x+0.08,y+0.06,-42.30,x+0.18,y+1.56,-42.16,'rust');
     box(x+3.05,y+0.06,-42.28,x+3.16,y+1.56,-42.14,'rust');
@@ -340,6 +468,7 @@ function makeScene() {
   for(let level=1;level<3;level++){
     const y=0.42+level*3.1;
     for(const x of [-43,-32,-21,12]){
+      if(level===1&&x< -17.3) continue; // preserve the double-height hall void
       box(x-1.4,y,-24.6,x+1.4,y+0.72,-23.8,'wood');
       box(x+1.8,y,-25.2,x+2.65,y+2.2,-24.3,'debris');
       box(x-3.2,y,-38.5,x-1.2,y+1.9,-37.8,'wood');
@@ -503,6 +632,7 @@ function makeScene() {
     const y=2.94+level*3.1;
     for(let i=0;i<interiorFixtures.length;i++){
       const [x,z]=interiorFixtures[i];
+      if(level<=1&&x< -15.0&&z< -24.8) continue; // custom auditorium lighting sits at the 6 m ceiling
       const failed=(i+level*3)%7===0;
       box(x-0.48,y,z-0.12,x+0.48,y+0.055,z+0.12,failed?'rust':'lamp');
       if(!failed && i%3===0) M3D_SCENE_LIGHTS.push([x,y-0.20,z,8.2,1.65,255,190,126]);

@@ -1,4 +1,4 @@
-name: Build Moteur 3D Qt — Windows and Linux
+name: Build Moteur 3D Qt — Windows
 
 on:
   push:
@@ -98,7 +98,7 @@ jobs:
       - name: Upload Windows application package
         uses: actions/upload-artifact@v4
         with:
-          name: Moteur3D-Qt-${{ matrix.os }}-build-261104-0009
+          name: Moteur3D-Qt-${{ matrix.os }}-build-261104-0010
           path: experiments/2026-10-30-cote-ete-gt/native_v14/dist
           if-no-files-found: error
           retention-days: 30

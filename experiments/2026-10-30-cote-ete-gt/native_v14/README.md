@@ -26,9 +26,9 @@ Les décors restent des sources indépendantes : `scene_coastal_v1314.js`, `scen
 
 La branche `pripiat` ajoute `scene_pripyat_central.js`, exportée en V4 par le même pipeline que Rapture et la scène côtière. Elle construit la place centrale, les façades principales d’Energetik et de l’hôtel Polissya, les abords résidentiels, les arbres et le mobilier.
 
-Le parcours automatique dédié suit une boucle dans cette zone et affiche chaque vue au rythme du moteur. Les autres scènes gardent leur aperçu rotatif. Les références cartographiques, le registre de photos documentaires et les niveaux de matériaux sont décrits dans [docs/pripyat/README.md](../../../docs/pripyat/README.md).
+Le parcours automatique dédié suit une boucle dans cette zone et affiche chaque vue au rythme du moteur. Les autres scènes gardent leur aperçu rotatif. Les références cartographiques, le registre de photos documentaires et les niveaux de matériaux sont décrits dans [docs/pripyat/README.md](../../../docs/pripyat/README.md). La vue « Cinéma / auditorium » sert de salle de contrôle visuel pour le build `261104-0010`.
 
-Le rendu V4 initial est géométrique et utilise la palette procédurale existante. Les cartes PBR spécifiques, les mesures de proportions sur photos et l’extension aux autres secteurs sont des étapes suivantes.
+Le build `261104-0010` ajoute une composition double hauteur pour l’auditorium, une scène profonde, des rangées de sièges dégradés, un parement en tuf volcanique et ses cartes procédurales de relief et rugosité. L’éclairage de la salle et la netteté à résolution native restent à valider sur le paquet Windows.
 
 ## Fonctionnalités détaillées
 
