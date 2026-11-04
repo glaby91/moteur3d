@@ -13,7 +13,7 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
   const B = (x0,y0,z0,x1,y1,z1,r,mat) => roundBox(X(x0),Y(y0),Z(z0),X(x1),Y(y1),Z(z1),r*scale,mat);
   const C = (a,b,r,mat) => capsule([X(a[0]),Y(a[1]),Z(a[2])],[X(b[0]),Y(b[1]),Z(b[2])],r*scale,mat);
   const E = (cx,cy,cz,rx,ry,rz,mat) => ellipse(X(cx),Y(cy),Z(cz),rx*scale,ry*scale,rz*scale,mat);
-  const Q = (x0,y0,z0,x1,y1,z1,mat) => box(X(x0),Y(y0),Z(z0),X(x1),Y(y1),Z(z1),mat);
+  const Q = (x0,y0,z0,x1,y1,z1,mat) => box(Math.min(X(x0),X(x1)),Math.min(Y(y0),Y(y1)),Math.min(Z(z0),Z(z1)),Math.max(X(x0),X(x1)),Math.max(Y(y0),Y(y1)),Math.max(Z(z0),Z(z1)),mat);
   const folded = options.folded === true;
   const objectStart = Array.isArray(api.objects) ? api.objects.length : null;
   const components = [];
