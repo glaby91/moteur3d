@@ -124,7 +124,7 @@ function makePripyatPbr(kind) {
   };
   const palettes={
     concrete:[145,140,126], stone:[119,113,100], asphalt:[57,59,54],
-    plaster:[166,159,143], mural:[151,139,116],
+    plaster:[166,159,143], mural:[179,151,112],
     brick:[132,91,69], rust:[112,62,39], leaves:[65,91,48],
     wood:[91,67,45], bark:[70,55,38], debris:[104,97,83], grass:[88,99,54]
   };
@@ -178,7 +178,7 @@ function makePripyatPbr(kind) {
     let pigment=base;
     if(kind==='mural'){
       const region=(Math.sin(x*.011+Math.sin(y*.006)*1.7+noise(x,y,5)*.8)+1)*.5;
-      pigment=region<.22?[51,112,132]:region<.46?[63,91,139]:region<.69?[163,91,57]:[184,164,128];
+      pigment=region<.22?[39,132,159]:region<.46?[55,103,164]:region<.69?[196,91,51]:[205,178,112];
       const peelField=noise(x,y,4)*.58+noise(x,y,2)*.30+grain*.12;
       if(peelField>.68)pigment=[139,132,115];
     }

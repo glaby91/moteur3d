@@ -217,8 +217,8 @@ function makeScene() {
   for(const side of [-1,1]){
     const x0=side<0?-11.0:-1.2, x1=side<0?-1.7:8.0;
     for(let i=0;i<17;i++){
-      const y=0.48+i*0.145, z=-25.0-i*0.50;
-      box(x0,y,z,x1,y+0.16,z+0.50,'stone');
+      const y=0.48+i*0.162, z=-25.0-i*0.50;
+      box(x0,y,z,x1,y+0.17,z+0.50,'stone');
     }
     const railX=side<0?-10.75:7.75;
     capsule([railX,0.80,-24.8],[railX,3.25,-33.0],0.10,'rust');
@@ -230,7 +230,9 @@ function makeScene() {
   box(-12.4,3.25,-34.1,9.2,3.48,-32.8,'stone');
   // Decorative wall panels and faded mural fragments based on documented
   // Energetik lobby photographs, with peeled plaster around the remaining art.
-  for(const [wallX,z,y,w,h] of [[-49.32,-33.6,4.0,4.8,2.0],[-49.32,-27.0,4.2,3.9,1.8],[29.30,-33.1,4.0,4.3,2.0],[29.30,-26.8,4.2,3.7,1.8]]){
+  // Mount the panels on the INTERIOR faces. The earlier positive-X offsets
+  // put both side-wall murals behind the exterior shell, so they never showed.
+  for(const [wallX,z,y,w,h] of [[-49.32,-35.5,4.0,6.8,2.2],[-49.32,-27.0,4.2,5.2,1.8],[28.70,-39.3,3.9,14.8,2.35]]){
     const x0=wallX, x1=wallX+0.16;
     box(x0,y,z,x1,y+h,z+w,'rust');
     box(x0+0.12,y+0.12,z+0.12,x1+0.12,y+h-0.10,z+w-0.12,'mural');
@@ -408,6 +410,22 @@ function makeScene() {
   const lamps=[[-50,-8],[-43,56],[-25,-10],[-12,54],[8,55],[28,54],[48,50],[52,23],
     [47,-8],[24,-10],[0,57],[0,67],[-52,25],[52,2]];
   for (let i=0;i<lamps.length;i++) lamp(lamps[i][0],lamps[i][1],i%5===0);
+
+  // Interior ceiling fixtures and warm pools of light. Keep a few dead lamps
+  // among the working ones so the abandoned rooms retain an uneven mood.
+  const interiorFixtures=[
+    [-43.4,-30.5],[-32.5,-30.5],[-21.4,-30.5],[-4.0,-30.5],[4.0,-30.5],[12.9,-30.5],[23.5,-30.5],
+    [-43.4,-38.0],[-32.5,-38.0],[-21.4,-38.0],[12.9,-38.0],[23.5,-36.0]
+  ];
+  for(let level=0;level<3;level++){
+    const y=2.94+level*3.1;
+    for(let i=0;i<interiorFixtures.length;i++){
+      const [x,z]=interiorFixtures[i];
+      const failed=(i+level*3)%7===0;
+      box(x-0.48,y,z-0.12,x+0.48,y+0.055,z+0.12,failed?'rust':'lamp');
+      if(!failed && i%3===0) M3D_SCENE_LIGHTS.push([x,y-0.20,z,8.2,1.65,255,190,126]);
+    }
+  }
 
   // Damaged paving, fragments and shallow puddles near low points.
   for (const d of [

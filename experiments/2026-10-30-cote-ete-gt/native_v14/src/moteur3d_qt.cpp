@@ -132,6 +132,31 @@ static V clampSceneMotion(const Scene& scene, V from, V to) {
     return to;
 }
 
+static V cameraEyeOffset(float angleDeg,float elevationDeg,float distance) {
+    const float a=angleDeg*PI/180.f,e=elevationDeg*PI/180.f;
+    return {distance*std::sin(a)*std::cos(e),distance*std::sin(e),distance*std::cos(a)*std::cos(e)};
+}
+
+static V clampCameraMotion(const Scene& scene,V from,V to,float angleDeg,float elevationDeg,float distance) {
+    const V delta=to-from;
+    const float length2=dot(delta,delta);
+    if(length2<.000225f)return to;
+    const V eyeOffset=cameraEyeOffset(angleDeg,elevationDeg,distance);
+    V allowed=clampSceneMotion(scene,from,to);
+    V eyeAllowed=clampSceneMotion(scene,from+eyeOffset,to+eyeOffset)-eyeOffset;
+    float t=std::min(dot(allowed-from,delta)/length2,dot(eyeAllowed-from,delta)/length2);
+    // Sweep two shoulder points as well as the eye centre so a narrow gap
+    // between stair flights cannot admit the camera body.
+    const float a=angleDeg*PI/180.f;
+    const V right{std::cos(a),0.f,-std::sin(a)};
+    for(float side:{-.18f,.18f}) {
+        const V offset=eyeOffset+right*side;
+        const V sideAllowed=clampSceneMotion(scene,from+offset,to+offset)-offset;
+        t=std::min(t,dot(sideAllowed-from,delta)/length2);
+    }
+    return from+delta*std::clamp(t,0.f,1.f);
+}
+
 struct BenchmarkRow {
     unsigned threads = 1;
     bool avx2 = false, gpu = false;
@@ -401,7 +426,21 @@ static CameraPose guidedPripyatTour(float progress, V& look) {
     const V& p1=route[i];
     const V& p2=route[i+1];
     look=p1+(p2-p1)*t;
-    const float dx=p2.x-p1.x,dz=p2.z-p1.z;
+    // Keep the path on its authored corridor, but turn the view gradually
+    // before corners. The old tangent switched instantly at every waypoint,
+    // which looked like a video jump (most noticeably at the foyer entrance).
+    const float lookAhead=1.35f;
+    float aheadDistance=progress*totalLength+lookAhead;
+    aheadDistance=std::clamp(aheadDistance,0.f,totalLength);
+    int ai=0;
+    while(ai<count-2 && aheadDistance>length(route[ai+1]-route[ai])) {
+        aheadDistance-=length(route[ai+1]-route[ai]);
+        ++ai;
+    }
+    const float al=length(route[ai+1]-route[ai]);
+    const float at=al>1e-5f?std::clamp(aheadDistance/al,0.f,1.f):0.f;
+    const V ahead=route[ai]+(route[ai+1]-route[ai])*at;
+    const float dx=ahead.x-look.x,dz=ahead.z-look.z;
     const float speed=std::max(.001f,std::sqrt(dx*dx+dz*dz));
     const float angle=std::atan2(-dx/speed,-dz/speed)*180.f/PI;
     const float cameraDistance=look.z>-16.f?3.0f:1.55f;
@@ -540,7 +579,7 @@ private:
     QSlider *distance_ = nullptr, *angle_ = nullptr, *elevation_ = nullptr, *fov_ = nullptr;
     QSlider *threads_ = nullptr, *hour_ = nullptr;
     QCheckBox *fog_ = nullptr, *dof_ = nullptr, *dust_ = nullptr, *edgeAa_ = nullptr, *videoPreview_ = nullptr, *fastNavigation_ = nullptr;
-    QPushButton *renderButton_ = nullptr, *homeButton_ = nullptr, *frontButton_ = nullptr, *rearButton_ = nullptr;
+    QPushButton *renderButton_ = nullptr, *homeButton_ = nullptr, *frontButton_ = nullptr, *rearButton_ = nullptr, *nightButton_ = nullptr;
     VideoPreviewWindow* videoWindow_ = nullptr;
     QAction* benchmarkAction_ = nullptr;
     QTimer* videoPlaybackTimer_ = nullptr;
@@ -625,7 +664,12 @@ private:
             const float scale=std::max(.001f,distance*2.f*std::tan(fov*.5f)/std::max(1,image_->height()));
             const V right{std::cos(angle),0.f,-std::sin(angle)};
             const V up{-std::sin(angle)*std::sin(elevation),std::cos(elevation),-std::cos(angle)*std::sin(elevation)};
+            const V previous=cameraTarget_;
             cameraTarget_=cameraTarget_+right*(-float(dx)*scale)+up*(float(dy)*scale);
+            if(isPripyatScene()) {
+                std::lock_guard<std::mutex> guard(sceneMutex_);
+                cameraTarget_=clampCameraMotion(scene_,previous,cameraTarget_,angle_->value(),elevation_->value(),distance);
+            }
         } else {
             setCameraSliders(distance_->value(),angle_->value()-int(std::lround(dx*.32f)),
                 std::max(-10,std::min(65,elevation_->value()+int(std::lround(dy*.24f)))),fov_->value());
@@ -657,7 +701,7 @@ private:
         }
         if(isPripyatScene()){
             std::lock_guard<std::mutex> guard(sceneMutex_);
-            cameraTarget_=clampSceneMotion(scene_,previous,cameraTarget_);
+            cameraTarget_=clampCameraMotion(scene_,previous,cameraTarget_,angle_->value(),elevation_->value(),distance);
         }
         beginNavigation(); readSettings(); navigationIdleTimer_->start(450); return true;
     }
@@ -769,6 +813,9 @@ private:
         rearButton_ = new QPushButton(QStringLiteral("Vue arrière"), panel);
         views->addWidget(homeButton_); views->addWidget(frontButton_);
         controls->addLayout(views); controls->addWidget(rearButton_);
+        nightButton_ = new QPushButton(QStringLiteral("Vue de nuit — 22 h"), panel);
+        nightButton_->setToolTip(QStringLiteral("Place la caméra devant la façade et règle l’heure à 22 h pour voir les éclairages intérieurs."));
+        controls->addWidget(nightButton_);
         status_ = new QLabel(QStringLiteral("Prêt"), panel);
         auto* diagTitle = new QLabel(QStringLiteral("DIAGNOSTICS MESURÉS"), panel);
         diagTitle->setStyleSheet("font-size:15px;font-weight:700");
@@ -846,6 +893,15 @@ private:
         connect(rearButton_, &QPushButton::clicked, this, [this] {
             if (isRaptureScene()) setCameraSliders(24,0,9,55); else setCameraSliders(24,-145,7,50);
             readSettings(); requestRender();
+        });
+        connect(nightButton_, &QPushButton::clicked, this, [this] {
+            if(isPripyatScene()) {
+                cameraTarget_={0.f,4.2f,-19.5f};
+                setCameraSliders(72,0,1,55);
+                { const QSignalBlocker hourBlock(hour_); hour_->setValue(32); }
+                hourLabel_->setText(QStringLiteral("Heure : 22:00 — Nuit"));
+                readSettings(); requestRender();
+            }
         });
         connect(hour_, &QSlider::valueChanged, this, [this](int step) {
             float h = 6.f + step * .5f;
@@ -1070,6 +1126,7 @@ private:
         threads_->setEnabled(enabled && !settings_.directX11); hour_->setEnabled(enabled); simdMode_->setEnabled(enabled && !settings_.directX11);
         fog_->setEnabled(enabled && !settings_.directX11); dof_->setEnabled(enabled && !settings_.directX11); edgeAa_->setEnabled(enabled);
         renderButton_->setEnabled(enabled); homeButton_->setEnabled(enabled); frontButton_->setEnabled(enabled); rearButton_->setEnabled(enabled);
+        nightButton_->setEnabled(enabled && isPripyatScene());
         fastNavigation_->setEnabled(enabled && isPripyatScene());
         image_->setEnabled(enabled);
         menuBar()->setEnabled(enabled);
@@ -1124,13 +1181,13 @@ private:
             // not skip waypoints while it is still rendering the previous one.
             const float progress=std::clamp(float(videoFrameIndex_)/float(videoFrameCount()),0.f,1.f);
             const CameraPose pose=guidedPripyatTour(progress,tourTarget);
-            {
-                std::lock_guard<std::mutex> guard(sceneMutex_);
-                cameraTarget_=clampSceneMotion(scene_,cameraTarget_,tourTarget);
-            }
             settings_.distance=pose.distance;
             settings_.angle=pose.angle;
             settings_.elevation=pose.elevation;
+            {
+                std::lock_guard<std::mutex> guard(sceneMutex_);
+                cameraTarget_=clampCameraMotion(scene_,cameraTarget_,tourTarget,pose.angle,pose.elevation,pose.distance);
+            }
         } else if (video) {
             // Preserve the established orbit preview for all existing scenes.
             const float orbitDistance=isRaptureScene()?std::max(settings_.distance,18.f):settings_.distance;

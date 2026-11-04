@@ -143,6 +143,7 @@ void put(GpuVertex& v,V p,V n,float u,float vv,uint32_t mat) {
 float uvScaleForMaterial(const Scene& scene,uint32_t mat) {
     if(mat<scene.mat.size()){
         const std::string& name=scene.mat[mat].name;
+        if(name=="mural")return .075f;
         if(name=="brick"||name=="glass"||name=="raptureGlass"||name=="raptureStone"||name=="concrete")return .16f;
     }
     return .65f;

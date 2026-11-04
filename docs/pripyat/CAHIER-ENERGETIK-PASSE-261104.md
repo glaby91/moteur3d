@@ -1,6 +1,6 @@
 # Cahier de reconstruction — Palais Energetik
 
-État de travail : deuxième passe enregistrée avec le build `261104-0004`. À comparer sur l’exécutable Windows, en particulier la visite manuelle, les lumières et le parcours à 21 secondes.
+État de travail : troisième passe préparée pour le build `261104-0005`. La reconstruction reste un blockout détaillé, à valider visuellement sur Windows ; les volumes et certains intérieurs doivent encore gagner en fidélité.
 
 ## Références prioritaires
 
@@ -43,12 +43,20 @@ L’emplacement exact des pièces, portes et couloirs devra être déduit des vu
 - La case « Visite fluide » garde un aperçu léger après les déplacements dans Pripiat ; « Calculer l’image » force toujours un rendu complet.
 - La visite automatique est limitée à 320 × 240 en interne sur CPU (800 × 600 sur la fenêtre), afin de réduire le retard de rendu.
 
+## Troisième passe — escaliers, fresque et nuit
+
+- Le déplacement manuel balaie maintenant le point de visée, la position de la caméra et deux points latéraux de son volume ; le déplacement panoramique utilise la même collision que le clavier.
+- Les marches du grand foyer ont été relevées pour rejoindre le palier sans jour visuel.
+- Les panneaux de fresque étaient placés derrière la coque latérale. Ils sont maintenant sur les faces intérieures, dont un panneau plus large ; le matériau de fresque est moins répétitif sur ces surfaces.
+- La visite guidée garde son trajet dans les couloirs et tourne progressivement avant les angles, pour supprimer l’à-coup à l’entrée observé autour de 21 secondes.
+- Les plafonniers de plusieurs salles et niveaux ont été ajoutés avec des sources chaudes. Le bouton « Vue de nuit — 22 h » place la caméra devant la façade et règle la scène pour montrer les éclairages intérieurs.
+
 ## Validation restante
 
-1. Compiler le paquet Windows `261104-0003`.
+1. Compiler le paquet Windows `261104-0005`.
 2. Comparer la façade DirectX et CPU à la maquette Skeiron et aux photos : silhouette, ouvertures, matériaux, couleur et lumière.
 3. Examiner le foyer, l’auditorium et le gymnase à plusieurs points de vue.
-4. Vérifier les déplacements aux portes, coursives, escaliers et transitions de niveau.
+4. Vérifier les déplacements aux portes, coursives, escaliers et transitions de niveau, ainsi que la visite guidée autour de 21 secondes.
 5. Mesurer le temps d’image DirectX à 1366 × 768 après la mise à jour des textures.
 
 Cette passe ne prétend pas être une reconstruction photogrammétrique ni une validation visuelle finale.
