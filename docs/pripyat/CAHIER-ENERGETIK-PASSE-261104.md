@@ -1,6 +1,6 @@
 # Cahier de reconstruction — Palais Energetik
 
-État de travail : passe de scène préparée pour le build `261104-0007`. La reconstruction reste un blockout détaillé, à valider visuellement sur Windows ; les volumes et certains intérieurs doivent encore gagner en fidélité.
+État de travail : passe de scène préparée pour le build `261104-0008`. La reconstruction reste un blockout détaillé, à valider visuellement sur Windows ; les volumes et certains intérieurs doivent encore gagner en fidélité.
 
 ## Références prioritaires
 
@@ -41,7 +41,7 @@ L’emplacement exact des pièces, portes et couloirs devra être déduit des vu
 - Le ciel de jour devient bleu pâle plutôt que beige, en conservant la teinte chaude au lever et au coucher du soleil.
 - Des lumières de rebond larges et discrètes éclairent la profondeur de la façade ouverte.
 - La case « Visite fluide » garde un aperçu léger après les déplacements dans Pripiat ; « Calculer l’image » force toujours un rendu complet.
-- La visite automatique est limitée à 320 × 240 en interne sur CPU (800 × 600 sur la fenêtre), afin de réduire le retard de rendu.
+- La visite automatique garde une définition interne de 800 × 600 sur CPU comme DirectX; elle avance à la cadence réellement calculée par le moteur.
 
 ## Troisième passe — escaliers, fresque et nuit
 
@@ -54,7 +54,7 @@ L’emplacement exact des pièces, portes et couloirs devra être déduit des vu
 
 ## Validation restante
 
-1. Compiler le paquet Windows `261104-0007`.
+1. Compiler le paquet Windows `261104-0008`.
 2. Comparer la façade DirectX et CPU à la maquette Skeiron et aux photos : silhouette, ouvertures, matériaux, couleur et lumière.
 3. Examiner le foyer, la fresque, l’auditorium et le gymnase à plusieurs points de vue.
 4. Vérifier les déplacements aux portes, coursives, escaliers et transitions de niveau, ainsi que la visite guidée autour de 21 secondes.
@@ -68,3 +68,10 @@ L’emplacement exact des pièces, portes et couloirs devra être déduit des vu
 - Les éléments ajoutés utilisent les matériaux du moteur et une géométrie légère, sans intégrer les photos de référence au binaire.
 
 Cette passe ne prétend pas être une reconstruction photogrammétrique ni une validation visuelle finale.
+
+## Cinquième passe — fresque longue, cage et vues directes
+
+- La fresque du foyer s’étend maintenant sur près de 18 m de mur, en deux pans qui laissent libre la porte du niveau. Les formes peintes, figures et fragments couvrent une longueur de mur au lieu d’un tableau isolé.
+- La cage d’escalier haute est maintenant une coque creuse avec une porte de toit. Le trajet guidé sort par cette porte et continue sur la bande praticable du toit avant sa vue finale.
+- Le mode vidéo calcule les images à 800 × 600 sur CPU comme sur DirectX 11. Le parcours peut prendre plus de temps sur CPU, mais ne grossit plus un rendu 320 × 240.
+- Une liste de dix cadrages au plus est chargée depuis `scene_pripyat_views.json`, annexe liée à la scène. La fiche des noms et usages est dans [VUES-ENERGETIK.md](VUES-ENERGETIK.md).

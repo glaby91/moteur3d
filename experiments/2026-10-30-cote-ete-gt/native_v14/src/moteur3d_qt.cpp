@@ -16,6 +16,9 @@
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QImage>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QWheelEvent>
@@ -69,6 +72,12 @@ struct RenderSettings {
 };
 
 struct CameraPose { float distance, angle, elevation; };
+struct SceneViewPreset {
+    QString name;
+    V target{};
+    float distance=8.f, angle=0.f, elevation=0.f, fov=50.f;
+    int hourStep=12;
+};
 
 static void applyDustOverlay(const Scene& scene, const Camera& cam, int w, int h,
                              int hourStep, std::vector<uint32_t>& pixels) {
@@ -378,10 +387,10 @@ static CameraPose ellipseOrbitPose(float distance, float angleDeg, float elevati
 
 static CameraPose guidedPripyatTour(float progress, V& look) {
     // 90-second guided tour: exterior, foyer, rooms on all three levels,
-    // the stair core, then a 10.8-second rooftop sun hold.
+    // the hollow stair tower, the roof walk, then a short rooftop hold.
     if (progress >= .88f) {
-        look={17.f,11.45f,-34.f};
-        return {3.0f,-44.f,-27.f};
+        look={0.f,11.35f,-23.5f};
+        return {3.0f,0.f,0.f};
     }
     progress=std::clamp(progress/.88f,0.f,.999999f);
     static constexpr V route[] = {
@@ -412,8 +421,10 @@ static CameraPose guidedPripyatTour(float progress, V& look) {
         { 0.f,7.8f,-30.5f }, { 12.9f,7.8f,-30.5f },
         { 19.0f,7.8f,-30.5f }, { 23.5f,7.8f,-30.5f },
         { 23.5f,7.8f,-40.5f }, { 23.5f,8.7f,-35.5f },
-        { 23.5f,9.7f,-30.0f }, { 23.5f,10.8f,-25.0f },
-        { 23.5f,11.0f,-21.6f }
+        { 23.5f,9.7f,-30.0f }, { 23.5f,10.65f,-25.0f },
+        { 23.5f,11.15f,-21.6f }, { 23.5f,11.35f,-20.3f },
+        { 16.0f,11.35f,-20.3f }, { 8.0f,11.35f,-20.3f },
+        { 0.0f,11.35f,-20.3f }, { 0.0f,11.35f,-23.5f }
     };
     constexpr int count=int(sizeof(route)/sizeof(route[0]));
     float totalLength=0.f;
@@ -536,6 +547,7 @@ public:
         resize(1480, 900);
         setMinimumSize(1000, 620);
         buildUi();
+        loadSceneViewPresets();
         applySceneCameraPreset();
         readSettings();
         auto* fileMenu = menuBar()->addMenu(QStringLiteral("Scène"));
@@ -585,6 +597,9 @@ private:
     QSlider *threads_ = nullptr, *hour_ = nullptr;
     QCheckBox *fog_ = nullptr, *dof_ = nullptr, *dust_ = nullptr, *edgeAa_ = nullptr, *videoPreview_ = nullptr, *fastNavigation_ = nullptr;
     QPushButton *renderButton_ = nullptr, *homeButton_ = nullptr, *frontButton_ = nullptr, *rearButton_ = nullptr, *nightButton_ = nullptr;
+    QComboBox* sceneViewSelector_ = nullptr;
+    QLabel* sceneViewLabel_ = nullptr;
+    std::vector<SceneViewPreset> sceneViewPresets_;
     VideoPreviewWindow* videoWindow_ = nullptr;
     QAction* benchmarkAction_ = nullptr;
     QTimer* videoPlaybackTimer_ = nullptr;
@@ -614,6 +629,63 @@ private:
         return QFileInfo(currentScenePath_).fileName().contains(QStringLiteral("pripyat"),Qt::CaseInsensitive);
     }
 
+    void loadSceneViewPresets() {
+        if(!sceneViewSelector_) return;
+        const QSignalBlocker blocker(sceneViewSelector_);
+        sceneViewPresets_.clear();
+        sceneViewSelector_->clear();
+        sceneViewSelector_->setVisible(isPripyatScene());
+        sceneViewSelector_->setEnabled(false);
+        if(!isPripyatScene()) return;
+        QFile file(QCoreApplication::applicationDirPath()+QStringLiteral("/scene_pripyat_views.json"));
+        if(!file.open(QIODevice::ReadOnly)) {
+            sceneViewSelector_->setToolTip(QStringLiteral("Annexe des vues introuvable près du moteur."));
+            return;
+        }
+        QJsonParseError parseError{};
+        const QJsonDocument doc=QJsonDocument::fromJson(file.readAll(),&parseError);
+        if(parseError.error!=QJsonParseError::NoError || !doc.isObject()) {
+            sceneViewSelector_->setToolTip(QStringLiteral("Annexe des vues illisible."));
+            return;
+        }
+        const QJsonArray views=doc.object().value(QStringLiteral("views")).toArray();
+        for(const QJsonValue& value:views) {
+            if(sceneViewPresets_.size()>=10 || !value.isObject()) break;
+            const QJsonObject o=value.toObject();
+            const QJsonArray target=o.value(QStringLiteral("target")).toArray();
+            if(target.size()!=3) continue;
+            SceneViewPreset p;
+            p.name=o.value(QStringLiteral("name")).toString().trimmed();
+            p.target={float(target[0].toDouble()),float(target[1].toDouble()),float(target[2].toDouble())};
+            p.distance=float(o.value(QStringLiteral("distance")).toDouble(8.0));
+            p.angle=float(o.value(QStringLiteral("angle")).toDouble());
+            p.elevation=float(o.value(QStringLiteral("elevation")).toDouble());
+            p.fov=float(o.value(QStringLiteral("fov")).toDouble(50.0));
+            p.hourStep=o.value(QStringLiteral("hour_step")).toInt(12);
+            if(p.name.isEmpty() || p.distance<3.f || p.distance>40.f || p.fov<35.f || p.fov>105.f) continue;
+            sceneViewPresets_.push_back(p);
+            sceneViewSelector_->addItem(p.name);
+        }
+        sceneViewSelector_->setEnabled(!sceneViewPresets_.empty());
+        sceneViewSelector_->setCurrentIndex(-1);
+        sceneViewSelector_->setToolTip(QStringLiteral("Jusqu’à dix vues documentées dans scene_pripyat_views.json."));
+    }
+
+    void applySceneViewPreset(int index) {
+        if(!isPripyatScene() || index<0 || size_t(index)>=sceneViewPresets_.size()) return;
+        const SceneViewPreset& p=sceneViewPresets_[size_t(index)];
+        navigationActive_=false;
+        if(navigationPreviewTimer_) navigationPreviewTimer_->stop();
+        if(navigationIdleTimer_) navigationIdleTimer_->stop();
+        cameraTarget_=p.target;
+        setCameraSliders(int(std::lround(p.distance*2.f)),int(std::lround(p.angle)),
+                         int(std::lround(p.elevation)),int(std::lround(p.fov)));
+        hour_->setValue(p.hourStep);
+        forceFullQuality_=true;
+        readSettings();
+        requestRender();
+    }
+
     int videoFrameCount() const { return isPripyatScene() ? 360 : 180; }
 
     void setCameraSliders(int distanceHalf,int angle,int elevation,int fov) {
@@ -631,14 +703,27 @@ private:
             fastNavigation_->setChecked(isPripyatScene());
         }
         if(isPripyatScene()) {
+            if(sceneViewSelector_) {
+                const QSignalBlocker viewBlock(sceneViewSelector_);
+                sceneViewSelector_->setCurrentIndex(-1);
+                sceneViewSelector_->setVisible(true);
+            }
+            if(sceneViewLabel_) sceneViewLabel_->setVisible(true);
             cameraTarget_={0.f,1.6f,48.f}; setCameraSliders(17,0,0,55);
-            if(videoPreview_) videoPreview_->setText(QStringLiteral("Visite Energetik — extérieur, intérieur et toit (1 min 30)"));
+            if(videoPreview_) {
+                videoPreview_->setText(QStringLiteral("Visite guidée — 800 × 600"));
+                videoPreview_->setToolTip(QStringLiteral("Rendu à 800 × 600 sur CPU et DirectX 11; sur CPU, la visite prend davantage de temps."));
+            }
             if(videoWindow_) videoWindow_->setWindowTitle(QStringLiteral("Parcours automatique — Pripiat"));
         } else if(isRaptureScene()) {
+            if(sceneViewSelector_) sceneViewSelector_->setVisible(false);
+            if(sceneViewLabel_) sceneViewLabel_->setVisible(false);
             cameraTarget_={0.f,4.4f,-35.f}; setCameraSliders(28,180,10,52);
             if(videoPreview_) videoPreview_->setText(QStringLiteral("Mode vidéo — aperçu rotatif 800 × 600"));
             if(videoWindow_) videoWindow_->setWindowTitle(QStringLiteral("Aperçu rotatif — 800 × 600"));
         } else {
+            if(sceneViewSelector_) sceneViewSelector_->setVisible(false);
+            if(sceneViewLabel_) sceneViewLabel_->setVisible(false);
             cameraTarget_={0.f,1.f,-8.f}; setCameraSliders(24,-43,7,50);
             if(videoPreview_) videoPreview_->setText(QStringLiteral("Mode vidéo — aperçu rotatif 800 × 600"));
             if(videoWindow_) videoWindow_->setWindowTitle(QStringLiteral("Aperçu rotatif — 800 × 600"));
@@ -764,6 +849,10 @@ private:
         controls->addWidget(new QLabel(QStringLiteral("Résolution de sortie"), panel)); controls->addWidget(resolution_);
         controls->addWidget(new QLabel(QStringLiteral("Moteur de rendu"), panel)); controls->addWidget(renderer_);
         controls->addWidget(new QLabel(QStringLiteral("Précision du calcul interne"), panel)); controls->addWidget(quality_);
+        sceneViewLabel_=new QLabel(QStringLiteral("Vues du Palais Energetik"),panel);
+        sceneViewSelector_=new QComboBox(panel);
+        sceneViewSelector_->setToolTip(QStringLiteral("Vues documentées dans l’annexe de la scène Pripiat."));
+        controls->addWidget(sceneViewLabel_); controls->addWidget(sceneViewSelector_);
 
         auto* form = new QFormLayout;
         distance_ = slider(Qt::Horizontal, 6, 80, 24, panel);
@@ -842,6 +931,8 @@ private:
         connect(resolution_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) { readSettings(); requestRender(); });
         connect(renderer_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) { readSettings(); requestRender(); });
         connect(quality_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) { readSettings(); requestRender(); });
+        connect(sceneViewSelector_, qOverload<int>(&QComboBox::currentIndexChanged), this,
+                [this](int index) { applySceneViewPreset(index); });
         for (auto* s : {distance_, angle_, elevation_, fov_}) {
             connect(s, &QSlider::sliderReleased, this, [this] { beginNavigation(); });
             connect(s, &QSlider::valueChanged, this, [this, s](int) {
@@ -951,6 +1042,7 @@ private:
             shadowHour_ = hourStep;
         }
         currentScenePath_ = path;
+        loadSceneViewPresets();
         applySceneCameraPreset();
         readSettings();
         requestRender();
@@ -1168,13 +1260,11 @@ private:
             settings_.samples=1u; settings_.edgeAa=false;
         }
         if(video && isPripyatScene()) {
-            // Keep the guided visit responsive on the software renderer too.
-            // The 800x600 window is the presentation size; low internal
-            // resolution is intentional for a moving preview, not a still.
-            const int previewW=settings_.directX11?800:320, previewH=settings_.directX11?600:240;
-            const float scale=std::min(1.f,std::min(previewW/800.f,previewH/600.f));
-            settings_.renderW=std::max(1,int(std::lround(settings_.outW*scale)));
-            settings_.renderH=std::max(1,int(std::lround(settings_.outH*scale)));
+            // Keep the guided preview at its advertised 800x600 resolution on
+            // both backends. It is slower on CPU, but avoids enlarging a tiny
+            // 320x240 image into the full video window.
+            settings_.renderW=800;
+            settings_.renderH=600;
             settings_.samples=1u; settings_.edgeAa=false;
         }
         settings_.distance = distance_->value() * .5f;
