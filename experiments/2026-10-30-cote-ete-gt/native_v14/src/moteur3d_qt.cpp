@@ -425,7 +425,7 @@ static CameraPose guidedPripyatTour(float progress, V& look) {
     const float t=segmentLength>1e-5f?std::clamp(remaining/segmentLength,0.f,1.f):0.f;
     const V& p1=route[i];
     const V& p2=route[i+1];
-    look=p1+(p2-p1)*t;
+    const V cameraPath=p1+(p2-p1)*t;
     // Keep the path on its authored corridor, but turn the view gradually
     // before corners. The old tangent switched instantly at every waypoint,
     // which looked like a video jump (most noticeably at the foyer entrance).
@@ -440,10 +440,15 @@ static CameraPose guidedPripyatTour(float progress, V& look) {
     const float al=length(route[ai+1]-route[ai]);
     const float at=al>1e-5f?std::clamp(aheadDistance/al,0.f,1.f):0.f;
     const V ahead=route[ai]+(route[ai+1]-route[ai])*at;
-    const float dx=ahead.x-look.x,dz=ahead.z-look.z;
+    const float dx=ahead.x-cameraPath.x,dz=ahead.z-cameraPath.z;
     const float speed=std::max(.001f,std::sqrt(dx*dx+dz*dz));
     const float angle=std::atan2(-dx/speed,-dz/speed)*180.f/PI;
-    const float cameraDistance=look.z>-16.f?3.0f:1.55f;
+    const float cameraDistance=cameraPath.z>-16.f?3.0f:1.55f;
+    // Route samples describe the camera's physical position. The renderer's
+    // camera API stores a look target and places the eye one distance behind
+    // it; compensate here so the eye, rather than the look target, passes
+    // through the authored door and foyer openings.
+    look=cameraPath-cameraEyeOffset(angle,0.f,cameraDistance);
     return {cameraDistance,angle,0.f};
 }
 
@@ -1184,10 +1189,10 @@ private:
             settings_.distance=pose.distance;
             settings_.angle=pose.angle;
             settings_.elevation=pose.elevation;
-            {
-                std::lock_guard<std::mutex> guard(sceneMutex_);
-                cameraTarget_=clampCameraMotion(scene_,cameraTarget_,tourTarget,pose.angle,pose.elevation,pose.distance);
-            }
+            // This fixed route is laid through the clear doorway centres.
+            // Sweeping the look target against walls misplaces the camera by
+            // its orbit distance and strands it at the entrance partition.
+            cameraTarget_=tourTarget;
         } else if (video) {
             // Preserve the established orbit preview for all existing scenes.
             const float orbitDistance=isRaptureScene()?std::max(settings_.distance,18.f):settings_.distance;
