@@ -143,6 +143,9 @@ void put(GpuVertex& v,V p,V n,float u,float vv,uint32_t mat) {
 float uvScaleForMaterial(const Scene& scene,uint32_t mat) {
     if(mat<scene.mat.size()){
         const std::string& name=scene.mat[mat].name;
+        if(name=="seatSteel")return .95f;
+        if(name=="seatFabricClean"||name=="seatTrim")return .85f;
+        if(name=="seatWood")return .65f;
         if(name=="mural")return .075f;
         // The old 0.16 scale stretched the 1k surface maps over 6.25 m.
         // Fine wear and normal detail then vanished at native output sizes.
@@ -313,7 +316,7 @@ public:
             else if(name=="puddle"){spec=.64f;power=18.f;}
             else if(name=="glass"||name=="raptureGlass"){spec=.27f;power=34.f;}
             else if(name=="raptureBronze"){spec=.20f;power=34.f;}
-            else if(name=="metal"){spec=.24f;power=34.f;}
+            else if(name=="metal"||name=="seatSteel"){spec=.24f;power=34.f;}
             else if(name=="wheelMetal"){spec=.34f;power=42.f;}
             else if(name=="carSilver"){spec=.94f;power=52.f;}
             else if(carPaint){spec=.68f;power=30.f;}
