@@ -425,4 +425,9 @@ function makeScene() {
   for (const x of [-43,-33,-23,-13,-3,7,17,27,37,47]) {
     M3D_SCENE_LIGHTS.push([x,5,-15.8,12,0.20,236,204,157]);
   }
+  // Daylight bounce under the open Energetik colonnade. These broad, pale
+  // fills lift the foyer and inner balcony faces without adding fake fixtures.
+  for (const x of [-39,-24,-9,7,22]) {
+    M3D_SCENE_LIGHTS.push([x,5.1,-24.2,13.5,0.78,255,232,204]);
+  }
 }

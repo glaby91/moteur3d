@@ -10,7 +10,7 @@ void updateLighting(float hour){
  float dusk=clampf(1.f-std::abs(hour-18.3f)/2.3f,0.f,1.f),dawn=clampf(1.f-std::abs(hour-7.1f)/1.8f,0.f,1.f),warm=std::max(dusk,dawn*.72f);
  lampFactor=clampf((hour-17.f)/3.f,0.f,1.f);
  sun=norm({.70f,-.16f+.92f*daylight,-.714f});
- V dayZenith={126,170,209},nightZenith={28,23,39},dayHorizon={244,185,134},nightHorizon={77,45,38};
+ V dayZenith={132,184,230},nightZenith={28,23,39},dayHorizon={205,222,236},nightHorizon={77,45,38};
  skyZenith=dayZenith*daylight+nightZenith*(1-daylight);
  skyHorizon=dayHorizon*daylight+nightHorizon*(1-daylight);
  skyHorizon=skyHorizon*(1-warm)+V{255,139,92}*warm;

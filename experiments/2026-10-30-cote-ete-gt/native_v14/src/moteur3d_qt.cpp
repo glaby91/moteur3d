@@ -539,7 +539,7 @@ private:
     QComboBox *resolution_ = nullptr, *renderer_ = nullptr, *quality_ = nullptr, *simdMode_ = nullptr;
     QSlider *distance_ = nullptr, *angle_ = nullptr, *elevation_ = nullptr, *fov_ = nullptr;
     QSlider *threads_ = nullptr, *hour_ = nullptr;
-    QCheckBox *fog_ = nullptr, *dof_ = nullptr, *dust_ = nullptr, *edgeAa_ = nullptr, *videoPreview_ = nullptr;
+    QCheckBox *fog_ = nullptr, *dof_ = nullptr, *dust_ = nullptr, *edgeAa_ = nullptr, *videoPreview_ = nullptr, *fastNavigation_ = nullptr;
     QPushButton *renderButton_ = nullptr, *homeButton_ = nullptr, *frontButton_ = nullptr, *rearButton_ = nullptr;
     VideoPreviewWindow* videoWindow_ = nullptr;
     QAction* benchmarkAction_ = nullptr;
@@ -551,6 +551,7 @@ private:
     float videoAngle_ = 0.f;
     V cameraTarget_{0.f,1.f,-8.f};
     bool navigationActive_ = false;
+    bool forceFullQuality_ = false;
     QTimer* navigationPreviewTimer_ = nullptr;
     QTimer* navigationIdleTimer_ = nullptr;
 
@@ -580,6 +581,11 @@ private:
         navigationActive_=false;
         if(navigationPreviewTimer_) navigationPreviewTimer_->stop();
         if(navigationIdleTimer_) navigationIdleTimer_->stop();
+        if(fastNavigation_) {
+            fastNavigation_->setEnabled(isPripyatScene());
+            fastNavigation_->setText(QStringLiteral("Visite fluide — aperçu léger après déplacement"));
+            fastNavigation_->setChecked(isPripyatScene());
+        }
         if(isPripyatScene()) {
             cameraTarget_={0.f,1.6f,48.f}; setCameraSliders(17,0,0,55);
             if(videoPreview_) videoPreview_->setText(QStringLiteral("Visite Energetik — extérieur, intérieur et toit (1 min 30)"));
@@ -606,6 +612,8 @@ private:
         navigationActive_=false;
         if(navigationPreviewTimer_) navigationPreviewTimer_->stop();
         readSettings(); requestRender();
+        if(fastNavigation_ && fastNavigation_->isChecked())
+            status_->setText(QStringLiteral("Visite fluide — aperçu léger. Calculer l’image lance le rendu complet."));
     }
 
     void handleCameraDrag(int dx,int dy,bool pan) {
@@ -738,6 +746,10 @@ private:
         controls->addLayout(checks);
         videoPreview_ = new QCheckBox(QStringLiteral("Mode vidéo — aperçu rotatif 800 × 600"), panel);
         controls->addWidget(videoPreview_);
+        fastNavigation_ = new QCheckBox(QStringLiteral("Visite fluide — aperçu léger après déplacement"), panel);
+        fastNavigation_->setToolTip(QStringLiteral("Garde un aperçu rapide pendant l’exploration. Le bouton Calculer l’image produit toujours un rendu complet."));
+        fastNavigation_->setChecked(false);
+        controls->addWidget(fastNavigation_);
         videoWindow_ = new VideoPreviewWindow(this);
         videoPlaybackTimer_ = new QTimer(this);
         videoPlaybackTimer_->setInterval(50);
@@ -824,7 +836,8 @@ private:
                 ? QStringLiteral("Visite Energetik — départ extérieur, pièces, étages puis toit · 1 min 30")
                 : QStringLiteral("Calcul vidéo — image 1 / 180 — caméra 0° / 360°"));
         });
-        connect(renderButton_, &QPushButton::clicked, this, [this] { readSettings(); requestRender(); });
+        connect(fastNavigation_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
+        connect(renderButton_, &QPushButton::clicked, this, [this] { forceFullQuality_=true; readSettings(); requestRender(); });
         connect(homeButton_, &QPushButton::clicked, this, [this] { applySceneCameraPreset(); readSettings(); requestRender(); });
         connect(frontButton_, &QPushButton::clicked, this, [this] {
             if (isRaptureScene()) setCameraSliders(16,180,7,48); else setCameraSliders(20,-10,4,50);
@@ -1057,6 +1070,7 @@ private:
         threads_->setEnabled(enabled && !settings_.directX11); hour_->setEnabled(enabled); simdMode_->setEnabled(enabled && !settings_.directX11);
         fog_->setEnabled(enabled && !settings_.directX11); dof_->setEnabled(enabled && !settings_.directX11); edgeAa_->setEnabled(enabled);
         renderButton_->setEnabled(enabled); homeButton_->setEnabled(enabled); frontButton_->setEnabled(enabled); rearButton_->setEnabled(enabled);
+        fastNavigation_->setEnabled(enabled && isPripyatScene());
         image_->setEnabled(enabled);
         menuBar()->setEnabled(enabled);
     }
@@ -1081,10 +1095,22 @@ private:
         settings_.edgeAa = edgeAa_->isChecked();
         settings_.videoPreview = video;
         settings_.targetX=cameraTarget_.x; settings_.targetY=cameraTarget_.y; settings_.targetZ=cameraTarget_.z;
-        settings_.navigationPreview=navigationActive_;
+        const bool explicitFullQuality=forceFullQuality_;
+        forceFullQuality_=false;
+        settings_.navigationPreview=!explicitFullQuality && (navigationActive_ || (fastNavigation_ && fastNavigation_->isChecked() && !video));
         if(settings_.navigationPreview) {
             const float previewW=settings_.directX11?1024.f:480.f,previewH=settings_.directX11?576.f:270.f;
             const float scale=std::min(1.f,std::min(previewW/std::max(1,settings_.outW),previewH/std::max(1,settings_.outH)));
+            settings_.renderW=std::max(1,int(std::lround(settings_.outW*scale)));
+            settings_.renderH=std::max(1,int(std::lround(settings_.outH*scale)));
+            settings_.samples=1u; settings_.edgeAa=false;
+        }
+        if(video && isPripyatScene()) {
+            // Keep the guided visit responsive on the software renderer too.
+            // The 800x600 window is the presentation size; low internal
+            // resolution is intentional for a moving preview, not a still.
+            const int previewW=settings_.directX11?800:320, previewH=settings_.directX11?600:240;
+            const float scale=std::min(1.f,std::min(previewW/800.f,previewH/600.f));
             settings_.renderW=std::max(1,int(std::lround(settings_.outW*scale)));
             settings_.renderH=std::max(1,int(std::lround(settings_.outH*scale)));
             settings_.samples=1u; settings_.edgeAa=false;
@@ -1094,7 +1120,9 @@ private:
         settings_.elevation = float(elevation_->value());
         if (video && isPripyatScene()) {
             V tourTarget{};
-            const float progress=std::clamp(float(tourTimer_.elapsed())/90000.f,0.f,1.f);
+            // Advance per completed frame, not by wall clock. A slow CPU must
+            // not skip waypoints while it is still rendering the previous one.
+            const float progress=std::clamp(float(videoFrameIndex_)/float(videoFrameCount()),0.f,1.f);
             const CameraPose pose=guidedPripyatTour(progress,tourTarget);
             {
                 std::lock_guard<std::mutex> guard(sceneMutex_);
@@ -1117,7 +1145,7 @@ private:
         settings_.avx2 = avx2FmaAvailable() && (simdSelection == 1 || simdSelection == 0);
         settings_.hourStep = (video && isPripyatScene()) ? 6 : hour_->value();
         settings_.fog = fog_->isChecked();
-        settings_.dof = dof_->isChecked() && !navigationActive_;
+        settings_.dof = dof_->isChecked() && !settings_.navigationPreview && !video;
         settings_.dust = dust_->isChecked();
         threadLabel_->setText(settings_.directX11
             ? QStringLiteral("DirectX 11 — affichage temps réel")
@@ -1129,13 +1157,20 @@ private:
         const int frameCount=videoFrameCount();
         if(isPripyatScene()){
             const qint64 elapsed=std::max<qint64>(0,tourTimer_.elapsed());
-            if(elapsed>=90000){
+            if(videoFrameIndex_>=size_t(frameCount)){
                 videoBuilding_=false;
                 videoWindow_->setStatus(QStringLiteral("Visite terminée — pause sur le toit"));
                 status_->setText(QStringLiteral("Visite Energetik terminée — 1 min 30"));
                 return;
             }
-            const int seconds=int(elapsed/1000);
+            // 360 route samples over 90 s gives a 250 ms target cadence. If a
+            // frame takes longer, the tour slows down instead of jumping ahead.
+            const qint64 targetElapsed=qint64(videoFrameIndex_)*90000/frameCount;
+            if(elapsed<targetElapsed){
+                QTimer::singleShot(int(targetElapsed-elapsed),this,[this]{queueNextVideoFrame();});
+                return;
+            }
+            const int seconds=int(targetElapsed/1000);
             videoWindow_->setStatus(QStringLiteral("Energetik — extérieur → intérieur → toit — %1:%2 / 1:30")
                 .arg(seconds/60).arg(seconds%60,2,10,QChar('0')));
         } else if(videoFrameIndex_>=size_t(frameCount)){

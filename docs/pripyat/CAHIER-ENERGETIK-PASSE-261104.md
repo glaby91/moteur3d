@@ -1,6 +1,6 @@
 # Cahier de reconstruction — Palais Energetik
 
-État de travail : première passe enregistrée avec le build `261104-0003`. Les changements restent à compiler et à comparer dans l’exécutable Windows.
+État de travail : deuxième passe enregistrée avec le build `261104-0004`. À comparer sur l’exécutable Windows, en particulier la visite manuelle, les lumières et le parcours à 21 secondes.
 
 ## Références prioritaires
 
@@ -34,6 +34,14 @@ L’emplacement exact des pièces, portes et couloirs devra être déduit des vu
 - Les textures procédurales du Palais ajoutent des coulures de béton, des zones d’enduit écaillé, une fresque en pigments délavés et des matériaux distincts pour bois, écorce, herbe et débris.
 - Le backend DirectX échantillonne maintenant les cartes de normales et de rugosité avec les mipmaps disponibles, afin que le relief et les reflets varient selon le matériau.
 - Les références photo restent des guides visuels ; aucun fichier photo protégé n’est intégré au dépôt comme texture.
+
+## Deuxième passe — lumière et exploration
+
+- L’éclairage diffus de base est relevé pour éclaircir les zones à l’ombre sans supprimer l’éclairage directionnel.
+- Le ciel de jour devient bleu pâle plutôt que beige, en conservant la teinte chaude au lever et au coucher du soleil.
+- Des lumières de rebond larges et discrètes éclairent la profondeur de la façade ouverte.
+- La case « Visite fluide » garde un aperçu léger après les déplacements dans Pripiat ; « Calculer l’image » force toujours un rendu complet.
+- La visite automatique est limitée à 320 × 240 en interne sur CPU (800 × 600 sur la fenêtre), afin de réduire le retard de rendu.
 
 ## Validation restante
 

@@ -289,7 +289,9 @@ public:
             float r=1.f,g=1.f,b=1.f,strength=0.f;
             float spec=0.f,power=34.f,sr=178.f/255.f,sg=202.f/255.f;
             float emissionR=0.f,emissionG=0.f,emissionB=0.f,emissionStrength=0.f;
-            float diffuseBase=.21f,diffuseDay=.34f,diffuseDirect=.50f;
+            // Lift the general environment fill without flattening direct sun.
+            // The previous .21/.34/.50 mix left shaded concrete too dark.
+            float diffuseBase=.30f,diffuseDay=.44f,diffuseDirect=.56f;
             if(name=="foam"){diffuseBase=.60f;diffuseDay=.30f;diffuseDirect=.24f;}
             else if(name=="orange"){diffuseBase=.34f;diffuseDay=.43f;diffuseDirect=.26f;}
             else if(carPaint){diffuseBase=.32f;diffuseDay=.42f;diffuseDirect=.32f;}
