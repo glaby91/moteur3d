@@ -7,7 +7,8 @@ on:
     paths:
       - experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_cinema_seat.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/scene_energetik_seat_preview.js
-      - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/export_energetik_seat_manifest.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/energetik_seat_physics_profiles.json
       - experiments/2026-10-30-cote-ete-gt/native_v14/source_v1314.html
       - experiments/2026-10-30-cote-ete-gt/native_v14/gltf_scene_import.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/assets/orange_texturecan/orange_peel_512.m3dpbr
@@ -34,7 +35,9 @@ jobs:
       - name: Export standalone chair scene
         shell: bash
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
-        run: M3D_SKIP_IMPORTED_CAR=1 node export_scene.js source_v1314.html scene_energetik_seat_preview.bin scene_energetik_seat_preview.js
+        run: |
+          M3D_SKIP_IMPORTED_CAR=1 node export_scene.js source_v1314.html scene_energetik_seat_preview.bin scene_energetik_seat_preview.js
+          node export_energetik_seat_manifest.js scene_energetik_seat_preview.assets.json
 
       - name: Package load instructions
         shell: bash
@@ -47,6 +50,7 @@ jobs:
           et sélectionner scene_energetik_seat_preview.bin.
           Le fichier est autonome : il contient un seul siège, son sol de présentation et ses matériaux.
           Aucun recompile du moteur n'est requis pour modifier le modèle et réexporter cette scène.
+          Le fichier .assets.json décrit les composants, le pivot de l'assise et les familles de matériaux pour une future physique; le moteur actuel ne simule pas encore ces propriétés.
           EOF
 
       - name: Upload standalone scene
@@ -55,6 +59,7 @@ jobs:
           name: energetik-seat-preview
           path: |
             experiments/2026-10-30-cote-ete-gt/native_v14/scene_energetik_seat_preview.bin
+            experiments/2026-10-30-cote-ete-gt/native_v14/scene_energetik_seat_preview.assets.json
             experiments/2026-10-30-cote-ete-gt/native_v14/scene_energetik_seat_preview.txt
           if-no-files-found: error
           retention-days: 30

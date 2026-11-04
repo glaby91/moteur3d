@@ -110,7 +110,7 @@ Le build `261103-0020` ajoute au benchmark les compteurs de dispatch des noyaux 
 
 ## Siège rabattable du Palais Energetik
 
-La géométrie réutilisable du siège est définie dans `assets/pripyat/energetik_cinema_seat.js`. La scène complète l’appelle pour chaque place; `scene_energetik_seat_preview.js` l’appelle seule dans une scène minimale. Les options de construction permettent notamment de choisir une assise ouverte ou rabattue. Les matériaux propres du prototype sont intégrés à l’export : tissu bordeaux, passepoil discret, bois et métal.
+La géométrie réutilisable du siège est définie dans `assets/pripyat/energetik_cinema_seat.js`. La scène complète l’appelle pour chaque place; `scene_energetik_seat_preview.js` l’appelle seule dans une scène minimale. Le prototype compte 80 éléments pour le siège, dont les couches de coque et de coussin, les côtés, les charnières, les boulons et les coutures; ce sont des volumes natifs du moteur, pas un maillage photogrammétrique. Les options de construction permettent notamment de choisir une assise ouverte ou rabattue. Les matériaux visuels sont le tissu bordeaux, le passepoil discret, le bois et le métal. `energetik_seat_physics_profiles.json` conserve les propriétés nécessaires aux futurs calculs : masse, volume, densité, modules élastiques, amortissement et courbe de compression de la mousse. Les valeurs non mesurées sont laissées vides, et les formules sont documentées dans l’annexe exportée.
 
 Pour recalculer seulement le prototype, sans compiler l’application Qt ni reconstruire la ville :
 
@@ -118,4 +118,4 @@ Pour recalculer seulement le prototype, sans compiler l’application Qt ni reco
 M3D_SKIP_IMPORTED_CAR=1 node export_scene.js source_v1314.html scene_energetik_seat_preview.bin scene_energetik_seat_preview.js
 ```
 
-Ouvrez ensuite `scene_energetik_seat_preview.bin` dans le moteur par **Scène → Ouvrir une scène…**. La scène autonome contient uniquement le siège et un petit sol neutre. Le workflow GitHub `Export Energetik cinema seat preview` produit ce binaire sans compiler l’application. Après validation du prototype, le même module peut être utilisé par d’autres scènes ou niveaux.
+Ouvrez ensuite `scene_energetik_seat_preview.bin` dans le moteur par **Scène → Ouvrir une scène…**. La scène autonome contient uniquement le siège et un petit sol neutre. Le workflow GitHub `Export Energetik cinema seat preview` produit le binaire et l’annexe `.assets.json` sans compiler l’application. Le binaire contient une pose statique; le manifeste décrit les pièces, l’axe de charnière et les profils physiques prévus. Après validation du prototype, le même module peut être utilisé par d’autres scènes ou niveaux.

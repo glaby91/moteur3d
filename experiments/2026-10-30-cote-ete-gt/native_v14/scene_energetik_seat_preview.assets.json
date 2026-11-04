@@ -1,0 +1,280 @@
+{
+  "schema": "m3d-asset-manifest-v1",
+  "asset": "energetik-folding-cinema-seat",
+  "units": "metres",
+  "pose": {
+    "folded": true,
+    "seatPanAngleDegrees": 0
+  },
+  "geometry": {
+    "objectCount": 80,
+    "sceneObjectRange": [
+      1,
+      81
+    ],
+    "primitiveCounts": {
+      "box": 3,
+      "roundbox": 21,
+      "ellipse": 28,
+      "capsule": 29
+    },
+    "components": [
+      {
+        "id": "frame",
+        "role": "rigid",
+        "firstObject": 1,
+        "objectCount": 29,
+        "materialProfileIds": [
+          "seat_steel",
+          "seat_shell_wood"
+        ]
+      },
+      {
+        "id": "backrest",
+        "role": "rigid",
+        "firstObject": 30,
+        "objectCount": 23,
+        "materialProfileIds": [
+          "seat_shell_wood",
+          "seat_upholstery_cover",
+          "seat_stitched_trim",
+          "seat_foam_core"
+        ]
+      },
+      {
+        "id": "seat_pan",
+        "role": "hinged_rigid",
+        "firstObject": 53,
+        "objectCount": 16,
+        "materialProfileIds": [
+          "seat_steel",
+          "seat_shell_wood",
+          "seat_upholstery_cover",
+          "seat_stitched_trim",
+          "seat_foam_core"
+        ]
+      },
+      {
+        "id": "armrests",
+        "role": "rigid",
+        "firstObject": 69,
+        "objectCount": 12,
+        "materialProfileIds": [
+          "seat_steel",
+          "seat_shell_wood"
+        ]
+      }
+    ]
+  },
+  "materialProperties": {
+    "schema": "m3d-physics-material-profiles-v1",
+    "units": {
+      "mass": "kg",
+      "volume": "m3",
+      "density": "kg/m3",
+      "force": "N",
+      "area": "m2",
+      "length": "m",
+      "stress_and_modulus": "Pa",
+      "strain": "dimensionless",
+      "damping_ratio": "dimensionless"
+    },
+    "calculationDefinitions": {
+      "density_kg_m3": "mass_kg / volume_m3",
+      "engineering_strain": "displacement_m / initial_length_m",
+      "engineering_stress_pa": "force_n / loaded_area_m2",
+      "secant_modulus_pa": "engineering_stress_pa / engineering_strain",
+      "foam_model": "Use a measured stress-strain curve for nonlinear compression; do not infer foam behavior from the visual texture."
+    },
+    "profiles": [
+      {
+        "id": "seat_steel",
+        "visualMaterialId": "metal",
+        "category": "steel_frame_and_hardware",
+        "physicsModel": "rigid_linear_elastic",
+        "measurements": {
+          "mass_kg": null,
+          "volume_m3": null,
+          "force_n": null,
+          "loaded_area_m2": null,
+          "initial_length_m": null,
+          "displacement_m": null
+        },
+        "density_kg_m3": null,
+        "young_modulus_pa": null,
+        "poisson_ratio": null,
+        "shear_modulus_pa": null,
+        "bulk_modulus_pa": null,
+        "damping_ratio": null,
+        "compression_curve": [],
+        "status": "parameters_unmeasured",
+        "calculated": {
+          "density_kg_m3": null,
+          "engineering_strain": null,
+          "engineering_stress_pa": null,
+          "secant_modulus_pa": null,
+          "compression_curve_secant_moduli_pa": []
+        }
+      },
+      {
+        "id": "seat_shell_wood",
+        "visualMaterialId": "wood",
+        "category": "wood_or_laminated_board",
+        "physicsModel": "rigid_orthotropic_elastic",
+        "measurements": {
+          "mass_kg": null,
+          "volume_m3": null,
+          "force_n": null,
+          "loaded_area_m2": null,
+          "initial_length_m": null,
+          "displacement_m": null
+        },
+        "density_kg_m3": null,
+        "young_modulus_pa": null,
+        "poisson_ratio": null,
+        "shear_modulus_pa": null,
+        "bulk_modulus_pa": null,
+        "damping_ratio": null,
+        "compression_curve": [],
+        "status": "material_type_to_confirm",
+        "calculated": {
+          "density_kg_m3": null,
+          "engineering_strain": null,
+          "engineering_stress_pa": null,
+          "secant_modulus_pa": null,
+          "compression_curve_secant_moduli_pa": []
+        }
+      },
+      {
+        "id": "seat_upholstery_cover",
+        "visualMaterialId": "seatFabricClean",
+        "category": "upholstery_cover_fabric_or_vinyl",
+        "physicsModel": "thin_membrane_attached_to_foam",
+        "measurements": {
+          "mass_kg": null,
+          "volume_m3": null,
+          "areal_mass_kg_m2": null,
+          "force_n": null,
+          "loaded_area_m2": null,
+          "initial_length_m": null,
+          "displacement_m": null
+        },
+        "density_kg_m3": null,
+        "young_modulus_pa": null,
+        "poisson_ratio": null,
+        "shear_modulus_pa": null,
+        "bulk_modulus_pa": null,
+        "damping_ratio": null,
+        "compression_curve": [],
+        "status": "cover_composition_to_confirm",
+        "calculated": {
+          "density_kg_m3": null,
+          "engineering_strain": null,
+          "engineering_stress_pa": null,
+          "secant_modulus_pa": null,
+          "compression_curve_secant_moduli_pa": []
+        }
+      },
+      {
+        "id": "seat_stitched_trim",
+        "visualMaterialId": "seatTrim",
+        "category": "seam_and_piping",
+        "physicsModel": "flexible_detail_attached_to_cover",
+        "measurements": {
+          "mass_kg": null,
+          "volume_m3": null,
+          "areal_mass_kg_m2": null,
+          "force_n": null,
+          "loaded_area_m2": null,
+          "initial_length_m": null,
+          "displacement_m": null
+        },
+        "density_kg_m3": null,
+        "young_modulus_pa": null,
+        "poisson_ratio": null,
+        "shear_modulus_pa": null,
+        "bulk_modulus_pa": null,
+        "damping_ratio": null,
+        "compression_curve": [],
+        "status": "parameters_unmeasured",
+        "calculated": {
+          "density_kg_m3": null,
+          "engineering_strain": null,
+          "engineering_stress_pa": null,
+          "secant_modulus_pa": null,
+          "compression_curve_secant_moduli_pa": []
+        }
+      },
+      {
+        "id": "seat_foam_core",
+        "visualMaterialId": null,
+        "category": "polyurethane_foam_assumption",
+        "physicsModel": "compressible_nonlinear_solid",
+        "rendered_as_separate_layer": false,
+        "measurements": {
+          "mass_kg": null,
+          "volume_m3": null,
+          "force_n": null,
+          "loaded_area_m2": null,
+          "initial_length_m": null,
+          "displacement_m": null
+        },
+        "density_kg_m3": null,
+        "young_modulus_pa": null,
+        "poisson_ratio": null,
+        "shear_modulus_pa": null,
+        "bulk_modulus_pa": null,
+        "damping_ratio": null,
+        "compression_curve": [],
+        "status": "foam_type_and_parameters_to_measure",
+        "calculated": {
+          "density_kg_m3": null,
+          "engineering_strain": null,
+          "engineering_stress_pa": null,
+          "secant_modulus_pa": null,
+          "compression_curve_secant_moduli_pa": []
+        }
+      }
+    ]
+  },
+  "joints": [
+    {
+      "id": "seat-pan-hinge",
+      "part": "seat_pan",
+      "type": "revolute",
+      "pivot": [
+        0,
+        0.49,
+        -0.115
+      ],
+      "axis": [
+        1,
+        0,
+        0
+      ],
+      "foldedAngleDegrees": 0,
+      "openAngleDegrees": -90,
+      "currentAngleDegrees": 0
+    }
+  ],
+  "deformableParts": [
+    {
+      "id": "seat-pad",
+      "component": "seat_pan",
+      "coreProfile": "seat_foam_core",
+      "coverProfile": "seat_upholstery_cover",
+      "runtimeDeformation": "not-supported-by-current-scene-format"
+    },
+    {
+      "id": "back-pad",
+      "component": "backrest",
+      "coreProfile": "seat_foam_core",
+      "coverProfile": "seat_upholstery_cover",
+      "runtimeDeformation": "not-supported-by-current-scene-format"
+    }
+  ],
+  "rendererStatus": {
+    "current": "The .bin contains static geometry in the selected pose.",
+    "future": "The manifest identifies rigid parts, the seat-pan revolute joint, and foam-backed pads. Runtime articulation and deformation require engine support."
+  }
+}

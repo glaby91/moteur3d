@@ -338,7 +338,7 @@ function makeScene() {
       box(bankLeft,0.04,z-0.38,bankRight,platformTop,z+0.42,(row%4===0)?'concrete':'stone');
       for(let seat=0;seat<seatsPerBank;seat++){
         const x=center+(seat-(seatsPerBank-1)*0.5)*seatPitch;
-        buildEnergetikCinemaSeat({ box, capsule, roundBox }, x, platformTop, z, { folded: true });
+        buildEnergetikCinemaSeat({ box, capsule, ellipse, roundBox }, x, platformTop, z, { folded: true });
       }
     }
   }
