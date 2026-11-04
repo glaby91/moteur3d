@@ -14,11 +14,14 @@ Approcher l’apparence des vraies photos de Pripiat abandonnée tout en conserv
 
 **Critère de validation :** les surfaces neutres et les matériaux de référence gardent des couleurs proches dans les deux rendus.
 
-### 2. Éclairage et ombres
+### 2. Éclairage, ombres et particules atmosphériques
 
 - Stabiliser la lumière du soleil et la lumière ambiante.
 - Améliorer les ombres portées et ajouter une occlusion de contact légère pour asseoir les objets sur le sol.
 - Garder une ambiance crédible selon l’heure et éviter les ombres bouchées ou les surfaces surexposées.
+- Ajouter de fines poussières en suspension, surtout visibles dans les rayons de soleil à l’intérieur et près des ouvertures.
+- Simuler leur diffusion par de petites particules translucides, discrètes et animées lentement, avec atténuation selon la distance et la lumière. Compléter par un léger voile atmosphérique dans les vues lointaines.
+- Régler la densité selon le lieu : poussière dans les pièces abandonnées, particules plus rares dehors. Éviter l’aspect confettis et le bruit uniforme sur toute l’image; le grain photographique, s’il est ajouté, restera un effet séparé et léger.
 
 ### 3. Matériaux
 
