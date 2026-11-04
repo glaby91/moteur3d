@@ -22,9 +22,14 @@ struct FrameConstants {
     float up[3], farPlane;
     float light[3], ambient;
     float sky[3]; uint32_t materialCount;
+    float shadowBase[3], shadowSpan;
+    float shadowRight[3], shadowDist;
+    float shadowUp[3], shadowSize;
     float materialGlow[256][4];
     float materialSpecular[256][4];
     float materialOpacity[256][4];
+    float materialDiffuse[256][4];
+    float materialEmission[256][4];
     float lightPositionRadius[256][4];
     float lightColorIntensity[256][4];
     uint32_t lightCount; float padding[3];
@@ -38,14 +43,20 @@ cbuffer Frame : register(b0) {
     float3 up; float farPlane;
     float3 lightDir; float ambient;
     float3 skyColor; uint materialCount;
+    float3 shadowBase; float shadowSpan;
+    float3 shadowRight; float shadowDist;
+    float3 shadowUp; float shadowSize;
     float4 materialGlow[256];
     float4 materialSpecular[256];
     float4 materialOpacity[256];
+    float4 materialDiffuse[256];
+    float4 materialEmission[256];
     float4 lightPositionRadius[256];
     float4 lightColorIntensity[256];
     uint lightCount; float3 padding;
 };
 Texture2DArray<float4> albedo : register(t0);
+Texture2D<float> shadowDepth : register(t1);
 SamplerState wrapSampler : register(s0);
 struct VSIn { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; uint mat:MATERIAL; };
 struct VSOut { float4 p:SV_POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; float3 world:TEXCOORD1; nointerpolation uint mat:MATERIAL; };
@@ -67,12 +78,31 @@ float4 PSMain(VSOut i):SV_TARGET {
     float3 base = albedo.Sample(wrapSampler, float3(frac(i.uv), i.mat)).rgb;
     float3 normal = normalize(i.n);
     float diffuse = saturate(dot(normal, normalize(lightDir)));
-    float light = ambient + (1.0 - ambient) * diffuse;
+    float3 shadowOffset = i.world - shadowBase;
+    float shadowFactor = 1.0;
+    float shadowScale = shadowSize / (2.0 * shadowSpan);
+    float shadowCenter = shadowSize * 0.5 - 0.5;
+    int2 shadowPixel = int2(round(float2(dot(shadowOffset, shadowRight), dot(shadowOffset, shadowUp)) * shadowScale + shadowCenter));
+    float shadowDistance = shadowDist - dot(shadowOffset, lightDir);
+    if (shadowPixel.x >= 2 && shadowPixel.y >= 2 && shadowPixel.x < int(shadowSize) - 2 && shadowPixel.y < int(shadowSize) - 2) {
+        float visible = 0.0;
+        [unroll] for (int sy = -1; sy <= 1; ++sy) [unroll] for (int sx = -1; sx <= 1; ++sx) {
+            float storedDepth = shadowDepth.Load(int3(shadowPixel + int2(sx, sy), 0));
+            visible += shadowDistance <= storedDepth + 0.095 ? 1.0 : 0.0;
+        }
+        shadowFactor = 0.16 + 0.84 * visible / 9.0;
+    }
+    float4 diffuseTerms = materialDiffuse[i.mat];
+    float light = diffuseTerms.x + diffuseTerms.y * diffuseTerms.w
+                + diffuseTerms.z * diffuse * shadowFactor * diffuseTerms.w;
     float3 color = base * light + base * materialGlow[i.mat].rgb * materialGlow[i.mat].a;
+    color += materialEmission[i.mat].rgb * materialEmission[i.mat].a;
+    color += float3(28.0, 13.0, 4.0) / 255.0 * (1.0 - diffuseTerms.w);
     float3 viewDir = normalize(eye - i.world);
-    float3 halfDir = normalize(normalize(lightDir) + viewDir);
-    float specular = pow(saturate(dot(normal, halfDir)), materialSpecular[i.mat].y) * materialSpecular[i.mat].x;
-    color += float3(materialSpecular[i.mat].z, materialSpecular[i.mat].w, 0.8) * specular;
+    float3 reflectedLight = reflect(-normalize(lightDir), normal);
+    float specular = pow(saturate(dot(viewDir, reflectedLight)), materialSpecular[i.mat].y)
+                   * materialSpecular[i.mat].x * shadowFactor * diffuseTerms.w;
+    color += float3(178.0, 202.0, 214.0) / 255.0 * specular;
     [loop] for (uint l = 0; l < lightCount; ++l) {
         float3 delta = lightPositionRadius[l].xyz - i.world;
         float distanceToLight = length(delta);
@@ -80,7 +110,7 @@ float4 PSMain(VSOut i):SV_TARGET {
         if (distanceToLight < radius && distanceToLight > 0.0001) {
             float edge = 1.0 - distanceToLight / radius;
             float lambert = saturate(dot(normal, delta / distanceToLight));
-            color += base * lightColorIntensity[l].rgb * (edge * edge * lightColorIntensity[l].a * lambert * 0.27);
+            color += lightColorIntensity[l].rgb * (edge * edge * lightColorIntensity[l].a * lambert * 0.27);
         }
     }
     return float4(color, materialOpacity[i.mat].x);
@@ -217,10 +247,10 @@ public:
 
 class DirectX11Preview {
 public:
-    bool render(const Scene& scene,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error) {
+    bool render(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error) {
         const auto started=std::chrono::steady_clock::now();
         if(w<=0||h<=0){error=L"Résolution GPU invalide.";return false;}
-        if(!ensureDevice(error)||!ensureScene(scene,error)||!ensureTargets(w,h,error))return false;
+        if(!ensureDevice(error)||!ensureScene(scene,error)||!ensureShadow(shadows,error)||!ensureTargets(w,h,error))return false;
         FrameConstants cb{};
         cb.eye[0]=cam.eye.x;cb.eye[1]=cam.eye.y;cb.eye[2]=cam.eye.z;cb.tanHalf=cam.tanHalf;
         cb.forward[0]=cam.f.x;cb.forward[1]=cam.f.y;cb.forward[2]=cam.f.z;cb.aspect=cam.aspect;
@@ -229,32 +259,60 @@ public:
         cb.light[0]=sun.x;cb.light[1]=sun.y;cb.light[2]=sun.z;cb.ambient=.66f;
         V bg=scene.underwaterEnvironment?V{7,27,39}:skyHorizon*.65f+skyZenith*.35f;
         cb.sky[0]=bg.x/255.f;cb.sky[1]=bg.y/255.f;cb.sky[2]=bg.z/255.f;cb.materialCount=uint32_t(std::max<size_t>(1,scene.mat.size()));
+        cb.shadowBase[0]=shadows.base.x;cb.shadowBase[1]=shadows.base.y;cb.shadowBase[2]=shadows.base.z;cb.shadowSpan=shadows.span;
+        cb.shadowRight[0]=shadows.right.x;cb.shadowRight[1]=shadows.right.y;cb.shadowRight[2]=shadows.right.z;cb.shadowDist=shadows.dist;
+        cb.shadowUp[0]=shadows.up.x;cb.shadowUp[1]=shadows.up.y;cb.shadowUp[2]=shadows.up.z;cb.shadowSize=float(shadows.size);
         for(size_t m=0;m<scene.mat.size()&&m<256;m++){
             const std::string& name=scene.mat[m].name;
+            const bool carPaint=name.rfind("sports",0)==0||name=="carSilver"||name=="carBlue"||name=="carGreen"||name=="classicBody";
+            const bool raptureSurface=name=="raptureStone"||name=="raptureBronze"||name=="raptureGlass";
             float r=1.f,g=1.f,b=1.f,strength=0.f;
-            float spec=0.f,power=32.f,sr=1.f,sg=1.f;
-            if(name=="lamp"){r=1.f;g=.65f;b=.36f;strength=.75f+1.9f*lampFactor;}
-            else if(name=="led"){r=1.f;g=.85f;b=.65f;strength=.48f+.85f*lampFactor;}
-            else if(name=="taillight"){r=1.f;g=.11f;b=.05f;strength=1.25f*lampFactor;}
-            else if(name=="neon"){r=.65f;g=.9f;b=1.f;strength=1.1f;}
-            else if(name=="windowlit"){r=1.f;g=.8f;b=.55f;strength=.88f;}
-            if(name=="raptureBronze"){spec=.20f;power=28.f;sr=1.f;sg=.62f;}
-            else if(name=="metal"){spec=.24f;power=36.f;sr=.72f;sg=.82f;}
-            else if(name=="wheelMetal"){spec=.34f;power=44.f;sr=.84f;sg=.9f;}
-            else if(name=="raptureGlass"||name=="glass"){spec=.20f;power=48.f;sr=.55f;sg=.78f;}
-            else if(name=="sea"||name=="puddle"){spec=.30f;power=24.f;sr=.67f;sg=.78f;}
+            float spec=0.f,power=34.f,sr=178.f/255.f,sg=202.f/255.f;
+            float emissionR=0.f,emissionG=0.f,emissionB=0.f,emissionStrength=0.f;
+            float diffuseBase=.21f,diffuseDay=.34f,diffuseDirect=.50f;
+            if(name=="foam"){diffuseBase=.60f;diffuseDay=.30f;diffuseDirect=.24f;}
+            else if(name=="orange"){diffuseBase=.34f;diffuseDay=.43f;diffuseDirect=.26f;}
+            else if(carPaint){diffuseBase=.32f;diffuseDay=.42f;diffuseDirect=.32f;}
+            else if(raptureSurface){diffuseBase=.42f;diffuseDay=.28f;diffuseDirect=.50f;}
+            if(name=="lamp")strength=.45f+1.05f*lampFactor;
+            else if(name=="led")strength=1.35f*lampFactor;
+            else if(name=="taillight")strength=1.05f*lampFactor;
+            else if(name=="neon")strength=1.1f;
+            else if(name=="windowlit")strength=.88f;
+            if(name=="lamp"){emissionR=1.f;emissionG=166.f/255.f;emissionB=91.f/255.f;emissionStrength=.75f+1.9f*lampFactor;}
+            else if(name=="led"){emissionR=1.f;emissionG=217.f/255.f;emissionB=165.f/255.f;emissionStrength=.48f+.85f*lampFactor;}
+            else if(name=="taillight"){emissionR=1.f;emissionG=28.f/255.f;emissionB=12.f/255.f;emissionStrength=1.25f*lampFactor;}
+            if(name=="sea"){spec=.46f;power=25.f;}
+            else if(name=="puddle"){spec=.64f;power=18.f;}
+            else if(name=="glass"||name=="raptureGlass"){spec=.27f;power=34.f;}
+            else if(name=="raptureBronze"){spec=.20f;power=34.f;}
+            else if(name=="metal"){spec=.24f;power=34.f;}
+            else if(name=="wheelMetal"){spec=.34f;power=42.f;}
+            else if(name=="carSilver"){spec=.94f;power=52.f;}
+            else if(carPaint){spec=.68f;power=30.f;}
+            else if(name=="carGlass"){spec=.52f;power=38.f;}
+            else if(name=="taxi"){spec=.20f;power=34.f;}
+            else if(name=="mutant"){spec=.23f;power=29.f;}
+            else if(name=="scar"){spec=.28f;power=35.f;}
+            else if(name=="wound"){spec=.19f;power=20.f;}
+            else if(name=="asphalt"){spec=.16f;power=13.f;}
+            else if(name=="orange"){spec=.13f;power=42.f;}
+            if(spec==0.f&&scene.mat[m].reflectivityPercent>0)spec=.20f*scene.mat[m].reflectivityPercent/100.f;
             cb.materialGlow[m][0]=r;cb.materialGlow[m][1]=g;cb.materialGlow[m][2]=b;cb.materialGlow[m][3]=strength;
             cb.materialSpecular[m][0]=spec;cb.materialSpecular[m][1]=power;cb.materialSpecular[m][2]=sr;cb.materialSpecular[m][3]=sg;
             cb.materialOpacity[m][0]=1.f-float(scene.mat[m].transmissionPercent)/100.f;
+            cb.materialDiffuse[m][0]=diffuseBase;cb.materialDiffuse[m][1]=diffuseDay;cb.materialDiffuse[m][2]=diffuseDirect;cb.materialDiffuse[m][3]=daylight;
+            cb.materialEmission[m][0]=emissionR;cb.materialEmission[m][1]=emissionG;cb.materialEmission[m][2]=emissionB;cb.materialEmission[m][3]=emissionStrength;
         }
-        auto appendLight=[&](const Light& l){
+        const float sceneLightScale=.42f+.58f*(1.f-daylight);
+        auto appendLight=[&](const Light& l,float scale){
             if(cb.lightCount>=256)return;
             const uint32_t i=cb.lightCount++;
             cb.lightPositionRadius[i][0]=l.p.x;cb.lightPositionRadius[i][1]=l.p.y;cb.lightPositionRadius[i][2]=l.p.z;cb.lightPositionRadius[i][3]=l.radius;
-            cb.lightColorIntensity[i][0]=l.color.x/255.f;cb.lightColorIntensity[i][1]=l.color.y/255.f;cb.lightColorIntensity[i][2]=l.color.z/255.f;cb.lightColorIntensity[i][3]=l.intensity;
+            cb.lightColorIntensity[i][0]=l.color.x/255.f;cb.lightColorIntensity[i][1]=l.color.y/255.f;cb.lightColorIntensity[i][2]=l.color.z/255.f;cb.lightColorIntensity[i][3]=l.intensity*scale;
         };
-        for(const Light& l:pointLights)appendLight(l);
-        for(const Light& l:scene.lights)appendLight(l);
+        for(const Light& l:pointLights)appendLight(l,1.f);
+        for(const Light& l:scene.lights)appendLight(l,sceneLightScale);
         D3D11_MAPPED_SUBRESOURCE mapped{};
         HRESULT hr=context_->Map(constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped);
         if(FAILED(hr)){error=L"Impossible de transmettre les paramètres à DirectX 11.";return false;}
@@ -265,7 +323,7 @@ public:
         UINT stride=sizeof(GpuVertex),offset=0;ID3D11Buffer* vb=vertices_.Get();context_->IASetInputLayout(layout_.Get());context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context_->RSSetState(raster_.Get());context_->OMSetDepthStencilState(depth_.Get(),0);context_->VSSetShader(vs_.Get(),nullptr,0);context_->PSSetShader(ps_.Get(),nullptr,0);
         ID3D11Buffer* cbuff=constants_.Get();context_->VSSetConstantBuffers(0,1,&cbuff);context_->PSSetConstantBuffers(0,1,&cbuff);
-        ID3D11ShaderResourceView* srv=albedo_.Get();context_->PSSetShaderResources(0,1,&srv);ID3D11SamplerState* sampler=sampler_.Get();context_->PSSetSamplers(0,1,&sampler);
+        ID3D11ShaderResourceView* srvs[]={albedo_.Get(),shadowSrv_.Get()};context_->PSSetShaderResources(0,2,srvs);ID3D11SamplerState* sampler=sampler_.Get();context_->PSSetSamplers(0,1,&sampler);
         if(vertexCount_)context_->Draw(vertexCount_,0);
         if(!transparent_.empty()){
             std::sort(transparent_.begin(),transparent_.end(),[&](const TransparentTriangle& a,const TransparentTriangle& b){return dot(a.center-cam.eye,cam.f)>dot(b.center-cam.eye,cam.f);});
@@ -284,6 +342,16 @@ public:
         context_->Unmap(staging_.Get(),0);stats={};stats.gpu=true;stats.threads=0;stats.ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();stats.tests=vertexCount_/3;return true;
     }
 private:
+    bool ensureShadow(const ShadowMap& shadows,std::wstring& error) {
+        if(shadows.size<=0||shadows.d.size()<size_t(shadows.size)*shadows.size){error=L"Carte d’ombres invalide pour DirectX 11.";return false;}
+        if(!shadowTexture_||shadowSize_!=shadows.size){
+            shadowTexture_.Reset();shadowSrv_.Reset();
+            D3D11_TEXTURE2D_DESC td{};td.Width=UINT(shadows.size);td.Height=UINT(shadows.size);td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_R32_FLOAT;td.SampleDesc.Count=1;td.Usage=D3D11_USAGE_DEFAULT;td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+            if(FAILED(device_->CreateTexture2D(&td,nullptr,&shadowTexture_))||FAILED(device_->CreateShaderResourceView(shadowTexture_.Get(),nullptr,&shadowSrv_))){error=L"Création de la carte d’ombres DirectX 11 impossible.";return false;}
+            shadowSize_=shadows.size;
+        }
+        context_->UpdateSubresource(shadowTexture_.Get(),0,nullptr,shadows.d.data(),UINT(shadows.size*sizeof(float)),0);return true;
+    }
     bool ensureDevice(std::wstring& error) {
         if(device_)return true;
         D3D_FEATURE_LEVEL feature{};
@@ -350,13 +418,13 @@ private:
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&staging_))){error=L"Création du tampon de lecture DirectX 11 impossible.";return false;}return true;
     }
     ComPtr<ID3D11Device> device_;ComPtr<ID3D11DeviceContext> context_;ComPtr<ID3D11VertexShader> vs_;ComPtr<ID3D11PixelShader> ps_;ComPtr<ID3D11InputLayout> layout_;
-    ComPtr<ID3D11Buffer> constants_,vertices_,transparentVertices_;ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_;ComPtr<ID3D11ShaderResourceView> albedo_;std::vector<TransparentTriangle> transparent_;
+    ComPtr<ID3D11Buffer> constants_,vertices_,transparentVertices_;ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_;ComPtr<ID3D11ShaderResourceView> albedo_,shadowSrv_;ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<TransparentTriangle> transparent_;
     ComPtr<ID3D11Texture2D> target_,depthTexture_,staging_;ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
     const Obj* sceneKey_=nullptr;size_t objectCount_=0;UINT vertexCount_=0;int width_=0,height_=0;
 };
 }
-bool renderDirectX11Preview(const Scene& scene,const ShadowMap&,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error) {
-    thread_local DirectX11Preview renderer;return renderer.render(scene,cam,w,h,pixels,stats,error);
+bool renderDirectX11Preview(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error) {
+    thread_local DirectX11Preview renderer;return renderer.render(scene,shadows,cam,w,h,pixels,stats,error);
 }
 }
 #else

@@ -14,6 +14,8 @@ Approcher l’apparence des vraies photos de Pripiat abandonnée tout en conserv
 
 **Critère de validation :** les surfaces neutres et les matériaux de référence gardent des couleurs proches dans les deux rendus.
 
+**Première passe intégrée le 4 novembre 2026 :** le shader DirectX reprend maintenant les coefficients diffus par matériau, les émissions des lampes et la teinte nocturne du CPU. Il échantillonne aussi la carte d’ombres calculée par le moteur CPU. Cela réduit plusieurs écarts évidents, mais l’équivalence reste à mesurer sur Windows avec les mêmes captures; le passage complet en espace linéaire et la validation visuelle ne sont pas encore terminés.
+
 ### 2. Éclairage, ombres et particules atmosphériques
 
 - Stabiliser la lumière du soleil et la lumière ambiante.
@@ -21,7 +23,7 @@ Approcher l’apparence des vraies photos de Pripiat abandonnée tout en conserv
 - Garder une ambiance crédible selon l’heure et éviter les ombres bouchées ou les surfaces surexposées.
 - Ajouter de fines poussières en suspension, surtout visibles dans les rayons de soleil à l’intérieur et près des ouvertures.
 - Simuler leur diffusion par de petites particules translucides, discrètes et animées lentement, avec atténuation selon la distance et la lumière. Compléter par un léger voile atmosphérique dans les vues lointaines.
-- Régler la densité selon le lieu : poussière dans les pièces abandonnées, particules plus rares dehors. Éviter l’aspect confettis et le bruit uniforme sur toute l’image; le grain photographique, s’il est ajouté, restera un effet séparé et léger.
+- Régler la densité selon le lieu : poussière dans les pièces abandonnées, particules plus rares dehors. Ces particules peuvent créer un léger grain visible dans les faisceaux lumineux, mais leur distribution doit rester liée au volume et à l’éclairage. Éviter l’aspect confettis et le bruit uniforme sur toute l’image; le grain photographique, s’il est ajouté, restera un effet séparé et léger.
 
 ### 3. Matériaux
 
