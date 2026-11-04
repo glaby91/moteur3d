@@ -39,6 +39,7 @@ Energetik
 │   ├── Portraits peints de dirigeants soviétiques — confirmés
 │   ├── Fresques murales de figures et travailleurs — confirmées
 │   ├── Panneaux / cartouches avec texte cyrillique — confirmés
+│   ├── Inscription rouge verticale peinte sur porte rainurée — photo 69; lecture provisoire « СКЛАД 47 »
 │   ├── Slogan mural « DEAR COMRADES! » — confirmé par l’alt de la galerie
 │   └── Panneaux de propagande sur supports extérieurs — confirmés
 ├── 06. Mobilier et objets abandonnés
@@ -101,6 +102,10 @@ La galerie basse expose 92 vignettes de la série `palace-of-culture-sub`; les n
 | Galerie basse 85–92 | `Palace-culture-4-2392.jpg`; `Palace-culture-4-2388.jpg`; `Palace-culture-4-2389-Edit-Edit-Edit.jpg`; `Palace-culture-4-2542.jpg`; `Palace-culture-4-2394.jpg`; `Palace-culture-4-2399.jpg`; `Palace-culture-4-2390-2.jpg`; `c21-palace-culture-_DSC2386-4.jpg` | Fresques et portraits : figures humaines, compositions peintes, inscriptions cyrilliques et peinture écaillée; lecture détaillée des caractères à confirmer. |
 
 Les 8 images de la galerie principale sont : `c29-Palace-culture-4-2545.jpg` (extérieur), `DSC2360-Edit.jpg` (intérieur), `c46-palace-culture-2452.jpg` (auditorium), `c15-Palace-culture-4-2406.jpg` (piscine), `DSC2487-Edit-Edit.jpg` (toiture), `c2-palace-culture-3880.jpg`, `DSC2418.jpg` (gymnase), `c70-Palace-culture-4-3861.jpg`. Les titres de cette galerie confirment explicitement extérieur, intérieur, auditorium, piscine, toit et gymnase.
+
+### Vérification en ligne — inscription de la photo 69
+
+La peinture rouge semble pouvoir se lire **« СКЛАД 47 »**, soit « dépôt / local de stockage 47 » en russe; cette lecture reste une **inférence visuelle** à confirmer avec une image plus nette. Si elle est correcte, le contenu ressemble davantage à une désignation de local ou de stockage qu’à une marque disant « je suis passé ici », sans exclure qu’elle ait été ajoutée après l’évacuation. Une histoire de référence sur la Zone indique que l’Energetik a accueilli des liquidateurs, des services administratifs et des unités de police après l’accident, avant son abandon final en 2000 ([*Interesting Chernobyl TOP100*, entrée « Energetic »](https://www.schraegstrichpunkt.de/wp-content/uploads/2022/03/chernobyl-top100-book.pdf)). Des inscriptions de visiteurs et de stalkers sont aussi documentées ailleurs à Pripiat ([RBC Ukraine, visite récente de Pripiat](https://www.rbc.ua/ukr/news/zakrito-nazavzhdi-k-viglyadae-prip-yat-pislya-1745589464.html/amp); [FindWay, graffiti de Pripiat](https://find-way.com.ua/en/regions/chernobyl-exclusion-zone/pripyat/graffiti-of-pripyat)). **Aucune source trouvée ne date ni n’attribue cette inscription précise de la porte 69**; son origine et son intention restent ouvertes.
 
 ## Mapping individuel — lot 1 (photos 01–32)
 
@@ -176,7 +181,7 @@ Les numéros suivent l’ordre des miniatures de la galerie basse. Les vues lié
 | 66 | `palace-culture-2469.jpg` | Livres ouverts et fermés, couverture illustrée et document typographié | Étude de petites piles de livres; typographie à garder floue sauf référence lisible licenciée | papier, carton, encre mate | Élevée |
 | 67 | `palace-culture-2470-2.jpg` | Livres illustrés, cahiers et pages ouvertes au sol | Papier déformé, couvertures colorées et poussière | papier/carton, débris | Élevée |
 | 68 | `palace-culture-2471-2.jpg` | Journaux avec portrait imprimé, livres et photographies | Documents d’archives/documentaires; la photo imprimée ne prouve pas la présence d’un portrait peint dans cette pièce | papier jauni, encre, couverture | Élevée |
-| 69 | `palace-culture-2474.jpg` | Plante à feuilles jaunes derrière une table ou un pupitre poussiéreux | Feuillage et tiges visibles; plante confirmée par l’utilisateur; espèce, pot et éventuel support masqué restent à vérifier | feuilles jaunies, tiges sèches, poussière; contenant à identifier | Élevée pour « plante », faible pour espèce/contenant |
+| 69 | `palace-culture-2474.jpg` | Porte/panneau à rainures verticales, inscription rouge peinte, poignée/fermeture et charnières; plante à feuilles jaunes au premier plan | Porte usée gris-brun avec traces de peinture bleu-vert, relief nervuré vertical, rouille aux ferrures. Lecture visuelle provisoire de l’inscription : « СКЛАД 47 » (*sklad*, dépôt/stockage 47); le sens « code pour signaler son passage » n’est pas confirmé. Plante secondaire, feuilles jaunies | priorité texture porte : aspect métal peint `prp_steel_painted` + corrosion localisée `prp_steel_rusted`, normale des rainures et rugosité variable; lettrage rouge en masque/albédo séparé; plante `prp_foliage`, tiges sèches `prp_bark_wet`; table au premier plan avec revêtement clair fortement écaillé | Élevée pour porte, ferrures, inscription rouge et plante; faible pour lecture exacte, date et fonction du marquage |
 | 70 | `palace-culture-3855.jpg` | Livres, brochures, papiers et textile rouge entassés parmi les débris | Amas de bibliothèque/archives; plusieurs formats de livres et feuilles | papier, textile, gravats | Élevée |
 | 71 | `palace-culture-3856.jpg` | Livre fermé isolé sur une table, couverture portant un titre cyrillique | Objet de premier plan à modéliser comme livre; titre translittéré à vérifier avant d’en faire un texte | papier/carton, table en bois peint | Élevée |
 | 72 | `palace-culture-3857.jpg` | Livres et textiles mélangés à des déchets, papiers et petites boîtes | Amas d’objets divers; boîtes/tissus seulement des formes génériques à cette échelle | papier, tissu, carton, débris | Élevée |
