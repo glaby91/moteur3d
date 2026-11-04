@@ -1,4 +1,4 @@
-name: Export Energetik cinema seat preview
+name: Export Energetik three-seat row preview
 
 on:
   push:
@@ -32,7 +32,7 @@ jobs:
         with:
           node-version: 22
 
-      - name: Export standalone chair scene
+      - name: Export three-seat row scene
         shell: bash
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: |
@@ -44,19 +44,19 @@ jobs:
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: |
           cat > scene_energetik_seat_preview.txt <<'EOF'
-          Aperçu du siège rabattable du Palais Energetik
+          Rangée de trois sièges rabattables du Palais Energetik
 
           Ouvrir le moteur déjà installé, puis choisir Scène > Ouvrir une scène…
           et sélectionner scene_energetik_seat_preview.bin.
-          Le fichier est autonome : il contient un seul siège, son sol de présentation et ses matériaux.
+          Le fichier est autonome : il contient trois sièges, un tube de fixation commun, des montants en bois, le sol de présentation et les matériaux.
           Aucun recompile du moteur n'est requis pour modifier le modèle et réexporter cette scène.
-          Le fichier .assets.json décrit les composants, le pivot de l'assise et les familles de matériaux pour une future physique; le moteur actuel ne simule pas encore ces propriétés.
+          Le fichier .assets.json décrit les composants, les pivots des assises et les familles de matériaux pour une future physique; le moteur actuel ne simule pas encore ces propriétés.
           EOF
 
       - name: Upload standalone scene
         uses: actions/upload-artifact@v4
         with:
-          name: energetik-seat-preview
+          name: energetik-three-seat-row-preview
           path: |
             experiments/2026-10-30-cote-ete-gt/native_v14/scene_energetik_seat_preview.bin
             experiments/2026-10-30-cote-ete-gt/native_v14/scene_energetik_seat_preview.assets.json
