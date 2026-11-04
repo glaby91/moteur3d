@@ -3,7 +3,7 @@
 // Documentary-photo references and map sources are listed in docs/pripyat/README.md.
 
 const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
-  concrete: 2, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
+  concrete: 2, plaster: 1, mural: 1, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
   asphalt: 3, stone: 5, metal: 18, rust: 7, leaves: 2, grass: 1,
   bark: 1, wood: 4, sign: 3, debris: 2, puddle: 28
 });
@@ -13,6 +13,9 @@ const M3D_SCENE_LIGHTS = [];
 
 function makeScene() {
   objects.length = 0;
+  // The exporter owns the call to makeScene(). Reset local lights too so
+  // repeated exports never accumulate duplicate illumination.
+  M3D_SCENE_LIGHTS.length = 0;
 
   // Coordinate convention: Y is vertical. The camera approaches from +Z.
   // Zone 01 covers the central plaza, Energetik and Hotel Polissya frontages.
@@ -71,6 +74,53 @@ function makeScene() {
   box(20.5,9.4,-40.8,30.5,14.0,-22.2,'concrete'); // stair tower
   box(-43.0,11.25,-42.5,18.4,11.75,-20.1,'stone');
 
+  // Projecting plinth, pilasters, capitals and layered cornice give the civic
+  // façade real relief, with the curtain wall recessed behind the stonework.
+  box(-48.0,0.0,-20.55,26.9,0.72,-19.25,'stone');
+  box(-47.0,8.7,-20.48,25.6,9.02,-19.42,'concrete');
+  box(-47.6,9.02,-20.74,26.2,9.28,-19.26,'stone');
+  box(-47.9,9.28,-20.94,26.5,9.48,-19.08,'concrete');
+  for (const x of [-45.8,-39.0,-32.2,-25.4,-18.6,-11.8,-5.0,1.8,8.6,15.4,22.2]) {
+    box(x-0.42,0.40,-20.34,x+0.42,0.78,-19.34,'stone');
+    box(x-0.27,0.78,-20.16,x+0.27,8.25,-19.54,'concrete');
+    box(x-0.48,8.25,-20.42,x+0.48,8.62,-19.28,'stone');
+    box(x-0.58,8.62,-20.50,x+0.58,8.78,-19.20,'concrete');
+  }
+  // Broad ceremonial approach: six shallow steps and damaged handrails.
+  for (let step=0; step<6; step++) {
+    const y=0.12+step*0.105, z=-22.2+step*0.42;
+    box(-8.6,y,z,8.6,y+0.13,z+0.46,'stone');
+  }
+  box(-9.1,0.70,-20.0,9.1,0.90,-19.36,'concrete');
+  for (const x of [-9.5,9.5]) {
+    capsule([x,0.72,-21.8],[x,1.32,-19.8],0.09,'rust');
+    for (let z=-21.6;z<-19.9;z+=0.34) capsule([x,0.82,z],[x,1.14,z],0.035,'metal');
+  }
+  // Recessed, weathered rooftop plaque and built-up Cyrillic lettering.
+  box(-7.0,10.0,-20.9,7.0,11.25,-20.18,'rust');
+  box(-6.78,10.10,-21.0,6.78,11.12,-20.96,'windowdark');
+  const glyphs={
+    'Э':['11110','10001','00001','01111','00001','10001','11110'],
+    'Н':['10001','10001','10001','11111','10001','10001','10001'],
+    'Е':['11111','10000','10000','11110','10000','10000','11111'],
+    'Р':['11110','10001','10001','11110','10000','10000','10000'],
+    'Г':['11111','10000','10000','10000','10000','10000','10000'],
+    'Т':['11111','00100','00100','00100','00100','00100','00100'],
+    'И':['10001','10011','10101','10101','11001','10001','10001'],
+    'К':['10001','10010','10100','11000','10100','10010','10001']
+  };
+  const title='ЭНЕРГЕТИК', cell=0.13, gap=0.075;
+  const titleWidth=title.length*5*cell+(title.length-1)*gap;
+  let titleX=-titleWidth*0.5;
+  for(const ch of title){
+    const rows=glyphs[ch];
+    for(let row=0;row<7;row++)for(let col=0;col<5;col++)if(rows[row][col]==='1'){
+      const x=titleX+col*cell, y=10.20+(6-row)*cell;
+      box(x,y,-21.04,x+cell*0.82,y+cell*0.82,-20.98,'brick');
+    }
+    titleX+=5*cell+gap;
+  }
+
   // Three readable levels. Slabs wrap the foyer atrium and the open stair core.
   box(-49.2,0.05,-42.2,29.2,0.38,-20.1,'stone');
   function floorPlate(y){
@@ -113,24 +163,38 @@ function makeScene() {
     box(mid+door*.5,y,z,x1,y+h,z+thick,mat);
     box(mid-door*.5,y+2.15,z,mid+door*.5,y+h,z+thick,'concrete');
   }
+  function sideDoorWall(x,z0,z1,y,h,mat){
+    const mid=(z0+z1)*0.5, door=1.8, thick=0.16;
+    box(x,y,z0,x+thick,y+h,mid-door*.5,mat);
+    box(x,y,mid+door*.5,x+thick,y+h,z1,mat);
+    box(x,y+2.15,mid-door*.5,x+thick,y+h,mid+door*.5,'concrete');
+  }
   for(let level=0;level<3;level++){
     const y=0.38+level*3.1, h=2.72;
     for(const [x0,x1] of [[-48.7,-38.0],[-38.0,-27.0],[-27.0,-15.8],[8.2,17.6]]){
       // Low corridor walls and room dividers; the first-floor rear hall stays open as an auditorium.
-      box(x0,y,-34.0,x0+0.16,y+h,-27.0,'concrete');
-      box(x0,y,-27.0,x0+0.16,y+h,-20.1,'concrete');
-      box(x1-0.16,y,-27.0,x1,y+h,-20.1,'concrete');
+      sideDoorWall(x0,-34.0,-27.0,y,h,'concrete');
+      sideDoorWall(x0,-27.0,-20.1,y,h,'concrete');
+      sideDoorWall(x1-0.16,-27.0,-20.1,y,h,'concrete');
       if(level>0){
-        box(x0,y,-42.1,x0+0.16,y+h,-34.0,'concrete');
-        box(x1-0.16,y,-42.1,x1,y+h,-34.0,'concrete');
+        sideDoorWall(x0,-42.1,-34.0,y,h,'concrete');
+        sideDoorWall(x1-0.16,-42.1,-34.0,y,h,'concrete');
       }
       doorwayWall(x0,x1,-27.12,y,h,'concrete');
       doorwayWall(x0,x1,-34.10,y,h,'concrete');
-      box(x1-0.16,y,-34.0,x1,y+h,-27.0,'concrete');
+      sideDoorWall(x1-0.16,-34.0,-27.0,y,h,'concrete');
     }
     // Broken plaster and fallen ceiling sections are broad, readable shapes.
     box(-46.0,y+2.25,-26.92,-42.5,y+2.42,-26.72,'debris');
     box(-25.0,y+2.36,-34.28,-21.8,y+2.51,-34.08,'debris');
+  }
+  // The east stair core is connected through a real doorway in its west wall.
+  // Align it with the rear corridor so the guided camera can reach the stairs.
+  for(let level=0;level<3;level++){
+    const y=0.38+level*3.1;
+    box(18.0,y,-42.2,20.0,y+2.15,-31.4,'concrete');
+    box(18.0,y,-29.6,20.0,y+2.15,-20.1,'concrete');
+    box(18.0,y+2.15,-31.4,20.0,y+2.72,-29.6,'concrete');
   }
 
   // Ground floor: foyer, abandoned auditorium, stage, and a few large room fixtures.
@@ -147,6 +211,45 @@ function makeScene() {
   for(const p of [[-11,0.40,-25.5,-8,0.55,-24.8],[7,0.40,-31.8,9,0.60,-30.8],
                   [-20,0.40,-39.6,-17,0.57,-38.8],[12,3.55,-24.8,15,3.72,-24.1]])
     box(...p,'debris');
+
+  // Foyer stair flights and wall cladding add a readable human scale indoors.
+  for(const side of [-1,1]){
+    const x0=side<0?-11.0:-1.2, x1=side<0?-1.7:8.0;
+    for(let i=0;i<17;i++){
+      const y=0.48+i*0.145, z=-25.0-i*0.50;
+      box(x0,y,z,x1,y+0.16,z+0.50,'stone');
+    }
+    const railX=side<0?-10.75:7.75;
+    capsule([railX,0.80,-24.8],[railX,3.25,-33.0],0.10,'rust');
+    for(let i=0;i<10;i++){
+      const z=-25.1-i*0.73, y=1.0+i*0.22;
+      capsule([railX,y,z],[railX,y+0.43,z],0.035,'metal');
+    }
+  }
+  box(-12.4,3.25,-34.1,9.2,3.48,-32.8,'stone');
+  // Decorative wall panels and faded mural fragments based on documented
+  // Energetik lobby photographs, with peeled plaster around the remaining art.
+  for(const [wallX,z,y,w,h] of [[-49.32,-33.6,4.0,4.8,2.0],[-49.32,-27.0,4.2,3.9,1.8],[29.30,-33.1,4.0,4.3,2.0],[29.30,-26.8,4.2,3.7,1.8]]){
+    const x0=wallX, x1=wallX+0.16;
+    box(x0,y,z,x1,y+h,z+w,'rust');
+    box(x0+0.12,y+0.12,z+0.12,x1+0.12,y+h-0.10,z+w-0.12,'mural');
+    for(let i=0;i<5;i++){
+      const zz=z+0.34+i*(w-0.75)/5;
+      box(x1+0.13,y+0.32,zz,x1+0.18,y+h-0.28,zz+0.12,i%2?'plaster':'brick');
+    }
+    box(x1+0.13,y+h*0.50,z+0.18,x1+0.19,y+h*0.50+0.10,z+w*0.46,'stone');
+    box(x1+0.13,y+0.24,z+w*0.57,x1+0.19,y+0.36,z+w-0.24,'plaster');
+  }
+  // Ceiling failures and exposed glazing frames leave specific traces of decay.
+  for(const [x,z,w,d] of [[-39,-30,4.2,2.1],[-27,-23,3.0,1.5],[12,-29,3.6,2.0]]){
+    box(x,8.36,z,x+w,8.52,z+d,'windowdark');
+    box(x-0.2,8.40,z-0.18,x+w+0.26,8.58,z+0.22,'debris');
+  }
+  for(const [x,y] of [[-31.6,1.0],[-20.8,4.1],[8.4,7.1],[14.6,1.0]]){
+    box(x,y,-42.24,x+3.5,y+1.65,-42.08,'windowdark');
+    box(x+0.08,y+0.06,-42.30,x+0.18,y+1.56,-42.16,'rust');
+    box(x+3.05,y+0.06,-42.28,x+3.16,y+1.56,-42.14,'rust');
+  }
 
   // Upper rooms retain a few recognizable large-scale fixtures and rubble.
   for(let level=1;level<3;level++){
@@ -165,8 +268,12 @@ function makeScene() {
       box(21.0,y,z,25.7,y+0.18,z+1.35,'stone');
     }
     box(20.0,baseY+2.7,-24.8,27.0,baseY+3.0,-21.2,'concrete');
+    box(20.0,baseY+2.7,-26.7,27.0,baseY+3.0,-23.0,'concrete');
   }
-  box(20.0,9.4,-22.2,27.0,13.3,-21.0,'windowdark'); // rooftop stair door
+  // Leave a genuine 3.8 m rooftop doorway in the stair tower wall.
+  box(20.0,9.4,-22.2,21.7,13.3,-21.0,'rust');
+  box(25.3,9.4,-22.2,27.0,13.3,-21.0,'rust');
+  box(21.7,12.0,-22.2,25.3,13.3,-21.0,'concrete');
 
   // Roof access, low parapet, vents, weeds, and an open atrium that admits direct sun.
   box(-49.2,9.4,-42.2,-15,9.7,-20.1,'concrete');
@@ -318,5 +425,3 @@ function makeScene() {
     M3D_SCENE_LIGHTS.push([x,5,-15.8,12,0.20,236,204,157]);
   }
 }
-
-makeScene();

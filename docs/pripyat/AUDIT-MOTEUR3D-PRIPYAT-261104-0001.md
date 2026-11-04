@@ -92,3 +92,20 @@ Ces limites sont déjà partiellement reconnues dans `docs/pripyat/README.md` et
 4. Réduire les copies CPU/GPU et la mémoire du maillage avant d’étendre la scène.
 5. Valider les volumes et matériaux d’Energetik sur des photos et plans, puis détailler les secteurs voisins.
 
+## Suivi des corrections — Build 261104-0002
+
+Ces changements sont postérieurs à l’audit initial. Les limites notées comme partielles restent pertinentes, notamment jusqu’à validation dans le paquet Windows.
+
+| Constat | État | Changement |
+| --- | --- | --- |
+| A1 — lumières locales ajoutées deux fois | Corrigé dans le code | `makeScene()` est appelé par l’exporteur uniquement ; la scène vide maintenant aussi `M3D_SCENE_LIGHTS` lors de sa construction. |
+| A2 — ombres DirectX incohérentes après changement d’heure | Corrigé dans le code | Une variation d’heure reconstruit la carte d’ombres avant le chemin de rendu CPU ou DirectX. |
+| A3 — comparaison CPU/GPU présentée comme gain équivalent | Corrigé dans l’interface/export | Le tableau identifie la comparaison comme chemins et qualités différents ; le CSV porte un indicateur de comparabilité. |
+| A4 — lecture CPU synchrone de l’image GPU | Toujours présent | Le pipeline DirectX lit encore le tampon staging côté CPU. Une présentation native sur surface GPU reste un chantier séparé. |
+| A5 — expansion mémoire de la scène raster | Partiellement encadré | Le chargeur de scène vérifie désormais une estimation mémoire avant allocation. Le maillage raster reste développé en triangles non indexés. |
+| A6 — enveloppe BVH non vérifiée | Corrigé dans le code | Le chargeur contrôle maintenant que chaque feuille contient les objets et que les parents contiennent leurs enfants, en plus des contrôles de graphe existants. |
+| Trajet caméra traversant des cloisons | Corrigé dans le code, à valider sur Windows | Le parcours a été redessiné sur les portes modélisées ; les mouvements manuels et guidés s’arrêtent sur les géométries opaques. |
+| Qualité des textures et finesse de sortie | Amélioré, comparaison visuelle à faire | Les matériaux Energetik sont exportés en 1024 px ; le nouveau préréglage CPU calcule à 2× la résolution de sortie et réduit l’image. |
+
+La compilation et l’export de cette révision sont déclenchés par le workflow Windows. Ce tableau ne prétend pas valider les résultats visuels : un parcours de l’exécutable et une comparaison avec les références du document [Energetik — références visuelles et passe haute définition](ENERGETIK-REFERENCES-ET-QUALITE.md) restent nécessaires.
+

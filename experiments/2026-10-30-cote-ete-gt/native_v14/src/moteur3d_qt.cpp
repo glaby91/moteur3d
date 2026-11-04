@@ -64,11 +64,73 @@ struct RenderSettings {
     unsigned threads = std::max(1u, std::thread::hardware_concurrency()), samples = 1;
     bool avx2 = false;
     bool directX11 = false;
-    int hourStep = 12;
-    bool fog = false, dof = false, edgeAa = true, videoPreview = false;
+    int hourStep = 4;
+    bool fog = false, dof = false, edgeAa = true, dust = true, videoPreview = false;
 };
 
 struct CameraPose { float distance, angle, elevation; };
+
+static void applyDustOverlay(const Scene& scene, const Camera& cam, int w, int h,
+                             int hourStep, std::vector<uint32_t>& pixels) {
+    if (w < 2 || h < 2 || pixels.size() < size_t(w) * size_t(h) || daylight < .12f) return;
+    auto mixPixel = [&](int x, int y, int r, int g, int b, int alpha) {
+        if (x < 0 || y < 0 || x >= w || y >= h) return;
+        uint32_t& p = pixels[size_t(y) * size_t(w) + size_t(x)];
+        const int inv = 255 - alpha;
+        const int pr = int((p >> 16) & 255), pg = int((p >> 8) & 255), pb = int(p & 255);
+        p = 0xff000000u | (uint32_t((pr * inv + r * alpha) / 255) << 16)
+            | (uint32_t((pg * inv + g * alpha) / 255) << 8)
+            | uint32_t((pb * inv + b * alpha) / 255);
+    };
+    // Fixed world-space motes remain stable while navigating. A ray test keeps
+    // them behind opaque walls while allowing light shafts through the glazing.
+    uint32_t rng = 0x9e3779b9u ^ uint32_t(hourStep * 7919);
+    auto random01 = [&]() {
+        rng ^= rng << 13; rng ^= rng >> 17; rng ^= rng << 5;
+        return float(rng & 0x00ffffffu) / float(0x01000000u);
+    };
+    Stats visibilityStats;
+    const int count = 92;
+    for (int i = 0; i < count; ++i) {
+        const V point{-14.f + random01() * 24.f, .72f + random01() * 7.0f,
+                      -31.2f + random01() * 10.0f};
+        const V delta = point - cam.eye;
+        const float distance = length(delta);
+        if (distance < .6f) continue;
+        const V direction = delta / distance;
+        Hit blocker;
+        closest(scene, Ray{cam.eye, direction}, blocker, &visibilityStats, false, -1, true);
+        if (blocker.id >= 0 && blocker.t < distance - .12f) continue;
+        const float depth = dot(delta, cam.f);
+        if (depth <= .35f) continue;
+        const float nx = dot(delta, cam.r) / (depth * cam.tanHalf * cam.aspect);
+        const float ny = dot(delta, cam.u) / (depth * cam.tanHalf);
+        if (std::abs(nx) > .99f || std::abs(ny) > .99f) continue;
+        const int x = int((nx * .5f + .5f) * float(w));
+        const int y = int((.5f - ny * .5f) * float(h));
+        const int radius = depth < 5.f ? 2 : 1;
+        const int alpha = int((18.f + random01() * 32.f) * std::clamp(daylight * 1.4f, .35f, 1.f));
+        const int green = int(205.f + random01() * 40.f);
+        const int blue = int(152.f + random01() * 48.f);
+        mixPixel(x, y, 255, green, blue, alpha);
+        if (radius == 2) {
+            mixPixel(x-1,y,255,green,blue,alpha/3); mixPixel(x+1,y,255,green,blue,alpha/3);
+            mixPixel(x,y-1,255,green,blue,alpha/3); mixPixel(x,y+1,255,green,blue,alpha/3);
+        }
+    }
+}
+
+static V clampSceneMotion(const Scene& scene, V from, V to) {
+    const V delta=to-from;
+    const float distance=length(delta);
+    if(distance<.015f)return to;
+    const V direction=delta/distance;
+    Hit obstacle;
+    closest(scene,Ray{from+direction*.02f,direction},obstacle,nullptr,false,-1,true);
+    if(obstacle.id>=0&&obstacle.t<distance-.10f)
+        return from+direction*std::max(0.f,obstacle.t-.12f);
+    return to;
+}
 
 struct BenchmarkRow {
     unsigned threads = 1;
@@ -113,7 +175,7 @@ public:
         engine->addWidget(new QLabel(QStringLiteral("Moteur à mesurer :"), this));
         engineMode_ = new QComboBox(this);
         engineMode_->addItems({QStringLiteral("CPU — ray tracing complet"), QStringLiteral("GPU — DirectX 11"), QStringLiteral("Comparaison CPU x64 / GPU DirectX 11")});
-        engineMode_->setToolTip(QStringLiteral("En comparaison CPU/GPU, le CPU passe en x64 standard et les options non prises en charge par DirectX (brouillard et profondeur de champ) sont désactivées pour les deux passes."));
+        engineMode_->setToolTip(QStringLiteral("La comparaison CPU/GPU mesure deux chemins de rendu de qualité différente : le CPU trace les rayons, tandis que DirectX rasterise et ne calcule pas les mêmes réflexions/réfraction. La lecture GPU→CPU est incluse. Ce n’est pas un gain à qualité égale."));
 #ifndef _WIN32
         engineMode_->setItemData(1, 0, Qt::UserRole - 1); engineMode_->setItemData(2, 0, Qt::UserRole - 1);
         engineMode_->setItemData(1, QStringLiteral("DirectX 11 est disponible uniquement sous Windows."), Qt::ToolTipRole);
@@ -135,7 +197,7 @@ public:
         status_ = new QLabel(QStringLiteral("Prêt — choisissez CPU, DirectX 11 ou une comparaison CPU/GPU."), this);
         root->addWidget(status_); root->addWidget(progress_);
         table_ = new QTableWidget(0, 8, this);
-        table_->setHorizontalHeaderLabels({QStringLiteral("Moteur / mode"), QStringLiteral("Threads"), QStringLiteral("Rendu médian (ms)"), QStringLiteral("Post (ms)"), QStringLiteral("Total (ms)"), QStringLiteral("Gain SIMD"), QStringLiteral("Débit relatif (× réf.)"), QStringLiteral("Dispatch AVX2 : rayon / triangle / texture / lumière")});
+        table_->setHorizontalHeaderLabels({QStringLiteral("Moteur / mode"), QStringLiteral("Threads"), QStringLiteral("Rendu médian (ms)"), QStringLiteral("Post (ms)"), QStringLiteral("Total (ms)"), QStringLiteral("Gain SIMD"), QStringLiteral("Débit relatif*"), QStringLiteral("Dispatch AVX2 : rayon / triangle / texture / lumière")});
         table_->horizontalHeaderItem(7)->setToolTip(QStringLiteral("Paquets de 8 rayons, groupes de 8 triangles, échantillons de texture et lots de 8 lumières réellement passés par les noyaux AVX2."));
         table_->horizontalHeader()->setSectionResizeMode(QHeaderView::ResizeToContents);
         table_->horizontalHeader()->setStretchLastSection(true);
@@ -213,6 +275,8 @@ public:
         }
         QStringList advice{QStringLiteral("%1 répétitions mesurées par configuration, médiane affichée; échauffement exclu. Ombres : %2 ms pour la passe unique.")
             .arg(repetitionsMeasured_).arg(shadowMs_, 0, 'f', 1)};
+        if(std::any_of(rows_.begin(),rows_.end(),[](const BenchmarkRow& row){return row.gpu;}))
+            advice << QStringLiteral("* Débit relatif indicatif : CPU ray tracing complet et GPU raster ne rendent pas les mêmes effets. Réflexions/réfraction et lecture GPU→CPU diffèrent; ce n’est pas un gain à qualité égale.");
         if (modesMeasured.size() > 1) {
             for (const auto& row : rows_) if (!row.gpu && row.avx2) {
                 const auto ref = std::find_if(rows_.begin(), rows_.end(), [&row](const BenchmarkRow& r) { return !r.gpu && !r.avx2 && r.threads == row.threads; });
@@ -253,7 +317,9 @@ private:
         out << "# simd_selection=" << modeSummary_ << "; repetitions=" << repetitionsMeasured_ << "; warmup=1\n";
         out << "# settings=" << settingsSummary_ << "\n";
         out << "# resolution=" << width_ << "x" << height_ << "; samples_per_pixel=" << samples_ << "; shadow_build_ms=" << QString::number(shadowMs_, 'f', 3) << "\n";
-        out << "engine;simd;threads;render_median_ms;post_median_ms;total_median_ms;speedup_vs_reference;simd_gain_vs_x64_same_threads;simd_ray_packets;simd_triangle_packets;simd_texture_samples;simd_light_batches;rays;BVH_tests;BVH_nodes;AABB_tests;hits;texels\n";
+        const bool hasGpu=std::any_of(rows_.begin(),rows_.end(),[](const BenchmarkRow& row){return row.gpu;});
+        if(hasGpu)out << "# comparison=non-equivalent paths; CPU full ray tracing vs DirectX raster preview; relative throughput is indicative only\n";
+        out << "engine;simd;threads;render_median_ms;post_median_ms;total_median_ms;speedup_vs_reference;quality_comparable;simd_gain_vs_x64_same_threads;simd_ray_packets;simd_triangle_packets;simd_texture_samples;simd_light_batches;rays;BVH_tests;BVH_nodes;AABB_tests;hits;texels\n";
         const auto baseIt = std::find_if(rows_.begin(), rows_.end(), [](const BenchmarkRow& r) { return !r.gpu && !r.avx2; });
         const double referenceMs = rows_.empty() ? 0 : (baseIt == rows_.end() ? rows_.front() : *baseIt).totalMs;
         for (const auto& r : rows_) {
@@ -264,7 +330,7 @@ private:
             const QString simdGain = !r.gpu && r.avx2 && standard != rows_.end() ? QString::number(standard->totalMs / std::max(.001, r.totalMs), 'f', 4) : QString();
             out << engineName << ';' << modeName << ';' << (r.gpu?QStringLiteral("GPU"):QString::number(r.threads)) << ';' << QString::number(r.renderMs, 'f', 3) << ';'
                 << QString::number(r.postMs, 'f', 3) << ';' << QString::number(r.totalMs, 'f', 3) << ';'
-                << QString::number(relative, 'f', 4) << ';' << simdGain << ';'
+                << QString::number(relative, 'f', 4) << ';' << (hasGpu?QStringLiteral("no"):QStringLiteral("yes")) << ';' << simdGain << ';'
                 << r.simdRayPackets << ';' << r.simdTrianglePackets << ';' << r.simdTextureSamples << ';' << r.simdLightBatches << ';'
                 << r.rays << ';' << r.tests << ';' << r.nodes << ';' << r.aabb << ';' << r.hits << ';' << r.texels << '\n';
         }
@@ -295,36 +361,51 @@ static CameraPose guidedPripyatTour(float progress, V& look) {
     progress=std::clamp(progress/.88f,0.f,.999999f);
     static constexpr V route[] = {
         { 0.f,1.6f,48.f }, { 0.f,1.6f,25.f }, { 0.f,1.6f,2.f },
-        { 0.f,1.6f,-17.f }, { 0.f,1.6f,-28.f }, { -18.f,1.6f,-31.f },
-        { -33.f,1.6f,-23.f }, { -34.f,1.6f,-38.f },
-        { -3.f,1.6f,-31.f }, { -3.f,4.7f,-31.f },
-        { -33.f,4.7f,-23.f }, { -42.f,4.7f,-38.f },
-        { -3.f,4.7f,-31.f }, { -3.f,7.8f,-31.f },
-        { -33.f,7.8f,-23.f }, { -39.f,7.8f,-38.f },
-        { 15.f,7.8f,-31.f }, { 22.f,10.f,-31.f },
-        { 19.f,10.5f,-34.f }
+        { 0.f,1.6f,-17.f }, { 0.f,1.6f,-23.5f },
+        { 12.9f,1.6f,-23.5f }, { 12.9f,1.6f,-30.5f },
+        { 0.f,1.6f,-30.5f }, { -21.4f,1.6f,-30.5f },
+        { -32.5f,1.6f,-30.5f }, { -43.35f,1.6f,-30.5f },
+        { -43.35f,1.6f,-38.0f }, { -32.5f,1.6f,-38.0f },
+        { -43.35f,1.6f,-30.5f }, { -32.5f,1.6f,-30.5f },
+        { -21.4f,1.6f,-30.5f }, { 0.f,1.6f,-30.5f },
+        { 12.9f,1.6f,-30.5f }, { 19.0f,1.6f,-30.5f },
+        { 23.5f,1.6f,-40.5f }, { 23.5f,2.4f,-36.0f },
+        { 23.5f,3.3f,-31.0f }, { 23.5f,4.6f,-25.0f },
+        { 23.5f,4.7f,-30.5f }, { 19.0f,4.7f,-30.5f },
+        { 12.9f,4.7f,-30.5f }, { 0.f,4.7f,-30.5f },
+        { -21.4f,4.7f,-30.5f }, { -32.5f,4.7f,-30.5f },
+        { -43.35f,4.7f,-30.5f }, { -32.5f,4.7f,-30.5f },
+        { -21.4f,4.7f,-30.5f }, { 0.f,4.7f,-30.5f },
+        { 12.9f,4.7f,-30.5f }, { 19.0f,4.7f,-30.5f },
+        { 23.5f,4.7f,-30.5f }, { 23.5f,4.7f,-40.1f },
+        { 23.5f,5.6f,-35.0f }, { 23.5f,6.6f,-30.0f },
+        { 23.5f,7.7f,-25.0f }, { 23.5f,7.8f,-30.5f },
+        { 19.0f,7.8f,-30.5f }, { 12.9f,7.8f,-30.5f },
+        { 0.f,7.8f,-30.5f }, { -21.4f,7.8f,-30.5f },
+        { -32.5f,7.8f,-30.5f }, { -43.35f,7.8f,-30.5f },
+        { -32.5f,7.8f,-30.5f }, { -21.4f,7.8f,-30.5f },
+        { 0.f,7.8f,-30.5f }, { 12.9f,7.8f,-30.5f },
+        { 19.0f,7.8f,-30.5f }, { 23.5f,7.8f,-30.5f },
+        { 23.5f,7.8f,-40.5f }, { 23.5f,8.7f,-35.5f },
+        { 23.5f,9.7f,-30.0f }, { 23.5f,10.8f,-25.0f },
+        { 23.5f,11.0f,-21.6f }
     };
     constexpr int count=int(sizeof(route)/sizeof(route[0]));
-    const float scaled=progress*float(count-1);
-    const int i=std::min(count-2,int(scaled));
-    const float t=scaled-float(i);
-    const V& p0=route[std::max(0,i-1)];
+    float totalLength=0.f;
+    for(int i=0;i<count-1;i++) totalLength+=length(route[i+1]-route[i]);
+    float remaining=progress*totalLength;
+    int i=0;
+    while(i<count-2&&remaining>length(route[i+1]-route[i])){remaining-=length(route[i+1]-route[i]);i++;}
+    const float segmentLength=length(route[i+1]-route[i]);
+    const float t=segmentLength>1e-5f?std::clamp(remaining/segmentLength,0.f,1.f):0.f;
     const V& p1=route[i];
     const V& p2=route[i+1];
-    const V& p3=route[std::min(count-1,i+2)];
-    auto curve=[t](float a,float b,float c,float d){
-        const float t2=t*t,t3=t2*t;
-        return .5f*((2.f*b)+(-a+c)*t+(2.f*a-5.f*b+4.f*c-d)*t2+(-a+3.f*b-3.f*c+d)*t3);
-    };
-    auto tangent=[t](float a,float b,float c,float d){
-        const float t2=t*t;
-        return .5f*((-a+c)+2.f*(2.f*a-5.f*b+4.f*c-d)*t+3.f*(-a+3.f*b-3.f*c+d)*t2);
-    };
-    look={curve(p0.x,p1.x,p2.x,p3.x),curve(p0.y,p1.y,p2.y,p3.y),curve(p0.z,p1.z,p2.z,p3.z)};
-    const float dx=tangent(p0.x,p1.x,p2.x,p3.x),dz=tangent(p0.z,p1.z,p2.z,p3.z);
+    look=p1+(p2-p1)*t;
+    const float dx=p2.x-p1.x,dz=p2.z-p1.z;
     const float speed=std::max(.001f,std::sqrt(dx*dx+dz*dz));
     const float angle=std::atan2(-dx/speed,-dz/speed)*180.f/PI;
-    return {3.0f,angle,0.f};
+    const float cameraDistance=look.z>-16.f?3.0f:1.55f;
+    return {cameraDistance,angle,0.f};
 }
 
 class ImageView final : public QWidget {
@@ -458,7 +539,7 @@ private:
     QComboBox *resolution_ = nullptr, *renderer_ = nullptr, *quality_ = nullptr, *simdMode_ = nullptr;
     QSlider *distance_ = nullptr, *angle_ = nullptr, *elevation_ = nullptr, *fov_ = nullptr;
     QSlider *threads_ = nullptr, *hour_ = nullptr;
-    QCheckBox *fog_ = nullptr, *dof_ = nullptr, *edgeAa_ = nullptr, *videoPreview_ = nullptr;
+    QCheckBox *fog_ = nullptr, *dof_ = nullptr, *dust_ = nullptr, *edgeAa_ = nullptr, *videoPreview_ = nullptr;
     QPushButton *renderButton_ = nullptr, *homeButton_ = nullptr, *frontButton_ = nullptr, *rearButton_ = nullptr;
     VideoPreviewWindow* videoWindow_ = nullptr;
     QAction* benchmarkAction_ = nullptr;
@@ -556,6 +637,7 @@ private:
         const float distance=distance_->value()*.5f,angle=angle_->value()*PI/180.f;
         const float step=std::max(.15f,distance*.055f);
         const V forward{-std::sin(angle),0.f,-std::cos(angle)},right{std::cos(angle),0.f,-std::sin(angle)};
+        const V previous=cameraTarget_;
         switch(key) {
             case Qt::Key_Z: cameraTarget_=cameraTarget_+forward*step; break;
             case Qt::Key_S: cameraTarget_=cameraTarget_-forward*step; break;
@@ -564,6 +646,10 @@ private:
             case Qt::Key_R: cameraTarget_.y+=step; break;
             case Qt::Key_X: cameraTarget_.y-=step; break;
             default: return false;
+        }
+        if(isPripyatScene()){
+            std::lock_guard<std::mutex> guard(sceneMutex_);
+            cameraTarget_=clampSceneMotion(scene_,previous,cameraTarget_);
         }
         beginNavigation(); readSettings(); navigationIdleTimer_->start(450); return true;
     }
@@ -583,8 +669,8 @@ private:
         auto* navigationInfo = new QLabel(QStringLiteral("Navigation : glisser gauche pour tourner, glisser droit pour se déplacer, molette pour zoomer. AZERTY : Z/Q/S/D pour avancer/gauche/reculer/droite, R/X pour monter/descendre."), left);
         navigationInfo->setWordWrap(true);
         navigationInfo->setStyleSheet("color:#b8cbd8;font-size:11px;");
-        hourLabel_ = new QLabel(QStringLiteral("Heure : 12:00 — Midi"), left);
-        hour_ = slider(Qt::Horizontal, 0, 32, 12, left);
+        hourLabel_ = new QLabel(QStringLiteral("Heure : 08:00 — Matin"), left);
+        hour_ = slider(Qt::Horizontal, 0, 32, 4, left);
         auto* hourMarks = new QHBoxLayout;
         for (const auto& label : {QStringLiteral("Matin"), QStringLiteral("Midi"), QStringLiteral("Coucher"), QStringLiteral("Nuit")}) {
             auto* l = new QLabel(label, left); l->setStyleSheet("color:#d4e1eb"); hourMarks->addWidget(l);
@@ -616,8 +702,8 @@ private:
         renderer_->setItemData(1, QStringLiteral("DirectX 11 est disponible uniquement sous Windows."), Qt::ToolTipRole);
 #endif
         quality_ = new QComboBox(panel);
-        quality_->addItems({QStringLiteral("Natif — 100 %"), QStringLiteral("Équilibré — 87,5 % par axe"), QStringLiteral("Détails — 75 % par axe"), QStringLiteral("Rapide — 66,7 % par axe"), QStringLiteral("Très rapide — 50 % par axe"), QStringLiteral("FSAA 16× — motif stratifié 4×4")});
-        quality_->setCurrentIndex(0);
+        quality_->addItems({QStringLiteral("Natif — 100 %"), QStringLiteral("Équilibré — 87,5 % par axe"), QStringLiteral("Détails — 75 % par axe"), QStringLiteral("Rapide — 66,7 % par axe"), QStringLiteral("Très rapide — 50 % par axe"), QStringLiteral("FSAA 16× — motif stratifié 4×4"), QStringLiteral("Haute définition — 2× interne (SSAA CPU)")});
+        quality_->setCurrentIndex(6);
         controls->addWidget(new QLabel(QStringLiteral("Résolution de sortie"), panel)); controls->addWidget(resolution_);
         controls->addWidget(new QLabel(QStringLiteral("Moteur de rendu"), panel)); controls->addWidget(renderer_);
         controls->addWidget(new QLabel(QStringLiteral("Précision du calcul interne"), panel)); controls->addWidget(quality_);
@@ -646,8 +732,9 @@ private:
         auto* checks = new QHBoxLayout;
         fog_ = new QCheckBox(QStringLiteral("Brouillard atmosphérique"), panel);
         dof_ = new QCheckBox(QStringLiteral("DOF"), panel);
+        dust_ = new QCheckBox(QStringLiteral("Poussière dans les rais de lumière"), panel); dust_->setChecked(true);
         edgeAa_ = new QCheckBox(QStringLiteral("AA contours"), panel); edgeAa_->setChecked(true);
-        checks->addWidget(fog_); checks->addWidget(dof_); checks->addWidget(edgeAa_); checks->addStretch();
+        checks->addWidget(fog_); checks->addWidget(dof_); checks->addWidget(dust_); checks->addWidget(edgeAa_); checks->addStretch();
         controls->addLayout(checks);
         videoPreview_ = new QCheckBox(QStringLiteral("Mode vidéo — aperçu rotatif 800 × 600"), panel);
         controls->addWidget(videoPreview_);
@@ -704,6 +791,7 @@ private:
         }
         connect(fog_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
         connect(dof_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
+        connect(dust_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
         connect(edgeAa_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
         connect(simdMode_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) { readSettings(); requestRender(); });
         connect(videoPreview_, &QCheckBox::toggled, this, [this](bool enabled) {
@@ -849,14 +937,14 @@ private:
             else if(engineMode==2){for(unsigned n:threadCounts)passes.push_back({n,false,false});passes.push_back({0,false,true});}
             else for(unsigned n:threadCounts)for(bool avx:simdModes)passes.push_back({n,avx,false});
             const QString modeSummary = engineMode==1 ? QStringLiteral("DirectX 11 GPU")
-                : engineMode==2 ? QStringLiteral("Comparaison CPU x64 / GPU DirectX 11")
+                : engineMode==2 ? QStringLiteral("Chemins CPU / GPU (qualités différentes)")
                 : selectedMode == 3 ? QStringLiteral("Comparaison complète x64 / AVX2 + FMA3")
                 : selectedMode == 2 ? QStringLiteral("AVX2 + FMA3")
                 : selectedMode == 1 ? QStringLiteral("x64 standard")
                 : QStringLiteral("Mode choisi dans le moteur (%1)").arg(cfg.avx2 && avxAvailable ? QStringLiteral("AVX2 + FMA3") : QStringLiteral("x64 standard"));
             const QString threadSummary=engineMode==1?QStringLiteral("GPU"):([&] { QStringList v; for (unsigned n : threadCounts) v << QString::number(n); return v.join(','); }());
             const QString settingsSummary = QStringLiteral("engine=%1; output=%2x%3; internal=%4x%5; samples=%6; threads=%7; hour=%8; fog=%9; dof=%10; edge_aa=%11; camera=%12/%13/%14; fov=%15; arch=%16; logical_processors=%17")
-                .arg(engineMode==1?QStringLiteral("DirectX 11"):engineMode==2?QStringLiteral("CPU/GPU comparable"):QStringLiteral("CPU"))
+                .arg(engineMode==1?QStringLiteral("DirectX 11"):engineMode==2?QStringLiteral("CPU/GPU non équivalent"):QStringLiteral("CPU"))
                 .arg(cfg.outW).arg(cfg.outH).arg(cfg.renderW).arg(cfg.renderH).arg(cfg.samples).arg(threadSummary)
                 .arg(cfg.hourStep).arg(cfg.fog ? 1 : 0).arg(cfg.dof ? 1 : 0).arg(cfg.edgeAa ? 1 : 0)
                 .arg(cfg.distance, 0, 'f', 2).arg(cfg.angle, 0, 'f', 1).arg(cfg.elevation, 0, 'f', 1).arg(cfg.fov, 0, 'f', 1)
@@ -986,7 +1074,7 @@ private:
         fog_->setEnabled(!settings_.directX11);
         dof_->setEnabled(!settings_.directX11);
         const int qi = quality_->currentIndex();
-        const float scale = qi == 0 ? 1.f : qi == 1 ? .875f : qi == 2 ? .75f : qi == 3 ? (2.f / 3.f) : qi == 4 ? .5f : 1.f;
+        const float scale = qi == 6 && !settings_.directX11 ? 2.f : qi == 0 ? 1.f : qi == 1 ? .875f : qi == 2 ? .75f : qi == 3 ? (2.f / 3.f) : qi == 4 ? .5f : 1.f;
         settings_.renderW = int(std::lround(settings_.outW * scale));
         settings_.renderH = int(std::lround(settings_.outH * scale));
         settings_.samples = qi == 5 ? 16u : 1u;
@@ -1008,7 +1096,10 @@ private:
             V tourTarget{};
             const float progress=std::clamp(float(tourTimer_.elapsed())/90000.f,0.f,1.f);
             const CameraPose pose=guidedPripyatTour(progress,tourTarget);
-            cameraTarget_=tourTarget;
+            {
+                std::lock_guard<std::mutex> guard(sceneMutex_);
+                cameraTarget_=clampSceneMotion(scene_,cameraTarget_,tourTarget);
+            }
             settings_.distance=pose.distance;
             settings_.angle=pose.angle;
             settings_.elevation=pose.elevation;
@@ -1027,6 +1118,7 @@ private:
         settings_.hourStep = (video && isPripyatScene()) ? 6 : hour_->value();
         settings_.fog = fog_->isChecked();
         settings_.dof = dof_->isChecked() && !navigationActive_;
+        settings_.dust = dust_->isChecked();
         threadLabel_->setText(settings_.directX11
             ? QStringLiteral("DirectX 11 — affichage temps réel")
             : QStringLiteral("Threads CPU : %1 — SIMD : %2").arg(settings_.threads).arg(settings_.avx2 ? QStringLiteral("AVX2 + FMA3") : QStringLiteral("x64 standard")));
@@ -1090,13 +1182,11 @@ private:
             double shadowMs = 0;
             if (cfg.hourStep != shadowHour_) {
                 updateLighting(hour);
-                if (!cfg.directX11) {
-                    Stats lightStats; lightStats.avx2 = cfg.avx2;
-                    const auto start = std::chrono::steady_clock::now();
-                    shadows_ = buildShadow(scene_, lightStats);
-                    shadowMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
-                    shadowHour_ = cfg.hourStep;
-                }
+                Stats lightStats; lightStats.avx2 = cfg.avx2;
+                const auto start = std::chrono::steady_clock::now();
+                shadows_ = buildShadow(scene_, lightStats);
+                shadowMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+                shadowHour_ = cfg.hourStep;
             }
 
             std::vector<uint32_t> pixels(size_t(cfg.renderW) * cfg.renderH);
@@ -1113,13 +1203,6 @@ private:
                 std::wstring gpuError;
                 if (!renderDirectX11Preview(scene_, shadows_, cam, cfg.renderW, cfg.renderH, pixels, st, gpuError)) {
                     fallbackNotice = QStringLiteral("DirectX indisponible — rendu CPU de secours : ") + QString::fromWCharArray(gpuError.c_str());
-                    if (cfg.hourStep != shadowHour_) {
-                        Stats lightStats; lightStats.avx2 = cfg.avx2;
-                        const auto shadowStart = std::chrono::steady_clock::now();
-                        shadows_ = buildShadow(scene_, lightStats);
-                        shadowMs += std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - shadowStart).count();
-                        shadowHour_ = cfg.hourStep;
-                    }
                     st = m3d::render(scene_, shadows_, cam, cfg.renderW, cfg.renderH, pixels, cfg.threads, cfg.fog, generation_, token, samples, cfg.dof, cfg.avx2);
                 }
             } else {
@@ -1130,6 +1213,7 @@ private:
             if (cfg.renderW == cfg.outW * 2 && cfg.renderH == cfg.outH * 2) pixels = downsample2x(pixels, cfg.renderW, cfg.renderH, cfg.threads);
             else if (cfg.renderW != cfg.outW || cfg.renderH != cfg.outH) pixels = upscaleBilinear(pixels, cfg.renderW, cfg.renderH, cfg.outW, cfg.outH, cfg.threads);
             if (cfg.edgeAa) pixels = antialiasEdges4(pixels, cfg.outW, cfg.outH, cfg.threads, cfg.avx2);
+            if (cfg.dust && isPripyatScene()) applyDustOverlay(scene_, cam, cfg.outW, cfg.outH, cfg.hourStep, pixels);
             st.postMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - postStart).count();
             st.shadowMs = shadowMs;
             st.ms += st.postMs + shadowMs;

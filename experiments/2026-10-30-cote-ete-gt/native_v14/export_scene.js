@@ -9,7 +9,7 @@ function readPbrMipChain(filePath) {
   const b = fs.readFileSync(filePath);
   if (b.toString('ascii', 0, 8) !== 'M3DPBR1\0') throw new Error(`Matériau PBR invalide: ${filePath}`);
   const baseSize = b.readUInt32LE(8), count = b.readUInt32LE(12);
-  if (baseSize !== 512 || count !== 7) throw new Error(`Pyramide PBR attendue en 512/7 niveaux: ${filePath}`);
+  if (![512, 1024].includes(baseSize) || count !== Math.log2(baseSize / 8) + 1) throw new Error(`Pyramide PBR attendue en 512 ou 1024 px: ${filePath}`);
   let offset = 16;
   const maps = { color: [], normal: [], roughness: [] };
   for (let level = 0; level < count; level++) {
@@ -51,7 +51,7 @@ globalThis.__m3dAppendClassicCar = (objects, placement) => {
   globalThis.__m3dImportedCarTriangles = addGlbCar(objects, file, placement);
 };
 const optionalCar = process.env.M3D_SKIP_IMPORTED_CAR === '1' ? '' : 'globalThis.__m3dAppendClassicCar(objects, M3D_IMPORTED_CAR);';
-eval(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\n${sceneSource}\nmakeScene(); ${optionalCar} buildBVH(); const __mats = [...new Set(objects.map(o => o.mat))]; for (const id of __mats) materials.set(id, makeMips(id, 512)); globalThis.__scene = { objects, bvh, bvhRoot, sun, skyZenith, skyHorizon, pointLights, materials, mats: __mats, reflectivityPercent: M3D_MATERIAL_REFLECTIVITY_PERCENT, transmissionPercent: typeof M3D_MATERIAL_TRANSMISSION_PERCENT === "undefined" ? {} : M3D_MATERIAL_TRANSMISSION_PERCENT, refractiveIndex: typeof M3D_MATERIAL_IOR === "undefined" ? {} : M3D_MATERIAL_IOR, sceneLights: typeof M3D_SCENE_LIGHTS === "undefined" ? [] : M3D_SCENE_LIGHTS };`);
+eval(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\n${sceneSource}\nmakeScene(); ${optionalCar} buildBVH(); const __mats = [...new Set(objects.map(o => o.mat))]; for (const id of __mats) materials.set(id, makeMips(id, 1024)); globalThis.__scene = { objects, bvh, bvhRoot, sun, skyZenith, skyHorizon, pointLights, materials, mats: __mats, reflectivityPercent: M3D_MATERIAL_REFLECTIVITY_PERCENT, transmissionPercent: typeof M3D_MATERIAL_TRANSMISSION_PERCENT === "undefined" ? {} : M3D_MATERIAL_TRANSMISSION_PERCENT, refractiveIndex: typeof M3D_MATERIAL_IOR === "undefined" ? {} : M3D_MATERIAL_IOR, sceneLights: typeof M3D_SCENE_LIGHTS === "undefined" ? [] : M3D_SCENE_LIGHTS };`);
 const scene = globalThis.__scene;
 const objects = scene.objects;
 const bvh = scene.bvh;
@@ -107,7 +107,7 @@ function makeRapturePbr(kind) {
 }
 
 function makePripyatPbr(kind) {
-  const size=512, color=new Uint16Array(size*size), normal=new Uint16Array(size*size), roughness=new Uint16Array(size*size);
+  const size=1024, color=new Uint16Array(size*size), normal=new Uint16Array(size*size), roughness=new Uint16Array(size*size);
   const hash=(x,y)=>{let h=Math.imul((x|0)^0x9e3779b9,0x85ebca6b)^Math.imul((y|0)^0xc2b2ae35,0x27d4eb2f);h=Math.imul(h^(h>>>15),0x85ebca6b);return (h^(h>>>13))>>>0;};
   const noise=(x,y,shift,salt=0)=>hash((x>>shift)+salt,(y>>shift)-salt)/2147483647.5-1;
   const heightAt=(x,y)=>{
@@ -115,10 +115,13 @@ function makePripyatPbr(kind) {
     if(kind==='stone') return broad*.11+mid*.045+grain*.012;
     if(kind==='asphalt') return broad*.025+mid*.018+grain*.03;
     if(kind==='leaves') return broad*.08+mid*.12+grain*.04;
+    if(kind==='plaster') return broad*.16+mid*.08+grain*.025;
+    if(kind==='mural') return broad*.10+mid*.07+grain*.025;
     return broad*.10+mid*.055+grain*.018;
   };
   const palettes={
     concrete:[145,140,126], stone:[119,113,100], asphalt:[57,59,54],
+    plaster:[179,168,146], mural:[93,119,94],
     brick:[132,91,69], rust:[112,62,39], leaves:[55,76,43]
   };
   const base=palettes[kind]||[128,128,128];
@@ -146,6 +149,14 @@ function makePripyatPbr(kind) {
       variation-=streak*25;
     } else if(kind==='leaves'){
       variation+=Math.max(0,grain)*12;
+    } else if(kind==='plaster'){
+      const damp=Math.max(0,Math.sin(x*.035+noise(x,y,6)*1.8))*Math.max(0,Math.sin(y*.017));
+      const flake=hash(x>>2,y>>2)%100;
+      variation-=damp*23+(flake<7?13:0);
+    } else if(kind==='mural'){
+      const peeled=hash(x>>2,y>>2)%100;
+      variation+=Math.sin(x*.025)*7-Math.max(0,Math.sin(y*.019+noise(x,y,5)))*12;
+      if(peeled<9)variation-=36;
     }
     const tint=(k,amount)=>Math.max(0,Math.min(255,base[k]+variation*amount));
     color[i]=pack565(tint(0,1),tint(1,kind==='rust'?.76:kind==='leaves'?.95:.98),tint(2,kind==='rust'?.54:kind==='leaves'?.72:.88));
@@ -170,7 +181,7 @@ function makePripyatPbr(kind) {
   };
   return {color:makeMips(color),normal:makeMips(normal),roughness:makeMips(roughness)};
 }
-const generatedPripyatPbr=new Map(mats.filter(name=>['concrete','stone','asphalt','brick','rust','leaves'].includes(name)).map(name=>[name,makePripyatPbr(name)]));
+const generatedPripyatPbr=new Map(mats.filter(name=>['concrete','plaster','mural','stone','asphalt','brick','rust','leaves'].includes(name)).map(name=>[name,makePripyatPbr(name)]));
 for(const [name,pbr] of generatedPripyatPbr) scene.materials.set(name,{levels:pbr.color});
 
 const generatedPbr = new Map(['raptureStone', 'raptureBronze', 'raptureGlass'].map(name => [name, makeRapturePbr(name)]));
@@ -188,13 +199,12 @@ if (sceneLights.length > 256) throw new Error('Une scène ne peut pas définir p
 for (const [i, l] of sceneLights.entries()) {
   if (!Array.isArray(l) || l.length !== 8 || l.some(v => !Number.isFinite(v)) || l[3] <= 0 || l[3] > 10000 || l[4] < 0 || l[4] > 10000 || l.slice(5).some(v => v < 0 || v > 255)) throw new Error(`Lumière ponctuelle invalide à l’index ${i}.`);
 }
-let totalBytes = 40 + mats.length * 32 + objects.reduce((n, o) => n + 28 + floatCount(o) * 4, 0) + bvh.length * 40 + objects.length * 4
+const textureSize = Math.max(512, ...mats.map(id => scene.materials.get(id)?.levels?.[0]?.size || 512));
+// Each material stores a 24-byte name plus four bytes of optical metadata.
+let totalBytes = 40 + mats.length * 28 + objects.reduce((n, o) => n + 28 + floatCount(o) * 4, 0) + bvh.length * 40 + objects.length * 4
   + mats.reduce((n, id) => { const pbr = materialPbr(id); return n + pbrChainBytes(pbr?.normal) + pbrChainBytes(pbr?.roughness); }, 0)
   + 4 + sceneLights.length * 32;
-for (const id of mats) {
-  const size = 512;
-  for (let n = size; ; n >>= 1) { totalBytes += 4 + n * n * 2; if (n <= 8) break; }
-}
+for (const id of mats) { const tex=scene.materials.get(id); totalBytes += 4 + tex.levels.reduce((n,l)=>n+4+l.data.length*2,0); }
 const file = Buffer.allocUnsafe(totalBytes);
 let offset = 0;
 function putU8(v) { file.writeUInt8(v, offset); offset++; }
@@ -207,7 +217,7 @@ const vecs = (...vs) => vs.flat();
 
 file.fill(0, offset, offset + 8); file.write('M3D1314', offset, 'ascii'); offset += 8;
 putU32(4); putU32(objects.length); putU32(bvh.length); putI32(scene.bvhRoot);
-putU32(objects.length); putU32(mats.length); putU32(mats.length); putU32(512);
+putU32(objects.length); putU32(mats.length); putU32(mats.length); putU32(textureSize);
 for (const mat of mats) {
   const reflectivity = scene.reflectivityPercent[mat] ?? 0;
   if (!Number.isInteger(reflectivity) || reflectivity < 0 || reflectivity > 100) throw new Error(`Réflectivité invalide pour ${mat}: ${reflectivity}`);
