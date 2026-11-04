@@ -5,10 +5,11 @@
 module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
   const { box, capsule, ellipse, roundBox } = api;
   const scale = options.scale || 1;
-  const fabric = options.fabric || 'seatFabricClean';
-  const piping = options.trim || 'seatTrim';
+  const fabric = options.fabric || 'seatVinylBrown';
+  const piping = options.trim || fabric;
   const metal = options.metal || 'seatSteel';
   const wood = options.wood || 'seatWood';
+  const support = options.support || 'seatSupportPaint';
   const X = v => x + v * scale, Y = v => y + v * scale, Z = v => z + v * scale;
   const B = (x0,y0,z0,x1,y1,z1,r,mat) => roundBox(X(x0),Y(y0),Z(z0),X(x1),Y(y1),Z(z1),r*scale,mat);
   const C = (a,b,r,mat) => capsule([X(a[0]),Y(a[1]),Z(a[2])],[X(b[0]),Y(b[1]),Z(b[2])],r*scale,mat);
@@ -21,10 +22,10 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
   const components = [];
   let componentStart = objectStart;
   const componentMaterials = {
-    frame: ['seat_steel', 'seat_shell_wood'],
+    frame: ['seat_steel', 'seat_support_paint'],
     backrest: ['seat_shell_wood', 'seat_upholstery_cover', 'seat_stitched_trim', 'seat_foam_core'],
     seat_pan: ['seat_steel', 'seat_shell_wood', 'seat_upholstery_cover', 'seat_stitched_trim', 'seat_foam_core'],
-    armrests: ['seat_steel', 'seat_shell_wood']
+    armrests: ['seat_upholstery_cover', 'seat_steel']
   };
   const finishComponent = (id, role) => {
     if (componentStart === null) return;
@@ -33,18 +34,16 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
     componentStart = end;
   };
 
-  // Two upright wooden standards carry the seat and back. The row preview
-  // adds one continuous mounting tube shared by all three seats.
+  // The padded side panels carry the seat; no separate tall wooden stiles or foot bar.
   for (const side of [-1,1]) {
-    B(side*.255-.048,.055,.005,side*.255+.048,.70,.20,.028,wood);
-    // Metal hinge plates and pins remain visible at the folding joint.
-    Q(side*.197,.44,.055,side*.233,.51,.15,metal);
-    E(side*.236,.475,.115,.018,.043,.043,metal);
-    E(side*.252,.475,.115,.008,.022,.022,piping);
+    // Exposed lateral pivot hardware sits at the rear of the open seat pan.
+    Q(side*.190,.455,-.145,side*.224,.515,-.085,metal);
+    E(side*.378,.485,-.115,.012,.031,.031,metal);
+    E(side*.390,.485,-.115,.006,.016,.016,piping);
   }
-  C([-.215,.13,.10],[.215,.13,.10],.026,metal);
-  C([-.215,.39,.14],[.215,.39,.14],.022,metal);
-  C([-.215,.455,.095],[.215,.455,.095],.020,metal);
+  // One transverse turquoise rail and one central tube carry the open pan.
+  C([-.205,.405,.025],[.205,.405,.025],.022,support);
+  C([0,.405,.025],[0,.025,.025],.026,support);
   finishComponent('frame', 'rigid');
 
   // Thick back shell. Four narrow mouldings frame the upholstery instead of
@@ -68,7 +67,7 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
 
   // Seat board and padded face. The folded version stands upright in front of
   // the back, with a separate hinge axle, end caps and return-spring shapes.
-  if (folded) {
+  if (!options.seatPanMissing && folded) {
     B(-.255,.485,-.214,.255,.925,-.095,.035,wood);
     B(-.232,.515,-.238,.232,.895,-.161,.042,fabric);
     E(0,.705,-.215,.216,.174,.046,fabric);
@@ -82,37 +81,35 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
       C([side*.19,.45,-.09],[side*.19,.55,.015],.012,metal);
       C([side*.19,.55,.015],[side*.19,.64,-.09],.010,metal);
     }
-  } else {
-    B(-.265,.435,-.245,.265,.565,.205,.045,wood);
-    B(-.242,.48,-.254,.242,.605,.17,.050,fabric);
-    E(0,.560,-.045,.215,.052,.180,fabric);
+  } else if (!options.seatPanMissing) {
+    B(-.215,.435,-.245,.215,.565,.205,.045,wood);
+    B(-.195,.48,-.254,.195,.605,.17,.050,fabric);
+    E(0,.560,-.045,.185,.052,.180,fabric);
     for (const dx of [-.15,-.075,0,.075,.15]) {
       const z0=-.20,z1=.11;
       C([dx,padTopY(dx,z0,0,.560,-.045,.215,.180,.052),z0],[dx,padTopY(dx,z1,0,.560,-.045,.215,.180,.052),z1],.0045,piping);
     }
-    C([-.245,.455,.165],[.245,.455,.165],.020,metal);
+    C([-.205,.455,.165],[.205,.455,.165],.020,metal);
   }
-  finishComponent('seat_pan', 'hinged_rigid');
+  finishComponent('seat_pan', options.seatPanMissing ? 'broken_missing' : 'hinged_rigid');
 
-  // Two broad arm caps with a slight crown, underside trim, and fixing pins.
+  // Each armrest is the side montant: one broad padded volume that reaches
+  // the floor, runs back to the dossier, and has a softly rounded top.
   for (const side of [-1,1]) {
-    B(side*.315-.095,.665,-.12,side*.315+.095,.755,.245,.030,wood);
-    B(side*.315-.077,.735,-.095,side*.315+.077,.772,.215,.018,wood);
-    C([side*.315,.64,-.075],[side*.315,.68,-.075],.018,metal);
-    C([side*.315,.64,.205],[side*.315,.68,.205],.018,metal);
-    E(side*.315,.765,.05,.018,.008,.018,metal);
-    E(side*.315,.765,.18,.018,.008,.018,metal);
+    B(side*.280-.095,.035,-.285,side*.280+.095,.755,.285,.085,fabric);
   }
 
-  finishComponent('armrests', 'rigid');
+  finishComponent('armrests', 'padded_structural_side_panel');
   const objectEnd = Array.isArray(api.objects) ? api.objects.length : null;
-  const open = !folded;
+  const open = !folded && !options.seatPanMissing;
   return {
     schema: 'm3d-asset-instance-v1',
     asset: 'energetik-folding-cinema-seat',
     origin: [x, y, z],
     scale,
     folded,
+    seatPanMissing: !!options.seatPanMissing,
+    armrestIsSideMontant: true,
     objectRange: objectStart === null ? null : [objectStart, objectEnd],
     components,
     joints: [{
