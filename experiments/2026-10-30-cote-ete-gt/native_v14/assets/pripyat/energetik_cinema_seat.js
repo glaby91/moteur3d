@@ -7,7 +7,7 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
   const scale = options.scale || 1;
   const fabric = options.fabric || 'seatFabricClean';
   const piping = options.trim || 'seatTrim';
-  const metal = options.metal || 'metal';
+  const metal = options.metal || 'seatSteel';
   const wood = options.wood || 'seatWood';
   const X = v => x + v * scale, Y = v => y + v * scale, Z = v => z + v * scale;
   const B = (x0,y0,z0,x1,y1,z1,r,mat) => roundBox(X(x0),Y(y0),Z(z0),X(x1),Y(y1),Z(z1),r*scale,mat);
