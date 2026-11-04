@@ -144,7 +144,7 @@ float uvScaleForMaterial(const Scene& scene,uint32_t mat) {
     if(mat<scene.mat.size()){
         const std::string& name=scene.mat[mat].name;
         if(name=="seatSteel")return .95f;
-        if(name=="seatFabricClean"||name=="seatTrim")return .85f;
+        if(name=="seatFabricClean"||name=="seatTrim"||name=="seatVinylBrown"||name=="seatSupportPaint")return .85f;
         if(name=="seatWood")return .65f;
         if(name=="mural")return .075f;
         // The old 0.16 scale stretched the 1k surface maps over 6.25 m.
