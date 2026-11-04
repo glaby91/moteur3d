@@ -66,7 +66,8 @@ struct RenderSettings {
     bool navigationPreview = false;
     unsigned threads = std::max(1u, std::thread::hardware_concurrency()), samples = 1;
     bool avx2 = false;
-    bool directX11 = false;
+    bool directX11 = false, offlinePathTrace = false;
+    unsigned pathBounces = 3;
     int hourStep = 4;
     bool fog = false, dof = false, edgeAa = true, dust = true, videoPreview = false;
 };
@@ -547,6 +548,13 @@ public:
         resize(1480, 900);
         setMinimumSize(1000, 620);
         buildUi();
+        rendererCapabilities_ = detectRendererCapabilities();
+        if (rendererCapabilities_.dxrHardware && !rendererCapabilities_.dxrBackend)
+            rendererStatus_->setText(QStringLiteral("GPU compatible DXR détecté. Backend DXR du moteur absent pour l’instant : Auto rend sur CPU."));
+        else if (!rendererCapabilities_.dxrHardware)
+            rendererStatus_->setText(QStringLiteral("DXR non disponible : le rendu complet s’exécute sur CPU."));
+        else
+            rendererStatus_->setText(QStringLiteral("DXR disponible : sélection automatique au rendu."));
         loadSceneViewPresets();
         applySceneCameraPreset();
         readSettings();
@@ -593,6 +601,8 @@ private:
     ImageView* image_ = nullptr;
     QLabel *status_ = nullptr, *stats_ = nullptr, *hourLabel_ = nullptr, *threadLabel_ = nullptr;
     QComboBox *resolution_ = nullptr, *renderer_ = nullptr, *quality_ = nullptr, *simdMode_ = nullptr;
+    QLabel* rendererStatus_ = nullptr;
+    RendererCapabilities rendererCapabilities_{};
     QSlider *distance_ = nullptr, *angle_ = nullptr, *elevation_ = nullptr, *fov_ = nullptr;
     QSlider *threads_ = nullptr, *hour_ = nullptr;
     QCheckBox *fog_ = nullptr, *dof_ = nullptr, *dust_ = nullptr, *edgeAa_ = nullptr, *videoPreview_ = nullptr, *fastNavigation_ = nullptr;
@@ -836,18 +846,20 @@ private:
         resolution_ = new QComboBox(panel);
         resolution_->addItems({QStringLiteral("Vostro — 1366 × 768"), QStringLiteral("Full HD — 1920 × 1080"), QStringLiteral("1600 × 900"), QStringLiteral("1280 × 720"), QStringLiteral("4K UHD — 3840 × 2160")});
         renderer_ = new QComboBox(panel);
-        renderer_->addItems({QStringLiteral("CPU — ray tracing complet"), QStringLiteral("GPU — DirectX 11 (affichage temps réel)")});
+        renderer_->addItems({QStringLiteral("Auto — DXR si renderer disponible, sinon CPU"), QStringLiteral("CPU — ray tracing logiciel complet"), QStringLiteral("GPU — DirectX 11 (aperçu raster)")});
         renderer_->setCurrentIndex(0);
-        renderer_->setToolTip(QStringLiteral("DirectX 11 rasterise la scène sur le GPU pour une navigation réactive. Il reprend la carte d’ombres et les réglages de lumière du CPU; profondeur de champ, réflexions et réfraction restent simplifiées dans cet aperçu."));
+        renderer_->setToolTip(QStringLiteral("Le mode Auto utilise DXR seulement si le GPU et un backend DXR du moteur sont disponibles; sinon le rendu complet reste sur CPU. DirectX 11 est un aperçu raster optionnel."));
 #ifndef _WIN32
-        renderer_->setItemData(1, 0, Qt::UserRole - 1);
-        renderer_->setItemData(1, QStringLiteral("DirectX 11 est disponible uniquement sous Windows."), Qt::ToolTipRole);
+        renderer_->setItemData(2, 0, Qt::UserRole - 1);
+        renderer_->setItemData(2, QStringLiteral("DirectX 11 est disponible uniquement sous Windows."), Qt::ToolTipRole);
 #endif
         quality_ = new QComboBox(panel);
-        quality_->addItems({QStringLiteral("Natif — 100 %"), QStringLiteral("Équilibré — 87,5 % par axe"), QStringLiteral("Détails — 75 % par axe"), QStringLiteral("Rapide — 66,7 % par axe"), QStringLiteral("Très rapide — 50 % par axe"), QStringLiteral("FSAA 16× — motif stratifié 4×4"), QStringLiteral("Haute définition — 2× interne (SSAA CPU)")});
+        quality_->addItems({QStringLiteral("Natif — 100 %"), QStringLiteral("Équilibré — 87,5 % par axe"), QStringLiteral("Détails — 75 % par axe"), QStringLiteral("Rapide — 66,7 % par axe"), QStringLiteral("Très rapide — 50 % par axe"), QStringLiteral("FSAA 16× — motif stratifié 4×4"), QStringLiteral("Haute définition — 2× interne (SSAA CPU)"), QStringLiteral("CPU hors-ligne — 64 spp / 3 rebonds GI (expérimental)")});
+        quality_->setToolTip(QStringLiteral("Le mode CPU hors-ligne échantillonne chaque pixel de façon stochastique et calcule l’éclairage indirect diffus. Le temps de calcul augmente fortement avec la résolution."));
         quality_->setCurrentIndex(6);
         controls->addWidget(new QLabel(QStringLiteral("Résolution de sortie"), panel)); controls->addWidget(resolution_);
         controls->addWidget(new QLabel(QStringLiteral("Moteur de rendu"), panel)); controls->addWidget(renderer_);
+        rendererStatus_ = new QLabel(panel); rendererStatus_->setWordWrap(true); controls->addWidget(rendererStatus_);
         controls->addWidget(new QLabel(QStringLiteral("Précision du calcul interne"), panel)); controls->addWidget(quality_);
         sceneViewLabel_=new QLabel(QStringLiteral("Vues du Palais Energetik"),panel);
         sceneViewSelector_=new QComboBox(panel);
@@ -1235,17 +1247,19 @@ private:
         const bool video = videoPreview_->isChecked();
         settings_.outW = video ? 800 : ri == 0 ? 1366 : ri == 1 ? 1920 : ri == 2 ? 1600 : ri == 3 ? 1280 : 3840;
         settings_.outH = video ? 600 : ri == 0 ? 768 : ri == 1 ? 1080 : ri == 2 ? 900 : ri == 3 ? 720 : 2160;
-        settings_.directX11 = renderer_->currentIndex() == 1;
+        const int qi = quality_->currentIndex();
+        settings_.offlinePathTrace = qi == 7;
+        settings_.directX11 = renderer_->currentIndex() == 2 && !settings_.offlinePathTrace;
+        if (rendererStatus_ && qi == 7) rendererStatus_->setText(QStringLiteral("Mode hors-ligne CPU — 64 échantillons/pixel et 3 rebonds diffus."));
         if (navigationPreviewTimer_) navigationPreviewTimer_->setInterval(settings_.directX11 ? 50 : 350);
         threads_->setEnabled(!settings_.directX11);
         simdMode_->setEnabled(!settings_.directX11);
         fog_->setEnabled(!settings_.directX11);
         dof_->setEnabled(!settings_.directX11);
-        const int qi = quality_->currentIndex();
-        const float scale = qi == 6 && !settings_.directX11 ? 2.f : qi == 0 ? 1.f : qi == 1 ? .875f : qi == 2 ? .75f : qi == 3 ? (2.f / 3.f) : qi == 4 ? .5f : 1.f;
+        const float scale = qi == 7 ? 1.f : qi == 6 && !settings_.directX11 ? 2.f : qi == 0 ? 1.f : qi == 1 ? .875f : qi == 2 ? .75f : qi == 3 ? (2.f / 3.f) : qi == 4 ? .5f : 1.f;
         settings_.renderW = int(std::lround(settings_.outW * scale));
         settings_.renderH = int(std::lround(settings_.outH * scale));
-        settings_.samples = qi == 5 ? 16u : 1u;
+        settings_.samples = qi == 7 ? 64u : qi == 5 ? 16u : 1u;
         settings_.edgeAa = edgeAa_->isChecked();
         settings_.videoPreview = video;
         settings_.targetX=cameraTarget_.x; settings_.targetY=cameraTarget_.y; settings_.targetZ=cameraTarget_.z;
@@ -1257,7 +1271,7 @@ private:
             const float scale=std::min(1.f,std::min(previewW/std::max(1,settings_.outW),previewH/std::max(1,settings_.outH)));
             settings_.renderW=std::max(1,int(std::lround(settings_.outW*scale)));
             settings_.renderH=std::max(1,int(std::lround(settings_.outH*scale)));
-            settings_.samples=1u; settings_.edgeAa=false;
+            settings_.samples=1u; settings_.edgeAa=false; settings_.offlinePathTrace=false;
         }
         if(video && isPripyatScene()) {
             // Keep the guided preview at its advertised 800x600 resolution on
@@ -1265,7 +1279,7 @@ private:
             // 320x240 image into the full video window.
             settings_.renderW=800;
             settings_.renderH=600;
-            settings_.samples=1u; settings_.edgeAa=false;
+            settings_.samples=1u; settings_.edgeAa=false; settings_.offlinePathTrace=false;
         }
         settings_.distance = distance_->value() * .5f;
         settings_.angle = float(angle_->value());
@@ -1390,10 +1404,10 @@ private:
                 std::wstring gpuError;
                 if (!renderDirectX11Preview(scene_, shadows_, cam, cfg.renderW, cfg.renderH, pixels, st, gpuError)) {
                     fallbackNotice = QStringLiteral("DirectX indisponible — rendu CPU de secours : ") + QString::fromWCharArray(gpuError.c_str());
-                    st = m3d::render(scene_, shadows_, cam, cfg.renderW, cfg.renderH, pixels, cfg.threads, cfg.fog, generation_, token, samples, cfg.dof, cfg.avx2);
+                    st = m3d::render(scene_, shadows_, cam, cfg.renderW, cfg.renderH, pixels, cfg.threads, cfg.fog, generation_, token, samples, cfg.dof, cfg.avx2, cfg.offlinePathTrace, cfg.pathBounces);
                 }
             } else {
-                st = m3d::render(scene_, shadows_, cam, cfg.renderW, cfg.renderH, pixels, cfg.threads, cfg.fog, generation_, token, samples, cfg.dof, cfg.avx2);
+                st = m3d::render(scene_, shadows_, cam, cfg.renderW, cfg.renderH, pixels, cfg.threads, cfg.fog, generation_, token, samples, cfg.dof, cfg.avx2, cfg.offlinePathTrace, cfg.pathBounces);
             }
             if (generation_.load() != token) continue;
             const auto postStart = std::chrono::steady_clock::now();
