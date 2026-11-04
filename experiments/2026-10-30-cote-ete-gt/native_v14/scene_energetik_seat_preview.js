@@ -1,6 +1,6 @@
 // Three-seat Energetik cinema row for inspecting worn vinyl and the central mount.
 const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
-  concrete: 2, seatPreviewFloor: 2, seatVinylBrown: 28, seatSupportPaint: 12,
+  concrete: 2, seatPreviewFloor: 2, seatVinylBrown: 54, seatSupportPaint: 12,
   seatTrim: 3, metal: 18, seatSteel: 30, wood: 4, seatWood: 8
 });
 const M3D_SCENE_LIGHTS = [];
