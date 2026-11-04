@@ -90,4 +90,31 @@ V traceColor(const Scene&s,const ShadowMap&sm,const Camera&cam,const Ray&input,S
  Hit tail;closest(s,ray,tail,&st,true,ignore);st.rays++;if(tail.id==-1)st.sky++;else st.hits++;
  return result+shade(s,sm,cam,ray,tail,st,fog,true)*remaining;
 }
+V traceOfflineColor(const Scene&s,const ShadowMap&sm,const Camera&cam,const Ray&input,Stats&st,bool fog,uint64_t seed,unsigned maxBounces){
+ auto random01=[&](){seed+=0x9e3779b97f4a7c15ull;uint64_t z=seed;z=(z^(z>>30))*0xbf58476d1ce4e5b9ull;z=(z^(z>>27))*0x94d049bb133111ebull;z^=z>>31;return float((z>>40)&0xffffffu)/16777216.f;};
+ maxBounces=std::clamp(maxBounces,1u,8u);
+ V radiance{0,0,0},throughput{1,1,1};Ray ray=input;int ignore=-1;
+ for(unsigned bounce=0;bounce<=maxBounces;bounce++){
+  Hit hit;closest(s,ray,hit,&st,true,ignore);st.rays++;
+  if(hit.id==-1)st.sky++;else st.hits++;
+  if(hit.id>=0&&s.mat[hit.mat].transmissionPercent>0){const V transmitted=traceColor(s,sm,cam,ray,st,fog);radiance=radiance+V{throughput.x*transmitted.x,throughput.y*transmitted.y,throughput.z*transmitted.z};break;}
+  const V local=shade(s,sm,cam,ray,hit,st,fog,false);
+  radiance=radiance+V{throughput.x*local.x,throughput.y*local.y,throughput.z*local.z};
+  if(hit.id<0||bounce==maxBounces)break;
+  const int mi=hit.id==-2?groundMaterial(s,hit.p):hit.mat;
+  const Material& material=s.mat[mi];V uv;float footprint=1.f;
+  if(hit.id==-2)uv={hit.p.x*.34f,hit.p.z*.34f,.34f};
+  else{uv=uvAt(s,s.obj[hit.id],hit.p,hit.n);const float slope=std::max(.16f,std::abs(dot(hit.n,ray.d)));footprint=float(material.mip.empty()?512:material.mip.front().size)*hit.t*cam.pixelAngle/slope*uv.z;}
+  const V base=texSample(material,uv.x,uv.y,footprint,st);
+  const float diffuse=1.f-clampf(float(material.reflectivityPercent)*.01f,0.f,.98f);
+  throughput={throughput.x*clampf(base.x/255.f,0.f,1.f)*diffuse,throughput.y*clampf(base.y/255.f,0.f,1.f)*diffuse,throughput.z*clampf(base.z/255.f,0.f,1.f)*diffuse};
+  if(bounce>=2){const float survive=clampf(std::max({throughput.x,throughput.y,throughput.z}),.12f,.92f);if(random01()>survive)break;throughput=throughput/survive;}
+  const V n=dot(ray.d,hit.n)<0.f?hit.n:hit.n*-1.f;
+  const V axis=std::abs(n.y)<.9f?V{0,1,0}:V{1,0,0},tangent=norm(cross(axis,n)),bitangent=norm(cross(n,tangent));
+  const float u=random01(),v=random01(),rad=std::sqrt(u),phi=2.f*PI*v;
+  const V direction=norm(tangent*(rad*std::cos(phi))+bitangent*(rad*std::sin(phi))+n*std::sqrt(std::max(0.f,1.f-u)));
+  ignore=hit.id;ray={hit.p+n*.025f,direction};
+ }
+ return radiance;
+}
 }
