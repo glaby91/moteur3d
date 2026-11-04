@@ -1,6 +1,7 @@
-// Three-seat Energetik cinema row for inspecting the wood, upholstery and shared mount.
+// Three-seat Energetik cinema row for inspecting worn vinyl and the central mount.
 const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
-  concrete: 2, seatPreviewFloor: 2, seatFabricClean: 16, seatTrim: 3, metal: 18, seatSteel: 30, wood: 4, seatWood: 8
+  concrete: 2, seatPreviewFloor: 2, seatVinylBrown: 28, seatSupportPaint: 12,
+  seatTrim: 3, metal: 18, seatSteel: 30, wood: 4, seatWood: 8
 });
 const M3D_SCENE_LIGHTS = [];
 
@@ -9,22 +10,18 @@ function makeScene() {
   M3D_SCENE_LIGHTS.length = 0;
   box(-3, -0.14, -11, 3, -0.02, -5, 'seatPreviewFloor');
 
-  // Three adjacent chairs, centered on the default Qt camera.
+  // Three chairs match the approved reference; the first has its broken pan missing.
   const seatCenters = [-0.82, 0, 0.82];
-  for (const centerX of seatCenters) {
+  seatCenters.forEach((centerX, index) => {
     buildEnergetikCinemaSeat(
       { objects, box, capsule, ellipse, roundBox },
       centerX, 0, -8,
-      { folded: true, fabric: 'seatFabricClean' }
+      { folded: false, fabric: 'seatVinylBrown', trim: 'seatVinylBrown',
+        support: 'seatSupportPaint', seatPanMissing: index === 0 }
     );
-  }
+  });
 
-  // Shared tubular mounting rail and the visible wooden uprights of the row.
-  capsule([-1.25, 0.13, -7.73], [1.25, 0.13, -7.73], 0.038, 'seatSteel');
-  for (const postX of [-1.23, -0.41, 0.41, 1.23]) {
-    roundBox(postX - 0.045, 0.08, -7.81, postX + 0.045, 0.52, -7.72, 0.025, 'seatWood');
-  }
-
+  // Retain the approved neutral-warm fill; the material fix does not rely on extra lights.
   M3D_SCENE_LIGHTS.push([-1.1, 2.8, -9.2, 6.5, 0.8, 255, 235, 215]);
   M3D_SCENE_LIGHTS.push([1.6, 2.1, -6.5, 3.5, 0.55, 205, 216, 230]);
 }
