@@ -15,7 +15,7 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
   const E = (cx,cy,cz,rx,ry,rz,mat) => ellipse(X(cx),Y(cy),Z(cz),rx*scale,ry*scale,rz*scale,mat);
   const Q = (x0,y0,z0,x1,y1,z1,mat) => box(Math.min(X(x0),X(x1)),Math.min(Y(y0),Y(y1)),Math.min(Z(z0),Z(z1)),Math.max(X(x0),X(x1)),Math.max(Y(y0),Y(y1)),Math.max(Z(z0),Z(z1)),mat);
   const padFrontZ = (px,py,cx,cy,cz,rx,ry,rz) => cz-rz*Math.sqrt(Math.max(.035,1-((px-cx)/rx)**2-((py-cy)/ry)**2))-.002;
-  const padTopY = (px,pz,cx,cz,rx,rz,ry) => cy+ry*Math.sqrt(Math.max(.035,1-((px-cx)/rx)**2-((pz-cz)/rz)**2));
+  const padTopY = (px,pz,cx,cy,cz,rx,rz,ry) => cy+ry*Math.sqrt(Math.max(.035,1-((px-cx)/rx)**2-((pz-cz)/rz)**2));
   const folded = options.folded === true;
   const objectStart = Array.isArray(api.objects) ? api.objects.length : null;
   const components = [];
@@ -95,7 +95,7 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
     E(0,.560,-.045,.215,.052,.180,fabric);
     for (const dx of [-.15,-.075,0,.075,.15]) {
       const z0=-.20,z1=.11;
-      C([dx,padTopY(dx,z0,0,-.045,.215,.180,.052),z0],[dx,padTopY(dx,z1,0,-.045,.215,.180,.052),z1],.0045,piping);
+      C([dx,padTopY(dx,z0,0,.560,-.045,.215,.180,.052),z0],[dx,padTopY(dx,z1,0,.560,-.045,.215,.180,.052),z1],.0045,piping);
     }
     C([-.245,.455,.165],[.245,.455,.165],.020,metal);
   }
