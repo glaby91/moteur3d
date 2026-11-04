@@ -43,3 +43,7 @@ cmake --build build --config Release --parallel
 ```
 
 Le workflow Windows exporte la scène et l’ajoute au paquet de l’application. Le fichier binaire est généré à la compilation ; la source JavaScript reste modifiable.
+
+## Audit technique
+
+Voir [l’audit complet du moteur V14 et de la scène de Pripiat](AUDIT-MOTEUR3D-PRIPYAT-261104-0001.md) pour les constats sur l’export, les ombres DirectX, le benchmark, la mémoire raster et le périmètre historique de la scène.
