@@ -108,7 +108,9 @@ function makeRapturePbr(kind) {
 }
 
 function makePripyatPbr(kind) {
-  const size=1024, color=new Uint16Array(size*size), normal=new Uint16Array(size*size), roughness=new Uint16Array(size*size);
+  const size=Number(process.env.M3D_TEXTURE_SIZE || 1024);
+  if (![512,1024,2048].includes(size)) throw new Error(`Taille de texture M3D_TEXTURE_SIZE invalide: ${size} (512, 1024 ou 2048 attendus).`);
+  const color=new Uint16Array(size*size), normal=new Uint16Array(size*size), roughness=new Uint16Array(size*size);
   const hash=(x,y)=>{let h=Math.imul((x|0)^0x9e3779b9,0x85ebca6b)^Math.imul((y|0)^0xc2b2ae35,0x27d4eb2f);h=Math.imul(h^(h>>>15),0x85ebca6b);return (h^(h>>>13))>>>0;};
   const noise=(x,y,shift,salt=0)=>hash((x>>shift)+salt,(y>>shift)-salt)/2147483647.5-1;
   const heightAt=(x,y)=>{
