@@ -22,7 +22,7 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
   const components = [];
   let componentStart = objectStart;
   const componentMaterials = {
-    frame: ['seat_steel', 'seat_shell_wood'],
+    frame: ['seat_steel', 'seat_support_paint'],
     backrest: ['seat_shell_wood', 'seat_upholstery_cover', 'seat_stitched_trim', 'seat_foam_core'],
     seat_pan: ['seat_steel', 'seat_shell_wood', 'seat_upholstery_cover', 'seat_stitched_trim', 'seat_foam_core'],
     armrests: ['seat_upholstery_cover', 'seat_steel']
@@ -91,7 +91,7 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
     }
     C([-.205,.455,.165],[.205,.455,.165],.020,metal);
   }
-  finishComponent('seat_pan', 'hinged_rigid');
+  finishComponent('seat_pan', options.seatPanMissing ? 'broken_missing' : 'hinged_rigid');
 
   // Each armrest is the side montant: one broad padded volume that reaches
   // the floor, runs back to the dossier, and has a softly rounded top.
@@ -99,7 +99,7 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
     B(side*.280-.095,.035,-.285,side*.280+.095,.755,.285,.085,fabric);
   }
 
-  finishComponent('armrests', 'rigid');
+  finishComponent('armrests', 'padded_structural_side_panel');
   const objectEnd = Array.isArray(api.objects) ? api.objects.length : null;
   const open = !folded && !options.seatPanMissing;
   return {
