@@ -101,6 +101,61 @@ La galerie basse expose 92 vignettes de la série `palace-of-culture-sub`; les n
 
 Les 8 images de la galerie principale sont : `c29-Palace-culture-4-2545.jpg` (extérieur), `DSC2360-Edit.jpg` (intérieur), `c46-palace-culture-2452.jpg` (auditorium), `c15-Palace-culture-4-2406.jpg` (piscine), `DSC2487-Edit-Edit.jpg` (toiture), `c2-palace-culture-3880.jpg`, `DSC2418.jpg` (gymnase), `c70-Palace-culture-4-3861.jpg`. Les titres de cette galerie confirment explicitement extérieur, intérieur, auditorium, piscine, toit et gymnase.
 
+## Mapping individuel — lot 1 (photos 01–32)
+
+Les numéros suivent l’ordre des miniatures de la galerie basse. Les vues liées sont ouvertes en grand format (850 px côté long). « À confirmer » signale qu’un petit objet n’est pas identifiable avec assez de précision pour en faire un asset séparé.
+
+| N° | Fichier photo | Pièce / objets identifiés | État et décision de modélisation | Matériaux probables | Confiance |
+|---:|---|---|---|---|---|
+| 01 | `Palace-culture-4-2359-Edit-Edit.jpg` | Façade principale, enseigne de toit, travées et poteaux | Parement dégradé; baies largement ouvertes; végétation au pied | `prp_concrete_panel`, `prp_steel_rusted`, `prp_foliage` | Élevée |
+| 02 | `palace-culture-2356-Edit-2.jpg` | Façade d’angle, portique et coursive couverte | Vitrages absents, sol extérieur envahi de feuilles | béton, acier peint/rouillé, feuilles | Élevée |
+| 03 | `Palace-culture-4-3849.jpg` | Escalier intérieur, rampe, panneau rouge de propagande | Panneau appuyé contre la rampe; escalier sombre et poussiéreux | béton brut, acier peint, `prp_sign_paint` | Élevée |
+| 04 | `palace-culture-2370-Edit-2.jpg` | Salle traversante avec comptoirs/meubles bas et ouverture vers d’autres pièces | Plafond et parements cassés; mobilier incomplet; gravats au sol | béton, enduit, bois vieilli, gravats | Moyenne |
+| 05 | `Palace-culture-4-2419.jpg` | Gymnase, terrain peint, grandes baies, plafond à caissons | Lignes sportives très effacées; fenêtres sans vitrage; débris | sol sportif peint, béton, métal, feuilles | Élevée |
+| 06 | `palace-culture-2416-2.jpg` | Gymnase, bandeau mural avec lettrage cyrillique | Peinture murale écaillée; rails/éléments bas au pied du mur | enduit, peinture signalétique, métal rouillé | Élevée |
+| 07 | `Palace-culture-4-2361.jpg` | Gymnase depuis l’extrémité, poteaux et baies latérales | Sol jonché de fragments; lumière latérale forte | béton, revêtement sportif, verre brisé, débris | Élevée |
+| 08 | `Palace-culture-4-2429.jpg` | Gymnase, marquages du terrain, poutres/plafond | Usure et dépôts au sol; structure répétitive à modulariser | béton, peinture au sol, métal | Élevée |
+| 09 | `Palace-culture-4-2431.jpg` | Gymnase, lignes de jeu et côté des baies | Eau/salissures et feuilles dans la salle; équipement fixe non lisible | revêtement sportif, béton humide, débris | Élevée |
+| 10 | `Palace-culture-4-2434.jpg` | Vue en hauteur du gymnase et d’une plateforme/bordure longitudinale | Délimitation surélevée en bord de salle; vérifier si tribune ou passerelle sur une autre vue | béton, garde-corps métallique | Moyenne |
+| 11 | `Palace-culture-4-2439.jpg` | Extrémité du gymnase, équipement de jeu fixe au fond (structure de panier probable) | Structures de sport très dégradées; identification de l’équipement à vérifier | métal rouillé, sol peint, béton | Moyenne |
+| 12 | `Palace-culture-4-2442.jpg` | Gymnase, panneau vert mobile, slogan mural, ouverture de scène/alcôve | Panneau posé contre le mur; ne pas traiter comme mobilier permanent | panneau peint, béton, enduit | Élevée |
+| 13 | `palace-culture-2440.jpg` | Gymnase et cadre métallique autoportant au centre du terrain | But/cadre d’exercice possible, usage non déterminable sur cette vue | acier rouillé, sol sportif | Moyenne |
+| 14 | `palace-culture-2472.jpg` | Plaque verticale portant une consigne incendie en russe | Inscription rouge lisible, « При пожаре звонить 0-01 »; plaque montée sur mur clair | `prp_sign_paint`, enduit | Élevée |
+| 15 | `Palace-culture-4-2407.jpg` | Bassin rectangulaire intérieur, margelles et baies latérales | Bassin vide, dépôts et végétation; modéliser volume du bassin avant l’eau | carrelage, béton brut, enduit, feuilles | Élevée |
+| 16 | `Palace-culture-4-2408.jpg` | Piscine depuis l’extrémité, plages et bordures | Long bassin vide; débris et humidité; ouvertures sans vitrages | carrelage, béton, acier oxydé | Élevée |
+| 17 | `Palace-culture-4-2411.jpg` | Petit bassin / cuve attenante à la piscine, échelle métallique | Eau absente; échelle en place; carreaux et margelles cassés | carrelage céramique, béton, acier rouillé | Élevée |
+| 18 | `Palace-culture-4-2446.jpg` | Salle de rangement ou bibliothèque, rayonnages/armoires en bois | Meubles encore en place, panneaux manquants; contenu non lisible | `prp_wood_weathered`, enduit, béton | Élevée pour rayonnages; fonction à confirmer |
+| 19 | `Palace-culture-4-2473.jpg` | Petite salle à baie, radiateur sous fenêtre, débris et pièces de mobilier | Intérieur vidé et sombre; éléments au sol à séparer en quelques modules | béton/enduit, métal peint, bois | Élevée |
+| 20 | `Palace-culture-4-2475.jpg` | Façade latérale vue depuis un étage, fenêtres répétées | Cadres absents ou incomplets; végétation proche du bâtiment | béton, cadre métallique, feuillage | Élevée |
+| 21 | `Palace-culture-4-2480.jpg` | Végétation haute et sol extérieur forestier depuis le toit | Bouleaux/arbres dans l’emprise; feuilles au sol | `prp_bark_wet`, `prp_foliage`, terre/feuilles | Élevée |
+| 22 | `Palace-culture-4-2478-Edit-Edit.jpg` | Ossature de l’enseigne de toiture, lettres déposées/renversées | Treillis métallique exposé; peinture rouge/blanche écaillée | acier peint et rouillé, peinture d’enseigne | Élevée |
+| 23 | `Palace-culture-4-2483-Edit.jpg` | Lettre monumentale renversée et mécanisme/support de l’enseigne | Grande lettre métallique inclinée; rivets et renforts visibles | acier rouillé, peinture rouge/blanche | Élevée |
+| 24 | `Palace-culture-4-2489.jpg` | Enseigne cyrillique sur son treillis, vue côté arrière | Lettres volumétriques et structure en treillis; corrosion avancée | acier peint, rouille | Élevée |
+| 25 | `Palace-culture-4-2492.jpg` | Enseigne de toit et vue de la ville | Plusieurs lettres subsistent; treillis, toiture plate et végétation lointaine | acier rouillé, béton/toiture bitume | Élevée |
+| 26 | `palace-culture-2477-Edit.jpg` | Verso des grandes lettres d’enseigne, ossature porteuse | Lettres et montants arrière visibles; séparer lettres et treillis dans le modèle | acier peint écaillé, acier rouillé | Élevée |
+| 27 | `Palace-culture-4-2493-2.jpg` | Toiture plate, parapet et vue vers le bâtiment voisin | Membrane/étanchéité dégradée, végétation poussant autour | `prp_roof_bitumen`, béton, feuillage | Élevée |
+| 28 | `Palace-culture-4-2495.jpg` | Panorama de toiture, parapet, immeubles voisins et arbres | Toiture à grandes nappes; détails techniques trop petits pour identifier des équipements | bitume, béton, feuillage | Moyenne |
+| 29 | `Palace-culture-4-2496.jpg` | Petit local intérieur avec pictogramme noir de visage / masque peint sur porte ou panneau | Peinture murale écaillée; pictogramme distinctif à conserver comme decal/texture dédiée | enduit, peinture mate, bois ou métal du support à confirmer | Élevée pour le pictogramme |
+| 30 | `Palace-culture-4-3852.jpg` | Galerie intérieure, fresque colorée sur grand mur, baies, comptoirs/meubles bas | Fresque multicolore encore identifiable; plafond manquant et débris | enduit + texture de fresque dédiée, béton, bois | Élevée |
+| 31 | `Palace-culture-4-3854.jpg` | Amas d’objets et déchets : papiers, tissus, fragments, petits objets mélangés | Ne pas modéliser chaque fragment; créer plusieurs amas réutilisables, papiers distincts au premier plan | papier, tissu, bois, plâtre, verre, métal | Élevée pour amas; faible pour objets individuels |
+| 32 | `Palace-culture-4-3858.jpg` | Pièce sombre cadrée par une fenêtre sans châssis/vitrage, arbres dehors | Embrasure massive; intérieur presque vide; cadre et enduit fissurés | béton, enduit, verre absent, feuillage extérieur | Élevée |
+| 33 | `DSC2367-Edit.jpg` | Cour arrière, façade latérale et arbres entre les bâtiments | Sol extérieur envahi; façades préfabriquées à fenêtres répétées | béton, cadres absents, végétation | Élevée |
+| 34 | `c54-palace-culture-_DSC2383-4.jpg` | Petite salle ouverte sur une baie, fragments de vitrages au sol, morceau de mobilier | Châssis largement absent; gravats et verre au premier plan | béton, enduit, verre brisé, bois | Élevée |
+| 35 | `palace-culture-2385.jpg` | Plafond avec grand motif circulaire/rosette en relief | Décor architectural central à modéliser en géométrie ou normal map selon distance; enduit qui se détache | béton/enduit peint, poussière | Élevée |
+| 36 | `c61-palace-culture-_DSC2404-4.jpg` | Salle encombrée de tables/chaises ou éléments de mobilier renversés | Mobilier cassé empilé près d’une ouverture; identification chaise/table à garder générique | bois peint, acier, débris | Moyenne |
+| 37 | `palace-culture-2357-Edit-3-2.jpg` | Portique extérieur, poteaux et dessous d’auvent | Travées répétées, façade abîmée et végétation qui gagne l’accès | béton, enduit, feuillage | Élevée |
+| 38 | `palace-culture-2364-Edit.jpg` | Galerie extérieure couverte, grandes ouvertures, carreaux/dalles cassés | Longue circulation; gravats et végétation; manque des cadres de fenêtres | béton, carreaux, métal de châssis, feuilles | Élevée |
+| 39 | `palace-culture-2366-Edit-Edit-2.jpg` | Vue de la cour et du bâtiment au travers des arbres | Façade répétitive, arbres et sol envahi; repère de composition extérieure | béton, feuillage, sol végétal | Élevée |
+| 40 | `palace-culture-2369-Edit.jpg` | Salle longue à baies, bancs/assises périphériques et sol effondré | Plusieurs ouvertures vides; mobilier bas conservé le long du mur | béton, bois/métal de bancs à confirmer sur l’original, feuilles | Moyenne |
+| 41 | `palace-culture-2372.jpg` | Grande salle ouverte soutenue par poteaux, sol avec flaques | Béton brut, infiltrations et eau stagnante; lignes de structure lisibles | béton, `prp_puddle_water`, rouille locale | Élevée |
+| 42 | `palace-culture-2377-2.jpg` | Petite salle, fenêtre encadrée, plafonniers rectangulaires en grille | Plusieurs diffuseurs au plafond; intérieur vide et poussiéreux | béton/enduit, corps métal peint, diffuseurs opaques | Élevée |
+| 43 | `palace-culture-2378-2.jpg` | Salle avec baie, table ou mobilier bas renversé, plafonniers | Gravats autour du mobilier; fenêtres absentes | bois, acier, enduit, verre brisé | Moyenne |
+| 44 | `palace-culture-2379.jpg` | Amas de profilés, tôles et pièces métalliques de plafond ou mobilier | Éléments répétés en vrac; réutiliser en kit de débris métal plutôt que créer chaque pièce | métal rouillé, peinture écaillée | Moyenne |
+| 45 | `palace-culture-2380.jpg` | Couloir avec portes latérales, plafonds et sol encombrés | Fuite de perspective; gravats en tas au fond; portes boisées ou peintes | béton/enduit, bois peint, poussière | Élevée |
+| 46 | `palace-culture-2381.jpg` | Galerie longue côté fenêtres, parapet bas et amas de briques/débris | Baies sans vitrage; rupture localisée de maçonnerie et revêtement | béton, brique, verre, bois | Élevée |
+| 47 | `palace-culture-2401.jpg` | Structure de mobilier en bois brisée et fragments de chaises/tables | Pieds, traverses et panneaux cassés; à traiter comme un petit amas modulaire | `prp_wood_weathered`, métal, plâtre | Élevée |
+| 48 | `palace-culture-2402.jpg` | Autre amas de mobilier renversé, avec assises et cadres de bois | Meubles cassés, morceaux dispersés sur le sol; ne pas en déduire une armoire intacte | bois, tissu/vinyle possible, acier, gravats | Élevée |
+
 ## Statut du mapping
 
 - **Confirmé par photo ou légende :** enveloppe béton, grandes baies absentes, coursives, gymnase, terrain peint, fresques et portraits, scène, structure d’éclairage scénique, auditorium, piscine, toiture, imprimés et déchets visibles.
