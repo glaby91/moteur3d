@@ -71,7 +71,7 @@ jobs:
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: |
           M3D_SKIP_IMPORTED_CAR=1 node export_scene.js source_v1314.html scene_pripyat_central.bin scene_pripyat_central.js
-          M3D_SKIP_IMPORTED_CAR=1 node export_scene.js source_v1314.html scene_energetik_seat_preview.bin scene_energetik_seat_preview.js
+          M3D_SKIP_IMPORTED_CAR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_energetik_seat_preview.bin scene_energetik_seat_preview.js
 
       - name: Configure Qt application
         shell: bash
@@ -99,7 +99,7 @@ jobs:
       - name: Upload Windows application package
         uses: actions/upload-artifact@v4
         with:
-          name: Moteur3D-Qt-${{ matrix.os }}-build-261104-0011
+          name: Moteur3D-Qt-${{ matrix.os }}-build-261104-0012
           path: experiments/2026-10-30-cote-ete-gt/native_v14/dist
           if-no-files-found: error
           retention-days: 30
