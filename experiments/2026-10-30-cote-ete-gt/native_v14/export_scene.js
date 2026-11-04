@@ -119,10 +119,10 @@ function makePripyatPbr(kind) {
     if(kind==='plaster') return broad*.20+mid*.11+grain*.035;
     if(kind==='mural') return broad*.13+mid*.09+grain*.035;
     if(kind==='volcanicTuff') return broad*.18+mid*.12+grain*.055;
-    if(kind==='seatSteel') return Math.sin(x*.5+y*.3)*.0002;
+    if(kind==='seatSteel') return Math.sin(y*12+Math.sin(x*.15)*.45)*.0013+Math.sin(y*29)*.00035;
     if(kind==='seatPreviewFloor') return Math.sin(x*.13)*.0012+Math.cos(y*.11)*.0012+noise(x,y,9)*.0005;
-    if(kind==='seatWood') return Math.sin(y*.035+noise(x,y,8)*.25)*.012+Math.sin(y*.09)*.003;
-    if(kind==='seatFabricClean') return Math.sin(x*Math.PI/5)*.0018+Math.cos(y*Math.PI/5)*.0018;
+    if(kind==='seatWood') return Math.sin(y*.035+noise(x,y,8)*.25)*.020+Math.sin(y*.09)*.006+Math.sin(x*.021+noise(x,y,9)*.25)*.002;
+    if(kind==='seatFabricClean'||kind==='seatTrim') return Math.sin(x*Math.PI/5)*.003+Math.cos(y*Math.PI/5)*.003;
     if(kind==='wood'||kind==='bark') return broad*.07+Math.sin(y*.08+noise(x,y,5))* .035+grain*.018;
     if(kind==='seatFabric'||kind==='curtain') return broad*.045+mid*.035+grain*.018;
     if(kind==='cinemaScreen') return broad*.07+mid*.035+grain*.012;
@@ -135,12 +135,12 @@ function makePripyatPbr(kind) {
     plaster:[166,159,143], mural:[179,151,112], volcanicTuff:[145,96,79],
     brick:[132,91,69], rust:[112,62,39], leaves:[65,91,48],
     wood:[91,67,45], bark:[70,55,38], debris:[104,97,83], grass:[88,99,54],
-    seatFabric:[76,43,41], seatFabricClean:[126,43,53], seatWood:[112,77,48], seatSteel:[72,78,82], seatPreviewFloor:[132,129,120], seatTrim:[130,77,70], curtain:[69,43,42], cinemaScreen:[119,117,108]
+    seatFabric:[76,43,41], seatFabricClean:[109,37,44], seatWood:[110,73,46], seatSteel:[78,84,89], seatPreviewFloor:[132,129,120], seatTrim:[84,31,38], curtain:[69,43,42], cinemaScreen:[119,117,108]
   };
   const base=palettes[kind]||[128,128,128];
   for(let y=0;y<size;y++) for(let x=0;x<size;x++){
     const i=y*size+x, broad=noise(x,y,5), mid=noise(x,y,3), grain=noise(x,y,1);
-    let variation=(kind==='seatFabricClean'||kind==='seatWood'||kind==='seatSteel'||kind==='seatPreviewFloor')?0:broad*15+mid*10+grain*5;
+    let variation=(kind==='seatFabricClean'||kind==='seatWood'||kind==='seatSteel'||kind==='seatPreviewFloor'||kind==='seatTrim')?0:broad*15+mid*10+grain*5;
     if(kind==='concrete'){
       const wash=Math.max(0,Math.sin(x*.045+noise(x,y,6)*2.2))**10*(.35+.65*Math.max(0,noise(x,y,5)));
       const runoff=Math.max(0,Math.sin(x*.018+noise(x,y,5)*1.6))**12*(.35+.65*Math.max(0,noise(x,y,4)));
@@ -187,13 +187,18 @@ function makePripyatPbr(kind) {
       const peelField=noise(x,y,4)*.58+noise(x,y,2)*.30+grain*.12;
       variation-=Math.max(0,(peelField-.49)/.51)*(22+Math.max(0,mid)*25);
     } else if(kind==='seatSteel'){
-      variation+=Math.sin(x*.21)*.55+Math.sin(y*.17)*.45;
+      const brush=Math.sin(y*12+Math.sin(x*.15)*.45);
+      variation+=brush*3.1+Math.sin(y*29)*1.1+Math.sin(y*2.3+x*.09)*.7;
+    } else if(kind==='seatTrim'){
+      const wx=2*Math.PI*(x%10)/10, wy=2*Math.PI*(y%10)/10;
+      variation+=Math.cos(wx)*1.2+Math.cos(wy)*1.0;
+
     } else if(kind==='seatPreviewFloor'){
       variation+=Math.sin(x*.13)*1.8+Math.cos(y*.11)*1.5+Math.sin((x+y)*.07)*.8+noise(x,y,9)*.4;
     } else if(kind==='seatWood'){
       const grainLine=Math.sin(y*.035+noise(x,y,8)*.25);
-      variation+=grainLine*2.8+noise(x,y,9)*.7;
-      if(Math.abs(grainLine)>.97) variation-=3.5;
+      variation+=grainLine*4.2+noise(x,y,9)*1.1+Math.sin(y*.12)*.8;
+      if(Math.abs(grainLine)>.97) variation-=4.0;
     } else if(kind==='wood'||kind==='bark'){
       const grainLine=Math.abs(Math.sin(y*.08+noise(x,y,5)*1.2));
       variation-=Math.max(0,.25-grainLine)*24;
@@ -203,10 +208,10 @@ function makePripyatPbr(kind) {
       variation+=worn*18;
       if(hash(x>>2,y>>2)%100<2) variation-=15;
     } else if(kind==='seatFabricClean'){
-      // Fine warp-and-weft weave: no broad noise, stains, or stone-like surface relief.
+      // Fine warp-and-weft upholstery weave, distinct from the darker piping.
       const wx=2*Math.PI*(x%10)/10, wy=2*Math.PI*(y%10)/10;
       const interlace=((Math.floor(x/10)+Math.floor(y/10))&1)?-1:1;
-      variation+=Math.cos(wx)*1.8+Math.cos(wy)*1.5+interlace*.55;
+      variation+=Math.cos(wx)*2.4+Math.cos(wy)*2.0+interlace*.8;
     } else if(kind==='curtain'){
       const fold=Math.abs(Math.sin(x*.11+noise(x,y,5)*.7));
       variation-=Math.max(0,.24-fold)*17;
@@ -238,8 +243,8 @@ function makePripyatPbr(kind) {
     const dx=(heightAt(x+1,y)-heightAt(x-1,y))*1.2, dy=(heightAt(x,y+1)-heightAt(x,y-1))*1.2;
     const inv=1/Math.hypot(dx,dy,1);
     normal[i]=pack565(128-dx*inv*127,128-dy*inv*127,128+inv*127);
-    const roughBase=kind==='seatSteel'?176:kind==='seatPreviewFloor'?236:kind==='seatWood'?142:kind==='seatFabricClean'?238:kind==='asphalt'?232:kind==='leaves'||kind==='grass'?224:kind==='rust'?218:kind==='stone'?222:kind==='wood'||kind==='bark'?214:kind==='debris'?236:kind==='plaster'||kind==='mural'?228:kind==='volcanicTuff'?238:kind==='seatFabric'||kind==='curtain'?244:kind==='cinemaScreen'?228:232;
-    const r=roughBase+grain*10+Math.abs(mid)*4;
+    const roughBase=kind==='seatSteel'?170:kind==='seatPreviewFloor'?236:kind==='seatWood'?145:kind==='seatTrim'?232:kind==='seatFabricClean'?238:kind==='asphalt'?232:kind==='leaves'||kind==='grass'?224:kind==='rust'?218:kind==='stone'?222:kind==='wood'||kind==='bark'?214:kind==='debris'?236:kind==='plaster'||kind==='mural'?228:kind==='volcanicTuff'?238:kind==='seatFabric'||kind==='curtain'?244:kind==='cinemaScreen'?228:232;
+    const r=kind==='seatSteel'?169+Math.sin(y*12)*15+Math.sin(y*29)*4:kind==='seatWood'?145+Math.sin(y*.07)*7+grain*2:kind==='seatFabricClean'?238+Math.cos(x*Math.PI/5)*4:kind==='seatTrim'?232+Math.sin(y*Math.PI/5)*3:roughBase+grain*10+Math.abs(mid)*4;
     roughness[i]=pack565(r,r,r);
   }
   const makeMips=baseMap=>{
