@@ -5,7 +5,7 @@
 const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
   concrete: 2, plaster: 1, mural: 1, volcanicTuff: 3, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
   asphalt: 3, stone: 5, metal: 18, rust: 7, leaves: 2, grass: 1,
-  bark: 1, wood: 4, sign: 3, debris: 2, puddle: 28, seatFabric: 1, seatFabricClean: 1, seatTrim: 2, curtain: 1, cinemaScreen: 0
+  bark: 1, wood: 4, sign: 3, debris: 2, puddle: 28, seatFabric: 1, seatFabricClean: 1, seatVinylBrown: 28, seatSupportPaint: 12, seatTrim: 2, curtain: 1, cinemaScreen: 0
 });
 const M3D_MATERIAL_TRANSMISSION_PERCENT = Object.freeze({ glass: 62 });
 const M3D_MATERIAL_IOR = Object.freeze({ glass: 1.48 });
@@ -338,7 +338,7 @@ function makeScene() {
       box(bankLeft,0.04,z-0.38,bankRight,platformTop,z+0.42,(row%4===0)?'concrete':'stone');
       for(let seat=0;seat<seatsPerBank;seat++){
         const x=center+(seat-(seatsPerBank-1)*0.5)*seatPitch;
-        buildEnergetikCinemaSeat({ box, capsule, ellipse, roundBox }, x, platformTop, z, { folded: true });
+        buildEnergetikCinemaSeat({ box, capsule, ellipse, roundBox }, x, platformTop, z, { folded: false, fabric: 'seatVinylBrown', trim: 'seatVinylBrown', support: 'seatSupportPaint' });
       }
     }
   }
