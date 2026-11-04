@@ -1,25 +1,32 @@
 # Rendu CPU hors-ligne
 
-Le renderer CPU reste le chemin complet et autonome du moteur. Il ne nécessite ni DirectX, ni GPU. Le mode **CPU hors-ligne** ajouté dans V14 est un premier renderer stochastique : il échantillonne les pixels aléatoirement, prend en charge la profondeur de champ et estime l'éclairage indirect diffus par plusieurs rebonds. Il vise d’abord les images fixes. Le rendu hors-ligne des séquences d’animation reste à intégrer.
+Le renderer CPU reste autonome et complet. Il ne nécessite ni DirectX, ni GPU. Le mode **CPU hors-ligne PBR/HDR** cible d’abord les images fixes ; l’export par lots des animations reste à intégrer.
 
-## État de cette première étape
+## Fonctions intégrées
 
-- Le CPU calcule les intersections avec le BVH existant et peut utiliser les threads configurés.
-- Le préréglage de qualité hors-ligne lance 64 échantillons par pixel et 3 rebonds diffus, avec arrêt anticipé par roulette russe.
-- Le rendu principal, les reflets directs et les matériaux transparents continuent d'utiliser le shading V14 existant.
-- Les textures actuelles restent en RGB 8 bits et le framebuffer de sortie reste en RGB 8 bits.
-- Le modèle de matériaux et l'estimation de l'éclairage indirect ne constituent pas encore un renderer PBR photoréaliste. Le mode est expérimental et peut être lent en haute résolution.
+- 64 échantillons stochastiques par pixel, jusqu’à 3 rebonds diffus, avec roulette russe.
+- BRDF PBR de première passe : distribution GGX, Fresnel Schlick, rugosité issue de la carte existante et métallicité estimée depuis `reflectivityPercent`.
+- Décodage sRGB vers linéaire pour les couleurs des textures et accumulation flottante HDR pendant le calcul.
+- Tone mapping ACES et encodage sRGB à l’affichage.
+- Filtre bilatéral CPU 5×5 après rendu, activé uniquement pour ce mode.
+
+## Limites actuelles
+
+- Les textures de couleur source restent RGB565/RGB 8 bits ; il n’y a pas encore de carte de métallicité dédiée.
+- La métallicité, l’émission et certaines propriétés de matière sont encore estimées à partir des noms de matériaux et des anciens champs de scène.
+- Le framebuffer affiché est 8 bits après tone mapping ; l’export OpenEXR ou HDR n’est pas encore ajouté.
+- Le débruiteur utilise couleur et luminance, sans guides de normales ou d’albédo. Il peut lisser les détails fins.
+- Le modèle reste expérimental. Il ne garantit pas encore une qualité photo sur toutes les scènes ; les textures, les lumières surfaciques, les matériaux et l’échantillonnage demandent encore du travail.
 
 ## Détection DXR
 
-Au lancement sous Windows, le moteur interroge D3D12 et le niveau DXR exposé par l'adaptateur. Cette détection ne déclenche pas à elle seule un rendu GPU : la sélection automatique reste CPU tant que le backend DXR propre au moteur n'existe pas. L'aperçu DirectX 11 raster reste une option séparée. Hors Windows, le renderer CPU reste disponible sans dépendance à DirectX.
+Au lancement sous Windows, le moteur interroge D3D12 et le niveau DXR exposé par l’adaptateur. Cette détection ne sélectionne pas un renderer GPU tant que le backend DXR du moteur n’existe pas : le mode Auto utilise donc le CPU. L’aperçu DirectX 11 raster est une option séparée. Le renderer CPU fonctionne aussi hors Windows.
 
-## Étapes graphiques suivantes
+## Étapes suivantes
 
-1. Passer les textures et calculs d'éclairage dans un espace linéaire à haute dynamique et ajouter l'export HDR.
-2. Définir un modèle PBR cohérent (albédo, métallicité, rugosité, normales et émission) partagé par tous les renderers.
-3. Ajouter l'échantillonnage des sources lumineuses, une meilleure gestion de la réfraction et un débruiteur pour réduire le nombre d'échantillons nécessaires.
-4. Ajouter un backend DXR qui consomme les mêmes scènes et paramètres, en gardant le renderer CPU comme référence et solution complète.
-5. Rendre les images et animations par lots, avec progression, reprise et export d'images sans limite temps réel.
+1. Ajouter des paramètres matériaux explicites et des cartes métallicité/rugosité haute résolution.
+2. Échantillonner les lumières surfaciques et l’environnement avec une stratégie de bruit faible.
+3. Améliorer le débruiteur avec des guides albédo/normales.
+4. Ajouter un export HDR/EXR et le rendu hors-ligne par lots des séquences d’animation.
+5. Ajouter un backend DXR partageant les mêmes matériaux, en gardant le CPU comme solution complète.
 
-Le format de scène et le chemin CPU restent utilisables quand aucun GPU compatible n'est présent.

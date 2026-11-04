@@ -45,4 +45,17 @@ std::vector<uint32_t> bloomGlow(const std::vector<uint32_t>&src,int w,int h,unsi
  parallel([&](int y){for(int x=0;x<w;x++){RGB sum;for(int k=-radius;k<=radius;k++){int sy=std::clamp(y+k,0,h-1),weight=radius+1-std::abs(k);const RGB q=horizontal[size_t(sy)*w+x];sum.r+=q.r*weight;sum.g+=q.g*weight;sum.b+=q.b*weight;}const RGB q={sum.r/weightSum,sum.g/weightSum,sum.b/weightSum};const uint32_t p=src[size_t(y)*w+x];auto add=[&](int shift,float glow){return std::min(255.f,float((p>>shift)&255)+glow*strength);};out[size_t(y)*w+x]=0xff000000u|(uint32_t(add(16,q.r))<<16)|(uint32_t(add(8,q.g))<<8)|uint32_t(add(0,q.b));}},h);
  return out;
 }
+std::vector<uint32_t> denoiseBilateral(const std::vector<uint32_t>&src,int w,int h,unsigned threads){
+ if(w<=0||h<=0||src.size()<size_t(w)*size_t(h))return src;
+ std::vector<uint32_t>out(size_t(w)*size_t(h));std::atomic<int>nextRow{0};
+ const float spatial[5]={.1353f,.6065f,1.f,.6065f,.1353f};const float sigma=20.f,invVariance=1.f/(2.f*sigma*sigma);
+ auto luma=[](uint32_t p){return .2126f*float((p>>16)&255)+.7152f*float((p>>8)&255)+.0722f*float(p&255);};
+ auto worker=[&](){for(;;){const int y=nextRow.fetch_add(1);if(y>=h)break;for(int x=0;x<w;x++){
+  const uint32_t center=src[size_t(y)*w+x];const float centerLuma=luma(center);float sumR=0,sumG=0,sumB=0,sumW=0;
+  for(int dy=-2;dy<=2;dy++){const int sy=std::clamp(y+dy,0,h-1);for(int dx=-2;dx<=2;dx++){const int sx=std::clamp(x+dx,0,w-1);const uint32_t p=src[size_t(sy)*w+sx];const float dl=luma(p)-centerLuma;const float weight=spatial[dy+2]*spatial[dx+2]*std::exp(-dl*dl*invVariance);sumR+=float((p>>16)&255)*weight;sumG+=float((p>>8)&255)*weight;sumB+=float(p&255)*weight;sumW+=weight;}}
+  out[size_t(y)*w+x]=0xff000000u|(uint32_t(std::lround(sumR/sumW))<<16)|(uint32_t(std::lround(sumG/sumW))<<8)|uint32_t(std::lround(sumB/sumW));
+ }}};
+ threads=std::max(1u,std::min(threads,unsigned(h)));std::vector<std::thread>pool;pool.reserve(threads>0?threads-1:0);for(unsigned i=1;i<threads;i++)pool.emplace_back(worker);worker();for(auto&t:pool)t.join();return out;
+}
+
 }
