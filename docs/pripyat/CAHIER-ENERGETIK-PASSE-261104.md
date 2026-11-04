@@ -7,6 +7,16 @@
 - [Maquette extérieure Skeiron — Google Arts & Culture](https://artsandculture.google.com/story/palace-of-culture-energetik-skeiron/ggUh4kq6wkwB7w?hl=en) : volume général, implantation, toiture, chemins et végétation alentour.
 - [Galerie du Palais Energetik — Chernobyl Gallery](https://www.chernobylgallery.com/galleries/palace-of-culture/) et captures fournies par l’utilisateur : façade, foyer, fresque, gymnase, auditorium, toiture et état d’abandon.
 - Répartition des salles ci-dessous : indications fournies par l’utilisateur. Les photos guident l’aspect et les ouvertures ; elles ne donnent pas un plan complet coté.
+- [PhotoBuildings — bâtiment de Pripiat](https://photobuildings.com/object/80424/?lang=ru) et [fiche du projet type](https://photobuildings.com/projects/2736?lang=en) : identifient la série 2С-06-9/70 et documentent le bâtiment et ses variantes.
+- [TipDoc — projet 2С-06-9/70](https://tipdoc.ru/catalog/14090/1640132/) et [Proekt.sx — dossier de réfection](https://proekt.sx/tip/dk781-detail.html) : pistes pour les dessins techniques; les fiches distinguent le projet type, le passeport résumé et le dossier de réfection.
+- [Chernobyl.one — galerie Energetik](https://www.chernobyl.one/pripyat-palace-of-culture-energetik/) : vues de l’état intérieur, du théâtre, du gymnase, des fresques et des autres espaces.
+
+## Référence technique et niveau de confiance
+
+- Le bâtiment de Pripiat est référencé sous le projet type **2С-06-9/70**. La fiche générique du projet décrit un club avec salle de 800 places, trois niveaux et murs extérieurs en brique; la fiche du bâtiment de Pripiat donne deux niveaux. Ces fiches ne suffisent donc pas à reconstruire seules les adaptations locales.
+- Le dossier Proekt.sx décrit une réfection d’un bâtiment utilisant ce projet type : 30,4 × 81,3 m, auditorium de 720 places et salle de 24 × 18 m. Ces dimensions sont un repère de comparaison, pas encore une cote validée pour Energetik à Pripiat.
+- Le matériau propre à reproduire dans la salle cinéma est le **tuf volcanique rouge/rose** : des fragments de ce parement sont signalés comme encore visibles à l’intérieur. Pour l’extérieur, la finition en **marbre blanc** est documentée. Les ossatures, dalles alvéolaires, briques et vitrages décrits par les fiches génériques restent à confirmer sur les plans ou photos du bâtiment précis.
+- TipDoc signale que les dessins PDF sont disponibles mais vend séparément le passeport résumé et le projet complet; Proekt.sx propose une documentation de réfection payante. Aucun fichier de plan coté propre à la variante de Pripiat n’a encore été obtenu. Les proportions de la scène restent donc des estimations photographiques jusqu’à réception d’un plan ou d’un relevé.
 
 ## Organisation de référence
 
