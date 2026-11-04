@@ -75,7 +75,7 @@ function makeScene() {
   box(-43.0,11.25,-42.5,18.4,11.75,-20.1,'stone');
 
   // Projecting plinth, pilasters, capitals and layered cornice give the civic
-  // façade real relief, with the curtain wall recessed behind the stonework.
+  // façade real relief. The large bays stay open: the reference facade has no glazing.
   box(-48.0,0.0,-20.55,26.9,0.72,-19.25,'stone');
   box(-47.0,8.7,-20.48,25.6,9.02,-19.42,'concrete');
   box(-47.6,9.02,-20.74,26.2,9.28,-19.26,'stone');
@@ -138,15 +138,16 @@ function makeScene() {
   }
   floorPlate(3.25); floorPlate(6.35);
 
-  // Large curtain wall and open central doors: sunlight can reach the foyer.
-  box(-46.5,0.8,-19.95,-3.2,8.55,-19.72,'glass');
-  box(3.2,0.8,-19.95,25.3,8.55,-19.72,'glass');
-  box(-3.0,2.25,-19.94,3.0,8.5,-19.72,'glass');
-  for(let x=-45.8;x<25;x+=2.65) box(x,0.92,-19.68,x+0.08,8.42,-19.62,'metal');
-  for(let y=2.2;y<8.4;y+=2.15) box(-46.3,y,-19.67,25.1,y+0.07,-19.62,'metal');
-  // Replace several lower panes with dark openings for an abandoned, walk-in entrance.
-  for(const [x,w] of [[-8.6,2.1],[5.3,2.0],[15.9,2.4]])
-    box(x,0.22,-19.66,x+w,2.12,-19.60,'windowdark');
+  // Open facade bays expose the deep galleries and interior structure, not glass.
+  // Keep only damaged railings at the balcony edges, with irregular missing sections.
+  for (const y of [3.28, 6.38]) {
+    box(-45.0,y,-19.18,24.6,y+0.075,-19.06,'rust');
+    box(-45.0,y+0.88,-19.18,24.6,y+0.96,-19.06,'rust');
+    for (let x=-44.4; x<24.2; x+=0.68) {
+      if (Math.sin(x*1.71+y*2.3)>0.82) continue; // missing balusters in the ruin
+      capsule([x,y+0.08,-19.12],[x,y+0.86,-19.12],0.027,'rust');
+    }
+  }
 
   // Rear and end glazing, deep reveals, and long horizontal concrete bands.
   for(let x=-45.5;x<18;x+=6.2){

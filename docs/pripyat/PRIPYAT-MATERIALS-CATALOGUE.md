@@ -9,7 +9,7 @@ La scène V14 emploie la palette intégrée et les cartes procédurales du moteu
 | Béton vieilli | `concrete` | Façades, piliers, bordures | 2 % / 0 % |
 | Pierre et dalles | `stone` | Place, marches, appuis | 5 % / 0 % |
 | Asphalte | `asphalt` | Chaussée et fond | 3 % / 0 % |
-| Vitrage | `glass` | Entrées et galeries | 4 % / 62 %, IOR 1,48 |
+| Vitrage | `glass` | Ouvertures où les photos montrent encore du verre ; pas sur la grande façade ouverte | 4 % / 62 %, IOR 1,48 |
 | Fenêtre sombre | `windowdark` | Vitrages cassés ou opaques | 1 % / 0 % |
 | Fenêtre éclairée | `windowlit` | Quelques fenêtres de repère | 3 % / 0 % |
 | Métal peint | `metal` | Lampadaires, ferrures | 18 % / 0 % |

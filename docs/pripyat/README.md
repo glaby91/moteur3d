@@ -14,12 +14,14 @@ Les photos documentaires servent à vérifier la silhouette, les façades et l�
 
 Voir [les références visuelles du bâtiment et la passe haute définition](ENERGETIK-REFERENCES-ET-QUALITE.md) pour les vues retenues, leur usage précis et l’état des améliorations.
 
+Le cahier des exigences, les niveaux communiqués, les références prioritaires et la validation restante sont suivis dans [Cahier de reconstruction Energetik](CAHIER-ENERGETIK-PASSE-261104.md).
+
 ## Démo visée
 
 Le parcours automatique dure **1 min 30** :
 
 1. approche extérieure du bâtiment sous un soleil matinal franc ;
-2. entrée par le foyer vitré ;
+2. entrée par les travées ouvertes de la façade ;
 3. découverte du foyer, de l’auditorium et des pièces modélisées ;
 4. passage par les niveaux et la cage d’escalier ;
 5. sortie sur le toit, avec une pause finale d’environ 11 secondes face au soleil.
@@ -30,11 +32,11 @@ Le moteur affiche les images à sa cadence de rendu. La durée est pilotée sur 
 
 Source : `experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js`.
 
-Le modèle répartit le travail sur des éléments visibles à l’échelle de la visite : volume long et bas, tour d’escalier, colonnade, façade vitrée, foyer traversant, salles, dalles d’étage, escalier, auditorium et toiture accessible. Cette passe ajoute du relief à la façade, un socle, des pilastres et corniches, le lettrage d’entrée, des murs à portes ouvertes, des peintures murales, des éclats de vitrage et des rampes d’escalier. La géométrie est reconstruite pour permettre la caméra intérieure ; ce n’est pas un relevé complet de chaque pièce historique.
+Le modèle répartit le travail sur des éléments visibles à l’échelle de la visite : volume long et bas, tour d’escalier, colonnade, façade ouverte sans vitres, foyer traversant, salles, dalles d’étage, escalier, auditorium et toiture accessible. La façade doit montrer ses grandes travées ouvertes, ses piliers et ses coursives ; les photos fournies ne montrent pas de vitrages sur cette façade. Le parcours intérieur s’appuie sur la répartition communiquée : stand de tir, réserves et archives au sous-sol ; foyer, théâtre/concert, cinéma et aile sportive au rez-de-chaussée ; mezzanine, danse/discothèque Edison-2 et bibliothèque au premier étage ; salles de clubs et accès à la terrasse au niveau supérieur. Les positions exactes des pièces et les connexions non visibles dans les photos restent des interprétations. La géométrie est reconstruite pour permettre la caméra intérieure ; ce n’est pas un relevé complet de chaque pièce historique.
 
 L’exporteur produit les textures couleur de tous les matériaux utilisés par Energetik en 1024 × 1024 avec mipmaps jusqu’à 8 × 8. Il ajoute des cartes de normale et de rugosité pour le béton, l’enduit, les peintures murales, la pierre, l’asphalte, la brique, la rouille et les feuilles. Le mode **Haute définition — 2× interne** calcule en 2732 × 1536 puis réduit vers la sortie Vostro 1366 × 768 ; cela multiplie approximativement par quatre les pixels calculés et s’applique au rendu CPU. DirectX reste à la résolution de sortie pour préserver la cadence de l’aperçu.
 
-L’éclairage démarre à 08:00 et une option activée par défaut ajoute quelques poussières visibles dans les rais lumineux. L’intensité des textures, la fidélité des volumes et le rendu DirectX doivent encore être validés sur l’exécutable Windows et comparés visuellement aux photos ; la reconstruction n’est pas une restitution photogrammétrique.
+L’éclairage démarre à 08:00 et une option activée par défaut ajoute quelques poussières visibles dans les rais lumineux. Les textures procédurales ont des couches d’usure, coulures, éclats de peinture, variations de rugosité et pigments délavés pour la fresque. Le mode DirectX échantillonne désormais les cartes de rugosité et de normales avec les mipmaps disponibles. Ces changements doivent encore être validés sur l’exécutable Windows et comparés visuellement aux photos ; la reconstruction n’est pas une restitution photogrammétrique.
 
 ## Export et compilation
 

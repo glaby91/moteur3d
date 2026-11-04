@@ -106,6 +106,9 @@ Ces changements sont postérieurs à l’audit initial. Les limites notées comm
 | A6 — enveloppe BVH non vérifiée | Corrigé dans le code | Le chargeur contrôle maintenant que chaque feuille contient les objets et que les parents contiennent leurs enfants, en plus des contrôles de graphe existants. |
 | Trajet caméra traversant des cloisons | Corrigé dans le code, à valider sur Windows | Le parcours a été redessiné sur les portes modélisées ; les mouvements manuels et guidés s’arrêtent sur les géométries opaques. |
 | Qualité des textures et finesse de sortie | Amélioré, comparaison visuelle à faire | Les matériaux Energetik sont exportés en 1024 px ; le nouveau préréglage CPU calcule à 2× la résolution de sortie et réduit l’image. |
+| DirectX ignorait les cartes PBR | Corrigé dans le code, à valider sur Windows | Le shader raster échantillonne les cartes de normale et de rugosité ; les cartes couleur, normale et rugosité sont envoyées avec les mipmaps disponibles. La normale est transformée depuis l’espace tangent à partir des dérivées écran. |
+| La façade principale est modélisée vitrée | Corrigé dans la source de scène, à valider sur Windows | Les panneaux de verre ont été retirés des grandes travées avant ; les galeries restent ouvertes et reçoivent des garde-corps rouillés et incomplets. |
+| Textures Energetik trop uniformes | Première passe procédurale, comparaison visuelle à faire | Les cartes ajoutent des coulures, de l’enduit écaillé, des pigments usés de fresque et des variantes pour bois, écorce, débris et herbe. |
 
 La compilation et l’export de cette révision sont déclenchés par le workflow Windows. Ce tableau ne prétend pas valider les résultats visuels : un parcours de l’exécutable et une comparaison avec les références du document [Energetik — références visuelles et passe haute définition](ENERGETIK-REFERENCES-ET-QUALITE.md) restent nécessaires.
 

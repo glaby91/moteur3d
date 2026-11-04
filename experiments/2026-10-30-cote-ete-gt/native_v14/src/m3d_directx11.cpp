@@ -57,6 +57,8 @@ cbuffer Frame : register(b0) {
 };
 Texture2DArray<float4> albedo : register(t0);
 Texture2D<float> shadowDepth : register(t1);
+Texture2DArray<float> roughnessMap : register(t2);
+Texture2DArray<float4> normalMap : register(t3);
 SamplerState wrapSampler : register(s0);
 struct VSIn { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; uint mat:MATERIAL; };
 struct VSOut { float4 p:SV_POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; float3 world:TEXCOORD1; nointerpolation uint mat:MATERIAL; };
@@ -77,6 +79,19 @@ VSOut VSMain(VSIn i) {
 float4 PSMain(VSOut i):SV_TARGET {
     float3 base = albedo.Sample(wrapSampler, float3(frac(i.uv), i.mat)).rgb;
     float3 normal = normalize(i.n);
+    float3 dpdx = ddx(i.world), dpdy = ddy(i.world);
+    float2 duvdx = ddx(i.uv), duvdy = ddy(i.uv);
+    float determinant = duvdx.x * duvdy.y - duvdx.y * duvdy.x;
+    if (materialOpacity[i.mat].y > 0.5) {
+        float3 detailNormal = normalize(normalMap.Sample(wrapSampler, float3(frac(i.uv), i.mat)).xyz * 2.0 - 1.0);
+        if (abs(determinant) > 0.000001) {
+            float3 tangent = (dpdx * duvdy.y - dpdy * duvdx.y) / determinant;
+            float3 rawBitangent = (-dpdx * duvdy.x + dpdy * duvdx.x) / determinant;
+            tangent = normalize(tangent - normal * dot(normal, tangent));
+            float3 bitangent = normalize(cross(normal, tangent)) * (dot(cross(normal, tangent), rawBitangent) < 0.0 ? -1.0 : 1.0);
+            normal = normalize(tangent * detailNormal.x + bitangent * detailNormal.y + normal * detailNormal.z);
+        }
+    }
     float diffuse = saturate(dot(normal, normalize(lightDir)));
     float3 shadowOffset = i.world - shadowBase;
     float shadowFactor = 1.0;
@@ -100,7 +115,12 @@ float4 PSMain(VSOut i):SV_TARGET {
     color += float3(28.0, 13.0, 4.0) / 255.0 * (1.0 - diffuseTerms.w);
     float3 viewDir = normalize(eye - i.world);
     float3 reflectedLight = reflect(-normalize(lightDir), normal);
-    float specular = pow(saturate(dot(viewDir, reflectedLight)), materialSpecular[i.mat].y)
+    float roughness = roughnessMap.Sample(wrapSampler, float3(frac(i.uv), i.mat));
+    float specularPower = materialSpecular[i.mat].y;
+    if (materialSpecular[i.mat].z > 0.5) {
+        specularPower = clamp(2.0 / max(roughness * roughness, 0.0001) - 2.0, 8.0, 80.0);
+    }
+    float specular = pow(saturate(dot(viewDir, reflectedLight)), specularPower)
                    * materialSpecular[i.mat].x * shadowFactor * diffuseTerms.w;
     color += float3(178.0, 202.0, 214.0) / 255.0 * specular;
     [loop] for (uint l = 0; l < lightCount; ++l) {
@@ -299,8 +319,9 @@ public:
             else if(name=="orange"){spec=.13f;power=42.f;}
             if(spec==0.f&&scene.mat[m].reflectivityPercent>0)spec=.20f*scene.mat[m].reflectivityPercent/100.f;
             cb.materialGlow[m][0]=r;cb.materialGlow[m][1]=g;cb.materialGlow[m][2]=b;cb.materialGlow[m][3]=strength;
-            cb.materialSpecular[m][0]=spec;cb.materialSpecular[m][1]=power;cb.materialSpecular[m][2]=sr;cb.materialSpecular[m][3]=sg;
+            cb.materialSpecular[m][0]=spec;cb.materialSpecular[m][1]=power;cb.materialSpecular[m][2]=scene.mat[m].roughnessMip.empty()?0.f:1.f;cb.materialSpecular[m][3]=sg;
             cb.materialOpacity[m][0]=1.f-float(scene.mat[m].transmissionPercent)/100.f;
+            cb.materialOpacity[m][1]=scene.mat[m].normalMip.empty()?0.f:1.f;
             cb.materialDiffuse[m][0]=diffuseBase;cb.materialDiffuse[m][1]=diffuseDay;cb.materialDiffuse[m][2]=diffuseDirect;cb.materialDiffuse[m][3]=daylight;
             cb.materialEmission[m][0]=emissionR;cb.materialEmission[m][1]=emissionG;cb.materialEmission[m][2]=emissionB;cb.materialEmission[m][3]=emissionStrength;
         }
@@ -323,7 +344,7 @@ public:
         UINT stride=sizeof(GpuVertex),offset=0;ID3D11Buffer* vb=vertices_.Get();context_->IASetInputLayout(layout_.Get());context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context_->RSSetState(raster_.Get());context_->OMSetDepthStencilState(depth_.Get(),0);context_->VSSetShader(vs_.Get(),nullptr,0);context_->PSSetShader(ps_.Get(),nullptr,0);
         ID3D11Buffer* cbuff=constants_.Get();context_->VSSetConstantBuffers(0,1,&cbuff);context_->PSSetConstantBuffers(0,1,&cbuff);
-        ID3D11ShaderResourceView* srvs[]={albedo_.Get(),shadowSrv_.Get()};context_->PSSetShaderResources(0,2,srvs);ID3D11SamplerState* sampler=sampler_.Get();context_->PSSetSamplers(0,1,&sampler);
+        ID3D11ShaderResourceView* srvs[]={albedo_.Get(),shadowSrv_.Get(),roughness_.Get(),normal_.Get()};context_->PSSetShaderResources(0,4,srvs);ID3D11SamplerState* sampler=sampler_.Get();context_->PSSetSamplers(0,1,&sampler);
         if(vertexCount_)context_->Draw(vertexCount_,0);
         if(!transparent_.empty()){
             std::sort(transparent_.begin(),transparent_.end(),[&](const TransparentTriangle& a,const TransparentTriangle& b){return dot(a.center-cam.eye,cam.f)>dot(b.center-cam.eye,cam.f);});
@@ -400,13 +421,57 @@ private:
         if(!mesh.vertices.empty()){D3D11_BUFFER_DESC bd{};bd.ByteWidth=UINT(mesh.vertices.size()*sizeof(GpuVertex));bd.Usage=D3D11_USAGE_IMMUTABLE;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;D3D11_SUBRESOURCE_DATA init{};init.pSysMem=mesh.vertices.data();if(FAILED(device_->CreateBuffer(&bd,&init,&vertices_))){error=L"Allocation de la géométrie dans la mémoire GPU impossible.";return false;}vertexCount_=UINT(mesh.vertices.size());}
         if(!mesh.transparent.empty()){D3D11_BUFFER_DESC bd{};bd.ByteWidth=UINT(mesh.transparent.size()*3*sizeof(GpuVertex));bd.Usage=D3D11_USAGE_DYNAMIC;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;if(FAILED(device_->CreateBuffer(&bd,nullptr,&transparentVertices_))){error=L"Allocation du tampon des surfaces transparentes impossible.";return false;}}
         transparent_=std::move(mesh.transparent);
-        UINT texSize=512;for(const Material& material:scene.mat)if(!material.mip.empty())texSize=std::max(texSize,material.mip.front().size);const UINT matCount=UINT(std::max<size_t>(1,scene.mat.size()));std::vector<std::vector<uint32_t>> rgba(matCount,std::vector<uint32_t>(size_t(texSize)*texSize,0xff808080u));
-        for(UINT m=0;m<scene.mat.size();m++)if(!scene.mat[m].mip.empty()){const Level& l=scene.mat[m].mip.front();if(l.size==0||l.p.size()<size_t(l.size)*l.size)continue;for(UINT y=0;y<texSize;y++)for(UINT x=0;x<texSize;x++){const UINT sx=std::min(l.size-1,UINT(uint64_t(x)*l.size/texSize)),sy=std::min(l.size-1,UINT(uint64_t(y)*l.size/texSize));uint16_t c=l.p[size_t(sy)*l.size+sx];uint32_t r=((c>>11)&31)*255/31,g=((c>>5)&63)*255/63,b=(c&31)*255/31;rgba[m][size_t(y)*texSize+x]=0xff000000u|(b<<16)|(g<<8)|r;}}
-        std::vector<D3D11_SUBRESOURCE_DATA> sub(matCount);for(UINT i=0;i<matCount;i++){sub[i].pSysMem=rgba[i].data();sub[i].SysMemPitch=texSize*4;sub[i].SysMemSlicePitch=texSize*texSize*4;}
-        D3D11_TEXTURE2D_DESC td{};td.Width=texSize;td.Height=texSize;td.MipLevels=1;td.ArraySize=matCount;td.Format=DXGI_FORMAT_R8G8B8A8_UNORM;td.SampleDesc.Count=1;td.Usage=D3D11_USAGE_IMMUTABLE;td.BindFlags=D3D11_BIND_SHADER_RESOURCE;ComPtr<ID3D11Texture2D> texture;
+        UINT texSize=512;for(const Material& material:scene.mat)if(!material.mip.empty())texSize=std::max(texSize,material.mip.front().size);const UINT matCount=UINT(std::max<size_t>(1,scene.mat.size()));
+        UINT mipLevels=1;for(UINT size=texSize;size>8;size>>=1)++mipLevels;
+        std::vector<std::vector<uint32_t>> mipRgba(size_t(matCount)*mipLevels);
+        std::vector<std::vector<uint32_t>> mipNormal(size_t(matCount)*mipLevels);
+        std::vector<std::vector<uint8_t>> mipRoughness(size_t(matCount)*mipLevels);
+        std::vector<D3D11_SUBRESOURCE_DATA> sub(size_t(matCount)*mipLevels),normalSub(size_t(matCount)*mipLevels),roughSub(size_t(matCount)*mipLevels);
+        for(UINT m=0;m<matCount;m++)for(UINT level=0;level<mipLevels;level++){
+            const UINT targetSize=std::max(1u,texSize>>level);const size_t subIndex=size_t(m)*mipLevels+level;
+            auto& color=mipRgba[subIndex];color.resize(size_t(targetSize)*targetSize);
+            auto& normal=mipNormal[subIndex];normal.resize(size_t(targetSize)*targetSize,0xffff8080u);
+            auto& rough=mipRoughness[subIndex];rough.resize(size_t(targetSize)*targetSize,184);
+            const Material& material=scene.mat[m];
+            if(!material.mip.empty()){
+                const Level& l=material.mip[std::min<size_t>(level,material.mip.size()-1)];
+                if(l.size&&l.p.size()>=size_t(l.size)*l.size)for(UINT y=0;y<targetSize;y++)for(UINT x=0;x<targetSize;x++){
+                    const UINT sx=std::min(l.size-1,UINT(uint64_t(x)*l.size/targetSize)),sy=std::min(l.size-1,UINT(uint64_t(y)*l.size/targetSize));
+                    const uint16_t c=l.p[size_t(sy)*l.size+sx];const uint32_t r=((c>>11)&31)*255/31,g=((c>>5)&63)*255/63,b=(c&31)*255/31;
+                    color[size_t(y)*targetSize+x]=0xff000000u|(b<<16)|(g<<8)|r;
+                }
+            }else std::fill(color.begin(),color.end(),0xff808080u);
+            if(!material.normalMip.empty()){
+                const Level& l=material.normalMip[std::min<size_t>(level,material.normalMip.size()-1)];
+                if(l.size&&l.p.size()>=size_t(l.size)*l.size)for(UINT y=0;y<targetSize;y++)for(UINT x=0;x<targetSize;x++){
+                    const UINT sx=std::min(l.size-1,UINT(uint64_t(x)*l.size/targetSize)),sy=std::min(l.size-1,UINT(uint64_t(y)*l.size/targetSize));
+                    const uint16_t c=l.p[size_t(sy)*l.size+sx];const uint32_t r=((c>>11)&31)*255/31,g=((c>>5)&63)*255/63,b=(c&31)*255/31;
+                    normal[size_t(y)*targetSize+x]=0xff000000u|(b<<16)|(g<<8)|r;
+                }
+            }
+            if(!material.roughnessMip.empty()){
+                const Level& l=material.roughnessMip[std::min<size_t>(level,material.roughnessMip.size()-1)];
+                if(l.size&&l.p.size()>=size_t(l.size)*l.size)for(UINT y=0;y<targetSize;y++)for(UINT x=0;x<targetSize;x++){
+                    const UINT sx=std::min(l.size-1,UINT(uint64_t(x)*l.size/targetSize)),sy=std::min(l.size-1,UINT(uint64_t(y)*l.size/targetSize));
+                    rough[size_t(y)*targetSize+x]=uint8_t(((l.p[size_t(sy)*l.size+sx]>>11)&31)*255/31);
+                }
+            }
+            sub[subIndex].pSysMem=color.data();sub[subIndex].SysMemPitch=targetSize*4;sub[subIndex].SysMemSlicePitch=targetSize*targetSize*4;
+            normalSub[subIndex].pSysMem=normal.data();normalSub[subIndex].SysMemPitch=targetSize*4;normalSub[subIndex].SysMemSlicePitch=targetSize*targetSize*4;
+            roughSub[subIndex].pSysMem=rough.data();roughSub[subIndex].SysMemPitch=targetSize;roughSub[subIndex].SysMemSlicePitch=targetSize*targetSize;
+        }
+        D3D11_TEXTURE2D_DESC td{};td.Width=texSize;td.Height=texSize;td.MipLevels=mipLevels;td.ArraySize=matCount;td.Format=DXGI_FORMAT_R8G8B8A8_UNORM;td.SampleDesc.Count=1;td.Usage=D3D11_USAGE_IMMUTABLE;td.BindFlags=D3D11_BIND_SHADER_RESOURCE;ComPtr<ID3D11Texture2D> texture;
         if(FAILED(device_->CreateTexture2D(&td,sub.data(),&texture))){error=L"Chargement des textures dans DirectX 11 impossible.";return false;}
-        D3D11_SHADER_RESOURCE_VIEW_DESC sv{};sv.Format=td.Format;sv.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2DARRAY;sv.Texture2DArray.MipLevels=1;sv.Texture2DArray.ArraySize=matCount;
-        if(FAILED(device_->CreateShaderResourceView(texture.Get(),&sv,&albedo_))){error=L"Création de la table de textures DirectX 11 impossible.";return false;}sceneKey_=scene.obj.data();objectCount_=scene.obj.size();return true;
+        D3D11_SHADER_RESOURCE_VIEW_DESC sv{};sv.Format=td.Format;sv.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2DARRAY;sv.Texture2DArray.MipLevels=mipLevels;sv.Texture2DArray.ArraySize=matCount;
+        if(FAILED(device_->CreateShaderResourceView(texture.Get(),&sv,&albedo_))){error=L"Création de la table de textures DirectX 11 impossible.";return false;}
+        ComPtr<ID3D11Texture2D> normalTexture;
+        if(FAILED(device_->CreateTexture2D(&td,normalSub.data(),&normalTexture))){error=L"Chargement des normales dans DirectX 11 impossible.";return false;}
+        if(FAILED(device_->CreateShaderResourceView(normalTexture.Get(),&sv,&normal_))){error=L"Création de la table de normales DirectX 11 impossible.";return false;}
+        td.Format=DXGI_FORMAT_R8_UNORM;ComPtr<ID3D11Texture2D> roughTexture;
+        if(FAILED(device_->CreateTexture2D(&td,roughSub.data(),&roughTexture))){error=L"Chargement des rugosités dans DirectX 11 impossible.";return false;}
+        sv.Format=td.Format;
+        if(FAILED(device_->CreateShaderResourceView(roughTexture.Get(),&sv,&roughness_))){error=L"Création de la table de rugosités DirectX 11 impossible.";return false;}
+        sceneKey_=scene.obj.data();objectCount_=scene.obj.size();return true;
     }
     bool ensureTargets(int w,int h,std::wstring& error) {
         if(w==width_&&h==height_&&target_)return true;width_=w;height_=h;target_.Reset();rtv_.Reset();staging_.Reset();depthTexture_.Reset();dsv_.Reset();
@@ -418,7 +483,7 @@ private:
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&staging_))){error=L"Création du tampon de lecture DirectX 11 impossible.";return false;}return true;
     }
     ComPtr<ID3D11Device> device_;ComPtr<ID3D11DeviceContext> context_;ComPtr<ID3D11VertexShader> vs_;ComPtr<ID3D11PixelShader> ps_;ComPtr<ID3D11InputLayout> layout_;
-    ComPtr<ID3D11Buffer> constants_,vertices_,transparentVertices_;ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_;ComPtr<ID3D11ShaderResourceView> albedo_,shadowSrv_;ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<TransparentTriangle> transparent_;
+    ComPtr<ID3D11Buffer> constants_,vertices_,transparentVertices_;ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_;ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<TransparentTriangle> transparent_;
     ComPtr<ID3D11Texture2D> target_,depthTexture_,staging_;ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
     const Obj* sceneKey_=nullptr;size_t objectCount_=0;UINT vertexCount_=0;int width_=0,height_=0;
 };

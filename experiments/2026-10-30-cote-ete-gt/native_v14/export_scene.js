@@ -115,14 +115,18 @@ function makePripyatPbr(kind) {
     if(kind==='stone') return broad*.11+mid*.045+grain*.012;
     if(kind==='asphalt') return broad*.025+mid*.018+grain*.03;
     if(kind==='leaves') return broad*.08+mid*.12+grain*.04;
-    if(kind==='plaster') return broad*.16+mid*.08+grain*.025;
-    if(kind==='mural') return broad*.10+mid*.07+grain*.025;
+    if(kind==='plaster') return broad*.20+mid*.11+grain*.035;
+    if(kind==='mural') return broad*.13+mid*.09+grain*.035;
+    if(kind==='wood'||kind==='bark') return broad*.07+Math.sin(y*.08+noise(x,y,5))* .035+grain*.018;
+    if(kind==='debris') return broad*.18+mid*.10+grain*.07;
+    if(kind==='grass') return broad*.11+mid*.14+grain*.05;
     return broad*.10+mid*.055+grain*.018;
   };
   const palettes={
     concrete:[145,140,126], stone:[119,113,100], asphalt:[57,59,54],
-    plaster:[179,168,146], mural:[93,119,94],
-    brick:[132,91,69], rust:[112,62,39], leaves:[55,76,43]
+    plaster:[166,159,143], mural:[151,139,116],
+    brick:[132,91,69], rust:[112,62,39], leaves:[65,91,48],
+    wood:[91,67,45], bark:[70,55,38], debris:[104,97,83], grass:[88,99,54]
   };
   const base=palettes[kind]||[128,128,128];
   for(let y=0;y<size;y++) for(let x=0;x<size;x++){
@@ -130,7 +134,9 @@ function makePripyatPbr(kind) {
     let variation=broad*15+mid*10+grain*5;
     if(kind==='concrete'){
       const wash=Math.max(0,Math.sin(x*.045+noise(x,y,6)*2.2))**10*(.35+.65*Math.max(0,noise(x,y,5)));
-      variation-=wash*30;
+      const runoff=Math.max(0,Math.sin(x*.018+noise(x,y,5)*1.6))**12*(.35+.65*Math.max(0,noise(x,y,4)));
+      variation-=wash*27+runoff*19;
+      variation+=hash(x>>1,y>>1)%100<9?-7:0;
     } else if(kind==='stone'){
       const gx=(x+((Math.floor(y/72)%2)*36))%96, gy=y%72;
       const seam=(gx<2.4||gy<2.4||gx>94||gy>70)?-34:0;
@@ -150,20 +156,39 @@ function makePripyatPbr(kind) {
     } else if(kind==='leaves'){
       variation+=Math.max(0,grain)*12;
     } else if(kind==='plaster'){
-      const damp=Math.max(0,Math.sin(x*.035+noise(x,y,6)*1.8))*Math.max(0,Math.sin(y*.017));
-      const flake=hash(x>>2,y>>2)%100;
-      variation-=damp*23+(flake<7?13:0);
+      const damp=Math.max(0,Math.sin(x*.031+noise(x,y,6)*1.8))*Math.max(0,Math.sin(y*.017));
+      const peelField=noise(x,y,4)*.58+noise(x,y,2)*.30+grain*.12;
+      const peel=Math.max(0,(peelField-.39)/.61);
+      variation-=damp*27+peel*(18+Math.max(0,mid)*24);
     } else if(kind==='mural'){
-      const peeled=hash(x>>2,y>>2)%100;
       variation+=Math.sin(x*.025)*7-Math.max(0,Math.sin(y*.019+noise(x,y,5)))*12;
-      if(peeled<9)variation-=36;
+      const peelField=noise(x,y,4)*.58+noise(x,y,2)*.30+grain*.12;
+      variation-=Math.max(0,(peelField-.49)/.51)*(22+Math.max(0,mid)*25);
+    } else if(kind==='wood'||kind==='bark'){
+      const grainLine=Math.abs(Math.sin(y*.08+noise(x,y,5)*1.2));
+      variation-=Math.max(0,.25-grainLine)*24;
+      variation+=noise(x,y,6)*9;
+    } else if(kind==='debris'){
+      const chip=hash(x>>3,y>>3)%100;
+      variation+=chip<16?15:chip>86?-20:0;
+    } else if(kind==='grass'||kind==='leaves'){
+      const cluster=Math.max(0,Math.sin(x*.035+noise(x,y,5))*Math.sin(y*.027+noise(x,y,4)));
+      variation+=cluster*18+Math.max(0,grain)*8;
     }
-    const tint=(k,amount)=>Math.max(0,Math.min(255,base[k]+variation*amount));
-    color[i]=pack565(tint(0,1),tint(1,kind==='rust'?.76:kind==='leaves'?.95:.98),tint(2,kind==='rust'?.54:kind==='leaves'?.72:.88));
+    let pigment=base;
+    if(kind==='mural'){
+      const region=(Math.sin(x*.011+Math.sin(y*.006)*1.7+noise(x,y,5)*.8)+1)*.5;
+      pigment=region<.22?[51,112,132]:region<.46?[63,91,139]:region<.69?[163,91,57]:[184,164,128];
+      const peelField=noise(x,y,4)*.58+noise(x,y,2)*.30+grain*.12;
+      if(peelField>.68)pigment=[139,132,115];
+    }
+    const tint=(k,amount)=>Math.max(0,Math.min(255,pigment[k]+variation*amount));
+    color[i]=pack565(tint(0,1),tint(1,kind==='rust'?.76:kind==='leaves'||kind==='grass'?.95:.98),tint(2,kind==='rust'?.54:kind==='leaves'||kind==='grass'?.72:kind==='wood'||kind==='bark'?.72:.88));
     const dx=(heightAt(x+1,y)-heightAt(x-1,y))*1.2, dy=(heightAt(x,y+1)-heightAt(x,y-1))*1.2;
     const inv=1/Math.hypot(dx,dy,1);
     normal[i]=pack565(128-dx*inv*127,128-dy*inv*127,128+inv*127);
-    const r=(kind==='asphalt'?226:kind==='leaves'?218:kind==='rust'?205:kind==='stone'?218:232)+grain*10;
+    const roughBase=kind==='asphalt'?232:kind==='leaves'||kind==='grass'?224:kind==='rust'?218:kind==='stone'?222:kind==='wood'||kind==='bark'?214:kind==='debris'?236:kind==='plaster'||kind==='mural'?228:232;
+    const r=roughBase+grain*10+Math.abs(mid)*4;
     roughness[i]=pack565(r,r,r);
   }
   const makeMips=baseMap=>{
@@ -181,7 +206,7 @@ function makePripyatPbr(kind) {
   };
   return {color:makeMips(color),normal:makeMips(normal),roughness:makeMips(roughness)};
 }
-const generatedPripyatPbr=new Map(mats.filter(name=>['concrete','plaster','mural','stone','asphalt','brick','rust','leaves'].includes(name)).map(name=>[name,makePripyatPbr(name)]));
+const generatedPripyatPbr=new Map(mats.filter(name=>['concrete','plaster','mural','stone','asphalt','brick','rust','leaves','grass','wood','bark','debris'].includes(name)).map(name=>[name,makePripyatPbr(name)]));
 for(const [name,pbr] of generatedPripyatPbr) scene.materials.set(name,{levels:pbr.color});
 
 const generatedPbr = new Map(['raptureStone', 'raptureBronze', 'raptureGlass'].map(name => [name, makeRapturePbr(name)]));
