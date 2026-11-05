@@ -4,10 +4,11 @@
   "displayName": "Energetik façade bay",
   "units": "metres",
   "dimensions": {"width": 6.8, "height": 9.38, "depth": 1.1},
-  "geometry": {"nativePrimitives": 26, "glbTriangles": 4984, "front": "+Z", "openBay": true},
+  "geometry": {"nativePrimitives": 26, "glbTriangles": 4984, "front": "+Z", "openBay": true, "details": "stepped cornice, pilaster bases and capitals, framed pilaster faces"},
   "material": {
     "catalogId": "prp_concrete_panel",
     "nativeEngineId": "concrete",
+    "appearanceTarget": "weathered pale-grey architectural concrete, subtle mottling and edge wear",
     "metallic": 0.0,
     "roughnessTarget": [0.78, 0.94],
     "roughnessBase": 0.87,
@@ -17,5 +18,5 @@
   "references": ["Energetik photo mapping 01/H01; approximate dimensions follow existing 6.8 m façade bay and 9.4 m shell height."],
   "textureProvenance": "Procedurally generated in-project base-color texture; tangent normal derived from base-color luminance as a subtle surface approximation; no documentary photo reused as texture.",
   "outputs": {"unrealGlb": "assets/pripyat/energetik_facade_bay.glb", "nativeScene": "scene_pripyat_facade_bay.bin"},
-  "validation": {"glbStructure": "GLB 2.0 checked", "unrealImport": "not yet checked in Unreal Editor", "nativeExport": "export_scene.js completed; 27 scene objects, 2 materials"}
+  "validation": {"glbStructure": "GLB 2.0 checked", "unrealImport": "not yet checked in Unreal Editor", "nativeExport": "export_scene.js completed, 26 asset primitives"}
 }
