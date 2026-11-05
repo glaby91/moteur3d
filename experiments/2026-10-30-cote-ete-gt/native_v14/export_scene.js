@@ -105,6 +105,8 @@ const optionalCar = process.env.M3D_SKIP_IMPORTED_CAR === '1' ? '' : 'globalThis
 const optionalPripyatCatalog = process.env.M3D_IMPORT_PRIPYAT_GLB === '1' && path.basename(scenePath) === 'scene_pripyat_central.js' ? 'globalThis.__m3dAppendPripyatCatalog(objects);' : '';
 eval(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\n${sceneSource}\nmakeScene(); ${optionalCar} ${optionalPripyatCatalog} buildBVH(); const __mats = [...new Set(objects.map(o => o.mat))]; for (const id of __mats) materials.set(id, makeMips(id, sceneBuildTextureSize)); globalThis.__scene = { objects, bvh, bvhRoot, sun, skyZenith, skyHorizon, pointLights, materials, mats: __mats, reflectivityPercent: M3D_MATERIAL_REFLECTIVITY_PERCENT, transmissionPercent: typeof M3D_MATERIAL_TRANSMISSION_PERCENT === "undefined" ? {} : M3D_MATERIAL_TRANSMISSION_PERCENT, refractiveIndex: typeof M3D_MATERIAL_IOR === "undefined" ? {} : M3D_MATERIAL_IOR, sceneLights: typeof M3D_SCENE_LIGHTS === "undefined" ? [] : M3D_SCENE_LIGHTS };`);
 const scene = globalThis.__scene;
+const energetikFrescoPbr = readPbrMipChain(path.join(__dirname, 'assets/pripyat/textures/energetik_fresco_mosaic.m3dpbr.gz'));
+scene.materials.set('energetikFresco', { levels: energetikFrescoPbr.color });
 const importedPripyatPbr = globalThis.__m3dPripyatPbr || new Map();
 for (const [name, pbr] of importedPripyatPbr) scene.materials.set(name, { levels:pbr.color });
 const objects = scene.objects;

@@ -19,6 +19,8 @@ on:
       - experiments/2026-10-30-cote-ete-gt/native_v14/tools/export_energetik_seat_row_glb.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/tools/export_pripyat_outdoor_chair_glb.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/tools/generate_pripyat_chair_maps.py
+      - experiments/2026-10-30-cote-ete-gt/native_v14/tools/generate_energetik_fresco_map.py
+      - experiments/2026-10-30-cote-ete-gt/native_v14/tools/export_energetik_fresco_glb.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/**
       - experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_views.json
       - experiments/2026-10-30-cote-ete-gt/native_v14/source_v1314.html
@@ -88,6 +90,8 @@ jobs:
         run: |
           python tools/generate_seat_maps.py
           python tools/generate_pripyat_chair_maps.py
+          python tools/generate_energetik_fresco_map.py
+          node tools/export_energetik_fresco_glb.js
           M3D_SKIP_IMPORTED_CAR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_pripyat_central.bin scene_pripyat_central.js
           M3D_SKIP_IMPORTED_CAR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_energetik_seat_preview.bin scene_energetik_seat_preview.js
           node export_energetik_seat_manifest.js scene_energetik_seat_preview.assets.json
@@ -116,6 +120,7 @@ jobs:
           cp assets/pripyat/energetik_facade_bay.glb assets/pripyat/energetik_facade_bay.asset.json dist/assets/pripyat/
           cp assets/pripyat/pripyat_outdoor_chair.glb assets/pripyat/pripyat_outdoor_chair.asset.json dist/assets/pripyat/
           cp assets/pripyat/energetik_cinema_seat_row.glb dist/assets/pripyat/
+          cp assets/pripyat/energetik_fresco_mosaic.glb assets/pripyat/energetik_fresco_mosaic.asset.json dist/assets/pripyat/
           cp assets/pripyat/energetik_roof_neon_sign.glb dist/assets/pripyat/
           cp -r assets/pripyat/textures dist/assets/pripyat/
           cp -r docs dist/
@@ -128,7 +133,7 @@ jobs:
       - name: Upload Windows application package
         uses: actions/upload-artifact@v4
         with:
-          name: Moteur3D-Qt-${{ matrix.os }}-Energetik-seat-${{ github.run_number }}
+          name: Moteur3D-Qt-${{ matrix.os }}-Energetik-fresco-${{ github.run_number }}
           path: experiments/2026-10-30-cote-ete-gt/native_v14/dist
           if-no-files-found: error
           retention-days: 30

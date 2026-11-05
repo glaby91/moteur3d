@@ -197,7 +197,9 @@
         "prp_plaster_pale"
       ],
       "confidence": "confirmed",
-      "status": "catalogue-backlog"
+      "status": "first-hero-asset-complete",
+      "asset": "energetik_fresco_mosaic",
+      "notes": "Mosaïque panoramique interprétative posée sur le mur du hall d’escalier; dimensions et position provisoires selon estimation utilisateur."
     },
     {
       "id": "signage_cyrillic",
@@ -359,6 +361,20 @@
         "GLB 2.0"
       ],
       "status": "complete-first-pass-review-in-engine-pending"
+    },
+    {
+      "id": "murals_portraits",
+      "references": [
+        "Photos de fresque fournies par l’utilisateur"
+      ],
+      "reason": "Remplacer le motif procédural par une texture lumineuse réutilisable et visible dans la scène d’escalier.",
+      "deliverables": [
+        "albédo panoramique 2048 × 930",
+        "mipmaps natifs RGB888",
+        "GLB 2.0 9.5 × 4.3 m",
+        "quad natif placé dans la scène"
+      ],
+      "status": "first-hero-asset-complete-review-pending"
     }
   ],
   "heroAssets": [
@@ -398,6 +414,20 @@
         "Pripyat public furniture photo inventory"
       ],
       "notes": "Modèle réutilisable de 0,50 × 0,85 × 0,54 m, quatre variantes d’usure, textures PBR 2048² base color/normal/metallic-roughness, placements natifs et export GLB 2.0."
+    },
+    {
+      "id": "energetik_fresco_mosaic",
+      "catalogFamily": "murals_portraits",
+      "status": "first-hero-asset-complete",
+      "nativeSource": "experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js",
+      "nativeTexture": "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/textures/energetik_fresco_mosaic.m3dpbr.gz",
+      "unrealGlb": "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_fresco_mosaic.glb",
+      "manifest": "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_fresco_mosaic.asset.json",
+      "materialId": "energetikFresco",
+      "references": [
+        "Four user-provided mural views"
+      ],
+      "notes": "Bright, generated mosaic reconstruction; native panel at X=8.12, Y=2.00, Z=-41.55 m, 9.5 × 4.3 m, facing -X. Composition is interpretive; scene/Unreal visual review pending."
     }
   ]
 }

@@ -3,7 +3,7 @@
 // Documentary-photo references and map sources are listed in docs/pripyat/README.md.
 
 const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
-  concrete: 2, plaster: 1, mural: 1, volcanicTuff: 3, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
+  concrete: 2, plaster: 1, mural: 1, energetikFresco: 2, volcanicTuff: 3, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
   asphalt: 3, stone: 5, metal: 18, rust: 7, leaves: 2, grass: 1,
   bark: 1, wood: 4, sign: 3, neon: 2, debris: 2, puddle: 28, seatFabric: 1, seatFabricClean: 1, seatVinylBrown: 28, seatSupportPaint: 12, seatTrim: 2, curtain: 1, cinemaScreen: 0
 });
@@ -381,44 +381,19 @@ function makeScene() {
     box(x1+0.13,y+h*0.50,z+0.18,x1+0.19,y+h*0.50+0.10,z+w*0.46,'stone');
     box(x1+0.13,y+0.24,z+w*0.57,x1+0.19,y+0.36,z+w-0.24,'plaster');
   }
-  // The foyer fresco is a long wall painting rather than a framed panel. It
-  // runs on both sides of the level-one doorway and stays on the hall-facing
-  // side of the return wall, leaving the opening clear.
-  const frescoX=8.12;
-  const frescoBands=[[-41.55,-31.58],[-29.42,-21.35]];
-  for(const [z0,z1] of frescoBands){
-    box(frescoX,3.66,z0,frescoX+0.10,6.30,z1,'plaster');
-    box(frescoX+0.10,3.78,z0+0.12,frescoX+0.15,6.18,z1-0.12,'mural');
-    // Long pigment bands tie the painted sections together over the door.
-    box(frescoX+0.16,4.03,z0+0.24,frescoX+0.20,4.36,z1-0.24,'sea');
-    box(frescoX+0.16,5.70,z0+0.24,frescoX+0.20,5.91,z1-0.24,'sportsViolet');
-  }
-  // Broad allegorical figure and sun disk, composed as worn paint directly on
-  // the wall. Their scale now reads against the full-length mural.
-  ellipsoidMesh(frescoX+0.19,5.12,-23.10,0.045,0.72,0.72,'sportsRed',16,12);
-  ellipsoidMesh(frescoX+0.21,5.10,-36.80,0.052,0.30,0.29,'taxi',12,8);
-  box(frescoX+0.16,4.30,-37.42,frescoX+0.22,4.91,-36.20,'sportsViolet');
-  capsule([frescoX+0.20,4.80,-36.32],[frescoX+0.20,5.18,-35.78],0.105,'sportsPaint');
-  capsule([frescoX+0.20,4.74,-37.20],[frescoX+0.20,5.44,-37.72],0.10,'sportsPaint');
-  capsule([frescoX+0.20,5.44,-37.72],[frescoX+0.20,5.76,-38.02],0.075,'sportsRed');
-  // Wheat/energy motifs and varied mosaic fragments across both wall spans.
-  for(let i=0;i<15;i++){
-    const z=-40.90+i*0.59, y=4.18+(i%5)*0.18;
-    capsule([frescoX+0.21,y,z],[frescoX+0.21,y+0.47,z-0.34],0.042,i%2?'taxi':'sportsPaint');
-    ellipsoidMesh(frescoX+0.23,y+0.34,z-0.23,0.04,0.12,0.18,i%2?'sportsPaint':'taxi',8,6);
-  }
-  for(let i=0;i<72;i++){
-    const z=-41.18+(i*37%194)/10, y=3.90+(i*19%22)/10;
-    if(z>-31.65&&z<-29.35) continue; // keep the door opening unobstructed
-    if(y>4.25&&y<5.82&&z>-38.4&&z<-35.5) continue;
-    const mat=['sportsRed','sportsPaint','sportsViolet','taxi','sea','plaster'][i%6];
-    box(frescoX+0.17,y,z,frescoX+0.21,y+0.09+(i%3)*0.06,z+0.15+(i%4)*0.07,mat);
-  }
-  // Irregular peeling at the edges exposes concrete below the pigment.
-  for(const [y,z,w,h] of [[5.94,-41.36,0.68,0.36],[5.76,-21.70,0.52,0.48],
-                           [3.88,-40.95,0.84,0.25],[4.08,-21.80,0.62,0.34],
-                           [5.86,-32.30,0.42,0.28],[4.12,-29.72,0.36,0.25]])
-    box(frescoX+0.21,y,z,frescoX+0.24,y+h,z+w,'stone');
+  // The foyer mosaic is a reusable, photo-guided texture on the hall-facing stair wall.
+  // Dimensions are the current 9.5 x 4.3 m estimate; update the manifest if surveyed.
+  // The supporting wall sits at X=8.38 m. This plane faces -X and spans toward +Z.
+  const frescoX=8.12, frescoY0=2.00, frescoY1=6.30;
+  const frescoZ0=-41.55, frescoZ1=-32.05;
+  const frescoNormal=[-1,0,0];
+  const frescoTopV=0.27294921875, frescoBottomV=0.72705078125;
+  const frescoBL={p:[frescoX,frescoY0,frescoZ0],n:frescoNormal,uv:[0,frescoBottomV]};
+  const frescoBR={p:[frescoX,frescoY0,frescoZ1],n:frescoNormal,uv:[1,frescoBottomV]};
+  const frescoTL={p:[frescoX,frescoY1,frescoZ0],n:frescoNormal,uv:[0,frescoTopV]};
+  const frescoTR={p:[frescoX,frescoY1,frescoZ1],n:frescoNormal,uv:[1,frescoTopV]};
+  meshTriangle(frescoBL,frescoBR,frescoTL,'energetikFresco');
+  meshTriangle(frescoBR,frescoTR,frescoTL,'energetikFresco');
   // Ceiling failures and exposed glazing frames leave specific traces of decay.
   for(const [x,z,w,d] of [[-39,-30,4.2,2.1],[-27,-23,3.0,1.5],[12,-29,3.6,2.0]]){
     box(x,8.36,z,x+w,8.52,z+d,'windowdark');
