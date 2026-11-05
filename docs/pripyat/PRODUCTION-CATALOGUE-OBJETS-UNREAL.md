@@ -1,42 +1,45 @@
-# Production — catalogue d’objets Energetik
+# Production prioritaire — assets photoréalistes Energetik
 
-## Périmètre vérifié
+## Inventaire source
 
-- L’inventaire décrit **100 références photographiques** : 92 images de galerie et 8 vues principales.
-- Il regroupe le travail en **20 familles d’objets** et référence **22 matériaux prp_***.
-- Le siège cinéma existe comme module procédural de 80 primitives; la scène Energetik centrale contient déjà une reconstruction architecturale procédurale.
-- L’inventaire détaille individuellement les photos 01–32 et H01–H08; les photos 33–92 sont regroupées par plages. Les attributions incertaines restent exclues.
-- Le dépôt ne contient pas encore un pack GLB autonome des 20 familles. L’importeur glTF actuel ne conserve pas les cartes PBR glTF : il convertit seulement les triangles et remappe quelques noms de matériaux.
+- 100 références photographiques : 92 de galerie et 8 vues principales.
+- 20 familles documentées; 22 IDs matériau `prp_*`.
+- Mapping photo par photo détaillé pour 01–32 et H01–H08; les références 33–92 sont regroupées par plages.
+- Le siège cinéma existe déjà en 80 primitives; l’architecture principale existe en blockout procédural. Les assets ne sont pas encore livrés en GLB autonome.
 
-## Règles de production
+## Priorité décidée
 
-1. Utiliser les identifiants et paramètres déjà définis dans les catalogues; ne pas transformer `reflectivityPercent` en métallicité.
-2. Ajouter un nouveau paramètre matériau seulement si le format existant ne le décrit pas, et le documenter avant son utilisation.
-3. Garder un identifiant stable, une unité métrique, un pivot et une échelle UV par objet.
-4. Livrer une définition native réutilisable et un export glTF 2.0/GLB pour Unreal Engine à partir des mêmes données géométriques.
-5. Les photos de référence guident la forme et l’usure; aucune photo n’est redistribuée comme texture sans licence vérifiée.
-6. Garder les exclusions de l’inventaire : pas d’accessoires dont la fonction n’est pas confirmée.
+Produire moins d’objets et pousser leur fidélité visuelle. Les objets suivants passent en premier :
 
-## Livrables visés
+1. **Travée de façade Energetik** — références 01/H01; béton, relief, UV et usure.
+2. **Siège/rangée d’auditorium** — référence H03 et photos fournies; coque, revêtement, coutures et structure.
+3. **Enseigne de toiture** — référence H05; lettres cyrilliques, treillis, peinture écaillée et corrosion.
 
-- `assets/pripyat/catalogue-objects.json` : registre des familles, matériaux et états de validation.
-- Modules d’objets réutilisables par famille, avec variantes paramétriques.
-- Cartes PBR utilisant les définitions documentées : albédo, normale tangentielle, rugosité; ORM/metalness uniquement si une définition explicite existe.
-- Paquet GLB et manifeste source/licence par famille, plus l’intégration native dans la scène Energetik.
-- Vues de contrôle natives et vérification d’ouverture des GLB dans Unreal, en distinguant la compilation de la validation visuelle.
+Le reste des 20 familles reste au catalogue en attente. Aucun détail ambigu ne sera inventé.
 
-## Estimation sur la fenêtre de 6 h 30
+## Matériaux et fidélité
 
-Cette fenêtre suffit pour mettre en place le registre et le pipeline, produire une première passe modulaire des 20 familles et livrer un GLB de contrôle. Elle ne suffit pas à garantir une restitution photogrammétrique/photo-réaliste de chaque variante, la vérification des 100 vues image par image et une validation visuelle complète dans les deux moteurs. Les incertitudes de l’inventaire et les droits de chaque source restent à respecter.
+- Réutiliser les IDs, cartes de rugosité et normales définis dans `PRIPYAT-MATERIALS-CATALOGUE.md` et les paramètres de scène existants.
+- Ne jamais convertir `reflectivityPercent` en métallicité. Le format de scène ne fournit pas ce paramètre PBR.
+- Ajouter ou réinterpréter un paramètre seulement après avoir identifié sa définition et sa source.
+- Les photos protégées servent à la modélisation; elles ne deviennent pas des textures redistribuables sans licence vérifiée.
+- Les textures doivent être raccordées aux matériaux natifs et inclues en PBR dans les GLB destinés à Unreal.
 
-## État de départ — 5 novembre 2026
+## Livrables sur la fenêtre de 6 h 30
 
-| Domaine | État |
-|---|---|
-| Inventaire | 20 familles et 22 matériaux recensés; mapping détaillé incomplet pour les photos 33–92 |
-| Géométrie native | Scène Energetik existante; siège cinéma réutilisable; pack modulaire manquant |
-| Textures | Matériaux et cartes procédurales définis pour la scène; liaison stable aux identifiants prp_* à finaliser |
-| Unreal | GLB 2.0 est le format cible; exporteur commun et intégration des cartes PBR à créer |
-| Validation | Build seul insuffisant; contrôle de géométrie, matériaux et ouverture du GLB requis |
+Objectif réaliste : les trois assets prioritaires en première passe haute fidélité, réutilisation de leur géométrie dans le moteur natif et GLB 2.0 pour Unreal, avec manifeste des sources et matériaux. Cette fenêtre ne garantit pas une restitution photogrammétrique complète ni la validation sur toutes les configurations Unreal.
 
-L’avancement courant est suivi dans [le ticket GitHub](https://github.com/glaby91/moteur3d/issues/4).
+## Vérification
+
+- Générer la scène native sans modifier ni supprimer les objets existants.
+- Contrôler l’échelle métrique, UV, normales, orientation et matériaux.
+- Compiler le moteur natif sous Windows.
+- Valider le GLB 2.0 et son ouverture/import dans Unreal séparément du succès de compilation.
+- Garder les captures de comparaison photo/rendu et les performances comme éléments de validation.
+
+## Suivi
+
+Branche de travail : `feature/pripyat-catalog-assets-261105`.
+Ticket : [Créer le catalogue d’objets Energetik natif + Unreal](https://github.com/glaby91/moteur3d/issues/4).
+
+Les corrections PBR et d’éclairage du rendu CPU évoquées après le build `261105-0001` restent au backlog et seront traitées après les assets si le temps le permet.

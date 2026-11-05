@@ -38,7 +38,8 @@
     "Use existing source definitions and stable IDs; do not infer metallicity from reflectivityPercent.",
     "Reference photos are not texture sources unless redistribution rights are verified.",
     "Do not add low-confidence unidentified objects.",
-    "Keep scene geometry/material assignments reusable in native Moteur3D and export standard glTF 2.0/GLB for Unreal Engine."
+    "Keep scene geometry/material assignments reusable in native Moteur3D and export standard glTF 2.0/GLB for Unreal Engine.",
+    "Quality-first selection: finish and validate a small number of hero assets before expanding the remaining families."
   ],
   "targets": {
     "native": {
@@ -66,7 +67,7 @@
         "prp_concrete_raw"
       ],
       "confidence": "confirmed",
-      "status": "catalogued; asset package pending"
+      "status": "priority-first-pass"
     },
     {
       "id": "covered_walkway",
@@ -78,7 +79,7 @@
         "prp_steel_rusted"
       ],
       "confidence": "confirmed",
-      "status": "catalogued; asset package pending"
+      "status": "catalogue-backlog"
     },
     {
       "id": "windows_frames",
@@ -89,7 +90,7 @@
         "prp_window_glass"
       ],
       "confidence": "confirmed",
-      "status": "catalogued; asset package pending"
+      "status": "catalogue-backlog"
     },
     {
       "id": "railings",
@@ -100,7 +101,7 @@
         "prp_steel_rusted"
       ],
       "confidence": "confirmed",
-      "status": "catalogued; asset package pending"
+      "status": "catalogue-backlog"
     },
     {
       "id": "stairs_landings",
@@ -111,7 +112,7 @@
         "prp_terrazzo_floor"
       ],
       "confidence": "confirmed",
-      "status": "catalogued; asset package pending"
+      "status": "catalogue-backlog"
     },
     {
       "id": "corridor_ceiling",
@@ -123,7 +124,7 @@
         "prp_roof_metal"
       ],
       "confidence": "confirmed",
-      "status": "catalogued; asset package pending"
+      "status": "catalogue-backlog"
     },
     {
       "id": "ceiling_lights",
@@ -134,7 +135,7 @@
         "prp_window_glass"
       ],
       "confidence": "confirmed",
-      "status": "catalogued; asset package pending"
+      "status": "catalogue-backlog"
     },
     {
       "id": "gym_floor",
@@ -145,7 +146,7 @@
         "prp_lino_floor"
       ],
       "confidence": "confirmed",
-      "status": "catalogued; asset package pending"
+      "status": "catalogue-backlog"
     },
     {
       "id": "perimeter_benches",
@@ -156,7 +157,7 @@
         "prp_steel_painted"
       ],
       "confidence": "medium",
-      "status": "catalogued; asset package pending"
+      "status": "catalogue-backlog"
     },
     {
       "id": "auditorium_seats",
@@ -167,7 +168,7 @@
         "prp_wood_weathered"
       ],
       "confidence": "confirmed_shape_material_pending",
-      "status": "existing seat prototype only; standalone export pending"
+      "status": "priority-first-pass"
     },
     {
       "id": "stage_lighting_rig",
@@ -179,7 +180,7 @@
         "prp_steel_rusted"
       ],
       "confidence": "confirmed",
-      "status": "catalogued; asset package pending"
+      "status": "catalogue-backlog"
     },
     {
       "id": "murals_portraits",
@@ -189,7 +190,7 @@
         "prp_plaster_pale"
       ],
       "confidence": "confirmed",
-      "status": "catalogued; asset package pending"
+      "status": "catalogue-backlog"
     },
     {
       "id": "signage_cyrillic",
@@ -199,7 +200,7 @@
         "prp_sign_paint"
       ],
       "confidence": "confirmed_text_uncertain",
-      "status": "catalogued; asset package pending"
+      "status": "catalogue-backlog"
     },
     {
       "id": "paper_books",
@@ -209,7 +210,7 @@
         "prp_wallpaper_faded"
       ],
       "confidence": "confirmed_material_pending",
-      "status": "catalogued; asset package pending"
+      "status": "catalogue-backlog"
     },
     {
       "id": "rubble_clusters",
@@ -221,7 +222,7 @@
         "prp_steel_rusted"
       ],
       "confidence": "confirmed",
-      "status": "catalogued; asset package pending"
+      "status": "catalogue-backlog"
     },
     {
       "id": "edison2_disco",
@@ -233,7 +234,7 @@
         "prp_sign_paint"
       ],
       "confidence": "confirmed_shape_pending",
-      "status": "catalogued; asset package pending"
+      "status": "catalogue-backlog"
     },
     {
       "id": "empty_pool",
@@ -244,7 +245,7 @@
         "prp_concrete_raw"
       ],
       "confidence": "confirmed",
-      "status": "catalogued; asset package pending"
+      "status": "catalogue-backlog"
     },
     {
       "id": "indoor_vegetation",
@@ -257,7 +258,7 @@
         "prp_moss_lichen"
       ],
       "confidence": "confirmed",
-      "status": "catalogued; asset package pending"
+      "status": "catalogue-backlog"
     },
     {
       "id": "puddles_damp",
@@ -268,7 +269,7 @@
         "prp_concrete_raw"
       ],
       "confidence": "confirmed_by_room",
-      "status": "catalogued; asset package pending"
+      "status": "catalogue-backlog"
     },
     {
       "id": "roof_sign",
@@ -279,7 +280,52 @@
         "prp_steel_rusted"
       ],
       "confidence": "confirmed",
-      "status": "catalogued; asset package pending"
+      "status": "priority-first-pass"
+    }
+  ],
+  "productionStrategy": "quality_first",
+  "priorityAssets": [
+    {
+      "id": "facade_modules",
+      "references": [
+        "Photo 01",
+        "H01"
+      ],
+      "reason": "structure and materials are clearly documented; high visual impact",
+      "deliverables": [
+        "high-detail modular mesh",
+        "UVs",
+        "albedo/normal/roughness maps",
+        "native scene instance",
+        "GLB 2.0"
+      ]
+    },
+    {
+      "id": "auditorium_seats",
+      "references": [
+        "H03",
+        "user-provided Energetik seat photographs"
+      ],
+      "reason": "existing 80-primitive prototype can be replaced by a more faithful textured model",
+      "deliverables": [
+        "high-detail seat/row mesh",
+        "defined upholstery and steel materials",
+        "native scene instance",
+        "GLB 2.0"
+      ]
+    },
+    {
+      "id": "roof_sign",
+      "references": [
+        "H05"
+      ],
+      "reason": "recognizable focal point with clear text and steel lattice",
+      "deliverables": [
+        "Cyrillic lettering and support mesh",
+        "weathered metal materials",
+        "native scene instance",
+        "GLB 2.0"
+      ]
     }
   ]
 }
