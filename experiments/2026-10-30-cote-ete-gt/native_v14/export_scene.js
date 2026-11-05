@@ -9,12 +9,32 @@ globalThis.buildEnergetikCinemaSeat = require('./assets/pripyat/energetik_cinema
 globalThis.buildEnergetikFacadeBay = require('./assets/pripyat/energetik_facade_bay.js').buildEnergetikFacadeBay;
 globalThis.buildEnergetikRoofNeonSign = require('./assets/pripyat/energetik_roof_neon_sign.js').buildEnergetikRoofNeonSign;
 
+function extendMipChain(levels, mode='color') {
+  while (levels[levels.length - 1].size > 1) {
+    const prev = levels[levels.length - 1], n = prev.size >> 1, data = new Uint16Array(n * n);
+    for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+      const ps = [prev.data[(y*2)*prev.size+x*2], prev.data[(y*2)*prev.size+x*2+1], prev.data[(y*2+1)*prev.size+x*2], prev.data[(y*2+1)*prev.size+x*2+1]];
+      let r=0,g=0,b=0;
+      if (mode === 'normal') {
+        for (const p of ps) { r += ((p>>11)&31)*255/31/127.5-1; g += ((p>>5)&63)*255/63/127.5-1; b += (p&31)*255/31/127.5-1; }
+        const len=Math.hypot(r,g,b)||1; r=128+(r/len)*127; g=128+(g/len)*127; b=128+(b/len)*127;
+      } else {
+        for (const p of ps) { r += ((p>>11)&31)*255/31; g += ((p>>5)&63)*255/63; b += (p&31)*255/31; }
+        r/=4;g/=4;b/=4;
+      }
+      data[y*n+x]=((Math.max(0,Math.min(255,Math.round(r)))>>3)<<11)|((Math.max(0,Math.min(255,Math.round(g)))>>2)<<5)|(Math.max(0,Math.min(255,Math.round(b)))>>3);
+    }
+    levels.push({size:n,data});
+  }
+  return levels;
+}
+
 function readPbrMipChain(filePath) {
   const stored = fs.readFileSync(filePath);
   const b = filePath.endsWith('.gz') ? zlib.gunzipSync(stored) : stored;
   if (b.toString('ascii', 0, 8) !== 'M3DPBR1\0') throw new Error(`Matériau PBR invalide: ${filePath}`);
   const baseSize = b.readUInt32LE(8), count = b.readUInt32LE(12);
-  if (![512, 1024].includes(baseSize) || count !== Math.log2(baseSize / 8) + 1) throw new Error(`Pyramide PBR attendue en 512 ou 1024 px: ${filePath}`);
+  if (![512, 1024, 2048].includes(baseSize) || ![Math.log2(baseSize / 8) + 1, Math.log2(baseSize) + 1].includes(count)) throw new Error(`Pyramide PBR invalide (512 à 2048 px, chaîne vers 8 ou 1): ${filePath}`);
   let offset = 16;
   const maps = { color: [], normal: [], roughness: [] };
   for (let level = 0; level < count; level++) {
@@ -28,6 +48,7 @@ function readPbrMipChain(filePath) {
       offset += bytes;
     }
   }
+  for (const [channel, chain] of Object.entries(maps)) extendMipChain(chain, channel);
   if (offset !== b.length) throw new Error(`Données en trop dans le matériau PBR: ${filePath}`);
   return maps;
 }
@@ -100,7 +121,7 @@ function makeRapturePbr(kind) {
   }
   const makeMips = base => {
     const levels = [{ size, data: base }]; let prev = base, prevSize = size;
-    while (prevSize > 8) {
+    while (prevSize > 1) {
       const n = prevSize >> 1, data = new Uint16Array(n * n);
       for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
         const ps = [prev[(y * 2) * prevSize + x * 2], prev[(y * 2) * prevSize + x * 2 + 1], prev[(y * 2 + 1) * prevSize + x * 2], prev[(y * 2 + 1) * prevSize + x * 2 + 1]];
@@ -275,7 +296,7 @@ function makePripyatPbr(kind) {
   }
   const makeMips=baseMap=>{
     const levels=[{size,data:baseMap}];let prev=baseMap,prevSize=size;
-    while(prevSize>8){
+    while(prevSize>1){
       const n=prevSize>>1,data=new Uint16Array(n*n);
       for(let y=0;y<n;y++)for(let x=0;x<n;x++){
         const ps=[prev[(y*2)*prevSize+x*2],prev[(y*2)*prevSize+x*2+1],prev[(y*2+1)*prevSize+x*2],prev[(y*2+1)*prevSize+x*2+1]];

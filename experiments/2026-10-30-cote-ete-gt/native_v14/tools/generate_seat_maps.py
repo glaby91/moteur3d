@@ -7,7 +7,7 @@ from PIL import ImageDraw
 
 OUT = Path(__file__).resolve().parents[1] / "assets/pripyat/textures/seats"
 OUT.mkdir(parents=True, exist_ok=True)
-SIZE = 512
+SIZE = 2048
 
 def make_maps(name, base, roughness, seed, wear="grain"):
     random.seed(seed)

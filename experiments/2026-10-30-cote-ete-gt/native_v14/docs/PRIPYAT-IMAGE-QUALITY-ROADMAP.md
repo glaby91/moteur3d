@@ -30,7 +30,7 @@ Approcher l’apparence des vraies photos de Pripiat abandonnée tout en conserv
 - Faire évoluer le shader vers une réponse PBR cohérente : couleur, normale et rugosité réellement prises en compte.
 - Vérifier l’échelle des UV afin que joints, briques, panneaux et feuilles gardent des dimensions plausibles.
 - Prévoir 1K pour les matériaux courants et 2K seulement pour les façades et éléments vus de près.
-- Étendre le format de scène et l’exporteur au-delà de la limite actuelle de 512 × 512, en conservant la lecture des scènes existantes et des mipmaps.
+- Exploiter les entrées 2048² déjà acceptées par l’exporteur, compléter la chaîne de mipmaps jusqu’à 1² et conserver la lecture des chaînes 512→8 historiques.
 
 ### 4. Géométrie et détails visibles
 
@@ -50,4 +50,4 @@ Construire un bâtiment représentatif avec sa rue, ses matériaux usés et son 
 
 ## Contraintes connues
 
-Le moteur natif stocke actuellement les textures en RGB565 avec une pyramide de mipmaps plafonnée à 512 × 512. Le chemin DirectX 11 est un aperçu raster simplifié : il ne reproduit pas encore les effets du lancer de rayons CPU, notamment certaines ombres, réflexions, réfractions et la profondeur de champ. Ces écarts doivent être indiqués dans les diagnostics tant que les deux chemins ne sont pas équivalents.
+Le moteur natif stocke les textures en RGB565 jusqu’à 2048² et charge maintenant les chaînes mip jusqu’à 1². Le chemin DirectX 11 reste un aperçu raster simplifié : il ne reproduit pas encore les effets du lancer de rayons CPU, notamment certaines ombres, réflexions, réfractions et la profondeur de champ. Ces écarts doivent être indiqués dans les diagnostics tant que les deux chemins ne sont pas équivalents.

@@ -149,9 +149,22 @@ function addGlbCar(objects, filePath, placement) {
   return triangles;
 }
 
+function extendMipChain(levels) {
+  while (levels[levels.length - 1].size > 1) {
+    const prev=levels[levels.length-1], n=prev.size>>1, data=new Uint16Array(n*n);
+    for(let y=0;y<n;y++)for(let x=0;x<n;x++){
+      const ps=[prev.data[(y*2)*prev.size+x*2],prev.data[(y*2)*prev.size+x*2+1],prev.data[(y*2+1)*prev.size+x*2],prev.data[(y*2+1)*prev.size+x*2+1]];
+      const r=Math.round(ps.reduce((s,p)=>s+(p>>11),0)/4),g=Math.round(ps.reduce((s,p)=>s+((p>>5)&63),0)/4),b=Math.round(ps.reduce((s,p)=>s+(p&31),0)/4);
+      data[y*n+x]=(r<<11)|(g<<5)|b;
+    }
+    levels.push({size:n,data});
+  }
+  return levels;
+}
+
 function readRgb565MipChain(filePath) {
   const bytes = fs.readFileSync(filePath); let offset = 0; const levels = [];
-  for (let size = 512; size >= 8; size >>= 1) {
+  for (let size = 512; size >= 1 && offset + size * size * 2 <= bytes.length; size >>= 1) {
     const count = size * size;
     if (offset + count * 2 > bytes.length) throw new Error('Chaîne de textures RGB565 tronquée: ' + path.basename(filePath));
     const data = new Uint16Array(count);
@@ -159,7 +172,7 @@ function readRgb565MipChain(filePath) {
     levels.push({ size, data });
   }
   if (offset !== bytes.length) throw new Error('La chaîne RGB565 contient des données supplémentaires: ' + path.basename(filePath));
-  return levels;
+  return extendMipChain(levels);
 }
 
 module.exports = { addGlbCar, readRgb565MipChain };

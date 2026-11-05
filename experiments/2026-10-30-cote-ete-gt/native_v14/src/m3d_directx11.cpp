@@ -432,7 +432,7 @@ private:
         if(!mesh.transparent.empty()){D3D11_BUFFER_DESC bd{};bd.ByteWidth=UINT(mesh.transparent.size()*3*sizeof(GpuVertex));bd.Usage=D3D11_USAGE_DYNAMIC;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;if(FAILED(device_->CreateBuffer(&bd,nullptr,&transparentVertices_))){error=L"Allocation du tampon des surfaces transparentes impossible.";return false;}}
         transparent_=std::move(mesh.transparent);
         UINT texSize=512;for(const Material& material:scene.mat)if(!material.mip.empty())texSize=std::max(texSize,material.mip.front().size);const UINT matCount=UINT(std::max<size_t>(1,scene.mat.size()));
-        UINT mipLevels=1;for(UINT size=texSize;size>8;size>>=1)++mipLevels;
+        UINT mipLevels=1;for(UINT size=texSize;size>1;size>>=1)++mipLevels;
         std::vector<std::vector<uint32_t>> mipRgba(size_t(matCount)*mipLevels);
         std::vector<std::vector<uint32_t>> mipNormal(size_t(matCount)*mipLevels);
         std::vector<std::vector<uint8_t>> mipRoughness(size_t(matCount)*mipLevels);

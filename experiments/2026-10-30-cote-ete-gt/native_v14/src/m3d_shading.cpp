@@ -4,7 +4,24 @@ namespace m3d {
 ShadowMap buildShadow(const Scene&s,Stats&st){ShadowMap m;m.right=norm(cross({0,1,0},sun));m.up=cross(m.right,sun);m.d.resize(m.size*m.size);for(int y=0;y<m.size;y++){float vy=((y+.5f)/m.size-.5f)*2*m.span;for(int x=0;x<m.size;x++){float vx=((x+.5f)/m.size-.5f)*2*m.span;V o=m.base+sun*m.dist+m.right*vx+m.up*vy;Ray r{o,sun*-1};Hit h;closest(s,r,h,&st,false,-1,true);m.d[y*m.size+x]=h.t;}}m.min.assign(m.d.size(),INF);m.max.assign(m.d.size(),-INF);for(int y=0;y<m.size;y++)for(int x=0;x<m.size;x++){float lo=INF,hi=-INF;for(int j=-2;j<=2;j++)for(int i=-2;i<=2;i++){float v=m.d[std::clamp(y+j,0,m.size-1)*m.size+std::clamp(x+i,0,m.size-1)];lo=std::min(lo,v);hi=std::max(hi,v);}m.min[y*m.size+x]=lo;m.max[y*m.size+x]=hi;}return m;}
 static float visibility(const ShadowMap&m,V p,Stats*st){V q=p-m.base;float fac=m.size/(2*m.span),center=m.size*.5f-.5f;int x=(int)std::lround(dot(q,m.right)*fac+center),y=(int)std::lround(dot(q,m.up)*fac+center);if(x<2||y<2||x>=m.size-2||y>=m.size-2)return 1;int ix=y*m.size+x;float td=m.dist-dot(q,sun),bias=.095f;if(st)st->depthReads++;if(td<=m.min[ix]+bias)return 1;if(st)st->depthReads++;if(td>m.max[ix]+bias)return .28f;float v=0;for(int j=-2;j<=2;j++)for(int i=-2;i<=2;i++){if(st)st->depthReads++;v+=td<=m.d[(y+j)*m.size+x+i]+bias?1.f:0.f;}return .16f+.84f*v/25;}
 static V uvAt(const Scene&s,const Obj&o,V p,V n){if(o.kind==Kind::Triangle){const V e1=o.len2>0?o.center:o.b-o.a,e2=o.len2>0?o.core:o.c-o.a,q=p-o.a;const float d00=o.len2>0?o.uv0.z:dot(e1,e1),d01=o.len2>0?o.uv1.z:dot(e1,e2),d11=o.len2>0?o.uv2.z:dot(e2,e2),d20=dot(q,e1),d21=dot(q,e2),den=d00*d11-d01*d01,inv=o.len2>0?o.len2:1.f/den,b1=(d11*d20-d01*d21)*inv,b2=(d00*d21-d01*d20)*inv,b0=1-b1-b2;return{o.uv0.x*b0+o.uv1.x*b1+o.uv2.x*b2,o.uv0.y*b0+o.uv1.y*b1+o.uv2.y*b2,.8f};}if(o.kind==Kind::Ellipse){return{std::atan2((p.z-o.a.z)/o.b.z,(p.x-o.a.x)/o.b.x)/(2*PI)*2.5f,(.5f-std::asin(clampf((p.y-o.a.y)/o.b.y,-1,1))/PI)*2.5f,.9f};}if(o.kind==Kind::Capsule){V ba=o.b-o.a,q=p-o.a;float h=clampf(dot(q,ba)/o.len2,0,1);V radial=q-ba*h;return{std::atan2(radial.z,radial.x)/(2*PI),(h*std::sqrt(o.len2)+std::asin(clampf(radial.y/o.r,-1,1))*o.r)*.55f,.72f};}if(o.kind==Kind::Cone){V q=p-o.a;return{std::atan2(q.z,q.x)/(2*PI)*3,dot(q,o.n0)*.84f,.8f};}const std::string&mat=s.mat[o.mat].name;float scale=mat=="seatSteel"?.95f:(mat=="seatFabricClean"||mat=="seatTrim"||mat=="seatVinylBrown"||mat=="seatSupportPaint")?.85f:mat=="seatWood"?.65f:mat=="mural"?.075f:mat=="concrete"?.34f:(mat=="stone"||mat=="brick")?.28f:(mat=="glass"||mat=="raptureGlass"||mat=="raptureStone")?.16f:.65f,ax=std::abs(n.x),ay=std::abs(n.y),az=std::abs(n.z);if(ay>=ax&&ay>=az)return{p.x*scale,p.z*scale,scale};if(ax>=az)return{p.z*scale,p.y*scale,scale};return{p.x*scale,p.y*scale,scale};}
-static V sampleMipChain(const std::vector<Level>& mip,float u,float v,float footprint,Stats&st){if(mip.empty())return{128,128,128};float lod=clampf(std::log2(std::max(1.f,footprint)),0.f,(float)mip.size()-1);const Level&l=mip[(int)std::lround(lod)];int n=(int)l.size,mask=n-1;float fxp=u*n-.5f,fyp=v*n-.5f;int ix=(int)std::floor(fxp),iy=(int)std::floor(fyp);float ax=fxp-ix,ay=fyp-iy;int x0=ix&mask,y0=iy&mask,x1=(x0+1)&mask,y1=(y0+1)&mask;uint16_t a=l.p[y0*n+x0],b=l.p[y0*n+x1],c=l.p[y1*n+x0],d=l.p[y1*n+x1];float w0=(1-ax)*(1-ay),w1=ax*(1-ay),w2=(1-ax)*ay,w3=ax*ay;st.texels+=4;if(st.avx2){st.simdTextureSamples++;return sampleRgb565Avx2(a,b,c,d,w0,w1,w2,w3);}float r=(((a>>11)*w0+(b>>11)*w1+(c>>11)*w2+(d>>11)*w3)*255/31),g=((((a>>5&63)*w0+(b>>5&63)*w1+(c>>5&63)*w2+(d>>5&63)*w3)*255/63)),bl=(((a&31)*w0+(b&31)*w1+(c&31)*w2+(d&31)*w3)*255/31);return V{std::floor(r+.5f),std::floor(g+.5f),std::floor(bl+.5f)};}
+static V sampleMipChain(const std::vector<Level>& mip,float u,float v,float footprint,Stats&st){
+ if(mip.empty())return{128,128,128};
+ const float lod=clampf(std::log2(std::max(1.f,footprint)),0.f,(float)mip.size()-1);
+ const size_t lo=(size_t)std::floor(lod),hi=std::min(lo+1,mip.size()-1);const float blend=lod-(float)lo;
+ auto sampleLevel=[&](size_t level){
+  const Level& l=mip[level];const int n=(int)l.size,mask=n-1;const float fxp=u*n-.5f,fyp=v*n-.5f;
+  const int ix=(int)std::floor(fxp),iy=(int)std::floor(fyp);const float ax=fxp-ix,ay=fyp-iy;
+  const int x0=ix&mask,y0=iy&mask,x1=(x0+1)&mask,y1=(y0+1)&mask;
+  const uint16_t a=l.p[y0*n+x0],b=l.p[y0*n+x1],c=l.p[y1*n+x0],d=l.p[y1*n+x1];
+  const float w0=(1-ax)*(1-ay),w1=ax*(1-ay),w2=(1-ax)*ay,w3=ax*ay;st.texels+=4;
+  if(st.avx2){st.simdTextureSamples++;return sampleRgb565Avx2(a,b,c,d,w0,w1,w2,w3);}
+  const float r=((a>>11)*w0+(b>>11)*w1+(c>>11)*w2+(d>>11)*w3)*255/31;
+  const float g=(((a>>5&63)*w0+(b>>5&63)*w1+(c>>5&63)*w2+(d>>5&63)*w3)*255/63);
+  const float bl=((a&31)*w0+(b&31)*w1+(c&31)*w2+(d&31)*w3)*255/31;
+  return V{std::floor(r+.5f),std::floor(g+.5f),std::floor(bl+.5f)};
+ };
+ const V a=sampleLevel(lo);if(lo==hi)return a;const V b=sampleLevel(hi);return a*(1-blend)+b*blend;
+}
 static V texSample(const Material&m,float u,float v,float footprint,Stats&st){return sampleMipChain(m.mip,u,v,footprint,st);}
 static V sky(V d,bool fog,bool deepOcean=false){
  if(deepOcean){

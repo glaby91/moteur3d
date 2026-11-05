@@ -72,7 +72,7 @@ Le menu **Scène → Ouvrir une scène…** permet de charger un fichier `.bin` 
 
 La case **Aperçu rotatif — 800 × 600** ouvre une seconde fenêtre qui calcule en 400 × 300 et fait tourner la caméra autour de la scène. Les images sont assemblées dans un tampon et publiées après le rendu et les effets de sortie; l’image terminée précédente reste visible pendant le calcul. Les cartes PBR de l’orange et de Rapture sont intégrées dans les binaires V4; le chargeur conserve la lecture des anciennes scènes V3.
 
-Le lissage des contours et le bloom sont des post-traitements CPU. Les textures utilisent des mipmaps de 512×512 à 8×8 et une interpolation bilinéaire à quatre texels.
+Le moteur natif accepte des textures de 512² à 2048². Les builds Pripyat produisent désormais les scènes principales en 2048² avec une chaîne complète jusqu’à 1². Le rendu CPU filtre bilinéairement dans chaque niveau et interpole entre deux niveaux mip; l’aperçu DirectX utilise le filtrage mip et l’anisotropie 8×.
 
 ## Interface Qt multiplateforme
 
@@ -96,7 +96,7 @@ Sur une distribution Linux où Qt 6 est installé dans les chemins système, `-D
 
 ## Voiture 1970s Coupe
 
-Le fichier source CC0 est dans `assets/1970s-coupe/1970s-coupe.glb`. L’exporteur extrait le maillage glTF (positions, normales, UV et matériaux), applique son placement déclaré dans `scene_coastal_v1314.js`, puis l’ajoute au BVH de la scène. Les textures de couleur de carrosserie et de pneus sont préconverties en chaînes RGB565 512→8 afin que le workflow Windows n’ait pas besoin d’un décodeur JPEG. Le moteur applique son éclairage et ses reflets natifs au matériau carrosserie; les pourcentages de réflexion se règlent dans la source de scène. Le format V4 transporte les cartes couleur, normale et rugosité; les scènes V3 historiques restent lisibles.
+Le fichier source CC0 est dans `assets/1970s-coupe/1970s-coupe.glb`. L’exporteur extrait le maillage glTF (positions, normales, UV et matériaux), applique son placement déclaré dans `scene_coastal_v1314.js`, puis l’ajoute au BVH de la scène. Les textures source de carrosserie et de pneus restent stockées dans le format RGB565 historique 512→8; l’exporteur complète les niveaux jusqu’à 1² afin que le moteur ne bloque pas le LOD au niveau 8². Le moteur applique son éclairage et ses reflets natifs au matériau carrosserie; les pourcentages de réflexion se règlent dans la source de scène. Le format V4 transporte les cartes couleur, normale et rugosité; les scènes V3 historiques restent lisibles.
 
 La source est publiée sous CC0 1.0 : https://grab3d.com/models/vehicles/1970s-coupe/.
 
@@ -112,7 +112,7 @@ Le build `261103-0020` ajoute au benchmark les compteurs de dispatch des noyaux 
 
 La géométrie réutilisable du siège est définie dans `assets/pripyat/energetik_cinema_seat.js`. La scène de prévisualisation présente trois états du même modèle, conformément à la référence : assise manquante, relevée et abaissée, reliées par un rail métallique continu. Le modèle compte 125 primitives pour la rangée, dont les coques et coussins, les côtés capitonnés, les charnières, les boulons et les coutures; ce sont des volumes natifs du moteur, pas un maillage photogrammétrique. Le manifeste conserve les pivots et profils physiques prévus; les valeurs non mesurées restent vides.
 
-Le GLB `assets/pripyat/energetik_cinema_seat_row.glb` réunit quatre matériaux et leurs cartes PBR intégrées pour Unreal Engine. Les textures 512 px sont procédurales et non photographiques. Elles couvrent le vinyle brun usé, la peinture des supports, l’acier et les garnitures en bois. L’import Unreal et le contrôle visuel dans le moteur Qt restent à effectuer.
+Le GLB `assets/pripyat/energetik_cinema_seat_row.glb` réunit quatre matériaux et leurs cartes PBR intégrées pour Unreal Engine. Les cartes de vinyle brun usé, peinture des supports, acier et bois sont procédurales et générées en 2048²; Unreal génère la chaîne mip à l’import. Elles couvrent le vinyle brun usé, la peinture des supports, l’acier et les garnitures en bois. L’import Unreal et le contrôle visuel dans le moteur Qt restent à effectuer.
 
 Pour recalculer seulement le prototype, sans compiler l’application Qt ni reconstruire la ville :
 

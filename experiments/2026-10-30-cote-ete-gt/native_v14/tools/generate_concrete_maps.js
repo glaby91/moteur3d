@@ -6,7 +6,7 @@ const zlib = require('zlib');
 const root = path.resolve(__dirname, '..');
 const tex = path.join(root, 'assets/pripyat/textures');
 const source = path.join(tex, 'prp_concrete_panel_source.jpg');
-const SIZE = 512;
+const SIZE = 2048;
 const pack565 = (r,g,b) => ((Math.round(r) >> 3) << 11) | ((Math.round(g) >> 2) << 5) | (Math.round(b) >> 3);
 async function main() {
   const {data: color, info} = await sharp(source).resize(SIZE,SIZE,{fit:'cover'}).removeAlpha().raw().toBuffer({resolveWithObject:true});
@@ -27,7 +27,7 @@ async function main() {
   // Native M3DPBR1: RGB565 color, tangent normal and scalar roughness mip chains.
   const levels=[];
   let prev={color,normal,roughness:rough,size:SIZE};
-  while(true){levels.push(prev);if(prev.size===8)break;const size=prev.size>>1,next={size};
+  while(true){levels.push(prev);if(prev.size===1)break;const size=prev.size>>1,next={size};
     for(const name of ['color','normal','roughness']) { const src=prev[name], dst=Buffer.alloc(size*size*3); for(let y=0;y<size;y++)for(let x=0;x<size;x++)for(let c=0;c<3;c++){const j=((y*2)*prev.size+x*2)*3+c;dst[(y*size+x)*3+c]=Math.round((src[j]+src[j+3]+src[j+prev.size*3]+src[j+prev.size*3+3])/4)} next[name]=dst; }
     prev=next;
   }
