@@ -19,4 +19,4 @@ Les coordonnées sont en mètres. `target` désigne le point visé par la camér
 
 Les noms de pièces servent de repères de visite. Les photos et le plan transmis restent les sources pour confirmer la fonction et la disposition exacte des locaux.
 
-La vue 2 place la caméra du côté foyer (+X) et vise le centre de l’ouverture à `z = -30,5 m`. Elle regarde la fresque sur sa face peinte, en passant par les portes alignées du foyer et du retour de cloison.
+La vue 2 place la caméra côté intérieur (−X), face au panneau texturé. Elle vise son centre à `[8,12, 4,15, −36,80] m` depuis le côté peint ; le retour en béton reste derrière la fresque.
