@@ -7,6 +7,7 @@ const zlib = require('zlib');
 const { addGlbCar, readRgb565MipChain } = require('./gltf_scene_import');
 globalThis.buildEnergetikCinemaSeat = require('./assets/pripyat/energetik_cinema_seat.js');
 globalThis.buildEnergetikFacadeBay = require('./assets/pripyat/energetik_facade_bay.js').buildEnergetikFacadeBay;
+globalThis.buildEnergetikRoofNeonSign = require('./assets/pripyat/energetik_roof_neon_sign.js').buildEnergetikRoofNeonSign;
 
 function readPbrMipChain(filePath) {
   const stored = fs.readFileSync(filePath);

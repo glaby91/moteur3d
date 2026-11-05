@@ -89,6 +89,7 @@ jobs:
           M3D_SKIP_IMPORTED_CAR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_energetik_seat_preview.bin scene_energetik_seat_preview.js
           node export_energetik_seat_manifest.js scene_energetik_seat_preview.assets.json
           node tools/export_energetik_seat_row_glb.js
+          node tools/export_energetik_roof_neon_sign_glb.js
           M3D_SKIP_IMPORTED_CAR=1 M3D_FACADE_PBR=1 M3D_TEXTURE_SIZE=512 node export_scene.js source_v1314.html scene_pripyat_facade_bay.bin scene_pripyat_facade_bay.js
 
       - name: Configure Qt application
@@ -106,10 +107,11 @@ jobs:
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: |
           cmake --install build --config Release --prefix dist
-          cp scene_pripyat_central.bin scene_pripyat_central.js scene_pripyat_views.json scene_energetik_seat_preview.bin scene_energetik_seat_preview.js scene_energetik_seat_preview.assets.json scene_pripyat_facade_bay.bin scene_pripyat_facade_bay.js README.md dist/
+          cp scene_pripyat_central.bin scene_pripyat_central.js scene_pripyat_views.json scene_energetik_seat_preview.bin scene_energetik_seat_preview.js scene_energetik_seat_preview.assets.json scene_pripyat_facade_bay.bin scene_pripyat_facade_bay.js assets/pripyat/energetik_roof_neon_sign.js assets/pripyat/energetik_roof_neon_sign.asset.json README.md dist/
           mkdir -p dist/assets/pripyat
           cp assets/pripyat/energetik_facade_bay.glb assets/pripyat/energetik_facade_bay.asset.json dist/assets/pripyat/
           cp assets/pripyat/energetik_cinema_seat_row.glb dist/assets/pripyat/
+          cp assets/pripyat/energetik_roof_neon_sign.glb dist/assets/pripyat/
           cp -r assets/pripyat/textures dist/assets/pripyat/
           cp -r docs dist/
 

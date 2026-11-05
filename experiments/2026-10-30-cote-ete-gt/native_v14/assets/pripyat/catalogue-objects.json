@@ -280,10 +280,12 @@
       "source": "photo inventory",
       "materialIds": [
         "prp_roof_metal",
-        "prp_steel_rusted"
+        "prp_steel_rusted",
+        "neon",
+        "glass"
       ],
       "confidence": "confirmed",
-      "status": "priority-first-pass"
+      "status": "first-hero-asset-complete"
     }
   ],
   "productionStrategy": "quality_first",
@@ -326,11 +328,13 @@
       ],
       "reason": "recognizable focal point with clear text and steel lattice",
       "deliverables": [
-        "Cyrillic lettering and support mesh",
-        "weathered metal materials",
+        "segmented Cyrillic glass tubes and emissive cores",
+        "nine independently addressable letter circuits",
+        "weathered steel lattice, insulators and transformer boxes",
         "native scene instance",
         "GLB 2.0"
-      ]
+      ],
+      "status": "complete-first-pass-review-in-engine-pending"
     }
   ],
   "heroAssets": [
@@ -346,6 +350,16 @@
         "H01"
       ],
       "notes": "Approximate scale from existing blockout; not photogrammetric. UE editor import remains to validate."
+    },
+    {
+      "id": "energetik_roof_neon_sign",
+      "catalogFamily": "roof_sign",
+      "status": "first-hero-asset-complete",
+      "nativeSource": "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_roof_neon_sign.js",
+      "unrealGlb": "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_roof_neon_sign.glb",
+      "manifest": "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_roof_neon_sign.asset.json",
+      "references": ["H05"],
+      "notes": "Nine independently wired Cyrillic letters. Every glass tube and luminous core is split into short, separately named elements; the native sign instance contains 518 primitives at the current 0.28 m segment length. Approximate reconstruction from the H05 reference; glow and UE import remain to validate."
     }
   ]
 }

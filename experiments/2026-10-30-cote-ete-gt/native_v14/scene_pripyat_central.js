@@ -5,7 +5,7 @@
 const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
   concrete: 2, plaster: 1, mural: 1, volcanicTuff: 3, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
   asphalt: 3, stone: 5, metal: 18, rust: 7, leaves: 2, grass: 1,
-  bark: 1, wood: 4, sign: 3, debris: 2, puddle: 28, seatFabric: 1, seatFabricClean: 1, seatVinylBrown: 28, seatSupportPaint: 12, seatTrim: 2, curtain: 1, cinemaScreen: 0
+  bark: 1, wood: 4, sign: 3, neon: 2, debris: 2, puddle: 28, seatFabric: 1, seatFabricClean: 1, seatVinylBrown: 28, seatSupportPaint: 12, seatTrim: 2, curtain: 1, cinemaScreen: 0
 });
 const M3D_MATERIAL_TRANSMISSION_PERCENT = Object.freeze({ glass: 62 });
 const M3D_MATERIAL_IOR = Object.freeze({ glass: 1.48 });
@@ -87,6 +87,10 @@ function makeScene() {
   box(-47.6,9.02,-20.74,26.2,9.28,-19.26,'stone');
   box(-47.9,9.28,-20.94,26.5,9.48,-19.08,'concrete');
   for (const x of [-45.8,-39.0,-32.2,-25.4,-18.6,-11.8,-5.0,1.8,8.6,15.4,22.2]) {
+    if (x === -39.0) {
+      buildEnergetikFacadeBay({ objects, roundBox }, x, 0, -19.63, { nativeMaterial: 'concrete' });
+      continue;
+    }
     box(x-0.42,0.40,-20.34,x+0.42,0.78,-19.34,'stone');
     box(x-0.27,0.78,-20.16,x+0.27,8.25,-19.54,'concrete');
     box(x-0.48,8.25,-20.42,x+0.48,8.62,-19.28,'stone');
@@ -122,30 +126,11 @@ function makeScene() {
     capsule([x,0.72,-21.8],[x,1.32,-19.8],0.09,'rust');
     for (let z=-21.6;z<-19.9;z+=0.34) capsule([x,0.82,z],[x,1.14,z],0.035,'metal');
   }
-  // Recessed, weathered rooftop plaque and built-up Cyrillic lettering.
-  box(-7.0,10.0,-20.9,7.0,11.25,-20.18,'rust');
-  box(-6.78,10.10,-21.0,6.78,11.12,-20.96,'windowdark');
-  const glyphs={
-    'Э':['11110','10001','00001','01111','00001','10001','11110'],
-    'Н':['10001','10001','10001','11111','10001','10001','10001'],
-    'Е':['11111','10000','10000','11110','10000','10000','11111'],
-    'Р':['11110','10001','10001','11110','10000','10000','10000'],
-    'Г':['11111','10000','10000','10000','10000','10000','10000'],
-    'Т':['11111','00100','00100','00100','00100','00100','00100'],
-    'И':['10001','10011','10101','10101','11001','10001','10001'],
-    'К':['10001','10010','10100','11000','10100','10010','10001']
-  };
-  const title='ЭНЕРГЕТИК', cell=0.13, gap=0.075;
-  const titleWidth=title.length*5*cell+(title.length-1)*gap;
-  let titleX=-titleWidth*0.5;
-  for(const ch of title){
-    const rows=glyphs[ch];
-    for(let row=0;row<7;row++)for(let col=0;col<5;col++)if(rows[row][col]==='1'){
-      const x=titleX+col*cell, y=10.20+(6-row)*cell;
-      box(x,y,-21.04,x+cell*0.82,y+cell*0.82,-20.98,'brick');
-    }
-    titleX+=5*cell+gap;
-  }
+  // Nine separately addressable Cyrillic neon letters, split into short glass
+  // envelopes and luminous cores for believable tube construction and control.
+  const neonManifest = buildEnergetikRoofNeonSign({ objects, box, roundBox, capsule }, 0, 9.43, -19.34, { sectionLength: 0.28 });
+  for (const p of neonManifest.lighting.lightPositions)
+    M3D_SCENE_LIGHTS.push([p[0], p[1], p[2], 5.4, 0.75, 70, 220, 255]);
 
   // Three readable levels. Slabs wrap the foyer atrium and the open stair core.
   box(-49.2,0.05,-42.2,29.2,0.38,-20.1,'stone');
