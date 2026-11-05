@@ -1,38 +1,43 @@
 {
   "schema": "m3d-asset-manifest-v1",
-  "asset": "energetik-folding-cinema-seat",
+  "asset": "energetik-folding-cinema-seat-row",
   "units": "metres",
   "pose": {
-    "folded": true,
-    "seatPanAngleDegrees": 0
+    "seatCount": 3,
+    "variants": [
+      "left_missing_pan",
+      "center_raised_pan",
+      "right_lowered_pan"
+    ],
+    "sharedRail": true
   },
   "geometry": {
-    "objectCount": 80,
+    "objectCount": 125,
     "sceneObjectRange": [
       1,
-      81
+      126
     ],
     "primitiveCounts": {
-      "box": 3,
-      "roundbox": 21,
-      "ellipse": 28,
-      "capsule": 29
+      "box": 6,
+      "ellipse": 45,
+      "roundbox": 31,
+      "capsule": 43
     },
     "components": [
       {
-        "id": "frame",
+        "id": "seat_1_frame",
         "role": "rigid",
         "firstObject": 1,
-        "objectCount": 29,
+        "objectCount": 6,
         "materialProfileIds": [
           "seat_steel",
-          "seat_shell_wood"
+          "seat_support_paint"
         ]
       },
       {
-        "id": "backrest",
+        "id": "seat_1_backrest",
         "role": "rigid",
-        "firstObject": 30,
+        "firstObject": 7,
         "objectCount": 23,
         "materialProfileIds": [
           "seat_shell_wood",
@@ -42,10 +47,10 @@
         ]
       },
       {
-        "id": "seat_pan",
-        "role": "hinged_rigid",
-        "firstObject": 53,
-        "objectCount": 16,
+        "id": "seat_1_seat_pan",
+        "role": "broken_missing",
+        "firstObject": 30,
+        "objectCount": 0,
         "materialProfileIds": [
           "seat_steel",
           "seat_shell_wood",
@@ -55,10 +60,110 @@
         ]
       },
       {
-        "id": "armrests",
+        "id": "seat_1_armrests",
+        "role": "padded_structural_side_panel",
+        "firstObject": 30,
+        "objectCount": 2,
+        "materialProfileIds": [
+          "seat_upholstery_cover",
+          "seat_steel"
+        ]
+      },
+      {
+        "id": "seat_2_frame",
         "role": "rigid",
-        "firstObject": 69,
-        "objectCount": 12,
+        "firstObject": 32,
+        "objectCount": 6,
+        "materialProfileIds": [
+          "seat_steel",
+          "seat_support_paint"
+        ]
+      },
+      {
+        "id": "seat_2_backrest",
+        "role": "rigid",
+        "firstObject": 38,
+        "objectCount": 23,
+        "materialProfileIds": [
+          "seat_shell_wood",
+          "seat_upholstery_cover",
+          "seat_stitched_trim",
+          "seat_foam_core"
+        ]
+      },
+      {
+        "id": "seat_2_seat_pan",
+        "role": "hinged_rigid",
+        "firstObject": 61,
+        "objectCount": 17,
+        "materialProfileIds": [
+          "seat_steel",
+          "seat_shell_wood",
+          "seat_upholstery_cover",
+          "seat_stitched_trim",
+          "seat_foam_core"
+        ]
+      },
+      {
+        "id": "seat_2_armrests",
+        "role": "padded_structural_side_panel",
+        "firstObject": 78,
+        "objectCount": 2,
+        "materialProfileIds": [
+          "seat_upholstery_cover",
+          "seat_steel"
+        ]
+      },
+      {
+        "id": "seat_3_frame",
+        "role": "rigid",
+        "firstObject": 80,
+        "objectCount": 6,
+        "materialProfileIds": [
+          "seat_steel",
+          "seat_support_paint"
+        ]
+      },
+      {
+        "id": "seat_3_backrest",
+        "role": "rigid",
+        "firstObject": 86,
+        "objectCount": 23,
+        "materialProfileIds": [
+          "seat_shell_wood",
+          "seat_upholstery_cover",
+          "seat_stitched_trim",
+          "seat_foam_core"
+        ]
+      },
+      {
+        "id": "seat_3_seat_pan",
+        "role": "hinged_rigid",
+        "firstObject": 109,
+        "objectCount": 9,
+        "materialProfileIds": [
+          "seat_steel",
+          "seat_shell_wood",
+          "seat_upholstery_cover",
+          "seat_stitched_trim",
+          "seat_foam_core"
+        ]
+      },
+      {
+        "id": "seat_3_armrests",
+        "role": "padded_structural_side_panel",
+        "firstObject": 118,
+        "objectCount": 2,
+        "materialProfileIds": [
+          "seat_upholstery_cover",
+          "seat_steel"
+        ]
+      },
+      {
+        "id": "shared_mounting_rail",
+        "role": "rigid",
+        "firstObject": 120,
+        "objectCount": 6,
         "materialProfileIds": [
           "seat_steel",
           "seat_shell_wood"
@@ -239,13 +344,13 @@
   },
   "joints": [
     {
-      "id": "seat-pan-hinge",
-      "part": "seat_pan",
+      "id": "seat_1_seat-pan-hinge",
+      "part": "seat_1_seat_pan",
       "type": "revolute",
       "pivot": [
-        0,
+        -0.82,
         0.49,
-        -0.115
+        -8.115
       ],
       "axis": [
         1,
@@ -255,26 +360,90 @@
       "foldedAngleDegrees": 0,
       "openAngleDegrees": -90,
       "currentAngleDegrees": 0
+    },
+    {
+      "id": "seat_2_seat-pan-hinge",
+      "part": "seat_2_seat_pan",
+      "type": "revolute",
+      "pivot": [
+        0,
+        0.49,
+        -8.115
+      ],
+      "axis": [
+        1,
+        0,
+        0
+      ],
+      "foldedAngleDegrees": 0,
+      "openAngleDegrees": -90,
+      "currentAngleDegrees": 0
+    },
+    {
+      "id": "seat_3_seat-pan-hinge",
+      "part": "seat_3_seat_pan",
+      "type": "revolute",
+      "pivot": [
+        0.82,
+        0.49,
+        -8.115
+      ],
+      "axis": [
+        1,
+        0,
+        0
+      ],
+      "foldedAngleDegrees": 0,
+      "openAngleDegrees": -90,
+      "currentAngleDegrees": -90
     }
   ],
   "deformableParts": [
     {
-      "id": "seat-pad",
-      "component": "seat_pan",
+      "id": "seat_1_seat-pad",
+      "component": "seat_1_seat_pan",
       "coreProfile": "seat_foam_core",
       "coverProfile": "seat_upholstery_cover",
       "runtimeDeformation": "not-supported-by-current-scene-format"
     },
     {
-      "id": "back-pad",
-      "component": "backrest",
+      "id": "seat_1_back-pad",
+      "component": "seat_1_backrest",
+      "coreProfile": "seat_foam_core",
+      "coverProfile": "seat_upholstery_cover",
+      "runtimeDeformation": "not-supported-by-current-scene-format"
+    },
+    {
+      "id": "seat_2_seat-pad",
+      "component": "seat_2_seat_pan",
+      "coreProfile": "seat_foam_core",
+      "coverProfile": "seat_upholstery_cover",
+      "runtimeDeformation": "not-supported-by-current-scene-format"
+    },
+    {
+      "id": "seat_2_back-pad",
+      "component": "seat_2_backrest",
+      "coreProfile": "seat_foam_core",
+      "coverProfile": "seat_upholstery_cover",
+      "runtimeDeformation": "not-supported-by-current-scene-format"
+    },
+    {
+      "id": "seat_3_seat-pad",
+      "component": "seat_3_seat_pan",
+      "coreProfile": "seat_foam_core",
+      "coverProfile": "seat_upholstery_cover",
+      "runtimeDeformation": "not-supported-by-current-scene-format"
+    },
+    {
+      "id": "seat_3_back-pad",
+      "component": "seat_3_backrest",
       "coreProfile": "seat_foam_core",
       "coverProfile": "seat_upholstery_cover",
       "runtimeDeformation": "not-supported-by-current-scene-format"
     }
   ],
   "rendererStatus": {
-    "current": "The .bin contains static geometry in the selected pose.",
-    "future": "The manifest identifies rigid parts, the seat-pan revolute joint, and foam-backed pads. Runtime articulation and deformation require engine support."
+    "current": "The .bin contains three static seat states (missing pan, raised pan, lowered pan) and one continuous shared mounting rail.",
+    "future": "The manifest identifies each rigid seat, seat-pan hinge and foam-backed pad. Runtime articulation and deformation require engine support."
   }
 }

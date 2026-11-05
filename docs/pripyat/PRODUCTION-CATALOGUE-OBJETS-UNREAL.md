@@ -9,8 +9,8 @@
 ## Priorité actuelle
 
 1. **Travée de façade Energetik** — première pièce livrée : source native réutilisable, scène native isolée, GLB 2.0 avec cartes PBR et manifeste. Dimensions approximatives reprises du blockout existant; pas de prétention photogrammétrique.
-2. **Siège / rangée d’auditorium** — reprendre la pièce existante en commençant par corriger ses matériaux et détails, en suivant H03 et les photos fournies.
-3. **Enseigne de toiture** — référence H05; lettres cyrilliques, treillis, peinture et corrosion à reprendre uniquement depuis la référence.
+2. **Siège / rangée d’auditorium** — première rangée livrée avec trois états documentés : assise manquante, relevée et abaissée; rail métallique commun et cartes PBR procédurales.
+3. **Enseigne de toiture** — prochaine priorité, référence H05; lettres cyrilliques, treillis, peinture et corrosion à reprendre uniquement depuis la référence.
 
 Les 17 autres familles restent dans le catalogue. Aucun remplissage par objets supposés.
 
@@ -22,12 +22,19 @@ Les 17 autres familles restent dans le catalogue. Aucun remplissage par objets s
 - GLB 2.0 vérifié structurellement, avec trois images incorporées et orientation triangles/normales cohérente. Export natif effectué; import Unreal Editor et comparaison image finale à faire.
 - Les corrections d’éclairage/PBR antérieurement mises en attente restent distinctes de cet asset et ne sont pas incluses dans son matériau.
 
+## Deuxième livraison : rangée de sièges d’auditorium
+
+L’asset `energetik_cinema_seat_row` conserve le même modèle de siège capitonné sur les trois emplacements. La rangée présente une assise absente à gauche, une assise relevée au centre et une assise abaissée à droite, conformément à la référence fournie. Un rail continu relie les trois places.
+
+Le modèle est exporté comme scène native V14 et comme GLB 2.0 pour Unreal Engine. Le GLB regroupe quatre matériaux et incorpore les cartes de couleur, normale et métallique-rugosité. Les cartes sont procédurales et non photographiques. L’identification des matériaux reste approximative tant que les images sources détaillées n’ont pas permis de la confirmer. L’import Unreal et la comparaison visuelle dans le moteur Qt restent à effectuer.
+
+Fiche asset : [ASSET-ENERGETIK-AUDITORIUM-SEAT-ROW.md](ASSET-ENERGETIK-AUDITORIUM-SEAT-ROW.md).
+
 ## Étapes suivantes
 
-1. Contrôler la travée dans le moteur Qt et l’importer dans Unreal Engine; comparer aux références et ajuster échelle UV, lumière et relief.
-2. Reprendre le siège avec les mêmes contrôles et éviter les brillances métalliques constatées dans l’image précédente.
-3. Créer l’enseigne comme troisième pièce seulement après lecture rapprochée de H05.
-4. Revenir aux corrections d’éclairage du rendu après les actifs prioritaires.
+1. Contrôler les deux assets dans le moteur Qt et importer les GLB dans Unreal Engine; comparer aux références et ajuster l’échelle UV, la lumière et les reliefs.
+2. Créer l’enseigne comme troisième pièce après lecture rapprochée de H05.
+3. Revenir aux corrections d’éclairage du rendu après les assets prioritaires.
 
 Branche : `feature/pripyat-catalog-assets-261105` — [ticket #4](https://github.com/glaby91/moteur3d/issues/4).
 

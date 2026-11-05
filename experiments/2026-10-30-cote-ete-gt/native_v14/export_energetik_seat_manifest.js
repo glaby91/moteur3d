@@ -15,16 +15,26 @@ const api = {
   capsule: record('capsule'), ellipse: record('ellipse')
 };
 const seatCenters = [-0.82, 0, 0.82];
+const poses = [
+  { id: 'left_missing_pan', folded: false, seatPanMissing: true },
+  { id: 'center_raised_pan', folded: true },
+  { id: 'right_lowered_pan', folded: false }
+];
 const seats = seatCenters.map((centerX, index) => ({
   index: index + 1,
   centerX,
-  instance: buildSeat(api, centerX, 0, 0, { folded: true })
+  pose: poses[index],
+  instance: buildSeat(api, centerX, 0, -8, {
+    variantId: poses[index].id, folded: poses[index].folded,
+    seatPanMissing: !!poses[index].seatPanMissing,
+    omitSharedFrame: true, sideStyle: 'padded'
+  })
 }));
 const supportStart = objects.length;
-api.capsule([-1.25, 0.13, 0.27], [1.25, 0.13, 0.27], 0.038, 'seatSteel');
-for (const postX of [-1.23, -0.41, 0.41, 1.23]) {
-  api.roundBox(postX - 0.045, 0.08, 0.19, postX + 0.045, 0.52, 0.28, 0.025, 'seatWood');
-}
+api.capsule([-1.235, 0.405, -7.975], [1.235, 0.405, -7.975], 0.027, 'seatSupportPaint');
+for (const postX of [-1.235, -0.41, 0.41, 1.235])
+  api.capsule([postX, 0.405, -7.975], [postX, 0.485, -7.975], 0.019, 'seatSteel');
+api.capsule([0, 0.405, -7.975], [0, 0.025, -7.975], 0.031, 'seatSupportPaint');
 const components = seats.flatMap(({ index, instance }) =>
   instance.components.map(component => ({ ...component, id: `seat_${index}_${component.id}` }))
 );
@@ -62,7 +72,7 @@ const manifest = {
   schema: 'm3d-asset-manifest-v1',
   asset: 'energetik-folding-cinema-seat-row',
   units: 'metres',
-  pose: { seatCount: seats.length, folded: true },
+  pose: { seatCount: seats.length, variants: poses.map(pose => pose.id), sharedRail: true },
   geometry: {
     objectCount: objects.length - 1,
     sceneObjectRange: [1, objects.length],
@@ -76,7 +86,7 @@ const manifest = {
   joints,
   deformableParts,
   rendererStatus: {
-    current: 'The .bin contains static geometry for three folded seats and their shared mounting structure.',
+    current: 'The .bin contains three static seat states (missing pan, raised pan, lowered pan) and one continuous shared mounting rail.',
     future: 'The manifest identifies each rigid seat, seat-pan hinge and foam-backed pad. Runtime articulation and deformation require engine support.'
   }
 };

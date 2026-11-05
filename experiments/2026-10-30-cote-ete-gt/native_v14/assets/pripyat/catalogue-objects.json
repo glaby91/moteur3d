@@ -168,7 +168,10 @@
         "prp_wood_weathered"
       ],
       "confidence": "confirmed_shape_material_pending",
-      "status": "priority-first-pass"
+      "status": "first-hero-asset-complete-materials-approximate",
+      "asset": "energetik_cinema_seat_row",
+      "variants": ["left_missing_pan", "center_raised_pan", "right_lowered_pan"],
+      "notes": "One repeated auditorium-seat construction in three photo-supported damage/pose states; material identity remains approximate."
     },
     {
       "id": "stage_lighting_rig",
@@ -306,13 +309,15 @@
         "H03",
         "user-provided Energetik seat photographs"
       ],
-      "reason": "existing 80-primitive prototype can be replaced by a more faithful textured model",
+      "reason": "preserve the photo-supported padded side structure while adding coherent seat states, a shared mounting rail and authored PBR maps",
       "deliverables": [
         "high-detail seat/row mesh",
-        "defined upholstery and steel materials",
+        "procedural non-photographic vinyl, painted-steel, steel and wood PBR maps",
         "native scene instance",
-        "GLB 2.0"
-      ]
+        "GLB 2.0",
+        "per-seat component and hinge manifest"
+      ],
+      "status": "complete-first-pass-review-in-engine-pending"
     },
     {
       "id": "roof_sign",

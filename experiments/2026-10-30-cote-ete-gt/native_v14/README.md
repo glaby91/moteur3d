@@ -110,12 +110,17 @@ Le build `261103-0020` ajoute au benchmark les compteurs de dispatch des noyaux 
 
 ## Siège rabattable du Palais Energetik
 
-La géométrie réutilisable du siège est définie dans `assets/pripyat/energetik_cinema_seat.js`. La scène complète l’appelle pour chaque place; `scene_energetik_seat_preview.js` l’appelle seule dans une scène minimale. Le prototype compte 80 éléments pour le siège, dont les couches de coque et de coussin, les côtés, les charnières, les boulons et les coutures; ce sont des volumes natifs du moteur, pas un maillage photogrammétrique. Les options de construction permettent notamment de choisir une assise ouverte ou rabattue. Les matériaux visuels sont le tissu bordeaux, le passepoil discret, le bois et le métal. `energetik_seat_physics_profiles.json` conserve les propriétés nécessaires aux futurs calculs : masse, volume, densité, modules élastiques, amortissement et courbe de compression de la mousse. Les valeurs non mesurées sont laissées vides, et les formules sont documentées dans l’annexe exportée.
+La géométrie réutilisable du siège est définie dans `assets/pripyat/energetik_cinema_seat.js`. La scène de prévisualisation présente trois états du même modèle, conformément à la référence : assise manquante, relevée et abaissée, reliées par un rail métallique continu. Le modèle compte 125 primitives pour la rangée, dont les coques et coussins, les côtés capitonnés, les charnières, les boulons et les coutures; ce sont des volumes natifs du moteur, pas un maillage photogrammétrique. Le manifeste conserve les pivots et profils physiques prévus; les valeurs non mesurées restent vides.
+
+Le GLB `assets/pripyat/energetik_cinema_seat_row.glb` réunit quatre matériaux et leurs cartes PBR intégrées pour Unreal Engine. Les textures 512 px sont procédurales et non photographiques. Elles couvrent le vinyle brun usé, la peinture des supports, l’acier et les garnitures en bois. L’import Unreal et le contrôle visuel dans le moteur Qt restent à effectuer.
 
 Pour recalculer seulement le prototype, sans compiler l’application Qt ni reconstruire la ville :
 
 ```sh
 M3D_SKIP_IMPORTED_CAR=1 node export_scene.js source_v1314.html scene_energetik_seat_preview.bin scene_energetik_seat_preview.js
+python3 tools/generate_seat_maps.py
+node tools/export_energetik_seat_row_glb.js
+node export_energetik_seat_manifest.js scene_energetik_seat_preview.assets.json
 ```
 
-Ouvrez ensuite `scene_energetik_seat_preview.bin` dans le moteur par **Scène → Ouvrir une scène…**. La scène autonome contient uniquement le siège et un petit sol neutre. Le workflow GitHub `Export Energetik cinema seat preview` produit le binaire et l’annexe `.assets.json` sans compiler l’application. Le binaire contient une pose statique; le manifeste décrit les pièces, l’axe de charnière et les profils physiques prévus. Après validation du prototype, le même module peut être utilisé par d’autres scènes ou niveaux.
+Ouvrez ensuite `scene_energetik_seat_preview.bin` dans le moteur par **Scène → Ouvrir une scène…**. La scène autonome contient la rangée et un petit sol neutre. Le workflow de build Qt exporte la scène native et le GLB, puis les inclut dans le pack Windows. Le binaire contient des poses statiques; le manifeste décrit les pièces, les axes de charnière et les profils physiques prévus. Le même module peut être réutilisé dans d’autres scènes.
