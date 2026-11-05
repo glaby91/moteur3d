@@ -15,6 +15,8 @@ Cette note rassemble les références partagées pour guider la scène de Pripia
 | [Chernobyl & Pripyat (1988) — Rare Footage, Flying Over The Zone](https://youtu.be/E92TnfQuQps) | Vues aériennes de Pripiat environ deux ans après l’accident, selon le titre et la description de la vidéo. Utile pour comparer les volumes urbains, les axes et la végétation en 1988. | C’est une vue postérieure à l’évacuation : elle ne documente pas la circulation ordinaire, les habitants ni leurs vêtements le 26 avril 1986. La vidéo doit être visionnée plan par plan avant d’en tirer un placement précis. |
 | [Pripyat through the years (1977–2024)](https://youtu.be/6i1zngYkWtk) | Montage comportant de nombreuses photographies et vues de Pripiat couvrant plusieurs périodes. À exploiter comme index visuel pour repérer les bâtiments, rues, voitures et changements dans le temps. | Toutes les images ne représentent pas Pripiat en 1986 : identifier leur période avant de les utiliser pour reconstituer la ville au moment de la catastrophe. La description précise que cette version remplace une version antérieure et que certaines photos ont été retirées après des réclamations de droits. |
 
+| [Ukraine : la ville de Pripyat figée dans le temps — AFP](https://youtu.be/coF8WGjlhqc) | Reportage récent sur l’état actuel de Pripiat, avec des vues de la ville abandonnée. Sert de référence pour l’état post-accident, la végétation et la dégradation visibles aujourd’hui. | Ce n’est pas une source pour reconstituer Pripiat au 26 avril 1986 : elle documente une ville vidée après l’accident, plusieurs décennies plus tard. |
+
 ## Relevé visuel à effectuer
 
 Pour chaque photographie ou plan retenu, noter le minutage, la période supposée, le lieu si identifiable, puis les éléments visibles :
