@@ -18,3 +18,5 @@ Les coordonnées sont en mètres. `target` désigne le point visé par la camér
 | 10 | Façade de nuit |
 
 Les noms de pièces servent de repères de visite. Les photos et le plan transmis restent les sources pour confirmer la fonction et la disposition exacte des locaux.
+
+La vue 2 place la caméra du côté foyer (+X) et vise le centre de l’ouverture à `z = -30,5 m`. Elle regarde la fresque sur sa face peinte, en passant par les portes alignées du foyer et du retour de cloison.
