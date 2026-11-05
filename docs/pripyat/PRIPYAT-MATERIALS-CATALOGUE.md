@@ -1,6 +1,6 @@
 # Matériaux — scène Pripiat
 
-La scène V14 emploie la palette intégrée et les cartes procédurales du moteur. Le plafond actuel est de 512 × 512 pixels, avec mipmaps RGB565. Le premier export ne contient pas encore de cartes normale/rugosité dédiées à Pripiat.
+La scène V14 emploie la palette intégrée et les cartes procédurales du moteur. Le format natif V5 accepte des albedos RGB888 jusqu’à 2048 × 2048 avec mipmaps; les scènes V3/V4 et leurs albedos RGB565 restent lisibles. Les cartes normales et rugosité natives sont actuellement encodées en RGB565. Le catalogue GLB Pripiat peut embarquer les cartes couleur, normale et rugosité importées dans son export natif.
 
 ## Palette employée dans `scene_pripyat_central.js`
 

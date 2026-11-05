@@ -9,4 +9,6 @@ Le build 261103-0028 ajoute un backend Direct3D 11 facultatif à l’application
 - Si le périphérique, les shaders, les buffers ou les cibles de rendu ne peuvent pas être créés, l’application affiche la raison dans les diagnostics et revient au rendu CPU complet.
 - Le mode GPU sert à parcourir la scène en temps réel. Il ne doit pas être comparé au CPU comme une image de qualité identique.
 
-Le backend utilise la rasterisation Direct3D 11, compatible avec les GPU Windows qui prennent en charge D3D11, dont Intel HD Graphics 620. Le chemin ne requiert pas DirectX Raytracing (DXR).
+Le backend utilise la rasterisation Direct3D 11, compatible avec les GPU Windows qui prennent en charge D3D11, dont Intel HD Graphics 620. Il demande le MSAA 4× si le format couleur et le tampon de profondeur l’acceptent, puis tente 2× avant le repli sans MSAA. Les textures couleur s’échantillonnent en sRGB et la cible de rendu encode la sortie en sRGB; les cartes normales et rugosité restent linéaires. Le sampler utilise jusqu’à 16× d’anisotropie, selon le niveau pris en charge par le périphérique. Le chemin ne requiert pas DirectX Raytracing (DXR).
+
+La compilation et le calcul du nombre de niveaux MSAA sont intégrés, mais le changement demande encore une validation visuelle sur Windows et sur un GPU réellement compatible. En particulier, les scènes natives conservent leur référence CPU; l’aperçu raster Direct3D reste un chemin de navigation avec des différences d’éclairage et de transparence.

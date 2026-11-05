@@ -26,6 +26,8 @@ enum class Kind:uint8_t{Triangle=0,Box=1,RoundBox=2,Capsule=3,Cone=4,Ellipse=5};
 struct Obj { Kind kind{}; uint8_t mat=0; V mn,mx,a,b,c,n0,n1,n2,uv0,uv1,uv2,center,core; float r=0,r1=0,k=0,len=0,len2=0; };
 struct Node { V mn,mx; int32_t left=-1,right=-1,start=0,count=0; bool simdTrianglePair=false; };
 struct Level { uint32_t size=0; std::vector<uint16_t> p; };
+// Version-5 albedo mips keep full 8-bit RGB channels (0x00RRGGBB).
+struct ColorLevel { uint32_t size=0; std::vector<uint32_t> p; };
 // Both optical controls are percentages; transmission is thin, straight-through glass.
 struct Ray { V o,d; };
 struct Hit { float t=INF; V p,n; int mat=-1,id=-1; };
@@ -33,7 +35,7 @@ struct Camera { V eye,f,r,u; float tanHalf=0,aspect=1,pixelAngle=0,focusDistance
 struct RendererCapabilities { bool dxrHardware=false; bool dxrBackend=false; };
 struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,depthReads=0,shadowRays=0; uint64_t simdRayPackets=0,simdTrianglePackets=0,simdTextureSamples=0,simdLightBatches=0; double ms=0,postMs=0,shadowMs=0; unsigned threads=1; bool avx2=false,gpu=false; };
 struct Light { V p; float radius,intensity; V color; };
-struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPercent=0; float refractiveIndex=1.5f; std::vector<Level> mip,normalMip,roughnessMip; };
+struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPercent=0; float refractiveIndex=1.5f; std::vector<Level> mip,normalMip,roughnessMip; std::vector<ColorLevel> colorMip; };
 struct Scene { bool underwaterEnvironment=false; std::vector<Obj> obj; std::vector<Node> node; std::vector<uint32_t> order; std::vector<Material> mat; std::vector<Light> lights; int32_t root=-1; };
 struct ShadowMap { int size=1024; float span=30,dist=42; V base={0,1.5f,0},right,up;std::vector<float>d,min,max; };
 extern V sun,skyZenith,skyHorizon,sunTint;

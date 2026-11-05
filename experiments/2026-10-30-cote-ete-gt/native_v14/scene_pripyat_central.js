@@ -572,7 +572,9 @@ function makeScene() {
     [52,7,14],[48,-11,13],[-52,49,12],[-48,2,11],[-44,-12,12],
     [-34,-10,13],[34,-11,12],[43,-11,13],[-56,68,11],[53,67,12]
   ];
-  for (let i=0;i<matureTrees.length;i++) poplar(...matureTrees[i],0.76+(i%4)*0.11);
+  if (process.env.M3D_IMPORT_PRIPYAT_GLB !== '1') {
+    for (let i=0;i<matureTrees.length;i++) poplar(...matureTrees[i],0.76+(i%4)*0.11);
+  }
   // Young volunteer trees and shrubs growing through failed paving.
   const saplings=[[-37,13],[-24,7],[-19,29],[-7,48],[2,12],[8,31],[15,46],[28,11],
     [37,36],[-46,40],[47,42],[-4,56],[30,-4],[-31,-2],[4,2],[18,6]];

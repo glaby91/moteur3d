@@ -2,7 +2,7 @@
 
 ## Repères de version
 
-- **Build natif :** `261104-0001`.
+- **Build natif :** `261105-0001`.
 - **Révision GitHub :** SHA court du commit, injecté à la compilation.
 - **Branche GitHub :** nom exact de la branche, injecté à la compilation.
 - **Scène et géométrie source :** V13.14.
@@ -18,13 +18,13 @@ Une note sur la continuité x86 entre Athlon et Zen et ses limites pour les opti
 
 ## Sources de scène modifiables
 
-Le build de démonstration `261104-0001` ouvre automatiquement Energetik/Pripiat et n’embarque que cette scène. Les sources des décors côtier, Orange et Rapture restent conservées dans le dépôt GitHub.
+Le build de démonstration `261105-0001` ouvre automatiquement Energetik/Pripiat et n’embarque que cette scène. Les sources des décors côtier, Orange et Rapture restent conservées dans le dépôt GitHub.
 
 Les décors restent des sources indépendantes : `scene_coastal_v1314.js`, `scene_orange_macro.js`, l’étude Rapture `scene_rapture.js` et la scène Pripiat `scene_pripyat_central.js`. Chaque fichier décrit géométrie, placement et matériaux; `source_v1314.html` fournit les primitives et l’aperçu, tandis que `export_scene.js` produit un binaire natif. La bathysphère Rapture reçoit une coque segmentée et rivetée, un grand hublot avant réellement ouvert dans les deux enveloppes, des hublots latéraux élargis et un poste de pilotage ambré visible avec instruments et commandes. L’ouverture de `scene_rapture.bin` sélectionne un cadrage rapproché face à la bathysphère. La vue se pilote par glisser gauche (orbite), glisser droit (déplacement), molette (zoom) et touches AZERTY Z/Q/S/D et R/X (Z avancer, Q gauche, S reculer, D droite, R monter, X descendre); pendant les mouvements, l’image est recalculée en aperçu 480 × 270, puis à la qualité et à la résolution choisies après 450 ms d’arrêt. Le jeton commémoratif argenté avec un « R » en relief reste dans sa vitrine. Le build 261103-0003 affine la découpe du hublot, recule le cadrage initial et atténue les reflets de la coque. Le build 261103-0004 éloigne le parcours vidéo rotatif Rapture pour éviter que la caméra ne longe la coque ou les murs voisins. Les matériaux pierre, bronze et verre ont des cartes couleur, normale et rugosité; le verre utilise Fresnel/réfraction et les lumières locales n’ont pas encore d’ombres propres.
 
 ## Scène Pripiat — secteur central
 
-La branche `pripiat` ajoute `scene_pripyat_central.js`, exportée en V4 par le même pipeline que Rapture et la scène côtière. Elle construit la place centrale, les façades principales d’Energetik et de l’hôtel Polissya, les abords résidentiels, les arbres et le mobilier.
+La branche `pripiat` ajoute `scene_pripyat_central.js`, exportée par le même pipeline que Rapture et la scène côtière. Le catalogue GLB optionnel produit un binaire V5. La scène décrit la place centrale, les façades principales d’Energetik et de l’hôtel Polissya, les abords résidentiels, les arbres et le mobilier.
 
 Le parcours automatique dédié suit une boucle dans cette zone et affiche chaque vue au rythme du moteur. Les autres scènes gardent leur aperçu rotatif. Les références cartographiques, le registre de photos documentaires et les niveaux de matériaux sont décrits dans [docs/pripyat/README.md](../../../docs/pripyat/README.md). La vue « Cinéma / auditorium » sert de salle de contrôle visuel pour le build `261104-0011`.
 
@@ -40,7 +40,7 @@ L’audit du build `261102-0005` reste dans [AUDIT-TECHNIQUE-261102-0005.md](doc
 
 Les sources de travail sont séparées dans `src/` afin que chaque partie puisse évoluer indépendamment :
 
-- `src/m3d_scene.cpp` : lecture/validation des binaires V3 historiques et V4.
+- `src/m3d_scene.cpp` : lecture/validation des binaires V3 historiques, V4 et V5.
 - `src/m3d_lighting.cpp` : soleil, ciel et sources lumineuses pilotés par l’heure.
 - `src/m3d_intersection.cpp` : intersections des primitives, calcul des normales et parcours BVH avec directions inverses par rayon et données de triangle préparées au chargement.
 - `src/m3d_shading.cpp` : ombres solaires, lumières globales et propres à la scène, cartes normales/rugosité, bump, réflexions et transmission réfractée par Fresnel.
@@ -70,9 +70,27 @@ Le lissage des contours fonctionne à la résolution de sortie : les pixels pré
 
 Le menu **Scène → Ouvrir une scène…** permet de charger un fichier `.bin` exporté par `export_scene.js`, dont les scènes côtière, orange ou Rapture. Le chargement et la reconstruction des ombres se font sur le thread de rendu; la scène active reste conservée si le fichier choisi ne peut pas être chargé. Pour Rapture, l’interface Qt choisit le cadrage de départ et active le bloom; la case reste réglable.
 
-La case **Aperçu rotatif — 800 × 600** ouvre une seconde fenêtre qui calcule en 400 × 300 et fait tourner la caméra autour de la scène. Les images sont assemblées dans un tampon et publiées après le rendu et les effets de sortie; l’image terminée précédente reste visible pendant le calcul. Les cartes PBR de l’orange et de Rapture sont intégrées dans les binaires V4; le chargeur conserve la lecture des anciennes scènes V3.
+La case **Aperçu rotatif — 800 × 600** ouvre une seconde fenêtre qui calcule en 400 × 300 et fait tourner la caméra autour de la scène. Les images sont assemblées dans un tampon et publiées après le rendu et les effets de sortie; l’image terminée précédente reste visible pendant le calcul. Les cartes PBR de l’orange et de Rapture sont intégrées dans le format de scène; le chargeur conserve la lecture des anciennes scènes V3/V4.
 
-Le moteur natif accepte des textures de 512² à 2048². Les builds Pripyat produisent désormais les scènes principales en 2048² avec une chaîne complète jusqu’à 1². Le rendu CPU filtre bilinéairement dans chaque niveau et interpole entre deux niveaux mip; l’aperçu DirectX utilise le filtrage mip et l’anisotropie 8×.
+Le moteur natif accepte des textures de 512² à 2048². Le format de scène V5 ajoute les albedos RGB888, tout en gardant la lecture des albedos RGB565 des scènes V3/V4; les chaînes normales et rugosité restent encodées en RGB565. Les scènes Pripiat exportées avec la commande ci-dessous embarquent les albedos des GLB sans réduction RGB565 et les mipmaps couleur, normale et rugosité jusqu’à 1². Le rendu CPU filtre bilinéairement dans chaque niveau et interpole entre deux niveaux mip. L’aperçu DirectX 11 applique le décodage/encodage sRGB, demande le MSAA 4× (repli 2× puis sans MSAA selon le GPU), et utilise le filtrage anisotrope jusqu’à 16×.
+
+### Import natif du catalogue GLB Pripiat
+
+L’importeur lit les primitives triangulées glTF 2.0/GLB, les indices, transformations de nœuds, normales, UV0 et les textures glTF de couleur, normales et rugosité. Les cartes couleur gardent 8 bits par canal dans le format V5; les cartes normales et rugosité restent RGB565. Les mipmaps sont calculées au moment de l’export. Le catalogue de 26 modèles remplace les 20 peupliers procéduraux de la place et ajoute les six modèles de mobilier/façade du pack source. Les fichiers PNG référencés par les GLB doivent être présents à côté de leurs modèles; les images intégrées en data URI ou dans les chunks GLB, les vertex colors, l’alpha cutout/blend et le canal metallic ne sont pas encore interprétés par ce chemin natif.
+
+Après extraction du pack `Pripyat-objets-PBR-2048`, exportez la scène depuis ce dossier :
+
+L’export GLB nécessite Python 3 avec Pillow et NumPy, en plus de Node.js. Le pack d’objets et ses PNG doivent rester extraits pendant l’export.
+
+```sh
+M3D_SKIP_IMPORTED_CAR=1 \
+M3D_IMPORT_PRIPYAT_GLB=1 \
+M3D_PRIPYAT_OBJECTS_DIR="/chemin/vers/assets/objects" \
+M3D_TEXTURE_SIZE=2048 \
+node export_scene.js source_v1314.html scene_pripyat_central.bin scene_pripyat_central.js
+```
+
+L’option catalogue est explicite afin que les builds standards restent reproductibles sans le pack source externe. L’export d’intégration a produit 561 340 objets, dont 538 788 triangles et 519 220 triangles apportés par les GLB. Le binaire généré est volumineux : prévoyez plusieurs centaines de mégaoctets de stockage et de mémoire selon la scène.
 
 ## Interface Qt multiplateforme
 
@@ -96,7 +114,7 @@ Sur une distribution Linux où Qt 6 est installé dans les chemins système, `-D
 
 ## Voiture 1970s Coupe
 
-Le fichier source CC0 est dans `assets/1970s-coupe/1970s-coupe.glb`. L’exporteur extrait le maillage glTF (positions, normales, UV et matériaux), applique son placement déclaré dans `scene_coastal_v1314.js`, puis l’ajoute au BVH de la scène. Les textures source de carrosserie et de pneus restent stockées dans le format RGB565 historique 512→8; l’exporteur complète les niveaux jusqu’à 1² afin que le moteur ne bloque pas le LOD au niveau 8². Le moteur applique son éclairage et ses reflets natifs au matériau carrosserie; les pourcentages de réflexion se règlent dans la source de scène. Le format V4 transporte les cartes couleur, normale et rugosité; les scènes V3 historiques restent lisibles.
+Le fichier source CC0 est dans `assets/1970s-coupe/1970s-coupe.glb`. L’exporteur extrait le maillage glTF (positions, normales, UV et matériaux), applique son placement déclaré dans `scene_coastal_v1314.js`, puis l’ajoute au BVH de la scène. Les textures source de carrosserie et de pneus restent stockées dans le format RGB565 historique 512→8; l’exporteur complète les niveaux jusqu’à 1² afin que le moteur ne bloque pas le LOD au niveau 8². Le moteur applique son éclairage et ses reflets natifs au matériau carrosserie; les pourcentages de réflexion se règlent dans la source de scène. Les scènes V3/V4 restent lisibles avec le format V5.
 
 La source est publiée sous CC0 1.0 : https://grab3d.com/models/vehicles/1970s-coupe/.
 

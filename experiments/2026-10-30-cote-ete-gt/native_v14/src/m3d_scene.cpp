@@ -18,12 +18,12 @@ bool loadScene(const std::filesystem::path& path,Scene& s,std::wstring& error){
   char magic[8]{};uint32_t version=0,no=0,nn=0,nord=0,nm=0,nt=0,texSize=0;int32_t root=-1;
   if(!readBytes(f,magic,8)||std::memcmp(magic,"M3D1314",7)||magic[7]!='\0'||!readU32(f,version)||!readU32(f,no)||!readU32(f,nn)||!readI32(f,root)||!readU32(f,nord)||!readU32(f,nm)||!readU32(f,nt)||!readU32(f,texSize))
    return fail(error,L"En-tête de scène absent ou tronqué.");
-  if((version!=3&&version!=4)||!no||no>4200000||!nn||nn>4200000||nord!=no||!nm||nm>256||nt!=nm||texSize<512||texSize>2048||(texSize&(texSize-1))!=0||root<0||(uint32_t)root>=nn)
+  if((version<3||version>5)||!no||no>4200000||!nn||nn>4200000||nord!=no||!nm||nm>256||nt!=nm||texSize<512||texSize>2048||(texSize&(texSize-1))!=0||root<0||(uint32_t)root>=nn)
    return fail(error,L"En-tête de scène V13.14 invalide (version, quantités ou racine BVH).");
   constexpr uint64_t maxSceneBytes=2048ull*1024ull*1024ull;
   uint64_t estimatedBytes=uint64_t(no)*sizeof(Obj)+uint64_t(nn)*sizeof(Node)+uint64_t(nord)*sizeof(uint32_t)+uint64_t(nm)*sizeof(Material);
   if(estimatedBytes>maxSceneBytes)return fail(error,L"La géométrie de la scène dépasse la limite de mémoire de sécurité (2 Gio).");
-  auto reserveTexture=[&](uint32_t size){const uint64_t bytes=uint64_t(size)*size*sizeof(uint16_t);if(bytes>maxSceneBytes-estimatedBytes)return false;estimatedBytes+=bytes;return true;};
+  auto reserveTexture=[&](uint32_t size,uint32_t bytesPerTexel=2){const uint64_t bytes=uint64_t(size)*size*bytesPerTexel;if(bytes>maxSceneBytes-estimatedBytes)return false;estimatedBytes+=bytes;return true;};
   Scene tmp;tmp.root=root;tmp.obj.resize(no);tmp.node.resize(nn);tmp.order.resize(nord);tmp.mat.resize(nm);
   for(auto& m:tmp.mat){char name[24]{};if(!readBytes(f,name,sizeof(name)))return fail(error,L"Table de matériaux tronquée.");size_t n=0;while(n<sizeof(name)&&name[n])++n;m.name.assign(name,n);uint16_t iorMilli=0;if(!readU8(f,m.reflectivityPercent)||!readU8(f,m.transmissionPercent)||!readU16(f,iorMilli)||m.reflectivityPercent>100||m.transmissionPercent>100||(iorMilli&& (iorMilli<1000||iorMilli>3000)))return fail(error,L"Paramètres optiques du matériau invalides ou tronqués.");if(iorMilli)m.refractiveIndex=iorMilli*.001f;}
   for(auto& o:tmp.obj){
@@ -60,9 +60,11 @@ bool loadScene(const std::filesystem::path& path,Scene& s,std::wstring& error){
    for(int32_t k=0;k<r.count&&triangles;k++)triangles=tmp.obj[tmp.order[r.start+k]].kind==Kind::Triangle;
    n.simdTrianglePair=triangles;
   }
-  for(auto& m:tmp.mat){uint32_t levels=0;if(!readU32(f,levels)||levels<7||levels>12)return fail(error,L"Pyramide de texture invalide.");m.mip.resize(levels);uint32_t expected=0;
-   for(size_t i=0;i<m.mip.size();i++){auto& l=m.mip[i];uint32_t size=0;if(!readU32(f,size)||(i==0&&(size<512||size>texSize||(size&(size-1))!=0))||(i>0&&size!=expected)||!reserveTexture(size))return fail(error,L"Taille de niveau mip invalide ou limite mémoire de texture dépassée.");l.size=size;l.p.resize(size_t(size)*size);for(auto& v:l.p)if(!readU16(f,v))return fail(error,L"Texture RGB565 tronquée.");expected=size>>1;}
-   if(m.mip.back().size!=8&&m.mip.back().size!=1)return fail(error,L"La pyramide de texture doit se terminer à 8 px ou 1 px.");
+  for(auto& m:tmp.mat){uint32_t levels=0;if(!readU32(f,levels)||levels<7||levels>12)return fail(error,L"Pyramide de texture invalide.");uint32_t expected=0;
+   if(version>=5){m.colorMip.resize(levels);for(size_t i=0;i<m.colorMip.size();i++){auto& l=m.colorMip[i];uint32_t size=0;if(!readU32(f,size)||(i==0&&(size<512||size>texSize||(size&(size-1))!=0))||(i>0&&size!=expected)||!reserveTexture(size,4))return fail(error,L"Taille de niveau mip RGB888 invalide ou limite mémoire de texture dépassée.");l.size=size;l.p.resize(size_t(size)*size);for(auto& v:l.p)if(!readU32(f,v))return fail(error,L"Texture RGB888 tronquée.");expected=size>>1;}}
+   else{m.mip.resize(levels);for(size_t i=0;i<m.mip.size();i++){auto& l=m.mip[i];uint32_t size=0;if(!readU32(f,size)||(i==0&&(size<512||size>texSize||(size&(size-1))!=0))||(i>0&&size!=expected)||!reserveTexture(size))return fail(error,L"Taille de niveau mip invalide ou limite mémoire de texture dépassée.");l.size=size;l.p.resize(size_t(size)*size);for(auto& v:l.p)if(!readU16(f,v))return fail(error,L"Texture RGB565 tronquée.");expected=size>>1;}}
+   const uint32_t finalSize=version>=5?m.colorMip.back().size:m.mip.back().size;
+   if(finalSize!=8&&finalSize!=1)return fail(error,L"La pyramide de texture doit se terminer à 8 px ou 1 px.");
   }
   auto readMap=[&](std::vector<Level>& chain){uint32_t levels=0;if(!readU32(f,levels)||levels>12)return false;if(levels==0)return true;if(levels<7)return false;chain.resize(levels);uint32_t expected=0;for(size_t i=0;i<chain.size();i++){auto& l=chain[i];uint32_t size=0;if(!readU32(f,size)||(i==0&&(size<512||size>texSize||(size&(size-1))!=0))||(i>0&&size!=expected)||!reserveTexture(size))return false;l.size=size;l.p.resize(size_t(size)*size);for(auto& v:l.p)if(!readU16(f,v))return false;expected=size>>1;}return chain.back().size==8||chain.back().size==1;};
   for(auto& m:tmp.mat)if(!readMap(m.normalMip)||!readMap(m.roughnessMip))return fail(error,L"Cartes PBR absentes, tronquées ou de taille invalide.");
