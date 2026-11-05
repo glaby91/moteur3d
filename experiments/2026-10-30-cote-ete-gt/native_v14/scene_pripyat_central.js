@@ -554,6 +554,15 @@ function makeScene() {
     [-24,52,0],[18,52,0],[0,22,Math.PI/2],[0,-3,0]
   ]) bench(b[0],b[1],b[2]);
 
+  // Cheap painted-tube public chairs with weathered timber slats. Keep a few
+  // individually placed pieces around the plaza; these are not auditorium seats.
+  for (const chair of [
+    [-25, 11, 0, 'worn_intact'], [-22, 11, Math.PI/2, 'missing_back_slat'],
+    [19, 11, Math.PI/2, 'worn_intact'], [22, 11, 0, 'missing_seat_slat'],
+    [-3, 29, 0, 'broken_slat'], [1, 29, Math.PI/2, 'worn_intact']
+  ]) buildPripyatOutdoorChair({objects,box,roundBox,capsule,ellipse},chair[0],0,chair[1],
+    {angle:chair[2],variant:chair[3]});
+
   // Poplars and younger trees: slender trunks with narrow crowns, progressively
   // varied so the square does not read as a repeated asset grid.
   function poplar(x, z, h, crownScale=1) {

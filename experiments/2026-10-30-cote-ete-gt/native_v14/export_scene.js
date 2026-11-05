@@ -8,6 +8,7 @@ const { addGlbCar, addGlbAsset, readRgb565MipChain } = require('./gltf_scene_imp
 globalThis.buildEnergetikCinemaSeat = require('./assets/pripyat/energetik_cinema_seat.js');
 globalThis.buildEnergetikFacadeBay = require('./assets/pripyat/energetik_facade_bay.js').buildEnergetikFacadeBay;
 globalThis.buildEnergetikRoofNeonSign = require('./assets/pripyat/energetik_roof_neon_sign.js').buildEnergetikRoofNeonSign;
+globalThis.buildPripyatOutdoorChair = require('./assets/pripyat/pripyat_outdoor_chair.js');
 
 function extendMipChain(levels, mode='color') {
   while (levels[levels.length - 1].size > 1) {

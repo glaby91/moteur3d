@@ -7,7 +7,7 @@
     "mainViews": 8,
     "total": 100
   },
-  "familyCount": 20,
+  "familyCount": 21,
   "materialCatalogue": "experiments/2026-10-30-cote-ete-gt/native_v14/docs/PRIPYAT-MATERIALS-CATALOGUE.md",
   "materialCount": 22,
   "materialIds": [
@@ -170,7 +170,11 @@
       "confidence": "confirmed_shape_material_pending",
       "status": "first-hero-asset-complete-materials-approximate",
       "asset": "energetik_cinema_seat_row",
-      "variants": ["left_missing_pan", "center_raised_pan", "right_lowered_pan"],
+      "variants": [
+        "left_missing_pan",
+        "center_raised_pan",
+        "right_lowered_pan"
+      ],
       "notes": "One repeated auditorium-seat construction in three photo-supported damage/pose states; material identity remains approximate."
     },
     {
@@ -286,6 +290,26 @@
       ],
       "confidence": "confirmed",
       "status": "first-hero-asset-complete"
+    },
+    {
+      "id": "outdoor_chairs",
+      "label": "Fauteuils publics extérieurs bon marché",
+      "source": "photo inventory",
+      "materialIds": [
+        "prp_steel_painted",
+        "prp_steel_rusted",
+        "prp_wood_weathered"
+      ],
+      "confidence": "confirmed_shape_approximate_materials",
+      "status": "first-hero-asset-complete",
+      "asset": "pripyat_outdoor_chair",
+      "variants": [
+        "worn_intact",
+        "missing_seat_slat",
+        "missing_back_slat",
+        "broken_slat"
+      ],
+      "notes": "Mobilier public distinct des sièges d’auditorium : structure tubulaire peinte, lattes de bois simples, corrosion ponctuelle et variantes avec lattes manquantes."
     }
   ],
   "productionStrategy": "quality_first",
@@ -358,8 +382,22 @@
       "nativeSource": "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_roof_neon_sign.js",
       "unrealGlb": "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_roof_neon_sign.glb",
       "manifest": "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_roof_neon_sign.asset.json",
-      "references": ["H05"],
+      "references": [
+        "H05"
+      ],
       "notes": "Nine independently wired Cyrillic letters. Every glass tube and luminous core is split into short, separately named elements; the native sign instance contains 518 primitives at the current 0.28 m segment length. Approximate reconstruction from the H05 reference; glow and UE import remain to validate."
+    },
+    {
+      "id": "pripyat_outdoor_chair",
+      "catalogFamily": "outdoor_chairs",
+      "status": "first-hero-asset-complete",
+      "nativeSource": "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/pripyat_outdoor_chair.js",
+      "unrealGlb": "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/pripyat_outdoor_chair.glb",
+      "manifest": "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/pripyat_outdoor_chair.asset.json",
+      "references": [
+        "Pripyat public furniture photo inventory"
+      ],
+      "notes": "Modèle réutilisable de 0,50 × 0,85 × 0,54 m, quatre variantes d’usure, textures PBR 2048² base color/normal/metallic-roughness, placements natifs et export GLB 2.0."
     }
   ]
 }
