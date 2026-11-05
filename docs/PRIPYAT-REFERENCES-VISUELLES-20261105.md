@@ -3,7 +3,9 @@
 Date d’ajout : 5 novembre 2026  
 Branche : `feature/pripyat-catalog-assets-261105`
 
-Cette note rassemble les références partagées pour guider la scène de Pripiat.\n\nPour relier les références aux bâtiments et objets placés dans la scène, voir aussi le [plan spatial et registre de références](../experiments/2026-10-30-cote-ete-gt/native_v14/docs/pripyat/README.md). Elles servent à comparer l’ambiance, les volumes, les personnes, les véhicules et l’implantation générale. Elles ne constituent pas un relevé architectural ni une preuve de dimensions ou de positions exactes.
+Cette note rassemble les références partagées pour guider la scène de Pripiat.
+
+Pour relier les références aux bâtiments et objets placés dans la scène, voir aussi le [plan spatial et registre de références](../experiments/2026-10-30-cote-ete-gt/native_v14/docs/pripyat/README.md). Elles servent à comparer l’ambiance, les volumes, les personnes, les véhicules et l’implantation générale. Elles ne constituent pas un relevé architectural ni une preuve de dimensions ou de positions exactes.
 
 ## Sources
 
