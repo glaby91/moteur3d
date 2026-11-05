@@ -20,10 +20,10 @@ bool loadScene(const std::filesystem::path& path,Scene& s,std::wstring& error){
    return fail(error,L"En-tête de scène absent ou tronqué.");
   if((version!=3&&version!=4)||!no||no>4200000||!nn||nn>4200000||nord!=no||!nm||nm>256||nt!=nm||texSize<512||texSize>2048||(texSize&(texSize-1))!=0||root<0||(uint32_t)root>=nn)
    return fail(error,L"En-tête de scène V13.14 invalide (version, quantités ou racine BVH).");
-  const uint64_t mipPixels=uint64_t(texSize)*texSize*4/3;
-  const uint64_t estimatedBytes=uint64_t(no)*sizeof(Obj)+uint64_t(nn)*sizeof(Node)+uint64_t(nord)*sizeof(uint32_t)
-      +uint64_t(nm)*mipPixels*2u*3u;
-  if(estimatedBytes>768ull*1024ull*1024ull)return fail(error,L"La scène dépasse la limite de mémoire de sécurité (768 Mio).");
+  constexpr uint64_t maxSceneBytes=2048ull*1024ull*1024ull;
+  uint64_t estimatedBytes=uint64_t(no)*sizeof(Obj)+uint64_t(nn)*sizeof(Node)+uint64_t(nord)*sizeof(uint32_t)+uint64_t(nm)*sizeof(Material);
+  if(estimatedBytes>maxSceneBytes)return fail(error,L"La géométrie de la scène dépasse la limite de mémoire de sécurité (2 Gio).");
+  auto reserveTexture=[&](uint32_t size){const uint64_t bytes=uint64_t(size)*size*sizeof(uint16_t);if(bytes>maxSceneBytes-estimatedBytes)return false;estimatedBytes+=bytes;return true;};
   Scene tmp;tmp.root=root;tmp.obj.resize(no);tmp.node.resize(nn);tmp.order.resize(nord);tmp.mat.resize(nm);
   for(auto& m:tmp.mat){char name[24]{};if(!readBytes(f,name,sizeof(name)))return fail(error,L"Table de matériaux tronquée.");size_t n=0;while(n<sizeof(name)&&name[n])++n;m.name.assign(name,n);uint16_t iorMilli=0;if(!readU8(f,m.reflectivityPercent)||!readU8(f,m.transmissionPercent)||!readU16(f,iorMilli)||m.reflectivityPercent>100||m.transmissionPercent>100||(iorMilli&& (iorMilli<1000||iorMilli>3000)))return fail(error,L"Paramètres optiques du matériau invalides ou tronqués.");if(iorMilli)m.refractiveIndex=iorMilli*.001f;}
   for(auto& o:tmp.obj){
@@ -61,10 +61,10 @@ bool loadScene(const std::filesystem::path& path,Scene& s,std::wstring& error){
    n.simdTrianglePair=triangles;
   }
   for(auto& m:tmp.mat){uint32_t levels=0;if(!readU32(f,levels)||levels<7||levels>12)return fail(error,L"Pyramide de texture invalide.");m.mip.resize(levels);uint32_t expected=0;
-   for(size_t i=0;i<m.mip.size();i++){auto& l=m.mip[i];uint32_t size=0;if(!readU32(f,size)||(i==0&&(size<512||size>texSize||(size&(size-1))!=0))||(i>0&&size!=expected))return fail(error,L"Taille de niveau mip invalide.");l.size=size;l.p.resize(size_t(size)*size);for(auto& v:l.p)if(!readU16(f,v))return fail(error,L"Texture RGB565 tronquée.");expected=size>>1;}
+   for(size_t i=0;i<m.mip.size();i++){auto& l=m.mip[i];uint32_t size=0;if(!readU32(f,size)||(i==0&&(size<512||size>texSize||(size&(size-1))!=0))||(i>0&&size!=expected)||!reserveTexture(size))return fail(error,L"Taille de niveau mip invalide ou limite mémoire de texture dépassée.");l.size=size;l.p.resize(size_t(size)*size);for(auto& v:l.p)if(!readU16(f,v))return fail(error,L"Texture RGB565 tronquée.");expected=size>>1;}
    if(m.mip.back().size!=8&&m.mip.back().size!=1)return fail(error,L"La pyramide de texture doit se terminer à 8 px ou 1 px.");
   }
-  auto readMap=[&](std::vector<Level>& chain){uint32_t levels=0;if(!readU32(f,levels)||levels>12)return false;if(levels==0)return true;if(levels<7)return false;chain.resize(levels);uint32_t expected=0;for(size_t i=0;i<chain.size();i++){auto& l=chain[i];uint32_t size=0;if(!readU32(f,size)||(i==0&&(size<512||size>texSize||(size&(size-1))!=0))||(i>0&&size!=expected))return false;l.size=size;l.p.resize(size_t(size)*size);for(auto& v:l.p)if(!readU16(f,v))return false;expected=size>>1;}return chain.back().size==8||chain.back().size==1;};
+  auto readMap=[&](std::vector<Level>& chain){uint32_t levels=0;if(!readU32(f,levels)||levels>12)return false;if(levels==0)return true;if(levels<7)return false;chain.resize(levels);uint32_t expected=0;for(size_t i=0;i<chain.size();i++){auto& l=chain[i];uint32_t size=0;if(!readU32(f,size)||(i==0&&(size<512||size>texSize||(size&(size-1))!=0))||(i>0&&size!=expected)||!reserveTexture(size))return false;l.size=size;l.p.resize(size_t(size)*size);for(auto& v:l.p)if(!readU16(f,v))return false;expected=size>>1;}return chain.back().size==8||chain.back().size==1;};
   for(auto& m:tmp.mat)if(!readMap(m.normalMip)||!readMap(m.roughnessMip))return fail(error,L"Cartes PBR absentes, tronquées ou de taille invalide.");
   if(version>=4){uint32_t lightCount=0;if(!readU32(f,lightCount)||lightCount>256)return fail(error,L"Table de lumières invalide ou tronquée.");tmp.lights.resize(lightCount);for(auto& l:tmp.lights){if(!readV(f,l.p)||!readF(f,l.radius)||!readF(f,l.intensity)||!readV(f,l.color)||l.radius<=0||l.radius>10000||l.intensity<0||l.intensity>10000||l.color.x<0||l.color.y<0||l.color.z<0||l.color.x>255||l.color.y>255||l.color.z>255)return fail(error,L"Paramètre d’une lumière de scène invalide ou tronqué.");}}
   if(f.peek()!=std::char_traits<char>::eof())return fail(error,L"Le fichier contient des données supplémentaires après la scène.");
