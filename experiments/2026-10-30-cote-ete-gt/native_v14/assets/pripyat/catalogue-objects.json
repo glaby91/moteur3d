@@ -67,7 +67,7 @@
         "prp_concrete_raw"
       ],
       "confidence": "confirmed",
-      "status": "priority-first-pass"
+      "status": "first-hero-asset-complete"
     },
     {
       "id": "covered_walkway",
@@ -326,6 +326,21 @@
         "native scene instance",
         "GLB 2.0"
       ]
+    }
+  ],
+  "heroAssets": [
+    {
+      "id": "energetik_facade_bay",
+      "catalogFamily": "facade_modules",
+      "status": "first-hero-asset-complete",
+      "nativeSource": "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_facade_bay.js",
+      "unrealGlb": "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_facade_bay.glb",
+      "materialId": "prp_concrete_panel",
+      "references": [
+        "Photo 01",
+        "H01"
+      ],
+      "notes": "Approximate scale from existing blockout; not photogrammetric. UE editor import remains to validate."
     }
   ]
 }

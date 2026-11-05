@@ -12,6 +12,8 @@ on:
       - experiments/2026-10-30-cote-ete-gt/native_v14/scene_rapture.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/scene_coastal_v1314.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_facade_bay.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/**
       - experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_views.json
       - experiments/2026-10-30-cote-ete-gt/native_v14/source_v1314.html
       - experiments/2026-10-30-cote-ete-gt/native_v14/src/moteur3d_qt.cpp
@@ -72,6 +74,7 @@ jobs:
         run: |
           M3D_SKIP_IMPORTED_CAR=1 node export_scene.js source_v1314.html scene_pripyat_central.bin scene_pripyat_central.js
           M3D_SKIP_IMPORTED_CAR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_energetik_seat_preview.bin scene_energetik_seat_preview.js
+          M3D_SKIP_IMPORTED_CAR=1 M3D_FACADE_PBR=1 M3D_TEXTURE_SIZE=512 node export_scene.js source_v1314.html scene_pripyat_facade_bay.bin scene_pripyat_facade_bay.js
 
       - name: Configure Qt application
         shell: bash
@@ -88,7 +91,10 @@ jobs:
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: |
           cmake --install build --config Release --prefix dist
-          cp scene_pripyat_central.bin scene_pripyat_central.js scene_pripyat_views.json scene_energetik_seat_preview.bin scene_energetik_seat_preview.js README.md dist/
+          cp scene_pripyat_central.bin scene_pripyat_central.js scene_pripyat_views.json scene_energetik_seat_preview.bin scene_energetik_seat_preview.js scene_pripyat_facade_bay.bin scene_pripyat_facade_bay.js README.md dist/
+          mkdir -p dist/assets/pripyat
+          cp assets/pripyat/energetik_facade_bay.glb assets/pripyat/energetik_facade_bay.asset.json dist/assets/pripyat/
+          cp -r assets/pripyat/textures dist/assets/pripyat/
           cp -r docs dist/
 
       - name: Deploy Qt DLLs on Windows

@@ -3,11 +3,14 @@
 // normals, UVs, SAH BVH, and embedded RGB565 color/normal/roughness mip chains.
 const fs = require('fs');
 const path = require('path');
+const zlib = require('zlib');
 const { addGlbCar, readRgb565MipChain } = require('./gltf_scene_import');
 globalThis.buildEnergetikCinemaSeat = require('./assets/pripyat/energetik_cinema_seat.js');
+globalThis.buildEnergetikFacadeBay = require('./assets/pripyat/energetik_facade_bay.js').buildEnergetikFacadeBay;
 
 function readPbrMipChain(filePath) {
-  const b = fs.readFileSync(filePath);
+  const stored = fs.readFileSync(filePath);
+  const b = filePath.endsWith('.gz') ? zlib.gunzipSync(stored) : stored;
   if (b.toString('ascii', 0, 8) !== 'M3DPBR1\0') throw new Error(`Matériau PBR invalide: ${filePath}`);
   const baseSize = b.readUInt32LE(8), count = b.readUInt32LE(12);
   if (![512, 1024].includes(baseSize) || count !== Math.log2(baseSize / 8) + 1) throw new Error(`Pyramide PBR attendue en 512 ou 1024 px: ${filePath}`);
@@ -28,6 +31,7 @@ function readPbrMipChain(filePath) {
   return maps;
 }
 
+const sceneBuildTextureSize = Math.max(512, Math.min(2048, Number(process.env.M3D_TEXTURE_SIZE) || 1024));
 const htmlPath = process.argv[2] || path.join(__dirname, 'source_v1314.html');
 const outPath = process.argv[3] || path.join(__dirname, 'moteur3d_v1314_scene.bin');
 const scenePath = process.argv[4] || path.join(__dirname, 'scene_coastal_v1314.js');
@@ -52,7 +56,7 @@ globalThis.__m3dAppendClassicCar = (objects, placement) => {
   globalThis.__m3dImportedCarTriangles = addGlbCar(objects, file, placement);
 };
 const optionalCar = process.env.M3D_SKIP_IMPORTED_CAR === '1' ? '' : 'globalThis.__m3dAppendClassicCar(objects, M3D_IMPORTED_CAR);';
-eval(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\n${sceneSource}\nmakeScene(); ${optionalCar} buildBVH(); const __mats = [...new Set(objects.map(o => o.mat))]; for (const id of __mats) materials.set(id, makeMips(id, 1024)); globalThis.__scene = { objects, bvh, bvhRoot, sun, skyZenith, skyHorizon, pointLights, materials, mats: __mats, reflectivityPercent: M3D_MATERIAL_REFLECTIVITY_PERCENT, transmissionPercent: typeof M3D_MATERIAL_TRANSMISSION_PERCENT === "undefined" ? {} : M3D_MATERIAL_TRANSMISSION_PERCENT, refractiveIndex: typeof M3D_MATERIAL_IOR === "undefined" ? {} : M3D_MATERIAL_IOR, sceneLights: typeof M3D_SCENE_LIGHTS === "undefined" ? [] : M3D_SCENE_LIGHTS };`);
+eval(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\n${sceneSource}\nmakeScene(); ${optionalCar} buildBVH(); const __mats = [...new Set(objects.map(o => o.mat))]; for (const id of __mats) materials.set(id, makeMips(id, sceneBuildTextureSize)); globalThis.__scene = { objects, bvh, bvhRoot, sun, skyZenith, skyHorizon, pointLights, materials, mats: __mats, reflectivityPercent: M3D_MATERIAL_REFLECTIVITY_PERCENT, transmissionPercent: typeof M3D_MATERIAL_TRANSMISSION_PERCENT === "undefined" ? {} : M3D_MATERIAL_TRANSMISSION_PERCENT, refractiveIndex: typeof M3D_MATERIAL_IOR === "undefined" ? {} : M3D_MATERIAL_IOR, sceneLights: typeof M3D_SCENE_LIGHTS === "undefined" ? [] : M3D_SCENE_LIGHTS };`);
 const scene = globalThis.__scene;
 const objects = scene.objects;
 const bvh = scene.bvh;
@@ -69,6 +73,8 @@ const orangePbr = readPbrMipChain(path.join(__dirname, 'assets/orange_texturecan
 scene.materials.set('orange', { levels: orangePbr.color });
 scene.materials.set('classicBody', { levels: readRgb565MipChain(path.join(__dirname, 'assets/1970s-coupe/classic_body.rgb565mip')) });
 scene.materials.set('classicTire', { levels: readRgb565MipChain(path.join(__dirname, 'assets/1970s-coupe/classic_tire.rgb565mip')) });
+const facadePbr = process.env.M3D_FACADE_PBR === '1' ? readPbrMipChain(path.join(__dirname, 'assets/pripyat/textures/prp_concrete_panel.m3dpbr.gz')) : null;
+if (facadePbr) scene.materials.set('concrete', { levels: facadePbr.color });
 
 function pack565(r, g, b) {
   return ((Math.max(0, Math.min(255, Math.round(r))) >> 3) << 11)
@@ -286,6 +292,7 @@ for(const [name,pbr] of generatedPripyatPbr) scene.materials.set(name,{levels:pb
 
 const generatedPbr = new Map(['raptureStone', 'raptureBronze', 'raptureGlass'].map(name => [name, makeRapturePbr(name)]));
 function materialPbr(name) {
+  if (name === 'concrete' && facadePbr) return facadePbr;
   if (name === 'orange') return orangePbr;
   return generatedPripyatPbr.get(name) || generatedPbr.get(name) || null;
 }

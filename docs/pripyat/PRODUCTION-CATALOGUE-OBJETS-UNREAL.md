@@ -1,45 +1,32 @@
-# Production prioritaire — assets photoréalistes Energetik
+# Catalogue Energetik — production qualité d’abord
 
-## Inventaire source
+## Référentiel
 
-- 100 références photographiques : 92 de galerie et 8 vues principales.
-- 20 familles documentées; 22 IDs matériau `prp_*`.
-- Mapping photo par photo détaillé pour 01–32 et H01–H08; les références 33–92 sont regroupées par plages.
-- Le siège cinéma existe déjà en 80 primitives; l’architecture principale existe en blockout procédural. Les assets ne sont pas encore livrés en GLB autonome.
+- Inventaire : 100 photos de référence, 20 familles d’objets et 22 IDs matériau `prp_*`.
+- Les références servent à retrouver formes, placement et usure. Elles ne deviennent pas des textures redistribuables sans licence vérifiée.
+- Les identifiants et paramètres du catalogue existant restent la source. Une valeur native `reflectivityPercent` ne devient jamais une métallicité.
 
-## Priorité décidée
+## Priorité actuelle
 
-Produire moins d’objets et pousser leur fidélité visuelle. Les objets suivants passent en premier :
+1. **Travée de façade Energetik** — première pièce livrée : source native réutilisable, scène native isolée, GLB 2.0 avec cartes PBR et manifeste. Dimensions approximatives reprises du blockout existant; pas de prétention photogrammétrique.
+2. **Siège / rangée d’auditorium** — reprendre la pièce existante en commençant par corriger ses matériaux et détails, en suivant H03 et les photos fournies.
+3. **Enseigne de toiture** — référence H05; lettres cyrilliques, treillis, peinture et corrosion à reprendre uniquement depuis la référence.
 
-1. **Travée de façade Energetik** — références 01/H01; béton, relief, UV et usure.
-2. **Siège/rangée d’auditorium** — référence H03 et photos fournies; coque, revêtement, coutures et structure.
-3. **Enseigne de toiture** — référence H05; lettres cyrilliques, treillis, peinture écaillée et corrosion.
+Les 17 autres familles restent dans le catalogue. Aucun remplissage par objets supposés.
 
-Le reste des 20 familles reste au catalogue en attente. Aucun détail ambigu ne sera inventé.
+## Première livraison
 
-## Matériaux et fidélité
+- Asset : `energetik_facade_bay` — 26 reliefs natifs, scène de 27 objets avec dalle témoin, 4 984 triangles GLB.
+- Béton catalogue `prp_concrete_panel`, relié à l’ID natif existant `concrete` (réflectivité 2%). Métallicité GLB = 0; rugosité cible catalogue 0,78–0,94; moyenne de la carte ≈ 0,87.
+- Cartes couleur, normale tangentielle, rugosité et masque glTF Metallic-Roughness intégrés. La normale est une approximation discrète dérivée de la luminance; elle n’est pas issue d’un scan.
+- GLB 2.0 vérifié structurellement, avec trois images incorporées et orientation triangles/normales cohérente. Export natif effectué; import Unreal Editor et comparaison image finale à faire.
+- Les corrections d’éclairage/PBR antérieurement mises en attente restent distinctes de cet asset et ne sont pas incluses dans son matériau.
 
-- Réutiliser les IDs, cartes de rugosité et normales définis dans `PRIPYAT-MATERIALS-CATALOGUE.md` et les paramètres de scène existants.
-- Ne jamais convertir `reflectivityPercent` en métallicité. Le format de scène ne fournit pas ce paramètre PBR.
-- Ajouter ou réinterpréter un paramètre seulement après avoir identifié sa définition et sa source.
-- Les photos protégées servent à la modélisation; elles ne deviennent pas des textures redistribuables sans licence vérifiée.
-- Les textures doivent être raccordées aux matériaux natifs et inclues en PBR dans les GLB destinés à Unreal.
+## Étapes suivantes
 
-## Livrables sur la fenêtre de 6 h 30
+1. Contrôler la travée dans le moteur Qt et l’importer dans Unreal Engine; comparer aux références et ajuster échelle UV, lumière et relief.
+2. Reprendre le siège avec les mêmes contrôles et éviter les brillances métalliques constatées dans l’image précédente.
+3. Créer l’enseigne comme troisième pièce seulement après lecture rapprochée de H05.
+4. Revenir aux corrections d’éclairage du rendu après les actifs prioritaires.
 
-Objectif réaliste : les trois assets prioritaires en première passe haute fidélité, réutilisation de leur géométrie dans le moteur natif et GLB 2.0 pour Unreal, avec manifeste des sources et matériaux. Cette fenêtre ne garantit pas une restitution photogrammétrique complète ni la validation sur toutes les configurations Unreal.
-
-## Vérification
-
-- Générer la scène native sans modifier ni supprimer les objets existants.
-- Contrôler l’échelle métrique, UV, normales, orientation et matériaux.
-- Compiler le moteur natif sous Windows.
-- Valider le GLB 2.0 et son ouverture/import dans Unreal séparément du succès de compilation.
-- Garder les captures de comparaison photo/rendu et les performances comme éléments de validation.
-
-## Suivi
-
-Branche de travail : `feature/pripyat-catalog-assets-261105`.
-Ticket : [Créer le catalogue d’objets Energetik natif + Unreal](https://github.com/glaby91/moteur3d/issues/4).
-
-Les corrections PBR et d’éclairage du rendu CPU évoquées après le build `261105-0001` restent au backlog et seront traitées après les assets si le temps le permet.
+Branche : `feature/pripyat-catalog-assets-261105` — [ticket #4](https://github.com/glaby91/moteur3d/issues/4).
