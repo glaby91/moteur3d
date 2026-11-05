@@ -111,20 +111,23 @@ static V offlinePbrShade(const Scene&s,const ShadowMap&sm,const Camera&cam,const
  if(h.id==-1){const V env=sky(r.d,fog,s.underwaterEnvironment);return rgbBytesToLinear(env);}
  const int mi=h.id==-2?groundMaterial(s,h.p):h.mat;
  const Material& material=s.mat[mi];const std::string& name=material.name;
- const Obj* o=h.id>=0?&s.obj[h.id]:nullptr;V n=h.n,uv;float footprint=1.f,worldFootprint=h.t*cam.pixelAngle;
+ const Obj* o=h.id>=0?&s.obj[h.id]:nullptr;V n=dot(h.n,r.d)>0.f?h.n*-1.f:h.n,uv;float footprint=1.f,worldFootprint=h.t*cam.pixelAngle;
  if(h.id==-2)uv={h.p.x*.34f,h.p.z*.34f,.34f};
  else{uv=uvAt(s,*o,h.p,n);const float slope=std::max(.16f,std::abs(dot(n,r.d)));worldFootprint=h.t*cam.pixelAngle/slope;footprint=float(material.mip.empty()?512:material.mip.front().size)*worldFootprint*uv.z;}
  if(o&&!material.normalMip.empty())n=mappedNormal(material,*o,n,uv.x,uv.y,footprint,st);else n=bumpNormal(name,h.p,n,worldFootprint);
  const V base=rgbBytesToLinear(texSample(material,uv.x,uv.y,footprint,st));
  const float roughness=material.roughnessMip.empty()?.72f:clampf(sampleMipChain(material.roughnessMip,uv.x,uv.y,footprint,st).x/255.f,.08f,.98f);
- const float metallic=clampf(float(material.reflectivityPercent)*.01f,0.f,.98f);
+ // V4 defines reflectivity, transmission and IOR, but no metallic channel.
+ // Preserve reflectivity as dielectric F0; never reinterpret it as metallicity.
+ const float f0Level=material.reflectivityPercent?clampf(float(material.reflectivityPercent)*.01f,.02f,.95f):.04f;
+ const float metallic=0.f;
  if(roughOut)*roughOut=roughness;
  if(metallicOut)*metallicOut=metallic;
  if(baseOut)*baseOut=base;
  if(normalOut)*normalOut=n;
  const V view=norm(r.d*-1.f);const float nv=std::max(1e-4f,dot(n,view));
- const V f0=V{.04f,.04f,.04f}*(1.f-metallic)+base*metallic;
- auto evaluate=[&](V l,V radiance,float visibilityFactor){const float nl=std::max(0.f,dot(n,l));if(nl<=0.f||visibilityFactor<=0.f)return V{0,0,0};const V half=norm(view+l);const float nh=std::max(0.f,dot(n,half)),vh=std::max(0.f,dot(view,half));const V F=fresnelSchlick(f0,vh);const float D=ggxDistribution(nh,roughness),G=smithG1(nv,roughness)*smithG1(nl,roughness);const V spec=F*(D*G/(4.f*nv*nl+1e-6f));const V kd=oneMinus(F)*(1.f-metallic);const V diff=mul(kd,base)*(1.f/PI);return mul(diff+spec,radiance)*(nl*visibilityFactor);};
+ const V f0{f0Level,f0Level,f0Level};
+ auto evaluate=[&](V l,V radiance,float visibilityFactor){const float nl=std::max(0.f,dot(n,l));if(nl<=0.f||visibilityFactor<=0.f)return V{0,0,0};const V half=norm(view+l);const float nh=std::max(0.f,dot(n,half)),vh=std::max(0.f,dot(view,half));const V F=fresnelSchlick(f0,vh);const float D=ggxDistribution(nh,roughness),G=smithG1(nv,roughness)*smithG1(nl,roughness);const V spec=F*(D*G/(4.f*nv*nl+1e-6f));const V kd=oneMinus(F);const V diff=mul(kd,base)*(1.f/PI);return mul(diff+spec,radiance)*(nl*visibilityFactor);};
  V result{0,0,0};
  const float sunVis=daylight>.001f?visibility(sm,h.p+n*.025f,&st):1.f;
  const V sunRadiance=rgbBytesToLinear(sunTint)*(2.8f*daylight);
@@ -134,7 +137,7 @@ static V offlinePbrShade(const Scene&s,const ShadowMap&sm,const Camera&cam,const
  for(const Light& l:pointLights)addPoint(l,1.f);
  for(const Light& l:s.lights)addPoint(l,sceneLightScale);
  const V skyAverage=rgbBytesToLinear(skyHorizon*.5f+skyZenith*.5f);
- result=result+mul(base,skyAverage)*(.16f*(1.f-metallic));
+ result=result+mul(base,skyAverage)*.16f;
  V emission{0,0,0};
  if(name=="lamp")emission=rgbBytesToLinear({255,166,91})*(.7f+2.f*lampFactor);
  else if(name=="led")emission=rgbBytesToLinear({255,217,165})*(.6f+lampFactor);
@@ -155,7 +158,9 @@ V traceOfflineColor(const Scene&s,const ShadowMap&sm,const Camera&cam,const Ray&
   const V direct=offlinePbrShade(s,sm,cam,ray,hit,st,fog,&roughness,&metallic,&base,&n);
   radiance=radiance+mul(throughput,direct);
   if(hit.id<0||bounce==maxBounces)break;
-  const float specProbability=clampf(.04f*(1.f-metallic)+metallic,.05f,.95f);
+  const Material& bounceMaterial=hit.id>=0?s.mat[hit.mat]:s.mat[groundMaterial(s,hit.p)];
+  const float f0Level=bounceMaterial.reflectivityPercent?clampf(float(bounceMaterial.reflectivityPercent)*.01f,.02f,.95f):.04f;
+  const float specProbability=clampf(f0Level,.05f,.95f);
   V direction;
   if(random01()<specProbability){
    const V perfect=norm(ray.d-n*(2.f*dot(ray.d,n))),axis=std::abs(perfect.y)<.9f?V{0,1,0}:V{1,0,0};
@@ -163,13 +168,13 @@ V traceOfflineColor(const Scene&s,const ShadowMap&sm,const Camera&cam,const Ray&
    const V jitter=tangent*(rad*std::cos(phi))+bitangent*(rad*std::sin(phi))+perfect*std::sqrt(std::max(0.f,1.f-u));
    direction=norm(perfect*(1.f-roughness*roughness)+jitter*(roughness*roughness));
    if(dot(direction,n)<=.001f)direction=perfect;
-   const V f0=V{.04f,.04f,.04f}*(1.f-metallic)+base*metallic;
+   const V f0{f0Level,f0Level,f0Level};
    throughput=mul(throughput,f0)/specProbability;
   }else{
    const V axis=std::abs(n.y)<.9f?V{0,1,0}:V{1,0,0},tangent=norm(cross(axis,n)),bitangent=norm(cross(n,tangent));
    const float u=random01(),v=random01(),rad=std::sqrt(u),phi=2.f*PI*v;
    direction=norm(tangent*(rad*std::cos(phi))+bitangent*(rad*std::sin(phi))+n*std::sqrt(std::max(0.f,1.f-u)));
-   throughput=mul(throughput,base)*((1.f-metallic)/(1.f-specProbability));
+   throughput=mul(throughput,base)*(1.f/(1.f-specProbability));
   }
   if(bounce>=2){const float survive=clampf(maxComponent(throughput),.12f,.95f);if(random01()>survive)break;throughput=throughput/survive;}
   ignore=hit.id;ray={hit.p+n*.025f,direction};

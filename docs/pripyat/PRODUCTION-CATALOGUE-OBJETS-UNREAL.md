@@ -30,3 +30,7 @@ Les 17 autres familles restent dans le catalogue. Aucun remplissage par objets s
 4. Revenir aux corrections d’éclairage du rendu après les actifs prioritaires.
 
 Branche : `feature/pripyat-catalog-assets-261105` — [ticket #4](https://github.com/glaby91/moteur3d/issues/4).
+
+## Correction d’éclairage CPU hors-ligne
+
+L’audit du rendu du siège a révélé que `reflectivityPercent` était converti en `metallic` dans le shader CPU PBR, alors que les scènes V4 ne définissent aucun canal métallique. Le correctif garde les matériaux dans le modèle diélectrique disponible : réflectivité pilote F0, et métallicité reste à zéro. Les normales de surface sont orientées contre le rayon avant l’éclairage et le calcul des rebonds utilise le même F0 que l’éclairage direct. Ce changement ne rend pas encore les surfaces métalliques physiques; cela demandera un paramètre metallic explicite dans le format.
