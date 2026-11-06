@@ -51,3 +51,16 @@
 - La fresque est bien attestée dans le foyer par les photos : https://www.hdhuntphoto.com/chernobyl-kiev/chernobyl-kiev-two-three ; son mur exact, son orientation et ses dimensions ne sont pas cotés.
 - Changement de géométrie expérimental : ouverture d'une travée du plancher côté escalier/fresque, conservation d'une galerie et d'un palier, commit `ab19d8d`. **Implantation provisoire à vérifier avec les photos**, pas une reconstruction fidèle certifiée.
 - Aucune photographie ni aucun plan n'établit encore une correspondance métrique complète entre les niveaux du foyer et les coordonnées de la scène.
+
+## Campagne documentaire — salles sportives et espaces annexes
+- Photo directement légendée **Gymnasium of the Palace of Culture**, Timm Suess, 26 mars 2009 : https://commons.wikimedia.org/wiki/File:Palace_of_Culture-Gym_1_(indoor)-Pripyat.jpg (preuve directe du gymnase, pas de ses coordonnées dans le bâtiment).
+- Inventaire des intérieurs du palais : https://commons.wikimedia.org/wiki/Category:Interiors_of_the_palace_of_culture_in_Prypyat
+- La catégorie « Local sports hall, Pripyat » peut contenir un équipement sportif distinct : https://commons.wikimedia.org/wiki/Category:Sports_venues_in_Prypiat ; ne pas assimiler automatiquement les 14 photos à une salle de l'Energetik.
+- Salle de boxe et ring mentionnés dans les récits : https://www.find-way.com.ua/ru/oblasti/chernobylskaya-zona/pripyat/dvorets-kul-tury-energetik-pripyat ; emplacement et dimensions non confirmés.
+- Témoignage photographique sur la cage de scène et les volumes : https://mikhed.com/world/2008-08-zone-pripyat.html
+- Autres fonctions mentionnées (piscine, bibliothèque, stand de tir) : https://commons.wikimedia.org/wiki/Category:Palace_of_culture_in_Prypyat ; **ne pas placer sans photos géolocalisées à l'intérieur**.
+
+### État de reconstruction
+- Commit `27bd184b` : prototype d'une zone entraînement/boxe au niveau supérieur, avec sol, espaliers, bancs et ring. **Position, taille et voisinage hypothétiques**. L'objet est destiné à être replacé après recoupement de plans/photos ; ne constitue pas une reconstitution certifiée.
+- Conserver séparément trois niveaux de certitude : (1) existence de la fonction, (2) apparence documentée, (3) position et cotes dans le bâtiment.
+- Le gymnase et la boxe ne doivent pas être fusionnés arbitrairement dans une même salle lors de la validation finale.
