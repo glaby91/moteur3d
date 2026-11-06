@@ -25,3 +25,15 @@ Branche de base : feature/cpu-pbr-hdr-denoise-2026-11-05.
 
 ## Limites
 Les changements ne constituent pas une correction complète du flou. Aucun test visuel Windows ni compilation de cette branche n'est encore validé. Les chemins de rendu CPU et D3D11 ne sont pas visuellement équivalents.
+
+## Deuxième passe — diagnostic interactif
+- Case « Diagnostic netteté — pixels bruts 100 % » : impose la résolution interne native et désactive AA contours, DOF, poussière et débruitage. Le mode navigation à résolution réduite est neutralisé pour ce diagnostic.
+- Case « Débruitage bilatéral (rendu hors-ligne) » : permet de comparer avec/sans filtrage en mode path tracing.
+- Le widget Qt désactive SmoothPixmapTransform en diagnostic même lorsque la fenêtre impose un redimensionnement. Un affichage sans changement d'échelle exige toujours un viewport de dimensions identiques au framebuffer.
+- Le diagnostic ne remplace pas la refonte du format des textures RGB565 ni un débruiteur guidé par normales/profondeur.
+
+### Validation encore requise
+- Compilation Windows Qt6 et lancement avec la scène Pripyat réelle.
+- Capture d'images CPU / D3D11 à résolution et caméra identiques.
+- Test de netteté du mural et des détails architecturaux, comparaison de performance.
+- Vérifier le comportement de la qualité hors-ligne en mode diagnostic : 1 spp est volontairement bruité pour isoler le filtrage ; comparer également 64 spp avec débruitage désactivé.
