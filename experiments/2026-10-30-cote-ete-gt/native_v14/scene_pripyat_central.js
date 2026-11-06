@@ -133,7 +133,7 @@ function makeScene() {
     M3D_SCENE_LIGHTS.push([p[0], p[1], p[2], 5.4, 0.75, 70, 220, 255]);
 
   // Three readable levels. Slabs wrap the foyer atrium and the open stair core.
-  box(-49.2,0.05,-42.2,29.2,0.38,-20.1,'stone');
+  box(-49.2,0.05,-42.2,29.2,0.38,-20.1,'floorTerrazzo');
   function floorPlate(y, openAuditorium=false){
     const t=y,b=y+0.24;
     if(openAuditorium){
@@ -261,6 +261,11 @@ function makeScene() {
     box(18.0,y+2.15,-31.4,20.0,y+2.72,-29.6,'concrete');
   }
 
+  // Thin wear overlays above the original structural slab: preserve walkable geometry.
+  // Zoning is approximate pending photographic registration of each room.
+  box(-48.8,0.381,-41.5,-16.2,0.394,-25.0,'floorConcreteDust');
+  box(-14.4,0.381,-40.9,7.7,0.394,-26.0,'floorTerrazzo');
+  box(9.0,0.381,-40.9,27.4,0.394,-26.0,'floorCeramic');
   // Ground floor: foyer, abandoned auditorium, stage, and a few large room fixtures.
   for(let x=-12;x<=7;x+=6) capsule([x,0.38,-33.5],[x,8.9,-33.5],0.28,'stone');
   // Hero cinema: a two-storey volume, not a low box. The first upper slab is
@@ -386,7 +391,7 @@ function makeScene() {
   // cinema, mural or facade envelope.
   const sportY=6.60;
   // Worn indoor training floor and wall-mounted exercise bars.
-  box(-12.6,sportY,-34.2,4.7,sportY+0.055,-27.1,'wood');
+  box(-12.6,sportY,-34.2,4.7,sportY+0.055,-27.1,'floorGym');
   for(let k=0;k<9;k++){
     const x=-11.8+k*1.85;
     box(x,sportY+0.058,-34.15,x+0.055,sportY+0.064,-27.15,'stone');
@@ -401,14 +406,14 @@ function makeScene() {
   // This is a visual placeholder pending photographic measurement.
   const ringX0=-6.9,ringX1=-1.1,ringZ0=-33.35,ringZ1=-27.65;
   box(ringX0,sportY+0.06,ringZ0,ringX1,sportY+0.36,ringZ1,'wood');
-  box(ringX0+0.14,sportY+0.36,ringZ0+0.14,ringX1-0.14,sportY+0.39,ringZ1-0.14,'seatFabric');
+  box(ringX0+0.14,sportY+0.36,ringZ0+0.14,ringX1-0.14,sportY+0.39,ringZ1-0.14,'boxingCanvas');
   for(const x of [ringX0,ringX1]) for(const z of [ringZ0,ringZ1])
     capsule([x,sportY+0.36,z],[x,sportY+1.78,z],0.08,'metal');
   for(const y of [sportY+0.78,sportY+1.13,sportY+1.48]){
     for(const z of [ringZ0,ringZ1])
-      capsule([ringX0,y,z],[ringX1,y,z],0.025,'rust');
+      capsule([ringX0,y,z],[ringX1,y,z],0.025,'boxingRope');
     for(const x of [ringX0,ringX1])
-      capsule([x,y,ringZ0],[x,y,ringZ1],0.025,'rust');
+      capsule([x,y,ringZ0],[x,y,ringZ1],0.025,'boxingRope');
   }
   // Open practice area, with a pair of gym benches and a storage rack.
   for(const z of [-33.1,-28.2]){
