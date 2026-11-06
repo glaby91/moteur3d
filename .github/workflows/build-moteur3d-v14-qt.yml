@@ -93,8 +93,9 @@ jobs:
           python tools/generate_seat_maps.py
           python tools/generate_pripyat_chair_maps.py
           python tools/generate_energetik_fresco_map.py
+          python tools/generate_energetik_room_pbr.py
           node tools/export_energetik_fresco_glb.js
-          M3D_SKIP_IMPORTED_CAR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_pripyat_central.bin scene_pripyat_central.js
+          M3D_ENERGETIK_PBR_DIR=assets/pripyat/textures/rooms M3D_SKIP_IMPORTED_CAR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_pripyat_central.bin scene_pripyat_central.js
           M3D_SKIP_IMPORTED_CAR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_energetik_seat_preview.bin scene_energetik_seat_preview.js
           node export_energetik_seat_manifest.js scene_energetik_seat_preview.assets.json
           node tools/export_energetik_seat_row_glb.js
@@ -135,6 +136,8 @@ jobs:
           cp assets/pripyat/energetik_fresco_mosaic.glb assets/pripyat/energetik_fresco_mosaic.asset.json dist/assets/pripyat/
           cp assets/pripyat/energetik_roof_neon_sign.glb dist/assets/pripyat/
           cp -r assets/pripyat/textures dist/assets/pripyat/
+          cp tools/generate_energetik_room_pbr.py dist/docs/
+          cp version.h dist/
           cp -r docs dist/
 
       - name: Deploy Qt DLLs on Windows
