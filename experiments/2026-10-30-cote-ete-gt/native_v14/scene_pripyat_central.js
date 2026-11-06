@@ -224,7 +224,7 @@ function makeScene() {
     box(x,y,mid+door*.5,x+thick,y+h,z1,mat);
     box(x,y+2.15,mid-door*.5,x+thick,y+h,mid+door*.5,'concrete');
   }
-  for(let level=0;level<3;level++){
+  for(let level=0;level<2;level++){
     const y=0.38+level*3.1, h=2.72;
     // A real return wall frames the foyer stair and gives the side-room door
     // a proper opening; the mural is mounted on its hall-facing surface.
@@ -415,6 +415,50 @@ function makeScene() {
     box(1.3,sportY+0.42,z,3.8,sportY+0.53,z+0.42,'wood');
     for(const x of [1.55,3.55])
       box(x,sportY+0.07,z+0.12,x+0.10,sportY+0.44,z+0.24,'metal');
+  }
+  // Structural programme: upper-floor activity rooms and library.
+  // These functions are historically plausible; room assignments and
+  // partition positions are architectural hypotheses, not surveyed plans.
+  // The existing sports room occupies the rear band (-34.2 .. -27.1);
+  // the front band is a separate library/club suite, not a swimming pool.
+  const activityFloor=6.60;
+  // Separate library and club from the training space with a door opening.
+  box(-13.0,activityFloor,-26.92,-5.5,9.20,-26.76,'plaster');
+  box(-3.7,activityFloor,-26.92,5.2,9.20,-26.76,'plaster');
+  box(-5.5,activityFloor+2.12,-26.92,-3.7,9.20,-26.76,'concrete');
+  // Reading room perimeter, columns, and an interior partition with doorway.
+  box(-13.0,activityFloor,-21.10,5.2,activityFloor+0.16,-20.92,'concrete');
+  box(-4.3,activityFloor,-26.76,-4.12,activityFloor+2.58,-24.65,'plaster');
+  box(-4.3,activityFloor,-22.75,-4.12,activityFloor+2.58,-21.10,'plaster');
+  box(-4.3,activityFloor+2.12,-24.65,-4.12,activityFloor+2.58,-22.75,'concrete');
+  // Low structural ceiling ribs; do not fill the room with solid slabs.
+  for(const x of [-12.5,-8.0,-3.5,1.0,5.0])
+    box(x,9.18,-26.8,x+0.22,9.35,-21.1,'concrete');
+  // Fixed shelves and reading tables (minimal functional fixtures).
+  for(const x of [-11.9,-9.3,-6.7]){
+    box(x,activityFloor+0.08,-22.0,x+0.55,activityFloor+1.85,-21.65,'wood');
+    for(const y of [activityFloor+0.54,activityFloor+1.04,activityFloor+1.54])
+      box(x-0.03,y,-22.1,x+0.58,y+0.07,-21.58,'wood');
+  }
+  for(const x of [-11.0,-7.7]){
+    box(x,activityFloor+0.70,-25.0,x+1.5,activityFloor+0.80,-23.9,'wood');
+    for(const dx of [0.16,1.25])
+      box(x+dx,activityFloor+0.08,-24.9,x+dx+0.10,activityFloor+0.70,-24.0,'metal');
+  }
+  // Adjacent multipurpose club room: distinct space, no unverified pool.
+  for(const x of [-2.9,0.5,3.4])
+    box(x,activityFloor+0.12,-25.7,x+1.5,activityFloor+0.22,-24.7,'wood');
+  // Rear service spine and backstage rooms are structurally separate from
+  // the audience volume. Use existing auditorium wall; add access openings.
+  for(const z of [-39.8,-35.3,-30.8]){
+    box(-49.05,0.38,z,-47.70,3.10,z+0.18,'concrete');
+  }
+  // Original roof-level clerestory rhythm, damaged and incomplete.
+  // Existing facade bays determine spacing; no new arbitrary window rows.
+  for(let i=0;i<8;i++){
+    const x=-12.0+i*4.1;
+    box(x,8.10,-20.31,x+2.35,8.52,-20.24,i%4===0?'windowdark':'glass');
+    box(x-0.10,8.06,-20.38,x+2.45,8.10,-20.20,'rust');
   }
   // A ruined reception desk, scattered panels and tall foyer openings.
   box(-4.8,0.42,-24.8,4.2,1.25,-23.8,'wood');
