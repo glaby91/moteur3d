@@ -79,7 +79,7 @@ Stats renderHybrid(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,in
      hit.n=norm(o.n0*(1-v-u)+o.n1*v+o.n2*u);
     }
     // Ray-based secondary effects stay in the original shader.
-    V color=shade(s,sm,cam,ray,hit,st,fog);
+    V color=mixed?traceColor(s,sm,cam,ray,st,fog):shade(s,sm,cam,ray,hit,st,fog);
     auto byte=[](float v)->uint32_t{return uint32_t(clampf(v,0.f,255.f));};
     pixels[size_t(y)*w+x]=0xff000000u|(byte(color.x)<<16)|(byte(color.y)<<8)|byte(color.z);
     ++st.rays;if(hit.id>=0)++st.hits;else if(hit.id==-1)++st.sky;
