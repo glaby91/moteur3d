@@ -147,7 +147,12 @@ function makeScene() {
     box(-15,t,-26.5,8,b,-20.1,'concrete');
     box(-15,t,-35.8,-7,b,-26.5,'concrete');
     box(6,t,-35.8,8,b,-26.5,'concrete');
-    box(8,t,-42.2,18,b,-20.1,'concrete');
+    // Energetik stair foyer: reserve a double-height atrium beside the
+    // mural wall instead of capping the whole east gallery at each level.
+    // These are provisional cutouts, NOT surveyed 2S-06-9/70 coordinates.
+    // Rear bay remains open; the front gallery and east landing are retained.
+    box(8,t,-31.5,18,b,-20.1,'concrete');
+    box(16.5,t,-42.2,18,b,-31.5,'concrete');
     box(18,t,-42.2,20,b,-20.1,'concrete');
     box(27,t,-42.2,29.2,b,-20.1,'concrete');
     box(20,t,-42.2,27,b,-38.0,'concrete');
