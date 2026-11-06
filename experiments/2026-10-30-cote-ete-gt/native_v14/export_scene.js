@@ -116,7 +116,16 @@ if (energetikPbrDir && path.basename(scenePath) === 'scene_pripyat_central.js') 
     concrete: 'concrete', plaster: 'plaster', volcanicTuff: 'volcanicTuff',
     stone: 'stone', brick: 'brick', wood: 'wood', metal: 'metal',
     rust: 'rust', seatVinylBrown: 'seatVinylBrown', asphalt: 'asphalt',
-    debris: 'debris', curtain: 'curtain'
+    debris: 'debris', curtain: 'curtain',
+    floorTerrazzo: 'floorTerrazzo', floorCeramic: 'floorCeramic',
+    floorParquet: 'floorParquet', floorGym: 'floorGym',
+    floorConcreteDust: 'floorConcreteDust', floorRubber: 'floorRubber',
+    wallCeramic: 'wallCeramic', wallDamp: 'wallDamp',
+    paintPeeling: 'paintPeeling', ceilingFlaked: 'ceilingFlaked',
+    doorPaint: 'doorPaint', windowFrame: 'windowFrame',
+    stageWood: 'stageWood', seatFabricWorn: 'seatFabricWorn',
+    boxingCanvas: 'boxingCanvas', boxingRope: 'boxingRope',
+    paperAged: 'paperAged', pipePaint: 'pipePaint', mosaicWall: 'mosaicWall'
   };
   for (const [id, asset] of Object.entries(overrides)) {
     const file = path.join(energetikPbrDir, asset + '_2048.m3dpbr.gz');
