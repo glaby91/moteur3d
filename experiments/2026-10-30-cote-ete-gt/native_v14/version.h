@@ -1,6 +1,6 @@
 #pragma once
 #include "build_info.h"
-#define M3D_BUILD_ID_ANSI "12beta4"
-#define M3D_BUILD_ID_WIDE L"12beta4"
-#define M3D_RELEASE_ID_ANSI "Draft 12beta4"
-#define M3D_RELEASE_ID_WIDE L"Draft 12beta4"
+#define M3D_BUILD_ID_ANSI "15.0-beta.1"
+#define M3D_BUILD_ID_WIDE L"15.0-beta.1"
+#define M3D_RELEASE_ID_ANSI "Moteur3D V15.0 Beta 1"
+#define M3D_RELEASE_ID_WIDE L"Moteur3D V15.0 Beta 1"
