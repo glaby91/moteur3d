@@ -460,6 +460,39 @@ function makeScene() {
     box(x,8.10,-20.31,x+2.35,8.52,-20.24,i%4===0?'windowdark':'glass');
     box(x-0.10,8.06,-20.38,x+2.45,8.10,-20.20,'rust');
   }
+  // EAST CORE: two connected stair flights, a half landing and roof access.
+  // Built in the existing tower footprint; the tower shell stays hollow.
+  // This is a functional structural reconstruction, with provisional geometry.
+  const stairX0=21.9, stairX1=24.1, stairX2=26.5;
+  for(let floor=0;floor<2;floor++){
+    const base=0.40+floor*3.10;
+    for(let i=0;i<10;i++){
+      const rise=i*0.155, z=-37.7+i*0.65;
+      box(stairX0,base+rise,z,stairX1,base+rise+0.16,z+0.65,'stone');
+      box(stairX1+0.25,base+1.55+rise,-31.2-i*0.65,stairX2,base+1.71+rise,-30.55-i*0.65,'stone');
+    }
+    box(stairX0,base+1.55,-31.5,stairX2,base+1.73,-30.5,'concrete');
+    box(stairX0,base+3.10,-38.0,stairX2,base+3.28,-37.0,'concrete');
+    capsule([stairX0,base+0.75,-37.7],[stairX0,base+2.20,-31.2],0.05,'rust');
+    capsule([stairX2,base+2.25,-31.2],[stairX2,base+3.78,-37.7],0.05,'rust');
+  }
+  // Upper stair tower to roof: small landing and access opening.
+  box(21.9,9.55,-37.9,26.5,9.75,-36.8,'concrete');
+  box(21.9,9.55,-23.1,26.5,9.75,-22.0,'concrete');
+  // Backstage and technical spine: thin partitions with clear doors,
+  // without enclosing the auditorium or blocking its existing exits.
+  const serviceY=0.40;
+  for(const z of [-40.8,-36.4,-32.0,-27.6]){
+    const x0=-14.6,x1=-8.0,door0=-12.2,door1=-10.5;
+    box(x0,serviceY,z,x0+2.4,serviceY+2.7,z+0.16,'plaster');
+    box(door1,serviceY,z,x1,serviceY+2.7,z+0.16,'plaster');
+    box(door0,serviceY+2.15,z,door1,serviceY+2.7,z+0.16,'concrete');
+  }
+  // Roof-edge parapet in separate strips, avoiding a solid roof-top prism.
+  box(-49.2,9.4,-42.3,20.5,9.95,-42.0,'concrete');
+  box(-49.2,9.4,-20.5,20.5,9.95,-20.2,'concrete');
+  box(-49.2,9.4,-42.0,-48.9,9.95,-20.5,'concrete');
+  box(20.2,9.4,-42.0,20.5,9.95,-20.5,'concrete');
   // A ruined reception desk, scattered panels and tall foyer openings.
   box(-4.8,0.42,-24.8,4.2,1.25,-23.8,'wood');
   box(-3.8,1.25,-24.45,3.0,1.42,-24.15,'stone');
