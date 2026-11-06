@@ -349,6 +349,44 @@ function makeScene() {
     box(x-0.58,5.30,z-0.12,x+0.58,5.39,z+0.12,working?'lamp':'windowdark');
     if(working) M3D_SCENE_LIGHTS.push([x,5.04,z,8.8,1.08,255,203,158]);
   }
+  // Provisional upper-level training / boxing room (ZONE SPORT).
+  // The existence of sport facilities is documented for Energetik, but no
+  // verified floor plan yet fixes their precise location. Do not mistake this
+  // room for a surveyed reconstruction or for the separate city sports hall.
+  // Fit inside the existing upper-floor gallery footprint; do not alter the
+  // cinema, mural or facade envelope.
+  const sportY=6.60;
+  // Worn indoor training floor and wall-mounted exercise bars.
+  box(-12.6,sportY,-34.2,4.7,sportY+0.055,-27.1,'wood');
+  for(let k=0;k<9;k++){
+    const x=-11.8+k*1.85;
+    box(x,sportY+0.058,-34.15,x+0.055,sportY+0.064,-27.15,'stone');
+  }
+  for(let k=0;k<11;k++){
+    const z=-33.7+k*0.55;
+    capsule([-12.15,sportY+0.65,z],[-12.15,sportY+2.10,z],0.035,'wood');
+  }
+  for(let h=0;h<5;h++)
+    capsule([-12.15,sportY+0.75+h*0.30,-33.85],[-12.15,sportY+0.75+h*0.30,-28.35],0.034,'wood');
+  // Compact practice boxing ring with four corner posts and three rope levels.
+  // This is a visual placeholder pending photographic measurement.
+  const ringX0=-6.9,ringX1=-1.1,ringZ0=-33.35,ringZ1=-27.65;
+  box(ringX0,sportY+0.06,ringZ0,ringX1,sportY+0.36,ringZ1,'wood');
+  box(ringX0+0.14,sportY+0.36,ringZ0+0.14,ringX1-0.14,sportY+0.39,ringZ1-0.14,'seatFabric');
+  for(const x of [ringX0,ringX1]) for(const z of [ringZ0,ringZ1])
+    capsule([x,sportY+0.36,z],[x,sportY+1.78,z],0.08,'metal');
+  for(const y of [sportY+0.78,sportY+1.13,sportY+1.48]){
+    for(const z of [ringZ0,ringZ1])
+      capsule([ringX0,y,z],[ringX1,y,z],0.025,'rust');
+    for(const x of [ringX0,ringX1])
+      capsule([x,y,ringZ0],[x,y,ringZ1],0.025,'rust');
+  }
+  // Open practice area, with a pair of gym benches and a storage rack.
+  for(const z of [-33.1,-28.2]){
+    box(1.3,sportY+0.42,z,3.8,sportY+0.53,z+0.42,'wood');
+    for(const x of [1.55,3.55])
+      box(x,sportY+0.07,z+0.12,x+0.10,sportY+0.44,z+0.24,'metal');
+  }
   // A ruined reception desk, scattered panels and tall foyer openings.
   box(-4.8,0.42,-24.8,4.2,1.25,-23.8,'wood');
   box(-3.8,1.25,-24.45,3.0,1.42,-24.15,'stone');
