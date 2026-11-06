@@ -7,6 +7,7 @@ on:
       - pripiat
       - feature/pripyat-catalog-assets-261105
       - feature/pripyat-square-v15-beta2
+      - integration/moteur3d-unified-v15
     paths:
       - experiments/2026-10-30-cote-ete-gt/native_v14/CMakeLists.txt
       - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
