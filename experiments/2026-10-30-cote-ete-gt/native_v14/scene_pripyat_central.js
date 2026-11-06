@@ -459,13 +459,46 @@ function makeScene() {
     box(x,9.7,z,x+1.4,9.7+h,z+1.2,'rust');
   for(let x=-44;x<27;x+=9) ellipsoidMesh(x,9.85,-20.8,1.0,0.12,0.55,'grass',8,6);
 
-  // The Polissya hotel stays a quiet contextual mass; Energetik owns the detail budget.
-  box(40.0,0.0,-42.0,63.0,15.5,-20.0,'concrete');
-  box(43.5,15.5,-39.0,59.5,20.0,-22.5,'concrete');
+  // Polissya hotel: separate urban landmark, NOT attached to Energetik.
+  // Preliminary spatial layout, pending a georeferenced survey: nearest edges
+  // are 24 m apart in X (Energetik ends at 30.5; hotel starts at 54.5).
+  // Preserve the pedestrian corridor and avoid a false connecting volume.
+  const hotelX0=54.5, hotelX1=83.5, hotelFront=-17.2, hotelBack=-43.8;
+  box(hotelX0,0,hotelBack,hotelX1,15.5,hotelFront,'concrete');
+  box(hotelX0+4.2,15.5,hotelBack+2.2,hotelX1-3.8,20.0,hotelFront-2.5,'concrete');
+  // Late-Soviet hotel: concrete grid, recessed windows, continuous sill
+  // courses, projecting vertical stair bay, entrance canopy and parapet.
   for(let floor=0;floor<5;floor++){
     const y=1.8+floor*2.65;
-    for(let x=42.0;x<61.0;x+=3.1)
-      box(x,y,-19.92,x+1.45,y+1.55,-19.78,(floor===2&&x>51)?'windowlit':'windowdark');
+    box(hotelX0+.25,y-.30,hotelFront-.34,hotelX1-.25,y-.16,hotelFront-.08,'stone');
+    for(let x=hotelX0+1.65;x<hotelX1-1.4;x+=3.15){
+      box(x-.20,y-.18,hotelFront-.40,x+1.70,y+1.78,hotelFront-.10,'stone');
+      box(x,y,hotelFront-.48,x+1.30,y+1.50,hotelFront-.38,
+          (floor===2&&x>hotelX0+13)?'windowlit':'windowdark');
+      box(x,y-.15,hotelFront-.55,x+1.30,y-.05,hotelFront-.37,'concrete');
+    }
+  }
+  box(hotelX0+1.1,0,hotelFront-.85,hotelX0+6.2,15.5,hotelFront-.18,'concrete');
+  for(let y=1.6;y<14.0;y+=2.65)
+    box(hotelX0+2.4,y,hotelFront-.95,hotelX0+4.7,y+1.65,hotelFront-.82,'windowdark');
+  box(hotelX0+10.0,3.1,hotelFront-3.0,hotelX0+21.0,3.45,hotelFront+.4,'stone');
+  for(let x=hotelX0+11.0;x<hotelX0+21.0;x+=4.2)
+    box(x,0.15,hotelFront-2.6,x+.38,3.1,hotelFront-2.2,'concrete');
+  box(hotelX0-.3,15.5,hotelBack-.3,hotelX1+.3,16.2,hotelFront+.3,'stone');
+  // Transitional landscaping, curb stones and a readable pedestrian approach.
+  for(let x=33.0;x<52.0;x+=2.2){
+    box(x,.03,-16.4,x+1.3,.08,-15.7,'stone');
+    if(Math.round(x)%3===0)box(x,.09,-15.2,x+.85,.25,-14.3,'grass');
+  }
+  // Low concrete planters, lamp pedestals and architectural bollards.
+  for(const [x,z] of [[35,-9],[42,-9],[49,-9],[39,4],[48,4]]){
+    box(x-.75,.02,z-.75,x+.75,.55,z+.75,'concrete');
+    box(x-.52,.55,z-.52,x+.52,.68,z+.52,'stone');
+    box(x-.35,.68,z-.35,x+.35,.82,z+.35,'grass');
+  }
+  for(const x of [34.5,43.5,51.0]){
+    box(x-.14,.02,-12.4,x+.14,1.15,-12.12,'rust');
+    box(x-.24,1.12,-12.52,x+.24,1.28,-12.02,'stone');
   }
 
   // Repeated small windows add depth to the visible west side of Energetik.
