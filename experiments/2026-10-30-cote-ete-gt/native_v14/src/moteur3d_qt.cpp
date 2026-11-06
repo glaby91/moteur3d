@@ -240,6 +240,15 @@ public:
         diagnosis_ = new QLabel(QStringLiteral("Le diagnostic apparaîtra après la première série."), this);
         diagnosis_->setWordWrap(true); diagnosis_->setStyleSheet("color:#9fd5c5;padding:6px;background:#142735");
         root->addWidget(diagnosis_);
+        // Independent prototype reference: NOT a live benchmark on the loaded scene.
+        auto* prototypeReference = new QLabel(
+            QStringLiteral("PROTO V3 — RÉFÉRENCE EXTERNE (scène synthétique, NON mesurée ici)\\n"
+                           "640 × 360 · 898 triangles · 4 threads · CPU sans AVX2\\n"
+                           "Rayons + BVH : 77,8 ms/image (12,9 FPS)  |  Visibilité tuilée : 6,0 ms/image (166,7 FPS)\\n"
+                           "Gain sur cette simulation : ×13,0. Non comparable directement aux lignes du moteur Pripyat."), this);
+        prototypeReference->setWordWrap(true);
+        prototypeReference->setStyleSheet("color:#e1d6a5;padding:7px;border:1px solid #665b37;");
+        root->addWidget(prototypeReference);
         auto* actions = new QHBoxLayout;
         run_ = new QPushButton(QStringLiteral("Lancer le benchmark"), this);
         export_ = new QPushButton(QStringLiteral("Exporter CSV…"), this); export_->setEnabled(false);
