@@ -501,6 +501,65 @@ function makeScene() {
     box(x-.24,1.12,-12.52,x+.24,1.28,-12.02,'stone');
   }
 
+  // Central-square urban ensemble (schematic, metres; not surveyed).
+  // The historical Energetik-Polissya link is a curved arch, not an isolated gap.
+  // Construct a faceted shallow arch with an open pedestrian passage below.
+  // The actual gap and orientation must be calibrated from aerial photographs.
+  const archLeft=30.5, archRight=54.5, archFront=-19.0;
+  const archSegments=18;
+  for(let i=0;i<archSegments;i++){
+    const a=archLeft+(archRight-archLeft)*i/archSegments;
+    const c=archLeft+(archRight-archLeft)*(i+1)/archSegments;
+    const u=(a+c)*.5, q=(u-(archLeft+archRight)*.5)/((archRight-archLeft)*.5);
+    const archSoffit=3.2+2.1*Math.sqrt(Math.max(0,1-q*q));
+    const archCrown=7.5+0.9*Math.sqrt(Math.max(0,1-q*q));
+    box(a,archSoffit,archFront-.70,c,archCrown,archFront+.70,'stone');
+    box(a,archCrown,archFront-.82,c,archCrown+.18,archFront+.82,'concrete');
+  }
+  box(archLeft-.4,0,archFront-1.15,archLeft+.75,7.8,archFront+1.15,'concrete');
+  box(archRight-.75,0,archFront-1.15,archRight+.4,7.8,archFront+1.15,'concrete');
+  // Street and pedestrian approach continue into the outer 100 m ring.
+  box(-92,-.28,65,105,-.12,104,'asphalt');
+  box(-92,-.09,62,105,.04,65,'concrete');
+  box(-92,-.09,104,105,.04,107,'concrete');
+  for(let x=-84;x<96;x+=9.5){
+    box(x,-.10,84.3,x+4.2,-.07,84.48,'stone');
+  }
+  // Administrative block, shopping arcade and restaurant: massing placeholders
+  // at the square's far edge. Their surveyed footprints remain to be fitted.
+  // Distinct rooflines and facade rhythms avoid generic identical boxes.
+  const civic=[{x0:-85,x1:-48,z0:109,z1:129,h:13.2,kind:'admin'},
+               {x0:-38,x1:13,z0:112,z1:133,h:8.5,kind:'shops'},
+               {x0:22,x1:56,z0:110,z1:131,h:9.8,kind:'restaurant'}];
+  for(const c of civic){
+    box(c.x0,0,c.z0,c.x1,c.h,c.z1,'concrete');
+    box(c.x0-.3,c.h,c.z0-.3,c.x1+.3,c.h+.55,c.z1+.3,'stone');
+    box(c.x0,0,c.z0-.8,c.x1,.6,c.z0+.4,'stone');
+    const floors=c.kind==='admin'?4:c.kind==='shops'?2:3;
+    for(let f=0;f<floors;f++){
+      const y=.9+f*(c.h-.9)/floors;
+      for(let x=c.x0+1.5;x<c.x1-1.8;x+=c.kind==='shops'?3.9:2.7){
+        box(x-.12,y-.12,c.z0-.34,x+1.75,y+1.7,c.z0-.12,'stone');
+        box(x,y,c.z0-.43,x+1.50,y+1.48,c.z0-.33,
+            (f===0&&c.kind==='shops')?'glass':'windowdark');
+      }
+    }
+    if(c.kind==='restaurant'){
+      box(c.x0+2,c.h,c.z0+2,c.x1-2,c.h+1.5,c.z1-2,'stone');
+      for(let x=c.x0+3;x<c.x1-2;x+=4.5)
+        box(x,c.h+.3,c.z0-.46,x+2.5,c.h+1.15,c.z0-.34,'glass');
+    }
+  }
+  // Characteristic Soviet-era square: long paving seams, raised beds and
+  // low steps; no invented monuments or inaccessible interiors.
+  for(let x=-50;x<55;x+=6.4)
+    box(x,.025,54,x+.06,.038,62,'concrete');
+  for(const [x,z] of [[-43,57],[-26,58],[23,58],[42,57]]){
+    box(x-2,.025,z-1,x+2,.45,z+1,'concrete');
+    box(x-1.65,.45,z-.7,x+1.65,.56,z+.7,'stone');
+    box(x-1.3,.56,z-.5,x+1.3,.68,z+.5,'grass');
+  }
+
   // Repeated small windows add depth to the visible west side of Energetik.
   for (let z = -43; z <= -22; z += 4.2) {
     for (let y = 2.0; y < 8.4; y += 2.9) {
