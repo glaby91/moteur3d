@@ -587,9 +587,9 @@ function makeScene() {
     }
   }
   apartment(-64, -34, -57, -10, 6, -10.0);
-  apartment(46, -37, 60, -12, 7, -12.0);
+  // Former generic slab removed: it intersected the relocated Polissya hotel.
   apartment(-64, 20, -57, 52, 5, 20.0);
-  apartment(47, 18, 60, 50, 6, 18.0);
+  // Eastern generic slab removed to preserve the hotel forecourt and view corridor.
 
   // Broken low walls, concrete planters and street furniture around the square.
   function planter(x, z, w, d, height) {
