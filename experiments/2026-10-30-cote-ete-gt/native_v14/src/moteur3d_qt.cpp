@@ -169,7 +169,7 @@ static V clampCameraMotion(const Scene& scene,V from,V to,float angleDeg,float e
 
 struct BenchmarkRow {
     unsigned threads = 1;
-    bool avx2 = false, gpu = false;
+    bool avx2 = false, gpu = false, hybrid = false;
     double renderMs = 0, postMs = 0, totalMs = 0;
     uint64_t rays = 0, tests = 0, nodes = 0, aabb = 0, hits = 0, texels = 0;
     uint64_t simdRayPackets = 0, simdTrianglePackets = 0, simdTextureSamples = 0, simdLightBatches = 0;
@@ -293,12 +293,12 @@ public:
         double maxRelative = 1.0;
         for (const auto& row : rows_) if (row.totalMs > 0) maxRelative = std::max(maxRelative, referenceMs / row.totalMs);
         QStringList modesMeasured;
-        auto modeLabel=[](const BenchmarkRow& row){return row.gpu?QStringLiteral("DirectX 11 GPU"):row.avx2?QStringLiteral("AVX2 + FMA3"):QStringLiteral("x64 standard");};
+        auto modeLabel=[](const BenchmarkRow& row){return row.gpu?QStringLiteral("DirectX 11 GPU"):row.hybrid?QStringLiteral("CPU hybride V3"):row.avx2?QStringLiteral("AVX2 + FMA3"):QStringLiteral("x64 standard");};
         for (const auto& row : rows_) { const QString name = modeLabel(row); if (!modesMeasured.contains(name)) modesMeasured << name; }
         for (int i = 0; i < int(rows_.size()); ++i) {
             const auto& row = rows_[size_t(i)];
             const QString modeName = modeLabel(row);
-            const auto standardIt = std::find_if(rows_.begin(), rows_.end(), [&row](const BenchmarkRow& r) { return !r.gpu && !r.avx2 && r.threads == row.threads; });
+            const auto standardIt = std::find_if(rows_.begin(), rows_.end(), [&row](const BenchmarkRow& r) { return !r.gpu && !r.hybrid && !r.avx2 && r.threads == row.threads; });
             const QString simdGain = !row.gpu && row.avx2 && standardIt != rows_.end()
                 ? QStringLiteral("%1×").arg(standardIt->totalMs / std::max(.001, row.totalMs), 0, 'f', 2)
                 : QStringLiteral("—");
@@ -1188,7 +1188,7 @@ private:
                     if (benchmarkGeneration_.load() != token || !benchmarkError.isEmpty()) break;
                     const unsigned postThreads = pass.gpu ? std::max(1u,cfg.threads) : pass.threads;
                     std::vector<double> renderTimes, postTimes, totalTimes;
-                    BenchmarkRow row; row.threads = pass.threads; row.avx2 = pass.avx2; row.gpu = pass.gpu;
+                    BenchmarkRow row; row.threads = pass.threads; row.avx2 = pass.avx2; row.gpu = pass.gpu; row.hybrid = pass.hybrid;
                     for (int repetition = -1; repetition < repeats; ++repetition) {
                         if (benchmarkGeneration_.load() != token) break;
                         std::vector<uint32_t> pixels(size_t(cfg.renderW) * cfg.renderH);
@@ -1217,7 +1217,7 @@ private:
                         }
                         ++done;
                         const int progress = int(100.0 * done / std::max(1, totalPasses));
-                        const QString modeName = pass.gpu ? QStringLiteral("DirectX 11 GPU") : pass.avx2 ? QStringLiteral("AVX2 + FMA3") : QStringLiteral("x64 standard");
+                        const QString modeName = pass.gpu ? QStringLiteral("DirectX 11 GPU") : pass.hybrid ? QStringLiteral("CPU hybride V3") : pass.avx2 ? QStringLiteral("AVX2 + FMA3") : QStringLiteral("x64 standard");
                         const QString threadLabel = pass.gpu ? QStringLiteral("GPU") : QStringLiteral("%1 thread(s)").arg(pass.threads);
                         QMetaObject::invokeMethod(&dialog, [&dialog, progress, threadLabel, repetition, repeats, modeName] {
                             const QString phase = repetition < 0 ? QStringLiteral("Échauffement") : QStringLiteral("Mesure %1/%2").arg(repetition + 1).arg(repeats);
