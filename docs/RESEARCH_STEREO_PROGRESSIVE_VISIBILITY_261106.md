@@ -55,3 +55,12 @@ La surface de recherche doit tenir compte de la perspective. Distinguer :
 6. Prévoir les cas limites : Z proche de zéro, clipping near plane, caméra inclinée, géométrie non frontale, occlusions, changements de FOV.
 
 Validation : scène avec rangées de fenêtres identiques à des profondeurs croissantes, comparaison du nombre de pixels couverts, de la fidélité UV et de l'absence de disparition prématurée.
+
+
+## 5. Premier prototype indépendant simulé (2026-11-06)
+Un démonstrateur C++17 CPU a été compilé et exécuté localement, hors du moteur Qt, avec une scène procédurale simplifiée (98 triangles, 640x360 pixels) et deux chemins de visibilité :
+- classique : un rayon par pixel, intersection brute contre tous les triangles ;
+- prototype : rasterisation de triangles par tuiles 16x16, profondeur inverse Z, UV/position corrigées par la perspective, shading identique.
+Mesure sur une exécution locale, non représentative du moteur réel : classique ~214,8 ms, prototype ~16,4 ms ; pixels différents 8 810/230 400 (3,82 %) ; erreur absolue RGB moyenne ~0,745/255.
+Ces chiffres ne démontrent **aucun gain** sur Pripyat : le chemin classique de cette maquette est volontairement naïf (pas de BVH, contrairement au vrai moteur), et le prototype n'intègre ni Hi-Z, ni ombres, ni réflexions, ni transparence, ni multithreading. La différence d'image impose de corriger les règles de couverture et les conventions de shading avant une intégration.
+Prochaine étape : comparer au vrai BVH et intégrer un pipeline expérimental activable sans remplacer le rendu existant.
