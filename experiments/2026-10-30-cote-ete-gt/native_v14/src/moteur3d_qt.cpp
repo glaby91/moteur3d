@@ -66,7 +66,7 @@ struct RenderSettings {
     bool navigationPreview = false;
     unsigned threads = std::max(1u, std::thread::hardware_concurrency()), samples = 1;
     bool avx2 = false;
-    bool directX11 = false, offlinePathTrace = false;
+    bool directX11 = false, offlinePathTrace = false, sharpnessDiagnostic = false, enableDenoise = true;
     unsigned pathBounces = 3;
     int hourStep = 4;
     bool fog = false, dof = false, edgeAa = true, dust = true, videoPreview = false;
@@ -471,6 +471,7 @@ public:
         setFocusPolicy(Qt::StrongFocus); setMouseTracking(true);
     }
     void setFrame(QImage image) { image_ = std::move(image); update(); }
+    void setPixelExact(bool enabled) { pixelExact_ = enabled; update(); }
     void setNavigationHandlers(std::function<void(int,int,bool)> drag, std::function<void(int)> zoom,
                                std::function<bool(int)> move, std::function<void()> release) {
         dragHandler_ = std::move(drag); zoomHandler_ = std::move(zoom);
@@ -482,7 +483,7 @@ protected:
         if (image_.isNull()) return;
         QSize fit=image_.size(); fit.scale(size(), Qt::KeepAspectRatio);
         QRect target(QPoint((width()-fit.width())/2,(height()-fit.height())/2),fit);
-        p.setRenderHint(QPainter::SmoothPixmapTransform, target.size() != image_.size()); p.drawImage(target,image_);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, !pixelExact_ && target.size() != image_.size()); p.drawImage(target,image_);
     }
     void mousePressEvent(QMouseEvent* event) override {
         if(event->button()==Qt::LeftButton || event->button()==Qt::RightButton) {
@@ -515,7 +516,7 @@ protected:
         QWidget::keyPressEvent(event);
     }
 private:
-    QImage image_; QPoint lastMouse_; Qt::MouseButton pressedButton_=Qt::NoButton; bool dragged_=false;
+    QImage image_; bool pixelExact_ = false; QPoint lastMouse_; Qt::MouseButton pressedButton_=Qt::NoButton; bool dragged_=false;
     std::function<void(int,int,bool)> dragHandler_;
     std::function<void(int)> zoomHandler_;
     std::function<bool(int)> moveHandler_;
@@ -605,7 +606,7 @@ private:
     RendererCapabilities rendererCapabilities_{};
     QSlider *distance_ = nullptr, *angle_ = nullptr, *elevation_ = nullptr, *fov_ = nullptr;
     QSlider *threads_ = nullptr, *hour_ = nullptr;
-    QCheckBox *fog_ = nullptr, *dof_ = nullptr, *dust_ = nullptr, *edgeAa_ = nullptr, *videoPreview_ = nullptr, *fastNavigation_ = nullptr;
+    QCheckBox *fog_ = nullptr, *dof_ = nullptr, *dust_ = nullptr, *edgeAa_ = nullptr, *sharpnessDiagnostic_ = nullptr, *denoise_ = nullptr, *videoPreview_ = nullptr, *fastNavigation_ = nullptr;
     QPushButton *renderButton_ = nullptr, *homeButton_ = nullptr, *frontButton_ = nullptr, *rearButton_ = nullptr, *nightButton_ = nullptr;
     QComboBox* sceneViewSelector_ = nullptr;
     QLabel* sceneViewLabel_ = nullptr;
@@ -894,6 +895,12 @@ private:
         edgeAa_ = new QCheckBox(QStringLiteral("AA contours"), panel); edgeAa_->setChecked(false);
         checks->addWidget(fog_); checks->addWidget(dof_); checks->addWidget(dust_); checks->addWidget(edgeAa_); checks->addStretch();
         controls->addLayout(checks);
+        sharpnessDiagnostic_ = new QCheckBox(QStringLiteral("Diagnostic netteté — pixels bruts 100 %"), panel);
+        sharpnessDiagnostic_->setToolTip(QStringLiteral("Résolution native, sans AA, DOF, poussière, débruitage ni interpolation Qt. Comparez avec les réglages habituels."));
+        controls->addWidget(sharpnessDiagnostic_);
+        denoise_ = new QCheckBox(QStringLiteral("Débruitage bilatéral (rendu hors-ligne)"), panel);
+        denoise_->setChecked(true);
+        controls->addWidget(denoise_);
         videoPreview_ = new QCheckBox(QStringLiteral("Mode vidéo — aperçu rotatif 800 × 600"), panel);
         controls->addWidget(videoPreview_);
         fastNavigation_ = new QCheckBox(QStringLiteral("Visite fluide — aperçu léger après déplacement"), panel);
@@ -960,6 +967,8 @@ private:
         connect(dof_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
         connect(dust_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
         connect(edgeAa_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
+        connect(sharpnessDiagnostic_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
+        connect(denoise_, &QCheckBox::toggled, this, [this] { readSettings(); requestRender(); });
         connect(simdMode_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this](int) { readSettings(); requestRender(); });
         connect(videoPreview_, &QCheckBox::toggled, this, [this](bool enabled) {
             setVideoControlsEnabled(!enabled);
@@ -1261,6 +1270,8 @@ private:
         settings_.renderH = int(std::lround(settings_.outH * scale));
         settings_.samples = qi == 7 ? 64u : qi == 5 ? 16u : 1u;
         settings_.edgeAa = edgeAa_->isChecked();
+        settings_.sharpnessDiagnostic = sharpnessDiagnostic_->isChecked() && !video;
+        settings_.enableDenoise = denoise_->isChecked() && !settings_.sharpnessDiagnostic;
         settings_.videoPreview = video;
         settings_.targetX=cameraTarget_.x; settings_.targetY=cameraTarget_.y; settings_.targetZ=cameraTarget_.z;
         const bool explicitFullQuality=forceFullQuality_;
@@ -1313,6 +1324,15 @@ private:
         settings_.fog = fog_->isChecked();
         settings_.dof = dof_->isChecked() && !settings_.navigationPreview && !video;
         settings_.dust = dust_->isChecked();
+        if (settings_.sharpnessDiagnostic) {
+            settings_.renderW = settings_.outW;
+            settings_.renderH = settings_.outH;
+            settings_.navigationPreview = false;
+            settings_.samples = 1u;
+            settings_.edgeAa = false;
+            settings_.dof = false;
+            settings_.dust = false;
+        }
         threadLabel_->setText(settings_.directX11
             ? QStringLiteral("DirectX 11 — affichage temps réel")
             : QStringLiteral("Threads CPU : %1 — SIMD : %2").arg(settings_.threads).arg(settings_.avx2 ? QStringLiteral("AVX2 + FMA3") : QStringLiteral("x64 standard")));
@@ -1413,7 +1433,7 @@ private:
             const auto postStart = std::chrono::steady_clock::now();
             if (cfg.renderW == cfg.outW * 2 && cfg.renderH == cfg.outH * 2) pixels = downsample2x(pixels, cfg.renderW, cfg.renderH, cfg.threads);
             else if (cfg.renderW != cfg.outW || cfg.renderH != cfg.outH) pixels = upscaleBilinear(pixels, cfg.renderW, cfg.renderH, cfg.outW, cfg.outH, cfg.threads);
-            if (cfg.offlinePathTrace) pixels = denoiseBilateral(pixels, cfg.outW, cfg.outH, cfg.threads);
+            if (cfg.offlinePathTrace && cfg.enableDenoise) pixels = denoiseBilateral(pixels, cfg.outW, cfg.outH, cfg.threads);
             if (cfg.edgeAa) pixels = antialiasEdges4(pixels, cfg.outW, cfg.outH, cfg.threads, cfg.avx2);
             if (cfg.dust && isPripyatScene()) applyDustOverlay(scene_, cam, cfg.outW, cfg.outH, cfg.hourStep, pixels);
             st.postMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - postStart).count();
@@ -1437,7 +1457,7 @@ private:
                     .arg(qulonglong(objectCount)).arg(qulonglong(count)).arg(qulonglong(st.texels));
             }
             if (!fallbackNotice.isEmpty()) diag.prepend(fallbackNotice + QStringLiteral("\n"));
-            QMetaObject::invokeMethod(this, [this, image = std::move(image), diag, hourValue, token, videoFrame = cfg.videoPreview] {
+            QMetaObject::invokeMethod(this, [this, image = std::move(image), diag, hourValue, token, videoFrame = cfg.videoPreview, cfgPixelExact = cfg.sharpnessDiagnostic] {
                 if (generation_.load() != token || videoPreview_->isChecked() != videoFrame) return;
                 stats_->setText(diag);
                 if (videoFrame) {
@@ -1454,6 +1474,7 @@ private:
                         queueNextVideoFrame();
                     }
                 } else {
+                    image_->setPixelExact(cfgPixelExact);
                     image_->setFrame(image);
                     status_->setText(QStringLiteral("Terminé — ") + QString::fromWCharArray(M3D_RELEASE_ID_WIDE) + QStringLiteral(" — ") + QString::number(hourValue) + QStringLiteral(" h"));
                 }
