@@ -42,3 +42,12 @@
 - https://proekt.sx/tip/dk781-detail.html
 - https://commons.wikimedia.org/wiki/Category:Palace_of_culture_in_Prypyat
 - https://pripyat.fandom.com/ru/wiki/Энергетик
+
+## Recoupement photos / projet type — 2026-11-06
+- L'inventaire photographique des fresques (7 fichiers) : https://commons.wikimedia.org/wiki/Category:Murals_in_the_palace_of_culture_in_Pripyat
+- L'inventaire des intérieurs : https://commons.wikimedia.org/wiki/Category:Interiors_of_the_palace_of_culture_in_Prypyat
+- La fiche de l'édifice confirme la famille 2С-06-9 / 2С-06-9/70, mais ne livre pas de plan intérieur coté : https://domophoto.ru/building/80424/
+- Une reconstitution indépendante décrit l'enveloppe spécifique à Pripyat comme **81,2 × 24,4 m**, proche de l'enveloppe du moteur (81 × 24,6 m) : https://awesomeness3242.itch.io/palace-of-culture-energetik . Il s'agit d'une **source secondaire de modélisation**, non d'un relevé certifié. Le 81,3 × 30,4 m mentionné plus haut concerne une réalisation documentée du projet type et **ne justifie pas d'élargir le bâtiment de Pripyat**.
+- La fresque est bien attestée dans le foyer par les photos : https://www.hdhuntphoto.com/chernobyl-kiev/chernobyl-kiev-two-three ; son mur exact, son orientation et ses dimensions ne sont pas cotés.
+- Changement de géométrie expérimental : ouverture d'une travée du plancher côté escalier/fresque, conservation d'une galerie et d'un palier, commit `ab19d8d`. **Implantation provisoire à vérifier avec les photos**, pas une reconstruction fidèle certifiée.
+- Aucune photographie ni aucun plan n'établit encore une correspondance métrique complète entre les niveaux du foyer et les coordonnées de la scène.
