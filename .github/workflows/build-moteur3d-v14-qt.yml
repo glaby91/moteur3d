@@ -5,6 +5,7 @@ on:
     branches:
       - experiment/manhattan-silent-hill-2026-10-30
       - pripiat
+      - fix/native-sharpness-diagnostic-261106
     paths:
       - experiments/2026-10-30-cote-ete-gt/native_v14/CMakeLists.txt
       - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
@@ -15,6 +16,7 @@ on:
       - experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_views.json
       - experiments/2026-10-30-cote-ete-gt/native_v14/source_v1314.html
       - experiments/2026-10-30-cote-ete-gt/native_v14/src/moteur3d_qt.cpp
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_hybrid.cpp
       - experiments/2026-10-30-cote-ete-gt/native_v14/src/**
       - docs/pripyat/**
       - experiments/2026-10-30-cote-ete-gt/native_v14/version.h
