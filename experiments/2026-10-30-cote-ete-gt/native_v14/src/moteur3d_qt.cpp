@@ -66,7 +66,7 @@ struct RenderSettings {
     bool navigationPreview = false;
     unsigned threads = std::max(1u, std::thread::hardware_concurrency()), samples = 1;
     bool avx2 = false;
-    bool directX11 = false, hybridCpu = false, offlinePathTrace = false;
+    bool directX11 = false, compute11 = false, hybridCpu = false, offlinePathTrace = false;
     unsigned pathBounces = 3;
     int hourStep = 4;
     bool fog = false, dof = false, edgeAa = true, dust = true, videoPreview = false;
@@ -846,11 +846,12 @@ private:
         resolution_ = new QComboBox(panel);
         resolution_->addItems({QStringLiteral("Vostro — 1366 × 768"), QStringLiteral("Full HD — 1920 × 1080"), QStringLiteral("1600 × 900"), QStringLiteral("1280 × 720"), QStringLiteral("4K UHD — 3840 × 2160")});
         renderer_ = new QComboBox(panel);
-        renderer_->addItems({QStringLiteral("Auto — DXR si renderer disponible, sinon CPU"), QStringLiteral("CPU — ray tracing logiciel complet"), QStringLiteral("GPU — DirectX 11 (aperçu raster)"), QStringLiteral("CPU hybride V3 — tuiles / BVH (expérimental)")});
+        renderer_->addItems({QStringLiteral("Auto — DXR si renderer disponible, sinon CPU"), QStringLiteral("CPU — ray tracing logiciel complet"), QStringLiteral("GPU — DirectX 11 (aperçu raster)"), QStringLiteral("CPU hybride V3 — tuiles / BVH (expérimental)"), QStringLiteral("GPU — Compute D3D11 (normales, expérimental)")});
         renderer_->setCurrentIndex(0);
         renderer_->setToolTip(QStringLiteral("Le mode Auto utilise DXR seulement si le GPU et un backend DXR du moteur sont disponibles; sinon le rendu complet reste sur CPU. DirectX 11 est un aperçu raster optionnel."));
 #ifndef _WIN32
         renderer_->setItemData(2, 0, Qt::UserRole - 1);
+        renderer_->setItemData(4, 0, Qt::UserRole - 1);
         renderer_->setItemData(2, QStringLiteral("DirectX 11 est disponible uniquement sous Windows."), Qt::ToolTipRole);
 #endif
         quality_ = new QComboBox(panel);
@@ -1256,6 +1257,7 @@ private:
         settings_.offlinePathTrace = qi == 7;
         settings_.directX11 = renderer_->currentIndex() == 2 && !settings_.offlinePathTrace;
         settings_.hybridCpu = renderer_->currentIndex() == 3 && !settings_.offlinePathTrace;
+        settings_.compute11 = renderer_->currentIndex() == 4 && !settings_.offlinePathTrace;
         if (rendererStatus_ && qi == 7) rendererStatus_->setText(QStringLiteral("CPU hors-ligne PBR/HDR — 64 spp, 3 rebonds et débruitage."));
         if (navigationPreviewTimer_) navigationPreviewTimer_->setInterval(settings_.directX11 ? 50 : 350);
         threads_->setEnabled(!settings_.directX11);
@@ -1368,8 +1370,8 @@ private:
     void requestRender() {
         generation_.fetch_add(1);
         bool gpu=false;
-        { std::lock_guard<std::mutex> lock(requestMutex_); pending_ = true; gpu=settings_.directX11; }
-        status_->setText(gpu ? QStringLiteral("Aperçu GPU DirectX 11 en cours…") : QStringLiteral("Rendu CPU en cours…"));
+        { std::lock_guard<std::mutex> lock(requestMutex_); pending_ = true; gpu=settings_.directX11||settings_.compute11; }
+        status_->setText(gpu ? QStringLiteral("Calcul GPU DirectX 11 en cours…") : QStringLiteral("Rendu CPU en cours…"));
         requestCv_.notify_one();
     }
 
@@ -1406,7 +1408,13 @@ private:
             if (cfg.dof && samples < 4) samples = 4;
             Stats st{};
             QString fallbackNotice;
-            if (cfg.directX11) {
+            if (cfg.compute11) {
+                std::wstring gpuError;
+                if (!renderCompute11Preview(scene_, cam, cfg.renderW, cfg.renderH, pixels, st, gpuError)) {
+                    fallbackNotice = QStringLiteral("GPU Compute indisponible — repli CPU : ") + QString::fromWCharArray(gpuError.c_str());
+                    st = m3d::render(scene_, shadows_, cam, cfg.renderW, cfg.renderH, pixels, cfg.threads, cfg.fog, generation_, token, samples, cfg.dof, cfg.avx2, cfg.offlinePathTrace, cfg.pathBounces);
+                }
+            } else if (cfg.directX11) {
                 std::wstring gpuError;
                 if (!renderDirectX11Preview(scene_, shadows_, cam, cfg.renderW, cfg.renderH, pixels, st, gpuError)) {
                     fallbackNotice = QStringLiteral("DirectX indisponible — rendu CPU de secours : ") + QString::fromWCharArray(gpuError.c_str());
