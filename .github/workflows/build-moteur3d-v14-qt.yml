@@ -136,6 +136,7 @@ jobs:
           cp assets/pripyat/energetik_fresco_mosaic.glb assets/pripyat/energetik_fresco_mosaic.asset.json dist/assets/pripyat/
           cp assets/pripyat/energetik_roof_neon_sign.glb dist/assets/pripyat/
           cp -r assets/pripyat/textures dist/assets/pripyat/
+          mkdir -p dist/docs
           cp tools/generate_energetik_room_pbr.py dist/docs/
           cp version.h dist/
           cp -r docs dist/
