@@ -48,6 +48,7 @@ ShadowMap buildShadow(const Scene& s,Stats& st);
 V shade(const Scene& s,const ShadowMap& sm,const Camera& cam,const Ray& r,const Hit& h,Stats& st,bool fog,bool reflections=true);
 V traceColor(const Scene& s,const ShadowMap& sm,const Camera& cam,const Ray& r,Stats& st,bool fog);
 Camera camera(float angleDeg,float elevationDeg,float distance,int w,int h,V look=V{0,1,-8});
+Stats renderHybrid(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,unsigned threads,bool fog,const std::atomic<uint64_t>& generation,uint64_t token);
 Stats render(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,unsigned threads,bool fog,const std::atomic<uint64_t>& generation,uint64_t token,unsigned samplesPerPixel=1,bool depthOfField=false,bool useAvx2=false,bool offlinePathTrace=false,unsigned maxBounces=3);
 V traceOfflineColor(const Scene& s,const ShadowMap& sm,const Camera& cam,const Ray& ray,Stats& st,bool fog,uint64_t seed,unsigned maxBounces);
 RendererCapabilities detectRendererCapabilities() noexcept;
