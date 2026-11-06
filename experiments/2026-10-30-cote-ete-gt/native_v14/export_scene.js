@@ -372,6 +372,11 @@ for(const [name,pbr] of generatedPripyatPbr) scene.materials.set(name,{levels:pb
 
 const generatedPbr = new Map(['raptureStone', 'raptureBronze', 'raptureGlass'].map(name => [name, makeRapturePbr(name)]));
 function materialPbr(name) {
+  if (energetikPbrDir && path.basename(scenePath) === 'scene_pripyat_central.js') {
+    const selected = scene.materials.get(name);
+    if (selected?.normalLevels && selected?.roughnessLevels)
+      return { normal: selected.normalLevels, roughness: selected.roughnessLevels };
+  }
   if (importedPripyatPbr.has(name)) return importedPripyatPbr.get(name);
   if (name === 'concrete' && facadePbr) return facadePbr;
   if (name === 'orange') return orangePbr;
