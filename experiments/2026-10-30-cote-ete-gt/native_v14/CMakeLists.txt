@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(Moteur3DNative VERSION 14.0 LANGUAGES CXX)
+project(Moteur3DNative VERSION 15.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,6 +14,7 @@ set(M3D_CORE_SOURCES
     src/m3d_intersection.cpp
     src/m3d_shading.cpp
     src/m3d_render.cpp
+    src/m3d_hybrid.cpp
     src/m3d_post.cpp
     src/m3d_simd.cpp
     src/m3d_directx11.cpp
