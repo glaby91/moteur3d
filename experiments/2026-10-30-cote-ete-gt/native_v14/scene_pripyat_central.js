@@ -384,7 +384,16 @@ function makeScene() {
   // The foyer mosaic is a reusable, photo-guided texture on the hall-facing stair wall.
   // Dimensions are the current 9.5 x 4.3 m estimate; update the manifest if surveyed.
   // The supporting wall sits at X=8.38 m. This plane faces -X and spans toward +Z.
-  const frescoX=8.12, frescoY0=2.00, frescoY1=6.30;
+  // The mural belongs to the upper stair-hall wall, not the ground-floor partition.
+// Keep the measured-from-photo 9.5 x 4.3 m estimate, but position its lower
+// edge above the first mezzanine slab (top = 3.49 m). This prevents the image
+// crossing into the lower storey. Heights remain provisional pending survey.
+// Reference photos: Wikimedia Commons, "Palace of Culture Lobby-pripyat.jpg"
+// and "Pripyat - cultural center 08.jpg".
+const frescoX=8.12, frescoY0=3.72, frescoY1=8.02;
+// A continuous upper wall is required behind the mural, instead of relying
+// on the repeating storey partitions which break at each slab.
+box(8.38,3.50,-41.80,8.54,8.24,-31.80,'concrete');
   const frescoZ0=-41.55, frescoZ1=-32.05;
   const frescoNormal=[-1,0,0];
   const frescoTopV=0.27294921875, frescoBottomV=0.72705078125;
