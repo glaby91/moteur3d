@@ -6,6 +6,7 @@ on:
       - experiment/manhattan-silent-hill-2026-10-30
       - pripiat
       - feature/pripyat-catalog-assets-261105
+      - feature/pripyat-square-v15-beta2
     paths:
       - experiments/2026-10-30-cote-ete-gt/native_v14/CMakeLists.txt
       - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
@@ -99,6 +100,16 @@ jobs:
           node tools/export_pripyat_outdoor_chair_glb.js
           node tools/export_energetik_roof_neon_sign_glb.js
           M3D_SKIP_IMPORTED_CAR=1 M3D_FACADE_PBR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_pripyat_facade_bay.bin scene_pripyat_facade_bay.js
+
+      - name: Validate central-square landmark assets
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          test -s scene_pripyat_central.bin
+          test -s assets/pripyat/energetik_fresco_mosaic.glb
+          test -s assets/pripyat/energetik_roof_neon_sign.glb
+          node -e "const fs=require('fs');const s=fs.readFileSync('scene_pripyat_central.js','utf8');for(const term of ['buildEnergetikRoofNeonSign','energetikFresco','archSegments','civic='])if(!s.includes(term))throw Error('Missing landmark: '+term);"
+          echo "Fresco, roof neon, arch and square geometry present in exported source."
 
       - name: Configure Qt application
         shell: bash
