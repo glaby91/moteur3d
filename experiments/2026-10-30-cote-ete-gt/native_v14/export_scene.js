@@ -107,6 +107,25 @@ eval(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\n${sc
 const scene = globalThis.__scene;
 const energetikFrescoPbr = readPbrMipChain(path.join(__dirname, 'assets/pripyat/textures/energetik_fresco_mosaic.m3dpbr.gz'));
 scene.materials.set('energetikFresco', { levels: energetikFrescoPbr.color });
+// Optional local Energetik PBR library (not bundled in the repository).
+// Set M3D_ENERGETIK_PBR_DIR to the unpacked 2048px material pack.
+// Only override existing material IDs; never replace the dedicated fresco.
+const energetikPbrDir = process.env.M3D_ENERGETIK_PBR_DIR;
+if (energetikPbrDir && path.basename(scenePath) === 'scene_pripyat_central.js') {
+  const overrides = {
+    concrete: 'concrete', plaster: 'plaster', volcanicTuff: 'volcanicTuff',
+    stone: 'stone', brick: 'brick', wood: 'wood', metal: 'metal',
+    rust: 'rust', seatVinylBrown: 'seatVinylBrown', asphalt: 'asphalt',
+    debris: 'debris', curtain: 'curtain'
+  };
+  for (const [id, asset] of Object.entries(overrides)) {
+    const file = path.join(energetikPbrDir, asset + '_2048.m3dpbr.gz');
+    if (!fs.existsSync(file)) { console.warn('Energetik PBR missing: ' + file); continue; }
+    const pbr = readPbrMipChain(file);
+    scene.materials.set(id, { levels: pbr.color, normalLevels: pbr.normal, roughnessLevels: pbr.roughness });
+    console.log('Energetik PBR loaded: ' + id);
+  }
+}
 const importedPripyatPbr = globalThis.__m3dPripyatPbr || new Map();
 for (const [name, pbr] of importedPripyatPbr) scene.materials.set(name, { levels:pbr.color });
 const objects = scene.objects;
