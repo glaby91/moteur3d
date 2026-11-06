@@ -17,6 +17,7 @@ set(M3D_CORE_SOURCES
     src/m3d_hybrid.cpp
     src/m3d_post.cpp
     src/m3d_simd.cpp
+    src/m3d_compute11.cpp
     src/m3d_directx11.cpp
     src/m3d_dxr.cpp
     src/simd/avx2/post.cpp
@@ -48,3 +49,9 @@ endif()
 
 install(TARGETS moteur3d_qt RUNTIME DESTINATION .)
 install(FILES moteur3d_v1314_scene.bin DESTINATION . OPTIONAL)
+
+if(WIN32)
+    add_custom_command(TARGET m3d_core POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/shaders"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/m3d_raytrace_compute.hlsl" "${CMAKE_CURRENT_BINARY_DIR}/shaders/m3d_raytrace_compute.hlsl")
+endif()
