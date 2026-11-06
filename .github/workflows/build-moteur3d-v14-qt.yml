@@ -46,6 +46,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate engine checkout
+        shell: bash
+        run: |
+          if [ ! -f experiments/2026-10-30-cote-ete-gt/native_v14/CMakeLists.txt ]; then
+            echo "::error::Le moteur 3D n'est pas present sur la branche selectionnee ($GITHUB_REF_NAME). Relancer Run workflow avec fix/native-sharpness-diagnostic-261106 ou une branche de developpement contenant native_v14."
+            exit 1
+          fi
+
       - name: Install Qt 6 on Linux
         if: runner.os == 'Linux'
         run: |
