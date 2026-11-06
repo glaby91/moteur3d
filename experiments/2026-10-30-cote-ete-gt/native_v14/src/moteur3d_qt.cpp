@@ -66,7 +66,7 @@ struct RenderSettings {
     bool navigationPreview = false;
     unsigned threads = std::max(1u, std::thread::hardware_concurrency()), samples = 1;
     bool avx2 = false;
-    bool directX11 = false, offlinePathTrace = false;
+    bool directX11 = false, hybridCpu = false, offlinePathTrace = false;
     unsigned pathBounces = 3;
     int hourStep = 4;
     bool fog = false, dof = false, edgeAa = true, dust = true, videoPreview = false;
@@ -169,13 +169,13 @@ static V clampCameraMotion(const Scene& scene,V from,V to,float angleDeg,float e
 
 struct BenchmarkRow {
     unsigned threads = 1;
-    bool avx2 = false, gpu = false;
+    bool avx2 = false, gpu = false, hybrid = false;
     double renderMs = 0, postMs = 0, totalMs = 0;
     uint64_t rays = 0, tests = 0, nodes = 0, aabb = 0, hits = 0, texels = 0;
     uint64_t simdRayPackets = 0, simdTrianglePackets = 0, simdTextureSamples = 0, simdLightBatches = 0;
 };
 
-struct BenchmarkPass { unsigned threads = 1; bool avx2 = false, gpu = false; };
+struct BenchmarkPass { unsigned threads = 1; bool avx2 = false, gpu = false, hybrid = false; };
 
 class BenchmarkDialog final : public QDialog {
 public:
@@ -209,7 +209,7 @@ public:
         auto* engine = new QHBoxLayout;
         engine->addWidget(new QLabel(QStringLiteral("Moteur à mesurer :"), this));
         engineMode_ = new QComboBox(this);
-        engineMode_->addItems({QStringLiteral("CPU — ray tracing complet"), QStringLiteral("GPU — DirectX 11"), QStringLiteral("Comparaison CPU x64 / GPU DirectX 11")});
+        engineMode_->addItems({QStringLiteral("CPU — ray tracing complet"), QStringLiteral("GPU — DirectX 11"), QStringLiteral("Comparaison CPU x64 / GPU DirectX 11"), QStringLiteral("CPU hybride V3 — scène réelle"), QStringLiteral("Comparaison CPU ray tracing / hybride V3")});
         engineMode_->setToolTip(QStringLiteral("La comparaison CPU/GPU mesure deux chemins de rendu de qualité différente : le CPU trace les rayons, tandis que DirectX rasterise et ne calcule pas les mêmes réflexions/réfraction. La lecture GPU→CPU est incluse. Ce n’est pas un gain à qualité égale."));
 #ifndef _WIN32
         engineMode_->setItemData(1, 0, Qt::UserRole - 1); engineMode_->setItemData(2, 0, Qt::UserRole - 1);
@@ -284,12 +284,12 @@ public:
         double maxRelative = 1.0;
         for (const auto& row : rows_) if (row.totalMs > 0) maxRelative = std::max(maxRelative, referenceMs / row.totalMs);
         QStringList modesMeasured;
-        auto modeLabel=[](const BenchmarkRow& row){return row.gpu?QStringLiteral("DirectX 11 GPU"):row.avx2?QStringLiteral("AVX2 + FMA3"):QStringLiteral("x64 standard");};
+        auto modeLabel=[](const BenchmarkRow& row){return row.gpu?QStringLiteral("DirectX 11 GPU"):row.hybrid?QStringLiteral("CPU hybride V3"):row.avx2?QStringLiteral("AVX2 + FMA3"):QStringLiteral("x64 standard");};
         for (const auto& row : rows_) { const QString name = modeLabel(row); if (!modesMeasured.contains(name)) modesMeasured << name; }
         for (int i = 0; i < int(rows_.size()); ++i) {
             const auto& row = rows_[size_t(i)];
             const QString modeName = modeLabel(row);
-            const auto standardIt = std::find_if(rows_.begin(), rows_.end(), [&row](const BenchmarkRow& r) { return !r.gpu && !r.avx2 && r.threads == row.threads; });
+            const auto standardIt = std::find_if(rows_.begin(), rows_.end(), [&row](const BenchmarkRow& r) { return !r.gpu && !r.hybrid && !r.avx2 && r.threads == row.threads; });
             const QString simdGain = !row.gpu && row.avx2 && standardIt != rows_.end()
                 ? QStringLiteral("%1×").arg(standardIt->totalMs / std::max(.001, row.totalMs), 0, 'f', 2)
                 : QStringLiteral("—");
@@ -846,7 +846,7 @@ private:
         resolution_ = new QComboBox(panel);
         resolution_->addItems({QStringLiteral("Vostro — 1366 × 768"), QStringLiteral("Full HD — 1920 × 1080"), QStringLiteral("1600 × 900"), QStringLiteral("1280 × 720"), QStringLiteral("4K UHD — 3840 × 2160")});
         renderer_ = new QComboBox(panel);
-        renderer_->addItems({QStringLiteral("Auto — DXR si renderer disponible, sinon CPU"), QStringLiteral("CPU — ray tracing logiciel complet"), QStringLiteral("GPU — DirectX 11 (aperçu raster)")});
+        renderer_->addItems({QStringLiteral("Auto — DXR si renderer disponible, sinon CPU"), QStringLiteral("CPU — ray tracing logiciel complet"), QStringLiteral("GPU — DirectX 11 (aperçu raster)"), QStringLiteral("CPU hybride V3 — tuiles / BVH (expérimental)")});
         renderer_->setCurrentIndex(0);
         renderer_->setToolTip(QStringLiteral("Le mode Auto utilise DXR seulement si le GPU et un backend DXR du moteur sont disponibles; sinon le rendu complet reste sur CPU. DirectX 11 est un aperçu raster optionnel."));
 #ifndef _WIN32
@@ -1113,8 +1113,12 @@ private:
             std::vector<BenchmarkPass> passes;
             if(engineMode==1)passes.push_back({0,false,true});
             else if(engineMode==2){for(unsigned n:threadCounts)passes.push_back({n,false,false});passes.push_back({0,false,true});}
+            else if(engineMode==3){for(unsigned n:threadCounts)passes.push_back({n,false,false,true});}
+            else if(engineMode==4){for(unsigned n:threadCounts){passes.push_back({n,false,false,false});passes.push_back({n,false,false,true});}}
             else for(unsigned n:threadCounts)for(bool avx:simdModes)passes.push_back({n,avx,false});
-            const QString modeSummary = engineMode==1 ? QStringLiteral("DirectX 11 GPU")
+            const QString modeSummary = engineMode==3 ? QStringLiteral("CPU hybride V3 sur scène réelle")
+                : engineMode==4 ? QStringLiteral("Comparaison CPU ray tracing / hybride V3")
+                : engineMode==1 ? QStringLiteral("DirectX 11 GPU")
                 : engineMode==2 ? QStringLiteral("Chemins CPU / GPU (qualités différentes)")
                 : selectedMode == 3 ? QStringLiteral("Comparaison complète x64 / AVX2 + FMA3")
                 : selectedMode == 2 ? QStringLiteral("AVX2 + FMA3")
@@ -1166,7 +1170,7 @@ private:
                     if (benchmarkGeneration_.load() != token || !benchmarkError.isEmpty()) break;
                     const unsigned postThreads = pass.gpu ? std::max(1u,cfg.threads) : pass.threads;
                     std::vector<double> renderTimes, postTimes, totalTimes;
-                    BenchmarkRow row; row.threads = pass.threads; row.avx2 = pass.avx2; row.gpu = pass.gpu;
+                    BenchmarkRow row; row.threads = pass.threads; row.avx2 = pass.avx2; row.gpu = pass.gpu; row.hybrid = pass.hybrid;
                     for (int repetition = -1; repetition < repeats; ++repetition) {
                         if (benchmarkGeneration_.load() != token) break;
                         std::vector<uint32_t> pixels(size_t(cfg.renderW) * cfg.renderH);
@@ -1178,6 +1182,7 @@ private:
                         const auto start = std::chrono::steady_clock::now();
                         Stats st;
                         if(pass.gpu){std::wstring error;if(!renderDirectX11Preview(scene_,benchShadows,cam,cfg.renderW,cfg.renderH,pixels,st,error)){benchmarkError=QString::fromWCharArray(error.c_str());break;}}
+                        else if(pass.hybrid && !cfg.dof && samples==1) st=m3d::renderHybrid(scene_, benchShadows, cam, cfg.renderW, cfg.renderH, pixels, pass.threads, cfg.fog, benchmarkGeneration_, token);
                         else st=m3d::render(scene_, benchShadows, cam, cfg.renderW, cfg.renderH, pixels, pass.threads, cfg.fog, benchmarkGeneration_, token, samples, cfg.dof, pass.avx2);
                         if (benchmarkGeneration_.load() != token) break;
                         const double renderMs = st.ms;
@@ -1194,7 +1199,7 @@ private:
                         }
                         ++done;
                         const int progress = int(100.0 * done / std::max(1, totalPasses));
-                        const QString modeName = pass.gpu ? QStringLiteral("DirectX 11 GPU") : pass.avx2 ? QStringLiteral("AVX2 + FMA3") : QStringLiteral("x64 standard");
+                        const QString modeName = pass.gpu ? QStringLiteral("DirectX 11 GPU") : pass.hybrid ? QStringLiteral("CPU hybride V3") : pass.avx2 ? QStringLiteral("AVX2 + FMA3") : QStringLiteral("x64 standard");
                         const QString threadLabel = pass.gpu ? QStringLiteral("GPU") : QStringLiteral("%1 thread(s)").arg(pass.threads);
                         QMetaObject::invokeMethod(&dialog, [&dialog, progress, threadLabel, repetition, repeats, modeName] {
                             const QString phase = repetition < 0 ? QStringLiteral("Échauffement") : QStringLiteral("Mesure %1/%2").arg(repetition + 1).arg(repeats);
@@ -1250,6 +1255,7 @@ private:
         const int qi = quality_->currentIndex();
         settings_.offlinePathTrace = qi == 7;
         settings_.directX11 = renderer_->currentIndex() == 2 && !settings_.offlinePathTrace;
+        settings_.hybridCpu = renderer_->currentIndex() == 3 && !settings_.offlinePathTrace;
         if (rendererStatus_ && qi == 7) rendererStatus_->setText(QStringLiteral("CPU hors-ligne PBR/HDR — 64 spp, 3 rebonds et débruitage."));
         if (navigationPreviewTimer_) navigationPreviewTimer_->setInterval(settings_.directX11 ? 50 : 350);
         threads_->setEnabled(!settings_.directX11);
@@ -1406,6 +1412,8 @@ private:
                     fallbackNotice = QStringLiteral("DirectX indisponible — rendu CPU de secours : ") + QString::fromWCharArray(gpuError.c_str());
                     st = m3d::render(scene_, shadows_, cam, cfg.renderW, cfg.renderH, pixels, cfg.threads, cfg.fog, generation_, token, samples, cfg.dof, cfg.avx2, cfg.offlinePathTrace, cfg.pathBounces);
                 }
+            } else if(cfg.hybridCpu && !cfg.dof && samples==1) {
+                st = m3d::renderHybrid(scene_, shadows_, cam, cfg.renderW, cfg.renderH, pixels, cfg.threads, cfg.fog, generation_, token);
             } else {
                 st = m3d::render(scene_, shadows_, cam, cfg.renderW, cfg.renderH, pixels, cfg.threads, cfg.fog, generation_, token, samples, cfg.dof, cfg.avx2, cfg.offlinePathTrace, cfg.pathBounces);
             }
