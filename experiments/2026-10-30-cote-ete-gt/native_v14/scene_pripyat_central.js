@@ -20,8 +20,8 @@ function makeScene() {
   // Coordinate convention: Y is vertical. The camera approaches from +Z.
   // Zone 01 covers the central plaza, Energetik and Hotel Polissya frontages.
   const groundY = -0.08;
-  box(-64, -0.32, -70, 64, groundY, 88, 'asphalt');
-  box(-58, -0.10, -62, 58, -0.045, 70, 'concrete');
+  box(-64, -0.32, -70, 94, groundY, 88, 'asphalt');
+  box(-58, -0.10, -62, 89, -0.045, 70, 'concrete');
 
   // Main paved square: broad worn paving, joint bands, patched slabs and weeds.
   box(-53, -0.045, -15, 53, 0.015, 61, 'stone');
@@ -39,8 +39,8 @@ function makeScene() {
   ]) box(p[0], 0.018, p[1], p[0] + p[3], 0.023, p[1] + p[4], 'concrete');
 
   // Roads and sidewalks frame the plaza and connect to the surrounding blocks.
-  box(-64, -0.015, 65, 64, 0.025, 88, 'asphalt');
-  box(-64, 0.025, 61, 64, 0.13, 65, 'concrete');
+  box(-64, -0.015, 65, 94, 0.025, 88, 'asphalt');
+  box(-64, 0.025, 61, 94, 0.13, 65, 'concrete');
   box(-64, 0.025, -19, 64, 0.13, -15, 'concrete');
   box(-60, 0.02, -15, -55, 0.14, 65, 'concrete');
   box(55, 0.02, -15, 60, 0.14, 65, 'concrete');
