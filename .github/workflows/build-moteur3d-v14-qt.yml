@@ -86,6 +86,11 @@ jobs:
           #define M3D_GIT_RUN_WIDE L"$GITHUB_RUN_NUMBER"
           EOF
 
+      - name: Validate room-object-material registry
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: python tools/validate_energetik_materials.py
+
       - name: Export runtime scenes
         shell: bash
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
@@ -138,7 +143,8 @@ jobs:
           cp -r assets/pripyat/textures dist/assets/pripyat/
           mkdir -p dist/docs
           cp tools/generate_energetik_room_pbr.py dist/docs/
-          cp version.h dist/
+          cp version.h energetik_room_materials.json dist/
+          cp tools/validate_energetik_materials.py dist/docs/
           cp -r docs dist/
 
       - name: Deploy Qt DLLs on Windows
