@@ -14,6 +14,7 @@ set(M3D_CORE_SOURCES
     src/m3d_intersection.cpp
     src/m3d_shading.cpp
     src/m3d_render.cpp
+    src/m3d_hybrid.cpp
     src/m3d_post.cpp
     src/m3d_simd.cpp
     src/m3d_directx11.cpp
