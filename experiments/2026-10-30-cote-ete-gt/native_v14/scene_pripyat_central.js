@@ -158,7 +158,30 @@ function makeScene() {
     box(20,t,-42.2,27,b,-38.0,'concrete');
     box(20,t,-23.0,27,b,-20.1,'concrete');
   }
-  floorPlate(3.25,true); floorPlate(6.35);
+  // Two principal occupied levels are supported by the building record;
+  // the 6.35 m plate acts as the upper ceiling/roof structure of the foyer.
+  // The western auditorium and eastern stair-hall must remain voids through
+  // the first occupied-floor plate, rather than generic room-sized boxes.
+  floorPlate(3.25,true);
+  floorPlate(6.35);
+
+  // Independent structure for the stair-hall gallery (architectural pass).
+  // Columns carry the upper landing; parapets follow the actual slab edges
+  // and leave the open hall visible from the lower floor.
+  for(const z of [-41.6,-36.5,-31.5]){
+    box(16.25,0.38,z-0.20,16.65,6.35,z+0.20,'concrete');
+  }
+  // First-floor landing bordering the double-height rear atrium.
+  box(8.0,3.49,-31.58,16.5,3.62,-31.35,'stone');
+  box(16.38,3.49,-41.8,16.56,3.62,-31.35,'stone');
+  // Low railings and uprights on the inner edge of the gallery.
+  for(const z of [-41.4,-39.6,-37.8,-36.0,-34.2,-32.4]){
+    capsule([16.42,3.62,z],[16.42,4.55,z],0.038,'rust');
+  }
+  capsule([16.42,4.55,-41.5],[16.42,4.55,-31.4],0.048,'rust');
+  for(const x of [8.3,10.0,11.7,13.4,15.1,16.3])
+    capsule([x,3.62,-31.45],[x,4.55,-31.45],0.038,'rust');
+  capsule([8.2,4.55,-31.45],[16.45,4.55,-31.45],0.048,'rust');
 
   // Open facade bays expose the deep galleries and interior structure, not glass.
   // Keep only damaged railings at the balcony edges, with irregular missing sections.
