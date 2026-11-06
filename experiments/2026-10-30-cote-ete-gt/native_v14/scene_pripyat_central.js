@@ -178,10 +178,13 @@ function makeScene() {
       box(x,1.0,-42.10,x+3.5,2.65,-41.98,((Math.floor((x+45.5)/6.2)%4)===1)?'windowdark':'glass');
       box(x,4.1,-42.10,x+3.5,5.85,-41.98,'glass');
     }
-    // Upper rear bays: restore glazing in documented window positions;
-    // a minority remain dark/damaged for the abandoned presentation.
-    const upperGlass=((Math.floor((x+45.5)/6.2)%5)===2)?'windowdark':'glass';
-    box(x,7.1,-42.10,x+3.5,8.75,-41.98,upperGlass);
+    // Reconstruct original glazing positions, preserving the abandoned state:
+    // some panes survive, others are dark/broken or entirely missing.
+    // This distribution is provisional until photo-matched per bay.
+    const upperBayIndex=Math.round((x+45.5)/6.2);
+    const upperGlass=upperBayIndex%5===2?'windowdark':'glass';
+    if(upperBayIndex%5!==4)
+      box(x,7.1,-42.10,x+3.5,8.75,-41.98,upperGlass);
   }
   for(const y of [3.05,6.15,9.05]) box(-49.2,y,-42.16,29.2,y+0.18,-41.92,'stone');
 
