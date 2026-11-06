@@ -38,3 +38,20 @@ Critère : aucun défaut de visibilité et détails des textures au moins aussi 
 
 ## Ordre de réalisation
 D'abord terminer la netteté/mipmapping et le diagnostic pixel-exact ; ensuite prototype CPU de visibilité par tuiles et G-buffer ; enfin stéréoscopie indépendante et éventuelle réutilisation multi-vues.
+
+
+## 4. Précision utilisateur : resserrement vers le point de fuite selon Z
+La surface de recherche doit tenir compte de la perspective. Distinguer :
+- **Frustum en espace caméra** : pour une profondeur Z>0, demi-largeur = Z*tan(FOV_horizontal/2), demi-hauteur = Z*tan(FOV_vertical/2). Le volume couvert **s'élargit** avec Z.
+- **Empreinte projetée d'un objet de taille fixe** : largeur écran ≈ f*largeur/Z ; elle **rétrécit** avec Z. La surface en pixels décroît approximativement comme 1/Z² tant que l'objet reste petit et frontal.
+- **Point de fuite** : les directions parallèles convergent dans l'image ; ce n'est pas une position 3D où tous les objets doivent être ramenés.
+
+### Adaptation du prototype
+1. Pour chaque tuile écran, construire un sous-frustum (pyramide tronquée), pas une enveloppe 3D qui rétrécit artificiellement avec Z.
+2. Intersecter BVH / bounding boxes avec ce sous-frustum et utiliser un test d'occlusion conservateur par profondeur.
+3. Projeter les bornes des objets pour déterminer leur empreinte écran et choisir la granularité de traitement, le LOD et les seuils de détails.
+4. Pour les triangles, interpoler 1/Z, U/Z, V/Z, puis reconstituer U et V par division pour éviter les déformations de texture.
+5. Ne jamais exclure un objet au seul motif qu'il est éloigné : silhouettes, fils, fenêtres et détails contrastés peuvent encore être visibles.
+6. Prévoir les cas limites : Z proche de zéro, clipping near plane, caméra inclinée, géométrie non frontale, occlusions, changements de FOV.
+
+Validation : scène avec rangées de fenêtres identiques à des profondeurs croissantes, comparaison du nombre de pixels couverts, de la fidélité UV et de l'absence de disparition prématurée.
