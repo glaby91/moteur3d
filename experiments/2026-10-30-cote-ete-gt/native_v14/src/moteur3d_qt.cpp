@@ -482,7 +482,7 @@ protected:
         if (image_.isNull()) return;
         QSize fit=image_.size(); fit.scale(size(), Qt::KeepAspectRatio);
         QRect target(QPoint((width()-fit.width())/2,(height()-fit.height())/2),fit);
-        p.setRenderHint(QPainter::SmoothPixmapTransform,true); p.drawImage(target,image_);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, target.size() != image_.size()); p.drawImage(target,image_);
     }
     void mousePressEvent(QMouseEvent* event) override {
         if(event->button()==Qt::LeftButton || event->button()==Qt::RightButton) {
@@ -856,7 +856,7 @@ private:
         quality_ = new QComboBox(panel);
         quality_->addItems({QStringLiteral("Natif — 100 %"), QStringLiteral("Équilibré — 87,5 % par axe"), QStringLiteral("Détails — 75 % par axe"), QStringLiteral("Rapide — 66,7 % par axe"), QStringLiteral("Très rapide — 50 % par axe"), QStringLiteral("FSAA 16× — motif stratifié 4×4"), QStringLiteral("Haute définition — 2× interne (SSAA CPU)"), QStringLiteral("CPU hors-ligne PBR/HDR — 64 spp / 3 rebonds")});
         quality_->setToolTip(QStringLiteral("Le mode hors-ligne utilise un BRDF PBR GGX en lumière linéaire, un tone mapping ACES et un débruitage bilatéral CPU. Le temps de calcul augmente fortement avec la résolution."));
-        quality_->setCurrentIndex(6);
+        quality_->setCurrentIndex(0);
         controls->addWidget(new QLabel(QStringLiteral("Résolution de sortie"), panel)); controls->addWidget(resolution_);
         controls->addWidget(new QLabel(QStringLiteral("Moteur de rendu"), panel)); controls->addWidget(renderer_);
         rendererStatus_ = new QLabel(panel); rendererStatus_->setWordWrap(true); controls->addWidget(rendererStatus_);
@@ -891,7 +891,7 @@ private:
         fog_ = new QCheckBox(QStringLiteral("Brouillard atmosphérique"), panel);
         dof_ = new QCheckBox(QStringLiteral("DOF"), panel);
         dust_ = new QCheckBox(QStringLiteral("Poussière dans les rais de lumière"), panel); dust_->setChecked(true);
-        edgeAa_ = new QCheckBox(QStringLiteral("AA contours"), panel); edgeAa_->setChecked(true);
+        edgeAa_ = new QCheckBox(QStringLiteral("AA contours"), panel); edgeAa_->setChecked(false);
         checks->addWidget(fog_); checks->addWidget(dof_); checks->addWidget(dust_); checks->addWidget(edgeAa_); checks->addStretch();
         controls->addLayout(checks);
         videoPreview_ = new QCheckBox(QStringLiteral("Mode vidéo — aperçu rotatif 800 × 600"), panel);
