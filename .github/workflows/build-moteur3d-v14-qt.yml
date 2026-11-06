@@ -1,0 +1,139 @@
+name: Build Moteur 3D Qt — Windows
+
+on:
+  push:
+    branches:
+      - experiment/manhattan-silent-hill-2026-10-30
+      - pripiat
+      - feature/pripyat-catalog-assets-261105
+    paths:
+      - experiments/2026-10-30-cote-ete-gt/native_v14/CMakeLists.txt
+      - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/m3d_engine.h
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_rapture.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_coastal_v1314.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_facade_bay.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_energetik_seat_preview.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/export_energetik_seat_manifest.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/tools/export_energetik_seat_row_glb.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/tools/export_pripyat_outdoor_chair_glb.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/tools/generate_pripyat_chair_maps.py
+      - experiments/2026-10-30-cote-ete-gt/native_v14/tools/generate_energetik_fresco_map.py
+      - experiments/2026-10-30-cote-ete-gt/native_v14/tools/export_energetik_fresco_glb.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/**
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_views.json
+      - experiments/2026-10-30-cote-ete-gt/native_v14/source_v1314.html
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/moteur3d_qt.cpp
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/**
+      - docs/pripyat/**
+      - experiments/2026-10-30-cote-ete-gt/native_v14/version.h
+      - experiments/2026-10-30-cote-ete-gt/native_v14/build_info.h
+      - .github/workflows/build-moteur3d-v14-qt.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt 6 on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake qt6-base-dev
+
+      - name: Install Qt 6 on Windows
+        if: runner.os == 'Windows'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+
+      - name: Set up Python for procedural PBR maps
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install texture generator dependency
+        run: python -m pip install Pillow
+
+      - name: Inject GitHub build provenance
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          revision="${GITHUB_SHA:0:12}"
+          branch="$GITHUB_REF_NAME"
+          cat > build_info.h <<EOF
+          #pragma once
+          #define M3D_GIT_REVISION_ANSI "$revision"
+          #define M3D_GIT_REVISION_WIDE L"$revision"
+          #define M3D_GIT_BRANCH_ANSI "$branch"
+          #define M3D_GIT_BRANCH_WIDE L"$branch"
+          #define M3D_GIT_RUN_WIDE L"$GITHUB_RUN_NUMBER"
+          EOF
+
+      - name: Export runtime scenes
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          python tools/generate_seat_maps.py
+          python tools/generate_pripyat_chair_maps.py
+          python tools/generate_energetik_fresco_map.py
+          node tools/export_energetik_fresco_glb.js
+          M3D_SKIP_IMPORTED_CAR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_pripyat_central.bin scene_pripyat_central.js
+          M3D_SKIP_IMPORTED_CAR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_energetik_seat_preview.bin scene_energetik_seat_preview.js
+          node export_energetik_seat_manifest.js scene_energetik_seat_preview.assets.json
+          node tools/export_energetik_seat_row_glb.js
+          node tools/export_pripyat_outdoor_chair_glb.js
+          node tools/export_energetik_roof_neon_sign_glb.js
+          M3D_SKIP_IMPORTED_CAR=1 M3D_FACADE_PBR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_pripyat_facade_bay.bin scene_pripyat_facade_bay.js
+
+      - name: Configure Qt application
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compile Qt application
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: cmake --build build --config Release --parallel
+
+      - name: Install Qt runtime and package scenes
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          cmake --install build --config Release --prefix dist
+          cp scene_pripyat_central.bin scene_pripyat_central.js scene_pripyat_views.json scene_energetik_seat_preview.bin scene_energetik_seat_preview.js scene_energetik_seat_preview.assets.json scene_pripyat_facade_bay.bin scene_pripyat_facade_bay.js assets/pripyat/energetik_roof_neon_sign.js assets/pripyat/energetik_roof_neon_sign.asset.json README.md dist/
+          mkdir -p dist/assets/pripyat
+          cp assets/pripyat/energetik_facade_bay.glb assets/pripyat/energetik_facade_bay.asset.json dist/assets/pripyat/
+          cp assets/pripyat/pripyat_outdoor_chair.glb assets/pripyat/pripyat_outdoor_chair.asset.json dist/assets/pripyat/
+          cp assets/pripyat/energetik_cinema_seat_row.glb dist/assets/pripyat/
+          cp assets/pripyat/energetik_fresco_mosaic.glb assets/pripyat/energetik_fresco_mosaic.asset.json dist/assets/pripyat/
+          cp assets/pripyat/energetik_roof_neon_sign.glb dist/assets/pripyat/
+          cp -r assets/pripyat/textures dist/assets/pripyat/
+          cp -r docs dist/
+
+      - name: Deploy Qt DLLs on Windows
+        if: runner.os == 'Windows'
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: windeployqt --release --compiler-runtime --dir dist dist/moteur3d_qt.exe
+
+      - name: Upload Windows application package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moteur3D-Qt-${{ matrix.os }}-Energetik-fresco-${{ github.run_number }}
+          path: experiments/2026-10-30-cote-ete-gt/native_v14/dist
+          if-no-files-found: error
+          retention-days: 30
