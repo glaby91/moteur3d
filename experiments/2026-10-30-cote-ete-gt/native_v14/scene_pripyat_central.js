@@ -315,11 +315,11 @@ function makeScene() {
   }
   // Stage has a deep proscenium, tuff returns, broken timber deck and layered
   // curtains. Vertical folds and ripped edges keep it from reading as flat boxes.
-  box(-43.5,0.38,-41.72,-21.5,0.91,-38.48,'wood');
-  box(-43.5,0.16,-38.62,-21.5,0.89,-38.43,'wood');
+  box(-43.5,0.38,-41.72,-21.5,0.91,-38.48,'stageWood');
+  box(-43.5,0.16,-38.62,-21.5,0.89,-38.43,'stageWood');
   for(let z=-41.58;z<-38.58;z+=0.19){
     const missing=Math.sin(z*4.7)>0.87;
-    if(!missing) box(-43.38,0.91,z,-21.62,0.98,z+0.145,(Math.floor((z+42)*10)%6===0)?'debris':'wood');
+    if(!missing) box(-43.38,0.91,z,-21.62,0.98,z+0.145,(Math.floor((z+42)*10)%6===0)?'debris':'stageWood');
   }
   box(-45.6,0.90,-41.80,-20.0,3.55,-41.62,'volcanicTuff');
   box(-42.0,1.06,-41.58,-24.0,3.34,-41.48,'rust');
@@ -333,7 +333,7 @@ function makeScene() {
     for(let x=start;x<=end;x+=0.42){
       const fold=Math.sin(x*1.7)*0.045;
       const torn=Math.sin(x*3.1)>0.72;
-      capsule([x,0.92,-41.18+fold],[x+0.05,torn?2.35:3.45,-41.18+fold],0.095,(Math.floor((x+45)*10)%5===0)?'seatFabric':'curtain');
+      capsule([x,0.92,-41.18+fold],[x+0.05,torn?2.35:3.45,-41.18+fold],0.095,(Math.floor((x+45)*10)%5===0)?'seatFabricWorn':'curtain');
     }
   }
   for(const [x,y,w,h] of [[-44.7,1.0,0.42,0.78],[-43.0,2.1,0.34,0.56],[-22.6,1.25,0.50,0.94],[-20.8,2.4,0.44,0.56]])
@@ -421,6 +421,15 @@ function makeScene() {
     for(const x of [1.55,3.55])
       box(x,sportY+0.07,z+0.12,x+0.10,sportY+0.44,z+0.24,'metal');
   }
+  // Worn upper-floor finishes (thin overlays, no change to structural envelope).
+  box(-12.8,6.60,-26.55,5.0,6.615,-21.18,'floorParquet');
+  box(8.2,6.60,-31.20,16.1,6.615,-21.15,'floorCeramic');
+  // Surviving tiled skirting in eastern service passage; upper edges left damaged.
+  for (const z of [-30.9,-29.0,-27.1,-25.2,-23.3])
+    box(17.88,0.40,z,17.96,1.34,z+1.55,'wallCeramic');
+  // Uneven damaged plaster strips in the central corridor.
+  for (const z of [-39.0,-35.0,-31.0,-27.0])
+    box(7.83,0.40,z,7.91,2.55,z+1.65,'paintPeeling');
   // Structural programme: upper-floor activity rooms and library.
   // These functions are historically plausible; room assignments and
   // partition positions are architectural hypotheses, not surveyed plans.
@@ -428,13 +437,13 @@ function makeScene() {
   // the front band is a separate library/club suite, not a swimming pool.
   const activityFloor=6.60;
   // Separate library and club from the training space with a door opening.
-  box(-13.0,activityFloor,-26.92,-5.5,9.20,-26.76,'plaster');
-  box(-3.7,activityFloor,-26.92,5.2,9.20,-26.76,'plaster');
+  box(-13.0,activityFloor,-26.92,-5.5,9.20,-26.76,'paintPeeling');
+  box(-3.7,activityFloor,-26.92,5.2,9.20,-26.76,'paintPeeling');
   box(-5.5,activityFloor+2.12,-26.92,-3.7,9.20,-26.76,'concrete');
   // Reading room perimeter, columns, and an interior partition with doorway.
   box(-13.0,activityFloor,-21.10,5.2,activityFloor+0.16,-20.92,'concrete');
-  box(-4.3,activityFloor,-26.76,-4.12,activityFloor+2.58,-24.65,'plaster');
-  box(-4.3,activityFloor,-22.75,-4.12,activityFloor+2.58,-21.10,'plaster');
+  box(-4.3,activityFloor,-26.76,-4.12,activityFloor+2.58,-24.65,'wallDamp');
+  box(-4.3,activityFloor,-22.75,-4.12,activityFloor+2.58,-21.10,'wallDamp');
   box(-4.3,activityFloor+2.12,-24.65,-4.12,activityFloor+2.58,-22.75,'concrete');
   // Low structural ceiling ribs; do not fill the room with solid slabs.
   for(const x of [-12.5,-8.0,-3.5,1.0,5.0])
@@ -446,17 +455,17 @@ function makeScene() {
       box(x-0.03,y,-22.1,x+0.58,y+0.07,-21.58,'wood');
   }
   for(const x of [-11.0,-7.7]){
-    box(x,activityFloor+0.70,-25.0,x+1.5,activityFloor+0.80,-23.9,'wood');
+    box(x,activityFloor+0.70,-25.0,x+1.5,activityFloor+0.80,-23.9,'floorParquet');
     for(const dx of [0.16,1.25])
       box(x+dx,activityFloor+0.08,-24.9,x+dx+0.10,activityFloor+0.70,-24.0,'metal');
   }
   // Adjacent multipurpose club room: distinct space, no unverified pool.
   for(const x of [-2.9,0.5,3.4])
-    box(x,activityFloor+0.12,-25.7,x+1.5,activityFloor+0.22,-24.7,'wood');
+    box(x,activityFloor+0.12,-25.7,x+1.5,activityFloor+0.22,-24.7,'floorParquet');
   // Rear service spine and backstage rooms are structurally separate from
   // the audience volume. Use existing auditorium wall; add access openings.
   for(const z of [-39.8,-35.3,-30.8]){
-    box(-49.05,0.38,z,-47.70,3.10,z+0.18,'concrete');
+    box(-49.05,0.38,z,-47.70,3.10,z+0.18,'wallDamp');
   }
   // Original roof-level clerestory rhythm, damaged and incomplete.
   // Existing facade bays determine spacing; no new arbitrary window rows.
@@ -489,8 +498,8 @@ function makeScene() {
   const serviceY=0.40;
   for(const z of [-40.8,-36.4,-32.0,-27.6]){
     const x0=-14.6,x1=-8.0,door0=-12.2,door1=-10.5;
-    box(x0,serviceY,z,x0+2.4,serviceY+2.7,z+0.16,'plaster');
-    box(door1,serviceY,z,x1,serviceY+2.7,z+0.16,'plaster');
+    box(x0,serviceY,z,x0+2.4,serviceY+2.7,z+0.16,'paintPeeling');
+    box(door1,serviceY,z,x1,serviceY+2.7,z+0.16,'paintPeeling');
     box(door0,serviceY+2.15,z,door1,serviceY+2.7,z+0.16,'concrete');
   }
   // Roof-edge parapet in separate strips, avoiding a solid roof-top prism.
@@ -499,7 +508,7 @@ function makeScene() {
   box(-49.2,9.4,-42.0,-48.9,9.95,-20.5,'concrete');
   box(20.2,9.4,-42.0,20.5,9.95,-20.5,'concrete');
   // A ruined reception desk, scattered panels and tall foyer openings.
-  box(-4.8,0.42,-24.8,4.2,1.25,-23.8,'wood');
+  box(-4.8,0.42,-24.8,4.2,1.25,-23.8,'stageWood');
   box(-3.8,1.25,-24.45,3.0,1.42,-24.15,'stone');
   for(const p of [[-11,0.40,-25.5,-8,0.55,-24.8],[7,0.40,-31.8,9,0.60,-30.8],
                   [-20,0.40,-39.6,-17,0.57,-38.8],[12,3.55,-24.8,15,3.72,-24.1]])
@@ -567,7 +576,7 @@ box(8.38,3.50,-41.80,8.54,8.24,-31.80,'concrete');
   for(const z of [-39.8,-37.2,-23.4,-21.4])
     box(-13.8,8.28,z,7.2,8.34,z+0.055,'metal');
   for(const x of [-12.8,-9.6,-6.4,-3.2,0,3.2,6.4])
-    box(x,8.28,-40.1,x+0.05,8.34,-21.2,'metal');
+    box(x,8.28,-40.1,x+0.05,8.34,-21.2,'pipePaint');
   for(const [x,z,w,d] of [[-12.3,-39.4,2.0,1.3],[-7.2,-38.8,1.4,0.9],
                            [1.1,-23.1,2.2,1.2],[4.0,-37.8,1.6,1.1]])
     box(x,8.22,z,x+w,8.30,z+d,'debris');
