@@ -23,7 +23,7 @@ assert.ok(Math.abs(eastAlong[1]-westFront[1]-(local.x1-local.x0))<.001,'90-degre
 const galleryStart=p.at(0),galleryEnd=p.at(1);
 assert.ok(galleryStart[0]>palace.x1+2.0,'gallery must start clear of Energetik');
 assert.ok(galleryEnd[0]<hotel.x0-2.0,'gallery must end before hotel frontage');
-assert.ok(hotel.x1-hotel.x0>=35,'hotel needs elongated main facade');
+assert.ok(hotel.z1-hotel.z0>=35,'hotel needs elongated long facade after rotation');
 assert.ok(p.roofBottom>3.1&&p.roofBottom<4.1,'canopy headroom inconsistent');
 assert.ok(p.halfWidth>=1.6&&p.halfWidth<=2.3,'canopy width implausible');
 const start=p.at(0),mid=p.at(.5),end=p.at(1);
