@@ -992,7 +992,7 @@ function addPripyatExpansion() {
 // conspicuously flat lawn and sparse overgrowth on paved joints.
 // The close-up range is deliberately limited for the Intel HD 620.
 const M3D_PRIPYAT_GRASS_LAYER=Object.freeze({
-  seed:261107,patchMax:1750,bladesPerPatch:3,nearRadius:168,
+  seed:261107,patchMax:1450,bladesPerPatch:3,nearRadius:160,
   plazaBaseY:0.031,peripheryBaseY:0.022,planterTopY:0.973
 });
 function m3dPripyatGrassHash(a,b,c=0){
@@ -1033,61 +1033,72 @@ function m3dPripyatGroundGrassSites(){
   const cfg=M3D_PRIPYAT_GRASS_LAYER, sites=[];
   const add=(x,z,y,h,kind)=>{
     if(sites.length>=cfg.patchMax)return;
-    if(!Number.isFinite(x)||!Number.isFinite(z)||!Number.isFinite(y)||!Number.isFinite(h))throw Error('Grass: invalid site');
+    if(!Number.isFinite(x)||!Number.isFinite(z)||!Number.isFinite(y)||!Number.isFinite(h))
+      throw Error('Grass: invalid site');
     sites.push({x,z,y,h,kind});
   };
-  // 1. Cracks and expansion joints in the central stone-paved square.
-  // Sparse islands, not a uniform lawn over the pedestrian circulation.
+  const clump=(x,z,y,h,kind,count,index)=>{
+    // Deliberately local clumps, rather than equally spaced single spikes.
+    for(let k=0;k<count;k++){
+      const angle=6.283185*m3dPripyatGrassHash(index,k,90);
+      const r=.02+.13*m3dPripyatGrassHash(index,k,91);
+      add(x+Math.cos(angle)*r,z+Math.sin(angle)*r,y,
+          h*(.77+.35*m3dPripyatGrassHash(index,k,92)),kind);
+    }
+  };
+  // The concrete slabs have REAL 3.2 m joints in m3dBuildPlaza.
+  // Match those lines, don't invent a uniform lawn in the middle of slabs.
   const plaza=M3D_PRIPYAT_BLOCKOUT.plaza;
-  for(let col=0;col<32;col++)for(let row=0;row<29;row++){
-    const r=m3dPripyatGrassHash(col,row,1);
-    if(r>0.265)continue;
-    let x=plaza.x0+1+col*3.2, z=plaza.z0+1+row*2.52;
-    x+=(m3dPripyatGrassHash(col,row,2)-.5)*.11;
-    z+=(m3dPripyatGrassHash(col,row,3)-.5)*.75;
-    if(x<=plaza.x0+.75||x>=plaza.x1-.75||z<=plaza.z0+.75||z>=plaza.z1-.75)continue;
-    if(m3dPripyatInsideUrbanBuilding(x,z,.4))continue;
-    add(x,z,cfg.plazaBaseY,.15+.37*m3dPripyatGrassHash(col,row,4),'joint');
+  for(let col=0;col<32;col++)for(let row=0;row<23;row++){
+    if(m3dPripyatGrassHash(col,row,1)>.155)continue;
+    const x=plaza.x0+1+col*3.2, z=plaza.z0+1+row*3.2;
+    if(x<=plaza.x0+.5||x>=plaza.x1-.5||z<=plaza.z0+.5||z>=plaza.z1-.5)continue;
+    if(m3dPripyatInsideUrbanBuilding(x,z,.5))continue;
+    const idx=col*43+row;
+    clump(x,z,cfg.plazaBaseY,.065+.075*m3dPripyatGrassHash(col,row,4),
+          'joint',2+(m3dPripyatGrassHash(col,row,5)>.62?1:0),idx);
   }
-  // 2. Curbs and outside building edges get considerably taller weeds.
+  // Scruffy kerbs but NOT a row of tall identical reeds.
   for(let edge=0;edge<4;edge++)for(let i=0;i<83;i++){
-    if(m3dPripyatGrassHash(i,edge,10)<.26)continue;
+    if(m3dPripyatGrassHash(i,edge,10)<.44)continue;
     const t=i/82,dx=m3dPripyatGrassHash(i,edge,11)*.25;
     const x=edge===0?plaza.x0+.32+dx:edge===1?plaza.x1-.35-dx:plaza.x0+1+t*(plaza.x1-plaza.x0-2);
     const z=edge===2?plaza.z0+.35+dx:edge===3?plaza.z1-.35-dx:plaza.z0+1+t*(plaza.z1-plaza.z0-2);
     if(m3dPripyatInsideUrbanBuilding(x,z,.35))continue;
-    add(x,z,cfg.plazaBaseY,.26+.53*m3dPripyatGrassHash(i,edge,12),'curb');
+    clump(x,z,cfg.plazaBaseY,.10+.14*m3dPripyatGrassHash(i,edge,12),
+          'curb',2,i+edge*1000);
   }
-  // 3. Concrete planters: plants must start ABOVE the raised top surface.
+  // Planters start at the elevated planting surface, not through concrete.
   const planters=[[-48,5,7,2],[-31,47,8,2],[31,42,9,2],[45,6,7,2],[-5,53,8,2],[7,-6,7,2]];
   for(let j=0;j<planters.length;j++){
     const [px,pz,pw,pd]=planters[j];
-    for(let i=0;i<22;i++){
+    for(let i=0;i<12;i++){
       const x=px+.52+(.10+.80*m3dPripyatGrassHash(i,j,20))*(pw-1.04);
       const z=pz+.52+(.10+.80*m3dPripyatGrassHash(i,j,21))*(pd-1.04);
-      add(x,z,cfg.planterTopY,.17+.41*m3dPripyatGrassHash(i,j,22),'planter');
+      clump(x,z,cfg.planterTopY,.10+.15*m3dPripyatGrassHash(i,j,22),
+            'planter',2,2000+j*40+i);
     }
   }
-  // 4. Grassland outside the carefully constructed centre: explicit building
-  // and OSM-road collision masks, no fake plants inside major road surfaces.
-  // Radius < 168 m: within the flat central SRTM blend where Y=0.
-  for(let ix=-82;ix<=82;ix+=2)for(let iz=-82;iz<=82;iz+=2){
+  // Low ground cover outside the built-up central footprint. The SRTM blend
+  // is flat within this radius, allowing an unmodified Y datum.
+  for(let ix=-80;ix<=80;ix+=2)for(let iz=-80;iz<=80;iz+=2){
     const x=ix*2.0+(m3dPripyatGrassHash(ix,iz,31)-.5)*.65;
     const z=iz*2.0+(m3dPripyatGrassHash(ix,iz,32)-.5)*.65;
-    const r=Math.hypot(x+10,z+31.1);
-    if(r>cfg.nearRadius)continue;
-    // Never fill a road or the manually paved city centre.
+    if(Math.hypot(x+10,z+31.1)>cfg.nearRadius)continue;
+    // Do not lay grass above detailed square pavements or street meshes.
     if(x>-65&&x<112&&z>-89&&z<105)continue;
     if(m3dPripyatInsideUrbanBuilding(x,z,1.4))continue;
-    if(m3dPripyatGrassHash(ix,iz,33)>.38)continue;
+    if(m3dPripyatGrassHash(ix,iz,33)>.50)continue;
     if(m3dPripyatNearVerifiedRoad(x,z,.8))continue;
-    add(x,z,cfg.peripheryBaseY,.25+.49*m3dPripyatGrassHash(ix,iz,34),'lawn');
+    clump(x,z,cfg.peripheryBaseY,.075+.16*m3dPripyatGrassHash(ix,iz,34),
+          'lawn',2,4000+ix*200+iz);
   }
   return sites;
 }
 function m3dBuildPripyatGroundGrass({meshTriangle},sites=m3dPripyatGroundGrassSites()){
-  // Three crossed, irregular blades per tuft, two-sided triangles to avoid
-  // back-face disappearance on orbiting cameras. No alpha-test dependence.
+  // Each blade is a narrow, BENT tapered ribbon: 3 front triangles and
+  // 3 reverse-wound back triangles, both CPU/BVH and HLSL-friendly.
+  // No billboards or alpha-mask texture that could vanish in ray tracing.
   let triangles=0;
   const tri=(a,b,c,material)=>{
     const u=[b[0]-a[0],b[1]-a[1],b[2]-a[2]];
@@ -1104,16 +1115,22 @@ function m3dBuildPripyatGroundGrass({meshTriangle},sites=m3dPripyatGroundGrassSi
     const q=sites[i],seedX=Math.round(q.x*113),seedZ=Math.round(q.z*131);
     for(let k=0;k<M3D_PRIPYAT_GRASS_LAYER.bladesPerPatch;k++){
       const angle=k*2.39996+m3dPripyatGrassHash(seedX,seedZ,41)*6.28318;
-      const radius=.025+.12*m3dPripyatGrassHash(seedX,seedZ,k+42);
+      const radius=.012+.055*m3dPripyatGrassHash(seedX,seedZ,k+42);
       const cx=q.x+Math.cos(angle)*radius,cz=q.z+Math.sin(angle)*radius;
-      const width=.020+.026*m3dPripyatGrassHash(seedX,seedZ,k+51);
-      const height=q.h*(.66+.56*m3dPripyatGrassHash(seedX,seedZ,k+61));
-      const sway=.13+.26*m3dPripyatGrassHash(seedX,seedZ,k+71);
+      const width=.006+.007*m3dPripyatGrassHash(seedX,seedZ,k+51);
+      const height=q.h*(.77+.31*m3dPripyatGrassHash(seedX,seedZ,k+61));
+      const lean=.12+.26*m3dPripyatGrassHash(seedX,seedZ,k+71);
       const px=-Math.sin(angle),pz=Math.cos(angle),dx=Math.cos(angle),dz=Math.sin(angle);
-      const left=[cx-px*width,q.y,cz-pz*width];
-      const right=[cx+px*width,q.y,cz+pz*width];
-      const tip=[cx+dx*sway*height,q.y+height,cz+dz*sway*height];
-      tri(left,right,tip,k%3===0?'leaves':'grass');
+      const baseL=[cx-px*width,q.y,cz-pz*width];
+      const baseR=[cx+px*width,q.y,cz+pz*width];
+      const midX=cx+dx*lean*height*.42,midZ=cz+dz*lean*height*.42;
+      const midL=[midX-px*width*.48,q.y+height*.62,midZ-pz*width*.48];
+      const midR=[midX+px*width*.48,q.y+height*.62,midZ+pz*width*.48];
+      const tip=[cx+dx*lean*height,q.y+height,cz+dz*lean*height];
+      const material=k%4===0?'leaves':'grass';
+      tri(baseL,baseR,midL,material);
+      tri(baseR,midR,midL,material);
+      tri(midL,midR,tip,material);
     }
   }
   return {patches:sites.length,triangles};
