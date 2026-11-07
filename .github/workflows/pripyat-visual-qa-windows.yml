@@ -1,0 +1,227 @@
+name: Pripyat visual QA — Windows automatic
+
+on:
+  push:
+    branches:
+      - feature/pripyat-visual-quality-baseline-261107
+      - experiment/manhattan-silent-hill-2026-10-30
+      - pripiat
+      - feature/pripyat-catalog-assets-261105
+      - feature/pripyat-square-survey-measurements-261107
+      - feature/pripyat-compute-d3d11-261107
+      - feature/pripyat-polissya-arcade-261107
+    paths:
+      - experiments/2026-10-30-cote-ete-gt/native_v14/CMakeLists.txt
+      - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/m3d_engine.h
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_rapture.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_coastal_v1314.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_facade_bay.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_energetik_seat_preview.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/export_energetik_seat_manifest.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/tools/export_energetik_seat_row_glb.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/tools/export_pripyat_outdoor_chair_glb.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/tools/export_pripyat_wheel_mechanism.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/tools/generate_pripyat_chair_maps.py
+      - experiments/2026-10-30-cote-ete-gt/native_v14/tools/generate_energetik_fresco_map.py
+      - experiments/2026-10-30-cote-ete-gt/native_v14/tools/export_energetik_fresco_glb.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/**
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/shaders/**
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_views.json
+      - experiments/2026-10-30-cote-ete-gt/native_v14/source_v1314.html
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/moteur3d_qt.cpp
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/**
+      - docs/pripyat/**
+      - tools/pripyat_visual_qa.py
+      - tools/compare_visual_captures.py
+      - experiments/pripyat-survey/**
+      - experiments/2026-10-30-cote-ete-gt/native_v14/version.h
+      - experiments/2026-10-30-cote-ete-gt/native_v14/build_info.h
+      - .github/workflows/build-moteur3d-v14-qt.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt 6 on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake qt6-base-dev
+
+      - name: Install Qt 6 on Windows
+        if: runner.os == 'Windows'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+
+      - name: Set up Python for procedural PBR maps
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install texture generator dependency
+        run: python -m pip install Pillow
+
+      - name: Inject GitHub build provenance
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          revision="${GITHUB_SHA:0:12}"
+          branch="$GITHUB_REF_NAME"
+          cat > build_info.h <<EOF
+          #pragma once
+          #define M3D_GIT_REVISION_ANSI "$revision"
+          #define M3D_GIT_REVISION_WIDE L"$revision"
+          #define M3D_GIT_BRANCH_ANSI "$branch"
+          #define M3D_GIT_BRANCH_WIDE L"$branch"
+          #define M3D_GIT_RUN_WIDE L"$GITHUB_RUN_NUMBER"
+          EOF
+
+      - name: Verify Pripyat scene syntax and geometry
+        shell: bash
+        run: |
+          node --check experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js
+          node experiments/pripyat-survey/test-pripyat-survey.mjs
+          node experiments/pripyat-survey/test-mosaic-clearance.mjs
+          node experiments/pripyat-survey/test-energetik-architecture.mjs
+          node experiments/pripyat-survey/test-energetik-sightlines.mjs
+          node experiments/pripyat-survey/test-energetik-sports-wing.mjs
+          node experiments/pripyat-survey/test-energetik-origin-and-court.mjs
+          node experiments/pripyat-survey/test-pripyat-ferris-wheel.mjs
+          node experiments/pripyat-survey/test-compute-camera-projection.mjs
+          node experiments/pripyat-survey/test-polissya-arcade.mjs
+          node experiments/pripyat-survey/test-compute-pbr-cache.mjs
+
+      - name: Export runtime scenes
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          python tools/generate_seat_maps.py
+          python tools/generate_pripyat_chair_maps.py
+          python tools/generate_energetik_fresco_map.py
+          node tools/export_energetik_fresco_glb.js
+          node tools/export_pripyat_wheel_mechanism.js
+          M3D_SKIP_IMPORTED_CAR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_pripyat_central.bin scene_pripyat_central.js
+          M3D_SKIP_IMPORTED_CAR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_energetik_seat_preview.bin scene_energetik_seat_preview.js
+          node export_energetik_seat_manifest.js scene_energetik_seat_preview.assets.json
+          node tools/export_energetik_seat_row_glb.js
+          node tools/export_pripyat_outdoor_chair_glb.js
+          node tools/export_energetik_roof_neon_sign_glb.js
+          M3D_SKIP_IMPORTED_CAR=1 M3D_FACADE_PBR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_pripyat_facade_bay.bin scene_pripyat_facade_bay.js
+
+      - name: Configure Qt application
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Compile Qt application
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: cmake --build build --config Release --parallel
+
+      - name: Install Qt runtime and package scenes
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          cmake --install build --config Release --prefix dist
+          mkdir -p dist/shaders
+          cp src/shaders/m3d_raytrace_compute.hlsl dist/shaders/
+          cp scene_pripyat_central.bin scene_pripyat_central.js scene_pripyat_views.json scene_pripyat_wheel_mechanism.json scene_energetik_seat_preview.bin scene_energetik_seat_preview.js scene_energetik_seat_preview.assets.json scene_pripyat_facade_bay.bin scene_pripyat_facade_bay.js assets/pripyat/energetik_roof_neon_sign.js assets/pripyat/energetik_roof_neon_sign.asset.json README.md dist/
+          mkdir -p dist/assets/pripyat
+          cp assets/pripyat/energetik_facade_bay.glb assets/pripyat/energetik_facade_bay.asset.json dist/assets/pripyat/
+          cp assets/pripyat/pripyat_outdoor_chair.glb assets/pripyat/pripyat_outdoor_chair.asset.json dist/assets/pripyat/
+          cp assets/pripyat/energetik_cinema_seat_row.glb dist/assets/pripyat/
+          cp assets/pripyat/energetik_fresco_mosaic.glb assets/pripyat/energetik_fresco_mosaic.asset.json dist/assets/pripyat/
+          cp assets/pripyat/energetik_roof_neon_sign.glb dist/assets/pripyat/
+          cp -r assets/pripyat/textures dist/assets/pripyat/
+          cp -r docs dist/
+          cp ../../../docs/pripyat/CHANGEMENTS_POLISSYA_COMPUTE_261107.txt ../../../docs/pripyat/POLISSYA-PLANCHE-3VUES-261107.svg dist/
+
+      - name: Deploy Qt DLLs on Windows
+        if: runner.os == 'Windows'
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: windeployqt --release --compiler-runtime --dir dist dist/moteur3d_qt.exe
+
+      - name: Validate D3D11 Compute Shader Model 5.0
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          & "./dist/moteur3d_qt.exe" --validate-compute-hlsl
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Execute actual HLSL compute shader with WARP (synthetic BVH)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        env:
+          M3D_COMPUTE_WARP: '1'
+        run: |
+          & "./dist/moteur3d_qt.exe" --smoke-compute-hlsl "./dist/compute-warp-smoke.png"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path "./dist/compute-warp-smoke.png")) { throw "Compute WARP image missing" }
+
+      - name: Render all thirteen photographic inspection views on CPU
+        if: runner.os == 'Windows'
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          mkdir -p dist/architecture-review
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12 13; do
+            ./dist/moteur3d_qt.exe --snapshot "$i" "dist/architecture-review/view-$(printf '%02d' "$i").png"
+          done
+          python - <<'PY'
+          from PIL import Image, ImageStat
+          from pathlib import Path
+          for p in sorted(Path('dist/architecture-review').glob('view-*.png')):
+              with Image.open(p) as image:
+                  image=image.convert('RGB')
+                  std=ImageStat.Stat(image).stddev
+                  assert image.size == (640,360), (p, image.size)
+                  assert max(std) > 2.0, (p, std)
+                  print(f"{p}: RGB deviation {std}")
+          assert len(list(Path('dist/architecture-review').glob('view-*.png'))) == 13
+          PY
+
+      - name: Automatically analyze visual quality of 13 native CPU snapshots
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          python tools/pripyat_visual_qa.py \
+            experiments/2026-10-30-cote-ete-gt/native_v14/dist/architecture-review \
+            --output experiments/2026-10-30-cote-ete-gt/native_v14/dist/architecture-review/visual-qa.json \
+            --contact-sheet experiments/2026-10-30-cote-ete-gt/native_v14/dist/architecture-review/contact-sheet.png
+          cat experiments/2026-10-30-cote-ete-gt/native_v14/dist/architecture-review/visual-qa.json
+
+      - name: Upload compact architectural inspection images
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pripyat-Architecture-Inspection-${{ github.run_number }}
+          path: experiments/2026-10-30-cote-ete-gt/native_v14/dist/architecture-review
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload Windows application package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moteur3D-Qt-${{ matrix.os }}-Energetik-fresco-${{ github.run_number }}
+          path: experiments/2026-10-30-cote-ete-gt/native_v14/dist
+          if-no-files-found: error
+          retention-days: 30
