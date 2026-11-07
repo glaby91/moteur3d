@@ -38,6 +38,27 @@ Sous-face de la toiture à Y=3,55 m ; dessus à Y=3,86 m.
 de poteaux en béton. La toiture et ses bords suivent vraiment la courbe.
 La galerie est OUVERTE aux deux extrémités, SANS RACCORDEMENT
 à l'hôtel ni au palais, et passe devant la façade ouest de l'hôtel.
+
+CORRECTION PHOTOGUIDÉE — CROQUIS DU 07/11/2026, SOIR
+Le tracé de l'arcade n'est pas une courbe régulière sur toute la longueur :
+- le début est quasi rectiligne, immédiatement après l'angle droit du palais ;
+- ensuite la galerie amorce un VIRAGE de plus en plus prononcé ;
+- elle se termine quasiment parallèle au grand axe de l'hôtel,
+  avec un petit espacement côté façade ouest ;
+- les DEUX extrémités ont un bout de couverture ARRONDI,
+  sans mur ou liaison avec les bâtiments.
+Nouveaux points de contrôle cubiques (XZ, mètres moteur) :
+ P0=(limite est Energetik + 3,35 ; -12,8)
+ P1=(59,0 ; -12,8)
+ P2=(78,1 ; -12,8)
+ P3=(78,1 ; 12,5).
+La forme est donc une tangente +X au départ et une tangente +Z
+à l'arrivée. Chaque extrémité reçoit une demi-toiture en arc de cercle
+de 12 segments, avec un rayon de 1,85 m (demi-largeur de 3,70 m).
+Implantation schématique non métrée fournie par l'utilisateur,
+qui PRIME sur la première approximation cubique plus régulière.
+Ces valeurs sont encore des ESTIMATIONS visuelles et pourront changer
+avec des références aériennes plus précises.
 Éviter toute liaison maçonnée supplémentaire au cours de l'évolution.
 
 C. VEGETATION
