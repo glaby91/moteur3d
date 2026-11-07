@@ -313,7 +313,36 @@ function m3dBuildPolissya({box,capsule}, cfg = M3D_PRIPYAT_BLOCKOUT.polissya) {
   const height=cfg.height??15.5;
   // Separate podium, tower, recessed roof and facade components.
   box(x0,0,z0,x1,1.05,z1,'stone');
-  box(x0,1.05,z0,x1,height,z1,'concrete');
+  // Hollow hotel shell: the former 22 × 23 × 14.5 m solid concrete prism
+  // physically blocked all floors, rear windows and potential entry passages.
+  // These openings follow existing facade bays; room layout is provisional.
+  const wall=0.52;
+  const westDoorZ0=-25.55,westDoorZ1=-21.0,westDoorTop=4.15;
+  box(x0,1.05,z0,x0+wall,height,westDoorZ0,'concrete');
+  box(x0,1.05,westDoorZ1,x0+wall,height,z1,'concrete');
+  box(x0,westDoorTop,westDoorZ0,x0+wall,height,westDoorZ1,'concrete');
+  box(x1-wall,1.05,z0,x1,height,z1,'concrete');
+  box(x0+wall,1.05,z0,x1-wall,height,z0+wall,'concrete');
+  const windowXs=[];
+  for(let x=x0+2.0;x<x1-2.0;x+=3.1) windowXs.push(x);
+  let span=x0+wall;
+  for(const x of windowXs){
+    if(x>span)box(span,1.05,z1-wall,x,height,z1,'concrete');
+    let vertical=1.05;
+    for(let floor=0;floor<5;floor++){
+      const bottom=1.8+floor*2.65, top=bottom+1.55;
+      if(bottom>vertical)box(x,vertical,z1-wall,x+1.45,bottom,z1,'concrete');
+      vertical=top;
+    }
+    if(vertical<height)box(x,vertical,z1-wall,x+1.45,height,z1,'concrete');
+    span=x+1.45;
+  }
+  if(span<x1-wall)box(span,1.05,z1-wall,x1-wall,height,z1,'concrete');
+  // Independent thin hotel floor slabs, not five overlapping solid blocks.
+  for(let floor=1;floor<=5;floor++){
+    const y=Math.min(height-0.20,1.05+floor*2.65);
+    box(x0+wall,y,z0+wall,x1-wall,y+0.14,z1-wall,'concrete');
+  }
   // Photograph-inspired rooftop belvedere: the old solid penthouse cube
   // incorrectly filled the open terrace with concrete.
   box(x0+10.5,height,z0+1.4,x1-0.45,height+3.50,z0+4.0,'concrete');
