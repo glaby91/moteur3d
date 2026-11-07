@@ -689,7 +689,7 @@ private:
         }
         const QJsonArray views=doc.object().value(QStringLiteral("views")).toArray();
         for(const QJsonValue& value:views) {
-            if(sceneViewPresets_.size()>=11 || !value.isObject()) break;
+            if(sceneViewPresets_.size()>=13 || !value.isObject()) break;
             const QJsonObject o=value.toObject();
             const QJsonArray target=o.value(QStringLiteral("target")).toArray();
             if(target.size()!=3) continue;
@@ -707,7 +707,7 @@ private:
         }
         sceneViewSelector_->setEnabled(!sceneViewPresets_.empty());
         sceneViewSelector_->setCurrentIndex(-1);
-        sceneViewSelector_->setToolTip(QStringLiteral("Onze vues documentées dans scene_pripyat_views.json, dont grande roue."));
+        sceneViewSelector_->setToolTip(QStringLiteral("Treize vues documentées : Energetik, grande roue, Polissya et galerie."));
     }
 
     void applySceneViewPreset(int index) {
@@ -1557,13 +1557,13 @@ int main(int argc, char** argv) {
         return 12;
     }
     // Non-GUI CPU snapshots for reproducible GitHub Actions geometry inspection.
-    // Usage: moteur3d_qt.exe --snapshot <view 1..11> <output.png>
+    // Usage: moteur3d_qt.exe --snapshot <view 1..13> <output.png>
     if (argc >= 4 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--snapshot")) {
         QCoreApplication app(argc, argv);
         bool ok = false;
         const int view = QString::fromLocal8Bit(argv[2]).toInt(&ok);
         QFile file(QCoreApplication::applicationDirPath()+QStringLiteral("/scene_pripyat_views.json"));
-        if (!ok || view < 1 || view > 11 || !file.open(QIODevice::ReadOnly)) return 2;
+        if (!ok || view < 1 || view > 13 || !file.open(QIODevice::ReadOnly)) return 2;
         QJsonParseError parseError{};
         const QJsonDocument doc=QJsonDocument::fromJson(file.readAll(),&parseError);
         if(parseError.error!=QJsonParseError::NoError || !doc.isObject()) return 3;
