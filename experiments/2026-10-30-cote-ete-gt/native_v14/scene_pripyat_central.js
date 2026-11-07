@@ -124,6 +124,11 @@ function m3dBuildEastStairCore({box,capsule}, a=M3D_ENERGETIK_ARCH){
     capsule([25.93,top+0.13,-40.2],[25.93,top+0.93,-29.7],0.035,'rust');
   }
 }
+// Independently testable floor slab generator: the foyer atrium must stay open.
+function m3dBuildEnergetikSlabs({box},a=M3D_ENERGETIK_ARCH){
+  const {levels:archLevels,foyer:archFoyer}=a;
+  m3dBuildEnergetikSlabs({box});
+}
 function m3dBuildFoyerMuralArcade({box}, a=M3D_ENERGETIK_ARCH) {
   const f=a.foyer,l=a.levels, x0=f.mosaicWallX, x1=x0+f.arcadeDepth;
   // Full mural backing; side facing the foyer is on the -X side.
