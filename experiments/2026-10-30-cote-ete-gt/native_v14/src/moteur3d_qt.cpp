@@ -195,7 +195,8 @@ public:
         sceneLabel_ = new QLabel(this); root->addWidget(sceneLabel_);
         auto* settings = new QHBoxLayout;
         resolution_ = new QComboBox(this);
-        resolution_->addItems({QStringLiteral("Réglage courant"), QStringLiteral("1280 × 720"), QStringLiteral("Full HD — 1920 × 1080"), QStringLiteral("4K UHD — 3840 × 2160")});
+        resolution_->addItems({QStringLiteral("Résolution courante — natif 1:1"), QStringLiteral("1280 × 720 — natif 1:1"), QStringLiteral("Full HD — 1920 × 1080 — natif 1:1"), QStringLiteral("4K UHD — 3840 × 2160 — natif 1:1")});
+        resolution_->setToolTip(QStringLiteral("La résolution du benchmark est exactement celle indiquée : aucun rééchantillonnage selon l'aperçu fluide ou le niveau de qualité de la fenêtre principale."));
         repeats_ = new QSpinBox(this); repeats_->setRange(1, 7); repeats_->setValue(3);
         gpuFrames_ = new QSpinBox(this);
         gpuFrames_->setRange(10, 500); gpuFrames_->setValue(100);
@@ -1268,22 +1269,29 @@ autorisation générale de reproduction ni une preuve d'implantation exacte.</p>
             readSettings();
             RenderSettings cfg;
             { std::lock_guard<std::mutex> lock(requestMutex_); cfg = settings_; }
-            const int baseOutW = cfg.outW, baseOutH = cfg.outH;
             switch (dialog.resolutionIndex()) {
                 case 1: cfg.outW = 1280; cfg.outH = 720; break;
                 case 2: cfg.outW = 1920; cfg.outH = 1080; break;
                 case 3: cfg.outW = 3840; cfg.outH = 2160; break;
                 default: break;
             }
-            const float scaleX = float(cfg.renderW) / std::max(1, baseOutW);
-            const float scaleY = float(cfg.renderH) / std::max(1, baseOutH);
-            cfg.renderW = std::max(1, int(std::lround(cfg.outW * scaleX)));
-            cfg.renderH = std::max(1, int(std::lround(cfg.outH * scaleY)));
-            cfg.videoPreview = false;
+            // IMPORTANT: benchmark dimensions are native pixel dimensions,
+            // NOT a scaled version of the navigation preview. Before this fix
+            // "1280x720" could silently compute only 450x253 when the user's
+            // previous render had been a 480px quick preview.
+            cfg.renderW=cfg.outW;
+            cfg.renderH=cfg.outH;
+            cfg.navigationPreview=false;
+            cfg.videoPreview=false;
             auto threadCounts = dialog.selectedThreads();
             std::sort(threadCounts.begin(), threadCounts.end());
             const int engineMode = dialog.requestedEngine();
             if(engineMode!=0){cfg.samples=1;cfg.dof=false;cfg.fog=false;}
+            if(cfg.renderW!=cfg.outW || cfg.renderH!=cfg.outH) {
+                QMessageBox::critical(&dialog,QStringLiteral("Benchmark"),
+                    QStringLiteral("La résolution interne ne correspond pas à la résolution demandée. Mesure abandonnée."));
+                return;
+            }
             if(engineMode==3) {
                 // Sustained HLSL ray tracing, NOT the separate D3D11 rasterizer.
                 // Same view/lighting for each frame. Warmup excluded.
@@ -1291,7 +1299,7 @@ autorisation générale de reproduction ni une preuve d'implantation exacte.</p>
                 dialog.setRows({}, 0, cfg.outW, cfg.outH, 1, 0,
                     QStringLiteral("Compute D3D11 GPU"), QStringLiteral("Charge Windows sur %1 images").arg(frameCount));
                 dialog.setRunning(true);
-                dialog.setProgress(0, QStringLiteral("Préparation GPU Compute / compteurs WDDM…"));
+                dialog.setProgress(0, QStringLiteral("GPU Compute natif 1:1 (%1×%2 px) — préparation WDDM…").arg(cfg.renderW).arg(cfg.renderH));
                 uint64_t token=0;
                 {
                     std::lock_guard<std::mutex> lock(requestMutex_);
@@ -1338,7 +1346,7 @@ autorisation générale de reproduction ni une preuve d'implantation exacte.</p>
                                 const int progress=int(100.*complete/std::max(1,frameCount));
                                 QMetaObject::invokeMethod(&dialog,[&dialog,progress,complete,frameCount]{
                                     dialog.setProgress(progress,QStringLiteral(
-                                        "Compute HLSL — image %1/%2 ; charge GPU en cours"
+                                        "Compute HLSL natif — image %1/%2 ; charge GPU en cours"
                                     ).arg(complete).arg(frameCount));
                                 },Qt::QueuedConnection);
                             }else if(meter.available()){
