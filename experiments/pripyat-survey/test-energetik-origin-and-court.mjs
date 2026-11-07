@@ -29,7 +29,7 @@ assert.equal(g.z1-g.z0,26.2);
 const triangles=[];
 a.gym({box:()=>{},capsule:()=>{},meshTriangle:(...v)=>triangles.push(v)});
 assert.equal(triangles.filter(t=>t[3]==='gymFloor').length,2);
-assert.ok(exporter.includes('X=(U-.5)*43.6,Z=(V-.5)*25.6'),
+assert.ok(exporter.includes('X=(U-.5)*43.6,Z=(V-.5)*25.8'),
  'floor atlas must map precisely to the new hall mesh');
 assert.ok(exporter.includes('near(aX-20.0,.075)'),
  'handball goal lines must be 40 metres apart');
