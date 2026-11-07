@@ -140,14 +140,36 @@ jobs:
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: windeployqt --release --compiler-runtime --dir dist dist/moteur3d_qt.exe
 
-      - name: Render architectural inspection PNGs on CPU
+      - name: Render all ten photographic inspection views on CPU
         if: runner.os == 'Windows'
         shell: bash
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: |
-          ./dist/moteur3d_qt.exe --snapshot 2 dist/energetik_mural_arcade.png
-          ./dist/moteur3d_qt.exe --snapshot 3 dist/energetik_foyer_stair.png
-          ./dist/moteur3d_qt.exe --snapshot 9 dist/energetik_roof.png
+          mkdir -p dist/architecture-review
+          for i in 1 2 3 4 5 6 7 8 9 10; do
+            ./dist/moteur3d_qt.exe --snapshot "$i" "dist/architecture-review/view-$(printf '%02d' "$i").png"
+          done
+          python - <<'PY'
+          from PIL import Image, ImageStat
+          from pathlib import Path
+          for p in sorted(Path('dist/architecture-review').glob('view-*.png')):
+              with Image.open(p) as image:
+                  image=image.convert('RGB')
+                  std=ImageStat.Stat(image).stddev
+                  assert image.size == (640,360), (p, image.size)
+                  assert max(std) > 2.0, (p, std)
+                  print(f"{p}: RGB deviation {std}")
+          assert len(list(Path('dist/architecture-review').glob('view-*.png'))) == 10
+          PY
+
+      - name: Upload compact architectural inspection images
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pripyat-Architecture-Inspection-${{ github.run_number }}
+          path: experiments/2026-10-30-cote-ete-gt/native_v14/dist/architecture-review
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Upload Windows application package
         uses: actions/upload-artifact@v4
