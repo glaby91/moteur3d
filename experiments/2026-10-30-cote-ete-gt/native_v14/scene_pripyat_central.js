@@ -45,7 +45,7 @@ const M3D_ENERGETIK_ARCH = Object.freeze({
     mosaicBottomY:2.0, mosaicTopY:6.30,
     mosaicStartZ:-41.55, mosaicEndZ:-32.05,
     galleryEastEdgeX:8.65, rearGalleryEndZ:-40.9,
-    firstLandingY:3.25,
+    firstLandingY:3.49,
     muralBackingBaseY:1.95,
     arcadePierZ:Object.freeze([-41.5,-38.55,-35.7,-32.65]),
     arcadePierLength:0.60,
@@ -70,7 +70,7 @@ function m3dCheckEnergetikDatum(a=M3D_ENERGETIK_ARCH){
        f.arcadePierTopY>f.mosaicBottomY && f.arcadePierTopY<l.firstSlab &&
        f.arcadePierZ.every(z=>z>=f.mosaicStartZ && z+f.arcadePierLength<=f.mosaicEndZ)))
     throw new Error('Energetik: mural arcade dimensions inconsistent');
-  if(Math.abs(f.firstLandingY-l.firstSlab)>0.001)
+  if(Math.abs(f.firstLandingY-(l.firstSlab+l.slabThickness))>0.001)
     throw new Error('Energetik: stair landing and first floor disconnected');
   return true;
 }
@@ -501,7 +501,8 @@ function makeScene() {
 
   // Open facade bays expose the deep galleries and interior structure, not glass.
   // Keep only damaged railings at the balcony edges, with irregular missing sections.
-  for (const y of [archLevels.firstSlab+0.03, archLevels.secondSlab+0.03]) {
+  for (const y of [archLevels.firstSlab+archLevels.slabThickness+0.03,
+                   archLevels.secondSlab+archLevels.slabThickness+0.03]) {
     box(-45.0,y,-19.18,24.6,y+0.075,-19.06,'rust');
     box(-45.0,y+0.88,-19.18,24.6,y+0.96,-19.06,'rust');
     for (let x=-44.4; x<24.2; x+=0.68) {
