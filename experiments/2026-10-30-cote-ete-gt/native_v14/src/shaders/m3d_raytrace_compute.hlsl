@@ -154,7 +154,7 @@ float4 tracePrimary(Ray ray){
  if(nodeCount==0||rootIndex>=nodeCount)return float4(.02,.03,.06,1);
  uint stack[64],sp=0;stack[sp++]=rootIndex;
  float closest=farPlane;float3 normal=float3(0,1,0);uint material=0;
- float2 hitUV=float2(0,0);GpuObject hitObj=(GpuObject)0;
+ float2 hitUV=float2(0,0);GpuObject hitObj;
  bool found=false,overflow=false;uint visits=0;
  [loop]while(sp>0){
   if(++visits>maxTraversal){overflow=true;break;}
