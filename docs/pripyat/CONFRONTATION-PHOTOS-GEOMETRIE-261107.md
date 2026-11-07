@@ -15,6 +15,14 @@ Date de l'examen : 2026-11-07. **Statut : correspondances morphologiques établi
 ## Projet-type
 [Domophoto — Energetik, projet 2С-06-9/70](https://domophoto.ru/building/80424/) décrit **deux étages**. Le découpage logiciel possède actuellement les altitudes `ground=0.38`, `firstSlab=3.25`, `secondSlab=6.35`, toiture `9.4` m : **ne pas appeler automatiquement ces trois plateformes trois étages historiques**. À confirmer avec plan de coupe, car des galeries/niveaux techniques peuvent être confondus avec des étages.
 
+## Recoupement des archives du projet-type — conflit documentaire réel
+
+- [PhotoBuildings — série 2С-06-9/70](https://photobuildings.com/projects/2736/) décrit **3 niveaux** dans le projet-type; [Domophoto — bâtiment de Pripiat](https://domophoto.ru/building/80424/) en indique **2**. Ce sont deux inventaires ayant potentiellement des conventions de comptage différentes.
+- Une [notice de rénovation d'un bâtiment de la même famille](https://proekt.sx/tip/dk781-detail.html) donne, pour **ce projet de rénovation et non nécessairement le palais de Pripiat**, 81,3 × 30,4 m d'axes, une salle de spectacle 24 × 18 m et un ensemble sur 4 niveaux dont 1 sous-sol. **Ne pas importer ces mesures sans identifier le bâtiment exact et sa variante.**
+- [Une reconstruction tierce](https://www.fab.com/listings/39bd11e2-0185-48e4-b75f-f2bf45d5baef) attribue à Pripiat 81,2 × 24,4 m et 11,4 m de hauteur : données de reconstruction, utiles comme ordre de grandeur, non preuve métrique indépendante.
+- Le code actuel donne 81 × 24,6 m à l'emprise `M3D_PRIPYAT_BLOCKOUT.energetik` : cohérent en ordre de grandeur avec la reconstruction tierce, **non homologué**.
+- La scène doit préserver une logique spatiale à plusieurs niveaux et un hall double hauteur **sans affirmer à tort** que chacun des niveaux dessinés correspond à un « étage » historique habité.
+
 ## Décisions de modélisation actuelles
 1. Garder les textures PBR et les matériaux `stone`, `concrete`, `plaster`, `volcanicTuff`, `rust`, `glass`, `energetikFresco` préexistants.
 2. Préserver un hall dégagé devant la fresque et des passages sous le mur peint; supprimer les grands prismes opaques qui coupent les lignes de vue.
