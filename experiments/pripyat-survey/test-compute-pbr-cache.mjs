@@ -14,7 +14,8 @@ assert.match(cpp,/atlas\(DXGI_FORMAT_R8_UNORM,subRoughs,srv\[6\]\)/);
 assert.match(shader,/Texture2DArray<float4> AlbedoAtlas : register\(t4\)/);
 assert.match(shader,/Texture2DArray<float4> NormalAtlas : register\(t5\)/);
 assert.match(shader,/Texture2DArray<float4> RoughAtlas : register\(t6\)/);
-assert.match(shader,/hitUV=o\.uv0\.xy/); // prevent interpolating from uninitialised UV
+assert.match(shader,/uv=o\.uv0\.xy/); // actual triangle barycentric UVs
+assert.match(shader,/hitUV=uv/); // intersection carries interpolated UV
 assert.match(shader,/AlbedoAtlas\.SampleLevel/);
 assert.match(shader,/NormalAtlas\.SampleLevel/);
 assert.match(shader,/RoughAtlas\.SampleLevel/);
