@@ -24,8 +24,7 @@ const M3D_PRIPYAT_BLOCKOUT = Object.freeze({
   plaza:{x0:-53,x1:53,z0:-15,z1:61},
   energetik:{x0:-50.5,x1:30.5,z0:-43.4,z1:-18.8,mainHeight:11.4,towerHeight:14},
   polissya:{x0:40,x1:63,z0:-42,z1:-20},
-  // Sports club annex: provisional independent placement, photograph-matched interior.
-  gym:{x0:-48,x1:-8,z0:-82,z1:-56,floorY:0.40,height:11.4},
+  // The sports hall is a rear WING of Energetik, not a separate building.
   housing:[
     {id:'west-south',x0:-64,z0:-34,x1:-57,z1:-10,floors:6,frontZ:-10},
     // Provisional context block moved outside the Polissya footprint to avoid
@@ -59,13 +58,17 @@ const M3D_ENERGETIK_ARCH = Object.freeze({
   }),
   rearWindowXs:Object.freeze([-14.5,-8.3,-2.1,4.1,10.3,16.5]),
   rearWindowWidth:3.5,
+  // Rear sports wing; dimensions are provisional, physically joined at the
+  // main building's north (-Z) wall. Its glazing faces the amusement park.
+  sports: Object.freeze({x0:-47,x1:-7,z0:-68.9,z1:-42.7,floorY:0.40,height:11.4,
+    doorwayLeft:-14.05,doorwayRight:-11.5,doorTop:2.65}),
   tower: Object.freeze({roofY:14.0})
 });
 // Catch accidental double-booking of urban building footprints.
 // Plaza paving and the intentional Energetik–Polissya connector are excluded.
 function m3dCheckUrbanFootprints(b=M3D_PRIPYAT_BLOCKOUT){
   const buildings=[{id:'Energetik',...b.energetik},
-    {id:'Polissya',...b.polissya},{id:'Sports club',...b.gym},...b.housing];
+    {id:'Polissya',...b.polissya},...b.housing];
   for(let i=0;i<buildings.length;i++)for(let j=i+1;j<buildings.length;j++){
     const p=buildings[i],q=buildings[j];
     const overlapX=Math.min(p.x1,q.x1)-Math.max(p.x0,q.x0);
@@ -78,7 +81,14 @@ function m3dCheckUrbanFootprints(b=M3D_PRIPYAT_BLOCKOUT){
 m3dCheckUrbanFootprints();
 
 function m3dCheckEnergetikDatum(a=M3D_ENERGETIK_ARCH){
-  const {levels:l,foyer:f,envelope:e}=a;
+  const {levels:l,foyer:f,envelope:e,sports:g}=a;
+  // A connected rear wing must touch the main shell, with an internal passage;
+  // it must never be an independent block across an exterior courtyard.
+  if(!(g.x0>=e.x0 && g.x1<=e.x1 && g.z0<e.z0-10 &&
+       g.z1>e.z0 && g.z1<e.z0+1.2 &&
+       g.doorwayLeft>=g.x0 && g.doorwayRight<=g.x1 &&
+       g.doorwayRight-g.doorwayLeft>=2 && g.doorTop>2.1))
+    throw new Error('Energetik: sports wing must attach to the rear wall');
   if(!(l.ground<l.firstSlab && l.firstSlab<l.secondSlab && l.secondSlab<l.roof))
     throw new Error('Energetik: inconsistent floor elevations');
   if(!(f.mosaicBottomY<l.firstSlab && f.mosaicTopY<l.secondSlab &&
@@ -196,7 +206,7 @@ function m3dBuildFoyerMuralArcade({box}, a=M3D_ENERGETIK_ARCH) {
 // Independent sporting club / gymnasium module reconstructed from the photo
 // set provided on 2026-11-07. Dimensions and annex location are provisional.
 // Existing scene material slots remain untouched; gym materials are additive.
-function m3dBuildSportsClub({box,capsule,meshTriangle},g=M3D_PRIPYAT_BLOCKOUT.gym){
+function m3dBuildSportsClub({box,capsule,meshTriangle},g=M3D_ENERGETIK_ARCH.sports){
   const {x0,x1,z0,z1,floorY,height}=g;
   if(!(x1-x0>=38 && z1-z0>=24 && height>9.5))
     throw new Error('Sports club: insufficient clear span / height');
@@ -216,7 +226,12 @@ function m3dBuildSportsClub({box,capsule,meshTriangle},g=M3D_PRIPYAT_BLOCKOUT.gy
   meshTriangle(vb,vc,vd,'gymFloor');
   // Three opaque walls. Their colour/peel PBR is deliberately independent of
   // the mosaic hall material to preserve the reference photos' blue-green tint.
-  box(x0,floorY,z0,x1,top,z0+0.40,'gymWall');
+  // Connection to the main palace through the gallery-side ground floor wall.
+  // Mirror below makes this wall face +Z (toward the existing foyer corridor).
+  const left=g.doorwayLeft,right=g.doorwayRight,lintel=g.doorTop;
+  box(x0,floorY,z0,left,top,z0+0.40,'gymWall');
+  box(right,floorY,z0,x1,top,z0+0.40,'gymWall');
+  box(left,lintel,z0,right,top,z0+0.40,'gymWall');
   box(x0,floorY,z0,x0+0.42,top,z1,'gymWall');
   box(x1-0.42,floorY,z0,x1,top,z1,'gymWall');
   // Long fully open window facade: tall, closely spaced concrete piers; only
@@ -361,6 +376,20 @@ function m3dBuildSportsClub({box,capsule,meshTriangle},g=M3D_PRIPYAT_BLOCKOUT.gy
   for(const px of [x0+5,x0+14,x0+23,x0+32])
     M3D_SCENE_LIGHTS.push([px,top-2.5,z1-2.2,14,0.53,206,223,225]);
 }
+// Put the hall's glazed side on the amusement-park (-Z) side. The reusable
+// gym builder is mirrored to preserve its PBR floor UV geometry and all props.
+function m3dBuildEnergetikSportsWing({box,capsule,meshTriangle},a=M3D_ENERGETIK_ARCH){
+  const g=a.sports, sumZ=g.z0+g.z1;
+  const mirror=z=>sumZ-z;
+  const mapVertex=v=>({p:[v.p[0],v.p[1],mirror(v.p[2])],
+    n:[v.n[0],v.n[1],-v.n[2]],uv:v.uv});
+  const wrap={
+    box:(x0,y0,z0,x1,y1,z1,mat)=>box(x0,y0,mirror(z1),x1,y1,mirror(z0),mat),
+    capsule:(p,q,r,mat)=>capsule([p[0],p[1],mirror(p[2])],[q[0],q[1],mirror(q[2])],r,mat),
+    meshTriangle:(v0,v1,v2,mat)=>meshTriangle(mapVertex(v0),mapVertex(v2),mapVertex(v1),mat)
+  };
+  m3dBuildSportsClub(wrap,g);
+}
 function m3dBuildPlaza({box}, p=M3D_PRIPYAT_BLOCKOUT.plaza){
   // Separate physical layers: foundation, pedestrian paving, expansion joints,
   // patch repairs and flush perimeter drainage.
@@ -422,8 +451,14 @@ function m3dBuildEnergetikRearWall({box}, a=M3D_ENERGETIK_ARCH){
   const first=-15.0,last=20.25;
   box(e.x0,0,wallZ0,first,l.roof,wallZ1,'concrete');
   box(last,0,wallZ0,e.x1,l.roof,wallZ1,'concrete');
-  for(const [bottom,top] of [[0,1.0],[2.65,4.1],[5.85,7.1],[8.75,l.roof]])
-    box(first,bottom,wallZ0,last,top,wallZ1,'concrete');
+  for(const [bottom,top] of [[0,1.0],[2.65,4.1],[5.85,7.1],[8.75,l.roof]]){
+    if(bottom===0){
+      // Real, full-depth circulation passage to the connected sports wing.
+      const g=a.sports;
+      box(first,bottom,wallZ0,g.doorwayLeft,top,wallZ1,'concrete');
+      box(g.doorwayRight,bottom,wallZ0,last,top,wallZ1,'concrete');
+    } else box(first,bottom,wallZ0,last,top,wallZ1,'concrete');
+  }
   let cursor=first;
   for(const x of a.rearWindowXs){
     if(x>cursor)box(cursor,1.0,wallZ0,x,8.75,wallZ1,'concrete');
@@ -704,8 +739,8 @@ function makeScene() {
 
   m3dBuildEnergetikArchitecturalAccents({box,capsule});
 
-  // Separate long-span sports club: never reuse the foyer or cinema geometry.
-  m3dBuildSportsClub({box,capsule,meshTriangle});
+  // Attached north wing: internal doorway joins the original palace corridor.
+  m3dBuildEnergetikSportsWing({box,capsule,meshTriangle});
 
   // Exposed aggregate, broken cladding and rust runoff on the street-facing
   // lintel. The patch layout is irregular so the facade reads as weathered
@@ -765,7 +800,8 @@ function makeScene() {
   for(let x=-45.5;x<18;x+=6.2){
     const inAuditorium=x>=-47.5&&x<=-17.3;
     if(!inAuditorium){
-      box(x,1.0,-42.10,x+3.5,2.65,-41.98,((Math.floor((x+45.5)/6.2)%4)===1)?'windowdark':'glass');
+      // The former rear window is now the circulation passage into the gym.
+      if(Math.abs(x-(-14.5))>0.01) box(x,1.0,-42.10,x+3.5,2.65,-41.98,((Math.floor((x+45.5)/6.2)%4)===1)?'windowdark':'glass');
       box(x,4.1,-42.10,x+3.5,5.85,-41.98,'glass');
     }
     box(x,7.1,-42.10,x+3.5,8.75,-41.98,'windowdark');
