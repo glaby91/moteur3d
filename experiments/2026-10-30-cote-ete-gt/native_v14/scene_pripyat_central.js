@@ -315,11 +315,15 @@ function makeScene() {
       box(-17.3,t,-42.2,-15,b,-25.2,'concrete');
       box(-49.2,t,-25.2,-15,b,-20.1,'concrete');
     } else box(-49.2,t,-42.2,-15,b,-20.1,'concrete');
-    box(-15,t,-42.2,8,b,-35.8,'concrete');
+    // Double-height mosaic hall: remove the upper slab in front of the mural.
+    // Preserve a narrow structural strip and the rear cross-corridor.
+    box(-15,t,-42.2,-12.8,b,-35.8,'concrete');
+    box(-12.8,t,-42.2,8,b,-40.9,'concrete');
     box(-15,t,-26.5,8,b,-20.1,'concrete');
     box(-15,t,-35.8,-7,b,-26.5,'concrete');
     box(6,t,-35.8,8,b,-26.5,'concrete');
-    box(8,t,-42.2,18,b,-20.1,'concrete');
+    // Start the east upper floor behind the mural support wall (X=8.38).
+    box(8.65,t,-42.2,18,b,-20.1,'concrete');
     box(18,t,-42.2,20,b,-20.1,'concrete');
     box(27,t,-42.2,29.2,b,-20.1,'concrete');
     box(20,t,-42.2,27,b,-38.0,'concrete');
@@ -366,7 +370,10 @@ function makeScene() {
     const y=0.38+level*3.1, h=2.72;
     // A real return wall frames the foyer stair and gives the side-room door
     // a proper opening; the mural is mounted on its hall-facing surface.
-    sideDoorWall(8.38,-34.8,-26.2,y,h,'concrete');
+    // Continuous masonry behind the full mosaic, with doorway further forward.
+    // A door directly under the mural used to cut through the artwork.
+    box(8.38,y,-34.8,8.54,y+h,-32.0,'concrete');
+    sideDoorWall(8.38,-32.0,-26.2,y,h,'concrete');
     // Continue that wall to both ends of the fresco. Previously those spans
     // had no backing, leaving most of the mural suspended in the atrium.
     box(8.38,y,-42.2,8.54,y+h,-34.8,'concrete');
@@ -556,6 +563,8 @@ function makeScene() {
   // The foyer mosaic is a reusable, photo-guided texture on the hall-facing stair wall.
   // Dimensions are the current 9.5 x 4.3 m estimate; update the manifest if surveyed.
   // The supporting wall sits at X=8.38 m. This plane faces -X and spans toward +Z.
+  // The mural spans the atrium across the first-floor level; never crop it
+  // with a mezzanine slab. Keep the historically estimated 4.3 m height.
   const frescoX=8.12, frescoY0=2.00, frescoY1=6.30;
   const frescoZ0=-41.55, frescoZ1=-32.05;
   const frescoNormal=[-1,0,0];
