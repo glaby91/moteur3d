@@ -19,7 +19,7 @@ routier métrique 1:1.
 ## Végétation désormais réellement exportée dans scene.bin
 
 Un générateur déterministe `m3dPripyatGroundGrassSites` place des
-touffes irrégulières (3 brins chacun) construites en triangles
+touffes irrégulières (3 brins chacun) construites en rubans étroits, légèrement incurvés et triangulés
 **double face**, sans billboards dépendant de la caméra ni textures
 transparentes. Même géométrie pour CPU et GPU Compute D3D11.
 
@@ -40,8 +40,14 @@ urbains existants restent inchangés.
 
 ## Budget graphique et limites
 
-- Maximum : **1 750 touffes**, soit au maximum **10 500 triangles**
-  double face pour les herbes (trois brins × deux faces × 1 750).
+- Maximum : **1 450 touffes**, soit au maximum **26 100 triangles**
+  double face pour les herbes (3 brins × 3 triangles × 2 faces × 1 450).
+- Brins bien plus fins et moins hauts que dans le premier rendu :
+  **6–16 cm** dans les joints, **10–27 cm** près des bordures,
+  et **8–26 cm** sur le terrain périphérique (enveloppes maximales).
+- Les pousses sont regroupées par petites touffes et positionnées sur les
+  vrais croisements de joints de **3,2 m**, plutôt qu'à intervalles
+  réguliers au milieu des dalles.
 - Répartition aléatoire **reproductible** à chaque export avec graine fixe.
 - Le volume concerne l'environnement proche (rayon inférieur à 168 m du
   centre SRTM, topographie encore aplanie dans cet intervalle).
@@ -60,13 +66,14 @@ urbains existants restent inchangés.
 
 `experiments/pripyat-survey/test-pripyat-grass-3d.mjs` :
 
-- contrôles de quantité, répartition et bornes du coût géométrique ;
+- contrôles de quantité, répartition, hauteurs maximales et bornes du coût géométrique ;
 - absence de touffes dans les bâtiments et les emprises routières
   pour la végétation périphérique ;
 - hauteurs cohérentes avec la place et les jardinières ;
 - génération entièrement déterministe ;
 - triangles double face ayant les mêmes positions / orientations inversées ;
-- 25 répétitions PBR sur une dalle de 100 m dans les deux directions.
+- 25 répétitions PBR sur une dalle de 100 m dans les deux directions ;
+- correspondance des pousses aux joints de dallage de 3,2 m.
 
 ## Livraison
 
