@@ -10,6 +10,8 @@ const src=readFileSync(new URL('../2026-10-30-cote-ete-gt/native_v14/scene_pripy
 const api=vm.runInNewContext(src+`
 ({
  arch:M3D_ENERGETIK_ARCH,
+ footprints:M3D_PRIPYAT_BLOCKOUT,
+ validateFootprints:m3dCheckUrbanFootprints,
  validate:m3dCheckEnergetikDatum,
  arcade:m3dBuildFoyerMuralArcade,
  slabs:m3dBuildEnergetikSlabs,
@@ -21,6 +23,11 @@ const api=vm.runInNewContext(src+`
  polissya:m3dBuildPolissya
 })`, {}, {timeout:5000});
 assert.equal(api.validate(),true);
+assert.equal(api.validateFootprints(),true,'urban buildings must not overlap');
+assert.throws(()=>api.validateFootprints({
+ energetik:api.footprints.energetik,polissya:api.footprints.polissya,
+ housing:[{id:'invalid',x0:45,x1:50,z0:-30,z1:-25}]
+}),/overlapping footprints/,'reject geometrically impossible apartment/hotel overlap');
 assert.equal(api.arch.envelope.x1-api.arch.envelope.x0,81);
 assert.ok(Math.abs(api.arch.envelope.z1-api.arch.envelope.z0-24.6)<1e-8);
 
