@@ -2,19 +2,19 @@
   "scene": "Palais de la Culture Energetik — Pripiat",
   "schema_version": 1,
   "annex": "docs/pripyat/VUES-ENERGETIK.md",
-  "notes": "target=point de visée (m); distance=rayon de caméra; angle/elevation en degrés; hour_step=06:00 + 30 min × indice. Vues 01/10 reculées pour cadrer la façade et vues intérieures repositionnées après inspection des dix rendus CPU de la build 200.",
+  "notes": "Vues 01,03,04,07,10 validées visuellement sur les captures CPU de la build 210; la fresque nette est vérifiée en vue 02. target en mètres, distance en mètres, angles en degrés et hour_step = 06:00 + 30 min × indice.",
   "views": [
     {
       "name": "01 — Façade complète et colonnade",
       "target": [
-        -10,
-        5.5,
+        -9,
+        5,
         -21
       ],
-      "distance": 54,
+      "distance": 102,
       "angle": 0,
-      "elevation": 7,
-      "fov": 50,
+      "elevation": 3,
+      "fov": 55,
       "hour_step": 12
     },
     {
@@ -33,27 +33,27 @@
     {
       "name": "03 — Escalier principal et palier",
       "target": [
-        -5,
-        2.4,
-        -29
+        -6.6,
+        2.3,
+        -29.5
       ],
-      "distance": 12,
-      "angle": 0,
+      "distance": 7.6,
+      "angle": 90,
       "elevation": 5,
-      "fov": 65,
+      "fov": 54,
       "hour_step": 12
     },
     {
       "name": "04 — Auditorium vu en surplomb",
       "target": [
-        -32.7,
+        -32.5,
         2.8,
-        -35.5
+        -32
       ],
-      "distance": 10.8,
+      "distance": 7.2,
       "angle": 0,
-      "elevation": 4,
-      "fov": 70,
+      "elevation": 22,
+      "fov": 74,
       "hour_step": 12
     },
     {
@@ -85,13 +85,13 @@
     {
       "name": "07 — Cage d’escalier vue depuis le bas",
       "target": [
-        23.5,
-        4.3,
-        -30.5
+        23.3,
+        1.6,
+        -35.1
       ],
-      "distance": 6,
-      "angle": -90,
-      "elevation": 3,
+      "distance": 5.7,
+      "angle": 180,
+      "elevation": 4,
       "fov": 58,
       "hour_step": 12
     },
@@ -124,14 +124,14 @@
     {
       "name": "10 — Façade complète de nuit",
       "target": [
-        -10,
-        5.4,
+        -9,
+        5,
         -21
       ],
-      "distance": 54,
+      "distance": 102,
       "angle": 0,
-      "elevation": 5,
-      "fov": 50,
+      "elevation": 3,
+      "fov": 55,
       "hour_step": 32
     }
   ]
