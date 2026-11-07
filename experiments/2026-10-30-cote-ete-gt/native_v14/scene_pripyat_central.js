@@ -573,12 +573,14 @@ function makeScene() {
   // Foyer stair flights and wall cladding add a readable human scale indoors.
   for(const side of [-1,1]){
     const x0=side<0?-11.0:-1.2, x1=side<0?-1.7:8.0;
-    for(let i=0;i<17;i++){
-      const y=0.48+i*0.162, z=-25.0-i*0.50;
+    const stairCount=17, stairBaseY=archLevels.ground+0.10;
+    const stairRise=(archFoyer.firstLandingY-stairBaseY-0.17)/(stairCount-1);
+    for(let i=0;i<stairCount;i++){
+      const y=stairBaseY+i*stairRise, z=-25.0-i*0.50;
       box(x0,y,z,x1,y+0.17,z+0.50,'stone');
     }
     const railX=side<0?-10.75:7.75;
-    capsule([railX,0.80,-24.8],[railX,3.25,-33.0],0.10,'rust');
+    capsule([railX,0.80,-24.8],[railX,archFoyer.firstLandingY,-33.0],0.10,'rust');
     for(let i=0;i<10;i++){
       const z=-25.1-i*0.73, y=1.0+i*0.22;
       capsule([railX,y,z],[railX,y+0.43,z],0.035,'metal');
