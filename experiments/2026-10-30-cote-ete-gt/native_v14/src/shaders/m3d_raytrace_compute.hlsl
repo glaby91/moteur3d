@@ -1,6 +1,11 @@
 // Pripyat / Moteur3D - D3D11 Compute Shader Model 5.0, no DXR.
 // Ray tracing on mixed analytic primitives with real albedo, normal and roughness maps.
 // Single-bounce direct shading, NOT full CPU GI/refraction; magenta means BVH overflow.
+// Opt-in near-first traversal: disabled by default until scene-specific visual
+// parity and Intel HD 620 performance are independently confirmed.
+#ifndef M3D_NEAR_FIRST
+#define M3D_NEAR_FIRST 0
+#endif
 struct Ray { float3 origin; float3 direction; };
 struct GpuBvhNode {float3 boundsMin; uint left; float3 boundsMax; uint right; uint first; uint count; uint pad0; uint pad1;};
 struct GpuObject {
@@ -49,6 +54,20 @@ bool hitBounds(Ray r,float3 mn,float3 mx,float limit){
  }
  return true;
 }
+// Same slab tests and numerical thresholds as hitBounds. Used by the opt-in
+// ordered traversal so that the near child is popped first from the LIFO stack.
+#if M3D_NEAR_FIRST
+bool hitBoundsNear(Ray r,float3 mn,float3 mx,float limit,out float nearT){
+ float lo=max(nearPlane,0.0001),hi=limit;
+ [unroll]for(uint k=0;k<3;k++){
+  float d=r.direction[k],o=r.origin[k];
+  if(abs(d)<1.e-9){if(o<mn[k]||o>mx[k]){nearT=limit;return false;}}
+  else{float a=(mn[k]-o)/d,b=(mx[k]-o)/d;
+   lo=max(lo,min(a,b));hi=min(hi,max(a,b));if(hi<lo){nearT=limit;return false;}}
+ }
+ nearT=lo;return true;
+}
+#endif
 float3 normalBox(GpuObject o,float3 p){
  float3 a=abs(p-o.mn),b=abs(p-o.mx);
  float d=a.x;float3 n=float3(-1,0,0);
@@ -171,8 +190,23 @@ float4 tracePrimary(Ray ray){
     }
    }
   }else{
+#if M3D_NEAR_FIRST
+   if(node.left>=nodeCount||node.right>=nodeCount){overflow=true;break;}
+   GpuBvhNode leftNode=Nodes[node.left],rightNode=Nodes[node.right];
+   float leftEntry=closest,rightEntry=closest;
+   bool useLeft=hitBoundsNear(ray,leftNode.boundsMin,leftNode.boundsMax,closest,leftEntry);
+   bool useRight=hitBoundsNear(ray,rightNode.boundsMin,rightNode.boundsMax,closest,rightEntry);
+   if(useLeft&&useRight){
+    if(sp+2>64){overflow=true;break;}
+    // Preserve original right-before-left order when bounds tie exactly.
+    if(leftEntry<rightEntry){stack[sp++]=node.right;stack[sp++]=node.left;}
+    else{stack[sp++]=node.left;stack[sp++]=node.right;}
+   }else if(useLeft){if(sp>=64){overflow=true;break;}stack[sp++]=node.left;}
+   else if(useRight){if(sp>=64){overflow=true;break;}stack[sp++]=node.right;}
+#else
    if(sp+2>64){overflow=true;break;}
    stack[sp++]=node.left;stack[sp++]=node.right;
+#endif
   }
   if(overflow)break;
  }
