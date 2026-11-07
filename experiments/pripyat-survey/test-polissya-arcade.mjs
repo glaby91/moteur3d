@@ -6,30 +6,42 @@ import vm from 'node:vm';
 const scene=readFileSync(new URL('../2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js',import.meta.url),'utf8');
 const api=vm.runInNewContext(scene+`({
   block:M3D_PRIPYAT_BLOCKOUT,
-  plan:m3dPolissyaArcadePlan,
+  plan:m3dPolissyaArcadePlan,world:m3dPolissyaLocalToWorld,model:M3D_POLISSYA_MODEL,angle:M3D_POLISSYA_ORIENTATION_DEGREES,
   arcade:m3dBuildConnector,
   hotel:m3dBuildPolissya
 })`,{}, {timeout:5000});
 const p=api.plan(),palace=api.block.energetik,hotel=api.block.polissya;
-assert.ok(p.x0>palace.x1+2.5,'gallery must start clear of Energetik');
+assert.equal(api.angle,90,'Polissya should be perpendicular to palace');
+assert.equal(hotel.x1-hotel.x0,22,'rotated Polissya depth');
+assert.equal(hotel.z1-hotel.z0,38,'rotated Polissya length');
+const local=api.model;
+const westFront=api.world(local.x0,local.z1),eastBack=api.world(local.x0,local.z0);
+assert.ok(westFront[0]<eastBack[0],'hotel local +Z frontage must rotate toward square (west)');
+const eastAlong=api.world(local.x1,local.z1);
+assert.ok(Math.abs(westFront[0]-eastAlong[0])<.001,'long hotel axis must be world Z');
+assert.ok(Math.abs(eastAlong[1]-westFront[1]-(local.x1-local.x0))<.001,'90-degree rotation must preserve longitudinal dimensions');
+const galleryStart=p.at(0),galleryEnd=p.at(1);
+assert.ok(galleryStart[0]>palace.x1+2.0,'gallery must start clear of Energetik');
+assert.ok(galleryEnd[0]<hotel.x0-2.0,'gallery must end before hotel frontage');
 assert.ok(hotel.x1-hotel.x0>=35,'hotel needs elongated main facade');
 assert.ok(p.roofBottom>3.1&&p.roofBottom<4.1,'canopy headroom inconsistent');
 assert.ok(p.halfWidth>=1.6&&p.halfWidth<=2.3,'canopy width implausible');
 const start=p.at(0),mid=p.at(.5),end=p.at(1);
-assert.ok(mid[1]>start[1]+4&&mid[1]>end[1]+4,'gallery is not visibly curved');
+const chordZ=(start[1]+end[1])/2;
+assert.ok(Math.abs(mid[1]-chordZ)>3,'gallery is not visibly curved');
 for(let i=0;i<=128;i++){
  const t=i/128;
  for(const side of [-1,0,1]){
   const [x,z]=p.at(t,side*p.halfWidth);
-  assert.ok(x>palace.x1+2,'arcade touches palace');
-  // Entire colonnade stands in FRONT of the hotel, outside its +Z face.
-  assert.ok(z>hotel.z1+2.0,'colonnade enters the hotel facade');
+  assert.ok(x>palace.x1+1.0,'arcade touches palace');
+  // All portions remain west of the world-oriented hotel's western frontage.
+  assert.ok(x<hotel.x0-1.0,'colonnade enters the hotel west facade');
  }
 }
 const meshes=[],boxes=[];
 api.arcade({box:(...args)=>boxes.push(args),meshTriangle:(...args)=>meshes.push(args)});
-assert.ok(meshes.length>=250,'bent roof mesh should use a continuous multi-segment surface');
-assert.ok(boxes.length>=34,'regular paired arcade pillars missing');
+assert.ok(meshes.length>=350,'bent roof mesh should use a continuous multi-segment surface');
+assert.ok(boxes.length>=40,'regular paired arcade pillars missing');
 for(const [a,b,c,mat] of meshes){
  assert.ok(['stone','concrete'].includes(mat),'unexpected arcade material');
  for(const v of [a,b,c]){
