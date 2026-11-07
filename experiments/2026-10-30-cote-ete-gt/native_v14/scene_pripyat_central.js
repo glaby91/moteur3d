@@ -440,7 +440,7 @@ function m3dWheelPose(seconds=0,rpm=1/6,w=M3D_FERRIS_WHEEL,site=m3dWheelSite()){
   const a=phase+2*Math.PI*i/N;
   return {id:'gondola-'+String(i+1).padStart(2,'0'),
    pivot:[site.x+w.radius*Math.sin(a),site.y+w.axleHeight+w.radius*Math.cos(a),site.z],
-   rotorAngleRad:a,localCounterRotationRad:-a,worldCabinPitchRad:0};
+   rotorAngleRad:a,localCounterRotationRad:-phase,worldCabinPitchRad:0};
  });
  return {phaseRad:phase,seconds,rpm,hub:[site.x,site.y+w.axleHeight,site.z],gondolas};
 }
