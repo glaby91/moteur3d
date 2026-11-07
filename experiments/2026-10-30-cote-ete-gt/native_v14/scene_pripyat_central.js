@@ -86,24 +86,27 @@ m3dCheckEnergetikDatum();
 // The shared datum drives risers, upper landings and return gallery.
 // Main double-flight foyer stair: every tread is derived from the actual
 // finished upper floor (slab top), not the underside of the slab.
+// The real foyer photograph shows one broad staircase to the side of the
+// mural, not two stair flights cutting across the mural viewing corridor.
 function m3dBuildFoyerStairFlights({box,capsule},a=M3D_ENERGETIK_ARCH){
   const l=a.levels,f=a.foyer;
-  const count=17, base=l.ground+0.10;
+  const count=17,base=l.ground+0.10;
   const rise=(f.firstLandingY-base-0.17)/(count-1);
-  for(const side of [-1,1]){
-    const x0=side<0?-11.0:-1.2, x1=side<0?-1.7:8.0;
-    for(let i=0;i<count;i++){
-      const y=base+i*rise, z=-25.0-i*0.50;
-      box(x0,y,z,x1,y+0.17,z+0.50,'stone');
-    }
-    const railX=side<0?-10.75:7.75;
+  const x0=-11.0,x1=-2.0;
+  for(let i=0;i<count;i++){
+    const y=base+i*rise,z=-25.0-i*0.50;
+    box(x0,y,z,x1,y+0.17,z+0.50,'stone');
+  }
+  // Landing stays entirely west of the viewing corridor and still meets the
+  // upper walking surface. This removes a 9-metre slab in front of the mural.
+  box(-12.4,l.firstSlab,-34.1,-1.4,l.firstSlab+l.slabThickness,-32.8,'stone');
+  for(const railX of [x0+0.25,x1-0.25]){
     capsule([railX,0.80,-24.8],[railX,f.firstLandingY,-33.0],0.10,'rust');
     for(let i=0;i<10;i++){
-      const z=-25.1-i*0.73, y=1.0+i*0.22;
+      const z=-25.1-i*0.73,y=1.0+i*0.22;
       capsule([railX,y,z],[railX,y+0.43,z],0.035,'metal');
     }
   }
-  box(-12.4,l.firstSlab,-34.1,8.0,l.firstSlab+l.slabThickness,-32.8,'stone');
 }
 function m3dBuildEastStairCore({box,capsule}, a=M3D_ENERGETIK_ARCH){
   const l=a.levels;
