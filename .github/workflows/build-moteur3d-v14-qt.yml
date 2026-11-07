@@ -7,6 +7,7 @@ on:
       - pripiat
       - feature/pripyat-catalog-assets-261105
       - feature/pripyat-square-survey-measurements-261107
+      - feature/pripyat-compute-d3d11-261107
     paths:
       - experiments/2026-10-30-cote-ete-gt/native_v14/CMakeLists.txt
       - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
