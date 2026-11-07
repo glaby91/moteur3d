@@ -96,6 +96,34 @@ function m3dBuildEnergetikShell({box},cfg=M3D_PRIPYAT_BLOCKOUT.energetik){
 
 }
 
+
+function m3dBuildEnergetikArchitecturalAccents({box,capsule}){
+  // Photo-guided facade segmentation. Provisional detailing: avoids sealing
+  // the foyer and preserves the existing stair and auditorium paths.
+  // Two entrance wings and a distinct central recessed vestibule.
+  for(const x of [-12.2,11.1]){
+    box(x,0.2,-20.62,x+1.1,3.25,-19.72,'stone');
+    box(x-0.18,3.25,-20.83,x+1.28,3.52,-19.46,'concrete');
+  }
+  // Horizontal entrance canopy split into structural elements.
+  box(-11.1,3.35,-19.45,11.2,3.60,-17.95,'concrete');
+  box(-11.3,3.59,-19.53,11.4,3.69,-17.88,'stone');
+  for(const x of [-10.0,-5.1,0,5.1,10.0]){
+    box(x-0.075,0.45,-19.47,x+0.075,3.35,-19.27,'metal');
+    box(x-0.48,3.0,-19.51,x+0.48,3.15,-19.24,'rust');
+  }
+  // Facade bays remain open to the original interior; no opaque wall placed.
+  // Stair-tower upper parapet and rear roof mechanical housing.
+  box(20.45,13.95,-40.95,30.6,14.28,-40.5,'stone');
+  box(20.45,13.95,-22.35,30.6,14.28,-21.95,'stone');
+  box(22.2,11.55,-37.5,25.6,12.9,-35.2,'concrete');
+  box(22.0,12.9,-37.7,25.8,13.03,-35.0,'stone');
+  // Thin facade scars and metal remnants, not a repetitive decorative grid.
+  for(const [x,y] of [[-42.5,2.2],[-29.4,4.7],[-16.8,6.1],[7.3,5.8],[19.2,3.1]]){
+    capsule([x,y,-20.86],[x+0.4,y+0.24,-20.87],0.022,'rust');
+  }
+}
+
 function m3dBuildEnergetikFacade({box,roundBox,objects}){
   // Projecting plinth, pilasters, capitals and layered cornice give the civic
   // façade real relief. The large bays stay open: the reference facade has no glazing.
@@ -237,6 +265,8 @@ function makeScene() {
 
   // Independent facade assembly: main building remains traversable.
   m3dBuildEnergetikFacade({box,roundBox,objects});
+
+  m3dBuildEnergetikArchitecturalAccents({box,capsule});
 
   // Exposed aggregate, broken cladding and rust runoff on the street-facing
   // lintel. The patch layout is irregular so the facade reads as weathered
