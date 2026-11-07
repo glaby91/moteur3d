@@ -48,10 +48,10 @@ Le tracé de l'arcade n'est pas une courbe régulière sur toute la longueur :
 - les DEUX extrémités ont un bout de couverture ARRONDI,
   sans mur ou liaison avec les bâtiments.
 Nouveaux points de contrôle cubiques (XZ, mètres moteur) :
- P0=(limite est Energetik + 3,35 ; -12,8)
- P1=(59,0 ; -12,8)
- P2=(78,1 ; -12,8)
- P3=(78,1 ; 12,5).
+ P0=(limite est Energetik + 3,35 ; -30,5)
+ P1=(59,0 ; -30,5)
+ P2=(78,1 ; -30,5)
+ P3=(78,1 ; 7,0).
 La forme est donc une tangente +X au départ et une tangente +Z
 à l'arrivée. Chaque extrémité reçoit une demi-toiture en arc de cercle
 de 12 segments, avec un rayon de 1,85 m (demi-largeur de 3,70 m).
@@ -110,3 +110,12 @@ F. RESTE A AMELIORER
 - Relief, arbres à feuilles détaillées, herbes et dommages photo.
 - Ray tracing GPU : ombres secondaires, reflets, rebonds et GI.
 - Réutilisation des buffers et écran GPU sans readback vers la RAM.
+
+AJUSTEMENT DE POSITION — 07/11/2026
+La vue schématique montrait un départ trop bas par rapport au côté du
+palais Energetik. Son Z de départ est désormais -30,5 m, soit dans la
+partie médiane de la façade latérale (Z=-43,4 à -18,8), sans contact.
+L'arrivée Z=7,0 m se trouve sensiblement au milieu du grand axe de
+l'hôtel (Z=-12 à 26). La section initiale reste quasiment horizontale
+et le dernier tronçon quasiment vertical, comme le croquis de référence.
+Le rayon et les coordonnées restent des estimations visuelles.
