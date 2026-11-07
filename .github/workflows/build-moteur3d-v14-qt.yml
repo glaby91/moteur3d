@@ -161,13 +161,13 @@ jobs:
           & "./dist/moteur3d_qt.exe" --validate-compute-hlsl
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Render all eleven photographic inspection views on CPU
+      - name: Render all thirteen photographic inspection views on CPU
         if: runner.os == 'Windows'
         shell: bash
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: |
           mkdir -p dist/architecture-review
-          for i in 1 2 3 4 5 6 7 8 9 10 11; do
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12 13; do
             ./dist/moteur3d_qt.exe --snapshot "$i" "dist/architecture-review/view-$(printf '%02d' "$i").png"
           done
           python - <<'PY'
@@ -180,7 +180,7 @@ jobs:
                   assert image.size == (640,360), (p, image.size)
                   assert max(std) > 2.0, (p, std)
                   print(f"{p}: RGB deviation {std}")
-          assert len(list(Path('dist/architecture-review').glob('view-*.png'))) == 11
+          assert len(list(Path('dist/architecture-review').glob('view-*.png'))) == 13
           PY
 
       - name: Upload compact architectural inspection images
