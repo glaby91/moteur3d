@@ -33,7 +33,7 @@ assert.ok(Math.abs(api.arch.envelope.z1-api.arch.envelope.z0-24.6)<1e-8);
 
 function geometry(builder){
   const boxes=[];
-  builder({box:(...v)=>boxes.push(v),capsule:()=>{}});
+  builder({box:(...v)=>boxes.push(v),capsule:()=>{},meshTriangle:()=>{}});
   assert.ok(boxes.length>0,'geometry generator emitted nothing');
   for(const v of boxes){
     assert.equal(v.length,7);
@@ -70,7 +70,10 @@ assert.equal(hits(shell,0,10.4,-31).length,0,'former solid rooftop occluder retu
 
 const connector=geometry(api.connector);
 assert.equal(hits(connector,35,2.0,-21).length,0,'arch pedestrian way blocked');
-assert.ok(hits(connector,35,5.1,-21).length>0,'arch superstructure missing');
+assert.equal(hits(connector,35,5.1,-21).length,0,'old solid hotel-palace arch must not return');
+assert.ok(connector.length>=30,'curved colonnade concrete pillars missing');
+assert.ok(connector.every(b=>b[0]>api.arch.envelope.x1+1),
+ 'colonnade may not touch Energetik facade');
 
 const foyerStair=geometry(api.foyerStair);
 assert.equal(foyerStair.filter(v=>v[6]==='stone').length,18,'17 broad foyer steps plus landing required');
