@@ -27,7 +27,7 @@ for(const p of poses){
  for(const g of p.gondolas){
    near(Math.hypot(g.pivot[0]-p.hub[0],g.pivot[1]-p.hub[1]),spec.radius,'rim radius');
    near(g.pivot[2],site.z,'pin on wheel plane');
-   near(g.rotorAngleRad+g.localCounterRotationRad,0,'gravity-upright gondola pivot');
+   near(p.phaseRad+g.localCounterRotationRad,0,'parent rotor phase cancelled by each upright gondola');
    near(g.worldCabinPitchRad,0,'independent cabin must remain vertical');
  }
 }
