@@ -971,6 +971,140 @@ function addPripyatExpansion() {
   }
 }
 
+
+// Vegetation layer — 2026-11-07. Each grass blade is a real, double-sided
+// triangle visible to BOTH CPU ray tracing and GPU Compute HLSL.
+// This does not modify the base grass PBR material; it breaks up the
+// conspicuously flat lawn and sparse overgrowth on paved joints.
+// The close-up range is deliberately limited for the Intel HD 620.
+const M3D_PRIPYAT_GRASS_LAYER=Object.freeze({
+  seed:261107,patchMax:1750,bladesPerPatch:3,nearRadius:168,
+  plazaBaseY:0.031,peripheryBaseY:0.022,planterTopY:0.973
+});
+function m3dPripyatGrassHash(a,b,c=0){
+  let x=Math.imul((a|0)^M3D_PRIPYAT_GRASS_LAYER.seed,0x9e3779b1);
+  x=Math.imul(x^Math.imul((b|0),0x85ebca6b)^Math.imul((c|0),0xc2b2ae35),0x27d4eb2d);
+  x^=x>>>15;x=Math.imul(x,0x85ebca6b);x^=x>>>13;
+  return (x>>>0)/4294967296;
+}
+function m3dPripyatInsideUrbanBuilding(x,z,pad=0.65){
+  const e=M3D_PRIPYAT_BLOCKOUT.energetik;
+  const b=M3D_PRIPYAT_BLOCKOUT.polissya;
+  const inRect=(q)=>x>=q.x0-pad&&x<=q.x1+pad&&z>=q.z0-pad&&z<=q.z1+pad;
+  if(inRect(e)||inRect(b))return true;
+  const gym=M3D_ENERGETIK_ARCH.sports;
+  if(inRect(gym))return true;
+  return M3D_PRIPYAT_BLOCKOUT.housing.some(inRect);
+}
+function m3dPripyatNearVerifiedRoad(x,z,distance=1.0){
+  // Source is a current OSM snapshot, not a validated historical road plan.
+  // The mask prevents tufts floating on top of the *existing* road meshes.
+  const d=M3D_PRIPYAT_EXPANSION_DATA;
+  for(const route of d.routes){
+    const w=route.w/d.scale*.5+distance;
+    for(const path of route.p)for(let i=0;i+1<path.length;i++){
+      const a=m3dExpansionLegacyRoadMetres(path[i][0],path[i][1],d);
+      const b=m3dExpansionLegacyRoadMetres(path[i+1][0],path[i+1][1],d);
+      const dx=b[0]-a[0],dz=b[1]-a[1],ll=dx*dx+dz*dz;
+      if(ll<1e-8)continue;
+      if(x<Math.min(a[0],b[0])-w||x>Math.max(a[0],b[0])+w||
+         z<Math.min(a[1],b[1])-w||z>Math.max(a[1],b[1])+w)continue;
+      const t=Math.max(0,Math.min(1,((x-a[0])*dx+(z-a[1])*dz)/ll));
+      if(Math.hypot(x-a[0]-t*dx,z-a[1]-t*dz)<w)return true;
+    }
+  }
+  return false;
+}
+function m3dPripyatGroundGrassSites(){
+  const cfg=M3D_PRIPYAT_GRASS_LAYER, sites=[];
+  const add=(x,z,y,h,kind)=>{
+    if(sites.length>=cfg.patchMax)return;
+    if(!Number.isFinite(x)||!Number.isFinite(z)||!Number.isFinite(y)||!Number.isFinite(h))throw Error('Grass: invalid site');
+    sites.push({x,z,y,h,kind});
+  };
+  // 1. Cracks and expansion joints in the central stone-paved square.
+  // Sparse islands, not a uniform lawn over the pedestrian circulation.
+  const plaza=M3D_PRIPYAT_BLOCKOUT.plaza;
+  for(let col=0;col<32;col++)for(let row=0;row<29;row++){
+    const r=m3dPripyatGrassHash(col,row,1);
+    if(r>0.265)continue;
+    let x=plaza.x0+1+col*3.2, z=plaza.z0+1+row*2.52;
+    x+=(m3dPripyatGrassHash(col,row,2)-.5)*.11;
+    z+=(m3dPripyatGrassHash(col,row,3)-.5)*.75;
+    if(x<=plaza.x0+.75||x>=plaza.x1-.75||z<=plaza.z0+.75||z>=plaza.z1-.75)continue;
+    if(m3dPripyatInsideUrbanBuilding(x,z,.4))continue;
+    add(x,z,cfg.plazaBaseY,.15+.37*m3dPripyatGrassHash(col,row,4),'joint');
+  }
+  // 2. Curbs and outside building edges get considerably taller weeds.
+  for(let edge=0;edge<4;edge++)for(let i=0;i<83;i++){
+    if(m3dPripyatGrassHash(i,edge,10)<.26)continue;
+    const t=i/82,dx=m3dPripyatGrassHash(i,edge,11)*.25;
+    const x=edge===0?plaza.x0+.32+dx:edge===1?plaza.x1-.35-dx:plaza.x0+1+t*(plaza.x1-plaza.x0-2);
+    const z=edge===2?plaza.z0+.35+dx:edge===3?plaza.z1-.35-dx:plaza.z0+1+t*(plaza.z1-plaza.z0-2);
+    if(m3dPripyatInsideUrbanBuilding(x,z,.35))continue;
+    add(x,z,cfg.plazaBaseY,.26+.53*m3dPripyatGrassHash(i,edge,12),'curb');
+  }
+  // 3. Concrete planters: plants must start ABOVE the raised top surface.
+  const planters=[[-48,5,7,2],[-31,47,8,2],[31,42,9,2],[45,6,7,2],[-5,53,8,2],[7,-6,7,2]];
+  for(let j=0;j<planters.length;j++){
+    const [px,pz,pw,pd]=planters[j];
+    for(let i=0;i<22;i++){
+      const x=px+.52+(.10+.80*m3dPripyatGrassHash(i,j,20))*(pw-1.04);
+      const z=pz+.52+(.10+.80*m3dPripyatGrassHash(i,j,21))*(pd-1.04);
+      add(x,z,cfg.planterTopY,.17+.41*m3dPripyatGrassHash(i,j,22),'planter');
+    }
+  }
+  // 4. Grassland outside the carefully constructed centre: explicit building
+  // and OSM-road collision masks, no fake plants inside major road surfaces.
+  // Radius < 168 m: within the flat central SRTM blend where Y=0.
+  for(let ix=-82;ix<=82;ix+=2)for(let iz=-82;iz<=82;iz+=2){
+    const x=ix*2.0+(m3dPripyatGrassHash(ix,iz,31)-.5)*.65;
+    const z=iz*2.0+(m3dPripyatGrassHash(ix,iz,32)-.5)*.65;
+    const r=Math.hypot(x+10,z+31.1);
+    if(r>cfg.nearRadius)continue;
+    // Never fill a road or the manually paved city centre.
+    if(x>-65&&x<112&&z>-89&&z<105)continue;
+    if(m3dPripyatInsideUrbanBuilding(x,z,1.4))continue;
+    if(m3dPripyatGrassHash(ix,iz,33)>.38)continue;
+    if(m3dPripyatNearVerifiedRoad(x,z,.8))continue;
+    add(x,z,cfg.peripheryBaseY,.25+.49*m3dPripyatGrassHash(ix,iz,34),'lawn');
+  }
+  return sites;
+}
+function m3dBuildPripyatGroundGrass({meshTriangle},sites=m3dPripyatGroundGrassSites()){
+  // Three crossed, irregular blades per tuft, two-sided triangles to avoid
+  // back-face disappearance on orbiting cameras. No alpha-test dependence.
+  let triangles=0;
+  const tri=(a,b,c,material)=>{
+    const u=[b[0]-a[0],b[1]-a[1],b[2]-a[2]];
+    const v=[c[0]-a[0],c[1]-a[1],c[2]-a[2]];
+    let nx=u[1]*v[2]-u[2]*v[1],ny=u[2]*v[0]-u[0]*v[2],nz=u[0]*v[1]-u[1]*v[0];
+    const inv=1/Math.max(1e-6,Math.hypot(nx,ny,nz));
+    nx*=inv;ny*=inv;nz*=inv;
+    const uv=[[0,0],[1,0],[.5,1]],verts=[a,b,c];
+    meshTriangle(...verts.map((p,i)=>({p,n:[nx,ny,nz],uv:uv[i]})),material);
+    meshTriangle(...[c,b,a].map((p,i)=>({p,n:[-nx,-ny,-nz],uv:uv[i]})),material);
+    triangles+=2;
+  };
+  for(let i=0;i<sites.length;i++){
+    const q=sites[i],seedX=Math.round(q.x*113),seedZ=Math.round(q.z*131);
+    for(let k=0;k<M3D_PRIPYAT_GRASS_LAYER.bladesPerPatch;k++){
+      const angle=k*2.39996+m3dPripyatGrassHash(seedX,seedZ,41)*6.28318;
+      const radius=.025+.12*m3dPripyatGrassHash(seedX,seedZ,k+42);
+      const cx=q.x+Math.cos(angle)*radius,cz=q.z+Math.sin(angle)*radius;
+      const width=.020+.026*m3dPripyatGrassHash(seedX,seedZ,k+51);
+      const height=q.h*(.66+.56*m3dPripyatGrassHash(seedX,seedZ,k+61));
+      const sway=.13+.26*m3dPripyatGrassHash(seedX,seedZ,k+71);
+      const px=-Math.sin(angle),pz=Math.cos(angle),dx=Math.cos(angle),dz=Math.sin(angle);
+      const left=[cx-px*width,q.y,cz-pz*width];
+      const right=[cx+px*width,q.y,cz+pz*width];
+      const tip=[cx+dx*sway*height,q.y+height,cz+dz*sway*height];
+      tri(left,right,tip,k%3===0?'leaves':'grass');
+    }
+  }
+  return {patches:sites.length,triangles};
+}
+
 function makeScene() {
   objects.length = 0;
   // The exporter owns the call to makeScene(). Reset local lights too so
@@ -1456,12 +1590,10 @@ function makeScene() {
       ellipsoidMesh(bx,cy+.30,bz,.43,h*.13,.36,'leaves',7,5);
     }
   }
-  // Weed tufts along joints, curbs and beneath trees.
-  for (let x=-49;x<=49;x+=7) for (let z=-12;z<=59;z+=9) {
-    const dx=((x*13+z*7)%5)*0.12, dz=((x*3-z*11)%5)*0.12;
-    ellipsoidMesh(x+dx,0.22,z+dz,0.38,0.28,0.34,'grass',8,6);
-    for (let k=0;k<3;k++) capsule([x+dx,0.08,z+dz],[x+dx+(k-1)*0.15,0.52+(k%2)*0.18,z+dz+0.04],0.035,'leaves');
-  }
+  // Replace isolated green spheres with actual blades that intersect the
+  // correct surfaces (paving cracks, curbs, planters, exterior grassland).
+  // This layer remains a pure geometry export, not a renderer modification.
+  m3dBuildPripyatGroundGrass({meshTriangle});
 
   // Soviet-era street lamps with intact and broken fittings.
   function lamp(x,z,broken=false) {
