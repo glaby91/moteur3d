@@ -91,7 +91,13 @@ struct ComputeCache {
   wchar_t exe[MAX_PATH]{};GetModuleFileNameW(nullptr,exe,MAX_PATH);
   const auto shaderPath=std::filesystem::path(exe).parent_path()/L"shaders"/L"m3d_raytrace_compute.hlsl";
   ComPtr<ID3DBlob> code,diag;
-  hr=D3DCompileFromFile(shaderPath.c_str(),nullptr,D3D_COMPILE_STANDARD_FILE_INCLUDE,
+  // Explicit opt-in benchmark variant: image quality is protected by
+  // leaving the original BVH traversal active until both output and speed
+  // are validated on the actual Pripyat scene.
+  wchar_t bvhMode[4]{};
+  const bool nearFirst=GetEnvironmentVariableW(L"M3D_BVH_NEAR_FIRST",bvhMode,4)==1 && bvhMode[0]==L'1';
+  const D3D_SHADER_MACRO macros[]={{"M3D_NEAR_FIRST",nearFirst?"1":"0"},{nullptr,nullptr}};
+  hr=D3DCompileFromFile(shaderPath.c_str(),macros,D3D_COMPILE_STANDARD_FILE_INCLUDE,
       "CSMain","cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&code,&diag);
   if(FAILED(hr)){
    error=L"Shader Compute PBR invalide : "+shaderPath.wstring();
