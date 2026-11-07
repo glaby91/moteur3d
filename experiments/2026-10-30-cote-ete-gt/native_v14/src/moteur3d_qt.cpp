@@ -542,6 +542,26 @@ private:
     QLabel* status_ = nullptr;
 };
 
+
+// Independent, non-modal render viewport. Main window keeps all controls and
+// its embedded preview; the second window receives exactly the same CPU/GPU
+// frame without starting a second render or copying scene geometry.
+class DetachedRenderWindow final : public QDialog {
+public:
+    explicit DetachedRenderWindow(QWidget* parent=nullptr):QDialog(parent,Qt::Window){
+        setWindowTitle(QStringLiteral("Moteur3D — Rendu indépendant"));
+        auto* layout=new QVBoxLayout(this);
+        layout->setContentsMargins(6,6,6,6);
+        view_=new ImageView(this);
+        view_->setMinimumSize(640,360);
+        layout->addWidget(view_,1);
+        resize(1280,760);
+    }
+    void setFrame(const QImage& frame){if(view_)view_->setFrame(frame);}
+private:
+    ImageView* view_=nullptr;
+};
+
 class MainWindow final : public QMainWindow {
 public:
     explicit MainWindow(Scene loadedScene, QString scenePath) : scene_(std::move(loadedScene)), currentScenePath_(std::move(scenePath)) {
@@ -563,6 +583,11 @@ public:
         auto* openScene = fileMenu->addAction(QStringLiteral("Ouvrir une scène…"));
         connect(openScene, &QAction::triggered, this, [this] { openSceneFile(); });
         auto* toolsMenu = menuBar()->addMenu(QStringLiteral("Outils"));
+        auto* separateView = toolsMenu->addAction(QStringLiteral("Ouvrir la deuxième fenêtre de rendu"));
+        connect(separateView,&QAction::triggered,this,[this]{
+            if(!detachedRender_)detachedRender_=new DetachedRenderWindow(this);
+            detachedRender_->show();detachedRender_->raise();detachedRender_->activateWindow();
+        });
         benchmarkAction_ = toolsMenu->addAction(QStringLiteral("Benchmark du moteur…"));
         connect(benchmarkAction_, &QAction::triggered, this, [this] { openBenchmark(); });
         updateLighting(12.f);
@@ -600,6 +625,7 @@ private:
     std::thread benchmarkThread_;
     bool stopping_ = false, pending_ = false, benchmarking_ = false;
     ImageView* image_ = nullptr;
+    DetachedRenderWindow* detachedRender_ = nullptr;
     QLabel *status_ = nullptr, *stats_ = nullptr, *hourLabel_ = nullptr, *threadLabel_ = nullptr;
     QComboBox *resolution_ = nullptr, *renderer_ = nullptr, *quality_ = nullptr, *simdMode_ = nullptr;
     QLabel* rendererStatus_ = nullptr;
@@ -1494,6 +1520,7 @@ private:
                     }
                 } else {
                     image_->setFrame(image);
+                    if(detachedRender_ && detachedRender_->isVisible()) detachedRender_->setFrame(image);
                     status_->setText(QStringLiteral("Terminé — ") + QString::fromWCharArray(M3D_RELEASE_ID_WIDE) + QStringLiteral(" — ") + QString::number(hourValue) + QStringLiteral(" h"));
                 }
             }, Qt::QueuedConnection);
