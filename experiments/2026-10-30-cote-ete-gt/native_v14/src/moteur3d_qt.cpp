@@ -875,12 +875,14 @@ private:
         resolution_ = new QComboBox(panel);
         resolution_->addItems({QStringLiteral("Vostro — 1366 × 768"), QStringLiteral("Full HD — 1920 × 1080"), QStringLiteral("1600 × 900"), QStringLiteral("1280 × 720"), QStringLiteral("4K UHD — 3840 × 2160")});
         renderer_ = new QComboBox(panel);
-        renderer_->addItems({QStringLiteral("Auto — DXR si renderer disponible, sinon CPU"), QStringLiteral("CPU — ray tracing logiciel complet"), QStringLiteral("GPU — DirectX 11 (aperçu raster)"), QStringLiteral("GPU — Compute D3D11 (normales expérimentales)")});
+        renderer_->addItems({QStringLiteral("Auto — DXR si renderer disponible, sinon CPU"), QStringLiteral("CPU — ray tracing logiciel complet"), QStringLiteral("GPU — DirectX 11 (aperçu raster)"), QStringLiteral("GPU — Compute D3D11 (ray tracing expérimental)")});
         renderer_->setCurrentIndex(0);
-        renderer_->setToolTip(QStringLiteral("Le mode Auto utilise DXR seulement si le GPU et un backend DXR du moteur sont disponibles; sinon le rendu complet reste sur CPU. DirectX 11 est un aperçu raster optionnel."));
+        renderer_->setToolTip(QStringLiteral("Auto : CPU tant que DXR n’est pas disponible. GPU DirectX 11 : raster. GPU Compute D3D11 : ray tracing BVH sans DXR, aperçu avec albédo moyen et éclairage simplifié. Repli CPU si erreur."));
 #ifndef _WIN32
         renderer_->setItemData(2, 0, Qt::UserRole - 1);
         renderer_->setItemData(2, QStringLiteral("DirectX 11 est disponible uniquement sous Windows."), Qt::ToolTipRole);
+        renderer_->setItemData(3, 0, Qt::UserRole - 1);
+        renderer_->setItemData(3, QStringLiteral("GPU Compute D3D11 disponible uniquement sous Windows."), Qt::ToolTipRole);
 #endif
         quality_ = new QComboBox(panel);
         quality_->addItems({QStringLiteral("Natif — 100 %"), QStringLiteral("Équilibré — 87,5 % par axe"), QStringLiteral("Détails — 75 % par axe"), QStringLiteral("Rapide — 66,7 % par axe"), QStringLiteral("Très rapide — 50 % par axe"), QStringLiteral("FSAA 16× — motif stratifié 4×4"), QStringLiteral("Haute définition — 2× interne (SSAA CPU)"), QStringLiteral("CPU hors-ligne PBR/HDR — 64 spp / 3 rebonds")});
@@ -1319,6 +1321,7 @@ private:
         settings_.directX11 = renderer_->currentIndex() == 2 && !settings_.offlinePathTrace;
         settings_.compute11 = renderer_->currentIndex() == 3 && !settings_.offlinePathTrace;
         if (rendererStatus_ && qi == 7) rendererStatus_->setText(QStringLiteral("CPU hors-ligne PBR/HDR — 64 spp, 3 rebonds et débruitage."));
+        else if (rendererStatus_ && settings_.compute11) rendererStatus_->setText(QStringLiteral("GPU Compute D3D11 : rayons BVH sur GPU, matériaux simplifiés; repli CPU si échec. DXR non requis."));
         if (navigationPreviewTimer_) navigationPreviewTimer_->setInterval(settings_.directX11 ? 50 : 350);
         threads_->setEnabled(!(settings_.directX11 || settings_.compute11));
         simdMode_->setEnabled(!(settings_.directX11 || settings_.compute11));
@@ -1504,7 +1507,7 @@ private:
             sceneLock.unlock();
             QString diag;
             if (st.gpu && cfg.compute11) {
-                diag = QStringLiteral("GPU Compute D3D11 — ray tracing expérimental | calcul %1 ms | total %2 ms\nPrévisualisation des normales; éclairage et PBR complets non implémentés.").arg(st.ms-st.postMs,0,'f',1).arg(st.ms,0,'f',1);
+                diag = QStringLiteral("GPU Compute D3D11 — ray tracing expérimental | calcul %1 ms | total %2 ms\nAlbédo moyen et éclairage simplifié; UV/PBR et réflexions complètes non implémentés.").arg(st.ms-st.postMs,0,'f',1).arg(st.ms,0,'f',1);
             } else if (st.gpu) {
                 diag = QStringLiteral("GPU DirectX 11 — aperçu raster | rendu %1 ms | post %2 ms | total %3 ms\nGéométrie rasterisée : %4 triangles\nCarte d’ombres CPU réutilisée; DOF, réflexions et réfraction restent simplifiées.")
                     .arg(st.ms - st.postMs, 0, 'f', 1).arg(st.postMs, 0, 'f', 1).arg(st.ms, 0, 'f', 1).arg(qulonglong(st.tests));
