@@ -828,22 +828,23 @@ function makeScene() {
   box(25.3,9.4,-22.2,27.0,13.3,-21.0,'rust');
   box(21.7,12.0,-22.2,25.3,13.3,-21.0,'concrete');
 
-  // Roof access, low parapet, vents, weeds, and an open atrium that admits direct sun.
-  box(-49.2,9.4,-42.2,-15,9.7,-20.1,'concrete');
-  box(-15,9.4,-42.2,8,9.7,-35.8,'concrete');
-  box(-15,9.4,-26.5,8,9.7,-20.1,'concrete');
-  box(-15,9.4,-35.8,-7,9.7,-26.5,'concrete');
-  box(6,9.4,-35.8,8,9.7,-26.5,'concrete');
-  box(8,9.4,-42.2,18,9.7,-20.1,'concrete');
-  box(18,9.4,-42.2,20,9.7,-20.1,'concrete');
-  box(27,9.4,-42.2,29.2,9.7,-20.1,'concrete');
-  box(20,9.4,-42.2,27,9.7,-38,'concrete');
-  box(20,9.4,-23,27,9.7,-20.1,'concrete');
+  // Roof access: height driven by shared datum, retaining the existing materials.
+  const mainRoofY=archLevels.roof, roofDeckTop=mainRoofY+0.30;
+  box(-49.2,mainRoofY,-42.2,-15,roofDeckTop,-20.1,'concrete');
+  box(-15,mainRoofY,-42.2,8,roofDeckTop,-35.8,'concrete');
+  box(-15,mainRoofY,-26.5,8,roofDeckTop,-20.1,'concrete');
+  box(-15,mainRoofY,-35.8,-7,roofDeckTop,-26.5,'concrete');
+  box(6,mainRoofY,-35.8,8,roofDeckTop,-26.5,'concrete');
+  box(8,mainRoofY,-42.2,18,roofDeckTop,-20.1,'concrete');
+  box(18,mainRoofY,-42.2,20,roofDeckTop,-20.1,'concrete');
+  box(27,mainRoofY,-42.2,29.2,roofDeckTop,-20.1,'concrete');
+  box(20,mainRoofY,-42.2,27,roofDeckTop,-38,'concrete');
+  box(20,mainRoofY,-23,27,roofDeckTop,-20.1,'concrete');
   for(const [x0,x1,z0,z1] of [[-49.2,29.2,-42.2,-41.2],[-49.2,29.2,-20.4,-19.6],[-49.2,-48.3,-42.2,-20.0],[28.3,29.2,-42.2,-20.0]])
-    box(x0,9.7,z0,x1,10.55,z1,'concrete');
+    box(x0,roofDeckTop,z0,x1,roofDeckTop+0.85,z1,'concrete');
   for(const [x,z,h] of [[-36,-38,1.2],[-7,-40,1.8],[12,-22,1.1],[17,-39,1.4]])
-    box(x,9.7,z,x+1.4,9.7+h,z+1.2,'rust');
-  for(let x=-44;x<27;x+=9) ellipsoidMesh(x,9.85,-20.8,1.0,0.12,0.55,'grass',8,6);
+    box(x,roofDeckTop,z,x+1.4,9.7+h,z+1.2,'rust');
+  for(let x=-44;x<27;x+=9) ellipsoidMesh(x,mainRoofY+0.45,-20.8,1.0,0.12,0.55,'grass',8,6);
 
   // Separate reusable Polissya building module. Historical geometry still pending survey.
   m3dBuildPolissya({box,capsule});
