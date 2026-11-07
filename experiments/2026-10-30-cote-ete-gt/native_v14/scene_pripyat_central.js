@@ -60,7 +60,10 @@ const M3D_ENERGETIK_ARCH = Object.freeze({
   rearWindowWidth:3.5,
   // Rear sports wing; dimensions are provisional, physically joined at the
   // main building's north (-Z) wall. Its glazing faces the amusement park.
-  sports: Object.freeze({x0:-47,x1:-7,z0:-68.9,z1:-42.7,floorY:0.40,height:11.4,
+  sports: Object.freeze({x0:-47,x1:-3,z0:-68.9,z1:-42.7,floorY:0.40,height:11.4,
+    // 40 x 20 m marked court plus minimum 2 m ends / 1 m sides;
+    // clear-span 44 x 26 m is a DESIGN HYPOTHESIS, not surveyed Energetik.
+    courtLength:40,courtWidth:20,clearEnd:2,clearSide:3,
     doorwayLeft:-14.05,doorwayRight:-11.5,doorTop:2.65}),
   tower: Object.freeze({roofY:14.0})
 });
@@ -86,6 +89,8 @@ function m3dCheckEnergetikDatum(a=M3D_ENERGETIK_ARCH){
   // it must never be an independent block across an exterior courtyard.
   if(!(g.x0>=e.x0 && g.x1<=e.x1 && g.z0<e.z0-10 &&
        g.z1>e.z0 && g.z1<e.z0+1.2 &&
+       g.x1-g.x0>=g.courtLength+2*g.clearEnd &&
+       g.z1-g.z0>=g.courtWidth+2*g.clearSide &&
        g.doorwayLeft>=g.x0 && g.doorwayRight<=g.x1 &&
        g.doorwayRight-g.doorwayLeft>=2 && g.doorTop>2.1))
     throw new Error('Energetik: sports wing must attach to the rear wall');
@@ -208,10 +213,12 @@ function m3dBuildFoyerMuralArcade({box}, a=M3D_ENERGETIK_ARCH) {
 // Existing scene material slots remain untouched; gym materials are additive.
 function m3dBuildSportsClub({box,capsule,meshTriangle},g=M3D_ENERGETIK_ARCH.sports){
   const {x0,x1,z0,z1,floorY,height}=g;
-  if(!(x1-x0>=38 && z1-z0>=24 && height>9.5))
+  if(!(x1-x0>=g.courtLength+2*g.clearEnd &&
+       z1-z0>=g.courtWidth+2*g.clearSide && height>9.5))
     throw new Error('Sports club: insufficient clear span / height');
   const top=floorY+height;
-  // 40 x 26 m standalone rectangular volume. No solid volume fills the hall.
+  // Connected rear wing, with a 44 x 26 m provisional clear hall and a
+  // 40 x 20 m marked multi-sport court. No opaque solid fills the volume.
   box(x0,-0.06,z0,x1,floorY-0.02,z1,'concrete');
   box(x0,floorY-0.02,z0,x1,floorY,z1,'wood');
   // One UV-controlled full-court atlas, photographed colour distribution and
