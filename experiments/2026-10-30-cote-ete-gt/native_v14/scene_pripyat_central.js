@@ -34,12 +34,29 @@ const M3D_PRIPYAT_BLOCKOUT = Object.freeze({
     {id:'east-north',x0:47,z0:18,x1:60,z1:50,floors:6,frontZ:18}
   ]
 });
+// Historical typology for comparison only. This is a later documented
+// refurbishment of the 2C-06-9/70 standard design, NOT a measured set of
+// as-built dimensions for the modified Pripyat palace. Never automatically
+// resize the real scene to match the prototype; preserve the adapted facade,
+// gym wing, halls and openings until photographs + measured plans confirm them.
+const M3D_ENERGETIK_TYPE_1970 = Object.freeze({
+  project:'2C-06-9/70',revisionYear:1970,
+  planAxesMetres:Object.freeze({length:81.3,depth:30.4}),
+  auditorium:Object.freeze({span:24,depth:18,clearHeight:11.6,refurbishedSeats:720}),
+  flyTower:Object.freeze({height:21,stageSpan:18.3,stageDepth:18}),
+  foyerAreaSqM:540.6,
+  sources:Object.freeze([
+    'https://photobuildings.com/projects/2736',
+    'https://proekt.sx/tip/dk781-detail.html'
+  ])
+});
 // Single architectural datum for Energetik. Values are provisional until
 // measured plans and matched photo viewpoints establish historical dimensions.
 // Coordinates are world metres; Y=0 is the ground-floor reference.
 const M3D_ENERGETIK_ARCH = Object.freeze({
   origin: Object.freeze({x:0,y:0,z:0}),
   envelope: M3D_PRIPYAT_BLOCKOUT.energetik,
+  typeProject: M3D_ENERGETIK_TYPE_1970,
   levels: Object.freeze({
     ground:0.38, firstSlab:3.25, secondSlab:6.35,
     slabThickness:0.24, roof:9.4
