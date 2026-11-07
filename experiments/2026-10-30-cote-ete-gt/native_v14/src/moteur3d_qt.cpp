@@ -180,7 +180,10 @@ struct BenchmarkRow {
 };
 
 struct BenchmarkPass { unsigned threads = 1; bool avx2 = false, gpu = false; };
-struct GpuBusySample { int frame=0; double systemPct=-1., processPct=-1.; };
+struct GpuBusySample {
+    int frame=0; double systemPct=-1.,processPct=-1.;
+    double totalMs=0.,gpuKernelMs=-1.,submitCpuMs=0.,readbackWallMs=0.;
+};
 
 class BenchmarkDialog final : public QDialog {
 public:
@@ -293,6 +296,7 @@ public:
     void setProgress(int value, const QString& text) { progress_->setValue(value); status_->setText(text); }
     void setGpuReport(std::vector<GpuBusySample> samples, unsigned frames, int width, int height) {
         gpuBusySamples_ = std::move(samples); gpuRenderedFrames_ = frames;
+        width_=width;height_=height;
         gpuReportAvailable_ = !gpuBusySamples_.empty();
         rows_.clear(); table_->setVisible(false);
         double sumSystem=0.,sumProcess=0.,maxSystem=0.,maxProcess=0.;
@@ -1323,9 +1327,11 @@ autorisation générale de reproduction ni une preuve d'implantation exacte.</p>
                         cam.focusDistance=cfg.distance;cam.apertureRadius=0.f;
                         cam.pixelAngle=2*cam.tanHalf/std::max(1,cfg.renderW);
                         auto lastSample=std::chrono::steady_clock::now()-std::chrono::milliseconds(250);
+                        // Persistent framebuffer: no repeated 1366x768 / 4K allocation.
+                        std::vector<uint32_t> pixels;
+                        pixels.reserve(size_t(cfg.renderW)*size_t(cfg.renderH));
                         for(int i=-1;i<frameCount;i++){
                             if(benchmarkGeneration_.load()!=token)break;
-                            std::vector<uint32_t> pixels;
                             Stats st{};
                             std::wstring error;
                             if(!renderCompute11Preview(scene_,cam,cfg.renderW,cfg.renderH,pixels,st,error)) {
@@ -1334,6 +1340,10 @@ autorisation générale de reproduction ni une preuve d'implantation exacte.</p>
                             if(i>=0){
                                 GpuBusySample item{};
                                 item.frame=i+1;
+                                item.totalMs=st.ms;
+                                item.gpuKernelMs=st.gpuKernelMs;
+                                item.submitCpuMs=st.gpuSubmitCpuMs;
+                                item.readbackWallMs=st.gpuReadbackWallMs;
                                 const auto now=std::chrono::steady_clock::now();
                                 if(now-lastSample>=std::chrono::milliseconds(200)){
                                     const auto load=meter.sample();
