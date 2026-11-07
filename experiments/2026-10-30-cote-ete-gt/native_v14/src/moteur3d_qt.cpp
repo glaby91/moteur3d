@@ -67,7 +67,7 @@ struct RenderSettings {
     bool navigationPreview = false;
     unsigned threads = std::max(1u, std::thread::hardware_concurrency()), samples = 1;
     bool avx2 = false;
-    bool directX11 = false, offlinePathTrace = false;
+    bool directX11 = false, compute11 = false, offlinePathTrace = false;
     unsigned pathBounces = 3;
     int hourStep = 4;
     bool fog = false, dof = false, edgeAa = true, dust = true, videoPreview = false;
@@ -875,12 +875,14 @@ private:
         resolution_ = new QComboBox(panel);
         resolution_->addItems({QStringLiteral("Vostro — 1366 × 768"), QStringLiteral("Full HD — 1920 × 1080"), QStringLiteral("1600 × 900"), QStringLiteral("1280 × 720"), QStringLiteral("4K UHD — 3840 × 2160")});
         renderer_ = new QComboBox(panel);
-        renderer_->addItems({QStringLiteral("Auto — DXR si renderer disponible, sinon CPU"), QStringLiteral("CPU — ray tracing logiciel complet"), QStringLiteral("GPU — DirectX 11 (aperçu raster)")});
+        renderer_->addItems({QStringLiteral("Auto — DXR si renderer disponible, sinon CPU"), QStringLiteral("CPU — ray tracing logiciel complet"), QStringLiteral("GPU — DirectX 11 (aperçu raster)"), QStringLiteral("GPU — Compute D3D11 (ray tracing expérimental)")});
         renderer_->setCurrentIndex(0);
-        renderer_->setToolTip(QStringLiteral("Le mode Auto utilise DXR seulement si le GPU et un backend DXR du moteur sont disponibles; sinon le rendu complet reste sur CPU. DirectX 11 est un aperçu raster optionnel."));
+        renderer_->setToolTip(QStringLiteral("Auto : CPU tant que DXR n’est pas disponible. GPU DirectX 11 : raster. GPU Compute D3D11 : ray tracing BVH sans DXR, aperçu avec albédo moyen et éclairage simplifié. Repli CPU si erreur."));
 #ifndef _WIN32
         renderer_->setItemData(2, 0, Qt::UserRole - 1);
         renderer_->setItemData(2, QStringLiteral("DirectX 11 est disponible uniquement sous Windows."), Qt::ToolTipRole);
+        renderer_->setItemData(3, 0, Qt::UserRole - 1);
+        renderer_->setItemData(3, QStringLiteral("GPU Compute D3D11 disponible uniquement sous Windows."), Qt::ToolTipRole);
 #endif
         quality_ = new QComboBox(panel);
         quality_->addItems({QStringLiteral("Natif — 100 %"), QStringLiteral("Équilibré — 87,5 % par axe"), QStringLiteral("Détails — 75 % par axe"), QStringLiteral("Rapide — 66,7 % par axe"), QStringLiteral("Très rapide — 50 % par axe"), QStringLiteral("FSAA 16× — motif stratifié 4×4"), QStringLiteral("Haute définition — 2× interne (SSAA CPU)"), QStringLiteral("CPU hors-ligne PBR/HDR — 64 spp / 3 rebonds")});
@@ -1317,13 +1319,15 @@ private:
         const int qi = quality_->currentIndex();
         settings_.offlinePathTrace = qi == 7;
         settings_.directX11 = renderer_->currentIndex() == 2 && !settings_.offlinePathTrace;
+        settings_.compute11 = renderer_->currentIndex() == 3 && !settings_.offlinePathTrace;
         if (rendererStatus_ && qi == 7) rendererStatus_->setText(QStringLiteral("CPU hors-ligne PBR/HDR — 64 spp, 3 rebonds et débruitage."));
+        else if (rendererStatus_ && settings_.compute11) rendererStatus_->setText(QStringLiteral("GPU Compute D3D11 : rayons BVH sur GPU, matériaux simplifiés; repli CPU si échec. DXR non requis."));
         if (navigationPreviewTimer_) navigationPreviewTimer_->setInterval(settings_.directX11 ? 50 : 350);
-        threads_->setEnabled(!settings_.directX11);
-        simdMode_->setEnabled(!settings_.directX11);
-        fog_->setEnabled(!settings_.directX11);
-        dof_->setEnabled(!settings_.directX11);
-        const float scale = qi == 7 ? 1.f : qi == 6 && !settings_.directX11 ? 2.f : qi == 0 ? 1.f : qi == 1 ? .875f : qi == 2 ? .75f : qi == 3 ? (2.f / 3.f) : qi == 4 ? .5f : 1.f;
+        threads_->setEnabled(!(settings_.directX11 || settings_.compute11));
+        simdMode_->setEnabled(!(settings_.directX11 || settings_.compute11));
+        fog_->setEnabled(!(settings_.directX11 || settings_.compute11));
+        dof_->setEnabled(!(settings_.directX11 || settings_.compute11));
+        const float scale = qi == 7 ? 1.f : qi == 6 && !(settings_.directX11 || settings_.compute11) ? 2.f : qi == 0 ? 1.f : qi == 1 ? .875f : qi == 2 ? .75f : qi == 3 ? (2.f / 3.f) : qi == 4 ? .5f : 1.f;
         settings_.renderW = int(std::lround(settings_.outW * scale));
         settings_.renderH = int(std::lround(settings_.outH * scale));
         settings_.samples = qi == 7 ? 64u : qi == 5 ? 16u : 1u;
@@ -1380,7 +1384,9 @@ private:
         settings_.fog = fog_->isChecked();
         settings_.dof = dof_->isChecked() && !settings_.navigationPreview && !video;
         settings_.dust = dust_->isChecked();
-        threadLabel_->setText(settings_.directX11
+        threadLabel_->setText(settings_.compute11
+            ? QStringLiteral("D3D11 Compute — ray tracing expérimental")
+            : settings_.directX11
             ? QStringLiteral("DirectX 11 — affichage temps réel")
             : QStringLiteral("Threads CPU : %1 — SIMD : %2").arg(settings_.threads).arg(settings_.avx2 ? QStringLiteral("AVX2 + FMA3") : QStringLiteral("x64 standard")));
     }
@@ -1429,7 +1435,7 @@ private:
     void requestRender() {
         generation_.fetch_add(1);
         bool gpu=false;
-        { std::lock_guard<std::mutex> lock(requestMutex_); pending_ = true; gpu=settings_.directX11; }
+        { std::lock_guard<std::mutex> lock(requestMutex_); pending_ = true; gpu=settings_.directX11||settings_.compute11; }
         status_->setText(gpu ? QStringLiteral("Aperçu GPU DirectX 11 en cours…") : QStringLiteral("Rendu CPU en cours…"));
         requestCv_.notify_one();
     }
@@ -1467,7 +1473,13 @@ private:
             if (cfg.dof && samples < 4) samples = 4;
             Stats st{};
             QString fallbackNotice;
-            if (cfg.directX11) {
+            if (cfg.compute11) {
+                std::wstring gpuError;
+                if (!renderCompute11Preview(scene_, cam, cfg.renderW, cfg.renderH, pixels, st, gpuError)) {
+                    fallbackNotice = QStringLiteral("Compute GPU indisponible — rendu CPU de secours : ") + QString::fromWCharArray(gpuError.c_str());
+                    st = m3d::render(scene_, shadows_, cam, cfg.renderW, cfg.renderH, pixels, cfg.threads, cfg.fog, generation_, token, samples, cfg.dof, cfg.avx2, cfg.offlinePathTrace, cfg.pathBounces);
+                }
+            } else if (cfg.directX11) {
                 std::wstring gpuError;
                 if (!renderDirectX11Preview(scene_, shadows_, cam, cfg.renderW, cfg.renderH, pixels, st, gpuError)) {
                     fallbackNotice = QStringLiteral("DirectX indisponible — rendu CPU de secours : ") + QString::fromWCharArray(gpuError.c_str());
@@ -1494,7 +1506,9 @@ private:
             const auto objectCount = scene_.obj.size();
             sceneLock.unlock();
             QString diag;
-            if (st.gpu) {
+            if (st.gpu && cfg.compute11) {
+                diag = QStringLiteral("GPU Compute D3D11 — ray tracing expérimental | calcul %1 ms | total %2 ms\nAlbédo moyen et éclairage simplifié; UV/PBR et réflexions complètes non implémentés.").arg(st.ms-st.postMs,0,'f',1).arg(st.ms,0,'f',1);
+            } else if (st.gpu) {
                 diag = QStringLiteral("GPU DirectX 11 — aperçu raster | rendu %1 ms | post %2 ms | total %3 ms\nGéométrie rasterisée : %4 triangles\nCarte d’ombres CPU réutilisée; DOF, réflexions et réfraction restent simplifiées.")
                     .arg(st.ms - st.postMs, 0, 'f', 1).arg(st.postMs, 0, 'f', 1).arg(st.ms, 0, 'f', 1).arg(qulonglong(st.tests));
             } else {
@@ -1533,6 +1547,15 @@ private:
 }
 
 int main(int argc, char** argv) {
+    if (argc >= 2 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--validate-compute-hlsl")) {
+        std::wstring error;
+        if (m3d::validateCompute11Shader(error)) {
+            std::cout << "HLSL Compute Shader Model 5.0: compilation OK" << std::endl;
+            return 0;
+        }
+        std::wcerr << L"Erreur de validation HLSL : " << error << std::endl;
+        return 12;
+    }
     // Non-GUI CPU snapshots for reproducible GitHub Actions geometry inspection.
     // Usage: moteur3d_qt.exe --snapshot <view 1..11> <output.png>
     if (argc >= 4 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--snapshot")) {

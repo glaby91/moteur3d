@@ -7,6 +7,7 @@ on:
       - pripiat
       - feature/pripyat-catalog-assets-261105
       - feature/pripyat-square-survey-measurements-261107
+      - feature/pripyat-compute-d3d11-261107
     paths:
       - experiments/2026-10-30-cote-ete-gt/native_v14/CMakeLists.txt
       - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
@@ -24,6 +25,7 @@ on:
       - experiments/2026-10-30-cote-ete-gt/native_v14/tools/generate_energetik_fresco_map.py
       - experiments/2026-10-30-cote-ete-gt/native_v14/tools/export_energetik_fresco_glb.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/**
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/shaders/**
       - experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_views.json
       - experiments/2026-10-30-cote-ete-gt/native_v14/source_v1314.html
       - experiments/2026-10-30-cote-ete-gt/native_v14/src/moteur3d_qt.cpp
@@ -98,6 +100,7 @@ jobs:
           node experiments/pripyat-survey/test-energetik-sports-wing.mjs
           node experiments/pripyat-survey/test-energetik-origin-and-court.mjs
           node experiments/pripyat-survey/test-pripyat-ferris-wheel.mjs
+          node experiments/pripyat-survey/test-compute-camera-projection.mjs
 
       - name: Export runtime scenes
         shell: bash
@@ -131,6 +134,8 @@ jobs:
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: |
           cmake --install build --config Release --prefix dist
+          mkdir -p dist/shaders
+          cp src/shaders/m3d_raytrace_compute.hlsl dist/shaders/
           cp scene_pripyat_central.bin scene_pripyat_central.js scene_pripyat_views.json scene_pripyat_wheel_mechanism.json scene_energetik_seat_preview.bin scene_energetik_seat_preview.js scene_energetik_seat_preview.assets.json scene_pripyat_facade_bay.bin scene_pripyat_facade_bay.js assets/pripyat/energetik_roof_neon_sign.js assets/pripyat/energetik_roof_neon_sign.asset.json README.md dist/
           mkdir -p dist/assets/pripyat
           cp assets/pripyat/energetik_facade_bay.glb assets/pripyat/energetik_facade_bay.asset.json dist/assets/pripyat/
@@ -145,6 +150,14 @@ jobs:
         if: runner.os == 'Windows'
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: windeployqt --release --compiler-runtime --dir dist dist/moteur3d_qt.exe
+
+      - name: Validate D3D11 Compute Shader Model 5.0
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          & "./dist/moteur3d_qt.exe" --validate-compute-hlsl
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Render all eleven photographic inspection views on CPU
         if: runner.os == 'Windows'

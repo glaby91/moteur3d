@@ -1,0 +1,90 @@
+MOTEUR 3D — PRIPYAT
+JOURNAL DES MODIFICATIONS / AJOUTS / FONCTIONNALITES
+Date : 07 novembre 2026
+Branche cible : feature/pripyat-compute-d3d11-261107
+Base : feature/pripyat-square-survey-measurements-261107
+Prototype récupéré : integration/moteur3d-unified-v15
+
+BUT
+Intégrer le lancer de rayons GPU par Compute Shader HLSL (Direct3D 11)
+sans DXR, tout en conservant le ray tracing CPU de référence,
+le rendu raster DirectX 11, les caméras et les deux fenêtres Qt.
+
+FICHIERS AJOUTES
+- experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_compute11.cpp
+  Backend C++ Windows : upload BVH / primitives / albédo moyen, création
+  Direct3D 11, compilation dynamique du HLSL cs_5_0, dispatch en 8x8,
+  lecture de l'image GPU et diagnostics en cas d'erreur.
+- experiments/2026-10-30-cote-ete-gt/native_v14/src/shaders/m3d_raytrace_compute.hlsl
+  Noyau GPU de rayons primaires. Intersections analytiques :
+  triangle, boîte, boîte arrondie, capsule, cône et ellipsoïde.
+  Parcours BVH, normales, albédo moyen, lumière solaire simple.
+  Un dépassement de pile ou de parcours BVH produit du magenta.
+- docs/pripyat/CHANGEMENTS_COMPUTE_HLSL_261107.txt
+  Ce journal versionné.
+
+FICHIERS MODIFIES
+- m3d_engine.h : déclaration publique renderCompute11Preview().
+- CMakeLists.txt : compilation de m3d_compute11.cpp et installation HLSL.
+- src/moteur3d_qt.cpp : nouveau choix « GPU — Compute D3D11 »,
+  déclenchement du backend GPU, retour CPU si échec, statut et diagnostic.
+- .github/workflows/build-moteur3d-v14-qt.yml :
+  shader ajouté au paquet Windows dans dist/shaders/ et déclenchement
+  du workflow sur modification des shaders.
+
+FONCTIONNALITES INTEGREES DANS LE CODE
+1. Nouvelle option GPU Compute indépendante de GPU raster et du CPU.
+2. Ray tracing des rayons primaires via GPU sans matériel DXR.
+3. Parcours GPU du BVH de la scène existante, sans refaire les plans.
+4. Six types géométriques couverts, donc pas de rejet global automatique
+   au premier objet non triangulaire de Pripyat.
+5. Couleur de prévisualisation dérivée de l'albédo moyen des matériaux.
+6. Eclairage directionnel solaire simplifié / spécularité approximative.
+7. Repli automatique vers le rendu CPU sur échec initialisation/compilation,
+   allocation GPU ou récupération de l'image.
+8. Conservation de la sélection des 11 caméras Energetik/Pripyat, de la
+   grande roue, du gymnase, de la fresque et des deux fenêtres de rendu.
+
+LIMITES CONNUES
+A. La sortie GPU Compute N'EST PAS le rendu CPU PBR complet.
+   Les normal maps, cartes de rugosité, UV par pixel, ombres par rayons,
+   réflexions multiples, réfraction, GI et débruitage restent à intégrer.
+B. Le rendu actuel utilise un albédo moyen par matériau, non des textures
+   détaillées échantillonnées sur le GPU.
+C. Le GPU Compute réalloue le BVH et relit le framebuffer à chaque image ;
+   optimisations de cache, d'upload et de présentation non réalisées.
+D. La pile BVH est limitée à 64 entrées; un dépassement donne du magenta.
+E. Certaines intersections analytiques, particulièrement RoundBox,
+   peuvent diverger légèrement du résultat CPU. Contrôle visuel requis.
+F. La carte HD Graphics 620 doit être testée sous Windows avec pilotes
+   D3D11 Feature Level 11_0 / Compute Shader Model 5.0.
+G. La vitesse et la fidélité ne sont pas validées sans benchmark sur
+   machine cible. Ne pas annoncer de gain ni de parité CPU/GPU.
+
+VERIFICATION / RECETTE
+- Compiler GitHub Actions Windows depuis cette branche.
+- Ouvrir scene_pripyat_central.bin ; activer GPU — Compute D3D11.
+- Tester caméra 11 (grande roue) puis caméra 06 (gymnase).
+- Comparer CPU/raster/compute à 800x600 puis 1920x1080.
+- Contrôler absence de pixels magenta et erreur dans diagnostic.
+- Comparer quelques objets boîtes, capsules, ellipsoïdes et cônes.
+- Relever temps complet, temps de dispatch, occupation GPU et mémoire.
+- Ajouter ensuite PBR par pixel, ombres et présentation directe GPU.
+
+STATUT : intégration source réalisée sur branche dédiée ;
+compilation Windows, exécution GPU sur la carte cible, tests de rendu
+et performances restent à valider et seront consignés après essais.
+
+CORRECTIF — 07/11/2026 : CADRAGE CAMERA COMMUN CPU / DIRECTX 11 / COMPUTE
+- Anomalie reproduite sur les captures camera 06 (gymnase / grande roue) :
+  le choix du backend GPU Compute élargissait artificiellement le champ.
+- Cause : le shader appliquait tanHalfFov * aspect sur l'axe horizontal,
+  au lieu de tanHalfFov sur X et tanHalfFov / aspect sur Y.
+- Modification : src/shaders/m3d_raytrace_compute.hlsl, formule des rayons
+  primaires alignée sur m3d_render.cpp et m3d_directx11.cpp.
+- Test : experiments/pripyat-survey/test-compute-camera-projection.mjs,
+  lancé également dans le workflow Windows ; résolutions 16:9, 4:3, 1:1.
+- Aucune modification de la position de la grande roue ni des presets.
+- Les écarts de matériaux, luminosité du ciel et performances Compute
+  sont des sujets distincts et restent à traiter.
+- Validation GPU réelle après recompilation Windows nécessaire.

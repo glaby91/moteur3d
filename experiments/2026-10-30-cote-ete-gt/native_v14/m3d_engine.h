@@ -54,6 +54,9 @@ Stats render(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,st
 V traceOfflineColor(const Scene& s,const ShadowMap& sm,const Camera& cam,const Ray& ray,Stats& st,bool fog,uint64_t seed,unsigned maxBounces);
 RendererCapabilities detectRendererCapabilities() noexcept;
 bool renderDirectX11Preview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
+bool renderCompute11Preview(const Scene& s,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
+// Compile the HLSL without requiring a physical GPU (CI preflight).
+bool validateCompute11Shader(std::wstring& error);
 std::vector<uint32_t> upscaleBilinear(const std::vector<uint32_t>& src,int sw,int sh,int dw,int dh,unsigned threads);
 std::vector<uint32_t> downsample2x(const std::vector<uint32_t>& src,int sw,int sh,unsigned threads);
 bool avx2FmaAvailable() noexcept;

@@ -16,6 +16,7 @@ set(M3D_CORE_SOURCES
     src/m3d_render.cpp
     src/m3d_post.cpp
     src/m3d_simd.cpp
+    src/m3d_compute11.cpp
     src/m3d_directx11.cpp
     src/m3d_dxr.cpp
     src/simd/avx2/post.cpp
@@ -46,4 +47,5 @@ else()
 endif()
 
 install(TARGETS moteur3d_qt RUNTIME DESTINATION .)
+install(FILES src/shaders/m3d_raytrace_compute.hlsl DESTINATION shaders)
 install(FILES moteur3d_v1314_scene.bin DESTINATION . OPTIONAL)
