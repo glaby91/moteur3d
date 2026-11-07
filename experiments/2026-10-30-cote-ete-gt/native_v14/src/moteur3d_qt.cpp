@@ -57,6 +57,7 @@
 #include <filesystem>
 #include <functional>
 #include <mutex>
+#include <numeric>
 #include <thread>
 
 namespace {
@@ -306,15 +307,45 @@ public:
             if(r.processPct>=0){sumProcess+=r.processPct;maxProcess=std::max(maxProcess,r.processPct);++nProcess;}
         }
         auto pct=[](double v, unsigned n){ return n?QStringLiteral("%1 %").arg(v,0,'f',1):QStringLiteral("N/D"); };
+        std::vector<double> frameMs,kernelMs,submitMs,readbackMs;
+        for(const auto& r:gpuBusySamples_){
+            if(r.totalMs>0. && std::isfinite(r.totalMs))frameMs.push_back(r.totalMs);
+            if(r.gpuKernelMs>=0. && std::isfinite(r.gpuKernelMs))kernelMs.push_back(r.gpuKernelMs);
+            if(r.submitCpuMs>=0. && std::isfinite(r.submitCpuMs))submitMs.push_back(r.submitCpuMs);
+            if(r.readbackWallMs>=0. && std::isfinite(r.readbackWallMs))readbackMs.push_back(r.readbackWallMs);
+        }
+        auto mean=[](const std::vector<double>& v)->double{
+            return v.empty()?0.:std::accumulate(v.begin(),v.end(),0.)/double(v.size());
+        };
+        auto percentile=[](std::vector<double> v,double p)->double{
+            if(v.empty())return 0.;
+            std::sort(v.begin(),v.end());
+            return v[std::min(v.size()-1,size_t(std::ceil(double(v.size())*p)-1))];
+        };
+        const double avgMs=mean(frameMs);
+        const QString perf=frameMs.empty()?QStringLiteral("N/D")
+            :QStringLiteral("moyenne %1 ms/image, médiane %2 ms, P95 %3 ms, débit %4 images/s")
+              .arg(avgMs,0,'f',2).arg(percentile(frameMs,.50),0,'f',2)
+              .arg(percentile(frameMs,.95),0,'f',2)
+              .arg(avgMs>0?1000./avgMs:0.,0,'f',2);
+        const QString shaderMs=kernelMs.empty()?QStringLiteral("N/D (timestamp pilote indisponible)")
+            :QStringLiteral("%1 ms de kernel (%2/%3 images)")
+               .arg(mean(kernelMs),0,'f',2).arg(kernelMs.size()).arg(gpuBusySamples_.size());
+        const QString transferMs=QStringLiteral("Soumission CPU %1 ms, attente/lecture GPU vers CPU %2 ms (intervalles pouvant se recouper)")
+              .arg(mean(submitMs),0,'f',2).arg(mean(readbackMs),0,'f',2);
         diagnosis_->setText(QStringLiteral(
             "GPU Compute D3D11 : %1 images (%2×%3).\n"
             "Charge GPU Windows (moteur le plus actif) : moyenne %4, maximum %5 (%6 échantillons).\n"
             "Charge attribuée à Moteur3D : moyenne %7, maximum %8 (%9 échantillons).\n"
             "Mesures WDDM GPU Engine; le maximum par moteur n'est PAS la somme des moteurs."
-            " Autres programmes GPU inclus dans la charge globale."
+            " Autres programmes GPU inclus dans la charge globale.\n"
+            "Performance bout en bout : %10.\n"
+            "GPU seul (timestamp D3D11) : %11.\n"
+            "Profil CPU : %12."
         ).arg(frames).arg(width).arg(height)
          .arg(pct(nSystem?sumSystem/nSystem:0,nSystem)).arg(pct(maxSystem,nSystem)).arg(nSystem)
-         .arg(pct(nProcess?sumProcess/nProcess:0,nProcess)).arg(pct(maxProcess,nProcess)).arg(nProcess));
+         .arg(pct(nProcess?sumProcess/nProcess:0,nProcess)).arg(pct(maxProcess,nProcess)).arg(nProcess)
+         .arg(perf).arg(shaderMs).arg(transferMs));
         if(!nSystem)diagnosis_->setText(diagnosis_->text()+QStringLiteral(
             "\nCompteurs GPU Engine indisponibles sur cette version du pilote/Windows : aucun pourcentage inventé."));
         export_->setEnabled(gpuReportAvailable_ && !running_);
