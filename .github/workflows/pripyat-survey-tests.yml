@@ -15,5 +15,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Check Pripyat scene syntax
+        run: node --check experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js
       - name: Run metric geometry tests
         run: node experiments/pripyat-survey/test-pripyat-survey.mjs
