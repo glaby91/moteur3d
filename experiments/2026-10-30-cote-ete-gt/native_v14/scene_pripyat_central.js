@@ -11,6 +11,32 @@ const M3D_MATERIAL_TRANSMISSION_PERCENT = Object.freeze({ glass: 62 });
 const M3D_MATERIAL_IOR = Object.freeze({ glass: 1.48 });
 const M3D_SCENE_LIGHTS = [];
 
+// Modular building geometry: independent object generator, compatible with V14 box API.
+// Coordinates are legacy placeholders pending verified cadastral/photogrammetric survey.
+function m3dBuildPolissya({box}, cfg = {}) {
+  const x0=cfg.x0??40.0, x1=cfg.x1??63.0, z0=cfg.z0??-42.0, z1=cfg.z1??-20.0;
+  const height=cfg.height??15.5;
+  // Separate podium, tower, recessed roof and facade components.
+  box(x0,0,z0,x1,1.05,z1,'stone');
+  box(x0,1.05,z0,x1,height,z1,'concrete');
+  box(x0+3.5,height,z0+3.0,x1-3.5,height+4.5,z1-2.5,'concrete');
+  box(x0-0.15,height-0.18,z0-0.15,x1+0.15,height+0.22,z1+0.15,'stone');
+  // Front facade: windows as separate reusable bays.
+  for(let floor=0;floor<5;floor++){
+    const y=1.8+floor*2.65;
+    for(let x=x0+2.0;x<x1-2.0;x+=3.1){
+      box(x,y,z1+0.08,x+1.45,y+1.55,z1+0.20,(floor===2&&x>x0+11)?'windowlit':'windowdark');
+      box(x-0.13,y-0.13,z1+0.06,x+1.58,y-0.04,z1+0.23,'stone');
+      box(x-0.13,y+1.55,z1+0.06,x+1.58,y+1.67,z1+0.23,'stone');
+    }
+  }
+  // Entry canopy and vertical side facade bays.
+  box(x0+8.0,2.85,z1+0.15,x0+15.0,3.13,z1+2.0,'concrete');
+  for(let floor=0;floor<4;floor++)for(let z=z0+2.0;z<z1-2.0;z+=4.0)
+    box(x1+0.06,2.2+floor*3.0,z,x1+0.18,3.7+floor*3.0,z+1.55,'windowdark');
+}
+
+
 // Terrain and road extension for the Pripyat scene (2 km radius from Energetik).
 // Streets and paths are clipped from OpenStreetMap (ODbL), snapshot 2026-11-05T23:29:21Z.
 // Geographic-to-scene fit uses the existing Energetik/Polissya center spacing; y is
@@ -502,14 +528,8 @@ function makeScene() {
     box(x,9.7,z,x+1.4,9.7+h,z+1.2,'rust');
   for(let x=-44;x<27;x+=9) ellipsoidMesh(x,9.85,-20.8,1.0,0.12,0.55,'grass',8,6);
 
-  // The Polissya hotel stays a quiet contextual mass; Energetik owns the detail budget.
-  box(40.0,0.0,-42.0,63.0,15.5,-20.0,'concrete');
-  box(43.5,15.5,-39.0,59.5,20.0,-22.5,'concrete');
-  for(let floor=0;floor<5;floor++){
-    const y=1.8+floor*2.65;
-    for(let x=42.0;x<61.0;x+=3.1)
-      box(x,y,-19.92,x+1.45,y+1.55,-19.78,(floor===2&&x>51)?'windowlit':'windowdark');
-  }
+  // Separate reusable Polissya building module. Historical geometry still pending survey.
+  m3dBuildPolissya({box});
 
   // Repeated small windows add depth to the visible west side of Energetik.
   for (let z = -43; z <= -22; z += 4.2) {
