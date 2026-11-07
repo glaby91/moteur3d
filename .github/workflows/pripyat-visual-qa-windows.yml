@@ -211,15 +211,16 @@ jobs:
 
       - name: Capture fixed-camera Pripyat GPU Compute via WARP
         if: runner.os == 'Windows'
-        shell: pwsh
+        # Git Bash waits for the Qt WIN32 GUI executable to exit; PowerShell may
+        # return before the snapshot file has actually been written.
+        shell: bash
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         timeout-minutes: 20
         env:
           M3D_COMPUTE_WARP: '1'
         run: |
-          & "./dist/moteur3d_qt.exe" --snapshot-compute 12 "./dist/architecture-review/view-12-compute-warp.png"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          if (-not (Test-Path "./dist/architecture-review/view-12-compute-warp.png")) { throw "Missing GPU Compute capture" }
+          ./dist/moteur3d_qt.exe --snapshot-compute 12 ./dist/architecture-review/view-12-compute-warp.png
+          test -s ./dist/architecture-review/view-12-compute-warp.png
 
       - name: Compare CPU and GPU at identical camera 12
         if: runner.os == 'Windows'
