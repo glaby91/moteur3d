@@ -1,0 +1,49 @@
+{
+  "schema": "moteur3d-benchmark-gpu-wddm-v1",
+  "date_local": "2026-11-07",
+  "provenance": "user-supplied screenshot of benchmark dialog; numeric CSV not supplied",
+  "recorded_in_repository": true,
+  "device": {
+    "gpu": "Intel HD Graphics 620",
+    "os": "Windows",
+    "gpu_memory_bandwidth_gbps": null,
+    "gpu_frequency_mhz": null
+  },
+  "engine": {
+    "name": "Moteur3D",
+    "build": "261107-0004",
+    "backend": "GPU Compute D3D11 experimental ray tracing HLSL, non-DXR",
+    "source": "https://github.com/glaby91/moteur3d/actions/runs/42411694183"
+  },
+  "scene": {
+    "file": "scene_pripyat_central.bin",
+    "local_folder_label": "296",
+    "objects": 92886,
+    "triangles": 67404,
+    "scene_git_commit": null
+  },
+  "benchmark": {
+    "native_resolution": true,
+    "render_width": 1366,
+    "render_height": 768,
+    "measured_frames": 500,
+    "warmup_frames": 1,
+    "valid_wddm_samples": 223,
+    "sampling_api": "Windows WDDM GPU Engine performance counters",
+    "metric_interpretation": "busiest GPU engine; never sum independent engines",
+    "gpu_system_busiest_engine": {
+      "average_busy_percent": 88.9,
+      "maximum_busy_percent": 93.5,
+      "samples": 223
+    },
+    "gpu_process_moteur3d": {
+      "average_busy_percent": 88.9,
+      "maximum_busy_percent": 93.5,
+      "samples": 223
+    },
+    "mean_ms_per_frame": null,
+    "median_ms_per_frame": null,
+    "frames_per_second": null,
+    "notes": "Native 1:1 resolution in build 0004; earlier 100-frame benchmark selections were often preview-downscaled and not comparable on selected output size."
+  }
+}
