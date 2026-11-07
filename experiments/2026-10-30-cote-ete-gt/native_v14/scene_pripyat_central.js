@@ -13,6 +13,64 @@ const M3D_SCENE_LIGHTS = [];
 
 // Modular building geometry: independent object generator, compatible with V14 box API.
 // Coordinates are legacy placeholders pending verified cadastral/photogrammetric survey.
+
+/**
+ * Scene assembly, one component per urban element. Coordinates in metres.
+ * Geometry is a photo-guided BLOCKOUT, not a surveyed cadastral model.
+ * Each building owns its components; changes do not alter unrelated assets.
+ */
+const M3D_PRIPYAT_BLOCKOUT = Object.freeze({
+  plaza:{x0:-53,x1:53,z0:-15,z1:61},
+  energetik:{x0:-50.5,x1:30.5,z0:-43.4,z1:-18.8,mainHeight:11.4,towerHeight:14},
+  polissya:{x0:40,x1:63,z0:-42,z1:-20},
+  housing:[
+    {id:'west-south',x0:-64,z0:-34,x1:-57,z1:-10,floors:6,frontZ:-10},
+    {id:'east-south',x0:46,z0:-37,x1:60,z1:-12,floors:7,frontZ:-12},
+    {id:'west-north',x0:-64,z0:20,x1:-57,z1:52,floors:5,frontZ:20},
+    {id:'east-north',x0:47,z0:18,x1:60,z1:50,floors:6,frontZ:18}
+  ]
+});
+function m3dBuildPlaza({box}, p=M3D_PRIPYAT_BLOCKOUT.plaza){
+  // Separate physical layers: foundation, pedestrian paving, expansion joints,
+  // patch repairs and flush perimeter drainage.
+  box(p.x0,-0.045,p.z0,p.x1,0.015,p.z1,'stone');
+  for(let x=p.x0+1;x<p.x1-0.5;x+=3.2)
+    box(x,0.016,p.z0+1,x+0.055,0.021,p.z1-1,'concrete');
+  for(let z=p.z0+1;z<p.z1-0.5;z+=3.2)
+    box(p.x0+1,0.016,z,p.x1-1,0.021,z+0.055,'concrete');
+  for(const [x,z,w,d] of [[-42,-7,6,3],[-29,10,4,5],[-10,-4,7,3],
+    [12,5,4,4],[34,-8,6,4],[41,9,3,5],[-5,29,5,4],[20,38,7,3],[-35,45,4,6]])
+    box(x,0.018,z,x+w,0.023,z+d,'concrete');
+  for(const x of [p.x0+0.3,p.x1-0.5])
+    box(x,0.017,p.z0+1,x+0.22,0.026,p.z1-1,'rust');
+}
+function m3dBuildHousing({box},b){
+  const {x0,x1,z0,z1,floors,frontZ}=b,storey=2.75,height=floors*storey;
+  // Discrete structural parts, windows, balcony ledges, entrance and parapet.
+  box(x0,0,z0,x1,0.45,z1,'stone');
+  box(x0,0.45,z0,x1,height,z1,'concrete');
+  for(let f=0;f<floors;f++){
+    const y=1.1+f*storey;
+    for(let x=x0+1.4;x<x1-1.1;x+=2.7){
+      box(x,y,frontZ-0.1,x+1.25,y+1.25,frontZ+0.06,'windowdark');
+      box(x-0.12,y-0.12,frontZ-0.16,x+1.37,y+1.38,frontZ-0.06,'stone');
+    }
+    box(x0,y+1.45,frontZ-0.05,x1,y+1.55,frontZ+0.07,'stone');
+  }
+  box(x0-0.2,height,z0-0.15,x1+0.2,height+0.75,z1+0.15,'concrete');
+  for(let x=x0+2;x<x1;x+=8.1)
+    box(x,height*0.56,frontZ-0.2,x+1.3,height*0.56+1.25,frontZ+0.08,'windowlit');
+}
+function m3dBuildConnector({box}){
+  // Structural components split for later conversion to a photo-matched arch.
+  box(30.2,0,-24,40.2,5.8,-18.6,'concrete');
+  box(30,5.65,-24.2,40.4,6.05,-18.4,'stone');
+  for(let x=31;x<39.5;x+=2.05){
+    box(x,0.65,-18.78,x+1.25,3.4,-18.58,'glass');
+    box(x-0.10,0.48,-18.83,x+1.35,0.62,-18.52,'stone');
+  }
+}
+
 function m3dBuildPolissya({box}, cfg = {}) {
   const x0=cfg.x0??40.0, x1=cfg.x1??63.0, z0=cfg.z0??-42.0, z1=cfg.z1??-20.0;
   const height=cfg.height??15.5;
@@ -92,20 +150,8 @@ function makeScene() {
   box(-64, -0.32, -70, 64, groundY, 88, 'asphalt');
   box(-58, -0.10, -62, 58, -0.045, 70, 'concrete');
 
-  // Main paved square: broad worn paving, joint bands, patched slabs and weeds.
-  box(-53, -0.045, -15, 53, 0.015, 61, 'stone');
-  for (let x = -52; x <= 52; x += 3.2) {
-    box(x, 0.016, -14, x + 0.055, 0.021, 60, 'concrete');
-  }
-  for (let z = -14; z <= 60; z += 3.2) {
-    box(-52, 0.016, z, 52, 0.021, z + 0.055, 'concrete');
-  }
-  // Replacement slabs and darker repaired patches break the regular grid.
-  for (const p of [
-    [-42, 9, -7, 6, 3], [-29, 19, 10, 4, 5], [-10, 30, -4, 7, 3],
-    [12, 45, 5, 4, 4], [34, 18, -8, 6, 4], [41, 49, 9, 3, 5],
-    [-5, 4, 29, 5, 4], [20, 33, 38, 7, 3], [-35, 2, 45, 4, 6]
-  ]) box(p[0], 0.018, p[1], p[0] + p[3], 0.023, p[1] + p[4], 'concrete');
+  // Independent plaza component (provisional coordinates).
+  m3dBuildPlaza({box});
 
   // Roads and sidewalks frame the plaza and connect to the surrounding blocks.
   box(-64, -0.015, 65, 64, 0.025, 88, 'asphalt');
@@ -121,13 +167,8 @@ function makeScene() {
     box(x, 0.036, 72, x + 1.25, 0.043, 77, 'concrete');
   }
 
-  // The low connector is kept as context between the hero building and the hotel.
-  box(30.2,0.0,-24.0,40.2,5.8,-18.6,'concrete');
-  box(30.0,5.65,-24.2,40.4,6.05,-18.4,'stone');
-  for(let x=31.0;x<39.5;x+=2.05){
-    box(x,0.65,-18.78,x+1.25,3.4,-18.58,'glass');
-    box(x-0.10,0.48,-18.83,x+1.35,0.62,-18.52,'stone');
-  }
+  // Independent building-to-building connector component.
+  m3dBuildConnector({box});
 
   // Hero asset: the Palace of Culture Energetik is the only fully developed building.
   // Approximate envelope: 81 x 24 m, 11.4 m main roof and a 14 m stair tower.
@@ -538,29 +579,8 @@ function makeScene() {
       box(-50.66, y - 0.12, z - 0.12, -50.22, y + 1.62, z + 1.82, 'stone');
     }
   }
-  // Two surrounding apartment slabs establish the next urban blocks without
-  // pretending that unseen districts have already been modelled.
-  function apartment(x0, z0, x1, z1, floors, frontZ) {
-    const height = floors * 2.75;
-    box(x0, 0, z0, x1, height, z1, 'concrete');
-    for (let f = 0; f < floors; f++) {
-      const y = 1.1 + f * 2.75;
-      for (let x = x0 + 1.4; x < x1 - 1.1; x += 2.7) {
-        box(x, y, frontZ - 0.1, x + 1.25, y + 1.25, frontZ + 0.06, 'windowdark');
-        box(x - 0.12, y - 0.12, frontZ - 0.16, x + 1.37, y + 1.38, frontZ - 0.06, 'stone');
-      }
-      box(x0, y + 1.45, frontZ - 0.05, x1, y + 1.55, frontZ + 0.07, 'stone');
-    }
-    // Roof parapet and occasional broken bays.
-    box(x0 - 0.2, height, z0 - 0.15, x1 + 0.2, height + 0.75, z1 + 0.15, 'concrete');
-    for (let x = x0 + 2; x < x1; x += 8.1) {
-      box(x, height * 0.56, frontZ - 0.2, x + 1.3, height * 0.56 + 1.25, frontZ + 0.08, 'windowlit');
-    }
-  }
-  apartment(-64, -34, -57, -10, 6, -10.0);
-  apartment(46, -37, 60, -12, 7, -12.0);
-  apartment(-64, 20, -57, 52, 5, 20.0);
-  apartment(47, 18, 60, 50, 6, 18.0);
+  // Each residential block is generated independently from the scene registry.
+  for(const building of M3D_PRIPYAT_BLOCKOUT.housing) m3dBuildHousing({box},building);
 
   // Broken low walls, concrete planters and street furniture around the square.
   function planter(x, z, w, d, height) {
