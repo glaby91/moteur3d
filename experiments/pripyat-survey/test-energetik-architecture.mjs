@@ -110,6 +110,6 @@ for(const index of [0,9]){
 assert.ok(eye(presets[1])[0]<api.arch.foyer.mosaicSurfaceX-2,
   'mural snapshot must face the painted interior surface');
 const stairEye=eye(presets[6]);
-assert.ok(stairEye[0]<18.0 && stairEye[2]>-31.4 && stairEye[2]<-29.6,
-  'east stair snapshot must stand at the west-wall doorway');
+assert.ok(stairEye[0]>20 && stairEye[0]<27 && stairEye[2]<-39,
+  'east stair snapshot should look up the stairs from their rear entrance');
 console.log('Camera position and framing sanity checks passed');
