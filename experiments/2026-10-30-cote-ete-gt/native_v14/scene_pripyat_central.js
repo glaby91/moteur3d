@@ -25,7 +25,9 @@ const M3D_PRIPYAT_BLOCKOUT = Object.freeze({
   polissya:{x0:40,x1:63,z0:-42,z1:-20},
   housing:[
     {id:'west-south',x0:-64,z0:-34,x1:-57,z1:-10,floors:6,frontZ:-10},
-    {id:'east-south',x0:46,z0:-37,x1:60,z1:-12,floors:7,frontZ:-12},
+    // Provisional context block moved outside the Polissya footprint to avoid
+    // two buildings physically occupying the same volume. Not a surveyed location.
+    {id:'east-south',x0:69,z0:-37,x1:83,z1:-12,floors:7,frontZ:-12},
     {id:'west-north',x0:-64,z0:20,x1:-57,z1:52,floors:5,frontZ:20},
     {id:'east-north',x0:47,z0:18,x1:60,z1:50,floors:6,frontZ:18}
   ]
@@ -56,6 +58,22 @@ const M3D_ENERGETIK_ARCH = Object.freeze({
   rearWindowWidth:3.5,
   tower: Object.freeze({roofY:14.0})
 });
+// Catch accidental double-booking of urban building footprints.
+// Plaza paving and the intentional Energetik–Polissya connector are excluded.
+function m3dCheckUrbanFootprints(b=M3D_PRIPYAT_BLOCKOUT){
+  const buildings=[{id:'Energetik',...b.energetik},
+    {id:'Polissya',...b.polissya},...b.housing];
+  for(let i=0;i<buildings.length;i++)for(let j=i+1;j<buildings.length;j++){
+    const p=buildings[i],q=buildings[j];
+    const overlapX=Math.min(p.x1,q.x1)-Math.max(p.x0,q.x0);
+    const overlapZ=Math.min(p.z1,q.z1)-Math.max(p.z0,q.z0);
+    if(overlapX>0.01&&overlapZ>0.01)
+      throw new Error('Pripyat: overlapping footprints '+p.id+' / '+q.id);
+  }
+  return true;
+}
+m3dCheckUrbanFootprints();
+
 function m3dCheckEnergetikDatum(a=M3D_ENERGETIK_ARCH){
   const {levels:l,foyer:f,envelope:e}=a;
   if(!(l.ground<l.firstSlab && l.firstSlab<l.secondSlab && l.secondSlab<l.roof))
