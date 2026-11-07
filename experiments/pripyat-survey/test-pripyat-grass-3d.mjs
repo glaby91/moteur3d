@@ -10,7 +10,8 @@ const context=vm.runInNewContext(code+`({
   build:m3dBuildPripyatGroundGrass,
   overlaps:m3dPripyatInsideUrbanBuilding,
   nearRoad:m3dPripyatNearVerifiedRoad,
-  roadSegments:M3D_PRIPYAT_EXPANSION_DATA.routes.length
+  roadSegments:M3D_PRIPYAT_EXPANSION_DATA.routes.length,
+  terrainQuad:m3dBuildTiledGrassTerrainQuad
 })`,{process:{env:{}}},{timeout:5000});
 const sites=context.sites();
 assert.ok(sites.length>=500,'needs substantial 3D grass, not isolated proxy objects');
@@ -37,6 +38,17 @@ for(const s of sites){
 for(const kind of ['joint','curb','planter','lawn'])
  assert.ok(kinds[kind]>20,`missing planted type ${kind}`);
 assert.equal(JSON.stringify(context.sites()),JSON.stringify(sites),'nondeterministic export');
+// Verify that every 100m SRTM cell repeats grass PBR every ~4m, not once.
+const tiled=[];
+const textured=vm.runInNewContext(code+`({tiler:m3dBuildTiledGrassTerrainQuad})`,{
+  process:{env:{}},
+  meshTriangle:(a,b,c,mat)=>tiled.push({a,b,c,mat})
+},{timeout:5000});
+textured.tiler([[0,0,0],[100,0,0],[100,0,100],[0,0,100]],4);
+assert.equal(tiled.length,2,'one SRTM quad must remain two triangles');
+assert.equal(tiled[0].mat,'grass');
+assert.equal(tiled[0].b.uv[0]-tiled[0].a.uv[0],25,'100m terrain stretched: expected 25 PBR repeats');
+assert.equal(tiled[0].c.uv[1]-tiled[0].a.uv[1],25,'grass tiling must repeat in Z');
 const tris=[];
 const report=context.build({meshTriangle:(a,b,c,m)=>tris.push({a,b,c,m})},sites);
 assert.equal(report.patches,sites.length);
