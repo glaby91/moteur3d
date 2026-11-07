@@ -269,13 +269,21 @@ function m3dBuildEnergetikFacade({box,roundBox,objects}){
   }
 }
 
-function m3dBuildPolissya({box}, cfg = {}) {
+function m3dBuildPolissya({box,capsule}, cfg = M3D_PRIPYAT_BLOCKOUT.polissya) {
   const x0=cfg.x0??40.0, x1=cfg.x1??63.0, z0=cfg.z0??-42.0, z1=cfg.z1??-20.0;
   const height=cfg.height??15.5;
   // Separate podium, tower, recessed roof and facade components.
   box(x0,0,z0,x1,1.05,z1,'stone');
   box(x0,1.05,z0,x1,height,z1,'concrete');
-  box(x0+3.5,height,z0+3.0,x1-3.5,height+4.5,z1-2.5,'concrete');
+  // Photograph-inspired rooftop belvedere: the old solid penthouse cube
+  // incorrectly filled the open terrace with concrete.
+  box(x0+10.5,height,z0+1.4,x1-0.45,height+3.50,z0+4.0,'concrete');
+  box(x0+10.5,height+3.50,z0+1.4,x1+0.1,height+3.80,z1+0.15,'stone');
+  for(const x of [x0+12.2,x0+16.0,x0+19.8])
+    box(x,height+0.12,z1-0.65,x+0.27,height+3.50,z1-0.28,'plaster');
+  // Open terrace parapet and metal cap on the visible front edge.
+  box(x0+10.5,height+0.15,z1-0.12,x1+0.1,height+0.90,z1+0.15,'concrete');
+  box(x0+10.5,height+0.90,z1-0.18,x1+0.1,height+0.99,z1+0.19,'rust');
   box(x0-0.15,height-0.18,z0-0.15,x1+0.15,height+0.22,z1+0.15,'stone');
   // Front facade: windows as separate reusable bays.
   for(let floor=0;floor<5;floor++){
@@ -286,10 +294,40 @@ function m3dBuildPolissya({box}, cfg = {}) {
       box(x-0.13,y+1.55,z1+0.06,x+1.58,y+1.67,z1+0.23,'stone');
     }
   }
+  // Recessed ribbing and worn pale cladding seen in Polissya photographs.
+  // Keep the five horizontal rows of existing window materials untouched.
+  for(let x=x0+0.56;x<x1-0.4;x+=1.0)
+    box(x,1.12,z1+0.16,x+0.065,height-0.20,z1+0.24,'plaster');
+  for(const y of [4.2,6.85,9.5,12.15])
+    box(x0+0.30,y,z1+0.12,x1-0.30,y+0.055,z1+0.27,'stone');
+
   // Entry canopy and vertical side facade bays.
   box(x0+8.0,2.85,z1+0.15,x0+15.0,3.13,z1+2.0,'concrete');
   for(let floor=0;floor<4;floor++)for(let z=z0+2.0;z<z1-2.0;z+=4.0)
     box(x1+0.06,2.2+floor*3.0,z,x1+0.18,3.7+floor*3.0,z+1.55,'windowdark');
+  // Rooftop sign remains rusty, not actively lit in the abandoned era.
+  // 5×7 stroke pixels are an original geometric asset (no imported font).
+  const letters={
+    'Г':['11111','10000','10000','10000','10000','10000','10000'],
+    'О':['01110','10001','10001','10001','10001','10001','01110'],
+    'Т':['11111','00100','00100','00100','00100','00100','00100'],
+    'Е':['11111','10000','10000','11110','10000','10000','11111'],
+    'Л':['00111','01001','10001','10001','10001','10001','10001'],
+    'Ь':['10000','10000','10000','11110','10001','10001','11110'],
+    'П':['11111','10001','10001','10001','10001','10001','10001'],
+    'І':['11111','00100','00100','00100','00100','00100','11111'],
+    'С':['01111','10000','10000','10000','10000','10000','01111'],
+    'Я':['01111','10001','10001','01111','00101','01001','10001']
+  };
+  const label='ГОТЕЛЬ ПОЛІССЯ', px=0.095, pitch=0.72, signX=x0+1.1, signY=height+0.45;
+  for(let k=0;k<label.length;k++){
+    const glyph=letters[label[k]];
+    if(!glyph) continue;
+    for(let row=0;row<7;row++)for(let col=0;col<5;col++)if(glyph[row][col]==='1'){
+      const sx=signX+k*pitch+col*px, sy=signY+(6-row)*px;
+      box(sx,sy,z1-0.35,sx+px*0.80,sy+px*0.80,z1-0.27,'rust');
+    }
+  }
 }
 
 
@@ -763,7 +801,7 @@ function makeScene() {
   for(let x=-44;x<27;x+=9) ellipsoidMesh(x,9.85,-20.8,1.0,0.12,0.55,'grass',8,6);
 
   // Separate reusable Polissya building module. Historical geometry still pending survey.
-  m3dBuildPolissya({box});
+  m3dBuildPolissya({box,capsule});
 
   // Repeated small windows add depth to the visible west side of Energetik.
   for (let z = -43; z <= -22; z += 4.2) {
