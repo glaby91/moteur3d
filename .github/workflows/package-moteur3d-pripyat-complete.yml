@@ -1,4 +1,4 @@
-name: Package Moteur3D Windows + Pripyat 3D complete
+name: Package Moteur3D Windows + Pripyat grass v2 complete
 
 on:
   push:
@@ -30,7 +30,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: Pripyat-Grass3D-SceneOnly-1to1
-          run-id: 42407704064
+          run-id: 42410006051
           repository: glaby91/moteur3d
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: scene
@@ -53,6 +53,8 @@ jobs:
           1. Decompressez l'archive sur votre ordinateur Windows.
           2. Double-cliquez sur LANCER-MOTEUR3D.cmd (ou moteur3d_qt.exe).
           3. La scene Pripyat se charge automatiquement depuis le dossier.
+          Herbes v2 : brins fins, courts et legerement courbes, regroupes
+          le long des joints de dalles et des bordures (pas de grandes pointes).
           4. Selectionnez GPU Compute D3D11 pour le ray tracing GPU sans DXR.
           5. Outils > Benchmark du moteur : charge GPU (%) sur 100 images.
           6. Aide > A propos et sources : photos, atlas et credits.
@@ -67,7 +69,7 @@ jobs:
           externes citees servent de references, pas de textures distribuees.
 
           Origine du moteur: GitHub Actions run 42407053208
-          Origine de la scene: GitHub Actions run 42407704064
+          Origine de la scene: GitHub Actions run 42410006051
           EOF
 
       - name: Verify the folder is actually runnable and scene is present
@@ -102,13 +104,14 @@ jobs:
              'app_build':'261107-0003',
              'engine_git_sha':'1eb662f862bb6935053b32c877b91e4542584c32',
              'engine_actions_run':42407053208,
-             'scene_git_sha':'7a26b68cf129871eac6e0aeac0c71b5ff09d5591',
-             'scene_actions_run':42407704064,
+             'scene_git_sha':'5036a68bd7906c2d7dd31e512f47616ac43fdf1c',
+             'scene_actions_run':42410006051,
              'scene_bytes':scene.stat().st_size,
              'camera_presets':13,
              'verified_required_files':required,
              'shader_packaged':True,
              'grass_3d':True,
+             'grass_revision':'v2 short bent clustered blades on real 3.2m paving joints',
              'metric_1to1':True,
              'grass_world_uv_repetition_m':4,
              'note':'Scene loaded by default when executable starts from same folder'
@@ -123,7 +126,7 @@ jobs:
       - name: Upload ONE complete Moteur3D Pripyat Windows download
         uses: actions/upload-artifact@v4
         with:
-          name: Moteur3D-Pripyat-Complet-Windows
+          name: Moteur3D-Pripyat-Complet-Windows-GrassV2
           path: Moteur3D-Pripyat-Complet/
           compression-level: 1
           if-no-files-found: error
