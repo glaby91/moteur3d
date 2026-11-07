@@ -3,7 +3,8 @@
 // Documentary-photo references and map sources are listed in docs/pripyat/README.md.
 
 const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
-  concrete: 2, plaster: 1, mural: 1, energetikFresco: 2, volcanicTuff: 3, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
+  concrete: 2, plaster: 1, mural: 1, energetikFresco: 2,
+  gymFloor: 3, gymWall: 1, gymCeiling: 2, gymMetal: 10, gymLetter: 2, volcanicTuff: 3, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
   asphalt: 3, stone: 5, metal: 18, rust: 7, leaves: 2, grass: 1,
   bark: 1, wood: 4, sign: 3, neon: 2, debris: 2, puddle: 28, seatFabric: 1, seatFabricClean: 1, seatVinylBrown: 28, seatSupportPaint: 12, seatTrim: 2, curtain: 1, cinemaScreen: 0
 });
@@ -23,6 +24,8 @@ const M3D_PRIPYAT_BLOCKOUT = Object.freeze({
   plaza:{x0:-53,x1:53,z0:-15,z1:61},
   energetik:{x0:-50.5,x1:30.5,z0:-43.4,z1:-18.8,mainHeight:11.4,towerHeight:14},
   polissya:{x0:40,x1:63,z0:-42,z1:-20},
+  // Sports club annex: provisional independent placement, photograph-matched interior.
+  gym:{x0:-48,x1:-8,z0:-82,z1:-56,floorY:0.40,height:11.4},
   housing:[
     {id:'west-south',x0:-64,z0:-34,x1:-57,z1:-10,floors:6,frontZ:-10},
     // Provisional context block moved outside the Polissya footprint to avoid
@@ -62,7 +65,7 @@ const M3D_ENERGETIK_ARCH = Object.freeze({
 // Plaza paving and the intentional Energetik–Polissya connector are excluded.
 function m3dCheckUrbanFootprints(b=M3D_PRIPYAT_BLOCKOUT){
   const buildings=[{id:'Energetik',...b.energetik},
-    {id:'Polissya',...b.polissya},...b.housing];
+    {id:'Polissya',...b.polissya},{id:'Sports club',...b.gym},...b.housing];
   for(let i=0;i<buildings.length;i++)for(let j=i+1;j<buildings.length;j++){
     const p=buildings[i],q=buildings[j];
     const overlapX=Math.min(p.x1,q.x1)-Math.max(p.x0,q.x0);
@@ -189,6 +192,169 @@ function m3dBuildFoyerMuralArcade({box}, a=M3D_ENERGETIK_ARCH) {
     box(x0-0.145,l.ground+0.63,z+0.03,x0-0.135,
         l.ground+0.95,z+f.arcadePierLength-0.08,'rust');
   }
+}
+// Independent sporting club / gymnasium module reconstructed from the photo
+// set provided on 2026-11-07. Dimensions and annex location are provisional.
+// Existing scene material slots remain untouched; gym materials are additive.
+function m3dBuildSportsClub({box,capsule,meshTriangle},g=M3D_PRIPYAT_BLOCKOUT.gym){
+  const {x0,x1,z0,z1,floorY,height}=g;
+  if(!(x1-x0>=38 && z1-z0>=24 && height>9.5))
+    throw new Error('Sports club: insufficient clear span / height');
+  const top=floorY+height;
+  // 40 x 26 m standalone rectangular volume. No solid volume fills the hall.
+  box(x0,-0.06,z0,x1,floorY-0.02,z1,'concrete');
+  box(x0,floorY-0.02,z0,x1,floorY,z1,'wood');
+  // One UV-controlled full-court atlas, photographed colour distribution and
+  // overlapping handball and basketball court markings baked into the PBR map.
+  // The painted planks and markings follow the *whole hall* rather than boxes
+  // whose UV repetition would break the lines.
+  const va={p:[x0+0.20,floorY+0.004,z0+0.20],n:[0,1,0],uv:[0,0]};
+  const vb={p:[x1-0.20,floorY+0.004,z0+0.20],n:[0,1,0],uv:[1,0]};
+  const vc={p:[x0+0.20,floorY+0.004,z1-0.20],n:[0,1,0],uv:[0,1]};
+  const vd={p:[x1-0.20,floorY+0.004,z1-0.20],n:[0,1,0],uv:[1,1]};
+  meshTriangle(va,vc,vb,'gymFloor');
+  meshTriangle(vb,vc,vd,'gymFloor');
+  // Three opaque walls. Their colour/peel PBR is deliberately independent of
+  // the mosaic hall material to preserve the reference photos' blue-green tint.
+  box(x0,floorY,z0,x1,top,z0+0.40,'gymWall');
+  box(x0,floorY,z0,x0+0.42,top,z1,'gymWall');
+  box(x1-0.42,floorY,z0,x1,top,z1,'gymWall');
+  // Long fully open window facade: tall, closely spaced concrete piers; only
+  // a lower plinth and upper beam close the wall (no solid glass rectangle).
+  box(x0,floorY,z1-0.38,x1,floorY+0.75,z1,'gymWall');
+  box(x0,top-1.18,z1-0.52,x1,top,z1,'gymConcrete');
+  for(let x=x0;x<=x1+0.001;x+=4.6){
+    const left=Math.min(x,x1-0.72);
+    box(left,floorY+0.70,z1-0.66,left+0.72,top-0.55,z1,'gymConcrete');
+    box(left+0.14,floorY+1.05,z1+0.015,left+0.48,floorY+1.16,z1+0.10,'gymMetal');
+  }
+  // Concrete roof panels and coffer grid. Keep the main interior volume open.
+  box(x0,top-0.28,z0,x1,top+0.10,z1,'gymConcrete');
+  for(let x=x0+2.55;x<x1-1.0;x+=4.8){
+    // Deep transverse girders with open rectangular web bays approximating
+    // the source photograph's distinctive chamfered/octagonal perforations.
+    box(x,top-1.22,z0+0.5,x+0.58,top-1.04,z1-0.52,'gymConcrete');
+    box(x,top-0.47,z0+0.5,x+0.58,top-0.27,z1-0.52,'gymConcrete');
+    for(let z=z0+0.65;z<z1-1.2;z+=1.92){
+      box(x,top-1.22,z,x+0.58,top-0.27,z+0.28,'gymConcrete');
+      // Narrow diagonal imitation of the sloped octagonal aperture shoulders.
+      box(x+0.02,top-1.05,z+0.28,x+0.56,top-0.92,z+0.43,'gymConcrete');
+      box(x+0.02,top-0.59,z+0.28,x+0.56,top-0.47,z+0.43,'gymConcrete');
+    }
+  }
+  for(let x=x0+0.9;x<x1-0.6;x+=2.4)
+    box(x,top-0.48,z0+0.6,x+0.22,top-0.28,z1-0.6,'gymConcrete');
+
+  // Long gallery along the closed (opposite-to-windows) wall, with continuous
+  // parapet, rusty guardrail and the famous inscription under its fascia.
+  const galleryTop=floorY+5.20,frontZ=z0+2.52;
+  box(x0+0.65,galleryTop-0.25,z0+0.35,x1-0.65,galleryTop,frontZ,'gymConcrete');
+  box(x0+0.65,galleryTop-0.28,frontZ-0.09,x1-0.65,galleryTop-0.06,frontZ+0.02,'gymMetal');
+  for(let x=x0+1.0;x<x1-1.0;x+=2.9){
+    capsule([x,galleryTop+0.06,frontZ-0.16],[x,galleryTop+0.94,frontZ-0.16],0.030,'gymMetal');
+  }
+  capsule([x0+0.82,galleryTop+0.96,frontZ-0.16],[x1-0.84,galleryTop+0.96,frontZ-0.16],0.033,'gymMetal');
+  capsule([x0+0.82,galleryTop+0.51,frontZ-0.16],[x1-0.84,galleryTop+0.51,frontZ-0.16],0.016,'gymMetal');
+  // Brown timber/metal sign below the balcony, clean lettering with damaged paint.
+  box(x0+1.05,galleryTop-0.96,frontZ-0.12,x1-1.05,galleryTop-0.34,frontZ+0.018,'gymMetal');
+  const font5x7={
+    'С':['01110','10001','10000','10000','10000','10001','01110'],
+    'И':['10001','10011','10101','10101','11001','10001','10001'],
+    'Л':['00111','01001','01001','01001','01001','10001','10001'],
+    'Ь':['10000','10000','10000','11110','10001','10001','11110'],
+    'Н':['10001','10001','10001','11111','10001','10001','10001'],
+    'Ы':['10001','10001','10001','11101','10101','10101','11101'],
+    'Е':['11111','10000','10000','11110','10000','10000','11111'],
+    'М':['10001','11011','10101','10101','10001','10001','10001'],
+    'О':['01110','10001','10001','10001','10001','10001','01110'],
+    'В':['11110','10001','10001','11110','10001','10001','11110'],
+    'К':['10001','10010','10100','11000','10100','10010','10001'],
+    ' ':['00000','00000','00000','00000','00000','00000','00000']
+  };
+  const inscription='СИЛЬНЫЕ СМЕЛЫЕ ЛОВКИЕ';
+  const cell=Math.min(0.071,(x1-x0-3)/(inscription.length*6));
+  const startX=x0+1.75,startY=galleryTop-0.88,signZ=frontZ+0.028;
+  for(let j=0;j<inscription.length;j++){
+    const glyph=font5x7[inscription[j]]||font5x7[' '];
+    for(let row=0;row<7;row++)for(let col=0;col<5;col++)
+      if(glyph[row][col]==='1'){
+        const px=startX+(j*6+col)*cell,py=startY+(6-row)*cell*1.08;
+        box(px,py,signZ,px+cell*0.85,py+cell*0.91,signZ+0.012,'gymLetter');
+      }
+  }
+  // Two little athletics pictograms interrupt the original sign.
+  for(const [x,mat] of [[x0+13.5,'gymBlue'],[x0+25.5,'gymRed']])
+    box(x,startY-0.02,signZ+0.005,x+0.46,startY+0.47,signZ+0.018,mat);
+
+  // Upper row of ventilation grilles and the oxidized scoreboards above the gallery.
+  box(x0+0.6,top-2.05,z0+0.37,x1-0.6,top-1.75,z0+0.54,'gymMetal');
+  for(let x=x0+0.75;x<x1-0.75;x+=0.4)
+    box(x,top-2.01,z0+0.535,x+0.045,top-1.78,z0+0.55,'gymConcrete');
+  for(let x=x0+3.1;x<x0+24;x+=6.5){
+    box(x,top-4.25,z0+0.38,x+5.8,top-3.36,z0+0.58,'gymMetal');
+    for(let k=0;k<12;k++)
+      box(x+0.20+k*0.44,top-4.08,z0+0.59,x+0.28+k*0.44,top-3.87,z0+0.605,'gymLetter');
+  }
+  // Wall bar gymnastic ladders beneath the gallery at the near end.
+  for(const z of [z0+0.58,z0+3.05,z0+5.52]){
+    for(const px of [x0+0.92,x0+2.45])
+      capsule([px,floorY+0.43,z],[px,floorY+3.52,z],0.038,'gymMetal');
+    for(let y=floorY+0.62;y<floorY+3.5;y+=0.33)
+      capsule([x0+0.92,y,z],[x0+2.45,y,z],0.026,'gymMetal');
+  }
+  // Heating tubes along the back wall, disused vertical supports.
+  for(let x=x0+2.2;x<x1-1.4;x+=4.6){
+    for(const dy of [0.55,0.73,0.91])
+      capsule([x,floorY+dy,z0+0.53],[x+3.35,floorY+dy,z0+0.53],0.036,'gymMetal');
+    for(const px of [x+0.06,x+3.31])
+      capsule([px,floorY+0.39,z0+0.53],[px,floorY+1.02,z0+0.53],0.025,'gymMetal');
+  }
+  // Red and white handball goal, sized from standard 3m wide × 2m high.
+  const goalX=x0+3.15,goalZ=(z0+z1)/2,goalHalf=1.50;
+  const poleY=floorY+0.065;
+  for(const zz of [goalZ-goalHalf,goalZ+goalHalf]){
+    for(let k=0;k<7;k++) {
+      const a=poleY+k*(2/7),b=poleY+(k+1)*(2/7);
+      capsule([goalX,a,zz],[goalX,b,zz],0.055,k%2?'gymLetter':'gymRed');
+    }
+  }
+  for(let k=0;k<12;k++){
+    const z=goalZ-goalHalf+k*0.25;
+    capsule([goalX,poleY+2,z],[goalX,poleY+2,z+0.25],0.055,k%2?'gymLetter':'gymRed');
+  }
+  for(const zz of [goalZ-goalHalf,goalZ+goalHalf])
+    capsule([goalX,poleY,zz],[goalX+0.7,poleY,zz],0.025,'gymMetal');
+  // Raised end balcony and recessed small opening.
+  box(x0+0.45,galleryTop-0.45,z0+1.2,x0+5.5,galleryTop,z1-1.1,'gymConcrete');
+  box(x0+5.0,galleryTop-0.33,z0+1.0,x0+5.5,galleryTop+0.30,z1-1.1,'gymConcrete');
+  // Suspended climbing rope; damaged basketball hoops remain high at both ends.
+  capsule([x0+12.4,top-0.56,(z0+z1)/2],[x0+12.45,floorY+3.12,(z0+z1)/2+0.18],0.033,'gymMetal');
+  for(const bx of [x0+1.0,x1-1.0]){
+    box(bx-0.065,floorY+3.15,goalZ-0.94,bx+0.065,floorY+4.36,goalZ+0.94,'gymLetter');
+    for(let t=0;t<12;t++){
+      const theta=t*Math.PI/6,theta2=(t+1)*Math.PI/6;
+      const cx=bx+(bx<x0+5?0.6:-0.6);
+      capsule([cx+0.30*Math.cos(theta),floorY+3.16,goalZ+0.30*Math.sin(theta)],
+        [cx+0.30*Math.cos(theta2),floorY+3.16,goalZ+0.30*Math.sin(theta2)],0.025,'gymRed');
+    }
+  }
+  // Lost glass, splintered boards and rubble near windows. Small primitives
+  // remain separate from the photo-guided PBR to preserve parallax.
+  for(let k=0;k<82;k++){
+    const x=x0+1.2+((k*17)%97)/97*(x1-x0-2.4);
+    const z=z0+1.4+((k*31)%89)/89*(z1-z0-2.0);
+    const edge=(z>z1-4.0 || k%3===0);
+    if(!edge)continue;
+    const w=0.12+(k%5)*0.10,d=0.10+(k%4)*0.08;
+    box(x,floorY+0.012,z,x+w,floorY+0.022+(k%3)*0.012,z+d,k%7===0?'glass':k%4===0?'gymMetal':'debris');
+  }
+  for(let k=0;k<18;k++){
+    const x=x0+2+(k*11)%34,z=z1-1.8+(k%4)*0.35;
+    capsule([x,floorY+0.03,z],[x+0.3,floorY+0.44+(k%3)*0.30,z+0.08],0.023,'bark');
+  }
+  // Weathered daylight, intentionally cold, and no fake warm theatrical wash.
+  for(const px of [x0+5,x0+14,x0+23,x0+32])
+    M3D_SCENE_LIGHTS.push([px,top-2.5,z1-2.2,14,0.53,206,223,225]);
 }
 function m3dBuildPlaza({box}, p=M3D_PRIPYAT_BLOCKOUT.plaza){
   // Separate physical layers: foundation, pedestrian paving, expansion joints,
@@ -532,6 +698,9 @@ function makeScene() {
   m3dBuildEnergetikFacade({box,roundBox,objects});
 
   m3dBuildEnergetikArchitecturalAccents({box,capsule});
+
+  // Separate long-span sports club: never reuse the foyer or cinema geometry.
+  m3dBuildSportsClub({box,capsule,meshTriangle});
 
   // Exposed aggregate, broken cladding and rust runoff on the street-facing
   // lintel. The patch layout is irregular so the facade reads as weathered
