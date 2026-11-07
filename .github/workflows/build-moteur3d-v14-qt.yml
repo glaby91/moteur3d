@@ -24,6 +24,7 @@ on:
       - experiments/2026-10-30-cote-ete-gt/native_v14/tools/generate_energetik_fresco_map.py
       - experiments/2026-10-30-cote-ete-gt/native_v14/tools/export_energetik_fresco_glb.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/**
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/shaders/**
       - experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_views.json
       - experiments/2026-10-30-cote-ete-gt/native_v14/source_v1314.html
       - experiments/2026-10-30-cote-ete-gt/native_v14/src/moteur3d_qt.cpp
@@ -131,6 +132,8 @@ jobs:
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: |
           cmake --install build --config Release --prefix dist
+          mkdir -p dist/shaders
+          cp src/shaders/m3d_raytrace_compute.hlsl dist/shaders/
           cp scene_pripyat_central.bin scene_pripyat_central.js scene_pripyat_views.json scene_pripyat_wheel_mechanism.json scene_energetik_seat_preview.bin scene_energetik_seat_preview.js scene_energetik_seat_preview.assets.json scene_pripyat_facade_bay.bin scene_pripyat_facade_bay.js assets/pripyat/energetik_roof_neon_sign.js assets/pripyat/energetik_roof_neon_sign.asset.json README.md dist/
           mkdir -p dist/assets/pripyat
           cp assets/pripyat/energetik_facade_bay.glb assets/pripyat/energetik_facade_bay.asset.json dist/assets/pripyat/
