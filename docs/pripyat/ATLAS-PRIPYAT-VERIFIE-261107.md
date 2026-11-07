@@ -2,7 +2,7 @@
 
 **Projet :** Moteur3D / Pripyat, catalogue documentaliste fondé sur photographies, cartographies et sources identifiables.  
 **Règle de sélection :** seulement les sites ou objets dont l’existence est confirmée. Une existence confirmée **ne valide pas** la précision de la position, de la forme ni l'état exact du bâtiment à une époque donnée.  
-**Nombre d’entrées :** 43.  
+**Nombre d’entrées :** 44.  
 **Ordre :** priorité 1 = axe de démonstration, 2 = extension structurante, 3 = détail d’environnement.
 
 ## Consignes de reconstruction
@@ -16,7 +16,7 @@
 - Les URL des sources sont des références documentaires : **ne pas réutiliser sans autorisation les photographies dans les textures commerciales**.
 
 
-## Place centrale et patrimoine (11)
+## Place centrale et patrimoine (12)
 
 | Priorité | Élément confirmé | Utilité 3D | Sources |
 |---|---|---|---|
@@ -29,6 +29,7 @@
 | 2 | **Cinéma Prometheus** | Cinéma avec grande salle, entrée et mosaïque extérieure. | [1](https://www.flickr.com/photos/lordolsen/albums/72157709935982846/) [2](https://www.bcd-urbex.com/pripyat-then-and-now/) |
 | 2 | **Mosaïque du cinéma Prometheus** | Mosaïque architecturale située sur un mur du cinéma ; décor distinct du palais. | [1](https://www.bcd-urbex.com/pripyat-then-and-now/) |
 | 2 | **Bureau de poste** | Bâtiment de la poste et mosaïque intérieure documentée. | [1](https://www.obsidianurbexphotography.com/leisure/pripyat-post-office-shops/) [2](https://www.bcd-urbex.com/pripyat-then-and-now/) |
+| 2 | **Fresque intérieure du bureau de poste** | Fresque sur le thème des communications : cosmonaute soviétique, figure féminine et colombes. **Distinguée de la fresque Energetik.** Dimensions et mur exact encore à relever ; non modélisée. | [1](https://www.bcd-urbex.com/pripyat-then-and-now/) [2](https://commons.wikimedia.org/wiki/File:Yuri_Gagarin_in_Pripyat_Post_Office.jpg) |
 | 2 | **Grand magasin / supermarché** | Vitrines, halls commerciaux, devantures et enseignes. | [1](https://www.obsidianurbexphotography.com/leisure/pripyat-post-office-shops/) [2](https://www.lemonde.fr/livres/portfolio/2020/10/26/en-images-tchernobyl-les-jours-d-apres_6057430_3260.html) [3](https://www.chernobylgallery.com/galleries/) |
 | 2 | **Restaurant de la place centrale** | Restaurant devant ou proche de l'esplanade centrale ; emplacement de détail à vérifier. | [1](https://www.forgottenchernobyl.net/pripyat-then-and-now-part-1-main-square) [2](https://www.lemonde.fr/livres/portfolio/2020/10/26/en-images-tchernobyl-les-jours-d-apres_6057430_3260.html) |
 
