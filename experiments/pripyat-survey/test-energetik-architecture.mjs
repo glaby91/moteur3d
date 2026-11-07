@@ -26,7 +26,7 @@ assert.equal(api.validate(),true);
 assert.equal(api.validateFootprints(),true,'urban buildings must not overlap');
 assert.throws(()=>api.validateFootprints({
  energetik:api.footprints.energetik,polissya:api.footprints.polissya,
- housing:[{id:'invalid',x0:45,x1:50,z0:-30,z1:-25}]
+ housing:[{id:'invalid',x0:86,x1:90,z0:3,z1:8}]
 }),/overlapping footprints/,'reject geometrically impossible apartment/hotel overlap');
 assert.equal(api.arch.envelope.x1-api.arch.envelope.x0,81);
 assert.ok(Math.abs(api.arch.envelope.z1-api.arch.envelope.z0-24.6)<1e-8);
