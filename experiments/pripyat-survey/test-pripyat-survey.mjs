@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import {point,distance3D,horizontalDistance,polygonArea,footprintGap,measurePair,surveyReport} from "./pripyat-survey.mjs";
+import {point,distance3D,horizontalDistance,polygonArea,footprintGap,measurePair,surveyReport,geographicLandmarks,geodesicDistanceMetres,localTangentMetres,landmarkSeparationReport} from "./pripyat-survey.mjs";
 assert.equal(distance3D(point(0,0,0),point(3,4,12)),13);
 assert.equal(horizontalDistance(point(0,0,0),point(3,4,12)),Math.sqrt(153));
 assert.equal(polygonArea([[0,0],[2,0],[2,3],[0,3]]),6);
@@ -8,3 +8,10 @@ assert.equal(footprintGap([[0,0],[3,0],[3,3],[0,3]],[[1,1],[2,1],[2,2],[1,2]]),0
 assert.deepEqual(measurePair(point(0,0,0),point(3,4,0)),{horizontal_m:3,spatial_m:5,elevation_m:4});
 assert.equal(surveyReport().verified,false);
 console.log("Pripyat survey geometry: tests passed");
+
+const geo=geodesicDistanceMetres(geographicLandmarks.energetik,geographicLandmarks.polissya);
+assert.ok(geo>100&&geo<140,"historic landmarks should be about 100–140 m apart");
+const offset=localTangentMetres(geographicLandmarks.energetik,geographicLandmarks.polissya);
+assert.ok(offset.east_m>0&&offset.north_m>0);
+assert.equal(landmarkSeparationReport().comparable,false);
+assert.equal(footprintGap([[0,0],[4,0],[4,1],[0,1]],[[1,-1],[2,-1],[2,2],[1,2]]),0,"crossing edges without contained vertices");
