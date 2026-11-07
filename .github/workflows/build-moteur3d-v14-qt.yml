@@ -93,6 +93,7 @@ jobs:
           node experiments/pripyat-survey/test-pripyat-survey.mjs
           node experiments/pripyat-survey/test-mosaic-clearance.mjs
           node experiments/pripyat-survey/test-energetik-architecture.mjs
+          node experiments/pripyat-survey/test-energetik-sightlines.mjs
 
       - name: Export runtime scenes
         shell: bash
