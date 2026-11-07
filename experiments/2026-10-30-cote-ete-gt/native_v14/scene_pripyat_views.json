@@ -2,7 +2,7 @@
   "scene": "Palais de la Culture Energetik — Pripiat",
   "schema_version": 1,
   "annex": "docs/pripyat/VUES-ENERGETIK.md",
-  "notes": "Vues d'inspection du palais Energetik. Vue 06 dans le gymnase de l'aile arrière avec vitrage vers le parc; emplacement précis non certifié faute de plan coté.",
+  "notes": "11 vues de contrôle (dont 06 vue depuis le gymnase vers la roue et 11 portrait mécanique). La géolocalisation de la roue est sourcée, mais la transformation scène/terrain demeure provisoire.",
   "views": [
     {
       "name": "01 — Façade complète et colonnade",
@@ -70,16 +70,16 @@
       "hour_step": 12
     },
     {
-      "name": "06 — Gymnase Energetik, aile arrière",
+      "name": "06 — Gymnase vers la grande roue, par les baies",
       "target": [
-        -25.5,
-        4.4,
-        -55.8
+        -14.566,
+        12.4,
+        -122.658
       ],
-      "distance": 19.1,
-      "angle": -90,
-      "elevation": 4,
-      "fov": 76,
+      "distance": 63,
+      "angle": -12,
+      "elevation": -7.3,
+      "fov": 52,
       "hour_step": 12
     },
     {
@@ -133,6 +133,19 @@
       "elevation": 3,
       "fov": 55,
       "hour_step": 32
+    },
+    {
+      "name": "11 — Grande roue, rotor et nacelles jaunes",
+      "target": [
+        -14.566,
+        14,
+        -122.658
+      ],
+      "distance": 49,
+      "angle": 0,
+      "elevation": 4,
+      "fov": 58,
+      "hour_step": 12
     }
   ]
 }
