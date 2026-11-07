@@ -20,9 +20,9 @@ def compare(before: Path, after: Path):
         raise ValueError(f"Resolution mismatch: {a.size} vs {b.size}")
     diff = ImageChops.difference(a, b)
     stat = ImageStat.Stat(diff)
-    rms = [(sum(v * v * n for v, n in enumerate(h)) / sum(h)) ** 0.5
-           for h in diff.histogram()[i * 256:(i + 1) * 256]
-           for n in [sum(h)] if n]  # one RMS value per RGB channel
+    # ImageStat computes the RMS independently for each RGB channel.
+    # Iterating a flattened histogram here incorrectly treated bin counts as lists.
+    rms = stat.rms
     result = {
         "before": str(before), "after": str(after),
         "resolution": list(a.size),
