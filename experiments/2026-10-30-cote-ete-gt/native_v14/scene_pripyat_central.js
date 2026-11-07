@@ -82,6 +82,24 @@ m3dCheckEnergetikDatum();
  * open ground-floor bays and masonry piers, not an opaque three-storey wall.
  * The mural itself remains an independent textured mesh in makeScene().
  */
+// East stair volume with three geometrically connected flights.
+// The shared datum drives risers, upper landings and return gallery.
+function m3dBuildEastStairCore({box,capsule}, a=M3D_ENERGETIK_ARCH){
+  const l=a.levels;
+  const stairDatum=[l.ground,l.firstSlab+l.slabThickness,
+                    l.secondSlab+l.slabThickness,l.roof];
+  for(let flight=0;flight<3;flight++){
+    const start=stairDatum[flight], top=stairDatum[flight+1];
+    const steps=17, rise=(top-start)/steps, tread=0.625, startZ=-40.50;
+    for(let i=0;i<steps;i++){
+      const z=startZ+i*tread,topY=start+(i+1)*rise;
+      box(21.0,topY-0.15,z,26.05,topY,z+tread+0.015,'stone');
+    }
+    box(20.0,top-0.16,-29.90,27.0,top+0.02,-27.40,'concrete');
+    box(26.0,top-0.16,-40.55,27.0,top+0.02,-23.05,'concrete');
+    capsule([25.93,top+0.13,-40.2],[25.93,top+0.93,-29.7],0.035,'rust');
+  }
+}
 function m3dBuildFoyerMuralArcade({box}, a=M3D_ENERGETIK_ARCH) {
   const f=a.foyer,l=a.levels, x0=f.mosaicWallX, x1=x0+f.arcadeDepth;
   // Full mural backing; side facing the foyer is on the -X side.
@@ -761,23 +779,7 @@ function makeScene() {
       box(x-3.2,y,-38.5,x-1.2,y+1.9,-37.8,'wood');
     }
   }
-  // East stair core: three flights aligned with the shared architectural
-  // levels instead of the previous 1.42 m deep steps and disconnected slabs.
-  const stairDatum=[archLevels.ground,archLevels.firstSlab+archLevels.slabThickness,
-                    archLevels.secondSlab+archLevels.slabThickness,archLevels.roof];
-  for(let flight=0;flight<3;flight++){
-    const start=stairDatum[flight], top=stairDatum[flight+1];
-    const steps=17, rise=(top-start)/steps, tread=0.625, startZ=-40.50;
-    for(let i=0;i<steps;i++){
-      const z=startZ+i*tread, topY=start+(i+1)*rise;
-      box(21.0,topY-0.15,z,25.7,topY,z+tread+0.015,'stone');
-    }
-    // Connected upper landing and a narrow return gallery to the next flight.
-    // The x=21..25.7 stair well remains open along its full height.
-    box(20.0,top-0.16,-29.90,27.0,top+0.02,-27.40,'concrete');
-    box(26.0,top-0.16,-40.55,27.0,top+0.02,-23.05,'concrete');
-    capsule([25.93,top+0.13,-40.2],[25.93,top+0.93,-29.7],0.035,'rust');
-  }
+  m3dBuildEastStairCore({box,capsule});
   // Leave a genuine 3.8 m rooftop doorway in the stair tower wall.
   box(20.0,9.4,-22.2,21.7,13.3,-21.0,'rust');
   box(25.3,9.4,-22.2,27.0,13.3,-21.0,'rust');
