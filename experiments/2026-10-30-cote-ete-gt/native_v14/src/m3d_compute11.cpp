@@ -13,8 +13,22 @@ using Microsoft::WRL::ComPtr;
 namespace m3d {
 namespace {
 struct alignas(16) GpuNode { float mn[3]; uint32_t left; float mx[3]; uint32_t right; uint32_t first,count,pad0,pad1; };
-struct alignas(16) GpuTri { float p0[3]; uint32_t material; float p1[3]; uint32_t pad0; float p2[3]; uint32_t pad1; float n0[3]; uint32_t pad2; float n1[3]; uint32_t pad3; float n2[3]; uint32_t pad4; };
-struct alignas(16) Params { float eye[3],tanHalf,forward[3],aspect,right[3],nearPlane,up[3],farPlane; uint32_t width,height,nodeCount,triangleCount,rootIndex,maxTraversal,reserved0,reserved1; };
+struct alignas(16) GpuObject {
+ float mn[3]; uint32_t kind;
+ float mx[3]; uint32_t material;
+ float a[3]; float r;
+ float b[3]; float r1;
+ float c[3]; float k;
+ float n0[3]; float len;
+ float n1[3]; float len2;
+ float n2[3]; float pad0;
+ float center[3]; float pad1;
+ float core[3]; float pad2;
+};
+struct alignas(16) GpuMaterial { float shade[4]; };
+static_assert(sizeof(GpuObject)==160,"GpuObject/HLSL layout mismatch");
+static_assert(sizeof(GpuMaterial)==16,"GpuMaterial/HLSL layout mismatch");
+struct alignas(16) Params { float eye[3],tanHalf,forward[3],aspect,right[3],nearPlane,up[3],farPlane; uint32_t width,height,nodeCount,objectCount,rootIndex,maxTraversal,reserved0,reserved1; float sunDir[3],ambient; };
 void v3(float* dst,V v){dst[0]=v.x;dst[1]=v.y;dst[2]=v.z;}
 template<class T> bool makeSrv(ID3D11Device* d,const std::vector<T>& values,ComPtr<ID3D11ShaderResourceView>& srv){
  if(values.empty())return false;
@@ -30,14 +44,32 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,std
  if(w<=0||h<=0||w>8192||h>8192){error=L"Résolution compute invalide";return false;}
  if(scene.root<0||scene.node.empty()||scene.order.empty()){error=L"BVH absent";return false;}
  if(scene.obj.size()>UINT32_MAX||scene.node.size()>UINT32_MAX||scene.order.size()>UINT32_MAX){error=L"Scène trop grande";return false;}
- // Phase 1 supports triangle-only BVH. Never silently drop boxes, cones, capsules, etc.
- for(const auto& o:scene.obj)if(o.kind!=Kind::Triangle){error=L"Compute phase 1 : BVH contenant des primitives non triangulaires ; repli CPU";return false;}
  std::vector<GpuNode> nodes;nodes.reserve(scene.node.size());
  for(const auto& n:scene.node){GpuNode g{};v3(g.mn,n.mn);v3(g.mx,n.mx);g.left=uint32_t(n.left);g.right=uint32_t(n.right);g.first=uint32_t(n.start);g.count=uint32_t(n.count);
  if(n.count<0||n.start<0||uint64_t(n.start)+uint64_t(n.count)>scene.order.size()||(n.count==0&&(n.left<0||n.right<0))){error=L"BVH invalide";return false;}nodes.push_back(g);}
- std::vector<GpuTri> triangles;triangles.reserve(scene.obj.size());
- for(const auto& o:scene.obj){GpuTri t{};v3(t.p0,o.a);v3(t.p1,o.b);v3(t.p2,o.c);v3(t.n0,o.n0);v3(t.n1,o.n1);v3(t.n2,o.n2);t.material=o.mat;triangles.push_back(t);}
- for(uint32_t index:scene.order)if(index>=triangles.size()){error=L"Index de primitive invalide";return false;}
+ std::vector<GpuObject> objects;objects.reserve(scene.obj.size());
+ for(const auto& o:scene.obj){
+  GpuObject g{};v3(g.mn,o.mn);v3(g.mx,o.mx);g.kind=uint32_t(o.kind);g.material=o.mat;
+  v3(g.a,o.a);g.r=o.r;v3(g.b,o.b);g.r1=o.r1;v3(g.c,o.c);g.k=o.k;
+  v3(g.n0,o.n0);g.len=o.len;v3(g.n1,o.n1);g.len2=o.len2;v3(g.n2,o.n2);
+  v3(g.center,o.center);v3(g.core,o.core);objects.push_back(g);
+ }
+ if(objects.empty()||scene.mat.empty()){error=L"Scène Compute sans géométrie ou matériaux";return false;}
+ std::vector<GpuMaterial> materials;materials.reserve(scene.mat.size());
+ for(const auto& m:scene.mat){
+  GpuMaterial g{};uint64_t rr=0,gg=0,bb=0,count=0;
+  if(!m.colorMip.empty()&&!m.colorMip.front().p.empty()){
+   const auto& image=m.colorMip.front().p;const size_t step=std::max<size_t>(1,image.size()/128);
+   for(size_t i=0;i<image.size();i+=step){const auto v=image[i];rr+=(v>>16)&255;gg+=(v>>8)&255;bb+=v&255;++count;}
+  }else if(!m.mip.empty()&&!m.mip.front().p.empty()){
+   const auto& image=m.mip.front().p;const size_t step=std::max<size_t>(1,image.size()/128);
+   for(size_t i=0;i<image.size();i+=step){const auto v=image[i];rr+=((v>>11)&31)*255/31;gg+=((v>>5)&63)*255/63;bb+=(v&31)*255/31;++count;}
+  }
+  if(!count)count=1;
+  g.shade[0]=float(rr)/float(count*255);g.shade[1]=float(gg)/float(count*255);g.shade[2]=float(bb)/float(count*255);
+  g.shade[3]=float(m.reflectivityPercent)/100.f;materials.push_back(g);
+ }
+ for(uint32_t index:scene.order)if(index>=objects.size()){error=L"Index de primitive invalide";return false;}
  UINT flags=0;
  ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> ctx;D3D_FEATURE_LEVEL level{};
  HRESULT hr=D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,flags,nullptr,0,D3D11_SDK_VERSION,&device,&level,&ctx);
@@ -46,12 +78,12 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,std
  auto shaderPath=std::filesystem::path(exe).parent_path()/L"shaders"/L"m3d_raytrace_compute.hlsl";
  ComPtr<ID3DBlob> bytecode,diagnostics;
  hr=D3DCompileFromFile(shaderPath.c_str(),nullptr,D3D_COMPILE_STANDARD_FILE_INCLUDE,"CSMain","cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&bytecode,&diagnostics);
- if(FAILED(hr)){error=L"Compilation compute HLSL impossible : "+shaderPath.wstring();return false;}
+ if(FAILED(hr)){error=L"Compilation compute HLSL impossible : "+shaderPath.wstring();if(diagnostics&&diagnostics->GetBufferPointer()){auto msg=static_cast<const char*>(diagnostics->GetBufferPointer());const size_t n=std::min<size_t>(diagnostics->GetBufferSize(),1600);for(size_t i=0;i<n;++i)error+=wchar_t(uint8_t(msg[i]));}return false;}
  ComPtr<ID3D11ComputeShader> shader;
  if(FAILED(device->CreateComputeShader(bytecode->GetBufferPointer(),bytecode->GetBufferSize(),nullptr,&shader))){error=L"CreateComputeShader impossible";return false;}
- ComPtr<ID3D11ShaderResourceView> srv0,srv1,srv2;
- if(!makeSrv(device.Get(),nodes,srv0)||!makeSrv(device.Get(),triangles,srv1)||!makeSrv(device.Get(),scene.order,srv2)){error=L"Allocation des buffers BVH GPU impossible";return false;}
- Params params{};v3(params.eye,cam.eye);params.tanHalf=cam.tanHalf;v3(params.forward,cam.f);params.aspect=cam.aspect;v3(params.right,cam.r);params.nearPlane=0.0001f;v3(params.up,cam.u);params.farPlane=100000.f;params.width=uint32_t(w);params.height=uint32_t(h);params.nodeCount=uint32_t(nodes.size());params.triangleCount=uint32_t(triangles.size());params.rootIndex=uint32_t(scene.root);params.maxTraversal=uint32_t(std::min<size_t>(1000000,nodes.size()*4+1));
+ ComPtr<ID3D11ShaderResourceView> srv0,srv1,srv2,srv3;
+ if(!makeSrv(device.Get(),nodes,srv0)||!makeSrv(device.Get(),objects,srv1)||!makeSrv(device.Get(),scene.order,srv2)||!makeSrv(device.Get(),materials,srv3)){error=L"Allocation des buffers BVH GPU impossible";return false;}
+ Params params{};v3(params.eye,cam.eye);params.tanHalf=cam.tanHalf;v3(params.forward,cam.f);params.aspect=cam.aspect;v3(params.right,cam.r);params.nearPlane=0.0001f;v3(params.up,cam.u);params.farPlane=100000.f;params.width=uint32_t(w);params.height=uint32_t(h);params.nodeCount=uint32_t(nodes.size());params.objectCount=uint32_t(objects.size());v3(params.sunDir,norm(sun));params.ambient=std::max(.10f,std::min(1.f,daylight));params.rootIndex=uint32_t(scene.root);params.maxTraversal=uint32_t(std::min<size_t>(1000000,nodes.size()*4+1));
  D3D11_BUFFER_DESC cb{};cb.ByteWidth=sizeof(Params);cb.Usage=D3D11_USAGE_DEFAULT;cb.BindFlags=D3D11_BIND_CONSTANT_BUFFER;D3D11_SUBRESOURCE_DATA init{};init.pSysMem=&params;ComPtr<ID3D11Buffer> constant;
  if(FAILED(device->CreateBuffer(&cb,&init,&constant))){error=L"Constantes GPU indisponibles";return false;}
  D3D11_TEXTURE2D_DESC td{};td.Width=UINT(w);td.Height=UINT(h);td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_R32G32B32A32_FLOAT;td.SampleDesc.Count=1;td.Usage=D3D11_USAGE_DEFAULT;td.BindFlags=D3D11_BIND_UNORDERED_ACCESS;
@@ -60,10 +92,10 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,std
  td.Usage=D3D11_USAGE_STAGING;td.BindFlags=0;td.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
  ComPtr<ID3D11Texture2D> staging;
  if(FAILED(device->CreateTexture2D(&td,nullptr,&staging))){error=L"Texture de lecture GPU indisponible";return false;}
- ID3D11ShaderResourceView* srvs[]={srv0.Get(),srv1.Get(),srv2.Get()};ID3D11UnorderedAccessView* uavs[]={uav.Get()};ID3D11Buffer* cbuff[]={constant.Get()};
- ctx->CSSetShader(shader.Get(),nullptr,0);ctx->CSSetShaderResources(0,3,srvs);ctx->CSSetUnorderedAccessViews(0,1,uavs,nullptr);ctx->CSSetConstantBuffers(0,1,cbuff);
+ ID3D11ShaderResourceView* srvs[]={srv0.Get(),srv1.Get(),srv2.Get(),srv3.Get()};ID3D11UnorderedAccessView* uavs[]={uav.Get()};ID3D11Buffer* cbuff[]={constant.Get()};
+ ctx->CSSetShader(shader.Get(),nullptr,0);ctx->CSSetShaderResources(0,4,srvs);ctx->CSSetUnorderedAccessViews(0,1,uavs,nullptr);ctx->CSSetConstantBuffers(0,1,cbuff);
  ctx->Dispatch(UINT((w+7)/8),UINT((h+7)/8),1);
- ID3D11UnorderedAccessView* nullUav=nullptr;ID3D11ShaderResourceView* nullSrvs[3]={};ctx->CSSetUnorderedAccessViews(0,1,&nullUav,nullptr);ctx->CSSetShaderResources(0,3,nullSrvs);
+ ID3D11UnorderedAccessView* nullUav=nullptr;ID3D11ShaderResourceView* nullSrvs[4]={};ctx->CSSetUnorderedAccessViews(0,1,&nullUav,nullptr);ctx->CSSetShaderResources(0,4,nullSrvs);
  ctx->CopyResource(staging.Get(),output.Get());
  D3D11_MAPPED_SUBRESOURCE mapped{};
  if(FAILED(ctx->Map(staging.Get(),0,D3D11_MAP_READ,0,&mapped))){error=L"Lecture résultat compute impossible";return false;}
