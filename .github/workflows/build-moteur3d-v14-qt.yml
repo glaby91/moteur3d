@@ -28,6 +28,7 @@ on:
       - experiments/2026-10-30-cote-ete-gt/native_v14/src/moteur3d_qt.cpp
       - experiments/2026-10-30-cote-ete-gt/native_v14/src/**
       - docs/pripyat/**
+      - experiments/pripyat-survey/**
       - experiments/2026-10-30-cote-ete-gt/native_v14/version.h
       - experiments/2026-10-30-cote-ete-gt/native_v14/build_info.h
       - .github/workflows/build-moteur3d-v14-qt.yml
@@ -90,6 +91,7 @@ jobs:
         run: |
           node --check experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js
           node experiments/pripyat-survey/test-pripyat-survey.mjs
+          node experiments/pripyat-survey/test-mosaic-clearance.mjs
 
       - name: Export runtime scenes
         shell: bash
