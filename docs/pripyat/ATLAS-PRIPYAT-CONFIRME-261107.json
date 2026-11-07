@@ -7,9 +7,9 @@
     "River passenger terminal at connected old river arm; cargo docks of other towns excluded",
     "Red Forest near ChNPP outside Pripyat proper; no made-up perimeter"
   ],
-  "count": 43,
+  "count": 44,
   "section_counts": {
-    "centre": 11,
+    "centre": 12,
     "parc": 6,
     "voirie": 1,
     "habitat": 1,
@@ -169,6 +169,24 @@
       "reference_urls": [
         "https://www.obsidianurbexphotography.com/leisure/pripyat-post-office-shops/",
         "https://www.bcd-urbex.com/pripyat-then-and-now/"
+      ],
+      "location": null
+    },
+    {
+      "id": "post-office-mural",
+      "name": "Fresque intérieure du bureau de poste de Pripyat — histoire des communications",
+      "section": "centre",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "documentée — à intégrer dans l'intérieur du bureau de poste",
+      "description": "Grande fresque murale polychrome à l'intérieur du bureau de poste central : cosmonaute soviétique, figure féminine, colombes, histoire du courrier et des moyens de communication. Photos avant 1986 et après l'évacuation. Distincte de la fresque du hall Energetik. Emplacement de mur exact et dimensions non encore relevés.",
+      "reference_urls": [
+        "https://www.bcd-urbex.com/pripyat-then-and-now/",
+        "https://www.bbc.com/news/extra/yhc2px09n2/newsround-chernobyl-anniversary-disaster",
+        "https://commons.wikimedia.org/wiki/File:Yuri_Gagarin_in_Pripyat_Post_Office.jpg",
+        "https://www.flickr.com/photos/timster1973/13914681625"
       ],
       "location": null
     },
@@ -732,6 +750,7 @@
   "notes": [
     "Une existence confirmée ne valide pas l'emplacement au mètre.",
     "La colonnade est attestée, mais non ses raccordements historiques exacts.",
-    "Forêt rouge en 1986 exigée, même si le reste de la scène montre des bâtiments postérieurs."
+    "Forêt rouge en 1986 exigée, même si le reste de la scène montre des bâtiments postérieurs.",
+    "Fresque du bureau de poste confirmée indépendamment du palais Energetik par photos avant/après. Échelle, mur et position exacte dans le local non encore mesurés : aucune géométrie placée sans relevé."
   ]
 }
