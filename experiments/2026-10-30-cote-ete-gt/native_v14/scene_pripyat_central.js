@@ -24,7 +24,9 @@ const M3D_SCENE_LIGHTS = [];
 const M3D_PRIPYAT_BLOCKOUT = Object.freeze({
   plaza:{x0:-53,x1:53,z0:-15,z1:61},
   energetik:{x0:-50.5,x1:30.5,z0:-43.4,z1:-18.8,mainHeight:11.4,towerHeight:14},
-  polissya:{x0:40,x1:78,z0:-42,z1:-20,height:16.2},
+  // Final exterior blockout: Hotel Polissya's long axis Z is perpendicular
+  // to Energetik's X axis. Photo-guided orientation, not cadastral survey.
+  polissya:{x0:82,x1:104,z0:-12,z1:26,height:16.2},
   // The sports hall is a rear WING of Energetik, not a separate building.
   housing:[
     {id:'west-south',x0:-64,z0:-34,x1:-57,z1:-10,floors:6,frontZ:-10},
@@ -35,6 +37,11 @@ const M3D_PRIPYAT_BLOCKOUT = Object.freeze({
     {id:'east-north',x0:47,z0:18,x1:60,z1:50,floors:6,frontZ:18}
   ]
 });
+// Local, unrotated proportions of Polissya. Applied through a 90-degree
+// rigid rotation about Y into the independently situated world footprint.
+// Width/length refer to the PHOTOGRAPHIC model, not surveyed plans.
+const M3D_POLISSYA_MODEL=Object.freeze({x0:40,x1:78,z0:-42,z1:-20,height:16.2});
+const M3D_POLISSYA_ORIENTATION_DEGREES=90;
 // Historical typology for comparison only. This is a later documented
 // refurbishment of the 2C-06-9/70 standard design, NOT a measured set of
 // as-built dimensions for the modified Pripyat palace. Never automatically
@@ -549,14 +556,23 @@ function m3dBuildHousing({box},b){
 // and passes IN FRONT of the hotel. It touches neither building.
 // Unmeasured dimensions are an exterior visual estimate (tolerance ~1m).
 function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polissya){
- const x0=a.envelope.x1+3.2,x1=b.x1+1.0,bow=5.8,centerZ=-13.6,halfWidth=1.85;
+ // Cubic Bézier in X/Z: begins near palace, passes before hotel's west face.
+ // Roof is open on BOTH ends and separated by >=1.1m from either building.
+ const control=Object.freeze([
+  [a.envelope.x1+3.3,-12.8], [58,-18.6], [76.4,-18.3], [b.x0-3.9,22.0]
+ ]);
+ const halfWidth=1.85;
  const at=(t,offset=0)=>{
-   const x=x0+(x1-x0)*t,z=centerZ+bow*Math.sin(Math.PI*t);
-   const tx=x1-x0,tz=bow*Math.PI*Math.cos(Math.PI*t),inv=1/Math.hypot(tx,tz);
-   return [x-offset*tz*inv,z+offset*tx*inv];
+   const u=1-t;
+   const x=u*u*u*control[0][0]+3*u*u*t*control[1][0]+3*u*t*t*control[2][0]+t*t*t*control[3][0];
+   const z=u*u*u*control[0][1]+3*u*u*t*control[1][1]+3*u*t*t*control[2][1]+t*t*t*control[3][1];
+   const dx=3*u*u*(control[1][0]-control[0][0])+6*u*t*(control[2][0]-control[1][0])+3*t*t*(control[3][0]-control[2][0]);
+   const dz=3*u*u*(control[1][1]-control[0][1])+6*u*t*(control[2][1]-control[1][1])+3*t*t*(control[3][1]-control[2][1]);
+   const inv=1/Math.hypot(dx,dz);
+   return [x-offset*dz*inv,z+offset*dx*inv];
  };
- return Object.freeze({x0,x1,bow,centerZ,halfWidth,roofBottom:3.55,roofTop:3.86,
-   pierCount:17,segments:36,at});
+ return Object.freeze({control,halfWidth,roofBottom:3.55,roofTop:3.86,
+   pierCount:20,segments:48,at});
 }
 function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
  const p=m3dPolissyaArcadePlan(a);
@@ -721,7 +737,27 @@ function m3dBuildEnergetikFacade({box,roundBox,objects}){
 // lower western wing, broken glazing, pale vertical facade cladding,
 // open rooftop terrace and individual oxidised Cyrillic letters.
 // Geometry dimensions are provisional, based on the visual references.
-function m3dBuildPolissya({box,capsule}, cfg=M3D_PRIPYAT_BLOCKOUT.polissya){
+// World-space instancing: 90° Y-axis rotation around the LOCAL hotel
+// footprint. All 3D details, windows and roof signage rotate together.
+function m3dPolissyaLocalToWorld(x,z,cfg=M3D_PRIPYAT_BLOCKOUT.polissya){
+ return [cfg.x0+M3D_POLISSYA_MODEL.z1-z,
+         cfg.z0+x-M3D_POLISSYA_MODEL.x0];
+}
+function m3dBuildPolissya({box,capsule},cfg=M3D_PRIPYAT_BLOCKOUT.polissya){
+ const worldBox=(x0,y0,z0,x1,y1,z1,mat)=>{
+   const [ax,az]=m3dPolissyaLocalToWorld(x0,z0,cfg);
+   const [bx,bz]=m3dPolissyaLocalToWorld(x1,z1,cfg);
+   box(Math.min(ax,bx),y0,Math.min(az,bz),
+       Math.max(ax,bx),y1,Math.max(az,bz),mat);
+ };
+ const worldCapsule=(a,b,r,mat)=>{
+   const [ax,az]=m3dPolissyaLocalToWorld(a[0],a[2],cfg);
+   const [bx,bz]=m3dPolissyaLocalToWorld(b[0],b[2],cfg);
+   capsule([ax,a[1],az],[bx,b[1],bz],r,mat);
+ };
+ m3dBuildPolissyaLocal({box:worldBox,capsule:worldCapsule},M3D_POLISSYA_MODEL);
+}
+function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
  const {x0,x1,z0,z1}=cfg,mainH=cfg.height??16.2;
  const wall=.50,westW=11.0,westEnd=x0+westW,westH=10.95,step=2.65;
  // Shallow foundations and truly hollow interior (no overlapping concrete prism).
@@ -1339,8 +1375,8 @@ function makeScene() {
     [52,7,14],[48,-11,13],[-52,49,12],[-48,2,11],[-44,-12,12],
     [-34,-10,13],[34,-11,12],[43,-11,13],[-56,68,11],[53,67,12],
     // Dense but irregular overgrowth around the front of Hotel Polissya.
-    [62,-5,15],[70,-4,17],[77,-7,13],[83,0,16],[60,10,13],
-    [73,14,15],[82,17,14],[67,24,16],[88,26,12]
+    [62,-5,15],[70,-4,17],[77,-7,13],[79,-1,16],[60,10,13],
+    [73,14,15],[79,19,14],[67,24,16],[109,30,12]
   ];
   if (process.env.M3D_IMPORT_PRIPYAT_GLB !== '1') {
     for (let i=0;i<matureTrees.length;i++) poplar(...matureTrees[i],0.76+(i%4)*0.11);
