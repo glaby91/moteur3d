@@ -5,7 +5,7 @@
   "notes": "target is the camera look target in metres; distance is the orbit radius; angle and elevation are degrees; hour_step maps to 06:00 + 30 minutes per step.",
   "views": [
     { "name": "01 — Façade et colonnade", "target": [0.0, 5.2, -30.0], "distance": 16.0, "angle": 0.0, "elevation": 7.0, "fov": 50.0, "hour_step": 12 },
-    { "name": "02 — Foyer et fresque longue", "target": [8.2, 5.0, -31.4], "distance": 14.0, "angle": -90.0, "elevation": 4.0, "fov": 70.0, "hour_step": 12 },
+    { "name": "02 — Mosaïque du hall et escalier", "target": [8.12, 4.15, -36.80], "distance": 7.0, "angle": -90.0, "elevation": 3.0, "fov": 60.0, "hour_step": 12 },
     { "name": "03 — Grand escalier", "target": [2.5, 3.0, -29.2], "distance": 4.5, "angle": -90.0, "elevation": 8.0, "fov": 52.0, "hour_step": 12 },
     { "name": "04 — Cinéma / auditorium", "target": [-32.5, 2.15, -33.4], "distance": 7.8, "angle": 0.0, "elevation": 2.0, "fov": 80.0, "hour_step": 12 },
     { "name": "05 — Mezzanine", "target": [-4.0, 4.9, -31.0], "distance": 6.0, "angle": -90.0, "elevation": 5.0, "fov": 55.0, "hour_step": 12 },

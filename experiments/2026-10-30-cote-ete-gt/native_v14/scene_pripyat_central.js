@@ -3,9 +3,9 @@
 // Documentary-photo references and map sources are listed in docs/pripyat/README.md.
 
 const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
-  concrete: 2, plaster: 1, mural: 1, volcanicTuff: 3, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
+  concrete: 2, plaster: 1, mural: 1, energetikFresco: 2, volcanicTuff: 3, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
   asphalt: 3, stone: 5, metal: 18, rust: 7, leaves: 2, grass: 1,
-  bark: 1, wood: 4, sign: 3, debris: 2, puddle: 28, seatFabric: 1, seatFabricClean: 1, seatVinylBrown: 28, seatSupportPaint: 12, seatTrim: 2, curtain: 1, cinemaScreen: 0
+  bark: 1, wood: 4, sign: 3, neon: 2, debris: 2, puddle: 28, seatFabric: 1, seatFabricClean: 1, seatVinylBrown: 28, seatSupportPaint: 12, seatTrim: 2, curtain: 1, cinemaScreen: 0
 });
 const M3D_MATERIAL_TRANSMISSION_PERCENT = Object.freeze({ glass: 62 });
 const M3D_MATERIAL_IOR = Object.freeze({ glass: 1.48 });
@@ -20,8 +20,8 @@ function makeScene() {
   // Coordinate convention: Y is vertical. The camera approaches from +Z.
   // Zone 01 covers the central plaza, Energetik and Hotel Polissya frontages.
   const groundY = -0.08;
-  box(-64, -0.32, -70, 64, groundY, 88, 'asphalt');
-  box(-58, -0.10, -62, 58, -0.045, 70, 'concrete');
+  box(-64, -0.32, -70, 94, groundY, 88, 'asphalt');
+  box(-58, -0.10, -62, 89, -0.045, 70, 'concrete');
 
   // Main paved square: broad worn paving, joint bands, patched slabs and weeds.
   box(-53, -0.045, -15, 53, 0.015, 61, 'stone');
@@ -39,8 +39,8 @@ function makeScene() {
   ]) box(p[0], 0.018, p[1], p[0] + p[3], 0.023, p[1] + p[4], 'concrete');
 
   // Roads and sidewalks frame the plaza and connect to the surrounding blocks.
-  box(-64, -0.015, 65, 64, 0.025, 88, 'asphalt');
-  box(-64, 0.025, 61, 64, 0.13, 65, 'concrete');
+  box(-64, -0.015, 65, 94, 0.025, 88, 'asphalt');
+  box(-64, 0.025, 61, 94, 0.13, 65, 'concrete');
   box(-64, 0.025, -19, 64, 0.13, -15, 'concrete');
   box(-60, 0.02, -15, -55, 0.14, 65, 'concrete');
   box(55, 0.02, -15, 60, 0.14, 65, 'concrete');
@@ -87,6 +87,10 @@ function makeScene() {
   box(-47.6,9.02,-20.74,26.2,9.28,-19.26,'stone');
   box(-47.9,9.28,-20.94,26.5,9.48,-19.08,'concrete');
   for (const x of [-45.8,-39.0,-32.2,-25.4,-18.6,-11.8,-5.0,1.8,8.6,15.4,22.2]) {
+    if (x === -39.0) {
+      buildEnergetikFacadeBay({ objects, roundBox }, x, 0, -19.63, { nativeMaterial: 'concrete' });
+      continue;
+    }
     box(x-0.42,0.40,-20.34,x+0.42,0.78,-19.34,'stone');
     box(x-0.27,0.78,-20.16,x+0.27,8.25,-19.54,'concrete');
     box(x-0.48,8.25,-20.42,x+0.48,8.62,-19.28,'stone');
@@ -122,30 +126,11 @@ function makeScene() {
     capsule([x,0.72,-21.8],[x,1.32,-19.8],0.09,'rust');
     for (let z=-21.6;z<-19.9;z+=0.34) capsule([x,0.82,z],[x,1.14,z],0.035,'metal');
   }
-  // Recessed, weathered rooftop plaque and built-up Cyrillic lettering.
-  box(-7.0,10.0,-20.9,7.0,11.25,-20.18,'rust');
-  box(-6.78,10.10,-21.0,6.78,11.12,-20.96,'windowdark');
-  const glyphs={
-    'Э':['11110','10001','00001','01111','00001','10001','11110'],
-    'Н':['10001','10001','10001','11111','10001','10001','10001'],
-    'Е':['11111','10000','10000','11110','10000','10000','11111'],
-    'Р':['11110','10001','10001','11110','10000','10000','10000'],
-    'Г':['11111','10000','10000','10000','10000','10000','10000'],
-    'Т':['11111','00100','00100','00100','00100','00100','00100'],
-    'И':['10001','10011','10101','10101','11001','10001','10001'],
-    'К':['10001','10010','10100','11000','10100','10010','10001']
-  };
-  const title='ЭНЕРГЕТИК', cell=0.13, gap=0.075;
-  const titleWidth=title.length*5*cell+(title.length-1)*gap;
-  let titleX=-titleWidth*0.5;
-  for(const ch of title){
-    const rows=glyphs[ch];
-    for(let row=0;row<7;row++)for(let col=0;col<5;col++)if(rows[row][col]==='1'){
-      const x=titleX+col*cell, y=10.20+(6-row)*cell;
-      box(x,y,-21.04,x+cell*0.82,y+cell*0.82,-20.98,'brick');
-    }
-    titleX+=5*cell+gap;
-  }
+  // Nine separately addressable Cyrillic neon letters, split into short glass
+  // envelopes and luminous cores for believable tube construction and control.
+  const neonManifest = buildEnergetikRoofNeonSign({ objects, box, roundBox, capsule }, 0, 9.43, -19.34, { sectionLength: 0.28 });
+  for (const p of neonManifest.lighting.lightPositions)
+    M3D_SCENE_LIGHTS.push([p[0], p[1], p[2], 5.4, 0.75, 70, 220, 255]);
 
   // Three readable levels. Slabs wrap the foyer atrium and the open stair core.
   box(-49.2,0.05,-42.2,29.2,0.38,-20.1,'stone');
@@ -396,44 +381,19 @@ function makeScene() {
     box(x1+0.13,y+h*0.50,z+0.18,x1+0.19,y+h*0.50+0.10,z+w*0.46,'stone');
     box(x1+0.13,y+0.24,z+w*0.57,x1+0.19,y+0.36,z+w-0.24,'plaster');
   }
-  // The foyer fresco is a long wall painting rather than a framed panel. It
-  // runs on both sides of the level-one doorway and stays on the hall-facing
-  // side of the return wall, leaving the opening clear.
-  const frescoX=8.12;
-  const frescoBands=[[-41.55,-31.58],[-29.42,-21.35]];
-  for(const [z0,z1] of frescoBands){
-    box(frescoX,3.66,z0,frescoX+0.10,6.30,z1,'plaster');
-    box(frescoX+0.10,3.78,z0+0.12,frescoX+0.15,6.18,z1-0.12,'mural');
-    // Long pigment bands tie the painted sections together over the door.
-    box(frescoX+0.16,4.03,z0+0.24,frescoX+0.20,4.36,z1-0.24,'sea');
-    box(frescoX+0.16,5.70,z0+0.24,frescoX+0.20,5.91,z1-0.24,'sportsViolet');
-  }
-  // Broad allegorical figure and sun disk, composed as worn paint directly on
-  // the wall. Their scale now reads against the full-length mural.
-  ellipsoidMesh(frescoX+0.19,5.12,-23.10,0.045,0.72,0.72,'sportsRed',16,12);
-  ellipsoidMesh(frescoX+0.21,5.10,-36.80,0.052,0.30,0.29,'taxi',12,8);
-  box(frescoX+0.16,4.30,-37.42,frescoX+0.22,4.91,-36.20,'sportsViolet');
-  capsule([frescoX+0.20,4.80,-36.32],[frescoX+0.20,5.18,-35.78],0.105,'sportsPaint');
-  capsule([frescoX+0.20,4.74,-37.20],[frescoX+0.20,5.44,-37.72],0.10,'sportsPaint');
-  capsule([frescoX+0.20,5.44,-37.72],[frescoX+0.20,5.76,-38.02],0.075,'sportsRed');
-  // Wheat/energy motifs and varied mosaic fragments across both wall spans.
-  for(let i=0;i<15;i++){
-    const z=-40.90+i*0.59, y=4.18+(i%5)*0.18;
-    capsule([frescoX+0.21,y,z],[frescoX+0.21,y+0.47,z-0.34],0.042,i%2?'taxi':'sportsPaint');
-    ellipsoidMesh(frescoX+0.23,y+0.34,z-0.23,0.04,0.12,0.18,i%2?'sportsPaint':'taxi',8,6);
-  }
-  for(let i=0;i<72;i++){
-    const z=-41.18+(i*37%194)/10, y=3.90+(i*19%22)/10;
-    if(z>-31.65&&z<-29.35) continue; // keep the door opening unobstructed
-    if(y>4.25&&y<5.82&&z>-38.4&&z<-35.5) continue;
-    const mat=['sportsRed','sportsPaint','sportsViolet','taxi','sea','plaster'][i%6];
-    box(frescoX+0.17,y,z,frescoX+0.21,y+0.09+(i%3)*0.06,z+0.15+(i%4)*0.07,mat);
-  }
-  // Irregular peeling at the edges exposes concrete below the pigment.
-  for(const [y,z,w,h] of [[5.94,-41.36,0.68,0.36],[5.76,-21.70,0.52,0.48],
-                           [3.88,-40.95,0.84,0.25],[4.08,-21.80,0.62,0.34],
-                           [5.86,-32.30,0.42,0.28],[4.12,-29.72,0.36,0.25]])
-    box(frescoX+0.21,y,z,frescoX+0.24,y+h,z+w,'stone');
+  // The foyer mosaic is a reusable, photo-guided texture on the hall-facing stair wall.
+  // Dimensions are the current 9.5 x 4.3 m estimate; update the manifest if surveyed.
+  // The supporting wall sits at X=8.38 m. This plane faces -X and spans toward +Z.
+  const frescoX=8.12, frescoY0=2.00, frescoY1=6.30;
+  const frescoZ0=-41.55, frescoZ1=-32.05;
+  const frescoNormal=[-1,0,0];
+  const frescoTopV=0.27294921875, frescoBottomV=0.72705078125;
+  const frescoBL={p:[frescoX,frescoY0,frescoZ0],n:frescoNormal,uv:[0,frescoBottomV]};
+  const frescoBR={p:[frescoX,frescoY0,frescoZ1],n:frescoNormal,uv:[1,frescoBottomV]};
+  const frescoTL={p:[frescoX,frescoY1,frescoZ0],n:frescoNormal,uv:[0,frescoTopV]};
+  const frescoTR={p:[frescoX,frescoY1,frescoZ1],n:frescoNormal,uv:[1,frescoTopV]};
+  meshTriangle(frescoBL,frescoBR,frescoTL,'energetikFresco');
+  meshTriangle(frescoBR,frescoTR,frescoTL,'energetikFresco');
   // Ceiling failures and exposed glazing frames leave specific traces of decay.
   for(const [x,z,w,d] of [[-39,-30,4.2,2.1],[-27,-23,3.0,1.5],[12,-29,3.6,2.0]]){
     box(x,8.36,z,x+w,8.52,z+d,'windowdark');
@@ -499,13 +459,105 @@ function makeScene() {
     box(x,9.7,z,x+1.4,9.7+h,z+1.2,'rust');
   for(let x=-44;x<27;x+=9) ellipsoidMesh(x,9.85,-20.8,1.0,0.12,0.55,'grass',8,6);
 
-  // The Polissya hotel stays a quiet contextual mass; Energetik owns the detail budget.
-  box(40.0,0.0,-42.0,63.0,15.5,-20.0,'concrete');
-  box(43.5,15.5,-39.0,59.5,20.0,-22.5,'concrete');
+  // Polissya hotel: separate urban landmark, NOT attached to Energetik.
+  // Preliminary spatial layout, pending a georeferenced survey: nearest edges
+  // are 24 m apart in X (Energetik ends at 30.5; hotel starts at 54.5).
+  // Preserve the pedestrian corridor and avoid a false connecting volume.
+  const hotelX0=54.5, hotelX1=83.5, hotelFront=-17.2, hotelBack=-43.8;
+  box(hotelX0,0,hotelBack,hotelX1,15.5,hotelFront,'concrete');
+  box(hotelX0+4.2,15.5,hotelBack+2.2,hotelX1-3.8,20.0,hotelFront-2.5,'concrete');
+  // Late-Soviet hotel: concrete grid, recessed windows, continuous sill
+  // courses, projecting vertical stair bay, entrance canopy and parapet.
   for(let floor=0;floor<5;floor++){
     const y=1.8+floor*2.65;
-    for(let x=42.0;x<61.0;x+=3.1)
-      box(x,y,-19.92,x+1.45,y+1.55,-19.78,(floor===2&&x>51)?'windowlit':'windowdark');
+    box(hotelX0+.25,y-.30,hotelFront-.34,hotelX1-.25,y-.16,hotelFront-.08,'stone');
+    for(let x=hotelX0+1.65;x<hotelX1-1.4;x+=3.15){
+      box(x-.20,y-.18,hotelFront-.40,x+1.70,y+1.78,hotelFront-.10,'stone');
+      box(x,y,hotelFront-.48,x+1.30,y+1.50,hotelFront-.38,
+          (floor===2&&x>hotelX0+13)?'windowlit':'windowdark');
+      box(x,y-.15,hotelFront-.55,x+1.30,y-.05,hotelFront-.37,'concrete');
+    }
+  }
+  box(hotelX0+1.1,0,hotelFront-.85,hotelX0+6.2,15.5,hotelFront-.18,'concrete');
+  for(let y=1.6;y<14.0;y+=2.65)
+    box(hotelX0+2.4,y,hotelFront-.95,hotelX0+4.7,y+1.65,hotelFront-.82,'windowdark');
+  box(hotelX0+10.0,3.1,hotelFront-3.0,hotelX0+21.0,3.45,hotelFront+.4,'stone');
+  for(let x=hotelX0+11.0;x<hotelX0+21.0;x+=4.2)
+    box(x,0.15,hotelFront-2.6,x+.38,3.1,hotelFront-2.2,'concrete');
+  box(hotelX0-.3,15.5,hotelBack-.3,hotelX1+.3,16.2,hotelFront+.3,'stone');
+  // Transitional landscaping, curb stones and a readable pedestrian approach.
+  for(let x=33.0;x<52.0;x+=2.2){
+    box(x,.03,-16.4,x+1.3,.08,-15.7,'stone');
+    if(Math.round(x)%3===0)box(x,.09,-15.2,x+.85,.25,-14.3,'grass');
+  }
+  // Low concrete planters, lamp pedestals and architectural bollards.
+  for(const [x,z] of [[35,-9],[42,-9],[49,-9],[39,4],[48,4]]){
+    box(x-.75,.02,z-.75,x+.75,.55,z+.75,'concrete');
+    box(x-.52,.55,z-.52,x+.52,.68,z+.52,'stone');
+    box(x-.35,.68,z-.35,x+.35,.82,z+.35,'grass');
+  }
+  for(const x of [34.5,43.5,51.0]){
+    box(x-.14,.02,-12.4,x+.14,1.15,-12.12,'rust');
+    box(x-.24,1.12,-12.52,x+.24,1.28,-12.02,'stone');
+  }
+
+  // Central-square urban ensemble (schematic, metres; not surveyed).
+  // The historical Energetik-Polissya link is a curved arch, not an isolated gap.
+  // Construct a faceted shallow arch with an open pedestrian passage below.
+  // The actual gap and orientation must be calibrated from aerial photographs.
+  const archLeft=30.5, archRight=54.5, archFront=-19.0;
+  const archSegments=18;
+  for(let i=0;i<archSegments;i++){
+    const a=archLeft+(archRight-archLeft)*i/archSegments;
+    const c=archLeft+(archRight-archLeft)*(i+1)/archSegments;
+    const u=(a+c)*.5, q=(u-(archLeft+archRight)*.5)/((archRight-archLeft)*.5);
+    const archSoffit=3.2+2.1*Math.sqrt(Math.max(0,1-q*q));
+    const archCrown=7.5+0.9*Math.sqrt(Math.max(0,1-q*q));
+    box(a,archSoffit,archFront-.70,c,archCrown,archFront+.70,'stone');
+    box(a,archCrown,archFront-.82,c,archCrown+.18,archFront+.82,'concrete');
+  }
+  box(archLeft-.4,0,archFront-1.15,archLeft+.75,7.8,archFront+1.15,'concrete');
+  box(archRight-.75,0,archFront-1.15,archRight+.4,7.8,archFront+1.15,'concrete');
+  // Street and pedestrian approach continue into the outer 100 m ring.
+  box(-92,-.28,65,105,-.12,104,'asphalt');
+  box(-92,-.09,62,105,.04,65,'concrete');
+  box(-92,-.09,104,105,.04,107,'concrete');
+  for(let x=-84;x<96;x+=9.5){
+    box(x,-.10,84.3,x+4.2,-.07,84.48,'stone');
+  }
+  // Administrative block, shopping arcade and restaurant: massing placeholders
+  // at the square's far edge. Their surveyed footprints remain to be fitted.
+  // Distinct rooflines and facade rhythms avoid generic identical boxes.
+  const civic=[{x0:-85,x1:-48,z0:109,z1:129,h:13.2,kind:'admin'},
+               {x0:-38,x1:13,z0:112,z1:133,h:8.5,kind:'shops'},
+               {x0:22,x1:56,z0:110,z1:131,h:9.8,kind:'restaurant'}];
+  for(const c of civic){
+    box(c.x0,0,c.z0,c.x1,c.h,c.z1,'concrete');
+    box(c.x0-.3,c.h,c.z0-.3,c.x1+.3,c.h+.55,c.z1+.3,'stone');
+    box(c.x0,0,c.z0-.8,c.x1,.6,c.z0+.4,'stone');
+    const floors=c.kind==='admin'?4:c.kind==='shops'?2:3;
+    for(let f=0;f<floors;f++){
+      const y=.9+f*(c.h-.9)/floors;
+      for(let x=c.x0+1.5;x<c.x1-1.8;x+=c.kind==='shops'?3.9:2.7){
+        box(x-.12,y-.12,c.z0-.34,x+1.75,y+1.7,c.z0-.12,'stone');
+        box(x,y,c.z0-.43,x+1.50,y+1.48,c.z0-.33,
+            (f===0&&c.kind==='shops')?'glass':'windowdark');
+      }
+    }
+    if(c.kind==='restaurant'){
+      box(c.x0+2,c.h,c.z0+2,c.x1-2,c.h+1.5,c.z1-2,'stone');
+      for(let x=c.x0+3;x<c.x1-2;x+=4.5)
+        box(x,c.h+.3,c.z0-.46,x+2.5,c.h+1.15,c.z0-.34,'glass');
+    }
+  }
+  // Characteristic Soviet-era square: long paving seams, raised beds and
+  // low steps; no invented monuments or inaccessible interiors.
+  for(let x=-50;x<55;x+=6.4)
+    box(x,.025,54,x+.06,.038,62,'concrete');
+  for(const [x,z] of [[-43,57],[-26,58],[23,58],[42,57]]){
+    box(x-2,.025,z-1,x+2,.45,z+1,'concrete');
+    box(x-1.65,.45,z-.7,x+1.65,.56,z+.7,'stone');
+    box(x-1.3,.56,z-.5,x+1.3,.68,z+.5,'grass');
   }
 
   // Repeated small windows add depth to the visible west side of Energetik.
@@ -569,6 +621,15 @@ function makeScene() {
     [-24,52,0],[18,52,0],[0,22,Math.PI/2],[0,-3,0]
   ]) bench(b[0],b[1],b[2]);
 
+  // Cheap painted-tube public chairs with weathered timber slats. Keep a few
+  // individually placed pieces around the plaza; these are not auditorium seats.
+  for (const chair of [
+    [-25, 11, 0, 'worn_intact'], [-22, 11, Math.PI/2, 'missing_back_slat'],
+    [19, 11, Math.PI/2, 'worn_intact'], [22, 11, 0, 'missing_seat_slat'],
+    [-3, 29, 0, 'broken_slat'], [1, 29, Math.PI/2, 'worn_intact']
+  ]) buildPripyatOutdoorChair({objects,box,roundBox,capsule,ellipse},chair[0],0,chair[1],
+    {angle:chair[2],variant:chair[3]});
+
   // Poplars and younger trees: slender trunks with narrow crowns, progressively
   // varied so the square does not read as a repeated asset grid.
   function poplar(x, z, h, crownScale=1) {
@@ -587,7 +648,9 @@ function makeScene() {
     [52,7,14],[48,-11,13],[-52,49,12],[-48,2,11],[-44,-12,12],
     [-34,-10,13],[34,-11,12],[43,-11,13],[-56,68,11],[53,67,12]
   ];
-  for (let i=0;i<matureTrees.length;i++) poplar(...matureTrees[i],0.76+(i%4)*0.11);
+  if (process.env.M3D_IMPORT_PRIPYAT_GLB !== '1') {
+    for (let i=0;i<matureTrees.length;i++) poplar(...matureTrees[i],0.76+(i%4)*0.11);
+  }
   // Young volunteer trees and shrubs growing through failed paving.
   const saplings=[[-37,13],[-24,7],[-19,29],[-7,48],[2,12],[8,31],[15,46],[28,11],
     [37,36],[-46,40],[47,42],[-4,56],[30,-4],[-31,-2],[4,2],[18,6]];

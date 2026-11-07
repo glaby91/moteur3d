@@ -5,6 +5,10 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const crypto = require('crypto');
+const { execFileSync } = require('child_process');
+const zlib = require('zlib');
 
 function mat4Mul(a, b) {
   const out = new Array(16).fill(0);
@@ -93,6 +97,20 @@ function accessorReader(json, bin) {
 }
 
 function importedMaterial(name) {
+  const n = String(name).toLowerCase();
+  if (/poplar.*bark|bark.*poplar/i.test(n)) return 'bark';
+  if (/broken_bark|deadwood|weathered_wood|aged wood|trim.*wood/i.test(n)) return 'wood';
+  if (/leaves.*dry|dry.*leaves/i.test(n)) return 'leavesAutumn';
+  if (/leaves|foliage/i.test(n)) return 'leaves';
+  if (/vinyl/i.test(n)) return 'seatVinylBrown';
+  if (/seat.*steel|painted steel|dark steel/i.test(n)) return 'seatSteel';
+  if (/seat.*wood|aged wood/i.test(n)) return 'seatWood';
+  if (/concrete|facade|plaster/i.test(n)) return 'concrete';
+  if (/rust/i.test(n)) return 'rust';
+  if (/neon.*core|core.*neon/i.test(n)) return 'led';
+  if (/neon.*tube|tube.*neon/i.test(n)) return 'neon';
+  if (/glass|window/i.test(n)) return 'carGlass';
+  if (/bronze|aluminium|aluminum|iron|steel|metal|ceramic/i.test(n)) return 'metal';
   if (/body_pbr/i.test(name)) return 'classicBody';
   if (/tire/i.test(name)) return 'classicTire';
   if (/rim|hubcap/i.test(name)) return 'wheelMetal';
@@ -101,7 +119,7 @@ function importedMaterial(name) {
   return 'metal';
 }
 
-function addGlbCar(objects, filePath, placement) {
+function addGlbCar(objects, filePath, placement, materialResolver=importedMaterial) {
   const { json, bin } = decodeGlb(filePath), read = accessorReader(json, bin);
   const nodes = json.nodes || [], meshes = json.meshes || [], mats = json.materials || [];
   const offset = placement.position || [0, 0, 0], scale = placement.scale || 1;
@@ -114,7 +132,7 @@ function addGlbCar(objects, filePath, placement) {
       if (attrs.POSITION == null || attrs.NORMAL == null) throw new Error('Le modèle doit fournir les positions et les normales.');
       const positions = read(attrs.POSITION), normals = read(attrs.NORMAL), uvs = attrs.TEXCOORD_0 == null ? positions.map(() => [0, 0]) : read(attrs.TEXCOORD_0);
       const indices = prim.indices == null ? positions.map((_, i) => i) : read(prim.indices);
-      const sourceMat = mats[prim.material] || {}, material = importedMaterial(sourceMat.name || '');
+      const sourceMat = mats[prim.material] || {}, material = materialResolver(sourceMat.name || '', sourceMat, prim.material, json, filePath);
       for (let k = 0; k + 2 < indices.length; k += 3) {
         const ids = [indices[k], indices[k + 2], indices[k + 1]]; // scene Z is reversed, so preserve front-face winding
         const verts = ids.map(id => {
@@ -149,9 +167,76 @@ function addGlbCar(objects, filePath, placement) {
   return triangles;
 }
 
+function materialTexturePath(json, textureInfo, filePath) {
+  if (!textureInfo || textureInfo.index == null) return null;
+  const texture = (json.textures || [])[textureInfo.index];
+  const image = texture && (json.images || [])[texture.source];
+  if (!image) return null;
+  if (image.uri && !image.uri.startsWith('data:')) return path.resolve(path.dirname(filePath), decodeURIComponent(image.uri));
+  throw new Error(`Image GLB embarquée non prise en charge par le packer natif: ${path.basename(filePath)}`);
+}
+
+function readGlbPbrMipChain(filePath) {
+  const stored=fs.readFileSync(filePath), b=filePath.endsWith('.gz')?zlib.gunzipSync(stored):stored;
+  if(b.toString('ascii',0,8)!=='M3DPBR2\0')throw new Error(`Le packer GLB doit produire des cartes M3DPBR2: ${filePath}`);
+  const baseSize=b.readUInt32LE(8),count=b.readUInt32LE(12);
+  if(baseSize!==2048||count!==12)throw new Error(`Les cartes GLB natives doivent être en 2048² avec une chaîne complète: ${filePath}`);
+  let offset=16;const maps={color:[],normal:[],roughness:[]};
+  for(let level=0;level<count;level++){
+    const size=b.readUInt32LE(offset);offset+=4;if(size!==(baseSize>>level))throw new Error(`Niveau PBR GLB incohérent: ${filePath}`);
+    const n=size*size;
+    for(const channel of ['color','normal','roughness']){const bpp=channel==='color'?4:2,data=bpp===4?new Uint32Array(n):new Uint16Array(n);for(let i=0;i<n;i++,offset+=bpp)data[i]=bpp===4?b.readUInt32LE(offset):b.readUInt16LE(offset);maps[channel].push({size,data});}
+  }
+  if(offset!==b.length)throw new Error(`Données PBR GLB supplémentaires: ${filePath}`);
+  return {color:maps.color,normal:maps.normal,roughness:maps.roughness};
+}
+
+function importedPbr(json, sourceMat, filePath, registry) {
+  const pbr = sourceMat.pbrMetallicRoughness || {};
+  const maps = [
+    materialTexturePath(json, pbr.baseColorTexture, filePath),
+    materialTexturePath(json, sourceMat.normalTexture, filePath),
+    materialTexturePath(json, pbr.metallicRoughnessTexture, filePath),
+  ];
+  if (maps.every(x => !x)) return null;
+  const signature = maps.map(x => x || '-').join('\n');
+  const id = 'glb' + crypto.createHash('sha1').update(signature).digest('hex').slice(0, 12);
+  if (!registry.has(id)) {
+    for (const texture of maps) if (texture && !fs.existsSync(texture)) throw new Error(`Texture GLB introuvable: ${texture}`);
+    const cacheDir = path.join(os.tmpdir(), 'm3d-glb-pbr');
+    const packed = path.join(cacheDir, id + '.m3dpbr.gz');
+    if (!fs.existsSync(packed)) {
+      const python = process.env.M3D_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
+      const packer = path.join(__dirname, 'tools', 'pack_glb_pbr_material.py');
+      execFileSync(python, [packer, ...maps.map(x => x || '-'), packed], { stdio: 'inherit' });
+    }
+    registry.set(id, readGlbPbrMipChain(packed));
+  }
+  return id;
+}
+
+function addGlbAsset(objects, filePath, placement, registry=new Map()) {
+  const { json } = decodeGlb(filePath);
+  return addGlbCar(objects, filePath, placement, (name, sourceMat) =>
+    importedPbr(json, sourceMat, filePath, registry) || importedMaterial(name));
+}
+
+function extendMipChain(levels) {
+  while (levels[levels.length - 1].size > 1) {
+    const prev=levels[levels.length-1], n=prev.size>>1, data=new Uint16Array(n*n);
+    for(let y=0;y<n;y++)for(let x=0;x<n;x++){
+      const ps=[prev.data[(y*2)*prev.size+x*2],prev.data[(y*2)*prev.size+x*2+1],prev.data[(y*2+1)*prev.size+x*2],prev.data[(y*2+1)*prev.size+x*2+1]];
+      const r=Math.round(ps.reduce((s,p)=>s+(p>>11),0)/4),g=Math.round(ps.reduce((s,p)=>s+((p>>5)&63),0)/4),b=Math.round(ps.reduce((s,p)=>s+(p&31),0)/4);
+      data[y*n+x]=(r<<11)|(g<<5)|b;
+    }
+    levels.push({size:n,data});
+  }
+  return levels;
+}
+
 function readRgb565MipChain(filePath) {
   const bytes = fs.readFileSync(filePath); let offset = 0; const levels = [];
-  for (let size = 512; size >= 8; size >>= 1) {
+  for (let size = 512; size >= 1 && offset + size * size * 2 <= bytes.length; size >>= 1) {
     const count = size * size;
     if (offset + count * 2 > bytes.length) throw new Error('Chaîne de textures RGB565 tronquée: ' + path.basename(filePath));
     const data = new Uint16Array(count);
@@ -159,7 +244,7 @@ function readRgb565MipChain(filePath) {
     levels.push({ size, data });
   }
   if (offset !== bytes.length) throw new Error('La chaîne RGB565 contient des données supplémentaires: ' + path.basename(filePath));
-  return levels;
+  return extendMipChain(levels);
 }
 
-module.exports = { addGlbCar, readRgb565MipChain };
+module.exports = { addGlbCar, addGlbAsset, importedMaterial, readRgb565MipChain };

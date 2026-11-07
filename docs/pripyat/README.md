@@ -18,6 +18,12 @@ Voir [les références visuelles du bâtiment et la passe haute définition](ENE
 
 Le cahier des exigences, les niveaux communiqués, les références prioritaires et la validation restante sont suivis dans [Cahier de reconstruction Energetik](CAHIER-ENERGETIK-PASSE-261104.md).
 
+## Fresque du hall d’escalier
+
+La fresque du foyer est désormais une mosaïque panoramique lumineuse, mappée directement dans la scène native sur le mur côté hall près de l’escalier. Le quad de 9,5 × 4,3 m est placé en X=8,12, Y=2,00, Z=−41,55 m, face −X. La texture sRGB 2048 × 930 conserve le ratio estimé de l’œuvre; l’export natif construit des mipmaps RGB888. Un GLB autonome est fourni pour Unreal.
+
+La composition est une reconstruction générée à partir des quatre vues fournies; les pertes sans référence sont interprétées. Les dimensions et l’emplacement suivent le blockout et restent à valider visuellement. Voir [la fiche de l’asset](../../experiments/2026-10-30-cote-ete-gt/native_v14/docs/ASSET-ENERGETIK-FRESQUE-ESCALIER.md).
+
 ## Démo visée
 
 Le parcours automatique dure **1 min 30** :

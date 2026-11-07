@@ -1,6 +1,6 @@
 # Bibliothèque de matériaux — Pripiat
 
-Catalogue de départ pour reconstruire la ville avec le moteur natif **après des décennies d’abandon**. Le but visuel est une ville encore reconnaissable, marquée par les affres du temps : façades usées, vitrages brisés, corrosion, débris et végétation qui reprend les rues. Les noms sont des identifiants stables à réutiliser dans les objets de scène. Les cartes de couleur, normale et rugosité sont prévues au format PBR déjà consommé par l’exporteur natif (mipmaps 512→8, RGB565). Les valeurs de rugosité ci-dessous sont des cibles artistiques, à ajuster avec les vraies photos de référence.
+Catalogue de départ pour reconstruire la ville avec le moteur natif **après des décennies d’abandon**. Le but visuel est une ville encore reconnaissable, marquée par les affres du temps : façades usées, vitrages brisés, corrosion, débris et végétation qui reprend les rues. Les noms sont des identifiants stables à réutiliser dans les objets de scène. Les cartes de couleur, normale et rugosité utilisent le format PBR natif RGB565; l’exporteur accepte des sources de 512² à 2048² et le moteur charge désormais les mipmaps jusqu’à 1². Les valeurs de rugosité ci-dessous sont des cibles artistiques, à ajuster avec les vraies photos de référence.
 
 ## Matériaux de base
 
@@ -40,12 +40,12 @@ Les quatre zones prévues restent des **macro-zones de travail**. Pour la recons
 | Niveau | Quand l’utiliser | Matières et détail |
 |---|---|---|
 | `LOD0_economique` | Bâtiment lointain ou cellule voisine préchargée | Couleur seule ou petite texture; géométrie de silhouette |
-| `LOD1_standard` | Rue et façades dans le champ de vision | Couleur + normale + rugosité en 512 × 512, avec mipmaps |
+| `LOD1_standard` | Rue et façades dans le champ de vision | Couleur + normale + rugosité jusqu’à 2048 × 2048, chaîne mip complète |
 | `LOD2_detaille` | Bâtiment proche, place centrale ou point d’intérêt | Cartes les plus détaillées disponibles, usure locale, débris et éléments cassés en géométrie |
 
 Le choix de LOD dépend de la distance à la caméra et de la taille projetée à l’écran, jamais du numéro de zone. Pour le premier découpage, viser **8 à 12 secteurs urbains** alignés sur les quartiers et points d’intérêt, puis **32 à 48 cellules de streaming** de taille variable selon la densité des bâtiments (cellules plus petites au centre, plus grandes dans les espaces ouverts). Une bande de recouvrement charge progressivement les cellules voisines; les textures et matériaux partagés ne sont chargés qu’une fois. Le joueur peut rejoindre n’importe quel point de la ville sans transition visible.
 
-Le moteur actuel charge une scène monolithique : le streaming par cellules est une évolution à concevoir dans le chargeur et l’exporteur, pas une capacité déjà active. Le moteur plafonne aussi les cartes natives à 512 × 512 (mipmaps jusqu’à 8 × 8). `LOD2_detaille` signifie donc d’abord davantage de géométrie et de variations locales; des textures 1K/2K nécessiteront une évolution explicite du format de scène et de l’exporteur.
+Le moteur actuel charge une scène monolithique : le streaming par cellules reste une évolution à concevoir. Le format de scène accepte jusqu’à 2048² et le chargeur descend maintenant jusqu’à 1². `LOD2_detaille` peut donc associer géométrie plus fine et cartes 2K, en gardant le partage des matériaux pour maîtriser la mémoire.
 
 ## Ce que le moteur doit recevoir
 

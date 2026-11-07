@@ -10,6 +10,8 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
   const metal = options.metal || 'seatSteel';
   const wood = options.wood || 'seatWood';
   const support = options.support || 'seatSupportPaint';
+  const sideStyle = options.sideStyle || 'padded';
+  const assetVariant = options.variantId || `side-${sideStyle}`;
   const X = v => x + v * scale, Y = v => y + v * scale, Z = v => z + v * scale;
   const B = (x0,y0,z0,x1,y1,z1,r,mat) => roundBox(X(x0),Y(y0),Z(z0),X(x1),Y(y1),Z(z1),r*scale,mat);
   const C = (a,b,r,mat) => capsule([X(a[0]),Y(a[1]),Z(a[2])],[X(b[0]),Y(b[1]),Z(b[2])],r*scale,mat);
@@ -41,9 +43,11 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
     E(side*.378,.485,-.115,.012,.031,.031,metal);
     E(side*.390,.485,-.115,.006,.016,.016,piping);
   }
-  // One transverse turquoise rail and one central tube carry the open pan.
-  C([-.205,.405,.025],[.205,.405,.025],.022,support);
-  C([0,.405,.025],[0,.025,.025],.026,support);
+  // The row builder may supply one shared continuous rail and its floor supports.
+  if (!options.omitSharedFrame) {
+    C([-.205,.405,.025],[.205,.405,.025],.022,support);
+    C([0,.405,.025],[0,.025,.025],.026,support);
+  }
   finishComponent('frame', 'rigid');
 
   // Thick back shell. Four narrow mouldings frame the upholstery instead of
@@ -93,23 +97,38 @@ module.exports = function buildEnergetikCinemaSeat(api, x, y, z, options = {}) {
   }
   finishComponent('seat_pan', options.seatPanMissing ? 'broken_missing' : 'hinged_rigid');
 
-  // Each armrest is the side montant: one broad padded volume that reaches
-  // the floor, runs back to the dossier, and has a softly rounded top.
+  // The catalogue has more than one auditorium-seat construction. Keep the
+  // broad upholstered side as the reference variant, and expose two plausible
+  // alternatives without changing the shared seat/back geometry.
   for (const side of [-1,1]) {
-    B(side*.280-.095,.035,-.285,side*.280+.095,.755,.285,.085,fabric);
+    if (sideStyle === 'wood_stiles') {
+      B(side*.280-.045,.035,-.255,side*.280+.045,.735,.245,.035,wood);
+      B(side*.280-.105,.690,-.275,side*.280+.105,.765,.265,.050,fabric);
+      B(side*.280-.052,.065,-.270,side*.280+.052,.105,.260,.014,metal);
+    } else if (sideStyle === 'tubular') {
+      C([side*.280,.055,-.245],[side*.280,.730,-.245],.024,metal);
+      C([side*.280,.055,.205],[side*.280,.730,.205],.024,metal);
+      C([side*.280,.730,-.245],[side*.280,.730,.205],.024,metal);
+      B(side*.280-.085,.690,-.255,side*.280+.085,.755,.225,.032,fabric);
+      C([side*.280,.055,-.245],[side*.280,.055,.205],.017,support);
+    } else {
+      B(side*.280-.095,.035,-.285,side*.280+.095,.755,.285,.085,fabric);
+    }
   }
 
-  finishComponent('armrests', 'padded_structural_side_panel');
+  finishComponent('armrests', sideStyle === 'padded' ? 'padded_structural_side_panel' : sideStyle);
   const objectEnd = Array.isArray(api.objects) ? api.objects.length : null;
   const open = !folded && !options.seatPanMissing;
   return {
     schema: 'm3d-asset-instance-v1',
     asset: 'energetik-folding-cinema-seat',
+    variantId: assetVariant,
+    sideStyle,
     origin: [x, y, z],
     scale,
     folded,
     seatPanMissing: !!options.seatPanMissing,
-    armrestIsSideMontant: true,
+    armrestIsSideMontant: sideStyle === 'padded',
     objectRange: objectStart === null ? null : [objectStart, objectEnd],
     components,
     joints: [{
