@@ -45,7 +45,12 @@ const M3D_ENERGETIK_ARCH = Object.freeze({
     mosaicBottomY:2.0, mosaicTopY:6.30,
     mosaicStartZ:-41.55, mosaicEndZ:-32.05,
     galleryEastEdgeX:8.65, rearGalleryEndZ:-40.9,
-    firstLandingY:3.25
+    firstLandingY:3.25,
+    muralBackingBaseY:1.95,
+    arcadePierZ:Object.freeze([-41.5,-38.55,-35.7,-32.65]),
+    arcadePierLength:0.60,
+    arcadePierTopY:2.10,
+    arcadeDepth:0.18
   }),
   tower: Object.freeze({roofY:14.0})
 });
@@ -59,12 +64,40 @@ function m3dCheckEnergetikDatum(a=M3D_ENERGETIK_ARCH){
     throw new Error('Energetik: mosaic intersects a structural datum');
   if(!(f.mosaicStartZ<f.mosaicEndZ && e.z0<f.mosaicStartZ && f.mosaicEndZ<e.z1))
     throw new Error('Energetik: mosaic outside building envelope');
+  if(!(l.ground<f.muralBackingBaseY && f.muralBackingBaseY<=f.mosaicBottomY &&
+       f.arcadePierTopY>f.mosaicBottomY && f.arcadePierTopY<l.firstSlab &&
+       f.arcadePierZ.every(z=>z>=f.mosaicStartZ && z+f.arcadePierLength<=f.mosaicEndZ)))
+    throw new Error('Energetik: mural arcade dimensions inconsistent');
   if(Math.abs(f.firstLandingY-l.firstSlab)>0.001)
     throw new Error('Energetik: stair landing and first floor disconnected');
   return true;
 }
 m3dCheckEnergetikDatum();
 
+/**
+ * Photo-guided wall of the Energetik foyer.
+ * Historical photos show a continuous painted upper wall suspended over
+ * open ground-floor bays and masonry piers, not an opaque three-storey wall.
+ * The mural itself remains an independent textured mesh in makeScene().
+ */
+function m3dBuildFoyerMuralArcade({box}, a=M3D_ENERGETIK_ARCH) {
+  const f=a.foyer,l=a.levels, x0=f.mosaicWallX, x1=x0+f.arcadeDepth;
+  // Full mural backing; side facing the foyer is on the -X side.
+  box(x0,f.muralBackingBaseY,f.mosaicStartZ,x1,l.secondSlab,f.mosaicEndZ,'plaster');
+  // Small solid concrete soffit directly behind the artwork's lower edge.
+  box(x0-0.025,f.muralBackingBaseY,f.mosaicStartZ,
+      x1+0.035,f.arcadePierTopY,f.mosaicEndZ,'concrete');
+  // Open bays with individual structural piers; avoid the old opaque wall.
+  for(const z of f.arcadePierZ) {
+    box(x0-0.14,l.ground,z,x1+0.14,f.arcadePierTopY,
+        z+f.arcadePierLength,'stone');
+    // Eroded column foot and staining use existing scene materials.
+    box(x0-0.18,l.ground,z-0.04,x1+0.18,l.ground+0.13,
+        z+f.arcadePierLength+0.04,'concrete');
+    box(x0-0.145,l.ground+0.63,z+0.03,x0-0.135,
+        l.ground+0.95,z+f.arcadePierLength-0.08,'rust');
+  }
+}
 function m3dBuildPlaza({box}, p=M3D_PRIPYAT_BLOCKOUT.plaza){
   // Separate physical layers: foundation, pedestrian paving, expansion joints,
   // patch repairs and flush perimeter drainage.
@@ -369,6 +402,7 @@ function makeScene() {
     box(20,t,-23.0,27,b,-20.1,'concrete');
   }
   floorPlate(archLevels.firstSlab,true); floorPlate(archLevels.secondSlab);
+  m3dBuildFoyerMuralArcade({box});
 
   // Open facade bays expose the deep galleries and interior structure, not glass.
   // Keep only damaged railings at the balcony edges, with irregular missing sections.
@@ -408,25 +442,24 @@ function makeScene() {
   for(let level=0;level<3;level++){
     const y=[archLevels.ground,archLevels.firstSlab+archLevels.slabThickness,archLevels.secondSlab+archLevels.slabThickness][level];
     const h=([archLevels.firstSlab,archLevels.secondSlab,archLevels.roof][level]-y)-0.12;
-    // A real return wall frames the foyer stair and gives the side-room door
-    // a proper opening; the mural is mounted on its hall-facing surface.
-    // Continuous masonry behind the full mosaic, with doorway further forward.
-    // A door directly under the mural used to cut through the artwork.
-    box(8.38,y,-34.8,8.54,y+h,-32.0,'concrete');
-    sideDoorWall(8.38,-32.0,-26.2,y,h,'concrete');
-    // Continue that wall to both ends of the fresco. Previously those spans
-    // had no backing, leaving most of the mural suspended in the atrium.
-    box(8.38,y,-42.2,8.54,y+h,-34.8,'concrete');
-    box(8.38,y,-26.2,8.54,y+h,-20.1,'concrete');
+    // The mural occupies its own suspended wall / pier arcade, built once.
+    // Only the forward-facing room partition continues toward the entrance.
+    if(level===0) {
+      sideDoorWall(archFoyer.mosaicWallX,-32.0,-26.2,y,h,'concrete');
+      box(archFoyer.mosaicWallX,y,-26.2,archFoyer.mosaicWallX+0.16,y+h,-20.1,'concrete');
+    } else {
+      sideDoorWall(archFoyer.mosaicWallX,-32.0,-26.2,y,h,'concrete');
+      box(archFoyer.mosaicWallX,y,-26.2,archFoyer.mosaicWallX+0.16,y+h,-20.1,'concrete');
+    }
     for(const [x0,x1] of [[-48.7,-38.0],[-38.0,-27.0],[-27.0,-15.8],[8.2,17.6]]){
       // The west wing is the double-height auditorium, not a stack of small boxes.
       if(x0< -15.8) continue;
       // Low corridor walls and room dividers; the first-floor rear hall stays open as an auditorium.
-      sideDoorWall(x0,-34.0,-27.0,y,h,'concrete');
+      if(x0!==8.2) sideDoorWall(x0,-34.0,-27.0,y,h,'concrete');
       sideDoorWall(x0,-27.0,-20.1,y,h,'concrete');
       sideDoorWall(x1-0.16,-27.0,-20.1,y,h,'concrete');
       if(level>0){
-        sideDoorWall(x0,-42.1,-34.0,y,h,'concrete');
+        if(x0!==8.2) sideDoorWall(x0,-42.1,-34.0,y,h,'concrete');
         sideDoorWall(x1-0.16,-42.1,-34.0,y,h,'concrete');
       }
       doorwayWall(x0,x1,-27.12,y,h,'concrete');
