@@ -824,9 +824,9 @@ function makeScene() {
   }
   m3dBuildEastStairCore({box,capsule});
   // Leave a genuine 3.8 m rooftop doorway in the stair tower wall.
-  box(20.0,9.4,-22.2,21.7,13.3,-21.0,'rust');
-  box(25.3,9.4,-22.2,27.0,13.3,-21.0,'rust');
-  box(21.7,12.0,-22.2,25.3,13.3,-21.0,'concrete');
+  box(20.0,archLevels.roof,-22.2,21.7,M3D_ENERGETIK_ARCH.tower.roofY-0.7,-21.0,'rust');
+  box(25.3,archLevels.roof,-22.2,27.0,M3D_ENERGETIK_ARCH.tower.roofY-0.7,-21.0,'rust');
+  box(21.7,M3D_ENERGETIK_ARCH.tower.roofY-2.0,-22.2,25.3,M3D_ENERGETIK_ARCH.tower.roofY-0.7,-21.0,'concrete');
 
   // Roof access: height driven by shared datum, retaining the existing materials.
   const mainRoofY=archLevels.roof, roofDeckTop=mainRoofY+0.30;
@@ -843,7 +843,7 @@ function makeScene() {
   for(const [x0,x1,z0,z1] of [[-49.2,29.2,-42.2,-41.2],[-49.2,29.2,-20.4,-19.6],[-49.2,-48.3,-42.2,-20.0],[28.3,29.2,-42.2,-20.0]])
     box(x0,roofDeckTop,z0,x1,roofDeckTop+0.85,z1,'concrete');
   for(const [x,z,h] of [[-36,-38,1.2],[-7,-40,1.8],[12,-22,1.1],[17,-39,1.4]])
-    box(x,roofDeckTop,z,x+1.4,9.7+h,z+1.2,'rust');
+    box(x,roofDeckTop,z,x+1.4,roofDeckTop+h,z+1.2,'rust');
   for(let x=-44;x<27;x+=9) ellipsoidMesh(x,mainRoofY+0.45,-20.8,1.0,0.12,0.55,'grass',8,6);
 
   // Separate reusable Polissya building module. Historical geometry still pending survey.
