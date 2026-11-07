@@ -72,6 +72,30 @@ function m3dBuildConnector({box}){
 }
 
 
+
+// The exterior shell is isolated from interiors and roof features.
+// Its slabs and walls are intentionally separated to preserve camera access.
+function m3dBuildEnergetikShell({box},cfg=M3D_PRIPYAT_BLOCKOUT.energetik){
+  const ex0=cfg.x0,ex1=cfg.x1,front=cfg.z1,back=cfg.z0;
+  box(ex0,0,back,ex0+1.2,9.4,front,'concrete');
+  box(ex1-1.2,0,back,ex1,9.4,front,'concrete');
+  box(ex0,0,back,ex1,9.4,back+1.2,'concrete');
+  box(ex0,0,-20.2,-46.8,9.4,front,'concrete');
+  box(25.5,0,-20.2,ex1,9.4,front,'concrete');
+  box(-46.8,8.8,-20.2,25.5,9.4,front,'stone');
+  box(-42.0,9.4,-41.8,20.5,cfg.mainHeight-0.05,-20.4,'concrete');
+  // Hollow stair tower. The old solid prism capped the ascending camera and
+  // made the roof door look like a wall; retain only the concrete shell.
+  box(20.5,9.4,-40.8,21.7,cfg.towerHeight,-22.2,'concrete');
+  box(27.0,9.4,-40.8,30.5,cfg.towerHeight,-22.2,'concrete');
+  box(21.7,9.4,-40.8,27.0,cfg.towerHeight,-39.6,'concrete');
+  box(21.7,12.0,-22.2,25.3,cfg.towerHeight,-21.0,'concrete');
+  box(27.0,9.4,-22.2,30.5,cfg.towerHeight,-21.0,'concrete');
+  box(-43.0,11.25,-42.5,18.4,11.75,-20.1,'stone');
+
+
+}
+
 function m3dBuildEnergetikFacade({box,roundBox,objects}){
   // Projecting plinth, pilasters, capitals and layered cornice give the civic
   // façade real relief. The large bays stay open: the reference facade has no glazing.
@@ -208,25 +232,8 @@ function makeScene() {
   // Independent building-to-building connector component.
   m3dBuildConnector({box});
 
-  // Hero asset: the Palace of Culture Energetik is the only fully developed building.
-  // Approximate envelope: 81 x 24 m, 11.4 m main roof and a 14 m stair tower.
-  // The outer shell is deliberately split into walls and slabs so the camera can enter.
-  const ex0=-50.5, ex1=30.5, front=-18.8, back=-43.4;
-  box(ex0,0,back,ex0+1.2,9.4,front,'concrete');
-  box(ex1-1.2,0,back,ex1,9.4,front,'concrete');
-  box(ex0,0,back,ex1,9.4,back+1.2,'concrete');
-  box(ex0,0,-20.2,-46.8,9.4,front,'concrete');
-  box(25.5,0,-20.2,ex1,9.4,front,'concrete');
-  box(-46.8,8.8,-20.2,25.5,9.4,front,'stone');
-  box(-42.0,9.4,-41.8,20.5,11.35,-20.4,'concrete');
-  // Hollow stair tower. The old solid prism capped the ascending camera and
-  // made the roof door look like a wall; retain only the concrete shell.
-  box(20.5,9.4,-40.8,21.7,14.0,-22.2,'concrete');
-  box(27.0,9.4,-40.8,30.5,14.0,-22.2,'concrete');
-  box(21.7,9.4,-40.8,27.0,14.0,-39.6,'concrete');
-  box(21.7,12.0,-22.2,25.3,14.0,-21.0,'concrete');
-  box(27.0,9.4,-22.2,30.5,14.0,-21.0,'concrete');
-  box(-43.0,11.25,-42.5,18.4,11.75,-20.1,'stone');
+  // Main civic building: separately assembled exterior and detailed facade.
+  m3dBuildEnergetikShell({box});
 
   // Independent facade assembly: main building remains traversable.
   m3dBuildEnergetikFacade({box,roundBox,objects});
