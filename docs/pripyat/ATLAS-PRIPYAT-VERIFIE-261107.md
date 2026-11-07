@@ -24,7 +24,7 @@
 | 1 | **Fresque du hall Energetik** | Peinture monumentale visible sur le mur du hall ; dimensions et détails modélisés encore sujets à contrôle. | [1](https://www.chernobyl.one/pripyat-palace-of-culture-energetik/) [2](https://www.chernobylgallery.com/galleries/) |
 | 1 | **Hôtel Polissya** | Hôtel de la place avec façade régulière, belvédère supérieur et lettres métalliques sur le toit. | [1](https://www.forgottenchernobyl.net/pripyat-then-and-now-part-1-main-square) [2](https://commons.wikimedia.org/wiki/Category:Polissya_hotel_(Pripyat)) [3](https://www.lemonde.fr/livres/portfolio/2020/10/26/en-images-tchernobyl-les-jours-d-apres_6057430_3260.html) |
 | 1 | **Place centrale / place Lénine** | Esplanade du centre, trottoirs, sols durs, alignements végétaux. | [1](https://www.forgottenchernobyl.net/pripyat-then-and-now-part-1-main-square) [2](https://www.lemonde.fr/livres/portfolio/2020/10/26/en-images-tchernobyl-les-jours-d-apres_6057430_3260.html) |
-| 1 | **Colonnade courbe de la place** | Toiture basse ouverte portée par piliers, courbure et détachement documentés par photos utilisateur ; géométrie pas métrée. | [1](https://www.forgottenchernobyl.net/pripyat-then-and-now-part-1-main-square) [2](https://www.atlasobscura.com/articles/pripyat-before-after) |
+| 1 | **Colonnade courbe de la place** | Toiture basse ouverte portée par piliers, courbure et détachement documentés par photos utilisateur ; géométrie pas métrée. | [1](https://www.forgottenchernobyl.net/pripyat-then-and-now-part-1-main-square) [2](https://www.lemonde.fr/livres/portfolio/2020/10/26/en-images-tchernobyl-les-jours-d-apres_6057430_3260.html) |
 | 2 | **Hôtel de ville / comité exécutif** | Immeuble de l'administration municipale ; façade et entrées à reprendre sur photos. | [1](https://www.chernobyl.one/pripyat-city-hall/) [2](https://www.chernobyl.one/locations/) |
 | 2 | **Cinéma Prometheus** | Cinéma avec grande salle, entrée et mosaïque extérieure. | [1](https://www.flickr.com/photos/lordolsen/albums/72157709935982846/) [2](https://www.bcd-urbex.com/pripyat-then-and-now/) |
 | 2 | **Mosaïque du cinéma Prometheus** | Mosaïque architecturale située sur un mur du cinéma ; décor distinct du palais. | [1](https://www.bcd-urbex.com/pripyat-then-and-now/) |
@@ -68,7 +68,7 @@
 |---|---|---|---|
 | 2 | **École secondaire n° 1** | Établissement scolaire photographié. | [1](https://www.andrewmarcus.me/travel/pripyat-oct-2013) |
 | 2 | **École secondaire n° 3** | École près de la piscine Azure ; salles, corridors et vitrages. | [1](https://www.chernobylgallery.com/galleries/) [2](https://www.chernobylgallery.com/galleries/middle-school-number-3/) |
-| 3 | **École secondaire n° 2** | Établissement scolaire attesté par photographies et cartographies. | [1](https://commons.wikimedia.org/wiki/Category:Schools_in_Prypiat) |
+| 3 | **École secondaire n° 2** | Établissement scolaire attesté par photographies et cartographies. | [1](https://commons.wikimedia.org/wiki/Category:Schools_in_Prypiat) [2](https://gizmodo.com/photos-of-everyday-life-in-pripyat-before-the-chernobyl-1618107860) |
 | 3 | **École secondaire n° 5** | École n° 5 dont le bâtiment est documenté par photographie. | [1](https://commons.wikimedia.org/wiki/Category:Schools_in_Prypiat) |
 | 3 | **Jardin d'enfants n° 3 Sonechko** | Maternelle n° 3 avenue Lénine, signalée et photographiée. | [1](https://www.forgottenchernobyl.net/category/chernobyl-photos/schools-and-nurseries/kindergartens) [2](https://commons.wikimedia.org/wiki/Category:Schools_in_Prypiat) |
 | 3 | **Jardin d'enfants n° 10 Cheburashka** | Bâtiment, mobilier, panneaux et dessins d'enfants documentés. | [1](https://www.forgottenchernobyl.net/category/chernobyl-photos/schools-and-nurseries/kindergartens) [2](https://meanderingwild.com/kindergarten-10-chernobyl/) [3](https://www.forgottenchernobyl.net/pripyat-cherbuarshka-nursery-childrens-drawings-08) |
@@ -131,3 +131,5 @@
 - [Inventaire JSON lisible par script](./ATLAS-PRIPYAT-CONFIRME-261107.json)
 - [Forêt rousse de 1986 : cahier environnement](./FORET-ROUSSE-1986-REFERENCE.md)
 - [Rivière et port passagers : cahier environnement](./SECTEUR-FLUVIAL-PRIPYAT-REFERENCE.md)
+
+**Traçabilité :** l'attestation d'existence de la colonnade ne valide pas ses raccordements physiques historiques. Les extrémités libres sont la consigne de notre modèle tirée des photos et du croquis utilisateur, non une mesure cadastrale.
