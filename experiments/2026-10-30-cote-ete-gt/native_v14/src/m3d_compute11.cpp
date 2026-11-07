@@ -76,7 +76,10 @@ struct ComputeCache {
  bool ensureDevice(std::wstring& error){
   if(device)return true;
   D3D_FEATURE_LEVEL level{};
-  HRESULT hr=D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,0,nullptr,0,
+  wchar_t mode[4]{};
+  const bool softwareTest=GetEnvironmentVariableW(L"M3D_COMPUTE_WARP",mode,4)==1&&mode[0]==L'1';
+  const D3D_DRIVER_TYPE driver=softwareTest?D3D_DRIVER_TYPE_WARP:D3D_DRIVER_TYPE_HARDWARE;
+  HRESULT hr=D3D11CreateDevice(nullptr,driver,nullptr,0,nullptr,0,
                                D3D11_SDK_VERSION,&device,&level,&context);
   if(FAILED(hr)||level<D3D_FEATURE_LEVEL_11_0){
    error=L"GPU D3D11 Feature Level 11_0 requis";return false;
