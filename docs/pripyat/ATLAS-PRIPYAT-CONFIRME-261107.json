@@ -63,9 +63,7 @@
       "priority": 1,
       "confirmed": true,
       "geography": "Pripyat",
-      "historical_period": [
-        2026
-      ],
+      "historical_period": "avant 1986",
       "scene_status": "modélisé — implantation photoguidée",
       "description": "Hôtel de la place avec façade régulière, belvédère supérieur et lettres métalliques sur le toit.",
       "reference_urls": [
@@ -104,10 +102,10 @@
       "geography": "Pripyat",
       "historical_period": "avant 1986",
       "scene_status": "modélisé — tracé provisoire",
-      "description": "Toiture basse ouverte portée par piliers, courbure et détachement documentés par photos utilisateur ; géométrie pas métrée.",
+      "description": "Galerie basse courbe documentée par photographies de la place ; géométrie exacte et attaches physiques non certifiées. Le modèle 3D suit la consigne utilisateur : extrémités libres.",
       "reference_urls": [
         "https://www.forgottenchernobyl.net/pripyat-then-and-now-part-1-main-square",
-        "https://www.atlasobscura.com/articles/pripyat-before-after"
+        "https://www.lemonde.fr/livres/portfolio/2020/10/26/en-images-tchernobyl-les-jours-d-apres_6057430_3260.html"
       ],
       "location": null
     },
@@ -402,7 +400,8 @@
       "scene_status": "à intégrer",
       "description": "Établissement scolaire attesté par photographies et cartographies.",
       "reference_urls": [
-        "https://commons.wikimedia.org/wiki/Category:Schools_in_Prypiat"
+        "https://commons.wikimedia.org/wiki/Category:Schools_in_Prypiat",
+        "https://gizmodo.com/photos-of-everyday-life-in-pripyat-before-the-chernobyl-1618107860"
       ],
       "location": null
     },
@@ -729,5 +728,10 @@
       ],
       "location": null
     }
+  ],
+  "notes": [
+    "Une existence confirmée ne valide pas l'emplacement au mètre.",
+    "La colonnade est attestée, mais non ses raccordements historiques exacts.",
+    "Forêt rouge en 1986 exigée, même si le reste de la scène montre des bâtiments postérieurs."
   ]
 }
