@@ -1883,6 +1883,8 @@ int main(int argc, char** argv) {
     }
     // Non-GUI CPU snapshots for reproducible GitHub Actions geometry inspection.
     // Usage: moteur3d_qt.exe --snapshot <view 1..13> <output.png>
+    // GPU parity CI: moteur3d_qt.exe --snapshot-compute <view 1..13> <output.png>
+    // Identical camera, FOV and lighting; WARP can be selected via M3D_COMPUTE_WARP=1.
     if (argc >= 4 && (QString::fromLocal8Bit(argv[1]) == QStringLiteral("--snapshot") ||
                       QString::fromLocal8Bit(argv[1]) == QStringLiteral("--snapshot-compute"))) {
         const bool computeSnapshot = QString::fromLocal8Bit(argv[1]) == QStringLiteral("--snapshot-compute");
