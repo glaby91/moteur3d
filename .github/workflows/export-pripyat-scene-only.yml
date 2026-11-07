@@ -1,0 +1,126 @@
+name: Export Pripyat scene only - metric 1to1
+
+on:
+  push:
+    branches:
+      - feature/pripyat-scene-assemble-scale-1to1-261107
+    paths:
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js
+      - experiments/pripyat-survey/test-pripyat-metric-1to1.mjs
+      - docs/pripyat/ASSEMBLAGE-SCENE-1TO1-261107.md
+      - .github/workflows/export-pripyat-scene-only.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-pripyat-bin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout scene and existing Moteur3D exporter
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Set up Python for existing PBR material generators
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Pillow for PBR texture maps
+        run: python -m pip install Pillow
+
+      - name: Verify metric scale and architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js
+          node experiments/pripyat-survey/test-pripyat-metric-1to1.mjs
+          node experiments/pripyat-survey/test-pripyat-survey.mjs
+          node experiments/pripyat-survey/test-energetik-architecture.mjs
+          node experiments/pripyat-survey/test-energetik-sightlines.mjs
+          node experiments/pripyat-survey/test-energetik-sports-wing.mjs
+          node experiments/pripyat-survey/test-energetik-origin-and-court.mjs
+          node experiments/pripyat-survey/test-pripyat-ferris-wheel.mjs
+          node experiments/pripyat-survey/test-polissya-arcade.mjs
+          node experiments/pripyat-survey/test-compute-camera-projection.mjs
+          node experiments/pripyat-survey/test-compute-pbr-cache.mjs
+
+      - name: Generate existing PBR maps and 3D dependencies
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        shell: bash
+        run: |
+          set -euo pipefail
+          python tools/generate_seat_maps.py
+          python tools/generate_pripyat_chair_maps.py
+          python tools/generate_energetik_fresco_map.py
+          node tools/export_energetik_fresco_glb.js
+          node tools/export_pripyat_wheel_mechanism.js
+
+      - name: Export scene.bin ONLY - no Qt or CMake compilation
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        shell: bash
+        env:
+          M3D_SKIP_IMPORTED_CAR: '1'
+          M3D_TEXTURE_SIZE: '2048'
+          NODE_OPTIONS: '--max-old-space-size=6144'
+        run: |
+          set -euo pipefail
+          node export_scene.js source_v1314.html scene_pripyat_central.bin scene_pripyat_central.js
+
+      - name: Package scene for existing Windows Qt app Build 296
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p scene-dist
+          cp experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.bin scene-dist/
+          cp experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_views.json scene-dist/
+          cp docs/pripyat/ASSEMBLAGE-SCENE-1TO1-261107.md scene-dist/
+          cp docs/pripyat/ATLAS-PRIPYAT-CONFIRME-261107.json scene-dist/
+          cat >scene-dist/LISEZ-MOI.txt <<'EOF'
+          SCENE PRIPYAT - METRIQUE 1:1
+          Paquet de donnees 3D uniquement, SANS executable Windows.
+          Ouvrir scene_pripyat_central.bin dans Moteur3D Qt Build 296:
+          https://github.com/glaby91/moteur3d/actions/runs/42400188810
+          Scene comprend Energetik, Polissya, colonnade, arbres, roue,
+          routes OSM et topographie SRTM, en coordonnees metriques.
+          Foret rousse et port fluvial: documentes, pas encore modelises.
+          Les emprises des batiments restent photoguidees.
+          EOF
+          python - <<'PY'
+          from pathlib import Path
+          import json, os
+          scene=Path('scene-dist/scene_pripyat_central.bin')
+          assert scene.exists(), 'Missing scene binary'
+          assert scene.stat().st_size > 100_000_000, 'Binary size too small for full Pripyat scene'
+          meta={
+            'source_commit':os.getenv('GITHUB_SHA'),
+            'build_run':os.getenv('GITHUB_RUN_NUMBER'),
+            'scene_file':scene.name,
+            'scene_bytes':scene.stat().st_size,
+            'scene_scale':'1 engine unit = 1 metre for OSM/SRTM periphery',
+            'legacy_road_scale_removed':0.4882691,
+            'radius_metres':2000,
+            'compatible_windows_app_build':296,
+            'qt_recompiled':False,
+            'pbr_texture_size':2048,
+            'historical_red_forest_geometry_included':False,
+            'river_terminal_geometry_included':False
+          }
+          Path('scene-dist/scene-manifest.json').write_text(json.dumps(meta,indent=2)+'\n',encoding='utf-8')
+          print(json.dumps(meta,indent=2))
+          PY
+
+      - name: Upload scene.bin and manifest only
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pripyat-SceneOnly-1to1
+          path: scene-dist/
+          compression-level: 1
+          if-no-files-found: error
+          retention-days: 30
