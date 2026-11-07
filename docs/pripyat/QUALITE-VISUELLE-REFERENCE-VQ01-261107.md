@@ -58,3 +58,9 @@ Conserver également une image « avant » archivée. Les rendus doivent être n
 - [ ] Compilation Windows complète et essai sur GPU réel.
 
 Ce document est un **point de départ technique**, pas une affirmation que la qualité visuelle est déjà atteinte.
+
+## Automatisation de comparaison CPU / Compute (08/11/2026)
+
+La branche contient une commande de capture GPU `moteur3d_qt.exe --snapshot-compute 12 <sortie.png>`, alignée sur la caméra et l'heure de la capture CPU `--snapshot 12`. Le workflow `.github/workflows/pripyat-visual-qa-windows.yml` génère les 13 vues CPU, un contact-sheet et un rapport de diagnostics, puis exécute **la scène complète** sur Compute D3D11 avec WARP pour la vue 12. Il produit une différence PNG et un JSON des écarts RGB.
+
+**Limites :** WARP est un moteur de test logiciel D3D11, pas une mesure de vitesse du HD 620. Les rendus CPU et GPU n'ont pas encore une parité de lumière et de matériaux démontrée. Le workflow a été commité ; sa réussite et la présence des artefacts doivent être vérifiées sur GitHub Actions avant de cocher les validations correspondantes. Les images d'origine CNEWS/AFP et Roaming Required restent des références externes (voir `REFERENCES-PHOTOS-CNEWS-ROAMING-261107.md`).
