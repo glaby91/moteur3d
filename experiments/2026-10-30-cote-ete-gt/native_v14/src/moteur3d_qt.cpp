@@ -1,4 +1,5 @@
 #include "m3d_engine.h"
+#include "m3d_gpu_load_meter.h"
 #include "version.h"
 
 #include <QAction>
@@ -177,6 +178,7 @@ struct BenchmarkRow {
 };
 
 struct BenchmarkPass { unsigned threads = 1; bool avx2 = false, gpu = false; };
+struct GpuBusySample { int frame=0; double systemPct=-1., processPct=-1.; };
 
 class BenchmarkDialog final : public QDialog {
 public:
@@ -193,6 +195,9 @@ public:
         resolution_ = new QComboBox(this);
         resolution_->addItems({QStringLiteral("Réglage courant"), QStringLiteral("1280 × 720"), QStringLiteral("Full HD — 1920 × 1080"), QStringLiteral("4K UHD — 3840 × 2160")});
         repeats_ = new QSpinBox(this); repeats_->setRange(1, 7); repeats_->setValue(3);
+        gpuFrames_ = new QSpinBox(this);
+        gpuFrames_->setRange(10, 500); gpuFrames_->setValue(100);
+        gpuFrames_->setToolTip(QStringLiteral("Nombre d'images de ray tracing GPU Compute. Une image d'échauffement non mesurée est ajoutée."));
         simdMode_ = new QComboBox(this);
         simdMode_->addItems({QStringLiteral("Mode choisi dans le moteur"), QStringLiteral("x64 standard"), QStringLiteral("AVX2 + FMA3"), QStringLiteral("Comparaison complète : x64 / AVX2 + FMA3")});
         const bool avxAvailable = avx2FmaAvailable();
@@ -206,14 +211,19 @@ public:
         settings->addWidget(new QLabel(QStringLiteral("Résolution :"), this)); settings->addWidget(resolution_);
         settings->addSpacing(12); settings->addWidget(new QLabel(QStringLiteral("SIMD :"), this)); settings->addWidget(simdMode_, 1);
         settings->addSpacing(12); settings->addWidget(new QLabel(QStringLiteral("Répétitions :"), this)); settings->addWidget(repeats_);
-        settings->addWidget(new QLabel(QStringLiteral("+ 1 échauffement"), this)); root->addLayout(settings);
+        settings->addWidget(new QLabel(QStringLiteral("+ 1 échauffement"), this));
+        settings->addWidget(new QLabel(QStringLiteral("Images Compute :"),this));
+        settings->addWidget(gpuFrames_);
+        root->addLayout(settings);
         auto* engine = new QHBoxLayout;
         engine->addWidget(new QLabel(QStringLiteral("Moteur à mesurer :"), this));
         engineMode_ = new QComboBox(this);
         engineMode_->addItems({QStringLiteral("CPU — ray tracing complet"), QStringLiteral("GPU — DirectX 11"), QStringLiteral("Comparaison CPU x64 / GPU DirectX 11")});
-        engineMode_->setToolTip(QStringLiteral("La comparaison CPU/GPU mesure deux chemins de rendu de qualité différente : le CPU trace les rayons, tandis que DirectX rasterise et ne calcule pas les mêmes réflexions/réfraction. La lecture GPU→CPU est incluse. Ce n’est pas un gain à qualité égale."));
+        engineMode_->addItem(QStringLiteral("GPU Compute D3D11 — occupation GPU (%)"));
+        engineMode_->setCurrentIndex(3);
+        engineMode_->setToolTip(QStringLiteral("GPU Compute : véritable ray tracing HLSL + comptage WDDM du GPU pendant 100 images. Le mode DirectX 11 classique utilise le rasteriseur."));
 #ifndef _WIN32
-        engineMode_->setItemData(1, 0, Qt::UserRole - 1); engineMode_->setItemData(2, 0, Qt::UserRole - 1);
+        engineMode_->setItemData(1, 0, Qt::UserRole - 1); engineMode_->setItemData(2, 0, Qt::UserRole - 1); engineMode_->setItemData(3, 0, Qt::UserRole - 1);
         engineMode_->setItemData(1, QStringLiteral("DirectX 11 est disponible uniquement sous Windows."), Qt::ToolTipRole);
         engineMode_->setItemData(2, QStringLiteral("DirectX 11 est disponible uniquement sous Windows."), Qt::ToolTipRole);
 #endif
@@ -226,7 +236,8 @@ public:
         }
         connect(engineMode_, qOverload<int>(&QComboBox::currentIndexChanged), this, [this] {
             simdMode_->setEnabled(!running_ && engineMode_->currentIndex()==0);
-            for(const auto& item:threadChecks_)item.second->setEnabled(!running_ && engineMode_->currentIndex()!=1);
+            for(const auto& item:threadChecks_)item.second->setEnabled(!running_ && engineMode_->currentIndex()!=1 && engineMode_->currentIndex()!=3);
+            gpuFrames_->setEnabled(!running_ && engineMode_->currentIndex()==3);
         });
         threads->addStretch(); root->addLayout(threads);
         progress_ = new QProgressBar(this); progress_->setRange(0, 100); progress_->setValue(0);
@@ -241,6 +252,8 @@ public:
         diagnosis_ = new QLabel(QStringLiteral("Le diagnostic apparaîtra après la première série."), this);
         diagnosis_->setWordWrap(true); diagnosis_->setStyleSheet("color:#9fd5c5;padding:6px;background:#142735");
         root->addWidget(diagnosis_);
+        table_->setVisible(false);
+        gpuFrames_->setEnabled(engineMode_->currentIndex()==3);
         auto* actions = new QHBoxLayout;
         run_ = new QPushButton(QStringLiteral("Lancer le benchmark"), this);
         export_ = new QPushButton(QStringLiteral("Exporter CSV…"), this); export_->setEnabled(false);
@@ -259,22 +272,49 @@ public:
         std::vector<unsigned> out; for (const auto& item : threadChecks_) if (item.second->isChecked()) out.push_back(item.first); return out;
     }
     int repeats() const { return repeats_->value(); }
+    int gpuFrameCount() const { return gpuFrames_->value(); }
     int resolutionIndex() const { return resolution_->currentIndex(); }
     int requestedEngine() const { return engineMode_->currentIndex(); }
     int requestedSimdMode() const { return simdMode_->currentIndex(); }
     void setRunning(bool running) {
-        running_ = running; run_->setEnabled(!running); export_->setEnabled(!running && !rows_.empty());
+        running_ = running; run_->setEnabled(!running); export_->setEnabled(!running && (!rows_.empty() || gpuReportAvailable_));
         cancel_->setEnabled(running);
         resolution_->setEnabled(!running); repeats_->setEnabled(!running); engineMode_->setEnabled(!running);
         simdMode_->setEnabled(!running && engineMode_->currentIndex()==0);
-        for (const auto& item : threadChecks_) item.second->setEnabled(!running && engineMode_->currentIndex()!=1);
+        for (const auto& item : threadChecks_) item.second->setEnabled(!running && engineMode_->currentIndex()!=1 && engineMode_->currentIndex()!=3);
+        gpuFrames_->setEnabled(!running && engineMode_->currentIndex()==3);
         close_->setText(running ? QStringLiteral("Benchmark en cours…") : QStringLiteral("Fermer"));
         close_->setEnabled(!running);
     }
     void setCancelling() { cancel_->setEnabled(false); status_->setText(QStringLiteral("Annulation demandée — arrêt au prochain point d’interruption…")); }
     void setProgress(int value, const QString& text) { progress_->setValue(value); status_->setText(text); }
+    void setGpuReport(std::vector<GpuBusySample> samples, unsigned frames, int width, int height) {
+        gpuBusySamples_ = std::move(samples); gpuRenderedFrames_ = frames;
+        gpuReportAvailable_ = !gpuBusySamples_.empty();
+        rows_.clear(); table_->setVisible(false);
+        double sumSystem=0.,sumProcess=0.,maxSystem=0.,maxProcess=0.;
+        unsigned nSystem=0,nProcess=0;
+        for (const auto& r:gpuBusySamples_) {
+            if(r.systemPct>=0){sumSystem+=r.systemPct;maxSystem=std::max(maxSystem,r.systemPct);++nSystem;}
+            if(r.processPct>=0){sumProcess+=r.processPct;maxProcess=std::max(maxProcess,r.processPct);++nProcess;}
+        }
+        auto pct=[](double v, unsigned n){ return n?QStringLiteral("%1 %").arg(v,0,'f',1):QStringLiteral("N/D"); };
+        diagnosis_->setText(QStringLiteral(
+            "GPU Compute D3D11 : %1 images (%2×%3).\\n"
+            "Charge GPU Windows (moteur le plus actif) : moyenne %4, maximum %5 (%6 échantillons).\\n"
+            "Charge attribuée à Moteur3D : moyenne %7, maximum %8 (%9 échantillons).\\n"
+            "Mesures WDDM GPU Engine; le maximum par moteur n'est PAS la somme des moteurs."
+            " Autres programmes GPU inclus dans la charge globale."
+        ).arg(frames).arg(width).arg(height)
+         .arg(pct(nSystem?sumSystem/nSystem:0,nSystem)).arg(pct(maxSystem,nSystem)).arg(nSystem)
+         .arg(pct(nProcess?sumProcess/nProcess:0,nProcess)).arg(pct(maxProcess,nProcess)).arg(nProcess));
+        if(!nSystem)diagnosis_->setText(diagnosis_->text()+QStringLiteral(
+            "\\nCompteurs GPU Engine indisponibles sur cette version du pilote/Windows : aucun pourcentage inventé."));
+        export_->setEnabled(gpuReportAvailable_ && !running_);
+    }
     void setRows(std::vector<BenchmarkRow> rows, double shadowMs, int width, int height, unsigned samples,
                  unsigned repetitions = 0, QString modeSummary = {}, QString settingsSummary = {}) {
+        gpuReportAvailable_=false;gpuBusySamples_.clear();table_->setVisible(true);
         rows_ = std::move(rows); shadowMs_ = shadowMs; width_ = width; height_ = height; samples_ = samples;
         repetitionsMeasured_ = repetitions; modeSummary_ = std::move(modeSummary); settingsSummary_ = std::move(settingsSummary);
         table_->clearContents(); table_->setRowCount(int(rows_.size()));
@@ -342,11 +382,24 @@ private:
     std::vector<std::pair<unsigned, QCheckBox*>> threadChecks_;
     std::vector<BenchmarkRow> rows_; double shadowMs_ = 0; int width_ = 0, height_ = 0;
     unsigned samples_ = 1, repetitionsMeasured_ = 0; bool running_ = false; QString settingsSummary_, modeSummary_;
+    QSpinBox* gpuFrames_ = nullptr;
+    std::vector<GpuBusySample> gpuBusySamples_;
+    unsigned gpuRenderedFrames_ = 0; bool gpuReportAvailable_ = false;
     void exportCsv() {
         const QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Exporter les résultats du benchmark"), QStringLiteral("benchmark_moteur3d.csv"), QStringLiteral("CSV (*.csv)"));
         if (path.isEmpty()) return;
         QFile file(path); if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) { QMessageBox::warning(this, QStringLiteral("Export CSV"), QStringLiteral("Impossible d’écrire ce fichier.")); return; }
         QTextStream out(&file); out.setEncoding(QStringConverter::Utf8);
+        if(gpuReportAvailable_){
+            out << "# benchmark=GPU Compute D3D11 ray tracing; source=Windows WDDM GPU Engine; frames=" << gpuRenderedFrames_ << "\\n";
+            out << "# utilization=max individual engine, not sum of GPU engines; system value includes other applications\\n";
+            out << "frame;gpu_system_busiest_engine_pct;gpu_moteur3d_engine_pct\\n";
+            for(const auto& r:gpuBusySamples_)
+                out << r.frame << ';'
+                    << (r.systemPct>=0?QString::number(r.systemPct,'f',2):QStringLiteral("N/D")) << ';'
+                    << (r.processPct>=0?QString::number(r.processPct,'f',2):QStringLiteral("N/D")) << '\\n';
+            return;
+        }
         out << "# build=" << M3D_BUILD_ID_ANSI << "; scene=" << sceneLabel_->text() << "\n";
         out << "# cpu_arch=" << QSysInfo::currentCpuArchitecture() << "; os=" << QSysInfo::productType() << " " << QSysInfo::productVersion()
             << "; logical_processors=" << std::thread::hardware_concurrency() << "; avx2_fma_available=" << (avx2FmaAvailable() ? 1 : 0) << "\n";
