@@ -1,4 +1,4 @@
-name: Independent free AI audit - Qwen2.5 Coder
+name: Independent free AI audit - Qwen2.5 Coder 3B fast
 
 on:
   push:
@@ -14,11 +14,11 @@ permissions:
 
 jobs:
   audit:
-    name: Free independent C++ and HLSL code review
+    name: Free fast independent C++ and HLSL code review
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 35
     env:
-      OLLAMA_MODEL: qwen2.5-coder:7b
+      OLLAMA_MODEL: qwen2.5-coder:3b
       OLLAMA_NUM_PARALLEL: '1'
       OLLAMA_MAX_LOADED_MODELS: '1'
     steps:
@@ -49,7 +49,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Audit-IA-Gratuit-Qwen-Moteur3D
+          name: Audit-IA-Gratuit-Qwen3B-Moteur3D
           path: independent-audit/
           if-no-files-found: warn
           retention-days: 30
