@@ -12,6 +12,7 @@ const api=vm.runInNewContext(src+`
  arch:M3D_ENERGETIK_ARCH,
  validate:m3dCheckEnergetikDatum,
  arcade:m3dBuildFoyerMuralArcade,
+ slabs:m3dBuildEnergetikSlabs,
  stair:m3dBuildEastStairCore,
  foyerStair:m3dBuildFoyerStairFlights,
  rear:m3dBuildEnergetikRearWall,
