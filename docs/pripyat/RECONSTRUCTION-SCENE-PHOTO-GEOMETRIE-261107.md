@@ -25,12 +25,18 @@
 9. **Contrôles** : `test-mosaic-clearance.mjs` et `test-energetik-architecture.mjs` contrôlent géométries réellement construites, trous d'arcades, ouvertures arrière, toit, arche et escaliers.
 10. **Validation graphique automatisable** : `moteur3d_qt.exe --snapshot <vue> <fichier.png>` calcule un PNG 640×360 par rendu CPU ; workflow Windows vise les vues 02, 03 et 09.
 
+## Projet-type architectural retrouvé
+
+En complément des photos, l'étude de rénovation d'un bâtiment bâti sur le **projet-type 2С-06-9/70** décrit un gabarit de **81,3 × 30,4 m entre axes**, une salle de **24 × 18 m**, une scène de **18,3 × 18 m**, un foyer de **540,6 m²** et une **cage de scène de 21 m**. Voir `PROJET-TYPE-2C-06-9-70-PROPORTIONS.md` pour les différences avec la version Pripiat.
+
+Ces données sont **une comparaison utile mais non un plan d'exécution validé de l'Energetik**. Elles soulignent que le plan actuel de l'auditorium et de la scène reste provisoire ; pour préserver la scène déjà texturée, nous n'avons pas étiré arbitrairement les volumes sans définir de correspondances sur les plans.
+
 ## Limites et points ouverts
 - **Pas de plan architectural coté authentifié** disponible parmi les ressources exploitées. Les volumes ne peuvent pas être qualifiés d'exacts au centimètre près.
 - **Contradiction à lever** : deux étages selon base architecturale, trois niveaux de plancher dans la scène. Le second plancher peut correspondre à des zones techniques/partielles, mais cela doit être documenté par une coupe.
 - **Référence géographique** : repères GPS Energetik/Polissya et coordonnées locales ne sont pas homologues ; ne pas étirer arbitrairement les routes.
 - **Salle, bibliothèque, gymnase, boxe, piscine et annexes** : l'implantation réelle exige un plan de distribution ; aucun nouvel emplacement fantaisiste n'a été imposé.
-- **Rendus** : les contrôles mathématiques ne garantissent pas la fidélité visuelle ; examiner les PNG produits par Windows Actions et comparer à cadrages rapprochés.
+- **Rendus** : les contrôles mathématiques ne garantissent pas la fidélité visuelle ; le workflow Windows produit les **10 vues CPU de contrôle** à 640 × 360. Exiger que le job atteigne l'étape PNG et archive l'artifact distinct `Pripyat-Architecture-Inspection-<run>`.
 - **Rendu GPU** : cette refonte porte sur la géométrie, pas sur un backend DXR/compute ray tracing.
 
 ## Critères de validation
