@@ -1321,7 +1321,7 @@ private:
         settings_.directX11 = renderer_->currentIndex() == 2 && !settings_.offlinePathTrace;
         settings_.compute11 = renderer_->currentIndex() == 3 && !settings_.offlinePathTrace;
         if (rendererStatus_ && qi == 7) rendererStatus_->setText(QStringLiteral("CPU hors-ligne PBR/HDR — 64 spp, 3 rebonds et débruitage."));
-        else if (rendererStatus_ && settings_.compute11) rendererStatus_->setText(QStringLiteral("GPU Compute D3D11 : rayons BVH sur GPU, matériaux simplifiés; repli CPU si échec. DXR non requis."));
+        else if (rendererStatus_ && settings_.compute11) rendererStatus_->setText(QStringLiteral("GPU Compute D3D11 : ray tracing BVH, atlas PBR et ciel. GPU sans DXR, repli CPU si échec."));
         if (navigationPreviewTimer_) navigationPreviewTimer_->setInterval(settings_.directX11 ? 50 : 350);
         threads_->setEnabled(!(settings_.directX11 || settings_.compute11));
         simdMode_->setEnabled(!(settings_.directX11 || settings_.compute11));
@@ -1507,7 +1507,7 @@ private:
             sceneLock.unlock();
             QString diag;
             if (st.gpu && cfg.compute11) {
-                diag = QStringLiteral("GPU Compute D3D11 — ray tracing expérimental | calcul %1 ms | total %2 ms\nAlbédo moyen et éclairage simplifié; UV/PBR et réflexions complètes non implémentés.").arg(st.ms-st.postMs,0,'f',1).arg(st.ms,0,'f',1);
+                diag = QStringLiteral("GPU Compute D3D11 — ray tracing expérimental | calcul %1 ms | total %2 ms\nAlbédo, normales et rugosité échantillonnés sur GPU; ombres, GI et réfraction en développement.").arg(st.ms-st.postMs,0,'f',1).arg(st.ms,0,'f',1);
             } else if (st.gpu) {
                 diag = QStringLiteral("GPU DirectX 11 — aperçu raster | rendu %1 ms | post %2 ms | total %3 ms\nGéométrie rasterisée : %4 triangles\nCarte d’ombres CPU réutilisée; DOF, réflexions et réfraction restent simplifiées.")
                     .arg(st.ms - st.postMs, 0, 'f', 1).arg(st.postMs, 0, 'f', 1).arg(st.ms, 0, 'f', 1).arg(qulonglong(st.tests));
