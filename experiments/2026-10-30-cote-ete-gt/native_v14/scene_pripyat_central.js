@@ -41,7 +41,7 @@ const M3D_ENERGETIK_ARCH = Object.freeze({
     slabThickness:0.24, roof:9.4
   }),
   foyer: Object.freeze({
-    mosaicWallX:8.38, mosaicSurfaceX:8.12,
+    mosaicWallX:8.15, mosaicSurfaceX:8.12,
     mosaicBottomY:2.0, mosaicTopY:6.30,
     mosaicStartZ:-41.55, mosaicEndZ:-32.05,
     galleryEastEdgeX:8.65, rearGalleryEndZ:-40.9,
@@ -489,7 +489,7 @@ function makeScene() {
     box(-15,t,-35.8,-7,b,-26.5,'concrete');
     // Removed: this narrow slab ran directly across the mosaic sightline.
     // The hall's east gallery is supported beyond the wall at X=8.65.
-    // Start the east upper floor behind the mural support wall (X=8.38).
+    // Start the east upper floor behind the mural support wall (X from datum).
     box(archFoyer.galleryEastEdgeX,t,-42.2,18,b,-20.1,'concrete');
     box(18,t,-42.2,20,b,-20.1,'concrete');
     box(27,t,-42.2,29.2,b,-20.1,'concrete');
@@ -733,7 +733,8 @@ function makeScene() {
   }
   // The foyer mosaic is a reusable, photo-guided texture on the hall-facing stair wall.
   // Dimensions are the current 9.5 x 4.3 m estimate; update the manifest if surveyed.
-  // The supporting wall sits at X=8.38 m. This plane faces -X and spans toward +Z.
+  // The supporting wall now sits 3 cm behind the painted plane, not 26 cm.
+  // The painted plane faces -X and spans toward +Z.
   // The mural spans the atrium across the first-floor level; never crop it
   // with a mezzanine slab. Keep the historically estimated 4.3 m height.
   const frescoX=archFoyer.mosaicSurfaceX, frescoY0=archFoyer.mosaicBottomY, frescoY1=archFoyer.mosaicTopY;
