@@ -245,6 +245,7 @@ float4 tracePrimary(Ray ray){
  float spec=d*gv*gl*F/max(.1,4*ndl*ndv);
  float fill=.40+.23*ambient;
  float3 rgb=base*(fill+sunIntensity*.95*ndl)+float3(spec,spec,spec)*sunIntensity*.55;
+ rgb+=base*m.params.z*max(.18,1-sunIntensity); // rooftop neon and surviving lamps
  return float4(saturate(rgb),1);
 }
 [numthreads(8,8,1)]
