@@ -2,7 +2,7 @@
   "scene": "Palais de la Culture Energetik — Pripiat",
   "schema_version": 1,
   "annex": "docs/pripyat/VUES-ENERGETIK.md",
-  "notes": "Vues 01,03,04,07,10 validées visuellement sur les captures CPU de la build 210; la fresque nette est vérifiée en vue 02. target en mètres, distance en mètres, angles en degrés et hour_step = 06:00 + 30 min × indice.",
+  "notes": "Vues d'inspection de reconstruction. La vue 06 montre une pièce réellement modélisée dans l'aile est, sans prétendre en connaître l'usage historique. Les cadrages restent provisoires.",
   "views": [
     {
       "name": "01 — Façade complète et colonnade",
@@ -70,16 +70,16 @@
       "hour_step": 12
     },
     {
-      "name": "06 — Salle de club, étage",
+      "name": "06 — Pièce de l'aile est, étage (provisoire)",
       "target": [
-        -32,
-        7.8,
-        -30
+        12,
+        7.35,
+        -29.7
       ],
-      "distance": 5.5,
-      "angle": 0,
-      "elevation": 4,
-      "fov": 52,
+      "distance": 4,
+      "angle": 90,
+      "elevation": 0,
+      "fov": 64,
       "hour_step": 12
     },
     {
