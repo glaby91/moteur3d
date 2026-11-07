@@ -140,6 +140,15 @@ jobs:
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: windeployqt --release --compiler-runtime --dir dist dist/moteur3d_qt.exe
 
+      - name: Render architectural inspection PNGs on CPU
+        if: runner.os == 'Windows'
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          ./dist/moteur3d_qt.exe --snapshot 2 dist/energetik_mural_arcade.png
+          ./dist/moteur3d_qt.exe --snapshot 3 dist/energetik_foyer_stair.png
+          ./dist/moteur3d_qt.exe --snapshot 9 dist/energetik_roof.png
+
       - name: Upload Windows application package
         uses: actions/upload-artifact@v4
         with:
