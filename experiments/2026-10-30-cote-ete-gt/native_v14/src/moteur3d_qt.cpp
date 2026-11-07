@@ -586,6 +586,7 @@ public:
         auto* separateView = toolsMenu->addAction(QStringLiteral("Ouvrir la deuxième fenêtre de rendu"));
         connect(separateView,&QAction::triggered,this,[this]{
             if(!detachedRender_)detachedRender_=new DetachedRenderWindow(this);
+            if(!lastRenderedFrame_.isNull())detachedRender_->setFrame(lastRenderedFrame_);
             detachedRender_->show();detachedRender_->raise();detachedRender_->activateWindow();
         });
         benchmarkAction_ = toolsMenu->addAction(QStringLiteral("Benchmark du moteur…"));
@@ -626,6 +627,7 @@ private:
     bool stopping_ = false, pending_ = false, benchmarking_ = false;
     ImageView* image_ = nullptr;
     DetachedRenderWindow* detachedRender_ = nullptr;
+    QImage lastRenderedFrame_;
     QLabel *status_ = nullptr, *stats_ = nullptr, *hourLabel_ = nullptr, *threadLabel_ = nullptr;
     QComboBox *resolution_ = nullptr, *renderer_ = nullptr, *quality_ = nullptr, *simdMode_ = nullptr;
     QLabel* rendererStatus_ = nullptr;
@@ -1519,6 +1521,7 @@ private:
                         queueNextVideoFrame();
                     }
                 } else {
+                    lastRenderedFrame_=image;
                     image_->setFrame(image);
                     if(detachedRender_ && detachedRender_->isVisible()) detachedRender_->setFrame(image);
                     status_->setText(QStringLiteral("Terminé — ") + QString::fromWCharArray(M3D_RELEASE_ID_WIDE) + QStringLiteral(" — ") + QString::number(hourValue) + QStringLiteral(" h"));
