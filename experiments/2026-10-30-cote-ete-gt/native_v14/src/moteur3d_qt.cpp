@@ -300,16 +300,16 @@ public:
         }
         auto pct=[](double v, unsigned n){ return n?QStringLiteral("%1 %").arg(v,0,'f',1):QStringLiteral("N/D"); };
         diagnosis_->setText(QStringLiteral(
-            "GPU Compute D3D11 : %1 images (%2×%3).\\n"
-            "Charge GPU Windows (moteur le plus actif) : moyenne %4, maximum %5 (%6 échantillons).\\n"
-            "Charge attribuée à Moteur3D : moyenne %7, maximum %8 (%9 échantillons).\\n"
+            "GPU Compute D3D11 : %1 images (%2×%3).\n"
+            "Charge GPU Windows (moteur le plus actif) : moyenne %4, maximum %5 (%6 échantillons).\n"
+            "Charge attribuée à Moteur3D : moyenne %7, maximum %8 (%9 échantillons).\n"
             "Mesures WDDM GPU Engine; le maximum par moteur n'est PAS la somme des moteurs."
             " Autres programmes GPU inclus dans la charge globale."
         ).arg(frames).arg(width).arg(height)
          .arg(pct(nSystem?sumSystem/nSystem:0,nSystem)).arg(pct(maxSystem,nSystem)).arg(nSystem)
          .arg(pct(nProcess?sumProcess/nProcess:0,nProcess)).arg(pct(maxProcess,nProcess)).arg(nProcess));
         if(!nSystem)diagnosis_->setText(diagnosis_->text()+QStringLiteral(
-            "\\nCompteurs GPU Engine indisponibles sur cette version du pilote/Windows : aucun pourcentage inventé."));
+            "\nCompteurs GPU Engine indisponibles sur cette version du pilote/Windows : aucun pourcentage inventé."));
         export_->setEnabled(gpuReportAvailable_ && !running_);
     }
     void setRows(std::vector<BenchmarkRow> rows, double shadowMs, int width, int height, unsigned samples,
@@ -391,13 +391,13 @@ private:
         QFile file(path); if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) { QMessageBox::warning(this, QStringLiteral("Export CSV"), QStringLiteral("Impossible d’écrire ce fichier.")); return; }
         QTextStream out(&file); out.setEncoding(QStringConverter::Utf8);
         if(gpuReportAvailable_){
-            out << "# benchmark=GPU Compute D3D11 ray tracing; source=Windows WDDM GPU Engine; frames=" << gpuRenderedFrames_ << "\\n";
-            out << "# utilization=max individual engine, not sum of GPU engines; system value includes other applications\\n";
-            out << "frame;gpu_system_busiest_engine_pct;gpu_moteur3d_engine_pct\\n";
+            out << "# benchmark=GPU Compute D3D11 ray tracing; source=Windows WDDM GPU Engine; frames=" << gpuRenderedFrames_ << "\n";
+            out << "# utilization=max individual engine, not sum of GPU engines; system value includes other applications\n";
+            out << "frame;gpu_system_busiest_engine_pct;gpu_moteur3d_engine_pct\n";
             for(const auto& r:gpuBusySamples_)
                 out << r.frame << ';'
                     << (r.systemPct>=0?QString::number(r.systemPct,'f',2):QStringLiteral("N/D")) << ';'
-                    << (r.processPct>=0?QString::number(r.processPct,'f',2):QStringLiteral("N/D")) << '\\n';
+                    << (r.processPct>=0?QString::number(r.processPct,'f',2):QStringLiteral("N/D")) << '\n';
             return;
         }
         out << "# build=" << M3D_BUILD_ID_ANSI << "; scene=" << sceneLabel_->text() << "\n";
@@ -1214,6 +1214,92 @@ private:
             std::sort(threadCounts.begin(), threadCounts.end());
             const int engineMode = dialog.requestedEngine();
             if(engineMode!=0){cfg.samples=1;cfg.dof=false;cfg.fog=false;}
+            if(engineMode==3) {
+                // Sustained HLSL ray tracing, NOT the separate D3D11 rasterizer.
+                // Same view/lighting for each frame. Warmup excluded.
+                const int frameCount=dialog.gpuFrameCount();
+                dialog.setRows({}, 0, cfg.outW, cfg.outH, 1, 0,
+                    QStringLiteral("Compute D3D11 GPU"), QStringLiteral("Charge Windows sur %1 images").arg(frameCount));
+                dialog.setRunning(true);
+                dialog.setProgress(0, QStringLiteral("Préparation GPU Compute / compteurs WDDM…"));
+                uint64_t token=0;
+                {
+                    std::lock_guard<std::mutex> lock(requestMutex_);
+                    benchmarking_=true;pending_=false;
+                    generation_.fetch_add(1);
+                    token=benchmarkGeneration_.fetch_add(1)+1;
+                }
+                requestCv_.notify_one();
+                benchmarkThread_=std::thread([this,&dialog,cfg,frameCount,token] {
+                    std::vector<GpuBusySample> measurements;
+                    measurements.reserve(size_t(frameCount));
+                    QString errorMsg;
+                    int complete=0;
+                    std::unique_lock<std::mutex> sceneLock(sceneMutex_);
+                    if(benchmarkGeneration_.load()==token) {
+                        updateLighting(6.f+cfg.hourStep*.5f);
+                        GpuLoadMeter meter;
+                        Camera cam=camera(cfg.angle,cfg.elevation,cfg.distance,
+                            cfg.renderW,cfg.renderH,V{cfg.targetX,cfg.targetY,cfg.targetZ});
+                        cam.tanHalf=std::tan(cfg.fov*PI/360.f);
+                        cam.focusDistance=cfg.distance;cam.apertureRadius=0.f;
+                        cam.pixelAngle=2*cam.tanHalf/std::max(1,cfg.renderW);
+                        auto lastSample=std::chrono::steady_clock::now()-std::chrono::milliseconds(250);
+                        for(int i=-1;i<frameCount;i++){
+                            if(benchmarkGeneration_.load()!=token)break;
+                            std::vector<uint32_t> pixels;
+                            Stats st{};
+                            std::wstring error;
+                            if(!renderCompute11Preview(scene_,cam,cfg.renderW,cfg.renderH,pixels,st,error)) {
+                                errorMsg=QString::fromWCharArray(error.c_str());break;
+                            }
+                            if(i>=0){
+                                GpuBusySample item{};
+                                item.frame=i+1;
+                                const auto now=std::chrono::steady_clock::now();
+                                if(now-lastSample>=std::chrono::milliseconds(200)){
+                                    const auto load=meter.sample();
+                                    item.systemPct=load.systemBusyPercent;
+                                    item.processPct=load.processBusyPercent;
+                                    lastSample=now;
+                                }
+                                measurements.push_back(item);
+                                ++complete;
+                                const int progress=int(100.*complete/std::max(1,frameCount));
+                                QMetaObject::invokeMethod(&dialog,[&dialog,progress,complete,frameCount]{
+                                    dialog.setProgress(progress,QStringLiteral(
+                                        "Compute HLSL — image %1/%2 ; charge GPU en cours"
+                                    ).arg(complete).arg(frameCount));
+                                },Qt::QueuedConnection);
+                            }else if(meter.available()){
+                                // Prime the GPU Engine perf counter after the warmup.
+                                meter.sample();
+                                lastSample=std::chrono::steady_clock::now();
+                            }
+                        }
+                    }
+                    sceneLock.unlock();
+                    const bool cancelled=benchmarkGeneration_.load()!=token;
+                    {
+                        std::lock_guard<std::mutex> lock(requestMutex_);
+                        benchmarking_=false;
+                    }
+                    QMetaObject::invokeMethod(&dialog,[this,&dialog,measurements=std::move(measurements),
+                        complete,cfg,frameCount,cancelled,errorMsg]() mutable {
+                        dialog.setGpuReport(std::move(measurements),unsigned(complete),cfg.renderW,cfg.renderH);
+                        if(!errorMsg.isEmpty())
+                            dialog.setProgress(0,QStringLiteral("Échec GPU Compute : %1").arg(errorMsg));
+                        else if(cancelled)
+                            dialog.setProgress(int(100.*complete/std::max(1,frameCount)),
+                                QStringLiteral("Benchmark GPU interrompu : %1 images réalisées.").arg(complete));
+                        else
+                            dialog.setProgress(100,QStringLiteral("Terminé : %1 images GPU Compute. Moyenne et maximum ci-dessous.").arg(complete));
+                        dialog.setRunning(false);
+                        requestCv_.notify_one();
+                    },Qt::QueuedConnection);
+                });
+                return;
+            }
             if (engineMode == 0 && threadCounts.empty()) { QMessageBox::information(&dialog, QStringLiteral("Benchmark"), QStringLiteral("Sélectionnez au moins un nombre de threads.")); return; }
             if (threadCounts.empty()) threadCounts.push_back(1);
             const int repeats = dialog.repeats();
