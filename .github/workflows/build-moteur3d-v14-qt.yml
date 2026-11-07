@@ -6,6 +6,7 @@ on:
       - experiment/manhattan-silent-hill-2026-10-30
       - pripiat
       - feature/pripyat-catalog-assets-261105
+      - feature/pripyat-square-survey-measurements-261107
     paths:
       - experiments/2026-10-30-cote-ete-gt/native_v14/CMakeLists.txt
       - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
@@ -83,6 +84,12 @@ jobs:
           #define M3D_GIT_BRANCH_WIDE L"$branch"
           #define M3D_GIT_RUN_WIDE L"$GITHUB_RUN_NUMBER"
           EOF
+
+      - name: Verify Pripyat scene syntax and geometry
+        shell: bash
+        run: |
+          node --check experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js
+          node experiments/pripyat-survey/test-pripyat-survey.mjs
 
       - name: Export runtime scenes
         shell: bash
