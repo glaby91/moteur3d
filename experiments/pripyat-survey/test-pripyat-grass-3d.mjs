@@ -17,10 +17,13 @@ const sites=context.sites();
 assert.ok(sites.length>=500,'needs substantial 3D grass, not isolated proxy objects');
 assert.ok(sites.length<=context.config.patchMax,'grass triangle budget exceeded');
 assert.equal(context.config.bladesPerPatch,3);
+assert.equal(context.config.patchMax,1450);
 const kinds={};
 for(const s of sites){
   kinds[s.kind]=(kinds[s.kind]??0)+1;
   assert.ok(Number.isFinite(s.x+s.y+s.z+s.h) && s.h>0,'invalid world-space grass');
+  const maxHeight={joint:.16,curb:.28,planter:.30,lawn:.27}[s.kind];
+  assert.ok(s.h<=maxHeight,`grass too tall for ${s.kind}: ${s.h.toFixed(3)} m`);
   if(s.kind==='lawn'){
     assert.ok(Math.hypot(s.x+10,s.z+31.1)<context.config.nearRadius+1e-8,'outside flat SRTM ground');
     assert.ok(!(s.x>-65&&s.x<112&&s.z>-89&&s.z<105),'lawn on urban pavement');
@@ -52,7 +55,7 @@ assert.equal(tiled[0].c.uv[1]-tiled[0].a.uv[1],25,'grass tiling must repeat in Z
 const tris=[];
 const report=context.build({meshTriangle:(a,b,c,m)=>tris.push({a,b,c,m})},sites);
 assert.equal(report.patches,sites.length);
-assert.equal(report.triangles,sites.length*context.config.bladesPerPatch*2);
+assert.equal(report.triangles,sites.length*context.config.bladesPerPatch*6);
 assert.equal(tris.length,report.triangles);
 for(let i=0;i<tris.length;i+=2){
  const a=tris[i],b=tris[i+1];
@@ -63,6 +66,17 @@ for(let i=0;i<tris.length;i+=2){
 }
 assert.ok(!code.includes("ellipsoidMesh(x+dx,0.22,z+dz,0.38,0.28,0.34,'grass'"),
           'old green sphere proxies remain');
+// Alignment with true plaza 3.2m grouting: each tuft is clustered
+// at the intersection of existing expansion joints, not on slab centres.
+const plaza={x0:-53,z0:-15};
+let matched=0,total=0;
+for(const v of sites.filter(v=>v.kind==='joint')){
+  const gx=Math.round((v.x-plaza.x0-1)/3.2),gz=Math.round((v.z-plaza.z0-1)/3.2);
+  if(gx>=0&&gx<32&&gz>=0&&gz<23){
+    total++;if(Math.hypot(v.x-(plaza.x0+1+gx*3.2),v.z-(plaza.z0+1+gz*3.2))<.18)matched++;
+  }
+}
+assert.ok(total>100&&matched/total>.95,'grass does not follow actual paving joints');
 assert.ok(code.includes('m3dBuildPripyatGroundGrass({meshTriangle});'),
           'grass builder must be called in actual makeScene');
 console.log('Grass 3D OK: '+sites.length+' tufts, '+tris.length+' actual double-sided triangles; groups: '+JSON.stringify(kinds));
