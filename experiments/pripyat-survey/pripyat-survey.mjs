@@ -30,3 +30,33 @@ export function footprintGap(a,b){if(a.length<3||b.length<3)throw new RangeError
 export function measurePair(a,b){return {horizontal_m:horizontalDistance(a,b),spatial_m:distance3D(a,b),elevation_m:b.y-a.y}}
 export function footprintReport(name,footprint){const xs=footprint.vertices.map(p=>p[0]),zs=footprint.vertices.map(p=>p[1]);return {name,status:footprint.status,width_m:Math.max(...xs)-Math.min(...xs),depth_m:Math.max(...zs)-Math.min(...zs),area_m2:polygonArea(footprint.vertices)}}
 export function surveyReport(){const names=Object.keys(preliminaryFootprints);return {units:"metres",verified:false,buildings:names.map(n=>footprintReport(n,preliminaryFootprints[n])),gaps:names.flatMap((a,i)=>names.slice(i+1).map(b=>({a,b,gap_m:footprintGap(preliminaryFootprints[a].vertices,preliminaryFootprints[b].vertices)})))}}
+
+/**
+ * Publicly documented approximate WGS84 landmark positions (Wikimedia Commons).
+ * These are landmark POINTS, not footprint corners. Positional uncertainty and
+ * choice of representative building point prevent automatic exact placement.
+ */
+export const geographicLandmarks=Object.freeze({
+  energetik:{latitude:51+24/60+24.19/3600,longitude:30+3/60+23.58/3600,source:"Wikimedia Commons building coordinates",accuracy:"approximate"},
+  polissya:{latitude:51+24/60+25.74/3600,longitude:30+3/60+29.63/3600,source:"Wikimedia Commons building coordinates",accuracy:"approximate"}
+});
+export function geodesicDistanceMetres(a,b){
+  const rad=Math.PI/180,R=6371008.8;
+  const lat1=finite(a.latitude,"latitude")*rad,lat2=finite(b.latitude,"latitude")*rad;
+  const dLat=lat2-lat1,dLon=(finite(b.longitude,"longitude")-finite(a.longitude,"longitude"))*rad;
+  const h=Math.sin(dLat/2)**2+Math.cos(lat1)*Math.cos(lat2)*Math.sin(dLon/2)**2;
+  return 2*R*Math.asin(Math.min(1,Math.sqrt(h)));
+}
+export function localTangentMetres(origin,target){
+  const rad=Math.PI/180,R=6371008.8,lat0=finite(origin.latitude,"latitude")*rad;
+  return {east_m:R*Math.cos(lat0)*(finite(target.longitude,"longitude")-finite(origin.longitude,"longitude"))*rad,
+          north_m:R*(finite(target.latitude,"latitude")-finite(origin.latitude,"latitude"))*rad};
+}
+export function landmarkSeparationReport(){
+  const a=geographicLandmarks.energetik,b=geographicLandmarks.polissya;
+  const sceneA=preliminaryFootprints.energetik.vertices,sceneB=preliminaryFootprints.polissya.vertices;
+  const center=poly=>({x:poly.reduce((v,p)=>v+p[0],0)/poly.length,y:0,z:poly.reduce((v,p)=>v+p[1],0)/poly.length});
+  return {source:"Wikimedia Commons approximate building points",geodesic_m:geodesicDistanceMetres(a,b),
+    scene_centers_m:horizontalDistance(center(sceneA),center(sceneB)),comparable:false,
+    warning:"Source points are not confirmed building centroids. Do not apply a scale factor until the same physical landmarks are identified."};
+}
