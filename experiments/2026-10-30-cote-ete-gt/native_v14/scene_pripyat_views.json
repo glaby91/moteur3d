@@ -2,7 +2,7 @@
   "scene": "Palais de la Culture Energetik — Pripiat",
   "schema_version": 1,
   "annex": "docs/pripyat/VUES-ENERGETIK.md",
-  "notes": "Vues d'inspection de reconstruction. La vue 06 montre une pièce réellement modélisée dans l'aile est, sans prétendre en connaître l'usage historique. Les cadrages restent provisoires.",
+  "notes": "Vues d'inspection du palais Energetik. Vue 06 dans le gymnase de l'aile arrière avec vitrage vers le parc; emplacement précis non certifié faute de plan coté.",
   "views": [
     {
       "name": "01 — Façade complète et colonnade",
@@ -70,16 +70,16 @@
       "hour_step": 12
     },
     {
-      "name": "06 — Pièce de l'aile est, étage (provisoire)",
+      "name": "06 — Gymnase Energetik, aile arrière",
       "target": [
-        12,
-        7.35,
-        -29.7
+        -25.5,
+        4.4,
+        -55.8
       ],
-      "distance": 4,
-      "angle": 90,
-      "elevation": 0,
-      "fov": 64,
+      "distance": 19.1,
+      "angle": -90,
+      "elevation": 4,
+      "fov": 76,
       "hour_step": 12
     },
     {
