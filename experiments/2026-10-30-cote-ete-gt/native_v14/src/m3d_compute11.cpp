@@ -67,6 +67,10 @@ struct ComputeCache {
  ComPtr<ID3D11ComputeShader> shader;
  ComPtr<ID3D11SamplerState> sampler;
  ComPtr<ID3D11Buffer> constants;
+ // D3D11 timestamps isolate kernel execution from CPU readback latency.
+ // Some drivers (including WARP) can report unavailable/disjoint timings:
+ // render quality is completely independent of these optional queries.
+ ComPtr<ID3D11Query> gpuDisjoint,gpuStart,gpuStop;
  std::array<ComPtr<ID3D11ShaderResourceView>,7> srv{};
  ComPtr<ID3D11Texture2D> output,staging;
  ComPtr<ID3D11UnorderedAccessView> outputUav;
@@ -108,6 +112,15 @@ struct ComputeCache {
   sd.AddressU=sd.AddressV=sd.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;sd.MaxLOD=D3D11_FLOAT32_MAX;
   if(FAILED(device->CreateSamplerState(&sd,&sampler))){
     error=L"Creation du sampler PBR impossible";return false;
+  }
+  D3D11_QUERY_DESC tq{};
+  tq.Query=D3D11_QUERY_TIMESTAMP_DISJOINT;
+  if(SUCCEEDED(device->CreateQuery(&tq,&gpuDisjoint))){
+    tq.Query=D3D11_QUERY_TIMESTAMP;
+    if(FAILED(device->CreateQuery(&tq,&gpuStart))||
+       FAILED(device->CreateQuery(&tq,&gpuStop))){
+      gpuDisjoint.Reset();gpuStart.Reset();gpuStop.Reset();
+    }
   }
   return true;
  }
@@ -260,6 +273,7 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
  v3(p.sunDir,norm(sun));p.ambient=clampf(daylight,.05f,1.f);
  v3(p.skyZenith,skyZenith/255.f);v3(p.skyHorizon,skyHorizon/255.f);
  p.sunIntensity=clampf(daylight,0.f,1.f);
+ const auto cpuSubmitStart=std::chrono::steady_clock::now();
  cache.context->UpdateSubresource(cache.constants.Get(),0,nullptr,&p,0,0);
  ID3D11ShaderResourceView* srvs[7]={};
  for(size_t i=0;i<7;i++)srvs[i]=cache.srv[i].Get();
@@ -271,11 +285,23 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
  cache.context->CSSetUnorderedAccessViews(0,1,uavs,nullptr);
  cache.context->CSSetConstantBuffers(0,1,constant);
  cache.context->CSSetSamplers(0,1,samplers);
+ const bool timestamps=cache.gpuDisjoint&&cache.gpuStart&&cache.gpuStop;
+ if(timestamps){
+  cache.context->Begin(cache.gpuDisjoint.Get());
+  cache.context->End(cache.gpuStart.Get());
+ }
  cache.context->Dispatch(UINT((w+7)/8),UINT((h+7)/8),1);
+ if(timestamps){
+  cache.context->End(cache.gpuStop.Get());
+  cache.context->End(cache.gpuDisjoint.Get());
+ }
  ID3D11UnorderedAccessView* nullUav=nullptr;
  ID3D11ShaderResourceView* nullSrvs[7]={};
  cache.context->CSSetUnorderedAccessViews(0,1,&nullUav,nullptr);
  cache.context->CSSetShaderResources(0,7,nullSrvs);
+ stats.gpuSubmitCpuMs=std::chrono::duration<double,std::milli>(
+     std::chrono::steady_clock::now()-cpuSubmitStart).count();
+ const auto readbackStart=std::chrono::steady_clock::now();
  cache.context->CopyResource(cache.staging.Get(),cache.output.Get());
  D3D11_MAPPED_SUBRESOURCE mapped{};
  if(FAILED(cache.context->Map(cache.staging.Get(),0,D3D11_MAP_READ,0,&mapped))){
@@ -291,6 +317,21 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
   }
  }
  cache.context->Unmap(cache.staging.Get(),0);
+ stats.gpuReadbackWallMs=std::chrono::duration<double,std::milli>(
+     std::chrono::steady_clock::now()-readbackStart).count();
+ // Never stall the renderer solely to obtain profiling statistics.
+ // A successful Map already waited for the copy to finish; most devices
+ // consequently have timestamp data ready at this point.
+ if(timestamps){
+  D3D11_QUERY_DATA_TIMESTAMP_DISJOINT d{};
+  UINT64 a=0,b=0;
+  const UINT flags=D3D11_ASYNC_GETDATA_DONOTFLUSH;
+  if(cache.context->GetData(cache.gpuDisjoint.Get(),&d,sizeof(d),flags)==S_OK &&
+     cache.context->GetData(cache.gpuStart.Get(),&a,sizeof(a),flags)==S_OK &&
+     cache.context->GetData(cache.gpuStop.Get(),&b,sizeof(b),flags)==S_OK &&
+     !d.Disjoint && d.Frequency>0 && b>=a)
+    stats.gpuKernelMs=1000.0*double(b-a)/double(d.Frequency);
+ }
  stats.gpu=true;stats.ms=std::chrono::duration<double,std::milli>(
     std::chrono::steady_clock::now()-start).count();
  stats.tests=uint64_t(w)*uint64_t(h);
