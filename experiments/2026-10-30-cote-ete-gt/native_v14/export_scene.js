@@ -103,7 +103,7 @@ globalThis.__m3dAppendPripyatCatalog = (objects) => {
 };
 const optionalCar = process.env.M3D_SKIP_IMPORTED_CAR === '1' ? '' : 'globalThis.__m3dAppendClassicCar(objects, M3D_IMPORTED_CAR);';
 const optionalPripyatCatalog = process.env.M3D_IMPORT_PRIPYAT_GLB === '1' && path.basename(scenePath) === 'scene_pripyat_central.js' ? 'globalThis.__m3dAppendPripyatCatalog(objects);' : '';
-eval(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\n${sceneSource}\nmakeScene(); ${optionalCar} ${optionalPripyatCatalog} buildBVH(); const __mats = [...new Set(objects.map(o => o.mat))]; for (const id of __mats) materials.set(id, makeMips(id, id.startsWith('gym') ? 512 : sceneBuildTextureSize)); globalThis.__scene = { objects, bvh, bvhRoot, sun, skyZenith, skyHorizon, pointLights, materials, mats: __mats, reflectivityPercent: M3D_MATERIAL_REFLECTIVITY_PERCENT, transmissionPercent: typeof M3D_MATERIAL_TRANSMISSION_PERCENT === "undefined" ? {} : M3D_MATERIAL_TRANSMISSION_PERCENT, refractiveIndex: typeof M3D_MATERIAL_IOR === "undefined" ? {} : M3D_MATERIAL_IOR, sceneLights: typeof M3D_SCENE_LIGHTS === "undefined" ? [] : M3D_SCENE_LIGHTS };`);
+eval(`${script.slice(0, end)}\n${script.slice(materialStart, materialEnd)}\n${sceneSource}\nmakeScene(); ${optionalCar} ${optionalPripyatCatalog} buildBVH(); const __mats = [...new Set(objects.map(o => o.mat))]; for (const id of __mats) materials.set(id, makeMips(id, (id.startsWith('gym') || id.startsWith('wheel')) ? 512 : sceneBuildTextureSize)); globalThis.__scene = { objects, bvh, bvhRoot, sun, skyZenith, skyHorizon, pointLights, materials, mats: __mats, reflectivityPercent: M3D_MATERIAL_REFLECTIVITY_PERCENT, transmissionPercent: typeof M3D_MATERIAL_TRANSMISSION_PERCENT === "undefined" ? {} : M3D_MATERIAL_TRANSMISSION_PERCENT, refractiveIndex: typeof M3D_MATERIAL_IOR === "undefined" ? {} : M3D_MATERIAL_IOR, sceneLights: typeof M3D_SCENE_LIGHTS === "undefined" ? [] : M3D_SCENE_LIGHTS };`);
 const scene = globalThis.__scene;
 const energetikFrescoPbr = readPbrMipChain(path.join(__dirname, 'assets/pripyat/textures/energetik_fresco_mosaic.m3dpbr.gz'));
 scene.materials.set('energetikFresco', { levels: energetikFrescoPbr.color });
@@ -165,7 +165,7 @@ function makeRapturePbr(kind) {
 }
 
 function makePripyatPbr(kind) {
-  const size=kind.startsWith('gym') && kind!=='gymFloor' ? 1024 : Number(process.env.M3D_TEXTURE_SIZE || 1024);
+  const size=((kind.startsWith('gym') && kind!=='gymFloor') || kind.startsWith('wheel')) ? 1024 : Number(process.env.M3D_TEXTURE_SIZE || 1024);
   if (![512,1024,2048].includes(size)) throw new Error(`Taille de texture M3D_TEXTURE_SIZE invalide: ${size} (512, 1024 ou 2048 attendus).`);
   const isLeaf=kind==='leaves'||kind==='leavesAutumn';
   const color=new Uint16Array(size*size), normal=new Uint16Array(size*size), roughness=new Uint16Array(size*size);
@@ -173,6 +173,9 @@ function makePripyatPbr(kind) {
   const noise=(x,y,shift,salt=0)=>hash((x>>shift)+salt,(y>>shift)-salt)/2147483647.5-1;
   const heightAt=(x,y)=>{
     const broad=noise(x,y,5), mid=noise(x,y,3), grain=noise(x,y,1);
+    if(kind==='wheelSteel'||kind==='wheelRust') return broad*.045+mid*.027+grain*.008;
+    if(kind==='wheelYellow') return broad*.06+mid*.033+grain*.015;
+    if(kind==='wheelTrim') return broad*.04+mid*.02+grain*.008;
     if(kind==='gymFloor') return Math.sin(y*.075)*.003+Math.sin(y*.37)*.0009+broad*.055+mid*.025+grain*.010;
     if(kind==='gymWall') return broad*.16+mid*.10+grain*.027;
     if(kind==='gymConcrete') return broad*.11+mid*.065+grain*.025;
@@ -197,6 +200,7 @@ function makePripyatPbr(kind) {
     return broad*.10+mid*.055+grain*.018;
   };
   const palettes={
+    wheelSteel:[93,77,62], wheelRust:[121,65,37], wheelYellow:[204,152,37], wheelTrim:[92,82,67],
     gymFloor:[119,159,170], gymWall:[143,159,151], gymConcrete:[135,131,118],
     gymMetal:[100,78,61], gymLetter:[228,223,207], gymRed:[151,59,53], gymBlue:[36,113,164],
     concrete:[145,140,126], stone:[119,113,100], asphalt:[57,59,54],
@@ -209,7 +213,16 @@ function makePripyatPbr(kind) {
   for(let y=0;y<size;y++) for(let x=0;x<size;x++){
     const i=y*size+x, broad=noise(x,y,5), mid=noise(x,y,3), grain=noise(x,y,1);
     let variation=(kind==='seatFabricClean'||kind==='seatWood'||kind==='seatSteel'||kind==='seatPreviewFloor'||kind==='seatTrim')?0:kind==='seatVinylBrown'?broad*10+mid*6+grain*1.2:broad*15+mid*10+grain*5;
-    if(kind==='gymFloor'){
+    if(kind==='wheelSteel'||kind==='wheelRust'){
+      const flakes=noise(x,y,5)*.51+noise(x,y,2)*.33+grain*.16;
+      variation-=Math.max(0,flakes-.23)*48;
+      if(flakes>.5)variation+=16;
+    } else if(kind==='wheelYellow'){
+      const flakes=noise(x,y,6)*.52+noise(x,y,3)*.32+grain*.16;
+      variation-=Math.max(0,flakes-.13)*67;
+    } else if(kind==='wheelTrim'){
+      variation-=Math.max(0,noise(x,y,4)*.6+mid*.4)*28;
+    } else if(kind==='gymFloor'){
       // Parallel parquet planks, weathered worn paint and inlaid sports court.
       const seam=Math.min(y%17,17-y%17),woodKnots=Math.max(0,noise(x,y,3));
       variation+=seam<1.05?-31:Math.sin(x*.15+noise(x,y,5))*4;
@@ -334,6 +347,19 @@ function makePripyatPbr(kind) {
       const peelField=noise(x,y,4)*.58+noise(x,y,2)*.30+grain*.12;
       if(peelField>.68)pigment=[139,132,115];
     }
+    if(kind==='wheelYellow'){
+      const chip=noise(x,y,6)*.51+noise(x,y,2)*.31+grain*.18;
+      if(chip>.44)pigment=[108,64,40];
+      else if(chip<-.55)pigment=[156,128,54];
+    }
+    if(kind==='wheelSteel'){
+      const corrosion=noise(x,y,6)*.54+noise(x,y,3)*.34+grain*.12;
+      if(corrosion>.27)pigment=[139,74,42];
+    }
+    if(kind==='wheelRust'){
+      const corrosion=noise(x,y,5)*.62+noise(x,y,2)*.38;
+      if(corrosion<-.45)pigment=[68,70,65];
+    }
     if(kind==='gymFloor'){
       // The atlas is mapped *once* to the floor mesh, not tiled per board.
       const U=x/(size-1),V=y/(size-1),X=(U-.5)*43.6,Z=(V-.5)*25.8;
@@ -383,7 +409,7 @@ function makePripyatPbr(kind) {
     const dx=(heightAt(x+1,y)-heightAt(x-1,y))*1.2, dy=(heightAt(x,y+1)-heightAt(x,y-1))*1.2;
     const inv=1/Math.hypot(dx,dy,1);
     normal[i]=pack565(128-dx*inv*127,128-dy*inv*127,128+inv*127);
-    const roughBase=kind==='gymFloor'?187:kind==='gymWall'?221:kind==='gymConcrete'?216:kind==='gymMetal'?198:kind==='gymLetter'?174:kind==='gymRed'||kind==='gymBlue'?175:kind==='seatSteel'?170:kind==='seatSupportPaint'?176:kind==='seatVinylBrown'?96:kind==='seatPreviewFloor'?236:kind==='seatWood'?145:kind==='seatTrim'?232:kind==='seatFabricClean'?238:kind==='asphalt'?232:isLeaf||kind==='grass'?224:kind==='rust'?218:kind==='stone'?222:kind==='wood'||kind==='bark'?214:kind==='debris'?236:kind==='plaster'||kind==='mural'?228:kind==='volcanicTuff'?238:kind==='seatFabric'||kind==='curtain'?244:kind==='cinemaScreen'?228:232;
+    const roughBase=kind==='wheelYellow'?189:kind==='wheelSteel'?184:kind==='wheelRust'?217:kind==='wheelTrim'?175:kind==='gymFloor'?187:kind==='gymWall'?221:kind==='gymConcrete'?216:kind==='gymMetal'?198:kind==='gymLetter'?174:kind==='gymRed'||kind==='gymBlue'?175:kind==='seatSteel'?170:kind==='seatSupportPaint'?176:kind==='seatVinylBrown'?96:kind==='seatPreviewFloor'?236:kind==='seatWood'?145:kind==='seatTrim'?232:kind==='seatFabricClean'?238:kind==='asphalt'?232:isLeaf||kind==='grass'?224:kind==='rust'?218:kind==='stone'?222:kind==='wood'||kind==='bark'?214:kind==='debris'?236:kind==='plaster'||kind==='mural'?228:kind==='volcanicTuff'?238:kind==='seatFabric'||kind==='curtain'?244:kind==='cinemaScreen'?228:232;
     const r=kind==='seatSteel'?169+Math.sin(y*12)*15+Math.sin(y*29)*4:kind==='seatWood'?145+Math.sin(y*.07)*7+grain*2:kind==='seatFabricClean'?238+Math.cos(x*Math.PI/5)*4:kind==='seatVinylBrown'?96+noise(x,y,4)*24+Math.abs(grain)*10:kind==='seatSupportPaint'?176+noise(x,y,3)*12:kind==='seatTrim'?232+Math.sin(y*Math.PI/5)*3:roughBase+grain*10+Math.abs(mid)*4;
     roughness[i]=pack565(r,r,r);
   }
@@ -402,7 +428,7 @@ function makePripyatPbr(kind) {
   };
   return {color:makeMips(color),normal:makeMips(normal),roughness:makeMips(roughness)};
 }
-const generatedPripyatPbr=new Map(mats.filter(name=>['concrete','plaster','mural','volcanicTuff','stone','asphalt','brick','rust','leaves','leavesAutumn','grass','wood','bark','debris','seatFabric','seatFabricClean','seatVinylBrown','seatSupportPaint','seatWood','seatSteel','seatPreviewFloor','seatTrim','curtain','cinemaScreen','gymFloor','gymWall','gymConcrete','gymMetal','gymLetter','gymRed','gymBlue'].includes(name)).map(name=>[name,makePripyatPbr(name)]));
+const generatedPripyatPbr=new Map(mats.filter(name=>['concrete','plaster','mural','volcanicTuff','stone','asphalt','brick','rust','leaves','leavesAutumn','grass','wood','bark','debris','seatFabric','seatFabricClean','seatVinylBrown','seatSupportPaint','seatWood','seatSteel','seatPreviewFloor','seatTrim','curtain','cinemaScreen','gymFloor','gymWall','gymConcrete','gymMetal','gymLetter','gymRed','gymBlue','wheelSteel','wheelRust','wheelYellow','wheelTrim'].includes(name)).map(name=>[name,makePripyatPbr(name)]));
 for(const [name,pbr] of generatedPripyatPbr) scene.materials.set(name,{levels:pbr.color});
 
 const generatedPbr = new Map(['raptureStone', 'raptureBronze', 'raptureGlass'].map(name => [name, makeRapturePbr(name)]));
