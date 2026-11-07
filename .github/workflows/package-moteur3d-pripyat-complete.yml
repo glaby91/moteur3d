@@ -1,4 +1,4 @@
-name: Package Moteur3D Windows + Pripyat grass v2 complete
+name: Package Moteur3D native benchmark + Pripyat grass v2
 
 on:
   push:
@@ -20,8 +20,8 @@ jobs:
       - name: Download tested Moteur3D Windows with GPU Benchmark and About
         uses: actions/download-artifact@v4
         with:
-          name: Moteur3D-GPU-Load-Benchmark-3
-          run-id: 42407053208
+          name: Moteur3D-GPU-Native-Benchmark-1
+          run-id: 42411694183
           repository: glaby91/moteur3d
           github-token: ${{ secrets.GITHUB_TOKEN }}
           path: engine
@@ -57,6 +57,8 @@ jobs:
           le long des joints de dalles et des bordures (pas de grandes pointes).
           4. Selectionnez GPU Compute D3D11 pour le ray tracing GPU sans DXR.
           5. Outils > Benchmark du moteur : charge GPU (%) sur 100 images.
+          Calcul GPU a resolution native 1:1, non reduite par l'apercu fluide.
+          La resolution affichee dans le rapport est la resolution vraiment calculee.
           6. Aide > A propos et sources : photos, atlas et credits.
 
           Ce paquet inclut :
@@ -68,7 +70,7 @@ jobs:
           Le moteur est un projet de recherche personnel ; les photos
           externes citees servent de references, pas de textures distribuees.
 
-          Origine du moteur: GitHub Actions run 42407053208
+          Origine du moteur: GitHub Actions run 42411694183
           Origine de la scene: GitHub Actions run 42410006051
           EOF
 
@@ -101,9 +103,9 @@ jobs:
           manifest={
              'bundle':'Moteur3D-Pripyat-Complet',
              'platform':'Windows x64',
-             'app_build':'261107-0003',
-             'engine_git_sha':'1eb662f862bb6935053b32c877b91e4542584c32',
-             'engine_actions_run':42407053208,
+             'app_build':'261107-0004',
+             'engine_git_sha':'904362698f32fadeb215c355b20c61814d86bbd4',
+             'engine_actions_run':42411694183,
              'scene_git_sha':'5036a68bd7906c2d7dd31e512f47616ac43fdf1c',
              'scene_actions_run':42410006051,
              'scene_bytes':scene.stat().st_size,
@@ -111,6 +113,7 @@ jobs:
              'verified_required_files':required,
              'shader_packaged':True,
              'grass_3d':True,
+             'gpu_benchmark_resolution':'native 1:1 (not preview-scaled)',
              'grass_revision':'v2 short bent clustered blades on real 3.2m paving joints',
              'metric_1to1':True,
              'grass_world_uv_repetition_m':4,
@@ -126,7 +129,7 @@ jobs:
       - name: Upload ONE complete Moteur3D Pripyat Windows download
         uses: actions/upload-artifact@v4
         with:
-          name: Moteur3D-Pripyat-Complet-Windows-GrassV2
+          name: Moteur3D-Pripyat-Complet-Windows-GPU-Natif
           path: Moteur3D-Pripyat-Complet/
           compression-level: 1
           if-no-files-found: error
