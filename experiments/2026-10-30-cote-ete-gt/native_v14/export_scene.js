@@ -336,7 +336,7 @@ function makePripyatPbr(kind) {
     }
     if(kind==='gymFloor'){
       // The atlas is mapped *once* to the floor mesh, not tiled per board.
-      const U=x/(size-1),V=y/(size-1),X=(U-.5)*43.6,Z=(V-.5)*25.6;
+      const U=x/(size-1),V=y/(size-1),X=(U-.5)*43.6,Z=(V-.5)*25.8;
       const aX=Math.abs(X),aZ=Math.abs(Z);
       const red=aX>12 && aZ<8.3;
       const yellow=aZ>9.5 && aZ<11.7;
