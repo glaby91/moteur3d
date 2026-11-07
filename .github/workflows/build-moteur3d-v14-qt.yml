@@ -8,6 +8,7 @@ on:
       - feature/pripyat-catalog-assets-261105
       - feature/pripyat-square-survey-measurements-261107
       - feature/pripyat-compute-d3d11-261107
+      - feature/pripyat-polissya-arcade-261107
     paths:
       - experiments/2026-10-30-cote-ete-gt/native_v14/CMakeLists.txt
       - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
@@ -101,6 +102,8 @@ jobs:
           node experiments/pripyat-survey/test-energetik-origin-and-court.mjs
           node experiments/pripyat-survey/test-pripyat-ferris-wheel.mjs
           node experiments/pripyat-survey/test-compute-camera-projection.mjs
+          node experiments/pripyat-survey/test-polissya-arcade.mjs
+          node experiments/pripyat-survey/test-compute-pbr-cache.mjs
 
       - name: Export runtime scenes
         shell: bash
@@ -145,6 +148,7 @@ jobs:
           cp assets/pripyat/energetik_roof_neon_sign.glb dist/assets/pripyat/
           cp -r assets/pripyat/textures dist/assets/pripyat/
           cp -r docs dist/
+          cp ../../../docs/pripyat/CHANGEMENTS_POLISSYA_COMPUTE_261107.txt ../../../docs/pripyat/POLISSYA-PLANCHE-3VUES-261107.svg dist/
 
       - name: Deploy Qt DLLs on Windows
         if: runner.os == 'Windows'
@@ -159,13 +163,24 @@ jobs:
           & "./dist/moteur3d_qt.exe" --validate-compute-hlsl
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-      - name: Render all eleven photographic inspection views on CPU
+      - name: Execute actual HLSL compute shader with WARP (synthetic BVH)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        env:
+          M3D_COMPUTE_WARP: '1'
+        run: |
+          & "./dist/moteur3d_qt.exe" --smoke-compute-hlsl "./dist/compute-warp-smoke.png"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path "./dist/compute-warp-smoke.png")) { throw "Compute WARP image missing" }
+
+      - name: Render all thirteen photographic inspection views on CPU
         if: runner.os == 'Windows'
         shell: bash
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: |
           mkdir -p dist/architecture-review
-          for i in 1 2 3 4 5 6 7 8 9 10 11; do
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12 13; do
             ./dist/moteur3d_qt.exe --snapshot "$i" "dist/architecture-review/view-$(printf '%02d' "$i").png"
           done
           python - <<'PY'
@@ -178,7 +193,7 @@ jobs:
                   assert image.size == (640,360), (p, image.size)
                   assert max(std) > 2.0, (p, std)
                   print(f"{p}: RGB deviation {std}")
-          assert len(list(Path('dist/architecture-review').glob('view-*.png'))) == 11
+          assert len(list(Path('dist/architecture-review').glob('view-*.png'))) == 13
           PY
 
       - name: Upload compact architectural inspection images

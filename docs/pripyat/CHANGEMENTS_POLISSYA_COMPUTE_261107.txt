@@ -1,0 +1,91 @@
+MOTEUR 3D / PRIPYAT — RECONSTRUCTION POLISSYA ET COMPUTE HLSL
+JOURNAL DES MODIFICATIONS, FONCTIONNALITÉS ET LIMITES
+Date : 07 novembre 2026
+Branche : feature/pripyat-polissya-arcade-261107
+Base : feature/pripyat-compute-d3d11-261107
+
+OBJECTIFS
+- Hôtel Polissya crédible depuis les photographies utilisateur.
+- Colonnade béton courbe, autoportante et indépendante.
+- AUCUNE jonction physique entre l’hôtel et l’Energetik.
+- Arbres ramifiés, feuillages plus naturels, sans explosion polygonale.
+- GPU Compute D3D11 sans DXR : vraies textures PBR et réutilisation des
+  ressources entre deux images, en gardant le fallback CPU.
+- Planche de référence comprenant face, côté et dessus.
+
+DIMENSIONS PROVISOIRES, VISUELLEMENT GUIDÉES
+Hôtel Polissya :
+  emprise X 40..78 m, Z -42..-20 m, soit 38 x 22 m.
+  hauteur du corps principal ~16,2 m; aile ouest ~10,95 m.
+  terrasse ouverte / belvédère au niveau ~19,85 m.
+  Nota : toutes ces dimensions restent des hypothèses de notre scène.
+Galerie :
+  départ X ~33,7 m (3,2 m après limite orientale du palais).
+  extrémité X ~79,0 m, longueur en projection ~45,3 m.
+  largeur du toit ~3,7 m; sous-face Y 3,55 m; dessus Y 3,86 m.
+  courbure centrale Z(t)=-13,6 + 5,8*sin(pi*t), t∈[0;1].
+  36 panneaux courbes, deux rangées de 17 poteaux (34 poteaux).
+  L'ensemble se trouve en avant de la façade Z=-20 de l'hôtel,
+  sans aucun raccordement à l'hôtel ou au palais.
+  Les distances réelles restent à vérifier après géoréférencement.
+
+GÉOMÉTRIE ET MATÉRIAUX
+- Remplacement de l’arche maçonnée droite qui reliait artificiellement
+  les deux bâtiments par une promenade ouverte à toiture courbe,
+  générée en triangles et non par une suite de blocs rectangulaires.
+- Hôtel : façade à travées, fenêtres manquantes, placage vertical clair,
+  corps asymétrique, toit et belvédère partiellement ouverts, enseigne
+  géométrique oxydée « ГОТЕЛЬ ПОЛІССЯ », auvent d’entrée.
+- Réorganisation de l'immeuble d'habitation à l'est pour éviter
+  son chevauchement avec le nouveau volume de l'hôtel.
+- Peupliers : tronc, huit branches obliques, branches secondaires,
+  bouquetages irréguliers et variation des silhouettes.
+- Ajout de grands arbres devant l'hôtel (et renforcement arbustes
+  existants) : distribution irrégulière, ramure visible en plan.
+- Les matériaux utilisent la palette existante (béton, pierre,
+  enduit, rouille, vitres, écorce, feuilles) sans copier les photos.
+- Les autres scènes et la fresque intérieure restent intactes.
+
+INTERFACE ET CONTRÔLE
+- La sélection passe de 11 à 13 caméras.
+- 12 : façade Polissya et galerie courbe depuis l'esplanade.
+- 13 : colonnade courbe en vue plongeante depuis la place.
+- Captures de contrôle CPU de 01 à 13 via Windows Actions.
+- Planche : docs/pripyat/POLISSYA-PLANCHE-3VUES-261107.svg
+  et PNG issu de la même géométrie provisoire.
+
+GPU COMPUTE — CE QUI A CHANGÉ
+- Projection des rayons primaires alignée sur CPU/raster (correctif précédent).
+- Chargement des UV des triangles dans les buffers GPU.
+- Atlas 512x512 pixels par matériau (albédo, normale et rugosité)
+  envoyé une seule fois lors du chargement/changement de scène.
+- Textures réellement échantillonnées dans le shader HLSL en fonction
+  des UV ou de la projection procédurale par type de primitive.
+- Ciel diurne/nocturne dérivé des paramètres de scène, et émission
+  simplifiée pour néons, lampes et fenêtres éclairées.
+- BRDF GGX direct simplifié avec rugosité et Fresnel diélectrique.
+- Conservations par thread du périphérique D3D11, shader, buffers BVH,
+  textures et cible 8 bits, plutôt que de tout réallouer à chaque image.
+- Repli CPU si le shader ou les allocations GPU échouent.
+
+LIMITES ET POINTS À NE PAS SURVENDRE
+- La fidélité photographique architecturale et les mesures du site
+  ne sont PAS établies par les tests de géométrie.
+- Compute ne possède pas encore les ombres par rayons, GI multi-rebonds,
+  réfraction transparente, débruitage HDR et parité PBR CPU complète.
+- L'atlas Compute 512 px réduit la finesse de certaines textures 2048.
+- Le BVH reste traversé une fois par pixel avec pile limitée à 64 nœuds.
+  Des pixels magenta peuvent signaler un débordement à investiguer.
+- Le rendu reste soumis aux performances de l'Intel HD Graphics 620.
+  La compilation Windows ne garantit pas une accélération mesurée.
+- DirectX raster reste soumis à sa limite séparée de tessellation.
+- La position de la grande roue n'est pas déplacée par ces corrections.
+
+RECETTE
+1. Exécuter les tests géométriques Polissya et des vues/caméras.
+2. Compiler, exporter la scène et exécuter le test HLSL cs_5_0 Windows.
+3. Générer les 13 captures de contrôle CPU, dont Polissya 12 et 13.
+4. Sur la machine cible, comparer caméra 02 (fresque), 06 (roue),
+   12 (hôtel) et 13 (galerie) entre CPU et GPU Compute.
+5. Relever les temps de première image et images suivantes.
+6. Examiner ciel, textures, ramures, ombres et messages fallback.
