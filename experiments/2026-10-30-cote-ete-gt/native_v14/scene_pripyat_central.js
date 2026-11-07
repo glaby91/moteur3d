@@ -357,6 +357,7 @@ function makeScene() {
     box(-15,t,-42.2,-12.8,b,-35.8,'concrete');
     box(-12.8,t,-42.2,8,b,archFoyer.rearGalleryEndZ,'concrete');
     box(-15,t,-26.5,8,b,-20.1,'concrete');
+    // First landing/gallery above the foyer staircase; leave the mural atrium open.
     box(-15,t,-35.8,-7,b,-26.5,'concrete');
     // Removed: this narrow slab ran directly across the mosaic sightline.
     // The hall's east gallery is supported beyond the wall at X=8.65.
@@ -405,7 +406,8 @@ function makeScene() {
     box(x,y+2.15,mid-door*.5,x+thick,y+h,mid+door*.5,'concrete');
   }
   for(let level=0;level<3;level++){
-    const y=0.38+level*3.1, h=2.72;
+    const y=[archLevels.ground,archLevels.firstSlab+archLevels.slabThickness,archLevels.secondSlab+archLevels.slabThickness][level];
+    const h=([archLevels.firstSlab,archLevels.secondSlab,archLevels.roof][level]-y)-0.12;
     // A real return wall frames the foyer stair and gives the side-room door
     // a proper opening; the mural is mounted on its hall-facing surface.
     // Continuous masonry behind the full mosaic, with doorway further forward.
@@ -438,7 +440,7 @@ function makeScene() {
   // The east stair core is connected through a real doorway in its west wall.
   // Align it with the rear corridor so the guided camera can reach the stairs.
   for(let level=0;level<3;level++){
-    const y=0.38+level*3.1;
+    const y=[archLevels.ground,archLevels.firstSlab+archLevels.slabThickness,archLevels.secondSlab+archLevels.slabThickness][level];
     box(18.0,y,-42.2,20.0,y+2.15,-31.4,'concrete');
     box(18.0,y,-29.6,20.0,y+2.15,-20.1,'concrete');
     box(18.0,y+2.15,-31.4,20.0,y+2.72,-29.6,'concrete');
@@ -582,7 +584,8 @@ function makeScene() {
       capsule([railX,y,z],[railX,y+0.43,z],0.035,'metal');
     }
   }
-  box(-12.4,3.25,-34.1,9.2,3.48,-32.8,'stone');
+  // Stair landing terminates before the mural support wall, not through it.
+  box(-12.4,archLevels.firstSlab,-34.1,8.0,archLevels.firstSlab+archLevels.slabThickness,-32.8,'stone');
   // Decorative wall panels and faded mural fragments based on documented
   // Energetik lobby photographs, with peeled plaster around the remaining art.
   // Mount the panels on the INTERIOR faces. The earlier positive-X offsets
@@ -638,7 +641,7 @@ function makeScene() {
 
   // Upper rooms retain a few recognizable large-scale fixtures and rubble.
   for(let level=1;level<3;level++){
-    const y=0.42+level*3.1;
+    const y=[archLevels.ground,archLevels.firstSlab+archLevels.slabThickness,archLevels.secondSlab+archLevels.slabThickness][level]+0.04;
     for(const x of [-43,-32,-21,12]){
       if(level===1&&x< -17.3) continue; // preserve the double-height hall void
       box(x-1.4,y,-24.6,x+1.4,y+0.72,-23.8,'wood');
