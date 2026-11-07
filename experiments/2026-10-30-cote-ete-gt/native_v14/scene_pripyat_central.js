@@ -556,10 +556,17 @@ function m3dBuildHousing({box},b){
 // and passes IN FRONT of the hotel. It touches neither building.
 // Unmeasured dimensions are an exterior visual estimate (tolerance ~1m).
 function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polissya){
- // Cubic Bézier in X/Z: begins near palace, passes before hotel's west face.
- // Roof is open on BOTH ends and separated by >=1.1m from either building.
+ // Interpretation of the user's top-view sketch (07/11/2026):
+ // almost straight alongside the palace, then a pronounced rounded 90-degree
+ // bend toward the hotel's WEST side, with no physical building connection.
+ // The endpoints and main radius are estimates, not cadastral survey.
+ // The first two control points share Z => tangent along +X;
+ // the last two share X => tangent along +Z at the hotel.
  const control=Object.freeze([
-  [a.envelope.x1+3.3,-12.8], [58,-18.6], [76.4,-18.3], [b.x0-3.9,22.0]
+  [a.envelope.x1+3.35,-12.8],
+  [59.0,-12.8],
+  [b.x0-3.9,-12.8],
+  [b.x0-3.9,12.5]
  ]);
  const halfWidth=1.85;
  const at=(t,offset=0)=>{
@@ -572,7 +579,7 @@ function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polis
    return [x-offset*dz*inv,z+offset*dx*inv];
  };
  return Object.freeze({control,halfWidth,roofBottom:3.55,roofTop:3.86,
-   pierCount:20,segments:48,at});
+   pierCount:20,segments:48,endCapSegments:12,at});
 }
 function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
  const p=m3dPolissyaArcadePlan(a);
@@ -597,6 +604,39 @@ function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
            u2=plane(edge0,p.roofTop,[0,0,side],t0*8,1),
            u3=plane(edge1,p.roofTop,[0,0,side],t1*8,1);
      meshTriangle(u0,u1,u2,'concrete');meshTriangle(u1,u3,u2,'concrete');
+   }
+ }
+ // The hand-drawn plan shows rounded ends, not square-cut slabs.
+ // Add a semicircular concrete roof cap at each free end. This is only
+ // a roof continuation: there is no hidden connector or end wall.
+ for(const end of [0,1]){
+   const [cx,cz]=p.at(end);
+   const [gx,gz]=p.at(end===0?.0001:.9999);
+   const [hx,hz]=p.at(end===0?.0002:1.0);
+   const tx=(hx-gx),tz=(hz-gz),inv=1/Math.hypot(tx,tz);
+   const tan=[tx*inv,tz*inv],nor=[-tan[1],tan[0]];
+   const outward=end===0?-1:1;
+   const rim=(angle)=>[cx+p.halfWidth*(outward*tan[0]*Math.cos(angle)+nor[0]*Math.sin(angle)),
+                       cz+p.halfWidth*(outward*tan[1]*Math.cos(angle)+nor[1]*Math.sin(angle))];
+   for(let i=0;i<p.endCapSegments;i++){
+     const a=-Math.PI/2+i*Math.PI/p.endCapSegments;
+     const b=-Math.PI/2+(i+1)*Math.PI/p.endCapSegments;
+     const v0=rim(a),v1=rim(b);
+     const top=plane([cx,cz],p.roofTop,[0,1,0],0,.5),
+           p0=plane(v0,p.roofTop,[0,1,0],0,0),
+           p1=plane(v1,p.roofTop,[0,1,0],1,0);
+     meshTriangle(top,p0,p1,'stone');
+     const bottom=plane([cx,cz],p.roofBottom,[0,-1,0],0,.5),
+           b0=plane(v0,p.roofBottom,[0,-1,0],0,0),
+           b1=plane(v1,p.roofBottom,[0,-1,0],1,0);
+     meshTriangle(bottom,b1,b0,'concrete');
+     const radial=[(v0[0]+v1[0])*.5-cx,0,(v0[1]+v1[1])*.5-cz];
+     const nLen=Math.hypot(radial[0],radial[2]);
+     const n=[radial[0]/nLen,0,radial[2]/nLen];
+     meshTriangle(plane(v0,p.roofBottom,n,0,0),plane(v0,p.roofTop,n,0,1),
+                  plane(v1,p.roofTop,n,1,1),'concrete');
+     meshTriangle(plane(v0,p.roofBottom,n,0,0),plane(v1,p.roofTop,n,1,1),
+                  plane(v1,p.roofBottom,n,1,0),'concrete');
    }
  }
  // A staggered pair of reinforced concrete posts every ~2.7 m.
