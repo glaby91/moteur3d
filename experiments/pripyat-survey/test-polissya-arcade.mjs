@@ -27,6 +27,13 @@ assert.ok(hotel.z1-hotel.z0>=35,'hotel needs elongated long facade after rotatio
 assert.ok(p.roofBottom>3.1&&p.roofBottom<4.1,'canopy headroom inconsistent');
 assert.ok(p.halfWidth>=1.6&&p.halfWidth<=2.3,'canopy width implausible');
 const start=p.at(0),mid=p.at(.5),end=p.at(1);
+const front=p.at(.02),last=p.at(.98);
+const departSlope=Math.abs((front[1]-start[1])/(front[0]-start[0]));
+const arrivalSlope=Math.abs((end[0]-last[0])/(end[1]-last[1]));
+assert.ok(departSlope<.04,'sketch: arcade must leave palace nearly horizontally');
+assert.ok(arrivalSlope<.04,'sketch: arcade must finish nearly vertically along hotel');
+assert.ok(end[1]>8&&end[1]<16,'sketch: arcade end must stop around middle of hotel frontage');
+assert.equal(p.endCapSegments,12,'sketch: both free roof ends must be rounded');
 const chordZ=(start[1]+end[1])/2;
 assert.ok(Math.abs(mid[1]-chordZ)>3,'gallery is not visibly curved');
 for(let i=0;i<=128;i++){
@@ -40,7 +47,7 @@ for(let i=0;i<=128;i++){
 }
 const meshes=[],boxes=[];
 api.arcade({box:(...args)=>boxes.push(args),meshTriangle:(...args)=>meshes.push(args)});
-assert.ok(meshes.length>=350,'bent roof mesh should use a continuous multi-segment surface');
+assert.ok(meshes.length>=350+4*p.endCapSegments*2,'bent roof and semicircular ends missing');
 assert.ok(boxes.length>=40,'regular paired arcade pillars missing');
 for(const [a,b,c,mat] of meshes){
  assert.ok(['stone','concrete'].includes(mat),'unexpected arcade material');
