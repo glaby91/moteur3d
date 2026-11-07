@@ -19,6 +19,7 @@ on:
       - experiments/2026-10-30-cote-ete-gt/native_v14/export_energetik_seat_manifest.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/tools/export_energetik_seat_row_glb.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/tools/export_pripyat_outdoor_chair_glb.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/tools/export_pripyat_wheel_mechanism.js
       - experiments/2026-10-30-cote-ete-gt/native_v14/tools/generate_pripyat_chair_maps.py
       - experiments/2026-10-30-cote-ete-gt/native_v14/tools/generate_energetik_fresco_map.py
       - experiments/2026-10-30-cote-ete-gt/native_v14/tools/export_energetik_fresco_glb.js
@@ -96,6 +97,7 @@ jobs:
           node experiments/pripyat-survey/test-energetik-sightlines.mjs
           node experiments/pripyat-survey/test-energetik-sports-wing.mjs
           node experiments/pripyat-survey/test-energetik-origin-and-court.mjs
+          node experiments/pripyat-survey/test-pripyat-ferris-wheel.mjs
 
       - name: Export runtime scenes
         shell: bash
@@ -105,6 +107,7 @@ jobs:
           python tools/generate_pripyat_chair_maps.py
           python tools/generate_energetik_fresco_map.py
           node tools/export_energetik_fresco_glb.js
+          node tools/export_pripyat_wheel_mechanism.js
           M3D_SKIP_IMPORTED_CAR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_pripyat_central.bin scene_pripyat_central.js
           M3D_SKIP_IMPORTED_CAR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_energetik_seat_preview.bin scene_energetik_seat_preview.js
           node export_energetik_seat_manifest.js scene_energetik_seat_preview.assets.json
@@ -128,7 +131,7 @@ jobs:
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: |
           cmake --install build --config Release --prefix dist
-          cp scene_pripyat_central.bin scene_pripyat_central.js scene_pripyat_views.json scene_energetik_seat_preview.bin scene_energetik_seat_preview.js scene_energetik_seat_preview.assets.json scene_pripyat_facade_bay.bin scene_pripyat_facade_bay.js assets/pripyat/energetik_roof_neon_sign.js assets/pripyat/energetik_roof_neon_sign.asset.json README.md dist/
+          cp scene_pripyat_central.bin scene_pripyat_central.js scene_pripyat_views.json scene_pripyat_wheel_mechanism.json scene_energetik_seat_preview.bin scene_energetik_seat_preview.js scene_energetik_seat_preview.assets.json scene_pripyat_facade_bay.bin scene_pripyat_facade_bay.js assets/pripyat/energetik_roof_neon_sign.js assets/pripyat/energetik_roof_neon_sign.asset.json README.md dist/
           mkdir -p dist/assets/pripyat
           cp assets/pripyat/energetik_facade_bay.glb assets/pripyat/energetik_facade_bay.asset.json dist/assets/pripyat/
           cp assets/pripyat/pripyat_outdoor_chair.glb assets/pripyat/pripyat_outdoor_chair.asset.json dist/assets/pripyat/
@@ -143,13 +146,13 @@ jobs:
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: windeployqt --release --compiler-runtime --dir dist dist/moteur3d_qt.exe
 
-      - name: Render all ten photographic inspection views on CPU
+      - name: Render all eleven photographic inspection views on CPU
         if: runner.os == 'Windows'
         shell: bash
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: |
           mkdir -p dist/architecture-review
-          for i in 1 2 3 4 5 6 7 8 9 10; do
+          for i in 1 2 3 4 5 6 7 8 9 10 11; do
             ./dist/moteur3d_qt.exe --snapshot "$i" "dist/architecture-review/view-$(printf '%02d' "$i").png"
           done
           python - <<'PY'
@@ -162,7 +165,7 @@ jobs:
                   assert image.size == (640,360), (p, image.size)
                   assert max(std) > 2.0, (p, std)
                   print(f"{p}: RGB deviation {std}")
-          assert len(list(Path('dist/architecture-review').glob('view-*.png'))) == 10
+          assert len(list(Path('dist/architecture-review').glob('view-*.png'))) == 11
           PY
 
       - name: Upload compact architectural inspection images
