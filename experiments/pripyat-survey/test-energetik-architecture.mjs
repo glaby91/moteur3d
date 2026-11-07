@@ -39,10 +39,12 @@ function hits(boxes,x,y,z){
                          z>=v[2] && z<=v[5]);
 }
 const arcade=geometry(api.arcade);
-assert.equal(hits(arcade,8.44,1.2,-40.5).length,0,'lower foyer bay must be open');
-assert.equal(hits(arcade,8.44,1.2,-36.9).length,0,'other lower foyer bay must be open');
-assert.ok(hits(arcade,8.44,3.9,-36.9).length>0,'upper painted wall must have backing');
+const muralProbeX=api.arch.foyer.mosaicWallX+api.arch.foyer.arcadeDepth/2;
+assert.equal(hits(arcade,muralProbeX,1.2,-40.5).length,0,'lower foyer bay must be open');
+assert.equal(hits(arcade,muralProbeX,1.2,-36.9).length,0,'other lower foyer bay must be open');
+assert.ok(hits(arcade,muralProbeX,3.9,-36.9).length>0,'upper painted wall must have backing');
 assert.ok(arcade.some(v=>v[6]==='stone' && v[4]>2.0),'stone piers missing');
+assert.ok(api.arch.foyer.mosaicWallX-api.arch.foyer.mosaicSurfaceX<0.05,'mural is visibly detached from backing');
 
 const rear=geometry(api.rear);
 assert.equal(hits(rear,-12.2,1.8,-42.8).length,0,'rear glazing must have opening');
