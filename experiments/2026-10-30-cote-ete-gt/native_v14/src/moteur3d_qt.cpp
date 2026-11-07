@@ -1568,7 +1568,9 @@ int main(int argc, char** argv) {
         cam.tanHalf=std::tan(fov*PI/360.f);
         cam.focusDistance=distance;
         cam.pixelAngle=2*cam.tanHalf/float(width);
-        std::vector<uint32_t> pixels;
+        // m3d::render writes directly to pixels[index], so allocate the full
+        // framebuffer before dispatching threads (same as the GUI render loop).
+        std::vector<uint32_t> pixels(size_t(width)*size_t(height));
         const std::atomic<uint64_t> generation{1};
         m3d::render(scene,shadow,cam,width,height,pixels,4,false,generation,1,1,false,false);
         if(pixels.size()!=size_t(width)*size_t(height)) return 7;
