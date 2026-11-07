@@ -1544,6 +1544,15 @@ private:
 }
 
 int main(int argc, char** argv) {
+    if (argc >= 2 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--validate-compute-hlsl")) {
+        std::wstring error;
+        if (m3d::validateCompute11Shader(error)) {
+            std::cout << "HLSL Compute Shader Model 5.0: compilation OK" << std::endl;
+            return 0;
+        }
+        std::wcerr << L"Erreur de validation HLSL : " << error << std::endl;
+        return 12;
+    }
     // Non-GUI CPU snapshots for reproducible GitHub Actions geometry inspection.
     // Usage: moteur3d_qt.exe --snapshot <view 1..11> <output.png>
     if (argc >= 4 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--snapshot")) {
