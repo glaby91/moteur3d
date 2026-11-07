@@ -701,7 +701,7 @@ private:
             p.elevation=float(o.value(QStringLiteral("elevation")).toDouble());
             p.fov=float(o.value(QStringLiteral("fov")).toDouble(50.0));
             p.hourStep=o.value(QStringLiteral("hour_step")).toInt(12);
-            if(p.name.isEmpty() || p.distance<3.f || p.distance>40.f || p.fov<35.f || p.fov>105.f) continue;
+            if(p.name.isEmpty() || p.distance<3.f || p.distance>130.f || p.fov<35.f || p.fov>105.f) continue;
             sceneViewPresets_.push_back(p);
             sceneViewSelector_->addItem(p.name);
         }
@@ -896,7 +896,7 @@ private:
         controls->addWidget(sceneViewLabel_); controls->addWidget(sceneViewSelector_);
 
         auto* form = new QFormLayout;
-        distance_ = slider(Qt::Horizontal, 6, 80, 24, panel);
+        distance_ = slider(Qt::Horizontal, 6, 260, 24, panel);
         angle_ = slider(Qt::Horizontal, -180, 180, -43, panel);
         elevation_ = slider(Qt::Horizontal, -5, 50, 7, panel);
         fov_ = slider(Qt::Horizontal, 35, 105, 50, panel);
