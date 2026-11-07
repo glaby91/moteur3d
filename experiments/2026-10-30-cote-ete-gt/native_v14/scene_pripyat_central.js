@@ -321,7 +321,8 @@ function makeScene() {
     box(-12.8,t,-42.2,8,b,-40.9,'concrete');
     box(-15,t,-26.5,8,b,-20.1,'concrete');
     box(-15,t,-35.8,-7,b,-26.5,'concrete');
-    box(6,t,-35.8,8,b,-26.5,'concrete');
+    // Removed: this narrow slab ran directly across the mosaic sightline.
+    // The hall's east gallery is supported beyond the wall at X=8.65.
     // Start the east upper floor behind the mural support wall (X=8.38).
     box(8.65,t,-42.2,18,b,-20.1,'concrete');
     box(18,t,-42.2,20,b,-20.1,'concrete');
