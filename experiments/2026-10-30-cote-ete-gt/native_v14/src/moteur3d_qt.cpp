@@ -1559,6 +1559,7 @@ int main(int argc, char** argv) {
     // Execute the real D3D11 compute shader on a tiny synthetic BVH.
     // WARP is selected only when M3D_COMPUTE_WARP=1 (Windows CI).
     if (argc >= 2 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--smoke-compute-hlsl")) {
+        QCoreApplication app(argc,argv);
         m3d::Scene minimal;
         m3d::Obj box{};
         box.kind=m3d::Kind::Box;
