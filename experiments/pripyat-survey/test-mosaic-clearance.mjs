@@ -11,4 +11,4 @@ assert.ok(source.includes("meshTriangle(frescoBR,frescoTR,frescoTL,'energetikFre
 console.log('Mosaic hall structural clearance checks passed');
 
 assert.ok(source.includes('m3dCheckEnergetikDatum();'),'architectural datum must be validated');
-assert.ok(source.includes('box(-12.4,archLevels.firstSlab,-34.1,8.0,'),'landing must stop before mural wall');
+assert.ok(source.includes('box(-12.4,l.firstSlab,-34.1,8.0,'),'landing must stop before mural wall');
