@@ -31,16 +31,16 @@
       "hour_step": 12
     },
     {
-      "name": "03 — Grand escalier",
+      "name": "03 — Escalier principal et palier",
       "target": [
-        2.5,
-        3,
-        -29.2
+        -6.6,
+        2.3,
+        -29.5
       ],
-      "distance": 4.5,
-      "angle": -90,
-      "elevation": 8,
-      "fov": 52,
+      "distance": 7.6,
+      "angle": 90,
+      "elevation": 5,
+      "fov": 54,
       "hour_step": 12
     },
     {
