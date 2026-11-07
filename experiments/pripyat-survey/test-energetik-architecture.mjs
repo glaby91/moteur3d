@@ -58,7 +58,7 @@ assert.equal(hits(connector,35,2.0,-21).length,0,'arch pedestrian way blocked');
 assert.ok(hits(connector,35,5.1,-21).length>0,'arch superstructure missing');
 
 const foyerStair=geometry(api.foyerStair);
-assert.equal(foyerStair.filter(v=>v[6]==='stone').length,35,'34 foyer steps plus landing required');
+assert.equal(foyerStair.filter(v=>v[6]==='stone').length,18,'17 broad foyer steps plus landing required');
 const f=api.arch.foyer;
 assert.ok(foyerStair.some(v=>Math.abs(v[4]-f.firstLandingY)<0.00001),
   'top foyer tread must match the finished landing elevation');
