@@ -163,6 +163,17 @@ jobs:
           & "./dist/moteur3d_qt.exe" --validate-compute-hlsl
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Execute actual HLSL compute shader with WARP (synthetic BVH)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        env:
+          M3D_COMPUTE_WARP: '1'
+        run: |
+          & "./dist/moteur3d_qt.exe" --smoke-compute-hlsl "./dist/compute-warp-smoke.png"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path "./dist/compute-warp-smoke.png")) { throw "Compute WARP image missing" }
+
       - name: Render all thirteen photographic inspection views on CPU
         if: runner.os == 'Windows'
         shell: bash
