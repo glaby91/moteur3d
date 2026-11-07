@@ -71,6 +71,44 @@ function m3dBuildConnector({box}){
   }
 }
 
+
+function m3dBuildEnergetikFacade({box,roundBox,objects}){
+  // Projecting plinth, pilasters, capitals and layered cornice give the civic
+  // façade real relief. The large bays stay open: the reference facade has no glazing.
+  box(-48.0,0.0,-20.55,26.9,0.72,-19.25,'stone');
+  box(-47.0,8.7,-20.48,25.6,9.02,-19.42,'concrete');
+  box(-47.6,9.02,-20.74,26.2,9.28,-19.26,'stone');
+  box(-47.9,9.28,-20.94,26.5,9.48,-19.08,'concrete');
+  for (const x of [-45.8,-39.0,-32.2,-25.4,-18.6,-11.8,-5.0,1.8,8.6,15.4,22.2]) {
+    if (x === -39.0) {
+      buildEnergetikFacadeBay({ objects, roundBox }, x, 0, -19.63, { nativeMaterial: 'concrete' });
+      continue;
+    }
+    box(x-0.42,0.40,-20.34,x+0.42,0.78,-19.34,'stone');
+    box(x-0.27,0.78,-20.16,x+0.27,8.25,-19.54,'concrete');
+    box(x-0.48,8.25,-20.42,x+0.48,8.62,-19.28,'stone');
+    box(x-0.58,8.62,-20.50,x+0.58,8.78,-19.20,'concrete');
+  }
+
+  // Separate second-storey gallery bays, reveals and structural transoms.
+  // No glazing is inserted into the abandoned facade: preserve sightlines
+  // into the existing atrium and the walk-through camera path.
+  const columns=[-45.8,-39.0,-32.2,-25.4,-18.6,-11.8,-5.0,1.8,8.6,15.4,22.2];
+  for(let bay=0;bay<columns.length-1;bay++){
+    const left=columns[bay]+0.40,right=columns[bay+1]-0.40;
+    if(right<=left)continue;
+    // Upper and lower reveals, with staggered weathering by bay.
+    box(left,3.20,-20.26,right,3.34,-19.62,'stone');
+    box(left,6.35,-20.26,right,6.49,-19.62,'stone');
+    if(bay%3!==1){
+      box(left+0.12,3.34,-20.17,left+0.23,6.35,-19.78,'rust');
+      box(right-0.23,3.34,-20.17,right-0.12,6.35,-19.78,'rust');
+    }
+    // Partial vertical frame fragments, deliberately not closed windows.
+    if(bay%4===0)box((left+right)*0.5-0.045,6.5,-20.11,(left+right)*0.5+0.045,8.2,-19.82,'metal');
+  }
+}
+
 function m3dBuildPolissya({box}, cfg = {}) {
   const x0=cfg.x0??40.0, x1=cfg.x1??63.0, z0=cfg.z0??-42.0, z1=cfg.z1??-20.0;
   const height=cfg.height??15.5;
@@ -190,22 +228,9 @@ function makeScene() {
   box(27.0,9.4,-22.2,30.5,14.0,-21.0,'concrete');
   box(-43.0,11.25,-42.5,18.4,11.75,-20.1,'stone');
 
-  // Projecting plinth, pilasters, capitals and layered cornice give the civic
-  // façade real relief. The large bays stay open: the reference facade has no glazing.
-  box(-48.0,0.0,-20.55,26.9,0.72,-19.25,'stone');
-  box(-47.0,8.7,-20.48,25.6,9.02,-19.42,'concrete');
-  box(-47.6,9.02,-20.74,26.2,9.28,-19.26,'stone');
-  box(-47.9,9.28,-20.94,26.5,9.48,-19.08,'concrete');
-  for (const x of [-45.8,-39.0,-32.2,-25.4,-18.6,-11.8,-5.0,1.8,8.6,15.4,22.2]) {
-    if (x === -39.0) {
-      buildEnergetikFacadeBay({ objects, roundBox }, x, 0, -19.63, { nativeMaterial: 'concrete' });
-      continue;
-    }
-    box(x-0.42,0.40,-20.34,x+0.42,0.78,-19.34,'stone');
-    box(x-0.27,0.78,-20.16,x+0.27,8.25,-19.54,'concrete');
-    box(x-0.48,8.25,-20.42,x+0.48,8.62,-19.28,'stone');
-    box(x-0.58,8.62,-20.50,x+0.58,8.78,-19.20,'concrete');
-  }
+  // Independent facade assembly: main building remains traversable.
+  m3dBuildEnergetikFacade({box,roundBox,objects});
+
   // Exposed aggregate, broken cladding and rust runoff on the street-facing
   // lintel. The patch layout is irregular so the facade reads as weathered
   // cast concrete rather than a clean repeating block texture.
