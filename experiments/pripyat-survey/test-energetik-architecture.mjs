@@ -13,6 +13,7 @@ const api=vm.runInNewContext(src+`
  validate:m3dCheckEnergetikDatum,
  arcade:m3dBuildFoyerMuralArcade,
  stair:m3dBuildEastStairCore,
+ foyerStair:m3dBuildFoyerStairFlights,
  rear:m3dBuildEnergetikRearWall,
  shell:m3dBuildEnergetikShell,
  connector:m3dBuildConnector,
@@ -56,6 +57,13 @@ const connector=geometry(api.connector);
 assert.equal(hits(connector,35,2.0,-21).length,0,'arch pedestrian way blocked');
 assert.ok(hits(connector,35,5.1,-21).length>0,'arch superstructure missing');
 
+const foyerStair=geometry(api.foyerStair);
+assert.equal(foyerStair.filter(v=>v[6]==='stone').length,35,'34 foyer steps plus landing required');
+const f=api.arch.foyer;
+assert.ok(foyerStair.some(v=>Math.abs(v[4]-f.firstLandingY)<0.00001),
+  'top foyer tread must match the finished landing elevation');
+assert.equal(f.firstLandingY,api.arch.levels.firstSlab+api.arch.levels.slabThickness,
+  'landing uses underside instead of walking surface');
 const stair=geometry(api.stair);
 assert.equal(stair.filter(v=>v[6]==='stone').length,51,'expected 17 treads over 3 flights');
 assert.equal(stair.filter(v=>v[6]==='concrete').length,6,'three stair landings and galleries required');
@@ -70,5 +78,6 @@ assert.ok(hotel.some(v=>v[6]==='rust' && v[4]>15.9),'rusty hotel rooftop sign mi
 assert.ok(hotel.some(v=>v[6]==='stone' && v[4]>18.5),'hotel roof terrace missing');
 console.log('Energetik/Polissya generator geometry probes passed:',{
   arcade:arcade.length, rear:rear.length, shell:shell.length,
+  foyerStair:foyerStair.length,
   stair:stair.length, connector:connector.length, hotel:hotel.length
 });
