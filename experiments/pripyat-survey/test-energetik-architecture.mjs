@@ -74,6 +74,9 @@ for(const y of [l.firstSlab+l.slabThickness,l.secondSlab+l.slabThickness,l.roof]
 }
 
 const hotel=geometry(api.polissya);
+assert.equal(hits(hotel,51.5,2.1,-32).length,0,'Polissya core must be hollow');
+assert.equal(hits(hotel,40.25,2.2,-23).length,0,'Polissya western entry blocked');
+assert.equal(hits(hotel,52,2.4,-20.30).length,0,'Polissya front window is an opaque wall');
 assert.ok(hotel.some(v=>v[6]==='rust' && v[4]>15.9),'rusty hotel rooftop sign missing');
 assert.ok(hotel.some(v=>v[6]==='stone' && v[4]>18.5),'hotel roof terrace missing');
 console.log('Energetik/Polissya generator geometry probes passed:',{
