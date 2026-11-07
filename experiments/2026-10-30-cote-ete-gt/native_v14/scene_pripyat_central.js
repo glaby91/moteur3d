@@ -563,10 +563,13 @@ function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polis
  // The first two control points share Z => tangent along +X;
  // the last two share X => tangent along +Z at the hotel.
  const control=Object.freeze([
-  [a.envelope.x1+3.35,-12.8],
-  [59.0,-12.8],
-  [b.x0-3.9,-12.8],
-  [b.x0-3.9,12.5]
+  // Keep the palace-side entrance level with the building side elevation,
+  // as in the user's sketch (not below the whole building footprint).
+  [a.envelope.x1+3.35,-30.5],
+  [59.0,-30.5],
+  [b.x0-3.9,-30.5],
+  // Finish alongside the middle of Polissya's west facade.
+  [b.x0-3.9,7.0]
  ]);
  const halfWidth=1.85;
  const at=(t,offset=0)=>{
