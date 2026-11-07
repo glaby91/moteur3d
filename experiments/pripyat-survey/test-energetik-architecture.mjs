@@ -105,7 +105,8 @@ console.log('Energetik/Polissya generator geometry probes passed:',{
 
 
 const presets=JSON.parse(readFileSync(new URL('../2026-10-30-cote-ete-gt/native_v14/scene_pripyat_views.json',import.meta.url),'utf8')).views;
-assert.equal(presets.length,11,'all eleven architectural inspection views required');
+assert.equal(presets.length,13,'all thirteen architectural inspection views required');
+assert.ok(presets[11].name.includes('Polissya') && presets[12].name.includes('Colonnade'),'hotel review views missing');
 function eye(p){
   const a=p.angle*Math.PI/180, e=p.elevation*Math.PI/180;
   return [p.target[0]+p.distance*Math.sin(a)*Math.cos(e),
