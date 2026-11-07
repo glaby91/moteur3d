@@ -1533,6 +1533,49 @@ private:
 }
 
 int main(int argc, char** argv) {
+    // Non-GUI CPU snapshots for reproducible GitHub Actions geometry inspection.
+    // Usage: moteur3d_qt.exe --snapshot <view 1..10> <output.png>
+    if (argc >= 4 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--snapshot")) {
+        QCoreApplication app(argc, argv);
+        bool ok = false;
+        const int view = QString::fromLocal8Bit(argv[2]).toInt(&ok);
+        QFile file(QCoreApplication::applicationDirPath()+QStringLiteral("/scene_pripyat_views.json"));
+        if (!ok || view < 1 || view > 10 || !file.open(QIODevice::ReadOnly)) return 2;
+        QJsonParseError parseError{};
+        const QJsonDocument doc=QJsonDocument::fromJson(file.readAll(),&parseError);
+        if(parseError.error!=QJsonParseError::NoError || !doc.isObject()) return 3;
+        const QJsonArray views=doc.object().value(QStringLiteral("views")).toArray();
+        if(view>views.size()) return 4;
+        const QJsonObject p=views.at(view-1).toObject();
+        const QJsonArray t=p.value(QStringLiteral("target")).toArray();
+        if(t.size()!=3) return 5;
+        Scene scene;
+        std::wstring error;
+        const std::filesystem::path path(QCoreApplication::applicationDirPath().toStdWString()
+                                          + std::wstring(L"/scene_pripyat_central.bin"));
+        if(!loadScene(path,scene,error)) return 6;
+        updateLighting(6.0f+float(p.value(QStringLiteral("hour_step")).toInt(12))*0.5f);
+        Stats shadowStats{};
+        const ShadowMap shadow=buildShadow(scene,shadowStats);
+        constexpr int width=640,height=360;
+        const float angle=float(p.value(QStringLiteral("angle")).toDouble());
+        const float elevation=float(p.value(QStringLiteral("elevation")).toDouble());
+        const float distance=float(p.value(QStringLiteral("distance")).toDouble(9.0));
+        const float fov=float(p.value(QStringLiteral("fov")).toDouble(60.0));
+        const V target{float(t.at(0).toDouble()),float(t.at(1).toDouble()),
+                       float(t.at(2).toDouble())};
+        Camera cam=camera(angle,elevation,distance,width,height,target);
+        cam.tanHalf=std::tan(fov*PI/360.f);
+        cam.focusDistance=distance;
+        cam.pixelAngle=2*cam.tanHalf/float(width);
+        std::vector<uint32_t> pixels;
+        const std::atomic<uint64_t> generation{1};
+        m3d::render(scene,shadow,cam,width,height,pixels,4,false,generation,1,1,false,false);
+        if(pixels.size()!=size_t(width)*size_t(height)) return 7;
+        QImage image(reinterpret_cast<const uchar*>(pixels.data()),
+                     width,height,width*int(sizeof(uint32_t)),QImage::Format_ARGB32);
+        return image.copy().save(QString::fromLocal8Bit(argv[3]),"PNG")?0:8;
+    }
     QApplication app(argc, argv);
     const QString defaultScenePath = QCoreApplication::applicationDirPath() + QStringLiteral("/scene_pripyat_central.bin");
     const QString scenePath = argc > 1 ? QString::fromLocal8Bit(argv[1]) : defaultScenePath;
