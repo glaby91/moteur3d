@@ -931,6 +931,20 @@ function m3dExpansionLegacyRoadMetres(x,z,d=M3D_PRIPYAT_EXPANSION_DATA){
     throw new Error('Pripyat: invalid legacy road scale');
   return [d.anchorX+(x-d.anchorX)/scale,d.anchorZ+(z-d.anchorZ)/scale];
 }
+// A terrain cell is 100 × 100 m; a single 0..1 UV texture over that area
+// looked like a stretched, flat photo. Tiling in WORLD METRES keeps the grass
+// PBR pattern at ~4 m and continuous across adjacent SRTM cells on CPU/GPU.
+function m3dBuildTiledGrassTerrainQuad(points,metresPerRepeat=4){
+  const e1=points[1].map((v,i)=>v-points[0][i]),e2=points[2].map((v,i)=>v-points[0][i]);
+  let n=[e1[1]*e2[2]-e1[2]*e2[1],
+         e1[2]*e2[0]-e1[0]*e2[2],
+         e1[0]*e2[1]-e1[1]*e2[0]];
+  const inv=1/Math.max(1e-8,Math.hypot(...n));n=n.map(x=>x*inv);
+  if(n[1]<0)n=n.map(x=>-x);
+  const v=points.map(p=>({p,n,uv:[p[0]/metresPerRepeat,p[2]/metresPerRepeat]}));
+  meshTriangle(v[0],v[1],v[2],'grass');
+  meshTriangle(v[0],v[2],v[3],'grass');
+}
 function addPripyatExpansion() {
   const d=M3D_PRIPYAT_EXPANSION_DATA, {grid,routes}=d, size=grid.length;
   const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -952,7 +966,7 @@ function addPripyatExpansion() {
     const east=-2000+i*d.step,north=-2000+j*d.step;
     const p0=world(east,north),p1=world(east+d.step,north),p2=world(east+d.step,north+d.step),p3=world(east,north+d.step);
     const center=Math.hypot(east+d.step*.5,north+d.step*.5);if(center>d.radius)continue;
-    flatQuadMesh([[p0[0],height(east,north),p0[1]],[p1[0],height(east+d.step,north),p1[1]],[p2[0],height(east+d.step,north+d.step),p2[1]],[p3[0],height(east,north+d.step),p3[1]]],'grass',[0,1,0]);
+    m3dBuildTiledGrassTerrainQuad([[p0[0],height(east,north),p0[1]],[p1[0],height(east+d.step,north),p1[1]],[p2[0],height(east+d.step,north+d.step),p2[1]],[p3[0],height(east,north+d.step),p3[1]]]);
   }
   // Build road surfaces as georeferenced strips. Keep the existing detailed
   // central plaza intact; this layer extends its connected streets outward.
