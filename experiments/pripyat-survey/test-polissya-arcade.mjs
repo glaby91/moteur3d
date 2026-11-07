@@ -32,7 +32,9 @@ const departSlope=Math.abs((front[1]-start[1])/(front[0]-start[0]));
 const arrivalSlope=Math.abs((end[0]-last[0])/(end[1]-last[1]));
 assert.ok(departSlope<.04,'sketch: arcade must leave palace nearly horizontally');
 assert.ok(arrivalSlope<.04,'sketch: arcade must finish nearly vertically along hotel');
-assert.ok(end[1]>8&&end[1]<16,'sketch: arcade end must stop around middle of hotel frontage');
+assert.ok(end[1]>5&&end[1]<10,'sketch: arcade end must stop around middle of hotel frontage');
+assert.ok(start[1]>palace.z0+7&&start[1]<palace.z1-7,
+  'sketch: arcade start must align with middle portion of the palace side facade');
 assert.equal(p.endCapSegments,12,'sketch: both free roof ends must be rounded');
 const chordZ=(start[1]+end[1])/2;
 assert.ok(Math.abs(mid[1]-chordZ)>3,'gallery is not visibly curved');
