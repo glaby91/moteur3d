@@ -52,6 +52,8 @@ const M3D_ENERGETIK_ARCH = Object.freeze({
     arcadePierTopY:2.10,
     arcadeDepth:0.18
   }),
+  rearWindowXs:Object.freeze([-14.5,-8.3,-2.1,4.1,10.3,16.5]),
+  rearWindowWidth:3.5,
   tower: Object.freeze({roofY:14.0})
 });
 function m3dCheckEnergetikDatum(a=M3D_ENERGETIK_ARCH){
@@ -152,6 +154,22 @@ function m3dBuildConnector({box},a=M3D_ENERGETIK_ARCH){
   box(left+0.6,roof+0.97,z1+0.025,right-0.6,roof+1.045,z1+0.13,'metal');
 }
 
+// Shared rear-wall bay grid: openings are actual holes in the masonry,
+// aligned with the existing translucent/dark window planes.
+function m3dBuildEnergetikRearWall({box}, a=M3D_ENERGETIK_ARCH){
+  const e=a.envelope,l=a.levels, wallZ0=e.z0,wallZ1=e.z0+1.2;
+  const first=-15.0,last=20.25;
+  box(e.x0,0,wallZ0,first,l.roof,wallZ1,'concrete');
+  box(last,0,wallZ0,e.x1,l.roof,wallZ1,'concrete');
+  for(const [bottom,top] of [[0,1.0],[2.65,4.1],[5.85,7.1],[8.75,l.roof]])
+    box(first,bottom,wallZ0,last,top,wallZ1,'concrete');
+  let cursor=first;
+  for(const x of a.rearWindowXs){
+    if(x>cursor)box(cursor,1.0,wallZ0,x,8.75,wallZ1,'concrete');
+    cursor=x+a.rearWindowWidth;
+  }
+  if(cursor<last)box(cursor,1.0,wallZ0,last,8.75,wallZ1,'concrete');
+}
 // The exterior shell is isolated from interiors and roof features.
 // Its slabs and walls are intentionally separated to preserve camera access.
 function m3dBuildEnergetikShell({box},cfg=M3D_PRIPYAT_BLOCKOUT.energetik){
@@ -159,11 +177,17 @@ function m3dBuildEnergetikShell({box},cfg=M3D_PRIPYAT_BLOCKOUT.energetik){
   const {levels,tower}=M3D_ENERGETIK_ARCH;
   box(ex0,0,back,ex0+1.2,9.4,front,'concrete');
   box(ex1-1.2,0,back,ex1,9.4,front,'concrete');
-  box(ex0,0,back,ex1,9.4,back+1.2,'concrete');
+  m3dBuildEnergetikRearWall({box});
   box(ex0,0,-20.2,-46.8,9.4,front,'concrete');
   box(25.5,0,-20.2,ex1,9.4,front,'concrete');
   box(-46.8,8.8,-20.2,25.5,9.4,front,'stone');
-  box(-42.0,9.4,-41.8,20.5,cfg.mainHeight-0.05,-20.4,'concrete');
+  // Open rooftop volume: former solid block trapped the rooftop camera below
+  // nearly two metres of concrete. Only a thin coping frames the roof.
+  const copingY=cfg.mainHeight-0.25;
+  box(-42.0,levels.roof+0.22,-41.8,-41.68,copingY,-20.4,'concrete');
+  box(20.2,levels.roof+0.22,-41.8,20.5,copingY,-20.4,'concrete');
+  box(-41.68,levels.roof+0.22,-41.8,20.2,copingY,-41.46,'concrete');
+  box(-41.68,levels.roof+0.22,-20.72,20.2,copingY,-20.4,'concrete');
   // Hollow stair tower. The old solid prism capped the ascending camera and
   // made the roof door look like a wall; retain only the concrete shell.
   box(20.5,9.4,-40.8,21.7,tower.roofY,-22.2,'concrete');
@@ -171,7 +195,11 @@ function m3dBuildEnergetikShell({box},cfg=M3D_PRIPYAT_BLOCKOUT.energetik){
   box(21.7,9.4,-40.8,27.0,tower.roofY,-39.6,'concrete');
   box(21.7,12.0,-22.2,25.3,tower.roofY,-21.0,'concrete');
   box(27.0,9.4,-22.2,30.5,tower.roofY,-21.0,'concrete');
-  box(-43.0,11.25,-42.5,18.4,11.75,-20.1,'stone');
+  // Four thin coping strips retain the published external silhouette.
+  box(-43.0,copingY,-42.5,18.4,copingY+0.20,-42.18,'stone');
+  box(-43.0,copingY,-20.42,18.4,copingY+0.20,-20.1,'stone');
+  box(-43.0,copingY,-42.18,-42.68,copingY+0.20,-20.42,'stone');
+  box(18.08,copingY,-42.18,18.4,copingY+0.20,-20.42,'stone');
 
 
 }
