@@ -4,7 +4,8 @@
 
 const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
   concrete: 2, plaster: 1, mural: 1, energetikFresco: 2,
-  gymFloor: 3, gymWall: 1, gymConcrete: 2, gymMetal: 10, gymLetter: 2, gymRed: 3, gymBlue: 3, volcanicTuff: 3, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
+  gymFloor: 3, gymWall: 1, gymConcrete: 2, gymMetal: 10, gymLetter: 2, gymRed: 3, gymBlue: 3,
+  wheelSteel: 9, wheelRust: 6, wheelYellow: 6, wheelTrim: 12, volcanicTuff: 3, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
   asphalt: 3, stone: 5, metal: 18, rust: 7, leaves: 2, grass: 1,
   bark: 1, wood: 4, sign: 3, neon: 2, debris: 2, puddle: 28, seatFabric: 1, seatFabricClean: 1, seatVinylBrown: 28, seatSupportPaint: 12, seatTrim: 2, curtain: 1, cinemaScreen: 0
 });
@@ -414,6 +415,104 @@ function m3dBuildEnergetikSportsWing({box,capsule,meshTriangle},a=M3D_ENERGETIK_
   };
   m3dBuildSportsClub(wrap,g);
 }
+// Pripyat "Krugovoy obzor": three distinct mechanical assemblies.
+// The static V14 BVH can export any time pose; real-time transforms will require
+// separate instance transforms + BVH refit in the renderer (not yet implemented).
+const M3D_FERRIS_WHEEL=Object.freeze({
+ id:'pripyat-circular-overview',gps:Object.freeze({lat:51.408348,lon:30.055847}),
+ palaceGps:Object.freeze({lat:51.40671944444444,lon:30.05655}),
+ diameter:24.6,radius:12.3,axleHeight:15.2,numberOfGondolas:20,
+ axleHalfDepth:1.24,hangLength:1.70,nominalRotationSeconds:360
+});
+function m3dWheelSite(w=M3D_FERRIS_WHEEL,d=M3D_PRIPYAT_EXPANSION_DATA){
+ const dr=Math.PI/180,e=(w.gps.lon-w.palaceGps.lon)*111320*
+ Math.cos((w.gps.lat+w.palaceGps.lat)*.5*dr),n=(w.gps.lat-w.palaceGps.lat)*111320;
+ const c=Math.cos(d.theta),s=Math.sin(d.theta);
+ return {x:d.anchorX+d.scale*(e*c+n*s),y:0,
+  z:d.anchorZ+d.scale*(e*s-n*c),geoEastMetres:e,geoNorthMetres:n,
+  placementAccuracy:'provisional OSM transform, not a measured site survey'};
+}
+function m3dWheelPose(seconds=0,rpm=1/6,w=M3D_FERRIS_WHEEL,site=m3dWheelSite()){
+ if(!Number.isFinite(seconds)||!Number.isFinite(rpm)||Math.abs(rpm)>2)
+  throw new Error('wheel: non-finite time or invalid RPM');
+ const phase=2*Math.PI*((seconds*rpm/60)%1),N=w.numberOfGondolas;
+ const gondolas=Array.from({length:N},(_,i)=>{
+  const a=phase+2*Math.PI*i/N;
+  return {id:'gondola-'+String(i+1).padStart(2,'0'),
+   pivot:[site.x+w.radius*Math.sin(a),site.y+w.axleHeight+w.radius*Math.cos(a),site.z],
+   rotorAngleRad:a,localCounterRotationRad:-a,worldCabinPitchRad:0};
+ });
+ return {phaseRad:phase,seconds,rpm,hub:[site.x,site.y+w.axleHeight,site.z],gondolas};
+}
+function m3dBuildWheelStatic({box,capsule},w=M3D_FERRIS_WHEEL,site=m3dWheelSite()){
+ const {x,y,z}=site,h=y+w.axleHeight;
+ for(const dz of [-2.25,2.25]){
+  for(const dx of [-6.4,6.4]){
+   box(x+dx-.7,y-.12,z+dz-.7,x+dx+.7,y+.28,z+dz+.7,'wheelRust');
+   capsule([x+dx,y+.15,z+dz],[x+Math.sign(dx)*.34,h,z+dz],.30,'wheelSteel');
+  }
+  capsule([x-5.2,y+3.7,z+dz],[x+5.2,y+3.7,z+dz],.13,'wheelRust');
+  box(x-.56,h-.55,z+dz-.45,x+.56,h+.55,z+dz+.45,'wheelSteel');
+ }
+ capsule([x,h,z-2.75],[x,h,z+2.75],.29,'wheelSteel'); // axle
+ box(x+3,y+.2,z+2.65,x+5.6,y+1.9,z+4.6,'wheelRust'); // reducer motor
+ capsule([x+3.8,y+1.7,z+3.5],[x+2.5,y+3.5,z+2.0],.10,'wheelTrim');
+ // Boarding platform and weathered perimeter railing.
+ box(x-5.5,y-.04,z+3.8,x+5.5,y+.18,z+6.0,'concrete');
+ for(const dx of [-5,5]){
+  capsule([x+dx,y+.20,z+5.6],[x+dx,y+1.25,z+5.6],.055,'wheelRust');
+ }
+ capsule([x-5,y+1.25,z+5.6],[x+5,y+1.25,z+5.6],.055,'wheelRust');
+}
+function m3dBuildWheelRotor({capsule},pose,w=M3D_FERRIS_WHEEL){
+ const [x,y,z]=pose.hub,R=w.radius,N=w.numberOfGondolas;
+ const p=(r,a,d)=>[x+r*Math.sin(a),y+r*Math.cos(a),z+d];
+ for(const dz of [-w.axleHalfDepth,w.axleHalfDepth]){
+  for(let i=0;i<N;i++){
+   const a=pose.phaseRad+2*Math.PI*i/N,b=pose.phaseRad+2*Math.PI*(i+1)/N;
+   capsule(p(R,a,dz),p(R,b,dz),.105,'wheelRust'); // outer hoop
+   capsule(p(.28,a,dz),p(R,a,dz),.072,'wheelSteel'); // radial spoke
+   capsule(p(R*.58,a,dz),p(R,b,dz),.035,'wheelRust'); // bracing
+   capsule(p(R*.91,a,dz),p(R*.91,b,dz),.048,'wheelSteel');
+  }
+ }
+ for(let i=0;i<N;i++){
+  const a=pose.phaseRad+2*Math.PI*i/N;
+  capsule(p(R,a,-w.axleHalfDepth),p(R,a,w.axleHalfDepth),.11,'wheelSteel');
+  capsule(p(R*.62,a,-w.axleHalfDepth),
+          p(R*.62,a+Math.PI*2/N,w.axleHalfDepth),.035,'wheelRust');
+ }
+ capsule([x,y,z-1.6],[x,y,z+1.6],.51,'wheelRust'); // rotating hub
+}
+function m3dBuildWheelGondolas({box,capsule,ellipsoidMesh},pose,w=M3D_FERRIS_WHEEL){
+ for(const g of pose.gondolas){
+  const [x,py,z]=g.pivot,cy=py-w.hangLength;
+  // Pivots follow the rotating rim; cabin local rotation cancels wheel phase.
+  // Every cabin is an independent upright mechanical assembly.
+  capsule([x,py,z-.77],[x,cy+.31,z-.77],.045,'wheelTrim');
+  capsule([x,py,z+.77],[x,cy+.31,z+.77],.045,'wheelTrim');
+  capsule([x,py,z-.87],[x,py,z+.87],.065,'wheelSteel'); // hanger bearing
+  ellipsoidMesh(x,cy-.08,z,.88,.22,.88,'wheelYellow',12,5);
+  ellipsoidMesh(x,cy+1.22,z,1.02,.20,1.02,'wheelYellow',12,5);
+  for(let k=0;k<12;k++){
+   const a=2*Math.PI*k/12,dx=.80*Math.sin(a),dz=.80*Math.cos(a);
+   capsule([x+dx,cy-.04,z+dz],[x+dx,cy+.43,z+dz],.046,
+     k%5===0?'wheelRust':'wheelYellow');
+   capsule([x+dx,cy+.45,z+dz],
+           [x+.91*Math.sin(a),cy+1.12,z+.91*Math.cos(a)],
+           .020,'wheelTrim');
+  }
+  box(x-.40,cy+.12,z-.40,x+.40,cy+.21,z+.40,'wheelRust');
+ }
+}
+function m3dBuildPripyatWheel(ops,seconds=0,rpm=1/6,w=M3D_FERRIS_WHEEL,site=m3dWheelSite()){
+ const pose=m3dWheelPose(seconds,rpm,w,site);
+ m3dBuildWheelStatic(ops,w,site);
+ m3dBuildWheelRotor(ops,pose,w);
+ m3dBuildWheelGondolas(ops,pose,w);
+ return {site,pose,mechanism:{fixed:'supports + drive',rotor:'rim + spokes',
+ gondolas:'20 individual gravity-upright pendulums'}};
+}
 function m3dBuildPlaza({box}, p=M3D_PRIPYAT_BLOCKOUT.plaza){
   // Separate physical layers: foundation, pedestrian paving, expansion joints,
   // patch repairs and flush perimeter drainage.
@@ -728,6 +827,10 @@ function makeScene() {
 
   // Add the OSM road network and SRTM terrain around the preserved central scene.
   addPripyatExpansion();
+  // Independent wheel rotor/gondola pose; BVH is static at export time.
+  m3dBuildPripyatWheel({box,capsule,ellipsoidMesh},
+    Number(process.env.M3D_WHEEL_TIME_SECONDS||0),
+    Number(process.env.M3D_WHEEL_RPM||1/6));
 
   // Coordinate convention: Y is vertical. The camera approaches from +Z.
   // Zone 01 covers the central plaza, Energetik and Hotel Polissya frontages.
