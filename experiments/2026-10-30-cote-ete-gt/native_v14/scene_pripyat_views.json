@@ -2,7 +2,7 @@
   "scene": "Palais de la Culture Energetik — Pripiat",
   "schema_version": 1,
   "annex": "docs/pripyat/VUES-ENERGETIK.md",
-  "notes": "11 vues de contrôle (dont 06 vue depuis le gymnase vers la roue et 11 portrait mécanique). La géolocalisation de la roue est sourcée, mais la transformation scène/terrain demeure provisoire.",
+  "notes": "13 vues de contrôle : 01–11 Energetik/gymnase/roue, 12–13 façade Polissya et galerie autonome courbe. Distances/implantation provisoires.",
   "views": [
     {
       "name": "01 — Façade complète et colonnade",
@@ -145,6 +145,32 @@
       "angle": 0,
       "elevation": 4,
       "fov": 58,
+      "hour_step": 12
+    },
+    {
+      "name": "12 — Hôtel Polissya et galerie courbe",
+      "target": [
+        62,
+        8.1,
+        -26
+      ],
+      "distance": 57,
+      "angle": 0,
+      "elevation": 5,
+      "fov": 56,
+      "hour_step": 12
+    },
+    {
+      "name": "13 — Colonnade Polissya vue en surplomb",
+      "target": [
+        58,
+        3,
+        -12
+      ],
+      "distance": 78,
+      "angle": -25,
+      "elevation": 23,
+      "fov": 66,
       "hour_step": 12
     }
   ]
