@@ -39,6 +39,22 @@ template<class T> bool makeSrv(ID3D11Device* d,const std::vector<T>& values,ComP
  return SUCCEEDED(d->CreateShaderResourceView(buf.Get(),&vd,&srv));
 }
 }
+bool validateCompute11Shader(std::wstring& error){
+ wchar_t exe[MAX_PATH]{};GetModuleFileNameW(nullptr,exe,MAX_PATH);
+ const auto shaderPath=std::filesystem::path(exe).parent_path()/L"shaders"/L"m3d_raytrace_compute.hlsl";
+ ComPtr<ID3DBlob> bytecode,diagnostics;
+ const HRESULT hr=D3DCompileFromFile(shaderPath.c_str(),nullptr,D3D_COMPILE_STANDARD_FILE_INCLUDE,
+                                      "CSMain","cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&bytecode,&diagnostics);
+ if(FAILED(hr)){
+  error=L"Shader HLSL invalide : "+shaderPath.wstring();
+  if(diagnostics&&diagnostics->GetBufferPointer()){
+   const char* msg=static_cast<const char*>(diagnostics->GetBufferPointer());
+   for(size_t i=0;i<std::min<size_t>(diagnostics->GetBufferSize(),3000);++i)error+=wchar_t(uint8_t(msg[i]));
+  }
+  return false;
+ }
+ return true;
+}
 bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error){
  const auto start=std::chrono::steady_clock::now();
  if(w<=0||h<=0||w>8192||h>8192){error=L"Résolution compute invalide";return false;}
@@ -108,5 +124,5 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,std
 }
 }
 #else
-namespace m3d { bool renderCompute11Preview(const Scene&,const Camera&,int,int,std::vector<uint32_t>&,Stats&,std::wstring& error){error=L"Compute D3D11 uniquement sous Windows";return false;} }
+namespace m3d { bool validateCompute11Shader(std::wstring& error){error=L"Compute D3D11 uniquement sous Windows";return false;} bool renderCompute11Preview(const Scene&,const Camera&,int,int,std::vector<uint32_t>&,Stats&,std::wstring& error){error=L"Compute D3D11 uniquement sous Windows";return false;} }
 #endif
