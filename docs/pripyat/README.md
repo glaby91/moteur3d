@@ -1,5 +1,16 @@
 # Pripiat — Palais de la Culture Energetik
 
+## Benchmark GPU sur Intel HD Graphics 620 — 7 novembre 2026
+
+Mesure sur matériel réel du ray tracing **Compute D3D11 sans DXR** : **500 images natives 1366 × 768**, **223 échantillons WDDM**, **88,9 % d'occupation GPU moyenne** et **93,5 % maximale**. Scène : 92 886 objets et 67 404 triangles. Les FPS ne sont pas mesurés.
+
+- [Rapport du benchmark et limites des mesures](BENCHMARK-GPU-HD620-500-261107.md)
+- [Résultats JSON exploitables par les prochains audits](BENCHMARK-GPU-HD620-500-261107.json)
+- [Version Windows Build 261107-0004 + scène Pripyat](https://github.com/glaby91/moteur3d/actions/runs/42411886443#artifacts)
+
+Les anciennes séries 100 images ayant hérité de la réduction d'aperçu ne sont pas comparables à résolution sélectionnée identique. **Aucune modification du shader ou de la scène dans cet enregistrement de résultats.**
+
+
 Le développement de cette branche se concentre désormais sur **un seul bâtiment détaillé : le Palais de la Culture Energetik**. La place et l’hôtel Polissya restent en arrière-plan pour situer le bâtiment. Les autres scènes du moteur restent conservées sur GitHub.
 
 ## Références
