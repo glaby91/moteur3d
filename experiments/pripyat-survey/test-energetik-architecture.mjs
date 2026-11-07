@@ -91,3 +91,24 @@ console.log('Energetik/Polissya generator geometry probes passed:',{
   foyerStair:foyerStair.length,
   stair:stair.length, connector:connector.length, hotel:hotel.length
 });
+
+
+const presets=JSON.parse(readFileSync(new URL('../2026-10-30-cote-ete-gt/native_v14/scene_pripyat_views.json',import.meta.url),'utf8')).views;
+assert.equal(presets.length,10,'all ten architectural inspection views required');
+function eye(p){
+  const a=p.angle*Math.PI/180, e=p.elevation*Math.PI/180;
+  return [p.target[0]+p.distance*Math.sin(a)*Math.cos(e),
+          p.target[1]+p.distance*Math.sin(e),
+          p.target[2]+p.distance*Math.cos(a)*Math.cos(e)];
+}
+for(const index of [0,9]){
+  assert.ok(eye(presets[index])[2]>api.arch.envelope.z1+10,
+    'front facade snapshot camera must stand well outside the building');
+  assert.ok(presets[index].distance>=45,'facade snapshot should frame full building length');
+}
+assert.ok(eye(presets[1])[0]<api.arch.foyer.mosaicSurfaceX-2,
+  'mural snapshot must face the painted interior surface');
+const stairEye=eye(presets[6]);
+assert.ok(stairEye[0]<18.0 && stairEye[2]>-31.4 && stairEye[2]<-29.6,
+  'east stair snapshot must stand at the west-wall doorway');
+console.log('Camera position and framing sanity checks passed');
