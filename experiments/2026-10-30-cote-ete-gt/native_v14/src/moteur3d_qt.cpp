@@ -9,6 +9,7 @@
 #include <QCoreApplication>
 #include <QCloseEvent>
 #include <QDialog>
+#include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFormLayout>
@@ -922,6 +923,44 @@ private:
         nightButton_ = new QPushButton(QStringLiteral("Vue de nuit — 22 h"), panel);
         nightButton_->setToolTip(QStringLiteral("Place la caméra devant la façade et règle l’heure à 22 h pour voir les éclairages intérieurs."));
         controls->addWidget(nightButton_);
+        // Metric survey panel: scene-space coordinates, 1 unit = 1 metre.
+        // Input is explicit until depth-buffer picking is implemented.
+        auto* surveyTitle = new QLabel(QStringLiteral("MESURES DE LA SCÈNE (m)"), panel);
+        surveyTitle->setStyleSheet("font-size:15px;font-weight:700");
+        controls->addWidget(surveyTitle);
+        auto* surveyForm = new QFormLayout;
+        QDoubleSpinBox* surveyCoordinates[6] = {};
+        const QString surveyNames[6] = {
+            QStringLiteral("Point A — X"), QStringLiteral("Point A — Y"), QStringLiteral("Point A — Z"),
+            QStringLiteral("Point B — X"), QStringLiteral("Point B — Y"), QStringLiteral("Point B — Z")
+        };
+        for(int i=0;i<6;++i) {
+            auto* value = new QDoubleSpinBox(panel);
+            value->setRange(-1000000.0,1000000.0);
+            value->setDecimals(3);
+            value->setSingleStep(0.5);
+            value->setSuffix(QStringLiteral(" m"));
+            surveyCoordinates[i]=value;
+            surveyForm->addRow(surveyNames[i],value);
+        }
+        controls->addLayout(surveyForm);
+        auto* surveyResult = new QLabel(QStringLiteral("Saisissez les coordonnées de deux points."),panel);
+        surveyResult->setWordWrap(true);
+        auto* measureButton = new QPushButton(QStringLiteral("Mesurer A → B"),panel);
+        controls->addWidget(measureButton);
+        controls->addWidget(surveyResult);
+        connect(measureButton,&QPushButton::clicked,this,[surveyCoordinates,surveyResult] {
+            const double dx=surveyCoordinates[3]->value()-surveyCoordinates[0]->value();
+            const double dy=surveyCoordinates[4]->value()-surveyCoordinates[1]->value();
+            const double dz=surveyCoordinates[5]->value()-surveyCoordinates[2]->value();
+            const double horizontal=std::hypot(dx,dz);
+            const double spatial=std::hypot(horizontal,dy);
+            surveyResult->setText(QStringLiteral("Horizontale : %1 m | 3D : %2 m | Dénivelé B−A : %3 m")
+                .arg(horizontal,0,'f',3).arg(spatial,0,'f',3).arg(dy,0,'f',3));
+        });
+        auto* surveyCaution = new QLabel(QStringLiteral("Coordonnées de scène uniquement : géoréférencement historique non validé. Sélection par clic 3D à venir."),panel);
+        surveyCaution->setWordWrap(true);
+        controls->addWidget(surveyCaution);
         status_ = new QLabel(QStringLiteral("Prêt"), panel);
         auto* diagTitle = new QLabel(QStringLiteral("DIAGNOSTICS MESURÉS"), panel);
         diagTitle->setStyleSheet("font-size:15px;font-weight:700");
