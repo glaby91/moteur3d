@@ -24,13 +24,13 @@ const M3D_SCENE_LIGHTS = [];
 const M3D_PRIPYAT_BLOCKOUT = Object.freeze({
   plaza:{x0:-53,x1:53,z0:-15,z1:61},
   energetik:{x0:-50.5,x1:30.5,z0:-43.4,z1:-18.8,mainHeight:11.4,towerHeight:14},
-  polissya:{x0:40,x1:63,z0:-42,z1:-20},
+  polissya:{x0:40,x1:78,z0:-42,z1:-20,height:16.2},
   // The sports hall is a rear WING of Energetik, not a separate building.
   housing:[
     {id:'west-south',x0:-64,z0:-34,x1:-57,z1:-10,floors:6,frontZ:-10},
     // Provisional context block moved outside the Polissya footprint to avoid
     // two buildings physically occupying the same volume. Not a surveyed location.
-    {id:'east-south',x0:69,z0:-37,x1:83,z1:-12,floors:7,frontZ:-12},
+    {id:'east-south',x0:86,z0:-37,x1:100,z1:-12,floors:7,frontZ:-12},
     {id:'west-north',x0:-64,z0:20,x1:-57,z1:52,floors:5,frontZ:20},
     {id:'east-north',x0:47,z0:18,x1:60,z1:50,floors:6,frontZ:18}
   ]
@@ -544,27 +544,56 @@ function m3dBuildHousing({box},b){
   for(let x=x0+2;x<x1;x+=8.1)
     box(x,height*0.56,frontZ-0.2,x+1.3,height*0.56+1.25,frontZ+0.08,'windowlit');
 }
-// Photo-informed connector between Energetik and Polissya: the central
-// pedestrian opening follows a shallow segmented arch, not a solid prism.
-// The footprint is provisional until the survey fixes both anchor points.
-function m3dBuildConnector({box},a=M3D_ENERGETIK_ARCH){
-  const left=a.envelope.x1-0.3, right=M3D_PRIPYAT_BLOCKOUT.polissya.x0+0.2;
-  const z0=-24.0,z1=-18.6, roof=5.82,steps=18,dx=(right-left)/steps;
-  // Side abutments and two horizontal cornice bands use existing materials.
-  box(left,0,z0,left+0.72,roof,z1,'concrete');
-  box(right-0.72,0,z0,right,roof,z1,'concrete');
-  for(let i=0;i<steps;i++){
-    const x=left+i*dx, normalized=(i+0.5)/steps*2-1;
-    const intrados=3.48+1.12*Math.sqrt(Math.max(0,1-normalized*normalized));
-    // Masonry ABOVE the pedestrian arch, leaving the underpass open.
-    box(x,intrados,z0,x+dx+0.012,roof,z1,'concrete');
-    box(x,intrados-0.08,z1-0.06,x+dx+0.012,intrados+0.025,z1+0.05,'stone');
-  }
-  box(left-0.15,roof,z0-0.2,right+0.15,roof+0.25,z1+0.2,'stone');
-  // Corroded front balustrade, visibly separate from the load-bearing arch.
-  for(let x=left+0.9;x<right-0.6;x+=0.95)
-    box(x,roof+0.26,z1+0.035,x+0.055,roof+1.00,z1+0.09,'rust');
-  box(left+0.6,roof+0.97,z1+0.025,right-0.6,roof+1.045,z1+0.13,'metal');
+// Photographic reconstruction of the open, CURVED, independent Polissya arcade.
+// The colonnade bends in plan across the square; it approaches Energetik
+// and passes IN FRONT of the hotel. It touches neither building.
+// Unmeasured dimensions are an exterior visual estimate (tolerance ~1m).
+function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polissya){
+ const x0=a.envelope.x1+3.2,x1=b.x1+1.0,bow=5.8,centerZ=-13.6,halfWidth=1.85;
+ const at=(t,offset=0)=>{
+   const x=x0+(x1-x0)*t,z=centerZ+bow*Math.sin(Math.PI*t);
+   const tx=x1-x0,tz=bow*Math.PI*Math.cos(Math.PI*t),inv=1/Math.hypot(tx,tz);
+   return [x-offset*tz*inv,z+offset*tx*inv];
+ };
+ return Object.freeze({x0,x1,bow,centerZ,halfWidth,roofBottom:3.55,roofTop:3.86,
+   pierCount:17,segments:36,at});
+}
+function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
+ const p=m3dPolissyaArcadePlan(a);
+ const plane=(v,y,n,u,w)=>({p:[v[0],y,v[1]],n,uv:[u,w]});
+ const face=(v0,v1,v2,v3,y,n,material,u0,u1)=>{
+   // Two triangles follow the curve; avoids axis-aligned box stair stepping.
+   const a0=plane(v0,y,n,u0,0),b0=plane(v1,y,n,u0,1);
+   const c0=plane(v2,y,n,u1,0),d0=plane(v3,y,n,u1,1);
+   meshTriangle(a0,b0,c0,material);meshTriangle(c0,b0,d0,material);
+ };
+ for(let i=0;i<p.segments;i++){
+   const t0=i/p.segments,t1=(i+1)/p.segments;
+   const a0=p.at(t0,-p.halfWidth),b0=p.at(t0,p.halfWidth);
+   const a1=p.at(t1,-p.halfWidth),b1=p.at(t1,p.halfWidth);
+   face(a0,b0,a1,b1,p.roofTop,[0,1,0],'stone',t0*8,t1*8);
+   face(b0,a0,b1,a1,p.roofBottom,[0,-1,0],'concrete',t0*8,t1*8);
+   // Thin perimeter beam along both edges, built from actual polygons.
+   for(const side of [-1,1]){
+     const edge0=p.at(t0,side*p.halfWidth),edge1=p.at(t1,side*p.halfWidth);
+     const u0=plane(edge0,p.roofBottom,[0,0,side],t0*8,0),
+           u1=plane(edge1,p.roofBottom,[0,0,side],t1*8,0),
+           u2=plane(edge0,p.roofTop,[0,0,side],t0*8,1),
+           u3=plane(edge1,p.roofTop,[0,0,side],t1*8,1);
+     meshTriangle(u0,u1,u2,'concrete');meshTriangle(u1,u3,u2,'concrete');
+   }
+ }
+ // A staggered pair of reinforced concrete posts every ~2.7 m.
+ // Their X/Z placement follows the arc, while their cross-sections stay square.
+ for(let i=0;i<p.pierCount;i++){
+   const t=(i+0.55)/(p.pierCount+0.1);
+   for(const side of [-1,1]){
+     const [x,z]=p.at(t,side*(p.halfWidth-0.32));
+     box(x-0.20,0.08,z-0.19,x+0.20,p.roofBottom+0.03,z+0.19,'concrete');
+     box(x-0.28,0.035,z-0.27,x+0.28,0.16,z+0.27,'stone');
+   }
+ }
+ // Ends remain visibly open; NO abutments, horizontal wall or attachment.
 }
 
 // Shared rear-wall bay grid: openings are actual holes in the masonry,
@@ -688,96 +717,121 @@ function m3dBuildEnergetikFacade({box,roundBox,objects}){
   }
 }
 
-function m3dBuildPolissya({box,capsule}, cfg = M3D_PRIPYAT_BLOCKOUT.polissya) {
-  const x0=cfg.x0??40.0, x1=cfg.x1??63.0, z0=cfg.z0??-42.0, z1=cfg.z1??-20.0;
-  const height=cfg.height??15.5;
-  // Separate podium, tower, recessed roof and facade components.
-  box(x0,0,z0,x1,1.05,z1,'stone');
-  // Hollow hotel shell: the former 22 × 23 × 14.5 m solid concrete prism
-  // physically blocked all floors, rear windows and potential entry passages.
-  // These openings follow existing facade bays; room layout is provisional.
-  const wall=0.52;
-  const westDoorZ0=-25.55,westDoorZ1=-21.0,westDoorTop=4.15;
-  box(x0,1.05,z0,x0+wall,height,westDoorZ0,'concrete');
-  box(x0,1.05,westDoorZ1,x0+wall,height,z1,'concrete');
-  box(x0,westDoorTop,westDoorZ0,x0+wall,height,westDoorZ1,'concrete');
-  box(x1-wall,1.05,z0,x1,height,z1,'concrete');
-  box(x0+wall,1.05,z0,x1-wall,height,z0+wall,'concrete');
-  const windowXs=[];
-  for(let x=x0+2.0;x<x1-2.0;x+=3.1) windowXs.push(x);
-  let span=x0+wall;
-  for(const x of windowXs){
-    if(x>span)box(span,1.05,z1-wall,x,height,z1,'concrete');
-    let vertical=1.05;
-    for(let floor=0;floor<5;floor++){
-      const bottom=1.8+floor*2.65, top=bottom+1.55;
-      if(bottom>vertical)box(x,vertical,z1-wall,x+1.45,bottom,z1,'concrete');
-      vertical=top;
-    }
-    if(vertical<height)box(x,vertical,z1-wall,x+1.45,height,z1,'concrete');
-    span=x+1.45;
+// Hotel Polissya: photo-guided five-storey main volume with an asymmetrical
+// lower western wing, broken glazing, pale vertical facade cladding,
+// open rooftop terrace and individual oxidised Cyrillic letters.
+// Geometry dimensions are provisional, based on the visual references.
+function m3dBuildPolissya({box,capsule}, cfg=M3D_PRIPYAT_BLOCKOUT.polissya){
+ const {x0,x1,z0,z1}=cfg,mainH=cfg.height??16.2;
+ const wall=.50,westW=11.0,westEnd=x0+westW,westH=10.95,step=2.65;
+ // Shallow foundations and truly hollow interior (no overlapping concrete prism).
+ box(x0,0,z0,x1,1.05,z1,'stone');
+ box(x0+wall,mainH-.22,z0+wall,x1-wall,mainH,z1-wall,'concrete');
+ for(let floor=1;floor<=5;floor++){
+   const y=1.05+floor*step;
+   if(y<mainH-.05)box(x0+wall,y,z0+wall,x1-wall,y+.14,z1-wall,'concrete');
+ }
+ // Two different building heights: left block lower than central / eastern body.
+ box(x0,westH-.18,z0-.08,westEnd,westH+.18,z1+.10,'stone');
+ // Side walls are segmented to keep a real west-side ground-floor doorway.
+ const door0=-25.55,door1=-21.00,doorTop=4.15;
+ box(x0,1.05,z0,x0+wall,westH,door0,'concrete');
+ box(x0,1.05,door1,x0+wall,westH,z1,'concrete');
+ box(x0,doorTop,door0,x0+wall,westH,door1,'concrete');
+ box(x1-wall,1.05,z0,x1,mainH,z1,'concrete');
+ box(westEnd-.4,westH,z0,westEnd+.16,mainH,z0+wall,'concrete');
+ // Rear facade with rhythmic masonry piers, so rooms remain hollow.
+ for(let x=x0+.6;x<x1-.5;x+=3.15){
+   const top=x<westEnd?westH:mainH;
+   box(x,1.05,z0,x+.54,top,z0+wall,'concrete');
+   for(let floor=0;floor<5;floor++){
+     const y=1.75+floor*step;
+     if(y+1.42>top)continue;
+     if((Math.floor(x*3)+floor)%4!==0)
+       box(x+.58,y,z0-.10,x+2.0,y+1.42,z0+.04,'windowdark');
+   }
+ }
+ // Street facade: genuine window openings between columns and spandrels,
+ // unlike a monolithic facade surface with painted window rectangles.
+ let cursor=x0+wall;
+ for(let x=x0+2;x<x1-1.9;x+=3.1){
+   const top=x<westEnd?westH:mainH;
+   if(x>cursor)box(cursor,1.05,z1-wall,x,top,z1,'concrete');
+   let yCursor=1.05;
+   for(let floor=0;floor<5;floor++){
+     const y=1.80+floor*step;
+     if(y+1.55>top)break;
+     box(x,yCursor,z1-wall,x+1.45,y,z1,'concrete');
+     yCursor=y+1.55;
+     // Repeat dark and broken panes, avoid identical glowing rectangles.
+     const open=(Math.round(x*10)+floor*13)%6===0;
+     if(!open)box(x+.045,y+.06,z1+.045,x+1.405,y+1.48,z1+.095,'windowdark');
+     else{
+       box(x+.065,y+.82,z1+.03,x+.69,y+1.46,z1+.065,'windowdark');
+       box(x+.72,y+.08,z1+.03,x+1.38,y+.72,z1+.065,'glass');
+     }
+     box(x-.10,y-.13,z1+.05,x+1.55,y-.045,z1+.20,'stone');
+     box(x-.10,y+1.55,z1+.05,x+1.55,y+1.65,z1+.20,'stone');
+   }
+   if(yCursor<top)box(x,yCursor,z1-wall,x+1.45,top,z1,'concrete');
+   cursor=x+1.45;
+ }
+ if(cursor<x1-wall)box(cursor,1.05,z1-wall,x1-wall,mainH,z1,'concrete');
+ // Cladding starts at the high block only; the lower western wing is plaster.
+ for(let x=westEnd+.3;x<x1-.40;x+=.74)
+   box(x,mainH-4.1,z1+.08,x+.085,mainH-.16,z1+.17,
+       Math.round(x*9)%7===0?'rust':'plaster');
+ for(let x=x0+1.2;x<westEnd-.4;x+=1.1)
+   box(x,westH-3.4,z1+.09,x+.07,westH-.25,z1+.17,'plaster');
+ for(const y of [4.22,6.87,9.52,12.17,14.82]){
+   box(westEnd,y,z1+.06,x1-.52,y+.095,z1+.15,'stone');
+ }
+ // Asymmetric belvedere above right side: open front bays, not a solid box.
+ const terraceX0=x1-14.0,roofY=mainH,terraceY=mainH+3.40;
+ box(terraceX0,roofY,z0+1.2,x1-.4,roofY+3.2,z0+3.5,'concrete');
+ box(terraceX0-.1,terraceY,z0+1.0,x1+.15,terraceY+.25,z1+.23,'stone');
+ for(const x of [terraceX0+1.2,terraceX0+5.1,terraceX0+9.0]){
+   box(x,roofY+.04,z1-.37,x+.32,terraceY,z1-.08,'plaster');
+   box(x+1.3,roofY+1.3,z1-.30,x+2.45,roofY+2.4,z1-.22,'windowdark');
+ }
+ box(terraceX0,roofY+.10,z1-.20,x1+.05,roofY+.85,z1+.04,'concrete');
+ box(terraceX0,roofY+.86,z1-.24,x1+.05,roofY+.96,z1+.05,'rust');
+ // Projecting entrance awning, with a recessed area below.
+ box(x0+13,3.10,z1+.10,x0+23,3.39,z1+2.35,'concrete');
+ for(const x of [x0+13.4,x0+22.2])
+   box(x,.18,z1+1.85,x+.30,3.16,z1+2.12,'rust');
+ // Visible side facade, weathered windows and lateral balconies.
+ for(let floor=0;floor<5;floor++)
+  for(let z=z0+2.2;z<z1-2;z+=3.9){
+   const y=1.8+floor*step;
+   if(y+1.4>mainH)continue;
+   box(x1+.06,y,z,x1+.13,y+1.42,z+1.50,'windowdark');
+   box(x1+.13,y-.08,z-.10,x1+.25,y,z+1.6,'stone');
   }
-  if(span<x1-wall)box(span,1.05,z1-wall,x1-wall,height,z1,'concrete');
-  // Independent thin hotel floor slabs, not five overlapping solid blocks.
-  for(let floor=1;floor<=5;floor++){
-    const y=Math.min(height-0.20,1.05+floor*2.65);
-    box(x0+wall,y,z0+wall,x1-wall,y+0.14,z1-wall,'concrete');
-  }
-  // Photograph-inspired rooftop belvedere: the old solid penthouse cube
-  // incorrectly filled the open terrace with concrete.
-  box(x0+10.5,height,z0+1.4,x1-0.45,height+3.50,z0+4.0,'concrete');
-  box(x0+10.5,height+3.50,z0+1.4,x1+0.1,height+3.80,z1+0.15,'stone');
-  for(const x of [x0+12.2,x0+16.0,x0+19.8])
-    box(x,height+0.12,z1-0.65,x+0.27,height+3.50,z1-0.28,'plaster');
-  // Open terrace parapet and metal cap on the visible front edge.
-  box(x0+10.5,height+0.15,z1-0.12,x1+0.1,height+0.90,z1+0.15,'concrete');
-  box(x0+10.5,height+0.90,z1-0.18,x1+0.1,height+0.99,z1+0.19,'rust');
-  box(x0-0.15,height-0.18,z0-0.15,x1+0.15,height+0.22,z1+0.15,'stone');
-  // Front facade: windows as separate reusable bays.
-  for(let floor=0;floor<5;floor++){
-    const y=1.8+floor*2.65;
-    for(let x=x0+2.0;x<x1-2.0;x+=3.1){
-      box(x,y,z1+0.08,x+1.45,y+1.55,z1+0.20,(floor===2&&x>x0+11)?'windowlit':'windowdark');
-      box(x-0.13,y-0.13,z1+0.06,x+1.58,y-0.04,z1+0.23,'stone');
-      box(x-0.13,y+1.55,z1+0.06,x+1.58,y+1.67,z1+0.23,'stone');
-    }
-  }
-  // Recessed ribbing and worn pale cladding seen in Polissya photographs.
-  // Keep the five horizontal rows of existing window materials untouched.
-  for(let x=x0+0.56;x<x1-0.4;x+=1.0)
-    box(x,1.12,z1+0.16,x+0.065,height-0.20,z1+0.24,'plaster');
-  for(const y of [4.2,6.85,9.5,12.15])
-    box(x0+0.30,y,z1+0.12,x1-0.30,y+0.055,z1+0.27,'stone');
-
-  // Entry canopy and vertical side facade bays.
-  box(x0+8.0,2.85,z1+0.15,x0+15.0,3.13,z1+2.0,'concrete');
-  for(let floor=0;floor<4;floor++)for(let z=z0+2.0;z<z1-2.0;z+=4.0)
-    box(x1+0.06,2.2+floor*3.0,z,x1+0.18,3.7+floor*3.0,z+1.55,'windowdark');
-  // Rooftop sign remains rusty, not actively lit in the abandoned era.
-  // 5×7 stroke pixels are an original geometric asset (no imported font).
-  const letters={
-    'Г':['11111','10000','10000','10000','10000','10000','10000'],
-    'О':['01110','10001','10001','10001','10001','10001','01110'],
-    'Т':['11111','00100','00100','00100','00100','00100','00100'],
-    'Е':['11111','10000','10000','11110','10000','10000','11111'],
-    'Л':['00111','01001','10001','10001','10001','10001','10001'],
-    'Ь':['10000','10000','10000','11110','10001','10001','11110'],
-    'П':['11111','10001','10001','10001','10001','10001','10001'],
-    'І':['11111','00100','00100','00100','00100','00100','11111'],
-    'С':['01111','10000','10000','10000','10000','10000','01111'],
-    'Я':['01111','10001','10001','01111','00101','01001','10001']
-  };
-  const label='ГОТЕЛЬ ПОЛІССЯ', px=0.095, pitch=0.72, signX=x0+1.1, signY=height+0.45;
-  for(let k=0;k<label.length;k++){
-    const glyph=letters[label[k]];
-    if(!glyph) continue;
-    for(let row=0;row<7;row++)for(let col=0;col<5;col++)if(glyph[row][col]==='1'){
-      const sx=signX+k*pitch+col*px, sy=signY+(6-row)*px;
-      box(sx,sy,z1-0.35,sx+px*0.80,sy+px*0.80,z1-0.27,'rust');
-    }
-  }
+ // Individual rusty roof sign, modeled as letter strokes (not bitmap).
+ const glyphs={
+ 'Г':['11111','10000','10000','10000','10000','10000','10000'],
+ 'О':['01110','10001','10001','10001','10001','10001','01110'],
+ 'Т':['11111','00100','00100','00100','00100','00100','00100'],
+ 'Е':['11111','10000','10000','11110','10000','10000','11111'],
+ 'Л':['00111','01001','10001','10001','10001','10001','10001'],
+ 'Ь':['10000','10000','10000','11110','10001','10001','11110'],
+ 'П':['11111','10001','10001','10001','10001','10001','10001'],
+ 'І':['11111','00100','00100','00100','00100','00100','11111'],
+ 'С':['01111','10000','10000','10000','10000','10000','01111'],
+ 'Я':['01111','10001','10001','01111','00101','01001','10001']
+ };
+ const label='ГОТЕЛЬ ПОЛІССЯ',px=.132,pitch=.88,signX=westEnd+1.1,signY=mainH+1.22;
+ for(let k=0;k<label.length;k++){
+   const g=glyphs[label[k]];if(!g)continue;
+   for(let y=0;y<7;y++)for(let x=0;x<5;x++)if(g[y][x]==='1'){
+     const xx=signX+k*pitch+x*px,yy=signY+(6-y)*px;
+     box(xx,yy,z1-.45,xx+px*.82,yy+px*.82,z1-.34,'rust');
+   }
+ }
+ for(let x=signX-.3;x<signX+label.length*pitch;x+=3.0)
+   capsule([x,mainH+.18,z1-.55],[x,signY+.18,z1-.55],.04,'rust');
 }
-
 
 // Terrain and road extension for the Pripyat scene (2 km radius from Energetik).
 // Streets and paths are clipped from OpenStreetMap (ODbL), snapshot 2026-11-05T23:29:21Z.
@@ -856,7 +910,7 @@ function makeScene() {
   }
 
   // Independent building-to-building connector component.
-  m3dBuildConnector({box});
+  m3dBuildConnector({box,meshTriangle});
 
   // Main civic building: separately assembled exterior and detailed facade.
   m3dBuildEnergetikShell({box});
@@ -1253,23 +1307,40 @@ function makeScene() {
   ]) buildPripyatOutdoorChair({objects,box,roundBox,capsule,ellipse},chair[0],0,chair[1],
     {angle:chair[2],variant:chair[3]});
 
-  // Poplars and younger trees: slender trunks with narrow crowns, progressively
-  // varied so the square does not read as a repeated asset grid.
-  function poplar(x, z, h, crownScale=1) {
-    capsule([x,0.05,z],[x,h*0.78,z],0.20,'bark');
-    for (let k=0;k<4;k++) {
-      const y=h*(0.46+k*0.125);
-      ellipsoidMesh(x,y,z,1.05*crownScale*(1-k*0.14),h*0.22,0.78*crownScale*(1-k*0.12),'leaves',12,10);
+  // Photos Polissya: visible branch skeleton + irregular grouped foliage.
+  // Low tessellation is deliberate: the HD 620 cannot rasterise millions
+  // of high-poly leaves. Canopies stay visible in the CPU/BVH and compute GPU.
+  function poplar(x,z,h,crownScale=1){
+    const jitter=n=>Math.sin((x*3.3+z*5.7+n*17.13)*1.41);
+    const trunkTop=h*.78;
+    capsule([x,.04,z],[x,trunkTop,z],.17+.035*crownScale,'bark');
+    // Main side boughs split into inclined secondary branches.
+    for(let k=0;k<8;k++){
+      const y=h*(.29+k*.071),theta=k*2.3999+jitter(k)*.22;
+      const rad=(.70+(k%3)*.28)*crownScale*(1-k*.055);
+      const x1=x+Math.cos(theta)*rad,z1=z+Math.sin(theta)*rad;
+      const y1=y+h*(.090+(k%2)*.012);
+      capsule([x,y,z],[x1,y1,z1],.082-k*.005,'bark');
+      const end=[x1+Math.cos(theta+.33)*rad*.64,y1+h*.043,z1+Math.sin(theta+.33)*rad*.64];
+      capsule([x1,y1,z1],end,.045,'bark');
+      ellipsoidMesh(end[0],end[1],end[2],.62*crownScale,h*.090,.50*crownScale,'leaves',7,5);
     }
-    for (const side of [-1,1]) {
-      capsule([x,0.12,z],[x+side*0.42,0.04,z+0.16],0.08,'bark');
+    for(let k=0;k<5;k++){
+      const y=h*(.58+k*.075),dx=Math.cos(k*2.73+jitter(k+12))*.44*crownScale;
+      const dz=Math.sin(k*2.73+jitter(k+12))*.38*crownScale;
+      ellipsoidMesh(x+dx,y,z+dz,.78*crownScale,h*.095,.65*crownScale,'leaves',8,5);
     }
+    // Exposed root flare and small trunk knots.
+    for(const side of [-1,1])capsule([x,.12,z],[x+side*.52,.04,z+.2],.07,'bark');
   }
   const matureTrees=[
     [-52,-11,12],[-48,29,14],[-39,58,13],[-27,58,15],[-13,59,12],
     [5,59,15],[20,59,13],[38,57,14],[51,49,13],[53,28,12],
     [52,7,14],[48,-11,13],[-52,49,12],[-48,2,11],[-44,-12,12],
-    [-34,-10,13],[34,-11,12],[43,-11,13],[-56,68,11],[53,67,12]
+    [-34,-10,13],[34,-11,12],[43,-11,13],[-56,68,11],[53,67,12],
+    // Dense but irregular overgrowth around the front of Hotel Polissya.
+    [62,-5,15],[70,-4,17],[77,-7,13],[83,0,16],[60,10,13],
+    [73,14,15],[82,17,14],[67,24,16],[88,26,12]
   ];
   if (process.env.M3D_IMPORT_PRIPYAT_GLB !== '1') {
     for (let i=0;i<matureTrees.length;i++) poplar(...matureTrees[i],0.76+(i%4)*0.11);
@@ -1280,8 +1351,12 @@ function makeScene() {
   for (let i=0;i<saplings.length;i++) {
     const [x,z]=saplings[i],h=3.3+(i%4)*0.75;
     capsule([x,0.05,z],[x,h*.72,z],0.09,'bark');
-    ellipsoidMesh(x,h*.78,z,0.72,h*.34,0.62,'leaves',10,8);
-    ellipsoidMesh(x-.42,h*.70,z+.10,0.45,h*.25,0.42,'leaves',9,7);
+    for(let j=0;j<5;j++){
+      const angle=j*2.32+i*.17,cy=h*(.48+j*.085);
+      const bx=x+Math.cos(angle)*.54,bz=z+Math.sin(angle)*.48;
+      capsule([x,cy*.78,z],[bx,cy+.25,bz],.041,'bark');
+      ellipsoidMesh(bx,cy+.30,bz,.43,h*.13,.36,'leaves',7,5);
+    }
   }
   // Weed tufts along joints, curbs and beneath trees.
   for (let x=-49;x<=49;x+=7) for (let z=-12;z<=59;z+=9) {
