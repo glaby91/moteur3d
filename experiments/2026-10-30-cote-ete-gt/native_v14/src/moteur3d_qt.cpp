@@ -1883,7 +1883,9 @@ int main(int argc, char** argv) {
     }
     // Non-GUI CPU snapshots for reproducible GitHub Actions geometry inspection.
     // Usage: moteur3d_qt.exe --snapshot <view 1..13> <output.png>
-    if (argc >= 4 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--snapshot")) {
+    if (argc >= 4 && (QString::fromLocal8Bit(argv[1]) == QStringLiteral("--snapshot") ||
+                      QString::fromLocal8Bit(argv[1]) == QStringLiteral("--snapshot-compute"))) {
+        const bool computeSnapshot = QString::fromLocal8Bit(argv[1]) == QStringLiteral("--snapshot-compute");
         QCoreApplication app(argc, argv);
         bool ok = false;
         const int view = QString::fromLocal8Bit(argv[2]).toInt(&ok);
@@ -1904,7 +1906,8 @@ int main(int argc, char** argv) {
         if(!loadScene(path,scene,error)) return 6;
         updateLighting(6.0f+float(p.value(QStringLiteral("hour_step")).toInt(12))*0.5f);
         Stats shadowStats{};
-        const ShadowMap shadow=buildShadow(scene,shadowStats);
+        // The GPU snapshot uses the same camera and daylight, but needs no CPU shadow map.
+        const ShadowMap shadow=computeSnapshot ? ShadowMap{} : buildShadow(scene,shadowStats);
         constexpr int width=640,height=360;
         const float angle=float(p.value(QStringLiteral("angle")).toDouble());
         const float elevation=float(p.value(QStringLiteral("elevation")).toDouble());
@@ -1920,7 +1923,15 @@ int main(int argc, char** argv) {
         // framebuffer before dispatching threads (same as the GUI render loop).
         std::vector<uint32_t> pixels(size_t(width)*size_t(height));
         const std::atomic<uint64_t> generation{1};
-        m3d::render(scene,shadow,cam,width,height,pixels,4,false,generation,1,1,false,false);
+        if(computeSnapshot) {
+            Stats computeStats{};
+            if(!renderCompute11Preview(scene,cam,width,height,pixels,computeStats,error)) {
+                std::wcerr << L"Compute snapshot failed: " << error << std::endl;
+                return 9;
+            }
+        } else {
+            m3d::render(scene,shadow,cam,width,height,pixels,4,false,generation,1,1,false,false);
+        }
         if(pixels.size()!=size_t(width)*size_t(height)) return 7;
         QImage image(reinterpret_cast<const uchar*>(pixels.data()),
                      width,height,width*int(sizeof(uint32_t)),QImage::Format_ARGB32);
