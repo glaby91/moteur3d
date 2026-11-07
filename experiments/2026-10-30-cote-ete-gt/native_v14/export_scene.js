@@ -336,7 +336,7 @@ function makePripyatPbr(kind) {
     }
     if(kind==='gymFloor'){
       // The atlas is mapped *once* to the floor mesh, not tiled per board.
-      const U=x/(size-1),V=y/(size-1),X=(U-.5)*39.6,Z=(V-.5)*25.6;
+      const U=x/(size-1),V=y/(size-1),X=(U-.5)*43.6,Z=(V-.5)*25.6;
       const aX=Math.abs(X),aZ=Math.abs(Z);
       const red=aX>12 && aZ<8.3;
       const yellow=aZ>9.5 && aZ<11.7;
@@ -346,15 +346,15 @@ function makePripyatPbr(kind) {
       if(exposed>.41) pigment=[135,116,91];
       else if(exposed<-.58) pigment=[80,114,124];
       const near=(d,w)=>Math.abs(d)<w;
-      const courtOutline=(near(aX-18.0,.075)&&aZ<=10.15) ||
-                         (near(aZ-10.0,.075)&&aX<=18.2);
+      const courtOutline=(near(aX-20.0,.075)&&aZ<=10.15) ||
+                         (near(aZ-10.0,.075)&&aX<=20.15);
       const centreLine=near(X,.061)&&aZ<=10;
       const centreCircle=near(Math.hypot(X,Z)-1.8,.070);
       // The two semicircular basketball key boundaries use white paint.
-      const basketArc=near(Math.hypot(aX-15.5,Z)-4.85,.075)&&aX<16.4;
-      const basketKey=near(aZ-2.45,.064)&&aX>13.5&&aX<18.0;
-      const handArc=near(Math.hypot(aX-18.0,Z)-6.0,.095)&&aX<18.1;
-      const handDash=near(Math.hypot(aX-18.0,Z)-9.0,.082)&&aX<18.1&&Math.floor(Math.atan2(Z,aX-18)*4)%2===0;
+      const basketArc=near(Math.hypot(aX-17.5,Z)-4.85,.075)&&aX<18.4;
+      const basketKey=near(aZ-2.45,.064)&&aX>15.5&&aX<20.0;
+      const handArc=near(Math.hypot(aX-20.0,Z)-6.0,.095)&&aX<20.1;
+      const handDash=near(Math.hypot(aX-20.0,Z)-9.0,.082)&&aX<20.1&&Math.floor(Math.atan2(Z,aX-20)*4)%2===0;
       let ink=null;
       if(courtOutline||centreLine||centreCircle||basketArc||basketKey)ink=[215,211,195];
       if(handArc||handDash)ink=[202,177,92];
