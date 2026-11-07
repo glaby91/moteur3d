@@ -103,6 +103,7 @@ jobs:
           node experiments/pripyat-survey/test-pripyat-ferris-wheel.mjs
           node experiments/pripyat-survey/test-compute-camera-projection.mjs
           node experiments/pripyat-survey/test-polissya-arcade.mjs
+          node experiments/pripyat-survey/test-compute-pbr-cache.mjs
 
       - name: Export runtime scenes
         shell: bash
@@ -147,6 +148,7 @@ jobs:
           cp assets/pripyat/energetik_roof_neon_sign.glb dist/assets/pripyat/
           cp -r assets/pripyat/textures dist/assets/pripyat/
           cp -r docs dist/
+          cp ../../../docs/pripyat/CHANGEMENTS_POLISSYA_COMPUTE_261107.txt ../../../docs/pripyat/POLISSYA-PLANCHE-3VUES-261107.svg dist/
 
       - name: Deploy Qt DLLs on Windows
         if: runner.os == 'Windows'
