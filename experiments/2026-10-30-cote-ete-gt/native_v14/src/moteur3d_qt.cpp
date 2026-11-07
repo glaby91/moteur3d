@@ -10,6 +10,8 @@
 #include <QCoreApplication>
 #include <QCloseEvent>
 #include <QDialog>
+#include <QDialogButtonBox>
+#include <QTextBrowser>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QFile>
@@ -644,6 +646,9 @@ public:
         });
         benchmarkAction_ = toolsMenu->addAction(QStringLiteral("Benchmark du moteur…"));
         connect(benchmarkAction_, &QAction::triggered, this, [this] { openBenchmark(); });
+        auto* helpMenu = menuBar()->addMenu(QStringLiteral("Aide"));
+        auto* aboutAction = helpMenu->addAction(QStringLiteral("À propos et sources…"));
+        connect(aboutAction, &QAction::triggered, this, [this] { showAboutDialog(); });
         updateLighting(12.f);
         Stats initialShadowStats; initialShadowStats.avx2 = settings_.avx2;
         shadows_ = buildShadow(scene_, initialShadowStats);
@@ -1180,6 +1185,71 @@ private:
         applySceneCameraPreset();
         readSettings();
         requestRender();
+    }
+
+    void showAboutDialog() {
+        QDialog about(this);
+        about.setWindowTitle(QStringLiteral("À propos de Moteur3D — sources"));
+        about.resize(740,620);
+        auto* layout=new QVBoxLayout(&about);
+        auto* browser=new QTextBrowser(&about);
+        browser->setOpenExternalLinks(true);
+        browser->setStyleSheet(QStringLiteral(
+            "QTextBrowser {background:#102330;color:#e4ecf2;"
+            "font-size:13px;border:1px solid #345267;padding:14px;}"
+            "a {color:#94cafa;}"));
+        const QString html=QStringLiteral(R"html(
+<h2>Moteur3D — moteur de rendu expérimental</h2>
+<p><b>Version :</b> %1</p>
+<p><b>Projet :</b> recherche personnelle, rendu CPU / GPU Compute D3D11,
+reconstruction documentaire de Pripyat.</p>
+<h3>Sources documentaires pour Pripyat</h3>
+<p>Les références servent à identifier les bâtiments, les véhicules,
+les paysages et les matériaux. Leur consultation ne signifie pas qu'une
+photographie a été incorporée au moteur ou qu'une licence de réutilisation
+a été obtenue.</p>
+<ul>
+<li><a href="https://www.gettyimages.fr/search/2/image?phrase=pripiat&amp;sort=mostpopular&amp;page=4&amp;license=rf%2Crm">Getty Images — photographies de Pripyat</a>
+ — photographes et agences crédités sur les fiches individuelles, droits réservés.</li>
+<li><a href="https://www.chernobylgallery.com/galleries/">Chernobyl Gallery</a>
+ — patrimoine, architecture et objets.</li>
+<li><a href="https://www.forgottenchernobyl.net/">Forgotten Chernobyl</a>
+ — photographies et comparaisons historiques.</li>
+<li><a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>
+ — référentiel routier, contributeurs OpenStreetMap, licence ODbL.</li>
+<li><a href="https://www.earthdata.nasa.gov/">NASA Earthdata</a>
+ — contexte topographique / SRTM.</li>
+<li><a href="https://www.ceh.ac.uk/our-science/projects/tree-red-fire-radioactive-environment-damaged-fire">UK Centre for Ecology &amp; Hydrology</a>
+ — documentation scientifique de la Forêt rouge.</li>
+<li><a href="https://www-pub.iaea.org/MTCD/Publications/PDF/te_1240_prn.pdf">AIEA — TECDOC 1240</a>
+ — données scientifiques sur l'environnement de Tchernobyl.</li>
+<li><a href="https://dawnus.org/the-pripyat-marshes-of-ukraine-europes-largest-wetlands/">Dawnus — marais de la Pripiat</a>
+ — contexte paysager régional.</li>
+<li><a href="https://fr.wikipedia.org/wiki/Parc_national_de_la_Pripiat">Parc national de la Pripiat</a>
+ — contexte de zone humide en <b>Biélorussie</b>, et non localisation d'un site de notre scène ukrainienne.</li>
+</ul>
+<h3>Références fournies dans le cadre du projet</h3>
+<p>Photographies de façades, fresques (Energetik et bureau de poste),
+colonnade, végétation, matériaux écaillés et croquis de travail transmis
+par l'utilisateur. Les références non confirmées ne sont pas ajoutées
+à la géométrie historique.</p>
+<h3>Crédits et statut des ressources</h3>
+<p><b>Photos externes :</b> les auteurs et détenteurs de droits restent
+crédités par leurs publications respectives. Une photographie Getty
+n'est pas une texture du moteur par défaut.</p>
+<p><b>3D / shaders :</b> moteur maison et données générées pour ce projet ;
+éventuelles textures ou ressources tierces à créditer individuellement
+dans leur fiche de provenance lorsqu'elles sont effectivement intégrées.</p>
+<p><b>Diffusion envisagée :</b> aucune — usage personnel de recherche.</p>
+<p>Une source citée ici est une <b>référence documentaire</b>, pas une
+autorisation générale de reproduction ni une preuve d'implantation exacte.</p>
+)html").arg(QString::fromWCharArray(M3D_RELEASE_ID_WIDE));
+        browser->setHtml(html);
+        layout->addWidget(browser,1);
+        auto* buttons=new QDialogButtonBox(QDialogButtonBox::Close,&about);
+        QObject::connect(buttons,&QDialogButtonBox::rejected,&about,&QDialog::reject);
+        layout->addWidget(buttons);
+        about.exec();
     }
 
     void openBenchmark() {
