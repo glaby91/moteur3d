@@ -429,13 +429,20 @@ private:
         QFile file(path); if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) { QMessageBox::warning(this, QStringLiteral("Export CSV"), QStringLiteral("Impossible d’écrire ce fichier.")); return; }
         QTextStream out(&file); out.setEncoding(QStringConverter::Utf8);
         if(gpuReportAvailable_){
-            out << "# benchmark=GPU Compute D3D11 ray tracing; source=Windows WDDM GPU Engine; frames=" << gpuRenderedFrames_ << "\n";
+            out << "# benchmark=GPU Compute D3D11 ray tracing; build=" << M3D_BUILD_ID_ANSI << "; source=Windows WDDM GPU Engine"
+                << "; frames=" << gpuRenderedFrames_ << "; resolution=" << width_ << "x" << height_ << "; warmup=1\n";
             out << "# utilization=max individual engine, not sum of GPU engines; system value includes other applications\n";
-            out << "frame;gpu_system_busiest_engine_pct;gpu_moteur3d_engine_pct\n";
+            out << "# total_wall_ms=CPU clock including GPU dispatch/wait/readback;"
+                   " gpu_kernel_ms=optional D3D11 timestamp; CPU submit/readback intervals are not additive\n";
+            out << "frame;gpu_system_busiest_engine_pct;gpu_moteur3d_engine_pct;total_wall_ms;gpu_kernel_ms;cpu_submit_ms;readback_wall_ms\n";
             for(const auto& r:gpuBusySamples_)
                 out << r.frame << ';'
                     << (r.systemPct>=0?QString::number(r.systemPct,'f',2):QStringLiteral("N/D")) << ';'
-                    << (r.processPct>=0?QString::number(r.processPct,'f',2):QStringLiteral("N/D")) << '\n';
+                    << (r.processPct>=0?QString::number(r.processPct,'f',2):QStringLiteral("N/D")) << ';'
+                    << QString::number(r.totalMs,'f',3) << ';'
+                    << (r.gpuKernelMs>=0?QString::number(r.gpuKernelMs,'f',3):QStringLiteral("N/D")) << ';'
+                    << QString::number(r.submitCpuMs,'f',3) << ';'
+                    << QString::number(r.readbackWallMs,'f',3) << '\n';
             return;
         }
         out << "# build=" << M3D_BUILD_ID_ANSI << "; scene=" << sceneLabel_->text() << "\n";
