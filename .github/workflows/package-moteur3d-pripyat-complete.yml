@@ -1,0 +1,129 @@
+name: Package Moteur3D Windows + Pripyat 3D complete
+
+on:
+  push:
+    branches:
+      - feature/pripyat-vegetation-3d-261107
+    paths:
+      - .github/workflows/package-moteur3d-pripyat-complete.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Download tested Moteur3D Windows with GPU Benchmark and About
+        uses: actions/download-artifact@v4
+        with:
+          name: Moteur3D-GPU-Load-Benchmark-3
+          run-id: 42407053208
+          repository: glaby91/moteur3d
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: engine
+
+      - name: Download latest complete Pripyat grass 3D scene.bin
+        uses: actions/download-artifact@v4
+        with:
+          name: Pripyat-Grass3D-SceneOnly-1to1
+          run-id: 42407704064
+          repository: glaby91/moteur3d
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: scene
+
+      - name: Assemble one portable Windows folder
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p Moteur3D-Pripyat-Complet
+          cp -a engine/. Moteur3D-Pripyat-Complet/
+          cp -a scene/. Moteur3D-Pripyat-Complet/
+          cat >Moteur3D-Pripyat-Complet/LANCER-MOTEUR3D.cmd <<'EOF'
+          @echo off
+          cd /d "%~dp0"
+          start "" "moteur3d_qt.exe"
+          EOF
+          cat >Moteur3D-Pripyat-Complet/LISEZ-MOI-DEMARRAGE.txt <<'EOF'
+          MOTEUR 3D PRIPYAT - ARCHIVE WINDOWS COMPLETE - 07/11/2026
+
+          1. Decompressez l'archive sur votre ordinateur Windows.
+          2. Double-cliquez sur LANCER-MOTEUR3D.cmd (ou moteur3d_qt.exe).
+          3. La scene Pripyat se charge automatiquement depuis le dossier.
+          4. Selectionnez GPU Compute D3D11 pour le ray tracing GPU sans DXR.
+          5. Outils > Benchmark du moteur : charge GPU (%) sur 100 images.
+          6. Aide > A propos et sources : photos, atlas et credits.
+
+          Ce paquet inclut :
+          - le moteur Windows Qt x64 et ses DLL ;
+          - le compute shader HLSL et les outils de benchmark GPU ;
+          - scene_pripyat_central.bin : herbes 3D et PBR au sol repete tous les 4 m ;
+          - 13 vues de camera et atlas historique de Pripyat.
+
+          Le moteur est un projet de recherche personnel ; les photos
+          externes citees servent de references, pas de textures distribuees.
+
+          Origine du moteur: GitHub Actions run 42407053208
+          Origine de la scene: GitHub Actions run 42407704064
+          EOF
+
+      - name: Verify the folder is actually runnable and scene is present
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          import json,hashlib
+          root=Path('Moteur3D-Pripyat-Complet')
+          required=[
+             'moteur3d_qt.exe',
+             'Qt6Core.dll','Qt6Gui.dll','Qt6Widgets.dll',
+             'shaders/m3d_raytrace_compute.hlsl',
+             'scene_pripyat_central.bin',
+             'scene_pripyat_views.json',
+             'LANCER-MOTEUR3D.cmd',
+          ]
+          missing=[str(f) for f in required if not (root/f).is_file()]
+          if missing: raise SystemExit('MISSING REQUIRED FILES: '+', '.join(missing))
+          scene=root/'scene_pripyat_central.bin'
+          assert scene.stat().st_size>100_000_000,'Scene binary incomplete'
+          views=json.loads((root/'scene_pripyat_views.json').read_text(encoding='utf-8'))
+          assert len(views['views'])==13,'Expected 13 Pripyat inspection cameras'
+          engine=root/'moteur3d_qt.exe'
+          assert engine.stat().st_size>1_000_000, 'Windows executable incomplete'
+          assert engine.open('rb').read(2)==b'MZ', 'Invalid Windows PE executable'
+          manifest={
+             'bundle':'Moteur3D-Pripyat-Complet',
+             'platform':'Windows x64',
+             'app_build':'261107-0003',
+             'engine_git_sha':'1eb662f862bb6935053b32c877b91e4542584c32',
+             'engine_actions_run':42407053208,
+             'scene_git_sha':'7a26b68cf129871eac6e0aeac0c71b5ff09d5591',
+             'scene_actions_run':42407704064,
+             'scene_bytes':scene.stat().st_size,
+             'camera_presets':13,
+             'verified_required_files':required,
+             'shader_packaged':True,
+             'grass_3d':True,
+             'metric_1to1':True,
+             'grass_world_uv_repetition_m':4,
+             'note':'Scene loaded by default when executable starts from same folder'
+          }
+          (root/'VERSION-ET-ORIGINES.json').write_text(
+              json.dumps(manifest,indent=2,ensure_ascii=False)+'\n',encoding='utf-8')
+          print(json.dumps(manifest,indent=2,ensure_ascii=False))
+          print('Files',sum(p.is_file() for p in root.rglob('*')))
+          print('Package size',sum(p.stat().st_size for p in root.rglob('*') if p.is_file()))
+          PY
+
+      - name: Upload ONE complete Moteur3D Pripyat Windows download
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moteur3D-Pripyat-Complet-Windows
+          path: Moteur3D-Pripyat-Complet/
+          compression-level: 1
+          if-no-files-found: error
+          retention-days: 30
