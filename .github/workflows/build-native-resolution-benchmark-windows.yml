@@ -1,0 +1,91 @@
+name: Build native-resolution GPU benchmark - Windows
+on:
+  push:
+    branches: [feature/pripyat-vegetation-3d-261107]
+    paths:
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/moteur3d_qt.cpp
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_gpu_load_meter.h
+      - experiments/2026-10-30-cote-ete-gt/native_v14/version.h
+      - experiments/2026-10-30-cote-ete-gt/native_v14/CMakeLists.txt
+      - .github/workflows/build-native-resolution-benchmark-windows.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Qt 6.8.3
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+      - name: Write build provenance
+        shell: pwsh
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          @"
+          #pragma once
+          #define M3D_GIT_REVISION_ANSI "$($env:GITHUB_SHA.Substring(0,12))"
+          #define M3D_GIT_REVISION_WIDE L"$($env:GITHUB_SHA.Substring(0,12))"
+          #define M3D_GIT_BRANCH_ANSI "$($env:GITHUB_REF_NAME)"
+          #define M3D_GIT_BRANCH_WIDE L"$($env:GITHUB_REF_NAME)"
+          #define M3D_GIT_RUN_WIDE L"$($env:GITHUB_RUN_NUMBER)"
+          "@ | Set-Content -Path build_info.h -Encoding utf8
+      - name: Configure Qt benchmark application
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        shell: pwsh
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+      - name: Compile benchmark
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        shell: pwsh
+        run: cmake --build build --config Release --parallel
+      - name: Install benchmark and Qt DLLs
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        shell: pwsh
+        run: |
+          cmake --install build --config Release --prefix dist
+          windeployqt --release --compiler-runtime --dir dist dist/moteur3d_qt.exe
+      - name: Validate compute shader compilation
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        shell: pwsh
+        run: |
+          & "./dist/moteur3d_qt.exe" --validate-compute-hlsl
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Execute compute shader in software WARP
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        shell: pwsh
+        env:
+          M3D_COMPUTE_WARP: '1'
+        run: |
+          & "./dist/moteur3d_qt.exe" --smoke-compute-hlsl "./dist/compute-warp-smoke.png"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path "./dist/compute-warp-smoke.png")) { throw "Smoke image not generated" }
+      - name: Include retrofit README
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        shell: pwsh
+        run: |
+          @"
+          GPU BENCHMARK - BUILD 261107-0004
+          Windows Qt Compute D3D11 renderer and GPU load diagnostics.
+          Scene binary not included: reuse scene_pripyat_central.bin from
+          Moteur3D Build 296 or the metric scene-only artifact.
+          Outils > Benchmark du moteur > GPU Compute D3D11 - occupation GPU (%).
+          Default 100 frames, average and peak Windows GPU Engine busy percent.
+          Benchmark pixels are always TRUE native 1:1: no navigation preview scaling.
+          CSV provides per-process and system busiest-engine values.
+          Counters unavailable: N/D (no percentage is invented).
+          Tests on the Intel HD 620 are still required.
+          "@ | Set-Content -Path dist/LISEZ-MOI-BENCHMARK-GPU.txt -Encoding utf8
+      - name: Upload Qt benchmark tools (no scene.bin)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moteur3D-GPU-Native-Benchmark-${{ github.run_number }}
+          path: experiments/2026-10-30-cote-ete-gt/native_v14/dist/
+          retention-days: 30
+          if-no-files-found: error
