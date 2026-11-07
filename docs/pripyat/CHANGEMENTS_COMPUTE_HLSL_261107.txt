@@ -74,3 +74,17 @@ VERIFICATION / RECETTE
 STATUT : intégration source réalisée sur branche dédiée ;
 compilation Windows, exécution GPU sur la carte cible, tests de rendu
 et performances restent à valider et seront consignés après essais.
+
+CORRECTIF — 07/11/2026 : CADRAGE CAMERA COMMUN CPU / DIRECTX 11 / COMPUTE
+- Anomalie reproduite sur les captures camera 06 (gymnase / grande roue) :
+  le choix du backend GPU Compute élargissait artificiellement le champ.
+- Cause : le shader appliquait tanHalfFov * aspect sur l'axe horizontal,
+  au lieu de tanHalfFov sur X et tanHalfFov / aspect sur Y.
+- Modification : src/shaders/m3d_raytrace_compute.hlsl, formule des rayons
+  primaires alignée sur m3d_render.cpp et m3d_directx11.cpp.
+- Test : experiments/pripyat-survey/test-compute-camera-projection.mjs,
+  lancé également dans le workflow Windows ; résolutions 16:9, 4:3, 1:1.
+- Aucune modification de la position de la grande roue ni des presets.
+- Les écarts de matériaux, luminosité du ciel et performances Compute
+  sont des sujets distincts et restent à traiter.
+- Validation GPU réelle après recompilation Windows nécessaire.

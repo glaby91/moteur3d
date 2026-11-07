@@ -184,6 +184,8 @@ void CSMain(uint3 tid:SV_DispatchThreadID){
  if(tid.x>=width||tid.y>=height)return;
  float2 uv=((float2(tid.xy)+.5)/float2(width,height))*2-1;
  Ray ray;ray.origin=eye;
- ray.direction=normalize(forward+right*uv.x*tanHalfFov*aspect-up*uv.y*tanHalfFov);
+ // Match CPU m3d_render.cpp and D3D11 raster: tanHalfFov is HORIZONTAL.
+ // Keep vertical field of view divided by aspect, never multiplied into X.
+ ray.direction=normalize(forward+right*uv.x*tanHalfFov-up*uv.y*tanHalfFov/aspect);
  Output[tid.xy]=tracePrimary(ray);
 }
