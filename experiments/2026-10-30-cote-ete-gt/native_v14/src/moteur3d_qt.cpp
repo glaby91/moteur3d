@@ -1556,6 +1556,49 @@ int main(int argc, char** argv) {
         std::wcerr << L"Erreur de validation HLSL : " << error << std::endl;
         return 12;
     }
+    // Execute the real D3D11 compute shader on a tiny synthetic BVH.
+    // WARP is selected only when M3D_COMPUTE_WARP=1 (Windows CI).
+    if (argc >= 2 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--smoke-compute-hlsl")) {
+        m3d::Scene minimal;
+        m3d::Obj box{};
+        box.kind=m3d::Kind::Box;
+        box.mat=0;
+        box.mn={-1.f,-.95f,-4.f};box.mx={1.f,.95f,-2.f};
+        minimal.obj.push_back(box);
+        m3d::Node leaf{};
+        leaf.mn=box.mn;leaf.mx=box.mx;leaf.start=0;leaf.count=1;
+        minimal.node.push_back(leaf);
+        minimal.order.push_back(0);minimal.root=0;
+        m3d::Material mat{};
+        mat.name="concrete";
+        m3d::ColorLevel albedo{};
+        albedo.size=512;
+        albedo.p.assign(512u*512u,0x00a3b27du);
+        mat.colorMip.push_back(std::move(albedo));
+        minimal.mat.push_back(std::move(mat));
+        m3d::updateLighting(12.f);
+        m3d::Camera cam=m3d::camera(0.f,0.f,5.f,128,72,{0.f,0.f,-3.f});
+        std::vector<uint32_t> pixels;
+        m3d::Stats stats{};
+        std::wstring error;
+        if(!m3d::renderCompute11Preview(minimal,cam,128,72,pixels,stats,error)) {
+            std::wcerr << L"Compute execution smoke FAILED: "<<error<<std::endl;
+            return 14;
+        }
+        if(pixels.size()!=128u*72u || !stats.gpu ||
+           pixels[36u*128u+64u]==pixels[0] ||
+           pixels[36u*128u+64u]==0xffff00ffu) {
+            std::cerr << "Compute execution smoke produced incorrect framebuffer" << std::endl;
+            return 15;
+        }
+        if(argc>=3) {
+            QImage image(reinterpret_cast<const uchar*>(pixels.data()),128,72,
+                         128*int(sizeof(uint32_t)),QImage::Format_ARGB32);
+            if(!image.copy().save(QString::fromLocal8Bit(argv[2]),"PNG"))return 16;
+        }
+        std::cout << "D3D11 compute BVH + PBR textures + 8bit readback: OK (" << stats.ms << " ms)" << std::endl;
+        return 0;
+    }
     // Non-GUI CPU snapshots for reproducible GitHub Actions geometry inspection.
     // Usage: moteur3d_qt.exe --snapshot <view 1..13> <output.png>
     if (argc >= 4 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--snapshot")) {
