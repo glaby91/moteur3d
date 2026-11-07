@@ -39,6 +39,13 @@ function hits(boxes,x,y,z){
                          y>=v[1] && y<=v[4] &&
                          z>=v[2] && z<=v[5]);
 }
+const slabs=geometry(api.slabs);
+assert.equal(hits(slabs,2,3.30,-37.0).length,0,'mezzanine blocks the mural atrium at first floor');
+assert.equal(hits(slabs,2,6.40,-37.0).length,0,'second slab blocks the double-height mural atrium');
+assert.ok(hits(slabs,10,3.30,-37.0).length>0,'east-side upper gallery missing');
+assert.ok(hits(slabs,5,3.30,-41.5).length>0,'rear connecting strip missing');
+assert.equal(hits(slabs,-40,3.30,-37).length,0,'first-floor slab blocks double-height auditorium');
+assert.ok(hits(slabs,-40,6.40,-37).length>0,'upper auditorium ceiling slab missing');
 const arcade=geometry(api.arcade);
 const muralProbeX=api.arch.foyer.mosaicWallX+api.arch.foyer.arcadeDepth/2;
 assert.equal(hits(arcade,muralProbeX,1.2,-40.5).length,0,'lower foyer bay must be open');
@@ -80,7 +87,7 @@ assert.equal(hits(hotel,52,2.4,-20.30).length,0,'Polissya front window is an opa
 assert.ok(hotel.some(v=>v[6]==='rust' && v[4]>15.9),'rusty hotel rooftop sign missing');
 assert.ok(hotel.some(v=>v[6]==='stone' && v[4]>18.5),'hotel roof terrace missing');
 console.log('Energetik/Polissya generator geometry probes passed:',{
-  arcade:arcade.length, rear:rear.length, shell:shell.length,
+  slabs:slabs.length, arcade:arcade.length, rear:rear.length, shell:shell.length,
   foyerStair:foyerStair.length,
   stair:stair.length, connector:connector.length, hotel:hotel.length
 });
