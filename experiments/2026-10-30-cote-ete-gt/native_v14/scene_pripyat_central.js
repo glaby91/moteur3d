@@ -30,6 +30,41 @@ const M3D_PRIPYAT_BLOCKOUT = Object.freeze({
     {id:'east-north',x0:47,z0:18,x1:60,z1:50,floors:6,frontZ:18}
   ]
 });
+// Single architectural datum for Energetik. Values are provisional until
+// measured plans and matched photo viewpoints establish historical dimensions.
+// Coordinates are world metres; Y=0 is the ground-floor reference.
+const M3D_ENERGETIK_ARCH = Object.freeze({
+  origin: Object.freeze({x:0,y:0,z:0}),
+  envelope: M3D_PRIPYAT_BLOCKOUT.energetik,
+  levels: Object.freeze({
+    ground:0.38, firstSlab:3.25, secondSlab:6.35,
+    slabThickness:0.24, roof:9.4
+  }),
+  foyer: Object.freeze({
+    mosaicWallX:8.38, mosaicSurfaceX:8.12,
+    mosaicBottomY:2.0, mosaicTopY:6.30,
+    mosaicStartZ:-41.55, mosaicEndZ:-32.05,
+    galleryEastEdgeX:8.65, rearGalleryEndZ:-40.9,
+    firstLandingY:3.25
+  }),
+  tower: Object.freeze({roofY:14.0})
+});
+function m3dCheckEnergetikDatum(a=M3D_ENERGETIK_ARCH){
+  const {levels:l,foyer:f,envelope:e}=a;
+  if(!(l.ground<l.firstSlab && l.firstSlab<l.secondSlab && l.secondSlab<l.roof))
+    throw new Error('Energetik: inconsistent floor elevations');
+  if(!(f.mosaicBottomY<l.firstSlab && f.mosaicTopY<l.secondSlab &&
+       f.mosaicTopY<=l.secondSlab && f.mosaicSurfaceX<f.mosaicWallX &&
+       f.galleryEastEdgeX>f.mosaicWallX))
+    throw new Error('Energetik: mosaic intersects a structural datum');
+  if(!(f.mosaicStartZ<f.mosaicEndZ && e.z0<f.mosaicStartZ && f.mosaicEndZ<e.z1))
+    throw new Error('Energetik: mosaic outside building envelope');
+  if(Math.abs(f.firstLandingY-l.firstSlab)>0.001)
+    throw new Error('Energetik: stair landing and first floor disconnected');
+  return true;
+}
+m3dCheckEnergetikDatum();
+
 function m3dBuildPlaza({box}, p=M3D_PRIPYAT_BLOCKOUT.plaza){
   // Separate physical layers: foundation, pedestrian paving, expansion joints,
   // patch repairs and flush perimeter drainage.
@@ -77,6 +112,7 @@ function m3dBuildConnector({box}){
 // Its slabs and walls are intentionally separated to preserve camera access.
 function m3dBuildEnergetikShell({box},cfg=M3D_PRIPYAT_BLOCKOUT.energetik){
   const ex0=cfg.x0,ex1=cfg.x1,front=cfg.z1,back=cfg.z0;
+  const {levels,tower}=M3D_ENERGETIK_ARCH;
   box(ex0,0,back,ex0+1.2,9.4,front,'concrete');
   box(ex1-1.2,0,back,ex1,9.4,front,'concrete');
   box(ex0,0,back,ex1,9.4,back+1.2,'concrete');
@@ -86,11 +122,11 @@ function m3dBuildEnergetikShell({box},cfg=M3D_PRIPYAT_BLOCKOUT.energetik){
   box(-42.0,9.4,-41.8,20.5,cfg.mainHeight-0.05,-20.4,'concrete');
   // Hollow stair tower. The old solid prism capped the ascending camera and
   // made the roof door look like a wall; retain only the concrete shell.
-  box(20.5,9.4,-40.8,21.7,cfg.towerHeight,-22.2,'concrete');
-  box(27.0,9.4,-40.8,30.5,cfg.towerHeight,-22.2,'concrete');
-  box(21.7,9.4,-40.8,27.0,cfg.towerHeight,-39.6,'concrete');
-  box(21.7,12.0,-22.2,25.3,cfg.towerHeight,-21.0,'concrete');
-  box(27.0,9.4,-22.2,30.5,cfg.towerHeight,-21.0,'concrete');
+  box(20.5,9.4,-40.8,21.7,tower.roofY,-22.2,'concrete');
+  box(27.0,9.4,-40.8,30.5,tower.roofY,-22.2,'concrete');
+  box(21.7,9.4,-40.8,27.0,tower.roofY,-39.6,'concrete');
+  box(21.7,12.0,-22.2,25.3,tower.roofY,-21.0,'concrete');
+  box(27.0,9.4,-22.2,30.5,tower.roofY,-21.0,'concrete');
   box(-43.0,11.25,-42.5,18.4,11.75,-20.1,'stone');
 
 
@@ -306,8 +342,9 @@ function makeScene() {
 
   // Three readable levels. Slabs wrap the foyer atrium and the open stair core.
   box(-49.2,0.05,-42.2,29.2,0.38,-20.1,'stone');
+  const {levels:archLevels,foyer:archFoyer}=M3D_ENERGETIK_ARCH;
   function floorPlate(y, openAuditorium=false){
-    const t=y,b=y+0.24;
+    const t=y,b=y+archLevels.slabThickness;
     if(openAuditorium){
       // Keep the west-side audience hall open through the first upper slab.
       // Narrow side strips and a rear cross-corridor still connect the upper floor.
@@ -318,19 +355,19 @@ function makeScene() {
     // Double-height mosaic hall: remove the upper slab in front of the mural.
     // Preserve a narrow structural strip and the rear cross-corridor.
     box(-15,t,-42.2,-12.8,b,-35.8,'concrete');
-    box(-12.8,t,-42.2,8,b,-40.9,'concrete');
+    box(-12.8,t,-42.2,8,b,archFoyer.rearGalleryEndZ,'concrete');
     box(-15,t,-26.5,8,b,-20.1,'concrete');
     box(-15,t,-35.8,-7,b,-26.5,'concrete');
     // Removed: this narrow slab ran directly across the mosaic sightline.
     // The hall's east gallery is supported beyond the wall at X=8.65.
     // Start the east upper floor behind the mural support wall (X=8.38).
-    box(8.65,t,-42.2,18,b,-20.1,'concrete');
+    box(archFoyer.galleryEastEdgeX,t,-42.2,18,b,-20.1,'concrete');
     box(18,t,-42.2,20,b,-20.1,'concrete');
     box(27,t,-42.2,29.2,b,-20.1,'concrete');
     box(20,t,-42.2,27,b,-38.0,'concrete');
     box(20,t,-23.0,27,b,-20.1,'concrete');
   }
-  floorPlate(3.25,true); floorPlate(6.35);
+  floorPlate(archLevels.firstSlab,true); floorPlate(archLevels.secondSlab);
 
   // Open facade bays expose the deep galleries and interior structure, not glass.
   // Keep only damaged railings at the balcony edges, with irregular missing sections.
@@ -566,8 +603,8 @@ function makeScene() {
   // The supporting wall sits at X=8.38 m. This plane faces -X and spans toward +Z.
   // The mural spans the atrium across the first-floor level; never crop it
   // with a mezzanine slab. Keep the historically estimated 4.3 m height.
-  const frescoX=8.12, frescoY0=2.00, frescoY1=6.30;
-  const frescoZ0=-41.55, frescoZ1=-32.05;
+  const frescoX=archFoyer.mosaicSurfaceX, frescoY0=archFoyer.mosaicBottomY, frescoY1=archFoyer.mosaicTopY;
+  const frescoZ0=archFoyer.mosaicStartZ, frescoZ1=archFoyer.mosaicEndZ;
   const frescoNormal=[-1,0,0];
   const frescoTopV=0.27294921875, frescoBottomV=0.72705078125;
   const frescoBL={p:[frescoX,frescoY0,frescoZ0],n:frescoNormal,uv:[0,frescoBottomV]};
