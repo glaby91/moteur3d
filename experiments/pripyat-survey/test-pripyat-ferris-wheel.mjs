@@ -8,6 +8,7 @@ const scene=readFileSync(new URL('../2026-10-30-cote-ete-gt/native_v14/scene_pri
 const api=vm.runInNewContext(scene+`({
  spec:M3D_FERRIS_WHEEL,site:m3dWheelSite,pose:m3dWheelPose,
  fixed:m3dBuildWheelStatic,rotor:m3dBuildWheelRotor,
+ wing:m3dBuildEnergetikSportsWing,
  gondolas:m3dBuildWheelGondolas,build:m3dBuildPripyatWheel
 })`,{},{timeout:5000});
 const {spec}=api,site=api.site();
@@ -51,3 +52,31 @@ assert.notDeepEqual(JSON.stringify(rotor.capsules.slice(0,2)),JSON.stringify(rot
 assert.throws(()=>api.pose(NaN),/invalid/);
 assert.throws(()=>api.pose(0,Infinity),/invalid/);
 console.log('Pripyat wheel pose solver: site, 360s revolution, 20 upright cabins, rotating hub and support rig OK');
+
+// The wheel must actually be visible from inside the sports hall through its
+// park-facing glazing, not merely placed in the correct direction.
+const views=JSON.parse(readFileSync(new URL('../2026-10-30-cote-ete-gt/native_v14/scene_pripyat_views.json',import.meta.url),'utf8')).views;
+const v=views[5],rad=Math.PI/180;
+const eye=[v.target[0]+v.distance*Math.sin(v.angle*rad)*Math.cos(v.elevation*rad),
+ v.target[1]+v.distance*Math.sin(v.elevation*rad),
+ v.target[2]+v.distance*Math.cos(v.angle*rad)*Math.cos(v.elevation*rad)];
+const hub=poses[0].hub;
+const boxes=[];
+api.wing({box:(...p)=>boxes.push(p),capsule:()=>{},meshTriangle:()=>{}});
+function intersects(from,to,b){
+ let lo=.001,hi=.999;
+ for(let i=0;i<3;i++){
+  const d=to[i]-from[i];
+  if(Math.abs(d)<1e-12){if(from[i]<b[i]||from[i]>b[i+3])return false;continue;}
+  let a=(b[i]-from[i])/d,c=(b[i+3]-from[i])/d;
+  if(a>c)[a,c]=[c,a];
+  lo=Math.max(lo,a);hi=Math.min(hi,c);
+  if(lo>hi)return false;
+ }
+ return true;
+}
+assert.ok(eye[2]>-68.9&&eye[2]<-42.7,'camera 06 must stand inside gym');
+assert.ok(hub[2]<-68.9,'ferris wheel must be behind the park-facing gym windows');
+const occluders=boxes.filter(b=>intersects(eye,hub,b));
+assert.equal(occluders.length,0,'gym architecture blocks the wheel view from camera 06');
+console.log('Photographic view 06 clear through gym glazing to Ferris wheel hub');
