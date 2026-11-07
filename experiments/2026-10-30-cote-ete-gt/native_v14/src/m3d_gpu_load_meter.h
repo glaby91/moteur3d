@@ -15,6 +15,7 @@
 #endif
 #include <windows.h>
 #include <pdh.h>
+#include <pdhmsg.h> // PDH_MORE_DATA / PDH_CSTATUS_* declarations
 #endif
 
 namespace m3d {
