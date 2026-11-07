@@ -1,0 +1,55 @@
+name: Independent free AI audit - Qwen2.5 Coder
+
+on:
+  push:
+    branches:
+      - feature/gpu-profiling-and-bvh-261107
+    paths:
+      - tools/free_qwen_gpu_audit.py
+      - .github/workflows/audit-gpu-qwen-free.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Free independent C++ and HLSL code review
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      OLLAMA_MODEL: qwen2.5-coder:7b
+      OLLAMA_NUM_PARALLEL: '1'
+      OLLAMA_MAX_LOADED_MODELS: '1'
+    steps:
+      - name: Checkout Moteur3D source (read only)
+        uses: actions/checkout@v4
+      - name: Check Python syntax
+        run: python3 -m py_compile tools/free_qwen_gpu_audit.py
+      - name: Install local Ollama runtime (no cloud inference API)
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama --version
+      - name: Start model server and pull Qwen2.5-Coder 7B
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup ollama serve >"$RUNNER_TEMP/ollama.log" 2>&1 </dev/null &
+          for i in $(seq 1 40); do
+            if curl -fsS http://127.0.0.1:11434/api/tags >/dev/null; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
+          ollama pull "$OLLAMA_MODEL"
+      - name: Ask another AI to audit GPU code independently
+        run: python3 tools/free_qwen_gpu_audit.py
+      - name: Upload raw findings for human verification
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Audit-IA-Gratuit-Qwen-Moteur3D
+          path: independent-audit/
+          if-no-files-found: warn
+          retention-days: 30
