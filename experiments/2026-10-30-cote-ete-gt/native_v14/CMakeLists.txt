@@ -35,6 +35,9 @@ target_link_libraries(m3d_core PUBLIC Threads::Threads)
 
 qt_add_executable(moteur3d_qt WIN32 src/moteur3d_qt.cpp)
 target_link_libraries(moteur3d_qt PRIVATE m3d_core Qt6::Widgets)
+if(WIN32)
+    target_link_libraries(moteur3d_qt PRIVATE pdh)
+endif()
 
 if(MSVC)
     set_source_files_properties(src/simd/avx2/post.cpp src/simd/avx2/ray_generation.cpp src/simd/avx2/triangle_intersection.cpp src/simd/avx2/lighting.cpp src/simd/avx2/texture_sampling.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
