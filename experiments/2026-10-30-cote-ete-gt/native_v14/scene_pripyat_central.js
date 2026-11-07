@@ -127,7 +127,32 @@ function m3dBuildEastStairCore({box,capsule}, a=M3D_ENERGETIK_ARCH){
 // Independently testable floor slab generator: the foyer atrium must stay open.
 function m3dBuildEnergetikSlabs({box},a=M3D_ENERGETIK_ARCH){
   const {levels:archLevels,foyer:archFoyer}=a;
-  m3dBuildEnergetikSlabs({box});
+  function floorPlate(y, openAuditorium=false){
+    const t=y,b=y+archLevels.slabThickness;
+    if(openAuditorium){
+      // Keep the west-side audience hall open through the first upper slab.
+      // Narrow side strips and a rear cross-corridor still connect the upper floor.
+      box(-49.2,t,-42.2,-47.5,b,-25.2,'concrete');
+      box(-17.3,t,-42.2,-15,b,-25.2,'concrete');
+      box(-49.2,t,-25.2,-15,b,-20.1,'concrete');
+    } else box(-49.2,t,-42.2,-15,b,-20.1,'concrete');
+    // Double-height mosaic hall: remove the upper slab in front of the mural.
+    // Preserve a narrow structural strip and the rear cross-corridor.
+    box(-15,t,-42.2,-12.8,b,-35.8,'concrete');
+    box(-12.8,t,-42.2,8,b,archFoyer.rearGalleryEndZ,'concrete');
+    box(-15,t,-26.5,8,b,-20.1,'concrete');
+    // First landing/gallery above the foyer staircase; leave the mural atrium open.
+    box(-15,t,-35.8,-7,b,-26.5,'concrete');
+    // Removed: this narrow slab ran directly across the mosaic sightline.
+    // The hall's east gallery is supported beyond the wall at X=8.65.
+    // Start the east upper floor behind the mural support wall (X from datum).
+    box(archFoyer.galleryEastEdgeX,t,-42.2,18,b,-20.1,'concrete');
+    box(18,t,-42.2,20,b,-20.1,'concrete');
+    box(27,t,-42.2,29.2,b,-20.1,'concrete');
+    box(20,t,-42.2,27,b,-38.0,'concrete');
+    box(20,t,-23.0,27,b,-20.1,'concrete');
+  }
+  floorPlate(archLevels.firstSlab,true); floorPlate(archLevels.secondSlab);
 }
 function m3dBuildFoyerMuralArcade({box}, a=M3D_ENERGETIK_ARCH) {
   const f=a.foyer,l=a.levels, x0=f.mosaicWallX, x1=x0+f.arcadeDepth;
@@ -529,32 +554,7 @@ function makeScene() {
   // Three readable levels. Slabs wrap the foyer atrium and the open stair core.
   box(-49.2,0.05,-42.2,29.2,0.38,-20.1,'stone');
   const {levels:archLevels,foyer:archFoyer}=M3D_ENERGETIK_ARCH;
-  function floorPlate(y, openAuditorium=false){
-    const t=y,b=y+archLevels.slabThickness;
-    if(openAuditorium){
-      // Keep the west-side audience hall open through the first upper slab.
-      // Narrow side strips and a rear cross-corridor still connect the upper floor.
-      box(-49.2,t,-42.2,-47.5,b,-25.2,'concrete');
-      box(-17.3,t,-42.2,-15,b,-25.2,'concrete');
-      box(-49.2,t,-25.2,-15,b,-20.1,'concrete');
-    } else box(-49.2,t,-42.2,-15,b,-20.1,'concrete');
-    // Double-height mosaic hall: remove the upper slab in front of the mural.
-    // Preserve a narrow structural strip and the rear cross-corridor.
-    box(-15,t,-42.2,-12.8,b,-35.8,'concrete');
-    box(-12.8,t,-42.2,8,b,archFoyer.rearGalleryEndZ,'concrete');
-    box(-15,t,-26.5,8,b,-20.1,'concrete');
-    // First landing/gallery above the foyer staircase; leave the mural atrium open.
-    box(-15,t,-35.8,-7,b,-26.5,'concrete');
-    // Removed: this narrow slab ran directly across the mosaic sightline.
-    // The hall's east gallery is supported beyond the wall at X=8.65.
-    // Start the east upper floor behind the mural support wall (X from datum).
-    box(archFoyer.galleryEastEdgeX,t,-42.2,18,b,-20.1,'concrete');
-    box(18,t,-42.2,20,b,-20.1,'concrete');
-    box(27,t,-42.2,29.2,b,-20.1,'concrete');
-    box(20,t,-42.2,27,b,-38.0,'concrete');
-    box(20,t,-23.0,27,b,-20.1,'concrete');
-  }
-  floorPlate(archLevels.firstSlab,true); floorPlate(archLevels.secondSlab);
+  m3dBuildEnergetikSlabs({box});
   m3dBuildFoyerMuralArcade({box});
 
   // Open facade bays expose the deep galleries and interior structure, not glass.
