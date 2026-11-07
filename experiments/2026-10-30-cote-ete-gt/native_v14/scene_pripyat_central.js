@@ -4,7 +4,7 @@
 
 const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
   concrete: 2, plaster: 1, mural: 1, energetikFresco: 2,
-  gymFloor: 3, gymWall: 1, gymCeiling: 2, gymMetal: 10, gymLetter: 2, volcanicTuff: 3, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
+  gymFloor: 3, gymWall: 1, gymConcrete: 2, gymMetal: 10, gymLetter: 2, gymRed: 3, gymBlue: 3, volcanicTuff: 3, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
   asphalt: 3, stone: 5, metal: 18, rust: 7, leaves: 2, grass: 1,
   bark: 1, wood: 4, sign: 3, neon: 2, debris: 2, puddle: 28, seatFabric: 1, seatFabricClean: 1, seatVinylBrown: 28, seatSupportPaint: 12, seatTrim: 2, curtain: 1, cinemaScreen: 0
 });
@@ -272,19 +272,24 @@ function m3dBuildSportsClub({box,capsule,meshTriangle},g=M3D_PRIPYAT_BLOCKOUT.gy
     ' ':['00000','00000','00000','00000','00000','00000','00000']
   };
   const inscription='СИЛЬНЫЕ СМЕЛЫЕ ЛОВКИЕ';
-  const cell=Math.min(0.071,(x1-x0-3)/(inscription.length*6));
-  const startX=x0+1.75,startY=galleryTop-0.88,signZ=frontZ+0.028;
+  const cellX=Math.min(0.18,(x1-x0-3)/(inscription.length*6));
+  const cellY=0.074;
+  const startX=x0+(x1-x0-inscription.length*6*cellX)*0.5;
+  const startY=galleryTop-0.88,signZ=frontZ+0.028;
   for(let j=0;j<inscription.length;j++){
     const glyph=font5x7[inscription[j]]||font5x7[' '];
     for(let row=0;row<7;row++)for(let col=0;col<5;col++)
       if(glyph[row][col]==='1'){
-        const px=startX+(j*6+col)*cell,py=startY+(6-row)*cell*1.08;
-        box(px,py,signZ,px+cell*0.85,py+cell*0.91,signZ+0.012,'gymLetter');
+        const px=startX+(j*6+col)*cellX,py=startY+(6-row)*cellY*1.08;
+        box(px,py,signZ,px+cellX*0.85,py+cellY*0.91,signZ+0.012,'gymLetter');
       }
   }
   // Two little athletics pictograms interrupt the original sign.
-  for(const [x,mat] of [[x0+13.5,'gymBlue'],[x0+25.5,'gymRed']])
-    box(x,startY-0.02,signZ+0.005,x+0.46,startY+0.47,signZ+0.018,mat);
+  const spaces=[...inscription].flatMap((c,i)=>c===' '?[i]:[]);
+  for(const [k,j] of spaces.entries()){
+    const x=startX+(j*6+0.2)*cellX;
+    box(x,startY-0.02,signZ+0.005,x+0.55,startY+0.50,signZ+0.018,k===0?'gymBlue':'gymRed');
+  }
 
   // Upper row of ventilation grilles and the oxidized scoreboards above the gallery.
   box(x0+0.6,top-2.05,z0+0.37,x1-0.6,top-1.75,z0+0.54,'gymMetal');
