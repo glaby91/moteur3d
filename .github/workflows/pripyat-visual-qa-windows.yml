@@ -209,6 +209,28 @@ jobs:
             --contact-sheet experiments/2026-10-30-cote-ete-gt/native_v14/dist/architecture-review/contact-sheet.png
           cat experiments/2026-10-30-cote-ete-gt/native_v14/dist/architecture-review/visual-qa.json
 
+      - name: Capture fixed-camera Pripyat GPU Compute via WARP
+        if: runner.os == 'Windows'
+        shell: pwsh
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        timeout-minutes: 20
+        env:
+          M3D_COMPUTE_WARP: '1'
+        run: |
+          & "./dist/moteur3d_qt.exe" --snapshot-compute 12 "./dist/architecture-review/view-12-compute-warp.png"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if (-not (Test-Path "./dist/architecture-review/view-12-compute-warp.png")) { throw "Missing GPU Compute capture" }
+
+      - name: Compare CPU and GPU at identical camera 12
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          python tools/compare_visual_captures.py \
+            experiments/2026-10-30-cote-ete-gt/native_v14/dist/architecture-review/view-12.png \
+            experiments/2026-10-30-cote-ete-gt/native_v14/dist/architecture-review/view-12-compute-warp.png \
+            --diff experiments/2026-10-30-cote-ete-gt/native_v14/dist/architecture-review/view-12-cpu-vs-gpu-diff.png \
+            --json experiments/2026-10-30-cote-ete-gt/native_v14/dist/architecture-review/view-12-cpu-vs-gpu-metrics.json
+
       - name: Upload compact architectural inspection images
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
