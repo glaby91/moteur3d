@@ -129,17 +129,28 @@ function m3dBuildHousing({box},b){
   for(let x=x0+2;x<x1;x+=8.1)
     box(x,height*0.56,frontZ-0.2,x+1.3,height*0.56+1.25,frontZ+0.08,'windowlit');
 }
-function m3dBuildConnector({box}){
-  // Structural components split for later conversion to a photo-matched arch.
-  box(30.2,0,-24,40.2,5.8,-18.6,'concrete');
-  box(30,5.65,-24.2,40.4,6.05,-18.4,'stone');
-  for(let x=31;x<39.5;x+=2.05){
-    box(x,0.65,-18.78,x+1.25,3.4,-18.58,'glass');
-    box(x-0.10,0.48,-18.83,x+1.35,0.62,-18.52,'stone');
+// Photo-informed connector between Energetik and Polissya: the central
+// pedestrian opening follows a shallow segmented arch, not a solid prism.
+// The footprint is provisional until the survey fixes both anchor points.
+function m3dBuildConnector({box},a=M3D_ENERGETIK_ARCH){
+  const left=a.envelope.x1-0.3, right=M3D_PRIPYAT_BLOCKOUT.polissya.x0+0.2;
+  const z0=-24.0,z1=-18.6, roof=5.82,steps=18,dx=(right-left)/steps;
+  // Side abutments and two horizontal cornice bands use existing materials.
+  box(left,0,z0,left+0.72,roof,z1,'concrete');
+  box(right-0.72,0,z0,right,roof,z1,'concrete');
+  for(let i=0;i<steps;i++){
+    const x=left+i*dx, normalized=(i+0.5)/steps*2-1;
+    const intrados=3.48+1.12*Math.sqrt(Math.max(0,1-normalized*normalized));
+    // Masonry ABOVE the pedestrian arch, leaving the underpass open.
+    box(x,intrados,z0,x+dx+0.012,roof,z1,'concrete');
+    box(x,intrados-0.08,z1-0.06,x+dx+0.012,intrados+0.025,z1+0.05,'stone');
   }
+  box(left-0.15,roof,z0-0.2,right+0.15,roof+0.25,z1+0.2,'stone');
+  // Corroded front balustrade, visibly separate from the load-bearing arch.
+  for(let x=left+0.9;x<right-0.6;x+=0.95)
+    box(x,roof+0.26,z1+0.035,x+0.055,roof+1.00,z1+0.09,'rust');
+  box(left+0.6,roof+0.97,z1+0.025,right-0.6,roof+1.045,z1+0.13,'metal');
 }
-
-
 
 // The exterior shell is isolated from interiors and roof features.
 // Its slabs and walls are intentionally separated to preserve camera access.
@@ -406,7 +417,7 @@ function makeScene() {
 
   // Open facade bays expose the deep galleries and interior structure, not glass.
   // Keep only damaged railings at the balcony edges, with irregular missing sections.
-  for (const y of [3.28, 6.38]) {
+  for (const y of [archLevels.firstSlab+0.03, archLevels.secondSlab+0.03]) {
     box(-45.0,y,-19.18,24.6,y+0.075,-19.06,'rust');
     box(-45.0,y+0.88,-19.18,24.6,y+0.96,-19.06,'rust');
     for (let x=-44.4; x<24.2; x+=0.68) {
@@ -485,7 +496,7 @@ function makeScene() {
   // cut away above the audience; concrete girders still carry the room's roof.
   // The recovered Pripyat finish is red/rose volcanic tuff, now visible under
   // missing panels instead of a generic repeating grey wall.
-  const hallFloor=0.38, hallTop=6.35;
+  const hallFloor=archLevels.ground, hallTop=archLevels.secondSlab;
   box(-49.18,hallFloor,-41.98,-48.94,hallTop,-24.96,'volcanicTuff');
   box(-16.04,hallFloor,-41.98,-15.80,hallTop,-31.52,'volcanicTuff');
   box(-16.04,hallFloor,-29.48,-15.80,hallTop,-24.96,'volcanicTuff'); // doorway to the hall
@@ -684,15 +695,22 @@ function makeScene() {
       box(x-3.2,y,-38.5,x-1.2,y+1.9,-37.8,'wood');
     }
   }
-  // Stairs wind through the open east core; landings meet all three floors and the roof.
+  // East stair core: three flights aligned with the shared architectural
+  // levels instead of the previous 1.42 m deep steps and disconnected slabs.
+  const stairDatum=[archLevels.ground,archLevels.firstSlab+archLevels.slabThickness,
+                    archLevels.secondSlab+archLevels.slabThickness,archLevels.roof];
   for(let flight=0;flight<3;flight++){
-    const baseY=0.45+flight*3.1, baseZ=-40.5+flight*0.4;
-    for(let step=0;step<11;step++){
-      const y=baseY+step*0.255, z=baseZ+step*1.42;
-      box(21.0,y,z,25.7,y+0.18,z+1.35,'stone');
+    const start=stairDatum[flight], top=stairDatum[flight+1];
+    const steps=17, rise=(top-start)/steps, tread=0.625, startZ=-40.50;
+    for(let i=0;i<steps;i++){
+      const z=startZ+i*tread, topY=start+(i+1)*rise;
+      box(21.0,topY-0.15,z,25.7,topY,z+tread+0.015,'stone');
     }
-    box(20.0,baseY+2.7,-24.8,27.0,baseY+3.0,-21.2,'concrete');
-    box(20.0,baseY+2.7,-26.7,27.0,baseY+3.0,-23.0,'concrete');
+    // Connected upper landing and a narrow return gallery to the next flight.
+    // The x=21..25.7 stair well remains open along its full height.
+    box(20.0,top-0.16,-29.90,27.0,top+0.02,-27.40,'concrete');
+    box(26.0,top-0.16,-40.55,27.0,top+0.02,-23.05,'concrete');
+    capsule([25.93,top+0.13,-40.2],[25.93,top+0.93,-29.7],0.035,'rust');
   }
   // Leave a genuine 3.8 m rooftop doorway in the stair tower wall.
   box(20.0,9.4,-22.2,21.7,13.3,-21.0,'rust');
@@ -823,7 +841,8 @@ function makeScene() {
     [-43.4,-38.0],[-32.5,-38.0],[-21.4,-38.0],[12.9,-38.0],[23.5,-36.0]
   ];
   for(let level=0;level<3;level++){
-    const y=2.94+level*3.1;
+    const ceilings=[archLevels.firstSlab,archLevels.secondSlab,archLevels.roof];
+    const y=ceilings[level]-0.31;
     for(let i=0;i<interiorFixtures.length;i++){
       const [x,z]=interiorFixtures[i];
       if(level<=1&&x< -15.0&&z< -24.8) continue; // custom auditorium lighting sits at the 6 m ceiling
