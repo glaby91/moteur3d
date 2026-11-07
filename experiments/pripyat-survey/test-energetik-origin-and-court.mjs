@@ -25,7 +25,7 @@ assert.equal(g.courtWidth,20);
 assert.ok(g.x1-g.x0 >= g.courtLength+2*g.clearEnd, 'missing end clearance');
 assert.ok(g.z1-g.z0 >= g.courtWidth+2*g.clearSide, 'missing side clearance');
 assert.equal(g.x1-g.x0,44);
-assert.equal(g.z1-g.z0,26.2);
+assert.ok(Math.abs((g.z1-g.z0)-26.2)<1e-9,'26.2 m sports hall width');
 const triangles=[];
 a.gym({box:()=>{},capsule:()=>{},meshTriangle:(...v)=>triangles.push(v)});
 assert.equal(triangles.filter(t=>t[3]==='gymFloor').length,2);
