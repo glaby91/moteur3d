@@ -234,7 +234,7 @@ jobs:
             --diff experiments/2026-10-30-cote-ete-gt/native_v14/dist/architecture-review/view-12-cpu-vs-gpu-diff.png \
             --json experiments/2026-10-30-cote-ete-gt/native_v14/dist/architecture-review/view-12-cpu-vs-gpu-metrics.json
 
-      - name: Render three closeup arcade camera views in CPU and D3D11 WARP
+      - name: Render four closeup arcade camera views in CPU and D3D11 WARP
         if: runner.os == 'Windows'
         shell: bash
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
@@ -243,7 +243,7 @@ jobs:
           M3D_COMPUTE_WARP: '1'
         run: |
           set -euo pipefail
-          for i in 1 2 3; do
+          for i in 1 2 3 4; do
             k=$(printf '%02d' "$i")
             ./dist/moteur3d_qt.exe --snapshot-arcade "$i" "dist/architecture-review/arcade-$k-cpu.png"
             ./dist/moteur3d_qt.exe --snapshot-arcade-compute "$i" "dist/architecture-review/arcade-$k-warp.png"
@@ -263,8 +263,8 @@ jobs:
               with Image.open(p) as im:
                   assert im.size==(640,360),p
                   assert max(ImageStat.Stat(im.convert('RGB')).stddev)>2.0,p
-          assert len(list(folder.glob('arcade-*-cpu.png')))==3
-          assert len(list(folder.glob('arcade-*-warp.png')))==3
+          assert len(list(folder.glob('arcade-*-cpu.png')))==4
+          assert len(list(folder.glob('arcade-*-warp.png')))==4
           print('Arcade close-up CPU/Compute cameras captured successfully')
           PY
 
