@@ -1,5 +1,9 @@
 # Pripiat — Palais de la Culture Energetik
 
+## Suivi des travaux différés
+
+- [Panorama de l'hôtel Polissya : baies, toiture inclinée, carrelage, briques et état d'abandon — non prioritaire](BACKLOG-POLISSYA-PANORAMA.md). Priorité actuelle : colonnade courbe, ses quatre marches et l'arrivée près de l'avancée de l'hôtel.
+
 ## Benchmark GPU sur Intel HD Graphics 620 — 7 novembre 2026
 
 Mesure sur matériel réel du ray tracing **Compute D3D11 sans DXR** : **500 images natives 1366 × 768**, **223 échantillons WDDM**, **88,9 % d'occupation GPU moyenne** et **93,5 % maximale**. Scène : 92 886 objets et 67 404 triangles. Les FPS ne sont pas mesurés.
