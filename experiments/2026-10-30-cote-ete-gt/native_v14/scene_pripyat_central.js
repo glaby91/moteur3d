@@ -611,11 +611,11 @@ function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
  }
  // Photo reference: raised concrete coping and intersecting structural ribs.
  // Keep the existing curved slab as the recessed base of the roof coffers.
- const ribBottom=p.roofTop-.025,ribTop=p.roofTop+.30;
- const rib=(a,b,c,d)=>{
+ const ribBottom=p.roofTop-.025,ribTop=p.roofTop+.18,parapetTop=p.roofTop+.34;
+ const rib=(a,b,c,d,top=ribTop)=>{
    const v=(pt,y)=>({p:[pt[0],y,pt[1]],n:[0,1,0],uv:[pt[0]*.12,pt[1]*.12]});
    const A=v(a,ribBottom),B=v(b,ribBottom),C=v(c,ribBottom),D=v(d,ribBottom);
-   const E=v(a,ribTop),F=v(b,ribTop),G=v(c,ribTop),H=v(d,ribTop);
+   const E=v(a,top),F=v(b,top),G=v(c,top),H=v(d,top);
    const quad=(q,r,s,t)=>{meshTriangle(q,r,s,'concrete');meshTriangle(s,r,t,'concrete');};
    quad(E,F,G,H);quad(A,C,B,D);quad(A,E,C,G);
    quad(B,D,F,H);quad(A,B,E,F);quad(C,G,D,H);
@@ -627,7 +627,8 @@ function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
      [-p.halfWidth+.13,.26],[-p.halfWidth*.34,.14],
      [p.halfWidth*.34,.14],[p.halfWidth-.13,.26]]){
      rib(p.at(t0,offset-width/2),p.at(t0,offset+width/2),
-         p.at(t1,offset-width/2),p.at(t1,offset+width/2));
+         p.at(t1,offset-width/2),p.at(t1,offset+width/2),
+         Math.abs(offset)>p.halfWidth*.7?parapetTop:ribTop);
    }
  }
  // Repeated transverse beams form real 3D rectangular roof coffers.
@@ -667,6 +668,25 @@ function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
                   plane(v1,p.roofTop,n,1,1),'concrete');
      meshTriangle(plane(v0,p.roofBottom,n,0,0),plane(v1,p.roofTop,n,1,1),
                   plane(v1,p.roofBottom,n,1,0),'concrete');
+   }
+ }
+ // Complete the raised perimeter at BOTH rounded ends.
+ // The ring follows the same semicircular plan as the slab caps.
+ for(const end of [0,1]){
+   const [cx,cz]=p.at(end),[gx,gz]=p.at(end===0?.0001:.9999);
+   const [hx,hz]=p.at(end===0?.0002:1.0);
+   const inv=1/Math.hypot(hx-gx,hz-gz);
+   const tan=[(hx-gx)*inv,(hz-gz)*inv],nor=[-tan[1],tan[0]];
+   const outward=end===0?-1:1;
+   const point=(angle,r)=>[
+     cx+r*(outward*tan[0]*Math.cos(angle)+nor[0]*Math.sin(angle)),
+     cz+r*(outward*tan[1]*Math.cos(angle)+nor[1]*Math.sin(angle))
+   ];
+   for(let k=0;k<p.endCapSegments;k++){
+     const a=-Math.PI/2+k*Math.PI/p.endCapSegments;
+     const b=-Math.PI/2+(k+1)*Math.PI/p.endCapSegments;
+     rib(point(a,p.halfWidth-.26),point(a,p.halfWidth),
+         point(b,p.halfWidth-.26),point(b,p.halfWidth),parapetTop);
    }
  }
  // A staggered pair of reinforced concrete posts every ~2.7 m.
