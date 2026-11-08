@@ -8,7 +8,8 @@ const api=vm.runInNewContext(scene+`({
   block:M3D_PRIPYAT_BLOCKOUT,
   plan:m3dPolissyaArcadePlan,world:m3dPolissyaLocalToWorld,model:M3D_POLISSYA_MODEL,angle:M3D_POLISSYA_ORIENTATION_DEGREES,
   arcade:m3dBuildConnector,
-  hotel:m3dBuildPolissya
+  hotel:m3dBuildPolissya,
+  roadPlan:m3dPolissyaSideRoadPlan, sideRoad:m3dBuildPolissyaSideRoad
 })`,{}, {timeout:5000});
 const p=api.plan(),palace=api.block.energetik,hotel=api.block.polissya;
 assert.equal(api.angle,90,'Polissya should be perpendicular to palace');
@@ -39,13 +40,17 @@ const departSlope=Math.abs((front[1]-start[1])/(front[0]-start[0]));
 const arrivalSlope=Math.abs((end[0]-last[0])/(end[1]-last[1]));
 assert.ok(departSlope<.04,'sketch: arcade must leave palace nearly horizontally');
 assert.ok(arrivalSlope<.04,'sketch: arcade must finish nearly vertically along hotel');
-assert.ok(end[1]>hotel.z1-11&&end[1]<hotel.z1-7,'photo: arcade finishes at the outward wing tip, on the hotel-corner-side of the plaza');
+assert.ok(end[1]>p.awningEndZ && end[1]<hotel.z1,
+  'arcade must pass in front of the full wing width before terminating near its northern side');
 assert.ok(start[1]>palace.z0+7&&start[1]<palace.z1-7,
   'sketch: arcade start must align with middle portion of the palace side facade');
 assert.equal(p.endShape,'straight','photographs: flat transverse ends, no semicircular caps');
 assert.equal(p.stepCount,4,'four shallow curved steps from the square');
 assert.equal(p.platformTop,0.40,'arcade deck elevation');
-assert.ok(Math.abs(end[1]-(p.awningStartZ-p.arrivalGapZ))<1e-6,'photo red line: gallery must finish at beginning of hotel canopy, with short gap');
+assert.ok(Math.abs(end[1]-(p.awningEndZ+p.frontPassBeyondWing))<1e-6,
+  'curved gallery must pass in FRONT of the hotel wing, beyond its far edge');
+assert.ok(p.frontPassBeyondWing>=.8&&p.frontPassBeyondWing<=2.0,
+  'arcade must not terminate abruptly at the wing corner');
 assert.ok(Math.abs(p.awningStartZ-(hotel.z1-3.10-5.40))<1e-6,
  'wing side must be set back from right hotel corner by one bay plus wing width');
 assert.ok(p.arrivalGapZ>0&&p.arrivalGapZ<=.5,'no structural connection permitted at roof seam');
@@ -60,6 +65,13 @@ assert.ok(Math.abs(end[0]+p.halfWidth+p.hotelClearance-p.awningFrontX)<.001,
   'arcade free end must meet the outer wing end at its corner, without contact');
 assert.ok(hotel.x0-p.awningFrontX>20,
   'wing must extend perpendicularly towards the esplanade');
+// The gallery passes the ENTIRE free end of the wing, with the concrete
+// roof staying in front of (not penetrating) the low hotel's roof slab.
+const frontCrossings=Array.from({length:257},(_,i)=>p.at(i/256))
+  .filter(pt=>pt[1]>=p.awningStartZ+.3 && pt[1]<=p.awningEndZ-.3);
+assert.ok(frontCrossings.length>=10,'arcade must physically traverse the full wing front');
+assert.ok(frontCrossings.every(pt=>pt[0]+p.halfWidth<=p.awningFrontX-p.hotelClearance+.001),
+  'arcade curved roof would penetrate the hotel's wing');
 const chordZ=(start[1]+end[1])/2;
 assert.ok(Math.abs(mid[1]-chordZ)>3,'gallery is not visibly curved');
 for(let i=0;i<=128;i++){
@@ -88,6 +100,21 @@ for(const [a,b,c,mat] of meshes){
   assert.ok(v.p.every(Number.isFinite),'nonfinite mesh vertex');
  }
 }
+// Right-hand access roadway runs along X beside the short side-wall of
+// Polissya. It must stay OUTSIDE the building and OUTSIDE the wing stairs.
+const street=api.roadPlan(),rb=[];
+api.sideRoad({box:(...args)=>rb.push(args)});
+assert.ok(street.z0>hotel.z1+1.0,'side road intrudes into Polissya');
+assert.ok(street.x0<hotel.x0 && street.x1>hotel.x1,
+  'side road must run past the hotel, perpendicular to its long facade');
+assert.ok(street.width>=5.5&&street.width<=7.5,'side street must be usable by vehicles');
+assert.ok(rb.some(v=>v[6]==='asphalt' &&
+  Math.abs(v[0]-street.x0)<.001&&Math.abs(v[2]-street.z0)<.001&&
+  Math.abs(v[3]-street.x1)<.001&&Math.abs(v[5]-street.z1)<.001),
+  'missing long side road asphalt surface');
+assert.ok(rb.some(v=>v[6]==='concrete'&&v[4]>.12),
+  'side road must have a visible curb');
+assert.ok(rb.every(v=>v[2]>hotel.z1),'road elements cross the hotel wall');
 const hb=[],hotelMeshes=[],hotelCapsules=[];
 api.hotel({box:(...args)=>hb.push(args),capsule:(...args)=>hotelCapsules.push(args),
            meshTriangle:(...args)=>hotelMeshes.push(args)});
