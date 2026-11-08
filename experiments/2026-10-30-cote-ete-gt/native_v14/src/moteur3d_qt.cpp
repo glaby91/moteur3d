@@ -689,7 +689,7 @@ private:
         }
         const QJsonArray views=doc.object().value(QStringLiteral("views")).toArray();
         for(const QJsonValue& value:views) {
-            if(sceneViewPresets_.size()>=14 || !value.isObject()) break;
+            if(sceneViewPresets_.size()>=18 || !value.isObject()) break;
             const QJsonObject o=value.toObject();
             const QJsonArray target=o.value(QStringLiteral("target")).toArray();
             if(target.size()!=3) continue;
@@ -1601,13 +1601,13 @@ int main(int argc, char** argv) {
         return 0;
     }
     // Non-GUI CPU snapshots for reproducible GitHub Actions geometry inspection.
-    // Usage: moteur3d_qt.exe --snapshot <view 1..14> <output.png>
+    // Usage: moteur3d_qt.exe --snapshot <view 1..18> <output.png>
     if (argc >= 4 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--snapshot")) {
         QCoreApplication app(argc, argv);
         bool ok = false;
         const int view = QString::fromLocal8Bit(argv[2]).toInt(&ok);
         QFile file(QCoreApplication::applicationDirPath()+QStringLiteral("/scene_pripyat_views.json"));
-        if (!ok || view < 1 || view > 14 || !file.open(QIODevice::ReadOnly)) return 2;
+        if (!ok || view < 1 || view > 18 || !file.open(QIODevice::ReadOnly)) return 2;
         QJsonParseError parseError{};
         const QJsonDocument doc=QJsonDocument::fromJson(file.readAll(),&parseError);
         if(parseError.error!=QJsonParseError::NoError || !doc.isObject()) return 3;
