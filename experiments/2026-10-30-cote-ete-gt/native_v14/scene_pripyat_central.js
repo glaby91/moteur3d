@@ -1117,7 +1117,7 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
  // Cladding starts at the high block only; the lower western wing is plaster.
  for(let x=westEnd+.3;x<x1-.40;x+=.74)
    box(x,mainH-4.1,z1+.08,x+.085,mainH-.16,z1+.17,
-       Math.round(x*9)%7===0?'rust':'plaster');
+       M3D_PRIPYAT_FACADE_PERIOD==='abandoned' && Math.round(x*9)%7===0?'rust':'plaster');
  for(let x=x0+1.2;x<westEnd-.4;x+=1.1)
    box(x,westH-3.4,z1+.09,x+.07,westH-.25,z1+.17,'plaster');
  for(const y of [4.22,6.87,9.52,12.17,14.82]){
@@ -1132,7 +1132,8 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
    box(x+1.3,roofY+1.3,z1-.30,x+2.45,roofY+2.4,z1-.22,'windowdark');
  }
  box(terraceX0,roofY+.10,z1-.20,x1+.05,roofY+.85,z1+.04,'concrete');
- box(terraceX0,roofY+.86,z1-.24,x1+.05,roofY+.96,z1+.05,'rust');
+ box(terraceX0,roofY+.86,z1-.24,x1+.05,roofY+.96,z1+.05,
+      M3D_PRIPYAT_FACADE_PERIOD==='abandoned'?'rust':'metal');
  // Long hotel entrance awning reconstructed from historic front view.
  // A separate slim pedestrian gap is reserved between its western lip and
  // the independent gallery; NO masonry connector.
@@ -1153,7 +1154,8 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
   for(let z=z0+2.2;z<z1-2;z+=3.9){
    const y=1.8+floor*step;
    if(y+1.4>mainH)continue;
-   box(x1+.06,y,z,x1+.13,y+1.42,z+1.50,'windowdark');
+   box(x1+.06,y,z,x1+.13,y+1.42,z+1.50,
+        M3D_PRIPYAT_FACADE_PERIOD==='pre1986'?'glass':'windowdark');
    box(x1+.13,y-.08,z-.10,x1+.25,y,z+1.6,'stone');
   }
  // Individual rusty roof sign, modeled as letter strokes (not bitmap).
@@ -1174,11 +1176,13 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
    const g=glyphs[label[k]];if(!g)continue;
    for(let y=0;y<7;y++)for(let x=0;x<5;x++)if(g[y][x]==='1'){
      const xx=signX+k*pitch+x*px,yy=signY+(6-y)*px;
-     box(xx,yy,z1-.45,xx+px*.82,yy+px*.82,z1-.34,'rust');
+     box(xx,yy,z1-.45,xx+px*.82,yy+px*.82,z1-.34,
+          M3D_PRIPYAT_FACADE_PERIOD==='pre1986'?'metal':'rust');
    }
  }
  for(let x=signX-.3;x<signX+label.length*pitch;x+=3.0)
-   capsule([x,mainH+.18,z1-.55],[x,signY+.18,z1-.55],.04,'rust');
+   capsule([x,mainH+.18,z1-.55],[x,signY+.18,z1-.55],.04,
+      M3D_PRIPYAT_FACADE_PERIOD==='pre1986'?'metal':'rust');
 }
 
 // Terrain and road extension for the Pripyat scene (2 km radius from Energetik).
@@ -1582,14 +1586,17 @@ function makeScene() {
     for(const x of [-43,-32,-21,12]){
       if(level===1&&x< -17.3) continue; // preserve the double-height hall void
       box(x-1.4,y,-24.6,x+1.4,y+0.72,-23.8,'wood');
-      box(x+1.8,y,-25.2,x+2.65,y+2.2,-24.3,'debris');
+      if(M3D_PRIPYAT_FACADE_PERIOD==='abandoned')
+        box(x+1.8,y,-25.2,x+2.65,y+2.2,-24.3,'debris');
       box(x-3.2,y,-38.5,x-1.2,y+1.9,-37.8,'wood');
     }
   }
   m3dBuildEastStairCore({box,capsule});
   // Leave a genuine 3.8 m rooftop doorway in the stair tower wall.
-  box(20.0,archLevels.roof,-22.2,21.7,M3D_ENERGETIK_ARCH.tower.roofY-0.7,-21.0,'rust');
-  box(25.3,archLevels.roof,-22.2,27.0,M3D_ENERGETIK_ARCH.tower.roofY-0.7,-21.0,'rust');
+  box(20.0,archLevels.roof,-22.2,21.7,M3D_ENERGETIK_ARCH.tower.roofY-0.7,-21.0,
+      M3D_PRIPYAT_FACADE_PERIOD==='abandoned'?'rust':'plaster');
+  box(25.3,archLevels.roof,-22.2,27.0,M3D_ENERGETIK_ARCH.tower.roofY-0.7,-21.0,
+      M3D_PRIPYAT_FACADE_PERIOD==='abandoned'?'rust':'plaster');
   box(21.7,M3D_ENERGETIK_ARCH.tower.roofY-2.0,-22.2,25.3,M3D_ENERGETIK_ARCH.tower.roofY-0.7,-21.0,'concrete');
 
   // Roof access: height driven by shared datum, retaining the existing materials.
@@ -1607,7 +1614,8 @@ function makeScene() {
   for(const [x0,x1,z0,z1] of [[-49.2,29.2,-42.2,-41.2],[-49.2,29.2,-20.4,-19.6],[-49.2,-48.3,-42.2,-20.0],[28.3,29.2,-42.2,-20.0]])
     box(x0,roofDeckTop,z0,x1,roofDeckTop+0.85,z1,'concrete');
   for(const [x,z,h] of [[-36,-38,1.2],[-7,-40,1.8],[12,-22,1.1],[17,-39,1.4]])
-    box(x,roofDeckTop,z,x+1.4,roofDeckTop+h,z+1.2,'rust');
+    box(x,roofDeckTop,z,x+1.4,roofDeckTop+h,z+1.2,
+        M3D_PRIPYAT_FACADE_PERIOD==='abandoned'?'rust':'metal');
   if(M3D_PRIPYAT_FACADE_PERIOD==='abandoned')
     for(let x=-44;x<27;x+=9)
       ellipsoidMesh(x,mainRoofY+0.45,-20.8,1.0,0.12,0.55,'grass',8,6);
@@ -1644,8 +1652,10 @@ function makeScene() {
     plank(-1.15,1.15,0.68,0.82,'wood');
     plank(-1.15,1.15,0.88,0.99,'wood');
     for (const u of [-0.86,0.86]) {
-      capsule([x+c*u,0.08,z+s*u],[x+c*u,0.68,z+s*u],0.07,'rust');
-      capsule([x+c*u,0.58,z+s*u],[x+c*u,1.35,z+s*u],0.06,'rust');
+      capsule([x+c*u,0.08,z+s*u],[x+c*u,0.68,z+s*u],0.07,
+        M3D_PRIPYAT_FACADE_PERIOD==='abandoned'?'rust':'metal');
+      capsule([x+c*u,0.58,z+s*u],[x+c*u,1.35,z+s*u],0.06,
+        M3D_PRIPYAT_FACADE_PERIOD==='abandoned'?'rust':'metal');
     }
     plank(-1.05,1.05,1.27,1.36,'wood');
   }
