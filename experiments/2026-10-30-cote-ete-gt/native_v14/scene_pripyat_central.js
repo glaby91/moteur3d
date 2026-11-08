@@ -1023,10 +1023,18 @@ function m3dBuildPolissyaLocal({box,capsule,meshTriangle}, cfg=M3D_POLISSYA_MODE
    // Legacy geometry-only callers may omit triangle callback.
    box(roofLeft,terraceY,roofBack,roofRight,terraceY+.39,roofFront,'concrete');
  }
- // Ribbed lower parapet below the openings and visible transverse lintel.
- box(pavilionLeft,roofY+.12,pavilionFront-.23,pavilionRight+.35,roofY+1.04,pavilionFront+.10,'concrete');
+ // Photo-guided panoramic café frontage. Keep the wide window bays open
+ // and LOWER the original solid spandrel: visitors could look across Pripyat.
+ // The reinforced frame and a low chipped parapet survive, not opaque panes.
+ const panoramaSillTop=roofY+.58;
+ box(pavilionLeft,roofY+.12,pavilionFront-.23,pavilionRight+.35,panoramaSillTop,pavilionFront+.10,'concrete');
  for(let x=pavilionLeft+.13;x<pavilionRight+.2;x+=.40)
-   box(x,roofY+.17,pavilionFront+.10,x+.065,roofY+1.00,pavilionFront+.18,'plaster');
+   box(x,roofY+.17,pavilionFront+.10,x+.065,panoramaSillTop-.04,pavilionFront+.18,
+       Math.round(x*9)%11===0?'rust':'plaster');
+ // Broken window-frame remnants only at the boundaries, not across the view.
+ for(let x of [pavilionLeft+4.35,pavilionLeft+8.75]){
+   box(x-.035,panoramaSillTop,pavilionFront+.105,x+.035,terraceY-.44,pavilionFront+.16,'rust');
+ }
  box(pavilionLeft,terraceY-.43,pavilionFront-.24,pavilionRight+.35,terraceY,pavilionFront+.13,'concrete');
  // Thin oxidised rooftop rail and structure supporting the painted lettering.
  for(const x of [pavilionLeft,pavilionLeft+4.35,pavilionLeft+8.75,pavilionRight])
