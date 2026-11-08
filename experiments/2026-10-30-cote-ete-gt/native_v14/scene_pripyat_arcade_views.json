@@ -1,7 +1,7 @@
 {
   "scene": "Colonnade indépendante Energetik–Polissya",
   "schema_version": 1,
-  "notes": "Caméras QA ponctuelles, hors 13 vues officielles. Profil 3 cadré sur l'arrivée devant l'avancée Polissya et les quatre marches.",
+  "notes": "Vues dédiées: toiture, sous-face, arrivée vers Polissya, côté courbe tourné vers Energetik. Les deux extrémités de la dalle restent coupées droit; quatre marches peu hautes suivent le plan en courbe.",
   "views": [
     {
       "name": "01 — Toiture plate et caissons, vue plongeante rapprochée",
@@ -40,6 +40,19 @@
       "angle": -98,
       "elevation": 10,
       "fov": 57,
+      "hour_step": 12
+    },
+    {
+      "name": "04 — Côté courbe vers Energetik, quatre marches et piliers",
+      "target": [
+        43,
+        1.9,
+        -30.5
+      ],
+      "distance": 23,
+      "angle": -62,
+      "elevation": 8,
+      "fov": 60,
       "hour_step": 12
     }
   ]
