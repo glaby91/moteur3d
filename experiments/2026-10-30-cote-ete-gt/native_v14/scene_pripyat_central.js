@@ -903,25 +903,45 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
    cursor=x+1.45;
  }
  if(cursor<x1-wall)box(cursor,1.05,z1-wall,x1-wall,mainH,z1,'concrete');
- // Cladding starts at the high block only; the lower western wing is plaster.
- for(let x=westEnd+.3;x<x1-.40;x+=.74)
-   box(x,mainH-4.1,z1+.08,x+.085,mainH-.16,z1+.17,
-       Math.round(x*9)%7===0?'rust':'plaster');
- for(let x=x0+1.2;x<westEnd-.4;x+=1.1)
-   box(x,westH-3.4,z1+.09,x+.07,westH-.25,z1+.17,'plaster');
- for(const y of [4.22,6.87,9.52,12.17,14.82]){
+ // Photo references (Nov 2026): narrow vertical concrete flutes form a
+ // continuous upper attic band, ABOVE the last window row, not over glazing.
+ const terraceX0=x1-14.0,roofY=mainH,terraceY=roofY+3.40;
+ const atticTop=roofY+1.12;
+ box(westEnd,roofY-.74,z1-.13,x1,atticTop,z1+.06,'concrete');
+ for(let x=westEnd+.12;x<x1-.15;x+=.39)
+   box(x,roofY-.72,z1+.065,x+.075,atticTop-.04,z1+.18,
+       Math.round(x*11)%17===0?'stone':'plaster');
+ for(let x=x0+.15;x<westEnd-.20;x+=.52)
+   box(x,westH-2.9,z1+.085,x+.07,westH-.22,z1+.17,'plaster');
+ // Keep low, aged concrete strip courses; no false dark pane painted on top.
+ for(const y of [4.22,6.87,9.52,12.17,14.82])
    box(westEnd,y,z1+.06,x1-.52,y+.095,z1+.15,'stone');
+
+ // Hotel rooftop summer-cafe pavilion: genuine front-to-back OPEN bays.
+ // This must not be a solid rectangular building or dark window rectangles.
+ const pavilionFront=z1-.20,pavilionRear=z0+1.35;
+ const pavilionLeft=terraceX0,pavilionRight=x1-.35;
+ // Structural four corner supports and intermediate piers.
+ const supportXs=[pavilionLeft,pavilionLeft+4.35,pavilionLeft+8.75,pavilionRight-.46];
+ for(const x of supportXs){
+   box(x,roofY+.04,pavilionFront-.33,x+.43,terraceY,pavilionFront+.08,'concrete');
+   box(x,roofY+.04,pavilionRear-.12,x+.43,terraceY,pavilionRear+.35,'concrete');
  }
- // Asymmetric belvedere above right side: open front bays, not a solid box.
- const terraceX0=x1-14.0,roofY=mainH,terraceY=mainH+3.40;
- box(terraceX0,roofY,z0+1.2,x1-.4,roofY+3.2,z0+3.5,'concrete');
- box(terraceX0-.1,terraceY,z0+1.0,x1+.15,terraceY+.25,z1+.23,'stone');
- for(const x of [terraceX0+1.2,terraceX0+5.1,terraceX0+9.0]){
-   box(x,roofY+.04,z1-.37,x+.32,terraceY,z1-.08,'plaster');
-   box(x+1.3,roofY+1.3,z1-.30,x+2.45,roofY+2.4,z1-.22,'windowdark');
- }
- box(terraceX0,roofY+.10,z1-.20,x1+.05,roofY+.85,z1+.04,'concrete');
- box(terraceX0,roofY+.86,z1-.24,x1+.05,roofY+.96,z1+.05,'rust');
+ // Open side elevations: reinforced frame only, with views through the bays.
+ for(const x of [pavilionLeft,pavilionRight])
+   box(x,terraceY-.40,pavilionRear-.13,x+.36,terraceY+.06,pavilionFront+.15,'stone');
+ // Flat pavilion roof slab and a visible soffit under its projecting lip.
+ box(pavilionLeft-.12,terraceY,pavilionRear-.20,pavilionRight+.40,terraceY+.33,pavilionFront+.32,'concrete');
+ box(pavilionLeft-.08,terraceY+.33,pavilionRear-.22,pavilionRight+.42,terraceY+.41,pavilionFront+.36,'stone');
+ // Ribbed lower parapet below the openings and visible transverse lintel.
+ box(pavilionLeft,roofY+.12,pavilionFront-.23,pavilionRight+.35,roofY+1.04,pavilionFront+.10,'concrete');
+ for(let x=pavilionLeft+.13;x<pavilionRight+.2;x+=.40)
+   box(x,roofY+.17,pavilionFront+.10,x+.065,roofY+1.00,pavilionFront+.18,'plaster');
+ box(pavilionLeft,terraceY-.43,pavilionFront-.24,pavilionRight+.35,terraceY,pavilionFront+.13,'concrete');
+ // Thin oxidised rooftop rail and structure supporting the painted lettering.
+ for(const x of [pavilionLeft,pavilionLeft+4.35,pavilionLeft+8.75,pavilionRight])
+   capsule([x,terraceY+.34,z1-.36],[x,terraceY+.61,z1-.36],.035,'rust');
+ capsule([pavilionLeft,terraceY+.54,z1-.36],[pavilionRight,terraceY+.54,z1-.36],.03,'rust');
  // Projecting entrance awning, with a recessed area below.
  box(x0+13,3.10,z1+.10,x0+23,3.39,z1+2.35,'concrete');
  for(const x of [x0+13.4,x0+22.2])
@@ -947,7 +967,7 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
  'С':['01111','10000','10000','10000','10000','10000','01111'],
  'Я':['01111','10001','10001','01111','00101','01001','10001']
  };
- const label='ГОТЕЛЬ ПОЛІССЯ',px=.132,pitch=.88,signX=westEnd+1.1,signY=mainH+1.22;
+ const label='ГОТЕЛЬ ПОЛІССЯ',px=.132,pitch=.88,signX=westEnd+1.1,signY=terraceY+.77;
  for(let k=0;k<label.length;k++){
    const g=glyphs[label[k]];if(!g)continue;
    for(let y=0;y<7;y++)for(let x=0;x<5;x++)if(g[y][x]==='1'){
@@ -956,7 +976,7 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
    }
  }
  for(let x=signX-.3;x<signX+label.length*pitch;x+=3.0)
-   capsule([x,mainH+.18,z1-.55],[x,signY+.18,z1-.55],.04,'rust');
+   capsule([x,terraceY+.39,z1-.55],[x,signY+.18,z1-.55],.04,'rust');
 }
 
 // Terrain and road extension for the Pripyat scene (2 km radius from Energetik).
