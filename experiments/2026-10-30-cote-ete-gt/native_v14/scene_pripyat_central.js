@@ -561,15 +561,19 @@ function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polis
  // bend toward the hotel's WEST side, with no physical building connection.
  // The endpoints and main radius are photo-guided estimates, not a survey.
  // The arcade is curved IN PLAN; its TWO ENDS are flat, straight crosscuts.
- // The west-facing hotel entrance canopy projects 2.35 m toward the plaza.
- // Its far end is at local hotel x0+23; stop a window bay (3.1 m) before
- // that end. Preserve a clear gap: this is NOT a building connector.
+ // User-annotated photo (08/11/2026): red seam separates the curved
+ // standalone gallery (left) from the STRAIGHT hotel entrance canopy (right).
+ // Stop at the canopy's BEGINNING, not halfway beneath that canopy.
+ // The hotel canopy is defined below by local x0+13 ... x0+23 and
+ // protrudes 2.35 m toward the plaza after world-space rotation.
+ // Keep a small physical gap even though the two roofs nearly align visually.
  const halfWidth=2.05;
  const awningFrontX=b.x0-2.35;
+ const awningStartZ=b.z0+13.0;
  const awningEndZ=b.z0+23.0;
- const windowBay=3.10, hotelClearance=.45;
+ const hotelClearance=.45,arrivalGapZ=.30;
  const endCenterX=awningFrontX-halfWidth-hotelClearance;
- const endZ=awningEndZ-windowBay;
+ const endZ=awningStartZ-arrivalGapZ;
  const control=Object.freeze([
   [a.envelope.x1+3.35,-30.5],
   [59.0,-30.5],
@@ -587,7 +591,7 @@ function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polis
  };
  return Object.freeze({control,halfWidth,roofBottom:3.55,roofTop:3.86,
    pierCount:20,segments:48,endShape:'straight',at,
-   hotelClearance,awningFrontX,awningEndZ,windowBay,
+   hotelClearance,arrivalGapZ,awningFrontX,awningStartZ,awningEndZ,
    platformTop:.40,stepCount:4,stepRise:.10,stepRun:.62});
 }
 function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
