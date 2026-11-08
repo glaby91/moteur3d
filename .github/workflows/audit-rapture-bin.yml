@@ -1,0 +1,72 @@
+name: Audit binaire Rapture seul
+
+on:
+  push:
+    branches:
+      - feature/pripyat-visual-quality-baseline-261107
+    paths:
+      - .github/workflows/audit-rapture-bin.yml
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_rapture.js
+      - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Check Rapture source syntax
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: node --check scene_rapture.js
+      - name: Export Rapture BIN and detailed inventory
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          set -euo pipefail
+          M3D_SKIP_IMPORTED_CAR=1 M3D_TEXTURE_SIZE=1024 node export_scene.js source_v1314.html scene_rapture.bin scene_rapture.js | tee rapture-export-report.json
+          test -s scene_rapture.bin
+          python3 - <<'PY'
+          import json,struct,pathlib,collections
+          b=pathlib.Path('scene_rapture.bin').read_bytes()
+          magic=b[:8]; version,nobj,nbvh,root,norder,nmat,ntex,texsize=struct.unpack_from('<IIIiIIII',b,8)
+          assert magic==b'M3D1314\0' and 3<=version<=5
+          assert 0<nobj<=4200000 and norder==nobj and 0<nmat<=256
+          offset=40
+          materials=[]
+          for _ in range(nmat):
+              name=b[offset:offset+24].split(b'\0')[0].decode('utf8')
+              refl,trans,ior=struct.unpack_from('<BBH',b,offset+24)
+              materials.append(dict(name=name,reflectivity_percent=refl,transmission_percent=trans,ior=ior/1000 if ior else None))
+              offset+=28
+          kinds=collections.Counter()
+          per_material=collections.Counter()
+          sizes={0:96,1:0,2:28,3:32,4:52,5:24}
+          for _ in range(nobj):
+              kind,mat=struct.unpack_from('<BB',b,offset)
+              assert kind in sizes and mat<nmat
+              kinds[['triangle','box','roundbox','capsule','cone','ellipse'][kind]]+=1
+              per_material[materials[mat]['name']]+=1
+              offset+=28+sizes[kind]
+          assert offset<len(b)
+          report={'binary_bytes':len(b),'format_version':version,'objects':nobj,'bvh_nodes':nbvh,'materials':materials,'primitive_counts':dict(kinds),'primitives_per_material':dict(per_material)}
+          pathlib.Path('rapture-binary-audit.json').write_text(json.dumps(report,indent=2,ensure_ascii=False))
+          print(json.dumps(report,indent=2,ensure_ascii=False))
+          PY
+      - name: Publish binary and reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rapture-bin-audit
+          path: |
+            experiments/2026-10-30-cote-ete-gt/native_v14/scene_rapture.bin
+            experiments/2026-10-30-cote-ete-gt/native_v14/rapture-export-report.json
+            experiments/2026-10-30-cote-ete-gt/native_v14/rapture-binary-audit.json
+          if-no-files-found: warn
+          retention-days: 14
