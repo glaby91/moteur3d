@@ -8,7 +8,8 @@ const api=vm.runInNewContext(scene+`({
   block:M3D_PRIPYAT_BLOCKOUT,
   plan:m3dPolissyaArcadePlan,world:m3dPolissyaLocalToWorld,model:M3D_POLISSYA_MODEL,angle:M3D_POLISSYA_ORIENTATION_DEGREES,
   arcade:m3dBuildConnector,
-  hotel:m3dBuildPolissya
+  hotel:m3dBuildPolissya,
+  annex:m3dBuildPolissyaAttachedAnnex
 })`,{}, {timeout:5000});
 const p=api.plan(),palace=api.block.energetik,hotel=api.block.polissya;
 assert.equal(api.angle,90,'Polissya should be perpendicular to palace');
@@ -65,7 +66,37 @@ for(const [a,b,c,mat] of meshes){
 const hb=[];
 api.hotel({box:(...args)=>hb.push(args),capsule:()=>{}});
 assert.ok(hb.some(x=>x[4]>19),'hotel rooftop terrace missing');
-assert.ok(hb.some(x=>x[6]==='rust'&&x[4]>18),'oxidised roof sign missing');
+assert.ok(hb.some(x=>x[6]==='metal'&&x[4]>18),'restored 1986 hotel sign missing');
 assert.ok(hb.some(x=>x[6]==='windowdark'),'hotel windows missing');
 assert.ok(hb.some(x=>x[6]==='plaster'),'pale roof cladding missing');
+const annex=api.block.polissyaAnnex;
+assert.ok(annex,'Low hotel-attached wing omitted from city plan');
+assert.equal(api.block.housing.some(b=>b.id==='east-south'||b.id==='east-north'),false,
+ 'Unverified multi-storey blocks appear on the right of the Hotel / gallery');
+assert.ok(annex.z0 < hotel.z0-12 && annex.z1>hotel.z0 && annex.z1<hotel.z0+.6,
+ 'One-storey wing must touch the hotel SOUTH end');
+const attachedParts=[];
+const manifest=api.annex({box:(...b)=>attachedParts.push(b)});
+assert.equal(manifest.glazedBays,6,'Low wing should have its own storefront');
+assert.ok(attachedParts.some(b=>b[6]==='glass'),'1986 restaurant wing needs intact glazing');
+assert.ok(attachedParts.some(b=>b[6]==='concrete' && b[4]>=annex.height-.001 &&
+  b[0]===annex.x0 && b[2]===annex.z0),'low wing roof needs a physical volume');
+assert.ok(manifest.doorWorldX0>=hotel.x0+.8 && manifest.doorWorldX1<=hotel.x0+5.6,
+ 'Annex passage must line up with the already existing hotel side entrance');
+// The annex is separate from the curved arcade. Check each roof-edge sample,
+// not only the two plan endpoints.
+let nearest=Infinity;
+const rectPointDist=(x,z)=>
+ Math.hypot(Math.max(annex.x0-x,0,x-annex.x1),
+            Math.max(annex.z0-z,0,z-annex.z1));
+for(let i=0;i<=1000;i++){
+ const t=i/1000;
+ for(const side of [-1,0,1]){
+  const [x,z]=p.at(t,side*p.halfWidth);
+  nearest=Math.min(nearest,rectPointDist(x,z));
+ }
+}
+assert.ok(nearest>0.8,
+ 'Arcade roof clips the attached hotel low wing (closest distance: '+nearest.toFixed(2)+' m)');
+console.log('Attached low Polissya wing valid; minimum free arcade / wing gap: '+nearest.toFixed(2)+' m');
 console.log('Polissya hotel + curved freestanding arcade: '+meshes.length+' roof triangles, '+boxes.length+' pillar pieces, '+hb.length+' hotel parts');
