@@ -12,6 +12,9 @@ from pathlib import Path
 from PIL import Image, ImageChops, ImageStat
 
 def compare(before: Path, after: Path):
+    for capture in (before, after):
+        if not capture.is_file() or capture.stat().st_size == 0:
+            raise FileNotFoundError(f"Missing or empty capture: {capture}")
     with Image.open(before) as im:
         a = im.convert("RGB")
     with Image.open(after) as im:
