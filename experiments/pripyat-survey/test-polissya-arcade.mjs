@@ -50,9 +50,13 @@ for(let i=0;i<=128;i++){
 const meshes=[],boxes=[];
 api.arcade({box:(...args)=>boxes.push(args),meshTriangle:(...args)=>meshes.push(args)});
 assert.ok(meshes.length>=350+4*p.endCapSegments*2,'bent roof and semicircular ends missing');
-assert.ok(boxes.length>=40,'regular paired arcade pillars missing');
+const postTriangles=meshes.filter(x=>x[3]==='plaster');
+assert.ok(postTriangles.length>=p.pierCount*2*12,'tall ceramic-clad arcade pillars missing');
+assert.ok(p.halfWidth>=2.0,'roof slab must overhang rebuilt posts');
+assert.ok(postTriangles.some(t=>t.slice(0,3).some(v=>v.p[1]<0.25)),'posts must reach the base');
+assert.ok(postTriangles.some(t=>t.slice(0,3).some(v=>v.p[1]>=p.roofBottom)),'posts must reach soffit');
 for(const [a,b,c,mat] of meshes){
- assert.ok(['stone','concrete'].includes(mat),'unexpected arcade material');
+ assert.ok(['stone','concrete','plaster'].includes(mat),'unexpected arcade material');
  for(const v of [a,b,c]){
   assert.equal(v.p.length,3);assert.equal(v.uv.length,2);
   assert.ok(v.p.every(Number.isFinite),'nonfinite mesh vertex');
@@ -64,4 +68,4 @@ assert.ok(hb.some(x=>x[4]>19),'hotel rooftop terrace missing');
 assert.ok(hb.some(x=>x[6]==='rust'&&x[4]>18),'oxidised roof sign missing');
 assert.ok(hb.some(x=>x[6]==='windowdark'),'hotel windows missing');
 assert.ok(hb.some(x=>x[6]==='plaster'),'pale roof cladding missing');
-console.log('Polissya hotel + curved freestanding arcade: '+meshes.length+' roof triangles, '+boxes.length+' pillar pieces, '+hb.length+' hotel parts');
+console.log('Polissya hotel + curved freestanding arcade: '+meshes.length+' total triangles, '+postTriangles.length+' post-surface triangles, '+hb.length+' hotel parts');
