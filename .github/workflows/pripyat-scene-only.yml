@@ -5,6 +5,9 @@ on:
       - feature/pripyat-visual-quality-baseline-261107
     paths:
       - .github/workflows/pripyat-scene-only.yml
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js
+      - experiments/pripyat-survey/test-polissya-arcade.mjs
+      - experiments/pripyat-survey/test-energetik-architecture.mjs
   workflow_dispatch:
 permissions:
   contents: read
