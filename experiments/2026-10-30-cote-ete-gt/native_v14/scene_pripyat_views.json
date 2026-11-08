@@ -1,8 +1,8 @@
 {
   "scene": "Palais de la Culture Energetik — Pripiat",
-  "schema_version": 1,
+  "schema_version": 2,
   "annex": "docs/pripyat/VUES-ENERGETIK.md",
-  "notes": "14 vues de contrôle. 12 et 13 ciblent la galerie et l'aile basse près du Polissya ; 14 donne une vue de la façade arrière et de la loggia supérieure. IMG-022 reste exclue.",
+  "notes": "18 vues de travail : les 14 précédentes sont conservées, vues 15 à 18 pour quatre archives reçues le 9 novembre 2026. Cadrages approximatifs sans étalonnage photogrammétrique.",
   "views": [
     {
       "name": "01 — Façade complète et colonnade",
@@ -185,6 +185,66 @@
       "elevation": 12,
       "fov": 56,
       "hour_step": 12
+    },
+    {
+      "name": "15 — Archive : oblique du Palais depuis la place",
+      "target": [
+        -11,
+        5,
+        -20
+      ],
+      "distance": 110,
+      "angle": -24,
+      "elevation": 4,
+      "fov": 55,
+      "hour_step": 12,
+      "reference_id": "ENE-HIST-01",
+      "match_status": "camera-study-not-registered"
+    },
+    {
+      "name": "16 — Archive : nuit et enseignes du palais",
+      "target": [
+        8,
+        6,
+        -17
+      ],
+      "distance": 126,
+      "angle": 13,
+      "elevation": 6,
+      "fov": 61,
+      "hour_step": 32,
+      "reference_id": "ENE-HIST-02",
+      "match_status": "camera-study-not-registered"
+    },
+    {
+      "name": "17 — Archive 1985 : façade et panneaux",
+      "target": [
+        -10.5,
+        4.8,
+        -19
+      ],
+      "distance": 103,
+      "angle": 0,
+      "elevation": 2,
+      "fov": 48,
+      "hour_step": 12,
+      "reference_id": "ENE-HIST-03",
+      "match_status": "camera-study-not-registered"
+    },
+    {
+      "name": "18 — Archive : autobus et accès à la place",
+      "target": [
+        -3,
+        4,
+        22
+      ],
+      "distance": 130,
+      "angle": -12,
+      "elevation": 3,
+      "fov": 61,
+      "hour_step": 12,
+      "reference_id": "ENE-HIST-04",
+      "match_status": "camera-study-not-registered"
     }
   ]
 }
