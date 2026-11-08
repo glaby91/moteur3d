@@ -1148,16 +1148,23 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
  box(x0,doorTop,door0,x0+wall,westH,door1,'concrete');
  box(x1-wall,1.05,z0,x1,mainH,z1,'concrete');
  box(westEnd-.4,westH,z0,westEnd+.16,mainH,z0+wall,'concrete');
- // Rear facade with rhythmic masonry piers, so rooms remain hollow.
+ // Rear hotel elevation: regular 1986 glazing in each occupied floor.
+ // The wall should be independently reconstructable from rear photographs.
  for(let x=x0+.6;x<x1-.5;x+=3.15){
    const top=x<westEnd?westH:mainH;
    box(x,1.05,z0,x+.54,top,z0+wall,'concrete');
    for(let floor=0;floor<5;floor++){
      const y=1.75+floor*step;
      if(y+1.42>top)continue;
-     if(M3D_PRIPYAT_FACADE_PERIOD==='pre1986' || (Math.floor(x*3)+floor)%4!==0)
+     if(M3D_PRIPYAT_FACADE_PERIOD==='pre1986' || (Math.floor(x*3)+floor)%4!==0){
        box(x+.58,y,z0-.10,x+2.0,y+1.42,z0+.04,
            M3D_PRIPYAT_FACADE_PERIOD==='pre1986'?'glass':'windowdark');
+       // Thin aluminium frames and sills reveal the depth from the rear.
+       box(x+1.25,y+.02,z0-.13,x+1.32,y+1.42,z0+.065,'metal');
+       box(x+.58,y+.73,z0-.12,x+2.0,y+.81,z0+.07,'metal');
+       box(x+.48,y-.11,z0-.18,x+2.08,y+.005,z0+.13,'stone');
+       box(x+.48,y+1.43,z0-.16,x+2.08,y+1.53,z0+.12,'stone');
+     }
    }
  }
  // Street facade: genuine window openings between columns and spandrels,
@@ -1196,17 +1203,33 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
  for(const y of [4.22,6.87,9.52,12.17,14.82]){
    box(westEnd,y,z1+.06,x1-.52,y+.095,z1+.15,'stone');
  }
- // Asymmetric belvedere above right side: open front bays, not a solid box.
+ // Polissya rooftop is an OPEN panoramic loggia / cafe terrace.
+ // In archive photos one can see the sky through deep framed bays, whereas
+ // the old model contained a giant opaque 14 m rear cube. Remove that cube.
  const terraceX0=x1-14.0,roofY=mainH,terraceY=mainH+3.40;
- box(terraceX0,roofY,z0+1.2,x1-.4,roofY+3.2,z0+3.5,'concrete');
- box(terraceX0-.1,terraceY,z0+1.0,x1+.15,terraceY+.25,z1+.23,'stone');
- for(const x of [terraceX0+1.2,terraceX0+5.1,terraceX0+9.0]){
-   box(x,roofY+.04,z1-.37,x+.32,terraceY,z1-.08,'plaster');
-   box(x+1.3,roofY+1.3,z1-.30,x+2.45,roofY+2.4,z1-.22,'windowdark');
+ // Thin cover, upper coping and parapets; front is local Z=z1.
+ box(terraceX0-.12,terraceY,z0+1.0,x1+.14,terraceY+.25,z1+.24,'concrete');
+ box(terraceX0-.18,terraceY+.24,z1-.54,x1+.2,terraceY+.43,z1+.28,'stone');
+ box(terraceX0,roofY+.10,z1-.32,x1+.05,roofY+.92,z1+.045,'plaster');
+ box(terraceX0-.08,roofY+.92,z1-.37,x1+.13,roofY+1.05,z1+.09,'stone');
+ // The rear (local Z=z0) is also an open-sided upper terrace.
+ box(terraceX0,roofY+.10,z0+.98,x1+.05,roofY+.80,z0+1.38,'plaster');
+ const bays=4,terracePitch=(x1-terraceX0)/bays;
+ for(let i=0;i<=bays;i++){
+   const x=terraceX0+i*terracePitch;
+   for(const z of [z0+1.06,z1-.37]){
+     box(x-.21,roofY+.88,z-.12,x+.21,terraceY,z+.30,'concrete');
+     box(x-.30,roofY+.80,z-.19,x+.30,roofY+.98,z+.34,'stone');
+   }
  }
- box(terraceX0,roofY+.10,z1-.20,x1+.05,roofY+.85,z1+.04,'concrete');
- box(terraceX0,roofY+.86,z1-.24,x1+.05,roofY+.96,z1+.05,
-      M3D_PRIPYAT_FACADE_PERIOD==='abandoned'?'rust':'metal');
+ // Supporting ends at the narrow lateral edges without filling the bays.
+ for(const x of [terraceX0-.06,x1-.32]){
+   box(x,roofY+.96,z0+1.3,x+.34,terraceY,z0+1.72,'concrete');
+   box(x,roofY+.96,z1-.75,x+.34,terraceY,z1-.30,'concrete');
+ }
+ // Vertical ribbed cladding on the front upper floor below the terrace.
+ for(let x=terraceX0+.48;x<x1-.2;x+=.73)
+   box(x,mainH-3.90,z1+.16,x+.09,roofY+.05,z1+.27,'plaster');
  // Long hotel entrance awning reconstructed from historic front view.
  // A separate slim pedestrian gap is reserved between its western lip and
  // the independent gallery; NO masonry connector.
@@ -1244,7 +1267,9 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
  'С':['01111','10000','10000','10000','10000','10000','01111'],
  'Я':['01111','10001','10001','01111','00101','01001','10001']
  };
- const label='ГОТЕЛЬ ПОЛІССЯ',px=.132,pitch=.88,signX=westEnd+1.1,signY=mainH+1.22;
+ // Roof-mounted hotel sign follows the upper loggia slab, not the low wing.
+ const label='ГОТЕЛЬ ПОЛІССЯ',px=.176,pitch=.93,
+       signX=terraceX0+.38,signY=terraceY+.38;
  for(let k=0;k<label.length;k++){
    const g=glyphs[label[k]];if(!g)continue;
    for(let y=0;y<7;y++)for(let x=0;x<5;x++)if(g[y][x]==='1'){
@@ -1254,7 +1279,7 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
    }
  }
  for(let x=signX-.3;x<signX+label.length*pitch;x+=3.0)
-   capsule([x,mainH+.18,z1-.55],[x,signY+.18,z1-.55],.04,
+   capsule([x,terraceY+.28,z1-.55],[x,signY+.18,z1-.55],.04,
       M3D_PRIPYAT_FACADE_PERIOD==='pre1986'?'metal':'rust');
 }
 
