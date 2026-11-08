@@ -68,8 +68,13 @@ for(const [a,b,c,mat] of meshes){
   assert.ok(v.p.every(Number.isFinite),'nonfinite mesh vertex');
  }
 }
-const hb=[];
-api.hotel({box:(...args)=>hb.push(args),capsule:()=>{}});
+const hb=[],hotelMeshes=[];
+api.hotel({box:(...args)=>hb.push(args),capsule:()=>{},meshTriangle:(...args)=>hotelMeshes.push(args)});
+assert.ok(hotelMeshes.length>=24,'pitched rooftop summer cafe slab missing');
+const rooftop=hotelMeshes.filter(tr=>tr[3]==='concrete'||tr[3]==='stone');
+const heights=rooftop.flatMap(tr=>tr.slice(0,3).map(v=>v.p[1]));
+assert.ok(Math.max(...heights)-Math.min(...heights)>.5,'photographic rooftop slope is not visible');
+assert.ok(hb.filter(x=>x[6]==='brick').length>=100,'exposed masonry brick courses missing from hotel');
 assert.ok(hb.some(x=>x[4]>19),'hotel rooftop terrace missing');
 assert.ok(hb.some(x=>x[6]==='rust'&&x[4]>18),'oxidised roof sign missing');
 assert.ok(hb.some(x=>x[6]==='windowdark'),'hotel windows missing');
