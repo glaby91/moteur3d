@@ -1003,6 +1003,35 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
    box(x1+.06,y,z,x1+.13,y+1.42,z+1.50,'windowdark');
    box(x1+.13,y-.08,z-.10,x1+.25,y,z+1.6,'stone');
   }
+ // Exposed BRICK masonry where the original plaster has fallen away.
+ // Photo references show much more masonry than our earlier all-concrete
+ // blockout. Keep the load-bearing arcade columns tiled/concrete: these brick
+ // patches belong to the HOTEL's damaged side-wall infill and rooftop masonry.
+ // Bricks are actual shallow 3D pieces with staggered mortar gaps, not paint.
+ const brickPatches=[
+   {z:z0+5.0, y:3.46, width:2.35, rows:6},
+   {z:z0+12.7,y:6.15, width:2.75, rows:6},
+   {z:z0+17.1,y:8.64, width:2.30, rows:6},
+   {z:z0+8.0, y:11.25,width:2.60, rows:5}
+ ];
+ for(const patch of brickPatches){
+   const brickHeight=.085, course=.108, brickWidth=.260, pitch=.283;
+   for(let row=0;row<patch.rows;row++){
+     const stagger=(row%2)*pitch/2, y=patch.y+row*course;
+     for(let z=patch.z+stagger;z+brickWidth<patch.z+patch.width;z+=pitch){
+       // Outside +X wall, between glazing rows; rusty and pale weathering.
+       worldBox(x1+.045,y,z,x1+.085,y+brickHeight,z+brickWidth,
+                ((row+Math.round(z*4))%9===0)?'rust':'brick');
+     }
+   }
+ }
+ // Brick infill is visible below the open rooftop terrace at the rear,
+ // while the panoramic front openings remain completely unobstructed.
+ for(let row=0;row<5;row++){
+   const y=roofY+.19+row*.108;
+   for(let z=pavilionRear+.50+(row%2)*.14;z<pavilionRear+3.30;z+=.295)
+     worldBox(pavilionRight-.09,y,z,pavilionRight-.04,y+.080,z+.267,'brick');
+ }
  // Individual rusty roof sign, modeled as letter strokes (not bitmap).
  const glyphs={
  'Г':['11111','10000','10000','10000','10000','10000','10000'],
