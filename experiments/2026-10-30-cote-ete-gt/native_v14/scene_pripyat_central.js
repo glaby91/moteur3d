@@ -1602,7 +1602,9 @@ function makeScene() {
     box(x0,roofDeckTop,z0,x1,roofDeckTop+0.85,z1,'concrete');
   for(const [x,z,h] of [[-36,-38,1.2],[-7,-40,1.8],[12,-22,1.1],[17,-39,1.4]])
     box(x,roofDeckTop,z,x+1.4,roofDeckTop+h,z+1.2,'rust');
-  for(let x=-44;x<27;x+=9) ellipsoidMesh(x,mainRoofY+0.45,-20.8,1.0,0.12,0.55,'grass',8,6);
+  if(M3D_PRIPYAT_FACADE_PERIOD==='abandoned')
+    for(let x=-44;x<27;x+=9)
+      ellipsoidMesh(x,mainRoofY+0.45,-20.8,1.0,0.12,0.55,'grass',8,6);
 
   // Separate reusable Polissya building module. Historical geometry still pending survey.
   m3dBuildPolissya({box,capsule});
@@ -1654,7 +1656,7 @@ function makeScene() {
     [19, 11, Math.PI/2, 'worn_intact'], [22, 11, 0, 'missing_seat_slat'],
     [-3, 29, 0, 'broken_slat'], [1, 29, Math.PI/2, 'worn_intact']
   ]) buildPripyatOutdoorChair({objects,box,roundBox,capsule,ellipse},chair[0],0,chair[1],
-    {angle:chair[2],variant:chair[3]});
+    {angle:chair[2],variant:M3D_PRIPYAT_FACADE_PERIOD==='abandoned'?chair[3]:'worn_intact'});
 
   // Photos Polissya: visible branch skeleton + irregular grouped foliage.
   // Low tessellation is deliberate: the HD 620 cannot rasterise millions
@@ -1692,12 +1694,20 @@ function makeScene() {
     [73,14,15],[79,19,14],[67,24,16],[109,30,12]
   ];
   if (process.env.M3D_IMPORT_PRIPYAT_GLB !== '1') {
-    for (let i=0;i<matureTrees.length;i++) poplar(...matureTrees[i],0.76+(i%4)*0.11);
+    // In 1986 the pre-disaster planted rows were younger; the volunteer
+    // post-accident woods by Polissya are not yet present.
+    const originalCount=M3D_PRIPYAT_FACADE_PERIOD==='abandoned'?
+      matureTrees.length:20;
+    for (let i=0;i<originalCount;i++){
+      const [x,z,h]=matureTrees[i];
+      const scale=(0.76+(i%4)*0.11)*(M3D_PRIPYAT_FACADE_PERIOD==='abandoned'?1:.82);
+      poplar(x,z,h*(M3D_PRIPYAT_FACADE_PERIOD==='abandoned'?1:.82),scale);
+    }
   }
   // Young volunteer trees and shrubs growing through failed paving.
   const saplings=[[-37,13],[-24,7],[-19,29],[-7,48],[2,12],[8,31],[15,46],[28,11],
     [37,36],[-46,40],[47,42],[-4,56],[30,-4],[-31,-2],[4,2],[18,6]];
-  for (let i=0;i<saplings.length;i++) {
+  if(M3D_PRIPYAT_FACADE_PERIOD==='abandoned') for (let i=0;i<saplings.length;i++) {
     const [x,z]=saplings[i],h=3.3+(i%4)*0.75;
     capsule([x,0.05,z],[x,h*.72,z],0.09,'bark');
     for(let j=0;j<5;j++){
@@ -1708,7 +1718,7 @@ function makeScene() {
     }
   }
   // Weed tufts along joints, curbs and beneath trees.
-  for (let x=-49;x<=49;x+=7) for (let z=-12;z<=59;z+=9) {
+  if(M3D_PRIPYAT_FACADE_PERIOD==='abandoned') for (let x=-49;x<=49;x+=7) for (let z=-12;z<=59;z+=9) {
     const dx=((x*13+z*7)%5)*0.12, dz=((x*3-z*11)%5)*0.12;
     ellipsoidMesh(x+dx,0.22,z+dz,0.38,0.28,0.34,'grass',8,6);
     for (let k=0;k<3;k++) capsule([x+dx,0.08,z+dz],[x+dx+(k-1)*0.15,0.52+(k%2)*0.18,z+dz+0.04],0.035,'leaves');
@@ -1723,7 +1733,8 @@ function makeScene() {
   }
   const lamps=[[-50,-8],[-43,56],[-25,-10],[-12,54],[8,55],[28,54],[48,50],[52,23],
     [47,-8],[24,-10],[0,57],[0,67],[-52,25],[52,2]];
-  for (let i=0;i<lamps.length;i++) lamp(lamps[i][0],lamps[i][1],i%5===0);
+  for (let i=0;i<lamps.length;i++)
+    lamp(lamps[i][0],lamps[i][1],M3D_PRIPYAT_FACADE_PERIOD==='abandoned' && i%5===0);
 
   // Interior ceiling fixtures and warm pools of light. Keep a few dead lamps
   // among the working ones so the abandoned rooms retain an uneven mood.
@@ -1737,14 +1748,14 @@ function makeScene() {
     for(let i=0;i<interiorFixtures.length;i++){
       const [x,z]=interiorFixtures[i];
       if(level<=1&&x< -15.0&&z< -24.8) continue; // custom auditorium lighting sits at the 6 m ceiling
-      const failed=(i+level*3)%7===0;
+      const failed=M3D_PRIPYAT_FACADE_PERIOD==='abandoned' && (i+level*3)%7===0;
       box(x-0.48,y,z-0.12,x+0.48,y+0.055,z+0.12,failed?'rust':'lamp');
       if(!failed && i%3===0) M3D_SCENE_LIGHTS.push([x,y-0.20,z,8.2,1.65,255,190,126]);
     }
   }
 
-  // Damaged paving, fragments and shallow puddles near low points.
-  for (const d of [
+  // Damaged paving and debris belong to decades after 1986.
+  if(M3D_PRIPYAT_FACADE_PERIOD==='abandoned') for (const d of [
     [-47,4,0.9],[-35,27,1.1],[-20,54,0.7],[-9,8,0.8],[6,48,1.2],
     [21,16,0.9],[33,48,0.7],[44,14,1.0],[-3,35,0.8],[12,1,1.1]
   ]) {
