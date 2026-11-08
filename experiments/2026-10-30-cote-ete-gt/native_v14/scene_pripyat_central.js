@@ -41,6 +41,15 @@ const M3D_PRIPYAT_BLOCKOUT = Object.freeze({
 // rigid rotation about Y into the independently situated world footprint.
 // Width/length refer to the PHOTOGRAPHIC model, not surveyed plans.
 const M3D_POLISSYA_MODEL=Object.freeze({x0:40,x1:78,z0:-42,z1:-20,height:16.2});
+// Façade Polissya: repères tirés des traits ROUGES de la photo fournie.
+// L'extension basse (avancée) commence 13 m après le coin gauche du modèle
+// local. Son RECUl est une travée estimée (3.10 m) AVANT le coin droit de
+// l'hôtel. Ces deux lignes sont distinctes sur la photo; ce n'est pas le
+// raccord entre galerie indépendante et avancée. Le plan reste approximatif.
+const M3D_POLISSYA_EXTENSION=Object.freeze({
+  startOffset:13.0, endInset:3.10, roofProjection:2.35,
+  roofBottom:3.10, roofTop:3.39
+});
 const M3D_POLISSYA_ORIENTATION_DEGREES=90;
 // Historical typology for comparison only. This is a later documented
 // refurbishment of the 2C-06-9/70 standard design, NOT a measured set of
@@ -564,13 +573,16 @@ function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polis
  // User-annotated photo (08/11/2026): red seam separates the curved
  // standalone gallery (left) from the STRAIGHT hotel entrance canopy (right).
  // Stop at the canopy's BEGINNING, not halfway beneath that canopy.
- // The hotel canopy is defined below by local x0+13 ... x0+23 and
- // protrudes 2.35 m toward the plaza after world-space rotation.
- // Keep a small physical gap even though the two roofs nearly align visually.
- const halfWidth=2.05;
- const awningFrontX=b.x0-2.35;
- const awningStartZ=b.z0+13.0;
- const awningEndZ=b.z0+23.0;
+ // The hotel canopy begins at local x0+13; its far edge is set back
+ // by ~one window bay (3.10 m) from the hotel RIGHT-HAND CORNER, as marked
+ // with two vertical red lines on the user's second annotated photograph.
+ // Those two photo markers are NOT the arcade/canopy boundary.
+ // Keep a small physical gap at the ACTUAL arcade/canopy boundary.
+ const halfWidth=2.05,ex=M3D_POLISSYA_EXTENSION;
+ const awningFrontX=b.x0-ex.roofProjection;
+ const awningStartZ=b.z0+ex.startOffset;
+ const awningEndZ=b.z1-ex.endInset;
+ const hotelCornerZ=b.z1;
  const hotelClearance=.45,arrivalGapZ=.30;
  const endCenterX=awningFrontX-halfWidth-hotelClearance;
  const endZ=awningStartZ-arrivalGapZ;
@@ -591,7 +603,7 @@ function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polis
  };
  return Object.freeze({control,halfWidth,roofBottom:3.55,roofTop:3.86,
    pierCount:20,segments:48,endShape:'straight',at,
-   hotelClearance,arrivalGapZ,awningFrontX,awningStartZ,awningEndZ,
+   hotelClearance,arrivalGapZ,awningFrontX,awningStartZ,awningEndZ,hotelCornerZ,
    platformTop:.40,stepCount:4,stepRise:.10,stepRun:.62});
 }
 function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
@@ -1044,10 +1056,26 @@ function m3dBuildPolissyaLocal({box,capsule,meshTriangle}, cfg=M3D_POLISSYA_MODE
  for(const x of [pavilionLeft,pavilionLeft+4.35,pavilionLeft+8.75,pavilionRight])
    capsule([x,terraceY+.34,z1-.36],[x,terraceY+.61,z1-.36],.035,'rust');
  capsule([pavilionLeft,terraceY+.54,z1-.36],[pavilionRight,terraceY+.54,z1-.36],.03,'rust');
- // Projecting entrance awning, with a recessed area below.
- box(x0+13,3.10,z1+.10,x0+23,3.39,z1+2.35,'concrete');
- for(const x of [x0+13.4,x0+22.2])
-   box(x,.18,z1+1.85,x+.30,3.16,z1+2.12,'rust');
+ // Photo: the hotel's LOW STRAIGHT EXTENSION begins where the curved
+ // independent arcade ends (left red seam in first photo). The extension
+ // stops/recedes one full window bay BEFORE the main building's right corner
+ // (separate pair of red marks in the second annotated photograph).
+ const ext=M3D_POLISSYA_EXTENSION;
+ const extensionX0=x0+ext.startOffset,extensionX1=x1-ext.endInset;
+ // Deep concrete roof/fascia above an open, recessed ground-floor frontage.
+ box(extensionX0,ext.roofBottom,z1+.10,
+     extensionX1,ext.roofTop,z1+ext.roofProjection,'concrete');
+ // Shallow coping and exposed front edge underline the low straight roof.
+ box(extensionX0,ext.roofTop,z1+ext.roofProjection-.16,
+     extensionX1,ext.roofTop+.09,z1+ext.roofProjection+.03,'stone');
+ // End return faces towards the main hotel's corner but does not fill the
+ // recessed bay or create a false closed wall across the entrance.
+ box(extensionX1-.28,.14,z1+1.55,
+     extensionX1,ext.roofBottom,z1+ext.roofProjection-.09,'concrete');
+ for(const x of [extensionX0+.38,(extensionX0+extensionX1)*.5,extensionX1-.82]){
+   box(x,.18,z1+1.85,x+.34,ext.roofBottom+.03,z1+2.12,'plaster');
+   box(x-.025,.10,z1+1.82,x+.365,.33,z1+2.16,'rust');
+ }
  // Visible side facade, weathered windows and lateral balconies.
  for(let floor=0;floor<5;floor++)
   for(let z=z0+2.2;z<z1-2;z+=3.9){
