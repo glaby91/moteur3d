@@ -198,6 +198,38 @@ jobs:
           assert len(list(Path('dist/architecture-review').glob('view-*.png'))) == 13
           PY
 
+      - name: Publish compact visual preview for review
+        if: runner.os == 'Windows'
+        shell: bash
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          python - <<'PY'
+          from PIL import Image, ImageDraw, ImageOps
+          from pathlib import Path
+          import io, base64
+          paths=sorted(Path('dist/architecture-review').glob('view-*.png'))
+          if len(paths)!=13: raise RuntimeError('Expected 13 source render captures')
+          # 4 columns x 4 rows, each original snapshot retains its own label.
+          sheet=Image.new('RGB',(4*280,4*181),(239,239,239))
+          for i,p in enumerate(paths):
+              with Image.open(p) as image:
+                  image=ImageOps.fit(image.convert('RGB'),(280,158))
+                  cell=Image.new('RGB',(280,181),(244,244,244))
+                  cell.paste(image,(0,22))
+                  ImageDraw.Draw(cell).text((8,3),f'RENDU SCENE {i+1:02d}',fill=(20,20,20))
+                  sheet.paste(cell,((i%4)*280,(i//4)*181))
+          for filename,img,quality in [
+            ('contact-sheet-preview.jpg',sheet,47),
+            ('facade-front-preview.jpg',Image.open(paths[0]).convert('RGB'),58)
+          ]:
+              b=io.BytesIO();img.save(b,format='JPEG',quality=quality,optimize=True)
+              blob=b.getvalue()
+              (Path('dist/architecture-review')/filename).write_bytes(blob)
+              print(f'M3D_AUDIT_BEGIN {filename} {len(blob)}')
+              print(base64.b64encode(blob).decode('ascii'))
+              print('M3D_AUDIT_END')
+          PY
+
       - name: Upload compact architectural inspection images
         if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
