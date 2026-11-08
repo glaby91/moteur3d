@@ -80,8 +80,8 @@ for(const tri of connector.triangles){
       'colonnade geometry may not touch Energetik facade');
   }
 }
-assert.ok(connectorPillars.some(tri=>tri.some(v=>v?.p?.[1]<.2)),
-  'colonnade supports must reach the ground');
+assert.ok(connectorPillars.some(tri=>tri.some(v=>v?.p?.[1]>.5&&v?.p?.[1]<.56)),
+  'colonnade supports must reach raised deck base');
 
 const foyerStair=geometry(api.foyerStair);
 assert.equal(foyerStair.filter(v=>v[6]==='stone').length,18,'17 broad foyer steps plus landing required');
