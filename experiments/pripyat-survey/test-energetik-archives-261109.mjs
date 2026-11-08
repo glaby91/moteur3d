@@ -3,11 +3,12 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import vm from 'node:vm';
 import {createRequire} from 'node:module';
+import {fileURLToPath} from 'node:url';
 const require=createRequire(import.meta.url);
 const root=new URL('../2026-10-30-cote-ete-gt/native_v14/',import.meta.url);
 const scene=readFileSync(new URL('scene_pripyat_central.js',root),'utf8');
 const exporter=readFileSync(new URL('export_scene.js',root),'utf8');
-const sign=require(new URL('assets/pripyat/energetik_roof_neon_sign.js',root).pathname);
+const sign=require(fileURLToPath(new URL('assets/pripyat/energetik_roof_neon_sign.js',root)));
 function variant(period,display){
  return vm.runInNewContext(scene+`({roof:m3dBuildEnergetikHistoricalRoofTitle,
    facade:m3dBuildEnergetikCongressFacade,lights:M3D_SCENE_LIGHTS})`,
