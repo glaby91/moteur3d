@@ -46,7 +46,9 @@ assert.ok(Math.abs(p.awningEndZ-(hotel.z1-3.10))<1e-6,
 assert.ok(Math.abs(p.hotelCornerZ-hotel.z1)<1e-6,'hotel corner landmark must be independent');
 assert.ok(p.awningEndZ-p.awningStartZ>20,
   'extension must be long, not the old 10m shallow canopy');
-assert.ok(Math.abs(p.awningFrontX-(end[0]+p.halfWidth)-p.hotelClearance)<.001,'arcade clearance to hotel projecting canopy');
+assert.ok(Math.abs((end[0]-p.halfWidth)-p.awningFrontX-p.hotelClearance)<.001,
+  'outer edge of curved roof must align with front fascia of the long hotel extension');
+assert.ok(hotel.x0-p.awningFrontX>5.0,'long recessed extension must be deep enough for a usable gallery');
 const chordZ=(start[1]+end[1])/2;
 assert.ok(Math.abs(mid[1]-chordZ)>3,'gallery is not visibly curved');
 for(let i=0;i<=128;i++){
