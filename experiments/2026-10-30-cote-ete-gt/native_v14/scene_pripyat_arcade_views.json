@@ -1,7 +1,7 @@
 {
   "scene": "Colonnade indépendante Energetik–Polissya",
   "schema_version": 1,
-  "notes": "L'avancée Polissya part PERPENDICULAIREMENT à la façade de l'hôtel vers l'esplanade (axe X monde), tandis que l'arcade courbe arrive à l'extrémité libre sans raccordement physique; quatre marches courbes et passage latéral distinct. Géométrie estimée selon photos annotées 8 novembre 2026.",
+  "notes": "Photographies de référence du 8/11/2026: la colonnade courbe passe DEVANT toute la largeur de l'avancée libre de Polissya et non seulement devant son angle; une route de service longe le côté droit de l'hôtel (X environ 72–109, Z environ 28–35). Quatre marches principales en courbe, petit accès latéral distinct. Toutes dimensions estimées.",
   "views": [
     {
       "name": "01 — Toiture plate et caissons, vue plongeante rapprochée",
@@ -30,29 +30,29 @@
       "hour_step": 12
     },
     {
-      "name": "03 — Arcade / extrémité de l'avancée réorientée à 90°",
+      "name": "03 — Arcade devant toute l'avancée Polissya",
       "target": [
-        64,
-        2.4,
-        18.5
+        67,
+        2.8,
+        21.5
       ],
       "distance": 30,
-      "angle": -84,
+      "angle": -102,
       "elevation": 12,
-      "fov": 63,
+      "fov": 65,
       "hour_step": 12
     },
     {
-      "name": "04 — Côté courbe vers Energetik, quatre marches et piliers",
+      "name": "04 — Route latérale et aile basse côté hôtel",
       "target": [
-        43,
-        1.9,
-        -30.5
+        93,
+        2.1,
+        30.5
       ],
-      "distance": 23,
-      "angle": -62,
-      "elevation": 8,
-      "fov": 60,
+      "distance": 38,
+      "angle": -78,
+      "elevation": 12,
+      "fov": 65,
       "hour_step": 12
     }
   ]
