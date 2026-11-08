@@ -23,6 +23,8 @@ Le cahier des exigences, les niveaux communiqués, les références prioritaires
 La reconstruction du Palais s'inscrit dans un **atlas plus large de Pripiat**, qui conserve pour chaque référence visuelle : le lien/photo, le crédit, la date ou période, une légende précise, un **texte historique original rédigé en français**, les enseignes et inscriptions authentifiées, ainsi que les choix de restitution 3D. Ne jamais remplacer ces textes par une image seule.
 
 - [**Mosaïques monumentales de l'avenue Lénine — Svitanok, Do Svitla et Tvorennya (8 novembre 2026)**](MOSAIQUES-AVENUE-LENINE-REFERENCES-20261108.md) : trois fiches sourcées, quatre photos référencées, textes et recommandations 3D ; œuvre distinctes de la fresque du hall Energetik.
+- [**JDD — Pripyat, fondation, évacuation et transformation de la ville (2026)**](PRIPYAT-HISTOIRE-EVACUATION-JDD-20261108.md) : texte historique original, chronologie et photo datée de 2019 avec crédit et limites d'utilisation.
+- [**France 3 — photographe roannais, série Pripyat (source à dépouiller)**](PRIPYAT-FRANCE3-PHOTOGRAPHE-ROANNAIS-20261108.md) : référence conservée, contexte rédigé, fiches photos réservées ; contenu de la page non vérifié pour cause de restriction d'accès.
 - [Atlas des lieux et objets confirmés](ATLAS-PRIPYAT-VERIFIE-261107.md) : inventaire général des bâtiments et objets réels.
 
 **Livrable documentaire final envisagé :** un atlas Word et PDF rassemblant les photographies utilisables, leurs crédits, les textes remodelés et les rendus comparatifs ; vérifier les droits de reproduction des images tierces avant toute diffusion.
