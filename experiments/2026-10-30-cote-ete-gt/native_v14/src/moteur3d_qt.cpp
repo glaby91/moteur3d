@@ -1881,18 +1881,28 @@ int main(int argc, char** argv) {
         std::cout << "D3D11 compute BVH + PBR textures + 8bit readback: OK (" << stats.ms << " ms)" << std::endl;
         return 0;
     }
-    // Non-GUI CPU snapshots for reproducible GitHub Actions geometry inspection.
-    // Usage: moteur3d_qt.exe --snapshot <view 1..13> <output.png>
-    // GPU parity CI: moteur3d_qt.exe --snapshot-compute <view 1..13> <output.png>
-    // Identical camera, FOV and lighting; WARP can be selected via M3D_COMPUTE_WARP=1.
-    if (argc >= 4 && (QString::fromLocal8Bit(argv[1]) == QStringLiteral("--snapshot") ||
-                      QString::fromLocal8Bit(argv[1]) == QStringLiteral("--snapshot-compute"))) {
-        const bool computeSnapshot = QString::fromLocal8Bit(argv[1]) == QStringLiteral("--snapshot-compute");
+    // Non-GUI snapshots for fixed-camera QA. The thirteen historic views remain
+    // unchanged; the three arcade shots use a SEPARATE JSON to avoid shifting them.
+    // --snapshot / --snapshot-compute <view 1..13> <output.png>
+    // --snapshot-arcade / --snapshot-arcade-compute <view 1..3> <output.png>
+    // WARP can be selected by setting M3D_COMPUTE_WARP=1.
+    const QString snapshotMode = argc >= 4 ? QString::fromLocal8Bit(argv[1]) : QString();
+    const bool arcadeSnapshot = snapshotMode == QStringLiteral("--snapshot-arcade") ||
+                                snapshotMode == QStringLiteral("--snapshot-arcade-compute");
+    const bool computeSnapshot = snapshotMode == QStringLiteral("--snapshot-compute") ||
+                                 snapshotMode == QStringLiteral("--snapshot-arcade-compute");
+    if (argc >= 4 && (snapshotMode == QStringLiteral("--snapshot") ||
+                      snapshotMode == QStringLiteral("--snapshot-compute") ||
+                      arcadeSnapshot)) {
         QCoreApplication app(argc, argv);
         bool ok = false;
         const int view = QString::fromLocal8Bit(argv[2]).toInt(&ok);
-        QFile file(QCoreApplication::applicationDirPath()+QStringLiteral("/scene_pripyat_views.json"));
-        if (!ok || view < 1 || view > 13 || !file.open(QIODevice::ReadOnly)) return 2;
+        const QString presetFile = arcadeSnapshot
+            ? QStringLiteral("/scene_pripyat_arcade_views.json")
+            : QStringLiteral("/scene_pripyat_views.json");
+        QFile file(QCoreApplication::applicationDirPath()+presetFile);
+        if (!ok || view < 1 || view > (arcadeSnapshot ? 3 : 13) ||
+            !file.open(QIODevice::ReadOnly)) return 2;
         QJsonParseError parseError{};
         const QJsonDocument doc=QJsonDocument::fromJson(file.readAll(),&parseError);
         if(parseError.error!=QJsonParseError::NoError || !doc.isObject()) return 3;
