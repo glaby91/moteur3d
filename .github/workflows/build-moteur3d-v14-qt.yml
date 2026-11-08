@@ -104,6 +104,7 @@ jobs:
           node experiments/pripyat-survey/test-compute-camera-projection.mjs
           node experiments/pripyat-survey/test-polissya-arcade.mjs
           node experiments/pripyat-survey/test-photo-references-261108.mjs
+          node experiments/pripyat-survey/test-energetik-facade-1986.mjs
           node experiments/pripyat-survey/test-compute-pbr-cache.mjs
 
       - name: Export runtime scenes
