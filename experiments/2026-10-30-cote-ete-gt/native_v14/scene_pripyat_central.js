@@ -42,6 +42,20 @@ const M3D_PRIPYAT_BLOCKOUT = Object.freeze({
 // Width/length refer to the PHOTOGRAPHIC model, not surveyed plans.
 const M3D_POLISSYA_MODEL=Object.freeze({x0:40,x1:78,z0:-42,z1:-20,height:16.2});
 const M3D_POLISSYA_ORIENTATION_DEGREES=90;
+// Limited photo-study toggle, NOT a full 1986 scene: only street glazing changes.
+// M3D_PRIPYAT_FACADE_PERIOD=pre1986 (default: abandoned).
+const M3D_PRIPYAT_FACADE_PERIOD =
+  typeof process !== 'undefined' && process.env && process.env.M3D_PRIPYAT_FACADE_PERIOD === 'pre1986'
+    ? 'pre1986' : 'abandoned';
+const M3D_POLISSYA_ENTRANCE_AWNING=Object.freeze({
+ startLocalX:M3D_POLISSYA_MODEL.x0+9.5,
+ endLocalX:M3D_POLISSYA_MODEL.x1-2.5,
+ projection:3.55,
+ canopyY:3.10,
+ canopyThickness:0.33,
+ postLocalX:Object.freeze([M3D_POLISSYA_MODEL.x0+11.0,M3D_POLISSYA_MODEL.x0+18.0,
+                            M3D_POLISSYA_MODEL.x0+25.0,M3D_POLISSYA_MODEL.x0+32.5])
+});
 // Historical typology for comparison only. This is a later documented
 // refurbishment of the 2C-06-9/70 standard design, NOT a measured set of
 // as-built dimensions for the modified Pripyat palace. Never automatically
@@ -567,9 +581,9 @@ function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polis
   // as in the user's sketch (not below the whole building footprint).
   [a.envelope.x1+3.35,-30.5],
   [59.0,-30.5],
-  [b.x0-3.9,-30.5],
+  [b.x0-6.7,-30.5],
   // Finish alongside the middle of Polissya's west facade.
-  [b.x0-3.9,7.0]
+  [b.x0-6.7,7.0]
  ]);
  const halfWidth=1.85;
  const at=(t,offset=0)=>{
@@ -758,7 +772,7 @@ function m3dBuildEnergetikFacade({box,roundBox,objects}){
   }
 
   // Separate second-storey gallery bays, reveals and structural transoms.
-  // No glazing is inserted into the abandoned facade: preserve sightlines
+  // No glazing in the default abandoned facade; optional historic glazing below.
   // into the existing atrium and the walk-through camera path.
   const columns=[-45.8,-39.0,-32.2,-25.4,-18.6,-11.8,-5.0,1.8,8.6,15.4,22.2];
   for(let bay=0;bay<columns.length-1;bay++){
@@ -774,6 +788,51 @@ function m3dBuildEnergetikFacade({box,roundBox,objects}){
     // Partial vertical frame fragments, deliberately not closed windows.
     if(bay%4===0)box((left+right)*0.5-0.045,6.5,-20.11,(left+right)*0.5+0.045,8.2,-19.82,'metal');
   }
+}
+
+// Comparison geometry: original glazed facade visible in user's winter archive.
+// Does not retrofit the entire ruined city into 1986.
+function m3dBuildEnergetik1986FacadeGlazing({box}){
+ if(M3D_PRIPYAT_FACADE_PERIOD!=='pre1986')return;
+ const cols=[-45.8,-39.0,-32.2,-25.4,-18.6,-11.8,-5.0,1.8,8.6,15.4,22.2];
+ for(let bay=0;bay<cols.length-1;bay++){
+   const left=cols[bay]+.45,right=cols[bay+1]-.45,z=-19.40;
+   box(left,3.50,z,right,8.32,z+.055,'glass');
+   for(let j=1;j<=3;j++){
+     const x=left+(right-left)*j/4;
+     box(x-.055,3.52,z+.01,x+.055,8.31,z+.105,'metal');
+   }
+   box(left,5.78,z+.01,right,5.88,z+.11,'metal');
+   box(left,8.23,z,right,8.34,z+.11,'stone');
+ }
+}
+
+// Supplement the existing 9-letter ЭНЕРГЕТИК sign with the archival title.
+// Strokes/spacing are placeholders until scaled original lettering is surveyed.
+function m3dBuildEnergetikHistoricalRoofTitle({box}){
+ const glyphs={
+  'Д':['01110','01010','01010','01010','11111','10001','10001'],
+  'В':['11110','10001','10001','11110','10001','10001','11110'],
+  'О':['01110','10001','10001','10001','10001','10001','01110'],
+  'Р':['11110','10001','10001','11110','10000','10000','10000'],
+  'Е':['11111','10000','10000','11110','10000','10000','11111'],
+  'Ц':['10001','10001','10001','10001','10001','11111','00001'],
+  'К':['10001','10010','10100','11000','10100','10010','10001'],
+  'У':['10001','10001','01010','00100','00100','00100','00100'],
+  'Л':['00111','01001','10001','10001','10001','10001','10001'],
+  'Ь':['10000','10000','10000','11110','10001','10001','11110'],
+  'Т':['11111','00100','00100','00100','00100','00100','00100'],
+  'Ы':['10001','10001','10001','11101','10011','10011','11101']
+ };
+ const label='ДВОРЕЦ КУЛЬТУРЫ',px=.095,pitch=.65,x0=-43.4,y0=9.85,z0=-19.30;
+ const mat=M3D_PRIPYAT_FACADE_PERIOD==='pre1986'?'metal':'rust';
+ for(let k=0;k<label.length;k++){
+   const glyph=glyphs[label[k]];if(!glyph)continue;
+   for(let iy=0;iy<7;iy++)for(let ix=0;ix<5;ix++)if(glyph[iy][ix]==='1'){
+     const xx=x0+k*pitch+ix*px,yy=y0+(6-iy)*px;
+     box(xx,yy,z0,xx+px*.88,yy+px*.88,z0+.12,mat);
+   }
+ }
 }
 
 // Hotel Polissya: photo-guided five-storey main volume with an asymmetrical
@@ -875,10 +934,21 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
  }
  box(terraceX0,roofY+.10,z1-.20,x1+.05,roofY+.85,z1+.04,'concrete');
  box(terraceX0,roofY+.86,z1-.24,x1+.05,roofY+.96,z1+.05,'rust');
- // Projecting entrance awning, with a recessed area below.
- box(x0+13,3.10,z1+.10,x0+23,3.39,z1+2.35,'concrete');
- for(const x of [x0+13.4,x0+22.2])
-   box(x,.18,z1+1.85,x+.30,3.16,z1+2.12,'rust');
+ // Long hotel entrance awning reconstructed from historic front view.
+ // A separate slim pedestrian gap is reserved between its western lip and
+ // the independent gallery; NO masonry connector.
+ const aw=M3D_POLISSYA_ENTRANCE_AWNING;
+ box(aw.startLocalX,aw.canopyY,z1+.12,aw.endLocalX,
+     aw.canopyY+aw.canopyThickness,z1+aw.projection,'concrete');
+ box(aw.startLocalX-.10,aw.canopyY+.16,z1+aw.projection-.22,
+     aw.endLocalX+.10,aw.canopyY+aw.canopyThickness+.055,
+     z1+aw.projection+.08,'stone');
+ for(const x of aw.postLocalX){
+   box(x-.17,.12,z1+aw.projection-.42,x+.17,aw.canopyY+.035,z1+aw.projection-.08,'concrete');
+   box(x-.27,.035,z1+aw.projection-.54,x+.27,.15,z1+aw.projection+.03,'stone');
+ }
+ for(const x of [x0+17.1,x0+23.8])
+   box(x,.15,z1+.12,x+.32,aw.canopyY-.06,z1+.35,'plaster');
  // Visible side facade, weathered windows and lateral balconies.
  for(let floor=0;floor<5;floor++)
   for(let z=z0+2.2;z<z1-2;z+=3.9){
@@ -996,7 +1066,8 @@ function makeScene() {
 
   // Independent facade assembly: main building remains traversable.
   m3dBuildEnergetikFacade({box,roundBox,objects});
-
+  m3dBuildEnergetik1986FacadeGlazing({box});
+  m3dBuildEnergetikHistoricalRoofTitle({box});
   m3dBuildEnergetikArchitecturalAccents({box,capsule});
 
   // Attached north wing: internal doorway joins the original palace corridor.
