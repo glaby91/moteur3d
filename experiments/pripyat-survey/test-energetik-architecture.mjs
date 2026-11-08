@@ -95,7 +95,8 @@ const hotel=geometry(api.polissya);
 assert.equal(hits(hotel,93,2.1,7).length,0,'Polissya rotated core must be hollow');
 assert.equal(hits(hotel,85,2.2,-11.75).length,0,'Polissya rotated western entry blocked');
 assert.equal(hits(hotel,82.30,2.4,0).length,0,'Polissya rotated front window is an opaque wall');
-assert.ok(hotel.some(v=>v[6]==='rust' && v[4]>15.9),'rusty hotel rooftop sign missing');
+assert.ok(hotel.some(v=>v[6]==='metal' && v[4]>15.9),
+ '1986 metal hotel rooftop sign missing (rust belongs to abandoned mode)');
 assert.ok(hotel.some(v=>v[6]==='stone' && v[4]>18.5),'hotel roof terrace missing');
 console.log('Energetik/Polissya generator geometry probes passed:',{
   slabs:slabs.length, arcade:arcade.length, rear:rear.length, shell:shell.length,
