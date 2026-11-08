@@ -578,17 +578,22 @@ function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polis
  // The user-annotated front and side photographs show TWO distinct elements:
  // 1) the quarter-turn independent covered arcade, 2) the low hotel wing
  // stretching OUT from Polissya towards the plaza, not alongside the facade.
- // Its far free end aligns visually with the arcade, with NO direct junction.
+ // The arcade passes IN FRONT of the wing's whole free end (not only its corner), with NO direct junction.
  const ex=M3D_POLISSYA_EXTENSION,halfWidth=2.05;
  const awningFrontX=b.x0-ex.length; // free west end, towards esplanade
  const awningBackX=b.x0+.10;       // roof penetrates 10 cm into hotel façade
  const awningStartZ=b.z1-ex.endInset-ex.width; // one-bay recess from corner
  const awningEndZ=b.z1-ex.endInset;
  const hotelCornerZ=b.z1;
- // The arcade arrives at the free END of the wing, at its plaza-side corner.
- const hotelClearance=.25, arrivalGapZ=.30;
+ // The arcade does NOT stop alongside the wing's southern corner:
+ // it CURVES IN FRONT of the free (plaza-facing) end, runs past the entire
+ // 5.4-metre frontage and finishes beyond its northern edge. This was
+ // corrected by the user after checking the real Moteur3D camera 12.
+ // Maintain 25 cm between the inner roof edge and the wing front; the
+ // apparent visual connection is not a physical interpenetration.
+ const hotelClearance=.25,frontPassBeyondWing=1.30;
  const endCenterX=awningFrontX-halfWidth-hotelClearance;
- const endZ=awningStartZ-arrivalGapZ;
+ const endZ=awningEndZ+frontPassBeyondWing;
  const control=Object.freeze([
   [a.envelope.x1+3.35,-30.5],
   [50.0,-30.5],
@@ -606,8 +611,35 @@ function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polis
  };
  return Object.freeze({control,halfWidth,roofBottom:3.55,roofTop:3.86,
    pierCount:20,segments:48,endShape:'straight',at,
-   hotelClearance,arrivalGapZ,awningFrontX,awningBackX,awningStartZ,awningEndZ,hotelCornerZ,
+   hotelClearance,frontPassBeyondWing,awningFrontX,awningBackX,awningStartZ,awningEndZ,hotelCornerZ,
    platformTop:.40,stepCount:4,stepRise:.10,stepRun:.62});
+}
+// Service road alongside the hotel's RIGHT end-wall, visible in the
+// oblique exterior references. In the scene Polissya's long facade faces
+// world -X; the right short side is at world Z=hotel.z1. The road runs
+// PERPENDICULAR to the main facade, along world X, not along the arcade.
+// Footprint and curb widths are photographic estimates, not OSM survey.
+function m3dPolissyaSideRoadPlan(b=M3D_PRIPYAT_BLOCKOUT.polissya){
+ const z0=b.z1+2.30,width=6.30,x0=b.x0-10.0,x1=b.x1+5.0;
+ return Object.freeze({x0,x1,z0,z1:z0+width,width,
+   sidewalkZ0:b.z1+.22,sidewalkZ1:b.z1+1.95,
+   curbZ0:b.z1+1.96,curbZ1:b.z1+2.22});
+}
+function m3dBuildPolissyaSideRoad({box},b=M3D_PRIPYAT_BLOCKOUT.polissya){
+ const r=m3dPolissyaSideRoadPlan(b);
+ // Paving is placed above the background terrain to remain visible.
+ box(r.x0,-.045,r.z0,r.x1,.038,r.z1,'asphalt');
+ // Pavement adjacent to the long side-wall, with a continuous raised curb.
+ box(b.x0-.45,.006,r.sidewalkZ0,r.x1,.12,r.sidewalkZ1,'stone');
+ box(r.x0,.025,r.curbZ0,r.x1,.16,r.curbZ1,'concrete');
+ // Opposite damaged curb / strip: the road remains free for circulation.
+ box(r.x0,.035,r.z1-.18,r.x1,.09,r.z1+.05,'concrete');
+ // Joint lines and weathered patches break the perfectly new road surface.
+ for(let x=r.x0+3.4;x<r.x1-2;x+=7.3){
+   box(x,.039,r.z0+1.30,x+1.65,.043,r.z0+1.54,'stone');
+   box(x+2.0,.039,r.z1-1.36,x+3.40,.042,r.z1-1.18,'asphalt');
+ }
+ return r;
 }
 function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
  const p=m3dPolissyaArcadePlan(a);
@@ -1444,6 +1476,10 @@ function makeScene() {
   for (let x = -13; x < 14; x += 2.4) {
     box(x, 0.036, 72, x + 1.25, 0.043, 77, 'concrete');
   }
+
+  // Real side street on the RIGHT of Hotel Polissya (separate from
+  // the footpath, from the four arcade steps and from the hotel's ramp).
+  m3dBuildPolissyaSideRoad({box});
 
   // Independent building-to-building connector component.
   m3dBuildConnector({box,meshTriangle});
