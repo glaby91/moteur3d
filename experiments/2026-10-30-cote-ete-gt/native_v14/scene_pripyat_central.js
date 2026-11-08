@@ -760,7 +760,8 @@ function m3dBuildEnergetikArchitecturalAccents({box,capsule}){
   box(-11.3,3.59,-19.53,11.4,3.69,-17.88,'stone');
   for(const x of [-10.0,-5.1,0,5.1,10.0]){
     box(x-0.075,0.45,-19.47,x+0.075,3.35,-19.27,'metal');
-    box(x-0.48,3.0,-19.51,x+0.48,3.15,-19.24,'rust');
+    box(x-0.48,3.0,-19.51,x+0.48,3.15,-19.24,
+        M3D_PRIPYAT_FACADE_PERIOD==='abandoned'?'rust':'metal');
   }
   // Facade bays remain open to the original interior; no opaque wall placed.
   // Stair-tower upper parapet and rear roof mechanical housing.
@@ -768,21 +769,23 @@ function m3dBuildEnergetikArchitecturalAccents({box,capsule}){
   box(20.45,13.95,-22.35,30.6,14.28,-21.95,'stone');
   box(22.2,11.55,-37.5,25.6,12.9,-35.2,'concrete');
   box(22.0,12.9,-37.7,25.8,13.03,-35.0,'stone');
-  // Thin facade scars and metal remnants, not a repetitive decorative grid.
-  for(const [x,y] of [[-42.5,2.2],[-29.4,4.7],[-16.8,6.1],[7.3,5.8],[19.2,3.1]]){
-    capsule([x,y,-20.86],[x+0.4,y+0.24,-20.87],0.022,'rust');
-  }
+  // Rust scars are post-1986 damage: keep the archival facade intact.
+  if(M3D_PRIPYAT_FACADE_PERIOD==='abandoned')
+    for(const [x,y] of [[-42.5,2.2],[-29.4,4.7],[-16.8,6.1],[7.3,5.8],[19.2,3.1]]){
+      capsule([x,y,-20.86],[x+0.4,y+0.24,-20.87],0.022,'rust');
+    }
 }
 
 function m3dBuildEnergetikFacade({box,roundBox,objects}){
-  // Projecting plinth, pilasters, capitals and layered cornice give the civic
-  // façade real relief. The large bays stay open: the reference facade has no glazing.
+  // Main front: 1986 glass-wall enclosure versus open bays in later ruins.
+  // The frame, capitals and cornice remain actual geometry, not painted flats.
   box(-48.0,0.0,-20.55,26.9,0.72,-19.25,'stone');
   box(-47.0,8.7,-20.48,25.6,9.02,-19.42,'concrete');
   box(-47.6,9.02,-20.74,26.2,9.28,-19.26,'stone');
   box(-47.9,9.28,-20.94,26.5,9.48,-19.08,'concrete');
   for (const x of [-45.8,-39.0,-32.2,-25.4,-18.6,-11.8,-5.0,1.8,8.6,15.4,22.2]) {
-    if (x === -39.0) {
+    if(x===-39.0 && M3D_PRIPYAT_FACADE_PERIOD==='abandoned'){
+      // The old imported crumbling-bay asset must not appear in 1986.
       buildEnergetikFacadeBay({ objects, roundBox }, x, 0, -19.63, { nativeMaterial: 'concrete' });
       continue;
     }
@@ -792,9 +795,8 @@ function m3dBuildEnergetikFacade({box,roundBox,objects}){
     box(x-0.58,8.62,-20.50,x+0.58,8.78,-19.20,'concrete');
   }
 
-  // Separate second-storey gallery bays, reveals and structural transoms.
-  // No glazing in the default abandoned facade; optional historic glazing below.
-  // into the existing atrium and the walk-through camera path.
+  // Storey galleries and reveals; the 1986 option adds continuous glazing
+  // on top of these frames, whereas the abandoned option leaves bays open.
   const columns=[-45.8,-39.0,-32.2,-25.4,-18.6,-11.8,-5.0,1.8,8.6,15.4,22.2];
   for(let bay=0;bay<columns.length-1;bay++){
     const left=columns[bay]+0.40,right=columns[bay+1]-0.40;
@@ -846,7 +848,9 @@ function m3dBuildEnergetikHistoricalRoofTitle({box}){
   'Т':['11111','00100','00100','00100','00100','00100','00100'],
   'Ы':['10001','10001','10001','11101','10011','10011','11101']
  };
- const label='ДВОРЕЦ КУЛЬТУРЫ',px=.095,pitch=.65,x0=-43.4,y0=9.85,z0=-19.30;
+ // Historic sign spans most of the WEST roof edge in the photo. Its previous
+ // ~10 m width was visibly too small relative to the 75 m facade.
+ const label='ДВОРЕЦ КУЛЬТУРЫ',px=.24,pitch=2.0,x0=-44.5,y0=9.74,z0=-19.30;
  const mat=M3D_PRIPYAT_FACADE_PERIOD==='pre1986'?'metal':'rust';
  for(let k=0;k<label.length;k++){
    const glyph=glyphs[label[k]];if(!glyph)continue;
@@ -1078,8 +1082,9 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
    for(let floor=0;floor<5;floor++){
      const y=1.75+floor*step;
      if(y+1.42>top)continue;
-     if((Math.floor(x*3)+floor)%4!==0)
-       box(x+.58,y,z0-.10,x+2.0,y+1.42,z0+.04,'windowdark');
+     if(M3D_PRIPYAT_FACADE_PERIOD==='pre1986' || (Math.floor(x*3)+floor)%4!==0)
+       box(x+.58,y,z0-.10,x+2.0,y+1.42,z0+.04,
+           M3D_PRIPYAT_FACADE_PERIOD==='pre1986'?'glass':'windowdark');
    }
  }
  // Street facade: genuine window openings between columns and spandrels,
@@ -1095,8 +1100,9 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
      box(x,yCursor,z1-wall,x+1.45,y,z1,'concrete');
      yCursor=y+1.55;
      // Repeat dark and broken panes, avoid identical glowing rectangles.
-     const open=(Math.round(x*10)+floor*13)%6===0;
-     if(!open)box(x+.045,y+.06,z1+.045,x+1.405,y+1.48,z1+.095,'windowdark');
+     const open=M3D_PRIPYAT_FACADE_PERIOD==='abandoned' && (Math.round(x*10)+floor*13)%6===0;
+     if(!open)box(x+.045,y+.06,z1+.045,x+1.405,y+1.48,z1+.095,
+          M3D_PRIPYAT_FACADE_PERIOD==='pre1986'?'glass':'windowdark');
      else{
        box(x+.065,y+.82,z1+.03,x+.69,y+1.46,z1+.065,'windowdark');
        box(x+.72,y+.08,z1+.03,x+1.38,y+.72,z1+.065,'glass');
