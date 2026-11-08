@@ -609,6 +609,33 @@ function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
      meshTriangle(u0,u1,u2,'concrete');meshTriangle(u1,u3,u2,'concrete');
    }
  }
+ // Photo reference: raised concrete coping and intersecting structural ribs.
+ // Keep the existing curved slab as the recessed base of the roof coffers.
+ const ribBottom=p.roofTop-.025,ribTop=p.roofTop+.30;
+ const rib=(a,b,c,d)=>{
+   const v=(pt,y)=>({p:[pt[0],y,pt[1]],n:[0,1,0],uv:[pt[0]*.12,pt[1]*.12]});
+   const A=v(a,ribBottom),B=v(b,ribBottom),C=v(c,ribBottom),D=v(d,ribBottom);
+   const E=v(a,ribTop),F=v(b,ribTop),G=v(c,ribTop),H=v(d,ribTop);
+   const quad=(q,r,s,t)=>{meshTriangle(q,r,s,'concrete');meshTriangle(s,r,t,'concrete');};
+   quad(E,F,G,H);quad(A,C,B,D);quad(A,E,C,G);
+   quad(B,D,F,H);quad(A,B,E,F);quad(C,G,D,H);
+ };
+ // Longitudinal edge parapets and internal ribs follow the Bezier arc.
+ for(let i=0;i<p.segments;i++){
+   const t0=i/p.segments,t1=(i+1)/p.segments;
+   for(const [offset,width] of [
+     [-p.halfWidth+.13,.26],[-p.halfWidth*.34,.14],
+     [p.halfWidth*.34,.14],[p.halfWidth-.13,.26]]){
+     rib(p.at(t0,offset-width/2),p.at(t0,offset+width/2),
+         p.at(t1,offset-width/2),p.at(t1,offset+width/2));
+   }
+ }
+ // Repeated transverse beams form real 3D rectangular roof coffers.
+ for(let i=1;i<24;i++){
+   const t=i/24,t0=t-.0035,t1=t+.0035;
+   rib(p.at(t0,-p.halfWidth+.02),p.at(t0,p.halfWidth-.02),
+       p.at(t1,-p.halfWidth+.02),p.at(t1,p.halfWidth-.02));
+ }
  // The hand-drawn plan shows rounded ends, not square-cut slabs.
  // Add a semicircular concrete roof cap at each free end. This is only
  // a roof continuation: there is no hidden connector or end wall.
