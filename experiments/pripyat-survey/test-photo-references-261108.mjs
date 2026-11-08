@@ -51,7 +51,7 @@ api.roofTitle({box:(...args)=>afterRoof.push(args)});
 historic.roofTitle({box:(...args)=>beforeRoof.push(args)});
 assert.ok(beforeRoof.length>120 && beforeRoof.length===afterRoof.length,
   'Full archival phrase should consist of geometric letter strokes');
-assert.ok(beforeRoof.every(v=>v[6]==='metal'));
+assert.ok(beforeRoof.every(v=>v[6]==='neon'),'Historic blue roof title should be emissive');
 assert.ok(afterRoof.every(v=>v[6]==='rust'));
 console.log('Photo-guided arcade/hotel/Energetik study geometry checks passed', {
  openPedestrianGapM:+gap.toFixed(2),
