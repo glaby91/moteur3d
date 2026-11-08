@@ -24,6 +24,7 @@ function buildEnergetikRoofNeonSign(api, x=0, y=0, z=0, options={}) {
   const letterW=1.22*scale, letterH=1.62*scale, gap=.20*scale;
   const sectionLength=options.sectionLength||.245*scale;
   const neonRadius=options.neonRadius||.026*scale;
+  const coreMaterial=options.coreMaterial||'neon';
   const outerRadius=options.outerRadius||.044*scale;
   const frontZ=z+.38*scale;
   const originY=y+.23*scale;
@@ -95,7 +96,7 @@ function buildEnergetikRoofNeonSign(api, x=0, y=0, z=0, options={}) {
       const p=strokes[strokeIndex].map(([u,v])=>[lx+u*letterW,originY+v*letterH,frontZ]);
       // Secondary outer glass and bright inner core are separately segmented.
       tubeSegments.push(...line(p,'glass',outerRadius,`glyph_${index+1}_${ch}_tube${strokeIndex+1}_glass`,ch));
-      tubeSegments.push(...line(p,'neon',neonRadius,`glyph_${index+1}_${ch}_tube${strokeIndex+1}_core`,ch));
+      tubeSegments.push(...line(p,coreMaterial,neonRadius,`glyph_${index+1}_${ch}_tube${strokeIndex+1}_core`,ch));
       // Visible steel clips hold the tube at regular intervals along the trace.
       for(let k=0;k<p.length-1;k++){
         const a=p[k],b=p[k+1],len=Math.hypot(b[0]-a[0],b[1]-a[1]);
@@ -125,7 +126,7 @@ function buildEnergetikRoofNeonSign(api, x=0, y=0, z=0, options={}) {
     units:'metres',origin:[x,y,z],scale,dimensions:{width:totalW+.82*scale,height:2.02*scale,depth:.82*scale},
     face:'+Z',objectRange:objectStart===null?null:[objectStart,objectEnd],objectCount:objectStart===null?null:objectEnd-objectStart,
     electricalSegmentation:{independentCircuits:title.length,letters:letterRecords,parts},
-    lighting:{nativeMaterial:'neon',lightPositions:letterRecords.map((_,i)=>[left+i*(letterW+gap)+letterW*.5,originY+.76*letterH,frontZ+.18*scale])}
+    lighting:{nativeMaterial:coreMaterial,lightPositions:letterRecords.map((_,i)=>[left+i*(letterW+gap)+letterW*.5,originY+.76*letterH,frontZ+.18*scale])}
   };
 }
 
