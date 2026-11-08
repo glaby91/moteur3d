@@ -71,7 +71,7 @@ const frontCrossings=Array.from({length:257},(_,i)=>p.at(i/256))
   .filter(pt=>pt[1]>=p.awningStartZ+.3 && pt[1]<=p.awningEndZ-.3);
 assert.ok(frontCrossings.length>=10,'arcade must physically traverse the full wing front');
 assert.ok(frontCrossings.every(pt=>pt[0]+p.halfWidth<=p.awningFrontX-p.hotelClearance+.001),
-  'arcade curved roof would penetrate the hotel's wing');
+  'arcade curved roof would penetrate the Polissya wing');
 const chordZ=(start[1]+end[1])/2;
 assert.ok(Math.abs(mid[1]-chordZ)>3,'gallery is not visibly curved');
 for(let i=0;i<=128;i++){
