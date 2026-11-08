@@ -1,0 +1,46 @@
+{
+  "scene": "Colonnade indépendante Energetik–Polissya",
+  "schema_version": 1,
+  "notes": "Caméras QA ponctuelles; elles n'altèrent pas les 13 vues officielles. Coordonnées métriques estimées, plan de Bézier m3dPolissyaArcadePlan. Vues CPU et WARP aux paramètres identiques.",
+  "views": [
+    {
+      "name": "01 — Toiture plate et caissons, vue plongeante rapprochée",
+      "target": [
+        63.5,
+        3.86,
+        -25
+      ],
+      "distance": 31,
+      "angle": -20,
+      "elevation": 71,
+      "fov": 52,
+      "hour_step": 12
+    },
+    {
+      "name": "02 — Sous-face et poteaux carrelés, vue depuis la place",
+      "target": [
+        65.5,
+        2.1,
+        -26.3
+      ],
+      "distance": 16.5,
+      "angle": -105,
+      "elevation": 2,
+      "fov": 63,
+      "hour_step": 12
+    },
+    {
+      "name": "03 — Profil du débord et rythme des supports",
+      "target": [
+        71,
+        2,
+        -21.7
+      ],
+      "distance": 20,
+      "angle": 145,
+      "elevation": 1.5,
+      "fov": 58,
+      "hour_step": 12
+    }
+  ]
+}
