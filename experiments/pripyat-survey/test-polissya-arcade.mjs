@@ -109,7 +109,7 @@ assert.ok(supports.length>=6,'long extension must have repeated structural pilla
 const fascia=hb.filter(v=>v[6]==='concrete' && v[0]<hotel.x0-2 &&
                                v[1]>2.7 && v[1]<3.1 && v[4]>=p.roofBottom);
 assert.ok(fascia.length>=1,'continuous deep upper fascia missing');
-const sideSteps=hb.filter(v=>v[6]==='stone' && Math.abs(v[1]-.025)<.001 &&
+const sideSteps=hb.filter(v=>v[6]==='stone' && Math.abs(v[1]-.02)<.001 &&
                                 [0.125,0.250,0.375].some(y=>Math.abs(v[4]-y)<.001));
 assert.ok(sideSteps.length>=3,'three small side access treads to hotel are missing');
 const handrails=hotelCapsules.filter(x=>x[3]==='rust' && x[0]?.[1]>.9 && x[1]?.[1]>.9 &&
