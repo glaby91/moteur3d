@@ -158,7 +158,7 @@ struct ComputeCache {
    g.params[0]=name=="concrete"?.34f:name=="stone"||name=="brick"?.28f:
        name=="glass"?.16f:name=="mural"?.075f:name=="seatVinylBrown"?.85f:.65f;
    g.params[1]=float(m.transmissionPercent)/100.f;
-   g.params[2]=name=="neon"?1.35f:name=="lamp"?1.f:name=="windowlit"?.22f:0.f;
+   g.params[2]=(name=="neon"||name=="neonRed")?1.35f:name=="lamp"?1.f:name=="windowlit"?.22f:0.f;
    materials.push_back(g);
    colors[mIndex].resize(pixelCount);normals[mIndex].resize(pixelCount);
    roughs[mIndex].resize(pixelCount);
