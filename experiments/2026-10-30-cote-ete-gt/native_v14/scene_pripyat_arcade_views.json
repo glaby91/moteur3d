@@ -1,7 +1,7 @@
 {
   "scene": "Colonnade indépendante Energetik–Polissya",
   "schema_version": 1,
-  "notes": "Quatre caméras QA indépendantes. La vue 03 cadre le trait rouge de la photo fournie (début de l'avancée rectiligne de Polissya). La toiture de l'arcade conserve des extrémités coupées droit; les quatre marches suivent la courbe.",
+  "notes": "L'avancée Polissya part PERPENDICULAIREMENT à la façade de l'hôtel vers l'esplanade (axe X monde), tandis que l'arcade courbe arrive à l'extrémité libre sans raccordement physique; quatre marches courbes et passage latéral distinct. Géométrie estimée selon photos annotées 8 novembre 2026.",
   "views": [
     {
       "name": "01 — Toiture plate et caissons, vue plongeante rapprochée",
@@ -30,16 +30,16 @@
       "hour_step": 12
     },
     {
-      "name": "03 — Jonction visuelle arcade / début avancée Polissya",
+      "name": "03 — Arcade / extrémité de l'avancée réorientée à 90°",
       "target": [
-        77.2,
-        2.15,
-        0.85
+        64,
+        2.4,
+        18.5
       ],
-      "distance": 24,
-      "angle": -105,
-      "elevation": 8,
-      "fov": 57,
+      "distance": 30,
+      "angle": -84,
+      "elevation": 12,
+      "fov": 63,
       "hour_step": 12
     },
     {
