@@ -2,7 +2,7 @@
   "scene": "Palais de la Culture Energetik — Pripiat",
   "schema_version": 1,
   "annex": "docs/pripyat/VUES-ENERGETIK.md",
-  "notes": "13 vues; 12 = Polissya + aile basse et arcade depuis la place, 13 = surplomb rapproche de leur jonction et passage. IMG-022 exclue comme reference. Dimensions non mesurees.",
+  "notes": "14 vues de contrôle. 12 et 13 ciblent la galerie et l'aile basse près du Polissya ; 14 donne une vue de la façade arrière et de la loggia supérieure. IMG-022 reste exclue.",
   "views": [
     {
       "name": "01 — Façade complète et colonnade",
@@ -171,6 +171,19 @@
       "angle": -22,
       "elevation": 65,
       "fov": 66,
+      "hour_step": 12
+    },
+    {
+      "name": "14 — Façade arrière de l'hôtel Polissya et loggia supérieure",
+      "target": [
+        93,
+        9,
+        4
+      ],
+      "distance": 48,
+      "angle": 90,
+      "elevation": 12,
+      "fov": 56,
       "hour_step": 12
     }
   ]
