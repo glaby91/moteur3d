@@ -53,7 +53,7 @@ assert.ok(p.frontPassBeyondWing>=.8&&p.frontPassBeyondWing<=2.0,
   'arcade must not terminate abruptly at the wing corner');
 assert.ok(Math.abs(p.awningStartZ-(hotel.z1-3.10-5.40))<1e-6,
  'wing side must be set back from right hotel corner by one bay plus wing width');
-assert.ok(p.arrivalGapZ>0&&p.arrivalGapZ<=.5,'no structural connection permitted at roof seam');
+assert.ok(p.hotelClearance>=.20&&p.hotelClearance<=.50,'no structural connection permitted at roof seam');
 assert.ok(Math.abs(p.awningEndZ-(hotel.z1-3.10))<1e-6,
   'photo 2: wing outer side is one window bay short of hotel corner');
 assert.ok(Math.abs(p.hotelCornerZ-hotel.z1)<1e-6,'hotel corner landmark must be independent');
