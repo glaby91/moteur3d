@@ -1,0 +1,26 @@
+name: Pripyat colonnade geometry quick QA
+on:
+  push:
+    branches:
+      - feature/pripyat-visual-quality-baseline-261107
+    paths:
+      - experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js
+      - experiments/pripyat-survey/test-polissya-arcade.mjs
+      - experiments/pripyat-survey/test-energetik-architecture.mjs
+      - .github/workflows/pripyat-colonnade-geometry-qa.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  geometry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate scene syntax and geometry
+        run: |
+          node --check experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js
+          node experiments/pripyat-survey/test-energetik-architecture.mjs
+          node experiments/pripyat-survey/test-polissya-arcade.mjs
