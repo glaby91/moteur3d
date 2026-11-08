@@ -707,7 +707,7 @@ private:
         }
         sceneViewSelector_->setEnabled(!sceneViewPresets_.empty());
         sceneViewSelector_->setCurrentIndex(-1);
-        sceneViewSelector_->setToolTip(QStringLiteral("Quatorze vues documentées : Energetik, grande roue, Polissya et galerie, dont la façade arrière."));
+        sceneViewSelector_->setToolTip(QStringLiteral("Dix-huit vues de travail, dont quatre caméras historiques non recalées."));
     }
 
     void applySceneViewPreset(int index) {
