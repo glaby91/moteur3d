@@ -2,7 +2,7 @@
   "scene": "Palais de la Culture Energetik — Pripiat",
   "schema_version": 1,
   "annex": "docs/pripyat/VUES-ENERGETIK.md",
-  "notes": "13 vues de contrôle (12 : façade Polissya depuis la place ; 13 : colonnade courbe en surplomb), gym/roue 06/11 conservées. La géoréférence reste provisoire.",
+  "notes": "13 vues; 12 = Polissya + aile basse et arcade depuis la place, 13 = surplomb rapproche de leur jonction et passage. IMG-022 exclue comme reference. Dimensions non mesurees.",
   "views": [
     {
       "name": "01 — Façade complète et colonnade",
@@ -148,29 +148,29 @@
       "hour_step": 12
     },
     {
-      "name": "12 — Hôtel Polissya et galerie courbe",
+      "name": "12 — Hôtel Polissya, aile basse et arcade devant",
       "target": [
-        89,
-        8,
-        7
+        80,
+        5.5,
+        -4
       ],
-      "distance": 72,
-      "angle": -90,
-      "elevation": 8,
-      "fov": 62,
+      "distance": 53,
+      "angle": -83,
+      "elevation": 9,
+      "fov": 58,
       "hour_step": 12
     },
     {
-      "name": "13 — Colonnade Polissya vue en surplomb",
+      "name": "13 — Colonnade et aile basse Polissya en surplomb",
       "target": [
-        63,
-        4,
-        -4
+        73,
+        3.4,
+        -11
       ],
-      "distance": 106,
-      "angle": -20,
-      "elevation": 70,
-      "fov": 70,
+      "distance": 54,
+      "angle": -22,
+      "elevation": 65,
+      "fov": 66,
       "hour_step": 12
     }
   ]
