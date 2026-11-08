@@ -89,8 +89,8 @@ const projectingAwning=hb.filter(v=>v[0]<hotel.x0-2 && Math.abs(v[1]-p.roofBotto
 assert.ok(projectingAwning.some(v=>Math.abs(v[2]-p.awningStartZ)<1e-6 &&
                                       Math.abs(v[5]-p.awningEndZ)<1e-6),
   'continuous hotel extension roof must span the photo-annotated landmarks');
-assert.ok(hb.filter(v=>v[0]<hotel.x0-1 && v[1]>2.5).every(v=>v[2]<=p.awningEndZ+.01),
-  'solid upper extension must not extend beyond one-bay recessed end');
+assert.ok(projectingAwning.every(v=>v[5]<=p.awningEndZ+.001),
+  'solid canopy roof must stop at the photo-defined recessed end');
 const supports=hb.filter(v=>v[6]==='plaster' && v[1]>.35 && v[1]<.5 &&
                                   v[4]>p.roofBottom && v[0]<hotel.x0-1);
 assert.ok(supports.length>=6,'long extension must have repeated structural pillars');
