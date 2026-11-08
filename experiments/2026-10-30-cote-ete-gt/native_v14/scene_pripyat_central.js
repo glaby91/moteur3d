@@ -612,6 +612,45 @@ function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polis
  return Object.freeze({control,halfWidth,roofBottom:3.55,roofTop:3.86,
    roofCrownRise:0.22,pierCount:20,segments:48,endCapSegments:12,at});
 }
+// Guard rail for the photographic square reconstruction.  The curved arcade
+// must remain an OPEN, independent colonnade, pass in front of the Polissya
+// annex and never intersect Energetik, the hotel or its entrance extension.
+// The clearances are derived from the current PHOTO-GUIDED BLOCKOUT only;
+// they are NOT measurements of the historic Pripyat square.
+function m3dCheckPolissyaArcadeClearance(plan=m3dPolissyaArcadePlan(),b=M3D_PRIPYAT_BLOCKOUT){
+  const candidates=[
+    ['Energetik',b.energetik],['Polissya',b.polissya],
+    ...(b.polissyaAnnex?[['Polissya annex',b.polissyaAnnex]]:[])
+  ];
+  const gaps=Object.fromEntries(candidates.map(([id])=>[id,Infinity]));
+  for(let i=0;i<=128;i++){
+    const t=i/128;
+    for(const offset of [-plan.halfWidth,0,plan.halfWidth]){
+      const [x,z]=plan.at(t,offset);
+      if(!Number.isFinite(x)||!Number.isFinite(z))
+        throw new Error('Polissya arcade: non-finite plan coordinates');
+      for(const [id,r] of candidates){
+        const dx=Math.max(r.x0-x,0,x-r.x1);
+        const dz=Math.max(r.z0-z,0,z-r.z1);
+        gaps[id]=Math.min(gaps[id],Math.hypot(dx,dz));
+      }
+    }
+  }
+  const [sx,sz]=plan.at(0),[sx1,sz1]=plan.at(0.001);
+  const [ex0,ez0]=plan.at(0.999),[ex1,ez1]=plan.at(1);
+  if(!(sx1>sx && ex1>=ex0-0.01 && ez1>ez0 &&
+       Math.abs(sz1-sz)<0.1*(sx1-sx) &&
+       Math.abs(ex1-ex0)<0.1*(ez1-ez0)))
+    throw new Error('Polissya arcade: orientation/turn no longer matches reference');
+  for(const [id,gap] of Object.entries(gaps)){
+    // This is a modelling collision threshold, not a claimed historical gap.
+    if(gap<0.7)throw new Error('Polissya arcade intersects '+id+
+      ' (blockout clearance '+gap.toFixed(2)+' m)');
+  }
+  return Object.freeze(gaps);
+}
+const M3D_POLISSYA_ARCADE_BLOCKOUT_CLEARANCE=m3dCheckPolissyaArcadeClearance();
+
 function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
  const p=m3dPolissyaArcadePlan(a);
  const plane=(v,y,n,u,w)=>({p:[v[0],y,v[1]],n,uv:[u,w]});
