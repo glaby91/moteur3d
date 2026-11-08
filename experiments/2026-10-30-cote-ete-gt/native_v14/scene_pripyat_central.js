@@ -571,7 +571,8 @@ function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polis
   // Finish alongside the middle of Polissya's west facade.
   [b.x0-3.9,7.0]
  ]);
- const halfWidth=1.85;
+ // Wide cantilevered concrete soffit seen from below (photo reference).
+ const halfWidth=2.05;
  const at=(t,offset=0)=>{
    const u=1-t;
    const x=u*u*u*control[0][0]+3*u*u*t*control[1][0]+3*u*t*t*control[2][0]+t*t*t*control[3][0];
@@ -689,16 +690,62 @@ function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
          point(b,p.halfWidth-.26),point(b,p.halfWidth),parapetTop);
    }
  }
- // A staggered pair of reinforced concrete posts every ~2.7 m.
- // Their X/Z placement follows the arc, while their cross-sections stay square.
+ // Photo-guided arcade: generous FLAT soffit; wide cantilever beyond posts.
+ // Structural posts are rotated to follow the local tangent of the arcade,
+ // not world-axis aligned thin sticks. All dimensions remain estimates.
+ const solidPrism=(a,b,c,d,yBottom,yTop,mat)=>{
+   const V=(v,y)=>[v[0],y,v[1]];
+   const A=V(a,yBottom),B=V(b,yBottom),C=V(c,yBottom),D=V(d,yBottom);
+   const E=V(a,yTop),F=V(b,yTop),G=V(c,yTop),H=V(d,yTop);
+   const tri=(u,v,w)=>{
+     const x=[v[0]-u[0],v[1]-u[1],v[2]-u[2]];
+     const y=[w[0]-u[0],w[1]-u[1],w[2]-u[2]];
+     const n=[x[1]*y[2]-x[2]*y[1],x[2]*y[0]-x[0]*y[2],x[0]*y[1]-x[1]*y[0]];
+     const len=Math.hypot(...n)||1,normal=n.map(c=>c/len);
+     const vert=q=>({p:q,n:normal,uv:[q[0]*.22+q[2]*.05,q[1]*.22+q[2]*.08]});
+     meshTriangle(vert(u),vert(v),vert(w),mat);
+   };
+   const quad=(q,r,t,u)=>{tri(q,r,t);tri(q,t,u);};
+   quad(E,F,H,G);quad(A,C,D,B);quad(A,B,F,E);
+   quad(C,G,H,D);quad(A,E,G,C);quad(B,D,H,F);
+ };
+ const postAlong=.82,postAcross=.67;
+ const postOffset=p.halfWidth-.95; // >=0.6 m outer roof overhang
  for(let i=0;i<p.pierCount;i++){
-   const t=(i+0.55)/(p.pierCount+0.1);
+   const t=(i+.55)/(p.pierCount+.1);
+   const q0=p.at(Math.max(0,t-.0005)),q1=p.at(Math.min(1,t+.0005));
+   const dx=q1[0]-q0[0],dz=q1[1]-q0[1],len=Math.hypot(dx,dz)||1;
+   const tx=dx/len,tz=dz/len,nx=-tz,nz=tx;
+   const at=(center,along,across)=>[
+     center[0]+tx*along+nx*across,
+     center[1]+tz*along+nz*across
+   ];
    for(const side of [-1,1]){
-     const [x,z]=p.at(t,side*(p.halfWidth-0.32));
-     box(x-0.20,0.08,z-0.19,x+0.20,p.roofBottom+0.03,z+0.19,'concrete');
-     box(x-0.28,0.035,z-0.27,x+0.28,0.16,z+0.27,'stone');
+     const center=p.at(t,side*postOffset);
+     const corners=(along,across)=>[
+       at(center,-along/2,-across/2),at(center,-along/2,across/2),
+       at(center,along/2,-across/2),at(center,along/2,across/2)
+     ];
+     const [a,b,c,d]=corners(postAlong,postAcross);
+     // Pale ceramic-covered square supports, grounded on reinforced plinths.
+     solidPrism(a,b,c,d,.13,p.roofBottom+.025,'plaster');
+     const [pa,pb,pc,pd]=corners(postAlong+.18,postAcross+.17);
+     solidPrism(pa,pb,pc,pd,.035,.19,'stone');
+     // Actual horizontal tile joints across the externally visible post face:
+     // small inset bands, so they do not cover the entire load-bearing pillar.
+     for(let y=.54;y<p.roofBottom-.12;y+=.43){
+       const seam=.012;
+       const e=.003,outer=postAcross/2+e;
+       const s0=at(center,-postAlong/2,side*outer);
+       const s1=at(center,postAlong/2,side*outer);
+       const vert=(v,yy)=>({p:[v[0],yy,v[1]],n:[nx*side,0,nz*side],uv:[0,yy]});
+       meshTriangle(vert(s0,y),vert(s1,y),vert(s0,y+seam),'concrete');
+       meshTriangle(vert(s1,y),vert(s1,y+seam),vert(s0,y+seam),'concrete');
+     }
    }
  }
+ // Keep the mural athlete on the photographed post for a later textured
+ // detail pass: the reference does not establish its exact position in plan.
  // Ends remain visibly open; NO abutments, horizontal wall or attachment.
 }
 
