@@ -75,20 +75,34 @@ for(const [a,b,c,mat] of meshes){
   assert.ok(v.p.every(Number.isFinite),'nonfinite mesh vertex');
  }
 }
-const hb=[],hotelMeshes=[];
-api.hotel({box:(...args)=>hb.push(args),capsule:()=>{},meshTriangle:(...args)=>hotelMeshes.push(args)});
+const hb=[],hotelMeshes=[],hotelCapsules=[];
+api.hotel({box:(...args)=>hb.push(args),capsule:(...args)=>hotelCapsules.push(args),
+           meshTriangle:(...args)=>hotelMeshes.push(args)});
 assert.ok(hotelMeshes.length>=24,'pitched rooftop summer cafe slab missing');
 const rooftop=hotelMeshes.filter(tr=>tr[3]==='concrete'||tr[3]==='stone');
 const heights=rooftop.flatMap(tr=>tr.slice(0,3).map(v=>v.p[1]));
 assert.ok(Math.max(...heights)-Math.min(...heights)>.5,'photographic rooftop slope is not visible');
 assert.ok(hb.filter(x=>x[6]==='brick').length>=100,'exposed masonry brick courses missing from hotel');
-const projectingAwning=hb.filter(v=>v[0]<hotel.x0-2 && v[1]>3 && v[1]<3.2 &&
-                                 v[4]>3.3 && v[4]<3.5 && v[6]==='concrete');
+// The LONG low extension must be a deep gallery, not the obsolete 10 m plate.
+const projectingAwning=hb.filter(v=>v[0]<hotel.x0-2 && Math.abs(v[1]-p.roofBottom)<1e-6 &&
+                                 Math.abs(v[4]-p.roofTop)<1e-6 && v[6]==='concrete');
 assert.ok(projectingAwning.some(v=>Math.abs(v[2]-p.awningStartZ)<1e-6 &&
                                       Math.abs(v[5]-p.awningEndZ)<1e-6),
-  'hotel projecting roof should be aligned with the two photo landmarks');
-assert.ok(hb.filter(v=>v[0]<hotel.x0-1).every(v=>v[2]<=p.awningEndZ+.01),
-  'no projecting roof may continue beyond the recessed extension line');
+  'continuous hotel extension roof must span the photo-annotated landmarks');
+assert.ok(hb.filter(v=>v[0]<hotel.x0-1 && v[1]>2.5).every(v=>v[2]<=p.awningEndZ+.01),
+  'solid upper extension must not extend beyond one-bay recessed end');
+const supports=hb.filter(v=>v[6]==='plaster' && v[1]>.35 && v[1]<.5 &&
+                                  v[4]>p.roofBottom && v[0]<hotel.x0-1);
+assert.ok(supports.length>=6,'long extension must have repeated structural pillars');
+const fascia=hb.filter(v=>v[6]==='concrete' && v[0]<hotel.x0-2 &&
+                               v[1]>2.7 && v[1]<3.1 && v[4]>=p.roofBottom);
+assert.ok(fascia.length>=1,'continuous deep upper fascia missing');
+const sideSteps=hb.filter(v=>v[6]==='stone' && Math.abs(v[1]-.025)<.001 &&
+                                [0.125,0.250,0.375].some(y=>Math.abs(v[4]-y)<.001));
+assert.ok(sideSteps.length>=3,'three small side access treads to hotel are missing');
+const handrails=hotelCapsules.filter(x=>x[3]==='rust' && x[0]?.[1]>.9 && x[1]?.[1]>.9 &&
+                                                x[0]?.[1]<1.6 && x[1]?.[1]<1.6);
+assert.ok(handrails.length>=2,'side access needs a visible rusted guardrail');
 assert.ok(hb.some(x=>x[4]>19),'hotel rooftop terrace missing');
 assert.ok(hb.some(x=>x[6]==='rust'&&x[4]>18),'oxidised roof sign missing');
 assert.ok(hb.some(x=>x[6]==='windowdark'),'hotel windows missing');
