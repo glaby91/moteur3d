@@ -26,6 +26,13 @@ assert.ok(galleryEnd[0]<hotel.x0-2.0,'gallery must end before hotel frontage');
 assert.ok(hotel.z1-hotel.z0>=35,'hotel needs elongated long facade after rotation');
 assert.ok(p.roofBottom>3.1&&p.roofBottom<4.1,'canopy headroom inconsistent');
 assert.ok(p.halfWidth>=1.6&&p.halfWidth<=2.3,'canopy width implausible');
+const junctionForecourt={x0:53,x1:82.5,z0:15,z1:25};
+for(const h of api.block.housing){
+  const intersects=h.x0<junctionForecourt.x1 && h.x1>junctionForecourt.x0 &&
+                   h.z0<junctionForecourt.z1 && h.z1>junctionForecourt.z0;
+  assert.ok(!intersects, 'unverified residential context occludes Polissya wing/arcade: '+h.id);
+}
+
 const start=p.at(0),mid=p.at(.5),end=p.at(1);
 const front=p.at(.02),last=p.at(.98);
 const departSlope=Math.abs((front[1]-start[1])/(front[0]-start[0]));
