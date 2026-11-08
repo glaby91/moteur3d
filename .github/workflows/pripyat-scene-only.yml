@@ -1,0 +1,55 @@
+name: Pripyat binary scene only
+on:
+  push:
+    branches:
+      - feature/pripyat-visual-quality-baseline-261107
+    paths:
+      - .github/workflows/pripyat-scene-only.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scene:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+    steps:
+      - name: Checkout the scene revision
+        uses: actions/checkout@v4
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare texture generator
+        run: python -m pip install Pillow
+      - name: Generate required reference textures and assets
+        run: |
+          python tools/generate_seat_maps.py
+          python tools/generate_pripyat_chair_maps.py
+          python tools/generate_energetik_fresco_map.py
+          node tools/export_energetik_fresco_glb.js
+          node tools/export_pripyat_wheel_mechanism.js
+      - name: Export current Pripyat scene in native M3D format
+        env:
+          M3D_SKIP_IMPORTED_CAR: '1'
+          M3D_TEXTURE_SIZE: '2048'
+        run: |
+          node export_scene.js source_v1314.html scene_pripyat_central.bin scene_pripyat_central.js
+          test -s scene_pripyat_central.bin
+          sha256sum scene_pripyat_central.bin > scene_pripyat_central.bin.sha256
+          ls -lh scene_pripyat_central.bin
+      - name: Upload ONLY native Pripyat scene
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pripyat-Scene-Only-${{ github.run_number }}
+          path: |
+            experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.bin
+            experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.bin.sha256
+          if-no-files-found: error
+          retention-days: 30
