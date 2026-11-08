@@ -1020,7 +1020,7 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
      const stagger=(row%2)*pitch/2, y=patch.y+row*course;
      for(let z=patch.z+stagger;z+brickWidth<patch.z+patch.width;z+=pitch){
        // Outside +X wall, between glazing rows; rusty and pale weathering.
-       worldBox(x1+.045,y,z,x1+.085,y+brickHeight,z+brickWidth,
+       box(x1+.045,y,z,x1+.085,y+brickHeight,z+brickWidth,
                 ((row+Math.round(z*4))%9===0)?'rust':'brick');
      }
    }
@@ -1030,7 +1030,7 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
  for(let row=0;row<5;row++){
    const y=roofY+.19+row*.108;
    for(let z=pavilionRear+.50+(row%2)*.14;z<pavilionRear+3.30;z+=.295)
-     worldBox(pavilionRight-.09,y,z,pavilionRight-.04,y+.080,z+.267,'brick');
+     box(pavilionRight-.09,y,z,pavilionRight-.04,y+.080,z+.267,'brick');
  }
  // Individual rusty roof sign, modeled as letter strokes (not bitmap).
  const glyphs={
