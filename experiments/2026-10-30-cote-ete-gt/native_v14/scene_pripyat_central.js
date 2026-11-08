@@ -4,6 +4,8 @@
 
 const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
   concrete: 2, plaster: 1, mural: 1, energetikFresco: 2,
+  congressRed: 3, congressCrimson: 3, congressCharcoal: 2,
+  congressIvory: 2, congressFrame: 4, congressGold: 12, propagandaPortraitAtlas: 2,
   gymFloor: 3, gymWall: 1, gymConcrete: 2, gymMetal: 10, gymLetter: 2, gymRed: 3, gymBlue: 3,
   wheelSteel: 9, wheelRust: 6, wheelYellow: 6, wheelTrim: 12, volcanicTuff: 3, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
   asphalt: 3, stone: 5, metal: 18, rust: 7, leaves: 2, grass: 1,
