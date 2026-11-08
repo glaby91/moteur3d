@@ -42,11 +42,18 @@ const M3D_PRIPYAT_BLOCKOUT = Object.freeze({
 // Width/length refer to the PHOTOGRAPHIC model, not surveyed plans.
 const M3D_POLISSYA_MODEL=Object.freeze({x0:40,x1:78,z0:-42,z1:-20,height:16.2});
 const M3D_POLISSYA_ORIENTATION_DEGREES=90;
-// Limited photo-study toggle, NOT a full 1986 scene: only street glazing changes.
-// M3D_PRIPYAT_FACADE_PERIOD=pre1986 (default: abandoned).
+// The public scene is a 1986 reconstruction, not an abandoned tourist view.
+// The alternative abandoned state remains available for archive comparisons.
+// M3D_PRIPYAT_FACADE_PERIOD=pre1986 (default) or abandoned.
 const M3D_PRIPYAT_FACADE_PERIOD =
-  typeof process !== 'undefined' && process.env && process.env.M3D_PRIPYAT_FACADE_PERIOD === 'pre1986'
-    ? 'pre1986' : 'abandoned';
+  typeof process !== 'undefined' && process.env && process.env.M3D_PRIPYAT_FACADE_PERIOD === 'abandoned'
+    ? 'abandoned' : 'pre1986';
+// Changing facade propaganda is independent from changing the period.
+// In particular IMG-022 is EXCLUDED as a source for the arcade roof.
+// 1986 is the XXVII CPSU Congress; 1985 is the victory-anniversary banner.
+const M3D_ENERGETIK_FACADE_DISPLAY =
+  typeof process!=='undefined' && process.env && process.env.M3D_ENERGETIK_FACADE_DISPLAY
+    ? process.env.M3D_ENERGETIK_FACADE_DISPLAY : 'congress1986';
 const M3D_POLISSYA_ENTRANCE_AWNING=Object.freeze({
  startLocalX:M3D_POLISSYA_MODEL.x0+9.5,
  endLocalX:M3D_POLISSYA_MODEL.x1-2.5,
@@ -781,12 +788,13 @@ function m3dBuildEnergetikFacade({box,roundBox,objects}){
     // Upper and lower reveals, with staggered weathering by bay.
     box(left,3.20,-20.26,right,3.34,-19.62,'stone');
     box(left,6.35,-20.26,right,6.49,-19.62,'stone');
-    if(bay%3!==1){
+    if(M3D_PRIPYAT_FACADE_PERIOD==='abandoned' && bay%3!==1){
       box(left+0.12,3.34,-20.17,left+0.23,6.35,-19.78,'rust');
       box(right-0.23,3.34,-20.17,right-0.12,6.35,-19.78,'rust');
     }
-    // Partial vertical frame fragments, deliberately not closed windows.
-    if(bay%4===0)box((left+right)*0.5-0.045,6.5,-20.11,(left+right)*0.5+0.045,8.2,-19.82,'metal');
+    // Partial vertical frame fragments in abandoned state only.
+    if(M3D_PRIPYAT_FACADE_PERIOD==='abandoned' && bay%4===0)
+      box((left+right)*0.5-0.045,6.5,-20.11,(left+right)*0.5+0.045,8.2,-19.82,'metal');
   }
 }
 
@@ -833,6 +841,177 @@ function m3dBuildEnergetikHistoricalRoofTitle({box}){
      box(xx,yy,z0,xx+px*.88,yy+px*.88,z0+.12,mat);
    }
  }
+}
+
+// Documentary front elevation: window wall, temporary propaganda display,
+// public entrance steps. Coordinates are photo-guided, NOT measured CAD data.
+// Ref images: 1985 victory banner and 1986 XXVII Congress + 12-portrait row.
+const M3D_ENERGETIK_1986_FRONT=Object.freeze({
+ bannerCenterX:-10.5, panelZ:-18.78, y0:5.15, y1:8.35,
+ portraitCount:12, portraitBottomY:3.52, portraitTopY:5.05,
+ entryWidth:25.6, entryDepth:3.78
+});
+
+// Compact 5x7 geometric Soviet sign lettering. Each row is emitted as a
+// contiguous horizontal stroke, not 5 separate boxes per line/pixel.
+function m3dEnergetikTextRows({box},label,x0,y0,z,pixel,ink,spacing=1.0){
+ const fonts={
+ 'X':['10001','10001','01010','00100','01010','10001','10001'],
+ 'V':['10001','10001','10001','10001','10001','01010','00100'],
+ 'I':['11111','00100','00100','00100','00100','00100','11111'],
+ '1':['00100','01100','00100','00100','00100','00100','01110'],
+ '9':['01110','10001','10001','01111','00001','00010','11100'],
+ '4':['00110','01010','10010','11111','00010','00010','00010'],
+ '5':['11111','10000','10000','11110','00001','10001','01110'],
+ '8':['01110','10001','10001','01110','10001','10001','01110'],
+ '6':['00110','01000','10000','11110','10001','10001','01110'],
+ '-':['00000','00000','00000','11111','00000','00000','00000'],
+ 'С':['01111','10000','10000','10000','10000','10000','01111'],
+ 'Ъ':['11000','01000','01000','01110','01001','01001','01110'],
+ 'Е':['11111','10000','10000','11110','10000','10000','11111'],
+ 'З':['11110','00001','00001','01110','00001','00001','11110'],
+ 'Д':['01110','01010','01010','01010','11111','10001','10001'],
+ 'У':['10001','10001','01010','00100','00100','00100','00100'],
+ 'К':['10001','10010','10100','11000','10100','10010','10001'],
+ 'П':['11111','10001','10001','10001','10001','10001','10001'],
+ 'О':['01110','10001','10001','10001','10001','10001','01110'],
+ 'Т':['11111','00100','00100','00100','00100','00100','00100'],
+ 'Й':['10101','10001','10001','10001','10001','10001','11111'],
+ 'Н':['10001','10001','10001','11111','10001','10001','10001'],
+ 'Ю':['10011','10101','10101','11101','10101','10101','10011'],
+ 'В':['11110','10001','10001','11110','10001','10001','11110'],
+ 'Р':['11110','10001','10001','11110','10000','10000','10000'],
+ 'Ч':['10001','10001','10001','01111','00001','00001','00001'],
+ 'М':['10001','11011','10101','10101','10001','10001','10001'],
+ 'А':['01110','10001','10001','11111','10001','10001','10001'],
+ 'Л':['00111','01001','10001','10001','10001','10001','10001'],
+ 'Я':['01111','10001','10001','01111','00101','01001','10001']
+ };
+ const chars=Array.from(label);
+ const advance=6*pixel*spacing, width=chars.length*advance-pixel;
+ // Text is centered at the requested x0, y0 is the BOTTOM of the seven rows.
+ let strokes=0;
+ for(let k=0;k<chars.length;k++){
+  const glyph=fonts[chars[k]];
+  if(!glyph)continue;
+  for(let ry=0;ry<7;ry++){
+   const row=glyph[ry];let a=-1;
+   for(let cx=0;cx<=5;cx++){
+    const filled=cx<5 && row[cx]==='1';
+    if(filled && a<0)a=cx;
+    if(!filled && a>=0){
+      const x=x0-width*.5+k*advance+a*pixel;
+      const y=y0+(6-ry)*pixel;
+      box(x,y,z,x+(cx-a)*pixel*.98,y+pixel*.94,z+.041,ink);
+      strokes++;a=-1;
+    }
+   }
+  }
+ }
+ return strokes;
+}
+
+function m3dBuildEnergetikCongressFacade({box,meshTriangle},display=M3D_ENERGETIK_FACADE_DISPLAY){
+ if(M3D_PRIPYAT_FACADE_PERIOD!=='pre1986'||display==='none')return {panels:0,portraits:0,display};
+ const f=M3D_ENERGETIK_1986_FRONT,z=f.panelZ,cx=f.bannerCenterX;
+ if(display==='victory1985'){
+   // Historical 1945–1985 victory-anniversary panel, pictured on archive photo.
+   // Artwork is an approximation; date/panel letterforms await high-resolution scan.
+   box(cx-3.3,5.05,z-.15,cx+3.3,8.12,z,'congressCharcoal');
+   box(cx-3.18,5.16,z,cx+3.18,8.02,z+.07,'congressCharcoal');
+   m3dEnergetikTextRows({box},'XXXX',cx,6.25,z+.09,.30,'congressIvory',.86);
+   m3dEnergetikTextRows({box},'1945-1985',cx,5.27,z+.10,.132,'congressIvory',.92);
+   return {panels:1,portraits:0,display};
+ }
+ if(display==='soviet_emblem'){
+   // Late 1970s/early 1980s facade setting is not yet fully dated: placeholder
+   // emblem base + title, not a photographically certified sculptural replica.
+   box(cx-3.7,5.02,z-.14,cx+3.7,8.33,z,'congressRed');
+   box(cx-1.15,6.15,z,cx+1.15,8.12,z+.08,'congressGold');
+   m3dEnergetikTextRows({box},'СССР',cx,5.42,z+.10,.25,'congressIvory');
+   return {panels:1,portraits:0,display};
+ }
+ if(display!=='congress1986')return {panels:0,portraits:0,display};
+ // Main red pleated backing. Deep profile is geometry, white lettering raised.
+ box(cx-7.55,5.28,z-.15,cx+7.55,8.40,z-.06,'congressRed');
+ for(let k=0;k<18;k++){
+   const x=cx-7.45+k*.84;
+   const left=x<cx-3.05,right=x>cx+3.05;
+   if(left||right){
+     const step=(k%4)*.13;
+     box(x,5.3+step,z-.04,x+.20,8.34,z+.12,'congressCrimson');
+     box(x+.20,5.3+step,z-.03,x+.26,8.34,z+.16,'congressRed');
+   }
+ }
+ // Central board, in front of the red fabric. The original photo's wording
+ // is in Russian, not an English/French translation on the physical surface.
+ box(cx-3.00,5.25,z-.07,cx+3.00,8.43,z+.14,'congressCharcoal');
+ box(cx-2.82,5.39,z+.14,cx+2.82,8.30,z+.18,'congressRed');
+ m3dEnergetikTextRows({box},'XXVII',cx,7.34,z+.24,.205,'congressIvory',.94);
+ m3dEnergetikTextRows({box},'СЪЕЗДУ',cx,6.89,z+.24,.095,'congressIvory',.94);
+ m3dEnergetikTextRows({box},'КПСС',cx,6.14,z+.24,.205,'congressIvory',1.05);
+ m3dEnergetikTextRows({box},'ДОСТОЙНУЮ',cx,5.75,z+.24,.075,'congressIvory',.91);
+ m3dEnergetikTextRows({box},'ВСТРЕЧУ',cx,5.48,z+.24,.075,'congressIvory',.92);
+
+ // Twelve portrait boards line the lower glass curtain wall. Photo provides
+ // positions but identities are not verified: the single procedural atlas
+ // paints 12 distinguishable placeholder faces, NOT authenticated likenesses.
+ const n=f.portraitCount, x0=-44.25,x1=22.45, boardW=2.50;
+ for(let k=0;k<n;k++){
+   const x=x0+k*(x1-x0)/(n-1);
+   box(x-boardW*.5,f.portraitBottomY-.07,z-.24,
+       x+boardW*.5,f.portraitTopY+.04,z+.012,'congressFrame');
+   box(x-boardW*.5+.075,f.portraitBottomY,z+.015,
+       x+boardW*.5-.075,f.portraitTopY,z+.055,'congressIvory');
+   const col=k%4,row=Math.floor(k/4);
+   const u0=col/4+.002,u1=(col+1)/4-.002;
+   const v0=row/3+.002,v1=(row+1)/3-.002;
+   const px0=x-boardW*.5+.10, px1=x+boardW*.5-.10;
+   const yy0=f.portraitBottomY+.04, yy1=f.portraitTopY-.04;
+   const v=(px,py,uu,vv)=>({p:[px,py,z+.068],n:[0,0,1],uv:[uu,vv]});
+   // UV atlas 4 columns x 3 rows; two triangles per portrait frame.
+   meshTriangle(v(px0,yy0,u0,v1),v(px1,yy0,u1,v1),
+                v(px0,yy1,u0,v0),'propagandaPortraitAtlas');
+   meshTriangle(v(px0,yy1,u0,v0),v(px1,yy0,u1,v1),
+                v(px1,yy1,u1,v0),'propagandaPortraitAtlas');
+ }
+ return {panels:1,portraits:n,display};
+}
+
+function m3dBuildEnergetikHistoricSteps({box,capsule}){
+ if(M3D_PRIPYAT_FACADE_PERIOD!=='pre1986')return 0;
+ // Broad walk-up in archival frontal views: dimensions are provisional.
+ const width=M3D_ENERGETIK_1986_FRONT.entryWidth,half=width*.5;
+ for(let i=0;i<6;i++){
+   const z=-23.45+i*.58, top=.16+i*.105;
+   box(-half,.015,z,half,top,z+.63,'stone');
+ }
+ box(-half,.015,-19.98,half,.73,-19.45,'stone');
+ for(const side of [-1,1]){
+   const x=side*(half+.20);
+   capsule([x,.32,-23.3],[x,.95,-19.7],.055,'metal');
+   for(let k=0;k<5;k++){
+     const zz=-23.1+k*.72;
+     capsule([x,.13,zz],[x,.49+k*.08,zz],.036,'metal');
+   }
+ }
+ return 7;
+}
+
+// Historical 1986 lower storefront/foyer glazing. Entrance central bay is
+// physically open for the camera walk-through; side display windows remain.
+function m3dBuildEnergetikHistoricEntry({box}){
+ if(M3D_PRIPYAT_FACADE_PERIOD!=='pre1986')return;
+ for(const x of [-42,-35,-28,-21,13,20]){
+   box(x,.82,-19.44,x+4.95,3.08,-19.38,'glass');
+   box(x-.07,.74,-19.36,x+.02,3.15,-19.28,'metal');
+   box(x+2.48,.82,-19.34,x+2.55,3.08,-19.28,'metal');
+ }
+ // Central doors are open for the virtual visit (no glass collision volume).
+ for(const x of [-6.5,-2.8,2.9,6.6]){
+    box(x,.74,-19.32,x+.095,3.08,-19.25,'metal');
+ }
+ box(-8.2,3.02,-19.36,8.2,3.14,-19.20,'stone');
 }
 
 // Hotel Polissya: photo-guided five-storey main volume with an asymmetrical
@@ -1067,12 +1246,16 @@ function makeScene() {
   // Independent facade assembly: main building remains traversable.
   m3dBuildEnergetikFacade({box,roundBox,objects});
   m3dBuildEnergetik1986FacadeGlazing({box});
+  m3dBuildEnergetikHistoricEntry({box});
+  m3dBuildEnergetikCongressFacade({box,meshTriangle});
   m3dBuildEnergetikHistoricalRoofTitle({box});
   m3dBuildEnergetikArchitecturalAccents({box,capsule});
 
   // Attached north wing: internal doorway joins the original palace corridor.
   m3dBuildEnergetikSportsWing({box,capsule,meshTriangle});
 
+  // Post-abandon facade damage is NEVER part of the 1986 default.
+  if(M3D_PRIPYAT_FACADE_PERIOD==='abandoned') {
   // Exposed aggregate, broken cladding and rust runoff on the street-facing
   // lintel. The patch layout is irregular so the facade reads as weathered
   // cast concrete rather than a clean repeating block texture.
@@ -1103,6 +1286,9 @@ function makeScene() {
     capsule([x,0.72,-21.8],[x,1.32,-19.8],0.09,'rust');
     for (let z=-21.6;z<-19.9;z+=0.34) capsule([x,0.82,z],[x,1.14,z],0.035,'metal');
   }
+  } else {
+    m3dBuildEnergetikHistoricSteps({box,capsule});
+  }
   // Nine separately addressable Cyrillic neon letters, split into short glass
   // envelopes and luminous cores for believable tube construction and control.
   const neonManifest = buildEnergetikRoofNeonSign({ objects, box, roundBox, capsule }, 0, 9.43, -19.34, { sectionLength: 0.28 });
@@ -1115,9 +1301,8 @@ function makeScene() {
   m3dBuildEnergetikSlabs({box});
   m3dBuildFoyerMuralArcade({box});
 
-  // Open facade bays expose the deep galleries and interior structure, not glass.
-  // Keep only damaged railings at the balcony edges, with irregular missing sections.
-  for (const y of [archLevels.firstSlab+archLevels.slabThickness+0.03,
+  // Damaged balustrades belong only to the post-abandon variant.
+  if(M3D_PRIPYAT_FACADE_PERIOD==='abandoned') for (const y of [archLevels.firstSlab+archLevels.slabThickness+0.03,
                    archLevels.secondSlab+archLevels.slabThickness+0.03]) {
     box(-45.0,y,-19.18,24.6,y+0.075,-19.06,'rust');
     box(-45.0,y+0.88,-19.18,24.6,y+0.96,-19.06,'rust');
