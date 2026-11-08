@@ -178,13 +178,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           if (-not (Test-Path "./dist/compute-warp-smoke.png")) { throw "Compute WARP image missing" }
 
-      - name: Render all fourteen photographic inspection views on CPU
+      - name: Render all eighteen photo-study views on CPU
         if: runner.os == 'Windows'
         shell: bash
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: |
           mkdir -p dist/architecture-review
-          for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14; do
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18; do
             ./dist/moteur3d_qt.exe --snapshot "$i" "dist/architecture-review/view-$(printf '%02d' "$i").png"
           done
           python - <<'PY'
@@ -197,7 +197,7 @@ jobs:
                   assert image.size == (640,360), (p, image.size)
                   assert max(std) > 2.0, (p, std)
                   print(f"{p}: RGB deviation {std}")
-          assert len(list(Path('dist/architecture-review').glob('view-*.png'))) == 14
+          assert len(list(Path('dist/architecture-review').glob('view-*.png'))) == 18
           PY
 
       - name: Publish compact visual preview for review
@@ -210,9 +210,9 @@ jobs:
           from pathlib import Path
           import io, base64
           paths=sorted(Path('dist/architecture-review').glob('view-*.png'))
-          if len(paths)!=14: raise RuntimeError('Expected 14 source render captures')
-          # 4 columns x 4 rows, each original snapshot retains its own label.
-          sheet=Image.new('RGB',(4*280,4*181),(239,239,239))
+          if len(paths)!=18: raise RuntimeError('Expected 18 source render captures')
+          # 4 columns x 5 rows, the first 14 original views retained and four archive studies appended.
+          sheet=Image.new('RGB',(4*280,5*181),(239,239,239))
           for i,p in enumerate(paths):
               with Image.open(p) as image:
                   image=ImageOps.fit(image.convert('RGB'),(280,158))
