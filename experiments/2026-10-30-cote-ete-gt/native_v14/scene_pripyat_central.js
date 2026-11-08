@@ -29,14 +29,17 @@ const M3D_PRIPYAT_BLOCKOUT = Object.freeze({
   // Final exterior blockout: Hotel Polissya's long axis Z is perpendicular
   // to Energetik's X axis. Photo-guided orientation, not cadastral survey.
   polissya:{x0:82,x1:104,z0:-12,z1:26,height:16.2},
-  // The sports hall is a rear WING of Energetik, not a separate building.
+  // Attached restaurant/service block beside the SOUTH end of Polissya.
+  // Previously a fictitious seven-storey 'east-south' context residence was
+  // occupying this spot. It was never a validated part of 1986 Pripyat.
+  // The short wing is connected to the existing hotel's side entrance.
+  polissyaAnnex:{x0:79.2,x1:99.5,z0:-28.5,z1:-11.8,height:4.10},
+  // Unverified eastern context buildings are intentionally absent until
+  // photographically located. Only two remote west-side background blocks
+  // remain as provisional city context.
   housing:[
     {id:'west-south',x0:-64,z0:-34,x1:-57,z1:-10,floors:6,frontZ:-10},
-    // Provisional context block moved outside the Polissya footprint to avoid
-    // two buildings physically occupying the same volume. Not a surveyed location.
-    {id:'east-south',x0:86,z0:-37,x1:100,z1:-12,floors:7,frontZ:-12},
-    {id:'west-north',x0:-64,z0:20,x1:-57,z1:52,floors:5,frontZ:20},
-    {id:'east-north',x0:47,z0:18,x1:60,z1:50,floors:6,frontZ:18}
+    {id:'west-north',x0:-64,z0:20,x1:-57,z1:52,floors:5,frontZ:20}
   ]
 });
 // Local, unrotated proportions of Polissya. Applied through a 90-degree
@@ -1055,7 +1058,77 @@ function m3dBuildPolissya({box,capsule},cfg=M3D_PRIPYAT_BLOCKOUT.polissya){
    capsule([ax,a[1],az],[bx,b[1],bz],r,mat);
  };
  m3dBuildPolissyaLocal({box:worldBox,capsule:worldCapsule},M3D_POLISSYA_MODEL);
+ // Independent part of the SAME HOTEL, not a standalone background house.
+ // Leave the curved city arcade entirely free of structural connections.
+ m3dBuildPolissyaAttachedAnnex({box});
 }
+
+/**
+ * Low hotel-related pavilion on the SOUTH end of Polissya.
+ * 1986 photos show an extended, one-storey building beside the hotel, not
+ * a seven-storey context apartment at this location.
+ * Its facade consists of glass bays and a solid flat roof with parapet;
+ * a genuine opening aligns with Polissya's existing south side doorway.
+ * No imaginary masonry bridge to the CURVED freestanding arcade.
+ *
+ * The dimensions are provisional photo-derived blockout, not a survey.
+ */
+function m3dBuildPolissyaAttachedAnnex({box}, a=M3D_PRIPYAT_BLOCKOUT.polissyaAnnex){
+  const {x0,x1,z0,z1,height:h}=a;
+  const hotel=M3D_PRIPYAT_BLOCKOUT.polissya;
+  // The south facade of the hotel is at Z=-12 and the local doorway maps
+  // onto world X=83..87.55. The roof overlaps its sill by just 0.2 m.
+  if(!(z0<hotel.z0-10 && z1>=hotel.z0 && z1<hotel.z0+.6 &&
+       x0<hotel.x0 && x1>hotel.x0+5 && x1<hotel.x1-2))
+    throw new Error('Polissya annex must meet south side, not become a detached apartment');
+  const doorX0=hotel.x0+1.0,doorX1=hotel.x0+5.55;
+  const doorTop=3.05;
+  // The floor remains walkable and continuous through the lateral passage.
+  box(x0,.05,z0,x1,.27,z1,'stone');
+  // Flat double roof and coping, materially separate from the CAMBERED arcade.
+  box(x0,h-.22,z0,x1,h,z1,'concrete');
+  box(x0-.12,h,z0-.15,x1+.12,h+.18,z0+.15,'stone');
+  box(x0-.12,h,z1-.15,x1+.12,h+.18,z1+.12,'stone');
+  box(x0-.12,h,z0,x0+.12,h+.18,z1,'stone');
+  box(x1-.12,h,z0,x1+.12,h+.18,z1,'stone');
+
+  // Southern end wall (Z=z0): segments avoid an opaque painted facade.
+  box(x0,.27,z0,x0+3.2,h-.22,z0+.35,'plaster');
+  box(x1-4.1,.27,z0,x1,h-.22,z0+.35,'plaster');
+  box(x0+3.2,doorTop,z0,x1-4.1,h-.22,z0+.35,'plaster');
+  const southOpenX0=x0+3.38,southOpenX1=x1-4.25;
+  box(southOpenX0,.72,z0-.05,southOpenX1,doorTop,z0,'glass');
+  for(let x=southOpenX0+2.6;x<southOpenX1;x+=2.6)
+    box(x-.065,.72,z0-.11,x+.065,doorTop,z0+.07,'metal');
+  box(southOpenX0,1.77,z0-.10,southOpenX1,1.84,z0+.06,'metal');
+
+  // Rear wall (east) and main west-facing glazed ribbon, repeated bays.
+  box(x1-.4,.27,z0,x1,h-.22,z1,'plaster');
+  box(x0,.27,z0,x0+.38,.86,z1,'stone');
+  box(x0,3.35,z0,x0+.38,h-.22,z1,'plaster');
+  const spans=6, pitch=(z1-z0)/spans;
+  for(let k=0;k<spans;k++){
+    const z=z0+k*pitch;
+    box(x0-.12,.85,z,x0+.32,3.35,z+.18,'plaster');
+    box(x0-.12,.95,z+.23,x0-.065,3.27,z+pitch-.18,
+        M3D_PRIPYAT_FACADE_PERIOD==='pre1986'?'glass':'windowdark');
+    box(x0-.17,2.0,z+.18,x0+.05,2.09,z+pitch-.16,'metal');
+  }
+  // Physical northern contact with the hotel. The opening matches the
+  // hotel's existing side door; no seal or opaque slab through the passage.
+  box(x0,.27,z1-.35,doorX0,h-.22,z1,'plaster');
+  box(doorX1,.27,z1-.35,x1,h-.22,z1,'plaster');
+  box(doorX0,doorTop,z1-.35,doorX1,h-.22,z1,'plaster');
+
+  // Front terrace canopy with shallow recessed soffit and slender columns.
+  box(x0-.66,3.20,z0+.55,x0+.15,3.41,z1-1.55,'concrete');
+  for(const z of [z0+1.25,z0+5.6,z0+10.0]){
+    box(x0-.40,.14,z,x0-.16,3.24,z+.25,'concrete');
+  }
+  return {roofY:h,doorWorldX0:doorX0,doorWorldX1:doorX1,
+          annexFootprint:a,glazedBays:spans};
+}
+
 function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
  const {x0,x1,z0,z1}=cfg,mainH=cfg.height??16.2;
  const wall=.50,westW=11.0,westEnd=x0+westW,westH=10.95,step=2.65;
