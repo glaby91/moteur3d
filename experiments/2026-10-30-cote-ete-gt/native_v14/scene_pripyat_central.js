@@ -614,12 +614,25 @@ function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
  // Keep the existing curved slab as the recessed base of the roof coffers.
  const ribBottom=p.roofTop-.025,ribTop=p.roofTop+.18,parapetTop=p.roofTop+.34;
  const rib=(a,b,c,d,top=ribTop)=>{
-   const v=(pt,y)=>({p:[pt[0],y,pt[1]],n:[0,1,0],uv:[pt[0]*.12,pt[1]*.12]});
+   const v=(pt,y)=>[pt[0],y,pt[1]];
    const A=v(a,ribBottom),B=v(b,ribBottom),C=v(c,ribBottom),D=v(d,ribBottom);
    const E=v(a,top),F=v(b,top),G=v(c,top),H=v(d,top);
-   const quad=(q,r,s,t)=>{meshTriangle(q,r,s,'concrete');meshTriangle(s,r,t,'concrete');};
-   quad(E,F,G,H);quad(A,C,B,D);quad(A,E,C,G);
-   quad(B,D,F,H);quad(A,B,E,F);quad(C,G,D,H);
+   const center=[(a[0]+b[0]+c[0]+d[0])/4,(a[1]+b[1]+c[1]+d[1])/4];
+   const tri=(u,v,w,faceY=0)=>{
+     let dr=[v[0]-u[0],v[1]-u[1],v[2]-u[2]];
+     let ds=[w[0]-u[0],w[1]-u[1],w[2]-u[2]];
+     let n=[dr[1]*ds[2]-dr[2]*ds[1],dr[2]*ds[0]-dr[0]*ds[2],dr[0]*ds[1]-dr[1]*ds[0]];
+     const m=[(u[0]+v[0]+w[0])/3,(u[2]+v[2]+w[2])/3];
+     const inward=faceY===0 && (n[0]*(m[0]-center[0])+n[2]*(m[1]-center[1])<0);
+     const reversed=faceY!==0 && n[1]*faceY<0;
+     if(inward||reversed){const swap=v;v=w;w=swap;n=n.map(t=>-t);}
+     const length=Math.hypot(...n)||1,normal=n.map(t=>t/length);
+     const point=q=>({p:q,n:normal,uv:[(q[0]+q[2])*.12,q[1]*.35]});
+     meshTriangle(point(u),point(v),point(w),'concrete');
+   };
+   const quad=(q,r,t,u,faceY=0)=>{tri(q,r,t,faceY);tri(t,r,u,faceY);};
+   quad(E,F,G,H,1);quad(A,C,B,D,-1);
+   quad(A,E,C,G);quad(B,D,F,H);quad(A,B,E,F);quad(C,G,D,H);
  };
  // Longitudinal edge parapets and internal ribs follow the Bezier arc.
  for(let i=0;i<p.segments;i++){
