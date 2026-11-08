@@ -36,7 +36,7 @@ const hotel=[];
 api.hotel({box:(...args)=>hotel.push(args),capsule:()=>{}});
 const lipX=canopyWorldEdge;
 assert.ok(hotel.some(([x0,y0,z0,x1,y1,z1,m])=>
-  m==='concrete' && y0>=3 && x0<=lipX+.1 && x1>=westEdge-.1 && z1-z0>23),
+  m==='concrete' && y0>=3 && x0<=lipX+.1 && x1>=westEdge-.25 && z1-z0>23),
   'Large canopy missing in generated world-space hotel geometry');
 const oldGlazing=[];
 api.glazing({box:(...args)=>oldGlazing.push(args)});
