@@ -9,7 +9,7 @@ const M3D_MATERIAL_REFLECTIVITY_PERCENT = Object.freeze({
   gymFloor: 3, gymWall: 1, gymConcrete: 2, gymMetal: 10, gymLetter: 2, gymRed: 3, gymBlue: 3,
   wheelSteel: 9, wheelRust: 6, wheelYellow: 6, wheelTrim: 12, volcanicTuff: 3, brick: 2, glass: 4, windowdark: 1, windowlit: 3,
   asphalt: 3, stone: 5, metal: 18, rust: 7, leaves: 2, grass: 1,
-  bark: 1, wood: 4, sign: 3, neon: 2, debris: 2, puddle: 28, seatFabric: 1, seatFabricClean: 1, seatVinylBrown: 28, seatSupportPaint: 12, seatTrim: 2, curtain: 1, cinemaScreen: 0
+  bark: 1, wood: 4, sign: 3, neon: 2, neonRed: 2, debris: 2, puddle: 28, seatFabric: 1, seatFabricClean: 1, seatVinylBrown: 28, seatSupportPaint: 12, seatTrim: 2, curtain: 1, cinemaScreen: 0
 });
 const M3D_MATERIAL_TRANSMISSION_PERCENT = Object.freeze({ glass: 62 });
 const M3D_MATERIAL_IOR = Object.freeze({ glass: 1.48 });
@@ -854,7 +854,7 @@ function m3dBuildEnergetikHistoricalRoofTitle({box}){
  // Historic sign spans most of the WEST roof edge in the photo. Its previous
  // ~10 m width was visibly too small relative to the 75 m facade.
  const label='ДВОРЕЦ КУЛЬТУРЫ',px=.24,pitch=2.0,x0=-44.5,y0=9.74,z0=-19.30;
- const mat=M3D_PRIPYAT_FACADE_PERIOD==='pre1986'?'metal':'rust';
+ const mat=M3D_PRIPYAT_FACADE_PERIOD==='pre1986'?'neon':'rust';
  for(let k=0;k<label.length;k++){
    const glyph=glyphs[label[k]];if(!glyph)continue;
    for(let iy=0;iy<7;iy++)for(let ix=0;ix<5;ix++)if(glyph[iy][ix]==='1'){
@@ -862,6 +862,28 @@ function m3dBuildEnergetikHistoricalRoofTitle({box}){
      box(xx,yy,z0,xx+px*.88,yy+px*.88,z0+.12,mat);
    }
  }
+ // Historic "Palace of Culture" title: separate cool-blue rooftop lighting.
+ if(M3D_PRIPYAT_FACADE_PERIOD==='pre1986')
+   for(let k=0;k<label.length;k+=2)
+     M3D_SCENE_LIGHTS.push([x0+k*pitch+.8,y0+.70,z0+.22,5.2,.38,80,176,255]);
+}
+
+// Archive 1945-1985: provisional white side panel and ANONYMOUS
+// walking silhouette. No unverified lettering or historical identity.
+function m3dBuildEnergetik1985SidePanel({box,capsule}) {
+ if(M3D_PRIPYAT_FACADE_PERIOD!=='pre1986'||
+    M3D_ENERGETIK_FACADE_DISPLAY!=='victory1985')return 0;
+ const z=-18.97,ink='congressCharcoal';
+ box(-35.40,.76,z-.18,-29.90,8.48,z,'congressIvory');
+ box(-35.30,.77,z,-30.00,.88,z+.055,'congressFrame');
+ capsule([-32.73,6.65,z+.11],[-32.68,7.02,z+.11],.27,ink);
+ box(-33.17,4.25,z+.03,-32.20,6.45,z+.115,ink);
+ capsule([-32.75,4.35,z+.13],[-33.42,2.17,z+.13],.20,ink);
+ capsule([-32.63,4.34,z+.13],[-31.80,2.36,z+.13],.19,ink);
+ capsule([-33.02,6.02,z+.13],[-33.93,4.69,z+.13],.17,ink);
+ capsule([-32.23,6.01,z+.13],[-31.65,4.98,z+.13],.17,ink);
+ box(-34.03,4.51,z+.12,-33.69,4.74,z+.17,ink);
+ return 1;
 }
 
 // Documentary front elevation: window wall, temporary propaganda display,
@@ -932,11 +954,12 @@ function m3dEnergetikTextRows({box},label,x0,y0,z,pixel,ink,spacing=1.0){
  return strokes;
 }
 
-function m3dBuildEnergetikCongressFacade({box,meshTriangle},display=M3D_ENERGETIK_FACADE_DISPLAY){
+function m3dBuildEnergetikCongressFacade({box,meshTriangle,capsule},display=M3D_ENERGETIK_FACADE_DISPLAY){
  if(M3D_PRIPYAT_FACADE_PERIOD!=='pre1986'||display==='none')return {panels:0,portraits:0,display};
  const f=M3D_ENERGETIK_1986_FRONT,z=f.panelZ,cx=f.bannerCenterX;
  if(display==='victory1985'){
    // Historical 1945–1985 victory-anniversary panel, pictured on archive photo.
+   m3dBuildEnergetik1985SidePanel({box,capsule});
    // Artwork is an approximation; date/panel letterforms await high-resolution scan.
    box(cx-3.3,5.05,z-.15,cx+3.3,8.12,z,'congressCharcoal');
    box(cx-3.18,5.16,z,cx+3.18,8.02,z+.07,'congressCharcoal');
@@ -1369,7 +1392,7 @@ function makeScene() {
   m3dBuildEnergetikFacade({box,roundBox,objects});
   m3dBuildEnergetik1986FacadeGlazing({box});
   m3dBuildEnergetikHistoricEntry({box});
-  m3dBuildEnergetikCongressFacade({box,meshTriangle});
+  m3dBuildEnergetikCongressFacade({box,meshTriangle,capsule});
   m3dBuildEnergetikHistoricalRoofTitle({box});
   m3dBuildEnergetikArchitecturalAccents({box,capsule});
 
@@ -1413,9 +1436,14 @@ function makeScene() {
   }
   // Nine separately addressable Cyrillic neon letters, split into short glass
   // envelopes and luminous cores for believable tube construction and control.
-  const neonManifest = buildEnergetikRoofNeonSign({ objects, box, roundBox, capsule }, 0, 9.43, -19.34, { sectionLength: 0.28 });
-  for (const p of neonManifest.lighting.lightPositions)
-    M3D_SCENE_LIGHTS.push([p[0], p[1], p[2], 5.4, 0.75, 70, 220, 255]);
+  const neonManifest = buildEnergetikRoofNeonSign({ objects, box, roundBox, capsule }, 0, 9.43, -19.34, {
+    sectionLength: 0.28,
+    coreMaterial:M3D_PRIPYAT_FACADE_PERIOD==='pre1986'?'neonRed':'rust'
+  });
+  // Historic "Energetik" is red; abandoned signage is de-energised.
+  if(M3D_PRIPYAT_FACADE_PERIOD==='pre1986')
+    for (const p of neonManifest.lighting.lightPositions)
+      M3D_SCENE_LIGHTS.push([p[0], p[1], p[2], 5.4, .75, 255, 64, 50]);
 
   // Three readable levels. Slabs wrap the foyer atrium and the open stair core.
   box(-49.2,0.05,-42.2,29.2,0.38,-20.1,'stone');
