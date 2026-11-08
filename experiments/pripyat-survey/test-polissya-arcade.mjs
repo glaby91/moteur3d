@@ -32,23 +32,27 @@ const departSlope=Math.abs((front[1]-start[1])/(front[0]-start[0]));
 const arrivalSlope=Math.abs((end[0]-last[0])/(end[1]-last[1]));
 assert.ok(departSlope<.04,'sketch: arcade must leave palace nearly horizontally');
 assert.ok(arrivalSlope<.04,'sketch: arcade must finish nearly vertically along hotel');
-assert.ok(end[1]>=hotel.z0+12&&end[1]<hotel.z0+13,'photo: arcade ends just before straight hotel canopy begins');
+assert.ok(end[1]>hotel.z1-11&&end[1]<hotel.z1-7,'photo: arcade finishes at the outward wing tip, on the hotel-corner-side of the plaza');
 assert.ok(start[1]>palace.z0+7&&start[1]<palace.z1-7,
   'sketch: arcade start must align with middle portion of the palace side facade');
 assert.equal(p.endShape,'straight','photographs: flat transverse ends, no semicircular caps');
 assert.equal(p.stepCount,4,'four shallow curved steps from the square');
 assert.equal(p.platformTop,0.40,'arcade deck elevation');
 assert.ok(Math.abs(end[1]-(p.awningStartZ-p.arrivalGapZ))<1e-6,'photo red line: gallery must finish at beginning of hotel canopy, with short gap');
-assert.ok(Math.abs(p.awningStartZ-(hotel.z0+13.0))<1e-6,'hotel canopy beginning must match world-rotated local x0+13');
+assert.ok(Math.abs(p.awningStartZ-(hotel.z1-3.10-5.40))<1e-6,
+ 'wing side must be set back from right hotel corner by one bay plus wing width');
 assert.ok(p.arrivalGapZ>0&&p.arrivalGapZ<=.5,'no structural connection permitted at roof seam');
 assert.ok(Math.abs(p.awningEndZ-(hotel.z1-3.10))<1e-6,
-  'photo 2: extension recess must be one approximate window bay before hotel corner');
+  'photo 2: wing outer side is one window bay short of hotel corner');
 assert.ok(Math.abs(p.hotelCornerZ-hotel.z1)<1e-6,'hotel corner landmark must be independent');
-assert.ok(p.awningEndZ-p.awningStartZ>20,
-  'extension must be long, not the old 10m shallow canopy');
-assert.ok(Math.abs((end[0]-p.halfWidth)-p.awningFrontX-p.hotelClearance)<.001,
-  'outer edge of curved roof must align with front fascia of the long hotel extension');
-assert.ok(hotel.x0-p.awningFrontX>5.0,'long recessed extension must be deep enough for a usable gallery');
+assert.ok(p.awningBackX-p.awningFrontX>20,
+  'wing MUST project outward from the hotel, not run along the facade');
+assert.ok(p.awningEndZ-p.awningStartZ>4&&p.awningEndZ-p.awningStartZ<7,
+  'wing cross-section must be ~5m wide, not 20m along the hotel facade');
+assert.ok(Math.abs(end[0]+p.halfWidth+p.hotelClearance-p.awningFrontX)<.001,
+  'arcade free end must meet the outer wing end at its corner, without contact');
+assert.ok(hotel.x0-p.awningFrontX>20,
+  'wing must extend perpendicularly towards the esplanade');
 const chordZ=(start[1]+end[1])/2;
 assert.ok(Math.abs(mid[1]-chordZ)>3,'gallery is not visibly curved');
 for(let i=0;i<=128;i++){
@@ -86,13 +90,19 @@ const heights=rooftop.flatMap(tr=>tr.slice(0,3).map(v=>v.p[1]));
 assert.ok(Math.max(...heights)-Math.min(...heights)>.5,'photographic rooftop slope is not visible');
 assert.ok(hb.filter(x=>x[6]==='brick').length>=100,'exposed masonry brick courses missing from hotel');
 // The LONG low extension must be a deep gallery, not the obsolete 10 m plate.
-const projectingAwning=hb.filter(v=>v[0]<hotel.x0-2 && Math.abs(v[1]-p.roofBottom)<1e-6 &&
-                                 Math.abs(v[4]-p.roofTop)<1e-6 && v[6]==='concrete');
-assert.ok(projectingAwning.some(v=>Math.abs(v[2]-p.awningStartZ)<1e-6 &&
-                                      Math.abs(v[5]-p.awningEndZ)<1e-6),
-  'continuous hotel extension roof must span the photo-annotated landmarks');
+// Actual rotation check: the FREE END of the long wing is ~22m west of
+// Polissya, while the wing's width in the world-Z direction is ~5.4m.
+const projectingAwning=hb.filter(v=>v[6]==='concrete' &&
+                         Math.abs(v[1]-p.roofBottom)<1e-6 &&
+                         Math.abs(v[4]-p.roofTop)<1e-6 &&
+                         v[0]<hotel.x0-15);
+assert.ok(projectingAwning.some(v=>Math.abs(v[0]-p.awningFrontX)<.001 &&
+                                      Math.abs(v[3]-p.awningBackX)<.001 &&
+                                      Math.abs(v[2]-p.awningStartZ)<.001 &&
+                                      Math.abs(v[5]-p.awningEndZ)<.001),
+  'wing roof must project WEST from Polissya perpendicular to its frontage');
 assert.ok(projectingAwning.every(v=>v[5]<=p.awningEndZ+.001),
-  'solid canopy roof must stop at the photo-defined recessed end');
+  'wing must end before the main hotel corner by one window bay');
 const supports=hb.filter(v=>v[6]==='plaster' && v[1]>.35 && v[1]<.5 &&
                                   v[4]>p.roofBottom && v[0]<hotel.x0-1);
 assert.ok(supports.length>=6,'long extension must have repeated structural pillars');
