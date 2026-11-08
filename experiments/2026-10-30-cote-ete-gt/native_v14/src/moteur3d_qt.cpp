@@ -1882,9 +1882,9 @@ int main(int argc, char** argv) {
         return 0;
     }
     // Non-GUI snapshots for fixed-camera QA. The thirteen historic views remain
-    // unchanged; the three arcade shots use a SEPARATE JSON to avoid shifting them.
+    // unchanged; the four arcade shots use a SEPARATE JSON to avoid shifting them.
     // --snapshot / --snapshot-compute <view 1..13> <output.png>
-    // --snapshot-arcade / --snapshot-arcade-compute <view 1..3> <output.png>
+    // --snapshot-arcade / --snapshot-arcade-compute <view 1..4> <output.png>
     // WARP can be selected by setting M3D_COMPUTE_WARP=1.
     const QString snapshotMode = argc >= 4 ? QString::fromLocal8Bit(argv[1]) : QString();
     const bool arcadeSnapshot = snapshotMode == QStringLiteral("--snapshot-arcade") ||
@@ -1901,7 +1901,7 @@ int main(int argc, char** argv) {
             ? QStringLiteral("/scene_pripyat_arcade_views.json")
             : QStringLiteral("/scene_pripyat_views.json");
         QFile file(QCoreApplication::applicationDirPath()+presetFile);
-        if (!ok || view < 1 || view > (arcadeSnapshot ? 3 : 13) ||
+        if (!ok || view < 1 || view > (arcadeSnapshot ? 4 : 13) ||
             !file.open(QIODevice::ReadOnly)) return 2;
         QJsonParseError parseError{};
         const QJsonDocument doc=QJsonDocument::fromJson(file.readAll(),&parseError);
