@@ -25,6 +25,8 @@ assert.ok(galleryStart[0]>palace.x1+2.0,'gallery must start clear of Energetik')
 assert.ok(galleryEnd[0]<hotel.x0-2.0,'gallery must end before hotel frontage');
 assert.ok(hotel.z1-hotel.z0>=35,'hotel needs elongated long facade after rotation');
 assert.ok(p.roofBottom>3.1&&p.roofBottom<4.1,'canopy headroom inconsistent');
+assert.ok(p.roofCrownRise>.10&&p.roofCrownRise<.45,
+ 'Canopy cross section must be cambered, never a flat slab (IMG-022 excluded)');
 assert.ok(p.halfWidth>=1.6&&p.halfWidth<=2.3,'canopy width implausible');
 const start=p.at(0),mid=p.at(.5),end=p.at(1);
 const front=p.at(.02),last=p.at(.98);
@@ -50,6 +52,8 @@ for(let i=0;i<=128;i++){
 const meshes=[],boxes=[];
 api.arcade({box:(...args)=>boxes.push(args),meshTriangle:(...args)=>meshes.push(args)});
 assert.ok(meshes.length>=350+4*p.endCapSegments*2,'bent roof and semicircular ends missing');
+assert.ok(meshes.some(tri=>tri.slice(0,3).some(v=>v.p[1]>p.roofTop+p.roofCrownRise-.001)),
+ 'Roof triangles lack a raised transverse crown: flat roof regression');
 assert.ok(boxes.length>=40,'regular paired arcade pillars missing');
 for(const [a,b,c,mat] of meshes){
  assert.ok(['stone','concrete'].includes(mat),'unexpected arcade material');
