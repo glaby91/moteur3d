@@ -882,7 +882,7 @@ function m3dPolissyaLocalToWorld(x,z,cfg=M3D_PRIPYAT_BLOCKOUT.polissya){
  return [cfg.x0+M3D_POLISSYA_MODEL.z1-z,
          cfg.z0+x-M3D_POLISSYA_MODEL.x0];
 }
-function m3dBuildPolissya({box,capsule},cfg=M3D_PRIPYAT_BLOCKOUT.polissya){
+function m3dBuildPolissya({box,capsule,meshTriangle},cfg=M3D_PRIPYAT_BLOCKOUT.polissya){
  const worldBox=(x0,y0,z0,x1,y1,z1,mat)=>{
    const [ax,az]=m3dPolissyaLocalToWorld(x0,z0,cfg);
    const [bx,bz]=m3dPolissyaLocalToWorld(x1,z1,cfg);
@@ -894,9 +894,16 @@ function m3dBuildPolissya({box,capsule},cfg=M3D_PRIPYAT_BLOCKOUT.polissya){
    const [bx,bz]=m3dPolissyaLocalToWorld(b[0],b[2],cfg);
    capsule([ax,a[1],az],[bx,b[1],bz],r,mat);
  };
- m3dBuildPolissyaLocal({box:worldBox,capsule:worldCapsule},M3D_POLISSYA_MODEL);
+ const worldTriangle=meshTriangle ? (a,b,c,mat)=>{
+   const transform=v=>{
+     const [wx,wz]=m3dPolissyaLocalToWorld(v.p[0],v.p[2],cfg);
+     return {p:[wx,v.p[1],wz],n:[-v.n[2],v.n[1],v.n[0]],uv:v.uv};
+   };
+   meshTriangle(transform(a),transform(b),transform(c),mat);
+ } : undefined;
+ m3dBuildPolissyaLocal({box:worldBox,capsule:worldCapsule,meshTriangle:worldTriangle},M3D_POLISSYA_MODEL);
 }
-function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
+function m3dBuildPolissyaLocal({box,capsule,meshTriangle}, cfg=M3D_POLISSYA_MODEL){
  const {x0,x1,z0,z1}=cfg,mainH=cfg.height??16.2;
  const wall=.50,westW=11.0,westEnd=x0+westW,westH=10.95,step=2.65;
  // Shallow foundations and truly hollow interior (no overlapping concrete prism).
@@ -954,7 +961,7 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
  if(cursor<x1-wall)box(cursor,1.05,z1-wall,x1-wall,mainH,z1,'concrete');
  // Photo references (Nov 2026): narrow vertical concrete flutes form a
  // continuous upper attic band, ABOVE the last window row, not over glazing.
- const terraceX0=x1-14.0,roofY=mainH,terraceY=roofY+3.40;
+ const terraceX0=x1-14.0,roofY=mainH,terraceY=roofY+3.40,roofRise=.62;
  const atticTop=roofY+1.12;
  box(westEnd,roofY-.74,z1-.13,x1,atticTop,z1+.06,'concrete');
  for(let x=westEnd+.12;x<x1-.15;x+=.39)
@@ -974,14 +981,48 @@ function m3dBuildPolissyaLocal({box,capsule}, cfg=M3D_POLISSYA_MODEL){
  const supportXs=[pavilionLeft,pavilionLeft+4.35,pavilionLeft+8.75,pavilionRight-.46];
  for(const x of supportXs){
    box(x,roofY+.04,pavilionFront-.33,x+.43,terraceY,pavilionFront+.08,'concrete');
-   box(x,roofY+.04,pavilionRear-.12,x+.43,terraceY,pavilionRear+.35,'concrete');
+   box(x,roofY+.04,pavilionRear-.12,x+.43,terraceY+roofRise,pavilionRear+.35,'concrete');
  }
  // Open side elevations: reinforced frame only, with views through the bays.
  for(const x of [pavilionLeft,pavilionRight])
    box(x,terraceY-.40,pavilionRear-.13,x+.36,terraceY+.06,pavilionFront+.15,'stone');
- // Flat pavilion roof slab and a visible soffit under its projecting lip.
- box(pavilionLeft-.12,terraceY,pavilionRear-.20,pavilionRight+.40,terraceY+.33,pavilionFront+.32,'concrete');
- box(pavilionLeft-.08,terraceY+.33,pavilionRear-.22,pavilionRight+.42,terraceY+.41,pavilionFront+.36,'stone');
+ // Rooftop summer cafe: genuine pitched flat plane, gently rising at
+ // rear (+0.62 m), leaving large unobstructed panorama window openings.
+ // A sloped underside is visible from the plaza, not a stack of boxes.
+ const roofFront=pavilionFront+.32,roofBack=pavilionRear-.20;
+ const roofLeft=pavilionLeft-.12,roofRight=pavilionRight+.40;
+ const emitRoof=(a,b,c,n,mat)=>{
+   const len=Math.hypot(...n)||1,normal=n.map(t=>t/len);
+   const v=p=>({p,n:normal,uv:[p[0]*.15,p[2]*.15]});
+   meshTriangle(v(a),v(b),v(c),mat);
+ };
+ const pitchedSlab=(yFront,thickness,mat)=>{
+   const A=[roofLeft,yFront,roofFront],B=[roofRight,yFront,roofFront];
+   const C=[roofLeft,yFront+roofRise,roofBack],D=[roofRight,yFront+roofRise,roofBack];
+   const down=p=>[p[0],p[1]-thickness,p[2]];
+   const a=down(A),b=down(B),c=down(C),d=down(D);
+   const dz=roofFront-roofBack;
+   // Face winding is outward, including for the visible sloping soffit.
+   emitRoof(A,B,C,[0,1,roofRise/dz],mat);
+   emitRoof(C,B,D,[0,1,roofRise/dz],mat);
+   emitRoof(a,c,b,[0,-1,-roofRise/dz],mat);
+   emitRoof(c,d,b,[0,-1,-roofRise/dz],mat);
+   emitRoof(A,a,B,[0,0,1],mat);
+   emitRoof(B,a,b,[0,0,1],mat);
+   emitRoof(C,D,c,[0,0,-1],mat);
+   emitRoof(D,d,c,[0,0,-1],mat);
+   emitRoof(A,C,a,[-1,0,0],mat);
+   emitRoof(C,c,a,[-1,0,0],mat);
+   emitRoof(B,b,D,[1,0,0],mat);
+   emitRoof(D,b,d,[1,0,0],mat);
+ };
+ if(meshTriangle){
+   pitchedSlab(terraceY+.30,.30,'concrete');
+   pitchedSlab(terraceY+.39,.09,'stone');
+ }else{
+   // Legacy geometry-only callers may omit triangle callback.
+   box(roofLeft,terraceY,roofBack,roofRight,terraceY+.39,roofFront,'concrete');
+ }
  // Ribbed lower parapet below the openings and visible transverse lintel.
  box(pavilionLeft,roofY+.12,pavilionFront-.23,pavilionRight+.35,roofY+1.04,pavilionFront+.10,'concrete');
  for(let x=pavilionLeft+.13;x<pavilionRight+.2;x+=.40)
@@ -1664,7 +1705,7 @@ function makeScene() {
   for(let x=-44;x<27;x+=9) ellipsoidMesh(x,mainRoofY+0.45,-20.8,1.0,0.12,0.55,'grass',8,6);
 
   // Separate reusable Polissya building module. Historical geometry still pending survey.
-  m3dBuildPolissya({box,capsule});
+  m3dBuildPolissya({box,capsule,meshTriangle});
 
   // Repeated small windows add depth to the visible west side of Energetik.
   for (let z = -43; z <= -22; z += 4.2) {
