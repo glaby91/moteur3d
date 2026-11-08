@@ -1,0 +1,27 @@
+name: Helicopter wreck reference isolated QA
+on:
+  push:
+    branches: [feature/pripyat-visual-quality-baseline-261107]
+    paths:
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/references/**'
+      - '.github/workflows/helicopter-reference-qa.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-asset:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Geometry and isolation test
+        shell: bash
+        run: |
+          node --check experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/references/helicopter_wreck_reference.js
+          node experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/references/test_helicopter_wreck_reference.cjs
+          if grep -q 'helicopter_wreck_reference' experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js; then
+            echo 'Reference was incorrectly imported into Pripyat' >&2
+            exit 1
+          fi
