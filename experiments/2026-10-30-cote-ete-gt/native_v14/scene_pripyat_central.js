@@ -559,20 +559,23 @@ function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polis
  // Interpretation of the user's top-view sketch (07/11/2026):
  // almost straight alongside the palace, then a pronounced rounded 90-degree
  // bend toward the hotel's WEST side, with no physical building connection.
- // The endpoints and main radius are estimates, not cadastral survey.
- // The first two control points share Z => tangent along +X;
- // the last two share X => tangent along +Z at the hotel.
+ // The endpoints and main radius are photo-guided estimates, not a survey.
+ // The arcade is curved IN PLAN; its TWO ENDS are flat, straight crosscuts.
+ // The west-facing hotel entrance canopy projects 2.35 m toward the plaza.
+ // Its far end is at local hotel x0+23; stop a window bay (3.1 m) before
+ // that end. Preserve a clear gap: this is NOT a building connector.
+ const halfWidth=2.05;
+ const awningFrontX=b.x0-2.35;
+ const awningEndZ=b.z0+23.0;
+ const windowBay=3.10, hotelClearance=.45;
+ const endCenterX=awningFrontX-halfWidth-hotelClearance;
+ const endZ=awningEndZ-windowBay;
  const control=Object.freeze([
-  // Keep the palace-side entrance level with the building side elevation,
-  // as in the user's sketch (not below the whole building footprint).
   [a.envelope.x1+3.35,-30.5],
   [59.0,-30.5],
-  [b.x0-3.9,-30.5],
-  // Finish alongside the middle of Polissya's west facade.
-  [b.x0-3.9,7.0]
+  [endCenterX,-30.5],
+  [endCenterX,endZ]
  ]);
- // Wide cantilevered concrete soffit seen from below (photo reference).
- const halfWidth=2.05;
  const at=(t,offset=0)=>{
    const u=1-t;
    const x=u*u*u*control[0][0]+3*u*u*t*control[1][0]+3*u*t*t*control[2][0]+t*t*t*control[3][0];
@@ -583,7 +586,9 @@ function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polis
    return [x-offset*dz*inv,z+offset*dx*inv];
  };
  return Object.freeze({control,halfWidth,roofBottom:3.55,roofTop:3.86,
-   pierCount:20,segments:48,endCapSegments:12,at});
+   pierCount:20,segments:48,endShape:'straight',at,
+   hotelClearance,awningFrontX,awningEndZ,windowBay,
+   platformTop:.40,stepCount:4,stepRise:.10,stepRun:.62});
 }
 function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
  const p=m3dPolissyaArcadePlan(a);
@@ -642,7 +647,8 @@ function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
      [p.halfWidth*.34,.14],[p.halfWidth-.13,.26]]){
      rib(p.at(t0,offset-width/2),p.at(t0,offset+width/2),
          p.at(t1,offset-width/2),p.at(t1,offset+width/2),
-         Math.abs(offset)>p.halfWidth*.7?parapetTop:ribTop);
+         Math.abs(offset)>p.halfWidth*.7
+           ? (i<p.segments/2?parapetTop:parapetTop+.12) : ribTop);
    }
  }
  // Repeated transverse beams form real 3D rectangular roof coffers.
@@ -651,57 +657,22 @@ function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
    rib(p.at(t0,-p.halfWidth+.02),p.at(t0,p.halfWidth-.02),
        p.at(t1,-p.halfWidth+.02),p.at(t1,p.halfWidth-.02));
  }
- // The hand-drawn plan shows rounded ends, not square-cut slabs.
- // Add a semicircular concrete roof cap at each free end. This is only
- // a roof continuation: there is no hidden connector or end wall.
+ // Reference photographs: the TWO ENDS are STRAIGHT, not semicircular.
+ // The top and underside of the slab are already cut at t=0 and t=1;
+ // close their vertical fascia and place a transverse raised parapet.
  for(const end of [0,1]){
-   const [cx,cz]=p.at(end);
-   const [gx,gz]=p.at(end===0?.0001:.9999);
-   const [hx,hz]=p.at(end===0?.0002:1.0);
-   const tx=(hx-gx),tz=(hz-gz),inv=1/Math.hypot(tx,tz);
-   const tan=[tx*inv,tz*inv],nor=[-tan[1],tan[0]];
-   const outward=end===0?-1:1;
-   const rim=(angle)=>[cx+p.halfWidth*(outward*tan[0]*Math.cos(angle)+nor[0]*Math.sin(angle)),
-                       cz+p.halfWidth*(outward*tan[1]*Math.cos(angle)+nor[1]*Math.sin(angle))];
-   for(let i=0;i<p.endCapSegments;i++){
-     const a=-Math.PI/2+i*Math.PI/p.endCapSegments;
-     const b=-Math.PI/2+(i+1)*Math.PI/p.endCapSegments;
-     const v0=rim(a),v1=rim(b);
-     const top=plane([cx,cz],p.roofTop,[0,1,0],0,.5),
-           p0=plane(v0,p.roofTop,[0,1,0],0,0),
-           p1=plane(v1,p.roofTop,[0,1,0],1,0);
-     meshTriangle(top,p0,p1,'stone');
-     const bottom=plane([cx,cz],p.roofBottom,[0,-1,0],0,.5),
-           b0=plane(v0,p.roofBottom,[0,-1,0],0,0),
-           b1=plane(v1,p.roofBottom,[0,-1,0],1,0);
-     meshTriangle(bottom,b1,b0,'concrete');
-     const radial=[(v0[0]+v1[0])*.5-cx,0,(v0[1]+v1[1])*.5-cz];
-     const nLen=Math.hypot(radial[0],radial[2]);
-     const n=[radial[0]/nLen,0,radial[2]/nLen];
-     meshTriangle(plane(v0,p.roofBottom,n,0,0),plane(v0,p.roofTop,n,0,1),
-                  plane(v1,p.roofTop,n,1,1),'concrete');
-     meshTriangle(plane(v0,p.roofBottom,n,0,0),plane(v1,p.roofTop,n,1,1),
-                  plane(v1,p.roofBottom,n,1,0),'concrete');
-   }
- }
- // Complete the raised perimeter at BOTH rounded ends.
- // The ring follows the same semicircular plan as the slab caps.
- for(const end of [0,1]){
-   const [cx,cz]=p.at(end),[gx,gz]=p.at(end===0?.0001:.9999);
-   const [hx,hz]=p.at(end===0?.0002:1.0);
-   const inv=1/Math.hypot(hx-gx,hz-gz);
-   const tan=[(hx-gx)*inv,(hz-gz)*inv],nor=[-tan[1],tan[0]];
-   const outward=end===0?-1:1;
-   const point=(angle,r)=>[
-     cx+r*(outward*tan[0]*Math.cos(angle)+nor[0]*Math.sin(angle)),
-     cz+r*(outward*tan[1]*Math.cos(angle)+nor[1]*Math.sin(angle))
-   ];
-   for(let k=0;k<p.endCapSegments;k++){
-     const a=-Math.PI/2+k*Math.PI/p.endCapSegments;
-     const b=-Math.PI/2+(k+1)*Math.PI/p.endCapSegments;
-     rib(point(a,p.halfWidth-.26),point(a,p.halfWidth),
-         point(b,p.halfWidth-.26),point(b,p.halfWidth),parapetTop);
-   }
+   const left=p.at(end,-p.halfWidth),right=p.at(end,p.halfWidth);
+   const eps=.0001;
+   const before=p.at(Math.max(0,end-eps)),after=p.at(Math.min(1,end+eps));
+   const dx=after[0]-before[0],dz=after[1]-before[1],inv=1/(Math.hypot(dx,dz)||1);
+   const n=[(end===0?-1:1)*dx*inv,0,(end===0?-1:1)*dz*inv];
+   const v=(pt,y)=>plane(pt,y,n,pt[0]*.1,pt[1]*.1);
+   meshTriangle(v(left,p.roofBottom),v(left,p.roofTop),v(right,p.roofTop),'concrete');
+   meshTriangle(v(left,p.roofBottom),v(right,p.roofTop),v(right,p.roofBottom),'concrete');
+   const t0=end===0?0:1-.006,t1=end===0?.006:1;
+   rib(p.at(t0,-p.halfWidth+.26),p.at(t0,p.halfWidth-.26),
+       p.at(t1,-p.halfWidth+.26),p.at(t1,p.halfWidth-.26),
+       end===0?parapetTop:parapetTop+.12);
  }
  // Photo-guided arcade: generous FLAT soffit; wide cantilever beyond posts.
  // Structural posts are rotated to follow the local tangent of the arcade,
@@ -722,6 +693,23 @@ function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
    quad(E,F,H,G);quad(A,C,D,B);quad(A,B,F,E);
    quad(C,G,H,D);quad(A,E,G,C);quad(B,D,H,F);
  };
+ // Four broad, shallow curved steps from the plaza to the arcade deck.
+ // Their concentric runs follow the outer (+normal) edge of the promenade.
+ // These are actual 3D stair treads, not painted markings.
+ for(let i=0;i<p.segments;i++){
+   const t0=i/p.segments,t1=(i+1)/p.segments;
+   solidPrism(p.at(t0,-p.halfWidth),p.at(t0,p.halfWidth),
+              p.at(t1,-p.halfWidth),p.at(t1,p.halfWidth),
+              .02,p.platformTop,'stone');
+   for(let step=0;step<p.stepCount;step++){
+     const inside=p.halfWidth+(p.stepCount-step-1)*p.stepRun;
+     const outside=inside+p.stepRun;
+     const yTop=(step+1)*p.stepRise;
+     solidPrism(p.at(t0,inside),p.at(t0,outside),
+                p.at(t1,inside),p.at(t1,outside),
+                .02,yTop,'stone');
+   }
+ }
  const postAlong=.82,postAcross=.67;
  const postOffset=p.halfWidth-.95; // >=0.6 m outer roof overhang
  for(let i=0;i<p.pierCount;i++){
@@ -741,12 +729,13 @@ function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
      ];
      const [a,b,c,d]=corners(postAlong,postAcross);
      // Pale ceramic-covered square supports, grounded on reinforced plinths.
-     solidPrism(a,b,c,d,.13,p.roofBottom+.025,'plaster');
+     solidPrism(a,b,c,d,p.platformTop+.13,p.roofBottom+.025,'plaster');
      const [pa,pb,pc,pd]=corners(postAlong+.18,postAcross+.17);
-     solidPrism(pa,pb,pc,pd,.035,.19,'stone');
+     // Low brown/oxidised skirting from the photograph, not bare metal by default.
+     solidPrism(pa,pb,pc,pd,p.platformTop+.015,p.platformTop+.20,'rust');
      // Actual horizontal tile joints across the externally visible post face:
      // small inset bands, so they do not cover the entire load-bearing pillar.
-     for(let y=.54;y<p.roofBottom-.12;y+=.43){
+     for(let y=p.platformTop+.54;y<p.roofBottom-.12;y+=.43){
        const seam=.012;
        const e=.003,outer=postAcross/2+e;
        const s0=at(center,-postAlong/2,side*outer);
