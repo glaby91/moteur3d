@@ -31,6 +31,7 @@ La reconstruction du Palais s'inscrit dans un **atlas plus large de Pripiat**, q
 - [**Chernobyl Visit — façade historique vitrée d'Energetik et enseigne**](ENERGETIK-FACADE-ARCHIVES-CHERNOBYLVISIT-20261108.md) : vues d'hiver, façade après abandon, texte de toiture et affiche à vérifier.
 - [**Pripiat, ville verte — reconquête végétale**](PRIPYAT-VILLE-VERTE-URBANISME-2011-REF-20261108.md) : source du Laboratoire Urbanisme Insurrectionnel, texte historique et crédit Ian Rance.
 - [**SaveEcoBot — situation radiologique à Pripiat**](PRIPYAT-RADIATION-SAVE-ECOBOT-20261108.md) : unités et mesures datées du 8 novembre 2026, sans confusion avec 1986.
+- [**Grand atlas grand public — économie, géographie, port, industrie, agriculture, faune et patrimoine (8 novembre 2026)**](ATLAS-LIVRE-ECONOMIE-PORT-GEOGRAPHIE-FAUNE-261108.md) : 12 nouveaux chapitres, sources scientifiques, parcours documentaire et photographie sourcée ; édition Word/PDF à 57 pages dans la conversation.
 - [Atlas des lieux et objets confirmés](ATLAS-PRIPYAT-VERIFIE-261107.md) : inventaire général des bâtiments et objets réels.
 
 **Livrable documentaire final envisagé :** un atlas Word et PDF rassemblant les photographies utilisables, leurs crédits, les textes remodelés et les rendus comparatifs ; vérifier les droits de reproduction des images tierces avant toute diffusion.
