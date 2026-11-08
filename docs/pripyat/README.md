@@ -18,6 +18,15 @@ Voir [les références visuelles du bâtiment et la passe haute définition](ENE
 
 Le cahier des exigences, les niveaux communiqués, les références prioritaires et la validation restante sont suivis dans [Cahier de reconstruction Energetik](CAHIER-ENERGETIK-PASSE-261104.md).
 
+## Atlas iconographique et textes historiques
+
+La reconstruction du Palais s'inscrit dans un **atlas plus large de Pripiat**, qui conserve pour chaque référence visuelle : le lien/photo, le crédit, la date ou période, une légende précise, un **texte historique original rédigé en français**, les enseignes et inscriptions authentifiées, ainsi que les choix de restitution 3D. Ne jamais remplacer ces textes par une image seule.
+
+- [**Mosaïques monumentales de l'avenue Lénine — Svitanok, Do Svitla et Tvorennya (8 novembre 2026)**](MOSAIQUES-AVENUE-LENINE-REFERENCES-20261108.md) : trois fiches sourcées, quatre photos référencées, textes et recommandations 3D ; œuvre distinctes de la fresque du hall Energetik.
+- [Atlas des lieux et objets confirmés](ATLAS-PRIPYAT-VERIFIE-261107.md) : inventaire général des bâtiments et objets réels.
+
+**Livrable documentaire final envisagé :** un atlas Word et PDF rassemblant les photographies utilisables, leurs crédits, les textes remodelés et les rendus comparatifs ; vérifier les droits de reproduction des images tierces avant toute diffusion.
+
 ## Fresque du hall d’escalier
 
 La fresque du foyer est désormais une mosaïque panoramique lumineuse, mappée directement dans la scène native sur le mur côté hall près de l’escalier. Le quad de 9,5 × 4,3 m est placé en X=8,12, Y=2,00, Z=−41,55 m, face −X. La texture sRGB 2048 × 930 conserve le ratio estimé de l’œuvre; l’export natif construit des mipmaps RGB888. Un GLB autonome est fourni pour Unreal.
