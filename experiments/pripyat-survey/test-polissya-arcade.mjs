@@ -67,7 +67,7 @@ const hb=[];
 api.hotel({box:(...args)=>hb.push(args),capsule:()=>{}});
 assert.ok(hb.some(x=>x[4]>19),'hotel rooftop terrace missing');
 assert.ok(hb.some(x=>x[6]==='metal'&&x[4]>18),'restored 1986 hotel sign missing');
-assert.ok(hb.some(x=>x[6]==='windowdark'),'hotel windows missing');
+assert.ok(hb.some(x=>x[6]==='glass'),'historical 1986 hotel windows must be glazed');
 assert.ok(hb.some(x=>x[6]==='plaster'),'pale roof cladding missing');
 const annex=api.block.polissyaAnnex;
 assert.ok(annex,'Low hotel-attached wing omitted from city plan');
