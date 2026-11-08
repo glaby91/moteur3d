@@ -32,9 +32,10 @@ assert.equal(api.arch.envelope.x1-api.arch.envelope.x0,81);
 assert.ok(Math.abs(api.arch.envelope.z1-api.arch.envelope.z0-24.6)<1e-8);
 
 function geometry(builder){
-  const boxes=[];
-  builder({box:(...v)=>boxes.push(v),capsule:()=>{},meshTriangle:()=>{}});
-  assert.ok(boxes.length>0,'geometry generator emitted nothing');
+  const boxes=[],meshes=[];
+  builder({box:(...v)=>boxes.push(v),capsule:()=>{},meshTriangle:(...v)=>meshes.push(v)});
+  assert.ok(boxes.length>0||meshes.length>0,'geometry generator emitted nothing');
+  Object.defineProperty(boxes,'triangles',{value:meshes});
   for(const v of boxes){
     assert.equal(v.length,7);
     for(const n of v.slice(0,6))assert.ok(Number.isFinite(n),'nonfinite box coordinate');
@@ -71,9 +72,16 @@ assert.equal(hits(shell,0,10.4,-31).length,0,'former solid rooftop occluder retu
 const connector=geometry(api.connector);
 assert.equal(hits(connector,35,2.0,-21).length,0,'arch pedestrian way blocked');
 assert.equal(hits(connector,35,5.1,-21).length,0,'old solid hotel-palace arch must not return');
-assert.ok(connector.length>=30,'curved colonnade concrete pillars missing');
-assert.ok(connector.every(b=>b[0]>api.arch.envelope.x1+1),
- 'colonnade may not touch Energetik facade');
+const connectorPillars=connector.triangles.filter(tri=>tri[3]==='plaster');
+assert.ok(connectorPillars.length>=400,'rotated ceramic-covered colonnade pillars missing');
+for(const tri of connector.triangles){
+  for(const v of tri.slice(0,3)){
+    assert.ok(v.p[0]>api.arch.envelope.x1+1,
+      'colonnade geometry may not touch Energetik facade');
+  }
+}
+assert.ok(connectorPillars.some(tri=>tri.some(v=>v?.p?.[1]<.2)),
+  'colonnade supports must reach the ground');
 
 const foyerStair=geometry(api.foyerStair);
 assert.equal(foyerStair.filter(v=>v[6]==='stone').length,18,'17 broad foyer steps plus landing required');
