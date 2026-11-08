@@ -106,11 +106,11 @@ console.log('Energetik/Polissya generator geometry probes passed:',{
 
 
 const presets=JSON.parse(readFileSync(new URL('../2026-10-30-cote-ete-gt/native_v14/scene_pripyat_views.json',import.meta.url),'utf8')).views;
-assert.equal(presets.length,14,'all fourteen architectural inspection views required');
+assert.equal(presets.length,18,'all 14 original architectural views and 4 archival camera studies required');
 assert.ok(presets[13].name.includes('arrière'),'rear hotel inspection view missing');
 const qtController=readFileSync(new URL('../2026-10-30-cote-ete-gt/native_v14/src/moteur3d_qt.cpp',import.meta.url),'utf8');
-assert.ok(qtController.includes('sceneViewPresets_.size()>=14'),'Qt must expose all fourteen camera presets');
-assert.ok(qtController.includes('view > 14'),'Non-GUI CPU snapshot must permit the rear hotel camera');
+assert.ok(qtController.includes('sceneViewPresets_.size()>=18'),'Qt must expose all eighteen camera presets');
+assert.ok(qtController.includes('view > 18'),'Non-GUI CPU snapshot must permit all archival cameras');
 assert.ok(presets[11].name.includes('Polissya') && presets[12].name.includes('Colonnade'),'hotel review views missing');
 function eye(p){
   const a=p.angle*Math.PI/180, e=p.elevation*Math.PI/180;
