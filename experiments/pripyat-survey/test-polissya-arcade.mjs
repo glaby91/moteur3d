@@ -35,7 +35,11 @@ assert.ok(arrivalSlope<.04,'sketch: arcade must finish nearly vertically along h
 assert.ok(end[1]>5&&end[1]<10,'sketch: arcade end must stop around middle of hotel frontage');
 assert.ok(start[1]>palace.z0+7&&start[1]<palace.z1-7,
   'sketch: arcade start must align with middle portion of the palace side facade');
-assert.equal(p.endCapSegments,12,'sketch: both free roof ends must be rounded');
+assert.equal(p.endShape,'straight','photographs: flat transverse ends, no semicircular caps');
+assert.equal(p.stepCount,4,'four shallow curved steps from the square');
+assert.equal(p.platformTop,0.40,'arcade deck elevation');
+assert.ok(Math.abs(end[1]-(p.awningEndZ-p.windowBay))<1e-6,'arcade must stop one window bay before hotel projecting canopy end');
+assert.ok(Math.abs(p.awningFrontX-(end[0]+p.halfWidth)-p.hotelClearance)<.001,'arcade clearance to hotel projecting canopy');
 const chordZ=(start[1]+end[1])/2;
 assert.ok(Math.abs(mid[1]-chordZ)>3,'gallery is not visibly curved');
 for(let i=0;i<=128;i++){
@@ -49,14 +53,16 @@ for(let i=0;i<=128;i++){
 }
 const meshes=[],boxes=[];
 api.arcade({box:(...args)=>boxes.push(args),meshTriangle:(...args)=>meshes.push(args)});
-assert.ok(meshes.length>=350+4*p.endCapSegments*2,'bent roof and semicircular ends missing');
+assert.ok(meshes.length>=350,'curved, square-ended arcade roof missing');
+assert.ok(meshes.filter(t=>t[3]==='rust').length>=p.pierCount*24,'oxidised post bases missing');
+assert.ok(meshes.filter(t=>t[3]==='stone' && t.slice(0,3).some(v=>v.p[1]<=.41)).length>=p.segments*p.stepCount*2,'four arc-following shallow steps missing');
 const postTriangles=meshes.filter(x=>x[3]==='plaster');
 assert.ok(postTriangles.length>=p.pierCount*2*12,'tall ceramic-clad arcade pillars missing');
 assert.ok(p.halfWidth>=2.0,'roof slab must overhang rebuilt posts');
-assert.ok(postTriangles.some(t=>t.slice(0,3).some(v=>v.p[1]<0.25)),'posts must reach the base');
+assert.ok(postTriangles.some(t=>t.slice(0,3).some(v=>v.p[1]>=p.platformTop+.1&&v.p[1]<=p.platformTop+.15)),'supports must meet the raised plinth');
 assert.ok(postTriangles.some(t=>t.slice(0,3).some(v=>v.p[1]>=p.roofBottom)),'posts must reach soffit');
 for(const [a,b,c,mat] of meshes){
- assert.ok(['stone','concrete','plaster'].includes(mat),'unexpected arcade material');
+ assert.ok(['stone','concrete','plaster','rust'].includes(mat),'unexpected arcade material');
  for(const v of [a,b,c]){
   assert.equal(v.p.length,3);assert.equal(v.uv.length,2);
   assert.ok(v.p.every(Number.isFinite),'nonfinite mesh vertex');
