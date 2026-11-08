@@ -25,6 +25,13 @@ jobs:
       - name: Check Rapture source syntax
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
         run: node --check scene_rapture.js
+      - name: Generate prerequisite PBR texture packs
+        working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
+        run: |
+          python3 -m pip install Pillow
+          python3 tools/generate_energetik_fresco_map.py
+          python3 tools/generate_pripyat_chair_maps.py
+          python3 tools/generate_seat_maps.py
       - name: Export Rapture BIN and detailed inventory
         shell: bash
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14
