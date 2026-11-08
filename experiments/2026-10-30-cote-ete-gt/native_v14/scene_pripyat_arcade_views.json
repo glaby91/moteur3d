@@ -1,7 +1,7 @@
 {
   "scene": "Colonnade indépendante Energetik–Polissya",
   "schema_version": 1,
-  "notes": "Vues dédiées: toiture, sous-face, arrivée vers Polissya, côté courbe tourné vers Energetik. Les deux extrémités de la dalle restent coupées droit; quatre marches peu hautes suivent le plan en courbe.",
+  "notes": "Quatre caméras QA indépendantes. La vue 03 cadre le trait rouge de la photo fournie (début de l'avancée rectiligne de Polissya). La toiture de l'arcade conserve des extrémités coupées droit; les quatre marches suivent la courbe.",
   "views": [
     {
       "name": "01 — Toiture plate et caissons, vue plongeante rapprochée",
@@ -30,15 +30,15 @@
       "hour_step": 12
     },
     {
-      "name": "03 — Extrémité droite, quatre marches et avancée Polissya",
+      "name": "03 — Jonction visuelle arcade / début avancée Polissya",
       "target": [
-        76.7,
+        77.2,
         2.15,
-        7.6
+        0.85
       ],
-      "distance": 29,
-      "angle": -98,
-      "elevation": 10,
+      "distance": 24,
+      "angle": -105,
+      "elevation": 8,
       "fov": 57,
       "hour_step": 12
     },
