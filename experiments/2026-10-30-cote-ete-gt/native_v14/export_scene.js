@@ -214,6 +214,7 @@ function makePripyatPbr(kind) {
     congressRed:[183,37,28], congressCrimson:[135,22,22],
     congressCharcoal:[43,39,35], congressIvory:[239,230,205],
     congressFrame:[160,149,129], congressGold:[209,173,67],
+    neonRed:[249,48,36],
     propagandaPortraitAtlas:[221,217,203],
     concrete:[145,140,126], stone:[119,113,100], asphalt:[57,59,54],
     plaster:[166,159,143], mural:[179,151,112], volcanicTuff:[145,96,79],
@@ -478,7 +479,7 @@ function makePripyatPbr(kind) {
   return {color:makeMips(color),normal:makeMips(normal),roughness:makeMips(roughness)};
 }
 const generatedPripyatPbr=new Map(mats.filter(name=>['concrete','plaster','mural','volcanicTuff','stone','asphalt','brick','rust','leaves','leavesAutumn','grass','wood','bark','debris','seatFabric','seatFabricClean','seatVinylBrown','seatSupportPaint','seatWood','seatSteel','seatPreviewFloor','seatTrim','curtain','cinemaScreen','gymFloor','gymWall','gymConcrete','gymMetal','gymLetter','gymRed','gymBlue','wheelSteel','wheelRust','wheelYellow','wheelTrim',
-'congressRed','congressCrimson','congressCharcoal','congressIvory','congressFrame','congressGold','propagandaPortraitAtlas'].includes(name)).map(name=>[name,makePripyatPbr(name)]));
+'congressRed','congressCrimson','congressCharcoal','congressIvory','congressFrame','congressGold','propagandaPortraitAtlas','neonRed'].includes(name)).map(name=>[name,makePripyatPbr(name)]));
 for(const [name,pbr] of generatedPripyatPbr) scene.materials.set(name,{levels:pbr.color});
 
 const generatedPbr = new Map(['raptureStone', 'raptureBronze', 'raptureGlass'].map(name => [name, makeRapturePbr(name)]));
