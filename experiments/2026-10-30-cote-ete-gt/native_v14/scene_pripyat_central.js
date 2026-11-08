@@ -47,8 +47,13 @@ const M3D_POLISSYA_MODEL=Object.freeze({x0:40,x1:78,z0:-42,z1:-20,height:16.2});
 // l'hôtel. Ces deux lignes sont distinctes sur la photo; ce n'est pas le
 // raccord entre galerie indépendante et avancée. Le plan reste approximatif.
 const M3D_POLISSYA_EXTENSION=Object.freeze({
+  // Photo-guided, unsurveyed estimates: distinct long straight extension
+  // perpendicular to the curved open arcade, one-bay recess before hotel corner.
   startOffset:13.0, endInset:3.10, roofProjection:2.35,
-  roofBottom:3.10, roofTop:3.39
+  platformTop:.40, roofBottom:3.55, roofTop:3.86,
+  fasciaBottom:2.88, baySpacing:3.30,
+  sideWalkWidth:1.18, sideWalkStartInset:10.4, sideWalkEndOverhang:1.40,
+  sideStepCount:3, sideStepRise:.125, sideStepRun:.46
 });
 const M3D_POLISSYA_ORIENTATION_DEGREES=90;
 // Historical typology for comparison only. This is a later documented
@@ -1056,26 +1061,86 @@ function m3dBuildPolissyaLocal({box,capsule,meshTriangle}, cfg=M3D_POLISSYA_MODE
  for(const x of [pavilionLeft,pavilionLeft+4.35,pavilionLeft+8.75,pavilionRight])
    capsule([x,terraceY+.34,z1-.36],[x,terraceY+.61,z1-.36],.035,'rust');
  capsule([pavilionLeft,terraceY+.54,z1-.36],[pavilionRight,terraceY+.54,z1-.36],.03,'rust');
- // Photo: the hotel's LOW STRAIGHT EXTENSION begins where the curved
- // independent arcade ends (left red seam in first photo). The extension
- // stops/recedes one full window bay BEFORE the main building's right corner
- // (separate pair of red marks in the second annotated photograph).
+ // Low, long, straight entrance extension. The user marked the recessed
+ // bay and the main hotel corner with TWO separate red lines on the photo.
+ // The covered circulation follows the complete arcade + extension, but the
+ // HOTEL extension stops one window-bay before the actual main corner.
+ // The roof fascia is a solid reinforced-concrete ribbon above an OPEN arcade
+ // (not one shallow flat plate resting on two isolated posts).
  const ext=M3D_POLISSYA_EXTENSION;
  const extensionX0=x0+ext.startOffset,extensionX1=x1-ext.endInset;
- // Deep concrete roof/fascia above an open, recessed ground-floor frontage.
- box(extensionX0,ext.roofBottom,z1+.10,
-     extensionX1,ext.roofTop,z1+ext.roofProjection,'concrete');
- // Shallow coping and exposed front edge underline the low straight roof.
- box(extensionX0,ext.roofTop,z1+ext.roofProjection-.16,
-     extensionX1,ext.roofTop+.09,z1+ext.roofProjection+.03,'stone');
- // End return faces towards the main hotel's corner but does not fill the
- // recessed bay or create a false closed wall across the entrance.
- box(extensionX1-.28,.14,z1+1.55,
-     extensionX1,ext.roofBottom,z1+ext.roofProjection-.09,'concrete');
- for(const x of [extensionX0+.38,(extensionX0+extensionX1)*.5,extensionX1-.82]){
-   box(x,.18,z1+1.85,x+.34,ext.roofBottom+.03,z1+2.12,'plaster');
-   box(x-.025,.10,z1+1.82,x+.365,.33,z1+2.16,'rust');
+ const front= z1+ext.roofProjection;
+ const rear= z1+.06;
+ const deckY=ext.platformTop;
+ // Main roof: full depth, aligned with the freestanding arcade soffit.
+ box(extensionX0,ext.roofBottom,rear,extensionX1,ext.roofTop,front,'concrete');
+ // Deep solid fascia; below it the individual recessed bays remain legible.
+ box(extensionX0,ext.fasciaBottom,front-.20,extensionX1,ext.roofBottom,front,'concrete');
+ box(extensionX0,ext.roofTop,front-.18,extensionX1,ext.roofTop+.10,front+.025,'stone');
+ // Plinth under the entire extension: same walking level as under the arcade.
+ box(extensionX0, .02, rear+.08, extensionX1, deckY, front-.12,'stone');
+ // Recessed masonry/door bays and roof supports, following the long facade.
+ // Section lengths and damaged treatments are estimated from the photographs.
+ const bayCount=Math.ceil((extensionX1-extensionX0)/ext.baySpacing);
+ for(let i=0;i<=bayCount;i++){
+   const x=Math.min(extensionX1-.48,extensionX0+i*ext.baySpacing);
+   if(i>0 && x<=extensionX0+.48)continue;
+   box(x,deckY+.04,front-.60,x+.54,ext.roofBottom+.04,front-.16,'plaster');
+   box(x-.06,deckY+.02,front-.68,x+.60,deckY+.21,front-.11,'rust');
+   if(i===bayCount)continue;
+   const xL=x+.57,xR=Math.min(extensionX1-.55,extensionX0+(i+1)*ext.baySpacing-.15);
+   if(xR<=xL+.15)continue;
+   // Recessed low brickwork is alternated with open glazed entrance bays:
+   // it is NOT a continuous fake opaque wall closing the pedestrian area.
+   const wallZ=rear+.25;
+   if(i%3!==1){
+     box(xL,deckY+.04,wallZ,xR,1.27,wallZ+.22,'brick');
+     box(xL,2.45,wallZ,xR,ext.fasciaBottom-.06,wallZ+.20,'plaster');
+     if(i%2===0){
+       // Large blacked-out/broken glazing with rusted metal uprights.
+       box(xL+.12,1.36,wallZ-.015,xR-.12,2.37,wallZ+.020,'windowdark');
+       box(xL+.13,1.35,wallZ-.032,xL+.18,2.42,wallZ+.028,'rust');
+       box(xR-.18,1.35,wallZ-.032,xR-.13,2.42,wallZ+.028,'rust');
+     }
+   }else{
+     // True pedestrian opening into the recessed arcade/hotel entry.
+     box(xL,2.68,wallZ,xR,ext.fasciaBottom-.05,wallZ+.20,'concrete');
+     box(xL+.05,deckY+.05,wallZ,xL+.12,2.57,wallZ+.12,'rust');
+     box(xR-.12,deckY+.05,wallZ,xR-.05,2.57,wallZ+.12,'rust');
+   }
  }
+ // Brick and detached plaster near the exposed end-return: the original
+ // structure is masonry within reinforced concrete, not all white concrete.
+ box(extensionX1-.34,deckY+.10,rear+.18,extensionX1,ext.fasciaBottom,front-.72,'brick');
+ box(extensionX1-.36,ext.fasciaBottom,rear,extensionX1,ext.roofBottom,front,'concrete');
+ for(let y=deckY+.28;y<ext.fasciaBottom-.17;y+=.37)
+   box(extensionX1+.015,y,front-.95,extensionX1+.050,y+.10,front-.48,
+       (Math.round(y*10)%3===0)?'rust':'plaster');
+ // Side access seen in the photograph: a narrower, raised concrete
+ // walkway outside the low extension, with rusted guardrails and small
+ // approach stairs. Independent from the FOUR broad arcade plaza steps.
+ const walkStart=extensionX1-ext.sideWalkStartInset;
+ const walkEnd=extensionX1+ext.sideWalkEndOverhang;
+ const walkZ0=front-.08,walkZ1=front+ext.sideWalkWidth;
+ box(walkStart,.025,walkZ0,walkEnd,deckY,walkZ1,'stone');
+ // Two longitudinal rails on a parapet and vertical support stubs.
+ for(const z of [walkZ1-.09]){
+   box(walkStart,deckY,z-.11,walkEnd,deckY+.14,z+.11,'concrete');
+   for(let x=walkStart+.20;x<=walkEnd-.12;x+=1.38){
+     capsule([x,deckY+.13,z],[x,deckY+1.13,z],.026,'rust');
+   }
+   for(const y of [deckY+.63,deckY+1.07])
+     capsule([walkStart+.12,y,z],[walkEnd-.08,y,z],.027,'rust');
+ }
+ // Short access stair parallel to the end of the walkway, along X.
+ const landingX=walkEnd-.28;
+ for(let i=0;i<ext.sideStepCount;i++){
+   const xa=landingX+(ext.sideStepCount-i-1)*ext.sideStepRun;
+   const xb=xa+ext.sideStepRun;
+   box(xa,.025,walkZ0,xb,(i+1)*ext.sideStepRise,walkZ1-.18,'stone');
+ }
+ // Shallow connection up to deck at the last stair, avoid a vertical void.
+ box(landingX-.10,.025,walkZ0,landingX+.02,deckY,walkZ1-.18,'stone');
  // Visible side facade, weathered windows and lateral balconies.
  for(let floor=0;floor<5;floor++)
   for(let z=z0+2.2;z<z1-2;z+=3.9){
