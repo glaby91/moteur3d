@@ -49,7 +49,7 @@ const M3D_POLISSYA_MODEL=Object.freeze({x0:40,x1:78,z0:-42,z1:-20,height:16.2});
 const M3D_POLISSYA_EXTENSION=Object.freeze({
   // Photo-guided, unsurveyed estimates: distinct long straight extension
   // perpendicular to the curved open arcade, one-bay recess before hotel corner.
-  startOffset:13.0, endInset:3.10, roofProjection:2.35,
+  startOffset:13.0, endInset:3.10, roofProjection:5.60,
   platformTop:.40, roofBottom:3.55, roofTop:3.86,
   fasciaBottom:2.88, baySpacing:3.30,
   sideWalkWidth:1.18, sideWalkStartInset:10.4, sideWalkEndOverhang:1.40,
@@ -582,14 +582,21 @@ function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polis
  // by ~one window bay (3.10 m) from the hotel RIGHT-HAND CORNER, as marked
  // with two vertical red lines on the user's second annotated photograph.
  // Those two photo markers are NOT the arcade/canopy boundary.
- // Keep a small physical gap at the ACTUAL arcade/canopy boundary.
+ // The forward visible fascia of the arcade is near the hotel extension's
+ // forward fascia; the former code aligned the REAR arcade edge to it,
+ // leaving a ~4.5-metre apparent jump in the two roof fronts.
+ // Enlarging the low wing depth allows a real recessed corridor, while
+ // leaving a separate 0.30 m gap at the photo-annotated roof junction.
  const halfWidth=2.05,ex=M3D_POLISSYA_EXTENSION;
  const awningFrontX=b.x0-ex.roofProjection;
  const awningStartZ=b.z0+ex.startOffset;
  const awningEndZ=b.z1-ex.endInset;
  const hotelCornerZ=b.z1;
- const hotelClearance=.45,arrivalGapZ=.30;
- const endCenterX=awningFrontX-halfWidth-hotelClearance;
+ const hotelClearance=.25,arrivalGapZ=.30;
+ // At the end the tangent runs along +Z: the roof's plaza-facing edge
+ // is p.at(1,+halfWidth), whose X coordinate is endCenterX-halfWidth.
+ // Set it just 25 cm behind the straight extension's front fascia.
+ const endCenterX=awningFrontX+halfWidth+hotelClearance;
  const endZ=awningStartZ-arrivalGapZ;
  const control=Object.freeze([
   [a.envelope.x1+3.35,-30.5],
