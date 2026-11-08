@@ -32,13 +32,15 @@ const departSlope=Math.abs((front[1]-start[1])/(front[0]-start[0]));
 const arrivalSlope=Math.abs((end[0]-last[0])/(end[1]-last[1]));
 assert.ok(departSlope<.04,'sketch: arcade must leave palace nearly horizontally');
 assert.ok(arrivalSlope<.04,'sketch: arcade must finish nearly vertically along hotel');
-assert.ok(end[1]>5&&end[1]<10,'sketch: arcade end must stop around middle of hotel frontage');
+assert.ok(end[1]>=hotel.z0+12&&end[1]<hotel.z0+13,'photo: arcade ends just before straight hotel canopy begins');
 assert.ok(start[1]>palace.z0+7&&start[1]<palace.z1-7,
   'sketch: arcade start must align with middle portion of the palace side facade');
 assert.equal(p.endShape,'straight','photographs: flat transverse ends, no semicircular caps');
 assert.equal(p.stepCount,4,'four shallow curved steps from the square');
 assert.equal(p.platformTop,0.40,'arcade deck elevation');
-assert.ok(Math.abs(end[1]-(p.awningEndZ-p.windowBay))<1e-6,'arcade must stop one window bay before hotel projecting canopy end');
+assert.ok(Math.abs(end[1]-(p.awningStartZ-p.arrivalGapZ))<1e-6,'photo red line: gallery must finish at beginning of hotel canopy, with short gap');
+assert.ok(Math.abs(p.awningStartZ-(hotel.z0+13.0))<1e-6,'hotel canopy beginning must match world-rotated local x0+13');
+assert.ok(p.arrivalGapZ>0&&p.arrivalGapZ<=.5,'no structural connection permitted at roof seam');
 assert.ok(Math.abs(p.awningFrontX-(end[0]+p.halfWidth)-p.hotelClearance)<.001,'arcade clearance to hotel projecting canopy');
 const chordZ=(start[1]+end[1])/2;
 assert.ok(Math.abs(mid[1]-chordZ)>3,'gallery is not visibly curved');
