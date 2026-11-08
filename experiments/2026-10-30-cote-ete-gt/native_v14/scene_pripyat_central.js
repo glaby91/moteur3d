@@ -604,8 +604,10 @@ function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polis
    const inv=1/Math.hypot(dx,dz);
    return [x-offset*dz*inv,z+offset*dx*inv];
  };
+ // Shallow camber of canopy roof in CROSS-SECTION (not just in plan).
+ // Estimate for study only; IMG-022 is explicitly EXCLUDED as a reference.
  return Object.freeze({control,halfWidth,roofBottom:3.55,roofTop:3.86,
-   pierCount:20,segments:48,endCapSegments:12,at});
+   roofCrownRise:0.22,pierCount:20,segments:48,endCapSegments:12,at});
 }
 function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
  const p=m3dPolissyaArcadePlan(a);
@@ -620,7 +622,17 @@ function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
    const t0=i/p.segments,t1=(i+1)/p.segments;
    const a0=p.at(t0,-p.halfWidth),b0=p.at(t0,p.halfWidth);
    const a1=p.at(t1,-p.halfWidth),b1=p.at(t1,p.halfWidth);
-   face(a0,b0,a1,b1,p.roofTop,[0,1,0],'stone',t0*8,t1*8);
+   // Four cambered triangles rather than a flat rectangular top.
+   const m0=p.at(t0,0),m1=p.at(t1,0),sideY=p.roofTop,crownY=sideY+p.roofCrownRise;
+   const roofV=(v,y,u,w)=>plane(v,y,[0,1,0],u,w);
+   meshTriangle(roofV(a0,sideY,t0*8,0),roofV(m0,crownY,t0*8,.5),
+                roofV(a1,sideY,t1*8,0),'stone');
+   meshTriangle(roofV(a1,sideY,t1*8,0),roofV(m0,crownY,t0*8,.5),
+                roofV(m1,crownY,t1*8,.5),'stone');
+   meshTriangle(roofV(m0,crownY,t0*8,.5),roofV(b0,sideY,t0*8,1),
+                roofV(m1,crownY,t1*8,.5),'stone');
+   meshTriangle(roofV(m1,crownY,t1*8,.5),roofV(b0,sideY,t0*8,1),
+                roofV(b1,sideY,t1*8,1),'stone');
    face(b0,a0,b1,a1,p.roofBottom,[0,-1,0],'concrete',t0*8,t1*8);
    // Thin perimeter beam along both edges, built from actual polygons.
    for(const side of [-1,1]){
@@ -648,7 +660,7 @@ function m3dBuildConnector({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
      const a=-Math.PI/2+i*Math.PI/p.endCapSegments;
      const b=-Math.PI/2+(i+1)*Math.PI/p.endCapSegments;
      const v0=rim(a),v1=rim(b);
-     const top=plane([cx,cz],p.roofTop,[0,1,0],0,.5),
+     const top=plane([cx,cz],p.roofTop+p.roofCrownRise,[0,1,0],0,.5),
            p0=plane(v0,p.roofTop,[0,1,0],0,0),
            p1=plane(v1,p.roofTop,[0,1,0],1,0);
      meshTriangle(top,p0,p1,'stone');
@@ -948,7 +960,7 @@ function m3dBuildEnergetikCongressFacade({box,meshTriangle},display=M3D_ENERGETI
  // Central board, in front of the red fabric. The original photo's wording
  // is in Russian, not an English/French translation on the physical surface.
  box(cx-3.00,5.25,z-.07,cx+3.00,8.43,z+.14,'congressCharcoal');
- box(cx-2.82,5.39,z+.14,cx+2.82,8.30,z+.18,'congressRed');
+ box(cx-2.82,5.39,z+.14,cx+2.82,8.30,z+.18,'congressCharcoal');
  m3dEnergetikTextRows({box},'XXVII',cx,7.34,z+.24,.205,'congressIvory',.94);
  m3dEnergetikTextRows({box},'СЪЕЗДУ',cx,6.89,z+.24,.095,'congressIvory',.94);
  m3dEnergetikTextRows({box},'КПСС',cx,6.14,z+.24,.205,'congressIvory',1.05);
