@@ -25,6 +25,11 @@ La reconstruction du Palais s'inscrit dans un **atlas plus large de Pripiat**, q
 - [**Mosaïques monumentales de l'avenue Lénine — Svitanok, Do Svitla et Tvorennya (8 novembre 2026)**](MOSAIQUES-AVENUE-LENINE-REFERENCES-20261108.md) : trois fiches sourcées, quatre photos référencées, textes et recommandations 3D ; œuvre distinctes de la fresque du hall Energetik.
 - [**JDD — Pripyat, fondation, évacuation et transformation de la ville (2026)**](PRIPYAT-HISTOIRE-EVACUATION-JDD-20261108.md) : texte historique original, chronologie et photo datée de 2019 avec crédit et limites d'utilisation.
 - [**France 3 — photographe roannais, série Pripyat (source à dépouiller)**](PRIPYAT-FRANCE3-PHOTOGRAPHE-ROANNAIS-20261108.md) : référence conservée, contexte rédigé, fiches photos réservées ; contenu de la page non vérifié pour cause de restriction d'accès.
+- [**Atlas Obscura — photos de la place, de l'hôtel Polissya, d'Energetik et des intérieurs**](PRIPYAT-ATLAS-OBSCURA-PHOTOS-20261108.md) : six fiches thématiques avec textes, légendes/crédits et contrôles géométriques ; la vue aérienne de la galerie courbe est prioritaire.
+- [**Chernobyl Visit — Polissya ancien/récent, auvent d'entrée et galerie**](POLISSYA-PHOTOS-ORIGINALES-ARCADE-CHERNOBYLVISIT-20261108.md) : vue d'époque très utile au placement du volume d'entrée et à la relation avec la galerie.
+- [**Chernobyl Visit — façade historique vitrée d'Energetik et enseigne**](ENERGETIK-FACADE-ARCHIVES-CHERNOBYLVISIT-20261108.md) : vues d'hiver, façade après abandon, texte de toiture et affiche à vérifier.
+- [**Pripiat, ville verte — reconquête végétale**](PRIPYAT-VILLE-VERTE-URBANISME-2011-REF-20261108.md) : source du Laboratoire Urbanisme Insurrectionnel, texte historique et crédit Ian Rance.
+- [**SaveEcoBot — situation radiologique à Pripiat**](PRIPYAT-RADIATION-SAVE-ECOBOT-20261108.md) : unités et mesures datées du 8 novembre 2026, sans confusion avec 1986.
 - [Atlas des lieux et objets confirmés](ATLAS-PRIPYAT-VERIFIE-261107.md) : inventaire général des bâtiments et objets réels.
 
 **Livrable documentaire final envisagé :** un atlas Word et PDF rassemblant les photographies utilisables, leurs crédits, les textes remodelés et les rendus comparatifs ; vérifier les droits de reproduction des images tierces avant toute diffusion.
