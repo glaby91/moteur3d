@@ -578,7 +578,7 @@ function m3dPolissyaArcadePlan(a=M3D_ENERGETIK_ARCH,b=M3D_PRIPYAT_BLOCKOUT.polis
  // Its far free end aligns visually with the arcade, with NO direct junction.
  const ex=M3D_POLISSYA_EXTENSION,halfWidth=2.05;
  const awningFrontX=b.x0-ex.length; // free west end, towards esplanade
- const awningBackX=b.x0+.08;       // building's front (west) facade
+ const awningBackX=b.x0+.10;       // roof penetrates 10 cm into hotel façade
  const awningStartZ=b.z1-ex.endInset-ex.width; // one-bay recess from corner
  const awningEndZ=b.z1-ex.endInset;
  const hotelCornerZ=b.z1;
