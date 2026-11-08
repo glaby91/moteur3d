@@ -41,6 +41,11 @@ assert.equal(p.platformTop,0.40,'arcade deck elevation');
 assert.ok(Math.abs(end[1]-(p.awningStartZ-p.arrivalGapZ))<1e-6,'photo red line: gallery must finish at beginning of hotel canopy, with short gap');
 assert.ok(Math.abs(p.awningStartZ-(hotel.z0+13.0))<1e-6,'hotel canopy beginning must match world-rotated local x0+13');
 assert.ok(p.arrivalGapZ>0&&p.arrivalGapZ<=.5,'no structural connection permitted at roof seam');
+assert.ok(Math.abs(p.awningEndZ-(hotel.z1-3.10))<1e-6,
+  'photo 2: extension recess must be one approximate window bay before hotel corner');
+assert.ok(Math.abs(p.hotelCornerZ-hotel.z1)<1e-6,'hotel corner landmark must be independent');
+assert.ok(p.awningEndZ-p.awningStartZ>20,
+  'extension must be long, not the old 10m shallow canopy');
 assert.ok(Math.abs(p.awningFrontX-(end[0]+p.halfWidth)-p.hotelClearance)<.001,'arcade clearance to hotel projecting canopy');
 const chordZ=(start[1]+end[1])/2;
 assert.ok(Math.abs(mid[1]-chordZ)>3,'gallery is not visibly curved');
@@ -77,6 +82,13 @@ const rooftop=hotelMeshes.filter(tr=>tr[3]==='concrete'||tr[3]==='stone');
 const heights=rooftop.flatMap(tr=>tr.slice(0,3).map(v=>v.p[1]));
 assert.ok(Math.max(...heights)-Math.min(...heights)>.5,'photographic rooftop slope is not visible');
 assert.ok(hb.filter(x=>x[6]==='brick').length>=100,'exposed masonry brick courses missing from hotel');
+const projectingAwning=hb.filter(v=>v[0]<hotel.x0-2 && v[1]>3 && v[1]<3.2 &&
+                                 v[4]>3.3 && v[4]<3.5 && v[6]==='concrete');
+assert.ok(projectingAwning.some(v=>Math.abs(v[2]-p.awningStartZ)<1e-6 &&
+                                      Math.abs(v[5]-p.awningEndZ)<1e-6),
+  'hotel projecting roof should be aligned with the two photo landmarks');
+assert.ok(hb.filter(v=>v[0]<hotel.x0-1).every(v=>v[2]<=p.awningEndZ+.01),
+  'no projecting roof may continue beyond the recessed extension line');
 assert.ok(hb.some(x=>x[4]>19),'hotel rooftop terrace missing');
 assert.ok(hb.some(x=>x[6]==='rust'&&x[4]>18),'oxidised roof sign missing');
 assert.ok(hb.some(x=>x[6]==='windowdark'),'hotel windows missing');
