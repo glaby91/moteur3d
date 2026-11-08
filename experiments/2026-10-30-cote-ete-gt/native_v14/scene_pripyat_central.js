@@ -34,7 +34,10 @@ const M3D_PRIPYAT_BLOCKOUT = Object.freeze({
     // two buildings physically occupying the same volume. Not a surveyed location.
     {id:'east-south',x0:86,z0:-37,x1:100,z1:-12,floors:7,frontZ:-12},
     {id:'west-north',x0:-64,z0:20,x1:-57,z1:52,floors:5,frontZ:20},
-    {id:'east-north',x0:47,z0:18,x1:60,z1:50,floors:6,frontZ:18}
+    // Unsurveyed context volume: previous position obstructed the exact
+    // photo-matched sightline from the esplanade toward Polissya's low wing.
+    // Keep it in the wider background, not in the open central forecourt.
+    {id:'east-north',x0:110,z0:30,x1:126,z1:58,floors:6,frontZ:30}
   ]
 });
 // Local, unrotated proportions of Polissya. Applied through a 90-degree
