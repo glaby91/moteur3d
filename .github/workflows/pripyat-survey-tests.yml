@@ -29,3 +29,4 @@ jobs:
           node experiments/pripyat-survey/test-energetik-architecture.mjs
           node experiments/pripyat-survey/test-polissya-arcade.mjs
           node experiments/pripyat-survey/test-photo-references-261108.mjs
+          node experiments/pripyat-survey/test-energetik-facade-1986.mjs
