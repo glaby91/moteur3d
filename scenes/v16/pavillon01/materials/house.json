@@ -1,0 +1,54 @@
+{
+  "format": "m3d-materials-v1",
+  "materials": [
+    {
+      "id": "grass",
+      "baseColor": [
+        0.22,
+        0.34,
+        0.16
+      ],
+      "roughness": 0.95
+    },
+    {
+      "id": "concrete",
+      "baseColor": [
+        0.75,
+        0.74,
+        0.7
+      ],
+      "roughness": 0.83
+    },
+    {
+      "id": "glass",
+      "baseColor": [
+        0.62,
+        0.77,
+        0.85
+      ],
+      "roughness": 0.06,
+      "transmission": 0.85,
+      "ior": 1.5
+    },
+    {
+      "id": "wood",
+      "baseColor": [
+        0.47,
+        0.28,
+        0.13
+      ],
+      "roughness": 0.58
+    },
+    {
+      "id": "water",
+      "baseColor": [
+        0.1,
+        0.32,
+        0.42
+      ],
+      "roughness": 0.04,
+      "transmission": 0.75,
+      "ior": 1.333
+    }
+  ]
+}
