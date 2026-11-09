@@ -1,44 +1,56 @@
-# Moteur3D V16 — Windows / Pavillon 01
+# Moteur3D V16 — Windows, Pavillon 01 et modules séparés
 
-## Scope
-- **Windows x64 only:** Qt 6.8.3, MSVC 2022, CMake, GitHub Actions.
-- Pavillon 01 is the **only V16 development scene**.
-- Legacy binary loader is removed from the V16 compilation target. Previous sources and branches remain in Git history, and any later Pripyat conversion will be a separate utility.
-- No Linux build or packaging is targeted for V16 at this stage.
+## Périmètre
+- Windows x64 uniquement : MSVC 2022, Qt 6.8.3 et CMake.
+- Pavillon 01 est la seule scène V16 active ; Pripiat sera converti séparément plus tard.
+- Aucun lecteur de scène V3/V4/V5 dans la cible V16.
 
-## Implemented (committed, not yet build-confirmed)
-- Modular JSON manifest, resource loader, traversal checks.
-- External geometry/instances/material/PBR/cameras/lights/environment resource files.
-- Hierarchical scene nodes and Qt6 scene/resource browser, including material PBR fields.
-- JSON box primitives -> **84 render triangles** with bounding volume hierarchy (BVH).
-- CPU render scene startup and scene switching from V16 JSON.
-- Triangle-only Compute backend can consume the same geometric BVH (materials/lighting are not yet equivalent to CPU).
-- Procedural PBR *preview recipes*, separate from objects, generate albedo/normal/roughness textures at 2048 px with full 12-level mip chains. **External PBR image files and true material authoring still remain.**
-- Windows-only GitHub Actions workflow on `feature/v16-modular-scene-dispatch`, including native Qt tests and packaging.
-- CTest assertions for geometry, material IDs, valid BVH, 2048->1 mip chains and path traversal rejection.
+## Architecture livrée
+- `moteur3d_v16_core.dll` : moteur C++ (ray tracing CPU, aperçu Compute D3D11, BVH, matériaux).
+- `moteur3d_v16.exe` : visualisation Qt6, catalogue des matériaux, explorateur et six raccourcis caméra **1 à 6**.
+- `moteur3d_v16_benchui.exe` : **fenêtre autonome** de configuration des benchmarks.
+- `moteur3d_v16_benchmark.exe` : calculateur de benchmark indépendant, sans fenêtre GUI.
 
-## Remaining
-1. Confirm MSVC GitHub Actions build is successful; inspect CI logs for compiler/runtime errors.
-2. Build detailed architectural geometry: rooms, actual wall thicknesses, door/window cutouts, stairs, furniture, landscape and water geometry.
-3. Add actual image import for albedo, normal, roughness, metallic, ambient occlusion, height and emissive; implement persistent compressed texture cache.
-4. Add physically coherent material shading, proper texture color-space handling and tangent-space mapping in CPU and Compute.
-5. Confirm Windows packaged executable opens Pavillon 01, displays triangles and materials; collect reference screenshots and benchmark metrics.
-6. Add scene edits through Qt controls, dirty tracking and independent resource reload.
+L'interface et les benchmarks se compilent séparément de la DLL. Les modifications de l'interface ne nécessitent pas de recompiler le cœur tant que son code et son ABI ne changent pas.
 
-## Development links
-- Branch: https://github.com/glaby91/moteur3d/tree/feature/v16-modular-scene-dispatch
-- Windows Actions workflow: https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v14-qt.yml
+## Scène compacte
+- Maison : environ 18 × 12 m ; sol : **30 × 26 m** (centre en z=1), environ 5 à 6 m autour.
+- Terrasse rapprochée et bassin resserré pour tenir dans les limites du terrain.
+- **3 arbres** (12 instances tronc/houppier), **6 massifs**, et accès en dalles.
+- **6 caméras** (façade complète, jardin, entrée, salon, étage, aérienne) accessibles par boutons et touches 1 à 6.
+- Les anciennes sphères de feuillage restent des primitives : l'objectif de qualité visuelle n'est pas encore atteint.
 
-## Local Windows build
+## Benchmark complet — exports automatiques
+Dans le programme principal : **Outils > Benchmark complet…**.
+La fenêtre de benchmark propose un dossier de destination et les modes complet, rapide, ou CPU seul.
+
+Mode complet :
+- CPU ray tracing : 6 caméras × 3 résolutions (400×225, 800×450, 1280×720) × 5 réglages de threads (1/2/4/8/16).
+- CPU qualité : 6 caméras × 800×450, 4 échantillons/pixel.
+- GPU D3D11 Compute : 6 caméras × 800×450, aperçu de la géométrie ; marqué `skipped` si indisponible.
+- Dossier horodaté `Pavillon01-V16-AAAAmmJJ_HHMMSS_mmm`.
+- Exports `results.csv`, `summary.json`, `system.json`, `progress.jsonl` et `images/*.png`.
+- Les essais GPU sont des aperçus géométriques ; **aucune parité PBR CPU/GPU n'est revendiquée**.
+
+Le test rapide automatique de GitHub Actions vérifie un parcours CPU et la production de CSV, JSON et PNG. Le mode complet n'est pas exécuté en CI.
+
+## Construction incrémentale
+Depuis la racine du dépôt :
 ```powershell
-python tools/v16_scene_dispatch.py scenes/v16/pavillon01/scene.json
-cd experiments/2026-10-30-cote-ete-gt/native_v14
-cmake -S . -B build-v16 -G "Visual Studio 17 2022" -A x64
-cmake --build build-v16 --config Release --parallel
-ctest --test-dir build-v16 --build-config Release --output-on-failure
-cmake --install build-v16 --config Release --prefix dist-v16
-windeployqt --release --compiler-runtime --dir dist-v16 dist-v16/moteur3d_qt.exe
-.`dist-v16/moteur3d_qt.exe`
+.\v16\build-windows.ps1 -Target ui
+.\v16\build-windows.ps1 -Target engine
+.\v16\build-windows.ps1 -Target benchmark
+.\v16\build-windows.ps1 -Target benchmark-ui
+.\v16\build-windows.ps1 -Target all
 ```
+La compilation utilise un seul cache `build-v16` : un changement de source GUI seul ne provoque pas la recompilation des fichiers moteur.
 
-Build and runtime are *not yet independently verified* in this session.
+## Tests et limitations
+- Build Windows, tests de chargement, rendu CPU et export rapide benchmark **validés sur GitHub Actions n°85**.
+- La génération d'un PNG n'est pas une validation de qualité architecturale.
+- Les cartes PBR sont encore majoritairement procédurales ; les images PBR externes et le rendu GPU PBR cohérent restent à faire.
+- L'exécutable Windows n'a pas été manipulé manuellement sur un PC physique dans cette session.
+
+## Liens
+- Branche : https://github.com/glaby91/moteur3d/tree/feature/v16-modular-scene-dispatch
+- Workflow Windows : https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v16.yml
