@@ -55,6 +55,14 @@ jobs:
           exit 0
       - name: Validate Pavillon 01
         run: ctest --test-dir build-v16 -C Release --verbose --output-on-failure
+      - name: Verify benchmark reports
+        shell: pwsh
+        run: |
+          $csv = @(Get-ChildItem -Path "build-v16/benchmark-tests" -Filter "results.csv" -Recurse -ErrorAction SilentlyContinue)
+          $json = @(Get-ChildItem -Path "build-v16/benchmark-tests" -Filter "summary.json" -Recurse -ErrorAction SilentlyContinue)
+          $png = @(Get-ChildItem -Path "build-v16/benchmark-tests" -Filter "*.png" -Recurse -ErrorAction SilentlyContinue)
+          if ($csv.Count -lt 1 -or $json.Count -lt 1 -or $png.Count -lt 1) { throw "Benchmark export missing CSV, JSON or PNG" }
+          Write-Host "Benchmark export verified: $($csv.Count) CSV, $($json.Count) JSON, $($png.Count) PNG"
       - name: Verify CPU preview PNG
         shell: pwsh
         run: |
@@ -71,11 +79,16 @@ jobs:
         run: |
           New-Item -Type Directory -Path "dist" -Force | Out-Null
           Copy-Item "build-v16/Release/moteur3d_v16.exe" "dist/"
+          Copy-Item "build-v16/Release/moteur3d_v16_core.dll" "dist/"
+          Copy-Item "build-v16/Release/moteur3d_v16_benchmark.exe" "dist/"
+          Copy-Item "build-v16/Release/moteur3d_v16_benchui.exe" "dist/"
+          Copy-Item "build-v16/benchmark-tests" "dist/benchmark-tests" -Recurse
           Copy-Item "build-v16/pavillon01-smoke.png" "dist/Pavillon01-CPU-Preview.png"
           git rev-parse HEAD | Out-File "dist/REVISION.txt" -Encoding ascii
           Copy-Item "build-v16/Release/pavillon01" "dist/pavillon01" -Recurse
           Copy-Item "build-v16/Release/shaders" "dist/shaders" -Recurse
           windeployqt --release --no-translations dist/moteur3d_v16.exe
+          windeployqt --release --no-translations dist/moteur3d_v16_benchui.exe
       - name: Upload complete Windows package
         uses: actions/upload-artifact@v4
         with:
