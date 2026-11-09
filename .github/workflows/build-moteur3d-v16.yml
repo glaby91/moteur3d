@@ -78,6 +78,15 @@ jobs:
             throw "Le rendu CPU semble vide ($($png.Length) octets)"
           }
           Write-Host "Aperçu CPU validé : $($png.Length) octets"
+      - name: Verify actual WARP Compute render
+        shell: pwsh
+        run: |
+          if (!(Test-Path "build-v16/pavillon01-gpu-warp.png")) {
+            throw "Missing Direct3D11 WARP GPU preview"
+          }
+          $item = Get-Item "build-v16/pavillon01-gpu-warp.png"
+          if ($item.Length -lt 1000) { throw "GPU WARP preview appears blank" }
+          Write-Host "GPU Compute WARP rendering verified: $($item.Length) bytes"
       - name: Package EXE + Pavillon 01 + Qt6 dependencies
         shell: pwsh
         run: |
@@ -88,6 +97,7 @@ jobs:
           Copy-Item "build-v16/Release/moteur3d_v16_benchui.exe" "dist/"
           Copy-Item "build-v16/benchmark-tests" "dist/benchmark-tests" -Recurse
           Copy-Item "build-v16/pavillon01-smoke.png" "dist/Pavillon01-CPU-Preview.png"
+          Copy-Item "build-v16/pavillon01-gpu-warp.png" "dist/Pavillon01-GPU-WARP-Preview.png"
           git rev-parse HEAD | Out-File "dist/REVISION.txt" -Encoding ascii
           Copy-Item "build-v16/Release/pavillon01" "dist/pavillon01" -Recurse
           Copy-Item "build-v16/Release/shaders" "dist/shaders" -Recurse
