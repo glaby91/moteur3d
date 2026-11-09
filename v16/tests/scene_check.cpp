@@ -32,9 +32,21 @@ int main(int argc,char** argv){
             qCritical()<<"Broken mip chain:"<<m.name.c_str();return 1;
         }
     }
-    for(const auto& object:r.objects)if(object.triangleCount<=0){
-        qCritical()<<"Empty object:"<<object.id;return 1;
+    int organicCanopies=0;
+    for(const auto& object:r.objects){
+        if(object.triangleCount<=0){
+            qCritical()<<"Empty object:"<<object.id;return 1;
+        }
+        if(object.material==QStringLiteral("leaves") && object.parent.contains(QStringLiteral("Jardin"))) {
+            if(object.triangleCount<250){
+                qCritical()<<"Foliage fell back to primitive sphere:"<<object.id
+                           <<"triangles:"<<object.triangleCount;
+                return 1;
+            }
+            ++organicCanopies;
+        }
     }
+    if(organicCanopies!=15){qCritical()<<"Expected 15 foliage canopies, got"<<organicCanopies;return 1;}
     if(!s.finiteGround){qCritical()<<"V16 must not use implicit infinite ground";return 1;}
     // A downward ray beyond the bounded Pavillon site must see the sky.
     m3d::Stats terrainStats;
