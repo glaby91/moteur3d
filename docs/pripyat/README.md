@@ -18,6 +18,8 @@ Voir [les références visuelles du bâtiment et la passe haute définition](ENE
 
 Le cahier des exigences, les niveaux communiqués, les références prioritaires et la validation restante sont suivis dans [Cahier de reconstruction Energetik](CAHIER-ENERGETIK-PASSE-261104.md).
 
+> **Livre narratif (édition du 9 novembre 2026) :** [**PRIPYAT — Les jours que la ville gardait**](ATLAS-NARRATIF-LES-JOURS-QUE-LA-VILLE-GARDAIT-261109.md), **81 pages / 11 chapitres / 147 références**. Il croise la presse soviétique *Трибуна енергетика*, les dossiers du KGB publiés par l'Ukraine et des témoignages d'anciens habitants. Le **manuscrit GitHub est une version condensée et sourcée** ; les fichiers Word et PDF illustrés intégraux sont transmis dans la conversation et non redistribués sur le dépôt public faute de droits photographiques vérifiés.
+
 ## Atlas iconographique et textes historiques
 
 > **Édition la plus récente : 9 novembre 2026.** [Grand atlas illustré — 74 pages / 147 références](ATLAS-GRAND-ILLUSTRE-261109.md). L'édition Word et PDF conserve les 136 références historiques et ajoute 11 images (IMG-137 à IMG-147) et 5 rubriques Urbex Session. Les deux binaires sont diffusés dans la conversation, pas dans le dépôt public, car les droits des photos ne sont pas tous identifiés.
