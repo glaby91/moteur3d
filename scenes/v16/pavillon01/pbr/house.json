@@ -7,7 +7,8 @@
     "normal",
     "roughness"
   ],
-  "textures": [
+  "note": "Canonical V16 PBR texture-set registry. materials.textureSet resolves sets[].id. Procedural albedo, normal and roughness with generated mip levels; external image maps pending.",
+  "sets": [
     {
       "id": "tex_grass",
       "material": "grass",
@@ -85,6 +86,5 @@
       "recipe": "grass",
       "resolution": 2048
     }
-  ],
-  "note": "Single PBR registry for the complete 203-object Pavillon 01. textureSet in materials references id. Procedural maps are previews; native bridge generates mip levels."
+  ]
 }
