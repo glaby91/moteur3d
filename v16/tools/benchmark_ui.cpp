@@ -40,11 +40,11 @@ public:
         row->addWidget(root_);row->addWidget(browse);
         form->addRow(QStringLiteral("Dossier de sortie"),rootRow);
         layout->addLayout(form);
-        quick_=new QCheckBox(QStringLiteral("Test rapide (1 caméra, 320 × 180, CPU uniquement)"));
+        quick_=new QCheckBox(QStringLiteral("Test rapide (1 caméra, Full HD 1920 × 1080, CPU uniquement)"));
         cpuOnly_=new QCheckBox(QStringLiteral("CPU uniquement — ne pas tester l'aperçu GPU Compute"));
         layout->addWidget(quick_);layout->addWidget(cpuOnly_);
         layout->addWidget(new QLabel(QStringLiteral(
-            "Complet : 6 caméras, 400/800/1280 px, 1/2/4/8/16 threads, "
+            "Complet : 6 caméras, Full HD / 1440p / 4K, 1/2/4/8/16 threads, "
             "test CPU 4 spp et essai GPU par caméra (couleurs sans PBR). GPU sans accélération : test ignoré, jamais simulé.")));
         auto* controls=new QHBoxLayout;
         start_=new QPushButton(QStringLiteral("Lancer le benchmark complet"));
