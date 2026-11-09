@@ -1,0 +1,6 @@
+{
+  "format": "m3d-pbr-v1",
+  "textureResolutionTarget": 2048,
+  "textures": [],
+  "note": "Material scalar defaults only; no generated PBR image assets yet."
+}
