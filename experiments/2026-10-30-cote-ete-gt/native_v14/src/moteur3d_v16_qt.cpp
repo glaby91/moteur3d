@@ -298,7 +298,7 @@ private:
                 Stats shadowStats;
                 const auto shadow=buildShadow(snapshot->renderScene,shadowStats);
                 std::atomic<uint64_t> generation{1};
-                stats=render(snapshot->renderScene,shadow,camera,w,h,pixels,
+                stats=m3d::render(snapshot->renderScene,shadow,camera,w,h,pixels,
                              std::max(1u,std::min(8u,std::thread::hardware_concurrency())),
                              false,generation,1,1,false,false,false,3);
                 result.renderer=QStringLiteral("CPU Ray Tracing — PBR et mipmaps");
