@@ -52,11 +52,24 @@ jobs:
           assert v["retour_lateral"]["segments"] == 5
           assert not result.get("planes"), "No unsupported 3D or ground-plane depths"
           PY
+      - name: Measure second Energetik facade without assuming a new FOV
+        run: |
+          python3 tools/photo2scene/facade_linefit.py tools/photo2scene/data/pripyat/energetik-20261109-second-view-sample.json -o energetik-second-linefit.json
+          python3 - <<'PY'
+          import json
+          report=json.load(open("energetik-second-linefit.json"))
+          assert len(report["structural_level_line_fits"])==3
+          assert report["fov_horizontal_deg"] is None
+          assert report["three_dimensional_distances"] is None
+          assert report["calibration_status"]=="NOT_VALIDATED"
+          print("Second-view facade line-fit QA PASS: no invented FOV or depth")
+          PY
       - uses: actions/upload-artifact@v4
         with:
-          name: Photo2Scene-WARP-Energetik-camera-and-synthetic-reports
+          name: Photo2Scene-WARP-Energetik-two-views-geometry-reports
           path: |
             ground-result.json
             fov-result.json
             energetik-camera-preliminary.json
+            energetik-second-linefit.json
           if-no-files-found: error
