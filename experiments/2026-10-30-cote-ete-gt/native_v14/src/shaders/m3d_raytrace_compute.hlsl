@@ -146,6 +146,8 @@ void CSMain(uint3 tid:SV_DispatchThreadID){
     float2 uv=((float2(tid.xy)+.5f)/float2(width,height))*2.f-1.f;
     Ray ray;
     ray.origin=eye;
-    ray.direction=normalize(forward+right*uv.x*tanHalfFov*aspect-up*uv.y*tanHalfFov);
+    // Match CPU m3d_render.cpp: tanHalfFov is the horizontal half-FOV.
+    // Vertical half-FOV is tanHalfFov/aspect (never multiply horizontal by aspect).
+    ray.direction=normalize(forward+right*uv.x*tanHalfFov-up*uv.y*(tanHalfFov/aspect));
     Output[tid.xy]=tracePrimary(ray);
 }
