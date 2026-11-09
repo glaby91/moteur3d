@@ -27,9 +27,9 @@ Dans le programme principal : **Outils > Benchmark complet…**.
 La fenêtre de benchmark propose un dossier de destination et les modes complet, rapide, ou CPU seul.
 
 Mode complet :
-- CPU ray tracing : 6 caméras × 3 résolutions (400×225, 800×450, 1280×720) × 5 réglages de threads (1/2/4/8/16).
-- CPU qualité : 6 caméras × 800×450, 4 échantillons/pixel.
-- GPU D3D11 Compute : 6 caméras × 800×450, aperçu de la géométrie ; marqué `skipped` si indisponible.
+- CPU ray tracing : 6 caméras × 3 résolutions (1920×1080, 2560×1440, 3840×2160) × 5 réglages de threads (1/2/4/8/16).
+- CPU qualité : 6 caméras × 1920×1080, 4 échantillons/pixel.
+- GPU D3D11 Compute : 6 caméras × 1920×1080, textures PBR simplifiées ; marqué `skipped` si indisponible.
 - Dossier horodaté `Pavillon01-V16-AAAAmmJJ_HHMMSS_mmm`.
 - Exports `results.csv`, `summary.json`, `system.json`, `progress.jsonl` et `images/*.png`.
 - Les essais GPU sont des aperçus géométriques ; **aucune parité PBR CPU/GPU n'est revendiquée**.
@@ -49,6 +49,7 @@ La compilation utilise un seul cache `build-v16` : un changement de source GUI s
 
 ## Tests et limitations
 - Build Windows, tests de chargement, rendu CPU et export rapide benchmark **validés sur GitHub Actions n°85**.
+- L'application utilise le Full HD (1920×1080) par défaut, avec options Full HD (4 échantillons CPU) et 4K. Tous les PNG de référence CPU, GPU et benchmark sont en Full HD minimum ; la CI contrôle les dimensions réelles des fichiers.
 - La génération d'un PNG n'est pas une validation de qualité architecturale.
 - Les cartes PBR sont encore majoritairement procédurales ; les images PBR externes et le rendu GPU PBR cohérent restent à faire.
 - L'exécutable Windows n'a pas été manipulé manuellement sur un PC physique dans cette session.
