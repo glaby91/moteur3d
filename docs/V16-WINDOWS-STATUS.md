@@ -1,6 +1,6 @@
-# CSE WARP Beta 0 — Moteur3D V16 Windows, Pavillon 01 et modules séparés
+# CSE WARP Beta X — Moteur3D V16 Windows, Pavillon 01 et modules séparés
 
-**Nom public du moteur : CSE WARP Beta 0.** Les exécutables conservent temporairement leurs noms techniques `moteur3d_v16*.exe` pour préserver les scripts de build et les outils existants.
+**Nom public du moteur : CSE WARP Beta X.** Les exécutables conservent temporairement leurs noms techniques `moteur3d_v16*.exe` pour préserver les scripts de build et les outils existants.
 
 ## Périmètre
 - Windows x64 uniquement : MSVC 2022, Qt 6.8.3 et CMake.
