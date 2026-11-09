@@ -295,6 +295,7 @@ private:
                 else result.error=QStringLiteral("GPU indisponible (%1) — retour CPU. ").arg(QString::fromStdWString(reason));
             }
             if(!ok){
+                pixels.resize(size_t(w)*size_t(h));
                 Stats shadowStats;
                 const auto shadow=buildShadow(snapshot->renderScene,shadowStats);
                 std::atomic<uint64_t> generation{1};
