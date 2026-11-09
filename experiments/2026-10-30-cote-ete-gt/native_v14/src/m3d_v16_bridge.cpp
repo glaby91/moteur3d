@@ -203,6 +203,17 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
             const float veins=std::sin(u*12.f+v*8.f+std::sin(v*15.f)*1.5f);
             factor=.94f+.05f*veins+.035f*(n-.5f);
         }
+        else if(pattern=="roof") {
+            // Dark bituminous roof: broad wear patches, very fine grain.
+            const float large=smoothNoise(u*9.f,v*9.f,seed^0x72c95aa9u);
+            const float grain=smoothNoise(u*83.f,v*83.f,seed^0xb5297a4du);
+            factor=.91f+.14f*(large-.5f)+.035f*(grain-.5f);
+        }
+        else if(pattern=="porcelain") {
+            // Glazed interior tile: low-frequency clouds with very low bump.
+            const float cloud=smoothNoise(u*5.f,v*5.f,seed^0x9e3779b9u);
+            factor=.973f+.045f*(cloud-.5f);
+        }
         else if(pattern=="fabric")
             factor=.91f+.065f*std::sin(u*260.f)*std::sin(v*260.f);
         else if(pattern=="lawn"||pattern=="foliage") {
@@ -227,7 +238,7 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
             const float b=2.f*PI*(u*2.f-v*3.f);
             normal=norm({.025f*std::cos(a)+.015f*std::cos(b),
                          .014f*std::sin(a)-.011f*std::sin(b),1.f});
-        } else if(pattern=="glass"||pattern=="metal") {
+        } else if(pattern=="glass"||pattern=="metal"||pattern=="porcelain") {
             normal={0,0,1};
         } else {
             const float d=(n-.5f)*(pattern=="concrete"||pattern=="plaster"?.035f:.07f);
