@@ -143,6 +143,162 @@
       "transmission": 0,
       "ior": 1.5,
       "textureSet": "tex_leaves"
+    },
+    {
+      "id": "roof_membrane",
+      "baseColor": [
+        0.26,
+        0.29,
+        0.31
+      ],
+      "roughness": 0.91,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_roof_membrane"
+    },
+    {
+      "id": "zinc_coping",
+      "baseColor": [
+        0.43,
+        0.45,
+        0.46
+      ],
+      "roughness": 0.39,
+      "metallic": 0.72,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_zinc_coping"
+    },
+    {
+      "id": "facade_cedar",
+      "baseColor": [
+        0.48,
+        0.3,
+        0.18
+      ],
+      "roughness": 0.72,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_facade_cedar"
+    },
+    {
+      "id": "basalt_plinth",
+      "baseColor": [
+        0.24,
+        0.26,
+        0.28
+      ],
+      "roughness": 0.83,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_basalt_plinth"
+    },
+    {
+      "id": "window_gasket",
+      "baseColor": [
+        0.095,
+        0.1,
+        0.105
+      ],
+      "roughness": 0.63,
+      "metallic": 0.12,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_window_gasket"
+    },
+    {
+      "id": "wood_deck",
+      "baseColor": [
+        0.52,
+        0.34,
+        0.21
+      ],
+      "roughness": 0.69,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_wood_deck"
+    },
+    {
+      "id": "travertine",
+      "baseColor": [
+        0.74,
+        0.68,
+        0.58
+      ],
+      "roughness": 0.72,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_travertine"
+    },
+    {
+      "id": "ceramic_tile",
+      "baseColor": [
+        0.72,
+        0.76,
+        0.74
+      ],
+      "roughness": 0.34,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_ceramic_tile"
+    },
+    {
+      "id": "terrazzo",
+      "baseColor": [
+        0.65,
+        0.64,
+        0.6
+      ],
+      "roughness": 0.55,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_terrazzo"
+    },
+    {
+      "id": "roof_vent",
+      "baseColor": [
+        0.2,
+        0.22,
+        0.23
+      ],
+      "roughness": 0.48,
+      "metallic": 0.56,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_roof_vent"
+    },
+    {
+      "id": "textile_rug",
+      "baseColor": [
+        0.46,
+        0.43,
+        0.38
+      ],
+      "roughness": 0.94,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_textile_rug"
+    },
+    {
+      "id": "warm_brass",
+      "baseColor": [
+        0.62,
+        0.49,
+        0.27
+      ],
+      "roughness": 0.36,
+      "metallic": 0.78,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_warm_brass"
     }
   ]
 }
