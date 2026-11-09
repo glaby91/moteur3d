@@ -2,27 +2,23 @@
 
 **Périmètre : Pavillon 01 exclusivement.** Le moteur V16 ouvre `scene.json` et les ressources déclarées. Aucun chargeur de scène binaire V3/V4/V5 n'est lié à l'exécutable V16. Pripiat sera traité plus tard par un convertisseur externe.
 
-## Construction
+## Construction et validation — Windows x64 exclusivement
 
-Prérequis : Qt 6.2+ (Core, Gui, Widgets, Concurrent), CMake 3.24+, compilateur C++17.
+Plateforme cible : **Windows 10/11 x64**, Visual Studio 2022 (MSVC x64), Qt 6.8.3, CMake 3.24+. Nous n'exécutons plus de jobs Linux pendant cette phase V16.
 
-```bash
-cmake -S v16 -B build-v16 -DCMAKE_BUILD_TYPE=Release
-cmake --build build-v16 --parallel
-ctest --test-dir build-v16 --output-on-failure
-```
-
-Sous Windows, utiliser Visual Studio 2022 et le build GitHub Actions, ou configurer :
+Build local depuis PowerShell, avec Qt6 installé :
 
 ```powershell
-cmake -S v16 -B build-v16 -G "Visual Studio 17 2022" -A x64
-cmake --build build-v16 --config Release
+cmake -S v16 -B build-v16 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="C:/Qt/6.8.3/msvc2022_64"
+cmake --build build-v16 --config Release --parallel 4
 ctest --test-dir build-v16 -C Release --output-on-failure
 ```
 
-Le build place le dossier `pavillon01/` et le shader `shaders/m3d_raytrace_compute.hlsl` près de l'exécutable. Lancer `moteur3d_v16` ou passer un manifeste comme premier argument.
+Le [workflow Windows V16](https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v16.yml) construit `moteur3d_v16.exe`, exécute les tests natifs et un rendu CPU de Pavillon 01, contrôle le PNG, puis publie l'artefact `Moteur3D-V16-Pavillon01-Windows-x64`.
 
-**Package Windows prêt à copier** : workflow [Build Moteur3D V16](https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v16.yml), artefact `Moteur3D-V16-Pavillon01-Windows-x64` avec DLL Qt6 déployées par `windeployqt`.
+Le ZIP contient l'exécutable, les bibliothèques Qt6, le dossier `pavillon01/`, `shaders/`, `REVISION.txt` et `Pavillon01-CPU-Preview.png`. Décompresser en conservant l'arborescence et lancer `moteur3d_v16.exe`. La scène V16 est ouverte automatiquement; aucune scène `.bin` n'est acceptée.
+
+L'aperçu GPU D3D11 Compute doit encore être éprouvé sur un PC Windows réel; son rendu ne possède pas la parité PBR du CPU.
 
 ## Répartition des ressources
 
