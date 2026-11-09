@@ -1,0 +1,189 @@
+{
+  "image": {
+    "id": "energetik-photo-historique-20261109-516x387",
+    "width": 516,
+    "height": 387,
+    "original_filename": "image(20261109-192551).png",
+    "sha256": "5652f4a61edac6ddf30ef1a3dd728e50600ce139bb7f7dabafdc10dbd911d1c5"
+  },
+  "vanishing": {
+    "directions": {
+      "facade_longitudinale": [
+        {
+          "a": [
+            335.39,
+            39.97
+          ],
+          "b": [
+            387.28,
+            21.77
+          ]
+        },
+        {
+          "a": [
+            340.68,
+            47.03
+          ],
+          "b": [
+            384.62,
+            32.61
+          ]
+        },
+        {
+          "a": [
+            170.89,
+            105.18
+          ],
+          "b": [
+            138.97,
+            115.64
+          ]
+        },
+        {
+          "a": [
+            222,
+            88.5
+          ],
+          "b": [
+            191.9,
+            98.2
+          ]
+        },
+        {
+          "a": [
+            119.78,
+            121.84
+          ],
+          "b": [
+            92.02,
+            131.07
+          ]
+        },
+        {
+          "a": [
+            331.56,
+            45.89
+          ],
+          "b": [
+            356.81,
+            37.92
+          ]
+        },
+        {
+          "a": [
+            152.08,
+            196.12
+          ],
+          "b": [
+            109.43,
+            201.09
+          ]
+        },
+        {
+          "a": [
+            349.42,
+            177.35
+          ],
+          "b": [
+            306.84,
+            181.46
+          ]
+        },
+        {
+          "a": [
+            65.51,
+            214.78
+          ],
+          "b": [
+            106.91,
+            212.59
+          ]
+        },
+        {
+          "a": [
+            388.06,
+            172.58
+          ],
+          "b": [
+            359.41,
+            175.96
+          ]
+        }
+      ],
+      "retour_lateral": [
+        {
+          "a": [
+            396.17,
+            27.63
+          ],
+          "b": [
+            488.84,
+            113.61
+          ]
+        },
+        {
+          "a": [
+            487.59,
+            117.43
+          ],
+          "b": [
+            463.41,
+            94.08
+          ]
+        },
+        {
+          "a": [
+            448.52,
+            80.21
+          ],
+          "b": [
+            429.94,
+            62.6
+          ]
+        },
+        {
+          "a": [
+            391,
+            174
+          ],
+          "b": [
+            501,
+            198
+          ]
+        },
+        {
+          "a": [
+            426.8,
+            193.39
+          ],
+          "b": [
+            439.69,
+            197.01
+          ]
+        }
+      ]
+    },
+    "orthogonal_pair": [
+      "facade_longitudinale",
+      "retour_lateral"
+    ],
+    "principal_point": [
+      258,
+      193.5
+    ]
+  },
+  "notes": {
+    "original_image": "User supplied 2026-11-09 516x387 file; do not extract pixel geometry from generative sky/vegetation edits",
+    "segments": "OpenCV LSD selection assisted by semantic building-region recognition: 10 front segments and 5 return segments",
+    "assisted_segment": "Return axis balcony segment [391,174] to [501,198] placed using visual judgement; must be reverified",
+    "interpretation": "ONLY camera vanishing points and conditional FOV; no 3D distances or physical scale",
+    "assumptions": [
+      "two horizontal building axes are orthogonal",
+      "principal point = image center",
+      "square pixels",
+      "zero lens distortion",
+      "no significant perspective crop"
+    ],
+    "warning": "Low-resolution, overgrowth and reprojected evidence prevent validated camera intrinsics. Require independent photos, architecture constraints and holdout residuals."
+  }
+}

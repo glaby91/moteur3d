@@ -35,8 +35,15 @@ struct Camera { V eye,f,r,u; float tanHalf=0,aspect=1,pixelAngle=0,focusDistance
 struct RendererCapabilities { bool dxrHardware=false; bool dxrBackend=false; };
 struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,depthReads=0,shadowRays=0; uint64_t simdRayPackets=0,simdTrianglePackets=0,simdTextureSamples=0,simdLightBatches=0; double ms=0,postMs=0,shadowMs=0; unsigned threads=1; bool avx2=false,gpu=false; };
 struct Light { V p; float radius,intensity; V color; };
-struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPercent=0; float refractiveIndex=1.5f; std::vector<Level> mip,normalMip,roughnessMip; std::vector<ColorLevel> colorMip; };
-struct Scene { bool underwaterEnvironment=false; std::vector<Obj> obj; std::vector<Node> node; std::vector<uint32_t> order; std::vector<Material> mat; std::vector<Light> lights; int32_t root=-1; };
+struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPercent=0; float refractiveIndex=1.5f; float metallic=0.f, roughnessScale=1.f; std::vector<Level> mip,normalMip,roughnessMip; std::vector<ColorLevel> colorMip; };
+struct Scene { bool underwaterEnvironment=false; bool finiteGround=false; bool useLegacyWorldLights=true; std::vector<Obj> obj; std::vector<Node> node; std::vector<uint32_t> order; std::vector<Material> mat; std::vector<Light> lights; int32_t root=-1;
+ // V16 builder assigns a unique identity after scene construction. Tracked scenes
+ // are immutable except for explicit editor mutations, which MUST call
+ // markGpuContentChanged(). Legacy/untracked scenes (identity == 0) retain
+ // the full byte-for-byte scene hash as a safe fallback.
+ uint64_t gpuCacheIdentity=0, gpuCacheRevision=0;
+ void markGpuContentChanged(){++gpuCacheRevision;}
+};
 struct ShadowMap { int size=1024; float span=30,dist=42; V base={0,1.5f,0},right,up;std::vector<float>d,min,max; };
 extern V sun,skyZenith,skyHorizon,sunTint;
 extern float daylight,lampFactor;
@@ -53,6 +60,17 @@ Camera camera(float angleDeg,float elevationDeg,float distance,int w,int h,V loo
 Stats renderHybrid(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,unsigned threads,bool fog,const std::atomic<uint64_t>& generation,uint64_t token);
 Stats render(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,unsigned threads,bool fog,const std::atomic<uint64_t>& generation,uint64_t token,unsigned samplesPerPixel=1,bool depthOfField=false,bool useAvx2=false,bool offlinePathTrace=false,unsigned maxBounces=3);
 V traceOfflineColor(const Scene& s,const ShadowMap& sm,const Camera& cam,const Ray& ray,Stats& st,bool fog,uint64_t seed,unsigned maxBounces);
+/* Accumulate distinct, deterministic Monte-Carlo samples as linear HDR RGB.
+ * Each pass updates accum and returns an sRGB/tonemapped preview of all samples
+ * [0, firstSample+batchSamples). The same image must result whether rendered in
+ * one batch or in several progressive passes. Cancellation is checked per tile.
+ * Caller must reset accum on changes of scene, camera or render settings. */
+Stats renderGiAccumulatePass(const Scene& scene,const ShadowMap& shadow,
+    const Camera& cam,int w,int h,std::vector<V>& accum,
+    std::vector<uint32_t>& preview,uint32_t firstSample,uint32_t batchSamples,
+    unsigned threads,const std::atomic<uint64_t>& generation,uint64_t token,
+    unsigned maxBounces);
+
 RendererCapabilities detectRendererCapabilities() noexcept;
 bool renderCompute11Preview(const Scene& s,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
 bool renderDirectX11Preview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);

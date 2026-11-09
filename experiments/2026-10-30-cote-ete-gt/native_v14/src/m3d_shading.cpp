@@ -47,7 +47,7 @@ static V sky(V d,bool fog,bool deepOcean=false){
   if(fog)c=c*.86f+V{13,52,62}*.14f;
   return c;
  }
- float k=clampf(d.y*.90f+.25f,0,1);V c=skyHorizon*(1-k)+skyZenith*k;float nearDist=std::max(0.f,dot(d,sun)),g=(std::pow(nearDist,92)*12+std::pow(nearDist,28)*2.2f)*daylight;c=c+V{g*sunTint.x/255.f,g*.82f*sunTint.y/255.f,g*.62f*sunTint.z/255.f};if(daylight>.05f&&nearDist>.99975f)c=sunTint;else if(daylight>.05f&&nearDist>.9985f)c=c+V{sunTint.x*.141f,sunTint.y*.123f,sunTint.z*.093f};if(fog&&d.y>-.08f){float w=std::sin(d.x*11.7f+d.z*4.2f)*std::sin(d.z*8.4f-d.y*15.1f)+.54f*std::sin(d.x*23.2f+d.y*10.4f)*std::cos(d.z*13.8f),cloud=clampf((w-.45f)*2.4f,0,1)*clampf((d.y+.16f)*3,0,1)*daylight;c=c*(1-cloud)+V{174,182,186}*cloud;}if(daylight<.18f){V moon=norm({-sun.x,.46f,-sun.z});float md=std::max(0.f,dot(d,moon)),a=std::pow(md,18)*.10f*(1-daylight),disc=clampf((md-.9994f)*1200.f,0,1)*(1-daylight);c=c+V{246,214,178}*(a+disc*.72f);}return c;
+ float k=clampf((d.y+.10f)*1.10f,0.f,1.f);V c=skyHorizon*(1-k)+skyZenith*k;float nearDist=std::max(0.f,dot(d,sun)),g=(std::pow(nearDist,92)*12+std::pow(nearDist,28)*2.2f)*daylight;c=c+V{g*sunTint.x/255.f,g*.82f*sunTint.y/255.f,g*.62f*sunTint.z/255.f};if(daylight>.05f&&nearDist>.99975f)c=sunTint;else if(daylight>.05f&&nearDist>.9985f)c=c+V{sunTint.x*.141f,sunTint.y*.123f,sunTint.z*.093f};if(fog&&d.y>-.08f){float w=std::sin(d.x*11.7f+d.z*4.2f)*std::sin(d.z*8.4f-d.y*15.1f)+.54f*std::sin(d.x*23.2f+d.y*10.4f)*std::cos(d.z*13.8f),cloud=clampf((w-.45f)*2.4f,0,1)*clampf((d.y+.16f)*3,0,1)*daylight;c=c*(1-cloud)+V{174,182,186}*cloud;}if(daylight<.18f){V moon=norm({-sun.x,.46f,-sun.z});float md=std::max(0.f,dot(d,moon)),a=std::pow(md,18)*.10f*(1-daylight),disc=clampf((md-.9994f)*1200.f,0,1)*(1-daylight);c=c+V{246,214,178}*(a+disc*.72f);}return c;
 }
 // Procedural bump mapping: perturb the shading normal without changing geometry.
 static V bumpNormal(const std::string&mat,V p,V n,float pixelFootprint){
@@ -78,11 +78,19 @@ static V mappedNormal(const Material&m,const Obj&o,V n,float u,float v,float foo
  V tex=sampleMipChain(m.normalMip,u,v,footprint,st),q=norm({tex.x/127.5f-1.f,tex.y/127.5f-1.f,tex.z/127.5f-1.f});
  return norm(t*q.x+b*q.y+n*q.z);
 }
-V shade(const Scene&s,const ShadowMap&sm,const Camera&cam,const Ray&r,const Hit&h,Stats&st,bool fog,bool reflections){if(h.id==-1)return sky(r.d,fog,s.underwaterEnvironment);V p=h.p,n=h.n;int mi=h.id==-2?groundMaterial(s,p):h.mat;const std::string&mat=s.mat[mi].name;const bool carPaint=mat.rfind("sports",0)==0||mat=="carSilver"||mat=="carBlue"||mat=="carGreen"||mat=="classicBody";const bool raptureSurface=mat=="raptureStone"||mat=="raptureBronze"||mat=="raptureGlass";V uv;float footprint=1,worldFootprint=h.t*cam.pixelAngle;const Obj*o=h.id>=0?&s.obj[h.id]:nullptr;if(h.id==-2){uv={p.x*.34f,p.z*.34f,.34f};}else{uv=uvAt(s,*o,p,n);float slope=std::max(.16f,std::abs(dot(n,r.d)));worldFootprint=h.t*cam.pixelAngle/slope;footprint=float(albedoSize(s.mat[mi]))*worldFootprint*uv.z;}const Material&material=s.mat[mi];if(o&&!material.normalMip.empty())n=mappedNormal(material,*o,n,uv.x,uv.y,footprint,st);else n=bumpNormal(mat,p,n,worldFootprint);V base=texSample(material,uv.x,uv.y,footprint,st);float roughness=material.roughnessMip.empty()?.72f:clampf(sampleMipChain(material.roughnessMip,uv.x,uv.y,footprint,st).x/255.f,.08f,.98f);float ndotl=std::max(0.f,dot(n,sun)),vis=daylight>.001f?visibility(sm,p+n*.025f,&st):1.f,direct=ndotl*vis*daylight,diffuseLevel=mat=="foam"?.60f+.30f*daylight+.24f*direct:mat=="orange"?.34f+.43f*daylight+.26f*direct:carPaint?.32f+.42f*daylight+.32f*direct:raptureSurface?.42f+.28f*daylight+.50f*direct:.30f+.44f*daylight+.56f*direct;V c=base*diffuseLevel;float glow=mat=="led"?1.35f*lampFactor:mat=="taillight"?1.05f*lampFactor:mat=="neon"?1.1f:mat=="lamp"?.45f+1.05f*lampFactor:mat=="windowlit"?.88f:0;if(glow)c=c+base*glow;if(mat=="lamp")c=c+V{255,166,91}*(.75f+1.9f*lampFactor);if(mat=="led")c=c+V{255,217,165}*(.48f+.85f*lampFactor);if(mat=="taillight")c=c+V{255,28,12}*(1.25f*lampFactor);if(daylight<1.f)c=c+V{28.f,13.f,4.f}*(1-daylight);float spec=mat=="sea"?.46f:mat=="puddle"?.64f:mat=="glass"?.27f:(mat=="metal"||mat=="seatSteel")?.24f:mat=="carSilver"?.94f:carPaint?.68f:mat=="wheelMetal"?.34f:mat=="carGlass"?.52f:mat=="taxi"?.2f:mat=="mutant"?.23f:mat=="scar"?.28f:mat=="wound"?.19f:mat=="asphalt"?.16f:mat=="orange"?.045f+.16f*(1.f-roughness):(material.reflectivityPercent>0?.20f*material.reflectivityPercent/100.f:0.f);if(spec){V refl=n*(2*ndotl)-sun;float power=mat=="sea"?25:mat=="puddle"?18:mat=="asphalt"?13:mat=="mutant"?29:mat=="scar"?35:mat=="wound"?20:mat=="carSilver"?52:carPaint?30:mat=="wheelMetal"?42:mat=="carGlass"?38:mat=="orange"?42:34;if(!material.roughnessMip.empty())power=clampf(2.f/(roughness*roughness)-2.f,8.f,80.f);float shine=std::pow(std::max(0.f,-dot(r.d,refl)),power)*spec*vis*daylight;float moonSheen=mat=="sea"?std::pow(std::max(0.f,-dot(r.d,refl)),17)*.42f*(1-daylight):0;c=c+V{178,202,214}*shine+V{148,169,196}*moonSheen;}
+V shade(const Scene&s,const ShadowMap&sm,const Camera&cam,const Ray&r,const Hit&h,Stats&st,bool fog,bool reflections){if(h.id==-1)return sky(r.d,fog,s.underwaterEnvironment);V p=h.p,n=h.n;int mi=h.id==-2?groundMaterial(s,p):h.mat;const std::string&mat=s.mat[mi].name;const bool carPaint=mat.rfind("sports",0)==0||mat=="carSilver"||mat=="carBlue"||mat=="carGreen"||mat=="classicBody";const bool raptureSurface=mat=="raptureStone"||mat=="raptureBronze"||mat=="raptureGlass";V uv;float footprint=1,worldFootprint=h.t*cam.pixelAngle;const Obj*o=h.id>=0?&s.obj[h.id]:nullptr;if(h.id==-2){uv={p.x*.34f,p.z*.34f,.34f};}else{uv=uvAt(s,*o,p,n);float slope=std::max(.16f,std::abs(dot(n,r.d)));worldFootprint=h.t*cam.pixelAngle/slope;footprint=float(albedoSize(s.mat[mi]))*worldFootprint*uv.z;}const Material&material=s.mat[mi];if(o&&!material.normalMip.empty())n=mappedNormal(material,*o,n,uv.x,uv.y,footprint,st);else n=bumpNormal(mat,p,n,worldFootprint);V base=texSample(material,uv.x,uv.y,footprint,st);float roughness=material.roughnessMip.empty()?.72f:clampf(sampleMipChain(material.roughnessMip,uv.x,uv.y,footprint,st).x/255.f,.08f,.98f);roughness=clampf(roughness*material.roughnessScale,.04f,.98f);float ndotl=std::max(0.f,dot(n,sun)),vis=daylight>.001f?visibility(sm,p+n*.025f,&st):1.f,direct=ndotl*vis*daylight,diffuseLevel=mat=="foam"?.60f+.30f*daylight+.24f*direct:mat=="orange"?.34f+.43f*daylight+.26f*direct:carPaint?.32f+.42f*daylight+.32f*direct:raptureSurface?.42f+.28f*daylight+.50f*direct:.30f+.44f*daylight+.56f*direct;// Generic daylight shading: a normal-facing sky model helps *any* scene
+ // reveal relief in its own PBR normal maps without scene-name rules.
+ if(!s.underwaterEnvironment){
+   const float skyFacing=clampf(.5f+.5f*n.y,0.f,1.f);
+   diffuseLevel=(diffuseLevel-.10f*daylight)*(.72f+.28f*skyFacing)+.13f*direct;
+ }
+ V c=base*(diffuseLevel*(1.f-.7f*material.metallic));float glow=mat=="led"?1.35f*lampFactor:mat=="taillight"?1.05f*lampFactor:mat=="neon"?1.1f:mat=="lamp"?.45f+1.05f*lampFactor:mat=="windowlit"?.88f:0;if(glow)c=c+base*glow;if(mat=="lamp")c=c+V{255,166,91}*(.75f+1.9f*lampFactor);if(mat=="led")c=c+V{255,217,165}*(.48f+.85f*lampFactor);if(mat=="taillight")c=c+V{255,28,12}*(1.25f*lampFactor);if(daylight<1.f)c=c+V{28.f,13.f,4.f}*(1-daylight);float spec=mat=="sea"?.46f:mat=="puddle"?.64f:mat=="glass"?.27f:(mat=="metal"||mat=="seatSteel")?.24f:mat=="carSilver"?.94f:carPaint?.68f:mat=="wheelMetal"?.34f:mat=="carGlass"?.52f:mat=="taxi"?.2f:mat=="mutant"?.23f:mat=="scar"?.28f:mat=="wound"?.19f:mat=="asphalt"?.16f:mat=="orange"?.045f+.16f*(1.f-roughness):(material.reflectivityPercent>0?.20f*material.reflectivityPercent/100.f:0.f);spec=std::max(spec,material.metallic*.72f);if(spec){V refl=n*(2*ndotl)-sun;float power=mat=="sea"?25:mat=="puddle"?18:mat=="asphalt"?13:mat=="mutant"?29:mat=="scar"?35:mat=="wound"?20:mat=="carSilver"?52:carPaint?30:mat=="wheelMetal"?42:mat=="carGlass"?38:mat=="orange"?42:34;if(!material.roughnessMip.empty())power=clampf(2.f/(roughness*roughness)-2.f,8.f,80.f);float shine=std::pow(std::max(0.f,-dot(r.d,refl)),power)*spec*vis*daylight;float moonSheen=mat=="sea"?std::pow(std::max(0.f,-dot(r.d,refl)),17)*.42f*(1-daylight):0;c=c+V{178,202,214}*shine+V{148,169,196}*moonSheen;}
  const float sceneLightScale=.42f+.58f*(1.f-daylight);
- if(st.avx2){st.simdLightBatches+=pointLights.size()/8+s.lights.size()/8;c=c+accumulatePointLightsAvx2(pointLights.data(),pointLights.size(),p,n,1.f);c=c+accumulatePointLightsAvx2(s.lights.data(),s.lights.size(),p,n,sceneLightScale);}
+ if(st.avx2){st.simdLightBatches+=(s.useLegacyWorldLights?pointLights.size()/8:0)+s.lights.size()/8;
+   if(s.useLegacyWorldLights)c=c+accumulatePointLightsAvx2(pointLights.data(),pointLights.size(),p,n,1.f);
+   c=c+accumulatePointLightsAvx2(s.lights.data(),s.lights.size(),p,n,sceneLightScale);}
  auto applyPointLight=[&](const Light&l,float scale){float wet=mat=="puddle"?.48f:mat=="asphalt"?.25f:mat=="raptureStone"?.17f:mat=="raptureBronze"?.24f:carPaint?.74f:mat=="taxi"?.10f:mat=="concrete"?.12f:mat=="wood"?.18f:0;if(st.avx2&&!wet)return;V q=l.p-p;float d2=dot(q,q),r2=l.radius*l.radius;if(d2>=r2||d2<1e-5f)return;float d=std::sqrt(d2);V ld=q/d;float edge=1-d/l.radius,energy=edge*edge*l.intensity*scale,lam=std::max(0.f,dot(n,ld));if(!st.avx2)c=c+V{l.color.x,l.color.y,l.color.z}*(energy*lam*.27f);if(wet){V half=norm(ld-r.d);float sp=std::pow(std::max(0.f,dot(n,half)),mat=="asphalt"?18:carPaint?14:38)*energy*wet;c=c+V{l.color.x,l.color.y,l.color.z}*sp;}};
- for(const auto&l:pointLights)applyPointLight(l,1.f);for(const auto&l:s.lights)applyPointLight(l,sceneLightScale);
+ if(s.useLegacyWorldLights)for(const auto&l:pointLights)applyPointLight(l,1.f);for(const auto&l:s.lights)applyPointLight(l,sceneLightScale);
  if(reflections&&s.mat[mi].reflectivityPercent){V rd=norm(r.d-n*(2.f*dot(r.d,n)));float grazing=1.f-clampf(-dot(r.d,n),0.f,1.f);float profile=mat=="sea"?(.27f+.24f*grazing)/.51f:mat=="carSilver"?(.70f+.25f*std::pow(grazing,3))/.95f:(mat=="carGlass"||mat=="glass")?(.14f+.28f*grazing)/.42f:(.07f+.22f*std::pow(grazing,5))/.29f;float amount=(s.mat[mi].reflectivityPercent*.01f)*profile;V reflected{0,0,0};int taps=mat=="sea"?2:1;for(int k=0;k<taps;k++){V dir=rd;if(k){V axis=std::abs(rd.y)>.92f?V{1,0,0}:V{0,1,0},tangent=norm(cross(rd,axis)),bitangent=norm(cross(rd,tangent));dir=norm(rd+tangent*.045f+bitangent*.03f);}Ray rr{p+n*.035f,dir};Hit rh;closest(s,rr,rh,&st);st.rays++;if(rh.id==-1)st.sky++;else st.hits++;reflected=reflected+shade(s,sm,cam,rr,rh,st,fog,false);}reflected=reflected*(1.f/taps);if(mat=="carSilver")reflected={reflected.x*.84f,reflected.y*.84f,reflected.z*.84f};c=c*(1.f-amount)+reflected*amount;} if(fog){float f=1-std::exp(-h.t*.038f);c=c*(1-f)+skyHorizon*f;}return{clampf(c.x,0,255),clampf(c.y,0,255),clampf(c.z,0,255)};}
 
 V traceColor(const Scene&s,const ShadowMap&sm,const Camera&cam,const Ray&input,Stats&st,bool fog){
@@ -103,7 +111,15 @@ V traceColor(const Scene&s,const ShadowMap&sm,const Camera&cam,const Ray&input,S
   const float eta=entering?1.f/ior:ior;
   const float sin2=std::max(0.f,1.f-cosine*cosine),k=1.f-eta*eta*sin2;
   const bool totalInternalReflection=k<=0.f;
-  const float reflectedWeight=totalInternalReflection?1.f:fresnel;
+  // Pavillon 01 pool: retain a sky/building reflection even for a shallow,
+  // low-transmission water surface. Non-water glass keeps physical Schlick F0.
+  // Use measured medium properties, not a scene name or an object label.
+  // The GPU Preview uses the same water IOR/transmission classification.
+  const bool architecturalWater=(material.transmissionPercent>5 &&
+      material.refractiveIndex>1.28f && material.refractiveIndex<1.38f);
+  const float waterEdge=std::pow(1.f-cosine,3.f);
+  const float reflectedWeight=totalInternalReflection?1.f:
+      architecturalWater?clampf(.15f+.32f*waterEdge,0.f,.72f):fresnel;
   const float pass=totalInternalReflection?0.f:(transmission*.01f)*(1.f-fresnel);
 
   V surface=shade(s,sm,cam,ray,hit,st,fog,false);
@@ -149,28 +165,32 @@ static V offlinePbrShade(const Scene&s,const ShadowMap&sm,const Camera&cam,const
  else{uv=uvAt(s,*o,h.p,n);const float slope=std::max(.16f,std::abs(dot(n,r.d)));worldFootprint=h.t*cam.pixelAngle/slope;footprint=float(albedoSize(material))*worldFootprint*uv.z;}
  if(o&&!material.normalMip.empty())n=mappedNormal(material,*o,n,uv.x,uv.y,footprint,st);else n=bumpNormal(name,h.p,n,worldFootprint);
  const V base=rgbBytesToLinear(texSample(material,uv.x,uv.y,footprint,st));
- const float roughness=material.roughnessMip.empty()?.72f:clampf(sampleMipChain(material.roughnessMip,uv.x,uv.y,footprint,st).x/255.f,.08f,.98f);
+ float roughness=material.roughnessMip.empty()?.72f:clampf(sampleMipChain(material.roughnessMip,uv.x,uv.y,footprint,st).x/255.f,.08f,.98f);roughness=clampf(roughness*material.roughnessScale,.04f,.98f);
  // V4 defines reflectivity, transmission and IOR, but no metallic channel.
  // Preserve reflectivity as dielectric F0; never reinterpret it as metallicity.
  const float f0Level=material.reflectivityPercent?clampf(float(material.reflectivityPercent)*.01f,.02f,.95f):.04f;
- const float metallic=0.f;
+ const float metallic=clampf(material.metallic,0.f,1.f);
  if(roughOut)*roughOut=roughness;
  if(metallicOut)*metallicOut=metallic;
  if(baseOut)*baseOut=base;
  if(normalOut)*normalOut=n;
  const V view=norm(r.d*-1.f);const float nv=std::max(1e-4f,dot(n,view));
- const V f0{f0Level,f0Level,f0Level};
- auto evaluate=[&](V l,V radiance,float visibilityFactor){const float nl=std::max(0.f,dot(n,l));if(nl<=0.f||visibilityFactor<=0.f)return V{0,0,0};const V half=norm(view+l);const float nh=std::max(0.f,dot(n,half)),vh=std::max(0.f,dot(view,half));const V F=fresnelSchlick(f0,vh);const float D=ggxDistribution(nh,roughness),G=smithG1(nv,roughness)*smithG1(nl,roughness);const V spec=F*(D*G/(4.f*nv*nl+1e-6f));const V kd=oneMinus(F);const V diff=mul(kd,base)*(1.f/PI);return mul(diff+spec,radiance)*(nl*visibilityFactor);};
+ const V f0=V{f0Level,f0Level,f0Level}*(1.f-metallic)+base*metallic;
+ auto evaluate=[&](V l,V radiance,float visibilityFactor){const float nl=std::max(0.f,dot(n,l));if(nl<=0.f||visibilityFactor<=0.f)return V{0,0,0};const V half=norm(view+l);const float nh=std::max(0.f,dot(n,half)),vh=std::max(0.f,dot(view,half));const V F=fresnelSchlick(f0,vh);const float D=ggxDistribution(nh,roughness),G=smithG1(nv,roughness)*smithG1(nl,roughness);const V spec=F*(D*G/(4.f*nv*nl+1e-6f));const V kd=oneMinus(F)*(1.f-metallic);const V diff=mul(kd,base)*(1.f/PI);return mul(diff+spec,radiance)*(nl*visibilityFactor);};
  V result{0,0,0};
  const float sunVis=daylight>.001f?visibility(sm,h.p+n*.025f,&st):1.f;
  const V sunRadiance=rgbBytesToLinear(sunTint)*(2.8f*daylight);
  result=result+evaluate(norm(sun),sunRadiance,sunVis);
  const float sceneLightScale=.42f+.58f*(1.f-daylight);
  auto addPoint=[&](const Light& light,float scale){V delta=light.p-h.p;const float d2=dot(delta,delta),radius2=light.radius*light.radius;if(d2<1e-5f||d2>=radius2)return;const float d=std::sqrt(d2),edge=1.f-d/light.radius;const V radiance=rgbBytesToLinear(light.color)*(light.intensity*scale*edge*edge*.45f);result=result+evaluate(delta/d,radiance,1.f);};
- for(const Light& l:pointLights)addPoint(l,1.f);
+ if(s.useLegacyWorldLights)for(const Light& l:pointLights)addPoint(l,1.f);
  for(const Light& l:s.lights)addPoint(l,sceneLightScale);
- const V skyAverage=rgbBytesToLinear(skyHorizon*.5f+skyZenith*.5f);
- result=result+mul(base,skyAverage)*.16f;
+ // Hemispheric sky irradiance: upward faces receive cooler zenith light,
+ // façades receive the warmer horizon and downward faces get weaker fill.
+ const float skyFacing=clampf(.5f+.5f*n.y,0.f,1.f);
+ const V skyIrradiance=rgbBytesToLinear(skyZenith)*(.25f+.55f*skyFacing)+
+                       rgbBytesToLinear(skyHorizon)*(.50f-.20f*skyFacing);
+ result=result+mul(base,skyIrradiance)*.22f;
  V emission{0,0,0};
  if(name=="lamp")emission=rgbBytesToLinear({255,166,91})*(.7f+2.f*lampFactor);
  else if(name=="led")emission=rgbBytesToLinear({255,217,165})*(.6f+lampFactor);

@@ -1,0 +1,70 @@
+{
+  "format": "photo2scene-prior-registry-v0",
+  "subject": "Palais de la Culture Energetik, Pripiat",
+  "warning": "Prior notes collected during exploration, NOT historically verified dimensions of Energetik. Do not feed these to the solver as hard constraints.",
+  "coordinate_system": "Scene units; scale conversion to meters only when externally authenticated",
+  "dimensions": [
+    {
+      "id": "working_column_grid_6",
+      "component": "structural_grid",
+      "value": 6,
+      "unit": "m",
+      "source_kind": "generic_construction_typology",
+      "confidence": "unverified",
+      "constraint_policy": "soft_prior_only",
+      "notes": "6 m construction grid was proposed as a working reference; not tied to actual drawings of Energetik"
+    },
+    {
+      "id": "working_wall_outer_510",
+      "component": "outer_brick_walls",
+      "value": 0.51,
+      "unit": "m",
+      "source_kind": "generic_construction_typology",
+      "confidence": "unverified",
+      "constraint_policy": "soft_prior_only"
+    },
+    {
+      "id": "working_wall_inner_380",
+      "component": "inner_structural_walls",
+      "value": 0.38,
+      "unit": "m",
+      "source_kind": "generic_construction_typology",
+      "confidence": "unverified",
+      "constraint_policy": "soft_prior_only"
+    },
+    {
+      "id": "working_column_400",
+      "component": "hall_columns",
+      "value": 0.4,
+      "unit": "m",
+      "source_kind": "generic_construction_typology",
+      "confidence": "unverified",
+      "constraint_policy": "soft_prior_only",
+      "notes": "Square section 400 x 400 mm posited, NOT known from historic as-built drawings"
+    },
+    {
+      "id": "working_fresco_width",
+      "component": "energetik_hall_fresco",
+      "min": 9,
+      "max": 10,
+      "unit": "m",
+      "source_kind": "photographic_visual_estimate",
+      "confidence": "unverified",
+      "constraint_policy": "do_not_constrain_geometry",
+      "notes": "Visual estimate only: mural is not an authoritative scale reference"
+    },
+    {
+      "id": "working_fresco_height",
+      "component": "energetik_hall_fresco",
+      "min": 4,
+      "max": 4.5,
+      "unit": "m",
+      "source_kind": "photographic_visual_estimate",
+      "confidence": "unverified",
+      "constraint_policy": "do_not_constrain_geometry"
+    }
+  ],
+  "verified_dimensions": [],
+  "photos": [],
+  "reporting_rule": "Unverified or generic dimensions must never be reported as measured Energetik facts; verified observations and independent checks take precedence."
+}

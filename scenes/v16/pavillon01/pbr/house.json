@@ -1,0 +1,195 @@
+{
+  "format": "m3d-pbr-v1",
+  "textureResolutionTarget": 2048,
+  "mipmaps": "auto",
+  "channels": [
+    "albedo",
+    "normal",
+    "roughness"
+  ],
+  "note": "Canonical V16 PBR texture-set registry. materials.textureSet resolves sets[].id. Procedural albedo, normal and roughness with generated mip levels; external image maps pending.",
+  "sets": [
+    {
+      "id": "tex_grass",
+      "material": "grass",
+      "pattern": "lawn",
+      "recipe": "grass",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_concrete",
+      "material": "concrete",
+      "pattern": "concrete",
+      "recipe": "concrete",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_plaster",
+      "material": "plaster",
+      "pattern": "plaster",
+      "recipe": "concrete",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_glass",
+      "material": "glass",
+      "pattern": "glass",
+      "recipe": "glass",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_aluminium",
+      "material": "aluminium",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_wood",
+      "material": "wood",
+      "pattern": "wood",
+      "recipe": "oak",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_water",
+      "material": "water",
+      "pattern": "water",
+      "recipe": "water",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_stone",
+      "material": "stone",
+      "pattern": "stone",
+      "recipe": "concrete",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_fabric",
+      "material": "fabric",
+      "pattern": "fabric",
+      "recipe": "grass",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_blackmetal",
+      "material": "blackmetal",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_leaves",
+      "material": "leaves",
+      "pattern": "foliage",
+      "recipe": "grass",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_roof_membrane",
+      "material": "roof_membrane",
+      "pattern": "roof",
+      "recipe": "roof",
+      "resolution": 1024
+    },
+    {
+      "id": "tex_zinc_coping",
+      "material": "zinc_coping",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 512
+    },
+    {
+      "id": "tex_facade_cedar",
+      "material": "facade_cedar",
+      "pattern": "wood",
+      "recipe": "wood",
+      "resolution": 1024
+    },
+    {
+      "id": "tex_basalt_plinth",
+      "material": "basalt_plinth",
+      "pattern": "stone",
+      "recipe": "stone",
+      "resolution": 512
+    },
+    {
+      "id": "tex_window_gasket",
+      "material": "window_gasket",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 512
+    },
+    {
+      "id": "tex_wood_deck",
+      "material": "wood_deck",
+      "pattern": "wood",
+      "recipe": "wood",
+      "resolution": 1024
+    },
+    {
+      "id": "tex_travertine",
+      "material": "travertine",
+      "pattern": "stone",
+      "recipe": "stone",
+      "resolution": 1024
+    },
+    {
+      "id": "tex_ceramic_tile",
+      "material": "ceramic_tile",
+      "pattern": "porcelain",
+      "recipe": "porcelain",
+      "resolution": 1024
+    },
+    {
+      "id": "tex_terrazzo",
+      "material": "terrazzo",
+      "pattern": "stone",
+      "recipe": "stone",
+      "resolution": 1024
+    },
+    {
+      "id": "tex_roof_vent",
+      "material": "roof_vent",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 512
+    },
+    {
+      "id": "tex_textile_rug",
+      "material": "textile_rug",
+      "pattern": "fabric",
+      "recipe": "fabric",
+      "resolution": 512
+    },
+    {
+      "id": "tex_warm_brass",
+      "material": "warm_brass",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 512
+    },
+    {
+      "id": "tex_bark",
+      "material": "bark",
+      "pattern": "wood",
+      "recipe": "wood",
+      "resolution": 512
+    },
+    {
+      "id": "tex_foliage_olive",
+      "material": "foliage_olive",
+      "pattern": "foliage",
+      "recipe": "foliage",
+      "resolution": 512
+    },
+    {
+      "id": "tex_foliage_sage",
+      "material": "foliage_sage",
+      "pattern": "foliage",
+      "recipe": "foliage",
+      "resolution": 512
+    }
+  ]
+}

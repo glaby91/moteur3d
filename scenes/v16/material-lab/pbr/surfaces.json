@@ -1,0 +1,75 @@
+{
+  "format": "m3d-pbr-v1",
+  "sets": [
+    {
+      "id": "tex_brick_clay",
+      "material": "brick_clay",
+      "pattern": "brick",
+      "recipe": "brick",
+      "resolution": 1024
+    },
+    {
+      "id": "tex_lime_plaster",
+      "material": "lime_plaster",
+      "pattern": "plaster",
+      "recipe": "plaster",
+      "resolution": 1024
+    },
+    {
+      "id": "tex_architect_concrete",
+      "material": "architect_concrete",
+      "pattern": "concrete",
+      "recipe": "concrete",
+      "resolution": 1024
+    },
+    {
+      "id": "tex_timber",
+      "material": "timber",
+      "pattern": "wood",
+      "recipe": "wood",
+      "resolution": 1024
+    },
+    {
+      "id": "tex_slate_stone",
+      "material": "slate_stone",
+      "pattern": "stone",
+      "recipe": "stone",
+      "resolution": 1024
+    },
+    {
+      "id": "tex_steel",
+      "material": "steel",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 512
+    },
+    {
+      "id": "tex_transparent_glass",
+      "material": "transparent_glass",
+      "pattern": "glass",
+      "recipe": "glass",
+      "resolution": 512
+    },
+    {
+      "id": "tex_roof_bitumen",
+      "material": "roof_bitumen",
+      "pattern": "roof",
+      "recipe": "roof",
+      "resolution": 512
+    },
+    {
+      "id": "tex_meadow",
+      "material": "meadow",
+      "pattern": "lawn",
+      "recipe": "lawn",
+      "resolution": 512
+    },
+    {
+      "id": "tex_water_test",
+      "material": "water_test",
+      "pattern": "water",
+      "recipe": "water",
+      "resolution": 512
+    }
+  ]
+}

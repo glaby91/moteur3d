@@ -1,0 +1,50 @@
+{
+  "format": "m3d-cameras-v1",
+  "cameras": [
+    {
+      "id": "oblique_01",
+      "name": "Photo 1 — vue oblique (modèle provisoire)",
+      "position": [
+        6.7089348996,
+        -2.19480565,
+        10.382968
+      ],
+      "target": [
+        -0.3753043957,
+        -0.694804276,
+        3.486334834
+      ],
+      "fovDegrees": 47.04579052
+    },
+    {
+      "id": "frontal_02",
+      "name": "Photo 2 — vue frontale (modèle provisoire)",
+      "position": [
+        0.613953146,
+        -1.913994532,
+        28.903986716
+      ],
+      "target": [
+        -1.96012173,
+        -1.035044128,
+        19.281014996
+      ],
+      "fovDegrees": 26.89422066
+    },
+    {
+      "id": "distant_03",
+      "name": "Photo 3 — vue éloignée (modèle provisoire)",
+      "position": [
+        29.89524256,
+        -0.5887112852,
+        18.946941858
+      ],
+      "target": [
+        21.112479853,
+        0.058368783,
+        14.20939327
+      ],
+      "fovDegrees": 26.368667
+    }
+  ]
+}

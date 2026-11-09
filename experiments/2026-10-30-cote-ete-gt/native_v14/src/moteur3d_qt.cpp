@@ -1,4 +1,5 @@
 #include "m3d_engine.h"
+#include "m3d_scene_v16.h"
 #include "version.h"
 
 #include <QAction>
@@ -9,6 +10,9 @@
 #include <QCoreApplication>
 #include <QCloseEvent>
 #include <QDialog>
+#include <QDockWidget>
+#include <QTreeWidget>
+#include <QTabWidget>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFormLayout>
@@ -543,7 +547,8 @@ private:
 
 class MainWindow final : public QMainWindow {
 public:
-    explicit MainWindow(Scene loadedScene, QString scenePath) : scene_(std::move(loadedScene)), currentScenePath_(std::move(scenePath)) {
+    explicit MainWindow(Scene loadedScene, QString scenePath, m3d::v16::SceneDatabase v16Database)
+        : scene_(std::move(loadedScene)), currentScenePath_(std::move(scenePath)) {
         setWindowTitle(QStringLiteral("Moteur 3D natif x64 — ") + QString::fromWCharArray(M3D_RELEASE_ID_WIDE));
         resize(1480, 900);
         setMinimumSize(1000, 620);
@@ -561,6 +566,8 @@ public:
         auto* fileMenu = menuBar()->addMenu(QStringLiteral("Scène"));
         auto* openScene = fileMenu->addAction(QStringLiteral("Ouvrir une scène…"));
         connect(openScene, &QAction::triggered, this, [this] { openSceneFile(); });
+        setupV16Browser();
+        displayV16Scene(v16Database);
         auto* toolsMenu = menuBar()->addMenu(QStringLiteral("Outils"));
         benchmarkAction_ = toolsMenu->addAction(QStringLiteral("Benchmark du moteur…"));
         connect(benchmarkAction_, &QAction::triggered, this, [this] { openBenchmark(); });
@@ -585,7 +592,10 @@ public:
     }
 
 private:
-    Scene scene_;
+    
+    QTreeWidget* v16SceneTree_ = nullptr;
+    QTreeWidget* v16ResourceTree_ = nullptr;
+Scene scene_;
     ShadowMap shadows_;
     std::mutex sceneMutex_;
     QString currentScenePath_;
@@ -734,7 +744,7 @@ private:
         } else {
             if(sceneViewSelector_) sceneViewSelector_->setVisible(false);
             if(sceneViewLabel_) sceneViewLabel_->setVisible(false);
-            cameraTarget_={0.f,1.f,-8.f}; setCameraSliders(24,-43,7,50);
+            cameraTarget_={0.f,3.f,0.f}; setCameraSliders(32,38,14,55);
             if(videoPreview_) videoPreview_->setText(QStringLiteral("Mode vidéo — aperçu rotatif 800 × 600"));
             if(videoWindow_) videoWindow_->setWindowTitle(QStringLiteral("Aperçu rotatif — 800 × 600"));
         }
@@ -1028,37 +1038,132 @@ private:
             [this] { navigationIdleTimer_->start(450); });
     }
 
-    void openSceneFile() {
-        const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Ouvrir une scène"), currentScenePath_, QStringLiteral("Scènes Moteur 3D (*.bin);;Tous les fichiers (*.*)"));
-        if (path.isEmpty()) return;
-        Scene loaded;
-        std::wstring error;
-#ifdef _WIN32
-        const std::filesystem::path nativePath(path.toStdWString());
-#else
-        const QByteArray encodedPath = path.toUtf8();
-        const std::filesystem::path nativePath(std::string(encodedPath.constData(), size_t(encodedPath.size())));
-#endif
-        if (!loadScene(nativePath, loaded, error)) {
-            QMessageBox::critical(this, QStringLiteral("Ouverture de scène impossible"), QString::fromWCharArray(error.c_str()));
+    void setupV16Browser() {
+        auto* dock = new QDockWidget(QStringLiteral("V16 — Arbre de scène et ressources"), this);
+        auto* tabs = new QTabWidget(dock);
+        v16SceneTree_ = new QTreeWidget(tabs);
+        v16SceneTree_->setHeaderLabels({QStringLiteral("Scène / objet"), QStringLiteral("Type")});
+        v16ResourceTree_ = new QTreeWidget(tabs);
+        v16ResourceTree_->setHeaderLabels({QStringLiteral("Ressource"), QStringLiteral("Fichier")});
+        tabs->addTab(v16SceneTree_, QStringLiteral("Hiérarchie"));
+        tabs->addTab(v16ResourceTree_, QStringLiteral("Ressources"));
+        dock->setWidget(tabs);
+        addDockWidget(Qt::LeftDockWidgetArea, dock);
+        dock->setMinimumWidth(280);
+    }
+
+    void displayV16Scene(const m3d::v16::SceneDatabase& database) {
+        v16SceneTree_->clear();
+        v16ResourceTree_->clear();
+        auto* sceneRoot = new QTreeWidgetItem(v16SceneTree_,
+            {database.name, QStringLiteral("Scène V16")});
+        for (const auto& sector : database.sectors) {
+            auto* sectorItem = new QTreeWidgetItem(sceneRoot,
+                {sector.id, QStringLiteral("Secteur")});
+            for (auto it = sector.resources.cbegin(); it != sector.resources.cend(); ++it) {
+                auto* category = new QTreeWidgetItem(v16ResourceTree_,
+                    {sector.id + QStringLiteral("/") + it.key(), QString()});
+                for (const auto& resource : it.value()) {
+                    auto* fileItem = new QTreeWidgetItem(category,
+                        {QFileInfo(resource.path).fileName(), resource.path});
+                    if (it.key() == QStringLiteral("materials")) {
+                        for (const auto& value : resource.data.value(QStringLiteral("materials")).toArray()) {
+                            const auto obj = value.toObject();
+                            auto* materialItem = new QTreeWidgetItem(fileItem,
+                                {obj.value(QStringLiteral("id")).toString(), QStringLiteral("Matériau PBR")});
+                            for (const QString& property : {QStringLiteral("roughness"),
+                                                             QStringLiteral("metallic"),
+                                                             QStringLiteral("transmission"),
+                                                             QStringLiteral("ior")}) {
+                                if (obj.contains(property))
+                                    new QTreeWidgetItem(materialItem,
+                                        {property, QString::number(obj.value(property).toDouble())});
+                            }
+                        }
+                    }
+                    if (it.key() == QStringLiteral("pbr")) {
+                        for (const auto& value : resource.data.value(QStringLiteral("textures")).toArray()) {
+                            const auto obj = value.toObject();
+                            new QTreeWidgetItem(fileItem, {obj.value(QStringLiteral("id")).toString(),
+                                                             obj.value(QStringLiteral("path")).toString()});
+                        }
+                    }
+                    if (it.key() != QStringLiteral("instances")) continue;
+                    QHash<QString, QTreeWidgetItem*> nodeItems;
+                    struct PendingNode { QJsonObject obj; };
+                    QVector<PendingNode> pending;
+                    for (const auto& value : resource.data.value(QStringLiteral("nodes")).toArray())
+                        if (value.isObject()) pending.push_back({value.toObject()});
+                    // Resolve parents regardless of declaration order.
+                    size_t attempts = 0;
+                    while (!pending.empty() && attempts++ < 1000) {
+                        bool progress = false;
+                        for (int index = 0; index < pending.size();) {
+                            const auto obj = pending[index].obj;
+                            const auto id = obj.value(QStringLiteral("id")).toString();
+                            const auto parentId = obj.value(QStringLiteral("parent")).toString();
+                            if (id.isEmpty() || (!parentId.isEmpty() && !nodeItems.contains(parentId))) {
+                                ++index;
+                                continue;
+                            }
+                            auto* parent = parentId.isEmpty() ? sectorItem : nodeItems.value(parentId);
+                            auto* item = new QTreeWidgetItem(parent,
+                                {obj.value(QStringLiteral("name")).toString(id),
+                                 obj.value(QStringLiteral("type")).toString()});
+                            nodeItems.insert(id,item);
+                            pending.removeAt(index);
+                            progress = true;
+                        }
+                        if (!progress) break;
+                    }
+                    for (const auto& value : resource.data.value(QStringLiteral("instances")).toArray()) {
+                        const auto obj = value.toObject();
+                        auto* parent = nodeItems.value(obj.value(QStringLiteral("node")).toString(),sectorItem);
+                        new QTreeWidgetItem(parent,
+                            {obj.value(QStringLiteral("geometry")).toString(),QStringLiteral("Objet 3D")});
+                    }
+                }
+            }
+        }
+        v16SceneTree_->expandAll();
+        v16ResourceTree_->expandToDepth(2);
+    }
+
+    void openV16SceneFile(const QString& path) {
+        const auto result = m3d::v16::loadScene(path);
+        if (!result) {
+            QMessageBox::critical(this, QStringLiteral("Scène V16 invalide"), result.error);
+            return;
+        }
+        Scene compiled;
+        QString error;
+        if (!m3d::v16::compileRenderScene(result.scene, compiled, error)) {
+            QMessageBox::critical(this, QStringLiteral("Géométrie V16 invalide"), error);
             return;
         }
         generation_.fetch_add(1);
         {
             std::lock_guard<std::mutex> guard(sceneMutex_);
-            scene_ = std::move(loaded);
+            scene_ = std::move(compiled);
             const int hourStep = hour_->value();
-            const float hour = 6.f + hourStep * .5f;
-            updateLighting(hour);
+            updateLighting(6.f + hourStep*.5f);
             Stats build;
             shadows_ = buildShadow(scene_, build);
             shadowHour_ = hourStep;
         }
         currentScenePath_ = path;
-        loadSceneViewPresets();
-        applySceneCameraPreset();
+        displayV16Scene(result.scene);
+        cameraTarget_={0.f,3.f,0.f};
+        setCameraSliders(32,38,14,55);
         readSettings();
         requestRender();
+    }
+
+    void openSceneFile() {
+        const QString path = QFileDialog::getOpenFileName(
+            this, QStringLiteral("Ouvrir Pavillon 01 (V16)"),
+            QString(), QStringLiteral("Manifeste V16 (scene.json);;Fichiers JSON (*.json)"));
+        if (!path.isEmpty()) openV16SceneFile(path);
     }
 
     void openBenchmark() {
@@ -1481,21 +1586,21 @@ private:
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
-    const QString defaultScenePath = QCoreApplication::applicationDirPath() + QStringLiteral("/scene_pripyat_central.bin");
+    const QString defaultScenePath = QCoreApplication::applicationDirPath()
+        + QStringLiteral("/scenes/v16/pavillon01/scene.json");
     const QString scenePath = argc > 1 ? QString::fromLocal8Bit(argv[1]) : defaultScenePath;
-    Scene scene;
-    std::wstring error;
-#ifdef _WIN32
-    const std::filesystem::path nativePath(scenePath.toStdWString());
-#else
-    const QByteArray encodedPath = scenePath.toUtf8();
-    const std::filesystem::path nativePath(std::string(encodedPath.constData(), size_t(encodedPath.size())));
-#endif
-    if (!loadScene(nativePath, scene, error)) {
-        QMessageBox::critical(nullptr, QStringLiteral("Moteur 3D natif"), QString::fromWCharArray(error.c_str()));
+    const auto loaded = m3d::v16::loadScene(scenePath);
+    if (!loaded) {
+        QMessageBox::critical(nullptr, QStringLiteral("V16 — scène invalide"), loaded.error);
         return 1;
     }
-    MainWindow window(std::move(scene), scenePath);
+    Scene scene;
+    QString error;
+    if (!m3d::v16::compileRenderScene(loaded.scene, scene, error)) {
+        QMessageBox::critical(nullptr, QStringLiteral("V16 — compilation de scène impossible"), error);
+        return 1;
+    }
+    MainWindow window(std::move(scene), scenePath, loaded.scene);
     window.show();
     return app.exec();
 }
