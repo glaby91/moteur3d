@@ -299,6 +299,45 @@
       "transmission": 0,
       "ior": 1.5,
       "textureSet": "tex_warm_brass"
+    },
+    {
+      "id": "bark",
+      "baseColor": [
+        0.25,
+        0.18,
+        0.13
+      ],
+      "roughness": 0.94,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_bark"
+    },
+    {
+      "id": "foliage_olive",
+      "baseColor": [
+        0.23,
+        0.37,
+        0.18
+      ],
+      "roughness": 0.91,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_foliage_olive"
+    },
+    {
+      "id": "foliage_sage",
+      "baseColor": [
+        0.32,
+        0.48,
+        0.27
+      ],
+      "roughness": 0.88,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_foliage_sage"
     }
   ]
 }
