@@ -86,7 +86,7 @@ bool intersectTriangle(Ray ray,GpuTriangle tri,out float t,out float2 uv) {
 }
 // Returns 0 = miss, 1 = hit, 2 = invalid BVH / traversal overflow.
 // Ignore mostly transparent triangles for opaque shadow occlusion.
-uint traceClosest(Ray ray,float limit,bool shadowOnly,out HitInfo hit) {
+uint traceClosest(Ray ray,float limit,bool shadowOnly,uint skipPrimitive,out HitInfo hit) {
     hit.t=limit;hit.bary=float2(0,0);hit.primitive=0;
     if(nodeCount==0||rootIndex>=nodeCount)return 0;
     uint stack[64],sp=1;
@@ -104,11 +104,12 @@ uint traceClosest(Ray ray,float limit,bool shadowOnly,out HitInfo hit) {
                 if(node.first+i>=triangleCount)return 2;
                 uint primIndex=PrimitiveOrder[node.first+i];
                 if(primIndex>=triangleCount)return 2;
+                if(shadowOnly&&primIndex==skipPrimitive)continue;
                 GpuTriangle tri=Triangles[primIndex];
                 if(tri.material>=materialCount)return 2;
                 if(shadowOnly&&Materials[tri.material].transmission>.35f)continue;
                 float t;float2 uv;
-                if(intersectTriangle(ray,tri,t,uv)&&t<hit.t) {
+                if(intersectTriangle(ray,tri,t,uv)&&t<hit.t&&(!shadowOnly||t>.065f)) {
                     hit.t=t;hit.bary=uv;hit.primitive=primIndex;found=true;
                     if(shadowOnly)return 1;
                 }
@@ -151,10 +152,17 @@ float3 shadeSurface(Ray ray,HitInfo hit,float3 n,float3 color,float roughness,fl
     float3 L=normalize(sunDirection);
     float diffuse=saturate(dot(n,L));
     if(diffuse>.0001f) {
-        Ray shadow;shadow.origin=p+n*.045f;shadow.direction=L;
+        // Use the unperturbed triangle normal for ray offsets. Bump-map normals
+        // can point underneath a surface and cause false dark patches ("shadow acne").
+        float3 geometryNormal=normalize(cross(tri.p1-tri.p0,tri.p2-tri.p0));
+        if(dot(geometryNormal,ray.direction)>0.f)geometryNormal=-geometryNormal;
+        Ray shadow;
+        shadow.origin=p+geometryNormal*.035f+L*.025f;
+        shadow.direction=L;
         HitInfo blocker;
-        const uint state=traceClosest(shadow,1000.f,true,blocker);
-        if(state==1)diffuse*=.22f;
+        // Exclude the originating triangle and tiny adjacent coplanar hits.
+        const uint state=traceClosest(shadow,1000.f,true,hit.primitive,blocker);
+        if(state==1)diffuse*=.35f;
     }
     float3 lit=color*(ambientStrength+diffuse*sunStrength*(1.f-.55f*metallic));
     float3 viewDir=-ray.direction;
@@ -169,7 +177,7 @@ float4 tracePrimary(Ray ray) {
     float throughput=1.f;
     [loop] for(uint layer=0;layer<6;++layer) {
         HitInfo hit;
-        uint status=traceClosest(ray,farPlane,false,hit);
+        uint status=traceClosest(ray,farPlane,false,0xffffffffu,hit);
         if(status==2)return float4(1,0,1,1);
         if(status==0) {
             accumulated+=background(ray)*throughput;
