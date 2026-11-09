@@ -25,6 +25,17 @@ int main(int argc,char** argv){
     auto built=m3d::v16::buildRuntime(loaded.scene,128);
     if(!built){qCritical()<<built.error;return 1;}
     if(built.runtime.cameras.isEmpty()){qCritical()<<"No cameras";return 1;}
+    // This check only applies when the independent material test scene
+    // defines the brick sample: mortar must have REAL normal-map relief.
+    if(built.runtime.materialIndex.contains(QStringLiteral("brick_clay"))){
+        const int mi=built.runtime.materialIndex.value(QStringLiteral("brick_clay"));
+        const auto& m=built.runtime.renderScene.mat[size_t(mi)];
+        if(m.normalMip.empty()){qCritical()<<"Missing reusable brick normal map";return 1;}
+        const auto& values=m.normalMip.front().p;
+        std::set<uint16_t> distinct(values.begin(),values.end());
+        if(distinct.size()<12){qCritical()<<"Brick joint normals are too flat:"<<distinct.size();return 1;}
+        qInfo()<<"Brick mortar bump map verified:"<<distinct.size()<<"normal values";
+    }
     qInfo()<<"Geometry BVH and mips ready";
     const int w=1920,h=1080; // Full HD reference screenshot, never a low-resolution preview
     const auto cam=m3d::v16::makeCamera(built.runtime.cameras.front(),w,h);
