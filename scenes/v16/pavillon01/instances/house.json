@@ -9,12 +9,12 @@
       "position": [
         0,
         -0.25,
-        2
+        1
       ],
       "size": [
-        50,
+        30,
         0.4,
-        50
+        26
       ],
       "rotationY": 0
     },
@@ -2253,12 +2253,12 @@
       "position": [
         -1,
         0,
-        9.5
+        7.7
       ],
       "size": [
         17,
         0.22,
-        6.5
+        3.25
       ],
       "rotationY": 0
     },
@@ -2269,13 +2269,13 @@
       "material": "wood",
       "position": [
         -8.5,
-        0.15,
-        9.5
+        0.14,
+        7.7
       ],
       "size": [
         1.27,
         0.045,
-        6.3
+        3.12
       ],
       "rotationY": 0
     },
@@ -2286,13 +2286,13 @@
       "material": "wood",
       "position": [
         -7.14,
-        0.15,
-        9.5
+        0.14,
+        7.7
       ],
       "size": [
         1.27,
         0.045,
-        6.3
+        3.12
       ],
       "rotationY": 0
     },
@@ -2303,13 +2303,13 @@
       "material": "wood",
       "position": [
         -5.779999999999999,
-        0.15,
-        9.5
+        0.14,
+        7.7
       ],
       "size": [
         1.27,
         0.045,
-        6.3
+        3.12
       ],
       "rotationY": 0
     },
@@ -2320,13 +2320,13 @@
       "material": "wood",
       "position": [
         -4.42,
-        0.15,
-        9.5
+        0.14,
+        7.7
       ],
       "size": [
         1.27,
         0.045,
-        6.3
+        3.12
       ],
       "rotationY": 0
     },
@@ -2337,13 +2337,13 @@
       "material": "wood",
       "position": [
         -3.0599999999999996,
-        0.15,
-        9.5
+        0.14,
+        7.7
       ],
       "size": [
         1.27,
         0.045,
-        6.3
+        3.12
       ],
       "rotationY": 0
     },
@@ -2354,13 +2354,13 @@
       "material": "wood",
       "position": [
         -1.6999999999999993,
-        0.15,
-        9.5
+        0.14,
+        7.7
       ],
       "size": [
         1.27,
         0.045,
-        6.3
+        3.12
       ],
       "rotationY": 0
     },
@@ -2371,13 +2371,13 @@
       "material": "wood",
       "position": [
         -0.33999999999999986,
-        0.15,
-        9.5
+        0.14,
+        7.7
       ],
       "size": [
         1.27,
         0.045,
-        6.3
+        3.12
       ],
       "rotationY": 0
     },
@@ -2388,13 +2388,13 @@
       "material": "wood",
       "position": [
         1.0200000000000014,
-        0.15,
-        9.5
+        0.14,
+        7.7
       ],
       "size": [
         1.27,
         0.045,
-        6.3
+        3.12
       ],
       "rotationY": 0
     },
@@ -2405,13 +2405,13 @@
       "material": "wood",
       "position": [
         2.380000000000001,
-        0.15,
-        9.5
+        0.14,
+        7.7
       ],
       "size": [
         1.27,
         0.045,
-        6.3
+        3.12
       ],
       "rotationY": 0
     },
@@ -2422,13 +2422,13 @@
       "material": "wood",
       "position": [
         3.74,
-        0.15,
-        9.5
+        0.14,
+        7.7
       ],
       "size": [
         1.27,
         0.045,
-        6.3
+        3.12
       ],
       "rotationY": 0
     },
@@ -2439,13 +2439,13 @@
       "material": "wood",
       "position": [
         5.100000000000001,
-        0.15,
-        9.5
+        0.14,
+        7.7
       ],
       "size": [
         1.27,
         0.045,
-        6.3
+        3.12
       ],
       "rotationY": 0
     },
@@ -2456,13 +2456,13 @@
       "material": "wood",
       "position": [
         6.460000000000001,
-        0.15,
-        9.5
+        0.14,
+        7.7
       ],
       "size": [
         1.27,
         0.045,
-        6.3
+        3.12
       ],
       "rotationY": 0
     },
@@ -2474,12 +2474,12 @@
       "position": [
         3,
         -0.1,
-        17
+        11.45
       ],
       "size": [
-        9,
+        7.8,
         0.3,
-        4.6
+        2.75
       ],
       "rotationY": 0
     },
@@ -2491,12 +2491,12 @@
       "position": [
         3,
         0.08,
-        17
+        11.45
       ],
       "size": [
-        8.6,
+        7.35,
         0.06,
-        4.2
+        2.25
       ],
       "rotationY": 0
     },
@@ -2504,16 +2504,16 @@
       "id": "instance_148",
       "parent": "Exterieur/Bassin",
       "geometry": "unit_box",
-      "material": "concrete",
+      "material": "stone",
       "position": [
-        -1.5,
-        0.25,
-        14.6
+        3,
+        0.2,
+        10.07
       ],
       "size": [
-        0.12,
-        0.5,
-        0.14
+        7.9,
+        0.14,
+        0.15
       ],
       "rotationY": 0
     },
@@ -2521,16 +2521,16 @@
       "id": "instance_149",
       "parent": "Exterieur/Bassin",
       "geometry": "unit_box",
-      "material": "concrete",
+      "material": "stone",
       "position": [
-        0.30000000000000004,
-        0.25,
-        14.6
+        3,
+        0.2,
+        12.83
       ],
       "size": [
-        0.12,
-        0.5,
-        0.14
+        7.9,
+        0.14,
+        0.15
       ],
       "rotationY": 0
     },
@@ -2538,16 +2538,16 @@
       "id": "instance_150",
       "parent": "Exterieur/Bassin",
       "geometry": "unit_box",
-      "material": "concrete",
+      "material": "stone",
       "position": [
-        2.1,
-        0.25,
-        14.6
+        -0.95,
+        0.2,
+        11.45
       ],
       "size": [
-        0.12,
-        0.5,
-        0.14
+        0.15,
+        0.14,
+        2.75
       ],
       "rotationY": 0
     },
@@ -2555,50 +2555,16 @@
       "id": "instance_151",
       "parent": "Exterieur/Bassin",
       "geometry": "unit_box",
-      "material": "concrete",
+      "material": "stone",
       "position": [
-        3.9000000000000004,
-        0.25,
-        14.6
+        6.95,
+        0.2,
+        11.45
       ],
       "size": [
-        0.12,
-        0.5,
-        0.14
-      ],
-      "rotationY": 0
-    },
-    {
-      "id": "instance_152",
-      "parent": "Exterieur/Bassin",
-      "geometry": "unit_box",
-      "material": "concrete",
-      "position": [
-        5.7,
-        0.25,
-        14.6
-      ],
-      "size": [
-        0.12,
-        0.5,
-        0.14
-      ],
-      "rotationY": 0
-    },
-    {
-      "id": "instance_153",
-      "parent": "Exterieur/Bassin",
-      "geometry": "unit_box",
-      "material": "concrete",
-      "position": [
-        7.5,
-        0.25,
-        14.6
-      ],
-      "size": [
-        0.12,
-        0.5,
-        0.14
+        0.15,
+        0.14,
+        2.75
       ],
       "rotationY": 0
     },
@@ -2608,14 +2574,14 @@
       "geometry": "unit_box",
       "material": "wood",
       "position": [
-        -22,
-        1.9,
-        19
+        -12,
+        1.8,
+        -8.5
       ],
       "size": [
-        0.32,
-        3.8,
-        0.32
+        0.25,
+        3.6,
+        0.25
       ],
       "rotationY": 0
     },
@@ -2625,14 +2591,14 @@
       "geometry": "unit_sphere",
       "material": "leaves",
       "position": [
-        -22,
-        3.8,
-        19.7
+        -12,
+        3.7,
+        -8.5
       ],
       "size": [
-        3.1,
-        2.4,
-        2.9
+        2.7,
+        1.9,
+        2.35
       ]
     },
     {
@@ -2641,14 +2607,14 @@
       "geometry": "unit_sphere",
       "material": "leaves",
       "position": [
-        -21.242676113672893,
-        4.4399999999999995,
-        19.3782116141077
+        -12.4,
+        4.25,
+        -8.8
       ],
       "size": [
-        2.75,
-        2.4,
-        2.6
+        2.1,
+        1.7,
+        2
       ]
     },
     {
@@ -2657,144 +2623,14 @@
       "geometry": "unit_sphere",
       "material": "leaves",
       "position": [
-        -21.181632315856888,
-        5.08,
-        18.708697214417
+        -11.6,
+        4.7,
+        -8.3
       ],
       "size": [
-        2.4000000000000004,
-        2.4,
-        2.3
-      ]
-    },
-    {
-      "id": "instance_158",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_box",
-      "material": "wood",
-      "position": [
-        -16.7,
-        2.225,
-        -15
-      ],
-      "size": [
-        0.32,
-        4.45,
-        0.32
-      ],
-      "rotationY": 0
-    },
-    {
-      "id": "instance_159",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        -15.942676113672892,
-        4.45,
-        -15.291302785583
-      ],
-      "size": [
-        3.1,
-        2.4,
-        2.9
-      ]
-    },
-    {
-      "id": "instance_160",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        -15.881632315856885,
-        5.09,
-        -15.692994747620311
-      ],
-      "size": [
-        2.75,
-        2.4,
-        2.6
-      ]
-    },
-    {
-      "id": "instance_161",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        -16.57299199274612,
-        5.73,
-        -15.457550534604529
-      ],
-      "size": [
-        2.4000000000000004,
-        2.4,
-        2.3
-      ]
-    },
-    {
-      "id": "instance_162",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_box",
-      "material": "wood",
-      "position": [
-        -11.4,
-        2.55,
-        19
-      ],
-      "size": [
-        0.32,
-        5.1,
-        0.32
-      ],
-      "rotationY": 0
-    },
-    {
-      "id": "instance_163",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        -10.581632315856886,
-        5.1,
-        18.54244946539547
-      ],
-      "size": [
-        3.1,
-        2.4,
-        2.9
-      ]
-    },
-    {
-      "id": "instance_164",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        -11.27299199274612,
-        5.739999999999999,
-        19.19856352982426
-      ],
-      "size": [
-        2.75,
-        2.4,
-        2.6
-      ]
-    },
-    {
-      "id": "instance_165",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        -12.081122245777136,
-        6.38,
-        19.672119200655256
-      ],
-      "size": [
-        2.4000000000000004,
-        2.4,
-        2.3
+        1.7,
+        1.5,
+        1.85
       ]
     },
     {
@@ -2803,14 +2639,14 @@
       "geometry": "unit_box",
       "material": "wood",
       "position": [
-        -6.100000000000001,
-        2.875,
-        -15
+        12,
+        2.05,
+        -8.2
       ],
       "size": [
-        0.32,
-        5.75,
-        0.32
+        0.25,
+        4.1,
+        0.25
       ],
       "rotationY": 0
     },
@@ -2820,14 +2656,14 @@
       "geometry": "unit_sphere",
       "material": "leaves",
       "position": [
-        -5.972991992746121,
-        5.75,
-        -14.327880799344744
+        12,
+        4.199999999999999,
+        -8.2
       ],
       "size": [
-        3.1,
-        2.4,
-        2.9
+        2.7,
+        1.9,
+        2.35
       ]
     },
     {
@@ -2836,14 +2672,14 @@
       "geometry": "unit_sphere",
       "material": "leaves",
       "position": [
-        -6.781122245777137,
-        6.39,
-        -14.472268421959686
+        11.6,
+        4.75,
+        -8.5
       ],
       "size": [
-        2.75,
-        2.4,
-        2.6
+        2.1,
+        1.7,
+        2
       ]
     },
     {
@@ -2852,209 +2688,14 @@
       "geometry": "unit_sphere",
       "material": "leaves",
       "position": [
-        -6.9630318471968256,
-        7.03,
-        -15.10185002366603
+        12.4,
+        5.199999999999999,
+        -7.999999999999999
       ],
       "size": [
-        2.4000000000000004,
-        2.4,
-        2.3
-      ]
-    },
-    {
-      "id": "instance_170",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_box",
-      "material": "wood",
-      "position": [
-        -0.8000000000000007,
-        1.9,
-        19
-      ],
-      "size": [
-        0.32,
-        3.8,
-        0.32
-      ],
-      "rotationY": 0
-    },
-    {
-      "id": "instance_171",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        -1.481122245777136,
-        3.8,
-        18.898149976333972
-      ],
-      "size": [
-        3.1,
-        2.4,
-        2.9
-      ]
-    },
-    {
-      "id": "instance_172",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        -1.6630318471968253,
-        4.4399999999999995,
-        18.362208816680727
-      ],
-      "size": [
-        2.75,
-        2.4,
-        2.6
-      ]
-    },
-    {
-      "id": "instance_173",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        -1.051473948379034,
-        5.08,
-        18.412649929646484
-      ],
-      "size": [
-        2.4000000000000004,
-        2.4,
-        2.3
-      ]
-    },
-    {
-      "id": "instance_174",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_box",
-      "material": "wood",
-      "position": [
-        4.5,
-        2.225,
-        -15
-      ],
-      "size": [
-        0.32,
-        4.45,
-        0.32
-      ],
-      "rotationY": 0
-    },
-    {
-      "id": "instance_175",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        3.6369681528031754,
-        4.45,
-        -15.587350070353517
-      ],
-      "size": [
-        3.1,
-        2.4,
-        2.9
-      ]
-    },
-    {
-      "id": "instance_176",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        4.248526051620967,
-        5.09,
-        -14.996902011408364
-      ],
-      "size": [
-        2.75,
-        2.4,
-        2.6
-      ]
-    },
-    {
-      "id": "instance_177",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        5.09128793884691,
-        5.73,
-        -14.409302228887256
-      ],
-      "size": [
-        2.4000000000000004,
-        2.4,
-        2.3
-      ]
-    },
-    {
-      "id": "instance_178",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_box",
-      "material": "wood",
-      "position": [
-        9.799999999999997,
-        2.55,
-        19
-      ],
-      "size": [
-        0.32,
-        5.1,
-        0.32
-      ],
-      "rotationY": 0
-    },
-    {
-      "id": "instance_179",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        9.548526051620964,
-        5.1,
-        19.590697771112744
-      ],
-      "size": [
-        3.1,
-        2.4,
-        2.9
-      ]
-    },
-    {
-      "id": "instance_180",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        10.391287938846908,
-        5.739999999999999,
-        19.63521274701514
-      ],
-      "size": [
-        2.75,
-        2.4,
-        2.6
-      ]
-    },
-    {
-      "id": "instance_181",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        10.69042242196104,
-        6.38,
-        19.095716052745484
-      ],
-      "size": [
-        2.4000000000000004,
-        2.4,
-        2.3
+        1.7,
+        1.5,
+        1.85
       ]
     },
     {
@@ -3063,14 +2704,14 @@
       "geometry": "unit_box",
       "material": "wood",
       "position": [
-        15.100000000000001,
-        2.875,
-        -15
+        -12,
+        1.95,
+        10.5
       ],
       "size": [
-        0.32,
-        5.75,
-        0.32
+        0.25,
+        3.9,
+        0.25
       ],
       "rotationY": 0
     },
@@ -3080,14 +2721,14 @@
       "geometry": "unit_sphere",
       "material": "leaves",
       "position": [
-        15.691287938846912,
-        5.75,
-        -14.904283947254516
+        -12,
+        4,
+        10.5
       ],
       "size": [
-        3.1,
-        2.4,
-        2.9
+        2.7,
+        1.9,
+        2.35
       ]
     },
     {
@@ -3096,14 +2737,14 @@
       "geometry": "unit_sphere",
       "material": "leaves",
       "position": [
-        15.990422421961044,
-        6.39,
-        -15.531781539001175
+        -12.4,
+        4.55,
+        10.2
       ],
       "size": [
-        2.75,
-        2.4,
-        2.6
+        2.1,
+        1.7,
+        2
       ]
     },
     {
@@ -3112,79 +2753,14 @@
       "geometry": "unit_sphere",
       "material": "leaves",
       "position": [
-        15.470906636717583,
-        7.03,
-        -15.67036163622637
+        -11.6,
+        5,
+        10.7
       ],
       "size": [
-        2.4000000000000004,
-        2.4,
-        2.3
-      ]
-    },
-    {
-      "id": "instance_186",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_box",
-      "material": "wood",
-      "position": [
-        20.4,
-        1.9,
-        19
-      ],
-      "size": [
-        0.32,
-        3.8,
-        0.32
-      ],
-      "rotationY": 0
-    },
-    {
-      "id": "instance_187",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        21.290422421961043,
-        3.8,
-        18.32963836377363
-      ],
-      "size": [
-        3.1,
-        2.4,
-        2.9
-      ]
-    },
-    {
-      "id": "instance_188",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        20.77090663671758,
-        4.4399999999999995,
-        18.80738566336388
-      ],
-      "size": [
-        2.75,
-        2.4,
-        2.6
-      ]
-    },
-    {
-      "id": "instance_189",
-      "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        19.910381000199564,
-        5.08,
-        19.462221695770857
-      ],
-      "size": [
-        2.4000000000000004,
-        2.4,
-        2.3
+        1.7,
+        1.5,
+        1.85
       ]
     },
     {
@@ -3193,14 +2769,14 @@
       "geometry": "unit_sphere",
       "material": "leaves",
       "position": [
-        -20,
-        0.52,
-        12
+        -12.5,
+        0.32,
+        3.4
       ],
       "size": [
-        1.35,
         1,
-        1.35
+        0.6,
+        0.8
       ]
     },
     {
@@ -3209,14 +2785,14 @@
       "geometry": "unit_sphere",
       "material": "leaves",
       "position": [
-        -17.3,
-        0.52,
-        13.8
+        -12.1,
+        0.32,
+        6.5
       ],
       "size": [
-        1.35,
         1,
-        1.35
+        0.6,
+        0.8
       ]
     },
     {
@@ -3225,14 +2801,14 @@
       "geometry": "unit_sphere",
       "material": "leaves",
       "position": [
-        -14.6,
-        0.52,
-        15.6
+        -10.6,
+        0.32,
+        12.1
       ],
       "size": [
-        1.35,
         1,
-        1.35
+        0.6,
+        0.8
       ]
     },
     {
@@ -3241,14 +2817,14 @@
       "geometry": "unit_sphere",
       "material": "leaves",
       "position": [
-        -11.899999999999999,
-        0.52,
-        12
+        11.4,
+        0.32,
+        6.7
       ],
       "size": [
-        1.35,
         1,
-        1.35
+        0.6,
+        0.8
       ]
     },
     {
@@ -3257,14 +2833,14 @@
       "geometry": "unit_sphere",
       "material": "leaves",
       "position": [
-        -9.2,
-        0.52,
-        13.8
+        12.6,
+        0.32,
+        9.5
       ],
       "size": [
-        1.35,
         1,
-        1.35
+        0.6,
+        0.8
       ]
     },
     {
@@ -3273,143 +2849,66 @@
       "geometry": "unit_sphere",
       "material": "leaves",
       "position": [
-        -6.5,
-        0.52,
-        15.6
+        10.1,
+        0.32,
+        12.25
       ],
       "size": [
-        1.35,
         1,
-        1.35
+        0.6,
+        0.8
       ]
     },
     {
-      "id": "instance_196",
-      "parent": "Exterieur/Jardin/Massifs",
-      "geometry": "unit_sphere",
-      "material": "leaves",
+      "id": "approche_minerale_1",
+      "parent": "Exterieur/Acces",
+      "geometry": "unit_box",
+      "material": "stone",
       "position": [
-        -3.799999999999997,
-        0.52,
-        12
+        3,
+        -0.01,
+        -7
       ],
       "size": [
-        1.35,
-        1,
-        1.35
-      ]
+        2.45,
+        0.085,
+        1.18
+      ],
+      "rotationY": 0
     },
     {
-      "id": "instance_197",
-      "parent": "Exterieur/Jardin/Massifs",
-      "geometry": "unit_sphere",
-      "material": "leaves",
+      "id": "approche_minerale_2",
+      "parent": "Exterieur/Acces",
+      "geometry": "unit_box",
+      "material": "stone",
       "position": [
-        -1.0999999999999979,
-        0.52,
-        13.8
+        3,
+        -0.01,
+        -8.45
       ],
       "size": [
-        1.35,
-        1,
-        1.35
-      ]
+        2.45,
+        0.085,
+        1.18
+      ],
+      "rotationY": 0
     },
     {
-      "id": "instance_198",
-      "parent": "Exterieur/Jardin/Massifs",
-      "geometry": "unit_sphere",
-      "material": "leaves",
+      "id": "approche_minerale_3",
+      "parent": "Exterieur/Acces",
+      "geometry": "unit_box",
+      "material": "stone",
       "position": [
-        1.6000000000000014,
-        0.52,
-        15.6
+        3,
+        -0.01,
+        -9.9
       ],
       "size": [
-        1.35,
-        1,
-        1.35
-      ]
-    },
-    {
-      "id": "instance_199",
-      "parent": "Exterieur/Jardin/Massifs",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        4.300000000000001,
-        0.52,
-        12
+        2.45,
+        0.085,
+        1.18
       ],
-      "size": [
-        1.35,
-        1,
-        1.35
-      ]
-    },
-    {
-      "id": "instance_200",
-      "parent": "Exterieur/Jardin/Massifs",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        7,
-        0.52,
-        13.8
-      ],
-      "size": [
-        1.35,
-        1,
-        1.35
-      ]
-    },
-    {
-      "id": "instance_201",
-      "parent": "Exterieur/Jardin/Massifs",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        9.700000000000003,
-        0.52,
-        15.6
-      ],
-      "size": [
-        1.35,
-        1,
-        1.35
-      ]
-    },
-    {
-      "id": "instance_202",
-      "parent": "Exterieur/Jardin/Massifs",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        12.400000000000006,
-        0.52,
-        12
-      ],
-      "size": [
-        1.35,
-        1,
-        1.35
-      ]
-    },
-    {
-      "id": "instance_203",
-      "parent": "Exterieur/Jardin/Massifs",
-      "geometry": "unit_sphere",
-      "material": "leaves",
-      "position": [
-        15.100000000000001,
-        0.52,
-        13.8
-      ],
-      "size": [
-        1.35,
-        1,
-        1.35
-      ]
+      "rotationY": 0
     }
   ],
   "nodes": [
@@ -3443,5 +2942,18 @@
       "parent": "building",
       "type": "roof"
     }
-  ]
+  ],
+  "layout": {
+    "terrainMeters": [
+      30,
+      26
+    ],
+    "terrainCenter": [
+      0,
+      -0.25,
+      1
+    ],
+    "targetMarginMeters": 5,
+    "notes": "Small architectural showcase; terrace, pool and planting fit within terrain. 3 feature trees and 6 shrubs."
+  }
 }
