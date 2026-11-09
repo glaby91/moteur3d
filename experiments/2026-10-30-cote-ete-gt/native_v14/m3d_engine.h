@@ -60,6 +60,17 @@ Camera camera(float angleDeg,float elevationDeg,float distance,int w,int h,V loo
 Stats renderHybrid(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,unsigned threads,bool fog,const std::atomic<uint64_t>& generation,uint64_t token);
 Stats render(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,unsigned threads,bool fog,const std::atomic<uint64_t>& generation,uint64_t token,unsigned samplesPerPixel=1,bool depthOfField=false,bool useAvx2=false,bool offlinePathTrace=false,unsigned maxBounces=3);
 V traceOfflineColor(const Scene& s,const ShadowMap& sm,const Camera& cam,const Ray& ray,Stats& st,bool fog,uint64_t seed,unsigned maxBounces);
+/* Accumulate distinct, deterministic Monte-Carlo samples as linear HDR RGB.
+ * Each pass updates accum and returns an sRGB/tonemapped preview of all samples
+ * [0, firstSample+batchSamples). The same image must result whether rendered in
+ * one batch or in several progressive passes. Cancellation is checked per tile.
+ * Caller must reset accum on changes of scene, camera or render settings. */
+Stats renderGiAccumulatePass(const Scene& scene,const ShadowMap& shadow,
+    const Camera& cam,int w,int h,std::vector<V>& accum,
+    std::vector<uint32_t>& preview,uint32_t firstSample,uint32_t batchSamples,
+    unsigned threads,const std::atomic<uint64_t>& generation,uint64_t token,
+    unsigned maxBounces);
+
 RendererCapabilities detectRendererCapabilities() noexcept;
 bool renderCompute11Preview(const Scene& s,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
 bool renderDirectX11Preview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
