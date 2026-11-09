@@ -13,6 +13,16 @@
 - Aucun échantillon supprimé, aucun changement de résolution, aucune réduction de la géométrie. La validation automatique vérifie la stricte identité des rendus GPU avant/après réutilisation du cache et l'invalidation en cas de modification de matériau.
 - Les chiffres de performance sous WARP logiciel ne préjugent pas des gains sur le GPU matériel.
 
+## Détail architectural — scène Pavillon 01 enrichie
+- 311 instances (contre 172) et 26 matériaux PBR distincts (contre 11). Les nouveaux objets correspondent à de vrais détails : étanchéité de toiture, couvertines zinc, évacuations/ventilations, bardage bois à joints, soubassements minéraux, bandeaux et meneaux de fenêtres, seuils, terrasse en lames étroites, sols terrazzo et équipements intérieurs.
+- Bois de terrasse, bardage, écorce et feuillages ont leurs matériaux distincts. Les textures secondaires utilisent des chaînes mipmap PBR de 512 à 1024 px afin de limiter le coût mémoire ; les matériaux d'origine conservent leur définition.
+- La forme générale, les positions des caméras et la transparence vitrée de Pavillon 01 sont conservées.
+
+## Éclairage global CPU — mode facultatif
+- Le moteur disposait déjà d'un path tracer CPU avec rebonds indirects et encodage HDR. La V16 propose désormais dans la liste des backends : « CPU Éclairage global — 2 rebonds, 4 échantillons » et « CPU Éclairage global — 4 rebonds, 16 échantillons ».
+- Ces modes sont **CPU uniquement** et plus coûteux que l'aperçu direct. Le GPU D3D11 Compute conserve son mode PBR simplifié rapide ; aucun calcul GI GPU n'est revendiqué.
+- Les tests Windows conservent CPU/GPU Full HD et ajoutent une image GI Full HD distincte. Le test GI technique emploie 1 échantillon pour couvrir la voie d'exécution, les préréglages d'utilisation en emploient 4 ou 16.
+
 ## Architecture livrée
 - `moteur3d_v16_core.dll` : moteur C++ (ray tracing CPU, aperçu Compute D3D11, BVH, matériaux).
 - `moteur3d_v16.exe` : visualisation Qt6, catalogue des matériaux, explorateur et six raccourcis caméra **1 à 6**.
