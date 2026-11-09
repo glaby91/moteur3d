@@ -1,6 +1,6 @@
 {
   "format": "m3d-lighting-v1",
-  "hour": 16.5,
+  "hour": 14.75,
   "sun": {
     "direction": [
       -0.68,
@@ -61,5 +61,5 @@
       ]
     }
   ],
-  "notes": "Rendu de fin d'après-midi : le moteur V16 applique hour via updateLighting; sun.direction et ambient sont préparés pour une intégration physique ultérieure."
+  "notes": "Architectural afternoon daylight, neutral blue horizon, useful directional sun. CPU/GPU use the same updateLighting(hour) clock, not yet physical GI."
 }
