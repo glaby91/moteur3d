@@ -1,8 +1,8 @@
-# Photo2Scene — reconstruction architecturale fondée sur des calculs
+# Photo2Scene WARP — reconstruction architecturale fondée sur des calculs
 
 ## Origine du projet
 
-CSE WARP Beta X vient du programme QBasic initial et est devenu un moteur C++ / Qt6 : BVH, CPU multithread, PBR/normal maps, GPU D3D11 Compute et GI CPU. Photo2Scene est un module géométrique distinct, pas un nouveau moteur graphique. Les calculs restent reproductibles et indépendants des prompts.
+CSE WARP Beta X vient du programme QBasic initial et est devenu un moteur C++ / Qt6 : BVH, CPU multithread, PBR/normal maps, GPU D3D11 Compute et GI CPU. Photo2Scene WARP est un module géométrique distinct, pas un nouveau moteur graphique. Les calculs restent reproductibles et indépendants des prompts.
 
 ## Architecture recommandée : intelligence visuelle + géométrie métrique
 
@@ -15,7 +15,7 @@ CSE WARP Beta X vient du programme QBasic initial et est devenu un moteur C++ / 
 
 ## Ce qui est implémenté (MVP reproductible)
 
-Le script tools/photo2scene/photo2scene.py, sans bibliothèque externe, calcule :
+Le script tools/photo2scene/photo2scene.py (Photo2Scene WARP), sans bibliothèque externe, calcule :
 
 - l'intersection aux moindres carrés de droites annotées avec erreur RMS en pixels ;
 - un FOV à partir de DEUX familles de lignes dont les directions 3D sont orthogonales, avec hypothèses caméra sténopé, pixels carrés, distorsion nulle et point principal connu ou centré ;
