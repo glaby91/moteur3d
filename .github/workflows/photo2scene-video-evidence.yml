@@ -1,0 +1,42 @@
+name: Photo2Scene WARP — video evidence (no user footage)
+on:
+  push:
+    branches:
+      - feature/photo2scene-warp-video-261109
+    paths:
+      - 'tools/photo2scene/video_evidence.py'
+      - 'tools/photo2scene/data/pripyat/video-evidence-261109.json'
+      - 'tools/photo2scene/tests/test_video_evidence.py'
+      - '.github/workflows/photo2scene-video-evidence.yml'
+  pull_request:
+    paths:
+      - 'tools/photo2scene/video_evidence.py'
+      - 'tools/photo2scene/data/pripyat/video-evidence-261109.json'
+      - 'tools/photo2scene/tests/test_video_evidence.py'
+  workflow_dispatch:
+
+jobs:
+  deterministic-photo-geometry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install numerical geometry (no neural models)
+        run: python -m pip install 'numpy>=1.26,<3' 'opencv-python-headless>=4.9,<5' 'Pillow>=10,<13' 'trimesh>=4,<5'
+      - name: Verify nonmetric image-space reconstruction
+        run: python -m unittest discover -s tools/photo2scene/tests -p 'test_video_evidence.py' -v
+      - name: Validate video manifest (no private media in repository)
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          p=Path('tools/photo2scene/data/pripyat/video-evidence-261109.json')
+          d=json.loads(p.read_text())
+          assert len(d['views'])==9
+          assert len(d['pairs'])==4
+          assert all('time_s' in x and 'roi' in x for x in d['views'])
+          assert not list(Path('tools/photo2scene').glob('**/*.mp4'))
+          print('9 video samples indexed, 4 candidate pairs, no private video in repository')
+          PY

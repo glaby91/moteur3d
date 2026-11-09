@@ -1,0 +1,223 @@
+{
+  "schema": "photo2scene/video-evidence-v1",
+  "views": [
+    {
+      "id": "historic_facade_120",
+      "file": "No comment. Припять. Июнь 1986 (колесо обозрения, во дворах).mp4",
+      "time_s": 120,
+      "role": "historic surroundings and candidate facade",
+      "roi": [
+        0,
+        15,
+        854,
+        410
+      ]
+    },
+    {
+      "id": "historic_facade_124",
+      "file": "No comment. Припять. Июнь 1986 (колесо обозрения, во дворах).mp4",
+      "time_s": 124,
+      "role": "streetscape and candidate facade",
+      "roi": [
+        0,
+        10,
+        854,
+        410
+      ]
+    },
+    {
+      "id": "historic_facade_128",
+      "file": "No comment. Припять. Июнь 1986 (колесо обозрения, во дворах).mp4",
+      "time_s": 128,
+      "role": "facade upper glazed grid; identity pending",
+      "roi": [
+        100,
+        58,
+        552,
+        225
+      ],
+      "quad_px": [
+        [
+          152,
+          93
+        ],
+        [
+          518,
+          94
+        ],
+        [
+          518,
+          164
+        ],
+        [
+          152,
+          159
+        ]
+      ]
+    },
+    {
+      "id": "arcade_aerial_295",
+      "file": "Film Tchernobyl - Pripyat 2009 Partie 22.mp4",
+      "time_s": 295,
+      "role": "arcade photo-space curve, palace to image right",
+      "roi": [
+        430,
+        153,
+        635,
+        320
+      ],
+      "polyline_px": [
+        [
+          74,
+          354
+        ],
+        [
+          158,
+          355
+        ],
+        [
+          243,
+          345
+        ],
+        [
+          337,
+          328
+        ],
+        [
+          420,
+          302
+        ],
+        [
+          484,
+          274
+        ],
+        [
+          521,
+          249
+        ],
+        [
+          546,
+          235
+        ]
+      ]
+    },
+    {
+      "id": "energetik_facade_315",
+      "file": "Film Tchernobyl - Pripyat 2009 Partie 22.mp4",
+      "time_s": 315,
+      "role": "palace facade oblique",
+      "roi": [
+        40,
+        25,
+        625,
+        330
+      ]
+    },
+    {
+      "id": "auditorium_003",
+      "file": "AQNZU2zfHWPgS_rYFNAw1X6b42_lsmceQ081sGzEkC7VbQgjnias3gqio1RilDNqrY207ksjqb_5VXmhRUutyDDqcm3wvniyDXmKfw8ZMFCJmQ.mp4",
+      "time_s": 3,
+      "role": "main hall? likely auditorium: ceiling grid, unconfirmed room",
+      "roi": [
+        0,
+        315,
+        720,
+        1180
+      ]
+    },
+    {
+      "id": "auditorium_005",
+      "file": "AQNZU2zfHWPgS_rYFNAw1X6b42_lsmceQ081sGzEkC7VbQgjnias3gqio1RilDNqrY207ksjqb_5VXmhRUutyDDqcm3wvniyDXmKfw8ZMFCJmQ.mp4",
+      "time_s": 5,
+      "role": "auditorium upper walls, ceiling",
+      "roi": [
+        0,
+        315,
+        720,
+        1170
+      ]
+    },
+    {
+      "id": "auditorium_011",
+      "file": "AQNZU2zfHWPgS_rYFNAw1X6b42_lsmceQ081sGzEkC7VbQgjnias3gqio1RilDNqrY207ksjqb_5VXmhRUutyDDqcm3wvniyDXmKfw8ZMFCJmQ.mp4",
+      "time_s": 11,
+      "role": "platform/stage and wall openings",
+      "roi": [
+        0,
+        320,
+        720,
+        1180
+      ]
+    },
+    {
+      "id": "auditorium_013",
+      "file": "AQNZU2zfHWPgS_rYFNAw1X6b42_lsmceQ081sGzEkC7VbQgjnias3gqio1RilDNqrY207ksjqb_5VXmhRUutyDDqcm3wvniyDXmKfw8ZMFCJmQ.mp4",
+      "time_s": 13,
+      "role": "stage platform edge",
+      "roi": [
+        0,
+        315,
+        720,
+        1180
+      ]
+    }
+  ],
+  "pairs": [
+    [
+      "historic_facade_120",
+      "historic_facade_124"
+    ],
+    [
+      "historic_facade_124",
+      "historic_facade_128"
+    ],
+    [
+      "auditorium_003",
+      "auditorium_005"
+    ],
+    [
+      "auditorium_011",
+      "auditorium_013"
+    ]
+  ],
+  "exclude_rectangles": {
+    "auditorium_003": [
+      [
+        0,
+        0,
+        720,
+        360
+      ]
+    ],
+    "auditorium_011": [
+      [
+        0,
+        0,
+        720,
+        360
+      ]
+    ],
+    "historic_facade_120": [
+      [
+        0,
+        405,
+        854,
+        480
+      ]
+    ],
+    "historic_facade_124": [
+      [
+        0,
+        405,
+        854,
+        480
+      ]
+    ]
+  },
+  "notes": {
+    "quad_px": "Provisional corners chosen in original frame, not ground truth; revise with reference survey",
+    "polyline_px": "Image-space trace only. Not a world-space curve.",
+    "scale": "Unknown; no metres inferred",
+    "source_date": "Filename says 1986 or 2009; provenance date not independently verified"
+  }
+}
