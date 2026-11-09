@@ -201,8 +201,8 @@ private:
         backendBox_->setItemData(1,0,Qt::UserRole-1);
 #endif
         qualityBox_=new QComboBox;
-        qualityBox_->addItems({QStringLiteral("Aperçu 480 × 270"),QStringLiteral("Standard 800 × 450"),QStringLiteral("Haute qualité 1280 × 720")});
-        qualityBox_->setCurrentIndex(1);
+        qualityBox_->addItems({QStringLiteral("Full HD 1920 × 1080"),QStringLiteral("Full HD qualité 1920 × 1080 (CPU 4 échantillons)"),QStringLiteral("4K UHD 3840 × 2160")});
+        qualityBox_->setCurrentIndex(0);
         azimuth_=new QSlider(Qt::Horizontal);
         azimuth_->setRange(-180,180);
         azimuth_->setValue(0);
@@ -392,11 +392,11 @@ private:
         preset.eye={preset.target.x+dir.x*std::cos(angle)+dir.z*std::sin(angle),
                     preset.eye.y,
                     preset.target.z-dir.x*std::sin(angle)+dir.z*std::cos(angle)};
-        const int w=qualityBox_->currentIndex()==0?480:qualityBox_->currentIndex()==1?800:1280;
+        const int w=qualityBox_->currentIndex()==2?3840:1920;
         const int h=w*9/16;
         const bool wantGpu=backendBox_->currentIndex()==1;
         const bool edgeAA=edgeAa_->isChecked();
-        const unsigned sampleCount=qualityBox_->currentIndex()==2?4u:1u;
+        const unsigned sampleCount=qualityBox_->currentIndex()==1?4u:1u;
         statusBar()->showMessage(QStringLiteral("Calcul de l'image…"));
         watcher_.setFuture(QtConcurrent::run([snapshot,preset,w,h,wantGpu,edgeAA,sampleCount]{
             Result result;
