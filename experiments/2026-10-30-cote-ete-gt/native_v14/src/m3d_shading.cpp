@@ -113,7 +113,10 @@ V traceColor(const Scene&s,const ShadowMap&sm,const Camera&cam,const Ray&input,S
   const bool totalInternalReflection=k<=0.f;
   // Pavillon 01 pool: retain a sky/building reflection even for a shallow,
   // low-transmission water surface. Non-water glass keeps physical Schlick F0.
-  const bool architecturalWater=material.name=="water" && s.finiteGround;
+  // Use measured medium properties, not a scene name or an object label.
+  // The GPU Preview uses the same water IOR/transmission classification.
+  const bool architecturalWater=(material.transmissionPercent>5 &&
+      material.refractiveIndex>1.28f && material.refractiveIndex<1.38f);
   const float waterEdge=std::pow(1.f-cosine,3.f);
   const float reflectedWeight=totalInternalReflection?1.f:
       architecturalWater?clampf(.15f+.32f*waterEdge,0.f,.72f):fresnel;
