@@ -35,10 +35,28 @@ jobs:
           assert 70.0 < f["fov_horizontal_deg"] < 80.0
           print("Synthetic photo geometry tests PASSED")
           PY
+      - name: Run Photo2Scene WARP on original Energetik pixel annotations
+        run: |
+          python3 tools/photo2scene/photo2scene.py analyse tools/photo2scene/data/pripyat/energetik-20261109-original-lines.json -o energetik-camera-preliminary.json
+          python3 - <<'PY'
+          import json
+          result=json.load(open("energetik-camera-preliminary.json"))
+          f=result["camera_intrinsics_estimate"]
+          v=result["vanishing_points"]
+          print("Energetik (unverified assumptions), FOV horizontal =",
+                round(f["fov_horizontal_deg"],2),"degrees")
+          print("Front VP:",v["facade_longitudinale"]["pixel"])
+          print("Side VP:",v["retour_lateral"]["pixel"])
+          assert 55 < f["fov_horizontal_deg"] < 80
+          assert v["facade_longitudinale"]["segments"] == 10
+          assert v["retour_lateral"]["segments"] == 5
+          assert not result.get("planes"), "No unsupported 3D or ground-plane depths"
+          PY
       - uses: actions/upload-artifact@v4
         with:
-          name: Photo2Scene-WARP-synthetic-geometry-reports
+          name: Photo2Scene-WARP-Energetik-camera-and-synthetic-reports
           path: |
             ground-result.json
             fov-result.json
+            energetik-camera-preliminary.json
           if-no-files-found: error
