@@ -770,8 +770,14 @@ function m3dBuildEnergetikForecourtLattice({box,meshTriangle},a=M3D_ENERGETIK_AR
       [0,3,7],[0,7,4],[1,5,6],[1,6,2],
       [0,4,5],[0,5,1],[3,2,6],[3,6,7]];
     for(const [i,j,k] of faces){
-      const q=index=>({p:v[index],n:[0,1,0],uv:[0,0]});
-      meshTriangle(q(i),q(j),q(k),material);
+      const a=v[i],b=v[j],c=v[k];
+      const u=[b[0]-a[0],b[1]-a[1],b[2]-a[2]];
+      const w=[c[0]-a[0],c[1]-a[1],c[2]-a[2]];
+      const n=[u[1]*w[2]-u[2]*w[1],u[2]*w[0]-u[0]*w[2],u[0]*w[1]-u[1]*w[0]];
+      const inv=1/Math.max(1e-10,Math.hypot(n[0],n[1],n[2]));
+      const normal=n.map(x=>x*inv);
+      const q=(index,uv)=>({p:v[index],n:normal,uv});
+      meshTriangle(q(i,[0,0]),q(j,[1,0]),q(k,[0,1]),material);
     }
   };
   // Two curved longitudinal perimeter rails + a narrow central rib.
