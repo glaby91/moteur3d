@@ -1,0 +1,37 @@
+{
+  "schema_version": "0.2.0",
+  "scene_id": "pavilion_01",
+  "name": "Pavillon 01",
+  "status": "modular_manifest_no_meshes_yet",
+  "asset_catalog": "../../assets/pavilion_01/assets.json",
+  "includes": [
+    {
+      "path": "environment/environment.json",
+      "kind": "environment"
+    },
+    {
+      "path": "geometry/building.json",
+      "kind": "objects"
+    },
+    {
+      "path": "instances/vegetation.json",
+      "kind": "objects"
+    },
+    {
+      "path": "lighting/lights.json",
+      "kind": "lights"
+    },
+    {
+      "path": "lighting/presets.json",
+      "kind": "environment"
+    },
+    {
+      "path": "cameras/cameras.json",
+      "kind": "cameras"
+    }
+  ],
+  "notes": [
+    "Includes resolve relative to this manifest.",
+    "Assets are placeholders until geometry exists."
+  ]
+}

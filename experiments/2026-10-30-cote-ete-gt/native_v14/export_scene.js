@@ -165,7 +165,13 @@ function makeRapturePbr(kind) {
 }
 
 function makePripyatPbr(kind) {
-  const size=((kind.startsWith('gym') && kind!=='gymFloor') || kind.startsWith('wheel')) ? 1024 : Number(process.env.M3D_TEXTURE_SIZE || 1024);
+  // Propaganda canvases have their own lightweight PBR texture sets.
+  // One atlas contains all 12 PAINTED placeholders, not 12 heavy materials.
+  const requestedTextureSize=Number(process.env.M3D_TEXTURE_SIZE || 1024);
+  const size=kind==='propagandaPortraitAtlas' ? Math.max(1024,requestedTextureSize)
+    :kind.startsWith('congress') ? 512
+    :((kind.startsWith('gym') && kind!=='gymFloor') || kind.startsWith('wheel')) ? 1024
+    :requestedTextureSize;
   if (![512,1024,2048].includes(size)) throw new Error(`Taille de texture M3D_TEXTURE_SIZE invalide: ${size} (512, 1024 ou 2048 attendus).`);
   const isLeaf=kind==='leaves'||kind==='leavesAutumn';
   const color=new Uint16Array(size*size), normal=new Uint16Array(size*size), roughness=new Uint16Array(size*size);
@@ -173,6 +179,8 @@ function makePripyatPbr(kind) {
   const noise=(x,y,shift,salt=0)=>hash((x>>shift)+salt,(y>>shift)-salt)/2147483647.5-1;
   const heightAt=(x,y)=>{
     const broad=noise(x,y,5), mid=noise(x,y,3), grain=noise(x,y,1);
+    if(kind.startsWith('congress') || kind==='propagandaPortraitAtlas')
+      return broad*.012+mid*.009+grain*.003;
     if(kind==='wheelSteel'||kind==='wheelRust') return broad*.045+mid*.027+grain*.008;
     if(kind==='wheelYellow') return broad*.06+mid*.033+grain*.015;
     if(kind==='wheelTrim') return broad*.04+mid*.02+grain*.008;
@@ -203,6 +211,11 @@ function makePripyatPbr(kind) {
     wheelSteel:[93,77,62], wheelRust:[121,65,37], wheelYellow:[204,152,37], wheelTrim:[92,82,67],
     gymFloor:[119,159,170], gymWall:[143,159,151], gymConcrete:[135,131,118],
     gymMetal:[100,78,61], gymLetter:[228,223,207], gymRed:[151,59,53], gymBlue:[36,113,164],
+    congressRed:[183,37,28], congressCrimson:[135,22,22],
+    congressCharcoal:[43,39,35], congressIvory:[239,230,205],
+    congressFrame:[160,149,129], congressGold:[209,173,67],
+    neonRed:[249,48,36],
+    propagandaPortraitAtlas:[221,217,203],
     concrete:[145,140,126], stone:[119,113,100], asphalt:[57,59,54],
     plaster:[166,159,143], mural:[179,151,112], volcanicTuff:[145,96,79],
     brick:[132,91,69], rust:[112,62,39], leaves:[65,91,48], leavesAutumn:[126,83,41],
@@ -404,12 +417,49 @@ function makePripyatPbr(kind) {
       if(oxide>.27)pigment=[141,79,48];
       else if(oxide<-.45)pigment=[70,70,66];
     }
+    if(kind.startsWith('congress')){
+      // Opaque oil-painted plywood / thick banner, not rusty metal.
+      // Slight irregular brush marks, no ruined-era streaking.
+      variation=broad*3+mid*2+grain*.6 + Math.sin(y*.30+noise(x,y,4))*.9;
+    }
+    if(kind==='propagandaPortraitAtlas'){
+      // Twelve non-identifiable painted portrait STUDIES at 4x3 UV cells.
+      // Their positions/color distribution resemble the historic boards,
+      // but these ARE NOT authenticated Politburo likenesses or textures.
+      const u=((x+.5)*4/size)%1, v=((y+.5)*3/size)%1;
+      const col=Math.min(3,Math.floor(x*4/size));
+      const row=Math.min(2,Math.floor(y*3/size));
+      const id=row*4+col;
+      const hue=id%4, skin=[[205,171,139],[215,182,151],[190,157,131],[210,179,151]][hue];
+      const dark=[[50,49,44],[68,63,60],[45,54,60],[75,66,55]][id%4];
+      const radius=(a,b,rx,ry)=>((u-a)/rx)**2+((v-b)/ry)**2;
+      pigment=[226-(id%3)*4,224-(id%4)*3,217-(id%5)*2];
+      // Blue/grey painted jackets have subtly different silhouettes.
+      const coatWidth=.24+Math.max(0,v-.52)*.63;
+      if(v>.58 && Math.abs(u-.50)<coatWidth) pigment=dark;
+      if(v>.60 && Math.abs(u-.50)<.092){
+        pigment=[217,211,198];
+        if(Math.abs(u-.50)<.023 && v>.69) pigment=[112+(id%4)*11,62,66+(id%3)*13];
+      }
+      // Face/neck in warm pigment. Hair is the outer top silhouette.
+      if(radius(.50,.43,.19,.25)<1.0) pigment=skin;
+      if(radius(.50,.27,.205,.15)<1.0 && (v<.36 || Math.abs(u-.50)>.155)) pigment=dark;
+      if(radius(.50,.59,.078,.095)<1.0 && v>.55) pigment=skin;
+      for(const eyeX of [.435,.565]){
+        if(radius(eyeX,.435,.014,.013)<1) pigment=[48,48,44];
+      }
+      if(Math.abs(u-.5)<.010 && v>.46 && v<.505) pigment=[148,111,92];
+      if(radius(.50,.548,.058,.008)<1.0) pigment=[136,91,79];
+      if(id%5===1 && v>.40 && v<.48 && (Math.abs(u-.435)<.045 || Math.abs(u-.565)<.045))
+        pigment=[91,84,72]; // distinctive eyeglasses on some placeholders
+      variation=broad*2+mid*.9+grain*.65;
+    }
     const tint=(k,amount)=>Math.max(0,Math.min(255,pigment[k]+variation*amount));
     color[i]=pack565(tint(0,1),tint(1,kind==='rust'?.76:isLeaf||kind==='grass'?.95:.98),tint(2,kind==='rust'?.54:isLeaf||kind==='grass'?.72:kind==='wood'||kind==='bark'?.72:.88));
     const dx=(heightAt(x+1,y)-heightAt(x-1,y))*1.2, dy=(heightAt(x,y+1)-heightAt(x,y-1))*1.2;
     const inv=1/Math.hypot(dx,dy,1);
     normal[i]=pack565(128-dx*inv*127,128-dy*inv*127,128+inv*127);
-    const roughBase=kind==='wheelYellow'?189:kind==='wheelSteel'?184:kind==='wheelRust'?217:kind==='wheelTrim'?175:kind==='gymFloor'?187:kind==='gymWall'?221:kind==='gymConcrete'?216:kind==='gymMetal'?198:kind==='gymLetter'?174:kind==='gymRed'||kind==='gymBlue'?175:kind==='seatSteel'?170:kind==='seatSupportPaint'?176:kind==='seatVinylBrown'?96:kind==='seatPreviewFloor'?236:kind==='seatWood'?145:kind==='seatTrim'?232:kind==='seatFabricClean'?238:kind==='asphalt'?232:isLeaf||kind==='grass'?224:kind==='rust'?218:kind==='stone'?222:kind==='wood'||kind==='bark'?214:kind==='debris'?236:kind==='plaster'||kind==='mural'?228:kind==='volcanicTuff'?238:kind==='seatFabric'||kind==='curtain'?244:kind==='cinemaScreen'?228:232;
+    const roughBase=kind==='propagandaPortraitAtlas'?214:kind.startsWith('congress')?201:kind==='wheelYellow'?189:kind==='wheelSteel'?184:kind==='wheelRust'?217:kind==='wheelTrim'?175:kind==='gymFloor'?187:kind==='gymWall'?221:kind==='gymConcrete'?216:kind==='gymMetal'?198:kind==='gymLetter'?174:kind==='gymRed'||kind==='gymBlue'?175:kind==='seatSteel'?170:kind==='seatSupportPaint'?176:kind==='seatVinylBrown'?96:kind==='seatPreviewFloor'?236:kind==='seatWood'?145:kind==='seatTrim'?232:kind==='seatFabricClean'?238:kind==='asphalt'?232:isLeaf||kind==='grass'?224:kind==='rust'?218:kind==='stone'?222:kind==='wood'||kind==='bark'?214:kind==='debris'?236:kind==='plaster'||kind==='mural'?228:kind==='volcanicTuff'?238:kind==='seatFabric'||kind==='curtain'?244:kind==='cinemaScreen'?228:232;
     const r=kind==='seatSteel'?169+Math.sin(y*12)*15+Math.sin(y*29)*4:kind==='seatWood'?145+Math.sin(y*.07)*7+grain*2:kind==='seatFabricClean'?238+Math.cos(x*Math.PI/5)*4:kind==='seatVinylBrown'?96+noise(x,y,4)*24+Math.abs(grain)*10:kind==='seatSupportPaint'?176+noise(x,y,3)*12:kind==='seatTrim'?232+Math.sin(y*Math.PI/5)*3:roughBase+grain*10+Math.abs(mid)*4;
     roughness[i]=pack565(r,r,r);
   }
@@ -428,7 +478,8 @@ function makePripyatPbr(kind) {
   };
   return {color:makeMips(color),normal:makeMips(normal),roughness:makeMips(roughness)};
 }
-const generatedPripyatPbr=new Map(mats.filter(name=>['concrete','plaster','mural','volcanicTuff','stone','asphalt','brick','rust','leaves','leavesAutumn','grass','wood','bark','debris','seatFabric','seatFabricClean','seatVinylBrown','seatSupportPaint','seatWood','seatSteel','seatPreviewFloor','seatTrim','curtain','cinemaScreen','gymFloor','gymWall','gymConcrete','gymMetal','gymLetter','gymRed','gymBlue','wheelSteel','wheelRust','wheelYellow','wheelTrim'].includes(name)).map(name=>[name,makePripyatPbr(name)]));
+const generatedPripyatPbr=new Map(mats.filter(name=>['concrete','plaster','mural','volcanicTuff','stone','asphalt','brick','rust','leaves','leavesAutumn','grass','wood','bark','debris','seatFabric','seatFabricClean','seatVinylBrown','seatSupportPaint','seatWood','seatSteel','seatPreviewFloor','seatTrim','curtain','cinemaScreen','gymFloor','gymWall','gymConcrete','gymMetal','gymLetter','gymRed','gymBlue','wheelSteel','wheelRust','wheelYellow','wheelTrim',
+'congressRed','congressCrimson','congressCharcoal','congressIvory','congressFrame','congressGold','propagandaPortraitAtlas','neonRed'].includes(name)).map(name=>[name,makePripyatPbr(name)]));
 for(const [name,pbr] of generatedPripyatPbr) scene.materials.set(name,{levels:pbr.color});
 
 const generatedPbr = new Map(['raptureStone', 'raptureBronze', 'raptureGlass'].map(name => [name, makeRapturePbr(name)]));

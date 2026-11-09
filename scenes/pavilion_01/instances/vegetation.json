@@ -1,0 +1,81 @@
+{
+  "schema_version": "0.2.0",
+  "objects": [
+    {
+      "id": "tree_01",
+      "asset": "tree_poplar",
+      "translation": [
+        -13,
+        -9,
+        0
+      ],
+      "rotation_euler_deg": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "id": "tree_02",
+      "asset": "tree_poplar",
+      "translation": [
+        13,
+        -9,
+        0
+      ],
+      "rotation_euler_deg": [
+        0,
+        0,
+        42
+      ],
+      "scale": [
+        0.9,
+        0.9,
+        1.1
+      ]
+    },
+    {
+      "id": "tree_03",
+      "asset": "tree_poplar",
+      "translation": [
+        -13,
+        9,
+        0
+      ],
+      "rotation_euler_deg": [
+        0,
+        0,
+        97
+      ],
+      "scale": [
+        1.1,
+        1.1,
+        0.95
+      ]
+    },
+    {
+      "id": "tree_04",
+      "asset": "tree_poplar",
+      "translation": [
+        13,
+        9,
+        0
+      ],
+      "rotation_euler_deg": [
+        0,
+        0,
+        135
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ]
+    }
+  ]
+}

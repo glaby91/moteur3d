@@ -1,0 +1,737 @@
+{
+  "title": "Pripyat — inventaire historique confirmé",
+  "as_of": "2026-11-07",
+  "policy": "Only documented existence; geolocation and dimensions not implied",
+  "requested_forest_period": "summer 1986 red/orange dead pines",
+  "spatial_notes": [
+    "River passenger terminal at connected old river arm; cargo docks of other towns excluded",
+    "Red Forest near ChNPP outside Pripyat proper; no made-up perimeter"
+  ],
+  "count": 43,
+  "section_counts": {
+    "centre": 11,
+    "parc": 6,
+    "voirie": 1,
+    "habitat": 1,
+    "sports": 2,
+    "education": 8,
+    "sante": 2,
+    "industrie": 1,
+    "transport": 2,
+    "fluvial": 7,
+    "paysage": 1,
+    "peripherie": 1
+  },
+  "locations": [
+    {
+      "id": "energetik",
+      "name": "Palais de la culture Energetik",
+      "section": "centre",
+      "priority": 1,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "modélisé — géométrie à affiner",
+      "description": "Façade à colonnade, hall monumental, espaces publics, scène et auditorium.",
+      "reference_urls": [
+        "https://www.chernobylgallery.com/galleries/",
+        "https://www.forgottenchernobyl.net/pripyat-then-and-now-part-1-main-square",
+        "https://www.chernobyl.one/pripyat-palace-of-culture-energetik/"
+      ],
+      "location": null
+    },
+    {
+      "id": "fresque-palais",
+      "name": "Fresque du hall Energetik",
+      "section": "centre",
+      "priority": 1,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "modélisé — position corrigée",
+      "description": "Peinture monumentale visible sur le mur du hall ; dimensions et détails modélisés encore sujets à contrôle.",
+      "reference_urls": [
+        "https://www.chernobyl.one/pripyat-palace-of-culture-energetik/",
+        "https://www.chernobylgallery.com/galleries/"
+      ],
+      "location": null
+    },
+    {
+      "id": "hotel-polissya",
+      "name": "Hôtel Polissya",
+      "section": "centre",
+      "priority": 1,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "modélisé — implantation photoguidée",
+      "description": "Hôtel de la place avec façade régulière, belvédère supérieur et lettres métalliques sur le toit.",
+      "reference_urls": [
+        "https://www.forgottenchernobyl.net/pripyat-then-and-now-part-1-main-square",
+        "https://commons.wikimedia.org/wiki/Category:Polissya_hotel_(Pripyat)",
+        "https://www.lemonde.fr/livres/portfolio/2020/10/26/en-images-tchernobyl-les-jours-d-apres_6057430_3260.html"
+      ],
+      "location": {
+        "latitude": 51.40715,
+        "longitude": 30.058230555555557,
+        "type": "point de carte Wikimedia/OSM; pas emprise"
+      }
+    },
+    {
+      "id": "central-square",
+      "name": "Place centrale / place Lénine",
+      "section": "centre",
+      "priority": 1,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "modélisé — réseaux et emprises à recalibrer",
+      "description": "Esplanade du centre, trottoirs, sols durs, alignements végétaux.",
+      "reference_urls": [
+        "https://www.forgottenchernobyl.net/pripyat-then-and-now-part-1-main-square",
+        "https://www.lemonde.fr/livres/portfolio/2020/10/26/en-images-tchernobyl-les-jours-d-apres_6057430_3260.html"
+      ],
+      "location": null
+    },
+    {
+      "id": "curved-colonnade",
+      "name": "Colonnade courbe de la place",
+      "section": "centre",
+      "priority": 1,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "modélisé — tracé provisoire",
+      "description": "Galerie basse courbe documentée par photographies de la place ; géométrie exacte et attaches physiques non certifiées. Le modèle 3D suit la consigne utilisateur : extrémités libres.",
+      "reference_urls": [
+        "https://www.forgottenchernobyl.net/pripyat-then-and-now-part-1-main-square",
+        "https://www.lemonde.fr/livres/portfolio/2020/10/26/en-images-tchernobyl-les-jours-d-apres_6057430_3260.html"
+      ],
+      "location": null
+    },
+    {
+      "id": "city-hall",
+      "name": "Hôtel de ville / comité exécutif",
+      "section": "centre",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Immeuble de l'administration municipale ; façade et entrées à reprendre sur photos.",
+      "reference_urls": [
+        "https://www.chernobyl.one/pripyat-city-hall/",
+        "https://www.chernobyl.one/locations/"
+      ],
+      "location": null
+    },
+    {
+      "id": "prometheus-cinema",
+      "name": "Cinéma Prometheus",
+      "section": "centre",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Cinéma avec grande salle, entrée et mosaïque extérieure.",
+      "reference_urls": [
+        "https://www.flickr.com/photos/lordolsen/albums/72157709935982846/",
+        "https://www.bcd-urbex.com/pripyat-then-and-now/"
+      ],
+      "location": null
+    },
+    {
+      "id": "prometheus-mosaic",
+      "name": "Mosaïque du cinéma Prometheus",
+      "section": "centre",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Mosaïque architecturale située sur un mur du cinéma ; décor distinct du palais.",
+      "reference_urls": [
+        "https://www.bcd-urbex.com/pripyat-then-and-now/"
+      ],
+      "location": null
+    },
+    {
+      "id": "city-post-office",
+      "name": "Bureau de poste",
+      "section": "centre",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Bâtiment de la poste et mosaïque intérieure documentée.",
+      "reference_urls": [
+        "https://www.obsidianurbexphotography.com/leisure/pripyat-post-office-shops/",
+        "https://www.bcd-urbex.com/pripyat-then-and-now/"
+      ],
+      "location": null
+    },
+    {
+      "id": "city-supermarket",
+      "name": "Grand magasin / supermarché",
+      "section": "centre",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Vitrines, halls commerciaux, devantures et enseignes.",
+      "reference_urls": [
+        "https://www.obsidianurbexphotography.com/leisure/pripyat-post-office-shops/",
+        "https://www.lemonde.fr/livres/portfolio/2020/10/26/en-images-tchernobyl-les-jours-d-apres_6057430_3260.html",
+        "https://www.chernobylgallery.com/galleries/"
+      ],
+      "location": null
+    },
+    {
+      "id": "city-restaurant",
+      "name": "Restaurant de la place centrale",
+      "section": "centre",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Restaurant devant ou proche de l'esplanade centrale ; emplacement de détail à vérifier.",
+      "reference_urls": [
+        "https://www.forgottenchernobyl.net/pripyat-then-and-now-part-1-main-square",
+        "https://www.lemonde.fr/livres/portfolio/2020/10/26/en-images-tchernobyl-les-jours-d-apres_6057430_3260.html"
+      ],
+      "location": null
+    },
+    {
+      "id": "lenin-avenue",
+      "name": "Avenue Lénine",
+      "section": "voirie",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Grande avenue urbaine, alignements d'arbres, panneaux et commerces.",
+      "reference_urls": [
+        "https://www.forgottenchernobyl.net/pripyat-then-and-now-part-1-main-square",
+        "https://www.bcd-urbex.com/pripyat-then-and-now/"
+      ],
+      "location": null
+    },
+    {
+      "id": "white-house-residential",
+      "name": "Immeuble résidentiel dit White House",
+      "section": "habitat",
+      "priority": 3,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Immeuble d'habitation proche de la place documenté sur vues avant/après.",
+      "reference_urls": [
+        "https://www.forgottenchernobyl.net/pripyat-then-and-now-part-1-main-square"
+      ],
+      "location": null
+    },
+    {
+      "id": "amusement-park",
+      "name": "Parc d'attractions de Pripyat",
+      "section": "parc",
+      "priority": 1,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "1986",
+      "scene_status": "modélisé — partiel",
+      "description": "Ensemble de cinq attractions, allées, dalles et zones vertes.",
+      "reference_urls": [
+        "https://www.ladyschnaps.fr/pripyat-amusement-park/",
+        "https://www.arcanumurbex.de/photos/civilian-objects/pripyat-town-fair/",
+        "https://commons.wikimedia.org/wiki/Category:Prypiat_amusement_park"
+      ],
+      "location": {
+        "latitude": 51.40842,
+        "longitude": 30.055099,
+        "type": "centre cartographié source Atlas Obscura"
+      }
+    },
+    {
+      "id": "ferris-wheel",
+      "name": "Grande roue Круговой обзор",
+      "section": "parc",
+      "priority": 1,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "1986",
+      "scene_status": "modélisé — rotor testable",
+      "description": "Grand rotor métallique, supports, nacelles jaunes ; vérification photogrammétrique nécessaire.",
+      "reference_urls": [
+        "https://www.ladyschnaps.fr/pripyat-amusement-park/",
+        "https://www.arcanumurbex.de/photos/civilian-objects/pripyat-town-fair/",
+        "https://commons.wikimedia.org/wiki/Category:Prypiat_amusement_park"
+      ],
+      "location": null
+    },
+    {
+      "id": "bumper-cars",
+      "name": "Autos tamponneuses Автодром",
+      "section": "parc",
+      "priority": 1,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "1986",
+      "scene_status": "à intégrer",
+      "description": "Piste bétonnée et voitures électriques carénées.",
+      "reference_urls": [
+        "https://www.ladyschnaps.fr/pripyat-amusement-park/",
+        "https://www.arcanumurbex.de/photos/civilian-objects/pripyat-town-fair/",
+        "https://commons.wikimedia.org/wiki/Category:Prypiat_amusement_park"
+      ],
+      "location": null
+    },
+    {
+      "id": "paratrooper",
+      "name": "Manège parachutiste Ромашка",
+      "section": "parc",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "1986",
+      "scene_status": "à intégrer",
+      "description": "Structure mécanique du manège parachutiste.",
+      "reference_urls": [
+        "https://www.ladyschnaps.fr/pripyat-amusement-park/",
+        "https://www.arcanumurbex.de/photos/civilian-objects/pripyat-town-fair/",
+        "https://www.obsidianurbexphotography.com/leisure/pripyat-amusement-park/"
+      ],
+      "location": null
+    },
+    {
+      "id": "swing-boats",
+      "name": "Bateaux à balançoires Русские качели",
+      "section": "parc",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "1986",
+      "scene_status": "à intégrer",
+      "description": "Navettes suspendues et armatures de balançoires.",
+      "reference_urls": [
+        "https://www.ladyschnaps.fr/pripyat-amusement-park/",
+        "https://www.arcanumurbex.de/photos/civilian-objects/pripyat-town-fair/",
+        "https://www.obsidianurbexphotography.com/leisure/pripyat-amusement-park/"
+      ],
+      "location": null
+    },
+    {
+      "id": "shooting-stand",
+      "name": "Stand de tir forain",
+      "section": "parc",
+      "priority": 3,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "1986",
+      "scene_status": "à intégrer",
+      "description": "Stand de jeux de tir ; dimensions spécifiques à reconstituer.",
+      "reference_urls": [
+        "https://www.ladyschnaps.fr/pripyat-amusement-park/",
+        "https://www.arcanumurbex.de/photos/civilian-objects/pripyat-town-fair/"
+      ],
+      "location": null
+    },
+    {
+      "id": "azure-pool",
+      "name": "Piscine Lazurny / Azure",
+      "section": "sports",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Piscine couverte avec bassin, plongeoirs et grandes ouvertures.",
+      "reference_urls": [
+        "https://www.chernobylgallery.com/galleries/",
+        "https://www.chernobyl.one/locations/",
+        "https://www.chernobylgallery.com/galleries/swimming-pool-azure/"
+      ],
+      "location": null
+    },
+    {
+      "id": "avanhard",
+      "name": "Stade Avanhard",
+      "section": "sports",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Stade et tribunes ; ne pas représenter comme stade ayant accueilli des matchs officiels en 1986.",
+      "reference_urls": [
+        "https://commons.wikimedia.org/wiki/Category:Avanhard_Stadium,_Prypiat",
+        "https://photo.unian.ua/photo/770020-napivzruynovaniy-stadion-u-prip-yati"
+      ],
+      "location": null
+    },
+    {
+      "id": "school-1",
+      "name": "École secondaire n° 1",
+      "section": "education",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Établissement scolaire photographié.",
+      "reference_urls": [
+        "https://www.andrewmarcus.me/travel/pripyat-oct-2013"
+      ],
+      "location": null
+    },
+    {
+      "id": "school-2",
+      "name": "École secondaire n° 2",
+      "section": "education",
+      "priority": 3,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Établissement scolaire attesté par photographies et cartographies.",
+      "reference_urls": [
+        "https://commons.wikimedia.org/wiki/Category:Schools_in_Prypiat",
+        "https://gizmodo.com/photos-of-everyday-life-in-pripyat-before-the-chernobyl-1618107860"
+      ],
+      "location": null
+    },
+    {
+      "id": "school-3",
+      "name": "École secondaire n° 3",
+      "section": "education",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "École près de la piscine Azure ; salles, corridors et vitrages.",
+      "reference_urls": [
+        "https://www.chernobylgallery.com/galleries/",
+        "https://www.chernobylgallery.com/galleries/middle-school-number-3/"
+      ],
+      "location": null
+    },
+    {
+      "id": "school-5",
+      "name": "École secondaire n° 5",
+      "section": "education",
+      "priority": 3,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "École n° 5 dont le bâtiment est documenté par photographie.",
+      "reference_urls": [
+        "https://commons.wikimedia.org/wiki/Category:Schools_in_Prypiat"
+      ],
+      "location": null
+    },
+    {
+      "id": "kindergarten-3",
+      "name": "Jardin d'enfants n° 3 Sonechko",
+      "section": "education",
+      "priority": 3,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Maternelle n° 3 avenue Lénine, signalée et photographiée.",
+      "reference_urls": [
+        "https://www.forgottenchernobyl.net/category/chernobyl-photos/schools-and-nurseries/kindergartens",
+        "https://commons.wikimedia.org/wiki/Category:Schools_in_Prypiat"
+      ],
+      "location": null
+    },
+    {
+      "id": "kindergarten-10",
+      "name": "Jardin d'enfants n° 10 Cheburashka",
+      "section": "education",
+      "priority": 3,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Bâtiment, mobilier, panneaux et dessins d'enfants documentés.",
+      "reference_urls": [
+        "https://www.forgottenchernobyl.net/category/chernobyl-photos/schools-and-nurseries/kindergartens",
+        "https://meanderingwild.com/kindergarten-10-chernobyl/",
+        "https://www.forgottenchernobyl.net/pripyat-cherbuarshka-nursery-childrens-drawings-08"
+      ],
+      "location": null
+    },
+    {
+      "id": "kindergarten-6",
+      "name": "Jardin d'enfants n° 6 Druzhba",
+      "section": "education",
+      "priority": 3,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Jardin d'enfants documenté près de l'avenue Lénine.",
+      "reference_urls": [
+        "https://www.forgottenchernobyl.net/category/chernobyl-photos/schools-and-nurseries/kindergartens"
+      ],
+      "location": null
+    },
+    {
+      "id": "vocational-8",
+      "name": "École professionnelle n° 8",
+      "section": "education",
+      "priority": 3,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Bâtiment d'enseignement technique documenté.",
+      "reference_urls": [
+        "https://commons.wikimedia.org/wiki/Category:Schools_in_Prypiat",
+        "https://www.chernobyl.one/locations/"
+      ],
+      "location": null
+    },
+    {
+      "id": "hospital-126",
+      "name": "Hôpital municipal MSCh-126",
+      "section": "sante",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Grand complexe médical et ses ailes annexes, avec inscription de toit.",
+      "reference_urls": [
+        "https://www.chernobyl.one/pripyat-city-hospital/",
+        "https://www.chernobylgallery.com/galleries/",
+        "https://www.chernobylgallery.com/galleries/pripyat-hospital/"
+      ],
+      "location": null
+    },
+    {
+      "id": "maternity-wing",
+      "name": "Maternité / service de pédiatrie",
+      "section": "sante",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Services médicaux en bâtiments du complexe hospitalier.",
+      "reference_urls": [
+        "https://www.chernobyl.one/pripyat-city-hospital/",
+        "https://www.chernobyl.one/locations/"
+      ],
+      "location": null
+    },
+    {
+      "id": "jupiter-factory",
+      "name": "Usine Jupiter",
+      "section": "industrie",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Grand site d'ateliers, bureaux et bâtiments industriels au bord de la ville.",
+      "reference_urls": [
+        "https://www.chernobylgallery.com/galleries/jupiter-factory/",
+        "https://www.chernobylgallery.com/galleries/",
+        "https://www.chernobylgallery.com/galleries/jupiter-factory/"
+      ],
+      "location": null
+    },
+    {
+      "id": "bus-station",
+      "name": "Gare routière de Pripyat",
+      "section": "transport",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Bâtiment voyageur et zone de dépose des autobus.",
+      "reference_urls": [
+        "https://www.chernobylgallery.com/galleries/",
+        "https://www.chernobyl.one/locations/",
+        "https://www.chernobyl.one/pripyat-bus-station/"
+      ],
+      "location": null
+    },
+    {
+      "id": "yaniv-station",
+      "name": "Gare ferroviaire de Yaniv",
+      "section": "transport",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "périphérie",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Gare et faisceau ferroviaire proches de Pripyat.",
+      "reference_urls": [
+        "https://www.chernobylgallery.com/galleries/"
+      ],
+      "location": null
+    },
+    {
+      "id": "river-pripyat",
+      "name": "Rivière Pripyat",
+      "section": "fluvial",
+      "priority": 1,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Cours d'eau régional bordant le secteur, lié au bras mort utilisé comme gare nautique.",
+      "reference_urls": [
+        "https://infoflotforum.ru/topic/36921-navigacija-na-reke-pripjat-do-avarii-na-chaas/",
+        "https://www.chernobylgallery.com/galleries/cafe-pripyat/"
+      ],
+      "location": null
+    },
+    {
+      "id": "old-river-arm",
+      "name": "Bras mort / plan d'eau du secteur de Pripyat",
+      "section": "fluvial",
+      "priority": 1,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Bassin aménagé relié à la rivière, où manœuvraient les bateaux rapides.",
+      "reference_urls": [
+        "https://infoflotforum.ru/topic/36921-navigacija-na-reke-pripjat-do-avarii-na-chaas/",
+        "https://www.chernobylgallery.com/galleries/cafe-pripyat/"
+      ],
+      "location": null
+    },
+    {
+      "id": "river-terminal",
+      "name": "Gare fluviale de Pripyat",
+      "section": "fluvial",
+      "priority": 1,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Terminal passagers, salle d'attente et accès à la rive ; distinguer du port de Tchernobyl.",
+      "reference_urls": [
+        "https://infoflotforum.ru/topic/36921-navigacija-na-reke-pripjat-do-avarii-na-chaas/",
+        "https://www.thepixelclub.com/2019/08/05/107-cafe-pripyat/",
+        "https://www.andrewmarcus.me/travel/pripyat-oct-2013"
+      ],
+      "location": null
+    },
+    {
+      "id": "passenger-pier",
+      "name": "Embarcadère et ponton flottant",
+      "section": "fluvial",
+      "priority": 1,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Quai, passerelle et ponton de départ pour Raketa, Meteor et Voskhod.",
+      "reference_urls": [
+        "https://infoflotforum.ru/topic/36921-navigacija-na-reke-pripjat-do-avarii-na-chaas/",
+        "https://www.chernobylgallery.com/galleries/cafe-pripyat/",
+        "https://www.thepixelclub.com/2019/08/05/107-cafe-pripyat/"
+      ],
+      "location": null
+    },
+    {
+      "id": "cafe-pripyat",
+      "name": "Café Pripyat / The Dish",
+      "section": "fluvial",
+      "priority": 1,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Architecture à terrasse arrondie, vitraux, galerie à piliers en V et escalier vers l'eau.",
+      "reference_urls": [
+        "https://www.chernobylgallery.com/galleries/cafe-pripyat/",
+        "https://www.thepixelclub.com/2019/08/05/107-cafe-pripyat/"
+      ],
+      "location": null
+    },
+    {
+      "id": "boating-station",
+      "name": "Station de bateaux / activité nautique",
+      "section": "fluvial",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Zone d'accueil de yachts et petites embarcations attestée par les photos d'archives.",
+      "reference_urls": [
+        "https://infoflotforum.ru/topic/36921-navigacija-na-reke-pripjat-do-avarii-na-chaas/",
+        "https://www.chernobylgallery.com/galleries/cafe-pripyat/"
+      ],
+      "location": null
+    },
+    {
+      "id": "hydrofoils",
+      "name": "Hydroptères Raketa, Meteor et Voskhod",
+      "section": "fluvial",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "Pripyat",
+      "historical_period": "avant 1986",
+      "scene_status": "à intégrer",
+      "description": "Transports passagers historiquement photographiés ; véhicules d'époque sans heure/ligne inventée.",
+      "reference_urls": [
+        "https://infoflotforum.ru/topic/36921-navigacija-na-reke-pripjat-do-avarii-na-chaas/"
+      ],
+      "location": null
+    },
+    {
+      "id": "forest-red-1986",
+      "name": "Forêt rouge — aiguilles roussies en 1986",
+      "section": "paysage",
+      "priority": 1,
+      "confirmed": true,
+      "geography": "hors ville — proche centrale",
+      "historical_period": "printemps-été 1986",
+      "scene_status": "à créer — biome historique distinct",
+      "description": "Zone de pins irradiés, aiguilles orange-roux, branches desséchées. Couche temporelle 1986 seulement ; limites exactes non reconstituées.",
+      "reference_urls": [
+        "https://www.ceh.ac.uk/our-science/projects/tree-red-fire-radioactive-environment-damaged-fire",
+        "https://www-pub.iaea.org/MTCD/Publications/PDF/te_1240_prn.pdf",
+        "https://komisc.ru/home/news/komisc-news-2/2641-radionuklidnaya-anomaliya-ob-uchastii-instituta-biologii-v-likvidatsii-posledstvij-avarii-na-chernobylskoj-aes"
+      ],
+      "location": null
+    },
+    {
+      "id": "plant-chnpp",
+      "name": "Centrale nucléaire de Tchernobyl",
+      "section": "peripherie",
+      "priority": 2,
+      "confirmed": true,
+      "geography": "hors ville",
+      "historical_period": "1986 et après",
+      "scene_status": "à intégrer à distance",
+      "description": "Repère industriel majeur voisin de la ville, hors Pripyat ; seulement pour horizon/périphérie.",
+      "reference_urls": [
+        "https://www-pub.iaea.org/MTCD/Publications/PDF/te_1240_prn.pdf",
+        "https://www.ceh.ac.uk/our-science/projects/tree-red-fire-radioactive-environment-damaged-fire"
+      ],
+      "location": null
+    }
+  ],
+  "notes": [
+    "Une existence confirmée ne valide pas l'emplacement au mètre.",
+    "La colonnade est attestée, mais non ses raccordements historiques exacts.",
+    "Forêt rouge en 1986 exigée, même si le reste de la scène montre des bâtiments postérieurs."
+  ]
+}

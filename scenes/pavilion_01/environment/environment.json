@@ -1,0 +1,17 @@
+{
+  "schema_version": "0.2.0",
+  "bounds": {
+    "size": [
+      18,
+      12,
+      7
+    ]
+  },
+  "coordinate_system": {
+    "handedness": "right",
+    "up": "Z",
+    "forward": "Y",
+    "origin": "ground_floor_center"
+  },
+  "units": "meters"
+}

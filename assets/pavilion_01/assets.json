@@ -1,0 +1,123 @@
+{
+  "schema_version": "0.1.0",
+  "status": "catalog_only_no_binary_assets",
+  "default_texture_resolution": [
+    2048,
+    2048
+  ],
+  "asset_definitions": [
+    {
+      "id": "building_shell",
+      "kind": "mesh",
+      "source": "objects/building_shell.glb",
+      "materials": [
+        "concrete_light",
+        "glass_clear",
+        "wood_warm",
+        "metal_dark",
+        "plaster_white"
+      ]
+    },
+    {
+      "id": "tree_poplar",
+      "kind": "mesh",
+      "source": "objects/tree_poplar.glb",
+      "materials": [
+        "foliage",
+        "wood_warm"
+      ],
+      "lod_sources": [
+        "objects/tree_poplar_lod1.glb"
+      ]
+    }
+  ],
+  "materials": [
+    {
+      "id": "concrete_light",
+      "metallic": 0,
+      "roughness": 0.85,
+      "base_color": [
+        0.73,
+        0.72,
+        0.68,
+        1
+      ]
+    },
+    {
+      "id": "glass_clear",
+      "metallic": 0,
+      "roughness": 0.06,
+      "base_color": [
+        0.94,
+        0.97,
+        1,
+        0.12
+      ],
+      "alpha_mode": "BLEND",
+      "double_sided": false
+    },
+    {
+      "id": "wood_warm",
+      "metallic": 0,
+      "roughness": 0.55,
+      "base_color": [
+        0.46,
+        0.28,
+        0.14,
+        1
+      ]
+    },
+    {
+      "id": "metal_dark",
+      "metallic": 0.8,
+      "roughness": 0.34,
+      "base_color": [
+        0.12,
+        0.13,
+        0.14,
+        1
+      ]
+    },
+    {
+      "id": "plaster_white",
+      "metallic": 0,
+      "roughness": 0.88,
+      "base_color": [
+        0.9,
+        0.88,
+        0.83,
+        1
+      ]
+    },
+    {
+      "id": "foliage",
+      "metallic": 0,
+      "roughness": 0.82,
+      "base_color": [
+        0.18,
+        0.34,
+        0.12,
+        1
+      ]
+    }
+  ],
+  "texture_policy": {
+    "source_format": "PNG_or_EXR",
+    "mipmaps": "generated_cache_not_source_of_truth",
+    "normal_space": "tangent",
+    "color_channels_srgb": [
+      "baseColor",
+      "emissive"
+    ],
+    "color_channels_linear": [
+      "normal",
+      "metallic",
+      "roughness",
+      "occlusion"
+    ]
+  },
+  "notes": [
+    "Catalog paths are planned; no mesh or texture binaries are included.",
+    "Water and emissive materials will be added with corresponding geometry."
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "schema_version": "0.2.0",
+  "environment": {
+    "active_preset": "day",
+    "presets": {
+      "day": {
+        "sun_intensity_lux": 75000,
+        "exposure_ev100": 14
+      },
+      "sunset": {
+        "sun_intensity_lux": 12000,
+        "exposure_ev100": 11
+      },
+      "night": {
+        "sun_intensity_lux": 0,
+        "exposure_ev100": 6
+      }
+    }
+  }
+}

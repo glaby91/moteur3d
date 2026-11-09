@@ -26,14 +26,14 @@ assert.equal(api.validate(),true);
 assert.equal(api.validateFootprints(),true,'urban buildings must not overlap');
 assert.throws(()=>api.validateFootprints({
  energetik:api.footprints.energetik,polissya:api.footprints.polissya,
- housing:[{id:'invalid',x0:45,x1:50,z0:-30,z1:-25}]
+ housing:[{id:'invalid',x0:86,x1:90,z0:3,z1:8}]
 }),/overlapping footprints/,'reject geometrically impossible apartment/hotel overlap');
 assert.equal(api.arch.envelope.x1-api.arch.envelope.x0,81);
 assert.ok(Math.abs(api.arch.envelope.z1-api.arch.envelope.z0-24.6)<1e-8);
 
 function geometry(builder){
   const boxes=[];
-  builder({box:(...v)=>boxes.push(v),capsule:()=>{}});
+  builder({box:(...v)=>boxes.push(v),capsule:()=>{},meshTriangle:()=>{}});
   assert.ok(boxes.length>0,'geometry generator emitted nothing');
   for(const v of boxes){
     assert.equal(v.length,7);
@@ -70,7 +70,10 @@ assert.equal(hits(shell,0,10.4,-31).length,0,'former solid rooftop occluder retu
 
 const connector=geometry(api.connector);
 assert.equal(hits(connector,35,2.0,-21).length,0,'arch pedestrian way blocked');
-assert.ok(hits(connector,35,5.1,-21).length>0,'arch superstructure missing');
+assert.equal(hits(connector,35,5.1,-21).length,0,'old solid hotel-palace arch must not return');
+assert.ok(connector.length>=30,'curved colonnade concrete pillars missing');
+assert.ok(connector.every(b=>b[0]>api.arch.envelope.x1+1),
+ 'colonnade may not touch Energetik facade');
 
 const foyerStair=geometry(api.foyerStair);
 assert.equal(foyerStair.filter(v=>v[6]==='stone').length,18,'17 broad foyer steps plus landing required');
@@ -89,10 +92,11 @@ for(const y of [l.firstSlab+l.slabThickness,l.secondSlab+l.slabThickness,l.roof]
 }
 
 const hotel=geometry(api.polissya);
-assert.equal(hits(hotel,51.5,2.1,-32).length,0,'Polissya core must be hollow');
-assert.equal(hits(hotel,40.25,2.2,-23).length,0,'Polissya western entry blocked');
-assert.equal(hits(hotel,52,2.4,-20.30).length,0,'Polissya front window is an opaque wall');
-assert.ok(hotel.some(v=>v[6]==='rust' && v[4]>15.9),'rusty hotel rooftop sign missing');
+assert.equal(hits(hotel,93,2.1,7).length,0,'Polissya rotated core must be hollow');
+assert.equal(hits(hotel,85,2.2,-11.75).length,0,'Polissya rotated western entry blocked');
+assert.equal(hits(hotel,82.30,2.4,0).length,0,'Polissya rotated front window is an opaque wall');
+assert.ok(hotel.some(v=>v[6]==='metal' && v[4]>15.9),
+ '1986 metal hotel rooftop sign missing (rust belongs to abandoned mode)');
 assert.ok(hotel.some(v=>v[6]==='stone' && v[4]>18.5),'hotel roof terrace missing');
 console.log('Energetik/Polissya generator geometry probes passed:',{
   slabs:slabs.length, arcade:arcade.length, rear:rear.length, shell:shell.length,
@@ -102,7 +106,12 @@ console.log('Energetik/Polissya generator geometry probes passed:',{
 
 
 const presets=JSON.parse(readFileSync(new URL('../2026-10-30-cote-ete-gt/native_v14/scene_pripyat_views.json',import.meta.url),'utf8')).views;
-assert.equal(presets.length,11,'all eleven architectural inspection views required');
+assert.equal(presets.length,18,'all 14 original architectural views and 4 archival camera studies required');
+assert.ok(presets[13].name.includes('arrière'),'rear hotel inspection view missing');
+const qtController=readFileSync(new URL('../2026-10-30-cote-ete-gt/native_v14/src/moteur3d_qt.cpp',import.meta.url),'utf8');
+assert.ok(qtController.includes('sceneViewPresets_.size()>=18'),'Qt must expose all eighteen camera presets');
+assert.ok(qtController.includes('view > 18'),'Non-GUI CPU snapshot must permit all archival cameras');
+assert.ok(presets[11].name.includes('Polissya') && presets[12].name.includes('Colonnade'),'hotel review views missing');
 function eye(p){
   const a=p.angle*Math.PI/180, e=p.elevation*Math.PI/180;
   return [p.target[0]+p.distance*Math.sin(a)*Math.cos(e),

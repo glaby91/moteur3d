@@ -1,0 +1,31 @@
+{
+  "schema_version": "0.2.0",
+  "lights": [
+    {
+      "id": "sun",
+      "type": "directional",
+      "direction": [
+        0.4,
+        0.6,
+        -0.7
+      ],
+      "color": [
+        1,
+        0.95,
+        0.86
+      ],
+      "preset_controlled": true
+    },
+    {
+      "id": "hall_light",
+      "type": "point",
+      "translation": [
+        0,
+        0,
+        4.8
+      ],
+      "intensity_lumens": 1800,
+      "color_temperature_kelvin": 3000
+    }
+  ]
+}

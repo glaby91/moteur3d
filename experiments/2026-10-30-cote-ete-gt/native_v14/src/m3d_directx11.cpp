@@ -307,7 +307,7 @@ public:
             if(name=="lamp")strength=.45f+1.05f*lampFactor;
             else if(name=="led")strength=1.35f*lampFactor;
             else if(name=="taillight")strength=1.05f*lampFactor;
-            else if(name=="neon")strength=1.1f;
+            else if(name=="neon"||name=="neonRed")strength=1.1f;
             else if(name=="windowlit")strength=.88f;
             if(name=="lamp"){emissionR=1.f;emissionG=166.f/255.f;emissionB=91.f/255.f;emissionStrength=.75f+1.9f*lampFactor;}
             else if(name=="led"){emissionR=1.f;emissionG=217.f/255.f;emissionB=165.f/255.f;emissionStrength=.48f+.85f*lampFactor;}

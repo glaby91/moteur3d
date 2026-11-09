@@ -689,7 +689,7 @@ private:
         }
         const QJsonArray views=doc.object().value(QStringLiteral("views")).toArray();
         for(const QJsonValue& value:views) {
-            if(sceneViewPresets_.size()>=11 || !value.isObject()) break;
+            if(sceneViewPresets_.size()>=18 || !value.isObject()) break;
             const QJsonObject o=value.toObject();
             const QJsonArray target=o.value(QStringLiteral("target")).toArray();
             if(target.size()!=3) continue;
@@ -707,7 +707,7 @@ private:
         }
         sceneViewSelector_->setEnabled(!sceneViewPresets_.empty());
         sceneViewSelector_->setCurrentIndex(-1);
-        sceneViewSelector_->setToolTip(QStringLiteral("Onze vues documentées dans scene_pripyat_views.json, dont grande roue."));
+        sceneViewSelector_->setToolTip(QStringLiteral("Dix-huit vues de travail, dont quatre caméras historiques non recalées."));
     }
 
     void applySceneViewPreset(int index) {
@@ -1321,7 +1321,7 @@ private:
         settings_.directX11 = renderer_->currentIndex() == 2 && !settings_.offlinePathTrace;
         settings_.compute11 = renderer_->currentIndex() == 3 && !settings_.offlinePathTrace;
         if (rendererStatus_ && qi == 7) rendererStatus_->setText(QStringLiteral("CPU hors-ligne PBR/HDR — 64 spp, 3 rebonds et débruitage."));
-        else if (rendererStatus_ && settings_.compute11) rendererStatus_->setText(QStringLiteral("GPU Compute D3D11 : rayons BVH sur GPU, matériaux simplifiés; repli CPU si échec. DXR non requis."));
+        else if (rendererStatus_ && settings_.compute11) rendererStatus_->setText(QStringLiteral("GPU Compute D3D11 : ray tracing BVH, atlas PBR et ciel. GPU sans DXR, repli CPU si échec."));
         if (navigationPreviewTimer_) navigationPreviewTimer_->setInterval(settings_.directX11 ? 50 : 350);
         threads_->setEnabled(!(settings_.directX11 || settings_.compute11));
         simdMode_->setEnabled(!(settings_.directX11 || settings_.compute11));
@@ -1507,7 +1507,7 @@ private:
             sceneLock.unlock();
             QString diag;
             if (st.gpu && cfg.compute11) {
-                diag = QStringLiteral("GPU Compute D3D11 — ray tracing expérimental | calcul %1 ms | total %2 ms\nAlbédo moyen et éclairage simplifié; UV/PBR et réflexions complètes non implémentés.").arg(st.ms-st.postMs,0,'f',1).arg(st.ms,0,'f',1);
+                diag = QStringLiteral("GPU Compute D3D11 — ray tracing expérimental | calcul %1 ms | total %2 ms\nAlbédo, normales et rugosité échantillonnés sur GPU; ombres, GI et réfraction en développement.").arg(st.ms-st.postMs,0,'f',1).arg(st.ms,0,'f',1);
             } else if (st.gpu) {
                 diag = QStringLiteral("GPU DirectX 11 — aperçu raster | rendu %1 ms | post %2 ms | total %3 ms\nGéométrie rasterisée : %4 triangles\nCarte d’ombres CPU réutilisée; DOF, réflexions et réfraction restent simplifiées.")
                     .arg(st.ms - st.postMs, 0, 'f', 1).arg(st.postMs, 0, 'f', 1).arg(st.ms, 0, 'f', 1).arg(qulonglong(st.tests));
@@ -1556,14 +1556,58 @@ int main(int argc, char** argv) {
         std::wcerr << L"Erreur de validation HLSL : " << error << std::endl;
         return 12;
     }
+    // Execute the real D3D11 compute shader on a tiny synthetic BVH.
+    // WARP is selected only when M3D_COMPUTE_WARP=1 (Windows CI).
+    if (argc >= 2 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--smoke-compute-hlsl")) {
+        QCoreApplication app(argc,argv);
+        m3d::Scene minimal;
+        m3d::Obj box{};
+        box.kind=m3d::Kind::Box;
+        box.mat=0;
+        box.mn={-1.f,-.95f,-4.f};box.mx={1.f,.95f,-2.f};
+        minimal.obj.push_back(box);
+        m3d::Node leaf{};
+        leaf.mn=box.mn;leaf.mx=box.mx;leaf.start=0;leaf.count=1;
+        minimal.node.push_back(leaf);
+        minimal.order.push_back(0);minimal.root=0;
+        m3d::Material mat{};
+        mat.name="concrete";
+        m3d::ColorLevel albedo{};
+        albedo.size=512;
+        albedo.p.assign(512u*512u,0x00a3b27du);
+        mat.colorMip.push_back(std::move(albedo));
+        minimal.mat.push_back(std::move(mat));
+        m3d::updateLighting(12.f);
+        m3d::Camera cam=m3d::camera(0.f,0.f,5.f,128,72,{0.f,0.f,-3.f});
+        std::vector<uint32_t> pixels;
+        m3d::Stats stats{};
+        std::wstring error;
+        if(!m3d::renderCompute11Preview(minimal,cam,128,72,pixels,stats,error)) {
+            std::wcerr << L"Compute execution smoke FAILED: "<<error<<std::endl;
+            return 14;
+        }
+        if(pixels.size()!=128u*72u || !stats.gpu ||
+           pixels[36u*128u+64u]==pixels[0] ||
+           pixels[36u*128u+64u]==0xffff00ffu) {
+            std::cerr << "Compute execution smoke produced incorrect framebuffer" << std::endl;
+            return 15;
+        }
+        if(argc>=3) {
+            QImage image(reinterpret_cast<const uchar*>(pixels.data()),128,72,
+                         128*int(sizeof(uint32_t)),QImage::Format_ARGB32);
+            if(!image.copy().save(QString::fromLocal8Bit(argv[2]),"PNG"))return 16;
+        }
+        std::cout << "D3D11 compute BVH + PBR textures + 8bit readback: OK (" << stats.ms << " ms)" << std::endl;
+        return 0;
+    }
     // Non-GUI CPU snapshots for reproducible GitHub Actions geometry inspection.
-    // Usage: moteur3d_qt.exe --snapshot <view 1..11> <output.png>
+    // Usage: moteur3d_qt.exe --snapshot <view 1..18> <output.png>
     if (argc >= 4 && QString::fromLocal8Bit(argv[1]) == QStringLiteral("--snapshot")) {
         QCoreApplication app(argc, argv);
         bool ok = false;
         const int view = QString::fromLocal8Bit(argv[2]).toInt(&ok);
         QFile file(QCoreApplication::applicationDirPath()+QStringLiteral("/scene_pripyat_views.json"));
-        if (!ok || view < 1 || view > 11 || !file.open(QIODevice::ReadOnly)) return 2;
+        if (!ok || view < 1 || view > 18 || !file.open(QIODevice::ReadOnly)) return 2;
         QJsonParseError parseError{};
         const QJsonDocument doc=QJsonDocument::fromJson(file.readAll(),&parseError);
         if(parseError.error!=QJsonParseError::NoError || !doc.isObject()) return 3;

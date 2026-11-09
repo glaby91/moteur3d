@@ -1,0 +1,24 @@
+{
+  "schema_version": "0.2.0",
+  "objects": [
+    {
+      "id": "building_shell_01",
+      "asset": "building_shell",
+      "translation": [
+        0,
+        0,
+        0
+      ],
+      "rotation_euler_deg": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 # Vues de repère — Palais Energetik
 
-Ce document est l’annexe de caméra de `scene_pripyat_central.js`. Les valeurs lisibles par l’interface se trouvent dans [`scene_pripyat_views.json`](../../experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_views.json) et sont livrées près de l’exécutable et du binaire de scène. L’interface en charge au plus dix.
+Ce document est l’annexe de caméra de `scene_pripyat_central.js`. Les valeurs lisibles par l’interface se trouvent dans [`scene_pripyat_views.json`](../../experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_views.json) et sont livrées près de l’exécutable et du binaire de scène. L’interface charge désormais treize vues documentées. Les vues 12 et 13 contrôlent l’hôtel Polissya et la colonnade courbe, sans raccorder cet ouvrage aux bâtiments.
 
 Les coordonnées sont en mètres. `target` désigne le point visé par la caméra; `distance` est son recul; `angle` et `elevation` sont en degrés. `hour_step` règle l’heure selon `06:00 + 30 minutes × hour_step`.
 
@@ -20,3 +20,9 @@ Les coordonnées sont en mètres. `target` désigne le point visé par la camér
 Les noms de pièces servent de repères de visite. Les photos et le plan transmis restent les sources pour confirmer la fonction et la disposition exacte des locaux.
 
 La vue 2 place la caméra côté intérieur, du côté peint (−X), devant le panneau. Elle vise son centre à X = 8,12 m, Y = 4,15 m, Z = −36,80 m ; le retour en béton se trouve derrière la fresque.
+
+## Vues complémentaires Polissya (novembre 2026)
+- **12** — hôtel et façade vue depuis la place, à travers la colonnade indépendante.
+- **13** — implantation et courbure de la galerie en vue oblique surplombante.
+
+Les paramètres des deux nouvelles vues sont provisoires et destinés au contrôle architectural visuel.
