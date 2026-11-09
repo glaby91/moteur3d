@@ -75,3 +75,18 @@ La géométrie obtenue reste éditable et portable dans toutes les scènes du mo
 ## Critères d'acceptation
 
 Les paramètres historiques sont identifiables par leurs sources. Les mesures ont une erreur de reprojection, les hypothèses sont explicites, et aucune distance d'un objet hors d'un plan connu ne peut être inventée. Une reconstruction seulement plausible visuellement n'est PAS une reconstruction mesurée.
+
+## Essai Energetik sur deux photographies réelles (9 novembre 2026)
+
+- **Photo A :** 516 x 387 px, vue oblique et retour latéral ; estimation de focale/FOV seulement conditionnelle (FOV horizontal ~63,61 degrés) avec orthogonalité des deux façades, distorsion négligée et point principal centré.
+- **Photo B :** 1024 x 680 px, vue plus frontale. Un relevé OpenCV LSD a détecté 2 497 segments ; 13 lignes candidates de toiture, 14 de bandeau supérieur, 12 de balcon et 18 montants verticaux. Un **sous-ensemble** de segments non interprétés en 3D est stocké dans `data/pripyat/energetik-20261109-second-view-sample.json`.
+- Le calcul `facade_linefit.py` ajuste indépendamment les trois niveaux, puis teste s'ils convergent vers un point de fuite commun : le critère échoue sur cette photo. Sorties volontairement **FOV=null** et **distance3D=null**. Un VP vertical loin hors champ ne suffit pas à rendre cette calibration identifiable.
+- Un premier SIFT + RANSAC entre les deux originaux donne des associations de piliers visuellement **fausses** malgré des candidats géométriques. Aucune correspondance 2D-2D n'est validée. Ne pas exécuter de triangulation ou annoncer une position de caméra sur ces appariements.
+- Prochaine étape : repères **uniques** (jonction particulière de volumes, angles, lettres distinctives de l'enseigne ou intersections spécifiques), vérification manuelle des identifiants 1:1, rectification du plan principal et résidu sur points indépendants, puis seulement la reconstruction multi-vue.
+- Les photographies et les versions nettoyées par IA ne sont pas ajoutées au dépôt. Leurs empreintes SHA-256 et les coordonnées de segments permettent d'associer les annotations aux originaux sans substituer une image inventée à la géométrie.
+
+Commande reproductible :
+
+    python tools/photo2scene/facade_linefit.py tools/photo2scene/data/pripyat/energetik-20261109-second-view-sample.json -o energetik-second-linefit.json
+
+Cette étape confirme notre règle : un algorithme qui refuse de conclure est préférable à une mesure fictive.
