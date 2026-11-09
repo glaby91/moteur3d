@@ -1,0 +1,61 @@
+{
+  "format": "m3d-instances-v1",
+  "instances": [
+    {
+      "geometry": "ground",
+      "position": [
+        0,
+        -0.3,
+        0
+      ]
+    },
+    {
+      "geometry": "slab",
+      "position": [
+        0,
+        0,
+        0
+      ]
+    },
+    {
+      "geometry": "ground-floor",
+      "position": [
+        0,
+        1.7,
+        0
+      ]
+    },
+    {
+      "geometry": "upper-floor",
+      "position": [
+        1,
+        4.8,
+        0
+      ]
+    },
+    {
+      "geometry": "roof",
+      "position": [
+        1,
+        6.5,
+        0
+      ]
+    },
+    {
+      "geometry": "terrace",
+      "position": [
+        0,
+        0,
+        8
+      ]
+    },
+    {
+      "geometry": "pool",
+      "position": [
+        0,
+        -0.1,
+        12
+      ]
+    }
+  ]
+}
