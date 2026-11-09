@@ -77,7 +77,7 @@ public:
         createUi();
         connect(&watcher_,&QFutureWatcher<Result>::finished,this,[this]{
             const auto outcome=watcher_.result();
-            if(!outcome.image.isNull())canvas_->setImage(outcome.image);
+            if(!outcome.image.isNull()){lastImage_=outcome.image;canvas_->setImage(outcome.image);}
             statusBar()->showMessage(outcome.error.isEmpty()
                 ?QStringLiteral("%1 — %2 ms").arg(outcome.renderer).arg(outcome.milliseconds,0,'f',1)
                 :outcome.error,15000);
