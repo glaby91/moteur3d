@@ -28,6 +28,7 @@
 #include <QImage>
 #include <QLabel>
 #include <QMainWindow>
+#include <QMetaObject>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPainter>
@@ -97,7 +98,7 @@ public:
         });
         if(!scenePath.isEmpty())openScene(scenePath);
     }
-    ~V16Window() override {watcher_.waitForFinished();}
+    ~V16Window() override {renderSerial_->fetch_add(1);watcher_.waitForFinished();}
 private:
     ImageView* canvas_=nullptr;
     QTreeWidget* sceneTree_=nullptr;
@@ -106,12 +107,16 @@ private:
     QVector<QAction*> quickCameraActions_;
     QComboBox* backendBox_=nullptr;
     QComboBox* qualityBox_=nullptr;
+    QComboBox* giSamples_=nullptr;
+    QCheckBox* progressiveGi_=nullptr;
+    QCheckBox* denoiseGi_=nullptr;
     QCheckBox* edgeAa_=nullptr;
     QSlider* azimuth_=nullptr;
     QDoubleSpinBox* roughness_=nullptr;
     QDoubleSpinBox* metallic_=nullptr;
     QLabel* materialLabel_=nullptr;
     QFutureWatcher<Result> watcher_;
+    std::shared_ptr<std::atomic<uint64_t>> renderSerial_=std::make_shared<std::atomic<uint64_t>>(0);
     std::shared_ptr<v16::Runtime> runtime_;
     // The sun and scene geometry do not change when navigating cameras.
     // Reuse an identical shadow map across CPU renders of the same runtime.
@@ -209,8 +214,8 @@ private:
         backendBox_->addItems({
             QStringLiteral("CPU Ray Tracing PBR — direct"),
             QStringLiteral("GPU D3D11 Compute — rapide, ombres + verre"),
-            QStringLiteral("CPU Éclairage global — 2 rebonds, 4 échantillons"),
-            QStringLiteral("CPU Éclairage global — 4 rebonds, 16 échantillons")
+            QStringLiteral("CPU Éclairage global — 2 rebonds (qualité réglable)"),
+            QStringLiteral("CPU Éclairage global — 4 rebonds (qualité réglable)")
         });
 #ifndef _WIN32
         backendBox_->setItemData(1,0,Qt::UserRole-1);
@@ -218,14 +223,28 @@ private:
         qualityBox_=new QComboBox;
         qualityBox_->addItems({QStringLiteral("Full HD 1920 × 1080"),QStringLiteral("Full HD qualité 1920 × 1080 (CPU 4 échantillons)"),QStringLiteral("4K UHD 3840 × 2160")});
         qualityBox_->setCurrentIndex(0);
+        giSamples_=new QComboBox;
+        for(int n:{4,8,16,32,64})
+            giSamples_->addItem(QStringLiteral("%1 échantillons / pixel").arg(n),n);
+        giSamples_->setCurrentIndex(2); // Native Full HD quality baseline: 16 spp.
+        giSamples_->setEnabled(false);
+        progressiveGi_=new QCheckBox(QStringLiteral("GI progressive (afficher les passes)"));
+        progressiveGi_->setChecked(true);
+        progressiveGi_->setEnabled(false);
+        denoiseGi_=new QCheckBox(QStringLiteral("Débruitage GI bilatéral (optionnel)"));
+        denoiseGi_->setChecked(true);
+        denoiseGi_->setEnabled(false);
         azimuth_=new QSlider(Qt::Horizontal);
         azimuth_->setRange(-180,180);
         azimuth_->setValue(0);
         form->addRow(QStringLiteral("Caméra"),cameraBox_);
         form->addRow(QStringLiteral("Méthode de rendu"),backendBox_);
         form->addRow(QStringLiteral("Résolution"),qualityBox_);
+        form->addRow(QStringLiteral("Échantillons GI"),giSamples_);
         form->addRow(QStringLiteral("Rotation caméra"),azimuth_);
         vertical->addLayout(form);
+        vertical->addWidget(progressiveGi_);
+        vertical->addWidget(denoiseGi_);
         edgeAa_=new QCheckBox(QStringLiteral("Antialiasing des contours"));
         edgeAa_->setChecked(true);
         vertical->addWidget(edgeAa_);
@@ -250,8 +269,17 @@ private:
 
         connect(renderButton,&QPushButton::clicked,this,[this]{requestRender();});
         connect(cameraBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){azimuth_->setValue(0);requestRender();});
-        connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){requestRender();});
+        connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int index){
+            const bool gi=index>=2;
+            giSamples_->setEnabled(gi);
+            progressiveGi_->setEnabled(gi);
+            denoiseGi_->setEnabled(gi);
+            requestRender();
+        });
         connect(qualityBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){requestRender();});
+        connect(giSamples_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){if(backendBox_->currentIndex()>=2)requestRender();});
+        connect(progressiveGi_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()>=2)requestRender();});
+        connect(denoiseGi_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()>=2)requestRender();});
         connect(edgeAa_,&QCheckBox::toggled,this,[this](bool){requestRender();});
         connect(azimuth_,&QSlider::sliderReleased,this,[this]{requestRender();});
         connect(roughness_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double){modifyMaterial();});
@@ -278,6 +306,7 @@ private:
     void modifyMaterial(){
         if(updatingControls_||!runtime_||selectedMaterial_<0)return;
         // Only mutate scene resources once the previous render no longer reads them.
+        renderSerial_->fetch_add(1);
         if(watcher_.isRunning())watcher_.waitForFinished();
         auto& m=runtime_->renderScene.mat[size_t(selectedMaterial_)];
         m.roughnessScale=float(roughness_->value());
@@ -318,6 +347,7 @@ private:
         statusBar()->showMessage(QStringLiteral("Matériaux enregistrés dans %1").arg(materialsPath_),15000);
     }
     void openScene(const QString& path){
+        renderSerial_->fetch_add(1);
         if(watcher_.isRunning())watcher_.waitForFinished();
         auto loaded=v16::loadScene(path);
         if(!loaded){QMessageBox::critical(this,"Fichier scene.json invalide",loaded.error);return;}
@@ -401,6 +431,8 @@ private:
     }
     void requestRender(){
         if(!runtime_||runtime_->cameras.isEmpty())return;
+        const auto serial=renderSerial_;
+        const uint64_t token=serial->fetch_add(1)+1;
         if(watcher_.isRunning()){pending_=true;return;}
         auto snapshot=runtime_;
         const int presetId=std::clamp(cameraBox_->currentIndex(),0,int(snapshot->cameras.size())-1);
@@ -416,12 +448,16 @@ private:
         const bool wantGpu=backend==1;
         const bool globalIllumination=backend>=2;
         const bool edgeAA=edgeAa_->isChecked();
-        const unsigned sampleCount=globalIllumination?(backend==2?4u:16u):
-                                   (qualityBox_->currentIndex()==1?4u:1u);
+        const unsigned sampleCount=globalIllumination?
+            unsigned(giSamples_->currentData().toInt()):
+            (qualityBox_->currentIndex()==1?4u:1u);
         const unsigned maxBounces=backend==2?2u:4u;
+        const bool progressive=globalIllumination&&progressiveGi_->isChecked();
+        const bool denoise=globalIllumination&&denoiseGi_->isChecked();
         statusBar()->showMessage(QStringLiteral("Calcul de l'image…"));
         const auto shadowCache=cpuShadows_;
-        watcher_.setFuture(QtConcurrent::run([snapshot,preset,w,h,wantGpu,globalIllumination,edgeAA,sampleCount,maxBounces,shadowCache]{
+        watcher_.setFuture(QtConcurrent::run([this,serial,token,snapshot,preset,w,h,wantGpu,
+            globalIllumination,edgeAA,sampleCount,maxBounces,progressive,denoise,shadowCache]{
             Result result;
             updateLighting(snapshot->daylightHour);
             const auto camera=v16::makeCamera(preset,w,h);
@@ -453,14 +489,55 @@ private:
                         shadowCache->shadow=shadow;
                     }
                 }
+                const unsigned workers=std::max(1u,std::min(8u,std::thread::hardware_concurrency()));
+                if(globalIllumination){
+                    std::vector<V> hdrAccum;
+                    unsigned completed=0;
+                    double totalMs=0;
+                    while(completed<sampleCount){
+                        if(serial->load()!=token)return result;
+                        const unsigned batch=progressive?
+                            std::min(std::max(1u,completed),sampleCount-completed):
+                            sampleCount-completed;
+                        const auto pass=renderGiAccumulatePass(
+                            snapshot->renderScene,*shadow,camera,w,h,hdrAccum,pixels,
+                            completed,batch,workers,*serial,token,maxBounces);
+                        if(serial->load()!=token)return result;
+                        completed+=batch;
+                        totalMs+=pass.ms;
+                        std::vector<uint32_t> display=pixels;
+                        // Filtering is separate from HDR accumulation, so the
+                        // next batch never feeds on blurred/tonemapped pixels.
+                        if(denoise&&completed>=4)
+                            display=denoiseBilateral(display,w,h,workers);
+                        if(edgeAA)display=antialiasEdges4(display,w,h,4,false);
+                        QImage image(w,h,QImage::Format_ARGB32);
+                        for(int y=0;y<h;++y)
+                            std::memcpy(image.scanLine(y),display.data()+size_t(y)*w,size_t(w)*4);
+                        if(progressive&&completed<sampleCount){
+                            QMetaObject::invokeMethod(this,
+                                [this,serial,token,count=completed,target=sampleCount,image=std::move(image)]() mutable {
+                                    if(serial->load()!=token)return;
+                                    lastImage_=std::move(image);
+                                    canvas_->setImage(lastImage_);
+                                    statusBar()->showMessage(
+                                        QStringLiteral("GI progressive — %1 / %2 échantillons Full HD")
+                                            .arg(count).arg(target));
+                                },Qt::QueuedConnection);
+                        }else{
+                            result.image=std::move(image);
+                        }
+                    }
+                    result.renderer=QStringLiteral("CPU GI — %1 rebonds, %2 spp, HDR%3")
+                        .arg(maxBounces).arg(sampleCount)
+                        .arg(denoise?QStringLiteral(", débruité"):QString());
+                    result.milliseconds=totalMs;
+                    return result;
+                }
                 std::atomic<uint64_t> generation{1};
                 stats=m3d::render(snapshot->renderScene,*shadow,camera,w,h,pixels,
-                             std::max(1u,std::min(8u,std::thread::hardware_concurrency())),
-                             false,generation,1,sampleCount,false,false,globalIllumination,maxBounces);
-                if(globalIllumination)
-                    result.renderer=QStringLiteral("CPU Path Tracing GI — %1 rebonds, %2 spp, HDR")
-                        .arg(maxBounces).arg(sampleCount);
-                else result.renderer=shadowReused
+                                  workers,false,generation,1,sampleCount,false,false,false,3);
+                result.renderer=shadowReused
                     ?QStringLiteral("CPU Ray Tracing — PBR, ombres en cache")
                     :QStringLiteral("CPU Ray Tracing — PBR, ombres calculées");
             }else result.gpu=true;
