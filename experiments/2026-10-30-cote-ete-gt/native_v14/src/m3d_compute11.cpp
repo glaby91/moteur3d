@@ -150,6 +150,8 @@ struct ComputeCache {
  std::mutex mutex;
  bool warp=false;
  uint64_t sceneHash=0;
+ uint64_t sceneRevision=0;
+ bool trackedScene=false;
  bool sceneReady=false;
  bool shaderTimeSet=false;
  std::filesystem::file_time_type shaderTime{};
@@ -166,7 +168,7 @@ struct ComputeCache {
   ctx.Reset();device.Reset();shader.Reset();
   srv0.Reset();srv1.Reset();srv2.Reset();srv3.Reset();srv4.Reset();
   sampler.Reset();constant.Reset();output.Reset();staging.Reset();uav.Reset();
-  sceneReady=false;shaderTimeSet=false;w=0;h=0;sceneHash=0;
+  sceneReady=false;shaderTimeSet=false;w=0;h=0;sceneHash=0;sceneRevision=0;trackedScene=false;
  }
 };
 ComputeCache& computeCache(){static ComputeCache cache;return cache;}
@@ -223,10 +225,16 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
   }
   c.shader=shader;c.shaderTime=modified;c.shaderTimeSet=true;
  }
- // Detect edits to both geometry and PBR materials. Re-upload only when the
- // scene data changes: rotating the camera never rebuilds its mip atlas/BVH.
- const uint64_t key=hashScene(scene);
- if(!c.sceneReady||c.sceneHash!=key){
+ // V16 runtime scenes have unique identity + explicit modification revision:
+ // no full scan of their 2048-pixel PBR mip chains on every camera movement.
+ // External/legacy scenes with no identity retain the original full hash;
+ // they can still be edited without an explicit revision.
+ const bool tracked=scene.gpuCacheIdentity!=0;
+ const uint64_t key=tracked?scene.gpuCacheIdentity:hashScene(scene);
+ const uint64_t revision=tracked?scene.gpuCacheRevision:0;
+ const bool sceneUpload=!c.sceneReady||c.trackedScene!=tracked||
+                         c.sceneHash!=key||c.sceneRevision!=revision;
+ if(sceneUpload){
   std::vector<GpuNode> nodes;nodes.reserve(scene.node.size());
   for(const auto& n:scene.node){
    if(n.count<0||n.start<0||uint64_t(n.start)+uint64_t(n.count)>scene.order.size()||
@@ -271,7 +279,8 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
   }
   if(!makePbrTextureArray(c.device.Get(),scene.mat,s4,error))return false;
   c.srv0=s0;c.srv1=s1;c.srv2=s2;c.srv3=s3;c.srv4=s4;
-  c.sceneHash=key;c.nodeCount=uint32_t(nodes.size());
+  c.sceneHash=key;c.sceneRevision=revision;c.trackedScene=tracked;
+  c.nodeCount=uint32_t(nodes.size());
   c.triangleCount=uint32_t(triangles.size());c.materialCount=uint32_t(materials.size());
   c.sceneReady=true;
  }
