@@ -23,7 +23,7 @@
 class BenchmarkWindow final : public QMainWindow {
 public:
     explicit BenchmarkWindow(const QString& scenePath){
-        setWindowTitle(QStringLiteral("CSE WARP Beta 0 — Benchmarks Windows"));
+        setWindowTitle(QStringLiteral("CSE WARP Beta X — Benchmarks Windows"));
         resize(820,590);
         auto* content=new QWidget(this);auto* layout=new QVBoxLayout(content);
         auto* intro=new QLabel(QStringLiteral(
