@@ -1,0 +1,121 @@
+{
+  "image": {
+    "id": "SYNTHETIC-FLOOR-ONLY",
+    "width": 1920,
+    "height": 1080
+  },
+  "planes": [
+    {
+      "id": "ground",
+      "description": "Arbitrary scene units, no metric conversion",
+      "anchors": [
+        {
+          "id": "synthetic-floor-anchor-1",
+          "pixel": [
+            200,
+            110
+          ],
+          "scene_uv": [
+            0,
+            0
+          ],
+          "label": "synthetic reference",
+          "status": "synthetic",
+          "source": "algorithm verification only"
+        },
+        {
+          "id": "synthetic-floor-anchor-2",
+          "pixel": [
+            480,
+            82
+          ],
+          "scene_uv": [
+            4,
+            0
+          ],
+          "label": "synthetic reference",
+          "status": "synthetic",
+          "source": "algorithm verification only"
+        },
+        {
+          "id": "synthetic-floor-anchor-3",
+          "pixel": [
+            248,
+            302
+          ],
+          "scene_uv": [
+            0,
+            4
+          ],
+          "label": "synthetic reference",
+          "status": "synthetic",
+          "source": "algorithm verification only"
+        },
+        {
+          "id": "synthetic-floor-anchor-4",
+          "pixel": [
+            528,
+            274
+          ],
+          "scene_uv": [
+            4,
+            4
+          ],
+          "label": "synthetic reference",
+          "status": "synthetic",
+          "source": "algorithm verification only"
+        },
+        {
+          "id": "synthetic-floor-anchor-5",
+          "pixel": [
+            364,
+            192
+          ],
+          "scene_uv": [
+            2,
+            2
+          ],
+          "label": "synthetic reference",
+          "status": "synthetic",
+          "source": "algorithm verification only"
+        },
+        {
+          "id": "synthetic-floor-anchor-6",
+          "pixel": [
+            422,
+            137
+          ],
+          "scene_uv": [
+            3,
+            1
+          ],
+          "label": "synthetic reference",
+          "status": "synthetic",
+          "source": "algorithm verification only"
+        }
+      ],
+      "holdout": [
+        {
+          "id": "unseen-control",
+          "scene_uv": [
+            1.5,
+            3.5
+          ],
+          "pixel": [
+            347,
+            267.5
+          ]
+        }
+      ],
+      "query": [
+        {
+          "id": "arch-foot-example",
+          "pixel": [
+            319.9,
+            230.85000000000002
+          ]
+        }
+      ]
+    }
+  ]
+}
