@@ -1087,38 +1087,10 @@ Scene scene_;
     }
 
     void openSceneFile() {
-        const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Ouvrir une scène"), currentScenePath_, QStringLiteral("Scène V16 (scene.json);;Tous les fichiers JSON (*.json)"));
-        if (path.isEmpty()) return;
-        openV16SceneFile(path);
-        return;
-        Scene loaded;
-        std::wstring error;
-#ifdef _WIN32
-        const std::filesystem::path nativePath(path.toStdWString());
-#else
-        const QByteArray encodedPath = path.toUtf8();
-        const std::filesystem::path nativePath(std::string(encodedPath.constData(), size_t(encodedPath.size())));
-#endif
-        if (!loadScene(nativePath, loaded, error)) {
-            QMessageBox::critical(this, QStringLiteral("Ouverture de scène impossible"), QString::fromWCharArray(error.c_str()));
-            return;
-        }
-        generation_.fetch_add(1);
-        {
-            std::lock_guard<std::mutex> guard(sceneMutex_);
-            scene_ = std::move(loaded);
-            const int hourStep = hour_->value();
-            const float hour = 6.f + hourStep * .5f;
-            updateLighting(hour);
-            Stats build;
-            shadows_ = buildShadow(scene_, build);
-            shadowHour_ = hourStep;
-        }
-        currentScenePath_ = path;
-        loadSceneViewPresets();
-        applySceneCameraPreset();
-        readSettings();
-        requestRender();
+        const QString path = QFileDialog::getOpenFileName(
+            this, QStringLiteral("Ouvrir Pavillon 01 (V16)"),
+            QString(), QStringLiteral("Manifeste V16 (scene.json);;Fichiers JSON (*.json)"));
+        if (!path.isEmpty()) openV16SceneFile(path);
     }
 
     void openBenchmark() {
