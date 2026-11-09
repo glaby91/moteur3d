@@ -7,6 +7,12 @@
 - Pavillon 01 est la seule scène V16 active ; Pripiat sera converti séparément plus tard.
 - Aucun lecteur de scène V3/V4/V5 dans la cible V16.
 
+## Optimisations conservatrices (V16 — sans baisse de qualité)
+- **GPU :** les scènes V16 construites par `buildRuntime()` portent un identifiant de contenu unique et une révision. Les changements de caméra ne rescannent plus les mipmaps PBR 2048² ; les modifications de matériaux dans Qt appellent `markGpuContentChanged()`. Les scènes non suivies continuent à utiliser l'empreinte intégrale, sans risque de cache périmé pour les appels historiques.
+- **CPU :** une carte d'ombres calculée pour Pavillon 01 est réutilisée entre les caméras d'une même scène, tant que l'heure d'éclairage et la scène ne changent pas.
+- Aucun échantillon supprimé, aucun changement de résolution, aucune réduction de la géométrie. La validation automatique vérifie la stricte identité des rendus GPU avant/après réutilisation du cache et l'invalidation en cas de modification de matériau.
+- Les chiffres de performance sous WARP logiciel ne préjugent pas des gains sur le GPU matériel.
+
 ## Architecture livrée
 - `moteur3d_v16_core.dll` : moteur C++ (ray tracing CPU, aperçu Compute D3D11, BVH, matériaux).
 - `moteur3d_v16.exe` : visualisation Qt6, catalogue des matériaux, explorateur et six raccourcis caméra **1 à 6**.
