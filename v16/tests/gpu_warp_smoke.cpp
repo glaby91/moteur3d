@@ -52,11 +52,36 @@ int main(int argc,char** argv) {
  if(renderScene.mat.empty()){qCritical()<<"Missing materials";return 1;}
  const float originalMetallic=renderScene.mat[0].metallic;
  renderScene.mat[0].metallic=originalMetallic>.5f?0.f:1.f;
+ renderScene.markGpuContentChanged(); // explicit V16 editor-like mutation
  std::vector<uint32_t> editedPixels;
  m3d::Stats editedStats;std::wstring editedError;
  if(!m3d::renderCompute11Preview(renderScene,cam,width,height,
                                  editedPixels,editedStats,editedError)||editedPixels==pixels){
   qCritical()<<"GPU scene cache not invalidated on material edit:"<<QString::fromStdWString(editedError);
+  return 1;
+ }
+ renderScene.mat[0].metallic=originalMetallic;
+ renderScene.markGpuContentChanged();
+ // Legacy and external users without a tracked identity must continue to
+ // detect in-place material edits using the complete scene content hash.
+ renderScene.gpuCacheIdentity=0;
+ std::vector<uint32_t> untrackedPixels;
+ m3d::Stats fallbackStats;std::wstring fallbackError;
+ if(!m3d::renderCompute11Preview(renderScene,cam,width,height,
+                                 untrackedPixels,fallbackStats,fallbackError)||
+                                 untrackedPixels!=pixels){
+  qCritical()<<"Legacy full-hash fallback changed reference image:"
+             <<QString::fromStdWString(fallbackError);
+  return 1;
+ }
+ renderScene.mat[0].metallic=originalMetallic>.5f?0.f:1.f;
+ std::vector<uint32_t> untrackedEdited;
+ m3d::Stats fallbackEditedStats;std::wstring fallbackEditedError;
+ if(!m3d::renderCompute11Preview(renderScene,cam,width,height,
+                                 untrackedEdited,fallbackEditedStats,fallbackEditedError)||
+                                 untrackedEdited==untrackedPixels){
+  qCritical()<<"Legacy full-hash cache failed to detect untracked material edit:"
+             <<QString::fromStdWString(fallbackEditedError);
   return 1;
  }
  renderScene.mat[0].metallic=originalMetallic;
