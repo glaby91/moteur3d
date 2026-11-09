@@ -18,6 +18,15 @@
 - Bois de terrasse, bardage, écorce et feuillages ont leurs matériaux distincts. Les textures secondaires utilisent des chaînes mipmap PBR de 512 à 1024 px afin de limiter le coût mémoire ; les matériaux d'origine conservent leur définition.
 - La forme générale, les positions des caméras et la transparence vitrée de Pavillon 01 sont conservées.
 
+## Contrat multi-scènes : moteur commun, fichiers indépendants
+- Pavillon 01 n'est **pas** une spécialisation du pipeline. Une deuxième scène autonome `scenes/v16/material-lab` utilise le même chargeur modulaire V16, le même BVH, les mêmes mipmaps PBR, le même soleil, les mêmes normales, le même CPU direct, le même GI CPU progressif et le même GPU D3D11 Compute.
+- Un nouveau motif réutilisable `brick` crée des briques jointoyées en texture et des normales de relief pour les joints creux ; aucune brique 3D supplémentaire n'est nécessaire. Il fonctionne dans toute scène définissant un matériau PBR correspondant.
+- Le rig historique d'éclairages globaux (phares et lampadaires V14) est explicitement désactivé pour **toutes** les scènes V16. Chaque scène ne reçoit que ses propres lumières facultatives déclarées dans son JSON, en plus du soleil/ciel communs.
+- L'éclairage hémisphérique des surfaces s'applique à toutes les scènes non sous-marines, sans condition portant sur le nom du bâtiment ni sur la présence du terrain.
+- La CI Windows teste réellement les **deux** scènes en 1920×1080 : CPU direct, CPU GI et GPU WARP, ainsi que des vues à 17 h. Les PNG sont conservés dans le ZIP Windows pour comparaison.
+- Il ne faut pas confondre « même moteur et même technique de rendu » avec « mêmes pixels » : des matériaux, une architecture et une orientation solaire différents donnent naturellement des images différentes.
+- `scenes/v16/pripyat` reste une ébauche de structure et n'est pas présentée comme une reconstruction fidèle ou une scène testée complète.
+
 ## V16 — lumière naturelle, normal mapping et comparaison Full HD
 - Soleil plus cohérent en orientation : l'azimut tourne avec l'heure, en plus de la hauteur. Ciel légèrement plus clair et moins saturé près de l'horizon, soleil de fin de journée plus chaud.
 - Les deux moteurs utilisent la même heure solaire ; l'application possède désormais un sélecteur de 7 h à 19 h (pas de 15 minutes). Le cache des cartes d'ombres CPU est invalidé quand l'heure change.
