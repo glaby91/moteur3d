@@ -130,3 +130,22 @@ Pour reproduire :
 Pour produire les PNG de contrôle, fournir --originals-dir avec les véritables images d'origine, identifiées par leur SHA-256. L'outil vérifie ces empreintes. Les images nettoyées par IA ne sont pas des données de mesure.
 
 La scène d'essai CSE WARP Beta X se trouve à scenes/v16/pripyat-photo2scene-proof/scene.json : 16 éléments filaires approximés par de très fines boîtes pour être affichables par le moteur, avec trois caméras conditionnelles. L'épaisseur technique de ces boîtes n'est pas mesurée. La scène d'origine Energetik reste distincte et intacte.
+
+## Prototype géométrique à trois caméras — façade plane (9 novembre 2026)
+
+Un **premier recalage simultané** a été exécuté et rendu reproductible. Sources :
+- `data/pripyat/energetik-three-view-front-plane-annotations.json` : trois originaux et leurs points de colonnade proposés manuellement, avec SHA-256 et statut **UNVERIFIED** ;
+- `three_view_front_plane.py` : `cv2.solvePnP` pour initialiser trois caméras, puis optimisation robuste `scipy.optimize.least_squares` des focales, poses et d'une hauteur commune ;
+- `tests/test_three_view_front_plane.py` : contrôle numérique sur les points mis de côté (travées impaires), test d'export filaire strictement plan ;
+- CI `photo2scene-geometry.yml` : test et export d'un OBJ filaire en unités de travée et d'un JSON contenant les paramètres conditionnels des caméras.
+
+**Résultats reproductibles, non certifiés historiquement :** hauteur entre deux lignes de façade = environ **2,2533 travées** ; RMS validation photo 1 : **3,44 pixels**, photo 2 : **6,36 pixels**, photo 3 : **2,58 pixels**. Les focales calculées correspondent à des FOV horizontaux conditionnels d'environ **47,05° / 26,89° / 26,37°**. La première valeur diffère de l'estimation aux points de fuite (~63,61°) : la focale n'est pas démontrée sans contraintes indépendantes.
+
+Le modèle exporté est **un seul plan Z=0**, avec une unité arbitraire par travée. Il ne calcule ni profondeur du retour droit, ni géométrie de toiture, ni longueurs historiques. Une faible erreur de reprojection ne suffit pas à valider la correspondance de piliers répétitifs. Les poses 3D produites sont conditionnelles aux identifiants de travée annotés et aux hypothèses du modèle sténopé ; **ne pas les intégrer comme données archéologiques définitives**.
+
+Reproduire :
+
+    python -m pip install numpy scipy opencv-python-headless
+    python tools/photo2scene/three_view_front_plane.py tools/photo2scene/data/pripyat/energetik-three-view-front-plane-annotations.json --output front-plane.json --obj front-plane.obj
+
+**Prochaine priorité :** identification de repères asymétriques réellement communs aux vues et contrôles indépendants des hypothèses de travées, puis ajout de plans perpendiculaires et de contraintes dimensionnelles authentifiées.
