@@ -3,8 +3,15 @@
 #include "src/m3d_v16_bridge.h"
 #include <QCoreApplication>
 #include <QDebug>
+#include <cstdio>
 #include <QFileInfo>
+static void ciLog(QtMsgType, const QMessageLogContext&, const QString& message) {
+    const QByteArray utf8 = message.toUtf8();
+    std::fprintf(stderr, "V16 TEST: %s\n", utf8.constData());
+    std::fflush(stderr);
+}
 int main(int argc,char** argv){
+    qInstallMessageHandler(ciLog);
     QCoreApplication app(argc,argv);
     if(argc!=2){qCritical()<<"Usage: v16_scene_check scene.json";return 2;}
     const QString path=QString::fromLocal8Bit(argv[1]);
