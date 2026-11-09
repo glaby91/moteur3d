@@ -185,7 +185,19 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
     Level nr;nr.size=uint32_t(resolution);nr.p.resize(first.p.size());
     Level rr;rr.size=uint32_t(resolution);rr.p.resize(first.p.size());
     const uint32_t seed=hash32(uint32_t(qHash(pattern)));
-    for(int y=0;y<resolution;y++)for(int x=0;x<resolution;x++){
+    // Reusable material-level height field: individual staggered bricks and
+    // depressed mortar are represented only in textures, never extra geometry.
+    auto brickHeight=[](float u,float v){
+        const float row=v*8.f;
+        const float rowIndex=std::floor(row);
+        const float offset=(int(rowIndex)&1)?.5f:0.f;
+        const float column=u*14.f+offset;
+        const float x=column-std::floor(column),y=row-rowIndex;
+        const float dx=std::min(x,1.f-x),dy=std::min(y,1.f-y);
+        const float edge=clampf(std::min(dx/.08f,dy/.14f),0.f,1.f);
+        return edge*edge*(3.f-2.f*edge);
+    };
+    for(int y=0;y<resolution;y>for(int x=0;x<resolution;x++){
         const float u=float(x)/resolution,v=float(y)/resolution;
         const float n=smoothNoise(float(x)/7.f,float(y)/7.f,seed),fine=noise(x,y,seed^0x9e3779b9u);
         float factor=1.f;
@@ -198,6 +210,12 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
         }
         else if(pattern=="concrete"||pattern=="plaster") {
             factor=.965f+.065f*(n-.5f)+.012f*(fine-.5f);
+        }
+        else if(pattern=="brick") {
+            // Staggered bonds, dark mortar and uneven fired-clay tint.
+            const float height=brickHeight(u,v);
+            const float coarse=smoothNoise(u*33.f,v*21.f,seed^0x7f4a7c15u);
+            factor=.43f+.55f*height+.12f*(coarse-.5f)+.035f*(n-.5f);
         }
         else if(pattern=="stone") {
             const float veins=std::sin(u*12.f+v*8.f+std::sin(v*15.f)*1.5f);
@@ -240,6 +258,13 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
                          .014f*std::sin(a)-.011f*std::sin(b),1.f});
         } else if(pattern=="glass"||pattern=="metal"||pattern=="porcelain") {
             normal={0,0,1};
+        } else if(pattern=="brick") {
+            const float du=1.f/float(resolution),dv=du;
+            const float sx=brickHeight(u+du,v)-brickHeight(u-du,v);
+            const float sy=brickHeight(u,v+dv)-brickHeight(u,v-dv);
+            // Bright brick faces and recessed mortar joints, with one-pixel
+            // gradients that mip-filter at distance.
+            normal=norm({-sx*.57f,-sy*.57f,1.f});
         } else if(pattern=="wood") {
             // Longitudinal grain grooves: the relief follows the color fibers.
             // This is genuine tangent-space normal mapping, not image noise.
