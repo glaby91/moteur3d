@@ -19,6 +19,7 @@ const api=vm.runInNewContext(src+`
  foyerStair:m3dBuildFoyerStairFlights,
  rear:m3dBuildEnergetikRearWall,
  shell:m3dBuildEnergetikShell,
+ auditoriumRoof:m3dBuildEnergetikAuditoriumRoof,
  connector:m3dBuildConnector,
  polissya:m3dBuildPolissya
 })`, {}, {timeout:5000});
@@ -53,7 +54,8 @@ assert.equal(hits(slabs,2,6.40,-37.0).length,0,'second slab blocks the double-he
 assert.ok(hits(slabs,10,3.30,-37.0).length>0,'east-side upper gallery missing');
 assert.ok(hits(slabs,5,3.30,-41.5).length>0,'rear connecting strip missing');
 assert.equal(hits(slabs,-40,3.30,-37).length,0,'first-floor slab blocks double-height auditorium');
-assert.ok(hits(slabs,-40,6.40,-37).length>0,'upper auditorium ceiling slab missing');
+assert.equal(hits(slabs,-40,6.40,-37).length,0,'auditorium second slab blocks required 11.6m clear volume');
+assert.equal(hits(slabs,-40,10.0,-37).length,0,'auditorium must stay open up to its actual roof');
 const arcade=geometry(api.arcade);
 const muralProbeX=api.arch.foyer.mosaicWallX+api.arch.foyer.arcadeDepth/2;
 assert.equal(hits(arcade,muralProbeX,1.2,-40.5).length,0,'lower foyer bay must be open');
@@ -62,11 +64,22 @@ assert.ok(hits(arcade,muralProbeX,3.9,-36.9).length>0,'upper painted wall must h
 assert.ok(arcade.some(v=>v[6]==='stone' && v[4]>2.0),'stone piers missing');
 assert.ok(api.arch.foyer.mosaicWallX-api.arch.foyer.mosaicSurfaceX<0.05,'mural is visibly detached from backing');
 
+const highRoof=geometry(api.auditoriumRoof);
+const aud=api.arch.auditorium;
+assert.equal(aud.clearHeight,11.6,'source auditorium clear height differs from design datum');
+assert.ok(Math.abs(aud.ceilingUnderY-aud.floorY-11.6)<1e-8,'auditorium heights added incorrectly');
+assert.equal(api.arch.stage.highestExteriorStudyY,21,'stage max from datum, not extra 21m');
+assert.ok(aud.ceilingUnderY<api.arch.stage.highestExteriorStudyY,'stage maximum must exceed auditorium roof');
+assert.ok(highRoof.some(b=>b[1]===aud.ceilingUnderY && b[4]===aud.roofTopY),
+  'raised auditorium roof must have underside at floor+11.6');
+assert.equal(hits(highRoof,-32,10.5,-33).length,0,'tall hall obstructed below ceiling');
+assert.ok(hits(highRoof,-32,aud.ceilingUnderY+.08,-33).length>0,'auditorium high ceiling is absent');
 const rear=geometry(api.rear);
 assert.equal(hits(rear,-12.2,1.8,-42.8).length,0,'rear glazing must have opening');
 assert.ok(hits(rear,-10.2,1.8,-42.8).length>0,'rear window jamb missing');
 const shell=geometry(api.shell);
 assert.equal(hits(shell,0,10.4,-31).length,0,'former solid rooftop occluder returned');
+assert.ok(aud.ceilingUnderY>=11.9 && aud.ceilingUnderY<=12.1,'wrong auditorium high ceiling underface');
 
 const connector=geometry(api.connector);
 assert.equal(hits(connector,35,2.0,-21).length,0,'arch pedestrian way blocked');
