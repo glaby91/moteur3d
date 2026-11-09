@@ -2588,7 +2588,7 @@
     {
       "id": "instance_155",
       "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
+      "geometry": "foliage_canopy",
       "material": "leaves",
       "position": [
         -12,
@@ -2604,7 +2604,7 @@
     {
       "id": "instance_156",
       "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
+      "geometry": "foliage_canopy",
       "material": "leaves",
       "position": [
         -12.4,
@@ -2620,7 +2620,7 @@
     {
       "id": "instance_157",
       "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
+      "geometry": "foliage_canopy",
       "material": "leaves",
       "position": [
         -11.6,
@@ -2653,7 +2653,7 @@
     {
       "id": "instance_167",
       "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
+      "geometry": "foliage_canopy",
       "material": "leaves",
       "position": [
         12,
@@ -2669,7 +2669,7 @@
     {
       "id": "instance_168",
       "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
+      "geometry": "foliage_canopy",
       "material": "leaves",
       "position": [
         11.6,
@@ -2685,7 +2685,7 @@
     {
       "id": "instance_169",
       "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
+      "geometry": "foliage_canopy",
       "material": "leaves",
       "position": [
         12.4,
@@ -2718,7 +2718,7 @@
     {
       "id": "instance_183",
       "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
+      "geometry": "foliage_canopy",
       "material": "leaves",
       "position": [
         -12,
@@ -2734,7 +2734,7 @@
     {
       "id": "instance_184",
       "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
+      "geometry": "foliage_canopy",
       "material": "leaves",
       "position": [
         -12.4,
@@ -2750,7 +2750,7 @@
     {
       "id": "instance_185",
       "parent": "Exterieur/Jardin/Arbres",
-      "geometry": "unit_sphere",
+      "geometry": "foliage_canopy",
       "material": "leaves",
       "position": [
         -11.6,
@@ -2766,7 +2766,7 @@
     {
       "id": "instance_190",
       "parent": "Exterieur/Jardin/Massifs",
-      "geometry": "unit_sphere",
+      "geometry": "foliage_canopy",
       "material": "leaves",
       "position": [
         -12.5,
@@ -2782,7 +2782,7 @@
     {
       "id": "instance_191",
       "parent": "Exterieur/Jardin/Massifs",
-      "geometry": "unit_sphere",
+      "geometry": "foliage_canopy",
       "material": "leaves",
       "position": [
         -12.1,
@@ -2798,7 +2798,7 @@
     {
       "id": "instance_192",
       "parent": "Exterieur/Jardin/Massifs",
-      "geometry": "unit_sphere",
+      "geometry": "foliage_canopy",
       "material": "leaves",
       "position": [
         -10.6,
@@ -2814,7 +2814,7 @@
     {
       "id": "instance_193",
       "parent": "Exterieur/Jardin/Massifs",
-      "geometry": "unit_sphere",
+      "geometry": "foliage_canopy",
       "material": "leaves",
       "position": [
         11.4,
@@ -2830,7 +2830,7 @@
     {
       "id": "instance_194",
       "parent": "Exterieur/Jardin/Massifs",
-      "geometry": "unit_sphere",
+      "geometry": "foliage_canopy",
       "material": "leaves",
       "position": [
         12.6,
@@ -2846,7 +2846,7 @@
     {
       "id": "instance_195",
       "parent": "Exterieur/Jardin/Massifs",
-      "geometry": "unit_sphere",
+      "geometry": "foliage_canopy",
       "material": "leaves",
       "position": [
         10.1,
