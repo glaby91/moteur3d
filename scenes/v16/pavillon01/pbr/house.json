@@ -1,38 +1,90 @@
 {
   "format": "m3d-pbr-v1",
   "textureResolutionTarget": 2048,
-  "textures": [
-    {
-      "id": "grass",
-      "recipe": "grass",
-      "resolution": 2048
-    },
-    {
-      "id": "concrete",
-      "recipe": "concrete",
-      "resolution": 2048
-    },
-    {
-      "id": "glass",
-      "recipe": "glass",
-      "resolution": 2048
-    },
-    {
-      "id": "wood",
-      "recipe": "oak",
-      "resolution": 2048
-    },
-    {
-      "id": "water",
-      "recipe": "water",
-      "resolution": 2048
-    }
-  ],
   "mipmaps": "auto",
   "channels": [
     "albedo",
     "normal",
     "roughness"
   ],
-  "note": "Procedural previews generated in native C++ and mipmapped in memory. Real external image maps still pending."
+  "textures": [
+    {
+      "id": "tex_grass",
+      "material": "grass",
+      "pattern": "lawn",
+      "recipe": "grass",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_concrete",
+      "material": "concrete",
+      "pattern": "concrete",
+      "recipe": "concrete",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_plaster",
+      "material": "plaster",
+      "pattern": "plaster",
+      "recipe": "concrete",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_glass",
+      "material": "glass",
+      "pattern": "glass",
+      "recipe": "glass",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_aluminium",
+      "material": "aluminium",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_wood",
+      "material": "wood",
+      "pattern": "wood",
+      "recipe": "oak",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_water",
+      "material": "water",
+      "pattern": "water",
+      "recipe": "water",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_stone",
+      "material": "stone",
+      "pattern": "stone",
+      "recipe": "concrete",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_fabric",
+      "material": "fabric",
+      "pattern": "fabric",
+      "recipe": "grass",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_blackmetal",
+      "material": "blackmetal",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 2048
+    },
+    {
+      "id": "tex_leaves",
+      "material": "leaves",
+      "pattern": "foliage",
+      "recipe": "grass",
+      "resolution": 2048
+    }
+  ],
+  "note": "Single PBR registry for the complete 203-object Pavillon 01. textureSet in materials references id. Procedural maps are previews; native bridge generates mip levels."
 }
