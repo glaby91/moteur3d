@@ -30,22 +30,50 @@ int main(int argc,char** argv) {
     m3d::Stats shadowStats;
     const auto shadows=m3d::buildShadow(scene,shadowStats);
     std::vector<uint32_t> pixels;
+    std::vector<m3d::V> hdr;
     const std::atomic<uint64_t> generation{1};
-    // One sample checks the exact full-resolution GI code path; selectable
-    // interactive presets use 4/16 spp to reduce Monte-Carlo noise.
-    const auto stats=m3d::render(scene,shadows,camera,width,height,pixels,
-                                  4,false,generation,1,1,false,false,true,2);
-    if(pixels.size()!=size_t(width)*height||stats.rays<100000){
-        qCritical()<<"GI failed to trace the full image"<<stats.rays;return 1;
+    // The CI reference is now genuinely accumulated 4 spp Full HD plus an
+    // optional bilateral denoise, rather than a deliberately noisy 1 spp PNG.
+    const auto first=m3d::renderGiAccumulatePass(scene,shadows,camera,width,height,
+        hdr,pixels,0,1,4,generation,1,2);
+    const auto second=m3d::renderGiAccumulatePass(scene,shadows,camera,width,height,
+        hdr,pixels,1,1,4,generation,1,2);
+    const auto third=m3d::renderGiAccumulatePass(scene,shadows,camera,width,height,
+        hdr,pixels,2,2,4,generation,1,2);
+    if(pixels.size()!=size_t(width)*height||hdr.size()!=pixels.size()||
+       first.rays+second.rays+third.rays<100000){
+        qCritical()<<"GI did not trace the complete Full HD image";return 1;
     }
-    std::set<uint32_t> unique(pixels.begin(),pixels.end());
-    if(unique.size()<128){qCritical()<<"GI image unexpectedly flat"<<unique.size();return 1;}
+    // Progressive batching and single-batch accumulation must produce
+    // bit-identical pixels. Test this efficiently on a separate small image;
+    // all actual reference images still use native Full HD.
+    constexpr int sw=256,sh=144;
+    const auto smallCam=m3d::v16::makeCamera(built.runtime.cameras.front(),sw,sh);
+    std::vector<m3d::V> incrementalHdr,singleHdr;
+    std::vector<uint32_t> incremental,single;
+    m3d::renderGiAccumulatePass(scene,shadows,smallCam,sw,sh,
+        incrementalHdr,incremental,0,1,4,generation,1,2);
+    m3d::renderGiAccumulatePass(scene,shadows,smallCam,sw,sh,
+        incrementalHdr,incremental,1,3,4,generation,1,2);
+    m3d::renderGiAccumulatePass(scene,shadows,smallCam,sw,sh,
+        singleHdr,single,0,4,4,generation,1,2);
+    if(incremental!=single){
+        qCritical()<<"GI progressive accumulation changes pixels compared to a single batch";
+        return 1;
+    }
+    auto clean=m3d::denoiseBilateral(pixels,width,height,4);
+    std::set<uint32_t> unique(clean.begin(),clean.end());
+    if(unique.size()<128||clean==pixels){
+        qCritical()<<"GI denoise failed or image unexpectedly flat";return 1;
+    }
     QImage img(width,height,QImage::Format_ARGB32);
     for(int y=0;y<height;++y)
-        std::memcpy(img.scanLine(y),pixels.data()+size_t(y)*width,size_t(width)*4);
+        std::memcpy(img.scanLine(y),clean.data()+size_t(y)*width,size_t(width)*4);
     if(!img.save(QString::fromLocal8Bit(argv[2]),"PNG")){
         qCritical()<<"Could not save Full HD GI preview";return 1;
     }
-    qInfo()<<"GI path tracing Full HD validated:"<<stats.ms<<"ms, rays:"<<stats.rays;
+    qInfo()<<"GI progressive Full HD 4 spp + denoise PASS: first"<<first.ms
+           <<"ms, second"<<second.ms<<"ms, third"<<third.ms<<"ms";
+    qInfo()<<"GI single versus 2-batch progressive: pixel-identical PASS.";
     return 0;
 }
