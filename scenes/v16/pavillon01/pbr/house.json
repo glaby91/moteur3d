@@ -169,6 +169,27 @@
       "pattern": "metal",
       "recipe": "metal",
       "resolution": 512
+    },
+    {
+      "id": "tex_bark",
+      "material": "bark",
+      "pattern": "wood",
+      "recipe": "wood",
+      "resolution": 512
+    },
+    {
+      "id": "tex_foliage_olive",
+      "material": "foliage_olive",
+      "pattern": "foliage",
+      "recipe": "foliage",
+      "resolution": 512
+    },
+    {
+      "id": "tex_foliage_sage",
+      "material": "foliage_sage",
+      "pattern": "foliage",
+      "recipe": "foliage",
+      "resolution": 512
     }
   ]
 }
