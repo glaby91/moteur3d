@@ -11,6 +11,7 @@ find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets Core)
 set(M3D_CORE_SOURCES
     src/m3d_scene_v16.cpp
     src/m3d_scene_v16_compile.cpp
+    src/m3d_pbr_v16.cpp
     src/m3d_lighting.cpp
     src/m3d_intersection.cpp
     src/m3d_shading.cpp
