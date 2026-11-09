@@ -6,7 +6,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-SCRIPT = Path(__file__).resolve().parents[2] / "tools/photo2scene/sparse_drone_3view.py"
+SCRIPT = Path(__file__).resolve().parents[1] / "sparse_drone_3view.py"
 spec = importlib.util.spec_from_file_location("sfm", SCRIPT)
 sfm = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(sfm)
