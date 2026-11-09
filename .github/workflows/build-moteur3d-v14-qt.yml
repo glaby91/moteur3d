@@ -9,6 +9,7 @@ on:
       - feature/pripyat-square-survey-measurements-261107
       - feature/pripyat-compute-d3d11-261107
       - feature/pripyat-polissya-arcade-261107
+      - feature/energetik-auditorium-clearheight-116-261110
     paths:
       - experiments/2026-10-30-cote-ete-gt/native_v14/CMakeLists.txt
       - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
