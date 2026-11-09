@@ -493,6 +493,23 @@
         1.55
       ],
       "rotationY": 0
+    },
+    {
+      "id": "water_panel",
+      "parent": "Atelier/Echantillons",
+      "geometry": "unit_box",
+      "material": "water_test",
+      "position": [
+        5,
+        0.41,
+        7
+      ],
+      "size": [
+        3.1,
+        0.13,
+        2.2
+      ],
+      "rotationY": 0
     }
   ]
 }
