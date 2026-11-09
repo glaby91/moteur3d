@@ -1,0 +1,77 @@
+{
+  "format": "m3d-geometry-v1",
+  "units": "m",
+  "primitives": [
+    {
+      "id": "ground",
+      "type": "box",
+      "size": [
+        32,
+        0.25,
+        26
+      ],
+      "material": "grass"
+    },
+    {
+      "id": "slab",
+      "type": "box",
+      "size": [
+        18,
+        0.35,
+        12
+      ],
+      "material": "concrete"
+    },
+    {
+      "id": "ground-floor",
+      "type": "box",
+      "size": [
+        18,
+        3.1,
+        12
+      ],
+      "material": "glass"
+    },
+    {
+      "id": "upper-floor",
+      "type": "box",
+      "size": [
+        14,
+        3.1,
+        10
+      ],
+      "material": "glass"
+    },
+    {
+      "id": "roof",
+      "type": "box",
+      "size": [
+        15,
+        0.35,
+        11
+      ],
+      "material": "concrete"
+    },
+    {
+      "id": "terrace",
+      "type": "box",
+      "size": [
+        18,
+        0.2,
+        4
+      ],
+      "material": "wood"
+    },
+    {
+      "id": "pool",
+      "type": "box",
+      "size": [
+        8,
+        0.1,
+        3
+      ],
+      "material": "water"
+    }
+  ],
+  "note": "Conceptual volumes only; facade apertures, rooms and structural details not yet modeled."
+}
