@@ -197,7 +197,7 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
         const float edge=clampf(std::min(dx/.08f,dy/.14f),0.f,1.f);
         return edge*edge*(3.f-2.f*edge);
     };
-    for(int y=0;y<resolution;y>for(int x=0;x<resolution;x++){
+    for(int y=0;y<resolution;y++)for(int x=0;x<resolution;x++){
         const float u=float(x)/resolution,v=float(y)/resolution;
         const float n=smoothNoise(float(x)/7.f,float(y)/7.f,seed),fine=noise(x,y,seed^0x9e3779b9u);
         float factor=1.f;
