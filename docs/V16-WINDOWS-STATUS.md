@@ -18,6 +18,15 @@
 - Bois de terrasse, bardage, écorce et feuillages ont leurs matériaux distincts. Les textures secondaires utilisent des chaînes mipmap PBR de 512 à 1024 px afin de limiter le coût mémoire ; les matériaux d'origine conservent leur définition.
 - La forme générale, les positions des caméras et la transparence vitrée de Pavillon 01 sont conservées.
 
+## V16 — lumière naturelle, normal mapping et comparaison Full HD
+- Soleil plus cohérent en orientation : l'azimut tourne avec l'heure, en plus de la hauteur. Ciel légèrement plus clair et moins saturé près de l'horizon, soleil de fin de journée plus chaud.
+- Les deux moteurs utilisent la même heure solaire ; l'application possède désormais un sélecteur de 7 h à 19 h (pas de 15 minutes). Le cache des cartes d'ombres CPU est invalidé quand l'heure change.
+- CPU direct : ambiance moins plate sur Pavillon 01, en conservant les ombres et le bump mapping existant. CPU GI : éclairement hémisphérique dépendant de l'orientation des normales (zénith plus froid, horizon plus neutre).
+- GPU D3D11 Compute : couleurs du soleil et contribution du ciel diffus transmises au shader, sans rayon supplémentaire ni perte de définition. La lumière fait apparaître le relief des normal maps, sans faux grain d'image.
+- Les matériaux procéduraux du bois, de la pierre, de l'enduit, du béton et de l'étanchéité ont des normales de hauteur cohérentes ou des fibres directionnelles. Ces effets ne modifient pas les silhouettes, contrairement à une vraie géométrie ou un déplacement parallax/occlusion.
+- La CI teste les rendus en 1920×1080 à 14 h 45 et à 17 h pour le CPU et le GPU ; elle vérifie que le retour à 14 h 45 produit exactement la même image GPU. Les deux images « soleil rasant » sont incluses dans l'archive Windows.
+- Ces modèles d'éclairage sont des approximations artistiques efficaces, **pas** une simulation atmosphérique physiquement calibrée ou une GI GPU multi-rebonds.
+
 ## V16.1–V16.3 — anti-bruit CPU et calcul progressif
 - **V16.1 :** échantillonnage CPU direct configurable (1, 4 ou 16 échantillons/pixel) indépendant de la résolution native Full HD, QHD ou 4K. Débruitage bilatéral facultatif, désactivé par défaut en CPU direct pour préserver les détails des matériaux. Les textures procédurales restent déterministes, et leur grain n'est pas du bruit Monte-Carlo.
 - **V16.2 :** vrai rendu GI progressif avec accumulateur HDR linéaire par pixel, échantillons uniques à chaque passe (séquence R2 et rotation par pixel), passes visibles 1/2/4/8/16/... jusqu'à la cible. Les pixels ne sont convertis en sRGB et tone-mappés qu'à l'affichage ; aucun PNG 8 bits n'est utilisé pour accumuler l'énergie.
