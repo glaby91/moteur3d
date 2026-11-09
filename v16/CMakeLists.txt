@@ -27,7 +27,10 @@ set(M3D_RENDER_SOURCES
     "${NATIVE_SRC}/simd/avx2/lighting.cpp"
     "${NATIVE_SRC}/simd/avx2/texture_sampling.cpp"
 )
-add_library(moteur3d_v16_core STATIC ${M3D_RENDER_SOURCES})
+add_library(moteur3d_v16_core SHARED ${M3D_RENDER_SOURCES})
+if(WIN32)
+    set_target_properties(moteur3d_v16_core PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+endif()
 target_include_directories(moteur3d_v16_core PUBLIC "${NATIVE}")
 target_link_libraries(moteur3d_v16_core PUBLIC Threads::Threads Qt6::Core)
 if(WIN32)
@@ -52,6 +55,15 @@ target_link_libraries(moteur3d_v16 PRIVATE moteur3d_v16_core Qt6::Widgets Qt6::C
 if(MSVC)
     target_compile_options(moteur3d_v16 PRIVATE /O2 /EHsc /utf-8)
 endif()
+# Standalone frontends: rebuilding controls or benchmark does not recompile the engine DLL.
+add_executable(moteur3d_v16_benchmark "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmark.cpp")
+target_link_libraries(moteur3d_v16_benchmark PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
+qt_add_executable(moteur3d_v16_benchui WIN32 "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmark_ui.cpp")
+target_link_libraries(moteur3d_v16_benchui PRIVATE Qt6::Widgets)
+if(MSVC)
+    target_compile_options(moteur3d_v16_benchmark PRIVATE /O2 /EHsc /utf-8)
+    target_compile_options(moteur3d_v16_benchui PRIVATE /O2 /EHsc /utf-8)
+endif()
 add_executable(v16_scene_check "${CMAKE_CURRENT_SOURCE_DIR}/tests/scene_check.cpp")
 target_link_libraries(v16_scene_check PRIVATE moteur3d_v16_core Qt6::Core)
 if(MSVC)
@@ -69,6 +81,11 @@ set_tests_properties(v16_pavillon01_loader PROPERTIES TIMEOUT 240)
 add_test(NAME v16_pavillon01_cpu_render
     COMMAND v16_render_smoke "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01/scene.json" "${CMAKE_CURRENT_BINARY_DIR}/pavillon01-smoke.png")
 set_tests_properties(v16_pavillon01_cpu_render PROPERTIES TIMEOUT 240)
+add_test(NAME v16_benchmark_quick
+    COMMAND moteur3d_v16_benchmark
+        "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01/scene.json"
+        "${CMAKE_CURRENT_BINARY_DIR}/benchmark-tests" --quick)
+set_tests_properties(v16_benchmark_quick PROPERTIES TIMEOUT 240)
 add_custom_command(TARGET moteur3d_v16 POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01"
@@ -79,7 +96,8 @@ add_custom_command(TARGET moteur3d_v16 POST_BUILD
         "${NATIVE_SRC}/shaders/m3d_raytrace_compute.hlsl"
         "$<TARGET_FILE_DIR:moteur3d_v16>/shaders/m3d_raytrace_compute.hlsl"
     VERBATIM)
-install(TARGETS moteur3d_v16 RUNTIME DESTINATION .)
+install(TARGETS moteur3d_v16 moteur3d_v16_core moteur3d_v16_benchmark moteur3d_v16_benchui
+    RUNTIME DESTINATION . LIBRARY DESTINATION . ARCHIVE DESTINATION lib)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01" DESTINATION .)
 install(FILES "${NATIVE_SRC}/shaders/m3d_raytrace_compute.hlsl" DESTINATION shaders)
 # No V3/V4/V5 binary loader, exporter or legacy Qt application is linked into V16.
