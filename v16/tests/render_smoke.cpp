@@ -26,7 +26,7 @@ int main(int argc,char** argv){
     if(!built){qCritical()<<built.error;return 1;}
     if(built.runtime.cameras.isEmpty()){qCritical()<<"No cameras";return 1;}
     qInfo()<<"Geometry BVH and mips ready";
-    const int w=384,h=216;
+    const int w=1920,h=1080; // Full HD reference screenshot, never a low-resolution preview
     const auto cam=m3d::v16::makeCamera(built.runtime.cameras.front(),w,h);
     m3d::updateLighting(built.runtime.daylightHour);
     m3d::Stats shadows;
