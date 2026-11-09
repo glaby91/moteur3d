@@ -147,7 +147,8 @@ bool compileRenderScene(const SceneDatabase& database, Scene& out,QString& error
         }
         for(const auto& resource:sector.resources.value(QStringLiteral("instances"))) {
             for(const auto& value:resource.data.value(QStringLiteral("instances")).toArray()){
-                const auto obj=value.toObject(),geom=obj.value(QStringLiteral("geometry")).toString();
+                const auto obj=value.toObject();
+                const QString geom=obj.value(QStringLiteral("geometry")).toString();
                 V position; 
                 if(!primitiveSizes.contains(geom)||!vec3(obj.value(QStringLiteral("position")),position)){
                     error=QStringLiteral("Unknown primitive or invalid position: %1").arg(geom);return false;
