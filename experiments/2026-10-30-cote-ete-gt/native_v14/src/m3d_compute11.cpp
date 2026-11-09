@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <chrono>
 #include <cstring>
+#include <cstdlib>
 using Microsoft::WRL::ComPtr;
 namespace m3d {
 namespace {
@@ -139,7 +140,11 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,std
  for(uint32_t index:scene.order)if(index>=triangles.size()){error=L"Index de primitive invalide";return false;}
  UINT flags=0;
  ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> ctx;D3D_FEATURE_LEVEL level{};
- HRESULT hr=D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,flags,nullptr,0,D3D11_SDK_VERSION,&device,&level,&ctx);
+ // Software WARP is opt-in for CI parity tests only; normal users always select hardware.
+ const char* forceWarp=std::getenv("M3D_V16_FORCE_WARP");
+ const D3D_DRIVER_TYPE driver=(forceWarp&&std::strcmp(forceWarp,"1")==0)
+     ?D3D_DRIVER_TYPE_WARP:D3D_DRIVER_TYPE_HARDWARE;
+ HRESULT hr=D3D11CreateDevice(nullptr,driver,nullptr,flags,nullptr,0,D3D11_SDK_VERSION,&device,&level,&ctx);
  if(FAILED(hr)||level<D3D_FEATURE_LEVEL_11_0){error=L"Compute Shader 5.0 non disponible sur cet adaptateur";return false;}
  wchar_t exe[MAX_PATH]{};GetModuleFileNameW(nullptr,exe,MAX_PATH);
  auto shaderPath=std::filesystem::path(exe).parent_path()/L"shaders"/L"m3d_raytrace_compute.hlsl";
