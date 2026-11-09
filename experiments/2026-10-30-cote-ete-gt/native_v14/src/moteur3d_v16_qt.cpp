@@ -80,7 +80,7 @@ private:
 class V16Window final : public QMainWindow {
 public:
     explicit V16Window(QString scenePath){
-        setWindowTitle(QStringLiteral("CSE WARP Beta 0 — Pavillon 01"));
+        setWindowTitle(QStringLiteral("CSE WARP Beta X — Pavillon 01"));
         resize(1510,900);
         setMinimumSize(1100,670);
         canvas_=new ImageView;
