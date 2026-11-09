@@ -117,6 +117,19 @@
       "transmission": 0,
       "ior": 1.5,
       "textureSet": "tex_meadow"
+    },
+    {
+      "id": "water_test",
+      "baseColor": [
+        0.11,
+        0.32,
+        0.46
+      ],
+      "roughness": 0.09,
+      "metallic": 0,
+      "transmission": 0.28,
+      "ior": 1.333,
+      "textureSet": "tex_water_test"
     }
   ]
 }
