@@ -47,7 +47,28 @@ int main(int argc,char** argv){
     if(!image.save(QString::fromLocal8Bit(argv[2]),"PNG")){
         qCritical()<<"Could not write PNG";return 1;
     }
+    // Same geometry/normal maps under a lower, warmer late-afternoon sun:
+    // the relief must change with light, without adding any triangles.
+    m3d::updateLighting(17.f);
+    m3d::Stats lateShadowStats;
+    const auto lateShadow=m3d::buildShadow(built.runtime.renderScene,lateShadowStats);
+    std::vector<uint32_t> latePixels;
+    const auto lateStats=m3d::render(built.runtime.renderScene,lateShadow,cam,w,h,
+        latePixels,4,false,generation,1,1,false,false,false,3);
+    if(latePixels.size()!=pixels.size()||latePixels==pixels){
+        qCritical()<<"Daylight 17:00 must change CPU Full HD pixels";return 1;
+    }
+    QImage eveningImage(w,h,QImage::Format_ARGB32);
+    for(int y=0;y<h;++y)
+        std::memcpy(eveningImage.scanLine(y),latePixels.data()+size_t(y)*w,w*4);
+    const QString eveningPath=QFileInfo(QString::fromLocal8Bit(argv[2])).absolutePath()+
+        QStringLiteral("/pavillon01-evening-cpu.png");
+    if(!eveningImage.save(eveningPath,"PNG")){
+        qCritical()<<"Could not save Full HD grazing daylight preview";return 1;
+    }
+    m3d::updateLighting(built.runtime.daylightHour);
     qInfo()<<"V16 CPU rendered:"<<w<<"x"<<h<<"pixels;"<<colors.size()
            <<"unique colors;"<<stats.ms<<"ms;"<<shadows.rays<<"shadow rays";
+    qInfo()<<"V16 low sun CPU Full HD rendered:"<<lateStats.ms<<"ms";
     return 0;
 }
