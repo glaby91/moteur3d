@@ -6,10 +6,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Threads REQUIRED)
-find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 6.2 REQUIRED COMPONENTS Widgets Core)
 
 set(M3D_CORE_SOURCES
     src/m3d_scene.cpp
+    src/m3d_scene_v16.cpp
     src/m3d_lighting.cpp
     src/m3d_intersection.cpp
     src/m3d_shading.cpp
@@ -32,7 +33,7 @@ if(WIN32)
     target_link_libraries(m3d_core PUBLIC d3d11 d3d12 dxgi d3dcompiler)
 endif()
 target_include_directories(m3d_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-target_link_libraries(m3d_core PUBLIC Threads::Threads)
+target_link_libraries(m3d_core PUBLIC Threads::Threads Qt6::Core)
 
 qt_add_executable(moteur3d_qt WIN32 src/moteur3d_qt.cpp)
 target_link_libraries(moteur3d_qt PRIVATE m3d_core Qt6::Widgets)
