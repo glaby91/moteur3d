@@ -4,6 +4,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -98,6 +99,7 @@ private:
     QComboBox* cameraBox_=nullptr;
     QComboBox* backendBox_=nullptr;
     QComboBox* qualityBox_=nullptr;
+    QCheckBox* edgeAa_=nullptr;
     QSlider* azimuth_=nullptr;
     QDoubleSpinBox* roughness_=nullptr;
     QDoubleSpinBox* metallic_=nullptr;
@@ -163,6 +165,9 @@ private:
         form->addRow(QStringLiteral("Résolution"),qualityBox_);
         form->addRow(QStringLiteral("Rotation caméra"),azimuth_);
         vertical->addLayout(form);
+        edgeAa_=new QCheckBox(QStringLiteral("Antialiasing des contours"));
+        edgeAa_->setChecked(true);
+        vertical->addWidget(edgeAa_);
         auto* renderButton=new QPushButton(QStringLiteral("Calculer l'image"));
         vertical->addWidget(renderButton);
         auto* materials=new QGroupBox(QStringLiteral("Matériau sélectionné"));
@@ -186,6 +191,7 @@ private:
         connect(cameraBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){azimuth_->setValue(0);requestRender();});
         connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){requestRender();});
         connect(qualityBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){requestRender();});
+        connect(edgeAa_,&QCheckBox::toggled,this,[this](bool){requestRender();});
         connect(azimuth_,&QSlider::sliderReleased,this,[this]{requestRender();});
         connect(roughness_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double){modifyMaterial();});
         connect(metallic_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double){modifyMaterial();});
@@ -337,8 +343,10 @@ private:
         const int w=qualityBox_->currentIndex()==0?480:qualityBox_->currentIndex()==1?800:1280;
         const int h=w*9/16;
         const bool wantGpu=backendBox_->currentIndex()==1;
+        const bool edgeAA=edgeAa_->isChecked();
+        const unsigned sampleCount=qualityBox_->currentIndex()==2?4u:1u;
         statusBar()->showMessage(QStringLiteral("Calcul de l'image…"));
-        watcher_.setFuture(QtConcurrent::run([snapshot,preset,w,h,wantGpu]{
+        watcher_.setFuture(QtConcurrent::run([snapshot,preset,w,h,wantGpu,edgeAA,sampleCount]{
             Result result;
             updateLighting(15.f);
             const auto camera=v16::makeCamera(preset,w,h);
@@ -358,10 +366,12 @@ private:
                 std::atomic<uint64_t> generation{1};
                 stats=m3d::render(snapshot->renderScene,shadow,camera,w,h,pixels,
                              std::max(1u,std::min(8u,std::thread::hardware_concurrency())),
-                             false,generation,1,1,false,false,false,3);
+                             false,generation,1,sampleCount,false,false,false,3);
                 result.renderer=QStringLiteral("CPU Ray Tracing — PBR et mipmaps");
             }else result.gpu=true;
             result.milliseconds=stats.ms;
+            if(edgeAA && pixels.size()==size_t(w)*size_t(h))
+                pixels=antialiasEdges4(pixels,w,h,4,false);
             if(pixels.size()!=size_t(w)*h){
                 result.error+=QStringLiteral("Image incomplète");
                 return result;
