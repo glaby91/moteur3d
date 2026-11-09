@@ -21,7 +21,7 @@ static_assert(sizeof(GpuTri)==128,"GPU triangle layout differs from HLSL");
 // Source albedo/roughness/normal maps are uploaded separately to a texture array.
 struct alignas(16) GpuMaterial { float albedo[3]; float roughnessScale; float metallic,transmission,ior,pad; };
 static_assert(sizeof(GpuMaterial)==32, "GPU material buffer layout mismatch");
-struct alignas(16) Params { float eye[3],tanHalf,forward[3],aspect,right[3],nearPlane,up[3],farPlane; uint32_t width,height,nodeCount,triangleCount,rootIndex,maxTraversal,materialCount,textureBaseSize; float sunDirection[3],ambientStrength; float skyZenith[3],skyStrength; float skyHorizon[3],sunStrength; };
+struct alignas(16) Params { float eye[3],tanHalf,forward[3],aspect,right[3],nearPlane,up[3],farPlane; uint32_t width,height,nodeCount,triangleCount,rootIndex,maxTraversal,materialCount,textureBaseSize; float sunDirection[3],ambientStrength; float skyZenith[3],skyStrength; float skyHorizon[3],sunStrength; float sunColor[3],skyFillStrength; };
 static_assert(sizeof(Params)%16==0, "GPU constant buffer must be aligned");
 void v3(float* dst,V v){dst[0]=v.x;dst[1]=v.y;dst[2]=v.z;}
 template<class T> bool makeSrv(ID3D11Device* d,const std::vector<T>& values,ComPtr<ID3D11ShaderResourceView>& srv){
@@ -327,12 +327,17 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
  params.rootIndex=uint32_t(scene.root);
  params.maxTraversal=uint32_t(std::min<size_t>(1000000,scene.node.size()*4+1));
  params.materialCount=c.materialCount;params.textureBaseSize=gpuTextureBaseSize;
- v3(params.sunDirection,sun);params.ambientStrength=.60f;
+ v3(params.sunDirection,sun);params.ambientStrength=.59f;
  params.skyZenith[0]=skyZenith.x/255.f;params.skyZenith[1]=skyZenith.y/255.f;
  params.skyZenith[2]=skyZenith.z/255.f;
  params.skyHorizon[0]=skyHorizon.x/255.f;params.skyHorizon[1]=skyHorizon.y/255.f;
  params.skyHorizon[2]=skyHorizon.z/255.f;
- params.skyStrength=1.f;params.sunStrength=.90f*std::max(.05f,daylight);
+ params.skyStrength=1.f;
+ params.sunStrength=.90f*std::max(.05f,daylight);
+ params.sunColor[0]=sunTint.x/255.f;
+ params.sunColor[1]=sunTint.y/255.f;
+ params.sunColor[2]=sunTint.z/255.f;
+ params.skyFillStrength=.23f;
  c.ctx->UpdateSubresource(c.constant.Get(),0,nullptr,&params,0,0);
  ID3D11ShaderResourceView* srvs[]={c.srv0.Get(),c.srv1.Get(),c.srv2.Get(),
                                     c.srv3.Get(),c.srv4.Get()};
