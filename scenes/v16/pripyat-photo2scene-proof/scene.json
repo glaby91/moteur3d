@@ -1,0 +1,29 @@
+{
+  "format": "m3d-scene-v16",
+  "name": "Energetik - Photo2Scene WARP - façade partielle non validée",
+  "version": 1,
+  "units": "unités de travée normalisées (non métriques)",
+  "sectors": [
+    {
+      "id": "energetik_façade_test",
+      "geometry": [
+        "geometry/box.json"
+      ],
+      "instances": [
+        "instances/wire.json"
+      ],
+      "materials": [
+        "materials/technical.json"
+      ],
+      "pbr": [
+        "pbr/technical.json"
+      ],
+      "cameras": [
+        "cameras/photos.json"
+      ],
+      "lighting": [
+        "lighting/day.json"
+      ]
+    }
+  ]
+}
