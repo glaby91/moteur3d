@@ -28,7 +28,7 @@ int main(int argc,char** argv){
     qInfo()<<"Geometry BVH and mips ready";
     const int w=384,h=216;
     const auto cam=m3d::v16::makeCamera(built.runtime.cameras.front(),w,h);
-    m3d::updateLighting(15.f);
+    m3d::updateLighting(built.runtime.daylightHour);
     m3d::Stats shadows;
     qInfo()<<"Building shadow map";
     const auto shadow=m3d::buildShadow(built.runtime.renderScene,shadows);
