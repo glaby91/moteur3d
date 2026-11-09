@@ -1,0 +1,35 @@
+{
+  "format": "m3d-cameras-v1",
+  "cameras": [
+    {
+      "id": "main",
+      "name": "01 · Atelier, textures et lumière",
+      "position": [
+        12,
+        8,
+        19
+      ],
+      "target": [
+        0,
+        3.1,
+        0
+      ],
+      "fovDegrees": 64
+    },
+    {
+      "id": "brick",
+      "name": "02 · Brique en lumière rasante",
+      "position": [
+        -1.8,
+        3.5,
+        13.5
+      ],
+      "target": [
+        -5,
+        3.2,
+        -3.9
+      ],
+      "fovDegrees": 51
+    }
+  ]
+}
