@@ -7,6 +7,7 @@ on:
       - 'v16/**'
       - 'scenes/v16/pavillon01/**'
       - 'scenes/v16/material-lab/**'
+      - 'scenes/v16/pripyat-photo2scene-proof/**'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_v16_bridge.*'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_scene_v16.*'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/moteur3d_v16_qt.cpp'
@@ -20,6 +21,7 @@ on:
       - 'v16/**'
       - 'scenes/v16/pavillon01/**'
       - 'scenes/v16/material-lab/**'
+      - 'scenes/v16/pripyat-photo2scene-proof/**'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_v16_bridge.*'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_compute11.cpp'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/shaders/**'
@@ -137,6 +139,7 @@ jobs:
           git rev-parse HEAD | Out-File "dist/REVISION.txt" -Encoding ascii
           Copy-Item "build-v16/Release/pavillon01" "dist/pavillon01" -Recurse
           Copy-Item "build-v16/Release/material-lab" "dist/material-lab" -Recurse
+          Copy-Item "build-v16/Release/pripyat-photo2scene-proof" "dist/pripyat-photo2scene-proof" -Recurse
           Copy-Item "build-v16/Release/shaders" "dist/shaders" -Recurse
           windeployqt --release --no-translations dist/moteur3d_v16.exe
           windeployqt --release --no-translations dist/moteur3d_v16_benchui.exe
