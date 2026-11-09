@@ -2,32 +2,79 @@
   "format": "m3d-cameras-v1",
   "cameras": [
     {
-      "id": "front",
+      "id": "facade",
+      "name": "Façade sud",
       "position": [
-        24,
-        12,
-        26
+        28,
+        13,
+        32
       ],
       "target": [
         0,
-        3,
+        3.3,
         0
       ],
       "fovDegrees": 55
     },
     {
-      "id": "garden",
+      "id": "jardin",
+      "name": "Terrasse et jardin",
       "position": [
-        -15,
-        5,
-        22
+        -18,
+        8,
+        23
       ],
       "target": [
         0,
-        3,
+        3.3,
         0
       ],
-      "fovDegrees": 65
+      "fovDegrees": 54
+    },
+    {
+      "id": "salon",
+      "name": "Intérieur salon",
+      "position": [
+        -5,
+        1.7,
+        3
+      ],
+      "target": [
+        1,
+        1.6,
+        -2
+      ],
+      "fovDegrees": 74
+    },
+    {
+      "id": "etage",
+      "name": "Chambres",
+      "position": [
+        -5,
+        4.8,
+        2
+      ],
+      "target": [
+        1,
+        5.1,
+        -3.5
+      ],
+      "fovDegrees": 69
+    },
+    {
+      "id": "vue_aerienne",
+      "name": "Vue aérienne",
+      "position": [
+        22,
+        28,
+        21
+      ],
+      "target": [
+        0,
+        2,
+        0
+      ],
+      "fovDegrees": 52
     }
   ]
 }
