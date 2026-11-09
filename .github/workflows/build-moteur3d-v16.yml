@@ -39,8 +39,22 @@ jobs:
         run: cmake -S v16 -B build-v16 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
       - name: Compile
         run: cmake --build build-v16 --config Release --parallel 4
+      - name: Diagnose Qt runtime and test process exit codes
+        shell: pwsh
+        run: |
+          Write-Host "Qt6Core.dll on PATH:"
+          where.exe Qt6Core.dll
+          Write-Host "Qt6Gui.dll on PATH:"
+          where.exe Qt6Gui.dll
+          Write-Host "Scene test:"
+          & "build-v16/Release/v16_scene_check.exe" "scenes/v16/pavillon01/scene.json"
+          Write-Host "v16_scene_check exit code: $LASTEXITCODE"
+          Write-Host "Render test:"
+          & "build-v16/Release/v16_render_smoke.exe" "scenes/v16/pavillon01/scene.json" "build-v16/pavillon01-smoke.png"
+          Write-Host "v16_render_smoke exit code: $LASTEXITCODE"
+          exit 0
       - name: Validate Pavillon 01
-        run: ctest --test-dir build-v16 -C Release --output-on-failure
+        run: ctest --test-dir build-v16 -C Release --verbose --output-on-failure
       - name: Verify CPU preview PNG
         shell: pwsh
         run: |
