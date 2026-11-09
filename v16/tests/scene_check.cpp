@@ -35,6 +35,12 @@ int main(int argc,char** argv){
     for(const auto& object:r.objects)if(object.triangleCount<=0){
         qCritical()<<"Empty object:"<<object.id;return 1;
     }
+    if(!s.finiteGround){qCritical()<<"V16 must not use implicit infinite ground";return 1;}
+    // A downward ray beyond the bounded Pavillon site must see the sky.
+    m3d::Stats terrainStats;
+    m3d::Hit outside;
+    m3d::closest(s,m3d::Ray{{50.f,8.f,50.f},{0.f,-1.f,0.f}},outside,&terrainStats,true);
+    if(outside.id!=-1){qCritical()<<"Unexpected infinite or external ground";return 1;}
     m3d::Stats stats;
     m3d::Ray ray{{0.f,11.f,22.f},m3d::norm({0.f,-.3f,-1.f})};
     m3d::Hit hit;
