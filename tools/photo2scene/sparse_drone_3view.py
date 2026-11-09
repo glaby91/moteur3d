@@ -148,7 +148,7 @@ def main():
         cap.release()
     if len({tuple(frame.shape) for frame in frames}) != 1:
         raise ValueError("Video resolution changed within selected frames")
-    feat = [detect(frame, conf["roi_polygons_px"][str(t)])
+    feat = [detect(frame, conf["roi_polygons_px"][str(float(t))])
             for frame, t in zip(frames, timestamps)]
     geom = triangulate(feat[0][0], feat[1][0], feat[2][0],
                        feat[0][1], feat[1][1], feat[2][1],
