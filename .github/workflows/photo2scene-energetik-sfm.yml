@@ -39,7 +39,7 @@ jobs:
           p=Path('tools/photo2scene/data/pripyat/energetik-drone-3view-rois.json')
           d=json.loads(p.read_text())
           assert d['frame_seconds']==[373,374.25,375.5]
-          assert all(len(d['roi_polygons_px'][str(t)])==4 for t in d['frame_seconds'])
+          assert all(len(d['roi_polygons_px'][str(float(t))])==4 for t in d['frame_seconds'])
           assert not list(Path('tools/photo2scene').glob('**/*.mp4'))
           print('ROI coverage PASS, no user-video published')
           PY
