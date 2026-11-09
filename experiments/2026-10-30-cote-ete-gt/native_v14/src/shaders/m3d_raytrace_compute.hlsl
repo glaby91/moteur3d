@@ -195,6 +195,20 @@ float4 tracePrimary(Ray ray) {
         float roughness=saturate(PbrMaps.SampleLevel(RepeatTrilinear,
                                 float3(uv,tri.material*3+2),mip).r*material.roughnessScale);
         float3 local=shadeSurface(ray,hit,n,base,roughness,material.metallic);
+        // Bounded, shallow architectural pool (IOR approximately 1.333):
+        // a subtle sky reflection is much more convincing than showing the stone
+        // basin through a noisy opaque-looking top. Still a single-bounce preview.
+        const bool pool=(material.ior>1.28f&&material.ior<1.38f&&
+                         material.transmission>.05f);
+        const float facing=saturate(dot(-ray.direction,normalize(n)));
+        const float edge=pow(1.f-facing,3.f);
+        if(pool) {
+            Ray reflected;
+            reflected.origin=ray.origin+ray.direction*hit.t+n*.02f;
+            reflected.direction=reflect(ray.direction,n);
+            float3 skyReflected=background(reflected);
+            local=lerp(local,skyReflected,.17f+.34f*edge);
+        }
         float t=saturate(material.transmission);
         if(t<=.05f) {
             accumulated+=throughput*local;
@@ -202,9 +216,9 @@ float4 tracePrimary(Ray ray) {
         }
         // Straight-through glass: let the ray see interior faces and their lighting.
         // Fresnel-like edge tint. Refraction and multi-bounce GI are not simulated.
-        float facing=saturate(dot(-ray.direction,normalize(n)));
-        float edge=pow(1.f-facing,5.f);
-        float opacity=saturate((1.f-t)*.68f+.06f+.20f*edge);
+        float glassEdge=pow(1.f-facing,5.f);
+        float opacity=pool?saturate(.77f+.12f*edge):
+                            saturate((1.f-t)*.68f+.06f+.20f*glassEdge);
         accumulated+=throughput*local*opacity;
         throughput*=1.f-opacity;
         ray.origin=ray.origin+ray.direction*(hit.t+.03f);
