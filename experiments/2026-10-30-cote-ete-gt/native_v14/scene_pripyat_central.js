@@ -53,6 +53,13 @@ const M3D_POLISSYA_ORIENTATION_DEGREES=90;
 const M3D_PRIPYAT_FACADE_PERIOD =
   typeof process !== 'undefined' && process.env && process.env.M3D_PRIPYAT_FACADE_PERIOD === 'abandoned'
     ? 'abandoned' : 'pre1986';
+// Energetik's open lattice canopy seen on the 2026-11-09 aerial reference.
+// A photo-study option ONLY: the screenshot does not establish roof coverage,
+// as-built dimensions or an independent connection to Hotel Polissya.
+const M3D_ENERGETIK_FORECOURT_LATTICE_MODE =
+  typeof process !== 'undefined' && process.env &&
+  process.env.M3D_ENERGETIK_FORECOURT_LATTICE === 'photo-study'
+    ? 'photo-study' : 'off';
 // Changing facade propaganda is independent from changing the period.
 // In particular IMG-022 is EXCLUDED as a source for the arcade roof.
 // 1986 is the XXVII CPSU Congress; 1985 is the victory-anniversary banner.
@@ -715,6 +722,90 @@ function m3dBuildEnergetikRearWall({box}, a=M3D_ENERGETIK_ARCH){
   }
   if(cursor<last)box(cursor,1.0,wallZ0,last,8.75,wallZ1,'concrete');
 }
+
+// Energetik, forecourt corner — separate open lattice photographed from above.
+// Important: this is NOT the independent Polissya arcade built by
+// m3dBuildConnector(). All positions are preliminary scene-relative estimates.
+// Original imagery: user-provided aerial screenshot, 09 Nov 2026, 924x530.
+function m3dBuildEnergetikForecourtLattice({box,meshTriangle},a=M3D_ENERGETIK_ARCH){
+  if(M3D_ENERGETIK_FORECOURT_LATTICE_MODE!=='photo-study')
+    return {enabled:false,subject:'Energetik',geometryStatus:'UNVALIDATED_PHOTO_STUDY'};
+  const e=a.envelope;
+  // Place at the right-front sector, outside the front facade. Control points
+  // are NOT surveyed positions and must not constrain the actual blockout.
+  const control=[
+    [e.x1-1.6,e.z1+1.8],
+    [e.x1+9.5,e.z1+3.0],
+    [e.x1+13.8,e.z1+26.4]
+  ];
+  const halfWidth=1.82,roofY=3.78,sections=24,railDepth=.31;
+  const center=(t)=>{
+    const u=1-t;
+    return [u*u*control[0][0]+2*u*t*control[1][0]+t*t*control[2][0],
+            u*u*control[0][1]+2*u*t*control[1][1]+t*t*control[2][1]];
+  };
+  const point=(t,offset=0)=>{
+    const [x,z]=center(t),u=1-t;
+    const dx=2*u*(control[1][0]-control[0][0])+2*t*(control[2][0]-control[1][0]);
+    const dz=2*u*(control[1][1]-control[0][1])+2*t*(control[2][1]-control[1][1]);
+    const inv=1/Math.hypot(dx,dz);
+    return [x-offset*dz*inv,z+offset*dx*inv];
+  };
+  // Real 3D rectangular profiles, not a fake flat rectangular roof.
+  const beam=(a0,b0,width,depth,material)=>{
+    const dx=b0[0]-a0[0],dz=b0[2]-a0[2],length=Math.hypot(dx,dz);
+    if(length<1e-5)throw new Error('Energetik lattice: degenerate rib');
+    const nx=-dz/length*width*.5,nz=dx/length*width*.5;
+    const v=[
+      [a0[0]+nx,a0[1]-depth/2,a0[2]+nz],
+      [a0[0]-nx,a0[1]-depth/2,a0[2]-nz],
+      [b0[0]-nx,b0[1]-depth/2,b0[2]-nz],
+      [b0[0]+nx,b0[1]-depth/2,b0[2]+nz],
+      [a0[0]+nx,a0[1]+depth/2,a0[2]+nz],
+      [a0[0]-nx,a0[1]+depth/2,a0[2]-nz],
+      [b0[0]-nx,b0[1]+depth/2,b0[2]-nz],
+      [b0[0]+nx,b0[1]+depth/2,b0[2]+nz]
+    ];
+    const faces=[[0,1,2],[0,2,3],[4,7,6],[4,6,5],
+      [0,3,7],[0,7,4],[1,5,6],[1,6,2],
+      [0,4,5],[0,5,1],[3,2,6],[3,6,7]];
+    for(const [i,j,k] of faces){
+      const q=index=>({p:v[index],n:[0,1,0],uv:[0,0]});
+      meshTriangle(q(i),q(j),q(k),material);
+    }
+  };
+  // Two curved longitudinal perimeter rails + a narrow central rib.
+  // Open bays remain truly open: no opaque slab above or between profiles.
+  for(let k=0;k<sections;k++){
+    const t0=k/sections,t1=(k+1)/sections;
+    for(const side of [-1,1]){
+      const p0=point(t0,side*halfWidth),p1=point(t1,side*halfWidth);
+      beam([p0[0],roofY,p0[1]],[p1[0],roofY,p1[1]],.26,railDepth,'concrete');
+    }
+    const p0=point(t0,0),p1=point(t1,0);
+    beam([p0[0],roofY+.025,p0[1]],[p1[0],roofY+.025,p1[1]],.16,.19,'metal');
+  }
+  // Cross ribs visible from the aerial image, regularly spaced as a working
+  // approximation only. No false claims about their real interval in metres.
+  const crossRibs=11;
+  for(let k=0;k<=crossRibs;k++){
+    const t=k/crossRibs;
+    const l=point(t,-halfWidth),r=point(t,halfWidth);
+    beam([l[0],roofY,l[1]],[r[0],roofY,r[1]],.20,.20,'concrete');
+  }
+  // Simple paired posts for spatial preview. Their spacing is provisional.
+  const postStations=[.15,.33,.51,.69,.87];
+  for(const t of postStations)for(const sign of [-1,1]){
+    const [x,z]=point(t,sign*(halfWidth-.22));
+    box(x-.18,.10,z-.18,x+.18,roofY-.13,z+.18,'concrete');
+    box(x-.27,.035,z-.27,x+.27,.15,z+.27,'stone');
+  }
+  return {enabled:true,subject:'Energetik',geometryStatus:'UNVALIDATED_PHOTO_STUDY',
+    control,halfWidth,roofY,crossRibs:crossRibs+1,postCount:postStations.length*2,
+    roofCladding:false,adjacentTo:'Energetik front-right exterior',
+    independentFrom:'Polissya arcade',point};
+}
+
 // The exterior shell is isolated from interiors and roof features.
 // Its slabs and walls are intentionally separated to preserve camera access.
 function m3dBuildEnergetikShell({box},cfg=M3D_PRIPYAT_BLOCKOUT.energetik){
@@ -1392,6 +1483,7 @@ function makeScene() {
   m3dBuildEnergetikFacade({box,roundBox,objects});
   m3dBuildEnergetik1986FacadeGlazing({box});
   m3dBuildEnergetikHistoricEntry({box});
+  m3dBuildEnergetikForecourtLattice({box,meshTriangle});
   m3dBuildEnergetikCongressFacade({box,meshTriangle,capsule});
   m3dBuildEnergetikHistoricalRoofTitle({box});
   m3dBuildEnergetikArchitecturalAccents({box,capsule});
