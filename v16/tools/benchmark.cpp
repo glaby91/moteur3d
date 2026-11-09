@@ -123,8 +123,9 @@ int main(int argc,char** argv){
         out<<QStringLiteral("[%1] %2 — %3 ms\n").arg(status,id).arg(r.value("wallMs").toDouble(),0,'f',1);
         out.flush();
     };
-    const QVector<QSize> resolutions=quick?QVector<QSize>{QSize(320,180)}:
-        QVector<QSize>{QSize(400,225),QSize(800,450),QSize(1280,720)};
+    // All saved benchmark images are at least Full HD. Larger sizes are opt-in via full mode.
+    const QVector<QSize> resolutions=quick?QVector<QSize>{QSize(1920,1080)}:
+        QVector<QSize>{QSize(1920,1080),QSize(2560,1440),QSize(3840,2160)};
     const QVector<int> threads=quick?QVector<int>{1}:QVector<int>{1,2,4,8,16};
     const int cameraCount=quick?1:int(cameras.size());
     const std::atomic<uint64_t> generation{1};
@@ -154,7 +155,7 @@ int main(int argc,char** argv){
             }
         }
         if(!quick){
-            const QSize size(800,450);
+            const QSize size(1920,1080);
             const auto cam=v16::makeCamera(preset,size.width(),size.height());
             std::vector<uint32_t> pixels(size_t(size.width())*size_t(size.height()));
             const auto t0=std::chrono::steady_clock::now();
@@ -171,7 +172,7 @@ int main(int argc,char** argv){
             record(r);
         }
         if(!cpuOnly){
-            const QSize gpuSize(800,450);
+            const QSize gpuSize(1920,1080);
             const auto cam=v16::makeCamera(preset,gpuSize.width(),gpuSize.height());
             Stats stats;std::wstring why;std::vector<uint32_t> pixels;
             const auto t0=std::chrono::steady_clock::now();
