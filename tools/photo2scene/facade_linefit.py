@@ -9,7 +9,7 @@ from pathlib import Path
 from photo2scene import GeometryError, least_squares
 
 
-def fit_structural_lines(groups: dict, width: int, height: int) -> dict:
+def fit_structural_lines(groups: dict, width: int, height: int, families: tuple[str, ...] = ("roof", "upper_openings", "balcony_front")) -> dict:
     """Fit each architectural level to y=m*x+b in the original image pixels.
 
     A common vanishing point is accepted only if independently fitted level
@@ -19,7 +19,9 @@ def fit_structural_lines(groups: dict, width: int, height: int) -> dict:
     if width <= 0 or height <= 0:
         raise GeometryError("Invalid photograph resolution")
     models = {}
-    for name in ("roof", "upper_openings", "balcony_front"):
+    if len(families) != 3 or len(set(families)) != 3:
+        raise GeometryError("Exactly three different structural line families are required")
+    for name in families:
         segs = groups.get(name, [])
         if len(segs) < 2:
             raise GeometryError("Not enough independent segments for " + name)
@@ -74,7 +76,8 @@ def main() -> int:
     args=p.parse_args()
     data=json.loads(args.input.read_text(encoding="utf-8"))
     image=data["image"]
-    result=fit_structural_lines(data["line_groups"],image["width"],image["height"])
+    result=fit_structural_lines(data["line_groups"],image["width"],image["height"],
+                               tuple(data.get("fit_families",("roof","upper_openings","balcony_front"))))
     result["photo_id"]=image["id"]
     result["sha256"]=image.get("sha256")
     result["two_view_matches"]="NOT_VALIDATED"
