@@ -58,6 +58,15 @@ int main(int argc,char** argv) {
   qCritical()<<"Changing sun hour did not change GPU Full HD illumination:"
              <<QString::fromStdWString(eveningError);return 1;
  }
+ QImage eveningImage(width,height,QImage::Format_ARGB32);
+ for(int y=0;y<height;++y)
+  std::memcpy(eveningImage.scanLine(y),
+              eveningPixels.data()+size_t(y)*width,size_t(width)*4);
+ const QString eveningPath=QFileInfo(QString::fromLocal8Bit(argv[2])).absolutePath()+
+                           QStringLiteral("/pavillon01-evening-gpu-warp.png");
+ if(!eveningImage.save(eveningPath,"PNG")){
+  qCritical()<<"Unable to save GPU sunset Full HD image";return 1;
+ }
  m3d::updateLighting(runtime.runtime.daylightHour);
  std::vector<uint32_t> restoredPixels;
  m3d::Stats restoredStats;std::wstring restoredError;
