@@ -18,7 +18,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Python geometry tests (no AI inference, no third party dependencies)
+      - name: Install numerical geometry solvers (no AI inference)
+        run: python3 -m pip install "numpy>=1.26,<3" "scipy>=1.13,<2" "opencv-python-headless>=4.9,<5"
+      - name: Python unit geometry and multiview regression tests
         run: python3 -m unittest discover -s tools/photo2scene/tests -v
       - name: Compute synthetic ground homography and camera FOV
         run: |
@@ -77,13 +79,29 @@ jobs:
           assert result["three_dimensional_distances"] is None
           print("Third photo: 1920x1080 candidate segment fits, no false 3D claims")
           PY
+      - name: Solve three-camera 3D facade rig and export OBJ without historical-scale claims
+        run: |
+          python3 tools/photo2scene/multiview_facade.py tools/photo2scene/data/pripyat/energetik-20261109-threeview-facade-anchors.json -o reprojection-3d
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=json.loads(Path("reprojection-3d/facade-calibration.json").read_text())
+          assert len(p["cameras"])==3
+          assert p["status"]=="EXPERIMENTAL_PARTIAL_FRONT_FACADE"
+          assert p["gauge"]["meters_per_bay"] is None
+          assert p["optimization"]["success"]
+          assert all(c["holdout"]["rms_px"]<10 for c in p["cameras"])
+          assert Path("reprojection-3d/energetik-front-plane-units.obj").stat().st_size > 100
+          print("3 cameras optimized; native OBJ saved; holdout residuals verified")
+          PY
       - uses: actions/upload-artifact@v4
         with:
-          name: Photo2Scene-WARP-Energetik-three-views-geometry-reports
+          name: Photo2Scene-WARP-Energetik-3D-calibration-and-reports
           path: |
             ground-result.json
             fov-result.json
             energetik-camera-preliminary.json
             energetik-second-linefit.json
             energetik-third-linefit.json
+            reprojection-3d/
           if-no-files-found: error
