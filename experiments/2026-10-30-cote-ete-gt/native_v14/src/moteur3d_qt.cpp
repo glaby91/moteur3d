@@ -1,4 +1,5 @@
 #include "m3d_engine.h"
+#include "m3d_scene_v16.h"
 #include "version.h"
 
 #include <QAction>
@@ -9,6 +10,9 @@
 #include <QCoreApplication>
 #include <QCloseEvent>
 #include <QDialog>
+#include <QDockWidget>
+#include <QTreeWidget>
+#include <QTabWidget>
 #include <QElapsedTimer>
 #include <QFile>
 #include <QFormLayout>
@@ -561,6 +565,7 @@ public:
         auto* fileMenu = menuBar()->addMenu(QStringLiteral("Scène"));
         auto* openScene = fileMenu->addAction(QStringLiteral("Ouvrir une scène…"));
         connect(openScene, &QAction::triggered, this, [this] { openSceneFile(); });
+        setupV16Browser();
         auto* toolsMenu = menuBar()->addMenu(QStringLiteral("Outils"));
         benchmarkAction_ = toolsMenu->addAction(QStringLiteral("Benchmark du moteur…"));
         connect(benchmarkAction_, &QAction::triggered, this, [this] { openBenchmark(); });
@@ -585,7 +590,10 @@ public:
     }
 
 private:
-    Scene scene_;
+    
+    QTreeWidget* v16SceneTree_ = nullptr;
+    QTreeWidget* v16ResourceTree_ = nullptr;
+Scene scene_;
     ShadowMap shadows_;
     std::mutex sceneMutex_;
     QString currentScenePath_;
@@ -1028,9 +1036,61 @@ private:
             [this] { navigationIdleTimer_->start(450); });
     }
 
+    void setupV16Browser() {
+        auto* dock = new QDockWidget(QStringLiteral("V16 — Arbre de scène et ressources"), this);
+        auto* tabs = new QTabWidget(dock);
+        v16SceneTree_ = new QTreeWidget(tabs);
+        v16SceneTree_->setHeaderLabels({QStringLiteral("Scène / objet"), QStringLiteral("Type")});
+        v16ResourceTree_ = new QTreeWidget(tabs);
+        v16ResourceTree_->setHeaderLabels({QStringLiteral("Ressource"), QStringLiteral("Fichier")});
+        tabs->addTab(v16SceneTree_, QStringLiteral("Hiérarchie"));
+        tabs->addTab(v16ResourceTree_, QStringLiteral("Ressources"));
+        dock->setWidget(tabs);
+        addDockWidget(Qt::LeftDockWidgetArea, dock);
+        dock->setMinimumWidth(280);
+    }
+
+    void displayV16Scene(const m3d::v16::SceneDatabase& database) {
+        v16SceneTree_->clear();
+        v16ResourceTree_->clear();
+        auto* sceneRoot = new QTreeWidgetItem(v16SceneTree_, {database.name, QStringLiteral("Scène V16")});
+        for (const auto& sector : database.sectors) {
+            auto* sectorItem = new QTreeWidgetItem(sceneRoot, {sector.id, QStringLiteral("Secteur")});
+            for (auto it = sector.resources.cbegin(); it != sector.resources.cend(); ++it) {
+                auto* category = new QTreeWidgetItem(v16ResourceTree_, {sector.id + QStringLiteral("/") + it.key(), QString()});
+                for (const auto& resource : it.value()) {
+                    new QTreeWidgetItem(category, {QFileInfo(resource.path).fileName(), resource.path});
+                    if (it.key() == QStringLiteral("instances")) {
+                        const auto instances = resource.data.value(QStringLiteral("instances")).toArray();
+                        for (const auto& instance : instances) {
+                            const auto obj = instance.toObject();
+                            new QTreeWidgetItem(sectorItem, {obj.value(QStringLiteral("geometry")).toString(),
+                                                              QStringLiteral("Instance")});
+                        }
+                    }
+                }
+            }
+        }
+        v16SceneTree_->expandAll();
+        v16ResourceTree_->expandToDepth(1);
+    }
+
+    void openV16SceneFile(const QString& path) {
+        const auto result = m3d::v16::loadScene(path);
+        if (!result) {
+            QMessageBox::critical(this, QStringLiteral("Scène V16 invalide"), result.error);
+            return;
+        }
+        displayV16Scene(result.scene);
+        QMessageBox::information(this, QStringLiteral("Scène V16 chargée"),
+            QStringLiteral("Manifeste et ressources chargés dans l'arbre. Le rendu des maillages V16 n'est pas encore raccordé."));
+    }
+
     void openSceneFile() {
-        const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Ouvrir une scène"), currentScenePath_, QStringLiteral("Scènes Moteur 3D (*.bin);;Tous les fichiers (*.*)"));
+        const QString path = QFileDialog::getOpenFileName(this, QStringLiteral("Ouvrir une scène"), currentScenePath_, QStringLiteral("Scène V16 (scene.json);;Tous les fichiers JSON (*.json)"));
         if (path.isEmpty()) return;
+        openV16SceneFile(path);
+        return;
         Scene loaded;
         std::wstring error;
 #ifdef _WIN32
