@@ -196,7 +196,7 @@ private:
         auto* form=new QFormLayout;
         cameraBox_=new QComboBox;
         backendBox_=new QComboBox;
-        backendBox_->addItems({QStringLiteral("CPU Ray Tracing PBR"),QStringLiteral("GPU D3D11 Compute — aperçu")});
+        backendBox_->addItems({QStringLiteral("CPU Ray Tracing PBR"),QStringLiteral("GPU D3D11 Compute — couleurs simples")});
 #ifndef _WIN32
         backendBox_->setItemData(1,0,Qt::UserRole-1);
 #endif
@@ -408,7 +408,7 @@ private:
             if(wantGpu){
                 std::wstring reason;
                 ok=renderCompute11Preview(snapshot->renderScene,camera,w,h,pixels,stats,reason);
-                if(ok)result.renderer=QStringLiteral("GPU D3D11 Compute (aperçu géométrique, PBR CPU)");
+                if(ok)result.renderer=QStringLiteral("GPU D3D11 Compute (couleurs + soleil, sans ombres/PBR)");
                 else result.error=QStringLiteral("GPU indisponible (%1) — retour CPU. ").arg(QString::fromStdWString(reason));
             }
             if(!ok){
