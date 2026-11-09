@@ -81,6 +81,11 @@ set_tests_properties(v16_pavillon01_loader PROPERTIES TIMEOUT 240)
 add_test(NAME v16_pavillon01_cpu_render
     COMMAND v16_render_smoke "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01/scene.json" "${CMAKE_CURRENT_BINARY_DIR}/pavillon01-smoke.png")
 set_tests_properties(v16_pavillon01_cpu_render PROPERTIES TIMEOUT 240)
+# Independent scene uses precisely the same C++ renderer and PBR loader.
+add_test(NAME v16_material_lab_cpu_render
+    COMMAND v16_render_smoke "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/material-lab/scene.json"
+        "${CMAKE_CURRENT_BINARY_DIR}/material-lab-cpu.png")
+set_tests_properties(v16_material_lab_cpu_render PROPERTIES TIMEOUT 240)
 add_executable(v16_gi_smoke "${CMAKE_CURRENT_SOURCE_DIR}/tests/gi_smoke.cpp")
 target_link_libraries(v16_gi_smoke PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
 if(MSVC)
@@ -90,6 +95,10 @@ add_test(NAME v16_cpu_global_illumination_fullhd
     COMMAND v16_gi_smoke "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01/scene.json"
         "${CMAKE_CURRENT_BINARY_DIR}/pavillon01-gi-smoke.png")
 set_tests_properties(v16_cpu_global_illumination_fullhd PROPERTIES TIMEOUT 240)
+add_test(NAME v16_material_lab_cpu_gi
+    COMMAND v16_gi_smoke "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/material-lab/scene.json"
+        "${CMAKE_CURRENT_BINARY_DIR}/material-lab-gi.png")
+set_tests_properties(v16_material_lab_cpu_gi PROPERTIES TIMEOUT 240)
 add_test(NAME v16_benchmark_quick
     COMMAND moteur3d_v16_benchmark
         "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01/scene.json"
@@ -106,6 +115,11 @@ if(WIN32)
             "${CMAKE_CURRENT_BINARY_DIR}/pavillon01-gpu-warp.png")
     set_tests_properties(v16_gpu_compute_warp
         PROPERTIES TIMEOUT 240 ENVIRONMENT "M3D_V16_FORCE_WARP=1")
+    add_test(NAME v16_material_lab_gpu_warp
+        COMMAND v16_gpu_warp_smoke "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/material-lab/scene.json"
+            "${CMAKE_CURRENT_BINARY_DIR}/material-lab-gpu.png")
+    set_tests_properties(v16_material_lab_gpu_warp
+        PROPERTIES TIMEOUT 240 ENVIRONMENT "M3D_V16_FORCE_WARP=1")
 endif()
 if(WIN32)
     add_executable(v16_shader_check "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_check.cpp")
@@ -118,6 +132,9 @@ add_custom_command(TARGET moteur3d_v16 POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01"
         "$<TARGET_FILE_DIR:moteur3d_v16>/pavillon01"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/material-lab"
+        "$<TARGET_FILE_DIR:moteur3d_v16>/material-lab"
     COMMAND ${CMAKE_COMMAND} -E make_directory
         "$<TARGET_FILE_DIR:moteur3d_v16>/shaders"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -127,5 +144,6 @@ add_custom_command(TARGET moteur3d_v16 POST_BUILD
 install(TARGETS moteur3d_v16 moteur3d_v16_core moteur3d_v16_benchmark moteur3d_v16_benchui
     RUNTIME DESTINATION . LIBRARY DESTINATION . ARCHIVE DESTINATION lib)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01" DESTINATION .)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/material-lab" DESTINATION .)
 install(FILES "${NATIVE_SRC}/shaders/m3d_raytrace_compute.hlsl" DESTINATION shaders)
 # No V3/V4/V5 binary loader, exporter or legacy Qt application is linked into V16.
