@@ -33,6 +33,15 @@ V linearToSrgb(V c){return{linearToSrgb(c.x),linearToSrgb(c.y),linearToSrgb(c.z)
 uint32_t hash32(uint32_t x){x^=x>>16;x*=0x7feb352du;x^=x>>15;x*=0x846ca68bu;x^=x>>16;return x;}
 float noise(int x,int y,uint32_t seed){return float(hash32(uint32_t(x)*73856093u ^ uint32_t(y)*19349663u ^ seed)&0xffffu)/65535.f;}
 V scale(V a,V b){return {a.x*b.x,a.y*b.y,a.z*b.z};}
+float smoothNoise(float x,float y,uint32_t seed) {
+    const int ix=int(std::floor(x)),iy=int(std::floor(y));
+    const float fx=x-ix,fy=y-iy;
+    const float sx=fx*fx*(3.f-2.f*fx),sy=fy*fy*(3.f-2.f*fy);
+    const float a=noise(ix,iy,seed),b=noise(ix+1,iy,seed);
+    const float c=noise(ix,iy+1,seed),d=noise(ix+1,iy+1,seed);
+    return ((a+(b-a)*sx)*(1.f-sy)+(c+(d-c)*sx)*sy);
+}
+
 
 void triangle(Scene& scene,V a,V b,V c,V uv0,V uv1,V uv2,int material,V normal={}) {
     const V e1=b-a,e2=c-a;
@@ -178,7 +187,7 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
     const uint32_t seed=hash32(uint32_t(qHash(pattern)));
     for(int y=0;y<resolution;y++)for(int x=0;x<resolution;x++){
         const float u=float(x)/resolution,v=float(y)/resolution;
-        const float n=noise(x/5,y/5,seed),fine=noise(x,y,seed^0x9e3779b9u);
+        const float n=smoothNoise(float(x)/7.f,float(y)/7.f,seed),fine=noise(x,y,seed^0x9e3779b9u);
         float factor=1.f;
         // Subtle large-scale patterns read better than high-frequency salt-and-pepper.
         // All patterns feed the same mipmap pipeline used by CPU and GPU.
@@ -197,8 +206,10 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
         else if(pattern=="fabric")
             factor=.91f+.065f*std::sin(u*260.f)*std::sin(v*260.f);
         else if(pattern=="lawn"||pattern=="foliage") {
-            const float broad=.5f+.5f*std::sin(u*17.f+v*11.f)*std::cos(v*19.f-u*7.f);
-            factor=.83f+.20f*broad+.10f*(n-.5f);
+            // Break up repetitive lattice/checkerboard patterns at Full HD.
+            const float broad=smoothNoise(u*13.f,v*13.f,seed^0x85ebca6bu);
+            const float medium=smoothNoise(u*41.f,v*41.f,seed^0xc2b2ae35u);
+            factor=.92f+.15f*(broad-.5f)+.065f*(medium-.5f)+.035f*(n-.5f);
         }
         else if(pattern=="water") {
             // Gentle caustic-like light variation without opaque stripes.
