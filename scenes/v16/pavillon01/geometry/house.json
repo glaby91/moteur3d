@@ -18,6 +18,11 @@
       "segments": 12,
       "rings": 8,
       "uv": "spherical"
+    },
+    {
+      "id": "foliage_canopy",
+      "type": "foliage_canopy",
+      "description": "Organic leaf clusters with undulating silhouette and sparse leaf facets; deterministic triangles in both renderers"
     }
   ]
 }
