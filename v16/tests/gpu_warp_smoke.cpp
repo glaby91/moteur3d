@@ -62,8 +62,8 @@ int main(int argc,char** argv) {
  for(int y=0;y<height;++y)
   std::memcpy(eveningImage.scanLine(y),
               eveningPixels.data()+size_t(y)*width,size_t(width)*4);
- const QString eveningPath=QFileInfo(QString::fromLocal8Bit(argv[2])).absolutePath()+
-                           QStringLiteral("/pavillon01-evening-gpu-warp.png");
+ const QFileInfo target(QString::fromLocal8Bit(argv[2]));
+    const QString eveningPath=target.absolutePath()+"/"+target.completeBaseName()+"-17h.png";
  if(!eveningImage.save(eveningPath,"PNG")){
   qCritical()<<"Unable to save GPU sunset Full HD image";return 1;
  }
