@@ -111,6 +111,7 @@ private:
     QComboBox* directSamples_=nullptr;
     QCheckBox* progressiveGi_=nullptr;
     QCheckBox* denoiseGi_=nullptr;
+    QCheckBox* denoiseDirect_=nullptr;
     QCheckBox* edgeAa_=nullptr;
     QSlider* azimuth_=nullptr;
     QDoubleSpinBox* roughness_=nullptr;
@@ -240,6 +241,8 @@ private:
         denoiseGi_=new QCheckBox(QStringLiteral("Débruitage GI bilatéral (optionnel)"));
         denoiseGi_->setChecked(true);
         denoiseGi_->setEnabled(false);
+        denoiseDirect_=new QCheckBox(QStringLiteral("Débruitage CPU direct (bilatéral)"));
+        denoiseDirect_->setChecked(false); // avoid blurring PBR details by default
         azimuth_=new QSlider(Qt::Horizontal);
         azimuth_->setRange(-180,180);
         azimuth_->setValue(0);
@@ -252,6 +255,7 @@ private:
         vertical->addLayout(form);
         vertical->addWidget(progressiveGi_);
         vertical->addWidget(denoiseGi_);
+        vertical->addWidget(denoiseDirect_);
         edgeAa_=new QCheckBox(QStringLiteral("Antialiasing des contours"));
         edgeAa_->setChecked(true);
         vertical->addWidget(edgeAa_);
@@ -279,6 +283,7 @@ private:
         connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int index){
             const bool gi=index>=2;
             directSamples_->setEnabled(index==0);
+            denoiseDirect_->setEnabled(index==0);
             giSamples_->setEnabled(gi);
             progressiveGi_->setEnabled(gi);
             denoiseGi_->setEnabled(gi);
@@ -289,6 +294,7 @@ private:
         connect(giSamples_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){if(backendBox_->currentIndex()>=2)requestRender();});
         connect(progressiveGi_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()>=2)requestRender();});
         connect(denoiseGi_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()>=2)requestRender();});
+        connect(denoiseDirect_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()==0)requestRender();});
         connect(edgeAa_,&QCheckBox::toggled,this,[this](bool){requestRender();});
         connect(azimuth_,&QSlider::sliderReleased,this,[this]{requestRender();});
         connect(roughness_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double){modifyMaterial();});
@@ -463,10 +469,11 @@ private:
         const unsigned maxBounces=backend==2?2u:4u;
         const bool progressive=globalIllumination&&progressiveGi_->isChecked();
         const bool denoise=globalIllumination&&denoiseGi_->isChecked();
+        const bool denoiseDirect=!globalIllumination&&!wantGpu&&denoiseDirect_->isChecked();
         statusBar()->showMessage(QStringLiteral("Calcul de l'image…"));
         const auto shadowCache=cpuShadows_;
         watcher_.setFuture(QtConcurrent::run([this,serial,token,snapshot,preset,w,h,wantGpu,
-            globalIllumination,edgeAA,sampleCount,maxBounces,progressive,denoise,shadowCache]{
+            globalIllumination,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache]{
             Result result;
             updateLighting(snapshot->daylightHour);
             const auto camera=v16::makeCamera(preset,w,h);
@@ -546,6 +553,7 @@ private:
                 std::atomic<uint64_t> generation{1};
                 stats=m3d::render(snapshot->renderScene,*shadow,camera,w,h,pixels,
                                   workers,false,generation,1,sampleCount,false,false,false,3);
+                if(denoiseDirect) pixels=denoiseBilateral(pixels,w,h,workers);
                 result.renderer=shadowReused
                     ?QStringLiteral("CPU Ray Tracing — %1 spp, ombres en cache").arg(sampleCount)
                     :QStringLiteral("CPU Ray Tracing — %1 spp, ombres calculées").arg(sampleCount);
