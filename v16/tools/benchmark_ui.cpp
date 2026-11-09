@@ -45,7 +45,7 @@ public:
         layout->addWidget(quick_);layout->addWidget(cpuOnly_);
         layout->addWidget(new QLabel(QStringLiteral(
             "Complet : 6 caméras, 400/800/1280 px, 1/2/4/8/16 threads, "
-            "test CPU 4 spp et essai GPU par caméra. GPU sans accélération : test ignoré, jamais simulé.")));
+            "test CPU 4 spp et essai GPU par caméra (couleurs sans PBR). GPU sans accélération : test ignoré, jamais simulé.")));
         auto* controls=new QHBoxLayout;
         start_=new QPushButton(QStringLiteral("Lancer le benchmark complet"));
         stop_=new QPushButton(QStringLiteral("Arrêter"));
