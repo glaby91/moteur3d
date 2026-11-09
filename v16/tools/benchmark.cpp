@@ -94,7 +94,7 @@ int main(int argc,char** argv){
         {"textureResolution",built.runtime.textureResolution},{"daylightHour",built.runtime.daylightHour},
         {"buildSceneMs",loadMs},{"buildShadowMs",shadowMs},
         {"quick",quick},{"cpuOnly",cpuOnly},
-        {"note","GPU Compute previews material colors and direct sunlight; it does not support textured PBR, shadows or reflections and must not be compared as quality parity with CPU."}
+        {"note","GPU Compute uses procedural PBR mip textures, hard sun shadows and straight-through transparency; no physical reflections, GI or CPU quality parity."}
     };
     if(!writeJson(directory.filePath("system.json"),manifest)){err<<"Cannot write system metadata\n";return 3;}
     QJsonArray records;
@@ -184,7 +184,7 @@ int main(int argc,char** argv){
                 image=QStringLiteral("images/%1.png").arg(id);
                 if(!writePng(directory.filePath(image),pixels,gpuSize.width(),gpuSize.height()))image.clear();
             }
-            r["id"]=id;r["backend"]="gpu";r["mode"]="compute_lit_material_preview";r["camera"]=preset.id;
+            r["id"]=id;r["backend"]="gpu";r["mode"]="compute_pbr_shadow_preview";r["camera"]=preset.id;
             r["width"]=gpuSize.width();r["height"]=gpuSize.height();r["threads"]=0;
             r["samples"]=1;r["wallMs"]=wallMs;r["status"]=ok?"ok":"skipped";
             r["error"]=ok?QString():QString::fromStdWString(why);
