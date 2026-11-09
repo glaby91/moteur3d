@@ -1,0 +1,44 @@
+name: Photo2Scene — geometry regression tests
+
+on:
+  push:
+    branches:
+      - feature/v16-modular-scene-dispatch
+    paths:
+      - 'tools/photo2scene/**'
+      - '.github/workflows/photo2scene-geometry.yml'
+  pull_request:
+    paths:
+      - 'tools/photo2scene/**'
+      - '.github/workflows/photo2scene-geometry.yml'
+  workflow_dispatch:
+
+jobs:
+  geometry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python geometry tests (no AI inference, no third party dependencies)
+        run: python3 -m unittest discover -s tools/photo2scene/tests -v
+      - name: Compute synthetic ground homography and camera FOV
+        run: |
+          python3 tools/photo2scene/photo2scene.py analyse tools/photo2scene/examples/synthetic-ground-anchors.json -o ground-result.json
+          python3 tools/photo2scene/photo2scene.py analyse tools/photo2scene/examples/synthetic-orthogonal-vanishing.json -o fov-result.json
+          python3 - <<'PY'
+          import json
+          a=json.load(open("ground-result.json"))
+          b=json.load(open("fov-result.json"))
+          assert a["planes"]["ground"]["fitting"]["rms_px"] < 1e-5
+          assert a["planes"]["ground"]["held_out_validation"]["rms_px"] < 1e-5
+          f=b["camera_intrinsics_estimate"]
+          assert abs(f["focal_length_px"]-1200.0) < 1e-4
+          assert 70.0 < f["fov_horizontal_deg"] < 80.0
+          print("Synthetic photo geometry tests PASSED")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Photo2Scene-synthetic-geometry-reports
+          path: |
+            ground-result.json
+            fov-result.json
+          if-no-files-found: error
