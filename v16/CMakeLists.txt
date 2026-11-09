@@ -86,6 +86,13 @@ add_test(NAME v16_benchmark_quick
         "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01/scene.json"
         "${CMAKE_CURRENT_BINARY_DIR}/benchmark-tests" --quick)
 set_tests_properties(v16_benchmark_quick PROPERTIES TIMEOUT 240)
+if(WIN32)
+    add_executable(v16_shader_check "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_check.cpp")
+    target_link_libraries(v16_shader_check PRIVATE d3dcompiler)
+    add_test(NAME v16_hlsl_compute_shader
+        COMMAND v16_shader_check "${NATIVE_SRC}/shaders/m3d_raytrace_compute.hlsl")
+    set_tests_properties(v16_hlsl_compute_shader PROPERTIES TIMEOUT 60)
+endif()
 add_custom_command(TARGET moteur3d_v16 POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01"
