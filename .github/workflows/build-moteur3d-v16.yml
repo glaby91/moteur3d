@@ -1,4 +1,4 @@
-name: Moteur3D V16 — Pavillon 01 — Windows x64
+name: CSE WARP V16 — multi-scene lighting — Windows x64
 on:
   push:
     branches:
@@ -6,6 +6,7 @@ on:
     paths:
       - 'v16/**'
       - 'scenes/v16/pavillon01/**'
+      - 'scenes/v16/material-lab/**'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_v16_bridge.*'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_scene_v16.*'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/moteur3d_v16_qt.cpp'
@@ -18,6 +19,7 @@ on:
     paths:
       - 'v16/**'
       - 'scenes/v16/pavillon01/**'
+      - 'scenes/v16/material-lab/**'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_v16_bridge.*'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_compute11.cpp'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/shaders/**'
@@ -57,7 +59,7 @@ jobs:
           & "build-v16/Release/v16_render_smoke.exe" "scenes/v16/pavillon01/scene.json" "build-v16/pavillon01-smoke.png"
           Write-Host "v16_render_smoke exit code: $LASTEXITCODE"
           exit 0
-      - name: Validate Pavillon 01
+      - name: Validate multi-scene lighting and graphics
         run: ctest --test-dir build-v16 -C Release --verbose --output-on-failure
       - name: Verify benchmark reports
         shell: pwsh
@@ -97,7 +99,7 @@ jobs:
       - name: Verify Full HD PNG dimensions
         shell: pwsh
         run: |
-          foreach ($path in @("build-v16/pavillon01-smoke.png", "build-v16/pavillon01-gpu-warp.png", "build-v16/pavillon01-gi-smoke.png", "build-v16/pavillon01-evening-cpu.png", "build-v16/pavillon01-evening-gpu-warp.png")) {
+          foreach ($path in @("build-v16/pavillon01-smoke.png", "build-v16/pavillon01-gpu-warp.png", "build-v16/pavillon01-gi-smoke.png", "build-v16/pavillon01-smoke-17h.png", "build-v16/pavillon01-gpu-warp-17h.png", "build-v16/material-lab-cpu.png", "build-v16/material-lab-gpu.png", "build-v16/material-lab-gi.png", "build-v16/material-lab-cpu-17h.png", "build-v16/material-lab-gpu-17h.png")) {
             if (!(Test-Path $path)) { throw "Reference PNG missing: $path" }
             $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $path))
             if ($bytes.Length -lt 24) { throw "Invalid PNG header: $path" }
@@ -125,10 +127,16 @@ jobs:
           Copy-Item "build-v16/pavillon01-smoke.png" "dist/Pavillon01-CPU-Preview.png"
           Copy-Item "build-v16/pavillon01-gi-smoke.png" "dist/Pavillon01-CPU-GI-FHD-Preview.png"
           Copy-Item "build-v16/pavillon01-gpu-warp.png" "dist/Pavillon01-GPU-WARP-Preview.png"
-          Copy-Item "build-v16/pavillon01-evening-cpu.png" "dist/Pavillon01-CPU-Soleil-Rasant-17h-FHD.png"
-          Copy-Item "build-v16/pavillon01-evening-gpu-warp.png" "dist/Pavillon01-GPU-Soleil-Rasant-17h-FHD.png"
+          Copy-Item "build-v16/pavillon01-smoke-17h.png" "dist/Pavillon01-CPU-Soleil-Rasant-17h-FHD.png"
+          Copy-Item "build-v16/pavillon01-gpu-warp-17h.png" "dist/Pavillon01-GPU-Soleil-Rasant-17h-FHD.png"
+          Copy-Item "build-v16/material-lab-cpu.png" "dist/Atelier-Materiaux-CPU-FHD.png"
+          Copy-Item "build-v16/material-lab-gi.png" "dist/Atelier-Materiaux-CPU-GI-FHD.png"
+          Copy-Item "build-v16/material-lab-gpu.png" "dist/Atelier-Materiaux-GPU-FHD.png"
+          Copy-Item "build-v16/material-lab-cpu-17h.png" "dist/Atelier-Materiaux-CPU-17h-FHD.png"
+          Copy-Item "build-v16/material-lab-gpu-17h.png" "dist/Atelier-Materiaux-GPU-17h-FHD.png"
           git rev-parse HEAD | Out-File "dist/REVISION.txt" -Encoding ascii
           Copy-Item "build-v16/Release/pavillon01" "dist/pavillon01" -Recurse
+          Copy-Item "build-v16/Release/material-lab" "dist/material-lab" -Recurse
           Copy-Item "build-v16/Release/shaders" "dist/shaders" -Recurse
           windeployqt --release --no-translations dist/moteur3d_v16.exe
           windeployqt --release --no-translations dist/moteur3d_v16_benchui.exe
