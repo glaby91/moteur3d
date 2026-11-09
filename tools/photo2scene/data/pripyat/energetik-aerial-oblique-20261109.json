@@ -1,0 +1,149 @@
+{
+  "schema": "photo2scene-warp-image-space-observation-v1",
+  "source": {
+    "label": "user screenshot (drone aerial, Energetik)",
+    "filename": "image(20261109-221430).png",
+    "width_px": 924,
+    "height_px": 530,
+    "asset_policy": "Image remains attached to conversation, not copied into repository",
+    "capture_date": "unknown",
+    "camera_intrinsics": "unknown"
+  },
+  "observed_geometry": {
+    "front_roof_top_edge": [
+      [
+        423,
+        173
+      ],
+      [
+        710,
+        221
+      ]
+    ],
+    "front_window_head": [
+      [
+        428,
+        201
+      ],
+      [
+        704,
+        252
+      ]
+    ],
+    "front_window_sill": [
+      [
+        421,
+        300
+      ],
+      [
+        709,
+        380
+      ]
+    ],
+    "front_lower_band": [
+      [
+        418,
+        321
+      ],
+      [
+        708,
+        391
+      ]
+    ],
+    "side_roof": [
+      [
+        710,
+        221
+      ],
+      [
+        921,
+        169
+      ]
+    ],
+    "side_window_head": [
+      [
+        711,
+        243
+      ],
+      [
+        923,
+        194
+      ]
+    ],
+    "side_lower_band": [
+      [
+        710,
+        390
+      ],
+      [
+        921,
+        321
+      ]
+    ],
+    "front_and_side_corner": [
+      710,
+      221
+    ],
+    "curved_canopy_outer_trace_px": [
+      [
+        774,
+        393
+      ],
+      [
+        788,
+        390
+      ],
+      [
+        813,
+        394
+      ],
+      [
+        839,
+        405
+      ],
+      [
+        872,
+        431
+      ],
+      [
+        904,
+        454
+      ],
+      [
+        924,
+        478
+      ]
+    ]
+  },
+  "measurements": {
+    "front_vp_px": [
+      -900.56,
+      -39.28
+    ],
+    "front_rms_distance_px": 24.96,
+    "front_fit_status": "POOR_MANUAL_FIT_NOT_VALIDATED",
+    "side_vp_px": [
+      2424.83,
+      -175.18
+    ],
+    "side_rms_distance_px": 19.48,
+    "side_fit_status": "POOR_MANUAL_FIT_NOT_VALIDATED",
+    "pixel_points_uncertainty_estimate_px": [
+      3,
+      8
+    ],
+    "meters_per_pixel": null,
+    "canopy_radius_m": null
+  },
+  "inferences": {
+    "confirmed": "Palais Energetik in right foreground, long front facade, lateral return, roof sign. Curved open framework very near building corner.",
+    "unverified": "Physical canopy attachment and identification as independent Polissya arcade cannot be established from this frame.",
+    "excluded": "Apartment/hotel identities in the background not inferred."
+  },
+  "action": {
+    "update_photo_reference": true,
+    "modify_energetik_geometry": false,
+    "modify_polissya_arcade": false,
+    "reason": "Single image plus high fit residuals; needs second calibrated perspective and validated common keypoints"
+  }
+}
