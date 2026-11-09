@@ -85,6 +85,90 @@
       "pattern": "foliage",
       "recipe": "grass",
       "resolution": 2048
+    },
+    {
+      "id": "tex_roof_membrane",
+      "material": "roof_membrane",
+      "pattern": "roof",
+      "recipe": "roof",
+      "resolution": 1024
+    },
+    {
+      "id": "tex_zinc_coping",
+      "material": "zinc_coping",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 512
+    },
+    {
+      "id": "tex_facade_cedar",
+      "material": "facade_cedar",
+      "pattern": "wood",
+      "recipe": "wood",
+      "resolution": 1024
+    },
+    {
+      "id": "tex_basalt_plinth",
+      "material": "basalt_plinth",
+      "pattern": "stone",
+      "recipe": "stone",
+      "resolution": 512
+    },
+    {
+      "id": "tex_window_gasket",
+      "material": "window_gasket",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 512
+    },
+    {
+      "id": "tex_wood_deck",
+      "material": "wood_deck",
+      "pattern": "wood",
+      "recipe": "wood",
+      "resolution": 1024
+    },
+    {
+      "id": "tex_travertine",
+      "material": "travertine",
+      "pattern": "stone",
+      "recipe": "stone",
+      "resolution": 1024
+    },
+    {
+      "id": "tex_ceramic_tile",
+      "material": "ceramic_tile",
+      "pattern": "porcelain",
+      "recipe": "porcelain",
+      "resolution": 1024
+    },
+    {
+      "id": "tex_terrazzo",
+      "material": "terrazzo",
+      "pattern": "stone",
+      "recipe": "stone",
+      "resolution": 1024
+    },
+    {
+      "id": "tex_roof_vent",
+      "material": "roof_vent",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 512
+    },
+    {
+      "id": "tex_textile_rug",
+      "material": "textile_rug",
+      "pattern": "fabric",
+      "recipe": "fabric",
+      "resolution": 512
+    },
+    {
+      "id": "tex_warm_brass",
+      "material": "warm_brass",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 512
     }
   ]
 }
