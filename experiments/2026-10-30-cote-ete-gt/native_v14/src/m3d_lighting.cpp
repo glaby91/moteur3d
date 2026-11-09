@@ -5,16 +5,27 @@ V sun=norm({.70f,.78f,-.714f}),skyZenith={126,170,209},skyHorizon={244,185,134},
 float daylight=1.f,lampFactor=0.f;
 std::vector<Light> pointLights;
 void updateLighting(float hour){
+ // Solar elevation and azimuth change together, not elevation alone:
+ // the roof and façade normal maps reveal different relief as the sun moves.
  float t=clampf((hour-6.f)/13.f,0.f,1.f);
- daylight=std::sin(PI*t);
- float dusk=clampf(1.f-std::abs(hour-18.3f)/2.3f,0.f,1.f),dawn=clampf(1.f-std::abs(hour-7.1f)/1.8f,0.f,1.f),warm=std::max(dusk,dawn*.72f);
+ daylight=std::max(0.f,std::sin(PI*t));
+ float dusk=clampf(1.f-std::abs(hour-18.3f)/2.3f,0.f,1.f);
+ float dawn=clampf(1.f-std::abs(hour-7.1f)/1.8f,0.f,1.f);
+ float warm=std::max(dusk,dawn*.72f);
  lampFactor=clampf((hour-17.f)/3.f,0.f,1.f);
- sun=norm({.70f,-.16f+.92f*daylight,-.714f});
- V dayZenith={132,184,230},nightZenith={28,23,39},dayHorizon={205,222,236},nightHorizon={77,45,38};
- skyZenith=dayZenith*daylight+nightZenith*(1-daylight);
- skyHorizon=dayHorizon*daylight+nightHorizon*(1-daylight);
- skyHorizon=skyHorizon*(1-warm)+V{255,139,92}*warm;
- sunTint=V{255,246,223}*(1-warm)+V{255,128,70}*warm;
+ const float azimuth=(hour-14.75f)*.12f;
+ const float c=std::cos(azimuth),si=std::sin(azimuth);
+ const float x=.70f*c+.714f*si;
+ const float z=.70f*si-.714f*c;
+ sun=norm({x,-.16f+.92f*daylight,z});
+ // Neutral airy zenith, slightly warm haze near the horizon.
+ // Keep day surfaces below overexposure: the shaders provide the contrast.
+ const V dayZenith={122,172,217},nightZenith={28,23,39};
+ const V dayHorizon={219,225,230},nightHorizon={77,45,38};
+ skyZenith=dayZenith*daylight+nightZenith*(1.f-daylight);
+ skyHorizon=dayHorizon*daylight+nightHorizon*(1.f-daylight);
+ skyHorizon=skyHorizon*(1.f-warm*.42f)+V{255,171,128}*(warm*.42f);
+ sunTint=V{255,246,225}*(1.f-warm)+V{255,173,112}*warm;
  pointLights.clear();
  if(lampFactor>.005f){
   pointLights.push_back({{6.35f,.72f,-4.2f},11.5f,3.2f*lampFactor,{255,166,92}});
