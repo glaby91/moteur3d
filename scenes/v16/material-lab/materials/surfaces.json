@@ -1,0 +1,122 @@
+{
+  "format": "m3d-materials-v1",
+  "materials": [
+    {
+      "id": "brick_clay",
+      "baseColor": [
+        0.64,
+        0.28,
+        0.19
+      ],
+      "roughness": 0.88,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_brick_clay"
+    },
+    {
+      "id": "lime_plaster",
+      "baseColor": [
+        0.78,
+        0.76,
+        0.69
+      ],
+      "roughness": 0.85,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_lime_plaster"
+    },
+    {
+      "id": "architect_concrete",
+      "baseColor": [
+        0.63,
+        0.64,
+        0.62
+      ],
+      "roughness": 0.75,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_architect_concrete"
+    },
+    {
+      "id": "timber",
+      "baseColor": [
+        0.53,
+        0.32,
+        0.17
+      ],
+      "roughness": 0.62,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_timber"
+    },
+    {
+      "id": "slate_stone",
+      "baseColor": [
+        0.43,
+        0.45,
+        0.46
+      ],
+      "roughness": 0.7,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_slate_stone"
+    },
+    {
+      "id": "steel",
+      "baseColor": [
+        0.55,
+        0.59,
+        0.63
+      ],
+      "roughness": 0.35,
+      "metallic": 0.72,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_steel"
+    },
+    {
+      "id": "transparent_glass",
+      "baseColor": [
+        0.58,
+        0.77,
+        0.88
+      ],
+      "roughness": 0.09,
+      "metallic": 0,
+      "transmission": 0.85,
+      "ior": 1.51,
+      "textureSet": "tex_transparent_glass"
+    },
+    {
+      "id": "roof_bitumen",
+      "baseColor": [
+        0.28,
+        0.3,
+        0.32
+      ],
+      "roughness": 0.91,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_roof_bitumen"
+    },
+    {
+      "id": "meadow",
+      "baseColor": [
+        0.32,
+        0.42,
+        0.24
+      ],
+      "roughness": 0.92,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_meadow"
+    }
+  ]
+}
