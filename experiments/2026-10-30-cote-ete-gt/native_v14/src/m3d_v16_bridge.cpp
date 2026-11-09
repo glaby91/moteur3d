@@ -208,7 +208,10 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution) {
                 c.fov=f(j.value("fovDegrees"),55.f);
                 result.runtime.cameras.push_back(c);
             }
-        for(const auto& file:sector.resources.value("lighting"))
+        for(const auto& file:sector.resources.value("lighting")) {
+            const float requestedHour=f(file.data.value("hour"),15.f);
+            if(std::isfinite(requestedHour) && requestedHour>=6.f && requestedHour<=19.f)
+                result.runtime.daylightHour=requestedHour;
             for(const auto& item:file.data.value("lights").toArray()){
                 const auto j=item.toObject();Light l;
                 l.p=v3(j.value("position"));l.radius=f(j.value("radius"),8.f);
@@ -216,6 +219,7 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution) {
                 l.color=v3(j.value("color"),{255,220,190});
                 render.lights.push_back(l);
             }
+        }
     }
     if(materialDocs.isEmpty()||meshes.isEmpty()||instanceDocs.isEmpty()){
         result.error="Missing meshes, instances or materials";return result;
