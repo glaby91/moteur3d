@@ -103,7 +103,12 @@ V traceColor(const Scene&s,const ShadowMap&sm,const Camera&cam,const Ray&input,S
   const float eta=entering?1.f/ior:ior;
   const float sin2=std::max(0.f,1.f-cosine*cosine),k=1.f-eta*eta*sin2;
   const bool totalInternalReflection=k<=0.f;
-  const float reflectedWeight=totalInternalReflection?1.f:fresnel;
+  // Pavillon 01 pool: retain a sky/building reflection even for a shallow,
+  // low-transmission water surface. Non-water glass keeps physical Schlick F0.
+  const bool architecturalWater=material.name=="water" && s.finiteGround;
+  const float waterEdge=std::pow(1.f-cosine,3.f);
+  const float reflectedWeight=totalInternalReflection?1.f:
+      architecturalWater?clampf(.15f+.32f*waterEdge,0.f,.72f):fresnel;
   const float pass=totalInternalReflection?0.f:(transmission*.01f)*(1.f-fresnel);
 
   V surface=shade(s,sm,cam,ray,hit,st,fog,false);
