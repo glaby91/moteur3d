@@ -1,0 +1,72 @@
+name: Build Moteur3D V16 — Pavillon 01
+on:
+  push:
+    branches:
+      - feature/v16-modular-scene-dispatch
+    paths:
+      - 'v16/**'
+      - 'scenes/v16/pavillon01/**'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_v16_bridge.*'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_scene_v16.*'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/moteur3d_v16_qt.cpp'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/m3d_engine.h'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_shading.cpp'
+      - '.github/workflows/build-moteur3d-v16.yml'
+  pull_request:
+    paths:
+      - 'v16/**'
+      - 'scenes/v16/pavillon01/**'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_v16_bridge.*'
+      - '.github/workflows/build-moteur3d-v16.yml'
+  workflow_dispatch:
+jobs:
+  windows:
+    name: Windows x64 Qt6 — compile, validate, package
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Qt6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Configure
+        shell: pwsh
+        run: cmake -S v16 -B build-v16 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+      - name: Compile
+        run: cmake --build build-v16 --config Release --parallel 4
+      - name: Validate Pavillon 01
+        run: ctest --test-dir build-v16 -C Release --output-on-failure
+      - name: Package EXE + Pavillon 01 + Qt6 dependencies
+        shell: pwsh
+        run: |
+          New-Item -Type Directory -Path "dist" -Force | Out-Null
+          Copy-Item "build-v16/Release/moteur3d_v16.exe" "dist/"
+          Copy-Item "build-v16/Release/pavillon01" "dist/pavillon01" -Recurse
+          Copy-Item "build-v16/Release/shaders" "dist/shaders" -Recurse
+          windeployqt --release --no-translations dist/moteur3d_v16.exe
+      - name: Upload complete Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moteur3D-V16-Pavillon01-Windows-x64
+          path: dist/
+          if-no-files-found: error
+  linux:
+    name: Linux Qt6 — compile and native validator
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Qt6 and compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-base-dev qt6-base-dev-tools
+      - name: Configure
+        run: cmake -S v16 -B build-v16-linux -DCMAKE_BUILD_TYPE=Release
+      - name: Compile
+        run: cmake --build build-v16-linux --parallel 4
+      - name: Validate Pavillon 01
+        run: ctest --test-dir build-v16-linux --output-on-failure
