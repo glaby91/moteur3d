@@ -1,0 +1,136 @@
+{
+  "status": "IMAGE_SPACE_CONSTRAINTS_ONLY",
+  "measured_on": "2026-11-09",
+  "source": "User-provided videos; media not published",
+  "historic_alignment": [
+    {
+      "pair_s": [
+        120,
+        124
+      ],
+      "orb_matches": 599,
+      "homography_inliers": 557,
+      "fundamental_inliers": 464,
+      "homography_rms_px_on_inliers": 1.2923930883407593,
+      "spatial_scale_roughly": 0.6,
+      "status": "dominant homography / possible zoom or reframing"
+    },
+    {
+      "pair_s": [
+        124,
+        128
+      ],
+      "orb_matches": 696,
+      "homography_inliers": 602,
+      "fundamental_inliers": 503,
+      "homography_rms_px_on_inliers": 1.3689007759094238,
+      "spatial_scale_roughly": 0.63,
+      "status": "dominant homography / possible zoom or reframing"
+    }
+  ],
+  "vertical_video": [
+    {
+      "pair_s": [
+        3,
+        5
+      ],
+      "orb_matches": 223,
+      "homography_inliers": 148,
+      "fundamental_inliers": 172,
+      "status": "uncalibrated candidate"
+    },
+    {
+      "pair_s": [
+        11,
+        13
+      ],
+      "orb_matches": 266,
+      "homography_inliers": 153,
+      "fundamental_inliers": 168,
+      "status": "uncalibrated candidate"
+    }
+  ],
+  "facade": {
+    "time_s": 128,
+    "quad_px": [
+      [
+        152,
+        93
+      ],
+      [
+        518,
+        94
+      ],
+      [
+        518,
+        164
+      ],
+      [
+        152,
+        159
+      ]
+    ],
+    "rectified_patch_size_px": [
+      1100,
+      250
+    ],
+    "candidate_repetition_px": 71,
+    "architectural_bay_count": null,
+    "scale_m": null,
+    "building_identity": "not confirmed"
+  },
+  "arcade": {
+    "time_s": 295,
+    "polyline_8_points": [
+      [
+        74,
+        354
+      ],
+      [
+        158,
+        355
+      ],
+      [
+        243,
+        345
+      ],
+      [
+        337,
+        328
+      ],
+      [
+        420,
+        302
+      ],
+      [
+        484,
+        274
+      ],
+      [
+        521,
+        249
+      ],
+      [
+        546,
+        235
+      ]
+    ],
+    "image_curve_model": "y=a*x^2+b*x+c",
+    "coefficients": [
+      -0.000725664768,
+      0.204792004,
+      341.340241
+    ],
+    "rms_fit_px": 2.242254564,
+    "world_curve_radius_m": null,
+    "physical_join_to_palace": "unconfirmed"
+  },
+  "mesh": {
+    "type": "image-aligned reference plane",
+    "unit_width": 1,
+    "scale_m": null,
+    "not_architectural_reconstruction": true
+  },
+  "historical_capture_dates_verified": false,
+  "notes": "All 2D measurements; excluded from automatically applying edits to M3D_ENERGETIK_ARCH until multiview geometry independently checked."
+}
