@@ -61,8 +61,8 @@ int main(int argc,char** argv){
     QImage eveningImage(w,h,QImage::Format_ARGB32);
     for(int y=0;y<h;++y)
         std::memcpy(eveningImage.scanLine(y),latePixels.data()+size_t(y)*w,w*4);
-    const QString eveningPath=QFileInfo(QString::fromLocal8Bit(argv[2])).absolutePath()+
-        QStringLiteral("/pavillon01-evening-cpu.png");
+    const QFileInfo target(QString::fromLocal8Bit(argv[2]));
+    const QString eveningPath=target.absolutePath()+"/"+target.completeBaseName()+"-17h.png";
     if(!eveningImage.save(eveningPath,"PNG")){
         qCritical()<<"Could not save Full HD grazing daylight preview";return 1;
     }
