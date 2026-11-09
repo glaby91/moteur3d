@@ -116,6 +116,18 @@ const M3D_ENERGETIK_ARCH = Object.freeze({
     // clear-span 44 x 26 m is a DESIGN HYPOTHESIS, not surveyed Energetik.
     courtLength:40,courtWidth:20,clearEnd:2,clearSide:3,
     doorwayLeft:-14.05,doorwayRight:-11.5,doorTop:2.65}),
+  // Auditorium 11.6 m means floor-to-UNDERSIDE clearance, not building height.
+  // Existing auditorium footprint is a visual blockout, NOT a surveyed 24x18m hall.
+  auditorium: Object.freeze({
+    floorY:0.38, clearHeight:11.6, ceilingUnderY:11.98,
+    roofThickness:0.30, roofTopY:12.28,
+    x0:-49.18, x1:-15.80, z0:-41.98, z1:-24.96
+  }),
+  // The project's 21 m stage fly-space is NOT added above the auditorium.
+  // 21 m is a working maximum height datum for a separate stage volume;
+  // no external stage box is located automatically from this datum.
+  stage: Object.freeze({highestExteriorStudyY:21.0, geometryLocated:false}),
+  // Existing EAST staircase roof remains independently located.
   tower: Object.freeze({roofY:14.0})
 });
 // Catch accidental double-booking of urban building footprints.
@@ -135,7 +147,7 @@ function m3dCheckUrbanFootprints(b=M3D_PRIPYAT_BLOCKOUT){
 m3dCheckUrbanFootprints();
 
 function m3dCheckEnergetikDatum(a=M3D_ENERGETIK_ARCH){
-  const {levels:l,foyer:f,envelope:e,sports:g}=a;
+  const {levels:l,foyer:f,envelope:e,sports:g,auditorium:aud,stage}=a;
   // A connected rear wing must touch the main shell, with an internal passage;
   // it must never be an independent block across an exterior courtyard.
   if(!(g.x0>=e.x0 && g.x1<=e.x1 && g.z0<e.z0-10 &&
@@ -157,6 +169,13 @@ function m3dCheckEnergetikDatum(a=M3D_ENERGETIK_ARCH){
        f.arcadePierTopY>f.mosaicBottomY && f.arcadePierTopY<l.firstSlab &&
        f.arcadePierZ.every(z=>z>=f.mosaicStartZ && z+f.arcadePierLength<=f.mosaicEndZ)))
     throw new Error('Energetik: mural arcade dimensions inconsistent');
+  if(!(Math.abs(aud.ceilingUnderY-(aud.floorY+aud.clearHeight))<1e-8 &&
+        Math.abs(aud.roofTopY-(aud.ceilingUnderY+aud.roofThickness))<1e-8 &&
+        aud.clearHeight===11.6 && stage.highestExteriorStudyY===21 &&
+        aud.floorY===l.ground && aud.ceilingUnderY>l.roof+2 &&
+        aud.roofTopY<stage.highestExteriorStudyY &&
+        aud.x0<aud.x1 && aud.z0<aud.z1))
+    throw new Error('Energetik: auditorium 11.6m clearance and 21m overall stage study inconsistent');
   if(Math.abs(f.firstLandingY-(l.firstSlab+l.slabThickness))>0.001)
     throw new Error('Energetik: stair landing and first floor disconnected');
   return true;
@@ -239,7 +258,9 @@ function m3dBuildEnergetikSlabs({box},a=M3D_ENERGETIK_ARCH){
     box(20,t,-42.2,27,b,-38.0,'concrete');
     box(20,t,-23.0,27,b,-20.1,'concrete');
   }
-  floorPlate(archLevels.firstSlab,true); floorPlate(archLevels.secondSlab);
+  // A clear 11.6 m auditorium needs openings through BOTH intermediate slabs.
+  // Side corridors remain, but the central audience hall is vertically open.
+  floorPlate(archLevels.firstSlab,true); floorPlate(archLevels.secondSlab,true);
 }
 function m3dBuildFoyerMuralArcade({box}, a=M3D_ENERGETIK_ARCH) {
   const f=a.foyer,l=a.levels, x0=f.mosaicWallX, x1=x0+f.arcadeDepth;
@@ -715,6 +736,30 @@ function m3dBuildEnergetikRearWall({box}, a=M3D_ENERGETIK_ARCH){
   }
   if(cursor<last)box(cursor,1.0,wallZ0,last,8.75,wallZ1,'concrete');
 }
+
+// Height-controlled auditorium envelope. This changes only the west theatre
+// volume, not the eastern foyer/mosaic, sports wing or hotel. 11.6 m is measured
+// from the theatre finished floor to the UNDERSIDE of the highest ceiling slab.
+// The 21 m stage fly-space is a distinct, still-unlocated building constraint.
+function m3dBuildEnergetikAuditoriumRoof({box},a=M3D_ENERGETIK_ARCH){
+  const h=a.auditorium, base=a.levels.secondSlab;
+  if(!(h.ceilingUnderY>base && h.roofTopY<=a.stage.highestExteriorStudyY))
+    throw new Error('Energetik: invalid auditorium roof datum');
+  // Upper load-bearing shell around the original, provisional auditorium plan.
+  // Separate opaque wall strips form actual geometry, never a filled hall cube.
+  box(h.x0,base,h.z0,h.x0+.24,h.ceilingUnderY,h.z1,'volcanicTuff');
+  box(h.x1-.24,base,h.z0,h.x1,h.ceilingUnderY,h.z1,'volcanicTuff');
+  box(h.x0,base,h.z0,h.x1,h.ceilingUnderY,h.z0+.22,'volcanicTuff');
+  box(h.x0,base,h.z1-.22,h.x1,h.ceilingUnderY,h.z1,'volcanicTuff');
+  // The roof is physically above the hall: exactly 11.6 m underside clearance.
+  box(h.x0,h.ceilingUnderY,h.z0,h.x1,h.roofTopY,h.z1,'concrete');
+  // Edged coping only at this taller roof, separated from the main roof.
+  for(const z of [h.z0,h.z1-.2])
+    box(h.x0,h.roofTopY,z,h.x1,h.roofTopY+.24,z+.20,'stone');
+  return {floorY:h.floorY,ceilingUnderY:h.ceilingUnderY,
+          clearHeight:h.ceilingUnderY-h.floorY,roofTopY:h.roofTopY};
+}
+
 // The exterior shell is isolated from interiors and roof features.
 // Its slabs and walls are intentionally separated to preserve camera access.
 function m3dBuildEnergetikShell({box},cfg=M3D_PRIPYAT_BLOCKOUT.energetik){
@@ -1387,6 +1432,7 @@ function makeScene() {
 
   // Main civic building: separately assembled exterior and detailed facade.
   m3dBuildEnergetikShell({box});
+  m3dBuildEnergetikAuditoriumRoof({box});
 
   // Independent facade assembly: main building remains traversable.
   m3dBuildEnergetikFacade({box,roundBox,objects});
@@ -1529,25 +1575,27 @@ function makeScene() {
 
   // Ground floor: foyer, abandoned auditorium, stage, and a few large room fixtures.
   for(let x=-12;x<=7;x+=6) capsule([x,0.38,-33.5],[x,8.9,-33.5],0.28,'stone');
-  // Hero cinema: a two-storey volume, not a low box. The first upper slab is
+  // Hero cinema: the audience volume has a measured-design target of 11.6 m
+  // clear height. All three levels above the room are now open below its roof.
+  // The first upper slab is
   // cut away above the audience; concrete girders still carry the room's roof.
   // The recovered Pripyat finish is red/rose volcanic tuff, now visible under
   // missing panels instead of a generic repeating grey wall.
-  const hallFloor=archLevels.ground, hallTop=archLevels.secondSlab;
+  const hallFloor=archLevels.ground, hallTop=M3D_ENERGETIK_ARCH.auditorium.ceilingUnderY;
   box(-49.18,hallFloor,-41.98,-48.94,hallTop,-24.96,'volcanicTuff');
   box(-16.04,hallFloor,-41.98,-15.80,hallTop,-31.52,'volcanicTuff');
   box(-16.04,hallFloor,-29.48,-15.80,hallTop,-24.96,'volcanicTuff'); // doorway to the hall
   box(-49.18,hallFloor,-42.00,-15.80,hallTop,-41.78,'volcanicTuff');
   // Structural girders, exposed services and broken suspended ceiling panels.
   for(const z of [-39.9,-36.5,-33.1,-29.7,-26.3]){
-    box(-48.6,5.74,z-0.28,-16.3,6.17,z+0.28,'concrete');
-    box(-48.6,5.62,z-0.34,-16.3,5.76,z-0.25,'rust');
+    box(-48.6,hallTop-.61,z-0.28,-16.3,hallTop-.18,z+0.28,'concrete');
+    box(-48.6,hallTop-.73,z-0.34,-16.3,hallTop-.59,z-0.25,'rust');
   }
   for(const x of [-44.0,-36.5,-29.0,-21.5])
-    box(x-0.22,5.80,-40.9,x+0.22,6.18,-25.2,'concrete');
+    box(x-0.22,hallTop-.57,-40.9,x+0.22,hallTop-.17,-25.2,'concrete');
   for(const [x,z,w,d] of [[-45.5,-38.7,4.1,1.5],[-39.0,-34.3,3.2,1.2],[-29.4,-28.8,4.0,1.7],[-21.6,-36.4,2.9,1.1]]){
-    box(x,6.18,z,x+w,6.23,z+d,'windowdark'); // lost ceiling cassette
-    box(x-0.16,5.96,z-0.10,x+w+0.20,6.04,z+d+0.14,'debris');
+    box(x,hallTop-.17,z,x+w,hallTop-.12,z+d,'windowdark');
+    box(x-0.16,hallTop-.39,z-0.10,x+w+0.20,hallTop-.31,z+d+0.14,'debris');
   }
   // Tuff panels are layered over the structural wall. Missing cladding exposes
   // rough concrete, with irregular edges and rust tracks at failed anchors.
@@ -1727,7 +1775,13 @@ function makeScene() {
 
   // Roof access: height driven by shared datum, retaining the existing materials.
   const mainRoofY=archLevels.roof, roofDeckTop=mainRoofY+0.30;
-  box(-49.2,mainRoofY,-42.2,-15,roofDeckTop,-20.1,'concrete');
+  // Main roof MUST have a real hole over the 11.6m auditorium.
+  // Otherwise the former 9.4m deck would cap the room below its ceiling.
+  const theatre=M3D_ENERGETIK_ARCH.auditorium;
+  box(-49.2,mainRoofY,-42.2,theatre.x0,roofDeckTop,-20.1,'concrete');
+  box(theatre.x1,mainRoofY,-42.2,-15,roofDeckTop,-20.1,'concrete');
+  box(theatre.x0,mainRoofY,-42.2,theatre.x1,roofDeckTop,theatre.z0,'concrete');
+  box(theatre.x0,mainRoofY,theatre.z1,theatre.x1,roofDeckTop,-20.1,'concrete');
   box(-15,mainRoofY,-42.2,8,roofDeckTop,-35.8,'concrete');
   box(-15,mainRoofY,-26.5,8,roofDeckTop,-20.1,'concrete');
   box(-15,mainRoofY,-35.8,-7,roofDeckTop,-26.5,'concrete');
