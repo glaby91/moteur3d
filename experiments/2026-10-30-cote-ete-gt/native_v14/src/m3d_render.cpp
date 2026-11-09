@@ -8,6 +8,8 @@ static uint32_t packHdr(V c){
  return 0xff000000u|(encode(c.x)<<16)|(encode(c.y)<<8)|encode(c.z);
 }
 Stats render(const Scene&s,const ShadowMap&sm,const Camera&cam,int w,int h,std::vector<uint32_t>&pixels,unsigned threads,bool fog,const std::atomic<uint64_t>&generation,uint64_t token,unsigned samplesPerPixel,bool depthOfField,bool useAvx2,bool offlinePathTrace,unsigned maxBounces){
+ if(w<=0||h<=0||size_t(w)>SIZE_MAX/size_t(h))return {};
+ pixels.resize(size_t(w)*size_t(h));
  auto start=std::chrono::steady_clock::now();std::atomic<int>next{0};std::atomic<uint64_t>rays{0},tests{0},aabb{0},nodes{0},hits{0},skies{0},texels{0},depth{0},simdRayPackets{0},simdTrianglePackets{0},simdTextureSamples{0},simdLightBatches{0};
  int nx=(w+15)/16,ny=(h+15)/16,total=nx*ny;const unsigned grid=samplesPerPixel==16?4u:samplesPerPixel==4?2u:1u;const unsigned sampleCount=offlinePathTrace?std::clamp(samplesPerPixel,1u,4096u):grid*grid;
  static constexpr float pattern[16][2]={{.125f,.125f},{.625f,.375f},{.375f,.625f},{.875f,.875f},{.375f,.125f},{.875f,.375f},{.125f,.625f},{.625f,.875f},{.875f,.125f},{.375f,.375f},{.625f,.625f},{.125f,.875f},{.625f,.125f},{.125f,.375f},{.875f,.625f},{.375f,.875f}};
