@@ -44,6 +44,7 @@
 #include <atomic>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -112,6 +113,15 @@ private:
     QLabel* materialLabel_=nullptr;
     QFutureWatcher<Result> watcher_;
     std::shared_ptr<v16::Runtime> runtime_;
+    // The sun and scene geometry do not change when navigating cameras.
+    // Reuse an identical shadow map across CPU renders of the same runtime.
+    struct CpuShadowCache {
+        std::mutex mutex;
+        std::weak_ptr<v16::Runtime> scene;
+        std::shared_ptr<const ShadowMap> shadow;
+        float hour=-1.f;
+    };
+    std::shared_ptr<CpuShadowCache> cpuShadows_=std::make_shared<CpuShadowCache>();
     bool pending_=false, updatingControls_=false;
     int selectedMaterial_=-1;
     QString scenePath_;
@@ -267,6 +277,9 @@ private:
         auto& m=runtime_->renderScene.mat[size_t(selectedMaterial_)];
         m.roughnessScale=float(roughness_->value());
         m.metallic=float(metallic_->value());
+        // Required for GPU fast-path cache invalidation. The shadow map itself
+        // depends only on geometry/sun, not on metallicity or roughness.
+        runtime_->renderScene.markGpuContentChanged();
         requestRender();
     }
     void saveMaterials(){
@@ -398,7 +411,8 @@ private:
         const bool edgeAA=edgeAa_->isChecked();
         const unsigned sampleCount=qualityBox_->currentIndex()==1?4u:1u;
         statusBar()->showMessage(QStringLiteral("Calcul de l'image…"));
-        watcher_.setFuture(QtConcurrent::run([snapshot,preset,w,h,wantGpu,edgeAA,sampleCount]{
+        const auto shadowCache=cpuShadows_;
+        watcher_.setFuture(QtConcurrent::run([snapshot,preset,w,h,wantGpu,edgeAA,sampleCount,shadowCache]{
             Result result;
             updateLighting(snapshot->daylightHour);
             const auto camera=v16::makeCamera(preset,w,h);
@@ -413,13 +427,30 @@ private:
             }
             if(!ok){
                 pixels.resize(size_t(w)*size_t(h));
-                Stats shadowStats;
-                const auto shadow=buildShadow(snapshot->renderScene,shadowStats);
+                std::shared_ptr<const ShadowMap> shadow;
+                bool shadowReused=false;
+                {
+                    std::lock_guard<std::mutex> lock(shadowCache->mutex);
+                    if(shadowCache->scene.lock()==snapshot &&
+                       shadowCache->hour==snapshot->daylightHour && shadowCache->shadow){
+                        shadow=shadowCache->shadow;
+                        shadowReused=true;
+                    }else{
+                        Stats shadowStats;
+                        shadow=std::make_shared<ShadowMap>(
+                            buildShadow(snapshot->renderScene,shadowStats));
+                        shadowCache->scene=snapshot;
+                        shadowCache->hour=snapshot->daylightHour;
+                        shadowCache->shadow=shadow;
+                    }
+                }
                 std::atomic<uint64_t> generation{1};
-                stats=m3d::render(snapshot->renderScene,shadow,camera,w,h,pixels,
+                stats=m3d::render(snapshot->renderScene,*shadow,camera,w,h,pixels,
                              std::max(1u,std::min(8u,std::thread::hardware_concurrency())),
                              false,generation,1,sampleCount,false,false,false,3);
-                result.renderer=QStringLiteral("CPU Ray Tracing — PBR et mipmaps");
+                result.renderer=shadowReused
+                    ?QStringLiteral("CPU Ray Tracing — PBR, ombres en cache")
+                    :QStringLiteral("CPU Ray Tracing — PBR, ombres calculées");
             }else result.gpu=true;
             result.milliseconds=stats.ms;
             if(edgeAA && pixels.size()==size_t(w)*size_t(h))
