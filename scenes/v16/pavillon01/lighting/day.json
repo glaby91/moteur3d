@@ -1,19 +1,64 @@
 {
   "format": "m3d-lighting-v1",
+  "hour": 15,
   "sun": {
     "direction": [
-      -0.5,
-      -0.8,
-      -0.3
+      -0.55,
+      0.8,
+      -0.22
     ],
-    "intensity": 3
+    "intensity": 3.1
   },
   "ambient": {
     "color": [
-      0.65,
-      0.75,
-      1
+      0.6,
+      0.72,
+      0.95
     ],
-    "intensity": 0.4
-  }
+    "intensity": 0.38
+  },
+  "lights": [
+    {
+      "position": [
+        -4,
+        2.65,
+        0
+      ],
+      "radius": 9,
+      "intensity": 1.5,
+      "color": [
+        255,
+        214,
+        171
+      ]
+    },
+    {
+      "position": [
+        5,
+        2.65,
+        -2
+      ],
+      "radius": 9,
+      "intensity": 1.5,
+      "color": [
+        255,
+        220,
+        185
+      ]
+    },
+    {
+      "position": [
+        -4,
+        5.8,
+        0
+      ],
+      "radius": 8,
+      "intensity": 1.5,
+      "color": [
+        255,
+        222,
+        190
+      ]
+    }
+  ]
 }
