@@ -47,6 +47,26 @@ int main(int argc,char** argv) {
   qCritical()<<"Cached WARP rendering differs from cold result:"<<QString::fromStdWString(warmError);
   return 1;
  }
+ // The sunlight changes with time of day without replacing geometry.
+ // V16 retains exactly the same cached triangles/PBR textures across this test.
+ m3d::updateLighting(17.0f);
+ std::vector<uint32_t> eveningPixels;
+ m3d::Stats eveningStats;std::wstring eveningError;
+ if(!m3d::renderCompute11Preview(runtime.runtime.renderScene,cam,width,height,
+                                 eveningPixels,eveningStats,eveningError)||
+                                 eveningPixels==pixels){
+  qCritical()<<"Changing sun hour did not change GPU Full HD illumination:"
+             <<QString::fromStdWString(eveningError);return 1;
+ }
+ m3d::updateLighting(runtime.runtime.daylightHour);
+ std::vector<uint32_t> restoredPixels;
+ m3d::Stats restoredStats;std::wstring restoredError;
+ if(!m3d::renderCompute11Preview(runtime.runtime.renderScene,cam,width,height,
+                                 restoredPixels,restoredStats,restoredError)||
+                                 restoredPixels!=pixels){
+  qCritical()<<"Restoring daylight does not restore identical GPU pixels:"
+             <<QString::fromStdWString(restoredError);return 1;
+ }
  // Editing a material must invalidate the GPU atlas and scene cache.
  auto& renderScene=runtime.runtime.renderScene;
  if(renderScene.mat.empty()){qCritical()<<"Missing materials";return 1;}
