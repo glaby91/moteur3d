@@ -26,5 +26,6 @@ struct LoadResult {
 // Transactional: the caller replaces its active scene only after a successful load.
 LoadResult loadScene(const QString& manifestPath);
 // Build a triangle-only render scene from the validated modular resource database.
+bool generateProceduralPbr(m3d::Material& material,const QString& recipe,int resolution,QString& error);
 bool compileRenderScene(const SceneDatabase& database, m3d::Scene& out, QString& error);
 }
