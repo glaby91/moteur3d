@@ -22,6 +22,7 @@ struct Runtime {
     QHash<QString,int> materialIndex;
     QString title;
     int textureResolution=0;
+    float daylightHour=15.f;
 };
 struct BuildResult {
     Runtime runtime;
