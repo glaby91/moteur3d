@@ -213,7 +213,7 @@ float4 tracePrimary(Ray ray) {
             reflected.origin=ray.origin+ray.direction*hit.t+n*.02f;
             reflected.direction=reflect(ray.direction,n);
             float3 skyReflected=background(reflected);
-            local=lerp(local,skyReflected,.17f+.34f*edge);
+            local=lerp(local,skyReflected,.27f+.33f*edge);
         }
         float t=saturate(material.transmission);
         if(t<=.05f) {
@@ -223,7 +223,7 @@ float4 tracePrimary(Ray ray) {
         // Straight-through glass: let the ray see interior faces and their lighting.
         // Fresnel-like edge tint. Refraction and multi-bounce GI are not simulated.
         float glassEdge=pow(1.f-facing,5.f);
-        float opacity=pool?saturate(.77f+.12f*edge):
+        float opacity=pool?saturate(.88f+.08f*edge):
                             saturate((1.f-t)*.68f+.06f+.20f*glassEdge);
         accumulated+=throughput*local*opacity;
         throughput*=1.f-opacity;
