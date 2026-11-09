@@ -734,7 +734,7 @@ function m3dBuildEnergetikForecourtLattice({box,meshTriangle},a=M3D_ENERGETIK_AR
   // Place at the right-front sector, outside the front facade. Control points
   // are NOT surveyed positions and must not constrain the actual blockout.
   const control=[
-    [e.x1-1.6,e.z1+1.8],
+    [e.x1-1.6,e.z1+2.6],
     [e.x1+9.5,e.z1+3.0],
     [e.x1+13.8,e.z1+26.4]
   ];
