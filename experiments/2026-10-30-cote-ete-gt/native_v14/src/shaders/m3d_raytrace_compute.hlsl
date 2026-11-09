@@ -37,6 +37,7 @@ cbuffer Frame : register(b0) {
     float3 sunDirection; float ambientStrength;
     float3 skyZenith; float skyStrength;
     float3 skyHorizon; float sunStrength;
+    float3 sunColor; float skyFillStrength;
 };
 StructuredBuffer<GpuBvhNode> Nodes : register(t0);
 StructuredBuffer<GpuTriangle> Triangles : register(t1);
@@ -48,8 +49,13 @@ SamplerState RepeatTrilinear : register(s0);
 RWTexture2D<float4> Output : register(u0);
 
 float3 background(Ray ray) {
-    float t=saturate(ray.direction.y*.90f+.25f);
-    return saturate(lerp(skyHorizon,skyZenith,t)*skyStrength);
+    // The same gentle zenith-to-horizon gradient as CPU daylight;
+    // a small solar aureole lends direction to sky and water reflections.
+    float t=saturate((ray.direction.y+.10f)*1.10f);
+    float3 sky=lerp(skyHorizon,skyZenith,t)*skyStrength;
+    float alignment=saturate(dot(ray.direction,normalize(sunDirection)));
+    float halo=pow(alignment,64.f)*.065f*sunStrength;
+    return saturate(sky+sunColor*halo);
 }
 bool intersectBounds(Ray ray,float3 bmin,float3 bmax,float limit) {
     float nearT=max(nearPlane,.0001f),farT=limit;
@@ -170,12 +176,18 @@ float3 shadeSurface(Ray ray,HitInfo hit,float3 n,float3 color,float roughness,fl
             diffuse*=lerp(.72f,.38f,separation);
         }
     }
-    float3 lit=color*(ambientStrength+diffuse*sunStrength*(1.f-.55f*metallic));
+    // Directional sky fill: normal-mapped facets see a distinct zenith /
+    // horizon ratio, preserving surface relief without geometry or noise.
+    float skyFacing=saturate(.5f+.5f*n.y);
+    float3 skyTint=lerp(skyHorizon,skyZenith,skyFacing);
+    float3 fill=ambientStrength*.65f+
+                 skyTint*skyFillStrength*(.42f+.58f*skyFacing);
+    float3 lit=color*(fill+diffuse*sunStrength*sunColor*(1.f-.55f*metallic));
     float3 viewDir=-ray.direction;
     float3 reflected=reflect(-L,n);
     float spec=pow(saturate(dot(reflected,viewDir)),lerp(90.f,8.f,roughness));
     float3 specular=lerp(float3(.18f,.18f,.18f),color,metallic);
-    lit+=specular*spec*(.2f+.55f*(1.f-roughness))*sunStrength;
+    lit+=specular*sunColor*spec*(.2f+.55f*(1.f-roughness))*sunStrength;
     return saturate(lit);
 }
 float4 tracePrimary(Ray ray) {
