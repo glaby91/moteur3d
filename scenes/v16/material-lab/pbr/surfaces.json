@@ -63,6 +63,13 @@
       "pattern": "lawn",
       "recipe": "lawn",
       "resolution": 512
+    },
+    {
+      "id": "tex_water_test",
+      "material": "water_test",
+      "pattern": "water",
+      "recipe": "water",
+      "resolution": 512
     }
   ]
 }
