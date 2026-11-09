@@ -108,6 +108,7 @@ private:
     QComboBox* backendBox_=nullptr;
     QComboBox* qualityBox_=nullptr;
     QComboBox* giSamples_=nullptr;
+    QComboBox* directSamples_=nullptr;
     QCheckBox* progressiveGi_=nullptr;
     QCheckBox* denoiseGi_=nullptr;
     QCheckBox* edgeAa_=nullptr;
@@ -221,8 +222,13 @@ private:
         backendBox_->setItemData(1,0,Qt::UserRole-1);
 #endif
         qualityBox_=new QComboBox;
-        qualityBox_->addItems({QStringLiteral("Full HD 1920 × 1080"),QStringLiteral("Full HD qualité 1920 × 1080 (CPU 4 échantillons)"),QStringLiteral("4K UHD 3840 × 2160")});
+        qualityBox_->addItems({QStringLiteral("Full HD 1920 × 1080"),
+            QStringLiteral("QHD 2560 × 1440"),QStringLiteral("4K UHD 3840 × 2160")});
         qualityBox_->setCurrentIndex(0);
+        directSamples_=new QComboBox;
+        for(int n:{1,4,16})
+            directSamples_->addItem(QStringLiteral("%1 échantillon(s) / pixel").arg(n),n);
+        directSamples_->setCurrentIndex(0);
         giSamples_=new QComboBox;
         for(int n:{4,8,16,32,64})
             giSamples_->addItem(QStringLiteral("%1 échantillons / pixel").arg(n),n);
@@ -240,6 +246,7 @@ private:
         form->addRow(QStringLiteral("Caméra"),cameraBox_);
         form->addRow(QStringLiteral("Méthode de rendu"),backendBox_);
         form->addRow(QStringLiteral("Résolution"),qualityBox_);
+        form->addRow(QStringLiteral("Échantillons CPU direct"),directSamples_);
         form->addRow(QStringLiteral("Échantillons GI"),giSamples_);
         form->addRow(QStringLiteral("Rotation caméra"),azimuth_);
         vertical->addLayout(form);
@@ -271,12 +278,14 @@ private:
         connect(cameraBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){azimuth_->setValue(0);requestRender();});
         connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int index){
             const bool gi=index>=2;
+            directSamples_->setEnabled(index==0);
             giSamples_->setEnabled(gi);
             progressiveGi_->setEnabled(gi);
             denoiseGi_->setEnabled(gi);
             requestRender();
         });
         connect(qualityBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){requestRender();});
+        connect(directSamples_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){if(backendBox_->currentIndex()==0)requestRender();});
         connect(giSamples_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){if(backendBox_->currentIndex()>=2)requestRender();});
         connect(progressiveGi_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()>=2)requestRender();});
         connect(denoiseGi_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()>=2)requestRender();});
@@ -442,7 +451,7 @@ private:
         preset.eye={preset.target.x+dir.x*std::cos(angle)+dir.z*std::sin(angle),
                     preset.eye.y,
                     preset.target.z-dir.x*std::sin(angle)+dir.z*std::cos(angle)};
-        const int w=qualityBox_->currentIndex()==2?3840:1920;
+        const int w=qualityBox_->currentIndex()==2?3840:qualityBox_->currentIndex()==1?2560:1920;
         const int h=w*9/16;
         const int backend=backendBox_->currentIndex();
         const bool wantGpu=backend==1;
@@ -450,7 +459,7 @@ private:
         const bool edgeAA=edgeAa_->isChecked();
         const unsigned sampleCount=globalIllumination?
             unsigned(giSamples_->currentData().toInt()):
-            (qualityBox_->currentIndex()==1?4u:1u);
+            (wantGpu?1u:unsigned(directSamples_->currentData().toInt()));
         const unsigned maxBounces=backend==2?2u:4u;
         const bool progressive=globalIllumination&&progressiveGi_->isChecked();
         const bool denoise=globalIllumination&&denoiseGi_->isChecked();
@@ -538,8 +547,8 @@ private:
                 stats=m3d::render(snapshot->renderScene,*shadow,camera,w,h,pixels,
                                   workers,false,generation,1,sampleCount,false,false,false,3);
                 result.renderer=shadowReused
-                    ?QStringLiteral("CPU Ray Tracing — PBR, ombres en cache")
-                    :QStringLiteral("CPU Ray Tracing — PBR, ombres calculées");
+                    ?QStringLiteral("CPU Ray Tracing — %1 spp, ombres en cache").arg(sampleCount)
+                    :QStringLiteral("CPU Ray Tracing — %1 spp, ombres calculées").arg(sampleCount);
             }else result.gpu=true;
             result.milliseconds=stats.ms;
             if(edgeAA && pixels.size()==size_t(w)*size_t(h))
