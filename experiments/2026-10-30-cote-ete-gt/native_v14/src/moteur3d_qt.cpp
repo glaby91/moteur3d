@@ -1055,26 +1055,78 @@ Scene scene_;
     void displayV16Scene(const m3d::v16::SceneDatabase& database) {
         v16SceneTree_->clear();
         v16ResourceTree_->clear();
-        auto* sceneRoot = new QTreeWidgetItem(v16SceneTree_, {database.name, QStringLiteral("Scène V16")});
+        auto* sceneRoot = new QTreeWidgetItem(v16SceneTree_,
+            {database.name, QStringLiteral("Scène V16")});
         for (const auto& sector : database.sectors) {
-            auto* sectorItem = new QTreeWidgetItem(sceneRoot, {sector.id, QStringLiteral("Secteur")});
+            auto* sectorItem = new QTreeWidgetItem(sceneRoot,
+                {sector.id, QStringLiteral("Secteur")});
             for (auto it = sector.resources.cbegin(); it != sector.resources.cend(); ++it) {
-                auto* category = new QTreeWidgetItem(v16ResourceTree_, {sector.id + QStringLiteral("/") + it.key(), QString()});
+                auto* category = new QTreeWidgetItem(v16ResourceTree_,
+                    {sector.id + QStringLiteral("/") + it.key(), QString()});
                 for (const auto& resource : it.value()) {
-                    new QTreeWidgetItem(category, {QFileInfo(resource.path).fileName(), resource.path});
-                    if (it.key() == QStringLiteral("instances")) {
-                        const auto instances = resource.data.value(QStringLiteral("instances")).toArray();
-                        for (const auto& instance : instances) {
-                            const auto obj = instance.toObject();
-                            new QTreeWidgetItem(sectorItem, {obj.value(QStringLiteral("geometry")).toString(),
-                                                              QStringLiteral("Instance")});
+                    auto* fileItem = new QTreeWidgetItem(category,
+                        {QFileInfo(resource.path).fileName(), resource.path});
+                    if (it.key() == QStringLiteral("materials")) {
+                        for (const auto& value : resource.data.value(QStringLiteral("materials")).toArray()) {
+                            const auto obj = value.toObject();
+                            auto* materialItem = new QTreeWidgetItem(fileItem,
+                                {obj.value(QStringLiteral("id")).toString(), QStringLiteral("Matériau PBR")});
+                            for (const QString& property : {QStringLiteral("roughness"),
+                                                             QStringLiteral("metallic"),
+                                                             QStringLiteral("transmission"),
+                                                             QStringLiteral("ior")}) {
+                                if (obj.contains(property))
+                                    new QTreeWidgetItem(materialItem,
+                                        {property, QString::number(obj.value(property).toDouble())});
+                            }
                         }
+                    }
+                    if (it.key() == QStringLiteral("pbr")) {
+                        for (const auto& value : resource.data.value(QStringLiteral("textures")).toArray()) {
+                            const auto obj = value.toObject();
+                            new QTreeWidgetItem(fileItem, {obj.value(QStringLiteral("id")).toString(),
+                                                             obj.value(QStringLiteral("path")).toString()});
+                        }
+                    }
+                    if (it.key() != QStringLiteral("instances")) continue;
+                    QHash<QString, QTreeWidgetItem*> nodeItems;
+                    struct PendingNode { QJsonObject obj; };
+                    QVector<PendingNode> pending;
+                    for (const auto& value : resource.data.value(QStringLiteral("nodes")).toArray())
+                        if (value.isObject()) pending.push_back({value.toObject()});
+                    // Resolve parents regardless of declaration order.
+                    size_t attempts = 0;
+                    while (!pending.empty() && attempts++ < 1000) {
+                        bool progress = false;
+                        for (int index = 0; index < pending.size();) {
+                            const auto obj = pending[index].obj;
+                            const auto id = obj.value(QStringLiteral("id")).toString();
+                            const auto parentId = obj.value(QStringLiteral("parent")).toString();
+                            if (id.isEmpty() || (!parentId.isEmpty() && !nodeItems.contains(parentId))) {
+                                ++index;
+                                continue;
+                            }
+                            auto* parent = parentId.isEmpty() ? sectorItem : nodeItems.value(parentId);
+                            auto* item = new QTreeWidgetItem(parent,
+                                {obj.value(QStringLiteral("name")).toString(id),
+                                 obj.value(QStringLiteral("type")).toString()});
+                            nodeItems.insert(id,item);
+                            pending.removeAt(index);
+                            progress = true;
+                        }
+                        if (!progress) break;
+                    }
+                    for (const auto& value : resource.data.value(QStringLiteral("instances")).toArray()) {
+                        const auto obj = value.toObject();
+                        auto* parent = nodeItems.value(obj.value(QStringLiteral("node")).toString(),sectorItem);
+                        new QTreeWidgetItem(parent,
+                            {obj.value(QStringLiteral("geometry")).toString(),QStringLiteral("Objet 3D")});
                     }
                 }
             }
         }
         v16SceneTree_->expandAll();
-        v16ResourceTree_->expandToDepth(1);
+        v16ResourceTree_->expandToDepth(2);
     }
 
     void openV16SceneFile(const QString& path) {
