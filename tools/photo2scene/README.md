@@ -90,3 +90,17 @@ Commande reproductible :
     python tools/photo2scene/facade_linefit.py tools/photo2scene/data/pripyat/energetik-20261109-second-view-sample.json -o energetik-second-linefit.json
 
 Cette étape confirme notre règle : un algorithme qui refuse de conclure est préférable à une mesure fictive.
+
+## Troisième photographie Energetik — vue distante 1920 × 1080 (9 novembre 2026)
+
+- Photographie originale fournie par l'utilisateur, avec façade principale, angle supérieur droit du bâtiment, retour latéral, enseigne et place au premier plan. Peupliers occultant de nombreux piliers ; le nettoyage IA ne constitue **pas** une source géométrique.
+- Détection classique OpenCV LSD : **5 234 segments**. Des sous-ensembles candidats sont enregistrés dans `data/pripyat/energetik-20261109-third-view-sample.json` avec SHA-256 de l'original et noms de régions. Ils n'ont **pas** valeur de correspondances architecturales validées.
+- Trois familles de segments visibles s'ajustent chacune à une droite, mais les directions ne forment pas encore un jeu de contraintes suffisant pour un FOV fiable. Le programme partagé `facade_linefit.py` accepte désormais trois familles structurales nommées dans le JSON ; il refuse explicitement une profondeur 3D non déterminée.
+- Test automatique de matching strict SIFT sur les trois originaux : **2 correspondances candidates** entre photo n° 1 et n° 3 et **1** entre photo n° 2 et n° 3 (ratio 0,65, association mutuelle), **aucune validée**. Ce résultat n'autorise ni triangulation ni estimation de positions relatives.
+- Pour progresser : identifier des points **architecturaux uniques** (angle droit supérieur, raccords spécifiques, enseignes avec support physique localisable, détails asymétriques), rechercher leurs correspondants en image originale, puis optimiser les poses et surfaces dans un solveur multi-vues avec contrôles de reprojection. Éviter de traiter toutes les baies répétées comme des repères uniques.
+
+Commande :
+
+    python tools/photo2scene/facade_linefit.py tools/photo2scene/data/pripyat/energetik-20261109-third-view-sample.json -o energetik-third-linefit.json
+
+Les unités de scène restent non résolues tant que les vues ne sont pas recalées par des repères vérifiés et des contraintes de plan/dimensions indépendantes.
