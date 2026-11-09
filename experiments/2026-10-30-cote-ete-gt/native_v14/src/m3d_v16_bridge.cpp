@@ -180,6 +180,8 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution) {
     maxTextureResolution=std::clamp(maxTextureResolution,64,2048);
     if(source.sectors.empty()){result.error="No sectors";return result;}
     auto& render=result.runtime.renderScene;
+    // Pavillon 01 has a real, bounded terrain mesh; never generate the old infinite ground plane.
+    render.finiteGround=true;
     QHash<QString,QJsonObject> meshes;
     QHash<QString,QJsonObject> sets;
     QVector<QJsonObject> instanceDocs;
