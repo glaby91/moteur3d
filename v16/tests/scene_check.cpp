@@ -37,7 +37,7 @@ int main(int argc,char** argv){
         if(object.triangleCount<=0){
             qCritical()<<"Empty object:"<<object.id;return 1;
         }
-        if(object.material==QStringLiteral("leaves") && object.parent.contains(QStringLiteral("Jardin"))) {
+        if((object.material==QStringLiteral("leaves")||object.material.startsWith(QStringLiteral("foliage_"))) && object.parent.contains(QStringLiteral("Jardin"))) {
             if(object.triangleCount<250){
                 qCritical()<<"Foliage fell back to primitive sphere:"<<object.id
                            <<"triangles:"<<object.triangleCount;
@@ -47,6 +47,18 @@ int main(int argc,char** argv){
         }
     }
     if(organicCanopies!=15){qCritical()<<"Expected 15 foliage canopies, got"<<organicCanopies;return 1;}
+    if(r.objects.size()<300 || s.mat.size()<25){
+        qCritical()<<"Architectural detail regression; objects:"<<r.objects.size()
+                   <<"PBR materials:"<<s.mat.size();return 1;
+    }
+    const QStringList requiredMaterials{QStringLiteral("roof_membrane"),QStringLiteral("zinc_coping"),
+        QStringLiteral("facade_cedar"),QStringLiteral("ceramic_tile"),QStringLiteral("wood_deck"),
+        QStringLiteral("travertine"),QStringLiteral("window_gasket")};
+    for(const auto& name:requiredMaterials) {
+        if(!r.materialIndex.contains(name)) {
+            qCritical()<<"Missing architectural PBR material:"<<name;return 1;
+        }
+    }
     if(!s.finiteGround){qCritical()<<"V16 must not use implicit infinite ground";return 1;}
     // A downward ray beyond the bounded Pavillon site must see the sky.
     m3d::Stats terrainStats;
