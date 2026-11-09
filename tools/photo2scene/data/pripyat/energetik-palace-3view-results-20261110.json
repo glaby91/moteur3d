@@ -1,0 +1,94 @@
+{
+  "schema": "photo2scene-energetik-palace-threeview-20261110-v1",
+  "subject": "Palais de la culture Energetik Pripiat",
+  "scope": "palace only; no Polissya nor city arcade",
+  "source_video": "user-supplied drone footage, withheld from public repo",
+  "frame_seconds": [
+    373,
+    374.25,
+    375.5
+  ],
+  "image_size_px": [
+    640,
+    360
+  ],
+  "method": "SIFT + Lowe + Essential RANSAC + cheirality + parallax + 3rd-view PnP on withheld matches",
+  "geometryStatus": "SPARSE_NONMETRIC",
+  "calibration": {
+    "focal_length_px": "assumed, not measured",
+    "distortion_coefficients": "unavailable",
+    "physical_baseline": "unknown",
+    "normalized_baseline": 1,
+    "meters_per_baseline_unit": null
+  },
+  "summary": {
+    "sift_matched_pairs": 340,
+    "homography_inliers": 243,
+    "homography_inliers_fraction": 0.7147
+  },
+  "assumed_focal_sweep": [
+    {
+      "focal_px": 350,
+      "hfov_deg": 84.872,
+      "epipolar_inliers": 303,
+      "accepted_3d_points": 278,
+      "median_parallax_deg": 2.783,
+      "third_view_holdout_n": 49,
+      "third_view_holdout_rms_px": 0.437
+    },
+    {
+      "focal_px": 450,
+      "hfov_deg": 70.834,
+      "epipolar_inliers": 303,
+      "accepted_3d_points": 258,
+      "median_parallax_deg": 2.423,
+      "third_view_holdout_n": 44,
+      "third_view_holdout_rms_px": 41.265,
+      "third_view_holdout_median_px": 0.313,
+      "note": "One mismatched heldout track dominates RMS. Do not claim reliable rms for this assumed focal length."
+    },
+    {
+      "focal_px": 550,
+      "hfov_deg": 60.383,
+      "epipolar_inliers": 305,
+      "accepted_3d_points": 243,
+      "median_parallax_deg": 2.084,
+      "third_view_holdout_n": 42,
+      "third_view_holdout_rms_px": 0.572,
+      "third_view_holdout_median_px": 0.273,
+      "third_view_holdout_fraction_under_5px": 1
+    },
+    {
+      "focal_px": 650,
+      "hfov_deg": 52.423,
+      "epipolar_inliers": 305,
+      "accepted_3d_points": 232,
+      "median_parallax_deg": 1.796,
+      "third_view_holdout_n": 40,
+      "third_view_holdout_rms_px": 0.535
+    },
+    {
+      "focal_px": 750,
+      "hfov_deg": 46.213,
+      "epipolar_inliers": 305,
+      "accepted_3d_points": 220,
+      "median_parallax_deg": 1.59,
+      "third_view_holdout_n": 37,
+      "third_view_holdout_rms_px": 0.597
+    }
+  ],
+  "interpretation": "Very good internal pixel reprojection at some assumed intrinsics; NOT an accurate historical 3D building model. Focal length, baseline and geometric alignment with Moteur3D remain unknown.",
+  "forbids": [
+    "automatic scene replacement",
+    "moving stair or rooftop tower",
+    "reporting dimensions in meters",
+    "merging Polissya and Palace geometry"
+  ],
+  "deliverablesLocalOnly": [
+    "energetik_sparse_nonmetric.ply",
+    "energetik_sparse_nonmetric.glb",
+    "planche_multivue_palais.jpg",
+    "points3d_correspondences.json"
+  ],
+  "date": "2026-11-10"
+}

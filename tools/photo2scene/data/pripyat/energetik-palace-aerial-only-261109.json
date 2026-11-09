@@ -1,0 +1,313 @@
+{
+  "schema": "photo2scene-palace-only-v1",
+  "project": "Moteur3D / Energetik / Photo2Scene WARP",
+  "scope": "PALACE_ONLY",
+  "date": "2026-11-09",
+  "source_images": [
+    {
+      "id": "aerial_A",
+      "label": "drone frame user screenshot 2026-11-09 22:36",
+      "filename_local": "image(20261109-223611).png",
+      "size_px": [
+        863,
+        458
+      ],
+      "ownership": "user-uploaded frame; do not publish imagery"
+    },
+    {
+      "id": "aerial_B",
+      "label": "browser screenshot of drone video 2026-11-09 22:38",
+      "filename_local": "image(20261109-223810).png",
+      "size_px": [
+        1366,
+        768
+      ],
+      "video_crop_xyxy_px": [
+        16,
+        153,
+        950,
+        680
+      ],
+      "ownership": "user-uploaded frame; do not publish imagery"
+    }
+  ],
+  "regions": {
+    "aerial_A": [
+      {
+        "id": "A",
+        "subject": "front_glazed_facade",
+        "poly_px": [
+          [
+            329,
+            184
+          ],
+          [
+            540,
+            154
+          ],
+          [
+            542,
+            226
+          ],
+          [
+            333,
+            257
+          ]
+        ]
+      },
+      {
+        "id": "B",
+        "subject": "high_rectangular_volume",
+        "poly_px": [
+          [
+            235,
+            121
+          ],
+          [
+            299,
+            113
+          ],
+          [
+            324,
+            214
+          ],
+          [
+            260,
+            216
+          ]
+        ]
+      },
+      {
+        "id": "C",
+        "subject": "main_roof",
+        "poly_px": [
+          [
+            318,
+            152
+          ],
+          [
+            496,
+            125
+          ],
+          [
+            544,
+            152
+          ],
+          [
+            332,
+            194
+          ]
+        ]
+      },
+      {
+        "id": "D",
+        "subject": "rear_long_rectangular_volume",
+        "poly_px": [
+          [
+            309,
+            76
+          ],
+          [
+            449,
+            62
+          ],
+          [
+            468,
+            103
+          ],
+          [
+            331,
+            115
+          ]
+        ]
+      },
+      {
+        "id": "E",
+        "subject": "left_lower_wing",
+        "poly_px": [
+          [
+            206,
+            167
+          ],
+          [
+            237,
+            163
+          ],
+          [
+            261,
+            221
+          ],
+          [
+            213,
+            237
+          ]
+        ]
+      }
+    ],
+    "aerial_B": [
+      {
+        "id": "A",
+        "subject": "front_glazed_facade",
+        "poly_px_cropped": [
+          [
+            279,
+            148
+          ],
+          [
+            685,
+            229
+          ],
+          [
+            689,
+            334
+          ],
+          [
+            275,
+            250
+          ]
+        ]
+      },
+      {
+        "id": "B",
+        "subject": "high_rectangular_volume",
+        "poly_px_cropped": [
+          [
+            190,
+            84
+          ],
+          [
+            342,
+            69
+          ],
+          [
+            354,
+            183
+          ],
+          [
+            187,
+            180
+          ]
+        ]
+      },
+      {
+        "id": "C",
+        "subject": "main_roof",
+        "poly_px_cropped": [
+          [
+            276,
+            150
+          ],
+          [
+            494,
+            104
+          ],
+          [
+            699,
+            224
+          ],
+          [
+            354,
+            185
+          ]
+        ]
+      },
+      {
+        "id": "D",
+        "subject": "rear_long_rectangular_volume",
+        "poly_px_cropped": [
+          [
+            495,
+            106
+          ],
+          [
+            758,
+            105
+          ],
+          [
+            780,
+            154
+          ],
+          [
+            499,
+            148
+          ]
+        ]
+      },
+      {
+        "id": "E",
+        "subject": "right_side_return",
+        "poly_px_cropped": [
+          [
+            686,
+            228
+          ],
+          [
+            775,
+            176
+          ],
+          [
+            776,
+            284
+          ],
+          [
+            687,
+            336
+          ]
+        ]
+      }
+    ]
+  },
+  "observations": [
+    "Front glazed longitudinal facade with a repeating frame rhythm and a lower band",
+    "Front roof and cyrillic roof signage belong to a different mass than the rear hall",
+    "A higher rectangular mass is visible near the visually left end of the front",
+    "One elongated rear volume is separated in silhouette from the front roof",
+    "Side return exists and is visible in oblique view"
+  ],
+  "model_review": {
+    "source_branch": "feature/pripyat-polissya-arcade-261107",
+    "scene_path": "experiments/2026-10-30-cote-ete-gt/native_v14/scene_pripyat_central.js",
+    "working_main_box": {
+      "x0": -50.5,
+      "x1": 30.5,
+      "z0": -43.4,
+      "z1": -18.8,
+      "mainHeight": 11.4
+    },
+    "tower_box_approx": {
+      "x0": 20.5,
+      "x1": 30.5,
+      "z0": -40.8,
+      "z1": -21,
+      "topY": 14
+    },
+    "rear_sports_volume_approx": {
+      "x0": -47,
+      "x1": -3,
+      "z0": -68.9,
+      "z1": -42.7,
+      "height": 11.4
+    },
+    "review_note": "The high volume is visually left in both aerial frames but authored at high X near +X edge. Camera orientation is uncalibrated; left/right photo alone is not proof of wrong 3D orientation. Do not move it automatically."
+  },
+  "calibration": {
+    "camera_intrinsics": null,
+    "orientation": null,
+    "metric_scale": null,
+    "spatial_points_validated": 0,
+    "stable_pixel_matches_in_building_mask": 5,
+    "calibration_status": "NOT_CALIBRATED",
+    "annotation_quality": "rough visual regions, not pixel-precise survey"
+  },
+  "excluded": [
+    "Polissya geometry",
+    "arcade geometry",
+    "photographic infill behind trees",
+    "historical as-built wall thickness or elevations"
+  ],
+  "rules": [
+    "Do not alter M3D_ENERGETIK_ARCH or existing rooms from these uncalibrated views alone",
+    "Do not infer real dimensions from screen-pixel polygons",
+    "Use the A-E volumes as region-of-interest masks for independently verified multiview keypoints"
+  ]
+}
