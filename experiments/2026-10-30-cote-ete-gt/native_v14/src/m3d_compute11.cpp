@@ -294,7 +294,7 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
  }
  if(c.output.Get()==nullptr||c.w!=UINT(w)||c.h!=UINT(h)){
   D3D11_TEXTURE2D_DESC desc{};desc.Width=UINT(w);desc.Height=UINT(h);
-  desc.MipLevels=1;desc.ArraySize=1;desc.Format=DXGI_FORMAT_R32G32B32A32_FLOAT;
+  desc.MipLevels=1;desc.ArraySize=1;desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
   desc.SampleDesc.Count=1;desc.Usage=D3D11_USAGE_DEFAULT;
   desc.BindFlags=D3D11_BIND_UNORDERED_ACCESS;
   ComPtr<ID3D11Texture2D> output,staging;
@@ -350,16 +350,17 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
   return false;
  }
  pixels.resize(size_t(w)*size_t(h));
- auto clampByte=[](float f)->uint32_t {
-  return uint32_t(std::max(0.f,std::min(255.f,f*255.f)));
- };
+ // RGBA8 typed UAV is supported by D3D11 feature level 11:
+ // it cuts output/staging bandwidth by 4x versus RGBA32F without an extra
+ // float-to-byte conversion pass on the CPU.
  for(int y=0;y<h;++y){
-  const float* row=reinterpret_cast<const float*>(
-          static_cast<const uint8_t*>(mapped.pData)+size_t(y)*mapped.RowPitch);
+  const uint8_t* row=static_cast<const uint8_t*>(mapped.pData)+size_t(y)*mapped.RowPitch;
   for(int x=0;x<w;++x){
-   const float* p=row+size_t(x)*4;
-   pixels[size_t(y)*w+x]=0xff000000u|(clampByte(p[0])<<16)|
-                           (clampByte(p[1])<<8)|clampByte(p[2]);
+   const uint8_t* p=row+size_t(x)*4;
+   pixels[size_t(y)*w+x]=0xff000000u|
+                           (uint32_t(p[0])<<16)|
+                           (uint32_t(p[1])<<8)|
+                            uint32_t(p[2]);
   }
  }
  c.ctx->Unmap(c.staging.Get(),0);
