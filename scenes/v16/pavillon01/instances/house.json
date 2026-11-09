@@ -2,59 +2,3413 @@
   "format": "m3d-instances-v1",
   "instances": [
     {
-      "geometry": "ground",
+      "id": "terrain",
+      "parent": "Exterieur/Terrain",
+      "geometry": "unit_box",
+      "material": "grass",
       "position": [
         0,
-        -0.3,
+        -0.25,
+        2
+      ],
+      "size": [
+        50,
+        0.4,
+        50
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "dalle_rdc",
+      "parent": "Structure/Fondations",
+      "geometry": "unit_box",
+      "material": "concrete",
+      "position": [
+        0,
+        0.03,
         0
-      ]
-    },
-    {
-      "geometry": "slab",
-      "position": [
-        0,
-        0,
-        0
-      ]
-    },
-    {
-      "geometry": "ground-floor",
-      "position": [
-        0,
-        1.7,
-        0
-      ]
-    },
-    {
-      "geometry": "upper-floor",
-      "position": [
-        1,
-        4.8,
-        0
-      ]
-    },
-    {
-      "geometry": "roof",
-      "position": [
-        1,
-        6.5,
-        0
-      ]
-    },
-    {
-      "geometry": "terrace",
-      "position": [
-        0,
-        0,
-        8
-      ]
-    },
-    {
-      "geometry": "pool",
-      "position": [
-        0,
-        -0.1,
+      ],
+      "size": [
+        18,
+        0.24,
         12
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "plancher_haut_ouest",
+      "parent": "Structure/Planchers",
+      "geometry": "unit_box",
+      "material": "concrete",
+      "position": [
+        -4.2,
+        3.36,
+        0
+      ],
+      "size": [
+        9.6,
+        0.24,
+        12
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "plancher_haut_est_nord",
+      "parent": "Structure/Planchers",
+      "geometry": "unit_box",
+      "material": "concrete",
+      "position": [
+        5.7,
+        3.36,
+        -3.7
+      ],
+      "size": [
+        6.6,
+        0.24,
+        4.6
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "plancher_haut_est_sud",
+      "parent": "Structure/Planchers",
+      "geometry": "unit_box",
+      "material": "concrete",
+      "position": [
+        5.7,
+        3.36,
+        4.5
+      ],
+      "size": [
+        6.6,
+        0.24,
+        3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "plancher_haut_est_centre",
+      "parent": "Structure/Planchers",
+      "geometry": "unit_box",
+      "material": "concrete",
+      "position": [
+        7.6,
+        3.36,
+        0.4
+      ],
+      "size": [
+        2.8,
+        0.24,
+        5.2
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "toit",
+      "parent": "Structure/Toit",
+      "geometry": "unit_box",
+      "material": "concrete",
+      "position": [
+        0,
+        7.05,
+        0
+      ],
+      "size": [
+        18.6,
+        0.38,
+        12.6
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "parapet_front",
+      "parent": "Structure/Toit",
+      "geometry": "unit_box",
+      "material": "concrete",
+      "position": [
+        0,
+        7.4,
+        6.12
+      ],
+      "size": [
+        18.6,
+        0.52,
+        0.28
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "parapet_back",
+      "parent": "Structure/Toit",
+      "geometry": "unit_box",
+      "material": "concrete",
+      "position": [
+        0,
+        7.4,
+        -6.12
+      ],
+      "size": [
+        18.6,
+        0.52,
+        0.28
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "parapet_east",
+      "parent": "Structure/Toit",
+      "geometry": "unit_box",
+      "material": "concrete",
+      "position": [
+        9.15,
+        7.4,
+        0
+      ],
+      "size": [
+        0.28,
+        0.52,
+        12.4
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "parapet_west",
+      "parent": "Structure/Toit",
+      "geometry": "unit_box",
+      "material": "concrete",
+      "position": [
+        -9.15,
+        7.4,
+        0
+      ],
+      "size": [
+        0.28,
+        0.52,
+        12.4
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "facade_front_rdc_west",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        -7.75,
+        1.67,
+        5.96
+      ],
+      "size": [
+        2.5,
+        3.08,
+        0.28
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "facade_front_rdc_pier1",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        -1.05,
+        1.67,
+        5.96
+      ],
+      "size": [
+        0.9,
+        3.08,
+        0.28
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "facade_front_rdc_pier2",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        4.2,
+        1.67,
+        5.96
+      ],
+      "size": [
+        0.8,
+        3.08,
+        0.28
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "facade_front_rdc_east",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        8.05,
+        1.67,
+        5.96
+      ],
+      "size": [
+        1.9,
+        3.08,
+        0.28
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "vitrage_front_rdc_0",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        -5.95,
+        1.67,
+        6
+      ],
+      "size": [
+        1.5,
+        2.55,
+        0.055
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "traverse_front_rdc_0",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        -5.95,
+        3,
+        6.04
+      ],
+      "size": [
+        1.5,
+        0.075,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "allège_front_rdc_0",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        -5.95,
+        0.34999999999999987,
+        6.04
+      ],
+      "size": [
+        1.5,
+        0.08,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "vitrage_front_rdc_1",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        -3.8,
+        1.67,
+        6
+      ],
+      "size": [
+        1,
+        2.55,
+        0.055
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "traverse_front_rdc_1",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        -3.8,
+        3,
+        6.04
+      ],
+      "size": [
+        1,
+        0.075,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "allège_front_rdc_1",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        -3.8,
+        0.34999999999999987,
+        6.04
+      ],
+      "size": [
+        1,
+        0.08,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "vitrage_front_rdc_2",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        0,
+        1.67,
+        6
+      ],
+      "size": [
+        2.2,
+        2.55,
+        0.055
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "traverse_front_rdc_2",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        0,
+        3,
+        6.04
+      ],
+      "size": [
+        2.2,
+        0.075,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "allège_front_rdc_2",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        0,
+        0.34999999999999987,
+        6.04
+      ],
+      "size": [
+        2.2,
+        0.08,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "vitrage_front_rdc_3",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        2.8,
+        1.67,
+        6
+      ],
+      "size": [
+        2.6,
+        2.55,
+        0.055
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "traverse_front_rdc_3",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        2.8,
+        3,
+        6.04
+      ],
+      "size": [
+        2.6,
+        0.075,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "allège_front_rdc_3",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        2.8,
+        0.34999999999999987,
+        6.04
+      ],
+      "size": [
+        2.6,
+        0.08,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "vitrage_front_rdc_4",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        6.25,
+        1.67,
+        6
+      ],
+      "size": [
+        3.1,
+        2.55,
+        0.055
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "traverse_front_rdc_4",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        6.25,
+        3,
+        6.04
+      ],
+      "size": [
+        3.1,
+        0.075,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "allège_front_rdc_4",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        6.25,
+        0.34999999999999987,
+        6.04
+      ],
+      "size": [
+        3.1,
+        0.08,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "facade_back_rdc_west",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        -6.2,
+        1.67,
+        -5.95
+      ],
+      "size": [
+        5.6,
+        3.08,
+        0.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "facade_back_rdc_center",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        0,
+        1.67,
+        -5.95
+      ],
+      "size": [
+        3,
+        3.08,
+        0.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "facade_back_rdc_east",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        6.2,
+        1.67,
+        -5.95
+      ],
+      "size": [
+        5.6,
+        3.08,
+        0.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "fenetre_nord_rdc_-2.6",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        -2.6,
+        1.67,
+        -5.95
+      ],
+      "size": [
+        1.6,
+        1.8,
+        0.06
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cadre_nord_h_rdc_-2.6_-0.96",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        -2.6,
+        0.71,
+        -5.9
+      ],
+      "size": [
+        1.75,
+        0.07,
+        0.13
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cadre_nord_h_rdc_-2.6_0.96",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        -2.6,
+        2.63,
+        -5.9
+      ],
+      "size": [
+        1.75,
+        0.07,
+        0.13
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cadre_nord_v_rdc_-2.6_-0.85",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        -3.45,
+        1.67,
+        -5.9
+      ],
+      "size": [
+        0.07,
+        2,
+        0.13
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cadre_nord_v_rdc_-2.6_0.85",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        -1.75,
+        1.67,
+        -5.9
+      ],
+      "size": [
+        0.07,
+        2,
+        0.13
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "fenetre_nord_rdc_2.7",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        2.7,
+        1.67,
+        -5.95
+      ],
+      "size": [
+        1.6,
+        1.8,
+        0.06
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cadre_nord_h_rdc_2.7_-0.96",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        2.7,
+        0.71,
+        -5.9
+      ],
+      "size": [
+        1.75,
+        0.07,
+        0.13
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cadre_nord_h_rdc_2.7_0.96",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        2.7,
+        2.63,
+        -5.9
+      ],
+      "size": [
+        1.75,
+        0.07,
+        0.13
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cadre_nord_v_rdc_2.7_-0.85",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        1.85,
+        1.67,
+        -5.9
+      ],
+      "size": [
+        0.07,
+        2,
+        0.13
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cadre_nord_v_rdc_2.7_0.85",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        3.5500000000000003,
+        1.67,
+        -5.9
+      ],
+      "size": [
+        0.07,
+        2,
+        0.13
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lateral_rdc_-1_a",
+      "parent": "Facades/Laterales",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        -8.87,
+        1.67,
+        -3.9
+      ],
+      "size": [
+        0.28,
+        3.08,
+        4.2
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lateral_rdc_-1_b",
+      "parent": "Facades/Laterales",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        -8.87,
+        1.67,
+        3.8
+      ],
+      "size": [
+        0.28,
+        3.08,
+        4.2
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lateral_verre_rdc_-1",
+      "parent": "Facades/Laterales",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        -8.87,
+        1.67,
+        0
+      ],
+      "size": [
+        0.07,
+        2.4,
+        3.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lateral_rdc_1_a",
+      "parent": "Facades/Laterales",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        8.87,
+        1.67,
+        -3.9
+      ],
+      "size": [
+        0.28,
+        3.08,
+        4.2
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lateral_rdc_1_b",
+      "parent": "Facades/Laterales",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        8.87,
+        1.67,
+        3.8
+      ],
+      "size": [
+        0.28,
+        3.08,
+        4.2
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lateral_verre_rdc_1",
+      "parent": "Facades/Laterales",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        8.87,
+        1.67,
+        0
+      ],
+      "size": [
+        0.07,
+        2.4,
+        3.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "facade_front_etage_west",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        -7.75,
+        5.15,
+        5.96
+      ],
+      "size": [
+        2.5,
+        3.08,
+        0.28
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "facade_front_etage_pier1",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        -1.05,
+        5.15,
+        5.96
+      ],
+      "size": [
+        0.9,
+        3.08,
+        0.28
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "facade_front_etage_pier2",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        4.2,
+        5.15,
+        5.96
+      ],
+      "size": [
+        0.8,
+        3.08,
+        0.28
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "facade_front_etage_east",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        8.05,
+        5.15,
+        5.96
+      ],
+      "size": [
+        1.9,
+        3.08,
+        0.28
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "vitrage_front_etage_0",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        -5.95,
+        5.15,
+        6
+      ],
+      "size": [
+        1.5,
+        2.55,
+        0.055
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "traverse_front_etage_0",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        -5.95,
+        6.48,
+        6.04
+      ],
+      "size": [
+        1.5,
+        0.075,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "allège_front_etage_0",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        -5.95,
+        3.83,
+        6.04
+      ],
+      "size": [
+        1.5,
+        0.08,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "vitrage_front_etage_1",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        -3.8,
+        5.15,
+        6
+      ],
+      "size": [
+        1,
+        2.55,
+        0.055
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "traverse_front_etage_1",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        -3.8,
+        6.48,
+        6.04
+      ],
+      "size": [
+        1,
+        0.075,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "allège_front_etage_1",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        -3.8,
+        3.83,
+        6.04
+      ],
+      "size": [
+        1,
+        0.08,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "vitrage_front_etage_2",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        0,
+        5.15,
+        6
+      ],
+      "size": [
+        2.2,
+        2.55,
+        0.055
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "traverse_front_etage_2",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        0,
+        6.48,
+        6.04
+      ],
+      "size": [
+        2.2,
+        0.075,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "allège_front_etage_2",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        0,
+        3.83,
+        6.04
+      ],
+      "size": [
+        2.2,
+        0.08,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "vitrage_front_etage_3",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        2.8,
+        5.15,
+        6
+      ],
+      "size": [
+        2.6,
+        2.55,
+        0.055
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "traverse_front_etage_3",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        2.8,
+        6.48,
+        6.04
+      ],
+      "size": [
+        2.6,
+        0.075,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "allège_front_etage_3",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        2.8,
+        3.83,
+        6.04
+      ],
+      "size": [
+        2.6,
+        0.08,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "vitrage_front_etage_4",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        6.25,
+        5.15,
+        6
+      ],
+      "size": [
+        3.1,
+        2.55,
+        0.055
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "traverse_front_etage_4",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        6.25,
+        6.48,
+        6.04
+      ],
+      "size": [
+        3.1,
+        0.075,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "allège_front_etage_4",
+      "parent": "Facades/Sud",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        6.25,
+        3.83,
+        6.04
+      ],
+      "size": [
+        3.1,
+        0.08,
+        0.1
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "facade_back_etage_west",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        -6.2,
+        5.15,
+        -5.95
+      ],
+      "size": [
+        5.6,
+        3.08,
+        0.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "facade_back_etage_center",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        0,
+        5.15,
+        -5.95
+      ],
+      "size": [
+        3,
+        3.08,
+        0.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "facade_back_etage_east",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        6.2,
+        5.15,
+        -5.95
+      ],
+      "size": [
+        5.6,
+        3.08,
+        0.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "fenetre_nord_etage_-2.6",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        -2.6,
+        5.15,
+        -5.95
+      ],
+      "size": [
+        1.6,
+        1.8,
+        0.06
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cadre_nord_h_etage_-2.6_-0.96",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        -2.6,
+        4.19,
+        -5.9
+      ],
+      "size": [
+        1.75,
+        0.07,
+        0.13
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cadre_nord_h_etage_-2.6_0.96",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        -2.6,
+        6.11,
+        -5.9
+      ],
+      "size": [
+        1.75,
+        0.07,
+        0.13
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cadre_nord_v_etage_-2.6_-0.85",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        -3.45,
+        5.15,
+        -5.9
+      ],
+      "size": [
+        0.07,
+        2,
+        0.13
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cadre_nord_v_etage_-2.6_0.85",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        -1.75,
+        5.15,
+        -5.9
+      ],
+      "size": [
+        0.07,
+        2,
+        0.13
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "fenetre_nord_etage_2.7",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        2.7,
+        5.15,
+        -5.95
+      ],
+      "size": [
+        1.6,
+        1.8,
+        0.06
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cadre_nord_h_etage_2.7_-0.96",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        2.7,
+        4.19,
+        -5.9
+      ],
+      "size": [
+        1.75,
+        0.07,
+        0.13
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cadre_nord_h_etage_2.7_0.96",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        2.7,
+        6.11,
+        -5.9
+      ],
+      "size": [
+        1.75,
+        0.07,
+        0.13
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cadre_nord_v_etage_2.7_-0.85",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        1.85,
+        5.15,
+        -5.9
+      ],
+      "size": [
+        0.07,
+        2,
+        0.13
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cadre_nord_v_etage_2.7_0.85",
+      "parent": "Facades/Nord",
+      "geometry": "unit_box",
+      "material": "aluminium",
+      "position": [
+        3.5500000000000003,
+        5.15,
+        -5.9
+      ],
+      "size": [
+        0.07,
+        2,
+        0.13
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lateral_etage_-1_a",
+      "parent": "Facades/Laterales",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        -8.87,
+        5.15,
+        -3.9
+      ],
+      "size": [
+        0.28,
+        3.08,
+        4.2
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lateral_etage_-1_b",
+      "parent": "Facades/Laterales",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        -8.87,
+        5.15,
+        3.8
+      ],
+      "size": [
+        0.28,
+        3.08,
+        4.2
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lateral_verre_etage_-1",
+      "parent": "Facades/Laterales",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        -8.87,
+        5.15,
+        0
+      ],
+      "size": [
+        0.07,
+        2.4,
+        3.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lateral_etage_1_a",
+      "parent": "Facades/Laterales",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        8.87,
+        5.15,
+        -3.9
+      ],
+      "size": [
+        0.28,
+        3.08,
+        4.2
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lateral_etage_1_b",
+      "parent": "Facades/Laterales",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        8.87,
+        5.15,
+        3.8
+      ],
+      "size": [
+        0.28,
+        3.08,
+        4.2
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lateral_verre_etage_1",
+      "parent": "Facades/Laterales",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        8.87,
+        5.15,
+        0
+      ],
+      "size": [
+        0.07,
+        2.4,
+        3.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cloison_salon_cuisine_1",
+      "parent": "RDC/Cloisons",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        2.15,
+        1.62,
+        -3.6
+      ],
+      "size": [
+        0.16,
+        3,
+        4.7
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cloison_salon_cuisine_2",
+      "parent": "RDC/Cloisons",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        2.15,
+        1.62,
+        4.15
+      ],
+      "size": [
+        0.16,
+        3,
+        3.4
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cloison_entree",
+      "parent": "RDC/Cloisons",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        5.6,
+        1.62,
+        0.3
+      ],
+      "size": [
+        0.16,
+        3,
+        5
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cloison_chambres_ouest",
+      "parent": "Etage/Cloisons",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        -2.4,
+        5.08,
+        -1.1
+      ],
+      "size": [
+        0.16,
+        3,
+        9.2
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "cloison_chambres_nord",
+      "parent": "Etage/Cloisons",
+      "geometry": "unit_box",
+      "material": "plaster",
+      "position": [
+        -5,
+        5.08,
+        -1.1
+      ],
+      "size": [
+        5,
+        3,
+        0.16
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "escalier_marche_01",
+      "parent": "RDC/Escalier",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        3.5,
+        0.435,
+        2.55
+      ],
+      "size": [
+        2.3,
+        0.13,
+        0.4
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "escalier_marche_02",
+      "parent": "RDC/Escalier",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        3.5,
+        0.69,
+        2.11
+      ],
+      "size": [
+        2.3,
+        0.13,
+        0.4
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "escalier_marche_03",
+      "parent": "RDC/Escalier",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        3.5,
+        0.9450000000000001,
+        1.67
+      ],
+      "size": [
+        2.3,
+        0.13,
+        0.4
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "escalier_marche_04",
+      "parent": "RDC/Escalier",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        3.5,
+        1.2,
+        1.2299999999999998
+      ],
+      "size": [
+        2.3,
+        0.13,
+        0.4
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "escalier_marche_05",
+      "parent": "RDC/Escalier",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        3.5,
+        1.4549999999999998,
+        0.7899999999999998
+      ],
+      "size": [
+        2.3,
+        0.13,
+        0.4
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "escalier_marche_06",
+      "parent": "RDC/Escalier",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        3.5,
+        1.71,
+        0.34999999999999964
+      ],
+      "size": [
+        2.3,
+        0.13,
+        0.4
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "escalier_marche_07",
+      "parent": "RDC/Escalier",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        3.5,
+        1.965,
+        -0.0900000000000003
+      ],
+      "size": [
+        2.3,
+        0.13,
+        0.4
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "escalier_marche_08",
+      "parent": "RDC/Escalier",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        3.5,
+        2.22,
+        -0.5300000000000002
+      ],
+      "size": [
+        2.3,
+        0.13,
+        0.4
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "escalier_marche_09",
+      "parent": "RDC/Escalier",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        3.5,
+        2.475,
+        -0.9700000000000002
+      ],
+      "size": [
+        2.3,
+        0.13,
+        0.4
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "escalier_marche_10",
+      "parent": "RDC/Escalier",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        3.5,
+        2.73,
+        -1.4100000000000001
+      ],
+      "size": [
+        2.3,
+        0.13,
+        0.4
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "escalier_marche_11",
+      "parent": "RDC/Escalier",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        3.5,
+        2.9850000000000003,
+        -1.8500000000000005
+      ],
+      "size": [
+        2.3,
+        0.13,
+        0.4
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "escalier_marche_12",
+      "parent": "RDC/Escalier",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        3.5,
+        3.24,
+        -2.29
+      ],
+      "size": [
+        2.3,
+        0.13,
+        0.4
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "escalier_palier",
+      "parent": "Etage/Escalier",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        3.5,
+        3.33,
+        -2.7
+      ],
+      "size": [
+        2.8,
+        0.16,
+        1.2
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "garde_corps_haut",
+      "parent": "Etage/Escalier",
+      "geometry": "unit_box",
+      "material": "glass",
+      "position": [
+        2,
+        4,
+        0.25
+      ],
+      "size": [
+        0.09,
+        1.05,
+        5
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "canape_salon_0.9",
+      "parent": "RDC/Salon",
+      "geometry": "unit_box",
+      "material": "fabric",
+      "position": [
+        -4.4,
+        0.9,
+        1
+      ],
+      "size": [
+        3.2,
+        0.6,
+        1.2
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "canape_salon_1.45",
+      "parent": "RDC/Salon",
+      "geometry": "unit_box",
+      "material": "fabric",
+      "position": [
+        -4.4,
+        1.45,
+        1
+      ],
+      "size": [
+        3.2,
+        0.6,
+        1.2
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "canape_dossier",
+      "parent": "RDC/Salon",
+      "geometry": "unit_box",
+      "material": "fabric",
+      "position": [
+        -4.4,
+        1.6,
+        0.4
+      ],
+      "size": [
+        3.2,
+        0.75,
+        0.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "table_basse",
+      "parent": "RDC/Salon",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        -3.9,
+        0.6,
+        2.7
+      ],
+      "size": [
+        2.1,
+        0.15,
+        1.2
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "tapis_salon",
+      "parent": "RDC/Salon",
+      "geometry": "unit_box",
+      "material": "stone",
+      "position": [
+        -4.1,
+        0.17,
+        1.8
+      ],
+      "size": [
+        5,
+        0.08,
+        4
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "meuble_tv",
+      "parent": "RDC/Salon",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        -7.9,
+        0.7,
+        -1.3
+      ],
+      "size": [
+        0.6,
+        1.3,
+        3.4
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "ecran_tv",
+      "parent": "RDC/Salon",
+      "geometry": "unit_box",
+      "material": "blackmetal",
+      "position": [
+        -7.5,
+        1.8,
+        -1.3
+      ],
+      "size": [
+        0.1,
+        1.5,
+        2.5
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "ilot_cuisine",
+      "parent": "RDC/Cuisine",
+      "geometry": "unit_box",
+      "material": "stone",
+      "position": [
+        5.9,
+        1,
+        -2
+      ],
+      "size": [
+        3.3,
+        1.8,
+        1.35
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "plan_cuisine",
+      "parent": "RDC/Cuisine",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        5.9,
+        2,
+        -2
+      ],
+      "size": [
+        3.6,
+        0.11,
+        1.5
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "placard_cuisine_0",
+      "parent": "RDC/Cuisine",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        3.2,
+        1.5,
+        -5.05
+      ],
+      "size": [
+        1.08,
+        2.6,
+        0.65
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "placard_cuisine_1",
+      "parent": "RDC/Cuisine",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        4.4,
+        1.5,
+        -5.05
+      ],
+      "size": [
+        1.08,
+        2.6,
+        0.65
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "placard_cuisine_2",
+      "parent": "RDC/Cuisine",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        5.6,
+        1.5,
+        -5.05
+      ],
+      "size": [
+        1.08,
+        2.6,
+        0.65
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "placard_cuisine_3",
+      "parent": "RDC/Cuisine",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        6.8,
+        1.5,
+        -5.05
+      ],
+      "size": [
+        1.08,
+        2.6,
+        0.65
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "table_repas",
+      "parent": "RDC/Salle_a_manger",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        -2,
+        0.95,
+        -3.3
+      ],
+      "size": [
+        2.8,
+        0.12,
+        1.4
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "chaise_repas_0",
+      "parent": "RDC/Salle_a_manger",
+      "geometry": "unit_box",
+      "material": "fabric",
+      "position": [
+        -3,
+        0.55,
+        -4.3
+      ],
+      "size": [
+        0.64,
+        0.8,
+        0.64
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "chaise_repas_1",
+      "parent": "RDC/Salle_a_manger",
+      "geometry": "unit_box",
+      "material": "fabric",
+      "position": [
+        -2.05,
+        0.55,
+        -4.3
+      ],
+      "size": [
+        0.64,
+        0.8,
+        0.64
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "chaise_repas_2",
+      "parent": "RDC/Salle_a_manger",
+      "geometry": "unit_box",
+      "material": "fabric",
+      "position": [
+        -1.1,
+        0.55,
+        -4.3
+      ],
+      "size": [
+        0.64,
+        0.8,
+        0.64
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "chaise_repas_3",
+      "parent": "RDC/Salle_a_manger",
+      "geometry": "unit_box",
+      "material": "fabric",
+      "position": [
+        -3,
+        0.55,
+        -2.3
+      ],
+      "size": [
+        0.64,
+        0.8,
+        0.64
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "chaise_repas_4",
+      "parent": "RDC/Salle_a_manger",
+      "geometry": "unit_box",
+      "material": "fabric",
+      "position": [
+        -2.05,
+        0.55,
+        -2.3
+      ],
+      "size": [
+        0.64,
+        0.8,
+        0.64
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "chaise_repas_5",
+      "parent": "RDC/Salle_a_manger",
+      "geometry": "unit_box",
+      "material": "fabric",
+      "position": [
+        -1.1,
+        0.55,
+        -2.3
+      ],
+      "size": [
+        0.64,
+        0.8,
+        0.64
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lit_0",
+      "parent": "Etage/Chambres",
+      "geometry": "unit_box",
+      "material": "fabric",
+      "position": [
+        -5.6,
+        4,
+        -2.5
+      ],
+      "size": [
+        2.1,
+        0.6,
+        2.5
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "tete_lit_0",
+      "parent": "Etage/Chambres",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        -5.6,
+        4.55,
+        -3.65
+      ],
+      "size": [
+        2.3,
+        1.5,
+        0.22
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "bureau_0",
+      "parent": "Etage/Chambres",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        -5.6,
+        4.15,
+        1.6
+      ],
+      "size": [
+        2.2,
+        0.14,
+        0.75
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lit_1",
+      "parent": "Etage/Chambres",
+      "geometry": "unit_box",
+      "material": "fabric",
+      "position": [
+        3.9,
+        4,
+        -2.5
+      ],
+      "size": [
+        2.1,
+        0.6,
+        2.5
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "tete_lit_1",
+      "parent": "Etage/Chambres",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        3.9,
+        4.55,
+        -3.65
+      ],
+      "size": [
+        2.3,
+        1.5,
+        0.22
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "bureau_1",
+      "parent": "Etage/Chambres",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        3.9,
+        4.15,
+        1.6
+      ],
+      "size": [
+        2.2,
+        0.14,
+        0.75
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "terrasse",
+      "parent": "Exterieur/Terrasse",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        -1,
+        0,
+        9.5
+      ],
+      "size": [
+        17,
+        0.22,
+        6.5
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lame_terrasse_0",
+      "parent": "Exterieur/Terrasse",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        -8.5,
+        0.15,
+        9.5
+      ],
+      "size": [
+        1.27,
+        0.045,
+        6.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lame_terrasse_1",
+      "parent": "Exterieur/Terrasse",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        -7.14,
+        0.15,
+        9.5
+      ],
+      "size": [
+        1.27,
+        0.045,
+        6.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lame_terrasse_2",
+      "parent": "Exterieur/Terrasse",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        -5.779999999999999,
+        0.15,
+        9.5
+      ],
+      "size": [
+        1.27,
+        0.045,
+        6.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lame_terrasse_3",
+      "parent": "Exterieur/Terrasse",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        -4.42,
+        0.15,
+        9.5
+      ],
+      "size": [
+        1.27,
+        0.045,
+        6.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lame_terrasse_4",
+      "parent": "Exterieur/Terrasse",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        -3.0599999999999996,
+        0.15,
+        9.5
+      ],
+      "size": [
+        1.27,
+        0.045,
+        6.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lame_terrasse_5",
+      "parent": "Exterieur/Terrasse",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        -1.6999999999999993,
+        0.15,
+        9.5
+      ],
+      "size": [
+        1.27,
+        0.045,
+        6.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lame_terrasse_6",
+      "parent": "Exterieur/Terrasse",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        -0.33999999999999986,
+        0.15,
+        9.5
+      ],
+      "size": [
+        1.27,
+        0.045,
+        6.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lame_terrasse_7",
+      "parent": "Exterieur/Terrasse",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        1.0200000000000014,
+        0.15,
+        9.5
+      ],
+      "size": [
+        1.27,
+        0.045,
+        6.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lame_terrasse_8",
+      "parent": "Exterieur/Terrasse",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        2.380000000000001,
+        0.15,
+        9.5
+      ],
+      "size": [
+        1.27,
+        0.045,
+        6.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lame_terrasse_9",
+      "parent": "Exterieur/Terrasse",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        3.74,
+        0.15,
+        9.5
+      ],
+      "size": [
+        1.27,
+        0.045,
+        6.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lame_terrasse_10",
+      "parent": "Exterieur/Terrasse",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        5.100000000000001,
+        0.15,
+        9.5
+      ],
+      "size": [
+        1.27,
+        0.045,
+        6.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "lame_terrasse_11",
+      "parent": "Exterieur/Terrasse",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        6.460000000000001,
+        0.15,
+        9.5
+      ],
+      "size": [
+        1.27,
+        0.045,
+        6.3
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "bassin_fond",
+      "parent": "Exterieur/Bassin",
+      "geometry": "unit_box",
+      "material": "stone",
+      "position": [
+        3,
+        -0.1,
+        17
+      ],
+      "size": [
+        9,
+        0.3,
+        4.6
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "surface_eau",
+      "parent": "Exterieur/Bassin",
+      "geometry": "unit_box",
+      "material": "water",
+      "position": [
+        3,
+        0.08,
+        17
+      ],
+      "size": [
+        8.6,
+        0.06,
+        4.2
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "borne_bassin_0",
+      "parent": "Exterieur/Bassin",
+      "geometry": "unit_box",
+      "material": "concrete",
+      "position": [
+        -1.5,
+        0.25,
+        14.6
+      ],
+      "size": [
+        0.12,
+        0.5,
+        0.14
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "borne_bassin_1",
+      "parent": "Exterieur/Bassin",
+      "geometry": "unit_box",
+      "material": "concrete",
+      "position": [
+        0.30000000000000004,
+        0.25,
+        14.6
+      ],
+      "size": [
+        0.12,
+        0.5,
+        0.14
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "borne_bassin_2",
+      "parent": "Exterieur/Bassin",
+      "geometry": "unit_box",
+      "material": "concrete",
+      "position": [
+        2.1,
+        0.25,
+        14.6
+      ],
+      "size": [
+        0.12,
+        0.5,
+        0.14
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "borne_bassin_3",
+      "parent": "Exterieur/Bassin",
+      "geometry": "unit_box",
+      "material": "concrete",
+      "position": [
+        3.9000000000000004,
+        0.25,
+        14.6
+      ],
+      "size": [
+        0.12,
+        0.5,
+        0.14
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "borne_bassin_4",
+      "parent": "Exterieur/Bassin",
+      "geometry": "unit_box",
+      "material": "concrete",
+      "position": [
+        5.7,
+        0.25,
+        14.6
+      ],
+      "size": [
+        0.12,
+        0.5,
+        0.14
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "borne_bassin_5",
+      "parent": "Exterieur/Bassin",
+      "geometry": "unit_box",
+      "material": "concrete",
+      "position": [
+        7.5,
+        0.25,
+        14.6
+      ],
+      "size": [
+        0.12,
+        0.5,
+        0.14
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "tronc_0",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        -22,
+        1.9,
+        19
+      ],
+      "size": [
+        0.32,
+        3.8,
+        0.32
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "feuillage_0_0",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -22,
+        3.8,
+        19.7
+      ],
+      "size": [
+        3.1,
+        2.4,
+        2.9
+      ]
+    },
+    {
+      "id": "feuillage_0_1",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -21.242676113672893,
+        4.4399999999999995,
+        19.3782116141077
+      ],
+      "size": [
+        2.75,
+        2.4,
+        2.6
+      ]
+    },
+    {
+      "id": "feuillage_0_2",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -21.181632315856888,
+        5.08,
+        18.708697214417
+      ],
+      "size": [
+        2.4000000000000004,
+        2.4,
+        2.3
+      ]
+    },
+    {
+      "id": "tronc_1",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        -16.7,
+        2.225,
+        -15
+      ],
+      "size": [
+        0.32,
+        4.45,
+        0.32
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "feuillage_1_0",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -15.942676113672892,
+        4.45,
+        -15.291302785583
+      ],
+      "size": [
+        3.1,
+        2.4,
+        2.9
+      ]
+    },
+    {
+      "id": "feuillage_1_1",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -15.881632315856885,
+        5.09,
+        -15.692994747620311
+      ],
+      "size": [
+        2.75,
+        2.4,
+        2.6
+      ]
+    },
+    {
+      "id": "feuillage_1_2",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -16.57299199274612,
+        5.73,
+        -15.457550534604529
+      ],
+      "size": [
+        2.4000000000000004,
+        2.4,
+        2.3
+      ]
+    },
+    {
+      "id": "tronc_2",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        -11.4,
+        2.55,
+        19
+      ],
+      "size": [
+        0.32,
+        5.1,
+        0.32
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "feuillage_2_0",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -10.581632315856886,
+        5.1,
+        18.54244946539547
+      ],
+      "size": [
+        3.1,
+        2.4,
+        2.9
+      ]
+    },
+    {
+      "id": "feuillage_2_1",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -11.27299199274612,
+        5.739999999999999,
+        19.19856352982426
+      ],
+      "size": [
+        2.75,
+        2.4,
+        2.6
+      ]
+    },
+    {
+      "id": "feuillage_2_2",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -12.081122245777136,
+        6.38,
+        19.672119200655256
+      ],
+      "size": [
+        2.4000000000000004,
+        2.4,
+        2.3
+      ]
+    },
+    {
+      "id": "tronc_3",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        -6.100000000000001,
+        2.875,
+        -15
+      ],
+      "size": [
+        0.32,
+        5.75,
+        0.32
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "feuillage_3_0",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -5.972991992746121,
+        5.75,
+        -14.327880799344744
+      ],
+      "size": [
+        3.1,
+        2.4,
+        2.9
+      ]
+    },
+    {
+      "id": "feuillage_3_1",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -6.781122245777137,
+        6.39,
+        -14.472268421959686
+      ],
+      "size": [
+        2.75,
+        2.4,
+        2.6
+      ]
+    },
+    {
+      "id": "feuillage_3_2",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -6.9630318471968256,
+        7.03,
+        -15.10185002366603
+      ],
+      "size": [
+        2.4000000000000004,
+        2.4,
+        2.3
+      ]
+    },
+    {
+      "id": "tronc_4",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        -0.8000000000000007,
+        1.9,
+        19
+      ],
+      "size": [
+        0.32,
+        3.8,
+        0.32
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "feuillage_4_0",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -1.481122245777136,
+        3.8,
+        18.898149976333972
+      ],
+      "size": [
+        3.1,
+        2.4,
+        2.9
+      ]
+    },
+    {
+      "id": "feuillage_4_1",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -1.6630318471968253,
+        4.4399999999999995,
+        18.362208816680727
+      ],
+      "size": [
+        2.75,
+        2.4,
+        2.6
+      ]
+    },
+    {
+      "id": "feuillage_4_2",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -1.051473948379034,
+        5.08,
+        18.412649929646484
+      ],
+      "size": [
+        2.4000000000000004,
+        2.4,
+        2.3
+      ]
+    },
+    {
+      "id": "tronc_5",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        4.5,
+        2.225,
+        -15
+      ],
+      "size": [
+        0.32,
+        4.45,
+        0.32
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "feuillage_5_0",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        3.6369681528031754,
+        4.45,
+        -15.587350070353517
+      ],
+      "size": [
+        3.1,
+        2.4,
+        2.9
+      ]
+    },
+    {
+      "id": "feuillage_5_1",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        4.248526051620967,
+        5.09,
+        -14.996902011408364
+      ],
+      "size": [
+        2.75,
+        2.4,
+        2.6
+      ]
+    },
+    {
+      "id": "feuillage_5_2",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        5.09128793884691,
+        5.73,
+        -14.409302228887256
+      ],
+      "size": [
+        2.4000000000000004,
+        2.4,
+        2.3
+      ]
+    },
+    {
+      "id": "tronc_6",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        9.799999999999997,
+        2.55,
+        19
+      ],
+      "size": [
+        0.32,
+        5.1,
+        0.32
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "feuillage_6_0",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        9.548526051620964,
+        5.1,
+        19.590697771112744
+      ],
+      "size": [
+        3.1,
+        2.4,
+        2.9
+      ]
+    },
+    {
+      "id": "feuillage_6_1",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        10.391287938846908,
+        5.739999999999999,
+        19.63521274701514
+      ],
+      "size": [
+        2.75,
+        2.4,
+        2.6
+      ]
+    },
+    {
+      "id": "feuillage_6_2",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        10.69042242196104,
+        6.38,
+        19.095716052745484
+      ],
+      "size": [
+        2.4000000000000004,
+        2.4,
+        2.3
+      ]
+    },
+    {
+      "id": "tronc_7",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        15.100000000000001,
+        2.875,
+        -15
+      ],
+      "size": [
+        0.32,
+        5.75,
+        0.32
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "feuillage_7_0",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        15.691287938846912,
+        5.75,
+        -14.904283947254516
+      ],
+      "size": [
+        3.1,
+        2.4,
+        2.9
+      ]
+    },
+    {
+      "id": "feuillage_7_1",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        15.990422421961044,
+        6.39,
+        -15.531781539001175
+      ],
+      "size": [
+        2.75,
+        2.4,
+        2.6
+      ]
+    },
+    {
+      "id": "feuillage_7_2",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        15.470906636717583,
+        7.03,
+        -15.67036163622637
+      ],
+      "size": [
+        2.4000000000000004,
+        2.4,
+        2.3
+      ]
+    },
+    {
+      "id": "tronc_8",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_box",
+      "material": "wood",
+      "position": [
+        20.4,
+        1.9,
+        19
+      ],
+      "size": [
+        0.32,
+        3.8,
+        0.32
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "feuillage_8_0",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        21.290422421961043,
+        3.8,
+        18.32963836377363
+      ],
+      "size": [
+        3.1,
+        2.4,
+        2.9
+      ]
+    },
+    {
+      "id": "feuillage_8_1",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        20.77090663671758,
+        4.4399999999999995,
+        18.80738566336388
+      ],
+      "size": [
+        2.75,
+        2.4,
+        2.6
+      ]
+    },
+    {
+      "id": "feuillage_8_2",
+      "parent": "Exterieur/Jardin/Arbres",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        19.910381000199564,
+        5.08,
+        19.462221695770857
+      ],
+      "size": [
+        2.4000000000000004,
+        2.4,
+        2.3
+      ]
+    },
+    {
+      "id": "buisson_0",
+      "parent": "Exterieur/Jardin/Massifs",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -20,
+        0.52,
+        12
+      ],
+      "size": [
+        1.35,
+        1,
+        1.35
+      ]
+    },
+    {
+      "id": "buisson_1",
+      "parent": "Exterieur/Jardin/Massifs",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -17.3,
+        0.52,
+        13.8
+      ],
+      "size": [
+        1.35,
+        1,
+        1.35
+      ]
+    },
+    {
+      "id": "buisson_2",
+      "parent": "Exterieur/Jardin/Massifs",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -14.6,
+        0.52,
+        15.6
+      ],
+      "size": [
+        1.35,
+        1,
+        1.35
+      ]
+    },
+    {
+      "id": "buisson_3",
+      "parent": "Exterieur/Jardin/Massifs",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -11.899999999999999,
+        0.52,
+        12
+      ],
+      "size": [
+        1.35,
+        1,
+        1.35
+      ]
+    },
+    {
+      "id": "buisson_4",
+      "parent": "Exterieur/Jardin/Massifs",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -9.2,
+        0.52,
+        13.8
+      ],
+      "size": [
+        1.35,
+        1,
+        1.35
+      ]
+    },
+    {
+      "id": "buisson_5",
+      "parent": "Exterieur/Jardin/Massifs",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -6.5,
+        0.52,
+        15.6
+      ],
+      "size": [
+        1.35,
+        1,
+        1.35
+      ]
+    },
+    {
+      "id": "buisson_6",
+      "parent": "Exterieur/Jardin/Massifs",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -3.799999999999997,
+        0.52,
+        12
+      ],
+      "size": [
+        1.35,
+        1,
+        1.35
+      ]
+    },
+    {
+      "id": "buisson_7",
+      "parent": "Exterieur/Jardin/Massifs",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        -1.0999999999999979,
+        0.52,
+        13.8
+      ],
+      "size": [
+        1.35,
+        1,
+        1.35
+      ]
+    },
+    {
+      "id": "buisson_8",
+      "parent": "Exterieur/Jardin/Massifs",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        1.6000000000000014,
+        0.52,
+        15.6
+      ],
+      "size": [
+        1.35,
+        1,
+        1.35
+      ]
+    },
+    {
+      "id": "buisson_9",
+      "parent": "Exterieur/Jardin/Massifs",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        4.300000000000001,
+        0.52,
+        12
+      ],
+      "size": [
+        1.35,
+        1,
+        1.35
+      ]
+    },
+    {
+      "id": "buisson_10",
+      "parent": "Exterieur/Jardin/Massifs",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        7,
+        0.52,
+        13.8
+      ],
+      "size": [
+        1.35,
+        1,
+        1.35
+      ]
+    },
+    {
+      "id": "buisson_11",
+      "parent": "Exterieur/Jardin/Massifs",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        9.700000000000003,
+        0.52,
+        15.6
+      ],
+      "size": [
+        1.35,
+        1,
+        1.35
+      ]
+    },
+    {
+      "id": "buisson_12",
+      "parent": "Exterieur/Jardin/Massifs",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        12.400000000000006,
+        0.52,
+        12
+      ],
+      "size": [
+        1.35,
+        1,
+        1.35
+      ]
+    },
+    {
+      "id": "buisson_13",
+      "parent": "Exterieur/Jardin/Massifs",
+      "geometry": "unit_sphere",
+      "material": "leaves",
+      "position": [
+        15.100000000000001,
+        0.52,
+        13.8
+      ],
+      "size": [
+        1.35,
+        1,
+        1.35
       ]
     }
   ]
