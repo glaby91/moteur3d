@@ -9,6 +9,7 @@ on:
       - feature/pripyat-square-survey-measurements-261107
       - feature/pripyat-compute-d3d11-261107
       - feature/pripyat-polissya-arcade-261107
+      - feature/energetik-entrance-lattice-261109
     paths:
       - experiments/2026-10-30-cote-ete-gt/native_v14/CMakeLists.txt
       - experiments/2026-10-30-cote-ete-gt/native_v14/export_scene.js
@@ -103,6 +104,7 @@ jobs:
           node experiments/pripyat-survey/test-pripyat-ferris-wheel.mjs
           node experiments/pripyat-survey/test-compute-camera-projection.mjs
           node experiments/pripyat-survey/test-polissya-arcade.mjs
+          node experiments/pripyat-survey/test-energetik-forecourt-lattice-261109.mjs
           node experiments/pripyat-survey/test-polissya-rooftop-1986.mjs
           node experiments/pripyat-survey/test-photo-references-261108.mjs
           node experiments/pripyat-survey/test-energetik-facade-1986.mjs
@@ -118,7 +120,8 @@ jobs:
           python tools/generate_energetik_fresco_map.py
           node tools/export_energetik_fresco_glb.js
           node tools/export_pripyat_wheel_mechanism.js
-          M3D_SKIP_IMPORTED_CAR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_pripyat_central.bin scene_pripyat_central.js
+          # Enable Energetik-only lattice for this branch's visual comparison build.
+          M3D_ENERGETIK_FORECOURT_LATTICE=photo-study M3D_PRIPYAT_FACADE_PERIOD=abandoned M3D_SKIP_IMPORTED_CAR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_pripyat_central.bin scene_pripyat_central.js
           M3D_SKIP_IMPORTED_CAR=1 M3D_TEXTURE_SIZE=2048 node export_scene.js source_v1314.html scene_energetik_seat_preview.bin scene_energetik_seat_preview.js
           node export_energetik_seat_manifest.js scene_energetik_seat_preview.assets.json
           node tools/export_energetik_seat_row_glb.js
