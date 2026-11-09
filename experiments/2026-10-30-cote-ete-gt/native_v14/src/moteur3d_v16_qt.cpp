@@ -160,6 +160,24 @@ private:
             camerasToolbar->addAction(action);
             camerasMenu->addAction(action);
         }
+        auto* toolsMenu=menuBar()->addMenu(QStringLiteral("Outils"));
+        auto* benchmarkAction=toolsMenu->addAction(QStringLiteral("Benchmark complet…"));
+        connect(benchmarkAction,&QAction::triggered,this,[this]{
+            if(scenePath_.isEmpty()){
+                QMessageBox::information(this,QStringLiteral("Benchmark"),QStringLiteral("Charger Pavillon 01 avant de lancer le benchmark."));
+                return;
+            }
+            const QString path=QCoreApplication::applicationDirPath()
+                +QStringLiteral("/moteur3d_v16_benchui.exe");
+            if(!QFileInfo::exists(path)){
+                QMessageBox::warning(this,QStringLiteral("Benchmark indisponible"),
+                                     QStringLiteral("Programme de benchmark introuvable : %1").arg(path));
+                return;
+            }
+            if(!QProcess::startDetached(path,{scenePath_},QCoreApplication::applicationDirPath()))
+                QMessageBox::critical(this,QStringLiteral("Benchmark"),QStringLiteral("Impossible d'ouvrir la fenêtre de benchmark."));
+        });
+
         auto* left=new QDockWidget(QStringLiteral("Explorateur de scène"),this);
         auto* tabs=new QTabWidget;
         sceneTree_=new QTreeWidget;
