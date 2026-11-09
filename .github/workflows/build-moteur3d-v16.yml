@@ -63,13 +63,17 @@ jobs:
       - name: Qt6 and compiler
         run: |
           sudo apt-get update
-          sudo apt-get install -y qt6-base-dev qt6-base-dev-tools
+          sudo apt-get install -y qt6-base-dev qt6-base-dev-tools gdb
       - name: Configure
-        run: cmake -S v16 -B build-v16-linux -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S v16 -B build-v16-linux -DCMAKE_BUILD_TYPE=RelWithDebInfo
       - name: Compile
         run: cmake --build build-v16-linux --parallel 4
       - name: Validate Pavillon 01
         run: ctest --test-dir build-v16-linux --output-on-failure
+      - name: Native backtrace if CPU rendering fails
+        if: failure()
+        run: |
+          gdb --batch -ex run -ex "bt 30" --args             build-v16-linux/v16_render_smoke             scenes/v16/pavillon01/scene.json             build-v16-linux/pavillon01-smoke-debug.png
       - name: Upload actual raytraced preview PNG
         uses: actions/upload-artifact@v4
         with:
