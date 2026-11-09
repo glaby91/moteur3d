@@ -16,6 +16,11 @@
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QKeySequence>
+#include <QToolBar>
+#include <QProcess>
+#include <QDateTime>
+#include <QStandardPaths>
 #include <QFormLayout>
 #include <QFutureWatcher>
 #include <QGroupBox>
@@ -97,6 +102,7 @@ private:
     QTreeWidget* sceneTree_=nullptr;
     QTreeWidget* resourceTree_=nullptr;
     QComboBox* cameraBox_=nullptr;
+    QVector<QAction*> quickCameraActions_;
     QComboBox* backendBox_=nullptr;
     QComboBox* qualityBox_=nullptr;
     QCheckBox* edgeAa_=nullptr;
@@ -132,6 +138,28 @@ private:
         auto* quit=file->addAction(QStringLiteral("Quitter"));
         connect(quit,&QAction::triggered,this,&QWidget::close);
 
+        // One-click camera presets are independent from the detailed settings panel.
+        auto* camerasMenu=menuBar()->addMenu(QStringLiteral("Caméras"));
+        auto* camerasToolbar=addToolBar(QStringLiteral("Caméras · 1 à 6"));
+        camerasToolbar->setMovable(false);
+        camerasToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        for(int i=0;i<6;++i){
+            auto* action=new QAction(QString::number(i+1),this);
+            action->setShortcut(QKeySequence(QString::number(i+1)));
+            action->setShortcutContext(Qt::ApplicationShortcut);
+            action->setEnabled(false);
+            const int index=i;
+            connect(action,&QAction::triggered,this,[this,index]{
+                if(!runtime_||index>=runtime_->cameras.size())return;
+                const bool changed=cameraBox_->currentIndex()!=index;
+                cameraBox_->setCurrentIndex(index);
+                azimuth_->setValue(0);
+                if(!changed)requestRender();
+            });
+            quickCameraActions_.append(action);
+            camerasToolbar->addAction(action);
+            camerasMenu->addAction(action);
+        }
         auto* left=new QDockWidget(QStringLiteral("Explorateur de scène"),this);
         auto* tabs=new QTabWidget;
         sceneTree_=new QTreeWidget;
@@ -277,6 +305,12 @@ private:
         cameraBox_->blockSignals(true);
         cameraBox_->clear();
         for(const auto& c:runtime_->cameras)cameraBox_->addItem(c.name);
+        for(int i=0;i<quickCameraActions_.size();++i){
+            const bool valid=i<runtime_->cameras.size();
+            quickCameraActions_[i]->setEnabled(valid);
+            quickCameraActions_[i]->setText(valid ? QStringLiteral("%1 · %2").arg(i+1).arg(runtime_->cameras[i].name) : QString::number(i+1));
+            quickCameraActions_[i]->setToolTip(valid ? QStringLiteral("Vue %1 — touche %2").arg(runtime_->cameras[i].name).arg(i+1) : QString());
+        }
         cameraBox_->blockSignals(false);
         populateTrees(loaded.scene);
         statusBar()->showMessage(QStringLiteral("Pavillon 01 — %1 objets, %2 triangles, %3 matériaux, PBR %4 px")
@@ -348,7 +382,7 @@ private:
         statusBar()->showMessage(QStringLiteral("Calcul de l'image…"));
         watcher_.setFuture(QtConcurrent::run([snapshot,preset,w,h,wantGpu,edgeAA,sampleCount]{
             Result result;
-            updateLighting(15.f);
+            updateLighting(snapshot->daylightHour);
             const auto camera=v16::makeCamera(preset,w,h);
             std::vector<uint32_t> pixels;
             Stats stats;
