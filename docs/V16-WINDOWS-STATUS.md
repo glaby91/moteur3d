@@ -18,6 +18,13 @@
 - Bois de terrasse, bardage, écorce et feuillages ont leurs matériaux distincts. Les textures secondaires utilisent des chaînes mipmap PBR de 512 à 1024 px afin de limiter le coût mémoire ; les matériaux d'origine conservent leur définition.
 - La forme générale, les positions des caméras et la transparence vitrée de Pavillon 01 sont conservées.
 
+## V16.1–V16.3 — anti-bruit CPU et calcul progressif
+- **V16.1 :** échantillonnage CPU direct configurable (1, 4 ou 16 échantillons/pixel) indépendant de la résolution native Full HD, QHD ou 4K. Débruitage bilatéral facultatif, désactivé par défaut en CPU direct pour préserver les détails des matériaux. Les textures procédurales restent déterministes, et leur grain n'est pas du bruit Monte-Carlo.
+- **V16.2 :** vrai rendu GI progressif avec accumulateur HDR linéaire par pixel, échantillons uniques à chaque passe (séquence R2 et rotation par pixel), passes visibles 1/2/4/8/16/... jusqu'à la cible. Les pixels ne sont convertis en sRGB et tone-mappés qu'à l'affichage ; aucun PNG 8 bits n'est utilisé pour accumuler l'énergie.
+- **V16.3 :** nombre d'échantillons GI réglable (4, 8, 16, 32, 64 spp) et profondeur de rebonds 2 ou 4. Débruitage bilatéral optionnel appliqué *après* la moyenne HDR et non dans l'accumulateur. Le changement de caméra, de matériau ou de réglage annule les passes obsolètes.
+- **Tests :** accumulation progressive et accumulation monobloc doivent fournir des PNG strictement identiques à paramètres égaux (test algorithmique compact). Image de référence CI en **1920×1080, 4 spp GI et débruitée**, pas un rendu GI final 1 spp. Le GPU Compute direct demeure inchangé.
+- Le débruitage bilatéral simple peut lisser de petits détails ; il n'est pas équivalent à un débruiteur guidé par normales/profondeur ou au débruitage IA.
+
 ## Éclairage global CPU — mode facultatif
 - Le moteur disposait déjà d'un path tracer CPU avec rebonds indirects et encodage HDR. La V16 propose désormais dans la liste des backends : « CPU Éclairage global — 2 rebonds, 4 échantillons » et « CPU Éclairage global — 4 rebonds, 16 échantillons ».
 - Ces modes sont **CPU uniquement** et plus coûteux que l'aperçu direct. Le GPU D3D11 Compute conserve son mode PBR simplifié rapide ; aucun calcul GI GPU n'est revendiqué.
