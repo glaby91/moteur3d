@@ -149,7 +149,7 @@ static V offlinePbrShade(const Scene&s,const ShadowMap&sm,const Camera&cam,const
  else{uv=uvAt(s,*o,h.p,n);const float slope=std::max(.16f,std::abs(dot(n,r.d)));worldFootprint=h.t*cam.pixelAngle/slope;footprint=float(albedoSize(material))*worldFootprint*uv.z;}
  if(o&&!material.normalMip.empty())n=mappedNormal(material,*o,n,uv.x,uv.y,footprint,st);else n=bumpNormal(name,h.p,n,worldFootprint);
  const V base=rgbBytesToLinear(texSample(material,uv.x,uv.y,footprint,st));
- const float roughness=material.roughnessMip.empty()?.72f:clampf(sampleMipChain(material.roughnessMip,uv.x,uv.y,footprint,st).x/255.f,.08f,.98f);roughness=clampf(roughness*material.roughnessScale,.04f,.98f);
+ float roughness=material.roughnessMip.empty()?.72f:clampf(sampleMipChain(material.roughnessMip,uv.x,uv.y,footprint,st).x/255.f,.08f,.98f);roughness=clampf(roughness*material.roughnessScale,.04f,.98f);
  // V4 defines reflectivity, transmission and IOR, but no metallic channel.
  // Preserve reflectivity as dielectric F0; never reinterpret it as metallicity.
  const float f0Level=material.reflectivityPercent?clampf(float(material.reflectivityPercent)*.01f,.02f,.95f):.04f;
