@@ -158,6 +158,25 @@ bool compileRenderScene(const SceneDatabase& database, Scene& out,QString& error
             }
         }
     }
+    // Material ID -> independent PBR recipe, with mip pyramid generated once per resource.
+    QSet<QString> appliedPbr;
+    for(const auto& sector:database.sectors) {
+        for(const auto& resource:sector.resources.value(QStringLiteral("pbr"))) {
+            for(const auto& value:resource.data.value(QStringLiteral("textures")).toArray()) {
+                const auto entry=value.toObject();
+                const QString materialId=entry.value(QStringLiteral("id")).toString();
+                const QString recipe=entry.value(QStringLiteral("recipe")).toString();
+                const int resolution=entry.value(QStringLiteral("resolution")).toInt(2048);
+                if(!materials.contains(materialId) || recipe.isEmpty() || appliedPbr.contains(materialId)) {
+                    error=QStringLiteral("Invalid or duplicate PBR texture set: %1").arg(materialId);
+                    return false;
+                }
+                if(!generateProceduralPbr(result.mat[materials[materialId]],recipe,resolution,error))
+                    return false;
+                appliedPbr.insert(materialId);
+            }
+        }
+    }
     if(result.obj.empty()){error=QStringLiteral("No render geometry");return false;}
     buildBvh(result);
     error.clear();out=std::move(result);return true;
