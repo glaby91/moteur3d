@@ -1,0 +1,9 @@
+{
+  "format": "m3d-environment-v1",
+  "sky": "clear",
+  "groundSize": [
+    32,
+    26
+  ],
+  "units": "m"
+}
