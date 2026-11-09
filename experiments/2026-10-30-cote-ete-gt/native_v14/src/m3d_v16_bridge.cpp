@@ -254,11 +254,11 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
         } else if(pattern=="concrete"||pattern=="plaster"||pattern=="roof") {
             // Smooth, coherent height gradients react to grazing daylight;
             // old unrelated random X/Y normal offsets looked like flat grain.
-            const float x=float(x)/7.f,yf=float(y)/7.f;
-            const float hx=smoothNoise(x+1.f/7.f,yf,seed)-
-                           smoothNoise(x-1.f/7.f,yf,seed);
-            const float hy=smoothNoise(x,yf+1.f/7.f,seed)-
-                           smoothNoise(x,yf-1.f/7.f,seed);
+            const float xf=float(x)/7.f,yf=float(y)/7.f;
+            const float hx=smoothNoise(xf+1.f/7.f,yf,seed)-
+                           smoothNoise(xf-1.f/7.f,yf,seed);
+            const float hy=smoothNoise(xf,yf+1.f/7.f,seed)-
+                           smoothNoise(xf,yf-1.f/7.f,seed);
             const float strength=pattern=="roof"?.10f:
                                  pattern=="concrete"?.33f:.24f;
             normal=norm({-hx*strength,-hy*strength,1.f});
