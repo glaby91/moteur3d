@@ -1,0 +1,89 @@
+{
+  "schema_version": "0.2.0",
+  "cameras": [
+    {
+      "id": "C01_exterior_front",
+      "position": [
+        0,
+        -27,
+        9
+      ],
+      "target": [
+        0,
+        0,
+        3
+      ],
+      "fov_y_deg": 55
+    },
+    {
+      "id": "C02_interior_hall",
+      "position": [
+        0,
+        -4,
+        1.65
+      ],
+      "target": [
+        0,
+        3,
+        3
+      ],
+      "fov_y_deg": 65
+    },
+    {
+      "id": "C03_stair",
+      "position": [
+        4,
+        1,
+        2
+      ],
+      "target": [
+        2,
+        1,
+        4
+      ],
+      "fov_y_deg": 55
+    },
+    {
+      "id": "C04_terrace",
+      "position": [
+        -12,
+        12,
+        4
+      ],
+      "target": [
+        0,
+        0,
+        2
+      ],
+      "fov_y_deg": 55
+    },
+    {
+      "id": "C05_night",
+      "position": [
+        15,
+        -22,
+        7
+      ],
+      "target": [
+        0,
+        0,
+        3
+      ],
+      "fov_y_deg": 55
+    },
+    {
+      "id": "C06_overhead",
+      "position": [
+        0,
+        0,
+        35
+      ],
+      "target": [
+        0,
+        0,
+        0
+      ],
+      "fov_y_deg": 55
+    }
+  ]
+}
