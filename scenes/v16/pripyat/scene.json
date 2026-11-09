@@ -1,0 +1,25 @@
+{
+  "format": "m3d-scene-v16",
+  "name": "Pripyat modular scene",
+  "version": 1,
+  "sectors": [
+    {
+      "id": "energetik",
+      "geometry": [
+        "geometry/energetik.json"
+      ],
+      "instances": [
+        "instances/energetik.json"
+      ],
+      "materials": [
+        "materials/energetik.json"
+      ],
+      "pbr": [
+        "pbr/energetik.json"
+      ],
+      "lighting": [],
+      "cameras": [],
+      "environment": []
+    }
+  ]
+}
