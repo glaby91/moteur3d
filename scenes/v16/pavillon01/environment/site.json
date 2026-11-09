@@ -2,8 +2,10 @@
   "format": "m3d-environment-v1",
   "sky": "clear",
   "groundSize": [
-    32,
-    26
+    50,
+    50
   ],
-  "units": "m"
+  "units": "m",
+  "coordinateSystem": "Y-up",
+  "notes": "Architectural demonstrator for V16; refer to instance paths for hierarchy."
 }
