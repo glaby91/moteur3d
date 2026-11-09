@@ -20,6 +20,10 @@ Le cahier des exigences, les niveaux communiqués, les références prioritaires
 
 ## Atlas iconographique et textes historiques
 
+> **Édition la plus récente : 9 novembre 2026.** [Grand atlas illustré — 74 pages / 147 références](ATLAS-GRAND-ILLUSTRE-261109.md). L'édition Word et PDF conserve les 136 références historiques et ajoute 11 images (IMG-137 à IMG-147) et 5 rubriques Urbex Session. Les deux binaires sont diffusés dans la conversation, pas dans le dépôt public, car les droits des photos ne sont pas tous identifiés.
+
+
+
 La reconstruction du Palais s'inscrit dans un **atlas plus large de Pripiat**, qui conserve pour chaque référence visuelle : le lien/photo, le crédit, la date ou période, une légende précise, un **texte historique original rédigé en français**, les enseignes et inscriptions authentifiées, ainsi que les choix de restitution 3D. Ne jamais remplacer ces textes par une image seule.
 
 - [**Photographies du 9 novembre — façade 1985, nuit, foule et autobus**](ENERGETIK-QUATRE-ARCHIVES-1985-NUIT-261109.md) : quatre nouvelles fiches, enseignes bleue/rouge et 4 caméras comparatives ajoutées à la scène.
