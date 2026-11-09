@@ -313,6 +313,10 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution) {
     auto& render=result.runtime.renderScene;
     // Pavillon 01 has a real, bounded terrain mesh; never generate the old infinite ground plane.
     render.finiteGround=true;
+    // V16 only uses authored lights from its JSON scene. Older V14 demonstrations
+    // can keep their hardcoded legacy light rig without leaking lamps/cars
+    // into new architectural or material-test scenes.
+    render.useLegacyWorldLights=false;
     // Unique per-runtime token avoids re-uploading gigabytes of 2K mips
     // during camera movement. All later V16 editor material mutations increment
     // gpuCacheRevision; untracked legacy scenes still use a full content hash.
