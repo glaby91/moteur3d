@@ -3,6 +3,7 @@
 #include <QString>
 #include <QVector>
 #include <QHash>
+#include "m3d_engine.h"
 
 namespace m3d::v16 {
 struct Resource {
@@ -24,4 +25,6 @@ struct LoadResult {
 };
 // Transactional: the caller replaces its active scene only after a successful load.
 LoadResult loadScene(const QString& manifestPath);
+// Build a triangle-only render scene from the validated modular resource database.
+bool compileRenderScene(const SceneDatabase& database, m3d::Scene& out, QString& error);
 }
