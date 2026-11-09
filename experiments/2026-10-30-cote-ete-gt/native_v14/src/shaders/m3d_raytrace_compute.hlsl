@@ -162,7 +162,13 @@ float3 shadeSurface(Ray ray,HitInfo hit,float3 n,float3 color,float roughness,fl
         HitInfo blocker;
         // Exclude the originating triangle and tiny adjacent coplanar hits.
         const uint state=traceClosest(shadow,1000.f,true,hit.primitive,blocker);
-        if(state==1)diffuse*=.35f;
+        if(state==1) {
+            // Close blockers such as roof parapets produce very hard black bands
+            // in a single-ray preview. Preserve the shadow but approximate
+            // skylight/penumbra by retaining more direct fill nearby.
+            const float separation=saturate(blocker.t/2.0f);
+            diffuse*=lerp(.72f,.38f,separation);
+        }
     }
     float3 lit=color*(ambientStrength+diffuse*sunStrength*(1.f-.55f*metallic));
     float3 viewDir=-ray.direction;
