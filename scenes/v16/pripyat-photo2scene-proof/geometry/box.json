@@ -1,0 +1,16 @@
+{
+  "format": "m3d-geometry-v1",
+  "units": "unité arbitraire",
+  "meshes": [
+    {
+      "id": "unit_box",
+      "type": "box",
+      "size": [
+        1,
+        1,
+        1
+      ],
+      "uv": "planar_per_face"
+    }
+  ]
+}
