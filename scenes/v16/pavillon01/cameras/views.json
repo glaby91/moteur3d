@@ -3,37 +3,52 @@
   "cameras": [
     {
       "id": "facade",
-      "name": "Façade sud",
+      "name": "01 · Façade / bassin",
       "position": [
-        28,
-        13,
-        32
+        11.8,
+        6.2,
+        13.1
       ],
       "target": [
         0,
-        3.3,
-        0
+        3.4,
+        1.9
       ],
-      "fovDegrees": 55
+      "fovDegrees": 56
     },
     {
       "id": "jardin",
-      "name": "Terrasse et jardin",
+      "name": "02 · Terrasse / jardin",
       "position": [
-        -18,
-        8,
-        23
+        -9.2,
+        4.6,
+        13.2
+      ],
+      "target": [
+        -0.5,
+        2.6,
+        5.4
+      ],
+      "fovDegrees": 60
+    },
+    {
+      "id": "entree",
+      "name": "03 · Entrée nord",
+      "position": [
+        9.5,
+        4.6,
+        -11.9
       ],
       "target": [
         0,
-        3.3,
-        0
+        2.8,
+        -1.2
       ],
-      "fovDegrees": 54
+      "fovDegrees": 57
     },
     {
       "id": "salon",
-      "name": "Intérieur salon",
+      "name": "04 · Salon intérieur",
       "position": [
         -5,
         1.7,
@@ -48,7 +63,7 @@
     },
     {
       "id": "etage",
-      "name": "Chambres",
+      "name": "05 · Étage / chambres",
       "position": [
         -5,
         4.8,
@@ -63,18 +78,18 @@
     },
     {
       "id": "vue_aerienne",
-      "name": "Vue aérienne",
+      "name": "06 · Vue aérienne compacte",
       "position": [
-        22,
-        28,
-        21
+        14,
+        16,
+        13
       ],
       "target": [
         0,
-        2,
-        0
+        2.7,
+        1.6
       ],
-      "fovDegrees": 52
+      "fovDegrees": 58
     }
   ]
 }
