@@ -5,11 +5,18 @@
 #include <QImage>
 #include <QFileInfo>
 #include <QDebug>
+#include <cstdio>
 #include <atomic>
 #include <cstring>
 #include <set>
 
+static void ciLog(QtMsgType, const QMessageLogContext&, const QString& message) {
+    const QByteArray utf8 = message.toUtf8();
+    std::fprintf(stderr, "V16 TEST: %s\n", utf8.constData());
+    std::fflush(stderr);
+}
 int main(int argc,char** argv){
+    qInstallMessageHandler(ciLog);
     QCoreApplication app(argc,argv);
     if(argc!=3){qCritical()<<"Usage: v16_render_smoke scene.json output.png";return 2;}
     auto loaded=m3d::v16::loadScene(QString::fromLocal8Bit(argv[1]));
