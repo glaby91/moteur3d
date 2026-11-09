@@ -175,9 +175,9 @@ private:
         right->setMinimumWidth(295);
 
         connect(renderButton,&QPushButton::clicked,this,[this]{requestRender();});
-        connect(cameraBox,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){azimuth_->setValue(0);requestRender();});
-        connect(backendBox,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){requestRender();});
-        connect(qualityBox,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){requestRender();});
+        connect(cameraBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){azimuth_->setValue(0);requestRender();});
+        connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){requestRender();});
+        connect(qualityBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){requestRender();});
         connect(azimuth_,&QSlider::sliderReleased,this,[this]{requestRender();});
         connect(roughness_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double){modifyMaterial();});
         connect(metallic_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double){modifyMaterial();});
