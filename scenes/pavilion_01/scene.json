@@ -1,0 +1,253 @@
+{
+  "schema_version": "0.1.0",
+  "scene_id": "pavilion_01",
+  "name": "Pavillon 01",
+  "status": "specification_only",
+  "units": "meters",
+  "coordinate_system": {
+    "handedness": "right",
+    "up": "Z",
+    "forward": "Y",
+    "origin": "ground_floor_center"
+  },
+  "bounds": {
+    "size": [
+      18,
+      12,
+      7
+    ]
+  },
+  "asset_catalog": "../../assets/pavilion_01/assets.json",
+  "environment": {
+    "active_preset": "day",
+    "presets": {
+      "day": {
+        "sun_intensity_lux": 75000,
+        "exposure_ev100": 14
+      },
+      "sunset": {
+        "sun_intensity_lux": 12000,
+        "exposure_ev100": 11
+      },
+      "night": {
+        "sun_intensity_lux": 0,
+        "exposure_ev100": 6
+      }
+    }
+  },
+  "instances": [
+    {
+      "id": "building_shell_01",
+      "asset": "building_shell",
+      "translation": [
+        0,
+        0,
+        0
+      ],
+      "rotation_euler_deg": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "id": "tree_01",
+      "asset": "tree_poplar",
+      "translation": [
+        -13,
+        -9,
+        0
+      ],
+      "rotation_euler_deg": [
+        0,
+        0,
+        0
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "id": "tree_02",
+      "asset": "tree_poplar",
+      "translation": [
+        13,
+        -9,
+        0
+      ],
+      "rotation_euler_deg": [
+        0,
+        0,
+        42
+      ],
+      "scale": [
+        0.9,
+        0.9,
+        1.1
+      ]
+    },
+    {
+      "id": "tree_03",
+      "asset": "tree_poplar",
+      "translation": [
+        -13,
+        9,
+        0
+      ],
+      "rotation_euler_deg": [
+        0,
+        0,
+        97
+      ],
+      "scale": [
+        1.1,
+        1.1,
+        0.95
+      ]
+    },
+    {
+      "id": "tree_04",
+      "asset": "tree_poplar",
+      "translation": [
+        13,
+        9,
+        0
+      ],
+      "rotation_euler_deg": [
+        0,
+        0,
+        135
+      ],
+      "scale": [
+        1,
+        1,
+        1
+      ]
+    }
+  ],
+  "lights": [
+    {
+      "id": "sun",
+      "type": "directional",
+      "direction": [
+        0.4,
+        0.6,
+        -0.7
+      ],
+      "color": [
+        1,
+        0.95,
+        0.86
+      ],
+      "preset_controlled": true
+    },
+    {
+      "id": "hall_light",
+      "type": "point",
+      "translation": [
+        0,
+        0,
+        4.8
+      ],
+      "intensity_lumens": 1800,
+      "color_temperature_kelvin": 3000
+    }
+  ],
+  "cameras": [
+    {
+      "id": "C01_exterior_front",
+      "position": [
+        0,
+        -27,
+        9
+      ],
+      "target": [
+        0,
+        0,
+        3
+      ],
+      "fov_y_deg": 55
+    },
+    {
+      "id": "C02_interior_hall",
+      "position": [
+        0,
+        -4,
+        1.65
+      ],
+      "target": [
+        0,
+        3,
+        3
+      ],
+      "fov_y_deg": 65
+    },
+    {
+      "id": "C03_stair",
+      "position": [
+        4,
+        1,
+        2
+      ],
+      "target": [
+        2,
+        1,
+        4
+      ],
+      "fov_y_deg": 55
+    },
+    {
+      "id": "C04_terrace",
+      "position": [
+        -12,
+        12,
+        4
+      ],
+      "target": [
+        0,
+        0,
+        2
+      ],
+      "fov_y_deg": 55
+    },
+    {
+      "id": "C05_night",
+      "position": [
+        15,
+        -22,
+        7
+      ],
+      "target": [
+        0,
+        0,
+        3
+      ],
+      "fov_y_deg": 55
+    },
+    {
+      "id": "C06_overhead",
+      "position": [
+        0,
+        0,
+        35
+      ],
+      "target": [
+        0,
+        0,
+        0
+      ],
+      "fov_y_deg": 55
+    }
+  ],
+  "notes": [
+    "All dimensions and placements are proposed test data.",
+    "Referenced meshes and textures are not yet created."
+  ]
+}
