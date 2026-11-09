@@ -4,51 +4,145 @@
     {
       "id": "grass",
       "baseColor": [
-        0.22,
-        0.34,
-        0.16
+        0.28,
+        0.43,
+        0.21
       ],
-      "roughness": 0.95
+      "roughness": 0.94,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_grass"
     },
     {
       "id": "concrete",
       "baseColor": [
-        0.75,
-        0.74,
-        0.7
+        0.7,
+        0.7,
+        0.69
       ],
-      "roughness": 0.83
+      "roughness": 0.83,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_concrete"
+    },
+    {
+      "id": "plaster",
+      "baseColor": [
+        0.84,
+        0.83,
+        0.79
+      ],
+      "roughness": 0.86,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_plaster"
     },
     {
       "id": "glass",
       "baseColor": [
-        0.62,
-        0.77,
-        0.85
+        0.64,
+        0.8,
+        0.91
       ],
-      "roughness": 0.06,
-      "transmission": 0.85,
-      "ior": 1.5
+      "roughness": 0.04,
+      "metallic": 0,
+      "transmission": 0.92,
+      "ior": 1.5,
+      "textureSet": "tex_glass"
+    },
+    {
+      "id": "aluminium",
+      "baseColor": [
+        0.36,
+        0.4,
+        0.42
+      ],
+      "roughness": 0.32,
+      "metallic": 0.85,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_aluminium"
     },
     {
       "id": "wood",
       "baseColor": [
-        0.47,
-        0.28,
-        0.13
+        0.5,
+        0.31,
+        0.15
       ],
-      "roughness": 0.58
+      "roughness": 0.59,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_wood"
     },
     {
       "id": "water",
       "baseColor": [
-        0.1,
-        0.32,
-        0.42
+        0.12,
+        0.38,
+        0.58
       ],
-      "roughness": 0.04,
-      "transmission": 0.75,
-      "ior": 1.333
+      "roughness": 0.025,
+      "metallic": 0,
+      "transmission": 0.76,
+      "ior": 1.333,
+      "textureSet": "tex_water"
+    },
+    {
+      "id": "stone",
+      "baseColor": [
+        0.65,
+        0.62,
+        0.59
+      ],
+      "roughness": 0.77,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_stone"
+    },
+    {
+      "id": "fabric",
+      "baseColor": [
+        0.32,
+        0.34,
+        0.35
+      ],
+      "roughness": 0.91,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_fabric"
+    },
+    {
+      "id": "blackmetal",
+      "baseColor": [
+        0.07,
+        0.08,
+        0.09
+      ],
+      "roughness": 0.25,
+      "metallic": 0.8,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_blackmetal"
+    },
+    {
+      "id": "leaves",
+      "baseColor": [
+        0.19,
+        0.43,
+        0.16
+      ],
+      "roughness": 0.82,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_leaves"
     }
   ]
 }
