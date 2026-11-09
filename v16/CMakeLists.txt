@@ -4,7 +4,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Threads REQUIRED)
-find_package(Qt6 6.2 REQUIRED COMPONENTS Core Widgets Concurrent)
+find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
 
 set(NATIVE "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
 set(NATIVE_SRC "${NATIVE}/src")
@@ -57,10 +57,18 @@ target_link_libraries(v16_scene_check PRIVATE moteur3d_v16_core Qt6::Core)
 if(MSVC)
     target_compile_options(v16_scene_check PRIVATE /O2 /EHsc /utf-8)
 endif()
+add_executable(v16_render_smoke "${CMAKE_CURRENT_SOURCE_DIR}/tests/render_smoke.cpp")
+target_link_libraries(v16_render_smoke PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
+if(MSVC)
+    target_compile_options(v16_render_smoke PRIVATE /O2 /EHsc /utf-8)
+endif()
 enable_testing()
 add_test(NAME v16_pavillon01_loader
     COMMAND v16_scene_check "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01/scene.json")
 set_tests_properties(v16_pavillon01_loader PROPERTIES TIMEOUT 240)
+add_test(NAME v16_pavillon01_cpu_render
+    COMMAND v16_render_smoke "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01/scene.json" "${CMAKE_CURRENT_BINARY_DIR}/pavillon01-smoke.png")
+set_tests_properties(v16_pavillon01_cpu_render PROPERTIES TIMEOUT 240)
 add_custom_command(TARGET moteur3d_v16 POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
         "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01"
