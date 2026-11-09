@@ -26,7 +26,7 @@ int main(int argc,char** argv){
     qInfo()<<"Building shadow map";
     const auto shadow=m3d::buildShadow(built.runtime.renderScene,shadows);
     qInfo()<<"Shadow map ready";
-    std::vector<uint32_t> pixels;
+    std::vector<uint32_t> pixels(size_t(w)*size_t(h));
     std::atomic<uint64_t> generation{1};
     qInfo()<<"Starting CPU render";
     const auto stats=m3d::render(built.runtime.renderScene,shadow,cam,w,h,pixels,4,false,generation,1,1,false,false,false,3);
