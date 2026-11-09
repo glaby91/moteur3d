@@ -180,19 +180,51 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
         const float u=float(x)/resolution,v=float(y)/resolution;
         const float n=noise(x/5,y/5,seed),fine=noise(x,y,seed^0x9e3779b9u);
         float factor=1.f;
-        if(pattern=="wood")factor=.76f+.18f*std::sin(u*105.f+std::sin(v*17)*2)+.10f*n;
-        else if(pattern=="concrete"||pattern=="plaster")factor=.89f+.20f*n+.04f*fine;
-        else if(pattern=="stone")factor=.75f+.23f*std::sin(u*23+v*15)+.15f*n;
-        else if(pattern=="fabric")factor=.83f+.15f*std::sin(u*700)*std::sin(v*700)+.07f*n;
-        else if(pattern=="lawn"||pattern=="foliage")factor=.73f+.4f*n+.1f*fine;
-        else if(pattern=="metal")factor=.87f+.12f*n;
+        // Subtle large-scale patterns read better than high-frequency salt-and-pepper.
+        // All patterns feed the same mipmap pipeline used by CPU and GPU.
+        if(pattern=="wood") {
+            const float grain=std::sin(u*93.f+2.f*std::sin(v*8.f)+
+                                       .4f*std::sin(u*17.f+v*21.f));
+            factor=.89f+.095f*grain+.035f*(n-.5f);
+        }
+        else if(pattern=="concrete"||pattern=="plaster") {
+            factor=.965f+.065f*(n-.5f)+.012f*(fine-.5f);
+        }
+        else if(pattern=="stone") {
+            const float veins=std::sin(u*12.f+v*8.f+std::sin(v*15.f)*1.5f);
+            factor=.94f+.05f*veins+.035f*(n-.5f);
+        }
+        else if(pattern=="fabric")
+            factor=.91f+.065f*std::sin(u*260.f)*std::sin(v*260.f);
+        else if(pattern=="lawn"||pattern=="foliage") {
+            const float broad=.5f+.5f*std::sin(u*17.f+v*11.f)*std::cos(v*19.f-u*7.f);
+            factor=.83f+.20f*broad+.10f*(n-.5f);
+        }
+        else if(pattern=="water") {
+            // Gentle caustic-like light variation without opaque stripes.
+            factor=.97f+.015f*std::sin(u*36.f+v*21.f);
+        }
+        else if(pattern=="glass")factor=1.f;
+        else if(pattern=="metal")factor=.975f+.018f*(n-.5f);
         const V color=scale(base,{factor,factor,factor});
         const size_t i=size_t(y)*resolution+x;
         first.p[i]=rgb({clampf(color.x,0,1),clampf(color.y,0,1),clampf(color.z,0,1)});
-        const float d=(n-.5f)*.11f;
-        V normal=norm({d,d*.55f,1.f});
+        V normal={0,0,1};
+        if(pattern=="water") {
+            // Ripples are smooth and low amplitude, not per-texel white noise.
+            const float a=2.f*PI*(u*4.f+v*2.f);
+            const float b=2.f*PI*(u*2.f-v*3.f);
+            normal=norm({.025f*std::cos(a)+.015f*std::cos(b),
+                         .014f*std::sin(a)-.011f*std::sin(b),1.f});
+        } else if(pattern=="glass"||pattern=="metal") {
+            normal={0,0,1};
+        } else {
+            const float d=(n-.5f)*(pattern=="concrete"||pattern=="plaster"?.035f:.07f);
+            normal=norm({d,d*.55f,1.f});
+        }
         nr.p[i]=rgb565({(normal.x+1)*.5f,(normal.y+1)*.5f,(normal.z+1)*.5f});
-        const float r=clampf(roughness+(n-.5f)*.09f,.03f,.98f);
+        const float variation=pattern=="water"||pattern=="glass"?.006f:.055f;
+        const float r=clampf(roughness+(n-.5f)*variation,.03f,.98f);
         rr.p[i]=rgb565({r,r,r});
     }
     mat.colorMip.push_back(std::move(first));
