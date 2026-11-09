@@ -97,7 +97,7 @@ jobs:
       - name: Verify Full HD PNG dimensions
         shell: pwsh
         run: |
-          foreach ($path in @("build-v16/pavillon01-smoke.png", "build-v16/pavillon01-gpu-warp.png", "build-v16/pavillon01-gi-smoke.png")) {
+          foreach ($path in @("build-v16/pavillon01-smoke.png", "build-v16/pavillon01-gpu-warp.png", "build-v16/pavillon01-gi-smoke.png", "build-v16/pavillon01-evening-cpu.png", "build-v16/pavillon01-evening-gpu-warp.png")) {
             if (!(Test-Path $path)) { throw "Reference PNG missing: $path" }
             $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $path))
             if ($bytes.Length -lt 24) { throw "Invalid PNG header: $path" }
@@ -125,6 +125,8 @@ jobs:
           Copy-Item "build-v16/pavillon01-smoke.png" "dist/Pavillon01-CPU-Preview.png"
           Copy-Item "build-v16/pavillon01-gi-smoke.png" "dist/Pavillon01-CPU-GI-FHD-Preview.png"
           Copy-Item "build-v16/pavillon01-gpu-warp.png" "dist/Pavillon01-GPU-WARP-Preview.png"
+          Copy-Item "build-v16/pavillon01-evening-cpu.png" "dist/Pavillon01-CPU-Soleil-Rasant-17h-FHD.png"
+          Copy-Item "build-v16/pavillon01-evening-gpu-warp.png" "dist/Pavillon01-GPU-Soleil-Rasant-17h-FHD.png"
           git rev-parse HEAD | Out-File "dist/REVISION.txt" -Encoding ascii
           Copy-Item "build-v16/Release/pavillon01" "dist/pavillon01" -Recurse
           Copy-Item "build-v16/Release/shaders" "dist/shaders" -Recurse
