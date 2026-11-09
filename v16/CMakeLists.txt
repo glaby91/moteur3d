@@ -81,6 +81,15 @@ set_tests_properties(v16_pavillon01_loader PROPERTIES TIMEOUT 240)
 add_test(NAME v16_pavillon01_cpu_render
     COMMAND v16_render_smoke "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01/scene.json" "${CMAKE_CURRENT_BINARY_DIR}/pavillon01-smoke.png")
 set_tests_properties(v16_pavillon01_cpu_render PROPERTIES TIMEOUT 240)
+add_executable(v16_gi_smoke "${CMAKE_CURRENT_SOURCE_DIR}/tests/gi_smoke.cpp")
+target_link_libraries(v16_gi_smoke PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
+if(MSVC)
+    target_compile_options(v16_gi_smoke PRIVATE /O2 /EHsc /utf-8)
+endif()
+add_test(NAME v16_cpu_global_illumination_fullhd
+    COMMAND v16_gi_smoke "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01/scene.json"
+        "${CMAKE_CURRENT_BINARY_DIR}/pavillon01-gi-smoke.png")
+set_tests_properties(v16_cpu_global_illumination_fullhd PROPERTIES TIMEOUT 240)
 add_test(NAME v16_benchmark_quick
     COMMAND moteur3d_v16_benchmark
         "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01/scene.json"
