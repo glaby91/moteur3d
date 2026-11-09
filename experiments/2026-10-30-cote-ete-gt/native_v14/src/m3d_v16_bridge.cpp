@@ -280,6 +280,12 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution) {
     auto& render=result.runtime.renderScene;
     // Pavillon 01 has a real, bounded terrain mesh; never generate the old infinite ground plane.
     render.finiteGround=true;
+    // Unique per-runtime token avoids re-uploading gigabytes of 2K mips
+    // during camera movement. All later V16 editor material mutations increment
+    // gpuCacheRevision; untracked legacy scenes still use a full content hash.
+    static std::atomic<uint64_t> nextGpuSceneIdentity{1};
+    render.gpuCacheIdentity=nextGpuSceneIdentity.fetch_add(1,std::memory_order_relaxed);
+    render.gpuCacheRevision=0;
     QHash<QString,QJsonObject> meshes;
     QHash<QString,QJsonObject> sets;
     QVector<QJsonObject> instanceDocs;
