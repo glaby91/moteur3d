@@ -1,4 +1,4 @@
-name: Build Moteur3D V16 — Pavillon 01
+name: Moteur3D V16 — Pavillon 01 — Windows x64
 on:
   push:
     branches:
@@ -21,7 +21,7 @@ on:
   workflow_dispatch:
 jobs:
   windows:
-    name: Windows x64 Qt6 — compile, validate, package
+    name: Windows x64 MSVC Qt6 — build, tests, PNG, package
     runs-on: windows-2022
     steps:
       - name: Checkout
@@ -41,11 +41,24 @@ jobs:
         run: cmake --build build-v16 --config Release --parallel 4
       - name: Validate Pavillon 01
         run: ctest --test-dir build-v16 -C Release --output-on-failure
+      - name: Verify CPU preview PNG
+        shell: pwsh
+        run: |
+          if (!(Test-Path "build-v16/pavillon01-smoke.png")) {
+            throw "Le test de ray tracing CPU n'a pas généré pavillon01-smoke.png"
+          }
+          $png = Get-Item "build-v16/pavillon01-smoke.png"
+          if ($png.Length -lt 1000) {
+            throw "Le rendu CPU semble vide ($($png.Length) octets)"
+          }
+          Write-Host "Aperçu CPU validé : $($png.Length) octets"
       - name: Package EXE + Pavillon 01 + Qt6 dependencies
         shell: pwsh
         run: |
           New-Item -Type Directory -Path "dist" -Force | Out-Null
           Copy-Item "build-v16/Release/moteur3d_v16.exe" "dist/"
+          Copy-Item "build-v16/pavillon01-smoke.png" "dist/Pavillon01-CPU-Preview.png"
+          git rev-parse HEAD | Out-File "dist/REVISION.txt" -Encoding ascii
           Copy-Item "build-v16/Release/pavillon01" "dist/pavillon01" -Recurse
           Copy-Item "build-v16/Release/shaders" "dist/shaders" -Recurse
           windeployqt --release --no-translations dist/moteur3d_v16.exe
@@ -54,29 +67,4 @@ jobs:
         with:
           name: Moteur3D-V16-Pavillon01-Windows-x64
           path: dist/
-          if-no-files-found: error
-  linux:
-    name: Linux Qt6 — compile and native validator
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - name: Qt6 and compiler
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qt6-base-dev qt6-base-dev-tools gdb
-      - name: Configure
-        run: cmake -S v16 -B build-v16-linux -DCMAKE_BUILD_TYPE=RelWithDebInfo
-      - name: Compile
-        run: cmake --build build-v16-linux --parallel 4
-      - name: Validate Pavillon 01
-        run: ctest --test-dir build-v16-linux --output-on-failure
-      - name: Native backtrace if CPU rendering fails
-        if: failure()
-        run: |
-          gdb --batch -ex run -ex "bt 30" --args             build-v16-linux/v16_render_smoke             scenes/v16/pavillon01/scene.json             build-v16-linux/pavillon01-smoke-debug.png
-      - name: Upload actual raytraced preview PNG
-        uses: actions/upload-artifact@v4
-        with:
-          name: Moteur3D-V16-Pavillon01-CPU-Preview
-          path: build-v16-linux/pavillon01-smoke.png
           if-no-files-found: error
