@@ -11,12 +11,16 @@ on:
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/moteur3d_v16_qt.cpp'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/m3d_engine.h'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_shading.cpp'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_compute11.cpp'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/shaders/**'
       - '.github/workflows/build-moteur3d-v16.yml'
   pull_request:
     paths:
       - 'v16/**'
       - 'scenes/v16/pavillon01/**'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_v16_bridge.*'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_compute11.cpp'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/shaders/**'
       - '.github/workflows/build-moteur3d-v16.yml'
   workflow_dispatch:
 jobs:
