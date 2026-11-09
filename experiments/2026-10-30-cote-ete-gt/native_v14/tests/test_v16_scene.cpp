@@ -23,7 +23,15 @@ int main(int argc,char** argv) {
         qCritical() << "Pavillon01 scene geometry/BVH invariants failed";
         return 5;
     }
-    for (const auto& material : scene.mat) {\n        if (material.colorMip.size()!=12 || material.normalMip.size()!=12 ||\n            material.roughnessMip.size()!=12 || material.colorMip.front().size!=2048 ||\n            material.colorMip.back().size!=1) {\n            qCritical() << \"PBR mip chain invalid for\" << material.name.c_str();\n            return 10;\n        }\n    }\n    for (const auto& object:scene.obj)
+    for (const auto& material : scene.mat) {
+        if (material.colorMip.size()!=12 || material.normalMip.size()!=12 ||
+            material.roughnessMip.size()!=12 || material.colorMip.front().size!=2048 ||
+            material.colorMip.back().size!=1) {
+            qCritical() << \"PBR mip chain invalid for\" << material.name.c_str();
+            return 10;
+        }
+    }
+    for (const auto& object:scene.obj)
         if (object.kind!=m3d::Kind::Triangle || object.mat>=scene.mat.size())
             return 6;
     QTemporaryDir dir;
