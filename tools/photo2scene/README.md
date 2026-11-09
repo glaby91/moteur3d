@@ -104,3 +104,29 @@ Commande :
     python tools/photo2scene/facade_linefit.py tools/photo2scene/data/pripyat/energetik-20261109-third-view-sample.json -o energetik-third-linefit.json
 
 Les unités de scène restent non résolues tant que les vues ne sont pas recalées par des repères vérifiés et des contraintes de plan/dimensions indépendantes.
+
+
+## PREMIER AJUSTEMENT FILAIRE 3D — TROIS PHOTOS (NON CERTIFIÉ)
+
+Le programme multiview_facade.py applique un *bundle adjustment* aux 68 candidats de points étiquetés manuellement dans data/pripyat/energetik-20261109-threeview-facade-anchors.json. 34 observations servent à ajuster les caméras ; les 34 autres sont réservées aux contrôles en pixels.
+
+| Original | RMS contrôle (pixels) | FOV conditionnel |
+|---|---:|---:|
+| Photo 1 oblique (516 × 387) | 3,44 | 47,05° |
+| Photo 2 frontale (1024 × 680) | 6,36 | 26,89° |
+| Photo 3 éloignée (1920 × 1080) | 2,58 | 26,37° |
+
+Le plan de façade est normalisé avec une largeur de travée = 1 unité horizontale. Une hauteur de colonnade de 2,253 unités par travée est ajustée. Il ne s'agit PAS d'une mesure historique certifiée.
+
+Une estimation précédente du FOV de la photo 1 par deux points de fuite donnait 63,61°, tandis que le bundle actuel donne 47,05°. Un ajustement qui contraint la focale de la photo 1 vers cette première valeur conserve des erreurs de contrôle assez proches. Cette instabilité rend les paramètres intrinsèques encore incertains.
+
+Ni la profondeur de l'édifice, ni la façade latérale, ni les dimensions métriques ne sont résolues. Le fichier OBJ produit est seulement une façade plane Z=0 avec 14 montants filaires ; le modèle ne prétend pas représenter le bâtiment entier.
+
+Pour reproduire :
+
+    python -m pip install numpy scipy opencv-python-headless
+    python tools/photo2scene/multiview_facade.py tools/photo2scene/data/pripyat/energetik-20261109-threeview-facade-anchors.json -o resultats-3d/
+
+Pour produire les PNG de contrôle, fournir --originals-dir avec les véritables images d'origine, identifiées par leur SHA-256. L'outil vérifie ces empreintes. Les images nettoyées par IA ne sont pas des données de mesure.
+
+La scène d'essai CSE WARP Beta X se trouve à scenes/v16/pripyat-photo2scene-proof/scene.json : 16 éléments filaires approximés par de très fines boîtes pour être affichables par le moteur, avec trois caméras conditionnelles. L'épaisseur technique de ces boîtes n'est pas mesurée. La scène d'origine Energetik reste distincte et intacte.
