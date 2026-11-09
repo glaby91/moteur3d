@@ -206,7 +206,12 @@ private:
         auto* form=new QFormLayout;
         cameraBox_=new QComboBox;
         backendBox_=new QComboBox;
-        backendBox_->addItems({QStringLiteral("CPU Ray Tracing PBR"),QStringLiteral("GPU D3D11 Compute — textures + ombres")});
+        backendBox_->addItems({
+            QStringLiteral("CPU Ray Tracing PBR — direct"),
+            QStringLiteral("GPU D3D11 Compute — rapide, ombres + verre"),
+            QStringLiteral("CPU Éclairage global — 2 rebonds, 4 échantillons"),
+            QStringLiteral("CPU Éclairage global — 4 rebonds, 16 échantillons")
+        });
 #ifndef _WIN32
         backendBox_->setItemData(1,0,Qt::UserRole-1);
 #endif
@@ -217,7 +222,7 @@ private:
         azimuth_->setRange(-180,180);
         azimuth_->setValue(0);
         form->addRow(QStringLiteral("Caméra"),cameraBox_);
-        form->addRow(QStringLiteral("Backend"),backendBox_);
+        form->addRow(QStringLiteral("Méthode de rendu"),backendBox_);
         form->addRow(QStringLiteral("Résolution"),qualityBox_);
         form->addRow(QStringLiteral("Rotation caméra"),azimuth_);
         vertical->addLayout(form);
@@ -407,12 +412,16 @@ private:
                     preset.target.z-dir.x*std::sin(angle)+dir.z*std::cos(angle)};
         const int w=qualityBox_->currentIndex()==2?3840:1920;
         const int h=w*9/16;
-        const bool wantGpu=backendBox_->currentIndex()==1;
+        const int backend=backendBox_->currentIndex();
+        const bool wantGpu=backend==1;
+        const bool globalIllumination=backend>=2;
         const bool edgeAA=edgeAa_->isChecked();
-        const unsigned sampleCount=qualityBox_->currentIndex()==1?4u:1u;
+        const unsigned sampleCount=globalIllumination?(backend==2?4u:16u):
+                                   (qualityBox_->currentIndex()==1?4u:1u);
+        const unsigned maxBounces=backend==2?2u:4u;
         statusBar()->showMessage(QStringLiteral("Calcul de l'image…"));
         const auto shadowCache=cpuShadows_;
-        watcher_.setFuture(QtConcurrent::run([snapshot,preset,w,h,wantGpu,edgeAA,sampleCount,shadowCache]{
+        watcher_.setFuture(QtConcurrent::run([snapshot,preset,w,h,wantGpu,globalIllumination,edgeAA,sampleCount,maxBounces,shadowCache]{
             Result result;
             updateLighting(snapshot->daylightHour);
             const auto camera=v16::makeCamera(preset,w,h);
@@ -447,8 +456,11 @@ private:
                 std::atomic<uint64_t> generation{1};
                 stats=m3d::render(snapshot->renderScene,*shadow,camera,w,h,pixels,
                              std::max(1u,std::min(8u,std::thread::hardware_concurrency())),
-                             false,generation,1,sampleCount,false,false,false,3);
-                result.renderer=shadowReused
+                             false,generation,1,sampleCount,false,false,globalIllumination,maxBounces);
+                if(globalIllumination)
+                    result.renderer=QStringLiteral("CPU Path Tracing GI — %1 rebonds, %2 spp, HDR")
+                        .arg(maxBounces).arg(sampleCount);
+                else result.renderer=shadowReused
                     ?QStringLiteral("CPU Ray Tracing — PBR, ombres en cache")
                     :QStringLiteral("CPU Ray Tracing — PBR, ombres calculées");
             }else result.gpu=true;
