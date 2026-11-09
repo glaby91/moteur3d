@@ -38,6 +38,11 @@ target_link_libraries(m3d_core PUBLIC Threads::Threads Qt6::Core)
 qt_add_executable(moteur3d_qt WIN32 src/moteur3d_qt.cpp)
 target_link_libraries(moteur3d_qt PRIVATE m3d_core Qt6::Widgets)
 
+enable_testing()
+add_executable(m3d_v16_scene_test tests/test_v16_scene.cpp)
+target_link_libraries(m3d_v16_scene_test PRIVATE m3d_core Qt6::Core)
+add_test(NAME pavillon01_scene_compile COMMAND m3d_v16_scene_test ${CMAKE_CURRENT_SOURCE_DIR}/../../../scenes/v16/pavillon01/scene.json)
+
 if(MSVC)
     set_source_files_properties(src/simd/avx2/post.cpp src/simd/avx2/ray_generation.cpp src/simd/avx2/triangle_intersection.cpp src/simd/avx2/lighting.cpp src/simd/avx2/texture_sampling.cpp PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
     target_compile_options(m3d_core PRIVATE /O2 /EHsc /utf-8)
