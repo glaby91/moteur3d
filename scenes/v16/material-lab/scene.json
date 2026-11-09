@@ -1,0 +1,30 @@
+{
+  "format": "m3d-scene-v16",
+  "name": "Atelier des materiaux - test transversal du moteur",
+  "version": 1,
+  "units": "m",
+  "sectors": [
+    {
+      "id": "atelier",
+      "geometry": [
+        "geometry/primitives.json"
+      ],
+      "instances": [
+        "instances/display.json"
+      ],
+      "materials": [
+        "materials/surfaces.json"
+      ],
+      "pbr": [
+        "pbr/surfaces.json"
+      ],
+      "lighting": [
+        "lighting/day.json"
+      ],
+      "cameras": [
+        "cameras/views.json"
+      ],
+      "environment": []
+    }
+  ]
+}
