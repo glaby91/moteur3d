@@ -82,7 +82,7 @@ private:
 class V16Window final : public QMainWindow {
 public:
     explicit V16Window(QString scenePath){
-        setWindowTitle(QStringLiteral("CSE WARP Beta X — Pavillon 01"));
+        setWindowTitle(QStringLiteral("CSE WARP Beta X — Scène V16"));
         resize(1510,900);
         setMinimumSize(1100,670);
         canvas_=new ImageView;
@@ -137,7 +137,7 @@ private:
 
     void createUi(){
         auto* file=menuBar()->addMenu(QStringLiteral("Fichier"));
-        auto* open=file->addAction(QStringLiteral("Ouvrir Pavillon 01 (scene.json)…"));
+        auto* open=file->addAction(QStringLiteral("Ouvrir une scène V16 (scene.json)…"));
         connect(open,&QAction::triggered,this,[this]{
             const QString chosen=QFileDialog::getOpenFileName(
                 this,QStringLiteral("Scène V16"),QFileInfo(scenePath_).absolutePath(),
@@ -390,6 +390,7 @@ private:
         if(!build){QMessageBox::critical(this,"Scène V16",build.error);return;}
         auto replacement=std::make_shared<v16::Runtime>(std::move(build.runtime));
         runtime_=std::move(replacement);
+        setWindowTitle(QStringLiteral("CSE WARP Beta X — %1").arg(runtime_->title));
         sunHour_->blockSignals(true);
         sunHour_->setValue(double(runtime_->daylightHour));
         sunHour_->blockSignals(false);
@@ -414,7 +415,8 @@ private:
         }
         cameraBox_->blockSignals(false);
         populateTrees(loaded.scene);
-        statusBar()->showMessage(QStringLiteral("Pavillon 01 — %1 objets, %2 triangles, %3 matériaux, PBR %4 px")
+        statusBar()->showMessage(QStringLiteral("%1 — %2 objets, %3 triangles, %4 matériaux, PBR %5 px")
+            .arg(runtime_->title)
             .arg(runtime_->objects.size())
             .arg(runtime_->renderScene.obj.size())
             .arg(runtime_->renderScene.mat.size())
