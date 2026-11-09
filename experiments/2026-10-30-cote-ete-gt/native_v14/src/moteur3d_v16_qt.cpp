@@ -114,6 +114,7 @@ private:
     QCheckBox* denoiseDirect_=nullptr;
     QCheckBox* edgeAa_=nullptr;
     QSlider* azimuth_=nullptr;
+    QDoubleSpinBox* sunHour_=nullptr;
     QDoubleSpinBox* roughness_=nullptr;
     QDoubleSpinBox* metallic_=nullptr;
     QLabel* materialLabel_=nullptr;
@@ -243,6 +244,13 @@ private:
         denoiseGi_->setEnabled(false);
         denoiseDirect_=new QCheckBox(QStringLiteral("Débruitage CPU direct (bilatéral)"));
         denoiseDirect_->setChecked(false); // avoid blurring PBR details by default
+        sunHour_=new QDoubleSpinBox;
+        sunHour_->setRange(7.0,19.0);
+        sunHour_->setDecimals(2);
+        sunHour_->setSingleStep(.25);
+        sunHour_->setSuffix(QStringLiteral(" h"));
+        sunHour_->setValue(14.75);
+        sunHour_->setToolTip(QStringLiteral("Direction et hauteur du soleil — lumière rasante vers 17 h"));
         azimuth_=new QSlider(Qt::Horizontal);
         azimuth_->setRange(-180,180);
         azimuth_->setValue(0);
@@ -251,6 +259,7 @@ private:
         form->addRow(QStringLiteral("Résolution"),qualityBox_);
         form->addRow(QStringLiteral("Échantillons CPU direct"),directSamples_);
         form->addRow(QStringLiteral("Échantillons GI"),giSamples_);
+        form->addRow(QStringLiteral("Heure solaire"),sunHour_);
         form->addRow(QStringLiteral("Rotation caméra"),azimuth_);
         vertical->addLayout(form);
         vertical->addWidget(progressiveGi_);
@@ -297,6 +306,14 @@ private:
         connect(denoiseDirect_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()==0)requestRender();});
         connect(edgeAa_,&QCheckBox::toggled,this,[this](bool){requestRender();});
         connect(azimuth_,&QSlider::sliderReleased,this,[this]{requestRender();});
+        connect(sunHour_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double hour){
+            if(!runtime_)return;
+            // No render thread may observe a partially updated daylight hour.
+            renderSerial_->fetch_add(1);
+            if(watcher_.isRunning())watcher_.waitForFinished();
+            runtime_->daylightHour=float(hour);
+            requestRender();
+        });
         connect(roughness_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double){modifyMaterial();});
         connect(metallic_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double){modifyMaterial();});
         connect(resourceTree_,&QTreeWidget::itemClicked,this,[this](QTreeWidgetItem* item,int){
@@ -373,6 +390,9 @@ private:
         if(!build){QMessageBox::critical(this,"Scène V16",build.error);return;}
         auto replacement=std::make_shared<v16::Runtime>(std::move(build.runtime));
         runtime_=std::move(replacement);
+        sunHour_->blockSignals(true);
+        sunHour_->setValue(double(runtime_->daylightHour));
+        sunHour_->blockSignals(false);
         scenePath_=path;
         materialsPath_.clear();
         for(const auto& sector:loaded.scene.sectors){
