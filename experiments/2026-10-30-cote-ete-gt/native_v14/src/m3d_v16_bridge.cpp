@@ -240,8 +240,30 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
                          .014f*std::sin(a)-.011f*std::sin(b),1.f});
         } else if(pattern=="glass"||pattern=="metal"||pattern=="porcelain") {
             normal={0,0,1};
+        } else if(pattern=="wood") {
+            // Longitudinal grain grooves: the relief follows the color fibers.
+            // This is genuine tangent-space normal mapping, not image noise.
+            const float phase=u*93.f+2.f*std::sin(v*8.f)+
+                              .4f*std::sin(u*17.f+v*21.f);
+            normal=norm({-.125f*std::cos(phase),
+                         .028f*std::sin(phase)*std::cos(v*8.f),1.f});
+        } else if(pattern=="stone") {
+            const float vein=u*12.f+v*8.f+1.5f*std::sin(v*15.f);
+            normal=norm({-.11f*std::cos(vein),
+                         -.065f*std::cos(vein)+.028f*(n-.5f),1.f});
+        } else if(pattern=="concrete"||pattern=="plaster"||pattern=="roof") {
+            // Smooth, coherent height gradients react to grazing daylight;
+            // old unrelated random X/Y normal offsets looked like flat grain.
+            const float x=float(x)/7.f,yf=float(y)/7.f;
+            const float hx=smoothNoise(x+1.f/7.f,yf,seed)-
+                           smoothNoise(x-1.f/7.f,yf,seed);
+            const float hy=smoothNoise(x,yf+1.f/7.f,seed)-
+                           smoothNoise(x,yf-1.f/7.f,seed);
+            const float strength=pattern=="roof"?.10f:
+                                 pattern=="concrete"?.33f:.24f;
+            normal=norm({-hx*strength,-hy*strength,1.f});
         } else {
-            const float d=(n-.5f)*(pattern=="concrete"||pattern=="plaster"?.035f:.07f);
+            const float d=(n-.5f)*.065f;
             normal=norm({d,d*.55f,1.f});
         }
         nr.p[i]=rgb565({(normal.x+1)*.5f,(normal.y+1)*.5f,(normal.z+1)*.5f});
