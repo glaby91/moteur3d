@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Photo2Scene: calcul reproductible de géométrie projective depuis annotations.
+"""Photo2Scene WARP: calcul reproductible de géométrie projective depuis annotations.
 
 Usage: python tools/photo2scene/photo2scene.py analyse data.json -o result.json
 Toutes les positions pixels sont des observations, pas des inférences fiables de l'IA.
@@ -175,7 +175,7 @@ def main() -> int:
     try:
         result=analyse(json.loads(a.input.read_text(encoding="utf-8")))
     except (OSError, KeyError, TypeError, ValueError, IndexError) as exc:
-        parser.exit(2,f"Photo2Scene: {exc}\n")
+        parser.exit(2,f"Photo2Scene WARP: {exc}\n")
     output=json.dumps(result,indent=2,ensure_ascii=False,allow_nan=False)+"\n"
     if a.output:
         a.output.parent.mkdir(parents=True,exist_ok=True)
