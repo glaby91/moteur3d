@@ -30,9 +30,9 @@
     {
       "id": "plaster",
       "baseColor": [
-        0.84,
-        0.83,
-        0.79
+        0.88,
+        0.87,
+        0.83
       ],
       "roughness": 0.86,
       "metallic": 0,
@@ -47,7 +47,7 @@
         0.8,
         0.91
       ],
-      "roughness": 0.04,
+      "roughness": 0.065,
       "metallic": 0,
       "transmission": 0.92,
       "ior": 1.5,
@@ -82,13 +82,13 @@
     {
       "id": "water",
       "baseColor": [
-        0.12,
-        0.38,
-        0.58
+        0.09,
+        0.34,
+        0.46
       ],
-      "roughness": 0.025,
+      "roughness": 0.075,
       "metallic": 0,
-      "transmission": 0.76,
+      "transmission": 0.32,
       "ior": 1.333,
       "textureSet": "tex_water"
     },
@@ -99,7 +99,7 @@
         0.62,
         0.59
       ],
-      "roughness": 0.77,
+      "roughness": 0.72,
       "metallic": 0,
       "transmission": 0,
       "ior": 1.5,
