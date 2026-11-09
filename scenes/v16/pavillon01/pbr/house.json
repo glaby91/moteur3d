@@ -1,6 +1,160 @@
 {
   "format": "m3d-pbr-v1",
   "textureResolutionTarget": 2048,
-  "textures": [],
-  "note": "Material scalar defaults only; no generated PBR image assets yet."
+  "sets": [
+    {
+      "id": "tex_grass",
+      "pattern": "lawn",
+      "resolution": 2048,
+      "uvScale": 5,
+      "generateMipmaps": true,
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness",
+        "metallic",
+        "ao"
+      ]
+    },
+    {
+      "id": "tex_concrete",
+      "pattern": "concrete",
+      "resolution": 2048,
+      "uvScale": 1,
+      "generateMipmaps": true,
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness",
+        "metallic",
+        "ao"
+      ]
+    },
+    {
+      "id": "tex_plaster",
+      "pattern": "plaster",
+      "resolution": 2048,
+      "uvScale": 1,
+      "generateMipmaps": true,
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness",
+        "metallic",
+        "ao"
+      ]
+    },
+    {
+      "id": "tex_glass",
+      "pattern": "glass",
+      "resolution": 2048,
+      "uvScale": 1,
+      "generateMipmaps": true,
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness",
+        "metallic",
+        "ao"
+      ]
+    },
+    {
+      "id": "tex_aluminium",
+      "pattern": "metal",
+      "resolution": 2048,
+      "uvScale": 1,
+      "generateMipmaps": true,
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness",
+        "metallic",
+        "ao"
+      ]
+    },
+    {
+      "id": "tex_wood",
+      "pattern": "wood",
+      "resolution": 2048,
+      "uvScale": 1,
+      "generateMipmaps": true,
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness",
+        "metallic",
+        "ao"
+      ]
+    },
+    {
+      "id": "tex_water",
+      "pattern": "water",
+      "resolution": 2048,
+      "uvScale": 1,
+      "generateMipmaps": true,
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness",
+        "metallic",
+        "ao"
+      ]
+    },
+    {
+      "id": "tex_stone",
+      "pattern": "stone",
+      "resolution": 2048,
+      "uvScale": 1,
+      "generateMipmaps": true,
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness",
+        "metallic",
+        "ao"
+      ]
+    },
+    {
+      "id": "tex_fabric",
+      "pattern": "fabric",
+      "resolution": 2048,
+      "uvScale": 1,
+      "generateMipmaps": true,
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness",
+        "metallic",
+        "ao"
+      ]
+    },
+    {
+      "id": "tex_blackmetal",
+      "pattern": "metal",
+      "resolution": 2048,
+      "uvScale": 1,
+      "generateMipmaps": true,
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness",
+        "metallic",
+        "ao"
+      ]
+    },
+    {
+      "id": "tex_leaves",
+      "pattern": "foliage",
+      "resolution": 2048,
+      "uvScale": 1,
+      "generateMipmaps": true,
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness",
+        "metallic",
+        "ao"
+      ]
+    }
+  ]
 }
