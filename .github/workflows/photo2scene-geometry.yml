@@ -1,4 +1,4 @@
-name: Photo2Scene — geometry regression tests
+name: Photo2Scene WARP — geometry regression tests
 
 on:
   push:
@@ -37,7 +37,7 @@ jobs:
           PY
       - uses: actions/upload-artifact@v4
         with:
-          name: Photo2Scene-synthetic-geometry-reports
+          name: Photo2Scene-WARP-synthetic-geometry-reports
           path: |
             ground-result.json
             fov-result.json
