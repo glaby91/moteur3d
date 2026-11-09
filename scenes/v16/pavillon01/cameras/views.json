@@ -1,0 +1,33 @@
+{
+  "format": "m3d-cameras-v1",
+  "cameras": [
+    {
+      "id": "front",
+      "position": [
+        24,
+        12,
+        26
+      ],
+      "target": [
+        0,
+        3,
+        0
+      ],
+      "fovDegrees": 55
+    },
+    {
+      "id": "garden",
+      "position": [
+        -15,
+        5,
+        22
+      ],
+      "target": [
+        0,
+        3,
+        0
+      ],
+      "fovDegrees": 65
+    }
+  ]
+}
