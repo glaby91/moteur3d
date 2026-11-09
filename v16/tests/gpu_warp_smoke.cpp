@@ -25,7 +25,7 @@ int main(int argc,char** argv) {
  if(!runtime){qCritical()<<runtime.error;return 1;}
  if(runtime.runtime.cameras.isEmpty()){qCritical()<<"Missing camera";return 1;}
  m3d::updateLighting(runtime.runtime.daylightHour);
- constexpr int width=384,height=216;
+ constexpr int width=1920,height=1080; // Full HD GPU WARP reference screenshot
  const auto cam=m3d::v16::makeCamera(runtime.runtime.cameras.front(),width,height);
  std::vector<uint32_t> pixels;
  m3d::Stats stats;std::wstring error;
