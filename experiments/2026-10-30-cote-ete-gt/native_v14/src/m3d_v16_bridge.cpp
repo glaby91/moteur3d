@@ -238,6 +238,7 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution) {
         material.transmissionPercent=uint8_t(std::lround(transmission*100));
         material.refractiveIndex=f(j.value("ior"),1.5f);
         material.metallic=metal;
+        material.roughnessScale=clampf(f(j.value("roughnessScale"),1.f),.01f,2.f);
         const auto texId=j.value("textureSet").toString();
         if(!sets.contains(texId)){result.error="Missing texture set: "+texId;return result;}
         const auto set=sets.value(texId);
