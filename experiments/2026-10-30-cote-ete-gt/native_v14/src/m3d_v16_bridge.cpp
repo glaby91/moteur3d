@@ -92,6 +92,61 @@ void sphere(Scene& scene,V position,V size,int mat) {
         if(i<R-1)add(b,c,d,{float(j)/S,float(i+1)/R,0},{float(j+1)/S,float(i+1)/R,0},{float(j+1)/S,float(i)/R,0});
     }
 }
+// Organic, lightweight foliage silhouette; shared between CPU and Compute backends.
+// Geometry remains triangles: no alpha-blending and no engine-specific special case.
+void foliageCanopy(Scene& scene,V position,V size,int material) {
+    constexpr int segments=18,rings=9;
+    const float halfX=size.x*.5f,halfY=size.y*.5f,halfZ=size.z*.5f;
+    auto point=[&](int ring,int segment)->V {
+        const float latitude=float(ring)*PI/rings;
+        const float azimuth=float(segment)*2.f*PI/segments;
+        const float ripple=1.f+.075f*std::sin(5.f*azimuth+2.f*latitude)
+                             +.055f*std::cos(9.f*azimuth-3.f*latitude)
+                             +.04f*std::sin(7.f*latitude+4.f*azimuth);
+        const float widest=std::sin(latitude)*ripple;
+        return {position.x+halfX*widest*std::cos(azimuth),
+                position.y+halfY*std::cos(latitude),
+                position.z+halfZ*widest*std::sin(azimuth)};
+    };
+    for(int ring=0;ring<rings;++ring)
+        for(int segment=0;segment<segments;++segment) {
+            const V a=point(ring,segment),b=point(ring+1,segment),
+                    c=point(ring+1,segment+1),d=point(ring,segment+1);
+            const auto add=[&](V p,V q,V r,V uv0,V uv1,V uv2) {
+                if(dot(cross(q-p,r-p),p-position)<0) {
+                    std::swap(q,r);
+                    std::swap(uv1,uv2);
+                }
+                triangle(scene,p,q,r,uv0,uv1,uv2,material);
+            };
+            if(ring>0) add(a,b,d,
+                {float(segment)/segments,float(ring)/rings,0},
+                {float(segment)/segments,float(ring+1)/rings,0},
+                {float(segment+1)/segments,float(ring)/rings,0});
+            if(ring<rings-1) add(b,c,d,
+                {float(segment)/segments,float(ring+1)/rings,0},
+                {float(segment+1)/segments,float(ring+1)/rings,0},
+                {float(segment+1)/segments,float(ring)/rings,0});
+        }
+    // Sparse leaf-shaped facets break up the perfectly round "green ball" outline.
+    // Fixed deterministic phases ensure stable benchmarks and reproducible images.
+    for(int i=0;i<36;++i) {
+        const float azimuth=float(i)*2.39996323f;
+        const float elevation=.35f*std::sin(i*1.731f);
+        const float cy=std::sin(elevation),radius=std::cos(elevation);
+        const V n=norm({radius*std::cos(azimuth),cy,radius*std::sin(azimuth)});
+        const V center={position.x+n.x*halfX*.93f,position.y+n.y*halfY*.93f,
+                        position.z+n.z*halfZ*.93f};
+        const V helper=std::abs(n.y)<.8f?V{0,1,0}:V{1,0,0};
+        const V tangent=norm(cross(n,helper));
+        const float width=(.12f+.035f*float(i%3))*std::min(size.x,size.z);
+        const float height=width*(1.15f+.20f*float(i%4));
+        const V base=center-tangent*(width*.45f);
+        const V end=center+tangent*(width*.4f)+V{0,height*.24f,0}+n*(height*.24f);
+        const V sides=center+V{0,height*.4f,0};
+        triangle(scene,base,sides,end,{0,0,0},{.5f,1.f,0},{1,0,0},material,n);
+    }
+}
 int buildBvh(Scene& s,int first,int count){
     Node node;node.mn={INF,INF,INF};node.mx={-INF,-INF,-INF};
     V cmin{INF,INF,INF},cmax{-INF,-INF,-INF};
@@ -277,6 +332,7 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution) {
         const auto type=meshes.value(meshId).value("type").toString();
         if(type=="box")box(render,pos,size,f(j.value("rotationY")),material);
         else if(type=="uv_sphere")sphere(render,pos,size,material);
+        else if(type=="foliage_canopy")foliageCanopy(render,pos,size,material);
         else {result.error="Unsupported V16 geometry: "+meshId;return result;}
         object.triangleCount=int(render.obj.size())-object.firstTriangle;
         result.runtime.objects.push_back(object);
