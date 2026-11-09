@@ -6,6 +6,11 @@
 #include <QComboBox>
 #include <QCoreApplication>
 #include <QDir>
+#include <QFile>
+#include <QSaveFile>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
 #include <QFileDialog>
@@ -102,6 +107,7 @@ private:
     bool pending_=false, updatingControls_=false;
     int selectedMaterial_=-1;
     QString scenePath_;
+    QString materialsPath_;
 
     void createUi(){
         auto* file=menuBar()->addMenu(QStringLiteral("Fichier"));
@@ -112,6 +118,8 @@ private:
                 QStringLiteral("Manifeste V16 (scene.json);;JSON (*.json)"));
             if(!chosen.isEmpty())openScene(chosen);
         });
+        auto* saveMaterialsAction=file->addAction(QStringLiteral("Enregistrer les matériaux PBR…"));
+        connect(saveMaterialsAction,&QAction::triggered,this,[this]{saveMaterials();});
         auto* save=file->addAction(QStringLiteral("Exporter l'image PNG…"));
         connect(save,&QAction::triggered,this,[this]{
             if(lastImage_.isNull()){QMessageBox::information(this,"PNG","Aucune image calculée.");return;}
@@ -209,6 +217,36 @@ private:
         m.metallic=float(metallic_->value());
         requestRender();
     }
+    void saveMaterials(){
+        if(materialsPath_.isEmpty()||!runtime_){QMessageBox::warning(this,"Matériaux","Aucun catalogue chargé.");return;}
+        if(watcher_.isRunning())watcher_.waitForFinished();
+        QFile file(materialsPath_);
+        if(!file.open(QIODevice::ReadOnly)){QMessageBox::critical(this,"Matériaux",file.errorString());return;}
+        const auto document=QJsonDocument::fromJson(file.readAll());
+        file.close();
+        if(!document.isObject()){QMessageBox::critical(this,"Matériaux","Fichier JSON invalide.");return;}
+        QJsonObject root=document.object();
+        QJsonArray materials=root.value("materials").toArray();
+        for(int i=0;i<materials.size();++i){
+            auto j=materials[i].toObject();
+            const QString id=j.value("id").toString();
+            if(!runtime_->materialIndex.contains(id))continue;
+            const auto& m=runtime_->renderScene.mat[size_t(runtime_->materialIndex.value(id))];
+            j.insert("roughnessScale",double(m.roughnessScale));
+            j.insert("metallic",double(m.metallic));
+            materials[i]=j;
+        }
+        root.insert("materials",materials);
+        QSaveFile output(materialsPath_);
+        if(!output.open(QIODevice::WriteOnly)){
+            QMessageBox::critical(this,"Matériaux",output.errorString());return;
+        }
+        const auto content=QJsonDocument(root).toJson(QJsonDocument::Indented);
+        if(output.write(content)!=content.size()||!output.commit()){
+            QMessageBox::critical(this,"Matériaux","Écriture du catalogue impossible.");return;
+        }
+        statusBar()->showMessage(QStringLiteral("Matériaux enregistrés dans %1").arg(materialsPath_),15000);
+    }
     void openScene(const QString& path){
         if(watcher_.isRunning())watcher_.waitForFinished();
         auto loaded=v16::loadScene(path);
@@ -221,6 +259,14 @@ private:
         auto replacement=std::make_shared<v16::Runtime>(std::move(build.runtime));
         runtime_=std::move(replacement);
         scenePath_=path;
+        materialsPath_.clear();
+        for(const auto& sector:loaded.scene.sectors){
+            const auto entries=sector.resources.value(QStringLiteral("materials"));
+            if(!entries.isEmpty()){
+                materialsPath_=QDir(QFileInfo(path).absolutePath()).absoluteFilePath(entries.front().path);
+                break;
+            }
+        }
         selectedMaterial_=-1;
         cameraBox_->blockSignals(true);
         cameraBox_->clear();
@@ -259,8 +305,19 @@ private:
         }
         auto* catalog=new QTreeWidgetItem(resourceTree_,{QStringLiteral("Catalogue des matériaux"),QStringLiteral("partagés")});
         for(auto it=runtime_->materialIndex.cbegin();it!=runtime_->materialIndex.cend();++it){
-            auto* leaf=new QTreeWidgetItem(catalog,{it.key(),QStringLiteral("PBR + mipmaps")});
+            const auto& m=runtime_->renderScene.mat[size_t(it.value())];
+            auto* leaf=new QTreeWidgetItem(catalog,{it.key(),QStringLiteral("PBR partagé")});
             leaf->setData(0,Qt::UserRole,it.key());
+            auto addChannel=[&](const QString& label,size_t count,int size){
+                auto* channel=new QTreeWidgetItem(leaf,{label,
+                    QStringLiteral("%1² → 1² / %2 mipmaps").arg(size).arg(count)});
+                channel->setData(0,Qt::UserRole,it.key());
+            };
+            if(!m.colorMip.empty())addChannel(QStringLiteral("Albedo — sRGB"),m.colorMip.size(),int(m.colorMip.front().size));
+            if(!m.normalMip.empty())addChannel(QStringLiteral("Normal — linéaire"),m.normalMip.size(),int(m.normalMip.front().size));
+            if(!m.roughnessMip.empty())addChannel(QStringLiteral("Rugosité — linéaire"),m.roughnessMip.size(),int(m.roughnessMip.front().size));
+            new QTreeWidgetItem(leaf,{QStringLiteral("Métallicité"),QString::number(m.metallic,'f',2)});
+            new QTreeWidgetItem(leaf,{QStringLiteral("Transmission"),QString::number(m.transmissionPercent)});
         }
         sceneTree_->expandToDepth(2);
         resourceTree_->expandToDepth(0);
