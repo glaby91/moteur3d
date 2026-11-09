@@ -70,3 +70,9 @@ jobs:
         run: cmake --build build-v16-linux --parallel 4
       - name: Validate Pavillon 01
         run: ctest --test-dir build-v16-linux --output-on-failure
+      - name: Upload actual raytraced preview PNG
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moteur3D-V16-Pavillon01-CPU-Preview
+          path: build-v16-linux/pavillon01-smoke.png
+          if-no-files-found: error
