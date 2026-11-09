@@ -94,6 +94,17 @@ jobs:
           assert Path("reprojection-3d/energetik-front-plane-units.obj").stat().st_size > 100
           print("3 cameras optimized; native OBJ saved; holdout residuals verified")
           PY
+      - name: Reconstruct conditional three-camera front plane and export OBJ
+        run: |
+          python3 tools/photo2scene/three_view_front_plane.py tools/photo2scene/data/pripyat/energetik-three-view-front-plane-annotations.json --output energetik-three-camera-front-plane.json --obj energetik-front-plane-bay-units.obj
+          python3 - <<'PY'
+          import json
+          q=json.load(open("energetik-three-camera-front-plane.json"))
+          assert q["solver"]["converged"]
+          assert all(c["holdout_rms_px"]<7 for c in q["photos"])
+          assert "side return depth" in q["unknown"]
+          print("Front facade only: 3 conditional camera models validated on held-out points")
+          PY
       - uses: actions/upload-artifact@v4
         with:
           name: Photo2Scene-WARP-Energetik-3D-calibration-and-reports
@@ -103,5 +114,7 @@ jobs:
             energetik-camera-preliminary.json
             energetik-second-linefit.json
             energetik-third-linefit.json
+            energetik-three-camera-front-plane.json
+            energetik-front-plane-bay-units.obj
             reprojection-3d/
           if-no-files-found: error
