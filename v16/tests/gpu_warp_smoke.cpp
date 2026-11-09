@@ -39,6 +39,29 @@ int main(int argc,char** argv) {
  for(int y=0;y<height;++y)
   std::memcpy(image.scanLine(y),pixels.data()+size_t(y)*width,width*4);
  if(!image.save(QString::fromLocal8Bit(argv[2]),"PNG")){qCritical()<<"Cannot write WARP PNG";return 1;}
+ // The cached render must be pixel-identical for unchanged scene and camera.
+ std::vector<uint32_t> warmPixels;
+ m3d::Stats warmStats;std::wstring warmError;
+ if(!m3d::renderCompute11Preview(runtime.runtime.renderScene,cam,width,height,
+                                 warmPixels,warmStats,warmError)||warmPixels!=pixels){
+  qCritical()<<"Cached WARP rendering differs from cold result:"<<QString::fromStdWString(warmError);
+  return 1;
+ }
+ // Editing a material must invalidate the GPU atlas and scene cache.
+ auto& renderScene=runtime.runtime.renderScene;
+ if(renderScene.mat.empty()){qCritical()<<"Missing materials";return 1;}
+ const float originalMetallic=renderScene.mat[0].metallic;
+ renderScene.mat[0].metallic=originalMetallic>.5f?0.f:1.f;
+ std::vector<uint32_t> editedPixels;
+ m3d::Stats editedStats;std::wstring editedError;
+ if(!m3d::renderCompute11Preview(renderScene,cam,width,height,
+                                 editedPixels,editedStats,editedError)||editedPixels==pixels){
+  qCritical()<<"GPU scene cache not invalidated on material edit:"<<QString::fromStdWString(editedError);
+  return 1;
+ }
+ renderScene.mat[0].metallic=originalMetallic;
+ qInfo()<<"D3D11 WARP cold:"<<stats.ms<<"ms, cached:"<<warmStats.ms
+        <<"ms, edited:"<<editedStats.ms<<"ms. Cache output and invalidation PASS.";
  qInfo()<<"D3D11 WARP shader executed:"<<width<<"x"<<height
         <<"unique colors:"<<colors.size()<<"milliseconds:"<<stats.ms;
  return 0;
