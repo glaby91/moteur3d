@@ -547,7 +547,8 @@ private:
 
 class MainWindow final : public QMainWindow {
 public:
-    explicit MainWindow(Scene loadedScene, QString scenePath) : scene_(std::move(loadedScene)), currentScenePath_(std::move(scenePath)) {
+    explicit MainWindow(Scene loadedScene, QString scenePath, m3d::v16::SceneDatabase v16Database)
+        : scene_(std::move(loadedScene)), currentScenePath_(std::move(scenePath)) {
         setWindowTitle(QStringLiteral("Moteur 3D natif x64 — ") + QString::fromWCharArray(M3D_RELEASE_ID_WIDE));
         resize(1480, 900);
         setMinimumSize(1000, 620);
@@ -566,6 +567,7 @@ public:
         auto* openScene = fileMenu->addAction(QStringLiteral("Ouvrir une scène…"));
         connect(openScene, &QAction::triggered, this, [this] { openSceneFile(); });
         setupV16Browser();
+        displayV16Scene(v16Database);
         auto* toolsMenu = menuBar()->addMenu(QStringLiteral("Outils"));
         benchmarkAction_ = toolsMenu->addAction(QStringLiteral("Benchmark du moteur…"));
         connect(benchmarkAction_, &QAction::triggered, this, [this] { openBenchmark(); });
@@ -742,7 +744,7 @@ Scene scene_;
         } else {
             if(sceneViewSelector_) sceneViewSelector_->setVisible(false);
             if(sceneViewLabel_) sceneViewLabel_->setVisible(false);
-            cameraTarget_={0.f,1.f,-8.f}; setCameraSliders(24,-43,7,50);
+            cameraTarget_={0.f,3.f,0.f}; setCameraSliders(32,38,14,55);
             if(videoPreview_) videoPreview_->setText(QStringLiteral("Mode vidéo — aperçu rotatif 800 × 600"));
             if(videoWindow_) videoWindow_->setWindowTitle(QStringLiteral("Aperçu rotatif — 800 × 600"));
         }
@@ -1081,9 +1083,28 @@ Scene scene_;
             QMessageBox::critical(this, QStringLiteral("Scène V16 invalide"), result.error);
             return;
         }
+        Scene compiled;
+        QString error;
+        if (!m3d::v16::compileRenderScene(result.scene, compiled, error)) {
+            QMessageBox::critical(this, QStringLiteral("Géométrie V16 invalide"), error);
+            return;
+        }
+        generation_.fetch_add(1);
+        {
+            std::lock_guard<std::mutex> guard(sceneMutex_);
+            scene_ = std::move(compiled);
+            const int hourStep = hour_->value();
+            updateLighting(6.f + hourStep*.5f);
+            Stats build;
+            shadows_ = buildShadow(scene_, build);
+            shadowHour_ = hourStep;
+        }
+        currentScenePath_ = path;
         displayV16Scene(result.scene);
-        QMessageBox::information(this, QStringLiteral("Scène V16 chargée"),
-            QStringLiteral("Manifeste et ressources chargés dans l'arbre. Le rendu des maillages V16 n'est pas encore raccordé."));
+        cameraTarget_={0.f,3.f,0.f};
+        setCameraSliders(32,38,14,55);
+        readSettings();
+        requestRender();
     }
 
     void openSceneFile() {
@@ -1513,21 +1534,21 @@ Scene scene_;
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
-    const QString defaultScenePath = QCoreApplication::applicationDirPath() + QStringLiteral("/scene_pripyat_central.bin");
+    const QString defaultScenePath = QCoreApplication::applicationDirPath()
+        + QStringLiteral("/scenes/v16/pavillon01/scene.json");
     const QString scenePath = argc > 1 ? QString::fromLocal8Bit(argv[1]) : defaultScenePath;
-    Scene scene;
-    std::wstring error;
-#ifdef _WIN32
-    const std::filesystem::path nativePath(scenePath.toStdWString());
-#else
-    const QByteArray encodedPath = scenePath.toUtf8();
-    const std::filesystem::path nativePath(std::string(encodedPath.constData(), size_t(encodedPath.size())));
-#endif
-    if (!loadScene(nativePath, scene, error)) {
-        QMessageBox::critical(nullptr, QStringLiteral("Moteur 3D natif"), QString::fromWCharArray(error.c_str()));
+    const auto loaded = m3d::v16::loadScene(scenePath);
+    if (!loaded) {
+        QMessageBox::critical(nullptr, QStringLiteral("V16 — scène invalide"), loaded.error);
         return 1;
     }
-    MainWindow window(std::move(scene), scenePath);
+    Scene scene;
+    QString error;
+    if (!m3d::v16::compileRenderScene(loaded.scene, scene, error)) {
+        QMessageBox::critical(nullptr, QStringLiteral("V16 — compilation de scène impossible"), error);
+        return 1;
+    }
+    MainWindow window(std::move(scene), scenePath, loaded.scene);
     window.show();
     return app.exec();
 }
