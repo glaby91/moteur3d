@@ -85,6 +85,16 @@ install(TARGETS moteur3d_v17 moteur3d_v17_benchmark moteur3d_v17_benchui
     RUNTIME DESTINATION .)
 
 if(WIN32)
+    # Dedicated generic geometry/material loader validation. Do not use the
+    # Pavillon 01 fixture, which hardcodes its original 15 foliage canopies.
+    add_executable(v17_benchmark_scene_load_smoke "tests/benchmark_scene_load_smoke.cpp")
+    target_include_directories(v17_benchmark_scene_load_smoke PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+    target_link_libraries(v17_benchmark_scene_load_smoke PRIVATE
+        moteur3d_v16_core Qt6::Core)
+    if(MSVC)
+        target_compile_options(v17_benchmark_scene_load_smoke PRIVATE /O2 /EHsc /utf-8)
+    endif()
     add_executable(v17_raster_warp_smoke "tests/raster_warp_smoke.cpp")
     target_include_directories(v17_raster_warp_smoke PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
