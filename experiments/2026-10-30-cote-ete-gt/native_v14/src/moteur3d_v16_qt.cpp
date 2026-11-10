@@ -238,10 +238,12 @@ private:
             QStringLiteral("CPU Ray Tracing PBR — direct"),
             QStringLiteral("GPU D3D11 Compute — rapide, ombres + verre"),
             QStringLiteral("CPU Éclairage global — 2 rebonds (qualité réglable)"),
-            QStringLiteral("CPU Éclairage global — 4 rebonds (qualité réglable)")
+            QStringLiteral("CPU Éclairage global — 4 rebonds (qualité réglable)"),
+            QStringLiteral("GPU D3D11 Raster — essai vitesse (sans GI)")
         });
 #ifndef _WIN32
         backendBox_->setItemData(1,0,Qt::UserRole-1);
+        backendBox_->setItemData(4,0,Qt::UserRole-1);
 #endif
         qualityBox_=new QComboBox;
         qualityBox_->addItems({QStringLiteral("Full HD 1920 × 1080"),
@@ -310,7 +312,7 @@ private:
         connect(renderButton,&QPushButton::clicked,this,[this]{requestRender();});
         connect(cameraBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){azimuth_->setValue(0);requestRender();});
         connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int index){
-            const bool gi=index>=2;
+            const bool gi=(index==2||index==3);
             directSamples_->setEnabled(index==0);
             denoiseDirect_->setEnabled(index==0);
             giSamples_->setEnabled(gi);
@@ -320,9 +322,9 @@ private:
         });
         connect(qualityBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){requestRender();});
         connect(directSamples_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){if(backendBox_->currentIndex()==0)requestRender();});
-        connect(giSamples_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){if(backendBox_->currentIndex()>=2)requestRender();});
-        connect(progressiveGi_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()>=2)requestRender();});
-        connect(denoiseGi_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()>=2)requestRender();});
+        connect(giSamples_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){if(backendBox_->currentIndex()==2||backendBox_->currentIndex()==3)requestRender();});
+        connect(progressiveGi_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()==2||backendBox_->currentIndex()==3)requestRender();});
+        connect(denoiseGi_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()==2||backendBox_->currentIndex()==3)requestRender();});
         connect(denoiseDirect_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()==0)requestRender();});
         connect(edgeAa_,&QCheckBox::toggled,this,[this](bool){requestRender();});
         connect(azimuth_,&QSlider::sliderReleased,this,[this]{requestRender();});
@@ -502,8 +504,9 @@ private:
         const int w=qualityBox_->currentIndex()==2?3840:qualityBox_->currentIndex()==1?2560:1920;
         const int h=w*9/16;
         const int backend=backendBox_->currentIndex();
-        const bool wantGpu=backend==1;
-        const bool globalIllumination=backend>=2;
+        const bool wantGpu=(backend==1||backend==4);
+        const bool wantRaster=(backend==4);
+        const bool globalIllumination=(backend==2||backend==3);
         const bool edgeAA=edgeAa_->isChecked();
         const unsigned sampleCount=globalIllumination?
             unsigned(giSamples_->currentData().toInt()):
@@ -515,7 +518,7 @@ private:
         statusBar()->showMessage(QStringLiteral("Calcul de l'image…"));
         const auto shadowCache=cpuShadows_;
         watcher_.setFuture(QtConcurrent::run([this,serial,token,snapshot,preset,w,h,wantGpu,
-            globalIllumination,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache]{
+            globalIllumination,wantRaster,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache]{
             Result result;
             updateLighting(snapshot->daylightHour);
             const auto camera=v16::makeCamera(preset,w,h);
@@ -524,9 +527,37 @@ private:
             bool ok=false;
             if(wantGpu){
                 std::wstring reason;
-                ok=renderCompute11Preview(snapshot->renderScene,camera,w,h,pixels,stats,reason);
-                if(ok)result.renderer=QStringLiteral("GPU D3D11 Compute — PBR simplifié, ombres et verre");
-                else result.error=QStringLiteral("GPU indisponible (%1) — retour CPU. ").arg(QString::fromStdWString(reason));
+                if(wantRaster){
+                    // Raster-first feasibility experiment. Reuse a matching
+                    // CPU shadow map rather than rebuilding it for each frame.
+                    std::shared_ptr<const ShadowMap> shadow;
+                    {
+                        std::lock_guard<std::mutex> lock(shadowCache->mutex);
+                        if(shadowCache->scene.lock()==snapshot &&
+                           shadowCache->hour==snapshot->daylightHour &&
+                           shadowCache->shadow)shadow=shadowCache->shadow;
+                        else{
+                            Stats shadowStats;
+                            shadow=std::make_shared<ShadowMap>(
+                                buildShadow(snapshot->renderScene,shadowStats));
+                            shadowCache->scene=snapshot;
+                            shadowCache->hour=snapshot->daylightHour;
+                            shadowCache->shadow=shadow;
+                        }
+                    }
+                    ok=renderDirectX11Preview(snapshot->renderScene,*shadow,camera,
+                                              w,h,pixels,stats,reason);
+                    if(ok)result.renderer=QStringLiteral(
+                        "GPU D3D11 Raster — référence vitesse (GI désactivée)");
+                }else{
+                    ok=renderCompute11Preview(snapshot->renderScene,camera,w,h,
+                                              pixels,stats,reason);
+                    if(ok)result.renderer=QStringLiteral(
+                        "GPU D3D11 Compute — GI adaptative");
+                }
+                if(!ok)result.error=QStringLiteral(
+                    "GPU indisponible (%1) — retour CPU. ")
+                    .arg(QString::fromStdWString(reason));
             }
             if(!ok){
                 pixels.resize(size_t(w)*size_t(h));
@@ -601,7 +632,7 @@ private:
                     :QStringLiteral("CPU Ray Tracing — %1 spp, ombres calculées").arg(sampleCount);
             }else result.gpu=true;
             result.milliseconds=stats.ms;
-            if(edgeAA && pixels.size()==size_t(w)*size_t(h))
+            if(edgeAA && !wantRaster && pixels.size()==size_t(w)*size_t(h))
                 pixels=antialiasEdges4(pixels,w,h,4,false);
             if(pixels.size()!=size_t(w)*h){
                 result.error+=QStringLiteral("Image incomplète");
