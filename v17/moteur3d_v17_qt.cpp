@@ -606,9 +606,12 @@ private:
                     "frustum culling, filtrage PBR/mipmaps corrigé, "
                     "instancing GPU expérimental des boîtes et ellipsoïdes, "
                     "trois niveaux de détail pour les ellipsoïdes.</p>"
-                    "<p><b>Benchmark :</b> temps par image, lecture GPU vers CPU, "
-                    "appels Draw, triangles soumis et nombres d'instances ; "
-                    "exports CSV, JSON et PNG.</p>"
+                    "<p><b>Qualité configurable :</b> profils Performance, Équilibrée, "
+                    "Élevée et Ultra ; MSAA, anisotropie, LOD et culling réglables "
+                    "dans l'interface ou depuis l'application hôte.</p>"
+                    "<p><b>Benchmark :</b> chronométrage matériel DirectX 11, attente CPU Map, "
+                    "débit et latence ; comparaison expérimentale des lectures "
+                    "à 1, 2 ou 3 tampons, contrôlées pixel par pixel.</p>"
                     "<p><b>Prochaines améliorations :</b> étendre l'instancing et les LOD, "
                     "améliorer ombres et éclairage PBR ; performance à valider sur Intel HD 620.</p>")
                     .arg(QString::number(CSE_WARP_BUILD_NUMBER),
