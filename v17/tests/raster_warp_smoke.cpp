@@ -87,6 +87,39 @@ int main(int argc,char** argv){
     }
     qInfo()<<"V17 A/B camera1: triangles submitted"<<qulonglong(warmStats.tests)
            <<"of"<<qulonglong(fullStats.tests);
+    // Ensure GPU box instancing does not degrade the reference scene:
+    // compare against the full legacy box mesh on the exact same camera.
+    if(_putenv_s("M3D_V17_DISABLE_GPU_INSTANCING","1")!=0){
+        qCritical()<<"Cannot disable instancing for A/B";return 1;
+    }
+    std::vector<uint32_t> legacy;
+    m3d::Stats legacyStats;
+    error.clear();
+    const bool legacyOk=m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,cam,
+                                                     w,h,legacy,legacyStats,error);
+    _putenv_s("M3D_V17_DISABLE_GPU_INSTANCING","");
+    if(!legacyOk||legacy.size()!=second.size()){
+        qCritical()<<"Legacy box A/B rendering failed:"<<QString::fromStdWString(error);
+        return 1;
+    }
+    size_t changed=0;uint64_t totalDelta=0;
+    for(size_t i=0;i<legacy.size();++i){
+        const uint32_t a=legacy[i],b=second[i];
+        const int dr=std::abs(int((a>>16)&255)-int((b>>16)&255));
+        const int dg=std::abs(int((a>>8)&255)-int((b>>8)&255));
+        const int db=std::abs(int(a&255)-int(b&255));
+        if(std::max({dr,dg,db})>8)++changed;
+        totalDelta+=uint64_t(dr+dg+db);
+    }
+    const double fraction=double(changed)/legacy.size();
+    const double meanDelta=double(totalDelta)/(legacy.size()*3);
+    if(fraction>.03||meanDelta>2.0){
+        qCritical()<<"GPU instancing changed scene appearance:"
+                   <<"fraction"<<fraction<<"mean per-channel delta"<<meanDelta;
+        return 1;
+    }
+    qInfo()<<"GPU box instancing A/B valid; fraction >8 difference:"<<fraction
+           <<"mean delta:"<<meanDelta;
     QImage png(w,h,QImage::Format_ARGB32);
     for(int y=0;y<h;++y)
         std::memcpy(png.scanLine(y),second.data()+size_t(y)*w,size_t(w)*4);
