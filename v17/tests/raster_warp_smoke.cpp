@@ -120,6 +120,46 @@ int main(int argc,char** argv){
     }
     qInfo()<<"GPU box instancing A/B valid; fraction >8 difference:"<<fraction
            <<"mean delta:"<<meanDelta;
+    // New experimental pipeline: submit N frames before reading the oldest.
+    // Every returned image must match the synchronous reference exactly,
+    // even across staging-slot reuse. Timestamp queries are optional on
+    // WARP/older drivers and must never be confused with CPU Map wait.
+    for(unsigned depth:{2u,3u}){
+        constexpr int frames=6;
+        int submitted=0,received=0;
+        for(int i=0;i<frames;++i){
+            error.clear();
+            if(!m3d::enqueueDirectX11Preview(built.runtime.renderScene,shadow,
+                                             cam,w,h,depth,error)){
+                qCritical()<<"Buffered GPU enqueue failed, depth"<<depth
+                           <<QString::fromStdWString(error);return 1;
+            }
+            ++submitted;
+            if(submitted-received>=int(depth)){
+                std::vector<uint32_t> frame;
+                m3d::Stats frameStats;
+                if(!m3d::receiveDirectX11Preview(frame,frameStats,error) ||
+                   frame!=second||frameStats.readbackBufferCount!=depth){
+                    qCritical()<<"Buffered GPU pixels differ, depth"<<depth
+                               <<QString::fromStdWString(error);return 1;
+                }
+                ++received;
+            }
+        }
+        while(received<submitted){
+            std::vector<uint32_t> frame;
+            m3d::Stats frameStats;
+            error.clear();
+            if(!m3d::receiveDirectX11Preview(frame,frameStats,error)||
+               frame!=second||frameStats.readbackBufferCount!=depth){
+                qCritical()<<"Buffered GPU drain failed, depth"<<depth
+                           <<QString::fromStdWString(error);return 1;
+            }
+            ++received;
+        }
+        qInfo()<<"V17 GPU readback depth"<<depth
+               <<"identical to synchronous pixels across"<<frames<<"frames";
+    }
     QImage png(w,h,QImage::Format_ARGB32);
     for(int y=0;y<h;++y)
         std::memcpy(png.scanLine(y),second.data()+size_t(y)*w,size_t(w)*4);
