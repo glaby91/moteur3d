@@ -1,5 +1,6 @@
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QCoreApplication>
 #include <QDesktopServices>
 #include <QDir>
@@ -55,6 +56,19 @@ public:
         quick_=new QCheckBox(QStringLiteral("Rapide : caméra 01, 1366 × 768, raster GPU (6 images mesurées)"));
         compare_=new QCheckBox(QStringLiteral("Comparer avec V16 : Compute HLSL et ray tracing CPU"));
         layout->addWidget(quick_);layout->addWidget(compare_);
+        auto* gpuOptions=new QFormLayout;
+        readback_=new QComboBox(this);
+        readback_->addItem(QStringLiteral("1 buffer — lecture synchrone (référence)"),1);
+        readback_->addItem(QStringLiteral("2 buffers — copie GPU en pipeline"),2);
+        readback_->addItem(QStringLiteral("3 buffers — copie GPU en pipeline"),3);
+        gpuOptions->addRow(QStringLiteral("Tampons GPU → CPU"),readback_);
+        layout->addLayout(gpuOptions);
+        compareReadback_=new QCheckBox(QStringLiteral(
+            "Comparer automatiquement 1, 2 et 3 buffers (même scène, mêmes pixels)"),this);
+        layout->addWidget(compareReadback_);
+        connect(compareReadback_,&QCheckBox::toggled,readback_,[this](bool checked){
+            readback_->setEnabled(!checked);
+        });
         layout->addWidget(new QLabel(QStringLiteral(
             "Complet : deux caméras, 1366 × 768 et Full HD, 12 images par cas ; "
             "médiane, P95, P99 et image PNG. Les performances WARP ne sont pas celles de la HD 620.")));
@@ -86,6 +100,9 @@ public:
                     "Révision GitHub : %2</p>"
                     "<p>Mesure Raster D3D11 : premier rendu, P50/P95/P99, "
                     "FPS théoriques et triangles soumis au GPU.</p>"
+                    "<p>Chronométrage GPU DirectX 11 par timestamp/disjoint, "
+                    "attente CPU Map, conversion des pixels, "
+                    "comparaison de lecture à 1, 2 et 3 buffers.</p>"
                     "<p>Résultats CSV/JSON/PNG, comparaison V16 optionnelle.</p>")
                     .arg(QString::number(CSE_WARP_BUILD_NUMBER),revision.toHtmlEscaped()));
         });
@@ -125,7 +142,8 @@ public:
     }
 private:
     QLineEdit *scene_=nullptr,*root_=nullptr;
-    QCheckBox *quick_=nullptr,*compare_=nullptr;
+    QCheckBox *quick_=nullptr,*compare_=nullptr,*compareReadback_=nullptr;
+    QComboBox *readback_=nullptr;
     QPushButton *start_=nullptr,*stop_=nullptr,*open_=nullptr;
     QTextEdit *log_=nullptr;QLabel *status_=nullptr;
     QProcess process_;
@@ -151,6 +169,9 @@ private:
         QStringList args{scene_->text(),root_->text()};
         if(quick_->isChecked())args<<QStringLiteral("--quick");
         if(compare_->isChecked())args<<QStringLiteral("--compare-v16");
+        if(compareReadback_->isChecked())args<<QStringLiteral("--compare-readback");
+        else args<<QStringLiteral("--readback-depth")
+                 <<QString::number(readback_->currentData().toInt());
         log_->clear();
         status_->setText(QStringLiteral("Benchmark en cours — export automatique actif…"));
         start_->setEnabled(false);stop_->setEnabled(true);
