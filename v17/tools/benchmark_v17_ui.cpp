@@ -5,6 +5,9 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFile>
+#include <QIcon>
+#include <QMenuBar>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -20,21 +23,30 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+static QString benchmarkBuildNumber(){
+    QFile file(QCoreApplication::applicationDirPath()+QStringLiteral("/BUILD_NUMBER.txt"));
+    if(file.open(QIODevice::ReadOnly|QIODevice::Text)){
+        const auto build=QString::fromUtf8(file.readAll()).trimmed();
+        if(!build.isEmpty())return build;
+    }
+    return QStringLiteral("0 (local)");
+}
 class BenchmarkWindow final : public QMainWindow {
 public:
     explicit BenchmarkWindow(const QString& scenePath){
-        setWindowTitle(QStringLiteral("CSE WARP Beta X V17 — Benchmarks DirectX 11"));
+        setWindowTitle(QStringLiteral("CSE WARP Beta X V17.3 — Benchmark DirectX 11 — build %1")
+            .arg(benchmarkBuildNumber()));
         resize(820,590);
         auto* content=new QWidget(this);auto* layout=new QVBoxLayout(content);
         auto* intro=new QLabel(QStringLiteral(
-            "Benchmark V17 : DirectX 11 Raster (temps rendu + lecture GPU). Export automatique "
+            "Benchmark V17.3 : DirectX 11 Raster (temps rendu + lecture GPU). Export automatique "
             "CSV, JSON et PNG dans un sous-dossier horodaté. FPS estimés hors affichage Qt."));
         intro->setWordWrap(true);layout->addWidget(intro);
         auto* form=new QFormLayout;
         scene_=new QLineEdit(QFileInfo(scenePath).absoluteFilePath(),this);
         scene_->setReadOnly(true);form->addRow(QStringLiteral("Scène"),scene_);
         root_=new QLineEdit(QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation))
-                            .absoluteFilePath(QStringLiteral("CSE-WARP-V17-Benchmarks")),this);
+                            .absoluteFilePath(QStringLiteral("CSE-WARP-V17.3-Benchmarks")),this);
         auto* rootRow=new QWidget;auto* row=new QHBoxLayout(rootRow);row->setContentsMargins(0,0,0,0);
         auto* browse=new QPushButton(QStringLiteral("Parcourir..."));
         row->addWidget(root_);row->addWidget(browse);
@@ -47,7 +59,7 @@ public:
             "Complet : deux caméras, 1366 × 768 et Full HD, 12 images par cas ; "
             "médiane, P95, P99 et image PNG. Les performances WARP ne sont pas celles de la HD 620.")));
         auto* controls=new QHBoxLayout;
-        start_=new QPushButton(QStringLiteral("Lancer le benchmark V17"));
+        start_=new QPushButton(QStringLiteral("Lancer le benchmark V17.3"));
         stop_=new QPushButton(QStringLiteral("Arrêter"));
         open_=new QPushButton(QStringLiteral("Ouvrir le dossier"));
         stop_->setEnabled(false);
@@ -57,6 +69,23 @@ public:
         status_=new QLabel(QStringLiteral("Prêt — le calcul est exécuté dans un processus séparé."));
         layout->addWidget(status_);
         setCentralWidget(content);
+        auto* help=menuBar()->addMenu(QStringLiteral("Aide"));
+        auto* about=help->addAction(QStringLiteral("À propos du Benchmark V17.3…"));
+        connect(about,&QAction::triggered,this,[this]{
+            QString revision=QStringLiteral("développement");
+            QFile file(QCoreApplication::applicationDirPath()
+                +QStringLiteral("/REVISION.txt"));
+            if(file.open(QIODevice::ReadOnly|QIODevice::Text))
+                revision=QString::fromUtf8(file.readAll()).trimmed().left(12);
+            QMessageBox::about(this,QStringLiteral("Benchmark CSE WARP V17.3"),
+                QStringLiteral("<h3>CSE WARP V17.3 — Benchmark DirectX 11</h3>"
+                    "<p>Version 17.3.0 — <b>Build : %1</b><br/>"
+                    "Révision GitHub : %2</p>"
+                    "<p>Mesure Raster D3D11 : premier rendu, P50/P95/P99, "
+                    "FPS théoriques et triangles soumis au GPU.</p>"
+                    "<p>Résultats CSV/JSON/PNG, comparaison V16 optionnelle.</p>")
+                    .arg(benchmarkBuildNumber().toHtmlEscaped(),revision.toHtmlEscaped()));
+        });
         connect(browse,&QPushButton::clicked,this,[this]{
             const QString selected=QFileDialog::getExistingDirectory(this,QStringLiteral("Dossier benchmarks"),root_->text());
             if(!selected.isEmpty())root_->setText(selected);
@@ -128,6 +157,11 @@ private:
 };
 int main(int argc,char** argv){
     QApplication app(argc,argv);
+    QCoreApplication::setApplicationName(QStringLiteral("CSE WARP V17.3 Benchmark"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("17.3.0"));
+    const QString icon=QCoreApplication::applicationDirPath()
+        +QStringLiteral("/cse_warp_v17_bench.ico");
+    if(QFileInfo::exists(icon))app.setWindowIcon(QIcon(icon));
     QString scene;
     if(argc>1)scene=QString::fromLocal8Bit(argv[1]);
     else scene=QCoreApplication::applicationDirPath()+QStringLiteral("/pavillon01/scene.json");
