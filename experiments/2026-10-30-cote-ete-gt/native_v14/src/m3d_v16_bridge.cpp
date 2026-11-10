@@ -428,6 +428,11 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
     }
     if(materialDocs.size()>256){result.error="Material count exceeds 256";return result;}
     report(15,QStringLiteral("Préparation des textures PBR"));
+    auto stageStarted=std::chrono::steady_clock::now();
+    const auto stageElapsedMs=[&](){
+        return std::chrono::duration<double,std::milli>(
+            std::chrono::steady_clock::now()-stageStarted).count();
+    };
     int completedMaterials=0;
     for(const auto& j:materialDocs){
         const QString id=j.value("id").toString();
@@ -462,6 +467,8 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
             QStringLiteral("Textures PBR : %1 / %2 matériaux")
                 .arg(completedMaterials).arg(materialDocs.size()));
     }
+    result.runtime.pbrBuildMs=stageElapsedMs();
+    stageStarted=std::chrono::steady_clock::now();
     QSet<QString> instanceIds;
     int completedInstances=0;
     for(const auto& j:instanceDocs){
@@ -520,10 +527,13 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
                     .arg(completedInstances).arg(instanceDocs.size()));
     }
     if(render.obj.empty()){result.error="No triangles generated";return result;}
+    result.runtime.geometryBuildMs=stageElapsedMs();
+    stageStarted=std::chrono::steady_clock::now();
     render.order.resize(render.obj.size());
     std::iota(render.order.begin(),render.order.end(),0u);
     report(96,QStringLiteral("Construction de l'accélérateur BVH"));
     render.root=buildBvh(render,0,int(render.order.size()));
+    result.runtime.bvhBuildMs=stageElapsedMs();
     report(100,QStringLiteral("Scène prête"));
     return result;
 }
