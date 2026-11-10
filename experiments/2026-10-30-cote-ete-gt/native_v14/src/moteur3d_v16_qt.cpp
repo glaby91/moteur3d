@@ -36,6 +36,7 @@
 #include <QPushButton>
 #include <QScrollArea>
 #include <QSlider>
+#include <QSize>
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QTabWidget>
