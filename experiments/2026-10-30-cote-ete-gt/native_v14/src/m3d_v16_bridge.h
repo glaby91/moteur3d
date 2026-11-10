@@ -24,6 +24,10 @@ struct Runtime {
     QString title;
     int textureResolution=0;
     float daylightHour=15.f;
+    // Stage wall times measured during scene preparation (not rendering).
+    // Exposed for V17 benchmarks and embedding applications to distinguish
+    // expensive PBR generation from geometry instancing and BVH building.
+    double pbrBuildMs=0,geometryBuildMs=0,bvhBuildMs=0;
 };
 struct BuildResult {
     Runtime runtime;
