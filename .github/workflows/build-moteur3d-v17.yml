@@ -159,11 +159,16 @@ jobs:
         env:
           M3D_V16_FORCE_WARP: '1'
         run: |
-          & "build-v17/Release/moteur3d_v17_benchmark.exe" "scenes/v16/pavillon01/scene.json" "build-v17/v17-bench-readback" --smoke --compare-readback
+          & "build-v17/Release/moteur3d_v17_benchmark.exe" "scenes/v16/pavillon01/scene.json" "build-v17/v17-bench-readback" --smoke --compare-readback --raster-msaa 2 --raster-anisotropy 8 --raster-lod-percent 85 --raster-culling 1 --raster-lod-enabled 1
           if ($LASTEXITCODE -ne 0) { throw "Pipelined DX11 readback benchmark failed" }
           $summary = Get-ChildItem "build-v17/v17-bench-readback" -Recurse -Filter summary.json | Select-Object -First 1
           if (!$summary) { throw "No pipelined benchmark report" }
           $result = Get-Content $summary.FullName -Raw | ConvertFrom-Json
+          if ($result.system.rasterQuality.msaaSamples -ne 2 -or
+              $result.system.rasterQuality.anisotropy -ne 8 -or
+              $result.system.rasterQuality.lodQualityPercent -ne 85) {
+            throw "Host-quality flags were not applied in the benchmark process"
+          }
           $cases = @($result.cases | Where-Object { $_.backend -eq "V17_D3D11_Raster" })
           if ($cases.Count -ne 3) { throw "Expected 1, 2 and 3 staging buffer benchmark cases" }
           foreach ($depth in @(1,2,3)) {
