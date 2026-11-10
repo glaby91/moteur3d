@@ -1,0 +1,50 @@
+name: Photo2Scene WARP — Gaussian CPU (no copyrighted video)
+on:
+  push:
+    branches: [feature/photo2scene-energetik-gaussian-cpu-261110]
+    paths:
+      - 'tools/photo2scene/gaussian_from_drone_cpu.py'
+      - 'tools/photo2scene/data/pripyat/energetik-drone-3view-rois.json'
+      - '.github/workflows/photo2scene-gaussian-cpu.yml'
+  pull_request:
+    paths:
+      - 'tools/photo2scene/gaussian_from_drone_cpu.py'
+      - 'tools/photo2scene/data/pripyat/energetik-drone-3view-rois.json'
+  workflow_dispatch:
+
+jobs:
+  gaussian-format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU numeric packages
+        run: pip install 'numpy>=1.26,<3' 'opencv-python-headless>=4.9,<5'
+      - name: Validate the CLI, syntax and 3DGS format
+        run: |
+          python -m py_compile tools/photo2scene/gaussian_from_drone_cpu.py
+          python tools/photo2scene/gaussian_from_drone_cpu.py --help
+          python - <<'PY'
+          import importlib.util, tempfile, pathlib, numpy as np
+          spec=importlib.util.spec_from_file_location('splats','tools/photo2scene/gaussian_from_drone_cpu.py')
+          m=importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(m)
+          with tempfile.TemporaryDirectory() as d:
+              ply=pathlib.Path(d)/'synthetic.ply'
+              xyz=np.array([[0,0,5],[1,1,8]],dtype=np.float32)
+              c=np.array([[1,0,0],[0,1,0]],dtype=np.float32)
+              s=np.ones((2,3),dtype=np.float32)*.1
+              o=np.array([.9,.8],dtype=np.float32)
+              data=m.export_ply(ply,xyz,c,s,o)
+              splat=pathlib.Path(d)/'synthetic.splat'
+              m.export_splat(splat,data)
+              content=ply.read_bytes()
+              assert b'element vertex 2\n' in content
+              assert b'property float f_dc_0\n' in content
+              assert b'property float rot_3\n' in content
+              assert splat.stat().st_size == 64
+              np.testing.assert_allclose(data[:,:3],xyz)
+              print('Synthetic Gaussian PLY/SPLAT serialization PASSED')
+          PY
