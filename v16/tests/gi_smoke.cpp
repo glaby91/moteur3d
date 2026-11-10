@@ -20,8 +20,12 @@ int main(int argc,char** argv) {
     if(argc!=3){qCritical()<<"Usage: v16_gi_smoke scene.json output.png";return 2;}
     const auto loaded=m3d::v16::loadScene(QString::fromLocal8Bit(argv[1]));
     if(!loaded){qCritical()<<loaded.error;return 1;}
-    // The smoke uses 256 px mip bases but keeps the reference image Full HD.
-    auto built=m3d::v16::buildRuntime(loaded.scene,256);
+    // Critical parity control: GPU WARP smoke uses buildRuntime(scene, 512).
+    // Both renderers MUST receive PBR generated at the identical base size:
+    // procedural colors/normals/roughness are not invariant to texture resolution.
+    // The final image remains native 1920x1080; this is material resolution.
+    constexpr int referencePbrResolution=512;
+    auto built=m3d::v16::buildRuntime(loaded.scene,referencePbrResolution);
     if(!built||built.runtime.cameras.isEmpty()){qCritical()<<"Invalid scene/geometry";return 1;}
     const auto& scene=built.runtime.renderScene;
     m3d::updateLighting(built.runtime.daylightHour);
