@@ -47,6 +47,42 @@ int main(int argc,char** argv) {
   qCritical()<<"Cached WARP rendering differs from cold result:"<<QString::fromStdWString(warmError);
   return 1;
  }
+ // Dell native vs Full HD: identical scene, camera, time and materials.
+ // WARP is software, so these timings do not predict Intel HD 620 timings.
+ constexpr int nativeWidth=1366,nativeHeight=768;
+ const auto nativeCam=m3d::v16::makeCamera(runtime.runtime.cameras.front(),
+                                           nativeWidth,nativeHeight);
+ std::vector<uint32_t> nativePixels,nativeWarm;
+ m3d::Stats nativeColdStats,nativeWarmStats;
+ std::wstring nativeError;
+ if(!m3d::renderCompute11Preview(runtime.runtime.renderScene,nativeCam,
+      nativeWidth,nativeHeight,nativePixels,nativeColdStats,nativeError)){
+  qCritical()<<"Native Dell WARP render failed:"
+             <<QString::fromStdWString(nativeError);return 1;
+ }
+ nativeError.clear();
+ if(!m3d::renderCompute11Preview(runtime.runtime.renderScene,nativeCam,
+      nativeWidth,nativeHeight,nativeWarm,nativeWarmStats,nativeError)||
+      !nativeWarmStats.gpu||nativePixels.size()!=size_t(nativeWidth)*nativeHeight||
+      nativeWarm!=nativePixels){
+  qCritical()<<"Native Dell WARP cache or output failed:"
+             <<QString::fromStdWString(nativeError);return 1;
+ }
+ QImage nativeImage(nativeWidth,nativeHeight,QImage::Format_ARGB32);
+ for(int y=0;y<nativeHeight;++y)
+  std::memcpy(nativeImage.scanLine(y),nativeWarm.data()+size_t(y)*nativeWidth,
+              size_t(nativeWidth)*4);
+ const QFileInfo fhdOutput(QString::fromLocal8Bit(argv[2]));
+ const QString nativeOutput=fhdOutput.absolutePath()+"/"+
+     fhdOutput.completeBaseName()+"-native-1366x768.png";
+ if(!nativeImage.save(nativeOutput,"PNG")){
+  qCritical()<<"Cannot write native Dell WARP PNG";return 1;
+ }
+ qInfo()<<"Dell native-vs-FHD WARP (same camera and GI):"
+        <<"native"<<nativeWidth<<"x"<<nativeHeight
+        <<"native_cached_ms"<<nativeWarmStats.ms
+        <<"FHD"<<width<<"x"<<height<<"FHD_cached_ms"<<warmStats.ms
+        <<"native_png"<<nativeOutput;
  // Verify quality/performance switch against a true full-resolution
  // secondary-ray reference at the same camera, scene, lighting and sample count.
  // A small image keeps D3D11 software WARP test costs bounded.
