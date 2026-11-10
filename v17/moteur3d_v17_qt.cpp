@@ -822,9 +822,11 @@ private:
                     result.milliseconds=totalMs;
                     return result;
                 }
-                std::atomic<uint64_t> generation{1};
+                // Reuse the active render generation so CPU fallback/direct
+                // rays stop promptly when the scene or camera is changed.
                 stats=m3d::render(snapshot->renderScene,*shadow,camera,w,h,pixels,
-                                  workers,false,generation,1,sampleCount,false,false,false,3);
+                                  workers,false,*serial,token,sampleCount,false,false,false,3);
+                if(serial->load()!=token)return result;
                 if(denoiseDirect) pixels=denoiseBilateral(pixels,w,h,workers);
                 result.renderer=shadowReused
                     ?QStringLiteral("CPU Ray Tracing — %1 spp, ombres en cache").arg(sampleCount)
