@@ -19,6 +19,7 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QScrollBar>
+#include <QSpinBox>
 #include <QStandardPaths>
 #include <QTextEdit>
 #include <QUrl>
@@ -64,6 +65,40 @@ public:
         quick_=new QCheckBox(QStringLiteral("Rapide : caméra 01, 1366 × 768, raster GPU (6 images mesurées)"));
         compare_=new QCheckBox(QStringLiteral("Comparer avec V16 : Compute HLSL et ray tracing CPU"));
         layout->addWidget(quick_);layout->addWidget(compare_);
+        campaign_=new QCheckBox(QStringLiteral(
+            "Campagne complète : plusieurs scènes, résolutions, caméras, GPU/CPU et statistiques"),this);
+        campaign_->setToolTip(QStringLiteral(
+            "Une seule compilation. Répète les mesures dans un ordre équilibré pour identifier une vraie tendance."));
+        layout->addWidget(campaign_);
+        auto* campaignOptions=new QFormLayout;
+        rounds_=new QSpinBox(this);
+        rounds_->setRange(1,30);rounds_->setValue(6);
+        rounds_->setToolTip(QStringLiteral("Séries indépendantes ; ordre des buffers alterné à chaque série."));
+        frames_=new QSpinBox(this);
+        frames_->setRange(2,240);frames_->setValue(12);
+        warmup_=new QSpinBox(this);
+        warmup_->setRange(0,20);warmup_->setValue(2);
+        campaignOptions->addRow(QStringLiteral("Séries par condition"),rounds_);
+        campaignOptions->addRow(QStringLiteral("Images par série"),frames_);
+        campaignOptions->addRow(QStringLiteral("Échauffement par série"),warmup_);
+        layout->addLayout(campaignOptions);
+        allScenes_=new QCheckBox(QStringLiteral(
+            "Inclure les scènes fournies : pavillon, complexe léger/lourd/extrême, matériaux"),this);
+        allScenes_->setChecked(true);
+        cpuScaling_=new QCheckBox(QStringLiteral(
+            "Mesurer aussi le CPU (1/2/4/8/16/32 threads possibles) et Compute GPU"),this);
+        cpuScaling_->setChecked(true);
+        layout->addWidget(allScenes_);
+        layout->addWidget(cpuScaling_);
+        connect(campaign_,&QCheckBox::toggled,this,[this](bool enabled){
+            quick_->setEnabled(!enabled);
+            compare_->setEnabled(!enabled);
+            readback_->setEnabled(!enabled&&!compareReadback_->isChecked());
+            compareReadback_->setEnabled(!enabled);
+            rounds_->setEnabled(enabled);frames_->setEnabled(enabled);
+            warmup_->setEnabled(enabled);allScenes_->setEnabled(enabled);
+            cpuScaling_->setEnabled(enabled);
+        });
         auto* gpuOptions=new QFormLayout;
         readback_=new QComboBox(this);
         readback_->addItem(QStringLiteral("1 buffer — lecture synchrone (référence)"),1);
@@ -75,7 +110,7 @@ public:
             "Comparer automatiquement 1, 2 et 3 buffers (même scène, mêmes pixels)"),this);
         layout->addWidget(compareReadback_);
         connect(compareReadback_,&QCheckBox::toggled,readback_,[this](bool checked){
-            readback_->setEnabled(!checked);
+            readback_->setEnabled(!checked&&!campaign_->isChecked());
         });
         layout->addWidget(new QLabel(QStringLiteral(
             "Complet : deux caméras, 1366 × 768 et Full HD, 12 images par cas ; "
@@ -118,7 +153,8 @@ public:
             const QString selected=QFileDialog::getExistingDirectory(this,QStringLiteral("Dossier benchmarks"),root_->text());
             if(!selected.isEmpty())root_->setText(selected);
         });
-        quick_->setChecked(true);
+        quick_->setChecked(false);
+        campaign_->setChecked(true);
         // Comparison is optional even in quick mode: raster remains the main test.
         connect(start_,&QPushButton::clicked,this,[this]{runBenchmark();});
         connect(stop_,&QPushButton::clicked,this,[this]{
@@ -151,6 +187,8 @@ public:
 private:
     QLineEdit *scene_=nullptr,*root_=nullptr;
     QCheckBox *quick_=nullptr,*compare_=nullptr,*compareReadback_=nullptr;
+    QCheckBox *campaign_=nullptr,*allScenes_=nullptr,*cpuScaling_=nullptr;
+    QSpinBox *rounds_=nullptr,*frames_=nullptr,*warmup_=nullptr;
     QComboBox *readback_=nullptr;
     QPushButton *start_=nullptr,*stop_=nullptr,*open_=nullptr;
     QTextEdit *log_=nullptr;QLabel *status_=nullptr;
@@ -171,19 +209,31 @@ private:
             QMessageBox::critical(this,QStringLiteral("Dossier inaccessible"),root_->text());return;
         }
         const QString exe=QCoreApplication::applicationDirPath()
-                    +QStringLiteral("/moteur3d_v17_benchmark.exe");
+            +(campaign_->isChecked()
+                ?QStringLiteral("/moteur3d_v17_campaign.exe")
+                :QStringLiteral("/moteur3d_v17_benchmark.exe"));
         if(!QFileInfo::exists(exe)){
             QMessageBox::critical(this,QStringLiteral("Programme manquant"),exe);return;
         }
         QStringList args{scene_->text(),root_->text()};
-        if(quick_->isChecked())args<<QStringLiteral("--quick");
-        if(compare_->isChecked())args<<QStringLiteral("--compare-v16");
+        if(campaign_->isChecked()){
+            args<<QStringLiteral("--rounds")<<QString::number(rounds_->value())
+                <<QStringLiteral("--frames")<<QString::number(frames_->value())
+                <<QStringLiteral("--warmup")<<QString::number(warmup_->value());
+            if(allScenes_->isChecked())args<<QStringLiteral("--all-scenes");
+            if(cpuScaling_->isChecked())args<<QStringLiteral("--include-cpu");
+        }else{
+            if(quick_->isChecked())args<<QStringLiteral("--quick");
+            if(compare_->isChecked())args<<QStringLiteral("--compare-v16");
+            if(compareReadback_->isChecked())args<<QStringLiteral("--compare-readback");
+            else args<<QStringLiteral("--readback-depth")
+                     <<QString::number(readback_->currentData().toInt());
+        }
         args.append(qualityArgs_);
-        if(compareReadback_->isChecked())args<<QStringLiteral("--compare-readback");
-        else args<<QStringLiteral("--readback-depth")
-                 <<QString::number(readback_->currentData().toInt());
         log_->clear();
-        status_->setText(QStringLiteral("Benchmark en cours — export automatique actif…"));
+        status_->setText(campaign_->isChecked()
+            ?QStringLiteral("Campagne multi-séries en cours — CSV/JSON/HTML enregistrés après chaque scène…")
+            :QStringLiteral("Benchmark en cours — export automatique actif…"));
         start_->setEnabled(false);stop_->setEnabled(true);
         process_.setWorkingDirectory(QCoreApplication::applicationDirPath());
         process_.start(exe,args);
