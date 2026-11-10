@@ -69,10 +69,10 @@ jobs:
           $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
           Write-Host "V17 EXE icon and version: $($version.ProductName) — $($version.FileVersion)"
           if ($version.FileMajorPart -ne 17) { throw "The executable resource is not version 17" }
-      - name: Validate light complex scene with real V16/V17 scene compiler
+      - name: Validate light complex scene in native V17 loader
         shell: pwsh
         run: |
-          & "build-v17/v16/Release/v16_scene_check.exe" "scenes/v16/benchmark-civic/scene.json"
+          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" "scenes/v16/benchmark-civic/scene.json" 20000
           if ($LASTEXITCODE -ne 0) { throw "Complex scene fails in native V17 loader" }
       - name: Diagnose raster WARP executable before extended tests
         shell: pwsh
