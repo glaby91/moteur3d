@@ -276,9 +276,9 @@ float3 secondaryRadiance(Ray ray) {
         float facing=abs(dot(geomN,ray.direction));
         float f0=saturate(material.dielectricF0);
         float fresnel=f0+(1.f-f0)*pow(1.f-facing,5.f);
-        float pass=saturate(transmission*(1.f-fresnel));
-        result+=throughput*(1.f-pass)*lit;
-        throughput*=pass;
+        float transmittedWeight=saturate(transmission*(1.f-fresnel));
+        result+=throughput*(1.f-transmittedWeight)*lit;
+        throughput*=transmittedWeight;
         if(throughput<.02f)return result;
         ray.origin+=ray.direction*(h.t+.065f);
     }
