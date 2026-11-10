@@ -118,6 +118,20 @@ else()
     qt_add_executable(moteur3d_v17_benchui
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmark_v17_ui.cpp")
 endif()
+# The complete benchmark is a separate tool in the SAME Windows build:
+# no iterative recompilation is required to change rounds/cameras/buffers.
+add_executable(moteur3d_v17_campaign
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmark_v17_campaign.cpp")
+target_include_directories(moteur3d_v17_campaign PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+target_link_libraries(moteur3d_v17_campaign PRIVATE
+    moteur3d_v16_core Qt6::Core Qt6::Gui)
+target_compile_definitions(moteur3d_v17_campaign PRIVATE
+    CSE_WARP_BUILD_NUMBER=${V17_BUILD_NUMBER})
+if(MSVC)
+    target_compile_options(moteur3d_v17_campaign PRIVATE /O2 /EHsc /utf-8)
+endif()
+
 target_link_libraries(moteur3d_v17_benchui PRIVATE Qt6::Widgets)
 target_compile_definitions(moteur3d_v17_benchui PRIVATE CSE_WARP_BUILD_NUMBER=${V17_BUILD_NUMBER})
 if(WIN32)
@@ -131,7 +145,7 @@ if(MSVC)
     target_compile_options(moteur3d_v17_benchmark PRIVATE /O2 /EHsc /utf-8)
     target_compile_options(moteur3d_v17_benchui PRIVATE /O2 /EHsc /utf-8)
 endif()
-install(TARGETS moteur3d_v17 moteur3d_v17_benchmark moteur3d_v17_benchui
+install(TARGETS moteur3d_v17 moteur3d_v17_benchmark moteur3d_v17_benchui moteur3d_v17_campaign
     RUNTIME DESTINATION .)
 
 if(WIN32)
