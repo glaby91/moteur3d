@@ -58,7 +58,7 @@ def compare(cpu_file, gpu_file, outdir):
     report={
         "method":"Direct pixel comparison, same scene/camera. Does NOT establish physical accuracy.",
         "cpu_reference":"CPU GI, 2 bounces, 4 spp in GitHub tests; user reference at 16 spp",
-        "gpu_reference":"D3D11 WARP, one sample direct lighting + GGX, no full GI bounce",
+        "gpu_reference":"D3D11 WARP, one primary sample + configured 0..4 cosine-weighted GPU secondary samples; not exact CPU GI",
         "resolution":[width,height],
         "regions":{}
     }
