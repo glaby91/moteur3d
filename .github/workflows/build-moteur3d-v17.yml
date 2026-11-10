@@ -74,6 +74,16 @@ jobs:
         run: |
           & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" "scenes/v16/benchmark-civic/scene.json" 20000
           if ($LASTEXITCODE -ne 0) { throw "Complex scene fails in native V17 loader" }
+      - name: Render actual new civic scene with V17 D3D11 Raster WARP
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          & "build-v17/Release/moteur3d_v17_benchmark.exe" "scenes/v16/benchmark-civic/scene.json" "build-v17/civic-bench-smoke" --smoke
+          if ($LASTEXITCODE -ne 0) { throw "New civic benchmark scene fails D3D11 first-frame render" }
+          $picture = Get-ChildItem "build-v17/civic-bench-smoke" -Recurse -Filter raster_*.png | Select-Object -First 1
+          if (!$picture -or $picture.Length -lt 1000) { throw "Civic scene raster PNG missing or empty" }
+          Copy-Item $picture.FullName "build-v17/civic-actual-preview.png"
       - name: Diagnose raster WARP executable before extended tests
         shell: pwsh
         env:
@@ -132,6 +142,7 @@ jobs:
           Copy-Item "build-v17/Release/cse_warp_v17.ico" "dist-v17/"
           Copy-Item "build-v17/Release/pavillon01" "dist-v17/pavillon01" -Recurse
           Copy-Item "build-v17/Release/benchmark-civic" "dist-v17/benchmark-civic" -Recurse
+          Copy-Item "build-v17/civic-actual-preview.png" "dist-v17/benchmark-civic/actual-render-WARP.png"
           New-Item -ItemType Directory -Force "dist-v17/material-library/pripyat-v17/originaux" | Out-Null
           Copy-Item "assets/materials/pripyat-v17/catalogue.json" "dist-v17/material-library/pripyat-v17/"
           Copy-Item "assets/materials/pripyat-v17/README.md" "dist-v17/material-library/pripyat-v17/"
