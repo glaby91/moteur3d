@@ -1,0 +1,181 @@
+{
+  "schema": "photo2scene-warp-projection-planes-v1",
+  "source_video_frame": "frame_04.png at t=373.0s (640x360)",
+  "source_px_size": [
+    640,
+    360
+  ],
+  "focal_px_assumed": 550,
+  "coordinate_system": "anchor camera OpenCV X-right, Y-down, Z-forward; nonmetric",
+  "method": "ray-plane intersection from fitted roof/rear stage planes + front/right walls constrained from projected roof edges; UV sampled from exact input RGB; no invented texture",
+  "planes_from_264_sparse_points": {
+    "roof_main": {
+      "normal": [
+        0.029766,
+        0.965805,
+        0.257555
+      ],
+      "centroid": [
+        0.553348,
+        -0.83579,
+        7.754516
+      ],
+      "support": 84,
+      "inliers": 71
+    },
+    "stage_tower": {
+      "normal": [
+        0.950913,
+        -0.148271,
+        -0.271625
+      ],
+      "centroid": [
+        -1.964961,
+        -1.702539,
+        9.17544
+      ],
+      "support": 26,
+      "inliers": 17
+    },
+    "rear_block": {
+      "normal": [
+        0.083179,
+        -0.88969,
+        -0.448925
+      ],
+      "centroid": [
+        2.334274,
+        -1.29816,
+        8.287237
+      ],
+      "support": 28,
+      "inliers": 25
+    }
+  },
+  "source_quads_px": {
+    "main_roof": [
+      [
+        174,
+        116
+      ],
+      [
+        224,
+        99
+      ],
+      [
+        479,
+        112
+      ],
+      [
+        445,
+        162
+      ]
+    ],
+    "front_glazing": [
+      [
+        174,
+        116
+      ],
+      [
+        445,
+        162
+      ],
+      [
+        446,
+        242
+      ],
+      [
+        173,
+        190
+      ]
+    ],
+    "side_return": [
+      [
+        445,
+        162
+      ],
+      [
+        479,
+        112
+      ],
+      [
+        483,
+        191
+      ],
+      [
+        446,
+        240
+      ]
+    ],
+    "upper_block_wall": [
+      [
+        135,
+        58
+      ],
+      [
+        225,
+        55
+      ],
+      [
+        227,
+        112
+      ],
+      [
+        138,
+        117
+      ]
+    ],
+    "rear_roof": [
+      [
+        327,
+        67
+      ],
+      [
+        438,
+        63
+      ],
+      [
+        518,
+        71
+      ],
+      [
+        498,
+        94
+      ]
+    ],
+    "rear_wall": [
+      [
+        327,
+        67
+      ],
+      [
+        498,
+        94
+      ],
+      [
+        501,
+        116
+      ],
+      [
+        328,
+        108
+      ]
+    ]
+  },
+  "geometry_labels": {
+    "main_roof": "measured sparse plane",
+    "front_glazing": "derived vertical facade (roof seam + roof normal)",
+    "side_return": "derived vertical side (roof seam + roof normal)",
+    "upper_block_wall": "sparse wall fit weak",
+    "rear_roof": "sparse plane",
+    "rear_wall": "derived roof-edge facade"
+  },
+  "not_validated": [
+    "real-world dimensions or placement of tower",
+    "vegetation removal",
+    "lens calibration",
+    "interior geometry",
+    "full 3D architecture"
+  ],
+  "no_copies_of_user_photos_in_public_repo": true
+}
