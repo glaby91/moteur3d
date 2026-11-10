@@ -67,7 +67,7 @@ void addTimings(QJsonObject& record,std::vector<double> values){
 }
 int main(int argc,char** argv){
     QCoreApplication app(argc,argv);
-    QCoreApplication::setApplicationVersion(QStringLiteral("17.3.0"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER));
     QString buildNumber=QStringLiteral("0 (local)");
     QFile buildFile(QCoreApplication::applicationDirPath()
         +QStringLiteral("/BUILD_NUMBER.txt"));
@@ -92,7 +92,7 @@ int main(int argc,char** argv){
     const bool quick=smoke||args.contains(QStringLiteral("--quick"));
     const bool compare=args.contains(QStringLiteral("--compare-v16"))&&!smoke;
     const QString stamp=QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss_zzz");
-    const QString runName=QStringLiteral("CSE-WARP-V17.3-%1").arg(stamp);
+    const QString runName=QStringLiteral("CSE-WARP-V17.%1-%2").arg(CSE_WARP_BUILD_NUMBER).arg(stamp);
     if(!QDir(outDir).mkpath(runName)){
         err<<"Cannot create benchmark output directory\n";
         return 3;
@@ -119,8 +119,9 @@ int main(int argc,char** argv){
     const auto shadow=buildShadow(runtime.renderScene,shadowStats);
     const double shadowMs=elapsedMs(begin);
     QJsonObject system{
-        {"engine","CSE WARP Beta X V17.3 D3D11 Raster"},
-        {"version","17.3.0"},{"buildNumber",buildNumber},{"revision",sourceRevision},
+        {"engine","CSE WARP Beta X V17 D3D11 Raster"},
+        {"version",QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER)},
+        {"buildNumber",QString::number(CSE_WARP_BUILD_NUMBER)},{"revision",sourceRevision},
         {"scene",scenePath},{"sceneName",runtime.title},
         {"timestampUtc",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
         {"os",QSysInfo::prettyProductName()},
@@ -250,8 +251,9 @@ int main(int argc,char** argv){
             append(cpuCase);
         }
     }
-    QJsonObject summary{{"engine","CSE WARP Beta X V17.3"},
-                        {"version","17.3.0"},{"buildNumber",buildNumber},{"revision",sourceRevision},
+    QJsonObject summary{{"engine","CSE WARP Beta X V17"},
+                        {"version",QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER)},
+                        {"buildNumber",QString::number(CSE_WARP_BUILD_NUMBER)},{"revision",sourceRevision},
                         {"run",runName},{"system",system},{"cases",results},
                         {"completedUtc",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
                         {"successful",succeeded},{"skipped",skipped},{"failed",failed}};
