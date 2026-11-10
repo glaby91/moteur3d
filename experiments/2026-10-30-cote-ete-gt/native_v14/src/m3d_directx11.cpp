@@ -356,6 +356,55 @@ public:
     }
 };
 
+// A reusable canopy with the same deterministic ripple/leaf construction
+// as the V16 bridge. High LOD matches its 18x9 tessellation and 36 leaf
+// details; lower LODs only remove geometric detail at a distance.
+static std::vector<GpuVertex> makeFoliageTemplate(int segments,int rings,int leaves){
+    MeshBuilder mesh;
+    const auto point=[&](int ring,int segment){
+        const float latitude=float(ring)*PI/rings;
+        const float azimuth=float(segment)*2.f*PI/segments;
+        const float ripple=1.f+.075f*std::sin(5.f*azimuth+2.f*latitude)
+                             +.055f*std::cos(9.f*azimuth-3.f*latitude)
+                             +.04f*std::sin(7.f*latitude+4.f*azimuth);
+        const float widest=std::sin(latitude)*ripple;
+        return V{widest*std::cos(azimuth),std::cos(latitude),
+                 widest*std::sin(azimuth)};
+    };
+    auto add=[&](V p,V q,V r,V uv0,V uv1,V uv2){
+        V n=norm(cross(q-p,r-p));
+        if(dot(n,p)<0.f){std::swap(q,r);std::swap(uv1,uv2);n=norm(cross(q-p,r-p));}
+        mesh.tri(p,q,r,n,n,n,uv0.x,uv0.y,uv1.x,uv1.y,uv2.x,uv2.y,0);
+    };
+    for(int ring=0;ring<rings;++ring)for(int segment=0;segment<segments;++segment){
+        const V a=point(ring,segment),b=point(ring+1,segment);
+        const V c=point(ring+1,segment+1),d=point(ring,segment+1);
+        if(ring>0)add(a,b,d,
+            {float(segment)/segments,float(ring)/rings},
+            {float(segment)/segments,float(ring+1)/rings},
+            {float(segment+1)/segments,float(ring)/rings});
+        if(ring<rings-1)add(b,c,d,
+            {float(segment)/segments,float(ring+1)/rings},
+            {float(segment+1)/segments,float(ring+1)/rings},
+            {float(segment+1)/segments,float(ring)/rings});
+    }
+    for(int i=0;i<leaves;++i){
+        const float azimuth=float(i)*2.39996323f;
+        const float elevation=.35f*std::sin(i*1.731f);
+        const float cy=std::sin(elevation),radius=std::cos(elevation);
+        const V n=norm({radius*std::cos(azimuth),cy,radius*std::sin(azimuth)});
+        const V center=n*.93f;
+        const V helper=std::abs(n.y)<.8f?V{0,1,0}:V{1,0,0};
+        const V tangent=norm(cross(n,helper));
+        const float width=(.12f+.035f*float(i%3))*2.f;
+        const float height=width*(1.15f+.20f*float(i%4));
+        const V base=center-tangent*(width*.45f);
+        const V end=center+tangent*(width*.4f)+V{0,height*.24f,0}+n*(height*.24f);
+        const V sides=center+V{0,height*.4f,0};
+        mesh.tri(base,sides,end,n,n,n,0,0,.5f,1.f,1,0,0);
+    }
+    return std::move(mesh.vertices);
+}
 // Consecutive triangle batches are built once from the immutable mesh.
  // Their bounding spheres conservatively reject fully off-screen batches.
  // No geometry is edited or deleted: switch off for exact A/B comparisons.
