@@ -431,11 +431,18 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
   c.indirectLightUav.Reset();c.indirectGeoUav.Reset();
   if(!makeHalfRes(c.indirectLight,c.indirectLightSrv,c.indirectLightUav)||
      !makeHalfRes(c.indirectGeo,c.indirectGeoSrv,c.indirectGeoUav)){
-   error=L"Allocation des buffers half-res GI D3D11 impossible";return false;
+   // Optional UAV formats vary by D3D11 hardware. Preserve full-resolution
+   // rendering instead of failing to open on an older integrated GPU.
+   c.indirectLight.Reset();c.indirectGeo.Reset();
+   c.indirectLightSrv.Reset();c.indirectGeoSrv.Reset();
+   c.indirectLightUav.Reset();c.indirectGeoUav.Reset();
+   c.indirectWidth=0;c.indirectHeight=0;c.indirectValid=false;
+   params.adaptiveGI=0u;
+  }else{
+   c.indirectWidth=params.indirectWidth;
+   c.indirectHeight=params.indirectHeight;
+   c.indirectValid=false;
   }
-  c.indirectWidth=params.indirectWidth;
-  c.indirectHeight=params.indirectHeight;
-  c.indirectValid=false;
  }
  ID3D11Buffer* cbuff[]={c.constant.Get()};
  ID3D11SamplerState* samplers[]={c.sampler.Get()};
