@@ -1,7 +1,7 @@
 # CSE WARP Beta X — V17 : objectifs du moteur 3D temps réel
 
-**Version de cadrage : 1.0 — 10 novembre 2026**  
-**Statut : objectifs documentés ; développement V17 non commencé**  
+**Version de cadrage : 1.1 — 10 novembre 2026**  
+**Statut : phase de réalisation autorisée ; premier moteur V17 OpenGL temps réel implémenté sur la branche `feature/v17-opengl-realtime-pavillon01-261110`. Objectifs 30/40 FPS et qualité Call of Pripyat pas encore validés.**  
 **Branche de travail :** `feature/v17-realtime-architecture-roadmap-261110`  
 **Base conservée :** V16 `feature/v16-dell-native-1366x768-fhd-261110`. La V16 et ses autres PR restent intactes. Aucune fusion dans `master` autorisée implicitement.
 
@@ -155,5 +155,5 @@ Ces sources illustrent qu'un rendu de jeu crédible peut reposer sur **deferred 
 
 ## 8. Protocole de changement
 
-La création de ce document/branche **ne déclenche aucun développement V17**.
+**Développement lancé sur autorisation explicite de l'utilisateur (« fait le moteur V17 en avant toute »).** Le premier backend OpenGL 3.3 rasterisé est implémenté sur `feature/v17-opengl-realtime-pavillon01-261110`, tandis que V16 CPU/HLSL est conservé. L'amélioration de la GI et du réalisme, la parité DirectX 11 et les 30/40 FPS ne sont pas encore démontrés.
 Avant chaque phase : présenter l'impact, les fichiers à modifier, les risques, le benchmark attendu et les possibilités de retour arrière. Attendre une instruction explicite (« exécute », « code », etc.) pour les changements de code, compilations, branches supplémentaires ou fusion.
