@@ -120,6 +120,43 @@ int main(int argc,char** argv){
     }
     qInfo()<<"GPU box instancing A/B valid; fraction >8 difference:"<<fraction
            <<"mean delta:"<<meanDelta;
+    // Public host-application quality API must be effective and reversible
+    // on the same persistent worker, including MSAA target and sampler changes.
+    const auto originalQuality=m3d::rasterQualitySettings();
+    for(const auto profile:{m3d::RasterQualityProfile::Performance,
+                            m3d::RasterQualityProfile::Ultra}){
+        auto requested=m3d::rasterQualityProfile(profile);
+        error.clear();
+        if(!m3d::setRasterQualitySettings(requested,error)){
+            qCritical()<<"GPU quality setter rejected valid preset"<<QString::fromStdWString(error);
+            return 1;
+        }
+        const auto actual=m3d::rasterQualitySettings();
+        if(actual.msaaSamples!=requested.msaaSamples||
+           actual.anisotropy!=requested.anisotropy||
+           actual.dynamicLod!=requested.dynamicLod){
+            qCritical()<<"Host-side raster settings were not applied atomically";return 1;
+        }
+        std::vector<uint32_t> profileImage;
+        m3d::Stats profileStats;
+        if(!m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,cam,
+                                         w,h,profileImage,profileStats,error) ||
+           profileImage.size()!=second.size() || !profileStats.gpu){
+            qCritical()<<"Changed quality preset failed on WARP"
+                       <<QString::fromStdWString(error);return 1;
+        }
+    }
+    error.clear();
+    if(!m3d::setRasterQualitySettings(originalQuality,error)){
+        qCritical()<<"Cannot restore raster quality settings";return 1;
+    }
+    std::vector<uint32_t> restored;
+    m3d::Stats restoredStats;
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,cam,w,h,
+                                   restored,restoredStats,error)||restored!=second){
+        qCritical()<<"Restoring quality did not reproduce reference pixels"
+                   <<QString::fromStdWString(error);return 1;
+    }
     // New experimental pipeline: submit N frames before reading the oldest.
     // Every returned image must match the synchronous reference exactly,
     // even across staging-slot reuse. Timestamp queries are optional on
