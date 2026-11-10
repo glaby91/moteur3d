@@ -2,8 +2,8 @@
 
 **Version de cadrage : 1.0 — 10 novembre 2026**  
 **Statut : objectifs documentés ; développement V17 non commencé**  
-**Branche de travail :** \`feature/v17-realtime-architecture-roadmap-261110\`  
-**Base conservée :** V16 \`feature/v16-dell-native-1366x768-fhd-261110\`. La V16 et ses autres PR restent intactes. Aucune fusion dans \`master\` autorisée implicitement.
+**Branche de travail :** `feature/v17-realtime-architecture-roadmap-261110`  
+**Base conservée :** V16 `feature/v16-dell-native-1366x768-fhd-261110`. La V16 et ses autres PR restent intactes. Aucune fusion dans `master` autorisée implicitement.
 
 ## 1. La mission de V17
 
@@ -46,7 +46,7 @@ Faire passer CSE WARP Beta X d'un outil qui **calcule des images à la demande**
 
 ## 4. Architecture GPU temps réel
 
-\`\`\`text
+```text
 Scène V17 commune : objets / instances / PBR / UV / caméras / lumières
                            |
                       Cache des assets
@@ -64,14 +64,14 @@ Scène V17 commune : objets / instances / PBR / UV / caméras / lumières
                                   Image GPU native
                                        |
                                Affichage continu Qt
-\`\`\`
+```
 
 **Règle de calcul :** en exploration, ne plus utiliser un rayon BVH primaire par pixel pour les surfaces opaques. La rasterisation produit les surfaces visibles. Les rayons secondaires GPU deviennent un **complément ciblé**, pas le coût de base de chaque pixel.
 
 ### Deux backends potentiels
 
-- **DirectX 11 / HLSL : premier candidat Windows.** Réutiliser de \`native_v14/src/m3d_directx11.cpp\` : vertex/pixel shaders, rasterisation, Z-buffer, tableaux de textures PBR, mipmaps, MSAA, shadow mapping, alpha blending, géométrie GPU. **Ne pas reprendre tel quel son ancien modèle lumineux simplifié.**
-- **OpenGL 4.3+ / GLSL : second candidat**, pour l'intégration Qt via \`QOpenGLWidget\` et Linux. Tester la version/les extensions exposées réellement par le pilote HD620. Évaluer les deux sur **la même scène et la même qualité** avant un choix définitif.
+- **DirectX 11 / HLSL : premier candidat Windows.** Réutiliser de `native_v14/src/m3d_directx11.cpp` : vertex/pixel shaders, rasterisation, Z-buffer, tableaux de textures PBR, mipmaps, MSAA, shadow mapping, alpha blending, géométrie GPU. **Ne pas reprendre tel quel son ancien modèle lumineux simplifié.**
+- **OpenGL 4.3+ / GLSL : second candidat**, pour l'intégration Qt via `QOpenGLWidget` et Linux. Tester la version/les extensions exposées réellement par le pilote HD620. Évaluer les deux sur **la même scène et la même qualité** avant un choix définitif.
 - Éviter de créer deux moteurs GPU sans abstractions communes. On peut partager les ressources/passes/règles PBR tout en écrivant les shaders nécessaires à chaque API.
 - **Aucun DXR matériel nécessaire.** L'absence de DXR n'empêche pas le rendu moderne. Les jeux X-Ray historiques utilisent éclairage différé, ombres, AO, shaders et posttraitements sans lancer de rayons matériels.
 
@@ -79,7 +79,7 @@ Scène V17 commune : objets / instances / PBR / UV / caméras / lumières
 
 - Caméra libre : déplacement continu WASD/flèches, souris, vitesse réglable, collisions optionnelles ; six caméras prédéfinies conservées.
 - Boucle d'images avec cadence régulière, scène précalculée/cachée, chargement non bloquant et contrôle utilisateur réactif.
-- Présenter une **texture GPU directement** lorsque possible, au lieu d'un transfert synchrone \`GPU → mémoire CPU → QImage\` à chaque image.
+- Présenter une **texture GPU directement** lorsque possible, au lieu d'un transfert synchrone `GPU → mémoire CPU → QImage` à chaque image.
 - Export de capture PNG et rendu CPU haute qualité continuent d'exister mais sont des commandes distinctes.
 
 ## 5. Objectif visuel : finesse et « chaleur » de la scène
