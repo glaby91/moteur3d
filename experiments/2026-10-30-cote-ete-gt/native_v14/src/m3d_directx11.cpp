@@ -1362,9 +1362,9 @@ RasterQualitySettings rasterQualityProfile(RasterQualityProfile preset){
     case RasterQualityProfile::Performance:
         q.msaaSamples=1;q.anisotropy=2;q.lodQualityPercent=60;break;
     case RasterQualityProfile::Balanced:
-        q.msaaSamples=2;q.anisotropy=8;q.lodQualityPercent=100;break;
+        q.msaaSamples=2;q.anisotropy=8;q.lodQualityPercent=85;break;
     case RasterQualityProfile::High:
-        q.msaaSamples=4;q.anisotropy=16;q.lodQualityPercent=125;break;
+        q.msaaSamples=4;q.anisotropy=16;q.lodQualityPercent=100;break;
     case RasterQualityProfile::Ultra:
         q.msaaSamples=4;q.anisotropy=16;q.lodQualityPercent=200;
         q.dynamicLod=false;break;
@@ -1405,8 +1405,8 @@ namespace m3d {
 RasterQualitySettings rasterQualityProfile(RasterQualityProfile p){
     RasterQualitySettings q;
     if(p==RasterQualityProfile::Performance){q.msaaSamples=1;q.anisotropy=2;q.lodQualityPercent=60;}
-    else if(p==RasterQualityProfile::Balanced){q.msaaSamples=2;q.anisotropy=8;}
-    else if(p==RasterQualityProfile::High){q.lodQualityPercent=125;}
+    else if(p==RasterQualityProfile::Balanced){q.msaaSamples=2;q.anisotropy=8;q.lodQualityPercent=85;}
+    else if(p==RasterQualityProfile::High){q.lodQualityPercent=100;}
     else if(p==RasterQualityProfile::Ultra){q.lodQualityPercent=200;q.dynamicLod=false;}
     return q;
 }
