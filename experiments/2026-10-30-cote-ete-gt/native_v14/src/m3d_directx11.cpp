@@ -1269,7 +1269,7 @@ private:
         width_=w;height_=h;msaaPreference_=msaa;
         target_.Reset();resolve_.Reset();rtv_.Reset();depthTexture_.Reset();dsv_.Reset();
         sampleCount_=1;sampleQuality_=0;
-        for(UINT candidate:{4u,2u}){
+        for(UINT candidate:{8u,4u,2u}){
             if(candidate>msaa)continue;
             UINT levels=0,depthLevels=0;
             if(SUCCEEDED(device_->CheckMultisampleQualityLevels(DXGI_FORMAT_R8G8B8A8_UNORM,candidate,&levels))&&levels>0&&
@@ -1377,7 +1377,7 @@ RasterQualitySettings rasterQualityProfile(RasterQualityProfile preset){
     case RasterQualityProfile::High:
         q.msaaSamples=4;q.anisotropy=16;q.lodQualityPercent=100;break;
     case RasterQualityProfile::Ultra:
-        q.msaaSamples=4;q.anisotropy=16;q.lodQualityPercent=200;
+        q.msaaSamples=8;q.anisotropy=16;q.lodQualityPercent=200;
         q.dynamicLod=false;break;
     }
     return q;
@@ -1386,11 +1386,11 @@ RasterQualitySettings rasterQualitySettings(){
     return unpackQuality(gpuQualityBits.load(std::memory_order_acquire));
 }
 bool setRasterQualitySettings(const RasterQualitySettings& q,std::wstring& error){
-    const auto validSample=q.msaaSamples==1||q.msaaSamples==2||q.msaaSamples==4;
+    const auto validSample=q.msaaSamples==1||q.msaaSamples==2||q.msaaSamples==4||q.msaaSamples==8;
     const auto validAniso=q.anisotropy==1||q.anisotropy==2||
         q.anisotropy==4||q.anisotropy==8||q.anisotropy==16;
     if(!validSample||!validAniso||q.lodQualityPercent<50||q.lodQualityPercent>200){
-        error=L"Réglages DX11 invalides : MSAA 1/2/4, anisotropie 1/2/4/8/16, LOD 50..200%.";
+        error=L"Réglages DX11 invalides : MSAA 1/2/4/8, anisotropie 1/2/4/8/16, LOD 50..200%.";
         return false;
     }
     gpuQualityBits.store(packQuality(q),std::memory_order_release);
@@ -1418,7 +1418,7 @@ RasterQualitySettings rasterQualityProfile(RasterQualityProfile p){
     if(p==RasterQualityProfile::Performance){q.msaaSamples=1;q.anisotropy=2;q.lodQualityPercent=60;}
     else if(p==RasterQualityProfile::Balanced){q.msaaSamples=2;q.anisotropy=8;q.lodQualityPercent=85;}
     else if(p==RasterQualityProfile::High){q.lodQualityPercent=100;}
-    else if(p==RasterQualityProfile::Ultra){q.lodQualityPercent=200;q.dynamicLod=false;}
+    else if(p==RasterQualityProfile::Ultra){q.msaaSamples=8;q.lodQualityPercent=200;q.dynamicLod=false;}
     return q;
 }
 RasterQualitySettings rasterQualitySettings(){return RasterQualitySettings{};}
