@@ -9,6 +9,10 @@
 #include <QCoreApplication>
 #include <QComboBox>
 #include <QDockWidget>
+#include <QDir>
+#include <QHash>
+#include <QStatusBar>
+#include <QVector4D>
 #include <QDoubleSpinBox>
 #include <QElapsedTimer>
 #include <QFile>
@@ -558,10 +562,10 @@ private:
 class RealtimeWindow final : public QMainWindow {
 public:
     RealtimeWindow(std::shared_ptr<v16::Runtime> runtime,QString scenePath)
-       :scenePath_(std::move(scenePath)){
+       :runtime_(std::move(runtime)),scenePath_(std::move(scenePath)){
         setWindowTitle(QStringLiteral("CSE WARP Beta X — V17 · Exploration OpenGL"));
         resize(1320,780);
-        view_=new RealtimeView(std::move(runtime));
+        view_=new RealtimeView(runtime_);
         setCentralWidget(view_);
         createUi();
         view_->onPerformance=[this](float fps,float gpuMs){
@@ -642,8 +646,6 @@ private:
         statusBar()->showMessage("V17 · rasterisation OpenGL 3.3, PBR, ombres GPU et navigation libre");
     }
     const v16::Runtime* viewRuntime()const{return runtime_.get();}
-public:
-    void setRuntime(const std::shared_ptr<v16::Runtime>& r){runtime_=r;}
 private:
     std::shared_ptr<v16::Runtime> runtime_;
     QString scenePath_;
@@ -702,7 +704,6 @@ int main(int argc,char** argv){
         return 2;
     }
     RealtimeWindow window(runtime,path);
-    window.setRuntime(runtime);
     window.show();
     return app.exec();
 }
