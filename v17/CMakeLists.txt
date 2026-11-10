@@ -159,6 +159,17 @@ if(WIN32)
     if(MSVC)
         target_compile_options(v17_benchmark_scene_load_smoke PRIVATE /O2 /EHsc /utf-8)
     endif()
+    # Deterministic PBR multithreading and heterogeneous Compute mip smoke.
+    # Runs in WARP with textures sized 512px (serial vs parallel) and 256px
+    # (historical failure: no 512px mip for the Compute atlas).
+    add_executable(v17_pbr_compute_smoke "tests/pbr_compute_smoke.cpp")
+    target_include_directories(v17_pbr_compute_smoke PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+    target_link_libraries(v17_pbr_compute_smoke PRIVATE
+        moteur3d_v16_core Qt6::Core)
+    if(MSVC)
+        target_compile_options(v17_pbr_compute_smoke PRIVATE /O2 /EHsc /utf-8)
+    endif()
     add_executable(v17_raster_warp_smoke "tests/raster_warp_smoke.cpp")
     target_include_directories(v17_raster_warp_smoke PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
