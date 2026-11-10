@@ -1,8 +1,22 @@
 # CSE WARP Beta X — V17
 
-**V17 = exploration 3D réellement fluide ET qualité d'image convaincante.**
+**V17 = architecture temps réel en construction, sans abandonner les moteurs CPU et GPU V16.**
 
-> État : **cadrage technique uniquement** — aucun changement de moteur ni compilation dans cette branche V17.
+> État : **premier exécutable expérimental V17** — interface exploration, caméra WASD/souris, affichage continu, backend raster Direct3D11 réutilisé. Les 30/40 FPS et la qualité Call of Pripyat **ne sont pas encore validés**.
+
+## Prototype V17-1 — déjà implémenté
+
+- `v17/moteur3d_v17_qt.cpp` : fenêtre V17, mode Exploration, clic gauche + souris pour regarder, WASD/flèches pour se déplacer, Maj pour accélérer, espace/Ctrl pour monter/descendre, Échap pour arrêter.
+- `v17/CMakeLists.txt` : **réutilise directement le moteur V16 complet** (CPU ray tracing, CPU GI, D3D11 Compute, D3D11 Raster et scènes), sans recoder de moteur.
+- Rasterisation GPU existante ajoutée comme cinquième méthode, avec caches des ombres et scène chargée. Éclairage raster encore de première génération : l'amélioration de la chaleur, du verre et du PBR est une **étape ultérieure**.
+- FPS mesurés à l'écran pendant l'exploration et durée de rendu disponible.
+- **Limitation temporaire essentielle :** raster DirectX11 renvoie encore les pixels vers le CPU pour affichage dans Qt. Donc l'affichage direct d'une texture GPU, le vsync et les 25 ms **ne sont pas encore obtenus**. Il faudra remplacer ce readback et profiler la GPU HD620.
+- Build Windows sur GitHub Actions avec `actions/checkout@v5` et `actions/upload-artifact@v6`, tests de non-régression V16 conservés.
+
+## Tester sur le Dell
+
+Ouvrir `moteur3d_v17.exe`, choisir le preset **Dell 1366×768**, et cliquer sur **Démarrer exploration (V17)**. Tester la caméra 02, noter la fluidité et les FPS. Comparer le backend **V17 GPU D3D11 Raster** avec le **V16 GPU D3D11 Compute** en mode image fixe, puis les modes CPU. Les chiffres Windows CI WARP ne prédisent pas le temps réel du HD620.
+
 
 Le document de référence, avec objectifs vérifiables, risques, conditions de validation et étapes de développement, est :
 
