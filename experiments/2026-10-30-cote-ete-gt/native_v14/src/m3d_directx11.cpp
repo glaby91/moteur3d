@@ -115,7 +115,7 @@ VSOut VSBoxMain(VSBoxIn i) {
     if(i.uvMode==1){
         // Source V16 JSON boxes store per-face local UVs, while native
         // Kind::Box maps the world position. Preserve both conventions.
-        float2 localUV=i.uv;
+        float2 localUV=i.unusedUv;
         if(n.z < -0.5 || n.x > 0.5)localUV.x=1.0-localUV.x;
         if(n.y > 0.5)localUV.y=1.0-localUV.y;
         float uLength=(abs(n.x)>0.5?i.boxSize.z:i.boxSize.x)*0.5;
