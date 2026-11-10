@@ -224,6 +224,15 @@ jobs:
             }
             Write-Host "A/B pixel-identical $name — reference mean $($referenceCase.meanMs) ms; optimized mean $($optimizedCase.meanMs) ms (WARP only)"
           }
+      - name: Validate bit-identical parallel PBR and mixed-resolution Compute atlas
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          & "build-v17/Release/v17_pbr_compute_smoke.exe" "scenes/v16/pavillon01/scene.json"
+          if ($LASTEXITCODE -ne 0) {
+            throw "PBR parallel pixel equivalence or Compute mip atlas smoke failed"
+          }
       - name: Smoke complete multi-round benchmark campaign (all 3 buffer depths)
         shell: pwsh
         env:
