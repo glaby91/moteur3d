@@ -180,7 +180,7 @@ public:
         });
         // Return from the constructor immediately. The first scene is built
         // on a worker after show(), so Windows always shows the main window.
-        canvas_->setPlaceholder(QStringLiteral("CSE WARP V17\\nChargement de la scène…"));
+        canvas_->setPlaceholder(QStringLiteral("CSE WARP V17\nChargement de la scène…"));
         if(!scenePath.isEmpty())
             QTimer::singleShot(0,this,[this,scenePath]{openScene(scenePath);});
     }
@@ -414,14 +414,14 @@ private:
             camerasMenu->addAction(action);
         }
         auto* toolsMenu=menuBar()->addMenu(QStringLiteral("Outils"));
-        auto* benchmarkAction=toolsMenu->addAction(QStringLiteral("Benchmark complet…"));
+        auto* benchmarkAction=toolsMenu->addAction(QStringLiteral("Benchmark V17 — performances…"));
         connect(benchmarkAction,&QAction::triggered,this,[this]{
             if(scenePath_.isEmpty()){
-                QMessageBox::information(this,QStringLiteral("Benchmark"),QStringLiteral("Charger Pavillon 01 avant de lancer le benchmark."));
+                QMessageBox::information(this,QStringLiteral("Benchmark"),QStringLiteral("Charger une scène avant de lancer le benchmark."));
                 return;
             }
             const QString path=QCoreApplication::applicationDirPath()
-                +QStringLiteral("/moteur3d_v16_benchui.exe");
+                +QStringLiteral("/moteur3d_v17_benchui.exe");
             if(!QFileInfo::exists(path)){
                 QMessageBox::warning(this,QStringLiteral("Benchmark indisponible"),
                                      QStringLiteral("Programme de benchmark introuvable : %1").arg(path));
@@ -429,6 +429,28 @@ private:
             }
             if(!QProcess::startDetached(path,{scenePath_},QCoreApplication::applicationDirPath()))
                 QMessageBox::critical(this,QStringLiteral("Benchmark"),QStringLiteral("Impossible d'ouvrir la fenêtre de benchmark."));
+        });
+        auto* helpMenu=menuBar()->addMenu(QStringLiteral("Aide"));
+        auto* aboutAction=helpMenu->addAction(QStringLiteral("À propos de CSE WARP V17…"));
+        connect(aboutAction,&QAction::triggered,this,[this]{
+            const QString revisionPath=QCoreApplication::applicationDirPath()
+                +QStringLiteral("/REVISION.txt");
+            QString revision=QStringLiteral("développement");
+            QFile revisionFile(revisionPath);
+            if(revisionFile.open(QIODevice::ReadOnly|QIODevice::Text))
+                revision=QString::fromUtf8(revisionFile.readAll()).trimmed().left(12);
+            QMessageBox::about(this,QStringLiteral("À propos de CSE WARP V17"),
+                QStringLiteral("<h3>CSE WARP Beta X — V17</h3>"
+                    "<p>Exploration 3D expérimentale de scènes réelles, version 17.0.</p>"
+                    "<p><b>Moteurs :</b> Direct3D 11 Raster (V17), "
+                    "D3D11 Compute HLSL (V16), Ray Tracing CPU et GI CPU.</p>"
+                    "<p><b>Fonctions :</b> scène commune, textures PBR, éclairage, "
+                    "export PNG, navigation libre et benchmarks intégrés.</p>"
+                    "<p><b>Version Qt :</b> %1<br/><b>Révision GitHub :</b> %2</p>"
+                    "<p>Objectif temps réel 30–40 FPS sur Intel HD 620 : "
+                    "à confirmer par mesures sur le matériel.</p>")
+                    .arg(QString::fromLatin1(qVersion()).toHtmlEscaped(),
+                         revision.toHtmlEscaped()));
         });
 
         auto* left=new QDockWidget(QStringLiteral("Explorateur de scène"),this);
@@ -646,7 +668,7 @@ private:
         sceneLoadLabel_->show();
         sceneLoadProgress_->show();
         canvas_->setImage(QImage{});
-        canvas_->setPlaceholder(QStringLiteral("CSE WARP V17\\nChargement de la scène…"));
+        canvas_->setPlaceholder(QStringLiteral("CSE WARP V17\nChargement de la scène…"));
         cameraBox_->setEnabled(false);
         if(explorationButton_)explorationButton_->setEnabled(false);
         if(!loadWatcher_.isRunning())beginSceneLoad();
@@ -672,7 +694,7 @@ private:
                         sceneLoadProgress_->setValue(percent);
                         sceneLoadLabel_->setText(description);
                         canvas_->setPlaceholder(
-                            QStringLiteral("CSE WARP V17\\nChargement de la scène…\\n%1")
+                            QStringLiteral("CSE WARP V17\nChargement de la scène…\\n%1")
                                 .arg(description));
                     },Qt::QueuedConnection);
                 });
@@ -963,6 +985,8 @@ QString defaultPath(){
 }
 int main(int argc,char** argv){
     QApplication app(argc,argv);
+    QCoreApplication::setApplicationName(QStringLiteral("CSE WARP Beta X V17"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("17.0"));
     const bool switchSmoke=argc>=4
         && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-scene-switch");
     // Use the same Windows V17 brand icon for Qt titlebar/Alt-Tab/taskbar.
