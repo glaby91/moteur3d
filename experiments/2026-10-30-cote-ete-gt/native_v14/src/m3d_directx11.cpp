@@ -522,8 +522,10 @@ private:
                 sampleCount_=candidate;sampleQuality_=std::min(levels,depthLevels)-1;break;
             }
         }
-        D3D11_TEXTURE2D_DESC td{};td.Width=UINT(w);td.Height=UINT(h);td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_R8G8B8A8_UNORM;td.SampleDesc.Count=sampleCount_;td.SampleDesc.Quality=sampleQuality_;td.Usage=D3D11_USAGE_DEFAULT;td.BindFlags=D3D11_BIND_RENDER_TARGET;
+        D3D11_TEXTURE2D_DESC td{};td.Width=UINT(w);td.Height=UINT(h);td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_R8G8B8A8_TYPELESS;td.SampleDesc.Count=sampleCount_;td.SampleDesc.Quality=sampleQuality_;td.Usage=D3D11_USAGE_DEFAULT;td.BindFlags=D3D11_BIND_RENDER_TARGET;
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&target_))){error=L"Création de la cible image DirectX 11 impossible.";return false;}
+        // The render target must be TYPELESS for an sRGB RTV on D3D11/WARP.
+        // A typed UNORM texture with an sRGB view fails E_INVALIDARG.
         D3D11_RENDER_TARGET_VIEW_DESC rtvDesc{};rtvDesc.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;rtvDesc.ViewDimension=sampleCount_>1?D3D11_RTV_DIMENSION_TEXTURE2DMS:D3D11_RTV_DIMENSION_TEXTURE2D;
         if(sampleCount_==1)rtvDesc.Texture2D.MipSlice=0;
         if(FAILED(device_->CreateRenderTargetView(target_.Get(),&rtvDesc,&rtv_))){error=L"Création de la cible sRGB DirectX 11 impossible.";return false;}
