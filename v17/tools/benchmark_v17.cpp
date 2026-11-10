@@ -6,6 +6,7 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QVector>
 #include <QFile>
 #include <QFileInfo>
 #include <QImage>
@@ -47,6 +48,9 @@ QString csv(QString v){
     v.replace('"',QStringLiteral("\"\""));
     return QStringLiteral("\"")+v+QStringLiteral("\"");
 }
+double average(const std::vector<double>& values){
+    return values.empty()?0.0:std::accumulate(values.begin(),values.end(),0.0)/double(values.size());
+}
 double percentile(const std::vector<double>& sorted,double fraction){
     if(sorted.empty())return 0;
     const double pos=fraction*double(sorted.size()-1);
@@ -82,7 +86,7 @@ int main(int argc,char** argv){
         sourceRevision=QString::fromUtf8(revFile.readAll()).trimmed().left(12);
     QTextStream out(stdout),err(stderr);
     if(argc<3){
-        err<<"Usage: moteur3d_v17_benchmark.exe scene.json output_dir [--quick] [--compare-v16] [--smoke]\n";
+        err<<"Usage: moteur3d_v17_benchmark.exe scene.json output_dir [--quick] [--compare-v16] [--smoke] [--readback-depth 1|2|3] [--compare-readback]\n";
         return 2;
     }
     const QString scenePath=QFileInfo(QString::fromLocal8Bit(argv[1])).absoluteFilePath();
@@ -91,6 +95,19 @@ int main(int argc,char** argv){
     const bool smoke=args.contains(QStringLiteral("--smoke"));
     const bool quick=smoke||args.contains(QStringLiteral("--quick"));
     const bool compare=args.contains(QStringLiteral("--compare-v16"))&&!smoke;
+    const bool compareReadback=args.contains(QStringLiteral("--compare-readback"));
+    int readbackDepth=1;
+    const int depthOption=args.indexOf(QStringLiteral("--readback-depth"));
+    if(depthOption>=0){
+        if(depthOption+1>=args.size()){
+            err<<"--readback-depth expects 1, 2 or 3\n";return 2;
+        }
+        bool parsed=false;
+        readbackDepth=args[depthOption+1].toInt(&parsed);
+        if(!parsed||readbackDepth<1||readbackDepth>3){
+            err<<"--readback-depth must be 1, 2 or 3\n";return 2;
+        }
+    }
     const QString stamp=QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss_zzz");
     const QString runName=QStringLiteral("CSE-WARP-V17.%1-%2").arg(CSE_WARP_BUILD_NUMBER).arg(stamp);
     if(!QDir(outDir).mkpath(runName)){
@@ -102,7 +119,7 @@ int main(int argc,char** argv){
     QFile csvFile(directory.filePath("results.csv"));
     if(!csvFile.open(QIODevice::WriteOnly|QIODevice::Text))return 3;
     QTextStream csvOut(&csvFile);
-    csvOut<<"backend,camera,width,height,texture_px,cold_ms,frames,mean_ms,median_ms,p95_ms,p99_ms,estimated_fps,submitted_triangles,cold_readback_ms,mean_readback_ms,gpu_draw_calls,instanced_boxes,instanced_ellipsoids,instanced_foliage,status,error,image\n";
+    csvOut<<"backend,camera,width,height,texture_px,readback_depth,cold_ms,frames,mean_ms,median_ms,p95_ms,p99_ms,estimated_fps,stream_mean_ms,stream_fps,submitted_triangles,cold_readback_ms,mean_readback_ms,gpu_draw_calls,instanced_boxes,instanced_ellipsoids,instanced_foliage,gpu_timing_valid,gpu_draw_ms,gpu_transfer_ms,gpu_total_ms,cpu_submit_ms,cpu_map_wait_ms,cpu_pixel_convert_ms,pixel_identical,status,error,image\n";
     auto loaded=v16::loadScene(scenePath);
     if(!loaded){err<<"Scene load failed: "<<loaded.error<<"\n";return 4;}
     // The normal and quick modes use the same full 2048 PBR assets as V17.
@@ -134,7 +151,9 @@ int main(int argc,char** argv){
         {"sceneBuildMs",buildMs},{"shadowBuildMs",shadowMs},
         {"mode",smoke?"ci_smoke":quick?"quick":"full"},
         {"compareV16",compare},
-        {"timingDefinition","Synchronous renderDirectX11Preview: includes draw, GPU to CPU readback and buffer processing; excludes QImage GUI presentation, vsync and input latency."},
+        {"readbackDepth",readbackDepth},
+        {"compareReadback",compareReadback},
+        {"timingDefinition","GPU ms: D3D11 timestamp/disjoint queries (real hardware GPU time if available). cpuMapWaitMs: blocking Map; cpuPixelConvertMs: swizzle. meanMs: submit-to-receive latency; streamMeanMs: measured wall-time/frames, including pipeline fill and drain. Excludes GUI presentation/vsync."},
         {"hardwareNote","If M3D_V16_FORCE_WARP=1, this is a Microsoft software WARP test, not Intel HD620 GPU performance."}
     };
     if(!writeJson(directory.filePath("system.json"),system))return 3;
@@ -147,6 +166,7 @@ int main(int argc,char** argv){
               <<csv(record.value("camera").toString())<<','
               <<record.value("width").toInt()<<','<<record.value("height").toInt()<<','
               <<runtime.textureResolution<<','
+              <<record.value("readbackDepth").toInt(1)<<','
               <<record.value("coldMs").toDouble()<<','
               <<record.value("frames").toInt()<<','
               <<record.value("meanMs").toDouble()<<','
@@ -154,6 +174,8 @@ int main(int argc,char** argv){
               <<record.value("p95Ms").toDouble()<<','
               <<record.value("p99Ms").toDouble()<<','
               <<record.value("estimatedFps").toDouble()<<','
+              <<record.value("streamMeanMs").toDouble()<<','
+              <<record.value("streamFps").toDouble()<<','
               <<record.value("submittedTriangles").toDouble()<<','
               <<record.value("coldReadbackMs").toDouble()<<','
               <<record.value("meanReadbackMs").toDouble()<<','
@@ -161,6 +183,14 @@ int main(int argc,char** argv){
               <<record.value("gpuBoxInstances").toDouble()<<','
               <<record.value("gpuEllipseInstances").toDouble()<<','
               <<record.value("gpuFoliageInstances").toDouble()<<','
+              <<record.value("gpuTimingValid").toBool()<<','
+              <<record.value("gpuDrawMs").toDouble()<<','
+              <<record.value("gpuTransferMs").toDouble()<<','
+              <<record.value("gpuTotalMs").toDouble()<<','
+              <<record.value("cpuSubmitMs").toDouble()<<','
+              <<record.value("cpuMapWaitMs").toDouble()<<','
+              <<record.value("cpuPixelConvertMs").toDouble()<<','
+              <<record.value("pixelIdentical").toBool()<<','
               <<csv(status)<<','
               <<csv(record.value("error").toString())<<','
               <<csv(record.value("image").toString())<<"\n";
@@ -184,54 +214,118 @@ int main(int argc,char** argv){
         for(const auto& size:sizes){
             const int w=size.width(),h=size.height();
             const auto camera=v16::makeCamera(preset,w,h);
-            std::vector<uint32_t> pixels;
-            Stats stats;
-            std::wstring reason;
-            QJsonObject rec{{"backend","V17_D3D11_Raster"},{"camera",preset.id},
-                            {"width",w},{"height",h},{"frames",0}};
-            begin=Clock::now();
-            bool ok=renderDirectX11Preview(runtime.renderScene,shadow,camera,w,h,
-                                           pixels,stats,reason);
-            rec["coldMs"]=elapsedMs(begin);
-            rec["coldReadbackMs"]=ok?stats.postMs:0.0;
-            std::vector<double> frameTimes;
-            std::vector<double> readbackTimes;
-            if(ok){
-                for(int i=0;i<measuredFrames;++i){
-                    reason.clear();
-                    begin=Clock::now();
-                    ok=renderDirectX11Preview(runtime.renderScene,shadow,camera,w,h,
-                                              pixels,stats,reason);
-                    const double time=elapsedMs(begin);
-                    if(!ok)break;
-                    frameTimes.push_back(time);
+            const QVector<int> depths=compareReadback?QVector<int>{1,2,3}
+                :QVector<int>{readbackDepth};
+            std::vector<uint32_t> baselinePixels;
+            for(const int depth:depths){
+                std::vector<uint32_t> pixels;
+                Stats stats;
+                std::wstring reason;
+                QJsonObject rec{{"backend","V17_D3D11_Raster"},{"camera",preset.id},
+                                {"width",w},{"height",h},{"frames",0},
+                                {"readbackDepth",depth}};
+                // Use the unchanged synchronous path for cold start. It is
+                // explicitly outside the pipelined throughput measurement.
+                begin=Clock::now();
+                bool ok=renderDirectX11Preview(runtime.renderScene,shadow,camera,w,h,
+                                               pixels,stats,reason);
+                rec["coldMs"]=elapsedMs(begin);
+                rec["coldReadbackMs"]=ok?stats.postMs:0.0;
+                std::vector<double> latencies,readbackTimes,drawTimes,transferTimes,totalGpuTimes,
+                                    cpuSubmits,cpuWaits,cpuConversions;
+                auto collect=[&]{
+                    latencies.push_back(stats.ms);
                     readbackTimes.push_back(stats.postMs);
+                    cpuSubmits.push_back(stats.cpuSubmitMs);
+                    cpuWaits.push_back(stats.cpuMapWaitMs);
+                    cpuConversions.push_back(stats.cpuPixelConvertMs);
+                    if(stats.gpuTimingValid){
+                        drawTimes.push_back(stats.gpuDrawMs);
+                        transferTimes.push_back(stats.gpuTransferMs);
+                        totalGpuTimes.push_back(stats.gpuTotalMs);
+                    }
+                };
+                double streamDuration=0.;
+                if(ok){
+                    const auto streamStarted=Clock::now();
+                    if(depth==1){
+                        for(int i=0;i<measuredFrames;++i){
+                            reason.clear();
+                            ok=renderDirectX11Preview(runtime.renderScene,shadow,camera,w,h,
+                                                      pixels,stats,reason);
+                            if(!ok)break;
+                            collect();
+                        }
+                    }else{
+                        // Submit depth frames ahead and receive the oldest,
+                        // then drain. The COPY commands use distinct staging
+                        // textures; the shared render target is safely reused
+                        // by ordered D3D11 immediate-context commands.
+                        int queued=0,received=0;
+                        for(int i=0;i<measuredFrames;++i){
+                            reason.clear();
+                            ok=enqueueDirectX11Preview(runtime.renderScene,shadow,camera,
+                                                       w,h,unsigned(depth),reason);
+                            if(!ok)break;
+                            ++queued;
+                            if(queued-received>=depth){
+                                ok=receiveDirectX11Preview(pixels,stats,reason);
+                                if(!ok)break;
+                                ++received;
+                                collect();
+                            }
+                        }
+                        // Drain even after submission errors: no stale frames
+                        // may survive into another camera/depth benchmark.
+                        while(received<queued){
+                            std::wstring receiveError;
+                            const bool drained=receiveDirectX11Preview(pixels,stats,receiveError);
+                            if(!drained){
+                                ok=false;
+                                if(reason.empty())reason=receiveError;
+                                break;
+                            }
+                            ++received;
+                            collect();
+                        }
+                    }
+                    streamDuration=elapsedMs(streamStarted);
                 }
-            }
-            if(ok){
-                const QString image=QStringLiteral("images/raster_%1_%2x%3.png").arg(preset.id).arg(w).arg(h);
-                rec["image"]=image;
-                if(!writeImage(directory.filePath(image),pixels,w,h)){
-                    ok=false;
-                    reason=L"Cannot save PNG";
+                addTimings(rec,latencies);
+                rec["meanReadbackMs"]=average(readbackTimes);
+                rec["gpuTimingValid"]=!totalGpuTimes.empty();
+                rec["gpuDrawMs"]=average(drawTimes);
+                rec["gpuTransferMs"]=average(transferTimes);
+                rec["gpuTotalMs"]=average(totalGpuTimes);
+                rec["cpuSubmitMs"]=average(cpuSubmits);
+                rec["cpuMapWaitMs"]=average(cpuWaits);
+                rec["cpuPixelConvertMs"]=average(cpuConversions);
+                if(!latencies.empty()&&streamDuration>0){
+                    rec["streamMeanMs"]=streamDuration/double(latencies.size());
+                    rec["streamFps"]=double(latencies.size())*1000.0/streamDuration;
                 }
+                if(ok&&compareReadback&&depth==1)baselinePixels=pixels;
+                const bool identical=!compareReadback||depth==1||pixels==baselinePixels;
+                rec["pixelIdentical"]=identical;
+                if(ok&&!identical){ok=false;reason=L"GPU buffered readback changed pixel values";}
+                if(ok){
+                    const QString image=QStringLiteral("images/raster_%1_%2x%3_depth%4.png")
+                        .arg(preset.id).arg(w).arg(h).arg(depth);
+                    rec["image"]=image;
+                    if(!writeImage(directory.filePath(image),pixels,w,h)){
+                        ok=false;
+                        reason=L"Cannot save PNG";
+                    }
+                }
+                rec["submittedTriangles"]=double(stats.tests);
+                rec["gpuDrawCalls"]=double(stats.gpuDrawCalls);
+                rec["gpuBoxInstances"]=double(stats.gpuBoxInstances);
+                rec["gpuEllipseInstances"]=double(stats.gpuEllipseInstances);
+                rec["gpuFoliageInstances"]=double(stats.gpuFoliageInstances);
+                rec["status"]=ok?"ok":"skipped";
+                rec["error"]=ok?QString():QString::fromStdWString(reason);
+                append(rec);
             }
-            addTimings(rec,frameTimes);
-            if(!readbackTimes.empty()){
-                rec["meanReadbackMs"]=std::accumulate(
-                    readbackTimes.begin(),readbackTimes.end(),0.0)/readbackTimes.size();
-            }
-            // Stats.tests is the number of triangles actually sent to D3D11
-            // after optional opaque frustum culling, plus transparency.
-            // This makes it possible to compare scene coverage and FPS.
-            rec["submittedTriangles"]=double(stats.tests);
-            rec["gpuDrawCalls"]=double(stats.gpuDrawCalls);
-            rec["gpuBoxInstances"]=double(stats.gpuBoxInstances);
-            rec["gpuEllipseInstances"]=double(stats.gpuEllipseInstances);
-            rec["gpuFoliageInstances"]=double(stats.gpuFoliageInstances);
-            rec["status"]=ok?"ok":"skipped";
-            rec["error"]=ok?QString():QString::fromStdWString(reason);
-            append(rec);
         }
         if(compare){
             const QSize size(1366,768);
