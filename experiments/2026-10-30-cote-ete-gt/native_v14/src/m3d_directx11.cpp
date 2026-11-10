@@ -12,6 +12,7 @@
 #include <cstring>
 #include <algorithm>
 #include <array>
+#include <deque>
 #include <cmath>
 #include <limits>
 
@@ -429,11 +430,38 @@ static bool visibleChunk(const DrawChunk& chunk,const Camera& camera) {
     return true;
 }
 class DirectX11Preview {
+    using Clock=std::chrono::steady_clock;
+    struct ReadbackSlot {
+        ComPtr<ID3D11Texture2D> staging;
+        ComPtr<ID3D11Query> disjoint,start,afterDraw,afterCopy;
+        bool queryReady=false;
+        int width=0,height=0;
+        Clock::time_point cpuStarted{},copyQueued{};
+        Stats submitted{};
+    };
 public:
-    bool render(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error) {
-        const auto started=std::chrono::steady_clock::now();
+    bool render(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,
+                std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error) {
+        // Retain the original exact-image synchronous API. The pipelined API
+        // deliberately lives alongside this path and is opt-in in the bench.
+        return enqueue(scene,shadows,cam,w,h,1,error)&&receive(pixels,stats,error);
+    }
+    bool enqueue(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,
+                 unsigned depth,std::wstring& error) {
+        const auto started=Clock::now();
         if(w<=0||h<=0){error=L"Résolution GPU invalide.";return false;}
-        if(!ensureDevice(error)||!ensureScene(scene,error)||!ensureShadow(shadows,error)||!ensureTargets(w,h,error))return false;
+        if(depth<1||depth>3){error=L"Profondeur des tampons GPU attendue : 1 à 3.";return false;}
+        if(pending_.size()>=depth || (!pending_.empty()&&depth!=readbackDepth_)){
+            error=L"Lecture GPU en attente : vider la file avant de changer la profondeur.";return false;
+        }
+        if(!pending_.empty() && (w!=width_||h!=height_)){
+            error=L"Changement de résolution avec des images GPU en attente.";return false;
+        }
+        if(!ensureDevice(error)||!ensureScene(scene,error)||!ensureShadow(shadows,error)||
+           !ensureTargets(w,h,error)||!ensureReadback(depth,w,h,error))return false;
+        const unsigned slotIndex=nextReadbackSlot_;
+        ReadbackSlot& slot=readbackSlots_[slotIndex];
+        slot.cpuStarted=started;
         FrameConstants cb{};
         cb.eye[0]=cam.eye.x;cb.eye[1]=cam.eye.y;cb.eye[2]=cam.eye.z;cb.tanHalf=cam.tanHalf;
         cb.forward[0]=cam.f.x;cb.forward[1]=cam.f.y;cb.forward[2]=cam.f.z;cb.aspect=cam.aspect;
@@ -513,6 +541,10 @@ public:
         if(FAILED(hr)){error=L"Impossible de transmettre les paramètres à DirectX 11.";return false;}
         std::memcpy(mapped.pData,&cb,sizeof(cb));context_->Unmap(constants_.Get(),0);
         const float clear[4]={cb.sky[0],cb.sky[1],cb.sky[2],1.f};
+        if(slot.queryReady){
+            context_->Begin(slot.disjoint.Get());
+            context_->End(slot.start.Get());
+        }
         context_->OMSetRenderTargets(1,rtv_.GetAddressOf(),dsv_.Get());context_->ClearRenderTargetView(rtv_.Get(),clear);context_->ClearDepthStencilView(dsv_.Get(),D3D11_CLEAR_DEPTH,1.f,0);
         D3D11_VIEWPORT vp{};vp.Width=float(w);vp.Height=float(h);vp.MinDepth=0;vp.MaxDepth=1;context_->RSSetViewports(1,&vp);
         UINT stride=sizeof(GpuVertex),offset=0;ID3D11Buffer* vb=vertices_.Get();context_->IASetInputLayout(layout_.Get());context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -688,28 +720,73 @@ public:
             context_->OMSetDepthStencilState(transparentDepth_.Get(),0);context_->OMSetBlendState(blend_.Get(),nullptr,0xffffffffu);context_->Draw(UINT(transparent_.size()*3),0);++drawCalls;
             context_->OMSetBlendState(nullptr,nullptr,0xffffffffu);context_->OMSetDepthStencilState(depth_.Get(),0);context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
         }
-        const auto readbackStarted=std::chrono::steady_clock::now();
+        // GPU timestamps surround the actual draw commands and the queued
+        // GPU copy. They do not include any CPU-side GetData/Map blocking.
+        if(slot.queryReady)context_->End(slot.afterDraw.Get());
         if(sampleCount_>1)context_->ResolveSubresource(resolve_.Get(),0,target_.Get(),0,DXGI_FORMAT_R8G8B8A8_UNORM);
         else context_->CopyResource(resolve_.Get(),target_.Get());
-        context_->CopyResource(staging_.Get(),resolve_.Get());
-        hr=context_->Map(staging_.Get(),0,D3D11_MAP_READ,0,&mapped);
-        if(FAILED(hr)){error=L"Impossible de relire l’image calculée par DirectX 11.";return false;}
-        pixels.resize(size_t(w)*h);
-        for(int y=0;y<h;y++){const uint8_t* row=static_cast<const uint8_t*>(mapped.pData)+size_t(y)*mapped.RowPitch;for(int x=0;x<w;x++){const uint8_t* p=row+size_t(x)*4;pixels[size_t(y)*w+x]=0xff000000u|(uint32_t(p[0])<<16)|(uint32_t(p[1])<<8)|uint32_t(p[2]);}}
-        context_->Unmap(staging_.Get(),0);
-        const auto finished=std::chrono::steady_clock::now();
-        stats={};stats.gpu=true;stats.threads=0;
-        stats.ms=std::chrono::duration<double,std::milli>(finished-started).count();
-        // Reuse Stats.postMs for the GPU readback/post step. This includes
-        // Resolve+CopyResource+blocking Map and ARGB32 CPU conversion.
-        stats.postMs=std::chrono::duration<double,std::milli>(finished-readbackStarted).count();
-        stats.gpuDrawCalls=drawCalls;
-        stats.gpuBoxInstances=submittedBoxInstances;
-        stats.gpuEllipseInstances=submittedEllipseInstances;
-        stats.gpuFoliageInstances=submittedFoliageInstances;
-        // Count submitted opaque primitives, not triangles hidden by culling.
-        stats.tests=submittedVertices/3+uint64_t(submittedBoxInstances)*12
+        context_->CopyResource(slot.staging.Get(),resolve_.Get());
+        if(slot.queryReady){
+            context_->End(slot.afterCopy.Get());
+            context_->End(slot.disjoint.Get());
+        }
+        slot.submitted={};
+        slot.submitted.gpu=true;slot.submitted.threads=0;
+        slot.submitted.readbackBufferCount=depth;
+        slot.submitted.gpuDrawCalls=drawCalls;
+        slot.submitted.gpuBoxInstances=submittedBoxInstances;
+        slot.submitted.gpuEllipseInstances=submittedEllipseInstances;
+        slot.submitted.gpuFoliageInstances=submittedFoliageInstances;
+        slot.submitted.tests=submittedVertices/3+uint64_t(submittedBoxInstances)*12
             +submittedEllipseTriangles+submittedFoliageTriangles+transparent_.size();
+        slot.copyQueued=Clock::now();
+        slot.submitted.cpuSubmitMs=std::chrono::duration<double,std::milli>(
+            slot.copyQueued-started).count();
+        pending_.push_back(slotIndex);
+        nextReadbackSlot_=(slotIndex+1u)%readbackDepth_;
+        return true;
+    }
+    bool receive(std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error){
+        if(pending_.empty()){error=L"Aucune image GPU en attente.";return false;}
+        ReadbackSlot& slot=readbackSlots_[pending_.front()];
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        const auto mapStarted=Clock::now();
+        const HRESULT hr=context_->Map(slot.staging.Get(),0,D3D11_MAP_READ,0,&mapped);
+        if(FAILED(hr)){error=L"Lecture différée DirectX 11 impossible.";return false;}
+        const auto mapDone=Clock::now();
+        pixels.resize(size_t(slot.width)*size_t(slot.height));
+        for(int y=0;y<slot.height;++y){
+            const uint8_t* row=static_cast<const uint8_t*>(mapped.pData)
+                +size_t(y)*mapped.RowPitch;
+            for(int x=0;x<slot.width;++x){
+                const uint8_t* p=row+size_t(x)*4;
+                pixels[size_t(y)*slot.width+x]=0xff000000u
+                    |(uint32_t(p[0])<<16)|(uint32_t(p[1])<<8)|uint32_t(p[2]);
+            }
+        }
+        context_->Unmap(slot.staging.Get(),0);
+        const auto finished=Clock::now();
+        stats=slot.submitted;
+        stats.ms=std::chrono::duration<double,std::milli>(finished-slot.cpuStarted).count();
+        stats.postMs=std::chrono::duration<double,std::milli>(finished-slot.copyQueued).count();
+        stats.cpuMapWaitMs=std::chrono::duration<double,std::milli>(mapDone-mapStarted).count();
+        stats.cpuPixelConvertMs=std::chrono::duration<double,std::milli>(finished-mapDone).count();
+        if(slot.queryReady){
+            D3D11_QUERY_DATA_TIMESTAMP_DISJOINT info{};
+            UINT64 begin=0,draw=0,copy=0;
+            const bool valid=context_->GetData(slot.disjoint.Get(),&info,sizeof(info),0)==S_OK
+                &&context_->GetData(slot.start.Get(),&begin,sizeof(begin),0)==S_OK
+                &&context_->GetData(slot.afterDraw.Get(),&draw,sizeof(draw),0)==S_OK
+                &&context_->GetData(slot.afterCopy.Get(),&copy,sizeof(copy),0)==S_OK;
+            if(valid&&!info.Disjoint&&info.Frequency>0&&begin<=draw&&draw<=copy){
+                const double ticksToMs=1000.0/double(info.Frequency);
+                stats.gpuDrawMs=double(draw-begin)*ticksToMs;
+                stats.gpuTransferMs=double(copy-draw)*ticksToMs;
+                stats.gpuTotalMs=double(copy-begin)*ticksToMs;
+                stats.gpuTimingValid=true;
+            }
+        }
+        pending_.pop_front();
         return true;
     }
 private:
