@@ -25,6 +25,9 @@
 #include <numeric>
 #include <vector>
 #ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <Windows.h>
 #include <Psapi.h>
 #pragma comment(lib,"Psapi.lib")
@@ -481,7 +484,9 @@ int main(int argc,char** argv){
         }
         // CPU multi-core and Compute are separate diagnostic workloads, not
         // a misleading FPS comparison with the full-size Raster image.
-        if(cfg.includeCpu&&!cpuDone){
+        if(cfg.includeCpu&&!cpuDone &&
+           (!cfg.allScenes || sceneName.contains("pavillon01",Qt::CaseInsensitive)
+            || sceneIndex+1==unique.size())){
             cpuDone=true;
             const auto& preset=runtime.cameras.first();
             constexpr int cpuW=320,cpuH=180;
