@@ -1,0 +1,97 @@
+name: CSE WARP V17 — OpenGL realtime — Windows x64
+on:
+  push:
+    branches:
+      - feature/v17-opengl-realtime-pavillon01-261110
+    paths:
+      - 'v17/**'
+      - 'v16/CMakeLists.txt'
+      - '.github/workflows/build-moteur3d-v17.yml'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/**'
+      - 'scenes/v16/pavillon01/**'
+  pull_request:
+    paths:
+      - 'v17/**'
+      - 'v16/CMakeLists.txt'
+      - '.github/workflows/build-moteur3d-v17.yml'
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows x64 — V17 + V16 CPU/GPU — MSVC Qt6
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Qt 6.8.3 OpenGLWidgets
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Configure V16 core and additive V17 GUI
+        shell: pwsh
+        run: cmake -S v16 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+      - name: Build engine and both frontends
+        run: cmake --build build-v17 --config Release --parallel 4
+      - name: Verify shared V16 scene loader and V17 executable (no GL context required)
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = "offscreen"
+          & "build-v17/Release/moteur3d_v17.exe" --self-test "scenes/v16/pavillon01/scene.json"
+          if ($LASTEXITCODE -ne 0) { throw "V17 reuse of V16 Pavillon 01 failed" }
+          & "build-v17/Release/v16_scene_check.exe" "scenes/v16/pavillon01/scene.json"
+          if ($LASTEXITCODE -ne 0) { throw "V16 scene loader regression" }
+          if (!(Test-Path "build-v17/Release/moteur3d_v16.exe")) { throw "CPU/GPU V16 executable missing" }
+          if (!(Test-Path "build-v17/Release/shaders/v17/pbr.vert")) { throw "V17 OpenGL vertex shader missing" }
+          if (!(Test-Path "build-v17/Release/shaders/v17/pbr.frag")) { throw "V17 OpenGL PBR fragment shader missing" }
+          if (!(Test-Path "build-v17/Release/shaders/v17/shadow.vert")) { throw "V17 OpenGL shadow shader missing" }
+          Write-Host "V17 + V16 scene reuse and shader deployment passed"
+      - name: Validate CPU direct rendering remains available
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = "offscreen"
+          & "build-v17/Release/v16_render_smoke.exe" "scenes/v16/pavillon01/scene.json" "build-v17/v17-cpu-reference.png"
+          if ($LASTEXITCODE -ne 0) { throw "V16 CPU reference render broken by V17" }
+          if ((Get-Item "build-v17/v17-cpu-reference.png").Length -lt 1000) { throw "CPU reference PNG blank" }
+      - name: Package V17 and unchanged V16 backends
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist-v17 -Force | Out-Null
+          Copy-Item "build-v17/Release/moteur3d_v17.exe" "dist-v17/"
+          Copy-Item "build-v17/Release/moteur3d_v16.exe" "dist-v17/"
+          Copy-Item "build-v17/Release/moteur3d_v16_core.dll" "dist-v17/"
+          Copy-Item "build-v17/Release/pavillon01" "dist-v17/pavillon01" -Recurse
+          Copy-Item "build-v17/Release/material-lab" "dist-v17/material-lab" -Recurse
+          Copy-Item "build-v17/Release/pripyat-photo2scene-proof" "dist-v17/pripyat-photo2scene-proof" -Recurse
+          Copy-Item "build-v17/Release/shaders" "dist-v17/shaders" -Recurse
+          Copy-Item "build-v17/v17-cpu-reference.png" "dist-v17/V17-CPU-reference.png"
+          git rev-parse HEAD | Out-File "dist-v17/REVISION.txt" -Encoding ascii
+          windeployqt --release --no-translations dist-v17/moteur3d_v17.exe
+          windeployqt --release --no-translations dist-v17/moteur3d_v16.exe
+          Write-Host "Qt6 runtime, OpenGLWidgets and platforms deployed"
+      - name: Upload CSE WARP V17 Windows x64
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17-OpenGL-Windows-x64
+          path: dist-v17/
+          if-no-files-found: error
+
+  glsl:
+    name: Validate V17 GLSL 3.3 shaders
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install glslang validator
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq glslang-tools
+      - name: Compile all V17 shader stages
+        run: |
+          glslangValidator -S vert v17/shaders/pbr.vert
+          glslangValidator -S frag v17/shaders/pbr.frag
+          glslangValidator -S vert v17/shaders/shadow.vert
+          glslangValidator -S frag v17/shaders/shadow.frag
