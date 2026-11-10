@@ -5,6 +5,7 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QCheckBox>
+#include <QCloseEvent>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -144,12 +145,22 @@ public:
         sceneLoadLabel_->hide();
         sceneLoadProgress_->hide();
         connect(&loadWatcher_,&QFutureWatcher<SceneLoadOutcome>::finished,this,
-                [this]{ finishSceneLoad(); });
+                [this]{
+                    if(closingRequested_){
+                        if(!loadWatcher_.isRunning())QTimer::singleShot(0,this,[this]{close();});
+                        return;
+                    }
+                    finishSceneLoad();
+                });
         connect(&watcher_,&QFutureWatcher<Result>::finished,this,[this]{
             // A stale finished notification can arrive after setFuture()
             // already started another render. result() would block the GUI
             // waiting for that new render: never call it while still running.
             if(watcher_.isRunning())return;
+            if(closingRequested_){
+                QTimer::singleShot(0,this,[this]{close();});
+                return;
+            }
             const auto outcome=watcher_.result();
             if(sceneLoading_)return;
             // A previous scene may finish after the user has opened a new one.
@@ -347,6 +358,22 @@ private:
         if(!watcher_.isRunning()){frameClock_.start();requestRender();}
     }
 protected:
+    void closeEvent(QCloseEvent* event) override {
+        // A synchronous D3D11 Map/readback cannot be forcibly cancelled.
+        // Keep the UI visible while a worker is winding down instead of
+        // leaving a hidden "zombie" process in Task Manager.
+        if(watcher_.isRunning()||loadWatcher_.isRunning()){
+            closingRequested_=true;
+            stopExploration();
+            renderSerial_->fetch_add(1);
+            statusBar()->showMessage(QStringLiteral(
+                "Fermeture demandée : fin du calcul en cours… "
+                "Si le pilote GPU est bloqué, utilisez le Gestionnaire des tâches."));
+            event->ignore();
+            return;
+        }
+        QMainWindow::closeEvent(event);
+    }
     bool eventFilter(QObject* watched,QEvent* event) override{
         if(watched==canvas_ && exploring_){
             if(event->type()==QEvent::MouseButtonPress){
@@ -419,7 +446,7 @@ private:
         float hour=-1.f;
     };
     std::shared_ptr<CpuShadowCache> cpuShadows_=std::make_shared<CpuShadowCache>();
-    bool pending_=false, updatingControls_=false;
+    bool pending_=false, updatingControls_=false, closingRequested_=false;
     int selectedMaterial_=-1;
     QString scenePath_;
     QString materialsPath_;
@@ -937,6 +964,16 @@ private:
         const bool denoise=globalIllumination&&denoiseGi_->isChecked();
         const bool denoiseDirect=!globalIllumination&&!wantGpu&&denoiseDirect_->isChecked();
         statusBar()->showMessage(QStringLiteral("Calcul de l'image…"));
+        // Explain an abnormal delay rather than displaying "Calcul..." forever.
+        // This watchdog does not claim to cancel a driver-blocked D3D call.
+        if(raster){
+            QTimer::singleShot(30000,this,[this,serial,token]{
+                if(serial->load()==token && watcher_.isRunning() && !closingRequested_)
+                    statusBar()->showMessage(QStringLiteral(
+                        "Rendu DirectX 11 actif depuis plus de 30 secondes. "
+                        "GPU ou pilote possiblement saturé ; aucun basculement CPU."));
+            });
+        }
         const auto shadowCache=cpuShadows_;
         watcher_.setFuture(QtConcurrent::run(&renderPool_,[this,serial,token,snapshot,preset,w,h,wantGpu,
             globalIllumination,raster,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache]{
