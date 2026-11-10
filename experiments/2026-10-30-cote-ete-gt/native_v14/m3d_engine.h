@@ -103,7 +103,7 @@ bool renderDirectX11Preview(const Scene& s,const ShadowMap& sm,const Camera& cam
 // Hardware availability may reduce actual MSAA samples (4 -> 2 -> 1).
 enum class RasterQualityProfile:uint8_t{Performance=0,Balanced=1,High=2,Ultra=3};
 struct RasterQualitySettings {
-    uint32_t msaaSamples=4;          // 1, 2, 4
+    uint32_t msaaSamples=4;          // 1, 2, 4, 8 (auto fallback if unsupported)
     uint32_t anisotropy=16;          // 1, 2, 4, 8, 16
     uint32_t lodQualityPercent=100;  // 50 .. 200; higher retains details farther
     bool frustumCulling=true;        // never changes pixel fidelity
