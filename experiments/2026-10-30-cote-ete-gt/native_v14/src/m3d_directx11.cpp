@@ -699,10 +699,14 @@ private:
             !(disableBoxes && std::strcmp(disableBoxes,"1")==0);
         const bool useEllipseInstancing=useInstancing &&
             !(disableEllipses && std::strcmp(disableEllipses,"1")==0);
+        const char* disableFoliage=std::getenv("M3D_V17_DISABLE_FOLIAGE_INSTANCING");
+        const bool useFoliageInstancing=useInstancing &&
+            !(disableFoliage && std::strcmp(disableFoliage,"1")==0);
         if(sceneKey_==scene.obj.data()&&objectCount_==scene.obj.size()&&
            (vertices_||boxInstances_||ellipseInstances_) &&
            boxInstancingEnabled_==useBoxInstancing &&
            ellipseInstancingEnabled_==useEllipseInstancing &&
+           foliageInstancingEnabled_==useFoliageInstancing &&
            sceneIdentity_==scene.gpuCacheIdentity &&
            sceneRevision_==scene.gpuCacheRevision)return true;
         // An edited scene may retain the same std::vector address: revision
@@ -714,6 +718,9 @@ private:
         ellipseInstances_.Reset();
         for(auto& buffer:ellipseVertices_)buffer.Reset();
         ellipseVertexCounts_.fill(0);ellipses_.clear();ellipseInstanceCount_=0;
+        foliageInstances_.Reset();
+        for(auto& buffer:foliageVertices_)buffer.Reset();
+        foliageVertexCounts_.fill(0);foliage_.clear();foliageInstanceCount_=0;
         MeshBuilder mesh;
         std::vector<GpuBoxInstance> boxData;
         // V16 JSON geometry is triangulated for CPU/Compute, but the source
@@ -721,8 +728,10 @@ private:
         // boxes. Skip those triangles only in the raster vertex buffer and
         // submit their identical faces through GPU box instancing instead.
         std::vector<uint8_t> skipSource;
-        if(useBoxInstancing && !scene.sourceBoxes.empty()){
+        if((useBoxInstancing && !scene.sourceBoxes.empty()) ||
+           (useFoliageInstancing && !scene.sourceFoliage.empty()))
             skipSource.assign(scene.obj.size(),0);
+        if(useBoxInstancing && !scene.sourceBoxes.empty()){
             for(const SourceBox& source:scene.sourceBoxes){
                 if(source.triangleCount!=12||source.material>=scene.mat.size()||
                    scene.mat[source.material].transmissionPercent>0||
@@ -746,6 +755,31 @@ private:
                 boxData.push_back(box);
                 for(size_t k=source.firstTriangle;k<size_t(source.firstTriangle)+12;++k)
                     skipSource[k]=1;
+            }
+        }
+        if(useFoliageInstancing && !scene.sourceFoliage.empty()){
+            for(const SourceFoliage& source:scene.sourceFoliage){
+                const size_t begin=source.firstTriangle,end=begin+source.triangleCount;
+                if(!source.triangleCount||end>scene.obj.size()||
+                    source.material>=scene.mat.size()||
+                    scene.mat[source.material].transmissionPercent>0||
+                    source.radii.x<=0||source.radii.y<=0||source.radii.z<=0)continue;
+                bool valid=true;
+                for(size_t k=begin;k<end;++k){
+                    if(skipSource[k]||scene.obj[k].kind!=Kind::Triangle||
+                       scene.obj[k].mat!=source.material){valid=false;break;}
+                }
+                if(!valid)continue;
+                GpuEllipseInstance canopy{};
+                canopy.center[0]=source.center.x;
+                canopy.center[1]=source.center.y;
+                canopy.center[2]=source.center.z;
+                canopy.radii[0]=source.radii.x;
+                canopy.radii[1]=source.radii.y;
+                canopy.radii[2]=source.radii.z;
+                canopy.material=source.material;
+                foliage_.push_back(canopy);
+                for(size_t k=begin;k<end;++k)skipSource[k]=1;
             }
         }
         for(size_t objectIndex=0;objectIndex<scene.obj.size();++objectIndex){
@@ -786,7 +820,7 @@ private:
         }
         mesh.ground(scene);
         if(mesh.vertices.size()+mesh.transparent.size()*3>12000000u){error=L"Scène trop grande pour l’aperçu DirectX 11 (limite de sécurité mémoire).";return false;}
-        if(mesh.vertices.empty()&&mesh.transparent.empty()&&boxData.empty()&&ellipses_.empty()){
+        if(mesh.vertices.empty()&&mesh.transparent.empty()&&boxData.empty()&&ellipses_.empty()&&foliage_.empty()){
             error=L"La scène ne contient aucune géométrie affichable par DirectX 11.";return false;
         }
         if(!boxData.empty()){
@@ -960,6 +994,7 @@ private:
         sceneIdentity_=scene.gpuCacheIdentity;sceneRevision_=scene.gpuCacheRevision;
         boxInstancingEnabled_=useBoxInstancing;
         ellipseInstancingEnabled_=useEllipseInstancing;
+        foliageInstancingEnabled_=useFoliageInstancing;
         return true;
     }
     bool ensureTargets(int w,int h,std::wstring& error) {
@@ -1000,7 +1035,7 @@ private:
     ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_,staging_;ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
     std::vector<DrawChunk> chunks_,boxChunks_;
     UINT boxInstanceCount_=0;
-    bool boxInstancingEnabled_=false,ellipseInstancingEnabled_=false;
+    bool boxInstancingEnabled_=false,ellipseInstancingEnabled_=false,foliageInstancingEnabled_=false;
     const Obj* sceneKey_=nullptr;size_t objectCount_=0;uint64_t sceneIdentity_=0,sceneRevision_=0;UINT vertexCount_=0;UINT sampleCount_=1,sampleQuality_=0;int width_=0,height_=0;
 };
 }
