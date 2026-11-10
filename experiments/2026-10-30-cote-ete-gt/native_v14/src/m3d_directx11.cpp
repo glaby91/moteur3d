@@ -479,7 +479,16 @@ public:
         if(!pending_.empty() && (w!=width_||h!=height_)){
             error=L"Changement de résolution avec des images GPU en attente.";return false;
         }
-        const RasterQualitySettings quality=unpackQuality(gpuQualityBits.load(std::memory_order_acquire));
+        const uint64_t qualityBits=gpuQualityBits.load(std::memory_order_acquire);
+        const RasterQualitySettings quality=unpackQuality(qualityBits);
+        if(!pending_.empty() &&
+           (sceneKey_!=scene.obj.data() || objectCount_!=scene.obj.size() ||
+            sceneIdentity_!=scene.gpuCacheIdentity ||
+            sceneRevision_!=scene.gpuCacheRevision ||
+            lastSubmissionQualityBits_!=qualityBits)){
+            error=L"Vider les lectures différées avant de changer de scène ou de qualité.";
+            return false;
+        }
         if(!ensureDevice(error)||!ensureScene(scene,error)||!ensureShadow(shadows,error)||
            !ensureTargets(w,h,quality.msaaSamples,error)||
            !ensureAnisotropy(quality.anisotropy,error)||
@@ -773,6 +782,7 @@ public:
         slot.submitted.cpuSubmitMs=std::chrono::duration<double,std::milli>(
             slot.copyQueued-started).count();
         pending_.push_back(slotIndex);
+        lastSubmissionQualityBits_=qualityBits;
         nextReadbackSlot_=(slotIndex+1u)%readbackDepth_;
         return true;
     }
@@ -1348,6 +1358,7 @@ private:
     std::array<ReadbackSlot,3> readbackSlots_;
     std::deque<unsigned> pending_;
     unsigned readbackDepth_=0,nextReadbackSlot_=0;
+    uint64_t lastSubmissionQualityBits_=defaultQualityBits;
     ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
     std::vector<DrawChunk> chunks_,boxChunks_;
     UINT boxInstanceCount_=0;
