@@ -38,7 +38,7 @@ cbuffer Frame : register(b0) {
     float3 skyZenith; float skyStrength;
     float3 skyHorizon; float sunStrength;
     float3 sunColor; float skyFillStrength;
-    uint lightCount; float sceneLightScale; float indirectFill; float reserved0;
+    uint lightCount; float sceneLightScale; float indirectFill; uint gpuIndirectSamples;
 };
 struct GpuLight {
     float3 position; float radius;
@@ -233,7 +233,63 @@ float3 shadeSurface(Ray ray,HitInfo hit,float3 n,float3 base,float roughness,
     lit+=base*indirectFill;
     return max(lit,float3(0,0,0));
 }
-float4 tracePrimary(Ray ray) {
+// One physically motivated diffuse secondary ray per sample. This term is
+// averaged over independent cosine-weighted hemisphere directions. We deliberately
+// DO NOT invent hidden walls and DO NOT add arbitrary exposure to match CPU.
+// Secondary hits are shaded by the CPU-aligned GGX direct+hemisphere model;
+// no tertiary recursion. This is an approximate 1-bounce indirect estimate.
+uint mix32(uint x) {
+    x^=x>>16;x*=0x7feb352du;x^=x>>15;x*=0x846ca68bu;x^=x>>16;
+    return x;
+}
+float rand01(uint x) {return float(mix32(x)&0x00ffffffu)*(1.f/16777216.f);}
+float3 secondaryRadiance(Ray ray) {
+    HitInfo h;
+    uint state=traceClosest(ray,farPlane,false,0xffffffffu,h);
+    if(state==0)return background(ray);
+    if(state!=1)return float3(0,0,0);
+    GpuTriangle tri=Triangles[h.primitive];
+    GpuMaterial material=Materials[tri.material];
+    float k=1.f-h.bary.x-h.bary.y;
+    float3 n=normalize(tri.n0*k+tri.n1*h.bary.x+tri.n2*h.bary.y);
+    float2 uv=textureCoordinates(tri,h.bary);
+    float mip=estimateMip(tri,h.t);
+    float3 base=srgbToLinear(PbrMaps.SampleLevel(RepeatTrilinear,
+                                                float3(uv,tri.material*3),mip).rgb);
+    float3 mapped=PbrMaps.SampleLevel(RepeatTrilinear,
+                                     float3(uv,tri.material*3+1),mip).xyz*2.f-1.f;
+    if(dot(mapped,mapped)>.25f)n=tangentSpaceNormal(tri,n,normalize(mapped));
+    float roughness=clamp(PbrMaps.SampleLevel(RepeatTrilinear,
+                            float3(uv,tri.material*3+2),mip).r*material.roughnessScale,
+                            .04f,.98f);
+    return shadeSurface(ray,h,n,base,roughness,material);
+}
+float3 diffuseBounce(Ray primary,HitInfo hit,float3 n,float3 albedo,
+                     float metallic,uint2 pixelCoord) {
+    uint samples=min(gpuIndirectSamples,4u);
+    if(samples==0u || metallic>=.99f)return float3(0,0,0);
+    if(dot(n,primary.direction)>0.f)n=-n;
+    GpuTriangle tri=Triangles[hit.primitive];
+    float3 p=primary.origin+primary.direction*hit.t;
+    float3 geom=normalize(cross(tri.p1-tri.p0,tri.p2-tri.p0));
+    if(dot(geom,primary.direction)>0.f)geom=-geom;
+    float3 axis=abs(n.y)<.9f?float3(0.f,1.f,0.f):float3(1.f,0.f,0.f);
+    float3 tangent=normalize(cross(axis,n)),bitangent=normalize(cross(n,tangent));
+    uint seed=(pixelCoord.x+1u)*0x9e3779b9u ^ (pixelCoord.y+1u)*0x85ebca6bu;
+    float3 bounced=float3(0,0,0);
+    [loop] for(uint i=0;i<samples;++i) {
+        float u=frac(rand01(seed)+float(i)*.618033989f);
+        float v=frac(rand01(seed^0xc2b2ae35u)+float(i)*.754877666f);
+        float r=sqrt(u),phi=6.28318530718f*v;
+        float3 dir=normalize(tangent*(r*cos(phi))+bitangent*(r*sin(phi))+
+                             n*sqrt(max(0.f,1.f-u)));
+        Ray secondary;secondary.origin=p+geom*.025f+dir*.015f;
+        secondary.direction=dir;
+        bounced+=secondaryRadiance(secondary);
+    }
+    return bounced*(albedo*(1.f-saturate(metallic))/float(samples));
+}
+float4 tracePrimary(Ray ray,uint2 pixelCoord) {
     float3 accumulated=float3(0,0,0);
     float throughput=1.f;
     [loop] for(uint layer=0;layer<6;++layer) {
@@ -274,6 +330,7 @@ float4 tracePrimary(Ray ray) {
         }
         float t=saturate(material.transmission);
         if(t<=.05f) {
+            local+=diffuseBounce(ray,hit,n,base,material.metallic,pixelCoord);
             accumulated+=throughput*local;
             return float4(accumulated,1);
         }
@@ -298,5 +355,5 @@ void CSMain(uint3 tid:SV_DispatchThreadID) {
     // Matches CPU: tanHalfFov is HORIZONTAL, vertical half-FOV = tanHalfFov/aspect.
     ray.direction=normalize(forward+right*uv.x*tanHalfFov-
                             up*uv.y*(tanHalfFov/aspect));
-    Output[tid.xy]=float4(encodeHdr(tracePrimary(ray).rgb),1.f);
+    Output[tid.xy]=float4(encodeHdr(tracePrimary(ray,tid.xy).rgb),1.f);
 }
