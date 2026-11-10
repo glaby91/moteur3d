@@ -660,8 +660,16 @@ private:
     bool ensureScene(const Scene& scene,std::wstring& error) {
         const char* disableInstancing=std::getenv("M3D_V17_DISABLE_GPU_INSTANCING");
         const bool useInstancing=!(disableInstancing && std::strcmp(disableInstancing,"1")==0);
+        const char* disableBoxes=std::getenv("M3D_V17_DISABLE_BOX_INSTANCING");
+        const char* disableEllipses=std::getenv("M3D_V17_DISABLE_ELLIPSE_INSTANCING");
+        const bool useBoxInstancing=useInstancing &&
+            !(disableBoxes && std::strcmp(disableBoxes,"1")==0);
+        const bool useEllipseInstancing=useInstancing &&
+            !(disableEllipses && std::strcmp(disableEllipses,"1")==0);
         if(sceneKey_==scene.obj.data()&&objectCount_==scene.obj.size()&&
-           (vertices_||boxInstances_||ellipseInstances_) && instancingEnabled_==useInstancing &&
+           (vertices_||boxInstances_||ellipseInstances_) &&
+           boxInstancingEnabled_==useBoxInstancing &&
+           ellipseInstancingEnabled_==useEllipseInstancing &&
            sceneIdentity_==scene.gpuCacheIdentity &&
            sceneRevision_==scene.gpuCacheRevision)return true;
         // An edited scene may retain the same std::vector address: revision
@@ -681,7 +689,7 @@ private:
             mesh.transparentMaterial=m<scene.mat.size()&&scene.mat[m].transmissionPercent>0;
             if(o.kind==Kind::Triangle)mesh.tri(o.a,o.b,o.c,o.n0,o.n1,o.n2,o.uv0.x,o.uv0.y,o.uv1.x,o.uv1.y,o.uv2.x,o.uv2.y,m);
             else if(o.kind==Kind::Box){
-                if(useInstancing && !mesh.transparentMaterial){
+                if(useBoxInstancing && !mesh.transparentMaterial){
                     GpuBoxInstance instance{};
                     instance.lo[0]=o.mn.x;instance.lo[1]=o.mn.y;instance.lo[2]=o.mn.z;
                     instance.hi[0]=o.mx.x;instance.hi[1]=o.mx.y;instance.hi[2]=o.mx.z;
@@ -691,7 +699,7 @@ private:
             }
             else if(o.kind==Kind::RoundBox)mesh.roundedBox(o.mn,o.mx,o.r,m,uvScale);
             else if(o.kind==Kind::Ellipse){
-                if(useInstancing && !mesh.transparentMaterial
+                if(useEllipseInstancing && !mesh.transparentMaterial
                    && o.b.x>0.f && o.b.y>0.f && o.b.z>0.f){
                     GpuEllipseInstance instance{};
                     instance.center[0]=o.a.x;instance.center[1]=o.a.y;instance.center[2]=o.a.z;
@@ -879,7 +887,8 @@ private:
         if(FAILED(device_->CreateShaderResourceView(roughTexture.Get(),&sv,&roughness_))){error=L"Création de la table de rugosités DirectX 11 impossible.";return false;}
         sceneKey_=scene.obj.data();objectCount_=scene.obj.size();
         sceneIdentity_=scene.gpuCacheIdentity;sceneRevision_=scene.gpuCacheRevision;
-        instancingEnabled_=useInstancing;
+        boxInstancingEnabled_=useBoxInstancing;
+        ellipseInstancingEnabled_=useEllipseInstancing;
         return true;
     }
     bool ensureTargets(int w,int h,std::wstring& error) {
@@ -920,7 +929,7 @@ private:
     ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_,staging_;ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
     std::vector<DrawChunk> chunks_,boxChunks_;
     UINT boxInstanceCount_=0;
-    bool instancingEnabled_=false;
+    bool boxInstancingEnabled_=false,ellipseInstancingEnabled_=false;
     const Obj* sceneKey_=nullptr;size_t objectCount_=0;uint64_t sceneIdentity_=0,sceneRevision_=0;UINT vertexCount_=0;UINT sampleCount_=1,sampleQuality_=0;int width_=0,height_=0;
 };
 }
