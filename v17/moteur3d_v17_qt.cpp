@@ -64,6 +64,8 @@ struct Result {
     QString error;
     double milliseconds=0;
     bool gpu=false;
+    // Reject finished frames after a camera, material, backend or scene change.
+    uint64_t generation=0;
 };
 class ImageView final : public QWidget {
 public:
@@ -108,6 +110,12 @@ public:
         statusBar()->addPermanentWidget(renderTimeLabel_);
         connect(&watcher_,&QFutureWatcher<Result>::finished,this,[this]{
             const auto outcome=watcher_.result();
+            // A previous scene may finish after the user has opened a new one.
+            // Never show its image or overwrite the current status bar.
+            if(outcome.generation!=renderSerial_->load()){
+                if(pending_){pending_=false;requestRender();}
+                return;
+            }
             if(!outcome.image.isNull()){lastImage_=outcome.image;canvas_->setImage(outcome.image);}
             if(outcome.error.isEmpty()&&!outcome.image.isNull()){
                 const QString milliseconds=QString::number(outcome.milliseconds,'f',1);
@@ -544,8 +552,9 @@ private:
     void openScene(const QString& path){
         if(exploring_)stopExploration();
         freeCameraActive_=false;
-        renderSerial_->fetch_add(1);
-        if(watcher_.isRunning())watcher_.waitForFinished();
+        // Do not wait on the GUI thread for the previous GPU/CPU render.
+        // The worker owns its previous Runtime via a shared_ptr snapshot.
+        // We invalidate only once the replacement scene has built correctly.
         auto loaded=v16::loadScene(path);
         if(!loaded){QMessageBox::critical(this,"Fichier scene.json invalide",loaded.error);return;}
         statusBar()->showMessage(QStringLiteral("Construction des triangles, BVH et mipmaps PBR…"));
@@ -554,7 +563,13 @@ private:
         auto build=v16::buildRuntime(loaded.scene,2048);
         if(!build){QMessageBox::critical(this,"Scène V16",build.error);return;}
         auto replacement=std::make_shared<v16::Runtime>(std::move(build.runtime));
+        renderSerial_->fetch_add(1); // Any old scene frame is now obsolete.
+        pending_=false;               // Drop queued requests from old scene.
         runtime_=std::move(replacement);
+        lastImage_=QImage{};
+        canvas_->setImage(QImage{});  // Do not keep displaying an old scene.
+        renderTimeLabel_->setText(QStringLiteral("Dernier rendu : —"));
+        materialLabel_->setText(QStringLiteral("Sélectionner un matériau dans le catalogue"));
         setWindowTitle(QStringLiteral("CSE WARP Beta X V17 — %1").arg(runtime_->title));
         sunHour_->blockSignals(true);
         sunHour_->setValue(double(runtime_->daylightHour));
@@ -635,7 +650,11 @@ private:
         if(!runtime_||runtime_->cameras.isEmpty())return;
         const auto serial=renderSerial_;
         const uint64_t token=serial->fetch_add(1)+1;
-        if(watcher_.isRunning()){pending_=true;return;}
+        if(watcher_.isRunning()){
+            pending_=true;
+            statusBar()->showMessage(QStringLiteral("Nouveau rendu en attente de la fin du calcul précédent…"));
+            return;
+        }
         auto snapshot=runtime_;
         const int presetId=std::clamp(cameraBox_->currentIndex(),0,int(snapshot->cameras.size())-1);
         auto preset=snapshot->cameras[presetId];
@@ -667,6 +686,7 @@ private:
         watcher_.setFuture(QtConcurrent::run([this,serial,token,snapshot,preset,w,h,wantGpu,
             globalIllumination,raster,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache]{
             Result result;
+            result.generation=token;
             updateLighting(snapshot->daylightHour);
             const auto camera=v16::makeCamera(preset,w,h);
             std::vector<uint32_t> pixels;
