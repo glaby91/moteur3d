@@ -727,8 +727,24 @@ private:
         vertical->addWidget(rasterQuality);
         QSettings stored(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
         int initialPreset=std::clamp(stored.value(QStringLiteral("Raster/Preset"),2).toInt(),0,4);
-        auto initialQuality=rasterQualityProfile(
-            RasterQualityProfile(std::min(initialPreset,3)));
+        // An embedding host may configure the raster API BEFORE launching
+        // Qt. Respect it unless the user already saved UI preferences.
+        auto initialQuality=stored.contains(QStringLiteral("Raster/Preset"))
+            ?rasterQualityProfile(RasterQualityProfile(std::min(initialPreset,3)))
+            :rasterQualitySettings();
+        if(!stored.contains(QStringLiteral("Raster/Preset"))){
+            initialPreset=4;
+            for(int candidate=0;candidate<4;++candidate){
+                const auto q=rasterQualityProfile(RasterQualityProfile(candidate));
+                if(q.msaaSamples==initialQuality.msaaSamples &&
+                   q.anisotropy==initialQuality.anisotropy &&
+                   q.lodQualityPercent==initialQuality.lodQualityPercent &&
+                   q.frustumCulling==initialQuality.frustumCulling &&
+                   q.dynamicLod==initialQuality.dynamicLod){
+                    initialPreset=candidate;break;
+                }
+            }
+        }
         if(initialPreset==4){
             initialQuality.msaaSamples=stored.value(QStringLiteral("Raster/MSAA"),4).toUInt();
             initialQuality.anisotropy=stored.value(QStringLiteral("Raster/Anisotropy"),16).toUInt();
