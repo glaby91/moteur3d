@@ -404,22 +404,36 @@ int main(int argc,char** argv){
         const QString sceneName=QFileInfo(path).completeBaseName()+"-"
                                 +QString::number(sceneIndex);
         out<<"Scene "<<(sceneIndex+1)<<"/"<<unique.size()<<": "<<path<<"\n";out.flush();
+        // The previous full campaign looked stalled for more than a minute
+        // while building a small scene. Show actual phase transitions and
+        // durations, never invent progress or remaining-time estimates.
+        out<<"  [chargement] Analyse des fichiers de scene...\n";out.flush();
         auto tick=Clock::now();
         auto loaded=m3d::v16::loadScene(path);
-        side.append(subsystem(sceneName,"scene_parse",ms(tick),bool(loaded),loaded.error));
+        const double parseMs=ms(tick);
+        side.append(subsystem(sceneName,"scene_parse",parseMs,bool(loaded),loaded.error));
+        out<<"  [chargement] "<<parseMs<<" ms, "<<(loaded?"OK":"ERREUR")<<"\n";out.flush();
         if(!loaded){allOk=false;continue;}
+        out<<"  [construction] Geometrie et textures PBR...\n";out.flush();
         tick=Clock::now();
         const auto built=m3d::v16::buildRuntime(loaded.scene,cfg.smoke?256:2048);
+        const double buildMs=ms(tick);
         side.append(subsystem(sceneName,"geometry_materials_pbr_build",
-            ms(tick),bool(built),built.error));
+            buildMs,bool(built),built.error));
+        out<<"  [construction] "<<buildMs<<" ms, "<<(built?"OK":"ERREUR")<<"\n";out.flush();
         if(!built){allOk=false;continue;}
         const auto& runtime=built.runtime;
         updateLighting(runtime.daylightHour);
+        out<<"  [ombres] Preparation de la carte CPU...\n";out.flush();
         tick=Clock::now();
         Stats shadowStats;
         const ShadowMap shadows=buildShadow(runtime.renderScene,shadowStats);
-        side.append(subsystem(sceneName,"shadowmap_cpu_build",ms(tick)));
+        const double shadowMs=ms(tick);
+        side.append(subsystem(sceneName,"shadowmap_cpu_build",shadowMs));
+        out<<"  [ombres] "<<shadowMs<<" ms\n";out.flush();
         const auto mem=memoryUsage();
+        out<<"  [memoire] "<<mem.workingMiB<<" MiB actifs ; pic processus "
+           <<mem.peakMiB<<" MiB\n";out.flush();
         side.append(QJsonObject{{"name",sceneName},{"variant","memory_after_scene_build"},
             {"workingMiB",mem.workingMiB},{"peakMiB",mem.peakMiB},
             {"triangles",double(runtime.renderScene.obj.size())},
@@ -484,10 +498,22 @@ int main(int argc,char** argv){
         }
         // CPU multi-core and Compute are separate diagnostic workloads, not
         // a misleading FPS comparison with the full-size Raster image.
+        // The previous filename-based "sceneName" check never matched
+        // pavillon01: scene.json becomes "scene-1". Choose the actual parent
+        // directory, then only fall back to the last scene when no pavilion
+        // is present in the campaign.
+        const bool isPavilion=QFileInfo(path).dir().dirName().compare(
+            QStringLiteral("pavillon01"),Qt::CaseInsensitive)==0;
+        const bool pavilionPresent=std::any_of(unique.cbegin(),unique.cend(),
+            [](const QString& p){return QFileInfo(p).dir().dirName().compare(
+                QStringLiteral("pavillon01"),Qt::CaseInsensitive)==0;});
         if(cfg.includeCpu&&!cpuDone &&
-           (!cfg.allScenes || sceneName.contains("pavillon01",Qt::CaseInsensitive)
-            || sceneIndex+1==unique.size())){
+           (!cfg.allScenes || isPavilion ||
+            (!pavilionPresent&&sceneIndex+1==unique.size()))){
             cpuDone=true;
+            out<<"  [diagnostic CPU/Compute] scene "<<sceneName
+               <<" : "<<cfg.rounds<<" series de mesure par nombre de threads\n";
+            out.flush();
             const auto& preset=runtime.cameras.first();
             constexpr int cpuW=320,cpuH=180;
             const auto cam=m3d::v16::makeCamera(preset,cpuW,cpuH);
@@ -497,7 +523,9 @@ int main(int argc,char** argv){
             for(int workers:{1,2,4,8,16,32}){
                 if(workers>available)continue;
                 std::vector<double> times;
-                for(int rep=0;rep<2;++rep){
+                // CPU trend must use the same repeat count as the GPU
+                // campaign instead of two noisy timing samples.
+                for(int rep=0;rep<cfg.rounds;++rep){
                     tick=Clock::now();
                     const Stats result=render(runtime.renderScene,shadows,cam,cpuW,cpuH,pixels,
                         unsigned(workers),false,generation,1,1,false,false,false,3);
@@ -511,12 +539,15 @@ int main(int argc,char** argv){
                 side.append(QJsonObject{{"name",sceneName},{"variant","cpu_direct_scaling"},
                     {"threads",workers},{"resolution","320x180"},
                     {"meanMs",mean(times)},{"medianMs",pct(times,.5)},
+                    {"p95Ms",pct(times,.95)},{"stddevMs",deviation(times)},
+                    {"cvPercent",mean(times)>0?100.*deviation(times)/mean(times):0.},
                     {"runs",int(times.size())},{"note","No GPU comparison; fixed CPU 1 spp workload"}});
                 out<<"  CPU "<<workers<<" threads "<<mean(times)<<" ms @320x180\n";out.flush();
             }
             tick=Clock::now();
             Stats computeStats;
             std::wstring computeError;
+            out<<"  [Compute DirectX 11] Initialisation/test 320x180...\n";out.flush();
             bool gpuOk=renderCompute11Preview(runtime.renderScene,cam,cpuW,cpuH,
                                                pixels,computeStats,computeError);
             side.append(subsystem(sceneName,"d3d11_compute_320x180",ms(tick),
