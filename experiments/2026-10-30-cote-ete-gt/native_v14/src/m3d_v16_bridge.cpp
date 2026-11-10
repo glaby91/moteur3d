@@ -8,6 +8,10 @@
 #include <functional>
 #include <numeric>
 #include <random>
+#include <thread>
+#include <cstring>
+#include <cstdlib>
+#include <chrono>
 
 namespace m3d::v16 {
 namespace {
@@ -197,7 +201,11 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
         const float edge=clampf(std::min(dx/.08f,dy/.14f),0.f,1.f);
         return edge*edge*(3.f-2.f*edge);
     };
-    for(int y=0;y<resolution;y++)for(int x=0;x<resolution;x++){
+    // Per-texel evaluation is pure and independent. Split rows across CPU
+    // workers without allocating extra image buffers or changing the order of
+    // arithmetic in any texel. The serial path remains available for A/B QA.
+    const auto generateRows=[&](int firstRow,int lastRow){
+    for(int y=firstRow;y<lastRow;y++)for(int x=0;x<resolution;x++){
         const float u=float(x)/resolution,v=float(y)/resolution;
         const float n=smoothNoise(float(x)/7.f,float(y)/7.f,seed),fine=noise(x,y,seed^0x9e3779b9u);
         float factor=1.f;
@@ -295,6 +303,27 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
         const float variation=pattern=="water"||pattern=="glass"?.006f:.055f;
         const float r=clampf(roughness+(n-.5f)*variation,.03f,.98f);
         rr.p[i]=rgb565({r,r,r});
+    }
+    };
+    const char* forceSerial=std::getenv("M3D_V17_PBR_SERIAL");
+    const bool serial=forceSerial && std::strcmp(forceSerial,"1")==0;
+    const unsigned cpuCount=std::max(1u,std::thread::hardware_concurrency());
+    // Fewer stripes than 128 texels/worker would waste scheduling overhead.
+    // Cap to 8 concurrent workers on large CPU machines to avoid overloading
+    // laptops with shared-memory GPUs; still scales well beyond 4 threads.
+    const unsigned workerCount=(serial||resolution<512)?1u:
+        std::min(8u,std::min(cpuCount,unsigned(resolution/128)));
+    if(workerCount==1u)generateRows(0,resolution);
+    else{
+        std::vector<std::thread> workers;
+        workers.reserve(workerCount-1);
+        for(unsigned k=1;k<workerCount;++k){
+            const int begin=int(size_t(k)*resolution/workerCount);
+            const int end=int(size_t(k+1)*resolution/workerCount);
+            workers.emplace_back([&,begin,end]{generateRows(begin,end);});
+        }
+        generateRows(0,int(resolution/workerCount));
+        for(auto& worker:workers)worker.join();
     }
     mat.colorMip.push_back(std::move(first));
     mat.normalMip.push_back(std::move(nr));
