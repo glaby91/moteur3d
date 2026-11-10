@@ -105,6 +105,82 @@ estimation et **n'est pas** un FPS de présentation écran avec VSync.
 branche de travail ; tant que le pipeline Windows correspondant n'a pas
 réussi, ils ne doivent pas être considérés comme une build stable.
 
+## Navigation libre — prochaine version V17.build (demande utilisateur)
+
+**Objectif :** pouvoir se déplacer en hauteur naturellement, selon la
+direction exacte de la caméra, et accéder immédiatement à quatre angles
+extérieurs prédéfinis de la scène, sans perdre la navigation AZERTY.
+
+### Commandes de déplacement
+
+- **Z / flèche haut :** avance dans le vecteur de regard complet
+  `forward={sin(yaw)cos(pitch),sin(pitch),-cos(yaw)cos(pitch)}`.
+  La composante Y est **conservée** : caméra vers le ciel = montée,
+  caméra vers le sol = descente. **S / flèche bas :** recule dans
+  l'axe inverse.
+- **Q / flèche gauche** et **D / flèche droite :** déplacements latéraux
+  horizontaux, pour ne pas faire monter ou descendre accidentellement
+  lors d'une translation.
+- **Espace** monte verticalement et **Ctrl** descend verticalement,
+  indépendamment du regard. Ces touches existent déjà dans le code V17 ;
+  les rappeler explicitement dans l'aide, et vérifier les événements
+  clavier quand le focus quitte la vue.
+- **Maj** accélère le mouvement. Normaliser les mouvements simultanés
+  pour éviter d'aller plus vite en diagonale. Survol libre, sans collision
+  artificielle, avec possibilité d'observer les étages et les toits.
+- **Souris + clic gauche :** orienter la caméra, y compris le pitch,
+  sans déplacement automatique. **Échap :** arrêter l'exploration.
+- **Compatibilité :** ZQSD AZERTY et flèches ; conserver les raccourcis
+  préexistants et ne pas imposer WASD.
+
+**Constat dans le code actuel :** `frameTick()` calcule déjà un
+`forward` avec le pitch, mais utilise `horizontal` pour Z/S :
+les avances/reculs annulent ainsi systématiquement Y. Il faudra
+remplacer uniquement le vecteur utilisé pour Z/S, en conservant
+`horizontal` pour les déplacements latéraux.
+
+### Quatre boutons cliquables — vues aux quatre angles
+
+Placer une rangée de **quatre vrais boutons de caméra** clairement
+identifiés à proximité des raccourcis 1–6 :
+
+| Bouton | Position géométrique | Direction initiale |
+|---|---|---|
+| **Angle 1 — ↖** | coin min X / min Z | vers le centre de la zone |
+| **Angle 2 — ↗** | coin max X / min Z | vers le centre de la zone |
+| **Angle 3 — ↙** | coin min X / max Z | vers le centre de la zone |
+| **Angle 4 — ↘** | coin max X / max Z | vers le centre de la zone |
+
+*Ces repères sont relatifs à l'axe X/Z de la scène ; les flèches ne
+prétendent pas désigner des points cardinaux réels.*
+
+Pour chaque angle, déterminer la zone de vue à partir de la géométrie
+utile du décor / groupe architectural. Exclure ou pondérer les très
+grands sols, terrains, routes et objets isolés pour éviter qu'ils
+élargissent excessivement les bornes. Définir un recul et une hauteur
+proportionnels au gabarit, de manière que l'ensemble principal rentre
+dans le champ à la résolution et au FOV courants. Viser le centre
+du volume visible, pas l'origine arbitraire (0,0,0).
+
+**Comportement :** clic = téléportation instantanée de la caméra et
+orientation vers le centre, lancement d'un rendu Raster, puis
+déplacement libre immédiat. Ne pas quitter l'exploration lorsqu'elle
+est active. Conserver les **six caméras historiques** et ne pas
+réorganiser leurs raccourcis clavier. Les quatre boutons restent
+désactivés jusqu'à la fin du chargement ; les calculs de cadrage sont
+effectués une fois par scène et rafraîchis lors d'un changement de scène.
+
+**Validation de cette version :** tests clavier automatisés pour
+le déplacement avec pitch positif/négatif, Espace/Ctrl, Maj et
+diagonales ; test des quatre boutons avec vérification du quadrant
+XZ, de la hauteur, de la direction vers le centre, et de l'absence
+de curseur obsolète lors d'un changement de caméra. Test manuel
+sur le Dell (AZERTY, 1366×768), y compris scène extrême.
+
+**État : spécification enregistrée, pas encore implémentée.**
+Cette navigation ne doit pas être annoncée comme fonctionnelle tant que
+la compilation Windows et le test utilisateur n'ont pas été réalisés.
+
 ## Prochaines étapes — restant à implémenter ou valider
 
 | Priorité | Chantier | Bénéfice recherché | Validation |
