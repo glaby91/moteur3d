@@ -1,7 +1,7 @@
 # CSE WARP Beta X — V17 : objectifs du moteur 3D temps réel
 
 **Version de cadrage : 1.0 — 10 novembre 2026**  
-**Statut : objectifs documentés ; développement V17 non commencé**  
+**Statut : prototype V17-1 implémenté ; raster DirectX11 en validation CI ; objectifs de qualité et de FPS restant à mesurer sur HD620**  
 **Branche de travail :** `feature/v17-realtime-architecture-roadmap-261110`  
 **Base conservée :** V16 `feature/v16-dell-native-1366x768-fhd-261110`. La V16 et ses autres PR restent intactes. Aucune fusion dans `master` autorisée implicitement.
 
@@ -155,5 +155,5 @@ Ces sources illustrent qu'un rendu de jeu crédible peut reposer sur **deferred 
 
 ## 8. Protocole de changement
 
-La création de ce document/branche **ne déclenche aucun développement V17**.
+La conception V17-1 a été approuvée et un premier exécutable de navigation a été développé. Cela **n'autorise pas de fusion automatique dans master** ni ne valide les performances de la HD620.
 Avant chaque phase : présenter l'impact, les fichiers à modifier, les risques, le benchmark attendu et les possibilités de retour arrière. Attendre une instruction explicite (« exécute », « code », etc.) pour les changements de code, compilations, branches supplémentaires ou fusion.
