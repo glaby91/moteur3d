@@ -61,7 +61,23 @@ add_custom_command(TARGET moteur3d_v17 POST_BUILD
       "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14/src/shaders/m3d_raytrace_compute.hlsl"
       "$<TARGET_FILE_DIR:moteur3d_v17>/shaders/m3d_raytrace_compute.hlsl"
     VERBATIM)
-install(TARGETS moteur3d_v17 RUNTIME DESTINATION .)
+# Standalone V17 benchmark + GUI. The measured engine is the same
+# shared V16 DLL and native D3D11 raster path as the V17 exploration view.
+add_executable(moteur3d_v17_benchmark
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmark_v17.cpp")
+target_include_directories(moteur3d_v17_benchmark PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+target_link_libraries(moteur3d_v17_benchmark PRIVATE
+    moteur3d_v16_core Qt6::Core Qt6::Gui)
+qt_add_executable(moteur3d_v17_benchui WIN32
+    "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmark_v17_ui.cpp")
+target_link_libraries(moteur3d_v17_benchui PRIVATE Qt6::Widgets)
+if(MSVC)
+    target_compile_options(moteur3d_v17_benchmark PRIVATE /O2 /EHsc /utf-8)
+    target_compile_options(moteur3d_v17_benchui PRIVATE /O2 /EHsc /utf-8)
+endif()
+install(TARGETS moteur3d_v17 moteur3d_v17_benchmark moteur3d_v17_benchui
+    RUNTIME DESTINATION .)
 
 if(WIN32)
     add_executable(v17_raster_warp_smoke "tests/raster_warp_smoke.cpp")
