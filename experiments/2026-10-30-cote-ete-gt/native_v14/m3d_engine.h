@@ -49,6 +49,10 @@ extern V sun,skyZenith,skyHorizon,sunTint;
 extern float daylight,lampFactor;
 extern std::vector<Light> pointLights;
 void updateLighting(float hour);
+// Read-only snapshot for frontends linking against the V16 shared DLL.
+// Global lighting variables are not exported as imported DLL data on MSVC.
+struct LightingSnapshot { V sun, skyZenith, skyHorizon, sunTint; float daylight=1.f; };
+LightingSnapshot captureLighting(float hour);
 bool loadScene(const std::filesystem::path& path,Scene& s,std::wstring& error);
 inline bool loadScene(const wchar_t* path,Scene& s,std::wstring& error){return loadScene(std::filesystem::path(path),s,error);}
 void closest(const Scene& s,const Ray& r,Hit& best,Stats* st,bool ground=true,int ignoreObject=-1,bool ignoreTransparent=false);
