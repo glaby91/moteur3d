@@ -50,6 +50,12 @@ struct RendererCapabilities { bool dxrHardware=false; bool dxrBackend=false; };
 struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,depthReads=0,shadowRays=0; uint64_t simdRayPackets=0,simdTrianglePackets=0,simdTextureSamples=0,simdLightBatches=0; double ms=0,postMs=0,shadowMs=0;
     // DX11-only hardware counters; CPU/Compute paths leave these at zero.
     uint64_t gpuDrawCalls=0,gpuBoxInstances=0,gpuEllipseInstances=0,gpuFoliageInstances=0;
+    // Hardware D3D11 timestamp results, independent of the CPU-side Map wait.
+    // Valid only if GPU query timestamps are supported and not disjoint.
+    double gpuDrawMs=0,gpuTransferMs=0,gpuTotalMs=0;
+    double cpuSubmitMs=0,cpuMapWaitMs=0,cpuPixelConvertMs=0;
+    uint32_t readbackBufferCount=1;
+    bool gpuTimingValid=false;
     unsigned threads=1; bool avx2=false,gpu=false; };
 struct Light { V p; float radius,intensity; V color; };
 struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPercent=0; float refractiveIndex=1.5f; float metallic=0.f, roughnessScale=1.f; std::vector<Level> mip,normalMip,roughnessMip; std::vector<ColorLevel> colorMip; };
@@ -91,6 +97,15 @@ Stats renderGiAccumulatePass(const Scene& scene,const ShadowMap& shadow,
 RendererCapabilities detectRendererCapabilities() noexcept;
 bool renderCompute11Preview(const Scene& s,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
 bool renderDirectX11Preview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
+// Experimental pipelined D3D11 readback. Enqueue issues an ordered frame render
+// and CopyResource without waiting for CPU pixels; Receive returns the oldest
+// submitted frame, preserving exact frame order. Call both on the same thread.
+// Depth 1, 2 or 3, selected when queue is empty. Normal renderer stays
+// synchronous and is unaffected unless this API is explicitly used.
+bool enqueueDirectX11Preview(const Scene& s,const ShadowMap& sm,const Camera& cam,
+    int w,int h,unsigned depth,std::wstring& error);
+bool receiveDirectX11Preview(std::vector<uint32_t>& pixels,Stats& stats,
+    std::wstring& error);
 std::vector<uint32_t> upscaleBilinear(const std::vector<uint32_t>& src,int sw,int sh,int dw,int dh,unsigned threads);
 std::vector<uint32_t> downsample2x(const std::vector<uint32_t>& src,int sw,int sh,unsigned threads);
 bool avx2FmaAvailable() noexcept;
