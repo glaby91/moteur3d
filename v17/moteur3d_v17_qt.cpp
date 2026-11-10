@@ -725,7 +725,7 @@ private:
         });
         rasterForm->addRow(QStringLiteral("Préréglage"),rasterPresetBox_);
         rasterMsaaBox_=new QComboBox;
-        for(int v:{1,2,4})
+        for(int v:{1,2,4,8})
             rasterMsaaBox_->addItem(QStringLiteral("MSAA %1×").arg(v),v);
         rasterForm->addRow(QStringLiteral("Anti-aliasing GPU"),rasterMsaaBox_);
         rasterAnisoBox_=new QComboBox;
