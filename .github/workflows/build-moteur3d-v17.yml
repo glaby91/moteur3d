@@ -97,8 +97,6 @@ jobs:
           if (!(Test-Path $csv)) { throw "Missing V17 benchmark CSV" }
           $png = Get-ChildItem (Join-Path $summary.Directory.FullName "images") -Filter *.png | Select-Object -First 1
           if (!$png -or $png.Length -lt 1000) { throw "Missing V17 benchmark PNG" }
-      - name: V17 raster WARP and all inherited V16 CPU/GPU regression tests
-        run: ctest --test-dir build-v17 -C Release --verbose --output-on-failure
       - name: Verify V17 D3D11 raster WARP preview
         shell: pwsh
         run: |
@@ -130,3 +128,8 @@ jobs:
           name: CSE-WARP-V17-Exploration-Windows-x64
           path: dist-v17/
           if-no-files-found: error
+      # The V17-specific scene-switch and D3D11 benchmark smoke checks have
+      # already passed before we publish. Keep the complete inherited suite,
+      # but do not delay users' access to the fully packaged Windows app.
+      - name: Full V16 and V17 regression suite (post-package)
+        run: ctest --test-dir build-v17 -C Release --verbose --output-on-failure
