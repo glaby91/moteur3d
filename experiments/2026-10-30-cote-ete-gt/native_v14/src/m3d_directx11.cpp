@@ -8,6 +8,8 @@
 #include <d3dcompiler.h>
 #include <wrl/client.h>
 #include <cstddef>
+#include <cstdlib>
+#include <cstring>
 
 using Microsoft::WRL::ComPtr;
 
@@ -388,7 +390,12 @@ private:
     bool ensureDevice(std::wstring& error) {
         if(device_)return true;
         D3D_FEATURE_LEVEL feature{};
-        HRESULT hr=D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,&feature,&context_);
+        // Hardware rendering remains the default. CI can explicitly use the
+        // Microsoft WARP software renderer to test this raster backend.
+        const char* warp=std::getenv("M3D_V16_FORCE_WARP");
+        const D3D_DRIVER_TYPE driver=(warp&&std::strcmp(warp,"1")==0)
+            ?D3D_DRIVER_TYPE_WARP:D3D_DRIVER_TYPE_HARDWARE;
+        HRESULT hr=D3D11CreateDevice(nullptr,driver,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,&feature,&context_);
         if(FAILED(hr)){error=L"Aucun périphérique Direct3D 11 matériel n’est disponible.";return false;}
         ComPtr<ID3DBlob> vsCode,psCode,errors;
         hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",nullptr,nullptr,"VSMain","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&vsCode,&errors);
@@ -412,7 +419,13 @@ private:
         if(FAILED(device_->CreateSamplerState(&sd,&sampler_))){error=L"Création du sampler DirectX 11 impossible.";return false;}return true;
     }
     bool ensureScene(const Scene& scene,std::wstring& error) {
-        if(sceneKey_==scene.obj.data()&&objectCount_==scene.obj.size()&&vertices_)return true;
+        if(sceneKey_==scene.obj.data()&&objectCount_==scene.obj.size()&&vertices_ &&
+           sceneIdentity_==scene.gpuCacheIdentity &&
+           sceneRevision_==scene.gpuCacheRevision)return true;
+        // An edited scene may retain the same std::vector address: revision
+        // tracking is required to refresh its GPU PBR/mesh resources.
+        vertices_.Reset();transparentVertices_.Reset();albedo_.Reset();
+        roughness_.Reset();normal_.Reset();transparent_.clear();vertexCount_=0;
         MeshBuilder mesh;
         for(const Obj& o:scene.obj){
             const uint32_t m=o.mat;
@@ -491,7 +504,9 @@ private:
         if(FAILED(device_->CreateTexture2D(&td,roughSub.data(),&roughTexture))){error=L"Chargement des rugosités dans DirectX 11 impossible.";return false;}
         sv.Format=td.Format;
         if(FAILED(device_->CreateShaderResourceView(roughTexture.Get(),&sv,&roughness_))){error=L"Création de la table de rugosités DirectX 11 impossible.";return false;}
-        sceneKey_=scene.obj.data();objectCount_=scene.obj.size();return true;
+        sceneKey_=scene.obj.data();objectCount_=scene.obj.size();
+        sceneIdentity_=scene.gpuCacheIdentity;sceneRevision_=scene.gpuCacheRevision;
+        return true;
     }
     bool ensureTargets(int w,int h,std::wstring& error) {
         if(w==width_&&h==height_&&target_)return true;
@@ -519,7 +534,7 @@ private:
     ComPtr<ID3D11Device> device_;ComPtr<ID3D11DeviceContext> context_;ComPtr<ID3D11VertexShader> vs_;ComPtr<ID3D11PixelShader> ps_;ComPtr<ID3D11InputLayout> layout_;
     ComPtr<ID3D11Buffer> constants_,vertices_,transparentVertices_;ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_;ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<TransparentTriangle> transparent_;
     ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_,staging_;ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
-    const Obj* sceneKey_=nullptr;size_t objectCount_=0;UINT vertexCount_=0;UINT sampleCount_=1,sampleQuality_=0;int width_=0,height_=0;
+    const Obj* sceneKey_=nullptr;size_t objectCount_=0;uint64_t sceneIdentity_=0,sceneRevision_=0;UINT vertexCount_=0;UINT sampleCount_=1,sampleQuality_=0;int width_=0,height_=0;
 };
 }
 bool renderDirectX11Preview(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error) {
