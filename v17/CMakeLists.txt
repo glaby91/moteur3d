@@ -1,5 +1,14 @@
 cmake_minimum_required(VERSION 3.24)
-project(CSE_WARP_V17 VERSION 17.0 LANGUAGES CXX)
+project(CSE_WARP_V17 VERSION 17.3 LANGUAGES CXX)
+# GitHub Actions run number becomes the actual build number in both EXEs.
+# Local developer builds are explicitly numbered 0.
+set(V17_BUILD_NUMBER 0 CACHE STRING "CI run number for Windows version resource")
+if(NOT V17_BUILD_NUMBER MATCHES "^[0-9]+$")
+    message(FATAL_ERROR "V17_BUILD_NUMBER must be an unsigned integer")
+endif()
+if(V17_BUILD_NUMBER GREATER 65535)
+    message(FATAL_ERROR "Windows file version build component must fit 16 bits")
+endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
@@ -12,6 +21,7 @@ add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../v16" "${CMAKE_CURRENT_BINARY_DI
 # Generate all 16..256px sizes from the local brand artwork; no external download.
 if(WIN32)
     set(V17_ICON "${CMAKE_CURRENT_BINARY_DIR}/cse_warp_v17.ico")
+    set(V17_BENCH_ICON "${CMAKE_CURRENT_BINARY_DIR}/cse_warp_v17_bench.ico")
     add_custom_command(OUTPUT "${V17_ICON}"
         COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
             -File "${CMAKE_CURRENT_SOURCE_DIR}/tools/make_windows_icon.ps1"
@@ -19,10 +29,20 @@ if(WIN32)
         DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/make_windows_icon.ps1"
         COMMENT "Generate CSE WARP V17 Windows icon (16..256px)"
         VERBATIM)
-    add_custom_target(v17_icon_generator DEPENDS "${V17_ICON}")
+    add_custom_command(OUTPUT "${V17_BENCH_ICON}"
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+            -File "${CMAKE_CURRENT_SOURCE_DIR}/tools/make_windows_icon.ps1"
+            -OutputPath "${V17_BENCH_ICON}" -Benchmark
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/make_windows_icon.ps1"
+        COMMENT "Generate separate CSE WARP V17.3 Benchmark Windows icon"
+        VERBATIM)
+    add_custom_target(v17_icon_generator DEPENDS "${V17_ICON}" "${V17_BENCH_ICON}")
     file(TO_CMAKE_PATH "${V17_ICON}" V17_ICON_RC_PATH)
+    file(TO_CMAKE_PATH "${V17_BENCH_ICON}" V17_BENCH_ICON_RC_PATH)
     configure_file("${CMAKE_CURRENT_SOURCE_DIR}/resources/v17_app.rc.in"
                    "${CMAKE_CURRENT_BINARY_DIR}/v17_app.rc" @ONLY)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/resources/v17_benchmark.rc.in"
+                   "${CMAKE_CURRENT_BINARY_DIR}/v17_benchmark.rc" @ONLY)
     qt_add_executable(moteur3d_v17 WIN32
         "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_qt.cpp"
         "${CMAKE_CURRENT_BINARY_DIR}/v17_app.rc")
@@ -74,9 +94,25 @@ target_include_directories(moteur3d_v17_benchmark PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
 target_link_libraries(moteur3d_v17_benchmark PRIVATE
     moteur3d_v16_core Qt6::Core Qt6::Gui)
-qt_add_executable(moteur3d_v17_benchui WIN32
-    "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmark_v17_ui.cpp")
+if(WIN32)
+    qt_add_executable(moteur3d_v17_benchui WIN32
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmark_v17_ui.cpp"
+        "${CMAKE_CURRENT_BINARY_DIR}/v17_benchmark.rc")
+    add_dependencies(moteur3d_v17_benchui v17_icon_generator)
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/v17_benchmark.rc"
+        PROPERTIES OBJECT_DEPENDS "${V17_BENCH_ICON}")
+else()
+    qt_add_executable(moteur3d_v17_benchui
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmark_v17_ui.cpp")
+endif()
 target_link_libraries(moteur3d_v17_benchui PRIVATE Qt6::Widgets)
+if(WIN32)
+    add_custom_command(TARGET moteur3d_v17_benchui POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${V17_BENCH_ICON}"
+            "$<TARGET_FILE_DIR:moteur3d_v17_benchui>/cse_warp_v17_bench.ico"
+        VERBATIM)
+endif()
 if(MSVC)
     target_compile_options(moteur3d_v17_benchmark PRIVATE /O2 /EHsc /utf-8)
     target_compile_options(moteur3d_v17_benchui PRIVATE /O2 /EHsc /utf-8)
