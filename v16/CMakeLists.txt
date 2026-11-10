@@ -159,3 +159,31 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/material-lab" DESTI
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pripyat-photo2scene-proof" DESTINATION .)
 install(FILES "${NATIVE_SRC}/shaders/m3d_raytrace_compute.hlsl" DESTINATION shaders)
 # No V3/V4/V5 binary loader, exporter or legacy Qt application is linked into V16.
+
+# V17 is an additive realtime frontend over the *same* V16 renderer DLL,
+# scene loader and PBR resources. Existing CPU and HLSL executables remain.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../v17/src/v17_realtime.cpp")
+    find_package(Qt6 6.2 REQUIRED COMPONENTS OpenGL OpenGLWidgets)
+    qt_add_executable(moteur3d_v17 WIN32
+        "${CMAKE_CURRENT_SOURCE_DIR}/../v17/src/v17_realtime.cpp")
+    target_include_directories(moteur3d_v17 PRIVATE "${NATIVE}")
+    target_link_libraries(moteur3d_v17 PRIVATE moteur3d_v16_core
+        Qt6::Widgets Qt6::OpenGLWidgets Qt6::OpenGL)
+    if(MSVC)
+        target_compile_options(moteur3d_v17 PRIVATE /O2 /EHsc /utf-8)
+    endif()
+    add_custom_command(TARGET moteur3d_v17 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory
+          "$<TARGET_FILE_DIR:moteur3d_v17>/shaders/v17"
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+          "${CMAKE_CURRENT_SOURCE_DIR}/../v17/shaders"
+          "$<TARGET_FILE_DIR:moteur3d_v17>/shaders/v17"
+        VERBATIM)
+    add_test(NAME v17_pavillon01_reuse_v16_scene
+        COMMAND moteur3d_v17 --self-test
+          "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01/scene.json")
+    set_tests_properties(v17_pavillon01_reuse_v16_scene PROPERTIES TIMEOUT 180)
+    install(TARGETS moteur3d_v17 RUNTIME DESTINATION .)
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../v17/shaders/"
+        DESTINATION shaders/v17)
+endif()
