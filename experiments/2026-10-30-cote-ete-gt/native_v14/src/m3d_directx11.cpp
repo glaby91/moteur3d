@@ -769,8 +769,11 @@ private:
             {"BOXSIZE",0,DXGI_FORMAT_R32G32B32_FLOAT,1,32,D3D11_INPUT_PER_INSTANCE_DATA,1},
             {"BOXUVMODE",0,DXGI_FORMAT_R32_UINT,1,44,D3D11_INPUT_PER_INSTANCE_DATA,1}
         };
-        if(FAILED(device_->CreateInputLayout(boxInput,10,boxVsCode->GetBufferPointer(),boxVsCode->GetBufferSize(),&boxLayout_))){
-            error=L"Création du format des instances GPU impossible.";return false;
+        const HRESULT boxLayoutResult=device_->CreateInputLayout(
+            boxInput,10,boxVsCode->GetBufferPointer(),boxVsCode->GetBufferSize(),&boxLayout_);
+        if(FAILED(boxLayoutResult)){
+            error=L"Création du format des instances GPU impossible. HRESULT "
+                  +std::to_wstring(uint32_t(boxLayoutResult));return false;
         }
         if(FAILED(device_->CreateVertexShader(ellipseVsCode->GetBufferPointer(),
             ellipseVsCode->GetBufferSize(),nullptr,&ellipseVs_))){
@@ -783,9 +786,12 @@ private:
             {"ELLIPSERADII",0,DXGI_FORMAT_R32G32B32_FLOAT,1,16,D3D11_INPUT_PER_INSTANCE_DATA,1},
             {"ELLIPSEPAD",0,DXGI_FORMAT_R32_FLOAT,1,28,D3D11_INPUT_PER_INSTANCE_DATA,1}
         };
-        if(FAILED(device_->CreateInputLayout(ellipseInput,8,ellipseVsCode->GetBufferPointer(),
-            ellipseVsCode->GetBufferSize(),&ellipseLayout_))){
-            error=L"Format des instances ellipsoïdes incorrect.";return false;
+        const HRESULT ellipseLayoutResult=device_->CreateInputLayout(
+            ellipseInput,8,ellipseVsCode->GetBufferPointer(),
+            ellipseVsCode->GetBufferSize(),&ellipseLayout_);
+        if(FAILED(ellipseLayoutResult)){
+            error=L"Format des instances ellipsoïdes incorrect. HRESULT "
+                  +std::to_wstring(uint32_t(ellipseLayoutResult));return false;
         }
         D3D11_BUFFER_DESC cbd{};cbd.ByteWidth=sizeof(FrameConstants);cbd.Usage=D3D11_USAGE_DYNAMIC;cbd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;cbd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
         if(FAILED(device_->CreateBuffer(&cbd,nullptr,&constants_))){error=L"Création du buffer de constantes DirectX 11 impossible.";return false;}
