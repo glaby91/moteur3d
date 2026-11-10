@@ -1,6 +1,9 @@
 # Generate a standalone multi-resolution Windows ICO for CSE WARP V17.
 # No external packages: Windows GDI+ (System.Drawing) and PowerShell only.
-param([Parameter(Mandatory = $true)][string] $OutputPath)
+param(
+    [Parameter(Mandatory = $true)][string] $OutputPath,
+    [switch] $Benchmark
+)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 
@@ -43,7 +46,11 @@ $globePen=[System.Drawing.Pen]::new([System.Drawing.Color]::FromArgb(255,35,221,
 $g.DrawArc($globePen,28,188,108,80,184,140)
 
 $white=[System.Drawing.SolidBrush]::new([System.Drawing.Color]::White)
-$cyan=[System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(255,17,218,248))
+$cyan=[System.Drawing.SolidBrush]::new($(if($Benchmark){
+    [System.Drawing.Color]::FromArgb(255,251,183,66)
+}else{
+    [System.Drawing.Color]::FromArgb(255,17,218,248)
+}))
 $style=[System.Drawing.FontStyle]::Bold
 $unit=[System.Drawing.GraphicsUnit]::Pixel
 $fCse=[System.Drawing.Font]::new('Arial',57,$style,$unit)
@@ -51,7 +58,16 @@ $fWarp=[System.Drawing.Font]::new('Arial',50,$style,$unit)
 $fV17=[System.Drawing.Font]::new('Arial',69,$style,$unit)
 $g.DrawString('CSE',$fCse,$white,[float]53,[float]40)
 $g.DrawString('WARP',$fWarp,$white,[float]37,[float]95)
-$g.DrawString('V17',$fV17,$cyan,[float]69,[float]151)
+if($Benchmark){
+    # Distinct gold benchmark icon, retains CSE WARP typography and brand.
+    $fBench=[System.Drawing.Font]::new('Arial',43,$style,$unit)
+    $g.DrawString('BENCH',$fBench,$cyan,[float]32,[float]161)
+    $fBench.Dispose()
+}else{
+    $fVersion=[System.Drawing.Font]::new('Arial',53,$style,$unit)
+    $g.DrawString('V17.3',$fVersion,$cyan,[float]48,[float]154)
+    $fVersion.Dispose()
+}
 
 $bytes=New-Object 'System.Collections.Generic.List[byte[]]'
 foreach($size in @(16,24,32,48,64,128,256)){
@@ -93,4 +109,4 @@ $fCse.Dispose();$fWarp.Dispose();$fV17.Dispose()
 $white.Dispose();$cyan.Dispose();$globeBrush.Dispose();$globePen.Dispose()
 $outerPen.Dispose();$innerPen.Dispose();$baseBrush.Dispose()
 $outer.Dispose();$inner.Dispose();$g.Dispose();$bmp.Dispose()
-Write-Host "Generated CSE WARP V17 multi-resolution ICO: $full"
+Write-Host "Generated CSE WARP V17.3 $(if($Benchmark){'Benchmark'}else{'Application'}) multi-resolution ICO: $full"
