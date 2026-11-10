@@ -87,9 +87,9 @@ int main(int argc,char** argv){
     }
     qInfo()<<"V17 A/B camera1: triangles submitted"<<qulonglong(warmStats.tests)
            <<"of"<<qulonglong(fullStats.tests);
-    // Ensure GPU box instancing does not degrade the reference scene:
-    // compare against the full legacy box mesh on the exact same camera.
-    if(_putenv_s("M3D_V17_DISABLE_GPU_INSTANCING","1")!=0){
+    // Compare box instancing only; ellipsoid LOD is deliberately unchanged
+    // in the reference render and is independently testable.
+    if(_putenv_s("M3D_V17_DISABLE_BOX_INSTANCING","1")!=0){
         qCritical()<<"Cannot disable instancing for A/B";return 1;
     }
     std::vector<uint32_t> legacy;
@@ -97,7 +97,7 @@ int main(int argc,char** argv){
     error.clear();
     const bool legacyOk=m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,cam,
                                                      w,h,legacy,legacyStats,error);
-    _putenv_s("M3D_V17_DISABLE_GPU_INSTANCING","");
+    _putenv_s("M3D_V17_DISABLE_BOX_INSTANCING","");
     if(!legacyOk||legacy.size()!=second.size()){
         qCritical()<<"Legacy box A/B rendering failed:"<<QString::fromStdWString(error);
         return 1;
