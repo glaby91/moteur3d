@@ -128,6 +128,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "CPU/GPU direct-only comparison failed" }
           if (!(Test-Path "build-v16/parity-pavillon01/cpu_gpu_comparison.json")) { throw "GPU parity report absent" }
           if (!(Test-Path "build-v16/parity-gpu-direct-only/cpu_gpu_comparison.json")) { throw "GPU direct-only report absent" }
+      - name: Upload GPU/CPU visual QA images (small artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: V16-Pavillon01-GPU-Visual-QA
+          path: |
+            build-v16/parity-pavillon01/cpu_gpu_triptych.jpg
+            build-v16/parity-pavillon01/cpu_gpu_comparison.json
+            build-v16/parity-pavillon01/difference_x3.png
+            build-v16/parity-gpu-direct-only/cpu_gpu_comparison.json
+            build-v16/pavillon01-gpu-warp.png
+            build-v16/pavillon01-gi-smoke.png
+          if-no-files-found: error
       - name: Package EXE + Pavillon 01 + Qt6 dependencies
         shell: pwsh
         run: |
