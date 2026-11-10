@@ -42,8 +42,15 @@ jobs:
             if (!(Test-Path $p)) { throw "Missing V17 package file: $p" }
             Write-Host "Verified: $p"
           }
-      - name: V16 CPU/GPU regression tests (same shared engine)
-        run: ctest --test-dir build-v17/v16 -C Release --verbose --output-on-failure
+      - name: V17 raster WARP and all inherited V16 CPU/GPU regression tests
+        run: ctest --test-dir build-v17 -C Release --verbose --output-on-failure
+      - name: Verify V17 D3D11 raster WARP preview
+        shell: pwsh
+        run: |
+          $path = "build-v17/v17-raster-warp.png"
+          if (!(Test-Path $path)) { throw "Raster V17 PNG missing: $path" }
+          if ((Get-Item $path).Length -lt 1000) { throw "Raster V17 preview is blank" }
+          Write-Host "Verified V17 Raster WARP PNG"
       - name: Package CSE WARP V17
         shell: pwsh
         run: |
