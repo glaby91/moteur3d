@@ -470,7 +470,16 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
             }
         }
         else if(type=="uv_sphere")sphere(render,pos,size,material);
-        else if(type=="foliage_canopy")foliageCanopy(render,pos,size,material);
+        else if(type=="foliage_canopy"){
+            foliageCanopy(render,pos,size,material);
+            SourceFoliage source;
+            source.firstTriangle=uint32_t(object.firstTriangle);
+            source.triangleCount=uint32_t(render.obj.size()-size_t(object.firstTriangle));
+            source.center=pos;
+            source.radii=size*.5f;
+            source.material=uint32_t(material);
+            if(source.triangleCount>0)render.sourceFoliage.push_back(source);
+        }
         else {result.error="Unsupported V16 geometry: "+meshId;return result;}
         object.triangleCount=int(render.obj.size())-object.firstTriangle;
         result.runtime.objects.push_back(object);
