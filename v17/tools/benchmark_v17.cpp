@@ -118,7 +118,7 @@ int main(int argc,char** argv){
        !readQualityOption("--raster-culling",culling)||
        !readQualityOption("--raster-lod-enabled",dynamicLod)||
        culling>1||dynamicLod>1){
-        err<<"Invalid quality flags; expected MSAA 1/2/4, anisotropy 1/2/4/8/16, LOD 50..200, culling/LOD 0/1\n";
+        err<<"Invalid quality flags; expected MSAA 1/2/4/8, anisotropy 1/2/4/8/16, LOD 50..200, culling/LOD 0/1\n";
         return 2;
     }
     quality.frustumCulling=culling!=0;
