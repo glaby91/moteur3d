@@ -172,10 +172,19 @@ float4 PSMain(VSOut i):SV_TARGET {
     // derivatives at tile boundaries and forced inappropriate mip levels.
     float3 base = albedo.Sample(wrapSampler, float3(i.uv, i.mat)).rgb;
     float3 normal = normalize(i.n);
+#if !defined(M3D_V17_OPTIMIZE_PIXELS)
     float3 dpdx = ddx(i.world), dpdy = ddy(i.world);
     float2 duvdx = ddx(i.uv), duvdy = ddy(i.uv);
     float determinant = duvdx.x * duvdy.y - duvdx.y * duvdy.x;
+#endif
     if (materialOpacity[i.mat].y > 0.5) {
+#if defined(M3D_V17_OPTIMIZE_PIXELS)
+        // The nointerpolation material index is uniform per primitive.
+        // Do not evaluate derivatives when normal mapping is disabled.
+        float3 dpdx = ddx(i.world), dpdy = ddy(i.world);
+        float2 duvdx = ddx(i.uv), duvdy = ddy(i.uv);
+        float determinant = duvdx.x * duvdy.y - duvdx.y * duvdy.x;
+#endif
         float3 detailNormal = normalize(normalMap.Sample(wrapSampler, float3(i.uv, i.mat)).xyz * 2.0 - 1.0);
         if (abs(determinant) > 0.000001) {
             float3 tangent = (dpdx * duvdy.y - dpdy * duvdx.y) / determinant;
@@ -231,13 +240,23 @@ float4 PSMain(VSOut i):SV_TARGET {
     color += specTint * specular * (0.88+0.22*fresnel);
     [loop] for (uint l = 0; l < lightCount; ++l) {
         float3 delta = lightPositionRadius[l].xyz - i.world;
-        float distanceToLight = length(delta);
         float radius = lightPositionRadius[l].w;
-        if (distanceToLight < radius && distanceToLight > 0.0001) {
-            float edge = 1.0 - distanceToLight / radius;
-            float lambert = saturate(dot(normal, delta / distanceToLight));
-            color += lightColorIntensity[l].rgb * (edge * edge * lightColorIntensity[l].a * lambert * 0.27);
+#if defined(M3D_V17_OPTIMIZE_PIXELS)
+        // Reject far lights before computing length()/sqrt. Allow a
+        // conservative epsilon to keep the legacy threshold identical.
+        float radius2 = radius * radius;
+        float distance2 = dot(delta, delta);
+        [branch] if (radius > 0.0 && distance2 <= radius2 * 1.000001) {
+#endif
+            float distanceToLight = length(delta);
+            if (distanceToLight < radius && distanceToLight > 0.0001) {
+                float edge = 1.0 - distanceToLight / radius;
+                float lambert = saturate(dot(normal, delta / distanceToLight));
+                color += lightColorIntensity[l].rgb * (edge * edge * lightColorIntensity[l].a * lambert * 0.27);
+            }
+#if defined(M3D_V17_OPTIMIZE_PIXELS)
         }
+#endif
     }
     return float4(color, materialOpacity[i.mat].x);
 }
@@ -795,13 +814,29 @@ public:
         if(FAILED(hr)){error=L"Lecture différée DirectX 11 impossible.";return false;}
         const auto mapDone=Clock::now();
         pixels.resize(size_t(slot.width)*size_t(slot.height));
+        const char* disableFastSwizzle=std::getenv("M3D_V17_DISABLE_FAST_SWIZZLE");
+        const bool fastSwizzle=!(disableFastSwizzle&&std::strcmp(disableFastSwizzle,"1")==0);
         for(int y=0;y<slot.height;++y){
             const uint8_t* row=static_cast<const uint8_t*>(mapped.pData)
                 +size_t(y)*mapped.RowPitch;
-            for(int x=0;x<slot.width;++x){
-                const uint8_t* p=row+size_t(x)*4;
-                pixels[size_t(y)*slot.width+x]=0xff000000u
-                    |(uint32_t(p[0])<<16)|(uint32_t(p[1])<<8)|uint32_t(p[2]);
+            uint32_t* dest=pixels.data()+size_t(y)*slot.width;
+            if(fastSwizzle){
+                // Windows x64: R8G8B8A8_UNORM is a little-endian DWORD
+                // 0xAABBGGRR. QImage::Format_ARGB32 expects 0xFFRRGGBB.
+                // One aligned 32-bit load replaces three byte loads.
+                const uint32_t* src=reinterpret_cast<const uint32_t*>(row);
+                for(int x=0;x<slot.width;++x){
+                    const uint32_t rgba=src[x];
+                    dest[x]=0xff000000u|((rgba&0xffu)<<16)
+                        |(rgba&0xff00u)|((rgba>>16)&0xffu);
+                }
+            }else{
+                // Unmodified reference path for pixel-exact A/B.
+                for(int x=0;x<slot.width;++x){
+                    const uint8_t* p=row+size_t(x)*4;
+                    dest[x]=0xff000000u
+                        |(uint32_t(p[0])<<16)|(uint32_t(p[1])<<8)|uint32_t(p[2]);
+                }
             }
         }
         context_->Unmap(slot.staging.Get(),0);
@@ -869,7 +904,16 @@ private:
         hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",nullptr,nullptr,
                       "VSEllipseMain","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&ellipseVsCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation du shader LOD ellipsoïdes impossible");return false;}
-        hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",nullptr,nullptr,"PSMain","ps_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&psCode,&errors);
+        // The exact old shader can be selected to A/B test visual fidelity.
+        // HLSL is compiled once at device creation, never per frame.
+        const char* disableShaderOpt=std::getenv("M3D_V17_DISABLE_SHADER_OPT");
+        const bool optimizePixels=!(disableShaderOpt&&std::strcmp(disableShaderOpt,"1")==0);
+        const D3D_SHADER_MACRO pixelMacros[]={
+            {"M3D_V17_OPTIMIZE_PIXELS","1"},{nullptr,nullptr}
+        };
+        hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",
+            optimizePixels?pixelMacros:nullptr,nullptr,"PSMain","ps_4_0",
+            D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&psCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation du pixel shader DirectX 11 impossible");return false;}
         if(FAILED(device_->CreateVertexShader(vsCode->GetBufferPointer(),vsCode->GetBufferSize(),nullptr,&vs_))||FAILED(device_->CreatePixelShader(psCode->GetBufferPointer(),psCode->GetBufferSize(),nullptr,&ps_))){error=L"Création des shaders DirectX 11 impossible.";return false;}
         const D3D11_INPUT_ELEMENT_DESC input[]={{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,p),D3D11_INPUT_PER_VERTEX_DATA,0},{"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,n),D3D11_INPUT_PER_VERTEX_DATA,0},{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,offsetof(GpuVertex,uv),D3D11_INPUT_PER_VERTEX_DATA,0},{"MATERIAL",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertex,material),D3D11_INPUT_PER_VERTEX_DATA,0}};
