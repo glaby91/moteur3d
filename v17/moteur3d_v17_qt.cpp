@@ -26,6 +26,7 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QImage>
+#include <QIcon>
 #include <QLabel>
 #include <QElapsedTimer>
 #include <QKeyEvent>
@@ -797,8 +798,14 @@ QString defaultPath(){
 }
 int main(int argc,char** argv){
     QApplication app(argc,argv);
+    // Use the same Windows V17 brand icon for Qt titlebar/Alt-Tab/taskbar.
+    // The ICO is also embedded in the EXE's native Win32 resources.
+    const QString iconPath=QCoreApplication::applicationDirPath()
+        +QStringLiteral("/cse_warp_v17.ico");
+    if(QFileInfo::exists(iconPath))app.setWindowIcon(QIcon(iconPath));
     const QString path=argc>1?QString::fromLocal8Bit(argv[1]):defaultPath();
     V17Window window(path);
+    if(!app.windowIcon().isNull())window.setWindowIcon(app.windowIcon());
     window.show();
     return app.exec();
 }
