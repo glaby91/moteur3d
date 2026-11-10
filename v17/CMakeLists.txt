@@ -15,6 +15,9 @@ if(MSVC)
     target_compile_options(moteur3d_v17 PRIVATE /O2 /EHsc /utf-8)
 endif()
 add_custom_command(TARGET moteur3d_v17 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "$<TARGET_FILE:moteur3d_v16_core>"
+      "$<TARGET_FILE_DIR:moteur3d_v17>"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
       "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01"
       "$<TARGET_FILE_DIR:moteur3d_v17>/pavillon01"
