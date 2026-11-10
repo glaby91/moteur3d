@@ -951,6 +951,34 @@ private:
             }
             ellipseInstanceCount_=UINT(ellipses_.size());
         }
+        if(!foliage_.empty()){
+            const int segmentLevels[]={8,12,18};
+            const int ringLevels[]={4,6,9};
+            const int leafLevels[]={0,12,36};
+            for(int lod=0;lod<3;++lod){
+                const auto unit=makeFoliageTemplate(
+                    segmentLevels[lod],ringLevels[lod],leafLevels[lod]);
+                if(unit.empty()){error=L"Le maillage LOD du feuillage est vide.";return false;}
+                D3D11_BUFFER_DESC bd{};
+                bd.ByteWidth=UINT(unit.size()*sizeof(GpuVertex));
+                bd.Usage=D3D11_USAGE_IMMUTABLE;
+                bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;
+                D3D11_SUBRESOURCE_DATA init{};init.pSysMem=unit.data();
+                if(FAILED(device_->CreateBuffer(&bd,&init,&foliageVertices_[lod]))){
+                    error=L"Allocation des maillages LOD du feuillage impossible.";return false;
+                }
+                foliageVertexCounts_[lod]=UINT(unit.size());
+            }
+            D3D11_BUFFER_DESC bd{};
+            bd.ByteWidth=UINT(foliage_.size()*sizeof(GpuEllipseInstance));
+            bd.Usage=D3D11_USAGE_DYNAMIC;
+            bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;
+            bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+            if(FAILED(device_->CreateBuffer(&bd,nullptr,&foliageInstances_))){
+                error=L"Allocation des instances de feuillage impossible.";return false;
+            }
+            foliageInstanceCount_=UINT(foliage_.size());
+        }
         if(!mesh.vertices.empty()){
             // 4096 triangles per batch. Bounding boxes are derived from the
             // real emitted vertices: this also works for complicated shapes,
@@ -1075,11 +1103,15 @@ private:
     ComPtr<ID3D11VertexShader> vs_,boxVs_,ellipseVs_;
     ComPtr<ID3D11PixelShader> ps_;
     ComPtr<ID3D11InputLayout> layout_,boxLayout_,ellipseLayout_;
-    ComPtr<ID3D11Buffer> constants_,vertices_,transparentVertices_,boxVertices_,boxInstances_,ellipseInstances_;
+    ComPtr<ID3D11Buffer> constants_,vertices_,transparentVertices_,boxVertices_,boxInstances_,ellipseInstances_,foliageInstances_;
     std::array<ComPtr<ID3D11Buffer>,3> ellipseVertices_;
     std::array<UINT,3> ellipseVertexCounts_{{0,0,0}};
     std::vector<GpuEllipseInstance> ellipses_;
     UINT ellipseInstanceCount_=0;
+    std::array<ComPtr<ID3D11Buffer>,3> foliageVertices_;
+    std::array<UINT,3> foliageVertexCounts_{{0,0,0}};
+    std::vector<GpuEllipseInstance> foliage_;
+    UINT foliageInstanceCount_=0;
     ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_;ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<TransparentTriangle> transparent_;
     ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_,staging_;ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
     std::vector<DrawChunk> chunks_,boxChunks_;
