@@ -55,6 +55,11 @@ add_custom_command(TARGET moteur3d_v17 POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
       "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pripyat-photo2scene-proof"
       "$<TARGET_FILE_DIR:moteur3d_v17>/pripyat-photo2scene-proof"
+    # Generated, independently authored V17 benchmark with three load profiles.
+    # It is generated in GitHub Actions before CMake configuration.
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/benchmark-civic"
+      "$<TARGET_FILE_DIR:moteur3d_v17>/benchmark-civic"
     COMMAND ${CMAKE_COMMAND} -E make_directory
       "$<TARGET_FILE_DIR:moteur3d_v17>/shaders"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
