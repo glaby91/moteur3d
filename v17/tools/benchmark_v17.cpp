@@ -102,7 +102,7 @@ int main(int argc,char** argv){
     QFile csvFile(directory.filePath("results.csv"));
     if(!csvFile.open(QIODevice::WriteOnly|QIODevice::Text))return 3;
     QTextStream csvOut(&csvFile);
-    csvOut<<"backend,camera,width,height,texture_px,cold_ms,frames,mean_ms,median_ms,p95_ms,p99_ms,estimated_fps,submitted_triangles,cold_readback_ms,mean_readback_ms,gpu_draw_calls,instanced_boxes,instanced_ellipsoids,status,error,image\n";
+    csvOut<<"backend,camera,width,height,texture_px,cold_ms,frames,mean_ms,median_ms,p95_ms,p99_ms,estimated_fps,submitted_triangles,cold_readback_ms,mean_readback_ms,gpu_draw_calls,instanced_boxes,instanced_ellipsoids,instanced_foliage,status,error,image\n";
     auto loaded=v16::loadScene(scenePath);
     if(!loaded){err<<"Scene load failed: "<<loaded.error<<"\n";return 4;}
     // The normal and quick modes use the same full 2048 PBR assets as V17.
@@ -160,6 +160,7 @@ int main(int argc,char** argv){
               <<record.value("gpuDrawCalls").toDouble()<<','
               <<record.value("gpuBoxInstances").toDouble()<<','
               <<record.value("gpuEllipseInstances").toDouble()<<','
+              <<record.value("gpuFoliageInstances").toDouble()<<','
               <<csv(status)<<','
               <<csv(record.value("error").toString())<<','
               <<csv(record.value("image").toString())<<"\n";
@@ -225,6 +226,7 @@ int main(int argc,char** argv){
             rec["gpuDrawCalls"]=double(stats.gpuDrawCalls);
             rec["gpuBoxInstances"]=double(stats.gpuBoxInstances);
             rec["gpuEllipseInstances"]=double(stats.gpuEllipseInstances);
+            rec["gpuFoliageInstances"]=double(stats.gpuFoliageInstances);
             rec["status"]=ok?"ok":"skipped";
             rec["error"]=ok?QString():QString::fromStdWString(reason);
             append(rec);
