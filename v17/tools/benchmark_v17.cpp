@@ -102,7 +102,7 @@ int main(int argc,char** argv){
     QFile csvFile(directory.filePath("results.csv"));
     if(!csvFile.open(QIODevice::WriteOnly|QIODevice::Text))return 3;
     QTextStream csvOut(&csvFile);
-    csvOut<<"backend,camera,width,height,texture_px,cold_ms,frames,mean_ms,median_ms,p95_ms,p99_ms,estimated_fps,submitted_triangles,status,error,image\n";
+    csvOut<<"backend,camera,width,height,texture_px,cold_ms,frames,mean_ms,median_ms,p95_ms,p99_ms,estimated_fps,submitted_triangles,cold_readback_ms,mean_readback_ms,status,error,image\n";
     auto loaded=v16::loadScene(scenePath);
     if(!loaded){err<<"Scene load failed: "<<loaded.error<<"\n";return 4;}
     // The normal and quick modes use the same full 2048 PBR assets as V17.
@@ -155,6 +155,8 @@ int main(int argc,char** argv){
               <<record.value("p99Ms").toDouble()<<','
               <<record.value("estimatedFps").toDouble()<<','
               <<record.value("submittedTriangles").toDouble()<<','
+              <<record.value("coldReadbackMs").toDouble()<<','
+              <<record.value("meanReadbackMs").toDouble()<<','
               <<csv(status)<<','
               <<csv(record.value("error").toString())<<','
               <<csv(record.value("image").toString())<<"\n";
@@ -185,7 +187,9 @@ int main(int argc,char** argv){
             bool ok=renderDirectX11Preview(runtime.renderScene,shadow,camera,w,h,
                                            pixels,stats,reason);
             rec["coldMs"]=elapsedMs(begin);
+            rec["coldReadbackMs"]=ok?stats.postMs:0.0;
             std::vector<double> frameTimes;
+            std::vector<double> readbackTimes;
             if(ok){
                 for(int i=0;i<measuredFrames;++i){
                     reason.clear();
@@ -195,6 +199,7 @@ int main(int argc,char** argv){
                     const double time=elapsedMs(begin);
                     if(!ok)break;
                     frameTimes.push_back(time);
+                    readbackTimes.push_back(stats.postMs);
                 }
             }
             if(ok){
@@ -206,6 +211,10 @@ int main(int argc,char** argv){
                 }
             }
             addTimings(rec,frameTimes);
+            if(!readbackTimes.empty()){
+                rec["meanReadbackMs"]=std::accumulate(
+                    readbackTimes.begin(),readbackTimes.end(),0.0)/readbackTimes.size();
+            }
             // Stats.tests is the number of triangles actually sent to D3D11
             // after optional opaque frustum culling, plus transparency.
             // This makes it possible to compare scene coverage and FPS.
