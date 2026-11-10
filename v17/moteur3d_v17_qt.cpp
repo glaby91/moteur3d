@@ -110,7 +110,7 @@ class V17Window final : public QMainWindow {
 public:
     explicit V17Window(QString scenePath,int textureResolution=2048)
         :textureResolution_(textureResolution){
-        setWindowTitle(QStringLiteral("CSE WARP Beta X — V17 Exploration"));
+        setWindowTitle(QStringLiteral("CSE WARP Beta X — V17.3 Exploration"));
         resize(1510,900);
         setMinimumSize(1100,670);
         canvas_=new ImageView;
@@ -519,7 +519,7 @@ private:
             camerasMenu->addAction(action);
         }
         auto* toolsMenu=menuBar()->addMenu(QStringLiteral("Outils"));
-        auto* benchmarkAction=toolsMenu->addAction(QStringLiteral("Benchmark V17 — performances…"));
+        auto* benchmarkAction=toolsMenu->addAction(QStringLiteral("Benchmark V17.3 — performances…"));
         connect(benchmarkAction,&QAction::triggered,this,[this]{
             if(scenePath_.isEmpty()){
                 QMessageBox::information(this,QStringLiteral("Benchmark"),QStringLiteral("Charger une scène avant de lancer le benchmark."));
@@ -536,7 +536,7 @@ private:
                 QMessageBox::critical(this,QStringLiteral("Benchmark"),QStringLiteral("Impossible d'ouvrir la fenêtre de benchmark."));
         });
         auto* helpMenu=menuBar()->addMenu(QStringLiteral("Aide"));
-        auto* aboutAction=helpMenu->addAction(QStringLiteral("À propos de CSE WARP V17…"));
+        auto* aboutAction=helpMenu->addAction(QStringLiteral("À propos de CSE WARP V17.3…"));
         connect(aboutAction,&QAction::triggered,this,[this]{
             const QString revisionPath=QCoreApplication::applicationDirPath()
                 +QStringLiteral("/REVISION.txt");
@@ -544,18 +544,27 @@ private:
             QFile revisionFile(revisionPath);
             if(revisionFile.open(QIODevice::ReadOnly|QIODevice::Text))
                 revision=QString::fromUtf8(revisionFile.readAll()).trimmed().left(12);
-            QMessageBox::about(this,QStringLiteral("À propos de CSE WARP V17"),
-                QStringLiteral("<h3>CSE WARP Beta X — V17</h3>"
-                    "<p>Exploration 3D expérimentale de scènes réelles, version 17.0.</p>"
-                    "<p><b>Moteurs :</b> Direct3D 11 Raster (V17), "
-                    "D3D11 Compute HLSL (V16), Ray Tracing CPU et GI CPU.</p>"
-                    "<p><b>Fonctions :</b> scène commune, textures PBR, éclairage, "
-                    "export PNG, navigation libre et benchmarks intégrés.</p>"
-                    "<p><b>Version Qt :</b> %1<br/><b>Révision GitHub :</b> %2</p>"
-                    "<p>Objectif temps réel 30–40 FPS sur Intel HD 620 : "
-                    "à confirmer par mesures sur le matériel.</p>")
-                    .arg(QString::fromLatin1(qVersion()).toHtmlEscaped(),
-                         revision.toHtmlEscaped()));
+            QString buildNumber=QStringLiteral("0 (local)");
+            QFile buildFile(QCoreApplication::applicationDirPath()
+                +QStringLiteral("/BUILD_NUMBER.txt"));
+            if(buildFile.open(QIODevice::ReadOnly|QIODevice::Text)){
+                const QString candidate=QString::fromUtf8(buildFile.readAll()).trimmed();
+                if(!candidate.isEmpty())buildNumber=candidate;
+            }
+            QMessageBox::about(this,QStringLiteral("À propos de CSE WARP V17.3"),
+                QStringLiteral("<h3>CSE WARP Beta X — V17.3</h3>"
+                    "<p><b>Version :</b> 17.3.0 — <b>Build :</b> %1<br/>"
+                    "<b>Révision GitHub :</b> %2<br/><b>Qt :</b> %3</p>"
+                    "<p><b>Rendu :</b> Direct3D 11 Raster, GPU Compute HLSL, "
+                    "Ray Tracing CPU et illumination globale CPU.</p>"
+                    "<p><b>Nouveautés :</b> thread GPU permanent, chargement asynchrone, "
+                    "frustum culling de lots, correction du filtrage PBR/mipmaps, "
+                    "benchmark CSV/JSON avec triangles soumis et trois profils de charge.</p>"
+                    "<p><b>En développement :</b> instancing natif, LOD et éclairage PBR "
+                    "amélioré. Objectifs de FPS non garantis.</p>")
+                    .arg(buildNumber.toHtmlEscaped(),
+                         revision.toHtmlEscaped(),
+                         QString::fromLatin1(qVersion()).toHtmlEscaped()));
         });
 
         auto* left=new QDockWidget(QStringLiteral("Explorateur de scène"),this);
@@ -835,7 +844,7 @@ private:
         canvas_->setImage(QImage{});  // Do not keep displaying an old scene.
         renderTimeLabel_->setText(QStringLiteral("Dernier rendu : —"));
         materialLabel_->setText(QStringLiteral("Sélectionner un matériau dans le catalogue"));
-        setWindowTitle(QStringLiteral("CSE WARP Beta X V17 — %1").arg(runtime_->title));
+        setWindowTitle(QStringLiteral("CSE WARP Beta X V17.3 — %1").arg(runtime_->title));
         sunHour_->blockSignals(true);
         sunHour_->setValue(double(runtime_->daylightHour));
         sunHour_->blockSignals(false);
@@ -1123,8 +1132,8 @@ QString defaultPath(){
 }
 int main(int argc,char** argv){
     QApplication app(argc,argv);
-    QCoreApplication::setApplicationName(QStringLiteral("CSE WARP Beta X V17"));
-    QCoreApplication::setApplicationVersion(QStringLiteral("17.0"));
+    QCoreApplication::setApplicationName(QStringLiteral("CSE WARP Beta X V17.3"));
+    QCoreApplication::setApplicationVersion(QStringLiteral("17.3.0"));
     const bool switchSmoke=argc>=4
         && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-scene-switch");
     const bool repeatSmoke=argc>=3
