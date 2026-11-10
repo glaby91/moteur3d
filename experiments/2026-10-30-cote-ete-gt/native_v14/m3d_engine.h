@@ -97,6 +97,22 @@ Stats renderGiAccumulatePass(const Scene& scene,const ShadowMap& shadow,
 RendererCapabilities detectRendererCapabilities() noexcept;
 bool renderCompute11Preview(const Scene& s,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
 bool renderDirectX11Preview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
+// Renderer quality is a shared public API: embedded host software and the
+// standalone Qt interface modify exactly the same settings. Each DX11 frame
+// takes one atomic snapshot, preventing partial UI/worker configuration.
+// Hardware availability may reduce actual MSAA samples (4 -> 2 -> 1).
+enum class RasterQualityProfile:uint8_t{Performance=0,Balanced=1,High=2,Ultra=3};
+struct RasterQualitySettings {
+    uint32_t msaaSamples=4;          // 1, 2, 4
+    uint32_t anisotropy=16;          // 1, 2, 4, 8, 16
+    uint32_t lodQualityPercent=100;  // 50 .. 200; higher retains details farther
+    bool frustumCulling=true;        // never changes pixel fidelity
+    bool dynamicLod=true;            // Ultra disables reduction of distant assets
+};
+RasterQualitySettings rasterQualityProfile(RasterQualityProfile preset);
+RasterQualitySettings rasterQualitySettings();
+bool setRasterQualitySettings(const RasterQualitySettings& settings,std::wstring& error);
+
 // Experimental pipelined D3D11 readback. Enqueue issues an ordered frame render
 // and CopyResource without waiting for CPU pixels; Receive returns the oldest
 // submitted frame, preserving exact frame order. Call both on the same thread.
