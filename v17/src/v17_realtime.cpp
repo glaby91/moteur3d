@@ -20,6 +20,7 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMainWindow>
@@ -702,6 +703,8 @@ int main(int argc,char** argv){
     format.setSwapInterval(1);
     QSurfaceFormat::setDefaultFormat(format);
     QApplication app(argc,argv);
+    const QString iconPath=QCoreApplication::applicationDirPath()+"/cse_warp_v17.ico";
+    if(QFileInfo::exists(iconPath))app.setWindowIcon(QIcon(iconPath));
     const QString path=gpuSmoke?
         (argc>=4?QString::fromLocal8Bit(argv[3]):defaultScenePath()):
         (argc>=2?QString::fromLocal8Bit(argv[1]):defaultScenePath());
@@ -712,6 +715,7 @@ int main(int argc,char** argv){
         return 2;
     }
     RealtimeWindow window(runtime,path);
+    if(!app.windowIcon().isNull())window.setWindowIcon(app.windowIcon());
     if(gpuSmoke)window.prepareGpuSmoke();
     window.show();
     if(gpuSmoke){
