@@ -40,10 +40,16 @@ jobs:
         shell: pwsh
         run: |
           $env:QT_QPA_PLATFORM = "offscreen"
-          & "build-v17/Release/moteur3d_v17.exe" --self-test "scenes/v16/pavillon01/scene.json"
-          if ($LASTEXITCODE -ne 0) { throw "V17 reuse of V16 Pavillon 01 failed" }
           & "build-v17/Release/v16_scene_check.exe" "scenes/v16/pavillon01/scene.json"
+          Write-Host "V16 loader exit: $LASTEXITCODE"
           if ($LASTEXITCODE -ne 0) { throw "V16 scene loader regression" }
+          Write-Host "Checking Windows Qt DLL availability:"
+          where.exe Qt6OpenGLWidgets.dll
+          where.exe Qt6OpenGL.dll
+          & "build-v17/Release/moteur3d_v17.exe" --self-test "scenes/v16/pavillon01/scene.json"
+          $code = $LASTEXITCODE
+          Write-Host ("V17 scene loader exit: {0} / 0x{1:X8}" -f $code, [uint32]($code -band 0xffffffffL))
+          if ($code -ne 0) { throw "V17 reuse of V16 Pavillon 01 failed (exit $code)" }
           if (!(Test-Path "build-v17/Release/moteur3d_v16.exe")) { throw "CPU/GPU V16 executable missing" }
           if (!(Test-Path "build-v17/Release/shaders/v17/pbr.vert")) { throw "V17 OpenGL vertex shader missing" }
           if (!(Test-Path "build-v17/Release/shaders/v17/pbr.frag")) { throw "V17 OpenGL PBR fragment shader missing" }
