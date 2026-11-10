@@ -34,6 +34,7 @@
 #include <QMouseEvent>
 #include <QSet>
 #include <QTimer>
+#include <QThreadPool>
 #include <QMainWindow>
 #include <QMetaObject>
 #include <QMenuBar>
@@ -116,6 +117,12 @@ public:
         setCentralWidget(canvas_);
         frameTimer_.setInterval(16);
         connect(&frameTimer_, &QTimer::timeout, this, [this]{ frameTick(); });
+        // The D3D11 preview owns a thread_local device and texture cache.
+        // A single persistent QtConcurrent worker keeps GPU resources on
+        // the SAME thread across all subsequent renders and camera changes.
+        // Using Qt's global pool can build a new device for every worker.
+        renderPool_.setMaxThreadCount(1);
+        renderPool_.setExpiryTimeout(-1);
         createUi();
         // A permanent status-bar widget outlives temporary render/progress
         // messages. QStatusBar::showMessage(..., 15000) used to erase the
@@ -348,6 +355,7 @@ private:
     QLabel* materialLabel_=nullptr;
     QLabel* renderTimeLabel_=nullptr;
     QFutureWatcher<Result> watcher_;
+    QThreadPool renderPool_;
     QFutureWatcher<SceneLoadOutcome> loadWatcher_;
     QLabel* sceneLoadLabel_=nullptr;
     QProgressBar* sceneLoadProgress_=nullptr;
@@ -884,7 +892,7 @@ private:
         const bool denoiseDirect=!globalIllumination&&!wantGpu&&denoiseDirect_->isChecked();
         statusBar()->showMessage(QStringLiteral("Calcul de l'image…"));
         const auto shadowCache=cpuShadows_;
-        watcher_.setFuture(QtConcurrent::run([this,serial,token,snapshot,preset,w,h,wantGpu,
+        watcher_.setFuture(QtConcurrent::run(&renderPool_,[this,serial,token,snapshot,preset,w,h,wantGpu,
             globalIllumination,raster,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache]{
             Result result;
             result.generation=token;
@@ -916,7 +924,17 @@ private:
                     ok=renderCompute11Preview(snapshot->renderScene,camera,w,h,pixels,stats,reason);
                     if(ok)result.renderer=QStringLiteral("V16 D3D11 Compute — GI adaptative");
                 }
-                if(!ok)result.error=QStringLiteral("GPU indisponible (%1) — retour CPU. ").arg(QString::fromStdWString(reason));
+                if(!ok){
+                    // Never send hundreds of thousands of triangles through
+                    // CPU ray tracing as an invisible fallback. That used to
+                    // look like an indefinitely stalled D3D11 render.
+                    result.error=QStringLiteral(
+                        "Échec du rendu GPU DirectX 11 : %1. "
+                        "Aucun basculement automatique vers le CPU.")
+                        .arg(QString::fromStdWString(reason));
+                    result.renderer=QStringLiteral("V17 GPU D3D11 — erreur");
+                    return result;
+                }
             }
             if(!ok){
                 pixels.resize(size_t(w)*size_t(h));
