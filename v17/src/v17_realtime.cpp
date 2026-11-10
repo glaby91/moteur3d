@@ -275,12 +275,13 @@ private:
         const float seconds=std::clamp(float(frameClock_.restart())*.001f,0.f,.05f);
         const QVector3D f=front(),r=QVector3D::crossProduct(f,{0,1,0}).normalized();
         QVector3D motion;
-        if(pressed_[Qt::Key_W]||pressed_[Qt::Key_Up])motion+=f;
+        // AZERTY/flèches are the primary controls; preserve optional WASD.
+        if(pressed_[Qt::Key_Z]||pressed_[Qt::Key_W]||pressed_[Qt::Key_Up])motion+=f;
         if(pressed_[Qt::Key_S]||pressed_[Qt::Key_Down])motion-=f;
-        if(pressed_[Qt::Key_D])motion+=r;
-        if(pressed_[Qt::Key_A])motion-=r;
-        if(pressed_[Qt::Key_E]||pressed_[Qt::Key_Space])motion+=QVector3D(0,1,0);
-        if(pressed_[Qt::Key_Q]||pressed_[Qt::Key_Control])motion-=QVector3D(0,1,0);
+        if(pressed_[Qt::Key_D]||pressed_[Qt::Key_Right])motion+=r;
+        if(pressed_[Qt::Key_Q]||pressed_[Qt::Key_A]||pressed_[Qt::Key_Left])motion-=r;
+        if(pressed_[Qt::Key_E]||pressed_[Qt::Key_Space]||pressed_[Qt::Key_PageUp])motion+=QVector3D(0,1,0);
+        if(pressed_[Qt::Key_Control]||pressed_[Qt::Key_PageDown])motion-=QVector3D(0,1,0);
         if(motion.lengthSquared()>.001f){
             const float speed=pressed_[Qt::Key_Shift]?14.f:4.5f;
             position_+=motion.normalized()*speed*seconds;
@@ -630,9 +631,9 @@ private:
         performance_->setWordWrap(true);
         layout->addWidget(performance_);
         auto* instructions=new QLabel(
-            "W A S D : déplacement\n"
+            "Fleches ou ZQSD : deplacement (WASD aussi)\n"
             "Souris + bouton droit : regarder\n"
-            "E / Q : monter / descendre\n"
+            "E / Espace : monter, Ctrl : descendre\n"
             "Maj : accélérer\n"
             "Touches 1 à 6 : caméras\n"
             "F11 : plein écran, Échap : libérer souris\n\n"
