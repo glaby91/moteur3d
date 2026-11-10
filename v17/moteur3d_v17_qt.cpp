@@ -51,6 +51,7 @@
 #include <QtConcurrent/QtConcurrentRun>
 #include <atomic>
 #include <cstring>
+#include <cstdio>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -90,7 +91,8 @@ private:
 };
 class V17Window final : public QMainWindow {
 public:
-    explicit V17Window(QString scenePath){
+    explicit V17Window(QString scenePath,int textureResolution=2048)
+        :textureResolution_(textureResolution){
         setWindowTitle(QStringLiteral("CSE WARP Beta X — V17 Exploration"));
         resize(1510,900);
         setMinimumSize(1100,670);
@@ -151,8 +153,42 @@ public:
         });
         if(!scenePath.isEmpty())openScene(scenePath);
     }
+    // Automated Windows smoke: open a second scene while the first render may
+    // still be running, then verify the new image really completed.
+    void smokeSceneSwitch(const QString& secondScene){
+        QTimer::singleShot(0,this,[this,secondScene]{
+            openScene(secondScene);
+            const auto expected=runtime_;
+            if(!expected||QFileInfo(scenePath_).absoluteFilePath()!=QFileInfo(secondScene).absoluteFilePath()){
+                std::fprintf(stderr,"V17 SCENE SWITCH: failed to load second scene\n");
+                QCoreApplication::exit(21);
+                return;
+            }
+            auto* poll=new QTimer(this);
+            poll->setInterval(100);
+            connect(poll,&QTimer::timeout,this,[this,expected,poll]{
+                if(runtime_!=expected){
+                    std::fprintf(stderr,"V17 SCENE SWITCH: wrong runtime after switch\n");
+                    QCoreApplication::exit(22);
+                    return;
+                }
+                if(!watcher_.isRunning()&&!pending_&&!lastImage_.isNull()){
+                    std::fprintf(stderr,"V17 SCENE SWITCH: new scene rendered %dx%d\n",
+                        lastImage_.width(),lastImage_.height());
+                    poll->stop();
+                    QCoreApplication::exit(0);
+                }
+            });
+            poll->start();
+            QTimer::singleShot(120000,this,[]{
+                std::fprintf(stderr,"V17 SCENE SWITCH: timed out waiting for image\n");
+                QCoreApplication::exit(23);
+            });
+        });
+    }
     ~V17Window() override {renderSerial_->fetch_add(1);watcher_.waitForFinished();}
 private:
+    int textureResolution_=2048;
     ImageView* canvas_=nullptr;
     QTimer frameTimer_;
     QElapsedTimer frameClock_;
@@ -564,7 +600,7 @@ private:
         statusBar()->showMessage(QStringLiteral("Construction des triangles, BVH et mipmaps PBR…"));
         QApplication::processEvents();
         // 2048-pixel mip chains are built once and shared by every material reference.
-        auto build=v16::buildRuntime(loaded.scene,2048);
+        auto build=v16::buildRuntime(loaded.scene,textureResolution_);
         if(!build){QMessageBox::critical(this,"Scène V16",build.error);return;}
         auto replacement=std::make_shared<v16::Runtime>(std::move(build.runtime));
         renderSerial_->fetch_add(1); // Any old scene frame is now obsolete.
@@ -822,13 +858,19 @@ QString defaultPath(){
 }
 int main(int argc,char** argv){
     QApplication app(argc,argv);
+    const bool switchSmoke=argc>=4
+        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-scene-switch");
     // Use the same Windows V17 brand icon for Qt titlebar/Alt-Tab/taskbar.
     // The ICO is also embedded in the EXE's native Win32 resources.
     const QString iconPath=QCoreApplication::applicationDirPath()
         +QStringLiteral("/cse_warp_v17.ico");
     if(QFileInfo::exists(iconPath))app.setWindowIcon(QIcon(iconPath));
-    const QString path=argc>1?QString::fromLocal8Bit(argv[1]):defaultPath();
-    V17Window window(path);
+    const QString path=switchSmoke?QString::fromLocal8Bit(argv[2])
+        :(argc>1?QString::fromLocal8Bit(argv[1]):defaultPath());
+    // The smoke test uses reduced texture resolution to stay viable on
+    // CI's software-only WARP device. Normal V17 keeps full 2048 PBR.
+    V17Window window(path,switchSmoke?512:2048);
+    if(switchSmoke)window.smokeSceneSwitch(QString::fromLocal8Bit(argv[3]));
     if(!app.windowIcon().isNull())window.setWindowIcon(app.windowIcon());
     window.show();
     return app.exec();
