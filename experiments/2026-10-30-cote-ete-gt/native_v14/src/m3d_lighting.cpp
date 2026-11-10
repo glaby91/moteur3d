@@ -40,4 +40,9 @@ void updateLighting(float hour){
   pointLights.push_back({{2.1f,.68f,-58.6f},8.f,1.05f*lampFactor,{255,218,172}});
  }
 }
+
+LightingSnapshot captureLighting(float hour){
+ updateLighting(hour);
+ return {sun,skyZenith,skyHorizon,sunTint,daylight};
+}
 }

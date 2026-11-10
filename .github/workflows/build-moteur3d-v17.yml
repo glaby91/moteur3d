@@ -1,0 +1,154 @@
+name: CSE WARP V17 — OpenGL realtime — Windows x64
+on:
+  push:
+    branches:
+      - feature/v17-opengl-realtime-pavillon01-261110
+    paths:
+      - 'v17/**'
+      - 'v16/CMakeLists.txt'
+      - '.github/workflows/build-moteur3d-v17.yml'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/**'
+      - 'scenes/v16/pavillon01/**'
+  pull_request:
+    paths:
+      - 'v17/**'
+      - 'v16/CMakeLists.txt'
+      - '.github/workflows/build-moteur3d-v17.yml'
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows x64 — V17 + V16 CPU/GPU — MSVC Qt6
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Qt 6.8.3 OpenGLWidgets
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Configure V16 core and additive V17 GUI
+        shell: pwsh
+        run: cmake -S v16 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+      - name: Build engine and both frontends
+        run: cmake --build build-v17 --config Release --parallel 4
+      - name: Verify shared V16 scene loader and V17 executable (no GL context required)
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = "offscreen"
+          & "build-v17/Release/v16_scene_check.exe" "scenes/v16/pavillon01/scene.json"
+          Write-Host "V16 loader exit: $LASTEXITCODE"
+          if ($LASTEXITCODE -ne 0) { throw "V16 scene loader regression" }
+          Write-Host "Checking Windows Qt DLL availability:"
+          where.exe Qt6OpenGLWidgets.dll
+          where.exe Qt6OpenGL.dll
+          # The Qt application is built as WIN32 (GUI subsystem). On Windows,
+          # PowerShell's direct invocation does not reliably wait for GUI
+          # process completion or set LASTEXITCODE. Start-Process does.
+          $exe = (Resolve-Path "build-v17/Release/moteur3d_v17.exe").Path
+          $process = Start-Process -FilePath $exe -ArgumentList @("--self-test", "scenes/v16/pavillon01/scene.json") -Wait -PassThru
+          $code = $process.ExitCode
+          Write-Host ("V17 scene loader exit: {0} / 0x{1:X8}" -f $code, [uint32]($code -band 0xffffffffL))
+          if ($code -ne 0) { throw "V17 reuse of V16 Pavillon 01 failed (exit $code)" }
+          if (!(Test-Path "build-v17/Release/moteur3d_v16.exe")) { throw "CPU/GPU V16 executable missing" }
+          if (!(Test-Path "build-v17/Release/shaders/v17/pbr.vert")) { throw "V17 OpenGL vertex shader missing" }
+          if (!(Test-Path "build-v17/Release/shaders/v17/pbr.frag")) { throw "V17 OpenGL PBR fragment shader missing" }
+          if (!(Test-Path "build-v17/Release/shaders/v17/shadow.vert")) { throw "V17 OpenGL shadow shader missing" }
+          Write-Host "V17 + V16 scene reuse and shader deployment passed"
+      - name: Validate CPU direct rendering remains available
+        shell: pwsh
+        run: |
+          $env:QT_QPA_PLATFORM = "offscreen"
+          & "build-v17/Release/v16_render_smoke.exe" "scenes/v16/pavillon01/scene.json" "build-v17/v17-cpu-reference.png"
+          if ($LASTEXITCODE -ne 0) { throw "V16 CPU reference render broken by V17" }
+          if ((Get-Item "build-v17/v17-cpu-reference.png").Length -lt 1000) { throw "CPU reference PNG blank" }
+      - name: Package V17 and unchanged V16 backends
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path dist-v17 -Force | Out-Null
+          Copy-Item "build-v17/Release/moteur3d_v17.exe" "dist-v17/"
+          Copy-Item "build-v17/Release/moteur3d_v16.exe" "dist-v17/"
+          Copy-Item "build-v17/Release/moteur3d_v16_core.dll" "dist-v17/"
+          Copy-Item "build-v17/Release/pavillon01" "dist-v17/pavillon01" -Recurse
+          Copy-Item "build-v17/Release/material-lab" "dist-v17/material-lab" -Recurse
+          Copy-Item "build-v17/Release/pripyat-photo2scene-proof" "dist-v17/pripyat-photo2scene-proof" -Recurse
+          Copy-Item "build-v17/Release/shaders" "dist-v17/shaders" -Recurse
+          Copy-Item "build-v17/v17-cpu-reference.png" "dist-v17/V17-CPU-reference.png"
+          git rev-parse HEAD | Out-File "dist-v17/REVISION.txt" -Encoding ascii
+          windeployqt --release --no-translations dist-v17/moteur3d_v17.exe
+          windeployqt --release --no-translations dist-v17/moteur3d_v16.exe
+          Write-Host "Qt6 runtime, OpenGLWidgets and platforms deployed"
+      - name: Upload CSE WARP V17 Windows x64
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17-OpenGL-Windows-x64
+          path: dist-v17/
+          if-no-files-found: error
+
+  glsl:
+    name: Validate V17 GLSL 3.3 shaders
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install glslang validator
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq glslang-tools
+      - name: Compile all V17 shader stages
+        run: |
+          glslangValidator -S vert v17/shaders/pbr.vert
+          glslangValidator -S frag v17/shaders/pbr.frag
+          glslangValidator -S vert v17/shaders/shadow.vert
+          glslangValidator -S frag v17/shaders/shadow.frag
+
+  mesa:
+    name: Linux Mesa llvmpipe — actual V17 OpenGL framebuffer
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install Qt6 + Mesa + virtual X server
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            qt6-base-dev qt6-base-dev-tools libqt6opengl6-dev \
+            libgl1-mesa-dri libglx-mesa0 mesa-utils \
+            libxkbcommon-x11-0 libxcb-cursor0 xvfb xauth
+      - name: Build V17 executable from shared V16 C++ renderer
+        run: |
+          cmake -S v16 -B build-v17-linux -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-v17-linux --target moteur3d_v17 --parallel 4
+      - name: Real OpenGL 3.3 raster and PNG under Mesa software driver
+        env:
+          QT_QPA_PLATFORM: xcb
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          QT_OPENGL: desktop
+        run: |
+          xvfb-run -a -s "-screen 0 1366x900x24 +extension GLX -noreset" \
+            timeout 150 ./build-v17-linux/moteur3d_v17 --smoke-gpu \
+              "$PWD/v17-real-opengl-mesa.png" "$PWD/scenes/v16/pavillon01/scene.json"
+          python3 - <<'PY'
+          from pathlib import Path
+          from struct import unpack
+          p = Path("v17-real-opengl-mesa.png")
+          if not p.is_file() or p.stat().st_size < 2000:
+              raise SystemExit("OpenGL real framebuffer PNG missing / suspiciously small")
+          data=p.read_bytes()
+          if data[:8] != b"\x89PNG\r\n\x1a\n":
+              raise SystemExit("Invalid V17 PNG signature")
+          dims=unpack(">II",data[16:24])
+          if dims!=(640,360):
+              raise SystemExit(f"Unexpected OpenGL render resolution: {dims}")
+          print(f"Actual Mesa GL V17 render verified: {dims}, {p.stat().st_size} bytes")
+          PY
+      - name: Upload actual OpenGL frame (software Mesa validation)
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17-Mesa-OpenGL-Smoke
+          path: v17-real-opengl-mesa.png
+          if-no-files-found: error
