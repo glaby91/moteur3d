@@ -569,6 +569,7 @@ public:
             context_->OMSetDepthStencilState(transparentDepth_.Get(),0);context_->OMSetBlendState(blend_.Get(),nullptr,0xffffffffu);context_->Draw(UINT(transparent_.size()*3),0);
             context_->OMSetBlendState(nullptr,nullptr,0xffffffffu);context_->OMSetDepthStencilState(depth_.Get(),0);context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
         }
+        const auto readbackStarted=std::chrono::steady_clock::now();
         if(sampleCount_>1)context_->ResolveSubresource(resolve_.Get(),0,target_.Get(),0,DXGI_FORMAT_R8G8B8A8_UNORM);
         else context_->CopyResource(resolve_.Get(),target_.Get());
         context_->CopyResource(staging_.Get(),resolve_.Get());
@@ -576,7 +577,13 @@ public:
         if(FAILED(hr)){error=L"Impossible de relire l’image calculée par DirectX 11.";return false;}
         pixels.resize(size_t(w)*h);
         for(int y=0;y<h;y++){const uint8_t* row=static_cast<const uint8_t*>(mapped.pData)+size_t(y)*mapped.RowPitch;for(int x=0;x<w;x++){const uint8_t* p=row+size_t(x)*4;pixels[size_t(y)*w+x]=0xff000000u|(uint32_t(p[0])<<16)|(uint32_t(p[1])<<8)|uint32_t(p[2]);}}
-        context_->Unmap(staging_.Get(),0);stats={};stats.gpu=true;stats.threads=0;stats.ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+        context_->Unmap(staging_.Get(),0);
+        const auto finished=std::chrono::steady_clock::now();
+        stats={};stats.gpu=true;stats.threads=0;
+        stats.ms=std::chrono::duration<double,std::milli>(finished-started).count();
+        // Reuse Stats.postMs for the GPU readback/post step. This includes
+        // Resolve+CopyResource+blocking Map and ARGB32 CPU conversion.
+        stats.postMs=std::chrono::duration<double,std::milli>(finished-readbackStarted).count();
         // Count submitted opaque primitives, not triangles hidden by culling.
         stats.tests=submittedVertices/3+uint64_t(submittedBoxInstances)*12
             +submittedEllipseTriangles+transparent_.size();
