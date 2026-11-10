@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(CSE_WARP_V17 VERSION 17.3 LANGUAGES CXX)
+project(CSE_WARP_V17 VERSION 17.0 LANGUAGES CXX)
 # GitHub Actions run number becomes the actual build number in both EXEs.
 # Local developer builds are explicitly numbered 0.
 set(V17_BUILD_NUMBER 0 CACHE STRING "CI run number for Windows version resource")
@@ -58,6 +58,7 @@ endif()
 target_include_directories(moteur3d_v17 PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
 target_link_libraries(moteur3d_v17 PRIVATE moteur3d_v16_core Qt6::Widgets Qt6::Concurrent)
+target_compile_definitions(moteur3d_v17 PRIVATE CSE_WARP_BUILD_NUMBER=${V17_BUILD_NUMBER})
 if(MSVC)
     target_compile_options(moteur3d_v17 PRIVATE /O2 /EHsc /utf-8)
 endif()
@@ -105,6 +106,7 @@ target_include_directories(moteur3d_v17_benchmark PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
 target_link_libraries(moteur3d_v17_benchmark PRIVATE
     moteur3d_v16_core Qt6::Core Qt6::Gui)
+target_compile_definitions(moteur3d_v17_benchmark PRIVATE CSE_WARP_BUILD_NUMBER=${V17_BUILD_NUMBER})
 if(WIN32)
     qt_add_executable(moteur3d_v17_benchui WIN32
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmark_v17_ui.cpp"
@@ -117,6 +119,7 @@ else()
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmark_v17_ui.cpp")
 endif()
 target_link_libraries(moteur3d_v17_benchui PRIVATE Qt6::Widgets)
+target_compile_definitions(moteur3d_v17_benchui PRIVATE CSE_WARP_BUILD_NUMBER=${V17_BUILD_NUMBER})
 if(WIN32)
     add_custom_command(TARGET moteur3d_v17_benchui POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
