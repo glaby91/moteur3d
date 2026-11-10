@@ -471,11 +471,13 @@ public:
         ID3D11Buffer* cbuff=constants_.Get();context_->VSSetConstantBuffers(0,1,&cbuff);context_->PSSetConstantBuffers(0,1,&cbuff);
         ID3D11ShaderResourceView* srvs[]={albedo_.Get(),shadowSrv_.Get(),roughness_.Get(),normal_.Get()};context_->PSSetShaderResources(0,4,srvs);ID3D11SamplerState* sampler=sampler_.Get();context_->PSSetSamplers(0,1,&sampler);
         UINT submittedVertices=0;
+        uint64_t drawCalls=0;
         const char* noCull=std::getenv("M3D_V17_DISABLE_FRUSTUM_CULLING");
         const bool cullEnabled=!(noCull && std::strcmp(noCull,"1")==0);
         if(vertexCount_){
             if(!cullEnabled){
                 context_->Draw(vertexCount_,0);
+                ++drawCalls;
                 submittedVertices=vertexCount_;
             }else{
                 // Merge adjacent visible batches to avoid thousands of draw
@@ -484,6 +486,7 @@ public:
                 auto flush=[&]{
                     if(!count)return;
                     context_->Draw(count,start);
+                    ++drawCalls;
                     submittedVertices+=count;
                     count=0;
                 };
@@ -507,6 +510,7 @@ public:
             auto drawBoxes=[&](UINT first,UINT count){
                 if(!count)return;
                 context_->DrawInstanced(36,count,0,first);
+                ++drawCalls;
                 submittedBoxInstances+=count;
             };
             if(!cullEnabled){
@@ -527,6 +531,7 @@ public:
             context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
         }
         uint64_t submittedEllipseTriangles=0;
+        uint64_t submittedEllipseInstances=0;
         if(ellipseInstanceCount_){
             std::array<std::vector<GpuEllipseInstance>,3> level;
             for(auto& bucket:level)bucket.reserve(ellipseInstanceCount_/3+1);
@@ -567,6 +572,8 @@ public:
                 UINT offsets[]={0,0};
                 context_->IASetVertexBuffers(0,2,buffers,strides,offsets);
                 context_->DrawInstanced(ellipseVertexCounts_[lod],count,0,first);
+                ++drawCalls;
+                submittedEllipseInstances+=count;
                 submittedEllipseTriangles+=uint64_t(ellipseVertexCounts_[lod]/3)*count;
                 first+=count;
             }
@@ -580,7 +587,7 @@ public:
             if(FAILED(hr)){error=L"Impossible de préparer les surfaces transparentes DirectX 11.";return false;}
             auto* out=static_cast<GpuVertex*>(transparentMap.pData);for(const auto& t:transparent_)for(const auto& v:t.v)*out++=v;context_->Unmap(transparentVertices_.Get(),0);
             UINT transparentStride=sizeof(GpuVertex);ID3D11Buffer* transparentBuffer=transparentVertices_.Get();context_->IASetVertexBuffers(0,1,&transparentBuffer,&transparentStride,&offset);
-            context_->OMSetDepthStencilState(transparentDepth_.Get(),0);context_->OMSetBlendState(blend_.Get(),nullptr,0xffffffffu);context_->Draw(UINT(transparent_.size()*3),0);
+            context_->OMSetDepthStencilState(transparentDepth_.Get(),0);context_->OMSetBlendState(blend_.Get(),nullptr,0xffffffffu);context_->Draw(UINT(transparent_.size()*3),0);++drawCalls;
             context_->OMSetBlendState(nullptr,nullptr,0xffffffffu);context_->OMSetDepthStencilState(depth_.Get(),0);context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
         }
         const auto readbackStarted=std::chrono::steady_clock::now();
@@ -598,6 +605,9 @@ public:
         // Reuse Stats.postMs for the GPU readback/post step. This includes
         // Resolve+CopyResource+blocking Map and ARGB32 CPU conversion.
         stats.postMs=std::chrono::duration<double,std::milli>(finished-readbackStarted).count();
+        stats.gpuDrawCalls=drawCalls;
+        stats.gpuBoxInstances=submittedBoxInstances;
+        stats.gpuEllipseInstances=submittedEllipseInstances;
         // Count submitted opaque primitives, not triangles hidden by culling.
         stats.tests=submittedVertices/3+uint64_t(submittedBoxInstances)*12
             +submittedEllipseTriangles+transparent_.size();
