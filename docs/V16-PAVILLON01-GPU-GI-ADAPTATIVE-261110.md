@@ -22,10 +22,10 @@ La comparaison porte sur le même moteur et la même scène, avec textures CPU/G
 
 | Mesure | Build 336 (résolution GI native) | GI adaptative |
 | --- | ---: | ---: |
-| WARP Full HD, rendu à chaud | 5 068 ms | 2 767 ms (run 42786684379) |
+| WARP Full HD, rendu à chaud | 5 068 ms | 2 513 ms (Build 341, run 42786951904) |
 | Écart moyen RGB face au CPU GI 4 spp | 12,409/255 | 12,369/255 |
 | PSNR face au CPU GI 4 spp | 19,692 dB | 19,712 dB |
-| Test A/B WARP, 320×180, GI full vs adaptative | 282 ms full | 168 ms adaptative |
+| Test A/B WARP, 320×180, GI full vs adaptative | 265 ms full | 162 ms adaptative |
 | Test A/B, écart moyen adaptatif/full à 320×180 | — | **0,776/255** |
 
 Les mesures WARP démontrent la diminution du coût logiciel de la passe GI sans perte mesurée notable au test, **mais ne prédisent pas** directement la durée sur le GPU Intel HD 620 de l'utilisateur. Les timings incluent la synchronisation lecture image et peuvent varier avec l'environnement. Le premier appel cold WARP est **plus lent** avec les deux shaders et le cache à initialiser ; ne pas extrapoler les timings de warm-up.
@@ -39,5 +39,5 @@ Les mesures WARP démontrent la diminution du coût logiciel de la passe GI sans
 
 ## Liens
 - PR développement : https://github.com/glaby91/moteur3d/pull/18
-- CI initiale validée : https://github.com/glaby91/moteur3d/actions/runs/42786684379
+- CI finale validée : https://github.com/glaby91/moteur3d/actions/runs/42786951904
 - Base Build 336 : https://github.com/glaby91/moteur3d/actions/runs/42737363678
