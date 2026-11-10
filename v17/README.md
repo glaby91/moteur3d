@@ -6,7 +6,7 @@
 
 ## Prototype V17-1 — déjà implémenté
 
-- `v17/moteur3d_v17_qt.cpp` : fenêtre V17, mode Exploration, clic gauche + souris pour regarder, WASD/flèches pour se déplacer, Maj pour accélérer, espace/Ctrl pour monter/descendre, Échap pour arrêter.
+- `v17/moteur3d_v17_qt.cpp` : fenêtre V17, mode Exploration, clic gauche + souris pour regarder, ZQSD/flèches (AZERTY) pour se déplacer, Maj pour accélérer, espace/Ctrl pour monter/descendre, Échap pour arrêter.
 - `v17/CMakeLists.txt` : **réutilise directement le moteur V16 complet** (CPU ray tracing, CPU GI, D3D11 Compute, D3D11 Raster et scènes), sans recoder de moteur.
 - Rasterisation GPU existante ajoutée comme cinquième méthode, avec caches des ombres et scène chargée. Éclairage raster encore de première génération : l'amélioration de la chaleur, du verre et du PBR est une **étape ultérieure**.
 - FPS mesurés à l'écran pendant l'exploration et durée de rendu disponible.
