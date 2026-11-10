@@ -47,6 +47,58 @@ int main(int argc,char** argv) {
   qCritical()<<"Cached WARP rendering differs from cold result:"<<QString::fromStdWString(warmError);
   return 1;
  }
+ // Verify quality/performance switch against a true full-resolution
+ // secondary-ray reference at the same camera, scene, lighting and sample count.
+ // A small image keeps D3D11 software WARP test costs bounded.
+ constexpr int abWidth=320,abHeight=180;
+ const auto abCam=m3d::v16::makeCamera(runtime.runtime.cameras.front(),abWidth,abHeight);
+ qputenv("M3D_V16_GPU_GI_ADAPTIVE",QByteArrayLiteral("0"));
+ std::vector<uint32_t> fullGiPixels;
+ m3d::Stats fullGiStats;std::wstring fullGiError;
+ const bool fullGiOk=m3d::renderCompute11Preview(
+     runtime.runtime.renderScene,abCam,abWidth,abHeight,
+     fullGiPixels,fullGiStats,fullGiError);
+ qputenv("M3D_V16_GPU_GI_ADAPTIVE",QByteArrayLiteral("1"));
+ std::vector<uint32_t> halfGiPixels;
+ m3d::Stats halfGiStats;std::wstring halfGiError;
+ const bool halfGiOk=m3d::renderCompute11Preview(
+     runtime.runtime.renderScene,abCam,abWidth,abHeight,
+     halfGiPixels,halfGiStats,halfGiError);
+ qunsetenv("M3D_V16_GPU_GI_ADAPTIVE");
+ if(!fullGiOk||!halfGiOk||fullGiPixels.size()!=size_t(abWidth)*abHeight||
+    halfGiPixels.size()!=fullGiPixels.size()) {
+  qCritical()<<"Adaptive 2x2 GI mode comparison failed:"
+             <<QString::fromStdWString(fullGiError)
+             <<QString::fromStdWString(halfGiError);return 1;
+ }
+ double totalAbs=0.;
+ uint64_t changedPixels=0;
+ for(size_t i=0;i<fullGiPixels.size();++i){
+  if(fullGiPixels[i]!=halfGiPixels[i])++changedPixels;
+  for(int bit: {0,8,16}){
+   const int a=int((fullGiPixels[i]>>bit)&255u);
+   const int b=int((halfGiPixels[i]>>bit)&255u);
+   totalAbs+=std::abs(a-b);
+  }
+ }
+ const double meanAbs=totalAbs/double(fullGiPixels.size()*3u);
+ if(changedPixels==0||meanAbs>65.){
+  qCritical()<<"Adaptive GI invalid or severe visual regression:"
+             <<meanAbs<<"levels RGB/255 changed pixels"<<changedPixels;
+  return 1;
+ }
+ qInfo()<<"GI full-res vs adaptive 2x2 MAE"<<meanAbs
+        <<"full-res ms"<<fullGiStats.ms<<"adaptive ms"<<halfGiStats.ms;
+ // Confirm that the cached half-resolution GI can be reused by the full
+ // 1920x1080 path after a resolution/mode switch, without stale buffers.
+ std::vector<uint32_t> afterSwitchPixels;
+ m3d::Stats afterSwitchStats;std::wstring afterSwitchError;
+ if(!m3d::renderCompute11Preview(runtime.runtime.renderScene,cam,width,height,
+                                 afterSwitchPixels,afterSwitchStats,afterSwitchError)||
+    afterSwitchPixels!=pixels){
+  qCritical()<<"GI cache invalidated incorrectly after changing resolution:"
+             <<QString::fromStdWString(afterSwitchError);return 1;
+ }
  // Confirm that the new secondary-bounce quality path genuinely changes
  // the final image, and can be disabled for Intel iGPU performance comparison.
  qputenv("M3D_V16_GPU_GI_SAMPLES",QByteArrayLiteral("0"));
