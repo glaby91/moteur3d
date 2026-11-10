@@ -19,9 +19,11 @@ struct alignas(16) GpuNode { float mn[3]; uint32_t left; float mx[3]; uint32_t r
 struct alignas(16) GpuTri { float p0[3]; uint32_t material; float p1[3]; uint32_t pad0; float p2[3]; uint32_t pad1; float n0[3]; uint32_t pad2; float n1[3]; uint32_t pad3; float n2[3]; uint32_t pad4; float uv0[2],uv1[2],uv2[2],uvPad[2]; };
 static_assert(sizeof(GpuTri)==128,"GPU triangle layout differs from HLSL");
 // Source albedo/roughness/normal maps are uploaded separately to a texture array.
-struct alignas(16) GpuMaterial { float albedo[3]; float roughnessScale; float metallic,transmission,ior,pad; };
+struct alignas(16) GpuMaterial { float albedo[3]; float roughnessScale; float metallic,transmission,ior,dielectricF0; };
+struct alignas(16) GpuLight { float position[3];float radius;float color[3];float intensity; };
+static_assert(sizeof(GpuLight)==32, "GPU point light layout mismatch");
 static_assert(sizeof(GpuMaterial)==32, "GPU material buffer layout mismatch");
-struct alignas(16) Params { float eye[3],tanHalf,forward[3],aspect,right[3],nearPlane,up[3],farPlane; uint32_t width,height,nodeCount,triangleCount,rootIndex,maxTraversal,materialCount,textureBaseSize; float sunDirection[3],ambientStrength; float skyZenith[3],skyStrength; float skyHorizon[3],sunStrength; float sunColor[3],skyFillStrength; };
+struct alignas(16) Params { float eye[3],tanHalf,forward[3],aspect,right[3],nearPlane,up[3],farPlane; uint32_t width,height,nodeCount,triangleCount,rootIndex,maxTraversal,materialCount,textureBaseSize; float sunDirection[3],ambientStrength; float skyZenith[3],skyStrength; float skyHorizon[3],sunStrength; float sunColor[3],skyFillStrength; uint32_t lightCount;float sceneLightScale,indirectFill,reserved0; };
 static_assert(sizeof(Params)%16==0, "GPU constant buffer must be aligned");
 void v3(float* dst,V v){dst[0]=v.x;dst[1]=v.y;dst[2]=v.z;}
 template<class T> bool makeSrv(ID3D11Device* d,const std::vector<T>& values,ComPtr<ID3D11ShaderResourceView>& srv){
@@ -129,6 +131,12 @@ uint64_t hashScene(const Scene& scene) {
   scalar(node.left);scalar(node.right);scalar(node.start);scalar(node.count);
  }
  if(!scene.order.empty())bytes(scene.order.data(),scene.order.size()*sizeof(scene.order[0]));
+ scalar(scene.useLegacyWorldLights);
+ for(const auto& l:scene.lights){
+  scalar(l.p.x);scalar(l.p.y);scalar(l.p.z);
+  scalar(l.radius);scalar(l.intensity);
+  scalar(l.color.x);scalar(l.color.y);scalar(l.color.z);
+ }
  for(const auto& m:scene.mat){
   bytes(m.name.data(),m.name.size());
   scalar(m.reflectivityPercent);scalar(m.transmissionPercent);
@@ -155,18 +163,18 @@ struct ComputeCache {
  bool sceneReady=false;
  bool shaderTimeSet=false;
  std::filesystem::file_time_type shaderTime{};
- UINT w=0,h=0,nodeCount=0,triangleCount=0,materialCount=0;
+ UINT w=0,h=0,nodeCount=0,triangleCount=0,materialCount=0,lightCount=0;
  ComPtr<ID3D11Device> device;
  ComPtr<ID3D11DeviceContext> ctx;
  ComPtr<ID3D11ComputeShader> shader;
- ComPtr<ID3D11ShaderResourceView> srv0,srv1,srv2,srv3,srv4;
+ ComPtr<ID3D11ShaderResourceView> srv0,srv1,srv2,srv3,srv4,srv5;
  ComPtr<ID3D11SamplerState> sampler;
  ComPtr<ID3D11Buffer> constant;
  ComPtr<ID3D11Texture2D> output,staging;
  ComPtr<ID3D11UnorderedAccessView> uav;
  void reset(){
   ctx.Reset();device.Reset();shader.Reset();
-  srv0.Reset();srv1.Reset();srv2.Reset();srv3.Reset();srv4.Reset();
+  srv0.Reset();srv1.Reset();srv2.Reset();srv3.Reset();srv4.Reset();srv5.Reset();
   sampler.Reset();constant.Reset();output.Reset();staging.Reset();uav.Reset();
   sceneReady=false;shaderTimeSet=false;w=0;h=0;sceneHash=0;sceneRevision=0;trackedScene=false;
  }
@@ -270,18 +278,36 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
    g.metallic=std::clamp(m.metallic,0.f,1.f);
    g.transmission=float(m.transmissionPercent)/100.f;
    g.ior=m.refractiveIndex;
+   g.dielectricF0=m.reflectivityPercent?
+       std::clamp(float(m.reflectivityPercent)*.01f,.02f,.95f):.04f;
    materials.push_back(g);
   }
-  ComPtr<ID3D11ShaderResourceView> s0,s1,s2,s3,s4;
+  // Only scene-authored lights belong to the V16 scene. This is the same
+  // scene.lights list used by CPU offlinePbrShade().
+  std::vector<GpuLight> lights;lights.reserve(std::max<size_t>(1,scene.lights.size()));
+  for(const auto& l:scene.lights){
+   GpuLight g{};v3(g.position,l.p);g.radius=l.radius;
+   g.color[0]=l.color.x/255.f;
+   g.color[1]=l.color.y/255.f;
+   g.color[2]=l.color.z/255.f;
+   g.intensity=l.intensity;
+   lights.push_back(g);
+  }
+  if(lights.empty())lights.push_back(GpuLight{}); // valid nonempty SRV with lightCount=0
+  ComPtr<ID3D11ShaderResourceView> s0,s1,s2,s3,s4,s5;
   if(!makeSrv(c.device.Get(),nodes,s0)||!makeSrv(c.device.Get(),triangles,s1)||
      !makeSrv(c.device.Get(),scene.order,s2)||!makeSrv(c.device.Get(),materials,s3)){
    error=L"Allocation BVH/matériaux GPU impossible";return false;
   }
   if(!makePbrTextureArray(c.device.Get(),scene.mat,s4,error))return false;
-  c.srv0=s0;c.srv1=s1;c.srv2=s2;c.srv3=s3;c.srv4=s4;
+  if(!makeSrv(c.device.Get(),lights,s5)){
+   error=L"Allocation des lumieres V16 GPU impossible";return false;
+  }
+  c.srv0=s0;c.srv1=s1;c.srv2=s2;c.srv3=s3;c.srv4=s4;c.srv5=s5;
   c.sceneHash=key;c.sceneRevision=revision;c.trackedScene=tracked;
   c.nodeCount=uint32_t(nodes.size());
   c.triangleCount=uint32_t(triangles.size());c.materialCount=uint32_t(materials.size());
+  c.lightCount=uint32_t(scene.lights.size());
   c.sceneReady=true;
  }
  if(c.constant.Get()==nullptr){
@@ -327,34 +353,38 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
  params.rootIndex=uint32_t(scene.root);
  params.maxTraversal=uint32_t(std::min<size_t>(1000000,scene.node.size()*4+1));
  params.materialCount=c.materialCount;params.textureBaseSize=gpuTextureBaseSize;
- v3(params.sunDirection,sun);params.ambientStrength=.59f;
+ v3(params.sunDirection,sun);params.ambientStrength=0.f;
  params.skyZenith[0]=skyZenith.x/255.f;params.skyZenith[1]=skyZenith.y/255.f;
  params.skyZenith[2]=skyZenith.z/255.f;
  params.skyHorizon[0]=skyHorizon.x/255.f;params.skyHorizon[1]=skyHorizon.y/255.f;
  params.skyHorizon[2]=skyHorizon.z/255.f;
  params.skyStrength=1.f;
- params.sunStrength=.90f*std::max(.05f,daylight);
+ // Match CPU offlinePbrShade() direct solar radiance exactly.
+ params.sunStrength=2.8f*daylight;
  params.sunColor[0]=sunTint.x/255.f;
  params.sunColor[1]=sunTint.y/255.f;
  params.sunColor[2]=sunTint.z/255.f;
- params.skyFillStrength=.23f;
+ params.skyFillStrength=0.f;
+ params.lightCount=std::min<uint32_t>(c.lightCount,64u);
+ params.sceneLightScale=.42f+.58f*(1.f-daylight);
+ params.indirectFill=0.f; // No fake multi-bounce GI.
  c.ctx->UpdateSubresource(c.constant.Get(),0,nullptr,&params,0,0);
  ID3D11ShaderResourceView* srvs[]={c.srv0.Get(),c.srv1.Get(),c.srv2.Get(),
-                                    c.srv3.Get(),c.srv4.Get()};
+                                    c.srv3.Get(),c.srv4.Get(),c.srv5.Get()};
  ID3D11UnorderedAccessView* uavs[]={c.uav.Get()};
  ID3D11Buffer* cbuff[]={c.constant.Get()};
  ID3D11SamplerState* samplers[]={c.sampler.Get()};
  c.ctx->CSSetShader(c.shader.Get(),nullptr,0);
- c.ctx->CSSetShaderResources(0,5,srvs);
+ c.ctx->CSSetShaderResources(0,6,srvs);
  c.ctx->CSSetSamplers(0,1,samplers);
  c.ctx->CSSetUnorderedAccessViews(0,1,uavs,nullptr);
  c.ctx->CSSetConstantBuffers(0,1,cbuff);
  c.ctx->Dispatch(UINT((w+7)/8),UINT((h+7)/8),1);
  ID3D11UnorderedAccessView* noUav=nullptr;
- ID3D11ShaderResourceView* noSrvs[5]={};
+ ID3D11ShaderResourceView* noSrvs[6]={};
  ID3D11SamplerState* noSampler=nullptr;
  c.ctx->CSSetUnorderedAccessViews(0,1,&noUav,nullptr);
- c.ctx->CSSetShaderResources(0,5,noSrvs);
+ c.ctx->CSSetShaderResources(0,6,noSrvs);
  c.ctx->CSSetSamplers(0,1,&noSampler);
  c.ctx->CopyResource(c.staging.Get(),c.output.Get());
  D3D11_MAPPED_SUBRESOURCE mapped{};
