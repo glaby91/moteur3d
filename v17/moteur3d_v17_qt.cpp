@@ -109,6 +109,10 @@ public:
         renderTimeLabel_->setObjectName(QStringLiteral("v16LastRenderTime"));
         statusBar()->addPermanentWidget(renderTimeLabel_);
         connect(&watcher_,&QFutureWatcher<Result>::finished,this,[this]{
+            // A stale finished notification can arrive after setFuture()
+            // already started another render. result() would block the GUI
+            // waiting for that new render: never call it while still running.
+            if(watcher_.isRunning())return;
             const auto outcome=watcher_.result();
             // A previous scene may finish after the user has opened a new one.
             // Never show its image or overwrite the current status bar.
