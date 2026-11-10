@@ -5,7 +5,7 @@
 ## Ce qui est implémenté
 
 - **Rendu OpenGL 3.3 en continu**, basé sur les **triangles réellement compilés par `m3d::v16::buildRuntime`** ; aucun nouveau format de scène et aucun objet réinventé
-- **Camera libre** : WASD et flèches, bouton droit + souris, Q/E ou espace/contrôle pour monter/descendre, Maj pour accélérer, touches 1 à 6 pour les caméras existantes, F11 plein écran
+- **Caméra libre** : **ZQSD et quatre flèches** (WASD optionnel), bouton droit + souris, E/espace pour monter, Ctrl pour descendre, Maj pour accélérer, touches 1 à 6 pour les caméras existantes, F11 plein écran
 - **Rasterisation matérielle** avec Z-buffer et shaders GLSL PBR de première génération (GGX/Smith/Schlick, normal mapping, rugosité, métallicité, lumières architecturales)
 - **Carte d'ombres GPU 1024×1024**, recalculée lorsque l'heure solaire change, pas à chaque déplacement
 - **Génération des textures GPU** depuis les **mipmaps PBR de V16** : albedo sRGB, normal, roughness et constantes matériaux ; pas de textures artificielles séparées pour V17
