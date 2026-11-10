@@ -1,7 +1,7 @@
 // Moteur3D V16 - Windows D3D11 Compute shader, Shader Model 5.0.
 // Same scene, projection and PBR mip chains as the CPU renderer.
-// Preview shading: direct sun, BVH hard shadows, one straight-through glass path.
-// No DXR or physical multi-bounce path tracing; do not call this GPU/CPU PBR parity.
+// Color-managed primary lighting: CPU-GI GGX/Schlick + linear irradiance + ACES/sRGB.
+// Single-bounce preview: not identical to CPU two-bounce global illumination.
 struct Ray { float3 origin; float3 direction; };
 struct GpuBvhNode {
     float3 boundsMin; uint left;
@@ -20,7 +20,7 @@ struct GpuTriangle {
 };
 struct GpuMaterial {
     float3 albedo; float roughnessScale;
-    float metallic; float transmission; float ior; float pad;
+    float metallic; float transmission; float ior; float dielectricF0;
 };
 struct HitInfo {
     float t;
@@ -38,6 +38,11 @@ cbuffer Frame : register(b0) {
     float3 skyZenith; float skyStrength;
     float3 skyHorizon; float sunStrength;
     float3 sunColor; float skyFillStrength;
+    uint lightCount; float sceneLightScale; float indirectFill; uint gpuIndirectSamples;
+};
+struct GpuLight {
+    float3 position; float radius;
+    float3 color; float intensity;
 };
 StructuredBuffer<GpuBvhNode> Nodes : register(t0);
 StructuredBuffer<GpuTriangle> Triangles : register(t1);
@@ -45,17 +50,30 @@ StructuredBuffer<uint> PrimitiveOrder : register(t2);
 StructuredBuffer<GpuMaterial> Materials : register(t3);
 // Each material owns three slices: color, tangent-space normal, roughness.
 Texture2DArray<float4> PbrMaps : register(t4);
+StructuredBuffer<GpuLight> Lights : register(t5);
 SamplerState RepeatTrilinear : register(s0);
 RWTexture2D<float4> Output : register(u0);
 
+// CPU GI packHdr() uses ACES + sRGB, not raw saturate.
+float3 srgbToLinear(float3 c) {
+    c=max(c,float3(0,0,0));
+    return lerp(c/12.92f,pow((c+.055f)/1.055f,2.4f),step(.04045f,c));
+}
+float3 linearToSrgb(float3 c) {
+    c=max(c,float3(0,0,0));
+    return lerp(c*12.92f,1.055f*pow(c,1.f/2.4f)-.055f,step(.0031308f,c));
+}
+float3 encodeHdr(float3 radiance) {
+    float3 v=max(radiance,float3(0,0,0));
+    float3 aces=saturate((v*(2.51f*v+.03f))/(v*(2.43f*v+.59f)+.14f));
+    return saturate(linearToSrgb(aces));
+}
 float3 background(Ray ray) {
-    // The same gentle zenith-to-horizon gradient as CPU daylight;
-    // a small solar aureole lends direction to sky and water reflections.
     float t=saturate((ray.direction.y+.10f)*1.10f);
     float3 sky=lerp(skyHorizon,skyZenith,t)*skyStrength;
     float alignment=saturate(dot(ray.direction,normalize(sunDirection)));
-    float halo=pow(alignment,64.f)*.065f*sunStrength;
-    return saturate(sky+sunColor*halo);
+    float aureole=pow(alignment,64.f)*.065f*saturate(sunStrength/2.8f);
+    return srgbToLinear(saturate(sky+sunColor*aureole));
 }
 bool intersectBounds(Ray ray,float3 bmin,float3 bmax,float limit) {
     float nearT=max(nearPlane,.0001f),farT=limit;
@@ -151,46 +169,127 @@ float3 tangentSpaceNormal(GpuTriangle tri,float3 baseNormal,float3 mapped) {
     float3 bitangent=cross(baseNormal,tangent)*((det<0.f)?-1.f:1.f);
     return normalize(tangent*mapped.x+bitangent*mapped.y+baseNormal*mapped.z);
 }
-float3 shadeSurface(Ray ray,HitInfo hit,float3 n,float3 color,float roughness,float metallic) {
+// CPU offlinePbrShade's GGX/Smith/Schlick direct BRDF and hemispheric sky.
+// No invented GI bounce; indirectFill is zero until a validated probe exists.
+float ggxDistribution(float nh,float roughness) {
+    float a=max(.045f,roughness);float a2=a*a*a*a;
+    float d=nh*nh*(a2-1.f)+1.f;
+    return a2/(3.141592654f*d*d+1e-7f);
+}
+float smithG1(float nd,float roughness) {
+    float a=max(.045f,roughness);float k=(a+1.f)*(a+1.f)*.125f;
+    return nd/(nd*(1.f-k)+k+1e-7f);
+}
+float3 brdf(float3 n,float3 view,float3 l,float3 base,float roughness,
+            float metallic,float3 f0,float3 radiance,float visibilityFactor) {
+    float nl=saturate(dot(n,l));
+    if(nl<=0.f||visibilityFactor<=0.f)return float3(0,0,0);
+    float nv=max(1e-4f,dot(n,view));
+    float3 halfVector=normalize(view+l);
+    float nh=saturate(dot(n,halfVector)),vh=saturate(dot(view,halfVector));
+    float3 F=f0+(1.f-f0)*pow(1.f-vh,5.f);
+    float D=ggxDistribution(nh,roughness);
+    float G=smithG1(nv,roughness)*smithG1(nl,roughness);
+    float3 spec=F*(D*G/(4.f*nv*nl+1e-6f));
+    float3 diff=(1.f-F)*(1.f-metallic)*base*(1.f/3.141592654f);
+    return (diff+spec)*radiance*(nl*visibilityFactor);
+}
+float3 shadeSurface(Ray ray,HitInfo hit,float3 n,float3 base,float roughness,
+                    GpuMaterial material) {
     GpuTriangle tri=Triangles[hit.primitive];
     float3 p=ray.origin+ray.direction*hit.t;
-    if(dot(n,ray.direction)>0)n=-n;
+    if(dot(n,ray.direction)>0.f)n=-n;
+    float3 view=normalize(-ray.direction);
+    float metallic=saturate(material.metallic);
+    float3 f0=lerp(float3(material.dielectricF0,material.dielectricF0,material.dielectricF0),
+                   base,metallic);
     float3 L=normalize(sunDirection);
-    float diffuse=saturate(dot(n,L));
-    if(diffuse>.0001f) {
-        // Use the unperturbed triangle normal for ray offsets. Bump-map normals
-        // can point underneath a surface and cause false dark patches ("shadow acne").
-        float3 geometryNormal=normalize(cross(tri.p1-tri.p0,tri.p2-tri.p0));
-        if(dot(geometryNormal,ray.direction)>0.f)geometryNormal=-geometryNormal;
-        Ray shadow;
-        shadow.origin=p+geometryNormal*.035f+L*.025f;
-        shadow.direction=L;
+    float visibilityFactor=1.f;
+    if(dot(n,L)>.0001f) {
+        float3 geom=normalize(cross(tri.p1-tri.p0,tri.p2-tri.p0));
+        if(dot(geom,ray.direction)>0.f)geom=-geom;
+        Ray shadow;shadow.origin=p+geom*.035f+L*.025f;shadow.direction=L;
         HitInfo blocker;
-        // Exclude the originating triangle and tiny adjacent coplanar hits.
-        const uint state=traceClosest(shadow,1000.f,true,hit.primitive,blocker);
-        if(state==1) {
-            // Close blockers such as roof parapets produce very hard black bands
-            // in a single-ray preview. Preserve the shadow but approximate
-            // skylight/penumbra by retaining more direct fill nearby.
-            const float separation=saturate(blocker.t/2.0f);
-            diffuse*=lerp(.72f,.38f,separation);
-        }
+        uint state=traceClosest(shadow,1000.f,true,hit.primitive,blocker);
+        visibilityFactor=(state==1)?0.f:1.f;
     }
-    // Directional sky fill: normal-mapped facets see a distinct zenith /
-    // horizon ratio, preserving surface relief without geometry or noise.
+    float3 sunRadiance=srgbToLinear(sunColor)*sunStrength;
+    float3 lit=brdf(n,view,L,base,roughness,metallic,f0,sunRadiance,visibilityFactor);
     float skyFacing=saturate(.5f+.5f*n.y);
-    float3 skyTint=lerp(skyHorizon,skyZenith,skyFacing);
-    float3 fill=ambientStrength*.65f+
-                 skyTint*skyFillStrength*(.42f+.58f*skyFacing);
-    float3 lit=color*(fill+diffuse*sunStrength*sunColor*(1.f-.55f*metallic));
-    float3 viewDir=-ray.direction;
-    float3 reflected=reflect(-L,n);
-    float spec=pow(saturate(dot(reflected,viewDir)),lerp(90.f,8.f,roughness));
-    float3 specular=lerp(float3(.18f,.18f,.18f),color,metallic);
-    lit+=specular*sunColor*spec*(.2f+.55f*(1.f-roughness))*sunStrength;
-    return saturate(lit);
+    float3 skyIrradiance=srgbToLinear(skyZenith)*(.25f+.55f*skyFacing)+
+                         srgbToLinear(skyHorizon)*(.50f-.20f*skyFacing);
+    lit+=base*skyIrradiance*.22f;
+    // Respect point lights authored in scenes/v16/pavillon01/lighting/day.json.
+    [loop] for(uint i=0;i<min(lightCount,64u);++i) {
+        GpuLight light=Lights[i];
+        float3 delta=light.position-p;
+        float d2=dot(delta,delta),r2=light.radius*light.radius;
+        if(d2<1.e-5f||d2>=r2)continue;
+        float distance=sqrt(d2),edge=1.f-distance/light.radius;
+        float3 radiance=srgbToLinear(light.color)*
+                        (light.intensity*sceneLightScale*edge*edge*.45f);
+        lit+=brdf(n,view,delta/distance,base,roughness,metallic,f0,radiance,1.f);
+    }
+    lit+=base*indirectFill;
+    return max(lit,float3(0,0,0));
 }
-float4 tracePrimary(Ray ray) {
+// One physically motivated diffuse secondary ray per sample. This term is
+// averaged over independent cosine-weighted hemisphere directions. We deliberately
+// DO NOT invent hidden walls and DO NOT add arbitrary exposure to match CPU.
+// Secondary hits are shaded by the CPU-aligned GGX direct+hemisphere model;
+// no tertiary recursion. This is an approximate 1-bounce indirect estimate.
+uint mix32(uint x) {
+    x^=x>>16;x*=0x7feb352du;x^=x>>15;x*=0x846ca68bu;x^=x>>16;
+    return x;
+}
+float rand01(uint x) {return float(mix32(x)&0x00ffffffu)*(1.f/16777216.f);}
+float3 secondaryRadiance(Ray ray) {
+    HitInfo h;
+    uint state=traceClosest(ray,farPlane,false,0xffffffffu,h);
+    if(state==0)return background(ray);
+    if(state!=1)return float3(0,0,0);
+    GpuTriangle tri=Triangles[h.primitive];
+    GpuMaterial material=Materials[tri.material];
+    float k=1.f-h.bary.x-h.bary.y;
+    float3 n=normalize(tri.n0*k+tri.n1*h.bary.x+tri.n2*h.bary.y);
+    float2 uv=textureCoordinates(tri,h.bary);
+    float mip=estimateMip(tri,h.t);
+    float3 base=srgbToLinear(PbrMaps.SampleLevel(RepeatTrilinear,
+                                                float3(uv,tri.material*3),mip).rgb);
+    float3 mapped=PbrMaps.SampleLevel(RepeatTrilinear,
+                                     float3(uv,tri.material*3+1),mip).xyz*2.f-1.f;
+    if(dot(mapped,mapped)>.25f)n=tangentSpaceNormal(tri,n,normalize(mapped));
+    float roughness=clamp(PbrMaps.SampleLevel(RepeatTrilinear,
+                            float3(uv,tri.material*3+2),mip).r*material.roughnessScale,
+                            .04f,.98f);
+    return shadeSurface(ray,h,n,base,roughness,material);
+}
+float3 diffuseBounce(Ray primary,HitInfo hit,float3 n,float3 albedo,
+                     float metallic,uint2 pixelCoord) {
+    uint samples=min(gpuIndirectSamples,4u);
+    if(samples==0u || metallic>=.99f)return float3(0,0,0);
+    if(dot(n,primary.direction)>0.f)n=-n;
+    GpuTriangle tri=Triangles[hit.primitive];
+    float3 p=primary.origin+primary.direction*hit.t;
+    float3 geom=normalize(cross(tri.p1-tri.p0,tri.p2-tri.p0));
+    if(dot(geom,primary.direction)>0.f)geom=-geom;
+    float3 axis=abs(n.y)<.9f?float3(0.f,1.f,0.f):float3(1.f,0.f,0.f);
+    float3 tangent=normalize(cross(axis,n)),bitangent=normalize(cross(n,tangent));
+    uint seed=(pixelCoord.x+1u)*0x9e3779b9u ^ (pixelCoord.y+1u)*0x85ebca6bu;
+    float3 bounced=float3(0,0,0);
+    [loop] for(uint i=0;i<samples;++i) {
+        float u=frac(rand01(seed)+float(i)*.618033989f);
+        float v=frac(rand01(seed^0xc2b2ae35u)+float(i)*.754877666f);
+        float r=sqrt(u),phi=6.28318530718f*v;
+        float3 dir=normalize(tangent*(r*cos(phi))+bitangent*(r*sin(phi))+
+                             n*sqrt(max(0.f,1.f-u)));
+        Ray secondary;secondary.origin=p+geom*.025f+dir*.015f;
+        secondary.direction=dir;
+        bounced+=secondaryRadiance(secondary);
+    }
+    return bounced*(albedo*(1.f-saturate(metallic))/float(samples));
+}
+float4 tracePrimary(Ray ray,uint2 pixelCoord) {
     float3 accumulated=float3(0,0,0);
     float throughput=1.f;
     [loop] for(uint layer=0;layer<6;++layer) {
@@ -199,7 +298,7 @@ float4 tracePrimary(Ray ray) {
         if(status==2)return float4(1,0,1,1);
         if(status==0) {
             accumulated+=background(ray)*throughput;
-            return float4(saturate(accumulated),1);
+            return float4(accumulated,1);
         }
         GpuTriangle tri=Triangles[hit.primitive];
         GpuMaterial material=Materials[tri.material];
@@ -207,12 +306,14 @@ float4 tracePrimary(Ray ray) {
                            tri.n1*hit.bary.x+tri.n2*hit.bary.y);
         float2 uv=textureCoordinates(tri,hit.bary);
         float mip=estimateMip(tri,hit.t);
-        float3 base=PbrMaps.SampleLevel(RepeatTrilinear,float3(uv,tri.material*3),mip).rgb;
+        float3 base=srgbToLinear(PbrMaps.SampleLevel(RepeatTrilinear,
+                                                   float3(uv,tri.material*3),mip).rgb);
         float3 mapped=PbrMaps.SampleLevel(RepeatTrilinear,float3(uv,tri.material*3+1),mip).xyz*2.f-1.f;
         if(dot(mapped,mapped)>.25f)n=tangentSpaceNormal(tri,n,normalize(mapped));
-        float roughness=saturate(PbrMaps.SampleLevel(RepeatTrilinear,
-                                float3(uv,tri.material*3+2),mip).r*material.roughnessScale);
-        float3 local=shadeSurface(ray,hit,n,base,roughness,material.metallic);
+        float roughness=clamp(PbrMaps.SampleLevel(RepeatTrilinear,
+                                float3(uv,tri.material*3+2),mip).r*material.roughnessScale,
+                                .04f,.98f);
+        float3 local=shadeSurface(ray,hit,n,base,roughness,material);
         // Bounded, shallow architectural pool (IOR approximately 1.333):
         // a subtle sky reflection is much more convincing than showing the stone
         // basin through a noisy opaque-looking top. Still a single-bounce preview.
@@ -229,8 +330,9 @@ float4 tracePrimary(Ray ray) {
         }
         float t=saturate(material.transmission);
         if(t<=.05f) {
+            local+=diffuseBounce(ray,hit,n,base,material.metallic,pixelCoord);
             accumulated+=throughput*local;
-            return float4(saturate(accumulated),1);
+            return float4(accumulated,1);
         }
         // Straight-through glass: let the ray see interior faces and their lighting.
         // Fresnel-like edge tint. Refraction and multi-bounce GI are not simulated.
@@ -240,10 +342,10 @@ float4 tracePrimary(Ray ray) {
         accumulated+=throughput*local*opacity;
         throughput*=1.f-opacity;
         ray.origin=ray.origin+ray.direction*(hit.t+.03f);
-        if(throughput<.025f)return float4(saturate(accumulated),1);
+        if(throughput<.025f)return float4(accumulated,1);
     }
     accumulated+=throughput*background(ray);
-    return float4(saturate(accumulated),1);
+    return float4(accumulated,1);
 }
 [numthreads(8,8,1)]
 void CSMain(uint3 tid:SV_DispatchThreadID) {
@@ -253,5 +355,5 @@ void CSMain(uint3 tid:SV_DispatchThreadID) {
     // Matches CPU: tanHalfFov is HORIZONTAL, vertical half-FOV = tanHalfFov/aspect.
     ray.direction=normalize(forward+right*uv.x*tanHalfFov-
                             up*uv.y*(tanHalfFov/aspect));
-    Output[tid.xy]=tracePrimary(ray);
+    Output[tid.xy]=float4(encodeHdr(tracePrimary(ray,tid.xy).rgb),1.f);
 }

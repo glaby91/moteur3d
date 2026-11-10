@@ -47,6 +47,43 @@ int main(int argc,char** argv) {
   qCritical()<<"Cached WARP rendering differs from cold result:"<<QString::fromStdWString(warmError);
   return 1;
  }
+ // Confirm that the new secondary-bounce quality path genuinely changes
+ // the final image, and can be disabled for Intel iGPU performance comparison.
+ qputenv("M3D_V16_GPU_GI_SAMPLES",QByteArrayLiteral("0"));
+ std::vector<uint32_t> withoutBouncePixels;
+ m3d::Stats withoutBounceStats;std::wstring withoutBounceError;
+ const bool withoutBounceOk=m3d::renderCompute11Preview(
+     runtime.runtime.renderScene,cam,width,height,withoutBouncePixels,
+     withoutBounceStats,withoutBounceError);
+ qunsetenv("M3D_V16_GPU_GI_SAMPLES");
+ if(!withoutBounceOk||withoutBouncePixels.size()!=pixels.size()||
+    withoutBouncePixels==pixels){
+  qCritical()<<"GPU secondary-bounce option did not affect actual pixels:"
+             <<QString::fromStdWString(withoutBounceError);
+  return 1;
+ }
+ // Compare identical scenes/images with indirect=0 and indirect=2 in CI.
+ const QFileInfo baseImagePath(QString::fromLocal8Bit(argv[2]));
+ const QString directOnlyPath=baseImagePath.absolutePath()+"/"+
+                              baseImagePath.completeBaseName()+"-direct-only.png";
+ QImage directOnlyImage(width,height,QImage::Format_ARGB32);
+ for(int y=0;y<height;++y)
+     std::memcpy(directOnlyImage.scanLine(y),
+                 withoutBouncePixels.data()+size_t(y)*width,size_t(width)*4);
+ if(!directOnlyImage.save(directOnlyPath,"PNG")){
+  qCritical()<<"Unable to write direct-only GPU reference"<<directOnlyPath;
+  return 1;
+ }
+ // Restore the normal two-sample path and require byte-for-byte determinism.
+ std::vector<uint32_t> restoredBouncePixels;
+ m3d::Stats bounceStats;std::wstring bounceError;
+ if(!m3d::renderCompute11Preview(runtime.runtime.renderScene,cam,width,height,
+                                 restoredBouncePixels,bounceStats,bounceError)||
+                                 restoredBouncePixels!=pixels){
+  qCritical()<<"GPU secondary-bounce restoration failed:"
+             <<QString::fromStdWString(bounceError);
+  return 1;
+ }
  // The sunlight changes with time of day without replacing geometry.
  // V16 retains exactly the same cached triangles/PBR textures across this test.
  m3d::updateLighting(17.0f);
