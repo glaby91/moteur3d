@@ -370,7 +370,8 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
   c.output=output;c.staging=staging;c.uav=view;c.w=UINT(w);c.h=UINT(h);
   c.indirectValid=false;
  }
- Params params{};v3(params.eye,cam.eye);params.tanHalf=cam.tanHalf;
+ Params params{};std::memset(&params,0,sizeof(params));
+ v3(params.eye,cam.eye);params.tanHalf=cam.tanHalf;
  v3(params.forward,cam.f);params.aspect=cam.aspect;v3(params.right,cam.r);
  params.nearPlane=.0001f;v3(params.up,cam.u);params.farPlane=100000.f;
  params.width=uint32_t(w);params.height=uint32_t(h);
@@ -408,7 +409,7 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
  params.adaptiveGI=(params.gpuIndirectSamples>0u &&
                     !(adaptiveEnv&&std::strcmp(adaptiveEnv,"0")==0))?1u:0u;
  params.indirectWidth=uint32_t((w+1)/2);params.indirectHeight=uint32_t((h+1)/2);
- if(params.adaptiveGI&&(!c.indirectLight||!c.indirectGeo||
+ if(params.adaptiveGI&&(c.indirectLight.Get()==nullptr||c.indirectGeo.Get()==nullptr||
                         c.indirectWidth!=params.indirectWidth||
                         c.indirectHeight!=params.indirectHeight)){
   // 960x540 x 2 RGBA16F textures ~= 8.3 MB, compatible with Intel iGPUs.
