@@ -23,7 +23,7 @@ struct alignas(16) GpuMaterial { float albedo[3]; float roughnessScale; float me
 struct alignas(16) GpuLight { float position[3];float radius;float color[3];float intensity; };
 static_assert(sizeof(GpuLight)==32, "GPU point light layout mismatch");
 static_assert(sizeof(GpuMaterial)==32, "GPU material buffer layout mismatch");
-struct alignas(16) Params { float eye[3],tanHalf,forward[3],aspect,right[3],nearPlane,up[3],farPlane; uint32_t width,height,nodeCount,triangleCount,rootIndex,maxTraversal,materialCount,textureBaseSize; float sunDirection[3],ambientStrength; float skyZenith[3],skyStrength; float skyHorizon[3],sunStrength; float sunColor[3],skyFillStrength; uint32_t lightCount;float sceneLightScale,indirectFill,reserved0; };
+struct alignas(16) Params { float eye[3],tanHalf,forward[3],aspect,right[3],nearPlane,up[3],farPlane; uint32_t width,height,nodeCount,triangleCount,rootIndex,maxTraversal,materialCount,textureBaseSize; float sunDirection[3],ambientStrength; float skyZenith[3],skyStrength; float skyHorizon[3],sunStrength; float sunColor[3],skyFillStrength; uint32_t lightCount;float sceneLightScale,indirectFill;uint32_t gpuIndirectSamples; };
 static_assert(sizeof(Params)%16==0, "GPU constant buffer must be aligned");
 void v3(float* dst,V v){dst[0]=v.x;dst[1]=v.y;dst[2]=v.z;}
 template<class T> bool makeSrv(ID3D11Device* d,const std::vector<T>& values,ComPtr<ID3D11ShaderResourceView>& srv){
@@ -367,7 +367,15 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
  params.skyFillStrength=0.f;
  params.lightCount=std::min<uint32_t>(c.lightCount,64u);
  params.sceneLightScale=.42f+.58f*(1.f-daylight);
- params.indirectFill=0.f; // No fake multi-bounce GI.
+ params.indirectFill=0.f;
+ // Two real secondary hemisphere samples by default. Setting 0 disables the
+ // GPU bounce for performance comparisons; 1/2/4 enables graded quality.
+ // Kept bounded to avoid long D3D11 kernels and WDDM TDR on Intel iGPUs.
+ params.gpuIndirectSamples=2u;
+ if(const char* quality=std::getenv("M3D_V16_GPU_GI_SAMPLES")){
+  const int n=std::atoi(quality);
+  params.gpuIndirectSamples=uint32_t(std::clamp(n,0,4));
+ }
  c.ctx->UpdateSubresource(c.constant.Get(),0,nullptr,&params,0,0);
  ID3D11ShaderResourceView* srvs[]={c.srv0.Get(),c.srv1.Get(),c.srv2.Get(),
                                     c.srv3.Get(),c.srv4.Get(),c.srv5.Get()};
