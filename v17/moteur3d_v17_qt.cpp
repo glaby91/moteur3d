@@ -45,6 +45,8 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QSettings>
+#include <QSignalBlocker>
 #include <QSlider>
 #include <QSize>
 #include <QSpinBox>
@@ -416,6 +418,12 @@ private:
     QVector<QAction*> quickCameraActions_;
     QComboBox* backendBox_=nullptr;
     QComboBox* qualityBox_=nullptr;
+    QComboBox* rasterPresetBox_=nullptr;
+    QComboBox* rasterMsaaBox_=nullptr;
+    QComboBox* rasterAnisoBox_=nullptr;
+    QComboBox* rasterLodBox_=nullptr;
+    QCheckBox* rasterCullBox_=nullptr;
+    QCheckBox* rasterDynamicLodBox_=nullptr;
     QComboBox* giSamples_=nullptr;
     QComboBox* directSamples_=nullptr;
     QCheckBox* progressiveGi_=nullptr;
@@ -452,6 +460,46 @@ private:
     QString scenePath_;
     QString materialsPath_;
 
+    void displayRasterSettings(const RasterQualitySettings& q){
+        const QSignalBlocker msaaBlocker(rasterMsaaBox_);
+        const QSignalBlocker anisoBlocker(rasterAnisoBox_);
+        const QSignalBlocker lodBlocker(rasterLodBox_);
+        const QSignalBlocker cullBlocker(rasterCullBox_);
+        const QSignalBlocker dynamicBlocker(rasterDynamicLodBox_);
+        rasterMsaaBox_->setCurrentIndex(rasterMsaaBox_->findData(int(q.msaaSamples)));
+        rasterAnisoBox_->setCurrentIndex(rasterAnisoBox_->findData(int(q.anisotropy)));
+        rasterLodBox_->setCurrentIndex(rasterLodBox_->findData(int(q.lodQualityPercent)));
+        rasterCullBox_->setChecked(q.frustumCulling);
+        rasterDynamicLodBox_->setChecked(q.dynamicLod);
+        rasterLodBox_->setEnabled(q.dynamicLod);
+    }
+    void applyRasterSettings(bool userCustom){
+        if(!rasterPresetBox_||!rasterMsaaBox_)return;
+        if(userCustom){
+            const QSignalBlocker blocker(rasterPresetBox_);
+            rasterPresetBox_->setCurrentIndex(4);
+        }
+        RasterQualitySettings q;
+        q.msaaSamples=rasterMsaaBox_->currentData().toUInt();
+        q.anisotropy=rasterAnisoBox_->currentData().toUInt();
+        q.lodQualityPercent=rasterLodBox_->currentData().toUInt();
+        q.frustumCulling=rasterCullBox_->isChecked();
+        q.dynamicLod=rasterDynamicLodBox_->isChecked();
+        rasterLodBox_->setEnabled(q.dynamicLod);
+        std::wstring error;
+        if(!setRasterQualitySettings(q,error)){
+            statusBar()->showMessage(QString::fromStdWString(error),7000);
+            return;
+        }
+        QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+        settings.setValue(QStringLiteral("Raster/Preset"),rasterPresetBox_->currentIndex());
+        settings.setValue(QStringLiteral("Raster/MSAA"),q.msaaSamples);
+        settings.setValue(QStringLiteral("Raster/Anisotropy"),q.anisotropy);
+        settings.setValue(QStringLiteral("Raster/LODPercent"),q.lodQualityPercent);
+        settings.setValue(QStringLiteral("Raster/Culling"),q.frustumCulling);
+        settings.setValue(QStringLiteral("Raster/DynamicLOD"),q.dynamicLod);
+        if(runtime_&&backendBox_&&backendBox_->currentIndex()==4)requestRender();
+    }
     void createUi(){
         auto* file=menuBar()->addMenu(QStringLiteral("Fichier"));
         auto* open=file->addAction(QStringLiteral("Ouvrir une scène V16 (scene.json)…"));
@@ -646,6 +694,71 @@ private:
         edgeAa_=new QCheckBox(QStringLiteral("Antialiasing des contours"));
         edgeAa_->setChecked(true);
         vertical->addWidget(edgeAa_);
+        // One quality source for Qt and embedding host applications.
+        // All controls update an atomic engine snapshot; the GPU worker
+        // applies the new settings only at the next frame boundary.
+        auto* rasterQuality=new QGroupBox(QStringLiteral("Qualité Raster DirectX 11"));
+        auto* rasterForm=new QFormLayout(rasterQuality);
+        rasterPresetBox_=new QComboBox;
+        rasterPresetBox_->addItems({
+            QStringLiteral("Performance"),
+            QStringLiteral("Équilibrée"),
+            QStringLiteral("Élevée — qualité historique"),
+            QStringLiteral("Ultra — finesse maximale"),
+            QStringLiteral("Personnalisée")
+        });
+        rasterForm->addRow(QStringLiteral("Préréglage"),rasterPresetBox_);
+        rasterMsaaBox_=new QComboBox;
+        for(int v:{1,2,4})
+            rasterMsaaBox_->addItem(QStringLiteral("MSAA %1×").arg(v),v);
+        rasterForm->addRow(QStringLiteral("Anti-aliasing GPU"),rasterMsaaBox_);
+        rasterAnisoBox_=new QComboBox;
+        for(int v:{1,2,4,8,16})
+            rasterAnisoBox_->addItem(QStringLiteral("Anisotropie %1×").arg(v),v);
+        rasterForm->addRow(QStringLiteral("Textures PBR"),rasterAnisoBox_);
+        rasterLodBox_=new QComboBox;
+        for(int v:{50,60,75,85,100,125,150,180,200})
+            rasterLodBox_->addItem(QStringLiteral("Qualité LOD %1 %").arg(v),v);
+        rasterForm->addRow(QStringLiteral("Distance détails"),rasterLodBox_);
+        rasterCullBox_=new QCheckBox(QStringLiteral("Ne pas calculer les objets hors caméra"));
+        rasterForm->addRow(rasterCullBox_);
+        rasterDynamicLodBox_=new QCheckBox(QStringLiteral("LOD adaptatif des objets éloignés"));
+        rasterForm->addRow(rasterDynamicLodBox_);
+        vertical->addWidget(rasterQuality);
+        QSettings stored(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+        int initialPreset=std::clamp(stored.value(QStringLiteral("Raster/Preset"),2).toInt(),0,4);
+        auto initialQuality=rasterQualityProfile(
+            RasterQualityProfile(std::min(initialPreset,3)));
+        if(initialPreset==4){
+            initialQuality.msaaSamples=stored.value(QStringLiteral("Raster/MSAA"),4).toUInt();
+            initialQuality.anisotropy=stored.value(QStringLiteral("Raster/Anisotropy"),16).toUInt();
+            initialQuality.lodQualityPercent=stored.value(QStringLiteral("Raster/LODPercent"),100).toUInt();
+            initialQuality.frustumCulling=stored.value(QStringLiteral("Raster/Culling"),true).toBool();
+            initialQuality.dynamicLod=stored.value(QStringLiteral("Raster/DynamicLOD"),true).toBool();
+        }
+        if(rasterMsaaBox_->findData(int(initialQuality.msaaSamples))<0||
+           rasterAnisoBox_->findData(int(initialQuality.anisotropy))<0||
+           rasterLodBox_->findData(int(initialQuality.lodQualityPercent))<0){
+            initialPreset=2;initialQuality=rasterQualityProfile(RasterQualityProfile::High);
+        }
+        rasterPresetBox_->setCurrentIndex(initialPreset);
+        displayRasterSettings(initialQuality);
+        std::wstring qualityError;
+        setRasterQualitySettings(initialQuality,qualityError);
+        connect(rasterPresetBox_,qOverload<int>(&QComboBox::currentIndexChanged),
+                this,[this](int selected){
+            if(selected>=0&&selected<4)
+                displayRasterSettings(rasterQualityProfile(RasterQualityProfile(selected)));
+            applyRasterSettings(false);
+        });
+        for(auto* combo:{rasterMsaaBox_,rasterAnisoBox_,rasterLodBox_}){
+            connect(combo,qOverload<int>(&QComboBox::currentIndexChanged),
+                    this,[this](int){applyRasterSettings(true);});
+        }
+        connect(rasterCullBox_,&QCheckBox::toggled,this,
+                [this](bool){applyRasterSettings(true);});
+        connect(rasterDynamicLodBox_,&QCheckBox::toggled,this,
+                [this](bool){applyRasterSettings(true);});
         explorationButton_=new QPushButton(QStringLiteral("Démarrer exploration (V17)"));
         vertical->addWidget(explorationButton_);
         explorationHelp_=new QLabel(QStringLiteral(
@@ -668,7 +781,10 @@ private:
         matForm->addRow(QStringLiteral("Métallicité"),metallic_);
         vertical->addWidget(materials);
         vertical->addStretch(1);
-        right->setWidget(controls);
+        auto* rightScroll=new QScrollArea;
+        rightScroll->setWidgetResizable(true);
+        rightScroll->setWidget(controls);
+        right->setWidget(rightScroll);
         addDockWidget(Qt::RightDockWidgetArea,right);
         right->setMinimumWidth(295);
 
