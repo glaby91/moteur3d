@@ -364,7 +364,9 @@ float3 reusableBounce(Ray primary,HitInfo hit,float3 n,float3 albedo,
     // unrelated surfaces. Expensive fallback is local to these pixels.
     if(weightSum<.02f)
         return diffuseBounce(primary,hit,n,albedo,metallic);
-    return result/weightSum;
+    // Store incident irradiance in the atlas, not the producer texel color.
+    // Albedo/metallicity are applied at each final Full HD shading point.
+    return (result/weightSum)*albedo*(1.f-saturate(metallic));
 }
 
 // This pass runs at 1/2 resolution in each axis, tracing 1/4 as many
@@ -400,8 +402,11 @@ void CSIndirect(uint3 tid:SV_DispatchThreadID) {
         float3 geom=normalize(cross(tri.p1-tri.p0,tri.p2-tri.p0));
         if(dot(geom,ray.direction)>0.f)geom=-geom;
         float depth=length(ray.origin+ray.direction*hit.t-eye);
-        float3 bounced=diffuseBounce(ray,hit,n,albedo,mat.metallic);
-        IndirectOut[tid.xy]=float4(bounced,1.f);
+        // GI cache stores the incoming radiance before material response.
+        // This avoids 2x2 color blocks on textured grass, plaster and wood.
+        float3 incoming=mat.metallic>=.99f?float3(0.f,0.f,0.f):
+                         diffuseBounce(ray,hit,n,float3(1.f,1.f,1.f),0.f);
+        IndirectOut[tid.xy]=float4(incoming,1.f);
         IndirectGeoOut[tid.xy]=float4(geom,depth);
         return;
     }
