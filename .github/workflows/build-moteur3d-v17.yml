@@ -65,6 +65,21 @@ jobs:
           $result = $LASTEXITCODE
           Write-Host "V17 Raster WARP exit code: $result"
           if ($result -ne 0) { throw "V17 raster renderer is not operational; exit $result" }
+      - name: V17 GUI scene switching while a previous render may still be active
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          QT_QPA_PLATFORM: 'offscreen'
+        run: |
+          $exe = (Resolve-Path "build-v17/Release/moteur3d_v17.exe").Path
+          $args = @("--smoke-scene-switch",
+                    "scenes/v16/pavillon01/scene.json",
+                    "scenes/v16/material-lab/scene.json")
+          $process = Start-Process -FilePath $exe -ArgumentList $args -Wait -PassThru
+          Write-Host "V17 scene-switch smoke exit: $($process.ExitCode)"
+          if ($process.ExitCode -ne 0) {
+            throw "V17 GUI failed to render after switching scenes (exit $($process.ExitCode))"
+          }
       - name: V17 raster WARP and all inherited V16 CPU/GPU regression tests
         run: ctest --test-dir build-v17 -C Release --verbose --output-on-failure
       - name: Verify V17 D3D11 raster WARP preview
