@@ -19,6 +19,7 @@
 #include <QKeySequence>
 #include <QToolBar>
 #include <QProcess>
+#include <QProgressBar>
 #include <QDateTime>
 #include <QStandardPaths>
 #include <QFormLayout>
@@ -55,6 +56,7 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace m3d;
@@ -68,16 +70,26 @@ struct Result {
     // Reject finished frames after a camera, material, backend or scene change.
     uint64_t generation=0;
 };
+struct SceneLoadOutcome {
+    QString path;
+    QString error;
+    v16::SceneDatabase database;
+    std::shared_ptr<v16::Runtime> runtime;
+    uint64_t generation=0;
+};
 class ImageView final : public QWidget {
 public:
     void setImage(QImage im){image_=std::move(im);update();}
+    void setPlaceholder(const QString& message){placeholder_=message;update();}
 protected:
     void paintEvent(QPaintEvent*) override {
         QPainter p(this);
         p.fillRect(rect(),QColor(22,26,31));
         if(image_.isNull()) {
             p.setPen(QColor(180,191,204));
-            p.drawText(rect(),Qt::AlignCenter,QStringLiteral("Pavillon 01 — charger une scène V16"));
+            p.drawText(rect().adjusted(30,20,-30,-20),Qt::AlignCenter|Qt::TextWordWrap,
+                       placeholder_.isEmpty()?QStringLiteral("Ouvrir une scène V16 dans le menu Fichier")
+                                             :placeholder_);
             return;
         }
         QSize s=image_.size();
@@ -88,6 +100,7 @@ protected:
     }
 private:
     QImage image_;
+    QString placeholder_;
 };
 class V17Window final : public QMainWindow {
 public:
@@ -110,12 +123,26 @@ public:
         renderTimeLabel_=new QLabel(QStringLiteral("Dernier rendu : —"),this);
         renderTimeLabel_->setObjectName(QStringLiteral("v16LastRenderTime"));
         statusBar()->addPermanentWidget(renderTimeLabel_);
+        sceneLoadLabel_=new QLabel(this);
+        sceneLoadLabel_->setText(QStringLiteral("Chargement de la scène…"));
+        sceneLoadProgress_=new QProgressBar(this);
+        sceneLoadProgress_->setRange(0,100);
+        sceneLoadProgress_->setValue(0);
+        sceneLoadProgress_->setMaximumWidth(255);
+        sceneLoadProgress_->setTextVisible(true);
+        statusBar()->addWidget(sceneLoadLabel_,1);
+        statusBar()->addWidget(sceneLoadProgress_);
+        sceneLoadLabel_->hide();
+        sceneLoadProgress_->hide();
+        connect(&loadWatcher_,&QFutureWatcher<SceneLoadOutcome>::finished,this,
+                [this]{ finishSceneLoad(); });
         connect(&watcher_,&QFutureWatcher<Result>::finished,this,[this]{
             // A stale finished notification can arrive after setFuture()
             // already started another render. result() would block the GUI
             // waiting for that new render: never call it while still running.
             if(watcher_.isRunning())return;
             const auto outcome=watcher_.result();
+            if(sceneLoading_)return;
             // A previous scene may finish after the user has opened a new one.
             // Never show its image or overwrite the current status bar.
             if(outcome.generation!=renderSerial_->load()){
@@ -151,42 +178,51 @@ public:
             }
             if(pending_){pending_=false;requestRender();}
         });
-        if(!scenePath.isEmpty())openScene(scenePath);
+        // Return from the constructor immediately. The first scene is built
+        // on a worker after show(), so Windows always shows the main window.
+        canvas_->setPlaceholder(QStringLiteral("CSE WARP V17\\nChargement de la scène…"));
+        if(!scenePath.isEmpty())
+            QTimer::singleShot(0,this,[this,scenePath]{openScene(scenePath);});
     }
-    // Automated Windows smoke: open a second scene while the first render may
-    // still be running, then verify the new image really completed.
+    // GUI smoke: first scene must load asynchronously before we request
+    // another scene; the replacement must render a new (non-stale) image.
     void smokeSceneSwitch(const QString& secondScene){
-        QTimer::singleShot(0,this,[this,secondScene]{
-            openScene(secondScene);
-            const auto expected=runtime_;
-            if(!expected||QFileInfo(scenePath_).absoluteFilePath()!=QFileInfo(secondScene).absoluteFilePath()){
-                std::fprintf(stderr,"V17 SCENE SWITCH: failed to load second scene\n");
-                QCoreApplication::exit(21);
+        auto* poll=new QTimer(this);
+        auto phase=std::make_shared<int>(0);
+        poll->setInterval(100);
+        connect(poll,&QTimer::timeout,this,[this,secondScene,poll,phase]{
+            if(*phase==0){
+                if(sceneLoading_ || !runtime_)return;
+                *phase=1;
+                openScene(secondScene);
                 return;
             }
-            auto* poll=new QTimer(this);
-            poll->setInterval(100);
-            connect(poll,&QTimer::timeout,this,[this,expected,poll]{
-                if(runtime_!=expected){
-                    std::fprintf(stderr,"V17 SCENE SWITCH: wrong runtime after switch\n");
-                    QCoreApplication::exit(22);
-                    return;
-                }
-                if(!watcher_.isRunning()&&!pending_&&!lastImage_.isNull()){
-                    std::fprintf(stderr,"V17 SCENE SWITCH: new scene rendered %dx%d\n",
-                        lastImage_.width(),lastImage_.height());
-                    poll->stop();
-                    QCoreApplication::exit(0);
-                }
-            });
-            poll->start();
-            QTimer::singleShot(120000,this,[]{
-                std::fprintf(stderr,"V17 SCENE SWITCH: timed out waiting for image\n");
-                QCoreApplication::exit(23);
-            });
+            if(sceneLoading_||!runtime_||watcher_.isRunning()||pending_
+               ||lastImage_.isNull())return;
+            if(QFileInfo(scenePath_).absoluteFilePath()
+                !=QFileInfo(secondScene).absoluteFilePath()){
+                std::fprintf(stderr,"V17 SCENE SWITCH: wrong scene loaded\\n");
+                QCoreApplication::exit(22);
+                return;
+            }
+            std::fprintf(stderr,"V17 SCENE SWITCH: new scene rendered %dx%d\\n",
+                lastImage_.width(),lastImage_.height());
+            poll->stop();
+            QCoreApplication::exit(0);
+        });
+        poll->start();
+        QTimer::singleShot(120000,this,[]{
+            std::fprintf(stderr,"V17 SCENE SWITCH: timed out\\n");
+            QCoreApplication::exit(23);
         });
     }
-    ~V17Window() override {renderSerial_->fetch_add(1);watcher_.waitForFinished();}
+    ~V17Window() override {
+        renderSerial_->fetch_add(1);
+        // All async tasks hold independent snapshots. Wait before QObject
+        // destruction so no worker can post into the destroyed window.
+        loadWatcher_.waitForFinished();
+        watcher_.waitForFinished();
+    }
 private:
     int textureResolution_=2048;
     ImageView* canvas_=nullptr;
@@ -312,6 +348,12 @@ private:
     QLabel* materialLabel_=nullptr;
     QLabel* renderTimeLabel_=nullptr;
     QFutureWatcher<Result> watcher_;
+    QFutureWatcher<SceneLoadOutcome> loadWatcher_;
+    QLabel* sceneLoadLabel_=nullptr;
+    QProgressBar* sceneLoadProgress_=nullptr;
+    bool sceneLoading_=false;
+    uint64_t sceneLoadGeneration_=0;
+    QString queuedScenePath_;
     std::shared_ptr<std::atomic<uint64_t>> renderSerial_=std::make_shared<std::atomic<uint64_t>>(0);
     std::shared_ptr<v16::Runtime> runtime_;
     // The sun and scene geometry do not change when navigating cameras.
@@ -590,22 +632,78 @@ private:
         statusBar()->showMessage(QStringLiteral("Matériaux enregistrés dans %1").arg(materialsPath_),15000);
     }
     void openScene(const QString& path){
+        if(path.isEmpty())return;
         if(exploring_)stopExploration();
         freeCameraActive_=false;
-        // Do not wait on the GUI thread for the previous GPU/CPU render.
-        // The worker owns its previous Runtime via a shared_ptr snapshot.
-        // We invalidate only once the replacement scene has built correctly.
-        auto loaded=v16::loadScene(path);
-        if(!loaded){QMessageBox::critical(this,"Fichier scene.json invalide",loaded.error);return;}
-        statusBar()->showMessage(QStringLiteral("Construction des triangles, BVH et mipmaps PBR…"));
-        QApplication::processEvents();
-        // 2048-pixel mip chains are built once and shared by every material reference.
-        auto build=v16::buildRuntime(loaded.scene,textureResolution_);
-        if(!build){QMessageBox::critical(this,"Scène V16",build.error);return;}
-        auto replacement=std::make_shared<v16::Runtime>(std::move(build.runtime));
-        renderSerial_->fetch_add(1); // Any old scene frame is now obsolete.
-        pending_=false;               // Drop queued requests from old scene.
-        runtime_=std::move(replacement);
+        // Invalidates previous scene/camera frame without waiting on its GPU.
+        renderSerial_->fetch_add(1);
+        pending_=false;
+        queuedScenePath_=path;
+        ++sceneLoadGeneration_;
+        sceneLoading_=true;
+        sceneLoadProgress_->setValue(0);
+        sceneLoadLabel_->setText(QStringLiteral("Chargement de la scène…"));
+        sceneLoadLabel_->show();
+        sceneLoadProgress_->show();
+        canvas_->setImage(QImage{});
+        canvas_->setPlaceholder(QStringLiteral("CSE WARP V17\\nChargement de la scène…"));
+        cameraBox_->setEnabled(false);
+        if(explorationButton_)explorationButton_->setEnabled(false);
+        if(!loadWatcher_.isRunning())beginSceneLoad();
+    }
+    void beginSceneLoad(){
+        if(queuedScenePath_.isEmpty())return;
+        const QString path=std::exchange(queuedScenePath_,QString{});
+        const uint64_t token=sceneLoadGeneration_;
+        const int resolution=textureResolution_;
+        sceneLoadProgress_->setValue(5);
+        sceneLoadLabel_->setText(QStringLiteral("Lecture JSON et ressources…"));
+        loadWatcher_.setFuture(QtConcurrent::run([this,path,token,resolution]{
+            SceneLoadOutcome outcome;
+            outcome.path=path;
+            outcome.generation=token;
+            const auto loaded=v16::loadScene(path);
+            if(!loaded){outcome.error=loaded.error;return outcome;}
+            outcome.database=loaded.scene;
+            auto build=v16::buildRuntime(loaded.scene,resolution,
+                [this,token](int percent,const QString& description){
+                    QMetaObject::invokeMethod(this,[this,token,percent,description]{
+                        if(!sceneLoading_||token!=sceneLoadGeneration_)return;
+                        sceneLoadProgress_->setValue(percent);
+                        sceneLoadLabel_->setText(description);
+                        canvas_->setPlaceholder(
+                            QStringLiteral("CSE WARP V17\\nChargement de la scène…\\n%1")
+                                .arg(description));
+                    },Qt::QueuedConnection);
+                });
+            if(!build){outcome.error=build.error;return outcome;}
+            outcome.runtime=std::make_shared<v16::Runtime>(std::move(build.runtime));
+            return outcome;
+        }));
+    }
+    void finishSceneLoad(){
+        if(loadWatcher_.isRunning())return; // an older completion was queued
+        const SceneLoadOutcome outcome=loadWatcher_.result();
+        if(outcome.generation!=sceneLoadGeneration_ || !queuedScenePath_.isEmpty()){
+            if(!queuedScenePath_.isEmpty())beginSceneLoad();
+            return; // obsolete load; never apply its resources to new scene
+        }
+        if(!outcome.error.isEmpty()||!outcome.runtime){
+            sceneLoading_=false;
+            sceneLoadLabel_->hide();
+            sceneLoadProgress_->hide();
+            cameraBox_->setEnabled(bool(runtime_));
+            if(explorationButton_)explorationButton_->setEnabled(bool(runtime_));
+            canvas_->setPlaceholder(QStringLiteral("Chargement impossible : %1").arg(outcome.error));
+            statusBar()->showMessage(QStringLiteral("Erreur de chargement : %1").arg(outcome.error));
+            QMessageBox::warning(this,QStringLiteral("Chargement de la scène"),outcome.error);
+            return;
+        }
+        const auto replacement=outcome.runtime;
+        // Apply a complete, validated runtime in one GUI-thread transaction.
+        renderSerial_->fetch_add(1);
+        pending_=false;
+        runtime_=replacement;
         lastImage_=QImage{};
         canvas_->setImage(QImage{});  // Do not keep displaying an old scene.
         renderTimeLabel_->setText(QStringLiteral("Dernier rendu : —"));
@@ -614,12 +712,12 @@ private:
         sunHour_->blockSignals(true);
         sunHour_->setValue(double(runtime_->daylightHour));
         sunHour_->blockSignals(false);
-        scenePath_=path;
+        scenePath_=outcome.path;
         materialsPath_.clear();
-        for(const auto& sector:loaded.scene.sectors){
+        for(const auto& sector:outcome.database.sectors){
             const auto entries=sector.resources.value(QStringLiteral("materials"));
             if(!entries.isEmpty()){
-                materialsPath_=QDir(QFileInfo(path).absolutePath()).absoluteFilePath(entries.front().path);
+                materialsPath_=QDir(QFileInfo(outcome.path).absolutePath()).absoluteFilePath(entries.front().path);
                 break;
             }
         }
@@ -634,13 +732,18 @@ private:
             quickCameraActions_[i]->setToolTip(valid ? QStringLiteral("Vue %1 — touche %2").arg(runtime_->cameras[i].name).arg(i+1) : QString());
         }
         cameraBox_->blockSignals(false);
-        populateTrees(loaded.scene);
+        populateTrees(outcome.database);
         statusBar()->showMessage(QStringLiteral("%1 — %2 objets, %3 triangles, %4 matériaux, PBR %5 px")
             .arg(runtime_->title)
             .arg(runtime_->objects.size())
             .arg(runtime_->renderScene.obj.size())
             .arg(runtime_->renderScene.mat.size())
             .arg(runtime_->textureResolution));
+        sceneLoading_=false;
+        sceneLoadLabel_->hide();
+        sceneLoadProgress_->hide();
+        cameraBox_->setEnabled(true);
+        if(explorationButton_)explorationButton_->setEnabled(true);
         requestRender();
     }
     void populateTrees(const v16::SceneDatabase& database){
@@ -687,7 +790,7 @@ private:
         catalog->setExpanded(true);
     }
     void requestRender(){
-        if(!runtime_||runtime_->cameras.isEmpty())return;
+        if(sceneLoading_||!runtime_||runtime_->cameras.isEmpty())return;
         const auto serial=renderSerial_;
         const uint64_t token=serial->fetch_add(1)+1;
         if(watcher_.isRunning()){
