@@ -8,6 +8,7 @@
 #include <QImage>
 #include <QString>
 #include <cstring>
+#include <cstdlib>
 #include <cstdio>
 #include <set>
 #include <vector>
@@ -47,6 +48,45 @@ int main(int argc,char** argv){
        first!=second || std::set<uint32_t>(first.begin(),first.end()).size()<64){
         qCritical()<<"Empty, incomplete or non-deterministic raster image";return 1;
     }
+    // Regression for the V17 frustum optimization: switching culling OFF
+    // must produce identical pixels. The renderer must not drop a triangle
+    // that intersects the frustum or modify the underlying PBR resources.
+    if(_putenv_s("M3D_V17_DISABLE_FRUSTUM_CULLING","1")!=0){
+        qCritical()<<"Cannot set culling A/B test variable";return 1;
+    }
+    std::vector<uint32_t> reference;
+    m3d::Stats fullStats;
+    error.clear();
+    const bool fullOk=m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,cam,
+                                                   w,h,reference,fullStats,error);
+    _putenv_s("M3D_V17_DISABLE_FRUSTUM_CULLING","");
+    if(!fullOk||reference!=second){
+        qCritical()<<"Frustum culling changed first camera pixels:"<<QString::fromStdWString(error);
+        return 1;
+    }
+    if(built.runtime.cameras.size()>1){
+        const auto alternate=m3d::v16::makeCamera(built.runtime.cameras.back(),w,h);
+        std::vector<uint32_t> culledAlt,referenceAlt;
+        m3d::Stats culledStats,fullAltStats;
+        error.clear();
+        if(!m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,alternate,
+                                        w,h,culledAlt,culledStats,error)){
+            qCritical()<<"Second camera culling render failed:"<<QString::fromStdWString(error);
+            return 1;
+        }
+        _putenv_s("M3D_V17_DISABLE_FRUSTUM_CULLING","1");
+        const bool altOk=m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,alternate,
+                                                      w,h,referenceAlt,fullAltStats,error);
+        _putenv_s("M3D_V17_DISABLE_FRUSTUM_CULLING","");
+        if(!altOk||culledAlt!=referenceAlt){
+            qCritical()<<"Frustum culling changed alternate camera pixels:"<<QString::fromStdWString(error);
+            return 1;
+        }
+        qInfo()<<"V17 A/B camera2: triangles submitted"<<qulonglong(culledStats.tests)
+               <<"of"<<qulonglong(fullAltStats.tests);
+    }
+    qInfo()<<"V17 A/B camera1: triangles submitted"<<qulonglong(warmStats.tests)
+           <<"of"<<qulonglong(fullStats.tests);
     QImage png(w,h,QImage::Format_ARGB32);
     for(int y=0;y<h;++y)
         std::memcpy(png.scanLine(y),second.data()+size_t(y)*w,size_t(w)*4);
