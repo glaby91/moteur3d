@@ -578,6 +578,10 @@ public:
         };
         view_->setFocus();
     }
+    // Headless CI uses a real OpenGL context under Xvfb/Mesa, not fake
+    // shader-only parsing, and saves the actual GPU framebuffer.
+    void prepareGpuSmoke(){ view_->setRenderSize(640,360); }
+    bool captureGpuSmoke(const QString& path){ return view_->saveCapture(path); }
 private:
     void createUi(){
         QMenu* file=menuBar()->addMenu("Fichier");
@@ -672,6 +676,7 @@ std::shared_ptr<v16::Runtime> openScene(const QString& path,QString& error) {
 
 int main(int argc,char** argv){
     const bool selfTest=argc>=2&&QString::fromLocal8Bit(argv[1])=="--self-test";
+    const bool gpuSmoke=argc>=2&&QString::fromLocal8Bit(argv[1])=="--smoke-gpu";
     if(selfTest){
         QCoreApplication app(argc,argv);
         const QString path=argc>=3?QString::fromLocal8Bit(argv[2]):defaultScenePath();
@@ -696,7 +701,9 @@ int main(int argc,char** argv){
     format.setSwapInterval(1);
     QSurfaceFormat::setDefaultFormat(format);
     QApplication app(argc,argv);
-    const QString path=argc>=2?QString::fromLocal8Bit(argv[1]):defaultScenePath();
+    const QString path=gpuSmoke?
+        (argc>=4?QString::fromLocal8Bit(argv[3]):defaultScenePath()):
+        (argc>=2?QString::fromLocal8Bit(argv[1]):defaultScenePath());
     QString error;
     const auto runtime=openScene(path,error);
     if(!runtime){
@@ -704,6 +711,17 @@ int main(int argc,char** argv){
         return 2;
     }
     RealtimeWindow window(runtime,path);
+    if(gpuSmoke)window.prepareGpuSmoke();
     window.show();
+    if(gpuSmoke){
+        const QString png=argc>=3?QString::fromLocal8Bit(argv[2]):"v17-gpu-smoke.png";
+        QTimer::singleShot(4500,&app,[&app,&window,png]{
+            const bool captured=window.captureGpuSmoke(png);
+            std::fprintf(stderr,"V17 Mesa OpenGL capture %s: %s\n",
+                         captured?"OK":"FAILED",qPrintable(png));
+            std::fflush(stderr);
+            app.exit(captured?0:5);
+        });
+    }
     return app.exec();
 }
