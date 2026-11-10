@@ -423,6 +423,12 @@ int main(int argc,char** argv){
         out<<"  [construction] "<<buildMs<<" ms, "<<(built?"OK":"ERREUR")<<"\n";out.flush();
         if(!built){allOk=false;continue;}
         const auto& runtime=built.runtime;
+        side.append(subsystem(sceneName,"pbr_mip_generation",runtime.pbrBuildMs));
+        side.append(subsystem(sceneName,"geometry_instancing",runtime.geometryBuildMs));
+        side.append(subsystem(sceneName,"bvh_build",runtime.bvhBuildMs));
+        out<<"  [detail] PBR "<<runtime.pbrBuildMs<<" ms ; instanciation "
+           <<runtime.geometryBuildMs<<" ms ; BVH "<<runtime.bvhBuildMs<<" ms\n";
+        out.flush();
         updateLighting(runtime.daylightHour);
         out<<"  [ombres] Preparation de la carte CPU...\n";out.flush();
         tick=Clock::now();
