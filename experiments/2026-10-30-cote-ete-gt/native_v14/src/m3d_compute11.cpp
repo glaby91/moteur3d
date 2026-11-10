@@ -401,23 +401,82 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
   const int n=std::atoi(quality);
   params.gpuIndirectSamples=uint32_t(std::clamp(n,0,4));
  }
- c.ctx->UpdateSubresource(c.constant.Get(),0,nullptr,&params,0,0);
- ID3D11ShaderResourceView* srvs[]={c.srv0.Get(),c.srv1.Get(),c.srv2.Get(),
-                                    c.srv3.Get(),c.srv4.Get(),c.srv5.Get()};
- ID3D11UnorderedAccessView* uavs[]={c.uav.Get()};
+ // Default to a half-resolution diffuse GI cache: 1/4 the pixel count
+ // for secondary BVH queries. The Full HD direct/PBR/glass pass is unchanged.
+ // M3D_V16_GPU_GI_ADAPTIVE=0 is the exact full-res reference mode.
+ const char* adaptiveEnv=std::getenv("M3D_V16_GPU_GI_ADAPTIVE");
+ params.adaptiveGI=(params.gpuIndirectSamples>0u &&
+                    !(adaptiveEnv&&std::strcmp(adaptiveEnv,"0")==0))?1u:0u;
+ params.indirectWidth=uint32_t((w+1)/2);params.indirectHeight=uint32_t((h+1)/2);
+ if(params.adaptiveGI&&(!c.indirectLight||!c.indirectGeo||
+                        c.indirectWidth!=params.indirectWidth||
+                        c.indirectHeight!=params.indirectHeight)){
+  // 960x540 x 2 RGBA16F textures ~= 8.3 MB, compatible with Intel iGPUs.
+  const auto makeHalfRes=[&](ComPtr<ID3D11Texture2D>& tex,
+                            ComPtr<ID3D11ShaderResourceView>& srv,
+                            ComPtr<ID3D11UnorderedAccessView>& uav)->bool {
+   D3D11_TEXTURE2D_DESC desc{};
+   desc.Width=params.indirectWidth;desc.Height=params.indirectHeight;
+   desc.MipLevels=1;desc.ArraySize=1;desc.SampleDesc.Count=1;
+   desc.Format=DXGI_FORMAT_R16G16B16A16_FLOAT;
+   desc.Usage=D3D11_USAGE_DEFAULT;
+   desc.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS;
+   return SUCCEEDED(c.device->CreateTexture2D(&desc,nullptr,&tex))&&
+          SUCCEEDED(c.device->CreateShaderResourceView(tex.Get(),nullptr,&srv))&&
+          SUCCEEDED(c.device->CreateUnorderedAccessView(tex.Get(),nullptr,&uav));
+  };
+  c.indirectLight.Reset();c.indirectGeo.Reset();
+  c.indirectLightSrv.Reset();c.indirectGeoSrv.Reset();
+  c.indirectLightUav.Reset();c.indirectGeoUav.Reset();
+  if(!makeHalfRes(c.indirectLight,c.indirectLightSrv,c.indirectLightUav)||
+     !makeHalfRes(c.indirectGeo,c.indirectGeoSrv,c.indirectGeoUav)){
+   error=L"Allocation des buffers half-res GI D3D11 impossible";return false;
+  }
+  c.indirectWidth=params.indirectWidth;
+  c.indirectHeight=params.indirectHeight;
+  c.indirectValid=false;
+ }
  ID3D11Buffer* cbuff[]={c.constant.Get()};
  ID3D11SamplerState* samplers[]={c.sampler.Get()};
- c.ctx->CSSetShader(c.shader.Get(),nullptr,0);
- c.ctx->CSSetShaderResources(0,6,srvs);
+ ID3D11ShaderResourceView* sceneSrvs[8]={
+       c.srv0.Get(),c.srv1.Get(),c.srv2.Get(),
+       c.srv3.Get(),c.srv4.Get(),c.srv5.Get(),nullptr,nullptr};
+ ID3D11ShaderResourceView* nullSrvs[8]={};
+ ID3D11UnorderedAccessView* nullUavs[3]={};
  c.ctx->CSSetSamplers(0,1,samplers);
- c.ctx->CSSetUnorderedAccessViews(0,1,uavs,nullptr);
  c.ctx->CSSetConstantBuffers(0,1,cbuff);
+
+ if(params.adaptiveGI){
+  // Cached GI is ONLY reused for an identical scene, camera, sunlight,
+  // viewport, material revision and sample count.
+  const bool recompute=!c.indirectValid||
+      std::memcmp(&params,&c.cachedIndirectParams,sizeof(Params))!=0;
+  if(recompute){
+   c.ctx->UpdateSubresource(c.constant.Get(),0,nullptr,&params,0,0);
+   c.ctx->CSSetShader(c.indirectShader.Get(),nullptr,0);
+   c.ctx->CSSetShaderResources(0,8,sceneSrvs);
+   ID3D11UnorderedAccessView* giViews[3]={
+        nullptr,c.indirectLightUav.Get(),c.indirectGeoUav.Get()};
+   c.ctx->CSSetUnorderedAccessViews(0,3,giViews,nullptr);
+   c.ctx->Dispatch((params.indirectWidth+7u)/8u,
+                   (params.indirectHeight+7u)/8u,1u);
+   // D3D11 forbids the same texture bound as UAV and SRV concurrently.
+   c.ctx->CSSetUnorderedAccessViews(0,3,nullUavs,nullptr);
+   c.ctx->CSSetShaderResources(0,8,nullSrvs);
+   c.cachedIndirectParams=params;c.indirectValid=true;
+  }
+  sceneSrvs[6]=c.indirectLightSrv.Get();
+  sceneSrvs[7]=c.indirectGeoSrv.Get();
+ }
+ c.ctx->UpdateSubresource(c.constant.Get(),0,nullptr,&params,0,0);
+ c.ctx->CSSetShader(c.shader.Get(),nullptr,0);
+ c.ctx->CSSetShaderResources(0,8,sceneSrvs);
+ ID3D11UnorderedAccessView* mainViews[3]={c.uav.Get(),nullptr,nullptr};
+ c.ctx->CSSetUnorderedAccessViews(0,3,mainViews,nullptr);
  c.ctx->Dispatch(UINT((w+7)/8),UINT((h+7)/8),1);
- ID3D11UnorderedAccessView* noUav=nullptr;
- ID3D11ShaderResourceView* noSrvs[6]={};
+ c.ctx->CSSetUnorderedAccessViews(0,3,nullUavs,nullptr);
+ c.ctx->CSSetShaderResources(0,8,nullSrvs);
  ID3D11SamplerState* noSampler=nullptr;
- c.ctx->CSSetUnorderedAccessViews(0,1,&noUav,nullptr);
- c.ctx->CSSetShaderResources(0,6,noSrvs);
  c.ctx->CSSetSamplers(0,1,&noSampler);
  c.ctx->CopyResource(c.staging.Get(),c.output.Get());
  D3D11_MAPPED_SUBRESOURCE mapped{};
