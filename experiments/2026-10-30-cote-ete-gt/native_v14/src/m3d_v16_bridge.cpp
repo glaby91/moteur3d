@@ -330,11 +330,16 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
 bool finite3(V v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
 } // namespace
 
-BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution) {
+BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
+    const std::function<void(int,const QString&)>& onProgress) {
+    const auto report=[&](int percent,const QString& phase) {
+        if(onProgress)onProgress(percent,phase);
+    };
     BuildResult result;
     result.runtime.title=source.name;
     maxTextureResolution=std::clamp(maxTextureResolution,64,2048);
     if(source.sectors.empty()){result.error="No sectors";return result;}
+    report(10,QStringLiteral("Lecture et validation des ressources de scène"));
     auto& render=result.runtime.renderScene;
     // Pavillon 01 has a real, bounded terrain mesh; never generate the old infinite ground plane.
     render.finiteGround=true;
@@ -393,6 +398,8 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution) {
         result.error="Missing meshes, instances or materials";return result;
     }
     if(materialDocs.size()>256){result.error="Material count exceeds 256";return result;}
+    report(15,QStringLiteral("Préparation des textures PBR"));
+    int completedMaterials=0;
     for(const auto& j:materialDocs){
         const QString id=j.value("id").toString();
         if(id.isEmpty()||result.runtime.materialIndex.contains(id)){
@@ -421,8 +428,13 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution) {
         result.runtime.textureResolution=std::max(result.runtime.textureResolution,size);
         result.runtime.materialIndex.insert(id,int(render.mat.size()));
         render.mat.push_back(std::move(material));
+        ++completedMaterials;
+        report(15+int(65.0*completedMaterials/materialDocs.size()),
+            QStringLiteral("Textures PBR : %1 / %2 matériaux")
+                .arg(completedMaterials).arg(materialDocs.size()));
     }
     QSet<QString> instanceIds;
+    int completedInstances=0;
     for(const auto& j:instanceDocs){
         ObjectInfo object;
         object.id=j.value("id").toString();object.parent=j.value("parent").toString();
@@ -447,11 +459,19 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution) {
         else {result.error="Unsupported V16 geometry: "+meshId;return result;}
         object.triangleCount=int(render.obj.size())-object.firstTriangle;
         result.runtime.objects.push_back(object);
+        ++completedInstances;
+        // Every progress tick corresponds to an actual generated instance.
+        if(completedInstances==instanceDocs.size() || completedInstances%16==0)
+            report(80+int(15.0*completedInstances/instanceDocs.size()),
+                QStringLiteral("Géométrie : %1 / %2 objets")
+                    .arg(completedInstances).arg(instanceDocs.size()));
     }
     if(render.obj.empty()){result.error="No triangles generated";return result;}
     render.order.resize(render.obj.size());
     std::iota(render.order.begin(),render.order.end(),0u);
+    report(96,QStringLiteral("Construction de l'accélérateur BVH"));
     render.root=buildBvh(render,0,int(render.order.size()));
+    report(100,QStringLiteral("Scène prête"));
     return result;
 }
 Camera makeCamera(const CameraPreset& preset,int width,int height) {
