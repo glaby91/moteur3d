@@ -25,8 +25,9 @@ struct GpuVertex { float p[3], n[3], uv[2]; uint32_t material; };
 struct GpuBoxInstance {
     float lo[3], uvScale;
     float hi[3]; uint32_t material;
+    float size[3]; uint32_t uvMode;
 };
-static_assert(sizeof(GpuBoxInstance)==32,"D3D11 per-instance layout must be 32 bytes");
+static_assert(sizeof(GpuBoxInstance)==48,"D3D11 per-instance layout must be 48 bytes");
 // Ellipsoids use a single dynamic instance buffer per frame. Three immutable
 // unit-sphere meshes provide GPU LOD without regenerating scene geometry.
 struct GpuEllipseInstance {
@@ -101,6 +102,7 @@ struct VSBoxIn {
     uint unusedMaterial:MATERIAL;
     float3 boxLo:BOXMIN; float uvScale:BOXSCALE;
     float3 boxHi:BOXMAX; uint boxMat:BOXMAT;
+    float3 boxSize:BOXSIZE;uint uvMode:BOXUVMODE;
 };
 VSOut VSBoxMain(VSBoxIn i) {
     // Select the original box corners directly rather than recomputing a
@@ -109,9 +111,21 @@ VSOut VSBoxMain(VSBoxIn i) {
                     i.p.y<0.5?i.boxLo.y:i.boxHi.y,
                     i.p.z<0.5?i.boxLo.z:i.boxHi.z);
     float3 n=i.n;
-    float2 uv=(abs(n.y)>=abs(n.x)&&abs(n.y)>=abs(n.z))
-        ?p.xz*i.uvScale
-        :(abs(n.x)>=abs(n.z)?p.zy*i.uvScale:p.xy*i.uvScale);
+    float2 uv;
+    if(i.uvMode==1){
+        // Source V16 JSON boxes store per-face local UVs, while native
+        // Kind::Box maps the world position. Preserve both conventions.
+        float2 localUV=i.uv;
+        if(n.z < -0.5 || n.x > 0.5)localUV.x=1.0-localUV.x;
+        if(n.y > 0.5)localUV.y=1.0-localUV.y;
+        float uLength=(abs(n.x)>0.5?i.boxSize.z:i.boxSize.x)*0.5;
+        float vLength=(abs(n.y)>0.5?i.boxSize.z:i.boxSize.y)*0.5;
+        uv=localUV*float2(uLength,vLength);
+    }else{
+        uv=(abs(n.y)>=abs(n.x)&&abs(n.y)>=abs(n.z))
+            ?p.xz*i.uvScale
+            :(abs(n.x)>=abs(n.z)?p.zy*i.uvScale:p.xy*i.uvScale);
+    }
     VSIn raw;
     raw.p=p;raw.n=n;raw.uv=uv;raw.mat=i.boxMat;
     return VSMain(raw);
@@ -631,9 +645,11 @@ private:
             {"BOXMIN",0,DXGI_FORMAT_R32G32B32_FLOAT,1,0,D3D11_INPUT_PER_INSTANCE_DATA,1},
             {"BOXSCALE",0,DXGI_FORMAT_R32_FLOAT,1,12,D3D11_INPUT_PER_INSTANCE_DATA,1},
             {"BOXMAX",0,DXGI_FORMAT_R32G32B32_FLOAT,1,16,D3D11_INPUT_PER_INSTANCE_DATA,1},
-            {"BOXMAT",0,DXGI_FORMAT_R32_UINT,1,28,D3D11_INPUT_PER_INSTANCE_DATA,1}
+            {"BOXMAT",0,DXGI_FORMAT_R32_UINT,1,28,D3D11_INPUT_PER_INSTANCE_DATA,1},
+            {"BOXSIZE",0,DXGI_FORMAT_R32G32B32_FLOAT,1,32,D3D11_INPUT_PER_INSTANCE_DATA,1},
+            {"BOXUVMODE",0,DXGI_FORMAT_R32_UINT,1,44,D3D11_INPUT_PER_INSTANCE_DATA,1}
         };
-        if(FAILED(device_->CreateInputLayout(boxInput,8,boxVsCode->GetBufferPointer(),boxVsCode->GetBufferSize(),&boxLayout_))){
+        if(FAILED(device_->CreateInputLayout(boxInput,10,boxVsCode->GetBufferPointer(),boxVsCode->GetBufferSize(),&boxLayout_))){
             error=L"Création du format des instances GPU impossible.";return false;
         }
         if(FAILED(device_->CreateVertexShader(ellipseVsCode->GetBufferPointer(),
@@ -701,6 +717,10 @@ private:
                     instance.lo[0]=o.mn.x;instance.lo[1]=o.mn.y;instance.lo[2]=o.mn.z;
                     instance.hi[0]=o.mx.x;instance.hi[1]=o.mx.y;instance.hi[2]=o.mx.z;
                     instance.uvScale=uvScale;instance.material=m;
+                    instance.size[0]=o.mx.x-o.mn.x;
+                    instance.size[1]=o.mx.y-o.mn.y;
+                    instance.size[2]=o.mx.z-o.mn.z;
+                    instance.uvMode=0;
                     boxData.push_back(instance);
                 }else mesh.box(o.mn,o.mx,m,uvScale);
             }
