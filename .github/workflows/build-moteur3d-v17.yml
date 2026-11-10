@@ -97,10 +97,10 @@ jobs:
           if (!(Test-Path $csv)) { throw "Missing V17 benchmark CSV" }
           $png = Get-ChildItem (Join-Path $summary.Directory.FullName "images") -Filter *.png | Select-Object -First 1
           if (!$png -or $png.Length -lt 1000) { throw "Missing V17 benchmark PNG" }
-      - name: Verify V17 D3D11 raster WARP preview
+      - name: Verify V17 D3D11 raster WARP diagnostic preview
         shell: pwsh
         run: |
-          $path = "build-v17/v17-raster-warp.png"
+          $path = "build-v17/v17-raster-warp-quick.png"
           if (!(Test-Path $path)) { throw "Raster V17 PNG missing: $path" }
           if ((Get-Item $path).Length -lt 1000) { throw "Raster V17 preview is blank" }
           Write-Host "Verified V17 Raster WARP PNG"
