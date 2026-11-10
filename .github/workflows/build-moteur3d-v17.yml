@@ -148,6 +148,14 @@ jobs:
           Copy-Item "assets/materials/pripyat-v17/README.md" "dist-v17/material-library/pripyat-v17/"
           Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/textures/prp_concrete_panel.m3dpbr.gz" "dist-v17/material-library/pripyat-v17/originaux/"
           Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/textures/prp_concrete_panel_source.jpg" "dist-v17/material-library/pripyat-v17/originaux/"
+          # Additional existing Pripyat hero materials/models are preserved as
+          # ORIGINAL sources for reuse, not imported into the fictional scene.
+          New-Item -ItemType Directory -Force "dist-v17/material-library/pripyat-v17/hero-assets" | Out-Null
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/textures/energetik_fresco_mosaic.jpg" "dist-v17/material-library/pripyat-v17/hero-assets/"
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_fresco_mosaic.glb" "dist-v17/material-library/pripyat-v17/hero-assets/"
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_fresco_mosaic.asset.json" "dist-v17/material-library/pripyat-v17/hero-assets/"
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_facade_bay.glb" "dist-v17/material-library/pripyat-v17/hero-assets/"
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_facade_bay.asset.json" "dist-v17/material-library/pripyat-v17/hero-assets/"
           Copy-Item "build-v17/Release/material-lab" "dist-v17/material-lab" -Recurse
           Copy-Item "build-v17/Release/pripyat-photo2scene-proof" "dist-v17/pripyat-photo2scene-proof" -Recurse
           Copy-Item "build-v17/Release/shaders" "dist-v17/shaders" -Recurse
