@@ -6,6 +6,8 @@ on:
     paths:
       - 'v17/**'
       - 'v16/**'
+      - 'scenes/v16/benchmark-civic/**'
+      - 'assets/materials/pripyat-v17/**'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/**'
       - '.github/workflows/build-moteur3d-v17.yml'
   pull_request:
@@ -27,6 +29,12 @@ jobs:
           target: desktop
           arch: win64_msvc2022_64
           cache: true
+      - name: Generate benchmark scenes from reusable Pripyat material library
+        shell: pwsh
+        run: |
+          node --version
+          node scenes/v16/benchmark-civic/generate.cjs --all
+          node scenes/v16/benchmark-civic/validate.cjs
       - name: Configure
         shell: pwsh
         run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
@@ -41,6 +49,9 @@ jobs:
                          "build-v17/Release/moteur3d_v17_benchui.exe",
                          "build-v17/Release/cse_warp_v17.ico",
                          "build-v17/Release/pavillon01/scene.json",
+                         "build-v17/Release/benchmark-civic/scene.json",
+                         "build-v17/Release/benchmark-civic/scene-lourd.json",
+                         "build-v17/Release/benchmark-civic/scene-extreme.json",
                          "build-v17/Release/shaders/m3d_raytrace_compute.hlsl")) {
             if (!(Test-Path $p)) { throw "Missing V17 package file: $p" }
             Write-Host "Verified: $p"
@@ -58,6 +69,11 @@ jobs:
           $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
           Write-Host "V17 EXE icon and version: $($version.ProductName) — $($version.FileVersion)"
           if ($version.FileMajorPart -ne 17) { throw "The executable resource is not version 17" }
+      - name: Validate light complex scene with real V16/V17 scene compiler
+        shell: pwsh
+        run: |
+          & "build-v17/v16/Release/v16_scene_check.exe" "scenes/v16/benchmark-civic/scene.json"
+          if ($LASTEXITCODE -ne 0) { throw "Complex scene fails in native V17 loader" }
       - name: Diagnose raster WARP executable before extended tests
         shell: pwsh
         env:
@@ -115,6 +131,12 @@ jobs:
           Copy-Item "build-v17/Release/moteur3d_v16_core.dll" "dist-v17/"
           Copy-Item "build-v17/Release/cse_warp_v17.ico" "dist-v17/"
           Copy-Item "build-v17/Release/pavillon01" "dist-v17/pavillon01" -Recurse
+          Copy-Item "build-v17/Release/benchmark-civic" "dist-v17/benchmark-civic" -Recurse
+          New-Item -ItemType Directory -Force "dist-v17/material-library/pripyat-v17/originaux" | Out-Null
+          Copy-Item "assets/materials/pripyat-v17/catalogue.json" "dist-v17/material-library/pripyat-v17/"
+          Copy-Item "assets/materials/pripyat-v17/README.md" "dist-v17/material-library/pripyat-v17/"
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/textures/prp_concrete_panel.m3dpbr.gz" "dist-v17/material-library/pripyat-v17/originaux/"
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/textures/prp_concrete_panel_source.jpg" "dist-v17/material-library/pripyat-v17/originaux/"
           Copy-Item "build-v17/Release/material-lab" "dist-v17/material-lab" -Recurse
           Copy-Item "build-v17/Release/pripyat-photo2scene-proof" "dist-v17/pripyat-photo2scene-proof" -Recurse
           Copy-Item "build-v17/Release/shaders" "dist-v17/shaders" -Recurse
