@@ -1,4 +1,4 @@
-# CSE WARP V17 — Raster DirectX 11 : qualité et performance
+# CSE WARP V17.build — Raster DirectX 11 : qualité et performance
 
 Date de référence : 2026-11-10. Branche de travail :
 `feature/v17-realtime-architecture-roadmap-261110`.
@@ -63,21 +63,57 @@ estimation et **n'est pas** un FPS de présentation écran avec VSync.
   mélangent des zones très éloignées, le rejet sera moins efficace.
 - Les surfaces transparentes restent triées et soumises séparément comme
   auparavant, pour ne pas altérer leur ordre de composition.
-- Il n'y a **pas encore d'instancing GPU natif**. Les répétitions de
-  fenêtres, dalles et sièges sont encore développées en triangles.
+- **Instancing GPU natif introduit en développement** pour les boîtes
+  opaques non tournées. Le chargeur V16 conserve leurs 12 triangles pour CPU,
+  Compute et BVH et transmet leurs plages au Raster, qui peut les remplacer
+  par un maillage cube commun et un buffer d'instances D3D11. Les objets
+  tournés et les vitrages transparents gardent leur triangulation existante.
+- Les canopées d'arbres V16 conservent leur géométrie source pour CPU/Compute ;
+  un chemin GPU partagé dispose de trois maillages LOD (8×4, 12×6, 18×9).
+  La silhouette proche retient les ondulations et les facettes de feuilles.
+- Les sphères/ellipsoïdes natives bénéficient également de trois LOD.
+- Ces nouveaux chemins sont soumis aux tests WARP avant validation sur HD 620 ;
+  leur gain FPS n'est **pas encore garanti**.
 - Le gain de temps n'est pas garanti : le culling réduit le nombre de
   triangles soumis, mais ajoute une faible charge CPU et peut ajouter des
   appels de dessin. Un benchmark comparatif est obligatoire.
 
-## Prochaines étapes — non encore implémentées
+## Travail intégré depuis la première V17
+
+- **PBR Raster :** correction du filtrage des UV répétés, éclairage indirect
+  hémisphérique peu coûteux, prise en compte de la métallicité, rugosité et
+  transmission pour les matériaux historiques génériques.
+- **Instancing :** boîtes opaques non tournées des scènes V16/JSON et
+  ellipsoïdes avec buffers d'instances partagés. Les triangles originaux
+  restent disponibles pour les autres moteurs.
+- **LOD :** sélection par taille projetée des ellipsoïdes et des canopées.
+  Les niveaux de qualité sont préconstruits et réutilisés sur le GPU.
+- **Profilage :** export du nombre de draw calls, des boîtes et arbres
+  instanciés, des triangles soumis et de la durée du readback GPU→CPU.
+- **Compatibilité de test :** variables d'environnement
+  `M3D_V17_DISABLE_FRUSTUM_CULLING=1`,
+  `M3D_V17_DISABLE_GPU_INSTANCING=1`,
+  `M3D_V17_DISABLE_BOX_INSTANCING=1`,
+  `M3D_V17_DISABLE_FOLIAGE_INSTANCING=1`,
+  `M3D_V17_DISABLE_ELLIPSE_INSTANCING=1` et
+  `M3D_V17_DISABLE_LOD=1` pour mesurer des variantes à scène identique.
+- **Version Windows :** `V17.<build GitHub Actions>`, affichée par les
+  programmes, les propriétés Windows et les rapports du benchmark.
+  Ex. `V17.208`, sans suffixe artificiel `17.3`.
+
+**État de validation :** ces changements sont du code intégré dans la
+branche de travail ; tant que le pipeline Windows correspondant n'a pas
+réussi, ils ne doivent pas être considérés comme une build stable.
+
+## Prochaines étapes — restant à implémenter ou valider
 
 | Priorité | Chantier | Bénéfice recherché | Validation |
 |---|---|---|---|
-| P1 | Instancing GPU des objets identiques (dalles, vitres, bancs, arbres) | Réduire mémoire géométrique, transferts et draw calls | Comparer VRAM, FPS, image de référence |
-| P1 | Regroupement spatial des maillages + frustum culling par groupes | Réduire les triangles réellement visibles | Mesurer triangles soumis et coût CPU de sélection |
-| P2 | Niveaux de détail LOD sur la végétation et les façades éloignées | Gain GPU sans détériorer la vue rapprochée | Captures près/loin, comparaisons |
-| P2 | Traitement PBR et éclairage sur Raster (normales, roughness, contraste, ombres) | Approcher la qualité visuelle du Compute | Images de référence du même cadrage |
-| P3 | Profilage du GPU et de la lecture CPU des frames | Identifier les coûts réellement limitants | Durées upload/draw/readback séparées |
+| P1 | Étendre l'instancing aux boîtes tournées, vitrages et éléments composites | Moins de vertex buffers et de draw calls | Comparaison avec le chemin d'origine |
+| P1 | Regroupement spatial réel des lots et culling plus fin | Éviter les bounds trop larges sur une place immense | Mesurer triangles soumis et coût de sélection |
+| P2 | LOD sur les façades et le mobilier, puis validation des canopées | Réduire les détails invisibles loin de la caméra | Captures près/loin, pop-in, différences d'images |
+| P2 | Calibrer PBR/éclairage/ombres améliorés | Approcher la qualité du Compute sans surcoût GPU | Comparer images et FPS sur HD620 |
+| P3 | Chronométrage GPU natif et détail upload/shaders/draw | Distinguer latence GPU, driver et lecture CPU | D3D11 timestamp queries et télémétrie séparée |
 | P3 | Streaming / cache PBR persistant | Réduire les temps d'ouverture des scènes | Premier et deuxième lancement, RAM |
 | P3 | Préparation d'une scène de 2 millions de triangles | Valider capacité, pas uniquement FPS | Tests de mémoire, stabilité, fermeture |
 
