@@ -108,6 +108,19 @@ jobs:
           if ($process.ExitCode -ne 0) {
             throw "V17 GUI failed to render after switching scenes (exit $($process.ExitCode))"
           }
+      - name: Regression V17 — two GUI renders, identical scene and GPU worker
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          QT_QPA_PLATFORM: 'offscreen'
+        run: |
+          $exe = (Resolve-Path "build-v17/Release/moteur3d_v17.exe").Path
+          $args = @("--smoke-repeat-raster", "scenes/v16/pavillon01/scene.json")
+          $p = Start-Process -FilePath $exe -ArgumentList $args -Wait -PassThru
+          Write-Host "Second-render regression exit: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) {
+            throw "Two successive V17 GPU renders failed ($($p.ExitCode))"
+          }
       - name: Benchmark V17 D3D11 Raster on WARP — smoke CSV JSON PNG
         shell: pwsh
         env:
