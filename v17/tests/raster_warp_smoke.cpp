@@ -8,9 +8,16 @@
 #include <QImage>
 #include <QString>
 #include <cstring>
+#include <cstdio>
 #include <set>
 #include <vector>
+static void logToStderr(QtMsgType,const QMessageLogContext&,const QString& message){
+    const QByteArray utf8=message.toUtf8();
+    std::fprintf(stderr,"V17 RASTER TEST: %s\\n",utf8.constData());
+    std::fflush(stderr);
+}
 int main(int argc,char** argv){
+    qInstallMessageHandler(logToStderr);
     QCoreApplication app(argc,argv);
     if(argc!=3){qCritical()<<"Expected scene.json and output.png";return 2;}
     const auto loaded=m3d::v16::loadScene(QString::fromLocal8Bit(argv[1]));
