@@ -35,6 +35,7 @@
 #include <QSet>
 #include <QTimer>
 #include <QThreadPool>
+#include <QThread>
 #include <QMainWindow>
 #include <QMetaObject>
 #include <QMenuBar>
@@ -70,6 +71,7 @@ struct Result {
     bool gpu=false;
     // Reject finished frames after a camera, material, backend or scene change.
     uint64_t generation=0;
+    quintptr renderThread=0;
 };
 struct SceneLoadOutcome {
     QString path;
@@ -221,6 +223,50 @@ public:
         QTimer::singleShot(120000,this,[]{
             std::fprintf(stderr,"V17 SCENE SWITCH: timed out\\n");
             QCoreApplication::exit(23);
+        });
+    }
+    // Dedicated GPU regression: exercise two independent button-equivalent
+    // render requests on the same scene and assert worker/cache affinity.
+    // The first render starts normally after asynchronous scene loading.
+    void smokeRepeatRaster(){
+        backendBox_->setCurrentIndex(4);
+        auto count=std::make_shared<int>(0);
+        auto firstThread=std::make_shared<quintptr>(0);
+        connect(&watcher_,&QFutureWatcher<Result>::finished,this,
+            [this,count,firstThread]{
+                if(watcher_.isRunning()||sceneLoading_||!runtime_)return;
+                const Result result=watcher_.result();
+                if(result.generation!=renderSerial_->load())return;
+                if(!result.gpu||result.image.isNull()||!result.error.isEmpty()){
+                    std::fprintf(stderr,"V17 REPEAT RASTER: failed render %d: %s\n",
+                        *count+1,result.error.toUtf8().constData());
+                    QCoreApplication::exit(31);
+                    return;
+                }
+                if(*count==0){
+                    *firstThread=result.renderThread;
+                    std::fprintf(stderr,
+                        "V17 REPEAT RASTER: first GPU frame %.2f ms, worker %llu\n",
+                        result.milliseconds,
+                        static_cast<unsigned long long>(result.renderThread));
+                    ++*count;
+                    QTimer::singleShot(0,this,[this]{requestRender();});
+                    return;
+                }
+                if(result.renderThread!=*firstThread){
+                    std::fprintf(stderr,"V17 REPEAT RASTER: GPU worker changed!\n");
+                    QCoreApplication::exit(32);
+                    return;
+                }
+                std::fprintf(stderr,
+                    "V17 REPEAT RASTER: second GPU frame %.2f ms, same worker %llu\n",
+                    result.milliseconds,
+                    static_cast<unsigned long long>(result.renderThread));
+                QCoreApplication::exit(0);
+            });
+        QTimer::singleShot(120000,this,[]{
+            std::fprintf(stderr,"V17 REPEAT RASTER: timed out\n");
+            QCoreApplication::exit(33);
         });
     }
     ~V17Window() override {
@@ -896,6 +942,7 @@ private:
             globalIllumination,raster,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache]{
             Result result;
             result.generation=token;
+            result.renderThread=reinterpret_cast<quintptr>(QThread::currentThreadId());
             updateLighting(snapshot->daylightHour);
             const auto camera=v16::makeCamera(preset,w,h);
             std::vector<uint32_t> pixels;
@@ -1043,17 +1090,21 @@ int main(int argc,char** argv){
     QCoreApplication::setApplicationVersion(QStringLiteral("17.0"));
     const bool switchSmoke=argc>=4
         && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-scene-switch");
+    const bool repeatSmoke=argc>=3
+        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-repeat-raster");
     // Use the same Windows V17 brand icon for Qt titlebar/Alt-Tab/taskbar.
     // The ICO is also embedded in the EXE's native Win32 resources.
     const QString iconPath=QCoreApplication::applicationDirPath()
         +QStringLiteral("/cse_warp_v17.ico");
     if(QFileInfo::exists(iconPath))app.setWindowIcon(QIcon(iconPath));
-    const QString path=switchSmoke?QString::fromLocal8Bit(argv[2])
+    const QString path=switchSmoke||repeatSmoke
+        ?QString::fromLocal8Bit(argv[2])
         :(argc>1?QString::fromLocal8Bit(argv[1]):defaultPath());
     // The smoke test uses reduced texture resolution to stay viable on
     // CI's software-only WARP device. Normal V17 keeps full 2048 PBR.
-    V17Window window(path,switchSmoke?512:2048);
+    V17Window window(path,(switchSmoke||repeatSmoke)?256:2048);
     if(switchSmoke)window.smokeSceneSwitch(QString::fromLocal8Bit(argv[3]));
+    if(repeatSmoke)window.smokeRepeatRaster();
     if(!app.windowIcon().isNull())window.setWindowIcon(app.windowIcon());
     window.show();
     return app.exec();
