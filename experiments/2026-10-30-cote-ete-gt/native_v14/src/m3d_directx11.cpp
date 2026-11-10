@@ -19,6 +19,13 @@ using Microsoft::WRL::ComPtr;
 namespace m3d {
 namespace {
 struct GpuVertex { float p[3], n[3], uv[2]; uint32_t material; };
+// Box geometry is immutable and shared. Per-object bounds/materials occupy
+// 32 bytes instead of duplicating 36 vertex records (~1.3 kB) per box.
+struct GpuBoxInstance {
+    float lo[3], uvScale;
+    float hi[3]; uint32_t material;
+};
+static_assert(sizeof(GpuBoxInstance)==32,"D3D11 per-instance layout must be 32 bytes");
 struct TransparentTriangle { GpuVertex v[3]; V center; };
 struct FrameConstants {
     float eye[3], tanHalf;
@@ -80,6 +87,26 @@ VSOut VSMain(VSIn i) {
     o.p = float4(nx * safeZ, ny * safeZ, depth, z);
     o.n = i.n; o.uv = i.uv; o.world=i.p; o.mat = min(i.mat, materialCount - 1);
     return o;
+}
+struct VSBoxIn {
+    float3 p:POSITION; float3 n:NORMAL; float2 unusedUv:TEXCOORD0;
+    uint unusedMaterial:MATERIAL;
+    float3 boxLo:BOXMIN; float uvScale:BOXSCALE;
+    float3 boxHi:BOXMAX; uint boxMat:BOXMAT;
+};
+VSOut VSBoxMain(VSBoxIn i) {
+    // Select the original box corners directly rather than recomputing a
+    // matrix: world coordinates and texture mapping match the legacy mesh.
+    float3 p=float3(i.p.x<0.5?i.boxLo.x:i.boxHi.x,
+                    i.p.y<0.5?i.boxLo.y:i.boxHi.y,
+                    i.p.z<0.5?i.boxLo.z:i.boxHi.z);
+    float3 n=i.n;
+    float2 uv=(abs(n.y)>=abs(n.x)&&abs(n.y)>=abs(n.z))
+        ?p.xz*i.uvScale
+        :(abs(n.x)>=abs(n.z)?p.zy*i.uvScale:p.xy*i.uvScale);
+    VSIn raw;
+    raw.p=p;raw.n=n;raw.uv=uv;raw.mat=i.boxMat;
+    return VSMain(raw);
 }
 float4 PSMain(VSOut i):SV_TARGET {
     // WRAP sampler already handles tiling. frac(uv) here broke automatic
@@ -411,6 +438,36 @@ public:
                 flush();
             }
         }
+        UINT submittedBoxInstances=0;
+        if(boxInstanceCount_){
+            ID3D11Buffer* buffers[]={boxVertices_.Get(),boxInstances_.Get()};
+            UINT strides[]={UINT(sizeof(GpuVertex)),UINT(sizeof(GpuBoxInstance))};
+            UINT offsets[]={0,0};
+            context_->IASetInputLayout(boxLayout_.Get());
+            context_->IASetVertexBuffers(0,2,buffers,strides,offsets);
+            context_->VSSetShader(boxVs_.Get(),nullptr,0);
+            auto drawBoxes=[&](UINT first,UINT count){
+                if(!count)return;
+                context_->DrawInstanced(36,count,0,first);
+                submittedBoxInstances+=count;
+            };
+            if(!cullEnabled){
+                drawBoxes(0,boxInstanceCount_);
+            }else{
+                UINT first=0,count=0;
+                auto flush=[&]{drawBoxes(first,count);count=0;};
+                for(const DrawChunk& chunk:boxChunks_){
+                    if(!visibleChunk(chunk,cam)){flush();continue;}
+                    if(count && first+count!=chunk.first)flush();
+                    if(!count)first=chunk.first;
+                    count+=chunk.count;
+                }
+                flush();
+            }
+            context_->IASetInputLayout(layout_.Get());
+            context_->VSSetShader(vs_.Get(),nullptr,0);
+            context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
+        }
         if(!transparent_.empty()){
             std::sort(transparent_.begin(),transparent_.end(),[&](const TransparentTriangle& a,const TransparentTriangle& b){return dot(a.center-cam.eye,cam.f)>dot(b.center-cam.eye,cam.f);});
             D3D11_MAPPED_SUBRESOURCE transparentMap{};hr=context_->Map(transparentVertices_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&transparentMap);
@@ -429,7 +486,7 @@ public:
         for(int y=0;y<h;y++){const uint8_t* row=static_cast<const uint8_t*>(mapped.pData)+size_t(y)*mapped.RowPitch;for(int x=0;x<w;x++){const uint8_t* p=row+size_t(x)*4;pixels[size_t(y)*w+x]=0xff000000u|(uint32_t(p[0])<<16)|(uint32_t(p[1])<<8)|uint32_t(p[2]);}}
         context_->Unmap(staging_.Get(),0);stats={};stats.gpu=true;stats.threads=0;stats.ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
         // Count submitted opaque primitives, not triangles hidden by culling.
-        stats.tests=submittedVertices/3+transparent_.size();
+        stats.tests=submittedVertices/3+uint64_t(submittedBoxInstances)*12+transparent_.size();
         return true;
     }
 private:
@@ -453,14 +510,29 @@ private:
             ?D3D_DRIVER_TYPE_WARP:D3D_DRIVER_TYPE_HARDWARE;
         HRESULT hr=D3D11CreateDevice(nullptr,driver,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,&feature,&context_);
         if(FAILED(hr)){error=L"Aucun périphérique Direct3D 11 matériel n’est disponible.";return false;}
-        ComPtr<ID3DBlob> vsCode,psCode,errors;
+        ComPtr<ID3DBlob> vsCode,boxVsCode,psCode,errors;
         hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",nullptr,nullptr,"VSMain","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&vsCode,&errors);
         if(FAILED(hr)){error=L"Compilation du vertex shader DirectX 11 impossible.";return false;}
+        hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",nullptr,nullptr,"VSBoxMain","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&boxVsCode,&errors);
+        if(FAILED(hr)){error=L"Compilation du shader d'instancing V17 impossible.";return false;}
         hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",nullptr,nullptr,"PSMain","ps_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&psCode,&errors);
         if(FAILED(hr)){error=L"Compilation du pixel shader DirectX 11 impossible.";return false;}
         if(FAILED(device_->CreateVertexShader(vsCode->GetBufferPointer(),vsCode->GetBufferSize(),nullptr,&vs_))||FAILED(device_->CreatePixelShader(psCode->GetBufferPointer(),psCode->GetBufferSize(),nullptr,&ps_))){error=L"Création des shaders DirectX 11 impossible.";return false;}
         const D3D11_INPUT_ELEMENT_DESC input[]={{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,p),D3D11_INPUT_PER_VERTEX_DATA,0},{"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,n),D3D11_INPUT_PER_VERTEX_DATA,0},{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,offsetof(GpuVertex,uv),D3D11_INPUT_PER_VERTEX_DATA,0},{"MATERIAL",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertex,material),D3D11_INPUT_PER_VERTEX_DATA,0}};
         if(FAILED(device_->CreateInputLayout(input,4,vsCode->GetBufferPointer(),vsCode->GetBufferSize(),&layout_))){error=L"Création du format de sommet DirectX 11 impossible.";return false;}
+        if(FAILED(device_->CreateVertexShader(boxVsCode->GetBufferPointer(),boxVsCode->GetBufferSize(),nullptr,&boxVs_))){
+            error=L"Création du vertex shader d'instancing V17 impossible.";return false;
+        }
+        const D3D11_INPUT_ELEMENT_DESC boxInput[]={
+            input[0],input[1],input[2],input[3],
+            {"BOXMIN",0,DXGI_FORMAT_R32G32B32_FLOAT,1,0,D3D11_INPUT_PER_INSTANCE_DATA,1},
+            {"BOXSCALE",0,DXGI_FORMAT_R32_FLOAT,1,12,D3D11_INPUT_PER_INSTANCE_DATA,1},
+            {"BOXMAX",0,DXGI_FORMAT_R32G32B32_FLOAT,1,16,D3D11_INPUT_PER_INSTANCE_DATA,1},
+            {"BOXMAT",0,DXGI_FORMAT_R32_UINT,1,28,D3D11_INPUT_PER_INSTANCE_DATA,1}
+        };
+        if(FAILED(device_->CreateInputLayout(boxInput,8,boxVsCode->GetBufferPointer(),boxVsCode->GetBufferSize(),&boxLayout_))){
+            error=L"Création du format des instances GPU impossible.";return false;
+        }
         D3D11_BUFFER_DESC cbd{};cbd.ByteWidth=sizeof(FrameConstants);cbd.Usage=D3D11_USAGE_DYNAMIC;cbd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;cbd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
         if(FAILED(device_->CreateBuffer(&cbd,nullptr,&constants_))){error=L"Création du buffer de constantes DirectX 11 impossible.";return false;}
         D3D11_RASTERIZER_DESC rd{};rd.FillMode=D3D11_FILL_SOLID;rd.CullMode=D3D11_CULL_NONE;rd.DepthClipEnable=TRUE;rd.MultisampleEnable=TRUE;
@@ -475,21 +547,34 @@ private:
         if(FAILED(device_->CreateSamplerState(&sd,&sampler_))){error=L"Création du sampler DirectX 11 impossible.";return false;}return true;
     }
     bool ensureScene(const Scene& scene,std::wstring& error) {
-        if(sceneKey_==scene.obj.data()&&objectCount_==scene.obj.size()&&vertices_ &&
+        const char* disableInstancing=std::getenv("M3D_V17_DISABLE_GPU_INSTANCING");
+        const bool useInstancing=!(disableInstancing && std::strcmp(disableInstancing,"1")==0);
+        if(sceneKey_==scene.obj.data()&&objectCount_==scene.obj.size()&&
+           (vertices_||boxInstances_) && instancingEnabled_==useInstancing &&
            sceneIdentity_==scene.gpuCacheIdentity &&
            sceneRevision_==scene.gpuCacheRevision)return true;
         // An edited scene may retain the same std::vector address: revision
         // tracking is required to refresh its GPU PBR/mesh resources.
         vertices_.Reset();transparentVertices_.Reset();albedo_.Reset();
+        boxVertices_.Reset();boxInstances_.Reset();boxInstanceCount_=0;
         roughness_.Reset();normal_.Reset();transparent_.clear();vertexCount_=0;
-        chunks_.clear();
+        chunks_.clear();boxChunks_.clear();
         MeshBuilder mesh;
+        std::vector<GpuBoxInstance> boxData;
         for(const Obj& o:scene.obj){
             const uint32_t m=o.mat;
             const float uvScale=uvScaleForMaterial(scene,m);
             mesh.transparentMaterial=m<scene.mat.size()&&scene.mat[m].transmissionPercent>0;
             if(o.kind==Kind::Triangle)mesh.tri(o.a,o.b,o.c,o.n0,o.n1,o.n2,o.uv0.x,o.uv0.y,o.uv1.x,o.uv1.y,o.uv2.x,o.uv2.y,m);
-            else if(o.kind==Kind::Box)mesh.box(o.mn,o.mx,m,uvScale);
+            else if(o.kind==Kind::Box){
+                if(useInstancing && !mesh.transparentMaterial){
+                    GpuBoxInstance instance{};
+                    instance.lo[0]=o.mn.x;instance.lo[1]=o.mn.y;instance.lo[2]=o.mn.z;
+                    instance.hi[0]=o.mx.x;instance.hi[1]=o.mx.y;instance.hi[2]=o.mx.z;
+                    instance.uvScale=uvScale;instance.material=m;
+                    boxData.push_back(instance);
+                }else mesh.box(o.mn,o.mx,m,uvScale);
+            }
             else if(o.kind==Kind::RoundBox)mesh.roundedBox(o.mn,o.mx,o.r,m,uvScale);
             else if(o.kind==Kind::Ellipse)mesh.ellipsoid(o.a,o.b,m);
             else if(o.kind==Kind::Capsule)mesh.capsule(o.a,o.b,o.r,m);
@@ -499,7 +584,50 @@ private:
         }
         mesh.ground(scene);
         if(mesh.vertices.size()+mesh.transparent.size()*3>12000000u){error=L"Scène trop grande pour l’aperçu DirectX 11 (limite de sécurité mémoire).";return false;}
-        if(mesh.vertices.empty()&&mesh.transparent.empty()){error=L"La scène ne contient aucune géométrie affichable par DirectX 11.";return false;}
+        if(mesh.vertices.empty()&&mesh.transparent.empty()&&boxData.empty()){
+            error=L"La scène ne contient aucune géométrie affichable par DirectX 11.";return false;
+        }
+        if(!boxData.empty()){
+            // Reuse the exact 12-triangle cube winding and face normals of
+            // the existing MeshBuilder. One template is shared by all boxes.
+            MeshBuilder templateMesh;
+            templateMesh.box({0,0,0},{1,1,1},0,1.f);
+            if(templateMesh.vertices.size()!=36){
+                error=L"Maillage cube d'instancing incorrect.";return false;
+            }
+            D3D11_BUFFER_DESC bd{};
+            bd.ByteWidth=UINT(templateMesh.vertices.size()*sizeof(GpuVertex));
+            bd.Usage=D3D11_USAGE_IMMUTABLE;
+            bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;
+            D3D11_SUBRESOURCE_DATA init{};init.pSysMem=templateMesh.vertices.data();
+            if(FAILED(device_->CreateBuffer(&bd,&init,&boxVertices_))){
+                error=L"Allocation de la géométrie cube partagée impossible.";return false;
+            }
+            bd.ByteWidth=UINT(boxData.size()*sizeof(GpuBoxInstance));
+            init.pSysMem=boxData.data();
+            if(FAILED(device_->CreateBuffer(&bd,&init,&boxInstances_))){
+                error=L"Allocation des instances GPU impossible.";return false;
+            }
+            boxInstanceCount_=UINT(boxData.size());
+            constexpr size_t kBoxBatch=128;
+            for(size_t first=0;first<boxData.size();first+=kBoxBatch){
+                const size_t end=std::min(boxData.size(),first+kBoxBatch);
+                DrawChunk batch;
+                batch.first=UINT(first);batch.count=UINT(end-first);
+                batch.mn={boxData[first].lo[0],boxData[first].lo[1],boxData[first].lo[2]};
+                batch.mx={boxData[first].hi[0],boxData[first].hi[1],boxData[first].hi[2]};
+                for(size_t i=first+1;i<end;++i){
+                    const auto& box=boxData[i];
+                    for(int axis=0;axis<3;++axis){
+                        float *lo=axis==0?&batch.mn.x:axis==1?&batch.mn.y:&batch.mn.z;
+                        float *hi=axis==0?&batch.mx.x:axis==1?&batch.mx.y:&batch.mx.z;
+                        *lo=std::min(*lo,box.lo[axis]);
+                        *hi=std::max(*hi,box.hi[axis]);
+                    }
+                }
+                boxChunks_.push_back(batch);
+            }
+        }
         if(!mesh.vertices.empty()){
             // 4096 triangles per batch. Bounding boxes are derived from the
             // real emitted vertices: this also works for complicated shapes,
@@ -590,6 +718,7 @@ private:
         if(FAILED(device_->CreateShaderResourceView(roughTexture.Get(),&sv,&roughness_))){error=L"Création de la table de rugosités DirectX 11 impossible.";return false;}
         sceneKey_=scene.obj.data();objectCount_=scene.obj.size();
         sceneIdentity_=scene.gpuCacheIdentity;sceneRevision_=scene.gpuCacheRevision;
+        instancingEnabled_=useInstancing;
         return true;
     }
     bool ensureTargets(int w,int h,std::wstring& error) {
@@ -617,10 +746,15 @@ private:
         td.Format=DXGI_FORMAT_R8G8B8A8_UNORM;td.SampleDesc.Count=1;td.SampleDesc.Quality=0;td.Usage=D3D11_USAGE_STAGING;td.BindFlags=0;td.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&staging_))){error=L"Création du tampon de lecture DirectX 11 impossible.";return false;}return true;
     }
-    ComPtr<ID3D11Device> device_;ComPtr<ID3D11DeviceContext> context_;ComPtr<ID3D11VertexShader> vs_;ComPtr<ID3D11PixelShader> ps_;ComPtr<ID3D11InputLayout> layout_;
-    ComPtr<ID3D11Buffer> constants_,vertices_,transparentVertices_;ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_;ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<TransparentTriangle> transparent_;
+    ComPtr<ID3D11Device> device_;ComPtr<ID3D11DeviceContext> context_;
+    ComPtr<ID3D11VertexShader> vs_,boxVs_;ComPtr<ID3D11PixelShader> ps_;
+    ComPtr<ID3D11InputLayout> layout_,boxLayout_;
+    ComPtr<ID3D11Buffer> constants_,vertices_,transparentVertices_,boxVertices_,boxInstances_;
+    ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_;ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<TransparentTriangle> transparent_;
     ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_,staging_;ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
-    std::vector<DrawChunk> chunks_;
+    std::vector<DrawChunk> chunks_,boxChunks_;
+    UINT boxInstanceCount_=0;
+    bool instancingEnabled_=false;
     const Obj* sceneKey_=nullptr;size_t objectCount_=0;uint64_t sceneIdentity_=0,sceneRevision_=0;UINT vertexCount_=0;UINT sampleCount_=1,sampleQuality_=0;int width_=0,height_=0;
 };
 }
