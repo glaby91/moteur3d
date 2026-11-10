@@ -1220,7 +1220,13 @@ private:
     }
     bool ensureTargets(int w,int h,std::wstring& error) {
         if(w==width_&&h==height_&&target_)return true;
-        width_=w;height_=h;target_.Reset();resolve_.Reset();rtv_.Reset();staging_.Reset();depthTexture_.Reset();dsv_.Reset();
+        if(!pending_.empty()){
+            error=L"Vider les images GPU différées avant de changer de résolution.";
+            return false;
+        }
+        for(auto& slot:readbackSlots_)slot=ReadbackSlot{};
+        readbackDepth_=0;nextReadbackSlot_=0;
+        width_=w;height_=h;target_.Reset();resolve_.Reset();rtv_.Reset();depthTexture_.Reset();dsv_.Reset();
         sampleCount_=1;sampleQuality_=0;
         for(UINT candidate:{4u,2u}){
             UINT levels=0,depthLevels=0;
@@ -1240,8 +1246,42 @@ private:
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&resolve_))){error=L"Création de la cible de résolution DirectX 11 impossible.";return false;}
         td.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;td.SampleDesc.Count=sampleCount_;td.SampleDesc.Quality=sampleQuality_;td.BindFlags=D3D11_BIND_DEPTH_STENCIL;
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&depthTexture_))||FAILED(device_->CreateDepthStencilView(depthTexture_.Get(),nullptr,&dsv_))){error=L"Création du tampon de profondeur DirectX 11 impossible.";return false;}
-        td.Format=DXGI_FORMAT_R8G8B8A8_UNORM;td.SampleDesc.Count=1;td.SampleDesc.Quality=0;td.Usage=D3D11_USAGE_STAGING;td.BindFlags=0;td.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
-        if(FAILED(device_->CreateTexture2D(&td,nullptr,&staging_))){error=L"Création du tampon de lecture DirectX 11 impossible.";return false;}return true;
+        return true;
+    }
+    bool ensureReadback(unsigned depth,int w,int h,std::wstring& error){
+        if(depth==readbackDepth_ && readbackSlots_[0].staging)return true;
+        if(!pending_.empty()){
+            error=L"La profondeur de lecture GPU ne peut changer tant que des images sont en attente.";
+            return false;
+        }
+        for(auto& slot:readbackSlots_)slot=ReadbackSlot{};
+        nextReadbackSlot_=0;readbackDepth_=0;
+        D3D11_TEXTURE2D_DESC td{};
+        td.Width=UINT(w);td.Height=UINT(h);td.MipLevels=1;td.ArraySize=1;
+        td.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
+        td.SampleDesc.Count=1;td.SampleDesc.Quality=0;
+        td.Usage=D3D11_USAGE_STAGING;td.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+        for(unsigned i=0;i<depth;++i){
+            auto& slot=readbackSlots_[i];
+            if(FAILED(device_->CreateTexture2D(&td,nullptr,&slot.staging))){
+                error=L"Impossible de créer les tampons de lecture GPU différée.";
+                return false;
+            }
+            slot.width=w;slot.height=h;
+            // Timestamp/disjoint queries are optional on older drivers;
+            // rendering and byte-identical readback still work without them.
+            D3D11_QUERY_DESC qd{};
+            qd.Query=D3D11_QUERY_TIMESTAMP_DISJOINT;
+            const bool disjointOk=SUCCEEDED(device_->CreateQuery(&qd,&slot.disjoint));
+            qd.Query=D3D11_QUERY_TIMESTAMP;
+            const bool timestampsOk=disjointOk &&
+                SUCCEEDED(device_->CreateQuery(&qd,&slot.start)) &&
+                SUCCEEDED(device_->CreateQuery(&qd,&slot.afterDraw)) &&
+                SUCCEEDED(device_->CreateQuery(&qd,&slot.afterCopy));
+            slot.queryReady=disjointOk&&timestampsOk;
+        }
+        readbackDepth_=depth;
+        return true;
     }
     ComPtr<ID3D11Device> device_;ComPtr<ID3D11DeviceContext> context_;
     ComPtr<ID3D11VertexShader> vs_,boxVs_,ellipseVs_;
@@ -1257,19 +1297,36 @@ private:
     std::vector<GpuEllipseInstance> foliage_;
     UINT foliageInstanceCount_=0;
     ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_;ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<TransparentTriangle> transparent_;
-    ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_,staging_;ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
+    ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_;
+    std::array<ReadbackSlot,3> readbackSlots_;
+    std::deque<unsigned> pending_;
+    unsigned readbackDepth_=0,nextReadbackSlot_=0;
+    ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
     std::vector<DrawChunk> chunks_,boxChunks_;
     UINT boxInstanceCount_=0;
     bool boxInstancingEnabled_=false,ellipseInstancingEnabled_=false,foliageInstancingEnabled_=false;
     const Obj* sceneKey_=nullptr;size_t objectCount_=0;uint64_t sceneIdentity_=0,sceneRevision_=0;UINT vertexCount_=0;UINT sampleCount_=1,sampleQuality_=0;int width_=0,height_=0;
 };
 }
+static DirectX11Preview& rasterThreadContext(){
+    thread_local DirectX11Preview renderer;
+    return renderer;
+}
 bool renderDirectX11Preview(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error) {
-    thread_local DirectX11Preview renderer;return renderer.render(scene,shadows,cam,w,h,pixels,stats,error);
+    return rasterThreadContext().render(scene,shadows,cam,w,h,pixels,stats,error);
+}
+bool enqueueDirectX11Preview(const Scene& scene,const ShadowMap& shadows,const Camera& cam,
+                            int w,int h,unsigned depth,std::wstring& error){
+    return rasterThreadContext().enqueue(scene,shadows,cam,w,h,depth,error);
+}
+bool receiveDirectX11Preview(std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error){
+    return rasterThreadContext().receive(pixels,stats,error);
 }
 }
 #else
 namespace m3d {
 bool renderDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,std::vector<uint32_t>&,Stats&,std::wstring& error) { error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false; }
+bool enqueueDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,unsigned,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}
+bool receiveDirectX11Preview(std::vector<uint32_t>&,Stats&,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}
 }
 #endif
