@@ -1,4 +1,5 @@
-name: CSE WARP V17.3 — Windows x64 exploration
+name: CSE WARP V17.build — Windows x64 exploration
+run-name: CSE WARP V17.${{ github.run_number }} — Windows x64
 on:
   push:
     branches:
@@ -17,7 +18,7 @@ on:
   workflow_dispatch:
 jobs:
   windows:
-    name: Windows x64 — V17.3 build and V16 regression tests
+    name: Windows x64 — V17.build and V16 regression tests
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v5
@@ -71,9 +72,9 @@ jobs:
             $exe = (Resolve-Path "build-v17/Release/$name").Path
             $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
             Write-Host "$name — $($version.ProductName) — $($version.FileVersion)"
-            if ($version.FileMajorPart -ne 17 -or $version.FileMinorPart -ne 3 -or
-                $version.FileBuildPart -ne 0 -or
-                $version.FilePrivatePart -ne [int]$env:GITHUB_RUN_NUMBER) {
+            if ($version.FileMajorPart -ne 17 -or
+                $version.FileMinorPart -ne [int]$env:GITHUB_RUN_NUMBER -or
+                $version.FileBuildPart -ne 0 -or $version.FilePrivatePart -ne 0) {
               throw "Invalid V17.3 GitHub build version in $name : $($version.FileVersion)"
             }
           }
@@ -190,7 +191,7 @@ jobs:
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.3-build-${{ github.run_number }}-Windows-x64
+          name: CSE-WARP-V17.${{ github.run_number }}-Windows-x64
           path: dist-v17/
           if-no-files-found: error
       # The V17-specific scene-switch and D3D11 benchmark smoke checks have
