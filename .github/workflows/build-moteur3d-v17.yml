@@ -59,6 +59,19 @@ jobs:
           if (!(Test-Path "build-v17/Release/shaders/v17/pbr.frag")) { throw "V17 OpenGL PBR fragment shader missing" }
           if (!(Test-Path "build-v17/Release/shaders/v17/shadow.vert")) { throw "V17 OpenGL shadow shader missing" }
           Write-Host "V17 + V16 scene reuse and shader deployment passed"
+      - name: Verify embedded V17 icon and Windows version metadata
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $ico = "build-v17/Release/cse_warp_v17.ico"
+          if (!(Test-Path $ico)) { throw "Branded V17 ICO missing from package" }
+          if ((Get-Item $ico).Length -lt 4000) { throw "Incomplete V17 ICO" }
+          $handle = [System.Drawing.Icon]::new((Resolve-Path $ico).Path)
+          $handle.Dispose()
+          $exe = (Resolve-Path "build-v17/Release/moteur3d_v17.exe").Path
+          $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
+          if ($version.FileMajorPart -ne 17) { throw "V17 version resource not embedded" }
+          Write-Host "Verified V17 Windows icon and executable version $($version.FileVersion)"
       - name: Validate CPU direct rendering remains available
         shell: pwsh
         run: |
@@ -71,6 +84,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path dist-v17 -Force | Out-Null
           Copy-Item "build-v17/Release/moteur3d_v17.exe" "dist-v17/"
+          Copy-Item "build-v17/Release/cse_warp_v17.ico" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v16.exe" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v16_core.dll" "dist-v17/"
           Copy-Item "build-v17/Release/pavillon01" "dist-v17/pavillon01" -Recurse
