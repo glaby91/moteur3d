@@ -31,6 +31,13 @@ struct SourceBox {
     V mn{},mx{};
     uint32_t material=0;
 };
+// V16 foliage canopy source metadata: CPU/Compute triangles remain untouched,
+// while the rasterizer can select a shared mesh at a distance-dependent LOD.
+struct SourceFoliage {
+    uint32_t firstTriangle=0,triangleCount=0;
+    V center{},radii{};
+    uint32_t material=0;
+};
 struct Node { V mn,mx; int32_t left=-1,right=-1,start=0,count=0; bool simdTrianglePair=false; };
 struct Level { uint32_t size=0; std::vector<uint16_t> p; };
 // Version-5 albedo mips keep full 8-bit RGB channels (0x00RRGGBB).
@@ -46,7 +53,7 @@ struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,dept
     unsigned threads=1; bool avx2=false,gpu=false; };
 struct Light { V p; float radius,intensity; V color; };
 struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPercent=0; float refractiveIndex=1.5f; float metallic=0.f, roughnessScale=1.f; std::vector<Level> mip,normalMip,roughnessMip; std::vector<ColorLevel> colorMip; };
-struct Scene { bool underwaterEnvironment=false; bool finiteGround=false; bool useLegacyWorldLights=true; std::vector<Obj> obj; std::vector<SourceBox> sourceBoxes; std::vector<Node> node; std::vector<uint32_t> order; std::vector<Material> mat; std::vector<Light> lights; int32_t root=-1;
+struct Scene { bool underwaterEnvironment=false; bool finiteGround=false; bool useLegacyWorldLights=true; std::vector<Obj> obj; std::vector<SourceBox> sourceBoxes; std::vector<SourceFoliage> sourceFoliage; std::vector<Node> node; std::vector<uint32_t> order; std::vector<Material> mat; std::vector<Light> lights; int32_t root=-1;
  // V16 builder assigns a unique identity after scene construction. Tracked scenes
  // are immutable except for explicit editor mutations, which MUST call
  // markGpuContentChanged(). Legacy/untracked scenes (identity == 0) retain
