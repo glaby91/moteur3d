@@ -115,12 +115,12 @@ public:
     }
     void setHour(float hour){
         hour_=hour;
-        m3d::updateLighting(hour_);
-        sun_=qv(m3d::sun).normalized();
-        auto tint=m3d::sunTint;
-        const float intensity=0.75f+1.3f*m3d::daylight;
+        const auto lighting=m3d::captureLighting(hour_);
+        sun_=qv(lighting.sun).normalized();
+        const V tint=lighting.sunTint;
+        const float intensity=0.75f+1.3f*lighting.daylight;
         sunColor_={tint.x/255.f*intensity,tint.y/255.f*intensity,tint.z/255.f*intensity};
-        const V sky=m3d::skyZenith*.45f+m3d::skyHorizon*.55f;
+        const V sky=lighting.skyZenith*.45f+lighting.skyHorizon*.55f;
         skyColor_={sky.x/255.f*.68f,sky.y/255.f*.68f,sky.z/255.f*.68f};
         fill_={.19f,.165f,.14f};
         shadowDirty_=true;
