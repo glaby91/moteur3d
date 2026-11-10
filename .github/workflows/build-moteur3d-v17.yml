@@ -46,8 +46,12 @@ jobs:
           Write-Host "Checking Windows Qt DLL availability:"
           where.exe Qt6OpenGLWidgets.dll
           where.exe Qt6OpenGL.dll
-          & "build-v17/Release/moteur3d_v17.exe" --self-test "scenes/v16/pavillon01/scene.json"
-          $code = $LASTEXITCODE
+          # The Qt application is built as WIN32 (GUI subsystem). On Windows,
+          # PowerShell's direct invocation does not reliably wait for GUI
+          # process completion or set LASTEXITCODE. Start-Process does.
+          $exe = (Resolve-Path "build-v17/Release/moteur3d_v17.exe").Path
+          $process = Start-Process -FilePath $exe -ArgumentList @("--self-test", "scenes/v16/pavillon01/scene.json") -Wait -PassThru
+          $code = $process.ExitCode
           Write-Host ("V17 scene loader exit: {0} / 0x{1:X8}" -f $code, [uint32]($code -band 0xffffffffL))
           if ($code -ne 0) { throw "V17 reuse of V16 Pavillon 01 failed (exit $code)" }
           if (!(Test-Path "build-v17/Release/moteur3d_v16.exe")) { throw "CPU/GPU V16 executable missing" }
