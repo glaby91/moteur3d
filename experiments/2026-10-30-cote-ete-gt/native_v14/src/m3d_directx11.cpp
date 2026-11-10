@@ -706,7 +706,41 @@ private:
         ellipseVertexCounts_.fill(0);ellipses_.clear();ellipseInstanceCount_=0;
         MeshBuilder mesh;
         std::vector<GpuBoxInstance> boxData;
-        for(const Obj& o:scene.obj){
+        // V16 JSON geometry is triangulated for CPU/Compute, but the source
+        // builder now retains the exact 12-triangle ranges of unrotated
+        // boxes. Skip those triangles only in the raster vertex buffer and
+        // submit their identical faces through GPU box instancing instead.
+        std::vector<uint8_t> skipSource;
+        if(useBoxInstancing && !scene.sourceBoxes.empty()){
+            skipSource.assign(scene.obj.size(),0);
+            for(const SourceBox& source:scene.sourceBoxes){
+                if(source.triangleCount!=12||source.material>=scene.mat.size()||
+                   scene.mat[source.material].transmissionPercent>0||
+                   size_t(source.firstTriangle)+12>scene.obj.size())continue;
+                bool valid=true;
+                for(size_t k=source.firstTriangle;k<size_t(source.firstTriangle)+12;++k){
+                    const Obj& o=scene.obj[k];
+                    if(o.kind!=Kind::Triangle||o.mat!=source.material||skipSource[k]){
+                        valid=false;break;
+                    }
+                }
+                if(!valid)continue;
+                GpuBoxInstance box{};
+                box.lo[0]=source.mn.x;box.lo[1]=source.mn.y;box.lo[2]=source.mn.z;
+                box.hi[0]=source.mx.x;box.hi[1]=source.mx.y;box.hi[2]=source.mx.z;
+                box.size[0]=source.mx.x-source.mn.x;
+                box.size[1]=source.mx.y-source.mn.y;
+                box.size[2]=source.mx.z-source.mn.z;
+                box.material=source.material;
+                box.uvMode=1;
+                boxData.push_back(box);
+                for(size_t k=source.firstTriangle;k<size_t(source.firstTriangle)+12;++k)
+                    skipSource[k]=1;
+            }
+        }
+        for(size_t objectIndex=0;objectIndex<scene.obj.size();++objectIndex){
+            if(!skipSource.empty() && skipSource[objectIndex])continue;
+            const Obj& o=scene.obj[objectIndex];
             const uint32_t m=o.mat;
             const float uvScale=uvScaleForMaterial(scene,m);
             mesh.transparentMaterial=m<scene.mat.size()&&scene.mat[m].transmissionPercent>0;
