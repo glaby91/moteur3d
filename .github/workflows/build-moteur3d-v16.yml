@@ -124,7 +124,10 @@ jobs:
           python -m pip install --disable-pip-version-check "numpy>=1.26,<3" "pillow>=10,<13"
           python v16/tools/compare_cpu_gpu.py "build-v16/pavillon01-gi-smoke.png" "build-v16/pavillon01-gpu-warp.png" "build-v16/parity-pavillon01"
           if ($LASTEXITCODE -ne 0) { throw "CPU/GPU comparison failed" }
+          python v16/tools/compare_cpu_gpu.py "build-v16/pavillon01-gi-smoke.png" "build-v16/pavillon01-gpu-warp-direct-only.png" "build-v16/parity-gpu-direct-only"
+          if ($LASTEXITCODE -ne 0) { throw "CPU/GPU direct-only comparison failed" }
           if (!(Test-Path "build-v16/parity-pavillon01/cpu_gpu_comparison.json")) { throw "GPU parity report absent" }
+          if (!(Test-Path "build-v16/parity-gpu-direct-only/cpu_gpu_comparison.json")) { throw "GPU direct-only report absent" }
       - name: Package EXE + Pavillon 01 + Qt6 dependencies
         shell: pwsh
         run: |
@@ -138,6 +141,8 @@ jobs:
           Copy-Item "build-v16/pavillon01-gi-smoke.png" "dist/Pavillon01-CPU-GI-FHD-Preview.png"
           Copy-Item "build-v16/pavillon01-gpu-warp.png" "dist/Pavillon01-GPU-WARP-Preview.png"
           Copy-Item "build-v16/parity-pavillon01" "dist/parity-pavillon01" -Recurse
+          Copy-Item "build-v16/parity-gpu-direct-only" "dist/parity-gpu-direct-only" -Recurse
+          Copy-Item "build-v16/pavillon01-gpu-warp-direct-only.png" "dist/Pavillon01-GPU-Sans-GI-Preview.png"
           Copy-Item "build-v16/pavillon01-smoke-17h.png" "dist/Pavillon01-CPU-Soleil-Rasant-17h-FHD.png"
           Copy-Item "build-v16/pavillon01-gpu-warp-17h.png" "dist/Pavillon01-GPU-Soleil-Rasant-17h-FHD.png"
           Copy-Item "build-v16/material-lab-cpu.png" "dist/Atelier-Materiaux-CPU-FHD.png"
