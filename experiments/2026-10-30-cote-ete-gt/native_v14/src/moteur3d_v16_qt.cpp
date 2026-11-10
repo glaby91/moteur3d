@@ -580,13 +580,13 @@ private:
                             std::memcpy(image.scanLine(y),display.data()+size_t(y)*w,size_t(w)*4);
                         if(progressive&&completed<sampleCount){
                             QMetaObject::invokeMethod(this,
-                                [this,serial,token,count=completed,target=sampleCount,image=std::move(image)]() mutable {
+                                [this,serial,token,count=completed,target=sampleCount,w,h,image=std::move(image)]() mutable {
                                     if(serial->load()!=token)return;
                                     lastImage_=std::move(image);
                                     canvas_->setImage(lastImage_);
                                     statusBar()->showMessage(
-                                        QStringLiteral("GI progressive — %1 / %2 échantillons Full HD")
-                                            .arg(count).arg(target));
+                                        QStringLiteral("GI progressive — %1 / %2 échantillons (%3×%4)")
+                                            .arg(count).arg(target).arg(w).arg(h));
                                 },Qt::QueuedConnection);
                         }else{
                             result.image=std::move(image);
