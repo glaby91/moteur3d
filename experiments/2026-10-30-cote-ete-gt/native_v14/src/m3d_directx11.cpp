@@ -661,7 +661,7 @@ private:
         const char* disableInstancing=std::getenv("M3D_V17_DISABLE_GPU_INSTANCING");
         const bool useInstancing=!(disableInstancing && std::strcmp(disableInstancing,"1")==0);
         if(sceneKey_==scene.obj.data()&&objectCount_==scene.obj.size()&&
-           (vertices_||boxInstances_) && instancingEnabled_==useInstancing &&
+           (vertices_||boxInstances_||ellipseInstances_) && instancingEnabled_==useInstancing &&
            sceneIdentity_==scene.gpuCacheIdentity &&
            sceneRevision_==scene.gpuCacheRevision)return true;
         // An edited scene may retain the same std::vector address: revision
