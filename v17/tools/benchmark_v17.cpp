@@ -92,6 +92,44 @@ int main(int argc,char** argv){
     const QString scenePath=QFileInfo(QString::fromLocal8Bit(argv[1])).absoluteFilePath();
     const QString outDir=QString::fromLocal8Bit(argv[2]);
     const auto args=app.arguments();
+    // Quality comes from the embedding V17 UI or directly from a host
+    // application; benchmark and interactive renderer must use the same
+    // native DLL settings even though their processes are different.
+    auto quality=rasterQualitySettings();
+    bool qualityProvided=false;
+    const auto readQualityOption=[&](const char* name,uint32_t& field)->bool{
+        const int index=args.indexOf(QString::fromLatin1(name));
+        if(index<0)return true;
+        qualityProvided=true;
+        bool parsed=false;
+        const int value=index+1<args.size()?args[index+1].toInt(&parsed):0;
+        if(!parsed||value<0){
+            err<<"Invalid raster quality parameter: "<<name<<"\n";
+            return false;
+        }
+        field=uint32_t(value);
+        return true;
+    };
+    uint32_t culling=quality.frustumCulling?1u:0u;
+    uint32_t dynamicLod=quality.dynamicLod?1u:0u;
+    if(!readQualityOption("--raster-msaa",quality.msaaSamples)||
+       !readQualityOption("--raster-anisotropy",quality.anisotropy)||
+       !readQualityOption("--raster-lod-percent",quality.lodQualityPercent)||
+       !readQualityOption("--raster-culling",culling)||
+       !readQualityOption("--raster-lod-enabled",dynamicLod)||
+       culling>1||dynamicLod>1){
+        err<<"Invalid quality flags; expected MSAA 1/2/4, anisotropy 1/2/4/8/16, LOD 50..200, culling/LOD 0/1\n";
+        return 2;
+    }
+    quality.frustumCulling=culling!=0;
+    quality.dynamicLod=dynamicLod!=0;
+    if(qualityProvided){
+        std::wstring qualityError;
+        if(!setRasterQualitySettings(quality,qualityError)){
+            err<<QString::fromStdWString(qualityError)<<"\n";
+            return 2;
+        }
+    }
     const bool smoke=args.contains(QStringLiteral("--smoke"));
     const bool quick=smoke||args.contains(QStringLiteral("--quick"));
     const bool compare=args.contains(QStringLiteral("--compare-v16"))&&!smoke;
@@ -153,6 +191,13 @@ int main(int argc,char** argv){
         {"compareV16",compare},
         {"readbackDepth",readbackDepth},
         {"compareReadback",compareReadback},
+        {"rasterQuality",QJsonObject{
+            {"msaaSamples",int(quality.msaaSamples)},
+            {"anisotropy",int(quality.anisotropy)},
+            {"lodQualityPercent",int(quality.lodQualityPercent)},
+            {"frustumCulling",quality.frustumCulling},
+            {"dynamicLod",quality.dynamicLod}
+        }},
         {"timingDefinition","GPU ms: D3D11 timestamp/disjoint queries (real hardware GPU time if available). cpuMapWaitMs: blocking Map; cpuPixelConvertMs: swizzle. meanMs: submit-to-receive latency; streamMeanMs: measured wall-time/frames, including pipeline fill and drain. Excludes GUI presentation/vsync."},
         {"hardwareNote","If M3D_V16_FORCE_WARP=1, this is a Microsoft software WARP test, not Intel HD620 GPU performance."}
     };
