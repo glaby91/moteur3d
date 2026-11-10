@@ -379,6 +379,30 @@ private:
                 QStringLiteral("Manifeste V16 (scene.json);;JSON (*.json)"));
             if(!chosen.isEmpty())openScene(chosen);
         });
+        auto* benchmarkScenes=file->addMenu(QStringLiteral("Scènes benchmark architecturales"));
+        for(const auto& profile:QVector<QPair<QString,QString>>{
+            {QStringLiteral("Léger — 20 000 triangles"),QStringLiteral("scene.json")},
+            {QStringLiteral("Lourd — 150 000 triangles"),QStringLiteral("scene-lourd.json")},
+            {QStringLiteral("Extrême — 500 000+ triangles"),QStringLiteral("scene-extreme.json")}}){
+            auto* action=benchmarkScenes->addAction(profile.first);
+            const QString sceneFile=profile.second;
+            connect(action,&QAction::triggered,this,[this,sceneFile]{
+                const QString target=QCoreApplication::applicationDirPath()
+                    +QStringLiteral("/benchmark-civic/")+sceneFile;
+                if(!QFileInfo::exists(target)){
+                    QMessageBox::warning(this,QStringLiteral("Scène benchmark manquante"),
+                        QStringLiteral("La scène n'est pas installée : %1").arg(target));
+                    return;
+                }
+                if(sceneFile==QStringLiteral("scene-extreme.json")&&
+                    QMessageBox::question(this,QStringLiteral("Profil extrême"),
+                        QStringLiteral("Ce niveau contient au moins 500 000 triangles. "
+                                       "Il utilise beaucoup de RAM et peut être lent sur Intel HD 620. "
+                                       "Charger la scène sans lancer automatiquement son rendu ?"))
+                          !=QMessageBox::Yes)return;
+                openScene(target);
+            });
+        }
         auto* saveMaterialsAction=file->addAction(QStringLiteral("Enregistrer les matériaux PBR…"));
         connect(saveMaterialsAction,&QAction::triggered,this,[this]{saveMaterials();});
         auto* save=file->addAction(QStringLiteral("Exporter l'image PNG…"));
@@ -761,13 +785,24 @@ private:
             .arg(runtime_->renderScene.obj.size())
             .arg(runtime_->renderScene.mat.size())
             .arg(runtime_->textureResolution));
+        // The stress scene must start with the actual V17 DX11 Raster backend
+        // instead of CPU ray tracing, which scales poorly with 500k triangles.
+        const bool isStressScene=QFileInfo(outcome.path).absolutePath().endsWith(
+            QStringLiteral("/benchmark-civic"),Qt::CaseInsensitive);
+        const bool extremeStress=QFileInfo(outcome.path).fileName()
+            ==QStringLiteral("scene-extreme.json");
+        if(isStressScene)backendBox_->setCurrentIndex(4);
         sceneLoading_=false;
-        canvas_->setPlaceholder(QStringLiteral("Scène chargée. Calcul de la première image…"));
+        canvas_->setPlaceholder(extremeStress
+            ?QStringLiteral("Scène extrême chargée. Cliquez sur Calculer l'image pour lancer le rendu.")
+            :QStringLiteral("Scène chargée. Calcul de la première image…"));
         sceneLoadLabel_->hide();
         sceneLoadProgress_->hide();
         cameraBox_->setEnabled(true);
         if(explorationButton_)explorationButton_->setEnabled(true);
-        requestRender();
+        if(!extremeStress)requestRender();
+        else statusBar()->showMessage(QStringLiteral(
+            "Profil extrême : rendu manuel conseillé pour limiter la consommation mémoire."));
     }
     void populateTrees(const v16::SceneDatabase& database){
         sceneTree_->clear();resourceTree_->clear();
