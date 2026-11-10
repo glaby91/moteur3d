@@ -43,6 +43,8 @@ if(WIN32)
                    "${CMAKE_CURRENT_BINARY_DIR}/v17_app.rc" @ONLY)
     configure_file("${CMAKE_CURRENT_SOURCE_DIR}/resources/v17_benchmark.rc.in"
                    "${CMAKE_CURRENT_BINARY_DIR}/v17_benchmark.rc" @ONLY)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/resources/v17_benchmark_runner.rc.in"
+                   "${CMAKE_CURRENT_BINARY_DIR}/v17_benchmark_runner.rc" @ONLY)
     qt_add_executable(moteur3d_v17 WIN32
         "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_qt.cpp"
         "${CMAKE_CURRENT_BINARY_DIR}/v17_app.rc")
@@ -88,8 +90,17 @@ add_custom_command(TARGET moteur3d_v17 POST_BUILD
     VERBATIM)
 # Standalone V17 benchmark + GUI. The measured engine is the same
 # shared V16 DLL and native D3D11 raster path as the V17 exploration view.
-add_executable(moteur3d_v17_benchmark
-    "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmark_v17.cpp")
+if(WIN32)
+    add_executable(moteur3d_v17_benchmark
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmark_v17.cpp"
+        "${CMAKE_CURRENT_BINARY_DIR}/v17_benchmark_runner.rc")
+    add_dependencies(moteur3d_v17_benchmark v17_icon_generator)
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/v17_benchmark_runner.rc"
+        PROPERTIES OBJECT_DEPENDS "${V17_BENCH_ICON}")
+else()
+    add_executable(moteur3d_v17_benchmark
+        "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmark_v17.cpp")
+endif()
 target_include_directories(moteur3d_v17_benchmark PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
 target_link_libraries(moteur3d_v17_benchmark PRIVATE
