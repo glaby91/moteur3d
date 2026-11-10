@@ -128,7 +128,7 @@ public:
                 if(frameClock_.isValid()){
                     const qint64 frameMs=frameClock_.elapsed();
                     if(frameMs>0)renderTimeLabel_->setText(
-                        QStringLiteral("V17 : %1 ms · %2 FPS affichés")
+                        QStringLiteral("V17 : %1 ms · %2 FPS calculés")
                             .arg(frameMs).arg(1000.0/double(frameMs),0,'f',1));
                 }
             } else if(exploring_ && !outcome.error.isEmpty()){
@@ -445,8 +445,13 @@ private:
         right->setMinimumWidth(295);
 
         connect(renderButton,&QPushButton::clicked,this,[this]{requestRender();});
-        connect(cameraBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){azimuth_->setValue(0);requestRender();});
+        connect(cameraBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){
+            azimuth_->setValue(0);
+            if(exploring_)activateFreeCamera();
+            requestRender();
+        });
         connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int index){
+            if(exploring_ && index!=4)stopExploration();
             const bool gi=index==2||index==3;
             directSamples_->setEnabled(index==0);
             denoiseDirect_->setEnabled(index==0);
@@ -536,6 +541,8 @@ private:
         statusBar()->showMessage(QStringLiteral("Matériaux enregistrés dans %1").arg(materialsPath_),15000);
     }
     void openScene(const QString& path){
+        if(exploring_)stopExploration();
+        freeCameraActive_=false;
         renderSerial_->fetch_add(1);
         if(watcher_.isRunning())watcher_.waitForFinished();
         auto loaded=v16::loadScene(path);
@@ -547,7 +554,7 @@ private:
         if(!build){QMessageBox::critical(this,"Scène V16",build.error);return;}
         auto replacement=std::make_shared<v16::Runtime>(std::move(build.runtime));
         runtime_=std::move(replacement);
-        setWindowTitle(QStringLiteral("CSE WARP Beta X — %1").arg(runtime_->title));
+        setWindowTitle(QStringLiteral("CSE WARP Beta X V17 — %1").arg(runtime_->title));
         sunHour_->blockSignals(true);
         sunHour_->setValue(double(runtime_->daylightHour));
         sunHour_->blockSignals(false);
