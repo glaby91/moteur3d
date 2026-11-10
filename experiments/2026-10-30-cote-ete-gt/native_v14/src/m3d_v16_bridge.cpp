@@ -453,7 +453,22 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
         const int material=result.runtime.materialIndex.value(object.material);
         object.firstTriangle=int(render.obj.size());
         const auto type=meshes.value(meshId).value("type").toString();
-        if(type=="box")box(render,pos,size,f(j.value("rotationY")),material);
+        if(type=="box"){
+            const float angle=f(j.value("rotationY"));
+            box(render,pos,size,angle,material);
+            // Preserve the box source as lightweight metadata while keeping
+            // all 12 triangles in render.obj for CPU, Compute and BVH.
+            // Rotated or transparent geometry remains on the legacy path.
+            if(std::abs(angle)<1.e-5f && render.obj.size()>=size_t(object.firstTriangle+12)){
+                SourceBox src;
+                src.firstTriangle=uint32_t(object.firstTriangle);
+                src.triangleCount=uint32_t(render.obj.size()-size_t(object.firstTriangle));
+                src.mn=pos-size*.5f;
+                src.mx=pos+size*.5f;
+                src.material=uint32_t(material);
+                if(src.triangleCount==12)render.sourceBoxes.push_back(src);
+            }
+        }
         else if(type=="uv_sphere")sphere(render,pos,size,material);
         else if(type=="foliage_canopy")foliageCanopy(render,pos,size,material);
         else {result.error="Unsupported V16 geometry: "+meshId;return result;}
