@@ -105,3 +105,50 @@ jobs:
           glslangValidator -S frag v17/shaders/pbr.frag
           glslangValidator -S vert v17/shaders/shadow.vert
           glslangValidator -S frag v17/shaders/shadow.frag
+
+  mesa:
+    name: Linux Mesa llvmpipe — actual V17 OpenGL framebuffer
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Install Qt6 + Mesa + virtual X server
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            qt6-base-dev qt6-base-dev-tools libqt6opengl6-dev \
+            libgl1-mesa-dri libglx-mesa0 mesa-utils \
+            libxkbcommon-x11-0 libxcb-cursor0 xvfb xauth
+      - name: Build V17 executable from shared V16 C++ renderer
+        run: |
+          cmake -S v16 -B build-v17-linux -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-v17-linux --target moteur3d_v17 --parallel 4
+      - name: Real OpenGL 3.3 raster and PNG under Mesa software driver
+        env:
+          QT_QPA_PLATFORM: xcb
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          QT_OPENGL: desktop
+        run: |
+          xvfb-run -a -s "-screen 0 1366x900x24 +extension GLX -noreset" \
+            timeout 150 ./build-v17-linux/moteur3d_v17 --smoke-gpu \
+              "$PWD/v17-real-opengl-mesa.png" "$PWD/scenes/v16/pavillon01/scene.json"
+          python3 - <<'PY'
+          from pathlib import Path
+          from struct import unpack
+          p = Path("v17-real-opengl-mesa.png")
+          if not p.is_file() or p.stat().st_size < 2000:
+              raise SystemExit("OpenGL real framebuffer PNG missing / suspiciously small")
+          data=p.read_bytes()
+          if data[:8] != b"\x89PNG\r\n\x1a\n":
+              raise SystemExit("Invalid V17 PNG signature")
+          dims=unpack(">II",data[16:24])
+          if dims!=(640,360):
+              raise SystemExit(f"Unexpected OpenGL render resolution: {dims}")
+          print(f"Actual Mesa GL V17 render verified: {dims}, {p.stat().st_size} bytes")
+          PY
+      - name: Upload actual OpenGL frame (software Mesa validation)
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17-Mesa-OpenGL-Smoke
+          path: v17-real-opengl-mesa.png
+          if-no-files-found: error
