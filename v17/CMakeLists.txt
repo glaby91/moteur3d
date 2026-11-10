@@ -8,7 +8,31 @@ enable_testing()
 # Reuse the proven V16 CPU, Compute and raster engines, plus their tests.
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../v16" "${CMAKE_CURRENT_BINARY_DIR}/v16")
 
-qt_add_executable(moteur3d_v17 WIN32 "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_qt.cpp")
+# The Windows ICO is compiled into the EXE so Explorer/taskbar recognize V17.
+# Generate all 16..256px sizes from the local brand artwork; no external download.
+if(WIN32)
+    set(V17_ICON "${CMAKE_CURRENT_BINARY_DIR}/cse_warp_v17.ico")
+    add_custom_command(OUTPUT "${V17_ICON}"
+        COMMAND powershell.exe -NoProfile -ExecutionPolicy Bypass
+            -File "${CMAKE_CURRENT_SOURCE_DIR}/tools/make_windows_icon.ps1"
+            -OutputPath "${V17_ICON}"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/tools/make_windows_icon.ps1"
+        COMMENT "Generate CSE WARP V17 Windows icon (16..256px)"
+        VERBATIM)
+    add_custom_target(v17_icon_generator DEPENDS "${V17_ICON}")
+    file(TO_CMAKE_PATH "${V17_ICON}" V17_ICON_RC_PATH)
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/resources/v17_app.rc.in"
+                   "${CMAKE_CURRENT_BINARY_DIR}/v17_app.rc" @ONLY)
+    qt_add_executable(moteur3d_v17 WIN32
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_qt.cpp"
+        "${CMAKE_CURRENT_BINARY_DIR}/v17_app.rc")
+    add_dependencies(moteur3d_v17 v17_icon_generator)
+    set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/v17_app.rc"
+        PROPERTIES OBJECT_DEPENDS "${V17_ICON}")
+else()
+    qt_add_executable(moteur3d_v17
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_qt.cpp")
+endif()
 target_include_directories(moteur3d_v17 PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
 target_link_libraries(moteur3d_v17 PRIVATE moteur3d_v16_core Qt6::Widgets Qt6::Concurrent)
@@ -16,6 +40,9 @@ if(MSVC)
     target_compile_options(moteur3d_v17 PRIVATE /O2 /EHsc /utf-8)
 endif()
 add_custom_command(TARGET moteur3d_v17 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${V17_ICON}"
+      "$<TARGET_FILE_DIR:moteur3d_v17>/cse_warp_v17.ico"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
       "$<TARGET_FILE:moteur3d_v16_core>"
       "$<TARGET_FILE_DIR:moteur3d_v17>"
