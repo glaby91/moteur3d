@@ -1,0 +1,64 @@
+name: CSE WARP V17 — Windows x64 exploration
+on:
+  push:
+    branches:
+      - feature/v17-realtime-architecture-roadmap-261110
+    paths:
+      - 'v17/**'
+      - 'v16/**'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/**'
+      - '.github/workflows/build-moteur3d-v17.yml'
+  pull_request:
+    paths:
+      - 'v17/**'
+      - '.github/workflows/build-moteur3d-v17.yml'
+  workflow_dispatch:
+jobs:
+  windows:
+    name: Windows x64 — V17 build and V16 regression tests
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v5
+      - name: Qt6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Configure
+        shell: pwsh
+        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+      - name: Compile
+        run: cmake --build build-v17 --config Release --parallel 4
+      - name: Verify V17 executable and shared V16 engine
+        shell: pwsh
+        run: |
+          foreach ($p in @("build-v17/Release/moteur3d_v17.exe",
+                         "build-v17/Release/moteur3d_v16_core.dll",
+                         "build-v17/Release/pavillon01/scene.json",
+                         "build-v17/Release/shaders/m3d_raytrace_compute.hlsl")) {
+            if (!(Test-Path $p)) { throw "Missing V17 package file: $p" }
+            Write-Host "Verified: $p"
+          }
+      - name: V16 CPU/GPU regression tests (same shared engine)
+        run: ctest --test-dir build-v17/v16 -C Release --verbose --output-on-failure
+      - name: Package CSE WARP V17
+        shell: pwsh
+        run: |
+          New-Item -Type Directory -Path "dist-v17" -Force | Out-Null
+          Copy-Item "build-v17/Release/moteur3d_v17.exe" "dist-v17/"
+          Copy-Item "build-v17/Release/moteur3d_v16_core.dll" "dist-v17/"
+          Copy-Item "build-v17/Release/pavillon01" "dist-v17/pavillon01" -Recurse
+          Copy-Item "build-v17/Release/material-lab" "dist-v17/material-lab" -Recurse
+          Copy-Item "build-v17/Release/pripyat-photo2scene-proof" "dist-v17/pripyat-photo2scene-proof" -Recurse
+          Copy-Item "build-v17/Release/shaders" "dist-v17/shaders" -Recurse
+          git rev-parse HEAD | Out-File "dist-v17/REVISION.txt" -Encoding ascii
+          windeployqt --release --no-translations dist-v17/moteur3d_v17.exe
+      - name: Upload V17 Windows application
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17-Exploration-Windows-x64
+          path: dist-v17/
+          if-no-files-found: error
