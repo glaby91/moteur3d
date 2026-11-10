@@ -142,8 +142,13 @@ float4 PSMain(VSOut i):SV_TARGET {
         shadowFactor = 0.16 + 0.84 * visible / 9.0;
     }
     float4 diffuseTerms = materialDiffuse[i.mat];
-    float light = diffuseTerms.x + diffuseTerms.y * diffuseTerms.w
-                + diffuseTerms.z * diffuse * shadowFactor * diffuseTerms.w;
+    // Cheap hemispherical sky fill: upward surfaces receive slightly more
+    // ambient daylight than vertical walls and undersides. Direct lighting
+    // and the existing shadow map remain separate for stronger depth.
+    float hemisphere=saturate(normal.y*0.5+0.5);
+    float skyFill=lerp(0.86,1.10,hemisphere);
+    float light=(diffuseTerms.x + diffuseTerms.y*diffuseTerms.w)*skyFill
+                 + diffuseTerms.z*diffuse*shadowFactor*diffuseTerms.w;
     float3 color = base * light + base * materialGlow[i.mat].rgb * materialGlow[i.mat].a;
     color += materialEmission[i.mat].rgb * materialEmission[i.mat].a;
     color += float3(28.0, 13.0, 4.0) / 255.0 * (1.0 - diffuseTerms.w);
@@ -156,7 +161,15 @@ float4 PSMain(VSOut i):SV_TARGET {
     }
     float specular = pow(saturate(dot(viewDir, reflectedLight)), specularPower)
                    * materialSpecular[i.mat].x * shadowFactor * diffuseTerms.w;
-    color += float3(178.0, 202.0, 214.0) / 255.0 * specular;
+    // Use PBR metalness for the highlight tint and a cheap 5th-power
+    // Schlick grazing response. This avoids another expensive pow() call.
+    float metallic=saturate(materialSpecular[i.mat].w);
+    float grazing=1.0-saturate(dot(viewDir,normal));
+    float f2=grazing*grazing;
+    float fresnel=f2*f2*grazing;
+    float3 specTint=lerp(float3(178.0,202.0,214.0)/255.0,
+                         saturate(base*1.2),metallic);
+    color += specTint * specular * (0.88+0.22*fresnel);
     [loop] for (uint l = 0; l < lightCount; ++l) {
         float3 delta = lightPositionRadius[l].xyz - i.world;
         float distanceToLight = length(delta);
@@ -384,9 +397,18 @@ public:
             else if(name=="wound"){spec=.19f;power=20.f;}
             else if(name=="asphalt"){spec=.16f;power=13.f;}
             else if(name=="orange"){spec=.13f;power=42.f;}
-            if(spec==0.f&&scene.mat[m].reflectivityPercent>0)spec=.20f*scene.mat[m].reflectivityPercent/100.f;
+            // The Pripyat material IDs carry generic PBR parameters rather
+            // than the old hardcoded names (metal, puddle, glass). Honor
+            // roughness/metalness/transmission even for unseen material IDs.
+            const float metal=clampf(scene.mat[m].metallic,0.f,1.f);
+            const float surfaceRough=clampf(scene.mat[m].roughnessScale,.08f,1.f);
+            const float transmission=float(scene.mat[m].transmissionPercent)/100.f;
+            spec=std::max(spec,.025f+.29f*metal+.095f*(1.f-surfaceRough)
+                          +.14f*transmission);
+            if(scene.mat[m].roughnessMip.empty())
+                power=clampf(2.f/(surfaceRough*surfaceRough)-2.f,8.f,80.f);
             cb.materialGlow[m][0]=r;cb.materialGlow[m][1]=g;cb.materialGlow[m][2]=b;cb.materialGlow[m][3]=strength;
-            cb.materialSpecular[m][0]=spec;cb.materialSpecular[m][1]=power;cb.materialSpecular[m][2]=scene.mat[m].roughnessMip.empty()?0.f:1.f;cb.materialSpecular[m][3]=sg;
+            cb.materialSpecular[m][0]=spec;cb.materialSpecular[m][1]=power;cb.materialSpecular[m][2]=scene.mat[m].roughnessMip.empty()?0.f:1.f;cb.materialSpecular[m][3]=metal;
             cb.materialOpacity[m][0]=1.f-float(scene.mat[m].transmissionPercent)/100.f;
             cb.materialOpacity[m][1]=scene.mat[m].normalMip.empty()?0.f:1.f;
             cb.materialDiffuse[m][0]=diffuseBase;cb.materialDiffuse[m][1]=diffuseDay;cb.materialDiffuse[m][2]=diffuseDirect;cb.materialDiffuse[m][3]=daylight;
