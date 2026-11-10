@@ -169,7 +169,9 @@ int main(int argc,char** argv){
         out<<'['<<status<<"] "<<record.value("backend").toString()
            <<" / "<<record.value("camera").toString()
            <<" / "<<record.value("width").toInt()<<"x"<<record.value("height").toInt()
-           <<" : "<<record.value("meanMs").toDouble()<<" ms mean\n";
+           <<" : "<<record.value("meanMs").toDouble()<<" ms mean"
+           <<(status=="ok"?QString():QStringLiteral(" — error: ")+record.value("error").toString())
+           <<"\n";
         out.flush();
     };
     const QVector<QSize> sizes=smoke?QVector<QSize>{QSize(640,360)}
