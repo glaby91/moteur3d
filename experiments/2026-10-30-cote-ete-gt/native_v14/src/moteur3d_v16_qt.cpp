@@ -244,9 +244,13 @@ private:
         backendBox_->setItemData(1,0,Qt::UserRole-1);
 #endif
         qualityBox_=new QComboBox;
-        qualityBox_->addItems({QStringLiteral("Full HD 1920 × 1080"),
-            QStringLiteral("QHD 2560 × 1440"),QStringLiteral("4K UHD 3840 × 2160")});
-        qualityBox_->setCurrentIndex(0);
+        // Keep native and Full HD side by side. Store explicit width/height
+        // instead of deriving them from an index or assuming exact 16:9.
+        qualityBox_->addItem(QStringLiteral("Dell natif 1366 × 768"),QSize(1366,768));
+        qualityBox_->addItem(QStringLiteral("Full HD 1920 × 1080"),QSize(1920,1080));
+        qualityBox_->addItem(QStringLiteral("QHD 2560 × 1440"),QSize(2560,1440));
+        qualityBox_->addItem(QStringLiteral("4K UHD 3840 × 2160"),QSize(3840,2160));
+        qualityBox_->setCurrentIndex(0); // Native Dell resolution for GPU comparison.
         directSamples_=new QComboBox;
         for(int n:{1,4,16})
             directSamples_->addItem(QStringLiteral("%1 échantillon(s) / pixel").arg(n),n);
@@ -499,8 +503,9 @@ private:
         preset.eye={preset.target.x+dir.x*std::cos(angle)+dir.z*std::sin(angle),
                     preset.eye.y,
                     preset.target.z-dir.x*std::sin(angle)+dir.z*std::cos(angle)};
-        const int w=qualityBox_->currentIndex()==2?3840:qualityBox_->currentIndex()==1?2560:1920;
-        const int h=w*9/16;
+        const QSize renderSize=qualityBox_->currentData().toSize();
+        const int w=renderSize.width();
+        const int h=renderSize.height();
         const int backend=backendBox_->currentIndex();
         const bool wantGpu=backend==1;
         const bool globalIllumination=backend>=2;
@@ -586,9 +591,10 @@ private:
                             result.image=std::move(image);
                         }
                     }
-                    result.renderer=QStringLiteral("CPU GI — %1 rebonds, %2 spp, HDR%3")
+                    result.renderer=QStringLiteral("CPU GI — %1 rebonds, %2 spp, HDR%3 — %4×%5")
                         .arg(maxBounces).arg(sampleCount)
-                        .arg(denoise?QStringLiteral(", débruité"):QString());
+                        .arg(denoise?QStringLiteral(", débruité"):QString())
+                        .arg(w).arg(h);
                     result.milliseconds=totalMs;
                     return result;
                 }
@@ -601,6 +607,7 @@ private:
                     :QStringLiteral("CPU Ray Tracing — %1 spp, ombres calculées").arg(sampleCount);
             }else result.gpu=true;
             result.milliseconds=stats.ms;
+            result.renderer+=QStringLiteral(" — %1×%2").arg(w).arg(h);
             if(edgeAA && pixels.size()==size_t(w)*size_t(h))
                 pixels=antialiasEdges4(pixels,w,h,4,false);
             if(pixels.size()!=size_t(w)*h){
