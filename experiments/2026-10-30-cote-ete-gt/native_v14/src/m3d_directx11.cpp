@@ -497,6 +497,9 @@ private:
         D3D11_SHADER_RESOURCE_VIEW_DESC sv{};sv.Format=td.Format;sv.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2DARRAY;sv.Texture2DArray.MipLevels=mipLevels;sv.Texture2DArray.ArraySize=matCount;
         if(FAILED(device_->CreateShaderResourceView(texture.Get(),&sv,&albedo_))){error=L"Création de la table de textures DirectX 11 impossible.";return false;}
         td.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
+        // SRV format must match the typed normal-map resource. Keeping the
+        // previous albedo SRGB view description causes E_INVALIDARG on D3D11.
+        sv.Format=td.Format;
         ComPtr<ID3D11Texture2D> normalTexture;
         if(FAILED(device_->CreateTexture2D(&td,normalSub.data(),&normalTexture))){error=L"Chargement des normales dans DirectX 11 impossible.";return false;}
         if(FAILED(device_->CreateShaderResourceView(normalTexture.Get(),&sv,&normal_))){error=L"Création de la table de normales DirectX 11 impossible.";return false;}
