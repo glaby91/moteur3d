@@ -64,9 +64,8 @@ if($Benchmark){
     $g.DrawString('BENCH',$fBench,$cyan,[float]32,[float]161)
     $fBench.Dispose()
 }else{
-    $fVersion=[System.Drawing.Font]::new('Arial',53,$style,$unit)
-    $g.DrawString('V17.3',$fVersion,$cyan,[float]48,[float]154)
-    $fVersion.Dispose()
+    # Build number changes per GitHub run; keep V17 readable at 16px.
+    $g.DrawString('V17',$fV17,$cyan,[float]69,[float]151)
 }
 
 $bytes=New-Object 'System.Collections.Generic.List[byte[]]'
@@ -109,4 +108,4 @@ $fCse.Dispose();$fWarp.Dispose();$fV17.Dispose()
 $white.Dispose();$cyan.Dispose();$globeBrush.Dispose();$globePen.Dispose()
 $outerPen.Dispose();$innerPen.Dispose();$baseBrush.Dispose()
 $outer.Dispose();$inner.Dispose();$g.Dispose();$bmp.Dispose()
-Write-Host "Generated CSE WARP V17.3 $(if($Benchmark){'Benchmark'}else{'Application'}) multi-resolution ICO: $full"
+Write-Host "Generated CSE WARP V17 $(if($Benchmark){'Benchmark'}else{'Application'}) multi-resolution ICO: $full"
