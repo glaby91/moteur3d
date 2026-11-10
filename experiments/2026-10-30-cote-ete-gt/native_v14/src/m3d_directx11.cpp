@@ -630,6 +630,55 @@ public:
             context_->VSSetShader(vs_.Get(),nullptr,0);
             context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
         }
+        uint64_t submittedFoliageTriangles=0;
+        uint64_t submittedFoliageInstances=0;
+        if(foliageInstanceCount_){
+            std::array<std::vector<GpuEllipseInstance>,3> buckets;
+            for(auto& bucket:buckets)bucket.reserve(foliageInstanceCount_/3+1);
+            const char* disabled=std::getenv("M3D_V17_DISABLE_LOD");
+            const bool lodEnabled=!(disabled&&std::strcmp(disabled,"1")==0);
+            for(const auto& plant:foliage_){
+                const V center{plant.center[0],plant.center[1],plant.center[2]};
+                const float radius=std::max({plant.radii[0],plant.radii[1],plant.radii[2]});
+                const DrawChunk bounds{0,0,{center.x-radius,center.y-radius,center.z-radius},
+                    {center.x+radius,center.y+radius,center.z+radius}};
+                if(cullEnabled&&!visibleChunk(bounds,cam))continue;
+                const float z=std::max(.10f,dot(center-cam.eye,cam.f));
+                const float projectedRadius=radius*float(w)/(2.f*std::max(.01f,cam.tanHalf)*z);
+                const int lod=(!lodEnabled||projectedRadius>=40.f)?2
+                    :(projectedRadius>=12.f?1:0);
+                buckets[lod].push_back(plant);
+            }
+            D3D11_MAPPED_SUBRESOURCE foliageMap{};
+            hr=context_->Map(foliageInstances_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&foliageMap);
+            if(FAILED(hr)){error=L"Mise à jour des LOD du feuillage impossible.";return false;}
+            GpuEllipseInstance* dest=static_cast<GpuEllipseInstance*>(foliageMap.pData);
+            for(const auto& bucket:buckets){
+                if(bucket.empty())continue;
+                std::memcpy(dest,bucket.data(),bucket.size()*sizeof(GpuEllipseInstance));
+                dest+=bucket.size();
+            }
+            context_->Unmap(foliageInstances_.Get(),0);
+            context_->IASetInputLayout(ellipseLayout_.Get());
+            context_->VSSetShader(ellipseVs_.Get(),nullptr,0);
+            UINT first=0;
+            for(size_t lod=0;lod<buckets.size();++lod){
+                const UINT count=UINT(buckets[lod].size());
+                if(!count)continue;
+                ID3D11Buffer* buffers[]={foliageVertices_[lod].Get(),foliageInstances_.Get()};
+                UINT strides[]={UINT(sizeof(GpuVertex)),UINT(sizeof(GpuEllipseInstance))};
+                UINT offsets[]={0,0};
+                context_->IASetVertexBuffers(0,2,buffers,strides,offsets);
+                context_->DrawInstanced(foliageVertexCounts_[lod],count,0,first);
+                ++drawCalls;
+                submittedFoliageTriangles+=uint64_t(foliageVertexCounts_[lod]/3)*count;
+                submittedFoliageInstances+=count;
+                first+=count;
+            }
+            context_->IASetInputLayout(layout_.Get());
+            context_->VSSetShader(vs_.Get(),nullptr,0);
+            context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
+        }
         if(!transparent_.empty()){
             std::sort(transparent_.begin(),transparent_.end(),[&](const TransparentTriangle& a,const TransparentTriangle& b){return dot(a.center-cam.eye,cam.f)>dot(b.center-cam.eye,cam.f);});
             D3D11_MAPPED_SUBRESOURCE transparentMap{};hr=context_->Map(transparentVertices_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&transparentMap);
@@ -657,9 +706,10 @@ public:
         stats.gpuDrawCalls=drawCalls;
         stats.gpuBoxInstances=submittedBoxInstances;
         stats.gpuEllipseInstances=submittedEllipseInstances;
+        stats.gpuFoliageInstances=submittedFoliageInstances;
         // Count submitted opaque primitives, not triangles hidden by culling.
         stats.tests=submittedVertices/3+uint64_t(submittedBoxInstances)*12
-            +submittedEllipseTriangles+transparent_.size();
+            +submittedEllipseTriangles+submittedFoliageTriangles+transparent_.size();
         return true;
     }
 private:
