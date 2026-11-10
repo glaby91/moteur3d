@@ -88,12 +88,31 @@ public:
         canvas_=new ImageView;
         setCentralWidget(canvas_);
         createUi();
+        // A permanent status-bar widget outlives temporary render/progress
+        // messages. QStatusBar::showMessage(..., 15000) used to erase the
+        // completed render time after 15 seconds.
+        renderTimeLabel_=new QLabel(QStringLiteral("Dernier rendu : —"),this);
+        renderTimeLabel_->setObjectName(QStringLiteral("v16LastRenderTime"));
+        statusBar()->addPermanentWidget(renderTimeLabel_);
         connect(&watcher_,&QFutureWatcher<Result>::finished,this,[this]{
             const auto outcome=watcher_.result();
             if(!outcome.image.isNull()){lastImage_=outcome.image;canvas_->setImage(outcome.image);}
+            if(outcome.error.isEmpty()&&!outcome.image.isNull()){
+                const QString milliseconds=QString::number(outcome.milliseconds,'f',1);
+                const QString seconds=QString::number(outcome.milliseconds/1000.0,'f',1);
+                renderTimeLabel_->setText(QStringLiteral("Dernier rendu : %1 ms (%2 s)")
+                                              .arg(milliseconds,seconds));
+                renderTimeLabel_->setToolTip(
+                    QStringLiteral("%1\nTemps de calcul : %2 ms (%3 s). "
+                                   "Cette valeur exclut certains traitements de post-production.")
+                        .arg(outcome.renderer,milliseconds,seconds));
+            }
+            // The completion message itself also remains until another action.
+            // Errors leave the last successful render time visible.
             statusBar()->showMessage(outcome.error.isEmpty()
-                ?QStringLiteral("%1 — %2 ms").arg(outcome.renderer).arg(outcome.milliseconds,0,'f',1)
-                :outcome.error,15000);
+                ?QStringLiteral("%1 — %2 ms")
+                      .arg(outcome.renderer).arg(outcome.milliseconds,0,'f',1)
+                :outcome.error);
             if(pending_){pending_=false;requestRender();}
         });
         if(!scenePath.isEmpty())openScene(scenePath);
@@ -118,6 +137,7 @@ private:
     QDoubleSpinBox* roughness_=nullptr;
     QDoubleSpinBox* metallic_=nullptr;
     QLabel* materialLabel_=nullptr;
+    QLabel* renderTimeLabel_=nullptr;
     QFutureWatcher<Result> watcher_;
     std::shared_ptr<std::atomic<uint64_t>> renderSerial_=std::make_shared<std::atomic<uint64_t>>(0);
     std::shared_ptr<v16::Runtime> runtime_;
