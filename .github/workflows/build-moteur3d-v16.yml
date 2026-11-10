@@ -4,6 +4,7 @@ on:
     branches:
       - feature/v16-modular-scene-dispatch
       - feature/v16-pavillon01-gpu-cpu-lighting-parity-261110
+      - fix/v16-pavillon01-persistent-render-time-261110
     paths:
       - 'v16/**'
       - 'scenes/v16/pavillon01/**'
@@ -19,6 +20,7 @@ on:
       - '.github/workflows/build-moteur3d-v16.yml'
   pull_request:
     paths:
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/moteur3d_v16_qt.cpp'
       - 'v16/**'
       - 'scenes/v16/pavillon01/**'
       - 'scenes/v16/material-lab/**'
