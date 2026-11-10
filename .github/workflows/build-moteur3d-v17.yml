@@ -154,6 +154,26 @@ jobs:
           if (!(Test-Path $csv)) { throw "Missing V17 benchmark CSV" }
           $png = Get-ChildItem (Join-Path $summary.Directory.FullName "images") -Filter *.png | Select-Object -First 1
           if (!$png -or $png.Length -lt 1000) { throw "Missing V17 benchmark PNG" }
+      - name: Benchmark DX11 1/2/3 readback buffers with exact image parity
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          & "build-v17/Release/moteur3d_v17_benchmark.exe" "scenes/v16/pavillon01/scene.json" "build-v17/v17-bench-readback" --smoke --compare-readback
+          if ($LASTEXITCODE -ne 0) { throw "Pipelined DX11 readback benchmark failed" }
+          $summary = Get-ChildItem "build-v17/v17-bench-readback" -Recurse -Filter summary.json | Select-Object -First 1
+          if (!$summary) { throw "No pipelined benchmark report" }
+          $result = Get-Content $summary.FullName -Raw | ConvertFrom-Json
+          $cases = @($result.cases | Where-Object { $_.backend -eq "V17_D3D11_Raster" })
+          if ($cases.Count -ne 3) { throw "Expected 1, 2 and 3 staging buffer benchmark cases" }
+          foreach ($depth in @(1,2,3)) {
+            $case = $cases | Where-Object { $_.readbackDepth -eq $depth } | Select-Object -First 1
+            if (!$case -or $case.status -ne "ok" -or !$case.pixelIdentical -or
+                $case.streamMeanMs -le 0 -or $case.cpuMapWaitMs -lt 0) {
+              throw "Depth $depth failed image parity or timing test"
+            }
+            Write-Host "DX11 depth $depth : throughput $($case.streamFps) FPS, GPU valid=$($case.gpuTimingValid), GPU total=$($case.gpuTotalMs) ms"
+          }
       - name: Verify V17 D3D11 raster WARP diagnostic preview
         shell: pwsh
         run: |
