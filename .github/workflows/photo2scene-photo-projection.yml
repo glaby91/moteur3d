@@ -1,0 +1,61 @@
+name: Photo2Scene WARP — projective texture geometry (CPU)
+
+on:
+  push:
+    branches: [feature/photo2scene-energetik-photo-projection-261110]
+    paths:
+      - 'tools/photo2scene/projective_photo_mesh.py'
+      - 'tools/photo2scene/data/pripyat/energetik_photo_projection_planes_20261110.json'
+      - '.github/workflows/photo2scene-photo-projection.yml'
+  pull_request:
+    paths:
+      - 'tools/photo2scene/projective_photo_mesh.py'
+      - 'tools/photo2scene/data/pripyat/energetik_photo_projection_planes_20261110.json'
+  workflow_dispatch:
+
+jobs:
+  projective-geometry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU geometry and GLB support
+        run: pip install 'numpy>=1.26,<3' 'opencv-python-headless>=4.9,<5' 'Pillow>=10,<13' 'trimesh>=4,<5'
+      - name: Syntax and projective GLB regression on synthetic source photo
+        run: |
+          python -m py_compile tools/photo2scene/projective_photo_mesh.py
+          python tools/photo2scene/projective_photo_mesh.py --help
+          python - <<'PY'
+          import importlib.util, json, numpy as np, cv2, tempfile
+          from pathlib import Path
+          module_path=Path('tools/photo2scene/projective_photo_mesh.py')
+          spec=importlib.util.spec_from_file_location('photo',module_path)
+          m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+          cfg=json.loads(Path('tools/photo2scene/data/pripyat/energetik_photo_projection_planes_20261110.json').read_text())
+          K=np.array([[550.,0,320.],[0,550.,180.],[0,0,1]])
+          faces=m.assemble_faces(cfg,K)
+          assert len(faces)==6
+          for f in faces:
+              assert np.isfinite(f['xyz']).all(),f['name']
+              xy,depth=m.project(f['xyz'],np.eye(3),np.zeros((3,1)),K)
+              assert (depth>2).all()
+              assert np.max(np.abs(xy-f['pixels']))<.0001,(f['name'],xy,f['pixels'])
+          blank=np.full((360,640,3),220,dtype=np.uint8)
+          out,mask=m.render(blank,faces,np.eye(3),np.zeros((3,1)),K)
+          assert mask.sum()>15000 and out.shape==(360,640,3)
+          with tempfile.TemporaryDirectory() as tmp:
+              p=Path(tmp)/'photo.glb'
+              m.export_glb(p,blank,faces)
+              assert p.exists() and p.stat().st_size>1000
+          test={'transform_matrix':np.diag([1.,-1.,-1.,1.]).tolist()}
+          R,t=m.camera_pose_nerfstudio(test)
+          assert np.allclose(R,np.eye(3)) and np.allclose(t,0)
+          print('Six photo-derived planar surfaces, source-corner reprojection, GLB and camera pose: PASS')
+          PY
+      - name: Ensure private reference photographs are not committed
+        run: |
+          if find tools/photo2scene -type f \( -iname '*.mp4' -o -iname '*.jpg' -o -iname '*.png' \) -print -quit | grep -q .; then
+            echo 'Original user photograph/video accidentally published'; exit 1
+          fi
