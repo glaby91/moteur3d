@@ -12,6 +12,7 @@
 #include <cstring>
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <deque>
 #include <cmath>
 #include <limits>
@@ -20,6 +21,27 @@ using Microsoft::WRL::ComPtr;
 
 namespace m3d {
 namespace {
+// Single atomic configuration word: host and GUI may update quality while
+// the dedicated GPU worker is rendering. Each frame gets one full snapshot.
+// Bits: 0..7 MSAA, 8..15 anisotropy, 16..31 LOD quality percent,
+// 32 culling, 33 LOD.
+constexpr uint64_t defaultQualityBits=4ull|(16ull<<8)|(100ull<<16)|(1ull<<32)|(1ull<<33);
+std::atomic<uint64_t> gpuQualityBits{defaultQualityBits};
+uint64_t packQuality(const RasterQualitySettings& q){
+    return uint64_t(q.msaaSamples)|(uint64_t(q.anisotropy)<<8)
+        |(uint64_t(q.lodQualityPercent)<<16)
+        |(uint64_t(q.frustumCulling?1u:0u)<<32)
+        |(uint64_t(q.dynamicLod?1u:0u)<<33);
+}
+RasterQualitySettings unpackQuality(uint64_t bits){
+    RasterQualitySettings q;
+    q.msaaSamples=uint32_t(bits&255u);
+    q.anisotropy=uint32_t((bits>>8)&255u);
+    q.lodQualityPercent=uint32_t((bits>>16)&65535u);
+    q.frustumCulling=((bits>>32)&1u)!=0;
+    q.dynamicLod=((bits>>33)&1u)!=0;
+    return q;
+}
 struct GpuVertex { float p[3], n[3], uv[2]; uint32_t material; };
 // Box geometry is immutable and shared. Per-object bounds/materials occupy
 // 32 bytes instead of duplicating 36 vertex records (~1.3 kB) per box.
@@ -457,8 +479,11 @@ public:
         if(!pending_.empty() && (w!=width_||h!=height_)){
             error=L"Changement de résolution avec des images GPU en attente.";return false;
         }
+        const RasterQualitySettings quality=unpackQuality(gpuQualityBits.load(std::memory_order_acquire));
         if(!ensureDevice(error)||!ensureScene(scene,error)||!ensureShadow(shadows,error)||
-           !ensureTargets(w,h,error)||!ensureReadback(depth,w,h,error))return false;
+           !ensureTargets(w,h,quality.msaaSamples,error)||
+           !ensureAnisotropy(quality.anisotropy,error)||
+           !ensureReadback(depth,w,h,error))return false;
         const unsigned slotIndex=nextReadbackSlot_;
         ReadbackSlot& slot=readbackSlots_[slotIndex];
         slot.cpuStarted=started;
@@ -554,7 +579,8 @@ public:
         UINT submittedVertices=0;
         uint64_t drawCalls=0;
         const char* noCull=std::getenv("M3D_V17_DISABLE_FRUSTUM_CULLING");
-        const bool cullEnabled=!(noCull && std::strcmp(noCull,"1")==0);
+        const bool cullEnabled=quality.frustumCulling
+            &&!(noCull && std::strcmp(noCull,"1")==0);
         if(vertexCount_){
             if(!cullEnabled){
                 context_->Draw(vertexCount_,0);
@@ -617,7 +643,8 @@ public:
             std::array<std::vector<GpuEllipseInstance>,3> level;
             for(auto& bucket:level)bucket.reserve(ellipseInstanceCount_/3+1);
             const char* disableLod=std::getenv("M3D_V17_DISABLE_LOD");
-            const bool lodEnabled=!(disableLod && std::strcmp(disableLod,"1")==0);
+            const bool lodEnabled=quality.dynamicLod
+                &&!(disableLod && std::strcmp(disableLod,"1")==0);
             for(const auto& sphere:ellipses_){
                 const V center{sphere.center[0],sphere.center[1],sphere.center[2]};
                 const float radius=std::max({sphere.radii[0],sphere.radii[1],sphere.radii[2]});
@@ -626,8 +653,9 @@ public:
                 if(cullEnabled&&!visibleChunk(bounds,cam))continue;
                 const float z=std::max(.10f,dot(center-cam.eye,cam.f));
                 const float projectedRadius=radius*float(w)/(2.f*std::max(.01f,cam.tanHalf)*z);
-                const int lod=(!lodEnabled||projectedRadius>=48.f)?2
-                    :(projectedRadius>=14.f?1:0);
+                const float lodScale=100.f/float(quality.lodQualityPercent);
+                const int lod=(!lodEnabled||projectedRadius>=48.f*lodScale)?2
+                    :(projectedRadius>=14.f*lodScale?1:0);
                 level[lod].push_back(sphere);
             }
             // One small streaming allocation/update for all visible
@@ -668,7 +696,8 @@ public:
             std::array<std::vector<GpuEllipseInstance>,3> buckets;
             for(auto& bucket:buckets)bucket.reserve(foliageInstanceCount_/3+1);
             const char* disabled=std::getenv("M3D_V17_DISABLE_LOD");
-            const bool lodEnabled=!(disabled&&std::strcmp(disabled,"1")==0);
+            const bool lodEnabled=quality.dynamicLod
+                &&!(disabled&&std::strcmp(disabled,"1")==0);
             for(const auto& plant:foliage_){
                 const V center{plant.center[0],plant.center[1],plant.center[2]};
                 const float radius=std::max({plant.radii[0],plant.radii[1],plant.radii[2]});
@@ -677,8 +706,9 @@ public:
                 if(cullEnabled&&!visibleChunk(bounds,cam))continue;
                 const float z=std::max(.10f,dot(center-cam.eye,cam.f));
                 const float projectedRadius=radius*float(w)/(2.f*std::max(.01f,cam.tanHalf)*z);
-                const int lod=(!lodEnabled||projectedRadius>=40.f)?2
-                    :(projectedRadius>=12.f?1:0);
+                const float lodScale=100.f/float(quality.lodQualityPercent);
+                const int lod=(!lodEnabled||projectedRadius>=40.f*lodScale)?2
+                    :(projectedRadius>=12.f*lodScale?1:0);
                 buckets[lod].push_back(plant);
             }
             D3D11_MAPPED_SUBRESOURCE foliageMap{};
@@ -1218,17 +1248,19 @@ private:
         foliageInstancingEnabled_=useFoliageInstancing;
         return true;
     }
-    bool ensureTargets(int w,int h,std::wstring& error) {
-        if(w==width_&&h==height_&&target_)return true;
+    bool ensureTargets(int w,int h,unsigned msaa,std::wstring& error) {
+        if(w==width_&&h==height_&&target_&&msaaPreference_==msaa)return true;
         if(!pending_.empty()){
             error=L"Vider les images GPU différées avant de changer de résolution.";
             return false;
         }
         for(auto& slot:readbackSlots_)slot=ReadbackSlot{};
         readbackDepth_=0;nextReadbackSlot_=0;
-        width_=w;height_=h;target_.Reset();resolve_.Reset();rtv_.Reset();depthTexture_.Reset();dsv_.Reset();
+        width_=w;height_=h;msaaPreference_=msaa;
+        target_.Reset();resolve_.Reset();rtv_.Reset();depthTexture_.Reset();dsv_.Reset();
         sampleCount_=1;sampleQuality_=0;
         for(UINT candidate:{4u,2u}){
+            if(candidate>msaa)continue;
             UINT levels=0,depthLevels=0;
             if(SUCCEEDED(device_->CheckMultisampleQualityLevels(DXGI_FORMAT_R8G8B8A8_UNORM,candidate,&levels))&&levels>0&&
                SUCCEEDED(device_->CheckMultisampleQualityLevels(DXGI_FORMAT_D24_UNORM_S8_UINT,candidate,&depthLevels))&&depthLevels>0){
@@ -1246,6 +1278,21 @@ private:
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&resolve_))){error=L"Création de la cible de résolution DirectX 11 impossible.";return false;}
         td.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;td.SampleDesc.Count=sampleCount_;td.SampleDesc.Quality=sampleQuality_;td.BindFlags=D3D11_BIND_DEPTH_STENCIL;
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&depthTexture_))||FAILED(device_->CreateDepthStencilView(depthTexture_.Get(),nullptr,&dsv_))){error=L"Création du tampon de profondeur DirectX 11 impossible.";return false;}
+        return true;
+    }
+    bool ensureAnisotropy(unsigned aniso,std::wstring& error){
+        if(sampler_&&samplerAnisotropy_==aniso)return true;
+        D3D11_SAMPLER_DESC sd{};
+        sd.Filter=aniso>1?D3D11_FILTER_ANISOTROPIC:D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+        sd.MaxAnisotropy=aniso;
+        sd.AddressU=sd.AddressV=sd.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;
+        sd.MaxLOD=D3D11_FLOAT32_MAX;
+        ComPtr<ID3D11SamplerState> selected;
+        if(FAILED(device_->CreateSamplerState(&sd,&selected))){
+            error=L"Réglage anisotropique DirectX 11 non disponible.";return false;
+        }
+        sampler_=std::move(selected);
+        samplerAnisotropy_=aniso;
         return true;
     }
     bool ensureReadback(unsigned depth,int w,int h,std::wstring& error){
@@ -1304,9 +1351,39 @@ private:
     ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
     std::vector<DrawChunk> chunks_,boxChunks_;
     UINT boxInstanceCount_=0;
+    unsigned msaaPreference_=0,samplerAnisotropy_=16;
     bool boxInstancingEnabled_=false,ellipseInstancingEnabled_=false,foliageInstancingEnabled_=false;
     const Obj* sceneKey_=nullptr;size_t objectCount_=0;uint64_t sceneIdentity_=0,sceneRevision_=0;UINT vertexCount_=0;UINT sampleCount_=1,sampleQuality_=0;int width_=0,height_=0;
 };
+}
+RasterQualitySettings rasterQualityProfile(RasterQualityProfile preset){
+    RasterQualitySettings q;
+    switch(preset){
+    case RasterQualityProfile::Performance:
+        q.msaaSamples=1;q.anisotropy=2;q.lodQualityPercent=60;break;
+    case RasterQualityProfile::Balanced:
+        q.msaaSamples=2;q.anisotropy=8;q.lodQualityPercent=100;break;
+    case RasterQualityProfile::High:
+        q.msaaSamples=4;q.anisotropy=16;q.lodQualityPercent=125;break;
+    case RasterQualityProfile::Ultra:
+        q.msaaSamples=4;q.anisotropy=16;q.lodQualityPercent=200;
+        q.dynamicLod=false;break;
+    }
+    return q;
+}
+RasterQualitySettings rasterQualitySettings(){
+    return unpackQuality(gpuQualityBits.load(std::memory_order_acquire));
+}
+bool setRasterQualitySettings(const RasterQualitySettings& q,std::wstring& error){
+    const auto validSample=q.msaaSamples==1||q.msaaSamples==2||q.msaaSamples==4;
+    const auto validAniso=q.anisotropy==1||q.anisotropy==2||
+        q.anisotropy==4||q.anisotropy==8||q.anisotropy==16;
+    if(!validSample||!validAniso||q.lodQualityPercent<50||q.lodQualityPercent>200){
+        error=L"Réglages DX11 invalides : MSAA 1/2/4, anisotropie 1/2/4/8/16, LOD 50..200%.";
+        return false;
+    }
+    gpuQualityBits.store(packQuality(q),std::memory_order_release);
+    return true;
 }
 static DirectX11Preview& rasterThreadContext(){
     thread_local DirectX11Preview renderer;
@@ -1325,6 +1402,16 @@ bool receiveDirectX11Preview(std::vector<uint32_t>& pixels,Stats& stats,std::wst
 }
 #else
 namespace m3d {
+RasterQualitySettings rasterQualityProfile(RasterQualityProfile p){
+    RasterQualitySettings q;
+    if(p==RasterQualityProfile::Performance){q.msaaSamples=1;q.anisotropy=2;q.lodQualityPercent=60;}
+    else if(p==RasterQualityProfile::Balanced){q.msaaSamples=2;q.anisotropy=8;}
+    else if(p==RasterQualityProfile::High){q.lodQualityPercent=125;}
+    else if(p==RasterQualityProfile::Ultra){q.lodQualityPercent=200;q.dynamicLod=false;}
+    return q;
+}
+RasterQualitySettings rasterQualitySettings(){return RasterQualitySettings{};}
+bool setRasterQualitySettings(const RasterQualitySettings&,std::wstring& error){error=L"DirectX 11 indisponible sur cet OS.";return false;}
 bool renderDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,std::vector<uint32_t>&,Stats&,std::wstring& error) { error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false; }
 bool enqueueDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,unsigned,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}
 bool receiveDirectX11Preview(std::vector<uint32_t>&,Stats&,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}
