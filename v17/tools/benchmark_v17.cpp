@@ -191,6 +191,8 @@ int main(int argc,char** argv){
         {"compareV16",compare},
         {"readbackDepth",readbackDepth},
         {"compareReadback",compareReadback},
+        {"pixelShaderOptimized",qgetenv("M3D_V17_DISABLE_SHADER_OPT")!="1"},
+        {"fastPixelSwizzle",qgetenv("M3D_V17_DISABLE_FAST_SWIZZLE")!="1"},
         {"rasterQuality",QJsonObject{
             {"msaaSamples",int(quality.msaaSamples)},
             {"anisotropy",int(quality.anisotropy)},
