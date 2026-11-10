@@ -1,0 +1,51 @@
+name: Photo2Scene WARP — camera data preparation QA
+
+on:
+  push:
+    branches:
+      - feature/photo2scene-energetik-13poses-valid-261110
+    paths:
+      - 'tools/photo2scene/prepare_energetik_13views.py'
+      - 'docs/pripyat/PHOTO2SCENE-ENERGETIK-MULTIVIEW-13POSES-261110.md'
+      - '.github/workflows/photo2scene-13poses-qa.yml'
+  pull_request:
+    paths:
+      - 'tools/photo2scene/prepare_energetik_13views.py'
+      - '.github/workflows/photo2scene-13poses-qa.yml'
+  workflow_dispatch:
+
+jobs:
+  camera-geometry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU numeric geometry
+        run: python -m pip install 'numpy>=1.26,<3' 'opencv-python-headless>=4.9,<5'
+      - name: Check CLI and frame timestamp/matrix conventions
+        run: |
+          python -m py_compile tools/photo2scene/prepare_energetik_13views.py
+          python tools/photo2scene/prepare_energetik_13views.py --help
+          python - <<'PY'
+          import importlib.util, numpy as np
+          spec=importlib.util.spec_from_file_location('multi','tools/photo2scene/prepare_energetik_13views.py')
+          m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
+          poly=m.polygons_for(373.0)
+          assert len(poly)==4
+          assert poly[0][0].tolist()==[135,51]
+          K=np.eye(3)
+          T=np.array(m.pose_to_opengl(K,np.zeros((3,1))))
+          assert np.allclose(T[:3,:3],np.diag([1,-1,-1]))
+          assert np.allclose(np.linalg.det(T[:3,:3]),1)
+          test=np.zeros((360,640,3),dtype=np.uint8)
+          mask=m.mask_for(test,374.0)
+          assert mask.shape==(360,640) and int(mask.sum())>100000
+          print('Timestamp interpolation, OpenCV/OpenGL and 2D masks: PASS')
+          PY
+      - name: Verify no original video was pushed
+        run: |
+          if find tools/photo2scene -iname '*.mp4' -print -quit | grep -q .; then
+            echo "Video accidentally committed"; exit 1
+          fi
