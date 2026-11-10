@@ -1,0 +1,684 @@
+{
+  "schema": "cse-warp-reusable-material-library-v1",
+  "name": "Bibliothèque PBR Pripiat – réutilisable",
+  "materialCount": 22,
+  "provenance": {
+    "catalogue": "experiments/2026-10-30-cote-ete-gt/native_v14/docs/PRIPYAT-MATERIALS-CATALOGUE.md",
+    "objectCatalogue": "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/catalogue-objects.json",
+    "authenticNativeMaps": [
+      {
+        "material": "prp_concrete_panel",
+        "path": "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/textures/prp_concrete_panel.m3dpbr.gz",
+        "source": "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/textures/prp_concrete_panel_source.jpg",
+        "note": "Files copied byte-identically into Windows benchmark package, retained as native reference. Not decoded by V17 JSON renderer."
+      }
+    ],
+    "note": "Colors and PBR scalar values are artistically estimated from Pripyat ranges; not measured or pixel-equivalent to native V14 maps."
+  },
+  "materials": [
+    {
+      "id": "prp_asphalt_old",
+      "baseColor": [
+        0.3333,
+        0.3373,
+        0.3176
+      ],
+      "roughness": 0.92,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_asphalt_old",
+      "sourceId": "prp_asphalt_old",
+      "sourceColorReference": "#555651",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_concrete_panel",
+      "baseColor": [
+        0.5333,
+        0.5294,
+        0.498
+      ],
+      "roughness": 0.87,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_concrete_panel",
+      "sourceId": "prp_concrete_panel",
+      "sourceColorReference": "#88877F",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_concrete_raw",
+      "baseColor": [
+        0.549,
+        0.5412,
+        0.5137
+      ],
+      "roughness": 0.92,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_concrete_raw",
+      "sourceId": "prp_concrete_raw",
+      "sourceColorReference": "#8C8A83",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_plaster_pale",
+      "baseColor": [
+        0.6588,
+        0.6471,
+        0.6039
+      ],
+      "roughness": 0.87,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_plaster_pale",
+      "sourceId": "prp_plaster_pale",
+      "sourceColorReference": "#A8A59A",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_brick_red",
+      "baseColor": [
+        0.5294,
+        0.2941,
+        0.2471
+      ],
+      "roughness": 0.87,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_brick_red",
+      "sourceId": "prp_brick_red",
+      "sourceColorReference": "#874B3F",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_roof_bitumen",
+      "baseColor": [
+        0.2235,
+        0.2157,
+        0.2078
+      ],
+      "roughness": 0.93,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_roof_bitumen",
+      "sourceId": "prp_roof_bitumen",
+      "sourceColorReference": "#393735",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_roof_metal",
+      "baseColor": [
+        0.4,
+        0.3922,
+        0.3804
+      ],
+      "roughness": 0.71,
+      "metallic": 0.52,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_roof_metal",
+      "sourceId": "prp_roof_metal",
+      "sourceColorReference": "#666461",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_steel_painted",
+      "baseColor": [
+        0.3216,
+        0.3882,
+        0.4118
+      ],
+      "roughness": 0.65,
+      "metallic": 0.6,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_steel_painted",
+      "sourceId": "prp_steel_painted",
+      "sourceColorReference": "#526369",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_steel_rusted",
+      "baseColor": [
+        0.4588,
+        0.2941,
+        0.2157
+      ],
+      "roughness": 0.87,
+      "metallic": 0.4,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_steel_rusted",
+      "sourceId": "prp_steel_rusted",
+      "sourceColorReference": "#754B37",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_window_glass",
+      "baseColor": [
+        0.6078,
+        0.6588,
+        0.651
+      ],
+      "roughness": 0.15,
+      "metallic": 0,
+      "transmission": 0.65,
+      "ior": 1.5,
+      "textureSet": "tex_prp_window_glass",
+      "sourceId": "prp_window_glass",
+      "label": 1.48,
+      "sourceColorReference": "#9BA8A6",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_window_frame",
+      "baseColor": [
+        0.5216,
+        0.5608,
+        0.5373
+      ],
+      "roughness": 0.68,
+      "metallic": 0.38,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_window_frame",
+      "sourceId": "prp_window_frame",
+      "sourceColorReference": "#858F89",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_wood_weathered",
+      "baseColor": [
+        0.4392,
+        0.3373,
+        0.2471
+      ],
+      "roughness": 0.78,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_wood_weathered",
+      "sourceId": "prp_wood_weathered",
+      "sourceColorReference": "#70563F",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_tile_ceramic",
+      "baseColor": [
+        0.6667,
+        0.6627,
+        0.6039
+      ],
+      "roughness": 0.35,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_tile_ceramic",
+      "sourceId": "prp_tile_ceramic",
+      "sourceColorReference": "#AAA99A",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_terrazzo_floor",
+      "baseColor": [
+        0.5098,
+        0.4902,
+        0.451
+      ],
+      "roughness": 0.5,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_terrazzo_floor",
+      "sourceId": "prp_terrazzo_floor",
+      "sourceColorReference": "#827D73",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_lino_floor",
+      "baseColor": [
+        0.4471,
+        0.4353,
+        0.349
+      ],
+      "roughness": 0.68,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_lino_floor",
+      "sourceId": "prp_lino_floor",
+      "sourceColorReference": "#726F59",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_wallpaper_faded",
+      "baseColor": [
+        0.5922,
+        0.5725,
+        0.5098
+      ],
+      "roughness": 0.85,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_wallpaper_faded",
+      "sourceId": "prp_wallpaper_faded",
+      "sourceColorReference": "#979282",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_soil_leaf_litter",
+      "baseColor": [
+        0.349,
+        0.302,
+        0.2235
+      ],
+      "roughness": 0.96,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_soil_leaf_litter",
+      "sourceId": "prp_soil_leaf_litter",
+      "sourceColorReference": "#594D39",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_moss_lichen",
+      "baseColor": [
+        0.2549,
+        0.3373,
+        0.2353
+      ],
+      "roughness": 0.97,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_moss_lichen",
+      "sourceId": "prp_moss_lichen",
+      "sourceColorReference": "#41563C",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_bark_wet",
+      "baseColor": [
+        0.2627,
+        0.2353,
+        0.1922
+      ],
+      "roughness": 0.85,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_bark_wet",
+      "sourceId": "prp_bark_wet",
+      "sourceColorReference": "#433C31",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_foliage",
+      "baseColor": [
+        0.3216,
+        0.3765,
+        0.2784
+      ],
+      "roughness": 0.8,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_foliage",
+      "sourceId": "prp_foliage",
+      "sourceColorReference": "#526047",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_puddle_water",
+      "baseColor": [
+        0.2745,
+        0.3569,
+        0.3765
+      ],
+      "roughness": 0.09,
+      "metallic": 0,
+      "transmission": 0.4,
+      "ior": 1.5,
+      "textureSet": "tex_prp_puddle_water",
+      "sourceId": "prp_puddle_water",
+      "label": 1.333,
+      "sourceColorReference": "#465B60",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    },
+    {
+      "id": "prp_sign_paint",
+      "baseColor": [
+        0.6157,
+        0.3412,
+        0.2863
+      ],
+      "roughness": 0.73,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_prp_sign_paint",
+      "sourceId": "prp_sign_paint",
+      "sourceColorReference": "#9D5749",
+      "origin": "Pripyat legacy palette; V17 numerical appearance estimate"
+    }
+  ],
+  "sets": [
+    {
+      "id": "tex_prp_asphalt_old",
+      "material": "prp_asphalt_old",
+      "pattern": "concrete",
+      "recipe": "concrete",
+      "resolution": 1024,
+      "sourceId": "prp_asphalt_old",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_concrete_panel",
+      "material": "prp_concrete_panel",
+      "pattern": "concrete",
+      "recipe": "concrete",
+      "resolution": 2048,
+      "sourceId": "prp_concrete_panel",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_concrete_raw",
+      "material": "prp_concrete_raw",
+      "pattern": "concrete",
+      "recipe": "concrete",
+      "resolution": 2048,
+      "sourceId": "prp_concrete_raw",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_plaster_pale",
+      "material": "prp_plaster_pale",
+      "pattern": "plaster",
+      "recipe": "plaster",
+      "resolution": 1024,
+      "sourceId": "prp_plaster_pale",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_brick_red",
+      "material": "prp_brick_red",
+      "pattern": "brick",
+      "recipe": "brick",
+      "resolution": 1024,
+      "sourceId": "prp_brick_red",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_roof_bitumen",
+      "material": "prp_roof_bitumen",
+      "pattern": "roof",
+      "recipe": "roof",
+      "resolution": 1024,
+      "sourceId": "prp_roof_bitumen",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_roof_metal",
+      "material": "prp_roof_metal",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 512,
+      "sourceId": "prp_roof_metal",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_steel_painted",
+      "material": "prp_steel_painted",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 1024,
+      "sourceId": "prp_steel_painted",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_steel_rusted",
+      "material": "prp_steel_rusted",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 1024,
+      "sourceId": "prp_steel_rusted",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_window_glass",
+      "material": "prp_window_glass",
+      "pattern": "glass",
+      "recipe": "glass",
+      "resolution": 512,
+      "sourceId": "prp_window_glass",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_window_frame",
+      "material": "prp_window_frame",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 512,
+      "sourceId": "prp_window_frame",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_wood_weathered",
+      "material": "prp_wood_weathered",
+      "pattern": "wood",
+      "recipe": "wood",
+      "resolution": 1024,
+      "sourceId": "prp_wood_weathered",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_tile_ceramic",
+      "material": "prp_tile_ceramic",
+      "pattern": "porcelain",
+      "recipe": "porcelain",
+      "resolution": 1024,
+      "sourceId": "prp_tile_ceramic",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_terrazzo_floor",
+      "material": "prp_terrazzo_floor",
+      "pattern": "stone",
+      "recipe": "stone",
+      "resolution": 1024,
+      "sourceId": "prp_terrazzo_floor",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_lino_floor",
+      "material": "prp_lino_floor",
+      "pattern": "fabric",
+      "recipe": "fabric",
+      "resolution": 512,
+      "sourceId": "prp_lino_floor",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_wallpaper_faded",
+      "material": "prp_wallpaper_faded",
+      "pattern": "plaster",
+      "recipe": "plaster",
+      "resolution": 512,
+      "sourceId": "prp_wallpaper_faded",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_soil_leaf_litter",
+      "material": "prp_soil_leaf_litter",
+      "pattern": "lawn",
+      "recipe": "lawn",
+      "resolution": 512,
+      "sourceId": "prp_soil_leaf_litter",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_moss_lichen",
+      "material": "prp_moss_lichen",
+      "pattern": "foliage",
+      "recipe": "foliage",
+      "resolution": 512,
+      "sourceId": "prp_moss_lichen",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_bark_wet",
+      "material": "prp_bark_wet",
+      "pattern": "wood",
+      "recipe": "wood",
+      "resolution": 512,
+      "sourceId": "prp_bark_wet",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_foliage",
+      "material": "prp_foliage",
+      "pattern": "foliage",
+      "recipe": "foliage",
+      "resolution": 1024,
+      "sourceId": "prp_foliage",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_puddle_water",
+      "material": "prp_puddle_water",
+      "pattern": "water",
+      "recipe": "water",
+      "resolution": 512,
+      "sourceId": "prp_puddle_water",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    },
+    {
+      "id": "tex_prp_sign_paint",
+      "material": "prp_sign_paint",
+      "pattern": "plaster",
+      "recipe": "plaster",
+      "resolution": 512,
+      "sourceId": "prp_sign_paint",
+      "channels": [
+        "albedo",
+        "normal",
+        "roughness"
+      ],
+      "status": "V17 regenerated procedural fallback (not the original texture pixels)"
+    }
+  ]
+}
