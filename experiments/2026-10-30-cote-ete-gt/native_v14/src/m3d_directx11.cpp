@@ -10,6 +10,9 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <algorithm>
+#include <cmath>
+#include <limits>
 
 using Microsoft::WRL::ComPtr;
 
@@ -79,13 +82,15 @@ VSOut VSMain(VSIn i) {
     return o;
 }
 float4 PSMain(VSOut i):SV_TARGET {
-    float3 base = albedo.Sample(wrapSampler, float3(frac(i.uv), i.mat)).rgb;
+    // WRAP sampler already handles tiling. frac(uv) here broke automatic
+    // derivatives at tile boundaries and forced inappropriate mip levels.
+    float3 base = albedo.Sample(wrapSampler, float3(i.uv, i.mat)).rgb;
     float3 normal = normalize(i.n);
     float3 dpdx = ddx(i.world), dpdy = ddy(i.world);
     float2 duvdx = ddx(i.uv), duvdy = ddy(i.uv);
     float determinant = duvdx.x * duvdy.y - duvdx.y * duvdy.x;
     if (materialOpacity[i.mat].y > 0.5) {
-        float3 detailNormal = normalize(normalMap.Sample(wrapSampler, float3(frac(i.uv), i.mat)).xyz * 2.0 - 1.0);
+        float3 detailNormal = normalize(normalMap.Sample(wrapSampler, float3(i.uv, i.mat)).xyz * 2.0 - 1.0);
         if (abs(determinant) > 0.000001) {
             float3 tangent = (dpdx * duvdy.y - dpdy * duvdx.y) / determinant;
             float3 rawBitangent = (-dpdx * duvdy.x + dpdy * duvdx.x) / determinant;
@@ -117,7 +122,7 @@ float4 PSMain(VSOut i):SV_TARGET {
     color += float3(28.0, 13.0, 4.0) / 255.0 * (1.0 - diffuseTerms.w);
     float3 viewDir = normalize(eye - i.world);
     float3 reflectedLight = reflect(-normalize(lightDir), normal);
-    float roughness = roughnessMap.Sample(wrapSampler, float3(frac(i.uv), i.mat));
+    float roughness = roughnessMap.Sample(wrapSampler, float3(i.uv, i.mat));
     float specularPower = materialSpecular[i.mat].y;
     if (materialSpecular[i.mat].z > 0.5) {
         specularPower = clamp(2.0 / max(roughness * roughness, 0.0001) - 2.0, 8.0, 80.0);
@@ -275,6 +280,29 @@ public:
     }
 };
 
+// Consecutive triangle batches are built once from the immutable mesh.
+ // Their bounding spheres conservatively reject fully off-screen batches.
+ // No geometry is edited or deleted: switch off for exact A/B comparisons.
+struct DrawChunk {
+    UINT first=0, count=0;
+    V mn{}, mx{};
+};
+static bool visibleChunk(const DrawChunk& chunk,const Camera& camera) {
+    const V center=(chunk.mn+chunk.mx)*.5f;
+    const float radius=length(chunk.mx-chunk.mn)*.5f + .01f;
+    const V q=center-camera.eye;
+    const float z=dot(q,camera.f);
+    if(z+radius<.08f||z-radius>10000.f)return false;
+    const float x=dot(q,camera.r),y=dot(q,camera.u);
+    const float h=std::max(.001f,camera.tanHalf);
+    const float v=h/std::max(.001f,camera.aspect);
+    // Outward-facing frustum plane: sphere support radius is
+    // radius * sqrt(1+tanHalf^2). This is conservative on near-plane
+    // crossings and cannot cut partially visible geometry.
+    if(std::abs(x)>z*h+radius*std::sqrt(1.f+h*h))return false;
+    if(std::abs(y)>z*v+radius*std::sqrt(1.f+v*v))return false;
+    return true;
+}
 class DirectX11Preview {
 public:
     bool render(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error) {
@@ -357,7 +385,32 @@ public:
         context_->RSSetState(raster_.Get());context_->OMSetDepthStencilState(depth_.Get(),0);context_->VSSetShader(vs_.Get(),nullptr,0);context_->PSSetShader(ps_.Get(),nullptr,0);
         ID3D11Buffer* cbuff=constants_.Get();context_->VSSetConstantBuffers(0,1,&cbuff);context_->PSSetConstantBuffers(0,1,&cbuff);
         ID3D11ShaderResourceView* srvs[]={albedo_.Get(),shadowSrv_.Get(),roughness_.Get(),normal_.Get()};context_->PSSetShaderResources(0,4,srvs);ID3D11SamplerState* sampler=sampler_.Get();context_->PSSetSamplers(0,1,&sampler);
-        if(vertexCount_)context_->Draw(vertexCount_,0);
+        UINT submittedVertices=0;
+        const char* noCull=std::getenv("M3D_V17_DISABLE_FRUSTUM_CULLING");
+        const bool cullEnabled=!(noCull && std::strcmp(noCull,"1")==0);
+        if(vertexCount_){
+            if(!cullEnabled){
+                context_->Draw(vertexCount_,0);
+                submittedVertices=vertexCount_;
+            }else{
+                // Merge adjacent visible batches to avoid thousands of draw
+                // calls. A scene with every batch visible stays one Draw().
+                UINT start=0,count=0;
+                auto flush=[&]{
+                    if(!count)return;
+                    context_->Draw(count,start);
+                    submittedVertices+=count;
+                    count=0;
+                };
+                for(const DrawChunk& chunk:chunks_){
+                    if(!visibleChunk(chunk,cam)){flush();continue;}
+                    if(count && start+count!=chunk.first)flush();
+                    if(!count)start=chunk.first;
+                    count+=chunk.count;
+                }
+                flush();
+            }
+        }
         if(!transparent_.empty()){
             std::sort(transparent_.begin(),transparent_.end(),[&](const TransparentTriangle& a,const TransparentTriangle& b){return dot(a.center-cam.eye,cam.f)>dot(b.center-cam.eye,cam.f);});
             D3D11_MAPPED_SUBRESOURCE transparentMap{};hr=context_->Map(transparentVertices_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&transparentMap);
@@ -374,7 +427,10 @@ public:
         if(FAILED(hr)){error=L"Impossible de relire l’image calculée par DirectX 11.";return false;}
         pixels.resize(size_t(w)*h);
         for(int y=0;y<h;y++){const uint8_t* row=static_cast<const uint8_t*>(mapped.pData)+size_t(y)*mapped.RowPitch;for(int x=0;x<w;x++){const uint8_t* p=row+size_t(x)*4;pixels[size_t(y)*w+x]=0xff000000u|(uint32_t(p[0])<<16)|(uint32_t(p[1])<<8)|uint32_t(p[2]);}}
-        context_->Unmap(staging_.Get(),0);stats={};stats.gpu=true;stats.threads=0;stats.ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();stats.tests=vertexCount_/3;return true;
+        context_->Unmap(staging_.Get(),0);stats={};stats.gpu=true;stats.threads=0;stats.ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
+        // Count submitted opaque primitives, not triangles hidden by culling.
+        stats.tests=submittedVertices/3+transparent_.size();
+        return true;
     }
 private:
     bool ensureShadow(const ShadowMap& shadows,std::wstring& error) {
@@ -426,6 +482,7 @@ private:
         // tracking is required to refresh its GPU PBR/mesh resources.
         vertices_.Reset();transparentVertices_.Reset();albedo_.Reset();
         roughness_.Reset();normal_.Reset();transparent_.clear();vertexCount_=0;
+        chunks_.clear();
         MeshBuilder mesh;
         for(const Obj& o:scene.obj){
             const uint32_t m=o.mat;
@@ -443,7 +500,31 @@ private:
         mesh.ground(scene);
         if(mesh.vertices.size()+mesh.transparent.size()*3>12000000u){error=L"Scène trop grande pour l’aperçu DirectX 11 (limite de sécurité mémoire).";return false;}
         if(mesh.vertices.empty()&&mesh.transparent.empty()){error=L"La scène ne contient aucune géométrie affichable par DirectX 11.";return false;}
-        if(!mesh.vertices.empty()){D3D11_BUFFER_DESC bd{};bd.ByteWidth=UINT(mesh.vertices.size()*sizeof(GpuVertex));bd.Usage=D3D11_USAGE_IMMUTABLE;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;D3D11_SUBRESOURCE_DATA init{};init.pSysMem=mesh.vertices.data();if(FAILED(device_->CreateBuffer(&bd,&init,&vertices_))){error=L"Allocation de la géométrie dans la mémoire GPU impossible.";return false;}vertexCount_=UINT(mesh.vertices.size());}
+        if(!mesh.vertices.empty()){
+            // 4096 triangles per batch. Bounding boxes are derived from the
+            // real emitted vertices: this also works for complicated shapes,
+            // foliage and the appended world ground without OBJ assumptions.
+            constexpr size_t kChunkVertices=3u*4096u;
+            for(size_t start=0;start<mesh.vertices.size();start+=kChunkVertices){
+                const size_t end=std::min(start+kChunkVertices,mesh.vertices.size());
+                DrawChunk chunk;
+                chunk.first=UINT(start);
+                chunk.count=UINT(end-start);
+                const auto& first=mesh.vertices[start];
+                chunk.mn={first.p[0],first.p[1],first.p[2]};
+                chunk.mx=chunk.mn;
+                for(size_t i=start+1;i<end;++i){
+                    const auto& v=mesh.vertices[i];
+                    chunk.mn.x=std::min(chunk.mn.x,v.p[0]);
+                    chunk.mn.y=std::min(chunk.mn.y,v.p[1]);
+                    chunk.mn.z=std::min(chunk.mn.z,v.p[2]);
+                    chunk.mx.x=std::max(chunk.mx.x,v.p[0]);
+                    chunk.mx.y=std::max(chunk.mx.y,v.p[1]);
+                    chunk.mx.z=std::max(chunk.mx.z,v.p[2]);
+                }
+                chunks_.push_back(chunk);
+            }
+            D3D11_BUFFER_DESC bd{};bd.ByteWidth=UINT(mesh.vertices.size()*sizeof(GpuVertex));bd.Usage=D3D11_USAGE_IMMUTABLE;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;D3D11_SUBRESOURCE_DATA init{};init.pSysMem=mesh.vertices.data();if(FAILED(device_->CreateBuffer(&bd,&init,&vertices_))){error=L"Allocation de la géométrie dans la mémoire GPU impossible.";return false;}vertexCount_=UINT(mesh.vertices.size());}
         if(!mesh.transparent.empty()){D3D11_BUFFER_DESC bd{};bd.ByteWidth=UINT(mesh.transparent.size()*3*sizeof(GpuVertex));bd.Usage=D3D11_USAGE_DYNAMIC;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;if(FAILED(device_->CreateBuffer(&bd,nullptr,&transparentVertices_))){error=L"Allocation du tampon des surfaces transparentes impossible.";return false;}}
         transparent_=std::move(mesh.transparent);
         UINT texSize=512;for(const Material& material:scene.mat){if(!material.colorMip.empty())texSize=std::max(texSize,material.colorMip.front().size);else if(!material.mip.empty())texSize=std::max(texSize,material.mip.front().size);}const UINT matCount=UINT(std::max<size_t>(1,scene.mat.size()));
@@ -539,6 +620,7 @@ private:
     ComPtr<ID3D11Device> device_;ComPtr<ID3D11DeviceContext> context_;ComPtr<ID3D11VertexShader> vs_;ComPtr<ID3D11PixelShader> ps_;ComPtr<ID3D11InputLayout> layout_;
     ComPtr<ID3D11Buffer> constants_,vertices_,transparentVertices_;ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_;ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<TransparentTriangle> transparent_;
     ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_,staging_;ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
+    std::vector<DrawChunk> chunks_;
     const Obj* sceneKey_=nullptr;size_t objectCount_=0;uint64_t sceneIdentity_=0,sceneRevision_=0;UINT vertexCount_=0;UINT sampleCount_=1,sampleQuality_=0;int width_=0,height_=0;
 };
 }
