@@ -24,6 +24,13 @@ struct V { float x=0,y=0,z=0; V operator+(V b)const{return{x+b.x,y+b.y,z+b.z};} 
 inline float dot(V a,V b){return a.x*b.x+a.y*b.y+a.z*b.z;} inline V cross(V a,V b){return{a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};} inline float length(V a){return std::sqrt(dot(a,a));} inline V norm(V a){float l=length(a);return l>1e-20f?a/l:V{0,1,0};} inline float clampf(float x,float a,float b){return std::max(a,std::min(b,x));}
 enum class Kind:uint8_t{Triangle=0,Box=1,RoundBox=2,Capsule=3,Cone=4,Ellipse=5};
 struct Obj { Kind kind{}; uint8_t mat=0; V mn,mx,a,b,c,n0,n1,n2,uv0,uv1,uv2,center,core; float r=0,r1=0,k=0,len=0,len2=0; };
+// Optional immutable source-box metadata for GPU raster instancing.
+// The actual triangles remain in Scene::obj for CPU/Compute/BVH equivalence.
+struct SourceBox {
+    uint32_t firstTriangle=0, triangleCount=0;
+    V mn{},mx{};
+    uint32_t material=0;
+};
 struct Node { V mn,mx; int32_t left=-1,right=-1,start=0,count=0; bool simdTrianglePair=false; };
 struct Level { uint32_t size=0; std::vector<uint16_t> p; };
 // Version-5 albedo mips keep full 8-bit RGB channels (0x00RRGGBB).
@@ -36,7 +43,7 @@ struct RendererCapabilities { bool dxrHardware=false; bool dxrBackend=false; };
 struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,depthReads=0,shadowRays=0; uint64_t simdRayPackets=0,simdTrianglePackets=0,simdTextureSamples=0,simdLightBatches=0; double ms=0,postMs=0,shadowMs=0; unsigned threads=1; bool avx2=false,gpu=false; };
 struct Light { V p; float radius,intensity; V color; };
 struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPercent=0; float refractiveIndex=1.5f; float metallic=0.f, roughnessScale=1.f; std::vector<Level> mip,normalMip,roughnessMip; std::vector<ColorLevel> colorMip; };
-struct Scene { bool underwaterEnvironment=false; bool finiteGround=false; bool useLegacyWorldLights=true; std::vector<Obj> obj; std::vector<Node> node; std::vector<uint32_t> order; std::vector<Material> mat; std::vector<Light> lights; int32_t root=-1;
+struct Scene { bool underwaterEnvironment=false; bool finiteGround=false; bool useLegacyWorldLights=true; std::vector<Obj> obj; std::vector<SourceBox> sourceBoxes; std::vector<Node> node; std::vector<uint32_t> order; std::vector<Material> mat; std::vector<Light> lights; int32_t root=-1;
  // V16 builder assigns a unique identity after scene construction. Tracked scenes
  // are immutable except for explicit editor mutations, which MUST call
  // markGpuContentChanged(). Legacy/untracked scenes (identity == 0) retain
