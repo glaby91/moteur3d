@@ -554,11 +554,15 @@ private:
                     "<b>Révision GitHub :</b> %2<br/><b>Qt :</b> %3</p>"
                     "<p><b>Rendu :</b> Direct3D 11 Raster, GPU Compute HLSL, "
                     "Ray Tracing CPU et illumination globale CPU.</p>"
-                    "<p><b>Nouveautés :</b> thread GPU permanent, chargement asynchrone, "
-                    "frustum culling de lots, correction du filtrage PBR/mipmaps, "
-                    "benchmark CSV/JSON avec triangles soumis et trois profils de charge.</p>"
-                    "<p><b>En développement :</b> instancing natif, LOD et éclairage PBR "
-                    "amélioré. Objectifs de FPS non garantis.</p>")
+                    "<p><b>Nouveautés V17 :</b> thread GPU permanent, chargement asynchrone, "
+                    "frustum culling, filtrage PBR/mipmaps corrigé, "
+                    "instancing GPU expérimental des boîtes et ellipsoïdes, "
+                    "trois niveaux de détail pour les ellipsoïdes.</p>"
+                    "<p><b>Benchmark :</b> temps par image, lecture GPU vers CPU, "
+                    "appels Draw, triangles soumis et nombres d'instances ; "
+                    "exports CSV, JSON et PNG.</p>"
+                    "<p><b>Prochaines améliorations :</b> étendre l'instancing et les LOD, "
+                    "améliorer ombres et éclairage PBR ; performance à valider sur Intel HD 620.</p>")
                     .arg(QString::number(CSE_WARP_BUILD_NUMBER),
                          revision.toHtmlEscaped(),
                          QString::fromLatin1(qVersion()).toHtmlEscaped()));
