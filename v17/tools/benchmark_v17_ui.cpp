@@ -14,6 +14,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMainWindow>
+#include <QStringList>
 #include <QMessageBox>
 #include <QProcess>
 #include <QPushButton>
@@ -34,7 +35,8 @@ static QString benchmarkBuildNumber(){
 }
 class BenchmarkWindow final : public QMainWindow {
 public:
-    explicit BenchmarkWindow(const QString& scenePath){
+    explicit BenchmarkWindow(const QString& scenePath,QStringList rasterArgs={})
+        :qualityArgs_(std::move(rasterArgs)){
         setWindowTitle(QStringLiteral("CSE WARP Beta X V17.%1 — Benchmark DirectX 11")
             .arg(CSE_WARP_BUILD_NUMBER));
         resize(820,590);
@@ -43,6 +45,12 @@ public:
             "Benchmark V17 : DirectX 11 Raster (temps rendu + lecture GPU). Export automatique "
             "CSV, JSON et PNG dans un sous-dossier horodaté. FPS estimés hors affichage Qt."));
         intro->setWordWrap(true);layout->addWidget(intro);
+        if(!qualityArgs_.isEmpty()){
+            auto* qualityInfo=new QLabel(QStringLiteral(
+                "Configuration Raster héritée de V17 : %1").arg(qualityArgs_.join(' ')),this);
+            qualityInfo->setWordWrap(true);
+            layout->addWidget(qualityInfo);
+        }
         auto* form=new QFormLayout;
         scene_=new QLineEdit(QFileInfo(scenePath).absoluteFilePath(),this);
         scene_->setReadOnly(true);form->addRow(QStringLiteral("Scène"),scene_);
@@ -147,6 +155,7 @@ private:
     QPushButton *start_=nullptr,*stop_=nullptr,*open_=nullptr;
     QTextEdit *log_=nullptr;QLabel *status_=nullptr;
     QProcess process_;
+    QStringList qualityArgs_;
     void appendOutput(const QByteArray& data){
         if(data.isEmpty())return;
         log_->moveCursor(QTextCursor::End);
@@ -169,6 +178,7 @@ private:
         QStringList args{scene_->text(),root_->text()};
         if(quick_->isChecked())args<<QStringLiteral("--quick");
         if(compare_->isChecked())args<<QStringLiteral("--compare-v16");
+        args.append(qualityArgs_);
         if(compareReadback_->isChecked())args<<QStringLiteral("--compare-readback");
         else args<<QStringLiteral("--readback-depth")
                  <<QString::number(readback_->currentData().toInt());
@@ -191,7 +201,7 @@ int main(int argc,char** argv){
     QString scene;
     if(argc>1)scene=QString::fromLocal8Bit(argv[1]);
     else scene=QCoreApplication::applicationDirPath()+QStringLiteral("/pavillon01/scene.json");
-    BenchmarkWindow window(scene);
+    BenchmarkWindow window(scene,argc>1?app.arguments().mid(2):QStringList{});
     window.show();
     return app.exec();
 }
