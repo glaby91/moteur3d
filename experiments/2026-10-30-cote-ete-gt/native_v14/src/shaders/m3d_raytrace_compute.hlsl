@@ -39,6 +39,7 @@ cbuffer Frame : register(b0) {
     float3 skyHorizon; float sunStrength;
     float3 sunColor; float skyFillStrength;
     uint lightCount; float sceneLightScale; float indirectFill; uint gpuIndirectSamples;
+    uint adaptiveGI; uint indirectWidth; uint indirectHeight; uint giReserved;
 };
 struct GpuLight {
     float3 position; float radius;
@@ -51,6 +52,13 @@ StructuredBuffer<GpuMaterial> Materials : register(t3);
 // Each material owns three slices: color, tangent-space normal, roughness.
 Texture2DArray<float4> PbrMaps : register(t4);
 StructuredBuffer<GpuLight> Lights : register(t5);
+// The low-res GI buffers hold untonemapped diffuse radiance and hit normal/depth.
+// They are read only in CSMain and written only in CSIndirect; never bound
+// concurrently as SRV+UAV in D3D11.
+Texture2D<float4> IndirectRadiance : register(t6);
+Texture2D<float4> IndirectGeometry : register(t7);
+RWTexture2D<float4> IndirectOut : register(u1);
+RWTexture2D<float4> IndirectGeoOut : register(u2);
 SamplerState RepeatTrilinear : register(s0);
 RWTexture2D<float4> Output : register(u0);
 
@@ -318,7 +326,89 @@ float3 diffuseBounce(Ray primary,HitInfo hit,float3 n,float3 albedo,
     }
     return bounced*(albedo*(1.f-saturate(metallic))/float(samples));
 }
-float4 tracePrimary(Ray ray) {
+// Half-resolution indirect lighting (2x2 full-res pixels / sample).
+// Primary lighting, transparent windows and specular pool reflections
+// remain native Full HD. Only the expensive diffuse secondary BVH rays
+// are shared. Unsupported surfaces fall back to real full-res GI.
+float3 reusableBounce(Ray primary,HitInfo hit,float3 n,float3 albedo,
+                       float metallic,uint2 pixelCoord) {
+    if(gpuIndirectSamples==0u)return float3(0,0,0);
+    if(adaptiveGI==0u)return diffuseBounce(primary,hit,n,albedo,metallic);
+    GpuTriangle tri=Triangles[hit.primitive];
+    float3 geom=normalize(cross(tri.p1-tri.p0,tri.p2-tri.p0));
+    if(dot(geom,primary.direction)>0.f)geom=-geom;
+    float depth=length(primary.origin+primary.direction*hit.t-eye);
+    float2 uv=(float2(pixelCoord)+.5f)*.5f-.5f;
+    int2 cell=int2(floor(uv));
+    float3 result=float3(0,0,0);
+    float weightSum=0.f;
+    [unroll] for(int iy=0;iy<2;++iy) {
+        [unroll] for(int ix=0;ix<2;++ix) {
+            int2 p=cell+int2(ix,iy);
+            if(p.x<0||p.y<0||p.x>=int(indirectWidth)||p.y>=int(indirectHeight))
+                continue;
+            float4 geometry=IndirectGeometry.Load(int3(p,0));
+            if(geometry.w<=0.f || abs(geometry.w-depth)>max(.09f,depth*.015f))
+                continue;
+            float normalFit=dot(geom,geometry.xyz);
+            if(normalFit<.88f)continue;
+            float2 weights=saturate(1.f-abs(float2(p)-uv));
+            float weight=weights.x*weights.y*
+                saturate((normalFit-.88f)/.12f);
+            if(weight<=1e-5f)continue;
+            result+=IndirectRadiance.Load(int3(p,0)).rgb*weight;
+            weightSum+=weight;
+        }
+    }
+    // Disocclusions, glass borders, geometry edges: never blur GI over
+    // unrelated surfaces. Expensive fallback is local to these pixels.
+    if(weightSum<.02f)
+        return diffuseBounce(primary,hit,n,albedo,metallic);
+    return result/weightSum;
+}
+
+// This pass runs at 1/2 resolution in each axis, tracing 1/4 as many
+// expensive secondary GI samples. G-buffer filtering is deferred to CSMain.
+[numthreads(8,8,1)]
+void CSIndirect(uint3 tid:SV_DispatchThreadID) {
+    if(tid.x>=indirectWidth||tid.y>=indirectHeight)return;
+    float2 xy=float2(tid.xy)*2.f+1.f;
+    float2 uv=xy/float2(width,height)*2.f-1.f;
+    Ray ray;ray.origin=eye;
+    ray.direction=normalize(forward+right*uv.x*tanHalfFov-
+                            up*uv.y*(tanHalfFov/aspect));
+    [loop] for(uint layer=0;layer<6u;++layer) {
+        HitInfo hit;
+        uint status=traceClosest(ray,farPlane,false,0xffffffffu,hit);
+        if(status!=1u)break;
+        GpuTriangle tri=Triangles[hit.primitive];
+        GpuMaterial mat=Materials[tri.material];
+        if(mat.transmission>.05f) {
+            // The actual visible opaque receiver may be behind glazing.
+            ray.origin+=ray.direction*(hit.t+.065f);
+            continue;
+        }
+        float3 n=normalize(tri.n0*(1.f-hit.bary.x-hit.bary.y)+
+                           tri.n1*hit.bary.x+tri.n2*hit.bary.y);
+        float2 tex=textureCoordinates(tri,hit.bary);
+        float mip=estimateMip(tri,hit.t);
+        float3 albedo=srgbToLinear(PbrMaps.SampleLevel(
+                RepeatTrilinear,float3(tex,tri.material*3),mip).rgb);
+        float3 mapped=PbrMaps.SampleLevel(RepeatTrilinear,
+                                    float3(tex,tri.material*3+1),mip).xyz*2.f-1.f;
+        if(dot(mapped,mapped)>.25f)n=tangentSpaceNormal(tri,n,normalize(mapped));
+        float3 geom=normalize(cross(tri.p1-tri.p0,tri.p2-tri.p0));
+        if(dot(geom,ray.direction)>0.f)geom=-geom;
+        float depth=length(ray.origin+ray.direction*hit.t-eye);
+        float3 bounced=diffuseBounce(ray,hit,n,albedo,mat.metallic);
+        IndirectOut[tid.xy]=float4(bounced,1.f);
+        IndirectGeoOut[tid.xy]=float4(geom,depth);
+        return;
+    }
+    IndirectOut[tid.xy]=float4(0.f,0.f,0.f,0.f);
+    IndirectGeoOut[tid.xy]=float4(0.f,0.f,0.f,-1.f);
+}
+float4 tracePrimary(Ray ray,uint2 pixelCoord) {
     float3 accumulated=float3(0,0,0);
     float throughput=1.f;
     [loop] for(uint layer=0;layer<6;++layer) {
@@ -362,7 +452,7 @@ float4 tracePrimary(Ray ray) {
         }
         float t=saturate(material.transmission);
         if(t<=.05f) {
-            local+=diffuseBounce(ray,hit,n,base,material.metallic);
+            local+=reusableBounce(ray,hit,n,base,material.metallic,pixelCoord);
             accumulated+=throughput*local;
             return float4(accumulated,1);
         }
@@ -387,5 +477,5 @@ void CSMain(uint3 tid:SV_DispatchThreadID) {
     // Matches CPU: tanHalfFov is HORIZONTAL, vertical half-FOV = tanHalfFov/aspect.
     ray.direction=normalize(forward+right*uv.x*tanHalfFov-
                             up*uv.y*(tanHalfFov/aspect));
-    Output[tid.xy]=float4(encodeHdr(tracePrimary(ray).rgb),1.f);
+    Output[tid.xy]=float4(encodeHdr(tracePrimary(ray,tid.xy).rgb),1.f);
 }
