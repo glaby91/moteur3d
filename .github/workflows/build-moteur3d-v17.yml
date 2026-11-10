@@ -16,6 +16,9 @@ on:
       - 'v17/**'
       - '.github/workflows/build-moteur3d-v17.yml'
   workflow_dispatch:
+concurrency:
+  group: cse-warp-v17-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   windows:
     name: Windows x64 — V17.build and V16 regression tests
@@ -47,6 +50,7 @@ jobs:
           foreach ($p in @("build-v17/Release/moteur3d_v17.exe",
                          "build-v17/Release/moteur3d_v16_core.dll",
                          "build-v17/Release/moteur3d_v17_benchmark.exe",
+                         "build-v17/Release/moteur3d_v17_campaign.exe",
                          "build-v17/Release/moteur3d_v17_benchui.exe",
                          "build-v17/Release/cse_warp_v17.ico",
                          "build-v17/Release/cse_warp_v17_bench.ico",
@@ -220,6 +224,30 @@ jobs:
             }
             Write-Host "A/B pixel-identical $name — reference mean $($referenceCase.meanMs) ms; optimized mean $($optimizedCase.meanMs) ms (WARP only)"
           }
+      - name: Smoke complete multi-round benchmark campaign (all 3 buffer depths)
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          & "build-v17/Release/moteur3d_v17_campaign.exe" "scenes/v16/pavillon01/scene.json" "build-v17/campaign-smoke" --smoke --raster-msaa 2 --raster-anisotropy 8 --raster-lod-percent 100
+          if ($LASTEXITCODE -ne 0) { throw "Full benchmark campaign smoke failed" }
+          $summary=Get-ChildItem "build-v17/campaign-smoke" -Filter summary.json -Recurse | Select-Object -First 1
+          if (!$summary) { throw "Campaign summary missing" }
+          $s=Get-Content $summary.FullName -Raw | ConvertFrom-Json
+          if (!$s.complete -or @($s.cases).Count -ne 3) { throw "Campaign did not cover 1/2/3 buffers" }
+          foreach ($case in @($s.cases)) {
+            if ($case.status -ne 'ok' -or !$case.pixelIdentical -or
+                $case.roundsCompleted -ne 2 -or $case.frames -ne 4 -or
+                $case.streamFps -le 0 -or $case.p95Ms -le 0) {
+              throw "Campaign repetition or pixel parity failed: depth=$($case.readbackDepth)"
+            }
+          }
+          foreach ($name in @("campaign_frames.csv","campaign_results.csv","campaign_report.html")) {
+            if (!(Test-Path (Join-Path $summary.Directory.FullName $name))) {
+              throw "Campaign report missing: $name"
+            }
+          }
+          Write-Host "Full campaign smoke: repeated GPU rounds, CSV/JSON/HTML and parity OK"
       - name: Verify V17 D3D11 raster WARP diagnostic preview
         shell: pwsh
         run: |
@@ -233,6 +261,7 @@ jobs:
           New-Item -Type Directory -Path "dist-v17" -Force | Out-Null
           Copy-Item "build-v17/Release/moteur3d_v17.exe" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v17_benchmark.exe" "dist-v17/"
+          Copy-Item "build-v17/Release/moteur3d_v17_campaign.exe" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v17_benchui.exe" "dist-v17/"
           Copy-Item "build-v17/v16/Release/moteur3d_v16.exe" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v16_core.dll" "dist-v17/"
