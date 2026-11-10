@@ -11,6 +11,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 
@@ -26,6 +27,13 @@ struct GpuBoxInstance {
     float hi[3]; uint32_t material;
 };
 static_assert(sizeof(GpuBoxInstance)==32,"D3D11 per-instance layout must be 32 bytes");
+// Ellipsoids use a single dynamic instance buffer per frame. Three immutable
+// unit-sphere meshes provide GPU LOD without regenerating scene geometry.
+struct GpuEllipseInstance {
+    float center[3];uint32_t material;
+    float radii[3];float padding;
+};
+static_assert(sizeof(GpuEllipseInstance)==32,"D3D11 ellipsoid instance size");
 struct TransparentTriangle { GpuVertex v[3]; V center; };
 struct FrameConstants {
     float eye[3], tanHalf;
@@ -106,6 +114,20 @@ VSOut VSBoxMain(VSBoxIn i) {
         :(abs(n.x)>=abs(n.z)?p.zy*i.uvScale:p.xy*i.uvScale);
     VSIn raw;
     raw.p=p;raw.n=n;raw.uv=uv;raw.mat=i.boxMat;
+    return VSMain(raw);
+}
+struct VSEllipseIn {
+    float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0;
+    uint unusedMaterial:MATERIAL;
+    float3 center:ELLIPSECENTER;uint ellipseMat:ELLIPSEMAT;
+    float3 radii:ELLIPSERADII;float pad:ELLIPSEPAD;
+};
+VSOut VSEllipseMain(VSEllipseIn i) {
+    VSIn raw;
+    raw.p=i.center+i.p*i.radii;
+    raw.n=normalize(i.n/max(i.radii,float3(.00001,.00001,.00001)));
+    raw.uv=i.uv;
+    raw.mat=i.ellipseMat;
     return VSMain(raw);
 }
 float4 PSMain(VSOut i):SV_TARGET {
@@ -490,6 +512,54 @@ public:
             context_->VSSetShader(vs_.Get(),nullptr,0);
             context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
         }
+        uint64_t submittedEllipseTriangles=0;
+        if(ellipseInstanceCount_){
+            std::array<std::vector<GpuEllipseInstance>,3> level;
+            for(auto& bucket:level)bucket.reserve(ellipseInstanceCount_/3+1);
+            const char* disableLod=std::getenv("M3D_V17_DISABLE_LOD");
+            const bool lodEnabled=!(disableLod && std::strcmp(disableLod,"1")==0);
+            for(const auto& sphere:ellipses_){
+                const V center{sphere.center[0],sphere.center[1],sphere.center[2]};
+                const float radius=std::max({sphere.radii[0],sphere.radii[1],sphere.radii[2]});
+                const DrawChunk bounds{0,0,{center.x-radius,center.y-radius,center.z-radius},
+                                           {center.x+radius,center.y+radius,center.z+radius}};
+                if(cullEnabled&&!visibleChunk(bounds,cam))continue;
+                const float z=std::max(.10f,dot(center-cam.eye,cam.f));
+                const float projectedRadius=radius*float(w)/(2.f*std::max(.01f,cam.tanHalf)*z);
+                const int lod=(!lodEnabled||projectedRadius>=48.f)?2
+                    :(projectedRadius>=14.f?1:0);
+                level[lod].push_back(sphere);
+            }
+            // One small streaming allocation/update for all visible
+            // ellipsoids, not a per-object Draw() or a CPU rebuild.
+            D3D11_MAPPED_SUBRESOURCE ellipseMap{};
+            hr=context_->Map(ellipseInstances_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&ellipseMap);
+            if(FAILED(hr)){error=L"Mise à jour des LOD ellipsoïdes impossible.";return false;}
+            GpuEllipseInstance* dest=static_cast<GpuEllipseInstance*>(ellipseMap.pData);
+            for(const auto& bucket:level){
+                if(bucket.empty())continue;
+                std::memcpy(dest,bucket.data(),bucket.size()*sizeof(GpuEllipseInstance));
+                dest+=bucket.size();
+            }
+            context_->Unmap(ellipseInstances_.Get(),0);
+            context_->IASetInputLayout(ellipseLayout_.Get());
+            context_->VSSetShader(ellipseVs_.Get(),nullptr,0);
+            UINT first=0;
+            for(size_t lod=0;lod<level.size();++lod){
+                const UINT count=UINT(level[lod].size());
+                if(!count)continue;
+                ID3D11Buffer* buffers[]={ellipseVertices_[lod].Get(),ellipseInstances_.Get()};
+                UINT strides[]={UINT(sizeof(GpuVertex)),UINT(sizeof(GpuEllipseInstance))};
+                UINT offsets[]={0,0};
+                context_->IASetVertexBuffers(0,2,buffers,strides,offsets);
+                context_->DrawInstanced(ellipseVertexCounts_[lod],count,0,first);
+                submittedEllipseTriangles+=uint64_t(ellipseVertexCounts_[lod]/3)*count;
+                first+=count;
+            }
+            context_->IASetInputLayout(layout_.Get());
+            context_->VSSetShader(vs_.Get(),nullptr,0);
+            context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
+        }
         if(!transparent_.empty()){
             std::sort(transparent_.begin(),transparent_.end(),[&](const TransparentTriangle& a,const TransparentTriangle& b){return dot(a.center-cam.eye,cam.f)>dot(b.center-cam.eye,cam.f);});
             D3D11_MAPPED_SUBRESOURCE transparentMap{};hr=context_->Map(transparentVertices_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&transparentMap);
@@ -508,7 +578,8 @@ public:
         for(int y=0;y<h;y++){const uint8_t* row=static_cast<const uint8_t*>(mapped.pData)+size_t(y)*mapped.RowPitch;for(int x=0;x<w;x++){const uint8_t* p=row+size_t(x)*4;pixels[size_t(y)*w+x]=0xff000000u|(uint32_t(p[0])<<16)|(uint32_t(p[1])<<8)|uint32_t(p[2]);}}
         context_->Unmap(staging_.Get(),0);stats={};stats.gpu=true;stats.threads=0;stats.ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();
         // Count submitted opaque primitives, not triangles hidden by culling.
-        stats.tests=submittedVertices/3+uint64_t(submittedBoxInstances)*12+transparent_.size();
+        stats.tests=submittedVertices/3+uint64_t(submittedBoxInstances)*12
+            +submittedEllipseTriangles+transparent_.size();
         return true;
     }
 private:
@@ -532,11 +603,14 @@ private:
             ?D3D_DRIVER_TYPE_WARP:D3D_DRIVER_TYPE_HARDWARE;
         HRESULT hr=D3D11CreateDevice(nullptr,driver,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,&feature,&context_);
         if(FAILED(hr)){error=L"Aucun périphérique Direct3D 11 matériel n’est disponible.";return false;}
-        ComPtr<ID3DBlob> vsCode,boxVsCode,psCode,errors;
+        ComPtr<ID3DBlob> vsCode,boxVsCode,ellipseVsCode,psCode,errors;
         hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",nullptr,nullptr,"VSMain","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&vsCode,&errors);
         if(FAILED(hr)){error=L"Compilation du vertex shader DirectX 11 impossible.";return false;}
         hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",nullptr,nullptr,"VSBoxMain","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&boxVsCode,&errors);
         if(FAILED(hr)){error=L"Compilation du shader d'instancing V17 impossible.";return false;}
+        hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",nullptr,nullptr,
+                      "VSEllipseMain","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&ellipseVsCode,&errors);
+        if(FAILED(hr)){error=L"Compilation du shader LOD ellipsoïdes impossible.";return false;}
         hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",nullptr,nullptr,"PSMain","ps_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&psCode,&errors);
         if(FAILED(hr)){error=L"Compilation du pixel shader DirectX 11 impossible.";return false;}
         if(FAILED(device_->CreateVertexShader(vsCode->GetBufferPointer(),vsCode->GetBufferSize(),nullptr,&vs_))||FAILED(device_->CreatePixelShader(psCode->GetBufferPointer(),psCode->GetBufferSize(),nullptr,&ps_))){error=L"Création des shaders DirectX 11 impossible.";return false;}
@@ -554,6 +628,21 @@ private:
         };
         if(FAILED(device_->CreateInputLayout(boxInput,8,boxVsCode->GetBufferPointer(),boxVsCode->GetBufferSize(),&boxLayout_))){
             error=L"Création du format des instances GPU impossible.";return false;
+        }
+        if(FAILED(device_->CreateVertexShader(ellipseVsCode->GetBufferPointer(),
+            ellipseVsCode->GetBufferSize(),nullptr,&ellipseVs_))){
+            error=L"Création du shader GPU LOD impossible.";return false;
+        }
+        const D3D11_INPUT_ELEMENT_DESC ellipseInput[]={
+            input[0],input[1],input[2],input[3],
+            {"ELLIPSECENTER",0,DXGI_FORMAT_R32G32B32_FLOAT,1,0,D3D11_INPUT_PER_INSTANCE_DATA,1},
+            {"ELLIPSEMAT",0,DXGI_FORMAT_R32_UINT,1,12,D3D11_INPUT_PER_INSTANCE_DATA,1},
+            {"ELLIPSERADII",0,DXGI_FORMAT_R32G32B32_FLOAT,1,16,D3D11_INPUT_PER_INSTANCE_DATA,1},
+            {"ELLIPSEPAD",0,DXGI_FORMAT_R32_FLOAT,1,28,D3D11_INPUT_PER_INSTANCE_DATA,1}
+        };
+        if(FAILED(device_->CreateInputLayout(ellipseInput,8,ellipseVsCode->GetBufferPointer(),
+            ellipseVsCode->GetBufferSize(),&ellipseLayout_))){
+            error=L"Format des instances ellipsoïdes incorrect.";return false;
         }
         D3D11_BUFFER_DESC cbd{};cbd.ByteWidth=sizeof(FrameConstants);cbd.Usage=D3D11_USAGE_DYNAMIC;cbd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;cbd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
         if(FAILED(device_->CreateBuffer(&cbd,nullptr,&constants_))){error=L"Création du buffer de constantes DirectX 11 impossible.";return false;}
@@ -581,6 +670,9 @@ private:
         boxVertices_.Reset();boxInstances_.Reset();boxInstanceCount_=0;
         roughness_.Reset();normal_.Reset();transparent_.clear();vertexCount_=0;
         chunks_.clear();boxChunks_.clear();
+        ellipseInstances_.Reset();
+        for(auto& buffer:ellipseVertices_)buffer.Reset();
+        ellipseVertexCounts_.fill(0);ellipses_.clear();ellipseInstanceCount_=0;
         MeshBuilder mesh;
         std::vector<GpuBoxInstance> boxData;
         for(const Obj& o:scene.obj){
@@ -598,7 +690,16 @@ private:
                 }else mesh.box(o.mn,o.mx,m,uvScale);
             }
             else if(o.kind==Kind::RoundBox)mesh.roundedBox(o.mn,o.mx,o.r,m,uvScale);
-            else if(o.kind==Kind::Ellipse)mesh.ellipsoid(o.a,o.b,m);
+            else if(o.kind==Kind::Ellipse){
+                if(useInstancing && !mesh.transparentMaterial
+                   && o.b.x>0.f && o.b.y>0.f && o.b.z>0.f){
+                    GpuEllipseInstance instance{};
+                    instance.center[0]=o.a.x;instance.center[1]=o.a.y;instance.center[2]=o.a.z;
+                    instance.radii[0]=o.b.x;instance.radii[1]=o.b.y;instance.radii[2]=o.b.z;
+                    instance.material=m;
+                    ellipses_.push_back(instance);
+                }else mesh.ellipsoid(o.a,o.b,m);
+            }
             else if(o.kind==Kind::Capsule)mesh.capsule(o.a,o.b,o.r,m);
             else if(o.kind==Kind::Cone)mesh.frustum(o.a,o.n0,o.len,o.r,o.r1,m);
             mesh.transparentMaterial=false;
@@ -606,7 +707,7 @@ private:
         }
         mesh.ground(scene);
         if(mesh.vertices.size()+mesh.transparent.size()*3>12000000u){error=L"Scène trop grande pour l’aperçu DirectX 11 (limite de sécurité mémoire).";return false;}
-        if(mesh.vertices.empty()&&mesh.transparent.empty()&&boxData.empty()){
+        if(mesh.vertices.empty()&&mesh.transparent.empty()&&boxData.empty()&&ellipses_.empty()){
             error=L"La scène ne contient aucune géométrie affichable par DirectX 11.";return false;
         }
         if(!boxData.empty()){
@@ -649,6 +750,44 @@ private:
                 }
                 boxChunks_.push_back(batch);
             }
+        }
+        if(!ellipses_.empty()){
+            // Low / medium / high: 8×16, 16×32 and 32×64. Shared meshes are
+            // authored once per scene; their UVs match legacy ellipsoids.
+            const int ringsLevels[]={8,16,32};
+            for(int lod=0;lod<3;++lod){
+                const int rings=ringsLevels[lod],slices=rings*2;
+                MeshBuilder sphere;
+                auto point=[&](int y,int x){
+                    const float phi=PI*float(y)/rings,theta=2.f*PI*float(x)/slices;
+                    return V{std::sin(phi)*std::cos(theta),std::cos(phi),
+                             std::sin(phi)*std::sin(theta)};
+                };
+                for(int y=0;y<rings;++y)for(int x=0;x<slices;++x){
+                    const V p00=point(y,x),p01=point(y,x+1);
+                    const V p10=point(y+1,x),p11=point(y+1,x+1);
+                    const float u0=2.5f*x/slices,u1=2.5f*(x+1)/slices;
+                    const float v0=float(y)/rings,v1=float(y+1)/rings;
+                    sphere.tri(p00,p10,p11,p00,p10,p11,u0,v0,u0,v1,u1,v1,0);
+                    sphere.tri(p00,p11,p01,p00,p11,p01,u0,v0,u1,v1,u1,v0,0);
+                }
+                D3D11_BUFFER_DESC bd{};
+                bd.ByteWidth=UINT(sphere.vertices.size()*sizeof(GpuVertex));
+                bd.Usage=D3D11_USAGE_IMMUTABLE;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;
+                D3D11_SUBRESOURCE_DATA init{};init.pSysMem=sphere.vertices.data();
+                if(FAILED(device_->CreateBuffer(&bd,&init,&ellipseVertices_[lod]))){
+                    error=L"Allocation des niveaux de détail ellipsoïdes impossible.";return false;
+                }
+                ellipseVertexCounts_[lod]=UINT(sphere.vertices.size());
+            }
+            D3D11_BUFFER_DESC bd{};
+            bd.ByteWidth=UINT(ellipses_.size()*sizeof(GpuEllipseInstance));
+            bd.Usage=D3D11_USAGE_DYNAMIC;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;
+            bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+            if(FAILED(device_->CreateBuffer(&bd,nullptr,&ellipseInstances_))){
+                error=L"Allocation du buffer dynamique des ellipsoïdes impossible.";return false;
+            }
+            ellipseInstanceCount_=UINT(ellipses_.size());
         }
         if(!mesh.vertices.empty()){
             // 4096 triangles per batch. Bounding boxes are derived from the
@@ -769,9 +908,14 @@ private:
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&staging_))){error=L"Création du tampon de lecture DirectX 11 impossible.";return false;}return true;
     }
     ComPtr<ID3D11Device> device_;ComPtr<ID3D11DeviceContext> context_;
-    ComPtr<ID3D11VertexShader> vs_,boxVs_;ComPtr<ID3D11PixelShader> ps_;
-    ComPtr<ID3D11InputLayout> layout_,boxLayout_;
-    ComPtr<ID3D11Buffer> constants_,vertices_,transparentVertices_,boxVertices_,boxInstances_;
+    ComPtr<ID3D11VertexShader> vs_,boxVs_,ellipseVs_;
+    ComPtr<ID3D11PixelShader> ps_;
+    ComPtr<ID3D11InputLayout> layout_,boxLayout_,ellipseLayout_;
+    ComPtr<ID3D11Buffer> constants_,vertices_,transparentVertices_,boxVertices_,boxInstances_,ellipseInstances_;
+    std::array<ComPtr<ID3D11Buffer>,3> ellipseVertices_;
+    std::array<UINT,3> ellipseVertexCounts_{{0,0,0}};
+    std::vector<GpuEllipseInstance> ellipses_;
+    UINT ellipseInstanceCount_=0;
     ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_;ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<TransparentTriangle> transparent_;
     ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_,staging_;ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
     std::vector<DrawChunk> chunks_,boxChunks_;
