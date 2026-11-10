@@ -42,6 +42,15 @@ jobs:
             if (!(Test-Path $p)) { throw "Missing V17 package file: $p" }
             Write-Host "Verified: $p"
           }
+      - name: Diagnose raster WARP executable before extended tests
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          & "build-v17/Release/v17_raster_warp_smoke.exe" "scenes/v16/pavillon01/scene.json" "build-v17/v17-raster-warp-quick.png"
+          $result = $LASTEXITCODE
+          Write-Host "V17 Raster WARP exit code: $result"
+          if ($result -ne 0) { throw "V17 raster renderer is not operational; exit $result" }
       - name: V17 raster WARP and all inherited V16 CPU/GPU regression tests
         run: ctest --test-dir build-v17 -C Release --verbose --output-on-failure
       - name: Verify V17 D3D11 raster WARP preview
