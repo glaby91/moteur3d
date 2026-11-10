@@ -172,7 +172,7 @@ private:
         leftMouseHeld_=false;
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Démarrer exploration (V17)"));
         if(explorationHelp_)explorationHelp_->setText(QStringLiteral(
-            "WASD / flèches : mouvement · clic gauche + souris : regarder · Maj : accélérer · Échap : arrêter"));
+            "ZQSD / flèches : mouvement · clic gauche + souris : regarder · Maj : accélérer · Échap : arrêter"));
     }
     void toggleExploration(){
         if(exploring_){stopExploration();return;}
@@ -194,10 +194,10 @@ private:
         V horizontal=norm(V{forward.x,0,forward.z});
         V right=norm(cross(horizontal,V{0,1,0}));
         V move{};
-        if(keysDown_.contains(Qt::Key_W)||keysDown_.contains(Qt::Key_Up))move=move+horizontal;
+        if(keysDown_.contains(Qt::Key_Z)||keysDown_.contains(Qt::Key_W)||keysDown_.contains(Qt::Key_Up))move=move+horizontal;
         if(keysDown_.contains(Qt::Key_S)||keysDown_.contains(Qt::Key_Down))move=move-horizontal;
         if(keysDown_.contains(Qt::Key_D)||keysDown_.contains(Qt::Key_Right))move=move+right;
-        if(keysDown_.contains(Qt::Key_A)||keysDown_.contains(Qt::Key_Left))move=move-right;
+        if(keysDown_.contains(Qt::Key_Q)||keysDown_.contains(Qt::Key_A)||keysDown_.contains(Qt::Key_Left))move=move-right;
         if(keysDown_.contains(Qt::Key_Space))move.y+=1.f;
         if(keysDown_.contains(Qt::Key_Control))move.y-=1.f;
         if(length(move)>.01f){
@@ -421,7 +421,7 @@ private:
         explorationButton_=new QPushButton(QStringLiteral("Démarrer exploration (V17)"));
         vertical->addWidget(explorationButton_);
         explorationHelp_=new QLabel(QStringLiteral(
-            "WASD / flèches : mouvement · clic gauche + souris : regarder · Maj : accélérer · Échap : arrêter"));
+            "ZQSD / flèches : mouvement · clic gauche + souris : regarder · Maj : accélérer · Échap : arrêter"));
         explorationHelp_->setWordWrap(true);
         vertical->addWidget(explorationHelp_);
         connect(explorationButton_,&QPushButton::clicked,this,[this]{toggleExploration();});
