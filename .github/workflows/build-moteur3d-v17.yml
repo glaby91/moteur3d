@@ -93,6 +93,15 @@ jobs:
           $picture = Get-ChildItem "build-v17/civic-bench-smoke" -Recurse -Filter raster_*.png | Select-Object -First 1
           if (!$picture -or $picture.Length -lt 1000) { throw "Civic scene raster PNG missing or empty" }
           Copy-Item $picture.FullName "build-v17/civic-actual-preview.png"
+          $summary = Get-ChildItem "build-v17/civic-bench-smoke" -Recurse -Filter summary.json | Select-Object -First 1
+          if (!$summary) { throw "Civic benchmark summary missing" }
+          $result = Get-Content $summary.FullName -Raw | ConvertFrom-Json
+          $raster = $result.cases | Where-Object { $_.backend -eq "V17_D3D11_Raster" } | Select-Object -First 1
+          if (!$raster) { throw "Civic D3D11 Raster measurement missing" }
+          Write-Host "Civic GPU: boxes=$($raster.gpuBoxInstances), foliage=$($raster.gpuFoliageInstances), drawCalls=$($raster.gpuDrawCalls), triangles=$($raster.submittedTriangles)"
+          if ($raster.gpuBoxInstances -lt 10) { throw "GPU box instancing not exercised by civic JSON" }
+          if ($raster.gpuFoliageInstances -lt 1) { throw "GPU foliage LOD not exercised by civic JSON" }
+          if ($raster.gpuDrawCalls -lt 1) { throw "No draw calls measured" }
       - name: Diagnose raster WARP executable before extended tests
         shell: pwsh
         env:
