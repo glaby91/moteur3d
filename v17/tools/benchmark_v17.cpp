@@ -102,7 +102,7 @@ int main(int argc,char** argv){
     QFile csvFile(directory.filePath("results.csv"));
     if(!csvFile.open(QIODevice::WriteOnly|QIODevice::Text))return 3;
     QTextStream csvOut(&csvFile);
-    csvOut<<"backend,camera,width,height,texture_px,cold_ms,frames,mean_ms,median_ms,p95_ms,p99_ms,estimated_fps,submitted_triangles,cold_readback_ms,mean_readback_ms,status,error,image\n";
+    csvOut<<"backend,camera,width,height,texture_px,cold_ms,frames,mean_ms,median_ms,p95_ms,p99_ms,estimated_fps,submitted_triangles,cold_readback_ms,mean_readback_ms,gpu_draw_calls,instanced_boxes,instanced_ellipsoids,status,error,image\n";
     auto loaded=v16::loadScene(scenePath);
     if(!loaded){err<<"Scene load failed: "<<loaded.error<<"\n";return 4;}
     // The normal and quick modes use the same full 2048 PBR assets as V17.
@@ -157,6 +157,9 @@ int main(int argc,char** argv){
               <<record.value("submittedTriangles").toDouble()<<','
               <<record.value("coldReadbackMs").toDouble()<<','
               <<record.value("meanReadbackMs").toDouble()<<','
+              <<record.value("gpuDrawCalls").toDouble()<<','
+              <<record.value("gpuBoxInstances").toDouble()<<','
+              <<record.value("gpuEllipseInstances").toDouble()<<','
               <<csv(status)<<','
               <<csv(record.value("error").toString())<<','
               <<csv(record.value("image").toString())<<"\n";
@@ -219,6 +222,9 @@ int main(int argc,char** argv){
             // after optional opaque frustum culling, plus transparency.
             // This makes it possible to compare scene coverage and FPS.
             rec["submittedTriangles"]=double(stats.tests);
+            rec["gpuDrawCalls"]=double(stats.gpuDrawCalls);
+            rec["gpuBoxInstances"]=double(stats.gpuBoxInstances);
+            rec["gpuEllipseInstances"]=double(stats.gpuEllipseInstances);
             rec["status"]=ok?"ok":"skipped";
             rec["error"]=ok?QString():QString::fromStdWString(reason);
             append(rec);
