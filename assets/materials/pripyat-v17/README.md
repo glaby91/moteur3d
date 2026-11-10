@@ -18,6 +18,11 @@ de base, la rugosité, la métallicité, la transmission, l'indice et un `textur
   `prp_concrete_panel_source.jpg`. Le pipeline Windows les joint **sans modification** sous
   `material-library/pripyat-v17/originaux/` pour réutilisation future. Le chargeur
   JSON V17 ne sait pas encore lire automatiquement ce format `.m3dpbr.gz`.
+- Le pack conserve également les assets existants `energetik_facade_bay.glb`,
+  `energetik_fresco_mosaic.glb`, l'albédo JPEG de la fresque et leurs manifestes
+  sous `material-library/pripyat-v17/hero-assets/`. Ces fichiers originaux
+  **ne sont pas utilisés** dans le bâtiment fictif et ne sont pas encore lus
+  automatiquement par le chargeur JSON V17.
 - Les autres variantes `prp_*` décrites dans le catalogue sont principalement
   des prescriptions de matériau, non 21 fichiers PBR binaires indépendants.
 - La fresque historique et les photographies documentaires restent distinctes :
