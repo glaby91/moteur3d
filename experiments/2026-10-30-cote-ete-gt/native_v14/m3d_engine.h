@@ -49,7 +49,7 @@ struct Camera { V eye,f,r,u; float tanHalf=0,aspect=1,pixelAngle=0,focusDistance
 struct RendererCapabilities { bool dxrHardware=false; bool dxrBackend=false; };
 struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,depthReads=0,shadowRays=0; uint64_t simdRayPackets=0,simdTrianglePackets=0,simdTextureSamples=0,simdLightBatches=0; double ms=0,postMs=0,shadowMs=0;
     // DX11-only hardware counters; CPU/Compute paths leave these at zero.
-    uint64_t gpuDrawCalls=0,gpuBoxInstances=0,gpuEllipseInstances=0;
+    uint64_t gpuDrawCalls=0,gpuBoxInstances=0,gpuEllipseInstances=0,gpuFoliageInstances=0;
     unsigned threads=1; bool avx2=false,gpu=false; };
 struct Light { V p; float radius,intensity; V color; };
 struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPercent=0; float refractiveIndex=1.5f; float metallic=0.f, roughnessScale=1.f; std::vector<Level> mip,normalMip,roughnessMip; std::vector<ColorLevel> colorMip; };
