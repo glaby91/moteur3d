@@ -37,11 +37,25 @@ jobs:
         run: |
           foreach ($p in @("build-v17/Release/moteur3d_v17.exe",
                          "build-v17/Release/moteur3d_v16_core.dll",
+                         "build-v17/Release/cse_warp_v17.ico",
                          "build-v17/Release/pavillon01/scene.json",
                          "build-v17/Release/shaders/m3d_raytrace_compute.hlsl")) {
             if (!(Test-Path $p)) { throw "Missing V17 package file: $p" }
             Write-Host "Verified: $p"
           }
+      - name: Verify native V17 taskbar icon and executable version
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $icon = "build-v17/Release/cse_warp_v17.ico"
+          if ((Get-Item $icon).Length -lt 4000) { throw "Incomplete V17 ICO resource" }
+          $handle = [System.Drawing.Icon]::new((Resolve-Path $icon).Path)
+          if (!$handle) { throw "Cannot load generated CSE WARP V17 icon" }
+          $handle.Dispose()
+          $exe = (Resolve-Path "build-v17/Release/moteur3d_v17.exe").Path
+          $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
+          Write-Host "V17 EXE icon and version: $($version.ProductName) — $($version.FileVersion)"
+          if ($version.FileMajorPart -ne 17) { throw "The executable resource is not version 17" }
       - name: Diagnose raster WARP executable before extended tests
         shell: pwsh
         env:
@@ -66,6 +80,7 @@ jobs:
           New-Item -Type Directory -Path "dist-v17" -Force | Out-Null
           Copy-Item "build-v17/Release/moteur3d_v17.exe" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v16_core.dll" "dist-v17/"
+          Copy-Item "build-v17/Release/cse_warp_v17.ico" "dist-v17/"
           Copy-Item "build-v17/Release/pavillon01" "dist-v17/pavillon01" -Recurse
           Copy-Item "build-v17/Release/material-lab" "dist-v17/material-lab" -Recurse
           Copy-Item "build-v17/Release/pripyat-photo2scene-proof" "dist-v17/pripyat-photo2scene-proof" -Recurse
