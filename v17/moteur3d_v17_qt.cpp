@@ -582,7 +582,20 @@ private:
                                      QStringLiteral("Programme de benchmark introuvable : %1").arg(path));
                 return;
             }
-            if(!QProcess::startDetached(path,{scenePath_},QCoreApplication::applicationDirPath()))
+            // The benchmark is another process: the DLL's atomic settings
+            // cannot be shared implicitly. Transfer the active Raster quality
+            // explicitly so all image/performance comparisons use the exact
+            // same MSAA, anisotropy, LOD and culling configuration.
+            const auto q=rasterQualitySettings();
+            const QStringList arguments{
+                scenePath_,
+                QStringLiteral("--raster-msaa"),QString::number(q.msaaSamples),
+                QStringLiteral("--raster-anisotropy"),QString::number(q.anisotropy),
+                QStringLiteral("--raster-lod-percent"),QString::number(q.lodQualityPercent),
+                QStringLiteral("--raster-culling"),QString::number(q.frustumCulling?1:0),
+                QStringLiteral("--raster-lod-enabled"),QString::number(q.dynamicLod?1:0)
+            };
+            if(!QProcess::startDetached(path,arguments,QCoreApplication::applicationDirPath()))
                 QMessageBox::critical(this,QStringLiteral("Benchmark"),QStringLiteral("Impossible d'ouvrir la fenêtre de benchmark."));
         });
         auto* helpMenu=menuBar()->addMenu(QStringLiteral("Aide"));
