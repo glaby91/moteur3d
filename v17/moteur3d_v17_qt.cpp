@@ -694,7 +694,7 @@ private:
                         sceneLoadProgress_->setValue(percent);
                         sceneLoadLabel_->setText(description);
                         canvas_->setPlaceholder(
-                            QStringLiteral("CSE WARP V17\nChargement de la scène…\\n%1")
+                            QStringLiteral("CSE WARP V17\nChargement de la scène…\n%1")
                                 .arg(description));
                     },Qt::QueuedConnection);
                 });
@@ -762,6 +762,7 @@ private:
             .arg(runtime_->renderScene.mat.size())
             .arg(runtime_->textureResolution));
         sceneLoading_=false;
+        canvas_->setPlaceholder(QStringLiteral("Scène chargée. Calcul de la première image…"));
         sceneLoadLabel_->hide();
         sceneLoadProgress_->hide();
         cameraBox_->setEnabled(true);
