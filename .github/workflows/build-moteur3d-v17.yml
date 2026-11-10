@@ -179,6 +179,47 @@ jobs:
             }
             Write-Host "DX11 depth $depth : throughput $($case.streamFps) FPS, GPU valid=$($case.gpuTimingValid), GPU total=$($case.gpuTotalMs) ms"
           }
+      - name: Pixel-exact optimized vs reference PS and GPU readback conversion
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          $exe = "build-v17/Release/moteur3d_v17_benchmark.exe"
+          # First run uses the exact previous shader/conversion, the second
+          # runs the optimizations. Isolated processes ensure shader recompile.
+          foreach ($scene in @("scenes/v16/pavillon01/scene.json", "scenes/v16/benchmark-civic/scene.json")) {
+            $name = if ($scene -like "*pavillon01*") { "pavillon" } else { "civic" }
+            $env:M3D_V17_DISABLE_SHADER_OPT = '1'
+            $env:M3D_V17_DISABLE_FAST_SWIZZLE = '1'
+            & $exe $scene "build-v17/shader-ab-$name-reference" --smoke --raster-msaa 2 --raster-anisotropy 8
+            if ($LASTEXITCODE -ne 0) { throw "Reference PS failed: $scene" }
+            Remove-Item Env:M3D_V17_DISABLE_SHADER_OPT -ErrorAction SilentlyContinue
+            Remove-Item Env:M3D_V17_DISABLE_FAST_SWIZZLE -ErrorAction SilentlyContinue
+            & $exe $scene "build-v17/shader-ab-$name-optimized" --smoke --raster-msaa 2 --raster-anisotropy 8
+            if ($LASTEXITCODE -ne 0) { throw "Optimized PS failed: $scene" }
+            $refImg = Get-ChildItem "build-v17/shader-ab-$name-reference" -Recurse -Filter "raster_*.png" | Select-Object -First 1
+            $optImg = Get-ChildItem "build-v17/shader-ab-$name-optimized" -Recurse -Filter "raster_*.png" | Select-Object -First 1
+            if (!$refImg -or !$optImg) { throw "Missing A/B image for $scene" }
+            if ((Get-FileHash $refImg.FullName -Algorithm SHA256).Hash -ne
+                (Get-FileHash $optImg.FullName -Algorithm SHA256).Hash) {
+              throw "Optimized pixel shader or swizzle changed a pixel: $scene"
+            }
+            $refSummary=Get-ChildItem "build-v17/shader-ab-$name-reference" -Recurse -Filter "summary.json" | Select-Object -First 1
+            $optSummary=Get-ChildItem "build-v17/shader-ab-$name-optimized" -Recurse -Filter "summary.json" | Select-Object -First 1
+            $before=Get-Content $refSummary.FullName -Raw | ConvertFrom-Json
+            $after=Get-Content $optSummary.FullName -Raw | ConvertFrom-Json
+            if ($before.system.pixelShaderOptimized -or $before.system.fastPixelSwizzle -or
+                !$after.system.pixelShaderOptimized -or !$after.system.fastPixelSwizzle) {
+              throw "A/B shader and conversion mode not correctly reported"
+            }
+            $referenceCase=@($before.cases | Where-Object { $_.backend -eq "V17_D3D11_Raster" })[0]
+            $optimizedCase=@($after.cases | Where-Object { $_.backend -eq "V17_D3D11_Raster" })[0]
+            if ($referenceCase.status -ne 'ok' -or $optimizedCase.status -ne 'ok' -or
+                $referenceCase.submittedTriangles -ne $optimizedCase.submittedTriangles) {
+              throw "A/B source geometry or rendering status mismatch: $scene"
+            }
+            Write-Host "A/B pixel-identical $name — reference mean $($referenceCase.meanMs) ms; optimized mean $($optimizedCase.meanMs) ms (WARP only)"
+          }
       - name: Verify V17 D3D11 raster WARP diagnostic preview
         shell: pwsh
         run: |
