@@ -67,7 +67,7 @@ jobs:
             if (!$handle) { throw "Cannot load Windows icon: $icon" }
             $handle.Dispose()
           }
-          foreach ($name in @("moteur3d_v17.exe", "moteur3d_v17_benchui.exe")) {
+          foreach ($name in @("moteur3d_v17.exe", "moteur3d_v17_benchui.exe", "moteur3d_v17_benchmark.exe")) {
             $exe = (Resolve-Path "build-v17/Release/$name").Path
             $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
             Write-Host "$name — $($version.ProductName) — $($version.FileVersion)"
