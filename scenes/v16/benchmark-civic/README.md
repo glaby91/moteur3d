@@ -1,4 +1,4 @@
-# CSE WARP V17.317 — Palais unique, piscine olympique et parvis monumental
+# CSE WARP V17.323 — Palais unique, deux mosaïques distinctes et piscine olympique
 
 Scène **fictive** du moteur CSE WARP. Ce bâtiment n'est pas une reconstitution
 historique du Palais de la Culture Energetik : seule sa **véritable mosaïque
@@ -36,6 +36,37 @@ préparer ses mipmaps sRGB en lumière linéaire, et donner une texture
 identique aux rendus CPU, Compute et DirectX. Les anciennes textures PBR
 restent inchangées. La fresque elle-même est une reconstruction artistique
 préexistante, pas une photographie certifiée d'époque.
+
+## Les deux œuvres ne doivent jamais être interverties
+
+**Mosaïque extérieure (façade centrale)** : reproduit le costume multicolore
+et le personnage fournis par l'utilisateur le 11 novembre 2026. Le JPEG
+`textures/personnage_facade_mosaique.jpg` est un dérivé optimisé pour un
+premier rendu 3D (160 × 261 px, SHA-256
+`9336fd983194cfc4d1f13475049a5405fc182e4f20a6220c6f447fc454c1c9eb`).
+Les dimensions physiques sont **8 × 13,05 m**, de y=5,725 à 18,775 m,
+sur le mur **extérieur** central, au-dessus de l'entrée. Les joints
+de tesselles de 20 cm et le cadre sont des objets réels du moteur.
+Pour une reproduction de près, le PNG source 244 × 398 fourni dans la
+conversation pourra ultérieurement remplacer la version JPEG optimisée.
+
+**Fresque Energetik intérieure** : asset préexistant 2048 × 930 conservé
+**octet pour octet** (9,5 × 4,3 m), situé sur le mur du **hall** au-dessus
+d'un grand escalier de **25 marches**, jusqu'à la galerie de 4,5 m.
+Le vieux placement sur le mur de fond de la piscine a été retiré.
+
+**Piscine** : aucune œuvre figurative sur le mur de fond. Ce sont le
+carrelage, les vitrages et la lumière sur toute la longueur qui
+forment le décor. Tous les profils de charge gardent ces mêmes
+positions architecturales.
+
+### Validation progressive V17.323
+
+Le validateur contrôle le SHA-256 du portrait et la fidélité binaire de
+l'asset Energetik, l'orientation spatiale des deux images, l'absence de
+recouvrement du passage d'entrée, les 25 marches du hall et leur
+raccord à la galerie, les deux peintures **interdites** dans le bassin,
+les 96 modules du banc ovale et la suppression des immeubles secondaires.
 
 ## Aménagement extérieur
 

@@ -18,7 +18,8 @@ const specials=[
  ['cse_flower_purple',[.46,.26,.63],.84,'foliage'],
  ['cse_monument_bronze',[.36,.29,.19],.39,'metal'],
  ['cse_pool_strip',[.79,.86,.91],.27,'metal'],
- ['cse_energetik_fresco',[1,1,1],.72,'image']
+ ['cse_energetik_fresco',[1,1,1],.72,'image'],
+ ['cse_personnage_facade',[1,1,1],.78,'image']
 ];
 const localMaterials=specials.map(([id,baseColor,roughness])=>({
  id,baseColor,roughness,metallic:id==='cse_monument_bronze'?.72:0,
@@ -28,7 +29,8 @@ const localMaterials=specials.map(([id,baseColor,roughness])=>({
 const localSets=specials.map(([id,, ,pattern])=>({
  id:'tex_'+id,material:id,pattern,
  resolution:id==='cse_energetik_fresco'?2048:512,
- ...(id==='cse_energetik_fresco'?{imageFile:'textures/energetik_fresco_mosaic.jpg'}:{})
+ ...(id==='cse_energetik_fresco'?{imageFile:'textures/energetik_fresco_mosaic.jpg'}:{}),
+ ...(id==='cse_personnage_facade'?{imageFile:'textures/personnage_facade_mosaique.jpg'}:{})
 }));
 const profiles={
   leger: {target:20000, textureCap:512, pave:4.5, trees:18, benches:12, lamps:12, blocks:3, seatCols:16, seatRows:9, detail:3},
@@ -41,7 +43,8 @@ const geometry={format:'m3d-geometry-v1',units:'m',meshes:[
  {id:'foliage_canopy',type:'foliage_canopy'}
 ]};
 const cameras={format:'m3d-cameras-v1',cameras:[
- {id:'facade',name:'01 · Parvis et entrée principale',position:[0,2.3,34],target:[0,2.3,-6],fovDegrees:67},
+ {id:'facade',name:'01 · Façade et mosaïque du personnage',position:[0,3.1,36],target:[0,11.0,-4],fovDegrees:65},
+ {id:'mosaique',name:'02 · Mosaïque extérieure en détail',position:[12,8.0,19],target:[0,12.25,-3.8],fovDegrees:52},
  {id:'escalier',name:'02 · Escalier continu vers le palais',position:[-17,2.2,29],target:[0,2.6,-4],fovDegrees:66},
  {id:'passerelle',name:'03 · Grand banc ovale et statue',position:[66,2.3,72],target:[37,5.0,52],fovDegrees:67},
  {id:'bassin',name:'04 · Piscine olympique depuis l’entrée',position:[0,2.4,-10],target:[0,1.0,-34],fovDegrees:73},
@@ -138,12 +141,30 @@ function build(profileName,p){
   for(let k=0;k<27;k++){
    const x=-44+k*3.35;
    if(level===0&&Math.abs(x)<7.0)continue; // actual open entrance
+   if(level>0&&Math.abs(x)<5.0)continue; // central solid mosaic wall
    if(Math.abs(x)>22&&k%4===0)continue;
    B('Architecture/Palais/Verriere','prp_window_glass',x,y,-4.03,3.04,3.65,.085);
    B('Architecture/Palais/Chassis','prp_window_frame',x,y,-3.98,.10,3.8,.14);
    B('Architecture/Palais/Chassis','prp_window_frame',x,level*4.15+4.42,-3.95,3.4,.12,.15);
   }
  }
+ // User-provided costume figure, on the OUTER facade only.
+ // 8 × 13 m portrait mosaic; the 10 m entrance below remains open.
+ const mural='Architecture/Palais/Mosaique extérieure du personnage';
+ B(mural+'/Support','prp_concrete_panel',0,12.25,-4.18,8.6,13.15,.36);
+ B(mural+'/Image fournie par utilisateur','cse_personnage_facade',
+   0,12.25,-3.88,8.00,13.05,.09);
+ // Mortar lines of 20-cm tesserae are actual geometrical strips.
+ for(let x=-3.9;x<=3.91;x+=.20)
+  B(mural+'/Joints verticaux','prp_plaster_pale',
+    x,12.25,-3.823,.008,13.05,.013);
+ for(let y=5.82;y<=18.70;y+=.20)
+  B(mural+'/Joints horizontaux','prp_plaster_pale',
+    0,y,-3.823,8.00,.008,.013);
+ for(const x of [-4.13,4.13])
+  B(mural+'/Encadrement','prp_concrete_raw',x,12.25,-3.70,.22,13.45,.26);
+ for(const y of [5.54,18.96])
+  B(mural+'/Encadrement','prp_concrete_raw',0,y,-3.70,8.5,.20,.26);
  // Main steps extend fully to the building's front door, replacing the
  // old stair flight which stopped fourteen metres short of the façade.
  B('Place/Parvis d’entrée','prp_terrazzo_floor',0,.28,5.75,68,.55,22.5);
@@ -394,11 +415,11 @@ for(const name of selected){
   resolution:Math.min(p.textureCap,v.resolution)}));
  save('pbr/pripyat-reuse-'+name+'.json',{format:'m3d-pbr-v1',library:'Pripyat-V17',mipmaps:'auto',
    textureResolutionTarget:p.textureCap,channels:['albedo','normal','roughness'],
-   note:'22 legacy PBR recipes unchanged; scene-only plants and statue. Mosaic uses authentic 2048x930 JPG copied from the original Energetik asset.',
+   note:'22 original PBR recipes unchanged. Energetik hall image and supplied exterior portrait use separate scene-only JPEGs.',
    sets});
  const built=build(name,p);
  save('instances/'+name+'.json',{format:'m3d-instances-v1',
-   notes:'Single-palace olympic pool, open entry, oval planting with original Soviet-style statue and real Energetik mosaic. Generated deterministically.',
+   notes:'Single-palace Olympic pool. Costume mosaic facade OUTSIDE; Energetik fresco hall staircase INSIDE; oval flower garden and civic statue outside.',
    instances:built.objects});
  const sceneName=name==='leger'?'scene.json':'scene-'+name+'.json';
  save(sceneName,manifest(name));
