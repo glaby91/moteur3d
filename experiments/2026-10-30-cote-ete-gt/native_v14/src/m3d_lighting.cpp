@@ -2,9 +2,10 @@
 
 namespace m3d {
 V sun=norm({.70f,.78f,-.714f}),skyZenith={126,170,209},skyHorizon={244,185,134},sunTint={255,246,223};
-float daylight=1.f,lampFactor=0.f;
+float daylight=1.f,lampFactor=0.f,solarHour=14.75f;
 std::vector<Light> pointLights;
 void updateLighting(float hour){
+ solarHour=hour;
  // Solar elevation and azimuth change together, not elevation alone:
  // the roof and façade normal maps reveal different relief as the sun moves.
  float t=clampf((hour-6.f)/13.f,0.f,1.f);

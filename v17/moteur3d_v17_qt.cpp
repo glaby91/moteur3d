@@ -432,6 +432,7 @@ private:
     QCheckBox* edgeAa_=nullptr;
     QSlider* azimuth_=nullptr;
     QDoubleSpinBox* sunHour_=nullptr;
+    QCheckBox* hybridLightBox_=nullptr;
     QDoubleSpinBox* roughness_=nullptr;
     QDoubleSpinBox* metallic_=nullptr;
     QLabel* materialLabel_=nullptr;
@@ -693,6 +694,15 @@ private:
         sunHour_->setSuffix(QStringLiteral(" h"));
         sunHour_->setValue(14.75);
         sunHour_->setToolTip(QStringLiteral("Direction et hauteur du soleil — lumière rasante vers 17 h"));
+        // Experimental scene-aware bounced light; GUI defaults ON in this new
+        // version, while the core/benchmark keeps legacy OFF for reference.
+        hybridLightBox_=new QCheckBox(QStringLiteral("Éclairage hybride : rebonds + HDR (bêta)"));
+        hybridLightBox_->setToolTip(QStringLiteral(
+            "Sondes indirectes spatiales précalculées, heure solaire interpolée et rendu filmique.\n"
+            "Désactiver pour retrouver pixel par pixel le Raster historique."));
+        QSettings hybridPrefs(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+        hybridLightBox_->setChecked(hybridPrefs.value(QStringLiteral("Raster/HybridLighting"),true).toBool());
+        m3d::setRasterHybridLightingEnabled(hybridLightBox_->isChecked());
         azimuth_=new QSlider(Qt::Horizontal);
         azimuth_->setRange(-180,180);
         azimuth_->setValue(0);
@@ -702,6 +712,7 @@ private:
         form->addRow(QStringLiteral("Échantillons CPU direct"),directSamples_);
         form->addRow(QStringLiteral("Échantillons GI"),giSamples_);
         form->addRow(QStringLiteral("Heure solaire"),sunHour_);
+        form->addRow(hybridLightBox_);
         form->addRow(QStringLiteral("Rotation caméra"),azimuth_);
         vertical->addLayout(form);
         vertical->addWidget(progressiveGi_);
@@ -844,6 +855,12 @@ private:
         connect(denoiseDirect_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()==0)requestRender();});
         connect(edgeAa_,&QCheckBox::toggled,this,[this](bool){requestRender();});
         connect(azimuth_,&QSlider::sliderReleased,this,[this]{requestRender();});
+        connect(hybridLightBox_,&QCheckBox::toggled,this,[this](bool enabled){
+            m3d::setRasterHybridLightingEnabled(enabled);
+            QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+            settings.setValue(QStringLiteral("Raster/HybridLighting"),enabled);
+            if(backendBox_&&backendBox_->currentIndex()==4)requestRender();
+        });
         connect(sunHour_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double hour){
             if(!runtime_)return;
             // No render thread may observe a partially updated daylight hour.

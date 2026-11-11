@@ -27,6 +27,40 @@ namespace {
 // 32 culling, 33 LOD.
 constexpr uint64_t defaultQualityBits=4ull|(16ull<<8)|(100ull<<16)|(1ull<<32)|(1ull<<33);
 std::atomic<uint64_t> gpuQualityBits{defaultQualityBits};
+// Opt-in: keep all reference benchmarks and pre-existing renders pixel-exact.
+std::atomic<bool> hybridLighting{false};
+struct HourlyIrradiance { V sky,bounce,sun; };
+// Bake 25 half-hour samples once. This is a temporal irradiance LUT, not
+// a substitute for fully ray-traced light transport. Spatial influence comes
+// from the separate scene-dependent ray-sampled volume below.
+HourlyIrradiance irradianceAt(float hour){
+    static const auto samples=[](){
+        std::array<HourlyIrradiance,25> lut{};
+        for(int i=0;i<25;++i){
+            const float h=7.f+float(i)*.5f;
+            const float day=std::max(0.f,std::sin(PI*clampf((h-6.f)/13.f,0.f,1.f)));
+            const float dusk=clampf(1.f-std::abs(h-18.3f)/2.3f,0.f,1.f);
+            const float dawn=clampf(1.f-std::abs(h-7.1f)/1.8f,0.f,1.f);
+            const float warm=std::max(dusk,dawn*.72f);
+            lut[i].sky={.08f+day*(.27f+.05f*warm),
+                        .10f+day*(.31f-.02f*warm),
+                        .15f+day*(.37f-.16f*warm)};
+            lut[i].bounce={.13f+day*(.10f+.22f*warm),
+                           .10f+day*(.10f+.08f*warm),
+                           .08f+day*(.11f-.05f*warm)};
+            lut[i].sun={1.f,1.f-.14f*warm,1.f-.32f*warm};
+        }
+        return lut;
+    }();
+    const float u=clampf((hour-7.f)*2.f,0.f,24.f);
+    const size_t i=size_t(u);
+    const size_t j=std::min<size_t>(i+1,24);
+    const float a=u-float(i);
+    return {samples[i].sky*(1.f-a)+samples[j].sky*a,
+            samples[i].bounce*(1.f-a)+samples[j].bounce*a,
+            samples[i].sun*(1.f-a)+samples[j].sun*a};
+}
+
 uint64_t packQuality(const RasterQualitySettings& q){
     return uint64_t(q.msaaSamples)|(uint64_t(q.anisotropy)<<8)
         |(uint64_t(q.lodQualityPercent)<<16)
@@ -77,6 +111,12 @@ struct FrameConstants {
     float lightPositionRadius[256][4];
     float lightColorIntensity[256][4];
     uint32_t lightCount; float padding[3];
+    float indirectSky[4];
+    float indirectBounce[4];
+    float indirectSun[4];
+    float probeOrigin[4];
+    float probeInvSpan[4];
+    float hybridControls[4];
 };
 
 constexpr char kShader[] = R"(
@@ -98,12 +138,20 @@ cbuffer Frame : register(b0) {
     float4 lightPositionRadius[256];
     float4 lightColorIntensity[256];
     uint lightCount; float3 padding;
+    float4 indirectSky;
+    float4 indirectBounce;
+    float4 indirectSun;
+    float4 probeOrigin;
+    float4 probeInvSpan;
+    float4 hybridControls;
 };
 Texture2DArray<float4> albedo : register(t0);
 Texture2D<float> shadowDepth : register(t1);
 Texture2DArray<float> roughnessMap : register(t2);
 Texture2DArray<float4> normalMap : register(t3);
+Texture3D<float4> indirectProbes : register(t4);
 SamplerState wrapSampler : register(s0);
+SamplerState probeSampler : register(s1);
 struct VSIn { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; uint mat:MATERIAL; };
 struct VSOut { float4 p:SV_POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; float3 world:TEXCOORD1; nointerpolation uint mat:MATERIAL; };
 VSOut VSMain(VSIn i) {
@@ -257,6 +305,27 @@ float4 PSMain(VSOut i):SV_TARGET {
 #if defined(M3D_V17_OPTIMIZE_PIXELS)
         }
 #endif
+    }
+    if(hybridControls.x>0.5){
+        // Trilinear, geometry-aware static probes; solar-hour coefficients
+        // change continuously without baking a new scene on each camera move.
+        float3 position=saturate((i.world-probeOrigin.xyz)*probeInvSpan.xyz);
+        float4 probe=indirectProbes.SampleLevel(probeSampler,position,0);
+        float openSky=saturate(probe.a);
+        float upward=saturate(normal.y*.5+.5);
+        float3 skyBounce=indirectSky.rgb*(.20+.80*openSky)*(.30+.70*upward);
+        float3 wallBounce=indirectBounce.rgb*probe.rgb*(1.0-.55*upward);
+        float existingAmbient=(diffuseTerms.x+diffuseTerms.y*diffuseTerms.w)*skyFill;
+        // Replace a fraction of uniform ambient with spatially varying
+        // sky access and material-colored diffuse bounce (not an orange filter).
+        color+=base*(skyBounce+wallBounce-existingAmbient*.34);
+        float sunContribution=diffuseTerms.z*diffuse*shadowFactor*diffuseTerms.w;
+        color+=base*sunContribution*(indirectSun.rgb-1.0)*.50;
+        // Optional filmic output transform. Preserve HDR range until the end;
+        // SRGB albedo is already decoded by the SRGB texture view.
+        float3 hdr=max(color*hybridControls.y,0.0);
+        float3 filmic=(hdr*(2.51*hdr+.03))/(hdr*(2.43*hdr+.59)+.14);
+        color=pow(saturate(filmic),1.0/2.2);
     }
     return float4(color, materialOpacity[i.mat].x);
 }
@@ -499,16 +568,19 @@ public:
             error=L"Changement de résolution avec des images GPU en attente.";return false;
         }
         const uint64_t qualityBits=gpuQualityBits.load(std::memory_order_acquire);
+        const bool hybrid=hybridLighting.load(std::memory_order_acquire);
         const RasterQualitySettings quality=unpackQuality(qualityBits);
         if(!pending_.empty() &&
            (sceneKey_!=scene.obj.data() || objectCount_!=scene.obj.size() ||
             sceneIdentity_!=scene.gpuCacheIdentity ||
             sceneRevision_!=scene.gpuCacheRevision ||
-            lastSubmissionQualityBits_!=qualityBits)){
+            lastSubmissionQualityBits_!=qualityBits ||
+            lastSubmissionHybrid_!=hybrid)){
             error=L"Vider les lectures différées avant de changer de scène ou de qualité.";
             return false;
         }
         if(!ensureDevice(error)||!ensureScene(scene,error)||!ensureShadow(shadows,error)||
+           (hybrid&&!ensureProbeVolume(scene,error))||
            !ensureTargets(w,h,quality.msaaSamples,error)||
            !ensureAnisotropy(quality.anisotropy,error)||
            !ensureReadback(depth,w,h,error))return false;
@@ -526,6 +598,15 @@ public:
         cb.shadowBase[0]=shadows.base.x;cb.shadowBase[1]=shadows.base.y;cb.shadowBase[2]=shadows.base.z;cb.shadowSpan=shadows.span;
         cb.shadowRight[0]=shadows.right.x;cb.shadowRight[1]=shadows.right.y;cb.shadowRight[2]=shadows.right.z;cb.shadowDist=shadows.dist;
         cb.shadowUp[0]=shadows.up.x;cb.shadowUp[1]=shadows.up.y;cb.shadowUp[2]=shadows.up.z;cb.shadowSize=float(shadows.size);
+        if(hybrid){
+            const HourlyIrradiance ir=irradianceAt(solarHour);
+            cb.indirectSky[0]=ir.sky.x;cb.indirectSky[1]=ir.sky.y;cb.indirectSky[2]=ir.sky.z;
+            cb.indirectBounce[0]=ir.bounce.x;cb.indirectBounce[1]=ir.bounce.y;cb.indirectBounce[2]=ir.bounce.z;
+            cb.indirectSun[0]=ir.sun.x;cb.indirectSun[1]=ir.sun.y;cb.indirectSun[2]=ir.sun.z;
+            cb.probeOrigin[0]=probeOrigin_.x;cb.probeOrigin[1]=probeOrigin_.y;cb.probeOrigin[2]=probeOrigin_.z;
+            cb.probeInvSpan[0]=probeInvSpan_.x;cb.probeInvSpan[1]=probeInvSpan_.y;cb.probeInvSpan[2]=probeInvSpan_.z;
+            cb.hybridControls[0]=1.f;cb.hybridControls[1]=.86f;
+        }
         for(size_t m=0;m<scene.mat.size()&&m<256;m++){
             const std::string& name=scene.mat[m].name;
             const bool carPaint=name.rfind("sports",0)==0||name=="carSilver"||name=="carBlue"||name=="carGreen"||name=="classicBody";
@@ -603,7 +684,8 @@ public:
         UINT stride=sizeof(GpuVertex),offset=0;ID3D11Buffer* vb=vertices_.Get();context_->IASetInputLayout(layout_.Get());context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context_->RSSetState(raster_.Get());context_->OMSetDepthStencilState(depth_.Get(),0);context_->VSSetShader(vs_.Get(),nullptr,0);context_->PSSetShader(ps_.Get(),nullptr,0);
         ID3D11Buffer* cbuff=constants_.Get();context_->VSSetConstantBuffers(0,1,&cbuff);context_->PSSetConstantBuffers(0,1,&cbuff);
-        ID3D11ShaderResourceView* srvs[]={albedo_.Get(),shadowSrv_.Get(),roughness_.Get(),normal_.Get()};context_->PSSetShaderResources(0,4,srvs);ID3D11SamplerState* sampler=sampler_.Get();context_->PSSetSamplers(0,1,&sampler);
+        ID3D11ShaderResourceView* srvs[]={albedo_.Get(),shadowSrv_.Get(),roughness_.Get(),normal_.Get(),hybrid?probeSrv_.Get():nullptr};context_->PSSetShaderResources(0,5,srvs);
+        ID3D11SamplerState* samplers[]={sampler_.Get(),probeSampler_.Get()};context_->PSSetSamplers(0,2,samplers);
         UINT submittedVertices=0;
         uint64_t drawCalls=0;
         const char* noCull=std::getenv("M3D_V17_DISABLE_FRUSTUM_CULLING");
@@ -802,6 +884,7 @@ public:
             slot.copyQueued-started).count();
         pending_.push_back(slotIndex);
         lastSubmissionQualityBits_=qualityBits;
+        lastSubmissionHybrid_=hybrid;
         nextReadbackSlot_=(slotIndex+1u)%readbackDepth_;
         return true;
     }
@@ -865,15 +948,107 @@ public:
         return true;
     }
 private:
+    bool ensureProbeVolume(const Scene& scene,std::wstring& error){
+        if(probeSrv_)return true;
+        // Static, geometry-aware low-frequency indirect light probes.
+        // A small capped volume keeps setup reasonable on Intel HD 620.
+        constexpr UINT nx=16,ny=8,nz=16;
+        V lo{INF,INF,INF},hi{-INF,-INF,-INF};
+        for(const Obj& o:scene.obj){
+            const V a=o.mn,b=o.mx;
+            if(!std::isfinite(a.x)||!std::isfinite(a.y)||!std::isfinite(a.z)||
+               !std::isfinite(b.x)||!std::isfinite(b.y)||!std::isfinite(b.z)||
+               a.x>b.x||a.y>b.y||a.z>b.z)continue;
+            lo={std::min(lo.x,a.x),std::min(lo.y,a.y),std::min(lo.z,a.z)};
+            hi={std::max(hi.x,b.x),std::max(hi.y,b.y),std::max(hi.z,b.z)};
+        }
+        if(!std::isfinite(lo.x))lo={-5.f,-2.f,-5.f},hi={5.f,6.f,5.f};
+        const V dimensions=hi-lo;
+        const V padding={std::max(1.f,dimensions.x*.01f),
+                         std::max(1.f,dimensions.y*.03f),
+                         std::max(1.f,dimensions.z*.01f)};
+        probeOrigin_=lo-padding;
+        const V span=hi-lo+padding*2.f;
+        probeInvSpan_={1.f/std::max(span.x,.001f),
+                       1.f/std::max(span.y,.001f),
+                       1.f/std::max(span.z,.001f)};
+        const float maxRay=clampf(std::max(span.x,std::max(span.y,span.z))/12.f,6.f,25.f);
+        const std::array<V,8> directions={{
+            norm({0.f,1.f,0.f}),norm({.6f,.8f,0.f}),
+            norm({-.6f,.8f,0.f}),norm({0.f,.8f,.6f}),
+            norm({1.f,.2f,0.f}),norm({-1.f,.2f,0.f}),
+            norm({0.f,.2f,-1.f}),norm({0.f,-1.f,0.f})
+        }};
+        auto pigment=[&](int mi)->V{
+            if(mi<0||size_t(mi)>=scene.mat.size())return {.52f,.49f,.43f};
+            const Material& m=scene.mat[size_t(mi)];
+            if(!m.colorMip.empty()&&!m.colorMip.back().p.empty()){
+                const uint32_t c=m.colorMip.back().p.front();
+                return {float((c>>16)&255)/255.f,float((c>>8)&255)/255.f,float(c&255)/255.f};
+            }
+            if(!m.mip.empty()&&!m.mip.back().p.empty()){
+                const uint16_t c=m.mip.back().p.front();
+                return {float(c>>11)/31.f,float((c>>5)&63)/63.f,float(c&31)/31.f};
+            }
+            return {.52f,.49f,.43f};
+        };
+        std::vector<float> voxels(size_t(nx)*ny*nz*4u,0.f);
+        for(UINT z=0;z<nz;++z)for(UINT y=0;y<ny;++y)for(UINT x=0;x<nx;++x){
+            const V origin=probeOrigin_+V{span.x*(float(x)+.5f)/float(nx),
+                                           span.y*(float(y)+.5f)/float(ny),
+                                           span.z*(float(z)+.5f)/float(nz)};
+            V colors{};float reflectWeight=0.f,open=0.f;
+            for(size_t d=0;d<directions.size();++d){
+                Hit hit;
+                closest(scene,Ray{origin,directions[d]},hit,nullptr,false,-1,true);
+                if(hit.id<0||hit.t>maxRay){if(d<4)open+=1.f;continue;}
+                const float w=(1.f-hit.t/maxRay)*(d==7?1.15f:1.f);
+                colors=colors+pigment(hit.mat)*w;
+                reflectWeight+=w;
+            }
+            const V rgb=reflectWeight>.0001f?colors/reflectWeight:V{.38f,.39f,.42f};
+            const float impact=clampf(reflectWeight/4.f,0.f,1.f);
+            const size_t p=((size_t(z)*ny+y)*nx+x)*4u;
+            voxels[p+0]=rgb.x*impact;voxels[p+1]=rgb.y*impact;
+            voxels[p+2]=rgb.z*impact;voxels[p+3]=open*.25f;
+        }
+        D3D11_TEXTURE3D_DESC td{};
+        td.Width=nx;td.Height=ny;td.Depth=nz;td.MipLevels=1;
+        td.Format=DXGI_FORMAT_R32G32B32A32_FLOAT;
+        td.Usage=D3D11_USAGE_IMMUTABLE;td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+        D3D11_SUBRESOURCE_DATA data{};
+        data.pSysMem=voxels.data();data.SysMemPitch=nx*4u*sizeof(float);
+        data.SysMemSlicePitch=nx*ny*4u*sizeof(float);
+        if(FAILED(device_->CreateTexture3D(&td,&data,&probeTexture_))||
+           FAILED(device_->CreateShaderResourceView(probeTexture_.Get(),nullptr,&probeSrv_))){
+            error=L"Échec de création des sondes d'éclairage indirect sur GPU.";
+            probeTexture_.Reset();probeSrv_.Reset();return false;
+        }
+        return true;
+    }
     bool ensureShadow(const ShadowMap& shadows,std::wstring& error) {
         if(shadows.size<=0||shadows.d.size()<size_t(shadows.size)*shadows.size){error=L"Carte d’ombres invalide pour DirectX 11.";return false;}
         if(!shadowTexture_||shadowSize_!=shadows.size){
             shadowTexture_.Reset();shadowSrv_.Reset();
+            shadowUploadCache_.clear();
             D3D11_TEXTURE2D_DESC td{};td.Width=UINT(shadows.size);td.Height=UINT(shadows.size);td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_R32_FLOAT;td.SampleDesc.Count=1;td.Usage=D3D11_USAGE_DEFAULT;td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
             if(FAILED(device_->CreateTexture2D(&td,nullptr,&shadowTexture_))||FAILED(device_->CreateShaderResourceView(shadowTexture_.Get(),nullptr,&shadowSrv_))){error=L"Création de la carte d’ombres DirectX 11 impossible.";return false;}
             shadowSize_=shadows.size;
         }
-        context_->UpdateSubresource(shadowTexture_.Get(),0,nullptr,shadows.d.data(),UINT(shadows.size*sizeof(float)),0);return true;
+        // Bitwise comparison, not an address or probabilistic hash: in-place
+        // edits and allocator address reuse must never yield stale shadows.
+        // The transform is uploaded separately through FrameConstants.
+        const size_t count=size_t(shadows.size)*shadows.size;
+        const char* bypass=std::getenv("M3D_V17_DISABLE_SHADOW_UPLOAD_CACHE");
+        const bool cacheEnabled=!(bypass&&std::strcmp(bypass,"1")==0);
+        if(cacheEnabled&&shadowUploadCache_.size()==count &&
+           std::memcmp(shadowUploadCache_.data(),shadows.d.data(),
+                       count*sizeof(float))==0)return true;
+        context_->UpdateSubresource(shadowTexture_.Get(),0,nullptr,
+                                    shadows.d.data(),UINT(shadows.size*sizeof(float)),0);
+        if(cacheEnabled)shadowUploadCache_.assign(shadows.d.begin(),shadows.d.begin()+count);
+        else shadowUploadCache_.clear();
+        return true;
     }
     bool ensureDevice(std::wstring& error) {
         if(device_)return true;
@@ -965,7 +1140,11 @@ private:
         D3D11_BLEND_DESC blendDesc{};blendDesc.RenderTarget[0].BlendEnable=TRUE;blendDesc.RenderTarget[0].SrcBlend=D3D11_BLEND_SRC_ALPHA;blendDesc.RenderTarget[0].DestBlend=D3D11_BLEND_INV_SRC_ALPHA;blendDesc.RenderTarget[0].BlendOp=D3D11_BLEND_OP_ADD;blendDesc.RenderTarget[0].SrcBlendAlpha=D3D11_BLEND_ONE;blendDesc.RenderTarget[0].DestBlendAlpha=D3D11_BLEND_INV_SRC_ALPHA;blendDesc.RenderTarget[0].BlendOpAlpha=D3D11_BLEND_OP_ADD;blendDesc.RenderTarget[0].RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_ALL;
         if(FAILED(device_->CreateBlendState(&blendDesc,&blend_))){error=L"Création de l’état de transparence DirectX 11 impossible.";return false;}
         D3D11_SAMPLER_DESC sd{};sd.Filter=D3D11_FILTER_ANISOTROPIC;sd.MaxAnisotropy=16;sd.AddressU=sd.AddressV=sd.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;sd.MaxLOD=D3D11_FLOAT32_MAX;
-        if(FAILED(device_->CreateSamplerState(&sd,&sampler_))){error=L"Création du sampler DirectX 11 impossible.";return false;}return true;
+        if(FAILED(device_->CreateSamplerState(&sd,&sampler_))){error=L"Création du sampler DirectX 11 impossible.";return false;}
+        sd.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR;sd.MaxAnisotropy=1;
+        sd.AddressU=sd.AddressV=sd.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;
+        if(FAILED(device_->CreateSamplerState(&sd,&probeSampler_))){error=L"Création du sampler des sondes indirectes impossible.";return false;}
+        return true;
     }
     bool ensureScene(const Scene& scene,std::wstring& error) {
         const char* disableInstancing=std::getenv("M3D_V17_DISABLE_GPU_INSTANCING");
@@ -989,6 +1168,7 @@ private:
         // An edited scene may retain the same std::vector address: revision
         // tracking is required to refresh its GPU PBR/mesh resources.
         vertices_.Reset();transparentVertices_.Reset();albedo_.Reset();
+        probeSrv_.Reset();probeTexture_.Reset(); // new scene/revision = new probe bake
         boxVertices_.Reset();boxInstances_.Reset();boxInstanceCount_=0;
         roughness_.Reset();normal_.Reset();transparent_.clear();vertexCount_=0;
         chunks_.clear();boxChunks_.clear();
@@ -1397,12 +1577,13 @@ private:
     std::array<UINT,3> foliageVertexCounts_{{0,0,0}};
     std::vector<GpuEllipseInstance> foliage_;
     UINT foliageInstanceCount_=0;
-    ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_;ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<TransparentTriangle> transparent_;
+    ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_,probeSampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_,probeSrv_;ComPtr<ID3D11Texture3D> probeTexture_;V probeOrigin_{},probeInvSpan_{};ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<float> shadowUploadCache_;std::vector<TransparentTriangle> transparent_;
     ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_;
     std::array<ReadbackSlot,3> readbackSlots_;
     std::deque<unsigned> pending_;
     unsigned readbackDepth_=0,nextReadbackSlot_=0;
     uint64_t lastSubmissionQualityBits_=defaultQualityBits;
+    bool lastSubmissionHybrid_=false;
     ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
     std::vector<DrawChunk> chunks_,boxChunks_;
     UINT boxInstanceCount_=0;
@@ -1429,6 +1610,8 @@ RasterQualitySettings rasterQualityProfile(RasterQualityProfile preset){
 RasterQualitySettings rasterQualitySettings(){
     return unpackQuality(gpuQualityBits.load(std::memory_order_acquire));
 }
+bool rasterHybridLightingEnabled(){return hybridLighting.load(std::memory_order_acquire);}
+void setRasterHybridLightingEnabled(bool enabled){hybridLighting.store(enabled,std::memory_order_release);}
 bool setRasterQualitySettings(const RasterQualitySettings& q,std::wstring& error){
     const auto validSample=q.msaaSamples==1||q.msaaSamples==2||q.msaaSamples==4||q.msaaSamples==8;
     const auto validAniso=q.anisotropy==1||q.anisotropy==2||
@@ -1466,6 +1649,8 @@ RasterQualitySettings rasterQualityProfile(RasterQualityProfile p){
     return q;
 }
 RasterQualitySettings rasterQualitySettings(){return RasterQualitySettings{};}
+bool rasterHybridLightingEnabled(){return false;}
+void setRasterHybridLightingEnabled(bool){}
 bool setRasterQualitySettings(const RasterQualitySettings&,std::wstring& error){error=L"DirectX 11 indisponible sur cet OS.";return false;}
 bool renderDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,std::vector<uint32_t>&,Stats&,std::wstring& error) { error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false; }
 bool enqueueDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,unsigned,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}

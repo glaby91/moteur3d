@@ -48,6 +48,44 @@ int main(int argc,char** argv){
        first!=second || std::set<uint32_t>(first.begin(),first.end()).size()<64){
         qCritical()<<"Empty, incomplete or non-deterministic raster image";return 1;
     }
+    // Upload cache must be bit-exact against a forced GPU re-upload, even
+    // after an in-place shadow change at the same resolution.
+    if(_putenv_s("M3D_V17_DISABLE_SHADOW_UPLOAD_CACHE","1")!=0){
+        qCritical()<<"Cannot bypass shadow upload cache";return 1;
+    }
+    std::vector<uint32_t> forcedShadow;
+    m3d::Stats forcedStats;
+    error.clear();
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,cam,
+                                    w,h,forcedShadow,forcedStats,error) ||
+       forcedShadow!=second){
+        qCritical()<<"Cached shadows differ from forced upload";return 1;
+    }
+    _putenv_s("M3D_V17_DISABLE_SHADOW_UPLOAD_CACHE","");
+    m3d::ShadowMap modifiedShadow=shadow;
+    for(float& v:modifiedShadow.d)v*=.83f;
+    std::vector<uint32_t> alteredCached,alteredForced;
+    m3d::Stats alteredStats,alteredForcedStats;
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,modifiedShadow,cam,
+                                   w,h,alteredCached,alteredStats,error)){
+        qCritical()<<"Shadow content update failed";return 1;
+    }
+    _putenv_s("M3D_V17_DISABLE_SHADOW_UPLOAD_CACHE","1");
+    const bool alteredOk=m3d::renderDirectX11Preview(
+        built.runtime.renderScene,modifiedShadow,cam,w,h,
+        alteredForced,alteredForcedStats,error);
+    _putenv_s("M3D_V17_DISABLE_SHADOW_UPLOAD_CACHE","");
+    if(!alteredOk||alteredCached!=alteredForced){
+        qCritical()<<"Changed shadow content produced stale GPU data";return 1;
+    }
+    std::vector<uint32_t> restoredShadow;
+    m3d::Stats restoredShadowStats;
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,cam,
+                                    w,h,restoredShadow,restoredShadowStats,error)||
+       restoredShadow!=second){
+        qCritical()<<"Original shadow pixels not restored after edit";return 1;
+    }
+    qInfo()<<"Shadow cache pixel-exact across reuse, forced upload and change";
     // Regression for the V17 frustum optimization: switching culling OFF
     // must produce identical pixels. The renderer must not drop a triangle
     // that intersects the frustum or modify the underlying PBR resources.
@@ -197,6 +235,45 @@ int main(int argc,char** argv){
         qInfo()<<"V17 GPU readback depth"<<depth
                <<"identical to synchronous pixels across"<<frames<<"frames";
     }
+    // V17.308 hybrid-lighting regression. Legacy mode must remain exactly
+    // reproducible; experimental light probes and filmic HDR must be
+    // deterministic, visibly distinct, and respond to time-of-day changes.
+    const bool originalHybrid=m3d::rasterHybridLightingEnabled();
+    if(originalHybrid){qCritical()<<"Hybrid must default OFF for legacy benchmarks";return 1;}
+    m3d::setRasterHybridLightingEnabled(true);
+    std::vector<uint32_t> hybridA,hybridB,morning,evening;
+    m3d::Stats hs;
+    error.clear();
+    const bool hybridOk=m3d::renderDirectX11Preview(
+        built.runtime.renderScene,shadow,cam,w,h,hybridA,hs,error)&&
+        m3d::renderDirectX11Preview(
+        built.runtime.renderScene,shadow,cam,w,h,hybridB,hs,error);
+    if(!hybridOk||hybridA!=hybridB||hybridA==second){
+        qCritical()<<"Hybrid lighting not deterministic or no visible effect"
+                   <<QString::fromStdWString(error);return 1;
+    }
+    m3d::updateLighting(9.f);
+    m3d::Stats morningShadowStats;
+    const auto morningShadow=m3d::buildShadow(built.runtime.renderScene,morningShadowStats);
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,morningShadow,
+                                    cam,w,h,morning,hs,error)){
+        qCritical()<<"Hybrid morning render failed";return 1;
+    }
+    m3d::updateLighting(17.5f);
+    m3d::Stats eveningShadowStats;
+    const auto eveningShadow=m3d::buildShadow(built.runtime.renderScene,eveningShadowStats);
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,eveningShadow,
+                                    cam,w,h,evening,hs,error)||morning==evening){
+        qCritical()<<"Hybrid illumination did not respond to solar hour";return 1;
+    }
+    m3d::setRasterHybridLightingEnabled(false);
+    m3d::updateLighting(built.runtime.daylightHour);
+    std::vector<uint32_t> oldAfterHybrid;
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,
+                                     cam,w,h,oldAfterHybrid,hs,error)||oldAfterHybrid!=second){
+        qCritical()<<"Legacy raster pixels changed after hybrid mode";return 1;
+    }
+    qInfo()<<"Hybrid GI probes deterministic, hour-varying and fully reversible";
     QImage png(w,h,QImage::Format_ARGB32);
     for(int y=0;y<h;++y)
         std::memcpy(png.scanLine(y),second.data()+size_t(y)*w,size_t(w)*4);
