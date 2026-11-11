@@ -216,3 +216,25 @@ la cohérence de l'image, pas les FPS sur Intel HD 620.
 
 **Ne pas annoncer les cibles 40 ms (25 FPS) et 25 ms (40 FPS) comme atteintes.**
 Elles restent nos jalons d'optimisation pour le complexe extrême.
+
+## Consignes futures — Direct GPU et versioning strict (11 novembre 2026)
+
+**Statut : spécification uniquement, non implémentée.** Ne pas engager de modification
+du moteur ou du rendu sans nouvelle demande explicite.
+Détails et critères : [Consignes V17 — Direct GPU et versioning](V17_CONSIGNES_DIRECT_GPU_VERSIONING.md).
+Suivi : [issue GitHub #25](https://github.com/glaby91/moteur3d/issues/25).
+
+- **Direct GPU Present** : étudier une swap chain DXGI Flip Model D3D11/Windows
+  dans une fenêtre native Qt. Éviter le détour permanent GPU → RAM CPU → QImage.
+  Le resolve MSAA doit rester sur GPU. DirectFlip/Independent Flip dépend du
+  pilote, du compositeur Windows et du mode fenêtre.
+- **Qualité inchangée** : PBR 2048, géométrie, lumières, ombres, transparence,
+  MSAA 4×, anisotropie 16×, LOD 100 % et rendu CPU/Compute conservé.
+- **Validation** : comparer les pixels avant présentation, les FPS réellement
+  affichés, la latence, la cadence et les saccades sur Intel HD 620.
+- **Versioning obligatoire** : toute modification, y compris code, shaders,
+  scène, ressources, tests, CI, benchmark et documentation, est enregistrée
+  dans Git avec commit, SHA, historique des changements et statut de validation.
+  Chaque binaire distribué conserve son identité V17.<build GitHub>, sa révision
+  source et les artefacts de tests. Ne jamais modifier silencieusement une
+  build publiée ; préserver la dernière version stable et une marche arrière.
