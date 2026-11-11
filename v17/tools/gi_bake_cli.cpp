@@ -91,7 +91,7 @@ int main(int argc,char** argv){
     const double cacheLoadMedian=median(cacheTimes);
     const double interpMsMedian=median(interpolationTimes);
     QJsonObject result;
-    result.insert("version",QStringLiteral("V17.312"));
+    result.insert("version",QStringLiteral("V17.%1").arg(CSE_WARP_BUILD_NUMBER));
     result.insert("scene",input);
     result.insert("mode",QStringLiteral("offline CPU real ray transport"));
     result.insert("device",QStringLiteral("GitHub Windows runner CPU, not Intel HD620"));
