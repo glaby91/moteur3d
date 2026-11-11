@@ -1,4 +1,4 @@
-# CSE WARP V17.323 — Palais unique, deux mosaïques distinctes et piscine olympique
+# CSE WARP V17.324 — Palais unique, deux mosaïques distinctes et piscine olympique
 
 Scène **fictive** du moteur CSE WARP. Ce bâtiment n'est pas une reconstitution
 historique du Palais de la Culture Energetik : seule sa **véritable mosaïque
@@ -47,6 +47,11 @@ premier rendu 3D (160 × 261 px, SHA-256
 Les dimensions physiques sont **8 × 13,05 m**, de y=5,725 à 18,775 m,
 sur le mur **extérieur** central, au-dessus de l'entrée. Les joints
 de tesselles de 20 cm et le cadre sont des objets réels du moteur.
+Le premier rendu WARP de V17.323 a révélé une répétition de la texture
+causée par les UV de l'instancing GPU. V17.324 corrige cette divergence :
+**une œuvre = une image entière sur la face**, UV 0..1 sur CPU/Compute,
+mode d'instancing DirectX 11 dédié (UV mode 2), sans changer les UV
+répétitifs des autres matériaux PBR.
 Pour une reproduction de près, le PNG source 244 × 398 fourni dans la
 conversation pourra ultérieurement remplacer la version JPEG optimisée.
 

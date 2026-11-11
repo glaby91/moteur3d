@@ -198,15 +198,16 @@ VSOut VSBoxMain(VSBoxIn i) {
                     i.p.z<0.5?i.boxLo.z:i.boxHi.z);
     float3 n=i.n;
     float2 uv;
-    if(i.uvMode==1){
-        // Source V16 JSON boxes store per-face local UVs, while native
-        // Kind::Box maps the world position. Preserve both conventions.
+    if(i.uvMode==1 || i.uvMode==2){
+        // uvMode=1: normal scene PBR, repeat per metre.
+        // uvMode=2: image artwork, cover the entire box face once.
+        // The mirroring matches the original 12-triangle V16 source boxes.
         float2 localUV=i.unusedUv;
         if(n.z < -0.5 || n.x > 0.5)localUV.x=1.0-localUV.x;
         if(n.y > 0.5)localUV.y=1.0-localUV.y;
         float uLength=(abs(n.x)>0.5?i.boxSize.z:i.boxSize.x)*0.5;
         float vLength=(abs(n.y)>0.5?i.boxSize.z:i.boxSize.y)*0.5;
-        uv=localUV*float2(uLength,vLength);
+        uv=i.uvMode==2?localUV:localUV*float2(uLength,vLength);
     }else{
         uv=(abs(n.y)>=abs(n.x)&&abs(n.y)>=abs(n.z))
             ?p.xz*i.uvScale
@@ -1359,7 +1360,11 @@ private:
                 box.size[1]=source.mx.y-source.mn.y;
                 box.size[2]=source.mx.z-source.mn.z;
                 box.material=source.material;
-                box.uvMode=1;
+                // Two original scene artworks are mapped once to their
+                // complete faces, including on GPU-instanced source boxes.
+                const std::string& sourceName=scene.mat[source.material].name;
+                box.uvMode=(sourceName=="cse_energetik_fresco"||
+                            sourceName=="cse_personnage_facade")?2:1;
                 boxData.push_back(box);
                 for(size_t k=source.firstTriangle;k<size_t(source.firstTriangle)+12;++k)
                     skipSource[k]=1;

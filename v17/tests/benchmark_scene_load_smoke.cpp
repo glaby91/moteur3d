@@ -51,6 +51,26 @@ int main(int argc,char** argv){
     if(facade[0].p==image[0].p){
         qCritical()<<"Outdoor portrait and hall fresco are the same image";return 12;
     }
+    // Every artwork must be mapped exactly ONCE, not repeated as a normal
+    // concrete or tile texture. Validate CPU/Compute UVs; D3D11 source-box
+    // instancing mirrors these coordinates with dedicated uvMode=2.
+    const auto fullImageOnce=[&](int material)->bool{
+        size_t triangles=0;
+        for(const m3d::Obj& o:built.runtime.renderScene.obj){
+            if(o.mat!=material)continue;
+            if(o.kind!=m3d::Kind::Triangle)return false;
+            for(const m3d::V uv:{o.uv0,o.uv1,o.uv2}){
+                if(uv.x<-.001f||uv.x>1.001f||
+                   uv.y<-.001f||uv.y>1.001f)return false;
+            }
+            triangles++;
+        }
+        return triangles==12;
+    };
+    if(!fullImageOnce(artIndex)||!fullImageOnce(facadeIndex)){
+        qCritical()<<"Artwork UV exceeds 0..1: image repeats over its wall";
+        return 13;
+    }
     qInfo()<<"V17.323 two distinct image assets decoded:"
         <<"Energetik"<<image[0].p.size()<<"texels"<<colours.size()<<"colors;"
         <<"facade"<<facade[0].p.size()<<"texels"<<facadeColours.size()<<"colors";
