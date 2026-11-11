@@ -315,6 +315,12 @@ jobs:
         run: |
           & './v17/tools/total_simulation.ps1' -BinaryDirectory 'build-v17/Release' -OutputDirectory 'build-v17/total-simulation'
           if ($LASTEXITCODE -ne 0) { throw 'Simulation totale V17 a échoué' }
+          # Include actual shader output, not AI-generated references.
+          $comparison = "build-v17/total-simulation/lighting-ab"
+          New-Item -ItemType Directory -Force $comparison | Out-Null
+          Copy-Item "build-v17/v17-raster-warp-quick.png" "$comparison/raster-reference.png"
+          Copy-Item "build-v17/v17-raster-warp-quick.png.indirect.png" "$comparison/raster-indirect.png"
+          Copy-Item "build-v17/v17-raster-warp-quick.png.indirect-filmic.png" "$comparison/raster-indirect-filmic.png"
       - name: Archive des résultats de simulation totale WARP
         if: always()
         uses: actions/upload-artifact@v6

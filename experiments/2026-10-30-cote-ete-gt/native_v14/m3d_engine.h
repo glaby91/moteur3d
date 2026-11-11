@@ -115,6 +115,9 @@ RasterQualitySettings rasterQualitySettings();
 // GUI may opt in independently; the renderer snapshots this at frame boundaries.
 bool rasterHybridLightingEnabled();
 void setRasterHybridLightingEnabled(bool enabled);
+// Filmic shoulder control is independent of probe GI, and defaults OFF.
+bool rasterFilmicTonemapEnabled();
+void setRasterFilmicTonemapEnabled(bool enabled);
 bool setRasterQualitySettings(const RasterQualitySettings& settings,std::wstring& error);
 
 // Experimental pipelined D3D11 readback. Enqueue issues an ordered frame render

@@ -29,6 +29,8 @@ constexpr uint64_t defaultQualityBits=4ull|(16ull<<8)|(100ull<<16)|(1ull<<32)|(1
 std::atomic<uint64_t> gpuQualityBits{defaultQualityBits};
 // Opt-in: keep all reference benchmarks and pre-existing renders pixel-exact.
 std::atomic<bool> hybridLighting{false};
+// Separate, independently reversible display-referred highlight compression.
+std::atomic<bool> filmicTonemap{false};
 struct HourlyIrradiance { V sky,bounce,sun; };
 // Bake 25 half-hour samples once. This is a temporal irradiance LUT, not
 // a substitute for fully ray-traced light transport. Spatial influence comes
@@ -307,25 +309,40 @@ float4 PSMain(VSOut i):SV_TARGET {
 #endif
     }
     if(hybridControls.x>0.5){
-        // Trilinear, geometry-aware static probes; solar-hour coefficients
-        // change continuously without baking a new scene on each camera move.
+        // Indirect probes modify AMBIENT energy instead of adding an extra
+        // full-strength light pass. This prevents washed-out concrete.
         float3 position=saturate((i.world-probeOrigin.xyz)*probeInvSpan.xyz);
         float4 probe=indirectProbes.SampleLevel(probeSampler,position,0);
-        float openSky=saturate(probe.a);
+        float skyVisibility=saturate(probe.a);
         float upward=saturate(normal.y*.5+.5);
-        float3 skyBounce=indirectSky.rgb*(.20+.80*openSky)*(.30+.70*upward);
-        float3 wallBounce=indirectBounce.rgb*probe.rgb*(1.0-.55*upward);
         float existingAmbient=(diffuseTerms.x+diffuseTerms.y*diffuseTerms.w)*skyFill;
-        // Replace a fraction of uniform ambient with spatially varying
-        // sky access and material-colored diffuse bounce (not an orange filter).
-        color+=base*(skyBounce+wallBounce-existingAmbient*.34);
+        // Normalize the time-dependent sky color so daylight changes hue,
+        // but doesn't create energy from a second hemispherical fill.
+        float skyMean=max(dot(indirectSky.rgb,float3(.333333,.333333,.333333)),.001);
+        float3 skyTint=lerp(float3(1.0,1.0,1.0),
+                            indirectSky.rgb/skyMean,.22);
+        // Retain up to 92% of the legacy ambient in open air, but only
+        // 48% in occluded interiors. Static probe volume interpolates in XYZ.
+        float3 accessibleSky=existingAmbient
+                             *lerp(.48,.92,skyVisibility)*skyTint;
+        // Low-energy, material-colored bounce gives warmth to nearby walls
+        // without washing out roofs. Decays in exposed outdoor probes.
+        float3 reflected=indirectBounce.rgb*probe.rgb
+                         *(.12+.18*(1.0-upward))
+                         *(.80-.30*skyVisibility);
+        float3 indirect=accessibleSky+reflected;
+        color+=base*(indirect-existingAmbient);
+        // The existing shadow map and dynamic direct sun remain unchanged;
+        // gently tint only the direct contribution at warm solar hours.
         float sunContribution=diffuseTerms.z*diffuse*shadowFactor*diffuseTerms.w;
-        color+=base*sunContribution*(indirectSun.rgb-1.0)*.50;
-        // Optional filmic output transform. Preserve HDR range until the end;
-        // SRGB albedo is already decoded by the SRGB texture view.
-        float3 hdr=max(color*hybridControls.y,0.0);
-        float3 filmic=(hdr*(2.51*hdr+.03))/(hdr*(2.43*hdr+.59)+.14);
-        color=pow(saturate(filmic),1.0/2.2);
+        color+=base*sunContribution*(indirectSun.rgb-1.0)*.40;
+    }
+    if(hybridControls.z>0.5){
+        // Conservative display-referred shoulder, independently toggled.
+        // IMPORTANT: no sRGB gamma here; the legacy back buffer is UNORM
+        // and the V17.309 pow(1/2.2) incorrectly lifted ALL midtones.
+        float3 linearPositive=max(color,0.0);
+        color=linearPositive/(1.0+.70*max(linearPositive-.64,0.0));
     }
     return float4(color, materialOpacity[i.mat].x);
 }
@@ -569,13 +586,15 @@ public:
         }
         const uint64_t qualityBits=gpuQualityBits.load(std::memory_order_acquire);
         const bool hybrid=hybridLighting.load(std::memory_order_acquire);
+        const bool tone=filmicTonemap.load(std::memory_order_acquire);
         const RasterQualitySettings quality=unpackQuality(qualityBits);
         if(!pending_.empty() &&
            (sceneKey_!=scene.obj.data() || objectCount_!=scene.obj.size() ||
             sceneIdentity_!=scene.gpuCacheIdentity ||
             sceneRevision_!=scene.gpuCacheRevision ||
             lastSubmissionQualityBits_!=qualityBits ||
-            lastSubmissionHybrid_!=hybrid)){
+            lastSubmissionHybrid_!=hybrid ||
+            lastSubmissionTone_!=tone)){
             error=L"Vider les lectures différées avant de changer de scène ou de qualité.";
             return false;
         }
@@ -605,8 +624,9 @@ public:
             cb.indirectSun[0]=ir.sun.x;cb.indirectSun[1]=ir.sun.y;cb.indirectSun[2]=ir.sun.z;
             cb.probeOrigin[0]=probeOrigin_.x;cb.probeOrigin[1]=probeOrigin_.y;cb.probeOrigin[2]=probeOrigin_.z;
             cb.probeInvSpan[0]=probeInvSpan_.x;cb.probeInvSpan[1]=probeInvSpan_.y;cb.probeInvSpan[2]=probeInvSpan_.z;
-            cb.hybridControls[0]=1.f;cb.hybridControls[1]=.86f;
+            cb.hybridControls[0]=1.f;
         }
+        cb.hybridControls[2]=tone?1.f:0.f;
         for(size_t m=0;m<scene.mat.size()&&m<256;m++){
             const std::string& name=scene.mat[m].name;
             const bool carPaint=name.rfind("sports",0)==0||name=="carSilver"||name=="carBlue"||name=="carGreen"||name=="classicBody";
@@ -885,6 +905,7 @@ public:
         pending_.push_back(slotIndex);
         lastSubmissionQualityBits_=qualityBits;
         lastSubmissionHybrid_=hybrid;
+        lastSubmissionTone_=tone;
         nextReadbackSlot_=(slotIndex+1u)%readbackDepth_;
         return true;
     }
@@ -1583,7 +1604,7 @@ private:
     std::deque<unsigned> pending_;
     unsigned readbackDepth_=0,nextReadbackSlot_=0;
     uint64_t lastSubmissionQualityBits_=defaultQualityBits;
-    bool lastSubmissionHybrid_=false;
+    bool lastSubmissionHybrid_=false,lastSubmissionTone_=false;
     ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
     std::vector<DrawChunk> chunks_,boxChunks_;
     UINT boxInstanceCount_=0;
@@ -1612,6 +1633,8 @@ RasterQualitySettings rasterQualitySettings(){
 }
 bool rasterHybridLightingEnabled(){return hybridLighting.load(std::memory_order_acquire);}
 void setRasterHybridLightingEnabled(bool enabled){hybridLighting.store(enabled,std::memory_order_release);}
+bool rasterFilmicTonemapEnabled(){return filmicTonemap.load(std::memory_order_acquire);}
+void setRasterFilmicTonemapEnabled(bool enabled){filmicTonemap.store(enabled,std::memory_order_release);}
 bool setRasterQualitySettings(const RasterQualitySettings& q,std::wstring& error){
     const auto validSample=q.msaaSamples==1||q.msaaSamples==2||q.msaaSamples==4||q.msaaSamples==8;
     const auto validAniso=q.anisotropy==1||q.anisotropy==2||
@@ -1651,6 +1674,8 @@ RasterQualitySettings rasterQualityProfile(RasterQualityProfile p){
 RasterQualitySettings rasterQualitySettings(){return RasterQualitySettings{};}
 bool rasterHybridLightingEnabled(){return false;}
 void setRasterHybridLightingEnabled(bool){}
+bool rasterFilmicTonemapEnabled(){return false;}
+void setRasterFilmicTonemapEnabled(bool){}
 bool setRasterQualitySettings(const RasterQualitySettings&,std::wstring& error){error=L"DirectX 11 indisponible sur cet OS.";return false;}
 bool renderDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,std::vector<uint32_t>&,Stats&,std::wstring& error) { error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false; }
 bool enqueueDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,unsigned,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}
