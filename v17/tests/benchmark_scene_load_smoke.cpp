@@ -15,7 +15,7 @@ int main(int argc,char** argv){
     const size_t triangles=built.runtime.renderScene.obj.size();
     const size_t requested=QString::fromLocal8Bit(argv[2]).toULongLong();
     if(triangles<requested || built.runtime.cameras.size()<6 ||
-       built.runtime.renderScene.mat.size()!=29 || built.runtime.objects.size()<1000){
+       built.runtime.renderScene.mat.size()!=30 || built.runtime.objects.size()<1000){
         qCritical()<<"Invalid benchmark content: triangles="<<qulonglong(triangles)
                    <<"min="<<qulonglong(requested)
                    <<"cameras="<<built.runtime.cameras.size()
@@ -23,9 +23,9 @@ int main(int argc,char** argv){
                    <<"instances="<<built.runtime.objects.size();
         return 5;
     }
-    // This scene adds seven local materials but preserves all 22 Pripyat
-    // originals. Prove that the real JPEG mosaic was loaded, not replaced
-    // with a uniform procedural fake.
+    // Eight scene-local materials preserve all 22 original Pripyat IDs.
+    // BOTH the user's exterior portrait and original hall Energetik fresco
+    // must load through the real scene PBR/JPEG path (not flat fallbacks).
     const int artIndex=built.runtime.materialIndex.value(
         QStringLiteral("cse_energetik_fresco"),-1);
     if(artIndex<0){qCritical()<<"No Energetik mosaic material";return 6;}
@@ -37,8 +37,23 @@ int main(int argc,char** argv){
     if(colours.size()<128){
         qCritical()<<"Energetik mosaic has no photographic color detail";return 8;
     }
-    qInfo()<<"V17.317 authentic Energetik image verified:"
-        <<image[0].p.size()<<"texels and"<<colours.size()<<"distinct colors";
+    const int facadeIndex=built.runtime.materialIndex.value(
+        QStringLiteral("cse_personnage_facade"),-1);
+    if(facadeIndex<0){qCritical()<<"User facade artwork material missing";return 9;}
+    const auto& facade=built.runtime.renderScene.mat[size_t(facadeIndex)].colorMip;
+    if(facade.empty()||facade[0].p.size()<10000){
+        qCritical()<<"User facade image failed to decode";return 10;
+    }
+    const std::set<uint32_t> facadeColours(facade[0].p.begin(),facade[0].p.end());
+    if(facadeColours.size()<100){
+        qCritical()<<"User portrait was replaced with a flat material";return 11;
+    }
+    if(facade[0].p==image[0].p){
+        qCritical()<<"Outdoor portrait and hall fresco are the same image";return 12;
+    }
+    qInfo()<<"V17.323 two distinct image assets decoded:"
+        <<"Energetik"<<image[0].p.size()<<"texels"<<colours.size()<<"colors;"
+        <<"facade"<<facade[0].p.size()<<"texels"<<facadeColours.size()<<"colors";
     qInfo()<<"CSE WARP V17 benchmark scene validated:"
            <<qulonglong(triangles)<<"triangles,"
            <<built.runtime.objects.size()<<"instances,"
