@@ -1,4 +1,4 @@
-# CSE WARP V17.324 — Palais unique, deux mosaïques distinctes et piscine olympique
+# CSE WARP V17.325 — Palais unique, deux mosaïques distinctes et piscine olympique
 
 Scène **fictive** du moteur CSE WARP. Ce bâtiment n'est pas une reconstitution
 historique du Palais de la Culture Energetik : seule sa **véritable mosaïque
@@ -86,6 +86,24 @@ les 96 modules du banc ovale et la suppression des immeubles secondaires.
   Environ 8 m de haut ; **ce n'est pas un véritable monument de Pripiat**.
 - Lampadaires et arbres paysagers périphériques conservés ; aucune
   construction supplémentaire à l'extérieur.
+
+## Continuité intérieure — V17.325
+
+- Le premier plancher de la galerie est désormais **percé d'une trémie** au
+  droit du nouvel escalier d'entrée de 25 marches. La hauteur libre du corps
+  (1,76 m) est protégée et la dernière marche rejoint un vrai palier.
+- Le hall dispose d'un escalier praticable vers le niveau 4,5 m, sans
+  traverser une dalle. L'autre escalier d'accès aux galeries côté piscine est
+  conservé.
+- Le RDC du bâtiment principal comprend des **vestiaires et douches
+  intérieurs**, notamment un espace à l'ouest de la piscine avec 12 casiers,
+  5 postes de douche, 3 bancs intérieurs et luminaires, ainsi qu'un local
+  de service avec 6 casiers à l'est. Aucun bâtiment annexe n'est ajouté.
+- Une caméra dédiée **Vestiaires et douches** permet de contrôler
+  l'aménagement depuis CSE WARP.
+- En plus des tests dimensionnels, `benchmark_scene_load_smoke` inclut
+  des tests BVH de marche depuis l'extérieur et de montée du grand escalier.
+  Ces tests servent de garde-fou, pas de certificat d'accessibilité.
 
 ## Test et génération
 

@@ -50,6 +50,7 @@ const cameras={format:'m3d-cameras-v1',cameras:[
  {id:'bassin',name:'04 · Piscine olympique depuis l’entrée',position:[0,2.4,-10],target:[0,1.0,-34],fovDegrees:73},
  {id:'hall',name:'05 · Hall, escalier et fresque Energetik',position:[-7,2.9,-10],target:[-15,10.35,-17.9],fovDegrees:69},
  {id:'etage',name:'06 · Galerie au-dessus des lignes d’eau',position:[34,6.6,-44],target:[0,2,-32],fovDegrees:71},
+ {id:'vestiaires',name:'07 · Vestiaires et douches RDC',position:[-33.5,2.15,-35.4],target:[-43.5,2,-36],fovDegrees:68},
  {id:'vue_haut',name:'07 · Vue aérienne du bâtiment unique',position:[95,68,105],target:[15,5,11],fovDegrees:67}
 ]};
 const lighting={format:'m3d-lighting-v1',hour:14.75,
@@ -60,7 +61,9 @@ const lighting={format:'m3d-lighting-v1',hour:14.75,
   ...Array.from({length:4},(_,i)=>[-19.5+i*13]).flatMap(x=>[
    {position:[x,14,-16],radius:10,intensity:.75,color:[231,240,252]},
    {position:[x,14,-48],radius:10,intensity:.75,color:[231,240,252]}
-  ])
+  ]),
+  {position:[-40,3.95,-36],radius:10,intensity:.63,color:[235,239,243]},
+  {position:[44,3.85,-48],radius:9,intensity:.48,color:[235,239,243]}
  ]};
 const environment={format:'m3d-environment-v1',terrain:'finite',units:'m',
  note:'Fictional, explorable single modernist palace with olympic pool, a copied real Energetik mosaic artwork asset, and original Soviet-inspired monument; NOT historical reconstruction.'};
@@ -115,8 +118,15 @@ function build(profileName,p){
   for(const side of [-1,1])
    B('Interieur/Galeries','prp_concrete_raw',side*39.5,y,-30,22,.30,49);
   B('Interieur/Galeries','prp_concrete_raw',0,y,-50.15,57,.30,9.7);
-  // Clear front/entrance sightline; mezzanine turns around the water.
-  B('Interieur/Galeries','prp_concrete_raw',0,y,-9.45,57,.30,8.5);
+  // A genuine staircase shaft must remain open through the first
+  // mezzanine. Otherwise the avatar's head hits the floor at y=4.5.
+  if(y===4.5){
+   B('Interieur/Galeries','prp_concrete_raw',-23.325,y,-9.45,10.35,.30,8.5);
+   B('Interieur/Galeries','prp_concrete_raw',8.325,y,-9.45,40.35,.30,8.5);
+   B('Interieur/Galeries','prp_concrete_raw',-15,y,-6.9,6.3,.30,3.4);
+  }else{
+   B('Interieur/Galeries','prp_concrete_raw',0,y,-9.45,57,.30,8.5);
+  }
  }
  // Perimeter roof + continuous glazed clerestory over the 50-m pool.
  for(const side of [-1,1])
@@ -236,6 +246,10 @@ function build(profileName,p){
    B('Interieur/Hall/Grand escalier/Garde-corps','prp_steel_painted',
      -15+side*2.2,top+.53,z,.07,1.05,.08);
  }
+ // Landing tongue overlaps the final tread and the existing y=4.5
+ // first-floor gallery, so feet never have to jump a 0.7 m void.
+ B('Interieur/Hall/Palier raccord escalier','prp_terrazzo_floor',
+   -15,4.50,-9.02,4.4,.30,1.30);
  // The original Energetik image hangs above THAT staircase in the hall.
  // Its wall ends at y=7.6, leaving the hall's floor and pool sightline open.
  B('Interieur/Hall/Mur fresque','prp_plaster_pale',-15,10.35,-18.18,
@@ -248,6 +262,39 @@ function build(profileName,p){
  for(const y of [8.05,12.65])
   B('Interieur/Hall/Fresque/Cadre','prp_steel_rusted',
     -15,y,-17.84,10.1,.16,.18);
+ // Locker rooms and showers inside the WEST ground-floor deck, accessed
+ // through a 4 m opening from the western poolside corridor. No new building.
+ const cloak='Interieur/Vestiaires et douches ouest';
+ for(const z of [-45,-27])
+  B(cloak+'/Murs','prp_tile_ceramic',-40,2.15,z,17,3.25,.24);
+ B(cloak+'/Murs','prp_tile_ceramic',-48.38,2.15,-36,.25,3.25,18.0);
+ for(const z of [-41.5,-30.5])
+  B(cloak+'/Mur accès','prp_tile_ceramic',-31.35,2.15,z,.25,3.25,7);
+ // The shower suite is behind a split wall with a passage.
+ for(const [x,w] of [[-45,7],[-34.7,6.8]])
+  B(cloak+'/Douches/Cloisons','prp_tile_ceramic',x,2.1,-41,w,3.15,.23);
+ for(let i=0;i<12;i++){
+  const z=-43.5+i*1.12;
+  B(cloak+'/Casiers','prp_steel_painted',-47.5,1.55,z,.68,1.88,.69);
+  B(cloak+'/Casiers/Poignées','prp_window_frame',-47.13,1.7,z,.055,.18,.20);
+ }
+ for(const z of [-36,-33.4,-30.8])
+  B(cloak+'/Bancs intérieurs','prp_wood_weathered',-40,.91,z,3.0,.19,.62);
+ for(let i=0;i<5;i++){
+  const x=-44.5+i*1.75;
+  B(cloak+'/Douches/Colonnes','prp_steel_painted',x,2.0,-43.6,.09,2.8,.09);
+  S(cloak+'/Douches/Pommeaux','prp_steel_painted',x,3.10,-43.5,.42,.14,.35);
+ }
+ for(const z of [-38,-31])
+  B(cloak+'/Plafonniers','cse_pool_strip',-40,4.10,z,7.5,.09,.45);
+ // Small eastern service/changing room, entirely clear of east gallery
+ // stairs, reached from the rear walkway of the pool.
+ const east='Interieur/Vestiaires est et locaux techniques';
+ for(const z of [-52,-45])
+  B(east+'/Murs','prp_tile_ceramic',44.5,2.10,z,8,3.20,.24);
+ B(east+'/Mur latéral','prp_tile_ceramic',48.5,2.10,-48.5,.24,3.20,7.0);
+ for(let k=0;k<6;k++)
+  B(east+'/Casiers','prp_steel_painted',46.8,1.55,-51+k*.92,.65,1.88,.70);
  // A long line of worn granite slabs; scene fills in from broad to small units.
  const step=p.pave;
  for(let x=-68;x<=67;x+=step)for(let z=26;z<=90;z+=step){

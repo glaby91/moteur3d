@@ -35,7 +35,8 @@ const validMaterials=new Set(allIds);
 const meshes=new Set(read('geometry/benchmark.json').meshes.map(m=>m.id));
 const cameras=read('cameras/views.json').cameras;
 check(cameras.length>=7&&cameras.some(c=>c.id==='bassin')&&
- cameras.some(c=>c.id==='etage'),'Pool + gallery cameras missing');
+ cameras.some(c=>c.id==='etage')&&cameras.some(c=>c.id==='vestiaires'),
+ 'Pool, gallery and changing rooms cameras missing');
 for(const [profile,target,cap,sceneFile] of [
  ['leger',20000,512,'scene.json'],['lourd',150000,1024,'scene-lourd.json'],
  ['extreme',500000,1024,'scene-extreme.json']
@@ -114,6 +115,27 @@ for(const [profile,target,cap,sceneFile] of [
   'Grand staircase must meet the y=4.5 entrance gallery');
  check(unique('Interieur/Hall/Mur fresque').length===1,
   'Hall fresco support wall missing');
+ // First-floor access MUST have a cut-out so the player does not hit
+ // an overhead slab while climbing the last steps (1.70 m eye height).
+ for(const g of select('Interieur/Galeries').filter(o=>o.position[1]===4.5)){
+  const [x,,z]=g.position,[w,,d]=g.size;
+  const intersectsStairShaft=(x+w/2>-17.6&&x-w/2<-12.4&&
+    z+d/2>-13.5&&z-d/2<-9.2);
+  check(!intersectsStairShaft,'Headroom obstructed above hall staircase');
+ }
+ const west=select('Interieur/Vestiaires et douches ouest');
+ const east=select('Interieur/Vestiaires est et locaux techniques');
+ check(west.length>=35&&east.length>=8,
+  'Indoor locker rooms, shower fixtures or service rooms missing');
+ for(const o of [...west,...east]){
+  const [x,,z]=o.position;
+  check(Math.abs(x)>30.5,'Locker facilities intersect pool promenade');
+  check(z>=-55&&z<=-26,'Locker facilities escaped the main building footprint');
+ }
+ const corridorDoor=select('Interieur/Vestiaires et douches ouest/Mur accès');
+ check(corridorDoor.length===2&&
+  Math.abs(corridorDoor[0].position[2]-corridorDoor[1].position[2])===11,
+  'Poolside locker-room entrance is not 4 m wide');
  const exteriorArt=inst.filter(o=>o.material==='cse_personnage_facade');
  check(exteriorArt.length===1&&
    exteriorArt[0].parent==='Architecture/Palais/Mosaique extérieure du personnage/Image fournie par utilisateur'&&
