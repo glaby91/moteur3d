@@ -1,53 +1,107 @@
 #!/usr/bin/env node
+// V17.317: structural and spatial validation, not just instance accounting.
 'use strict';
 const fs=require('node:fs');
 const path=require('node:path');
 const base=__dirname;
-const origin=JSON.parse(fs.readFileSync(path.resolve(base,'../../../assets/materials/pripyat-v17/catalogue.json'),'utf8'));
-const ids=origin.materials.map(x=>x.id);
-if(ids.length!==22||new Set(ids).size!==ids.length)throw Error('Legacy materials not preserved');
-const required=['geometry/benchmark.json','materials/pripyat-reuse.json',
-  'cameras/views.json','lighting/day.json',
-  'scene.json','scene-lourd.json','scene-extreme.json'];
-for(const file of required){
- if(!fs.existsSync(path.join(base,file)))throw Error('Missing '+file);
-}
-function read(file){return JSON.parse(fs.readFileSync(path.join(base,file),'utf8'));}
-const mats=read('materials/pripyat-reuse.json').materials;
-if(mats.length!==22||mats.some((m,i)=>m.id!==origin.materials[i].id))
- throw Error('Material source IDs were altered');
-for(const [profile,target,cap,filename] of [
- ['leger',20000,512,'scene.json'],
- ['lourd',150000,1024,'scene-lourd.json'],
+const root=path.resolve(base,'../../..');
+const origin=JSON.parse(fs.readFileSync(path.resolve(root,'assets/materials/pripyat-v17/catalogue.json'),'utf8'));
+function check(ok,message){if(!ok)throw new Error(message);}
+const sourceIds=origin.materials.map(m=>m.id);
+check(sourceIds.length===22&&new Set(sourceIds).size===22,'Original Pripyat material set changed');
+const required=['geometry/benchmark.json','materials/pripyat-reuse.json','cameras/views.json',
+ 'lighting/day.json','scene.json','scene-lourd.json','scene-extreme.json',
+ 'textures/energetik_fresco_mosaic.jpg'];
+for(const file of required)check(fs.existsSync(path.resolve(base,file)),'Missing '+file);
+const sceneMosaic=fs.readFileSync(path.resolve(base,'textures/energetik_fresco_mosaic.jpg'));
+const originalMosaic=fs.readFileSync(path.resolve(root,
+ 'experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/textures/energetik_fresco_mosaic.jpg'));
+check(sceneMosaic.equals(originalMosaic),'The copied Energetik mural is not byte-exact');
+function read(file){return JSON.parse(fs.readFileSync(path.resolve(base,file),'utf8'));}
+const materials=read('materials/pripyat-reuse.json').materials;
+const allIds=materials.map(m=>m.id);
+check(materials.length===29&&new Set(allIds).size===materials.length,'Expected 22 source + 7 scene materials');
+check(origin.materials.every((m,i)=>JSON.stringify(m)===JSON.stringify(materials[i])),
+ 'Original material recipes or ordering changed');
+const validMaterials=new Set(allIds);
+const meshes=new Set(read('geometry/benchmark.json').meshes.map(m=>m.id));
+const cameras=read('cameras/views.json').cameras;
+check(cameras.length>=7&&cameras.some(c=>c.id==='bassin')&&
+ cameras.some(c=>c.id==='etage'),'Pool + gallery cameras missing');
+for(const [profile,target,cap,sceneFile] of [
+ ['leger',20000,512,'scene.json'],['lourd',150000,1024,'scene-lourd.json'],
  ['extreme',500000,1024,'scene-extreme.json']
 ]){
- const scene=read(filename);
- const sector=scene.sectors?.[0];
- if(scene.format!=='m3d-scene-v16'||!sector)throw Error('Bad scene '+profile);
- const allRefs=['geometry','materials','pbr','instances','cameras','lighting','environment'];
- for(const kind of allRefs)for(const relative of sector[kind]||[]){
-   const real=path.resolve(base,relative);
-   if(!real.startsWith(base+path.sep)||!fs.existsSync(real))throw Error('Missing or escaping resource '+real);
+ const scene=read(sceneFile),sector=scene.sectors?.[0];
+ check(scene.format==='m3d-scene-v16'&&sector,'Bad scene '+profile);
+ for(const kind of ['geometry','materials','pbr','instances','cameras','lighting','environment']){
+  for(const item of sector[kind]||[]){
+   const full=path.resolve(base,item);
+   check(full.startsWith(base+path.sep)&&fs.existsSync(full),'Escaping/missing '+item);
+  }
  }
  const inst=read('instances/'+profile+'.json').instances;
  const pbr=read('pbr/pripyat-reuse-'+profile+'.json');
  const stats=read('stats/'+profile+'.json');
- const validMaterials=new Set(ids);
- const validGeometry=new Set(read('geometry/benchmark.json').meshes.map(x=>x.id));
- const used=new Set();
- let boxCount=0;
- for(const x of inst){
-   if(!x.id||used.has(x.id))throw Error('Duplicate or missing instance id '+x.id);
-   used.add(x.id);
-   if(!validGeometry.has(x.geometry)||!validMaterials.has(x.material))throw Error('Unknown mesh/material '+x.id);
-   if(x.size?.length!==3||x.position?.length!==3)throw Error('Invalid dimensions '+x.id);
-   for(const v of [...x.size,...x.position])if(!Number.isFinite(v))throw Error('Nonfinite value '+x.id);
-   if(x.size.some(v=>v<=0))throw Error('Degenerate object '+x.id);
-   if(x.geometry==='unit_box')boxCount++;
+ const seen=new Set();let boxCount=0;
+ for(const o of inst){
+  check(o.id&&!seen.has(o.id),'Duplicate object id '+o.id);
+  seen.add(o.id);
+  check(meshes.has(o.geometry)&&validMaterials.has(o.material),'Unresolved material/geometry '+o.id);
+  check(o.size?.length===3&&o.position?.length===3,'Invalid geometry '+o.id);
+  check([...o.size,...o.position].every(Number.isFinite)&&o.size.every(v=>v>0),
+   'Degenerate geometry '+o.id);
+  if(o.geometry==='unit_box')boxCount++;
+  check(!/^(Architecture\/Aile|Architecture\/Passerelle|Horizon\/|Mobilier\/Bancs|Mobilier\/Abribus|Place\/Bassin|Interieur\/Auditorium)/.test(o.parent),
+   'Unwanted additional building or external furniture '+o.parent);
  }
- if(boxCount*12<target)throw Error('Too few box triangles for '+profile);
- if(inst.length>65000)throw Error('More than safety cap');
- if(pbr.sets.length!==22||pbr.sets.some(x=>x.resolution>cap))throw Error('PBR texture cap mismatch');
- if(stats.totalInstances!==inst.length||stats.boxes!==boxCount)throw Error('Stats mismatch');
- process.stdout.write(profile+' PASS: '+inst.length+' instances, '+boxCount*12+' box triangles, PBR '+cap+'\n');
+ check(boxCount*12>=target&&inst.length<=65000,'Stress profile out of range');
+ check(stats.totalInstances===inst.length&&stats.boxes===boxCount,'Incorrect geometry stats');
+ check(pbr.sets.length===29&&pbr.sets.every(x=>x.resolution<=cap),
+  'Unexpected PBR cap or missing local textures');
+ const frescoSet=pbr.sets.find(m=>m.id==='tex_cse_energetik_fresco');
+ check(frescoSet&&frescoSet.imageFile==='textures/energetik_fresco_mosaic.jpg',
+  'The genuine mosaic is not used by PBR');
+ const select=prefix=>inst.filter(o=>o.parent.startsWith(prefix));
+ const unique=(prefix)=>{const a=select(prefix);check(a.length>=1,'Missing '+prefix);return a;};
+ const pool=unique('Interieur/Piscine olympique/Fond');
+ check(pool.some(p=>p.size[0]===50&&p.size[2]===25),
+  'Olympic 50 x 25 m basin not dimensionally correct');
+ check(unique('Interieur/Piscine olympique/Eau').some(o=>o.position[2]===-32),
+  'Water should remain in the cut-out');
+ const poolRegion=[-25,25,-44.5,-19.5];
+ // No solid central gallery floors: preserve tall clear water volume.
+ for(const x of select('Interieur/Galeries')){
+  const [px,,pz]=x.position,[w,,d]=x.size;
+  const intersects=px+w/2>poolRegion[0]&&px-w/2<poolRegion[1]&&
+   pz+d/2>poolRegion[2]&&pz-d/2<poolRegion[3];
+  check(!intersects,'Upper floor collides with pool air volume: '+x.id);
+ }
+ check(select('Interieur/Escalier galerie').length>=27,'Gallery stairs missing');
+ check(select('Interieur/Piscine olympique/Lumière linéaire').length>=4,'Linear lamps missing');
+ check(select('Interieur/Piscine olympique/Lignes d’eau').length>120,'Lane dividers missing');
+ const fresco=unique('Interieur/Fresque Energetik authentique en image');
+ check(fresco.length===1&&fresco[0].material==='cse_energetik_fresco'&&
+  fresco[0].size[0]===9.5&&fresco[0].size[1]===4.3,
+  'Wrong physical Energetik mosaic');
+ const seat=select('Place/Banc ovale béton/Assise');
+ check(seat.length===96,'Concrete oval must have 96 uninterrupted sections');
+ for(const x of seat){
+  const dx=(x.position[0]-37)/16.45,dz=(x.position[2]-52)/10.5;
+  check(Math.abs(dx*dx+dz*dz-1)<.01,'Seat is not an oval: '+x.id);
+ }
+ check(select('Place/Butte végétalisée/Fleurs et feuillages').length>200,
+  'Multicolour vegetated mound incomplete');
+ check(select('Place/Monument soviétique fictif').length>=25,
+  'Original monumental civic statue incomplete');
+ const entranceGlass=select('Architecture/Palais/Verriere').filter(o=>
+    o.position[1]<5&&Math.abs(o.position[0])<5);
+ check(entranceGlass.length===0,'Glass blocks the 10-m main doorway');
+ const steps=select('Place/Escalier monumental');
+ const landing=unique('Place/Parvis d’entrée')[0];
+ check(steps.length===4&&
+  steps.some(o=>o.position[2]-o.size[2]/2<=landing.position[2]+landing.size[2]/2+.03),
+  'Monumental steps do not physically meet the entrance terrace');
+ process.stdout.write(profile+' PASS: single palace, pool 50x25, original mosaic, oval bench, '+ 
+    inst.length+' objects, '+boxCount*12+' minimum triangles\n');
 }

@@ -29,6 +29,7 @@ LoadResult loadScene(const QString& manifestPath) {
     LoadResult result;
     const QFileInfo manifestInfo(manifestPath);
     const QString root = QDir::cleanPath(manifestInfo.absolutePath());
+    result.scene.rootPath = root;
     QJsonObject manifest;
     if (!readObject(manifestInfo.absoluteFilePath(), manifest, result.error)) return result;
     if (manifest.value("format").toString() != QStringLiteral("m3d-scene-v16")) {

@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <algorithm>
@@ -87,8 +88,11 @@ void box(Scene& scene,V position,V size,float rotationY,int mat) {
         const auto& v=faces[k];
         V a=world(v[0].x,v[0].y,v[0].z),b=world(v[1].x,v[1].y,v[1].z),
           c=world(v[2].x,v[2].y,v[2].z),d=world(v[3].x,v[3].y,v[3].z);
-        const float us=(k<2?size.x:k<4?size.z:size.x)*.5f;
-        const float vs=(k<4?size.y:size.z)*.5f;
+        // Exact UV coverage for the historic 9.5 x 4.3 m artwork.
+        const bool uniqueArt=mat>=0&&size_t(mat)<scene.mat.size()&&
+          scene.mat[size_t(mat)].name=="cse_energetik_fresco";
+        const float us=uniqueArt?1.f:(k<2?size.x:k<4?size.z:size.x)*.5f;
+        const float vs=uniqueArt?1.f:(k<4?size.y:size.z)*.5f;
         triangle(scene,a,b,c,{0,0,0},{us,0,0},{us,vs,0},mat);
         triangle(scene,a,c,d,{0,0,0},{us,vs,0},{0,vs,0},mat);
     }
@@ -486,6 +490,39 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
     }
     if(!cacheFile.isEmpty())savePbrCache(cacheFile,mat,resolution);
 }
+// Genuine JPEG image albedo for scene-local paintings. Every mip is
+// averaged in linear light (no fabricated mosaic or blurry resize chain).
+bool replaceAlbedoWithImage(Material& mat,const QString& file,QString& error){
+    QImage src(file);
+    if(src.isNull()){error=QStringLiteral("Cannot decode image texture: %1").arg(file);return false;}
+    if(mat.colorMip.empty()){error="Missing PBR mip array for image";return false;}
+    const int size=int(mat.colorMip.front().size);
+    QImage scaled=src.convertToFormat(QImage::Format_RGB32)
+        .scaled(size,size,Qt::IgnoreAspectRatio,Qt::SmoothTransformation)
+        .mirrored(false,true); // V=0 on the bottom edge of the vertical plate.
+    auto& first=mat.colorMip.front();
+    for(int y=0;y<size;y++){
+        const QRgb* row=reinterpret_cast<const QRgb*>(scaled.constScanLine(y));
+        for(int x=0;x<size;x++){
+            const QRgb px=row[x];
+            first.p[size_t(y)*size+x]=
+                (uint32_t(qRed(px))<<16)|(uint32_t(qGreen(px))<<8)|uint32_t(qBlue(px));
+        }
+    }
+    for(size_t level=1;level<mat.colorMip.size();level++){
+        const ColorLevel& previous=mat.colorMip[level-1];
+        ColorLevel& next=mat.colorMip[level];
+        const int d=int(next.size),from=int(previous.size);
+        for(int y=0;y<d;y++)for(int x=0;x<d;x++){
+            V sum{};
+            for(int dy=0;dy<2;dy++)for(int dx=0;dx<2;dx++)
+                sum=sum+srgbToLinear(unpack(previous.p[
+                    size_t(2*y+dy)*from+size_t(2*x+dx)]));
+            next.p[size_t(y)*d+x]=rgb(linearToSrgb(sum*.25f));
+        }
+    }
+    return true;
+}
 bool finite3(V v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
 } // namespace
 
@@ -589,6 +626,25 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
         int size=std::min(maxTextureResolution,requested);
         if(size<64||size>2048||(size&(size-1))){result.error="Invalid mip resolution";return result;}
         generatePbr(material,base,rough,set.value("pattern").toString("plaster"),size);
+        // Restrict optional painting source to the loaded scene's own root.
+        const QString imageRel=set.value("imageFile").toString();
+        if(!imageRel.isEmpty()){
+            const QDir sceneDir(source.rootPath);
+            const QString imagePath=QDir::cleanPath(sceneDir.absoluteFilePath(imageRel));
+            const QString rootCanonical=QFileInfo(source.rootPath).canonicalFilePath();
+            const QString imageCanonical=QFileInfo(imagePath).canonicalFilePath();
+            const QString relative=sceneDir.relativeFilePath(imagePath);
+            if(source.rootPath.isEmpty()||QDir::isAbsolutePath(imageRel)||
+               relative==".."||relative.startsWith("../")||
+               rootCanonical.isEmpty()||imageCanonical.isEmpty()||
+               !(imageCanonical.startsWith(rootCanonical+"/")||
+                 imageCanonical.startsWith(rootCanonical+"\\"))
+               ){
+                result.error="Image texture escapes/missing within scene root: "+imageRel;
+                return result;
+            }
+            if(!replaceAlbedoWithImage(material,imageCanonical,result.error))return result;
+        }
         result.runtime.textureResolution=std::max(result.runtime.textureResolution,size);
         result.runtime.materialIndex.insert(id,int(render.mat.size()));
         render.mat.push_back(std::move(material));

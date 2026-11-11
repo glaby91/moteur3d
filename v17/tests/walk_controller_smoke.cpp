@@ -42,6 +42,11 @@ int main(){
     top(scene,-.65f,.65f,-1.5f,-1.f,.6f);
     wall(scene,2.f,-5.f,5.f,3.f);
     done(scene);
+    // V17.317: aerial 85-m camera must still resolve the real floor.
+    State aerial{};
+    require(spawn(scene,{0.f,85.f,2.f},aerial),"aerial preset failed to reach site");
+    require(aerial.grounded&&std::abs(aerial.feet.y)<.02f,
+            "aerial spawn stayed floating or landed on the wrong height");
     State state{};
     require(spawn(scene,{0.f,1.7f,2.f},state),"no starting floor");
     require(std::abs(eye(state).y-1.7f)<.01f,"incorrect 1.70m eye height");

@@ -706,12 +706,17 @@ public:
             else if(name=="orange"){diffuseBase=.34f;diffuseDay=.43f;diffuseDirect=.26f;}
             else if(carPaint){diffuseBase=.32f;diffuseDay=.42f;diffuseDirect=.32f;}
             else if(raptureSurface){diffuseBase=.42f;diffuseDay=.28f;diffuseDirect=.50f;}
-            if(name=="lamp")strength=.45f+1.05f*lampFactor;
+            if(name=="cse_pool_strip")strength=.38f; // subdued linear luminaire
+            else if(name=="lamp")strength=.45f+1.05f*lampFactor;
             else if(name=="led")strength=1.35f*lampFactor;
             else if(name=="taillight")strength=1.05f*lampFactor;
             else if(name=="neon")strength=1.1f;
             else if(name=="windowlit")strength=.88f;
-            if(name=="lamp"){emissionR=1.f;emissionG=166.f/255.f;emissionB=91.f/255.f;emissionStrength=.75f+1.9f*lampFactor;}
+            if(name=="cse_pool_strip"){
+                emissionR=.83f;emissionG=.91f;emissionB=1.f;
+                emissionStrength=.24f; // do not overexpose concrete
+            }
+            else if(name=="lamp"){emissionR=1.f;emissionG=166.f/255.f;emissionB=91.f/255.f;emissionStrength=.75f+1.9f*lampFactor;}
             else if(name=="led"){emissionR=1.f;emissionG=217.f/255.f;emissionB=165.f/255.f;emissionStrength=.48f+.85f*lampFactor;}
             else if(name=="taillight"){emissionR=1.f;emissionG=28.f/255.f;emissionB=12.f/255.f;emissionStrength=1.25f*lampFactor;}
             if(name=="sea"){spec=.46f;power=25.f;}

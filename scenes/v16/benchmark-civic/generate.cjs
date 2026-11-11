@@ -9,6 +9,27 @@ const root=__dirname;
 const repoRoot=path.resolve(root,'../../..');
 const catalogPath=path.join(repoRoot,'assets/materials/pripyat-v17/catalogue.json');
 const catalog=JSON.parse(fs.readFileSync(catalogPath,'utf8'));
+// Scene-only PBR additions; original Pripyat IDs, materials and files remain
+// completely unchanged. The fresco is the actual legacy JPEG, not a fake mural.
+const specials=[
+ ['cse_flower_red',[.71,.19,.17],.81,'foliage'],
+ ['cse_flower_gold',[.92,.70,.18],.80,'foliage'],
+ ['cse_flower_blue',[.25,.40,.77],.81,'foliage'],
+ ['cse_flower_purple',[.46,.26,.63],.84,'foliage'],
+ ['cse_monument_bronze',[.36,.29,.19],.39,'metal'],
+ ['cse_pool_strip',[.79,.86,.91],.27,'metal'],
+ ['cse_energetik_fresco',[1,1,1],.72,'image']
+];
+const localMaterials=specials.map(([id,baseColor,roughness])=>({
+ id,baseColor,roughness,metallic:id==='cse_monument_bronze'?.72:0,
+ transmission:0,ior:1.5,textureSet:'tex_'+id,
+ origin:'CSE WARP single-palace scene material; original Pripyat library unchanged'
+}));
+const localSets=specials.map(([id,, ,pattern])=>({
+ id:'tex_'+id,material:id,pattern,
+ resolution:id==='cse_energetik_fresco'?2048:512,
+ ...(id==='cse_energetik_fresco'?{imageFile:'textures/energetik_fresco_mosaic.jpg'}:{})
+}));
 const profiles={
   leger: {target:20000, textureCap:512, pave:4.5, trees:18, benches:12, lamps:12, blocks:3, seatCols:16, seatRows:9, detail:3},
   lourd: {target:150000, textureCap:1024, pave:2.2, trees:56, benches:35, lamps:26, blocks:10, seatCols:40, seatRows:25, detail:8},
@@ -20,19 +41,26 @@ const geometry={format:'m3d-geometry-v1',units:'m',meshes:[
  {id:'foliage_canopy',type:'foliage_canopy'}
 ]};
 const cameras={format:'m3d-cameras-v1',cameras:[
- {id:'facade',name:'01 · Vue générale, palais et bassin',position:[93,37,102],target:[0,10,2],fovDegrees:67},
- {id:'escalier',name:'02 · Grand escalier et verrière',position:[18,9,41],target:[0,8,-16],fovDegrees:66},
- {id:'passerelle',name:'03 · Passerelle et aile ouest',position:[-115,14,22],target:[-50,9,-27],fovDegrees:70},
- {id:'bassin',name:'04 · Bassin, sculpture et façade',position:[73,6,70],target:[18,9,-15],fovDegrees:68},
- {id:'hall',name:'05 · Hall intérieur',position:[0,3.7,-14],target:[0,6,-35],fovDegrees:74},
- {id:'vue_haut',name:'06 · Vue aérienne',position:[108,85,106],target:[0,3,-13],fovDegrees:67}
+ {id:'facade',name:'01 · Parvis et entrée principale',position:[0,2.3,34],target:[0,2.3,-6],fovDegrees:67},
+ {id:'escalier',name:'02 · Escalier continu vers le palais',position:[-17,2.2,29],target:[0,2.6,-4],fovDegrees:66},
+ {id:'passerelle',name:'03 · Grand banc ovale et statue',position:[66,2.3,72],target:[37,5.0,52],fovDegrees:67},
+ {id:'bassin',name:'04 · Piscine olympique depuis l’entrée',position:[0,2.4,-10],target:[0,1.0,-34],fovDegrees:73},
+ {id:'hall',name:'05 · Fresque Energetik et piscine',position:[-12,3.0,-35],target:[0,10,-54],fovDegrees:70},
+ {id:'etage',name:'06 · Galerie au-dessus des lignes d’eau',position:[34,6.6,-44],target:[0,2,-32],fovDegrees:71},
+ {id:'vue_haut',name:'07 · Vue aérienne du bâtiment unique',position:[95,68,105],target:[15,5,11],fovDegrees:67}
 ]};
 const lighting={format:'m3d-lighting-v1',hour:14.75,
  sun:{direction:[-.68,.65,-.35],intensity:3.1},ambient:{color:[.63,.73,.91],intensity:.39},
- lights:[{position:[-5,8,-12],radius:20,intensity:1.8,color:[255,218,174]},
-         {position:[8,8,-22],radius:22,intensity:1.2,color:[255,217,180]}]};
+ lights:[
+  {position:[-5,13,-12],radius:19,intensity:1.2,color:[255,218,184]},
+  {position:[8,13,-46],radius:16,intensity:.95,color:[255,226,197]},
+  ...Array.from({length:4},(_,i)=>[-19.5+i*13]).flatMap(x=>[
+   {position:[x,14,-16],radius:10,intensity:.75,color:[231,240,252]},
+   {position:[x,14,-48],radius:10,intensity:.75,color:[231,240,252]}
+  ])
+ ]};
 const environment={format:'m3d-environment-v1',terrain:'finite',units:'m',
- note:'Fictional benchmark architecture, not historically accurate Pripyat. No external image textures are assumed.'};
+ note:'Fictional, explorable single modernist palace with olympic pool, a copied real Energetik mosaic artwork asset, and original Soviet-inspired monument; NOT historical reconstruction.'};
 function round(n){return Math.round(n*1000)/1000;}
 function ensure(p){fs.mkdirSync(path.join(root,p),{recursive:true});}
 function save(p,obj){const full=path.join(root,p);ensure(path.dirname(p));fs.writeFileSync(full,JSON.stringify(obj,null,2)+'\n','utf8');}
@@ -55,72 +83,134 @@ function build(profileName,p){
  const B=(group,mat,x,y,z,w,h,d,rot=0)=>add(group,mat,x,y,z,w,h,d,'unit_box',rot);
  const S=(group,mat,x,y,z,w,h,d)=>add(group,mat,x,y,z,w,h,d,'unit_sphere');
  const F=(group,mat,x,y,z,w,h,d)=>add(group,mat,x,y,z,w,h,d,'foliage_canopy');
- // Ground, roads and grounds of the fictional cultural campus.
- B('Terrain/Sol','prp_soil_leaf_litter',0,-.32,0,260,.55,235);
- B('Terrain/Place','prp_concrete_raw',0,-.04,33,144,.17,117);
+ // Outdoor site; the soil and plaza have a real hole under the indoor pool.
+ // The four soil bands prevent the terrain from covering the swimming basin.
+ const earth=[
+  [-78,0,104,235],[78,0,104,235],
+  [0,49.25,52,136.5],[0,-81.25,52,72.5]
+ ];
+ for(const [x,z,w,d] of earth)B('Terrain/Sol','prp_soil_leaf_litter',x,-.32,z,w,.55,d);
+ B('Terrain/Place','prp_concrete_raw',0,-.04,36.25,144,.17,110.5);
  B('Terrain/Routes','prp_asphalt_old',-93,.015,22,29,.14,210);
  B('Terrain/Routes','prp_asphalt_old',0,.015,105,250,.14,23);
  B('Terrain/Trottoirs','prp_concrete_panel',-73,.09,24,7,.18,195);
  B('Terrain/Trottoirs','prp_concrete_panel',0,.1,93,210,.18,5);
- // Three major building blocks: main palace 100 x 46, left wing and loading wing.
- for(const [name,x,z,w,d,height] of [
-   ['Palais',0,-30,101,50,19],
-   ['Aile ouest',-71,-32,39,36,12],
-   ['Aile est',75,-33,40,38,10]]) {
-   const g='Architecture/'+name;
-   B(g+'/Fondations','prp_concrete_raw',x,.27,z,w,.55,d);
-   const floors=Math.floor(height/4.5);
-   for(let f=1;f<=floors;f++)
-     B(g+'/Planchers','prp_concrete_raw',x,f*4.5,z,w,.3,d);
-   B(g+'/Toiture','prp_roof_bitumen',x,height+.55,z,w+1.7,.55,d+1.8);
-   B(g+'/Toiture','prp_roof_metal',x,height+.94,z+d/2,w+1.6,.27,.45);
-   B(g+'/Toiture','prp_roof_metal',x,height+.94,z-d/2,w+1.6,.27,.45);
-   B(g+'/Volume','prp_concrete_panel',x,2.4,z-d/2+.35,w,4.5,.65);
-   B(g+'/Volume','prp_concrete_panel',x-w/2+.35,height/2,z,.65,height,d);
-   B(g+'/Volume','prp_concrete_panel',x+w/2-.35,height/2,z,.65,height,d);
+ // A SINGLE public building (101 m × 50 m); all side wings, sky-blocks,
+ // connecting bridge and bus shelters are intentionally absent.
+ const shell='Architecture/Palais';
+ const zFront=-5,zBack=-55;
+ // Perimeter deck, deliberately leaving a 50 x 25 m opening in the floor.
+ for(const [x,z,w,d] of [
+  [-37.75,-30,25.5,50],[37.75,-30,25.5,50],
+  [0,-12.25,50,14.5],[0,-49.75,50,10.5]
+ ])B(shell+'/Fondations','prp_concrete_raw',x,.27,z,w,.55,d);
+ B(shell+'/Volume','prp_concrete_panel',0,9.5,-54.66,101,19,.68);
+ for(const side of [-1,1])
+  B(shell+'/Volume','prp_concrete_panel',side*50.15,9.5,-30,.70,19,50);
+ // Long galleries leave the entire natatorium volume open to the roof.
+ for(const y of [4.5,9,13.5]){
+  for(const side of [-1,1])
+   B('Interieur/Galeries','prp_concrete_raw',side*39.5,y,-30,22,.30,49);
+  B('Interieur/Galeries','prp_concrete_raw',0,y,-50.15,57,.30,9.7);
+  // Clear front/entrance sightline; mezzanine turns around the water.
+  B('Interieur/Galeries','prp_concrete_raw',0,y,-9.45,57,.30,8.5);
  }
- // Main glass atrium, colonnade and real structural cross-beams.
+ // Perimeter roof + continuous glazed clerestory over the 50-m pool.
+ for(const side of [-1,1])
+  B(shell+'/Toiture','prp_roof_bitumen',side*40.2,19.55,-30,21.4,.55,51);
+ for(const z of [-51,-9])
+  B(shell+'/Toiture','prp_roof_bitumen',0,19.55,z,60,.55,9);
+ B(shell+'/Verriere haute','prp_window_glass',0,19.55,-30,60,.12,34);
+ for(let x=-28;x<=28;x+=4)
+  B(shell+'/Verriere haute/Chassis','prp_window_frame',x,19.70,-30,.12,.25,34.5);
+ for(const z of [-46,-30,-14])
+  B(shell+'/Verriere haute/Chassis','prp_window_frame',0,19.70,z,60,.25,.12);
+ // Colonnade and external glazed entry: continuous 10-m doorway into hall.
  for(let i=0;i<17;i++){
-   const x=-48+i*6;
-   B('Architecture/Palais/Colonnade','prp_concrete_raw',x,9.5,-4.4,.72,19,.9);
-   B('Architecture/Palais/Poutres','prp_concrete_raw',x,15,-8.5,.55,.72,9);
+  const x=-48+i*6;
+  if(Math.abs(x)<4.5)continue; // never place a concrete pillar in the doorway
+  B('Architecture/Palais/Colonnade','prp_concrete_raw',x,9.5,-4.4,.72,19,.9);
+  B('Architecture/Palais/Poutres','prp_concrete_raw',x,15,-8.5,.55,.72,9);
  }
  for(let level=0;level<4;level++){
-   const y=2.6+level*4.15;
-   B('Architecture/Palais/Poutres','prp_concrete_raw',0,level*4.15+4.35,-4.6,96,.4,.74);
-   for(let k=0;k<27;k++){
-     const x=-44+k*3.35;
-     if(Math.abs(x)>22&&k%4===0)continue;
-     B('Architecture/Palais/Verriere','prp_window_glass',x,y,-4.03,3.04,3.65,.085);
-     B('Architecture/Palais/Chassis','prp_window_frame',x,y,-3.98,.10,3.8,.14);
-     B('Architecture/Palais/Chassis','prp_window_frame',x,level*4.15+4.42,-3.95,3.4,.12,.15);
-   }
+  const y=2.6+level*4.15;
+  B('Architecture/Palais/Poutres','prp_concrete_raw',0,level*4.15+4.35,-4.6,96,.4,.74);
+  for(let k=0;k<27;k++){
+   const x=-44+k*3.35;
+   if(level===0&&Math.abs(x)<7.0)continue; // actual open entrance
+   if(Math.abs(x)>22&&k%4===0)continue;
+   B('Architecture/Palais/Verriere','prp_window_glass',x,y,-4.03,3.04,3.65,.085);
+   B('Architecture/Palais/Chassis','prp_window_frame',x,y,-3.98,.10,3.8,.14);
+   B('Architecture/Palais/Chassis','prp_window_frame',x,level*4.15+4.42,-3.95,3.4,.12,.15);
+  }
  }
- // Massive stairs, balustrades, terraces, planters.
- for(let i=0;i<18;i++){
-   B('Place/Escalier monumental','prp_terrazzo_floor',0,.13+i*.095,22-i*.73,70,.2,1.03);
+ // Main steps extend fully to the building's front door, replacing the
+ // old stair flight which stopped fourteen metres short of the façade.
+ B('Place/Parvis d’entrée','prp_terrazzo_floor',0,.28,5.75,68,.55,22.5);
+ for(let i=0;i<4;i++){
+  const top=.17+i*.127;
+  B('Place/Escalier monumental','prp_terrazzo_floor',0,top-.077,
+   21.5-i*1.30,61,.155,1.38);
  }
- for(let side of [-1,1]){
-   B('Place/Retenues','prp_concrete_raw',side*41,1.3,13,3.1,2.6,30);
-   for(let n=0;n<21;n++){
-     B('Place/Garde corps','prp_steel_rusted',side*39,2.9,1+n*1.1,.09,1.15,.09);
-     B('Place/Garde corps','prp_steel_painted',side*39,3.4,1+n*1.1,.14,.08,1.15);
-   }
+ for(const side of [-1,1]){
+  B('Place/Retenues','prp_concrete_raw',side*35.2,.48,9,1.1,.95,27);
+  for(let n=0;n<18;n++){
+   B('Place/Garde corps','prp_steel_painted',side*33.5,1.33,-2+n*1.2,.09,.95,.09);
+  }
  }
- // Left enclosed walkway with accessible road beneath.
- for(let i=0;i<18;i++){
-   const x=-108+i*3;
-   B('Architecture/Passerelle','prp_concrete_panel',x,7.2,-20,3.05,.34,6);
-   B('Architecture/Passerelle','prp_concrete_panel',x,11.3,-20,3.05,.3,6);
-   B('Architecture/Passerelle/Vitres','prp_window_glass',x,9.1,-16.92,2.7,3.8,.1);
-   B('Architecture/Passerelle/Chassis','prp_window_frame',x,9.1,-16.85,.10,3.8,.15);
+ // 50 × 25 m olympic swimming pool, 10 visible lanes and tiled margins.
+ const pool='Interieur/Piscine olympique';
+ B(pool+'/Fond','prp_tile_ceramic',0,-1.48,-32,50,.22,25);
+ for(const x of [-25.12,25.12])
+  B(pool+'/Parois','prp_tile_ceramic',x,-.45,-32,.26,2.1,25.2);
+ for(const z of [-44.62,-19.38])
+  B(pool+'/Parois','prp_tile_ceramic',0,-.45,z,50.5,2.1,.26);
+ B(pool+'/Eau','prp_puddle_water',0,.18,-32,49.7,.045,24.7);
+ // Underwater lane markers and floating colored lane dividers.
+ for(let lane=0;lane<10;lane++){
+  const z=-43.25+lane*2.5;
+  B(pool+'/Marquage fond','prp_steel_painted',0,-1.346,z,47.8,.02,.075);
+  if(lane<9){
+   const line=z+1.25;
+   for(let j=0;j<19;j++)
+    S(pool+'/Lignes d’eau',j%5===0?'cse_flower_gold':'cse_flower_blue',
+      -23.6+j*2.62,.245,line,.18,.07,.18);
+  }
+  B(pool+'/Plots','prp_tile_ceramic',-26.7,.83,z,1.2,.5,.85);
+  B(pool+'/Plots','prp_tile_ceramic',26.7,.83,z,1.2,.5,.85);
  }
- // Great mural composed of deliberately distinct painted and concrete plates.
- for(let row=0;row<14;row++)for(let col=0;col<12;col++){
-   const warm=(row+col*3)%9<3;
-   B('Architecture/Palais/Fresque originale fictive',
-     warm?'prp_sign_paint':'prp_plaster_pale',32+col*1.24,8+row*.64,-3.9,1.22,.62,.07);
+ // Robust deck guardrails; the player cannot simply walk into the water.
+ for(const z of [-45.6,-18.4])for(let x=-24;x<=24;x+=3){
+  B(pool+'/Garde-corps','prp_steel_painted',x,1.15,z,.07,1.2,.07);
+  B(pool+'/Garde-corps','prp_steel_painted',x,1.70,z,3,.08,.1);
  }
+ // Luminaire rails run the FULL length of the water, not sporadic lamps.
+ for(const z of [-15.8,-48.2]){
+  B(pool+'/Lumière linéaire','cse_pool_strip',0,16.70,z,53,.14,.32);
+  B(pool+'/Lumière linéaire','prp_window_frame',0,16.88,z,53,.24,.07);
+  for(let x=-26;x<=26;x+=4)
+   B(pool+'/Lumière linéaire','prp_window_glass',x,16.61,z,3.85,.06,.20);
+ }
+ // Open lobby at ground level with a clear line of sight into the pool.
+ B('Interieur/Hall/Accueil','prp_wood_weathered',-19,1.05,-10,6,1.1,1.2);
+ for(const side of [-1,1])
+  B('Interieur/Hall/Panneaux','prp_concrete_panel',side*11,2.8,-11,.25,4.1,5);
+ // A walkable 27-tread staircase at the pool's east deck to the gallery.
+ for(let i=0;i<27;i++){
+  const top=.70+i*(3.95/26);
+  const z=-16.4-i*1.05;
+  B('Interieur/Escalier galerie','prp_terrazzo_floor',37,top-.09,z,4.4,.18,1.1);
+  for(const side of [-1,1])
+   B('Interieur/Escalier galerie/Contremarches',
+    'prp_concrete_raw',37+side*2.12,(.55+top)*.5,z,.14,top-.55,.98);
+ }
+ // Existing authentic 2048x930 Energetik mosaic, mapped 1:1 onto 9.5x4.3 m.
+ B('Interieur/Fresque Energetik authentique en image',
+   'cse_energetik_fresco',0,10.35,-54.21,9.5,4.3,.09);
+ for(const x of [-5.0,5.0])
+  B('Interieur/Fresque/Cadre','prp_steel_rusted',x,10.35,-54.05,.18,4.6,.18);
+ for(const y of [8.05,12.65])
+  B('Interieur/Fresque/Cadre','prp_steel_rusted',0,y,-54.05,10.1,.16,.18);
  // A long line of worn granite slabs; scene fills in from broad to small units.
  const step=p.pave;
  for(let x=-68;x<=67;x+=step)for(let z=26;z<=90;z+=step){
@@ -129,18 +219,60 @@ function build(profileName,p){
    if(rand()<.035)continue; // missing/repaired tiles
    B('Place/Dalles','prp_terrazzo_floor',x,.118,z,step*.91,.075,step*.91);
  }
- // Reflecting pool: sides, low sill, water as a distinct transmissive surface.
- B('Place/Bassin','prp_concrete_raw',37,.14,52,33,.28,22);
- B('Place/Bassin','prp_puddle_water',37,.32,52,30,.03,19);
- for(let z of [41,63])B('Place/Bassin/Bordure','prp_terrazzo_floor',37,.47,z,34,.65,.85);
- for(let x of [20,54])B('Place/Bassin/Bordure','prp_terrazzo_floor',x,.47,52,.85,.65,22);
- // A wholly original modernist abstract fountain sculpture.
- for(let k=0;k<26;k++){
-   const a=2*Math.PI*k/26;
-   B('Place/Monument abstrait','prp_steel_rusted',37+6*Math.cos(a),3.4+2*Math.sin(a),52,
-     .37,.38,.35,a);
+ // Oval concrete bench and raised planted mound REPLACE the old outdoor
+ // reflecting basin, sculpture and all freestanding exterior benches.
+ const cx=37,cz=52,rx=16.45,rz=10.5,segments=96;
+ for(let i=0;i<segments;i++){
+  const a=2*Math.PI*(i+.5)/segments;
+  const dx=-rx*Math.sin(a),dz=rz*Math.cos(a);
+  const tangent=Math.atan2(-dz,dx)*180/Math.PI;
+  const chord=Math.hypot(dx,dz)*2*Math.PI/segments;
+  const x=cx+rx*Math.cos(a),z=cz+rz*Math.sin(a);
+  B('Place/Banc ovale béton/Assise','prp_concrete_panel',x,.48,z,chord+0.10,.16,.76,tangent);
+  if(i%2===0)
+   B('Place/Banc ovale béton/Piétement','prp_concrete_raw',x,.235,z,
+     chord+.10,.35,.42,tangent);
  }
- B('Place/Monument abstrait','prp_concrete_raw',37,.7,52,5,1.1,4);
+ // Low earth dome: supports dense plants but does not occlude the seat.
+ S('Place/Butte végétalisée','prp_soil_leaf_litter',cx,.32,cz,29,2.35,17.2);
+ const flowers=['cse_flower_red','cse_flower_gold','cse_flower_blue','cse_flower_purple','prp_foliage'];
+ for(let i=0;i<250;i++){
+  const a=i*2.399963229728653;
+  const radius=Math.sqrt((i+.5)/250)*.93;
+  const u=radius*Math.cos(a),v=radius*Math.sin(a);
+  const x=cx+u*14.45,z=cz+v*8.50;
+  const height=.32+1.175*Math.sqrt(Math.max(0,1-u*u-v*v));
+  // Clear the 2.5 m central statue plinth.
+  if(Math.abs(x-cx)<2.7&&Math.abs(z-cz)<2.7)continue;
+  const flower=flowers[(i*7+Math.floor(i/7))%flowers.length];
+  const r=.56+.42*rand();
+  F('Place/Butte végétalisée/Fleurs et feuillages',flower,
+    x,height+r*.24,z,r,.65+.4*rand(),r);
+ }
+ // Original Soviet-era monumental composition: civic allegory of Progress,
+ // NOT a copy of an identified statue or historical Pripyat installation.
+ const monument='Place/Monument soviétique fictif';
+ B(monument+'/Socle','prp_concrete_raw',cx,1.54,cz,5.0,1.15,4.7);
+ B(monument+'/Socle','prp_terrazzo_floor',cx,2.20,cz,3.55,.18,3.2);
+ B(monument+'/Statue','cse_monument_bronze',cx,3.55,cz,1.35,2.15,.82);
+ B(monument+'/Statue','cse_monument_bronze',cx-.38,2.59,cz,.46,1.18,.58);
+ B(monument+'/Statue','cse_monument_bronze',cx+.40,2.59,cz,.48,1.18,.58);
+ S(monument+'/Statue','cse_monument_bronze',cx,5.02,cz,.85,1.05,.82);
+ // Raised angular arm pointing to the sky; stepped spheres give a readable
+ // silhouette without a fake invisible stress mesh.
+ for(let i=0;i<10;i++){
+  const t=i/9;
+  S(monument+'/Bras levé','cse_monument_bronze',
+    cx+.48+t*.9,4.38+t*2.42,cz,.34,.45,.39);
+ }
+ B(monument+'/Flambeau','prp_steel_rusted',cx+1.38,7.02,cz,.31,.62,.30);
+ S(monument+'/Flamme bronze','cse_flower_gold',cx+1.38,7.65,cz,.58,1.10,.48);
+ // Original radial sun rays, geometric reference to 1970s civic sculpture.
+ for(let j=0;j<7;j++){
+  const a=(j-3)*.26;
+  B(monument+'/Rayons','cse_monument_bronze',cx+.02+1.3*Math.sin(a),
+    5.68+1.15*Math.cos(a),cz-.44,.12,1.55,.13,a*180/Math.PI);
+ }
  // Roof equipment, railings and service frames.
  for(let x=-46;x<=46;x+=3.2)for(let z=-52;z<=-9;z+=6.4){
    B('Architecture/Palais/Toiture techniques','prp_roof_metal',x,19.9,z,1,.6,2.4);
@@ -149,34 +281,11 @@ function build(profileName,p){
    const x=-43+i*1.1;
    B('Architecture/Palais/Enseigne fictive','prp_steel_rusted',x,20.8,-3.4,.13,2.0,.16);
  }
- // Benches and lampposts, deliberately modeled from several material instances.
- function bench(x,z,rot){
-   B('Mobilier/Bancs','prp_steel_rusted',x, .43,z,2.05,.12,.6,rot);
-   B('Mobilier/Bancs','prp_wood_weathered',x,.57,z,1.9,.18,.52,rot);
-   B('Mobilier/Bancs','prp_wood_weathered',x,.96,z-.31,1.9,.8,.1,rot);
-   for(let side of [-.78,.78]){
-     B('Mobilier/Bancs','prp_steel_painted',x+side,.27,z,.09,.54,.68,rot);
-     B('Mobilier/Bancs','prp_steel_painted',x+side,1.0,z-.32,.09,.9,.1,rot);
-   }
- }
- for(let i=0;i<p.benches;i++){
-   const col=i%4,row=Math.floor(i/4);
-   bench(-62+col*39,31+row*5,(i%3)*.08);
- }
- for(let i=0;i<p.lamps;i++){
-   const x=-65+(i%2)*130,z=13+Math.floor(i/2)*6;
-   B('Mobilier/Lampadaires','prp_steel_painted',x,3.8,z,.24,7.6,.24);
-   S('Mobilier/Lampadaires','prp_window_glass',x,7.68,z,.82,.82,.82);
- }
- // Bus stop and loading shelters.
- B('Mobilier/Abribus','prp_steel_rusted',-101,3.3,46,8.6,.3,3.8);
- for(let k=0;k<4;k++){
-   B('Mobilier/Abribus','prp_steel_painted',-104+k*2,1.7,44.3,.11,3.2,.11);
-   B('Mobilier/Abribus','prp_window_glass',-103+k*2,1.75,44.3,1.85,2.8,.07);
- }
- for(let i=0;i<12;i++){
-   B('Mobilier/Barrières','prp_concrete_raw',-84+i*1.4,.52,91,1.2,.9,.45);
-   B('Mobilier/Barrières','prp_sign_paint',-84+i*1.4,.67,91.3,.75,.18,.07);
+ // Exterior benches removed: the single oval planter seat is the only one.
+ for(let i=0;i<Math.min(p.lamps,18);i++){
+  const x=-65+(i%2)*130,z=24+Math.floor(i/2)*8;
+  B('Mobilier/Lampadaires','prp_steel_painted',x,3.8,z,.24,7.6,.24);
+  S('Mobilier/Lampadaires','prp_window_glass',x,7.68,z,.82,.82,.82);
  }
  // Street trees and green pockets with repeated but distinct crown geometry.
  for(let i=0;i<p.trees;i++){
@@ -190,28 +299,9 @@ function build(profileName,p){
      F('Nature/Arbres','prp_foliage',x+.9,h*.72,z+.8,3.5,3.1,3);
    }
  }
- // Original indoor public auditorium with actual repetitive furniture modules.
- for(let row=0;row<p.seatRows;row++)for(let col=0;col<p.seatCols;col++){
-   const x=-23+col*.72,z=-47+row*.75;
-   const y=1.10+row*.028;
-   B('Interieur/Auditorium/Fauteuils','prp_steel_painted',x,y,z,.065,.6,.58);
-   B('Interieur/Auditorium/Fauteuils','prp_wood_weathered',x,y+.22,z,.59,.11,.53);
-   B('Interieur/Auditorium/Fauteuils','prp_wood_weathered',x,y+.48,z-.22,.59,.6,.13);
-   B('Interieur/Auditorium/Fauteuils','prp_steel_rusted',x+.3,y+.16,z,.05,.45,.58);
-   if(p.detail>4)
-     B('Interieur/Auditorium/Fauteuils','prp_steel_rusted',x-.3,y+.16,z,.05,.45,.58);
- }
- // Residential distant blocks: repeated real façade modules, not hidden dummy cubes.
- for(let i=0;i<p.blocks;i++){
-   const x=-112+(i%7)*31,z=-105-Math.floor(i/7)*26;
-   B('Horizon/Logements','prp_concrete_panel',x,13,z,20,26,12);
-   B('Horizon/Logements','prp_roof_bitumen',x,26.3,z,21,.35,13);
-   for(let floor=0;floor<7;floor++)for(let bay=0;bay<6;bay++){
-     const bx=x-8.5+bay*3.2,by=2.8+floor*3.5;
-     B('Horizon/Logements/Baies','prp_window_glass',bx,by,z+6.06,2.1,2.4,.08);
-     B('Horizon/Logements/Baies','prp_window_frame',bx,by+1.22,z+6.1,2.3,.09,.12);
-   }
- }
+ // The former auditorium seating was removed for the olympic pool.
+ // The three upper galleries, staircase and the pool lanes are all physical
+ // geometry; no hidden decorative dummy models are generated.
  // Technical rooftop ribs, visible from camera 06.
  for(let x=-45;x<=45;x+=100/p.detail)for(let z=-49;z<=-15;z+=120/p.detail){
    B('Architecture/Palais/Toiture techniques','prp_steel_painted',x,20.1,z,.07,.18,1.6);
@@ -227,6 +317,10 @@ function build(profileName,p){
    if(face===0){x=-47+col*.34;y=.75+(row%118)*.155;z=-55.04;}
    else if(face===1){x=-47+col*.34;y=.75+(row%118)*.155;z=-4.95;}
    else{x=-50.55;y=.75+(row%118)*.155;z=-54+col*.18;w=.055;d=.165;}
+   // Avoid bricking up entrance; raised galleries stay separate from façade.
+   if(face===1&&Math.abs(x)<7.5&&y<4.15){
+     col++;if(col>=275){col=0;row++;}continue;
+   }
    B('Architecture/Revêtements/Clinker haute densité',
      ((row+col)%17<3?'prp_concrete_raw':'prp_brick_red'),x,y,z,w,h,d);
    col++;
@@ -264,17 +358,19 @@ save('cameras/views.json',cameras);
 save('lighting/day.json',lighting);
 save('environment/site.json',environment);
 save('materials/pripyat-reuse.json',{format:'m3d-materials-v1',
- origin:'assets/materials/pripyat-v17/catalogue.json',materials:catalog.materials});
+ origin:'assets/materials/pripyat-v17/catalogue.json',
+ originalsRetained:catalog.materials.length,materials:[...catalog.materials,...localMaterials]});
 for(const name of selected){
  const p=profiles[name];
- const sets=catalog.sets.map(v=>Object.assign({},v,{resolution:Math.min(p.textureCap,v.resolution)}));
+ const sets=[...catalog.sets,...localSets].map(v=>Object.assign({},v,{
+  resolution:Math.min(p.textureCap,v.resolution)}));
  save('pbr/pripyat-reuse-'+name+'.json',{format:'m3d-pbr-v1',library:'Pripyat-V17',mipmaps:'auto',
    textureResolutionTarget:p.textureCap,channels:['albedo','normal','roughness'],
-   note:'Procedural V17 fallback; not an exact texture extraction of legacy V14 binary PBR maps.',
+   note:'22 legacy PBR recipes unchanged; scene-only plants and statue. Mosaic uses authentic 2048x930 JPG copied from the original Energetik asset.',
    sets});
  const built=build(name,p);
  save('instances/'+name+'.json',{format:'m3d-instances-v1',
-   notes:'Original fictional complex. Generated, deterministic; do not hand-edit this file.',
+   notes:'Single-palace olympic pool, open entry, oval planting with original Soviet-style statue and real Energetik mosaic. Generated deterministically.',
    instances:built.objects});
  const sceneName=name==='leger'?'scene.json':'scene-'+name+'.json';
  save(sceneName,manifest(name));
@@ -284,7 +380,7 @@ for(const name of selected){
    boxes:built.boxInstances,spheres:built.sphereInstances,
    foliageCanopies:built.canopyInstances,totalInstances:built.objects.length,
    maxPbrResolution:p.textureCap,
-   safetyNote:'Triangles are a box-derived lower bound; canopy and spheres add extra geometry. Extreme is manual/opt-in.'
+   safetyNote:'Triangles are a box-derived lower bound. Intact original Pripyat library and mosaic image; no secondary buildings. Extreme remains manual/opt-in.'
  });
  console.log(name+' — '+built.objects.length+' instances, >= '+
              built.estimatedMinTriangles+' box triangles, PBR <= '+p.textureCap);
