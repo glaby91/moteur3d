@@ -235,6 +235,45 @@ int main(int argc,char** argv){
         qInfo()<<"V17 GPU readback depth"<<depth
                <<"identical to synchronous pixels across"<<frames<<"frames";
     }
+    // V17.308 hybrid-lighting regression. Legacy mode must remain exactly
+    // reproducible; experimental light probes and filmic HDR must be
+    // deterministic, visibly distinct, and respond to time-of-day changes.
+    const bool originalHybrid=m3d::rasterHybridLightingEnabled();
+    if(originalHybrid){qCritical()<<"Hybrid must default OFF for legacy benchmarks";return 1;}
+    m3d::setRasterHybridLightingEnabled(true);
+    std::vector<uint32_t> hybridA,hybridB,morning,evening;
+    m3d::Stats hs;
+    error.clear();
+    const bool hybridOk=m3d::renderDirectX11Preview(
+        built.runtime.renderScene,shadow,cam,w,h,hybridA,hs,error)&&
+        m3d::renderDirectX11Preview(
+        built.runtime.renderScene,shadow,cam,w,h,hybridB,hs,error);
+    if(!hybridOk||hybridA!=hybridB||hybridA==second){
+        qCritical()<<"Hybrid lighting not deterministic or no visible effect"
+                   <<QString::fromStdWString(error);return 1;
+    }
+    m3d::updateLighting(9.f);
+    m3d::Stats morningShadowStats;
+    const auto morningShadow=m3d::buildShadow(built.runtime.renderScene,morningShadowStats);
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,morningShadow,
+                                    cam,w,h,morning,hs,error)){
+        qCritical()<<"Hybrid morning render failed";return 1;
+    }
+    m3d::updateLighting(17.5f);
+    m3d::Stats eveningShadowStats;
+    const auto eveningShadow=m3d::buildShadow(built.runtime.renderScene,eveningShadowStats);
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,eveningShadow,
+                                    cam,w,h,evening,hs,error)||morning==evening){
+        qCritical()<<"Hybrid illumination did not respond to solar hour";return 1;
+    }
+    m3d::setRasterHybridLightingEnabled(false);
+    m3d::updateLighting(built.runtime.daylightHour);
+    std::vector<uint32_t> oldAfterHybrid;
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,
+                                     cam,w,h,oldAfterHybrid,hs,error)||oldAfterHybrid!=second){
+        qCritical()<<"Legacy raster pixels changed after hybrid mode";return 1;
+    }
+    qInfo()<<"Hybrid GI probes deterministic, hour-varying and fully reversible";
     QImage png(w,h,QImage::Format_ARGB32);
     for(int y=0;y<h;++y)
         std::memcpy(png.scanLine(y),second.data()+size_t(y)*w,size_t(w)*4);
