@@ -12,6 +12,8 @@
 #include <cstdlib>
 #include <cstdio>
 #include <set>
+#include <algorithm>
+#include <utility>
 #include <vector>
 static void logToStderr(QtMsgType,const QMessageLogContext&,const QString& message){
     const QByteArray utf8=message.toUtf8();
@@ -384,6 +386,73 @@ int main(int argc,char** argv){
     if(!savePixels(bakedA,preview+QStringLiteral(".baked-gi.png"))){
         qCritical()<<"Baked GI PNG output missing";return 1;
     }
+    // V17.316 — independent linear-light color-energy balance.
+    // Run A/B on the exact same scene, camera, lighting, textures and WARP.
+    m3d::setRasterColorEnergyBalanceEnabled(true);
+    m3d::setRasterColorExposure(1.f);
+    m3d::Stats colorStats{};
+    std::vector<uint32_t> balancedA,balancedB,lowExposure,highExposure;
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,cam,w,h,
+                                    balancedA,colorStats,error)||
+       !m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,cam,w,h,
+                                    balancedB,colorStats,error)||
+       balancedA!=balancedB||balancedA==second){
+        qCritical()<<"Balanced color lighting not deterministic or no effect";return 1;
+    }
+    if(meanLuma(balancedA)>meanLuma(second)*1.12){
+        qCritical()<<"Balanced lighting raises the global light budget excessively";return 1;
+    }
+    m3d::setRasterColorExposure(.85f);
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,cam,w,h,
+                                    lowExposure,colorStats,error)){
+        qCritical()<<"Color exposure lower bound failed";return 1;
+    }
+    m3d::setRasterColorExposure(1.15f);
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,cam,w,h,
+                                    highExposure,colorStats,error)||
+       meanLuma(lowExposure)>=meanLuma(balancedA)||
+       meanLuma(balancedA)>=meanLuma(highExposure)){
+        qCritical()<<"Exposure is not correctly monotonic";return 1;
+    }
+    // Preserve material colorfulness by comparing screen-space chroma;
+    // no synthetic post-saturation adjustment is used.
+    auto chroma=[](const std::vector<uint32_t>& pixels)->double{
+        double sum=0;
+        for(uint32_t c:pixels){
+            const unsigned r=(c>>16)&255u,g=(c>>8)&255u,b=c&255u;
+            const unsigned mx=std::max({r,g,b}),mn=std::min({r,g,b});
+            sum+=double(mx-mn)/double(std::max(1u,mx));
+        }
+        return sum/double(pixels.size());
+    };
+    if(!savePixels(balancedA,preview+QStringLiteral(".balanced.png"))||
+       !savePixels(lowExposure,preview+QStringLiteral(".balanced-085.png"))||
+       !savePixels(highExposure,preview+QStringLiteral(".balanced-115.png"))){
+        qCritical()<<"Colorimetry A/B screenshots missing";return 1;
+    }
+    // Real WARP statistics for a reusable A/B comparison.
+    std::FILE* metric=std::fopen((preview+QStringLiteral(".color-metrics.csv")).toLocal8Bit().constData(),"wb");
+    if(!metric){qCritical()<<"Cannot write color benchmark CSV";return 1;}
+    std::fprintf(metric,"mode,mean_rgb_255,mean_normalized_chroma\n");
+    for(const auto& row:std::vector<std::pair<const char*,const std::vector<uint32_t>*>>{
+        {"legacy",&second},{"balanced",&balancedA},{"exposure_085",&lowExposure},
+        {"exposure_115",&highExposure}}){
+        std::fprintf(metric,"%s,%.5f,%.6f\n",row.first,
+                     meanLuma(*row.second),chroma(*row.second));
+    }
+    std::fclose(metric);
+    m3d::setRasterColorEnergyBalanceEnabled(false);
+    m3d::setRasterColorExposure(1.f);
+    std::vector<uint32_t> oldAfterColor;
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,cam,w,h,
+                                    oldAfterColor,colorStats,error)||
+       oldAfterColor!=second){
+        qCritical()<<"Disabling color-energy balance does not restore exact legacy pixels";
+        return 1;
+    }
+    qInfo()<<"V17.316 balanced colors verified: legacy luma"<<meanLuma(second)
+           <<"balanced luma"<<meanLuma(balancedA)
+           <<"legacy chroma"<<chroma(second)<<"balanced chroma"<<chroma(balancedA);
     qInfo()<<"V17.312 table-driven real GI verified: cache, hours and parity";
     qInfo()<<"V17 DX11 raster WARP OK, cached"<<warmStats.ms
            <<"ms; size"<<w<<"x"<<h;
