@@ -69,7 +69,7 @@ struct Scene { bool underwaterEnvironment=false; bool finiteGround=false; bool u
 };
 struct ShadowMap { int size=1024; float span=30,dist=42; V base={0,1.5f,0},right,up;std::vector<float>d,min,max; };
 extern V sun,skyZenith,skyHorizon,sunTint;
-extern float daylight,lampFactor;
+extern float daylight,lampFactor,solarHour;
 extern std::vector<Light> pointLights;
 void updateLighting(float hour);
 bool loadScene(const std::filesystem::path& path,Scene& s,std::wstring& error);
@@ -111,6 +111,10 @@ struct RasterQualitySettings {
 };
 RasterQualitySettings rasterQualityProfile(RasterQualityProfile preset);
 RasterQualitySettings rasterQualitySettings();
+// Experimental geometry-aware probe illumination. Default OFF for legacy pixel parity.
+// GUI may opt in independently; the renderer snapshots this at frame boundaries.
+bool rasterHybridLightingEnabled();
+void setRasterHybridLightingEnabled(bool enabled);
 bool setRasterQualitySettings(const RasterQualitySettings& settings,std::wstring& error);
 
 // Experimental pipelined D3D11 readback. Enqueue issues an ordered frame render
