@@ -246,8 +246,15 @@ function build(profileName,p){
   if(Math.abs(x-cx)<2.7&&Math.abs(z-cz)<2.7)continue;
   const flower=flowers[(i*7+Math.floor(i/7))%flowers.length];
   const r=.56+.42*rand();
-  F('Place/Butte végétalisée/Fleurs et feuillages',flower,
-    x,height+r*.24,z,r,.65+.4*rand(),r);
+  // Most flower heads use modest 12x8-patch sphere meshes; only every
+  // seventh cluster uses an organic foliage canopy. This keeps the actual
+  // lightweight scene from becoming a 600k-triangle garden benchmark.
+  if(i%7===0)
+   F('Place/Butte végétalisée/Fleurs et feuillages',flower,
+     x,height+r*.24,z,r,.65+.4*rand(),r);
+  else
+   S('Place/Butte végétalisée/Fleurs et feuillages',flower,
+     x,height+r*.18,z,r,.50+.3*rand(),r);
  }
  // Original Soviet-era monumental composition: civic allegory of Progress,
  // NOT a copy of an identified statue or historical Pripyat installation.
@@ -287,6 +294,11 @@ function build(profileName,p){
   B('Mobilier/Lampadaires','prp_steel_painted',x,3.8,z,.24,7.6,.24);
   S('Mobilier/Lampadaires','prp_window_glass',x,7.68,z,.82,.82,.82);
  }
+ // Four modest planted groups frame the entrance. They are inside the
+ // default camera frustum for the actual WARP foliage-instancing checks
+ // but outside the 10-m central access corridor.
+ for(const x of [-16,-11,11,16])
+  F('Place/Jardins devant entrée','prp_foliage',x,1.15,-1.5,2.1,2.35,2.1);
  // Street trees and green pockets with repeated but distinct crown geometry.
  for(let i=0;i<p.trees;i++){
    const col=i%2,row=Math.floor(i/2);
