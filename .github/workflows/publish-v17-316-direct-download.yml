@@ -1,0 +1,54 @@
+name: Publier ZIP direct Windows V17.316
+
+on:
+  push:
+    branches:
+      - distribution/v17-316-direct-zip-261111
+    paths:
+      - '.github/workflows/publish-v17-316-direct-download.yml'
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    name: Publication ZIP autonome V17.316
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Récupérer l'archive compilée avec succès V17.316
+        uses: actions/download-artifact@v4
+        with:
+          repository: glaby91/moteur3d
+          run-id: 43093078564
+          name: CSE-WARP-V17.316-Windows-x64
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: package
+      - name: Valider et empaqueter la version Windows exacte
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Contenu du programme original :"
+          find package -maxdepth 3 -type f | head -50
+          test "$(find package -type f | wc -l)" -gt 5
+          (cd package && zip -q -r "../CSE-WARP-V17.316-Windows-x64.zip" .)
+          test -s CSE-WARP-V17.316-Windows-x64.zip
+          unzip -t CSE-WARP-V17.316-Windows-x64.zip | tail -1
+          sha256sum CSE-WARP-V17.316-Windows-x64.zip
+      - name: Publier une release GitHub à téléchargement public direct
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view v17.316 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload v17.316 CSE-WARP-V17.316-Windows-x64.zip --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create v17.316 CSE-WARP-V17.316-Windows-x64.zip \
+              --repo "$GITHUB_REPOSITORY" \
+              --target 72aad9cd90e74c18aee5956cfe6fb46638ed3982 \
+              --title "CSE WARP V17.316 — Windows x64" \
+              --notes "Archive Windows x64 de la V17.316, issue du build GitHub Actions 43093078564 (succès). Éclairage et colorimétrie corrigés, déplacement à 1,70 m, collisions et précalcul GI. ZIP autonome, sans connexion GitHub nécessaire."
+          fi
+          gh release view v17.316 --repo "$GITHUB_REPOSITORY" --json url,assets
