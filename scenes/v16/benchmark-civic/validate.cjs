@@ -80,10 +80,29 @@ for(const [profile,target,cap,sceneFile] of [
  check(select('Interieur/Escalier galerie').length>=27,'Gallery stairs missing');
  check(select('Interieur/Piscine olympique/Lumière linéaire').length>=4,'Linear lamps missing');
  check(select('Interieur/Piscine olympique/Lignes d’eau').length>120,'Lane dividers missing');
- const fresco=unique('Interieur/Fresque Energetik authentique en image');
+ const fresco=unique('Interieur/Hall/Fresque Energetik authentique en image');
  check(fresco.length===1&&fresco[0].material==='cse_energetik_fresco'&&
-  fresco[0].size[0]===9.5&&fresco[0].size[1]===4.3,
-  'Wrong physical Energetik mosaic');
+  fresco[0].size[0]===9.5&&fresco[0].size[1]===4.3&&
+  fresco[0].position[0]===-15&&fresco[0].position[2]>-19.5,
+  'Energetik image must remain over the HALL staircase, not the pool');
+ check(!inst.some(o=>o.material==='cse_energetik_fresco'&&
+   !o.parent.startsWith('Interieur/Hall/')),
+  'Historic Energetik mosaic used outside the main hall');
+ const lobbyStairs=select('Interieur/Hall/Grand escalier').filter(o=>
+   o.parent==='Interieur/Hall/Grand escalier');
+ check(lobbyStairs.length===25,'Grand foyer staircase needs 25 accessible treads');
+ for(let i=1;i<lobbyStairs.length;i++){
+  const previous=lobbyStairs[i-1],next=lobbyStairs[i];
+  check(next.position[2]-previous.position[2]<.35&&
+    next.position[1]-previous.position[1]<.34,
+    'Grand staircase has an unwalkable gap or rise');
+ }
+ const lastStair=lobbyStairs.at(-1);
+ check(Math.abs(lastStair.position[1]+lastStair.size[1]/2-4.5)<.03&&
+   lastStair.position[2]>-13.7,
+  'Grand staircase must meet the y=4.5 entrance gallery');
+ check(unique('Interieur/Hall/Mur fresque').length===1,
+  'Hall fresco support wall missing');
  const seat=select('Place/Banc ovale béton/Assise');
  check(seat.length===96,'Concrete oval must have 96 uninterrupted sections');
  for(const x of seat){

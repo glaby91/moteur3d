@@ -45,7 +45,7 @@ const cameras={format:'m3d-cameras-v1',cameras:[
  {id:'escalier',name:'02 · Escalier continu vers le palais',position:[-17,2.2,29],target:[0,2.6,-4],fovDegrees:66},
  {id:'passerelle',name:'03 · Grand banc ovale et statue',position:[66,2.3,72],target:[37,5.0,52],fovDegrees:67},
  {id:'bassin',name:'04 · Piscine olympique depuis l’entrée',position:[0,2.4,-10],target:[0,1.0,-34],fovDegrees:73},
- {id:'hall',name:'05 · Fresque Energetik et piscine',position:[-12,3.0,-35],target:[0,10,-54],fovDegrees:70},
+ {id:'hall',name:'05 · Hall, escalier et fresque Energetik',position:[-7,2.9,-10],target:[-15,10.35,-17.9],fovDegrees:69},
  {id:'etage',name:'06 · Galerie au-dessus des lignes d’eau',position:[34,6.6,-44],target:[0,2,-32],fovDegrees:71},
  {id:'vue_haut',name:'07 · Vue aérienne du bâtiment unique',position:[95,68,105],target:[15,5,11],fovDegrees:67}
 ]};
@@ -204,13 +204,29 @@ function build(profileName,p){
    B('Interieur/Escalier galerie/Contremarches',
     'prp_concrete_raw',37+side*2.12,(.55+top)*.5,z,.14,top-.55,.98);
  }
- // Existing authentic 2048x930 Energetik mosaic, mapped 1:1 onto 9.5x4.3 m.
- B('Interieur/Fresque Energetik authentique en image',
-   'cse_energetik_fresco',0,10.35,-54.21,9.5,4.3,.09);
- for(const x of [-5.0,5.0])
-  B('Interieur/Fresque/Cadre','prp_steel_rusted',x,10.35,-54.05,.18,4.6,.18);
+ // Hall staircase: a separate public stair from ground to the y=4.5 gallery.
+ // Top tread overlaps the landing, no floating stairs and no blocked doorway.
+ for(let i=0;i<25;i++){
+  const top=.73+i*(3.77/24);
+  const z=-17.5+i*.33;
+  B('Interieur/Hall/Grand escalier','prp_terrazzo_floor',
+    -15,top-.12,z,4.2,.24,.43);
+  for(const side of [-1,1])
+   B('Interieur/Hall/Grand escalier/Garde-corps','prp_steel_painted',
+     -15+side*2.2,top+.53,z,.07,1.05,.08);
+ }
+ // The original Energetik image hangs above THAT staircase in the hall.
+ // Its wall ends at y=7.6, leaving the hall's floor and pool sightline open.
+ B('Interieur/Hall/Mur fresque','prp_plaster_pale',-15,10.35,-18.18,
+   10.3,5.5,.34);
+ B('Interieur/Hall/Fresque Energetik authentique en image',
+   'cse_energetik_fresco',-15,10.35,-17.935,9.5,4.3,.085);
+ for(const x of [-20.0,-10.0])
+  B('Interieur/Hall/Fresque/Cadre','prp_steel_rusted',
+    x,10.35,-17.84,.18,4.6,.18);
  for(const y of [8.05,12.65])
-  B('Interieur/Fresque/Cadre','prp_steel_rusted',0,y,-54.05,10.1,.16,.18);
+  B('Interieur/Hall/Fresque/Cadre','prp_steel_rusted',
+    -15,y,-17.84,10.1,.16,.18);
  // A long line of worn granite slabs; scene fills in from broad to small units.
  const step=p.pave;
  for(let x=-68;x<=67;x+=step)for(let z=26;z<=90;z+=step){

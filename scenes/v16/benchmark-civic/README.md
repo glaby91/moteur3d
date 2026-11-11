@@ -18,14 +18,16 @@ originale**, sans attribution historique.
   eau, 10 couloirs, lignes d'eau, marquages et plots de départ.
 - Dalle du sol et terrain découpés pour **laisser une ouverture réelle** sur
   le bassin ; aucun plancher fictif ne traverse les 25 m de largeur de la piscine.
-- Galeries sur plusieurs niveaux, long escalier sur la plage est, foyer ouvert.
+- Galeries sur plusieurs niveaux, long escalier sur la plage est et **25 marches
+  continues dans le hall jusqu'au premier étage** ; foyer ouvert.
 - Deux lignes de luminaires au-dessus des grands côtés du bassin (sur 53 m),
   éclairage ponctuel discret répété sur toute la longueur.
 
 ## Fresque réellement réutilisée
 
-Fresque d'Energetik à **9,5 × 4,3 m**, sur le mur arrière intérieur à
-hauteur de galerie, dans un cadre métallique. Le fichier source est
+Fresque d'Energetik à **9,5 × 4,3 m**, exclusivement sur le mur du **hall
+au-dessus du grand escalier**, dans un cadre métallique. L'ancien emplacement
+sur le mur du fond de la piscine a été supprimé. Le fichier source est
 `experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/textures/energetik_fresco_mosaic.jpg`
 (2048 × 930, 790 231 octets) et est réutilisé **à l'identique**, comme
 `textures/energetik_fresco_mosaic.jpg`. Un nouveau chemin facultatif
