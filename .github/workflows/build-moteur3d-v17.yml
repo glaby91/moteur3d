@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/v17-realtime-architecture-roadmap-261110
+      - distribution/v17-316-direct-zip-261111
     paths:
       - 'v17/**'
       - 'v16/**'
@@ -406,3 +407,45 @@ jobs:
       # but do not delay users' access to the fully packaged Windows app.
       - name: Full V16 and V17 regression suite (post-package)
         run: ctest --test-dir build-v17 -C Release --verbose --output-on-failure
+
+  direct_download_v17_316:
+    name: ZIP direct public — V17.316 (archive originale)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Récupérer le ZIP original compilé V17.316
+        uses: actions/download-artifact@v4
+        with:
+          repository: glaby91/moteur3d
+          run-id: 43093078564
+          name: CSE-WARP-V17.316-Windows-x64
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: extracted-v17-316
+      - name: Assembler archive ZIP Windows
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find extracted-v17-316 -type f | wc -l)" -gt 5
+          ( cd extracted-v17-316 && zip -q -r ../CSE-WARP-V17.316-Windows-x64.zip . )
+          test -s CSE-WARP-V17.316-Windows-x64.zip
+          unzip -t CSE-WARP-V17.316-Windows-x64.zip | tail -1
+          ls -lh CSE-WARP-V17.316-Windows-x64.zip
+      - name: Publier Release directement téléchargeable
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view v17.316 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload v17.316 CSE-WARP-V17.316-Windows-x64.zip --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create v17.316 CSE-WARP-V17.316-Windows-x64.zip \
+              --repo "$GITHUB_REPOSITORY" \
+              --target 72aad9cd90e74c18aee5956cfe6fb46638ed3982 \
+              --title "CSE WARP V17.316 — Windows x64" \
+              --notes "Version Windows x64 validée, issue de GitHub Actions 43093078564. Téléchargement public direct sans compte GitHub."
+          fi
+          gh release view v17.316 --repo "$GITHUB_REPOSITORY" --json url,assets
