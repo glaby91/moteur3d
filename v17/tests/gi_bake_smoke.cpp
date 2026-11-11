@@ -54,9 +54,9 @@ int main(int argc,char** argv){
     test(gibake::signature(scene)!=restored.sceneHash,
          "stale GI cache not rejected after material edit");
     std::fstream corrupted(file,std::ios::binary|std::ios::in|std::ios::out);
-    corrupted.seekg(-1,std::ios::end);char c=0;corrupted.get(c);
-    corrupted.seekp(-1,std::ios::end);c^=char(0x33);
-    corrupted.put(c);corrupted.close();
+    corrupted.seekg(-1,std::ios::end);char lastByte=0;corrupted.get(lastByte);
+    corrupted.seekp(-1,std::ios::end);lastByte^=char(0x33);
+    corrupted.put(lastByte);corrupted.close();
     gibake::Table invalid;
     test(!gibake::readFile(file,invalid,error),
          "corrupt GI cache checksum not rejected");
