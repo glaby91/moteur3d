@@ -307,6 +307,21 @@ jobs:
           name: CSE-WARP-V17.${{ github.run_number }}-Windows-x64
           path: dist-v17/
           if-no-files-found: error
+      - name: Simulation totale V17 — six scènes, Raster, CPU, Compute et parité PNG
+        shell: pwsh
+        timeout-minutes: 55
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          & './v17/tools/total_simulation.ps1' -BinaryDirectory 'build-v17/Release' -OutputDirectory 'build-v17/total-simulation'
+          if ($LASTEXITCODE -ne 0) { throw 'Simulation totale V17 a échoué' }
+      - name: Archive des résultats de simulation totale WARP
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17.${{ github.run_number }}-Total-Simulation-WARP
+          path: build-v17/total-simulation/
+          if-no-files-found: warn
       # The V17-specific scene-switch and D3D11 benchmark smoke checks have
       # already passed before we publish. Keep the complete inherited suite,
       # but do not delay users' access to the fully packaged Windows app.
