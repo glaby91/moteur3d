@@ -30,3 +30,7 @@
 ## Réversibilité / intégrité
 
 La qualité PBR 2048, les normal maps, les matériaux, le MSAA et l'AF ne sont pas réduits. La GI est optionnelle ; les rendus de référence avec hybrid OFF restent identiques. L'exécution Direct GPU Present ne fait pas partie de cette évolution. Chaque modification est versionnée par commit et archive de build.
+
+## Suivi de validation GitHub
+
+La PR doit rester en brouillon tant que la compilation Windows, les tests de cache GI et la simulation totale n'ont pas tous réussi. Les jeux de données de benchmark sont conservés dans l'artefact `Total-Simulation-WARP/gi-bench` avec les rapports JSON et le CSV des médianes de trois cuissons et sept relectures. Les images de validation comprennent la référence Raster, les sondes approximatives et la véritable table GI.
