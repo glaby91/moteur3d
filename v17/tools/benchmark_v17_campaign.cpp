@@ -138,7 +138,7 @@ struct Samples {
 };
 struct Config{
     int rounds=6,frames=12,warmup=2;
-    bool smoke=false,allScenes=false,includeCpu=false;
+    bool smoke=false,simulation=false,allScenes=false,includeCpu=false;
     RasterQualitySettings quality{};
     QString selected,baseDir;
 };
@@ -301,7 +301,7 @@ int main(int argc,char** argv){
     if(args.size()<3){
         err<<"Usage: moteur3d_v17_campaign scene.json outdir [--rounds 6] "
               "[--frames 12] [--warmup 2] [--all-scenes] [--include-cpu] "
-              "[--smoke] [--raster-msaa 1|2|4|8] [--raster-anisotropy 1|2|4|8|16] "
+              "[--smoke] [--simulation] [--raster-msaa 1|2|4|8] [--raster-anisotropy 1|2|4|8|16] "
               "[--raster-lod-percent 50..200] [--raster-culling 0|1] "
               "[--raster-lod-enabled 0|1]\n";
         return 2;
@@ -310,6 +310,10 @@ int main(int argc,char** argv){
     cfg.selected=QFileInfo(args[1]).absoluteFilePath();
     cfg.baseDir=args[2];
     cfg.smoke=args.contains("--smoke");
+    cfg.simulation=args.contains("--simulation");
+    if(cfg.smoke&&cfg.simulation){
+        err<<"--smoke and --simulation cannot be combined\n";return 2;
+    }
     cfg.allScenes=args.contains("--all-scenes")&&!cfg.smoke;
     cfg.includeCpu=args.contains("--include-cpu")&&!cfg.smoke;
     cfg.quality=rasterQualitySettings();
@@ -325,6 +329,9 @@ int main(int argc,char** argv){
        !parseInt("--frames",cfg.frames,2,240)||
        !parseInt("--warmup",cfg.warmup,0,20))return 2;
     if(cfg.smoke){cfg.rounds=2;cfg.frames=2;cfg.warmup=1;}
+    // Functional full-scene WARP simulation; the normal full-quality
+    // 2048px campaign is unchanged for native machine performance tests.
+    if(cfg.simulation){cfg.rounds=2;cfg.frames=2;cfg.warmup=1;}
     int msaa=int(cfg.quality.msaaSamples),aniso=int(cfg.quality.anisotropy),
         lod=int(cfg.quality.lodQualityPercent),
         cull=int(cfg.quality.frustumCulling),dynamic=int(cfg.quality.dynamicLod);
@@ -361,7 +368,12 @@ int main(int argc,char** argv){
         {"cpuThreads",QThread::idealThreadCount()},
         {"qt",QStringLiteral(QT_VERSION_STR)},
         {"rounds",cfg.rounds},{"framesPerRound",cfg.frames},{"warmup",cfg.warmup},
-        {"smoke",cfg.smoke},{"allScenes",cfg.allScenes},
+        {"smoke",cfg.smoke},{"simulation",cfg.simulation},
+        {"allScenes",cfg.allScenes},
+        {"textureResolutionLimit",cfg.smoke||cfg.simulation?256:2048},
+        {"simulationHardwareNote",cfg.simulation
+           ?"WARP software GPU, 256px PBR, 256x144 and 480x270. Functional coverage only, not native FPS."
+           :"Normal full-quality benchmark: compare on target GPU hardware."},
         {"quality",QJsonObject{
             {"msaaRequested",msaa},{"anisotropy",aniso},{"lodPercent",lod},
             {"culling",cull!=0},{"lodEnabled",dynamic!=0}
@@ -416,7 +428,8 @@ int main(int argc,char** argv){
         if(!loaded){allOk=false;continue;}
         out<<"  [construction] Geometrie et textures PBR...\n";out.flush();
         tick=Clock::now();
-        const auto built=m3d::v16::buildRuntime(loaded.scene,cfg.smoke?256:2048);
+        const auto built=m3d::v16::buildRuntime(
+            loaded.scene,(cfg.smoke||cfg.simulation)?256:2048);
         const double buildMs=ms(tick);
         side.append(subsystem(sceneName,"geometry_materials_pbr_build",
             buildMs,bool(built),built.error));
@@ -449,7 +462,9 @@ int main(int argc,char** argv){
         const int cameras=cfg.smoke?1:std::min(2,int(runtime.cameras.size()));
         const QVector<QSize> sizes=cfg.smoke
             ?QVector<QSize>{QSize(320,180)}
-            :QVector<QSize>{QSize(1366,768),QSize(1920,1080)};
+            :cfg.simulation
+                ?QVector<QSize>{QSize(256,144),QSize(480,270)}
+                :QVector<QSize>{QSize(1366,768),QSize(1920,1080)};
         for(int cameraIndex=0;cameraIndex<cameras;++cameraIndex){
             const auto& preset=runtime.cameras[cameraIndex];
             for(const QSize size:sizes){
@@ -521,7 +536,8 @@ int main(int argc,char** argv){
                <<" : "<<cfg.rounds<<" series de mesure par nombre de threads\n";
             out.flush();
             const auto& preset=runtime.cameras.first();
-            constexpr int cpuW=320,cpuH=180;
+            const int cpuW=cfg.simulation?96:320;
+            const int cpuH=cfg.simulation?54:180;
             const auto cam=m3d::v16::makeCamera(preset,cpuW,cpuH);
             std::vector<uint32_t> pixels;
             std::atomic<uint64_t> generation{1};
@@ -543,21 +559,30 @@ int main(int argc,char** argv){
                             {"triangleTests",double(result.tests)}});
                 }
                 side.append(QJsonObject{{"name",sceneName},{"variant","cpu_direct_scaling"},
-                    {"threads",workers},{"resolution","320x180"},
+                    {"threads",workers},{"resolution",cfg.simulation?"96x54":"320x180"},
                     {"meanMs",mean(times)},{"medianMs",pct(times,.5)},
                     {"p95Ms",pct(times,.95)},{"stddevMs",deviation(times)},
                     {"cvPercent",mean(times)>0?100.*deviation(times)/mean(times):0.},
                     {"runs",int(times.size())},{"note","No GPU comparison; fixed CPU 1 spp workload"}});
-                out<<"  CPU "<<workers<<" threads "<<mean(times)<<" ms @320x180\n";out.flush();
+                out<<"  CPU "<<workers<<" threads "<<mean(times)
+                   <<" ms @"<<cpuW<<"x"<<cpuH<<"\n";out.flush();
             }
             tick=Clock::now();
             Stats computeStats;
             std::wstring computeError;
-            out<<"  [Compute DirectX 11] Initialisation/test 320x180...\n";out.flush();
+            out<<"  [Compute DirectX 11] Initialisation/test "<<cpuW<<"x"
+               <<cpuH<<"...\n";out.flush();
             bool gpuOk=renderCompute11Preview(runtime.renderScene,cam,cpuW,cpuH,
                                                pixels,computeStats,computeError);
-            side.append(subsystem(sceneName,"d3d11_compute_320x180",ms(tick),
-                gpuOk,QString::fromStdWString(computeError)));
+            side.append(subsystem(sceneName,
+                cfg.simulation?"d3d11_compute_96x54":"d3d11_compute_320x180",
+                ms(tick),gpuOk,QString::fromStdWString(computeError)));
+            if(cfg.simulation&&!gpuOk){
+                allOk=false;
+                err<<"TOTAL SIMULATION COMPUTE FAILED: "
+                   <<QString::fromStdWString(computeError)<<"\n";
+                err.flush();
+            }
         }
         report(system,cases,side,dir,false);
     }
