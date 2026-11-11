@@ -1,0 +1,28 @@
+#include <winver.h>
+IDI_WARP_V17_BENCH_CLI ICON "@V17_BENCH_ICON_RC_PATH@"
+
+1 VERSIONINFO
+ FILEVERSION 17,@V17_BUILD_NUMBER@,0,0
+ PRODUCTVERSION 17,@V17_BUILD_NUMBER@,0,0
+ FILEFLAGSMASK 0x3fL
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+ BLOCK "StringFileInfo"
+ BEGIN
+  BLOCK "040904E4"
+  BEGIN
+   VALUE "CompanyName", "CSE WARP\0"
+   VALUE "FileDescription", "CSE WARP V17.@V17_BUILD_NUMBER@ — Benchmark Runner\0"
+   VALUE "FileVersion", "17.@V17_BUILD_NUMBER@\0"
+   VALUE "InternalName", "moteur3d_v17_benchmark\0"
+   VALUE "OriginalFilename", "moteur3d_v17_benchmark.exe\0"
+   VALUE "ProductName", "CSE WARP V17.@V17_BUILD_NUMBER@ Benchmark\0"
+   VALUE "ProductVersion", "17.@V17_BUILD_NUMBER@\0"
+  END
+ END
+ BLOCK "VarFileInfo"
+ BEGIN
+  VALUE "Translation", 0x0409, 1252
+ END
+END

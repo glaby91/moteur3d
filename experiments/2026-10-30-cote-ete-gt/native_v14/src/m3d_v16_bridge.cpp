@@ -8,6 +8,10 @@
 #include <functional>
 #include <numeric>
 #include <random>
+#include <thread>
+#include <cstring>
+#include <cstdlib>
+#include <chrono>
 
 namespace m3d::v16 {
 namespace {
@@ -197,7 +201,11 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
         const float edge=clampf(std::min(dx/.08f,dy/.14f),0.f,1.f);
         return edge*edge*(3.f-2.f*edge);
     };
-    for(int y=0;y<resolution;y++)for(int x=0;x<resolution;x++){
+    // Per-texel evaluation is pure and independent. Split rows across CPU
+    // workers without allocating extra image buffers or changing the order of
+    // arithmetic in any texel. The serial path remains available for A/B QA.
+    const auto generateRows=[&](int firstRow,int lastRow){
+    for(int y=firstRow;y<lastRow;y++)for(int x=0;x<resolution;x++){
         const float u=float(x)/resolution,v=float(y)/resolution;
         const float n=smoothNoise(float(x)/7.f,float(y)/7.f,seed),fine=noise(x,y,seed^0x9e3779b9u);
         float factor=1.f;
@@ -296,6 +304,27 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
         const float r=clampf(roughness+(n-.5f)*variation,.03f,.98f);
         rr.p[i]=rgb565({r,r,r});
     }
+    };
+    const char* forceSerial=std::getenv("M3D_V17_PBR_SERIAL");
+    const bool serial=forceSerial && std::strcmp(forceSerial,"1")==0;
+    const unsigned cpuCount=std::max(1u,std::thread::hardware_concurrency());
+    // Fewer stripes than 128 texels/worker would waste scheduling overhead.
+    // Cap to 8 concurrent workers on large CPU machines to avoid overloading
+    // laptops with shared-memory GPUs; still scales well beyond 4 threads.
+    const unsigned workerCount=(serial||resolution<512)?1u:
+        std::min(8u,std::min(cpuCount,unsigned(resolution/128)));
+    if(workerCount==1u)generateRows(0,resolution);
+    else{
+        std::vector<std::thread> workers;
+        workers.reserve(workerCount-1);
+        for(unsigned k=1;k<workerCount;++k){
+            const int begin=int(size_t(k)*resolution/workerCount);
+            const int end=int(size_t(k+1)*resolution/workerCount);
+            workers.emplace_back([&,begin,end]{generateRows(begin,end);});
+        }
+        generateRows(0,int(resolution/workerCount));
+        for(auto& worker:workers)worker.join();
+    }
     mat.colorMip.push_back(std::move(first));
     mat.normalMip.push_back(std::move(nr));
     mat.roughnessMip.push_back(std::move(rr));
@@ -330,11 +359,16 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
 bool finite3(V v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
 } // namespace
 
-BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution) {
+BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
+    const std::function<void(int,const QString&)>& onProgress) {
+    const auto report=[&](int percent,const QString& phase) {
+        if(onProgress)onProgress(percent,phase);
+    };
     BuildResult result;
     result.runtime.title=source.name;
     maxTextureResolution=std::clamp(maxTextureResolution,64,2048);
     if(source.sectors.empty()){result.error="No sectors";return result;}
+    report(10,QStringLiteral("Lecture et validation des ressources de scène"));
     auto& render=result.runtime.renderScene;
     // Pavillon 01 has a real, bounded terrain mesh; never generate the old infinite ground plane.
     render.finiteGround=true;
@@ -393,6 +427,13 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution) {
         result.error="Missing meshes, instances or materials";return result;
     }
     if(materialDocs.size()>256){result.error="Material count exceeds 256";return result;}
+    report(15,QStringLiteral("Préparation des textures PBR"));
+    auto stageStarted=std::chrono::steady_clock::now();
+    const auto stageElapsedMs=[&](){
+        return std::chrono::duration<double,std::milli>(
+            std::chrono::steady_clock::now()-stageStarted).count();
+    };
+    int completedMaterials=0;
     for(const auto& j:materialDocs){
         const QString id=j.value("id").toString();
         if(id.isEmpty()||result.runtime.materialIndex.contains(id)){
@@ -421,8 +462,15 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution) {
         result.runtime.textureResolution=std::max(result.runtime.textureResolution,size);
         result.runtime.materialIndex.insert(id,int(render.mat.size()));
         render.mat.push_back(std::move(material));
+        ++completedMaterials;
+        report(15+int(65.0*completedMaterials/materialDocs.size()),
+            QStringLiteral("Textures PBR : %1 / %2 matériaux")
+                .arg(completedMaterials).arg(materialDocs.size()));
     }
+    result.runtime.pbrBuildMs=stageElapsedMs();
+    stageStarted=std::chrono::steady_clock::now();
     QSet<QString> instanceIds;
+    int completedInstances=0;
     for(const auto& j:instanceDocs){
         ObjectInfo object;
         object.id=j.value("id").toString();object.parent=j.value("parent").toString();
@@ -441,17 +489,52 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution) {
         const int material=result.runtime.materialIndex.value(object.material);
         object.firstTriangle=int(render.obj.size());
         const auto type=meshes.value(meshId).value("type").toString();
-        if(type=="box")box(render,pos,size,f(j.value("rotationY")),material);
+        if(type=="box"){
+            const float angle=f(j.value("rotationY"));
+            box(render,pos,size,angle,material);
+            // Preserve the box source as lightweight metadata while keeping
+            // all 12 triangles in render.obj for CPU, Compute and BVH.
+            // Rotated or transparent geometry remains on the legacy path.
+            if(std::abs(angle)<1.e-5f && render.obj.size()>=size_t(object.firstTriangle+12)){
+                SourceBox src;
+                src.firstTriangle=uint32_t(object.firstTriangle);
+                src.triangleCount=uint32_t(render.obj.size()-size_t(object.firstTriangle));
+                src.mn=pos-size*.5f;
+                src.mx=pos+size*.5f;
+                src.material=uint32_t(material);
+                if(src.triangleCount==12)render.sourceBoxes.push_back(src);
+            }
+        }
         else if(type=="uv_sphere")sphere(render,pos,size,material);
-        else if(type=="foliage_canopy")foliageCanopy(render,pos,size,material);
+        else if(type=="foliage_canopy"){
+            foliageCanopy(render,pos,size,material);
+            SourceFoliage source;
+            source.firstTriangle=uint32_t(object.firstTriangle);
+            source.triangleCount=uint32_t(render.obj.size()-size_t(object.firstTriangle));
+            source.center=pos;
+            source.radii=size*.5f;
+            source.material=uint32_t(material);
+            if(source.triangleCount>0)render.sourceFoliage.push_back(source);
+        }
         else {result.error="Unsupported V16 geometry: "+meshId;return result;}
         object.triangleCount=int(render.obj.size())-object.firstTriangle;
         result.runtime.objects.push_back(object);
+        ++completedInstances;
+        // Every progress tick corresponds to an actual generated instance.
+        if(completedInstances==instanceDocs.size() || completedInstances%16==0)
+            report(80+int(15.0*completedInstances/instanceDocs.size()),
+                QStringLiteral("Géométrie : %1 / %2 objets")
+                    .arg(completedInstances).arg(instanceDocs.size()));
     }
     if(render.obj.empty()){result.error="No triangles generated";return result;}
+    result.runtime.geometryBuildMs=stageElapsedMs();
+    stageStarted=std::chrono::steady_clock::now();
     render.order.resize(render.obj.size());
     std::iota(render.order.begin(),render.order.end(),0u);
+    report(96,QStringLiteral("Construction de l'accélérateur BVH"));
     render.root=buildBvh(render,0,int(render.order.size()));
+    result.runtime.bvhBuildMs=stageElapsedMs();
+    report(100,QStringLiteral("Scène prête"));
     return result;
 }
 Camera makeCamera(const CameraPreset& preset,int width,int height) {

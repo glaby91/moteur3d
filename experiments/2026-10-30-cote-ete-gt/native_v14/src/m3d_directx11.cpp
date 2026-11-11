@@ -8,12 +8,56 @@
 #include <d3dcompiler.h>
 #include <wrl/client.h>
 #include <cstddef>
+#include <cstdlib>
+#include <cstring>
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <deque>
+#include <cmath>
+#include <limits>
 
 using Microsoft::WRL::ComPtr;
 
 namespace m3d {
 namespace {
+// Single atomic configuration word: host and GUI may update quality while
+// the dedicated GPU worker is rendering. Each frame gets one full snapshot.
+// Bits: 0..7 MSAA, 8..15 anisotropy, 16..31 LOD quality percent,
+// 32 culling, 33 LOD.
+constexpr uint64_t defaultQualityBits=4ull|(16ull<<8)|(100ull<<16)|(1ull<<32)|(1ull<<33);
+std::atomic<uint64_t> gpuQualityBits{defaultQualityBits};
+uint64_t packQuality(const RasterQualitySettings& q){
+    return uint64_t(q.msaaSamples)|(uint64_t(q.anisotropy)<<8)
+        |(uint64_t(q.lodQualityPercent)<<16)
+        |(uint64_t(q.frustumCulling?1u:0u)<<32)
+        |(uint64_t(q.dynamicLod?1u:0u)<<33);
+}
+RasterQualitySettings unpackQuality(uint64_t bits){
+    RasterQualitySettings q;
+    q.msaaSamples=uint32_t(bits&255u);
+    q.anisotropy=uint32_t((bits>>8)&255u);
+    q.lodQualityPercent=uint32_t((bits>>16)&65535u);
+    q.frustumCulling=((bits>>32)&1u)!=0;
+    q.dynamicLod=((bits>>33)&1u)!=0;
+    return q;
+}
 struct GpuVertex { float p[3], n[3], uv[2]; uint32_t material; };
+// Box geometry is immutable and shared. Per-object bounds/materials occupy
+// 32 bytes instead of duplicating 36 vertex records (~1.3 kB) per box.
+struct GpuBoxInstance {
+    float lo[3], uvScale;
+    float hi[3]; uint32_t material;
+    float size[3]; uint32_t uvMode;
+};
+static_assert(sizeof(GpuBoxInstance)==48,"D3D11 per-instance layout must be 48 bytes");
+// Ellipsoids use a single dynamic instance buffer per frame. Three immutable
+// unit-sphere meshes provide GPU LOD without regenerating scene geometry.
+struct GpuEllipseInstance {
+    float center[3];uint32_t material;
+    float radii[3];float padding;
+};
+static_assert(sizeof(GpuEllipseInstance)==32,"D3D11 ellipsoid instance size");
 struct TransparentTriangle { GpuVertex v[3]; V center; };
 struct FrameConstants {
     float eye[3], tanHalf;
@@ -76,14 +120,72 @@ VSOut VSMain(VSIn i) {
     o.n = i.n; o.uv = i.uv; o.world=i.p; o.mat = min(i.mat, materialCount - 1);
     return o;
 }
+struct VSBoxIn {
+    float3 p:POSITION; float3 n:NORMAL; float2 unusedUv:TEXCOORD0;
+    uint unusedMaterial:MATERIAL;
+    float3 boxLo:BOXMIN; float uvScale:BOXSCALE;
+    float3 boxHi:BOXMAX; uint boxMat:BOXMAT;
+    float3 boxSize:BOXSIZE;uint uvMode:BOXUVMODE;
+};
+VSOut VSBoxMain(VSBoxIn i) {
+    // Select the original box corners directly rather than recomputing a
+    // matrix: world coordinates and texture mapping match the legacy mesh.
+    float3 p=float3(i.p.x<0.5?i.boxLo.x:i.boxHi.x,
+                    i.p.y<0.5?i.boxLo.y:i.boxHi.y,
+                    i.p.z<0.5?i.boxLo.z:i.boxHi.z);
+    float3 n=i.n;
+    float2 uv;
+    if(i.uvMode==1){
+        // Source V16 JSON boxes store per-face local UVs, while native
+        // Kind::Box maps the world position. Preserve both conventions.
+        float2 localUV=i.unusedUv;
+        if(n.z < -0.5 || n.x > 0.5)localUV.x=1.0-localUV.x;
+        if(n.y > 0.5)localUV.y=1.0-localUV.y;
+        float uLength=(abs(n.x)>0.5?i.boxSize.z:i.boxSize.x)*0.5;
+        float vLength=(abs(n.y)>0.5?i.boxSize.z:i.boxSize.y)*0.5;
+        uv=localUV*float2(uLength,vLength);
+    }else{
+        uv=(abs(n.y)>=abs(n.x)&&abs(n.y)>=abs(n.z))
+            ?p.xz*i.uvScale
+            :(abs(n.x)>=abs(n.z)?p.zy*i.uvScale:p.xy*i.uvScale);
+    }
+    VSIn raw;
+    raw.p=p;raw.n=n;raw.uv=uv;raw.mat=i.boxMat;
+    return VSMain(raw);
+}
+struct VSEllipseIn {
+    float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0;
+    uint unusedMaterial:MATERIAL;
+    float3 center:ELLIPSECENTER;uint ellipseMat:ELLIPSEMAT;
+    float3 radii:ELLIPSERADII;float pad:ELLIPSEPAD;
+};
+VSOut VSEllipseMain(VSEllipseIn i) {
+    VSIn raw;
+    raw.p=i.center+i.p*i.radii;
+    raw.n=normalize(i.n/max(i.radii,float3(.00001,.00001,.00001)));
+    raw.uv=i.uv;
+    raw.mat=i.ellipseMat;
+    return VSMain(raw);
+}
 float4 PSMain(VSOut i):SV_TARGET {
-    float3 base = albedo.Sample(wrapSampler, float3(frac(i.uv), i.mat)).rgb;
+    // WRAP sampler already handles tiling. frac(uv) here broke automatic
+    // derivatives at tile boundaries and forced inappropriate mip levels.
+    float3 base = albedo.Sample(wrapSampler, float3(i.uv, i.mat)).rgb;
     float3 normal = normalize(i.n);
+#if !defined(M3D_V17_OPTIMIZE_PIXELS)
     float3 dpdx = ddx(i.world), dpdy = ddy(i.world);
     float2 duvdx = ddx(i.uv), duvdy = ddy(i.uv);
     float determinant = duvdx.x * duvdy.y - duvdx.y * duvdy.x;
+#endif
     if (materialOpacity[i.mat].y > 0.5) {
-        float3 detailNormal = normalize(normalMap.Sample(wrapSampler, float3(frac(i.uv), i.mat)).xyz * 2.0 - 1.0);
+#if defined(M3D_V17_OPTIMIZE_PIXELS)
+        // The nointerpolation material index is uniform per primitive.
+        // Do not evaluate derivatives when normal mapping is disabled.
+        float3 dpdx = ddx(i.world), dpdy = ddy(i.world);
+        float2 duvdx = ddx(i.uv), duvdy = ddy(i.uv);
+        float determinant = duvdx.x * duvdy.y - duvdx.y * duvdy.x;
+#endif
+        float3 detailNormal = normalize(normalMap.Sample(wrapSampler, float3(i.uv, i.mat)).xyz * 2.0 - 1.0);
         if (abs(determinant) > 0.000001) {
             float3 tangent = (dpdx * duvdy.y - dpdy * duvdx.y) / determinant;
             float3 rawBitangent = (-dpdx * duvdy.x + dpdy * duvdx.x) / determinant;
@@ -108,30 +210,53 @@ float4 PSMain(VSOut i):SV_TARGET {
         shadowFactor = 0.16 + 0.84 * visible / 9.0;
     }
     float4 diffuseTerms = materialDiffuse[i.mat];
-    float light = diffuseTerms.x + diffuseTerms.y * diffuseTerms.w
-                + diffuseTerms.z * diffuse * shadowFactor * diffuseTerms.w;
+    // Cheap hemispherical sky fill: upward surfaces receive slightly more
+    // ambient daylight than vertical walls and undersides. Direct lighting
+    // and the existing shadow map remain separate for stronger depth.
+    float hemisphere=saturate(normal.y*0.5+0.5);
+    float skyFill=lerp(0.86,1.10,hemisphere);
+    float light=(diffuseTerms.x + diffuseTerms.y*diffuseTerms.w)*skyFill
+                 + diffuseTerms.z*diffuse*shadowFactor*diffuseTerms.w;
     float3 color = base * light + base * materialGlow[i.mat].rgb * materialGlow[i.mat].a;
     color += materialEmission[i.mat].rgb * materialEmission[i.mat].a;
     color += float3(28.0, 13.0, 4.0) / 255.0 * (1.0 - diffuseTerms.w);
     float3 viewDir = normalize(eye - i.world);
     float3 reflectedLight = reflect(-normalize(lightDir), normal);
-    float roughness = roughnessMap.Sample(wrapSampler, float3(frac(i.uv), i.mat));
+    float roughness = roughnessMap.Sample(wrapSampler, float3(i.uv, i.mat));
     float specularPower = materialSpecular[i.mat].y;
     if (materialSpecular[i.mat].z > 0.5) {
         specularPower = clamp(2.0 / max(roughness * roughness, 0.0001) - 2.0, 8.0, 80.0);
     }
     float specular = pow(saturate(dot(viewDir, reflectedLight)), specularPower)
                    * materialSpecular[i.mat].x * shadowFactor * diffuseTerms.w;
-    color += float3(178.0, 202.0, 214.0) / 255.0 * specular;
+    // Use PBR metalness for the highlight tint and a cheap 5th-power
+    // Schlick grazing response. This avoids another expensive pow() call.
+    float metallic=saturate(materialSpecular[i.mat].w);
+    float grazing=1.0-saturate(dot(viewDir,normal));
+    float f2=grazing*grazing;
+    float fresnel=f2*f2*grazing;
+    float3 specTint=lerp(float3(178.0,202.0,214.0)/255.0,
+                         saturate(base*1.2),metallic);
+    color += specTint * specular * (0.88+0.22*fresnel);
     [loop] for (uint l = 0; l < lightCount; ++l) {
         float3 delta = lightPositionRadius[l].xyz - i.world;
-        float distanceToLight = length(delta);
         float radius = lightPositionRadius[l].w;
-        if (distanceToLight < radius && distanceToLight > 0.0001) {
-            float edge = 1.0 - distanceToLight / radius;
-            float lambert = saturate(dot(normal, delta / distanceToLight));
-            color += lightColorIntensity[l].rgb * (edge * edge * lightColorIntensity[l].a * lambert * 0.27);
+#if defined(M3D_V17_OPTIMIZE_PIXELS)
+        // Reject far lights before computing length()/sqrt. Allow a
+        // conservative epsilon to keep the legacy threshold identical.
+        float radius2 = radius * radius;
+        float distance2 = dot(delta, delta);
+        [branch] if (radius > 0.0 && distance2 <= radius2 * 1.000001) {
+#endif
+            float distanceToLight = length(delta);
+            if (distanceToLight < radius && distanceToLight > 0.0001) {
+                float edge = 1.0 - distanceToLight / radius;
+                float lambert = saturate(dot(normal, delta / distanceToLight));
+                color += lightColorIntensity[l].rgb * (edge * edge * lightColorIntensity[l].a * lambert * 0.27);
+            }
+#if defined(M3D_V17_OPTIMIZE_PIXELS)
         }
+#endif
     }
     return float4(color, materialOpacity[i.mat].x);
 }
@@ -273,12 +398,123 @@ public:
     }
 };
 
+// A reusable canopy with the same deterministic ripple/leaf construction
+// as the V16 bridge. High LOD matches its 18x9 tessellation and 36 leaf
+// details; lower LODs only remove geometric detail at a distance.
+static std::vector<GpuVertex> makeFoliageTemplate(int segments,int rings,int leaves){
+    MeshBuilder mesh;
+    const auto point=[&](int ring,int segment){
+        const float latitude=float(ring)*PI/rings;
+        const float azimuth=float(segment)*2.f*PI/segments;
+        const float ripple=1.f+.075f*std::sin(5.f*azimuth+2.f*latitude)
+                             +.055f*std::cos(9.f*azimuth-3.f*latitude)
+                             +.04f*std::sin(7.f*latitude+4.f*azimuth);
+        const float widest=std::sin(latitude)*ripple;
+        return V{widest*std::cos(azimuth),std::cos(latitude),
+                 widest*std::sin(azimuth)};
+    };
+    auto add=[&](V p,V q,V r,V uv0,V uv1,V uv2){
+        V n=norm(cross(q-p,r-p));
+        if(dot(n,p)<0.f){std::swap(q,r);std::swap(uv1,uv2);n=norm(cross(q-p,r-p));}
+        mesh.tri(p,q,r,n,n,n,uv0.x,uv0.y,uv1.x,uv1.y,uv2.x,uv2.y,0);
+    };
+    for(int ring=0;ring<rings;++ring)for(int segment=0;segment<segments;++segment){
+        const V a=point(ring,segment),b=point(ring+1,segment);
+        const V c=point(ring+1,segment+1),d=point(ring,segment+1);
+        if(ring>0)add(a,b,d,
+            {float(segment)/segments,float(ring)/rings},
+            {float(segment)/segments,float(ring+1)/rings},
+            {float(segment+1)/segments,float(ring)/rings});
+        if(ring<rings-1)add(b,c,d,
+            {float(segment)/segments,float(ring+1)/rings},
+            {float(segment+1)/segments,float(ring+1)/rings},
+            {float(segment+1)/segments,float(ring)/rings});
+    }
+    for(int i=0;i<leaves;++i){
+        const float azimuth=float(i)*2.39996323f;
+        const float elevation=.35f*std::sin(i*1.731f);
+        const float cy=std::sin(elevation),radius=std::cos(elevation);
+        const V n=norm({radius*std::cos(azimuth),cy,radius*std::sin(azimuth)});
+        const V center=n*.93f;
+        const V helper=std::abs(n.y)<.8f?V{0,1,0}:V{1,0,0};
+        const V tangent=norm(cross(n,helper));
+        const float width=(.12f+.035f*float(i%3))*2.f;
+        const float height=width*(1.15f+.20f*float(i%4));
+        const V base=center-tangent*(width*.45f);
+        const V end=center+tangent*(width*.4f)+V{0,height*.24f,0}+n*(height*.24f);
+        const V sides=center+V{0,height*.4f,0};
+        mesh.tri(base,sides,end,n,n,n,0,0,.5f,1.f,1,0,0);
+    }
+    return std::move(mesh.vertices);
+}
+// Consecutive triangle batches are built once from the immutable mesh.
+ // Their bounding spheres conservatively reject fully off-screen batches.
+ // No geometry is edited or deleted: switch off for exact A/B comparisons.
+struct DrawChunk {
+    UINT first=0, count=0;
+    V mn{}, mx{};
+};
+static bool visibleChunk(const DrawChunk& chunk,const Camera& camera) {
+    const V center=(chunk.mn+chunk.mx)*.5f;
+    const float radius=length(chunk.mx-chunk.mn)*.5f + .01f;
+    const V q=center-camera.eye;
+    const float z=dot(q,camera.f);
+    if(z+radius<.08f||z-radius>10000.f)return false;
+    const float x=dot(q,camera.r),y=dot(q,camera.u);
+    const float h=std::max(.001f,camera.tanHalf);
+    const float v=h/std::max(.001f,camera.aspect);
+    // Outward-facing frustum plane: sphere support radius is
+    // radius * sqrt(1+tanHalf^2). This is conservative on near-plane
+    // crossings and cannot cut partially visible geometry.
+    if(std::abs(x)>z*h+radius*std::sqrt(1.f+h*h))return false;
+    if(std::abs(y)>z*v+radius*std::sqrt(1.f+v*v))return false;
+    return true;
+}
 class DirectX11Preview {
+    using Clock=std::chrono::steady_clock;
+    struct ReadbackSlot {
+        ComPtr<ID3D11Texture2D> staging;
+        ComPtr<ID3D11Query> disjoint,start,afterDraw,afterCopy;
+        bool queryReady=false;
+        int width=0,height=0;
+        Clock::time_point cpuStarted{},copyQueued{};
+        Stats submitted{};
+    };
 public:
-    bool render(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error) {
-        const auto started=std::chrono::steady_clock::now();
+    bool render(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,
+                std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error) {
+        // Retain the original exact-image synchronous API. The pipelined API
+        // deliberately lives alongside this path and is opt-in in the bench.
+        return enqueue(scene,shadows,cam,w,h,1,error)&&receive(pixels,stats,error);
+    }
+    bool enqueue(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,
+                 unsigned depth,std::wstring& error) {
+        const auto started=Clock::now();
         if(w<=0||h<=0){error=L"Résolution GPU invalide.";return false;}
-        if(!ensureDevice(error)||!ensureScene(scene,error)||!ensureShadow(shadows,error)||!ensureTargets(w,h,error))return false;
+        if(depth<1||depth>3){error=L"Profondeur des tampons GPU attendue : 1 à 3.";return false;}
+        if(pending_.size()>=depth || (!pending_.empty()&&depth!=readbackDepth_)){
+            error=L"Lecture GPU en attente : vider la file avant de changer la profondeur.";return false;
+        }
+        if(!pending_.empty() && (w!=width_||h!=height_)){
+            error=L"Changement de résolution avec des images GPU en attente.";return false;
+        }
+        const uint64_t qualityBits=gpuQualityBits.load(std::memory_order_acquire);
+        const RasterQualitySettings quality=unpackQuality(qualityBits);
+        if(!pending_.empty() &&
+           (sceneKey_!=scene.obj.data() || objectCount_!=scene.obj.size() ||
+            sceneIdentity_!=scene.gpuCacheIdentity ||
+            sceneRevision_!=scene.gpuCacheRevision ||
+            lastSubmissionQualityBits_!=qualityBits)){
+            error=L"Vider les lectures différées avant de changer de scène ou de qualité.";
+            return false;
+        }
+        if(!ensureDevice(error)||!ensureScene(scene,error)||!ensureShadow(shadows,error)||
+           !ensureTargets(w,h,quality.msaaSamples,error)||
+           !ensureAnisotropy(quality.anisotropy,error)||
+           !ensureReadback(depth,w,h,error))return false;
+        const unsigned slotIndex=nextReadbackSlot_;
+        ReadbackSlot& slot=readbackSlots_[slotIndex];
+        slot.cpuStarted=started;
         FrameConstants cb{};
         cb.eye[0]=cam.eye.x;cb.eye[1]=cam.eye.y;cb.eye[2]=cam.eye.z;cb.tanHalf=cam.tanHalf;
         cb.forward[0]=cam.f.x;cb.forward[1]=cam.f.y;cb.forward[2]=cam.f.z;cb.aspect=cam.aspect;
@@ -327,9 +563,18 @@ public:
             else if(name=="wound"){spec=.19f;power=20.f;}
             else if(name=="asphalt"){spec=.16f;power=13.f;}
             else if(name=="orange"){spec=.13f;power=42.f;}
-            if(spec==0.f&&scene.mat[m].reflectivityPercent>0)spec=.20f*scene.mat[m].reflectivityPercent/100.f;
+            // The Pripyat material IDs carry generic PBR parameters rather
+            // than the old hardcoded names (metal, puddle, glass). Honor
+            // roughness/metalness/transmission even for unseen material IDs.
+            const float metal=clampf(scene.mat[m].metallic,0.f,1.f);
+            const float surfaceRough=clampf(scene.mat[m].roughnessScale,.08f,1.f);
+            const float transmission=float(scene.mat[m].transmissionPercent)/100.f;
+            spec=std::max(spec,.025f+.29f*metal+.095f*(1.f-surfaceRough)
+                          +.14f*transmission);
+            if(scene.mat[m].roughnessMip.empty())
+                power=clampf(2.f/(surfaceRough*surfaceRough)-2.f,8.f,80.f);
             cb.materialGlow[m][0]=r;cb.materialGlow[m][1]=g;cb.materialGlow[m][2]=b;cb.materialGlow[m][3]=strength;
-            cb.materialSpecular[m][0]=spec;cb.materialSpecular[m][1]=power;cb.materialSpecular[m][2]=scene.mat[m].roughnessMip.empty()?0.f:1.f;cb.materialSpecular[m][3]=sg;
+            cb.materialSpecular[m][0]=spec;cb.materialSpecular[m][1]=power;cb.materialSpecular[m][2]=scene.mat[m].roughnessMip.empty()?0.f:1.f;cb.materialSpecular[m][3]=metal;
             cb.materialOpacity[m][0]=1.f-float(scene.mat[m].transmissionPercent)/100.f;
             cb.materialOpacity[m][1]=scene.mat[m].normalMip.empty()?0.f:1.f;
             cb.materialDiffuse[m][0]=diffuseBase;cb.materialDiffuse[m][1]=diffuseDay;cb.materialDiffuse[m][2]=diffuseDirect;cb.materialDiffuse[m][3]=daylight;
@@ -349,30 +594,275 @@ public:
         if(FAILED(hr)){error=L"Impossible de transmettre les paramètres à DirectX 11.";return false;}
         std::memcpy(mapped.pData,&cb,sizeof(cb));context_->Unmap(constants_.Get(),0);
         const float clear[4]={cb.sky[0],cb.sky[1],cb.sky[2],1.f};
+        if(slot.queryReady){
+            context_->Begin(slot.disjoint.Get());
+            context_->End(slot.start.Get());
+        }
         context_->OMSetRenderTargets(1,rtv_.GetAddressOf(),dsv_.Get());context_->ClearRenderTargetView(rtv_.Get(),clear);context_->ClearDepthStencilView(dsv_.Get(),D3D11_CLEAR_DEPTH,1.f,0);
         D3D11_VIEWPORT vp{};vp.Width=float(w);vp.Height=float(h);vp.MinDepth=0;vp.MaxDepth=1;context_->RSSetViewports(1,&vp);
         UINT stride=sizeof(GpuVertex),offset=0;ID3D11Buffer* vb=vertices_.Get();context_->IASetInputLayout(layout_.Get());context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context_->RSSetState(raster_.Get());context_->OMSetDepthStencilState(depth_.Get(),0);context_->VSSetShader(vs_.Get(),nullptr,0);context_->PSSetShader(ps_.Get(),nullptr,0);
         ID3D11Buffer* cbuff=constants_.Get();context_->VSSetConstantBuffers(0,1,&cbuff);context_->PSSetConstantBuffers(0,1,&cbuff);
         ID3D11ShaderResourceView* srvs[]={albedo_.Get(),shadowSrv_.Get(),roughness_.Get(),normal_.Get()};context_->PSSetShaderResources(0,4,srvs);ID3D11SamplerState* sampler=sampler_.Get();context_->PSSetSamplers(0,1,&sampler);
-        if(vertexCount_)context_->Draw(vertexCount_,0);
+        UINT submittedVertices=0;
+        uint64_t drawCalls=0;
+        const char* noCull=std::getenv("M3D_V17_DISABLE_FRUSTUM_CULLING");
+        const bool cullEnabled=quality.frustumCulling
+            &&!(noCull && std::strcmp(noCull,"1")==0);
+        if(vertexCount_){
+            if(!cullEnabled){
+                context_->Draw(vertexCount_,0);
+                ++drawCalls;
+                submittedVertices=vertexCount_;
+            }else{
+                // Merge adjacent visible batches to avoid thousands of draw
+                // calls. A scene with every batch visible stays one Draw().
+                UINT start=0,count=0;
+                auto flush=[&]{
+                    if(!count)return;
+                    context_->Draw(count,start);
+                    ++drawCalls;
+                    submittedVertices+=count;
+                    count=0;
+                };
+                for(const DrawChunk& chunk:chunks_){
+                    if(!visibleChunk(chunk,cam)){flush();continue;}
+                    if(count && start+count!=chunk.first)flush();
+                    if(!count)start=chunk.first;
+                    count+=chunk.count;
+                }
+                flush();
+            }
+        }
+        UINT submittedBoxInstances=0;
+        if(boxInstanceCount_){
+            ID3D11Buffer* buffers[]={boxVertices_.Get(),boxInstances_.Get()};
+            UINT strides[]={UINT(sizeof(GpuVertex)),UINT(sizeof(GpuBoxInstance))};
+            UINT offsets[]={0,0};
+            context_->IASetInputLayout(boxLayout_.Get());
+            context_->IASetVertexBuffers(0,2,buffers,strides,offsets);
+            context_->VSSetShader(boxVs_.Get(),nullptr,0);
+            auto drawBoxes=[&](UINT first,UINT count){
+                if(!count)return;
+                context_->DrawInstanced(36,count,0,first);
+                ++drawCalls;
+                submittedBoxInstances+=count;
+            };
+            if(!cullEnabled){
+                drawBoxes(0,boxInstanceCount_);
+            }else{
+                UINT first=0,count=0;
+                auto flush=[&]{drawBoxes(first,count);count=0;};
+                for(const DrawChunk& chunk:boxChunks_){
+                    if(!visibleChunk(chunk,cam)){flush();continue;}
+                    if(count && first+count!=chunk.first)flush();
+                    if(!count)first=chunk.first;
+                    count+=chunk.count;
+                }
+                flush();
+            }
+            context_->IASetInputLayout(layout_.Get());
+            context_->VSSetShader(vs_.Get(),nullptr,0);
+            context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
+        }
+        uint64_t submittedEllipseTriangles=0;
+        uint64_t submittedEllipseInstances=0;
+        if(ellipseInstanceCount_){
+            std::array<std::vector<GpuEllipseInstance>,3> level;
+            for(auto& bucket:level)bucket.reserve(ellipseInstanceCount_/3+1);
+            const char* disableLod=std::getenv("M3D_V17_DISABLE_LOD");
+            const bool lodEnabled=quality.dynamicLod
+                &&!(disableLod && std::strcmp(disableLod,"1")==0);
+            for(const auto& sphere:ellipses_){
+                const V center{sphere.center[0],sphere.center[1],sphere.center[2]};
+                const float radius=std::max({sphere.radii[0],sphere.radii[1],sphere.radii[2]});
+                const DrawChunk bounds{0,0,{center.x-radius,center.y-radius,center.z-radius},
+                                           {center.x+radius,center.y+radius,center.z+radius}};
+                if(cullEnabled&&!visibleChunk(bounds,cam))continue;
+                const float z=std::max(.10f,dot(center-cam.eye,cam.f));
+                const float projectedRadius=radius*float(w)/(2.f*std::max(.01f,cam.tanHalf)*z);
+                const float lodScale=100.f/float(quality.lodQualityPercent);
+                const int lod=(!lodEnabled||projectedRadius>=48.f*lodScale)?2
+                    :(projectedRadius>=14.f*lodScale?1:0);
+                level[lod].push_back(sphere);
+            }
+            // One small streaming allocation/update for all visible
+            // ellipsoids, not a per-object Draw() or a CPU rebuild.
+            D3D11_MAPPED_SUBRESOURCE ellipseMap{};
+            hr=context_->Map(ellipseInstances_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&ellipseMap);
+            if(FAILED(hr)){error=L"Mise à jour des LOD ellipsoïdes impossible.";return false;}
+            GpuEllipseInstance* dest=static_cast<GpuEllipseInstance*>(ellipseMap.pData);
+            for(const auto& bucket:level){
+                if(bucket.empty())continue;
+                std::memcpy(dest,bucket.data(),bucket.size()*sizeof(GpuEllipseInstance));
+                dest+=bucket.size();
+            }
+            context_->Unmap(ellipseInstances_.Get(),0);
+            context_->IASetInputLayout(ellipseLayout_.Get());
+            context_->VSSetShader(ellipseVs_.Get(),nullptr,0);
+            UINT first=0;
+            for(size_t lod=0;lod<level.size();++lod){
+                const UINT count=UINT(level[lod].size());
+                if(!count)continue;
+                ID3D11Buffer* buffers[]={ellipseVertices_[lod].Get(),ellipseInstances_.Get()};
+                UINT strides[]={UINT(sizeof(GpuVertex)),UINT(sizeof(GpuEllipseInstance))};
+                UINT offsets[]={0,0};
+                context_->IASetVertexBuffers(0,2,buffers,strides,offsets);
+                context_->DrawInstanced(ellipseVertexCounts_[lod],count,0,first);
+                ++drawCalls;
+                submittedEllipseInstances+=count;
+                submittedEllipseTriangles+=uint64_t(ellipseVertexCounts_[lod]/3)*count;
+                first+=count;
+            }
+            context_->IASetInputLayout(layout_.Get());
+            context_->VSSetShader(vs_.Get(),nullptr,0);
+            context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
+        }
+        uint64_t submittedFoliageTriangles=0;
+        uint64_t submittedFoliageInstances=0;
+        if(foliageInstanceCount_){
+            std::array<std::vector<GpuEllipseInstance>,3> buckets;
+            for(auto& bucket:buckets)bucket.reserve(foliageInstanceCount_/3+1);
+            const char* disabled=std::getenv("M3D_V17_DISABLE_LOD");
+            const bool lodEnabled=quality.dynamicLod
+                &&!(disabled&&std::strcmp(disabled,"1")==0);
+            for(const auto& plant:foliage_){
+                const V center{plant.center[0],plant.center[1],plant.center[2]};
+                const float radius=std::max({plant.radii[0],plant.radii[1],plant.radii[2]});
+                const DrawChunk bounds{0,0,{center.x-radius,center.y-radius,center.z-radius},
+                    {center.x+radius,center.y+radius,center.z+radius}};
+                if(cullEnabled&&!visibleChunk(bounds,cam))continue;
+                const float z=std::max(.10f,dot(center-cam.eye,cam.f));
+                const float projectedRadius=radius*float(w)/(2.f*std::max(.01f,cam.tanHalf)*z);
+                const float lodScale=100.f/float(quality.lodQualityPercent);
+                const int lod=(!lodEnabled||projectedRadius>=40.f*lodScale)?2
+                    :(projectedRadius>=12.f*lodScale?1:0);
+                buckets[lod].push_back(plant);
+            }
+            D3D11_MAPPED_SUBRESOURCE foliageMap{};
+            hr=context_->Map(foliageInstances_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&foliageMap);
+            if(FAILED(hr)){error=L"Mise à jour des LOD du feuillage impossible.";return false;}
+            GpuEllipseInstance* dest=static_cast<GpuEllipseInstance*>(foliageMap.pData);
+            for(const auto& bucket:buckets){
+                if(bucket.empty())continue;
+                std::memcpy(dest,bucket.data(),bucket.size()*sizeof(GpuEllipseInstance));
+                dest+=bucket.size();
+            }
+            context_->Unmap(foliageInstances_.Get(),0);
+            context_->IASetInputLayout(ellipseLayout_.Get());
+            context_->VSSetShader(ellipseVs_.Get(),nullptr,0);
+            UINT first=0;
+            for(size_t lod=0;lod<buckets.size();++lod){
+                const UINT count=UINT(buckets[lod].size());
+                if(!count)continue;
+                ID3D11Buffer* buffers[]={foliageVertices_[lod].Get(),foliageInstances_.Get()};
+                UINT strides[]={UINT(sizeof(GpuVertex)),UINT(sizeof(GpuEllipseInstance))};
+                UINT offsets[]={0,0};
+                context_->IASetVertexBuffers(0,2,buffers,strides,offsets);
+                context_->DrawInstanced(foliageVertexCounts_[lod],count,0,first);
+                ++drawCalls;
+                submittedFoliageTriangles+=uint64_t(foliageVertexCounts_[lod]/3)*count;
+                submittedFoliageInstances+=count;
+                first+=count;
+            }
+            context_->IASetInputLayout(layout_.Get());
+            context_->VSSetShader(vs_.Get(),nullptr,0);
+            context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
+        }
         if(!transparent_.empty()){
             std::sort(transparent_.begin(),transparent_.end(),[&](const TransparentTriangle& a,const TransparentTriangle& b){return dot(a.center-cam.eye,cam.f)>dot(b.center-cam.eye,cam.f);});
             D3D11_MAPPED_SUBRESOURCE transparentMap{};hr=context_->Map(transparentVertices_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&transparentMap);
             if(FAILED(hr)){error=L"Impossible de préparer les surfaces transparentes DirectX 11.";return false;}
             auto* out=static_cast<GpuVertex*>(transparentMap.pData);for(const auto& t:transparent_)for(const auto& v:t.v)*out++=v;context_->Unmap(transparentVertices_.Get(),0);
             UINT transparentStride=sizeof(GpuVertex);ID3D11Buffer* transparentBuffer=transparentVertices_.Get();context_->IASetVertexBuffers(0,1,&transparentBuffer,&transparentStride,&offset);
-            context_->OMSetDepthStencilState(transparentDepth_.Get(),0);context_->OMSetBlendState(blend_.Get(),nullptr,0xffffffffu);context_->Draw(UINT(transparent_.size()*3),0);
+            context_->OMSetDepthStencilState(transparentDepth_.Get(),0);context_->OMSetBlendState(blend_.Get(),nullptr,0xffffffffu);context_->Draw(UINT(transparent_.size()*3),0);++drawCalls;
             context_->OMSetBlendState(nullptr,nullptr,0xffffffffu);context_->OMSetDepthStencilState(depth_.Get(),0);context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
         }
+        // GPU timestamps surround the actual draw commands and the queued
+        // GPU copy. They do not include any CPU-side GetData/Map blocking.
+        if(slot.queryReady)context_->End(slot.afterDraw.Get());
         if(sampleCount_>1)context_->ResolveSubresource(resolve_.Get(),0,target_.Get(),0,DXGI_FORMAT_R8G8B8A8_UNORM);
         else context_->CopyResource(resolve_.Get(),target_.Get());
-        context_->CopyResource(staging_.Get(),resolve_.Get());
-        hr=context_->Map(staging_.Get(),0,D3D11_MAP_READ,0,&mapped);
-        if(FAILED(hr)){error=L"Impossible de relire l’image calculée par DirectX 11.";return false;}
-        pixels.resize(size_t(w)*h);
-        for(int y=0;y<h;y++){const uint8_t* row=static_cast<const uint8_t*>(mapped.pData)+size_t(y)*mapped.RowPitch;for(int x=0;x<w;x++){const uint8_t* p=row+size_t(x)*4;pixels[size_t(y)*w+x]=0xff000000u|(uint32_t(p[0])<<16)|(uint32_t(p[1])<<8)|uint32_t(p[2]);}}
-        context_->Unmap(staging_.Get(),0);stats={};stats.gpu=true;stats.threads=0;stats.ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-started).count();stats.tests=vertexCount_/3;return true;
+        context_->CopyResource(slot.staging.Get(),resolve_.Get());
+        if(slot.queryReady){
+            context_->End(slot.afterCopy.Get());
+            context_->End(slot.disjoint.Get());
+        }
+        slot.submitted={};
+        slot.submitted.gpu=true;slot.submitted.threads=0;
+        slot.submitted.readbackBufferCount=depth;
+        slot.submitted.gpuDrawCalls=drawCalls;
+        slot.submitted.gpuBoxInstances=submittedBoxInstances;
+        slot.submitted.gpuEllipseInstances=submittedEllipseInstances;
+        slot.submitted.gpuFoliageInstances=submittedFoliageInstances;
+        slot.submitted.tests=submittedVertices/3+uint64_t(submittedBoxInstances)*12
+            +submittedEllipseTriangles+submittedFoliageTriangles+transparent_.size();
+        slot.copyQueued=Clock::now();
+        slot.submitted.cpuSubmitMs=std::chrono::duration<double,std::milli>(
+            slot.copyQueued-started).count();
+        pending_.push_back(slotIndex);
+        lastSubmissionQualityBits_=qualityBits;
+        nextReadbackSlot_=(slotIndex+1u)%readbackDepth_;
+        return true;
+    }
+    bool receive(std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error){
+        if(pending_.empty()){error=L"Aucune image GPU en attente.";return false;}
+        ReadbackSlot& slot=readbackSlots_[pending_.front()];
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        const auto mapStarted=Clock::now();
+        const HRESULT hr=context_->Map(slot.staging.Get(),0,D3D11_MAP_READ,0,&mapped);
+        if(FAILED(hr)){error=L"Lecture différée DirectX 11 impossible.";return false;}
+        const auto mapDone=Clock::now();
+        pixels.resize(size_t(slot.width)*size_t(slot.height));
+        const char* disableFastSwizzle=std::getenv("M3D_V17_DISABLE_FAST_SWIZZLE");
+        const bool fastSwizzle=!(disableFastSwizzle&&std::strcmp(disableFastSwizzle,"1")==0);
+        for(int y=0;y<slot.height;++y){
+            const uint8_t* row=static_cast<const uint8_t*>(mapped.pData)
+                +size_t(y)*mapped.RowPitch;
+            uint32_t* dest=pixels.data()+size_t(y)*slot.width;
+            if(fastSwizzle){
+                // Windows x64: R8G8B8A8_UNORM is a little-endian DWORD
+                // 0xAABBGGRR. QImage::Format_ARGB32 expects 0xFFRRGGBB.
+                // One aligned 32-bit load replaces three byte loads.
+                const uint32_t* src=reinterpret_cast<const uint32_t*>(row);
+                for(int x=0;x<slot.width;++x){
+                    const uint32_t rgba=src[x];
+                    dest[x]=0xff000000u|((rgba&0xffu)<<16)
+                        |(rgba&0xff00u)|((rgba>>16)&0xffu);
+                }
+            }else{
+                // Unmodified reference path for pixel-exact A/B.
+                for(int x=0;x<slot.width;++x){
+                    const uint8_t* p=row+size_t(x)*4;
+                    dest[x]=0xff000000u
+                        |(uint32_t(p[0])<<16)|(uint32_t(p[1])<<8)|uint32_t(p[2]);
+                }
+            }
+        }
+        context_->Unmap(slot.staging.Get(),0);
+        const auto finished=Clock::now();
+        stats=slot.submitted;
+        stats.ms=std::chrono::duration<double,std::milli>(finished-slot.cpuStarted).count();
+        stats.postMs=std::chrono::duration<double,std::milli>(finished-slot.copyQueued).count();
+        stats.cpuMapWaitMs=std::chrono::duration<double,std::milli>(mapDone-mapStarted).count();
+        stats.cpuPixelConvertMs=std::chrono::duration<double,std::milli>(finished-mapDone).count();
+        if(slot.queryReady){
+            D3D11_QUERY_DATA_TIMESTAMP_DISJOINT info{};
+            UINT64 begin=0,draw=0,copy=0;
+            const bool valid=context_->GetData(slot.disjoint.Get(),&info,sizeof(info),0)==S_OK
+                &&context_->GetData(slot.start.Get(),&begin,sizeof(begin),0)==S_OK
+                &&context_->GetData(slot.afterDraw.Get(),&draw,sizeof(draw),0)==S_OK
+                &&context_->GetData(slot.afterCopy.Get(),&copy,sizeof(copy),0)==S_OK;
+            if(valid&&!info.Disjoint&&info.Frequency>0&&begin<=draw&&draw<=copy){
+                const double ticksToMs=1000.0/double(info.Frequency);
+                stats.gpuDrawMs=double(draw-begin)*ticksToMs;
+                stats.gpuTransferMs=double(copy-draw)*ticksToMs;
+                stats.gpuTotalMs=double(copy-begin)*ticksToMs;
+                stats.gpuTimingValid=true;
+            }
+        }
+        pending_.pop_front();
+        return true;
     }
 private:
     bool ensureShadow(const ShadowMap& shadows,std::wstring& error) {
@@ -388,16 +878,82 @@ private:
     bool ensureDevice(std::wstring& error) {
         if(device_)return true;
         D3D_FEATURE_LEVEL feature{};
-        HRESULT hr=D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_HARDWARE,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,&feature,&context_);
+        // Hardware rendering remains the default. CI can explicitly use the
+        // Microsoft WARP software renderer to test this raster backend.
+        const char* warp=std::getenv("M3D_V16_FORCE_WARP");
+        const D3D_DRIVER_TYPE driver=(warp&&std::strcmp(warp,"1")==0)
+            ?D3D_DRIVER_TYPE_WARP:D3D_DRIVER_TYPE_HARDWARE;
+        HRESULT hr=D3D11CreateDevice(nullptr,driver,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,&feature,&context_);
         if(FAILED(hr)){error=L"Aucun périphérique Direct3D 11 matériel n’est disponible.";return false;}
-        ComPtr<ID3DBlob> vsCode,psCode,errors;
+        ComPtr<ID3DBlob> vsCode,boxVsCode,ellipseVsCode,psCode,errors;
+        auto shaderError=[&](const wchar_t* prefix){
+            std::wstring result(prefix);
+            if(errors&&errors->GetBufferPointer()){
+                result+=L": ";
+                const char* p=static_cast<const char*>(errors->GetBufferPointer());
+                const size_t n=std::min<size_t>(errors->GetBufferSize(),1024);
+                for(size_t i=0;i<n;++i)
+                    result.push_back(p[i]>=32&&p[i]<127?wchar_t(p[i]):L' ');
+            }
+            return result;
+        };
         hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",nullptr,nullptr,"VSMain","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&vsCode,&errors);
-        if(FAILED(hr)){error=L"Compilation du vertex shader DirectX 11 impossible.";return false;}
-        hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",nullptr,nullptr,"PSMain","ps_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&psCode,&errors);
-        if(FAILED(hr)){error=L"Compilation du pixel shader DirectX 11 impossible.";return false;}
+        if(FAILED(hr)){error=shaderError(L"Compilation du vertex shader DirectX 11 impossible");return false;}
+        hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",nullptr,nullptr,"VSBoxMain","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&boxVsCode,&errors);
+        if(FAILED(hr)){error=shaderError(L"Compilation du shader d'instancing V17 impossible");return false;}
+        hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",nullptr,nullptr,
+                      "VSEllipseMain","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&ellipseVsCode,&errors);
+        if(FAILED(hr)){error=shaderError(L"Compilation du shader LOD ellipsoïdes impossible");return false;}
+        // The exact old shader can be selected to A/B test visual fidelity.
+        // HLSL is compiled once at device creation, never per frame.
+        const char* disableShaderOpt=std::getenv("M3D_V17_DISABLE_SHADER_OPT");
+        const bool optimizePixels=!(disableShaderOpt&&std::strcmp(disableShaderOpt,"1")==0);
+        const D3D_SHADER_MACRO pixelMacros[]={
+            {"M3D_V17_OPTIMIZE_PIXELS","1"},{nullptr,nullptr}
+        };
+        hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",
+            optimizePixels?pixelMacros:nullptr,nullptr,"PSMain","ps_4_0",
+            D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&psCode,&errors);
+        if(FAILED(hr)){error=shaderError(L"Compilation du pixel shader DirectX 11 impossible");return false;}
         if(FAILED(device_->CreateVertexShader(vsCode->GetBufferPointer(),vsCode->GetBufferSize(),nullptr,&vs_))||FAILED(device_->CreatePixelShader(psCode->GetBufferPointer(),psCode->GetBufferSize(),nullptr,&ps_))){error=L"Création des shaders DirectX 11 impossible.";return false;}
         const D3D11_INPUT_ELEMENT_DESC input[]={{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,p),D3D11_INPUT_PER_VERTEX_DATA,0},{"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,n),D3D11_INPUT_PER_VERTEX_DATA,0},{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,offsetof(GpuVertex,uv),D3D11_INPUT_PER_VERTEX_DATA,0},{"MATERIAL",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertex,material),D3D11_INPUT_PER_VERTEX_DATA,0}};
         if(FAILED(device_->CreateInputLayout(input,4,vsCode->GetBufferPointer(),vsCode->GetBufferSize(),&layout_))){error=L"Création du format de sommet DirectX 11 impossible.";return false;}
+        if(FAILED(device_->CreateVertexShader(boxVsCode->GetBufferPointer(),boxVsCode->GetBufferSize(),nullptr,&boxVs_))){
+            error=L"Création du vertex shader d'instancing V17 impossible.";return false;
+        }
+        const D3D11_INPUT_ELEMENT_DESC boxInput[]={
+            input[0],input[1],input[2],input[3],
+            {"BOXMIN",0,DXGI_FORMAT_R32G32B32_FLOAT,1,0,D3D11_INPUT_PER_INSTANCE_DATA,1},
+            {"BOXSCALE",0,DXGI_FORMAT_R32_FLOAT,1,12,D3D11_INPUT_PER_INSTANCE_DATA,1},
+            {"BOXMAX",0,DXGI_FORMAT_R32G32B32_FLOAT,1,16,D3D11_INPUT_PER_INSTANCE_DATA,1},
+            {"BOXMAT",0,DXGI_FORMAT_R32_UINT,1,28,D3D11_INPUT_PER_INSTANCE_DATA,1},
+            {"BOXSIZE",0,DXGI_FORMAT_R32G32B32_FLOAT,1,32,D3D11_INPUT_PER_INSTANCE_DATA,1},
+            {"BOXUVMODE",0,DXGI_FORMAT_R32_UINT,1,44,D3D11_INPUT_PER_INSTANCE_DATA,1}
+        };
+        const HRESULT boxLayoutResult=device_->CreateInputLayout(
+            boxInput,10,boxVsCode->GetBufferPointer(),boxVsCode->GetBufferSize(),&boxLayout_);
+        if(FAILED(boxLayoutResult)){
+            error=L"Création du format des instances GPU impossible. HRESULT "
+                  +std::to_wstring(uint32_t(boxLayoutResult));return false;
+        }
+        if(FAILED(device_->CreateVertexShader(ellipseVsCode->GetBufferPointer(),
+            ellipseVsCode->GetBufferSize(),nullptr,&ellipseVs_))){
+            error=L"Création du shader GPU LOD impossible.";return false;
+        }
+        const D3D11_INPUT_ELEMENT_DESC ellipseInput[]={
+            input[0],input[1],input[2],input[3],
+            {"ELLIPSECENTER",0,DXGI_FORMAT_R32G32B32_FLOAT,1,0,D3D11_INPUT_PER_INSTANCE_DATA,1},
+            {"ELLIPSEMAT",0,DXGI_FORMAT_R32_UINT,1,12,D3D11_INPUT_PER_INSTANCE_DATA,1},
+            {"ELLIPSERADII",0,DXGI_FORMAT_R32G32B32_FLOAT,1,16,D3D11_INPUT_PER_INSTANCE_DATA,1},
+            {"ELLIPSEPAD",0,DXGI_FORMAT_R32_FLOAT,1,28,D3D11_INPUT_PER_INSTANCE_DATA,1}
+        };
+        const HRESULT ellipseLayoutResult=device_->CreateInputLayout(
+            ellipseInput,8,ellipseVsCode->GetBufferPointer(),
+            ellipseVsCode->GetBufferSize(),&ellipseLayout_);
+        if(FAILED(ellipseLayoutResult)){
+            error=L"Format des instances ellipsoïdes incorrect. HRESULT "
+                  +std::to_wstring(uint32_t(ellipseLayoutResult));return false;
+        }
         D3D11_BUFFER_DESC cbd{};cbd.ByteWidth=sizeof(FrameConstants);cbd.Usage=D3D11_USAGE_DYNAMIC;cbd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;cbd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
         if(FAILED(device_->CreateBuffer(&cbd,nullptr,&constants_))){error=L"Création du buffer de constantes DirectX 11 impossible.";return false;}
         D3D11_RASTERIZER_DESC rd{};rd.FillMode=D3D11_FILL_SOLID;rd.CullMode=D3D11_CULL_NONE;rd.DepthClipEnable=TRUE;rd.MultisampleEnable=TRUE;
@@ -412,16 +968,128 @@ private:
         if(FAILED(device_->CreateSamplerState(&sd,&sampler_))){error=L"Création du sampler DirectX 11 impossible.";return false;}return true;
     }
     bool ensureScene(const Scene& scene,std::wstring& error) {
-        if(sceneKey_==scene.obj.data()&&objectCount_==scene.obj.size()&&vertices_)return true;
+        const char* disableInstancing=std::getenv("M3D_V17_DISABLE_GPU_INSTANCING");
+        const bool useInstancing=!(disableInstancing && std::strcmp(disableInstancing,"1")==0);
+        const char* disableBoxes=std::getenv("M3D_V17_DISABLE_BOX_INSTANCING");
+        const char* disableEllipses=std::getenv("M3D_V17_DISABLE_ELLIPSE_INSTANCING");
+        const bool useBoxInstancing=useInstancing &&
+            !(disableBoxes && std::strcmp(disableBoxes,"1")==0);
+        const bool useEllipseInstancing=useInstancing &&
+            !(disableEllipses && std::strcmp(disableEllipses,"1")==0);
+        const char* disableFoliage=std::getenv("M3D_V17_DISABLE_FOLIAGE_INSTANCING");
+        const bool useFoliageInstancing=useInstancing &&
+            !(disableFoliage && std::strcmp(disableFoliage,"1")==0);
+        if(sceneKey_==scene.obj.data()&&objectCount_==scene.obj.size()&&
+           (vertices_||boxInstances_||ellipseInstances_) &&
+           boxInstancingEnabled_==useBoxInstancing &&
+           ellipseInstancingEnabled_==useEllipseInstancing &&
+           foliageInstancingEnabled_==useFoliageInstancing &&
+           sceneIdentity_==scene.gpuCacheIdentity &&
+           sceneRevision_==scene.gpuCacheRevision)return true;
+        // An edited scene may retain the same std::vector address: revision
+        // tracking is required to refresh its GPU PBR/mesh resources.
+        vertices_.Reset();transparentVertices_.Reset();albedo_.Reset();
+        boxVertices_.Reset();boxInstances_.Reset();boxInstanceCount_=0;
+        roughness_.Reset();normal_.Reset();transparent_.clear();vertexCount_=0;
+        chunks_.clear();boxChunks_.clear();
+        ellipseInstances_.Reset();
+        for(auto& buffer:ellipseVertices_)buffer.Reset();
+        ellipseVertexCounts_.fill(0);ellipses_.clear();ellipseInstanceCount_=0;
+        foliageInstances_.Reset();
+        for(auto& buffer:foliageVertices_)buffer.Reset();
+        foliageVertexCounts_.fill(0);foliage_.clear();foliageInstanceCount_=0;
         MeshBuilder mesh;
-        for(const Obj& o:scene.obj){
+        std::vector<GpuBoxInstance> boxData;
+        // V16 JSON geometry is triangulated for CPU/Compute, but the source
+        // builder now retains the exact 12-triangle ranges of unrotated
+        // boxes. Skip those triangles only in the raster vertex buffer and
+        // submit their identical faces through GPU box instancing instead.
+        std::vector<uint8_t> skipSource;
+        if((useBoxInstancing && !scene.sourceBoxes.empty()) ||
+           (useFoliageInstancing && !scene.sourceFoliage.empty()))
+            skipSource.assign(scene.obj.size(),0);
+        if(useBoxInstancing && !scene.sourceBoxes.empty()){
+            for(const SourceBox& source:scene.sourceBoxes){
+                if(source.triangleCount!=12||source.material>=scene.mat.size()||
+                   scene.mat[source.material].transmissionPercent>0||
+                   size_t(source.firstTriangle)+12>scene.obj.size())continue;
+                bool valid=true;
+                for(size_t k=source.firstTriangle;k<size_t(source.firstTriangle)+12;++k){
+                    const Obj& o=scene.obj[k];
+                    if(o.kind!=Kind::Triangle||o.mat!=source.material||skipSource[k]){
+                        valid=false;break;
+                    }
+                }
+                if(!valid)continue;
+                GpuBoxInstance box{};
+                box.lo[0]=source.mn.x;box.lo[1]=source.mn.y;box.lo[2]=source.mn.z;
+                box.hi[0]=source.mx.x;box.hi[1]=source.mx.y;box.hi[2]=source.mx.z;
+                box.size[0]=source.mx.x-source.mn.x;
+                box.size[1]=source.mx.y-source.mn.y;
+                box.size[2]=source.mx.z-source.mn.z;
+                box.material=source.material;
+                box.uvMode=1;
+                boxData.push_back(box);
+                for(size_t k=source.firstTriangle;k<size_t(source.firstTriangle)+12;++k)
+                    skipSource[k]=1;
+            }
+        }
+        if(useFoliageInstancing && !scene.sourceFoliage.empty()){
+            for(const SourceFoliage& source:scene.sourceFoliage){
+                const size_t begin=source.firstTriangle,end=begin+source.triangleCount;
+                if(!source.triangleCount||end>scene.obj.size()||
+                    source.material>=scene.mat.size()||
+                    scene.mat[source.material].transmissionPercent>0||
+                    source.radii.x<=0||source.radii.y<=0||source.radii.z<=0)continue;
+                bool valid=true;
+                for(size_t k=begin;k<end;++k){
+                    if(skipSource[k]||scene.obj[k].kind!=Kind::Triangle||
+                       scene.obj[k].mat!=source.material){valid=false;break;}
+                }
+                if(!valid)continue;
+                GpuEllipseInstance canopy{};
+                canopy.center[0]=source.center.x;
+                canopy.center[1]=source.center.y;
+                canopy.center[2]=source.center.z;
+                canopy.radii[0]=source.radii.x;
+                canopy.radii[1]=source.radii.y;
+                canopy.radii[2]=source.radii.z;
+                canopy.material=source.material;
+                foliage_.push_back(canopy);
+                for(size_t k=begin;k<end;++k)skipSource[k]=1;
+            }
+        }
+        for(size_t objectIndex=0;objectIndex<scene.obj.size();++objectIndex){
+            if(!skipSource.empty() && skipSource[objectIndex])continue;
+            const Obj& o=scene.obj[objectIndex];
             const uint32_t m=o.mat;
             const float uvScale=uvScaleForMaterial(scene,m);
             mesh.transparentMaterial=m<scene.mat.size()&&scene.mat[m].transmissionPercent>0;
             if(o.kind==Kind::Triangle)mesh.tri(o.a,o.b,o.c,o.n0,o.n1,o.n2,o.uv0.x,o.uv0.y,o.uv1.x,o.uv1.y,o.uv2.x,o.uv2.y,m);
-            else if(o.kind==Kind::Box)mesh.box(o.mn,o.mx,m,uvScale);
+            else if(o.kind==Kind::Box){
+                if(useBoxInstancing && !mesh.transparentMaterial){
+                    GpuBoxInstance instance{};
+                    instance.lo[0]=o.mn.x;instance.lo[1]=o.mn.y;instance.lo[2]=o.mn.z;
+                    instance.hi[0]=o.mx.x;instance.hi[1]=o.mx.y;instance.hi[2]=o.mx.z;
+                    instance.uvScale=uvScale;instance.material=m;
+                    instance.size[0]=o.mx.x-o.mn.x;
+                    instance.size[1]=o.mx.y-o.mn.y;
+                    instance.size[2]=o.mx.z-o.mn.z;
+                    instance.uvMode=0;
+                    boxData.push_back(instance);
+                }else mesh.box(o.mn,o.mx,m,uvScale);
+            }
             else if(o.kind==Kind::RoundBox)mesh.roundedBox(o.mn,o.mx,o.r,m,uvScale);
-            else if(o.kind==Kind::Ellipse)mesh.ellipsoid(o.a,o.b,m);
+            else if(o.kind==Kind::Ellipse){
+                if(useEllipseInstancing && !mesh.transparentMaterial
+                   && o.b.x>0.f && o.b.y>0.f && o.b.z>0.f){
+                    GpuEllipseInstance instance{};
+                    instance.center[0]=o.a.x;instance.center[1]=o.a.y;instance.center[2]=o.a.z;
+                    instance.radii[0]=o.b.x;instance.radii[1]=o.b.y;instance.radii[2]=o.b.z;
+                    instance.material=m;
+                    ellipses_.push_back(instance);
+                }else mesh.ellipsoid(o.a,o.b,m);
+            }
             else if(o.kind==Kind::Capsule)mesh.capsule(o.a,o.b,o.r,m);
             else if(o.kind==Kind::Cone)mesh.frustum(o.a,o.n0,o.len,o.r,o.r1,m);
             mesh.transparentMaterial=false;
@@ -429,8 +1097,141 @@ private:
         }
         mesh.ground(scene);
         if(mesh.vertices.size()+mesh.transparent.size()*3>12000000u){error=L"Scène trop grande pour l’aperçu DirectX 11 (limite de sécurité mémoire).";return false;}
-        if(mesh.vertices.empty()&&mesh.transparent.empty()){error=L"La scène ne contient aucune géométrie affichable par DirectX 11.";return false;}
-        if(!mesh.vertices.empty()){D3D11_BUFFER_DESC bd{};bd.ByteWidth=UINT(mesh.vertices.size()*sizeof(GpuVertex));bd.Usage=D3D11_USAGE_IMMUTABLE;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;D3D11_SUBRESOURCE_DATA init{};init.pSysMem=mesh.vertices.data();if(FAILED(device_->CreateBuffer(&bd,&init,&vertices_))){error=L"Allocation de la géométrie dans la mémoire GPU impossible.";return false;}vertexCount_=UINT(mesh.vertices.size());}
+        if(mesh.vertices.empty()&&mesh.transparent.empty()&&boxData.empty()&&ellipses_.empty()&&foliage_.empty()){
+            error=L"La scène ne contient aucune géométrie affichable par DirectX 11.";return false;
+        }
+        if(!boxData.empty()){
+            // Reuse the exact 12-triangle cube winding and face normals of
+            // the existing MeshBuilder. One template is shared by all boxes.
+            MeshBuilder templateMesh;
+            templateMesh.box({0,0,0},{1,1,1},0,1.f);
+            if(templateMesh.vertices.size()!=36){
+                error=L"Maillage cube d'instancing incorrect.";return false;
+            }
+            D3D11_BUFFER_DESC bd{};
+            bd.ByteWidth=UINT(templateMesh.vertices.size()*sizeof(GpuVertex));
+            bd.Usage=D3D11_USAGE_IMMUTABLE;
+            bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;
+            D3D11_SUBRESOURCE_DATA init{};init.pSysMem=templateMesh.vertices.data();
+            if(FAILED(device_->CreateBuffer(&bd,&init,&boxVertices_))){
+                error=L"Allocation de la géométrie cube partagée impossible.";return false;
+            }
+            bd.ByteWidth=UINT(boxData.size()*sizeof(GpuBoxInstance));
+            init.pSysMem=boxData.data();
+            if(FAILED(device_->CreateBuffer(&bd,&init,&boxInstances_))){
+                error=L"Allocation des instances GPU impossible.";return false;
+            }
+            boxInstanceCount_=UINT(boxData.size());
+            constexpr size_t kBoxBatch=128;
+            for(size_t first=0;first<boxData.size();first+=kBoxBatch){
+                const size_t end=std::min(boxData.size(),first+kBoxBatch);
+                DrawChunk batch;
+                batch.first=UINT(first);batch.count=UINT(end-first);
+                batch.mn={boxData[first].lo[0],boxData[first].lo[1],boxData[first].lo[2]};
+                batch.mx={boxData[first].hi[0],boxData[first].hi[1],boxData[first].hi[2]};
+                for(size_t i=first+1;i<end;++i){
+                    const auto& box=boxData[i];
+                    for(int axis=0;axis<3;++axis){
+                        float *lo=axis==0?&batch.mn.x:axis==1?&batch.mn.y:&batch.mn.z;
+                        float *hi=axis==0?&batch.mx.x:axis==1?&batch.mx.y:&batch.mx.z;
+                        *lo=std::min(*lo,box.lo[axis]);
+                        *hi=std::max(*hi,box.hi[axis]);
+                    }
+                }
+                boxChunks_.push_back(batch);
+            }
+        }
+        if(!ellipses_.empty()){
+            // Low / medium / high: 8×16, 16×32 and 32×64. Shared meshes are
+            // authored once per scene; their UVs match legacy ellipsoids.
+            const int ringsLevels[]={8,16,32};
+            for(int lod=0;lod<3;++lod){
+                const int rings=ringsLevels[lod],slices=rings*2;
+                MeshBuilder sphere;
+                auto point=[&](int y,int x){
+                    const float phi=PI*float(y)/rings,theta=2.f*PI*float(x)/slices;
+                    return V{std::sin(phi)*std::cos(theta),std::cos(phi),
+                             std::sin(phi)*std::sin(theta)};
+                };
+                for(int y=0;y<rings;++y)for(int x=0;x<slices;++x){
+                    const V p00=point(y,x),p01=point(y,x+1);
+                    const V p10=point(y+1,x),p11=point(y+1,x+1);
+                    const float u0=2.5f*x/slices,u1=2.5f*(x+1)/slices;
+                    const float v0=float(y)/rings,v1=float(y+1)/rings;
+                    sphere.tri(p00,p10,p11,p00,p10,p11,u0,v0,u0,v1,u1,v1,0);
+                    sphere.tri(p00,p11,p01,p00,p11,p01,u0,v0,u1,v1,u1,v0,0);
+                }
+                D3D11_BUFFER_DESC bd{};
+                bd.ByteWidth=UINT(sphere.vertices.size()*sizeof(GpuVertex));
+                bd.Usage=D3D11_USAGE_IMMUTABLE;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;
+                D3D11_SUBRESOURCE_DATA init{};init.pSysMem=sphere.vertices.data();
+                if(FAILED(device_->CreateBuffer(&bd,&init,&ellipseVertices_[lod]))){
+                    error=L"Allocation des niveaux de détail ellipsoïdes impossible.";return false;
+                }
+                ellipseVertexCounts_[lod]=UINT(sphere.vertices.size());
+            }
+            D3D11_BUFFER_DESC bd{};
+            bd.ByteWidth=UINT(ellipses_.size()*sizeof(GpuEllipseInstance));
+            bd.Usage=D3D11_USAGE_DYNAMIC;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;
+            bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+            if(FAILED(device_->CreateBuffer(&bd,nullptr,&ellipseInstances_))){
+                error=L"Allocation du buffer dynamique des ellipsoïdes impossible.";return false;
+            }
+            ellipseInstanceCount_=UINT(ellipses_.size());
+        }
+        if(!foliage_.empty()){
+            const int segmentLevels[]={8,12,18};
+            const int ringLevels[]={4,6,9};
+            const int leafLevels[]={0,12,36};
+            for(int lod=0;lod<3;++lod){
+                const auto unit=makeFoliageTemplate(
+                    segmentLevels[lod],ringLevels[lod],leafLevels[lod]);
+                if(unit.empty()){error=L"Le maillage LOD du feuillage est vide.";return false;}
+                D3D11_BUFFER_DESC bd{};
+                bd.ByteWidth=UINT(unit.size()*sizeof(GpuVertex));
+                bd.Usage=D3D11_USAGE_IMMUTABLE;
+                bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;
+                D3D11_SUBRESOURCE_DATA init{};init.pSysMem=unit.data();
+                if(FAILED(device_->CreateBuffer(&bd,&init,&foliageVertices_[lod]))){
+                    error=L"Allocation des maillages LOD du feuillage impossible.";return false;
+                }
+                foliageVertexCounts_[lod]=UINT(unit.size());
+            }
+            D3D11_BUFFER_DESC bd{};
+            bd.ByteWidth=UINT(foliage_.size()*sizeof(GpuEllipseInstance));
+            bd.Usage=D3D11_USAGE_DYNAMIC;
+            bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;
+            bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+            if(FAILED(device_->CreateBuffer(&bd,nullptr,&foliageInstances_))){
+                error=L"Allocation des instances de feuillage impossible.";return false;
+            }
+            foliageInstanceCount_=UINT(foliage_.size());
+        }
+        if(!mesh.vertices.empty()){
+            // 4096 triangles per batch. Bounding boxes are derived from the
+            // real emitted vertices: this also works for complicated shapes,
+            // foliage and the appended world ground without OBJ assumptions.
+            constexpr size_t kChunkVertices=3u*4096u;
+            for(size_t start=0;start<mesh.vertices.size();start+=kChunkVertices){
+                const size_t end=std::min(start+kChunkVertices,mesh.vertices.size());
+                DrawChunk chunk;
+                chunk.first=UINT(start);
+                chunk.count=UINT(end-start);
+                const auto& first=mesh.vertices[start];
+                chunk.mn={first.p[0],first.p[1],first.p[2]};
+                chunk.mx=chunk.mn;
+                for(size_t i=start+1;i<end;++i){
+                    const auto& v=mesh.vertices[i];
+                    chunk.mn.x=std::min(chunk.mn.x,v.p[0]);
+                    chunk.mn.y=std::min(chunk.mn.y,v.p[1]);
+                    chunk.mn.z=std::min(chunk.mn.z,v.p[2]);
+                    chunk.mx.x=std::max(chunk.mx.x,v.p[0]);
+                    chunk.mx.y=std::max(chunk.mx.y,v.p[1]);
+                    chunk.mx.z=std::max(chunk.mx.z,v.p[2]);
+                }
+                chunks_.push_back(chunk);
+            }
+            D3D11_BUFFER_DESC bd{};bd.ByteWidth=UINT(mesh.vertices.size()*sizeof(GpuVertex));bd.Usage=D3D11_USAGE_IMMUTABLE;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;D3D11_SUBRESOURCE_DATA init{};init.pSysMem=mesh.vertices.data();if(FAILED(device_->CreateBuffer(&bd,&init,&vertices_))){error=L"Allocation de la géométrie dans la mémoire GPU impossible.";return false;}vertexCount_=UINT(mesh.vertices.size());}
         if(!mesh.transparent.empty()){D3D11_BUFFER_DESC bd{};bd.ByteWidth=UINT(mesh.transparent.size()*3*sizeof(GpuVertex));bd.Usage=D3D11_USAGE_DYNAMIC;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;if(FAILED(device_->CreateBuffer(&bd,nullptr,&transparentVertices_))){error=L"Allocation du tampon des surfaces transparentes impossible.";return false;}}
         transparent_=std::move(mesh.transparent);
         UINT texSize=512;for(const Material& material:scene.mat){if(!material.colorMip.empty())texSize=std::max(texSize,material.colorMip.front().size);else if(!material.mip.empty())texSize=std::max(texSize,material.mip.front().size);}const UINT matCount=UINT(std::max<size_t>(1,scene.mat.size()));
@@ -484,6 +1285,9 @@ private:
         D3D11_SHADER_RESOURCE_VIEW_DESC sv{};sv.Format=td.Format;sv.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2DARRAY;sv.Texture2DArray.MipLevels=mipLevels;sv.Texture2DArray.ArraySize=matCount;
         if(FAILED(device_->CreateShaderResourceView(texture.Get(),&sv,&albedo_))){error=L"Création de la table de textures DirectX 11 impossible.";return false;}
         td.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
+        // SRV format must match the typed normal-map resource. Keeping the
+        // previous albedo SRGB view description causes E_INVALIDARG on D3D11.
+        sv.Format=td.Format;
         ComPtr<ID3D11Texture2D> normalTexture;
         if(FAILED(device_->CreateTexture2D(&td,normalSub.data(),&normalTexture))){error=L"Chargement des normales dans DirectX 11 impossible.";return false;}
         if(FAILED(device_->CreateShaderResourceView(normalTexture.Get(),&sv,&normal_))){error=L"Création de la table de normales DirectX 11 impossible.";return false;}
@@ -491,21 +1295,36 @@ private:
         if(FAILED(device_->CreateTexture2D(&td,roughSub.data(),&roughTexture))){error=L"Chargement des rugosités dans DirectX 11 impossible.";return false;}
         sv.Format=td.Format;
         if(FAILED(device_->CreateShaderResourceView(roughTexture.Get(),&sv,&roughness_))){error=L"Création de la table de rugosités DirectX 11 impossible.";return false;}
-        sceneKey_=scene.obj.data();objectCount_=scene.obj.size();return true;
+        sceneKey_=scene.obj.data();objectCount_=scene.obj.size();
+        sceneIdentity_=scene.gpuCacheIdentity;sceneRevision_=scene.gpuCacheRevision;
+        boxInstancingEnabled_=useBoxInstancing;
+        ellipseInstancingEnabled_=useEllipseInstancing;
+        foliageInstancingEnabled_=useFoliageInstancing;
+        return true;
     }
-    bool ensureTargets(int w,int h,std::wstring& error) {
-        if(w==width_&&h==height_&&target_)return true;
-        width_=w;height_=h;target_.Reset();resolve_.Reset();rtv_.Reset();staging_.Reset();depthTexture_.Reset();dsv_.Reset();
+    bool ensureTargets(int w,int h,unsigned msaa,std::wstring& error) {
+        if(w==width_&&h==height_&&target_&&msaaPreference_==msaa)return true;
+        if(!pending_.empty()){
+            error=L"Vider les images GPU différées avant de changer de résolution.";
+            return false;
+        }
+        for(auto& slot:readbackSlots_)slot=ReadbackSlot{};
+        readbackDepth_=0;nextReadbackSlot_=0;
+        width_=w;height_=h;msaaPreference_=msaa;
+        target_.Reset();resolve_.Reset();rtv_.Reset();depthTexture_.Reset();dsv_.Reset();
         sampleCount_=1;sampleQuality_=0;
-        for(UINT candidate:{4u,2u}){
+        for(UINT candidate:{8u,4u,2u}){
+            if(candidate>msaa)continue;
             UINT levels=0,depthLevels=0;
             if(SUCCEEDED(device_->CheckMultisampleQualityLevels(DXGI_FORMAT_R8G8B8A8_UNORM,candidate,&levels))&&levels>0&&
                SUCCEEDED(device_->CheckMultisampleQualityLevels(DXGI_FORMAT_D24_UNORM_S8_UINT,candidate,&depthLevels))&&depthLevels>0){
                 sampleCount_=candidate;sampleQuality_=std::min(levels,depthLevels)-1;break;
             }
         }
-        D3D11_TEXTURE2D_DESC td{};td.Width=UINT(w);td.Height=UINT(h);td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_R8G8B8A8_UNORM;td.SampleDesc.Count=sampleCount_;td.SampleDesc.Quality=sampleQuality_;td.Usage=D3D11_USAGE_DEFAULT;td.BindFlags=D3D11_BIND_RENDER_TARGET;
+        D3D11_TEXTURE2D_DESC td{};td.Width=UINT(w);td.Height=UINT(h);td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_R8G8B8A8_TYPELESS;td.SampleDesc.Count=sampleCount_;td.SampleDesc.Quality=sampleQuality_;td.Usage=D3D11_USAGE_DEFAULT;td.BindFlags=D3D11_BIND_RENDER_TARGET;
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&target_))){error=L"Création de la cible image DirectX 11 impossible.";return false;}
+        // The render target must be TYPELESS for an sRGB RTV on D3D11/WARP.
+        // A typed UNORM texture with an sRGB view fails E_INVALIDARG.
         D3D11_RENDER_TARGET_VIEW_DESC rtvDesc{};rtvDesc.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;rtvDesc.ViewDimension=sampleCount_>1?D3D11_RTV_DIMENSION_TEXTURE2DMS:D3D11_RTV_DIMENSION_TEXTURE2D;
         if(sampleCount_==1)rtvDesc.Texture2D.MipSlice=0;
         if(FAILED(device_->CreateRenderTargetView(target_.Get(),&rtvDesc,&rtv_))){error=L"Création de la cible sRGB DirectX 11 impossible.";return false;}
@@ -513,21 +1332,143 @@ private:
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&resolve_))){error=L"Création de la cible de résolution DirectX 11 impossible.";return false;}
         td.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;td.SampleDesc.Count=sampleCount_;td.SampleDesc.Quality=sampleQuality_;td.BindFlags=D3D11_BIND_DEPTH_STENCIL;
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&depthTexture_))||FAILED(device_->CreateDepthStencilView(depthTexture_.Get(),nullptr,&dsv_))){error=L"Création du tampon de profondeur DirectX 11 impossible.";return false;}
-        td.Format=DXGI_FORMAT_R8G8B8A8_UNORM;td.SampleDesc.Count=1;td.SampleDesc.Quality=0;td.Usage=D3D11_USAGE_STAGING;td.BindFlags=0;td.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
-        if(FAILED(device_->CreateTexture2D(&td,nullptr,&staging_))){error=L"Création du tampon de lecture DirectX 11 impossible.";return false;}return true;
+        return true;
     }
-    ComPtr<ID3D11Device> device_;ComPtr<ID3D11DeviceContext> context_;ComPtr<ID3D11VertexShader> vs_;ComPtr<ID3D11PixelShader> ps_;ComPtr<ID3D11InputLayout> layout_;
-    ComPtr<ID3D11Buffer> constants_,vertices_,transparentVertices_;ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_;ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<TransparentTriangle> transparent_;
-    ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_,staging_;ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
-    const Obj* sceneKey_=nullptr;size_t objectCount_=0;UINT vertexCount_=0;UINT sampleCount_=1,sampleQuality_=0;int width_=0,height_=0;
+    bool ensureAnisotropy(unsigned aniso,std::wstring& error){
+        if(sampler_&&samplerAnisotropy_==aniso)return true;
+        D3D11_SAMPLER_DESC sd{};
+        sd.Filter=aniso>1?D3D11_FILTER_ANISOTROPIC:D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+        sd.MaxAnisotropy=aniso;
+        sd.AddressU=sd.AddressV=sd.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;
+        sd.MaxLOD=D3D11_FLOAT32_MAX;
+        ComPtr<ID3D11SamplerState> selected;
+        if(FAILED(device_->CreateSamplerState(&sd,&selected))){
+            error=L"Réglage anisotropique DirectX 11 non disponible.";return false;
+        }
+        sampler_=std::move(selected);
+        samplerAnisotropy_=aniso;
+        return true;
+    }
+    bool ensureReadback(unsigned depth,int w,int h,std::wstring& error){
+        if(depth==readbackDepth_ && readbackSlots_[0].staging)return true;
+        if(!pending_.empty()){
+            error=L"La profondeur de lecture GPU ne peut changer tant que des images sont en attente.";
+            return false;
+        }
+        for(auto& slot:readbackSlots_)slot=ReadbackSlot{};
+        nextReadbackSlot_=0;readbackDepth_=0;
+        D3D11_TEXTURE2D_DESC td{};
+        td.Width=UINT(w);td.Height=UINT(h);td.MipLevels=1;td.ArraySize=1;
+        td.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
+        td.SampleDesc.Count=1;td.SampleDesc.Quality=0;
+        td.Usage=D3D11_USAGE_STAGING;td.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+        for(unsigned i=0;i<depth;++i){
+            auto& slot=readbackSlots_[i];
+            if(FAILED(device_->CreateTexture2D(&td,nullptr,&slot.staging))){
+                error=L"Impossible de créer les tampons de lecture GPU différée.";
+                return false;
+            }
+            slot.width=w;slot.height=h;
+            // Timestamp/disjoint queries are optional on older drivers;
+            // rendering and byte-identical readback still work without them.
+            D3D11_QUERY_DESC qd{};
+            qd.Query=D3D11_QUERY_TIMESTAMP_DISJOINT;
+            const bool disjointOk=SUCCEEDED(device_->CreateQuery(&qd,&slot.disjoint));
+            qd.Query=D3D11_QUERY_TIMESTAMP;
+            const bool timestampsOk=disjointOk &&
+                SUCCEEDED(device_->CreateQuery(&qd,&slot.start)) &&
+                SUCCEEDED(device_->CreateQuery(&qd,&slot.afterDraw)) &&
+                SUCCEEDED(device_->CreateQuery(&qd,&slot.afterCopy));
+            slot.queryReady=disjointOk&&timestampsOk;
+        }
+        readbackDepth_=depth;
+        return true;
+    }
+    ComPtr<ID3D11Device> device_;ComPtr<ID3D11DeviceContext> context_;
+    ComPtr<ID3D11VertexShader> vs_,boxVs_,ellipseVs_;
+    ComPtr<ID3D11PixelShader> ps_;
+    ComPtr<ID3D11InputLayout> layout_,boxLayout_,ellipseLayout_;
+    ComPtr<ID3D11Buffer> constants_,vertices_,transparentVertices_,boxVertices_,boxInstances_,ellipseInstances_,foliageInstances_;
+    std::array<ComPtr<ID3D11Buffer>,3> ellipseVertices_;
+    std::array<UINT,3> ellipseVertexCounts_{{0,0,0}};
+    std::vector<GpuEllipseInstance> ellipses_;
+    UINT ellipseInstanceCount_=0;
+    std::array<ComPtr<ID3D11Buffer>,3> foliageVertices_;
+    std::array<UINT,3> foliageVertexCounts_{{0,0,0}};
+    std::vector<GpuEllipseInstance> foliage_;
+    UINT foliageInstanceCount_=0;
+    ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_;ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<TransparentTriangle> transparent_;
+    ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_;
+    std::array<ReadbackSlot,3> readbackSlots_;
+    std::deque<unsigned> pending_;
+    unsigned readbackDepth_=0,nextReadbackSlot_=0;
+    uint64_t lastSubmissionQualityBits_=defaultQualityBits;
+    ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
+    std::vector<DrawChunk> chunks_,boxChunks_;
+    UINT boxInstanceCount_=0;
+    unsigned msaaPreference_=0,samplerAnisotropy_=16;
+    bool boxInstancingEnabled_=false,ellipseInstancingEnabled_=false,foliageInstancingEnabled_=false;
+    const Obj* sceneKey_=nullptr;size_t objectCount_=0;uint64_t sceneIdentity_=0,sceneRevision_=0;UINT vertexCount_=0;UINT sampleCount_=1,sampleQuality_=0;int width_=0,height_=0;
 };
 }
+RasterQualitySettings rasterQualityProfile(RasterQualityProfile preset){
+    RasterQualitySettings q;
+    switch(preset){
+    case RasterQualityProfile::Performance:
+        q.msaaSamples=1;q.anisotropy=2;q.lodQualityPercent=60;break;
+    case RasterQualityProfile::Balanced:
+        q.msaaSamples=2;q.anisotropy=8;q.lodQualityPercent=85;break;
+    case RasterQualityProfile::High:
+        q.msaaSamples=4;q.anisotropy=16;q.lodQualityPercent=100;break;
+    case RasterQualityProfile::Ultra:
+        q.msaaSamples=8;q.anisotropy=16;q.lodQualityPercent=200;
+        q.dynamicLod=false;break;
+    }
+    return q;
+}
+RasterQualitySettings rasterQualitySettings(){
+    return unpackQuality(gpuQualityBits.load(std::memory_order_acquire));
+}
+bool setRasterQualitySettings(const RasterQualitySettings& q,std::wstring& error){
+    const auto validSample=q.msaaSamples==1||q.msaaSamples==2||q.msaaSamples==4||q.msaaSamples==8;
+    const auto validAniso=q.anisotropy==1||q.anisotropy==2||
+        q.anisotropy==4||q.anisotropy==8||q.anisotropy==16;
+    if(!validSample||!validAniso||q.lodQualityPercent<50||q.lodQualityPercent>200){
+        error=L"Réglages DX11 invalides : MSAA 1/2/4/8, anisotropie 1/2/4/8/16, LOD 50..200%.";
+        return false;
+    }
+    gpuQualityBits.store(packQuality(q),std::memory_order_release);
+    return true;
+}
+static DirectX11Preview& rasterThreadContext(){
+    thread_local DirectX11Preview renderer;
+    return renderer;
+}
 bool renderDirectX11Preview(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error) {
-    thread_local DirectX11Preview renderer;return renderer.render(scene,shadows,cam,w,h,pixels,stats,error);
+    return rasterThreadContext().render(scene,shadows,cam,w,h,pixels,stats,error);
+}
+bool enqueueDirectX11Preview(const Scene& scene,const ShadowMap& shadows,const Camera& cam,
+                            int w,int h,unsigned depth,std::wstring& error){
+    return rasterThreadContext().enqueue(scene,shadows,cam,w,h,depth,error);
+}
+bool receiveDirectX11Preview(std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error){
+    return rasterThreadContext().receive(pixels,stats,error);
 }
 }
 #else
 namespace m3d {
+RasterQualitySettings rasterQualityProfile(RasterQualityProfile p){
+    RasterQualitySettings q;
+    if(p==RasterQualityProfile::Performance){q.msaaSamples=1;q.anisotropy=2;q.lodQualityPercent=60;}
+    else if(p==RasterQualityProfile::Balanced){q.msaaSamples=2;q.anisotropy=8;q.lodQualityPercent=85;}
+    else if(p==RasterQualityProfile::High){q.lodQualityPercent=100;}
+    else if(p==RasterQualityProfile::Ultra){q.msaaSamples=8;q.lodQualityPercent=200;q.dynamicLod=false;}
+    return q;
+}
+RasterQualitySettings rasterQualitySettings(){return RasterQualitySettings{};}
+bool setRasterQualitySettings(const RasterQualitySettings&,std::wstring& error){error=L"DirectX 11 indisponible sur cet OS.";return false;}
 bool renderDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,std::vector<uint32_t>&,Stats&,std::wstring& error) { error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false; }
+bool enqueueDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,unsigned,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}
+bool receiveDirectX11Preview(std::vector<uint32_t>&,Stats&,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}
 }
 #endif

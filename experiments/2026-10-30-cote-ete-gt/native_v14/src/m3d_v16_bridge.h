@@ -4,6 +4,7 @@
 #include <QHash>
 #include <QString>
 #include <vector>
+#include <functional>
 
 namespace m3d::v16 {
 struct CameraPreset {
@@ -23,12 +24,19 @@ struct Runtime {
     QString title;
     int textureResolution=0;
     float daylightHour=15.f;
+    // Stage wall times measured during scene preparation (not rendering).
+    // Exposed for V17 benchmarks and embedding applications to distinguish
+    // expensive PBR generation from geometry instancing and BVH building.
+    double pbrBuildMs=0,geometryBuildMs=0,bvhBuildMs=0;
 };
 struct BuildResult {
     Runtime runtime;
     QString error;
     explicit operator bool() const { return error.isEmpty(); }
 };
-BuildResult buildRuntime(const SceneDatabase& source, int maxTextureResolution=2048);
+// Optional, thread-safe consumer callback. Reports completed real stages/items
+// in percent (not elapsed-time predictions) and their current description.
+BuildResult buildRuntime(const SceneDatabase& source, int maxTextureResolution=2048,
+    const std::function<void(int,const QString&)>& onProgress={});
 Camera makeCamera(const CameraPreset& preset, int width, int height);
 }

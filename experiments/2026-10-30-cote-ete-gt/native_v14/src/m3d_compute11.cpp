@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <system_error>
+#include <type_traits>
 #include <algorithm>
 using Microsoft::WRL::ComPtr;
 namespace m3d {
@@ -65,26 +66,63 @@ bool makePbrTextureArray(ID3D11Device* device,const std::vector<Material>& mater
    const uint32_t size=gpuTextureBaseSize>>mip;
    const UINT index=D3D11CalcSubresource(mip,materialIndex*3u+kind,levels);
    auto& colors=pixels[index];colors.resize(size_t(size)*size);
+   // Material texture resolutions are allowed to differ (64..2048).
+   // The Compute atlas has a fixed 512px base to bound integrated-GPU memory.
+   // Prefer an exact existing mip; otherwise use the nearest *higher*
+   // resolution, or the largest available level for undersized materials.
+   // This preserves all authored texels for exact matches and never rejects
+   // an otherwise valid low-resolution material. Raster retains its own
+   // high-resolution PBR textures unchanged.
+   auto chooseLevel=[&](const auto& chain){
+    using Element=typename std::decay_t<decltype(chain)>::value_type;
+    const Element* selected=nullptr;
+    for(const auto& candidate:chain){
+     if(candidate.size==0||candidate.p.size()!=size_t(candidate.size)*candidate.size)
+      continue;
+     if(candidate.size==size){selected=&candidate;break;}
+     if(candidate.size>size){
+      if(!selected||selected->size<size||candidate.size<selected->size)
+       selected=&candidate;
+     }else if(!selected || (selected->size<size&&candidate.size>selected->size)){
+      selected=&candidate;
+     }
+    }
+    return selected;
+   };
    if(kind==0){
-    const auto level=std::find_if(material.colorMip.begin(),material.colorMip.end(),
-              [&](const ColorLevel& value){return value.size==size;});
-    if(level==material.colorMip.end()||level->p.size()!=colors.size()){
-     error=L"Chaîne mip couleur manquante sur un matériau";return false;
+    const auto* level=chooseLevel(material.colorMip);
+    if(!level){
+     error=L"Chaîne mip couleur vide ou invalide : matériau "
+           +std::wstring(material.name.begin(),material.name.end());
+     return false;
     }
-    for(size_t k=0;k<colors.size();++k)colors[k]=colorRgba(level->p[k]);
-   } else {
+    const UINT sourceSize=level->size;
+    for(UINT y=0;y<size;++y){
+     const size_t srcY=size_t(y)*sourceSize/size;
+     for(UINT x=0;x<size;++x){
+      const size_t srcX=size_t(x)*sourceSize/size;
+      colors[size_t(y)*size+x]=colorRgba(level->p[srcY*sourceSize+srcX]);
+     }
+    }
+   }else{
     const auto& chain=kind==1?material.normalMip:material.roughnessMip;
-    const auto level=std::find_if(chain.begin(),chain.end(),
-              [&](const Level& value){return value.size==size;});
-    if(level==chain.end()||level->p.size()!=colors.size()){
-     error=L"Chaîne mip normale/rugosité manquante sur un matériau";return false;
+    const auto* level=chooseLevel(chain);
+    if(!level){
+     error=L"Chaîne mip normale/rugosité vide ou invalide : matériau "
+           +std::wstring(material.name.begin(),material.name.end());
+     return false;
     }
-    for(size_t k=0;k<colors.size();++k){
-     const uint32_t rgb=packed565Rgba(level->p[k]);
-     if(kind==1)colors[k]=rgb;
-     else {
-      const uint32_t rough=rgb&255u;
-      colors[k]=rgba8(rough,rough,rough);
+    const UINT sourceSize=level->size;
+    for(UINT y=0;y<size;++y){
+     const size_t srcY=size_t(y)*sourceSize/size;
+     for(UINT x=0;x<size;++x){
+      const size_t srcX=size_t(x)*sourceSize/size;
+      const uint32_t rgb=packed565Rgba(level->p[srcY*sourceSize+srcX]);
+      if(kind==1)colors[size_t(y)*size+x]=rgb;
+      else{
+       const uint32_t rough=rgb&255u;
+       colors[size_t(y)*size+x]=rgba8(rough,rough,rough);
+      }
      }
     }
    }
