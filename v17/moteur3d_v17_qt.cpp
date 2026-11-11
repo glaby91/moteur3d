@@ -1,4 +1,5 @@
 #include "m3d_engine.h"
+#include "src/m3d_walk_controller.h"
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
 #include <QAction>
@@ -299,6 +300,8 @@ private:
     QSet<int> keysDown_;
     QPoint previousMouse_;
     v16::CameraPreset freeCamera_;
+    walk::State walkingState_{};
+    QCheckBox* walkingModeBox_=nullptr;
     bool exploring_=false,freeCameraActive_=false,leftMouseHeld_=false;
     float yaw_=0.f,pitch_=0.f;
     QPushButton* explorationButton_=nullptr;
@@ -311,6 +314,11 @@ private:
         yaw_=std::atan2(dir.x,-dir.z);
         pitch_=std::asin(clampf(dir.y,-.99f,.99f));
         freeCameraActive_=true;
+        if(walkingModeBox_&&walkingModeBox_->isChecked()){
+            walk::spawn(runtime_->renderScene,freeCamera_.eye,walkingState_);
+            freeCamera_.eye=walk::eye(walkingState_);
+            updateLook();
+        }
     }
     void updateLook(){
         const V forward{std::sin(yaw_)*std::cos(pitch_),std::sin(pitch_),
@@ -324,7 +332,8 @@ private:
         leftMouseHeld_=false;
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Démarrer exploration (V17)"));
         if(explorationHelp_)explorationHelp_->setText(QStringLiteral(
-            "ZQSD / flèches : mouvement · clic gauche + souris : regarder · Maj : accélérer · Échap : arrêter"));
+            "ZQSD / flèches : marcher · clic gauche + souris : regarder · Maj : accélérer · Échap : arrêter\n"
+            "En mode vol libre : Espace / Ctrl pour monter ou descendre."));
     }
     void toggleExploration(){
         if(exploring_){stopExploration();return;}
@@ -350,11 +359,22 @@ private:
         if(keysDown_.contains(Qt::Key_S)||keysDown_.contains(Qt::Key_Down))move=move-horizontal;
         if(keysDown_.contains(Qt::Key_D)||keysDown_.contains(Qt::Key_Right))move=move+right;
         if(keysDown_.contains(Qt::Key_Q)||keysDown_.contains(Qt::Key_A)||keysDown_.contains(Qt::Key_Left))move=move-right;
-        if(keysDown_.contains(Qt::Key_Space))move.y+=1.f;
-        if(keysDown_.contains(Qt::Key_Control))move.y-=1.f;
-        if(length(move)>.01f){
-            freeCamera_.eye=freeCamera_.eye+norm(move)*(dt*(keysDown_.contains(Qt::Key_Shift)?7.f:2.5f));
-            updateLook();
+        if(walkingModeBox_&&walkingModeBox_->isChecked()){
+            // Walking is always horizontal input. Height follows geometry:
+            // floor, stairs, landings, slopes and gravity on unsupported areas.
+            const float speed=keysDown_.contains(Qt::Key_Shift)?4.5f:2.5f;
+            const V displacement=length(move)>.01f?norm(move)*(dt*speed):V{};
+            const V oldEye=freeCamera_.eye;
+            walk::advance(runtime_->renderScene,walkingState_,displacement,dt);
+            freeCamera_.eye=walk::eye(walkingState_);
+            if(length(freeCamera_.eye-oldEye)>.00001f)updateLook();
+        }else{
+            if(keysDown_.contains(Qt::Key_Space))move.y+=1.f;
+            if(keysDown_.contains(Qt::Key_Control))move.y-=1.f;
+            if(length(move)>.01f){
+                freeCamera_.eye=freeCamera_.eye+norm(move)*(dt*(keysDown_.contains(Qt::Key_Shift)?7.f:2.5f));
+                updateLook();
+            }
         }
         // Avoid queued stale frames. CPU draw/readback is still a V17-1
         // limitation and cannot yet guarantee the 25 ms target.
@@ -813,11 +833,31 @@ private:
                 [this](bool){applyRasterSettings(true);});
         explorationButton_=new QPushButton(QStringLiteral("Démarrer exploration (V17)"));
         vertical->addWidget(explorationButton_);
+        walkingModeBox_=new QCheckBox(QStringLiteral("Marcher au sol (yeux à 1,70 m, escaliers et obstacles)"));
+        walkingModeBox_->setToolTip(QStringLiteral(
+            "Marche à hauteur d'homme, monte les marches de 34 cm au maximum,\n"
+            "descend les paliers et bloque les murs. Décochez pour voler librement."));
+        QSettings walkPreferences(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+        walkingModeBox_->setChecked(walkPreferences.value(QStringLiteral("Exploration/Walking"),true).toBool());
+        vertical->addWidget(walkingModeBox_);
         explorationHelp_=new QLabel(QStringLiteral(
-            "ZQSD / flèches : mouvement · clic gauche + souris : regarder · Maj : accélérer · Échap : arrêter"));
+            "ZQSD / flèches : marcher · clic gauche + souris : regarder · Maj : accélérer · Échap : arrêter\n"
+            "En mode vol libre : Espace / Ctrl pour monter ou descendre."));
         explorationHelp_->setWordWrap(true);
         vertical->addWidget(explorationHelp_);
         connect(explorationButton_,&QPushButton::clicked,this,[this]{toggleExploration();});
+        connect(walkingModeBox_,&QCheckBox::toggled,this,[this](bool enabled){
+            QSettings preferences(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+            preferences.setValue(QStringLiteral("Exploration/Walking"),enabled);
+            if(exploring_&&freeCameraActive_&&runtime_){
+                if(enabled){
+                    walk::spawn(runtime_->renderScene,freeCamera_.eye,walkingState_);
+                    freeCamera_.eye=walk::eye(walkingState_);
+                    updateLook();
+                }
+                requestRender();
+            }
+        });
         auto* renderButton=new QPushButton(QStringLiteral("Calculer l'image"));
         vertical->addWidget(renderButton);
         auto* materials=new QGroupBox(QStringLiteral("Matériau sélectionné"));

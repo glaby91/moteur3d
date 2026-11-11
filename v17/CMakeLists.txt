@@ -170,6 +170,16 @@ if(WIN32)
     if(MSVC)
         target_compile_options(v17_pbr_compute_smoke PRIVATE /O2 /EHsc /utf-8)
     endif()
+    # Pure CPU walker regression, no Qt or DXR requirement.
+    add_executable(v17_walk_controller_smoke "tests/walk_controller_smoke.cpp")
+    target_include_directories(v17_walk_controller_smoke PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+    target_link_libraries(v17_walk_controller_smoke PRIVATE moteur3d_v16_core)
+    if(MSVC)
+        target_compile_options(v17_walk_controller_smoke PRIVATE /O2 /EHsc /utf-8)
+    endif()
+    add_test(NAME v17_walk_stairs_collision COMMAND v17_walk_controller_smoke)
+    set_tests_properties(v17_walk_stairs_collision PROPERTIES TIMEOUT 30)
     add_executable(v17_raster_warp_smoke "tests/raster_warp_smoke.cpp")
     target_include_directories(v17_raster_warp_smoke PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
