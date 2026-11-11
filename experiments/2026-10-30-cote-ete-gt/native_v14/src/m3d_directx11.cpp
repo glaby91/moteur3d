@@ -1,4 +1,5 @@
 #include "m3d_engine.h"
+#include "m3d_gi_bake.h"
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -31,6 +32,12 @@ std::atomic<uint64_t> gpuQualityBits{defaultQualityBits};
 std::atomic<bool> hybridLighting{false};
 // Separate, independently reversible display-referred highlight compression.
 std::atomic<bool> filmicTonemap{false};
+// The GUI sets this to scene.json.m3dgi. Updated only on user action or
+// scene loading; render worker snapshots it when creating its probe texture.
+std::mutex giPathMutex;
+std::filesystem::path giFilePath;
+std::atomic<uint64_t> giFileRevision{1};
+std::atomic<bool> giTableLoaded{false};
 struct HourlyIrradiance { V sky,bounce,sun; };
 // Bake 25 half-hour samples once. This is a temporal irradiance LUT, not
 // a substitute for fully ray-traced light transport. Spatial influence comes
@@ -152,6 +159,7 @@ Texture2D<float> shadowDepth : register(t1);
 Texture2DArray<float> roughnessMap : register(t2);
 Texture2DArray<float4> normalMap : register(t3);
 Texture3D<float4> indirectProbes : register(t4);
+Texture3D<float4> indirectProbesNext : register(t5);
 SamplerState wrapSampler : register(s0);
 SamplerState probeSampler : register(s1);
 struct VSIn { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; uint mat:MATERIAL; };
@@ -313,6 +321,10 @@ float4 PSMain(VSOut i):SV_TARGET {
         // full-strength light pass. This prevents washed-out concrete.
         float3 position=saturate((i.world-probeOrigin.xyz)*probeInvSpan.xyz);
         float4 probe=indirectProbes.SampleLevel(probeSampler,position,0);
+        if(hybridControls.w>.5){
+            const float4 nextProbe=indirectProbesNext.SampleLevel(probeSampler,position,0);
+            probe=lerp(probe,nextProbe,hybridControls.y);
+        }
         float skyVisibility=saturate(probe.a);
         float upward=saturate(normal.y*.5+.5);
         float existingAmbient=(diffuseTerms.x+diffuseTerms.y*diffuseTerms.w)*skyFill;
@@ -331,6 +343,11 @@ float4 PSMain(VSOut i):SV_TARGET {
                          *(.12+.18*(1.0-upward))
                          *(.80-.30*skyVisibility);
         float3 indirect=accessibleSky+reflected;
+        if(hybridControls.w>.5){
+            // The offline cache stores real surface-to-probe illumination.
+            // Do not re-color it using the old empirical sky/bounce terms.
+            indirect=max(probe.rgb,0.0);
+        }
         color+=base*(indirect-existingAmbient);
         // The existing shadow map and dynamic direct sun remain unchanged;
         // gently tint only the direct contribution at warm solar hours.
@@ -600,6 +617,7 @@ public:
         }
         if(!ensureDevice(error)||!ensureScene(scene,error)||!ensureShadow(shadows,error)||
            (hybrid&&!ensureProbeVolume(scene,error))||
+           (hybrid&&!ensureGiHours(error))||
            !ensureTargets(w,h,quality.msaaSamples,error)||
            !ensureAnisotropy(quality.anisotropy,error)||
            !ensureReadback(depth,w,h,error))return false;
@@ -625,6 +643,8 @@ public:
             cb.probeOrigin[0]=probeOrigin_.x;cb.probeOrigin[1]=probeOrigin_.y;cb.probeOrigin[2]=probeOrigin_.z;
             cb.probeInvSpan[0]=probeInvSpan_.x;cb.probeInvSpan[1]=probeInvSpan_.y;cb.probeInvSpan[2]=probeInvSpan_.z;
             cb.hybridControls[0]=1.f;
+            cb.hybridControls[1]=giHourMix_;
+            cb.hybridControls[3]=hasBakedGi_?1.f:0.f;
         }
         cb.hybridControls[2]=tone?1.f:0.f;
         for(size_t m=0;m<scene.mat.size()&&m<256;m++){
@@ -704,7 +724,7 @@ public:
         UINT stride=sizeof(GpuVertex),offset=0;ID3D11Buffer* vb=vertices_.Get();context_->IASetInputLayout(layout_.Get());context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         context_->RSSetState(raster_.Get());context_->OMSetDepthStencilState(depth_.Get(),0);context_->VSSetShader(vs_.Get(),nullptr,0);context_->PSSetShader(ps_.Get(),nullptr,0);
         ID3D11Buffer* cbuff=constants_.Get();context_->VSSetConstantBuffers(0,1,&cbuff);context_->PSSetConstantBuffers(0,1,&cbuff);
-        ID3D11ShaderResourceView* srvs[]={albedo_.Get(),shadowSrv_.Get(),roughness_.Get(),normal_.Get(),hybrid?probeSrv_.Get():nullptr};context_->PSSetShaderResources(0,5,srvs);
+        ID3D11ShaderResourceView* srvs[]={albedo_.Get(),shadowSrv_.Get(),roughness_.Get(),normal_.Get(),hybrid?probeSrv_.Get():nullptr,hybrid?(hasBakedGi_?probeNextSrv_.Get():probeSrv_.Get()):nullptr};context_->PSSetShaderResources(0,6,srvs);
         ID3D11SamplerState* samplers[]={sampler_.Get(),probeSampler_.Get()};context_->PSSetSamplers(0,2,samplers);
         UINT submittedVertices=0;
         uint64_t drawCalls=0;
@@ -970,7 +990,31 @@ public:
     }
 private:
     bool ensureProbeVolume(const Scene& scene,std::wstring& error){
-        if(probeSrv_)return true;
+        const uint64_t version=giFileRevision.load(std::memory_order_acquire);
+        if(probeSrv_&&loadedGiFileRevision_==version)return true;
+        probeSrv_.Reset();probeTexture_.Reset();
+        probeNextSrv_.Reset();probeNextTexture_.Reset();
+        bakedGi_=gibake::Table{};hasBakedGi_=false;
+        lowFrame_=-1;highFrame_=-1;loadedGiFileRevision_=version;
+        std::filesystem::path cachePath;
+        {std::lock_guard<std::mutex> lock(giPathMutex);cachePath=giFilePath;}
+        if(!cachePath.empty()){
+            gibake::Table candidate;std::string reason;
+            if(gibake::readFile(cachePath,candidate,reason)&&
+               candidate.sceneHash==gibake::signature(scene)){
+                bakedGi_=std::move(candidate);
+                hasBakedGi_=true;
+                probeOrigin_=bakedGi_.origin;
+                probeInvSpan_={1.f/std::max(.001f,bakedGi_.span.x),
+                               1.f/std::max(.001f,bakedGi_.span.y),
+                               1.f/std::max(.001f,bakedGi_.span.z)};
+                giTableLoaded.store(true,std::memory_order_release);
+                return true;
+            }
+        }
+        giTableLoaded.store(false,std::memory_order_release);
+        // Compatibility fallback if a scene has not yet been baked. This
+        // retains the V17.310 reference path exactly and is NOT real GI.
         // Static, geometry-aware low-frequency indirect light probes.
         // A small capped volume keeps setup reasonable on Intel HD 620.
         constexpr UINT nx=16,ny=8,nz=16;
@@ -1045,6 +1089,37 @@ private:
             error=L"Échec de création des sondes d'éclairage indirect sur GPU.";
             probeTexture_.Reset();probeSrv_.Reset();return false;
         }
+        return true;
+    }
+    bool ensureGiHours(std::wstring& error){
+        if(!hasBakedGi_)return true;
+        unsigned lo=0,hi=0;float weight=0.f;
+        gibake::hourIndices(bakedGi_,solarHour,lo,hi,weight);
+        giHourMix_=weight;
+        if(lowFrame_==int(lo)&&highFrame_==int(hi)&&probeSrv_&&probeNextSrv_)
+            return true;
+        const UINT nx=bakedGi_.nx,ny=bakedGi_.ny,nz=bakedGi_.nz;
+        D3D11_TEXTURE3D_DESC td{};
+        td.Width=nx;td.Height=ny;td.Depth=nz;td.MipLevels=1;
+        td.Format=DXGI_FORMAT_R32G32B32A32_FLOAT;
+        td.Usage=D3D11_USAGE_IMMUTABLE;td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+        const size_t frameLength=bakedGi_.voxelCount()*4u;
+        auto build=[&](unsigned index,ComPtr<ID3D11Texture3D>& texture,
+                       ComPtr<ID3D11ShaderResourceView>& srv)->bool{
+            texture.Reset();srv.Reset();
+            D3D11_SUBRESOURCE_DATA data{};
+            data.pSysMem=bakedGi_.rgba.data()+frameLength*index;
+            data.SysMemPitch=nx*4u*sizeof(float);
+            data.SysMemSlicePitch=nx*ny*4u*sizeof(float);
+            return SUCCEEDED(device_->CreateTexture3D(&td,&data,&texture))&&
+                SUCCEEDED(device_->CreateShaderResourceView(texture.Get(),nullptr,&srv));
+        };
+        if(!build(lo,probeTexture_,probeSrv_)||
+           !build(hi,probeNextTexture_,probeNextSrv_)){
+            error=L"Échec des textures de table GI précalculée";
+            return false;
+        }
+        lowFrame_=int(lo);highFrame_=int(hi);
         return true;
     }
     bool ensureShadow(const ShadowMap& shadows,std::wstring& error) {
@@ -1189,7 +1264,10 @@ private:
         // An edited scene may retain the same std::vector address: revision
         // tracking is required to refresh its GPU PBR/mesh resources.
         vertices_.Reset();transparentVertices_.Reset();albedo_.Reset();
-        probeSrv_.Reset();probeTexture_.Reset(); // new scene/revision = new probe bake
+        probeSrv_.Reset();probeTexture_.Reset();
+        probeNextSrv_.Reset();probeNextTexture_.Reset();
+        hasBakedGi_=false;bakedGi_=gibake::Table{};
+        lowFrame_=-1;highFrame_=-1; // new scene/revision = reload GI cache
         boxVertices_.Reset();boxInstances_.Reset();boxInstanceCount_=0;
         roughness_.Reset();normal_.Reset();transparent_.clear();vertexCount_=0;
         chunks_.clear();boxChunks_.clear();
@@ -1598,7 +1676,13 @@ private:
     std::array<UINT,3> foliageVertexCounts_{{0,0,0}};
     std::vector<GpuEllipseInstance> foliage_;
     UINT foliageInstanceCount_=0;
-    ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_,probeSampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_,probeSrv_;ComPtr<ID3D11Texture3D> probeTexture_;V probeOrigin_{},probeInvSpan_{};ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<float> shadowUploadCache_;std::vector<TransparentTriangle> transparent_;
+    ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_,probeSampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_,probeSrv_;ComPtr<ID3D11Texture3D> probeTexture_,probeNextTexture_;
+    ComPtr<ID3D11ShaderResourceView> probeNextSrv_;
+    gibake::Table bakedGi_{};bool hasBakedGi_=false;
+    uint64_t loadedGiFileRevision_=0;
+    int lowFrame_=-1,highFrame_=-1;
+    float giHourMix_=0.f;
+    V probeOrigin_{},probeInvSpan_{};ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<float> shadowUploadCache_;std::vector<TransparentTriangle> transparent_;
     ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_;
     std::array<ReadbackSlot,3> readbackSlots_;
     std::deque<unsigned> pending_;
@@ -1635,6 +1719,12 @@ bool rasterHybridLightingEnabled(){return hybridLighting.load(std::memory_order_
 void setRasterHybridLightingEnabled(bool enabled){hybridLighting.store(enabled,std::memory_order_release);}
 bool rasterFilmicTonemapEnabled(){return filmicTonemap.load(std::memory_order_acquire);}
 void setRasterFilmicTonemapEnabled(bool enabled){filmicTonemap.store(enabled,std::memory_order_release);}
+void setRasterGiCachePath(const std::filesystem::path& file){
+    {std::lock_guard<std::mutex> lock(giPathMutex);giFilePath=file;}
+    giFileRevision.fetch_add(1,std::memory_order_acq_rel);
+    giTableLoaded.store(false,std::memory_order_release);
+}
+bool rasterGiCacheLoaded(){return giTableLoaded.load(std::memory_order_acquire);}
 bool setRasterQualitySettings(const RasterQualitySettings& q,std::wstring& error){
     const auto validSample=q.msaaSamples==1||q.msaaSamples==2||q.msaaSamples==4||q.msaaSamples==8;
     const auto validAniso=q.anisotropy==1||q.anisotropy==2||
@@ -1676,6 +1766,8 @@ bool rasterHybridLightingEnabled(){return false;}
 void setRasterHybridLightingEnabled(bool){}
 bool rasterFilmicTonemapEnabled(){return false;}
 void setRasterFilmicTonemapEnabled(bool){}
+void setRasterGiCachePath(const std::filesystem::path&){}
+bool rasterGiCacheLoaded(){return false;}
 bool setRasterQualitySettings(const RasterQualitySettings&,std::wstring& error){error=L"DirectX 11 indisponible sur cet OS.";return false;}
 bool renderDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,std::vector<uint32_t>&,Stats&,std::wstring& error) { error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false; }
 bool enqueueDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,unsigned,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}

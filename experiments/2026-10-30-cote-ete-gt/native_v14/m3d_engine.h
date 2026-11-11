@@ -118,6 +118,9 @@ void setRasterHybridLightingEnabled(bool enabled);
 // Filmic shoulder control is independent of probe GI, and defaults OFF.
 bool rasterFilmicTonemapEnabled();
 void setRasterFilmicTonemapEnabled(bool enabled);
+// Selects scene-specific offline GI cache, reloaded on every explicit set.
+void setRasterGiCachePath(const std::filesystem::path& path);
+bool rasterGiCacheLoaded();
 bool setRasterQualitySettings(const RasterQualitySettings& settings,std::wstring& error);
 
 // Experimental pipelined D3D11 readback. Enqueue issues an ordered frame render

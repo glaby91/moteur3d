@@ -50,6 +50,7 @@ jobs:
           foreach ($p in @("build-v17/Release/moteur3d_v17.exe",
                          "build-v17/Release/moteur3d_v16_core.dll",
                          "build-v17/Release/moteur3d_v17_benchmark.exe",
+                         "build-v17/Release/moteur3d_v17_gibake.exe",
                          "build-v17/Release/moteur3d_v17_campaign.exe",
                          "build-v17/Release/moteur3d_v17_benchui.exe",
                          "build-v17/Release/cse_warp_v17.ico",
@@ -270,6 +271,7 @@ jobs:
           New-Item -Type Directory -Path "dist-v17" -Force | Out-Null
           Copy-Item "build-v17/Release/moteur3d_v17.exe" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v17_benchmark.exe" "dist-v17/"
+          Copy-Item "build-v17/Release/moteur3d_v17_gibake.exe" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v17_campaign.exe" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v17_benchui.exe" "dist-v17/"
           Copy-Item "build-v17/v16/Release/moteur3d_v16.exe" "dist-v17/"
@@ -307,6 +309,72 @@ jobs:
           name: CSE-WARP-V17.${{ github.run_number }}-Windows-x64
           path: dist-v17/
           if-no-files-found: error
+      - name: Benchmark GI hors ligne — trois scènes, trois cuissons et sept relectures
+        shell: pwsh
+        timeout-minutes: 25
+        run: |
+          $folder = "build-v17/total-simulation/gi-bench"
+          New-Item -ItemType Directory -Force $folder | Out-Null
+          $data = @()
+          foreach ($entry in @(
+            @{ name='pavillon'; scene='scenes/v16/pavillon01/scene.json' },
+            @{ name='materiaux'; scene='scenes/v16/material-lab/scene.json' },
+            @{ name='civique'; scene='scenes/v16/benchmark-civic/scene.json' }
+          )) {
+            $cache = Join-Path $folder ($entry.name + ".m3dgi")
+            $json = Join-Path $folder ($entry.name + ".json")
+            & "build-v17/Release/moteur3d_v17_gibake.exe" $entry.scene $cache --smoke --bench $json
+            if ($LASTEXITCODE -ne 0) { throw "GI bake failed for $($entry.name)" }
+            $row = Get-Content $json -Raw | ConvertFrom-Json
+            if ($row.result -ne 'PASS' -or $row.hours -ne 5 -or
+                $row.bakeRepetitions -ne 3 -or $row.cacheLoadRepetitions -ne 7) {
+              throw "Incomplete GI benchmark for $($entry.name)"
+            }
+            $data += [pscustomobject]@{
+              version = $row.version; scene = $entry.name
+              probes = $row.probes; hours = $row.hours; rays = $row.raysPerProbe
+              coldBakeMedianMs = $row.bakeColdMedianMs
+              diskLoadMedianMs = $row.diskLoadMedianMs
+              sampleInterpolatedMedianMs = $row.sampleInterpolatedMedianMs
+              sceneBuildMs = $row.sceneBuildMs
+            }
+          }
+          $data | Export-Csv (Join-Path $folder 'gi-benchmark-summary.csv') -NoTypeInformation
+          $data | Format-Table -AutoSize | Out-String | Write-Host
+      - name: Benchmark GI volume complet — 864 sondes, 25 heures, 3 cuissons
+        shell: pwsh
+        timeout-minutes: 25
+        run: |
+          $folder = "build-v17/total-simulation/gi-bench"
+          New-Item -ItemType Directory -Force $folder | Out-Null
+          $data = @()
+          foreach ($entry in @(
+            @{ name='pavillon'; scene='scenes/v16/pavillon01/scene.json' },
+            @{ name='materiaux'; scene='scenes/v16/material-lab/scene.json' },
+            @{ name='civique'; scene='scenes/v16/benchmark-civic/scene.json' }
+          )) {
+            $cache = Join-Path $folder ($entry.name + "-full.m3dgi")
+            $json = Join-Path $folder ($entry.name + "-full.json")
+            # PBR load kept at 256px to control runner RAM; GI volume is full.
+            & "build-v17/Release/moteur3d_v17_gibake.exe" $entry.scene $cache --smoke --full-gi --bench $json
+            if ($LASTEXITCODE -ne 0) { throw "GI full-table bake failed: $($entry.name)" }
+            $row = Get-Content $json -Raw | ConvertFrom-Json
+            if ($row.result -ne 'PASS' -or $row.probes -ne 864 -or $row.hours -ne 25 -or
+                $row.raysPerProbe -ne 16 -or $row.bakeRepetitions -ne 3 -or
+                $row.cacheLoadRepetitions -ne 7) {
+              throw "Incomplete full GI benchmark: $($entry.name)"
+            }
+            $data += [pscustomobject]@{
+              version = $row.version; scene = $entry.name
+              probes = $row.probes; hours = $row.hours; rays = $row.raysPerProbe
+              coldBakeMedianMs = $row.bakeColdMedianMs
+              diskLoadMedianMs = $row.diskLoadMedianMs
+              sampleInterpolatedMedianMs = $row.sampleInterpolatedMedianMs
+              sceneBuildMs = $row.sceneBuildMs
+            }
+          }
+          $data | Export-Csv (Join-Path $folder 'gi-benchmark-full.csv') -NoTypeInformation
+          $data | Format-Table -AutoSize | Out-String | Write-Host
       - name: Simulation totale V17 — six scènes, Raster, CPU, Compute et parité PNG
         shell: pwsh
         timeout-minutes: 55
@@ -321,6 +389,7 @@ jobs:
           Copy-Item "build-v17/v17-raster-warp-quick.png" "$comparison/raster-reference.png"
           Copy-Item "build-v17/v17-raster-warp-quick.png.indirect.png" "$comparison/raster-indirect.png"
           Copy-Item "build-v17/v17-raster-warp-quick.png.indirect-filmic.png" "$comparison/raster-indirect-filmic.png"
+          Copy-Item "build-v17/v17-raster-warp-quick.png.baked-gi.png" "$comparison/raster-real-baked-gi.png"
       - name: Archive des résultats de simulation totale WARP
         if: always()
         uses: actions/upload-artifact@v6

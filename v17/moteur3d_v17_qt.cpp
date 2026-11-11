@@ -454,6 +454,9 @@ private:
     QDoubleSpinBox* sunHour_=nullptr;
     QCheckBox* hybridLightBox_=nullptr;
     QCheckBox* filmicToneBox_=nullptr;
+    QPushButton* bakeGiButton_=nullptr;
+    QProcess* bakeGiProcess_=nullptr;
+    QString bakingScenePath_;
     QDoubleSpinBox* roughness_=nullptr;
     QDoubleSpinBox* metallic_=nullptr;
     QLabel* materialLabel_=nullptr;
@@ -846,6 +849,50 @@ private:
         explorationHelp_->setWordWrap(true);
         vertical->addWidget(explorationHelp_);
         connect(explorationButton_,&QPushButton::clicked,this,[this]{toggleExploration();});
+        bakeGiButton_=new QPushButton(QStringLiteral("Précalculer la table GI (ray tracing CPU)"));
+        bakeGiButton_->setToolTip(QStringLiteral(
+            "Calcule les vrais rebonds sur les surfaces et écrit une table GI pour 25 heures solaires.\n"
+            "Opération hors ligne dans un programme séparé, sans ralentir chaque image."));
+        bakeGiButton_->setEnabled(false);
+        vertical->addWidget(bakeGiButton_);
+        bakeGiProcess_=new QProcess(this);
+        connect(bakeGiButton_,&QPushButton::clicked,this,[this]{
+            if(scenePath_.isEmpty()||bakeGiProcess_->state()!=QProcess::NotRunning)return;
+            const QString exe=QCoreApplication::applicationDirPath()
+                +QStringLiteral("/moteur3d_v17_gibake.exe");
+            if(!QFileInfo::exists(exe)){
+                QMessageBox::warning(this,QStringLiteral("Précalcul GI"),
+                    QStringLiteral("Exécutable moteur3d_v17_gibake.exe absent du dossier de l'application."));
+                return;
+            }
+            bakingScenePath_=scenePath_;
+            bakeGiButton_->setEnabled(false);
+            bakeGiButton_->setText(QStringLiteral("Calcul de la table GI en cours…"));
+            statusBar()->showMessage(QStringLiteral(
+                "Précalcul hors ligne : rayons et rebonds sur les surfaces de la scène…"));
+            bakeGiProcess_->setProgram(exe);
+            bakeGiProcess_->setArguments({bakingScenePath_,
+                                         bakingScenePath_+QStringLiteral(".m3dgi")});
+            bakeGiProcess_->start();
+        });
+        connect(bakeGiProcess_,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),
+                this,[this](int exitCode,QProcess::ExitStatus exitStatus){
+            bakeGiButton_->setText(QStringLiteral("Précalculer la table GI (ray tracing CPU)"));
+            bakeGiButton_->setEnabled(bool(runtime_));
+            if(exitStatus!=QProcess::NormalExit||exitCode!=0){
+                statusBar()->showMessage(QStringLiteral(
+                    "Échec précalcul GI : %1").arg(QString::fromUtf8(
+                        bakeGiProcess_->readAllStandardError()).left(200)),15000);
+                return;
+            }
+            if(bakingScenePath_!=scenePath_)return; // scene switched during bake
+            setRasterGiCachePath(std::filesystem::path(
+                (scenePath_+QStringLiteral(".m3dgi")).toStdWString()));
+            statusBar()->showMessage(QStringLiteral(
+                "Table GI enregistrée pour %1 — rebonds chargés au prochain rendu.")
+                .arg(QFileInfo(scenePath_).fileName()),16000);
+            requestRender();
+        });
         connect(walkingModeBox_,&QCheckBox::toggled,this,[this](bool enabled){
             QSettings preferences(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
             preferences.setValue(QStringLiteral("Exploration/Walking"),enabled);
@@ -1006,6 +1053,9 @@ private:
         canvas_->setPlaceholder(QStringLiteral("CSE WARP V17\nChargement de la scène…"));
         cameraBox_->setEnabled(false);
         if(explorationButton_)explorationButton_->setEnabled(false);
+        if(bakeGiButton_)bakeGiButton_->setEnabled(false);
+        if(bakeGiProcess_&&bakeGiProcess_->state()!=QProcess::NotRunning)
+            bakeGiProcess_->kill();
         if(!loadWatcher_.isRunning())beginSceneLoad();
     }
     void beginSceneLoad(){
@@ -1071,6 +1121,9 @@ private:
         sunHour_->setValue(double(runtime_->daylightHour));
         sunHour_->blockSignals(false);
         scenePath_=outcome.path;
+        setRasterGiCachePath(std::filesystem::path(
+            (scenePath_+QStringLiteral(".m3dgi")).toStdWString()));
+        if(bakeGiButton_)bakeGiButton_->setEnabled(true);
         materialsPath_.clear();
         for(const auto& sector:outcome.database.sectors){
             const auto entries=sector.resources.value(QStringLiteral("materials"));
@@ -1234,7 +1287,13 @@ private:
                         }
                     }
                     ok=renderDirectX11Preview(snapshot->renderScene,*shadow,camera,w,h,pixels,stats,reason);
-                    if(ok)result.renderer=QStringLiteral("V17 D3D11 Raster — géométrie matérielle");
+                    if(ok){
+                        result.renderer=QStringLiteral("V17 D3D11 Raster — géométrie matérielle");
+                        if(rasterHybridLightingEnabled())
+                            result.renderer+=rasterGiCacheLoaded()
+                              ?QStringLiteral(" — GI transport pré-calculée")
+                              :QStringLiteral(" — sondes approximatives (sans table GI)");
+                    }
                 }else{
                     ok=renderCompute11Preview(snapshot->renderScene,camera,w,h,pixels,stats,reason);
                     if(ok)result.renderer=QStringLiteral("V16 D3D11 Compute — GI adaptative");

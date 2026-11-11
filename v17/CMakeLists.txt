@@ -107,6 +107,15 @@ target_include_directories(moteur3d_v17_benchmark PRIVATE
 target_link_libraries(moteur3d_v17_benchmark PRIVATE
     moteur3d_v16_core Qt6::Core Qt6::Gui)
 target_compile_definitions(moteur3d_v17_benchmark PRIVATE CSE_WARP_BUILD_NUMBER=${V17_BUILD_NUMBER})
+# Offline multi-hour GI bake: CPU ray transport, disk table and benchmark.
+add_executable(moteur3d_v17_gibake "tools/gi_bake_cli.cpp")
+target_include_directories(moteur3d_v17_gibake PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+target_link_libraries(moteur3d_v17_gibake PRIVATE moteur3d_v16_core Qt6::Core)
+target_compile_definitions(moteur3d_v17_gibake PRIVATE CSE_WARP_BUILD_NUMBER=${V17_BUILD_NUMBER})
+if(MSVC)
+    target_compile_options(moteur3d_v17_gibake PRIVATE /O2 /EHsc /utf-8)
+endif()
 if(WIN32)
     qt_add_executable(moteur3d_v17_benchui WIN32
         "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmark_v17_ui.cpp"
@@ -170,6 +179,17 @@ if(WIN32)
     if(MSVC)
         target_compile_options(v17_pbr_compute_smoke PRIVATE /O2 /EHsc /utf-8)
     endif()
+    # GI transport bake: deterministic ray tracing, 25-hour format and cache checks.
+    add_executable(v17_gi_bake_smoke "tests/gi_bake_smoke.cpp")
+    target_include_directories(v17_gi_bake_smoke PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+    target_link_libraries(v17_gi_bake_smoke PRIVATE moteur3d_v16_core)
+    if(MSVC)
+        target_compile_options(v17_gi_bake_smoke PRIVATE /O2 /EHsc /utf-8)
+    endif()
+    add_test(NAME v17_gi_table_precompute_and_checksum
+        COMMAND v17_gi_bake_smoke "${CMAKE_CURRENT_BINARY_DIR}/v17-gi-smoke.m3dgi")
+    set_tests_properties(v17_gi_table_precompute_and_checksum PROPERTIES TIMEOUT 45)
     # Pure CPU walker regression, no Qt or DXR requirement.
     add_executable(v17_walk_controller_smoke "tests/walk_controller_smoke.cpp")
     target_include_directories(v17_walk_controller_smoke PRIVATE
