@@ -869,11 +869,25 @@ private:
         if(shadows.size<=0||shadows.d.size()<size_t(shadows.size)*shadows.size){error=L"Carte d’ombres invalide pour DirectX 11.";return false;}
         if(!shadowTexture_||shadowSize_!=shadows.size){
             shadowTexture_.Reset();shadowSrv_.Reset();
+            shadowUploadCache_.clear();
             D3D11_TEXTURE2D_DESC td{};td.Width=UINT(shadows.size);td.Height=UINT(shadows.size);td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_R32_FLOAT;td.SampleDesc.Count=1;td.Usage=D3D11_USAGE_DEFAULT;td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
             if(FAILED(device_->CreateTexture2D(&td,nullptr,&shadowTexture_))||FAILED(device_->CreateShaderResourceView(shadowTexture_.Get(),nullptr,&shadowSrv_))){error=L"Création de la carte d’ombres DirectX 11 impossible.";return false;}
             shadowSize_=shadows.size;
         }
-        context_->UpdateSubresource(shadowTexture_.Get(),0,nullptr,shadows.d.data(),UINT(shadows.size*sizeof(float)),0);return true;
+        // Bitwise comparison, not an address or probabilistic hash: in-place
+        // edits and allocator address reuse must never yield stale shadows.
+        // The transform is uploaded separately through FrameConstants.
+        const size_t count=size_t(shadows.size)*shadows.size;
+        const char* bypass=std::getenv("M3D_V17_DISABLE_SHADOW_UPLOAD_CACHE");
+        const bool cacheEnabled=!(bypass&&std::strcmp(bypass,"1")==0);
+        if(cacheEnabled&&shadowUploadCache_.size()==count &&
+           std::memcmp(shadowUploadCache_.data(),shadows.d.data(),
+                       count*sizeof(float))==0)return true;
+        context_->UpdateSubresource(shadowTexture_.Get(),0,nullptr,
+                                    shadows.d.data(),UINT(shadows.size*sizeof(float)),0);
+        if(cacheEnabled)shadowUploadCache_.assign(shadows.d.begin(),shadows.d.begin()+count);
+        else shadowUploadCache_.clear();
+        return true;
     }
     bool ensureDevice(std::wstring& error) {
         if(device_)return true;
@@ -1397,7 +1411,7 @@ private:
     std::array<UINT,3> foliageVertexCounts_{{0,0,0}};
     std::vector<GpuEllipseInstance> foliage_;
     UINT foliageInstanceCount_=0;
-    ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_;ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<TransparentTriangle> transparent_;
+    ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_;ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<float> shadowUploadCache_;std::vector<TransparentTriangle> transparent_;
     ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_;
     std::array<ReadbackSlot,3> readbackSlots_;
     std::deque<unsigned> pending_;

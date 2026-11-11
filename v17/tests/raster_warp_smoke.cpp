@@ -48,6 +48,44 @@ int main(int argc,char** argv){
        first!=second || std::set<uint32_t>(first.begin(),first.end()).size()<64){
         qCritical()<<"Empty, incomplete or non-deterministic raster image";return 1;
     }
+    // Upload cache must be bit-exact against a forced GPU re-upload, even
+    // after an in-place shadow change at the same resolution.
+    if(_putenv_s("M3D_V17_DISABLE_SHADOW_UPLOAD_CACHE","1")!=0){
+        qCritical()<<"Cannot bypass shadow upload cache";return 1;
+    }
+    std::vector<uint32_t> forcedShadow;
+    m3d::Stats forcedStats;
+    error.clear();
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,cam,
+                                    w,h,forcedShadow,forcedStats,error) ||
+       forcedShadow!=second){
+        qCritical()<<"Cached shadows differ from forced upload";return 1;
+    }
+    _putenv_s("M3D_V17_DISABLE_SHADOW_UPLOAD_CACHE","");
+    m3d::ShadowMap modifiedShadow=shadow;
+    for(float& v:modifiedShadow.d)v*=.83f;
+    std::vector<uint32_t> alteredCached,alteredForced;
+    m3d::Stats alteredStats,alteredForcedStats;
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,modifiedShadow,cam,
+                                   w,h,alteredCached,alteredStats,error)){
+        qCritical()<<"Shadow content update failed";return 1;
+    }
+    _putenv_s("M3D_V17_DISABLE_SHADOW_UPLOAD_CACHE","1");
+    const bool alteredOk=m3d::renderDirectX11Preview(
+        built.runtime.renderScene,modifiedShadow,cam,w,h,
+        alteredForced,alteredForcedStats,error);
+    _putenv_s("M3D_V17_DISABLE_SHADOW_UPLOAD_CACHE","");
+    if(!alteredOk||alteredCached!=alteredForced){
+        qCritical()<<"Changed shadow content produced stale GPU data";return 1;
+    }
+    std::vector<uint32_t> restoredShadow;
+    m3d::Stats restoredShadowStats;
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,cam,
+                                    w,h,restoredShadow,restoredShadowStats,error)||
+       restoredShadow!=second){
+        qCritical()<<"Original shadow pixels not restored after edit";return 1;
+    }
+    qInfo()<<"Shadow cache pixel-exact across reuse, forced upload and change";
     // Regression for the V17 frustum optimization: switching culling OFF
     // must produce identical pixels. The renderer must not drop a triangle
     // that intersects the frustum or modify the underlying PBR resources.

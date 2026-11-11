@@ -2,6 +2,13 @@
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QHash>
+#include <QByteArray>
+#include <QCryptographicHash>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QSaveFile>
+#include <QStandardPaths>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -184,7 +191,129 @@ int buildBvh(Scene& s,int first,int count){
     s.node[size_t(index)].left=left;s.node[size_t(index)].right=right;
     return index;
 }
+// Content-addressed, persistent PBR mip cache. The renderer reads exactly the
+// same color/normal/roughness texels; no reduction in texture resolution,
+// filtering quality, material detail or illumination. Bump the format/key
+// version whenever the procedural PBR math or its dependencies change.
+// Set M3D_V17_DISABLE_PBR_CACHE=1 for a cold A/B run. An optional
+// M3D_V17_PBR_CACHE_DIR isolates test or benchmark data.
+constexpr uint32_t kPbrCacheMagic=0x43535750u; // "PWSC", native little-endian
+constexpr uint32_t kPbrCacheVersion=1u;
+struct PbrCacheHeader{
+    uint32_t magic,version,resolution,levels;
+};
+QString pbrCachePath(V base,float roughness,const QString& pattern,int resolution) {
+    const char* disabled=std::getenv("M3D_V17_DISABLE_PBR_CACHE");
+    if(disabled&&std::strcmp(disabled,"1")==0)return {};
+    const char* overrideRoot=std::getenv("M3D_V17_PBR_CACHE_DIR");
+    const QString root=overrideRoot&&*overrideRoot
+        ?QString::fromLocal8Bit(overrideRoot)
+        :QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation)
+            +QStringLiteral("/CSE-WARP/PBR/v1");
+    if(root.isEmpty())return {};
+    // Raw IEEE-754 parameter bytes identify every arithmetic input exactly.
+    QByteArray key("CSE-WARP-PBR-20261111-v1|Qt");
+    key.append(QT_VERSION_STR);
+    key.append(pattern.toUtf8());
+    key.append('\0');
+    key.append(reinterpret_cast<const char*>(&base),sizeof(base));
+    key.append(reinterpret_cast<const char*>(&roughness),sizeof(roughness));
+    key.append(reinterpret_cast<const char*>(&resolution),sizeof(resolution));
+    const auto digest=QCryptographicHash::hash(key,QCryptographicHash::Sha256).toHex();
+    return QDir(root).filePath(QString::fromLatin1(digest)+QStringLiteral(".pbr"));
+}
+uint32_t mipLevelCount(uint32_t size) {
+    uint32_t count=0;
+    for(;size;size>>=1)++count;
+    return count;
+}
+qint64 pbrCacheLength(uint32_t resolution) {
+    qint64 total=qint64(sizeof(PbrCacheHeader))+32;
+    for(uint32_t size=resolution;size;size>>=1)
+        total+=qint64(size)*size*8; // RGB32 + normal565 + roughness565
+    return total;
+}
+bool loadPbrCache(const QString& path,Material& mat,int resolution) {
+    QFile in(path);
+    if(!in.open(QIODevice::ReadOnly)||in.size()!=pbrCacheLength(uint32_t(resolution)))
+        return false;
+    PbrCacheHeader header{};
+    if(in.read(reinterpret_cast<char*>(&header),sizeof(header))!=qint64(sizeof(header))
+       ||header.magic!=kPbrCacheMagic||header.version!=kPbrCacheVersion
+       ||header.resolution!=uint32_t(resolution)
+       ||header.levels!=mipLevelCount(uint32_t(resolution)))return false;
+    std::vector<ColorLevel> color;
+    std::vector<Level> normal,rough;
+    color.reserve(header.levels);normal.reserve(header.levels);rough.reserve(header.levels);
+    QCryptographicHash digest(QCryptographicHash::Sha256);
+    const auto readPixels=[&](auto& pixels)->bool {
+        const qint64 bytes=qint64(pixels.size()*sizeof(pixels[0]));
+        auto* raw=reinterpret_cast<char*>(pixels.data());
+        if(in.read(raw,bytes)!=bytes)return false;
+        digest.addData(raw,bytes);
+        return true;
+    };
+    for(uint32_t size=uint32_t(resolution);size;size>>=1){
+        ColorLevel c;c.size=size;c.p.resize(size_t(size)*size);
+        Level n;n.size=size;n.p.resize(size_t(size)*size);
+        Level r;r.size=size;r.p.resize(size_t(size)*size);
+        if(!readPixels(c.p)||!readPixels(n.p)||!readPixels(r.p))return false;
+        color.push_back(std::move(c));
+        normal.push_back(std::move(n));
+        rough.push_back(std::move(r));
+    }
+    const QByteArray expected=in.read(32);
+    if(expected.size()!=32||digest.result()!=expected)return false;
+    mat.colorMip=std::move(color);
+    mat.normalMip=std::move(normal);
+    mat.roughnessMip=std::move(rough);
+    return true;
+}
+void savePbrCache(const QString& path,const Material& mat,int resolution) {
+    const uint32_t count=mipLevelCount(uint32_t(resolution));
+    if(mat.colorMip.size()!=count||mat.normalMip.size()!=count||
+       mat.roughnessMip.size()!=count)return;
+    if(!QDir().mkpath(QFileInfo(path).absolutePath()))return;
+    QSaveFile out(path);
+    if(!out.open(QIODevice::WriteOnly))return;
+    const PbrCacheHeader header{kPbrCacheMagic,kPbrCacheVersion,
+                                uint32_t(resolution),count};
+    if(out.write(reinterpret_cast<const char*>(&header),sizeof(header))
+       !=qint64(sizeof(header))){out.cancelWriting();return;}
+    QCryptographicHash digest(QCryptographicHash::Sha256);
+    const auto writePixels=[&](const auto& pixels)->bool {
+        const qint64 bytes=qint64(pixels.size()*sizeof(pixels[0]));
+        const auto* raw=reinterpret_cast<const char*>(pixels.data());
+        if(out.write(raw,bytes)!=bytes)return false;
+        digest.addData(raw,bytes);
+        return true;
+    };
+    for(uint32_t level=0;level<count;++level){
+        if(!writePixels(mat.colorMip[level].p) ||
+           !writePixels(mat.normalMip[level].p) ||
+           !writePixels(mat.roughnessMip[level].p)){
+            out.cancelWriting();return;
+        }
+    }
+    const QByteArray checksum=digest.result();
+    if(out.write(checksum)!=checksum.size()){out.cancelWriting();return;}
+    if(!out.commit())return;
+    // Bound long-term disk usage without evicting textures from active scenes.
+    constexpr qint64 kMaxDiskCache=4ll*1024*1024*1024;
+    QDir dir(QFileInfo(path).absolutePath());
+    const auto entries=dir.entryInfoList({QStringLiteral("*.pbr")},
+        QDir::Files,QDir::Time|QDir::Reversed); // oldest first
+    qint64 total=0;
+    for(const auto& entry:entries)total+=entry.size();
+    for(const auto& entry:entries){
+        if(total<=kMaxDiskCache)break;
+        if(QFile::remove(entry.absoluteFilePath()))total-=entry.size();
+    }
+}
+
 void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int resolution) {
+    const QString cacheFile=pbrCachePath(base,roughness,pattern,resolution);
+    if(!cacheFile.isEmpty() && loadPbrCache(cacheFile,mat,resolution))return;
     ColorLevel first;first.size=uint32_t(resolution);first.p.resize(size_t(resolution)*resolution);
     Level nr;nr.size=uint32_t(resolution);nr.p.resize(first.p.size());
     Level rr;rr.size=uint32_t(resolution);rr.p.resize(first.p.size());
@@ -355,6 +484,7 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
         mat.normalMip.push_back(std::move(nt));
         mat.roughnessMip.push_back(std::move(rt));
     }
+    if(!cacheFile.isEmpty())savePbrCache(cacheFile,mat,resolution);
 }
 bool finite3(V v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
 } // namespace
