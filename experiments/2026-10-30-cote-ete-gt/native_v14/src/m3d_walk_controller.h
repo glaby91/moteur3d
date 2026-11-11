@@ -53,10 +53,11 @@ inline bool spawn(const Scene& scene,V cameraEye,State& state,
     state=State{};
     state.feet=cameraEye-V{0.f,cfg.eyeHeight,0.f};
     V floor{};
-    // Camera presets often start well above the model. Never snap UP
-    // through a ceiling or choose a floor above eye position.
+    // Aerial preset may sit 65-85 m above the site. Scan far enough down
+    // to the true terrain instead of leaving the player flying at 80 m.
+    // Never snap UP through a ceiling or choose a floor above eye position.
     if(support(scene,cameraEye.x,cameraEye.z,
-               cameraEye.y-.05f,cameraEye.y-24.f,floor,cfg)){
+               cameraEye.y-.05f,cameraEye.y-320.f,floor,cfg)){
         state.feet.y=floor.y;
         state.grounded=true;
     }
