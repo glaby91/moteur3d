@@ -390,6 +390,10 @@ jobs:
           Copy-Item "build-v17/v17-raster-warp-quick.png.indirect.png" "$comparison/raster-indirect.png"
           Copy-Item "build-v17/v17-raster-warp-quick.png.indirect-filmic.png" "$comparison/raster-indirect-filmic.png"
           Copy-Item "build-v17/v17-raster-warp-quick.png.baked-gi.png" "$comparison/raster-real-baked-gi.png"
+          Copy-Item "build-v17/v17-raster-warp-quick.png.balanced.png" "$comparison/raster-balanced-color.png"
+          Copy-Item "build-v17/v17-raster-warp-quick.png.balanced-085.png" "$comparison/raster-balanced-exposure-085.png"
+          Copy-Item "build-v17/v17-raster-warp-quick.png.balanced-115.png" "$comparison/raster-balanced-exposure-115.png"
+          Copy-Item "build-v17/v17-raster-warp-quick.png.color-metrics.csv" "$comparison/color-metrics.csv"
       - name: Archive des résultats de simulation totale WARP
         if: always()
         uses: actions/upload-artifact@v6

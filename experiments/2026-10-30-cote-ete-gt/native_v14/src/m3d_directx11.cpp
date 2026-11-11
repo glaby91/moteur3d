@@ -32,6 +32,9 @@ std::atomic<uint64_t> gpuQualityBits{defaultQualityBits};
 std::atomic<bool> hybridLighting{false};
 // Separate, independently reversible display-referred highlight compression.
 std::atomic<bool> filmicTonemap{false};
+// Corrected linear-energy material lighting (core OFF for parity, GUI ON).
+std::atomic<bool> colorEnergyBalance{false};
+std::atomic<float> colorExposure{1.f};
 // The GUI sets this to scene.json.m3dgi. Updated only on user action or
 // scene loading; render worker snapshots it when creating its probe texture.
 std::mutex giPathMutex;
@@ -126,6 +129,7 @@ struct FrameConstants {
     float probeOrigin[4];
     float probeInvSpan[4];
     float hybridControls[4];
+    float colorControls[4];
 };
 
 constexpr char kShader[] = R"(
@@ -153,6 +157,7 @@ cbuffer Frame : register(b0) {
     float4 probeOrigin;
     float4 probeInvSpan;
     float4 hybridControls;
+    float4 colorControls;
 };
 Texture2DArray<float4> albedo : register(t0);
 Texture2D<float> shadowDepth : register(t1);
@@ -273,9 +278,17 @@ float4 PSMain(VSOut i):SV_TARGET {
     // and the existing shadow map remain separate for stronger depth.
     float hemisphere=saturate(normal.y*0.5+0.5);
     float skyFill=lerp(0.86,1.10,hemisphere);
-    float light=(diffuseTerms.x + diffuseTerms.y*diffuseTerms.w)*skyFill
-                 + diffuseTerms.z*diffuse*shadowFactor*diffuseTerms.w;
-    float3 color = base * light + base * materialGlow[i.mat].rgb * materialGlow[i.mat].a;
+    float ambientEnergy=(diffuseTerms.x+diffuseTerms.y*diffuseTerms.w)*skyFill;
+    float sunEnergy=diffuseTerms.z*diffuse*shadowFactor*diffuseTerms.w;
+    if(colorControls.x>0.5){
+        // Neutral concrete previously received ~.74 ambient + .56 sun:
+        // correct the LIGHT budget, not the pixels after they have clipped.
+        float sunlightVisibility=saturate((shadowFactor-.16)/.84);
+        ambientEnergy=lerp(.115,.335,diffuseTerms.w)*lerp(.77,1.03,hemisphere);
+        sunEnergy=.88*diffuse*sunlightVisibility*diffuseTerms.w;
+    }
+    float3 color = base*(ambientEnergy+sunEnergy)
+                 + base*materialGlow[i.mat].rgb*materialGlow[i.mat].a;
     color += materialEmission[i.mat].rgb * materialEmission[i.mat].a;
     color += float3(28.0, 13.0, 4.0) / 255.0 * (1.0 - diffuseTerms.w);
     float3 viewDir = normalize(eye - i.world);
@@ -295,6 +308,13 @@ float4 PSMain(VSOut i):SV_TARGET {
     float fresnel=f2*f2*grazing;
     float3 specTint=lerp(float3(178.0,202.0,214.0)/255.0,
                          saturate(base*1.2),metallic);
+    if(colorControls.x>0.5){
+        // Dielectrics use neutral Fresnel F0 ~4%, not metallic steel blue.
+        // Keep glass specular response using transmission; maintain metals.
+        float glazing=1.0-saturate(materialOpacity[i.mat].x);
+        specTint=lerp(float3(.04,.04,.04),saturate(base),metallic);
+        specTint=lerp(specTint,float3(.24,.26,.28),saturate(glazing*1.8));
+    }
     color += specTint * specular * (0.88+0.22*fresnel);
     [loop] for (uint l = 0; l < lightCount; ++l) {
         float3 delta = lightPositionRadius[l].xyz - i.world;
@@ -310,7 +330,9 @@ float4 PSMain(VSOut i):SV_TARGET {
             if (distanceToLight < radius && distanceToLight > 0.0001) {
                 float edge = 1.0 - distanceToLight / radius;
                 float lambert = saturate(dot(normal, delta / distanceToLight));
-                color += lightColorIntensity[l].rgb * (edge * edge * lightColorIntensity[l].a * lambert * 0.27);
+                float3 localIrradiance=lightColorIntensity[l].rgb
+                    *(edge*edge*lightColorIntensity[l].a*lambert*.27);
+                color += colorControls.x>0.5 ? base*localIrradiance : localIrradiance;
             }
 #if defined(M3D_V17_OPTIMIZE_PIXELS)
         }
@@ -327,7 +349,7 @@ float4 PSMain(VSOut i):SV_TARGET {
         }
         float skyVisibility=saturate(probe.a);
         float upward=saturate(normal.y*.5+.5);
-        float existingAmbient=(diffuseTerms.x+diffuseTerms.y*diffuseTerms.w)*skyFill;
+        float existingAmbient=ambientEnergy;
         // Normalize the time-dependent sky color so daylight changes hue,
         // but doesn't create energy from a second hemispherical fill.
         float skyMean=max(dot(indirectSky.rgb,float3(.333333,.333333,.333333)),.001);
@@ -360,6 +382,15 @@ float4 PSMain(VSOut i):SV_TARGET {
         // and the V17.309 pow(1/2.2) incorrectly lifted ALL midtones.
         float3 linearPositive=max(color,0.0);
         color=linearPositive/(1.0+.70*max(linearPositive-.64,0.0));
+    }
+    if(colorControls.x>0.5){
+        // Color is LINEAR; SRGB RTV encodes exactly once. A shared
+        // luminance shoulder preserves chroma ratios while avoiding clips.
+        float3 positive=max(color,0.0);
+        float luminance=dot(positive,float3(.2126,.7152,.0722));
+        float adjusted=luminance*colorControls.y;
+        float compressed=adjusted/(1.0+.82*max(adjusted-.63,0.0));
+        color=positive*(compressed/max(luminance,0.000001));
     }
     return float4(color, materialOpacity[i.mat].x);
 }
@@ -604,6 +635,8 @@ public:
         const uint64_t qualityBits=gpuQualityBits.load(std::memory_order_acquire);
         const bool hybrid=hybridLighting.load(std::memory_order_acquire);
         const bool tone=filmicTonemap.load(std::memory_order_acquire);
+        const bool balanced=colorEnergyBalance.load(std::memory_order_acquire);
+        const float exposure=clampf(colorExposure.load(std::memory_order_acquire),.65f,1.45f);
         const RasterQualitySettings quality=unpackQuality(qualityBits);
         if(!pending_.empty() &&
            (sceneKey_!=scene.obj.data() || objectCount_!=scene.obj.size() ||
@@ -611,7 +644,9 @@ public:
             sceneRevision_!=scene.gpuCacheRevision ||
             lastSubmissionQualityBits_!=qualityBits ||
             lastSubmissionHybrid_!=hybrid ||
-            lastSubmissionTone_!=tone)){
+            lastSubmissionTone_!=tone ||
+            lastSubmissionBalanced_!=balanced ||
+            lastSubmissionExposure_!=exposure)){
             error=L"Vider les lectures différées avant de changer de scène ou de qualité.";
             return false;
         }
@@ -631,7 +666,15 @@ public:
         cb.up[0]=cam.u.x;cb.up[1]=cam.u.y;cb.up[2]=cam.u.z;cb.farPlane=10000.f;
         cb.light[0]=sun.x;cb.light[1]=sun.y;cb.light[2]=sun.z;cb.ambient=.66f;
         V bg=scene.underwaterEnvironment?V{7,27,39}:skyHorizon*.65f+skyZenith*.35f;
-        cb.sky[0]=bg.x/255.f;cb.sky[1]=bg.y/255.f;cb.sky[2]=bg.z/255.f;cb.materialCount=uint32_t(std::max<size_t>(1,scene.mat.size()));
+        // Sky authoring is in sRGB, while the target expects linear light.
+        auto decodeSrgb=[](float v)->float{
+            v=clampf(v,0.f,1.f);
+            return v<=.04045f?v/12.92f:std::pow((v+.055f)/1.055f,2.4f);
+        };
+        cb.sky[0]=balanced?decodeSrgb(bg.x/255.f):bg.x/255.f;
+        cb.sky[1]=balanced?decodeSrgb(bg.y/255.f):bg.y/255.f;
+        cb.sky[2]=balanced?decodeSrgb(bg.z/255.f):bg.z/255.f;
+        cb.materialCount=uint32_t(std::max<size_t>(1,scene.mat.size()));
         cb.shadowBase[0]=shadows.base.x;cb.shadowBase[1]=shadows.base.y;cb.shadowBase[2]=shadows.base.z;cb.shadowSpan=shadows.span;
         cb.shadowRight[0]=shadows.right.x;cb.shadowRight[1]=shadows.right.y;cb.shadowRight[2]=shadows.right.z;cb.shadowDist=shadows.dist;
         cb.shadowUp[0]=shadows.up.x;cb.shadowUp[1]=shadows.up.y;cb.shadowUp[2]=shadows.up.z;cb.shadowSize=float(shadows.size);
@@ -647,6 +690,8 @@ public:
             cb.hybridControls[3]=hasBakedGi_?1.f:0.f;
         }
         cb.hybridControls[2]=tone?1.f:0.f;
+        cb.colorControls[0]=balanced?1.f:0.f;
+        cb.colorControls[1]=exposure;
         for(size_t m=0;m<scene.mat.size()&&m<256;m++){
             const std::string& name=scene.mat[m].name;
             const bool carPaint=name.rfind("sports",0)==0||name=="carSilver"||name=="carBlue"||name=="carGreen"||name=="classicBody";
@@ -926,6 +971,8 @@ public:
         lastSubmissionQualityBits_=qualityBits;
         lastSubmissionHybrid_=hybrid;
         lastSubmissionTone_=tone;
+        lastSubmissionBalanced_=balanced;
+        lastSubmissionExposure_=exposure;
         nextReadbackSlot_=(slotIndex+1u)%readbackDepth_;
         return true;
     }
@@ -1688,7 +1735,8 @@ private:
     std::deque<unsigned> pending_;
     unsigned readbackDepth_=0,nextReadbackSlot_=0;
     uint64_t lastSubmissionQualityBits_=defaultQualityBits;
-    bool lastSubmissionHybrid_=false,lastSubmissionTone_=false;
+    bool lastSubmissionHybrid_=false,lastSubmissionTone_=false,lastSubmissionBalanced_=false;
+    float lastSubmissionExposure_=1.f;
     ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
     std::vector<DrawChunk> chunks_,boxChunks_;
     UINT boxInstanceCount_=0;
@@ -1719,6 +1767,10 @@ bool rasterHybridLightingEnabled(){return hybridLighting.load(std::memory_order_
 void setRasterHybridLightingEnabled(bool enabled){hybridLighting.store(enabled,std::memory_order_release);}
 bool rasterFilmicTonemapEnabled(){return filmicTonemap.load(std::memory_order_acquire);}
 void setRasterFilmicTonemapEnabled(bool enabled){filmicTonemap.store(enabled,std::memory_order_release);}
+bool rasterColorEnergyBalanceEnabled(){return colorEnergyBalance.load(std::memory_order_acquire);}
+void setRasterColorEnergyBalanceEnabled(bool enabled){colorEnergyBalance.store(enabled,std::memory_order_release);}
+float rasterColorExposure(){return colorExposure.load(std::memory_order_acquire);}
+void setRasterColorExposure(float x){colorExposure.store(clampf(x,.65f,1.45f),std::memory_order_release);}
 void setRasterGiCachePath(const std::filesystem::path& file){
     {std::lock_guard<std::mutex> lock(giPathMutex);giFilePath=file;}
     giFileRevision.fetch_add(1,std::memory_order_acq_rel);
@@ -1766,6 +1818,10 @@ bool rasterHybridLightingEnabled(){return false;}
 void setRasterHybridLightingEnabled(bool){}
 bool rasterFilmicTonemapEnabled(){return false;}
 void setRasterFilmicTonemapEnabled(bool){}
+bool rasterColorEnergyBalanceEnabled(){return false;}
+void setRasterColorEnergyBalanceEnabled(bool){}
+float rasterColorExposure(){return 1.f;}
+void setRasterColorExposure(float){}
 void setRasterGiCachePath(const std::filesystem::path&){}
 bool rasterGiCacheLoaded(){return false;}
 bool setRasterQualitySettings(const RasterQualitySettings&,std::wstring& error){error=L"DirectX 11 indisponible sur cet OS.";return false;}

@@ -454,6 +454,8 @@ private:
     QDoubleSpinBox* sunHour_=nullptr;
     QCheckBox* hybridLightBox_=nullptr;
     QCheckBox* filmicToneBox_=nullptr;
+    QCheckBox* colorEnergyBox_=nullptr;
+    QDoubleSpinBox* colorExposureBox_=nullptr;
     QPushButton* bakeGiButton_=nullptr;
     QProcess* bakeGiProcess_=nullptr;
     QString bakingScenePath_;
@@ -725,6 +727,19 @@ private:
         hybridLightBox_->setToolTip(QStringLiteral(
             "Sondes précalculées, ciel plus froid, rebonds colorés et zones abritées.\n"
             "Ne change pas le traitement tonal."));
+        // Calibrated linear-light energy path. Does not modify sRGB textures
+        // or flatten dielectric reflections; legacy lighting remains A/B.
+        colorEnergyBox_=new QCheckBox(QStringLiteral("Couleurs fidèles et lumière équilibrée"));
+        colorEnergyBox_->setToolTip(QStringLiteral(
+            "Équilibre l'éclairage ambiant, le soleil et les reflets du béton\n"
+            "dans l'espace linéaire, sans filtre de saturation ni flou PBR."));
+        colorExposureBox_=new QDoubleSpinBox;
+        colorExposureBox_->setRange(.65,1.45);
+        colorExposureBox_->setDecimals(2);
+        colorExposureBox_->setSingleStep(.05);
+        colorExposureBox_->setToolTip(QStringLiteral(
+            "Réglage fin de l'exposition du nouveau modèle. 1,00 = neutre.\n"
+            "Préserve la teinte et la saturation des matériaux."));
         filmicToneBox_=new QCheckBox(QStringLiteral("Compression tonale filmique (optionnelle)"));
         filmicToneBox_->setToolTip(QStringLiteral(
             "Adoucit les hautes lumières sans remonter les demi-teintes.\n"
@@ -732,8 +747,13 @@ private:
         QSettings hybridPrefs(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
         hybridLightBox_->setChecked(hybridPrefs.value(QStringLiteral("Raster/HybridLighting"),true).toBool());
         filmicToneBox_->setChecked(hybridPrefs.value(QStringLiteral("Raster/FilmicTonemap"),false).toBool());
+        colorEnergyBox_->setChecked(hybridPrefs.value(QStringLiteral("Raster/ColorEnergyBalance"),true).toBool());
+        colorExposureBox_->setValue(hybridPrefs.value(QStringLiteral("Raster/ColorExposure"),1.0).toDouble());
+        colorExposureBox_->setEnabled(colorEnergyBox_->isChecked());
         m3d::setRasterHybridLightingEnabled(hybridLightBox_->isChecked());
         m3d::setRasterFilmicTonemapEnabled(filmicToneBox_->isChecked());
+        m3d::setRasterColorEnergyBalanceEnabled(colorEnergyBox_->isChecked());
+        m3d::setRasterColorExposure(float(colorExposureBox_->value()));
         azimuth_=new QSlider(Qt::Horizontal);
         azimuth_->setRange(-180,180);
         azimuth_->setValue(0);
@@ -744,6 +764,8 @@ private:
         form->addRow(QStringLiteral("Échantillons GI"),giSamples_);
         form->addRow(QStringLiteral("Heure solaire"),sunHour_);
         form->addRow(hybridLightBox_);
+        form->addRow(colorEnergyBox_);
+        form->addRow(QStringLiteral("Exposition linéaire"),colorExposureBox_);
         form->addRow(filmicToneBox_);
         form->addRow(QStringLiteral("Rotation caméra"),azimuth_);
         vertical->addLayout(form);
@@ -956,6 +978,21 @@ private:
             QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
             settings.setValue(QStringLiteral("Raster/HybridLighting"),enabled);
             if(backendBox_&&backendBox_->currentIndex()==4)requestRender();
+        });
+        connect(colorEnergyBox_,&QCheckBox::toggled,this,[this](bool enabled){
+            m3d::setRasterColorEnergyBalanceEnabled(enabled);
+            colorExposureBox_->setEnabled(enabled);
+            QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+            settings.setValue(QStringLiteral("Raster/ColorEnergyBalance"),enabled);
+            if(backendBox_&&backendBox_->currentIndex()==4)requestRender();
+        });
+        connect(colorExposureBox_,qOverload<double>(&QDoubleSpinBox::valueChanged),
+                this,[this](double value){
+            m3d::setRasterColorExposure(float(value));
+            QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+            settings.setValue(QStringLiteral("Raster/ColorExposure"),value);
+            if(backendBox_&&backendBox_->currentIndex()==4&&colorEnergyBox_->isChecked())
+                requestRender();
         });
         connect(filmicToneBox_,&QCheckBox::toggled,this,[this](bool enabled){
             m3d::setRasterFilmicTonemapEnabled(enabled);

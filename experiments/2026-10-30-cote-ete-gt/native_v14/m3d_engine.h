@@ -118,6 +118,11 @@ void setRasterHybridLightingEnabled(bool enabled);
 // Filmic shoulder control is independent of probe GI, and defaults OFF.
 bool rasterFilmicTonemapEnabled();
 void setRasterFilmicTonemapEnabled(bool enabled);
+// Color-energy balance is independent of GI. Core OFF preserves old images.
+bool rasterColorEnergyBalanceEnabled();
+void setRasterColorEnergyBalanceEnabled(bool enabled);
+float rasterColorExposure();
+void setRasterColorExposure(float exposure);
 // Selects scene-specific offline GI cache, reloaded on every explicit set.
 void setRasterGiCachePath(const std::filesystem::path& path);
 bool rasterGiCacheLoaded();
