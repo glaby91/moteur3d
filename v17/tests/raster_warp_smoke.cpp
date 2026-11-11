@@ -235,13 +235,14 @@ int main(int argc,char** argv){
         qInfo()<<"V17 GPU readback depth"<<depth
                <<"identical to synchronous pixels across"<<frames<<"frames";
     }
-    // V17.308 hybrid-lighting regression. Legacy mode must remain exactly
-    // reproducible; experimental light probes and filmic HDR must be
-    // deterministic, visibly distinct, and respond to time-of-day changes.
-    const bool originalHybrid=m3d::rasterHybridLightingEnabled();
-    if(originalHybrid){qCritical()<<"Hybrid must default OFF for legacy benchmarks";return 1;}
+    // V17.310: separate GI and tonemapping. Test four states:
+    // legacy, indirect-only, indirect+filmic, filmic-only.
+    // The original GPU raster must remain pixel-exact when both are OFF.
+    if(m3d::rasterHybridLightingEnabled()||m3d::rasterFilmicTonemapEnabled()){
+        qCritical()<<"Reference Raster API must default OFF for GI and tone";return 1;
+    }
     m3d::setRasterHybridLightingEnabled(true);
-    std::vector<uint32_t> hybridA,hybridB,morning,evening;
+    std::vector<uint32_t> hybridA,hybridB,hybridToneA,hybridToneB,toneOnly,morning,evening;
     m3d::Stats hs;
     error.clear();
     const bool hybridOk=m3d::renderDirectX11Preview(
@@ -249,9 +250,51 @@ int main(int argc,char** argv){
         m3d::renderDirectX11Preview(
         built.runtime.renderScene,shadow,cam,w,h,hybridB,hs,error);
     if(!hybridOk||hybridA!=hybridB||hybridA==second){
-        qCritical()<<"Hybrid lighting not deterministic or no visible effect"
+        qCritical()<<"Indirect lighting not deterministic or no visible effect"
                    <<QString::fromStdWString(error);return 1;
     }
+    const auto meanLuma=[](const std::vector<uint32_t>& values)->double{
+        double sum=0;
+        for(uint32_t c:values)
+            sum+=double((c>>16)&255u)+double((c>>8)&255u)+double(c&255u);
+        return sum/(3.0*double(values.size()));
+    };
+    // Guard against V17.309's overly bright GI output; allow natural
+    // deviations in the test scene but prohibit a global white-out.
+    if(meanLuma(hybridA)>meanLuma(second)*1.12){
+        qCritical()<<"Hybrid lighting raised average brightness too far";
+        return 1;
+    }
+    m3d::setRasterFilmicTonemapEnabled(true);
+    const bool toneOk=m3d::renderDirectX11Preview(
+        built.runtime.renderScene,shadow,cam,w,h,hybridToneA,hs,error)&&
+        m3d::renderDirectX11Preview(
+        built.runtime.renderScene,shadow,cam,w,h,hybridToneB,hs,error);
+    if(!toneOk||hybridToneA!=hybridToneB){
+        qCritical()<<"Independent tone mapping not deterministic";return 1;
+    }
+    // The filmic shoulder can never raise a color channel. This is a
+    // stronger guarantee than an average-luminance test.
+    const auto noChannelBrightening=[](const std::vector<uint32_t>& before,
+                                      const std::vector<uint32_t>& after)->bool{
+        if(before.size()!=after.size())return false;
+        for(size_t i=0;i<before.size();++i)
+            for(unsigned shift:{0u,8u,16u})
+                if(((after[i]>>shift)&255u)>((before[i]>>shift)&255u))
+                    return false;
+        return true;
+    };
+    if(!noChannelBrightening(hybridA,hybridToneA)){
+        qCritical()<<"Filmic shoulder raised pixel values";return 1;
+    }
+    m3d::setRasterHybridLightingEnabled(false);
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,cam,w,h,
+                                     toneOnly,hs,error)||
+       !noChannelBrightening(second,toneOnly)){
+        qCritical()<<"Standalone tone mapping unexpectedly lifts the reference";return 1;
+    }
+    m3d::setRasterFilmicTonemapEnabled(false);
+    m3d::setRasterHybridLightingEnabled(true);
     m3d::updateLighting(9.f);
     m3d::Stats morningShadowStats;
     const auto morningShadow=m3d::buildShadow(built.runtime.renderScene,morningShadowStats);
@@ -271,15 +314,25 @@ int main(int argc,char** argv){
     std::vector<uint32_t> oldAfterHybrid;
     if(!m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,
                                      cam,w,h,oldAfterHybrid,hs,error)||oldAfterHybrid!=second){
-        qCritical()<<"Legacy raster pixels changed after hybrid mode";return 1;
+        qCritical()<<"Legacy raster pixels changed after tone/GI A/B";return 1;
     }
-    qInfo()<<"Hybrid GI probes deterministic, hour-varying and fully reversible";
-    QImage png(w,h,QImage::Format_ARGB32);
-    for(int y=0;y<h;++y)
-        std::memcpy(png.scanLine(y),second.data()+size_t(y)*w,size_t(w)*4);
-    if(!png.save(QString::fromLocal8Bit(argv[2]),"PNG")){
-        qCritical()<<"Failed to write raster PNG";return 1;
+    // CI artifacts include three actual WARP images for visual comparison.
+    // No synthetic illustration, just real shader output.
+    const auto savePixels=[&](const std::vector<uint32_t>& data,const QString& filename)->bool{
+        QImage frame(w,h,QImage::Format_ARGB32);
+        for(int y=0;y<h;++y)
+            std::memcpy(frame.scanLine(y),data.data()+size_t(y)*w,size_t(w)*4);
+        return frame.save(filename,"PNG");
+    };
+    const QString preview=QString::fromLocal8Bit(argv[2]);
+    if(!savePixels(second,preview)||
+       !savePixels(hybridA,preview+QStringLiteral(".indirect.png"))||
+       !savePixels(hybridToneA,preview+QStringLiteral(".indirect-filmic.png"))){
+        qCritical()<<"Failed to save lighting A/B reference PNGs";return 1;
     }
+    qInfo()<<"V17.310 GI/tone independent and reversible; reference luma"
+           <<meanLuma(second)<<"GI luma"<<meanLuma(hybridA)
+           <<"filmic luma"<<meanLuma(hybridToneA);
     qInfo()<<"V17 DX11 raster WARP OK, cached"<<warmStats.ms
            <<"ms; size"<<w<<"x"<<h;
     return 0;
