@@ -20,6 +20,7 @@ set(M3D_RENDER_SOURCES
     "${NATIVE_SRC}/m3d_simd.cpp"
     "${NATIVE_SRC}/m3d_compute11.cpp"
     "${NATIVE_SRC}/m3d_directx11.cpp"
+    "${NATIVE_SRC}/m3d_gi_bake.cpp"
     "${NATIVE_SRC}/m3d_dxr.cpp"
     "${NATIVE_SRC}/simd/avx2/post.cpp"
     "${NATIVE_SRC}/simd/avx2/ray_generation.cpp"

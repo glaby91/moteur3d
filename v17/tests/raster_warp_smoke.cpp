@@ -1,6 +1,7 @@
 // V17: exercise the reused D3D11 raster renderer in CI (Microsoft WARP).
 // This validates rendering, not the performance of Intel HD Graphics 620.
 #include "m3d_engine.h"
+#include "src/m3d_gi_bake.h"
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
 #include <QCoreApplication>
@@ -333,6 +334,57 @@ int main(int argc,char** argv){
     qInfo()<<"V17.310 GI/tone independent and reversible; reference luma"
            <<meanLuma(second)<<"GI luma"<<meanLuma(hybridA)
            <<"filmic luma"<<meanLuma(hybridToneA);
+    // V17.312: actual ray-transport table stored on disk, reloaded by the
+    // D3D11 GPU worker and interpolated between independently baked hours.
+    m3d::gibake::Options bakeOptions{};
+    bakeOptions.nx=4;bakeOptions.ny=3;bakeOptions.nz=4;
+    bakeOptions.rays=8;bakeOptions.frames=5;
+    bakeOptions.firstHour=8.f;bakeOptions.stepHours=2.5f;
+    m3d::gibake::Table table;
+    std::string bakeError;
+    if(!m3d::gibake::bake(built.runtime.renderScene,bakeOptions,table,bakeError)){
+        qCritical()<<"Real GI table bake failed"<<QString::fromStdString(bakeError);return 1;
+    }
+    const QString giName=QString::fromLocal8Bit(argv[2])+QStringLiteral(".m3dgi");
+    if(!m3d::gibake::writeFile(std::filesystem::path(giName.toStdWString()),table,bakeError)){
+        qCritical()<<"GI table file write failed"<<QString::fromStdString(bakeError);return 1;
+    }
+    m3d::setRasterGiCachePath(std::filesystem::path(giName.toStdWString()));
+    m3d::setRasterHybridLightingEnabled(true);
+    std::vector<uint32_t> bakedA,bakedB,bakedMorning,bakedEvening;
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,cam,w,h,
+                                     bakedA,hs,error)||!m3d::rasterGiCacheLoaded()||
+       !m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,cam,w,h,
+                                     bakedB,hs,error)||bakedA!=bakedB||bakedA==second){
+        qCritical()<<"D3D11 did not load/use deterministic GI tables"
+                   <<QString::fromStdWString(error);return 1;
+    }
+    m3d::updateLighting(9.f);
+    m3d::Stats mornStats;
+    const auto mornShadow=m3d::buildShadow(built.runtime.renderScene,mornStats);
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,mornShadow,cam,w,h,
+                                     bakedMorning,hs,error)){
+        qCritical()<<"Baked GI morning failed";return 1;
+    }
+    m3d::updateLighting(17.5f);
+    m3d::Stats eveStats;
+    const auto eveShadow=m3d::buildShadow(built.runtime.renderScene,eveStats);
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,eveShadow,cam,w,h,
+                                     bakedEvening,hs,error)||bakedMorning==bakedEvening){
+        qCritical()<<"Baked GI multi-hour interpolation not used";return 1;
+    }
+    m3d::setRasterHybridLightingEnabled(false);
+    m3d::setRasterGiCachePath(std::filesystem::path{});
+    m3d::updateLighting(built.runtime.daylightHour);
+    std::vector<uint32_t> legacyAfterBake;
+    if(!m3d::renderDirectX11Preview(built.runtime.renderScene,shadow,cam,w,h,
+                                     legacyAfterBake,hs,error)||legacyAfterBake!=second){
+        qCritical()<<"Baked GI changed historical reference pixels";return 1;
+    }
+    if(!savePixels(bakedA,preview+QStringLiteral(".baked-gi.png"))){
+        qCritical()<<"Baked GI PNG output missing";return 1;
+    }
+    qInfo()<<"V17.312 table-driven real GI verified: cache, hours and parity";
     qInfo()<<"V17 DX11 raster WARP OK, cached"<<warmStats.ms
            <<"ms; size"<<w<<"x"<<h;
     return 0;
