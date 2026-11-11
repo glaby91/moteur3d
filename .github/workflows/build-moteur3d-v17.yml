@@ -107,6 +107,24 @@ jobs:
           if ($raster.gpuBoxInstances -lt 10) { throw "GPU box instancing not exercised by civic JSON" }
           if ($raster.gpuFoliageInstances -lt 1) { throw "GPU foliage LOD not exercised by civic JSON" }
           if ($raster.gpuDrawCalls -lt 1) { throw "No draw calls measured" }
+      - name: V17 visual QA — render all 9 palace camera views with actual DX11 WARP
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          & "build-v17/Release/moteur3d_v17_benchmark.exe" "scenes/v16/benchmark-civic/scene.json" "build-v17/civic-views" --smoke --all-cameras
+          if ($LASTEXITCODE -ne 0) { throw "Civic 9-camera real WARP preview failed" }
+          $pictures = @(Get-ChildItem "build-v17/civic-views" -Recurse -Filter 'raster_*.png')
+          if ($pictures.Count -ne 9) {
+            throw "Incomplete visual review: expected 9 actual camera PNG, found $($pictures.Count)"
+          }
+          foreach ($camera in @('facade','mosaique','bassin','hall','vestiaires','passerelle','etage')) {
+            $matches = @($pictures | Where-Object { $_.Name -like "raster_$($camera)_*.png" })
+            if ($matches.Count -ne 1 -or $matches[0].Length -lt 1200) {
+              throw "Missing/empty scene camera image: $camera"
+            }
+          }
+          $pictures | Sort-Object Name | ForEach-Object { Write-Host "$($_.Name) - $($_.Length) bytes" }
       - name: Diagnose raster WARP executable before extended tests
         shell: pwsh
         env:
@@ -281,6 +299,10 @@ jobs:
           Copy-Item "build-v17/Release/pavillon01" "dist-v17/pavillon01" -Recurse
           Copy-Item "build-v17/Release/benchmark-civic" "dist-v17/benchmark-civic" -Recurse
           Copy-Item "build-v17/civic-actual-preview.png" "dist-v17/benchmark-civic/actual-render-WARP.png"
+          New-Item -ItemType Directory -Force "dist-v17/benchmark-civic/render-views-WARP" | Out-Null
+          Get-ChildItem "build-v17/civic-views" -Recurse -Filter 'raster_*.png' | ForEach-Object {
+            Copy-Item $_.FullName "dist-v17/benchmark-civic/render-views-WARP/"
+          }
           New-Item -ItemType Directory -Force "dist-v17/material-library/pripyat-v17/originaux" | Out-Null
           Copy-Item "assets/materials/pripyat-v17/catalogue.json" "dist-v17/material-library/pripyat-v17/"
           Copy-Item "assets/materials/pripyat-v17/README.md" "dist-v17/material-library/pripyat-v17/"
@@ -394,6 +416,11 @@ jobs:
           Copy-Item "build-v17/v17-raster-warp-quick.png.balanced-085.png" "$comparison/raster-balanced-exposure-085.png"
           Copy-Item "build-v17/v17-raster-warp-quick.png.balanced-115.png" "$comparison/raster-balanced-exposure-115.png"
           Copy-Item "build-v17/v17-raster-warp-quick.png.color-metrics.csv" "$comparison/color-metrics.csv"
+          $viewsFolder=Join-Path $comparison 'civic-camera-views'
+          New-Item -ItemType Directory -Force $viewsFolder | Out-Null
+          Get-ChildItem "build-v17/civic-views" -Recurse -Filter 'raster_*.png' | ForEach-Object {
+            Copy-Item $_.FullName $viewsFolder
+          }
       - name: Archive des résultats de simulation totale WARP
         if: always()
         uses: actions/upload-artifact@v6

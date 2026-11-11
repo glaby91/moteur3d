@@ -105,6 +105,20 @@ les 96 modules du banc ovale et la suppression des immeubles secondaires.
   des tests BVH de marche depuis l'extérieur et de montée du grand escalier.
   Ces tests servent de garde-fou, pas de certificat d'accessibilité.
 
+## Captures de contrôle depuis le vrai moteur — V17.326
+
+Les 9 points de vue du palais sont rendus en **DX11 Raster sous Microsoft WARP**
+avec `moteur3d_v17_benchmark --smoke --all-cameras`. Le dossier de
+livraison contient ensuite les **9 images PNG réellement calculées** dans
+`benchmark-civic/render-views-WARP`, et elles sont archivées aussi dans
+les résultats de simulation totale. Cela permet de vérifier indépendamment
+la façade, la mosaïque à courte distance, l'entrée, la piscine, la
+fresque du hall, les vestiaires, la galerie et le monument.
+
+Le test vérifie le nombre exact de vues et l'existence des PNG, **mais
+ne remplace pas leur inspection visuelle** : un éventuel mauvais
+positionnement reste à corriger avant validation esthétique finale.
+
 ## Test et génération
 
 ```powershell
