@@ -1,5 +1,5 @@
 // V17.312 — deterministic offline GI table generator + real CPU benchmark.
-// Usage: moteur3d_v17_gibake scene.json file.m3dgi [--smoke] [--bench report.json]
+// Usage: moteur3d_v17_gibake scene.json file.m3dgi [--smoke] [--full-gi] [--bench report.json]
 #include "src/m3d_gi_bake.h"
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
@@ -19,16 +19,17 @@ using namespace m3d;
 int main(int argc,char** argv){
     QCoreApplication app(argc,argv);
     if(argc<3){
-        std::fprintf(stderr,"Usage: moteur3d_v17_gibake scene.json file.m3dgi [--smoke] [--bench report.json]\n");
+        std::fprintf(stderr,"Usage: moteur3d_v17_gibake scene.json file.m3dgi [--smoke] [--full-gi] [--bench report.json]\n");
         return 2;
     }
     const QString input=QString::fromLocal8Bit(argv[1]);
     const QString output=QString::fromLocal8Bit(argv[2]);
-    bool smoke=false,bench=false;
+    bool smoke=false,bench=false,fullGi=false;
     QString report;
     for(int i=3;i<argc;i++){
         const QString arg=QString::fromLocal8Bit(argv[i]);
         if(arg=="--smoke")smoke=true;
+        else if(arg=="--full-gi")fullGi=true;
         else if(arg=="--bench"&&i+1<argc){bench=true;report=QString::fromLocal8Bit(argv[++i]);}
         else {qCritical()<<"Unknown GI parameter"<<arg;return 2;}
     }
@@ -40,7 +41,7 @@ int main(int argc,char** argv){
     const double setupMs=double(timer.elapsed());
     const Scene& scene=built.runtime.renderScene;
     gibake::Options opt;
-    if(smoke){opt.nx=4;opt.ny=3;opt.nz=4;opt.rays=8;
+    if(smoke&&!fullGi){opt.nx=4;opt.ny=3;opt.nz=4;opt.rays=8;
               opt.frames=5;opt.firstHour=8.f;opt.stepHours=2.5f;}
     const uint64_t hash=gibake::signature(scene);
     std::vector<double> freshTimes,cacheTimes,interpolationTimes;
@@ -95,7 +96,7 @@ int main(int argc,char** argv){
     result.insert("scene",input);
     result.insert("mode",QStringLiteral("offline CPU real ray transport"));
     result.insert("device",QStringLiteral("GitHub Windows runner CPU, not Intel HD620"));
-    result.insert("preset",smoke?QStringLiteral("smoke"):QStringLiteral("full"));
+    result.insert("preset",fullGi?QStringLiteral("full-gi-volume-small-textures"):(smoke?QStringLiteral("smoke"):QStringLiteral("full")));
     result.insert("result",QStringLiteral("PASS"));
     result.insert("sceneBuildMs",setupMs);
     result.insert("bakeColdMedianMs",coldBakeMedian);

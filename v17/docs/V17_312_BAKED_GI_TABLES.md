@@ -34,3 +34,7 @@ La qualité PBR 2048, les normal maps, les matériaux, le MSAA et l'AF ne sont p
 ## Suivi de validation GitHub
 
 La PR doit rester en brouillon tant que la compilation Windows, les tests de cache GI et la simulation totale n'ont pas tous réussi. Les jeux de données de benchmark sont conservés dans l'artefact `Total-Simulation-WARP/gi-bench` avec les rapports JSON et le CSV des médianes de trois cuissons et sept relectures. Les images de validation comprennent la référence Raster, les sondes approximatives et la véritable table GI.
+
+## Benchmark volumique complet
+
+La simulation ajoute une deuxième série à 864 sondes (12×6×12), 16 rayons, 2 rebonds et 25 états horaires. Chaque scène subit trois cuissons indépendantes, sept relectures du cache et 25 séries de 200 interpolations CPU. Le processeur GitHub exécute les calculs sur la **géométrie complète**, mais le chargement PBR de ce benchmark utilise des textures plafonnées à 256 px pour maîtriser la mémoire du runner ; la restitution visuelle et les performances du Dell à 2048 px restent à valider séparément. Rapport `gi-benchmark-full.csv` et JSON détaillés.

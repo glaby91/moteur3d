@@ -341,6 +341,40 @@ jobs:
           }
           $data | Export-Csv (Join-Path $folder 'gi-benchmark-summary.csv') -NoTypeInformation
           $data | Format-Table -AutoSize | Out-String | Write-Host
+      - name: Benchmark GI volume complet — 864 sondes, 25 heures, 3 cuissons
+        shell: pwsh
+        timeout-minutes: 25
+        run: |
+          $folder = "build-v17/total-simulation/gi-bench"
+          New-Item -ItemType Directory -Force $folder | Out-Null
+          $data = @()
+          foreach ($entry in @(
+            @{ name='pavillon'; scene='scenes/v16/pavillon01/scene.json' },
+            @{ name='materiaux'; scene='scenes/v16/material-lab/scene.json' },
+            @{ name='civique'; scene='scenes/v16/benchmark-civic/scene.json' }
+          )) {
+            $cache = Join-Path $folder ($entry.name + "-full.m3dgi")
+            $json = Join-Path $folder ($entry.name + "-full.json")
+            # PBR load kept at 256px to control runner RAM; GI volume is full.
+            & "build-v17/Release/moteur3d_v17_gibake.exe" $entry.scene $cache --smoke --full-gi --bench $json
+            if ($LASTEXITCODE -ne 0) { throw "GI full-table bake failed: $($entry.name)" }
+            $row = Get-Content $json -Raw | ConvertFrom-Json
+            if ($row.result -ne 'PASS' -or $row.probes -ne 864 -or $row.hours -ne 25 -or
+                $row.raysPerProbe -ne 16 -or $row.bakeRepetitions -ne 3 -or
+                $row.cacheLoadRepetitions -ne 7) {
+              throw "Incomplete full GI benchmark: $($entry.name)"
+            }
+            $data += [pscustomobject]@{
+              version = $row.version; scene = $entry.name
+              probes = $row.probes; hours = $row.hours; rays = $row.raysPerProbe
+              coldBakeMedianMs = $row.bakeColdMedianMs
+              diskLoadMedianMs = $row.diskLoadMedianMs
+              sampleInterpolatedMedianMs = $row.sampleInterpolatedMedianMs
+              sceneBuildMs = $row.sceneBuildMs
+            }
+          }
+          $data | Export-Csv (Join-Path $folder 'gi-benchmark-full.csv') -NoTypeInformation
+          $data | Format-Table -AutoSize | Out-String | Write-Host
       - name: Simulation totale V17 — six scènes, Raster, CPU, Compute et parité PNG
         shell: pwsh
         timeout-minutes: 55
