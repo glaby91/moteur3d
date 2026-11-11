@@ -86,7 +86,7 @@ int main(int argc,char** argv){
         sourceRevision=QString::fromUtf8(revFile.readAll()).trimmed().left(12);
     QTextStream out(stdout),err(stderr);
     if(argc<3){
-        err<<"Usage: moteur3d_v17_benchmark.exe scene.json output_dir [--quick] [--compare-v16] [--smoke] [--readback-depth 1|2|3] [--compare-readback]\n";
+        err<<"Usage: moteur3d_v17_benchmark.exe scene.json output_dir [--quick] [--compare-v16] [--smoke] [--readback-depth 1|2|3] [--compare-readback] [--all-cameras]\n";
         return 2;
     }
     const QString scenePath=QFileInfo(QString::fromLocal8Bit(argv[1])).absoluteFilePath();
@@ -130,6 +130,7 @@ int main(int argc,char** argv){
             return 2;
         }
     }
+    const bool allCameras=args.contains(QStringLiteral("--all-cameras"));
     const bool smoke=args.contains(QStringLiteral("--smoke"));
     const bool quick=smoke||args.contains(QStringLiteral("--quick"));
     const bool compare=args.contains(QStringLiteral("--compare-v16"))&&!smoke;
@@ -254,7 +255,11 @@ int main(int argc,char** argv){
     const QVector<QSize> sizes=smoke?QVector<QSize>{QSize(640,360)}
         :quick?QVector<QSize>{QSize(1366,768)}
               :QVector<QSize>{QSize(1366,768),QSize(1920,1080)};
-    const int cameras=quick?1:std::min(2,int(runtime.cameras.size()));
+    // In visual QA mode, capture EVERY preset as genuine GPU output
+    // (facade, mosaic close-up, hall/fresco, pool, changing rooms, statue).
+    // Historical benchmarks retain their exact old camera count.
+    const int cameras=allCameras?int(runtime.cameras.size()):
+        quick?1:std::min(2,int(runtime.cameras.size()));
     const int measuredFrames=smoke?2:quick?6:12;
     for(int cameraIndex=0;cameraIndex<cameras;++cameraIndex){
         const auto& preset=runtime.cameras[cameraIndex];

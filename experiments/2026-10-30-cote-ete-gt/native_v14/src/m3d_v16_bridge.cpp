@@ -88,9 +88,12 @@ void box(Scene& scene,V position,V size,float rotationY,int mat) {
         const auto& v=faces[k];
         V a=world(v[0].x,v[0].y,v[0].z),b=world(v[1].x,v[1].y,v[1].z),
           c=world(v[2].x,v[2].y,v[2].z),d=world(v[3].x,v[3].y,v[3].z);
-        // Exact UV coverage for the historic 9.5 x 4.3 m artwork.
+        // Full image per face: both the original 9.5 x 4.3 m Energetik
+        // fresco and the user's portrait on the 8 x 13 m OUTER facade.
+        // These image assets must not repeat at the regular PBR tile rate.
         const bool uniqueArt=mat>=0&&size_t(mat)<scene.mat.size()&&
-          scene.mat[size_t(mat)].name=="cse_energetik_fresco";
+          (scene.mat[size_t(mat)].name=="cse_energetik_fresco"||
+           scene.mat[size_t(mat)].name=="cse_personnage_facade");
         const float us=uniqueArt?1.f:(k<2?size.x:k<4?size.z:size.x)*.5f;
         const float vs=uniqueArt?1.f:(k<4?size.y:size.z)*.5f;
         triangle(scene,a,b,c,{0,0,0},{us,0,0},{us,vs,0},mat);
