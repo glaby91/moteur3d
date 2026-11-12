@@ -140,9 +140,12 @@ jobs:
             throw "Incomplete visual review: expected 11 actual camera PNG, found $($pictures.Count)"
           }
           foreach ($camera in @('facade','mosaique','bassin','hall','vestiaires','passerelle','etage','hall_ensemble','piscine_soir')) {
-            # Match the exact camera ID: 'hall' must not include 'hall_ensemble'.
-            $prefix = "raster_${camera}_"
-            $matches = @($pictures | Where-Object { $_.Name.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase) -and $_.Name.Substring($prefix.Length) -match '^[0-9]+x[0-9]+\.png
+            $prefix = 'raster_' + $camera + '_'
+            $matches = @($pictures | Where-Object { $_.Name.StartsWith($prefix) -and $_.Name.Substring($prefix.Length) -match '^[0-9]+x[0-9]+[.]png$' })
+            if ($matches.Count -ne 1 -or $matches[0].Length -lt 1200) {
+              throw "Missing/empty scene camera image: $camera"
+            }
+          }
           $pictures | Sort-Object Name | ForEach-Object { Write-Host "$($_.Name) - $($_.Length) bytes" }
       - name: V17.324 visual QA — pool at 14h and 19h, same camera
         shell: pwsh
