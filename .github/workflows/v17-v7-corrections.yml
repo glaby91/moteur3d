@@ -69,6 +69,16 @@ jobs:
           assert t["hillHeightM"]==2.7
           assert t["frontStairWidthM"]==68.2 and t["lateralParvisTransitions"]==8
           assert t["muralAtriumCentralSlabs"]==0
+          assert t["muralSightlineRemovedPoolEndRailParts"]==35
+          assert t["poolEndGuardrailNearEndPreserved"]==34
+          assert sum(o["parent"]=="Interieur/Piscine olympique/Garde-corps" and
+                     abs(o["position"][2]+45.6)<.01 for o in a)==0
+          assert sum(o["parent"]=="Interieur/Piscine olympique/Garde-corps" and
+                     abs(o["position"][2]+18.4)<.01 for o in a)==34
+          assert sum(o["parent"]=="Interieur/Piscine olympique/Main courante" and
+                     abs(o["position"][2]+44.64)<.01 for o in a)==0
+          assert sum(o["parent"]=="Interieur/Piscine olympique/Main courante" and
+                     abs(o["position"][2]+19.36)<.01 for o in a)==1
           assert not any(o["parent"]=="Interieur/Galeries" and o["position"][1]>=4.4
                and abs(o["position"][0])<.1 and o["position"][2]<-43 for o in a)
           assert not any(o["parent"].startswith("Interieur/Galeries/Garde-corps 1er etage/")
@@ -106,6 +116,14 @@ jobs:
           $img=@(Get-ChildItem v7-pool -Recurse -Filter "raster_v7_pool_fresco_640x360_depth1.png")
           if($img.Count -ne 1 -or $img[0].Length -lt 1000){throw "Missing fresco render"}
           Copy-Item $img[0].FullName v7-images/V7-FRESQUE-WARP-640x360.png
+      - name: Real D3D11 WARP camera 07 — verify formerly obstructed mural sightline
+        shell: pwsh
+        run: |
+          & dist-v7/moteur3d_v17_benchmark.exe dist-v7/benchmark-civic/scene-v7-corrections.json v7-gallery-check --smoke --camera-id v4_piscine --hour 14.75 --raster-msaa 1
+          if($LASTEXITCODE -ne 0){throw "Camera 07 real WARP render failed"}
+          $img=@(Get-ChildItem v7-gallery-check -Recurse -Filter "raster_v4_piscine_640x360_depth1.png")
+          if($img.Count -ne 1 -or $img[0].Length -lt 1000){throw "Camera 07 mural image missing"}
+          Copy-Item $img[0].FullName v7-images/V7-CAMERA-07-FRESQUE-SANS-GALERIE-WARP-640x360.png
       - name: Package all V7 executable and scenes
         shell: pwsh
         run: |

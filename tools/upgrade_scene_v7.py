@@ -296,6 +296,34 @@ def build(root):
     remove(lambda o:o["parent"].startswith("Interieur/Galeries/Garde-corps 1er etage/")
        and abs(o["position"][2]+45.3)<.2 and abs(o["position"][0])<28.1)
     report["muralAtriumCentralSlabs"]=0
+    # V7.423: the apparently surviving transverse "gallery" in the exact
+    # 07 / v4_piscine view is a separate pool-end 17-bay guardrail at z=-45.6,
+    # plus a 50-m freestanding cross-rail at z=-44.64.  The upper concrete
+    # gallery slabs had ALREADY been removed in V7.422.  These 35 elements
+    # obscured the bottom half of the fresco despite the empty atrium.
+    # Remove ONLY the transverse far-end barrier; retain the near-end
+    # protection, both longitudinal galleries and all basin concrete walls.
+    rear_rail=[o for o in objs
+               if o["parent"]=="Interieur/Piscine olympique/Garde-corps"
+               and abs(o["position"][2]+45.60)<.01]
+    rear_handrail=[o for o in objs
+                   if o["parent"]=="Interieur/Piscine olympique/Main courante"
+                   and abs(o["position"][2]+44.64)<.01]
+    assert len(rear_rail)==34 and len(rear_handrail)==1, (
+        "Unexpected pool-end rail geometry; refuse ambiguous deletion",
+        len(rear_rail),len(rear_handrail))
+    remove(lambda o:
+           (o["parent"]=="Interieur/Piscine olympique/Garde-corps"
+            and abs(o["position"][2]+45.60)<.01)
+           or (o["parent"]=="Interieur/Piscine olympique/Main courante"
+               and abs(o["position"][2]+44.64)<.01))
+    assert sum(o["parent"]=="Interieur/Piscine olympique/Garde-corps"
+               for o in objs)==34
+    assert sum(o["parent"]=="Interieur/Piscine olympique/Main courante"
+               for o in objs)==1
+    report["muralSightlineRemovedPoolEndRailParts"]=len(rear_rail)+len(rear_handrail)
+    report["poolEndGuardrailNearEndPreserved"]=34
+
 
     # 7. True maximal-ratio artwork: original 2048x930 pixels -> 4x2 native tiles.
     # Runtime low-memory atlas is limited to <=512px/material, so 8 individual
