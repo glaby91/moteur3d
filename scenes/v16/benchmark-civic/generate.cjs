@@ -51,7 +51,7 @@ const cameras={format:'m3d-cameras-v1',cameras:[
  {id:'escalier',name:'02 · Escalier continu vers le palais',position:[-17,2.2,29],target:[0,2.6,-4],fovDegrees:66},
  {id:'passerelle',name:'03 · Grand banc ovale et statue',position:[66,2.3,72],target:[37,5.0,52],fovDegrees:67},
  {id:'bassin',name:'04 · Piscine olympique depuis l’entrée',position:[0,2.4,-10],target:[0,1.0,-34],fovDegrees:73},
- {id:'hall',name:'05 · Hall, escalier et fresque Energetik',position:[-7,2.9,-10],target:[-15,10.35,-17.9],fovDegrees:69},
+ {id:'hall',name:'05 · Hall, escalier et fresque Energetik',position:[-15,10.35,-11.6],target:[-15,10.35,-18.0],fovDegrees:67},
  {id:'etage',name:'06 · Galerie au-dessus des lignes d’eau',position:[34,6.6,-44],target:[0,2,-32],fovDegrees:71},
  {id:'vestiaires',name:'07 · Vestiaires et douches RDC',position:[-33.5,2.15,-35.4],target:[-43.5,2,-36],fovDegrees:68},
  {id:'vue_haut',name:'07 · Vue aérienne du bâtiment unique',position:[95,68,105],target:[15,5,11],fovDegrees:67}
@@ -265,10 +265,40 @@ function build(profileName,p){
   for(let x=-26;x<=26;x+=4)
    B(pool+'/Lumière linéaire','prp_window_glass',x,16.61,z,3.85,.06,.20);
  }
+ // Physical ceiling luminaires aligned with the 55 actual pool lights.
+ // Each light is a luminous diffuser inside a discrete metal tray.
+ for(const z of [-44,-38,-32,-26,-20]){
+  for(let i=0;i<11;i++){
+   const x=-23+i*4.6;
+   B(pool+'/Plafonniers/Chassis','prp_window_frame',x,16.73,z,2.75,.16,.56);
+   B(pool+'/Plafonniers/Diffuseur','cse_pool_strip',x,16.63,z,2.48,.075,.32);
+  }
+ }
+ // A continuous pale ceramic waterline and coloured lane-end accents make
+ // the natatorium legible under artificial light without faking exposure.
+ for(const z of [-44.64,-19.36]){
+  B(pool+'/Frise ligne eau','prp_tile_ceramic',0,.34,z,50,.22,.055);
+  B(pool+'/Main courante','prp_steel_painted',0,1.27,z,50,.065,.065);
+ }
+ for(const x of [-25.15,25.15]){
+  B(pool+'/Frise ligne eau','prp_tile_ceramic',x,.34,-32,.055,.22,25.0);
+ }
+ // Sparse internal architectural ribs give roof depth rather than a flat slab.
+ for(const x of [-25,-15,-5,5,15,25])
+  B(pool+'/Poutres plafond','prp_concrete_panel',x,17.58,-32,.38,.38,34);
  // Open lobby at ground level with a clear line of sight into the pool.
  B('Interieur/Hall/Accueil','prp_wood_weathered',-19,1.05,-10,6,1.1,1.2);
  for(const side of [-1,1])
   B('Interieur/Hall/Panneaux','prp_concrete_panel',side*11,2.8,-11,.25,4.1,5);
+ // Hall light bars are visible architectural fixtures, not invisible bulbs.
+ for(const y of [7.55,11.95]){
+  for(const z of [-8,-12,-16]){
+   for(const x of [-26,-18,-10,-2,6,14,22]){
+    B('Interieur/Hall/Plafonniers/Chassis','prp_window_frame',x,y+.18,z,3.0,.12,.46);
+    B('Interieur/Hall/Plafonniers/Diffuseur','cse_pool_strip',x,y+.06,z,2.75,.075,.30);
+   }
+  }
+ }
  // A walkable 27-tread staircase at the pool's east deck to the gallery.
  for(let i=0;i<27;i++){
   const top=.70+i*(3.95/26);
