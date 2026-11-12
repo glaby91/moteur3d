@@ -27,7 +27,7 @@ const specials=[
 ];
 const localMaterials=specials.map(([id,baseColor,roughness])=>({
  id,baseColor,roughness,metallic:id==='cse_monument_bronze'?.72:0,
- transmission:id==='cse_pool_water'?48:0,ior:id==='cse_pool_water'?1.333:1.5,textureSet:'tex_'+id,
+ transmission:id==='cse_pool_water'?.48:0,ior:id==='cse_pool_water'?1.333:1.5,textureSet:'tex_'+id,
  origin:'CSE WARP single-palace scene material; original Pripyat library unchanged'
 }));
 const localSets=specials.map(([id,, ,pattern])=>({
