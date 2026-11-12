@@ -631,23 +631,68 @@ function build(profileName,p){
  // but outside the 10-m central access corridor.
  for(const x of [-16,-11,11,16])
   F('Place/Jardins devant entrée','prp_foliage',x,1.15,-1.5,2.1,2.35,2.1);
- // Street trees and green pockets with repeated but distinct crown geometry.
+ // The old tree coordinates were 120 m away from the facade, leaving
+ // the landscaped plaza empty. Put 26 actual branched poplars/birches
+ // near the paths, while keeping the 10 m central entrance unobstructed.
+ const civicTrees=[
+  [-45,12],[-57,18],[-68,22],[-41,33],[-62,41],[-74,51],
+  [-55,65],[-67,73],[-43,79],[-59,89],[-74,97],[-48,102],[-65,112],
+  [45,10],[59,18],[70,24],[61,37],[75,45],[59,66],
+  [69,76],[46,81],[62,92],[73,104],[50,109],[78,60],[67,113]
+ ];
  for(let i=0;i<p.trees;i++){
-   const col=i%2,row=Math.floor(i/2);
-   const x=(col===0?-127:119)+(rand()-.5)*8;
-   const z=-95+(row%38)*5.2+(rand()-.5)*2;
-   const h=9+rand()*7;
-   B('Nature/Arbres','prp_bark_wet',x,h*.35,z,.55,h*.7,.55);
-   // Layered asymmetric crowns and branched silhouettes.
-   for(const side of [-1,1]){
-    B('Nature/Arbres/Branches','prp_bark_wet',x+side*.72,h*.63,z+.32,.20,1.85,.20,side*24);
-    F('Nature/Arbres/Houppier','prp_foliage',x+side*1.55,h*.76,z+side*.6,
-      2.7+rand(),3.5+rand(),2.8+rand());
+  const near=civicTrees[i];
+  const col=i%2,row=Math.floor(i/2);
+  const x=near?near[0]+(rand()-.5)*1.2:
+    (col===0?-1:1)*(82+rand()*12);
+  const z=near?near[1]+(rand()-.5)*1.3:
+    -87+(row%48)*4.6+(rand()-.5)*1.8;
+  const birch=i%3===0;
+  const h=birch?9.3+rand()*3:12.1+rand()*4.8;
+  const bark=birch?'cse_birch_bark':'prp_bark_wet';
+  const canopy=i%5===0?'cse_leaf_gold':
+     i%2===0?'cse_leaf_olive':'prp_foliage';
+  const trunkW=birch?.31:.45;
+  B('Nature/Arbres',bark,x,h*.39,z,trunkW,h*.78,trunkW);
+  // Real articulated branches and asymmetric multilobe foliage geometry.
+  for(let k=0;k<4;k++){
+   const angle=k*Math.PI/2+.25*i;
+   const bx=x+Math.cos(angle)*(birch?.62:.78);
+   const bz=z+Math.sin(angle)*(birch?.62:.78);
+   const branchY=h*(.60+.055*(k%2));
+   B('Nature/Arbres/Branches',bark,bx,branchY,bz,
+     1.55,.16,.16,angle*180/Math.PI);
+   F('Nature/Arbres/Houppier',canopy,
+     x+Math.cos(angle)*(birch?1.65:1.00),
+     h*(birch?.72:.81)+.12*(k%2),
+     z+Math.sin(angle)*(birch?1.55:.85),
+     birch?3.65:2.45, birch?3.2:4.6,birch?3.40:2.55);
+  }
+  F('Nature/Arbres/Houppier',canopy,x,h*(birch?.90:.91),z,
+     birch?3.6:2.75,birch?3.3:5.2,birch?3.4:2.90);
+  if(birch){
+   for(let k=0;k<4;k++){
+    B('Nature/Arbres/Ecorce/bouleau','prp_bark_wet',
+      x+.16,h*(.18+.13*k),z,.025,.09,.21);
    }
-   F('Nature/Arbres/Houppier','prp_foliage',x,h*.91,z,3.6+rand(),4+rand(),3.5+rand());
-   if(p.detail>8){
-    F('Nature/Arbres/Houppier','prp_foliage',x+.9,h*.72,z+.8,3.1,2.6,3.0);
+  }
+  if(p.detail>8)
+   F('Nature/Arbres/Houppier','prp_foliage',
+     x+.40,h*.73,z-.55,3.1,2.8,3.0);
+ }
+ // Low mixed planting along the pavements: no scattered park benches,
+ // and no bushes across the entrance stairway.
+ for(const side of [-1,1]){
+  for(const z of [9,22,78,88]){
+   for(const distance of [36,44,53]){
+    const x=side*(distance+rand()*1.3);
+    F('Place/Jardins/Arbustes','cse_leaf_olive',x,.75,z,
+       1.85,.95+rand()*.7,1.55);
+    S('Place/Jardins/Fleurs basses',
+      ((distance+z)%2===0?'cse_flower_red':'cse_flower_gold'),
+      x+side*.60,.63,z+.65,.60,.43,.60);
    }
+  }
  }
  // The former auditorium seating was removed for the olympic pool.
  // The three upper galleries, staircase and the pool lanes are all physical
