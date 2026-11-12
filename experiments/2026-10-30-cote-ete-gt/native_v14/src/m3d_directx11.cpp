@@ -821,7 +821,35 @@ public:
             cb.materialEmission[m][0]=emissionR;cb.materialEmission[m][1]=emissionG;cb.materialEmission[m][2]=emissionB;cb.materialEmission[m][3]=emissionStrength;
         }
         const float sceneLightScale=.42f+.58f*(1.f-daylight);
+        // Experimental *CPU-side* conservative influence-sphere / camera
+        // frustum selection. A light whose complete influence sphere lies
+        // outside the viewing pyramid cannot illuminate any visible fragment.
+        // Existing PBR shading (including water, normals and GI) is unchanged.
+        // Environment toggle intentionally defaults OFF in production.
+        const char* cpuLightFrustumEnv=std::getenv("M3D_V17_EXPERIMENT_CPU_LIGHT_FRUSTUM");
+        const bool cpuLightFrustumEnabled=cpuLightFrustumEnv
+            &&std::strcmp(cpuLightFrustumEnv,"1")==0;
+        const float frustumSlopeX=cam.tanHalf;
+        const float frustumSlopeY=cam.tanHalf/std::max(.0001f,cam.aspect);
+        const float planeScaleX=std::sqrt(1.f+frustumSlopeX*frustumSlopeX);
+        const float planeScaleY=std::sqrt(1.f+frustumSlopeY*frustumSlopeY);
+        auto affectsView=[&](const Light& l)->bool{
+            if(!cpuLightFrustumEnabled)return true;
+            // Keep anything ambiguous. This test only discards lights that
+            // cannot affect the entire finite frustum, even at its borders.
+            if(!(l.radius>=0.f)||!std::isfinite(l.radius))return true;
+            const V relative=l.p-cam.eye;
+            const float z=dot(relative,cam.f);
+            const float r=l.radius;
+            if(z+r<cb.nearPlane || z-r>cb.farPlane)return false;
+            const float x=dot(relative,cam.r);
+            if(std::abs(x)-z*frustumSlopeX>r*planeScaleX)return false;
+            const float y=dot(relative,cam.u);
+            if(std::abs(y)-z*frustumSlopeY>r*planeScaleY)return false;
+            return true;
+        };
         auto appendLight=[&](const Light& l,float scale){
+            if(!affectsView(l))return;
             if(cb.lightCount>=256)return;
             const uint32_t i=cb.lightCount++;
             cb.lightPositionRadius[i][0]=l.p.x;cb.lightPositionRadius[i][1]=l.p.y;cb.lightPositionRadius[i][2]=l.p.z;cb.lightPositionRadius[i][3]=l.radius;
