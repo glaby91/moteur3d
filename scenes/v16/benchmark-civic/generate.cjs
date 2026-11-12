@@ -5,6 +5,7 @@
 'use strict';
 const fs=require('node:fs');
 const path=require('node:path');
+const {rebuildMonument,rebuildGarden,rebuildTrees}=require('./rebuild-objects.cjs');
 const root=__dirname;
 const repoRoot=path.resolve(root,'../../..');
 const catalogPath=path.join(repoRoot,'assets/materials/pripyat-v17/catalogue.json');
@@ -457,104 +458,10 @@ function build(profileName,p){
  }
  // Low earth dome: supports dense plants but does not occlude the seat.
  S('Place/Butte végétalisée','prp_soil_leaf_litter',cx,.32,cz,29,2.35,17.2);
- const flowers=['cse_flower_red','cse_flower_gold','cse_flower_blue','cse_flower_purple','prp_foliage'];
- for(let i=0;i<250;i++){
-  const a=i*2.399963229728653;
-  const radius=Math.sqrt((i+.5)/250)*.93;
-  const u=radius*Math.cos(a),v=radius*Math.sin(a);
-  const x=cx+u*14.45,z=cz+v*8.50;
-  const height=.32+1.175*Math.sqrt(Math.max(0,1-u*u-v*v));
-  // Clear the 2.5 m central statue plinth.
-  if(Math.abs(x-cx)<2.7&&Math.abs(z-cz)<2.7)continue;
-  const flower=flowers[(i*7+Math.floor(i/7))%flowers.length];
-  const r=.27+.22*rand();
-  // Ground cover first, with flowers as small accents: prevents the
-  // earlier cartoon-like mound of oversized bright spheres.
-  if(i%3===0)
-   F('Place/Butte végétalisée/Fleurs et feuillages',
-     i%2===0?'cse_leaf_olive':'prp_foliage',
-     x,height+r*.13,z,r*2.4,.48+.32*rand(),r*2.4);
-  else
-   S('Place/Butte végétalisée/Fleurs et feuillages',flower,
-     x,height+r*.13,z,r,.30+.17*rand(),r);
-  // Close-up clusters gain visible stems and petals but remain instanced,
-  // rather than receiving high-poly custom flower meshes.
-  if(i%4===0){
-   B('Place/Butte végétalisée/Tiges','cse_leaf_olive',
-     x,height+.18,z,.045,.48,.045);
-   for(let petal=0;petal<4;petal++){
-    const angle=petal*Math.PI/2;
-    S('Place/Butte végétalisée/Petales',flower,
-      x+.17*Math.cos(angle),height+.36,z+.17*Math.sin(angle),
-      .17,.12,.17);
-   }
-   S('Place/Butte végétalisée/Coeurs','cse_flower_gold',
-      x,height+.38,z,.13,.13,.13);
-  }
- }
- // New sober civic monument: TWO slender human silhouettes, NOT the earlier
- // cuboid figure, oversized torch and spikes. Inspired by period allegories,
- // explicitly fictional rather than a reconstruction of a Pripyat memorial.
- const monument='Place/Monument soviétique fictif';
- B(monument+'/Socle','prp_concrete_raw',cx,1.53,cz,4.5,1.10,3.7);
- B(monument+'/Socle','prp_terrazzo_floor',cx,2.17,cz,3.70,.20,3.25);
- const bronze='cse_monument_bronze';
- function person(label,px,pz,isWoman){
-  const base=monument+'/Silhouettes/'+label;
-  for(const side of [-1,1]){
-   if(isWoman){
-    S(base+'/Jambes',bronze,px+side*.22,2.86,pz,.29,1.12,.33);
-   }else{
-    S(base+'/Jambes',bronze,px+side*.24,2.96,pz,.31,1.28,.37);
-   }
-   S(base+'/Pieds',bronze,px+side*.24,2.37,pz+.14,.39,.20,.56);
-  }
-  if(isWoman){
-   S(base+'/Drape simple',bronze,px,3.48,pz,.94,1.74,.79);
-   S(base+'/Taille',bronze,px,4.20,pz,.58,.48,.55);
-  }else{
-   S(base+'/Bassin',bronze,px,3.64,pz,.78,.58,.67);
-  }
-  S(base+'/Torse',bronze,px,4.60,pz,.80,1.29,.64);
-  S(base+'/Epaules',bronze,px,5.01,pz,1.02,.42,.63);
-  S(base+'/Cou',bronze,px,5.28,pz,.26,.32,.24);
-  S(base+'/Tete',bronze,px,5.63,pz,.51,.70,.48);
-  if(isWoman){
-   S(base+'/Cheveux',bronze,px,5.71,pz-.22,.56,.67,.19);
-   // One arm points gently toward the square.
-   for(let k=0;k<7;k++){
-    const t=k/6;
-    S(base+'/Bras ouvert',bronze,px-.54-1.06*t,4.92-.29*t,pz,
-      .30,.26,.28);
-   }
-  }else{
-   // Heroic raised arm with smooth overlapping bronze sections.
-   for(let k=0;k<11;k++){
-    const t=k/10;
-    S(base+'/Bras levé',bronze,px+.45+.69*t,4.87+1.72*t,pz,
-      .28,.33,.29);
-   }
-  }
-  // The second arm stays relaxed and avoids an awkward cruciform silhouette.
-  for(let k=0;k<5;k++){
-   const t=k/4;
-   S(base+'/Bras bas',bronze,px+(isWoman?.48:-.47)+
-     (isWoman?.16:-.17)*t,4.82-.80*t,pz,
-     .25,.34,.26);
-  }
- }
- person('Jeunesse',cx-.76,cz+.14,true);
- person('Science',cx+.73,cz-.11,false);
- // Small star emblem, restrained in scale and attached to the raised hand.
- const starX=cx+1.87,starY=7.18,starZ=cz-.11;
- S(monument+'/Etoile/Disque','cse_flower_gold',starX,starY,starZ,.30,.30,.17);
- for(let j=0;j<5;j++){
-  const t=j*2*Math.PI/5;
-  S(monument+'/Etoile/Rayons','cse_flower_gold',
-    starX+.36*Math.cos(t),starY+.36*Math.sin(t),starZ,
-    .18,.23,.12);
- }
- S(monument+'/Socle/Insigne','cse_flower_gold',cx,1.62,cz+1.89,.50,.50,.13);
+ // Scene-only replacement — the earlier primitive statue and floating flower
+ // balls are not generated. Existing earth dome and oval concrete seat remain.
+ rebuildGarden({B,S,F,rand,cx,cz});
+ rebuildMonument({B,S,cx,cz});
  // Roof equipment, railings and service frames.
  for(let x=-46;x<=46;x+=3.2)for(let z=-52;z<=-9;z+=6.4){
    B('Architecture/Palais/Toiture techniques','prp_roof_metal',x,19.9,z,1,.6,2.4);
@@ -631,55 +538,9 @@ function build(profileName,p){
  // but outside the 10-m central access corridor.
  for(const x of [-16,-11,11,16])
   F('Place/Jardins devant entrée','prp_foliage',x,1.15,-1.5,2.1,2.35,2.1);
- // The old tree coordinates were 120 m away from the facade, leaving
- // the landscaped plaza empty. Put 26 actual branched poplars/birches
- // near the paths, while keeping the 10 m central entrance unobstructed.
- const civicTrees=[
-  [-34,12],[-57,18],[-68,22],[-41,33],[-62,41],[-74,51],
-  [-55,65],[-67,73],[-43,79],[-59,89],[-74,97],[-48,102],[-65,112],
-  [34,12],[59,18],[70,24],[61,37],[75,45],[79,66],
-  [82,84],[46,81],[62,92],[73,104],[50,109],[78,60],[67,113]
- ];
- for(let i=0;i<p.trees;i++){
-  const near=civicTrees[i];
-  const col=i%2,row=Math.floor(i/2);
-  const x=near?near[0]+(rand()-.5)*1.2:
-    (col===0?-1:1)*(82+rand()*12);
-  const z=near?near[1]+(rand()-.5)*1.3:
-    -87+(row%48)*4.6+(rand()-.5)*1.8;
-  const birch=i%3===0;
-  const h=birch?9.3+rand()*3:12.1+rand()*4.8;
-  const bark=birch?'cse_birch_bark':'prp_bark_wet';
-  const canopy=i%5===0?'cse_leaf_gold':
-     i%2===0?'cse_leaf_olive':'prp_foliage';
-  const trunkW=birch?.31:.45;
-  B('Nature/Arbres',bark,x,h*.39,z,trunkW,h*.78,trunkW);
-  // Real articulated branches and asymmetric multilobe foliage geometry.
-  for(let k=0;k<4;k++){
-   const angle=k*Math.PI/2+.25*i;
-   const bx=x+Math.cos(angle)*(birch?.62:.78);
-   const bz=z+Math.sin(angle)*(birch?.62:.78);
-   const branchY=h*(.60+.055*(k%2));
-   B('Nature/Arbres/Branches',bark,bx,branchY,bz,
-     1.55,.16,.16,angle*180/Math.PI);
-   F('Nature/Arbres/Houppier',canopy,
-     x+Math.cos(angle)*(birch?1.65:1.00),
-     h*(birch?.72:.81)+.12*(k%2),
-     z+Math.sin(angle)*(birch?1.55:.85),
-     birch?3.65:2.45, birch?3.2:4.6,birch?3.40:2.55);
-  }
-  F('Nature/Arbres/Houppier',canopy,x,h*(birch?.90:.91),z,
-     birch?3.6:2.75,birch?3.3:5.2,birch?3.4:2.90);
-  if(birch){
-   for(let k=0;k<4;k++){
-    B('Nature/Arbres/Ecorce/bouleau','prp_bark_wet',
-      x+.16,h*(.18+.13*k),z,.025,.09,.21);
-   }
-  }
-  if(p.detail>8)
-   F('Nature/Arbres/Houppier','prp_foliage',
-     x+.40,h*.73,z-.55,3.1,2.8,3.0);
- }
+ // Scene-only replacement: articulated poplars and birches at fixed
+ // documented coordinates; no 5-blob-on-a-pole former silhouettes.
+ rebuildTrees({B,S,F,rand,p});
  // Low mixed planting along the pavements: no scattered park benches,
  // and no bushes across the entrance stairway.
  for(const side of [-1,1]){
@@ -765,7 +626,7 @@ for(const name of selected){
    sets});
  const built=build(name,p);
  save('instances/'+name+'.json',{format:'m3d-instances-v1',
-   notes:'Single-palace Olympic pool. Costume mosaic facade OUTSIDE; Energetik fresco hall staircase INSIDE; oval flower garden and civic statue outside.',
+   notes:'Single-palace Olympic pool; two exact artworks retained; scene-only reconstructed sculpted figures, articulated trees and individual flowers.',
    instances:built.objects});
  const sceneName=name==='leger'?'scene.json':'scene-'+name+'.json';
  save(sceneName,manifest(name));
