@@ -19,7 +19,10 @@ const specials=[
  ['cse_monument_bronze',[.36,.29,.19],.39,'metal'],
  ['cse_pool_strip',[.79,.86,.91],.27,'metal'],
  ['cse_energetik_fresco',[1,1,1],.72,'image'],
- ['cse_personnage_facade',[1,1,1],.78,'image']
+ ['cse_personnage_facade',[1,1,1],.78,'image'],
+ ['cse_neon_red',[1,.10,.035],.18,'metal'],
+ ['cse_neon_cyan',[.02,.86,1],.17,'metal'],
+ ['cse_neon_gold',[1,.69,.21],.20,'metal']
 ];
 const localMaterials=specials.map(([id,baseColor,roughness])=>({
  id,baseColor,roughness,metallic:id==='cse_monument_bronze'?.72:0,
@@ -98,8 +101,13 @@ const lighting={format:'m3d-lighting-v1',hour:14.75,
     ...indoorFixtures
   ]
 };
-if(lighting.lights.length!==159)
-  throw new Error('Expected 159 independent indoor lights, got '+lighting.lights.length);
+// Accent lamps physically illuminate the facade around the rooftop sign.
+lighting.lights.push(...Array.from({length:12},(_,i)=>({
+  position:[-13.2+i*2.4,24.0,-1.85],radius:8.0,intensity:1.2,
+  color:i%3===0?[90,240,255]:i%3===1?[255,55,37]:[255,198,109]
+})));
+if(lighting.lights.length!==171)
+  throw new Error('Expected 171 lights (159 interior + 12 rooftop accents)');
 const environment={format:'m3d-environment-v1',terrain:'finite',units:'m',
  note:'Fictional, explorable single modernist palace with olympic pool, a copied real Energetik mosaic artwork asset, and original Soviet-inspired monument; NOT historical reconstruction.'};
 function round(n){return Math.round(n*1000)/1000;}
@@ -403,9 +411,66 @@ function build(profileName,p){
  for(let x=-46;x<=46;x+=3.2)for(let z=-52;z<=-9;z+=6.4){
    B('Architecture/Palais/Toiture techniques','prp_roof_metal',x,19.9,z,1,.6,2.4);
  }
- // Replace the isolated sign rods with a coherent parapet/cornice.
+ // Retro-futurist rooftop sign designed for the fictional Energetik palace.
+ // The lettering is real geometry, not a texture; it works in raster and CPU.
+ const neon='Architecture/Palais/Enseigne lumineuse toit';
  B('Architecture/Palais/Acrotere','prp_concrete_panel',0,19.85,-3.75,97.5,.72,.55);
  B('Architecture/Palais/Corniche','prp_terrazzo_floor',0,19.35,-3.65,98,.22,.8);
+ B(neon+'/Panneau','prp_steel_rusted',0,23.05,-3.32,30.9,4.45,.36);
+ B(neon+'/Retrofond','prp_concrete_panel',0,23.15,-3.08,29.8,3.8,.14);
+ for(const x of [-14,-7,0,7,14])
+  B(neon+'/Structure','prp_steel_rusted',x,21.55,-3.72,.28,3.7,.26);
+ for(const y of [20.9,25.2])
+  B(neon+'/Structure','prp_steel_painted',0,y,-3.36,31.3,.2,.22);
+ // Bright red and cyan marquees, warm incandescent bulbs.
+ for(const y of [21.15,25.0])
+  B(neon+'/Neon rouge','cse_neon_red',0,y,-2.96,29.8,.10,.12);
+ for(const x of [-14.9,14.9])
+  B(neon+'/Neon cyan','cse_neon_cyan',x,23.05,-2.94,.13,3.8,.11);
+ for(let i=0;i<43;i++){
+  const x=-14.7+i*.7;
+  S(neon+'/Ampoules','cse_neon_gold',x,25.4,-2.91,.21,.21,.18);
+ }
+ // Three concentric stylized cyan orbit arches above an atomic-star symbol.
+ for(const offset of [-.32,0,.32]){
+  for(let j=0;j<19;j++){
+   const angle=Math.PI*j/18;
+   const x=Math.cos(angle)*(4.1+offset);
+   const y=25.2+Math.sin(angle)*(1.15+offset*.28);
+   S(neon+'/Orbite cyan','cse_neon_cyan',x,y,-3.04,.26,.18,.13);
+  }
+ }
+ S(neon+'/Atome central','cse_neon_gold',0,26.38,-3.02,.38,.38,.2);
+ for(let i=0;i<10;i++){
+  const a=2*Math.PI*i/10;
+  S(neon+'/Etoile','cse_neon_red',Math.cos(a)*.8,27.43+Math.sin(a)*.8,-3.02,.33,.33,.19);
+ }
+ // 5x7 pixel-serif neon font, each letter built from individually illuminated
+ // metal/glass modules. Full-width readable Cyrillic « ЭНЕРГЕТИК ».
+ const glyph={
+  'Э':['01110','10001','00001','00111','00001','10001','01110'],
+  'Н':['10001','10001','10001','11111','10001','10001','10001'],
+  'Е':['11111','10000','10000','11110','10000','10000','11111'],
+  'Р':['11110','10001','10001','11110','10000','10000','10000'],
+  'Г':['11111','10000','10000','10000','10000','10000','10000'],
+  'Т':['11111','00100','00100','00100','00100','00100','00100'],
+  'И':['10001','10011','10101','10101','11001','10001','10001'],
+  'К':['10001','10010','10100','11000','10100','10010','10001']
+ };
+ const word='ЭНЕРГЕТИК';
+ for(let k=0;k<word.length;k++){
+  const rows=glyph[word[k]];
+  for(let row=0;row<7;row++)
+   for(let col=0;col<5;col++)
+    if(rows[row][col]==='1')
+     B(neon+'/Lettres ЭНЕРГЕТИК','cse_neon_red',
+       -11.35+k*2.77+col*.36,24.4-row*.40,-2.82,.30,.34,.18);
+ }
+ // Two contrasting fascia wings like a period roadside diner.
+ for(const side of [-1,1]){
+  for(let i=0;i<3;i++)
+   B(neon+'/Ailettes','cse_neon_cyan',side*(16.0+i*.65),23.0+i*.20,-3.0,1.3,.15,.18);
+ }
  // Exterior benches removed: the single oval planter seat is the only one.
  for(let i=0;i<Math.min(p.lamps,18);i++){
   const x=-65+(i%2)*130,z=24+Math.floor(i/2)*8;
