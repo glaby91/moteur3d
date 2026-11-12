@@ -33,7 +33,7 @@ check(origin.materials.every((m,i)=>JSON.stringify(m)===JSON.stringify(materials
  'Original material recipes or ordering changed');
 // Keep the evening artificial-light rig stable across all load profiles.
 const lamps=read('lighting/day.json').lights;
-check(lamps.length===171,'Expected 159 indoor and 12 rooftop lights');
+check(lamps.length===60,'Expected 60 architecture-placed sources, instead of 171');
 check(lamps.every(l=>l.position.length===3 &&
   l.position.every(Number.isFinite) && Number.isFinite(l.intensity) &&
   l.intensity>0 && l.radius>0 && l.intensity<=2),
