@@ -545,6 +545,9 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
  for(int y=0;y<h;++y){
   const uint8_t* row=static_cast<const uint8_t*>(mapped.pData)+size_t(y)*mapped.RowPitch;
   for(int x=0;x<w;++x){
+   // Quarter dispatch leaves three texels per 2x2 quad unwritten.
+   // Ignore their stale GPU memory; CPU reconstruction fills them.
+   if(params.primaryQuarter && ((x&1)!=0||(y&1)!=0))continue;
    const uint8_t* p=row+size_t(x)*4;
    pixels[size_t(y)*w+x]=0xff000000u|
                            (uint32_t(p[0])<<16)|
