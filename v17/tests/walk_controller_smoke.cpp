@@ -61,6 +61,32 @@ int main(){
     const float xBefore=state.feet.x;
     for(int i=0;i<10;++i)advance(scene,state,{0.f,0.f,-.10f},.04f);
     require(std::abs(state.feet.x-xBefore)<.02f,"wall sliding drifted into obstacle");
+    // V17.393: a panorama camera can begin OUTSIDE the authored terrain.
+    // Starting unsupported must never trigger endless gravity below the world.
+    State outside{};
+    require(!spawn(scene,{100.f,12.f,100.f},outside),
+            "off-terrain camera unexpectedly grounded");
+    const float initialFeetY=outside.feet.y;
+    for(int i=0;i<180;++i)advance(scene,outside,{0.f,0.f,0.f},.05f);
+    require(std::abs(outside.feet.y-initialFeetY)<.0001f,
+            "unsupported panorama camera fell forever");
+    // Upon entering valid terrain a camera should acquire a real surface.
+    outside.feet.x=1.f;
+    outside.feet.z=1.f;
+    advance(scene,outside,{0.f,0.f,0.f},.05f);
+    require(outside.grounded&&outside.hasSafeGround&&
+            std::abs(outside.feet.y)<.02f,
+            "panorama camera failed to acquire floor when returning to site");
+    // True platform exits still fall, but cannot fall below the entire scene.
+    State ledge{};
+    require(spawn(scene,{4.5f,1.7f,4.5f},ledge),
+            "edge camera failed to spawn");
+    const V safe=ledge.feet;
+    for(int i=0;i<180;++i)advance(scene,ledge,{.08f,0.f,0.f},.05f);
+    require(std::isfinite(ledge.feet.y)&&ledge.feet.y>=-3.1f,
+            "walk controller escaped below world bounds");
+    require(ledge.hasSafeGround&&std::isfinite(safe.y),
+            "last supported position not preserved");
     // Keep original presets and fly navigation independent from walker.
     std::puts("V17 WALK PASS: 1.70m eye, 20cm stair ascent/descent, wall collision and slide");
     return 0;
