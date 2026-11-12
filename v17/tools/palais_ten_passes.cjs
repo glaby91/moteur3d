@@ -49,7 +49,8 @@ const sha=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest
 const force=(yes,message)=>{if(!yes)throw new Error(message);};
 const shared=Object.fromEntries(files.filter(x=>x.endsWith('.json')).map(x=>
   [x,readJson(path.join(source,x))]));
-force(fs.existsSync(binary),'Missing Windows V17 benchmark binary: '+binary);
+if(!arguments_.includes('--check-only'))
+  force(fs.existsSync(binary),'Missing Windows V17 benchmark binary: '+binary);
 for(const file of files)force(fs.existsSync(path.join(source,file)),
   'Missing benchmark scene resource: '+file);
 fs.mkdirSync(output,{recursive:true});
