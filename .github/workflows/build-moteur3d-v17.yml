@@ -86,8 +86,12 @@ jobs:
       - name: Validate light complex scene in native V17 loader
         shell: pwsh
         run: |
-          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" "scenes/v16/benchmark-civic/scene.json" 20000
-          if ($LASTEXITCODE -ne 0) { throw "Complex scene fails in native V17 loader" }
+          $log = "build-v17/v344-native-scene-smoke.log"
+          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" "scenes/v16/benchmark-civic/scene.json" 20000 *>&1 | Tee-Object -FilePath $log
+          $rc = $LASTEXITCODE
+          Write-Host "V17 native smoke exit code: $rc"
+          Get-Content $log | ForEach-Object { Write-Host "SCENE_DIAGNOSTIC: $_" }
+          if ($rc -ne 0) { throw "Complex scene fails in native V17 loader; exit $rc" }
       - name: Render actual new civic scene with V17 D3D11 Raster WARP
         shell: pwsh
         env:
