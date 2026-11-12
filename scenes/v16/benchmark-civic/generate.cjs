@@ -138,8 +138,8 @@ function build(profileName,p){
  // Outdoor site; the soil and plaza have a real hole under the indoor pool.
  // The four soil bands prevent the terrain from covering the swimming basin.
  const earth=[
-  [-78,0,104,235],[78,0,104,235],
-  [0,49.25,52,136.5],[0,-81.25,52,72.5]
+  [-78,35,104,305],[78,35,104,305],
+  [0,84.25,52,206.5],[0,-81.25,52,72.5]
  ];
  for(const [x,z,w,d] of earth)B('Terrain/Sol','prp_soil_leaf_litter',x,-.32,z,w,.55,d);
  B('Terrain/Place','prp_concrete_raw',0,-.04,36.25,144,.17,110.5);
