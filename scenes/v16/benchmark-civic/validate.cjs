@@ -99,7 +99,7 @@ for(const [profile,target,cap,sceneFile] of [
  check(unique('Interieur/Piscine olympique/Eau').some(o=>o.position[2]===-32&&o.material==='cse_pool_water'),
   'Water needs the new translucent scene-specific material');
  const poolWater=materials.find(m=>m.id==='cse_pool_water');
- check(poolWater&&poolWater.transmission>=40&&poolWater.ior>=1.3&&poolWater.ior<=1.34,
+ check(poolWater&&poolWater.transmission>=.4&&poolWater.ior>=1.3&&poolWater.ior<=1.34,
   'Pool water must be a transparent dielectric');
  check(select('Interieur/Piscine olympique/Bandes carrelage fond').length===5,
   'Floor markers must remain readable beneath water');
