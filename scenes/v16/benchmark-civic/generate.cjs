@@ -56,11 +56,12 @@ const cameras={format:'m3d-cameras-v1',cameras:[
 const lighting={format:'m3d-lighting-v1',hour:14.75,
  sun:{direction:[-.68,.65,-.35],intensity:3.1},ambient:{color:[.63,.73,.91],intensity:.39},
  lights:[
-  {position:[-5,13,-12],radius:19,intensity:1.2,color:[255,218,184]},
-  {position:[8,13,-46],radius:16,intensity:.95,color:[255,226,197]},
-  ...Array.from({length:4},(_,i)=>[-19.5+i*13]).flatMap(x=>[
-   {position:[x,14,-16],radius:10,intensity:.75,color:[231,240,252]},
-   {position:[x,14,-48],radius:10,intensity:.75,color:[231,240,252]}
+  {position:[-5,13,-12],radius:19,intensity:1.4,color:[245,247,252]},
+  {position:[8,13,-46],radius:20,intensity:1.65,color:[245,246,250]},
+  // Neutral artificial illumination is maintained at 19h, independently of sun.
+  ...Array.from({length:7},(_,i)=>[-24+i*8]).flatMap(x=>[
+   {position:[x,15,-19],radius:15,intensity:1.65,color:[244,247,255]},
+   {position:[x,15,-43],radius:15,intensity:1.65,color:[244,247,255]}
   ]),
   {position:[-40,3.95,-36],radius:10,intensity:.63,color:[235,239,243]},
   {position:[44,3.85,-48],radius:9,intensity:.48,color:[235,239,243]}
