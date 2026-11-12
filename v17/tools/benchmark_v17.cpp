@@ -86,7 +86,7 @@ int main(int argc,char** argv){
         sourceRevision=QString::fromUtf8(revFile.readAll()).trimmed().left(12);
     QTextStream out(stdout),err(stderr);
     if(argc<3){
-        err<<"Usage: moteur3d_v17_benchmark.exe scene.json output_dir [--quick] [--compare-v16] [--smoke] [--readback-depth 1|2|3] [--compare-readback] [--all-cameras] [--camera-id bassin] [--hour 19] [--light-limit 0..256] [--profile-stage flat|texture|basic|pbr-fast|full]\n";
+        err<<"Usage: moteur3d_v17_benchmark.exe scene.json output_dir [--quick] [--compare-v16] [--smoke] [--readback-depth 1|2|3] [--compare-readback] [--all-cameras] [--camera-id bassin] [--hour 19] [--light-limit 0..256] [--profile-stage flat|texture|basic|pbr-fast|pbr-tile|full]\n";
         return 2;
     }
     const QString scenePath=QFileInfo(QString::fromLocal8Bit(argv[1])).absoluteFilePath();
@@ -152,8 +152,8 @@ int main(int argc,char** argv){
     const int profileOption=args.indexOf(QStringLiteral("--profile-stage"));
     const QString profileStage=profileOption>=0&&profileOption+1<args.size()
         ?args[profileOption+1]:QStringLiteral("full");
-    if(profileStage!="flat"&&profileStage!="texture"&&profileStage!="basic"&&profileStage!="pbr-fast"&&profileStage!="full"){
-        err<<"Invalid --profile-stage (flat/texture/basic/pbr-fast/full)\n";return 2;
+    if(profileStage!="flat"&&profileStage!="texture"&&profileStage!="basic"&&profileStage!="pbr-fast"&&profileStage!="pbr-tile"&&profileStage!="full"){
+        err<<"Invalid --profile-stage (flat/texture/basic/pbr-fast/pbr-tile/full)\n";return 2;
     }
     // Profile shader chosen before the D3D device is created.
     if(profileStage=="full")qunsetenv("M3D_V17_PROFILE_SHADER");
