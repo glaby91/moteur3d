@@ -226,6 +226,20 @@ function build(profileName,p){
   B(mural+'/Encadrement','prp_concrete_raw',x,12.25,-3.70,.22,13.45,.26);
  for(const y of [5.54,18.96])
   B(mural+'/Encadrement','prp_concrete_raw',0,y,-3.70,8.5,.20,.26);
+ // Sober architectural enrichment, without altering the original mosaic.
+ // Two horizontal cornices frame the glazed wings but never bridge the entry.
+ for(const side of [-1,1]){
+  const fx=side*31;
+  for(const y of [5.15,18.85])
+   B('Architecture/Palais/Facade/Corniches','prp_concrete_panel',
+     fx,y,-3.72,27,.18,.26);
+  for(const x of [side*20,side*30,side*40]){
+   B('Architecture/Palais/Facade/Pilastres','prp_concrete_raw',
+     x,10.9,-3.75,.23,10.6,.28);
+   B('Architecture/Palais/Facade/Soubassement','prp_terrazzo_floor',
+     x,4.85,-3.70,2.8,.22,.36);
+  }
+ }
  // Main steps extend fully to the building's front door, replacing the
  // old stair flight which stopped fourteen metres short of the façade.
  B('Place/Parvis d’entrée','prp_terrazzo_floor',0,.28,5.75,68,.55,22.5);
@@ -313,6 +327,22 @@ function build(profileName,p){
   B(pool+'/Bancs latéraux','prp_wood_weathered',side*28.0,.88,z,2.6,.18,.55);
   for(const offset of [-1,1])
    B(pool+'/Bancs latéraux/Pieds','prp_steel_painted',side*28.0+offset*.98,.49,z,.11,.80,.43);
+ }
+ // Two simple rows of swimming flags and four narrow access ladders.
+ // These are actual 3D parts rather than a 2D overlay.
+ for(const x of [-16,16]){
+  B(pool+'/Fanions/Fil','prp_steel_painted',x,4.16,-32,.035,.035,25.0);
+  for(let j=0;j<10;j++){
+   const z=-43.5+j*2.50;
+   B(pool+'/Fanions/Tissu',j%2===0?'cse_banner_red':'cse_banner_cream',
+     x,3.96,z,.48,.38,.045);
+  }
+ }
+ for(const x of [-25.72,25.72])for(const z of [-41.5,-22.5]){
+  for(const dz of [-.28,.28])
+   B(pool+'/Echelles/Barres','prp_steel_painted',x,1.0,z+dz,.075,1.95,.08);
+  for(const y of [.30,.62,.94,1.26])
+   B(pool+'/Echelles/Marches','prp_steel_painted',x,y,z,.08,.07,.60);
  }
  // Open lobby at ground level with a clear line of sight into the pool.
  B('Interieur/Hall/Accueil','prp_wood_weathered',-19,1.05,-10,6,1.1,1.2);
@@ -529,7 +559,7 @@ function build(profileName,p){
    const z=-3.31+Math.sin(strip*.85+side)*.065;
    B('Architecture/Palais/Banderoles toit/Tissu',
      side<0?'cse_banner_red':'cse_banner_cream',
-     bx,22.55-strip*.01,z,4.30,4.05,.065);
+     bx+(strip-2)*.86,22.55,z,.875,4.05,.065);
   }
   S('Architecture/Palais/Banderoles toit/Insigne','cse_flower_gold',
     bx,22.9,-3.19,.66,.66,.13);
