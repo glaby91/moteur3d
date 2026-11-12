@@ -15,7 +15,7 @@ from pathlib import Path
 
 BASE_X=37.0
 CENTER_X=0.0
-CENTER_Z=52.0
+CENTER_Z=72.0
 FOOTPRINT_SCALE=2.0
 HEIGHT_SCALE=1.15
 STATUE_SCALE_XZ=1.20
@@ -67,6 +67,15 @@ def main(root):
     def leaf(parent,material,x,y,z,sx,sy,sz):
         add(parent,'foliage_canopy',material,[x,y,z],[sx,sy,sz])
 
+    # Exterior repair V4b: move oval 20 m away from the front facade; expose
+    # the continuous seating, fix the old rectangular paving gap, and round
+    # the low-poly soil ellipse without changing any renderer code.
+    # Original civic mound was at z=52, the corrected one at z=72.
+    # The entire planting+bench family moves together, with the plinth.
+    old_paving=[o for o in instances if o['parent']=='Place/Dalles']
+    assert len(old_paving)>200, 'Expected the original inconsistent slab grid'
+    instances[:]=[o for o in instances if o['parent']!='Place/Dalles']
+
     # Move BOTH the oval concrete bench and the earthen mound coherently.
     # x axis of the existing historic/fictional building is x=0.
     # No other building, road, pool or fresco is translated.
@@ -75,11 +84,22 @@ def main(root):
         p=o['position']; s=o['size']
         if group.startswith('Place/Banc ovale béton'):
             p[0]=q(CENTER_X+(p[0]-BASE_X)*FOOTPRINT_SCALE)
-            p[2]=q(CENTER_Z+(p[2]-CENTER_Z)*FOOTPRINT_SCALE)
-            s[0]=q(s[0]*FOOTPRINT_SCALE)  # tangent length; seat WIDTH unchanged
+            p[2]=q(CENTER_Z+(p[2]-52.0)*FOOTPRINT_SCALE)
+            s[0]=q(s[0]*FOOTPRINT_SCALE)
+            if group=='Place/Banc ovale béton/Assise':
+                # The old thin line was mistaken for a decorative kerb.
+                # Expose an actual sit-able continuous concrete seat.
+                p[1]=.83
+                s[1]=.28
+                s[2]=1.30
+                o['material']='prp_concrete_panel'
+            elif group=='Place/Banc ovale béton/Piétement':
+                p[1]=.405
+                s[1]=.80
+                s[2]=.63
         elif group.startswith('Place/Butte végétalisée'):
             p[0]=q(CENTER_X+(p[0]-BASE_X)*FOOTPRINT_SCALE)
-            p[2]=q(CENTER_Z+(p[2]-CENTER_Z)*FOOTPRINT_SCALE)
+            p[2]=q(CENTER_Z+(p[2]-52.0)*FOOTPRINT_SCALE)
             p[1]=q(.32+(p[1]-.32)*HEIGHT_SCALE)
             # Only the DOMED SOIL doubles its x/z dimensions.
             # Flowers remain individual small petals, not 2x colored balls.
@@ -89,11 +109,76 @@ def main(root):
                 s[1]=q(s[1]*HEIGHT_SCALE)
         elif group.startswith('Place/Monument soviétique fictif'):
             p[0]=q(CENTER_X+(p[0]-BASE_X)*STATUE_SCALE_XZ)
-            p[2]=q(CENTER_Z+(p[2]-CENTER_Z)*STATUE_SCALE_XZ)
+            p[2]=q(CENTER_Z+(p[2]-52.0)*STATUE_SCALE_XZ)
             p[1]=q(.32+(p[1]-.32)*STATUE_SCALE_Y)
             s[0]=q(s[0]*STATUE_SCALE_XZ)
             s[1]=q(s[1]*STATUE_SCALE_Y)
             s[2]=q(s[2]*STATUE_SCALE_XZ)
+
+    # Rebuild the OUTDOOR PAVING instead of leaving a bare rectangle at
+    # x=17..59, z=39..65 (the previous reflecting pool, removed long ago).
+    # Modernist concrete slabs use one consistent module and a narrow joint;
+    # no random missing squares or discontinuous tile bands.
+    paving_count=0
+    module=3.65
+    pavement_width=module*.984
+    for xi in range(-20,21):
+        x=xi*module
+        for zi in range(5,33):
+            z=zi*module
+            if z<19.0 or z>114.0:
+                continue
+            # Building's existing entrance landings are already paved.
+            # Leave the oval bench and the soil island fully clear.
+            u=x/34.3
+            v=(z-CENTER_Z)/22.4
+            if u*u+v*v<1:
+                continue
+            box('Place/Dalles V4b alignées','prp_terrazzo_floor',
+                x,.118,z,pavement_width,.075,pavement_width)
+            paving_count+=1
+    assert paving_count>650, 'Failed to restore uninterrupted plaza paving'
+
+    # The 12-segment UV sphere formerly produced a conspicuously angular,
+    # almost rectangular bank. Existing runtime has no authored custom mesh;
+    # add 96 overlapping SOIL ellipsoids to form a smooth true oval outline.
+    # Second inward overlap ring blends the shoreline into the existing dome.
+    # These are soil, not bright plants and not a change to the engine.
+    for o in instances:
+        if o['parent']=='Place/Butte végétalisée':
+            o['size'][0]=55.8   # keep central height but pull polygon corners inward
+            o['size'][2]=32.2
+            break
+    soil_outline=96
+    for k in range(soil_outline):
+        t=TAU*(k+.5)/soil_outline
+        cx,sz=math.cos(t),math.sin(t)
+        # Contour's two rings overlap, preventing 12-sided straight edges.
+        sphere('Place/Butte végétalisée/V4b Sol galbé extérieur',
+               'prp_soil_leaf_litter',
+               CENTER_X+28.05*cx,.38,CENTER_Z+16.55*sz,
+               3.05,.57,2.20)
+        sphere('Place/Butte végétalisée/V4b Sol galbé intérieur',
+               'prp_soil_leaf_litter',
+               CENTER_X+25.80*cx,.46,CENTER_Z+15.15*sz,
+               3.15,.82,2.25)
+
+    # A real, legible 96-piece bench follows the oval continuously. Add
+    # a low outer backrest, not a second decorative line on the ground.
+    # Backrests are on the OUTSIDE so a person can face the planted mound.
+    seats=[o for o in instances if o['parent']=='Place/Banc ovale béton/Assise']
+    assert len(seats)==96
+    for seat in seats:
+        x,_,z=seat['position']
+        nx=(x-CENTER_X)/(32.9*32.9)
+        nz=(z-CENTER_Z)/(21.0*21.0)
+        norm=max(.0001,math.hypot(nx,nz))
+        xback=x+.64*nx/norm
+        zback=z+.64*nz/norm
+        box('Place/Banc ovale béton/V4b Dossier continu','prp_concrete_raw',
+            xback,1.23,zback,seat['size'][0]+.04,.54,.17,
+            seat.get('rotationY',0))
+    # Also retain the sober original metal/inset features from V3.
 
     # Physical mound top (same half-ellipse as the moved soil mesh).
     def planting_point(i,n,turn=0.0):
@@ -236,17 +321,17 @@ def main(root):
     view=copy.deepcopy(read(root/'cameras'/'views.json'))
     view['cameras']=[
       {'id':'v4_face','name':'01 · Façade et butte centrées',
-       'position':[0,10.5,119],'target':[0,8,-2],'fovDegrees':65},
+       'position':[0,12.0,146],'target':[0,7,2],'fovDegrees':63},
       {'id':'v4_place','name':'02 · Place végétale et monument, angle est',
-       'position':[55,15,99],'target':[0,5.2,48],'fovDegrees':66},
+       'position':[57,18,129],'target':[0,5.2,65],'fovDegrees':65},
       {'id':'v4_monument','name':'03 · Monument au centre du massif',
-       'position':[16,5.0,80],'target':[0,7.3,52],'fovDegrees':51},
+       'position':[19,5.5,106],'target':[0,7.3,CENTER_Z],'fovDegrees':54},
       {'id':'v4_fleurs','name':'04 · Détails floraux et couvert végétal',
-       'position':[28,2.45,76],'target':[17,1.35,65],'fovDegrees':59},
+       'position':[29,2.8,105],'target':[17,1.35,85],'fovDegrees':58},
       {'id':'v4_arbres','name':'05 · Peupliers et bouleaux détaillés',
        'position':[-31,3.4,21],'target':[-43,9,34],'fovDegrees':57},
       {'id':'v4_aerienne','name':'06 · Axe du palais vu du ciel',
-       'position':[77,67,119],'target':[0,5,24],'fovDegrees':66},
+       'position':[82,76,142],'target':[0,5,43],'fovDegrees':65},
       {'id':'v4_piscine','name':'07 · Piscine olympique en soirée',
        'position':[32.5,6.05,-19],'target':[0,1.1,-33],'fovDegrees':67},
       {'id':'v4_hall','name':'08 · Hall et fresque originelle',
@@ -277,10 +362,16 @@ def main(root):
         group_counts[label]={'objects':len(selected),
                'triangles':sum(TRIS[x['geometry']] for x in selected)}
     triangles=sum(TRIS[o['geometry']] for o in instances)
-    assert 1_000_000<=triangles<=1_200_000, f'Unexpected target budget {triangles}'
+    assert 1_000_000<=triangles<=1_270_000, f'Unexpected target budget {triangles}'
     assert abs(next(o for o in instances if o['parent']=='Place/Butte végétalisée')['position'][0])<.001
-    assert next(o for o in instances if o['parent']=='Place/Butte végétalisée')['size'][0]==58
+    assert next(o for o in instances if o['parent']=='Place/Butte végétalisée')['size'][0]==55.8
+    assert CENTER_Z==72.0 and CENTER_Z-21.0>45.0
     assert len([o for o in instances if o['parent']=='Place/Banc ovale béton/Assise'])==96
+    assert len([o for o in instances if o['parent']=='Place/Banc ovale béton/V4b Dossier continu'])==96
+    assert len([o for o in instances if o['parent']=='Place/Butte végétalisée/V4b Sol galbé extérieur'])==96
+    assert len([o for o in instances if o['parent']=='Place/Butte végétalisée/V4b Sol galbé intérieur'])==96
+    assert len([o for o in instances if o['parent']=='Place/Dalles'])==0
+    assert paving_count>=650
     assert len([o for o in instances if o['material']=='cse_personnage_facade'])==1
     assert len([o for o in instances if o['material']=='cse_energetik_fresco'])==1
     assert len({o['id'] for o in instances})==len(instances)
@@ -288,7 +379,11 @@ def main(root):
     assert all(o['material'] in materials and o['geometry'] in TRIS for o in instances)
     out={'version':'V4','motor':'frozen V17.370','building_axis_x':0,
          'mound_center_xyz':[CENTER_X,.32,CENTER_Z],
-         'mound_diameter_m':[58,34.4],
+         'mound_diameter_m':[58.0,34.4],
+         'new_center_z':CENTER_Z,'building_facade_z':-5,
+         'bench_backrest_segments':96,
+         'soil_rounding_patches':192,
+         'new_aligned_pavers':paving_count,
          'oval_bench_radii_m':[32.9,21.0],
          'footprint_scale':2,
          'original_objects':original_count,'v4_objects':len(instances),
