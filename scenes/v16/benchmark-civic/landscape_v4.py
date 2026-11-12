@@ -122,7 +122,7 @@ def main(root):
     paving_count=0
     module=3.65
     pavement_width=module*.984
-    for xi in range(-20,21):
+    for xi in range(-19,20):
         x=xi*module
         for zi in range(5,33):
             z=zi*module
@@ -141,7 +141,7 @@ def main(root):
 
     # The 12-segment UV sphere formerly produced a conspicuously angular,
     # almost rectangular bank. Existing runtime has no authored custom mesh;
-    # add 96 overlapping SOIL ellipsoids to form a smooth true oval outline.
+    # use 96 tangent SOIL facets around an overlapping inner soil ring.
     # Second inward overlap ring blends the shoreline into the existing dome.
     # These are soil, not bright plants and not a change to the engine.
     for o in instances:
@@ -153,11 +153,17 @@ def main(root):
     for k in range(soil_outline):
         t=TAU*(k+.5)/soil_outline
         cx,sz=math.cos(t),math.sin(t)
-        # Contour's two rings overlap, preventing 12-sided straight edges.
-        sphere('Place/Butte végétalisée/V4b Sol galbé extérieur',
-               'prp_soil_leaf_litter',
-               CENTER_X+28.05*cx,.38,CENTER_Z+16.55*sz,
-               3.05,.57,2.20)
+        # 96 contiguous TANGENTIAL soil facets form a genuine oval curb.
+        # Previous external spheres created a scalloped 'gear' silhouette.
+        # Their inner overlap still blends into the low central soil dome.
+        dx=-28.3*math.sin(t)
+        dz=16.75*math.cos(t)
+        tangent=math.degrees(math.atan2(-dz,dx))
+        chord=math.hypot(dx,dz)*TAU/soil_outline
+        box('Place/Butte végétalisée/V4b Sol galbé extérieur',
+            'prp_soil_leaf_litter',
+            CENTER_X+28.3*cx,.31,CENTER_Z+16.75*sz,
+            chord+.16,.40,1.40,tangent)
         sphere('Place/Butte végétalisée/V4b Sol galbé intérieur',
                'prp_soil_leaf_litter',
                CENTER_X+25.80*cx,.46,CENTER_Z+15.15*sz,
