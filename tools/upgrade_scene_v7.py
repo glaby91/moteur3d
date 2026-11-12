@@ -382,6 +382,18 @@ def build(root):
     report["galleryRightOldRailPartsRemoved"]=len(older_right_rail)
     report["galleryRightOuterFootwayPreserved"]=True
     report["galleryRightNewRailSections"]=rail_count
+    # The only remaining thin line across the mural in camera 07 was NOT a
+    # gallery: two pool fanion cables and 20 dangling red/white cloth blocks
+    # (at y=4.16/3.96). Keep the water-lane dividers; remove the overhead
+    # pennants so the artwork remains unobstructed at every viewing distance.
+    fanions=[o for o in objs if
+             o["parent"].startswith("Interieur/Piscine olympique/Fanions/")]
+    assert len(fanions)==22, (
+        "Unexpected pool bunting count; review before destructive edit",len(fanions))
+    remove(lambda o:o["parent"].startswith(
+        "Interieur/Piscine olympique/Fanions/"))
+    report["hangingMuralOccludingPennantsRemoved"]=len(fanions)
+
 
 
 

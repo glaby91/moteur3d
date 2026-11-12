@@ -75,6 +75,11 @@ jobs:
           assert t["galleryRightOldRailPartsRemoved"]>=20
           assert t["galleryRightOuterFootwayPreserved"] is True
           assert t["galleryRightNewRailSections"]==5
+          assert t["hangingMuralOccludingPennantsRemoved"]==22
+          assert not any(o["parent"].startswith("Interieur/Piscine olympique/Fanions/")
+                         for o in a)
+          assert any(o["parent"]=="Interieur/Piscine olympique/Lignes d’eau"
+                     for o in a), "Pool lane dividers must remain"
           assert sum(o["parent"].startswith("Interieur/Galeries/Garde-corps 1er etage/")
                      and abs(o["position"][0]-28.5)<.01 for o in a)==0
           assert sum(o["parent"]=="Interieur/Galeries/V7 Garde-corps recules/Main courante"
