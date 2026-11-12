@@ -477,31 +477,84 @@ function build(profileName,p){
   else
    S('Place/Butte végétalisée/Fleurs et feuillages',flower,
      x,height+r*.18,z,r,.50+.3*rand(),r);
+  // Close-up clusters gain visible stems and petals but remain instanced,
+  // rather than receiving high-poly custom flower meshes.
+  if(i%4===0){
+   B('Place/Butte végétalisée/Tiges','cse_leaf_olive',
+     x,height+.18,z,.045,.48,.045);
+   for(let petal=0;petal<4;petal++){
+    const angle=petal*Math.PI/2;
+    S('Place/Butte végétalisée/Petales',flower,
+      x+.25*Math.cos(angle),height+.46,z+.25*Math.sin(angle),
+      .28,.19,.28);
+   }
+   S('Place/Butte végétalisée/Coeurs','cse_flower_gold',
+      x,height+.49,z,.22,.20,.22);
+  }
  }
- // Original Soviet-era monumental composition: civic allegory of Progress,
- // NOT a copy of an identified statue or historical Pripyat installation.
+ // New sober civic monument: TWO slender human silhouettes, NOT the earlier
+ // cuboid figure, oversized torch and spikes. Inspired by period allegories,
+ // explicitly fictional rather than a reconstruction of a Pripyat memorial.
  const monument='Place/Monument soviétique fictif';
- B(monument+'/Socle','prp_concrete_raw',cx,1.54,cz,5.0,1.15,4.7);
- B(monument+'/Socle','prp_terrazzo_floor',cx,2.20,cz,3.55,.18,3.2);
- B(monument+'/Statue','cse_monument_bronze',cx,3.55,cz,1.35,2.15,.82);
- B(monument+'/Statue','cse_monument_bronze',cx-.38,2.59,cz,.46,1.18,.58);
- B(monument+'/Statue','cse_monument_bronze',cx+.40,2.59,cz,.48,1.18,.58);
- S(monument+'/Statue','cse_monument_bronze',cx,5.02,cz,.85,1.05,.82);
- // Raised angular arm pointing to the sky; stepped spheres give a readable
- // silhouette without a fake invisible stress mesh.
- for(let i=0;i<10;i++){
-  const t=i/9;
-  S(monument+'/Bras levé','cse_monument_bronze',
-    cx+.48+t*.9,4.38+t*2.42,cz,.34,.45,.39);
+ B(monument+'/Socle','prp_concrete_raw',cx,1.53,cz,4.5,1.10,3.7);
+ B(monument+'/Socle','prp_terrazzo_floor',cx,2.17,cz,3.70,.20,3.25);
+ const bronze='cse_monument_bronze';
+ function person(label,px,pz,isWoman){
+  const base=monument+'/Silhouettes/'+label;
+  for(const side of [-1,1]){
+   if(isWoman){
+    S(base+'/Jambes',bronze,px+side*.22,2.86,pz,.29,1.12,.33);
+   }else{
+    S(base+'/Jambes',bronze,px+side*.24,2.96,pz,.31,1.28,.37);
+   }
+   S(base+'/Pieds',bronze,px+side*.24,2.37,pz+.14,.39,.20,.56);
+  }
+  if(isWoman){
+   S(base+'/Drape simple',bronze,px,3.48,pz,.94,1.74,.79);
+   S(base+'/Taille',bronze,px,4.20,pz,.58,.48,.55);
+  }else{
+   S(base+'/Bassin',bronze,px,3.64,pz,.78,.58,.67);
+  }
+  S(base+'/Torse',bronze,px,4.60,pz,.80,1.29,.64);
+  S(base+'/Epaules',bronze,px,5.01,pz,1.02,.42,.63);
+  S(base+'/Cou',bronze,px,5.28,pz,.26,.32,.24);
+  S(base+'/Tete',bronze,px,5.63,pz,.51,.70,.48);
+  if(isWoman){
+   S(base+'/Cheveux',bronze,px,5.71,pz-.22,.56,.67,.19);
+   // One arm points gently toward the square.
+   for(let k=0;k<7;k++){
+    const t=k/6;
+    S(base+'/Bras ouvert',bronze,px-.54-1.06*t,4.92-.29*t,pz,
+      .30,.26,.28);
+   }
+  }else{
+   // Heroic raised arm with smooth overlapping bronze sections.
+   for(let k=0;k<11;k++){
+    const t=k/10;
+    S(base+'/Bras levé',bronze,px+.45+.69*t,4.87+1.72*t,pz,
+      .28,.33,.29);
+   }
+  }
+  // The second arm stays relaxed and avoids an awkward cruciform silhouette.
+  for(let k=0;k<5;k++){
+   const t=k/4;
+   S(base+'/Bras bas',bronze,px+(isWoman?.48:-.47)+
+     (isWoman?.16:-.17)*t,4.82-.80*t,pz,
+     .25,.34,.26);
+  }
  }
- B(monument+'/Flambeau','prp_steel_rusted',cx+1.38,7.02,cz,.31,.62,.30);
- S(monument+'/Flamme bronze','cse_flower_gold',cx+1.38,7.65,cz,.58,1.10,.48);
- // Original radial sun rays, geometric reference to 1970s civic sculpture.
- for(let j=0;j<7;j++){
-  const a=(j-3)*.26;
-  B(monument+'/Rayons','cse_monument_bronze',cx+.02+1.3*Math.sin(a),
-    5.68+1.15*Math.cos(a),cz-.44,.12,1.55,.13,a*180/Math.PI);
+ person('Jeunesse',cx-.76,cz+.14,true);
+ person('Science',cx+.73,cz-.11,false);
+ // Small star emblem, restrained in scale and attached to the raised hand.
+ const starX=cx+1.87,starY=7.18,starZ=cz-.11;
+ S(monument+'/Etoile/Disque','cse_flower_gold',starX,starY,starZ,.30,.30,.17);
+ for(let j=0;j<5;j++){
+  const t=j*2*Math.PI/5;
+  S(monument+'/Etoile/Rayons','cse_flower_gold',
+    starX+.36*Math.cos(t),starY+.36*Math.sin(t),starZ,
+    .18,.23,.12);
  }
+ S(monument+'/Socle/Insigne','cse_flower_gold',cx,1.62,cz+1.89,.50,.50,.13);
  // Roof equipment, railings and service frames.
  for(let x=-46;x<=46;x+=3.2)for(let z=-52;z<=-9;z+=6.4){
    B('Architecture/Palais/Toiture techniques','prp_roof_metal',x,19.9,z,1,.6,2.4);
