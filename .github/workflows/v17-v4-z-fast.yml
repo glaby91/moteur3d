@@ -141,6 +141,50 @@ jobs:
           if(@($comparison|Where-Object {-not $_.imageSha256Identical}).Count -gt 0){
             Write-Warning 'Visual mismatch detected: do not enable prepass by default until validated.'
           }
+      - name: WARP lossless readback A-B — pixel parity and GPU transfer
+        shell: pwsh
+        timeout-minutes: 16
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          M3D_V16_GPU_GI_SAMPLES: '0'
+          M3D_PRIMARY_RAYS_25: '0'
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=(Resolve-Path "build-v17/Release/moteur3d_v17_benchmark.exe").Path
+          $scene=(Resolve-Path "scenes/v16/benchmark-civic/scene-v4.json").Path
+          $base='build-v17/v4-z-comparison/readback-ab'
+          New-Item -ItemType Directory -Force "$base" | Out-Null
+          $data=@()
+          foreach($camera in @('v4_face','v4_piscine')){
+            foreach($msaa in @(1,2)){
+              foreach($legacy in @(0,1)){
+                if($legacy -eq 1){$env:M3D_V17_LEGACY_DOUBLE_COPY='1'}
+                else{Remove-Item Env:M3D_V17_LEGACY_DOUBLE_COPY -ErrorAction SilentlyContinue}
+                $tag="$camera-msaa$msaa-legacy$legacy"
+                $out="$base/$tag"
+                & $exe $scene $out --smoke --camera-id $camera --hour 19 --raster-msaa $msaa --readback-depth 1
+                if($LASTEXITCODE -ne 0){throw "WARP readback failed: $tag"}
+                $summary=Get-ChildItem $out -Recurse -Filter summary.json | Select-Object -First 1
+                $doc=Get-Content $summary.FullName -Raw | ConvertFrom-Json
+                $case=@($doc.cases | Where-Object {$_.backend -eq 'V17_D3D11_Raster'})[0]
+                if(!$case -or $case.status -ne 'ok'){throw "WARP readback result invalid: $tag"}
+                $png=Get-ChildItem $out -Recurse -Filter 'raster_*.png' | Select-Object -First 1
+                if(!$png){throw "Missing PNG: $tag"}
+                $data += [pscustomobject]@{tag=$tag;camera=$camera;msaa=$msaa;legacy=$legacy
+                  sha=(Get-FileHash $png.FullName -Algorithm SHA256).Hash
+                  transferMs=$case.gpuTransferMs;meanMs=$case.meanMs;fps=$case.streamFps}
+              }
+              $pair=@($data | Where-Object {$_.camera -eq $camera -and $_.msaa -eq $msaa})
+              if($pair.Count -ne 2 -or $pair[0].sha -ne $pair[1].sha){
+                throw "PIXEL PARITY FAILED $camera MSAA=$msaa: new direct readback differs from the legacy reference"
+              }
+              Write-Host "PIXEL EXACT $camera MSAA=$msaa"
+            }
+          }
+          Remove-Item Env:M3D_V17_LEGACY_DOUBLE_COPY -ErrorAction SilentlyContinue
+          $data|Export-Csv "$base/readback-comparison.csv" -NoTypeInformation -Encoding utf8
+          $data|ConvertTo-Json|Out-File "$base/readback-comparison.json" -Encoding utf8
+          if($data.Count -ne 8){throw 'Readback A/B incomplete'}
       - name: Package launchable V17 engine + full V4 scene + A-B results
         shell: pwsh
         run: |
