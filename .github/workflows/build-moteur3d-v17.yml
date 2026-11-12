@@ -508,6 +508,11 @@ jobs:
           Get-ChildItem "build-v17/civic-views" -Recurse -Filter 'raster_*.png' | ForEach-Object {
             Copy-Item $_.FullName $viewsFolder
           }
+      - name: Preflight ten design passes without rendering (regression guard)
+        shell: pwsh
+        run: |
+          node v17/tools/palais_ten_passes.cjs --scene scenes/v16/benchmark-civic --binary build-v17/Release/moteur3d_v17_benchmark.exe --check-only
+          if ($LASTEXITCODE -ne 0) { throw 'Ten-pass fast design preflight failed' }
       - name: Ten progressive native design passes — 55 real WARP camera renders and feedback
         shell: pwsh
         timeout-minutes: 35
