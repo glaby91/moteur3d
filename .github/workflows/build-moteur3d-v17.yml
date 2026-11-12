@@ -92,6 +92,16 @@ jobs:
           Write-Host "V17 native smoke exit code: $rc"
           Get-Content $log | ForEach-Object { Write-Host "SCENE_DIAGNOSTIC: $_" }
           if ($rc -ne 0) { throw "Complex scene fails in native V17 loader; exit $rc" }
+      - name: Verify real 25% primary rays on Pripyat pool 19h CPU and D3D11 Compute
+        shell: pwsh
+        timeout-minutes: 15
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          M3D_V16_GPU_GI_SAMPLES: '0'
+        run: |
+          & "build-v17/Release/v17_primary_quarter_pripyat_smoke.exe" "scenes/v16/benchmark-civic/scene.json" "build-v17/total-simulation/primary-quarter-pripyat"
+          if ($LASTEXITCODE -ne 0) { throw "Native primary-ray 25% Pripyat A/B failed" }
+          Get-Content "build-v17/total-simulation/primary-quarter-pripyat/primary-ray-ab.csv" | ForEach-Object { Write-Host $_ }
       - name: Render actual new civic scene with V17 D3D11 Raster WARP
         shell: pwsh
         env:
