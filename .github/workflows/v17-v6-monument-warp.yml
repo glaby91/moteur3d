@@ -6,6 +6,7 @@ on:
       - feature/v17-421-v6-monument-marteau-faucille-261112
     paths:
       - .github/workflows/v17-v6-monument-warp.yml
+      - tools/create_scene_v6_monument.py
   workflow_dispatch:
 permissions:
   contents: read
@@ -61,6 +62,8 @@ jobs:
           assert report['plinthHeightM']==1.2 and report['preservedPotPositions']==8
           assert report['preservedTreePits']==26
           assert report['tallGrassClumps']>=175
+          assert report['extraDenseGroundcoverClumps']>=690
+          assert report['extraFlowerLocations']==260
           assert report['removedOldSculptureInstances']>=100
           assert sum(o['parent']=='Place/Monument marteau faucille/Sculpture acier rouge' for o in objects)==4
           assert not any(o['parent'].startswith('Place/Monument soviétique fictif') for o in objects)
