@@ -378,8 +378,8 @@ function build(profileName,p){
        xIn,-.28,z+dz,.095,2.10,.095);
      // Continuous arc approximated by overlapping smooth rounded cylinders,
      // not unattached rectangular vertical sticks.
-     for(let k=0;k<=16;k++){
-       const t=k/16,theta=t*Math.PI*.75;
+     for(let k=0;k<=12;k++){
+       const t=k/12,theta=t*Math.PI*.75;
        const xx=side*(24.60+1.15*t);
        const yy=.78+.60*Math.sin(theta);
        S(pool+'/Echelles/Main courante arrondie',
