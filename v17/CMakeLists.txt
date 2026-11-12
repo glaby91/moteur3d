@@ -174,6 +174,17 @@ if(WIN32)
     # Deterministic PBR multithreading and heterogeneous Compute mip smoke.
     # Runs in WARP with textures sized 512px (serial vs parallel) and 256px
     # (historical failure: no 512px mip for the Compute atlas).
+    # Real-scene A/B: native primary-ray counts, CPU/Compute donor parity
+    # and four diagnostic PNGs from the pool camera at 19:00.
+    add_executable(v17_primary_quarter_pripyat_smoke
+        "tests/primary_quarter_pripyat_smoke.cpp")
+    target_include_directories(v17_primary_quarter_pripyat_smoke PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+    target_link_libraries(v17_primary_quarter_pripyat_smoke PRIVATE
+        moteur3d_v16_core Qt6::Core Qt6::Gui)
+    if(MSVC)
+        target_compile_options(v17_primary_quarter_pripyat_smoke PRIVATE /O2 /EHsc /utf-8)
+    endif()
     add_executable(v17_pbr_compute_smoke "tests/pbr_compute_smoke.cpp")
     target_include_directories(v17_pbr_compute_smoke PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
