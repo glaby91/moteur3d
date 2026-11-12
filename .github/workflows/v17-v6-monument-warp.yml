@@ -1,0 +1,127 @@
+name: V17.420 / V6 scene - genuine Windows WARP validation
+run-name: CSE WARP V6 — monument marteau-faucille, butte, inscription FR-UA
+on:
+  push:
+    branches:
+      - feature/v17-421-v6-monument-marteau-faucille-261112
+    paths:
+      - .github/workflows/v17-v6-monument-warp.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  windows-warp-v6:
+    runs-on: windows-2022
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+      M3D_V16_FORCE_WARP: '1'
+      M3D_V17_EXPERIMENT_Z_PREPASS: '0'
+      QT_QPA_PLATFORM: 'offscreen'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install numerical and image dependencies for scene-only modeling
+        shell: pwsh
+        run: |
+          python -m pip install --only-binary=:all: numpy Pillow shapely
+          if ($LASTEXITCODE -ne 0) { throw 'Python dependency installation failed' }
+      - name: Restore the complete successful V17.420 V5 Windows executable and data
+        shell: pwsh
+        run: |
+          gh run download 43292762389 --repo glaby91/moteur3d --name CSE-WARP-V17.420-V5-Windows-x64 --dir dist-v6
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot download verified V5 Windows artifact' }
+          if (!(Test-Path 'dist-v6/moteur3d_v17.exe')) { throw 'Missing complete Windows application' }
+          if (!(Test-Path 'dist-v6/moteur3d_v17_benchmark.exe')) { throw 'Missing real Windows WARP renderer' }
+          if (!(Test-Path 'dist-v6/benchmark-civic/scene-v5-complete.json')) { throw 'Missing source V5 scene' }
+      - name: Build V6 geometries and textures from actual V5 (no engine recompile)
+        shell: pwsh
+        run: |
+          python tools/create_scene_v6_monument.py --root dist-v6/benchmark-civic
+          if ($LASTEXITCODE -ne 0) { throw 'New V6 scene modeling failed' }
+      - name: Validate mesh references, inscription, 5m sculpture, old V5 kept
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          import json
+          b=Path('dist-v6/benchmark-civic')
+          m=json.loads((b/'scene-v6-monument.json').read_text(encoding='utf-8'))
+          s=m['sectors'][0]
+          assert (b/'scene-v5-complete.json').is_file()
+          for key in ['geometry','instances','materials','pbr','cameras','lighting','environment']:
+              assert all((b/p).is_file() for p in s[key]),key
+          objects=json.loads((b/s['instances'][0]).read_text(encoding='utf-8'))['instances']
+          report=json.loads((b/'reports/v6-monument-validation.json').read_text(encoding='utf-8'))
+          assert report['sculptureHeightM']==5.0 and report['moundHeightAboveBaseM']==1.2
+          assert report['plinthHeightM']==1.2 and report['preservedPotPositions']==8
+          assert report['preservedTreePits']==26
+          assert report['tallGrassClumps']>=175
+          assert report['removedOldSculptureInstances']>=100
+          assert sum(o['parent']=='Place/Monument marteau faucille/Sculpture acier rouge' for o in objects)==4
+          assert not any(o['parent'].startswith('Place/Monument soviétique fictif') for o in objects)
+          for text in ['LE COMMUNISME EST TOMBÉ.', 'L’UKRAINE EST DEBOUT.', 'КОМУНІЗМ УПАВ.', 'УКРАЇНА ЖИВЕ.']:
+              assert text in report['inscription']
+          print('V6 scene-only structural validation: PASS')
+          '@ | python -
+          if ($LASTEXITCODE -ne 0) { throw 'V6 structure is inconsistent' }
+      - name: Render actual V6 monument face with V17.420 Windows DirectX11 WARP (full PBR)
+        shell: pwsh
+        run: |
+          & 'dist-v6/moteur3d_v17_benchmark.exe' 'dist-v6/benchmark-civic/scene-v6-monument.json' 'v6-render-front' --quick --camera-id v6_monument_front --hour 14.75 --raster-msaa 1 --raster-lod-percent 100 --raster-lod-enabled 0
+          if ($LASTEXITCODE -ne 0) { throw 'Real WARP front render failed' }
+          $imgs=@(Get-ChildItem 'v6-render-front' -Recurse -Filter 'raster_v6_monument_front_1366x768_depth1.png')
+          if($imgs.Count -ne 1 -or $imgs[0].Length -lt 10000){throw 'Missing full-PBR frontal WARP PNG'}
+          New-Item -ItemType Directory -Force -Path 'v6-images' | Out-Null
+          Copy-Item $imgs[0].FullName 'v6-images/V6_Monument_Face_WARP_1366x768.png'
+      - name: Render actual V6 mound and palace overview with V17.420 Windows WARP
+        shell: pwsh
+        run: |
+          foreach($id in @('v6_monument_facade','v6_monument_contrechamp')){
+            & 'dist-v6/moteur3d_v17_benchmark.exe' 'dist-v6/benchmark-civic/scene-v6-monument.json' 'v6-render-small' --smoke --camera-id $id --hour 14.75 --raster-msaa 1
+            if ($LASTEXITCODE -ne 0) { throw "WARP scene render failed: $id" }
+            $imgs=@(Get-ChildItem 'v6-render-small' -Recurse -Filter "raster_${id}_640x360_depth1.png")
+            if($imgs.Count -ne 1 -or $imgs[0].Length -lt 1000){throw "Missing WARP PNG: $id"}
+            Copy-Item $imgs[0].FullName "v6-images/$id.png"
+          }
+      - name: Include stable launchers in portable Windows package
+        shell: pwsh
+        run: |
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set "M3D_V17_EXPERIMENT_Z_PREPASS="
+          start "" "moteur3d_v17.exe" "benchmark-civic\scene-v6-monument.json"
+          '@ | Out-File 'dist-v6/DEMARRER_CSE_WARP_V6_MONUMENT.bat' -Encoding ascii
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set "M3D_V17_EXPERIMENT_Z_PREPASS="
+          start "" "moteur3d_v17.exe" "benchmark-civic\scene-v5-complete.json"
+          '@ | Out-File 'dist-v6/DEMARRER_V5_REFERENCE.bat' -Encoding ascii
+          @'
+          CSE WARP V17.420 - V6 scene-only update. Extract all files.
+          Run DEMARRER_CSE_WARP_V6_MONUMENT.bat, or compare V5 using DEMARRER_V5_REFERENCE.bat.
+          Genuine Windows D3D11 WARP images validated by this workflow.
+          Experimental Z-prepass is disabled by default.
+          Sculpture is an original geometry inspired by the selected monument; the commercial TurboSquid model is not included.
+          Inscription is a visual engraved-look texture; not deep-cut geometry.
+          '@ | Out-File 'dist-v6/LIRE_EN_PREMIER-V6-MONUMENT.txt' -Encoding utf8
+          Copy-Item 'tools/create_scene_v6_monument.py' 'dist-v6/create_scene_v6_monument.py'
+      - name: Upload full tested portable Windows application and actual WARP views
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V17.420-V6-MONUMENT-Windows-x64
+          path: dist-v6/
+          retention-days: 21
+          if-no-files-found: error
+      - name: Upload real WARP render images
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V6-MONUMENT-3-VUES-WARP
+          path: v6-images/
+          retention-days: 21
+          if-no-files-found: error
