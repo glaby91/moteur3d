@@ -1,5 +1,6 @@
 #include "m3d_engine.h"
 #include "src/m3d_walk_controller.h"
+#include "exploration_motion.h"
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
 #include <QAction>
@@ -137,6 +138,10 @@ public:
         renderTimeLabel_=new QLabel(QStringLiteral("Dernier rendu : —"),this);
         renderTimeLabel_->setObjectName(QStringLiteral("v16LastRenderTime"));
         statusBar()->addPermanentWidget(renderTimeLabel_);
+        explorationSpeedLabel_=new QLabel(this);
+        explorationSpeedLabel_->setObjectName(QStringLiteral("v17ExplorationSpeed"));
+        statusBar()->addPermanentWidget(explorationSpeedLabel_);
+        explorationSpeedLabel_->hide();
         sceneLoadLabel_=new QLabel(this);
         sceneLoadLabel_->setText(QStringLiteral("Chargement de la scène…"));
         sceneLoadProgress_=new QProgressBar(this);
@@ -306,6 +311,22 @@ private:
     float yaw_=0.f,pitch_=0.f;
     QPushButton* explorationButton_=nullptr;
     QLabel* explorationHelp_=nullptr;
+    QLabel* explorationSpeedLabel_=nullptr;
+    void updateExplorationSpeedIndicator(){
+        if(!explorationSpeedLabel_)return;
+        if(!exploring_){
+            explorationSpeedLabel_->hide();
+            return;
+        }
+        const bool fast=keysDown_.contains(Qt::Key_Shift);
+        const bool walking=walkingModeBox_&&walkingModeBox_->isChecked();
+        explorationSpeedLabel_->setText(
+            QStringLiteral("%1 · %2")
+                .arg(walking?QStringLiteral("Marche"):QStringLiteral("Vol libre"))
+                .arg(fast?QStringLiteral("Vitesse ×3 (Maj)")
+                         :QStringLiteral("Vitesse ×1")));
+        explorationSpeedLabel_->show();
+    }
     void activateFreeCamera(){
         if(!runtime_||runtime_->cameras.isEmpty())return;
         const int idx=std::clamp(cameraBox_->currentIndex(),0,int(runtime_->cameras.size())-1);
@@ -330,9 +351,10 @@ private:
         frameTimer_.stop();
         keysDown_.clear();
         leftMouseHeld_=false;
+        updateExplorationSpeedIndicator();
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Démarrer exploration (V17)"));
         if(explorationHelp_)explorationHelp_->setText(QStringLiteral(
-            "ZQSD / flèches : marcher · clic gauche + souris : regarder · Maj : accélérer · Échap : arrêter\n"
+            "ZQSD / flèches : marcher · clic gauche + souris : regarder · Maj : vitesse ×3 · Échap : arrêter\n"
             "En mode vol libre : Espace / Ctrl pour monter ou descendre."));
     }
     void toggleExploration(){
@@ -345,6 +367,7 @@ private:
         frameClock_.invalidate();
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Arrêter exploration"));
         frameTimer_.start();
+        updateExplorationSpeedIndicator();
         canvas_->setFocus();
     }
     void frameTick(){
@@ -362,7 +385,10 @@ private:
         if(walkingModeBox_&&walkingModeBox_->isChecked()){
             // Walking is always horizontal input. Height follows geometry:
             // floor, stairs, landings, slopes and gravity on unsupported areas.
-            const float speed=keysDown_.contains(Qt::Key_Shift)?4.5f:2.5f;
+            // Shift is an exact 3× multiplier; the deterministic walker still
+            // subdivides large motion into <= 8.5cm steps for collision safety.
+            const float speed=cse::exploration::speedMetersPerSecond(
+                keysDown_.contains(Qt::Key_Shift));
             const V displacement=length(move)>.01f?norm(move)*(dt*speed):V{};
             const V oldEye=freeCamera_.eye;
             walk::advance(runtime_->renderScene,walkingState_,displacement,dt);
@@ -372,7 +398,7 @@ private:
             if(keysDown_.contains(Qt::Key_Space))move.y+=1.f;
             if(keysDown_.contains(Qt::Key_Control))move.y-=1.f;
             if(length(move)>.01f){
-                freeCamera_.eye=freeCamera_.eye+norm(move)*(dt*(keysDown_.contains(Qt::Key_Shift)?7.f:2.5f));
+                freeCamera_.eye=freeCamera_.eye+norm(move)*(dt*cse::exploration::speedMetersPerSecond(keysDown_.contains(Qt::Key_Shift)));
                 updateLook();
             }
         }
@@ -422,13 +448,16 @@ protected:
     void keyPressEvent(QKeyEvent* e) override{
         if(exploring_){
             if(e->key()==Qt::Key_Escape){stopExploration();e->accept();return;}
-            if(!e->isAutoRepeat()){keysDown_.insert(e->key());}
+            if(!e->isAutoRepeat()){
+                keysDown_.insert(e->key());
+                if(e->key()==Qt::Key_Shift)updateExplorationSpeedIndicator();
+            }
             e->accept();return;
         }
         QMainWindow::keyPressEvent(e);
     }
     void keyReleaseEvent(QKeyEvent* e) override{
-        if(exploring_){if(!e->isAutoRepeat())keysDown_.remove(e->key());e->accept();return;}
+        if(exploring_){if(!e->isAutoRepeat()){keysDown_.remove(e->key());if(e->key()==Qt::Key_Shift)updateExplorationSpeedIndicator();}e->accept();return;}
         QMainWindow::keyReleaseEvent(e);
     }
 private:
@@ -917,6 +946,7 @@ private:
             requestRender();
         });
         connect(walkingModeBox_,&QCheckBox::toggled,this,[this](bool enabled){
+            updateExplorationSpeedIndicator();
             QSettings preferences(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
             preferences.setValue(QStringLiteral("Exploration/Walking"),enabled);
             if(exploring_&&freeCameraActive_&&runtime_){

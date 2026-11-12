@@ -1,5 +1,6 @@
 // V17.311 — walk / collision / stair traversal CPU-only deterministic test.
 #include "src/m3d_walk_controller.h"
+#include "../exploration_motion.h"
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -42,6 +43,31 @@ int main(){
     top(scene,-.65f,.65f,-1.5f,-1.f,.6f);
     wall(scene,2.f,-5.f,5.f,3.f);
     done(scene);
+    // V17.429: speed is exactly 3x in both walking and fly navigation.
+    static_assert(cse::exploration::speedMetersPerSecond(false)==2.5f,
+                  "Normal walking/flying speed must remain unchanged");
+    static_assert(cse::exploration::speedMetersPerSecond(true)==7.5f,
+                  "Shift speed must be exactly 3x");
+    State normalRun{},boostedRun{};
+    require(spawn(scene,{-3.f,1.7f,3.5f},normalRun),"normal run spawn failed");
+    require(spawn(scene,{-3.f,1.7f,3.5f},boostedRun),"boosted run spawn failed");
+    constexpr float tick=.04f;
+    advance(scene,normalRun,
+        {cse::exploration::speedMetersPerSecond(false)*tick,0.f,0.f},tick);
+    advance(scene,boostedRun,
+        {cse::exploration::speedMetersPerSecond(true)*tick,0.f,0.f},tick);
+    const float normalDistance=normalRun.feet.x+3.f;
+    const float boostedDistance=boostedRun.feet.x+3.f;
+    require(std::abs(boostedDistance-3.f*normalDistance)<.005f,
+            "3x sprint displacement differs from normal mode by more than tolerance");
+    State fastWall{};
+    require(spawn(scene,{1.f,1.7f,2.2f},fastWall),"fast wall spawn failed");
+    for(int i=0;i<15;++i)advance(scene,fastWall,
+        {cse::exploration::speedMetersPerSecond(true)*.08f,0.f,0.f},.08f);
+    require(fastWall.feet.x<1.81f,
+            "fast walking crossed solid wall (tunnelling at 7.5m/s)");
+    require(fastWall.grounded,
+            "fast walking lost ground contact against wall");
     // V17.317: aerial 85-m camera must still resolve the real floor.
     State aerial{};
     require(spawn(scene,{0.f,85.f,2.f},aerial),"aerial preset failed to reach site");
