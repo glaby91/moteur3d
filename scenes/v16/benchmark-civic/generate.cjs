@@ -29,11 +29,16 @@ const specials=[
  ['cse_birch_bark',[.80,.79,.73],.89,'wood'],
  ['cse_leaf_olive',[.28,.43,.19],.94,'foliage'],
  ['cse_leaf_gold',[.51,.48,.20],.94,'foliage'],
- ['cse_pool_water',[.10,.53,.69],.10,'water']
+ ['cse_pool_water',[.10,.53,.69],.10,'water'],
+ ['cse_glaze_orange',[.98,.24,.028],.16,'ceramic'],
+ ['cse_glaze_yellow',[.99,.82,.025],.16,'ceramic'],
+ ['cse_glaze_cobalt',[.015,.19,.91],.14,'ceramic'],
+ ['cse_glaze_lime',[.35,.78,.03],.17,'ceramic'],
+ ['cse_glaze_red',[.93,.05,.11],.17,'ceramic']
 ];
 const localMaterials=specials.map(([id,baseColor,roughness])=>({
  id,baseColor,roughness,metallic:id==='cse_monument_bronze'?.72:0,
- transmission:id==='cse_pool_water'?0.48:0,ior:id==='cse_pool_water'?1.333:1.5,textureSet:'tex_'+id,
+ transmission:id==='cse_pool_water'?0.88:0,ior:id==='cse_pool_water'?1.333:1.5,textureSet:'tex_'+id,
  origin:'CSE WARP single-palace scene material; original Pripyat library unchanged'
 }));
 const localSets=specials.map(([id,, ,pattern])=>({
@@ -232,13 +237,20 @@ function build(profileName,p){
  B(mural+'/Support','prp_concrete_panel',0,12.25,-4.18,8.6,13.15,.36);
  B(mural+'/Image fournie par utilisateur','cse_personnage_facade',
    0,12.25,-3.88,8.00,13.05,.09);
- // Mortar lines of 20-cm tesserae are actual geometrical strips.
- for(let x=-3.9;x<=3.91;x+=.20)
-  B(mural+'/Joints verticaux','prp_plaster_pale',
-    x,12.25,-3.823,.008,13.05,.013);
- for(let y=5.82;y<=18.70;y+=.20)
-  B(mural+'/Joints horizontaux','prp_plaster_pale',
-    0,y,-3.823,8.00,.008,.013);
+ // Avoid subpixel flicker: no hundreds of 8-mm physical grout strips.
+ // The authentic image is kept intact; seamless joints belong in its authored
+ // texture/mip chain, not free-standing coplanar opaque rectangles.
+ // Matching 1970s geometric side bands extend it between the center piers.
+ for(const side of [-1,1]){
+   const x=side*6.55;
+   B(mural+'/Decor beton peint','prp_concrete_panel',x,12.25,-3.96,4.45,12.95,.14);
+   for(let n=0;n<7;n++){
+     const y=6.45+n*1.85;
+     B(mural+'/Bandes geometriques',n%3===0?'cse_neon_red':
+       (n%3===1?'cse_neon_gold':'cse_neon_cyan'),
+       x,y,-3.84,3.9,.42,.03);
+   }
+ }
  for(const x of [-4.13,4.13])
   B(mural+'/Encadrement','prp_concrete_raw',x,12.25,-3.70,.22,13.45,.26);
  for(const y of [5.54,18.96])
@@ -407,18 +419,23 @@ function build(profileName,p){
  // first-floor gallery, so feet never have to jump a 0.7 m void.
  B('Interieur/Hall/Palier raccord escalier','prp_terrazzo_floor',
    -15,4.50,-9.02,4.4,.30,1.30);
- // The original Energetik image hangs above THAT staircase in the hall.
- // Its wall ends at y=7.6, leaving the hall's floor and pool sightline open.
- B('Interieur/Hall/Mur fresque','prp_plaster_pale',-15,10.35,-18.18,
-   10.3,5.5,.34);
- B('Interieur/Hall/Fresque Energetik authentique en image',
-   'cse_energetik_fresco',-15,10.35,-17.935,9.5,4.3,.085);
- for(const x of [-20.0,-10.0])
-  B('Interieur/Hall/Fresque/Cadre','prp_steel_rusted',
-    x,10.35,-17.84,.18,4.6,.18);
- for(const y of [8.05,12.65])
-  B('Interieur/Hall/Fresque/Cadre','prp_steel_rusted',
-    -15,y,-17.84,10.1,.16,.18);
+ // Energetik artwork mounted INTO a real ground-floor wall facing the pool.
+ // Original aspect ratio 9.5/4.3 preserved. Rear shell inner face z=-54.32.
+ B('Interieur/Piscine/Fresque/Mur porteur','prp_plaster_pale',
+   0,2.46,-54.25,10.4,4.0,.15);
+ B('Interieur/Piscine/Fresque Energetik originale','cse_energetik_fresco',
+   0,2.46,-54.14,8.36,3.78,.065);
+ for(const x of [-4.9,4.9])
+   B('Interieur/Piscine/Fresque/Encadrement','prp_concrete_raw',
+     x,2.46,-54.11,.16,4.1,.15);
+ // Under-gallery strips share functional lights: no individual point light.
+ for(const side of [-1,1])
+   for(const z of [-45,-33,-21,-10]){
+     B('Interieur/Galeries/Sous mezzanine/Reglette','cse_pool_strip',
+       side*38.0,4.24,z,4.8,.065,.30);
+     B('Interieur/Galeries/Sous mezzanine/Support','prp_window_frame',
+       side*38.0,4.30,z,5.0,.12,.38);
+   }
  // Locker rooms and showers inside the WEST ground-floor deck, accessed
  // through a 4 m opening from the western poolside corridor. No new building.
  const cloak='Interieur/Vestiaires et douches ouest';
