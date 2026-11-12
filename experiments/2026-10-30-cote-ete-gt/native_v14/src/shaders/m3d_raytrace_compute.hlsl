@@ -39,7 +39,7 @@ cbuffer Frame : register(b0) {
     float3 skyHorizon; float sunStrength;
     float3 sunColor; float skyFillStrength;
     uint lightCount; float sceneLightScale; float indirectFill; uint gpuIndirectSamples;
-    uint adaptiveGI; uint indirectWidth; uint indirectHeight; uint giReserved;
+    uint adaptiveGI; uint indirectWidth; uint indirectHeight; uint primaryQuarter;
 };
 struct GpuLight {
     float3 position; float radius;
@@ -477,6 +477,12 @@ float4 tracePrimary(Ray ray,uint2 pixelCoord) {
 [numthreads(8,8,1)]
 void CSMain(uint3 tid:SV_DispatchThreadID) {
     if(tid.x>=width||tid.y>=height)return;
+    // Skip BVH traversal and all PBR/GI work for 3/4 of primary pixels.
+    // Alpha 0 marks missing pixels for post-readback reconstruction.
+    if(primaryQuarter!=0u && ((tid.x&1u)!=0u||(tid.y&1u)!=0u)) {
+        Output[tid.xy]=float4(0.f,0.f,0.f,0.f);
+        return;
+    }
     float2 uv=((float2(tid.xy)+.5f)/float2(width,height))*2.f-1.f;
     Ray ray;ray.origin=eye;
     // Matches CPU: tanHalfFov is HORIZONTAL, vertical half-FOV = tanHalfFov/aspect.
