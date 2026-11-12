@@ -68,6 +68,11 @@ jobs:
           assert len(t["pitRadiiM"])==26
           assert t["hillHeightM"]==2.7
           assert t["frontStairWidthM"]==68.2 and t["lateralParvisTransitions"]==8
+          assert t["muralAtriumCentralSlabs"]==0
+          assert not any(o["parent"]=="Interieur/Galeries" and o["position"][1]>=4.4
+               and abs(o["position"][0])<.1 and o["position"][2]<-43 for o in a)
+          assert not any(o["parent"].startswith("Interieur/Galeries/Garde-corps 1er etage/")
+               and abs(o["position"][2]+45.3)<.2 and abs(o["position"][0])<28.1 for o in a)
           assert sum(o["parent"]=="Place/Parvis/Transitions laterales sans trou" for o in a)==8
           assert all(o["size"][0]==68.2 for o in a if o["parent"]=="Place/Escalier monumental")
           assert t["frescoTiles"]==8 and abs(t["frescoAspectRatio"]-2048/930)<1e-6

@@ -286,11 +286,16 @@ def build(root):
             if zb>za:
                 objs.append(box_inst("v7_deck_seg_%d_%s"%(level*10,za),
                     "Interieur/Galeries/Plancher avec tremie",43,level,(za+zb)/2,8.2,.30,zb-za))
-    # First floor retained as circulation, open the two upper central slabs
-    # adjacent to the rear artwork to provide the monumental atrium.
+    # Full-height mural atrium: NONE of the three central rear slabs may
+    # cross the image, including the 4.5m mezzanine. Side decks are preserved.
     remove(lambda o:o["parent"]=="Interieur/Galeries"
-       and o["position"][1]>=8.9 and abs(o["position"][0])<.1
+       and o["position"][1]>=4.4 and abs(o["position"][0])<.1
        and o["position"][2]<-43)
+    # Remove the now unsupported 57m transverse 1st-floor rail and its posts,
+    # not the longitudinal protective rails of the retained side galleries.
+    remove(lambda o:o["parent"].startswith("Interieur/Galeries/Garde-corps 1er etage/")
+       and abs(o["position"][2]+45.3)<.2 and abs(o["position"][0])<28.1)
+    report["muralAtriumCentralSlabs"]=0
 
     # 7. True maximal-ratio artwork: original 2048x930 pixels -> 4x2 native tiles.
     # Runtime low-memory atlas is limited to <=512px/material, so 8 individual
