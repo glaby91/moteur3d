@@ -86,7 +86,7 @@ int main(int argc,char** argv){
         sourceRevision=QString::fromUtf8(revFile.readAll()).trimmed().left(12);
     QTextStream out(stdout),err(stderr);
     if(argc<3){
-        err<<"Usage: moteur3d_v17_benchmark.exe scene.json output_dir [--quick] [--compare-v16] [--smoke] [--readback-depth 1|2|3] [--compare-readback] [--all-cameras] [--camera-id bassin] [--hour 19]\n";
+        err<<"Usage: moteur3d_v17_benchmark.exe scene.json output_dir [--quick] [--compare-v16] [--smoke] [--readback-depth 1|2|3] [--compare-readback] [--all-cameras] [--camera-id bassin] [--hour 19] [--light-limit 0..256] [--profile-stage flat|texture|basic|full]\n";
         return 2;
     }
     const QString scenePath=QFileInfo(QString::fromLocal8Bit(argv[1])).absoluteFilePath();
@@ -140,6 +140,24 @@ int main(int argc,char** argv){
             err<<"--hour expects a number from 0 to below 24\n";return 2;
         }
     }
+    const int lightOption=args.indexOf(QStringLiteral("--light-limit"));
+    int lightLimit=-1;
+    if(lightOption>=0){
+        bool ok=false;
+        lightLimit=lightOption+1<args.size()?args[lightOption+1].toInt(&ok):-1;
+        if(!ok||lightLimit<0||lightLimit>256){
+            err<<"Invalid --light-limit (0..256)\n";return 2;
+        }
+    }
+    const int profileOption=args.indexOf(QStringLiteral("--profile-stage"));
+    const QString profileStage=profileOption>=0&&profileOption+1<args.size()
+        ?args[profileOption+1]:QStringLiteral("full");
+    if(profileStage!="flat"&&profileStage!="texture"&&profileStage!="basic"&&profileStage!="full"){
+        err<<"Invalid --profile-stage (flat/texture/basic/full)\n";return 2;
+    }
+    // Profile shader chosen before the D3D device is created.
+    if(profileStage=="full")qunsetenv("M3D_V17_PROFILE_SHADER");
+    else qputenv("M3D_V17_PROFILE_SHADER",profileStage.toUtf8());
     const int cameraOption=args.indexOf(QStringLiteral("--camera-id"));
     const QString requestedCamera=cameraOption>=0&&cameraOption+1<args.size()
         ?args[cameraOption+1]:QString();
@@ -179,7 +197,10 @@ int main(int argc,char** argv){
     auto built=v16::buildRuntime(loaded.scene,smoke?256:2048);
     const double buildMs=elapsedMs(begin);
     if(!built){err<<"Scene compilation failed: "<<built.error<<"\n";return 4;}
-    const auto& runtime=built.runtime;
+    auto& runtime=built.runtime;
+    const int originalLights=int(runtime.renderScene.lights.size());
+    if(lightLimit>=0&&lightLimit<originalLights)
+        runtime.renderScene.lights.resize(size_t(lightLimit));
     if(runtime.cameras.isEmpty()){err<<"Scene has no camera\n";return 4;}
     updateLighting(benchmarkHour>=0.f?benchmarkHour:runtime.daylightHour);
     begin=Clock::now();
@@ -192,6 +213,9 @@ int main(int argc,char** argv){
         {"buildNumber",QString::number(CSE_WARP_BUILD_NUMBER)},{"revision",sourceRevision},
         {"scene",scenePath},{"sceneName",runtime.title},
         {"lightingHour",benchmarkHour>=0.f?benchmarkHour:runtime.daylightHour},
+        {"profileStage",profileStage},
+        {"authoredLights",originalLights},
+        {"activeLights",int(runtime.renderScene.lights.size())},
         {"timestampUtc",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
         {"os",QSysInfo::prettyProductName()},
         {"cpuArchitecture",QSysInfo::currentCpuArchitecture()},
