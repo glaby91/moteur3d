@@ -96,7 +96,7 @@ jobs:
           python scenes/v16/benchmark-civic/revisions/v5/scene_v17_full_revision.py --root dist-v5/benchmark-civic --pot-dir v5_pot_models --plant-dir v5_nature > dist-v5/REVISION-V5-VALIDATION.json
           if($LASTEXITCODE -ne 0){throw 'V5 scene geometry validation failed'}
           $report=Get-Content 'dist-v5/benchmark-civic/reports/revision-v5-verification.json' -Raw|ConvertFrom-Json
-          if($report.potInstances -ne 8 -or $report.treePitCount -ne 26 -or $report.replacedProceduralTreePositions -ne 26){
+          if($report.potInstances -ne 8 -or $report.treePitCount -ne 26 -or $report.replacedProceduralTreePositions -ne 26 -or $report.newGLBFlowerPositions -ne 320){
             throw 'Incomplete V5 planters or real tree pit holes'
           }
           if(!$report.polyhavenApprovedFlowersAvailable.empodium -or !$report.polyhavenApprovedFlowersAvailable.gazania){
@@ -132,7 +132,7 @@ jobs:
           Start DEMARRER_CSE_WARP_V5.bat. EXE default also loads new V5 scene.
           8 exact approved large-base retro GLB planters (92cm base, 177cm rim).
           26 medium-poly real GLB trees + 8 slender planter trees + 26 cut-out concrete tree pits.
-          46 true GLB flower instances (Poly Haven Empodium+Gazania) and 92 grass tufts.
+          320 genuine GLB flower positions in dense clusters (Poly Haven Empodium+Gazania) and 92 grass tufts.
           PBR microgravel soil, native bump, subtly rippled pool water material.
           Experimental Z-prepass OFF. Old V4 comparison: DEMARRER_V4_ORIGINALE.bat.
           Engine limitation: glTF alpha-masked materials and imported normal maps are not fully supported;

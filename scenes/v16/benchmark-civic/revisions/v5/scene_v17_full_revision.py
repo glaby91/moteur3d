@@ -228,8 +228,8 @@ def main():
   drop=(pa.startswith(ROOT_PREFIX) or pa.startswith('Nature/Arbres') or
         (pa.startswith('Place/Butte végétalisée/') and
           any(pa.startswith('Place/Butte végétalisée/'+x) for x in
-              ['Petales','Tiges','Coeurs','Feuilles','Fleurs et feuillages','V4 Pétales',
-               'V4 Tiges','V4 Pistils','V4 Feuilles','V4 Couvre-sol'])))
+              ['Petales','Tiges','Coeurs','Feuilles','V4 Pétales',
+               'V4 Tiges','V4 Pistils','V4 Feuilles'])))
   if drop:removed[pa]+=1
   else:filtered.append(o)
  geometry=load(root/'geometry/benchmark.json');materials=load(root/'materials/pripyat-reuse.json')
@@ -284,15 +284,30 @@ def main():
    objects.extend(i3.place(['grass1','grass2'][t%2],
     'Nature/Fosses circulaires/Herbes clairsemees',[xx,.16+pit_level,zz],[.15,.20+.10*rng.random(),.15],
     rng.randrange(360),f'pitgrass{n}_{t}'))
- # Replace the hundreds of toy-spheres with a restrained scatter of real flower GLB.
- for n in range(46):
-  ang=rng.uniform(0,2*math.pi);rad=math.sqrt(rng.uniform(.04,.93));x=25.5*rad*math.cos(ang);z=72+13.0*rad*math.sin(ang)
-  # Ellipsoid mound already modeled in V4; flowers grow from its envelope.
+ # Keep the source scene's low groundcover; replace the toy petals with
+ # genuine GLB flower crowns. Dense colorful islands instead of 46 solitary dots.
+ # About 90% of plants grow in planted groups, the rest in free meadow gaps.
+ flower_clusters=[(-19,71),(-13,81),(-12,65),(-4,84),(8,81),
+                  (15,76),(19,67),(-20,78),(22,73)]
+ flower_count=320
+ flower_keys=['flower1','flower2','flower2','flower3','flower1',
+              'flower2','empodium','flower2','flower3']
+ for n in range(flower_count):
+  if n<288:
+   cx,cz=flower_clusters[n%len(flower_clusters)]
+   x=cx+rng.gauss(0,2.45);z=cz+rng.gauss(0,2.05)
+   if (x/25.5)**2+((z-72)/13.0)**2>=.96:
+    x=cx*.86+rng.gauss(0,1.1);z=72+(cz-72)*.80+rng.gauss(0,1.0)
+  else:
+   ang=rng.uniform(0,2*math.pi);rad=math.sqrt(rng.uniform(.16,.93))
+   x=25.5*rad*math.cos(ang);z=72+13.0*rad*math.sin(ang)
+  # Do not bury flowers in the monumental sculpture plinth.
+  if x*x+(z-72)**2<4.7**2:x+=5.2 if x>=0 else -5.2
   y=.32+1.35*math.sqrt(max(.02,1-(x/27.9)**2-((z-72)/16.1)**2))
-  key=floral_keys[n%len(floral_keys)]
-  h=.26+rng.random()*.22
+  key='gazania' if n%37==0 else flower_keys[n%len(flower_keys)]
+  h=.34+rng.random()*.27
   objects.extend(i3.place(key,'Place/Butte vegetale/Fleurs GLB CC0',[x,y,z],
-                           [h*.85,h,h*.85],rng.randrange(360),f'flower{n}'))
+                           [h*.86,h,h*.86],rng.randrange(360),f'flower{n}'))
  for n in range(92):
   ang=rng.uniform(0,2*math.pi);rad=math.sqrt(rng.uniform(.08,.99));x=26.*rad*math.cos(ang);z=72+13.5*rad*math.sin(ang)
   y=.32+1.35*math.sqrt(max(.01,1-(x/27.9)**2-((z-72)/16.1)**2))
@@ -324,7 +339,7 @@ def main():
  info={'approvedPotBaseDiameterM':.92,'approvedPotTopDiameterM':1.77,'approvedPotHeightM':1.32,
        'potInstances':8,'potTrianglesEach':i3.triangles['pot0'],
        'replacedProceduralTreePositions':len(original_plant_centers),
-       'slenderTreesInPots':8,'newGLBFlowerPositions':46,'newGrassPositions':92,
+       'slenderTreesInPots':8,'newGLBFlowerPositions':flower_count,'newGrassPositions':92,
        'treePitCount':len(original_plant_centers),'realPavingCut':cut_report,
        'priorObjectTypesRemoved':dict(removed),'importedMeshTriangleCounts':i3.triangles,
        'polyhavenApprovedFlowersAvailable':polyhaven,'allMaterialCount':len(materials['materials']),
