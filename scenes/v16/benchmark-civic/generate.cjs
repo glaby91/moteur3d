@@ -22,11 +22,12 @@ const specials=[
  ['cse_personnage_facade',[1,1,1],.78,'image'],
  ['cse_neon_red',[1,.10,.035],.18,'metal'],
  ['cse_neon_cyan',[.02,.86,1],.17,'metal'],
- ['cse_neon_gold',[1,.69,.21],.20,'metal']
+ ['cse_neon_gold',[1,.69,.21],.20,'metal'],
+ ['cse_pool_water',[.10,.53,.69],.10,'water']
 ];
 const localMaterials=specials.map(([id,baseColor,roughness])=>({
  id,baseColor,roughness,metallic:id==='cse_monument_bronze'?.72:0,
- transmission:0,ior:1.5,textureSet:'tex_'+id,
+ transmission:id==='cse_pool_water'?48:0,ior:id==='cse_pool_water'?1.333:1.5,textureSet:'tex_'+id,
  origin:'CSE WARP single-palace scene material; original Pripyat library unchanged'
 }));
 const localSets=specials.map(([id,, ,pattern])=>({
@@ -52,6 +53,8 @@ const cameras={format:'m3d-cameras-v1',cameras:[
  {id:'passerelle',name:'03 · Grand banc ovale et statue',position:[66,2.3,72],target:[37,5.0,52],fovDegrees:67},
  {id:'bassin',name:'04 · Piscine olympique depuis l’entrée',position:[0,2.4,-10],target:[0,1.0,-34],fovDegrees:73},
  {id:'hall',name:'05 · Hall, escalier et fresque Energetik',position:[-15,10.35,-11.6],target:[-15,10.35,-18.0],fovDegrees:67},
+ {id:'hall_ensemble',name:'06 · Hall et escalier - vue d ensemble',position:[-4.5,2.55,-8.0],target:[-15,6.4,-15.4],fovDegrees:61},
+ {id:'piscine_soir',name:'07 · Piscine vue latérale a 19h',position:[32.5,6.05,-19.0],target:[0,1.1,-33],fovDegrees:67},
  {id:'etage',name:'06 · Galerie au-dessus des lignes d’eau',position:[34,6.6,-44],target:[0,2,-32],fovDegrees:71},
  {id:'vestiaires',name:'07 · Vestiaires et douches RDC',position:[-33.5,2.15,-35.4],target:[-43.5,2,-36],fovDegrees:68},
  {id:'vue_haut',name:'07 · Vue aérienne du bâtiment unique',position:[95,68,105],target:[15,5,11],fovDegrees:67}
@@ -239,7 +242,11 @@ function build(profileName,p){
   B(pool+'/Parois','prp_tile_ceramic',x,-.45,-32,.26,2.1,25.2);
  for(const z of [-44.62,-19.38])
   B(pool+'/Parois','prp_tile_ceramic',0,-.45,z,50.5,2.1,.26);
- B(pool+'/Eau','prp_puddle_water',0,.18,-32,49.7,.045,24.7);
+ // Dedicated translucent water, rough dielectric with shallow wave detail.
+ B(pool+'/Eau','cse_pool_water',0,.18,-32,49.7,.045,24.7);
+ // Reinforce floor lane visibility beneath the transparent surface.
+ for(const z of [-43.25,-38.25,-33.25,-28.25,-23.25])
+  B(pool+'/Bandes carrelage fond','prp_tile_ceramic',0,-1.34,z,48,.018,.32);
  // Underwater lane markers and floating colored lane dividers.
  for(let lane=0;lane<10;lane++){
   const z=-43.25+lane*2.5;
@@ -286,6 +293,22 @@ function build(profileName,p){
  // Sparse internal architectural ribs give roof depth rather than a flat slab.
  for(const x of [-25,-15,-5,5,15,25])
   B(pool+'/Poutres plafond','prp_concrete_panel',x,17.58,-32,.38,.38,34);
+ // Architectural depth: side-wall pilasters, galleries and ceramic details,
+ // kept outside the 50x25m unobstructed water volume.
+ for(const side of [-1,1]) {
+  for(const z of [-48,-42,-36,-30,-24,-18]){
+   B(pool+'/Pilastres latéraux','prp_plaster_pale',side*49.15,7.1,z,.42,13.8,.68);
+   B(pool+'/Appliques galerie','cse_pool_strip',side*48.83,5.1,z,.16,1.35,.28);
+  }
+  for(const y of [4.75,9.25,13.75])
+   B(pool+'/Corniches galerie','prp_terrazzo_floor',side*30.15,y,-32,.40,.20,37);
+ }
+ // Pool bench seating under lateral windows for scale and room detail.
+ for(const side of [-1,1])for(const z of [-45,-35,-25]){
+  B(pool+'/Bancs latéraux','prp_wood_weathered',side*28.0,.88,z,2.6,.18,.55);
+  for(const offset of [-1,1])
+   B(pool+'/Bancs latéraux/Pieds','prp_steel_painted',side*28.0+offset*.98,.49,z,.11,.80,.43);
+ }
  // Open lobby at ground level with a clear line of sight into the pool.
  B('Interieur/Hall/Accueil','prp_wood_weathered',-19,1.05,-10,6,1.1,1.2);
  for(const side of [-1,1])
@@ -307,6 +330,13 @@ function build(profileName,p){
   for(const side of [-1,1])
    B('Interieur/Escalier galerie/Contremarches',
     'prp_concrete_raw',37+side*2.12,(.55+top)*.5,z,.14,top-.55,.98);
+ }
+ // Foyer visual rhythm: framed ceramic friezes and wall sconces.
+ for(const side of [-1,1]){
+  for(const z of [-9,-13,-17]){
+   B('Interieur/Hall/Appliques murales','cse_pool_strip',side*27,5.4,z,.16,1.35,.24);
+   B('Interieur/Hall/Encadrements','prp_terrazzo_floor',side*27,4.4,z,.24,.12,3.4);
+  }
  }
  // Hall staircase: a separate public stair from ground to the y=4.5 gallery.
  // Top tread overlaps the landing, no floating stairs and no blocked doorway.
