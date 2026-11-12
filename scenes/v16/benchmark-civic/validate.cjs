@@ -46,6 +46,10 @@ check(lamps.length<=256,'DX11 constant buffer supports at most 256 lights');
 const validMaterials=new Set(allIds);
 const meshes=new Set(read('geometry/benchmark.json').meshes.map(m=>m.id));
 const cameras=read('cameras/views.json').cameras;
+const hallCamera=cameras.find(c=>c.id==='hall');
+check(hallCamera&&Math.abs(hallCamera.position[1]-hallCamera.target[1])<.5 &&
+  hallCamera.position[2]>hallCamera.target[2]+4,
+  'Hall camera must aim horizontally at the fresco, not into the ceiling');
 check(cameras.length>=7&&cameras.some(c=>c.id==='bassin')&&
  cameras.some(c=>c.id==='etage')&&cameras.some(c=>c.id==='vestiaires'),
  'Pool, gallery and changing rooms cameras missing');
@@ -103,6 +107,12 @@ for(const [profile,target,cap,sceneFile] of [
  }
  check(select('Interieur/Escalier galerie').length>=27,'Gallery stairs missing');
  check(select('Interieur/Piscine olympique/Lumière linéaire').length>=4,'Linear lamps missing');
+ check(select('Interieur/Piscine olympique/Plafonniers/Diffuseur').length===55,
+  'Every pool ceiling lamp must have a visible luminous diffuser');
+ check(select('Interieur/Hall/Plafonniers/Diffuseur').length>=40,
+  'Hall light bars must be modeled as visible luminaires');
+ check(select('Interieur/Piscine olympique/Frise ligne eau').length===4,
+  'Pool ceramic waterline must be visible on four sides');
  check(select('Interieur/Piscine olympique/Lignes d’eau').length>120,'Lane dividers missing');
  const fresco=unique('Interieur/Hall/Fresque Energetik authentique en image');
  check(fresco.length===1&&fresco[0].material==='cse_energetik_fresco'&&
