@@ -28,7 +28,7 @@ check(portrait[0]===0xff&&portrait[1]===0xd8&&portrait.at(-2)===0xff&&
 function read(file){return JSON.parse(fs.readFileSync(path.resolve(base,file),'utf8'));}
 const materials=read('materials/pripyat-reuse.json').materials;
 const allIds=materials.map(m=>m.id);
-check(materials.length===33&&new Set(allIds).size===materials.length,'Expected 22 source + 11 scene materials');
+check(materials.length===34&&new Set(allIds).size===materials.length,'Expected 22 source + 12 scene materials');
 check(origin.materials.every((m,i)=>JSON.stringify(m)===JSON.stringify(materials[i])),
  'Original material recipes or ordering changed');
 // Keep the evening artificial-light rig stable across all load profiles.
@@ -50,7 +50,8 @@ const hallCamera=cameras.find(c=>c.id==='hall');
 check(hallCamera&&Math.abs(hallCamera.position[1]-hallCamera.target[1])<.5 &&
   hallCamera.position[2]>hallCamera.target[2]+4,
   'Hall camera must aim horizontally at the fresco, not into the ceiling');
-check(cameras.length>=7&&cameras.some(c=>c.id==='bassin')&&
+check(cameras.length>=11&&cameras.some(c=>c.id==='hall_ensemble')&&
+ cameras.some(c=>c.id==='piscine_soir')&&cameras.some(c=>c.id==='bassin')&&
  cameras.some(c=>c.id==='etage')&&cameras.some(c=>c.id==='vestiaires'),
  'Pool, gallery and changing rooms cameras missing');
 for(const [profile,target,cap,sceneFile] of [
@@ -82,7 +83,7 @@ for(const [profile,target,cap,sceneFile] of [
  }
  check(boxCount*12>=target&&inst.length<=65000,'Stress profile out of range');
  check(stats.totalInstances===inst.length&&stats.boxes===boxCount,'Incorrect geometry stats');
- check(pbr.sets.length===33&&pbr.sets.every(x=>x.resolution<=cap),
+ check(pbr.sets.length===34&&pbr.sets.every(x=>x.resolution<=cap),
   'Unexpected PBR cap or missing local textures');
  const frescoSet=pbr.sets.find(m=>m.id==='tex_cse_energetik_fresco');
  check(frescoSet&&frescoSet.imageFile==='textures/energetik_fresco_mosaic.jpg',
@@ -95,8 +96,17 @@ for(const [profile,target,cap,sceneFile] of [
  const pool=unique('Interieur/Piscine olympique/Fond');
  check(pool.some(p=>p.size[0]===50&&p.size[2]===25),
   'Olympic 50 x 25 m basin not dimensionally correct');
- check(unique('Interieur/Piscine olympique/Eau').some(o=>o.position[2]===-32),
-  'Water should remain in the cut-out');
+ check(unique('Interieur/Piscine olympique/Eau').some(o=>o.position[2]===-32&&o.material==='cse_pool_water'),
+  'Water needs the new translucent scene-specific material');
+ const poolWater=materials.find(m=>m.id==='cse_pool_water');
+ check(poolWater&&poolWater.transmission>=40&&poolWater.ior>=1.3&&poolWater.ior<=1.34,
+  'Pool water must be a transparent dielectric');
+ check(select('Interieur/Piscine olympique/Bandes carrelage fond').length===5,
+  'Floor markers must remain readable beneath water');
+ check(select('Interieur/Piscine olympique/Pilastres latéraux').length>=12,
+  'Pool side walls missing architectural depth');
+ check(select('Interieur/Piscine olympique/Bancs latéraux').length>=6,
+  'Pool gallery benches missing');
  const poolRegion=[-25,25,-44.5,-19.5];
  // No solid central gallery floors: preserve tall clear water volume.
  for(const x of select('Interieur/Galeries')){
