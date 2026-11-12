@@ -456,6 +456,25 @@ jobs:
           windeployqt --release --no-translations dist-v17/moteur3d_v17.exe
           windeployqt --release --no-translations dist-v17/moteur3d_v17_benchui.exe
           windeployqt --release --no-translations dist-v17/moteur3d_v16.exe
+      - name: Import 10 CC0 GLB trees into full Windows V17 package and smoke test final launch scene
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          M3D_V16_GPU_GI_SAMPLES: '0'
+          M3D_V17_EXPERIMENT_Z_PREPASS: '0'
+        run: |
+          python -m pip install --disable-pip-version-check trimesh numpy
+          if ($LASTEXITCODE -ne 0) { throw 'Missing tree import dependencies' }
+          python scenes/v16/benchmark-civic/import_trees_pilot.py --root scenes/v16/benchmark-civic
+          if ($LASTEXITCODE -ne 0) { throw '10 CC0 GLB trees import failed' }
+          python tools/package_v17_trees.py --dist dist-v17 --source scenes/v16/benchmark-civic
+          if ($LASTEXITCODE -ne 0) { throw 'Full distribution assembly failed' }
+          & "dist-v17/moteur3d_v17_benchmark.exe" "dist-v17/benchmark-civic/scene-v4.json" "build-v17/final-v4-10-tree-smoke" --smoke --camera-id v4_face --hour 14 --raster-msaa 1 --readback-depth 1
+          if ($LASTEXITCODE -ne 0) { throw 'Final delivered V17 tree scene failed real DX11 WARP rendering' }
+          $pic=Get-ChildItem "build-v17/final-v4-10-tree-smoke" -Recurse -Filter 'raster_v4_face_*.png' | Select-Object -First 1
+          if (!$pic -or $pic.Length -lt 1200) { throw 'Final tree scene preview missing or empty' }
+          Copy-Item $pic.FullName "dist-v17/benchmark-civic/10-arbres-V17-WARP.png"
+          Write-Host "READY: V17 Windows package opens corrected V4 + 10 trees by default"
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
