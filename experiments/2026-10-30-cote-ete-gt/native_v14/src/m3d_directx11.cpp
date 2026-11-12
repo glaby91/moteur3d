@@ -717,6 +717,18 @@ public:
                 emissionR=.83f;emissionG=.91f;emissionB=1.f;
                 emissionStrength=.24f; // do not overexpose concrete
             }
+            else if(name=="cse_neon_red"){
+                emissionR=1.f;emissionG=.09f;emissionB=.035f;emissionStrength=1.65f;
+                strength=.55f;
+            }
+            else if(name=="cse_neon_cyan"){
+                emissionR=.03f;emissionG=.89f;emissionB=1.f;emissionStrength=1.5f;
+                strength=.5f;
+            }
+            else if(name=="cse_neon_gold"){
+                emissionR=1.f;emissionG=.72f;emissionB=.24f;emissionStrength=1.35f;
+                strength=.45f;
+            }
             else if(name=="lamp"){emissionR=1.f;emissionG=166.f/255.f;emissionB=91.f/255.f;emissionStrength=.75f+1.9f*lampFactor;}
             else if(name=="led"){emissionR=1.f;emissionG=217.f/255.f;emissionB=165.f/255.f;emissionStrength=.48f+.85f*lampFactor;}
             else if(name=="taillight"){emissionR=1.f;emissionG=28.f/255.f;emissionB=12.f/255.f;emissionStrength=1.25f*lampFactor;}
