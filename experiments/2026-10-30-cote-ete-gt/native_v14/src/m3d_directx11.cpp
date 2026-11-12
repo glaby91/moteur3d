@@ -828,7 +828,17 @@ public:
         const char* noCull=std::getenv("M3D_V17_DISABLE_FRUSTUM_CULLING");
         const bool cullEnabled=quality.frustumCulling
             &&!(noCull && std::strcmp(noCull,"1")==0);
-        if(vertexCount_){
+        // Lightweight depth-only trial: reuse existing static/box geometry.
+        // No CPU ray casting, material evaluation or per-triangle sorting.
+        // The draw commands are repeated only for primary opaque occluders.
+        // Off by default; deliberately isolated from the production path.
+        const char* zPrepassEnv=std::getenv("M3D_V17_EXPERIMENT_Z_PREPASS");
+        const bool depthPrepass=zPrepassEnv&&std::strcmp(zPrepassEnv,"1")==0;
+        if(depthPrepass){
+            context_->OMSetRenderTargets(0,nullptr,dsv_.Get());
+            context_->PSSetShader(nullptr,nullptr,0);
+            // Static opaque walls, floors and other architectural meshes.
+            if(vertexCount_){
             if(!cullEnabled){
                 context_->Draw(vertexCount_,0);
                 ++drawCalls;
