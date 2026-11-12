@@ -20,63 +20,93 @@ function rebuildMonument({B,S,cx,cz}) {
   B(root+'/Socle/Joint', 'prp_steel_rusted', cx,1.74,cz+1.939,3.42,.045,.025);
   S(root+'/Socle/Medaille','cse_neon_gold',cx,1.52,cz+1.965,.35,.35,.11);
 
-  // Version 2 after *real* 1366x768 render inspection:
-  // The earlier small ellipsoid chain looked like an accordion. Use few,
-  // continuous, smoothly overlapping major volumes for readable sculpture.
+  // V3: slender, asymmetric anatomical silhouettes; no ribbed bead chains.
+  // All components are real existing ellipsoid meshes, never engine changes.
+  // The front-facing ensemble must read as two figures, not two bronze tubes.
   function figure(id,x,z,draped) {
     const p=root+'/Silhouettes/'+id;
+    const turn=draped?-.095:.085;
+    const faceX=x+turn;
     for(const side of [-1,1]){
-      const lx=x+side*.23;
-      S(p+'/Mollets',bronze,lx,2.80,z+.08,.32,.96,.34);
-      S(p+'/Cuisses',bronze,lx,3.42,z-.04,.42,1.00,.41);
-      S(p+'/Genoux',bronze,lx,3.08,z+.03,.32,.31,.34);
-      S(p+'/Chaussures',bronze,lx,2.30,z+.25,.42,.20,.71);
+      const foot=x+side*.255;
+      // Long legs in three continuous transitions, with staggered knees
+      // and anatomically smaller ankles. No chunky spherical kneecaps.
+      const stride=draped?side*.085:side*.045;
+      S(p+'/Mollets',bronze,foot+stride,2.77,z+(side>0?.12:-.08),
+        .245,.90,.27);
+      S(p+'/Cuisses',bronze,foot+stride*.35,3.44,z-.035,
+        .315,1.06,.335);
+      S(p+'/Genoux',bronze,foot+stride*.7,3.06,z+.035,
+        .26,.23,.28);
+      S(p+'/Chaussures',bronze,foot+stride,2.30,z+.19,
+        .33,.17,.58);
     }
-    S(p+'/Bassin',bronze,x,3.79,z,.86,.64,.69);
-    S(p+'/Torse sculpté',bronze,x,4.57,z,.83,1.32,.61);
-    S(p+'/Epaules',bronze,x,5.02,z,.99,.32,.64);
-    S(p+'/Cou',bronze,x,5.32,z,.26,.33,.29);
-    S(p+'/Visage',bronze,x,5.65,z+.045,.49,.73,.47);
-    S(p+'/Visage/Nez',bronze,x,5.58,z+.31,.13,.19,.20);
-    S(p+'/Visage/Menton',bronze,x,5.35,z+.15,.32,.12,.27);
-    if(draped){
-      // Single flowing skirt instead of rows of horizontal ribbed beads.
-      S(p+'/Tunique',bronze,x,3.74,z,.99,1.13,.76);
-      for(const t of [-.34,0,.34])
-        S(p+'/Drapé vertical',bronze,x+t,3.59,z+.25,.20,.75,.20);
-      S(p+'/Coiffure',bronze,x,5.91,z-.12,.54,.25,.43);
-      // Left arm opens gently toward the garden with two smooth tapered
-      // long ellipsoids, not seven mechanical beads.
-      S(p+'/Bras ouvert',bronze,x-.84,4.91,z,.79,.28,.29);
-      S(p+'/Avant-bras ouvert',bronze,x-1.42,4.77,z+.04,.72,.24,.27);
-      S(p+'/Main ouverte',bronze,x-1.83,4.74,z+.045,.20,.19,.27);
-      S(p+'/Bras bas',bronze,x+.57,4.67,z,.26,.92,.29);
-      S(p+'/Main basse',bronze,x+.60,4.23,z+.08,.20,.27,.23);
-    }else{
-      S(p+'/Veste',bronze,x,4.44,z+.03,.90,1.38,.68);
-      for(const offset of [-.32,.32])
-        S(p+'/Revers',bronze,x+offset,4.72,z+.33,.16,.54,.14);
-      // A readable raised gesture: shoulder, upper arm, forearm, hand.
-      S(p+'/Bras haut',bronze,x+.66,5.45,z,.28,.91,.29);
-      S(p+'/Avant-bras levé',bronze,x+1.01,6.20,z,.25,1.28,.27);
-      S(p+'/Coude',bronze,x+.84,5.78,z,.29,.28,.29);
-      S(p+'/Main étoile',bronze,x+1.16,6.75,z,.23,.28,.24);
-      S(p+'/Bras bas',bronze,x-.62,4.70,z,.27,.89,.27);
-      S(p+'/Main basse',bronze,x-.70,4.27,z+.07,.20,.25,.23);
+    // Proportional pelvis, tapered upper torso and narrower shoulders.
+    S(p+'/Bassin',bronze,x,3.78,z,.70,.54,.59);
+    S(p+'/Torse sculpté',bronze,x+turn*.55,4.53,z-.02,.65,1.23,.48);
+    S(p+'/Poitrine',bronze,x+turn*.8,4.82,z+.035,.72,.49,.53);
+    S(p+'/Epaules',bronze,x+turn,5.00,z-.035,.80,.26,.51);
+    S(p+'/Cou',bronze,faceX,5.28,z-.03,.19,.28,.22);
+    // Smaller head with a visible brow, chin and thin profile.
+    S(p+'/Visage',bronze,faceX,5.60,z+.015,.375,.57,.345);
+    S(p+'/Visage/Front',bronze,faceX,5.81,z+.12,.33,.15,.265);
+    S(p+'/Visage/Nez',bronze,faceX,5.57,z+.235,.085,.17,.145);
+    S(p+'/Visage/Menton',bronze,faceX,5.37,z+.115,.24,.115,.215);
+    for(const side of [-1,1])
+      S(p+'/Visage/Joues',bronze,faceX+side*.13,5.60,z+.19,
+        .13,.145,.115);
+    if(draped) {
+      // A narrower tunic with a three-layer skirt, rather than an oval barrel.
+      S(p+'/Tunique',bronze,x,3.76,z+.005,.78,1.10,.58);
+      for(const offset of [-.24,.02,.25])
+        S(p+'/Drapé vertical',bronze,x+offset,3.46,z+.28,
+          .12,.72,.11);
+      S(p+'/Ceinture',bronze,x,4.14,z+.09,.52,.18,.43);
+      S(p+'/Coiffure',bronze,faceX,5.81,z-.13,.415,.22,.34);
+      // Deliberate lower arm angle; fewer long continuous segments.
+      S(p+'/Bras ouvert',bronze,x-.58,4.90,z,
+        .28,.66,.245);
+      S(p+'/Avant-bras ouvert',bronze,x-1.03,4.69,z+.05,
+        .60,.215,.23);
+      S(p+'/Main ouverte',bronze,x-1.40,4.63,z+.06,
+        .16,.14,.19);
+      S(p+'/Bras bas',bronze,x+.53,4.67,z-.02,
+        .20,.72,.22);
+      S(p+'/Main basse',bronze,x+.56,4.27,z+.05,
+        .145,.21,.16);
+    } else {
+      // Close-cut jacket: one readable body, light lapel relief only.
+      S(p+'/Veste',bronze,x+turn*.55,4.51,z+.005,.67,1.16,.53);
+      for(const offset of [-.22,.22])
+        S(p+'/Revers',bronze,x+offset+turn,4.75,z+.255,
+          .10,.40,.09);
+      // Gesture follows shoulder -> elbow -> wrist without hard separation.
+      S(p+'/Bras haut',bronze,x+.51,5.30,z-.015,
+        .225,.71,.23);
+      S(p+'/Coude',bronze,x+.74,5.77,z-.015,
+        .21,.22,.22);
+      S(p+'/Avant-bras levé',bronze,x+.91,6.20,z-.015,
+        .195,.95,.21);
+      S(p+'/Main étoile',bronze,x+1.00,6.65,z-.015,
+        .165,.24,.18);
+      S(p+'/Bras bas',bronze,x-.52,4.69,z,
+        .225,.75,.24);
+      S(p+'/Main basse',bronze,x-.56,4.28,z+.04,
+        .16,.21,.17);
     }
   }
   figure('Jeunesse',cx-.79,cz+.08,true);
   figure('Science',cx+.76,cz-.10,false);
   // Small five-ray star held above the raised hand; restrained golden paint.
-  const sx=cx+1.94,sy=7.10,sz=cz-.10;
+  const sx=cx+1.76,sy=7.01,sz=cz-.10;
   S(root+'/Etoile/Coeur','cse_neon_gold',sx,sy,sz,.27,.27,.16);
   for(let i=0;i<5;i++){
     const theta=(i*72+90)*rad;
     for(let j=0;j<3;j++){
       const t=(j+.5)/3;
       S(root+'/Etoile/Branches','cse_neon_gold',
-        sx+.44*t*cos(theta),sy+.44*t*sin(theta),sz,
-        .20-.08*t,.20-.08*t,.105);
+        sx+.31*t*cos(theta),sy+.31*t*sin(theta),sz,
+        .14-.06*t,.14-.06*t,.08);
     }
   }
 }
