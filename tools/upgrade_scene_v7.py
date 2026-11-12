@@ -472,6 +472,63 @@ def build(root):
     report["floatingLuminaireMeshesRemoved"]=len(floaters)
     report["isolatedHallLightBlocksRemoved"]=len(white_posts)
 
+    # V7.426: complete the 1970s front curtain wall. The original base
+    # deliberately skipped EVERY FOURTH OUTER bay (x ~= -44,-30.6,23,36.4)
+    # at all four elevations, leaving 16 genuine missing glass panes.
+    # Keep the walk-through central door at ground level and the portrait
+    # mosaic on the upper levels entirely free of new glass or framework.
+    repaired_glass=0;metal_joints=0
+    for level in range(4):
+        y=2.6+level*4.15
+        for k in range(27):
+            x=-44+k*3.35
+            if level==0 and abs(x)<7.0:continue
+            if level>0 and abs(x)<5.0:continue
+            if abs(x)>22 and k%4==0:
+                objs.append(box_inst("v7_missing_glass_%d_%02d"%(level,k),
+                    "Architecture/Palais/Mur-rideau V7/Vitrages rajoutes",
+                    x,y,-4.03,3.04,3.65,.085,"prp_window_glass"))
+                repaired_glass+=1
+            # Perimeter framework around every existing/repaired glazed bay:
+            # visible steel mullions and transoms, not floating columns.
+            for side in (-1,1):
+                objs.append(box_inst("v7_mullion_%d_%02d_%s"%(
+                    level,k,side),"Architecture/Palais/Mur-rideau V7/Montants",
+                    x+side*1.59,y,-3.84,.115,3.86,.19,"prp_window_frame"))
+                metal_joints+=1
+            for edge in (-1,1):
+                objs.append(box_inst("v7_transom_%d_%02d_%s"%(
+                    level,k,edge),"Architecture/Palais/Mur-rideau V7/Traverses",
+                    x,y+edge*1.89,-3.84,3.21,.115,.19,"prp_window_frame"))
+                metal_joints+=1
+    # The old top glazing ended at y=16.875, while the roof underside starts
+    # around y=19.275. Fill the missing clerestory row only in the side wings.
+    # No upper glass in the portrait-and-geometric-band zone (|x| < 9m).
+    clerestory=0
+    for k in range(27):
+        x=-44+k*3.35
+        if abs(x)<9.0:continue
+        name="v7_clerestory_%02d"%k
+        objs.append(box_inst(name,
+            "Architecture/Palais/Mur-rideau V7/Vitrages bandeau haut",
+            x,18.02,-4.03,3.04,1.80,.085,"prp_window_glass"))
+        clerestory+=1
+        for side in (-1,1):
+            objs.append(box_inst(name+"_mullion_%s"%side,
+                "Architecture/Palais/Mur-rideau V7/Montants hauts",
+                x+side*1.59,18.02,-3.84,.115,1.88,.19,"prp_window_frame"))
+            metal_joints+=1
+        for edge in (-1,1):
+            objs.append(box_inst(name+"_transom_%s"%edge,
+                "Architecture/Palais/Mur-rideau V7/Traverses hautes",
+                x,18.02+edge*.94,-3.84,3.21,.115,.19,
+                "prp_window_frame"))
+            metal_joints+=1
+    assert repaired_glass==16 and clerestory==22 and metal_joints==468
+    report["curtainWallMissingBaysGlazed"]=repaired_glass
+    report["curtainWallClerestoryBaysGlazed"]=clerestory
+    report["curtainWallNewMetalMullionsAndTransoms"]=metal_joints
+
     # 7. True maximal-ratio artwork: original 2048x930 pixels -> 4x2 native tiles.
     # Runtime low-memory atlas is limited to <=512px/material, so 8 individual
     # material tiles preserve source detail instead of downsampling it to 512px.
