@@ -28,7 +28,7 @@ check(portrait[0]===0xff&&portrait[1]===0xd8&&portrait.at(-2)===0xff&&
 function read(file){return JSON.parse(fs.readFileSync(path.resolve(base,file),'utf8'));}
 const materials=read('materials/pripyat-reuse.json').materials;
 const allIds=materials.map(m=>m.id);
-check(materials.length===34&&new Set(allIds).size===materials.length,'Expected 22 source + 12 scene materials');
+check(materials.length===39&&new Set(allIds).size===materials.length,'Expected 22 source + 17 scene materials');
 check(origin.materials.every((m,i)=>JSON.stringify(m)===JSON.stringify(materials[i])),
  'Original material recipes or ordering changed');
 // Keep the evening artificial-light rig stable across all load profiles.
@@ -83,7 +83,7 @@ for(const [profile,target,cap,sceneFile] of [
  }
  check(boxCount*12>=target&&inst.length<=65000,'Stress profile out of range');
  check(stats.totalInstances===inst.length&&stats.boxes===boxCount,'Incorrect geometry stats');
- check(pbr.sets.length===34&&pbr.sets.every(x=>x.resolution<=cap),
+ check(pbr.sets.length===39&&pbr.sets.every(x=>x.resolution<=cap),
   'Unexpected PBR cap or missing local textures');
  const frescoSet=pbr.sets.find(m=>m.id==='tex_cse_energetik_fresco');
  check(frescoSet&&frescoSet.imageFile==='textures/energetik_fresco_mosaic.jpg',
@@ -123,6 +123,10 @@ for(const [profile,target,cap,sceneFile] of [
   'Hall light bars must be modeled as visible luminaires');
  check(select('Interieur/Piscine olympique/Frise ligne eau').length===4,
   'Pool ceramic waterline must be visible on four sides');
+ check(select('Interieur/Piscine olympique/Fanions/Tissu').length===20,
+  'Swimming flags missing');
+ check(select('Interieur/Piscine olympique/Echelles/Marches').length===16,
+  'Physical pool ladders missing');
  check(select('Interieur/Piscine olympique/Lignes d’eau').length>120,'Lane dividers missing');
  const fresco=unique('Interieur/Hall/Fresque Energetik authentique en image');
  check(fresco.length===1&&fresco[0].material==='cse_energetik_fresco'&&
@@ -189,11 +193,16 @@ for(const [profile,target,cap,sceneFile] of [
     ['cse_personnage_facade','cse_energetik_fresco'].includes(o.material)),
   'An artwork improperly covers the pool wall');
  const rooftop=select('Architecture/Palais/Enseigne lumineuse toit');
- check(rooftop.length>=180,'Rooftop neon sign geometry incomplete');
+ check(rooftop.length>=140,'Sober rooftop lettering geometry incomplete');
  check(select('Architecture/Palais/Enseigne lumineuse toit/Lettres ЭНЕРГЕТИК').length>=120,
   'Cyrillic illuminated Energetik lettering missing');
  check(select('Architecture/Palais/Enseigne lumineuse toit/Neon rouge').length===2,
   'Red neon marquee border missing');
+ check(select('Architecture/Palais/Banderoles toit/Tissu').length===10,
+  'Both fabric roof banners must be present');
+ check(select('Architecture/Palais/Facade/Corniches').length===4&&
+   select('Architecture/Palais/Facade/Pilastres').length===6,
+  'Sober facade architectural detailing missing');
  check(lamps.filter(l=>l.position[1]===24).length===12,
   '12 colored rooftop accent lights missing');
  const seat=select('Place/Banc ovale béton/Assise');
@@ -208,14 +217,27 @@ for(const [profile,target,cap,sceneFile] of [
   'Continuous roof parapet missing');
  check(select('Architecture/Palais/Enseigne fictive').length===0,
   'The obsolete 80-post rooftop sign has returned');
- check(select('Nature/Arbres/Branches').length===2*select('Nature/Arbres').filter(o=>o.parent==='Nature/Arbres'&&o.material==='prp_bark_wet').length,
-  'Tree boughs missing');
- check(select('Nature/Arbres/Houppier').length>=3*select('Nature/Arbres').filter(o=>o.parent==='Nature/Arbres'&&o.material==='prp_bark_wet').length,
-  'Asymmetric multi-lobe tree crowns missing');
+ const trunks=inst.filter(o=>o.parent==='Nature/Arbres');
+ check(trunks.length>=26&&
+   trunks.filter(o=>Math.abs(o.position[0])<85&&o.position[2]>0).length>=26,
+  'At least 26 visible poplars/birches must frame the plaza');
+ check(select('Nature/Arbres/Branches').length===4*trunks.length,
+  'Tree branches need four real geometric lobes per trunk');
+ check(select('Nature/Arbres/Houppier').length>=5*trunks.length,
+  'Five asymmetrical foliage canopies are required per tree');
  check(select('Place/Butte végétalisée/Fleurs et feuillages').length>200,
-  'Multicolour vegetated mound incomplete');
- check(select('Place/Monument soviétique fictif').length>=25,
-  'Original monumental civic statue incomplete');
+  'Colourful planted mound incomplete');
+ check(select('Place/Butte végétalisée/Petales').length>=180,
+  'Individual flower petals missing');
+ check(select('Place/Jardins/Arbustes').length>=24,
+  'Sidewalk shrubs missing');
+ check(select('Place/Monument soviétique fictif').length>=55,
+  'New two-figure monumental sculpture incomplete');
+ check(select('Place/Monument soviétique fictif/Silhouettes').length>=45,
+  'Two detailed figures are required, not the old block statue');
+ check(select('Place/Monument soviétique fictif/Flambeau').length===0&&
+   select('Place/Monument soviétique fictif/Rayons').length===0,
+  'Outdated torch and rooftop-like spikes on monument returned');
  const entranceGlass=select('Architecture/Palais/Verriere').filter(o=>
     o.position[1]<5&&Math.abs(o.position[0])<5);
  check(entranceGlass.length===0,'Glass blocks the 10-m main doorway');

@@ -12,10 +12,10 @@ const catalog=JSON.parse(fs.readFileSync(catalogPath,'utf8'));
 // Scene-only PBR additions; original Pripyat IDs, materials and files remain
 // completely unchanged. The fresco is the actual legacy JPEG, not a fake mural.
 const specials=[
- ['cse_flower_red',[.71,.19,.17],.81,'foliage'],
- ['cse_flower_gold',[.92,.70,.18],.80,'foliage'],
- ['cse_flower_blue',[.25,.40,.77],.81,'foliage'],
- ['cse_flower_purple',[.46,.26,.63],.84,'foliage'],
+ ['cse_flower_red',[.54,.20,.19],.88,'foliage'],
+ ['cse_flower_gold',[.74,.54,.25],.89,'foliage'],
+ ['cse_flower_blue',[.33,.43,.54],.89,'foliage'],
+ ['cse_flower_purple',[.44,.33,.49],.89,'foliage'],
  ['cse_monument_bronze',[.36,.29,.19],.39,'metal'],
  ['cse_pool_strip',[.79,.86,.91],.27,'metal'],
  ['cse_energetik_fresco',[1,1,1],.72,'image'],
@@ -23,6 +23,11 @@ const specials=[
  ['cse_neon_red',[1,.10,.035],.18,'metal'],
  ['cse_neon_cyan',[.02,.86,1],.17,'metal'],
  ['cse_neon_gold',[1,.69,.21],.20,'metal'],
+ ['cse_banner_red',[.52,.115,.10],.91,'fabric'],
+ ['cse_banner_cream',[.77,.71,.59],.87,'fabric'],
+ ['cse_birch_bark',[.80,.79,.73],.89,'wood'],
+ ['cse_leaf_olive',[.28,.43,.19],.94,'foliage'],
+ ['cse_leaf_gold',[.51,.48,.20],.94,'foliage'],
  ['cse_pool_water',[.10,.53,.69],.10,'water']
 ];
 const localMaterials=specials.map(([id,baseColor,roughness])=>({
@@ -37,9 +42,9 @@ const localSets=specials.map(([id,, ,pattern])=>({
  ...(id==='cse_personnage_facade'?{imageFile:'textures/personnage_facade_mosaique.jpg'}:{})
 }));
 const profiles={
-  leger: {target:20000, textureCap:512, pave:4.5, trees:18, benches:12, lamps:12, blocks:3, seatCols:16, seatRows:9, detail:3},
-  lourd: {target:150000, textureCap:1024, pave:2.2, trees:56, benches:35, lamps:26, blocks:10, seatCols:40, seatRows:25, detail:8},
-  extreme:{target:500000, textureCap:1024, pave:1.1, trees:130, benches:85, lamps:48, blocks:18, seatCols:64, seatRows:40, detail:20}
+  leger: {target:20000, textureCap:512, pave:4.5, trees:26, benches:12, lamps:12, blocks:3, seatCols:16, seatRows:9, detail:3},
+  lourd: {target:150000, textureCap:1024, pave:2.2, trees:72, benches:35, lamps:26, blocks:10, seatCols:40, seatRows:25, detail:8},
+  extreme:{target:500000, textureCap:1024, pave:1.1, trees:140, benches:85, lamps:48, blocks:18, seatCols:64, seatRows:40, detail:20}
 };
 const geometry={format:'m3d-geometry-v1',units:'m',meshes:[
  {id:'unit_box',type:'box',size:[1,1,1],uv:'planar_per_face'},
@@ -47,10 +52,10 @@ const geometry={format:'m3d-geometry-v1',units:'m',meshes:[
  {id:'foliage_canopy',type:'foliage_canopy'}
 ]};
 const cameras={format:'m3d-cameras-v1',cameras:[
- {id:'facade',name:'01 · Façade et mosaïque du personnage',position:[0,3.1,36],target:[0,11.0,-4],fovDegrees:65},
+ {id:'facade',name:'01 · Façade et mosaïque du personnage',position:[0,4.2,62],target:[0,10.7,-4],fovDegrees:66},
  {id:'mosaique',name:'02 · Mosaïque extérieure en détail',position:[12,8.0,19],target:[0,12.25,-3.8],fovDegrees:52},
  {id:'escalier',name:'02 · Escalier continu vers le palais',position:[-17,2.2,29],target:[0,2.6,-4],fovDegrees:66},
- {id:'passerelle',name:'03 · Grand banc ovale et statue',position:[66,2.3,72],target:[37,5.0,52],fovDegrees:67},
+ {id:'passerelle',name:'03 · Grand banc ovale et statue',position:[60,3.2,71],target:[37,4.8,52],fovDegrees:68},
  {id:'bassin',name:'04 · Piscine olympique depuis l’entrée',position:[0,2.4,-10],target:[0,1.0,-34],fovDegrees:73},
  {id:'hall',name:'05 · Hall, escalier et fresque Energetik',position:[-15,10.35,-11.6],target:[-15,10.35,-18.0],fovDegrees:67},
  {id:'hall_ensemble',name:'06 · Hall et escalier - vue d ensemble',position:[-4.5,2.55,-8.0],target:[-15,6.4,-15.4],fovDegrees:61},
@@ -106,8 +111,8 @@ const lighting={format:'m3d-lighting-v1',hour:14.75,
 };
 // Accent lamps physically illuminate the facade around the rooftop sign.
 lighting.lights.push(...Array.from({length:12},(_,i)=>({
-  position:[-13.2+i*2.4,24.0,-1.85],radius:8.0,intensity:1.2,
-  color:i%3===0?[90,240,255]:i%3===1?[255,55,37]:[255,198,109]
+  position:[-13.2+i*2.4,24.0,-1.85],radius:7.0,intensity:.80,
+  color:[255,210,154]
 })));
 if(lighting.lights.length!==171)
   throw new Error('Expected 171 lights (159 interior + 12 rooftop accents)');
@@ -221,6 +226,20 @@ function build(profileName,p){
   B(mural+'/Encadrement','prp_concrete_raw',x,12.25,-3.70,.22,13.45,.26);
  for(const y of [5.54,18.96])
   B(mural+'/Encadrement','prp_concrete_raw',0,y,-3.70,8.5,.20,.26);
+ // Sober architectural enrichment, without altering the original mosaic.
+ // Two horizontal cornices frame the glazed wings but never bridge the entry.
+ for(const side of [-1,1]){
+  const fx=side*31;
+  for(const y of [5.15,18.85])
+   B('Architecture/Palais/Facade/Corniches','prp_concrete_panel',
+     fx,y,-3.72,27,.18,.26);
+  for(const x of [side*20,side*30,side*40]){
+   B('Architecture/Palais/Facade/Pilastres','prp_concrete_raw',
+     x,10.9,-3.75,.23,10.6,.28);
+   B('Architecture/Palais/Facade/Soubassement','prp_terrazzo_floor',
+     x,4.85,-3.70,2.8,.22,.36);
+  }
+ }
  // Main steps extend fully to the building's front door, replacing the
  // old stair flight which stopped fourteen metres short of the façade.
  B('Place/Parvis d’entrée','prp_terrazzo_floor',0,.28,5.75,68,.55,22.5);
@@ -308,6 +327,22 @@ function build(profileName,p){
   B(pool+'/Bancs latéraux','prp_wood_weathered',side*28.0,.88,z,2.6,.18,.55);
   for(const offset of [-1,1])
    B(pool+'/Bancs latéraux/Pieds','prp_steel_painted',side*28.0+offset*.98,.49,z,.11,.80,.43);
+ }
+ // Two simple rows of swimming flags and four narrow access ladders.
+ // These are actual 3D parts rather than a 2D overlay.
+ for(const x of [-16,16]){
+  B(pool+'/Fanions/Fil','prp_steel_painted',x,4.16,-32,.035,.035,25.0);
+  for(let j=0;j<10;j++){
+   const z=-43.5+j*2.50;
+   B(pool+'/Fanions/Tissu',j%2===0?'cse_banner_red':'cse_banner_cream',
+     x,3.96,z,.48,.38,.045);
+  }
+ }
+ for(const x of [-25.72,25.72])for(const z of [-41.5,-22.5]){
+  for(const dz of [-.28,.28])
+   B(pool+'/Echelles/Barres','prp_steel_painted',x,1.0,z+dz,.075,1.95,.08);
+  for(const y of [.30,.62,.94,1.26])
+   B(pool+'/Echelles/Marches','prp_steel_painted',x,y,z,.08,.07,.60);
  }
  // Open lobby at ground level with a clear line of sight into the pool.
  B('Interieur/Hall/Accueil','prp_wood_weathered',-19,1.05,-10,6,1.1,1.2);
@@ -432,41 +467,94 @@ function build(profileName,p){
   // Clear the 2.5 m central statue plinth.
   if(Math.abs(x-cx)<2.7&&Math.abs(z-cz)<2.7)continue;
   const flower=flowers[(i*7+Math.floor(i/7))%flowers.length];
-  const r=.56+.42*rand();
-  // Most flower heads use modest 12x8-patch sphere meshes; only every
-  // seventh cluster uses an organic foliage canopy. This keeps the actual
-  // lightweight scene from becoming a 600k-triangle garden benchmark.
+  const r=.27+.22*rand();
+  // Ground cover first, with flowers as small accents: prevents the
+  // earlier cartoon-like mound of oversized bright spheres.
   if(i%3===0)
-   F('Place/Butte végétalisée/Fleurs et feuillages',flower,
-     x,height+r*.24,z,r,.65+.4*rand(),r);
+   F('Place/Butte végétalisée/Fleurs et feuillages',
+     i%2===0?'cse_leaf_olive':'prp_foliage',
+     x,height+r*.13,z,r*2.4,.48+.32*rand(),r*2.4);
   else
    S('Place/Butte végétalisée/Fleurs et feuillages',flower,
-     x,height+r*.18,z,r,.50+.3*rand(),r);
+     x,height+r*.13,z,r,.30+.17*rand(),r);
+  // Close-up clusters gain visible stems and petals but remain instanced,
+  // rather than receiving high-poly custom flower meshes.
+  if(i%4===0){
+   B('Place/Butte végétalisée/Tiges','cse_leaf_olive',
+     x,height+.18,z,.045,.48,.045);
+   for(let petal=0;petal<4;petal++){
+    const angle=petal*Math.PI/2;
+    S('Place/Butte végétalisée/Petales',flower,
+      x+.17*Math.cos(angle),height+.36,z+.17*Math.sin(angle),
+      .17,.12,.17);
+   }
+   S('Place/Butte végétalisée/Coeurs','cse_flower_gold',
+      x,height+.38,z,.13,.13,.13);
+  }
  }
- // Original Soviet-era monumental composition: civic allegory of Progress,
- // NOT a copy of an identified statue or historical Pripyat installation.
+ // New sober civic monument: TWO slender human silhouettes, NOT the earlier
+ // cuboid figure, oversized torch and spikes. Inspired by period allegories,
+ // explicitly fictional rather than a reconstruction of a Pripyat memorial.
  const monument='Place/Monument soviétique fictif';
- B(monument+'/Socle','prp_concrete_raw',cx,1.54,cz,5.0,1.15,4.7);
- B(monument+'/Socle','prp_terrazzo_floor',cx,2.20,cz,3.55,.18,3.2);
- B(monument+'/Statue','cse_monument_bronze',cx,3.55,cz,1.35,2.15,.82);
- B(monument+'/Statue','cse_monument_bronze',cx-.38,2.59,cz,.46,1.18,.58);
- B(monument+'/Statue','cse_monument_bronze',cx+.40,2.59,cz,.48,1.18,.58);
- S(monument+'/Statue','cse_monument_bronze',cx,5.02,cz,.85,1.05,.82);
- // Raised angular arm pointing to the sky; stepped spheres give a readable
- // silhouette without a fake invisible stress mesh.
- for(let i=0;i<10;i++){
-  const t=i/9;
-  S(monument+'/Bras levé','cse_monument_bronze',
-    cx+.48+t*.9,4.38+t*2.42,cz,.34,.45,.39);
+ B(monument+'/Socle','prp_concrete_raw',cx,1.53,cz,4.5,1.10,3.7);
+ B(monument+'/Socle','prp_terrazzo_floor',cx,2.17,cz,3.70,.20,3.25);
+ const bronze='cse_monument_bronze';
+ function person(label,px,pz,isWoman){
+  const base=monument+'/Silhouettes/'+label;
+  for(const side of [-1,1]){
+   if(isWoman){
+    S(base+'/Jambes',bronze,px+side*.22,2.86,pz,.29,1.12,.33);
+   }else{
+    S(base+'/Jambes',bronze,px+side*.24,2.96,pz,.31,1.28,.37);
+   }
+   S(base+'/Pieds',bronze,px+side*.24,2.37,pz+.14,.39,.20,.56);
+  }
+  if(isWoman){
+   S(base+'/Drape simple',bronze,px,3.48,pz,.94,1.74,.79);
+   S(base+'/Taille',bronze,px,4.20,pz,.58,.48,.55);
+  }else{
+   S(base+'/Bassin',bronze,px,3.64,pz,.78,.58,.67);
+  }
+  S(base+'/Torse',bronze,px,4.60,pz,.80,1.29,.64);
+  S(base+'/Epaules',bronze,px,5.01,pz,1.02,.42,.63);
+  S(base+'/Cou',bronze,px,5.28,pz,.26,.32,.24);
+  S(base+'/Tete',bronze,px,5.63,pz,.51,.70,.48);
+  if(isWoman){
+   S(base+'/Cheveux',bronze,px,5.71,pz-.22,.56,.67,.19);
+   // One arm points gently toward the square.
+   for(let k=0;k<7;k++){
+    const t=k/6;
+    S(base+'/Bras ouvert',bronze,px-.54-1.06*t,4.92-.29*t,pz,
+      .30,.26,.28);
+   }
+  }else{
+   // Heroic raised arm with smooth overlapping bronze sections.
+   for(let k=0;k<11;k++){
+    const t=k/10;
+    S(base+'/Bras levé',bronze,px+.45+.69*t,4.87+1.72*t,pz,
+      .28,.33,.29);
+   }
+  }
+  // The second arm stays relaxed and avoids an awkward cruciform silhouette.
+  for(let k=0;k<5;k++){
+   const t=k/4;
+   S(base+'/Bras bas',bronze,px+(isWoman?.48:-.47)+
+     (isWoman?.16:-.17)*t,4.82-.80*t,pz,
+     .25,.34,.26);
+  }
  }
- B(monument+'/Flambeau','prp_steel_rusted',cx+1.38,7.02,cz,.31,.62,.30);
- S(monument+'/Flamme bronze','cse_flower_gold',cx+1.38,7.65,cz,.58,1.10,.48);
- // Original radial sun rays, geometric reference to 1970s civic sculpture.
- for(let j=0;j<7;j++){
-  const a=(j-3)*.26;
-  B(monument+'/Rayons','cse_monument_bronze',cx+.02+1.3*Math.sin(a),
-    5.68+1.15*Math.cos(a),cz-.44,.12,1.55,.13,a*180/Math.PI);
+ person('Jeunesse',cx-.76,cz+.14,true);
+ person('Science',cx+.73,cz-.11,false);
+ // Small star emblem, restrained in scale and attached to the raised hand.
+ const starX=cx+1.87,starY=7.18,starZ=cz-.11;
+ S(monument+'/Etoile/Disque','cse_flower_gold',starX,starY,starZ,.30,.30,.17);
+ for(let j=0;j<5;j++){
+  const t=j*2*Math.PI/5;
+  S(monument+'/Etoile/Rayons','cse_flower_gold',
+    starX+.36*Math.cos(t),starY+.36*Math.sin(t),starZ,
+    .18,.23,.12);
  }
+ S(monument+'/Socle/Insigne','cse_flower_gold',cx,1.62,cz+1.89,.50,.50,.13);
  // Roof equipment, railings and service frames.
  for(let x=-46;x<=46;x+=3.2)for(let z=-52;z<=-9;z+=6.4){
    B('Architecture/Palais/Toiture techniques','prp_roof_metal',x,19.9,z,1,.6,2.4);
@@ -486,25 +574,12 @@ function build(profileName,p){
  for(const y of [21.15,25.0])
   B(neon+'/Neon rouge','cse_neon_red',0,y,-2.96,29.8,.10,.12);
  for(const x of [-14.9,14.9])
-  B(neon+'/Neon cyan','cse_neon_cyan',x,23.05,-2.94,.13,3.8,.11);
- for(let i=0;i<43;i++){
-  const x=-14.7+i*.7;
-  S(neon+'/Ampoules','cse_neon_gold',x,25.4,-2.91,.21,.21,.18);
+  B(neon+'/Encadrement lumineux','cse_neon_gold',x,23.05,-2.94,.09,3.8,.11);
+ for(let i=0;i<16;i++){
+  const x=-14.4+i*1.92;
+  S(neon+'/Ampoules sobres','cse_neon_gold',x,25.30,-2.91,.14,.14,.12);
  }
- // Three concentric stylized cyan orbit arches above an atomic-star symbol.
- for(const offset of [-.32,0,.32]){
-  for(let j=0;j<19;j++){
-   const angle=Math.PI*j/18;
-   const x=Math.cos(angle)*(4.1+offset);
-   const y=25.2+Math.sin(angle)*(1.15+offset*.28);
-   S(neon+'/Orbite cyan','cse_neon_cyan',x,y,-3.04,.26,.18,.13);
-  }
- }
- S(neon+'/Atome central','cse_neon_gold',0,26.38,-3.02,.38,.38,.2);
- for(let i=0;i<10;i++){
-  const a=2*Math.PI*i/10;
-  S(neon+'/Etoile','cse_neon_red',Math.cos(a)*.8,27.43+Math.sin(a)*.8,-3.02,.33,.33,.19);
- }
+ // Sober sign: the exaggerated orbit arches and rooftop spikes are removed.
  // 5x7 pixel-serif neon font, each letter built from individually illuminated
  // metal/glass modules. Full-width readable Cyrillic « ЭНЕРГЕТИК ».
  const glyph={
@@ -526,10 +601,24 @@ function build(profileName,p){
      B(neon+'/Lettres ЭНЕРГЕТИК','cse_neon_red',
        -11.35+k*2.77+col*.36,24.4-row*.40,-2.82,.30,.34,.18);
  }
- // Two contrasting fascia wings like a period roadside diner.
+ // Two simple roof fabric banners, not historically authenticated signage.
  for(const side of [-1,1]){
-  for(let i=0;i<3;i++)
-   B(neon+'/Ailettes','cse_neon_cyan',side*(16.0+i*.65),23.0+i*.20,-3.0,1.3,.15,.18);
+  const bx=side*36.5;
+  B('Architecture/Palais/Banderoles toit/Mat','prp_steel_painted',
+    bx-2.35,22.2,-3.52,.11,5.0,.11);
+  B('Architecture/Palais/Banderoles toit/Traverse','prp_steel_painted',
+    bx,24.75,-3.52,4.70,.10,.10);
+  for(let strip=0;strip<5;strip++){
+   const z=-3.31+Math.sin(strip*.85+side)*.065;
+   B('Architecture/Palais/Banderoles toit/Tissu',
+     side<0?'cse_banner_red':'cse_banner_cream',
+     bx+(strip-2)*.86,22.55,z,.875,4.05,.065);
+  }
+  S('Architecture/Palais/Banderoles toit/Insigne','cse_flower_gold',
+    bx,22.9,-3.19,.66,.66,.13);
+  for(const dx of [-.43,0,.43])
+   B('Architecture/Palais/Banderoles toit/Insigne','cse_banner_red',
+    bx+dx,22.22,-3.12,.075,.46,.07);
  }
  // Exterior benches removed: the single oval planter seat is the only one.
  for(let i=0;i<Math.min(p.lamps,18);i++){
@@ -542,23 +631,68 @@ function build(profileName,p){
  // but outside the 10-m central access corridor.
  for(const x of [-16,-11,11,16])
   F('Place/Jardins devant entrée','prp_foliage',x,1.15,-1.5,2.1,2.35,2.1);
- // Street trees and green pockets with repeated but distinct crown geometry.
+ // The old tree coordinates were 120 m away from the facade, leaving
+ // the landscaped plaza empty. Put 26 actual branched poplars/birches
+ // near the paths, while keeping the 10 m central entrance unobstructed.
+ const civicTrees=[
+  [-34,12],[-57,18],[-68,22],[-41,33],[-62,41],[-74,51],
+  [-55,65],[-67,73],[-43,79],[-59,89],[-74,97],[-48,102],[-65,112],
+  [34,12],[59,18],[70,24],[61,37],[75,45],[79,66],
+  [82,84],[46,81],[62,92],[73,104],[50,109],[78,60],[67,113]
+ ];
  for(let i=0;i<p.trees;i++){
-   const col=i%2,row=Math.floor(i/2);
-   const x=(col===0?-127:119)+(rand()-.5)*8;
-   const z=-95+(row%38)*5.2+(rand()-.5)*2;
-   const h=9+rand()*7;
-   B('Nature/Arbres','prp_bark_wet',x,h*.35,z,.55,h*.7,.55);
-   // Layered asymmetric crowns and branched silhouettes.
-   for(const side of [-1,1]){
-    B('Nature/Arbres/Branches','prp_bark_wet',x+side*.72,h*.63,z+.32,.20,1.85,.20,side*24);
-    F('Nature/Arbres/Houppier','prp_foliage',x+side*1.55,h*.76,z+side*.6,
-      2.7+rand(),3.5+rand(),2.8+rand());
+  const near=civicTrees[i];
+  const col=i%2,row=Math.floor(i/2);
+  const x=near?near[0]+(rand()-.5)*1.2:
+    (col===0?-1:1)*(82+rand()*12);
+  const z=near?near[1]+(rand()-.5)*1.3:
+    -87+(row%48)*4.6+(rand()-.5)*1.8;
+  const birch=i%3===0;
+  const h=birch?9.3+rand()*3:12.1+rand()*4.8;
+  const bark=birch?'cse_birch_bark':'prp_bark_wet';
+  const canopy=i%5===0?'cse_leaf_gold':
+     i%2===0?'cse_leaf_olive':'prp_foliage';
+  const trunkW=birch?.31:.45;
+  B('Nature/Arbres',bark,x,h*.39,z,trunkW,h*.78,trunkW);
+  // Real articulated branches and asymmetric multilobe foliage geometry.
+  for(let k=0;k<4;k++){
+   const angle=k*Math.PI/2+.25*i;
+   const bx=x+Math.cos(angle)*(birch?.62:.78);
+   const bz=z+Math.sin(angle)*(birch?.62:.78);
+   const branchY=h*(.60+.055*(k%2));
+   B('Nature/Arbres/Branches',bark,bx,branchY,bz,
+     1.55,.16,.16,angle*180/Math.PI);
+   F('Nature/Arbres/Houppier',canopy,
+     x+Math.cos(angle)*(birch?1.65:1.00),
+     h*(birch?.72:.81)+.12*(k%2),
+     z+Math.sin(angle)*(birch?1.55:.85),
+     birch?3.65:2.45, birch?3.2:4.6,birch?3.40:2.55);
+  }
+  F('Nature/Arbres/Houppier',canopy,x,h*(birch?.90:.91),z,
+     birch?3.6:2.75,birch?3.3:5.2,birch?3.4:2.90);
+  if(birch){
+   for(let k=0;k<4;k++){
+    B('Nature/Arbres/Ecorce/bouleau','prp_bark_wet',
+      x+.16,h*(.18+.13*k),z,.025,.09,.21);
    }
-   F('Nature/Arbres/Houppier','prp_foliage',x,h*.91,z,3.6+rand(),4+rand(),3.5+rand());
-   if(p.detail>8){
-    F('Nature/Arbres/Houppier','prp_foliage',x+.9,h*.72,z+.8,3.1,2.6,3.0);
+  }
+  if(p.detail>8)
+   F('Nature/Arbres/Houppier','prp_foliage',
+     x+.40,h*.73,z-.55,3.1,2.8,3.0);
+ }
+ // Low mixed planting along the pavements: no scattered park benches,
+ // and no bushes across the entrance stairway.
+ for(const side of [-1,1]){
+  for(const z of [9,22,78,88]){
+   for(const distance of [36,44,53]){
+    const x=side*(distance+rand()*1.3);
+    F('Place/Jardins/Arbustes','cse_leaf_olive',x,.75,z,
+       1.85,.95+rand()*.7,1.55);
+    S('Place/Jardins/Fleurs basses',
+      ((distance+z)%2===0?'cse_flower_red':'cse_flower_gold'),
+      x+side*.60,.63,z+.65,.34,.23,.34);
    }
+  }
  }
  // The former auditorium seating was removed for the olympic pool.
  // The three upper galleries, staircase and the pool lanes are all physical
