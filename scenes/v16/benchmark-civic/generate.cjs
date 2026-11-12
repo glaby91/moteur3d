@@ -23,6 +23,11 @@ const specials=[
  ['cse_neon_red',[1,.10,.035],.18,'metal'],
  ['cse_neon_cyan',[.02,.86,1],.17,'metal'],
  ['cse_neon_gold',[1,.69,.21],.20,'metal'],
+ ['cse_banner_red',[.52,.115,.10],.91,'fabric'],
+ ['cse_banner_cream',[.77,.71,.59],.87,'fabric'],
+ ['cse_birch_bark',[.80,.79,.73],.89,'wood'],
+ ['cse_leaf_olive',[.28,.43,.19],.94,'foliage'],
+ ['cse_leaf_gold',[.51,.48,.20],.94,'foliage'],
  ['cse_pool_water',[.10,.53,.69],.10,'water']
 ];
 const localMaterials=specials.map(([id,baseColor,roughness])=>({
@@ -37,9 +42,9 @@ const localSets=specials.map(([id,, ,pattern])=>({
  ...(id==='cse_personnage_facade'?{imageFile:'textures/personnage_facade_mosaique.jpg'}:{})
 }));
 const profiles={
-  leger: {target:20000, textureCap:512, pave:4.5, trees:18, benches:12, lamps:12, blocks:3, seatCols:16, seatRows:9, detail:3},
-  lourd: {target:150000, textureCap:1024, pave:2.2, trees:56, benches:35, lamps:26, blocks:10, seatCols:40, seatRows:25, detail:8},
-  extreme:{target:500000, textureCap:1024, pave:1.1, trees:130, benches:85, lamps:48, blocks:18, seatCols:64, seatRows:40, detail:20}
+  leger: {target:20000, textureCap:512, pave:4.5, trees:26, benches:12, lamps:12, blocks:3, seatCols:16, seatRows:9, detail:3},
+  lourd: {target:150000, textureCap:1024, pave:2.2, trees:72, benches:35, lamps:26, blocks:10, seatCols:40, seatRows:25, detail:8},
+  extreme:{target:500000, textureCap:1024, pave:1.1, trees:140, benches:85, lamps:48, blocks:18, seatCols:64, seatRows:40, detail:20}
 };
 const geometry={format:'m3d-geometry-v1',units:'m',meshes:[
  {id:'unit_box',type:'box',size:[1,1,1],uv:'planar_per_face'},
@@ -106,8 +111,8 @@ const lighting={format:'m3d-lighting-v1',hour:14.75,
 };
 // Accent lamps physically illuminate the facade around the rooftop sign.
 lighting.lights.push(...Array.from({length:12},(_,i)=>({
-  position:[-13.2+i*2.4,24.0,-1.85],radius:8.0,intensity:1.2,
-  color:i%3===0?[90,240,255]:i%3===1?[255,55,37]:[255,198,109]
+  position:[-13.2+i*2.4,24.0,-1.85],radius:7.0,intensity:.80,
+  color:[255,210,154]
 })));
 if(lighting.lights.length!==171)
   throw new Error('Expected 171 lights (159 interior + 12 rooftop accents)');
@@ -486,25 +491,12 @@ function build(profileName,p){
  for(const y of [21.15,25.0])
   B(neon+'/Neon rouge','cse_neon_red',0,y,-2.96,29.8,.10,.12);
  for(const x of [-14.9,14.9])
-  B(neon+'/Neon cyan','cse_neon_cyan',x,23.05,-2.94,.13,3.8,.11);
- for(let i=0;i<43;i++){
-  const x=-14.7+i*.7;
-  S(neon+'/Ampoules','cse_neon_gold',x,25.4,-2.91,.21,.21,.18);
+  B(neon+'/Encadrement lumineux','cse_neon_gold',x,23.05,-2.94,.09,3.8,.11);
+ for(let i=0;i<16;i++){
+  const x=-14.4+i*1.92;
+  S(neon+'/Ampoules sobres','cse_neon_gold',x,25.30,-2.91,.14,.14,.12);
  }
- // Three concentric stylized cyan orbit arches above an atomic-star symbol.
- for(const offset of [-.32,0,.32]){
-  for(let j=0;j<19;j++){
-   const angle=Math.PI*j/18;
-   const x=Math.cos(angle)*(4.1+offset);
-   const y=25.2+Math.sin(angle)*(1.15+offset*.28);
-   S(neon+'/Orbite cyan','cse_neon_cyan',x,y,-3.04,.26,.18,.13);
-  }
- }
- S(neon+'/Atome central','cse_neon_gold',0,26.38,-3.02,.38,.38,.2);
- for(let i=0;i<10;i++){
-  const a=2*Math.PI*i/10;
-  S(neon+'/Etoile','cse_neon_red',Math.cos(a)*.8,27.43+Math.sin(a)*.8,-3.02,.33,.33,.19);
- }
+ // Sober sign: the exaggerated orbit arches and rooftop spikes are removed.
  // 5x7 pixel-serif neon font, each letter built from individually illuminated
  // metal/glass modules. Full-width readable Cyrillic « ЭНЕРГЕТИК ».
  const glyph={
@@ -526,10 +518,24 @@ function build(profileName,p){
      B(neon+'/Lettres ЭНЕРГЕТИК','cse_neon_red',
        -11.35+k*2.77+col*.36,24.4-row*.40,-2.82,.30,.34,.18);
  }
- // Two contrasting fascia wings like a period roadside diner.
+ // Two simple roof fabric banners, not historically authenticated signage.
  for(const side of [-1,1]){
-  for(let i=0;i<3;i++)
-   B(neon+'/Ailettes','cse_neon_cyan',side*(16.0+i*.65),23.0+i*.20,-3.0,1.3,.15,.18);
+  const bx=side*36.5;
+  B('Architecture/Palais/Banderoles toit/Mat','prp_steel_painted',
+    bx-2.35,22.2,-3.52,.11,5.0,.11);
+  B('Architecture/Palais/Banderoles toit/Traverse','prp_steel_painted',
+    bx,24.75,-3.52,4.70,.10,.10);
+  for(let strip=0;strip<5;strip++){
+   const z=-3.31+Math.sin(strip*.85+side)*.065;
+   B('Architecture/Palais/Banderoles toit/Tissu',
+     side<0?'cse_banner_red':'cse_banner_cream',
+     bx,22.55-strip*.01,z,4.30,4.05,.065);
+  }
+  S('Architecture/Palais/Banderoles toit/Insigne','cse_flower_gold',
+    bx,22.9,-3.19,.66,.66,.13);
+  for(const dx of [-.43,0,.43])
+   B('Architecture/Palais/Banderoles toit/Insigne','cse_banner_red',
+    bx+dx,22.22,-3.12,.075,.46,.07);
  }
  // Exterior benches removed: the single oval planter seat is the only one.
  for(let i=0;i<Math.min(p.lamps,18);i++){
