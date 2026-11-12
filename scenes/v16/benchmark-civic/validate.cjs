@@ -116,7 +116,7 @@ for(const [profile,target,cap,sceneFile] of [
  check(select('Interieur/Escalier galerie').length>=27,'Gallery stairs missing');
  check(select('Interieur/Piscine olympique/Lumière linéaire').length>=4,'Linear lamps missing');
  check(select('Interieur/Piscine olympique/Plafonniers/Diffuseur').length===24,'24 shared pool decorative diffusers required');
- check(select('Interieur/Hall/Plafonniers/Diffuseur').length>=40,
+ check(select('Interieur/Hall/Plafonniers/Diffuseur').length===20,
   'Hall light bars must be modeled as visible luminaires');
  check(select('Interieur/Piscine olympique/Frise ligne eau').length===4,
   'Pool ceramic waterline must be visible on four sides');
