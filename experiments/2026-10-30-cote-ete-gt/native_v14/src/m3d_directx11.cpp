@@ -1682,7 +1682,33 @@ private:
             D3D11_BUFFER_DESC bd{};bd.ByteWidth=UINT(mesh.vertices.size()*sizeof(GpuVertex));bd.Usage=D3D11_USAGE_IMMUTABLE;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;D3D11_SUBRESOURCE_DATA init{};init.pSysMem=mesh.vertices.data();if(FAILED(device_->CreateBuffer(&bd,&init,&vertices_))){error=L"Allocation de la géométrie dans la mémoire GPU impossible.";return false;}vertexCount_=UINT(mesh.vertices.size());}
         if(!mesh.transparent.empty()){D3D11_BUFFER_DESC bd{};bd.ByteWidth=UINT(mesh.transparent.size()*3*sizeof(GpuVertex));bd.Usage=D3D11_USAGE_DYNAMIC;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;if(FAILED(device_->CreateBuffer(&bd,nullptr,&transparentVertices_))){error=L"Allocation du tampon des surfaces transparentes impossible.";return false;}}
         transparent_=std::move(mesh.transparent);
-        UINT texSize=512;for(const Material& material:scene.mat){if(!material.colorMip.empty())texSize=std::max(texSize,material.colorMip.front().size);else if(!material.mip.empty())texSize=std::max(texSize,material.mip.front().size);}const UINT matCount=UINT(std::max<size_t>(1,scene.mat.size()));
+        // Material textures arrive at different sizes (256..2048), but D3D11
+        // Texture2DArray allocates EVERY slice at the largest width/height.
+        // For 136 materials one 2048px mural used to balloon the three GPU
+        // arrays + CPU upload buffers to more than 12 GiB, starving 8 GiB PCs.
+        UINT texSize=512;
+        for(const Material& material:scene.mat){
+            if(!material.colorMip.empty())
+                texSize=std::max(texSize,material.colorMip.front().size);
+            else if(!material.mip.empty())
+                texSize=std::max(texSize,material.mip.front().size);
+        }
+        const UINT matCount=UINT(std::max<size_t>(1,scene.mat.size()));
+        if(matCount>64u){
+            // 512 MiB maximum for the *combined* albedo (4 B), normal (4 B)
+            // and roughness (1 B) arrays including mipmaps; mirrored staging
+            // memory is also bounded. Do not modify GLB triangles, UVs or
+            // the original 2048px CPU/scene textures.
+            constexpr uint64_t kMaxGpuTextureArrayBytes=512ull*1024ull*1024ull;
+            const auto arrayBytes=[matCount](UINT side)->uint64_t {
+                uint64_t pixels=0;
+                for(UINT level=side;level>0;level>>=1)
+                    pixels+=uint64_t(level)*uint64_t(level);
+                return pixels*uint64_t(matCount)*9ull;
+            };
+            while(texSize>256u && arrayBytes(texSize)>kMaxGpuTextureArrayBytes)
+                texSize>>=1;
+        }
         UINT mipLevels=1;for(UINT size=texSize;size>1;size>>=1)++mipLevels;
         std::vector<std::vector<uint32_t>> mipRgba(size_t(matCount)*mipLevels);
         std::vector<std::vector<uint32_t>> mipNormal(size_t(matCount)*mipLevels);
