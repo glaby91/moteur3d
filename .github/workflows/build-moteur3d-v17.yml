@@ -86,8 +86,29 @@ jobs:
       - name: Validate light complex scene in native V17 loader
         shell: pwsh
         run: |
-          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" "scenes/v16/benchmark-civic/scene.json" 20000
-          if ($LASTEXITCODE -ne 0) { throw "Complex scene fails in native V17 loader" }
+          $log = "build-v17/v344-native-scene-smoke.log"
+          New-Item -ItemType Directory -Force (Split-Path $log -Parent) | Out-Null
+          # Avoid relying on native stderr piping/PowerShell Tee-Object behavior.
+          # Redirect stdout/stderr directly to a file and preserve exit code.
+          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" "scenes/v16/benchmark-civic/scene.json" 20000 1> $log 2>&1
+          $rc = $LASTEXITCODE
+          Write-Host "V17 native smoke exit code: $rc"
+          if (Test-Path $log) {
+            Get-Content $log | ForEach-Object { Write-Host "SCENE_DIAGNOSTIC: $_" }
+          } else {
+            Write-Warning "Native smoke produced no log; using process exit code."
+          }
+          if ($rc -ne 0) { throw "Complex scene fails in native V17 loader; exit $rc" }
+      - name: Verify real 25% primary rays on Pripyat pool 19h CPU and D3D11 Compute
+        shell: pwsh
+        timeout-minutes: 15
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          M3D_V16_GPU_GI_SAMPLES: '0'
+        run: |
+          & "build-v17/Release/v17_primary_quarter_pripyat_smoke.exe" "scenes/v16/benchmark-civic/scene.json" "build-v17/total-simulation/primary-quarter-pripyat"
+          if ($LASTEXITCODE -ne 0) { throw "Native primary-ray 25% Pripyat A/B failed" }
+          Get-Content "build-v17/total-simulation/primary-quarter-pripyat/primary-ray-ab.csv" | ForEach-Object { Write-Host $_ }
       - name: Render actual new civic scene with V17 D3D11 Raster WARP
         shell: pwsh
         env:
@@ -107,19 +128,20 @@ jobs:
           if ($raster.gpuBoxInstances -lt 10) { throw "GPU box instancing not exercised by civic JSON" }
           if ($raster.gpuFoliageInstances -lt 1) { throw "GPU foliage LOD not exercised by civic JSON" }
           if ($raster.gpuDrawCalls -lt 1) { throw "No draw calls measured" }
-      - name: V17 visual QA — render all 9 palace camera views with actual DX11 WARP
+      - name: V17 visual QA — render all 11 palace camera views with actual DX11 WARP
         shell: pwsh
         env:
           M3D_V16_FORCE_WARP: '1'
         run: |
           & "build-v17/Release/moteur3d_v17_benchmark.exe" "scenes/v16/benchmark-civic/scene.json" "build-v17/civic-views" --smoke --all-cameras
-          if ($LASTEXITCODE -ne 0) { throw "Civic 9-camera real WARP preview failed" }
+          if ($LASTEXITCODE -ne 0) { throw "Civic 11-camera real WARP preview failed" }
           $pictures = @(Get-ChildItem "build-v17/civic-views" -Recurse -Filter 'raster_*.png')
-          if ($pictures.Count -ne 9) {
-            throw "Incomplete visual review: expected 9 actual camera PNG, found $($pictures.Count)"
+          if ($pictures.Count -ne 11) {
+            throw "Incomplete visual review: expected 11 actual camera PNG, found $($pictures.Count)"
           }
-          foreach ($camera in @('facade','mosaique','bassin','hall','vestiaires','passerelle','etage')) {
-            $matches = @($pictures | Where-Object { $_.Name -like "raster_$($camera)_*.png" })
+          foreach ($camera in @('facade','mosaique','bassin','hall','vestiaires','passerelle','etage','hall_ensemble','piscine_soir')) {
+            $prefix = 'raster_' + $camera + '_'
+            $matches = @($pictures | Where-Object { $_.Name.StartsWith($prefix) -and $_.Name.Substring($prefix.Length) -match '^[0-9]+x[0-9]+_depth[0-9]+[.]png$' })
             if ($matches.Count -ne 1 -or $matches[0].Length -lt 1200) {
               throw "Missing/empty scene camera image: $camera"
             }
@@ -160,6 +182,30 @@ jobs:
           $pic = Get-ChildItem "build-v17/hall-hour-19" -Recurse -Filter 'raster_hall_*.png' | Select-Object -First 1
           if (!$pic -or $pic.Length -lt 1200) { throw "Missing hall 19h PNG" }
           Copy-Item $pic.FullName "build-v17/hall-hour-19.png"
+      - name: V17.344 image-quality and GPU comparison — fixed 19h cameras
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          $records = @()
+          foreach ($camera in @('bassin','piscine_soir','hall_ensemble')) {
+            foreach ($depth in @(1,3)) {
+              $folder = "build-v17/v344-$camera-rb$depth"
+              & "build-v17/Release/moteur3d_v17_benchmark.exe" "scenes/v16/benchmark-civic/scene.json" $folder --smoke --camera-id $camera --hour 19 --readback-depth $depth
+              if ($LASTEXITCODE -ne 0) { throw "V17.344 benchmark failed for $camera depth $depth" }
+              $image = Get-ChildItem $folder -Recurse -Filter "raster_$($camera)_*.png" | Select-Object -First 1
+              if (!$image -or $image.Length -lt 1200) { throw "Missing $camera PNG" }
+              Copy-Item $image.FullName "build-v17/v344-$camera-rb$depth.png"
+              $summary = Get-ChildItem $folder -Recurse -Filter summary.json | Select-Object -First 1
+              if (!$summary) { throw "Benchmark JSON missing for $camera depth $depth" }
+              $measure = Get-Content $summary.FullName -Raw | ConvertFrom-Json
+              $row = @($measure.cases | Where-Object { $_.backend -eq 'V17_D3D11_Raster' })[0]
+              if (!$row) { throw "Raster measurement missing for $camera depth $depth" }
+              $records += [pscustomobject]@{Camera=$camera;Hour=19;ReadbackDepth=$depth;MedianMs=$row.medianMs;Fps=$row.estimatedFps}
+            }
+          }
+          $records | Export-Csv "build-v17/v344-19h-comparison.csv" -NoTypeInformation
+          $records | Format-Table | Out-String | Write-Host
       - name: Diagnose raster WARP executable before extended tests
         shell: pwsh
         env:
@@ -337,6 +383,9 @@ jobs:
           Copy-Item "build-v17/pool-hour-14.png" "dist-v17/benchmark-civic/pool-14h-WARP.png"
           Copy-Item "build-v17/pool-hour-19.png" "dist-v17/benchmark-civic/pool-19h-WARP.png"
           Copy-Item "build-v17/hall-hour-19.png" "dist-v17/benchmark-civic/hall-19h-WARP.png"
+          New-Item -ItemType Directory -Force "dist-v17/benchmark-civic/v344-evening" | Out-Null
+          Copy-Item "build-v17/v344-*.png" "dist-v17/benchmark-civic/v344-evening/"
+          Copy-Item "build-v17/v344-19h-comparison.csv" "dist-v17/benchmark-civic/v344-evening/"
           New-Item -ItemType Directory -Force "dist-v17/benchmark-civic/render-views-WARP" | Out-Null
           Get-ChildItem "build-v17/civic-views" -Recurse -Filter 'raster_*.png' | ForEach-Object {
             Copy-Item $_.FullName "dist-v17/benchmark-civic/render-views-WARP/"

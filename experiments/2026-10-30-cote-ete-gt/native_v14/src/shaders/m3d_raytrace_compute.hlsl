@@ -39,7 +39,7 @@ cbuffer Frame : register(b0) {
     float3 skyHorizon; float sunStrength;
     float3 sunColor; float skyFillStrength;
     uint lightCount; float sceneLightScale; float indirectFill; uint gpuIndirectSamples;
-    uint adaptiveGI; uint indirectWidth; uint indirectHeight; uint giReserved;
+    uint adaptiveGI; uint indirectWidth; uint indirectHeight; uint primaryQuarter;
 };
 struct GpuLight {
     float3 position; float radius;
@@ -476,11 +476,14 @@ float4 tracePrimary(Ray ray,uint2 pixelCoord) {
 }
 [numthreads(8,8,1)]
 void CSMain(uint3 tid:SV_DispatchThreadID) {
-    if(tid.x>=width||tid.y>=height)return;
-    float2 uv=((float2(tid.xy)+.5f)/float2(width,height))*2.f-1.f;
+    // True quarter-size GPU dispatch: one invocation per sampled primary
+    // pixel, NOT a full-resolution dispatch with 75% inactive lanes.
+    const uint2 pixel=primaryQuarter!=0u?tid.xy*2u:tid.xy;
+    if(pixel.x>=width||pixel.y>=height)return;
+    const float2 uv=((float2(pixel)+.5f)/float2(width,height))*2.f-1.f;
     Ray ray;ray.origin=eye;
     // Matches CPU: tanHalfFov is HORIZONTAL, vertical half-FOV = tanHalfFov/aspect.
     ray.direction=normalize(forward+right*uv.x*tanHalfFov-
                             up*uv.y*(tanHalfFov/aspect));
-    Output[tid.xy]=float4(encodeHdr(tracePrimary(ray,tid.xy).rgb),1.f);
+    Output[pixel]=float4(encodeHdr(tracePrimary(ray,pixel).rgb),1.f);
 }

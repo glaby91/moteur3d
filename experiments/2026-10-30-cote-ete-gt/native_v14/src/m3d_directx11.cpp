@@ -236,6 +236,15 @@ float4 PSMain(VSOut i):SV_TARGET {
     // derivatives at tile boundaries and forced inappropriate mip levels.
     float3 base = albedo.Sample(wrapSampler, float3(i.uv, i.mat)).rgb;
     float3 normal = normalize(i.n);
+    const bool poolWater=materialEmission[i.mat].a < -0.5;
+    // Dedicated animated-looking standing waves (static in world space) only on
+    // the new translucent pool water. Avoid extra trig on every other material.
+    if(poolWater && normal.y>0.75){
+        float waveA=sin(i.world.x*2.1+i.world.z*.75);
+        float waveB=cos(i.world.z*2.8-i.world.x*.45);
+        normal=normalize(normal+float3(.028*waveA,0,.025*waveB));
+        base=lerp(base,float3(.055,.38,.55),.62);
+    }
 #if !defined(M3D_V17_OPTIMIZE_PIXELS)
     float3 dpdx = ddx(i.world), dpdy = ddy(i.world);
     float2 duvdx = ddx(i.uv), duvdy = ddy(i.uv);
@@ -290,7 +299,7 @@ float4 PSMain(VSOut i):SV_TARGET {
     }
     float3 color = base*(ambientEnergy+sunEnergy)
                  + base*materialGlow[i.mat].rgb*materialGlow[i.mat].a;
-    color += materialEmission[i.mat].rgb * materialEmission[i.mat].a;
+    color += materialEmission[i.mat].rgb * max(materialEmission[i.mat].a,0.0);
     color += float3(28.0, 13.0, 4.0) / 255.0 * (1.0 - diffuseTerms.w);
     float3 viewDir = normalize(eye - i.world);
     float3 reflectedLight = reflect(-normalize(lightDir), normal);
@@ -392,6 +401,17 @@ float4 PSMain(VSOut i):SV_TARGET {
         float adjusted=luminance*colorControls.y;
         float compressed=adjusted/(1.0+.82*max(adjusted-.63,0.0));
         color=positive*(compressed/max(luminance,0.000001));
+    }
+    if(poolWater){
+        // Grazing-angle Fresnel, soft cool highlights and bottom visibility
+        // through the transparent polygon. No DXR/SSR dependency.
+        const float incidence=1.0-saturate(dot(normal,viewDir));
+        const float fresnelWater=.02+.98*pow(incidence,5.0);
+        float stripe=pow(saturate(.5+.5*sin(i.world.x*1.4+i.world.z*.37)),14.0);
+        color=lerp(color,float3(.27,.61,.73),.14+fresnelWater*.32);
+        color+=float3(.19,.32,.37)*stripe*(.025+.13*fresnelWater);
+        const float opacity=lerp(.30,.78,saturate(fresnelWater*1.75));
+        return float4(color,opacity);
     }
     return float4(color, materialOpacity[i.mat].x);
 }
@@ -707,6 +727,13 @@ public:
             else if(name=="orange"){diffuseBase=.34f;diffuseDay=.43f;diffuseDirect=.26f;}
             else if(carPaint){diffuseBase=.32f;diffuseDay=.42f;diffuseDirect=.32f;}
             else if(raptureSurface){diffuseBase=.42f;diffuseDay=.28f;diffuseDirect=.50f;}
+            else if(name=="prp_tile_ceramic" || name=="prp_plaster_pale"){
+                // Neutral, slightly stronger diffuse fill in enclosed spaces.
+                diffuseBase=.47f;diffuseDay=.37f;diffuseDirect=.38f;
+            }
+            else if(name=="prp_concrete_panel"){
+                diffuseBase=.38f;diffuseDay=.37f;diffuseDirect=.44f;
+            }
             if(name=="cse_pool_strip")strength=.38f; // subdued linear luminaire
             else if(name=="lamp")strength=.45f+1.05f*lampFactor;
             else if(name=="led")strength=1.35f*lampFactor;
@@ -716,6 +743,13 @@ public:
             if(name=="cse_pool_strip"){
                 emissionR=.83f;emissionG=.91f;emissionB=1.f;
                 emissionStrength=.24f; // do not overexpose concrete
+            }
+            else if(name=="cse_pool_water"){
+                // Negative emission sentinel identifies exactly this custom
+                // scene-local water material in the pixel shader.
+                emissionStrength=-1.f;
+                spec=.85f;power=58.f;
+                diffuseBase=.25f;diffuseDay=.26f;diffuseDirect=.18f;
             }
             else if(name=="cse_neon_red"){
                 emissionR=1.f;emissionG=.09f;emissionB=.035f;emissionStrength=1.65f;

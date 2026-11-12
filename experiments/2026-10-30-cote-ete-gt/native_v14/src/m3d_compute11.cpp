@@ -1,4 +1,5 @@
 #include "m3d_engine.h"
+#include "m3d_primary_quarter.h"
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -25,7 +26,7 @@ struct alignas(16) GpuMaterial { float albedo[3]; float roughnessScale; float me
 struct alignas(16) GpuLight { float position[3];float radius;float color[3];float intensity; };
 static_assert(sizeof(GpuLight)==32, "GPU point light layout mismatch");
 static_assert(sizeof(GpuMaterial)==32, "GPU material buffer layout mismatch");
-struct alignas(16) Params { float eye[3],tanHalf,forward[3],aspect,right[3],nearPlane,up[3],farPlane; uint32_t width,height,nodeCount,triangleCount,rootIndex,maxTraversal,materialCount,textureBaseSize; float sunDirection[3],ambientStrength; float skyZenith[3],skyStrength; float skyHorizon[3],sunStrength; float sunColor[3],skyFillStrength; uint32_t lightCount;float sceneLightScale,indirectFill;uint32_t gpuIndirectSamples;uint32_t adaptiveGI,indirectWidth,indirectHeight,giReserved; };
+struct alignas(16) Params { float eye[3],tanHalf,forward[3],aspect,right[3],nearPlane,up[3],farPlane; uint32_t width,height,nodeCount,triangleCount,rootIndex,maxTraversal,materialCount,textureBaseSize; float sunDirection[3],ambientStrength; float skyZenith[3],skyStrength; float skyHorizon[3],sunStrength; float sunColor[3],skyFillStrength; uint32_t lightCount;float sceneLightScale,indirectFill;uint32_t gpuIndirectSamples;uint32_t adaptiveGI,indirectWidth,indirectHeight,primaryQuarter; };
 static_assert(sizeof(Params)%16==0, "GPU constant buffer must be aligned");
 void v3(float* dst,V v){dst[0]=v.x;dst[1]=v.y;dst[2]=v.z;}
 template<class T> bool makeSrv(ID3D11Device* d,const std::vector<T>& values,ComPtr<ID3D11ShaderResourceView>& srv){
@@ -413,6 +414,7 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
  v3(params.forward,cam.f);params.aspect=cam.aspect;v3(params.right,cam.r);
  params.nearPlane=.0001f;v3(params.up,cam.u);params.farPlane=100000.f;
  params.width=uint32_t(w);params.height=uint32_t(h);
+ params.primaryQuarter=primaryQuarterEnabled()?1u:0u;
  params.nodeCount=c.nodeCount;params.triangleCount=c.triangleCount;
  params.rootIndex=uint32_t(scene.root);
  params.maxTraversal=uint32_t(std::min<size_t>(1000000,scene.node.size()*4+1));
@@ -519,7 +521,12 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
  c.ctx->CSSetShaderResources(0,8,sceneSrvs);
  ID3D11UnorderedAccessView* mainViews[3]={c.uav.Get(),nullptr,nullptr};
  c.ctx->CSSetUnorderedAccessViews(0,3,mainViews,nullptr);
- c.ctx->Dispatch(UINT((w+7)/8),UINT((h+7)/8),1);
+ // Quarter mode submits one GPU thread per real ray: an even-even
+ // full-resolution pixel. All unsampled texels are overwritten on CPU
+ // during the nearest-donor reconstruction after readback.
+ const UINT rayWidth=params.primaryQuarter?UINT((w+1)/2):UINT(w);
+ const UINT rayHeight=params.primaryQuarter?UINT((h+1)/2):UINT(h);
+ c.ctx->Dispatch((rayWidth+7u)/8u,(rayHeight+7u)/8u,1u);
  c.ctx->CSSetUnorderedAccessViews(0,3,nullUavs,nullptr);
  c.ctx->CSSetShaderResources(0,8,nullSrvs);
  ID3D11SamplerState* noSampler=nullptr;
@@ -538,6 +545,9 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
  for(int y=0;y<h;++y){
   const uint8_t* row=static_cast<const uint8_t*>(mapped.pData)+size_t(y)*mapped.RowPitch;
   for(int x=0;x<w;++x){
+   // Quarter dispatch leaves three texels per 2x2 quad unwritten.
+   // Ignore their stale GPU memory; CPU reconstruction fills them.
+   if(params.primaryQuarter && ((x&1)!=0||(y&1)!=0))continue;
    const uint8_t* p=row+size_t(x)*4;
    pixels[size_t(y)*w+x]=0xff000000u|
                            (uint32_t(p[0])<<16)|
@@ -546,6 +556,9 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
   }
  }
  c.ctx->Unmap(c.staging.Get(),0);
+ if(params.primaryQuarter)reconstructQuarterPixels(pixels,w,h);
+ stats.primarySamples=params.primaryQuarter?primaryQuarterSampleCount(w,h):
+                      uint64_t(w)*uint64_t(h);
  stats.gpu=true;
  stats.ms=std::chrono::duration<double,std::milli>(
               std::chrono::steady_clock::now()-begin).count();
