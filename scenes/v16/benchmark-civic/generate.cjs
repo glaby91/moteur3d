@@ -227,8 +227,8 @@ function build(profileName,p){
    if(level>0&&Math.abs(x)<5.0)continue; // central solid mosaic wall
    if(Math.abs(x)>22&&k%4===0)continue;
    B('Architecture/Palais/Verriere','prp_window_glass',x,y,-4.03,3.04,3.65,.085);
-   B('Architecture/Palais/Chassis','prp_window_frame',x,y,-3.98,.10,3.8,.14);
-   B('Architecture/Palais/Chassis','prp_window_frame',x,level*4.15+4.42,-3.95,3.4,.12,.15);
+   B('Architecture/Palais/Chassis','prp_window_frame',x,y,-3.88,.16,3.92,.18);
+   B('Architecture/Palais/Chassis','prp_window_frame',x,level*4.15+4.42,-3.87,3.40,.16,.18);
   }
  }
  // User-provided costume figure, on the OUTER facade only.
@@ -654,7 +654,7 @@ save('materials/pripyat-reuse.json',{format:'m3d-materials-v1',
 for(const name of selected){
  const p=profiles[name];
  const sets=[...catalog.sets,...localSets].map(v=>Object.assign({},v,{
-  resolution:Math.min(p.textureCap,v.resolution)}));
+  resolution:v.imageFile?2048:Math.min(p.textureCap,v.resolution)}));
  save('pbr/pripyat-reuse-'+name+'.json',{format:'m3d-pbr-v1',library:'Pripyat-V17',mipmaps:'auto',
    textureResolutionTarget:p.textureCap,channels:['albedo','normal','roughness'],
    note:'22 original PBR recipes unchanged. Energetik hall image and supplied exterior portrait use separate scene-only JPEGs.',
