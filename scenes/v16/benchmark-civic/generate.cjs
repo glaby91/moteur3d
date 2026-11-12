@@ -53,19 +53,53 @@ const cameras={format:'m3d-cameras-v1',cameras:[
  {id:'vestiaires',name:'07 · Vestiaires et douches RDC',position:[-33.5,2.15,-35.4],target:[-43.5,2,-36],fovDegrees:68},
  {id:'vue_haut',name:'07 · Vue aérienne du bâtiment unique',position:[95,68,105],target:[15,5,11],fovDegrees:67}
 ]};
+// V17.324: ~10x more independent light sources, not 10x the power of each bulb.
+// Designed for night/evening exploration at 19h. Keep under the D3D11
+// FrameConstants lightPositionRadius[256] and lightColorIntensity[256] limit.
+const indoorFixtures=[
+  // Swimming pool: five longitudinal rows, 11 fixtures per row (55).
+  ...[-44,-38,-32,-26,-20].flatMap(z=>
+    Array.from({length:11},(_,i)=>({
+      position:[-23+i*4.6,16.55,z],
+      radius:8.8,intensity:1.45,color:[246,249,255]
+    }))
+  ),
+  // Main hall and the monumental stairs: 9 x 4 ceiling modules (36).
+  ...[-7.5,-10.5,-13.5,-16.5].flatMap(z=>
+    Array.from({length:9},(_,i)=>({
+      position:[-32+i*8,7.45,z],
+      radius:9.5,intensity:1.25,color:[249,247,241]
+    }))
+  ),
+  // Three upper levels, both lateral galleries (54).
+  ...[4.5,9,13.5].flatMap(y=>
+    [-38,38].flatMap(x=>
+      Array.from({length:9},(_,i)=>({
+        position:[x,y+2.1,-50+i*5],
+        radius:7.4,intensity:1.05,color:[245,247,252]
+      }))
+    )
+  ),
+  // Locker rooms and service areas on both sides (12).
+  ...[-42,42].flatMap(x=>
+    [-47,-41,-35,-29,-23,-17].map(z=>({
+      position:[x,3.55,z],
+      radius:7.5,intensity:1.10,color:[244,248,255]
+    }))
+  )
+];
 const lighting={format:'m3d-lighting-v1',hour:14.75,
- sun:{direction:[-.68,.65,-.35],intensity:3.1},ambient:{color:[.63,.73,.91],intensity:.39},
- lights:[
-  {position:[-5,13,-12],radius:19,intensity:1.4,color:[245,247,252]},
-  {position:[8,13,-46],radius:20,intensity:1.65,color:[245,246,250]},
-  // Neutral artificial illumination is maintained at 19h, independently of sun.
-  ...Array.from({length:7},(_,i)=>[-24+i*8]).flatMap(x=>[
-   {position:[x,15,-19],radius:15,intensity:1.65,color:[244,247,255]},
-   {position:[x,15,-43],radius:15,intensity:1.65,color:[244,247,255]}
-  ]),
-  {position:[-40,3.95,-36],radius:10,intensity:.63,color:[235,239,243]},
-  {position:[44,3.85,-48],radius:9,intensity:.48,color:[235,239,243]}
- ]};
+  sun:{direction:[-.68,.65,-.35],intensity:3.1},
+  ambient:{color:[.63,.73,.91],intensity:.39},
+  lights:[
+    // Highlight art walls without altering the artwork's color data.
+    {position:[-15,11,-14.8],radius:7.5,intensity:1.2,color:[255,251,244]},
+    {position:[0,14,-7],radius:10,intensity:1.0,color:[255,250,244]},
+    ...indoorFixtures
+  ]
+};
+if(lighting.lights.length!==159)
+  throw new Error('Expected 159 independent indoor lights, got '+lighting.lights.length);
 const environment={format:'m3d-environment-v1',terrain:'finite',units:'m',
  note:'Fictional, explorable single modernist palace with olympic pool, a copied real Energetik mosaic artwork asset, and original Soviet-inspired monument; NOT historical reconstruction.'};
 function round(n){return Math.round(n*1000)/1000;}
