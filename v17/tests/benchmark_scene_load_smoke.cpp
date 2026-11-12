@@ -51,6 +51,25 @@ int main(int argc,char** argv){
     if(facade[0].p==image[0].p){
         qCritical()<<"Outdoor portrait and hall fresco are the same image";return 12;
     }
+    // A mural must map its entire image to a face, never tile it by meters.
+    const auto countFullUvFaces=[&](int materialId){
+        int full=0;
+        for(const auto& triangle:built.runtime.renderScene.obj){
+            if(int(triangle.mat)!=materialId)continue;
+            const auto inRange=[](float v){return v>=-0.001f&&v<=1.001f;};
+            if(!inRange(triangle.uv0.x)||!inRange(triangle.uv0.y)||
+               !inRange(triangle.uv1.x)||!inRange(triangle.uv1.y)||
+               !inRange(triangle.uv2.x)||!inRange(triangle.uv2.y))continue;
+            if((triangle.uv1.x==1.f||triangle.uv2.x==1.f)&&
+               (triangle.uv1.y==1.f||triangle.uv2.y==1.f))full++;
+        }
+        return full;
+    };
+    if(countFullUvFaces(artIndex)<2||countFullUvFaces(facadeIndex)<2){
+        qCritical()<<"Art mural faces must use non-repeating 0..1 UVs";
+        return 13;
+    }
+    qInfo()<<"V17.324 both mural UV layouts cover their full image:";
     qInfo()<<"V17.323 two distinct image assets decoded:"
         <<"Energetik"<<image[0].p.size()<<"texels"<<colours.size()<<"colors;"
         <<"facade"<<facade[0].p.size()<<"texels"<<facadeColours.size()<<"colors";
