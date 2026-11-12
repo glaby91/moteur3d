@@ -476,17 +476,14 @@ float4 tracePrimary(Ray ray,uint2 pixelCoord) {
 }
 [numthreads(8,8,1)]
 void CSMain(uint3 tid:SV_DispatchThreadID) {
-    if(tid.x>=width||tid.y>=height)return;
-    // Skip BVH traversal and all PBR/GI work for 3/4 of primary pixels.
-    // Alpha 0 marks missing pixels for post-readback reconstruction.
-    if(primaryQuarter!=0u && ((tid.x&1u)!=0u||(tid.y&1u)!=0u)) {
-        Output[tid.xy]=float4(0.f,0.f,0.f,0.f);
-        return;
-    }
-    float2 uv=((float2(tid.xy)+.5f)/float2(width,height))*2.f-1.f;
+    // True quarter-size GPU dispatch: one invocation per sampled primary
+    // pixel, NOT a full-resolution dispatch with 75% inactive lanes.
+    const uint2 pixel=primaryQuarter!=0u?tid.xy*2u:tid.xy;
+    if(pixel.x>=width||pixel.y>=height)return;
+    const float2 uv=((float2(pixel)+.5f)/float2(width,height))*2.f-1.f;
     Ray ray;ray.origin=eye;
     // Matches CPU: tanHalfFov is HORIZONTAL, vertical half-FOV = tanHalfFov/aspect.
     ray.direction=normalize(forward+right*uv.x*tanHalfFov-
                             up*uv.y*(tanHalfFov/aspect));
-    Output[tid.xy]=float4(encodeHdr(tracePrimary(ray,tid.xy).rgb),1.f);
+    Output[pixel]=float4(encodeHdr(tracePrimary(ray,pixel).rgb),1.f);
 }
