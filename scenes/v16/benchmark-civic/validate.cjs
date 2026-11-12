@@ -235,8 +235,14 @@ for(const [profile,target,cap,sceneFile] of [
   'New two-figure monumental sculpture incomplete');
  check(select('Place/Monument soviétique fictif/Silhouettes').length>=45,
   'Two detailed figures are required, not the old block statue');
- check(select('Place/Monument soviétique fictif/Silhouettes').length>=120,
-  'Reconstructed figures need articulated anatomy, hands and facial details');
+ check(select('Place/Monument soviétique fictif/Silhouettes').length>=48,
+  'Both reconstructed figures need sculpted body, hands and facial details');
+ check(select('Place/Monument soviétique fictif/Silhouettes/Jeunesse/Torse sculpté').length===1&&
+   select('Place/Monument soviétique fictif/Silhouettes/Science/Torse sculpté').length===1,
+   'Continuous ellipsoid torso must replace the ribbed multi-slice statues');
+ check(select('Place/Monument soviétique fictif/Silhouettes/Torse galbé').length===0&&
+   select('Place/Monument soviétique fictif/Silhouettes/Jeunesse/Drapé vertical').length<=4,
+   'Obsolete accordioned figure geometry returned');
  check(select('Place/Monument soviétique fictif/Silhouettes/Jeunesse/Visage').length>=1&&
    select('Place/Monument soviétique fictif/Silhouettes/Science/Visage').length>=1,
   'Both sculpted facial volumes are required');
