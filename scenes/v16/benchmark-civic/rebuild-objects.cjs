@@ -20,85 +20,49 @@ function rebuildMonument({B,S,cx,cz}) {
   B(root+'/Socle/Joint', 'prp_steel_rusted', cx,1.74,cz+1.939,3.42,.045,.025);
   S(root+'/Socle/Medaille','cse_neon_gold',cx,1.52,cz+1.965,.35,.35,.11);
 
-  // Lofts of ellipsoids produce more natural tapered anatomical transitions
-  // than the old one-cuboid-per-limb silhouette. Each point is a REAL mesh.
-  function taperedPath(group,pts,a,b,sub=3) {
-    for(let i=0;i<pts.length-1;i++){
-      const p=pts[i],q=pts[i+1];
-      for(let k=0;k<sub;k++){
-        const t=(k+.5)/sub;
-        const x=p[0]+(q[0]-p[0])*t,y=p[1]+(q[1]-p[1])*t,z=p[2]+(q[2]-p[2])*t;
-        const taper=1-.30*(i+t)/(pts.length-1);
-        const step=Math.hypot(q[0]-p[0],q[1]-p[1],q[2]-p[2])/sub;
-        S(group,bronze,x,y,z,a*taper,Math.max(b,step*1.6),a*.94*taper);
-      }
-    }
-  }
-  // Figure left in a draped tunic, right wearing a simpler period jacket.
+  // Version 2 after *real* 1366x768 render inspection:
+  // The earlier small ellipsoid chain looked like an accordion. Use few,
+  // continuous, smoothly overlapping major volumes for readable sculpture.
   function figure(id,x,z,draped) {
     const p=root+'/Silhouettes/'+id;
-    const lean=draped?-.08:.10;
-    const legHeight=draped?1.54:1.68;
-    const legBase=2.30, hipY=3.95, neckY=5.41, headY=5.79;
     for(const side of [-1,1]){
-      const lx=x+side*.24;
-      // Anatomical knees/ankles follow a continuous joined axis.
-      taperedPath(p+'/Mollets',[
-        [lx,legBase+.21,z+.16],[lx+side*.05,legBase+.85,z+.07],
-        [lx-side*.02,legBase+legHeight-.07,z-.04]
-      ],.37,.22,4);
-      S(p+'/Genoux',bronze,lx+side*.04,legBase+.86,z+.06,.38,.42,.40);
-      S(p+'/Chaussures',bronze,lx+side*.05,legBase+.10,z+.27,.40,.20,.77);
+      const lx=x+side*.23;
+      S(p+'/Mollets',bronze,lx,2.80,z+.08,.32,.96,.34);
+      S(p+'/Cuisses',bronze,lx,3.42,z-.04,.42,1.00,.41);
+      S(p+'/Genoux',bronze,lx,3.08,z+.03,.32,.31,.34);
+      S(p+'/Chaussures',bronze,lx,2.30,z+.25,.42,.20,.71);
     }
-    S(p+'/Bassin',bronze,x,hipY,z,.92,.72,.70);
-    // Pelvis, torso and shoulders are subdivided to remove coarse steps.
-    const torso=[
-       [3.95,.78,.67],[4.16,.77,.62],[4.36,.75,.59],
-       [4.56,.79,.57],[4.77,.85,.61],[4.94,.94,.62],[5.09,.96,.64]
-    ];
-    for(const [i,v] of torso.entries())
-      S(p+'/Torse galbé',bronze,x+lean*i/6,v[0],z,v[1],.30,v[2]);
-    S(p+'/Epaules',bronze,x+lean,5.14,z,1.10,.35,.61);
-    S(p+'/Cou',bronze,x+lean,5.46,z,.29,.38,.30);
-    S(p+'/Visage',bronze,x+lean,headY,z+.045,.50,.77,.50);
-    // Nose, cheekbones and hair profile give recognisable facial direction.
-    S(p+'/Visage/Nez',bronze,x+lean,headY-.06,z+.305,.14,.23,.21);
-    for(const side of [-1,1])
-      S(p+'/Visage/Pommettes',bronze,x+lean+side*.17,headY-.07,z+.23,.19,.18,.17);
-    S(p+'/Visage/Menton',bronze,x+lean,headY-.32,z+.17,.33,.15,.28);
+    S(p+'/Bassin',bronze,x,3.79,z,.86,.64,.69);
+    S(p+'/Torse sculpté',bronze,x,4.57,z,.83,1.32,.61);
+    S(p+'/Epaules',bronze,x,5.02,z,.99,.32,.64);
+    S(p+'/Cou',bronze,x,5.32,z,.26,.33,.29);
+    S(p+'/Visage',bronze,x,5.65,z+.045,.49,.73,.47);
+    S(p+'/Visage/Nez',bronze,x,5.58,z+.31,.13,.19,.20);
+    S(p+'/Visage/Menton',bronze,x,5.35,z+.15,.32,.12,.27);
     if(draped){
-      S(p+'/Coiffure',bronze,x+lean,headY+.27,z-.12,.58,.32,.46);
-      for(let i=0;i<7;i++){
-        const t=i/6, xx=x+(.66*t-.33),zz=z+.28;
-        S(p+'/Plis tunique',bronze,xx,3.89-.21*(i%3),zz,
-          .24,.97+.22*(i%2),.25);
-      }
-      // One arm opens to the landscape at a gentle downward angle.
-      taperedPath(p+'/Bras ouvert',[
-        [x-.55,5.11,z],[x-.95,4.93,z+.01],
-        [x-1.36,4.79,z+.035],[x-1.70,4.70,z+.04]
-      ],.31,.22,4);
-      S(p+'/Main',bronze,x-1.77,4.67,z+.055,.27,.19,.31);
-      taperedPath(p+'/Bras repos',[
-        [x+.56,5.12,z],[x+.70,4.75,z+.10],[x+.57,4.31,z+.21]
-      ],.29,.18,3);
+      // Single flowing skirt instead of rows of horizontal ribbed beads.
+      S(p+'/Tunique',bronze,x,3.74,z,.99,1.13,.76);
+      for(const t of [-.34,0,.34])
+        S(p+'/Drapé vertical',bronze,x+t,3.59,z+.25,.20,.75,.20);
+      S(p+'/Coiffure',bronze,x,5.91,z-.12,.54,.25,.43);
+      // Left arm opens gently toward the garden with two smooth tapered
+      // long ellipsoids, not seven mechanical beads.
+      S(p+'/Bras ouvert',bronze,x-.84,4.91,z,.79,.28,.29);
+      S(p+'/Avant-bras ouvert',bronze,x-1.42,4.77,z+.04,.72,.24,.27);
+      S(p+'/Main ouverte',bronze,x-1.83,4.74,z+.045,.20,.19,.27);
+      S(p+'/Bras bas',bronze,x+.57,4.67,z,.26,.92,.29);
+      S(p+'/Main basse',bronze,x+.60,4.23,z+.08,.20,.27,.23);
     }else{
-      // Coat folds read as vertical soft longitudinal ridges.
-      for(let i=0;i<7;i++){
-        const t=i/6;
-        S(p+'/Veste plis',bronze,x-.37+t*.74,4.23,z+.335,
-          .16,.66+.12*(i%2),.17);
-      }
-      // The raised arm joins the shoulder to a five pointed star;
-      // 4× interpolation removes the former chain of disconnected spheres.
-      taperedPath(p+'/Bras de science',[
-        [x+.58,5.12,z],[x+.82,5.42,z],[x+.95,5.86,z],
-        [x+1.07,6.35,z],[x+1.16,6.64,z]
-      ],.31,.20,4);
-      S(p+'/Main',bronze,x+1.18,6.72,z,.26,.34,.27);
-      taperedPath(p+'/Bras repos',[
-        [x-.55,5.11,z],[x-.75,4.76,z+.04],[x-.78,4.35,z+.10]
-      ],.29,.20,3);
+      S(p+'/Veste',bronze,x,4.44,z+.03,.90,1.38,.68);
+      for(const offset of [-.32,.32])
+        S(p+'/Revers',bronze,x+offset,4.72,z+.33,.16,.54,.14);
+      // A readable raised gesture: shoulder, upper arm, forearm, hand.
+      S(p+'/Bras haut',bronze,x+.66,5.45,z,.28,.91,.29);
+      S(p+'/Avant-bras levé',bronze,x+1.01,6.20,z,.25,1.28,.27);
+      S(p+'/Coude',bronze,x+.84,5.78,z,.29,.28,.29);
+      S(p+'/Main étoile',bronze,x+1.16,6.75,z,.23,.28,.24);
+      S(p+'/Bras bas',bronze,x-.62,4.70,z,.27,.89,.27);
+      S(p+'/Main basse',bronze,x-.70,4.27,z+.07,.20,.25,.23);
     }
   }
   figure('Jeunesse',cx-.79,cz+.08,true);
@@ -178,14 +142,14 @@ function rebuildTrees({B,S,F,rand,p}) {
     const h=birch?9.5+rand()*2.4:12.1+rand()*4;
     const bark=birch?'cse_birch_bark':'prp_bark_wet';
     const leaf=(i%7===0)?'cse_leaf_gold':(i%3===0?'prp_foliage':'cse_leaf_olive');
-    const w=birch?.28:.45;
+    const w=birch?.23:.31;
     // Central shaft is vertical and tapered with short real wooden sections,
     // not simply one box with three spherical leaves.
     B('Nature/Arbres',bark,x,h*.40,z,w,h*.8,w);
     for(let k=0;k<4;k++){
       const yy=h*(.43+k*.125);
       B('Nature/Arbres/Tronc/Noeuds',bark,x,yy,z,
-        w*(.91-k*.12),h*.16,w*(.91-k*.12));
+        w*(.90-k*.14),h*.16,w*(.91-k*.12));
     }
     if(birch){
       for(let k=0;k<8;k++){
