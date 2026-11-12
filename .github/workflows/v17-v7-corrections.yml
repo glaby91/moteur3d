@@ -67,6 +67,9 @@ jobs:
           assert t["retainedRealTrees"]==52
           assert len(t["pitRadiiM"])==26
           assert t["hillHeightM"]==2.7
+          assert t["frontStairWidthM"]==68.2 and t["lateralParvisTransitions"]==8
+          assert sum(o["parent"]=="Place/Parvis/Transitions laterales sans trou" for o in a)==8
+          assert all(o["size"][0]==68.2 for o in a if o["parent"]=="Place/Escalier monumental")
           assert t["frescoTiles"]==8 and abs(t["frescoAspectRatio"]-2048/930)<1e-6
           assert len([o for o in a if o["parent"].endswith("/Garde-corps continus")])==4
           assert not any(o["parent"] in ("Place/Jardins/Arbustes","Place/Jardins devant entrée") for o in a)

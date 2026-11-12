@@ -196,6 +196,22 @@ def build(root):
     remove(lambda o:o["parent"]=="V7/Removed pavement")
     report["retessellatedPavementSections"]=revised
 
+    # 4b. Restore safe lateral connections from the 55cm-high front parvis
+    # to the surrounding plaza. The former 61m staircase ended before the
+    # 68m parvis width: visitors near the outside columns could fall 51cm.
+    for o in objs:
+        if o["parent"]=="Place/Escalier monumental":
+            o["size"][0]=68.2 # full width of raised parvis, never 61m
+    for side in (-1,1):
+        for i in range(4):
+            xx=side*(34.55+1.05*i)
+            top=.555-.102*(i+1)
+            objs.append(box_inst("v7_parvis_side_%s_%02d"%(side,i),
+                "Place/Parvis/Transitions laterales sans trou",xx,top-.085,5.75,
+                1.14,.17,22.65,"prp_terrazzo_floor"))
+    report["frontStairWidthM"]=68.2
+    report["lateralParvisTransitions"]=8
+
     # 5. Stronger hill and authentic flowers conform to its new profile.
     OLD_H=1.2;NEW_H=2.7;BASE=.16
     def oldheight(x,z):
