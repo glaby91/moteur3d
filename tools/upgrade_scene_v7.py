@@ -578,6 +578,17 @@ def build(root):
         position=[27.7,2.10,-16.5],target=[0,9.0,-54.14],fovDegrees=73)
     cams["cameras"].append(dict(id="v7_pool_fresco",name="V7 · Fresque piscine panoramique",
         position=[0,3.3,-13],target=[0,9.6,-54.14],fovDegrees=70))
+    # Static verification cameras: inspect glass AND the removed stair space.
+    # Separate from the player's existing camera presets (all are preserved).
+    cams["cameras"].append(dict(id="v7_curtain_wall_detail",
+        name="V7 · Mur rideau metallique, vitrages complets",
+        position=[-24,7.2,22],target=[-24,10.6,-4.03],fovDegrees=65))
+    cams["cameras"].append(dict(id="v7_pool_stairs_removed",
+        name="V7 · Circulation piscine sans escalier flottant",
+        position=[4,2.2,-24],target=[-15,3.6,-13],fovDegrees=67))
+    cams["cameras"].append(dict(id="v7_east_gallery_closed",
+        name="V7 · Coursive est planchers refermes",
+        position=[24,4.3,-19],target=[43,6.4,-28],fovDegrees=70))
     # All V6 data and the original V5 remain untouched.
     write(root/"cameras/v7.json",cams)
     new_ids=[o["id"] for o in objs]
