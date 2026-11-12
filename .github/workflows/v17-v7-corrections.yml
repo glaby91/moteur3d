@@ -1,8 +1,8 @@
-name: CSE WARP V17.422 — V7 corrected scene and WARP
+name: CSE WARP V17.427 — native renderer, corrected scene and WARP
 on:
   push:
     branches: [feature/v17-v7-corrections-scene-261112]
-    paths: [tools/upgrade_scene_v7.py, .github/workflows/v17-v7-corrections.yml]
+    paths: [tools/upgrade_scene_v7.py, .github/workflows/v17-v7-corrections.yml, 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp', 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lighting.cpp']
   workflow_dispatch:
 permissions:
   contents: read
@@ -22,6 +22,14 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
+      - name: Install Qt6 for native Windows rendering
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
       - name: Install scene geometry dependencies
         shell: pwsh
         run: |
@@ -40,6 +48,20 @@ jobs:
           if($LASTEXITCODE -ne 0){throw "Low RAM patch download failed"}
           foreach($p in @("moteur3d_v17.exe","moteur3d_v17_benchmark.exe","moteur3d_v16_core.dll")){
             Copy-Item "patch/build-v17/Release/$p" "dist-v7/$p" -Force
+          }
+      - name: Compile native V17 with color and water fixes
+        shell: pwsh
+        run: |
+          node scenes/v16/benchmark-civic/generate.cjs --all
+          if($LASTEXITCODE -ne 0){throw "Benchmark scene generation failed"}
+          cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=427
+          if($LASTEXITCODE -ne 0){throw "CMake configuration failed"}
+          cmake --build build-v17 --config Release --parallel 4
+          if($LASTEXITCODE -ne 0){throw "Actual Windows engine compilation failed"}
+          foreach($p in @("moteur3d_v17.exe","moteur3d_v17_benchmark.exe","moteur3d_v16_core.dll")){
+            if(!(Test-Path "build-v17/Release/$p")){throw "Missing newly compiled $p"}
+            Copy-Item "dist-v7/$p" "dist-v7/BASELINE-V17.421-$p" -Force
+            Copy-Item "build-v17/Release/$p" "dist-v7/$p" -Force
           }
       - name: Create non-destructive V7 scene
         shell: pwsh
@@ -66,7 +88,20 @@ jobs:
           assert t["remainingBenchSeatSections"]==80
           assert t["retainedRealTrees"]==52
           assert len(t["pitRadiiM"])==26
-          assert t["hillHeightM"]==2.7
+          assert t["hillHeightM"]==3.2
+          assert t["plinthEmbeddedIntoHillM"]==.38
+          assert t["hillSummitFlatNormalizedRadius"]==.28
+          assert t["isolatedToyFlowerSpheresRemoved"]==24
+          assert not any(o["parent"]=="Place/Jardins/Fleurs basses" for o in a)
+          assert t["largeEngravedPanels"]==8
+          assert t["nativeEngravingPixelsPerFace"]==[2048,512]
+          assert sum(o["parent"]=="Place/Monument marteau faucille/Gravure bilingue" for o in a)==8
+          assert t["retainedLitLampPosts"]==10
+          assert sum(o["parent"]=="Mobilier/Lampadaires" for o in a)==20
+          assert t["topCorniceRealLights"]==12 and t["plazaRealLights"]==10
+          lighting=json.loads((r/"lighting/v7-evening.json").read_text(encoding="utf8"))
+          assert len(lighting["lights"])==82
+          assert sum(o["parent"]=="Architecture/Palais/Facade/Eclairage sous corniche" for o in a)==12
           assert t["frontStairWidthM"]==68.2 and t["lateralParvisTransitions"]==8
           assert t["muralAtriumCentralSlabs"]==0
           assert t["muralSightlineRemovedPoolEndRailParts"]==35
@@ -145,7 +180,7 @@ jobs:
                   restored.paste(tile,(512*x,465*y))
           assert src.tobytes()==restored.tobytes(),"fresco source pixels altered"
           assert (r/"scene-v6-monument.json").is_file() and (r/"scene-v5-complete.json").is_file()
-          print("V7 STRUCTURE PASS — GLB trees, pit sizes, stairs, fresco pixel fidelity")
+          print("V17.427 SCENE PASS — GLB, plinth, letters, lamps, mosaic and geometry")
           '@ | python -
           if($LASTEXITCODE -ne 0){throw "V7 structure invalid"}
       - name: Real DX11 WARP test at 1366x768
@@ -183,6 +218,20 @@ jobs:
             if($img.Count -ne 1 -or $img[0].Length -lt 1000){throw "Missing actual raster: $id"}
             Copy-Item $img[0].FullName "v7-images/$id.png"
           }
+      - name: Compare daytime and dusk DX11 raster, including new lamp fixtures
+        shell: pwsh
+        run: |
+          foreach($camera in @("v6_monument_front","v4_piscine","v7_curtain_wall_detail")){
+            foreach($hour in @("14.75","19.00")){
+              $safe=$hour.Replace(".","_")
+              $dest="v7-compare-$camera-$safe"
+              & dist-v7/moteur3d_v17_benchmark.exe dist-v7/benchmark-civic/scene-v7-corrections.json $dest --smoke --camera-id $camera --hour $hour --raster-msaa 1
+              if($LASTEXITCODE -ne 0){throw "WARP failed: $camera $hour"}
+              $img=@(Get-ChildItem $dest -Recurse -Filter "raster_$($camera)_640x360_depth1.png")
+              if($img.Count -ne 1 -or $img[0].Length -lt 1000){throw "Missing image: $camera $hour"}
+              Copy-Item $img[0].FullName "v7-images/V17-427-$camera-$safe.png"
+            }
+          }
       - name: Package all V7 executable and scenes
         shell: pwsh
         run: |
@@ -193,7 +242,7 @@ jobs:
           start "" "moteur3d_v17.exe" "benchmark-civic\scene-v7-corrections.json"
           '@ | Out-File dist-v7/DEMARRER_CSE_WARP_V7.bat -Encoding ascii
           @'
-          CSE WARP V17.422 / V7: independent scene from V6.
+          CSE WARP V17.427 / V7: scene corrections and freshly built native renderer.
           The original V5/V6 reference files remain available.
           Windows DX11 software WARP smoke benchmark; HD620 hardware FPS
           and full scene navigation need validation on the user's computer.
@@ -202,7 +251,7 @@ jobs:
           Copy-Item tools/upgrade_scene_v7.py dist-v7/upgrade_scene_v7.py
       - uses: actions/upload-artifact@v4
         with:
-          name: CSE-WARP-V17.422-V7-CORRECTIONS-Windows-x64
+          name: CSE-WARP-V17.427-V7-SCENE-RENDU-Windows-x64
           path: dist-v7/
           retention-days: 21
           if-no-files-found: error
