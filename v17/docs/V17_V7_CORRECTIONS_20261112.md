@@ -10,7 +10,7 @@
 - Raised mound from 1.2 to 2.7 m and 5 m sculpture scaled to approximately 7.1 m; planted elements adapted to mound relief.
 - Closer starting pedestrian camera and mural inspection camera.
 - Narrow pool-side stairs (2.4 m) with true continuous handrail meshes; second flight reaches level 2 with cut floor opening and landing.
-- Central rear upper gallery sections opened to permit higher uninterrupted mural volume.
+- All three central rear gallery slabs (including 4.5 m mezzanine) and unsupported transverse guardrail removed to expose the full-height mural; side circulation retained.
 - Enlarged fresco uses native 2048x930 pixels, eight 512x465 PNG tiles with exact source pixel reconstruction and custom UV-mapped triangle meshes.
 - Windows package keeps memory-corrected V17.421 EXE/DLL and defaults experimental Z-prepass off.
 
