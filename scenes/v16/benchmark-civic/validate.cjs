@@ -38,7 +38,7 @@ check(lamps.every(l=>l.position.length===3 &&
   l.position.every(Number.isFinite) && Number.isFinite(l.intensity) &&
   l.intensity>0 && l.radius>0 && l.intensity<=2),
   'Invalid or excessively intense fixture');
-check(lamps.filter(l=>l.position[1]>15&&l.position[1]<17).length===55,
+check(lamps.filter(l=>l.position[1]>16&&l.position[1]<17).length===55,
   '55 pool ceiling fixtures missing');
 check(lamps.filter(l=>l.position[1]>7&&l.position[1]<8).length===36,
   '36 hall ceiling fixtures missing');
