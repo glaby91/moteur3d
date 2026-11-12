@@ -221,7 +221,7 @@ for(const [profile,target,cap,sceneFile] of [
  check(trunks.length>=26&&
    trunks.filter(o=>Math.abs(o.position[0])<85&&o.position[2]>0).length>=26,
   'At least 26 visible poplars/birches must frame the plaza');
- check(select('Nature/Arbres/Branches').length===4*trunks.length,
+ check(inst.filter(o=>o.parent==='Nature/Arbres/Branches').length===4*trunks.length,
   'Tree branches need four real geometric lobes per trunk');
  check(select('Nature/Arbres/Houppier').length>=5*trunks.length,
   'Five asymmetrical foliage canopies are required per tree');
@@ -235,6 +235,24 @@ for(const [profile,target,cap,sceneFile] of [
   'New two-figure monumental sculpture incomplete');
  check(select('Place/Monument soviétique fictif/Silhouettes').length>=45,
   'Two detailed figures are required, not the old block statue');
+ check(select('Place/Monument soviétique fictif/Silhouettes').length>=120,
+  'Reconstructed figures need articulated anatomy, hands and facial details');
+ check(select('Place/Monument soviétique fictif/Silhouettes/Jeunesse/Visage').length>=1&&
+   select('Place/Monument soviétique fictif/Silhouettes/Science/Visage').length>=1,
+  'Both sculpted facial volumes are required');
+ check(select('Nature/Arbres/Branches secondaires').length>=12*trunks.length,
+  'Thin secondary branches missing from the reconstructed trees');
+ check(select('Nature/Arbres/Houppier').length>=22*trunks.length,
+  '22 separate foliage lobes per tree are required');
+ check(select('Place/Butte végétalisée/Petales').length>=700,
+  'Reconstructed flowers need hundreds of individual radial petals');
+ check(select('Place/Butte végétalisée/Fleurs et feuillages').length>=230,
+  'The original soil mound requires low green groundcover');
+ check(select('Place/Butte végétalisée/Coeurs').length>=130,
+  'Flower centers missing');
+ check(!inst.some(o=>o.parent.endsWith('/Drape simple')||
+   o.parent.endsWith('/Flamme bronze')||o.parent.endsWith('/Flambeau')),
+  'Crude original statue objects are still emitted');
  check(select('Place/Monument soviétique fictif/Flambeau').length===0&&
    select('Place/Monument soviétique fictif/Rayons').length===0,
   'Outdated torch and rooftop-like spikes on monument returned');
