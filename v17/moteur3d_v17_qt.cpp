@@ -1463,6 +1463,11 @@ private:
 QString defaultPath(){
     const QString app=QCoreApplication::applicationDirPath();
     const QStringList candidates{
+        // Prefer the packaged architectural V4 scene, not the old light/extreme
+        // stress-scene profile. Explicit CLI scene arguments still override.
+        app+QStringLiteral("/benchmark-civic/scene-v4.json"),
+        app+QStringLiteral("/scenes/v16/benchmark-civic/scene-v4.json"),
+        QDir::currentPath()+QStringLiteral("/scenes/v16/benchmark-civic/scene-v4.json"),
         app+QStringLiteral("/pavillon01/scene.json"),
         app+QStringLiteral("/scenes/v16/pavillon01/scene.json"),
         QDir::currentPath()+QStringLiteral("/scenes/v16/pavillon01/scene.json")
