@@ -420,13 +420,8 @@ jobs:
           git rev-parse HEAD | Out-File "dist-v17/REVISION.txt" -Encoding ascii
           $env:GITHUB_RUN_NUMBER | Out-File "dist-v17/BUILD_NUMBER.txt" -Encoding ascii
           if (!(Test-Path "dist-v17/BUILD_NUMBER.txt")) { throw "Build number missing" }
-          # One-click launch with correct scene and optional Z-prepass comparison.
-          @'
-          @echo off
-          cd /d "%~dp0"
-          set "M3D_V17_EXPERIMENT_Z_PREPASS=1"
-          start "" "moteur3d_v17.exe" "benchmark-civic\scene-v4.json"
-          '@ | Out-File "dist-v17/START_V4_Z_PREPASS.bat" -Encoding ascii
+          # Production starts with experimental Z-prepass disabled. 
+          # Z-prepass remains an opt-in internal test; do not ship a launcher.
           @'
           @echo off
           cd /d "%~dp0"
@@ -435,8 +430,9 @@ jobs:
           '@ | Out-File "dist-v17/START_V4_REFERENCE.bat" -Encoding ascii
           @'
           CSE WARP V17 — Palais reconstruit V4
-          Launch START_V4_Z_PREPASS.bat for the optimized DX11 version.
-          Launch START_V4_REFERENCE.bat for an A/B without the experimental Z-prepass.
+          Normal launch uses stable rendering (experimental Z-prepass disabled).
+          Launch START_V4_REFERENCE.bat for the reference V4 scene.
+          Experimental Z-prepass is reserved for developer-only tests.
           The executable defaults to benchmark-civic/scene-v4.json when no CLI path is provided.
           WARP software timings do not represent Intel HD 620 GPU performance.
           '@ | Out-File "dist-v17/README-V4.txt" -Encoding utf8

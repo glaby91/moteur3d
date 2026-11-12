@@ -122,8 +122,11 @@ for(const [profile,target,cap,sceneFile] of [
   'Pool ceramic waterline must be visible on four sides');
  check(select('Interieur/Piscine olympique/Fanions/Tissu').length===20,
   'Swimming flags missing');
- check(select('Interieur/Piscine olympique/Echelles/Marches').length===16,
-  'Physical pool ladders missing');
+ check(select('Interieur/Piscine olympique/Echelles/Marches immergees').length===20&&
+    select('Interieur/Piscine olympique/Echelles/Montants immerges').length===8&&
+    select('Interieur/Piscine olympique/Echelles/Mains courantes continues').length===536&&
+    select('Interieur/Piscine olympique/Echelles/Platines fixation plage').length===8,
+  'Physical pool ladders incomplete: 4 ladders, 5 treads each, continuous handrails and deck fastenings required');
  check(select('Interieur/Piscine olympique/Lignes d’eau').length>120,'Lane dividers missing');
  const fresco=unique('Interieur/Piscine/Fresque Energetik originale');
  check(fresco.length===1&&fresco[0].material==='cse_energetik_fresco'&&
