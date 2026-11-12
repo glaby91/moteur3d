@@ -1,0 +1,98 @@
+name: CSE WARP V17.428 — scene-only engraving correction
+on:
+  push:
+    branches: [feature/v17-428-engraving-clear-scene-261112]
+    paths: [tools/upgrade_scene_v7.py, .github/workflows/v17-428-scene-final.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      QT_QPA_PLATFORM: offscreen
+      M3D_V16_FORCE_WARP: '1'
+      M3D_V17_EXPERIMENT_Z_PREPASS: '0'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install scene geometry dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --only-binary=:all: "numpy>=2" "Pillow>=11" "shapely>=2.1.2"
+          if($LASTEXITCODE -ne 0){throw "Python dependencies failed"}
+      - name: Restore verified Windows V17.427 renderer; no C++ recompilation
+        shell: pwsh
+        run: |
+          gh run download 43326184870 --repo glaby91/moteur3d --name CSE-WARP-V17.427-V7-SCENE-RENDU-Windows-x64 --dir dist-v428
+          if($LASTEXITCODE -ne 0){throw "Previous Windows artifact missing"}
+          if(!(Test-Path dist-v428/moteur3d_v17_benchmark.exe)){throw "Compiled renderer missing"}
+      - name: Regenerate V17.428 scenes and both 512px engraving tile rows
+        shell: pwsh
+        run: |
+          python tools/upgrade_scene_v7.py --root dist-v428/benchmark-civic
+          if($LASTEXITCODE -ne 0){throw "V17.428 geometry failed"}
+          @'
+          import json
+          from pathlib import Path
+          from PIL import Image
+          root=Path("dist-v428/benchmark-civic")
+          r=json.loads((root/"reports/v7-corrections.json").read_text(encoding="utf8"))
+          assert r["engravingSecondLineRaisedPixels"]==48
+          assert r["largeEngravedPanels"]==8
+          assert r["isolatedToyFlowerSpheresRemoved"]==24
+          assert r["topCorniceRealLights"]==12 and r["plazaRealLights"]==10
+          assert r["lateralClearDoors"]==2
+          scene=json.loads((root/"scene-v7-corrections.json").read_text(encoding="utf8"))
+          assert "V17.428" in scene["name"]
+          for lang in ("fr","uk"):
+              for i in range(4):
+                  im=Image.open(root/f"textures/revision/v7/engraving_{lang}_{i}.png")
+                  assert im.size==(512,512)
+          print("V17.428 inscription, scene geometry and native texture checks passed")
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw "V17.428 scene assertions failed"}
+      - name: Render real D3D11 WARP close inscription
+        shell: pwsh
+        run: |
+          & dist-v428/moteur3d_v17_benchmark.exe dist-v428/benchmark-civic/scene-v7-corrections.json render-close --smoke --camera-id v6_monument_front --hour 14.75 --raster-msaa 1
+          if($LASTEXITCODE -ne 0){throw "Close-camera DX11 render failed"}
+          New-Item -ItemType Directory -Force -Path proof-v428 | Out-Null
+          $im=@(Get-ChildItem render-close -Recurse -Filter "raster_v6_monument_front_640x360_depth1.png")
+          if($im.Count -ne 1){throw "Missing close camera image"}
+          Copy-Item $im[0].FullName proof-v428/V17-428-GRAVURE-PROCHE-D3D11.png
+      - name: Render real D3D11 WARP 1366x768 starting view
+        shell: pwsh
+        run: |
+          & dist-v428/moteur3d_v17_benchmark.exe dist-v428/benchmark-civic/scene-v7-corrections.json render-native --quick --camera-id v4_face --hour 14.75 --raster-msaa 1 --raster-lod-percent 100 --raster-lod-enabled 0
+          if($LASTEXITCODE -ne 0){throw "Native 1366x768 render failed"}
+          $im=@(Get-ChildItem render-native -Recurse -Filter "raster_v4_face_1366x768_depth1.png")
+          if($im.Count -ne 1){throw "Missing native 1366x768 image"}
+          Copy-Item $im[0].FullName proof-v428/V17-428-GRAVURE-DEPART-1366x768.png
+      - name: Mark correct portable scene revision
+        shell: pwsh
+        run: |
+          @'
+          CSE WARP scene V17.428: inscription no longer hidden by mound.
+          The real V17.427 native renderer and original low-RAM backups are preserved.
+          Run DEMARRER_CSE_WARP_V7.bat after extracting the whole ZIP.
+          '@ | Out-File dist-v428/LIRE_EN_PREMIER-V17.428.txt -Encoding utf8
+          Copy-Item tools/upgrade_scene_v7.py dist-v428/upgrade_scene_v7.py -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V17.428-V7-GRAVURE-CORRIGEE-Windows-x64
+          path: dist-v428/
+          retention-days: 21
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V17.428-RENDU-REEL-D3D11
+          path: proof-v428/
+          retention-days: 21
+          if-no-files-found: error
