@@ -1,0 +1,169 @@
+name: CSE WARP V17 V5 — validation reelle scene complete (arbres/pots/fleurs/sol)
+run-name: CSE WARP V17 V5 - 8 pots / 26 arbres / fleurs / fosses / eau
+on:
+  push:
+    branches: [feature/v17-420-v5-vegetation-pots-paving-water-261112]
+    paths:
+      - '.github/workflows/v17-v5-full-scene.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  scene-v5:
+    runs-on: windows-2022
+    timeout-minutes: 80
+    env:
+      GH_TOKEN: ${{ github.token }}
+      M3D_V16_FORCE_WARP: '1'
+      M3D_V17_EXPERIMENT_Z_PREPASS: '0'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install Python GLB, PBR and geometry validator libraries
+        shell: pwsh
+        run: python -m pip install "numpy<3" pillow scipy "trimesh>=4.8,<5" "shapely>=2,<3"
+      - name: Retrieve already validated V17.417 Windows binaries (DO NOT recompile)
+        shell: pwsh
+        run: |
+          gh run download 43277492575 --repo glaby91/moteur3d --name CSE-WARP-V17.417-Windows-x64 --dir dist-v5
+          if($LASTEXITCODE -ne 0){throw 'V17.417 stable engine artifact download failed'}
+          foreach($name in @('moteur3d_v17.exe','moteur3d_v17_benchmark.exe','Qt6Core.dll','benchmark-civic/scene-v4.json')){
+            if(!(Test-Path "dist-v5/$name")){throw "Missing engine dependency: $name"}
+          }
+      - name: Retrieve original CC0 GLB trees, grasses and approved Poly Haven Empodium/Gazania
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          import urllib.request,urllib.parse,json,trimesh
+          out=Path('v5_nature');out.mkdir(exist_ok=True)
+          base='https://raw.githubusercontent.com/petroulacl/fps-buildings-env-kit/main/environment/vegetation/polypizza-stylized-nature-gltf/'
+          names=['Tree.glb','Tree-QVOop92WmG.glb','Pine.glb','Pine-79gmlLnweB.glb',
+                 'Twisted Tree.glb','Flower Group.glb','Flower Single.glb',
+                 'Bush with Flowers.glb','Grass Wispy.glb','Grass.glb']
+          def get(url,dest):
+              request=urllib.request.Request(url,headers={'User-Agent':'CSE-WARP-V17.420/1.0'})
+              with urllib.request.urlopen(request,timeout=90) as r:data=r.read()
+              dest.parent.mkdir(parents=True,exist_ok=True)
+              dest.write_bytes(data)
+              return len(data)
+          for name in names:
+              print('SOURCE_QUATERNIUS',name,get(base+urllib.parse.quote(name),out/name),flush=True)
+          for name,expected in [('flower_empodium',3053),('flower_gazania',14340)]:
+              request=urllib.request.Request('https://api.polyhaven.com/files/'+name,headers={'User-Agent':'CSE-WARP-V17.420/1.0'})
+              with urllib.request.urlopen(request,timeout=45) as r:data=json.load(r)
+              entry=data['gltf']['1k']['gltf']
+              folder=out/('polyhaven_'+name)
+              def walk(spec,filename=None):
+                  if not (isinstance(spec,dict) and 'url' in spec):return
+                  url=spec['url'];dest=folder/(filename or url.split('?')[0].split('/')[-1])
+                  print('SOURCE_POLYHAVEN',name,dest.name,get(url,dest),flush=True)
+                  inc=spec.get('include',{})
+                  if isinstance(inc,dict):
+                      for n,v in inc.items():walk(v,n)
+                  elif isinstance(inc,list):
+                      for v in inc:walk(v)
+              walk(entry)
+              model=next(folder.glob('*.gltf'))
+              gltf=trimesh.load(model,force='scene',process=False)
+              triangles=sum(len(m.faces) for m in gltf.geometry.values())
+              if triangles!=expected:raise RuntimeError('Unchanged source triangle count mismatch: '+name+str(triangles))
+              (out/(name+'.glb')).write_bytes(gltf.export(file_type='glb'))
+              print('APPROVED_FLOWER',name,triangles,'triangles, exported GLB',flush=True)
+          '@ | Set-Content 'fetch_v5_nature.py' -Encoding utf8
+          python fetch_v5_nature.py
+          if($LASTEXITCODE -ne 0){throw 'Original CC0 GLB retrieval failed (no placeholder model allowed)'}
+      - name: Recreate EXACT approved 8 base-92cm pots with original generator and source textures
+        shell: pwsh
+        run: |
+          @'
+          from pathlib import Path
+          p=Path('scenes/v16/benchmark-civic/revisions/v5/create_1970s_planters_base_elargie.py')
+          s=p.read_text(encoding='utf-8')
+          s=s.replace('/mnt/data/jardinieres_70s_base_elargie_glb','v5_pot_models')
+          s=s.replace('/mnt/data/CSE-WARP-JARDINIERES-BASE-ELARGIE-1970-8-GLB.zip','v5_pot_models.zip')
+          p.write_text(s,encoding='utf-8')
+          '@ | Set-Content 'prepare_pot_generator.py' -Encoding utf8
+          python prepare_pot_generator.py
+          python scenes/v16/benchmark-civic/revisions/v5/create_1970s_planters_base_elargie.py
+          if($LASTEXITCODE -ne 0){throw 'Approved GLB planters could not be regenerated'}
+      - name: Assemble full V5 scene with real circular pavement cutouts and textures
+        shell: pwsh
+        run: |
+          python scenes/v16/benchmark-civic/revisions/v5/scene_v17_full_revision.py --root dist-v5/benchmark-civic --pot-dir v5_pot_models --plant-dir v5_nature > dist-v5/REVISION-V5-VALIDATION.json
+          if($LASTEXITCODE -ne 0){throw 'V5 scene geometry validation failed'}
+          $report=Get-Content 'dist-v5/benchmark-civic/reports/revision-v5-verification.json' -Raw|ConvertFrom-Json
+          if($report.potInstances -ne 8 -or $report.treePitCount -ne 26 -or $report.replacedProceduralTreePositions -ne 26){
+            throw 'Incomplete V5 planters or real tree pit holes'
+          }
+          if(!$report.polyhavenApprovedFlowersAvailable.empodium -or !$report.polyhavenApprovedFlowersAvailable.gazania){
+            throw 'Approved Empodium/Gazania source meshes missing'
+          }
+          if($report.importedMeshTriangleCounts.pot0 -ne 6944){throw 'Approved pot triangle count lost'}
+          if(@($report.realPavingCut.PSObject.Properties).Count -lt 2){throw 'Pavement cut-through not applied'}
+          Write-Host "V5 VALIDATED: $($report.allObjectCount) instances, $($report.allMaterialCount) materials"
+      - name: Package Windows launcher, old-scene comparison and original CC0 GLB source files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force 'dist-v5/SOURCES_GLB_CC0/Pots_1970' |Out-Null
+          New-Item -ItemType Directory -Force 'dist-v5/SOURCES_GLB_CC0/Nature' |Out-Null
+          Copy-Item 'v5_pot_models/*.glb' 'dist-v5/SOURCES_GLB_CC0/Pots_1970/'
+          Copy-Item 'v5_nature/*.glb' 'dist-v5/SOURCES_GLB_CC0/Nature/'
+          Copy-Item 'scenes/v16/benchmark-civic/revisions/v5/*.py' 'dist-v5/SOURCES_GLB_CC0/'
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set "M3D_V17_EXPERIMENT_Z_PREPASS="
+          start "" "moteur3d_v17.exe" "benchmark-civic/scene-v5-complete.json"
+          '@ | Out-File 'dist-v5/DEMARRER_CSE_WARP_V5.bat' -Encoding ascii
+          Copy-Item 'dist-v5/DEMARRER_CSE_WARP_V5.bat' 'dist-v5/DEMARRER_CSE_WARP_10_ARBRES.bat' -Force
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set "M3D_V17_EXPERIMENT_Z_PREPASS="
+          start "" "moteur3d_v17.exe" "benchmark-civic/scene-v4-trees-pilot.json"
+          '@ | Out-File 'dist-v5/DEMARRER_V4_ORIGINALE.bat' -Encoding ascii
+          Copy-Item 'dist-v5/DEMARRER_V4_ORIGINALE.bat' 'dist-v5/START_V4_REFERENCE.bat' -Force
+          @'
+          CSE-WARP V17.420 — V5 complete scene (engine: validated V17.417, no rebuild)
+          Start DEMARRER_CSE_WARP_V5.bat. EXE default also loads new V5 scene.
+          8 exact approved large-base retro GLB planters (92cm base, 177cm rim).
+          26 medium-poly real GLB trees + 8 slender planter trees + 26 cut-out concrete tree pits.
+          46 true GLB flower instances (Poly Haven Empodium+Gazania) and 92 grass tufts.
+          PBR microgravel soil, native bump, subtly rippled pool water material.
+          Experimental Z-prepass OFF. Old V4 comparison: DEMARRER_V4_ORIGINALE.bat.
+          Engine limitation: glTF alpha-masked materials and imported normal maps are not fully supported;
+          pool wave texture is static, not animated. Do not claim material parity.
+          Sources: Quaternius Stylized Nature MegaKit CC0, Poly Haven Empodium and Gazania CC0.
+          '@ | Out-File 'dist-v5/LIRE-EN-PREMIER-V5.txt' -Encoding utf8
+      - name: Real Windows WARP render of delivered V5 scene, standard depth path, 640x360
+        shell: pwsh
+        run: |
+          & 'dist-v5/moteur3d_v17_benchmark.exe' 'dist-v5/benchmark-civic/scene-v5-complete.json' 'WARP-V5-RENDER' --smoke --camera-id v4_face --hour 14 --raster-msaa 1 --raster-lod-percent 100 --raster-lod-enabled 0
+          if($LASTEXITCODE -ne 0){throw 'Actual V5 Windows DirectX11 WARP render failed'}
+          $png=@(Get-ChildItem 'WARP-V5-RENDER' -Recurse -Filter 'raster_v4_face_640x360_depth1.png')
+          if($png.Count -ne 1 -or $png[0].Length -lt 2000){throw 'Missing real WARP V5 image'}
+          New-Item -ItemType Directory -Force dist-v5/WARP-V5-RENDU-VALIDATION|Out-Null
+          Copy-Item $png[0].FullName 'dist-v5/WARP-V5-RENDU-VALIDATION/'
+          Get-ChildItem 'WARP-V5-RENDER' -Recurse -Filter summary.json|Select-Object -First 1|ForEach-Object{
+            Copy-Item $_.FullName 'dist-v5/WARP-V5-RENDU-VALIDATION/summary.json'
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: V17.420-V5-DIAGNOSTIC
+          path: |
+            dist-v5/REVISION-V5-VALIDATION.json
+            dist-v5/benchmark-civic/reports/revision-v5-verification.json
+            WARP-V5-RENDER/
+          if-no-files-found: warn
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V17.420-V5-Windows-x64
+          path: dist-v5/
+          retention-days: 30
+          if-no-files-found: error
