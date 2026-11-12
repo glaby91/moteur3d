@@ -448,6 +448,30 @@ def build(root):
     report["closedFormerStairFloorSlabs"]=3
     report["galleryRightNewRailSections"]=3
 
+    # V7.426: all visible "lighting geometry" suspended without a ceiling,
+    # beam or wall was obsolete decoration, not one of the actual point lights
+    # in lighting.json.  Remove the unsupported floating blocks everywhere
+    # in the hall, natatorium and galleries, WITHOUT changing real light
+    # definitions or the roof and window frames.
+    unmounted_light_groups=(
+        "Interieur/Hall/Plafonniers/",
+        "Interieur/Piscine olympique/Plafonniers/",
+        "Interieur/Piscine olympique/Lumière linéaire",
+        "Interieur/Galeries/Sous mezzanine/",
+        "Interieur/Hall/Appliques murales",
+        "Interieur/Piscine olympique/Appliques galerie")
+    floaters=[o for o in objs if o["parent"].startswith(unmounted_light_groups)]
+    assert len(floaters)==154,(
+        "Unexpected free-standing fixture population",len(floaters))
+    remove(lambda o:o["parent"].startswith(unmounted_light_groups))
+    # Original two bright isolated white partitions did not form a complete
+    # wall or door. They have no overhead/wall mounting; clear the hallway.
+    white_posts=[o for o in objs if o["parent"]=="Interieur/Hall/Panneaux"]
+    assert len(white_posts)==2
+    remove(lambda o:o["parent"]=="Interieur/Hall/Panneaux")
+    report["floatingLuminaireMeshesRemoved"]=len(floaters)
+    report["isolatedHallLightBlocksRemoved"]=len(white_posts)
+
     # 7. True maximal-ratio artwork: original 2048x930 pixels -> 4x2 native tiles.
     # Runtime low-memory atlas is limited to <=512px/material, so 8 individual
     # material tiles preserve source detail instead of downsampling it to 512px.
