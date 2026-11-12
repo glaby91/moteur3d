@@ -141,7 +141,7 @@ jobs:
           }
           foreach ($camera in @('facade','mosaique','bassin','hall','vestiaires','passerelle','etage','hall_ensemble','piscine_soir')) {
             $prefix = 'raster_' + $camera + '_'
-            $matches = @($pictures | Where-Object { $_.Name.StartsWith($prefix) -and $_.Name.Substring($prefix.Length) -match '^[0-9]+x[0-9]+[.]png$' })
+            $matches = @($pictures | Where-Object { $_.Name.StartsWith($prefix) -and $_.Name.Substring($prefix.Length) -match '^[0-9]+x[0-9]+_depth[0-9]+[.]png$' })
             if ($matches.Count -ne 1 -or $matches[0].Length -lt 1200) {
               throw "Missing/empty scene camera image: $camera"
             }
