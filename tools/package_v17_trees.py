@@ -20,7 +20,7 @@ def bat(scene):
         '@echo off\r\n'
         'cd /d "%~dp0"\r\n'
         'set "M3D_V17_EXPERIMENT_Z_PREPASS="\r\n'
-        'start "" "moteur3d_v17.exe" "benchmark-civic\\\\' + scene + '"\r\n'
+        'start "" "moteur3d_v17.exe" "benchmark-civic/' + scene + '"\r\n'
     )
 
 def assemble(dist: Path, source: Path):
