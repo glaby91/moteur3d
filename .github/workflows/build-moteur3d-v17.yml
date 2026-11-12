@@ -508,6 +508,18 @@ jobs:
           Get-ChildItem "build-v17/civic-views" -Recurse -Filter 'raster_*.png' | ForEach-Object {
             Copy-Item $_.FullName $viewsFolder
           }
+      - name: Ten progressive native design passes — 55 real WARP camera renders and feedback
+        shell: pwsh
+        timeout-minutes: 35
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          M3D_V16_GPU_GI_SAMPLES: '0'
+        run: |
+          node v17/tools/palais_ten_passes.cjs --scene scenes/v16/benchmark-civic --binary build-v17/Release/moteur3d_v17_benchmark.exe --output build-v17/total-simulation/palais-10-pass
+          if ($LASTEXITCODE -ne 0) { throw 'Ten-pass real native WARP iteration failed' }
+          $report = Get-Content build-v17/total-simulation/palais-10-pass/campaign-summary.json -Raw | ConvertFrom-Json
+          if ($report.passesRendered -ne 10 -or !$report.baselineRendered) { throw 'Fewer than ten actual passes were rendered' }
+          Write-Host "Ten native iterations completed: $($report.passesKept) kept, $($report.passesRolledBack) rolled back"
       - name: Archive des résultats de simulation totale WARP
         if: always()
         uses: actions/upload-artifact@v6
