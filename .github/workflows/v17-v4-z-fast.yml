@@ -1,9 +1,9 @@
-name: V17.379 FAST — V4 1.1M scene + Z prepass performance package
+name: V17.380 FAST — architectural reconstruction and Z prepass benchmark
 run-name: V17.${{ github.run_number }} FAST — V4 Z-Prepass A-B
 on:
   push:
     branches:
-      - integration/v17-379-scene-v4-z-prepass-bench-fast-261112
+      - feature/v17-380-global-architectural-rebuild-261112
     paths:
       - '.github/workflows/v17-v4-z-fast.yml'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/**'
@@ -41,10 +41,27 @@ jobs:
           $budget=Get-Content scenes/v16/benchmark-civic/stats/v4-budget.json -Raw | ConvertFrom-Json
           if($budget.v4_triangles -lt 1000000 -or $budget.v4_triangles -gt 1200000){throw "Unexpected V4 triangles: $($budget.v4_triangles)"}
           Write-Host "V4 SOURCE TRIANGLES: $($budget.v4_triangles)"
+      - name: Architectural scene consistency and lighting count
+        shell: pwsh
+        run: |
+          $root='scenes/v16/benchmark-civic'
+          $scene=Get-Content "$root/scene-v4.json" -Raw | ConvertFrom-Json
+          $data=Get-Content "$root/instances/v4.json" -Raw | ConvertFrom-Json
+          $lights=Get-Content "$root/lighting/day.json" -Raw | ConvertFrom-Json
+          $objects=@($data.instances)
+          $groups=@($objects | ForEach-Object {$_.parent})
+          if($lights.lights.Count -ne 60){throw "Wrong light count: $($lights.lights.Count)"}
+          if(@($groups|Where-Object {$_ -like 'Interieur/Galeries/Garde-corps 1er etage*'}).Count -lt 40){throw 'First-floor guardrails missing'}
+          if(@($groups|Where-Object {$_ -like 'Architecture/Facade/Jardinieres ceramique POP 1970*'}).Count -lt 30){throw 'Colorful ceramic planters missing'}
+          if(@($groups|Where-Object {$_ -like 'Interieur/Piscine/Fresque Energetik originale*'}).Count -ne 1){throw 'Mounted original pool fresco missing'}
+          if(@($groups|Where-Object {$_ -like '*Joints verticaux*' -or $_ -like '*Joints horizontaux*'}).Count -gt 0){throw 'Aliased physical mosaic grout remains'}
+          $water=@($objects|Where-Object {$_.parent -eq 'Interieur/Piscine olympique/Eau'})
+          if($water.Count -ne 1 -or $water[0].size[0] -lt 49.9 -or $water[0].size[2] -lt 24.9){throw 'Incomplete pool water surface'}
+          Write-Host "V17.380 ARCHITECTURAL CHECKS PASS; lights=$($lights.lights.Count); source objects=$($objects.Count)"
       - name: Configure and compile Windows
         shell: pwsh
         run: |
-          cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=379
+          cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=380
           if($LASTEXITCODE -ne 0){throw 'Configure failed'}
           cmake --build build-v17 --config Release --parallel 4
           if($LASTEXITCODE -ne 0){throw 'Compile failed'}
@@ -161,7 +178,7 @@ jobs:
           Windows package with Qt runtime. WARP results are NOT Intel HD 620 results.
           '@|Out-File "$root/README-V4-Z.txt" -Encoding utf8
           git rev-parse HEAD|Out-File "$root/REVISION.txt" -Encoding ascii
-          '379'|Out-File "$root/BUILD_NUMBER.txt" -Encoding ascii
+          '380'|Out-File "$root/BUILD_NUMBER.txt" -Encoding ascii
           windeployqt --release --no-translations "$root/moteur3d_v17.exe"
           if($LASTEXITCODE -ne 0){throw 'Qt deployment failed'}
           windeployqt --release --no-translations "$root/moteur3d_v17_benchui.exe"
@@ -170,12 +187,12 @@ jobs:
       - name: Upload FAST A-B results only
         uses: actions/upload-artifact@v6
         with:
-          name: V17.379-V4-Z-BENCH
+          name: V17.380-V4-Z-BENCH
           path: build-v17/v4-z-comparison/
           if-no-files-found: error
       - name: Upload portable V4 Z-Prepass Windows package
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.379-V4-ZPREPASS-Windows-x64
+          name: CSE-WARP-V17.380-RECONSTRUCTION-V4-Windows-x64
           path: dist-v17-v4-z/
           if-no-files-found: error
