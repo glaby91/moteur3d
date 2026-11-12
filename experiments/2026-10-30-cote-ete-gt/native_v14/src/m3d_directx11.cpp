@@ -294,13 +294,15 @@ float4 PSMain(VSOut i):SV_TARGET {
         // Neutral concrete previously received ~.74 ambient + .56 sun:
         // correct the LIGHT budget, not the pixels after they have clipped.
         float sunlightVisibility=saturate((shadowFactor-.16)/.84);
-        ambientEnergy=lerp(.115,.335,diffuseTerms.w)*lerp(.77,1.03,hemisphere);
+        ambientEnergy=lerp(.055,.335,diffuseTerms.w)*lerp(.77,1.03,hemisphere);
         sunEnergy=.88*diffuse*sunlightVisibility*diffuseTerms.w;
     }
     float3 color = base*(ambientEnergy+sunEnergy)
                  + base*materialGlow[i.mat].rgb*materialGlow[i.mat].a;
     color += materialEmission[i.mat].rgb * max(materialEmission[i.mat].a,0.0);
-    color += float3(28.0, 13.0, 4.0) / 255.0 * (1.0 - diffuseTerms.w);
+    // The old warm (28,13,4) constant tinted *every* night material brown.
+    // Keep a tiny near-neutral floor instead; actual lamps add local warmth.
+    color += float3(4.0, 5.0, 7.0) / 255.0 * (1.0 - diffuseTerms.w);
     float3 viewDir = normalize(eye - i.world);
     float3 reflectedLight = reflect(-normalize(lightDir), normal);
     float roughness = roughnessMap.Sample(wrapSampler, float3(i.uv, i.mat));
@@ -408,9 +410,9 @@ float4 PSMain(VSOut i):SV_TARGET {
         const float incidence=1.0-saturate(dot(normal,viewDir));
         const float fresnelWater=.02+.98*pow(incidence,5.0);
         float stripe=pow(saturate(.5+.5*sin(i.world.x*1.4+i.world.z*.37)),14.0);
-        color=lerp(color,float3(.27,.61,.73),.14+fresnelWater*.32);
+        color=lerp(color,float3(.24,.57,.69),.07+fresnelWater*.20);
         color+=float3(.19,.32,.37)*stripe*(.025+.13*fresnelWater);
-        const float opacity=lerp(.30,.78,saturate(fresnelWater*1.75));
+        const float opacity=lerp(.10,.45,saturate(fresnelWater*1.75));
         return float4(color,opacity);
     }
     return float4(color, materialOpacity[i.mat].x);
@@ -806,7 +808,15 @@ public:
             cb.lightColorIntensity[i][0]=l.color.x/255.f;cb.lightColorIntensity[i][1]=l.color.y/255.f;cb.lightColorIntensity[i][2]=l.color.z/255.f;cb.lightColorIntensity[i][3]=l.intensity*scale;
         };
         for(const Light& l:pointLights)appendLight(l,1.f);
-        for(const Light& l:scene.lights)appendLight(l,sceneLightScale);
+        for(const Light& l:scene.lights){
+            // Cornice lights and the five pairs of plaza globes are electric:
+            // fade in as dusk approaches.  The other indoor sources keep
+            // their existing scene-wide scale and remain functional by day.
+            const bool exteriorFixture=(l.p.y>17.f&&l.p.z>-4.f&&l.p.z<-1.f)
+                          ||(l.p.y>6.f&&l.p.y<9.f&&l.p.z>18.f);
+            const float factor=exteriorFixture ? (.12f+.88f*lampFactor) : 1.f;
+            appendLight(l,sceneLightScale*factor);
+        }
         D3D11_MAPPED_SUBRESOURCE mapped{};
         HRESULT hr=context_->Map(constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped);
         if(FAILED(hr)){error=L"Impossible de transmettre les paramètres à DirectX 11.";return false;}

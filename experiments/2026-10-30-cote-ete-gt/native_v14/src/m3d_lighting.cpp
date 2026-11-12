@@ -21,11 +21,14 @@ void updateLighting(float hour){
  sun=norm({x,-.16f+.92f*daylight,z});
  // Neutral airy zenith, slightly warm haze near the horizon.
  // Keep day surfaces below overexposure: the shaders provide the contrast.
- const V dayZenith={122,172,217},nightZenith={28,23,39};
- const V dayHorizon={219,225,230},nightHorizon={77,45,38};
+ const V dayZenith={122,172,217},nightZenith={11,17,32};
+ const V dayHorizon={219,225,230},nightHorizon={29,35,53};
  skyZenith=dayZenith*daylight+nightZenith*(1.f-daylight);
  skyHorizon=dayHorizon*daylight+nightHorizon*(1.f-daylight);
- skyHorizon=skyHorizon*(1.f-warm*.42f)+V{255,171,128}*(warm*.42f);
+ // Twilight warmth belongs near the sun, not as an all-frame sepia veil.
+ // Small horizon-specific warm term fades out completely at full night.
+ const float warmHorizon=warm*daylight*.10f;
+ skyHorizon=skyHorizon*(1.f-warmHorizon)+V{235,198,174}*warmHorizon;
  sunTint=V{255,246,225}*(1.f-warm)+V{255,173,112}*warm;
  pointLights.clear();
  if(lampFactor>.005f){
