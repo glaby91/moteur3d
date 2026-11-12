@@ -1,0 +1,82 @@
+name: CSE WARP V17.429 — navigation Shift x3 only
+on:
+  push:
+    branches: [feature/v17-429-exploration-x3-261113]
+    paths: [v17/moteur3d_v17_qt.cpp, v17/exploration_motion.h, v17/tests/walk_controller_smoke.cpp, .github/workflows/v17-429-exploration-x3.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      QT_QPA_PLATFORM: offscreen
+      M3D_V17_EXPERIMENT_Z_PREPASS: '0'
+    steps:
+      - uses: actions/checkout@v5
+      - name: Qt 6 for Windows MSVC 2022 x64
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Restore verified V17.428 scene and working portable package unchanged
+        shell: pwsh
+        run: |
+          gh run download 43327897751 --repo glaby91/moteur3d --name CSE-WARP-V17.428-V7-GRAVURE-CORRIGEE-Windows-x64 --dir dist-v429
+          if($LASTEXITCODE -ne 0){throw "V17.428 baseline missing"}
+          foreach($file in @("moteur3d_v17.exe","moteur3d_v16_core.dll","benchmark-civic/scene-v7-corrections.json","DEMARRER_CSE_WARP_V7.bat")){
+            if(!(Test-Path "dist-v429/$file")){throw "Missing baseline file: $file"}
+          }
+          $hash=(Get-FileHash "dist-v429/benchmark-civic/scene-v7-corrections.json" -Algorithm SHA256).Hash
+          Set-Content "scene-original-sha256.txt" $hash
+      - name: Configure and build ONLY V17 UI and walker regression
+        shell: pwsh
+        run: |
+          node scenes/v16/benchmark-civic/generate.cjs --all
+          if($LASTEXITCODE -ne 0){throw "Minimal authored scene generation failed"}
+          cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=429
+          if($LASTEXITCODE -ne 0){throw "CMake configure failed"}
+          cmake --build build-v17 --config Release --target moteur3d_v17 v17_walk_controller_smoke --parallel 4
+          if($LASTEXITCODE -ne 0){throw "V17 navigation x3 compile failed"}
+          foreach($p in @("moteur3d_v17.exe","moteur3d_v16_core.dll","v17_walk_controller_smoke.exe")){
+            if(!(Test-Path "build-v17/Release/$p")){throw "Missing compiled file $p"}
+          }
+      - name: Execute actual collision/stair/Shift x3 deterministic regression
+        shell: pwsh
+        run: |
+          ctest --test-dir build-v17 -C Release -R "^v17_walk_stairs_collision$" --output-on-failure
+          if($LASTEXITCODE -ne 0){throw "3x speed collision regression failed"}
+          & build-v17/Release/v17_walk_controller_smoke.exe
+          if($LASTEXITCODE -ne 0){throw "Walk controller executable failed"}
+      - name: Package just UI and compatible DLL, preserving all V17.428 scene bytes
+        shell: pwsh
+        run: |
+          Copy-Item dist-v429/moteur3d_v17.exe dist-v429/BASELINE-V17.428-NAVIGATION.exe -Force
+          Copy-Item build-v17/Release/moteur3d_v17.exe dist-v429/moteur3d_v17.exe -Force
+          Copy-Item build-v17/Release/moteur3d_v16_core.dll dist-v429/moteur3d_v16_core.dll -Force
+          $before=(Get-Content scene-original-sha256.txt -Raw).Trim()
+          $after=(Get-FileHash "dist-v429/benchmark-civic/scene-v7-corrections.json" -Algorithm SHA256).Hash
+          if($before -ne $after){throw "Unrequested scene change detected"}
+          @'
+          CSE WARP Beta X V17.429 — exploration Shift x3 ONLY.
+          The scene is the identical V17.428, verified by exact SHA-256.
+          Walk or fly: normal speed 2.5 m/s. Hold Shift for 7.5 m/s (x3).
+          Status bar displays Vitesse x1 / Vitesse x3 while exploring.
+          Keyboard: ZQSD (AZERTY) / arrow keys, mouse-look, Esc to stop.
+          Wall collision and stair traversal still active; speed regression passed.
+          Extract the full ZIP and run DEMARRER_CSE_WARP_V7.bat.
+          Nine scene defects remain intentionally untouched.
+          '@ | Set-Content dist-v429/LIRE_EN_PREMIER-V17.429.txt -Encoding UTF8
+          Copy-Item v17/exploration_motion.h dist-v429/exploration_motion_v17_429.h -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V17.429-EXPLORATION-X3-Windows-x64
+          path: dist-v429/
+          retention-days: 21
+          if-no-files-found: error
