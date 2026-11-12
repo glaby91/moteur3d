@@ -162,6 +162,16 @@ for(const [profile,target,cap,sceneFile] of [
   const dx=(x.position[0]-37)/16.45,dz=(x.position[2]-52)/10.5;
   check(Math.abs(dx*dx+dz*dz-1)<.01,'Seat is not an oval: '+x.id);
  }
+ // Visual-structure regressions: do not bring back the rooftop spikes or
+ // turn street trees into simple poles with a single spherical canopy.
+ check(select('Architecture/Palais/Acrotere').length===1,
+  'Continuous roof parapet missing');
+ check(select('Architecture/Palais/Enseigne fictive').length===0,
+  'The obsolete 80-post rooftop sign has returned');
+ check(select('Nature/Arbres/Branches').length===2*select('Nature/Arbres').filter(o=>o.material==='prp_bark_wet').length,
+  'Tree boughs missing');
+ check(select('Nature/Arbres/Houppier').length>=3*select('Nature/Arbres').filter(o=>o.material==='prp_bark_wet').length,
+  'Asymmetric multi-lobe tree crowns missing');
  check(select('Place/Butte végétalisée/Fleurs et feuillages').length>200,
   'Multicolour vegetated mound incomplete');
  check(select('Place/Monument soviétique fictif').length>=25,
