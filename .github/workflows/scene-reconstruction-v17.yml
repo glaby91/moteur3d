@@ -88,6 +88,28 @@ jobs:
           }
           python scenes/v16/benchmark-civic/compare_reconstruction.py results/v17-geometric
           if ($LASTEXITCODE -ne 0) { throw "Native before/after image comparison failed" }
+      - name: Close-up art direction audit — monument, flowers, trees at 1366x768
+        shell: pwsh
+        timeout-minutes: 12
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          M3D_V16_GPU_GI_SAMPLES: '0'
+        run: |
+          node scenes/v16/benchmark-civic/make_detail_views.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot generate close-up cameras' }
+          $engine = (Resolve-Path "fixed-v17/moteur3d_v17_benchmark.exe").Path
+          $detailed = (Resolve-Path "scenes/v16/benchmark-civic/scene-detail.json").Path
+          foreach ($view in @('monument_detail','parterre_detail','arbres_detail')) {
+            $target = Join-Path "results/v17-geometric/details" $view
+            New-Item -ItemType Directory -Force $target | Out-Null
+            & $engine $detailed $target --quick --camera-id $view --hour 14
+            if ($LASTEXITCODE -ne 0) { throw "Close-up WARP render failed: $view" }
+            $png = @(Get-ChildItem $target -Recurse -Filter "raster_${view}_1366x768_depth1.png")
+            if ($png.Count -ne 1 -or $png[0].Length -lt 3500) {
+              throw "Close-up high-resolution PNG missing: $view"
+            }
+            Write-Host "ART_REVIEW $view = $($png[0].Length) bytes"
+          }
       - name: Save generated source-only scene (for direct loading into unchanged V17)
         shell: pwsh
         if: success()
