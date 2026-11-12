@@ -16,7 +16,7 @@ int main(int argc,char** argv){
     const size_t triangles=built.runtime.renderScene.obj.size();
     const size_t requested=QString::fromLocal8Bit(argv[2]).toULongLong();
     if(triangles<requested || built.runtime.cameras.size()<6 ||
-       built.runtime.renderScene.mat.size()!=30 || built.runtime.objects.size()<1000){
+       built.runtime.renderScene.mat.size()!=33 || built.runtime.objects.size()<1000){
         qCritical()<<"Invalid benchmark content: triangles="<<qulonglong(triangles)
                    <<"min="<<qulonglong(requested)
                    <<"cameras="<<built.runtime.cameras.size()
@@ -24,7 +24,7 @@ int main(int argc,char** argv){
                    <<"instances="<<built.runtime.objects.size();
         return 5;
     }
-    // Eight scene-local materials preserve all 22 original Pripyat IDs.
+    // Eleven scene-local materials preserve all 22 original Pripyat IDs.
     // BOTH the user's exterior portrait and original hall Energetik fresco
     // must load through the real scene PBR/JPEG path (not flat fallbacks).
     const int artIndex=built.runtime.materialIndex.value(
@@ -92,6 +92,24 @@ int main(int argc,char** argv){
     if(hallStair.feet.y<4.15f||hallStair.feet.z<-10.5f){
         qCritical()<<"V17 FPS cannot climb hall stairs to gallery:"
                    <<hallStair.feet.y<<hallStair.feet.z;return 17;
+    }
+    // A mural must map its entire image to a face, never tile it by meters.
+    const auto countFullUvFaces=[&](int materialId){
+        int full=0;
+        for(const auto& triangle:built.runtime.renderScene.obj){
+            if(int(triangle.mat)!=materialId)continue;
+            const auto inRange=[](float v){return v>=-0.001f&&v<=1.001f;};
+            if(!inRange(triangle.uv0.x)||!inRange(triangle.uv0.y)||
+               !inRange(triangle.uv1.x)||!inRange(triangle.uv1.y)||
+               !inRange(triangle.uv2.x)||!inRange(triangle.uv2.y))continue;
+            if((triangle.uv1.x==1.f||triangle.uv2.x==1.f)&&
+               (triangle.uv1.y==1.f||triangle.uv2.y==1.f))full++;
+        }
+        return full;
+    };
+    if(countFullUvFaces(artIndex)<2||countFullUvFaces(facadeIndex)<2){
+        qCritical()<<"Art mural faces must use non-repeating 0..1 UVs";
+        return 13;
     }
     qInfo()<<"V17 FPS outdoor entrance and staircase passed";
     qInfo()<<"V17.323 two distinct image assets decoded:"

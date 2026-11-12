@@ -100,7 +100,7 @@ protected:
             return;
         }
         QSize s=image_.size();
-        s.scale(size()-QSize(20,20),Qt::KeepAspectRatio);
+        s.scale(size(),Qt::KeepAspectRatio);
         QRect dst(QPoint((width()-s.width())/2,(height()-s.height())/2),s);
         p.setRenderHint(QPainter::SmoothPixmapTransform,false);
         p.drawImage(dst,image_);
@@ -691,11 +691,12 @@ private:
         qualityBox_=new QComboBox;
         // Keep native and Full HD side by side. Store explicit width/height
         // instead of deriving them from an index or assuming exact 16:9.
+        qualityBox_->addItem(QStringLiteral("Viewport adaptatif — taille du panneau 3D"),QSize());
         qualityBox_->addItem(QStringLiteral("Dell natif 1366 × 768"),QSize(1366,768));
         qualityBox_->addItem(QStringLiteral("Full HD 1920 × 1080"),QSize(1920,1080));
         qualityBox_->addItem(QStringLiteral("QHD 2560 × 1440"),QSize(2560,1440));
         qualityBox_->addItem(QStringLiteral("4K UHD 3840 × 2160"),QSize(3840,2160));
-        qualityBox_->setCurrentIndex(0); // Native Dell resolution for GPU comparison.
+        qualityBox_->setCurrentIndex(0); // Full-panel display by default; Dell 1366x768 remains available.
         directSamples_=new QComboBox;
         for(int n:{1,4,16})
             directSamples_->addItem(QStringLiteral("%1 échantillon(s) / pixel").arg(n),n);
@@ -948,6 +949,20 @@ private:
         right->setWidget(rightScroll);
         addDockWidget(Qt::RightDockWidgetArea,right);
         right->setMinimumWidth(295);
+        // Dedicated uncluttered exploration mode. Preserve dock state in editing mode.
+        // F11 maximizes the view without changing the underlying render resolution.
+        auto* viewMenu=menuBar()->addMenu(QStringLiteral("Affichage"));
+        auto* immersive=viewMenu->addAction(QStringLiteral("Vue 3D agrandie (F11)"));
+        immersive->setCheckable(true);
+        immersive->setShortcut(QKeySequence(Qt::Key_F11));
+        connect(immersive,&QAction::toggled,this,[this,left,right](bool enabled){
+            left->setVisible(!enabled);
+            right->setVisible(!enabled);
+            if(enabled)canvas_->setFocus();
+            QTimer::singleShot(0,this,[this]{
+                if(qualityBox_&&qualityBox_->currentIndex()==0)requestRender();
+            });
+        });
 
         connect(renderButton,&QPushButton::clicked,this,[this]{requestRender();});
         connect(cameraBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){
@@ -1269,7 +1284,15 @@ private:
                         preset.eye.y,
                         preset.target.z-dir.x*std::sin(angle)+dir.z*std::cos(angle)};
         }
-        const QSize renderSize=qualityBox_->currentData().toSize();
+        QSize renderSize=qualityBox_->currentData().toSize();
+        if(!renderSize.isValid() || renderSize.isEmpty()) {
+            // Render to the viewport's *actual* aspect ratio, not the monitor
+            // resolution; that used to letterbox the 3D image in a tiny strip.
+            // Keep a bounded pixel budget on integrated GPUs.
+            renderSize=canvas_->size().boundedTo(QSize(1600,900));
+            renderSize.setWidth(std::max(64,renderSize.width()));
+            renderSize.setHeight(std::max(64,renderSize.height()));
+        }
         const int w=renderSize.width();
         const int h=renderSize.height();
         const int backend=backendBox_->currentIndex();

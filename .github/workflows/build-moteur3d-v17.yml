@@ -125,6 +125,41 @@ jobs:
             }
           }
           $pictures | Sort-Object Name | ForEach-Object { Write-Host "$($_.Name) - $($_.Length) bytes" }
+      - name: V17.324 visual QA — pool at 14h and 19h, same camera
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          foreach ($hour in @(14,19)) {
+            & "build-v17/Release/moteur3d_v17_benchmark.exe" "scenes/v16/benchmark-civic/scene.json" "build-v17/pool-hour-$hour" --smoke --camera-id bassin --hour $hour
+            if ($LASTEXITCODE -ne 0) { throw "Pool render failed at $hour h" }
+            $pic = Get-ChildItem "build-v17/pool-hour-$hour" -Recurse -Filter 'raster_bassin_*.png' | Select-Object -First 1
+            if (!$pic -or $pic.Length -lt 1200) { throw "Missing pool PNG at $hour h" }
+            Copy-Item $pic.FullName "build-v17/pool-hour-$hour.png"
+            Add-Type -AssemblyName System.Drawing
+            $bmp = [System.Drawing.Bitmap]::new((Resolve-Path "build-v17/pool-hour-$hour.png").Path)
+            $r=0.0; $g=0.0; $b=0.0; $n=0
+            for ($y=16; $y -lt $bmp.Height; $y+=32) {
+              for ($x=16; $x -lt $bmp.Width; $x+=32) {
+                $p=$bmp.GetPixel($x,$y)
+                $r+=$p.R; $g+=$p.G; $b+=$p.B; $n++
+              }
+            }
+            $bmp.Dispose()
+            $average=($r+$g+$b)/(3*$n)
+            Write-Host "Pool $hour h mean RGB = $([math]::Round($r/$n,1)), $([math]::Round($g/$n,1)), $([math]::Round($b/$n,1)); luma=$([math]::Round($average,1))"
+            if ($average -lt 8) { throw "Pool entirely too dark at $hour h" }
+          }
+      - name: V17 visual QA — hall fresco from corrected camera at 19h
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          & "build-v17/Release/moteur3d_v17_benchmark.exe" "scenes/v16/benchmark-civic/scene.json" "build-v17/hall-hour-19" --smoke --camera-id hall --hour 19
+          if ($LASTEXITCODE -ne 0) { throw "Hall 19h scene rendering failed" }
+          $pic = Get-ChildItem "build-v17/hall-hour-19" -Recurse -Filter 'raster_hall_*.png' | Select-Object -First 1
+          if (!$pic -or $pic.Length -lt 1200) { throw "Missing hall 19h PNG" }
+          Copy-Item $pic.FullName "build-v17/hall-hour-19.png"
       - name: Diagnose raster WARP executable before extended tests
         shell: pwsh
         env:
@@ -299,6 +334,9 @@ jobs:
           Copy-Item "build-v17/Release/pavillon01" "dist-v17/pavillon01" -Recurse
           Copy-Item "build-v17/Release/benchmark-civic" "dist-v17/benchmark-civic" -Recurse
           Copy-Item "build-v17/civic-actual-preview.png" "dist-v17/benchmark-civic/actual-render-WARP.png"
+          Copy-Item "build-v17/pool-hour-14.png" "dist-v17/benchmark-civic/pool-14h-WARP.png"
+          Copy-Item "build-v17/pool-hour-19.png" "dist-v17/benchmark-civic/pool-19h-WARP.png"
+          Copy-Item "build-v17/hall-hour-19.png" "dist-v17/benchmark-civic/hall-19h-WARP.png"
           New-Item -ItemType Directory -Force "dist-v17/benchmark-civic/render-views-WARP" | Out-Null
           Get-ChildItem "build-v17/civic-views" -Recurse -Filter 'raster_*.png' | ForEach-Object {
             Copy-Item $_.FullName "dist-v17/benchmark-civic/render-views-WARP/"

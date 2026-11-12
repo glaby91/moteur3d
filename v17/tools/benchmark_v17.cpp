@@ -86,7 +86,7 @@ int main(int argc,char** argv){
         sourceRevision=QString::fromUtf8(revFile.readAll()).trimmed().left(12);
     QTextStream out(stdout),err(stderr);
     if(argc<3){
-        err<<"Usage: moteur3d_v17_benchmark.exe scene.json output_dir [--quick] [--compare-v16] [--smoke] [--readback-depth 1|2|3] [--compare-readback] [--all-cameras]\n";
+        err<<"Usage: moteur3d_v17_benchmark.exe scene.json output_dir [--quick] [--compare-v16] [--smoke] [--readback-depth 1|2|3] [--compare-readback] [--all-cameras] [--camera-id bassin] [--hour 19]\n";
         return 2;
     }
     const QString scenePath=QFileInfo(QString::fromLocal8Bit(argv[1])).absoluteFilePath();
@@ -131,6 +131,18 @@ int main(int argc,char** argv){
         }
     }
     const bool allCameras=args.contains(QStringLiteral("--all-cameras"));
+    const int hourOption=args.indexOf(QStringLiteral("--hour"));
+    float benchmarkHour=-1.f;
+    if(hourOption>=0){
+        bool ok=false;
+        benchmarkHour=hourOption+1<args.size()?args[hourOption+1].toFloat(&ok):-1.f;
+        if(!ok||benchmarkHour<0.f||benchmarkHour>=24.f){
+            err<<"--hour expects a number from 0 to below 24\n";return 2;
+        }
+    }
+    const int cameraOption=args.indexOf(QStringLiteral("--camera-id"));
+    const QString requestedCamera=cameraOption>=0&&cameraOption+1<args.size()
+        ?args[cameraOption+1]:QString();
     const bool smoke=args.contains(QStringLiteral("--smoke"));
     const bool quick=smoke||args.contains(QStringLiteral("--quick"));
     const bool compare=args.contains(QStringLiteral("--compare-v16"))&&!smoke;
@@ -169,7 +181,7 @@ int main(int argc,char** argv){
     if(!built){err<<"Scene compilation failed: "<<built.error<<"\n";return 4;}
     const auto& runtime=built.runtime;
     if(runtime.cameras.isEmpty()){err<<"Scene has no camera\n";return 4;}
-    updateLighting(runtime.daylightHour);
+    updateLighting(benchmarkHour>=0.f?benchmarkHour:runtime.daylightHour);
     begin=Clock::now();
     Stats shadowStats;
     const auto shadow=buildShadow(runtime.renderScene,shadowStats);
@@ -179,6 +191,7 @@ int main(int argc,char** argv){
         {"version",QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER)},
         {"buildNumber",QString::number(CSE_WARP_BUILD_NUMBER)},{"revision",sourceRevision},
         {"scene",scenePath},{"sceneName",runtime.title},
+        {"lightingHour",benchmarkHour>=0.f?benchmarkHour:runtime.daylightHour},
         {"timestampUtc",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
         {"os",QSysInfo::prettyProductName()},
         {"cpuArchitecture",QSysInfo::currentCpuArchitecture()},
@@ -260,8 +273,18 @@ int main(int argc,char** argv){
     // Historical benchmarks retain their exact old camera count.
     const int cameras=allCameras?int(runtime.cameras.size()):
         quick?1:std::min(2,int(runtime.cameras.size()));
+    QVector<int> selectedCameras;
+    if(!requestedCamera.isEmpty()){
+        for(int i=0;i<runtime.cameras.size();++i)
+            if(runtime.cameras[i].id==requestedCamera)selectedCameras.push_back(i);
+        if(selectedCameras.isEmpty()){
+            err<<"Unknown --camera-id "<<requestedCamera<<"\n";return 2;
+        }
+    }else{
+        for(int i=0;i<cameras;++i)selectedCameras.push_back(i);
+    }
     const int measuredFrames=smoke?2:quick?6:12;
-    for(int cameraIndex=0;cameraIndex<cameras;++cameraIndex){
+    for(const int cameraIndex:selectedCameras){
         const auto& preset=runtime.cameras[cameraIndex];
         for(const auto& size:sizes){
             const int w=size.width(),h=size.height();

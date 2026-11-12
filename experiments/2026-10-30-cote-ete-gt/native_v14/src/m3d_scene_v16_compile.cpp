@@ -49,16 +49,28 @@ void addTriangle(Scene& scene, V a,V b,V c,uint8_t mat) {
     o.len2=std::abs(det)>1e-20f?1.f/det:0.f;
     scene.obj.push_back(o);
 }
-void addQuad(Scene& scene,V a,V b,V c,V d,uint8_t mat) {
+void addQuad(Scene& scene,V a,V b,V c,V d,uint8_t mat,bool uniqueArtwork=false) {
     addTriangle(scene,a,b,c,mat);
     addTriangle(scene,a,c,d,mat);
+    if(uniqueArtwork) {
+        // Two triangles share one full-image [0,1] UV domain. Do not use
+        // world-distance tiling for a non-repeating mural or portrait.
+        Obj& t0=scene.obj[scene.obj.size()-2];
+        Obj& t1=scene.obj[scene.obj.size()-1];
+        t0.uv0.x=0.f;t0.uv0.y=0.f;
+        t0.uv1.x=1.f;t0.uv1.y=0.f;
+        t0.uv2.x=1.f;t0.uv2.y=1.f;
+        t1.uv0.x=0.f;t1.uv0.y=0.f;
+        t1.uv1.x=1.f;t1.uv1.y=1.f;
+        t1.uv2.x=0.f;t1.uv2.y=1.f;
+    }
 }
-void addBox(Scene& scene,V center,V size,uint8_t mat) {
+void addBox(Scene& scene,V center,V size,uint8_t mat,bool uniqueArtwork=false) {
     const V a=center-size*.5f,b=center+size*.5f;
     const V p000{a.x,a.y,a.z},p001{a.x,a.y,b.z},p010{a.x,b.y,a.z},p011{a.x,b.y,b.z};
     const V p100{b.x,a.y,a.z},p101{b.x,a.y,b.z},p110{b.x,b.y,a.z},p111{b.x,b.y,b.z};
-    addQuad(scene,p001,p101,p111,p011,mat);
-    addQuad(scene,p100,p000,p010,p110,mat);
+    addQuad(scene,p001,p101,p111,p011,mat,uniqueArtwork);
+    addQuad(scene,p100,p000,p010,p110,mat,uniqueArtwork);
     addQuad(scene,p000,p001,p011,p010,mat);
     addQuad(scene,p101,p100,p110,p111,mat);
     addQuad(scene,p010,p011,p111,p110,mat);
@@ -154,7 +166,10 @@ bool compileRenderScene(const SceneDatabase& database, Scene& out,QString& error
                     error=QStringLiteral("Unknown primitive or invalid position: %1").arg(geom);return false;
                 }
                 if(result.obj.size()>200000){error=QStringLiteral("Scene exceeds triangle limit");return false;}
-                addBox(result,position,primitiveSizes[geom],primitiveMaterials[geom]);
+                const std::string& materialName=result.mat[primitiveMaterials[geom]].name;
+                const bool mural=(materialName=="cse_personnage_facade" ||
+                                  materialName=="cse_energetik_fresco");
+                addBox(result,position,primitiveSizes[geom],primitiveMaterials[geom],mural);
             }
         }
     }

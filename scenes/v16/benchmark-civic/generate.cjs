@@ -19,7 +19,10 @@ const specials=[
  ['cse_monument_bronze',[.36,.29,.19],.39,'metal'],
  ['cse_pool_strip',[.79,.86,.91],.27,'metal'],
  ['cse_energetik_fresco',[1,1,1],.72,'image'],
- ['cse_personnage_facade',[1,1,1],.78,'image']
+ ['cse_personnage_facade',[1,1,1],.78,'image'],
+ ['cse_neon_red',[1,.10,.035],.18,'metal'],
+ ['cse_neon_cyan',[.02,.86,1],.17,'metal'],
+ ['cse_neon_gold',[1,.69,.21],.20,'metal']
 ];
 const localMaterials=specials.map(([id,baseColor,roughness])=>({
  id,baseColor,roughness,metallic:id==='cse_monument_bronze'?.72:0,
@@ -48,23 +51,63 @@ const cameras={format:'m3d-cameras-v1',cameras:[
  {id:'escalier',name:'02 · Escalier continu vers le palais',position:[-17,2.2,29],target:[0,2.6,-4],fovDegrees:66},
  {id:'passerelle',name:'03 · Grand banc ovale et statue',position:[66,2.3,72],target:[37,5.0,52],fovDegrees:67},
  {id:'bassin',name:'04 · Piscine olympique depuis l’entrée',position:[0,2.4,-10],target:[0,1.0,-34],fovDegrees:73},
- {id:'hall',name:'05 · Hall, escalier et fresque Energetik',position:[-7,2.9,-10],target:[-15,10.35,-17.9],fovDegrees:69},
+ {id:'hall',name:'05 · Hall, escalier et fresque Energetik',position:[-15,10.35,-11.6],target:[-15,10.35,-18.0],fovDegrees:67},
  {id:'etage',name:'06 · Galerie au-dessus des lignes d’eau',position:[34,6.6,-44],target:[0,2,-32],fovDegrees:71},
  {id:'vestiaires',name:'07 · Vestiaires et douches RDC',position:[-33.5,2.15,-35.4],target:[-43.5,2,-36],fovDegrees:68},
  {id:'vue_haut',name:'07 · Vue aérienne du bâtiment unique',position:[95,68,105],target:[15,5,11],fovDegrees:67}
 ]};
+// V17.324: ~10x more independent light sources, not 10x the power of each bulb.
+// Designed for night/evening exploration at 19h. Keep under the D3D11
+// FrameConstants lightPositionRadius[256] and lightColorIntensity[256] limit.
+const indoorFixtures=[
+  // Swimming pool: five longitudinal rows, 11 fixtures per row (55).
+  ...[-44,-38,-32,-26,-20].flatMap(z=>
+    Array.from({length:11},(_,i)=>({
+      position:[-23+i*4.6,16.55,z],
+      radius:8.8,intensity:1.45,color:[246,249,255]
+    }))
+  ),
+  // Main hall and the monumental stairs: 9 x 4 ceiling modules (36).
+  ...[-7.5,-10.5,-13.5,-16.5].flatMap(z=>
+    Array.from({length:9},(_,i)=>({
+      position:[-32+i*8,7.45,z],
+      radius:9.5,intensity:1.25,color:[249,247,241]
+    }))
+  ),
+  // Three upper levels, both lateral galleries (54).
+  ...[4.5,9,13.5].flatMap(y=>
+    [-38,38].flatMap(x=>
+      Array.from({length:9},(_,i)=>({
+        position:[x,y+2.1,-50+i*5],
+        radius:7.4,intensity:1.05,color:[245,247,252]
+      }))
+    )
+  ),
+  // Locker rooms and service areas on both sides (12).
+  ...[-42,42].flatMap(x=>
+    [-47,-41,-35,-29,-23,-17].map(z=>({
+      position:[x,3.55,z],
+      radius:7.5,intensity:1.10,color:[244,248,255]
+    }))
+  )
+];
 const lighting={format:'m3d-lighting-v1',hour:14.75,
- sun:{direction:[-.68,.65,-.35],intensity:3.1},ambient:{color:[.63,.73,.91],intensity:.39},
- lights:[
-  {position:[-5,13,-12],radius:19,intensity:1.2,color:[255,218,184]},
-  {position:[8,13,-46],radius:16,intensity:.95,color:[255,226,197]},
-  ...Array.from({length:4},(_,i)=>[-19.5+i*13]).flatMap(x=>[
-   {position:[x,14,-16],radius:10,intensity:.75,color:[231,240,252]},
-   {position:[x,14,-48],radius:10,intensity:.75,color:[231,240,252]}
-  ]),
-  {position:[-40,3.95,-36],radius:10,intensity:.63,color:[235,239,243]},
-  {position:[44,3.85,-48],radius:9,intensity:.48,color:[235,239,243]}
- ]};
+  sun:{direction:[-.68,.65,-.35],intensity:3.1},
+  ambient:{color:[.63,.73,.91],intensity:.39},
+  lights:[
+    // Highlight art walls without altering the artwork's color data.
+    {position:[-15,11,-14.8],radius:7.5,intensity:1.2,color:[255,251,244]},
+    {position:[0,14,-7],radius:10,intensity:1.0,color:[255,250,244]},
+    ...indoorFixtures
+  ]
+};
+// Accent lamps physically illuminate the facade around the rooftop sign.
+lighting.lights.push(...Array.from({length:12},(_,i)=>({
+  position:[-13.2+i*2.4,24.0,-1.85],radius:8.0,intensity:1.2,
+  color:i%3===0?[90,240,255]:i%3===1?[255,55,37]:[255,198,109]
+})));
+if(lighting.lights.length!==171)
+  throw new Error('Expected 171 lights (159 interior + 12 rooftop accents)');
 const environment={format:'m3d-environment-v1',terrain:'finite',units:'m',
  note:'Fictional, explorable single modernist palace with olympic pool, a copied real Energetik mosaic artwork asset, and original Soviet-inspired monument; NOT historical reconstruction.'};
 function round(n){return Math.round(n*1000)/1000;}
@@ -222,10 +265,40 @@ function build(profileName,p){
   for(let x=-26;x<=26;x+=4)
    B(pool+'/Lumière linéaire','prp_window_glass',x,16.61,z,3.85,.06,.20);
  }
+ // Physical ceiling luminaires aligned with the 55 actual pool lights.
+ // Each light is a luminous diffuser inside a discrete metal tray.
+ for(const z of [-44,-38,-32,-26,-20]){
+  for(let i=0;i<11;i++){
+   const x=-23+i*4.6;
+   B(pool+'/Plafonniers/Chassis','prp_window_frame',x,16.73,z,2.75,.16,.56);
+   B(pool+'/Plafonniers/Diffuseur','cse_pool_strip',x,16.63,z,2.48,.075,.32);
+  }
+ }
+ // A continuous pale ceramic waterline and coloured lane-end accents make
+ // the natatorium legible under artificial light without faking exposure.
+ for(const z of [-44.64,-19.36]){
+  B(pool+'/Frise ligne eau','prp_tile_ceramic',0,.34,z,50,.22,.055);
+  B(pool+'/Main courante','prp_steel_painted',0,1.27,z,50,.065,.065);
+ }
+ for(const x of [-25.15,25.15]){
+  B(pool+'/Frise ligne eau','prp_tile_ceramic',x,.34,-32,.055,.22,25.0);
+ }
+ // Sparse internal architectural ribs give roof depth rather than a flat slab.
+ for(const x of [-25,-15,-5,5,15,25])
+  B(pool+'/Poutres plafond','prp_concrete_panel',x,17.58,-32,.38,.38,34);
  // Open lobby at ground level with a clear line of sight into the pool.
  B('Interieur/Hall/Accueil','prp_wood_weathered',-19,1.05,-10,6,1.1,1.2);
  for(const side of [-1,1])
   B('Interieur/Hall/Panneaux','prp_concrete_panel',side*11,2.8,-11,.25,4.1,5);
+ // Hall light bars are visible architectural fixtures, not invisible bulbs.
+ for(const y of [7.55,11.95]){
+  for(const z of [-8,-12,-16]){
+   for(const x of [-26,-18,-10,-2,6,14,22]){
+    B('Interieur/Hall/Plafonniers/Chassis','prp_window_frame',x,y+.18,z,3.0,.12,.46);
+    B('Interieur/Hall/Plafonniers/Diffuseur','cse_pool_strip',x,y+.06,z,2.75,.075,.30);
+   }
+  }
+ }
  // A walkable 27-tread staircase at the pool's east deck to the gallery.
  for(let i=0;i<27;i++){
   const top=.70+i*(3.95/26);
@@ -333,7 +406,7 @@ function build(profileName,p){
   // Most flower heads use modest 12x8-patch sphere meshes; only every
   // seventh cluster uses an organic foliage canopy. This keeps the actual
   // lightweight scene from becoming a 600k-triangle garden benchmark.
-  if(i%7===0)
+  if(i%3===0)
    F('Place/Butte végétalisée/Fleurs et feuillages',flower,
      x,height+r*.24,z,r,.65+.4*rand(),r);
   else
@@ -368,9 +441,65 @@ function build(profileName,p){
  for(let x=-46;x<=46;x+=3.2)for(let z=-52;z<=-9;z+=6.4){
    B('Architecture/Palais/Toiture techniques','prp_roof_metal',x,19.9,z,1,.6,2.4);
  }
- for(let i=0;i<80;i++){
-   const x=-43+i*1.1;
-   B('Architecture/Palais/Enseigne fictive','prp_steel_rusted',x,20.8,-3.4,.13,2.0,.16);
+ // Retro-futurist rooftop sign designed for the fictional Energetik palace.
+ // The lettering is real geometry, not a texture; it works in raster and CPU.
+ const neon='Architecture/Palais/Enseigne lumineuse toit';
+ B('Architecture/Palais/Acrotere','prp_concrete_panel',0,19.85,-3.75,97.5,.72,.55);
+ B('Architecture/Palais/Corniche','prp_terrazzo_floor',0,19.35,-3.65,98,.22,.8);
+ B(neon+'/Panneau','prp_steel_rusted',0,23.05,-3.32,30.9,4.45,.36);
+ B(neon+'/Retrofond','prp_concrete_panel',0,23.15,-3.08,29.8,3.8,.14);
+ for(const x of [-14,-7,0,7,14])
+  B(neon+'/Structure','prp_steel_rusted',x,21.55,-3.72,.28,3.7,.26);
+ for(const y of [20.9,25.2])
+  B(neon+'/Structure','prp_steel_painted',0,y,-3.36,31.3,.2,.22);
+ // Bright red and cyan marquees, warm incandescent bulbs.
+ for(const y of [21.15,25.0])
+  B(neon+'/Neon rouge','cse_neon_red',0,y,-2.96,29.8,.10,.12);
+ for(const x of [-14.9,14.9])
+  B(neon+'/Neon cyan','cse_neon_cyan',x,23.05,-2.94,.13,3.8,.11);
+ for(let i=0;i<43;i++){
+  const x=-14.7+i*.7;
+  S(neon+'/Ampoules','cse_neon_gold',x,25.4,-2.91,.21,.21,.18);
+ }
+ // Three concentric stylized cyan orbit arches above an atomic-star symbol.
+ for(const offset of [-.32,0,.32]){
+  for(let j=0;j<19;j++){
+   const angle=Math.PI*j/18;
+   const x=Math.cos(angle)*(4.1+offset);
+   const y=25.2+Math.sin(angle)*(1.15+offset*.28);
+   S(neon+'/Orbite cyan','cse_neon_cyan',x,y,-3.04,.26,.18,.13);
+  }
+ }
+ S(neon+'/Atome central','cse_neon_gold',0,26.38,-3.02,.38,.38,.2);
+ for(let i=0;i<10;i++){
+  const a=2*Math.PI*i/10;
+  S(neon+'/Etoile','cse_neon_red',Math.cos(a)*.8,27.43+Math.sin(a)*.8,-3.02,.33,.33,.19);
+ }
+ // 5x7 pixel-serif neon font, each letter built from individually illuminated
+ // metal/glass modules. Full-width readable Cyrillic « ЭНЕРГЕТИК ».
+ const glyph={
+  'Э':['01110','10001','00001','00111','00001','10001','01110'],
+  'Н':['10001','10001','10001','11111','10001','10001','10001'],
+  'Е':['11111','10000','10000','11110','10000','10000','11111'],
+  'Р':['11110','10001','10001','11110','10000','10000','10000'],
+  'Г':['11111','10000','10000','10000','10000','10000','10000'],
+  'Т':['11111','00100','00100','00100','00100','00100','00100'],
+  'И':['10001','10011','10101','10101','11001','10001','10001'],
+  'К':['10001','10010','10100','11000','10100','10010','10001']
+ };
+ const word='ЭНЕРГЕТИК';
+ for(let k=0;k<word.length;k++){
+  const rows=glyph[word[k]];
+  for(let row=0;row<7;row++)
+   for(let col=0;col<5;col++)
+    if(rows[row][col]==='1')
+     B(neon+'/Lettres ЭНЕРГЕТИК','cse_neon_red',
+       -11.35+k*2.77+col*.36,24.4-row*.40,-2.82,.30,.34,.18);
+ }
+ // Two contrasting fascia wings like a period roadside diner.
+ for(const side of [-1,1]){
+  for(let i=0;i<3;i++)
+   B(neon+'/Ailettes','cse_neon_cyan',side*(16.0+i*.65),23.0+i*.20,-3.0,1.3,.15,.18);
  }
  // Exterior benches removed: the single oval planter seat is the only one.
  for(let i=0;i<Math.min(p.lamps,18);i++){
@@ -390,9 +519,15 @@ function build(profileName,p){
    const z=-95+(row%38)*5.2+(rand()-.5)*2;
    const h=9+rand()*7;
    B('Nature/Arbres','prp_bark_wet',x,h*.35,z,.55,h*.7,.55);
-   F('Nature/Arbres','prp_foliage',x,h*.83,z,4+rand()*2,5+rand()*3,4+rand()*2);
+   // Layered asymmetric crowns and branched silhouettes.
+   for(const side of [-1,1]){
+    B('Nature/Arbres/Branches','prp_bark_wet',x+side*.72,h*.63,z+.32,.20,1.85,.20,side*24);
+    F('Nature/Arbres/Houppier','prp_foliage',x+side*1.55,h*.76,z+side*.6,
+      2.7+rand(),3.5+rand(),2.8+rand());
+   }
+   F('Nature/Arbres/Houppier','prp_foliage',x,h*.91,z,3.6+rand(),4+rand(),3.5+rand());
    if(p.detail>8){
-     F('Nature/Arbres','prp_foliage',x+.9,h*.72,z+.8,3.5,3.1,3);
+    F('Nature/Arbres/Houppier','prp_foliage',x+.9,h*.72,z+.8,3.1,2.6,3.0);
    }
  }
  // The former auditorium seating was removed for the olympic pool.
