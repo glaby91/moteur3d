@@ -232,6 +232,18 @@ VSOut VSEllipseMain(VSEllipseIn i) {
     return VSMain(raw);
 }
 float4 PSMain(VSOut i):SV_TARGET {
+#if defined(M3D_V17_PROFILE_FLAT)
+    // Diagnostic ONLY: geometry, raster, depth; no PBR or texture fetch.
+    return float4(.62,.64,.67,1.0);
+#elif defined(M3D_V17_PROFILE_TEXTURE)
+    return float4(albedo.Sample(wrapSampler,float3(i.uv,i.mat)).rgb,
+                  materialOpacity[i.mat].x);
+#elif defined(M3D_V17_PROFILE_BASIC)
+    float3 tex=albedo.Sample(wrapSampler,float3(i.uv,i.mat)).rgb;
+    float3 n=normalize(i.n);
+    float lambert=saturate(dot(n,normalize(lightDir)));
+    return float4(tex*(.24+.76*lambert),materialOpacity[i.mat].x);
+#else
     // WRAP sampler already handles tiling. frac(uv) here broke automatic
     // derivatives at tile boundaries and forced inappropriate mip levels.
     float3 base = albedo.Sample(wrapSampler, float3(i.uv, i.mat)).rgb;
@@ -414,6 +426,7 @@ float4 PSMain(VSOut i):SV_TARGET {
         return float4(color,opacity);
     }
     return float4(color, materialOpacity[i.mat].x);
+#endif
 }
 )";
 
@@ -1278,11 +1291,27 @@ private:
         // HLSL is compiled once at device creation, never per frame.
         const char* disableShaderOpt=std::getenv("M3D_V17_DISABLE_SHADER_OPT");
         const bool optimizePixels=!(disableShaderOpt&&std::strcmp(disableShaderOpt,"1")==0);
+        // Profiling modes are selected only through an explicit process
+        // environment variable; the default shader remains byte-for-byte
+        // equivalent to V17.370. Each benchmark runs in a fresh process.
+        const char* profile=std::getenv("M3D_V17_PROFILE_SHADER");
+        const char* profileMacro=nullptr;
+        if(profile){
+            if(std::strcmp(profile,"flat")==0)profileMacro="M3D_V17_PROFILE_FLAT";
+            else if(std::strcmp(profile,"texture")==0)profileMacro="M3D_V17_PROFILE_TEXTURE";
+            else if(std::strcmp(profile,"basic")==0)profileMacro="M3D_V17_PROFILE_BASIC";
+        }
         const D3D_SHADER_MACRO pixelMacros[]={
-            {"M3D_V17_OPTIMIZE_PIXELS","1"},{nullptr,nullptr}
+            {"M3D_V17_OPTIMIZE_PIXELS",optimizePixels?"1":"0"},
+            {profileMacro,"1"},{nullptr,nullptr}
+        };
+        // The optimization guard checks macro definition, not its value:
+        // disable optimization by omitting that macro entirely.
+        const D3D_SHADER_MACRO pixelMacrosLegacy[]={
+            {profileMacro,"1"},{nullptr,nullptr}
         };
         hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",
-            optimizePixels?pixelMacros:nullptr,nullptr,"PSMain","ps_4_0",
+            optimizePixels?pixelMacros:pixelMacrosLegacy,nullptr,"PSMain","ps_4_0",
             D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&psCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation du pixel shader DirectX 11 impossible");return false;}
         if(FAILED(device_->CreateVertexShader(vsCode->GetBufferPointer(),vsCode->GetBufferSize(),nullptr,&vs_))||FAILED(device_->CreatePixelShader(psCode->GetBufferPointer(),psCode->GetBufferSize(),nullptr,&ps_))){error=L"Création des shaders DirectX 11 impossible.";return false;}
