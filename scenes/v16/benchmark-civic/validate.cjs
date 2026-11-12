@@ -188,9 +188,9 @@ for(const [profile,target,cap,sceneFile] of [
   'Continuous roof parapet missing');
  check(select('Architecture/Palais/Enseigne fictive').length===0,
   'The obsolete 80-post rooftop sign has returned');
- check(select('Nature/Arbres/Branches').length===2*select('Nature/Arbres').filter(o=>o.material==='prp_bark_wet').length,
+ check(select('Nature/Arbres/Branches').length===2*select('Nature/Arbres').filter(o=>o.parent==='Nature/Arbres'&&o.material==='prp_bark_wet').length,
   'Tree boughs missing');
- check(select('Nature/Arbres/Houppier').length>=3*select('Nature/Arbres').filter(o=>o.material==='prp_bark_wet').length,
+ check(select('Nature/Arbres/Houppier').length>=3*select('Nature/Arbres').filter(o=>o.parent==='Nature/Arbres'&&o.material==='prp_bark_wet').length,
   'Asymmetric multi-lobe tree crowns missing');
  check(select('Place/Butte végétalisée/Fleurs et feuillages').length>200,
   'Multicolour vegetated mound incomplete');
