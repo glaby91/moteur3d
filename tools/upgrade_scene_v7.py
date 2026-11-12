@@ -3,7 +3,7 @@
 import argparse,copy,collections,json,math
 from pathlib import Path
 import numpy as np
-from PIL import Image
+from PIL import Image,ImageDraw,ImageFont
 from shapely.geometry import Point,Polygon,box
 from shapely.ops import unary_union
 from shapely import constrained_delaunay_triangles
@@ -87,6 +87,14 @@ def build(root):
     # the eight GLB pot trees or any flowers.
     remove(lambda o:o["parent"] in ("Place/Jardins/Arbustes","Place/Jardins devant entrée"))
     assert sum(removed.values())==22,removed
+    # These 24 little red/ochre blobs are primitive spheres, unlike
+    # the preserved GLB flowers on the central landscaped mound.
+    toy_spheres=[o for o in objs if o["parent"]=="Place/Jardins/Fleurs basses"]
+    assert len(toy_spheres)==24 and all(o["geometry"]=="unit_sphere"
+          and o["material"] in ("cse_flower_gold","cse_flower_red")
+          for o in toy_spheres)
+    remove(lambda o:o["parent"]=="Place/Jardins/Fleurs basses")
+    report["isolatedToyFlowerSpheresRemoved"]=24
 
     # 2. Eight real walk-through gaps, at symmetric points of the existing oval.
     seats=[o for o in objs if o["parent"]=="Place/Banc ovale béton/Assise"]
@@ -213,16 +221,16 @@ def build(root):
     report["lateralParvisTransitions"]=8
 
     # 5. Stronger hill and authentic flowers conform to its new profile.
-    OLD_H=1.2;NEW_H=2.7;BASE=.16
+    OLD_H=1.2;NEW_H=3.2;BASE=.16
     def oldheight(x,z):
         r=math.hypot(x/13.2,(z-72)/7.8)
         t=max(0,min(1,(r-.12)/.88))
         return BASE+OLD_H*(1-t*t*(3-2*t))
     def newheight(x,z):
         r=math.hypot(x/15.2,(z-72)/9.3)
-        t=max(0,min(1,(r-.10)/.90))
+        # Real flat crown supports the entire 5.71 x 3.08m plinth.\n        t=max(0,min(1,(r-.28)/.72))
         return BASE+NEW_H*(1-t*t*(3-2*t))
-    hill=copy.deepcopy(geom["v6_butte_relief_solid"]);hill["id"]="v7_hill_2m70"
+    hill=copy.deepcopy(geom["v6_butte_relief_solid"]);hill["id"]="v7_hill_3m20_support_plateau"
     # Recompute surface Y, keep bottom/skirt below the base.
     for v in hill["vertices"]:
         if v[1]>=BASE-.00001:v[1]=round(newheight(v[0],v[2]),5)
@@ -235,12 +243,101 @@ def build(root):
     # Plinth grows 1.2 -> 1.55m; sculpture 5.0 -> 7.1m, preserving source shapes.
     for o in objs:
         if o["id"] in ("v6_socle_beton","v6_inscription_fr_uk"):
-            o["position"][1]=round(BASE+NEW_H,5)
+            o["position"][1]=round(BASE+NEW_H-.38,5)
             o["size"]=[1.12,1.29,1.10]
         if o["parent"]=="Place/Monument marteau faucille/Sculpture acier rouge":
-            o["position"][1]=round(BASE+NEW_H+1.55,5)
+            o["position"][1]=round(BASE+NEW_H-.38+1.55,5)
             o["size"]=[1.35,1.42,1.35]
     report["hillHeightM"]=NEW_H;report["sculptureHeightM"]=7.10
+    report["hillSummitFlatNormalizedRadius"]=.28
+    report["plinthEmbeddedIntoHillM"]=.38
+    assert max(math.hypot(x/15.2,z/9.3) for x in (-2.856,2.856)
+               for z in (-1.54,1.54)) < .28
+
+    # Preserve the existing original 2048px bilingual source texture, but
+    # replace its four tiny lines with two independently readable sides.
+    assert sum(o["id"]=="v6_inscription_fr_uk" for o in objs)==1
+    remove(lambda o:o["id"]=="v6_inscription_fr_uk")
+    inscriptions=(
+        ("fr",("LE COMMUNISME EST TOMBÉ","L’UKRAINE EST DEBOUT")),
+        ("uk",("КОМУНІЗМ УПАВ","УКРАЇНА ЖИВЕ")))
+    fonts=("C:/Windows/Fonts/arialbd.ttf",
+           "C:/Windows/Fonts/segoeuib.ttf","DejaVuSans-Bold.ttf")
+    for lang,lines in inscriptions:
+        bitmap=Image.new("RGB",(2048,512),(196,190,177))
+        draw=ImageDraw.Draw(bitmap)
+        draw.rectangle((14,14,2033,497),outline=(68,63,54),width=12)
+        for lineidx,line in enumerate(lines):
+            font=None
+            for sz in range(200,105,-5):
+                for font_name in fonts:
+                    try:
+                        candidate=ImageFont.truetype(font_name,sz)
+                        bb=draw.textbbox((0,0),line,font=candidate,stroke_width=2)
+                        if bb[2]-bb[0]<1910:
+                            font=candidate
+                            break
+                    except OSError:
+                        continue
+                if font:break
+            if font is None:raise RuntimeError(
+                "Missing bold font supporting the bilingual plaque")
+            bounds=draw.textbbox((0,0),line,font=font,stroke_width=2)
+            tw=bounds[2]-bounds[0]
+            th=bounds[3]-bounds[1]
+            x=(2048-tw)/2-bounds[0]
+            y=256*lineidx+128-th/2-bounds[1]
+            draw.text((int(x),int(y)),line,font=font,fill=(32,30,27),
+                      stroke_width=2,stroke_fill=(215,209,197))
+        for ix in range(4):
+            path="textures/revision/v7/engraving_%s_%d.png"%(lang,ix)
+            output=root/path
+            output.parent.mkdir(parents=True,exist_ok=True)
+            bitmap.crop((ix*512,0,(ix+1)*512,512)).save(output)
+            mid="v7_engraving_%s_%d"%(lang,ix)
+            mats["materials"].append(dict(id=mid,baseColor=[1,1,1],
+                roughness=.93,metallic=0,transmission=0,ior=1.5,
+                textureSet="tex_"+mid))
+            pbr["sets"].append(dict(id="tex_"+mid,material=mid,
+                pattern="concrete",resolution=512,imageFile=path))
+            plaque_w=5.31
+            tile_w=plaque_w/4
+            cy=BASE+NEW_H-.38+.605*1.29
+            cx=(-1.5+ix)*tile_w if lang=="fr" else (1.5-ix)*tile_w
+            z=72+(1.414*1.1+.013)*(1 if lang=="fr" else -1)
+            left=cx-tile_w/2
+            right=cx+tile_w/2
+            if lang=="uk":left,right=right,left
+            vertices=[[left,cy-.63,z],[right,cy-.63,z],
+                      [right,cy+.63,z],[left,cy+.63,z]]
+            name="v7_engraving_quad_%s_%d"%(lang,ix)
+            newgeo.append(mesh(name,vertices,
+                [[0,1,2],[0,2,3],[2,1,0],[3,2,0]],
+                [[0,0],[1,0],[1,1],[0,1]]))
+            objs.append(dict(id="inst_"+name,
+                parent="Place/Monument marteau faucille/Gravure bilingue",
+                geometry=name,material=mid,
+                position=[0,0,0],size=[1,1,1],rotationY=0))
+    report["largeEngravedPanels"]=8
+    report["bilingualPlaqueSides"]=["fr","uk"]
+    report["nativeEngravingPixelsPerFace"]=[2048,512]
+
+    # 12 original lamp posts are 24 instances (one stem + one globe).
+    original_poles=[o for o in objs if o["parent"]=="Mobilier/Lampadaires"]
+    assert len(original_poles)==24
+    remove(lambda o:o["parent"]=="Mobilier/Lampadaires"
+           and abs(o["position"][2]-40)<.001)
+    remaining_poles=[o for o in objs if o["parent"]=="Mobilier/Lampadaires"]
+    assert len(remaining_poles)==20
+    if not any(m["id"]=="lamp" for m in mats["materials"]):
+        mats["materials"].append(dict(id="lamp",baseColor=[1,.83,.65],
+            roughness=.27,metallic=0,transmission=0,ior=1.5,
+            textureSet="tex_lamp"))
+        pbr["sets"].append(dict(id="tex_lamp",material="lamp",
+            pattern="concrete",resolution=128))
+    for o in remaining_poles:
+        if o["geometry"]=="unit_sphere":o["material"]="lamp"
+    report["retainedLitLampPosts"]=10
 
     # 6. Swimming-pool stair: close to east wall, 2.4m wide, correct risers.
     remove(lambda o:o["parent"].startswith("Interieur/Escalier galerie"))
@@ -589,6 +686,31 @@ def build(root):
     cams["cameras"].append(dict(id="v7_east_gallery_closed",
         name="V7 · Coursive est planchers refermes",
         position=[24,4.3,-19],target=[43,6.4,-28],fovDegrees=70))
+    # True point-source lighting: previously only eight facade lights at
+    # y=4m, none at the cornice or around plaza lamp posts.
+    lighting=read(root/"lighting/day.json")
+    assert len(lighting["lights"])==60
+    for i,x in enumerate((-43,-35,-27,-19,-11,-3,5,13,21,29,37,45)):
+        lighting["lights"].append(dict(
+            position=[x,18.85,-2.92],radius=10.5,
+            intensity=2.3,color=[255,239,216]))
+        # Physical fluorescent tube attached to a metal roof bracket.
+        objs.append(box_inst("v7_upper_facade_lamp_%02d"%i,
+            "Architecture/Palais/Facade/Eclairage sous corniche",
+            x,19.05,-3.46,5.5,.10,.24,"lamp"))
+        objs.append(box_inst("v7_upper_facade_bracket_%02d"%i,
+            "Architecture/Palais/Facade/Eclairage sous corniche/Supports",
+            x,19.18,-3.61,5.55,.15,.20,"prp_window_frame"))
+    for o in remaining_poles:
+        if o["geometry"]!="unit_sphere":continue
+        x,y,z=o["position"]
+        lighting["lights"].append(dict(
+            position=[x,7.18,z],radius=14,intensity=2.1,
+            color=[255,242,222]))
+    assert len(lighting["lights"])==82
+    write(root/"lighting/v7-evening.json",lighting)
+    report["topCorniceRealLights"]=12
+    report["plazaRealLights"]=10
     # All V6 data and the original V5 remain untouched.
     write(root/"cameras/v7.json",cams)
     new_ids=[o["id"] for o in objs]
@@ -597,12 +719,13 @@ def build(root):
     write(root/"instances/v7-corrections.json",dict(format="m3d-instances-v1",instances=objs))
     write(root/"materials/v7.json",mats);write(root/"pbr/v7.json",pbr)
     scene=copy.deepcopy(scene)
-    scene["name"]="CSE WARP V17.422 / V7 - atrium, escaliers, fosses GLB et monument"
+    scene["name"]="CSE WARP V17.427 / V7 - corrections monument, eclairage et verriere"
     sec=scene["sectors"][0]
     sec["instances"]=["instances/v7-corrections.json"]
     sec["geometry"]=sec["geometry"]+["geometry/v7-corrections.json"]
     sec["materials"]=["materials/v7.json"];sec["pbr"]=["pbr/v7.json"]
     sec["cameras"]=["cameras/v7.json"]
+    sec["lighting"]=["lighting/v7-evening.json"]
     write(root/"scene-v7-corrections.json",scene)
     write(root/"scene-v4.json",scene)
     report.update(removedCategories=dict(removed),retainedRealTrees=len(trees),
