@@ -161,8 +161,19 @@ function build(profileName,p){
   B(shell+'/Volume','prp_concrete_panel',side*50.15,9.5,-30,.70,19,50);
  // Long galleries leave the entire natatorium volume open to the roof.
  for(const y of [4.5,9,13.5]){
-  for(const side of [-1,1])
-   B('Interieur/Galeries','prp_concrete_raw',side*39.5,y,-30,22,.30,49);
+  for(const side of [-1,1]){
+    if(y===4.5&&side===1){
+      // Stairwell: remove the overhead slab along the upper 15 m of the
+      // east-side stair, leaving a clear 5 m wide opening for a 1.70m avatar.
+      // Structural deck remains on both sides and at each end.
+      for(const [x,z,w,d] of [
+        [31.5,-30,6.0,49],[45,-30,11.0,49],
+        [37,-17.25,5.0,23.5],[37,-49.10,5.0,10.8]
+      ])B('Interieur/Galeries','prp_concrete_raw',x,y,z,w,.30,d);
+    }else{
+      B('Interieur/Galeries','prp_concrete_raw',side*39.5,y,-30,22,.30,49);
+    }
+  }
   B('Interieur/Galeries','prp_concrete_raw',0,y,-50.15,57,.30,9.7);
   // A genuine staircase shaft must remain open through the first
   // mezzanine. Otherwise the avatar's head hits the floor at y=4.5.
@@ -197,6 +208,9 @@ function build(profileName,p){
  rail(guard,0,-45.30,57,0);
  rail(guard,-23.325,-13.7,10.35,0);
  rail(guard,8.325,-13.7,40.35,0);
+ // Protect the new stairwell opening without blocking the upper exit.
+ rail(guard,34.50,-36.35,0,14.7);
+ rail(guard,39.50,-36.35,0,14.7);
  // Small beam-to-slab closures in front of the glass curtain wall.
  for(const y of [4.5,9,13.5])
    B('Architecture/Palais/Raccords structurels','prp_concrete_raw',
@@ -397,9 +411,11 @@ function build(profileName,p){
  for(const side of [-1,1])
   B('Interieur/Hall/Panneaux','prp_concrete_panel',side*11,2.8,-11,.25,4.1,5);
  // Hall light bars are visible architectural fixtures, not invisible bulbs.
+ // 20 elegant visible hall fixtures (previously 42), operated by the
+ // same 8 functional hall lights; avoids an overpacked fluorescent ceiling.
  for(const y of [7.55,11.95]){
-  for(const z of [-8,-12,-16]){
-   for(const x of [-26,-18,-10,-2,6,14,22]){
+  for(const z of [-10,-16]){
+   for(const x of [-24,-12,0,12,24]){
     B('Interieur/Hall/Plafonniers/Chassis','prp_window_frame',x,y+.18,z,3.0,.12,.46);
     B('Interieur/Hall/Plafonniers/Diffuseur','cse_pool_strip',x,y+.06,z,2.75,.075,.30);
    }
