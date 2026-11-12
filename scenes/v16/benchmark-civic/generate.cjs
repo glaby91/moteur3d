@@ -68,55 +68,44 @@ const cameras={format:'m3d-cameras-v1',cameras:[
 // V17.324: ~10x more independent light sources, not 10x the power of each bulb.
 // Designed for night/evening exploration at 19h. Keep under the D3D11
 // FrameConstants lightPositionRadius[256] and lightColorIntensity[256] limit.
+// V17.380: functional sources ≠ decorative visible fixtures.
+ // Reduced from 171 point lights to 60, distributed in architectural rows.
+ // Source count is an initial design target; photometry/visual checks follow.
 const indoorFixtures=[
-  // Swimming pool: five longitudinal rows, 11 fixtures per row (55).
-  ...[-44,-38,-32,-26,-20].flatMap(z=>
-    Array.from({length:11},(_,i)=>({
-      position:[-23+i*4.6,16.55,z],
-      radius:8.8,intensity:1.45,color:[246,249,255]
-    }))
-  ),
-  // Main hall and the monumental stairs: 9 x 4 ceiling modules (36).
-  ...[-7.5,-10.5,-13.5,-16.5].flatMap(z=>
-    Array.from({length:9},(_,i)=>({
-      position:[-32+i*8,7.45,z],
-      radius:9.5,intensity:1.25,color:[249,247,241]
-    }))
-  ),
-  // Three upper levels, both lateral galleries (54).
-  ...[4.5,9,13.5].flatMap(y=>
-    [-38,38].flatMap(x=>
-      Array.from({length:9},(_,i)=>({
-        position:[x,y+2.1,-50+i*5],
-        radius:7.4,intensity:1.05,color:[245,247,252]
-      }))
-    )
-  ),
-  // Locker rooms and service areas on both sides (12).
-  ...[-42,42].flatMap(x=>
-    [-47,-41,-35,-29,-23,-17].map(z=>({
-      position:[x,3.55,z],
-      radius:7.5,intensity:1.10,color:[244,248,255]
-    }))
-  )
+  // Swimming hall: two longitudinal rows of 6 wide-coverage lights.
+  ...[-38,-26].flatMap(z=>[-23,-14,-5,5,14,23].map(x=>({
+    position:[x,16.0,z],radius:15.5,intensity:1.85,color:[248,250,255]
+  }))),
+  // Main hall and monumental stairwell: 8 sources on paired beams.
+  ...[-10.5,-15.5].flatMap(z=>[-24,-8,8,24].map(x=>({
+    position:[x,7.1,z],radius:13,intensity:1.65,color:[255,244,223]
+  }))),
+  // Galleries: 24 lights, four on each side of three levels.
+  ...[4.5,9,13.5].flatMap(y=>[-38,38].flatMap(x=>[-45,-34,-23,-12].map(z=>({
+    position:[x,y-.32,z],radius:11.2,intensity:1.55,color:[247,248,251]
+  })))),
+  // Service and changing rooms: 6 sources.
+  ...[-42,42].flatMap(x=>[-43,-32,-21].map(z=>({
+    position:[x,3.4,z],radius:10,intensity:1.45,color:[250,248,241]
+  })))
 ];
 const lighting={format:'m3d-lighting-v1',hour:14.75,
   sun:{direction:[-.68,.65,-.35],intensity:3.1},
   ambient:{color:[.63,.73,.91],intensity:.39},
   lights:[
-    // Highlight art walls without altering the artwork's color data.
-    {position:[-15,11,-14.8],radius:7.5,intensity:1.2,color:[255,251,244]},
-    {position:[0,14,-7],radius:10,intensity:1.0,color:[255,250,244]},
-    ...indoorFixtures
+    // Mounted interior mural and the stair access.
+    {position:[0,3.95,-49.3],radius:10,intensity:1.65,color:[255,244,224]},
+    {position:[-15,3.9,-12],radius:9,intensity:1.5,color:[255,248,236]},
+    ...indoorFixtures,
+    // Architectural facade: few real lights, continuous visual strips.
+    ...[-39,-26,-13,0,13,26,39,47].map(x=>({
+      position:[x,4.0,-2.7],radius:13,intensity:1.3,
+      color:[255,225,184]
+    }))
   ]
 };
-// Accent lamps physically illuminate the facade around the rooftop sign.
-lighting.lights.push(...Array.from({length:12},(_,i)=>({
-  position:[-13.2+i*2.4,24.0,-1.85],radius:7.0,intensity:.80,
-  color:[255,210,154]
-})));
-if(lighting.lights.length!==171)
-  throw new Error('Expected 171 lights (159 interior + 12 rooftop accents)');
+if(lighting.lights.length!==60)
+  throw new Error('Expected 60 carefully positioned architectural light sources');
 const environment={format:'m3d-environment-v1',terrain:'finite',units:'m',
  note:'Fictional, explorable single modernist palace with olympic pool, a copied real Energetik mosaic artwork asset, and original Soviet-inspired monument; NOT historical reconstruction.'};
 function round(n){return Math.round(n*1000)/1000;}
@@ -180,6 +169,33 @@ function build(profileName,p){
    B('Interieur/Galeries','prp_concrete_raw',0,y,-9.45,57,.30,8.5);
   }
  }
+ // Protective guardrails must belong to the slabs, not float in space.
+ // First floor railing: posts embedded into the top of the mezzanine y=4.65.
+ // Preserve the central stair/landing access gap.
+ const guard='Interieur/Galeries/Garde-corps 1er etage';
+ const ground=4.65,top=5.75;
+ const rail=(group,cx,cz,dx,dz)=>{
+   if(dx>0){
+     B(group+'/Main courante','prp_steel_painted',cx,top,cz,dx,.075,.075);
+     B(group+'/Lisse','prp_steel_painted',cx,5.18,cz,dx,.055,.055);
+     for(let x=cx-dx/2;x<=cx+dx/2+.01;x+=2.5)
+       B(group+'/Montants','prp_steel_painted',x,5.18,cz,.085,1.14,.085);
+   } else {
+     B(group+'/Main courante','prp_steel_painted',cx,top,cz,.075,.075,dz);
+     B(group+'/Lisse','prp_steel_painted',cx,5.18,cz,.055,.055,dz);
+     for(let z=cz-dz/2;z<=cz+dz/2+.01;z+=2.5)
+       B(group+'/Montants','prp_steel_painted',cx,5.18,z,.085,1.14,.085);
+   }
+ };
+ rail(guard,-28.5,-30,0,49);
+ rail(guard,28.5,-30,0,49);
+ rail(guard,0,-45.30,57,0);
+ rail(guard,-23.325,-13.7,10.35,0);
+ rail(guard,8.325,-13.7,40.35,0);
+ // Small beam-to-slab closures in front of the glass curtain wall.
+ for(const y of [4.5,9,13.5])
+   B('Architecture/Palais/Raccords structurels','prp_concrete_raw',
+     0,y-.21,-5.0,96,.36,.45);
  // Perimeter roof + continuous glazed clerestory over the 50-m pool.
  for(const side of [-1,1])
   B(shell+'/Toiture','prp_roof_bitumen',side*40.2,19.55,-30,21.4,.55,51);
@@ -263,7 +279,9 @@ function build(profileName,p){
  for(const z of [-44.62,-19.38])
   B(pool+'/Parois','prp_tile_ceramic',0,-.45,z,50.5,2.1,.26);
  // Dedicated translucent water, rough dielectric with shallow wave detail.
- B(pool+'/Eau','cse_pool_water',0,.18,-32,49.7,.045,24.7);
+ // Water surface extends to the inner faces of all 4 basin walls
+ // (x inner = ±24.99; z inner = -44.49/-19.51), leaving no walkable slot.
+ B(pool+'/Eau','cse_pool_water',0,.18,-32,49.96,.025,24.94);
  // Reinforce floor lane visibility beneath the transparent surface.
  for(const z of [-43.25,-38.25,-33.25,-28.25,-23.25])
   B(pool+'/Bandes carrelage fond','prp_tile_ceramic',0,-1.34,z,48,.018,.32);
@@ -292,11 +310,11 @@ function build(profileName,p){
   for(let x=-26;x<=26;x+=4)
    B(pool+'/Lumière linéaire','prp_window_glass',x,16.61,z,3.85,.06,.20);
  }
- // Physical ceiling luminaires aligned with the 55 actual pool lights.
+ // Decorative ceiling luminaires share the 12 effective pool lights.
  // Each light is a luminous diffuser inside a discrete metal tray.
- for(const z of [-44,-38,-32,-26,-20]){
-  for(let i=0;i<11;i++){
-   const x=-23+i*4.6;
+ for(const z of [-41,-32,-23]){
+  for(let i=0;i<8;i++){
+   const x=-21+i*6;
    B(pool+'/Plafonniers/Chassis','prp_window_frame',x,16.73,z,2.75,.16,.56);
    B(pool+'/Plafonniers/Diffuseur','cse_pool_strip',x,16.63,z,2.48,.075,.32);
   }
