@@ -43,3 +43,15 @@ Initial independent V7 scene; validated Windows WARP CI; mural explicit-UV fix; 
 - Final run report: 26 custom pits, 82 paving sections retessellated, eight access gaps, eight lateral parvis transitions, 68.2 m front stairs, zero central rear gallery slabs.
 - Mural render checked: original full-width artwork now unobstructed by the deleted mezzanine and cross-gallery rail; safety railing at pool remains.
 - No claim of an interactive on-device walkthrough or HD620 benchmark; those remain explicit acceptance tests.
+
+
+## Fresco sightline repair — final validated revision
+- The original V7.422 mural obstruction was two different mechanisms: a **35-part transverse far-end pool barrier** and the **first-level side gallery** at x=28.5m. The latter could still overlay the mosaic from camera 07 even after removing the central rear floor.
+- Fixed with a constrained V7 scene upgrade: delete 35 rear pool-end barrier pieces, six inboard right-side gallery slabs, and the obsolete x=28.5m plus redundant old guardrail pieces; retain an outer 11.6m-wide level 3 strip and the stairwell at x=43m.
+- Rebuild the right gallery's outboard protective rail as five separated supported segments; the left side gallery and far pool-end opposite guardrails remain.
+- Remove the final 22 hanging pool pennants (two wires and 20 fabrics), which still occluded the mosaic after the gallery was opened. The pool water-lane dividers remain.
+- Camera 07 now starts from a grounded exterior pool deck position, not the removed upper mezzanine.
+- Latest validated WARP test run: https://github.com/glaby91/moteur3d/actions/runs/43321072039 — SUCCESS. Actual images from both camera 07 and frontal mural generated; visual inspection shows the mosaic unobstructed by either gallery or pennants.
+- Full Windows artifact id: 13990661584, ZIP SHA-256: e1158477ade6d5cb0fe6ed841bfb4d7e1bd7dd3c72a8c46eb5d686d78165041e; 243 ZIP entries, CRC test PASS.
+- Original V5/V6 files remain preserved; V17.421 low-RAM binary remains unchanged.
+- Important limitation: the 640x360 and 1366x768 WARP static renders do not constitute a full interactive, on-device collision or navigation test. This milestone solves the visible mural obstruction, not the remaining lighting/water/geometry backlog.
