@@ -71,6 +71,19 @@ jobs:
           assert t["muralAtriumCentralSlabs"]==0
           assert t["muralSightlineRemovedPoolEndRailParts"]==35
           assert t["poolEndGuardrailNearEndPreserved"]==34
+          assert t["galleryRightInboardSlabsRemoved"]==6
+          assert t["galleryRightOldRailPartsRemoved"]>=20
+          assert t["galleryRightOuterFootwayPreserved"] is True
+          assert t["galleryRightNewRailSections"]==5
+          assert sum(o["parent"].startswith("Interieur/Galeries/Garde-corps 1er etage/")
+                     and abs(o["position"][0]-28.5)<.01 for o in a)==0
+          assert sum(o["parent"]=="Interieur/Galeries/V7 Garde-corps recules/Main courante"
+                     for o in a)==5
+          assert any(o["id"]=="v7_gallery_right_third_floor_narrow" for o in a)
+          assert not any(o["parent"] in ("Interieur/Galeries","Interieur/Galeries/Plancher avec tremie")
+                     and 20<o["position"][0]<45
+                     and any(abs(o["position"][1]-h)<.01 for h in (4.5,9.,13.5))
+                     and o["position"][0]-o["size"][0]/2<38.8 for o in a)
           assert sum(o["parent"]=="Interieur/Piscine olympique/Garde-corps" and
                      abs(o["position"][2]+45.6)<.01 for o in a)==0
           assert sum(o["parent"]=="Interieur/Piscine olympique/Garde-corps" and

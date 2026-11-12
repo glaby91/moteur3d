@@ -324,6 +324,66 @@ def build(root):
     report["muralSightlineRemovedPoolEndRailParts"]=len(rear_rail)+len(rear_handrail)
     report["poolEndGuardrailNearEndPreserved"]=34
 
+    # The side gallery itself also projected a *long* foreground rail across
+    # the mural in the original camera 07: rail x=28.5, y=5.75, z=-30 ±24.5.
+    # Removing only the 35 rear pool-end rail pieces was insufficient.
+    # Open 10.4m of the interior RIGHT galleries (levels 4.5, 9 and 13.5)
+    # while RETAINING the outer strip at x=38.9..50.5 and the stair at x=43.
+    # The former 1st-level rail at x=28.5 and its redundant x=34.5/39.5
+    # fragments are replaced by fitted edge rails on the retained strip.
+    inboard=[o for o in objs if
+        o["parent"] in ("Interieur/Galeries",
+                        "Interieur/Galeries/Plancher avec tremie")
+        and 20<o["position"][0]<45
+        and any(abs(o["position"][1]-h)<.01 for h in (4.5,9.,13.5))
+        and o["position"][0]-o["size"][0]/2<38.8]
+    assert len(inboard)==6, (
+        "Unexpected right gallery geometry; refuse unsupported floor removal",
+        len(inboard),[(o["id"],o["position"]) for o in inboard])
+    remove(lambda o:o["id"] in {a["id"] for a in inboard})
+    older_right_rail=[o for o in objs if
+        o["parent"].startswith("Interieur/Galeries/Garde-corps 1er etage/")
+        and 28.4<o["position"][0]<40.5]
+    assert len(older_right_rail)>=20, "Expected right rail not found"
+    old_right_ids={o["id"] for o in older_right_rail}
+    remove(lambda o:o["id"] in old_right_ids)
+    objs.append(box_inst("v7_gallery_right_third_floor_narrow",
+        "Interieur/Galeries/V7 coursive exterieure conservee",
+        44.7,13.5,-30,11.6,.30,49,"prp_concrete_raw"))
+    # Physically attached 1.10m balustrades on outer strip with openings
+    # for the existing (retained) stairs at x=43.
+    rail_count=0
+    for level,spans in [
+        (4.5,[(-54.5,-23.0),(-10.5,-5.5)]),
+        (9.0,[(-54.5,-42.25),(-30.25,-5.5)]),
+        (13.5,[(-54.5,-5.5)])]:
+        for index,(lo,hi) in enumerate(spans):
+            length=hi-lo
+            if length<=0:continue
+            mid=(lo+hi)/2
+            prefix="v7_gallery_edge_%s_%d"%(int(level*10),index)
+            for j,(height,profile) in enumerate([
+                (level+.15+1.10,"Main courante"),
+                (level+.15+.56,"Lisse")]):
+                objs.append(box_inst(prefix+"_%s"%j,
+                    "Interieur/Galeries/V7 Garde-corps recules/"+profile,
+                    38.88,height,mid,.075,.075,length,
+                    "prp_steel_painted"))
+            n=max(2,int(math.ceil(length/2.5))+1)
+            for j in range(n):
+                zz=lo+length*j/(n-1)
+                objs.append(box_inst(prefix+"_post_%02d"%j,
+                    "Interieur/Galeries/V7 Garde-corps recules/Montants",
+                    38.88,level+.15+.55,zz,.075,1.10,.075,
+                    "prp_steel_painted"))
+            rail_count+=1
+    assert rail_count==5
+    report["galleryRightInboardSlabsRemoved"]=len(inboard)
+    report["galleryRightOldRailPartsRemoved"]=len(older_right_rail)
+    report["galleryRightOuterFootwayPreserved"]=True
+    report["galleryRightNewRailSections"]=rail_count
+
+
 
     # 7. True maximal-ratio artwork: original 2048x930 pixels -> 4x2 native tiles.
     # Runtime low-memory atlas is limited to <=512px/material, so 8 individual
@@ -370,6 +430,8 @@ def build(root):
     cams["cameras"][0].update(position=[0,2.2,100],target=[0,6.1,72],fovDegrees=59)
     cams["cameras"][0]["name"]="01 · Monument proche, départ à pied"
     cams["cameras"][1].update(position=[31,4.7,114],target=[0,5.8,72],fovDegrees=61)
+    next(c for c in cams["cameras"] if c["id"]=="v4_piscine").update(
+        position=[27.7,2.10,-16.5],target=[0,9.0,-54.14],fovDegrees=73)
     cams["cameras"].append(dict(id="v7_pool_fresco",name="V7 · Fresque piscine panoramique",
         position=[0,3.3,-13],target=[0,9.6,-54.14],fovDegrees=70))
     # All V6 data and the original V5 remain untouched.
