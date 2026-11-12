@@ -1,0 +1,66 @@
+name: CSE WARP V17.417 - vrais rendus jardinières façade
+run-name: WARP V17.417 - 3 vues des jardinières émaillées (sans reconstruire)
+on:
+  push:
+    branches:
+      - render/v17-facade-pots-warp-261112
+    paths:
+      - .github/workflows/render-v17-facade-pots-warp.yml
+permissions:
+  contents: read
+  actions: read
+jobs:
+  facades:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+      M3D_V16_FORCE_WARP: '1'
+      M3D_V16_GPU_GI_SAMPLES: '0'
+      M3D_V17_EXPERIMENT_Z_PREPASS: '0'
+    steps:
+      - name: Download actual validated Windows V17.417 complete package (no new build)
+        shell: pwsh
+        run: |
+          gh run download 43277492575 --repo glaby91/moteur3d --name CSE-WARP-V17.417-Windows-x64 --dir warp
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot download verified Windows build' }
+          if (!(Test-Path 'warp/moteur3d_v17_benchmark.exe')) { throw 'Missing actual WARP renderer' }
+          if (!(Test-Path 'warp/benchmark-civic/scene-v4.json')) { throw 'Missing source scene' }
+      - name: Introduce temporary camera views only (do not modify geometry or materials)
+        shell: pwsh
+        run: |
+          $path='warp/benchmark-civic/cameras/v4.json'
+          $doc=Get-Content $path -Raw | ConvertFrom-Json
+          $shots=@(
+            [pscustomobject]@{ id='pots_facade_gauche';name='Pots façade gauche - WARP';position=@(-31.0,2.65,19.0);target=@(-31.0,1.18,1.8);fovDegrees=50.0 },
+            [pscustomobject]@{ id='pot_emaillage_detail';name='Pot émaillé et végétation - WARP';position=@(-12.7,1.85,8.0);target=@(-12.0,1.16,1.8);fovDegrees=44.0 },
+            [pscustomobject]@{ id='pots_facade_droite';name='Pots façade droite - WARP';position=@(30.0,2.65,19.0);target=@(30.0,1.18,1.8);fovDegrees=50.0 }
+          )
+          foreach($shot in $shots){ $doc.cameras += $shot }
+          $doc | ConvertTo-Json -Depth 40 | Set-Content -Path $path -Encoding utf8
+          New-Item -ItemType Directory -Force images | Out-Null
+          Copy-Item $path 'images/cameras_pots_WARP.json'
+          $inst=Get-Content 'warp/benchmark-civic/instances/v4.json' -Raw | ConvertFrom-Json
+          $p=@($inst.instances|Where-Object {$_.parent -like 'Architecture/Facade/Jardinieres ceramique POP 1970*'})
+          if($p.Count -ne 72){throw "Expected 72 genuine planter component instances; got $($p.Count)"}
+          Write-Host "Found $($p.Count) planter components in unchanged V4 scene"
+      - name: Render the 3 real scene views with actual DirectX11 Microsoft WARP
+        shell: pwsh
+        run: |
+          foreach($cid in @('pots_facade_gauche','pot_emaillage_detail','pots_facade_droite')){
+            & 'warp/moteur3d_v17_benchmark.exe' 'warp/benchmark-civic/scene-v4.json' 'warp-output' --quick --camera-id $cid --hour 14 --raster-msaa 4 --raster-lod-percent 100 --raster-lod-enabled 0 --readback-depth 1
+            if($LASTEXITCODE -ne 0){throw "Failed real WARP render of $cid"}
+            $files=@(Get-ChildItem 'warp-output' -Recurse -Filter "raster_${cid}_1366x768_depth1.png")
+            if($files.Count -ne 1 -or $files[0].Length -lt 1500){throw "Missing real WARP output of $cid"}
+            Copy-Item $files[0].FullName "images/$cid.png"
+            $summary=Get-ChildItem 'warp-output' -Recurse -Filter summary.json|Sort-Object LastWriteTime -Descending |Select-Object -First 1
+            if(!$summary){throw "No rendering summary for $cid"}
+            Copy-Item $summary.FullName "images/$cid.summary.json"
+          }
+      - name: Publish genuine WARP images and camera metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V17.417-JARDINIERES-FACADE-3-VUES
+          path: images/
+          retention-days: 14
+          if-no-files-found: error
