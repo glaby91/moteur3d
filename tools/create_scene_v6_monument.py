@@ -37,7 +37,7 @@ def save(path, obj):
 def bed_elevation(x, z):
     # 20 m x 10.8 m planted central dome INSIDE existing ~56x32 m oval.
     # Plateau top supports the 5 m hammer+sickle without floating in midair.
-    rr = math.hypot((x-CX)/20.0, (z-CZ)/10.8)
+    rr = math.hypot((x-CX)/13.2, (z-CZ)/7.8)
     t = max(0.0, min(1.0, (rr-0.12)/(1.0-0.12)))
     smooth = t*t*(3.0-2.0*t)
     return BASE_Y + HILL_H*(1.0 - smooth)
@@ -240,7 +240,7 @@ def make_plaque(meshes):
     w,h,z=4.74,.99,2.80/2+.014
     y0=.11
     verts=[[-w/2,y0,z],[w/2,y0,z],[w/2,y0+h,z],[-w/2,y0+h,z]]
-    uv=[[0,1],[1,1],[1,0],[0,0]]
+    uv=[[0,0],[1,0],[1,1],[0,1]]  # WARP texture V orientation verified against real DX11 output
     faces=[[0,1,2],[0,2,3],[2,1,0],[3,2,0]]  # double-sided
     return register_mesh(meshes,'v6_inscription_front_texture',verts,faces,uv)
 
@@ -317,6 +317,39 @@ def main(root):
         objs.append(inst('v6_herbe_haute_%03d'%n,'Place/Butte relief 1m20/Herbes hautes GLB',mesh,mtl,
                          [round(x,4),round(bed_elevation(x,z)+.016,4),round(z,4)],
                          [round(h*.34,4),round(h,4),round(h*.34,4)],rng.randrange(360)))
+    # Denser planting without extra unique source GLBs or material duplication.
+    # Existing preserved flower2 meshes total about 285 triangles / flower.
+    # Wispy grass2 meshes total 155 triangles / tuft: inexpensive cover.
+    extra_cover=0
+    for n in range(700):
+        th=rng.uniform(0,2*math.pi)
+        radius=math.sqrt(rng.uniform(.015,.99))
+        x=27.3*radius*math.cos(th);z=CZ+15.2*radius*math.sin(th)
+        if abs(x)<3 and abs(z-CZ)<2.7:continue
+        h=rng.uniform(.25,.44);w=rng.uniform(.32,.48)
+        objs.append(inst('v6_couvre_sol_%03d'%n,'Place/Butte relief 1m20/Couvre-sol GLB dense',
+                         'asset_grass2_0','asset_mat_grass2_0',
+                         [round(x,4),round(bed_elevation(x,z)+.017,4),round(z,4)],
+                         [round(w,4),round(h,4),round(w,4)],rng.randrange(360)))
+        extra_cover+=1
+    extra_flowers=0
+    for n in range(260):
+        th=rng.uniform(0,2*math.pi)
+        radius=math.sqrt(rng.uniform(.12,.96))
+        x=24.8*radius*math.cos(th);z=CZ+13.9*radius*math.sin(th)
+        if abs(x)<3.6 and abs(z-CZ)<3:continue
+        h=rng.uniform(.39,.66);w=h*rng.uniform(.72,.89)
+        key='flower1' if n%5==0 else 'flower2'
+        for i,(mesh,mat) in enumerate([('asset_flower1_0','asset_mat_flower1_0'),
+                                      ('asset_flower1_1','asset_mat_flower1_1')] if key=='flower1' else
+                                      [('asset_flower2_0','asset_mat_flower2_0'),
+                                       ('asset_flower2_1','asset_mat_flower2_1')]):
+            if mesh not in existinggeo or mat not in existingmat:raise RuntimeError('Missing CC0 flower mesh')
+            objs.append(inst(f'v6_fleur_dense_{n:03d}_{i}',
+                 'Place/Butte relief 1m20/Fleurs GLB compactes',mesh,mat,
+                 [round(x,4),round(bed_elevation(x,z)+.012,4),round(z,4)],
+                 [round(w,4),round(h,4),round(w,4)],rng.randrange(360)))
+        extra_flowers+=1
     ids=[o['id'] for o in objs]
     if len(set(ids))!=len(ids):raise RuntimeError('Duplicate object ID')
     nmat=len(materials['materials'])
@@ -344,8 +377,8 @@ def main(root):
     # Additional intended views without touching original saved camera file.
     cameras=copy.deepcopy(get(root/'cameras/v4.json'))
     cameras['cameras'].extend([
-      {'id':'v6_monument_facade','name':'V6 - Monument depuis entree du palais','position':[0,3.1,11.5],
-       'target':[0,4.25,72],'fovDegrees':61},
+      {'id':'v6_monument_facade','name':'V6 - Monument depuis parvis du palais','position':[0,3.1,32.0],
+       'target':[0,4.10,72],'fovDegrees':43},
       {'id':'v6_monument_front','name':'V6 - Monument et inscription depuis place','position':[3.0,4.5,96],
        'target':[0,3.9,72],'fovDegrees':51},
       {'id':'v6_monument_contrechamp','name':'V6 - Depuis monument vers palais','position':[-7.0,3.8,66],
@@ -366,6 +399,7 @@ def main(root):
        'removedOldSculptureInstances':len(oldmon),'removedOldHillPieces':len(oldhill),
        'flowersAndGroundcoverResnappedToNewMound':dict(relocated),
        'tallGrassClumps':sum(o['parent']=='Place/Butte relief 1m20/Herbes hautes GLB' for o in objs),
+       'extraDenseGroundcoverClumps':extra_cover,'extraFlowerLocations':extra_flowers,
        'newGeometries':{x['id']:len(x['faces']) for x in meshes},
        'newMaterialsCount':nmat,'newInstancesCount':len(objs),
        'preservedPotPositions':len(set((round(o['position'][0],3),round(o['position'][2],3)) for o in objs if o['parent']=='Architecture/Facade/Grandes jardinières GLB 1970')),
