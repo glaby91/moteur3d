@@ -418,6 +418,52 @@ jobs:
           name: CSE-WARP-V17.${{ github.run_number }}-Windows-x64
           path: dist-v17/
           if-no-files-found: error
+      - name: V17.372 EXPERIMENT — full-PBR exact axis light-culling A-B
+        shell: pwsh
+        timeout-minutes: 18
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = 'build-v17/prototype-v372'
+          New-Item -ItemType Directory -Force "$root/captures" | Out-Null
+          $exe = 'build-v17/Release/moteur3d_v17_benchmark.exe'
+          $scene = 'scenes/v16/benchmark-civic/scene-extreme.json'
+          $rows = @()
+          foreach ($msaa in @(1,2,8)) {
+            foreach ($lightCount in @(0,171)) {
+              foreach ($stage in @('full','pbr-fast')) {
+                $caseId = "$stage-msaa$msaa-light$lightCount"
+                $dir = "$root/$caseId"
+                & $exe $scene $dir --quick --camera-id facade --hour 19 --profile-stage $stage --light-limit $lightCount --raster-msaa $msaa --readback-depth 1
+                if ($LASTEXITCODE -ne 0) { throw "Prototype V17.372 failed: $caseId" }
+                $summary = Get-ChildItem $dir -Recurse -Filter summary.json | Select-Object -First 1
+                if (!$summary) { throw "No summary.json: $caseId" }
+                $doc = Get-Content $summary.FullName -Raw | ConvertFrom-Json
+                $render = @($doc.cases | Where-Object { $_.backend -eq 'V17_D3D11_Raster' })[0]
+                if (!$render -or $render.status -ne 'ok') { throw "Bad result: $caseId" }
+                $rows += [pscustomobject]@{
+                  Id=$caseId;Stage=$stage;MSAA=$msaa;Lights=$lightCount
+                  GpuDrawMs=$render.gpuDrawMs;StreamFps=$render.streamFps
+                  CpuSubmitMs=$render.cpuSubmitMs;GpuTransferMs=$render.gpuTransferMs
+                  CpuMapWaitMs=$render.cpuMapWaitMs;DrawCalls=$render.gpuDrawCalls
+                  Triangles=$render.submittedTriangles;Status=$render.status
+                }
+                $png = Get-ChildItem $dir -Recurse -Filter 'raster_facade_*.png' | Select-Object -First 1
+                if ($png) { Copy-Item $png.FullName "$root/captures/$caseId.png" }
+              }
+            }
+          }
+          $rows | Export-Csv "$root/pbr-fast-ab.csv" -NoTypeInformation -Encoding utf8
+          $rows | Format-Table -AutoSize | Out-String | Write-Host
+          if ($rows.Count -ne 12) { throw "Missing full-PBR A-B comparisons" }
+      - name: Upload isolated V17.372 full-PBR A-B profiles and captures
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17.${{ github.run_number }}-PBR-FAST-EXPERIMENT
+          path: build-v17/prototype-v372/
+          if-no-files-found: warn
       - name: V17.371 EXPERIMENT — pixel-shader cost, overdraw proxy, PBR and MSAA
         shell: pwsh
         timeout-minutes: 35

@@ -341,6 +341,12 @@ float4 PSMain(VSOut i):SV_TARGET {
     [loop] for (uint l = 0; l < lightCount; ++l) {
         float3 delta = lightPositionRadius[l].xyz - i.world;
         float radius = lightPositionRadius[l].w;
+#if defined(M3D_V17_PROFILE_PBR_FAST)
+        // Exact conservative sphere AABB reject: cheap axis checks
+        // precede the expensive dot product for far-away lights.
+        // No light can affect this pixel if any coordinate is outside.
+        [branch] if(abs(delta.x)<radius && abs(delta.y)<radius && abs(delta.z)<radius) {
+#endif
 #if defined(M3D_V17_OPTIMIZE_PIXELS)
         // Reject far lights before computing length()/sqrt. Allow a
         // conservative epsilon to keep the legacy threshold identical.
@@ -357,6 +363,9 @@ float4 PSMain(VSOut i):SV_TARGET {
                 color += colorControls.x>0.5 ? base*localIrradiance : localIrradiance;
             }
 #if defined(M3D_V17_OPTIMIZE_PIXELS)
+        }
+#endif
+#if defined(M3D_V17_PROFILE_PBR_FAST)
         }
 #endif
     }
@@ -1300,6 +1309,7 @@ private:
             if(std::strcmp(profile,"flat")==0)profileMacro="M3D_V17_PROFILE_FLAT";
             else if(std::strcmp(profile,"texture")==0)profileMacro="M3D_V17_PROFILE_TEXTURE";
             else if(std::strcmp(profile,"basic")==0)profileMacro="M3D_V17_PROFILE_BASIC";
+            else if(std::strcmp(profile,"pbr-fast")==0)profileMacro="M3D_V17_PROFILE_PBR_FAST";
         }
         const D3D_SHADER_MACRO pixelMacros[]={
             {"M3D_V17_OPTIMIZE_PIXELS",optimizePixels?"1":"0"},
