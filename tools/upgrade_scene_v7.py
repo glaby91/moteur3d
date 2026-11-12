@@ -287,7 +287,9 @@ def build(root):
             tw=bounds[2]-bounds[0]
             th=bounds[3]-bounds[1]
             x=(2048-tw)/2-bounds[0]
-            y=256*lineidx+128-th/2-bounds[1]
+            # Lower inscription line must sit ABOVE the 3.2m mound.
+            # Geometry stays buried 38cm; move ink, not pedestal or camera.
+            y=256*lineidx+128-th/2-bounds[1] - (48 if lineidx==1 else 0)
             draw.text((int(x),int(y)),line,font=font,fill=(32,30,27),
                       stroke_width=2,stroke_fill=(215,209,197))
         for ix in range(4):
@@ -322,6 +324,7 @@ def build(root):
     report["largeEngravedPanels"]=8
     report["bilingualPlaqueSides"]=["fr","uk"]
     report["nativeEngravingPixelsPerFace"]=[2048,512]
+    report["engravingSecondLineRaisedPixels"]=48
 
     # 12 original lamp posts are 24 instances (one stem + one globe).
     original_poles=[o for o in objs if o["parent"]=="Mobilier/Lampadaires"]
@@ -752,7 +755,7 @@ def build(root):
     write(root/"instances/v7-corrections.json",dict(format="m3d-instances-v1",instances=objs))
     write(root/"materials/v7.json",mats);write(root/"pbr/v7.json",pbr)
     scene=copy.deepcopy(scene)
-    scene["name"]="CSE WARP V17.427 / V7 - corrections monument, eclairage et verriere"
+    scene["name"]="CSE WARP V17.428 / V7 - gravure lisible, eclairage et vitrages"
     sec=scene["sectors"][0]
     sec["instances"]=["instances/v7-corrections.json"]
     sec["geometry"]=sec["geometry"]+["geometry/v7-corrections.json"]
