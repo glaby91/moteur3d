@@ -165,6 +165,7 @@ Texture2DArray<float> roughnessMap : register(t2);
 Texture2DArray<float4> normalMap : register(t3);
 Texture3D<float4> indirectProbes : register(t4);
 Texture3D<float4> indirectProbesNext : register(t5);
+Texture2D<uint4> lightTileMasks : register(t6);
 SamplerState wrapSampler : register(s0);
 SamplerState probeSampler : register(s1);
 struct VSIn { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; uint mat:MATERIAL; };
@@ -338,7 +339,19 @@ float4 PSMain(VSOut i):SV_TARGET {
         specTint=lerp(specTint,float3(.24,.26,.28),saturate(glazing*1.8));
     }
     color += specTint * specular * (0.88+0.22*fresnel);
+#if defined(M3D_V17_PROFILE_CPU_TILE)
+    // One uint4 RGBA32 tile texel holds four light bit masks.
+    // Two texels cover 256 possible source lights; no compute shader required.
+    const uint2 tile=uint2(i.p.xy)/32u;
+    [loop] for(uint wordIndex=0u;wordIndex<8u;++wordIndex) {
+        const uint4 words=lightTileMasks.Load(int3(tile.x*2u+(wordIndex/4u),tile.y,0));
+        uint bits=words[wordIndex%4u];
+        [loop] while(bits!=0u) {
+            const uint l=wordIndex*32u+firstbitlow(bits);
+            bits&=(bits-1u);
+#else
     [loop] for (uint l = 0; l < lightCount; ++l) {
+#endif
         float3 delta = lightPositionRadius[l].xyz - i.world;
         float radius = lightPositionRadius[l].w;
 #if defined(M3D_V17_PROFILE_PBR_FAST)
@@ -369,6 +382,9 @@ float4 PSMain(VSOut i):SV_TARGET {
         }
 #endif
     }
+#if defined(M3D_V17_PROFILE_CPU_TILE)
+    }
+#endif
     if(hybridControls.x>0.5){
         // Indirect probes modify AMBIENT energy instead of adding an extra
         // full-strength light pass. This prevents washed-out concrete.
@@ -857,6 +873,69 @@ public:
         };
         for(const Light& l:pointLights)appendLight(l,1.f);
         for(const Light& l:scene.lights)appendLight(l,sceneLightScale);
+        // CPU tiled-light preparation is intentionally straightforward:
+        // ~171 sphere projections + filling small 32x32 screen-tile bitmasks.
+        // All complex PBR and material evaluation stays on DirectX.
+        const char* tileExperiment=std::getenv("M3D_V17_PROFILE_SHADER");
+        if(tileExperiment&&std::strcmp(tileExperiment,"pbr-tile")==0){
+            const unsigned tilesX=(unsigned(w)+31u)/32u,tilesY=(unsigned(h)+31u)/32u;
+            if(!tileMaskTexture_||lightTilesX_!=tilesX||lightTilesY_!=tilesY){
+                lightTileMaskSrv_.Reset();tileMaskTexture_.Reset();
+                D3D11_TEXTURE2D_DESC td{};
+                td.Width=tilesX*2u;td.Height=tilesY;
+                td.MipLevels=1;td.ArraySize=1;
+                td.Format=DXGI_FORMAT_R32G32B32A32_UINT;
+                td.SampleDesc.Count=1;td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+                td.Usage=D3D11_USAGE_DEFAULT;
+                if(FAILED(device_->CreateTexture2D(&td,nullptr,&tileMaskTexture_))||
+                   FAILED(device_->CreateShaderResourceView(tileMaskTexture_.Get(),nullptr,&lightTileMaskSrv_))){
+                    error=L"Creation des masques de lumieres CPU par tuiles impossible.";return false;
+                }
+                lightTilesX_=tilesX;lightTilesY_=tilesY;
+            }
+            std::vector<uint32_t> masks(size_t(tilesX)*tilesY*8u,0u);
+            for(uint32_t l=0;l<cb.lightCount;++l){
+                const float r=cb.lightPositionRadius[l][3];
+                const V relative{
+                    cb.lightPositionRadius[l][0]-cam.eye.x,
+                    cb.lightPositionRadius[l][1]-cam.eye.y,
+                    cb.lightPositionRadius[l][2]-cam.eye.z
+                };
+                const float z=dot(relative,cam.f);
+                if(z+r<cb.nearPlane||z-r>cb.farPlane)continue;
+                const float x=dot(relative,cam.r),y=dot(relative,cam.u);
+                int tx0=0,ty0=0,tx1=int(tilesX)-1,ty1=int(tilesY)-1;
+                // If the influence sphere crosses the near plane, retain
+                // every tile. This conservative fallback cannot lose light.
+                if(z-r>cb.nearPlane&&r>=0.f){
+                    const float zNear=z-r,zFar=z+r;
+                    const auto bounds=[&](float axis,float slope,float pixels)->std::pair<float,float>{
+                        const float a=(axis-r)/slope,b=(axis+r)/slope;
+                        const float v0=std::min({a/zNear,a/zFar,b/zNear,b/zFar});
+                        const float v1=std::max({a/zNear,a/zFar,b/zNear,b/zFar});
+                        return {((v0+1.f)*.5f)*pixels,((v1+1.f)*.5f)*pixels};
+                    };
+                    const auto bx=bounds(x,cam.tanHalf,float(w));
+                    const auto by=bounds(y,cam.tanHalf/std::max(.0001f,cam.aspect),float(h));
+                    const auto tileClamp=[](float pixel,int maxTile)->int{
+                        return int(std::clamp(std::floor(pixel/32.f),0.f,float(maxTile)));
+                    };
+                    tx0=tileClamp(bx.first,int(tilesX)-1);
+                    tx1=tileClamp(bx.second,int(tilesX)-1);
+                    // raster SV_Position origin is top-left; camera Y is up.
+                    ty0=tileClamp(float(h)-by.second,int(tilesY)-1);
+                    ty1=tileClamp(float(h)-by.first,int(tilesY)-1);
+                    if(bx.second<0.f||bx.first>float(w)||by.second<0.f||by.first>float(h))continue;
+                }
+                const uint32_t word=l/32u,bit=1u<<(l%32u);
+                for(int ty=ty0;ty<=ty1;++ty)
+                    for(int tx=tx0;tx<=tx1;++tx)
+                        masks[(size_t(ty)*tilesX+size_t(tx))*8u+word]|=bit;
+            }
+            // Each tile is two adjacent RGBA32_UINT pixels: 8 words.
+            context_->UpdateSubresource(tileMaskTexture_.Get(),0,nullptr,masks.data(),
+                                        UINT(tilesX*8u*sizeof(uint32_t)),0);
+        }
         D3D11_MAPPED_SUBRESOURCE mapped{};
         HRESULT hr=context_->Map(constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped);
         if(FAILED(hr)){error=L"Impossible de transmettre les paramètres à DirectX 11.";return false;}
@@ -872,6 +951,8 @@ public:
         context_->RSSetState(raster_.Get());context_->OMSetDepthStencilState(depth_.Get(),0);context_->VSSetShader(vs_.Get(),nullptr,0);context_->PSSetShader(ps_.Get(),nullptr,0);
         ID3D11Buffer* cbuff=constants_.Get();context_->VSSetConstantBuffers(0,1,&cbuff);context_->PSSetConstantBuffers(0,1,&cbuff);
         ID3D11ShaderResourceView* srvs[]={albedo_.Get(),shadowSrv_.Get(),roughness_.Get(),normal_.Get(),hybrid?probeSrv_.Get():nullptr,hybrid?(hasBakedGi_?probeNextSrv_.Get():probeSrv_.Get()):nullptr};context_->PSSetShaderResources(0,6,srvs);
+        ID3D11ShaderResourceView* tileSrv=lightTileMaskSrv_.Get();
+        context_->PSSetShaderResources(6,1,&tileSrv);
         ID3D11SamplerState* samplers[]={sampler_.Get(),probeSampler_.Get()};context_->PSSetSamplers(0,2,samplers);
         UINT submittedVertices=0;
         uint64_t drawCalls=0;
@@ -1338,6 +1419,7 @@ private:
             else if(std::strcmp(profile,"texture")==0)profileMacro="M3D_V17_PROFILE_TEXTURE";
             else if(std::strcmp(profile,"basic")==0)profileMacro="M3D_V17_PROFILE_BASIC";
             else if(std::strcmp(profile,"pbr-fast")==0)profileMacro="M3D_V17_PROFILE_PBR_FAST";
+            else if(std::strcmp(profile,"pbr-tile")==0)profileMacro="M3D_V17_PROFILE_CPU_TILE";
         }
         const D3D_SHADER_MACRO pixelMacros[]={
             {"M3D_V17_OPTIMIZE_PIXELS",optimizePixels?"1":"0"},
@@ -1349,7 +1431,8 @@ private:
             {profileMacro,"1"},{nullptr,nullptr}
         };
         hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",
-            optimizePixels?pixelMacros:pixelMacrosLegacy,nullptr,"PSMain","ps_4_0",
+            optimizePixels?pixelMacros:pixelMacrosLegacy,nullptr,"PSMain",
+            profileMacro&&std::strcmp(profileMacro,"M3D_V17_PROFILE_CPU_TILE")==0?"ps_5_0":"ps_4_0",
             D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&psCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation du pixel shader DirectX 11 impossible");return false;}
         if(FAILED(device_->CreateVertexShader(vsCode->GetBufferPointer(),vsCode->GetBufferSize(),nullptr,&vs_))||FAILED(device_->CreatePixelShader(psCode->GetBufferPointer(),psCode->GetBufferSize(),nullptr,&ps_))){error=L"Création des shaders DirectX 11 impossible.";return false;}
@@ -1848,6 +1931,9 @@ private:
     UINT foliageInstanceCount_=0;
     ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_,probeSampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_,probeSrv_;ComPtr<ID3D11Texture3D> probeTexture_,probeNextTexture_;
     ComPtr<ID3D11ShaderResourceView> probeNextSrv_;
+    ComPtr<ID3D11Texture2D> tileMaskTexture_;
+    ComPtr<ID3D11ShaderResourceView> lightTileMaskSrv_;
+    unsigned lightTilesX_=0,lightTilesY_=0;
     gibake::Table bakedGi_{};bool hasBakedGi_=false;
     uint64_t loadedGiFileRevision_=0;
     int lowFrame_=-1,highFrame_=-1;
