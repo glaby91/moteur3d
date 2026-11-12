@@ -14,13 +14,23 @@ import pathlib
 import urllib.request
 import zipfile
 
-SOURCE = "https://kenney.nl/media/pages/assets/nature-kit/37ac38a37b-1677698939/kenney_nature-kit.zip"
-EXPECTED = "fa7974a0d342bfe63c38664ba9f8ec1a4aab8ea25f099bdc56870e33588c4d9d"
-MODELS = [
-    "tree_oak", "tree_default", "tree_detailed", "tree_pineDefaultA",
-    "tree_pineDefaultB", "tree_fat", "tree_oak", "tree_detailed",
-    "tree_pineDefaultA", "tree_default",
-]
+SOURCE = "https://github.com/Hidencod/tge-assets/tree/main/packs/nature-kit"
+SOURCE_ORIGINAL = "https://kenney.nl/assets/nature-kit"
+MIRROR = "https://raw.githubusercontent.com/Hidencod/tge-assets/main/packs/nature-kit/"
+# Git blob IDs are exact content hashes of the public CC0 source mirror.
+EXPECTED = {
+    "tree-oak": "b136723ada4b5574b71f727120ab21fa579bf2fb",
+    "tree-default": "13247443438a210c252d3324c511aba3cb3b392a",
+    "tree-detailed": "8d59ea41e280a5ea9234ec1e503fb871c55021de",
+    "tree-pinedefaulta": "f1217a9ee5b1d8f2027d39fe6bd151d20be5ab84",
+    "tree-pinedefaultb": "3ecbf261dbaf7ad183660d1e00e7c941fef6b0de",
+    "tree-fat": "55862c422bc6aa8f4c7882805c171ef0d8aa2e75",
+    "tree-thin": "82f68f14b55807b9f6071674aff016f7d5684e45",
+    "tree-tall": "78395a0af80d518fc48d78eaf6afbfff996d6a36",
+    "tree-pinetalla-detailed": "55fb026627db69fea1cbaba2b30f98b19063bcaa",
+    "tree-pinetallb-detailed": "e9fcb7c7d40eb52d67ae51dcaebfe3426422b20b",
+}
+MODELS = list(EXPECTED)
 LOCATIONS = [
     (-62, 31, 10.0, 0), (62, 35, 11.0, 38), (-62, 50, 10.8, 94),
     (63, 54, 12.0, 153), (-60, 72, 11.6, 212), (61, 76, 10.2, 274),
@@ -35,18 +45,29 @@ def save(path, value):
 def read(path):
     return json.loads(path.read_text(encoding="utf-8"))
 
-def load_source(cache):
-    if cache.exists():
-        raw = cache.read_bytes()
-    else:
-        with urllib.request.urlopen(SOURCE, timeout=90) as req:
-            raw = req.read()
+class VerifiedCC0Mirror:
+    def __init__(self, cache):
+        self.data = {}
         cache.parent.mkdir(parents=True, exist_ok=True)
-        cache.write_bytes(raw)
-    actual = hashlib.sha256(raw).hexdigest()
-    if actual != EXPECTED:
-        raise RuntimeError("Kenney Nature Kit SHA256 mismatch: " + actual)
-    return zipfile.ZipFile(io.BytesIO(raw))
+        for model, expected_sha in EXPECTED.items():
+            dest = cache.parent / (model + ".glb")
+            if dest.exists():
+                raw = dest.read_bytes()
+            else:
+                with urllib.request.urlopen(MIRROR + model + ".glb", timeout=60) as req:
+                    raw = req.read()
+            blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\\0" + raw).hexdigest()
+            if blob != expected_sha:
+                raise RuntimeError("Unverified CC0 GLB: " + model + " git blob SHA=" + blob)
+            dest.write_bytes(raw)
+            self.data["Models/GLTF format/" + model + ".glb"] = raw
+    def namelist(self):
+        return list(self.data)
+    def read(self, path):
+        return self.data[path]
+
+def load_source(cache):
+    return VerifiedCC0Mirror(cache)
 
 def convert(zf, model, trimesh):
     import numpy as np
@@ -149,7 +170,7 @@ def main():
     save(root / "geometry/trees-pilot.json", geometry)
     save(root / "instances/v4-trees-pilot.json", instances)
     report = {
-        "author": "Kenney", "source": SOURCE, "sha256": EXPECTED, "license": "CC0-1.0",
+        "author": "Kenney", "source": SOURCE, "original": SOURCE_ORIGINAL, "gitBlobShas": EXPECTED, "license": "CC0-1.0",
         "trees": 10, "sourceModels": MODELS, "positions": LOCATIONS,
         "instancesAdded": len(pilot_ids), "meshCount": len(geometry["meshes"]),
         "triangles": sum(len(m["faces"]) for m in geometry["meshes"]),
