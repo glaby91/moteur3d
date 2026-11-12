@@ -334,7 +334,7 @@ function build(profileName,p){
   // Most flower heads use modest 12x8-patch sphere meshes; only every
   // seventh cluster uses an organic foliage canopy. This keeps the actual
   // lightweight scene from becoming a 600k-triangle garden benchmark.
-  if(i%7===0)
+  if(i%3===0)
    F('Place/Butte végétalisée/Fleurs et feuillages',flower,
      x,height+r*.24,z,r,.65+.4*rand(),r);
   else
@@ -369,10 +369,9 @@ function build(profileName,p){
  for(let x=-46;x<=46;x+=3.2)for(let z=-52;z<=-9;z+=6.4){
    B('Architecture/Palais/Toiture techniques','prp_roof_metal',x,19.9,z,1,.6,2.4);
  }
- for(let i=0;i<80;i++){
-   const x=-43+i*1.1;
-   B('Architecture/Palais/Enseigne fictive','prp_steel_rusted',x,20.8,-3.4,.13,2.0,.16);
- }
+ // Replace the isolated sign rods with a coherent parapet/cornice.
+ B('Architecture/Palais/Acrotere','prp_concrete_panel',0,19.85,-3.75,97.5,.72,.55);
+ B('Architecture/Palais/Corniche','prp_terrazzo_floor',0,19.35,-3.65,98,.22,.8);
  // Exterior benches removed: the single oval planter seat is the only one.
  for(let i=0;i<Math.min(p.lamps,18);i++){
   const x=-65+(i%2)*130,z=24+Math.floor(i/2)*8;
@@ -391,9 +390,15 @@ function build(profileName,p){
    const z=-95+(row%38)*5.2+(rand()-.5)*2;
    const h=9+rand()*7;
    B('Nature/Arbres','prp_bark_wet',x,h*.35,z,.55,h*.7,.55);
-   F('Nature/Arbres','prp_foliage',x,h*.83,z,4+rand()*2,5+rand()*3,4+rand()*2);
+   // Layered asymmetric crowns and branched silhouettes.
+   for(const side of [-1,1]){
+    B('Nature/Arbres/Branches','prp_bark_wet',x+side*.72,h*.63,z+.32,.20,1.85,.20,side*24);
+    F('Nature/Arbres/Houppier','prp_foliage',x+side*1.55,h*.76,z+side*.6,
+      2.7+rand(),3.5+rand(),2.8+rand());
+   }
+   F('Nature/Arbres/Houppier','prp_foliage',x,h*.91,z,3.6+rand(),4+rand(),3.5+rand());
    if(p.detail>8){
-     F('Nature/Arbres','prp_foliage',x+.9,h*.72,z+.8,3.5,3.1,3);
+    F('Nature/Arbres/Houppier','prp_foliage',x+.9,h*.72,z+.8,3.1,2.6,3.0);
    }
  }
  // The former auditorium seating was removed for the olympic pool.
