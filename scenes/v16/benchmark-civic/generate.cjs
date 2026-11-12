@@ -369,11 +369,28 @@ function build(profileName,p){
      x,3.96,z,.48,.38,.045);
   }
  }
- for(const x of [-25.72,25.72])for(const z of [-41.5,-22.5]){
-  for(const dz of [-.28,.28])
-   B(pool+'/Echelles/Barres','prp_steel_painted',x,1.0,z+dz,.075,1.95,.08);
-  for(const y of [.30,.62,.94,1.26])
-   B(pool+'/Echelles/Marches','prp_steel_painted',x,y,z,.08,.07,.60);
+ // Four stainless pool ladders: rungs actually descend below water level
+ // and curved handrails run from immersed wall to anchored deck plates.
+ for(const side of [-1,1])for(const z of [-41.5,-22.5]){
+   const xIn=side*24.60,xDeck=side*25.75;
+   for(const dz of [-.36,.36]){
+     B(pool+'/Echelles/Tube immerge','prp_steel_painted',
+       xIn,-.28,z+dz,.095,2.10,.095);
+     // Continuous arc approximated by overlapping smooth rounded cylinders,
+     // not unattached rectangular vertical sticks.
+     for(let k=0;k<=16;k++){
+       const t=k/16,theta=t*Math.PI*.75;
+       const xx=side*(24.60+1.15*t);
+       const yy=.78+.60*Math.sin(theta);
+       S(pool+'/Echelles/Main courante arrondie',
+         'prp_steel_painted',xx,yy,z+dz,.135,.135,.135);
+     }
+     B(pool+'/Echelles/Platine ancrage','prp_steel_painted',
+       xDeck,.62,z+dz,.28,.10,.22);
+   }
+   for(const y of [-.90,-.53,-.16,.21])
+     B(pool+'/Echelles/Marches','prp_steel_painted',
+       xIn,y,z,.13,.085,.74);
  }
  // Open lobby at ground level with a clear line of sight into the pool.
  B('Interieur/Hall/Accueil','prp_wood_weathered',-19,1.05,-10,6,1.1,1.2);
