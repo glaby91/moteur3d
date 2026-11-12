@@ -1,0 +1,55 @@
+name: CSE WARP V17.420 V5 — vues réelles rapprochées
+run-name: WARP V5 — jardinières, fleurs et fosses circulaires (3 vues)
+on:
+  push:
+    branches: [feature/v17-420-v5-vegetation-pots-paving-water-261112]
+    paths: [.github/workflows/v17-v5-closeups.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  closeups:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      M3D_V16_FORCE_WARP: '1'
+      M3D_V17_EXPERIMENT_Z_PREPASS: '0'
+    steps:
+      - name: Use already WARP-validated full scene V5 (no new compilation)
+        shell: pwsh
+        run: |
+          gh run download 43290143015 --repo glaby91/moteur3d --name CSE-WARP-V17.420-V5-Windows-x64 --dir warp
+          if($LASTEXITCODE -ne 0){throw 'Cannot retrieve validated V5'}
+          if(!(Test-Path 'warp/moteur3d_v17_benchmark.exe')){throw 'Missing executable'}
+      - name: Add exactly three temporary cameras (do not change geometry)
+        shell: pwsh
+        run: |
+          $path='warp/benchmark-civic/cameras/v4.json'
+          $doc=Get-Content $path -Raw |ConvertFrom-Json
+          $views=@(
+            [pscustomobject]@{id='v5_pots_reels';name='8 grandes jardinières au ras de la facade';position=@(-30.0,3.20,19.5);target=@(-30.0,1.8,1.8);fovDegrees=53.0},
+            [pscustomobject]@{id='v5_massif_fleurs';name='GLB Fleurs et herbes du massif';position=@(14.5,2.55,88.0);target=@(7.5,1.35,75.0);fovDegrees=54.0},
+            [pscustomobject]@{id='v5_fosse_terre';name='Fosse circulaire avec ouverture dans pavage';position=@(-45.0,3.20,42.0);target=@(-40.96,0.1,33.225);fovDegrees=53.0}
+          )
+          foreach($v in $views){$doc.cameras += $v}
+          $doc |ConvertTo-Json -Depth 40|Set-Content $path -Encoding utf8
+          New-Item -ItemType Directory -Force V5-IMAGES-WARP|Out-Null
+      - name: Render three 1366x768 genuine Windows DirectX11 WARP close-ups
+        shell: pwsh
+        run: |
+          foreach($cid in @('v5_pots_reels','v5_massif_fleurs','v5_fosse_terre')){
+            & 'warp/moteur3d_v17_benchmark.exe' 'warp/benchmark-civic/scene-v5-complete.json' 'v5-preview' --quick --camera-id $cid --hour 14 --raster-msaa 1 --raster-lod-percent 100 --raster-lod-enabled 0
+            if($LASTEXITCODE -ne 0){throw "DirectX11 WARP failed: $cid"}
+            $picture=@(Get-ChildItem 'v5-preview' -Recurse -Filter "raster_${cid}_1366x768_depth1.png")
+            if($picture.Count -ne 1 -or $picture[0].Length -lt 2000){throw "No WARP output: $cid"}
+            Copy-Item $picture[0].FullName "V5-IMAGES-WARP/$cid.png"
+            $summaries=@(Get-ChildItem 'v5-preview' -Recurse -Filter summary.json|Sort-Object LastWriteTime -Descending)
+            if($summaries.Count){Copy-Item $summaries[0].FullName "V5-IMAGES-WARP/$cid-summary.json"}
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V17.420-V5-3-VUES-CLOSEUP
+          path: V5-IMAGES-WARP/
+          if-no-files-found: error
+          retention-days: 30
