@@ -521,7 +521,12 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
  c.ctx->CSSetShaderResources(0,8,sceneSrvs);
  ID3D11UnorderedAccessView* mainViews[3]={c.uav.Get(),nullptr,nullptr};
  c.ctx->CSSetUnorderedAccessViews(0,3,mainViews,nullptr);
- c.ctx->Dispatch(UINT((w+7)/8),UINT((h+7)/8),1);
+ // Quarter mode submits one GPU thread per real ray: an even-even
+ // full-resolution pixel. All unsampled texels are overwritten on CPU
+ // during the nearest-donor reconstruction after readback.
+ const UINT rayWidth=params.primaryQuarter?UINT((w+1)/2):UINT(w);
+ const UINT rayHeight=params.primaryQuarter?UINT((h+1)/2):UINT(h);
+ c.ctx->Dispatch((rayWidth+7u)/8u,(rayHeight+7u)/8u,1u);
  c.ctx->CSSetUnorderedAccessViews(0,3,nullUavs,nullptr);
  c.ctx->CSSetShaderResources(0,8,nullSrvs);
  ID3D11SamplerState* noSampler=nullptr;
