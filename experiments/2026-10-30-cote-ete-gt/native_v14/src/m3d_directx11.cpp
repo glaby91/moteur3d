@@ -959,6 +959,60 @@ public:
         const char* noCull=std::getenv("M3D_V17_DISABLE_FRUSTUM_CULLING");
         const bool cullEnabled=quality.frustumCulling
             &&!(noCull && std::strcmp(noCull,"1")==0);
+        // Lightweight depth-only trial: reuse existing static/box geometry.
+        // No CPU ray casting, material evaluation or per-triangle sorting.
+        // The draw commands are repeated only for primary opaque occluders.
+        // Off by default; deliberately isolated from the production path.
+        const char* zPrepassEnv=std::getenv("M3D_V17_EXPERIMENT_Z_PREPASS");
+        const bool depthPrepass=zPrepassEnv&&std::strcmp(zPrepassEnv,"1")==0;
+        if(depthPrepass){
+            context_->OMSetRenderTargets(0,nullptr,dsv_.Get());
+            context_->PSSetShader(nullptr,nullptr,0);
+            // Static opaque walls, floors and other architectural meshes.
+            if(vertexCount_){
+                if(!cullEnabled)context_->Draw(vertexCount_,0);
+                else{
+                    UINT start=0,count=0;
+                    auto flush=[&]{if(count){context_->Draw(count,start);count=0;}};
+                    for(const DrawChunk& chunk:chunks_){
+                        if(!visibleChunk(chunk,cam)){flush();continue;}
+                        if(count&&start+count!=chunk.first)flush();
+                        if(!count)start=chunk.first;
+                        count+=chunk.count;
+                    }
+                    flush();
+                }
+            }
+            // Instanced opaque boxes: buildings/large occluders.
+            if(boxInstanceCount_){
+                ID3D11Buffer* buffers[]={boxVertices_.Get(),boxInstances_.Get()};
+                UINT strides[]={UINT(sizeof(GpuVertex)),UINT(sizeof(GpuBoxInstance))};
+                UINT offsets[]={0,0};
+                context_->IASetInputLayout(boxLayout_.Get());
+                context_->IASetVertexBuffers(0,2,buffers,strides,offsets);
+                context_->VSSetShader(boxVs_.Get(),nullptr,0);
+                if(!cullEnabled)context_->DrawInstanced(36,boxInstanceCount_,0,0);
+                else{
+                    UINT first=0,count=0;
+                    auto flush=[&]{
+                        if(count){context_->DrawInstanced(36,count,0,first);count=0;}
+                    };
+                    for(const DrawChunk& chunk:boxChunks_){
+                        if(!visibleChunk(chunk,cam)){flush();continue;}
+                        if(count&&first+count!=chunk.first)flush();
+                        if(!count)first=chunk.first;
+                        count+=chunk.count;
+                    }
+                    flush();
+                }
+                context_->IASetInputLayout(layout_.Get());
+                context_->VSSetShader(vs_.Get(),nullptr,0);
+                context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
+            }
+            // Restore exact production opaque and transparency pipeline.
+            context_->OMSetRenderTargets(1,rtv_.GetAddressOf(),dsv_.Get());
+            context_->PSSetShader(ps_.Get(),nullptr,0);
+        }
         if(vertexCount_){
             if(!cullEnabled){
                 context_->Draw(vertexCount_,0);
