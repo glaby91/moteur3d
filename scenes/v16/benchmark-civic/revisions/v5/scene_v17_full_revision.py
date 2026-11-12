@@ -222,14 +222,17 @@ def main():
   else:polyhaven[key]=False
  if not all(polyhaven.values()) and not args.allow_fallback_flower:
   raise RuntimeError('Approved Empodium/Gazania GLBs not available; use --allow-fallback-flower explicitly')
- raw=inst['instances'];filtered=[];removed=collections.Counter()
+ raw=inst['instances'];filtered=[];removed=collections.Counter();groundcover=[]
  for o in raw:
   pa=o['parent']
   drop=(pa.startswith(ROOT_PREFIX) or pa.startswith('Nature/Arbres') or
         (pa.startswith('Place/Butte végétalisée/') and
           any(pa.startswith('Place/Butte végétalisée/'+x) for x in
-              ['Petales','Tiges','Coeurs','Feuilles','V4 Pétales',
-               'V4 Tiges','V4 Pistils','V4 Feuilles'])))
+              ['Petales','Tiges','Coeurs','Feuilles','Fleurs et feuillages','V4 Pétales',
+               'V4 Tiges','V4 Pistils','V4 Feuilles','V4 Couvre-sol'])))
+  if pa in ('Place/Butte végétalisée/Fleurs et feuillages',
+            'Place/Butte végétalisée/V4 Couvre-sol'):
+   groundcover.append(o)
   if drop:removed[pa]+=1
   else:filtered.append(o)
  geometry=load(root/'geometry/benchmark.json');materials=load(root/'materials/pripyat-reuse.json')
@@ -314,6 +317,17 @@ def main():
   h=.13+rng.random()*.20
   objects.extend(i3.place('grass1' if n%2 else 'grass2','Place/Butte vegetale/Brins d herbe GLB',
                           [x,y,z],[h*.5,h,h*.5],rng.randrange(360),f'bedgrass{n}'))
+ # Existing green groundcover occupied well-planned positions, but its
+ # huge primitive canopy lobes look like boulders at ground level. Replace
+ # every other lobe with thin genuine GLB grass tufts, NOT huge green spheres.
+ small_groundcover_count=0
+ for n,source in enumerate(groundcover[::2]):
+  px,py,pz=source['position'];sy=source['size'][1]
+  h=.19+.055*(n%4);w=.14+.025*(n%3)
+  objects.extend(i3.place('grass1' if n%5==0 else 'grass2',
+   'Place/Butte vegetale/Couvre-sol herbe GLB',[px,max(.12,py-sy*.44),pz],
+   [w,h,w],rng.randrange(360),f'groundcover{n}'))
+  small_groundcover_count+=1
  # Quality controls BEFORE writing manifest: original pond and fresco remain.
  final=filtered+objects
  ids=[o['id'] for o in final]
@@ -340,6 +354,7 @@ def main():
        'potInstances':8,'potTrianglesEach':i3.triangles['pot0'],
        'replacedProceduralTreePositions':len(original_plant_centers),
        'slenderTreesInPots':8,'newGLBFlowerPositions':flower_count,'newGrassPositions':92,
+       'additionalFineGLBGroundcoverPositions':small_groundcover_count,
        'treePitCount':len(original_plant_centers),'realPavingCut':cut_report,
        'priorObjectTypesRemoved':dict(removed),'importedMeshTriangleCounts':i3.triangles,
        'polyhavenApprovedFlowersAvailable':polyhaven,'allMaterialCount':len(materials['materials']),
