@@ -418,6 +418,70 @@ jobs:
           name: CSE-WARP-V17.${{ github.run_number }}-Windows-x64
           path: dist-v17/
           if-no-files-found: error
+      - name: V17.371 EXPERIMENT — pixel-shader cost, overdraw proxy, PBR and MSAA
+        shell: pwsh
+        timeout-minutes: 35
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = 'build-v17/prototype-v371'
+          New-Item -ItemType Directory -Force "$root/captures" | Out-Null
+          $exe = 'build-v17/Release/moteur3d_v17_benchmark.exe'
+          $scene = 'scenes/v16/benchmark-civic/scene-extreme.json'
+          # All tests use same scene, camera, 19h, resolution 1366x768.
+          # CPU/WARP numbers are NOT Intel GPU hardware benchmarks.
+          $cases = @(
+            @{stage='flat';msaa=1;lights=171;cull=1;instancing=1},
+            @{stage='texture';msaa=1;lights=171;cull=1;instancing=1},
+            @{stage='basic';msaa=1;lights=171;cull=1;instancing=1},
+            @{stage='full';msaa=1;lights=171;cull=1;instancing=1},
+            @{stage='full';msaa=2;lights=171;cull=1;instancing=1},
+            @{stage='full';msaa=4;lights=171;cull=1;instancing=1},
+            @{stage='full';msaa=8;lights=171;cull=1;instancing=1},
+            @{stage='full';msaa=1;lights=0;cull=1;instancing=1},
+            @{stage='full';msaa=1;lights=48;cull=1;instancing=1},
+            @{stage='full';msaa=1;lights=171;cull=0;instancing=1},
+            @{stage='full';msaa=1;lights=171;cull=1;instancing=0},
+            @{stage='flat';msaa=1;lights=171;cull=0;instancing=1}
+          )
+          $rows = @()
+          foreach ($case in $cases) {
+            if ($case.instancing -eq 0) { $env:M3D_V17_DISABLE_GPU_INSTANCING='1' }
+            else { Remove-Item Env:M3D_V17_DISABLE_GPU_INSTANCING -ErrorAction SilentlyContinue }
+            $id = "$($case.stage)-msaa$($case.msaa)-light$($case.lights)-cull$($case.cull)-inst$($case.instancing)"
+            $folder = "$root/$id"
+            & $exe $scene $folder --quick --camera-id facade --hour 19 --profile-stage $case.stage --light-limit $case.lights --raster-msaa $case.msaa --raster-culling $case.cull --readback-depth 1
+            if ($LASTEXITCODE -ne 0) { throw "Benchmark process failed: $id" }
+            $report = Get-ChildItem $folder -Recurse -Filter summary.json | Select-Object -First 1
+            if (!$report) { throw "No summary.json: $id" }
+            $doc = Get-Content $report.FullName -Raw | ConvertFrom-Json
+            $render = @($doc.cases | Where-Object { $_.backend -eq 'V17_D3D11_Raster' })[0]
+            if (!$render -or $render.status -ne 'ok') { throw "Invalid raster result: $id" }
+            $rows += [pscustomobject]@{
+              Id=$id;Stage=$case.stage;MSAA=$case.msaa;Lights=$case.lights
+              Culling=$case.cull;Instancing=$case.instancing
+              GpuDrawMs=$render.gpuDrawMs;GpuTransferMs=$render.gpuTransferMs
+              CpuSubmitMs=$render.cpuSubmitMs;CpuMapWaitMs=$render.cpuMapWaitMs
+              CpuPixelConvertMs=$render.cpuPixelConvertMs
+              StreamFps=$render.streamFps;MedianMs=$render.medianMs
+              DrawCalls=$render.gpuDrawCalls;Triangles=$render.submittedTriangles
+              GpuTimingValid=$render.gpuTimingValid
+            }
+            $png = Get-ChildItem $folder -Recurse -Filter 'raster_facade_*.png' | Select-Object -First 1
+            if ($png) { Copy-Item $png.FullName "$root/captures/$id.png" }
+          }
+          Remove-Item Env:M3D_V17_DISABLE_GPU_INSTANCING -ErrorAction SilentlyContinue
+          $rows | Export-Csv "$root/profiling.csv" -NoTypeInformation -Encoding utf8
+          $rows | Format-Table -AutoSize | Out-String | Write-Host
+          if ($rows.Count -ne 12) { throw "Incomplete experimental comparison" }
+      - name: Upload isolated V17.371 diagnostics and raster PNGs
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17.${{ github.run_number }}-EXPERIMENT-RASTER-PROFILING
+          path: build-v17/prototype-v371/
+          if-no-files-found: warn
       - name: Benchmark GI hors ligne — trois scènes, trois cuissons et sept relectures
         shell: pwsh
         timeout-minutes: 25
