@@ -1054,9 +1054,21 @@ public:
         // GPU timestamps surround the actual draw commands and the queued
         // GPU copy. They do not include any CPU-side GetData/Map blocking.
         if(slot.queryReady)context_->End(slot.afterDraw.Get());
-        if(sampleCount_>1)context_->ResolveSubresource(resolve_.Get(),0,target_.Get(),0,DXGI_FORMAT_R8G8B8A8_UNORM);
-        else context_->CopyResource(resolve_.Get(),target_.Get());
-        context_->CopyResource(slot.staging.Get(),resolve_.Get());
+        // V17 WARP lossless fast-path: no MSAA resolve is needed when
+        // sampleCount_ == 1. Copy the render target directly into staging,
+        // eliminating an entire full-frame GPU copy. Both textures are
+        // DXGI R8G8B8A8 compatible; no shading/LOD/pixel changes.
+        // Keep the old two-copy path selectable for strict SHA-256 A/B.
+        const char* legacyReadback=std::getenv("M3D_V17_LEGACY_DOUBLE_COPY");
+        if(sampleCount_>1){
+            context_->ResolveSubresource(resolve_.Get(),0,target_.Get(),0,DXGI_FORMAT_R8G8B8A8_UNORM);
+            context_->CopyResource(slot.staging.Get(),resolve_.Get());
+        }else if(legacyReadback&&std::strcmp(legacyReadback,"1")==0){
+            context_->CopyResource(resolve_.Get(),target_.Get());
+            context_->CopyResource(slot.staging.Get(),resolve_.Get());
+        }else{
+            context_->CopyResource(slot.staging.Get(),target_.Get());
+        }
         if(slot.queryReady){
             context_->End(slot.afterCopy.Get());
             context_->End(slot.disjoint.Get());
