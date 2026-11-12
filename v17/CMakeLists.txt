@@ -14,6 +14,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
 
 enable_testing()
+# No GPU or Windows runtime required to verify exact 2x2 sample budget.
+add_executable(v17_primary_quarter_smoke "tests/primary_quarter_smoke.cpp")
+add_test(NAME v17_primary_quarter_exact_budget COMMAND v17_primary_quarter_smoke)
 # Reuse the proven V16 CPU, Compute and raster engines, plus their tests.
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../v16" "${CMAKE_CURRENT_BINARY_DIR}/v16")
 
