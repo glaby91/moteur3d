@@ -18,6 +18,7 @@ jobs:
       GH_TOKEN: ${{ github.token }}
       M3D_V16_FORCE_WARP: '1'
       M3D_V17_EXPERIMENT_Z_PREPASS: '0'
+      PYTHONIOENCODING: 'utf-8'
       QT_QPA_PLATFORM: 'offscreen'
     steps:
       - uses: actions/checkout@v5
