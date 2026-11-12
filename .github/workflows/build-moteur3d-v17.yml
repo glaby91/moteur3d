@@ -418,6 +418,57 @@ jobs:
           name: CSE-WARP-V17.${{ github.run_number }}-Windows-x64
           path: dist-v17/
           if-no-files-found: error
+      - name: V17.376 EXPERIMENT — CPU camera-frustum light selection vs reference PBR
+        shell: pwsh
+        timeout-minutes: 22
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='build-v17/prototype-v376'
+          New-Item -ItemType Directory -Force "$root/captures" | Out-Null
+          $exe='build-v17/Release/moteur3d_v17_benchmark.exe'
+          $scene='scenes/v16/benchmark-civic/scene-extreme.json'
+          $rows=@()
+          foreach ($camera in @('facade','bassin')) {
+            foreach ($msaa in @(1,2)) {
+              foreach ($mode in @('reference','cpu-frustum')) {
+                if($mode -eq 'cpu-frustum') {
+                  $env:M3D_V17_EXPERIMENT_CPU_LIGHT_FRUSTUM='1'
+                } else {
+                  Remove-Item Env:M3D_V17_EXPERIMENT_CPU_LIGHT_FRUSTUM -ErrorAction SilentlyContinue
+                }
+                $id="$camera-msaa$msaa-$mode"
+                $dir="$root/$id"
+                & $exe $scene $dir --quick --camera-id $camera --hour 19 --profile-stage full --light-limit 171 --raster-msaa $msaa --readback-depth 1
+                if($LASTEXITCODE -ne 0){throw "Benchmark failed: $id"}
+                $summary=Get-ChildItem $dir -Recurse -Filter summary.json | Select-Object -First 1
+                if(!$summary){throw "Missing JSON: $id"}
+                $doc=Get-Content $summary.FullName -Raw | ConvertFrom-Json
+                $render=@($doc.cases | Where-Object {$_.backend -eq 'V17_D3D11_Raster'})[0]
+                if(!$render -or $render.status -ne 'ok'){throw "Bad raster result: $id"}
+                $rows += [pscustomobject]@{
+                  Id=$id;Camera=$camera;MSAA=$msaa;Mode=$mode
+                  GpuDrawMs=$render.gpuDrawMs;GpuTransferMs=$render.gpuTransferMs
+                  CpuSubmitMs=$render.cpuSubmitMs;StreamFps=$render.streamFps
+                  DrawCalls=$render.gpuDrawCalls;Triangles=$render.submittedTriangles
+                }
+                $png=Get-ChildItem $dir -Recurse -Filter 'raster_*.png' | Select-Object -First 1
+                if($png){Copy-Item $png.FullName "$root/captures/$id.png"}
+              }
+            }
+          }
+          Remove-Item Env:M3D_V17_EXPERIMENT_CPU_LIGHT_FRUSTUM -ErrorAction SilentlyContinue
+          $rows | Export-Csv "$root/cpu-frustum-ab.csv" -NoTypeInformation -Encoding utf8
+          $rows | Format-Table -AutoSize | Out-String | Write-Host
+          if($rows.Count -ne 8){throw 'Incomplete CPU-frustum experiment'}
+      - name: Upload isolated V17.376 CPU frustum A-B diagnostics
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17.${{ github.run_number }}-CPU-FRUSTUM-EXPERIMENT
+          path: build-v17/prototype-v376/
+          if-no-files-found: warn
       - name: V17.372 EXPERIMENT — full-PBR exact axis light-culling A-B
         shell: pwsh
         timeout-minutes: 18
