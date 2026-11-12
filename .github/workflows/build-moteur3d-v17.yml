@@ -87,10 +87,17 @@ jobs:
         shell: pwsh
         run: |
           $log = "build-v17/v344-native-scene-smoke.log"
-          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" "scenes/v16/benchmark-civic/scene.json" 20000 *>&1 | Tee-Object -FilePath $log
+          New-Item -ItemType Directory -Force (Split-Path $log -Parent) | Out-Null
+          # Avoid relying on native stderr piping/PowerShell Tee-Object behavior.
+          # Redirect stdout/stderr directly to a file and preserve exit code.
+          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" "scenes/v16/benchmark-civic/scene.json" 20000 1> $log 2>&1
           $rc = $LASTEXITCODE
           Write-Host "V17 native smoke exit code: $rc"
-          Get-Content $log | ForEach-Object { Write-Host "SCENE_DIAGNOSTIC: $_" }
+          if (Test-Path $log) {
+            Get-Content $log | ForEach-Object { Write-Host "SCENE_DIAGNOSTIC: $_" }
+          } else {
+            Write-Warning "Native smoke produced no log; using process exit code."
+          }
           if ($rc -ne 0) { throw "Complex scene fails in native V17 loader; exit $rc" }
       - name: Verify real 25% primary rays on Pripyat pool 19h CPU and D3D11 Compute
         shell: pwsh
