@@ -948,6 +948,19 @@ private:
         right->setWidget(rightScroll);
         addDockWidget(Qt::RightDockWidgetArea,right);
         right->setMinimumWidth(295);
+        // Dedicated uncluttered exploration mode. Preserve dock state in editing mode.
+        // F11 maximizes the view without changing the underlying render resolution.
+        auto* viewMenu=menuBar()->addMenu(QStringLiteral("Affichage"));
+        auto* immersive=viewMenu->addAction(QStringLiteral("Vue 3D agrandie (F11)"));
+        immersive->setCheckable(true);
+        immersive->setShortcut(QKeySequence(Qt::Key_F11));
+        connect(immersive,&QAction::toggled,this,[this,left,right](bool enabled){
+            left->setVisible(!enabled);
+            right->setVisible(!enabled);
+            if(enabled)canvas_->setFocus();
+            // A resized viewport may need a new camera aspect to avoid distortions.
+            // Keep image proportions intact until a viewport-sized render is requested.
+        });
 
         connect(renderButton,&QPushButton::clicked,this,[this]{requestRender();});
         connect(cameraBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){
