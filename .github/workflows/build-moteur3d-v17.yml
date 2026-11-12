@@ -418,6 +418,59 @@ jobs:
           name: CSE-WARP-V17.${{ github.run_number }}-Windows-x64
           path: dist-v17/
           if-no-files-found: error
+      - name: V17.378 EXPERIMENT — minimal GPU-only depth prepass A-B
+        shell: pwsh
+        timeout-minutes: 22
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='build-v17/prototype-v378'
+          New-Item -ItemType Directory -Force "$root/captures" | Out-Null
+          $exe='build-v17/Release/moteur3d_v17_benchmark.exe'
+          $scene='scenes/v16/benchmark-civic/scene-extreme.json'
+          $rows=@()
+          foreach($camera in @('facade','bassin')){
+            foreach($msaa in @(1,2)){
+              foreach($mode in @('reference','z-prepass')){
+                if($mode -eq 'z-prepass'){$env:M3D_V17_EXPERIMENT_Z_PREPASS='1'}
+                else{Remove-Item Env:M3D_V17_EXPERIMENT_Z_PREPASS -ErrorAction SilentlyContinue}
+                $id="$camera-msaa$msaa-$mode"
+                $out="$root/$id"
+                & $exe $scene $out --quick --camera-id $camera --hour 19 --profile-stage full --light-limit 171 --raster-msaa $msaa --readback-depth 1
+                if($LASTEXITCODE -ne 0){throw "Benchmark failed: $id"}
+                $json=Get-ChildItem $out -Recurse -Filter summary.json | Select-Object -First 1
+                if(!$json){throw "Missing summary: $id"}
+                $doc=Get-Content $json.FullName -Raw | ConvertFrom-Json
+                $render=@($doc.cases | Where-Object {$_.backend -eq 'V17_D3D11_Raster'})[0]
+                if(!$render -or $render.status -ne 'ok'){throw "Invalid raster benchmark $id"}
+                $rows += [pscustomobject]@{
+                  Id=$id;Camera=$camera;MSAA=$msaa;Mode=$mode
+                  GpuDrawMs=$render.gpuDrawMs;CpuSubmitMs=$render.cpuSubmitMs
+                  GpuTransferMs=$render.gpuTransferMs;StreamFps=$render.streamFps
+                  DrawCalls=$render.gpuDrawCalls;Triangles=$render.submittedTriangles
+                }
+                $png=Get-ChildItem $out -Recurse -Filter 'raster_*.png' | Select-Object -First 1
+                if(!$png){throw "Missing PNG: $id"}
+                Copy-Item $png.FullName "$root/captures/$id.png"
+              }
+              $a=(Get-FileHash "$root/captures/$camera-msaa$msaa-reference.png" -Algorithm SHA256).Hash
+              $b=(Get-FileHash "$root/captures/$camera-msaa$msaa-z-prepass.png" -Algorithm SHA256).Hash
+              if($a -ne $b){Write-Warning "Z-prepass changes image: $camera MSAA $msaa"}
+              else{Write-Host "Image parity confirmed: $camera MSAA $msaa"}
+            }
+          }
+          Remove-Item Env:M3D_V17_EXPERIMENT_Z_PREPASS -ErrorAction SilentlyContinue
+          $rows | Export-Csv "$root/z-prepass.csv" -NoTypeInformation -Encoding utf8
+          $rows | Format-Table -AutoSize | Out-String | Write-Host
+          if($rows.Count -ne 8){throw "Incomplete depth A-B benchmark"}
+      - name: Upload isolated V17.378 depth prepass results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17.${{ github.run_number }}-Z-PREPASS-PROTOTYPE
+          path: build-v17/prototype-v378/
+          if-no-files-found: warn
       - name: V17.377 EXPERIMENT — CPU tiled light masks, no per-pixel 171-light traversal
         shell: pwsh
         timeout-minutes: 25
