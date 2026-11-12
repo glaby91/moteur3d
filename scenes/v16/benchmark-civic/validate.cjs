@@ -28,12 +28,12 @@ check(portrait[0]===0xff&&portrait[1]===0xd8&&portrait.at(-2)===0xff&&
 function read(file){return JSON.parse(fs.readFileSync(path.resolve(base,file),'utf8'));}
 const materials=read('materials/pripyat-reuse.json').materials;
 const allIds=materials.map(m=>m.id);
-check(materials.length===30&&new Set(allIds).size===materials.length,'Expected 22 source + 8 scene materials');
+check(materials.length===33&&new Set(allIds).size===materials.length,'Expected 22 source + 11 scene materials');
 check(origin.materials.every((m,i)=>JSON.stringify(m)===JSON.stringify(materials[i])),
  'Original material recipes or ordering changed');
 // Keep the evening artificial-light rig stable across all load profiles.
 const lamps=read('lighting/day.json').lights;
-check(lamps.length===159,'Expected exactly 159 interior lights');
+check(lamps.length===171,'Expected 159 indoor and 12 rooftop lights');
 check(lamps.every(l=>l.position.length===3 &&
   l.position.every(Number.isFinite) && Number.isFinite(l.intensity) &&
   l.intensity>0 && l.radius>0 && l.intensity<=2),
@@ -78,7 +78,7 @@ for(const [profile,target,cap,sceneFile] of [
  }
  check(boxCount*12>=target&&inst.length<=65000,'Stress profile out of range');
  check(stats.totalInstances===inst.length&&stats.boxes===boxCount,'Incorrect geometry stats');
- check(pbr.sets.length===30&&pbr.sets.every(x=>x.resolution<=cap),
+ check(pbr.sets.length===33&&pbr.sets.every(x=>x.resolution<=cap),
   'Unexpected PBR cap or missing local textures');
  const frescoSet=pbr.sets.find(m=>m.id==='tex_cse_energetik_fresco');
  check(frescoSet&&frescoSet.imageFile==='textures/energetik_fresco_mosaic.jpg',
@@ -168,6 +168,14 @@ for(const [profile,target,cap,sceneFile] of [
  check(!inst.some(o=>o.parent.startsWith('Interieur/Piscine olympique/')&&
     ['cse_personnage_facade','cse_energetik_fresco'].includes(o.material)),
   'An artwork improperly covers the pool wall');
+ const rooftop=select('Architecture/Palais/Enseigne lumineuse toit');
+ check(rooftop.length>=180,'Rooftop neon sign geometry incomplete');
+ check(select('Architecture/Palais/Enseigne lumineuse toit/Lettres ЭНЕРГЕТИК').length>=120,
+  'Cyrillic illuminated Energetik lettering missing');
+ check(select('Architecture/Palais/Enseigne lumineuse toit/Neon rouge').length===2,
+  'Red neon marquee border missing');
+ check(lamps.filter(l=>l.position[1]===24).length===12,
+  '12 colored rooftop accent lights missing');
  const seat=select('Place/Banc ovale béton/Assise');
  check(seat.length===96,'Concrete oval must have 96 uninterrupted sections');
  for(const x of seat){
