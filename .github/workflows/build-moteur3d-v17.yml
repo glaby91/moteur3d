@@ -140,9 +140,387 @@ jobs:
             throw "Incomplete visual review: expected 11 actual camera PNG, found $($pictures.Count)"
           }
           foreach ($camera in @('facade','mosaique','bassin','hall','vestiaires','passerelle','etage','hall_ensemble','piscine_soir')) {
-            $matches = @($pictures | Where-Object { $_.Name -like "raster_$($camera)_*.png" })
+            # Match the exact camera ID: 'hall' must not include 'hall_ensemble'.
+            $prefix = "raster_${camera}_"
+            $matches = @($pictures | Where-Object { $_.Name.StartsWith($prefix, [System.StringComparison]::OrdinalIgnoreCase) -and $_.Name.Substring($prefix.Length) -match '^[0-9]+x[0-9]+\.png
+          $pictures | Sort-Object Name | ForEach-Object { Write-Host "$($_.Name) - $($_.Length) bytes" }
+      - name: V17.324 visual QA — pool at 14h and 19h, same camera
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          foreach ($hour in @(14,19)) {
+            & "build-v17/Release/moteur3d_v17_benchmark.exe" "scenes/v16/benchmark-civic/scene.json" "build-v17/pool-hour-$hour" --smoke --camera-id bassin --hour $hour
+            if ($LASTEXITCODE -ne 0) { throw "Pool render failed at $hour h" }
+            $pic = Get-ChildItem "build-v17/pool-hour-$hour" -Recurse -Filter 'raster_bassin_*.png' | Select-Object -First 1
+            if (!$pic -or $pic.Length -lt 1200) { throw "Missing pool PNG at $hour h" }
+            Copy-Item $pic.FullName "build-v17/pool-hour-$hour.png"
+            Add-Type -AssemblyName System.Drawing
+            $bmp = [System.Drawing.Bitmap]::new((Resolve-Path "build-v17/pool-hour-$hour.png").Path)
+            $r=0.0; $g=0.0; $b=0.0; $n=0
+            for ($y=16; $y -lt $bmp.Height; $y+=32) {
+              for ($x=16; $x -lt $bmp.Width; $x+=32) {
+                $p=$bmp.GetPixel($x,$y)
+                $r+=$p.R; $g+=$p.G; $b+=$p.B; $n++
+              }
+            }
+            $bmp.Dispose()
+            $average=($r+$g+$b)/(3*$n)
+            Write-Host "Pool $hour h mean RGB = $([math]::Round($r/$n,1)), $([math]::Round($g/$n,1)), $([math]::Round($b/$n,1)); luma=$([math]::Round($average,1))"
+            if ($average -lt 8) { throw "Pool entirely too dark at $hour h" }
+          }
+      - name: V17 visual QA — hall fresco from corrected camera at 19h
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          & "build-v17/Release/moteur3d_v17_benchmark.exe" "scenes/v16/benchmark-civic/scene.json" "build-v17/hall-hour-19" --smoke --camera-id hall --hour 19
+          if ($LASTEXITCODE -ne 0) { throw "Hall 19h scene rendering failed" }
+          $pic = Get-ChildItem "build-v17/hall-hour-19" -Recurse -Filter 'raster_hall_*.png' | Select-Object -First 1
+          if (!$pic -or $pic.Length -lt 1200) { throw "Missing hall 19h PNG" }
+          Copy-Item $pic.FullName "build-v17/hall-hour-19.png"
+      - name: V17.344 image-quality and GPU comparison — fixed 19h cameras
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          $records = @()
+          foreach ($camera in @('bassin','piscine_soir','hall_ensemble')) {
+            foreach ($depth in @(1,3)) {
+              $folder = "build-v17/v344-$camera-rb$depth"
+              & "build-v17/Release/moteur3d_v17_benchmark.exe" "scenes/v16/benchmark-civic/scene.json" $folder --smoke --camera-id $camera --hour 19 --readback-depth $depth
+              if ($LASTEXITCODE -ne 0) { throw "V17.344 benchmark failed for $camera depth $depth" }
+              $image = Get-ChildItem $folder -Recurse -Filter "raster_$($camera)_*.png" | Select-Object -First 1
+              if (!$image -or $image.Length -lt 1200) { throw "Missing $camera PNG" }
+              Copy-Item $image.FullName "build-v17/v344-$camera-rb$depth.png"
+              $summary = Get-ChildItem $folder -Recurse -Filter summary.json | Select-Object -First 1
+              if (!$summary) { throw "Benchmark JSON missing for $camera depth $depth" }
+              $measure = Get-Content $summary.FullName -Raw | ConvertFrom-Json
+              $row = @($measure.cases | Where-Object { $_.backend -eq 'V17_D3D11_Raster' })[0]
+              if (!$row) { throw "Raster measurement missing for $camera depth $depth" }
+              $records += [pscustomobject]@{Camera=$camera;Hour=19;ReadbackDepth=$depth;MedianMs=$row.medianMs;Fps=$row.estimatedFps}
+            }
+          }
+          $records | Export-Csv "build-v17/v344-19h-comparison.csv" -NoTypeInformation
+          $records | Format-Table | Out-String | Write-Host
+      - name: Diagnose raster WARP executable before extended tests
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          & "build-v17/Release/v17_raster_warp_smoke.exe" "scenes/v16/pavillon01/scene.json" "build-v17/v17-raster-warp-quick.png"
+          $result = $LASTEXITCODE
+          Write-Host "V17 Raster WARP exit code: $result"
+          if ($result -ne 0) { throw "V17 raster renderer is not operational; exit $result" }
+      - name: V17 GUI scene switching while a previous render may still be active
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          QT_QPA_PLATFORM: 'offscreen'
+        run: |
+          $exe = (Resolve-Path "build-v17/Release/moteur3d_v17.exe").Path
+          $args = @("--smoke-scene-switch",
+                    "scenes/v16/pavillon01/scene.json",
+                    "scenes/v16/material-lab/scene.json")
+          $process = Start-Process -FilePath $exe -ArgumentList $args -Wait -PassThru
+          Write-Host "V17 scene-switch smoke exit: $($process.ExitCode)"
+          if ($process.ExitCode -ne 0) {
+            throw "V17 GUI failed to render after switching scenes (exit $($process.ExitCode))"
+          }
+      - name: Regression V17 — two GUI renders, identical scene and GPU worker
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          QT_QPA_PLATFORM: 'offscreen'
+        run: |
+          $exe = (Resolve-Path "build-v17/Release/moteur3d_v17.exe").Path
+          $args = @("--smoke-repeat-raster", "scenes/v16/pavillon01/scene.json")
+          $p = Start-Process -FilePath $exe -ArgumentList $args -Wait -PassThru
+          Write-Host "Second-render regression exit: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) {
+            throw "Two successive V17 GPU renders failed ($($p.ExitCode))"
+          }
+      - name: Benchmark V17 D3D11 Raster on WARP — smoke CSV JSON PNG
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          & "build-v17/Release/moteur3d_v17_benchmark.exe" "scenes/v16/pavillon01/scene.json" "build-v17/v17-bench-smoke" --smoke
+          if ($LASTEXITCODE -ne 0) { throw "V17 benchmark smoke failed" }
+          $summary = Get-ChildItem "build-v17/v17-bench-smoke" -Filter summary.json -Recurse | Select-Object -First 1
+          if (!$summary) { throw "Missing benchmark JSON" }
+          $json = Get-Content $summary.FullName -Raw | ConvertFrom-Json
+          if ($json.successful -lt 1) { throw "No successful raster benchmark case" }
+          $csv = Join-Path $summary.Directory.FullName "results.csv"
+          if (!(Test-Path $csv)) { throw "Missing V17 benchmark CSV" }
+          $png = Get-ChildItem (Join-Path $summary.Directory.FullName "images") -Filter *.png | Select-Object -First 1
+          if (!$png -or $png.Length -lt 1000) { throw "Missing V17 benchmark PNG" }
+      - name: Benchmark DX11 1/2/3 readback buffers with exact image parity
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          & "build-v17/Release/moteur3d_v17_benchmark.exe" "scenes/v16/pavillon01/scene.json" "build-v17/v17-bench-readback" --smoke --compare-readback --raster-msaa 2 --raster-anisotropy 8 --raster-lod-percent 85 --raster-culling 1 --raster-lod-enabled 1
+          if ($LASTEXITCODE -ne 0) { throw "Pipelined DX11 readback benchmark failed" }
+          $summary = Get-ChildItem "build-v17/v17-bench-readback" -Recurse -Filter summary.json | Select-Object -First 1
+          if (!$summary) { throw "No pipelined benchmark report" }
+          $result = Get-Content $summary.FullName -Raw | ConvertFrom-Json
+          if ($result.system.rasterQuality.msaaSamples -ne 2 -or
+              $result.system.rasterQuality.anisotropy -ne 8 -or
+              $result.system.rasterQuality.lodQualityPercent -ne 85) {
+            throw "Host-quality flags were not applied in the benchmark process"
+          }
+          $cases = @($result.cases | Where-Object { $_.backend -eq "V17_D3D11_Raster" })
+          if ($cases.Count -ne 3) { throw "Expected 1, 2 and 3 staging buffer benchmark cases" }
+          foreach ($depth in @(1,2,3)) {
+            $case = $cases | Where-Object { $_.readbackDepth -eq $depth } | Select-Object -First 1
+            if (!$case -or $case.status -ne "ok" -or !$case.pixelIdentical -or
+                $case.streamMeanMs -le 0 -or $case.cpuMapWaitMs -lt 0) {
+              throw "Depth $depth failed image parity or timing test"
+            }
+            Write-Host "DX11 depth $depth : throughput $($case.streamFps) FPS, GPU valid=$($case.gpuTimingValid), GPU total=$($case.gpuTotalMs) ms"
+          }
+      - name: Pixel-exact optimized vs reference PS and GPU readback conversion
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          $exe = "build-v17/Release/moteur3d_v17_benchmark.exe"
+          # First run uses the exact previous shader/conversion, the second
+          # runs the optimizations. Isolated processes ensure shader recompile.
+          foreach ($scene in @("scenes/v16/pavillon01/scene.json", "scenes/v16/benchmark-civic/scene.json")) {
+            $name = if ($scene -like "*pavillon01*") { "pavillon" } else { "civic" }
+            $env:M3D_V17_DISABLE_SHADER_OPT = '1'
+            $env:M3D_V17_DISABLE_FAST_SWIZZLE = '1'
+            & $exe $scene "build-v17/shader-ab-$name-reference" --smoke --raster-msaa 2 --raster-anisotropy 8
+            if ($LASTEXITCODE -ne 0) { throw "Reference PS failed: $scene" }
+            Remove-Item Env:M3D_V17_DISABLE_SHADER_OPT -ErrorAction SilentlyContinue
+            Remove-Item Env:M3D_V17_DISABLE_FAST_SWIZZLE -ErrorAction SilentlyContinue
+            & $exe $scene "build-v17/shader-ab-$name-optimized" --smoke --raster-msaa 2 --raster-anisotropy 8
+            if ($LASTEXITCODE -ne 0) { throw "Optimized PS failed: $scene" }
+            $refImg = Get-ChildItem "build-v17/shader-ab-$name-reference" -Recurse -Filter "raster_*.png" | Select-Object -First 1
+            $optImg = Get-ChildItem "build-v17/shader-ab-$name-optimized" -Recurse -Filter "raster_*.png" | Select-Object -First 1
+            if (!$refImg -or !$optImg) { throw "Missing A/B image for $scene" }
+            if ((Get-FileHash $refImg.FullName -Algorithm SHA256).Hash -ne
+                (Get-FileHash $optImg.FullName -Algorithm SHA256).Hash) {
+              throw "Optimized pixel shader or swizzle changed a pixel: $scene"
+            }
+            $refSummary=Get-ChildItem "build-v17/shader-ab-$name-reference" -Recurse -Filter "summary.json" | Select-Object -First 1
+            $optSummary=Get-ChildItem "build-v17/shader-ab-$name-optimized" -Recurse -Filter "summary.json" | Select-Object -First 1
+            $before=Get-Content $refSummary.FullName -Raw | ConvertFrom-Json
+            $after=Get-Content $optSummary.FullName -Raw | ConvertFrom-Json
+            if ($before.system.pixelShaderOptimized -or $before.system.fastPixelSwizzle -or
+                !$after.system.pixelShaderOptimized -or !$after.system.fastPixelSwizzle) {
+              throw "A/B shader and conversion mode not correctly reported"
+            }
+            $referenceCase=@($before.cases | Where-Object { $_.backend -eq "V17_D3D11_Raster" })[0]
+            $optimizedCase=@($after.cases | Where-Object { $_.backend -eq "V17_D3D11_Raster" })[0]
+            if ($referenceCase.status -ne 'ok' -or $optimizedCase.status -ne 'ok' -or
+                $referenceCase.submittedTriangles -ne $optimizedCase.submittedTriangles) {
+              throw "A/B source geometry or rendering status mismatch: $scene"
+            }
+            Write-Host "A/B pixel-identical $name — reference mean $($referenceCase.meanMs) ms; optimized mean $($optimizedCase.meanMs) ms (WARP only)"
+          }
+      - name: Validate bit-identical parallel PBR and mixed-resolution Compute atlas
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          & "build-v17/Release/v17_pbr_compute_smoke.exe" "scenes/v16/pavillon01/scene.json"
+          if ($LASTEXITCODE -ne 0) {
+            throw "PBR parallel pixel equivalence or Compute mip atlas smoke failed"
+          }
+      - name: Smoke complete multi-round benchmark campaign (all 3 buffer depths)
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          & "build-v17/Release/moteur3d_v17_campaign.exe" "scenes/v16/pavillon01/scene.json" "build-v17/campaign-smoke" --smoke --raster-msaa 2 --raster-anisotropy 8 --raster-lod-percent 100
+          if ($LASTEXITCODE -ne 0) { throw "Full benchmark campaign smoke failed" }
+          $summary=Get-ChildItem "build-v17/campaign-smoke" -Filter summary.json -Recurse | Select-Object -First 1
+          if (!$summary) { throw "Campaign summary missing" }
+          $s=Get-Content $summary.FullName -Raw | ConvertFrom-Json
+          if (!$s.complete -or @($s.cases).Count -ne 3) { throw "Campaign did not cover 1/2/3 buffers" }
+          foreach ($case in @($s.cases)) {
+            if ($case.status -ne 'ok' -or !$case.pixelIdentical -or
+                $case.roundsCompleted -ne 2 -or $case.frames -ne 4 -or
+                $case.streamFps -le 0 -or $case.p95Ms -le 0) {
+              throw "Campaign repetition or pixel parity failed: depth=$($case.readbackDepth)"
+            }
+          }
+          foreach ($name in @("campaign_frames.csv","campaign_results.csv","campaign_report.html")) {
+            if (!(Test-Path (Join-Path $summary.Directory.FullName $name))) {
+              throw "Campaign report missing: $name"
+            }
+          }
+          Write-Host "Full campaign smoke: repeated GPU rounds, CSV/JSON/HTML and parity OK"
+      - name: Verify V17 D3D11 raster WARP diagnostic preview
+        shell: pwsh
+        run: |
+          $path = "build-v17/v17-raster-warp-quick.png"
+          if (!(Test-Path $path)) { throw "Raster V17 PNG missing: $path" }
+          if ((Get-Item $path).Length -lt 1000) { throw "Raster V17 preview is blank" }
+          Write-Host "Verified V17 Raster WARP PNG"
+      - name: Package CSE WARP V17
+        shell: pwsh
+        run: |
+          New-Item -Type Directory -Path "dist-v17" -Force | Out-Null
+          Copy-Item "build-v17/Release/moteur3d_v17.exe" "dist-v17/"
+          Copy-Item "build-v17/Release/moteur3d_v17_benchmark.exe" "dist-v17/"
+          Copy-Item "build-v17/Release/moteur3d_v17_gibake.exe" "dist-v17/"
+          Copy-Item "build-v17/Release/moteur3d_v17_campaign.exe" "dist-v17/"
+          Copy-Item "build-v17/Release/moteur3d_v17_benchui.exe" "dist-v17/"
+          Copy-Item "build-v17/v16/Release/moteur3d_v16.exe" "dist-v17/"
+          Copy-Item "build-v17/Release/moteur3d_v16_core.dll" "dist-v17/"
+          Copy-Item "build-v17/Release/cse_warp_v17.ico" "dist-v17/"
+          Copy-Item "build-v17/Release/cse_warp_v17_bench.ico" "dist-v17/"
+          Copy-Item "build-v17/Release/pavillon01" "dist-v17/pavillon01" -Recurse
+          Copy-Item "build-v17/Release/benchmark-civic" "dist-v17/benchmark-civic" -Recurse
+          Copy-Item "build-v17/civic-actual-preview.png" "dist-v17/benchmark-civic/actual-render-WARP.png"
+          Copy-Item "build-v17/pool-hour-14.png" "dist-v17/benchmark-civic/pool-14h-WARP.png"
+          Copy-Item "build-v17/pool-hour-19.png" "dist-v17/benchmark-civic/pool-19h-WARP.png"
+          Copy-Item "build-v17/hall-hour-19.png" "dist-v17/benchmark-civic/hall-19h-WARP.png"
+          New-Item -ItemType Directory -Force "dist-v17/benchmark-civic/v344-evening" | Out-Null
+          Copy-Item "build-v17/v344-*.png" "dist-v17/benchmark-civic/v344-evening/"
+          Copy-Item "build-v17/v344-19h-comparison.csv" "dist-v17/benchmark-civic/v344-evening/"
+          New-Item -ItemType Directory -Force "dist-v17/benchmark-civic/render-views-WARP" | Out-Null
+          Get-ChildItem "build-v17/civic-views" -Recurse -Filter 'raster_*.png' | ForEach-Object {
+            Copy-Item $_.FullName "dist-v17/benchmark-civic/render-views-WARP/"
+          }
+          New-Item -ItemType Directory -Force "dist-v17/material-library/pripyat-v17/originaux" | Out-Null
+          Copy-Item "assets/materials/pripyat-v17/catalogue.json" "dist-v17/material-library/pripyat-v17/"
+          Copy-Item "assets/materials/pripyat-v17/README.md" "dist-v17/material-library/pripyat-v17/"
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/textures/prp_concrete_panel.m3dpbr.gz" "dist-v17/material-library/pripyat-v17/originaux/"
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/textures/prp_concrete_panel_source.jpg" "dist-v17/material-library/pripyat-v17/originaux/"
+          # Additional existing Pripyat hero materials/models are preserved as
+          # ORIGINAL sources for reuse, not imported into the fictional scene.
+          New-Item -ItemType Directory -Force "dist-v17/material-library/pripyat-v17/hero-assets" | Out-Null
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/textures/energetik_fresco_mosaic.jpg" "dist-v17/material-library/pripyat-v17/hero-assets/"
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_fresco_mosaic.glb" "dist-v17/material-library/pripyat-v17/hero-assets/"
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_fresco_mosaic.asset.json" "dist-v17/material-library/pripyat-v17/hero-assets/"
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_facade_bay.glb" "dist-v17/material-library/pripyat-v17/hero-assets/"
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_facade_bay.asset.json" "dist-v17/material-library/pripyat-v17/hero-assets/"
+          Copy-Item "build-v17/Release/material-lab" "dist-v17/material-lab" -Recurse
+          Copy-Item "build-v17/Release/pripyat-photo2scene-proof" "dist-v17/pripyat-photo2scene-proof" -Recurse
+          Copy-Item "build-v17/Release/shaders" "dist-v17/shaders" -Recurse
+          git rev-parse HEAD | Out-File "dist-v17/REVISION.txt" -Encoding ascii
+          $env:GITHUB_RUN_NUMBER | Out-File "dist-v17/BUILD_NUMBER.txt" -Encoding ascii
+          if (!(Test-Path "dist-v17/BUILD_NUMBER.txt")) { throw "Build number missing" }
+          windeployqt --release --no-translations dist-v17/moteur3d_v17.exe
+          windeployqt --release --no-translations dist-v17/moteur3d_v17_benchui.exe
+          windeployqt --release --no-translations dist-v17/moteur3d_v16.exe
+      - name: Upload V17 Windows application
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17.${{ github.run_number }}-Windows-x64
+          path: dist-v17/
+          if-no-files-found: error
+      - name: Benchmark GI hors ligne — trois scènes, trois cuissons et sept relectures
+        shell: pwsh
+        timeout-minutes: 25
+        run: |
+          $folder = "build-v17/total-simulation/gi-bench"
+          New-Item -ItemType Directory -Force $folder | Out-Null
+          $data = @()
+          foreach ($entry in @(
+            @{ name='pavillon'; scene='scenes/v16/pavillon01/scene.json' },
+            @{ name='materiaux'; scene='scenes/v16/material-lab/scene.json' },
+            @{ name='civique'; scene='scenes/v16/benchmark-civic/scene.json' }
+          )) {
+            $cache = Join-Path $folder ($entry.name + ".m3dgi")
+            $json = Join-Path $folder ($entry.name + ".json")
+            & "build-v17/Release/moteur3d_v17_gibake.exe" $entry.scene $cache --smoke --bench $json
+            if ($LASTEXITCODE -ne 0) { throw "GI bake failed for $($entry.name)" }
+            $row = Get-Content $json -Raw | ConvertFrom-Json
+            if ($row.result -ne 'PASS' -or $row.hours -ne 5 -or
+                $row.bakeRepetitions -ne 3 -or $row.cacheLoadRepetitions -ne 7) {
+              throw "Incomplete GI benchmark for $($entry.name)"
+            }
+            $data += [pscustomobject]@{
+              version = $row.version; scene = $entry.name
+              probes = $row.probes; hours = $row.hours; rays = $row.raysPerProbe
+              coldBakeMedianMs = $row.bakeColdMedianMs
+              diskLoadMedianMs = $row.diskLoadMedianMs
+              sampleInterpolatedMedianMs = $row.sampleInterpolatedMedianMs
+              sceneBuildMs = $row.sceneBuildMs
+            }
+          }
+          $data | Export-Csv (Join-Path $folder 'gi-benchmark-summary.csv') -NoTypeInformation
+          $data | Format-Table -AutoSize | Out-String | Write-Host
+      - name: Benchmark GI volume complet — 864 sondes, 25 heures, 3 cuissons
+        shell: pwsh
+        timeout-minutes: 25
+        run: |
+          $folder = "build-v17/total-simulation/gi-bench"
+          New-Item -ItemType Directory -Force $folder | Out-Null
+          $data = @()
+          foreach ($entry in @(
+            @{ name='pavillon'; scene='scenes/v16/pavillon01/scene.json' },
+            @{ name='materiaux'; scene='scenes/v16/material-lab/scene.json' },
+            @{ name='civique'; scene='scenes/v16/benchmark-civic/scene.json' }
+          )) {
+            $cache = Join-Path $folder ($entry.name + "-full.m3dgi")
+            $json = Join-Path $folder ($entry.name + "-full.json")
+            # PBR load kept at 256px to control runner RAM; GI volume is full.
+            & "build-v17/Release/moteur3d_v17_gibake.exe" $entry.scene $cache --smoke --full-gi --bench $json
+            if ($LASTEXITCODE -ne 0) { throw "GI full-table bake failed: $($entry.name)" }
+            $row = Get-Content $json -Raw | ConvertFrom-Json
+            if ($row.result -ne 'PASS' -or $row.probes -ne 864 -or $row.hours -ne 25 -or
+                $row.raysPerProbe -ne 16 -or $row.bakeRepetitions -ne 3 -or
+                $row.cacheLoadRepetitions -ne 7) {
+              throw "Incomplete full GI benchmark: $($entry.name)"
+            }
+            $data += [pscustomobject]@{
+              version = $row.version; scene = $entry.name
+              probes = $row.probes; hours = $row.hours; rays = $row.raysPerProbe
+              coldBakeMedianMs = $row.bakeColdMedianMs
+              diskLoadMedianMs = $row.diskLoadMedianMs
+              sampleInterpolatedMedianMs = $row.sampleInterpolatedMedianMs
+              sceneBuildMs = $row.sceneBuildMs
+            }
+          }
+          $data | Export-Csv (Join-Path $folder 'gi-benchmark-full.csv') -NoTypeInformation
+          $data | Format-Table -AutoSize | Out-String | Write-Host
+      - name: Simulation totale V17 — six scènes, Raster, CPU, Compute et parité PNG
+        shell: pwsh
+        timeout-minutes: 55
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          & './v17/tools/total_simulation.ps1' -BinaryDirectory 'build-v17/Release' -OutputDirectory 'build-v17/total-simulation'
+          if ($LASTEXITCODE -ne 0) { throw 'Simulation totale V17 a échoué' }
+          # Include actual shader output, not AI-generated references.
+          $comparison = "build-v17/total-simulation/lighting-ab"
+          New-Item -ItemType Directory -Force $comparison | Out-Null
+          Copy-Item "build-v17/v17-raster-warp-quick.png" "$comparison/raster-reference.png"
+          Copy-Item "build-v17/v17-raster-warp-quick.png.indirect.png" "$comparison/raster-indirect.png"
+          Copy-Item "build-v17/v17-raster-warp-quick.png.indirect-filmic.png" "$comparison/raster-indirect-filmic.png"
+          Copy-Item "build-v17/v17-raster-warp-quick.png.baked-gi.png" "$comparison/raster-real-baked-gi.png"
+          Copy-Item "build-v17/v17-raster-warp-quick.png.balanced.png" "$comparison/raster-balanced-color.png"
+          Copy-Item "build-v17/v17-raster-warp-quick.png.balanced-085.png" "$comparison/raster-balanced-exposure-085.png"
+          Copy-Item "build-v17/v17-raster-warp-quick.png.balanced-115.png" "$comparison/raster-balanced-exposure-115.png"
+          Copy-Item "build-v17/v17-raster-warp-quick.png.color-metrics.csv" "$comparison/color-metrics.csv"
+          $viewsFolder=Join-Path $comparison 'civic-camera-views'
+          New-Item -ItemType Directory -Force $viewsFolder | Out-Null
+          Get-ChildItem "build-v17/civic-views" -Recurse -Filter 'raster_*.png' | ForEach-Object {
+            Copy-Item $_.FullName $viewsFolder
+          }
+      - name: Archive des résultats de simulation totale WARP
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17.${{ github.run_number }}-Total-Simulation-WARP
+          path: build-v17/total-simulation/
+          if-no-files-found: warn
+      # The V17-specific scene-switch and D3D11 benchmark smoke checks have
+      # already passed before we publish. Keep the complete inherited suite,
+      # but do not delay users' access to the fully packaged Windows app.
+      - name: Full V16 and V17 regression suite (post-package)
+        run: ctest --test-dir build-v17 -C Release --verbose --output-on-failure
+ })
             if ($matches.Count -ne 1 -or $matches[0].Length -lt 1200) {
-              throw "Missing/empty scene camera image: $camera"
+              $pictures | Sort-Object Name | ForEach-Object { Write-Host "$($_.Name) - $($_.Length) bytes" }
+              throw "Missing/empty scene camera image: $camera (exact matches: $($matches.Count))"
             }
           }
           $pictures | Sort-Object Name | ForEach-Object { Write-Host "$($_.Name) - $($_.Length) bytes" }
