@@ -298,9 +298,18 @@ def build(root):
                   resolution=512,imageFile=path))
             x=(ix-1.5)*width/4
             y=.65+(1.5-iy)*height/2 # center tile, top row is highest Y
-            objs.append(box_inst("v7_fresco_%d_%d_inst"%(iy,ix),
-               "Interieur/Piscine/Fresque murale 2048 native pixels",x,y,-54.14,
-               width/4,height/2,.055,mid))
+            # Custom two-triangle billboard: unit_box UVs repeat textures
+            # several times over long walls. Explicit 0..1 UVs prevent it.
+            name="v7_fresco_quad_%d_%d"%(iy,ix)
+            w=width/4;h=height/2;z=-54.11
+            vertices=[[x-w/2,y-h/2,z],[x+w/2,y-h/2,z],
+                      [x+w/2,y+h/2,z],[x-w/2,y+h/2,z]]
+            uv=[[0,0],[1,0],[1,1],[0,1]]
+            newgeo.append(mesh(name,vertices,[[0,1,2],[0,2,3],[2,1,0],[3,2,0]],uv))
+            objs.append(dict(id="v7_fresco_%d_%d_inst"%(iy,ix),
+               parent="Interieur/Piscine/Fresque murale 2048 native pixels",
+               geometry=name,material=mid,position=[0,0,0],
+               size=[1,1,1],rotationY=0))
     report["frescoAspectRatio"]=width/height;report["frescoNativePixels"]=[2048,930]
     report["frescoTiles"]=8
     # Preserve the original 3D wall behind it.
