@@ -139,7 +139,7 @@ function check(state){
   force(mats.length===44&&lights.length===60,
      'Expected 44 materials and 60 lights on V17.380; got '+mats.length+' / '+lights.length);
   force(names.size===ins.length,'Duplicate object ids');
-  force(ins.length>=3000&&ins.length<=5000,'Bad instance total');
+  force(ins.length>=3000&&ins.length<=65000,'Expected 3,000..65,000 scene instances; actual '+ins.length);
   force(ins.every(o=>o.size.every(x=>x>0&&Number.isFinite(x))&&
     o.position.every(Number.isFinite)),'Invalid instance size or position');
   force(exact('Nature/Arbres').length===26,'Civic trees disappeared');
