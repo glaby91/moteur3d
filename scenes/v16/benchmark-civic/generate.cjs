@@ -180,6 +180,35 @@ function build(profileName,p){
    B('Interieur/Galeries','prp_concrete_raw',0,y,-9.45,57,.30,8.5);
   }
  }
+ // First mezzanine (y=4.5): protective railing along every edge
+ // overlooking the open pool/hall. The stair opening at x=-15 stays clear.
+ // Handrail at 1.10 m above finished deck (top y=4.65).
+ const guard='Interieur/Galeries/Premier etage/Garde-corps';
+ const deckTop=4.65,railTop=deckTop+1.10;
+ const metal='prp_steel_painted';
+ // Side corridors: inner edges at x=±28.5, spanning z=-54.5..-5.5.
+ for(const side of [-1,1]){
+  const x=side*28.5;
+  B(guard+'/Main courante',metal,x,railTop,-29.50,.075,.075,49.0);
+  B(guard+'/Lisse intermediaire',metal,x,deckTop+.53,-29.50,.055,.055,49.0);
+  for(let z=-54.0;z<=-5.5;z+=2.5)
+   B(guard+'/Montants',metal,x,deckTop+.53,z,.08,1.06,.08);
+ }
+ // Rear cross-gallery: inner edge z=-45.3 between the side corridors.
+ B(guard+'/Main courante',metal,0,railTop,-45.30,57.0,.075,.075);
+ B(guard+'/Lisse intermediaire',metal,0,deckTop+.53,-45.30,57.0,.055,.055);
+ for(let x=-28;x<=28;x+=2.0)
+  B(guard+'/Montants',metal,x,deckTop+.53,-45.30,.08,1.06,.08);
+ // Front gallery inner edge z=-13.7. Leave a clear 6.3 m opening
+ // aligned with the main stair shaft and its landing.
+ for(const [x0,x1] of [[-28.5,-18.15],[-11.85,28.5]]){
+  const cx=(x0+x1)/2,span=x1-x0;
+  B(guard+'/Main courante',metal,cx,railTop,-13.70,span,.075,.075);
+  B(guard+'/Lisse intermediaire',metal,cx,deckTop+.53,-13.70,span,.055,.055);
+  for(let x=x0;x<=x1+.0001;x+=2.0)
+   B(guard+'/Montants',metal,x,deckTop+.53,-13.70,.08,1.06,.08);
+  B(guard+'/Montants',metal,x1,deckTop+.53,-13.70,.08,1.06,.08);
+ }
  // Perimeter roof + continuous glazed clerestory over the 50-m pool.
  for(const side of [-1,1])
   B(shell+'/Toiture','prp_roof_bitumen',side*40.2,19.55,-30,21.4,.55,51);
