@@ -1,14 +1,7 @@
 name: V17.380 FAST — architectural reconstruction and Z prepass benchmark
 run-name: V17.${{ github.run_number }} FAST — V4 Z-Prepass A-B
 on:
-  push:
-    branches:
-      - feature/v17-380-global-architectural-rebuild-261112
-    paths:
-      - '.github/workflows/v17-v4-z-fast.yml'
-      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/**'
-      - 'v17/**'
-      - 'scenes/v16/benchmark-civic/**'
+  # Explicit opt-in only: experimental prepass must not affect daily builds.
   workflow_dispatch:
 permissions:
   contents: read
