@@ -33,3 +33,13 @@ Launch DEMARRER_CSE_WARP_V7.bat from the complete extracted ZIP. If the walker b
 
 ## Commits
 Initial independent V7 scene; validated Windows WARP CI; mural explicit-UV fix; exterior staircase side transition; QA report.
+
+
+## Final validated delivery (GitHub Actions)
+- Run: https://github.com/glaby91/moteur3d/actions/runs/43315114865 — SUCCESS.
+- Scene-generator verification and actual D3D11 WARP exterior/mural frames passed.
+- Portable Windows artifact id 13988725568 (243 ZIP entries, testzip PASS).
+- Final ZIP SHA-256: fb6fda6c1b9c00964b466bb2782b9b6dbe7f3e18eff5b601acd1c2811230ef37
+- Final run report: 26 custom pits, 82 paving sections retessellated, eight access gaps, eight lateral parvis transitions, 68.2 m front stairs, zero central rear gallery slabs.
+- Mural render checked: original full-width artwork now unobstructed by the deleted mezzanine and cross-gallery rail; safety railing at pool remains.
+- No claim of an interactive on-device walkthrough or HD620 benchmark; those remain explicit acceptance tests.
