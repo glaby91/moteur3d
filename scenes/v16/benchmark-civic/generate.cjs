@@ -12,10 +12,10 @@ const catalog=JSON.parse(fs.readFileSync(catalogPath,'utf8'));
 // Scene-only PBR additions; original Pripyat IDs, materials and files remain
 // completely unchanged. The fresco is the actual legacy JPEG, not a fake mural.
 const specials=[
- ['cse_flower_red',[.71,.19,.17],.81,'foliage'],
- ['cse_flower_gold',[.92,.70,.18],.80,'foliage'],
- ['cse_flower_blue',[.25,.40,.77],.81,'foliage'],
- ['cse_flower_purple',[.46,.26,.63],.84,'foliage'],
+ ['cse_flower_red',[.54,.20,.19],.88,'foliage'],
+ ['cse_flower_gold',[.74,.54,.25],.89,'foliage'],
+ ['cse_flower_blue',[.33,.43,.54],.89,'foliage'],
+ ['cse_flower_purple',[.44,.33,.49],.89,'foliage'],
  ['cse_monument_bronze',[.36,.29,.19],.39,'metal'],
  ['cse_pool_strip',[.79,.86,.91],.27,'metal'],
  ['cse_energetik_fresco',[1,1,1],.72,'image'],
@@ -52,10 +52,10 @@ const geometry={format:'m3d-geometry-v1',units:'m',meshes:[
  {id:'foliage_canopy',type:'foliage_canopy'}
 ]};
 const cameras={format:'m3d-cameras-v1',cameras:[
- {id:'facade',name:'01 · Façade et mosaïque du personnage',position:[0,3.1,36],target:[0,11.0,-4],fovDegrees:65},
+ {id:'facade',name:'01 · Façade et mosaïque du personnage',position:[0,4.2,62],target:[0,10.7,-4],fovDegrees:66},
  {id:'mosaique',name:'02 · Mosaïque extérieure en détail',position:[12,8.0,19],target:[0,12.25,-3.8],fovDegrees:52},
  {id:'escalier',name:'02 · Escalier continu vers le palais',position:[-17,2.2,29],target:[0,2.6,-4],fovDegrees:66},
- {id:'passerelle',name:'03 · Grand banc ovale et statue',position:[66,2.3,72],target:[37,5.0,52],fovDegrees:67},
+ {id:'passerelle',name:'03 · Grand banc ovale et statue',position:[60,3.2,71],target:[37,4.8,52],fovDegrees:68},
  {id:'bassin',name:'04 · Piscine olympique depuis l’entrée',position:[0,2.4,-10],target:[0,1.0,-34],fovDegrees:73},
  {id:'hall',name:'05 · Hall, escalier et fresque Energetik',position:[-15,10.35,-11.6],target:[-15,10.35,-18.0],fovDegrees:67},
  {id:'hall_ensemble',name:'06 · Hall et escalier - vue d ensemble',position:[-4.5,2.55,-8.0],target:[-15,6.4,-15.4],fovDegrees:61},
@@ -467,16 +467,16 @@ function build(profileName,p){
   // Clear the 2.5 m central statue plinth.
   if(Math.abs(x-cx)<2.7&&Math.abs(z-cz)<2.7)continue;
   const flower=flowers[(i*7+Math.floor(i/7))%flowers.length];
-  const r=.56+.42*rand();
-  // Most flower heads use modest 12x8-patch sphere meshes; only every
-  // seventh cluster uses an organic foliage canopy. This keeps the actual
-  // lightweight scene from becoming a 600k-triangle garden benchmark.
+  const r=.27+.22*rand();
+  // Ground cover first, with flowers as small accents: prevents the
+  // earlier cartoon-like mound of oversized bright spheres.
   if(i%3===0)
-   F('Place/Butte végétalisée/Fleurs et feuillages',flower,
-     x,height+r*.24,z,r,.65+.4*rand(),r);
+   F('Place/Butte végétalisée/Fleurs et feuillages',
+     i%2===0?'cse_leaf_olive':'prp_foliage',
+     x,height+r*.13,z,r*2.4,.48+.32*rand(),r*2.4);
   else
    S('Place/Butte végétalisée/Fleurs et feuillages',flower,
-     x,height+r*.18,z,r,.50+.3*rand(),r);
+     x,height+r*.13,z,r,.30+.17*rand(),r);
   // Close-up clusters gain visible stems and petals but remain instanced,
   // rather than receiving high-poly custom flower meshes.
   if(i%4===0){
@@ -485,11 +485,11 @@ function build(profileName,p){
    for(let petal=0;petal<4;petal++){
     const angle=petal*Math.PI/2;
     S('Place/Butte végétalisée/Petales',flower,
-      x+.25*Math.cos(angle),height+.46,z+.25*Math.sin(angle),
-      .28,.19,.28);
+      x+.17*Math.cos(angle),height+.36,z+.17*Math.sin(angle),
+      .17,.12,.17);
    }
    S('Place/Butte végétalisée/Coeurs','cse_flower_gold',
-      x,height+.49,z,.22,.20,.22);
+      x,height+.38,z,.13,.13,.13);
   }
  }
  // New sober civic monument: TWO slender human silhouettes, NOT the earlier
@@ -635,10 +635,10 @@ function build(profileName,p){
  // the landscaped plaza empty. Put 26 actual branched poplars/birches
  // near the paths, while keeping the 10 m central entrance unobstructed.
  const civicTrees=[
-  [-45,12],[-57,18],[-68,22],[-41,33],[-62,41],[-74,51],
+  [-34,12],[-57,18],[-68,22],[-41,33],[-62,41],[-74,51],
   [-55,65],[-67,73],[-43,79],[-59,89],[-74,97],[-48,102],[-65,112],
-  [45,10],[59,18],[70,24],[61,37],[75,45],[59,66],
-  [69,76],[46,81],[62,92],[73,104],[50,109],[78,60],[67,113]
+  [34,12],[59,18],[70,24],[61,37],[75,45],[79,66],
+  [82,84],[46,81],[62,92],[73,104],[50,109],[78,60],[67,113]
  ];
  for(let i=0;i<p.trees;i++){
   const near=civicTrees[i];
@@ -690,7 +690,7 @@ function build(profileName,p){
        1.85,.95+rand()*.7,1.55);
     S('Place/Jardins/Fleurs basses',
       ((distance+z)%2===0?'cse_flower_red':'cse_flower_gold'),
-      x+side*.60,.63,z+.65,.60,.43,.60);
+      x+side*.60,.63,z+.65,.34,.23,.34);
    }
   }
  }
