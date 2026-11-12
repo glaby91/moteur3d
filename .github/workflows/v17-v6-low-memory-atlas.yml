@@ -1,0 +1,98 @@
+name: CSE WARP V17 - bounded GPU texture atlas
+run-name: V17 V6 low RAM - original GLBs + 136 PBR materials
+on:
+  push:
+    branches: [fix/v17-v6-low-memory-atlas-261112]
+    paths:
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp'
+      - '.github/workflows/v17-v6-low-memory-atlas.yml'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  windows-lowram:
+    runs-on: windows-2022
+    timeout-minutes: 55
+    env:
+      GH_TOKEN: ${{ github.token }}
+      M3D_V16_FORCE_WARP: '1'
+      M3D_V16_GPU_GI_SAMPLES: '0'
+      M3D_V17_EXPERIMENT_Z_PREPASS: '0'
+    steps:
+      - uses: actions/checkout@v5
+      - name: Qt6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Generate existing core benchmark resource files
+        shell: pwsh
+        run: |
+          node scenes/v16/benchmark-civic/generate.cjs --all
+          if($LASTEXITCODE -ne 0){throw 'Generator failed'}
+          python scenes/v16/benchmark-civic/landscape_v4.py --root scenes/v16/benchmark-civic
+          if($LASTEXITCODE -ne 0){throw 'V4 generator failed'}
+      - name: Compile same engine, memory fix only
+        shell: pwsh
+        run: |
+          cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=421
+          if($LASTEXITCODE -ne 0){throw 'CMake configure failure'}
+          cmake --build build-v17 --config Release --parallel 4 --target moteur3d_v17 moteur3d_v17_benchmark
+          if($LASTEXITCODE -ne 0){throw 'C++ build failure'}
+          foreach($name in @('moteur3d_v17.exe','moteur3d_v17_benchmark.exe','moteur3d_v16_core.dll')){
+            if(!(Test-Path "build-v17/Release/$name")){throw "Missing $name"}
+          }
+      - name: Download the complete genuine V6 scene for actual WARP test
+        shell: pwsh
+        run: |
+          gh run download 43302001952 --repo glaby91/moteur3d --name CSE-WARP-V17.420-V6-MONUMENT-Windows-x64 --dir v6
+          if($LASTEXITCODE -ne 0){throw 'Cannot download genuine scene'}
+          if(!(Test-Path 'v6/benchmark-civic/scene-v6-monument.json')){throw 'Missing original V6 scene'}
+          Copy-Item build-v17/Release/moteur3d_v17.exe v6/moteur3d_v17.exe -Force
+          Copy-Item build-v17/Release/moteur3d_v17_benchmark.exe v6/moteur3d_v17_benchmark.exe -Force
+          Copy-Item build-v17/Release/moteur3d_v16_core.dll v6/moteur3d_v16_core.dll -Force
+          $scene=Get-Content 'v6/benchmark-civic/scene-v6-monument.json' -Raw|ConvertFrom-Json
+          $set=(Get-Content 'v6/benchmark-civic/pbr/monument-v6.json' -Raw|ConvertFrom-Json).sets
+          if($set.Count -ne 136){throw "Expected original V6 136 materials; found $($set.Count)"}
+          if(@($set|Where-Object{$_.resolution -eq 2048}).Count -lt 3){throw 'Original high-res textures not retained'}
+      - name: Test V6 136 original materials, first 1366x768 frame, monitor RAM
+        shell: pwsh
+        timeout-minutes: 20
+        run: |
+          New-Item -ItemType Directory -Force 'test-output'|Out-Null
+          $exe=(Resolve-Path 'v6/moteur3d_v17_benchmark.exe').Path
+          $scene=(Resolve-Path 'v6/benchmark-civic/scene-v6-monument.json').Path
+          $out=(Resolve-Path 'test-output').Path
+          $p=Start-Process -FilePath $exe -WorkingDirectory (Resolve-Path 'v6').Path -ArgumentList @($scene,$out,'--quick','--camera-id','v6_monument_front','--hour','14','--raster-msaa','1','--raster-lod-enabled','0') -RedirectStandardOutput 'test-output/stdout.txt' -RedirectStandardError 'test-output/stderr.txt' -PassThru
+          $peak=0L;$started=Get-Date
+          while(!$p.HasExited){
+            $p.Refresh()
+            $peak=[Math]::Max($peak,[long]$p.WorkingSet64)
+            if(((Get-Date)-$started).TotalMinutes -ge 16){
+              Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+              throw 'LowRAM native V6 benchmark timeout'
+            }
+            Start-Sleep -Milliseconds 400
+          }
+          $p.Refresh()
+          Write-Host ('PEAK_WORKING_SET_MB='+[Math]::Round($peak/1MB,1))
+          if(Test-Path 'test-output/stdout.txt'){Get-Content 'test-output/stdout.txt'}
+          if(Test-Path 'test-output/stderr.txt'){Get-Content 'test-output/stderr.txt'}
+          if($p.ExitCode -ne 0){throw "V6 lowRAM render failed: $($p.ExitCode)"}
+          if($peak -gt 3500MB){throw "Excessive working set: $([Math]::Round($peak/1MB,1)) MB"}
+          $png=@(Get-ChildItem test-output -Recurse -Filter 'raster_v6_monument_front_1366x768_depth1.png')
+          if($png.Count -ne 1){throw 'Missing genuine full V6 1366x768 frame'}
+      - name: Upload patched Windows binaries and proof image
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V17.421-LOWRAM-ENGINE-PATCH
+          path: |
+            build-v17/Release/moteur3d_v17.exe
+            build-v17/Release/moteur3d_v17_benchmark.exe
+            build-v17/Release/moteur3d_v16_core.dll
+            test-output/
+          if-no-files-found: error
+          retention-days: 14
