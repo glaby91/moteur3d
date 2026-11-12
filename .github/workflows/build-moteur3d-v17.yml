@@ -418,6 +418,56 @@ jobs:
           name: CSE-WARP-V17.${{ github.run_number }}-Windows-x64
           path: dist-v17/
           if-no-files-found: error
+      - name: V17.365 GPU diagnostic — light count vs MSAA, fixed camera
+        shell: pwsh
+        timeout-minutes: 30
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = "build-v17/gpu-profile-v365"
+          New-Item -Type Directory -Force "$root/images" | Out-Null
+          $rows = @()
+          $scene = "scenes/v16/benchmark-civic/scene-extreme.json"
+          $exe = "build-v17/Release/moteur3d_v17_benchmark.exe"
+          # Each combination runs in a fresh process to prevent D3D11 quality
+          # state and shader cache from contaminating comparisons.
+          foreach ($msaa in @(1,2,4,8)) {
+            foreach ($lights in @(0,16,48,171)) {
+              $tag = "msaa$msaa-lights$lights"
+              $dir = "$root/$tag"
+              & $exe $scene $dir --quick --camera-id facade --hour 19 --raster-msaa $msaa --raster-anisotropy 16 --light-limit $lights --readback-depth 1
+              if ($LASTEXITCODE -ne 0) { throw "Benchmark process failed: $tag" }
+              $report = Get-ChildItem $dir -Recurse -Filter "summary.json" | Select-Object -First 1
+              if (!$report) { throw "Summary missing for $tag" }
+              $summary = Get-Content $report.FullName -Raw | ConvertFrom-Json
+              $case = @($summary.cases | Where-Object { $_.backend -eq 'V17_D3D11_Raster' })[0]
+              if (!$case -or $case.status -ne 'ok') { throw "Invalid raster result for $tag" }
+              $rows += [pscustomobject]@{
+                MSAA=$msaa;Lights=$lights;Camera='facade';Hour=19
+                GpuDrawMs=$case.gpuDrawMs;GpuTransferMs=$case.gpuTransferMs
+                CpuSubmitMs=$case.cpuSubmitMs;CpuMapWaitMs=$case.cpuMapWaitMs
+                CpuPixelConvertMs=$case.cpuPixelConvertMs
+                StreamFps=$case.streamFps;MeanMs=$case.meanMs
+                DrawCalls=$case.gpuDrawCalls;Triangles=$case.submittedTriangles
+                TimingValid=$case.gpuTimingValid
+              }
+              $image = Get-ChildItem $dir -Recurse -Filter "raster_facade_*.png" | Select-Object -First 1
+              if ($image -and (($msaa -eq 1 -or $msaa -eq 8) -and ($lights -eq 0 -or $lights -eq 171))) {
+                Copy-Item $image.FullName "$root/images/$tag.png"
+              }
+            }
+          }
+          $rows | Export-Csv "$root/gpu-isolation.csv" -NoTypeInformation -Encoding utf8
+          $rows | Format-Table -AutoSize | Out-String | Write-Host
+          if ($rows.Count -ne 16) { throw "Incomplete factorial GPU profile" }
+      - name: Upload V17 GPU isolation data (16 factorial cases)
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17.${{ github.run_number }}-GPU-Isolation-171-lights-MSAA
+          path: build-v17/gpu-profile-v365/
+          if-no-files-found: warn
       - name: Benchmark GI hors ligne — trois scènes, trois cuissons et sept relectures
         shell: pwsh
         timeout-minutes: 25
