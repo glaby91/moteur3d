@@ -268,8 +268,8 @@ def build(root):
                              xp,y+.52,z,.065,1.04,.065,"prp_steel_painted"))
         end=z_start+z_sign*span
         objs.append(box_inst(prefix+"_landing",prefix+"/Palier",x,y1-.07,end+z_sign*.20,2.55,.14,.70,"prp_terrazzo_floor"))
-    stair("Interieur/Escalier V7 RDC vers 1er",43,-11,-1,.55,4.65)
-    stair("Interieur/Escalier V7 1er vers 2eme",43,-31,-1,4.65,9.15)
+    # V7.426: the two experimental stair flights are removed as requested.
+    # Keep the stair() helper for a later relocation away from the pool.
     # Remove stair-width trémies from the first and second galleries,
     # preserving the concrete slabs on both sides.
     remove(lambda o:o["parent"]=="Interieur/Galeries"
@@ -396,6 +396,57 @@ def build(root):
 
 
 
+
+    # V7.426: the original hall/pool staircase (25 treads + 50 loose posts)
+    # STILL existed in the V7 screenshot. Remove its 75 visible instances
+    # and the detached landing tongue; do not mistake this for the previously
+    # removed 27-tread "Interieur/Escalier galerie" legacy flight.
+    old_stair=[o for o in objs if
+        o["parent"].startswith("Interieur/Hall/Grand escalier")]
+    old_landing=[o for o in objs if
+        o["parent"]=="Interieur/Hall/Palier raccord escalier"]
+    assert len(old_stair)==75 and len(old_landing)==1,(
+        "Unexpected obsolete staircase geometry",len(old_stair),len(old_landing))
+    remove(lambda o:o["parent"].startswith("Interieur/Hall/Grand escalier")
+           or o["parent"]=="Interieur/Hall/Palier raccord escalier")
+    # Close the original 6.3m-wide staircase slot in the first-floor frontal
+    # mezzanine.  This is part of the actual walkable floor, not a decal.
+    objs.append(box_inst("v7_close_obsolete_hall_stairwell",
+        "Interieur/Galeries/V7 fermeture tremie ancien escalier",
+        -15,4.5,-11.15,6.3,.30,5.1,"prp_concrete_raw"))
+    # The experimental east-side V7 staircase is also removed, as requested.
+    # Restore the FIRST and SECOND floor as fully continuous 11.6m-wide
+    # galleries, not an invisible bridge over the former stair opening.
+    old_decks=[o for o in objs if
+        o["parent"]=="Interieur/Galeries/Plancher avec tremie"]
+    assert len(old_decks)>=4,("Unexpected floor cutouts",len(old_decks))
+    remove(lambda o:o["parent"]=="Interieur/Galeries/Plancher avec tremie")
+    for level in (4.5,9.0):
+        objs.append(box_inst("v7_close_east_stair_floor_%02d"%int(level*10),
+            "Interieur/Galeries/V7 coursive exterieure conservee",
+            44.7,level,-30,11.6,.30,49,"prp_concrete_raw"))
+    # Remove guardrails that had artificial holes for the missing staircase.
+    old_edge=[o for o in objs if
+        o["parent"].startswith("Interieur/Galeries/V7 Garde-corps recules/")]
+    assert len(old_edge)>=20
+    remove(lambda o:o["parent"].startswith(
+        "Interieur/Galeries/V7 Garde-corps recules/"))
+    for level in (4.5,9.0,13.5):
+        rootname="Interieur/Galeries/V7 Garde-corps recules"
+        for layer,h in (("Main courante",1.25),("Lisse",.71)):
+            objs.append(box_inst("v7_complete_east_gallery_%02d_%s"%(
+                int(level*10),layer.replace(" ","_")),rootname+"/"+layer,
+                38.88,level+h,-30,.075,.075,49,"prp_steel_painted"))
+        for k in range(21):
+            objs.append(box_inst("v7_complete_east_gallery_%02d_post_%02d"%(
+                int(level*10),k),rootname+"/Montants",
+                38.88,level+.70,-54.5+k*2.45,.075,1.10,.075,
+                "prp_steel_painted"))
+    report["obsoletePoolStairInstancesRemoved"]=len(old_stair)+len(old_landing)
+    report["experimentalPoolStairInstancesRemaining"]=sum(
+        o["parent"].startswith("Interieur/Escalier V7") for o in objs)
+    report["closedFormerStairFloorSlabs"]=3
+    report["galleryRightNewRailSections"]=3
 
     # 7. True maximal-ratio artwork: original 2048x930 pixels -> 4x2 native tiles.
     # Runtime low-memory atlas is limited to <=512px/material, so 8 individual
