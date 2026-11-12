@@ -383,28 +383,36 @@ function build(profileName,p){
      x,3.96,z,.48,.38,.045);
   }
  }
- // Four stainless pool ladders: rungs actually descend below water level
- // and curved handrails run from immersed wall to anchored deck plates.
+ // V17.409 integration: four realistic swimming pool ladders.
+ // Smooth continuous handrails approximated with supported sphere primitives.
+ function ladderBezier(a,b,c,d,t){
+   const q=1-t;
+   return q*q*q*a+3*q*q*t*b+3*q*t*t*c+t*t*t*d;
+ }
+ function ladderProfile(t){
+   if(t<.54){
+     const u=t/.54;
+     return [ladderBezier(0,0,.03,.20,u),ladderBezier(.48,.98,1.35,1.40,u)];
+   }
+   const u=(t-.54)/.46;
+   return [ladderBezier(.20,.59,1.15,1.15,u),ladderBezier(1.40,1.43,1.28,.62,u)];
+ }
  for(const side of [-1,1])for(const z of [-41.5,-22.5]){
    const xIn=side*24.60,xDeck=side*25.75;
    for(const dz of [-.36,.36]){
-     B(pool+'/Echelles/Tube immerge','prp_steel_painted',
-       xIn,-.28,z+dz,.095,2.10,.095);
-     // Continuous arc approximated by overlapping smooth rounded cylinders,
-     // not unattached rectangular vertical sticks.
-     for(let k=0;k<=12;k++){
-       const t=k/12,theta=t*Math.PI*.75;
-       const xx=side*(24.60+1.15*t);
-       const yy=.78+.60*Math.sin(theta);
-       S(pool+'/Echelles/Main courante arrondie',
-         'prp_steel_painted',xx,yy,z+dz,.135,.135,.135);
+     B(pool+'/Echelles/Montants immerges','prp_steel_painted',
+       xIn,-.41,z+dz,.115,1.97,.115);
+     for(let k=0;k<67;k++){
+       const [u,y]=ladderProfile(k/66);
+       S(pool+'/Echelles/Mains courantes continues',
+         'prp_steel_painted',side*(24.60+1.15*u),y,z+dz,.135,.135,.135);
      }
-     B(pool+'/Echelles/Platine ancrage','prp_steel_painted',
-       xDeck,.62,z+dz,.28,.10,.22);
+     B(pool+'/Echelles/Platines fixation plage','prp_steel_painted',
+       xDeck,.58,z+dz,.26,.10,.23);
    }
-   for(const y of [-.90,-.53,-.16,.21])
-     B(pool+'/Echelles/Marches','prp_steel_painted',
-       xIn,y,z,.13,.085,.74);
+   for(const y of [-1.10,-.77,-.44,-.11,.22])
+     B(pool+'/Echelles/Marches immergees','prp_steel_painted',
+       xIn,y,z,.17,.095,.72);
  }
  // Open lobby at ground level with a clear line of sight into the pool.
  B('Interieur/Hall/Accueil','prp_wood_weathered',-19,1.05,-10,6,1.1,1.2);
