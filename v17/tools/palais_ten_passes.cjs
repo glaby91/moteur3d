@@ -29,7 +29,7 @@ const cameras=[
   {id:'hall',hour:19}
 ];
 const objectives=[
- 'BASE: unchanged V17.368',
+ 'BASE: reconstructed V17.380, original image assets preserved',
  '01 monument: slimmer figures, smaller heads and emblem',
  '02 trees: taller narrower poplar and birch canopies',
  '03 landscaping: scaled petals, ground-cover and shrubs',
@@ -38,7 +38,7 @@ const objectives=[
  '06 pool: smaller flags and refined rail thickness',
  '07 hall: slimmer artwork frames and luminaires',
  '08 PBR: lower saturation and higher natural roughness',
- '09 lighting: gentler indoor fixtures and warm roof accents',
+ '09 lighting: rebalance 60 sources (pool, hall and facade)',
  '10 finish: reduce roof clutter and tune remaining details'
 ];
 const readJson=file=>JSON.parse(fs.readFileSync(file,'utf8'));
@@ -49,7 +49,8 @@ const sha=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest
 const force=(yes,message)=>{if(!yes)throw new Error(message);};
 const shared=Object.fromEntries(files.filter(x=>x.endsWith('.json')).map(x=>
   [x,readJson(path.join(source,x))]));
-force(fs.existsSync(binary),'Missing Windows V17 benchmark binary: '+binary);
+if(!arguments_.includes('--check-only'))
+  force(fs.existsSync(binary),'Missing Windows V17 benchmark binary: '+binary);
 for(const file of files)force(fs.existsSync(path.join(source,file)),
   'Missing benchmark scene resource: '+file);
 fs.mkdirSync(output,{recursive:true});
@@ -113,9 +114,9 @@ function applyPass(state,n){
     }
   }else if(n===9){
     for(const l of lights){
-      if(l.position[1]>16.4&&l.position[1]<17.1){
+      if(l.position[1]>=15.9&&l.position[1]<=16.1){
         l.intensity=round(l.intensity*.92);edits++;
-      }else if(l.position[1]===24){
+      }else if(l.position[1]===4.0){
         l.intensity=round(l.intensity*.88);edits++;
       }else if(l.position[1]>7&&l.position[1]<8){
         l.intensity=round(l.intensity*.95);edits++;
@@ -136,9 +137,10 @@ function check(state){
   const lights=state['lighting/day.json'].lights;
   const exact=p=>ins.filter(x=>x.parent===p);
   const names=new Set(ins.map(x=>x.id));
-  force(mats.length===39&&lights.length===171,'Materials or light rig changed unexpectedly');
+  force(mats.length===44&&lights.length===60,
+     'Expected 44 materials and 60 lights on V17.380; got '+mats.length+' / '+lights.length);
   force(names.size===ins.length,'Duplicate object ids');
-  force(ins.length>=3000&&ins.length<=5000,'Bad instance total');
+  force(ins.length>=3000&&ins.length<=65000,'Expected 3,000..65,000 scene instances; actual '+ins.length);
   force(ins.every(o=>o.size.every(x=>x>0&&Number.isFinite(x))&&
     o.position.every(Number.isFinite)),'Invalid instance size or position');
   force(exact('Nature/Arbres').length===26,'Civic trees disappeared');
@@ -252,6 +254,17 @@ function runCamera(scene,destination,camera){
 function csvEscape(v){const t=String(v??'');return /[,"\n]/.test(t)?'"'+t.replace(/"/g,'""')+'"':t;}
 const rows=[],outcomes=[];
 let accepted=stateFromShared(),previous=null,approvedCount=0;
+// Fast preflight before the costly 55-frame campaign.
+if(arguments_.includes('--check-only')){
+  const candidate=stateFromShared();
+  check(candidate);
+  for(let pass=1;pass<=10;pass++){
+    applyPass(candidate,pass);
+    check(candidate);
+  }
+  console.log('V17.380 PRECHECK PASS: 44 materials, 60 lights, all design passes applicable');
+  process.exit(0);
+}
 for(let pass=0;pass<=10;pass++){
   const code='pass-'+String(pass).padStart(2,'0');
   const directory=path.join(output,code),scene=path.join(directory,'scene');

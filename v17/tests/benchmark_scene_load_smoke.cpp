@@ -16,7 +16,7 @@ int main(int argc,char** argv){
     const size_t triangles=built.runtime.renderScene.obj.size();
     const size_t requested=QString::fromLocal8Bit(argv[2]).toULongLong();
     if(triangles<requested || built.runtime.cameras.size()<6 ||
-       built.runtime.renderScene.mat.size()!=39 || built.runtime.objects.size()<1000){
+       built.runtime.renderScene.mat.size()!=44 || built.runtime.objects.size()<1000){
         qCritical()<<"Invalid benchmark content: triangles="<<qulonglong(triangles)
                    <<"min="<<qulonglong(requested)
                    <<"cameras="<<built.runtime.cameras.size()
@@ -24,7 +24,7 @@ int main(int argc,char** argv){
                    <<"instances="<<built.runtime.objects.size();
         return 5;
     }
-    // Seventeen scene-local materials preserve all 22 original Pripyat IDs.
+    // Twenty-two scene-local materials (including ceramic glazes) preserve all 22 original Pripyat IDs.
     // BOTH the user's exterior portrait and original hall Energetik fresco
     // must load through the real scene PBR/JPEG path (not flat fallbacks).
     const int artIndex=built.runtime.materialIndex.value(

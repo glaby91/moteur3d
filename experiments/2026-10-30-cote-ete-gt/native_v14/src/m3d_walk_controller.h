@@ -22,6 +22,10 @@ struct State {
     V feet{};
     float verticalVelocity=0.f;
     bool grounded=false;
+    // Keep a known safe landing point; a lost finite-ground contact must not
+    // accelerate the player forever into empty world space.
+    V lastSafeFeet{};
+    bool hasSafeGround=false;
 };
 inline V eye(const State& state,const Settings& cfg={}) {
     return state.feet+V{0.f,cfg.eyeHeight,0.f};
@@ -60,6 +64,8 @@ inline bool spawn(const Scene& scene,V cameraEye,State& state,
                cameraEye.y-.05f,cameraEye.y-320.f,floor,cfg)){
         state.feet.y=floor.y;
         state.grounded=true;
+        state.lastSafeFeet=state.feet;
+        state.hasSafeGround=true;
     }
     return state.grounded;
 }
@@ -96,6 +102,27 @@ inline bool ceilingBlocked(const Scene& scene,V feet,
 inline void advance(const Scene& scene,State& state,V motion,float dt,
                     const Settings& cfg={}){
     dt=clampf(dt,0.f,.1f);
+    // Some view presets start outside authored terrain (e.g. panorama).
+    // Do not enable gravity without ever establishing a real surface.
+    // Preserve horizontal movement so the user can enter the walkable site.
+    if(!state.hasSafeGround){
+        V firstFloor{};
+        if(support(scene,state.feet.x,state.feet.z,
+                   state.feet.y+cfg.maxStepUp+.01f,
+                   state.feet.y-320.f,firstFloor,cfg)){
+            state.feet.y=firstFloor.y;
+            state.verticalVelocity=0.f;
+            state.grounded=true;
+            state.lastSafeFeet=state.feet;
+            state.hasSafeGround=true;
+        }else{
+            state.verticalVelocity=0.f;
+            state.grounded=false;
+            state.feet.x+=motion.x;
+            state.feet.z+=motion.z;
+            return;
+        }
+    }
     const float distance=length(V{motion.x,0.f,motion.z});
     const unsigned substeps=std::max(1u,unsigned(std::ceil(distance/cfg.maxSubstep)));
     const V delta{motion.x/float(substeps),0.f,motion.z/float(substeps)};
@@ -120,6 +147,8 @@ inline void advance(const Scene& scene,State& state,V motion,float dt,
             state.feet=next;
             if(supported&&state.grounded){
                 state.verticalVelocity=0.f;
+                state.lastSafeFeet=state.feet;
+                state.hasSafeGround=true;
             }else if(!supported){
                 state.grounded=false;
             }
@@ -138,6 +167,8 @@ inline void advance(const Scene& scene,State& state,V motion,float dt,
     if(landed&&state.grounded){
         state.feet.y=floor.y;
         state.verticalVelocity=0.f;
+        state.lastSafeFeet=state.feet;
+        state.hasSafeGround=true;
     }else{
         state.grounded=false;
         const float previousY=state.feet.y;
@@ -149,8 +180,19 @@ inline void advance(const Scene& scene,State& state,V motion,float dt,
             state.feet.y=landing.y;
             state.verticalVelocity=0.f;
             state.grounded=true;
+            state.lastSafeFeet=state.feet;
+            state.hasSafeGround=true;
         }else{
             state.feet.y=proposedY;
+            // Leaving a real ledge is allowed. Recover only once the player
+            // falls below the *whole scene* rather than running away at -22 m/s.
+            if(state.hasSafeGround && scene.root>=0 &&
+               size_t(scene.root)<scene.node.size() &&
+               state.feet.y<scene.node[size_t(scene.root)].mn.y-3.f){
+                state.feet=state.lastSafeFeet;
+                state.verticalVelocity=0.f;
+                state.grounded=true;
+            }
         }
     }
 }

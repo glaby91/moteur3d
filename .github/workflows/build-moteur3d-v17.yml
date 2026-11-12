@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/v17-realtime-architecture-roadmap-261110
+      - feature/v17-380-global-architectural-rebuild-261112
     paths:
       - 'v17/**'
       - 'v16/**'
@@ -39,6 +40,12 @@ jobs:
           node --version
           node scenes/v16/benchmark-civic/generate.cjs --all
           node scenes/v16/benchmark-civic/validate.cjs
+          if ($LASTEXITCODE -ne 0) { throw "V17 scene validation failed" }
+          python scenes/v16/benchmark-civic/landscape_v4.py --root scenes/v16/benchmark-civic
+          if ($LASTEXITCODE -ne 0) { throw "V4 scene generation failed" }
+          foreach ($p in @("scene-v4.json","instances/v4.json","cameras/v4.json","stats/v4-budget.json")) {
+            if (!(Test-Path "scenes/v16/benchmark-civic/$p")) { throw "Missing generated V4 resource: $p" }
+          }
       - name: Configure
         shell: pwsh
         run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=${{ github.run_number }}
@@ -379,6 +386,10 @@ jobs:
           Copy-Item "build-v17/Release/cse_warp_v17_bench.ico" "dist-v17/"
           Copy-Item "build-v17/Release/pavillon01" "dist-v17/pavillon01" -Recurse
           Copy-Item "build-v17/Release/benchmark-civic" "dist-v17/benchmark-civic" -Recurse
+          # Release CMake distribution includes the legacy benchmark scene only.
+          # Overlay the actual generated V4 scene, its instance/camera manifests,
+          # referenced textures and all PBR resources in the same relative paths.
+          Copy-Item "scenes/v16/benchmark-civic/*" "dist-v17/benchmark-civic/" -Recurse -Force -ErrorAction Stop
           Copy-Item "build-v17/civic-actual-preview.png" "dist-v17/benchmark-civic/actual-render-WARP.png"
           Copy-Item "build-v17/pool-hour-14.png" "dist-v17/benchmark-civic/pool-14h-WARP.png"
           Copy-Item "build-v17/pool-hour-19.png" "dist-v17/benchmark-civic/pool-19h-WARP.png"
@@ -409,9 +420,57 @@ jobs:
           git rev-parse HEAD | Out-File "dist-v17/REVISION.txt" -Encoding ascii
           $env:GITHUB_RUN_NUMBER | Out-File "dist-v17/BUILD_NUMBER.txt" -Encoding ascii
           if (!(Test-Path "dist-v17/BUILD_NUMBER.txt")) { throw "Build number missing" }
+          # Production starts with experimental Z-prepass disabled. 
+          # Z-prepass remains an opt-in internal test; do not ship a launcher.
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set "M3D_V17_EXPERIMENT_Z_PREPASS="
+          start "" "moteur3d_v17.exe" "benchmark-civic\scene-v4.json"
+          '@ | Out-File "dist-v17/START_V4_REFERENCE.bat" -Encoding ascii
+          @'
+          CSE WARP V17 — Palais reconstruit V4
+          Normal launch uses stable rendering (experimental Z-prepass disabled).
+          Launch START_V4_REFERENCE.bat for the reference V4 scene.
+          Experimental Z-prepass is reserved for developer-only tests.
+          The executable defaults to benchmark-civic/scene-v4.json when no CLI path is provided.
+          WARP software timings do not represent Intel HD 620 GPU performance.
+          '@ | Out-File "dist-v17/README-V4.txt" -Encoding utf8
+          $root="dist-v17/benchmark-civic"
+          $scene=Get-Content "$root/scene-v4.json" -Raw | ConvertFrom-Json
+          $sector=$scene.sectors[0]
+          foreach ($kind in @("geometry","materials","pbr","instances","cameras","lighting","environment")) {
+            $names=@($sector.$kind)
+            if ($names.Count -eq 0) { throw "V4 scene manifest missing $kind" }
+            foreach ($name in $names) {
+              if (!(Test-Path (Join-Path $root $name))) { throw "V4 resource missing: $kind / $name" }
+            }
+          }
+          foreach ($p in @("scene-v4.json","instances/v4.json","cameras/v4.json","textures/energetik_fresco_mosaic.jpg","textures/personnage_facade_mosaique.jpg")) {
+            if (!(Test-Path "$root/$p")) { throw "Required V4 artifact missing: $p" }
+          }
           windeployqt --release --no-translations dist-v17/moteur3d_v17.exe
           windeployqt --release --no-translations dist-v17/moteur3d_v17_benchui.exe
           windeployqt --release --no-translations dist-v17/moteur3d_v16.exe
+      - name: Import 10 CC0 GLB trees into full Windows V17 package and smoke test final launch scene
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          M3D_V16_GPU_GI_SAMPLES: '0'
+          M3D_V17_EXPERIMENT_Z_PREPASS: '0'
+        run: |
+          python -m pip install --disable-pip-version-check trimesh numpy
+          if ($LASTEXITCODE -ne 0) { throw 'Missing tree import dependencies' }
+          python scenes/v16/benchmark-civic/import_trees_pilot.py --root scenes/v16/benchmark-civic
+          if ($LASTEXITCODE -ne 0) { throw '10 CC0 GLB trees import failed' }
+          python tools/package_v17_trees.py --dist dist-v17 --source scenes/v16/benchmark-civic
+          if ($LASTEXITCODE -ne 0) { throw 'Full distribution assembly failed' }
+          & "dist-v17/moteur3d_v17_benchmark.exe" "dist-v17/benchmark-civic/scene-v4.json" "build-v17/final-v4-10-tree-smoke" --smoke --camera-id v4_face --hour 14 --raster-msaa 1 --readback-depth 1
+          if ($LASTEXITCODE -ne 0) { throw 'Final delivered V17 tree scene failed real DX11 WARP rendering' }
+          $pic=Get-ChildItem "build-v17/final-v4-10-tree-smoke" -Recurse -Filter 'raster_v4_face_*.png' | Select-Object -First 1
+          if (!$pic -or $pic.Length -lt 1200) { throw 'Final tree scene preview missing or empty' }
+          Copy-Item $pic.FullName "dist-v17/benchmark-civic/10-arbres-V17-WARP.png"
+          Write-Host "READY: V17 Windows package opens corrected V4 + 10 trees by default"
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
@@ -508,6 +567,11 @@ jobs:
           Get-ChildItem "build-v17/civic-views" -Recurse -Filter 'raster_*.png' | ForEach-Object {
             Copy-Item $_.FullName $viewsFolder
           }
+      - name: Preflight ten design passes without rendering (regression guard)
+        shell: pwsh
+        run: |
+          node v17/tools/palais_ten_passes.cjs --scene scenes/v16/benchmark-civic --binary build-v17/Release/moteur3d_v17_benchmark.exe --check-only
+          if ($LASTEXITCODE -ne 0) { throw 'Ten-pass fast design preflight failed' }
       - name: Ten progressive native design passes — 55 real WARP camera renders and feedback
         shell: pwsh
         timeout-minutes: 35

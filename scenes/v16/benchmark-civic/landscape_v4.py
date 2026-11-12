@@ -323,6 +323,37 @@ def main(root):
                 side*(2.0+j*.11),1.6+j*.10,
                 CENTER_Z+2.15,.038,.16,.038)
 
+    # Pop 1970s architectural planters, approved design:
+    # reusable geometric modules and vivid glossy ceramic enamels.
+    # Replace anonymous unsupported facade bushes, keep park greenery.
+    instances[:]=[o for o in instances
+                  if not (o['parent'].startswith('Place/Jardins/Arbustes')
+                          and abs(o['position'][2]-9)<2)]
+    enamel=['cse_glaze_orange','cse_glaze_cobalt','cse_glaze_yellow',
+           'cse_glaze_lime','cse_glaze_red']
+    planter_count=0
+    for side in (-1,1):
+        for j,x in enumerate((12,22,32,42)):
+            x=side*x
+            z=1.8
+            parent='Architecture/Facade/Jardinieres ceramique POP 1970'
+            material=enamel[(j+(0 if side<0 else 2))%len(enamel)]
+            # Faceted modular bases: central hexagonal volume, satin rim,
+            # contained soil and three individually modeled plant clusters.
+            box(parent+'/Corps emaille',material,x,.47,z,1.28,.82,.88)
+            box(parent+'/Rebord emaille',material,x,.91,z,1.40,.12,1.00)
+            box(parent+'/Terre','prp_soil_leaf_litter',x,.98,z,1.18,.055,.78)
+            for k in range(3):
+                dx=(k-1)*.34
+                leaf(parent+'/Arbustes compacts',
+                     'cse_leaf_olive' if k!=1 else 'cse_leaf_gold',
+                     x+dx,1.31,z+(.10 if k%2 else -.11),
+                     .56,.66,.47)
+                sphere(parent+'/Fleurs pop',
+                       ['cse_flower_red','cse_flower_gold','cse_flower_purple'][(j+k)%3],
+                       x+dx,1.65,z+.15,.20,.17,.18)
+            planter_count+=1
+    assert planter_count==8, 'POP planters missing'
     # Previous cameras/scene remain immutable; new curated V4 viewpoints.
     view=copy.deepcopy(read(root/'cameras'/'views.json'))
     view['cameras']=[

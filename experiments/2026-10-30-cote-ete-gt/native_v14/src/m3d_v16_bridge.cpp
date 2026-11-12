@@ -694,6 +694,57 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
                 if(src.triangleCount==12)render.sourceBoxes.push_back(src);
             }
         }
+        else if(type=="triangle_mesh"){
+            // Imported CC0 meshes: world-space triangle coordinates and UVs
+            // are preserved. This shared CPU/BVH geometry also powers DX11
+            // WARP, rather than substituting spheres for the imported model.
+            const QJsonObject def=meshes.value(meshId);
+            const auto vertices=def.value("vertices").toArray();
+            const auto faces=def.value("faces").toArray();
+            const auto texcoords=def.value("uv").toArray();
+            if(vertices.isEmpty()||faces.isEmpty()||vertices.size()>200000||
+               faces.size()>80000||(texcoords.size()!=0&&texcoords.size()!=vertices.size())){
+                result.error="Invalid imported mesh size: "+meshId;return result;
+            }
+            std::vector<V> local;local.reserve(size_t(vertices.size()));
+            std::vector<V> tex;tex.reserve(size_t(vertices.size()));
+            for(int vi=0;vi<vertices.size();++vi){
+                const auto coords=vertices[vi].toArray();
+                if(coords.size()!=3){
+                    result.error="Invalid mesh vertex: "+meshId;return result;
+                }
+                const V p=v3(vertices[vi],{INF,INF,INF});
+                if(!finite3(p)){
+                    result.error="Nonfinite mesh vertex: "+meshId;return result;
+                }
+                local.push_back(p);
+                if(!texcoords.isEmpty()){
+                    const auto uv=texcoords[vi].toArray();
+                    if(uv.size()!=2||!uv[0].isDouble()||!uv[1].isDouble()){
+                        result.error="Invalid mesh UV: "+meshId;return result;
+                    }
+                    tex.push_back({float(uv[0].toDouble()),float(uv[1].toDouble()),0.f});
+                }else tex.push_back({0.f,0.f,0.f});
+            }
+            const float angle=f(j.value("rotationY"))*PI/180.f;
+            const float cs=std::cos(angle),sn=std::sin(angle);
+            auto transform=[&](V v)->V{
+                const float x=v.x*size.x,y=v.y*size.y,z=v.z*size.z;
+                return {pos.x+x*cs+z*sn,pos.y+y,pos.z-x*sn+z*cs};
+            };
+            for(const auto& face:faces){
+                const auto ids=face.toArray();
+                if(ids.size()!=3){
+                    result.error="Non-triangle imported mesh face: "+meshId;return result;
+                }
+                const int a=ids[0].toInt(-1),b=ids[1].toInt(-1),c=ids[2].toInt(-1);
+                if(a<0||b<0||c<0||a>=int(local.size())||b>=int(local.size())||c>=int(local.size())){
+                    result.error="Imported mesh index out of range: "+meshId;return result;
+                }
+                triangle(render,transform(local[size_t(a)]),transform(local[size_t(b)]),
+                    transform(local[size_t(c)]),tex[size_t(a)],tex[size_t(b)],tex[size_t(c)],material);
+            }
+        }
         else if(type=="uv_sphere")sphere(render,pos,size,material);
         else if(type=="foliage_canopy"){
             foliageCanopy(render,pos,size,material);
