@@ -228,7 +228,8 @@ def build(root):
         return BASE+OLD_H*(1-t*t*(3-2*t))
     def newheight(x,z):
         r=math.hypot(x/15.2,(z-72)/9.3)
-        # Real flat crown supports the entire 5.71 x 3.08m plinth.\n        t=max(0,min(1,(r-.28)/.72))
+        # Real flat crown supports the entire 5.71 x 3.08m plinth.
+        t=max(0,min(1,(r-.28)/.72))
         return BASE+NEW_H*(1-t*t*(3-2*t))
     hill=copy.deepcopy(geom["v6_butte_relief_solid"]);hill["id"]="v7_hill_3m20_support_plateau"
     # Recompute surface Y, keep bottom/skirt below the base.
