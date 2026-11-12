@@ -627,6 +627,34 @@ def build(root):
     report["curtainWallClerestoryBaysGlazed"]=clerestory
     report["curtainWallNewMetalMullionsAndTransoms"]=metal_joints
 
+    # Two accessible side doors on the existing 68m front parvis.
+    # Previously all outer facade glass panels were solid collision barriers
+    # except the 10m central entrance. Clear the exact source panel AND old
+    # centrally placed chassis. Keep the new side mullions as door jambs and
+    # the upper transom, remove only the ankle-height bottom crossbar.
+    side_door_centers=(-27.25,26.35)
+    old_door_glass=[o for o in objs if
+        o["parent"]=="Architecture/Palais/Verriere"
+        and abs(o["position"][1]-2.6)<.01
+        and any(abs(o["position"][0]-x)<.01 for x in side_door_centers)]
+    old_door_center_frames=[o for o in objs if
+        o["parent"]=="Architecture/Palais/Chassis"
+        and abs(o["position"][1]-2.6)<.01
+        and any(abs(o["position"][0]-x)<.01 for x in side_door_centers)]
+    low_crossbars=[o for o in objs if
+        o["parent"]=="Architecture/Palais/Mur-rideau V7/Traverses"
+        and abs(o["position"][1]-(2.6-1.89))<.01
+        and any(abs(o["position"][0]-x)<.01 for x in side_door_centers)]
+    assert (len(old_door_glass),len(old_door_center_frames),len(low_crossbars))==(2,2,2)
+    ids={o["id"] for o in old_door_glass+old_door_center_frames+low_crossbars}
+    remove(lambda o:o["id"] in ids)
+    for idx,x in enumerate(side_door_centers):
+        objs.append(box_inst("v7_door_header_%d"%idx,
+            "Architecture/Palais/Mur-rideau V7/Portes latérales ouvertes",
+            x,4.40,-3.82,3.15,.18,.25,"prp_window_frame"))
+    report["lateralClearDoors"]=2
+    report["removedDoorBlockingParts"]=len(ids)
+
     # 7. True maximal-ratio artwork: original 2048x930 pixels -> 4x2 native tiles.
     # Runtime low-memory atlas is limited to <=512px/material, so 8 individual
     # material tiles preserve source detail instead of downsampling it to 512px.
@@ -712,6 +740,10 @@ def build(root):
     write(root/"lighting/v7-evening.json",lighting)
     report["topCorniceRealLights"]=12
     report["plazaRealLights"]=10
+    cams["cameras"].append(dict(id="v7_side_entry_open",
+        name="V7 · Entrée latérale ouverte et mur rideau",
+        position=[-27.25,2.15,11.0],
+        target=[-27.25,2.15,-11.0],fovDegrees=65))
     # All V6 data and the original V5 remain untouched.
     write(root/"cameras/v7.json",cams)
     new_ids=[o["id"] for o in objs]
