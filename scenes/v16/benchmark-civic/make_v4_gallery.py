@@ -54,7 +54,7 @@ def main(args):
               gpu_ellipsoids=int(case.get('gpuEllipseInstances',0)),
               gpu_foliage=int(case.get('gpuFoliageInstances',0))))
     sheet.save(folder/'V4_8_vues_reelles.png',optimize=True)
-    with (folder/'performance_8_vues.csv').open('w',newline='',encoding='utf8-sig') as out:
+    with (folder/'performance_8_vues.csv').open('w',newline='',encoding='utf-8-sig') as out:
         wr=csv.DictWriter(out,fieldnames=list(metrics[0]))
         wr.writeheader();wr.writerows(metrics)
     report={
