@@ -12,6 +12,7 @@
 #include <QFile>
 #include <cstdlib>
 #include <vector>
+#include <atomic>
 
 using namespace m3d;
 
@@ -124,5 +125,69 @@ int main(int argc,char** argv){
     }
     qInfo()<<"Compute heterogeneous mip atlas OK, 96x54, elapsed"<<timer.elapsed()
            <<"ms, output pixels"<<pixels.size();
+    // A/B: same real scene and camera. The primary shader must skip all
+    // BVH/PBR work in the 3 unsampled lanes of each 2x2 group.
+    if(stats.primarySamples!=uint64_t(96*54)){
+        qCritical()<<"Full Compute primary sample count mismatch"<<stats.primarySamples;
+        return 16;
+    }
+    if(_putenv_s("M3D_PRIMARY_RAYS_25","1")!=0){
+        qCritical()<<"Cannot enable native quarter ray mode";return 17;
+    }
+    std::vector<uint32_t> quarterPixels;
+    Stats quarterStats;
+    error.clear();
+    const bool quarterOK=renderCompute11Preview(mixed.runtime.renderScene,camera,96,54,
+                                                 quarterPixels,quarterStats,error);
+    _putenv_s("M3D_PRIMARY_RAYS_25","");
+    if(!quarterOK||quarterPixels.size()!=size_t(96*54)||
+       quarterStats.primarySamples!=uint64_t(48*27)){
+        qCritical()<<"Quarter Compute failed"<<QString::fromStdWString(error)
+                   <<"primary rays"<<quarterStats.primarySamples;
+        return 18;
+    }
+    for(int y=0;y<54;++y)for(int x=0;x<96;++x){
+        const size_t pos=size_t(y)*96+x;
+        const size_t donor=size_t(y&~1)*96+(x&~1);
+        if(quarterPixels[pos]!=quarterPixels[donor]){
+            qCritical()<<"Quarter Compute reconstruction mismatch at"<<x<<y;
+            return 19;
+        }
+        if((x&1)==0&&(y&1)==0&&quarterPixels[pos]!=pixels[pos]){
+            qCritical()<<"Compute sampled primary changed from full reference at"<<x<<y;
+            return 20;
+        }
+    }
+    // CPU must enforce the same genuine sample budget and leave its donor
+    // pixels bit-identical to a full-resolution CPU reference frame.
+    m3d::Stats shadowStats;
+    const auto shadow=buildShadow(mixed.runtime.renderScene,shadowStats);
+    std::atomic<uint64_t> generation{1};
+    std::vector<uint32_t> cpuFull,cpuQuarter;
+    const Stats cpuFullStats=render(mixed.runtime.renderScene,shadow,camera,96,54,
+                                    cpuFull,2,false,generation,1,1,false,false,false,3);
+    if(_putenv_s("M3D_PRIMARY_RAYS_25","1")!=0)return 21;
+    const Stats cpuQuarterStats=render(mixed.runtime.renderScene,shadow,camera,96,54,
+                                       cpuQuarter,2,false,generation,1,1,false,false,false,3);
+    _putenv_s("M3D_PRIMARY_RAYS_25","");
+    if(cpuFullStats.primarySamples!=uint64_t(96*54)||
+       cpuQuarterStats.primarySamples!=uint64_t(48*27)||
+       cpuQuarter.size()!=cpuFull.size()){
+        qCritical()<<"CPU primary sample budget regression";
+        return 22;
+    }
+    for(int y=0;y<54;++y)for(int x=0;x<96;++x){
+        const size_t p=size_t(y)*96+x;
+        const size_t donor=size_t(y&~1)*96+(x&~1);
+        if(cpuQuarter[p]!=cpuQuarter[donor]||
+          (((x&1)==0&&(y&1)==0)&&cpuQuarter[p]!=cpuFull[p])){
+            qCritical()<<"CPU sparse ray or reconstruction mismatch at"<<x<<y;
+            return 23;
+        }
+    }
+    qInfo()<<"Native quarter ray A/B verified on loaded real scene: CPU and"
+           <<" D3D11 Compute primary queries 5184 -> 1296; sampled donors exact"
+           <<" CPU ms"<<cpuFullStats.ms<<"->"<<cpuQuarterStats.ms
+           <<" Compute ms"<<stats.ms<<"->"<<quarterStats.ms;
     return 0;
 }
