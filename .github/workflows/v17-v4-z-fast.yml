@@ -44,7 +44,7 @@ jobs:
       - name: Configure and compile Windows
         shell: pwsh
         run: |
-          cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=${{ github.run_number }}
+          cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=379
           if($LASTEXITCODE -ne 0){throw 'Configure failed'}
           cmake --build build-v17 --config Release --parallel 4
           if($LASTEXITCODE -ne 0){throw 'Compile failed'}
@@ -161,7 +161,7 @@ jobs:
           Windows package with Qt runtime. WARP results are NOT Intel HD 620 results.
           '@|Out-File "$root/README-V4-Z.txt" -Encoding utf8
           git rev-parse HEAD|Out-File "$root/REVISION.txt" -Encoding ascii
-          $env:GITHUB_RUN_NUMBER|Out-File "$root/BUILD_NUMBER.txt" -Encoding ascii
+          '379'|Out-File "$root/BUILD_NUMBER.txt" -Encoding ascii
           windeployqt --release --no-translations "$root/moteur3d_v17.exe"
           if($LASTEXITCODE -ne 0){throw 'Qt deployment failed'}
           windeployqt --release --no-translations "$root/moteur3d_v17_benchui.exe"
@@ -170,12 +170,12 @@ jobs:
       - name: Upload FAST A-B results only
         uses: actions/upload-artifact@v6
         with:
-          name: V17.${{ github.run_number }}-V4-Z-BENCH
+          name: V17.379-V4-Z-BENCH
           path: build-v17/v4-z-comparison/
           if-no-files-found: error
       - name: Upload portable V4 Z-Prepass Windows package
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.${{ github.run_number }}-V4-ZPREPASS-Windows-x64
+          name: CSE-WARP-V17.379-V4-ZPREPASS-Windows-x64
           path: dist-v17-v4-z/
           if-no-files-found: error
