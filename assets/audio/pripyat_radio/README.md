@@ -15,7 +15,8 @@ de Radio Kiev / Suspilne n'est inclus.
    python build_radio.py
    ```
 3. Le fichier est généré dans
-   `generated/ukrainian_radio_reconstruction.ogg`.
+   `generated/ukrainian_radio_reconstruction.ogg`, accompagné de
+   `generated/pripyat_radio.wav` (PCM mono, 16 kHz), destiné à la lecture Windows.
    Les sources téléchargées sont mises en cache dans `cache/`.
 
 `python build_radio.py --download-only` récupère les fichiers originaux sans traitement.
@@ -34,9 +35,20 @@ L'audio doit être traité comme une ressource **facultative**, chargée seuleme
 - Afficher dans l'interface ou les crédits : « Reconstitution sonore moderne,
   **pas un programme original des années 1970** ».
 
-**État d'intégration :** l'outil de génération et le manifeste sont versionnés.
-Le raccordement à un lecteur audio 3D dans l'exécutable CSE WARP n'est **pas encore codé**,
-car il nécessite une adaptation au backend audio réel du programme.
+**État d'intégration :** un premier lecteur **non spatialisé** Windows est branché à
+`src/moteur3d_qt.cpp` via `PlaySoundW` / `winmm` : il démarre automatiquement
+si le nom de scène contient `pripyat` ou `energetik` et si le fichier WAV existe.
+La console Qt comporte un bouton **Arrêter la radio / Reprendre la radio**.
+La lecture est en boucle et s'arrête à la fermeture du programme ou en changeant de scène.
+Le son 3D quatre émetteurs avec XAudio2 + X3DAudio reste **à implémenter**.
+
+Pour activer le test, copier `generated/pripyat_radio.wav` dans
+`<dossier de l'exécutable>/audio/pripyat_radio.wav` ; créer le sous-dossier
+`audio` si nécessaire. Le fichier WAV n'est pas versionné car il est volumineux.
+Sans fichier audio, le logiciel doit fonctionner en silence et afficher un statut
+indiquant que le fichier manque. Les versions Linux restent silencieuses avec
+ce premier backend Windows. Cette intégration n'a pas encore été compilée ou
+testée sur le portable cible.
 
 ## Redistribution
 
