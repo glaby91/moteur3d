@@ -57,7 +57,7 @@ force(Array.isArray(pbr.sets),'Missing PBR texture sets in benchmark scene');
 for(const set of pbr.sets){
   if(set.imageFile==null)continue;
   const image=set.imageFile;
-  force(typeof image==='string' && /\\.(png|jpe?g|webp)$/i.test(image) &&
+  force(typeof image==='string' && /\.(png|jpe?g|webp)$/i.test(image) &&
         !path.isAbsolute(image) &&
         path.resolve(source,image).startsWith(source+path.sep),
         'Invalid referenced texture path: '+String(image));
