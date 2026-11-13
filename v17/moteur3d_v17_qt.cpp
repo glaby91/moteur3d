@@ -368,6 +368,53 @@ public:
             QCoreApplication::exit(33);
         });
     }
+    // Regression: recalling an anomaly must not switch the user's walking
+    // preference to free flight. Previously that disabling was persisted in
+    // QSettings and removed ALL collision checks on subsequent launches.
+    void smokeWalkingCollisionPreference(){
+        auto* poll=new QTimer(this);
+        poll->setInterval(100);
+        connect(poll,&QTimer::timeout,this,[this,poll]{
+            if(sceneLoading_||!runtime_||!walkingModeBox_)return;
+            poll->stop();
+            QSettings prefs(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+            const QVariant previous=prefs.value(QStringLiteral("Exploration/Walking"));
+            walkingModeBox_->setChecked(true);
+            prefs.setValue(QStringLiteral("Exploration/Walking"),true);
+            prefs.sync();
+            selectAnomaly(0); // ANO-005 has a precisely measured camera pose.
+            const bool okAfterSelect=walkingModeBox_->isChecked()
+                &&walkingCollisionSyncPending_
+                &&prefs.value(QStringLiteral("Exploration/Walking")).toBool();
+            returnBeforeAnomaly();
+            prefs.sync();
+            const bool okAfterReturn=walkingModeBox_->isChecked()
+                &&walkingCollisionSyncPending_
+                &&prefs.value(QStringLiteral("Exploration/Walking")).toBool();
+            // Restore the prior preference after the smoke test.
+            {
+                QSignalBlocker block(walkingModeBox_);
+                walkingModeBox_->setChecked(previous.isValid()?previous.toBool():true);
+            }
+            if(previous.isValid())prefs.setValue(QStringLiteral("Exploration/Walking"),previous);
+            else prefs.remove(QStringLiteral("Exploration/Walking"));
+            prefs.sync();
+            if(!okAfterSelect||!okAfterReturn){
+                std::fprintf(stderr,
+                    "V17 COLLISION PREFERENCE FAILED: afterSelect=%d afterReturn=%d\\n",
+                    int(okAfterSelect),int(okAfterReturn));
+                QCoreApplication::exit(38);
+                return;
+            }
+            std::puts("V17 COLLISION PREFERENCE PASS: anomaly pose + return retain walking preference");
+            QCoreApplication::exit(0);
+        });
+        poll->start();
+        QTimer::singleShot(120000,this,[]{
+            std::fprintf(stderr,"V17 COLLISION PREFERENCE: timeout\\n");
+            QCoreApplication::exit(39);
+        });
+    }
     ~V17Window() override {
         audioTimer_.stop();
         stopRadio();
@@ -2284,19 +2331,22 @@ int main(int argc,char** argv){
         && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-scene-switch");
     const bool repeatSmoke=argc>=3
         && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-repeat-raster");
+    const bool walkingSmoke=argc>=3
+        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-walking-collisions");
     // Use the same Windows V17 brand icon for Qt titlebar/Alt-Tab/taskbar.
     // The ICO is also embedded in the EXE's native Win32 resources.
     const QString iconPath=QCoreApplication::applicationDirPath()
         +QStringLiteral("/cse_warp_v17.ico");
     if(QFileInfo::exists(iconPath))app.setWindowIcon(QIcon(iconPath));
-    const QString path=switchSmoke||repeatSmoke
+    const QString path=switchSmoke||repeatSmoke||walkingSmoke
         ?QString::fromLocal8Bit(argv[2])
         :(argc>1?QString::fromLocal8Bit(argv[1]):defaultPath());
     // The smoke test uses reduced texture resolution to stay viable on
     // CI's software-only WARP device. Normal V17 keeps full 2048 PBR.
-    V17Window window(path,(switchSmoke||repeatSmoke)?256:2048);
+    V17Window window(path,(switchSmoke||repeatSmoke||walkingSmoke)?256:2048);
     if(switchSmoke)window.smokeSceneSwitch(QString::fromLocal8Bit(argv[3]));
     if(repeatSmoke)window.smokeRepeatRaster();
+    if(walkingSmoke)window.smokeWalkingCollisionPreference();
     if(!app.windowIcon().isNull())window.setWindowIcon(app.windowIcon());
     window.show();
     return app.exec();
