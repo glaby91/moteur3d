@@ -1215,6 +1215,8 @@ Scene scene_;
             shadowHour_ = hourStep;
         }
         currentScenePath_ = path;
+        stopRadio();
+        initializeRadio();
         displayV16Scene(result.scene);
         cameraTarget_={0.f,3.f,0.f};
         setCameraSliders(32,38,14,55);
