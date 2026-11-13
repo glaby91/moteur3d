@@ -152,7 +152,20 @@ int main(int argc,char**argv){
  QCoreApplication app(argc,argv);
  QTextStream out(stdout),err(stderr);
  QStringList args=app.arguments();
- if(args.size()<3){err<<"Usage: CSE-WARP-GPU-TRAJET-BENCH.exe scene.json dossier_sortie [--ci-smoke]\n";return 2;}
+ if(args.size()<3){err<<"Usage: CSE-WARP-GPU-TRAJET-BENCH.exe scene.json dossier_sortie [--ci-smoke] [--z-prepass=on|off] [--light-aabb=on|off]\\n";return 2;}
+ const auto configureSwitch=[&](const char* flag,const char* env)->bool{
+  const QString option=QString::fromLatin1(flag);
+  const bool on=args.contains(option+"=on"),off=args.contains(option+"=off");
+  if(on&&off){err<<"Contradictory option: "<<option<<"\\n";return false;}
+  if(on)qputenv(env,"1");
+  if(off)qputenv(env,"0");
+  return true;
+ };
+ if(!configureSwitch("--z-prepass","M3D_V17_EXPERIMENT_Z_PREPASS")||
+    !configureSwitch("--light-aabb","M3D_V17_EXPERIMENT_LIGHT_AABB_CULL"))
+    return 2;
+ const bool zEnabled=qgetenv("M3D_V17_EXPERIMENT_Z_PREPASS")=="1";
+ const bool lightAabbEnabled=qgetenv("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL")=="1";
  const bool smoke=args.contains("--ci-smoke");
  const int w=smoke?640:1366,h=smoke?360:768;
  const int frames=smoke?4:90;
@@ -195,7 +208,9 @@ int main(int argc,char**argv){
  const auto initialized=Clock::now();
  out<<"CSE WARP GPU D3D11 Raster trajectory, scene V17.430\n"
     <<"Device: "<<video.adapterName<<"; "<<w<<"x"<<h<<"; frames="<<frames
-    <<"; virtual seconds="<<virtualDuration<<"; MSAA=2, PBR="<<(smoke?256:2048)<<"\n";
+    <<"; virtual seconds="<<virtualDuration<<"; MSAA=2, PBR="<<(smoke?256:2048)
+     <<"; Z-prepass="<<(zEnabled?"ON":"OFF")
+     <<"; Local light AABB="<<(lightAabbEnabled?"ON":"OFF")<<"\\n";
  out.flush();
 
  const auto shifted=[&](int n){
@@ -216,7 +231,7 @@ int main(int argc,char**argv){
  QFile csvFile(csvPath);
  if(!csvFile.open(QIODevice::WriteOnly|QIODevice::Text)){err<<"CSV unavailable\n";return 7;}
  QTextStream csv(&csvFile);
- csv<<"frame,virtual_seconds,camera_x_m,camera_y_m,camera_z_m,wall_ms,throughput_fps,"
+ csv<<"frame,z_prepass,light_aabb_cull,virtual_seconds,camera_x_m,camera_y_m,camera_z_m,wall_ms,throughput_fps,"
        "process_cpu_ms,process_cpu_percent_total,process_cpu_percent_one_core,"
        "working_set_mb,private_commit_mb,peak_working_set_mb,"
        "gpu_3d_util_pct,gpu_all_engines_pct,dx11_gpu_timing_valid,"
@@ -251,7 +266,7 @@ int main(int argc,char**argv){
   times.push_back(wall);
   procCpu.push_back(cpuUsed);
   auto take=[&](double v){return v>=0?QString::number(v,'f',4):QString();};
-  csv<<i<<','<<QString::number(virtualT,'f',4)<<','
+  csv<<i<<','<<(zEnabled?1:0)<<','<<(lightAabbEnabled?1:0)<<','<<QString::number(virtualT,'f',4)<<','
      <<cam.eye.x<<','<<cam.eye.y<<','<<cam.eye.z<<','
      <<take(wall)<<','<<take(wall>0?1000/wall:-1)<<','
      <<take(cpuUsed)<<','<<take(totalLoad)<<','
@@ -267,7 +282,9 @@ int main(int argc,char**argv){
      <<(vm.contains("localUsageMb")?QString::number(vm["localUsageMb"].toDouble(),'f',3):QString())<<','
      <<(vm.contains("sharedUsageMb")?QString::number(vm["sharedUsageMb"].toDouble(),'f',3):QString())<<"\n";
   csv.flush(); // Keep results from preceding frames even after an interruption.
-  QJsonObject row{{"frame",i},{"virtualSeconds",virtualT},{"wallMs",wall},
+  QJsonObject row{{"frame",i},{"zPrepassEnabled",zEnabled},
+                   {"lightAabbCullEnabled",lightAabbEnabled},
+                   {"virtualSeconds",virtualT},{"wallMs",wall},
                    {"cpuProcessMs",cpuUsed},{"cpuPercentOfTotal",number(totalLoad)},
                    {"ramWorkingSetMb",number(mem.workingMb)},
                    {"ramPrivateCommitMb",number(mem.privateMb)},
@@ -297,6 +314,7 @@ int main(int argc,char**argv){
   {"adapterName",video.adapterName},{"adapterVendorId",video.vendor},
   {"deviceIdentification","DXGI default adapter descriptor; verify HD620 on local machine"},
   {"scene",sceneFile},{"camera","v8_glazing_raccords"},
+  {"zPrepassEnabled",zEnabled},{"lightAabbCullEnabled",lightAabbEnabled},
   {"width",w},{"height",h},{"msaaRequested",2},{"pbrTexturePx",smoke?256:2048},
   {"sampleFrames",frames},{"virtualMovementSeconds",virtualDuration},
   {"movementDistanceMeters",5.4},{"fixedScene",true},
@@ -316,6 +334,7 @@ int main(int argc,char**argv){
   {"memoryNote","DXGI local/shared usage represents adapter-wide usage, not this process only."},
   {"gpuNote","GPU Engine utilization counters may be unavailable on some Windows versions. Blank CSV means unavailable; no fabricated zeros."},
   {"timingNote","Six seconds of deterministic virtual camera movement over 90 frames; elapsed benchmark time can differ."},
+  {"featureFlagsNote","Z-prepass and experimental light AABB flags are captured from the actual environment used for this run."},
   {"files","frames.csv, summary.json, frame_000.png, frame_045.png, frame_089.png"}
  };
  if(!saveJson(results.filePath("summary.json"),QJsonObject{{"summary",summary},{"frames",samples}})){
