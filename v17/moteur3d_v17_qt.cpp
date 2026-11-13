@@ -2,6 +2,7 @@
 #include "src/m3d_walk_controller.h"
 #include "exploration_motion.h"
 #include "camera_diagnostic.h"
+#include "anomaly_catalog.h"
 #include "frame_pacing.h"
 #include "pool_ladder.h"
 #include "radio_audio.h"
@@ -877,6 +878,10 @@ private:
     int selectedMaterial_=-1;
     QString scenePath_;
     QString materialsPath_;
+    int currentAnomaly_=-1;
+    v16::CameraPreset beforeAnomalyCamera_{};
+    bool hasBeforeAnomalyCamera_=false;
+    QLabel* anomalyPanelLabel_=nullptr;
 
     void displayRasterSettings(const RasterQualitySettings& q){
         const QSignalBlocker msaaBlocker(rasterMsaaBox_);
@@ -979,6 +984,126 @@ private:
         if(isSquare&&radioAutoplayEnabled_)playRadio();
     }
 
+    void selectAnomaly(int index){
+        if(index<0||index>=int(cse::anomalies::records.size()))return;
+        if(!runtime_||runtime_->cameras.isEmpty()){
+            QMessageBox::information(this,QStringLiteral("Anomalies"),
+                QStringLiteral("Chargez la scene du palais avant de consulter le registre."));
+            return;
+        }
+        if(!scenePath_.contains(QStringLiteral("benchmark-civic"),Qt::CaseInsensitive)){
+            QMessageBox::warning(this,QStringLiteral("Anomalies"),
+                QStringLiteral("Les positions sont relevees dans le palais benchmark-civic. Ouvrez cette scene avant de les utiliser."));
+            return;
+        }
+        const auto& a=cse::anomalies::records[size_t(index)];
+        if(!hasBeforeAnomalyCamera_){
+            beforeAnomalyCamera_=activeCameraPose();
+            hasBeforeAnomalyCamera_=true;
+        }
+        currentAnomaly_=index;
+        if(a.cameraKnown){
+            // Preserve the exact screenshot height: walking-mode floor snapping
+            // must not alter the recalled anomaly viewpoint.
+            if(walkingModeBox_&&walkingModeBox_->isChecked())
+                walkingModeBox_->setChecked(false);
+            keysDown_.clear();
+            poolLadderMotion_={};
+            const float yr=a.yaw*PI/180.f;
+            const float pr=a.pitch*PI/180.f;
+            freeCamera_.eye={a.x,a.y,a.z};
+            freeCamera_.fov=a.fov;
+            freeCamera_.id=QString::fromLatin1(a.id);
+            freeCamera_.name=QString::fromUtf8(a.title);
+            yaw_=yr;pitch_=pr;
+            freeCameraActive_=true;
+            updateLook();
+            requestRender();
+            canvas_->setFocus();
+        }else{
+            // ANO-014 has no measured coordinates; keep the current pose.
+            // The user can select exterior camera 01 or walk to any paving joint.
+            statusBar()->showMessage(QStringLiteral(
+                "ANO-014 : pas de coordonnees mesurees. Selectionnez une vue exterieure puis marchez sur les joints."),13000);
+        }
+        updateAnomalyPanel();
+    }
+    void updateAnomalyPanel(){
+        if(!anomalyPanelLabel_)return;
+        if(currentAnomaly_<0){
+            anomalyPanelLabel_->setText(QStringLiteral(
+                "Choisissez ANO-005 a ANO-014 depuis le menu Anomalies."));
+            return;
+        }
+        const auto& a=cse::anomalies::records[size_t(currentAnomaly_)];
+        anomalyPanelLabel_->setText(
+            QStringLiteral("%1 - %2\n%3\n%4")
+              .arg(QString::fromLatin1(a.id),
+                   QString::fromUtf8(a.title),
+                   QString::fromUtf8(a.check),
+                   a.correctedCandidate?QStringLiteral("Modification codee : a valider")
+                                       :QStringLiteral("Anomalie encore ouverte")));
+        anomalyPanelLabel_->setWordWrap(true);
+        statusBar()->showMessage(
+            QStringLiteral("%1 : %2").arg(QString::fromLatin1(a.id),QString::fromUtf8(a.check)),
+            12000);
+    }
+    void saveAnomalyVerdict(const QString& verdict){
+        if(currentAnomaly_<0)return;
+        const auto& a=cse::anomalies::records[size_t(currentAnomaly_)];
+        // Separate file per attempt: do not overwrite the evidence from another
+        // version or previous review. No external storage or telemetry.
+        const QString root=QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+            +QStringLiteral("/CSE-WARP-Anomalies");
+        if(!QDir().mkpath(root)){
+            QMessageBox::warning(this,QStringLiteral("Anomalies"),
+                QStringLiteral("Impossible de creer le dossier : %1").arg(root));
+            return;
+        }
+        const QString timestamp=QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz"));
+        const QString path=root+QStringLiteral("/")
+            +QString::fromLatin1(a.id)+QStringLiteral("-V17.%1-").arg(CSE_WARP_BUILD_NUMBER)
+            +timestamp+QStringLiteral(".json");
+        const QJsonObject record{
+            {QStringLiteral("format"),QStringLiteral("cse-warp-anomaly-review-v1")},
+            {QStringLiteral("version"),QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER)},
+            {QStringLiteral("anomalyId"),QString::fromLatin1(a.id)},
+            {QStringLiteral("title"),QString::fromUtf8(a.title)},
+            {QStringLiteral("expected"),QString::fromUtf8(a.check)},
+            {QStringLiteral("verdict"),verdict},
+            {QStringLiteral("scene"),QFileInfo(scenePath_).fileName()},
+            {QStringLiteral("timestamp"),QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
+            {QStringLiteral("referencePoseKnown"),a.cameraKnown},
+            {QStringLiteral("camera"),cse::camera_diagnostic::toJson(activeCameraPose())}
+        };
+        QSaveFile file(path);
+        if(!file.open(QIODevice::WriteOnly)||
+            file.write(QJsonDocument(record).toJson(QJsonDocument::Indented))<0||
+            !file.commit()){
+            QMessageBox::warning(this,QStringLiteral("Anomalies"),
+               QStringLiteral("Echec d'enregistrement : %1").arg(path));
+            return;
+        }
+        statusBar()->showMessage(QStringLiteral("%1 : verdict %2 sauvegarde : %3")
+            .arg(QString::fromLatin1(a.id),verdict,path),14000);
+    }
+    void returnBeforeAnomaly(){
+        if(!hasBeforeAnomalyCamera_)return;
+        const auto pose=beforeAnomalyCamera_;
+        if(walkingModeBox_&&walkingModeBox_->isChecked())walkingModeBox_->setChecked(false);
+        freeCamera_=pose;
+        const V dir=norm(pose.target-pose.eye);
+        yaw_=std::atan2(dir.x,-dir.z);
+        pitch_=std::asin(clampf(dir.y,-.99f,.99f));
+        freeCameraActive_=true;
+        hasBeforeAnomalyCamera_=false;
+        currentAnomaly_=-1;
+        updateAnomalyPanel();
+        updateCameraHud();
+        requestRender();
+        canvas_->setFocus();
+    }
+
     void createUi(){
         auto* file=menuBar()->addMenu(QStringLiteral("Fichier"));
         auto* captureAction=file->addAction(QStringLiteral("Capturer une anomalie (PNG + caméra JSON)…"));
@@ -1056,6 +1181,57 @@ private:
             camerasToolbar->addAction(action);
             camerasMenu->addAction(action);
         }
+        // V17.443 - one-click regression review at the EXACT user-reported
+        // viewpoints, independent of the six artistic camera presets.
+        auto* anomaliesMenu=menuBar()->addMenu(QStringLiteral("Anomalies"));
+        for(int i=0;i<int(cse::anomalies::records.size());++i){
+            const auto& a=cse::anomalies::records[size_t(i)];
+            const QString name=QStringLiteral("%1 - %2%3")
+                .arg(QString::fromLatin1(a.id),
+                     QString::fromUtf8(a.title),
+                     a.cameraKnown?QString():QStringLiteral(" (position a definir)"));
+            auto* act=anomaliesMenu->addAction(name);
+            connect(act,&QAction::triggered,this,[this,i]{selectAnomaly(i);});
+        }
+        anomaliesMenu->addSeparator();
+        auto* prevAnomaly=anomaliesMenu->addAction(QStringLiteral("Anomalie precedente"));
+        prevAnomaly->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+Left")));
+        connect(prevAnomaly,&QAction::triggered,this,[this]{
+            selectAnomaly(currentAnomaly_<0?0:std::max(0,currentAnomaly_-1));
+        });
+        auto* nextAnomaly=anomaliesMenu->addAction(QStringLiteral("Anomalie suivante"));
+        nextAnomaly->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+Right")));
+        connect(nextAnomaly,&QAction::triggered,this,[this]{
+            selectAnomaly(currentAnomaly_<0?0:std::min(int(cse::anomalies::records.size())-1,currentAnomaly_+1));
+        });
+        auto* restoreAnomaly=anomaliesMenu->addAction(QStringLiteral("Retour a la position initiale"));
+        connect(restoreAnomaly,&QAction::triggered,this,[this]{returnBeforeAnomaly();});
+        auto* reviewDock=new QDockWidget(QStringLiteral("Validation des anomalies"),this);
+        auto* reviewWidget=new QWidget(reviewDock);
+        auto* reviewLayout=new QVBoxLayout(reviewWidget);
+        anomalyPanelLabel_=new QLabel(QStringLiteral(
+            "Choisissez ANO-005 a ANO-014 depuis le menu Anomalies."),reviewWidget);
+        anomalyPanelLabel_->setWordWrap(true);
+        reviewLayout->addWidget(anomalyPanelLabel_);
+        auto* reviewButtons=new QHBoxLayout;
+        for(const auto& verdict:QVector<QPair<QString,QString>>{
+            {QStringLiteral("Conforme"),QStringLiteral("conforme")},
+            {QStringLiteral("Presente"),QStringLiteral("toujours_presente")},
+            {QStringLiteral("A revoir"),QStringLiteral("a_revoir")}}){
+            auto* button=new QPushButton(verdict.first,reviewWidget);
+            connect(button,&QPushButton::clicked,this,[this,verdict]{
+                saveAnomalyVerdict(verdict.second);
+            });
+            reviewButtons->addWidget(button);
+        }
+        reviewLayout->addLayout(reviewButtons);
+        reviewDock->setWidget(reviewWidget);
+        addDockWidget(Qt::BottomDockWidgetArea,reviewDock);
+        reviewDock->setVisible(false);
+        connect(anomaliesMenu,&QMenu::aboutToShow,reviewDock,[reviewDock]{
+            reviewDock->show();
+        });
+
         auto* toolsMenu=menuBar()->addMenu(QStringLiteral("Outils"));
         auto* pacingAction=toolsMenu->addAction(QStringLiteral("Exporter benchmark fluidité (CSV + JSON)"));
         connect(pacingAction,&QAction::triggered,this,[this]{exportPacing();});
