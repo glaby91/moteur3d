@@ -427,6 +427,109 @@ private:
             QString::fromUtf8(QJsonDocument(report).toJson(QJsonDocument::Indented)));
         statusBar()->showMessage(QStringLiteral("Position caméra et identité de la scène copiées."),5000);
     }
+    void captureAnomaly(){
+        if(!runtime_||lastImage_.isNull()||!hasRenderedPose_){
+            QMessageBox::information(this,QStringLiteral("Capture d'anomalie"),
+                QStringLiteral("Une image doit être rendue avant d'enregistrer l'anomalie."));
+            return;
+        }
+        // During navigation the CPU-readback image may lag behind the live camera.
+        // Always export the exact pose associated with the accepted rendered frame.
+        const QString documents=QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+        const QString folder=QDir(documents.isEmpty()?QDir::homePath():documents)
+            .filePath(QStringLiteral("CSE WARP/Anomalies"));
+        if(!QDir().mkpath(folder)){
+            QMessageBox::warning(this,QStringLiteral("Capture d'anomalie"),
+                                 QStringLiteral("Dossier inaccessible : %1").arg(folder));
+            return;
+        }
+        const QString stamp=QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz");
+        const QString base=QDir(folder).filePath(QStringLiteral("ANOMALIE_%1").arg(stamp));
+        const QString imageFile=base+QStringLiteral(".png");
+        const QString jsonFile=base+QStringLiteral(".json");
+        QImage annotated=lastImage_.copy();
+        {
+            QPainter painter(&annotated);
+            ImageView::drawCameraHud(painter,annotated.rect(),
+                cse::camera_diagnostic::hudLines(lastRenderedPose_,
+                    QStringLiteral("CAMÉRA DU RENDU / V17.%1").arg(CSE_WARP_BUILD_NUMBER)));
+        }
+        if(!annotated.save(imageFile,"PNG")){
+            QMessageBox::warning(this,QStringLiteral("Capture d'anomalie"),
+                                 QStringLiteral("Échec de l'enregistrement PNG."));
+            return;
+        }
+        QJsonObject report=sceneCameraReport(lastRenderedPose_,scenePath_,runtime_->title,
+            QFileInfo(imageFile).fileName(),lastImage_.size(),githubRevision());
+        report.insert("renderInProgressAtCapture",watcher_.isRunning());
+        report.insert("liveCameraAtCapture",cse::camera_diagnostic::toJson(activeCameraPose()));
+        report.insert("note",QStringLiteral(
+            "camera correspond précisément au PNG enregistré; liveCameraAtCapture est informative."));
+        QSaveFile file(jsonFile);
+        if(!file.open(QIODevice::WriteOnly) ||
+           file.write(QJsonDocument(report).toJson(QJsonDocument::Indented))<0 ||
+           !file.commit()){
+            QFile::remove(imageFile);
+            QMessageBox::warning(this,QStringLiteral("Capture d'anomalie"),
+                                 QStringLiteral("Échec de l'enregistrement JSON."));
+            return;
+        }
+        statusBar()->showMessage(QStringLiteral("Anomalie sauvegardée : %1").arg(base),15000);
+        QMessageBox::information(this,QStringLiteral("Anomalie enregistrée"),
+            QStringLiteral("Capture PNG et coordonnées exactes disponibles dans :\n%1").arg(folder));
+    }
+    void restoreAnomalyCamera(){
+        if(!runtime_||runtime_->cameras.isEmpty()){
+            QMessageBox::information(this,QStringLiteral("Restaurer une caméra"),
+                                     QStringLiteral("Charge d'abord la scène concernée."));
+            return;
+        }
+        const QString path=QFileDialog::getOpenFileName(this,
+            QStringLiteral("Restaurer une caméra d'anomalie"),
+            QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+                +QStringLiteral("/CSE WARP/Anomalies"),
+            QStringLiteral("Rapport caméra CSE WARP (*.json)"));
+        if(path.isEmpty())return;
+        QFile file(path);
+        if(!file.open(QIODevice::ReadOnly)){
+            QMessageBox::warning(this,QStringLiteral("Restaurer une caméra"),
+                                 QStringLiteral("Impossible d'ouvrir le rapport."));return;
+        }
+        QJsonParseError parsing;
+        const auto doc=QJsonDocument::fromJson(file.readAll(),&parsing);
+        const auto root=doc.object();
+        if(parsing.error!=QJsonParseError::NoError ||
+           root.value("format").toString()!=QString::fromLatin1(cse::camera_diagnostic::formatId)){
+            QMessageBox::warning(this,QStringLiteral("Restaurer une caméra"),
+                                 QStringLiteral("Format incompatible ou JSON invalide."));return;
+        }
+        const auto scene=root.value("scene").toObject();
+        if(scene.value("manifestFile").toString()!=QFileInfo(scenePath_).fileName() ||
+           scene.value("title").toString()!=runtime_->title){
+            QMessageBox::warning(this,QStringLiteral("Scène différente"),
+                QStringLiteral("La capture appartient à une autre scène. Charge d'abord cette scène pour éviter toute erreur architecturale."));
+            return;
+        }
+        v16::CameraPreset pose;
+        QString error;
+        if(!cse::camera_diagnostic::fromJson(root.value("camera").toObject(),pose,error)){
+            QMessageBox::warning(this,QStringLiteral("Restaurer une caméra"),error);return;
+        }
+        keysDown_.clear();
+        // Walking mode would snap Y to the floor, which destroys exact replay.
+        if(walkingModeBox_&&walkingModeBox_->isChecked())
+            walkingModeBox_->setChecked(false);
+        freeCamera_=pose;
+        const V dir=norm(pose.target-pose.eye);
+        yaw_=std::atan2(dir.x,-dir.z);
+        pitch_=std::asin(clampf(dir.y,-.99f,.99f));
+        freeCameraActive_=true;
+        updateExplorationSpeedIndicator();
+        updateCameraHud();
+        requestRender();
+        canvas_->setFocus();
+        statusBar()->showMessage(QStringLiteral("Point de vue d'anomalie restauré depuis %1").arg(path),12000);
+    }
     void updateExplorationSpeedIndicator(){
         if(!explorationSpeedLabel_)return;
         if(!exploring_){
