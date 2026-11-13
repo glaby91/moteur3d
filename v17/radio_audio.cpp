@@ -91,6 +91,14 @@ X3DAUDIO_VECTOR unit(const float v[3]) {
     const float len = std::sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2]);
     if (!(len > .00001f) || !std::isfinite(len)) return X3DAUDIO_VECTOR{0,0,1};
     return X3DAUDIO_VECTOR{v[0]/len,v[1]/len,v[2]/len};
+} 
+X3DAUDIO_VECTOR orientedUp(const X3DAUDIO_VECTOR& front) {
+    // X3DAudio expects perpendicular, normalized front/up vectors.
+    const float y = front.y;
+    const float v[3]{-front.x*y, 1.f-y*y, -front.z*y};
+    if (v[0]*v[0]+v[1]*v[1]+v[2]*v[2] < .0001f)
+        return X3DAUDIO_VECTOR{1.f,0.f,0.f};
+    return unit(v);
 }
 }
 #endif
@@ -172,7 +180,7 @@ void RadioAudio::update(const float eye[3], const float target[3]) {
     X3DAUDIO_LISTENER listener{};
     listener.Position = vec(eye);
     listener.OrientFront = unit(dir);
-    listener.OrientTop = {0.f, 1.f, 0.f};
+    listener.OrientTop = orientedUp(listener.OrientFront);
     for (size_t n = 0; n < 4; ++n) {
         const auto& sp = impl_->speakerPositions[n];
         X3DAUDIO_CONE cone{};
@@ -185,7 +193,7 @@ void RadioAudio::update(const float eye[3], const float target[3]) {
         X3DAUDIO_EMITTER emitter{};
         emitter.pCone = &cone;
         emitter.OrientFront = unit(sp.front);
-        emitter.OrientTop = {0.f, 1.f, 0.f};
+        emitter.OrientTop = orientedUp(emitter.OrientFront);
         emitter.Position = vec(sp.position);
         emitter.ChannelCount = 1;
         emitter.CurveDistanceScaler = 20.f; // metres of useful outdoor range
