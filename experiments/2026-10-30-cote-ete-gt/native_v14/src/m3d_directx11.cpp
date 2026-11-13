@@ -28,6 +28,9 @@ namespace {
 // 32 culling, 33 LOD.
 constexpr uint64_t defaultQualityBits=4ull|(16ull<<8)|(100ull<<16)|(1ull<<32)|(1ull<<33);
 std::atomic<uint64_t> gpuQualityBits{defaultQualityBits};
+// -1 = legacy environment-driven benchmark; GUI sets 0 at idle, 1 only on motion.
+// A single atomic snapshot per submitted frame avoids UI/worker environment races.
+std::atomic<int> peripheralOverride{-1};
 // Opt-in: keep all reference benchmarks and pre-existing renders pixel-exact.
 std::atomic<bool> hybridLighting{false};
 // Separate, independently reversible display-referred highlight compression.
@@ -703,8 +706,12 @@ public:
         const bool balanced=colorEnergyBalance.load(std::memory_order_acquire);
         const float exposure=clampf(colorExposure.load(std::memory_order_acquire),.65f,1.45f);
         const RasterQualitySettings quality=unpackQuality(qualityBits);
-        const char* multiresEnv=std::getenv("M3D_V17_PERIPHERAL_MULTIREZ");
-        const bool multires=multiresEnv&&std::strcmp(multiresEnv,"1")==0&&w>=320&&h>=240;
+        const int peripheralSetting=peripheralOverride.load(std::memory_order_acquire);
+        const char* multiresEnv=peripheralSetting<0
+            ?std::getenv("M3D_V17_PERIPHERAL_MULTIREZ"):nullptr;
+        const bool multires=(peripheralSetting==1 ||
+            (peripheralSetting<0&&multiresEnv&&std::strcmp(multiresEnv,"1")==0))
+            &&w>=320&&h>=240;
         if(!pending_.empty() &&
            (sceneKey_!=scene.obj.data() || objectCount_!=scene.obj.size() ||
             sceneIdentity_!=scene.gpuCacheIdentity ||
@@ -2127,6 +2134,9 @@ void setRasterGiCachePath(const std::filesystem::path& file){
     giTableLoaded.store(false,std::memory_order_release);
 }
 bool rasterGiCacheLoaded(){return giTableLoaded.load(std::memory_order_acquire);}
+void setRasterPeripheralMultiresOverride(int mode){
+    peripheralOverride.store(std::clamp(mode,-1,1),std::memory_order_release);
+}
 bool setRasterQualitySettings(const RasterQualitySettings& q,std::wstring& error){
     const auto validSample=q.msaaSamples==1||q.msaaSamples==2||q.msaaSamples==4||q.msaaSamples==8;
     const auto validAniso=q.anisotropy==1||q.anisotropy==2||
@@ -2174,6 +2184,7 @@ float rasterColorExposure(){return 1.f;}
 void setRasterColorExposure(float){}
 void setRasterGiCachePath(const std::filesystem::path&){}
 bool rasterGiCacheLoaded(){return false;}
+void setRasterPeripheralMultiresOverride(int){}
 bool setRasterQualitySettings(const RasterQualitySettings&,std::wstring& error){error=L"DirectX 11 indisponible sur cet OS.";return false;}
 bool renderDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,std::vector<uint32_t>&,Stats&,std::wstring& error) { error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false; }
 bool enqueueDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,unsigned,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}
