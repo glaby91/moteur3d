@@ -108,7 +108,7 @@ for($pass=1;$pass -le $Passes;$pass++){
       exitCode=$exit;elapsedWallSeconds=[math]::Round($clock.Elapsed.TotalSeconds,3)
       summary=if($summaries.Count -eq 1){$summaries[0].FullName}else{""}
     }
-    $manifest+=New-Object PSObject -Property $row
+    $manifest += [PSCustomObject]$row
     $manifest|ConvertTo-Json -Depth 6|Set-Content (Join-Path $out "manifest.json") -Encoding UTF8
     if($exit -ne 0 -or $summaries.Count -ne 1){
       throw "Failure on $($case.name) repetition $pass : exit=$exit, summaries=$($summaries.Count). See $folder/console.txt"
