@@ -199,7 +199,7 @@ int main(int argc,char** argv){
     QFile csvFile(directory.filePath("results.csv"));
     if(!csvFile.open(QIODevice::WriteOnly|QIODevice::Text))return 3;
     QTextStream csvOut(&csvFile);
-    csvOut<<"backend,camera,width,height,texture_px,readback_depth,cold_ms,frames,mean_ms,median_ms,p95_ms,p99_ms,estimated_fps,stream_mean_ms,stream_fps,submitted_triangles,cold_readback_ms,mean_readback_ms,gpu_draw_calls,instanced_boxes,instanced_ellipsoids,instanced_foliage,gpu_timing_valid,gpu_draw_ms,gpu_transfer_ms,gpu_total_ms,cpu_submit_ms,cpu_map_wait_ms,cpu_pixel_convert_ms,pixel_identical,status,error,image\n";
+    csvOut<<"backend,camera,width,height,texture_px,readback_depth,cold_ms,frames,mean_ms,median_ms,p95_ms,p99_ms,estimated_fps,stream_mean_ms,stream_fps,submitted_triangles,cold_readback_ms,mean_readback_ms,gpu_draw_calls,instanced_boxes,instanced_ellipsoids,instanced_foliage,gpu_timing_valid,gpu_draw_ms,gpu_transfer_ms,gpu_resolve_ms,gpu_staging_copy_ms,gpu_transfer_split_valid,gpu_total_ms,cpu_submit_ms,cpu_map_wait_ms,cpu_pixel_convert_ms,pixel_identical,status,error,image\n";
     auto loaded=v16::loadScene(scenePath);
     if(!loaded){err<<"Scene load failed: "<<loaded.error<<"\n";return 4;}
     // The normal and quick modes use the same full 2048 PBR assets as V17.
@@ -292,6 +292,9 @@ int main(int argc,char** argv){
               <<record.value("gpuTimingValid").toBool()<<','
               <<record.value("gpuDrawMs").toDouble()<<','
               <<record.value("gpuTransferMs").toDouble()<<','
+              <<record.value("gpuResolveMs").toDouble()<<','
+              <<record.value("gpuStagingCopyMs").toDouble()<<','
+              <<record.value("gpuTransferSplitValid").toBool()<<','
               <<record.value("gpuTotalMs").toDouble()<<','
               <<record.value("cpuSubmitMs").toDouble()<<','
               <<record.value("cpuMapWaitMs").toDouble()<<','
@@ -355,7 +358,7 @@ int main(int argc,char** argv){
                 rec["coldMs"]=elapsedMs(begin);
                 rec["coldReadbackMs"]=ok?stats.postMs:0.0;
                 std::vector<double> latencies,readbackTimes,drawTimes,transferTimes,totalGpuTimes,
-                                    cpuSubmits,cpuWaits,cpuConversions;
+                                    resolveTimes,stagingCopyTimes,cpuSubmits,cpuWaits,cpuConversions;
                 auto collect=[&]{
                     latencies.push_back(stats.ms);
                     readbackTimes.push_back(stats.postMs);
@@ -366,6 +369,10 @@ int main(int argc,char** argv){
                         drawTimes.push_back(stats.gpuDrawMs);
                         transferTimes.push_back(stats.gpuTransferMs);
                         totalGpuTimes.push_back(stats.gpuTotalMs);
+                        if(stats.gpuTransferSplitValid){
+                            resolveTimes.push_back(stats.gpuResolveMs);
+                            stagingCopyTimes.push_back(stats.gpuStagingCopyMs);
+                        }
                     }
                 };
                 double streamDuration=0.;
@@ -419,6 +426,9 @@ int main(int argc,char** argv){
                 rec["gpuTimingValid"]=!totalGpuTimes.empty();
                 rec["gpuDrawMs"]=average(drawTimes);
                 rec["gpuTransferMs"]=average(transferTimes);
+                rec["gpuTransferSplitValid"]=!resolveTimes.empty();
+                rec["gpuResolveMs"]=average(resolveTimes);
+                rec["gpuStagingCopyMs"]=average(stagingCopyTimes);
                 rec["gpuTotalMs"]=average(totalGpuTimes);
                 rec["cpuSubmitMs"]=average(cpuSubmits);
                 rec["cpuMapWaitMs"]=average(cpuWaits);
