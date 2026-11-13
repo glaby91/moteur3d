@@ -1,0 +1,106 @@
+name: CSE WARP V17.439 - mosaïque, couleurs et accès
+on:
+  push:
+    branches: [feature/v17-439-design-mosaique-audit-261113]
+    paths:
+      - .github/workflows/v17-439-design.yml
+      - v17/**
+      - tools/upgrade_scene_v439_design.py
+      - scenes/v16/benchmark-civic/**
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  windows-design:
+    runs-on: windows-2022
+    timeout-minutes: 65
+    env:
+      GH_TOKEN: ${{ github.token }}
+      QT_QPA_PLATFORM: offscreen
+      M3D_V16_FORCE_WARP: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Restore V17.438 validated pool-ladder portable
+        shell: pwsh
+        run: |
+          gh run download 43420233080 --repo glaby91/moteur3d --name CSE-WARP-V17.438-ECHELLES-PISCINE-Windows-x64 --dir dist-v439
+          if($LASTEXITCODE -ne 0){throw "Validated 438 package not accessible"}
+          foreach($p in @("moteur3d_v17.exe","moteur3d_v16_core.dll","benchmark-civic/scene-v7-corrections.json","benchmark-civic/textures/energetik_fresco_mosaic.jpg")){
+            if(!(Test-Path "dist-v439/$p")){throw "Missing validated source: $p"}
+          }
+          (Get-FileHash dist-v439/benchmark-civic/textures/energetik_fresco_mosaic.jpg -Algorithm SHA256).Hash | Set-Content wall-fresco.sha256
+          (Get-FileHash dist-v439/audio/pripyat_radio.wav -Algorithm SHA256).Hash | Set-Content radio.sha256
+      - name: Generate custom original mosaic and patch actual V8 resources
+        shell: pwsh
+        run: |
+          node scenes/v16/benchmark-civic/build-entry-mosaic.cjs dist-v439/benchmark-civic/textures/revision/v439/cse_parvis_mosaique.png
+          if($LASTEXITCODE -ne 0){throw "Mosaic raster generation failed"}
+          python tools/upgrade_scene_v439_design.py --root dist-v439/benchmark-civic
+          if($LASTEXITCODE -ne 0){throw "Scene design patch failed"}
+          if((Get-FileHash dist-v439/benchmark-civic/textures/energetik_fresco_mosaic.jpg -Algorithm SHA256).Hash -ne (Get-Content wall-fresco.sha256 -Raw).Trim()){throw "Original fresco altered"}
+          if((Get-FileHash dist-v439/audio/pripyat_radio.wav -Algorithm SHA256).Hash -ne (Get-Content radio.sha256 -Raw).Trim()){throw "Radio altered"}
+          $r=Get-Content dist-v439/benchmark-civic/reports/v439-design.json -Raw | ConvertFrom-Json
+          if($r.corrections.floorArt -notlike "*trapezoidal*"){throw "Missing mosaic geometry"}
+          if($r.corrections.doorFramesRemoved -le 0){throw "Doors still blocked by mullions"}
+          if($r.corrections.stairWallOpened -ne 1){throw "Ground-floor staircase still blocked"}
+      - name: Compile 439 GUI and navigation regression targets
+        shell: pwsh
+        run: |
+          cmake -S v17 -B build-v439 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=439
+          if($LASTEXITCODE -ne 0){throw "CMake configure failure"}
+          cmake --build build-v439 --config Release --target moteur3d_v17 v17_pool_ladder_smoke v17_frame_pacing_smoke v17_walk_controller_smoke v17_camera_diagnostic_smoke --parallel 4
+          if($LASTEXITCODE -ne 0){throw "V17.439 compile failed"}
+          ctest --test-dir build-v439 -C Release -R "v17_pool_ladder_bidirectional|v17_frame_pacing_statistical_regression|v17_walk_stairs_collision|v17_camera_diagnostic_roundtrip" --output-on-failure
+          if($LASTEXITCODE -ne 0){throw "Regression failure"}
+          Copy-Item build-v439/Release/moteur3d_v17.exe dist-v439/moteur3d_v17.exe -Force
+          Copy-Item build-v439/v16/Release/moteur3d_v16_core.dll dist-v439/moteur3d_v16_core.dll -Force
+      - name: Render real revised V8 scene through D3D11 WARP
+        shell: pwsh
+        timeout-minutes: 15
+        run: |
+          $exe=(Resolve-Path dist-v439/moteur3d_v17.exe).Path
+          $scene=(Resolve-Path dist-v439/benchmark-civic/scene-v7-corrections.json).Path
+          $proc=Start-Process -FilePath $exe -ArgumentList @("--smoke-repeat-raster",$scene) -WorkingDirectory (Resolve-Path dist-v439).Path -PassThru -Wait
+          if($proc.ExitCode -ne 0){throw "Revised scene could not load/render D3D11"}
+      - name: Package verified scene and camera notes
+        shell: pwsh
+        run: |
+          @'
+          CSE WARP V17.439: approved entrance / pool design.
+          The actual V8 scene has been patched, not replaced by generator demo.
+          * Original warm tessera floor mosaic: trapezoid expanding to square
+          * Ivory plaster, grey waxed dry floors, non-slip wet areas and beige coping
+          * Floors retain genuine three-level stair holes
+          * Front door dark mullions removed from ground-level opening
+          * Partition cut along the first left wing stair flight
+          * Speaker-zone glass trimmed without removing the four speaker meshes
+          * Tree/pole collision pruning
+          * All V17.438 pool-ladder interaction, radio, fresco and benchmarks remain
+          Camera 03 "Monument au centre du massif" is a suitable entrance reference.
+          '@ | Set-Content dist-v439/LIRE-439-DESIGN-MOSAIQUE.txt -Encoding UTF8
+          $env:GITHUB_SHA | Set-Content dist-v439/REVISION.txt -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: CSE-WARP-V17.439-MOSAIQUE-PALAIS-PISCINE-Windows-x64
+          path: dist-v439/
+          retention-days: 21
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: V17.439-AUDIT-MOSAIQUE
+          path: dist-v439/benchmark-civic/reports/v439-design.json
+          retention-days: 14
+          if-no-files-found: warn
