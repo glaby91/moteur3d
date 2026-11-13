@@ -6,6 +6,7 @@
 #include <windows.h>
 #include <psapi.h>
 #include <pdh.h>
+#include <pdhmsg.h>
 #include <dxgi1_4.h>
 #include <wrl/client.h>
 #include <QCoreApplication>
