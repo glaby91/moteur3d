@@ -6,6 +6,7 @@ on:
       - .github/workflows/v17-440-audit.yml
       - v17/**
       - v16/**
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp
       - tools/repair_scene_v440.py
       - scenes/v16/benchmark-civic/build-entry-mosaic-v440.cjs
   workflow_dispatch:
