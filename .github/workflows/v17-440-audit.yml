@@ -1,0 +1,121 @@
+name: CSE WARP V17.440 - complete architectural and motion regression audit
+on:
+  push:
+    branches: [feature/v17-440-audit-complet-geometrie-rendu-261113]
+    paths:
+      - .github/workflows/v17-440-audit.yml
+      - v17/**
+      - v16/**
+      - tools/repair_scene_v440.py
+      - scenes/v16/benchmark-civic/build-entry-mosaic-v440.cjs
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  windows-v440:
+    runs-on: windows-2022
+    timeout-minutes: 75
+    env:
+      GH_TOKEN: ${{ github.token }}
+      QT_QPA_PLATFORM: offscreen
+      M3D_V16_FORCE_WARP: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Restore genuine tested 439 portable scene, audio and complete PBR
+        shell: pwsh
+        run: |
+          gh run download 43422841115 --repo glaby91/moteur3d --name CSE-WARP-V17.439-MOSAIQUE-PALAIS-PISCINE-Windows-x64 --dir dist-v440
+          if($LASTEXITCODE -ne 0){throw "439 baseline unavailable"}
+          foreach($p in @("benchmark-civic/scene-v7-corrections.json","benchmark-civic/textures/energetik_fresco_mosaic.jpg","audio/pripyat_radio.wav","moteur3d_v17.exe")){
+            if(!(Test-Path "dist-v440/$p")){throw "Missing $p"}
+          }
+          (Get-FileHash dist-v440/benchmark-civic/textures/energetik_fresco_mosaic.jpg -Algorithm SHA256).Hash | Set-Content wall-fresco.sha256
+          (Get-FileHash dist-v440/audio/pripyat_radio.wav -Algorithm SHA256).Hash | Set-Content radio.sha256
+      - name: Rebuild larger low-frequency tesserae and repair all verifiable scene anomalies
+        shell: pwsh
+        run: |
+          node scenes/v16/benchmark-civic/build-entry-mosaic-v440.cjs dist-v440/benchmark-civic/textures/revision/v440/cse_parvis_mosaique.png
+          if($LASTEXITCODE -ne 0){throw "Mosaic generation failed"}
+          python tools/repair_scene_v440.py --root dist-v440/benchmark-civic
+          if($LASTEXITCODE -ne 0){throw "V8 scene audit failed"}
+          $r=Get-Content dist-v440/benchmark-civic/reports/v440-audit.json -Raw | ConvertFrom-Json
+          if($r.counts.02_hall_stair_rail_blockers_removed -ne 7){throw "Old rail still blocks the hall stair"}
+          if($r.counts.06_curbs_trimmed_before_glass -lt 1){throw "Side curb still enters glass"}
+          if($r.counts.05_cantilever_beams_trimmed -lt 1){throw "Cantilever was not trimmed"}
+          if($r.issues.14_mosaic -notlike "*single*"){throw "Still drawing coplanar mosaic triangles"}
+          if((Get-FileHash dist-v440/benchmark-civic/textures/energetik_fresco_mosaic.jpg -Algorithm SHA256).Hash -ne (Get-Content wall-fresco.sha256 -Raw).Trim()){throw "Original fresco changed"}
+          if((Get-FileHash dist-v440/audio/pripyat_radio.wav -Algorithm SHA256).Hash -ne (Get-Content radio.sha256 -Raw).Trim()){throw "Radio recording changed"}
+      - name: Build 440 Windows 64-bit UI plus all relevant CPU smoke tests
+        shell: pwsh
+        run: |
+          cmake -S v17 -B build-v440 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=440
+          if($LASTEXITCODE -ne 0){throw "CMake failed"}
+          cmake --build build-v440 --config Release --target moteur3d_v17 v17_pool_ladder_smoke v17_frame_pacing_smoke v17_walk_controller_smoke v17_camera_diagnostic_smoke v17_gpu_trajectory --parallel 4
+          if($LASTEXITCODE -ne 0){throw "Build failed"}
+          ctest --test-dir build-v440 -C Release -R "v17_pool_ladder_bidirectional|v17_frame_pacing_statistical_regression|v17_walk_stairs_collision|v17_camera_diagnostic_roundtrip" --output-on-failure
+          if($LASTEXITCODE -ne 0){throw "CPU regression failed"}
+          Copy-Item build-v440/Release/moteur3d_v17.exe dist-v440/moteur3d_v17.exe -Force
+          Copy-Item build-v440/v16/Release/moteur3d_v16_core.dll dist-v440/moteur3d_v16_core.dll -Force
+          Copy-Item build-v440/Release/moteur3d_v17_gpu_trajectory.exe dist-v440/moteur3d_v17_gpu_trajectory.exe -Force
+      - name: D3D11 WARP verify actual 440 V8 scene and GUI repeat frames
+        shell: pwsh
+        timeout-minutes: 15
+        run: |
+          $exe=(Resolve-Path dist-v440/moteur3d_v17.exe).Path
+          $scene=(Resolve-Path dist-v440/benchmark-civic/scene-v7-corrections.json).Path
+          $proc=Start-Process -FilePath $exe -ArgumentList @("--smoke-repeat-raster",$scene) -WorkingDirectory (Resolve-Path dist-v440).Path -PassThru -Wait
+          if($proc.ExitCode -ne 0){throw "440 real scene not supported by WARP renderer"}
+      - name: D3D11 GPU fixed-route profile on real V8
+        shell: pwsh
+        timeout-minutes: 12
+        run: |
+          $exe="build-v440/Release/moteur3d_v17_gpu_trajectory.exe"
+          $scene="dist-v440/benchmark-civic/scene-v7-corrections.json"
+          & $exe $scene "audit-v440/v440" --ci-smoke --z-prepass=on --light-aabb=on
+          if($LASTEXITCODE -ne 0){throw "GPU fixed-route benchmark failed"}
+      - name: Package vetted full scene and diagnostic report
+        shell: pwsh
+        run: |
+          @'
+          CSE WARP V17.440 audit build.
+          * Original V8 geometry, Pripyat PBR and historic fresco kept
+          * 440 one-sided warm tessera floor mosaic (no coplanar reverse faces)
+          * Hall staircase obsolete rails removed
+          * Front door, curb and overhanging front beams repaired
+          * Four speaker anchor checks on actual concrete columns
+          * Tree/pole clearance checks and water rendering adjusted
+          * Only two REAL V8 pool ladders; interaction accurately mapped
+          * Stereo radio channel orientation adjusted
+          * On Intel HD 620 exploration temporarily uses MSAA 2x, restores
+            your selected quality on exit, preserving static 8x photographs
+          NOTE: visual inspections on physical Intel HD 620 still required.
+          Benchmark GPU timings from CI WARP are NOT HD 620 FPS results.
+          '@ | Set-Content dist-v440/LIRE-440-AUDIT-GLOBAL.txt -Encoding UTF8
+          $env:GITHUB_SHA | Set-Content dist-v440/REVISION.txt -Encoding ascii
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: CSE-WARP-V17.440-AUDIT-GLOBAL-Windows-x64
+          path: dist-v440/
+          retention-days: 21
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: V17.440-RAPPORT-ARCHITECTURE-ET-BENCH
+          path: |
+            dist-v440/benchmark-civic/reports/v440-audit.json
+            audit-v440/**
+          retention-days: 21
+          if-no-files-found: warn
