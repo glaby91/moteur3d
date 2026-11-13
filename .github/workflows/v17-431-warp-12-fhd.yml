@@ -68,6 +68,27 @@ jobs:
           $new=(Get-FileHash "dist-v431/benchmark-civic/textures/energetik_fresco_mosaic.jpg" -Algorithm SHA256).Hash
           if($old -ne $new){throw "Original fresco modified!"}
           Copy-Item dist-v431/benchmark-civic/reports/v9-fhd-12-proofs.json fhd-proof-manifest.json
+      - name: Preflight view 07 geometry on real DX11 WARP at 640x360
+        shell: pwsh
+        run: |
+          python -m pip install --only-binary=:all: "Pillow>=11"
+          if($LASTEXITCODE -ne 0){throw "Pillow install failed"}
+          & dist-v431/moteur3d_v17_benchmark.exe dist-v431/benchmark-civic/scene-v7-corrections.json "preflight-view07" --smoke --camera-id v9_clearance_overview --hour 14.75 --raster-msaa 1
+          if($LASTEXITCODE -ne 0){throw "Camera 07 DX11 WARP preflight render failed"}
+          $images=@(Get-ChildItem preflight-view07 -Recurse -File -Filter "raster_v9_clearance_overview_640x360_depth1.png")
+          if($images.Count -ne 1){throw "Camera 07 has no real WARP preview"}
+          @'
+          from PIL import Image,ImageStat
+          from pathlib import Path
+          fs=list(Path("preflight-view07").rglob("raster_v9_clearance_overview_640x360_depth1.png"))
+          assert len(fs)==1
+          with Image.open(fs[0]) as im:
+              assert im.size==(640,360)
+              sigma=max(ImageStat.Stat(im.convert("RGB")).stddev)
+              print(f"Camera 07 native WARP smoke: pixel standard deviation={sigma:.3f}")
+              assert sigma>2.0,"Camera 07 is looking at blank/degenerate geometry"
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw "Camera 07 framing preflight failed"}
       - name: Render every original anomaly zone at genuine 1920x1080 on DX11 WARP
         shell: pwsh
         run: |
@@ -138,8 +159,9 @@ jobs:
           if($LASTEXITCODE -ne 0){throw "FHD quality and uniqueness audit failed"}
           Copy-Item fhd-proof-manifest.json fhd-12/V17.431-PLAN-12-CAMERAS.json
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: CSE-WARP-V17.431-12-RENDUS-ANOMALIES-FHD-1920x1080
           path: fhd-12/
           retention-days: 21
-          if-no-files-found: error
+          if-no-files-found: warn
