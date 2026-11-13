@@ -1,0 +1,95 @@
+name: MSAA resolve multi-camera diagnostic - CSE WARP 17.443
+on:
+  push:
+    branches: [bench/v17-443-msaa-resolve-multicam-261113]
+    paths:
+      - .github/workflows/v17-443-msaa-multicam.yml
+      - v17/tools/benchmark_v17.cpp
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp
+      - experiments/2026-10-30-cote-ete-gt/native_v14/m3d_engine.h
+      - tools/bench_v443_msaa_multicam.ps1
+      - tools/analyze_msaa_multicam_v443.py
+      - docs/V17.443-msaa-multicam.md
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  diagnostic-binary-only:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    env:
+      GH_TOKEN: ${{ github.token }}
+      QT_QPA_PLATFORM: offscreen
+      M3D_V16_FORCE_WARP: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Restore previously verified V17.443 release (unchanged GUI and scene)
+        shell: pwsh
+        run: |
+          gh run download 43436662498 --repo glaby91/moteur3d --name CSE-WARP-V17.443-PROPRE-Windows-x64 --dir diag-dist
+          if($LASTEXITCODE -ne 0){throw "Cannot download V17.443 verified base"}
+          if(!(Test-Path diag-dist/benchmark-civic/scene.json)){throw "Missing tested pool scene"}
+          if(!(Test-Path diag-dist/moteur3d_v17.exe)){throw "Missing engine"}
+      - name: Compile ONLY the V17.443 diagnostic benchmark and shared rendering core
+        shell: pwsh
+        run: |
+          cmake -S v17 -B build-diag -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=443
+          if($LASTEXITCODE -ne 0){throw "CMake config failed"}
+          cmake --build build-diag --config Release --target moteur3d_v17_benchmark --parallel 4
+          if($LASTEXITCODE -ne 0){throw "Benchmark compilation failed"}
+          $exe="build-diag/Release/moteur3d_v17_benchmark.exe"
+          if(!(Test-Path $exe)){throw "No executable"}
+          $v=[Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path $exe).Path)
+          if($v.FileMajorPart -ne 17 -or $v.FileMinorPart -ne 443){throw "Version mismatch"}
+          Copy-Item $exe diag-dist/outils/benchmark/moteur3d_v17_benchmark.exe -Force
+          Copy-Item build-diag/v16/Release/moteur3d_v16_core.dll diag-dist/moteur3d_v16_core.dll -Force
+          New-Item -ItemType Directory diag-dist/tools -Force | Out-Null
+          Copy-Item tools/bench_v443_diagnostic.ps1 diag-dist/tools/bench_v443_diagnostic.ps1 -Force
+          Copy-Item tools/analyze_diagnostic_v443.py diag-dist/tools/analyze_diagnostic_v443.py -Force
+          Copy-Item tools/bench_v443_msaa_multicam.ps1 diag-dist/tools/bench_v443_msaa_multicam.ps1 -Force
+          Copy-Item tools/analyze_msaa_multicam_v443.py diag-dist/tools/analyze_msaa_multicam_v443.py -Force
+          Copy-Item docs/V17.443-msaa-multicam.md diag-dist/README-MSAA-MULTICAM.md -Force
+      - name: Validate GPU split timestamps, MSAA and multi-camera raster
+        shell: pwsh
+        timeout-minutes: 15
+        run: |
+          $env:PATH=(Resolve-Path diag-dist).Path+";"+$env:PATH
+          $env:QT_PLUGIN_PATH=(Resolve-Path diag-dist).Path
+          $exe=(Resolve-Path diag-dist/outils/benchmark/moteur3d_v17_benchmark.exe).Path
+          $scene=(Resolve-Path diag-dist/benchmark-civic/scene.json).Path
+          foreach($msaa in @(1,2,4)){
+            $depth=if($msaa -eq 2){3}else{1}
+            $dir="msaa-smoke-$msaa"
+            & $exe $scene $dir --smoke --all-cameras --resolution 320x180 --frames 2 --raster-msaa $msaa --raster-anisotropy 8 --readback-depth $depth
+            if($LASTEXITCODE -ne 0){throw "MSAA $msaa smoke failed"}
+            $summaries=@(Get-ChildItem $dir -Recurse -Filter summary.json)
+            if($summaries.Count -ne 1){throw "Missing summary for MSAA $msaa"}
+            $report=Get-Content $summaries[0].FullName -Raw | ConvertFrom-Json
+            if(@($report.cases).Count -lt 2){throw "Multicamera flag returned less than two views"}
+            foreach($item in $report.cases){
+              if($item.status -ne "ok" -or -not $item.gpuTimingValid -or -not $item.gpuTransferSplitValid){
+                throw "No valid GPU resolve/copy split on $msaa / $($item.camera)"
+              }
+              if([math]::Abs($item.gpuTransferMs - $item.gpuResolveMs - $item.gpuStagingCopyMs) -gt 0.25){
+                throw "GPU resolve plus copy inconsistent on $msaa / $($item.camera)"
+              }
+            }
+          }
+      - name: Upload diagnostic tool and verified scene (not production update)
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V17.443-MSAA-MULTICAM-DIAGNOSTIC
+          path: diag-dist/
+          retention-days: 21
+          if-no-files-found: error
