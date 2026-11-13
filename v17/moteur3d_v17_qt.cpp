@@ -591,6 +591,9 @@ private:
 
     ImageView* canvas_=nullptr;
     QTimer frameTimer_;
+    QTimer skyAnimationTimer_;
+    QTimer dayNightTimer_;
+    QElapsedTimer dayNightClock_;
     QElapsedTimer frameClock_;
     QElapsedTimer motionClock_;
     QSet<int> keysDown_;
@@ -1173,6 +1176,8 @@ private:
     QCheckBox* edgeAa_=nullptr;
     QSlider* azimuth_=nullptr;
     QDoubleSpinBox* sunHour_=nullptr;
+    QCheckBox* cloudAnimationBox_=nullptr;
+    QCheckBox* dayNightCycleBox_=nullptr;
     QCheckBox* hybridLightBox_=nullptr;
     QCheckBox* filmicToneBox_=nullptr;
     QCheckBox* colorEnergyBox_=nullptr;
@@ -1732,12 +1737,20 @@ private:
         denoiseDirect_=new QCheckBox(QStringLiteral("Débruitage CPU direct (bilatéral)"));
         denoiseDirect_->setChecked(false); // avoid blurring PBR details by default
         sunHour_=new QDoubleSpinBox;
-        sunHour_->setRange(7.0,19.0);
+        sunHour_->setRange(0.0,23.99);
         sunHour_->setDecimals(2);
         sunHour_->setSingleStep(.25);
         sunHour_->setSuffix(QStringLiteral(" h"));
         sunHour_->setValue(14.75);
-        sunHour_->setToolTip(QStringLiteral("Direction et hauteur du soleil — lumière rasante vers 17 h"));
+        sunHour_->setToolTip(QStringLiteral("Soleil et éclairage de 00 h à 24 h — aube, jour, crépuscule, nuit"));
+        cloudAnimationBox_=new QCheckBox(QStringLiteral("Nuages animés sur le ciel"));
+        cloudAnimationBox_->setChecked(true);
+        cloudAnimationBox_->setToolTip(QStringLiteral(
+            "Véritables cirrus calculés par le shader DirectX11. La scène reste nette."));
+        dayNightCycleBox_=new QCheckBox(QStringLiteral("Simulation jour/nuit (24 h en 6 min)"));
+        dayNightCycleBox_->setChecked(false);
+        dayNightCycleBox_->setToolTip(QStringLiteral(
+            "Fait progresser le soleil, le ciel, les ombres et les éclairages du bâtiment."));
         // Two independent controls avoid coupling global illumination and
         // output tone mapping. Preserve the existing hybrid preference, while
         // the new filmic shoulder defaults OFF to avoid V17.309 wash-out.
@@ -1781,6 +1794,8 @@ private:
         form->addRow(QStringLiteral("Échantillons CPU direct"),directSamples_);
         form->addRow(QStringLiteral("Échantillons GI"),giSamples_);
         form->addRow(QStringLiteral("Heure solaire"),sunHour_);
+        form->addRow(cloudAnimationBox_);
+        form->addRow(dayNightCycleBox_);
         form->addRow(hybridLightBox_);
         form->addRow(colorEnergyBox_);
         form->addRow(QStringLiteral("Exposition linéaire"),colorExposureBox_);
@@ -2069,6 +2084,30 @@ private:
             QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
             settings.setValue(QStringLiteral("Raster/FilmicTonemap"),enabled);
             if(backendBox_&&backendBox_->currentIndex()==4)requestRender();
+        });
+        // Separate, rate-limited sky updates. Do not queue renders when the
+        // integrated GPU is already working; preserve HD620 responsiveness.
+        skyAnimationTimer_.setInterval(1200);
+        connect(&skyAnimationTimer_,&QTimer::timeout,this,[this]{
+            if(!cloudAnimationBox_->isChecked() || dayNightCycleBox_->isChecked() ||
+               exploring_ || sceneLoading_ || !runtime_ ||
+               !backendBox_ || backendBox_->currentIndex()!=4 ||
+               watcher_.isRunning())return;
+            requestRender();
+        });
+        skyAnimationTimer_.start();
+        dayNightTimer_.setInterval(750);
+        connect(&dayNightTimer_,&QTimer::timeout,this,[this]{
+            const auto elapsed=dayNightClock_.restart();
+            if(!runtime_ || sceneLoading_ || watcher_.isRunning())return;
+            const double seconds=std::min<qint64>(elapsed,1500)/1000.0;
+            if(seconds<=0)return;
+            const double next=std::fmod(sunHour_->value()+seconds*24.0/360.0,24.0);
+            sunHour_->setValue(next);
+        });
+        connect(dayNightCycleBox_,&QCheckBox::toggled,this,[this](bool enabled){
+            if(enabled){dayNightClock_.start();dayNightTimer_.start();}
+            else dayNightTimer_.stop();
         });
         connect(sunHour_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double hour){
             if(!runtime_)return;
