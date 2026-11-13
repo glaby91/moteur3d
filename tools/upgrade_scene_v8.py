@@ -376,6 +376,17 @@ def build(root):
     remove(lambda o:o['parent'] in (P+'Bancs latéraux',P+'Bancs latéraux/Pieds'),
            '8_wooden_pool_bench_parts_removed',18)
 
+    # V17.430 correction validated against actual 640x360 DX11 images:
+    # These 203 structural-looking boxes were all on TOP of the glazed roof,
+    # seen through the transparent canopy as hundreds of dark dummy lights.
+    # They are NOT the 18 true structural glazing members or the three
+    # thin antenna/roof supports. Remove only the repeated 1x.6x2.4 boxes.
+    remove(lambda o:o['parent']==F+'Toiture techniques'
+           and o['geometry']=='unit_box'
+           and o['material']=='prp_roof_metal'
+           and o['size']==[1,.6,2.4],
+           '9_fake_overhead_roof_blocks_removed',203)
+
     # 9 — remove ghostly repeated roof blobs by using clear skylight material.
     # Keep the 18 true metal glass supports. Keep real evening lighting, fewer
     # physically attached diffusers (six not dozens of floating fake slabs).
@@ -404,15 +415,21 @@ def build(root):
     # Cameras for repeatable screenshots independent of user view selection.
     cameras['cameras'] += [
         dict(id='v8_three_level_stairs',name='V8 · Trois niveaux accessibles',
-            position=[-44,2.1,-18],target=[-45,8,-34],fovDegrees=68),
+            position=[-45,2.3,-28],target=[-45,4.15,-38],fovDegrees=70),
         dict(id='v8_pool_blocks',name='V8 · Plots numérotés sans échelles',
             position=[-22,2.5,-14.5],target=[-25.5,1,-32],fovDegrees=67),
         dict(id='v8_ladder_stainless',name='V8 · Echelle inox et eau',
-            position=[22.2,1.9,-42],target=[24.6,-.8,-44],fovDegrees=60),
+            position=[29,1.9,-42.0],target=[24.45,-.25,-44.05],fovDegrees=66),
         dict(id='v8_skylight_lighting',name='V8 · Verrière et luminaires',
             position=[0,3,-35],target=[5,18.5,-32],fovDegrees=71),
         dict(id='v8_glazing_raccords',name='V8 · Menuiseries métalliques',
             position=[-28,4.5,16],target=[-27,6,-4.03],fovDegrees=68)]
+
+    cameras['cameras'] += [
+        dict(id='v8_stair_first_landing',name='V8 · Palier du premier étage',
+             position=[-44,4.85,-43.5],target=[-40,7,-31],fovDegrees=69),
+        dict(id='v8_stair_second_landing',name='V8 · Palier du deuxième étage',
+             position=[-40,9.35,-24.2],target=[-35,12,-36],fovDegrees=69)]
 
     # Preservation assertions. Never retessellate or resample the artwork.
     assert before_fresco==[o for o in objects if 'Fresque murale 2048' in o['parent']]
