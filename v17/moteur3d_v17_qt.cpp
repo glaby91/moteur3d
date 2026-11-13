@@ -6,6 +6,7 @@
 #include "anomaly_catalog.h"
 #include "frame_pacing.h"
 #include "pool_ladder.h"
+#include "weather/solar_cycle.h"
 #include "radio_audio.h"
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
@@ -594,6 +595,8 @@ private:
     QTimer skyAnimationTimer_;
     QTimer dayNightTimer_;
     QElapsedTimer dayNightClock_;
+    double dayNightOriginHour_=14.75;
+    bool applyingDayNightTick_=false;
     QElapsedTimer frameClock_;
     QElapsedTimer motionClock_;
     QSet<int> keysDown_;
@@ -2098,18 +2101,31 @@ private:
         skyAnimationTimer_.start();
         dayNightTimer_.setInterval(750);
         connect(&dayNightTimer_,&QTimer::timeout,this,[this]{
-            const auto elapsed=dayNightClock_.restart();
             if(!runtime_ || sceneLoading_ || watcher_.isRunning())return;
-            const double seconds=std::min<qint64>(elapsed,1500)/1000.0;
-            if(seconds<=0)return;
-            const double next=std::fmod(sunHour_->value()+seconds*24.0/360.0,24.0);
+            // Elapsed time is absolute since the start, never accumulated
+            // from successful frames. Long HD620 GPU frames cannot freeze
+            // or stretch the 6-minute day/night cycle.
+            const double seconds=double(dayNightClock_.elapsed())/1000.0;
+            const double next=cse::weather::cycleHour(dayNightOriginHour_,seconds);
+            if(std::abs(next-sunHour_->value())<.01)return;
+            applyingDayNightTick_=true;
             sunHour_->setValue(next);
+            applyingDayNightTick_=false;
         });
         connect(dayNightCycleBox_,&QCheckBox::toggled,this,[this](bool enabled){
-            if(enabled){dayNightClock_.start();dayNightTimer_.start();}
-            else dayNightTimer_.stop();
+            if(enabled){
+                dayNightOriginHour_=sunHour_->value();
+                dayNightClock_.start();
+                dayNightTimer_.start();
+            }else dayNightTimer_.stop();
         });
         connect(sunHour_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double hour){
+            // A deliberate manual time change reanchors the running clock.
+            if(dayNightCycleBox_ && dayNightCycleBox_->isChecked() &&
+               !applyingDayNightTick_){
+                dayNightOriginHour_=hour;
+                dayNightClock_.restart();
+            }
             if(!runtime_)return;
             // No render thread may observe a partially updated daylight hour.
             renderSerial_->fetch_add(1);
