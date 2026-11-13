@@ -234,9 +234,15 @@ VSOut VSEllipseMain(VSEllipseIn i) {
     return VSMain(raw);
 }
 float4 PSMain(VSOut i):SV_TARGET {
+    // Smooth focus-lens / lighthouse geometry. The sharp center follows the
+    // camera's optical axis, with no rectangular hard cut or temporal reuse.
+    // Mode 0: original full-frame, 1: low-res surround, 2: full-res focus.
     if(peripheralControls.x>.5) {
         float2 uvScreen=i.p.xy*peripheralControls.yz;
-        if(abs(uvScreen.x-.5)<.29 && abs(uvScreen.y-.5)<.32) discard;
+        float2 focus=(uvScreen-.5)/float2(.47,.48);
+        float radius=length(focus);
+        if(peripheralControls.x<1.5 && radius<.82) discard;
+        if(peripheralControls.x>1.5 && radius>1.0) discard;
     }
     // WRAP sampler already handles tiling. frac(uv) here broke automatic
     // derivatives at tile boundaries and forced inappropriate mip levels.
@@ -446,8 +452,12 @@ CV VSC(uint id:SV_VertexID) {
     v.p=float4(v.uv.x*2.-1.,1.-v.uv.y*2.,0.,1.);return v;
 }
 float4 PSC(CV v):SV_TARGET {
-    float2 a=abs(v.uv-.5);
-    float fade=max(smoothstep(.35,.38,a.x),smoothstep(.375,.405,a.y));
+    // Camera-centred elliptical focus: approximately half the picture stays
+    // razor sharp, followed by a soft 16%-radius transition like a headlamp.
+    // The edge always uses fresh pixels from this frame (never reprojection).
+    float2 focus=(v.uv-.5)/float2(.47,.48);
+    float radius=length(focus);
+    float fade=smoothstep(.84,1.0,radius);
     return lerp(hi.Sample(bilinear,v.uv),lo.Sample(bilinear,v.uv),fade);
 }
 )";
@@ -864,7 +874,7 @@ public:
         auto drawScene=[&](ID3D11RenderTargetView* rt,ID3D11DepthStencilView* ds,
                            int pw,int ph,bool scissor,bool skipCore)->bool{
             if(multires){
-                cb.peripheralControls[0]=skipCore?1.f:0.f;
+                cb.peripheralControls[0]=skipCore?1.f:(scissor?2.f:0.f);
                 cb.peripheralControls[1]=1.f/float(pw);
                 cb.peripheralControls[2]=1.f/float(ph);
                 D3D11_MAPPED_SUBRESOURCE mp{};
@@ -879,8 +889,8 @@ public:
             D3D11_VIEWPORT vp{};vp.Width=float(pw);vp.Height=float(ph);
             vp.MinDepth=0;vp.MaxDepth=1;context_->RSSetViewports(1,&vp);
             if(scissor){
-                const D3D11_RECT rect={LONG(std::floor(pw*.12f)),LONG(std::floor(ph*.095f)),
-                    LONG(std::ceil(pw*.88f)),LONG(std::ceil(ph*.905f))};
+                const D3D11_RECT rect={LONG(std::floor(pw*.03f)),LONG(std::floor(ph*.02f)),
+                    LONG(std::ceil(pw*.97f)),LONG(std::ceil(ph*.98f))};
                 context_->RSSetScissorRects(1,&rect);
             }
             UINT stride=sizeof(GpuVertex),offset=0;
