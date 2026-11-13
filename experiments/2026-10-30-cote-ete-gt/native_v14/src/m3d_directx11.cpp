@@ -331,6 +331,13 @@ float4 PSMain(VSOut i):SV_TARGET {
     [loop] for (uint l = 0; l < lightCount; ++l) {
         float3 delta = lightPositionRadius[l].xyz - i.world;
         float radius = lightPositionRadius[l].w;
+#if defined(M3D_V17_LIGHT_AABB_CULL)
+        // Conservative light-volume rejection. A light outside ANY axis
+        // cannot contribute. Expand radius to preserve the legacy squared
+        // distance epsilon and avoid losing boundary pixels.
+        [branch] if (radius > 0.0 &&
+            all(abs(delta) <= radius * 1.000001)) {
+#endif
 #if defined(M3D_V17_OPTIMIZE_PIXELS)
         // Reject far lights before computing length()/sqrt. Allow a
         // conservative epsilon to keep the legacy threshold identical.
@@ -347,6 +354,9 @@ float4 PSMain(VSOut i):SV_TARGET {
                 color += colorControls.x>0.5 ? base*localIrradiance : localIrradiance;
             }
 #if defined(M3D_V17_OPTIMIZE_PIXELS)
+        }
+#endif
+#if defined(M3D_V17_LIGHT_AABB_CULL)
         }
 #endif
     }
@@ -1354,11 +1364,22 @@ private:
         // HLSL is compiled once at device creation, never per frame.
         const char* disableShaderOpt=std::getenv("M3D_V17_DISABLE_SHADER_OPT");
         const bool optimizePixels=!(disableShaderOpt&&std::strcmp(disableShaderOpt,"1")==0);
+        const char* lightCullEnv=std::getenv("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL");
+        const bool lightAabbCull=lightCullEnv&&std::strcmp(lightCullEnv,"1")==0;
         const D3D_SHADER_MACRO pixelMacros[]={
-            {"M3D_V17_OPTIMIZE_PIXELS","1"},{nullptr,nullptr}
+            {"M3D_V17_OPTIMIZE_PIXELS","1"},
+            {lightAabbCull?"M3D_V17_LIGHT_AABB_CULL":nullptr,lightAabbCull?"1":nullptr},
+            {nullptr,nullptr}
         };
+        const D3D_SHADER_MACRO lightCullOnlyMacros[]={
+            {"M3D_V17_LIGHT_AABB_CULL","1"},{nullptr,nullptr}
+        };
+        // Old reference shader, optimized shader, and the experimental
+        // conservative local-light rejection are independent A/B paths.
+        const D3D_SHADER_MACRO* activeMacros=
+            optimizePixels?pixelMacros:(lightAabbCull?lightCullOnlyMacros:nullptr);
         hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",
-            optimizePixels?pixelMacros:nullptr,nullptr,"PSMain","ps_4_0",
+            activeMacros,nullptr,"PSMain","ps_4_0",
             D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&psCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation du pixel shader DirectX 11 impossible");return false;}
         if(FAILED(device_->CreateVertexShader(vsCode->GetBufferPointer(),vsCode->GetBufferSize(),nullptr,&vs_))||FAILED(device_->CreatePixelShader(psCode->GetBufferPointer(),psCode->GetBufferSize(),nullptr,&ps_))){error=L"Création des shaders DirectX 11 impossible.";return false;}
