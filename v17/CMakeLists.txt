@@ -58,26 +58,52 @@ if(WIN32)
                    "${CMAKE_CURRENT_BINARY_DIR}/v17_benchmark_runner.rc" @ONLY)
     qt_add_executable(moteur3d_v17 WIN32
         "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_qt.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/radio_audio.cpp"
         "${CMAKE_CURRENT_BINARY_DIR}/v17_app.rc")
     add_dependencies(moteur3d_v17 v17_icon_generator)
     set_source_files_properties("${CMAKE_CURRENT_BINARY_DIR}/v17_app.rc"
         PROPERTIES OBJECT_DEPENDS "${V17_ICON}")
 else()
     qt_add_executable(moteur3d_v17
-        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_qt.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_qt.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/radio_audio.cpp")
 endif()
 target_include_directories(moteur3d_v17 PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
 target_link_libraries(moteur3d_v17 PRIVATE moteur3d_v16_core Qt6::Widgets Qt6::Concurrent)
 if(WIN32)
     # About dialog queries the DXGI primary adapter name without changing device selection.
-    target_link_libraries(moteur3d_v17 PRIVATE dxgi)
+    target_link_libraries(moteur3d_v17 PRIVATE dxgi xaudio2)
 endif()
 target_compile_definitions(moteur3d_v17 PRIVATE CSE_WARP_BUILD_NUMBER=${V17_BUILD_NUMBER})
 if(MSVC)
     target_compile_options(moteur3d_v17 PRIVATE /O2 /EHsc /utf-8)
 endif()
+# Repeatable original 30s PCM diagnostic loop; no copyright-sensitive downloads
+# and no external audio processing tool required by the Windows build.
+if(WIN32)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(V17_RADIO_TEST_WAV "${CMAKE_CURRENT_BINARY_DIR}/radio-assets/pripyat_radio.wav")
+    add_custom_command(
+        OUTPUT "${V17_RADIO_TEST_WAV}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/radio-assets"
+        COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/../assets/audio/pripyat_radio/generate_test_wav.py"
+            "${V17_RADIO_TEST_WAV}"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../assets/audio/pripyat_radio/generate_test_wav.py"
+        VERBATIM)
+    add_custom_target(v17_radio_test_asset DEPENDS "${V17_RADIO_TEST_WAV}")
+    add_dependencies(moteur3d_v17 v17_radio_test_asset)
+endif()
 add_custom_command(TARGET moteur3d_v17 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+      "$<TARGET_FILE_DIR:moteur3d_v17>/audio"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${CMAKE_CURRENT_SOURCE_DIR}/../assets/audio/pripyat_radio/speaker_layout.json"
+      "$<TARGET_FILE_DIR:moteur3d_v17>/audio/speaker_layout.json"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${V17_RADIO_TEST_WAV}"
+      "$<TARGET_FILE_DIR:moteur3d_v17>/audio/pripyat_radio.wav"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
       "${V17_ICON}"
       "$<TARGET_FILE_DIR:moteur3d_v17>/cse_warp_v17.ico"

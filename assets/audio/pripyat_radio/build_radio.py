@@ -65,11 +65,26 @@ def main():
         return 0
 
     paths = []
+    included = []
     for track in tracks:
         path = CACHE / track["commons_filename"]
-        download(track, path)
+        try:
+            download(track, path)
+        except Exception as exc:
+            # Wikimedia can return HTTP 429 after several large files.
+            # If we have Ukrainian speech AND the CC BY-SA song, prefer a
+            # shorter legal radio programme over a missing output.
+            print("WARNING: unavailable open source", track["id"], str(exc), file=sys.stderr)
+            continue
         paths.append(path)
-
+        included.append(track)
+    have_song = any(track["id"] == "lysenko-shevtchenko" for track in included)
+    have_narration = any(track["id"].startswith("spoken-") for track in included)
+    if not (have_song and have_narration):
+        print("Need at least one licensed narration AND the Ukrainian song.", file=sys.stderr)
+        return 3
+    print("Included", len(included), "licensed sources; duration approx",
+          sum(track["duration_seconds"] for track in included), "seconds")
     if args.download_only:
         return 0
     if not shutil.which("ffmpeg"):
