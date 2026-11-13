@@ -29,6 +29,9 @@ target_include_directories(v17_camera_diagnostic_smoke PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
 target_link_libraries(v17_camera_diagnostic_smoke PRIVATE Qt6::Core)
 add_test(NAME v17_camera_diagnostic_roundtrip COMMAND v17_camera_diagnostic_smoke)
+# Pure CPU test for RMB-held scoped FOV, smooth release and aim sensitivity.
+add_executable(v17_scope_zoom_smoke "tests/scope_zoom_smoke.cpp")
+add_test(NAME v17_scope_zoom_hold_release COMMAND v17_scope_zoom_smoke)
 
 # No GPU or Windows runtime required to verify exact 2x2 sample budget.
 add_executable(v17_primary_quarter_smoke "tests/primary_quarter_smoke.cpp")
