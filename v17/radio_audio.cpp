@@ -49,7 +49,7 @@ bool readPcmMono16(const std::wstring& filename, std::vector<uint8_t>& pcm, WAVE
     if (length < 44 || length > std::streamoff(80 * 1024 * 1024)) return false;
     std::vector<uint8_t> bytes(static_cast<size_t>(length));
     in.seekg(0);
-    if (!in.read(reinterpret_cast<char*>(bytes.data()), length)) return false;
+    if (!in.read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(length))) return false;
     if (std::memcmp(bytes.data(), "RIFF", 4) || std::memcmp(bytes.data() + 8, "WAVE", 4))
         return false;
     bool hasFmt = false, hasData = false;
