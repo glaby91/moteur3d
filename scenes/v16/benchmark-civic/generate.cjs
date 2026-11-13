@@ -10,9 +10,14 @@ const root=__dirname;
 const repoRoot=path.resolve(root,'../../..');
 const catalogPath=path.join(repoRoot,'assets/materials/pripyat-v17/catalogue.json');
 const catalog=JSON.parse(fs.readFileSync(catalogPath,'utf8'));
+const radioLayout=JSON.parse(fs.readFileSync(path.join(repoRoot,'assets/audio/pripyat_radio/speaker_layout.json'),'utf8'));
+if(radioLayout.loudspeakers.length!==4)throw new Error('Radio facade requires exactly four loudspeakers');
 // Scene-only PBR additions; original Pripyat IDs, materials and files remain
 // completely unchanged. The fresco is the actual legacy JPEG, not a fake mural.
 const specials=[
+ ['cse_radio_orange',[.75,.23,.10],.62,'metal'],
+ ['cse_radio_horn_dark',[.19,.20,.19],.66,'metal'],
+ ['cse_radio_mount',[.44,.43,.40],.76,'metal'],
  ['cse_flower_red',[.54,.20,.19],.88,'foliage'],
  ['cse_flower_gold',[.74,.54,.25],.89,'foliage'],
  ['cse_flower_blue',[.33,.43,.54],.89,'foliage'],
@@ -244,6 +249,24 @@ function build(profileName,p){
    B('Architecture/Palais/Chassis','prp_window_frame',x,y,-3.88,.16,3.92,.18);
    B('Architecture/Palais/Chassis','prp_window_frame',x,level*4.15+4.42,-3.87,3.40,.16,.18);
   }
+ }
+ // Four recognizable PA horns on existing entry pilasters, not the glazed panes.
+ // Share the EXACT world positions from speaker_layout.json with X3DAudio.
+ // Boxes form a stepped flared horn and solid rear housing; depth extends
+ // toward the public square (+Z). No change to columns, doors or glazing.
+ for(const sp of radioLayout.loudspeakers){
+   const [x,y,z]=sp.position;
+   const group='Architecture/Palais/Sonorisation exterieure/'+sp.id;
+   B(group+'/Platine','cse_radio_mount',x,y,z-.37,.33,.39,.08);
+   B(group+'/Bras','cse_radio_mount',x,y,z-.16,.13,.17,.47);
+   B(group+'/Boitier','cse_radio_orange',x,y,z+.12,.47,.43,.45);
+   B(group+'/Col','cse_radio_horn_dark',x,y,z+.43,.30,.24,.16);
+   B(group+'/Pavillon arriere','cse_radio_orange',x,y,z+.54,.54,.33,.17);
+   B(group+'/Pavillon bouche','cse_radio_orange',x,y,z+.70,.79,.46,.15);
+   B(group+'/Interieur sombre','cse_radio_horn_dark',x,y,z+.784,.59,.29,.015);
+   S(group+'/Diffuseur','cse_radio_mount',x,y,z+.81,.14,.14,.06);
+   for(const dx of [-.12,.12])for(const dy of [-.13,.13])
+     S(group+'/Visserie','cse_radio_mount',x+dx,y+dy,z-.323,.045,.045,.04);
  }
  // User-provided costume figure, on the OUTER facade only.
  // 8 × 13 m portrait mosaic; the 10 m entrance below remains open.
