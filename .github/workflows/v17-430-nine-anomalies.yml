@@ -1,0 +1,175 @@
+name: CSE WARP V17.430 — 9 anomalies scene repair / DX11 evidence
+on:
+  push:
+    branches: [feature/v17-430-nine-anomalies-261113]
+    paths:
+      - tools/upgrade_scene_v8.py
+      - .github/workflows/v17-430-nine-anomalies.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  nine-corrections-windows:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    env:
+      GH_TOKEN: ${{ github.token }}
+      QT_QPA_PLATFORM: offscreen
+      M3D_V16_FORCE_WARP: '1'
+      M3D_V17_EXPERIMENT_Z_PREPASS: '0'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install native mosaic and number texture tools
+        shell: pwsh
+        run: |
+          python -m pip install --only-binary=:all: "Pillow>=11"
+          if($LASTEXITCODE -ne 0){throw "Pillow install failed"}
+          python -m py_compile tools/upgrade_scene_v8.py
+          if($LASTEXITCODE -ne 0){throw "V8 scene upgrade syntax failed"}
+      - name: Restore verified V17.429 portable app with Shift x3
+        shell: pwsh
+        run: |
+          gh run download 43331886339 --repo glaby91/moteur3d --name CSE-WARP-V17.429-EXPLORATION-X3-Windows-x64 --dir dist-v430
+          if($LASTEXITCODE -ne 0){throw "V17.429 artifact unavailable"}
+          foreach($p in @("moteur3d_v17.exe","moteur3d_v17_benchmark.exe","moteur3d_v16_core.dll","benchmark-civic/scene-v7-corrections.json","DEMARRER_CSE_WARP_V7.bat")){
+            if(!(Test-Path "dist-v430/$p")){throw "Baseline file missing: $p"}
+          }
+          $art="dist-v430/benchmark-civic/textures/energetik_fresco_mosaic.jpg"
+          (Get-FileHash $art -Algorithm SHA256).Hash | Out-File original-artwork-sha.txt -Encoding ascii
+          (Get-FileHash "dist-v430/benchmark-civic/scene-v7-corrections.json" -Algorithm SHA256).Hash | Out-File original-scene-sha.txt -Encoding ascii
+      - name: Apply exactly nine repairs (never touch V17.429 renderer or fresco)
+        shell: pwsh
+        run: |
+          python tools/upgrade_scene_v8.py --root dist-v430/benchmark-civic | Tee-Object -FilePath v430-generator-report.txt
+          if($LASTEXITCODE -ne 0){throw "Nine-anomaly scene generator failed"}
+      - name: Independent checks — stairs, doors, glass, plot/ladder clearance, mosaic, lights
+        shell: pwsh
+        run: |
+          @'
+          import json, hashlib, math
+          from pathlib import Path
+          root=Path("dist-v430/benchmark-civic")
+          def load(p):return json.loads((root/p).read_text(encoding="utf8"))
+          report=load("reports/v8-nine-anomalies.json")
+          f=report["fixes"]
+          objs=load("instances/v8-nine-anomalies.json")["instances"]
+          materials=load("materials/v8-nine-anomalies.json")["materials"]
+          lighting=load("lighting/v8-nine-anomalies.json")["lights"]
+          cameras=load("cameras/v8-nine-anomalies.json")["cameras"]
+          scene=load("scene-v7-corrections.json")
+          def members(prefix):return [o for o in objs if o["parent"].startswith(prefix)]
+          # 1 / 2: original broken hall guard + 3 unsupported beams
+          assert f["1_guardrail_gap_closed_m"]==6.35
+          assert len(members("Interieur/Galeries/Garde-corps continus apres trémie/"))==7
+          assert f["2_unsupported_concrete_roof_joists_removed"]==3
+          assert sum(o["parent"]=="Interieur/Piscine olympique/Poutres plafond" for o in objs)==3
+          # 3: three real separate upper floor shafts and walkable stairs
+          assert f["3_floor_levels_reached"]==[4.5,9.0,13.5]
+          steps=members("Interieur/Galeries/Escaliers lateraux/Marches")
+          assert len(steps)==64 and f["3_shaft_openings"]==3
+          for fi,initial,final,n in [(0,.55,4.5,20),(1,4.5,9,22),(2,9,13.5,22)]:
+              ss=sorted((o for o in steps if o["id"].startswith(f"v8_stair_{fi}_step_")),key=lambda o:o["id"])
+              assert len(ss)==n
+              ys=[o["position"][1]+o["size"][1]/2 for o in ss]
+              assert abs(ys[-1]-final)<.01 and abs(ys[0]-initial-(final-initial)/n)<.01
+              assert all(.16<ys[k+1]-ys[k]<.34 for k in range(n-1))
+          assert sum(o["parent"]=="Interieur/Galeries/Escaliers lateraux/Planchers decoupes" for o in objs)==12
+          assert sum(o["parent"]=="Interieur/Galeries/Escaliers lateraux/Paliers raccordes" for o in objs)==3
+          # 4: all 4 curtain-wall levels have common dark metal posts.
+          assert f["4_misaligned_double_glazing_frames_removed"]==466
+          assert sum(o["parent"]=="Architecture/Palais/Mur-rideau V8/Montants raccordes" for o in objs)==112
+          assert any(m["id"]=="v8_mullion_dark_steel" and m["metallic"]>.8 for m in materials)
+          assert len(members("Architecture/Palais/Mur-rideau V7/Vitrages"))==38
+          # 5: > 2m deep, 4 smooth curved rails and no tiny floating sphere buoys.
+          assert f["5_pool_depth_metres"]==2.1
+          assert f["5_smooth_brushed_inox_rails"]==4
+          assert f["5_stray_pool_buoy_spheres_removed"]==171
+          assert sum(o["parent"]=="Interieur/Piscine olympique/Lignes d’eau" for o in objs)==0
+          assert len(members("Interieur/Piscine olympique/Echelles/Marches immergees"))==12
+          from PIL import Image
+          assert Image.open(root/"textures/revision/v8/pool_mosaic_ceramic_1024.png").size==(1024,1024)
+          # 6 / 7: ten correctly numbered lane plots, all at x<0; ladders at x>0.
+          plots=[o for o in objs if o["parent"]=="Interieur/Piscine olympique/Plots"]
+          assert len(plots)==10 and all(o["position"][0]<-25.4 for o in plots)
+          assert len(members("Interieur/Piscine olympique/Plots/Numéros des 10 couloirs"))==10
+          for n in range(1,11):
+              assert Image.open(root/f"textures/revision/v8/lane_{n:02d}_256.png").size==(256,256)
+          ladders=members("Interieur/Piscine olympique/Echelles/")
+          assert all(o["position"][0]>=0 for o in ladders)
+          assert min(o["position"][0] for o in ladders)>23.
+          assert (min(o["position"][0] for o in ladders)
+                  -max(o["position"][0] for o in plots))>45.
+          # 8: actual 6+12 wooden bench geometry absent.
+          assert f["8_wooden_pool_bench_parts_removed"]==18
+          assert not any("Bancs latéraux" in o["parent"] for o in objs)
+          # 9: exactly six truly attached lights and matching electric sources.
+          assert f["9_actual_ceiling_luminaires"]==6
+          assert len(members("Interieur/Piscine olympique/Plafond/Luminaires fonctionnels fixes aux poutres"))==6
+          assert len(lighting)==76
+          assert len([l for l in lighting if l["position"][1]==16.75])==6
+          assert any(c["id"]=="v8_skylight_lighting" for c in cameras)
+          # Fresco byte-for-byte, V17.428 scene baseline, no altered GLBs.
+          art="textures/energetik_fresco_mosaic.jpg"
+          original=(Path("original-artwork-sha.txt").read_text()).strip().lower()
+          assert hashlib.sha256((root/art).read_bytes()).hexdigest()==original
+          assert report["frescoOriginalSha256"]==original
+          assert report["frescoMeshesPreserved"]==8
+          original_scene=Path("original-scene-sha.txt").read_text().strip().lower()
+          assert hashlib.sha256((root/"scene-v7-baseline-untouched.json").read_bytes()).hexdigest()==original_scene
+          assert "V17.430" in scene["name"]
+          assert len(materials)<256 and len(objs)==len({o["id"] for o in objs})
+          print("V17.430 ALL NINE SCENE ASSERTION GROUPS PASS; fresco intact")
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw "Static V17.430 scene regression failed"}
+      - name: Actual DX11 WARP proof — stairs, pools, glazing, roof and preserved mural
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path proof-v430 | Out-Null
+          foreach($camera in @("v8_three_level_stairs","v8_pool_blocks","v8_ladder_stainless","v8_glazing_raccords","v4_piscine","v7_pool_fresco")){
+            & dist-v430/moteur3d_v17_benchmark.exe dist-v430/benchmark-civic/scene-v7-corrections.json "proof-$camera" --smoke --camera-id $camera --hour 14.75 --raster-msaa 1
+            if($LASTEXITCODE -ne 0){throw "Real Windows WARP camera failed: $camera"}
+            $image=@(Get-ChildItem "proof-$camera" -Recurse -Filter "raster_$($camera)_640x360_depth1.png")
+            if($image.Count -ne 1 -or $image[0].Length -lt 1000){throw "Missing actual WARP image: $camera"}
+            Copy-Item $image[0].FullName "proof-v430/V17.430-$camera-14h45.png"
+          }
+          foreach($hour in @("14.75","19.00")){
+            $s=$hour.Replace(".","_")
+            & dist-v430/moteur3d_v17_benchmark.exe dist-v430/benchmark-civic/scene-v7-corrections.json "roof-$s" --smoke --camera-id v8_skylight_lighting --hour $hour --raster-msaa 1
+            if($LASTEXITCODE -ne 0){throw "Real WARP skylight lighting failed at $hour"}
+            $image=@(Get-ChildItem "roof-$s" -Recurse -Filter "raster_v8_skylight_lighting_640x360_depth1.png")
+            if($image.Count -ne 1 -or $image[0].Length -lt 1000){throw "Roof photo missing $hour"}
+            Copy-Item $image[0].FullName "proof-v430/V17.430-skylight-$s.png"
+          }
+      - name: Package portable scene-only upgrade while preserving x3 app
+        shell: pwsh
+        run: |
+          Copy-Item tools/upgrade_scene_v8.py dist-v430/upgrade_scene_v8.py -Force
+          Copy-Item v430-generator-report.txt dist-v430/VALIDATION-V17.430.txt -Force
+          @'
+          CSE WARP V17.430 — 9 documented anomalies corrected in V8 scene.
+          V17.429 compiled Windows EXE with Shift x3 is preserved IDENTICALLY.
+          The source image of the 2048px fresco and all its original 8 UV
+          panel meshes are preserved byte-for-byte.
+          Start via DEMARRER_CSE_WARP_V7.bat: the established scene path now
+          points at scene-v8-nine-anomalies.json with a V17.430 title.
+          Original V17.428 pointer: scene-v7-baseline-untouched.json.
+          Important: scene-level tests and Windows software WARP renders do NOT
+          guarantee real player collision or FPS on a Dell Intel HD620.
+          '@ | Set-Content dist-v430/LIRE_EN_PREMIER-V17.430.txt -Encoding UTF8
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V17.430-9-ANOMALIES-Windows-x64
+          path: dist-v430/
+          retention-days: 21
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V17.430-8-RENDUS-DX11-WARP
+          path: proof-v430/
+          retention-days: 21
+          if-no-files-found: error
