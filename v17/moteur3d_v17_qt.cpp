@@ -3,6 +3,7 @@
 #include "exploration_motion.h"
 #include "camera_diagnostic.h"
 #include "frame_pacing.h"
+#include "pool_ladder.h"
 #include "radio_audio.h"
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
@@ -394,6 +395,7 @@ private:
     QPoint previousMouse_;
     v16::CameraPreset freeCamera_;
     walk::State walkingState_{};
+    cse::pool_ladder::Motion poolLadderMotion_{};
     QCheckBox* walkingModeBox_=nullptr;
     bool exploring_=false,freeCameraActive_=false,leftMouseHeld_=false;
     float yaw_=0.f,pitch_=0.f;
@@ -617,12 +619,13 @@ private:
         exploring_=false;
         frameTimer_.stop();
         keysDown_.clear();
+        poolLadderMotion_={};
         leftMouseHeld_=false;
         updateExplorationSpeedIndicator();
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Démarrer exploration (V17)"));
         if(explorationHelp_)explorationHelp_->setText(QStringLiteral(
             "ZQSD / flèches : marcher · clic gauche + souris : regarder · Maj : vitesse ×3 · Échap : arrêter\n"
-            "En mode vol libre : Espace / Ctrl pour monter ou descendre."));
+            "E près d’une échelle : monter/descendre dans la piscine. Vol libre : Espace / Ctrl."));
     }
     void toggleExploration(){
         if(exploring_){stopExploration();return;}
@@ -630,6 +633,7 @@ private:
         if(backendBox_->currentIndex()!=4)backendBox_->setCurrentIndex(4);
         if(!freeCameraActive_)activateFreeCamera();
         exploring_=true;
+        poolLadderMotion_={};
         motionClock_.start();
         frameClock_.invalidate();
         resetPacing();
@@ -652,6 +656,35 @@ private:
         if(keysDown_.contains(Qt::Key_D)||keysDown_.contains(Qt::Key_Right))move=move+right;
         if(keysDown_.contains(Qt::Key_Q)||keysDown_.contains(Qt::Key_A)||keysDown_.contains(Qt::Key_Left))move=move-right;
         if(walkingModeBox_&&walkingModeBox_->isChecked()){
+            if(poolLadderMotion_.active()){
+                const bool climbing=poolLadderMotion_.up;
+                const auto p=poolLadderMotion_.advance(dt);
+                walkingState_.feet={p.x,p.y,p.z};
+                freeCamera_.eye=walk::eye(walkingState_);
+                updateLook();
+                if(!poolLadderMotion_.active() && climbing){
+                    // Re-establish dry ground contact after climbing over coping.
+                    const V eye=walk::eye(walkingState_);
+                    walk::spawn(runtime_->renderScene,eye,walkingState_);
+                    freeCamera_.eye=walk::eye(walkingState_);
+                    updateLook();
+                }
+                if(!watcher_.isRunning()){frameClock_.start();requestRender();}
+                return;
+            }
+            const V currentFeet=walkingState_.feet;
+            if(scenePath_.contains(QStringLiteral("benchmark-civic"),Qt::CaseInsensitive) &&
+               cse::pool_ladder::inWater({currentFeet.x,currentFeet.y,currentFeet.z})){
+                const float speed=cse::exploration::speedMetersPerSecond(false)*.55f;
+                const V horizontalMotion=length(move)>.01f?norm(move)*(dt*speed):V{};
+                const auto p=cse::pool_ladder::walkInWater(
+                    {currentFeet.x,currentFeet.y,currentFeet.z},horizontalMotion.x,horizontalMotion.z);
+                walkingState_.feet={p.x,p.y,p.z};
+                freeCamera_.eye=walk::eye(walkingState_);
+                updateLook();
+                if(!watcher_.isRunning()){frameClock_.start();requestRender();}
+                return;
+            }
             // Walking is always horizontal input. Height follows geometry:
             // floor, stairs, landings, slopes and gravity on unsupported areas.
             // Shift is an exact 3× multiplier; the deterministic walker still
@@ -717,6 +750,18 @@ protected:
     void keyPressEvent(QKeyEvent* e) override{
         if(exploring_){
             if(e->key()==Qt::Key_Escape){stopExploration();e->accept();return;}
+            if(e->key()==Qt::Key_E && !e->isAutoRepeat() &&
+               walkingModeBox_ && walkingModeBox_->isChecked() &&
+               scenePath_.contains(QStringLiteral("benchmark-civic"),Qt::CaseInsensitive)){
+                const V feet=walkingState_.feet;
+                if(poolLadderMotion_.begin({feet.x,feet.y,feet.z})){
+                    keysDown_.clear();
+                    statusBar()->showMessage(poolLadderMotion_.up
+                        ?QStringLiteral("Piscine : montée de l'échelle en cours…")
+                        :QStringLiteral("Piscine : descente de l'échelle en cours…"),3000);
+                    e->accept();return;
+                }
+            }
             if(!e->isAutoRepeat()){
                 keysDown_.insert(e->key());
                 if(e->key()==Qt::Key_Shift)updateExplorationSpeedIndicator();
@@ -1283,7 +1328,7 @@ private:
         vertical->addWidget(walkingModeBox_);
         explorationHelp_=new QLabel(QStringLiteral(
             "ZQSD / flèches : marcher · clic gauche + souris : regarder · Maj : accélérer · Échap : arrêter\\n"
-            "Espace / Ctrl : monter / descendre en vol. Ctrl+Maj+A : anomalie PNG+JSON."));
+            "E près d’une échelle : monter/descendre dans la piscine. Ctrl+Maj+A : anomalie PNG+JSON."));
         explorationHelp_->setWordWrap(true);
         vertical->addWidget(explorationHelp_);
         connect(explorationButton_,&QPushButton::clicked,this,[this]{toggleExploration();});
