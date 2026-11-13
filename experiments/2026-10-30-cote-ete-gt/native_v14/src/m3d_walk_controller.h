@@ -62,8 +62,10 @@ inline bool continuousPaverFooting(const Scene& scene,V next,float previousY,
                                    float detectedY,const Settings& cfg={}){
     const float drop=previousY-detectedY;
     if(drop<.018f || drop>.18f)return false;
-    constexpr float offsets[4][2]={{.13f,0.f},{-.13f,0.f},
-                                    {0.f,.13f},{0.f,-.13f}};
+    constexpr float offsets[8][2]={{.13f,0.f},{-.13f,0.f},
+                                    {0.f,.13f},{0.f,-.13f},
+                                    {.13f,.13f},{.13f,-.13f},
+                                    {-.13f,.13f},{-.13f,-.13f}};
     for(const auto& offset:offsets){
         V nearby{};
         if(support(scene,next.x+offset[0],next.z+offset[1],
