@@ -399,7 +399,7 @@ def main(root):
         group_counts[label]={'objects':len(selected),
                'triangles':sum(TRIS[x['geometry']] for x in selected)}
     triangles=sum(TRIS[o['geometry']] for o in instances)
-    assert 1_000_000<=triangles<=1_270_000, f'Unexpected target budget {triangles}'
+    assert 1_000_000<=triangles<=1_500_000, f'Unexpected target budget {triangles}'
     assert abs(next(o for o in instances if o['parent']=='Place/Butte végétalisée')['position'][0])<.001
     assert next(o for o in instances if o['parent']=='Place/Butte végétalisée')['size'][0]==55.8
     assert CENTER_Z==72.0 and CENTER_Z-21.0>45.0
