@@ -5,6 +5,8 @@ on:
     paths:
       - .github/workflows/v17-444-gui-approved-scene.yml
       - experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp
+      - v17/moteur3d_v17_qt.cpp
+      - v17/tests/walk_controller_smoke.cpp
   workflow_dispatch:
 permissions:
   contents: read
@@ -40,7 +42,7 @@ jobs:
         run: |
           cmake -S v17 -B build-v444-gui -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=444
           if($LASTEXITCODE -ne 0){throw "CMake configure failed"}
-          cmake --build build-v444-gui --config Release --target moteur3d_v17 moteur3d_v17_benchmark --parallel 4
+          cmake --build build-v444-gui --config Release --target moteur3d_v17 moteur3d_v17_benchmark v17_walk_controller_smoke --parallel 4
           if($LASTEXITCODE -ne 0){throw "Native V17.444 Windows build failed"}
           foreach($f in @("build-v444-gui/Release/moteur3d_v17.exe",
                           "build-v444-gui/Release/moteur3d_v17_benchmark.exe",
@@ -78,6 +80,17 @@ jobs:
           if($sha -ne (Get-Content original-fresco-sha.txt -Raw).Trim()){throw "Fresco corrupted"}
           $v=[System.Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path package-v444/moteur3d_v17.exe).Path)
           if($v.FileMajorPart -ne 17 -or $v.FileMinorPart -ne 444){throw "GUI not 17.444"}
+      - name: Prevent re-enabling free flight after anomaly recall (regression)
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          $env:PATH=(Resolve-Path package-v444).Path+";"+$env:PATH
+          ctest --test-dir build-v444-gui -C Release -R "^v17_walk_stairs_collision$" --output-on-failure
+          if($LASTEXITCODE -ne 0){throw "Deterministic wall, stairs, fast-walk collision regression"}
+          $scene=(Resolve-Path package-v444/benchmark-civic/scene.json).Path
+          $gui=(Resolve-Path package-v444/moteur3d_v17.exe).Path
+          $proc=Start-Process -FilePath $gui -ArgumentList @("--smoke-walking-collisions",$scene) -WorkingDirectory (Resolve-Path package-v444).Path -PassThru -Wait
+          if($proc.ExitCode -ne 0){throw "Anomaly recalled view incorrectly changed persisted collision mode ($($proc.ExitCode))"}
       - name: Smoke Windows GUI with corrected scene (reference + multires)
         shell: pwsh
         timeout-minutes: 18
