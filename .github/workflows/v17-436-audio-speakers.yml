@@ -136,7 +136,7 @@ jobs:
           $proc=Start-Process -FilePath $exe -ArgumentList @("--smoke-repeat-raster",$scene) -WorkingDirectory (Resolve-Path "dist-v436").Path -PassThru -Wait
           if($proc.ExitCode -ne 0){throw "V17.436 GUI smoke failed: $($proc.ExitCode)"}
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: success()
         with:
           name: CSE-WARP-V17.436-AUDIO-4HP-433-434-Windows-x64
           path: dist-v436/
