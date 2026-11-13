@@ -120,13 +120,33 @@ jobs:
           stop/resume and volume.
           Included audio/pripyat_radio.wav is a 30-second ORIGINAL TECHNICAL
           SIGNAL, NOT a historical 1970s radio programme or Ukrainian songs.
-          Real licensed audio can later replace this file (PCM 16-bit mono).
+          An optional build step attempts a ~33 min CC BY-SA Ukrainian montage.\n          Read audio/CONTENU_WAV.txt to distinguish music from technical WAV.\n          A validated standalone PCM WAV may replace either (16-bit mono).
           The four emitters use the same speaker_layout.json as scene geometry.
           No unlicensed 1970s archive included. Real Intel HD620 benchmarks
           and headphone listening still need user-side hardware validation.
           '@ | Set-Content dist-v436/LIRE_EN_PREMIER-V17.436.txt -Encoding UTF8
           $fresco=(Get-FileHash "dist-v436/benchmark-civic/textures/energetik_fresco_mosaic.jpg" -Algorithm SHA256).Hash
           if($fresco -ne (Get-Content fresco-sha.txt -Raw).Trim()){throw "Fresco modified"}
+      - name: Attempt optional free Ukrainian music programme for included WAV
+        shell: pwsh
+        continue-on-error: true
+        timeout-minutes: 9
+        run: |
+          $status="WAV DE TEST ORIGINAL - sans chanson. Sources Wikimedia non récupérées."
+          if(Get-Command ffmpeg -ErrorAction SilentlyContinue){
+            python assets/audio/pripyat_radio/build_radio.py
+            if($LASTEXITCODE -eq 0 -and (Test-Path "assets/audio/pripyat_radio/generated/pripyat_radio.wav")){
+              $full="assets/audio/pripyat_radio/generated/pripyat_radio.wav"
+              Copy-Item $full dist-v436/audio/pripyat_radio.wav -Force
+              $status="MONTAGE LIBRE CC BY-SA 3.0 - voix ukrainiennes + chanson, reconstitution moderne, PAS une émission des années 1970. Voir CREDITS.md"
+              Write-Host "PASS: full openly licensed 33-minute Ukrainian radio-style montage"
+            }else{
+              Write-Host "Commons media unavailable: keep already packaged original technical WAV"
+            }
+          }else{
+            Write-Host "FFmpeg missing; keep valid generated technical PCM WAV"
+          }
+          $status | Set-Content dist-v436/audio/CONTENU_WAV.txt -Encoding UTF8
       - name: GUI smoke with two real DX11 software frames
         shell: pwsh
         timeout-minutes: 8
