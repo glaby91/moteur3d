@@ -260,11 +260,11 @@ function build(profileName,p){
    B(group+'/Platine','cse_radio_mount',x,y,z-.37,.33,.39,.08);
    B(group+'/Bras','cse_radio_mount',x,y,z-.16,.13,.17,.47);
    B(group+'/Boitier','cse_radio_orange',x,y,z+.12,.47,.43,.45);
-   B(group+'/Col','cse_radio_horn_dark',x,y,z+.43,.30,.24,.16);
-   B(group+'/Pavillon arriere','cse_radio_orange',x,y,z+.54,.54,.33,.17);
-   B(group+'/Pavillon bouche','cse_radio_orange',x,y,z+.70,.79,.46,.15);
-   B(group+'/Interieur sombre','cse_radio_horn_dark',x,y,z+.784,.59,.29,.015);
-   S(group+'/Diffuseur','cse_radio_mount',x,y,z+.81,.14,.14,.06);
+   B(group+'/Col','cse_radio_horn_dark',x,y-.06,z+.43,.30,.24,.16);
+   B(group+'/Pavillon arriere','cse_radio_orange',x,y-.10,z+.54,.54,.33,.17);
+   B(group+'/Pavillon bouche','cse_radio_orange',x,y-.16,z+.70,.79,.46,.15);
+   B(group+'/Interieur sombre','cse_radio_horn_dark',x,y-.16,z+.784,.59,.29,.015);
+   S(group+'/Diffuseur','cse_radio_mount',x,y-.16,z+.81,.14,.14,.06);
    for(const dx of [-.12,.12])for(const dy of [-.13,.13])
      S(group+'/Visserie','cse_radio_mount',x+dx,y+dy,z-.323,.045,.045,.04);
  }
