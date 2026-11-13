@@ -3,10 +3,13 @@ on:
   push:
     branches: [feature/v17-442-corrections-anomalies-261113]
     paths:
-      - .github/workflows/v17-442-clean-release.yml
-      - tools/package_clean_v441.py
+      - .github/workflows/v17-442-corrections.yml
+      - tools/package_clean_v442.py
       - tools/package_archives_v441.py
       - v17/**
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_walk_controller.h
+      - tools/patch_scene_v442.py
+      - tools/package_clean_v442.py
   workflow_dispatch:
 permissions:
   contents: read
@@ -76,7 +79,7 @@ jobs:
         shell: pwsh
         run: |
           $rev=(git rev-parse HEAD).Trim()
-          python tools/package_clean_v441.py --source dist-stage --dest dist-clean --revision $rev
+          python tools/package_clean_v442.py --source dist-stage --dest dist-clean --revision $rev
           if($LASTEXITCODE -ne 0){throw "Clean packaging failed"}
           python tools/package_archives_v441.py --source dist-stage --clean dist-clean --dest dist-archives
           if($LASTEXITCODE -ne 0){throw "Developer archive packaging failed"}
