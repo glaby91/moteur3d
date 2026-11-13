@@ -5,6 +5,7 @@ on:
     paths:
       - .github/workflows/v17-443-anomaly-validation.yml
       - tools/package_archives_v441.py
+      - tools/package_clean_v443.py
       - v17/**
       - experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_walk_controller.h
       - tools/patch_scene_v442.py
@@ -55,7 +56,7 @@ jobs:
       - name: Compile ALL deliverable executables in same build 17.443
         shell: pwsh
         run: |
-          cmake -S v17 -B build-v443 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=442
+          cmake -S v17 -B build-v443 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=443
           if($LASTEXITCODE -ne 0){throw "Configuration failed"}
           cmake --build build-v443 --config Release --target moteur3d_v17 moteur3d_v17_benchmark moteur3d_v17_benchui moteur3d_v17_campaign moteur3d_v17_gibake moteur3d_v17_gpu_trajectory v17_anomaly_catalog_smoke v17_pool_ladder_smoke v17_walk_controller_smoke v17_frame_pacing_smoke v17_camera_diagnostic_smoke --parallel 4
           if($LASTEXITCODE -ne 0){throw "Clean release build failed"}
@@ -68,7 +69,7 @@ jobs:
             if(!(Test-Path $path)){throw "Missing recompiled executable $path"}
             $v=[System.Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path $path).Path)
             Write-Host "$exe — file version $($v.FileVersion)"
-            if($v.FileMajorPart -ne 17 -or $v.FileMinorPart -ne 442){
+            if($v.FileMajorPart -ne 17 -or $v.FileMinorPart -ne 443){
               throw "Wrong executable version in $exe — $($v.FileVersion)"
             }
             Copy-Item $path "dist-stage/$exe" -Force
@@ -93,7 +94,7 @@ jobs:
           if((Get-FileHash dist-clean/benchmark-civic/textures/energetik_fresco_mosaic.jpg -Algorithm SHA256).Hash -ne (Get-Content fresco.sha256 -Raw).Trim()){throw "Original fresco altered"}
           foreach($exe in Get-ChildItem dist-clean -Recurse -Filter *.exe){
             $v=[System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe.FullName)
-            if($v.FileMajorPart -ne 17 -or $v.FileMinorPart -ne 442){
+            if($v.FileMajorPart -ne 17 -or $v.FileMinorPart -ne 443){
               throw "Stale exe in clean release: $($exe.FullName) version $($v.FileVersion)"
             }
           }
