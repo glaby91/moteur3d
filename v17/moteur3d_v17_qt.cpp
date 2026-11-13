@@ -399,6 +399,9 @@ private:
     cse::pool_ladder::Motion poolLadderMotion_{};
     QCheckBox* walkingModeBox_=nullptr;
     bool exploring_=false,freeCameraActive_=false,leftMouseHeld_=false;
+    // Exact anomaly/replayed camera is kept until the next walking input.
+    // This does not disable or persistently alter the user's collision mode.
+    bool walkingCollisionSyncPending_=false;
     bool explorationQualityOverride_=false;
     RasterQualitySettings explorationOriginalQuality_{};
     float yaw_=0.f,pitch_=0.f;
@@ -568,10 +571,11 @@ private:
             QMessageBox::warning(this,QStringLiteral("Restaurer une caméra"),error);return;
         }
         keysDown_.clear();
-        // Walking mode would snap Y to the floor, which destroys exact replay.
-        if(walkingModeBox_&&walkingModeBox_->isChecked())
-            walkingModeBox_->setChecked(false);
+        // Preserve the exact screenshot pose without switching the
+        // collision mode (which previously persisted "Vol libre" in QSettings).
+        // On the next user movement, resynchronize feet with the real scene.
         freeCamera_=pose;
+        walkingCollisionSyncPending_=true;
         const V dir=norm(pose.target-pose.eye);
         yaw_=std::atan2(dir.x,-dir.z);
         pitch_=std::asin(clampf(dir.y,-.99f,.99f));
@@ -605,6 +609,7 @@ private:
         yaw_=std::atan2(dir.x,-dir.z);
         pitch_=std::asin(clampf(dir.y,-.99f,.99f));
         freeCameraActive_=true;
+        walkingCollisionSyncPending_=false;
         if(walkingModeBox_&&walkingModeBox_->isChecked()){
             walk::spawn(runtime_->renderScene,freeCamera_.eye,walkingState_);
             freeCamera_.eye=walk::eye(walkingState_);
@@ -663,6 +668,10 @@ private:
             }
         }
         exploring_=true;
+        if(walkingModeBox_&&!walkingModeBox_->isChecked()){
+            statusBar()->showMessage(QStringLiteral(
+                "Vol libre : collisions désactivées. Cochez « Marcher au sol » pour bloquer murs et obstacles."),10000);
+        }
         poolLadderMotion_={};
         motionClock_.start();
         frameClock_.invalidate();
@@ -686,6 +695,15 @@ private:
         if(keysDown_.contains(Qt::Key_D)||keysDown_.contains(Qt::Key_Right))move=move+right;
         if(keysDown_.contains(Qt::Key_Q)||keysDown_.contains(Qt::Key_A)||keysDown_.contains(Qt::Key_Left))move=move-right;
         if(walkingModeBox_&&walkingModeBox_->isChecked()){
+            // A recalled anomaly camera can be above a floor or behind a wall.
+            // Keep its precise eye position until the user actually navigates.
+            // Never reuse stale feet from before camera teleportation.
+            if(walkingCollisionSyncPending_ && length(move)>.01f){
+                walk::spawn(runtime_->renderScene,freeCamera_.eye,walkingState_);
+                freeCamera_.eye=walk::eye(walkingState_);
+                walkingCollisionSyncPending_=false;
+                updateLook();
+            }
             if(poolLadderMotion_.active()){
                 const bool climbing=poolLadderMotion_.up;
                 const auto p=poolLadderMotion_.advance(dt);
@@ -796,6 +814,12 @@ protected:
             if(e->key()==Qt::Key_E && !e->isAutoRepeat() &&
                walkingModeBox_ && walkingModeBox_->isChecked() &&
                scenePath_.contains(QStringLiteral("benchmark-civic"),Qt::CaseInsensitive)){
+                if(walkingCollisionSyncPending_&&runtime_){
+                    walk::spawn(runtime_->renderScene,freeCamera_.eye,walkingState_);
+                    freeCamera_.eye=walk::eye(walkingState_);
+                    walkingCollisionSyncPending_=false;
+                    updateLook();
+                }
                 const V feet=walkingState_.feet;
                 if(poolLadderMotion_.begin({feet.x,feet.y,feet.z})){
                     keysDown_.clear();
@@ -1003,15 +1027,15 @@ private:
         }
         currentAnomaly_=index;
         if(a.cameraKnown){
-            // Preserve the exact screenshot height: walking-mode floor snapping
-            // must not alter the recalled anomaly viewpoint.
-            if(walkingModeBox_&&walkingModeBox_->isChecked())
-                walkingModeBox_->setChecked(false);
+            // Camera recalls preserve a precise reference view. Do not
+            // silently disable walking/collisions or overwrite QSettings.
+            // Only resynchronize the walking state on the next movement.
             keysDown_.clear();
             poolLadderMotion_={};
             const float yr=a.yaw*PI/180.f;
             const float pr=a.pitch*PI/180.f;
             freeCamera_.eye={a.x,a.y,a.z};
+            walkingCollisionSyncPending_=true;
             freeCamera_.fov=a.fov;
             freeCamera_.id=QString::fromLatin1(a.id);
             freeCamera_.name=QString::fromUtf8(a.title);
@@ -1090,8 +1114,10 @@ private:
     void returnBeforeAnomaly(){
         if(!hasBeforeAnomalyCamera_)return;
         const auto pose=beforeAnomalyCamera_;
-        if(walkingModeBox_&&walkingModeBox_->isChecked())walkingModeBox_->setChecked(false);
+        // Return to the old camera without changing the selected navigation
+        // mode or disabling obstacle collisions in saved preferences.
         freeCamera_=pose;
+        walkingCollisionSyncPending_=true;
         const V dir=norm(pose.target-pose.eye);
         yaw_=std::atan2(dir.x,-dir.z);
         pitch_=std::asin(clampf(dir.y,-.99f,.99f));
@@ -1601,6 +1627,7 @@ private:
             if(exploring_&&freeCameraActive_&&runtime_){
                 if(enabled){
                     walk::spawn(runtime_->renderScene,freeCamera_.eye,walkingState_);
+                    walkingCollisionSyncPending_=false;
                     freeCamera_.eye=walk::eye(walkingState_);
                     updateLook();
                 }
