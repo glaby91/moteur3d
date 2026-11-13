@@ -1,5 +1,5 @@
 #pragma once
-// V17.438: author-coordinated traversal of the FOUR real pool ladders.
+// V17.440: traverse the TWO real ladders retained by V8, never invented anchors.
 // 50 x 25 m basin and ladder anchors match benchmark-civic/generate.cjs.
 // Generic walk physics still controls ordinary stairs and dry floor movement.
 #include <algorithm>
@@ -9,21 +9,21 @@
 namespace cse::pool_ladder {
 struct Point { float x=0.f,y=0.f,z=0.f; };
 struct Ladder { float side; float z; };
-constexpr std::array<Ladder,4> anchors = {{
-    {-1.f,-41.5f},{-1.f,-22.5f},{1.f,-41.5f},{1.f,-22.5f}
+constexpr std::array<Ladder,2> anchors = {{
+    {1.f,-44.05f},{1.f,-19.95f}
 }};
 constexpr float deckX=25.75f;
 constexpr float submergedX=24.60f;
-constexpr float deckFeetY=0.f;
-constexpr float bottomFeetY=-1.35f;
+constexpr float deckFeetY=.55f;
+constexpr float bottomFeetY=-1.80f;
 constexpr float durationSeconds=2.4f;
 inline bool inWater(const Point& p) {
     return std::abs(p.x)<24.90f && p.z>-44.35f && p.z<-19.65f
-        && p.y<-.35f;
+        && p.y<-.65f;
 }
 inline bool nearby(const Point& p, const Ladder& ladder) {
     const float side=ladder.side;
-    if(std::abs(p.z-ladder.z)>1.05f || p.y<-1.65f || p.y>1.25f)
+    if(std::abs(p.z-ladder.z)>1.00f || p.y<-2.15f || p.y>1.35f)
         return false;
     const float x=side*(p.x);
     return x>=24.05f && x<=27.1f;
