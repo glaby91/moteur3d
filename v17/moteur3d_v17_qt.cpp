@@ -779,6 +779,16 @@ private:
     }
     void createUi(){
         auto* file=menuBar()->addMenu(QStringLiteral("Fichier"));
+        auto* captureAction=file->addAction(QStringLiteral("Capturer une anomalie (PNG + caméra JSON)…"));
+        captureAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+A")));
+        connect(captureAction,&QAction::triggered,this,[this]{captureAnomaly();});
+        auto* restoreAction=file->addAction(QStringLiteral("Restaurer une caméra d'anomalie…"));
+        restoreAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+O")));
+        connect(restoreAction,&QAction::triggered,this,[this]{restoreAnomalyCamera();});
+        auto* copyPoseAction=file->addAction(QStringLiteral("Copier la position caméra (JSON)"));
+        copyPoseAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+C")));
+        connect(copyPoseAction,&QAction::triggered,this,[this]{copyLiveCamera();});
+        file->addSeparator();
         auto* open=file->addAction(QStringLiteral("Ouvrir une scène V16 (scene.json)…"));
         connect(open,&QAction::triggered,this,[this]{
             const QString chosen=QFileDialog::getOpenFileName(
@@ -879,34 +889,53 @@ private:
         auto* aboutAction=helpMenu->addAction(
             QStringLiteral("À propos de CSE WARP V17.%1…").arg(CSE_WARP_BUILD_NUMBER));
         connect(aboutAction,&QAction::triggered,this,[this]{
-            const QString revisionPath=QCoreApplication::applicationDirPath()
-                +QStringLiteral("/REVISION.txt");
-            QString revision=QStringLiteral("développement");
-            QFile revisionFile(revisionPath);
-            if(revisionFile.open(QIODevice::ReadOnly|QIODevice::Text))
-                revision=QString::fromUtf8(revisionFile.readAll()).trimmed().left(12);
-            QMessageBox::about(this,
-                QStringLiteral("À propos de CSE WARP V17.%1").arg(CSE_WARP_BUILD_NUMBER),
-                QStringLiteral("<h3>CSE WARP Beta X — V17.%1</h3>"
-                    "<p><b>Version :</b> 17.%1<br/><b>Build GitHub :</b> %1<br/>"
-                    "<b>Révision GitHub :</b> %2<br/><b>Qt :</b> %3</p>"
-                    "<p><b>Rendu :</b> Direct3D 11 Raster, GPU Compute HLSL, "
-                    "Ray Tracing CPU et illumination globale CPU.</p>"
-                    "<p><b>Nouveautés V17 :</b> thread GPU permanent, chargement asynchrone, "
-                    "frustum culling, filtrage PBR/mipmaps corrigé, "
-                    "instancing GPU expérimental des boîtes et ellipsoïdes, "
-                    "trois niveaux de détail pour les ellipsoïdes.</p>"
-                    "<p><b>Qualité configurable :</b> profils Performance, Équilibrée, "
-                    "Élevée et Ultra ; MSAA, anisotropie, LOD et culling réglables "
-                    "dans l'interface ou depuis l'application hôte.</p>"
-                    "<p><b>Benchmark :</b> chronométrage matériel DirectX 11, attente CPU Map, "
-                    "débit et latence ; comparaison expérimentale des lectures "
-                    "à 1, 2 ou 3 tampons, contrôlées pixel par pixel.</p>"
-                    "<p><b>Prochaines améliorations :</b> étendre l'instancing et les LOD, "
-                    "améliorer ombres et éclairage PBR ; performance à valider sur Intel HD 620.</p>")
-                    .arg(QString::number(CSE_WARP_BUILD_NUMBER),
-                         revision.toHtmlEscaped(),
-                         QString::fromLatin1(qVersion()).toHtmlEscaped()));
+            const QString gpu=gpuAdapterLabel();
+            const QString revision=githubRevision();
+            const QString compileDate=QString::fromLatin1(__DATE__ " " __TIME__);
+            const auto quality=rasterQualitySettings();
+            const bool zEnabled=qEnvironmentVariable("M3D_V17_EXPERIMENT_Z_PREPASS")==QStringLiteral("1");
+            const bool lightEnabled=qEnvironmentVariable("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL")==QStringLiteral("1");
+            const QString backend=backendBox_?backendBox_->currentText():QStringLiteral("indéterminé");
+            const QString details=QStringLiteral(
+                "CSE WARP Beta X / V17.%1\\n"
+                "Révision GitHub : %2\\n"
+                "Compilation : %3\\n"
+                "Système : %4\\n"
+                "Adaptateur principal DXGI : %5\\n"
+                "Rendu sélectionné : %6\\n"
+                "Qt : %7\\n"
+                "MSAA : %8x | Anisotropie : %9x | PBR : %10 px\\n"
+                "Z-prepass expérimental : %11 | Rejet AABB lampes : %12\\n"
+                "HUD caméra / rapports d'anomalies PNG+JSON / restauration : disponibles")
+                .arg(CSE_WARP_BUILD_NUMBER)
+                .arg(revision).arg(compileDate).arg(QSysInfo::prettyProductName())
+                .arg(gpu).arg(backend).arg(QString::fromLatin1(qVersion()))
+                .arg(quality.msaaSamples).arg(quality.anisotropy)
+                .arg(textureResolution_).arg(zEnabled?QStringLiteral("ON"):QStringLiteral("OFF"))
+                .arg(lightEnabled?QStringLiteral("ON"):QStringLiteral("OFF"));
+            QMessageBox message(this);
+            message.setWindowTitle(QStringLiteral("À propos de CSE WARP V17.%1").arg(CSE_WARP_BUILD_NUMBER));
+            message.setIcon(QMessageBox::Information);
+            message.setTextFormat(Qt::RichText);
+            message.setText(QStringLiteral(
+                "<h3>CSE WARP Beta X — V17.%1</h3>"
+                "<p><b>Révision :</b> %2<br/><b>Compilation :</b> %3</p>"
+                "<p><b>GPU principal (DXGI) :</b> %4<br/><b>Rendu :</b> %5</p>"
+                "<p><b>Navigation :</b> HUD position X/Y/Z, cap, inclinaison et FOV.<br/>"
+                "<b>Diagnostic architectural :</b> capture PNG + position JSON restaurable.<br/>"
+                "<b>Raster :</b> Z-prepass %6, rejet AABB lumières %7 (expérimentaux).</p>"
+                "<p><b>Configuration :</b> Qt %8 ; MSAA %9x ; PBR %10 px.</p>")
+                .arg(CSE_WARP_BUILD_NUMBER).arg(revision.toHtmlEscaped())
+                .arg(compileDate.toHtmlEscaped()).arg(gpu.toHtmlEscaped())
+                .arg(backend.toHtmlEscaped())
+                .arg(zEnabled?QStringLiteral("ON"):QStringLiteral("OFF"))
+                .arg(lightEnabled?QStringLiteral("ON"):QStringLiteral("OFF"))
+                .arg(QString::fromLatin1(qVersion()))
+                .arg(quality.msaaSamples).arg(textureResolution_));
+            auto* copy=message.addButton(QStringLiteral("Copier les informations système"),QMessageBox::ActionRole);
+            message.addButton(QMessageBox::Ok);
+            message.exec();
+            if(message.clickedButton()==copy)QGuiApplication::clipboard()->setText(details);
         });
 
         auto* left=new QDockWidget(QStringLiteral("Explorateur de scène"),this);
@@ -1117,8 +1146,8 @@ private:
         walkingModeBox_->setChecked(walkPreferences.value(QStringLiteral("Exploration/Walking"),true).toBool());
         vertical->addWidget(walkingModeBox_);
         explorationHelp_=new QLabel(QStringLiteral(
-            "ZQSD / flèches : marcher · clic gauche + souris : regarder · Maj : accélérer · Échap : arrêter\n"
-            "En mode vol libre : Espace / Ctrl pour monter ou descendre."));
+            "ZQSD / flèches : marcher · clic gauche + souris : regarder · Maj : accélérer · Échap : arrêter\\n"
+            "Espace / Ctrl : monter / descendre en vol. Ctrl+Maj+A : anomalie PNG+JSON."));
         explorationHelp_->setWordWrap(true);
         vertical->addWidget(explorationHelp_);
         connect(explorationButton_,&QPushButton::clicked,this,[this]{toggleExploration();});
@@ -1203,6 +1232,17 @@ private:
         // Dedicated uncluttered exploration mode. Preserve dock state in editing mode.
         // F11 maximizes the view without changing the underlying render resolution.
         auto* viewMenu=menuBar()->addMenu(QStringLiteral("Affichage"));
+        auto* hudToggle=viewMenu->addAction(QStringLiteral("Afficher les coordonnées caméra (HUD)"));
+        hudToggle->setCheckable(true);
+        QSettings hudSettings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+        cameraHudEnabled_=hudSettings.value(QStringLiteral("Camera/ShowHUD"),true).toBool();
+        hudToggle->setChecked(cameraHudEnabled_);
+        connect(hudToggle,&QAction::toggled,this,[this](bool enabled){
+            cameraHudEnabled_=enabled;
+            QSettings cfg(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+            cfg.setValue(QStringLiteral("Camera/ShowHUD"),enabled);
+            updateCameraHud();
+        });
         auto* immersive=viewMenu->addAction(QStringLiteral("Vue 3D agrandie (F11)"));
         immersive->setCheckable(true);
         immersive->setShortcut(QKeySequence(Qt::Key_F11));
@@ -1240,7 +1280,7 @@ private:
         connect(denoiseGi_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()==2||backendBox_->currentIndex()==3)requestRender();});
         connect(denoiseDirect_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()==0)requestRender();});
         connect(edgeAa_,&QCheckBox::toggled,this,[this](bool){requestRender();});
-        connect(azimuth_,&QSlider::sliderReleased,this,[this]{requestRender();});
+        connect(azimuth_,&QSlider::sliderReleased,this,[this]{updateCameraHud();requestRender();});
         connect(hybridLightBox_,&QCheckBox::toggled,this,[this](bool enabled){
             m3d::setRasterHybridLightingEnabled(enabled);
             QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
