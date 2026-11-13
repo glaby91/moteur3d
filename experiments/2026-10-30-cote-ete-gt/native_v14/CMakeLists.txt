@@ -57,6 +57,13 @@ if(WIN32)
     )
     add_custom_target(m3d_radio_sample ALL DEPENDS "${M3D_RADIO_WAV}")
     add_dependencies(moteur3d_qt m3d_radio_sample)
+    # Also copy for Visual Studio / multi-config run directories (Release, Debug).
+    add_custom_command(TARGET moteur3d_qt POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:moteur3d_qt>/audio"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${M3D_RADIO_WAV}" "$<TARGET_FILE_DIR:moteur3d_qt>/audio/pripyat_radio.wav"
+        VERBATIM
+    )
     install(FILES "${M3D_RADIO_WAV}" DESTINATION audio)
 endif()
 
