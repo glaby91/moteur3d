@@ -17,6 +17,7 @@
 #include <deque>
 #include <cmath>
 #include <limits>
+#include <vector>
 
 using Microsoft::WRL::ComPtr;
 
@@ -250,6 +251,7 @@ float4 PSMain(VSOut i):SV_TARGET {
     float2 duvdx = ddx(i.uv), duvdy = ddy(i.uv);
     float determinant = duvdx.x * duvdy.y - duvdx.y * duvdy.x;
 #endif
+#if !defined(M3D_DIAG_NO_MATERIAL_DETAIL)
     if (materialOpacity[i.mat].y > 0.5) {
 #if defined(M3D_V17_OPTIMIZE_PIXELS)
         // The nointerpolation material index is uniform per primitive.
@@ -267,9 +269,11 @@ float4 PSMain(VSOut i):SV_TARGET {
             normal = normalize(tangent * detailNormal.x + bitangent * detailNormal.y + normal * detailNormal.z);
         }
     }
+#endif
     float diffuse = saturate(dot(normal, normalize(lightDir)));
-    float3 shadowOffset = i.world - shadowBase;
     float shadowFactor = 1.0;
+#if !defined(M3D_DIAG_NO_SHADOW_SAMPLING)
+    float3 shadowOffset = i.world - shadowBase;
     float shadowScale = shadowSize / (2.0 * shadowSpan);
     float shadowCenter = shadowSize * 0.5 - 0.5;
     int2 shadowPixel = int2(round(float2(dot(shadowOffset, shadowRight), dot(shadowOffset, shadowUp)) * shadowScale + shadowCenter));
@@ -282,6 +286,7 @@ float4 PSMain(VSOut i):SV_TARGET {
         }
         shadowFactor = 0.16 + 0.84 * visible / 9.0;
     }
+#endif
     float4 diffuseTerms = materialDiffuse[i.mat];
     // Cheap hemispherical sky fill: upward surfaces receive slightly more
     // ambient daylight than vertical walls and undersides. Direct lighting
@@ -305,7 +310,11 @@ float4 PSMain(VSOut i):SV_TARGET {
     color += float3(4.0, 5.0, 7.0) / 255.0 * (1.0 - diffuseTerms.w);
     float3 viewDir = normalize(eye - i.world);
     float3 reflectedLight = reflect(-normalize(lightDir), normal);
+#if defined(M3D_DIAG_NO_MATERIAL_DETAIL)
+    float roughness = 0.5;
+#else
     float roughness = roughnessMap.Sample(wrapSampler, float3(i.uv, i.mat));
+#endif
     float specularPower = materialSpecular[i.mat].y;
     if (materialSpecular[i.mat].z > 0.5) {
         specularPower = clamp(2.0 / max(roughness * roughness, 0.0001) - 2.0, 8.0, 80.0);
@@ -1368,18 +1377,22 @@ private:
         const bool optimizePixels=!(disableShaderOpt&&std::strcmp(disableShaderOpt,"1")==0);
         const char* lightCullEnv=std::getenv("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL");
         const bool lightAabbCull=lightCullEnv&&std::strcmp(lightCullEnv,"1")==0;
-        const D3D_SHADER_MACRO pixelMacros[]={
-            {"M3D_V17_OPTIMIZE_PIXELS","1"},
-            {lightAabbCull?"M3D_V17_LIGHT_AABB_CULL":nullptr,lightAabbCull?"1":nullptr},
-            {nullptr,nullptr}
+        // Diagnostic-only opt-outs, independent of the optimized/legacy paths.
+        // Never change default rendering when environment flags are unset.
+        const auto isEnvSet=[](const char* key){
+            const char* v=std::getenv(key);
+            return v && std::strcmp(v,"1")==0;
         };
-        const D3D_SHADER_MACRO lightCullOnlyMacros[]={
-            {"M3D_V17_LIGHT_AABB_CULL","1"},{nullptr,nullptr}
-        };
-        // Old reference shader, optimized shader, and the experimental
-        // conservative local-light rejection are independent A/B paths.
+        const bool skipShadowSamples=isEnvSet("M3D_V17_DIAG_NO_SHADOW_SAMPLING");
+        const bool skipMaterialDetail=isEnvSet("M3D_V17_DIAG_NO_MATERIAL_DETAIL");
+        std::vector<D3D_SHADER_MACRO> macros;
+        if(optimizePixels)macros.push_back({"M3D_V17_OPTIMIZE_PIXELS","1"});
+        if(lightAabbCull)macros.push_back({"M3D_V17_LIGHT_AABB_CULL","1"});
+        if(skipShadowSamples)macros.push_back({"M3D_DIAG_NO_SHADOW_SAMPLING","1"});
+        if(skipMaterialDetail)macros.push_back({"M3D_DIAG_NO_MATERIAL_DETAIL","1"});
+        macros.push_back({nullptr,nullptr});
         const D3D_SHADER_MACRO* activeMacros=
-            optimizePixels?pixelMacros:(lightAabbCull?lightCullOnlyMacros:nullptr);
+            macros.size()>1?macros.data():nullptr;
         hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",
             activeMacros,nullptr,"PSMain","ps_4_0",
             D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&psCode,&errors);
