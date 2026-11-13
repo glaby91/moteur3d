@@ -1067,7 +1067,7 @@ private:
                 return;
             }
             const QString path=QCoreApplication::applicationDirPath()
-                +QStringLiteral("/moteur3d_v17_benchui.exe");
+                +QStringLiteral("/outils/benchmark/moteur3d_v17_benchui.exe");
             if(!QFileInfo::exists(path)){
                 QMessageBox::warning(this,QStringLiteral("Benchmark indisponible"),
                                      QStringLiteral("Programme de benchmark introuvable : %1").arg(path));
@@ -1384,7 +1384,7 @@ private:
         connect(bakeGiButton_,&QPushButton::clicked,this,[this]{
             if(scenePath_.isEmpty()||bakeGiProcess_->state()!=QProcess::NotRunning)return;
             const QString exe=QCoreApplication::applicationDirPath()
-                +QStringLiteral("/moteur3d_v17_gibake.exe");
+                +QStringLiteral("/outils/gi/moteur3d_v17_gibake.exe");
             if(!QFileInfo::exists(exe)){
                 QMessageBox::warning(this,QStringLiteral("Précalcul GI"),
                     QStringLiteral("Exécutable moteur3d_v17_gibake.exe absent du dossier de l'application."));
@@ -1817,7 +1817,7 @@ private:
         const QString root=QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
             +QStringLiteral("/CSE WARP/Benchmarks");
         QDir().mkpath(root);
-        const QString name=QStringLiteral("V17.437-PACING-")
+        const QString name=QStringLiteral("V17.%1-PACING-").arg(CSE_WARP_BUILD_NUMBER)
             +QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-hhmmss"));
         const auto stats=cse::pacing::summarize(pacingSamples_,pacingRejected_,pacingQueued_);
         QJsonArray records;
@@ -1834,7 +1834,7 @@ private:
                 .arg(sample.renderMs,0,'f',3).arg(sample.pendingRequests);
         }
         const QJsonObject summary{
-            {"version",QStringLiteral("17.437")},
+            {"version",QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER)},
             {"scene",scenePath_},
             {"backend",backendBox_->currentText()},
             {"frameCount",int(stats.frames)},
@@ -2052,9 +2052,10 @@ private:
 QString defaultPath(){
     const QString app=QCoreApplication::applicationDirPath();
     const QStringList candidates{
-        // Prefer the packaged architectural V4 scene, not the old light/extreme
-        // stress-scene profile. Explicit CLI scene arguments still override.
-        app+QStringLiteral("/benchmark-civic/scene-v4.json"),
+        // The clean package always opens the latest validated V8/V440 scene.
+        // Explicit CLI scene arguments still override the default.
+        app+QStringLiteral("/benchmark-civic/scene.json"),
+        app+QStringLiteral("/benchmark-civic/scene-v440-audit.json"),
         app+QStringLiteral("/scenes/v16/benchmark-civic/scene-v4.json"),
         QDir::currentPath()+QStringLiteral("/scenes/v16/benchmark-civic/scene-v4.json"),
         app+QStringLiteral("/pavillon01/scene.json"),
@@ -2067,6 +2068,11 @@ QString defaultPath(){
 }
 int main(int argc,char** argv){
     QApplication app(argc,argv);
+    // Separate benchmark utilities need access to Qt and the V16 renderer
+    // DLL in this installation root, even when launched from a subdirectory.
+    const QByteArray installRoot=QCoreApplication::applicationDirPath().toLocal8Bit();
+    qputenv("PATH",installRoot+";"+qgetenv("PATH"));
+    qputenv("QT_PLUGIN_PATH",installRoot);
     QCoreApplication::setApplicationName(QStringLiteral("CSE WARP Beta X V17.%1")
         .arg(CSE_WARP_BUILD_NUMBER));
     QCoreApplication::setApplicationVersion(QStringLiteral("17.%1")
