@@ -96,7 +96,7 @@ jobs:
           $env:PATH=(Resolve-Path package-v444).Path+";"+$env:PATH
           $env:M3D_V17_PERIPHERAL_MULTIREZ="1"
           $scene=(Resolve-Path package-v444/benchmark-civic/scene.json).Path
-          & package-v444/moteur3d_v17_benchmark.exe $scene corrected-scene-QA --smoke --camera-id piscine_soir --raster-msaa 1
+          & package-v444/moteur3d_v17_benchmark.exe $scene corrected-scene-QA --smoke --camera-id v4_piscine --raster-msaa 1
           if($LASTEXITCODE -ne 0){throw "V17.444 corrected scene benchmark failed"}
           $p=Get-ChildItem corrected-scene-QA -Recurse -Filter "raster_*.png" | Select-Object -First 1
           if(!$p -or $p.Length -lt 1000){throw "No corrected-scene render"}
