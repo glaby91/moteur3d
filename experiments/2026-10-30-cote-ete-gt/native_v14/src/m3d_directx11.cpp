@@ -1,5 +1,6 @@
 #include "m3d_engine.h"
 #include "m3d_gi_bake.h"
+#include "../../../../v17/weather/clouds.h"
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -134,6 +135,17 @@ struct FrameConstants {
     float hybridControls[4];
     float colorControls[4];
     float peripheralControls[4];
+};
+
+// Independent sky constants avoid disturbing the existing PBR/shadow shader layout.
+struct CloudConstants {
+    float forward[3],tanHalf;
+    float right[3],aspect;
+    float up[3],pad0;
+    float sun[3],day;
+    float zenith[3],opacity;
+    float horizon[3],coverage;
+    float wind[4];
 };
 
 constexpr char kShader[] = R"(
@@ -445,6 +457,64 @@ float4 PSMain(VSOut i):SV_TARGET {
     return float4(color, materialOpacity[i.mat].x);
 }
 )";
+// World-locked, hemispherical cirrus. The procedural field is evaluated only
+// on uncovered background pixels; its cloud mask is never applied over objects.
+constexpr char kCloudSkyShader[] = R"(
+cbuffer Sky : register(b1) {
+    float3 forward; float tanHalf;
+    float3 right; float aspect;
+    float3 up; float pad0;
+    float3 sun; float day;
+    float3 zenith; float opacity;
+    float3 horizon; float coverage;
+    float4 wind;
+};
+struct SkyOut {float4 pos:SV_POSITION; float2 ndc:TEXCOORD0;};
+SkyOut VSSky(uint vid:SV_VertexID){
+    SkyOut o;
+    o.ndc=vid==0?float2(-1,-1):vid==1?float2(-1,3):float2(3,-1);
+    o.pos=float4(o.ndc,0,1);
+    return o;
+}
+float skyHash(float2 p){
+    float3 q=frac(float3(p.xyx)*.1031);
+    q+=dot(q,q.yzx+33.33);
+    return frac((q.x+q.y)*q.z);
+}
+float skyNoise(float2 p){
+    float2 k=floor(p),f=frac(p);f=f*f*(3-2*f);
+    return lerp(lerp(skyHash(k),skyHash(k+float2(1,0)),f.x),
+                lerp(skyHash(k+float2(0,1)),skyHash(k+1),f.x),f.y);
+}
+float4 PSSky(SkyOut i):SV_TARGET {
+    float3 d=normalize(forward+right*(i.ndc.x*tanHalf)
+                             +up*(i.ndc.y*tanHalf/aspect));
+    float gradient=smoothstep(-.06,.60,d.y);
+    float3 col=lerp(horizon,zenith,gradient);
+    if(d.y>-.02){
+        float2 dome=d.xz/max(d.y+.18,.18);
+        float2 p=float2(dome.x*3.0,dome.y*2.0)+wind.xy*18.0;
+        float n=.56*skyNoise(p*.73)+.30*skyNoise(p*1.53+float2(7.1,11.3))
+               +.14*skyNoise(p*3.11-float2(3.7,8.2));
+        float cloud=smoothstep(.60-coverage*.27,.73-coverage*.22,n)
+                   *smoothstep(.01,.16,d.y);
+        float3 cloudColor=lerp(float3(.018,.025,.045),
+                                float3(.78,.84,.91),day);
+        col=lerp(col,cloudColor,cloud*opacity);
+    }
+    // The solar disc stays on the moving directional-light vector.
+    if(sun.y>0) {
+        float x=saturate(dot(d,normalize(sun)));
+        float disc=smoothstep(.99984,.99997,x);
+        float halo=pow(x,128.0)*.20;
+        float warm=saturate(1.0-sun.y*3.2);
+        float3 c=lerp(float3(.95,.96,1),float3(1,.63,.32),warm);
+        col+=c*(disc*.75+halo)*day;
+    }
+    return float4(max(col,0),1);
+}
+)";
+
 constexpr char kPeripheralComposite[] = R"(
 Texture2D<float4> lo : register(t0);
 Texture2D<float4> hi : register(t1);
@@ -873,6 +943,40 @@ public:
         HRESULT hr=context_->Map(constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped);
         if(FAILED(hr)){error=L"Impossible de transmettre les paramètres à DirectX 11.";return false;}
         std::memcpy(mapped.pData,&cb,sizeof(cb));context_->Unmap(constants_.Get(),0);
+        // Animate wind on the sky hemisphere; geometry and PBR are untouched.
+        CloudConstants cloudCB{};
+        cloudCB.forward[0]=cam.f.x;cloudCB.forward[1]=cam.f.y;cloudCB.forward[2]=cam.f.z;
+        cloudCB.tanHalf=cam.tanHalf;
+        cloudCB.right[0]=cam.r.x;cloudCB.right[1]=cam.r.y;cloudCB.right[2]=cam.r.z;
+        cloudCB.aspect=cam.aspect;
+        cloudCB.up[0]=cam.u.x;cloudCB.up[1]=cam.u.y;cloudCB.up[2]=cam.u.z;
+        cloudCB.sun[0]=sun.x;cloudCB.sun[1]=sun.y;cloudCB.sun[2]=sun.z;
+        cloudCB.day=daylight;
+        const V zenith=skyZenith,horizon=skyHorizon;
+        const float zen[3]{zenith.x,zenith.y,zenith.z};
+        const float hor[3]{horizon.x,horizon.y,horizon.z};
+        for(int c=0;c<3;++c){
+            cloudCB.zenith[c]=balanced?decodeSrgb(zen[c]/255.f):zen[c]/255.f;
+            cloudCB.horizon[c]=balanced?decodeSrgb(hor[c]/255.f):hor[c]/255.f;
+        }
+        cse::weather::CloudState cloudSettings;
+        cloudSettings.coverage=.28f;
+        cloudSettings.opacity=.65f;
+        cloudSettings.windEastMetersPerSecond=12.f;
+        cloudSettings.windNorthMetersPerSecond=3.5f;
+        static const auto cloudEpoch=std::chrono::steady_clock::now();
+        const double cloudSeconds=std::chrono::duration<double>(
+            std::chrono::steady_clock::now()-cloudEpoch).count();
+        const auto clouds=cse::weather::cirrusAt(cloudSettings,cloudSeconds,
+            std::asin(clampf(sun.y,-1.f,1.f))*180.f/PI);
+        cloudCB.wind[0]=clouds.uOffset;cloudCB.wind[1]=clouds.vOffset;
+        cloudCB.coverage=clouds.coverage;cloudCB.opacity=clouds.opacity;
+        D3D11_MAPPED_SUBRESOURCE cloudMapped{};
+        if(FAILED(context_->Map(skyConstants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&cloudMapped))){
+            error=L"Upload paramètres nuages impossible.";return false;
+        }
+        std::memcpy(cloudMapped.pData,&cloudCB,sizeof(cloudCB));
+        context_->Unmap(skyConstants_.Get(),0);
         const float clear[4]={cb.sky[0],cb.sky[1],cb.sky[2],1.f};
         if(slot.queryReady){context_->Begin(slot.disjoint.Get());context_->End(slot.start.Get());}
         UINT submittedVertices=0,submittedBoxInstances=0;
@@ -895,6 +999,17 @@ public:
             context_->ClearDepthStencilView(ds,D3D11_CLEAR_DEPTH,1.f,0);
             D3D11_VIEWPORT vp{};vp.Width=float(pw);vp.Height=float(ph);
             vp.MinDepth=0;vp.MaxDepth=1;context_->RSSetViewports(1,&vp);
+            // Draw the clouded sky first, with depth completely disabled.
+            context_->RSSetState(raster_.Get());
+            context_->OMSetDepthStencilState(skyDepth_.Get(),0);
+            context_->OMSetBlendState(nullptr,nullptr,0xffffffffu);
+            context_->IASetInputLayout(nullptr);
+            context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            context_->VSSetShader(skyVs_.Get(),nullptr,0);
+            context_->PSSetShader(skyPs_.Get(),nullptr,0);
+            ID3D11Buffer* skyCb=skyConstants_.Get();
+            context_->PSSetConstantBuffers(1,1,&skyCb);
+            context_->Draw(3,0);
             if(scissor){
                 const D3D11_RECT rect={LONG(std::floor(pw*.03f)),LONG(std::floor(ph*.02f)),
                     LONG(std::ceil(pw*.97f)),LONG(std::ceil(ph*.98f))};
@@ -1489,6 +1604,21 @@ private:
             activeMacros,nullptr,"PSMain","ps_4_0",
             D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&psCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation du pixel shader DirectX 11 impossible");return false;}
+        ComPtr<ID3DBlob> skyVsCode,skyPsCode;
+        errors.Reset();
+        hr=D3DCompile(kCloudSkyShader,sizeof(kCloudSkyShader)-1,"CSE_WARP_CloudSky",
+            nullptr,nullptr,"VSSky","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&skyVsCode,&errors);
+        if(FAILED(hr)){error=shaderError(L"Compilation sommet ciel impossible");return false;}
+        errors.Reset();
+        hr=D3DCompile(kCloudSkyShader,sizeof(kCloudSkyShader)-1,"CSE_WARP_CloudSky",
+            nullptr,nullptr,"PSSky","ps_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&skyPsCode,&errors);
+        if(FAILED(hr)){error=shaderError(L"Compilation nuages DirectX 11 impossible");return false;}
+        if(FAILED(device_->CreateVertexShader(skyVsCode->GetBufferPointer(),
+               skyVsCode->GetBufferSize(),nullptr,&skyVs_)) ||
+           FAILED(device_->CreatePixelShader(skyPsCode->GetBufferPointer(),
+               skyPsCode->GetBufferSize(),nullptr,&skyPs_))){
+            error=L"Impossible de créer les shaders de nuages.";return false;
+        }
         ComPtr<ID3DBlob> mergeVS,mergePS;
         errors.Reset();hr=D3DCompile(kPeripheralComposite,sizeof(kPeripheralComposite)-1,
             "v17_multires",nullptr,nullptr,"VSC","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&mergeVS,&errors);
@@ -1541,6 +1671,8 @@ private:
         }
         D3D11_BUFFER_DESC cbd{};cbd.ByteWidth=sizeof(FrameConstants);cbd.Usage=D3D11_USAGE_DYNAMIC;cbd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;cbd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
         if(FAILED(device_->CreateBuffer(&cbd,nullptr,&constants_))){error=L"Création du buffer de constantes DirectX 11 impossible.";return false;}
+        cbd.ByteWidth=sizeof(CloudConstants);
+        if(FAILED(device_->CreateBuffer(&cbd,nullptr,&skyConstants_))){error=L"Création du buffer de nuages impossible.";return false;}
         D3D11_RASTERIZER_DESC rd{};rd.FillMode=D3D11_FILL_SOLID;rd.CullMode=D3D11_CULL_NONE;rd.DepthClipEnable=TRUE;rd.MultisampleEnable=TRUE;
         if(FAILED(device_->CreateRasterizerState(&rd,&raster_))){error=L"Création de l’état raster DirectX 11 impossible.";return false;}
         rd.ScissorEnable=TRUE;
@@ -1551,6 +1683,8 @@ private:
         if(FAILED(device_->CreateDepthStencilState(&dd,&depth_))){error=L"Création du depth buffer DirectX 11 impossible.";return false;}
         dd.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;
         if(FAILED(device_->CreateDepthStencilState(&dd,&transparentDepth_))){error=L"Création de l’état de profondeur transparent DirectX 11 impossible.";return false;}
+        dd.DepthEnable=FALSE;dd.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;
+        if(FAILED(device_->CreateDepthStencilState(&dd,&skyDepth_))){error=L"Création du ciel sans profondeur impossible.";return false;}
         D3D11_BLEND_DESC blendDesc{};blendDesc.RenderTarget[0].BlendEnable=TRUE;blendDesc.RenderTarget[0].SrcBlend=D3D11_BLEND_SRC_ALPHA;blendDesc.RenderTarget[0].DestBlend=D3D11_BLEND_INV_SRC_ALPHA;blendDesc.RenderTarget[0].BlendOp=D3D11_BLEND_OP_ADD;blendDesc.RenderTarget[0].SrcBlendAlpha=D3D11_BLEND_ONE;blendDesc.RenderTarget[0].DestBlendAlpha=D3D11_BLEND_INV_SRC_ALPHA;blendDesc.RenderTarget[0].BlendOpAlpha=D3D11_BLEND_OP_ADD;blendDesc.RenderTarget[0].RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_ALL;
         if(FAILED(device_->CreateBlendState(&blendDesc,&blend_))){error=L"Création de l’état de transparence DirectX 11 impossible.";return false;}
         D3D11_SAMPLER_DESC sd{};sd.Filter=D3D11_FILTER_ANISOTROPIC;sd.MaxAnisotropy=16;sd.AddressU=sd.AddressV=sd.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;sd.MaxLOD=D3D11_FLOAT32_MAX;
@@ -2064,10 +2198,10 @@ private:
         return true;
     }
     ComPtr<ID3D11Device> device_;ComPtr<ID3D11DeviceContext> context_;
-    ComPtr<ID3D11VertexShader> vs_,boxVs_,ellipseVs_,mergeVs_;
-    ComPtr<ID3D11PixelShader> ps_,mergePs_;
+    ComPtr<ID3D11VertexShader> vs_,boxVs_,ellipseVs_,mergeVs_,skyVs_;
+    ComPtr<ID3D11PixelShader> ps_,mergePs_,skyPs_;
     ComPtr<ID3D11InputLayout> layout_,boxLayout_,ellipseLayout_;
-    ComPtr<ID3D11Buffer> constants_,vertices_,transparentVertices_,boxVertices_,boxInstances_,ellipseInstances_,foliageInstances_;
+    ComPtr<ID3D11Buffer> skyConstants_,constants_,vertices_,transparentVertices_,boxVertices_,boxInstances_,ellipseInstances_,foliageInstances_;
     std::array<ComPtr<ID3D11Buffer>,3> ellipseVertices_;
     std::array<UINT,3> ellipseVertexCounts_{{0,0,0}};
     std::vector<GpuEllipseInstance> ellipses_;
@@ -2076,7 +2210,7 @@ private:
     std::array<UINT,3> foliageVertexCounts_{{0,0,0}};
     std::vector<GpuEllipseInstance> foliage_;
     UINT foliageInstanceCount_=0;
-    ComPtr<ID3D11RasterizerState> raster_,scissorRaster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_,probeSampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_,probeSrv_;ComPtr<ID3D11Texture3D> probeTexture_,probeNextTexture_;
+    ComPtr<ID3D11RasterizerState> raster_,scissorRaster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_,skyDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_,probeSampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_,probeSrv_;ComPtr<ID3D11Texture3D> probeTexture_,probeNextTexture_;
     ComPtr<ID3D11ShaderResourceView> probeNextSrv_;
     gibake::Table bakedGi_{};bool hasBakedGi_=false;
     uint64_t loadedGiFileRevision_=0;
