@@ -24,7 +24,18 @@ def main(directory):
         doc=read_json(path)
         if doc.get("system",{}).get("version")!="17.443":
             raise RuntimeError("Version mismatch: "+str(path))
-        quality=doc["system"].get("measurementQuality",{})
+        system=doc["system"]
+        # Verify each HLSL flag reached the separate DX11 process.
+        expected={
+            "pixelShaderOptimized":not bool(trial.get("shaderLegacy")),
+            "experimentalLightAabbCull":bool(trial.get("lightAabbCull")),
+            "diagnosticNoShadowSampling":bool(trial.get("noShadowSampling")),
+            "diagnosticNoMaterialDetail":bool(trial.get("noMaterialDetail"))
+        }
+        for name,value in expected.items():
+            if system.get(name)!=value:
+                raise RuntimeError(f"Missing/inconsistent shader flag {name} in {path}: got {system.get(name)!r}, expected {value}")
+        quality=system.get("measurementQuality",{})
         if quality:
             for metadata,runkey in (("msaaRequested","msaa"),("anisotropy","anisotropy"),
                                     ("lodPercent","lodPercent")):
@@ -54,6 +65,8 @@ def main(directory):
           width=w,height=h,pixels=w*h,frames=int(c["frames"]),
           msaa=trial["msaa"],anisotropy=trial["anisotropy"],
           shaderLegacy=trial["shaderLegacy"],lightAabbCull=trial["lightAabbCull"],
+          noShadowSampling=trial.get("noShadowSampling",0),
+          noMaterialDetail=trial.get("noMaterialDetail",0),
           culling=trial["culling"],lodPercent=trial["lodPercent"],
           lodEnabled=trial["lodEnabled"],
           meanMs=float(c["meanMs"]),medianMs=float(c.get("medianMs",0)),
@@ -113,7 +126,8 @@ def main(directory):
         "Pixel shader optimization and optional light AABB cull are real A/B flags, but not an isolated instruction profiler.",
         "GPU draw-time difference when changing resolution estimates pixel-related work, not a pure per-pixel shader cost.",
         "Frustum/LOD variants alter submitted geometry and sometimes the visible result; compare screenshots.",
-        "shadowBuildMs measures CPU shadow-map generation only. This campaign DOES NOT isolate per-frame shadow sampling or shadow rendering; it needs an explicit isolated engine switch.",
+        "shadowBuildMs measures CPU shadow-map generation. SHADOW_SAMPLING_OFF isolates nine texture taps in the pixel shader, not the shadow-building work or all effects of altered lighting.",
+        "PBR_DETAIL_OFF isolates normal-map detail and roughness lookups but changes normals/highlights; do not treat results as visually equivalent.",
         "Two or three runs cannot establish long-run thermal stability or reliable p99; do not extrapolate to a different GPU.",
         "Installed graphics adapters may not identify the actual DX11 rendering adapter."
       ],
