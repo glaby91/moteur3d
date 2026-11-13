@@ -43,6 +43,29 @@ int main(){
     top(scene,-.65f,.65f,-1.5f,-1.f,.6f);
     wall(scene,2.f,-5.f,5.f,3.f);
     done(scene);
+    // V17.442 / ANO-014: 5.5 cm paving joint reveals lower backing ground.
+    // Walking must not produce a 15 cm camera jump between adjacent stones.
+    {
+        Scene paved{};
+        top(paved,-3.f,3.f,-3.f,3.f,0.f);
+        top(paved,-1.5f,0.f,-1.f,1.f,.155f);
+        top(paved,.055f,1.5f,-1.f,1.f,.155f);
+        done(paved);
+        State onPavers{};
+        require(spawn(paved,{-.6f,1.855f,0.f},onPavers),
+                "paving start unavailable");
+        require(std::abs(onPavers.feet.y-.155f)<.005f,
+                "paving spawn on wrong floor");
+        float smallest=onPavers.feet.y;
+        for(int i=0;i<32;++i){
+            advance(paved,onPavers,{.045f,0.f,0.f},.02f);
+            smallest=std::min(smallest,onPavers.feet.y);
+        }
+        require(smallest>.13f,
+                "camera bounces into narrow paving joints (ANO-014)");
+        require(std::abs(onPavers.feet.y-.155f)<.015f,
+                "camera failed to reconnect to next paving tile");
+    }
     // V17.429: speed is exactly 3x in both walking and fly navigation.
     static_assert(cse::exploration::speedMetersPerSecond(false)==2.5f,
                   "Normal walking/flying speed must remain unchanged");
