@@ -1,0 +1,41 @@
+{
+  "schema": "cse-warp-perf-baseline-v1",
+  "date": "2026-11-13",
+  "engine": "CSE WARP V17.432",
+  "backend": "D3D11 hardware raster",
+  "adapter": "Intel(R) HD Graphics 620",
+  "vendorId": "0x8086",
+  "scene": "V17.430/benchmark-civic/scene-v7-corrections.json",
+  "cameraId": "v8_glazing_raccords",
+  "resolution": [
+    1366,
+    768
+  ],
+  "msaa": 2,
+  "pbrTexturePx": 2048,
+  "frames": 90,
+  "virtualDurationSeconds": 6,
+  "movementMeters": 5.4,
+  "metrics": {
+    "meanFrameMs": 72.58265111111112,
+    "medianFrameMs": 72.45645,
+    "p95FrameMs": 77.851505,
+    "p99FrameMs": 96.782416,
+    "rawFps": 13.777397004542834,
+    "wallRenderSeconds": 8.5691477,
+    "meanGpuDrawMs": 64.41167290886393,
+    "meanGpuTransferMs": 1.3328,
+    "meanCpuProcessMs": 5.902777777777778,
+    "meanCpuMapWaitMs": 66.286,
+    "meanCpuPixelConvertMs": 4.609,
+    "gpu3dUtilMeanPercent": 84.51312373122636,
+    "gpuLoadValidSamples": 89,
+    "gpuTimestampValidFrames": 90,
+    "ramWorkingSetMeanMiB": 1602.653,
+    "ramPrivateCommitMeanMiB": 1678.763,
+    "submittedTrianglesMean": 695215.2,
+    "drawCallsMean": 11.833
+  },
+  "sourceZip": "BENCH-GPU-HD620-20261113-020146.zip",
+  "note": "Measured on user Dell. Not software WARP. Raw CSV/JSON source ZIP remains in conversation; not committed. GPU DXGI adapter-wide memory does not isolate process."
+}
