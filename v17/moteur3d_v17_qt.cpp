@@ -722,7 +722,20 @@ private:
                 keysDown_.contains(Qt::Key_Shift));
             const V displacement=length(move)>.01f?norm(move)*(dt*speed):V{};
             const V oldEye=freeCamera_.eye;
+            const walk::State beforeStep=walkingState_;
             walk::advance(runtime_->renderScene,walkingState_,displacement,dt);
+            // The water volume is reached ONLY through the actual ladder
+            // interaction. Don't let numerical walker tunnelling bypass the
+            // tiled coping (a V17.437 user-found regression).
+            if(scenePath_.contains(QStringLiteral("benchmark-civic"),Qt::CaseInsensitive)
+                && beforeStep.feet.y<1.0f && walkingState_.feet.y<1.0f){
+                const auto dry=[](const V& feet){
+                    return !(std::abs(feet.x)<24.92f &&
+                        feet.z>-44.45f && feet.z<-19.55f);
+                };
+                if(dry(beforeStep.feet)&&!dry(walkingState_.feet))
+                    walkingState_=beforeStep;
+            }
             freeCamera_.eye=walk::eye(walkingState_);
             if(length(freeCamera_.eye-oldEye)>.00001f)updateLook();
         }else{
