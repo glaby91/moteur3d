@@ -836,6 +836,12 @@ private:
         if(explorationHelp_)explorationHelp_->setText(QStringLiteral(
             "ZQSD / flèches : marcher · souris : regarder librement · clic droit : lunette ×3\n"
             "F11 : plein écran · Échap : arrêter · E : échelle · Maj : accélérer · Vol libre : Espace / Ctrl."));
+        // A delayed multires GPU frame could still be on screen when Esc
+        // stops exploration. Queue a final guaranteed full-resolution image.
+        if(!closingRequested_&&!sceneLoading_&&runtime_)
+            QTimer::singleShot(0,this,[this]{
+                if(!exploring_&&!closingRequested_&&runtime_)requestRender();
+            });
     }
     void toggleExploration(){
         if(exploring_){stopExploration();return;}
