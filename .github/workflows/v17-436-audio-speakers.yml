@@ -1,0 +1,144 @@
+name: CSE WARP V17.436 - consolidated audio, architecture, 433/434 regression
+on:
+  push:
+    branches:
+      - feature/v17-436-audio-speakers-consolidation-261113
+    paths:
+      - .github/workflows/v17-436-audio-speakers.yml
+      - v17/**
+      - tools/install_radio_speakers_v436.py
+      - assets/audio/pripyat_radio/**
+      - scenes/v16/benchmark-civic/generate.cjs
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  windows-v436:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      QT_QPA_PLATFORM: offscreen
+      M3D_V16_FORCE_WARP: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Validate speaker source and deterministic packaging
+        shell: pwsh
+        run: |
+          python -m py_compile tools/install_radio_speakers_v436.py assets/audio/pripyat_radio/generate_test_wav.py
+          if($LASTEXITCODE -ne 0){throw "Python syntax failed"}
+          python tools/install_radio_speakers_v436.py --self-test
+          if($LASTEXITCODE -ne 0){throw "4 speaker scene patch regression failed"}
+          node --check scenes/v16/benchmark-civic/generate.cjs
+          if($LASTEXITCODE -ne 0){throw "Scene generator JS failed"}
+      - name: Restore validated architectural baseline V17.430
+        shell: pwsh
+        run: |
+          gh run download 43335003809 --repo glaby91/moteur3d --name CSE-WARP-V17.430-9-ANOMALIES-Windows-x64 --dir dist-v436
+          if($LASTEXITCODE -ne 0){throw "Required V17.430 architecture baseline unavailable"}
+          foreach($p in @("benchmark-civic/scene-v7-corrections.json","benchmark-civic/textures/energetik_fresco_mosaic.jpg","moteur3d_v17.exe","moteur3d_v16_core.dll")){
+            if(!(Test-Path "dist-v436/$p")){throw "Missing baseline component: $p"}
+          }
+          (Get-FileHash "dist-v436/benchmark-civic/textures/energetik_fresco_mosaic.jpg" -Algorithm SHA256).Hash | Set-Content fresco-sha.txt
+      - name: Add only 4 loudspeakers to final repaired architecture
+        shell: pwsh
+        run: |
+          (Get-FileHash "dist-v436/benchmark-civic/scene-v7-corrections.json" -Algorithm SHA256).Hash | Set-Content scene-sha.txt
+          python tools/install_radio_speakers_v436.py --root dist-v436/benchmark-civic
+          if($LASTEXITCODE -ne 0){throw "Four loudspeaker installation failed"}
+          $before=(Get-Content scene-sha.txt -Raw).Trim()
+          $after=(Get-FileHash "dist-v436/benchmark-civic/scene-v7-corrections.json" -Algorithm SHA256).Hash
+          if($before -ne $after){throw "Original architectural scene manifest changed"}
+          $fresco=(Get-FileHash "dist-v436/benchmark-civic/textures/energetik_fresco_mosaic.jpg" -Algorithm SHA256).Hash
+          if($fresco -ne (Get-Content fresco-sha.txt -Raw).Trim()){throw "Historic fresco changed"}
+          @'
+          import json
+          from pathlib import Path
+          root=Path("dist-v436/benchmark-civic")
+          sector=json.loads((root/"scene-v7-corrections.json").read_text(encoding="utf8"))["sectors"][0]
+          a=json.loads((root/sector["instances"][0]).read_text(encoding="utf8"))["instances"]
+          assert sum(o["id"].startswith("v436_radio_") for o in a)==48
+          assert len({o["id"] for o in a})==len(a)
+          assert (root/"reports/v8-nine-anomalies.json").exists()
+          print("Four red-orange speaker assemblies and 9 anomaly repair report verified")
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw "Scene checks failed"}
+      - name: Compile complete current V17.436 and benchmark tools
+        shell: pwsh
+        run: |
+          node scenes/v16/benchmark-civic/generate.cjs --all
+          if($LASTEXITCODE -ne 0){throw "Baseline generator failed"}
+          cmake -S v17 -B build-v436 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=436
+          if($LASTEXITCODE -ne 0){throw "CMake configure failed"}
+          cmake --build build-v436 --config Release --target moteur3d_v17 moteur3d_v17_benchmark moteur3d_v17_gpu_trajectory v17_camera_diagnostic_smoke v17_walk_controller_smoke --parallel 4
+          if($LASTEXITCODE -ne 0){throw "Actual V17.436 Windows compile failed"}
+          foreach($p in @("build-v436/Release/moteur3d_v17.exe","build-v436/Release/moteur3d_v17_benchmark.exe","build-v436/Release/moteur3d_v17_gpu_trajectory.exe","build-v436/v16/Release/moteur3d_v16_core.dll","build-v436/Release/audio/pripyat_radio.wav","build-v436/Release/audio/speaker_layout.json")){
+            if(!(Test-Path $p)){throw "Missing V17.436 output $p"}
+          }
+      - name: Regression V17.434 camera, navigation, 433 GPU software smoke
+        shell: pwsh
+        run: |
+          ctest --test-dir build-v436 -C Release -R "v17_camera_diagnostic_roundtrip|v17_walk_stairs_collision" --output-on-failure
+          if($LASTEXITCODE -ne 0){throw "433/434 regression failed"}
+          & build-v436/Release/moteur3d_v17_gpu_trajectory.exe dist-v436/benchmark-civic/scene-v7-corrections.json "ci-v436-gpu" --ci-smoke --z-prepass=on --light-aabb=on
+          if($LASTEXITCODE -ne 0){throw "V17.433 GPU trajectory smoke failed"}
+          $csv=@(Get-ChildItem ci-v436-gpu -Recurse -Filter frames.csv)
+          if($csv.Count -ne 1){throw "433 CSV was not produced"}
+      - name: Pack native app, DLL, 4 speaker scene and radio WAV
+        shell: pwsh
+        run: |
+          Copy-Item build-v436/Release/moteur3d_v17.exe dist-v436/moteur3d_v17.exe -Force
+          Copy-Item build-v436/Release/moteur3d_v17_benchmark.exe dist-v436/moteur3d_v17_benchmark.exe -Force
+          Copy-Item build-v436/Release/moteur3d_v17_gpu_trajectory.exe dist-v436/moteur3d_v17_gpu_trajectory.exe -Force
+          Copy-Item build-v436/v16/Release/moteur3d_v16_core.dll dist-v436/moteur3d_v16_core.dll -Force
+          Copy-Item build-v436/cse_warp_v17.ico dist-v436/cse_warp_v17.ico -Force
+          New-Item -ItemType Directory -Force dist-v436/audio | Out-Null
+          Copy-Item build-v436/Release/audio/pripyat_radio.wav dist-v436/audio/pripyat_radio.wav -Force
+          Copy-Item build-v436/Release/audio/speaker_layout.json dist-v436/audio/speaker_layout.json -Force
+          Copy-Item assets/audio/pripyat_radio/CREDITS.md dist-v436/audio/CREDITS.md -Force
+          $env:GITHUB_SHA | Set-Content dist-v436/REVISION.txt -Encoding ascii
+          @'
+          CSE WARP Beta X V17.436 — Windows x64.
+          Inherits V17.433 GPU benchmark and Z-prepass/AABB experiment.
+          Inherits V17.434 camera HUD, PNG+JSON anomaly tools and About.
+          Preserves all V17.430 architectural repairs and original fresco.
+          Adds four orange-red PA horns attached to facade pillars.
+          Audio: XAudio2 + X3DAudio four fixed 3D emitters, spatially
+          following camera at 20 Hz, autoplay on Pripiat square, console
+          stop/resume and volume.
+          Included audio/pripyat_radio.wav is a 30-second ORIGINAL TECHNICAL
+          SIGNAL, NOT a historical 1970s radio programme or Ukrainian songs.
+          Real licensed audio can later replace this file (PCM 16-bit mono).
+          The four emitters use the same speaker_layout.json as scene geometry.
+          No unlicensed 1970s archive included. Real Intel HD620 benchmarks
+          and headphone listening still need user-side hardware validation.
+          '@ | Set-Content dist-v436/LIRE_EN_PREMIER-V17.436.txt -Encoding UTF8
+          $fresco=(Get-FileHash "dist-v436/benchmark-civic/textures/energetik_fresco_mosaic.jpg" -Algorithm SHA256).Hash
+          if($fresco -ne (Get-Content fresco-sha.txt -Raw).Trim()){throw "Fresco modified"}
+      - name: GUI smoke with two real DX11 software frames
+        shell: pwsh
+        timeout-minutes: 8
+        run: |
+          $exe=(Resolve-Path "dist-v436/moteur3d_v17.exe").Path
+          $scene=(Resolve-Path "dist-v436/pavillon01/scene.json").Path
+          $proc=Start-Process -FilePath $exe -ArgumentList @("--smoke-repeat-raster",$scene) -WorkingDirectory (Resolve-Path "dist-v436").Path -PassThru -Wait
+          if($proc.ExitCode -ne 0){throw "V17.436 GUI smoke failed: $($proc.ExitCode)"}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CSE-WARP-V17.436-AUDIO-4HP-433-434-Windows-x64
+          path: dist-v436/
+          retention-days: 21
+          if-no-files-found: warn
