@@ -14,6 +14,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
 
 enable_testing()
+add_executable(v17_pool_ladder_smoke "tests/pool_ladder_smoke.cpp")
+add_test(NAME v17_pool_ladder_bidirectional COMMAND v17_pool_ladder_smoke)
 # Frame-pacing regression is GPU-free: measurable present intervals and scene safety.
 add_executable(v17_frame_pacing_smoke "tests/frame_pacing_smoke.cpp")
 add_test(NAME v17_frame_pacing_statistical_regression COMMAND v17_frame_pacing_smoke)
