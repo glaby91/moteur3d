@@ -204,6 +204,11 @@ void RadioAudio::update(const float eye[3], const float target[3]) {
         dsp.DstChannelCount = impl_->outputChannels;
         dsp.pMatrixCoefficients = matrix.data();
         X3DAudioCalculate(impl_->x3d, &listener, &emitter, X3DAUDIO_CALCULATE_MATRIX, &dsp);
+        // User listening tests found L/R reversed compared with world-space
+        // camera yaw. Correct ONLY stereo output; do not alter volume,
+        // attenuations or multichannel speaker layout.
+        if (impl_->outputChannels == 2 && matrix.size() == 2)
+            std::swap(matrix[0],matrix[1]);
         impl_->voices[n]->SetOutputMatrix(impl_->master, 1, impl_->outputChannels, matrix.data());
     }
 #else
