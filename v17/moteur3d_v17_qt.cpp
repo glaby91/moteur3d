@@ -356,6 +356,77 @@ private:
     QPushButton* explorationButton_=nullptr;
     QLabel* explorationHelp_=nullptr;
     QLabel* explorationSpeedLabel_=nullptr;
+    v16::CameraPreset activeCameraPose() const {
+        if(freeCameraActive_)return freeCamera_;
+        v16::CameraPreset pose;
+        if(!runtime_||runtime_->cameras.isEmpty())return pose;
+        const int idx=std::clamp(cameraBox_->currentIndex(),0,int(runtime_->cameras.size())-1);
+        pose=runtime_->cameras[idx];
+        const V dir=pose.eye-pose.target;
+        const float angle=float(azimuth_->value())*PI/180.f;
+        pose.eye={pose.target.x+dir.x*std::cos(angle)+dir.z*std::sin(angle),
+                  pose.eye.y,
+                  pose.target.z-dir.x*std::sin(angle)+dir.z*std::cos(angle)};
+        return pose;
+    }
+    void updateCameraHud(){
+        if(!canvas_)return;
+        if(!runtime_||runtime_->cameras.isEmpty()){
+            canvas_->setCameraHud({},false);return;
+        }
+        const auto pose=activeCameraPose();
+        const QString label=QStringLiteral("CAM %1 | %2")
+            .arg(freeCameraActive_?QStringLiteral("Libre"):QStringLiteral("Préréglée"),
+                 pose.name.isEmpty()?pose.id:pose.name);
+        canvas_->setCameraHud(cse::camera_diagnostic::hudLines(pose,label),cameraHudEnabled_);
+    }
+    static QString gpuAdapterLabel(){
+#if defined(_WIN32)
+        IDXGIFactory1* factory=nullptr;
+        if(SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))){
+            IDXGIAdapter1* adapter=nullptr;
+            if(SUCCEEDED(factory->EnumAdapters1(0,&adapter))){
+                DXGI_ADAPTER_DESC1 d{};
+                const HRESULT hr=adapter->GetDesc1(&d);
+                adapter->Release();factory->Release();
+                if(SUCCEEDED(hr))return QString::fromWCharArray(d.Description);
+            }else factory->Release();
+        }
+#endif
+        return QStringLiteral("Non détecté");
+    }
+    QString githubRevision() const {
+        QFile f(QCoreApplication::applicationDirPath()+QStringLiteral("/REVISION.txt"));
+        return f.open(QIODevice::ReadOnly|QIODevice::Text)
+            ?QString::fromUtf8(f.readAll()).trimmed().left(12)
+            :QStringLiteral("développement local");
+    }
+    static QJsonObject sceneCameraReport(const v16::CameraPreset& pose,
+        const QString& manifest,const QString& title,const QString& image,
+        const QSize imageSize,const QString& revision) {
+        return {
+            {"format",QString::fromLatin1(cse::camera_diagnostic::formatId)},
+            {"createdAtUtc",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
+            {"engine",QStringLiteral("CSE WARP Beta X")},
+            {"version",QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER)},
+            {"revision",revision},
+            {"scene",QJsonObject{{"manifestFile",QFileInfo(manifest).fileName()},
+                                 {"title",title},{"originalPath",manifest}}},
+            {"camera",cse::camera_diagnostic::toJson(pose)},
+            {"image",image},
+            {"resolution",QJsonObject{{"width",imageSize.width()},{"height",imageSize.height()}}},
+            {"units",QStringLiteral("metres")},
+            {"coordinateConvention",QStringLiteral("Y vertical; yaw 0 degrees points toward -Z; positive yaw rotates toward +X")}
+        };
+    }
+    void copyLiveCamera(){
+        if(!runtime_||runtime_->cameras.isEmpty())return;
+        const auto report=sceneCameraReport(activeCameraPose(),scenePath_,runtime_->title,
+                                             QString(),QSize(),githubRevision());
+        QGuiApplication::clipboard()->setText(
+            QString::fromUtf8(QJsonDocument(report).toJson(QJsonDocument::Indented)));
+        statusBar()->showMessage(QStringLiteral("Position caméra et identité de la scène copiées."),5000);
+    }
     void updateExplorationSpeedIndicator(){
         if(!explorationSpeedLabel_)return;
         if(!exploring_){
