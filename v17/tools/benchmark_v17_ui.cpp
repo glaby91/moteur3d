@@ -27,7 +27,7 @@
 #include <QWidget>
 
 static QString benchmarkBuildNumber(){
-    QFile file(QCoreApplication::applicationDirPath()+QStringLiteral("/BUILD_NUMBER.txt"));
+    QFile file(QCoreApplication::applicationDirPath()+QStringLiteral("/../../BUILD_NUMBER.txt"));
     if(file.open(QIODevice::ReadOnly|QIODevice::Text)){
         const auto build=QString::fromUtf8(file.readAll()).trimmed();
         if(!build.isEmpty())return build;
@@ -241,16 +241,19 @@ private:
 };
 int main(int argc,char** argv){
     QApplication app(argc,argv);
+    const QByteArray installRoot=QDir(QCoreApplication::applicationDirPath()).absoluteFilePath(QStringLiteral("../..")).toLocal8Bit();
+    qputenv("PATH",installRoot+";"+qgetenv("PATH"));
+    qputenv("QT_PLUGIN_PATH",installRoot);
     QCoreApplication::setApplicationName(QStringLiteral("CSE WARP V17.%1 Benchmark")
         .arg(CSE_WARP_BUILD_NUMBER));
     QCoreApplication::setApplicationVersion(QStringLiteral("17.%1")
         .arg(CSE_WARP_BUILD_NUMBER));
     const QString icon=QCoreApplication::applicationDirPath()
-        +QStringLiteral("/cse_warp_v17_bench.ico");
+        +QStringLiteral("/../../cse_warp_v17_bench.ico");
     if(QFileInfo::exists(icon))app.setWindowIcon(QIcon(icon));
     QString scene;
     if(argc>1)scene=QString::fromLocal8Bit(argv[1]);
-    else scene=QCoreApplication::applicationDirPath()+QStringLiteral("/pavillon01/scene.json");
+    else scene=QCoreApplication::applicationDirPath()+QStringLiteral("/../../benchmark-civic/scene.json");
     BenchmarkWindow window(scene,argc>1?app.arguments().mid(2):QStringList{});
     window.show();
     return app.exec();
