@@ -101,8 +101,14 @@ jobs:
         run: |
           $scene="dist-v434/pavillon01/scene.json"
           if(!(Test-Path $scene)){throw "Lightweight smoke scene missing from portable package"}
-          & dist-v434/moteur3d_v17.exe --smoke-repeat-raster $scene
-          if($LASTEXITCODE -ne 0){throw "GUI smoke repeated raster render failed: $LASTEXITCODE"}
+          # WIN32_SUBSYSTEM GUI executables are started asynchronously by
+          # PowerShell's call operator; LASTEXITCODE can stay null even when
+          # the child performs and completes its real GPU smoke successfully.
+          $exe=(Resolve-Path "dist-v434/moteur3d_v17.exe").Path
+          $testScene=(Resolve-Path $scene).Path
+          $proc=Start-Process -FilePath $exe -ArgumentList @("--smoke-repeat-raster",$testScene) -WorkingDirectory (Resolve-Path "dist-v434").Path -PassThru -Wait
+          if($proc.ExitCode -ne 0){throw "GUI smoke repeated raster render failed: $($proc.ExitCode)"}
+          Write-Host "PASS: Native GUI process returned exit code 0 after two DirectX11 renders."
       - name: Upload portable compiled V17.434 package
         uses: actions/upload-artifact@v4
         if: always()
