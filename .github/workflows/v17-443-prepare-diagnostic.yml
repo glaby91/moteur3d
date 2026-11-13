@@ -65,9 +65,29 @@ jobs:
           $env:QT_PLUGIN_PATH=(Resolve-Path diag-dist).Path
           $exe=(Resolve-Path diag-dist/outils/benchmark/moteur3d_v17_benchmark.exe).Path
           $scene=(Resolve-Path diag-dist/benchmark-civic/scene.json).Path
-          & $exe $scene diagnostic-smoke --smoke --camera-id v4_face --resolution 320x180 --frames 2 --raster-msaa 2 --raster-anisotropy 8 --readback-depth 1
-          if($LASTEXITCODE -ne 0){throw "Diagnostic executable smoke failed"}
-          if(@(Get-ChildItem diagnostic-smoke -Recurse -Filter summary.json).Count -ne 1){throw "Diagnostic summary missing"}
+          $variants=@(
+            @{Name="baseline";NoShadow=$false;NoPbr=$false;Legacy=$false},
+            @{Name="shadows_off";NoShadow=$true;NoPbr=$false;Legacy=$false},
+            @{Name="pbr_detail_off";NoShadow=$false;NoPbr=$true;Legacy=$false},
+            @{Name="legacy_shader";NoShadow=$false;NoPbr=$false;Legacy=$true}
+          )
+          foreach($variant in $variants){
+            if($variant.NoShadow){$env:M3D_V17_DIAG_NO_SHADOW_SAMPLING="1"}
+            else{Remove-Item Env:M3D_V17_DIAG_NO_SHADOW_SAMPLING -ErrorAction SilentlyContinue}
+            if($variant.NoPbr){$env:M3D_V17_DIAG_NO_MATERIAL_DETAIL="1"}
+            else{Remove-Item Env:M3D_V17_DIAG_NO_MATERIAL_DETAIL -ErrorAction SilentlyContinue}
+            if($variant.Legacy){$env:M3D_V17_DISABLE_SHADER_OPT="1"}
+            else{Remove-Item Env:M3D_V17_DISABLE_SHADER_OPT -ErrorAction SilentlyContinue}
+            $folder="diag-test-$($variant.Name)"
+            & $exe $scene $folder --smoke --camera-id v4_face --resolution 320x180 --frames 2 --raster-msaa 2 --raster-anisotropy 8 --readback-depth 1
+            if($LASTEXITCODE -ne 0){throw "Diagnostic smoke failed for $($variant.Name)"}
+            $summaries=@(Get-ChildItem $folder -Recurse -Filter summary.json)
+            if($summaries.Count -ne 1){throw "Diagnostic summary missing for $($variant.Name)"}
+            $report=Get-Content $summaries[0].FullName -Raw | ConvertFrom-Json
+            if([bool]$report.system.diagnosticNoShadowSampling -ne [bool]$variant.NoShadow){throw "Shadow flag not recorded"}
+            if([bool]$report.system.diagnosticNoMaterialDetail -ne [bool]$variant.NoPbr){throw "Material flag not recorded"}
+            if([bool]$report.system.pixelShaderOptimized -eq [bool]$variant.Legacy){throw "Legacy shader flag mismatch"}
+          }
       - name: Upload benchmark tool only (NO production engine modifications)
         uses: actions/upload-artifact@v4
         with:
