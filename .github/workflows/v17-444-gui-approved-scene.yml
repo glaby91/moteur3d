@@ -4,6 +4,7 @@ on:
     branches: [experiment/v17-444-peripheral-multires-dx11-261113]
     paths:
       - .github/workflows/v17-444-gui-approved-scene.yml
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp
   workflow_dispatch:
 permissions:
   contents: read
