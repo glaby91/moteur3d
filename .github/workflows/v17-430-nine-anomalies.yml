@@ -102,7 +102,7 @@ jobs:
           ladders=members("Interieur/Piscine olympique/Echelles/")
           assert all(o["position"][0]>=0 for o in ladders)
           solid_ladders=[o for o in ladders if o["geometry"]=="unit_box"]
-          assert len(solid_ladders)==18
+          assert len(solid_ladders)==20  # 18 source fixtures + 2 deeper stainless rungs
           assert min(o["position"][0] for o in solid_ladders)>23.
           ladder_meshes=[m for m in load("geometry/v8-nine-anomalies.json")["meshes"] if m["id"].startswith("v8_smooth_inox_ladder_rail_")]
           assert len(ladder_meshes)==4
