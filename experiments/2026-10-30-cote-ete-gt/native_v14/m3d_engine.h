@@ -53,6 +53,10 @@ struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,dept
     // Hardware D3D11 timestamp results, independent of the CPU-side Map wait.
     // Valid only if GPU query timestamps are supported and not disjoint.
     double gpuDrawMs=0,gpuTransferMs=0,gpuTotalMs=0;
+    // Optional GPU timestamp split of transfer work. Zero when unsupported,
+    // gpuTransferSplitValid distinguishes an unsupported measurement from a free pass.
+    double gpuResolveMs=0,gpuStagingCopyMs=0;
+    bool gpuTransferSplitValid=false;
     double cpuSubmitMs=0,cpuMapWaitMs=0,cpuPixelConvertMs=0;
     uint32_t readbackBufferCount=1;
     bool gpuTimingValid=false;
