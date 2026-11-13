@@ -86,7 +86,7 @@ int main(int argc,char** argv){
         sourceRevision=QString::fromUtf8(revFile.readAll()).trimmed().left(12);
     QTextStream out(stdout),err(stderr);
     if(argc<3){
-        err<<"Usage: moteur3d_v17_benchmark.exe scene.json output_dir [--quick] [--compare-v16] [--smoke] [--readback-depth 1|2|3] [--compare-readback] [--all-cameras] [--camera-id bassin] [--hour 19]\n";
+        err<<"Usage: moteur3d_v17_benchmark.exe scene.json output_dir [--quick] [--fhd-stills] [--compare-v16] [--smoke] [--readback-depth 1|2|3] [--compare-readback] [--all-cameras] [--camera-id bassin] [--hour 19]\n";
         return 2;
     }
     const QString scenePath=QFileInfo(QString::fromLocal8Bit(argv[1])).absoluteFilePath();
@@ -144,6 +144,9 @@ int main(int argc,char** argv){
     const QString requestedCamera=cameraOption>=0&&cameraOption+1<args.size()
         ?args[cameraOption+1]:QString();
     const bool smoke=args.contains(QStringLiteral("--smoke"));
+    // Capture genuine 1920x1080 DX11 output with full-resolution scene textures;
+    // unlike --smoke, never rescale a 640x360 screenshot.
+    const bool fhdStills=args.contains(QStringLiteral("--fhd-stills"));
     const bool quick=smoke||args.contains(QStringLiteral("--quick"));
     const bool compare=args.contains(QStringLiteral("--compare-v16"))&&!smoke;
     const bool compareReadback=args.contains(QStringLiteral("--compare-readback"));
@@ -201,7 +204,7 @@ int main(int argc,char** argv){
         {"triangles",int(runtime.renderScene.obj.size())},
         {"textureResolution",runtime.textureResolution},
         {"sceneBuildMs",buildMs},{"shadowBuildMs",shadowMs},
-        {"mode",smoke?"ci_smoke":quick?"quick":"full"},
+        {"mode",fhdStills?"fhd_still":smoke?"ci_smoke":quick?"quick":"full"},
         {"compareV16",compare},
         {"readbackDepth",readbackDepth},
         {"compareReadback",compareReadback},
@@ -265,7 +268,8 @@ int main(int argc,char** argv){
            <<"\n";
         out.flush();
     };
-    const QVector<QSize> sizes=smoke?QVector<QSize>{QSize(640,360)}
+    const QVector<QSize> sizes=fhdStills?QVector<QSize>{QSize(1920,1080)}
+        :smoke?QVector<QSize>{QSize(640,360)}
         :quick?QVector<QSize>{QSize(1366,768)}
               :QVector<QSize>{QSize(1366,768),QSize(1920,1080)};
     // In visual QA mode, capture EVERY preset as genuine GPU output
@@ -283,7 +287,7 @@ int main(int argc,char** argv){
     }else{
         for(int i=0;i<cameras;++i)selectedCameras.push_back(i);
     }
-    const int measuredFrames=smoke?2:quick?6:12;
+    const int measuredFrames=fhdStills?1:smoke?2:quick?6:12;
     for(const int cameraIndex:selectedCameras){
         const auto& preset=runtime.cameras[cameraIndex];
         for(const auto& size:sizes){
