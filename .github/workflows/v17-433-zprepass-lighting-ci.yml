@@ -3,7 +3,7 @@ on:
   push:
     branches: [feature/v17-433-zprepass-lighting-validation-261113]
     paths:
-      - .github/workflows/v17-433-hd620-single-trajectory.yml
+      - .github/workflows/v17-433-zprepass-lighting-ci.yml
       - v17/tools/benchmark_gpu_trajectory.cpp
       - experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp
       - v17/CMakeLists.txt
@@ -144,8 +144,8 @@ jobs:
           $scene="bench-HD620/benchmark-civic/scene-v7-corrections.json"
           $exe="bench-HD620/CSE-WARP-MULTI-CAMERA-QA.exe"
           foreach($mode in @("base","z","zlight")){
-            $env:M3D_V17_EXPERIMENT_Z_PREPASS=if($mode -eq "base"){"0"}else{"1"}
-            $env:M3D_V17_EXPERIMENT_LIGHT_AABB_CULL=if($mode -eq "zlight"){"1"}else{"0"}
+            $env:M3D_V17_EXPERIMENT_Z_PREPASS = if($mode -eq "base"){"0"}else{"1"}
+            $env:M3D_V17_EXPERIMENT_LIGHT_AABB_CULL = if($mode -eq "zlight"){"1"}else{"0"}
             & $exe $scene "ci-qa-$mode" --smoke --all-cameras --raster-msaa 2
             if($LASTEXITCODE -ne 0){throw "Multicamera QA failed mode $mode"}
           }
