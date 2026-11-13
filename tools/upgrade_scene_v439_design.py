@@ -155,6 +155,28 @@ def build(root):
     sec['geometry']=sec['geometry']+[geo_path]
     report['corrections']['floorArt']='trapezoidal UV mesh + original tessera PNG'
 
+    # A former changing-room partition physically cuts the FIRST 3-level
+    # stair flight (x=-45, z=-24.2 through -43.8). Split at the stair route,
+    # retaining both solid flanking wall segments; never delete the floor.
+    stair_wall=[o for o in objects if o['parent']=='Interieur/Vestiaires et douches ouest/Murs'
+                and abs(o['position'][0]+40)<.05
+                and abs(o['position'][2]+27)<.05
+                and o['geometry']=='unit_box']
+    if len(stair_wall)==1:
+        o=stair_wall[0];objects.remove(o)
+        x,y,z=o['position'];w,h,d=o['size']
+        # Full 3.7m aperture from -46.85 to -43.15.
+        lo,hi=x-w/2,x+w/2
+        openings=[(lo,-46.85),(-43.15,hi)]
+        for n,(a,b) in enumerate(openings):
+            if b>a:
+                add(box(f'v439_stair_wall_return_{n}',
+                        o['parent']+'/Retours porteurs',
+                        [(a+b)/2,y,z],[b-a,h,d],o['material']))
+        report['corrections']['stairWallOpened']=1
+    else:
+        report['corrections']['stairWallOpened']=0
+
     # Clear the actual 20m central entrance (existing V8 framing generated
     # steel mullions even in the geometrically open door). Restrict deletion
     # to GROUND-floor glass/frame entries in the public doorway only.
