@@ -398,6 +398,8 @@ private:
     cse::pool_ladder::Motion poolLadderMotion_{};
     QCheckBox* walkingModeBox_=nullptr;
     bool exploring_=false,freeCameraActive_=false,leftMouseHeld_=false;
+    bool explorationQualityOverride_=false;
+    RasterQualitySettings explorationOriginalQuality_{};
     float yaw_=0.f,pitch_=0.f;
     bool cameraHudEnabled_=true;
     bool hasRenderedPose_=false;
@@ -617,6 +619,12 @@ private:
     }
     void stopExploration(){
         exploring_=false;
+        if(explorationQualityOverride_){
+            std::wstring error;
+            if(setRasterQualitySettings(explorationOriginalQuality_,error))
+                displayRasterSettings(explorationOriginalQuality_);
+            explorationQualityOverride_=false;
+        }
         frameTimer_.stop();
         keysDown_.clear();
         poolLadderMotion_={};
@@ -632,6 +640,27 @@ private:
         if(!runtime_||runtime_->cameras.isEmpty())return;
         if(backendBox_->currentIndex()!=4)backendBox_->setCurrentIndex(4);
         if(!freeCameraActive_)activateFreeCamera();
+        // An Intel HD 620 cannot reasonably sustain 8x MSAA during continuous
+        // navigation of the large V8 scene. Temporarily lower AA to 2x ONLY
+        // while moving. Restore the user's precise settings on exit.
+        const auto adapter=gpuAdapterLabel();
+        if(adapter.contains(QStringLiteral("HD Graphics 620"),Qt::CaseInsensitive)
+           ||adapter.contains(QStringLiteral("UHD Graphics 620"),Qt::CaseInsensitive)){
+            const auto q=rasterQualitySettings();
+            if(q.msaaSamples>2){
+                auto interactive=q;
+                interactive.msaaSamples=2;
+                interactive.anisotropy=std::min<unsigned>(q.anisotropy,8);
+                std::wstring error;
+                if(setRasterQualitySettings(interactive,error)){
+                    explorationOriginalQuality_=q;
+                    explorationQualityOverride_=true;
+                    displayRasterSettings(interactive);
+                    statusBar()->showMessage(QStringLiteral(
+                        "HD 620 : exploration MSAA 2x temporaire ; qualité initiale restaurée à l'arrêt"),7000);
+                }
+            }
+        }
         exploring_=true;
         poolLadderMotion_={};
         motionClock_.start();
