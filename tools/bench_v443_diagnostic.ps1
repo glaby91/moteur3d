@@ -51,6 +51,8 @@ $tests=@(
   @{name="ANISO_16";group="anisotropy";res="1366x768";msaa=2;aniso=16;cull=1;lod=100;lodOn=1;legacy=0;light=0},
   @{name="PIXEL_SHADER_LEGACY";group="shader";res="1366x768";msaa=2;aniso=8;cull=1;lod=100;lodOn=1;legacy=1;light=0},
   @{name="LIGHT_AABB_CULL";group="shader";res="1366x768";msaa=2;aniso=8;cull=1;lod=100;lodOn=1;legacy=0;light=1},
+  @{name="SHADOW_SAMPLING_OFF";group="shadows";res="1366x768";msaa=2;aniso=8;cull=1;lod=100;lodOn=1;legacy=0;light=0;shadowOff=1},
+  @{name="PBR_DETAIL_OFF";group="materials";res="1366x768";msaa=2;aniso=8;cull=1;lod=100;lodOn=1;legacy=0;light=0;detailOff=1},
   @{name="FRUSTUM_OFF";group="geometry";res="1366x768";msaa=2;aniso=8;cull=0;lod=100;lodOn=1;legacy=0;light=0},
   @{name="LOD_OFF";group="geometry";res="1366x768";msaa=2;aniso=8;cull=1;lod=100;lodOn=0;legacy=0;light=0},
   @{name="LOD_50";group="geometry";res="1366x768";msaa=2;aniso=8;cull=1;lod=50;lodOn=1;legacy=0;light=0},
@@ -85,6 +87,10 @@ for($pass=1;$pass -le $Passes;$pass++){
     else{Remove-Item Env:M3D_V17_DISABLE_SHADER_OPT -ErrorAction SilentlyContinue}
     if($case.light -eq 1){$env:M3D_V17_EXPERIMENT_LIGHT_AABB_CULL="1"}
     else{Remove-Item Env:M3D_V17_EXPERIMENT_LIGHT_AABB_CULL -ErrorAction SilentlyContinue}
+    if($case.shadowOff -eq 1){$env:M3D_V17_DIAG_NO_SHADOW_SAMPLING="1"}
+    else{Remove-Item Env:M3D_V17_DIAG_NO_SHADOW_SAMPLING -ErrorAction SilentlyContinue}
+    if($case.detailOff -eq 1){$env:M3D_V17_DIAG_NO_MATERIAL_DETAIL="1"}
+    else{Remove-Item Env:M3D_V17_DIAG_NO_MATERIAL_DETAIL -ErrorAction SilentlyContinue}
     $args=@($scene,$folder,"--quick","--camera-id",$CameraId,
       "--resolution",$case.res,"--frames","$Frames","--readback-depth","1",
       "--hour","12",
@@ -105,6 +111,8 @@ for($pass=1;$pass -le $Passes;$pass++){
       msaa=$case.msaa;anisotropy=$case.aniso;culling=$case.cull
       lodPercent=$case.lod;lodEnabled=$case.lodOn
       shaderLegacy=$case.legacy;lightAabbCull=$case.light
+      noShadowSampling=if($case.shadowOff){1}else{0}
+      noMaterialDetail=if($case.detailOff){1}else{0}
       exitCode=$exit;elapsedWallSeconds=[math]::Round($clock.Elapsed.TotalSeconds,3)
       summary=if($summaries.Count -eq 1){$summaries[0].FullName}else{""}
     }
@@ -117,5 +125,7 @@ for($pass=1;$pass -le $Passes;$pass++){
 }
 Remove-Item Env:M3D_V17_DISABLE_SHADER_OPT -ErrorAction SilentlyContinue
 Remove-Item Env:M3D_V17_EXPERIMENT_LIGHT_AABB_CULL -ErrorAction SilentlyContinue
+Remove-Item Env:M3D_V17_DIAG_NO_SHADOW_SAMPLING -ErrorAction SilentlyContinue
+Remove-Item Env:M3D_V17_DIAG_NO_MATERIAL_DETAIL -ErrorAction SilentlyContinue
 Write-Host "Benchmark complete: $out"
 Write-Host "Run: python tools/analyze_diagnostic_v443.py `"$out`""
