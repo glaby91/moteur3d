@@ -40,6 +40,24 @@ qt_add_executable(moteur3d_qt WIN32 src/moteur3d_qt.cpp)
 target_link_libraries(moteur3d_qt PRIVATE m3d_core Qt6::Widgets)
 if(WIN32)
     target_link_libraries(moteur3d_qt PRIVATE winmm)
+
+    # Automatic, dependency-free creation of an ORIGINAL technical test WAV.
+    # Production music files are not embedded or fetched during build.
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(M3D_RADIO_WAV "${CMAKE_CURRENT_BINARY_DIR}/audio/pripyat_radio.wav")
+    add_custom_command(
+        OUTPUT "${M3D_RADIO_WAV}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/audio"
+        COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/../../../assets/audio/pripyat_radio/generate_test_wav.py"
+                "${M3D_RADIO_WAV}"
+        DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/../../../assets/audio/pripyat_radio/generate_test_wav.py"
+        COMMENT "Generating optional 30-second CSE WARP radio preview"
+        VERBATIM
+    )
+    add_custom_target(m3d_radio_sample ALL DEPENDS "${M3D_RADIO_WAV}")
+    add_dependencies(moteur3d_qt m3d_radio_sample)
+    install(FILES "${M3D_RADIO_WAV}" DESTINATION audio)
 endif()
 
 enable_testing()
