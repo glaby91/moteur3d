@@ -625,7 +625,7 @@ private:
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Démarrer exploration (V17)"));
         if(explorationHelp_)explorationHelp_->setText(QStringLiteral(
             "ZQSD / flèches : marcher · clic gauche + souris : regarder · Maj : vitesse ×3 · Échap : arrêter\n"
-            "En mode vol libre : Espace / Ctrl pour monter ou descendre."));
+            "E près d’une échelle : monter/descendre dans la piscine. Vol libre : Espace / Ctrl."));
     }
     void toggleExploration(){
         if(exploring_){stopExploration();return;}
@@ -1328,7 +1328,7 @@ private:
         vertical->addWidget(walkingModeBox_);
         explorationHelp_=new QLabel(QStringLiteral(
             "ZQSD / flèches : marcher · clic gauche + souris : regarder · Maj : accélérer · Échap : arrêter\\n"
-            "Espace / Ctrl : monter / descendre en vol. Ctrl+Maj+A : anomalie PNG+JSON."));
+            "E près d’une échelle : monter/descendre dans la piscine. Ctrl+Maj+A : anomalie PNG+JSON."));
         explorationHelp_->setWordWrap(true);
         vertical->addWidget(explorationHelp_);
         connect(explorationButton_,&QPushButton::clicked,this,[this]{toggleExploration();});
