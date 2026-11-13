@@ -488,6 +488,7 @@ float skyNoise(float2 p){
                 lerp(skyHash(k+float2(0,1)),skyHash(k+1),f.x),f.y);
 }
 float4 PSSky(SkyOut i):SV_TARGET {
+    if(wind.w>.5) return float4(0,0,0,0);
     float3 d=normalize(forward+right*(i.ndc.x*tanHalf)
                              +up*(i.ndc.y*tanHalf/aspect));
     float gradient=smoothstep(-.06,.60,d.y);
@@ -1006,6 +1007,8 @@ public:
             std::asin(clampf(sun.y,-1.f,1.f))*180.f/PI);
         cloudCB.wind[0]=clouds.uOffset;cloudCB.wind[1]=clouds.vOffset;
         cloudCB.wind[2]=solarHour; // Night stars rotate with the time of day.
+        const char* splitSky=std::getenv("M3D_V17_SPLIT_SKY");
+        cloudCB.wind[3]=(splitSky && std::strcmp(splitSky,"1")==0)?1.f:0.f;
         cloudCB.coverage=clouds.coverage;cloudCB.opacity=clouds.opacity;
         D3D11_MAPPED_SUBRESOURCE cloudMapped{};
         if(FAILED(context_->Map(skyConstants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&cloudMapped))){
@@ -1383,6 +1386,22 @@ public:
         pixels.resize(size_t(slot.width)*size_t(slot.height));
         const char* disableFastSwizzle=std::getenv("M3D_V17_DISABLE_FAST_SWIZZLE");
         const bool fastSwizzle=!(disableFastSwizzle&&std::strcmp(disableFastSwizzle,"1")==0);
+        const char* skyCompositor=std::getenv("M3D_V17_SPLIT_SKY");
+        const bool preserveAlpha=skyCompositor&&std::strcmp(skyCompositor,"1")==0;
+        auto packPixel=[preserveAlpha](uint32_t rgba)->uint32_t {
+            uint32_t r=rgba&255u,g=(rgba>>8)&255u,b=(rgba>>16)&255u;
+            if(!preserveAlpha)return 0xff000000u|(r<<16)|(g<<8)|b;
+            const uint32_t a=(rgba>>24)&255u;
+            if(a==0)return 0;
+            if(a<255){
+                // GPU transparency was blended over transparent black.
+                // Convert the premultiplied color to straight ARGB32 for Qt.
+                r=std::min(255u,(r*255u+a/2u)/a);
+                g=std::min(255u,(g*255u+a/2u)/a);
+                b=std::min(255u,(b*255u+a/2u)/a);
+            }
+            return (a<<24)|(r<<16)|(g<<8)|b;
+        };
         for(int y=0;y<slot.height;++y){
             const uint8_t* row=static_cast<const uint8_t*>(mapped.pData)
                 +size_t(y)*mapped.RowPitch;
@@ -1394,15 +1413,15 @@ public:
                 const uint32_t* src=reinterpret_cast<const uint32_t*>(row);
                 for(int x=0;x<slot.width;++x){
                     const uint32_t rgba=src[x];
-                    dest[x]=0xff000000u|((rgba&0xffu)<<16)
-                        |(rgba&0xff00u)|((rgba>>16)&0xffu);
+                    dest[x]=packPixel(rgba);
                 }
             }else{
                 // Unmodified reference path for pixel-exact A/B.
                 for(int x=0;x<slot.width;++x){
                     const uint8_t* p=row+size_t(x)*4;
-                    dest[x]=0xff000000u
-                        |(uint32_t(p[0])<<16)|(uint32_t(p[1])<<8)|uint32_t(p[2]);
+                    const uint32_t rgba=uint32_t(p[0])|(uint32_t(p[1])<<8)
+                        |(uint32_t(p[2])<<16)|(uint32_t(p[3])<<24);
+                    dest[x]=packPixel(rgba);
                 }
             }
         }

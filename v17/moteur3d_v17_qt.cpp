@@ -7,6 +7,7 @@
 #include "frame_pacing.h"
 #include "pool_ladder.h"
 #include "weather/solar_cycle.h"
+#include "weather/sky_compositor.h"
 #include "radio_audio.h"
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
@@ -105,6 +106,7 @@ struct Result {
     QString error;
     double milliseconds=0;
     bool gpu=false;
+    bool skyCompositing=false; // DX11 sky pixels are transparent for Qt compositor
     // Reject finished frames after a camera, material, backend or scene change.
     uint64_t generation=0;
     quintptr renderThread=0;
@@ -119,6 +121,21 @@ struct SceneLoadOutcome {
 class ImageView final : public QWidget {
 public:
     void setImage(QImage im){image_=std::move(im);paintPending_=true;update();}
+    void enableSkyCompositing(bool enabled){
+        skyCompositing_=enabled;
+        if(!enabled)skyImage_=QImage{};
+        else skyDirty_=true;
+        update();
+    }
+    bool hasSkyFrame()const{return !skyImage_.isNull()&&!skyDirty_;}
+    void invalidateSky(){skyDirty_=true;}
+    void drawSky(const m3d::Camera& camera,float hour,double seconds,
+                 bool cloudsEnabled,bool fastWeather){
+        if(!skyCompositing_)return;
+        skyComposer_.render(skyImage_,camera,hour,seconds,cloudsEnabled,fastWeather);
+        skyDirty_=false;
+        update();
+    }
     void onPresented(std::function<void()> callback){presented_=std::move(callback);}
     void setPlaceholder(const QString& message){placeholder_=message;update();}
     void setCameraHud(QStringList lines,bool enabled){
@@ -175,6 +192,13 @@ protected:
         s.scale(size(),Qt::KeepAspectRatio);
         QRect dst(QPoint((width()-s.width())/2,(height()-s.height())/2),s);
         p.setRenderHint(QPainter::SmoothPixmapTransform,false);
+        if(skyCompositing_ && !skyImage_.isNull()) {
+            // The 512x288 independent weather layer is updated at 30Hz.
+            // The DX11 architectural foreground stays at its last good frame.
+            p.setRenderHint(QPainter::SmoothPixmapTransform,true);
+            p.drawImage(dst,skyImage_);
+            p.setRenderHint(QPainter::SmoothPixmapTransform,false);
+        }
         p.drawImage(dst,image_);
         // Scoped reticle is only a 2D Qt overlay, with no effect on physical
         // position, collision rays or the raster/CPU renderer.
@@ -224,6 +248,9 @@ protected:
     }
 private:
     QImage image_;
+    QImage skyImage_;
+    cse::weather::SkyCompositor skyComposer_;
+    bool skyCompositing_=false,skyDirty_=true;
     bool paintPending_=false;
     std::function<void()> presented_;
     QString placeholder_;
@@ -261,6 +288,7 @@ public:
             qEnvironmentVariable("M3D_V17_PERIPHERAL_MULTIREZ")==QStringLiteral("1");
         setRasterPeripheralMultiresOverride(0);
         pacingClock_.start();
+        skyMotionClock_.start();
         canvas_->onPresented([this]{recordImagePresented();});
         audioTimer_.setInterval(50); // 20 Hz spatial updates, independent from GPU images.
         connect(&audioTimer_,&QTimer::timeout,this,[this]{
@@ -324,6 +352,7 @@ public:
                 hasRenderedPose_=true;
                 lastCompletedRenderMs_=outcome.milliseconds;
                 canvas_->setImage(outcome.image);
+                canvas_->enableSkyCompositing(outcome.skyCompositing);
             }
             if(outcome.error.isEmpty()&&!outcome.image.isNull()){
                 const QString milliseconds=QString::number(outcome.milliseconds,'f',1);
@@ -593,6 +622,7 @@ private:
     ImageView* canvas_=nullptr;
     QTimer frameTimer_;
     QTimer skyAnimationTimer_;
+    QElapsedTimer skyMotionClock_;
     QTimer dayNightTimer_;
     QElapsedTimer dayNightClock_;
     double dayNightOriginHour_=14.75;
@@ -2088,15 +2118,23 @@ private:
             settings.setValue(QStringLiteral("Raster/FilmicTonemap"),enabled);
             if(backendBox_&&backendBox_->currentIndex()==4)requestRender();
         });
-        // Separate, rate-limited sky updates. Do not queue renders when the
-        // integrated GPU is already working; preserve HD620 responsiveness.
-        skyAnimationTimer_.setInterval(1200);
+        // Independent 30Hz sky compositor: never waits for the GPU, never
+        // requests a geometry or shadow render just to animate weather.
+        skyAnimationTimer_.setInterval(33);
         connect(&skyAnimationTimer_,&QTimer::timeout,this,[this]{
-            if(!cloudAnimationBox_->isChecked() || dayNightCycleBox_->isChecked() ||
-               exploring_ || sceneLoading_ || !runtime_ ||
-               !backendBox_ || backendBox_->currentIndex()!=4 ||
-               watcher_.isRunning())return;
-            requestRender();
+            if(sceneLoading_||!runtime_||!hasRenderedPose_||lastImage_.isNull()||
+               !backendBox_||backendBox_->currentIndex()!=4)return;
+            if(!cloudAnimationBox_->isChecked()&&!dayNightCycleBox_->isChecked()&&
+               canvas_->hasSkyFrame())return;
+            const auto camera=v16::makeCamera(lastRenderedPose_,
+                                               lastImage_.width(),lastImage_.height());
+            const float hour=dayNightCycleBox_->isChecked()
+                ?float(cse::weather::cycleHour(dayNightOriginHour_,
+                       double(dayNightClock_.elapsed())/1000.0))
+                :float(sunHour_->value());
+            const double seconds=double(skyMotionClock_.elapsed())/1000.0;
+            canvas_->drawSky(camera,hour,seconds,
+                cloudAnimationBox_->isChecked(),dayNightCycleBox_->isChecked());
         });
         skyAnimationTimer_.start();
         // Weather animation deliberately faster than the old almost-static sky.
@@ -2104,9 +2142,9 @@ private:
         connect(cloudAnimationBox_,&QCheckBox::toggled,this,[this](bool enabled){
             m3d::setRasterCloudTimeScale(!enabled?0.f:
                 (dayNightCycleBox_->isChecked()?240.f:24.f));
-            if(runtime_ && !watcher_.isRunning())requestRender();
+            canvas_->invalidateSky();
         });
-        dayNightTimer_.setInterval(750);
+        dayNightTimer_.setInterval(1500); // Architectural lighting is slower than 30Hz sky
         connect(&dayNightTimer_,&QTimer::timeout,this,[this]{
             if(!runtime_ || sceneLoading_)return;
             // Simulated time advances independently of GPU frame duration.
@@ -2140,6 +2178,7 @@ private:
             // No UI-thread wait for a slow DX11 frame. Only the latest hour
             // is queued, and in-flight frames retain their captured hour.
             runtime_->daylightHour=float(hour);
+            canvas_->invalidateSky();
             requestRender();
         });
         connect(roughness_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double){modifyMaterial();});
@@ -2287,6 +2326,7 @@ private:
         runtime_=replacement;
         lastImage_=QImage{};
         canvas_->setImage(QImage{});  // Do not keep displaying an old scene.
+        canvas_->enableSkyCompositing(false);
         renderTimeLabel_->setText(QStringLiteral("Dernier rendu : —"));
         materialLabel_->setText(QStringLiteral("Sélectionner un matériau dans le catalogue"));
         setWindowTitle(QStringLiteral("CSE WARP Beta X V17.%1 — %2")
@@ -2481,6 +2521,10 @@ private:
         const uint64_t token=serial->fetch_add(1)+1;
         auto snapshot=runtime_;
         const float renderHour=snapshot->daylightHour;
+        // Shadows are materially unchanged within this 15-minute sky bin.
+        // The expensive map is rebuilt at most once per 0.25 simulated hour,
+        // not for each cloud frame or every fractional hour change.
+        const float shadowHour=std::floor(renderHour*4.f)*.25f;
         auto preset=activeCameraPose();
         updateCameraHud();
         QSize renderSize=qualityBox_->currentData().toSize();
@@ -2519,10 +2563,11 @@ private:
         }
         const auto shadowCache=cpuShadows_;
         watcher_.setFuture(QtConcurrent::run(&renderPool_,[this,serial,token,snapshot,preset,w,h,wantGpu,
-            globalIllumination,raster,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache,renderHour]{
+            globalIllumination,raster,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache,renderHour,shadowHour]{
             Result result;
             result.cameraPose=preset;
             result.generation=token;
+            result.skyCompositing=raster;
             result.renderThread=reinterpret_cast<quintptr>(QThread::currentThreadId());
             updateLighting(renderHour);
             const auto camera=v16::makeCamera(preset,w,h);
@@ -2536,13 +2581,13 @@ private:
                     {
                         std::lock_guard<std::mutex> lock(shadowCache->mutex);
                         if(shadowCache->scene.lock()==snapshot &&
-                           shadowCache->hour==renderHour&&shadowCache->shadow)
+                           shadowCache->hour==shadowHour&&shadowCache->shadow)
                             shadow=shadowCache->shadow;
                         else {
                             Stats shadowStats;
                             shadow=std::make_shared<ShadowMap>(
                                 buildShadow(snapshot->renderScene,shadowStats));
-                            shadowCache->scene=snapshot;shadowCache->hour=renderHour;
+                            shadowCache->scene=snapshot;shadowCache->hour=shadowHour;
                             shadowCache->shadow=shadow;
                         }
                     }
@@ -2577,7 +2622,7 @@ private:
                 {
                     std::lock_guard<std::mutex> lock(shadowCache->mutex);
                     if(shadowCache->scene.lock()==snapshot &&
-                       shadowCache->hour==renderHour && shadowCache->shadow){
+                       shadowCache->hour==shadowHour && shadowCache->shadow){
                         shadow=shadowCache->shadow;
                         shadowReused=true;
                     }else{
@@ -2585,7 +2630,7 @@ private:
                         shadow=std::make_shared<ShadowMap>(
                             buildShadow(snapshot->renderScene,shadowStats));
                         shadowCache->scene=snapshot;
-                        shadowCache->hour=renderHour;
+                        shadowCache->hour=shadowHour;
                         shadowCache->shadow=shadow;
                     }
                 }
@@ -2687,6 +2732,9 @@ int main(int argc,char** argv){
     // GUI animation is intentionally opt-in; offline GPU benchmarks remain
     // deterministic for strict RGB parity and regression comparisons.
     qputenv("M3D_V17_ANIMATE_CLOUDS","1");
+    // Split only interactive raster output into a sky backdrop and an
+    // alpha-preserving architecture foreground. Benchmarks stay unchanged.
+    qputenv("M3D_V17_SPLIT_SKY","1");
     QCoreApplication::setApplicationName(QStringLiteral("CSE WARP Beta X V17.%1")
         .arg(CSE_WARP_BUILD_NUMBER));
     QCoreApplication::setApplicationVersion(QStringLiteral("17.%1")
