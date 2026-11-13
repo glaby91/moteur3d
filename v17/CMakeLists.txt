@@ -14,6 +14,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
 
 enable_testing()
+# CSE WARP Physics / Weather: deterministic fair-weather cirrus smoke test.
+add_executable(v17_weather_clouds_smoke "tests/weather_clouds_smoke.cpp")
+add_test(NAME v17_weather_cirrus_deterministic COMMAND v17_weather_clouds_smoke)
+add_executable(v17_weather_solar_cycle_smoke "tests/weather_solar_cycle_smoke.cpp")
+add_test(NAME v17_weather_solar_24h_continuity COMMAND v17_weather_solar_cycle_smoke)
+add_executable(v17_weather_sky_compositor_smoke "tests/weather_sky_compositor_smoke.cpp")
+target_include_directories(v17_weather_sky_compositor_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+target_link_libraries(v17_weather_sky_compositor_smoke PRIVATE Qt6::Gui)
+add_test(NAME v17_weather_independent_30hz_sky COMMAND v17_weather_sky_compositor_smoke)
+add_executable(v17_weather_astronomy_smoke "tests/weather_astronomy_smoke.cpp")
+add_test(NAME v17_weather_astronomy_day_night COMMAND v17_weather_astronomy_smoke)
 # V17.443: anomaly catalogue and historically verified camera positions.
 add_executable(v17_anomaly_catalog_smoke "tests/anomaly_catalog_smoke.cpp")
 add_test(NAME v17_anomaly_catalog_registry COMMAND v17_anomaly_catalog_smoke)
@@ -29,6 +41,9 @@ target_include_directories(v17_camera_diagnostic_smoke PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
 target_link_libraries(v17_camera_diagnostic_smoke PRIVATE Qt6::Core)
 add_test(NAME v17_camera_diagnostic_roundtrip COMMAND v17_camera_diagnostic_smoke)
+# Pure CPU test for RMB-held scoped FOV, smooth release and aim sensitivity.
+add_executable(v17_scope_zoom_smoke "tests/scope_zoom_smoke.cpp")
+add_test(NAME v17_scope_zoom_hold_release COMMAND v17_scope_zoom_smoke)
 
 # No GPU or Windows runtime required to verify exact 2x2 sample budget.
 add_executable(v17_primary_quarter_smoke "tests/primary_quarter_smoke.cpp")

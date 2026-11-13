@@ -1,5 +1,6 @@
 #include "m3d_engine.h"
 #include "m3d_gi_bake.h"
+#include "../../../../v17/weather/clouds.h"
 
 #if defined(_WIN32)
 #define WIN32_LEAN_AND_MEAN
@@ -28,6 +29,9 @@ namespace {
 // 32 culling, 33 LOD.
 constexpr uint64_t defaultQualityBits=4ull|(16ull<<8)|(100ull<<16)|(1ull<<32)|(1ull<<33);
 std::atomic<uint64_t> gpuQualityBits{defaultQualityBits};
+// -1 = legacy environment-driven benchmark; GUI sets 0 at idle, 1 only on motion.
+// A single atomic snapshot per submitted frame avoids UI/worker environment races.
+std::atomic<int> peripheralOverride{-1};
 // Opt-in: keep all reference benchmarks and pre-existing renders pixel-exact.
 std::atomic<bool> hybridLighting{false};
 // Separate, independently reversible display-referred highlight compression.
@@ -35,6 +39,7 @@ std::atomic<bool> filmicTonemap{false};
 // Corrected linear-energy material lighting (core OFF for parity, GUI ON).
 std::atomic<bool> colorEnergyBalance{false};
 std::atomic<float> colorExposure{1.f};
+std::atomic<float> cloudTimeScale{1.f};
 // The GUI sets this to scene.json.m3dgi. Updated only on user action or
 // scene loading; render worker snapshots it when creating its probe texture.
 std::mutex giPathMutex;
@@ -130,6 +135,18 @@ struct FrameConstants {
     float probeInvSpan[4];
     float hybridControls[4];
     float colorControls[4];
+    float peripheralControls[4];
+};
+
+// Independent sky constants avoid disturbing the existing PBR/shadow shader layout.
+struct CloudConstants {
+    float forward[3],tanHalf;
+    float right[3],aspect;
+    float up[3],pad0;
+    float sun[3],day;
+    float zenith[3],opacity;
+    float horizon[3],coverage;
+    float wind[4];
 };
 
 constexpr char kShader[] = R"(
@@ -158,6 +175,7 @@ cbuffer Frame : register(b0) {
     float4 probeInvSpan;
     float4 hybridControls;
     float4 colorControls;
+    float4 peripheralControls;
 };
 Texture2DArray<float4> albedo : register(t0);
 Texture2D<float> shadowDepth : register(t1);
@@ -232,6 +250,16 @@ VSOut VSEllipseMain(VSEllipseIn i) {
     return VSMain(raw);
 }
 float4 PSMain(VSOut i):SV_TARGET {
+    // Smooth focus-lens / lighthouse geometry. The sharp center follows the
+    // camera's optical axis, with no rectangular hard cut or temporal reuse.
+    // Mode 0: original full-frame, 1: low-res surround, 2: full-res focus.
+    if(peripheralControls.x>.5) {
+        float2 uvScreen=i.p.xy*peripheralControls.yz;
+        float2 focus=(uvScreen-.5)/float2(.47,.48);
+        float radius=length(focus);
+        if(peripheralControls.x<1.5 && radius<.82) discard;
+        if(peripheralControls.x>1.5 && radius>1.0) discard;
+    }
     // WRAP sampler already handles tiling. frac(uv) here broke automatic
     // derivatives at tile boundaries and forced inappropriate mip levels.
     float3 base = albedo.Sample(wrapSampler, float3(i.uv, i.mat)).rgb;
@@ -430,7 +458,113 @@ float4 PSMain(VSOut i):SV_TARGET {
     return float4(color, materialOpacity[i.mat].x);
 }
 )";
+// World-locked, hemispherical cirrus. The procedural field is evaluated only
+// on uncovered background pixels; its cloud mask is never applied over objects.
+constexpr char kCloudSkyShader[] = R"(
+cbuffer Sky : register(b1) {
+    float3 forward; float tanHalf;
+    float3 right; float aspect;
+    float3 up; float pad0;
+    float3 sun; float day;
+    float3 zenith; float opacity;
+    float3 horizon; float coverage;
+    float4 wind;
+};
+struct SkyOut {float4 pos:SV_POSITION; float2 ndc:TEXCOORD0;};
+SkyOut VSSky(uint vid:SV_VertexID){
+    SkyOut o;
+    o.ndc=vid==0?float2(-1,-1):vid==1?float2(-1,3):float2(3,-1);
+    o.pos=float4(o.ndc,0,1);
+    return o;
+}
+float skyHash(float2 p){
+    float3 q=frac(float3(p.xyx)*.1031);
+    q+=dot(q,q.yzx+33.33);
+    return frac((q.x+q.y)*q.z);
+}
+float skyNoise(float2 p){
+    float2 k=floor(p),f=frac(p);f=f*f*(3-2*f);
+    return lerp(lerp(skyHash(k),skyHash(k+float2(1,0)),f.x),
+                lerp(skyHash(k+float2(0,1)),skyHash(k+1),f.x),f.y);
+}
+float4 PSSky(SkyOut i):SV_TARGET {
+    if(wind.w>.5) return float4(0,0,0,0);
+    float3 d=normalize(forward+right*(i.ndc.x*tanHalf)
+                             +up*(i.ndc.y*tanHalf/aspect));
+    float gradient=smoothstep(-.06,.60,d.y);
+    float3 col=lerp(horizon,zenith,gradient);
+    if(d.y>-.02){
+        float2 dome=d.xz/max(d.y+.18,.18);
+        float2 p=float2(dome.x*3.0,dome.y*2.0)+wind.xy*18.0;
+        float n=.56*skyNoise(p*.73)+.30*skyNoise(p*1.53+float2(7.1,11.3))
+               +.14*skyNoise(p*3.11-float2(3.7,8.2));
+        float cloud=smoothstep(.60-coverage*.27,.73-coverage*.22,n)
+                   *smoothstep(.01,.16,d.y);
+        float3 cloudColor=lerp(float3(.018,.025,.045),
+                                float3(.78,.84,.91),day);
+        col=lerp(col,cloudColor,cloud*opacity);
+    }
+    // Stable world-space star field. It appears only in the night sky, with
+    // soft subpixel points and natural occlusion from the animated clouds.
+    if(d.y>0.0 && day<0.20) {
+        float2 starUV=float2(atan2(d.z,d.x)/6.28318530718+0.5+wind.z/24.0,
+            asin(clamp(d.y,-1.0,1.0))/3.14159265359+0.5)*float2(360.0,180.0);
+        float2 starCell=floor(starUV);
+        float chance=skyHash(starCell+float2(19.79,91.73));
+        float2 center=float2(
+            skyHash(starCell+float2(41.11,12.77)),
+            skyHash(starCell+float2(13.47,59.19)));
+        float radius=lerp(.10,.18,skyHash(starCell+float2(29.5,97.3)));
+        float footprint=max(max(fwidth(starUV.x),fwidth(starUV.y))*.5,.018);
+        float disc=1.0-smoothstep(radius-footprint,radius+footprint,
+                                  length(frac(starUV)-center));
+        float bright=lerp(.60,1.55,skyHash(starCell+float2(2.19,6.37)));
+        float horizonFade=smoothstep(.09,.29,d.y);
+        float night=1.0-smoothstep(.01,.18,day);
+        float2 dome=d.xz/max(d.y+.18,.18);
+        float2 p=float2(dome.x*3.0,dome.y*2.0)+wind.xy*18.0;
+        float cloudNoise=.56*skyNoise(p*.73)
+            +.30*skyNoise(p*1.53+float2(7.1,11.3))
+            +.14*skyNoise(p*3.11-float2(3.7,8.2));
+        float cloudMask=smoothstep(.60-coverage*.27,
+                                   .73-coverage*.22,cloudNoise)*opacity;
+        float3 hue=lerp(float3(.65,.79,1.0),float3(1.0,.93,.82),
+            skyHash(starCell+float2(73.9,5.8)));
+        col+=hue*disc*step(.987,chance)*bright*horizonFade*night*
+            (1.0-saturate(cloudMask));
+    }
+    // The solar disc stays on the moving directional-light vector.
+    if(sun.y>0) {
+        float x=saturate(dot(d,normalize(sun)));
+        float disc=smoothstep(.99984,.99997,x);
+        float halo=pow(x,128.0)*.20;
+        float warm=saturate(1.0-sun.y*3.2);
+        float3 c=lerp(float3(.95,.96,1),float3(1,.63,.32),warm);
+        col+=c*(disc*.75+halo)*day;
+    }
+    return float4(max(col,0),1);
+}
+)";
 
+constexpr char kPeripheralComposite[] = R"(
+Texture2D<float4> lo : register(t0);
+Texture2D<float4> hi : register(t1);
+SamplerState bilinear : register(s0);
+struct CV {float4 p:SV_POSITION;float2 uv:TEXCOORD;};
+CV VSC(uint id:SV_VertexID) {
+    CV v;v.uv=float2(id==2?2.:0.,id==1?2.:0.);
+    v.p=float4(v.uv.x*2.-1.,1.-v.uv.y*2.,0.,1.);return v;
+}
+float4 PSC(CV v):SV_TARGET {
+    // Camera-centred elliptical focus: approximately half the picture stays
+    // razor sharp, followed by a soft 16%-radius transition like a headlamp.
+    // The edge always uses fresh pixels from this frame (never reprojection).
+    float2 focus=(v.uv-.5)/float2(.47,.48);
+    float radius=length(focus);
+    float fade=smoothstep(.84,1.0,radius);
+    return lerp(hi.Sample(bilinear,v.uv),lo.Sample(bilinear,v.uv),fade);
+}
+)";
 void put(GpuVertex& v,V p,V n,float u,float vv,uint32_t mat) {
     v={{p.x,p.y,p.z},{n.x,n.y,n.z},{u,vv},mat};
 }
@@ -673,6 +807,12 @@ public:
         const bool balanced=colorEnergyBalance.load(std::memory_order_acquire);
         const float exposure=clampf(colorExposure.load(std::memory_order_acquire),.65f,1.45f);
         const RasterQualitySettings quality=unpackQuality(qualityBits);
+        const int peripheralSetting=peripheralOverride.load(std::memory_order_acquire);
+        const char* multiresEnv=peripheralSetting<0
+            ?std::getenv("M3D_V17_PERIPHERAL_MULTIREZ"):nullptr;
+        const bool multires=(peripheralSetting==1 ||
+            (peripheralSetting<0&&multiresEnv&&std::strcmp(multiresEnv,"1")==0))
+            &&w>=320&&h>=240;
         if(!pending_.empty() &&
            (sceneKey_!=scene.obj.data() || objectCount_!=scene.obj.size() ||
             sceneIdentity_!=scene.gpuCacheIdentity ||
@@ -681,7 +821,7 @@ public:
             lastSubmissionHybrid_!=hybrid ||
             lastSubmissionTone_!=tone ||
             lastSubmissionBalanced_!=balanced ||
-            lastSubmissionExposure_!=exposure)){
+            lastSubmissionExposure_!=exposure || lastSubmissionMultires_!=multires)){
             error=L"Vider les lectures différées avant de changer de scène ou de qualité.";
             return false;
         }
@@ -689,6 +829,7 @@ public:
            (hybrid&&!ensureProbeVolume(scene,error))||
            (hybrid&&!ensureGiHours(error))||
            !ensureTargets(w,h,quality.msaaSamples,error)||
+           (multires&&!ensureMultires(w,h,error))||
            !ensureAnisotropy(quality.anisotropy,error)||
            !ensureReadback(depth,w,h,error))return false;
         const unsigned slotIndex=nextReadbackSlot_;
@@ -833,20 +974,106 @@ public:
         HRESULT hr=context_->Map(constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped);
         if(FAILED(hr)){error=L"Impossible de transmettre les paramètres à DirectX 11.";return false;}
         std::memcpy(mapped.pData,&cb,sizeof(cb));context_->Unmap(constants_.Get(),0);
-        const float clear[4]={cb.sky[0],cb.sky[1],cb.sky[2],1.f};
-        if(slot.queryReady){
-            context_->Begin(slot.disjoint.Get());
-            context_->End(slot.start.Get());
+        // Animate wind on the sky hemisphere; geometry and PBR are untouched.
+        CloudConstants cloudCB{};
+        cloudCB.forward[0]=cam.f.x;cloudCB.forward[1]=cam.f.y;cloudCB.forward[2]=cam.f.z;
+        cloudCB.tanHalf=cam.tanHalf;
+        cloudCB.right[0]=cam.r.x;cloudCB.right[1]=cam.r.y;cloudCB.right[2]=cam.r.z;
+        cloudCB.aspect=cam.aspect;
+        cloudCB.up[0]=cam.u.x;cloudCB.up[1]=cam.u.y;cloudCB.up[2]=cam.u.z;
+        cloudCB.sun[0]=sun.x;cloudCB.sun[1]=sun.y;cloudCB.sun[2]=sun.z;
+        cloudCB.day=daylight;
+        const V zenith=skyZenith,horizon=skyHorizon;
+        const float zen[3]{zenith.x,zenith.y,zenith.z};
+        const float hor[3]{horizon.x,horizon.y,horizon.z};
+        for(int c=0;c<3;++c){
+            cloudCB.zenith[c]=balanced?decodeSrgb(zen[c]/255.f):zen[c]/255.f;
+            cloudCB.horizon[c]=balanced?decodeSrgb(hor[c]/255.f):hor[c]/255.f;
         }
-        context_->OMSetRenderTargets(1,rtv_.GetAddressOf(),dsv_.Get());context_->ClearRenderTargetView(rtv_.Get(),clear);context_->ClearDepthStencilView(dsv_.Get(),D3D11_CLEAR_DEPTH,1.f,0);
-        D3D11_VIEWPORT vp{};vp.Width=float(w);vp.Height=float(h);vp.MinDepth=0;vp.MaxDepth=1;context_->RSSetViewports(1,&vp);
-        UINT stride=sizeof(GpuVertex),offset=0;ID3D11Buffer* vb=vertices_.Get();context_->IASetInputLayout(layout_.Get());context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        context_->RSSetState(raster_.Get());context_->OMSetDepthStencilState(depth_.Get(),0);context_->VSSetShader(vs_.Get(),nullptr,0);context_->PSSetShader(ps_.Get(),nullptr,0);
-        ID3D11Buffer* cbuff=constants_.Get();context_->VSSetConstantBuffers(0,1,&cbuff);context_->PSSetConstantBuffers(0,1,&cbuff);
-        ID3D11ShaderResourceView* srvs[]={albedo_.Get(),shadowSrv_.Get(),roughness_.Get(),normal_.Get(),hybrid?probeSrv_.Get():nullptr,hybrid?(hasBakedGi_?probeNextSrv_.Get():probeSrv_.Get()):nullptr};context_->PSSetShaderResources(0,6,srvs);
-        ID3D11SamplerState* samplers[]={sampler_.Get(),probeSampler_.Get()};context_->PSSetSamplers(0,2,samplers);
-        UINT submittedVertices=0;
-        uint64_t drawCalls=0;
+        cse::weather::CloudState cloudSettings;
+        cloudSettings.coverage=.28f;
+        cloudSettings.opacity=.65f;
+        cloudSettings.windEastMetersPerSecond=12.f;
+        cloudSettings.windNorthMetersPerSecond=3.5f;
+        static const auto cloudEpoch=std::chrono::steady_clock::now();
+        // Deterministic bench renders remain pixel-exact across readback modes;
+        // only the interactive GUI opts into real-time cloud motion.
+        const char* movingSky=std::getenv("M3D_V17_ANIMATE_CLOUDS");
+        const bool animateSky=movingSky && std::strcmp(movingSky,"1")==0;
+        const double cloudSeconds=animateSky ? std::chrono::duration<double>(
+            std::chrono::steady_clock::now()-cloudEpoch).count()*
+            double(cloudTimeScale.load(std::memory_order_acquire)) : 0.0;
+        const auto clouds=cse::weather::cirrusAt(cloudSettings,cloudSeconds,
+            std::asin(clampf(sun.y,-1.f,1.f))*180.f/PI);
+        cloudCB.wind[0]=clouds.uOffset;cloudCB.wind[1]=clouds.vOffset;
+        cloudCB.wind[2]=solarHour; // Night stars rotate with the time of day.
+        const char* splitSky=std::getenv("M3D_V17_SPLIT_SKY");
+        cloudCB.wind[3]=(splitSky && std::strcmp(splitSky,"1")==0)?1.f:0.f;
+        cloudCB.coverage=clouds.coverage;cloudCB.opacity=clouds.opacity;
+        D3D11_MAPPED_SUBRESOURCE cloudMapped{};
+        if(FAILED(context_->Map(skyConstants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&cloudMapped))){
+            error=L"Upload paramètres nuages impossible.";return false;
+        }
+        std::memcpy(cloudMapped.pData,&cloudCB,sizeof(cloudCB));
+        context_->Unmap(skyConstants_.Get(),0);
+        const float clear[4]={cb.sky[0],cb.sky[1],cb.sky[2],1.f};
+        if(slot.queryReady){context_->Begin(slot.disjoint.Get());context_->End(slot.start.Get());}
+        UINT submittedVertices=0,submittedBoxInstances=0;
+        uint64_t drawCalls=0,submittedEllipseTriangles=0,submittedEllipseInstances=0;
+        uint64_t submittedFoliageTriangles=0,submittedFoliageInstances=0;
+        auto drawScene=[&](ID3D11RenderTargetView* rt,ID3D11DepthStencilView* ds,
+                           int pw,int ph,bool scissor,bool skipCore)->bool{
+            if(multires){
+                cb.peripheralControls[0]=skipCore?1.f:(scissor?2.f:0.f);
+                cb.peripheralControls[1]=1.f/float(pw);
+                cb.peripheralControls[2]=1.f/float(ph);
+                D3D11_MAPPED_SUBRESOURCE mp{};
+                if(FAILED(context_->Map(constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mp))){
+                    error=L"Upload constantes multires impossible.";return false;
+                }
+                std::memcpy(mp.pData,&cb,sizeof(cb));context_->Unmap(constants_.Get(),0);
+            }
+            context_->OMSetRenderTargets(1,&rt,ds);
+            context_->ClearRenderTargetView(rt,clear);
+            context_->ClearDepthStencilView(ds,D3D11_CLEAR_DEPTH,1.f,0);
+            D3D11_VIEWPORT vp{};vp.Width=float(pw);vp.Height=float(ph);
+            vp.MinDepth=0;vp.MaxDepth=1;context_->RSSetViewports(1,&vp);
+            // Draw the clouded sky first, with depth completely disabled.
+            context_->RSSetState(raster_.Get());
+            context_->OMSetDepthStencilState(skyDepth_.Get(),0);
+            context_->OMSetBlendState(nullptr,nullptr,0xffffffffu);
+            context_->IASetInputLayout(nullptr);
+            context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            context_->VSSetShader(skyVs_.Get(),nullptr,0);
+            context_->PSSetShader(skyPs_.Get(),nullptr,0);
+            ID3D11Buffer* skyCb=skyConstants_.Get();
+            context_->PSSetConstantBuffers(1,1,&skyCb);
+            context_->Draw(3,0);
+            if(scissor){
+                const D3D11_RECT rect={LONG(std::floor(pw*.03f)),LONG(std::floor(ph*.02f)),
+                    LONG(std::ceil(pw*.97f)),LONG(std::ceil(ph*.98f))};
+                context_->RSSetScissorRects(1,&rect);
+            }
+            UINT stride=sizeof(GpuVertex),offset=0;
+            ID3D11Buffer* vb=vertices_.Get();
+            context_->IASetInputLayout(layout_.Get());
+            context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
+            context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            context_->RSSetState(scissor?scissorRaster_.Get():raster_.Get());
+            context_->OMSetDepthStencilState(depth_.Get(),0);
+            context_->VSSetShader(vs_.Get(),nullptr,0);
+            context_->PSSetShader(ps_.Get(),nullptr,0);
+            ID3D11Buffer* cbuff=constants_.Get();
+            context_->VSSetConstantBuffers(0,1,&cbuff);
+            context_->PSSetConstantBuffers(0,1,&cbuff);
+            ID3D11ShaderResourceView* srvs[]={albedo_.Get(),shadowSrv_.Get(),
+                roughness_.Get(),normal_.Get(),hybrid?probeSrv_.Get():nullptr,
+                hybrid?(hasBakedGi_?probeNextSrv_.Get():probeSrv_.Get()):nullptr};
+            context_->PSSetShaderResources(0,6,srvs);
+            ID3D11SamplerState* samplers[]={sampler_.Get(),probeSampler_.Get()};
+            context_->PSSetSamplers(0,2,samplers);
+        
+        
         const char* noCull=std::getenv("M3D_V17_DISABLE_FRUSTUM_CULLING");
         const bool cullEnabled=quality.frustumCulling
             &&!(noCull && std::strcmp(noCull,"1")==0);
@@ -857,7 +1084,7 @@ public:
         const char* zPrepassEnv=std::getenv("M3D_V17_EXPERIMENT_Z_PREPASS");
         const bool depthPrepass=zPrepassEnv&&std::strcmp(zPrepassEnv,"1")==0;
         if(depthPrepass){
-            context_->OMSetRenderTargets(0,nullptr,dsv_.Get());
+            context_->OMSetRenderTargets(0,nullptr,ds);
             context_->PSSetShader(nullptr,nullptr,0);
             // Static opaque walls, floors and other architectural meshes.
             if(vertexCount_){
@@ -901,7 +1128,7 @@ public:
                 context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
             }
             // Restore exact production opaque and transparency pipeline.
-            context_->OMSetRenderTargets(1,rtv_.GetAddressOf(),dsv_.Get());
+            context_->OMSetRenderTargets(1,&rt,ds);
             context_->PSSetShader(ps_.Get(),nullptr,0);
         }
         if(vertexCount_){
@@ -929,7 +1156,7 @@ public:
                 flush();
             }
         }
-        UINT submittedBoxInstances=0;
+        
         if(boxInstanceCount_){
             ID3D11Buffer* buffers[]={boxVertices_.Get(),boxInstances_.Get()};
             UINT strides[]={UINT(sizeof(GpuVertex)),UINT(sizeof(GpuBoxInstance))};
@@ -960,8 +1187,8 @@ public:
             context_->VSSetShader(vs_.Get(),nullptr,0);
             context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
         }
-        uint64_t submittedEllipseTriangles=0;
-        uint64_t submittedEllipseInstances=0;
+        
+        
         if(ellipseInstanceCount_){
             std::array<std::vector<GpuEllipseInstance>,3> level;
             for(auto& bucket:level)bucket.reserve(ellipseInstanceCount_/3+1);
@@ -1013,8 +1240,8 @@ public:
             context_->VSSetShader(vs_.Get(),nullptr,0);
             context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
         }
-        uint64_t submittedFoliageTriangles=0;
-        uint64_t submittedFoliageInstances=0;
+        
+        
         if(foliageInstanceCount_){
             std::array<std::vector<GpuEllipseInstance>,3> buckets;
             for(auto& bucket:buckets)bucket.reserve(foliageInstanceCount_/3+1);
@@ -1073,9 +1300,39 @@ public:
             context_->OMSetDepthStencilState(transparentDepth_.Get(),0);context_->OMSetBlendState(blend_.Get(),nullptr,0xffffffffu);context_->Draw(UINT(transparent_.size()*3),0);++drawCalls;
             context_->OMSetBlendState(nullptr,nullptr,0xffffffffu);context_->OMSetDepthStencilState(depth_.Get(),0);context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
         }
+            return true;
+        };
+        if(multires){
+            if(!drawScene(lowRtv_.Get(),lowDsv_.Get(),lowW_,lowH_,false,true) ||
+               !drawScene(rtv_.Get(),dsv_.Get(),w,h,true,false))return false;
+            if(sampleCount_>1)
+                context_->ResolveSubresource(resolve_.Get(),0,target_.Get(),0,DXGI_FORMAT_R8G8B8A8_UNORM);
+            context_->OMSetRenderTargets(1,mergeRtv_.GetAddressOf(),nullptr);
+            D3D11_VIEWPORT vp{};vp.Width=float(w);vp.Height=float(h);vp.MinDepth=0;vp.MaxDepth=1;
+            context_->RSSetViewports(1,&vp);
+            context_->RSSetState(raster_.Get());
+            context_->OMSetDepthStencilState(nullptr,0);
+            context_->OMSetBlendState(nullptr,nullptr,0xffffffffu);
+            context_->IASetInputLayout(nullptr);
+            context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            context_->VSSetShader(mergeVs_.Get(),nullptr,0);
+            context_->PSSetShader(mergePs_.Get(),nullptr,0);
+            ID3D11ShaderResourceView* srcs[]={lowSrv_.Get(),
+                sampleCount_>1?resolveSrv_.Get():targetSrv_.Get()};
+            context_->PSSetShaderResources(0,2,srcs);
+            ID3D11SamplerState* spl=probeSampler_.Get();
+            context_->PSSetSamplers(0,1,&spl);
+            context_->Draw(3,0);++drawCalls;
+            ID3D11ShaderResourceView* empty[]={nullptr,nullptr};
+            context_->PSSetShaderResources(0,2,empty);
+        }else if(!drawScene(rtv_.Get(),dsv_.Get(),w,h,false,false))return false;
         // GPU timestamps surround the actual draw commands and the queued
         // GPU copy. They do not include any CPU-side GetData/Map blocking.
         if(slot.queryReady)context_->End(slot.afterDraw.Get());
+        if(multires){
+            context_->OMSetRenderTargets(0,nullptr,nullptr);
+            context_->CopyResource(slot.staging.Get(),mergeTex_.Get());
+        }else{
         // V17 WARP lossless fast-path: no MSAA resolve is needed when
         // sampleCount_ == 1. Copy the render target directly into staging,
         // eliminating an entire full-frame GPU copy. Both textures are
@@ -1090,6 +1347,7 @@ public:
             context_->CopyResource(slot.staging.Get(),resolve_.Get());
         }else{
             context_->CopyResource(slot.staging.Get(),target_.Get());
+        }
         }
         if(slot.queryReady){
             context_->End(slot.afterCopy.Get());
@@ -1113,6 +1371,7 @@ public:
         lastSubmissionTone_=tone;
         lastSubmissionBalanced_=balanced;
         lastSubmissionExposure_=exposure;
+        lastSubmissionMultires_=multires;
         nextReadbackSlot_=(slotIndex+1u)%readbackDepth_;
         return true;
     }
@@ -1127,6 +1386,22 @@ public:
         pixels.resize(size_t(slot.width)*size_t(slot.height));
         const char* disableFastSwizzle=std::getenv("M3D_V17_DISABLE_FAST_SWIZZLE");
         const bool fastSwizzle=!(disableFastSwizzle&&std::strcmp(disableFastSwizzle,"1")==0);
+        const char* skyCompositor=std::getenv("M3D_V17_SPLIT_SKY");
+        const bool preserveAlpha=skyCompositor&&std::strcmp(skyCompositor,"1")==0;
+        auto packPixel=[preserveAlpha](uint32_t rgba)->uint32_t {
+            uint32_t r=rgba&255u,g=(rgba>>8)&255u,b=(rgba>>16)&255u;
+            if(!preserveAlpha)return 0xff000000u|(r<<16)|(g<<8)|b;
+            const uint32_t a=(rgba>>24)&255u;
+            if(a==0)return 0;
+            if(a<255){
+                // GPU transparency was blended over transparent black.
+                // Convert the premultiplied color to straight ARGB32 for Qt.
+                r=std::min(255u,(r*255u+a/2u)/a);
+                g=std::min(255u,(g*255u+a/2u)/a);
+                b=std::min(255u,(b*255u+a/2u)/a);
+            }
+            return (a<<24)|(r<<16)|(g<<8)|b;
+        };
         for(int y=0;y<slot.height;++y){
             const uint8_t* row=static_cast<const uint8_t*>(mapped.pData)
                 +size_t(y)*mapped.RowPitch;
@@ -1138,15 +1413,15 @@ public:
                 const uint32_t* src=reinterpret_cast<const uint32_t*>(row);
                 for(int x=0;x<slot.width;++x){
                     const uint32_t rgba=src[x];
-                    dest[x]=0xff000000u|((rgba&0xffu)<<16)
-                        |(rgba&0xff00u)|((rgba>>16)&0xffu);
+                    dest[x]=packPixel(rgba);
                 }
             }else{
                 // Unmodified reference path for pixel-exact A/B.
                 for(int x=0;x<slot.width;++x){
                     const uint8_t* p=row+size_t(x)*4;
-                    dest[x]=0xff000000u
-                        |(uint32_t(p[0])<<16)|(uint32_t(p[1])<<8)|uint32_t(p[2]);
+                    const uint32_t rgba=uint32_t(p[0])|(uint32_t(p[1])<<8)
+                        |(uint32_t(p[2])<<16)|(uint32_t(p[3])<<24);
+                    dest[x]=packPixel(rgba);
                 }
             }
         }
@@ -1384,6 +1659,32 @@ private:
             activeMacros,nullptr,"PSMain","ps_4_0",
             D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&psCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation du pixel shader DirectX 11 impossible");return false;}
+        ComPtr<ID3DBlob> skyVsCode,skyPsCode;
+        errors.Reset();
+        hr=D3DCompile(kCloudSkyShader,sizeof(kCloudSkyShader)-1,"CSE_WARP_CloudSky",
+            nullptr,nullptr,"VSSky","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&skyVsCode,&errors);
+        if(FAILED(hr)){error=shaderError(L"Compilation sommet ciel impossible");return false;}
+        errors.Reset();
+        hr=D3DCompile(kCloudSkyShader,sizeof(kCloudSkyShader)-1,"CSE_WARP_CloudSky",
+            nullptr,nullptr,"PSSky","ps_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&skyPsCode,&errors);
+        if(FAILED(hr)){error=shaderError(L"Compilation nuages DirectX 11 impossible");return false;}
+        if(FAILED(device_->CreateVertexShader(skyVsCode->GetBufferPointer(),
+               skyVsCode->GetBufferSize(),nullptr,&skyVs_)) ||
+           FAILED(device_->CreatePixelShader(skyPsCode->GetBufferPointer(),
+               skyPsCode->GetBufferSize(),nullptr,&skyPs_))){
+            error=L"Impossible de créer les shaders de nuages.";return false;
+        }
+        ComPtr<ID3DBlob> mergeVS,mergePS;
+        errors.Reset();hr=D3DCompile(kPeripheralComposite,sizeof(kPeripheralComposite)-1,
+            "v17_multires",nullptr,nullptr,"VSC","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&mergeVS,&errors);
+        if(FAILED(hr)){error=shaderError(L"Compilation VS multires impossible");return false;}
+        errors.Reset();hr=D3DCompile(kPeripheralComposite,sizeof(kPeripheralComposite)-1,
+            "v17_multires",nullptr,nullptr,"PSC","ps_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&mergePS,&errors);
+        if(FAILED(hr)){error=shaderError(L"Compilation PS multires impossible");return false;}
+        if(FAILED(device_->CreateVertexShader(mergeVS->GetBufferPointer(),mergeVS->GetBufferSize(),nullptr,&mergeVs_)) ||
+           FAILED(device_->CreatePixelShader(mergePS->GetBufferPointer(),mergePS->GetBufferSize(),nullptr,&mergePs_))){
+           error=L"Création shaders multires impossible.";return false;
+        }
         if(FAILED(device_->CreateVertexShader(vsCode->GetBufferPointer(),vsCode->GetBufferSize(),nullptr,&vs_))||FAILED(device_->CreatePixelShader(psCode->GetBufferPointer(),psCode->GetBufferSize(),nullptr,&ps_))){error=L"Création des shaders DirectX 11 impossible.";return false;}
         const D3D11_INPUT_ELEMENT_DESC input[]={{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,p),D3D11_INPUT_PER_VERTEX_DATA,0},{"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,n),D3D11_INPUT_PER_VERTEX_DATA,0},{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,offsetof(GpuVertex,uv),D3D11_INPUT_PER_VERTEX_DATA,0},{"MATERIAL",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertex,material),D3D11_INPUT_PER_VERTEX_DATA,0}};
         if(FAILED(device_->CreateInputLayout(input,4,vsCode->GetBufferPointer(),vsCode->GetBufferSize(),&layout_))){error=L"Création du format de sommet DirectX 11 impossible.";return false;}
@@ -1425,12 +1726,20 @@ private:
         }
         D3D11_BUFFER_DESC cbd{};cbd.ByteWidth=sizeof(FrameConstants);cbd.Usage=D3D11_USAGE_DYNAMIC;cbd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;cbd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
         if(FAILED(device_->CreateBuffer(&cbd,nullptr,&constants_))){error=L"Création du buffer de constantes DirectX 11 impossible.";return false;}
+        cbd.ByteWidth=sizeof(CloudConstants);
+        if(FAILED(device_->CreateBuffer(&cbd,nullptr,&skyConstants_))){error=L"Création du buffer de nuages impossible.";return false;}
         D3D11_RASTERIZER_DESC rd{};rd.FillMode=D3D11_FILL_SOLID;rd.CullMode=D3D11_CULL_NONE;rd.DepthClipEnable=TRUE;rd.MultisampleEnable=TRUE;
         if(FAILED(device_->CreateRasterizerState(&rd,&raster_))){error=L"Création de l’état raster DirectX 11 impossible.";return false;}
+        rd.ScissorEnable=TRUE;
+        if(FAILED(device_->CreateRasterizerState(&rd,&scissorRaster_))){
+            error=L"Scissor multires impossible.";return false;
+        }
         D3D11_DEPTH_STENCIL_DESC dd{};dd.DepthEnable=TRUE;dd.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ALL;dd.DepthFunc=D3D11_COMPARISON_LESS_EQUAL;
         if(FAILED(device_->CreateDepthStencilState(&dd,&depth_))){error=L"Création du depth buffer DirectX 11 impossible.";return false;}
         dd.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;
         if(FAILED(device_->CreateDepthStencilState(&dd,&transparentDepth_))){error=L"Création de l’état de profondeur transparent DirectX 11 impossible.";return false;}
+        dd.DepthEnable=FALSE;dd.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;
+        if(FAILED(device_->CreateDepthStencilState(&dd,&skyDepth_))){error=L"Création du ciel sans profondeur impossible.";return false;}
         D3D11_BLEND_DESC blendDesc{};blendDesc.RenderTarget[0].BlendEnable=TRUE;blendDesc.RenderTarget[0].SrcBlend=D3D11_BLEND_SRC_ALPHA;blendDesc.RenderTarget[0].DestBlend=D3D11_BLEND_INV_SRC_ALPHA;blendDesc.RenderTarget[0].BlendOp=D3D11_BLEND_OP_ADD;blendDesc.RenderTarget[0].SrcBlendAlpha=D3D11_BLEND_ONE;blendDesc.RenderTarget[0].DestBlendAlpha=D3D11_BLEND_INV_SRC_ALPHA;blendDesc.RenderTarget[0].BlendOpAlpha=D3D11_BLEND_OP_ADD;blendDesc.RenderTarget[0].RenderTargetWriteMask=D3D11_COLOR_WRITE_ENABLE_ALL;
         if(FAILED(device_->CreateBlendState(&blendDesc,&blend_))){error=L"Création de l’état de transparence DirectX 11 impossible.";return false;}
         D3D11_SAMPLER_DESC sd{};sd.Filter=D3D11_FILTER_ANISOTROPIC;sd.MaxAnisotropy=16;sd.AddressU=sd.AddressV=sd.AddressW=D3D11_TEXTURE_ADDRESS_WRAP;sd.MaxLOD=D3D11_FLOAT32_MAX;
@@ -1819,6 +2128,9 @@ private:
         readbackDepth_=0;nextReadbackSlot_=0;
         width_=w;height_=h;msaaPreference_=msaa;
         target_.Reset();resolve_.Reset();rtv_.Reset();depthTexture_.Reset();dsv_.Reset();
+        targetSrv_.Reset();resolveSrv_.Reset();lowTex_.Reset();lowRtv_.Reset();
+        lowSrv_.Reset();lowDepth_.Reset();lowDsv_.Reset();
+        mergeTex_.Reset();mergeRtv_.Reset();lowW_=0;lowH_=0;
         sampleCount_=1;sampleQuality_=0;
         for(UINT candidate:{8u,4u,2u}){
             if(candidate>msaa)continue;
@@ -1828,18 +2140,67 @@ private:
                 sampleCount_=candidate;sampleQuality_=std::min(levels,depthLevels)-1;break;
             }
         }
-        D3D11_TEXTURE2D_DESC td{};td.Width=UINT(w);td.Height=UINT(h);td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_R8G8B8A8_TYPELESS;td.SampleDesc.Count=sampleCount_;td.SampleDesc.Quality=sampleQuality_;td.Usage=D3D11_USAGE_DEFAULT;td.BindFlags=D3D11_BIND_RENDER_TARGET;
+        D3D11_TEXTURE2D_DESC td{};td.Width=UINT(w);td.Height=UINT(h);td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_R8G8B8A8_TYPELESS;td.SampleDesc.Count=sampleCount_;td.SampleDesc.Quality=sampleQuality_;td.Usage=D3D11_USAGE_DEFAULT;td.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&target_))){error=L"Création de la cible image DirectX 11 impossible.";return false;}
         // The render target must be TYPELESS for an sRGB RTV on D3D11/WARP.
         // A typed UNORM texture with an sRGB view fails E_INVALIDARG.
         D3D11_RENDER_TARGET_VIEW_DESC rtvDesc{};rtvDesc.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;rtvDesc.ViewDimension=sampleCount_>1?D3D11_RTV_DIMENSION_TEXTURE2DMS:D3D11_RTV_DIMENSION_TEXTURE2D;
         if(sampleCount_==1)rtvDesc.Texture2D.MipSlice=0;
         if(FAILED(device_->CreateRenderTargetView(target_.Get(),&rtvDesc,&rtv_))){error=L"Création de la cible sRGB DirectX 11 impossible.";return false;}
-        td.SampleDesc.Count=1;td.SampleDesc.Quality=0;td.BindFlags=0;
+        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        srvDesc.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MipLevels=1;
+        if(sampleCount_==1&&FAILED(device_->CreateShaderResourceView(target_.Get(),&srvDesc,&targetSrv_))){
+            error=L"SRV couleur HD indisponible.";return false;
+        }
+        td.SampleDesc.Count=1;td.SampleDesc.Quality=0;td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&resolve_))){error=L"Création de la cible de résolution DirectX 11 impossible.";return false;}
+        if(FAILED(device_->CreateShaderResourceView(resolve_.Get(),&srvDesc,&resolveSrv_))){
+            error=L"SRV résolution MSAA indisponible.";return false;
+        }
         td.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;td.SampleDesc.Count=sampleCount_;td.SampleDesc.Quality=sampleQuality_;td.BindFlags=D3D11_BIND_DEPTH_STENCIL;
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&depthTexture_))||FAILED(device_->CreateDepthStencilView(depthTexture_.Get(),nullptr,&dsv_))){error=L"Création du tampon de profondeur DirectX 11 impossible.";return false;}
         return true;
+    }
+    bool ensureMultires(int w,int h,std::wstring& error){
+        int lw=std::max(1,w/2),lh=std::max(1,h/2);
+        if(lowRtv_&&mergeRtv_&&lowW_==lw&&lowH_==lh)return true;
+        if(!pending_.empty()){error=L"Vider les images différées avant de changer de mode.";return false;}
+        lowTex_.Reset();lowRtv_.Reset();lowSrv_.Reset();lowDepth_.Reset();
+        lowDsv_.Reset();mergeTex_.Reset();mergeRtv_.Reset();
+        D3D11_TEXTURE2D_DESC td{};td.Width=UINT(lw);td.Height=UINT(lh);
+        td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_R8G8B8A8_TYPELESS;
+        td.SampleDesc.Count=1;td.Usage=D3D11_USAGE_DEFAULT;
+        td.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
+        if(FAILED(device_->CreateTexture2D(&td,nullptr,&lowTex_))){
+            error=L"Texture basse résolution impossible.";return false;
+        }
+        D3D11_RENDER_TARGET_VIEW_DESC rd{};
+        rd.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        rd.ViewDimension=D3D11_RTV_DIMENSION_TEXTURE2D;
+        if(FAILED(device_->CreateRenderTargetView(lowTex_.Get(),&rd,&lowRtv_))){
+            error=L"RTV basse résolution impossible.";return false;
+        }
+        D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+        sd.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        sd.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;
+        sd.Texture2D.MipLevels=1;
+        if(FAILED(device_->CreateShaderResourceView(lowTex_.Get(),&sd,&lowSrv_))){
+            error=L"SRV basse résolution impossible.";return false;
+        }
+        td.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;td.BindFlags=D3D11_BIND_DEPTH_STENCIL;
+        if(FAILED(device_->CreateTexture2D(&td,nullptr,&lowDepth_)) ||
+           FAILED(device_->CreateDepthStencilView(lowDepth_.Get(),nullptr,&lowDsv_))){
+            error=L"Profondeur basse résolution impossible.";return false;
+        }
+        td.Width=UINT(w);td.Height=UINT(h);
+        td.Format=DXGI_FORMAT_R8G8B8A8_TYPELESS;td.BindFlags=D3D11_BIND_RENDER_TARGET;
+        if(FAILED(device_->CreateTexture2D(&td,nullptr,&mergeTex_)) ||
+           FAILED(device_->CreateRenderTargetView(mergeTex_.Get(),&rd,&mergeRtv_))){
+            error=L"Composition multires impossible.";return false;
+        }
+        lowW_=lw;lowH_=lh;return true;
     }
     bool ensureAnisotropy(unsigned aniso,std::wstring& error){
         if(sampler_&&samplerAnisotropy_==aniso)return true;
@@ -1892,10 +2253,10 @@ private:
         return true;
     }
     ComPtr<ID3D11Device> device_;ComPtr<ID3D11DeviceContext> context_;
-    ComPtr<ID3D11VertexShader> vs_,boxVs_,ellipseVs_;
-    ComPtr<ID3D11PixelShader> ps_;
+    ComPtr<ID3D11VertexShader> vs_,boxVs_,ellipseVs_,mergeVs_,skyVs_;
+    ComPtr<ID3D11PixelShader> ps_,mergePs_,skyPs_;
     ComPtr<ID3D11InputLayout> layout_,boxLayout_,ellipseLayout_;
-    ComPtr<ID3D11Buffer> constants_,vertices_,transparentVertices_,boxVertices_,boxInstances_,ellipseInstances_,foliageInstances_;
+    ComPtr<ID3D11Buffer> skyConstants_,constants_,vertices_,transparentVertices_,boxVertices_,boxInstances_,ellipseInstances_,foliageInstances_;
     std::array<ComPtr<ID3D11Buffer>,3> ellipseVertices_;
     std::array<UINT,3> ellipseVertexCounts_{{0,0,0}};
     std::vector<GpuEllipseInstance> ellipses_;
@@ -1904,19 +2265,23 @@ private:
     std::array<UINT,3> foliageVertexCounts_{{0,0,0}};
     std::vector<GpuEllipseInstance> foliage_;
     UINT foliageInstanceCount_=0;
-    ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_,probeSampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_,probeSrv_;ComPtr<ID3D11Texture3D> probeTexture_,probeNextTexture_;
+    ComPtr<ID3D11RasterizerState> raster_,scissorRaster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_,skyDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_,probeSampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_,probeSrv_;ComPtr<ID3D11Texture3D> probeTexture_,probeNextTexture_;
     ComPtr<ID3D11ShaderResourceView> probeNextSrv_;
     gibake::Table bakedGi_{};bool hasBakedGi_=false;
     uint64_t loadedGiFileRevision_=0;
     int lowFrame_=-1,highFrame_=-1;
     float giHourMix_=0.f;
     V probeOrigin_{},probeInvSpan_{};ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<float> shadowUploadCache_;std::vector<TransparentTriangle> transparent_;
-    ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_;
+    ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_,lowTex_,lowDepth_,mergeTex_;
+    ComPtr<ID3D11ShaderResourceView> targetSrv_,resolveSrv_,lowSrv_;
+    ComPtr<ID3D11RenderTargetView> lowRtv_,mergeRtv_;
+    ComPtr<ID3D11DepthStencilView> lowDsv_;
+    int lowW_=0,lowH_=0;
     std::array<ReadbackSlot,3> readbackSlots_;
     std::deque<unsigned> pending_;
     unsigned readbackDepth_=0,nextReadbackSlot_=0;
     uint64_t lastSubmissionQualityBits_=defaultQualityBits;
-    bool lastSubmissionHybrid_=false,lastSubmissionTone_=false,lastSubmissionBalanced_=false;
+    bool lastSubmissionHybrid_=false,lastSubmissionTone_=false,lastSubmissionBalanced_=false,lastSubmissionMultires_=false;
     float lastSubmissionExposure_=1.f;
     ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
     std::vector<DrawChunk> chunks_,boxChunks_;
@@ -1958,6 +2323,12 @@ void setRasterGiCachePath(const std::filesystem::path& file){
     giTableLoaded.store(false,std::memory_order_release);
 }
 bool rasterGiCacheLoaded(){return giTableLoaded.load(std::memory_order_acquire);}
+void setRasterPeripheralMultiresOverride(int mode){
+    peripheralOverride.store(std::clamp(mode,-1,1),std::memory_order_release);
+}
+void setRasterCloudTimeScale(float x){
+    cloudTimeScale.store(std::clamp(x,0.f,480.f),std::memory_order_release);
+}
 bool setRasterQualitySettings(const RasterQualitySettings& q,std::wstring& error){
     const auto validSample=q.msaaSamples==1||q.msaaSamples==2||q.msaaSamples==4||q.msaaSamples==8;
     const auto validAniso=q.anisotropy==1||q.anisotropy==2||
@@ -2005,6 +2376,8 @@ float rasterColorExposure(){return 1.f;}
 void setRasterColorExposure(float){}
 void setRasterGiCachePath(const std::filesystem::path&){}
 bool rasterGiCacheLoaded(){return false;}
+void setRasterPeripheralMultiresOverride(int){}
+void setRasterCloudTimeScale(float){}
 bool setRasterQualitySettings(const RasterQualitySettings&,std::wstring& error){error=L"DirectX 11 indisponible sur cet OS.";return false;}
 bool renderDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,std::vector<uint32_t>&,Stats&,std::wstring& error) { error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false; }
 bool enqueueDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,unsigned,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}

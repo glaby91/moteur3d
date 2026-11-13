@@ -1,4 +1,5 @@
 #include "m3d_engine.h"
+#include "../../../../v17/weather/solar_cycle.h"
 
 namespace m3d {
 V sun=norm({.70f,.78f,-.714f}),skyZenith={126,170,209},skyHorizon={244,185,134},sunTint={255,246,223};
@@ -8,17 +9,18 @@ void updateLighting(float hour){
  solarHour=hour;
  // Solar elevation and azimuth change together, not elevation alone:
  // the roof and façade normal maps reveal different relief as the sun moves.
- float t=clampf((hour-6.f)/13.f,0.f,1.f);
- daylight=std::max(0.f,std::sin(PI*t));
+ const auto solar=cse::weather::solarMotion(hour);
+ daylight=solar.daylight;
  float dusk=clampf(1.f-std::abs(hour-18.3f)/2.3f,0.f,1.f);
  float dawn=clampf(1.f-std::abs(hour-7.1f)/1.8f,0.f,1.f);
  float warm=std::max(dusk,dawn*.72f);
- lampFactor=clampf((hour-17.f)/3.f,0.f,1.f);
- const float azimuth=(hour-14.75f)*.12f;
- const float c=std::cos(azimuth),si=std::sin(azimuth);
- const float x=.70f*c+.714f*si;
- const float z=.70f*si-.714f*c;
- sun=norm({x,-.16f+.92f*daylight,z});
+ // Automatic dusk AND night/dawn lamps: old time-only rule turned all lamps
+ // off after midnight, preventing a believable complete 24-hour cycle.
+ lampFactor=clampf((.38f-daylight)/.38f,0.f,1.f);
+ // True full-sweep 24-hour trajectory: the solar disc follows the shadows.
+ // Previously the azimuth moved only ~6.9 degrees/hour and the midnight
+ // altitude was stuck at -0.16, making the sun look almost stationary.
+ sun={solar.east,solar.up,solar.north};
  // Neutral airy zenith, slightly warm haze near the horizon.
  // Keep day surfaces below overexposure: the shaders provide the contrast.
  const V dayZenith={122,172,217},nightZenith={11,17,32};

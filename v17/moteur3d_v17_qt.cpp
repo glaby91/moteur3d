@@ -1,10 +1,13 @@
 #include "m3d_engine.h"
 #include "src/m3d_walk_controller.h"
 #include "exploration_motion.h"
+#include "scope_zoom.h"
 #include "camera_diagnostic.h"
 #include "anomaly_catalog.h"
 #include "frame_pacing.h"
 #include "pool_ladder.h"
+#include "weather/solar_cycle.h"
+#include "weather/sky_compositor.h"
 #include "radio_audio.h"
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
@@ -14,6 +17,7 @@
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QClipboard>
+#include <QCursor>
 #include <QGuiApplication>
 #include <QCoreApplication>
 #include <QDir>
@@ -51,6 +55,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
@@ -67,6 +72,7 @@
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <cstdio>
 #include <memory>
@@ -100,6 +106,7 @@ struct Result {
     QString error;
     double milliseconds=0;
     bool gpu=false;
+    bool skyCompositing=false; // DX11 sky pixels are transparent for Qt compositor
     // Reject finished frames after a camera, material, backend or scene change.
     uint64_t generation=0;
     quintptr renderThread=0;
@@ -114,11 +121,41 @@ struct SceneLoadOutcome {
 class ImageView final : public QWidget {
 public:
     void setImage(QImage im){image_=std::move(im);paintPending_=true;update();}
+    void enableSkyCompositing(bool enabled){
+        skyCompositing_=enabled;
+        if(!enabled)skyImage_=QImage{};
+        else skyDirty_=true;
+        update();
+    }
+    bool hasSkyFrame()const{return !skyImage_.isNull()&&!skyDirty_;}
+    void invalidateSky(){skyDirty_=true;}
+    void drawSky(const m3d::Camera& camera,float hour,double seconds,
+                 bool cloudsEnabled,bool fastWeather){
+        if(!skyCompositing_)return;
+        skyComposer_.render(skyImage_,camera,hour,seconds,cloudsEnabled,fastWeather);
+        skyDirty_=false;
+        update();
+    }
     void onPresented(std::function<void()> callback){presented_=std::move(callback);}
     void setPlaceholder(const QString& message){placeholder_=message;update();}
     void setCameraHud(QStringList lines,bool enabled){
         if(hudLines_==lines&&hudEnabled_==enabled)return;
         hudLines_=std::move(lines);hudEnabled_=enabled;update();
+    }
+    void setScopeOverlay(float level){
+        level=std::clamp(level,0.f,1.f);
+        if(std::abs(scopeLevel_-level)<.002f)return;
+        scopeLevel_=level;
+        update();
+    }
+    void setFpsOverlay(double fps,bool visible){
+        const QString next=visible&&fps>0.0
+            ?QStringLiteral("%1 FPS").arg(fps,0,'f',1)
+            :QStringLiteral("FPS —");
+        if(fpsVisible_==visible&&fpsText_==next)return;
+        fpsVisible_=visible;
+        fpsText_=next;
+        update();
     }
     static void drawCameraHud(QPainter& painter,const QRect& bounds,const QStringList& lines){
         if(lines.isEmpty()||bounds.width()<240||bounds.height()<110)return;
@@ -155,8 +192,55 @@ protected:
         s.scale(size(),Qt::KeepAspectRatio);
         QRect dst(QPoint((width()-s.width())/2,(height()-s.height())/2),s);
         p.setRenderHint(QPainter::SmoothPixmapTransform,false);
+        if(skyCompositing_ && !skyImage_.isNull()) {
+            // The 512x288 independent weather layer is updated at 30Hz.
+            // The DX11 architectural foreground stays at its last good frame.
+            p.setRenderHint(QPainter::SmoothPixmapTransform,true);
+            p.drawImage(dst,skyImage_);
+            p.setRenderHint(QPainter::SmoothPixmapTransform,false);
+        }
         p.drawImage(dst,image_);
+        // Scoped reticle is only a 2D Qt overlay, with no effect on physical
+        // position, collision rays or the raster/CPU renderer.
+        if(scopeLevel_>.005f){
+            p.save();
+            p.setRenderHint(QPainter::Antialiasing,true);
+            const QPointF center=dst.center();
+            const qreal radius=qreal(std::min(dst.width(),dst.height()))*.405;
+            QPainterPath outside;
+            outside.setFillRule(Qt::OddEvenFill);
+            outside.addRect(dst);
+            outside.addEllipse(center,radius,radius);
+            p.fillPath(outside,QColor(0,0,0,int(135.f*scopeLevel_)));
+            p.setBrush(Qt::NoBrush);
+            p.setPen(QPen(QColor(228,236,231,int(195.f*scopeLevel_)),1.25));
+            p.drawEllipse(center,radius,radius);
+            const qreal line=qreal(std::max(12,int(radius*.14)));
+            const qreal gap=5.;
+            p.setPen(QPen(QColor(16,24,22,int(245.f*scopeLevel_)),1.8));
+            p.drawLine(QPointF(center.x()-line,center.y()),QPointF(center.x()-gap,center.y()));
+            p.drawLine(QPointF(center.x()+gap,center.y()),QPointF(center.x()+line,center.y()));
+            p.drawLine(QPointF(center.x(),center.y()-line),QPointF(center.x(),center.y()-gap));
+            p.drawLine(QPointF(center.x(),center.y()+gap),QPointF(center.x(),center.y()+line));
+            p.setBrush(QColor(230,238,235,int(190.f*scopeLevel_)));
+            p.setPen(Qt::NoPen);
+            p.drawEllipse(center,1.75,1.75);
+            p.restore();
+        }
         if(hudEnabled_)drawCameraHud(p,dst,hudLines_);
+        if(fpsVisible_){
+            // Count completed presentations, not a theoretical GPU FPS claim.
+            p.save();
+            QFont f=p.font();f.setFamily(QStringLiteral("Consolas"));f.setPointSize(10);
+            f.setBold(true);p.setFont(f);
+            const int width=std::max(87,p.fontMetrics().horizontalAdvance(fpsText_)+18);
+            const QRect badge(dst.right()-width-10,dst.top()+10,width,28);
+            p.setPen(Qt::NoPen);p.setBrush(QColor(9,15,22,213));
+            p.drawRoundedRect(badge,6,6);
+            p.setPen(QColor(178,238,222));
+            p.drawText(badge,Qt::AlignCenter,fpsText_);
+            p.restore();
+        }
         if(paintPending_){
             paintPending_=false;
             if(presented_)presented_();
@@ -164,11 +248,17 @@ protected:
     }
 private:
     QImage image_;
+    QImage skyImage_;
+    cse::weather::SkyCompositor skyComposer_;
+    bool skyCompositing_=false,skyDirty_=true;
     bool paintPending_=false;
     std::function<void()> presented_;
     QString placeholder_;
     QStringList hudLines_;
     bool hudEnabled_=true;
+    float scopeLevel_=0.f;
+    bool fpsVisible_=false;
+    QString fpsText_;
 };
 class V17Window final : public QMainWindow {
 public:
@@ -192,7 +282,13 @@ public:
         renderPool_.setMaxThreadCount(1);
         renderPool_.setExpiryTimeout(-1);
         createUi();
+        // A stationary camera must always display the native full-resolution
+        // raster, regardless of the experimental launcher environment.
+        peripheralExperimentEnabled_=
+            qEnvironmentVariable("M3D_V17_PERIPHERAL_MULTIREZ")==QStringLiteral("1");
+        setRasterPeripheralMultiresOverride(0);
         pacingClock_.start();
+        skyMotionClock_.start();
         canvas_->onPresented([this]{recordImagePresented();});
         audioTimer_.setInterval(50); // 20 Hz spatial updates, independent from GPU images.
         connect(&audioTimer_,&QTimer::timeout,this,[this]{
@@ -256,6 +352,7 @@ public:
                 hasRenderedPose_=true;
                 lastCompletedRenderMs_=outcome.milliseconds;
                 canvas_->setImage(outcome.image);
+                canvas_->enableSkyCompositing(outcome.skyCompositing);
             }
             if(outcome.error.isEmpty()&&!outcome.image.isNull()){
                 const QString milliseconds=QString::number(outcome.milliseconds,'f',1);
@@ -368,6 +465,140 @@ public:
             QCoreApplication::exit(33);
         });
     }
+    // Regression: recalling an anomaly must not switch the user's walking
+    // preference to free flight. Previously that disabling was persisted in
+    // QSettings and removed ALL collision checks on subsequent launches.
+    void smokeWalkingCollisionPreference(){
+        auto* poll=new QTimer(this);
+        poll->setInterval(100);
+        connect(poll,&QTimer::timeout,this,[this,poll]{
+            if(sceneLoading_||!runtime_||!walkingModeBox_)return;
+            poll->stop();
+            QSettings prefs(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+            const QVariant previous=prefs.value(QStringLiteral("Exploration/Walking"));
+            walkingModeBox_->setChecked(true);
+            prefs.setValue(QStringLiteral("Exploration/Walking"),true);
+            prefs.sync();
+            selectAnomaly(0); // ANO-005 has a precisely measured camera pose.
+            const bool okAfterSelect=walkingModeBox_->isChecked()
+                &&walkingCollisionSyncPending_
+                &&prefs.value(QStringLiteral("Exploration/Walking")).toBool();
+            returnBeforeAnomaly();
+            prefs.sync();
+            const bool okAfterReturn=walkingModeBox_->isChecked()
+                &&walkingCollisionSyncPending_
+                &&prefs.value(QStringLiteral("Exploration/Walking")).toBool();
+            // Restore the prior preference after the smoke test.
+            {
+                QSignalBlocker block(walkingModeBox_);
+                walkingModeBox_->setChecked(previous.isValid()?previous.toBool():true);
+            }
+            if(previous.isValid())prefs.setValue(QStringLiteral("Exploration/Walking"),previous);
+            else prefs.remove(QStringLiteral("Exploration/Walking"));
+            prefs.sync();
+            if(!okAfterSelect||!okAfterReturn){
+                std::fprintf(stderr,
+                    "V17 COLLISION PREFERENCE FAILED: afterSelect=%d afterReturn=%d\\n",
+                    int(okAfterSelect),int(okAfterReturn));
+                QCoreApplication::exit(38);
+                return;
+            }
+            std::puts("V17 COLLISION PREFERENCE PASS: anomaly pose + return retain walking preference");
+            QCoreApplication::exit(0);
+        });
+        poll->start();
+        QTimer::singleShot(120000,this,[]{
+            std::fprintf(stderr,"V17 COLLISION PREFERENCE: timeout\\n");
+            QCoreApplication::exit(39);
+        });
+    }
+    // GUI integration smoke: actual Qt RMB events on the canvas, FOV narrows
+    // while aiming, and release/stop restores the original camera exactly.
+    // Does not change walking mode or camera position.
+    void smokeScopedAim(){
+        auto* poll=new QTimer(this);
+        poll->setInterval(100);
+        connect(poll,&QTimer::timeout,this,[this,poll]{
+            if(sceneLoading_||!runtime_||runtime_->cameras.isEmpty())return;
+            poll->stop();
+            if(!freeCameraActive_)activateFreeCamera();
+            exploring_=true;
+            const float originalFov=freeCamera_.fov;
+            const V originalEye=freeCamera_.eye;
+            QMouseEvent down(QEvent::MouseButtonPress,QPointF(40,40),
+                             Qt::RightButton,Qt::RightButton,Qt::NoModifier);
+            QCoreApplication::sendEvent(canvas_,&down);
+            const bool activated=rightMouseHeld_;
+            scopeBlend_=cse::scope::advance(scopeBlend_,rightMouseHeld_,.08f);
+            freeCamera_.fov=cse::scope::effectiveFov(scopeBaseFov_,scopeBlend_);
+            const bool magnified=freeCamera_.fov<originalFov-1.f;
+            QMouseEvent up(QEvent::MouseButtonRelease,QPointF(40,40),
+                           Qt::RightButton,Qt::NoButton,Qt::NoModifier);
+            QCoreApplication::sendEvent(canvas_,&up);
+            const bool released=!rightMouseHeld_;
+            stopExploration();
+            const bool restored=std::abs(freeCamera_.fov-originalFov)<.0005f;
+            const bool unchanged=length(freeCamera_.eye-originalEye)<.0005f;
+            if(!(activated&&magnified&&released&&restored&&unchanged)){
+                std::fprintf(stderr,
+                    "V17 SCOPE MOUSE FAIL: down=%d zoom=%d up=%d fov=%d eye=%d\\n",
+                    int(activated),int(magnified),int(released),int(restored),int(unchanged));
+                QCoreApplication::exit(44);return;
+            }
+            std::puts("V17 SCOPE MOUSE PASS: press/release and original FOV, position preserved");
+            QCoreApplication::exit(0);
+        });
+        poll->start();
+        QTimer::singleShot(120000,this,[]{
+            std::fprintf(stderr,"V17 SCOPE MOUSE TIMEOUT\\n");
+            QCoreApplication::exit(45);
+        });
+    }
+    // Real Qt event regression for free-look, true F11 fullscreen and return.
+    // Test uses a synthetic motion delta; no physical mouse is required on CI.
+    void smokeImmersiveMouse(){
+        auto* poll=new QTimer(this);
+        poll->setInterval(100);
+        connect(poll,&QTimer::timeout,this,[this,poll]{
+            if(sceneLoading_||!runtime_||runtime_->cameras.isEmpty())return;
+            poll->stop();
+            activateFreeCamera();
+            exploring_=true;
+            mouseCaptured_=true;
+            canvas_->setCursor(Qt::BlankCursor);
+            const float originalYaw=yaw_;
+            const V originalEye=freeCamera_.eye;
+            const QPoint center=canvas_->rect().center();
+            QMouseEvent move(QEvent::MouseMove,QPointF(center+QPoint(16,-9)),
+                Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+            QCoreApplication::sendEvent(canvas_,&move);
+            const bool freeLookWorked=std::abs(yaw_-originalYaw)>.01f;
+            const bool eyeUnchanged=length(freeCamera_.eye-originalEye)<.0005f;
+            const bool fpsReady=canvas_->isVisible();
+            immersiveAction_->setChecked(true);
+            QCoreApplication::processEvents();
+            const bool full=QWidget::isFullScreen()
+                &&!menuBar()->isVisible()&&!statusBar()->isVisible();
+            immersiveAction_->setChecked(false);
+            QCoreApplication::processEvents();
+            const bool back=!QWidget::isFullScreen()
+                &&menuBar()->isVisible()&&statusBar()->isVisible();
+            stopExploration();
+            if(!(freeLookWorked&&eyeUnchanged&&full&&back&&fpsReady)){
+                std::fprintf(stderr,
+                    "IMMERSIVE MOUSE FAILED: move=%d eye=%d full=%d back=%d canvas=%d\\n",
+                    int(freeLookWorked),int(eyeUnchanged),int(full),int(back),int(fpsReady));
+                QCoreApplication::exit(49);return;
+            }
+            std::puts("IMMERSIVE MOUSE PASS: no-button look, true F11 fullscreen and restored editor");
+            QCoreApplication::exit(0);
+        });
+        poll->start();
+        QTimer::singleShot(120000,this,[]{
+            std::fprintf(stderr,"IMMERSIVE MOUSE TIMEOUT\\n");
+            QCoreApplication::exit(50);
+        });
+    }
     ~V17Window() override {
         audioTimer_.stop();
         stopRadio();
@@ -390,6 +621,12 @@ private:
 
     ImageView* canvas_=nullptr;
     QTimer frameTimer_;
+    QTimer skyAnimationTimer_;
+    QElapsedTimer skyMotionClock_;
+    QTimer dayNightTimer_;
+    QElapsedTimer dayNightClock_;
+    double dayNightOriginHour_=14.75;
+    bool applyingDayNightTick_=false;
     QElapsedTimer frameClock_;
     QElapsedTimer motionClock_;
     QSet<int> keysDown_;
@@ -398,7 +635,17 @@ private:
     walk::State walkingState_{};
     cse::pool_ladder::Motion poolLadderMotion_{};
     QCheckBox* walkingModeBox_=nullptr;
-    bool exploring_=false,freeCameraActive_=false,leftMouseHeld_=false;
+    bool exploring_=false,freeCameraActive_=false,leftMouseHeld_=false,rightMouseHeld_=false;
+    bool mouseCaptured_=false;
+    bool peripheralExperimentEnabled_=false,peripheralDuringMotion_=false;
+    QElapsedTimer lastMouseLookMotion_;
+    QAction* immersiveAction_=nullptr;
+    std::vector<std::pair<QWidget*,bool>> fullscreenRestore_;
+    double fpsFiltered_=0.0;
+    float scopeBaseFov_=65.f,scopeBlend_=0.f;
+    // Exact anomaly/replayed camera is kept until the next walking input.
+    // This does not disable or persistently alter the user's collision mode.
+    bool walkingCollisionSyncPending_=false;
     bool explorationQualityOverride_=false;
     RasterQualitySettings explorationOriginalQuality_{};
     float yaw_=0.f,pitch_=0.f;
@@ -568,10 +815,12 @@ private:
             QMessageBox::warning(this,QStringLiteral("Restaurer une caméra"),error);return;
         }
         keysDown_.clear();
-        // Walking mode would snap Y to the floor, which destroys exact replay.
-        if(walkingModeBox_&&walkingModeBox_->isChecked())
-            walkingModeBox_->setChecked(false);
+        // Preserve the exact screenshot pose without switching the
+        // collision mode (which previously persisted "Vol libre" in QSettings).
+        // On the next user movement, resynchronize feet with the real scene.
         freeCamera_=pose;
+        resetScopeForCamera();
+        walkingCollisionSyncPending_=true;
         const V dir=norm(pose.target-pose.eye);
         yaw_=std::atan2(dir.x,-dir.z);
         pitch_=std::asin(clampf(dir.y,-.99f,.99f));
@@ -597,14 +846,22 @@ private:
                          :QStringLiteral("Vitesse ×1")));
         explorationSpeedLabel_->show();
     }
+    void resetScopeForCamera(){
+        rightMouseHeld_=false;
+        scopeBlend_=0.f;
+        scopeBaseFov_=freeCamera_.fov;
+        if(canvas_)canvas_->setScopeOverlay(0.f);
+    }
     void activateFreeCamera(){
         if(!runtime_||runtime_->cameras.isEmpty())return;
         const int idx=std::clamp(cameraBox_->currentIndex(),0,int(runtime_->cameras.size())-1);
         freeCamera_=runtime_->cameras[idx];
+        resetScopeForCamera();
         const V dir=norm(freeCamera_.target-freeCamera_.eye);
         yaw_=std::atan2(dir.x,-dir.z);
         pitch_=std::asin(clampf(dir.y,-.99f,.99f));
         freeCameraActive_=true;
+        walkingCollisionSyncPending_=false;
         if(walkingModeBox_&&walkingModeBox_->isChecked()){
             walk::spawn(runtime_->renderScene,freeCamera_.eye,walkingState_);
             freeCamera_.eye=walk::eye(walkingState_);
@@ -618,8 +875,31 @@ private:
         freeCamera_.target=freeCamera_.eye+forward;
         updateCameraHud();
     }
+    void captureMouseLook(){
+        if(!exploring_||mouseCaptured_||!canvas_||!isActiveWindow())return;
+        mouseCaptured_=true;
+        canvas_->setCursor(Qt::BlankCursor);
+        canvas_->setFocus(Qt::OtherFocusReason);
+        QCursor::setPos(canvas_->mapToGlobal(canvas_->rect().center()));
+    }
+    void releaseMouseLook(){
+        if(!mouseCaptured_)return;
+        mouseCaptured_=false;
+        if(canvas_)canvas_->unsetCursor();
+    }
+    void setMotionResolution(bool active){
+        const bool next=peripheralExperimentEnabled_&&active;
+        if(peripheralDuringMotion_==next)return;
+        peripheralDuringMotion_=next;
+        setRasterPeripheralMultiresOverride(next?1:0);
+    }
     void stopExploration(){
+        releaseMouseLook();
+        setMotionResolution(false);
         exploring_=false;
+        if(canvas_)canvas_->setFpsOverlay(0.0,false);
+        if(freeCameraActive_)freeCamera_.fov=scopeBaseFov_;
+        resetScopeForCamera();
         if(explorationQualityOverride_){
             std::wstring error;
             if(setRasterQualitySettings(explorationOriginalQuality_,error))
@@ -630,11 +910,19 @@ private:
         keysDown_.clear();
         poolLadderMotion_={};
         leftMouseHeld_=false;
+        rightMouseHeld_=false;
+        lastMouseLookMotion_.invalidate();
         updateExplorationSpeedIndicator();
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Démarrer exploration (V17)"));
         if(explorationHelp_)explorationHelp_->setText(QStringLiteral(
-            "ZQSD / flèches : marcher · clic gauche + souris : regarder · Maj : vitesse ×3 · Échap : arrêter\n"
-            "E près d’une échelle : monter/descendre dans la piscine. Vol libre : Espace / Ctrl."));
+            "ZQSD / flèches : marcher · souris : regarder librement · clic droit : lunette ×3\n"
+            "F11 : plein écran · Échap : arrêter · E : échelle · Maj : accélérer · Vol libre : Espace / Ctrl."));
+        // A delayed multires GPU frame could still be on screen when Esc
+        // stops exploration. Queue a final guaranteed full-resolution image.
+        if(!closingRequested_&&!sceneLoading_&&runtime_)
+            QTimer::singleShot(0,this,[this]{
+                if(!exploring_&&!closingRequested_&&runtime_)requestRender();
+            });
     }
     void toggleExploration(){
         if(exploring_){stopExploration();return;}
@@ -663,19 +951,34 @@ private:
             }
         }
         exploring_=true;
+        setMotionResolution(false);
+        resetPacing();
+        canvas_->setFpsOverlay(0.0,true);
+        if(walkingModeBox_&&!walkingModeBox_->isChecked()){
+            statusBar()->showMessage(QStringLiteral(
+                "Vol libre : collisions désactivées. Cochez « Marcher au sol » pour bloquer murs et obstacles."),10000);
+        }
         poolLadderMotion_={};
         motionClock_.start();
         frameClock_.invalidate();
-        resetPacing();
+        lastMouseLookMotion_.invalidate();
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Arrêter exploration"));
         updateCameraHud();
         frameTimer_.start();
         updateExplorationSpeedIndicator();
         canvas_->setFocus();
+        captureMouseLook();
     }
     void frameTick(){
         if(!exploring_||!runtime_||!freeCameraActive_)return;
         const float dt=std::min(0.08f,float(motionClock_.restart())/1000.f);
+        const float nextScope=cse::scope::advance(scopeBlend_,rightMouseHeld_,dt);
+        if(nextScope!=scopeBlend_){
+            scopeBlend_=nextScope;
+            freeCamera_.fov=cse::scope::effectiveFov(scopeBaseFov_,scopeBlend_);
+            canvas_->setScopeOverlay(scopeBlend_);
+            updateCameraHud();
+        }
         V forward{std::sin(yaw_)*std::cos(pitch_),std::sin(pitch_),
                   -std::cos(yaw_)*std::cos(pitch_)};
         V horizontal=norm(V{forward.x,0,forward.z});
@@ -685,7 +988,23 @@ private:
         if(keysDown_.contains(Qt::Key_S)||keysDown_.contains(Qt::Key_Down))move=move-horizontal;
         if(keysDown_.contains(Qt::Key_D)||keysDown_.contains(Qt::Key_Right))move=move+right;
         if(keysDown_.contains(Qt::Key_Q)||keysDown_.contains(Qt::Key_A)||keysDown_.contains(Qt::Key_Left))move=move-right;
+        const bool mouseRecentlyMoved=lastMouseLookMotion_.isValid()&&
+            lastMouseLookMotion_.elapsed()<180;
+        const bool moving=length(move)>.01f||poolLadderMotion_.active();
+        // The scoped sight remains fully sharp. On stopping, raster returns
+        // to full resolution within 180ms, without any temporal reprojection.
+        setMotionResolution((moving||mouseRecentlyMoved)&&
+            !rightMouseHeld_&&scopeBlend_<.05f);
         if(walkingModeBox_&&walkingModeBox_->isChecked()){
+            // A recalled anomaly camera can be above a floor or behind a wall.
+            // Keep its precise eye position until the user actually navigates.
+            // Never reuse stale feet from before camera teleportation.
+            if(walkingCollisionSyncPending_ && length(move)>.01f){
+                walk::spawn(runtime_->renderScene,freeCamera_.eye,walkingState_);
+                freeCamera_.eye=walk::eye(walkingState_);
+                walkingCollisionSyncPending_=false;
+                updateLook();
+            }
             if(poolLadderMotion_.active()){
                 const bool climbing=poolLadderMotion_.up;
                 const auto p=poolLadderMotion_.advance(dt);
@@ -768,34 +1087,86 @@ protected:
         }
         QMainWindow::closeEvent(event);
     }
+    bool event(QEvent* e) override {
+        if(e->type()==QEvent::WindowActivate&&exploring_){
+            QTimer::singleShot(0,this,[this]{
+                if(exploring_&&!closingRequested_)captureMouseLook();
+            });
+        }
+        if(e->type()==QEvent::WindowDeactivate){
+            // Alt+Tab / focus loss must never leave the pointer hidden or
+            // the rifle scope button logically stuck in the pressed state.
+            releaseMouseLook();
+            rightMouseHeld_=false;
+        }
+        return QMainWindow::event(e);
+    }
     bool eventFilter(QObject* watched,QEvent* event) override{
         if(watched==canvas_ && exploring_){
             if(event->type()==QEvent::MouseButtonPress){
                 auto* e=static_cast<QMouseEvent*>(event);
+                if(!mouseCaptured_)captureMouseLook();
+                if(e->button()==Qt::RightButton){
+                    rightMouseHeld_=true;
+                    canvas_->setFocus();
+                    return true;
+                }
                 if(e->button()==Qt::LeftButton){
-                    leftMouseHeld_=true;previousMouse_=e->pos();canvas_->setFocus();return true;
+                    leftMouseHeld_=true;
+                    canvas_->setFocus();
+                    return true;
                 }
             }
             if(event->type()==QEvent::MouseButtonRelease){
                 auto* e=static_cast<QMouseEvent*>(event);
+                if(e->button()==Qt::RightButton){rightMouseHeld_=false;return true;}
                 if(e->button()==Qt::LeftButton){leftMouseHeld_=false;return true;}
             }
-            if(event->type()==QEvent::MouseMove && leftMouseHeld_){
+            if(event->type()==QEvent::MouseMove && mouseCaptured_){
                 auto* e=static_cast<QMouseEvent*>(event);
-                const QPoint d=e->pos()-previousMouse_;previousMouse_=e->pos();
-                yaw_+=float(d.x())*.005f;
-                pitch_=clampf(pitch_-float(d.y())*.005f,-1.48f,1.48f);
-                updateLook();return true;
+                const QPoint center=canvas_->rect().center();
+                const QPoint delta=e->pos()-center;
+                // Qt generates a synthetic move when the cursor is recentered.
+                // Ignore it. No click is required to look around.
+                if(delta.isNull())return true;
+                const float dx=clampf(float(delta.x()),-160.f,160.f);
+                const float dy=clampf(float(delta.y()),-160.f,160.f);
+                const float sensitivity=.005f*cse::scope::mouseSensitivity(scopeBlend_);
+                yaw_+=dx*sensitivity;
+                pitch_=clampf(pitch_-dy*sensitivity,-1.48f,1.48f);
+                lastMouseLookMotion_.restart();
+                updateLook();
+                QCursor::setPos(canvas_->mapToGlobal(center));
+                return true;
             }
         }
         return QMainWindow::eventFilter(watched,event);
     }
     void keyPressEvent(QKeyEvent* e) override{
+        if(e->key()==Qt::Key_F11 && immersiveAction_){
+            immersiveAction_->setChecked(!immersiveAction_->isChecked());
+            e->accept();return;
+        }
         if(exploring_){
-            if(e->key()==Qt::Key_Escape){stopExploration();e->accept();return;}
+            if(e->key()==Qt::Key_Escape){
+                stopExploration();
+                if(immersiveAction_&&immersiveAction_->isChecked())
+                    immersiveAction_->setChecked(false);
+                e->accept();return;
+            }
+            if(e->key()==Qt::Key_Tab){
+                if(mouseCaptured_)releaseMouseLook();else captureMouseLook();
+                e->accept();return;
+            }
             if(e->key()==Qt::Key_E && !e->isAutoRepeat() &&
                walkingModeBox_ && walkingModeBox_->isChecked() &&
                scenePath_.contains(QStringLiteral("benchmark-civic"),Qt::CaseInsensitive)){
+                if(walkingCollisionSyncPending_&&runtime_){
+                    walk::spawn(runtime_->renderScene,freeCamera_.eye,walkingState_);
+                    freeCamera_.eye=walk::eye(walkingState_);
+                    walkingCollisionSyncPending_=false;
+                    updateLook();
+                }
                 const V feet=walkingState_.feet;
                 if(poolLadderMotion_.begin({feet.x,feet.y,feet.z})){
                     keysDown_.clear();
@@ -838,6 +1209,8 @@ private:
     QCheckBox* edgeAa_=nullptr;
     QSlider* azimuth_=nullptr;
     QDoubleSpinBox* sunHour_=nullptr;
+    QCheckBox* cloudAnimationBox_=nullptr;
+    QCheckBox* dayNightCycleBox_=nullptr;
     QCheckBox* hybridLightBox_=nullptr;
     QCheckBox* filmicToneBox_=nullptr;
     QCheckBox* colorEnergyBox_=nullptr;
@@ -1003,16 +1376,17 @@ private:
         }
         currentAnomaly_=index;
         if(a.cameraKnown){
-            // Preserve the exact screenshot height: walking-mode floor snapping
-            // must not alter the recalled anomaly viewpoint.
-            if(walkingModeBox_&&walkingModeBox_->isChecked())
-                walkingModeBox_->setChecked(false);
+            // Camera recalls preserve a precise reference view. Do not
+            // silently disable walking/collisions or overwrite QSettings.
+            // Only resynchronize the walking state on the next movement.
             keysDown_.clear();
             poolLadderMotion_={};
             const float yr=a.yaw*PI/180.f;
             const float pr=a.pitch*PI/180.f;
             freeCamera_.eye={a.x,a.y,a.z};
+            walkingCollisionSyncPending_=true;
             freeCamera_.fov=a.fov;
+            resetScopeForCamera();
             freeCamera_.id=QString::fromLatin1(a.id);
             freeCamera_.name=QString::fromUtf8(a.title);
             yaw_=yr;pitch_=pr;
@@ -1090,8 +1464,11 @@ private:
     void returnBeforeAnomaly(){
         if(!hasBeforeAnomalyCamera_)return;
         const auto pose=beforeAnomalyCamera_;
-        if(walkingModeBox_&&walkingModeBox_->isChecked())walkingModeBox_->setChecked(false);
+        // Return to the old camera without changing the selected navigation
+        // mode or disabling obstacle collisions in saved preferences.
         freeCamera_=pose;
+        resetScopeForCamera();
+        walkingCollisionSyncPending_=true;
         const V dir=norm(pose.target-pose.eye);
         yaw_=std::atan2(dir.x,-dir.z);
         pitch_=std::asin(clampf(dir.y,-.99f,.99f));
@@ -1393,12 +1770,20 @@ private:
         denoiseDirect_=new QCheckBox(QStringLiteral("Débruitage CPU direct (bilatéral)"));
         denoiseDirect_->setChecked(false); // avoid blurring PBR details by default
         sunHour_=new QDoubleSpinBox;
-        sunHour_->setRange(7.0,19.0);
+        sunHour_->setRange(0.0,23.99);
         sunHour_->setDecimals(2);
         sunHour_->setSingleStep(.25);
         sunHour_->setSuffix(QStringLiteral(" h"));
         sunHour_->setValue(14.75);
-        sunHour_->setToolTip(QStringLiteral("Direction et hauteur du soleil — lumière rasante vers 17 h"));
+        sunHour_->setToolTip(QStringLiteral("Soleil et éclairage de 00 h à 24 h — aube, jour, crépuscule, nuit"));
+        cloudAnimationBox_=new QCheckBox(QStringLiteral("Nuages animés sur le ciel"));
+        cloudAnimationBox_->setChecked(true);
+        cloudAnimationBox_->setToolTip(QStringLiteral(
+            "Véritables cirrus calculés par le shader DirectX11. La scène reste nette."));
+        dayNightCycleBox_=new QCheckBox(QStringLiteral("Simulation jour/nuit (24 h en 6 min)"));
+        dayNightCycleBox_->setChecked(false);
+        dayNightCycleBox_->setToolTip(QStringLiteral(
+            "Fait progresser le soleil, le ciel, les ombres et les éclairages du bâtiment."));
         // Two independent controls avoid coupling global illumination and
         // output tone mapping. Preserve the existing hybrid preference, while
         // the new filmic shoulder defaults OFF to avoid V17.309 wash-out.
@@ -1442,6 +1827,8 @@ private:
         form->addRow(QStringLiteral("Échantillons CPU direct"),directSamples_);
         form->addRow(QStringLiteral("Échantillons GI"),giSamples_);
         form->addRow(QStringLiteral("Heure solaire"),sunHour_);
+        form->addRow(cloudAnimationBox_);
+        form->addRow(dayNightCycleBox_);
         form->addRow(hybridLightBox_);
         form->addRow(colorEnergyBox_);
         form->addRow(QStringLiteral("Exposition linéaire"),colorExposureBox_);
@@ -1545,8 +1932,8 @@ private:
         walkingModeBox_->setChecked(walkPreferences.value(QStringLiteral("Exploration/Walking"),true).toBool());
         vertical->addWidget(walkingModeBox_);
         explorationHelp_=new QLabel(QStringLiteral(
-            "ZQSD / flèches : marcher · clic gauche + souris : regarder · Maj : accélérer · Échap : arrêter\\n"
-            "E près d’une échelle : monter/descendre dans la piscine. Ctrl+Maj+A : anomalie PNG+JSON."));
+            "ZQSD / flèches : marcher · souris libre : orienter la caméra · clic droit : zoom ×3\\n"
+            "F11 : plein écran · Échap : arrêter · E : échelle · Ctrl+Maj+A : anomalie PNG+JSON."));
         explorationHelp_->setWordWrap(true);
         vertical->addWidget(explorationHelp_);
         connect(explorationButton_,&QPushButton::clicked,this,[this]{toggleExploration();});
@@ -1601,6 +1988,7 @@ private:
             if(exploring_&&freeCameraActive_&&runtime_){
                 if(enabled){
                     walk::spawn(runtime_->renderScene,freeCamera_.eye,walkingState_);
+                    walkingCollisionSyncPending_=false;
                     freeCamera_.eye=walk::eye(walkingState_);
                     updateLook();
                 }
@@ -1628,8 +2016,8 @@ private:
         right->setWidget(rightScroll);
         addDockWidget(Qt::RightDockWidgetArea,right);
         right->setMinimumWidth(295);
-        // Dedicated uncluttered exploration mode. Preserve dock state in editing mode.
-        // F11 maximizes the view without changing the underlying render resolution.
+        // True fullscreen (not just hidden docks), preserving the editor
+        // layout for a reversible F11 return.
         auto* viewMenu=menuBar()->addMenu(QStringLiteral("Affichage"));
         auto* hudToggle=viewMenu->addAction(QStringLiteral("Afficher les coordonnées caméra (HUD)"));
         hudToggle->setCheckable(true);
@@ -1642,14 +2030,37 @@ private:
             cfg.setValue(QStringLiteral("Camera/ShowHUD"),enabled);
             updateCameraHud();
         });
-        auto* immersive=viewMenu->addAction(QStringLiteral("Vue 3D agrandie (F11)"));
-        immersive->setCheckable(true);
-        immersive->setShortcut(QKeySequence(Qt::Key_F11));
-        connect(immersive,&QAction::toggled,this,[this,left,right](bool enabled){
-            left->setVisible(!enabled);
-            right->setVisible(!enabled);
-            if(enabled)canvas_->setFocus();
+        immersiveAction_=viewMenu->addAction(QStringLiteral("Plein écran 3D (F11)"));
+        immersiveAction_->setCheckable(true);
+        immersiveAction_->setShortcut(QKeySequence(Qt::Key_F11));
+        immersiveAction_->setShortcutContext(Qt::ApplicationShortcut);
+        // F11 must remain available even while the menu bar is hidden.
+        addAction(immersiveAction_);
+        connect(immersiveAction_,&QAction::toggled,this,[this](bool enabled){
+            if(enabled){
+                fullscreenRestore_.clear();
+                const auto hideRemembered=[this](QWidget* w){
+                    if(!w)return;
+                    fullscreenRestore_.emplace_back(w,w->isVisible());
+                    w->hide();
+                };
+                for(auto* dock:findChildren<QDockWidget*>())hideRemembered(dock);
+                for(auto* bar:findChildren<QToolBar*>())hideRemembered(bar);
+                hideRemembered(menuBar());
+                hideRemembered(statusBar());
+                showFullScreen();
+            }else{
+                showNormal();
+                for(const auto& entry:fullscreenRestore_)
+                    if(entry.first)entry.first->setVisible(entry.second);
+                fullscreenRestore_.clear();
+            }
             QTimer::singleShot(0,this,[this]{
+                if(exploring_){
+                    releaseMouseLook();
+                    canvas_->setFocus();
+                    captureMouseLook();
+                }
                 if(qualityBox_&&qualityBox_->currentIndex()==0)requestRender();
             });
         });
@@ -1707,12 +2118,67 @@ private:
             settings.setValue(QStringLiteral("Raster/FilmicTonemap"),enabled);
             if(backendBox_&&backendBox_->currentIndex()==4)requestRender();
         });
+        // Independent 30Hz sky compositor: never waits for the GPU, never
+        // requests a geometry or shadow render just to animate weather.
+        skyAnimationTimer_.setInterval(33);
+        connect(&skyAnimationTimer_,&QTimer::timeout,this,[this]{
+            if(sceneLoading_||!runtime_||!hasRenderedPose_||lastImage_.isNull()||
+               !backendBox_||backendBox_->currentIndex()!=4)return;
+            if(!cloudAnimationBox_->isChecked()&&!dayNightCycleBox_->isChecked()&&
+               canvas_->hasSkyFrame())return;
+            const auto camera=v16::makeCamera(lastRenderedPose_,
+                                               lastImage_.width(),lastImage_.height());
+            const float hour=dayNightCycleBox_->isChecked()
+                ?float(cse::weather::cycleHour(dayNightOriginHour_,
+                       double(dayNightClock_.elapsed())/1000.0))
+                :float(sunHour_->value());
+            const double seconds=double(skyMotionClock_.elapsed())/1000.0;
+            canvas_->drawSky(camera,hour,seconds,
+                cloudAnimationBox_->isChecked(),dayNightCycleBox_->isChecked());
+        });
+        skyAnimationTimer_.start();
+        // Weather animation deliberately faster than the old almost-static sky.
+        m3d::setRasterCloudTimeScale(24.f);
+        connect(cloudAnimationBox_,&QCheckBox::toggled,this,[this](bool enabled){
+            m3d::setRasterCloudTimeScale(!enabled?0.f:
+                (dayNightCycleBox_->isChecked()?240.f:24.f));
+            canvas_->invalidateSky();
+        });
+        dayNightTimer_.setInterval(1500); // Architectural lighting is slower than 30Hz sky
+        connect(&dayNightTimer_,&QTimer::timeout,this,[this]{
+            if(!runtime_ || sceneLoading_)return;
+            // Simulated time advances independently of GPU frame duration.
+            // Elapsed time is absolute since the start, never accumulated
+            // from successful frames. Long HD620 GPU frames cannot freeze
+            // or stretch the 6-minute day/night cycle.
+            const double seconds=double(dayNightClock_.elapsed())/1000.0;
+            const double next=cse::weather::cycleHour(dayNightOriginHour_,seconds);
+            if(std::abs(next-sunHour_->value())<.01)return;
+            applyingDayNightTick_=true;
+            sunHour_->setValue(next);
+            applyingDayNightTick_=false;
+        });
+        connect(dayNightCycleBox_,&QCheckBox::toggled,this,[this](bool enabled){
+            if(enabled){
+                dayNightOriginHour_=sunHour_->value();
+                dayNightClock_.start();
+                dayNightTimer_.start();
+            }else dayNightTimer_.stop();
+            m3d::setRasterCloudTimeScale(!cloudAnimationBox_->isChecked()?0.f:
+                (enabled?240.f:24.f));
+        });
         connect(sunHour_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double hour){
+            // A deliberate manual time change reanchors the running clock.
+            if(dayNightCycleBox_ && dayNightCycleBox_->isChecked() &&
+               !applyingDayNightTick_){
+                dayNightOriginHour_=hour;
+                dayNightClock_.restart();
+            }
             if(!runtime_)return;
-            // No render thread may observe a partially updated daylight hour.
-            renderSerial_->fetch_add(1);
-            if(watcher_.isRunning())watcher_.waitForFinished();
+            // No UI-thread wait for a slow DX11 frame. Only the latest hour
+            // is queued, and in-flight frames retain their captured hour.
             runtime_->daylightHour=float(hour);
+            canvas_->invalidateSky();
             requestRender();
         });
         connect(roughness_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double){modifyMaterial();});
@@ -1860,6 +2326,7 @@ private:
         runtime_=replacement;
         lastImage_=QImage{};
         canvas_->setImage(QImage{});  // Do not keep displaying an old scene.
+        canvas_->enableSkyCompositing(false);
         renderTimeLabel_->setText(QStringLiteral("Dernier rendu : —"));
         materialLabel_->setText(QStringLiteral("Sélectionner un matériau dans le catalogue"));
         setWindowTitle(QStringLiteral("CSE WARP Beta X V17.%1 — %2")
@@ -1967,6 +2434,7 @@ private:
         pacingQueued_=0;
         lastPresentMs_=-1;
         lastCompletedRenderMs_=0.0;
+        fpsFiltered_=0.0;
         pacingClock_.restart();
     }
     void recordImagePresented(){
@@ -1981,6 +2449,12 @@ private:
             if(pacingSamples_.size()>=pacingCapacity_)
                 pacingSamples_.erase(pacingSamples_.begin());
             pacingSamples_.push_back(sample);
+            const double interval=lastPresentMs_>=0?double(ms-lastPresentMs_):0.0;
+            if(interval>=1.0){
+                const double fps=1000.0/interval;
+                fpsFiltered_=fpsFiltered_==0.0?fps:(fpsFiltered_*.72+fps*.28);
+                canvas_->setFpsOverlay(fpsFiltered_,true);
+            }
         }
         lastPresentMs_=ms;
     }
@@ -2046,6 +2520,11 @@ private:
         }
         const uint64_t token=serial->fetch_add(1)+1;
         auto snapshot=runtime_;
+        const float renderHour=snapshot->daylightHour;
+        // Shadows are materially unchanged within this 15-minute sky bin.
+        // The expensive map is rebuilt at most once per 0.25 simulated hour,
+        // not for each cloud frame or every fractional hour change.
+        const float shadowHour=std::floor(renderHour*4.f)*.25f;
         auto preset=activeCameraPose();
         updateCameraHud();
         QSize renderSize=qualityBox_->currentData().toSize();
@@ -2084,12 +2563,13 @@ private:
         }
         const auto shadowCache=cpuShadows_;
         watcher_.setFuture(QtConcurrent::run(&renderPool_,[this,serial,token,snapshot,preset,w,h,wantGpu,
-            globalIllumination,raster,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache]{
+            globalIllumination,raster,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache,renderHour,shadowHour]{
             Result result;
             result.cameraPose=preset;
             result.generation=token;
+            result.skyCompositing=raster;
             result.renderThread=reinterpret_cast<quintptr>(QThread::currentThreadId());
-            updateLighting(snapshot->daylightHour);
+            updateLighting(renderHour);
             const auto camera=v16::makeCamera(preset,w,h);
             std::vector<uint32_t> pixels;
             Stats stats;
@@ -2101,13 +2581,13 @@ private:
                     {
                         std::lock_guard<std::mutex> lock(shadowCache->mutex);
                         if(shadowCache->scene.lock()==snapshot &&
-                           shadowCache->hour==snapshot->daylightHour&&shadowCache->shadow)
+                           shadowCache->hour==shadowHour&&shadowCache->shadow)
                             shadow=shadowCache->shadow;
                         else {
                             Stats shadowStats;
                             shadow=std::make_shared<ShadowMap>(
                                 buildShadow(snapshot->renderScene,shadowStats));
-                            shadowCache->scene=snapshot;shadowCache->hour=snapshot->daylightHour;
+                            shadowCache->scene=snapshot;shadowCache->hour=shadowHour;
                             shadowCache->shadow=shadow;
                         }
                     }
@@ -2142,7 +2622,7 @@ private:
                 {
                     std::lock_guard<std::mutex> lock(shadowCache->mutex);
                     if(shadowCache->scene.lock()==snapshot &&
-                       shadowCache->hour==snapshot->daylightHour && shadowCache->shadow){
+                       shadowCache->hour==shadowHour && shadowCache->shadow){
                         shadow=shadowCache->shadow;
                         shadowReused=true;
                     }else{
@@ -2150,7 +2630,7 @@ private:
                         shadow=std::make_shared<ShadowMap>(
                             buildShadow(snapshot->renderScene,shadowStats));
                         shadowCache->scene=snapshot;
-                        shadowCache->hour=snapshot->daylightHour;
+                        shadowCache->hour=shadowHour;
                         shadowCache->shadow=shadow;
                     }
                 }
@@ -2249,6 +2729,12 @@ int main(int argc,char** argv){
     const QByteArray installRoot=QCoreApplication::applicationDirPath().toLocal8Bit();
     qputenv("PATH",installRoot+";"+qgetenv("PATH"));
     qputenv("QT_PLUGIN_PATH",installRoot);
+    // GUI animation is intentionally opt-in; offline GPU benchmarks remain
+    // deterministic for strict RGB parity and regression comparisons.
+    qputenv("M3D_V17_ANIMATE_CLOUDS","1");
+    // Split only interactive raster output into a sky backdrop and an
+    // alpha-preserving architecture foreground. Benchmarks stay unchanged.
+    qputenv("M3D_V17_SPLIT_SKY","1");
     QCoreApplication::setApplicationName(QStringLiteral("CSE WARP Beta X V17.%1")
         .arg(CSE_WARP_BUILD_NUMBER));
     QCoreApplication::setApplicationVersion(QStringLiteral("17.%1")
@@ -2257,19 +2743,28 @@ int main(int argc,char** argv){
         && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-scene-switch");
     const bool repeatSmoke=argc>=3
         && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-repeat-raster");
+    const bool walkingSmoke=argc>=3
+        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-walking-collisions");
+    const bool scopeSmoke=argc>=3
+        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-scope-mouse");
+    const bool immersiveSmoke=argc>=3
+        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-immersive-mouse");
     // Use the same Windows V17 brand icon for Qt titlebar/Alt-Tab/taskbar.
     // The ICO is also embedded in the EXE's native Win32 resources.
     const QString iconPath=QCoreApplication::applicationDirPath()
         +QStringLiteral("/cse_warp_v17.ico");
     if(QFileInfo::exists(iconPath))app.setWindowIcon(QIcon(iconPath));
-    const QString path=switchSmoke||repeatSmoke
+    const QString path=switchSmoke||repeatSmoke||walkingSmoke||scopeSmoke||immersiveSmoke
         ?QString::fromLocal8Bit(argv[2])
         :(argc>1?QString::fromLocal8Bit(argv[1]):defaultPath());
     // The smoke test uses reduced texture resolution to stay viable on
     // CI's software-only WARP device. Normal V17 keeps full 2048 PBR.
-    V17Window window(path,(switchSmoke||repeatSmoke)?256:2048);
+    V17Window window(path,(switchSmoke||repeatSmoke||walkingSmoke||scopeSmoke||immersiveSmoke)?256:2048);
     if(switchSmoke)window.smokeSceneSwitch(QString::fromLocal8Bit(argv[3]));
     if(repeatSmoke)window.smokeRepeatRaster();
+    if(walkingSmoke)window.smokeWalkingCollisionPreference();
+    if(scopeSmoke)window.smokeScopedAim();
+    if(immersiveSmoke)window.smokeImmersiveMouse();
     if(!app.windowIcon().isNull())window.setWindowIcon(app.windowIcon());
     window.show();
     return app.exec();
