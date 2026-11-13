@@ -1,6 +1,7 @@
 #include "m3d_engine.h"
 #include "src/m3d_walk_controller.h"
 #include "exploration_motion.h"
+#include "camera_diagnostic.h"
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
 #include <QAction>
@@ -8,6 +9,8 @@
 #include <QComboBox>
 #include <QCheckBox>
 #include <QCloseEvent>
+#include <QClipboard>
+#include <QGuiApplication>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -53,6 +56,8 @@
 #include <QSize>
 #include <QSpinBox>
 #include <QStatusBar>
+#include <QSysInfo>
+#include <QFontMetrics>
 #include <QTabWidget>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -65,11 +70,26 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <dxgi1_2.h>
+// Some Windows SDK headers still expose min/max macros; the native renderer
+// already uses std::min/std::max extensively and must not be macro-expanded.
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
+#endif
 
 using namespace m3d;
 namespace {
 struct Result {
     QImage image;
+    v16::CameraPreset cameraPose;
     QString renderer;
     QString error;
     double milliseconds=0;
@@ -89,6 +109,30 @@ class ImageView final : public QWidget {
 public:
     void setImage(QImage im){image_=std::move(im);update();}
     void setPlaceholder(const QString& message){placeholder_=message;update();}
+    void setCameraHud(QStringList lines,bool enabled){
+        if(hudLines_==lines&&hudEnabled_==enabled)return;
+        hudLines_=std::move(lines);hudEnabled_=enabled;update();
+    }
+    static void drawCameraHud(QPainter& painter,const QRect& bounds,const QStringList& lines){
+        if(lines.isEmpty()||bounds.width()<240||bounds.height()<110)return;
+        painter.save();
+        QFont font=painter.font();font.setFamily(QStringLiteral("Consolas"));font.setPointSize(9);
+        painter.setFont(font);
+        const QFontMetrics fm(font);
+        int longest=0;
+        for(const auto& t:lines)longest=std::max(longest,fm.horizontalAdvance(t));
+        const int pad=12,lh=fm.height()+3;
+        const QRect panel(bounds.left()+12,bounds.top()+12,
+                          std::min(bounds.width()-24,longest+pad*2),lh*lines.size()+pad*2);
+        painter.setPen(Qt::NoPen);painter.setBrush(QColor(10,18,27,208));
+        painter.drawRoundedRect(panel,8,8);
+        for(int i=0;i<lines.size();++i){
+            painter.setPen(i==0?QColor(140,224,245):QColor(236,243,249));
+            painter.drawText(panel.left()+pad,panel.top()+pad+fm.ascent()+i*lh,
+                fm.elidedText(lines[i],Qt::ElideRight,panel.width()-pad*2));
+        }
+        painter.restore();
+    }
 protected:
     void paintEvent(QPaintEvent*) override {
         QPainter p(this);
@@ -105,10 +149,13 @@ protected:
         QRect dst(QPoint((width()-s.width())/2,(height()-s.height())/2),s);
         p.setRenderHint(QPainter::SmoothPixmapTransform,false);
         p.drawImage(dst,image_);
+        if(hudEnabled_)drawCameraHud(p,dst,hudLines_);
     }
 private:
     QImage image_;
     QString placeholder_;
+    QStringList hudLines_;
+    bool hudEnabled_=true;
 };
 class V17Window final : public QMainWindow {
 public:
@@ -178,7 +225,12 @@ public:
                 if(pending_){pending_=false;requestRender();}
                 return;
             }
-            if(!outcome.image.isNull()){lastImage_=outcome.image;canvas_->setImage(outcome.image);}
+            if(!outcome.image.isNull()){
+                lastImage_=outcome.image;
+                lastRenderedPose_=outcome.cameraPose;
+                hasRenderedPose_=true;
+                canvas_->setImage(outcome.image);
+            }
             if(outcome.error.isEmpty()&&!outcome.image.isNull()){
                 const QString milliseconds=QString::number(outcome.milliseconds,'f',1);
                 const QString seconds=QString::number(outcome.milliseconds/1000.0,'f',1);
@@ -309,9 +361,186 @@ private:
     QCheckBox* walkingModeBox_=nullptr;
     bool exploring_=false,freeCameraActive_=false,leftMouseHeld_=false;
     float yaw_=0.f,pitch_=0.f;
+    bool cameraHudEnabled_=true;
+    bool hasRenderedPose_=false;
+    v16::CameraPreset lastRenderedPose_;
     QPushButton* explorationButton_=nullptr;
     QLabel* explorationHelp_=nullptr;
     QLabel* explorationSpeedLabel_=nullptr;
+    v16::CameraPreset activeCameraPose() const {
+        if(freeCameraActive_)return freeCamera_;
+        v16::CameraPreset pose;
+        if(!runtime_||runtime_->cameras.isEmpty())return pose;
+        const int idx=std::clamp(cameraBox_->currentIndex(),0,int(runtime_->cameras.size())-1);
+        pose=runtime_->cameras[idx];
+        const V dir=pose.eye-pose.target;
+        const float angle=float(azimuth_->value())*PI/180.f;
+        pose.eye={pose.target.x+dir.x*std::cos(angle)+dir.z*std::sin(angle),
+                  pose.eye.y,
+                  pose.target.z-dir.x*std::sin(angle)+dir.z*std::cos(angle)};
+        return pose;
+    }
+    void updateCameraHud(){
+        if(!canvas_)return;
+        if(!runtime_||runtime_->cameras.isEmpty()){
+            canvas_->setCameraHud({},false);return;
+        }
+        const auto pose=activeCameraPose();
+        const QString label=QStringLiteral("CAM %1 | %2")
+            .arg(freeCameraActive_?QStringLiteral("Libre"):QStringLiteral("Préréglée"),
+                 pose.name.isEmpty()?pose.id:pose.name);
+        canvas_->setCameraHud(cse::camera_diagnostic::hudLines(pose,label),cameraHudEnabled_);
+    }
+    static QString gpuAdapterLabel(){
+#if defined(_WIN32)
+        IDXGIFactory1* factory=nullptr;
+        if(SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))){
+            IDXGIAdapter1* adapter=nullptr;
+            if(SUCCEEDED(factory->EnumAdapters1(0,&adapter))){
+                DXGI_ADAPTER_DESC1 d{};
+                const HRESULT hr=adapter->GetDesc1(&d);
+                adapter->Release();factory->Release();
+                if(SUCCEEDED(hr))return QString::fromWCharArray(d.Description);
+            }else factory->Release();
+        }
+#endif
+        return QStringLiteral("Non détecté");
+    }
+    QString githubRevision() const {
+        QFile f(QCoreApplication::applicationDirPath()+QStringLiteral("/REVISION.txt"));
+        return f.open(QIODevice::ReadOnly|QIODevice::Text)
+            ?QString::fromUtf8(f.readAll()).trimmed().left(12)
+            :QStringLiteral("développement local");
+    }
+    static QJsonObject sceneCameraReport(const v16::CameraPreset& pose,
+        const QString& manifest,const QString& title,const QString& image,
+        const QSize imageSize,const QString& revision) {
+        return {
+            {"format",QString::fromLatin1(cse::camera_diagnostic::formatId)},
+            {"createdAtUtc",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
+            {"engine",QStringLiteral("CSE WARP Beta X")},
+            {"version",QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER)},
+            {"revision",revision},
+            {"scene",QJsonObject{{"manifestFile",QFileInfo(manifest).fileName()},
+                                 {"title",title},{"originalPath",manifest}}},
+            {"camera",cse::camera_diagnostic::toJson(pose)},
+            {"image",image},
+            {"resolution",QJsonObject{{"width",imageSize.width()},{"height",imageSize.height()}}},
+            {"units",QStringLiteral("metres")},
+            {"coordinateConvention",QStringLiteral("Y vertical; yaw 0 degrees points toward -Z; positive yaw rotates toward +X")}
+        };
+    }
+    void copyLiveCamera(){
+        if(!runtime_||runtime_->cameras.isEmpty())return;
+        const auto report=sceneCameraReport(activeCameraPose(),scenePath_,runtime_->title,
+                                             QString(),QSize(),githubRevision());
+        QGuiApplication::clipboard()->setText(
+            QString::fromUtf8(QJsonDocument(report).toJson(QJsonDocument::Indented)));
+        statusBar()->showMessage(QStringLiteral("Position caméra et identité de la scène copiées."),5000);
+    }
+    void captureAnomaly(){
+        if(!runtime_||lastImage_.isNull()||!hasRenderedPose_){
+            QMessageBox::information(this,QStringLiteral("Capture d'anomalie"),
+                QStringLiteral("Une image doit être rendue avant d'enregistrer l'anomalie."));
+            return;
+        }
+        // During navigation the CPU-readback image may lag behind the live camera.
+        // Always export the exact pose associated with the accepted rendered frame.
+        const QString documents=QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
+        const QString folder=QDir(documents.isEmpty()?QDir::homePath():documents)
+            .filePath(QStringLiteral("CSE WARP/Anomalies"));
+        if(!QDir().mkpath(folder)){
+            QMessageBox::warning(this,QStringLiteral("Capture d'anomalie"),
+                                 QStringLiteral("Dossier inaccessible : %1").arg(folder));
+            return;
+        }
+        const QString stamp=QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz");
+        const QString base=QDir(folder).filePath(QStringLiteral("ANOMALIE_%1").arg(stamp));
+        const QString imageFile=base+QStringLiteral(".png");
+        const QString jsonFile=base+QStringLiteral(".json");
+        QImage annotated=lastImage_.copy();
+        {
+            QPainter painter(&annotated);
+            ImageView::drawCameraHud(painter,annotated.rect(),
+                cse::camera_diagnostic::hudLines(lastRenderedPose_,
+                    QStringLiteral("CAMÉRA DU RENDU / V17.%1").arg(CSE_WARP_BUILD_NUMBER)));
+        }
+        if(!annotated.save(imageFile,"PNG")){
+            QMessageBox::warning(this,QStringLiteral("Capture d'anomalie"),
+                                 QStringLiteral("Échec de l'enregistrement PNG."));
+            return;
+        }
+        QJsonObject report=sceneCameraReport(lastRenderedPose_,scenePath_,runtime_->title,
+            QFileInfo(imageFile).fileName(),lastImage_.size(),githubRevision());
+        report.insert("renderInProgressAtCapture",watcher_.isRunning());
+        report.insert("liveCameraAtCapture",cse::camera_diagnostic::toJson(activeCameraPose()));
+        report.insert("note",QStringLiteral(
+            "camera correspond précisément au PNG enregistré; liveCameraAtCapture est informative."));
+        QSaveFile file(jsonFile);
+        if(!file.open(QIODevice::WriteOnly) ||
+           file.write(QJsonDocument(report).toJson(QJsonDocument::Indented))<0 ||
+           !file.commit()){
+            QFile::remove(imageFile);
+            QMessageBox::warning(this,QStringLiteral("Capture d'anomalie"),
+                                 QStringLiteral("Échec de l'enregistrement JSON."));
+            return;
+        }
+        statusBar()->showMessage(QStringLiteral("Anomalie sauvegardée : %1").arg(base),15000);
+        QMessageBox::information(this,QStringLiteral("Anomalie enregistrée"),
+            QStringLiteral("Capture PNG et coordonnées exactes disponibles dans :\n%1").arg(folder));
+    }
+    void restoreAnomalyCamera(){
+        if(!runtime_||runtime_->cameras.isEmpty()){
+            QMessageBox::information(this,QStringLiteral("Restaurer une caméra"),
+                                     QStringLiteral("Charge d'abord la scène concernée."));
+            return;
+        }
+        const QString path=QFileDialog::getOpenFileName(this,
+            QStringLiteral("Restaurer une caméra d'anomalie"),
+            QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+                +QStringLiteral("/CSE WARP/Anomalies"),
+            QStringLiteral("Rapport caméra CSE WARP (*.json)"));
+        if(path.isEmpty())return;
+        QFile file(path);
+        if(!file.open(QIODevice::ReadOnly)){
+            QMessageBox::warning(this,QStringLiteral("Restaurer une caméra"),
+                                 QStringLiteral("Impossible d'ouvrir le rapport."));return;
+        }
+        QJsonParseError parsing;
+        const auto doc=QJsonDocument::fromJson(file.readAll(),&parsing);
+        const auto root=doc.object();
+        if(parsing.error!=QJsonParseError::NoError ||
+           root.value("format").toString()!=QString::fromLatin1(cse::camera_diagnostic::formatId)){
+            QMessageBox::warning(this,QStringLiteral("Restaurer une caméra"),
+                                 QStringLiteral("Format incompatible ou JSON invalide."));return;
+        }
+        const auto scene=root.value("scene").toObject();
+        if(scene.value("manifestFile").toString()!=QFileInfo(scenePath_).fileName() ||
+           scene.value("title").toString()!=runtime_->title){
+            QMessageBox::warning(this,QStringLiteral("Scène différente"),
+                QStringLiteral("La capture appartient à une autre scène. Charge d'abord cette scène pour éviter toute erreur architecturale."));
+            return;
+        }
+        v16::CameraPreset pose;
+        QString error;
+        if(!cse::camera_diagnostic::fromJson(root.value("camera").toObject(),pose,error)){
+            QMessageBox::warning(this,QStringLiteral("Restaurer une caméra"),error);return;
+        }
+        keysDown_.clear();
+        // Walking mode would snap Y to the floor, which destroys exact replay.
+        if(walkingModeBox_&&walkingModeBox_->isChecked())
+            walkingModeBox_->setChecked(false);
+        freeCamera_=pose;
+        const V dir=norm(pose.target-pose.eye);
+        yaw_=std::atan2(dir.x,-dir.z);
+        pitch_=std::asin(clampf(dir.y,-.99f,.99f));
+        freeCameraActive_=true;
+        updateExplorationSpeedIndicator();
+        updateCameraHud();
+        requestRender();
+        canvas_->setFocus();
+        statusBar()->showMessage(QStringLiteral("Point de vue d'anomalie restauré depuis %1").arg(path),12000);
+    }
     void updateExplorationSpeedIndicator(){
         if(!explorationSpeedLabel_)return;
         if(!exploring_){
@@ -340,11 +569,13 @@ private:
             freeCamera_.eye=walk::eye(walkingState_);
             updateLook();
         }
+        updateCameraHud();
     }
     void updateLook(){
         const V forward{std::sin(yaw_)*std::cos(pitch_),std::sin(pitch_),
                         -std::cos(yaw_)*std::cos(pitch_)};
         freeCamera_.target=freeCamera_.eye+forward;
+        updateCameraHud();
     }
     void stopExploration(){
         exploring_=false;
@@ -361,11 +592,12 @@ private:
         if(exploring_){stopExploration();return;}
         if(!runtime_||runtime_->cameras.isEmpty())return;
         if(backendBox_->currentIndex()!=4)backendBox_->setCurrentIndex(4);
-        activateFreeCamera();
+        if(!freeCameraActive_)activateFreeCamera();
         exploring_=true;
         motionClock_.start();
         frameClock_.invalidate();
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Arrêter exploration"));
+        updateCameraHud();
         frameTimer_.start();
         updateExplorationSpeedIndicator();
         canvas_->setFocus();
@@ -558,6 +790,16 @@ private:
     }
     void createUi(){
         auto* file=menuBar()->addMenu(QStringLiteral("Fichier"));
+        auto* captureAction=file->addAction(QStringLiteral("Capturer une anomalie (PNG + caméra JSON)…"));
+        captureAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+A")));
+        connect(captureAction,&QAction::triggered,this,[this]{captureAnomaly();});
+        auto* restoreAction=file->addAction(QStringLiteral("Restaurer une caméra d'anomalie…"));
+        restoreAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+O")));
+        connect(restoreAction,&QAction::triggered,this,[this]{restoreAnomalyCamera();});
+        auto* copyPoseAction=file->addAction(QStringLiteral("Copier la position caméra (JSON)"));
+        copyPoseAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+C")));
+        connect(copyPoseAction,&QAction::triggered,this,[this]{copyLiveCamera();});
+        file->addSeparator();
         auto* open=file->addAction(QStringLiteral("Ouvrir une scène V16 (scene.json)…"));
         connect(open,&QAction::triggered,this,[this]{
             const QString chosen=QFileDialog::getOpenFileName(
@@ -658,34 +900,53 @@ private:
         auto* aboutAction=helpMenu->addAction(
             QStringLiteral("À propos de CSE WARP V17.%1…").arg(CSE_WARP_BUILD_NUMBER));
         connect(aboutAction,&QAction::triggered,this,[this]{
-            const QString revisionPath=QCoreApplication::applicationDirPath()
-                +QStringLiteral("/REVISION.txt");
-            QString revision=QStringLiteral("développement");
-            QFile revisionFile(revisionPath);
-            if(revisionFile.open(QIODevice::ReadOnly|QIODevice::Text))
-                revision=QString::fromUtf8(revisionFile.readAll()).trimmed().left(12);
-            QMessageBox::about(this,
-                QStringLiteral("À propos de CSE WARP V17.%1").arg(CSE_WARP_BUILD_NUMBER),
-                QStringLiteral("<h3>CSE WARP Beta X — V17.%1</h3>"
-                    "<p><b>Version :</b> 17.%1<br/><b>Build GitHub :</b> %1<br/>"
-                    "<b>Révision GitHub :</b> %2<br/><b>Qt :</b> %3</p>"
-                    "<p><b>Rendu :</b> Direct3D 11 Raster, GPU Compute HLSL, "
-                    "Ray Tracing CPU et illumination globale CPU.</p>"
-                    "<p><b>Nouveautés V17 :</b> thread GPU permanent, chargement asynchrone, "
-                    "frustum culling, filtrage PBR/mipmaps corrigé, "
-                    "instancing GPU expérimental des boîtes et ellipsoïdes, "
-                    "trois niveaux de détail pour les ellipsoïdes.</p>"
-                    "<p><b>Qualité configurable :</b> profils Performance, Équilibrée, "
-                    "Élevée et Ultra ; MSAA, anisotropie, LOD et culling réglables "
-                    "dans l'interface ou depuis l'application hôte.</p>"
-                    "<p><b>Benchmark :</b> chronométrage matériel DirectX 11, attente CPU Map, "
-                    "débit et latence ; comparaison expérimentale des lectures "
-                    "à 1, 2 ou 3 tampons, contrôlées pixel par pixel.</p>"
-                    "<p><b>Prochaines améliorations :</b> étendre l'instancing et les LOD, "
-                    "améliorer ombres et éclairage PBR ; performance à valider sur Intel HD 620.</p>")
-                    .arg(QString::number(CSE_WARP_BUILD_NUMBER),
-                         revision.toHtmlEscaped(),
-                         QString::fromLatin1(qVersion()).toHtmlEscaped()));
+            const QString gpu=gpuAdapterLabel();
+            const QString revision=githubRevision();
+            const QString compileDate=QString::fromLatin1(__DATE__ " " __TIME__);
+            const auto quality=rasterQualitySettings();
+            const bool zEnabled=qEnvironmentVariable("M3D_V17_EXPERIMENT_Z_PREPASS")==QStringLiteral("1");
+            const bool lightEnabled=qEnvironmentVariable("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL")==QStringLiteral("1");
+            const QString backend=backendBox_?backendBox_->currentText():QStringLiteral("indéterminé");
+            const QString details=QStringLiteral(
+                "CSE WARP Beta X / V17.%1\\n"
+                "Révision GitHub : %2\\n"
+                "Compilation : %3\\n"
+                "Système : %4\\n"
+                "Adaptateur principal DXGI : %5\\n"
+                "Rendu sélectionné : %6\\n"
+                "Qt : %7\\n"
+                "MSAA : %8x | Anisotropie : %9x | PBR : %10 px\\n"
+                "Z-prepass expérimental : %11 | Rejet AABB lampes : %12\\n"
+                "HUD caméra / rapports d'anomalies PNG+JSON / restauration : disponibles")
+                .arg(CSE_WARP_BUILD_NUMBER)
+                .arg(revision).arg(compileDate).arg(QSysInfo::prettyProductName())
+                .arg(gpu).arg(backend).arg(QString::fromLatin1(qVersion()))
+                .arg(quality.msaaSamples).arg(quality.anisotropy)
+                .arg(textureResolution_).arg(zEnabled?QStringLiteral("ON"):QStringLiteral("OFF"))
+                .arg(lightEnabled?QStringLiteral("ON"):QStringLiteral("OFF"));
+            QMessageBox message(this);
+            message.setWindowTitle(QStringLiteral("À propos de CSE WARP V17.%1").arg(CSE_WARP_BUILD_NUMBER));
+            message.setIcon(QMessageBox::Information);
+            message.setTextFormat(Qt::RichText);
+            message.setText(QStringLiteral(
+                "<h3>CSE WARP Beta X — V17.%1</h3>"
+                "<p><b>Révision :</b> %2<br/><b>Compilation :</b> %3</p>"
+                "<p><b>GPU principal (DXGI) :</b> %4<br/><b>Rendu :</b> %5</p>"
+                "<p><b>Navigation :</b> HUD position X/Y/Z, cap, inclinaison et FOV.<br/>"
+                "<b>Diagnostic architectural :</b> capture PNG + position JSON restaurable.<br/>"
+                "<b>Raster :</b> Z-prepass %6, rejet AABB lumières %7 (expérimentaux).</p>"
+                "<p><b>Configuration :</b> Qt %8 ; MSAA %9x ; PBR %10 px.</p>")
+                .arg(CSE_WARP_BUILD_NUMBER).arg(revision.toHtmlEscaped())
+                .arg(compileDate.toHtmlEscaped()).arg(gpu.toHtmlEscaped())
+                .arg(backend.toHtmlEscaped())
+                .arg(zEnabled?QStringLiteral("ON"):QStringLiteral("OFF"))
+                .arg(lightEnabled?QStringLiteral("ON"):QStringLiteral("OFF"))
+                .arg(QString::fromLatin1(qVersion()))
+                .arg(quality.msaaSamples).arg(textureResolution_));
+            auto* copy=message.addButton(QStringLiteral("Copier les informations système"),QMessageBox::ActionRole);
+            message.addButton(QMessageBox::Ok);
+            message.exec();
+            if(message.clickedButton()==copy)QGuiApplication::clipboard()->setText(details);
         });
 
         auto* left=new QDockWidget(QStringLiteral("Explorateur de scène"),this);
@@ -896,8 +1157,8 @@ private:
         walkingModeBox_->setChecked(walkPreferences.value(QStringLiteral("Exploration/Walking"),true).toBool());
         vertical->addWidget(walkingModeBox_);
         explorationHelp_=new QLabel(QStringLiteral(
-            "ZQSD / flèches : marcher · clic gauche + souris : regarder · Maj : accélérer · Échap : arrêter\n"
-            "En mode vol libre : Espace / Ctrl pour monter ou descendre."));
+            "ZQSD / flèches : marcher · clic gauche + souris : regarder · Maj : accélérer · Échap : arrêter\\n"
+            "Espace / Ctrl : monter / descendre en vol. Ctrl+Maj+A : anomalie PNG+JSON."));
         explorationHelp_->setWordWrap(true);
         vertical->addWidget(explorationHelp_);
         connect(explorationButton_,&QPushButton::clicked,this,[this]{toggleExploration();});
@@ -982,6 +1243,17 @@ private:
         // Dedicated uncluttered exploration mode. Preserve dock state in editing mode.
         // F11 maximizes the view without changing the underlying render resolution.
         auto* viewMenu=menuBar()->addMenu(QStringLiteral("Affichage"));
+        auto* hudToggle=viewMenu->addAction(QStringLiteral("Afficher les coordonnées caméra (HUD)"));
+        hudToggle->setCheckable(true);
+        QSettings hudSettings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+        cameraHudEnabled_=hudSettings.value(QStringLiteral("Camera/ShowHUD"),true).toBool();
+        hudToggle->setChecked(cameraHudEnabled_);
+        connect(hudToggle,&QAction::toggled,this,[this](bool enabled){
+            cameraHudEnabled_=enabled;
+            QSettings cfg(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+            cfg.setValue(QStringLiteral("Camera/ShowHUD"),enabled);
+            updateCameraHud();
+        });
         auto* immersive=viewMenu->addAction(QStringLiteral("Vue 3D agrandie (F11)"));
         immersive->setCheckable(true);
         immersive->setShortcut(QKeySequence(Qt::Key_F11));
@@ -998,6 +1270,8 @@ private:
         connect(cameraBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){
             azimuth_->setValue(0);
             if(exploring_)activateFreeCamera();
+            else freeCameraActive_=false;
+            updateCameraHud();
             requestRender();
         });
         connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int index){
@@ -1017,7 +1291,7 @@ private:
         connect(denoiseGi_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()==2||backendBox_->currentIndex()==3)requestRender();});
         connect(denoiseDirect_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()==0)requestRender();});
         connect(edgeAa_,&QCheckBox::toggled,this,[this](bool){requestRender();});
-        connect(azimuth_,&QSlider::sliderReleased,this,[this]{requestRender();});
+        connect(azimuth_,&QSlider::sliderReleased,this,[this]{updateCameraHud();requestRender();});
         connect(hybridLightBox_,&QCheckBox::toggled,this,[this](bool enabled){
             m3d::setRasterHybridLightingEnabled(enabled);
             QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
@@ -1132,6 +1406,9 @@ private:
         sceneLoadLabel_->show();
         sceneLoadProgress_->show();
         canvas_->setImage(QImage{});
+        canvas_->setCameraHud({},false);
+        hasRenderedPose_=false;
+        freeCameraActive_=false;
         canvas_->setPlaceholder(QStringLiteral("CSE WARP V17\nChargement de la scène…"));
         cameraBox_->setEnabled(false);
         if(explorationButton_)explorationButton_->setEnabled(false);
@@ -1225,6 +1502,7 @@ private:
             quickCameraActions_[i]->setToolTip(valid ? QStringLiteral("Vue %1 — touche %2").arg(runtime_->cameras[i].name).arg(i+1) : QString());
         }
         cameraBox_->blockSignals(false);
+        updateCameraHud();
         populateTrees(outcome.database);
         statusBar()->showMessage(QStringLiteral("%1 — %2 objets, %3 triangles, %4 matériaux, PBR %5 px")
             .arg(runtime_->title)
@@ -1304,16 +1582,8 @@ private:
             return;
         }
         auto snapshot=runtime_;
-        const int presetId=std::clamp(cameraBox_->currentIndex(),0,int(snapshot->cameras.size())-1);
-        auto preset=snapshot->cameras[presetId];
-        if(exploring_ && freeCameraActive_)preset=freeCamera_;
-        else {
-            const auto dir=preset.eye-preset.target;
-            const float angle=float(azimuth_->value())*PI/180;
-            preset.eye={preset.target.x+dir.x*std::cos(angle)+dir.z*std::sin(angle),
-                        preset.eye.y,
-                        preset.target.z-dir.x*std::sin(angle)+dir.z*std::cos(angle)};
-        }
+        auto preset=activeCameraPose();
+        updateCameraHud();
         QSize renderSize=qualityBox_->currentData().toSize();
         if(!renderSize.isValid() || renderSize.isEmpty()) {
             // Render to the viewport's *actual* aspect ratio, not the monitor
@@ -1352,6 +1622,7 @@ private:
         watcher_.setFuture(QtConcurrent::run(&renderPool_,[this,serial,token,snapshot,preset,w,h,wantGpu,
             globalIllumination,raster,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache]{
             Result result;
+            result.cameraPose=preset;
             result.generation=token;
             result.renderThread=reinterpret_cast<quintptr>(QThread::currentThreadId());
             updateLighting(snapshot->daylightHour);

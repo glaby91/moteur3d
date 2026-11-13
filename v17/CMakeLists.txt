@@ -14,6 +14,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
 
 enable_testing()
+# GUI-independent regression for exact, portable architectural camera poses.
+add_executable(v17_camera_diagnostic_smoke
+    "tests/camera_diagnostic_smoke.cpp")
+target_include_directories(v17_camera_diagnostic_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+target_link_libraries(v17_camera_diagnostic_smoke PRIVATE Qt6::Core)
+add_test(NAME v17_camera_diagnostic_roundtrip COMMAND v17_camera_diagnostic_smoke)
+
 # No GPU or Windows runtime required to verify exact 2x2 sample budget.
 add_executable(v17_primary_quarter_smoke "tests/primary_quarter_smoke.cpp")
 add_test(NAME v17_primary_quarter_exact_budget COMMAND v17_primary_quarter_smoke)
@@ -61,6 +69,10 @@ endif()
 target_include_directories(moteur3d_v17 PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
 target_link_libraries(moteur3d_v17 PRIVATE moteur3d_v16_core Qt6::Widgets Qt6::Concurrent)
+if(WIN32)
+    # About dialog queries the DXGI primary adapter name without changing device selection.
+    target_link_libraries(moteur3d_v17 PRIVATE dxgi)
+endif()
 target_compile_definitions(moteur3d_v17 PRIVATE CSE_WARP_BUILD_NUMBER=${V17_BUILD_NUMBER})
 if(MSVC)
     target_compile_options(moteur3d_v17 PRIVATE /O2 /EHsc /utf-8)
