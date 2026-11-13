@@ -45,7 +45,9 @@ public:
         const float day=sun.daylight;
         const float night=1.f-smoothstep(.02f,.20f,day);
         const float speed=fastWeather?10.f:1.f;
-        const float drift=float(std::fmod(elapsedSeconds*speed*.016,1024.0));
+        // ~8 texture pixels/real second normally; x10 during the accelerated
+        // six-minute diurnal cycle. Enough motion for smooth 30Hz perception.
+        const float drift=float(std::fmod(elapsedSeconds*speed*.25,1024.0));
         const m3d::V sunDir{sun.east,sun.up,sun.north};
         const auto mix=[](float a,float b,float t){return a+(b-a)*t;};
         for(int y=0;y<Height;++y){
@@ -72,7 +74,7 @@ public:
                 if(sun.up>0.f){
                     const float dot=d.x*sunDir.x+d.y*sunDir.y+d.z*sunDir.z;
                     const float disk=smoothstep(.99975f,.99994f,dot);
-                    const float halo=std::pow(std::max(0.f,dot),128.f)*.16f;
+                    const float halo=dot>.85f?std::pow(dot,128.f)*.16f:0.f;
                     const float warm=1.f-smoothstep(.04f,.32f,sun.up);
                     r+=255.f*(disk*.80f+halo)*day;
                     g+=mix(247.f,168.f,warm)*(disk*.80f+halo)*day;
