@@ -51,9 +51,13 @@ jobs:
           if($LASTEXITCODE -ne 0){throw "CMake configure failed"}
           cmake --build build-v431 --config Release --target moteur3d_v17_benchmark --parallel 4
           if($LASTEXITCODE -ne 0){throw "FHD native DX11 benchmark compilation failed"}
-          foreach($p in @("moteur3d_v17_benchmark.exe","moteur3d_v16_core.dll")){
-            if(!(Test-Path "build-v431/Release/$p")){throw "Native binary not found: $p"}
-            Copy-Item "build-v431/Release/$p" "dist-v431/$p" -Force
+          $nativeFiles=@{
+            "build-v431/Release/moteur3d_v17_benchmark.exe"="dist-v431/moteur3d_v17_benchmark.exe"
+            "build-v431/v16/Release/moteur3d_v16_core.dll"="dist-v431/moteur3d_v16_core.dll"
+          }
+          foreach($source in $nativeFiles.Keys){
+            if(!(Test-Path $source)){throw "Native binary not found: $source"}
+            Copy-Item $source $nativeFiles[$source] -Force
           }
       - name: Add exactly four new camera viewpoints (geometry and mosaics untouched)
         shell: pwsh
