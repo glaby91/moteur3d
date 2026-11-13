@@ -38,6 +38,9 @@ target_link_libraries(m3d_core PUBLIC Threads::Threads Qt6::Core)
 
 qt_add_executable(moteur3d_qt WIN32 src/moteur3d_qt.cpp)
 target_link_libraries(moteur3d_qt PRIVATE m3d_core Qt6::Widgets)
+if(WIN32)
+    target_link_libraries(moteur3d_qt PRIVATE winmm)
+endif()
 
 enable_testing()
 add_executable(m3d_v16_scene_test tests/test_v16_scene.cpp)
