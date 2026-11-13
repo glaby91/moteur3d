@@ -965,8 +965,12 @@ public:
         cloudSettings.windEastMetersPerSecond=12.f;
         cloudSettings.windNorthMetersPerSecond=3.5f;
         static const auto cloudEpoch=std::chrono::steady_clock::now();
-        const double cloudSeconds=std::chrono::duration<double>(
-            std::chrono::steady_clock::now()-cloudEpoch).count();
+        // Deterministic bench renders remain pixel-exact across readback modes;
+        // only the interactive GUI opts into real-time cloud motion.
+        const char* movingSky=std::getenv("M3D_V17_ANIMATE_CLOUDS");
+        const bool animateSky=movingSky && std::strcmp(movingSky,"1")==0;
+        const double cloudSeconds=animateSky ? std::chrono::duration<double>(
+            std::chrono::steady_clock::now()-cloudEpoch).count() : 0.0;
         const auto clouds=cse::weather::cirrusAt(cloudSettings,cloudSeconds,
             std::asin(clampf(sun.y,-1.f,1.f))*180.f/PI);
         cloudCB.wind[0]=clouds.uOffset;cloudCB.wind[1]=clouds.vOffset;

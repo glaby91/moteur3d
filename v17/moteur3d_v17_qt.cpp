@@ -2658,6 +2658,9 @@ int main(int argc,char** argv){
     const QByteArray installRoot=QCoreApplication::applicationDirPath().toLocal8Bit();
     qputenv("PATH",installRoot+";"+qgetenv("PATH"));
     qputenv("QT_PLUGIN_PATH",installRoot);
+    // GUI animation is intentionally opt-in; offline GPU benchmarks remain
+    // deterministic for strict RGB parity and regression comparisons.
+    qputenv("M3D_V17_ANIMATE_CLOUDS","1");
     QCoreApplication::setApplicationName(QStringLiteral("CSE WARP Beta X V17.%1")
         .arg(CSE_WARP_BUILD_NUMBER));
     QCoreApplication::setApplicationVersion(QStringLiteral("17.%1")
