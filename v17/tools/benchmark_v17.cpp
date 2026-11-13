@@ -86,7 +86,7 @@ int main(int argc,char** argv){
         sourceRevision=QString::fromUtf8(revFile.readAll()).trimmed().left(12);
     QTextStream out(stdout),err(stderr);
     if(argc<3){
-        err<<"Usage: moteur3d_v17_benchmark.exe scene.json output_dir [--quick] [--fhd-stills] [--compare-v16] [--smoke] [--readback-depth 1|2|3] [--compare-readback] [--all-cameras] [--camera-id bassin] [--hour 19]\n";
+        err<<"Usage: moteur3d_v17_benchmark.exe scene.json output_dir [--quick] [--fhd-stills] [--compare-v16] [--smoke] [--readback-depth 1|2|3] [--compare-readback] [--all-cameras] [--camera-id bassin] [--hour 19] [--resolution 1366x768] [--frames 24]\n";
         return 2;
     }
     const QString scenePath=QFileInfo(QString::fromLocal8Bit(argv[1])).absoluteFilePath();
@@ -150,6 +150,32 @@ int main(int argc,char** argv){
     const bool quick=smoke||args.contains(QStringLiteral("--quick"));
     const bool compare=args.contains(QStringLiteral("--compare-v16"))&&!smoke;
     const bool compareReadback=args.contains(QStringLiteral("--compare-readback"));
+    // Diagnostic benchmark only: expose exact resolution and sample count.
+    // This changes measurement controls, never the interactive renderer.
+    QSize diagnosticSize;
+    const int resolutionOption=args.indexOf(QStringLiteral("--resolution"));
+    if(resolutionOption>=0){
+        const QString raw=resolutionOption+1<args.size()
+            ?args[resolutionOption+1]:QString();
+        const auto dimensions=raw.toLower().split(QLatin1Char('x'));
+        bool wOk=false,hOk=false;
+        const int w=dimensions.size()==2?dimensions[0].toInt(&wOk):0;
+        const int h=dimensions.size()==2?dimensions[1].toInt(&hOk):0;
+        if(!wOk||!hOk||w<64||h<64||w>3840||h>2160){
+            err<<"--resolution expects WIDTHxHEIGHT between 64x64 and 3840x2160\n";
+            return 2;
+        }
+        diagnosticSize=QSize(w,h);
+    }
+    int diagnosticFrames=0;
+    const int framesOption=args.indexOf(QStringLiteral("--frames"));
+    if(framesOption>=0){
+        bool ok=false;
+        diagnosticFrames=framesOption+1<args.size()?args[framesOption+1].toInt(&ok):0;
+        if(!ok||diagnosticFrames<2||diagnosticFrames>240){
+            err<<"--frames expects an integer from 2 to 240\n";return 2;
+        }
+    }
     int readbackDepth=1;
     const int depthOption=args.indexOf(QStringLiteral("--readback-depth"));
     if(depthOption>=0){
@@ -191,6 +217,19 @@ int main(int argc,char** argv){
     const double shadowMs=elapsedMs(begin);
     QJsonObject system{
         {"engine","CSE WARP Beta X V17 D3D11 Raster"},
+        {"measurementQuality",QJsonObject{
+           {"msaaRequested",int(quality.msaaSamples)},
+           {"anisotropy",int(quality.anisotropy)},
+           {"lodPercent",int(quality.lodQualityPercent)},
+           {"cullingEnabled",quality.frustumCulling},
+           {"lodEnabled",quality.dynamicLod},
+           {"readbackDepth",readbackDepth},
+           {"explicitResolution",diagnosticSize.isValid()
+              ?QStringLiteral("%1x%2").arg(diagnosticSize.width()).arg(diagnosticSize.height())
+              :QStringLiteral("default")},
+           {"measuredFrames",diagnosticFrames>0?diagnosticFrames:
+               (fhdStills?1:smoke?2:quick?6:12)}
+        }},
         {"version",QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER)},
         {"buildNumber",QString::number(CSE_WARP_BUILD_NUMBER)},{"revision",sourceRevision},
         {"scene",scenePath},{"sceneName",runtime.title},
@@ -268,7 +307,8 @@ int main(int argc,char** argv){
            <<"\n";
         out.flush();
     };
-    const QVector<QSize> sizes=fhdStills?QVector<QSize>{QSize(1920,1080)}
+    const QVector<QSize> sizes=diagnosticSize.isValid()?QVector<QSize>{diagnosticSize}
+        :fhdStills?QVector<QSize>{QSize(1920,1080)}
         :smoke?QVector<QSize>{QSize(640,360)}
         :quick?QVector<QSize>{QSize(1366,768)}
               :QVector<QSize>{QSize(1366,768),QSize(1920,1080)};
@@ -287,7 +327,8 @@ int main(int argc,char** argv){
     }else{
         for(int i=0;i<cameras;++i)selectedCameras.push_back(i);
     }
-    const int measuredFrames=fhdStills?1:smoke?2:quick?6:12;
+    const int measuredFrames=diagnosticFrames>0?diagnosticFrames:
+        fhdStills?1:smoke?2:quick?6:12;
     for(const int cameraIndex:selectedCameras){
         const auto& preset=runtime.cameras[cameraIndex];
         for(const auto& size:sizes){
