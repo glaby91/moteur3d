@@ -22,6 +22,9 @@
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
+#ifdef _WIN32
+#include <mmsystem.h>
+#endif
 #include <QKeySequence>
 #include <QToolBar>
 #include <QProcess>
@@ -342,6 +345,7 @@ public:
         });
     }
     ~V17Window() override {
+        stopRadio();
         renderSerial_->fetch_add(1);
         // All async tasks hold independent snapshots. Wait before QObject
         // destruction so no worker can post into the destroyed window.
@@ -350,6 +354,11 @@ public:
     }
 private:
     int textureResolution_=2048;
+    QPushButton* radioToggleButton_=nullptr;
+    QLabel* radioStatusLabel_=nullptr;
+    bool radioPlaying_=false;
+    bool radioAutoplayEnabled_=true;
+
     ImageView* canvas_=nullptr;
     QTimer frameTimer_;
     QElapsedTimer frameClock_;
@@ -788,6 +797,44 @@ private:
         settings.setValue(QStringLiteral("Raster/DynamicLOD"),q.dynamicLod);
         if(runtime_&&backendBox_&&backendBox_->currentIndex()==4)requestRender();
     }
+    void stopRadio(){
+#ifdef _WIN32
+        if(radioPlaying_)PlaySoundW(nullptr,nullptr,0);
+#endif
+        radioPlaying_=false;
+        if(radioToggleButton_)radioToggleButton_->setText(QStringLiteral("Reprendre la radio"));
+        if(radioStatusLabel_)radioStatusLabel_->setText(QStringLiteral("Radio arrêtée"));
+    }
+    void playRadio(){
+#ifdef _WIN32
+        const QString path=QDir(QCoreApplication::applicationDirPath())
+            .filePath(QStringLiteral("audio/pripyat_radio.wav"));
+        if(!QFileInfo::exists(path)){
+            if(radioStatusLabel_)radioStatusLabel_->setText(QStringLiteral("Radio absente : audio/pripyat_radio.wav"));
+            return;
+        }
+        const auto wide=path.toStdWString();
+        radioPlaying_=PlaySoundW(wide.c_str(),nullptr,
+            SND_ASYNC|SND_LOOP|SND_FILENAME|SND_NODEFAULT)!=FALSE;
+        if(radioToggleButton_)radioToggleButton_->setText(radioPlaying_
+            ?QStringLiteral("Arrêter la radio"):QStringLiteral("Reprendre la radio"));
+        if(radioStatusLabel_)radioStatusLabel_->setText(radioPlaying_
+            ?QStringLiteral("Lecture en boucle (WAV technique)")
+            :QStringLiteral("Erreur de lecture du WAV"));
+#else
+        if(radioStatusLabel_)radioStatusLabel_->setText(QStringLiteral("Audio Windows non disponible"));
+#endif
+    }
+    void refreshRadioForScene(const QString& path){
+        stopRadio();
+        const QString lower=path.toLower();
+        // The active Pripiat square comes from benchmark-civic/scene-v7-corrections.json.
+        const bool isSquare=lower.contains(QStringLiteral("benchmark-civic"))
+            ||lower.contains(QStringLiteral("pripyat"))
+            ||lower.contains(QStringLiteral("energetik"));
+        if(isSquare&&radioAutoplayEnabled_)playRadio();
+    }
+
     void createUi(){
         auto* file=menuBar()->addMenu(QStringLiteral("Fichier"));
         auto* captureAction=file->addAction(QStringLiteral("Capturer une anomalie (PNG + caméra JSON)…"));
@@ -964,6 +1011,16 @@ private:
         auto* right=new QDockWidget(QStringLiteral("Rendu et matériaux"),this);
         auto* controls=new QWidget;
         auto* vertical=new QVBoxLayout(controls);
+        radioToggleButton_=new QPushButton(QStringLiteral("Reprendre la radio"),controls);
+        radioStatusLabel_=new QLabel(QStringLiteral("Radio arrêtée"),controls);
+        radioStatusLabel_->setWordWrap(true);
+        vertical->addWidget(new QLabel(QStringLiteral("SON AMBIANT — RADIO UKRAINIENNE"),controls));
+        vertical->addWidget(radioToggleButton_);
+        vertical->addWidget(radioStatusLabel_);
+        connect(radioToggleButton_,&QPushButton::clicked,this,[this]{
+            if(radioPlaying_){radioAutoplayEnabled_=false;stopRadio();}
+            else{radioAutoplayEnabled_=true;playRadio();}
+        });
         auto* form=new QFormLayout;
         cameraBox_=new QComboBox;
         backendBox_=new QComboBox;
@@ -1480,6 +1537,7 @@ private:
         sunHour_->setValue(double(runtime_->daylightHour));
         sunHour_->blockSignals(false);
         scenePath_=outcome.path;
+        refreshRadioForScene(scenePath_);
         setRasterGiCachePath(std::filesystem::path(
             (scenePath_+QStringLiteral(".m3dgi")).toStdWString()));
         if(bakeGiButton_)bakeGiButton_->setEnabled(true);
