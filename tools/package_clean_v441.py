@@ -54,6 +54,9 @@ def build(source,dest,revision):
  scene_root=source/SCENE
  manifest=jsonread(scene_root/'scene-v440-audit.json')
  assert len(manifest['sectors'])==1
+ # The actual architecture is the unchanged audited V8/V440 snapshot, but
+ # the user's visible scene title must match the installed 17.441 release.
+ manifest['name']='CSE WARP V17.441 — Palais, mosaïque et accès'
  selected=set()
  for sector in manifest['sectors']:
   for field in ('geometry','instances','materials','pbr','lighting','cameras','environment'):
