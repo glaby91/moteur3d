@@ -15,6 +15,7 @@
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QClipboard>
+#include <QCursor>
 #include <QGuiApplication>
 #include <QCoreApplication>
 #include <QDir>
@@ -129,6 +130,15 @@ public:
         scopeLevel_=level;
         update();
     }
+    void setFpsOverlay(double fps,bool visible){
+        const QString next=visible&&fps>0.0
+            ?QStringLiteral("%1 FPS").arg(fps,0,'f',1)
+            :QStringLiteral("FPS —");
+        if(fpsVisible_==visible&&fpsText_==next)return;
+        fpsVisible_=visible;
+        fpsText_=next;
+        update();
+    }
     static void drawCameraHud(QPainter& painter,const QRect& bounds,const QStringList& lines){
         if(lines.isEmpty()||bounds.width()<240||bounds.height()<110)return;
         painter.save();
@@ -193,6 +203,19 @@ protected:
             p.restore();
         }
         if(hudEnabled_)drawCameraHud(p,dst,hudLines_);
+        if(fpsVisible_){
+            // Count completed presentations, not a theoretical GPU FPS claim.
+            p.save();
+            QFont f=p.font();f.setFamily(QStringLiteral("Consolas"));f.setPointSize(10);
+            f.setBold(true);p.setFont(f);
+            const int width=std::max(87,p.fontMetrics().horizontalAdvance(fpsText_)+18);
+            const QRect badge(dst.right()-width-10,dst.top()+10,width,28);
+            p.setPen(Qt::NoPen);p.setBrush(QColor(9,15,22,213));
+            p.drawRoundedRect(badge,6,6);
+            p.setPen(QColor(178,238,222));
+            p.drawText(badge,Qt::AlignCenter,fpsText_);
+            p.restore();
+        }
         if(paintPending_){
             paintPending_=false;
             if(presented_)presented_();
@@ -206,6 +229,8 @@ private:
     QStringList hudLines_;
     bool hudEnabled_=true;
     float scopeLevel_=0.f;
+    bool fpsVisible_=false;
+    QString fpsText_;
 };
 class V17Window final : public QMainWindow {
 public:
@@ -229,6 +254,11 @@ public:
         renderPool_.setMaxThreadCount(1);
         renderPool_.setExpiryTimeout(-1);
         createUi();
+        // A stationary camera must always display the native full-resolution
+        // raster, regardless of the experimental launcher environment.
+        peripheralExperimentEnabled_=
+            qEnvironmentVariable("M3D_V17_PERIPHERAL_MULTIREZ")==QStringLiteral("1");
+        setRasterPeripheralMultiresOverride(0);
         pacingClock_.start();
         canvas_->onPresented([this]{recordImagePresented();});
         audioTimer_.setInterval(50); // 20 Hz spatial updates, independent from GPU images.
@@ -525,6 +555,11 @@ private:
     cse::pool_ladder::Motion poolLadderMotion_{};
     QCheckBox* walkingModeBox_=nullptr;
     bool exploring_=false,freeCameraActive_=false,leftMouseHeld_=false,rightMouseHeld_=false;
+    bool mouseCaptured_=false;
+    bool peripheralExperimentEnabled_=false,peripheralDuringMotion_=false;
+    QElapsedTimer lastMouseLookMotion_;
+    std::vector<std::pair<QWidget*,bool>> fullscreenRestore_;
+    double fpsFiltered_=0.0;
     float scopeBaseFov_=65.f,scopeBlend_=0.f;
     // Exact anomaly/replayed camera is kept until the next walking input.
     // This does not disable or persistently alter the user's collision mode.
@@ -758,8 +793,29 @@ private:
         freeCamera_.target=freeCamera_.eye+forward;
         updateCameraHud();
     }
+    void captureMouseLook(){
+        if(!exploring_||mouseCaptured_||!canvas_||!isActiveWindow())return;
+        mouseCaptured_=true;
+        canvas_->setCursor(Qt::BlankCursor);
+        canvas_->setFocus(Qt::OtherFocusReason);
+        QCursor::setPos(canvas_->mapToGlobal(canvas_->rect().center()));
+    }
+    void releaseMouseLook(){
+        if(!mouseCaptured_)return;
+        mouseCaptured_=false;
+        if(canvas_)canvas_->unsetCursor();
+    }
+    void setMotionResolution(bool active){
+        const bool next=peripheralExperimentEnabled_&&active;
+        if(peripheralDuringMotion_==next)return;
+        peripheralDuringMotion_=next;
+        setRasterPeripheralMultiresOverride(next?1:0);
+    }
     void stopExploration(){
+        releaseMouseLook();
+        setMotionResolution(false);
         exploring_=false;
+        if(canvas_)canvas_->setFpsOverlay(0.0,false);
         if(freeCameraActive_)freeCamera_.fov=scopeBaseFov_;
         resetScopeForCamera();
         if(explorationQualityOverride_){
@@ -773,11 +829,12 @@ private:
         poolLadderMotion_={};
         leftMouseHeld_=false;
         rightMouseHeld_=false;
+        lastMouseLookMotion_.invalidate();
         updateExplorationSpeedIndicator();
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Démarrer exploration (V17)"));
         if(explorationHelp_)explorationHelp_->setText(QStringLiteral(
-            "ZQSD / flèches : marcher · clic gauche : regarder · clic droit maintenu : lunette ×3 · Maj : vitesse ×3\n"
-            "E près d’une échelle : monter/descendre dans la piscine · Échap : arrêter · Vol libre : Espace / Ctrl."));
+            "ZQSD / flèches : marcher · souris : regarder librement · clic droit : lunette ×3\n"
+            "F11 : plein écran · Échap : arrêter · E : échelle · Maj : accélérer · Vol libre : Espace / Ctrl."));
     }
     void toggleExploration(){
         if(exploring_){stopExploration();return;}
@@ -806,6 +863,9 @@ private:
             }
         }
         exploring_=true;
+        setMotionResolution(false);
+        resetPacing();
+        canvas_->setFpsOverlay(0.0,true);
         if(walkingModeBox_&&!walkingModeBox_->isChecked()){
             statusBar()->showMessage(QStringLiteral(
                 "Vol libre : collisions désactivées. Cochez « Marcher au sol » pour bloquer murs et obstacles."),10000);
@@ -813,12 +873,13 @@ private:
         poolLadderMotion_={};
         motionClock_.start();
         frameClock_.invalidate();
-        resetPacing();
+        lastMouseLookMotion_.invalidate();
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Arrêter exploration"));
         updateCameraHud();
         frameTimer_.start();
         updateExplorationSpeedIndicator();
         canvas_->setFocus();
+        captureMouseLook();
     }
     void frameTick(){
         if(!exploring_||!runtime_||!freeCameraActive_)return;
@@ -839,6 +900,13 @@ private:
         if(keysDown_.contains(Qt::Key_S)||keysDown_.contains(Qt::Key_Down))move=move-horizontal;
         if(keysDown_.contains(Qt::Key_D)||keysDown_.contains(Qt::Key_Right))move=move+right;
         if(keysDown_.contains(Qt::Key_Q)||keysDown_.contains(Qt::Key_A)||keysDown_.contains(Qt::Key_Left))move=move-right;
+        const bool mouseRecentlyMoved=lastMouseLookMotion_.isValid()&&
+            lastMouseLookMotion_.elapsed()<180;
+        const bool moving=length(move)>.01f||poolLadderMotion_.active();
+        // The scoped sight remains fully sharp. On stopping, raster returns
+        // to full resolution within 180ms, without any temporal reprojection.
+        setMotionResolution((moving||mouseRecentlyMoved)&&
+            !rightMouseHeld_&&scopeBlend_<.05f);
         if(walkingModeBox_&&walkingModeBox_->isChecked()){
             // A recalled anomaly camera can be above a floor or behind a wall.
             // Keep its precise eye position until the user actually navigates.
@@ -1723,8 +1791,8 @@ private:
         walkingModeBox_->setChecked(walkPreferences.value(QStringLiteral("Exploration/Walking"),true).toBool());
         vertical->addWidget(walkingModeBox_);
         explorationHelp_=new QLabel(QStringLiteral(
-            "ZQSD / flèches : marcher · clic gauche : regarder · clic droit maintenu : lunette ×3 · Maj : accélérer\\n"
-            "E près d’une échelle : monter/descendre · Échap : arrêter · Ctrl+Maj+A : anomalie PNG+JSON."));
+            "ZQSD / flèches : marcher · souris libre : orienter la caméra · clic droit : zoom ×3\\n"
+            "F11 : plein écran · Échap : arrêter · E : échelle · Ctrl+Maj+A : anomalie PNG+JSON."));
         explorationHelp_->setWordWrap(true);
         vertical->addWidget(explorationHelp_);
         connect(explorationButton_,&QPushButton::clicked,this,[this]{toggleExploration();});
@@ -2146,6 +2214,7 @@ private:
         pacingQueued_=0;
         lastPresentMs_=-1;
         lastCompletedRenderMs_=0.0;
+        fpsFiltered_=0.0;
         pacingClock_.restart();
     }
     void recordImagePresented(){
@@ -2160,6 +2229,12 @@ private:
             if(pacingSamples_.size()>=pacingCapacity_)
                 pacingSamples_.erase(pacingSamples_.begin());
             pacingSamples_.push_back(sample);
+            const double interval=lastPresentMs_>=0?double(ms-lastPresentMs_):0.0;
+            if(interval>=1.0){
+                const double fps=1000.0/interval;
+                fpsFiltered_=fpsFiltered_==0.0?fps:(fpsFiltered_*.72+fps*.28);
+                canvas_->setFpsOverlay(fpsFiltered_,true);
+            }
         }
         lastPresentMs_=ms;
     }
