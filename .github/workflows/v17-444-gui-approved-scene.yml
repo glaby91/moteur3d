@@ -5,6 +5,7 @@ on:
     paths:
       - .github/workflows/v17-444-gui-approved-scene.yml
       - experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp
+      - experiments/2026-10-30-cote-ete-gt/native_v14/m3d_engine.h
       - v17/moteur3d_v17_qt.cpp
       - v17/tests/walk_controller_smoke.cpp
       - v17/scope_zoom.h
@@ -75,8 +76,12 @@ jobs:
           LANCER_CSE_WARP.bat = rendu DX11 normal par defaut.
           LANCER_V17_444_MULTIREZ_EXPERIMENTAL.bat = rendu peripherique multires actif.
           LANCER_BENCH_V17_444_MULTIREZ.bat = deux comparaisons sur votre GPU Intel.
-          Ce mode experimental reste actif meme a l'arret : la logique automatique
-          marche/course/arret sera etudiee seulement apres validation des mesures.
+          La multires est maintenant active UNIQUEMENT lors des deplacements
+          (ou rotations rapides). La pleine resolution revient a l'arret.
+          Le rendu lunette x3 reste toujours en pleine resolution.
+          En mode exploration : la souris oriente librement sans clic gauche.
+          Tab libere ou recapture la souris. Echap quitte l'exploration.
+          F11 = plein ecran reel; un FPS mesure apparait dans le coin de la vue.
           Navigation : cocher "Marcher au sol" pour les collisions. Ce choix
           reste actif apres le rappel d'une camera d'anomalie.
           En exploration : clic droit MAINTENU = lunette x3 progressive.
@@ -111,6 +116,15 @@ jobs:
           $gui=(Resolve-Path package-v444/moteur3d_v17.exe).Path
           $proc=Start-Process -FilePath $gui -ArgumentList @("--smoke-scope-mouse",$scene) -WorkingDirectory (Resolve-Path package-v444).Path -PassThru -Wait
           if($proc.ExitCode -ne 0){throw "RMB press/release GUI interaction regression failed ($($proc.ExitCode))"}
+      - name: Validate free mouse look and real fullscreen F11
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          $env:PATH=(Resolve-Path package-v444).Path+";"+$env:PATH
+          $scene=(Resolve-Path package-v444/benchmark-civic/scene.json).Path
+          $gui=(Resolve-Path package-v444/moteur3d_v17.exe).Path
+          $p=Start-Process -FilePath $gui -ArgumentList @("--smoke-immersive-mouse",$scene) -WorkingDirectory (Resolve-Path package-v444).Path -PassThru -Wait
+          if($p.ExitCode -ne 0){throw "Free-look / F11 fullscreen smoke failed ($($p.ExitCode))"}
       - name: Smoke Windows GUI with corrected scene (reference + multires)
         shell: pwsh
         timeout-minutes: 18
