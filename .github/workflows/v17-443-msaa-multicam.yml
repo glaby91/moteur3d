@@ -60,6 +60,15 @@ jobs:
           Copy-Item tools/bench_v443_msaa_multicam.ps1 diag-dist/tools/bench_v443_msaa_multicam.ps1 -Force
           Copy-Item tools/analyze_msaa_multicam_v443.py diag-dist/tools/analyze_msaa_multicam_v443.py -Force
           Copy-Item docs/V17.443-msaa-multicam.md diag-dist/README-MSAA-MULTICAM.md -Force
+          # The revised Stats ABI is diagnostic-only. Never ship an old GUI or
+          # utility EXE against a new experimental core DLL.
+          $benchmark=(Resolve-Path diag-dist/outils/benchmark/moteur3d_v17_benchmark.exe).Path
+          foreach($stale in Get-ChildItem diag-dist -Recurse -Filter *.exe -File){
+            if($stale.FullName -ne $benchmark){Remove-Item $stale.FullName -Force}
+          }
+          if(@(Get-ChildItem diag-dist -Recurse -Filter *.exe).Count -ne 1){
+            throw "Only the independently recompiled diagnostic benchmark EXE may remain"
+          }
       - name: Validate GPU split timestamps, MSAA and multi-camera raster
         shell: pwsh
         timeout-minutes: 15
