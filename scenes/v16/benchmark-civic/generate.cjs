@@ -192,10 +192,15 @@ function build(profileName,p){
     }
   }
   B('Interieur/Galeries','prp_concrete_raw',0,y,-50.15,57,.30,9.7);
-  // Scene-only floor finishes distinguish levels without recoloring the structural underside.
+  // Finish follows the REAL supporting slabs. Leave staircase wells open.
   const floorMat=y===4.5?'cse_gallery_limestone':y===9?'cse_gallery_warm':'cse_concrete_waxed';
-  for(const side of [-1,1])
-    B('Interieur/Galeries/Sol niveau '+y,floorMat,side*40,y+.17,-29.5,19.5,.035,46);
+  for(const side of [-1,1]){
+    if(y===4.5&&side===1){
+      for(const [x,z,w,d] of [[31.5,-30,5.6,48.5],[45,-30,10.5,48.5],
+          [37,-17.25,4.8,23.0],[37,-49.10,4.8,10.2]])
+        B('Interieur/Galeries/Sol niveau '+y,floorMat,x,y+.17,z,w,.035,d);
+    }else B('Interieur/Galeries/Sol niveau '+y,floorMat,side*39.5,y+.17,-30,21.6,.035,48.5);
+  }
   B('Interieur/Galeries/Sol niveau '+y,floorMat,0,y+.17,-50.15,56,.035,9.4);
   // A genuine staircase shaft must remain open through the first
   // mezzanine. Otherwise the avatar's head hits the floor at y=4.5.
