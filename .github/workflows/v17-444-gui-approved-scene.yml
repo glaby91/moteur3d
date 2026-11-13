@@ -1,0 +1,115 @@
+name: CSE WARP V17.444 - Complete GUI + approved V17.443 scene
+on:
+  push:
+    branches: [experiment/v17-444-peripheral-multires-dx11-261113]
+    paths:
+      - .github/workflows/v17-444-gui-approved-scene.yml
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package-approved-scene:
+    runs-on: windows-2022
+    timeout-minutes: 75
+    env:
+      GH_TOKEN: ${{ github.token }}
+      QT_QPA_PLATFORM: offscreen
+      M3D_V16_FORCE_WARP: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Recover validated V17.443 scene and UI assets unchanged
+        shell: pwsh
+        run: |
+          gh run download 43436662498 --repo glaby91/moteur3d --name CSE-WARP-V17.443-PROPRE-Windows-x64 --dir package-v444
+          if($LASTEXITCODE -ne 0){throw "V17.443 approved release artifact unavailable"}
+          foreach($p in @("moteur3d_v17.exe","moteur3d_v16_core.dll","benchmark-civic/scene.json","benchmark-civic/textures/energetik_fresco_mosaic.jpg")){
+            if(!(Test-Path "package-v444/$p")){throw "Missing approved V17.443 file: $p"}
+          }
+          (Get-FileHash package-v444/benchmark-civic/textures/energetik_fresco_mosaic.jpg -Algorithm SHA256).Hash | Set-Content original-fresco-sha.txt
+      - name: Build new Windows GUI and DX11 engine 17.444
+        shell: pwsh
+        run: |
+          cmake -S v17 -B build-v444-gui -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=444
+          if($LASTEXITCODE -ne 0){throw "CMake configure failed"}
+          cmake --build build-v444-gui --config Release --target moteur3d_v17 moteur3d_v17_benchmark --parallel 4
+          if($LASTEXITCODE -ne 0){throw "Native V17.444 Windows build failed"}
+          foreach($f in @("build-v444-gui/Release/moteur3d_v17.exe",
+                          "build-v444-gui/Release/moteur3d_v17_benchmark.exe",
+                          "build-v444-gui/v16/Release/moteur3d_v16_core.dll")){
+            if(!(Test-Path $f)){throw "Missing V17.444 native file $f"}
+          }
+      - name: Assemble isolated V17.444 GUI package with approved scene
+        shell: pwsh
+        run: |
+          Copy-Item build-v444-gui/Release/moteur3d_v17.exe package-v444/moteur3d_v17.exe -Force
+          Copy-Item build-v444-gui/Release/moteur3d_v17_benchmark.exe package-v444/moteur3d_v17_benchmark.exe -Force
+          Copy-Item build-v444-gui/Release/moteur3d_v17_benchmark.exe package-v444/outils/benchmark/moteur3d_v17_benchmark.exe -Force
+          Copy-Item build-v444-gui/v16/Release/moteur3d_v16_core.dll package-v444/moteur3d_v16_core.dll -Force
+          Copy-Item tools/LANCER_BENCH_V17_444_MULTIREZ.bat package-v444/LANCER_BENCH_V17_444_MULTIREZ.bat -Force
+          git rev-parse HEAD | Set-Content package-v444/REVISION.txt
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set M3D_V17_PERIPHERAL_MULTIREZ=1
+          start "" moteur3d_v17.exe
+          '@ | Set-Content package-v444/LANCER_V17_444_MULTIREZ_EXPERIMENTAL.bat -Encoding ascii
+          @'
+          CSE WARP V17.444 - BRANCHE EXPERIMENTALE SEULEMENT
+
+          Scene, Fresque, audio, menus et ressources identiques au paquet approuve V17.443.
+          LANCER_CSE_WARP.bat = rendu DX11 normal par defaut.
+          LANCER_V17_444_MULTIREZ_EXPERIMENTAL.bat = rendu peripherique multires actif.
+          LANCER_BENCH_V17_444_MULTIREZ.bat = deux comparaisons sur votre GPU Intel.
+          Ce mode experimental reste actif meme a l'arret : la logique automatique
+          marche/course/arret sera etudiee seulement apres validation des mesures.
+          Ne pas remplacer votre installation V17.443 avec cette archive test.
+          Critere : au moins 15 pour cent de GPU en moins et image acceptable.
+          '@ | Set-Content package-v444/LIRE-V17.444-EXPERIMENTAL.txt -Encoding utf8
+          $sha=(Get-FileHash package-v444/benchmark-civic/textures/energetik_fresco_mosaic.jpg -Algorithm SHA256).Hash
+          if($sha -ne (Get-Content original-fresco-sha.txt -Raw).Trim()){throw "Fresco corrupted"}
+          $v=[System.Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path package-v444/moteur3d_v17.exe).Path)
+          if($v.FileMajorPart -ne 17 -or $v.FileMinorPart -ne 444){throw "GUI not 17.444"}
+      - name: Smoke Windows GUI with corrected scene (reference + multires)
+        shell: pwsh
+        timeout-minutes: 18
+        run: |
+          $gui=(Resolve-Path package-v444/moteur3d_v17.exe).Path
+          $scene=(Resolve-Path package-v444/benchmark-civic/scene.json).Path
+          $wd=(Resolve-Path package-v444).Path
+          foreach($mode in @("0","1")){
+            $env:M3D_V17_PERIPHERAL_MULTIREZ=$mode
+            $p=Start-Process -FilePath $gui -ArgumentList @("--smoke-repeat-raster",$scene) -WorkingDirectory $wd -PassThru -Wait
+            if($p.ExitCode -ne 0){throw "V17.444 GUI corrected scene failed mode=$mode ($($p.ExitCode))"}
+          }
+      - name: Final corrected-scene benchmark visual smoke
+        shell: pwsh
+        timeout-minutes: 15
+        run: |
+          $env:PATH=(Resolve-Path package-v444).Path+";"+$env:PATH
+          $env:M3D_V17_PERIPHERAL_MULTIREZ="1"
+          $scene=(Resolve-Path package-v444/benchmark-civic/scene.json).Path
+          & package-v444/moteur3d_v17_benchmark.exe $scene corrected-scene-QA --smoke --camera-id piscine_soir --raster-msaa 1
+          if($LASTEXITCODE -ne 0){throw "V17.444 corrected scene benchmark failed"}
+          $p=Get-ChildItem corrected-scene-QA -Recurse -Filter "raster_*.png" | Select-Object -First 1
+          if(!$p -or $p.Length -lt 1000){throw "No corrected-scene render"}
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: CSE-WARP-V17.444-EXPERIMENTAL-Windows-x64-Scene-V443
+          path: package-v444/
+          retention-days: 21
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CSE-WARP-V17.444-SCENE-CORRIGEE-RENDER-CI
+          path: corrected-scene-QA/
+          retention-days: 21
+          if-no-files-found: warn
