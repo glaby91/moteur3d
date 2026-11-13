@@ -1,6 +1,7 @@
 #include "m3d_engine.h"
 #include "src/m3d_walk_controller.h"
 #include "exploration_motion.h"
+#include "scope_zoom.h"
 #include "camera_diagnostic.h"
 #include "anomaly_catalog.h"
 #include "frame_pacing.h"
@@ -51,6 +52,7 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
@@ -67,6 +69,7 @@
 #include <QVBoxLayout>
 #include <QtConcurrent/QtConcurrentRun>
 #include <atomic>
+#include <cmath>
 #include <cstring>
 #include <cstdio>
 #include <memory>
@@ -120,6 +123,12 @@ public:
         if(hudLines_==lines&&hudEnabled_==enabled)return;
         hudLines_=std::move(lines);hudEnabled_=enabled;update();
     }
+    void setScopeOverlay(float level){
+        level=std::clamp(level,0.f,1.f);
+        if(std::abs(scopeLevel_-level)<.002f)return;
+        scopeLevel_=level;
+        update();
+    }
     static void drawCameraHud(QPainter& painter,const QRect& bounds,const QStringList& lines){
         if(lines.isEmpty()||bounds.width()<240||bounds.height()<110)return;
         painter.save();
@@ -156,6 +165,33 @@ protected:
         QRect dst(QPoint((width()-s.width())/2,(height()-s.height())/2),s);
         p.setRenderHint(QPainter::SmoothPixmapTransform,false);
         p.drawImage(dst,image_);
+        // Scoped reticle is only a 2D Qt overlay, with no effect on physical
+        // position, collision rays or the raster/CPU renderer.
+        if(scopeLevel_>.005f){
+            p.save();
+            p.setRenderHint(QPainter::Antialiasing,true);
+            const QPointF center=dst.center();
+            const qreal radius=qreal(std::min(dst.width(),dst.height()))*.405;
+            QPainterPath outside;
+            outside.setFillRule(Qt::OddEvenFill);
+            outside.addRect(dst);
+            outside.addEllipse(center,radius,radius);
+            p.fillPath(outside,QColor(0,0,0,int(135.f*scopeLevel_)));
+            p.setBrush(Qt::NoBrush);
+            p.setPen(QPen(QColor(228,236,231,int(195.f*scopeLevel_)),1.25));
+            p.drawEllipse(center,radius,radius);
+            const qreal line=qreal(std::max(12,int(radius*.14)));
+            const qreal gap=5.;
+            p.setPen(QPen(QColor(16,24,22,int(245.f*scopeLevel_)),1.8));
+            p.drawLine(QPointF(center.x()-line,center.y()),QPointF(center.x()-gap,center.y()));
+            p.drawLine(QPointF(center.x()+gap,center.y()),QPointF(center.x()+line,center.y()));
+            p.drawLine(QPointF(center.x(),center.y()-line),QPointF(center.x(),center.y()-gap));
+            p.drawLine(QPointF(center.x(),center.y()+gap),QPointF(center.x(),center.y()+line));
+            p.setBrush(QColor(230,238,235,int(190.f*scopeLevel_)));
+            p.setPen(Qt::NoPen);
+            p.drawEllipse(center,1.75,1.75);
+            p.restore();
+        }
         if(hudEnabled_)drawCameraHud(p,dst,hudLines_);
         if(paintPending_){
             paintPending_=false;
@@ -169,6 +205,7 @@ private:
     QString placeholder_;
     QStringList hudLines_;
     bool hudEnabled_=true;
+    float scopeLevel_=0.f;
 };
 class V17Window final : public QMainWindow {
 public:
@@ -445,7 +482,8 @@ private:
     walk::State walkingState_{};
     cse::pool_ladder::Motion poolLadderMotion_{};
     QCheckBox* walkingModeBox_=nullptr;
-    bool exploring_=false,freeCameraActive_=false,leftMouseHeld_=false;
+    bool exploring_=false,freeCameraActive_=false,leftMouseHeld_=false,rightMouseHeld_=false;
+    float scopeBaseFov_=65.f,scopeBlend_=0.f;
     // Exact anomaly/replayed camera is kept until the next walking input.
     // This does not disable or persistently alter the user's collision mode.
     bool walkingCollisionSyncPending_=false;
@@ -622,6 +660,7 @@ private:
         // collision mode (which previously persisted "Vol libre" in QSettings).
         // On the next user movement, resynchronize feet with the real scene.
         freeCamera_=pose;
+        resetScopeForCamera();
         walkingCollisionSyncPending_=true;
         const V dir=norm(pose.target-pose.eye);
         yaw_=std::atan2(dir.x,-dir.z);
@@ -648,10 +687,17 @@ private:
                          :QStringLiteral("Vitesse ×1")));
         explorationSpeedLabel_->show();
     }
+    void resetScopeForCamera(){
+        rightMouseHeld_=false;
+        scopeBlend_=0.f;
+        scopeBaseFov_=freeCamera_.fov;
+        if(canvas_)canvas_->setScopeOverlay(0.f);
+    }
     void activateFreeCamera(){
         if(!runtime_||runtime_->cameras.isEmpty())return;
         const int idx=std::clamp(cameraBox_->currentIndex(),0,int(runtime_->cameras.size())-1);
         freeCamera_=runtime_->cameras[idx];
+        resetScopeForCamera();
         const V dir=norm(freeCamera_.target-freeCamera_.eye);
         yaw_=std::atan2(dir.x,-dir.z);
         pitch_=std::asin(clampf(dir.y,-.99f,.99f));
@@ -672,6 +718,8 @@ private:
     }
     void stopExploration(){
         exploring_=false;
+        if(freeCameraActive_)freeCamera_.fov=scopeBaseFov_;
+        resetScopeForCamera();
         if(explorationQualityOverride_){
             std::wstring error;
             if(setRasterQualitySettings(explorationOriginalQuality_,error))
@@ -682,11 +730,12 @@ private:
         keysDown_.clear();
         poolLadderMotion_={};
         leftMouseHeld_=false;
+        rightMouseHeld_=false;
         updateExplorationSpeedIndicator();
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Démarrer exploration (V17)"));
         if(explorationHelp_)explorationHelp_->setText(QStringLiteral(
-            "ZQSD / flèches : marcher · clic gauche + souris : regarder · Maj : vitesse ×3 · Échap : arrêter\n"
-            "E près d’une échelle : monter/descendre dans la piscine. Vol libre : Espace / Ctrl."));
+            "ZQSD / flèches : marcher · clic gauche : regarder · clic droit maintenu : lunette ×3 · Maj : vitesse ×3\n"
+            "E près d’une échelle : monter/descendre dans la piscine · Échap : arrêter · Vol libre : Espace / Ctrl."));
     }
     void toggleExploration(){
         if(exploring_){stopExploration();return;}
@@ -732,6 +781,13 @@ private:
     void frameTick(){
         if(!exploring_||!runtime_||!freeCameraActive_)return;
         const float dt=std::min(0.08f,float(motionClock_.restart())/1000.f);
+        const float nextScope=cse::scope::advance(scopeBlend_,rightMouseHeld_,dt);
+        if(nextScope!=scopeBlend_){
+            scopeBlend_=nextScope;
+            freeCamera_.fov=cse::scope::effectiveFov(scopeBaseFov_,scopeBlend_);
+            canvas_->setScopeOverlay(scopeBlend_);
+            updateCameraHud();
+        }
         V forward{std::sin(yaw_)*std::cos(pitch_),std::sin(pitch_),
                   -std::cos(yaw_)*std::cos(pitch_)};
         V horizontal=norm(V{forward.x,0,forward.z});
@@ -840,16 +896,21 @@ protected:
                 if(e->button()==Qt::LeftButton){
                     leftMouseHeld_=true;previousMouse_=e->pos();canvas_->setFocus();return true;
                 }
+                if(e->button()==Qt::RightButton){
+                    rightMouseHeld_=true;previousMouse_=e->pos();canvas_->setFocus();return true;
+                }
             }
             if(event->type()==QEvent::MouseButtonRelease){
                 auto* e=static_cast<QMouseEvent*>(event);
                 if(e->button()==Qt::LeftButton){leftMouseHeld_=false;return true;}
+                if(e->button()==Qt::RightButton){rightMouseHeld_=false;return true;}
             }
-            if(event->type()==QEvent::MouseMove && leftMouseHeld_){
+            if(event->type()==QEvent::MouseMove && (leftMouseHeld_||rightMouseHeld_)){
                 auto* e=static_cast<QMouseEvent*>(event);
                 const QPoint d=e->pos()-previousMouse_;previousMouse_=e->pos();
-                yaw_+=float(d.x())*.005f;
-                pitch_=clampf(pitch_-float(d.y())*.005f,-1.48f,1.48f);
+                const float sensitivity=.005f*cse::scope::mouseSensitivity(scopeBlend_);
+                yaw_+=float(d.x())*sensitivity;
+                pitch_=clampf(pitch_-float(d.y())*sensitivity,-1.48f,1.48f);
                 updateLook();return true;
             }
         }
@@ -1084,6 +1145,7 @@ private:
             freeCamera_.eye={a.x,a.y,a.z};
             walkingCollisionSyncPending_=true;
             freeCamera_.fov=a.fov;
+            resetScopeForCamera();
             freeCamera_.id=QString::fromLatin1(a.id);
             freeCamera_.name=QString::fromUtf8(a.title);
             yaw_=yr;pitch_=pr;
@@ -1164,6 +1226,7 @@ private:
         // Return to the old camera without changing the selected navigation
         // mode or disabling obstacle collisions in saved preferences.
         freeCamera_=pose;
+        resetScopeForCamera();
         walkingCollisionSyncPending_=true;
         const V dir=norm(pose.target-pose.eye);
         yaw_=std::atan2(dir.x,-dir.z);
@@ -1618,8 +1681,8 @@ private:
         walkingModeBox_->setChecked(walkPreferences.value(QStringLiteral("Exploration/Walking"),true).toBool());
         vertical->addWidget(walkingModeBox_);
         explorationHelp_=new QLabel(QStringLiteral(
-            "ZQSD / flèches : marcher · clic gauche + souris : regarder · Maj : accélérer · Échap : arrêter\\n"
-            "E près d’une échelle : monter/descendre dans la piscine. Ctrl+Maj+A : anomalie PNG+JSON."));
+            "ZQSD / flèches : marcher · clic gauche : regarder · clic droit maintenu : lunette ×3 · Maj : accélérer\\n"
+            "E près d’une échelle : monter/descendre · Échap : arrêter · Ctrl+Maj+A : anomalie PNG+JSON."));
         explorationHelp_->setWordWrap(true);
         vertical->addWidget(explorationHelp_);
         connect(explorationButton_,&QPushButton::clicked,this,[this]{toggleExploration();});
