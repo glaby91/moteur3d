@@ -15,7 +15,7 @@ NEW_CAMERAS = [
     dict(id="v9_joists_removed", name="02 Unsupported roof joists removed",
          position=[0, 5.2, -33.2], target=[-5, 17.25, -32], fovDegrees=76),
     dict(id="v9_clearance_overview", name="07 Opposite ends starting blocks and ladders",
-         position=[0, 15.2, -32], target=[0, -0.55, -32], fovDegrees=126),
+         position=[32.5, 9.4, -18.5], target=[0, 0.7, -32.5], fovDegrees=78),
     dict(id="v9_benches_removed", name="08 No wooden benches or feet",
          position=[-7.5, 2.55, -15.2], target=[-9, 0.8, -31], fovDegrees=82),
 ]
@@ -49,6 +49,11 @@ def main(root: Path):
     cameras = json.loads(original)["cameras"]
     ids = {c["id"] for c in cameras}
     for camera in NEW_CAMERAS:
+        # A near-vertical shot is degenerate in the WARP camera's world-up
+        # basis and previously produced a monochrome image (proof #07).
+        dx = camera["target"][0] - camera["position"][0]
+        dz = camera["target"][2] - camera["position"][2]
+        assert (dx*dx + dz*dz) > 9, "Camera points almost vertically: " + camera["id"]
         assert camera["id"] not in ids, camera["id"]
         ids.add(camera["id"])
         cameras.append(camera)
