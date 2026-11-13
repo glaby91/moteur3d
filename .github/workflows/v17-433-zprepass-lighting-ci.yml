@@ -1,0 +1,190 @@
+name: CSE WARP V17.433 - GPU HD620 trajectory 6 seconds, CPU GPU RAM
+on:
+  push:
+    branches: [feature/v17-433-zprepass-lighting-validation-261113]
+    paths:
+      - .github/workflows/v17-433-hd620-single-trajectory.yml
+      - v17/tools/benchmark_gpu_trajectory.cpp
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp
+      - v17/CMakeLists.txt
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  build-and-smoke-only:
+    runs-on: windows-2022
+    timeout-minutes: 40
+    env:
+      GH_TOKEN: ${{ github.token }}
+      QT_QPA_PLATFORM: offscreen
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Restore validated V17.430 heavy scene
+        shell: pwsh
+        run: |
+          gh run download 43335003809 --repo glaby91/moteur3d --name CSE-WARP-V17.430-9-ANOMALIES-Windows-x64 --dir old-v430
+          if($LASTEXITCODE -ne 0){throw "V17.430 corrected scene unavailable"}
+          foreach($p in @("benchmark-civic/scene-v7-corrections.json","benchmark-civic/cameras/v8-nine-anomalies.json","benchmark-civic/textures/energetik_fresco_mosaic.jpg")){
+            if(!(Test-Path "old-v430/$p")){throw "Missing V17.430 scene asset: $p"}
+          }
+          (Get-FileHash "old-v430/benchmark-civic/textures/energetik_fresco_mosaic.jpg" -Algorithm SHA256).Hash | Set-Content original-fresco-sha.txt
+      - name: Build ONLY the dedicated hardware GPU profile executable
+        shell: pwsh
+        run: |
+          node scenes/v16/benchmark-civic/generate.cjs --all
+          if($LASTEXITCODE -ne 0){throw "Scene prerequisite generation failed"}
+          cmake -S v17 -B build-v433 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=433
+          if($LASTEXITCODE -ne 0){throw "CMake configure failed"}
+          cmake --build build-v433 --config Release --target moteur3d_v17_gpu_trajectory moteur3d_v17_benchmark --parallel 4
+          if($LASTEXITCODE -ne 0){throw "Dedicated GPU profiler compile failed"}
+          foreach($p in @("build-v433/Release/moteur3d_v17_gpu_trajectory.exe","build-v433/v16/Release/moteur3d_v16_core.dll")){
+            if(!(Test-Path $p)){throw "Missing compiled native binary: $p"}
+          }
+      - name: Assemble ready-to-run benchmark ONLY, full current scene
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force bench-HD620 | Out-Null
+          Copy-Item build-v433/Release/moteur3d_v17_gpu_trajectory.exe bench-HD620/CSE-WARP-GPU-TRAJET-BENCH.exe -Force
+          Copy-Item build-v433/Release/moteur3d_v17_benchmark.exe bench-HD620/CSE-WARP-MULTI-CAMERA-QA.exe -Force
+          Copy-Item build-v433/v16/Release/moteur3d_v16_core.dll bench-HD620/moteur3d_v16_core.dll -Force
+          Copy-Item old-v430/benchmark-civic bench-HD620/benchmark-civic -Recurse -Force
+          Get-ChildItem old-v430 -File -Filter "*.dll" | Where-Object {$_.Name -ne "moteur3d_v16_core.dll"} | ForEach-Object {Copy-Item $_.FullName "bench-HD620/$($_.Name)"}
+          foreach($dir in @("platforms","imageformats","styles","tls")){
+            if(Test-Path "old-v430/$dir"){Copy-Item "old-v430/$dir" "bench-HD620/$dir" -Recurse -Force}
+          }
+          if(Test-Path "old-v430/qt.conf"){Copy-Item old-v430/qt.conf bench-HD620/qt.conf}
+          $art=(Get-FileHash "bench-HD620/benchmark-civic/textures/energetik_fresco_mosaic.jpg" -Algorithm SHA256).Hash
+          if($art -ne (Get-Content original-fresco-sha.txt -Raw).Trim()){throw "Original artwork modified"}
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set "M3D_V16_FORCE_WARP="
+          set "QT_QPA_PLATFORM=offscreen"
+          echo CSE WARP GPU D3D11 HARDWARE BENCH (not software WARP)
+          echo 1366x768 - 90 images - six virtual seconds - MSAA 2x
+          "CSE-WARP-GPU-TRAJET-BENCH.exe" "benchmark-civic\scene-v7-corrections.json" "RESULTATS_BENCHMARK" --z-prepass=on --light-aabb=off
+          echo.
+          echo Export dans RESULTATS_BENCHMARK\BENCH-GPU-HD620-...\
+          pause
+          '@ | Set-Content bench-HD620/LANCER_BENCH_GPU_HD620.bat -Encoding ascii
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set "M3D_V16_FORCE_WARP="
+          set "QT_QPA_PLATFORM=offscreen"
+          "CSE-WARP-GPU-TRAJET-BENCH.exe" "benchmark-civic\scene-v7-corrections.json" "RESULTATS_BENCHMARK" --z-prepass=on --light-aabb=on
+          pause
+          '@ | Set-Content bench-HD620/LANCER_AB_LUMIERES_GPU.bat -Encoding ascii
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set "M3D_V16_FORCE_WARP="
+          set "QT_QPA_PLATFORM=offscreen"
+          "CSE-WARP-GPU-TRAJET-BENCH.exe" "benchmark-civic\scene-v7-corrections.json" "RESULTATS_BENCHMARK" --z-prepass=off --light-aabb=off
+          pause
+          '@ | Set-Content bench-HD620/LANCER_REFERENCE_SANS_Z.bat -Encoding ascii
+          @'
+          CSE WARP V17.433 -- BENCH GPU D3D11 RASTER, UN SEUL TRAJET
+          Extraire toute l'archive puis lancer LANCER_BENCH_GPU_HD620.bat.
+          Utiliser sur Dell Intel HD Graphics 620 pour les vraies mesures GPU.
+          Ce programme exige le GPU D3D11 materiel (pas WARP logiciel).
+          Scene actuelle V17.430, neuf corrections et fresque intactes.
+          Trajet vitre 5.4 m, 6 secondes VIRTUELLES, 90 frames fixes.
+          1366 x 768 natif, MSAA 2x, PBR 2048 px, shaders inchanges.
+          Export : frames.csv (par image), summary.json (mediane p95 p99),
+          frame_000.png, frame_045.png, frame_089.png (3 images visuelles).
+          Compteurs : temps image et FPS, CPU process, memoire RAM, usages
+          GPU 3D Windows si disponibles, GPU D3D11 draw/copy/timestamps,
+          memoire locale/partagee DXGI de l'adaptateur.
+          Les chiffres DXGI de memoire sont globaux a l'adaptateur.
+          Les compteurs indisponibles sont laisses vides.
+          Z-prepass ON + lampe AABB OFF par defaut : reference optimisee.
+          LANCER_AB_LUMIERES_GPU.bat teste le rejet lumiere AABB avec Z ON.
+          LANCER_REFERENCE_SANS_Z.bat reproduit la baseline sans Z-prepass.
+          Les flags reels sont ecrits dans chaque frames.csv et summary.json.
+          A/B : commencer par les deux essais Z ON pour limiter les variations
+          thermiques; meme scene et 90 images.
+          Aucun benchmark complet, aucune recompilation sur votre Dell.
+          La duree de calcul ne se confond pas avec les six secondes virtuelles.
+          '@ | Set-Content bench-HD620/LIRE_EN_PREMIER.txt -Encoding utf8
+      - name: Windows DX11 four-frame technical smoke only, no full benchmark
+        shell: pwsh
+        run: |
+          $env:M3D_V16_FORCE_WARP="1"
+          & bench-HD620/CSE-WARP-GPU-TRAJET-BENCH.exe bench-HD620/benchmark-civic/scene-v7-corrections.json "ci-smoke-results" --ci-smoke --z-prepass=on --light-aabb=on
+          if($LASTEXITCODE -ne 0){throw "Targeted smoke process failed"}
+          $csv=@(Get-ChildItem ci-smoke-results -Recurse -Filter frames.csv)
+          $json=@(Get-ChildItem ci-smoke-results -Recurse -Filter summary.json)
+          if($csv.Count -ne 1 -or $json.Count -ne 1){throw "CSV/JSON exports missing"}
+          $rows=Import-Csv $csv[0].FullName
+          if($rows.Count -ne 4){throw "Expected 4 real smoke frames, got $($rows.Count)"}
+          $summary=Get-Content $json[0].FullName -Raw | ConvertFrom-Json
+          if($summary.summary.sampleFrames -ne 4 -or $summary.summary.width -ne 640 -or !$summary.summary.zPrepassEnabled -or !$summary.summary.lightAabbCullEnabled){throw "Wrong smoke flags/results"}
+          if($summary.summary.meanWallMs -le 0 -or $summary.frames.Count -ne 4){throw "Bad timing data"}
+          $pngs=@(Get-ChildItem ci-smoke-results -Recurse -Filter frame_*.png)
+          if($pngs.Count -ne 3){throw "Three real screenshots missing"}
+          Write-Host "PASS: 4 actual DirectX11 software CI frames, CSV and JSON exported"
+          Write-Host "Real Intel HD620 measurements must run on the user's Dell."
+      - name: Z-prepass / local-light AABB visual QA across all scene cameras
+        shell: pwsh
+        run: |
+          $env:M3D_V16_FORCE_WARP="1"
+          $scene="bench-HD620/benchmark-civic/scene-v7-corrections.json"
+          $exe="bench-HD620/CSE-WARP-MULTI-CAMERA-QA.exe"
+          foreach($mode in @("base","z","zlight")){
+            $env:M3D_V17_EXPERIMENT_Z_PREPASS=if($mode -eq "base"){"0"}else{"1"}
+            $env:M3D_V17_EXPERIMENT_LIGHT_AABB_CULL=if($mode -eq "zlight"){"1"}else{"0"}
+            & $exe $scene "ci-qa-$mode" --smoke --all-cameras --raster-msaa 2
+            if($LASTEXITCODE -ne 0){throw "Multicamera QA failed mode $mode"}
+          }
+          $base=@(Get-ChildItem ci-qa-base -Recurse -Filter 'raster_*_640x360_depth1.png')
+          if($base.Count -lt 10){throw "Not enough multi-angle proof images: $($base.Count)"}
+          foreach($case in @("z","zlight")){
+            $changed=0
+            foreach($png in $base){
+              $other=@(Get-ChildItem "ci-qa-$case" -Recurse -Filter $png.Name)
+              if($other.Count -ne 1){throw "Missing candidate image $case / $($png.Name)"}
+              if((Get-FileHash $png.FullName -Algorithm SHA256).Hash -ne (Get-FileHash $other[0].FullName -Algorithm SHA256).Hash){
+                 Write-Host "IMAGE DIFFERENCE: $case / $($png.Name)"
+                 $changed++
+              }
+            }
+            if($changed -gt 0){throw "$case has $changed images different from original across $($base.Count) cameras"}
+            Write-Host "PASS: $case matches $($base.Count) different camera images byte-for-byte"
+          }
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CSE-WARP-V17.433-VALIDATION-ANGLES-ZPREPASS-LUMIERES
+          path: |
+            ci-qa-base/
+            ci-qa-z/
+            ci-qa-zlight/
+          retention-days: 14
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CSE-WARP-V17.433-OPTIMISATIONS-ZPREPASS-LUMIERES-Windows-x64
+          path: bench-HD620/
+          retention-days: 21
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CSE-WARP-V17.433-TEST-CI-TRAJET-GPU
+          path: ci-smoke-results/
+          retention-days: 14
+          if-no-files-found: warn
