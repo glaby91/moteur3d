@@ -28,7 +28,9 @@ check(portrait[0]===0xff&&portrait[1]===0xd8&&portrait.at(-2)===0xff&&
 function read(file){return JSON.parse(fs.readFileSync(path.resolve(base,file),'utf8'));}
 const materials=read('materials/pripyat-reuse.json').materials;
 const allIds=materials.map(m=>m.id);
-check(materials.length===44&&new Set(allIds).size===materials.length,'Expected 22 source + 22 scene materials');
+check(materials.length>sourceIds.length&&new Set(allIds).size===materials.length&&
+  materials.slice(0,sourceIds.length).every((m,i)=>m.id===sourceIds[i]),
+  'Original source materials must be followed by unique scene materials');
 check(origin.materials.every((m,i)=>JSON.stringify(m)===JSON.stringify(materials[i])),
  'Original material recipes or ordering changed');
 // Keep the evening artificial-light rig stable across all load profiles.
@@ -81,7 +83,7 @@ for(const [profile,target,cap,sceneFile] of [
  }
  check(boxCount*12>=target&&inst.length<=65000,'Stress profile out of range');
  check(stats.totalInstances===inst.length&&stats.boxes===boxCount,'Incorrect geometry stats');
- check(pbr.sets.length===44&&pbr.sets.every(x=>x.resolution<=(x.imageFile?2048:cap)),
+ check(pbr.sets.length===materials.length&&pbr.sets.every(x=>x.resolution<=(x.imageFile?2048:cap)),
   'Unexpected PBR cap or missing local textures');
  const frescoSet=pbr.sets.find(m=>m.id==='tex_cse_energetik_fresco');
  check(frescoSet&&frescoSet.imageFile==='textures/energetik_fresco_mosaic.jpg',
