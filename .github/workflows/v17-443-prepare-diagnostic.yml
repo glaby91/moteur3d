@@ -1,5 +1,14 @@
 name: Prepare diagnostic executable - CSE WARP 17.443
 on:
+  push:
+    branches: [bench/v17-443-diagnostic-goulots-261113]
+    paths:
+      - .github/workflows/v17-443-prepare-diagnostic.yml
+      - v17/tools/benchmark_v17.cpp
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp
+      - tools/bench_v443_diagnostic.ps1
+      - tools/analyze_diagnostic_v443.py
+      - docs/V17.443-protocole-diagnostic.md
   workflow_dispatch:
 permissions:
   contents: read
