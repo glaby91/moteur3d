@@ -17,6 +17,9 @@ on:
       - 'v17/**'
       - '.github/workflows/build-moteur3d-v17.yml'
   workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
 concurrency:
   group: cse-warp-v17-${{ github.ref }}
   cancel-in-progress: true
@@ -541,7 +544,16 @@ jobs:
           # Smoke-test the exact scene we are going to deliver, not a substitute.
           & "dist-v17/moteur3d_v17_benchmark.exe" "dist-v17/benchmark-civic/scene.json" "build-v17/approved-v444-shipping-smoke" --smoke --camera-id v4_face --hour 14 --raster-msaa 1
           if ($LASTEXITCODE -ne 0) { throw "Approved 186-material scene failed final DirectX11 WARP render" }
-          Write-Host "READY: approved V17.444 scene + 186 materials + 82 image textures + radio; latest engine compiled"
+          & "dist-v17/moteur3d_v17_benchmark.exe" "dist-v17/benchmark-civic/scene.json" "build-v17/approved-v444-night-smoke" --smoke --camera-id v4_face --hour 2 --raster-msaa 1
+          if ($LASTEXITCODE -ne 0) { throw "Night-time cloud/lighting smoke failed" }
+          $dayImage=Get-ChildItem "build-v17/approved-v444-shipping-smoke" -Filter 'raster_*.png' -Recurse | Select-Object -First 1
+          $nightImage=Get-ChildItem "build-v17/approved-v444-night-smoke" -Filter 'raster_*.png' -Recurse | Select-Object -First 1
+          if (!$dayImage -or !$nightImage) { throw "Missing day/night DX11 sky preview PNG" }
+          if ((Get-FileHash $dayImage.FullName -Algorithm SHA256).Hash -eq
+              (Get-FileHash $nightImage.FullName -Algorithm SHA256).Hash) {
+            throw "No day/night difference in delivered DX11 images"
+          }
+          Write-Host "READY: approved 186-material scene, 82 PBR artworks, radio, distinct DAY/NIGHT sky rendered"
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
