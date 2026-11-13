@@ -52,6 +52,29 @@ inline bool support(const Scene& scene,float x,float z,float top,float bottom,
     }
     return false;
 }
+// V17.442 / ANO-014. Outdoor paving stones sit about 15 cm above their
+// backing slab, separated by decorative 5-6 cm joints. The character's
+// centre ray must not snap down to the backing slab while one foot is still
+// over a neighbouring paver. Keep the previous footing only when there is
+// a REAL nearby, walkable and almost coplanar surface. This is not a
+// generalized step-height increase and cannot bridge a wide stair/ledge.
+inline bool continuousPaverFooting(const Scene& scene,V next,float previousY,
+                                   float detectedY,const Settings& cfg={}){
+    const float drop=previousY-detectedY;
+    if(drop<.018f || drop>.18f)return false;
+    constexpr float offsets[8][2]={{.13f,0.f},{-.13f,0.f},
+                                    {0.f,.13f},{0.f,-.13f},
+                                    {.13f,.13f},{.13f,-.13f},
+                                    {-.13f,.13f},{-.13f,-.13f}};
+    for(const auto& offset:offsets){
+        V nearby{};
+        if(support(scene,next.x+offset[0],next.z+offset[1],
+                   previousY+.035f,previousY-.035f,nearby,cfg)
+           && std::abs(nearby.y-previousY)<.022f)
+            return true;
+    }
+    return false;
+}
 inline bool spawn(const Scene& scene,V cameraEye,State& state,
                   const Settings& cfg={}){
     state=State{};
@@ -138,7 +161,10 @@ inline void advance(const Scene& scene,State& state,V motion,float dt,
                 floor,cfg);
             if(supported&&state.grounded){
                 if(floor.y-from.y>cfg.maxStepUp+.001f)return false;
-                next.y=floor.y;
+                // Preserve eye height over narrow paving joints only;
+                // retain the actual lower floor for stairs and true ledges.
+                next.y=continuousPaverFooting(scene,next,from.y,floor.y,cfg)
+                           ?from.y:floor.y;
             }
             // While airborne keep falling; never teleport upwards to a
             // higher landing without the grounded step-up sequence.
@@ -165,7 +191,9 @@ inline void advance(const Scene& scene,State& state,V motion,float dt,
         state.feet.y+cfg.maxStepUp+.01f,
         state.feet.y-cfg.maxStepDown-.01f,floor,cfg);
     if(landed&&state.grounded){
-        state.feet.y=floor.y;
+        state.feet.y=continuousPaverFooting(scene,state.feet,state.feet.y,
+                                              floor.y,cfg)
+                          ?state.feet.y:floor.y;
         state.verticalVelocity=0.f;
         state.lastSafeFeet=state.feet;
         state.hasSafeGround=true;
