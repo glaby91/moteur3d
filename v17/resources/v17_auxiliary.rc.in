@@ -1,0 +1,26 @@
+#include <winver.h>
+1 VERSIONINFO
+ FILEVERSION 17,@V17_BUILD_NUMBER@,0,0
+ PRODUCTVERSION 17,@V17_BUILD_NUMBER@,0,0
+ FILEFLAGSMASK 0x3fL
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+BEGIN
+ BLOCK "StringFileInfo"
+ BEGIN
+  BLOCK "040904E4"
+  BEGIN
+   VALUE "CompanyName", "CSE WARP\0"
+   VALUE "FileDescription", "CSE WARP V17.@V17_BUILD_NUMBER@ - @V17_AUX_NAME@\0"
+   VALUE "FileVersion", "17.@V17_BUILD_NUMBER@\0"
+   VALUE "ProductVersion", "17.@V17_BUILD_NUMBER@\0"
+   VALUE "InternalName", "@V17_AUX_NAME@\0"
+   VALUE "OriginalFilename", "@V17_AUX_NAME@.exe\0"
+   VALUE "ProductName", "CSE WARP Beta X\0"
+  END
+ END
+ BLOCK "VarFileInfo"
+ BEGIN
+  VALUE "Translation", 0x0409, 1252
+ END
+END
