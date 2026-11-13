@@ -62,7 +62,7 @@ jobs:
         run: |
           cmake -S v17 -B build-v440 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=440
           if($LASTEXITCODE -ne 0){throw "CMake failed"}
-          cmake --build build-v440 --config Release --target moteur3d_v17 v17_pool_ladder_smoke v17_frame_pacing_smoke v17_walk_controller_smoke v17_camera_diagnostic_smoke v17_gpu_trajectory --parallel 4
+          cmake --build build-v440 --config Release --target moteur3d_v17 v17_pool_ladder_smoke v17_frame_pacing_smoke v17_walk_controller_smoke v17_camera_diagnostic_smoke moteur3d_v17_gpu_trajectory --parallel 4
           if($LASTEXITCODE -ne 0){throw "Build failed"}
           ctest --test-dir build-v440 -C Release -R "v17_pool_ladder_bidirectional|v17_frame_pacing_statistical_regression|v17_walk_stairs_collision|v17_camera_diagnostic_roundtrip" --output-on-failure
           if($LASTEXITCODE -ne 0){throw "CPU regression failed"}
