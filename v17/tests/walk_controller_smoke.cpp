@@ -66,6 +66,28 @@ int main(){
         require(std::abs(onPavers.feet.y-.155f)<.015f,
                 "camera failed to reconnect to next paving tile");
     }
+    // V17.442: diagonal crossings over the intersection of TWO paving
+    // joints require nearby diagonal footing, not just cardinal samples.
+    {
+        Scene pavedCorner{};
+        top(pavedCorner,-3.f,3.f,-3.f,3.f,0.f);
+        for(float x0:{-1.5f,.055f}){
+            for(float z0:{-1.5f,.055f}){
+                top(pavedCorner,x0,x0+1.5f,z0,z0+1.5f,.155f);
+            }
+        }
+        done(pavedCorner);
+        State diagonal{};
+        require(spawn(pavedCorner,{-.45f,1.855f,-.45f},diagonal),
+                "diagonal paving spawn unavailable");
+        float minFooting=diagonal.feet.y;
+        for(int i=0;i<38;++i){
+            advance(pavedCorner,diagonal,{.022f,0.f,.022f},.02f);
+            minFooting=std::min(minFooting,diagonal.feet.y);
+        }
+        require(minFooting>.13f,
+                "camera jumps at four-way outdoor paving intersection");
+    }
     // V17.429: speed is exactly 3x in both walking and fly navigation.
     static_assert(cse::exploration::speedMetersPerSecond(false)==2.5f,
                   "Normal walking/flying speed must remain unchanged");
