@@ -1,0 +1,113 @@
+name: CSE WARP V17.434 - HUD camera, anomaly screenshot JSON and About
+on:
+  push:
+    branches: [feature/v17-434-camera-anomalies-about-261113]
+    paths:
+      - .github/workflows/v17-434-camera-anomalies-build.yml
+      - v17/moteur3d_v17_qt.cpp
+      - v17/camera_diagnostic.h
+      - v17/tests/camera_diagnostic_smoke.cpp
+      - v17/CMakeLists.txt
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  windows-camera-diagnostic:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    env:
+      GH_TOKEN: ${{ github.token }}
+      QT_QPA_PLATFORM: offscreen
+      M3D_V16_FORCE_WARP: '1'
+      M3D_V17_EXPERIMENT_Z_PREPASS: '0'
+      M3D_V17_EXPERIMENT_LIGHT_AABB_CULL: '0'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Restore intact V17.430 architectural scene and portable Qt runtime
+        shell: pwsh
+        run: |
+          gh run download 43335003809 --repo glaby91/moteur3d --name CSE-WARP-V17.430-9-ANOMALIES-Windows-x64 --dir dist-v434
+          if($LASTEXITCODE -ne 0){throw "V17.430 portable baseline unavailable"}
+          foreach($p in @("benchmark-civic/scene-v7-corrections.json","benchmark-civic/textures/energetik_fresco_mosaic.jpg","moteur3d_v17.exe","moteur3d_v16_core.dll")){
+            if(!(Test-Path "dist-v434/$p")){throw "Missing portable component: $p"}
+          }
+          (Get-FileHash "dist-v434/benchmark-civic/textures/energetik_fresco_mosaic.jpg" -Algorithm SHA256).Hash | Set-Content fresco-original-sha.txt
+      - name: Build actual V17.434 Windows Qt app, benchmark and camera unit tests
+        shell: pwsh
+        run: |
+          node scenes/v16/benchmark-civic/generate.cjs --all
+          if($LASTEXITCODE -ne 0){throw "Scene prerequisite generation failed"}
+          cmake -S v17 -B build-v434 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=434
+          if($LASTEXITCODE -ne 0){throw "CMake V17.434 configure failed"}
+          cmake --build build-v434 --config Release --target moteur3d_v17 moteur3d_v17_benchmark v17_camera_diagnostic_smoke --parallel 4
+          if($LASTEXITCODE -ne 0){throw "CSE WARP V17.434 native compile failed"}
+          foreach($p in @("build-v434/Release/moteur3d_v17.exe","build-v434/Release/moteur3d_v17_benchmark.exe","build-v434/v16/Release/moteur3d_v16_core.dll")){
+            if(!(Test-Path $p)){throw "Missing compiled V17.434 binary: $p"}
+          }
+      - name: CTest exact pose JSON serialization, HUD and rejection of invalid camera
+        shell: pwsh
+        run: |
+          ctest --test-dir build-v434 -C Release -R "^v17_camera_diagnostic_roundtrip$" --output-on-failure
+          if($LASTEXITCODE -ne 0){throw "Camera diagnostic roundtrip regression failed"}
+      - name: Update only executable, DLL and provenance; preserve 430 scene & art
+        shell: pwsh
+        run: |
+          Copy-Item build-v434/Release/moteur3d_v17.exe dist-v434/moteur3d_v17.exe -Force
+          Copy-Item build-v434/Release/moteur3d_v17_benchmark.exe dist-v434/moteur3d_v17_benchmark.exe -Force
+          Copy-Item build-v434/v16/Release/moteur3d_v16_core.dll dist-v434/moteur3d_v16_core.dll -Force
+          Copy-Item build-v434/cse_warp_v17.ico dist-v434/cse_warp_v17.ico -Force
+          $env:GITHUB_SHA | Set-Content dist-v434/REVISION.txt -Encoding ascii
+          $fresco=(Get-FileHash "dist-v434/benchmark-civic/textures/energetik_fresco_mosaic.jpg" -Algorithm SHA256).Hash
+          if($fresco -ne (Get-Content fresco-original-sha.txt -Raw).Trim()){throw "Historic fresco unexpectedly changed"}
+          @'
+          CSE WARP Beta X V17.434 - Windows 64 bits
+          Le moteur interactif a ete RECOMPILE pour cette version.
+          La scene V17.430, la fresque d'origine et les neuf corrections
+          architecturales sont conservées. PBR 2048 et qualite existante gardes.
+
+          Démarrer comme auparavant via DEMARRER_CSE_WARP_V7.bat.
+
+          CAMERA / ANOMALIES :
+          * HUD X/Y/Z, cap, inclinaison, FOV dans la vue 3D.
+          * Affichage -> Afficher les coordonnees camera : activer/desactiver.
+          * Ctrl+Maj+A : capture PNG + rapport JSON reproduisant la
+            camera exacte du rendu; dossier Documents/CSE WARP/Anomalies.
+          * Ctrl+Maj+O : recharger un JSON dans la meme scene pour
+            retrouver l'angle exact, mode marche desactive pour ne pas
+            ajuster artificiellement la hauteur.
+          * Ctrl+Maj+C : copier la position actuelle JSON dans le presse-papiers.
+          * Aide -> A propos : version, revision, GPU DXGI et diagnostics.
+
+          Les images peuvent arriver apres la camera pendant le deplacement.
+          Le fichier PNG est etiquete avec la camera du rendu, non
+          celle d'une image precedente ou d'un mouvement ulterieur.
+          La mesure reelle des performances GPU doit etre faite sur le Dell.
+          '@ | Set-Content dist-v434/LIRE_EN_PREMIER-V17.434.txt -Encoding UTF8
+      - name: GUI smoke — two consecutive D3D11 WARP renders in real Qt window
+        shell: pwsh
+        timeout-minutes: 8
+        run: |
+          $scene="dist-v434/pavillon01/scene.json"
+          if(!(Test-Path $scene)){throw "Lightweight smoke scene missing from portable package"}
+          & dist-v434/moteur3d_v17.exe --smoke-repeat-raster $scene
+          if($LASTEXITCODE -ne 0){throw "GUI smoke repeated raster render failed: $LASTEXITCODE"}
+      - name: Upload portable compiled V17.434 package
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CSE-WARP-V17.434-CAMERA-ANOMALIES-Windows-x64
+          path: dist-v434/
+          retention-days: 21
+          if-no-files-found: error
