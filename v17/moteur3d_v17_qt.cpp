@@ -524,6 +524,51 @@ public:
             QCoreApplication::exit(45);
         });
     }
+    // Real Qt event regression for free-look, true F11 fullscreen and return.
+    // Test uses a synthetic motion delta; no physical mouse is required on CI.
+    void smokeImmersiveMouse(){
+        auto* poll=new QTimer(this);
+        poll->setInterval(100);
+        connect(poll,&QTimer::timeout,this,[this,poll]{
+            if(sceneLoading_||!runtime_||runtime_->cameras.isEmpty())return;
+            poll->stop();
+            activateFreeCamera();
+            exploring_=true;
+            mouseCaptured_=true;
+            canvas_->setCursor(Qt::BlankCursor);
+            const float originalYaw=yaw_;
+            const V originalEye=freeCamera_.eye;
+            const QPoint center=canvas_->rect().center();
+            QMouseEvent move(QEvent::MouseMove,QPointF(center+QPoint(16,-9)),
+                Qt::NoButton,Qt::NoButton,Qt::NoModifier);
+            QCoreApplication::sendEvent(canvas_,&move);
+            const bool freeLookWorked=std::abs(yaw_-originalYaw)>.01f;
+            const bool eyeUnchanged=length(freeCamera_.eye-originalEye)<.0005f;
+            const bool fpsReady=canvas_->isVisible();
+            immersiveAction_->setChecked(true);
+            QCoreApplication::processEvents();
+            const bool full=QWidget::isFullScreen()
+                &&!menuBar()->isVisible()&&!statusBar()->isVisible();
+            immersiveAction_->setChecked(false);
+            QCoreApplication::processEvents();
+            const bool back=!QWidget::isFullScreen()
+                &&menuBar()->isVisible()&&statusBar()->isVisible();
+            stopExploration();
+            if(!(freeLookWorked&&eyeUnchanged&&full&&back&&fpsReady)){
+                std::fprintf(stderr,
+                    "IMMERSIVE MOUSE FAILED: move=%d eye=%d full=%d back=%d canvas=%d\\n",
+                    int(freeLookWorked),int(eyeUnchanged),int(full),int(back),int(fpsReady));
+                QCoreApplication::exit(49);return;
+            }
+            std::puts("IMMERSIVE MOUSE PASS: no-button look, true F11 fullscreen and restored editor");
+            QCoreApplication::exit(0);
+        });
+        poll->start();
+        QTimer::singleShot(120000,this,[]{
+            std::fprintf(stderr,"IMMERSIVE MOUSE TIMEOUT\\n");
+            QCoreApplication::exit(50);
+        });
+    }
     ~V17Window() override {
         audioTimer_.stop();
         stopRadio();
@@ -1007,6 +1052,11 @@ protected:
         QMainWindow::closeEvent(event);
     }
     bool event(QEvent* e) override {
+        if(e->type()==QEvent::WindowActivate&&exploring_){
+            QTimer::singleShot(0,this,[this]{
+                if(exploring_&&!closingRequested_)captureMouseLook();
+            });
+        }
         if(e->type()==QEvent::WindowDeactivate){
             // Alt+Tab / focus loss must never leave the pointer hidden or
             // the rifle scope button logically stuck in the pressed state.
@@ -2581,21 +2631,24 @@ int main(int argc,char** argv){
         && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-walking-collisions");
     const bool scopeSmoke=argc>=3
         && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-scope-mouse");
+    const bool immersiveSmoke=argc>=3
+        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-immersive-mouse");
     // Use the same Windows V17 brand icon for Qt titlebar/Alt-Tab/taskbar.
     // The ICO is also embedded in the EXE's native Win32 resources.
     const QString iconPath=QCoreApplication::applicationDirPath()
         +QStringLiteral("/cse_warp_v17.ico");
     if(QFileInfo::exists(iconPath))app.setWindowIcon(QIcon(iconPath));
-    const QString path=switchSmoke||repeatSmoke||walkingSmoke||scopeSmoke
+    const QString path=switchSmoke||repeatSmoke||walkingSmoke||scopeSmoke||immersiveSmoke
         ?QString::fromLocal8Bit(argv[2])
         :(argc>1?QString::fromLocal8Bit(argv[1]):defaultPath());
     // The smoke test uses reduced texture resolution to stay viable on
     // CI's software-only WARP device. Normal V17 keeps full 2048 PBR.
-    V17Window window(path,(switchSmoke||repeatSmoke||walkingSmoke||scopeSmoke)?256:2048);
+    V17Window window(path,(switchSmoke||repeatSmoke||walkingSmoke||scopeSmoke||immersiveSmoke)?256:2048);
     if(switchSmoke)window.smokeSceneSwitch(QString::fromLocal8Bit(argv[3]));
     if(repeatSmoke)window.smokeRepeatRaster();
     if(walkingSmoke)window.smokeWalkingCollisionPreference();
     if(scopeSmoke)window.smokeScopedAim();
+    if(immersiveSmoke)window.smokeImmersiveMouse();
     if(!app.windowIcon().isNull())window.setWindowIcon(app.windowIcon());
     window.show();
     return app.exec();
