@@ -80,11 +80,11 @@ def patch(root, scene_name="scene-v7-corrections.json"):
         add(g+"/platine", "v436_radio_mount", (x,y,z-.37), (.33,.39,.08))
         add(g+"/bras", "v436_radio_mount", (x,y,z-.16), (.13,.17,.47))
         add(g+"/corps", "v436_radio_orange", (x,y,z+.12), (.47,.43,.45))
-        add(g+"/col", "v436_radio_dark", (x,y,z+.43), (.30,.24,.16))
-        add(g+"/pavillon", "v436_radio_orange", (x,y,z+.58), (.57,.38,.20))
-        add(g+"/levre", "v436_radio_orange", (x,y,z+.71), (.79,.47,.13))
-        add(g+"/fond", "v436_radio_dark", (x,y,z+.783), (.59,.31,.016))
-        add(g+"/diffuseur", "v436_radio_mount", (x,y,z+.807), (.14,.14,.055), "unit_sphere")
+        add(g+"/col", "v436_radio_dark", (x,y-.06,z+.43), (.30,.24,.16))
+        add(g+"/pavillon", "v436_radio_orange", (x,y-.10,z+.58), (.57,.38,.20))
+        add(g+"/levre", "v436_radio_orange", (x,y-.16,z+.71), (.79,.47,.13))
+        add(g+"/fond", "v436_radio_dark", (x,y-.16,z+.783), (.59,.31,.016))
+        add(g+"/diffuseur", "v436_radio_mount", (x,y-.16,z+.807), (.14,.14,.055), "unit_sphere")
         for dx in (-.12,.12):
             for dy in (-.13,.13):
                 add(g+"/boulons", "v436_radio_mount", (x+dx,y+dy,z-.322), (.045,.045,.04), "unit_sphere")
