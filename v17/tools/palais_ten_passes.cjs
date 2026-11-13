@@ -49,12 +49,27 @@ const sha=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).digest
 const force=(yes,message)=>{if(!yes)throw new Error(message);};
 const shared=Object.fromEntries(files.filter(x=>x.endsWith('.json')).map(x=>
   [x,readJson(path.join(source,x))]));
+// Include every image referenced by the PBR manifest in each temporary scene.
+// The source scene generator may add new PNG/JPEG artworks without updating
+// this test script; failing to copy them caused V17.482's first WARP pass to fail.
+const pbr=shared['pbr/pripyat-reuse-leger.json'];
+force(Array.isArray(pbr.sets),'Missing PBR texture sets in benchmark scene');
+for(const set of pbr.sets){
+  if(set.imageFile==null)continue;
+  const image=set.imageFile;
+  force(typeof image==='string' && /\\.(png|jpe?g|webp)$/i.test(image) &&
+        !path.isAbsolute(image) &&
+        path.resolve(source,image).startsWith(source+path.sep),
+        'Invalid referenced texture path: '+String(image));
+  if(!files.includes(image))files.push(image);
+}
+const imageFiles=files.filter(x=>!x.endsWith('.json'));
 if(!arguments_.includes('--check-only'))
   force(fs.existsSync(binary),'Missing Windows V17 benchmark binary: '+binary);
 for(const file of files)force(fs.existsSync(path.join(source,file)),
   'Missing benchmark scene resource: '+file);
 fs.mkdirSync(output,{recursive:true});
-const originalArt=files.filter(x=>x.endsWith('.jpg')).map(x=>sha(path.join(source,x)));
+const originalArt=imageFiles.map(x=>sha(path.join(source,x)));
 const stateFromShared=()=>clone(shared);
 const prefix=(o,s)=>o.parent.startsWith(s);
 function applyPass(state,n){
@@ -166,11 +181,11 @@ function saveVariant(state,directory){
   for(const file of files){
     const dest=path.join(directory,file);
     fs.mkdirSync(path.dirname(dest),{recursive:true});
-    if(file.endsWith('.jpg'))fs.copyFileSync(path.join(source,file),dest);
+    if(imageFiles.includes(file))fs.copyFileSync(path.join(source,file),dest);
     else writeJson(dest,state[file]);
   }
   for(let i=0;i<originalArt.length;i++)
-    force(sha(path.join(directory,files.filter(x=>x.endsWith('.jpg'))[i]))===originalArt[i],
+    force(sha(path.join(directory,imageFiles[i]))===originalArt[i],
       'Artwork bytes changed');
 }
 function imageStats(pngPath){
