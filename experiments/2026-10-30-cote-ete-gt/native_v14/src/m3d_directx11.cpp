@@ -130,6 +130,7 @@ struct FrameConstants {
     float probeInvSpan[4];
     float hybridControls[4];
     float colorControls[4];
+    float peripheralControls[4];
 };
 
 constexpr char kShader[] = R"(
@@ -158,6 +159,7 @@ cbuffer Frame : register(b0) {
     float4 probeInvSpan;
     float4 hybridControls;
     float4 colorControls;
+    float4 peripheralControls;
 };
 Texture2DArray<float4> albedo : register(t0);
 Texture2D<float> shadowDepth : register(t1);
@@ -232,6 +234,10 @@ VSOut VSEllipseMain(VSEllipseIn i) {
     return VSMain(raw);
 }
 float4 PSMain(VSOut i):SV_TARGET {
+    if(peripheralControls.x>.5) {
+        float2 uvScreen=i.p.xy*peripheralControls.yz;
+        if(abs(uvScreen.x-.5)<.29 && abs(uvScreen.y-.5)<.32) discard;
+    }
     // WRAP sampler already handles tiling. frac(uv) here broke automatic
     // derivatives at tile boundaries and forced inappropriate mip levels.
     float3 base = albedo.Sample(wrapSampler, float3(i.uv, i.mat)).rgb;
@@ -430,7 +436,21 @@ float4 PSMain(VSOut i):SV_TARGET {
     return float4(color, materialOpacity[i.mat].x);
 }
 )";
-
+constexpr char kPeripheralComposite[] = R"(
+Texture2D<float4> lo : register(t0);
+Texture2D<float4> hi : register(t1);
+SamplerState bilinear : register(s0);
+struct CV {float4 p:SV_POSITION;float2 uv:TEXCOORD;};
+CV VSC(uint id:SV_VertexID) {
+    CV v;v.uv=float2(id==2?2.:0.,id==1?2.:0.);
+    v.p=float4(v.uv.x*2.-1.,1.-v.uv.y*2.,0.,1.);return v;
+}
+float4 PSC(CV v):SV_TARGET {
+    float2 a=abs(v.uv-.5);
+    float fade=max(smoothstep(.35,.38,a.x),smoothstep(.375,.405,a.y));
+    return lerp(hi.Sample(bilinear,v.uv),lo.Sample(bilinear,v.uv),fade);
+}
+)";
 void put(GpuVertex& v,V p,V n,float u,float vv,uint32_t mat) {
     v={{p.x,p.y,p.z},{n.x,n.y,n.z},{u,vv},mat};
 }
@@ -673,6 +693,8 @@ public:
         const bool balanced=colorEnergyBalance.load(std::memory_order_acquire);
         const float exposure=clampf(colorExposure.load(std::memory_order_acquire),.65f,1.45f);
         const RasterQualitySettings quality=unpackQuality(qualityBits);
+        const char* multiresEnv=std::getenv("M3D_V17_PERIPHERAL_MULTIREZ");
+        const bool multires=multiresEnv&&std::strcmp(multiresEnv,"1")==0&&w>=320&&h>=240;
         if(!pending_.empty() &&
            (sceneKey_!=scene.obj.data() || objectCount_!=scene.obj.size() ||
             sceneIdentity_!=scene.gpuCacheIdentity ||
@@ -681,7 +703,7 @@ public:
             lastSubmissionHybrid_!=hybrid ||
             lastSubmissionTone_!=tone ||
             lastSubmissionBalanced_!=balanced ||
-            lastSubmissionExposure_!=exposure)){
+            lastSubmissionExposure_!=exposure || lastSubmissionMultires_!=multires)){
             error=L"Vider les lectures différées avant de changer de scène ou de qualité.";
             return false;
         }
@@ -689,6 +711,7 @@ public:
            (hybrid&&!ensureProbeVolume(scene,error))||
            (hybrid&&!ensureGiHours(error))||
            !ensureTargets(w,h,quality.msaaSamples,error)||
+           (multires&&!ensureMultires(w,h,error))||
            !ensureAnisotropy(quality.anisotropy,error)||
            !ensureReadback(depth,w,h,error))return false;
         const unsigned slotIndex=nextReadbackSlot_;
@@ -834,19 +857,52 @@ public:
         if(FAILED(hr)){error=L"Impossible de transmettre les paramètres à DirectX 11.";return false;}
         std::memcpy(mapped.pData,&cb,sizeof(cb));context_->Unmap(constants_.Get(),0);
         const float clear[4]={cb.sky[0],cb.sky[1],cb.sky[2],1.f};
-        if(slot.queryReady){
-            context_->Begin(slot.disjoint.Get());
-            context_->End(slot.start.Get());
-        }
-        context_->OMSetRenderTargets(1,rtv_.GetAddressOf(),dsv_.Get());context_->ClearRenderTargetView(rtv_.Get(),clear);context_->ClearDepthStencilView(dsv_.Get(),D3D11_CLEAR_DEPTH,1.f,0);
-        D3D11_VIEWPORT vp{};vp.Width=float(w);vp.Height=float(h);vp.MinDepth=0;vp.MaxDepth=1;context_->RSSetViewports(1,&vp);
-        UINT stride=sizeof(GpuVertex),offset=0;ID3D11Buffer* vb=vertices_.Get();context_->IASetInputLayout(layout_.Get());context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        context_->RSSetState(raster_.Get());context_->OMSetDepthStencilState(depth_.Get(),0);context_->VSSetShader(vs_.Get(),nullptr,0);context_->PSSetShader(ps_.Get(),nullptr,0);
-        ID3D11Buffer* cbuff=constants_.Get();context_->VSSetConstantBuffers(0,1,&cbuff);context_->PSSetConstantBuffers(0,1,&cbuff);
-        ID3D11ShaderResourceView* srvs[]={albedo_.Get(),shadowSrv_.Get(),roughness_.Get(),normal_.Get(),hybrid?probeSrv_.Get():nullptr,hybrid?(hasBakedGi_?probeNextSrv_.Get():probeSrv_.Get()):nullptr};context_->PSSetShaderResources(0,6,srvs);
-        ID3D11SamplerState* samplers[]={sampler_.Get(),probeSampler_.Get()};context_->PSSetSamplers(0,2,samplers);
-        UINT submittedVertices=0;
-        uint64_t drawCalls=0;
+        if(slot.queryReady){context_->Begin(slot.disjoint.Get());context_->End(slot.start.Get());}
+        UINT submittedVertices=0,submittedBoxInstances=0;
+        uint64_t drawCalls=0,submittedEllipseTriangles=0,submittedEllipseInstances=0;
+        uint64_t submittedFoliageTriangles=0,submittedFoliageInstances=0;
+        auto drawScene=[&](ID3D11RenderTargetView* rt,ID3D11DepthStencilView* ds,
+                           int pw,int ph,bool scissor,bool skipCore)->bool{
+            if(multires){
+                cb.peripheralControls[0]=skipCore?1.f:0.f;
+                cb.peripheralControls[1]=1.f/float(pw);
+                cb.peripheralControls[2]=1.f/float(ph);
+                D3D11_MAPPED_SUBRESOURCE mp{};
+                if(FAILED(context_->Map(constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mp))){
+                    error=L"Upload constantes multires impossible.";return false;
+                }
+                std::memcpy(mp.pData,&cb,sizeof(cb));context_->Unmap(constants_.Get(),0);
+            }
+            context_->OMSetRenderTargets(1,&rt,ds);
+            context_->ClearRenderTargetView(rt,clear);
+            context_->ClearDepthStencilView(ds,D3D11_CLEAR_DEPTH,1.f,0);
+            D3D11_VIEWPORT vp{};vp.Width=float(pw);vp.Height=float(ph);
+            vp.MinDepth=0;vp.MaxDepth=1;context_->RSSetViewports(1,&vp);
+            if(scissor){
+                const D3D11_RECT rect={LONG(std::floor(pw*.12f)),LONG(std::floor(ph*.095f)),
+                    LONG(std::ceil(pw*.88f)),LONG(std::ceil(ph*.905f))};
+                context_->RSSetScissorRects(1,&rect);
+            }
+            UINT stride=sizeof(GpuVertex),offset=0;
+            ID3D11Buffer* vb=vertices_.Get();
+            context_->IASetInputLayout(layout_.Get());
+            context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
+            context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            context_->RSSetState(scissor?scissorRaster_.Get():raster_.Get());
+            context_->OMSetDepthStencilState(depth_.Get(),0);
+            context_->VSSetShader(vs_.Get(),nullptr,0);
+            context_->PSSetShader(ps_.Get(),nullptr,0);
+            ID3D11Buffer* cbuff=constants_.Get();
+            context_->VSSetConstantBuffers(0,1,&cbuff);
+            context_->PSSetConstantBuffers(0,1,&cbuff);
+            ID3D11ShaderResourceView* srvs[]={albedo_.Get(),shadowSrv_.Get(),
+                roughness_.Get(),normal_.Get(),hybrid?probeSrv_.Get():nullptr,
+                hybrid?(hasBakedGi_?probeNextSrv_.Get():probeSrv_.Get()):nullptr};
+            context_->PSSetShaderResources(0,6,srvs);
+            ID3D11SamplerState* samplers[]={sampler_.Get(),probeSampler_.Get()};
+            context_->PSSetSamplers(0,2,samplers);
+        
+        
         const char* noCull=std::getenv("M3D_V17_DISABLE_FRUSTUM_CULLING");
         const bool cullEnabled=quality.frustumCulling
             &&!(noCull && std::strcmp(noCull,"1")==0);
@@ -857,7 +913,7 @@ public:
         const char* zPrepassEnv=std::getenv("M3D_V17_EXPERIMENT_Z_PREPASS");
         const bool depthPrepass=zPrepassEnv&&std::strcmp(zPrepassEnv,"1")==0;
         if(depthPrepass){
-            context_->OMSetRenderTargets(0,nullptr,dsv_.Get());
+            context_->OMSetRenderTargets(0,nullptr,ds);
             context_->PSSetShader(nullptr,nullptr,0);
             // Static opaque walls, floors and other architectural meshes.
             if(vertexCount_){
@@ -901,7 +957,7 @@ public:
                 context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
             }
             // Restore exact production opaque and transparency pipeline.
-            context_->OMSetRenderTargets(1,rtv_.GetAddressOf(),dsv_.Get());
+            context_->OMSetRenderTargets(1,&rt,ds);
             context_->PSSetShader(ps_.Get(),nullptr,0);
         }
         if(vertexCount_){
@@ -929,7 +985,7 @@ public:
                 flush();
             }
         }
-        UINT submittedBoxInstances=0;
+        
         if(boxInstanceCount_){
             ID3D11Buffer* buffers[]={boxVertices_.Get(),boxInstances_.Get()};
             UINT strides[]={UINT(sizeof(GpuVertex)),UINT(sizeof(GpuBoxInstance))};
@@ -960,8 +1016,8 @@ public:
             context_->VSSetShader(vs_.Get(),nullptr,0);
             context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
         }
-        uint64_t submittedEllipseTriangles=0;
-        uint64_t submittedEllipseInstances=0;
+        
+        
         if(ellipseInstanceCount_){
             std::array<std::vector<GpuEllipseInstance>,3> level;
             for(auto& bucket:level)bucket.reserve(ellipseInstanceCount_/3+1);
@@ -1013,8 +1069,8 @@ public:
             context_->VSSetShader(vs_.Get(),nullptr,0);
             context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
         }
-        uint64_t submittedFoliageTriangles=0;
-        uint64_t submittedFoliageInstances=0;
+        
+        
         if(foliageInstanceCount_){
             std::array<std::vector<GpuEllipseInstance>,3> buckets;
             for(auto& bucket:buckets)bucket.reserve(foliageInstanceCount_/3+1);
@@ -1073,9 +1129,39 @@ public:
             context_->OMSetDepthStencilState(transparentDepth_.Get(),0);context_->OMSetBlendState(blend_.Get(),nullptr,0xffffffffu);context_->Draw(UINT(transparent_.size()*3),0);++drawCalls;
             context_->OMSetBlendState(nullptr,nullptr,0xffffffffu);context_->OMSetDepthStencilState(depth_.Get(),0);context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
         }
+            return true;
+        };
+        if(multires){
+            if(!drawScene(lowRtv_.Get(),lowDsv_.Get(),lowW_,lowH_,false,true) ||
+               !drawScene(rtv_.Get(),dsv_.Get(),w,h,true,false))return false;
+            if(sampleCount_>1)
+                context_->ResolveSubresource(resolve_.Get(),0,target_.Get(),0,DXGI_FORMAT_R8G8B8A8_UNORM);
+            context_->OMSetRenderTargets(1,mergeRtv_.GetAddressOf(),nullptr);
+            D3D11_VIEWPORT vp{};vp.Width=float(w);vp.Height=float(h);vp.MinDepth=0;vp.MaxDepth=1;
+            context_->RSSetViewports(1,&vp);
+            context_->RSSetState(raster_.Get());
+            context_->OMSetDepthStencilState(nullptr,0);
+            context_->OMSetBlendState(nullptr,nullptr,0xffffffffu);
+            context_->IASetInputLayout(nullptr);
+            context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+            context_->VSSetShader(mergeVs_.Get(),nullptr,0);
+            context_->PSSetShader(mergePs_.Get(),nullptr,0);
+            ID3D11ShaderResourceView* srcs[]={lowSrv_.Get(),
+                sampleCount_>1?resolveSrv_.Get():targetSrv_.Get()};
+            context_->PSSetShaderResources(0,2,srcs);
+            ID3D11SamplerState* spl=probeSampler_.Get();
+            context_->PSSetSamplers(0,1,&spl);
+            context_->Draw(3,0);++drawCalls;
+            ID3D11ShaderResourceView* empty[]={nullptr,nullptr};
+            context_->PSSetShaderResources(0,2,empty);
+        }else if(!drawScene(rtv_.Get(),dsv_.Get(),w,h,false,false))return false;
         // GPU timestamps surround the actual draw commands and the queued
         // GPU copy. They do not include any CPU-side GetData/Map blocking.
         if(slot.queryReady)context_->End(slot.afterDraw.Get());
+        if(multires){
+            context_->OMSetRenderTargets(0,nullptr,nullptr);
+            context_->CopyResource(slot.staging.Get(),mergeTex_.Get());
+        }else{
         // V17 WARP lossless fast-path: no MSAA resolve is needed when
         // sampleCount_ == 1. Copy the render target directly into staging,
         // eliminating an entire full-frame GPU copy. Both textures are
@@ -1090,6 +1176,7 @@ public:
             context_->CopyResource(slot.staging.Get(),resolve_.Get());
         }else{
             context_->CopyResource(slot.staging.Get(),target_.Get());
+        }
         }
         if(slot.queryReady){
             context_->End(slot.afterCopy.Get());
@@ -1113,6 +1200,7 @@ public:
         lastSubmissionTone_=tone;
         lastSubmissionBalanced_=balanced;
         lastSubmissionExposure_=exposure;
+        lastSubmissionMultires_=multires;
         nextReadbackSlot_=(slotIndex+1u)%readbackDepth_;
         return true;
     }
@@ -1384,6 +1472,17 @@ private:
             activeMacros,nullptr,"PSMain","ps_4_0",
             D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&psCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation du pixel shader DirectX 11 impossible");return false;}
+        ComPtr<ID3DBlob> mergeVS,mergePS;
+        errors.Reset();hr=D3DCompile(kPeripheralComposite,sizeof(kPeripheralComposite)-1,
+            "v17_multires",nullptr,nullptr,"VSC","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&mergeVS,&errors);
+        if(FAILED(hr)){error=shaderError(L"Compilation VS multires impossible");return false;}
+        errors.Reset();hr=D3DCompile(kPeripheralComposite,sizeof(kPeripheralComposite)-1,
+            "v17_multires",nullptr,nullptr,"PSC","ps_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&mergePS,&errors);
+        if(FAILED(hr)){error=shaderError(L"Compilation PS multires impossible");return false;}
+        if(FAILED(device_->CreateVertexShader(mergeVS->GetBufferPointer(),mergeVS->GetBufferSize(),nullptr,&mergeVs_)) ||
+           FAILED(device_->CreatePixelShader(mergePS->GetBufferPointer(),mergePS->GetBufferSize(),nullptr,&mergePs_))){
+           error=L"Création shaders multires impossible.";return false;
+        }
         if(FAILED(device_->CreateVertexShader(vsCode->GetBufferPointer(),vsCode->GetBufferSize(),nullptr,&vs_))||FAILED(device_->CreatePixelShader(psCode->GetBufferPointer(),psCode->GetBufferSize(),nullptr,&ps_))){error=L"Création des shaders DirectX 11 impossible.";return false;}
         const D3D11_INPUT_ELEMENT_DESC input[]={{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,p),D3D11_INPUT_PER_VERTEX_DATA,0},{"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,n),D3D11_INPUT_PER_VERTEX_DATA,0},{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,offsetof(GpuVertex,uv),D3D11_INPUT_PER_VERTEX_DATA,0},{"MATERIAL",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertex,material),D3D11_INPUT_PER_VERTEX_DATA,0}};
         if(FAILED(device_->CreateInputLayout(input,4,vsCode->GetBufferPointer(),vsCode->GetBufferSize(),&layout_))){error=L"Création du format de sommet DirectX 11 impossible.";return false;}
@@ -1427,6 +1526,10 @@ private:
         if(FAILED(device_->CreateBuffer(&cbd,nullptr,&constants_))){error=L"Création du buffer de constantes DirectX 11 impossible.";return false;}
         D3D11_RASTERIZER_DESC rd{};rd.FillMode=D3D11_FILL_SOLID;rd.CullMode=D3D11_CULL_NONE;rd.DepthClipEnable=TRUE;rd.MultisampleEnable=TRUE;
         if(FAILED(device_->CreateRasterizerState(&rd,&raster_))){error=L"Création de l’état raster DirectX 11 impossible.";return false;}
+        rd.ScissorEnable=TRUE;
+        if(FAILED(device_->CreateRasterizerState(&rd,&scissorRaster_))){
+            error=L"Scissor multires impossible.";return false;
+        }
         D3D11_DEPTH_STENCIL_DESC dd{};dd.DepthEnable=TRUE;dd.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ALL;dd.DepthFunc=D3D11_COMPARISON_LESS_EQUAL;
         if(FAILED(device_->CreateDepthStencilState(&dd,&depth_))){error=L"Création du depth buffer DirectX 11 impossible.";return false;}
         dd.DepthWriteMask=D3D11_DEPTH_WRITE_MASK_ZERO;
@@ -1819,6 +1922,9 @@ private:
         readbackDepth_=0;nextReadbackSlot_=0;
         width_=w;height_=h;msaaPreference_=msaa;
         target_.Reset();resolve_.Reset();rtv_.Reset();depthTexture_.Reset();dsv_.Reset();
+        targetSrv_.Reset();resolveSrv_.Reset();lowTex_.Reset();lowRtv_.Reset();
+        lowSrv_.Reset();lowDepth_.Reset();lowDsv_.Reset();
+        mergeTex_.Reset();mergeRtv_.Reset();lowW_=0;lowH_=0;
         sampleCount_=1;sampleQuality_=0;
         for(UINT candidate:{8u,4u,2u}){
             if(candidate>msaa)continue;
@@ -1828,18 +1934,67 @@ private:
                 sampleCount_=candidate;sampleQuality_=std::min(levels,depthLevels)-1;break;
             }
         }
-        D3D11_TEXTURE2D_DESC td{};td.Width=UINT(w);td.Height=UINT(h);td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_R8G8B8A8_TYPELESS;td.SampleDesc.Count=sampleCount_;td.SampleDesc.Quality=sampleQuality_;td.Usage=D3D11_USAGE_DEFAULT;td.BindFlags=D3D11_BIND_RENDER_TARGET;
+        D3D11_TEXTURE2D_DESC td{};td.Width=UINT(w);td.Height=UINT(h);td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_R8G8B8A8_TYPELESS;td.SampleDesc.Count=sampleCount_;td.SampleDesc.Quality=sampleQuality_;td.Usage=D3D11_USAGE_DEFAULT;td.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&target_))){error=L"Création de la cible image DirectX 11 impossible.";return false;}
         // The render target must be TYPELESS for an sRGB RTV on D3D11/WARP.
         // A typed UNORM texture with an sRGB view fails E_INVALIDARG.
         D3D11_RENDER_TARGET_VIEW_DESC rtvDesc{};rtvDesc.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;rtvDesc.ViewDimension=sampleCount_>1?D3D11_RTV_DIMENSION_TEXTURE2DMS:D3D11_RTV_DIMENSION_TEXTURE2D;
         if(sampleCount_==1)rtvDesc.Texture2D.MipSlice=0;
         if(FAILED(device_->CreateRenderTargetView(target_.Get(),&rtvDesc,&rtv_))){error=L"Création de la cible sRGB DirectX 11 impossible.";return false;}
-        td.SampleDesc.Count=1;td.SampleDesc.Quality=0;td.BindFlags=0;
+        D3D11_SHADER_RESOURCE_VIEW_DESC srvDesc{};
+        srvDesc.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        srvDesc.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;
+        srvDesc.Texture2D.MipLevels=1;
+        if(sampleCount_==1&&FAILED(device_->CreateShaderResourceView(target_.Get(),&srvDesc,&targetSrv_))){
+            error=L"SRV couleur HD indisponible.";return false;
+        }
+        td.SampleDesc.Count=1;td.SampleDesc.Quality=0;td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&resolve_))){error=L"Création de la cible de résolution DirectX 11 impossible.";return false;}
+        if(FAILED(device_->CreateShaderResourceView(resolve_.Get(),&srvDesc,&resolveSrv_))){
+            error=L"SRV résolution MSAA indisponible.";return false;
+        }
         td.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;td.SampleDesc.Count=sampleCount_;td.SampleDesc.Quality=sampleQuality_;td.BindFlags=D3D11_BIND_DEPTH_STENCIL;
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&depthTexture_))||FAILED(device_->CreateDepthStencilView(depthTexture_.Get(),nullptr,&dsv_))){error=L"Création du tampon de profondeur DirectX 11 impossible.";return false;}
         return true;
+    }
+    bool ensureMultires(int w,int h,std::wstring& error){
+        int lw=std::max(1,w/2),lh=std::max(1,h/2);
+        if(lowRtv_&&mergeRtv_&&lowW_==lw&&lowH_==lh)return true;
+        if(!pending_.empty()){error=L"Vider les images différées avant de changer de mode.";return false;}
+        lowTex_.Reset();lowRtv_.Reset();lowSrv_.Reset();lowDepth_.Reset();
+        lowDsv_.Reset();mergeTex_.Reset();mergeRtv_.Reset();
+        D3D11_TEXTURE2D_DESC td{};td.Width=UINT(lw);td.Height=UINT(lh);
+        td.MipLevels=1;td.ArraySize=1;td.Format=DXGI_FORMAT_R8G8B8A8_TYPELESS;
+        td.SampleDesc.Count=1;td.Usage=D3D11_USAGE_DEFAULT;
+        td.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
+        if(FAILED(device_->CreateTexture2D(&td,nullptr,&lowTex_))){
+            error=L"Texture basse résolution impossible.";return false;
+        }
+        D3D11_RENDER_TARGET_VIEW_DESC rd{};
+        rd.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        rd.ViewDimension=D3D11_RTV_DIMENSION_TEXTURE2D;
+        if(FAILED(device_->CreateRenderTargetView(lowTex_.Get(),&rd,&lowRtv_))){
+            error=L"RTV basse résolution impossible.";return false;
+        }
+        D3D11_SHADER_RESOURCE_VIEW_DESC sd{};
+        sd.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        sd.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;
+        sd.Texture2D.MipLevels=1;
+        if(FAILED(device_->CreateShaderResourceView(lowTex_.Get(),&sd,&lowSrv_))){
+            error=L"SRV basse résolution impossible.";return false;
+        }
+        td.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;td.BindFlags=D3D11_BIND_DEPTH_STENCIL;
+        if(FAILED(device_->CreateTexture2D(&td,nullptr,&lowDepth_)) ||
+           FAILED(device_->CreateDepthStencilView(lowDepth_.Get(),nullptr,&lowDsv_))){
+            error=L"Profondeur basse résolution impossible.";return false;
+        }
+        td.Width=UINT(w);td.Height=UINT(h);
+        td.Format=DXGI_FORMAT_R8G8B8A8_TYPELESS;td.BindFlags=D3D11_BIND_RENDER_TARGET;
+        if(FAILED(device_->CreateTexture2D(&td,nullptr,&mergeTex_)) ||
+           FAILED(device_->CreateRenderTargetView(mergeTex_.Get(),&rd,&mergeRtv_))){
+            error=L"Composition multires impossible.";return false;
+        }
+        lowW_=lw;lowH_=lh;return true;
     }
     bool ensureAnisotropy(unsigned aniso,std::wstring& error){
         if(sampler_&&samplerAnisotropy_==aniso)return true;
@@ -1892,8 +2047,8 @@ private:
         return true;
     }
     ComPtr<ID3D11Device> device_;ComPtr<ID3D11DeviceContext> context_;
-    ComPtr<ID3D11VertexShader> vs_,boxVs_,ellipseVs_;
-    ComPtr<ID3D11PixelShader> ps_;
+    ComPtr<ID3D11VertexShader> vs_,boxVs_,ellipseVs_,mergeVs_;
+    ComPtr<ID3D11PixelShader> ps_,mergePs_;
     ComPtr<ID3D11InputLayout> layout_,boxLayout_,ellipseLayout_;
     ComPtr<ID3D11Buffer> constants_,vertices_,transparentVertices_,boxVertices_,boxInstances_,ellipseInstances_,foliageInstances_;
     std::array<ComPtr<ID3D11Buffer>,3> ellipseVertices_;
@@ -1904,19 +2059,23 @@ private:
     std::array<UINT,3> foliageVertexCounts_{{0,0,0}};
     std::vector<GpuEllipseInstance> foliage_;
     UINT foliageInstanceCount_=0;
-    ComPtr<ID3D11RasterizerState> raster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_,probeSampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_,probeSrv_;ComPtr<ID3D11Texture3D> probeTexture_,probeNextTexture_;
+    ComPtr<ID3D11RasterizerState> raster_,scissorRaster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_,probeSampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_,probeSrv_;ComPtr<ID3D11Texture3D> probeTexture_,probeNextTexture_;
     ComPtr<ID3D11ShaderResourceView> probeNextSrv_;
     gibake::Table bakedGi_{};bool hasBakedGi_=false;
     uint64_t loadedGiFileRevision_=0;
     int lowFrame_=-1,highFrame_=-1;
     float giHourMix_=0.f;
     V probeOrigin_{},probeInvSpan_{};ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<float> shadowUploadCache_;std::vector<TransparentTriangle> transparent_;
-    ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_;
+    ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_,lowTex_,lowDepth_,mergeTex_;
+    ComPtr<ID3D11ShaderResourceView> targetSrv_,resolveSrv_,lowSrv_;
+    ComPtr<ID3D11RenderTargetView> lowRtv_,mergeRtv_;
+    ComPtr<ID3D11DepthStencilView> lowDsv_;
+    int lowW_=0,lowH_=0;
     std::array<ReadbackSlot,3> readbackSlots_;
     std::deque<unsigned> pending_;
     unsigned readbackDepth_=0,nextReadbackSlot_=0;
     uint64_t lastSubmissionQualityBits_=defaultQualityBits;
-    bool lastSubmissionHybrid_=false,lastSubmissionTone_=false,lastSubmissionBalanced_=false;
+    bool lastSubmissionHybrid_=false,lastSubmissionTone_=false,lastSubmissionBalanced_=false,lastSubmissionMultires_=false;
     float lastSubmissionExposure_=1.f;
     ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
     std::vector<DrawChunk> chunks_,boxChunks_;
