@@ -558,6 +558,7 @@ private:
     bool mouseCaptured_=false;
     bool peripheralExperimentEnabled_=false,peripheralDuringMotion_=false;
     QElapsedTimer lastMouseLookMotion_;
+    QAction* immersiveAction_=nullptr;
     std::vector<std::pair<QWidget*,bool>> fullscreenRestore_;
     double fpsFiltered_=0.0;
     float scopeBaseFov_=65.f,scopeBlend_=0.f;
@@ -999,36 +1000,72 @@ protected:
         }
         QMainWindow::closeEvent(event);
     }
+    bool event(QEvent* e) override {
+        if(e->type()==QEvent::WindowDeactivate){
+            // Alt+Tab / focus loss must never leave the pointer hidden or
+            // the rifle scope button logically stuck in the pressed state.
+            releaseMouseLook();
+            rightMouseHeld_=false;
+        }
+        return QMainWindow::event(e);
+    }
     bool eventFilter(QObject* watched,QEvent* event) override{
         if(watched==canvas_ && exploring_){
             if(event->type()==QEvent::MouseButtonPress){
                 auto* e=static_cast<QMouseEvent*>(event);
-                if(e->button()==Qt::LeftButton){
-                    leftMouseHeld_=true;previousMouse_=e->pos();canvas_->setFocus();return true;
-                }
+                if(!mouseCaptured_)captureMouseLook();
                 if(e->button()==Qt::RightButton){
-                    rightMouseHeld_=true;previousMouse_=e->pos();canvas_->setFocus();return true;
+                    rightMouseHeld_=true;
+                    canvas_->setFocus();
+                    return true;
+                }
+                if(e->button()==Qt::LeftButton){
+                    leftMouseHeld_=true;
+                    canvas_->setFocus();
+                    return true;
                 }
             }
             if(event->type()==QEvent::MouseButtonRelease){
                 auto* e=static_cast<QMouseEvent*>(event);
-                if(e->button()==Qt::LeftButton){leftMouseHeld_=false;return true;}
                 if(e->button()==Qt::RightButton){rightMouseHeld_=false;return true;}
+                if(e->button()==Qt::LeftButton){leftMouseHeld_=false;return true;}
             }
-            if(event->type()==QEvent::MouseMove && (leftMouseHeld_||rightMouseHeld_)){
+            if(event->type()==QEvent::MouseMove && mouseCaptured_){
                 auto* e=static_cast<QMouseEvent*>(event);
-                const QPoint d=e->pos()-previousMouse_;previousMouse_=e->pos();
+                const QPoint center=canvas_->rect().center();
+                const QPoint delta=e->pos()-center;
+                // Qt generates a synthetic move when the cursor is recentered.
+                // Ignore it. No click is required to look around.
+                if(delta.isNull())return true;
+                const float dx=clampf(float(delta.x()),-160.f,160.f);
+                const float dy=clampf(float(delta.y()),-160.f,160.f);
                 const float sensitivity=.005f*cse::scope::mouseSensitivity(scopeBlend_);
-                yaw_+=float(d.x())*sensitivity;
-                pitch_=clampf(pitch_-float(d.y())*sensitivity,-1.48f,1.48f);
-                updateLook();return true;
+                yaw_+=dx*sensitivity;
+                pitch_=clampf(pitch_-dy*sensitivity,-1.48f,1.48f);
+                lastMouseLookMotion_.restart();
+                updateLook();
+                QCursor::setPos(canvas_->mapToGlobal(center));
+                return true;
             }
         }
         return QMainWindow::eventFilter(watched,event);
     }
     void keyPressEvent(QKeyEvent* e) override{
+        if(e->key()==Qt::Key_F11 && immersiveAction_){
+            immersiveAction_->setChecked(!immersiveAction_->isChecked());
+            e->accept();return;
+        }
         if(exploring_){
-            if(e->key()==Qt::Key_Escape){stopExploration();e->accept();return;}
+            if(e->key()==Qt::Key_Escape){
+                stopExploration();
+                if(immersiveAction_&&immersiveAction_->isChecked())
+                    immersiveAction_->setChecked(false);
+                e->accept();return;
+            }
+            if(e->key()==Qt::Key_Tab){
+                if(mouseCaptured_)releaseMouseLook();else captureMouseLook();
+                e->accept();return;
+            }
             if(e->key()==Qt::Key_E && !e->isAutoRepeat() &&
                walkingModeBox_ && walkingModeBox_->isChecked() &&
                scenePath_.contains(QStringLiteral("benchmark-civic"),Qt::CaseInsensitive)){
@@ -1875,8 +1912,8 @@ private:
         right->setWidget(rightScroll);
         addDockWidget(Qt::RightDockWidgetArea,right);
         right->setMinimumWidth(295);
-        // Dedicated uncluttered exploration mode. Preserve dock state in editing mode.
-        // F11 maximizes the view without changing the underlying render resolution.
+        // True fullscreen (not just hidden docks), preserving the editor
+        // layout for a reversible F11 return.
         auto* viewMenu=menuBar()->addMenu(QStringLiteral("Affichage"));
         auto* hudToggle=viewMenu->addAction(QStringLiteral("Afficher les coordonnées caméra (HUD)"));
         hudToggle->setCheckable(true);
@@ -1889,14 +1926,37 @@ private:
             cfg.setValue(QStringLiteral("Camera/ShowHUD"),enabled);
             updateCameraHud();
         });
-        auto* immersive=viewMenu->addAction(QStringLiteral("Vue 3D agrandie (F11)"));
-        immersive->setCheckable(true);
-        immersive->setShortcut(QKeySequence(Qt::Key_F11));
-        connect(immersive,&QAction::toggled,this,[this,left,right](bool enabled){
-            left->setVisible(!enabled);
-            right->setVisible(!enabled);
-            if(enabled)canvas_->setFocus();
+        immersiveAction_=viewMenu->addAction(QStringLiteral("Plein écran 3D (F11)"));
+        immersiveAction_->setCheckable(true);
+        immersiveAction_->setShortcut(QKeySequence(Qt::Key_F11));
+        immersiveAction_->setShortcutContext(Qt::ApplicationShortcut);
+        // F11 must remain available even while the menu bar is hidden.
+        addAction(immersiveAction_);
+        connect(immersiveAction_,&QAction::toggled,this,[this](bool enabled){
+            if(enabled){
+                fullscreenRestore_.clear();
+                const auto hideRemembered=[this](QWidget* w){
+                    if(!w)return;
+                    fullscreenRestore_.emplace_back(w,w->isVisible());
+                    w->hide();
+                };
+                for(auto* dock:findChildren<QDockWidget*>())hideRemembered(dock);
+                for(auto* bar:findChildren<QToolBar*>())hideRemembered(bar);
+                hideRemembered(menuBar());
+                hideRemembered(statusBar());
+                showFullScreen();
+            }else{
+                showNormal();
+                for(const auto& entry:fullscreenRestore_)
+                    if(entry.first)entry.first->setVisible(entry.second);
+                fullscreenRestore_.clear();
+            }
             QTimer::singleShot(0,this,[this]{
+                if(exploring_){
+                    releaseMouseLook();
+                    canvas_->setFocus();
+                    captureMouseLook();
+                }
                 if(qualityBox_&&qualityBox_->currentIndex()==0)requestRender();
             });
         });
