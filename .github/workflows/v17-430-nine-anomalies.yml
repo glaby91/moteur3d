@@ -101,8 +101,13 @@ jobs:
               assert Image.open(root/f"textures/revision/v8/lane_{n:02d}_256.png").size==(256,256)
           ladders=members("Interieur/Piscine olympique/Echelles/")
           assert all(o["position"][0]>=0 for o in ladders)
-          assert min(o["position"][0] for o in ladders)>23.
-          assert (min(o["position"][0] for o in ladders)
+          solid_ladders=[o for o in ladders if o["geometry"]=="unit_box"]
+          assert len(solid_ladders)==18
+          assert min(o["position"][0] for o in solid_ladders)>23.
+          ladder_meshes=[m for m in load("geometry/v8-nine-anomalies.json")["meshes"] if m["id"].startswith("v8_smooth_inox_ladder_rail_")]
+          assert len(ladder_meshes)==4
+          assert all(min(v[0] for v in m["vertices"])>24. for m in ladder_meshes)
+          assert (min(o["position"][0] for o in solid_ladders)
                   -max(o["position"][0] for o in plots))>45.
           # 8: actual 6+12 wooden bench geometry absent.
           assert f["8_wooden_pool_bench_parts_removed"]==18
