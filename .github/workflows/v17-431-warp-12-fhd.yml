@@ -1,0 +1,141 @@
+name: CSE WARP V17.431 - 12 anomaly proof renders FHD 1920x1080
+on:
+  push:
+    branches: [feature/v17-431-warp-12-fhd-261113]
+    paths:
+      - .github/workflows/v17-431-warp-12-fhd.yml
+      - tools/add_v431_fhd_proof_cameras.py
+      - v17/tools/benchmark_v17.cpp
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  fhd-warp:
+    runs-on: windows-2022
+    timeout-minutes: 70
+    env:
+      GH_TOKEN: ${{ github.token }}
+      QT_QPA_PLATFORM: offscreen
+      M3D_V16_FORCE_WARP: '1'
+      M3D_V17_EXPERIMENT_Z_PREPASS: '0'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install Qt 6.8.3 Windows MSVC 2022 64-bit
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Restore validated V17.430 nine-defect scene and portable DX11 build
+        shell: pwsh
+        run: |
+          gh run download 43335003809 --repo glaby91/moteur3d --name CSE-WARP-V17.430-9-ANOMALIES-Windows-x64 --dir dist-v431
+          if($LASTEXITCODE -ne 0){throw "Validated V17.430 portable package missing"}
+          foreach($p in @("moteur3d_v17_benchmark.exe","moteur3d_v16_core.dll","benchmark-civic/scene-v7-corrections.json","benchmark-civic/cameras/v8-nine-anomalies.json","benchmark-civic/reports/v8-nine-anomalies.json")){
+            if(!(Test-Path "dist-v431/$p")){throw "Required baseline missing: $p"}
+          }
+          (Get-FileHash "dist-v431/benchmark-civic/textures/energetik_fresco_mosaic.jpg" -Algorithm SHA256).Hash | Set-Content -Path artwork-before.txt
+      - name: Build native 1920x1080-only benchmark on Windows, preserving UI
+        shell: pwsh
+        run: |
+          node scenes/v16/benchmark-civic/generate.cjs --all
+          if($LASTEXITCODE -ne 0){throw "Authored scene generation failed"}
+          cmake -S v17 -B build-v431 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=431
+          if($LASTEXITCODE -ne 0){throw "CMake configure failed"}
+          cmake --build build-v431 --config Release --target moteur3d_v17_benchmark --parallel 4
+          if($LASTEXITCODE -ne 0){throw "FHD native DX11 benchmark compilation failed"}
+          foreach($p in @("moteur3d_v17_benchmark.exe","moteur3d_v16_core.dll")){
+            if(!(Test-Path "build-v431/Release/$p")){throw "Native binary not found: $p"}
+            Copy-Item "build-v431/Release/$p" "dist-v431/$p" -Force
+          }
+      - name: Add exactly four new camera viewpoints (geometry and mosaics untouched)
+        shell: pwsh
+        run: |
+          python tools/add_v431_fhd_proof_cameras.py --root dist-v431/benchmark-civic
+          if($LASTEXITCODE -ne 0){throw "FHD camera manifest invalid"}
+          $old=(Get-Content artwork-before.txt -Raw).Trim()
+          $new=(Get-FileHash "dist-v431/benchmark-civic/textures/energetik_fresco_mosaic.jpg" -Algorithm SHA256).Hash
+          if($old -ne $new){throw "Original fresco modified!"}
+          Copy-Item dist-v431/benchmark-civic/reports/v9-fhd-12-proofs.json fhd-proof-manifest.json
+      - name: Render every original anomaly zone at genuine 1920x1080 on DX11 WARP
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force fhd-12 | Out-Null
+          $proofs=(Get-Content fhd-proof-manifest.json -Raw | ConvertFrom-Json).proofs
+          if($proofs.Count -ne 12){throw "Exactly 12 FHD proof cameras required"}
+          foreach($proof in $proofs){
+            $camera=[string]$proof.cameraId
+            $hour=([double]$proof.lightingHour).ToString("0.00",[System.Globalization.CultureInfo]::InvariantCulture)
+            $runDir="render-$($proof.index)"
+            Write-Host "PROOF $($proof.index) - $camera - hour $hour - true 1920x1080"
+            & dist-v431/moteur3d_v17_benchmark.exe dist-v431/benchmark-civic/scene-v7-corrections.json $runDir --fhd-stills --camera-id $camera --hour $hour --raster-msaa 2 --readback-depth 1
+            if($LASTEXITCODE -ne 0){throw "Native Windows DX11 WARP render failed: $camera"}
+            $images=@(Get-ChildItem $runDir -Recurse -File -Filter "raster_$($camera)_1920x1080_depth1.png")
+            if($images.Count -ne 1){throw "Native FHD image missing or duplicated: $camera"}
+            Copy-Item $images[0].FullName "fhd-12/$($proof.file)"
+            $stats=@(Get-ChildItem $runDir -Recurse -File -Filter results.csv)
+            if($stats.Count -ne 1){throw "Per-view render timing CSV missing: $camera"}
+            Copy-Item $stats[0].FullName "fhd-12/$($proof.index)-timings.csv"
+          }
+      - name: Validate all FHD pixel dimensions and make contact sheet
+        shell: pwsh
+        run: |
+          python -m pip install --only-binary=:all: "Pillow>=11"
+          if($LASTEXITCODE -ne 0){throw "Pillow unavailable for pixel validation"}
+          @'
+          import csv,hashlib,json
+          from PIL import Image,ImageDraw,ImageStat
+          from pathlib import Path
+          proofs=json.loads(Path("fhd-proof-manifest.json").read_text(encoding="utf8"))["proofs"]
+          out=Path("fhd-12")
+          data=[]
+          canvas=Image.new("RGB",(3*640,4*405),(23,27,34))
+          draw=ImageDraw.Draw(canvas)
+          for i,proof in enumerate(proofs):
+              f=out/proof["file"]
+              assert f.exists() and f.stat().st_size>10000,(proof["index"],"missing image")
+              with Image.open(f) as im:
+                  assert im.size==(1920,1080),(proof["index"],im.size)
+                  assert im.format=="PNG"
+                  color=im.convert("RGB")
+                  st=ImageStat.Stat(color)
+                  assert max(st.stddev)>1,(proof["index"],"nearly uniform image")
+                  thumb=color.resize((640,360),Image.Resampling.LANCZOS)
+                  x=(i%3)*640;y=(i//3)*405
+                  canvas.paste(thumb,(x,y))
+                  draw.text((x+10,y+364),proof["index"]+" - "+proof["anomaly"],fill=(250,250,245))
+                  data.append({"index":proof["index"],"anomaly":proof["anomaly"],
+                    "camera":proof["cameraId"],"width":im.width,"height":im.height,
+                    "bytes":f.stat().st_size,"sha256":hashlib.sha256(f.read_bytes()).hexdigest(),
+                    "stddev":round(max(st.stddev),3)})
+          canvas.save(out/"V17.431-PLANCHE-CONTACT-12-VUES-FHD.png")
+          (out/"V17.431-VALIDATION-12-FHD.json").write_text(
+             json.dumps(data,indent=2,ensure_ascii=False),encoding="utf8")
+          with (out/"V17.431-VALIDATION-12-FHD.csv").open("w",newline="",encoding="utf8") as f:
+              writer=csv.DictWriter(f,fieldnames=data[0].keys())
+              writer.writeheader();writer.writerows(data)
+          (out/"LIRE_EN_PREMIER.txt").write_text(
+            "12 images natives DirectX11 Microsoft WARP (software), 1920x1080, MSAA 2x,\n"
+            "textures PBR 2048px, scene V17.430 avec les 9 anomalies corrigees.\n"
+            "01-09: chaque anomalie; 10-12: vues generales piscine, fresque et verriere.\n"
+            "La planche de contact utilise des vignettes: les 12 originaux restent FHD.\n"
+            "Geometrie et mosaïques identiques au package V17.430, moteur interactif Shift x3 intact.\n"
+            "Les rendus Microsoft WARP logiciels ne certifient ni le FPS de Intel HD620\n"
+            "ni la navigation physique en temps reel.\n",encoding="utf8")
+          print("SUCCESS: 12 / 12 true 1920x1080 PNG; contactsheet and hashes ready")
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw "FHD quality and uniqueness audit failed"}
+          Copy-Item fhd-proof-manifest.json fhd-12/V17.431-PLAN-12-CAMERAS.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V17.431-12-RENDUS-ANOMALIES-FHD-1920x1080
+          path: fhd-12/
+          retention-days: 21
+          if-no-files-found: error
