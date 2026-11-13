@@ -162,6 +162,9 @@ def build(root):
         par=o.get('parent','')
         x,y,z=o.get('position',[100,100,100])
         if y>=4.65 or abs(x)>10.8 or not(-4.4<=z<=-3.6):return False
+        # The horizontal lintel at y~4.5 is load-bearing visually.
+        if 'Traverses raccordees' in par and y>1.25:return False
+        if par==F+'Chassis' and y>4.0:return False
         return (par in (F+'Mur-rideau V8/Montants raccordes',
                        F+'Mur-rideau V8/Traverses raccordees',
                        F+'Chassis',F+'Verriere')
