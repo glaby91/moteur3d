@@ -13,7 +13,9 @@ void updateLighting(float hour){
  float dusk=clampf(1.f-std::abs(hour-18.3f)/2.3f,0.f,1.f);
  float dawn=clampf(1.f-std::abs(hour-7.1f)/1.8f,0.f,1.f);
  float warm=std::max(dusk,dawn*.72f);
- lampFactor=clampf((hour-17.f)/3.f,0.f,1.f);
+ // Automatic dusk AND night/dawn lamps: old time-only rule turned all lamps
+ // off after midnight, preventing a believable complete 24-hour cycle.
+ lampFactor=clampf((.38f-daylight)/.38f,0.f,1.f);
  const float azimuth=(hour-14.75f)*.12f;
  const float c=std::cos(azimuth),si=std::sin(azimuth);
  const float x=.70f*c+.714f*si;
