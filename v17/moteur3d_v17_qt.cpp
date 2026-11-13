@@ -2,6 +2,7 @@
 #include "src/m3d_walk_controller.h"
 #include "exploration_motion.h"
 #include "camera_diagnostic.h"
+#include "radio_audio.h"
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
 #include <QAction>
@@ -22,9 +23,6 @@
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFileInfo>
-#ifdef _WIN32
-#include <mmsystem.h>
-#endif
 #include <QKeySequence>
 #include <QToolBar>
 #include <QProcess>
@@ -69,6 +67,7 @@
 #include <cstring>
 #include <cstdio>
 #include <memory>
+#include <limits>
 #include <mutex>
 #include <thread>
 #include <utility>
@@ -182,6 +181,15 @@ public:
         renderPool_.setMaxThreadCount(1);
         renderPool_.setExpiryTimeout(-1);
         createUi();
+        audioTimer_.setInterval(50); // 20 Hz spatial updates, independent from GPU images.
+        connect(&audioTimer_,&QTimer::timeout,this,[this]{
+            if(!radioPlaying_ || !runtime_)return;
+            const auto pose=activeCameraPose();
+            const float eye[3]{pose.eye.x,pose.eye.y,pose.eye.z};
+            const float target[3]{pose.target.x,pose.target.y,pose.target.z};
+            radioAudio_.update(eye,target);
+        });
+        audioTimer_.start();
         // A permanent status-bar widget outlives temporary render/progress
         // messages. QStatusBar::showMessage(..., 15000) used to erase the
         // completed render time after 15 seconds.
@@ -345,6 +353,7 @@ public:
         });
     }
     ~V17Window() override {
+        audioTimer_.stop();
         stopRadio();
         renderSerial_->fetch_add(1);
         // All async tasks hold independent snapshots. Wait before QObject
@@ -358,6 +367,10 @@ private:
     QLabel* radioStatusLabel_=nullptr;
     bool radioPlaying_=false;
     bool radioAutoplayEnabled_=true;
+    cse::RadioAudio radioAudio_;
+    QTimer audioTimer_;
+    std::array<cse::RadioSpeaker,4> radioSpeakers_{};
+    QSlider* radioVolumeSlider_=nullptr;
 
     ImageView* canvas_=nullptr;
     QTimer frameTimer_;
@@ -798,37 +811,60 @@ private:
         if(runtime_&&backendBox_&&backendBox_->currentIndex()==4)requestRender();
     }
     void stopRadio(){
-#ifdef _WIN32
-        if(radioPlaying_)PlaySoundW(nullptr,nullptr,0);
-#endif
+        radioAudio_.stop();
         radioPlaying_=false;
         if(radioToggleButton_)radioToggleButton_->setText(QStringLiteral("Reprendre la radio"));
         if(radioStatusLabel_)radioStatusLabel_->setText(QStringLiteral("Radio arrêtée"));
     }
+    bool loadSpeakerLayout(){
+        const QString path=QDir(QCoreApplication::applicationDirPath()).filePath(
+            QStringLiteral("audio/speaker_layout.json"));
+        QFile file(path);
+        if(!file.open(QIODevice::ReadOnly))return false;
+        const auto doc=QJsonDocument::fromJson(file.readAll());
+        if(!doc.isObject())return false;
+        const QJsonArray sources=doc.object().value(QStringLiteral("loudspeakers")).toArray();
+        if(sources.size()!=4)return false;
+        for(int i=0;i<4;++i){
+            if(!sources[i].isObject())return false;
+            const auto obj=sources[i].toObject();
+            const auto pos=obj.value(QStringLiteral("position")).toArray();
+            const auto front=obj.value(QStringLiteral("front")).toArray();
+            if(pos.size()!=3||front.size()!=3)return false;
+            for(int axis=0;axis<3;++axis){
+                const double p=pos[axis].toDouble(std::numeric_limits<double>::quiet_NaN());
+                const double f=front[axis].toDouble(std::numeric_limits<double>::quiet_NaN());
+                if(!std::isfinite(p)||!std::isfinite(f))return false;
+                radioSpeakers_[i].position[axis]=float(p);
+                radioSpeakers_[i].front[axis]=float(f);
+            }
+        }
+        return true;
+    }
     void playRadio(){
-#ifdef _WIN32
-        const QString path=QDir(QCoreApplication::applicationDirPath())
-            .filePath(QStringLiteral("audio/pripyat_radio.wav"));
+        const QString path=QDir(QCoreApplication::applicationDirPath()).filePath(
+            QStringLiteral("audio/pripyat_radio.wav"));
         if(!QFileInfo::exists(path)){
-            if(radioStatusLabel_)radioStatusLabel_->setText(QStringLiteral("Radio absente : audio/pripyat_radio.wav"));
+            if(radioStatusLabel_)radioStatusLabel_->setText(
+                QStringLiteral("Fichier WAV absent : audio/pripyat_radio.wav"));
             return;
         }
-        const auto wide=path.toStdWString();
-        radioPlaying_=PlaySoundW(wide.c_str(),nullptr,
-            SND_ASYNC|SND_LOOP|SND_FILENAME|SND_NODEFAULT)!=FALSE;
+        if(!loadSpeakerLayout()){
+            if(radioStatusLabel_)radioStatusLabel_->setText(
+                QStringLiteral("Implantation des 4 HP introuvable ou invalide"));
+            return;
+        }
+        radioAudio_.setVolume(radioVolumeSlider_?float(radioVolumeSlider_->value())/500.f:.20f);
+        radioPlaying_=radioAudio_.start(path.toStdWString(),radioSpeakers_);
         if(radioToggleButton_)radioToggleButton_->setText(radioPlaying_
             ?QStringLiteral("Arrêter la radio"):QStringLiteral("Reprendre la radio"));
         if(radioStatusLabel_)radioStatusLabel_->setText(radioPlaying_
-            ?QStringLiteral("Lecture en boucle (WAV technique)")
-            :QStringLiteral("Erreur de lecture du WAV"));
-#else
-        if(radioStatusLabel_)radioStatusLabel_->setText(QStringLiteral("Audio Windows non disponible"));
-#endif
+            ?QStringLiteral("4 HP spatialisés · XAudio2 / X3DAudio · WAV de test")
+            :QStringLiteral("Audio 3D indisponible (pilote ou WAV incorrect)"));
     }
     void refreshRadioForScene(const QString& path){
         stopRadio();
         const QString lower=path.toLower();
-        // The active Pripiat square comes from benchmark-civic/scene-v7-corrections.json.
         const bool isSquare=lower.contains(QStringLiteral("benchmark-civic"))
             ||lower.contains(QStringLiteral("pripyat"))
             ||lower.contains(QStringLiteral("energetik"));
@@ -1017,6 +1053,15 @@ private:
         vertical->addWidget(new QLabel(QStringLiteral("SON AMBIANT — RADIO UKRAINIENNE"),controls));
         vertical->addWidget(radioToggleButton_);
         vertical->addWidget(radioStatusLabel_);
+        radioVolumeSlider_=new QSlider(Qt::Horizontal,controls);
+        radioVolumeSlider_->setRange(0,100);
+        radioVolumeSlider_->setValue(65);
+        radioVolumeSlider_->setToolTip(QStringLiteral("Volume de la radio 3D (0 à 100 %)"));
+        vertical->addWidget(new QLabel(QStringLiteral("Volume radio"),controls));
+        vertical->addWidget(radioVolumeSlider_);
+        connect(radioVolumeSlider_,&QSlider::valueChanged,this,[this](int value){
+            radioAudio_.setVolume(float(value)/500.f);
+        });
         connect(radioToggleButton_,&QPushButton::clicked,this,[this]{
             if(radioPlaying_){radioAutoplayEnabled_=false;stopRadio();}
             else{radioAutoplayEnabled_=true;playRadio();}
