@@ -50,9 +50,9 @@ jobs:
           python tools/repair_scene_v440.py --root dist-v440/benchmark-civic
           if($LASTEXITCODE -ne 0){throw "V8 scene audit failed"}
           $r=Get-Content dist-v440/benchmark-civic/reports/v440-audit.json -Raw | ConvertFrom-Json
-          if($r.counts.02_hall_stair_rail_blockers_removed -ne 7){throw "Old rail still blocks the hall stair"}
-          if($r.counts.06_curbs_trimmed_before_glass -lt 1){throw "Side curb still enters glass"}
-          if($r.counts.05_cantilever_beams_trimmed -lt 1){throw "Cantilever was not trimmed"}
+          if($r.counts.'02_hall_stair_rail_blockers_removed' -ne 7){throw "Old rail still blocks the hall stair"}
+          if($r.counts.'06_curbs_trimmed_before_glass' -lt 1){throw "Side curb still enters glass"}
+          if($r.counts.'05_cantilever_beams_trimmed' -lt 1){throw "Cantilever was not trimmed"}
           if($r.issues.14_mosaic -notlike "*single*"){throw "Still drawing coplanar mosaic triangles"}
           if((Get-FileHash dist-v440/benchmark-civic/textures/energetik_fresco_mosaic.jpg -Algorithm SHA256).Hash -ne (Get-Content wall-fresco.sha256 -Raw).Trim()){throw "Original fresco changed"}
           if((Get-FileHash dist-v440/audio/pripyat_radio.wav -Algorithm SHA256).Hash -ne (Get-Content radio.sha256 -Raw).Trim()){throw "Radio recording changed"}
