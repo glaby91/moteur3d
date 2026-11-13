@@ -652,7 +652,8 @@ class DirectX11Preview {
     using Clock=std::chrono::steady_clock;
     struct ReadbackSlot {
         ComPtr<ID3D11Texture2D> staging;
-        ComPtr<ID3D11Query> disjoint,start,afterDraw,afterCopy;
+        ComPtr<ID3D11Query> disjoint,start,afterDraw,afterResolve,afterCopy;
+        bool splitQueryReady=false;
         bool queryReady=false;
         int width=0,height=0;
         Clock::time_point cpuStarted{},copyQueued{};
@@ -1093,11 +1094,15 @@ public:
         const char* legacyReadback=std::getenv("M3D_V17_LEGACY_DOUBLE_COPY");
         if(sampleCount_>1){
             context_->ResolveSubresource(resolve_.Get(),0,target_.Get(),0,DXGI_FORMAT_R8G8B8A8_UNORM);
+            if(slot.splitQueryReady)context_->End(slot.afterResolve.Get());
             context_->CopyResource(slot.staging.Get(),resolve_.Get());
         }else if(legacyReadback&&std::strcmp(legacyReadback,"1")==0){
             context_->CopyResource(resolve_.Get(),target_.Get());
+            if(slot.splitQueryReady)context_->End(slot.afterResolve.Get());
             context_->CopyResource(slot.staging.Get(),resolve_.Get());
         }else{
+            // Single-sampled path has no resolve/copy-to-intermediate pass.
+            if(slot.splitQueryReady)context_->End(slot.afterResolve.Get());
             context_->CopyResource(slot.staging.Get(),target_.Get());
         }
         if(slot.queryReady){
@@ -1179,6 +1184,15 @@ public:
                 stats.gpuTransferMs=double(copy-draw)*ticksToMs;
                 stats.gpuTotalMs=double(copy-begin)*ticksToMs;
                 stats.gpuTimingValid=true;
+                if(slot.splitQueryReady){
+                    UINT64 resolve=0;
+                    if(context_->GetData(slot.afterResolve.Get(),&resolve,sizeof(resolve),0)==S_OK
+                        &&draw<=resolve&&resolve<=copy){
+                        stats.gpuResolveMs=double(resolve-draw)*ticksToMs;
+                        stats.gpuStagingCopyMs=double(copy-resolve)*ticksToMs;
+                        stats.gpuTransferSplitValid=true;
+                    }
+                }
             }
         }
         pending_.pop_front();
@@ -1900,6 +1914,10 @@ private:
                 SUCCEEDED(device_->CreateQuery(&qd,&slot.afterDraw)) &&
                 SUCCEEDED(device_->CreateQuery(&qd,&slot.afterCopy));
             slot.queryReady=disjointOk&&timestampsOk;
+            // Split is optional; retain old GPU timing if this extra query
+            // is unavailable on an older D3D11 driver.
+            slot.splitQueryReady=slot.queryReady
+                &&SUCCEEDED(device_->CreateQuery(&qd,&slot.afterResolve));
         }
         readbackDepth_=depth;
         return true;
