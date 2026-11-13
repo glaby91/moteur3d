@@ -133,6 +133,9 @@ bool setRasterQualitySettings(const RasterQualitySettings& settings,std::wstring
 //  0: force native full resolution; 1: enable experimental peripheral mode.
 // The GUI changes this atomic frame setting when the camera starts/stops moving.
 void setRasterPeripheralMultiresOverride(int mode);
+// GUI animation scale: 0=frozen, 24=normal sky, 240=accelerated 24h cycle.
+// Headless benchmarks retain 1 for deterministic pixel parity.
+void setRasterCloudTimeScale(float scale);
 
 
 // Experimental pipelined D3D11 readback. Enqueue issues an ordered frame render

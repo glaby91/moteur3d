@@ -2099,9 +2099,17 @@ private:
             requestRender();
         });
         skyAnimationTimer_.start();
+        // Weather animation deliberately faster than the old almost-static sky.
+        m3d::setRasterCloudTimeScale(24.f);
+        connect(cloudAnimationBox_,&QCheckBox::toggled,this,[this](bool enabled){
+            m3d::setRasterCloudTimeScale(!enabled?0.f:
+                (dayNightCycleBox_->isChecked()?240.f:24.f));
+            if(runtime_ && !watcher_.isRunning())requestRender();
+        });
         dayNightTimer_.setInterval(750);
         connect(&dayNightTimer_,&QTimer::timeout,this,[this]{
-            if(!runtime_ || sceneLoading_ || watcher_.isRunning())return;
+            if(!runtime_ || sceneLoading_)return;
+            // Simulated time advances independently of GPU frame duration.
             // Elapsed time is absolute since the start, never accumulated
             // from successful frames. Long HD620 GPU frames cannot freeze
             // or stretch the 6-minute day/night cycle.
@@ -2118,6 +2126,8 @@ private:
                 dayNightClock_.start();
                 dayNightTimer_.start();
             }else dayNightTimer_.stop();
+            m3d::setRasterCloudTimeScale(!cloudAnimationBox_->isChecked()?0.f:
+                (enabled?240.f:24.f));
         });
         connect(sunHour_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double hour){
             // A deliberate manual time change reanchors the running clock.
@@ -2127,9 +2137,8 @@ private:
                 dayNightClock_.restart();
             }
             if(!runtime_)return;
-            // No render thread may observe a partially updated daylight hour.
-            renderSerial_->fetch_add(1);
-            if(watcher_.isRunning())watcher_.waitForFinished();
+            // No UI-thread wait for a slow DX11 frame. Only the latest hour
+            // is queued, and in-flight frames retain their captured hour.
             runtime_->daylightHour=float(hour);
             requestRender();
         });
@@ -2471,6 +2480,7 @@ private:
         }
         const uint64_t token=serial->fetch_add(1)+1;
         auto snapshot=runtime_;
+        const float renderHour=snapshot->daylightHour;
         auto preset=activeCameraPose();
         updateCameraHud();
         QSize renderSize=qualityBox_->currentData().toSize();
@@ -2509,12 +2519,12 @@ private:
         }
         const auto shadowCache=cpuShadows_;
         watcher_.setFuture(QtConcurrent::run(&renderPool_,[this,serial,token,snapshot,preset,w,h,wantGpu,
-            globalIllumination,raster,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache]{
+            globalIllumination,raster,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache,renderHour]{
             Result result;
             result.cameraPose=preset;
             result.generation=token;
             result.renderThread=reinterpret_cast<quintptr>(QThread::currentThreadId());
-            updateLighting(snapshot->daylightHour);
+            updateLighting(renderHour);
             const auto camera=v16::makeCamera(preset,w,h);
             std::vector<uint32_t> pixels;
             Stats stats;
@@ -2526,13 +2536,13 @@ private:
                     {
                         std::lock_guard<std::mutex> lock(shadowCache->mutex);
                         if(shadowCache->scene.lock()==snapshot &&
-                           shadowCache->hour==snapshot->daylightHour&&shadowCache->shadow)
+                           shadowCache->hour==renderHour&&shadowCache->shadow)
                             shadow=shadowCache->shadow;
                         else {
                             Stats shadowStats;
                             shadow=std::make_shared<ShadowMap>(
                                 buildShadow(snapshot->renderScene,shadowStats));
-                            shadowCache->scene=snapshot;shadowCache->hour=snapshot->daylightHour;
+                            shadowCache->scene=snapshot;shadowCache->hour=renderHour;
                             shadowCache->shadow=shadow;
                         }
                     }
@@ -2567,7 +2577,7 @@ private:
                 {
                     std::lock_guard<std::mutex> lock(shadowCache->mutex);
                     if(shadowCache->scene.lock()==snapshot &&
-                       shadowCache->hour==snapshot->daylightHour && shadowCache->shadow){
+                       shadowCache->hour==renderHour && shadowCache->shadow){
                         shadow=shadowCache->shadow;
                         shadowReused=true;
                     }else{
@@ -2575,7 +2585,7 @@ private:
                         shadow=std::make_shared<ShadowMap>(
                             buildShadow(snapshot->renderScene,shadowStats));
                         shadowCache->scene=snapshot;
-                        shadowCache->hour=snapshot->daylightHour;
+                        shadowCache->hour=renderHour;
                         shadowCache->shadow=shadow;
                     }
                 }

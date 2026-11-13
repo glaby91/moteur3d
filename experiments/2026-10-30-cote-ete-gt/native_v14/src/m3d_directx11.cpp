@@ -39,6 +39,7 @@ std::atomic<bool> filmicTonemap{false};
 // Corrected linear-energy material lighting (core OFF for parity, GUI ON).
 std::atomic<bool> colorEnergyBalance{false};
 std::atomic<float> colorExposure{1.f};
+std::atomic<float> cloudTimeScale{1.f};
 // The GUI sets this to scene.json.m3dgi. Updated only on user action or
 // scene loading; render worker snapshots it when creating its probe texture.
 std::mutex giPathMutex;
@@ -501,6 +502,35 @@ float4 PSSky(SkyOut i):SV_TARGET {
         float3 cloudColor=lerp(float3(.018,.025,.045),
                                 float3(.78,.84,.91),day);
         col=lerp(col,cloudColor,cloud*opacity);
+    }
+    // Stable world-space star field. It appears only in the night sky, with
+    // soft subpixel points and natural occlusion from the animated clouds.
+    if(d.y>0.0 && day<0.20) {
+        float2 starUV=float2(atan2(d.z,d.x)/6.28318530718+0.5+wind.z/24.0,
+            asin(clamp(d.y,-1.0,1.0))/3.14159265359+0.5)*float2(360.0,180.0);
+        float2 starCell=floor(starUV);
+        float chance=skyHash(starCell+float2(19.79,91.73));
+        float2 center=float2(
+            skyHash(starCell+float2(41.11,12.77)),
+            skyHash(starCell+float2(13.47,59.19)));
+        float radius=lerp(.10,.18,skyHash(starCell+float2(29.5,97.3)));
+        float footprint=max(max(fwidth(starUV.x),fwidth(starUV.y))*.5,.018);
+        float disc=1.0-smoothstep(radius-footprint,radius+footprint,
+                                  length(frac(starUV)-center));
+        float bright=lerp(.60,1.55,skyHash(starCell+float2(2.19,6.37)));
+        float horizonFade=smoothstep(.09,.29,d.y);
+        float night=1.0-smoothstep(.01,.18,day);
+        float2 dome=d.xz/max(d.y+.18,.18);
+        float2 p=float2(dome.x*3.0,dome.y*2.0)+wind.xy*18.0;
+        float cloudNoise=.56*skyNoise(p*.73)
+            +.30*skyNoise(p*1.53+float2(7.1,11.3))
+            +.14*skyNoise(p*3.11-float2(3.7,8.2));
+        float cloudMask=smoothstep(.60-coverage*.27,
+                                   .73-coverage*.22,cloudNoise)*opacity;
+        float3 hue=lerp(float3(.65,.79,1.0),float3(1.0,.93,.82),
+            skyHash(starCell+float2(73.9,5.8)));
+        col+=hue*disc*step(.987,chance)*bright*horizonFade*night*
+            (1.0-saturate(cloudMask));
     }
     // The solar disc stays on the moving directional-light vector.
     if(sun.y>0) {
@@ -970,10 +1000,12 @@ public:
         const char* movingSky=std::getenv("M3D_V17_ANIMATE_CLOUDS");
         const bool animateSky=movingSky && std::strcmp(movingSky,"1")==0;
         const double cloudSeconds=animateSky ? std::chrono::duration<double>(
-            std::chrono::steady_clock::now()-cloudEpoch).count() : 0.0;
+            std::chrono::steady_clock::now()-cloudEpoch).count()*
+            double(cloudTimeScale.load(std::memory_order_acquire)) : 0.0;
         const auto clouds=cse::weather::cirrusAt(cloudSettings,cloudSeconds,
             std::asin(clampf(sun.y,-1.f,1.f))*180.f/PI);
         cloudCB.wind[0]=clouds.uOffset;cloudCB.wind[1]=clouds.vOffset;
+        cloudCB.wind[2]=solarHour; // Night stars rotate with the time of day.
         cloudCB.coverage=clouds.coverage;cloudCB.opacity=clouds.opacity;
         D3D11_MAPPED_SUBRESOURCE cloudMapped{};
         if(FAILED(context_->Map(skyConstants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&cloudMapped))){
@@ -2275,6 +2307,9 @@ bool rasterGiCacheLoaded(){return giTableLoaded.load(std::memory_order_acquire);
 void setRasterPeripheralMultiresOverride(int mode){
     peripheralOverride.store(std::clamp(mode,-1,1),std::memory_order_release);
 }
+void setRasterCloudTimeScale(float x){
+    cloudTimeScale.store(std::clamp(x,0.f,480.f),std::memory_order_release);
+}
 bool setRasterQualitySettings(const RasterQualitySettings& q,std::wstring& error){
     const auto validSample=q.msaaSamples==1||q.msaaSamples==2||q.msaaSamples==4||q.msaaSamples==8;
     const auto validAniso=q.anisotropy==1||q.anisotropy==2||
@@ -2323,6 +2358,7 @@ void setRasterColorExposure(float){}
 void setRasterGiCachePath(const std::filesystem::path&){}
 bool rasterGiCacheLoaded(){return false;}
 void setRasterPeripheralMultiresOverride(int){}
+void setRasterCloudTimeScale(float){}
 bool setRasterQualitySettings(const RasterQualitySettings&,std::wstring& error){error=L"DirectX 11 indisponible sur cet OS.";return false;}
 bool renderDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,std::vector<uint32_t>&,Stats&,std::wstring& error) { error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false; }
 bool enqueueDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,unsigned,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}
