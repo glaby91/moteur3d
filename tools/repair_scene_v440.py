@@ -82,6 +82,16 @@ def build(root):
              '02_hall_stair_rail_blockers_removed')
     assert n==7,('Expected 7 documented stair closure primitives',n)
     report['issues']['02_hall_stairs']='removed 7 obsolete railing closure elements; V8 flights retained'
+    # V8 already removed the three hanging unsupported pool joists. There
+    # are three actual supported ceiling beams left; don't delete these
+    # (they carry real functional luminaires).
+    ceiling=[o for o in objs if o['parent']==P+'Poutres plafond']
+    assert len(ceiling)==3,('V8 structural ceiling beam count changed',len(ceiling))
+    flights=[o for o in objs if o['parent']==G+'Escaliers lateraux/Marches']
+    landings=[o for o in objs if o['parent']==G+'Escaliers lateraux/Paliers raccordes']
+    assert len(flights)==64 and len(landings)==3,(len(flights),len(landings))
+    report['issues']['01_overhead_joists']='three unsupported joists were removed in V8; three true support beams retained'
+    report['validations'].append('three_level_stair_steps_64_landings_3')
 
     # A3, A5, A12: restore a shared facade datum. Trim ONLY front cantilever
     # beams extending outside glass, keeping their structural columns,
@@ -148,7 +158,7 @@ def build(root):
              and aabb(o)[2]<3.65
              and -4.45<o['position'][2]<-3.50,
              '13_additional_door_mullions_removed')
-    report['issues']['13_door']='ground-level central 19m opening cleared; upper lintel retained'
+    report['issues']['13_door']='10m effective entrance unobstructed by black mullions; concrete columns at +/-6m retained; upper lintel retained'
 
     # A4: fill holes around existing four speaker pillars with structural
     # support and eliminate ONLY opaque/glazed blocks overlapping speaker
