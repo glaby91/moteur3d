@@ -14,6 +14,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
 
 enable_testing()
+# CSE WARP Physics / Weather: deterministic fair-weather cirrus smoke test.
+add_executable(v17_weather_clouds_smoke "tests/weather_clouds_smoke.cpp")
+add_test(NAME v17_weather_cirrus_deterministic COMMAND v17_weather_clouds_smoke)
 # V17.443: anomaly catalogue and historically verified camera positions.
 add_executable(v17_anomaly_catalog_smoke "tests/anomaly_catalog_smoke.cpp")
 add_test(NAME v17_anomaly_catalog_registry COMMAND v17_anomaly_catalog_smoke)
