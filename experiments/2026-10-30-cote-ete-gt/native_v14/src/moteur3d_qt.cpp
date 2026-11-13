@@ -27,6 +27,11 @@
 #include <QMouseEvent>
 #include <QWheelEvent>
 #include <QFileInfo>
+#include <QDir>
+#ifdef _WIN32
+#include <windows.h>
+#include <mmsystem.h>
+#endif
 #include <QSignalBlocker>
 #include <QLabel>
 #include <QMainWindow>
@@ -563,6 +568,7 @@ public:
         loadSceneViewPresets();
         applySceneCameraPreset();
         readSettings();
+        initializeRadio();
         auto* fileMenu = menuBar()->addMenu(QStringLiteral("Scène"));
         auto* openScene = fileMenu->addAction(QStringLiteral("Ouvrir une scène…"));
         connect(openScene, &QAction::triggered, this, [this] { openSceneFile(); });
@@ -580,6 +586,7 @@ public:
     }
 
     ~MainWindow() override {
+        stopRadio();
         generation_.fetch_add(1);
         benchmarkGeneration_.fetch_add(1);
         {
@@ -622,6 +629,11 @@ Scene scene_;
     std::vector<SceneViewPreset> sceneViewPresets_;
     VideoPreviewWindow* videoWindow_ = nullptr;
     QAction* benchmarkAction_ = nullptr;
+    QPushButton* radioToggleButton_ = nullptr;
+    QLabel* radioStatusLabel_ = nullptr;
+    bool radioPlaying_ = false;
+    QString radioWavePath_;
+
     QTimer* videoPlaybackTimer_ = nullptr;
     QElapsedTimer tourTimer_;
     std::vector<QImage> videoFrames_;
@@ -816,6 +828,47 @@ Scene scene_;
         beginNavigation(); readSettings(); navigationIdleTimer_->start(450); return true;
     }
 
+    void stopRadio() {
+#ifdef _WIN32
+        if (radioPlaying_) PlaySoundW(nullptr, nullptr, 0);
+#endif
+        radioPlaying_ = false;
+        if (radioToggleButton_) radioToggleButton_->setText(QStringLiteral("Reprendre la radio"));
+        if (radioStatusLabel_) radioStatusLabel_->setText(QStringLiteral("Radio arrêtée"));
+    }
+
+    void startRadio() {
+#ifdef _WIN32
+        if (radioWavePath_.isEmpty() || !QFileInfo::exists(radioWavePath_)) {
+            if (radioStatusLabel_) radioStatusLabel_->setText(QStringLiteral("Fichier radio absent : audio/pripyat_radio.wav"));
+            return;
+        }
+        const std::wstring path = radioWavePath_.toStdWString();
+        radioPlaying_ = PlaySoundW(path.c_str(), nullptr, SND_FILENAME | SND_ASYNC | SND_LOOP | SND_NODEFAULT) != FALSE;
+        if (radioToggleButton_)
+            radioToggleButton_->setText(radioPlaying_ ? QStringLiteral("Arrêter la radio") : QStringLiteral("Reprendre la radio"));
+        if (radioStatusLabel_)
+            radioStatusLabel_->setText(radioPlaying_ ? QStringLiteral("Radio ukrainienne en lecture (mono, boucle)")
+                                                   : QStringLiteral("Échec de lecture du WAV"));
+#else
+        if (radioStatusLabel_) radioStatusLabel_->setText(QStringLiteral("Lecture Windows non disponible sur cette plateforme"));
+#endif
+    }
+
+    void initializeRadio() {
+        // Assets are intentionally not embedded or downloaded by the renderer.
+        // WAV created by assets/audio/pripyat_radio/build_radio.py then placed next to the app.
+        radioWavePath_ = QDir(QCoreApplication::applicationDirPath()).filePath(
+            QStringLiteral("audio/pripyat_radio.wav"));
+        if (radioStatusLabel_)
+            radioStatusLabel_->setText(QFileInfo::exists(radioWavePath_)
+                ? QStringLiteral("Source sonore disponible")
+                : QStringLiteral("Fichier radio absent : audio/pripyat_radio.wav"));
+        if (QFileInfo::exists(radioWavePath_) &&
+            (isPripyatScene() || currentScenePath_.contains(QStringLiteral("energetik"), Qt::CaseInsensitive)))
+            startRadio();
+    }
+
     void buildUi() {
         auto* central = new QWidget(this);
         auto* root = new QHBoxLayout(central);
@@ -853,6 +906,16 @@ Scene scene_;
         auto* heading = new QLabel(QStringLiteral("PILOTAGE DU RENDU"), panel);
         heading->setStyleSheet("font-size:17px;font-weight:700");
         controls->addWidget(heading);
+        auto* radioHeading = new QLabel(QStringLiteral("SON AMBIANT — RADIO UKRAINIENNE"), panel);
+        controls->addWidget(radioHeading);
+        radioToggleButton_ = new QPushButton(QStringLiteral("Reprendre la radio"), panel);
+        radioStatusLabel_ = new QLabel(QStringLiteral("Audio non initialisé"), panel);
+        radioStatusLabel_->setWordWrap(true);
+        controls->addWidget(radioToggleButton_);
+        controls->addWidget(radioStatusLabel_);
+        connect(radioToggleButton_, &QPushButton::clicked, this, [this] {
+            if (radioPlaying_) stopRadio(); else startRadio();
+        });
         resolution_ = new QComboBox(panel);
         resolution_->addItems({QStringLiteral("Vostro — 1366 × 768"), QStringLiteral("Full HD — 1920 × 1080"), QStringLiteral("1600 × 900"), QStringLiteral("1280 × 720"), QStringLiteral("4K UHD — 3840 × 2160")});
         renderer_ = new QComboBox(panel);
