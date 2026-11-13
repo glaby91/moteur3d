@@ -98,6 +98,34 @@ def build(root):
     report['counts']['05_cantilever_beams_trimmed']=beamFix
     report['issues']['03_05_12_facade']='front beam limits stop behind glass plane; outer concrete and columns retained'
 
+    # A3/A12: the two external 50m side walls stop at z=-5, while the
+    # curtain-wall datum is z=-4.035. Two concrete return reveals bridge this
+    # ~0.965m architectural gap without occupying or clipping the glass.
+    for side in (-1,1):
+        add(box(f'v440_outer_corner_return_{side}',
+                F+'Raccords angulaires facades', [side*49.74,9.50,-4.36],
+                [.55,19.0,.76], 'prp_concrete_raw'))
+    # Existing glass can terminate 2-3m short of the structural colonnade.
+    # Add panes only when a matching existing glass bay is absent.
+    glasses=[o for o in objs if o.get('geometry')=='unit_box'
+            and ('Verriere' in o.get('parent','') or 'Mur-rideau' in o.get('parent',''))
+            and -4.5<o['position'][2]<-3.6]
+    addedCornerGlass=0
+    for side,lo,hi in [(-1,-47.58,-45.56),(1,44.68,47.58)]:
+        for level in range(4):
+            yy=2.6+4.15*level
+            xx=(lo+hi)/2
+            if any(abs(g['position'][0]-xx)<1.1
+                   and abs(g['position'][1]-yy)<.9
+                   and g['material'].lower().find('glass')>=0 for g in glasses):
+                continue
+            add(box(f'v440_corner_glazing_{side}_{level}',
+                    F+'Raccords angulaires/vitrage ferme',
+                    [xx,yy,-4.035],[hi-lo,3.64,.065],'prp_window_glass'))
+            addedCornerGlass+=1
+    report['counts']['03_corner_glass_panels_added']=addedCornerGlass
+    report['issues']['12_upper_corners']='two full-height concrete returns to common -4.035 facade datum, closed glass gap if absent'
+
     # A6: side parvis curb was not trimmed by 439 (only parvis slab was).
     # It extended to z=-4.5 and physically passed through front glazing.
     curbFix=0
