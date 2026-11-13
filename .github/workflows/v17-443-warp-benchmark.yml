@@ -1,0 +1,94 @@
+name: Benchmark reel CSE WARP V17.443 - DX11 WARP logiciel
+on:
+  push:
+    branches: [bench/v17-443-warp-mesures-261113]
+    paths:
+      - .github/workflows/v17-443-warp-benchmark.yml
+      - tools/analyze_warp_bench_v443.py
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  benchmark-software-warp:
+    runs-on: windows-2022
+    timeout-minutes: 75
+    env:
+      GH_TOKEN: ${{ github.token }}
+      M3D_V16_FORCE_WARP: '1'
+      QT_QPA_PLATFORM: 'offscreen'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Download validated V17.443 complete Windows runtime
+        shell: pwsh
+        run: |
+          gh run download 43436662498 --repo glaby91/moteur3d --name CSE-WARP-V17.443-PROPRE-Windows-x64 --dir dist-v443
+          if($LASTEXITCODE -ne 0){throw "Unable to fetch V443 user release"}
+          foreach($p in @("moteur3d_v17.exe","moteur3d_v16_core.dll",
+                   "outils/benchmark/moteur3d_v17_benchmark.exe",
+                   "benchmark-civic/scene.json","platforms/qwindows.dll")){
+            if(!(Test-Path "dist-v443/$p")){throw "Missing benchmark dependency: $p"}
+          }
+          $v=[System.Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path dist-v443/outils/benchmark/moteur3d_v17_benchmark.exe).Path)
+          if($v.FileMajorPart -ne 17 -or $v.FileMinorPart -ne 443){throw "Wrong engine version $($v.FileVersion)"}
+      - name: Record actual runner CPU and graphics environment
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path measured -Force | Out-Null
+          Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors,MaxClockSpeed | ConvertTo-Json | Out-File measured/cpu.json -Encoding utf8
+          Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion,AdapterRAM | ConvertTo-Json | Out-File measured/video.json -Encoding utf8
+          Get-ComputerInfo | Select-Object WindowsProductName,WindowsVersion,OsArchitecture | ConvertTo-Json | Out-File measured/os.json -Encoding utf8
+          Get-Content measured/cpu.json
+          Get-Content measured/video.json
+      - name: Six independent benchmark runs (3 quality levels x 2 repeats)
+        shell: pwsh
+        timeout-minutes: 60
+        run: |
+          $ErrorActionPreference="Stop"
+          $env:PATH=(Resolve-Path dist-v443).Path+";"+$env:PATH
+          $env:QT_PLUGIN_PATH=(Resolve-Path dist-v443).Path
+          $exe=(Resolve-Path dist-v443/outils/benchmark/moteur3d_v17_benchmark.exe).Path
+          $scene=(Resolve-Path dist-v443/benchmark-civic/scene.json).Path
+          # Alternate order to reduce cold/thermal setup bias.
+          $cases=@(
+            @{Name="MSAA2_ANISO8";MSAA=2;Aniso=8;Rep=1},
+            @{Name="MSAA4_ANISO16";MSAA=4;Aniso=16;Rep=1},
+            @{Name="MSAA1_ANISO1";MSAA=1;Aniso=1;Rep=1},
+            @{Name="MSAA1_ANISO1";MSAA=1;Aniso=1;Rep=2},
+            @{Name="MSAA4_ANISO16";MSAA=4;Aniso=16;Rep=2},
+            @{Name="MSAA2_ANISO8";MSAA=2;Aniso=8;Rep=2}
+          )
+          foreach($case in $cases){
+            $name="$($case.Name)_R$($case.Rep)"
+            $folder=Join-Path (Resolve-Path measured).Path $name
+            New-Item -ItemType Directory -Force -Path $folder | Out-Null
+            Write-Host "BENCH START $name : DirectX WARP 1366x768 with 6 real frames"
+            $timer=[Diagnostics.Stopwatch]::StartNew()
+            $output= & $exe $scene $folder --quick --readback-depth 1 --raster-msaa $case.MSAA --raster-anisotropy $case.Aniso --raster-lod-percent 100 --raster-culling 1 --raster-lod-enabled 1 2>&1
+            $exit=$LASTEXITCODE
+            $timer.Stop()
+            $output | Out-File (Join-Path $folder "console.txt") -Encoding utf8
+            $output | Select-Object -Last 12 | ForEach-Object { Write-Host $_ }
+            Write-Host "BENCH END $name : exit $exit, wall $([Math]::Round($timer.Elapsed.TotalSeconds,2)) sec"
+            if($exit -ne 0){throw "Benchmark failed $name : $exit"}
+            if(@(Get-ChildItem -Path $folder -Recurse -Filter summary.json).Count -ne 1){
+              throw "No unique real summary.json for $name"
+            }
+          }
+      - name: Audit and aggregate actual measured results
+        shell: pwsh
+        run: |
+          python tools/analyze_warp_bench_v443.py measured
+          if($LASTEXITCODE -ne 0){throw "Measured results invalid"}
+          Get-Content measured/comparison.json
+      - name: Upload all actual raw raster benchmark files
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CSE-WARP-V17.443-BENCH-REEL-DX11-WARP
+          path: measured/
+          retention-days: 21
+          if-no-files-found: warn
