@@ -95,6 +95,14 @@ def main():
     digest = hashlib.sha256(args.output.read_bytes()).hexdigest()
     print("Created:", args.output)
     print("SHA256:", digest)
+    # Windows PlaySoundW accepts PCM WAV, not Ogg/Vorbis.
+    # Produce a low-bandwidth 16 kHz / 16-bit / mono offline copy.
+    wav_path = args.output.parent / "pripyat_radio.wav"
+    subprocess.run(["ffmpeg", "-hide_banner", "-y", "-i", str(args.output),
+                    "-ar", "16000", "-ac", "1", "-c:a", "pcm_s16le",
+                    str(wav_path)], check=True)
+    print("Windows preview WAV:", wav_path)
+    print("Copy WAV to <exe-directory>/audio/pripyat_radio.wav before launch.")
     print("Attribution required: CREDITS.md. Do not label as a 1970s recording.")
     return 0
 
