@@ -152,11 +152,11 @@ int main(int argc,char**argv){
  QCoreApplication app(argc,argv);
  QTextStream out(stdout),err(stderr);
  QStringList args=app.arguments();
- if(args.size()<3){err<<"Usage: CSE-WARP-GPU-TRAJET-BENCH.exe scene.json dossier_sortie [--ci-smoke] [--z-prepass=on|off] [--light-aabb=on|off]\\n";return 2;}
+ if(args.size()<3){err<<"Usage: CSE-WARP-GPU-TRAJET-BENCH.exe scene.json dossier_sortie [--ci-smoke] [--z-prepass=on|off] [--light-aabb=on|off]\n";return 2;}
  const auto configureSwitch=[&](const char* flag,const char* env)->bool{
   const QString option=QString::fromLatin1(flag);
   const bool on=args.contains(option+"=on"),off=args.contains(option+"=off");
-  if(on&&off){err<<"Contradictory option: "<<option<<"\\n";return false;}
+  if(on&&off){err<<"Contradictory option: "<<option<<"\n";return false;}
   if(on)qputenv(env,"1");
   if(off)qputenv(env,"0");
   return true;
@@ -210,7 +210,7 @@ int main(int argc,char**argv){
     <<"Device: "<<video.adapterName<<"; "<<w<<"x"<<h<<"; frames="<<frames
     <<"; virtual seconds="<<virtualDuration<<"; MSAA=2, PBR="<<(smoke?256:2048)
      <<"; Z-prepass="<<(zEnabled?"ON":"OFF")
-     <<"; Local light AABB="<<(lightAabbEnabled?"ON":"OFF")<<"\\n";
+     <<"; Local light AABB="<<(lightAabbEnabled?"ON":"OFF")<<"\n";
  out.flush();
 
  const auto shifted=[&](int n){
