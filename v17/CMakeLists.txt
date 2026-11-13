@@ -204,6 +204,17 @@ if(MSVC)
     target_compile_options(moteur3d_v17_campaign PRIVATE /O2 /EHsc /utf-8)
 endif()
 
+# All auxiliary Windows executables must report exactly the same build
+# number as the front-end and benchmark icons.
+if(WIN32)
+    foreach(aux IN ITEMS moteur3d_v17_gibake moteur3d_v17_campaign moteur3d_v17_gpu_trajectory)
+        set(V17_AUX_NAME "${aux}")
+        configure_file("${CMAKE_CURRENT_SOURCE_DIR}/resources/v17_auxiliary.rc.in"
+                       "${CMAKE_CURRENT_BINARY_DIR}/${aux}.rc" @ONLY)
+        target_sources(${aux} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/${aux}.rc")
+    endforeach()
+endif()
+
 target_link_libraries(moteur3d_v17_benchui PRIVATE Qt6::Widgets)
 target_compile_definitions(moteur3d_v17_benchui PRIVATE CSE_WARP_BUILD_NUMBER=${V17_BUILD_NUMBER})
 if(WIN32)
