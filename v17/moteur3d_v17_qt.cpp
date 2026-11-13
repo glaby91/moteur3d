@@ -2,6 +2,7 @@
 #include "src/m3d_walk_controller.h"
 #include "exploration_motion.h"
 #include "camera_diagnostic.h"
+#include "frame_pacing.h"
 #include "radio_audio.h"
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
@@ -67,6 +68,7 @@
 #include <cstring>
 #include <cstdio>
 #include <memory>
+#include <functional>
 #include <limits>
 #include <mutex>
 #include <thread>
@@ -109,7 +111,8 @@ struct SceneLoadOutcome {
 };
 class ImageView final : public QWidget {
 public:
-    void setImage(QImage im){image_=std::move(im);update();}
+    void setImage(QImage im){image_=std::move(im);paintPending_=true;update();}
+    void onPresented(std::function<void()> callback){presented_=std::move(callback);}
     void setPlaceholder(const QString& message){placeholder_=message;update();}
     void setCameraHud(QStringList lines,bool enabled){
         if(hudLines_==lines&&hudEnabled_==enabled)return;
@@ -152,9 +155,15 @@ protected:
         p.setRenderHint(QPainter::SmoothPixmapTransform,false);
         p.drawImage(dst,image_);
         if(hudEnabled_)drawCameraHud(p,dst,hudLines_);
+        if(paintPending_){
+            paintPending_=false;
+            if(presented_)presented_();
+        }
     }
 private:
     QImage image_;
+    bool paintPending_=false;
+    std::function<void()> presented_;
     QString placeholder_;
     QStringList hudLines_;
     bool hudEnabled_=true;
@@ -181,6 +190,8 @@ public:
         renderPool_.setMaxThreadCount(1);
         renderPool_.setExpiryTimeout(-1);
         createUi();
+        pacingClock_.start();
+        canvas_->onPresented([this]{recordImagePresented();});
         audioTimer_.setInterval(50); // 20 Hz spatial updates, independent from GPU images.
         connect(&audioTimer_,&QTimer::timeout,this,[this]{
             if(!radioPlaying_ || !runtime_)return;
@@ -233,6 +244,7 @@ public:
             // A previous scene may finish after the user has opened a new one.
             // Never show its image or overwrite the current status bar.
             if(outcome.generation!=renderSerial_->load()){
+                ++pacingRejected_;
                 if(pending_){pending_=false;requestRender();}
                 return;
             }
@@ -240,6 +252,7 @@ public:
                 lastImage_=outcome.image;
                 lastRenderedPose_=outcome.cameraPose;
                 hasRenderedPose_=true;
+                lastCompletedRenderMs_=outcome.milliseconds;
                 canvas_->setImage(outcome.image);
             }
             if(outcome.error.isEmpty()&&!outcome.image.isNull()){
@@ -269,6 +282,7 @@ public:
                 stopExploration();
             }
             if(pending_){pending_=false;requestRender();}
+            else if(exploring_ && !sceneLoading_ && runtime_)requestRender();
         });
         // Return from the constructor immediately. The first scene is built
         // on a worker after show(), so Windows always shows the main window.
@@ -618,6 +632,7 @@ private:
         exploring_=true;
         motionClock_.start();
         frameClock_.invalidate();
+        resetPacing();
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Arrêter exploration"));
         updateCameraHud();
         frameTimer_.start();
@@ -766,6 +781,12 @@ private:
     };
     std::shared_ptr<CpuShadowCache> cpuShadows_=std::make_shared<CpuShadowCache>();
     bool pending_=false, updatingControls_=false, closingRequested_=false;
+    QElapsedTimer pacingClock_;
+    qint64 lastPresentMs_=-1;
+    double lastCompletedRenderMs_=0.0;
+    uint64_t pacingRejected_=0, pacingQueued_=0;
+    std::vector<cse::pacing::Sample> pacingSamples_;
+    static constexpr int pacingCapacity_=5000;
     int selectedMaterial_=-1;
     QString scenePath_;
     QString materialsPath_;
@@ -949,6 +970,8 @@ private:
             camerasMenu->addAction(action);
         }
         auto* toolsMenu=menuBar()->addMenu(QStringLiteral("Outils"));
+        auto* pacingAction=toolsMenu->addAction(QStringLiteral("Exporter benchmark fluidité (CSV + JSON)"));
+        connect(pacingAction,&QAction::triggered,this,[this]{exportPacing();});
         auto* benchmarkAction=toolsMenu->addAction(
             QStringLiteral("Benchmark V17.%1 — performances…").arg(CSE_WARP_BUILD_NUMBER));
         connect(benchmarkAction,&QAction::triggered,this,[this]{
@@ -1678,12 +1701,12 @@ private:
     void requestRender(){
         if(sceneLoading_||!runtime_||runtime_->cameras.isEmpty())return;
         const auto serial=renderSerial_;
-        const uint64_t token=serial->fetch_add(1)+1;
         if(watcher_.isRunning()){
-            pending_=true;
-            statusBar()->showMessage(QStringLiteral("Nouveau rendu en attente de la fin du calcul précédent…"));
+            pending_=true; // Camera movement must not invalidate a finished image.
+            ++pacingQueued_;
             return;
         }
+        const uint64_t token=serial->fetch_add(1)+1;
         auto snapshot=runtime_;
         auto preset=activeCameraPose();
         updateCameraHud();
