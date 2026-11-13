@@ -6,6 +6,7 @@
 const fs=require('node:fs');
 const path=require('node:path');
 const {rebuildMonument,rebuildGarden,rebuildTrees}=require('./rebuild-objects.cjs');
+const {generate:generateEntryMosaic}=require('./build-entry-mosaic.cjs');
 const root=__dirname;
 const repoRoot=path.resolve(root,'../../..');
 const catalogPath=path.join(repoRoot,'assets/materials/pripyat-v17/catalogue.json');
@@ -35,6 +36,16 @@ const specials=[
  ['cse_leaf_olive',[.28,.43,.19],.94,'foliage'],
  ['cse_leaf_gold',[.51,.48,.20],.94,'foliage'],
  ['cse_pool_water',[.10,.53,.69],.10,'water'],
+ ['cse_ivory_plaster',[.88,.84,.77],.91,'plaster'],
+ ['cse_concrete_waxed',[.57,.56,.53],.50,'concrete'],
+ ['cse_gallery_limestone',[.77,.72,.65],.61,'concrete'],
+ ['cse_gallery_warm',[.68,.66,.61],.67,'concrete'],
+ ['cse_anti_slip',[.43,.43,.40],.89,'ceramic'],
+ ['cse_coping_beige',[.74,.70,.63],.78,'stone'],
+ ['cse_entry_mosaic',[1,1,1],.78,'image'],
+ ['cse_terra_tile',[.71,.41,.32],.82,'ceramic'],
+ ['cse_ochre_tile',[.79,.65,.39],.84,'ceramic'],
+ ['cse_olive_tile',[.42,.46,.39],.82,'ceramic'],
  ['cse_glaze_orange',[.98,.24,.028],.16,'ceramic'],
  ['cse_glaze_yellow',[.99,.82,.025],.16,'ceramic'],
  ['cse_glaze_cobalt',[.015,.19,.91],.14,'ceramic'],
@@ -50,7 +61,8 @@ const localSets=specials.map(([id,, ,pattern])=>({
  id:'tex_'+id,material:id,pattern,
  resolution:id==='cse_energetik_fresco'?2048:512,
  ...(id==='cse_energetik_fresco'?{imageFile:'textures/energetik_fresco_mosaic.jpg'}:{}),
- ...(id==='cse_personnage_facade'?{imageFile:'textures/personnage_facade_mosaique.jpg'}:{})
+ ...(id==='cse_personnage_facade'?{imageFile:'textures/personnage_facade_mosaique.jpg'}:{}),
+ ...(id==='cse_entry_mosaic'?{imageFile:'textures/cse_parvis_mosaique.png'}:{})
 }));
 const profiles={
   leger: {target:20000, textureCap:512, pave:4.5, trees:26, benches:12, lamps:12, blocks:3, seatCols:16, seatRows:9, detail:3},
@@ -160,7 +172,7 @@ function build(profileName,p){
  for(const [x,z,w,d] of [
   [-37.75,-30,25.5,50],[37.75,-30,25.5,50],
   [0,-12.25,50,14.5],[0,-49.75,50,10.5]
- ])B(shell+'/Fondations','prp_concrete_raw',x,.27,z,w,.55,d);
+ ])B(shell+'/Fondations','cse_concrete_waxed',x,.27,z,w,.55,d);
  B(shell+'/Volume','prp_concrete_panel',0,9.5,-54.66,101,19,.68);
  for(const side of [-1,1])
   B(shell+'/Volume','prp_concrete_panel',side*50.15,9.5,-30,.70,19,50);
@@ -180,6 +192,16 @@ function build(profileName,p){
     }
   }
   B('Interieur/Galeries','prp_concrete_raw',0,y,-50.15,57,.30,9.7);
+  // Finish follows the REAL supporting slabs. Leave staircase wells open.
+  const floorMat=y===4.5?'cse_gallery_limestone':y===9?'cse_gallery_warm':'cse_concrete_waxed';
+  for(const side of [-1,1]){
+    if(y===4.5&&side===1){
+      for(const [x,z,w,d] of [[31.5,-30,5.6,48.5],[45,-30,10.5,48.5],
+          [37,-17.25,4.8,23.0],[37,-49.10,4.8,10.2]])
+        B('Interieur/Galeries/Sol niveau '+y,floorMat,x,y+.17,z,w,.035,d);
+    }else B('Interieur/Galeries/Sol niveau '+y,floorMat,side*39.5,y+.17,-30,21.6,.035,48.5);
+  }
+  B('Interieur/Galeries/Sol niveau '+y,floorMat,0,y+.17,-50.15,56,.035,9.4);
   // A genuine staircase shaft must remain open through the first
   // mezzanine. Otherwise the avatar's head hits the floor at y=4.5.
   if(y===4.5){
@@ -219,7 +241,7 @@ function build(profileName,p){
  // Small beam-to-slab closures in front of the glass curtain wall.
  for(const y of [4.5,9,13.5])
    B('Architecture/Palais/Raccords structurels','prp_concrete_raw',
-     0,y-.21,-5.0,96,.36,.45);
+     0,y-.21,-4.60,96,.36,.32);
  // Perimeter roof + continuous glazed clerestory over the 50-m pool.
  for(const side of [-1,1])
   B(shell+'/Toiture','prp_roof_bitumen',side*40.2,19.55,-30,21.4,.55,51);
@@ -242,7 +264,7 @@ function build(profileName,p){
   B('Architecture/Palais/Poutres','prp_concrete_raw',0,level*4.15+4.35,-4.6,96,.4,.74);
   for(let k=0;k<27;k++){
    const x=-44+k*3.35;
-   if(level===0&&Math.abs(x)<7.0)continue; // actual open entrance
+   if(level===0&&Math.abs(x)<11.0)continue; // 20 m-wide entrance: no black uprights in pedestrian path
    if(level>0&&Math.abs(x)<5.0)continue; // central solid mosaic wall
    if(Math.abs(x)>22&&k%4===0)continue;
    B('Architecture/Palais/Verriere','prp_window_glass',x,y,-4.03,3.04,3.65,.085);
@@ -308,7 +330,26 @@ function build(profileName,p){
  }
  // Main steps extend fully to the building's front door, replacing the
  // old stair flight which stopped fourteen metres short of the façade.
- B('Place/Parvis d’entrée','prp_terrazzo_floor',0,.28,5.75,68,.55,22.5);
+ B('Place/Parvis d’entrée','prp_terrazzo_floor',0,.28,6.65,68,.55,20.7);
+ // The external slab now ends at z=-3.70, ahead of the glass line z=-4.03.
+ // Only a narrow, dedicated threshold joins the dry indoor circulation.
+ B('Interieur/Hall/Seuil principal','cse_concrete_waxed',0,.57,-3.79,19.2,.07,.70);
+ // Approved 1970s monumental entrance artwork: original warm-toned tessera
+ // mosaic with two portraits, laurel, atom, ocre/terracotta rays. The colored
+ // treatment gradually opens toward the public square. Base remains solid.
+ B('Place/Parvis/Mosaique polychrome','cse_entry_mosaic',0,.590,7.3,10.2,.045,13.2);
+ for(let band=0;band<16;band++){
+   const z=-2.8+band*1.17;
+   const half=5.5+band*.52;
+   for(const side of [-1,1]){
+     const x=side*(half+1.20);
+     const palette=['cse_terra_tile','cse_ochre_tile','cse_olive_tile'];
+     B('Place/Parvis/Rayons de mosaique',palette[(band+((side+1)/2))%3],
+       x,.579,z,1.0,.023,1.16);
+     B('Place/Parvis/Bordure en pierre','cse_coping_beige',
+       side*(half+2.06),.572,z,.18,.024,1.16);
+   }
+ }
  for(let i=0;i<4;i++){
   const top=.17+i*.127;
   B('Place/Escalier monumental','prp_terrazzo_floor',0,top-.077,
@@ -322,11 +363,34 @@ function build(profileName,p){
  }
  // 50 × 25 m olympic swimming pool, 10 visible lanes and tiled margins.
  const pool='Interieur/Piscine olympique';
- B(pool+'/Fond','prp_tile_ceramic',0,-1.48,-32,50,.22,25);
+ B(pool+'/Fond','cse_coping_beige',0,-1.48,-32,50,.22,25);
  for(const x of [-25.12,25.12])
-  B(pool+'/Parois','prp_tile_ceramic',x,-.45,-32,.26,2.1,25.2);
+  B(pool+'/Parois','cse_coping_beige',x,-.45,-32,.26,2.1,25.2);
  for(const z of [-44.62,-19.38])
-  B(pool+'/Parois','prp_tile_ceramic',0,-.45,z,50.5,2.1,.26);
+  B(pool+'/Parois','cse_coping_beige',0,-.45,z,50.5,2.1,.26);
+ // Dedicated translucent water, rough dielectric with shallow wave detail.
+ // Dark, textured anti-slip band ONLY around the wet pool deck; the rest of
+ // the building retains the approved warm-grey waxed concrete.
+ for(const side of [-1,1]){
+   B(pool+'/Plages antiderapantes','cse_anti_slip',
+     side*27.40,.569,-32,4.55,.045,25.60);
+   B(pool+'/Margelles antiderapantes','cse_coping_beige',
+     side*25.40,.600,-32,.48,.060,25.1);
+ }
+ for(const z of [-46.00,-18.00]){
+   B(pool+'/Plages antiderapantes','cse_anti_slip',
+     0,.569,z,49.9,.045,2.5);
+   B(pool+'/Margelles antiderapantes','cse_coping_beige',
+     0,.600,z> -30?-19.37:-44.63,49.9,.060,.40);
+ }
+ // Ivory plaster is mounted as INNER lining, keeping outer brutalist
+ // concrete untouched and the original rear mural unobstructed.
+ for(const side of [-1,1]){
+   B(pool+'/Murs interieur enduit ivoire','cse_ivory_plaster',
+     side*49.72,9.6,-32,.05,17.6,42);
+   B(pool+'/Murs interieur enduit ivoire','cse_ivory_plaster',
+     side*27.5,9.6,-54.20,43,17.6,.05); // leave central fresco bay clear
+ }
  // Dedicated translucent water, rough dielectric with shallow wave detail.
  // Water surface extends to the inner faces of all 4 basin walls
  // (x inner = ±24.99; z inner = -44.49/-19.51), leaving no walkable slot.
@@ -440,7 +504,7 @@ function build(profileName,p){
  // Open lobby at ground level with a clear line of sight into the pool.
  B('Interieur/Hall/Accueil','prp_wood_weathered',-19,1.05,-10,6,1.1,1.2);
  for(const side of [-1,1])
-  B('Interieur/Hall/Panneaux','prp_concrete_panel',side*11,2.8,-11,.25,4.1,5);
+  B('Interieur/Hall/Panneaux','cse_ivory_plaster',side*11,2.8,-11,.25,4.1,5);
  // Hall light bars are visible architectural fixtures, not invisible bulbs.
  // 20 elegant visible hall fixtures (previously 42), operated by the
  // same 8 functional hall lights; avoids an overpacked fluorescent ceiling.
@@ -504,8 +568,8 @@ function build(profileName,p){
  // through a 4 m opening from the western poolside corridor. No new building.
  const cloak='Interieur/Vestiaires et douches ouest';
  for(const z of [-45,-27])
-  B(cloak+'/Murs','prp_tile_ceramic',-40,2.15,z,17,3.25,.24);
- B(cloak+'/Murs','prp_tile_ceramic',-48.38,2.15,-36,.25,3.25,18.0);
+  B(cloak+'/Murs','cse_ivory_plaster',-40,2.15,z,17,3.25,.24);
+ B(cloak+'/Murs','cse_ivory_plaster',-48.38,2.15,-36,.25,3.25,18.0);
  for(const z of [-41.5,-30.5])
   B(cloak+'/Mur accès','prp_tile_ceramic',-31.35,2.15,z,.25,3.25,7);
  // The shower suite is behind a split wall with a passage.
@@ -529,7 +593,7 @@ function build(profileName,p){
  // stairs, reached from the rear walkway of the pool.
  const east='Interieur/Vestiaires est et locaux techniques';
  for(const z of [-52,-45])
-  B(east+'/Murs','prp_tile_ceramic',44.5,2.10,z,8,3.20,.24);
+  B(east+'/Murs','cse_ivory_plaster',44.5,2.10,z,8,3.20,.24);
  B(east+'/Mur latéral','prp_tile_ceramic',48.5,2.10,-48.5,.24,3.20,7.0);
  for(let k=0;k<6;k++)
   B(east+'/Casiers','prp_steel_painted',46.8,1.55,-51+k*.92,.65,1.88,.70);
@@ -715,6 +779,7 @@ save('environment/site.json',environment);
 save('materials/pripyat-reuse.json',{format:'m3d-materials-v1',
  origin:'assets/materials/pripyat-v17/catalogue.json',
  originalsRetained:catalog.materials.length,materials:[...catalog.materials,...localMaterials]});
+generateEntryMosaic(path.join(root,'textures/cse_parvis_mosaique.png'));
 for(const name of selected){
  const p=profiles[name];
  const sets=[...catalog.sets,...localSets].map(v=>Object.assign({},v,{
