@@ -1,6 +1,7 @@
 #include "m3d_engine.h"
 #include "src/m3d_walk_controller.h"
 #include "exploration_motion.h"
+#include "camera_diagnostic.h"
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
 #include <QAction>
@@ -8,6 +9,8 @@
 #include <QComboBox>
 #include <QCheckBox>
 #include <QCloseEvent>
+#include <QClipboard>
+#include <QGuiApplication>
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -53,6 +56,8 @@
 #include <QSize>
 #include <QSpinBox>
 #include <QStatusBar>
+#include <QSysInfo>
+#include <QFontMetrics>
 #include <QTabWidget>
 #include <QTreeWidget>
 #include <QVBoxLayout>
@@ -65,11 +70,15 @@
 #include <thread>
 #include <utility>
 #include <vector>
+#if defined(_WIN32)
+#include <dxgi1_2.h>
+#endif
 
 using namespace m3d;
 namespace {
 struct Result {
     QImage image;
+    v16::CameraPreset cameraPose;
     QString renderer;
     QString error;
     double milliseconds=0;
@@ -89,6 +98,30 @@ class ImageView final : public QWidget {
 public:
     void setImage(QImage im){image_=std::move(im);update();}
     void setPlaceholder(const QString& message){placeholder_=message;update();}
+    void setCameraHud(QStringList lines,bool enabled){
+        if(hudLines_==lines&&hudEnabled_==enabled)return;
+        hudLines_=std::move(lines);hudEnabled_=enabled;update();
+    }
+    static void drawCameraHud(QPainter& painter,const QRect& bounds,const QStringList& lines){
+        if(lines.isEmpty()||bounds.width()<240||bounds.height()<110)return;
+        painter.save();
+        QFont font=painter.font();font.setFamily(QStringLiteral("Consolas"));font.setPointSize(9);
+        painter.setFont(font);
+        const QFontMetrics fm(font);
+        int longest=0;
+        for(const auto& t:lines)longest=std::max(longest,fm.horizontalAdvance(t));
+        const int pad=12,lh=fm.height()+3;
+        const QRect panel(bounds.left()+12,bounds.top()+12,
+                          std::min(bounds.width()-24,longest+pad*2),lh*lines.size()+pad*2);
+        painter.setPen(Qt::NoPen);painter.setBrush(QColor(10,18,27,208));
+        painter.drawRoundedRect(panel,8,8);
+        for(int i=0;i<lines.size();++i){
+            painter.setPen(i==0?QColor(140,224,245):QColor(236,243,249));
+            painter.drawText(panel.left()+pad,panel.top()+pad+fm.ascent()+i*lh,
+                fm.elidedText(lines[i],Qt::ElideRight,panel.width()-pad*2));
+        }
+        painter.restore();
+    }
 protected:
     void paintEvent(QPaintEvent*) override {
         QPainter p(this);
@@ -105,10 +138,13 @@ protected:
         QRect dst(QPoint((width()-s.width())/2,(height()-s.height())/2),s);
         p.setRenderHint(QPainter::SmoothPixmapTransform,false);
         p.drawImage(dst,image_);
+        if(hudEnabled_)drawCameraHud(p,dst,hudLines_);
     }
 private:
     QImage image_;
     QString placeholder_;
+    QStringList hudLines_;
+    bool hudEnabled_=true;
 };
 class V17Window final : public QMainWindow {
 public:
@@ -178,7 +214,12 @@ public:
                 if(pending_){pending_=false;requestRender();}
                 return;
             }
-            if(!outcome.image.isNull()){lastImage_=outcome.image;canvas_->setImage(outcome.image);}
+            if(!outcome.image.isNull()){
+                lastImage_=outcome.image;
+                lastRenderedPose_=outcome.cameraPose;
+                hasRenderedPose_=true;
+                canvas_->setImage(outcome.image);
+            }
             if(outcome.error.isEmpty()&&!outcome.image.isNull()){
                 const QString milliseconds=QString::number(outcome.milliseconds,'f',1);
                 const QString seconds=QString::number(outcome.milliseconds/1000.0,'f',1);
@@ -309,6 +350,9 @@ private:
     QCheckBox* walkingModeBox_=nullptr;
     bool exploring_=false,freeCameraActive_=false,leftMouseHeld_=false;
     float yaw_=0.f,pitch_=0.f;
+    bool cameraHudEnabled_=true;
+    bool hasRenderedPose_=false;
+    v16::CameraPreset lastRenderedPose_;
     QPushButton* explorationButton_=nullptr;
     QLabel* explorationHelp_=nullptr;
     QLabel* explorationSpeedLabel_=nullptr;
@@ -340,11 +384,13 @@ private:
             freeCamera_.eye=walk::eye(walkingState_);
             updateLook();
         }
+        updateCameraHud();
     }
     void updateLook(){
         const V forward{std::sin(yaw_)*std::cos(pitch_),std::sin(pitch_),
                         -std::cos(yaw_)*std::cos(pitch_)};
         freeCamera_.target=freeCamera_.eye+forward;
+        updateCameraHud();
     }
     void stopExploration(){
         exploring_=false;
@@ -361,11 +407,12 @@ private:
         if(exploring_){stopExploration();return;}
         if(!runtime_||runtime_->cameras.isEmpty())return;
         if(backendBox_->currentIndex()!=4)backendBox_->setCurrentIndex(4);
-        activateFreeCamera();
+        if(!freeCameraActive_)activateFreeCamera();
         exploring_=true;
         motionClock_.start();
         frameClock_.invalidate();
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Arrêter exploration"));
+        updateCameraHud();
         frameTimer_.start();
         updateExplorationSpeedIndicator();
         canvas_->setFocus();
@@ -998,6 +1045,8 @@ private:
         connect(cameraBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){
             azimuth_->setValue(0);
             if(exploring_)activateFreeCamera();
+            else freeCameraActive_=false;
+            updateCameraHud();
             requestRender();
         });
         connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int index){
@@ -1132,6 +1181,9 @@ private:
         sceneLoadLabel_->show();
         sceneLoadProgress_->show();
         canvas_->setImage(QImage{});
+        canvas_->setCameraHud({},false);
+        hasRenderedPose_=false;
+        freeCameraActive_=false;
         canvas_->setPlaceholder(QStringLiteral("CSE WARP V17\nChargement de la scène…"));
         cameraBox_->setEnabled(false);
         if(explorationButton_)explorationButton_->setEnabled(false);
@@ -1225,6 +1277,7 @@ private:
             quickCameraActions_[i]->setToolTip(valid ? QStringLiteral("Vue %1 — touche %2").arg(runtime_->cameras[i].name).arg(i+1) : QString());
         }
         cameraBox_->blockSignals(false);
+        updateCameraHud();
         populateTrees(outcome.database);
         statusBar()->showMessage(QStringLiteral("%1 — %2 objets, %3 triangles, %4 matériaux, PBR %5 px")
             .arg(runtime_->title)
@@ -1304,16 +1357,8 @@ private:
             return;
         }
         auto snapshot=runtime_;
-        const int presetId=std::clamp(cameraBox_->currentIndex(),0,int(snapshot->cameras.size())-1);
-        auto preset=snapshot->cameras[presetId];
-        if(exploring_ && freeCameraActive_)preset=freeCamera_;
-        else {
-            const auto dir=preset.eye-preset.target;
-            const float angle=float(azimuth_->value())*PI/180;
-            preset.eye={preset.target.x+dir.x*std::cos(angle)+dir.z*std::sin(angle),
-                        preset.eye.y,
-                        preset.target.z-dir.x*std::sin(angle)+dir.z*std::cos(angle)};
-        }
+        auto preset=activeCameraPose();
+        updateCameraHud();
         QSize renderSize=qualityBox_->currentData().toSize();
         if(!renderSize.isValid() || renderSize.isEmpty()) {
             // Render to the viewport's *actual* aspect ratio, not the monitor
@@ -1352,6 +1397,7 @@ private:
         watcher_.setFuture(QtConcurrent::run(&renderPool_,[this,serial,token,snapshot,preset,w,h,wantGpu,
             globalIllumination,raster,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache]{
             Result result;
+            result.cameraPose=preset;
             result.generation=token;
             result.renderThread=reinterpret_cast<quintptr>(QThread::currentThreadId());
             updateLighting(snapshot->daylightHour);
