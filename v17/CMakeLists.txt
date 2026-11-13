@@ -14,6 +14,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
 
 enable_testing()
+# V17.443: anomaly catalogue and historically verified camera positions.
+add_executable(v17_anomaly_catalog_smoke "tests/anomaly_catalog_smoke.cpp")
+add_test(NAME v17_anomaly_catalog_registry COMMAND v17_anomaly_catalog_smoke)
 add_executable(v17_pool_ladder_smoke "tests/pool_ladder_smoke.cpp")
 add_test(NAME v17_pool_ladder_bidirectional COMMAND v17_pool_ladder_smoke)
 # Frame-pacing regression is GPU-free: measurable present intervals and scene safety.
