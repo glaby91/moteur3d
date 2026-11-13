@@ -7,6 +7,9 @@ on:
       - experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp
       - v17/moteur3d_v17_qt.cpp
       - v17/tests/walk_controller_smoke.cpp
+      - v17/scope_zoom.h
+      - v17/tests/scope_zoom_smoke.cpp
+      - v17/CMakeLists.txt
   workflow_dispatch:
 permissions:
   contents: read
@@ -42,7 +45,7 @@ jobs:
         run: |
           cmake -S v17 -B build-v444-gui -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=444
           if($LASTEXITCODE -ne 0){throw "CMake configure failed"}
-          cmake --build build-v444-gui --config Release --target moteur3d_v17 moteur3d_v17_benchmark v17_walk_controller_smoke --parallel 4
+          cmake --build build-v444-gui --config Release --target moteur3d_v17 moteur3d_v17_benchmark v17_walk_controller_smoke v17_scope_zoom_smoke --parallel 4
           if($LASTEXITCODE -ne 0){throw "Native V17.444 Windows build failed"}
           foreach($f in @("build-v444-gui/Release/moteur3d_v17.exe",
                           "build-v444-gui/Release/moteur3d_v17_benchmark.exe",
@@ -57,6 +60,7 @@ jobs:
           Copy-Item build-v444-gui/Release/moteur3d_v17_benchmark.exe package-v444/outils/benchmark/moteur3d_v17_benchmark.exe -Force
           Copy-Item build-v444-gui/v16/Release/moteur3d_v16_core.dll package-v444/moteur3d_v16_core.dll -Force
           Copy-Item tools/LANCER_BENCH_V17_444_MULTIREZ.bat package-v444/LANCER_BENCH_V17_444_MULTIREZ.bat -Force
+          Copy-Item tools/LANCER_BENCH_HD620_PISCINE_1366x768.bat package-v444/LANCER_BENCH_HD620_PISCINE_1366x768.bat -Force
           git rev-parse HEAD | Set-Content package-v444/REVISION.txt
           @'
           @echo off
@@ -73,6 +77,11 @@ jobs:
           LANCER_BENCH_V17_444_MULTIREZ.bat = deux comparaisons sur votre GPU Intel.
           Ce mode experimental reste actif meme a l'arret : la logique automatique
           marche/course/arret sera etudiee seulement apres validation des mesures.
+          Navigation : cocher "Marcher au sol" pour les collisions. Ce choix
+          reste actif apres le rappel d'une camera d'anomalie.
+          En exploration : clic droit MAINTENU = lunette x3 progressive.
+          Relacher le clic droit restaure le FOV habituel et le reticule disparait.
+          Bouger la souris bouton droit maintenu permet la visee precise.
           Ne pas remplacer votre installation V17.443 avec cette archive test.
           Critere : au moins 15 pour cent de GPU en moins et image acceptable.
           '@ | Set-Content package-v444/LIRE-V17.444-EXPERIMENTAL.txt -Encoding utf8
@@ -91,6 +100,17 @@ jobs:
           $gui=(Resolve-Path package-v444/moteur3d_v17.exe).Path
           $proc=Start-Process -FilePath $gui -ArgumentList @("--smoke-walking-collisions",$scene) -WorkingDirectory (Resolve-Path package-v444).Path -PassThru -Wait
           if($proc.ExitCode -ne 0){throw "Anomaly recalled view incorrectly changed persisted collision mode ($($proc.ExitCode))"}
+      - name: Verify mouse-held optical rifle scope and exact FOV restoration
+        shell: pwsh
+        timeout-minutes: 10
+        run: |
+          ctest --test-dir build-v444-gui -C Release -R "^v17_scope_zoom_hold_release$" --output-on-failure
+          if($LASTEXITCODE -ne 0){throw "Scope FOV math / hold release regression failed"}
+          $env:PATH=(Resolve-Path package-v444).Path+";"+$env:PATH
+          $scene=(Resolve-Path package-v444/benchmark-civic/scene.json).Path
+          $gui=(Resolve-Path package-v444/moteur3d_v17.exe).Path
+          $proc=Start-Process -FilePath $gui -ArgumentList @("--smoke-scope-mouse",$scene) -WorkingDirectory (Resolve-Path package-v444).Path -PassThru -Wait
+          if($proc.ExitCode -ne 0){throw "RMB press/release GUI interaction regression failed ($($proc.ExitCode))"}
       - name: Smoke Windows GUI with corrected scene (reference + multires)
         shell: pwsh
         timeout-minutes: 18
