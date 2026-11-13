@@ -133,6 +133,18 @@ jobs:
         timeout-minutes: 9
         run: |
           $status="WAV DE TEST ORIGINAL - sans chanson. Sources Wikimedia non récupérées."
+          if(!(Get-Command ffmpeg -ErrorAction SilentlyContinue)){
+            python -m pip install --quiet imageio-ffmpeg
+            if($LASTEXITCODE -eq 0){
+              $ffmpeg=(python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())" | Select-Object -Last 1).Trim()
+              if(Test-Path $ffmpeg){
+                $dir=Split-Path $ffmpeg -Parent
+                Copy-Item $ffmpeg "$dir/ffmpeg.exe" -Force
+                $env:PATH="$dir;$env:PATH"
+                Write-Host "Bundled FFmpeg prepared for CC BY-SA montage"
+              }
+            }
+          }
           if(Get-Command ffmpeg -ErrorAction SilentlyContinue){
             python assets/audio/pripyat_radio/build_radio.py
             if($LASTEXITCODE -eq 0 -and (Test-Path "assets/audio/pripyat_radio/generated/pripyat_radio.wav")){
