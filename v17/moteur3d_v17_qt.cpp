@@ -71,7 +71,18 @@
 #include <utility>
 #include <vector>
 #if defined(_WIN32)
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <dxgi1_2.h>
+// Some Windows SDK headers still expose min/max macros; the native renderer
+// already uses std::min/std::max extensively and must not be macro-expanded.
+#ifdef min
+#undef min
+#endif
+#ifdef max
+#undef max
+#endif
 #endif
 
 using namespace m3d;
