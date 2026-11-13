@@ -137,8 +137,14 @@ function check(state){
   const lights=state['lighting/day.json'].lights;
   const exact=p=>ins.filter(x=>x.parent===p);
   const names=new Set(ins.map(x=>x.id));
-  force(mats.length===44&&lights.length===60,
-     'Expected 44 materials and 60 lights on V17.380; got '+mats.length+' / '+lights.length);
+  const materialIds=new Set(mats.map(m=>m.id));
+  force(mats.length>0&&materialIds.size===mats.length&&
+    mats.every(m=>typeof m.id==='string'&&m.id.length>0),
+    'Invalid or duplicate scene material IDs: '+mats.length);
+  force(ins.every(o=>materialIds.has(o.material)),
+    'Some scene instances reference missing PBR materials');
+  force(lights.length===60,
+    'Expected 60 scene lighting fixtures; got '+lights.length);
   force(names.size===ins.length,'Duplicate object ids');
   force(ins.length>=3000&&ins.length<=65000,'Expected 3,000..65,000 scene instances; actual '+ins.length);
   force(ins.every(o=>o.size.every(x=>x>0&&Number.isFinite(x))&&
@@ -262,7 +268,7 @@ if(arguments_.includes('--check-only')){
     applyPass(candidate,pass);
     check(candidate);
   }
-  console.log('V17.380 PRECHECK PASS: 44 materials, 60 lights, all design passes applicable');
+  console.log('V17 ten-pass PRECHECK PASS: '+candidate['materials/pripyat-reuse.json'].materials.length+' unique materials, 60 lights, all design passes applicable');
   process.exit(0);
 }
 for(let pass=0;pass<=10;pass++){

@@ -46,6 +46,11 @@ jobs:
           foreach ($p in @("scene-v4.json","instances/v4.json","cameras/v4.json","stats/v4-budget.json")) {
             if (!(Test-Path "scenes/v16/benchmark-civic/$p")) { throw "Missing generated V4 resource: $p" }
           }
+      - name: Preflight ten design passes without rendering (regression guard)
+        shell: pwsh
+        run: |
+          node v17/tools/palais_ten_passes.cjs --scene scenes/v16/benchmark-civic --binary build-v17/Release/moteur3d_v17_benchmark.exe --check-only
+          if ($LASTEXITCODE -ne 0) { throw 'Ten-pass fast design preflight failed' }
       - name: Configure
         shell: pwsh
         run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=${{ github.run_number }}
@@ -567,11 +572,6 @@ jobs:
           Get-ChildItem "build-v17/civic-views" -Recurse -Filter 'raster_*.png' | ForEach-Object {
             Copy-Item $_.FullName $viewsFolder
           }
-      - name: Preflight ten design passes without rendering (regression guard)
-        shell: pwsh
-        run: |
-          node v17/tools/palais_ten_passes.cjs --scene scenes/v16/benchmark-civic --binary build-v17/Release/moteur3d_v17_benchmark.exe --check-only
-          if ($LASTEXITCODE -ne 0) { throw 'Ten-pass fast design preflight failed' }
       - name: Ten progressive native design passes — 55 real WARP camera renders and feedback
         shell: pwsh
         timeout-minutes: 35
