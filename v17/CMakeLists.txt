@@ -17,6 +17,8 @@ enable_testing()
 # CSE WARP Physics / Weather: deterministic fair-weather cirrus smoke test.
 add_executable(v17_weather_clouds_smoke "tests/weather_clouds_smoke.cpp")
 add_test(NAME v17_weather_cirrus_deterministic COMMAND v17_weather_clouds_smoke)
+add_executable(v17_weather_astronomy_smoke "tests/weather_astronomy_smoke.cpp")
+add_test(NAME v17_weather_astronomy_day_night COMMAND v17_weather_astronomy_smoke)
 # V17.443: anomaly catalogue and historically verified camera positions.
 add_executable(v17_anomaly_catalog_smoke "tests/anomaly_catalog_smoke.cpp")
 add_test(NAME v17_anomaly_catalog_registry COMMAND v17_anomaly_catalog_smoke)
