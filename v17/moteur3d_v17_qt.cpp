@@ -452,6 +452,48 @@ public:
             QCoreApplication::exit(39);
         });
     }
+    // GUI integration smoke: actual Qt RMB events on the canvas, FOV narrows
+    // while aiming, and release/stop restores the original camera exactly.
+    // Does not change walking mode or camera position.
+    void smokeScopedAim(){
+        auto* poll=new QTimer(this);
+        poll->setInterval(100);
+        connect(poll,&QTimer::timeout,this,[this,poll]{
+            if(sceneLoading_||!runtime_||runtime_->cameras.isEmpty())return;
+            poll->stop();
+            if(!freeCameraActive_)activateFreeCamera();
+            exploring_=true;
+            const float originalFov=freeCamera_.fov;
+            const V originalEye=freeCamera_.eye;
+            QMouseEvent down(QEvent::MouseButtonPress,QPointF(40,40),
+                             Qt::RightButton,Qt::RightButton,Qt::NoModifier);
+            QCoreApplication::sendEvent(canvas_,&down);
+            const bool activated=rightMouseHeld_;
+            scopeBlend_=cse::scope::advance(scopeBlend_,rightMouseHeld_,.08f);
+            freeCamera_.fov=cse::scope::effectiveFov(scopeBaseFov_,scopeBlend_);
+            const bool magnified=freeCamera_.fov<originalFov-1.f;
+            QMouseEvent up(QEvent::MouseButtonRelease,QPointF(40,40),
+                           Qt::RightButton,Qt::NoButton,Qt::NoModifier);
+            QCoreApplication::sendEvent(canvas_,&up);
+            const bool released=!rightMouseHeld_;
+            stopExploration();
+            const bool restored=std::abs(freeCamera_.fov-originalFov)<.0005f;
+            const bool unchanged=length(freeCamera_.eye-originalEye)<.0005f;
+            if(!(activated&&magnified&&released&&restored&&unchanged)){
+                std::fprintf(stderr,
+                    "V17 SCOPE MOUSE FAIL: down=%d zoom=%d up=%d fov=%d eye=%d\\n",
+                    int(activated),int(magnified),int(released),int(restored),int(unchanged));
+                QCoreApplication::exit(44);return;
+            }
+            std::puts("V17 SCOPE MOUSE PASS: press/release and original FOV, position preserved");
+            QCoreApplication::exit(0);
+        });
+        poll->start();
+        QTimer::singleShot(120000,this,[]{
+            std::fprintf(stderr,"V17 SCOPE MOUSE TIMEOUT\\n");
+            QCoreApplication::exit(45);
+        });
+    }
     ~V17Window() override {
         audioTimer_.stop();
         stopRadio();
@@ -2396,20 +2438,23 @@ int main(int argc,char** argv){
         && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-repeat-raster");
     const bool walkingSmoke=argc>=3
         && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-walking-collisions");
+    const bool scopeSmoke=argc>=3
+        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-scope-mouse");
     // Use the same Windows V17 brand icon for Qt titlebar/Alt-Tab/taskbar.
     // The ICO is also embedded in the EXE's native Win32 resources.
     const QString iconPath=QCoreApplication::applicationDirPath()
         +QStringLiteral("/cse_warp_v17.ico");
     if(QFileInfo::exists(iconPath))app.setWindowIcon(QIcon(iconPath));
-    const QString path=switchSmoke||repeatSmoke||walkingSmoke
+    const QString path=switchSmoke||repeatSmoke||walkingSmoke||scopeSmoke
         ?QString::fromLocal8Bit(argv[2])
         :(argc>1?QString::fromLocal8Bit(argv[1]):defaultPath());
     // The smoke test uses reduced texture resolution to stay viable on
     // CI's software-only WARP device. Normal V17 keeps full 2048 PBR.
-    V17Window window(path,(switchSmoke||repeatSmoke||walkingSmoke)?256:2048);
+    V17Window window(path,(switchSmoke||repeatSmoke||walkingSmoke||scopeSmoke)?256:2048);
     if(switchSmoke)window.smokeSceneSwitch(QString::fromLocal8Bit(argv[3]));
     if(repeatSmoke)window.smokeRepeatRaster();
     if(walkingSmoke)window.smokeWalkingCollisionPreference();
+    if(scopeSmoke)window.smokeScopedAim();
     if(!app.windowIcon().isNull())window.setWindowIcon(app.windowIcon());
     window.show();
     return app.exec();
