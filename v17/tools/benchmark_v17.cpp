@@ -249,6 +249,8 @@ int main(int argc,char** argv){
         {"compareReadback",compareReadback},
         {"pixelShaderOptimized",qgetenv("M3D_V17_DISABLE_SHADER_OPT")!="1"},
         {"experimentalLightAabbCull",qgetenv("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL")=="1"},
+        {"diagnosticNoShadowSampling",qgetenv("M3D_V17_DIAG_NO_SHADOW_SAMPLING")=="1"},
+        {"diagnosticNoMaterialDetail",qgetenv("M3D_V17_DIAG_NO_MATERIAL_DETAIL")=="1"},
         {"fastPixelSwizzle",qgetenv("M3D_V17_DISABLE_FAST_SWIZZLE")!="1"},
         {"rasterQuality",QJsonObject{
             {"msaaSamples",int(quality.msaaSamples)},
