@@ -110,6 +110,23 @@ target_include_directories(moteur3d_v17_benchmark PRIVATE
 target_link_libraries(moteur3d_v17_benchmark PRIVATE
     moteur3d_v16_core Qt6::Core Qt6::Gui)
 target_compile_definitions(moteur3d_v17_benchmark PRIVATE CSE_WARP_BUILD_NUMBER=${V17_BUILD_NUMBER})
+
+# Independent one-route hardware D3D11 profiler (no full benchmark campaign).
+# All telemetry is produced in CSV/JSON, with three quality-check PNG frames.
+if(WIN32)
+    add_executable(moteur3d_v17_gpu_trajectory
+        "tools/benchmark_gpu_trajectory.cpp")
+    target_include_directories(moteur3d_v17_gpu_trajectory PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+    target_link_libraries(moteur3d_v17_gpu_trajectory PRIVATE
+        moteur3d_v16_core Qt6::Core Qt6::Gui psapi pdh dxgi)
+    target_compile_definitions(moteur3d_v17_gpu_trajectory PRIVATE
+        CSE_WARP_BUILD_NUMBER=${V17_BUILD_NUMBER})
+    if(MSVC)
+        target_compile_options(moteur3d_v17_gpu_trajectory PRIVATE /O2 /EHsc /utf-8)
+    endif()
+endif()
+
 # Offline multi-hour GI bake: CPU ray transport, disk table and benchmark.
 add_executable(moteur3d_v17_gibake "tools/gi_bake_cli.cpp")
 target_include_directories(moteur3d_v17_gibake PRIVATE
