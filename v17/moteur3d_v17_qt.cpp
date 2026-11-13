@@ -398,6 +398,8 @@ private:
     cse::pool_ladder::Motion poolLadderMotion_{};
     QCheckBox* walkingModeBox_=nullptr;
     bool exploring_=false,freeCameraActive_=false,leftMouseHeld_=false;
+    bool explorationQualityOverride_=false;
+    RasterQualitySettings explorationOriginalQuality_{};
     float yaw_=0.f,pitch_=0.f;
     bool cameraHudEnabled_=true;
     bool hasRenderedPose_=false;
@@ -617,6 +619,12 @@ private:
     }
     void stopExploration(){
         exploring_=false;
+        if(explorationQualityOverride_){
+            std::wstring error;
+            if(setRasterQualitySettings(explorationOriginalQuality_,error))
+                displayRasterSettings(explorationOriginalQuality_);
+            explorationQualityOverride_=false;
+        }
         frameTimer_.stop();
         keysDown_.clear();
         poolLadderMotion_={};
@@ -632,6 +640,27 @@ private:
         if(!runtime_||runtime_->cameras.isEmpty())return;
         if(backendBox_->currentIndex()!=4)backendBox_->setCurrentIndex(4);
         if(!freeCameraActive_)activateFreeCamera();
+        // An Intel HD 620 cannot reasonably sustain 8x MSAA during continuous
+        // navigation of the large V8 scene. Temporarily lower AA to 2x ONLY
+        // while moving. Restore the user's precise settings on exit.
+        const auto adapter=gpuAdapterLabel();
+        if(adapter.contains(QStringLiteral("HD Graphics 620"),Qt::CaseInsensitive)
+           ||adapter.contains(QStringLiteral("UHD Graphics 620"),Qt::CaseInsensitive)){
+            const auto q=rasterQualitySettings();
+            if(q.msaaSamples>2){
+                auto interactive=q;
+                interactive.msaaSamples=2;
+                interactive.anisotropy=std::min<unsigned>(q.anisotropy,8);
+                std::wstring error;
+                if(setRasterQualitySettings(interactive,error)){
+                    explorationOriginalQuality_=q;
+                    explorationQualityOverride_=true;
+                    displayRasterSettings(interactive);
+                    statusBar()->showMessage(QStringLiteral(
+                        "HD 620 : exploration MSAA 2x temporaire ; qualité initiale restaurée à l'arrêt"),7000);
+                }
+            }
+        }
         exploring_=true;
         poolLadderMotion_={};
         motionClock_.start();
@@ -693,7 +722,20 @@ private:
                 keysDown_.contains(Qt::Key_Shift));
             const V displacement=length(move)>.01f?norm(move)*(dt*speed):V{};
             const V oldEye=freeCamera_.eye;
+            const walk::State beforeStep=walkingState_;
             walk::advance(runtime_->renderScene,walkingState_,displacement,dt);
+            // The water volume is reached ONLY through the actual ladder
+            // interaction. Don't let numerical walker tunnelling bypass the
+            // tiled coping (a V17.437 user-found regression).
+            if(scenePath_.contains(QStringLiteral("benchmark-civic"),Qt::CaseInsensitive)
+                && beforeStep.feet.y<1.0f && walkingState_.feet.y<1.0f){
+                const auto dry=[](const V& feet){
+                    return !(std::abs(feet.x)<24.92f &&
+                        feet.z>-44.45f && feet.z<-19.55f);
+                };
+                if(dry(beforeStep.feet)&&!dry(walkingState_.feet))
+                    walkingState_=beforeStep;
+            }
             freeCamera_.eye=walk::eye(walkingState_);
             if(length(freeCamera_.eye-oldEye)>.00001f)updateLook();
         }else{

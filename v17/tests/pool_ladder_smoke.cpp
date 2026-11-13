@@ -4,13 +4,14 @@
 #include <iostream>
 using namespace cse::pool_ladder;
 int main(){
-    assert(anchors.size()==4);
-    assert(nearest({25.7f,0.f,-41.5f})==2);
-    assert(nearest({-25.7f,0.f,-22.5f})==1);
+    assert(anchors.size()==2);
+    assert(nearest({25.7f,.55f,-44.05f})==0);
+    assert(nearest({25.7f,.55f,-19.95f})==1);
     assert(nearest({0.f,0.f,0.f})==-1);
+    assert(nearest({-25.7f,.55f,-44.05f})==-1);
     assert(!inWater({26.f,0.f,-41.5f}));
-    assert(inWater({24.6f,-1.35f,-41.5f}));
-    for(int i=0;i<4;i++){
+    assert(inWater({24.6f,-1.80f,-41.5f}));
+    for(int i=0;i<2;i++){
         const auto& a=anchors[i];
         Motion descend{};
         assert(descend.begin({a.side*deckX,deckFeetY,a.z}));
@@ -39,8 +40,8 @@ int main(){
         assert(std::abs(current.y-deckFeetY)<.0001f);
         assert(std::abs(current.x-a.side*deckX)<.0001f);
     }
-    const auto bounded=walkInWater({24.60f,-1.35f,-41.5f},10.f,-10.f);
+    const auto bounded=walkInWater({24.60f,-1.80f,-41.5f},10.f,-10.f);
     assert(bounded.x<=24.72f&&bounded.z>=-44.24f);
     assert(std::abs(bounded.y-bottomFeetY)<.00001f);
-    std::cout<<"V17.438 pool ladder PASS: four ladders, up/down, dry/wet boundary, no escape through wall\n";
+    std::cout<<"V17.438 pool ladder PASS: two actual V8 ladders, up/down, dry/wet boundary, no escape through wall\n";
 }

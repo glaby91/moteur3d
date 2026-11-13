@@ -422,7 +422,9 @@ float4 PSMain(VSOut i):SV_TARGET {
         float stripe=pow(saturate(.5+.5*sin(i.world.x*1.4+i.world.z*.37)),14.0);
         color=lerp(color,float3(.24,.57,.69),.07+fresnelWater*.20);
         color+=float3(.19,.32,.37)*stripe*(.025+.13*fresnelWater);
-        const float opacity=lerp(.10,.45,saturate(fresnelWater*1.75));
+        // Underwater ladders must remain visible through the surface from the deck.
+        // Avoid the former 45% high-angle opaque cyan veil.
+        const float opacity=lerp(.08,.24,saturate(fresnelWater*1.75));
         return float4(color,opacity);
     }
     return float4(color, materialOpacity[i.mat].x);
