@@ -1,5 +1,5 @@
 // CSE WARP V17 Vulkan Raster (experimental independent backend).
-// Vulkan 1.0 / SPIR-V, native GPU raster of the existing Scene and Camera.
+// Requires Vulkan API 1.3.204, native GPU raster of the existing Scene and Camera.
 // Offscreen color is read back for the current Qt QImage host. No swapchain.
 #include "m3d_engine.h"
 #include "m3d_vulkan_mesh.h"
@@ -282,24 +282,26 @@ class VulkanRaster final {
         vkUpdateDescriptorSets(device_,uint32_t(writes.size()),writes.data(),0,nullptr);
     }
     void configure(){
-        // The HD620 user's runtime currently reports 1.3.204; the physical
-        // device may expose a different version. Query both, never infer features.
+        // Explicit minimum selected for this experiment: Vulkan API 1.3.204.
+        // The installed SDK/loader and physical device versions are independent.
+        constexpr uint32_t kMinimumVulkanVersion=VK_MAKE_API_VERSION(0,1,3,204);
         uint32_t instanceVersion=VK_API_VERSION_1_0;
         auto enumerateVersion=reinterpret_cast<PFN_vkEnumerateInstanceVersion>(
             vkGetInstanceProcAddr(VK_NULL_HANDLE,"vkEnumerateInstanceVersion"));
         if(enumerateVersion)
             vkcheck(enumerateVersion(&instanceVersion),"query Vulkan loader version");
-        if(instanceVersion<VK_API_VERSION_1_2)
-            throw std::runtime_error("Vulkan runtime below 1.2; install a compatible Intel driver");
+        if(instanceVersion<kMinimumVulkanVersion)
+            throw std::runtime_error("Vulkan loader below required API 1.3.204; update Vulkan runtime / Intel graphics driver");
         VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
         app.pApplicationName="CSE WARP V17 Vulkan Native Raster";
-        app.apiVersion=std::min(instanceVersion,VK_API_VERSION_1_3);
+        app.apiVersion=kMinimumVulkanVersion;
         std::clog<<"[CSE WARP Vulkan] Loader="
                  <<VK_VERSION_MAJOR(instanceVersion)<<"."
                  <<VK_VERSION_MINOR(instanceVersion)<<"."
                  <<VK_VERSION_PATCH(instanceVersion)
                  <<" requested="<<VK_VERSION_MAJOR(app.apiVersion)<<"."
-                 <<VK_VERSION_MINOR(app.apiVersion)<<"\n";
+                 <<VK_VERSION_MINOR(app.apiVersion)<<"."
+                 <<VK_VERSION_PATCH(app.apiVersion)<<"\n";
         VkInstanceCreateInfo i{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};i.pApplicationInfo=&app;
         vkcheck(vkCreateInstance(&i,nullptr,&instance_),"create instance");
         uint32_t n=0;vkcheck(vkEnumeratePhysicalDevices(instance_,&n,nullptr),"enumerate GPUs");
@@ -309,7 +311,12 @@ class VulkanRaster final {
         int best=-1;
         for(auto pd:devices){
             VkPhysicalDeviceProperties props{};vkGetPhysicalDeviceProperties(pd,&props);
-            if(props.deviceType==VK_PHYSICAL_DEVICE_TYPE_CPU || props.apiVersion<VK_API_VERSION_1_2)continue;
+            if(props.deviceType==VK_PHYSICAL_DEVICE_TYPE_CPU)continue;
+            std::clog<<"[CSE WARP Vulkan] Candidate GPU "<<props.deviceName<<" API="
+                     <<VK_VERSION_MAJOR(props.apiVersion)<<"."
+                     <<VK_VERSION_MINOR(props.apiVersion)<<"."
+                     <<VK_VERSION_PATCH(props.apiVersion)<<"\n";
+            if(props.apiVersion<kMinimumVulkanVersion)continue;
             uint32_t qn=0;vkGetPhysicalDeviceQueueFamilyProperties(pd,&qn,nullptr);
             std::vector<VkQueueFamilyProperties> qs(qn);
             vkGetPhysicalDeviceQueueFamilyProperties(pd,&qn,qs.data());
@@ -320,7 +327,7 @@ class VulkanRaster final {
                 break;
             }
         }
-        if(!physical_)throw std::runtime_error("Vulkan 1.2-capable hardware graphics device not found; use DX11 or update driver");
+        if(!physical_)throw std::runtime_error("No hardware GPU exposing Vulkan API 1.3.204 or newer; the Vulkan SDK/loader version does not prove GPU compatibility. Try DirectX11 or check the Intel driver");
         vkGetPhysicalDeviceProperties(physical_,&props_);
         vkGetPhysicalDeviceMemoryProperties(physical_,&memoryTypes_);
         vkGetPhysicalDeviceFeatures(physical_,&features_);
