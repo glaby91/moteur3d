@@ -1,10 +1,10 @@
-# CSE WARP V17 — Portage Raster Vulkan 1.2+ (expérimental)
+# CSE WARP V17 — Portage Raster Vulkan 1.3.204 minimum (expérimental)
 
 **Branche :** `experiment/v17-vulkan-raster-backend-261114`. La V17 DirectX11 de `master` est conservée sans modification. Ce backend n'est **pas encore une réécriture fonctionnellement identique de tout DirectX11** ; c'est une première implémentation native suffisamment complète pour afficher la géométrie principale, puis mesurer les écarts de performance et de qualité.
 
 ## Compatibilité avec ton installation 1.3.204
 
-L'installation communiquée est **Vulkan 1.3.204**. Khronos distingue la version du chargeur/instance, celle déclarée par chaque GPU, et les fonctionnalités activées. Le programme demande **Vulkan 1.3 si le loader le permet**, sinon 1.2 ; il refuse un GPU physique inférieur à 1.2. Il journalise les deux versions et n'utilise actuellement aucune fonctionnalité 1.3 non vérifiée. Les shaders SPIR-V sont compilés pour la cible Vulkan 1.2, utilisable avec un pilote 1.3 rétrocompatible.
+Le minimum requis est désormais **Vulkan API 1.3.204**, aussi bien pour le chargeur que pour le GPU physique. L'installation Vulkan 1.3.204 signalée par l'utilisateur ne démontre pas à elle seule la version API du pilote graphique Intel HD620 ; le backend contrôle les deux indépendamment et signale une incompatibilité si le pilote expose une version inférieure. Les shaders SPIR-V sont compilés pour la cible Vulkan 1.3. Les fonctionnalités optionnelles restent soumises à vérification ; annoncer 1.3.204 ne les rend pas automatiquement disponibles.
 
 La carte HD620 doit exposer une queue graphique Vulkan, les textures/attachments nécessaires, et une mémoire `HOST_VISIBLE` pour le buffer de lecture. L'exécutable signale les erreurs ; il n'effectue pas de repli silencieux CPU.
 
