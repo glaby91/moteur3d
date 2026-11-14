@@ -24,7 +24,7 @@
 namespace m3d { namespace {
 using Clock=std::chrono::steady_clock;
 using Vertex=vkmesh::GpuVertex;
-constexpr uint32_t kTexSize=256, kMaxMaterials=256, kLights=16;
+constexpr uint32_t kMaxMaterials=256, kLights=16;
 void vkcheck(VkResult code,const char* name) {
     if(code!=VK_SUCCESS)throw std::runtime_error(std::string(name)+" Vulkan error "+std::to_string(int(code)));
 }
@@ -527,37 +527,52 @@ class VulkanRaster final {
     void textures(const Scene& scene){
         free(albedo_);free(surface_);
         const uint32_t layers=uint32_t(std::max<size_t>(1,std::min<size_t>(kMaxMaterials,scene.mat.size())));
-        albedo_=image(kTexSize,kTexSize,layers,VK_FORMAT_R8G8B8A8_SRGB,
+        if(layers>props_.limits.maxImageArrayLayers)
+            throw std::runtime_error("GPU maxImageArrayLayers insufficient for scene");
+        // Allocate within a fixed working set on shared-memory HD620. Keep full
+        // 2048 pixels when there are few materials; reduce only busy scenes.
+        uint64_t budget=128ull*1024ull*1024ull;
+        for(uint32_t i=0;i<memoryTypes_.memoryHeapCount;i++)
+            if(memoryTypes_.memoryHeaps[i].flags&VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+                budget=std::min(budget,std::max<uint64_t>(16ull*1024ull*1024ull,memoryTypes_.memoryHeaps[i].size/8));
+        uint32_t side=128;
+        for(uint32_t candidate:{256u,512u,1024u,2048u})
+            if(candidate<=props_.limits.maxImageDimension2D &&
+               uint64_t(candidate)*candidate*layers*8ull<=budget)side=candidate;
+        if(side>props_.limits.maxImageDimension2D)
+            throw std::runtime_error("GPU image dimensions too small");
+
+        albedo_=image(side,side,layers,VK_FORMAT_R8G8B8A8_SRGB,
                       VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_ASPECT_COLOR_BIT);
-        surface_=image(kTexSize,kTexSize,layers,VK_FORMAT_R8G8B8A8_UNORM,
+        surface_=image(side,side,layers,VK_FORMAT_R8G8B8A8_UNORM,
                        VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_ASPECT_COLOR_BIT);
-        std::vector<uint32_t> alb(size_t(kTexSize)*kTexSize*layers,0xff808080u);
+        std::vector<uint32_t> alb(size_t(side)*side*layers,0xff808080u);
         std::vector<uint32_t> surf(alb.size(),0xffFF8080u); // norm (128,128,255), roughness 255
         for(uint32_t layer=0;layer<layers&&layer<scene.mat.size();layer++){
             const Material& m=scene.mat[layer];
-            const ColorLevel* color=nearestLevel(m.colorMip,kTexSize);
-            const Level* legacy=nearestLevel(m.mip,kTexSize);
-            const Level* normal=nearestLevel(m.normalMip,kTexSize);
-            const Level* rough=nearestLevel(m.roughnessMip,kTexSize);
-            for(uint32_t y=0;y<kTexSize;y++)for(uint32_t x=0;x<kTexSize;x++){
-                const size_t index=size_t(layer)*kTexSize*kTexSize+size_t(y)*kTexSize+x;
+            const ColorLevel* color=nearestLevel(m.colorMip,side);
+            const Level* legacy=nearestLevel(m.mip,side);
+            const Level* normal=nearestLevel(m.normalMip,side);
+            const Level* rough=nearestLevel(m.roughnessMip,side);
+            for(uint32_t y=0;y<side;y++)for(uint32_t x=0;x<side;x++){
+                const size_t index=size_t(layer)*side*side+size_t(y)*side+x;
                 uint32_t rgb=0x999999u;
                 if(color&&!color->p.empty()&&color->size){
-                    const size_t i=size_t(y*color->size/kTexSize)*color->size+(x*color->size/kTexSize);
+                    const size_t i=size_t(y*color->size/side)*color->size+(x*color->size/side);
                     if(i<color->p.size())rgb=color->p[i]&0xffffffu;
                 }else if(legacy&&!legacy->p.empty()&&legacy->size){
-                    const size_t i=size_t(y*legacy->size/kTexSize)*legacy->size+(x*legacy->size/kTexSize);
+                    const size_t i=size_t(y*legacy->size/side)*legacy->size+(x*legacy->size/side);
                     if(i<legacy->p.size())rgb=unpack565(legacy->p[i]);
                 }
                 alb[index]=rgba8(rgb);
                 uint32_t n=0x8080ffu;
                 if(normal&&!normal->p.empty()&&normal->size){
-                    const size_t i=size_t(y*normal->size/kTexSize)*normal->size+(x*normal->size/kTexSize);
+                    const size_t i=size_t(y*normal->size/side)*normal->size+(x*normal->size/side);
                     if(i<normal->p.size())n=unpack565(normal->p[i]);
                 }
                 uint32_t rv=255;
                 if(rough&&!rough->p.empty()&&rough->size){
-                    const size_t i=size_t(y*rough->size/kTexSize)*rough->size+(x*rough->size/kTexSize);
+                    const size_t i=size_t(y*rough->size/side)*rough->size+(x*rough->size/side);
                     if(i<rough->p.size()){
                         const uint32_t c=unpack565(rough->p[i]);
                         rv=((c>>16&255u)+(c>>8&255u)+(c&255u))/3;
