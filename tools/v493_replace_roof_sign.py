@@ -55,6 +55,21 @@ def main():
     if not(15.8<=bounds[1,0]-bounds[0,0]<=16.5 and 2.5<=bounds[1,2]-bounds[0,2]<=2.8):
         raise SystemExit('GLB physical scale incorrect')
     newgeos=[];newinst=[];newmats=[];newsets=[];matmap={}
+    # The existing V493 renderer recognizes these precise historic material
+    # IDs as self-lit, with emissive GPU parameters. Reusing them avoids
+    # rebuilding the renderer or silently losing the GLB's neon glow.
+    emissive={
+        'Néon rouge étoile':'cse_neon_red',
+        'Lettrage néon blanc chaud':'cse_neon_gold',
+        'Tube nageur blanc':'cse_pool_strip',
+        'Néon eau cyan':'cse_neon_cyan',
+        'Néon eau bleu':'cse_neon_cyan',
+        'Néon eau turquoise':'cse_neon_cyan'
+    }
+    available={m['id'] for m in materials['materials']}
+    required=set(emissive.values())
+    if not required.issubset(available):
+        raise SystemExit('Real scene lacks expected emissive materials: '+str(required-available))
     for idx,node in enumerate(source.graph.nodes_geometry):
         transform,gid=source.graph[node]
         mesh=source.geometry[gid].copy()
@@ -62,14 +77,17 @@ def main():
         material=mesh.visual.material
         key=getattr(material,'name','unspecified')
         if key not in matmap:
-            mi=len(matmap);mid=f'{ID}mat_{mi:02d}';tid=f'{ID}tex_{mi:02d}'
-            c=np.asarray(getattr(material,'baseColorFactor',[180,180,180,255]),dtype=float)[:3]/255.
-            matmap[key]=mid
-            newmats.append({'id':mid,'baseColor':np.round(c,4).tolist(),
-                'roughness':round(float(getattr(material,'roughnessFactor',.55) or .55),4),
-                'metallic':round(float(getattr(material,'metallicFactor',0) or 0),4),
-                'transmission':0,'ior':1.5,'textureSet':tid,'sourceGLBMaterial':key})
-            newsets.append({'id':tid,'material':mid,'pattern':'solid','resolution':64})
+            if key in emissive:
+                matmap[key]=emissive[key]
+            else:
+                mi=len(newmats);mid=f'{ID}mat_{mi:02d}';tid=f'{ID}tex_{mi:02d}'
+                c=np.asarray(getattr(material,'baseColorFactor',[180,180,180,255]),dtype=float)[:3]/255.
+                matmap[key]=mid
+                newmats.append({'id':mid,'baseColor':np.round(c,4).tolist(),
+                    'roughness':round(float(getattr(material,'roughnessFactor',.55) or .55),4),
+                    'metallic':round(float(getattr(material,'metallicFactor',0) or 0),4),
+                    'transmission':0,'ior':1.5,'textureSet':tid,'sourceGLBMaterial':key})
+                newsets.append({'id':tid,'material':mid,'pattern':'solid','resolution':64})
         verts=np.asarray(mesh.vertices,dtype=float)
         if len(verts)>200000 or len(mesh.faces)>80000:raise SystemExit('Mesh exceeds engine limits')
         # glTF x,y,z -> engine x,z,y. Axis swap inverts winding.
