@@ -103,6 +103,7 @@ int main(int argc,char** argv) {
   s["dx11_draw_ms"]=dxStats.gpuTimingValid?QJsonValue(dxStats.gpuDrawMs):QJsonValue();
   s["vulkan_draw_ms"]=vkStats.gpuTimingValid?QJsonValue(vkStats.gpuDrawMs):QJsonValue();
   s["vulkan_submit_ms"]=vkStats.cpuSubmitMs;
+  s["vulkan_pixel_convert_ms"]=vkStats.cpuPixelConvertMs;
   s["vulkan_fence_wait_ms"]=vkStats.cpuMapWaitMs;
   s["vulkan_draw_calls"]=qint64(vkStats.gpuDrawCalls);
   s["vulkan_box_instances"]=qint64(vkStats.gpuBoxInstances);
@@ -113,6 +114,8 @@ int main(int argc,char** argv) {
  QJsonObject doc;
  doc["target"]="CSE WARP V17 Vulkan API 1.3.204 minimum on loader and GPU";
  doc["scene"]=sceneFile;doc["width"]=width;doc["height"]=height;doc["frames"]=frames;
+ const char* shaderMode=std::getenv("CSE_WARP_VK_FAST_FRAGMENT");
+ doc["vulkan_fragment_profile"]=(shaderMode && std::strcmp(shaderMode,"1")==0)?"optimized":"baseline";
  doc["dx11_median_ms"]=median(dxTimes);doc["vulkan_median_ms"]=median(vkTimes);
  doc["dx11_p95_ms"]=p95(dxTimes);doc["vulkan_p95_ms"]=p95(vkTimes);
  doc["vulkan_vs_dx11_median_speedup"]=median(vkTimes)>0?median(dxTimes)/median(vkTimes):0.0;

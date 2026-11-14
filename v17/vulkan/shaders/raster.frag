@@ -48,9 +48,20 @@ void main() {
  }
  vec3 L=normalize(f.sun.xyz);
  float ndotl=max(dot(n,L),0.0);
+ // Preserve original shading when the experimental fast profile is disabled.
+#ifdef CSE_WARP_VK_FAST_FRAGMENT
+ // A back-facing surface has zero direct sun and zero solar specular;
+ // its 9-tap shadow filter cannot change the output.
+ float shade=ndotl>0.0?visibility(world):1.0;
+#else
  float shade=visibility(world);
+#endif
  float hemi=mix(0.75,1.1,clamp(n.y*0.5+0.5,0.0,1.0));
  vec3 color=base*((0.28+0.34*f.sun.w)*hemi+(0.56*ndotl)*shade);
+#ifdef CSE_WARP_VK_FAST_FRAGMENT
+ // Specular is exactly zero for ndotl=0. Skip normalization, Fresnel and pow.
+ if(ndotl>0.0) {
+#endif
  float rough=clamp(nm.a*f.materialProps[m].y,0.065,1.0);
  float metal=clamp(f.materialProps[m].x,0.0,1.0);
  vec3 V=normalize(f.eye.xyz-world);
@@ -62,12 +73,26 @@ void main() {
  float a=rough*rough;
  float D=a*a/(pi*pow(max(0.0001,nh*nh*(a*a-1.0)+1.0),2.0));
  color+=F*D*ndotl*shade*0.24;
+#ifdef CSE_WARP_VK_FAST_FRAGMENT
+ }
+#endif
  for(int i=0;i<16;i++){
    if(i>=int(f.misc.x))break;
    vec3 delta=f.lightPos[i].xyz-world;
+#ifdef CSE_WARP_VK_FAST_FRAGMENT
+   // Radius rejection uses dot(), avoiding sqrt() and normalization outside
+   // influence. It retains the original attenuation inside the light radius.
+   float radius=max(0.05,f.lightPos[i].w);
+   float distSquared=dot(delta,delta);
+   if(distSquared>=radius*radius)continue;
+   float dist=sqrt(distSquared);
+   float fade=clamp(1.0-dist/radius,0.0,1.0);
+   float falloff=fade*fade;
+#else
    float dist=length(delta);
    float radius=max(0.05,f.lightPos[i].w);
    float falloff=pow(clamp(1.0-dist/radius,0.0,1.0),2.0);
+#endif
    color+=base*f.lightRgb[i].rgb*f.lightRgb[i].a*falloff*max(0.0,dot(n,normalize(delta)))*0.38;
  }
  color+=f.emission[m].rgb*max(0.0,f.emission[m].a);

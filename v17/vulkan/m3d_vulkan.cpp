@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <memory>
@@ -432,7 +433,13 @@ class VulkanRaster final {
     }
     void buildPipelines(){
         const auto vs=spirv(shaderFile("raster.vert.spv"));
-        const auto fs=spirv(shaderFile("raster.frag.spv"));
+        // Compare baseline and experimental fragment shader without modifying
+        // DX11 or the default Vulkan profile. One renderer instance per process.
+        const char* selected=std::getenv("CSE_WARP_VK_FAST_FRAGMENT");
+        const bool fastFragment=selected && std::strcmp(selected,"1")==0;
+        std::clog<<"[CSE WARP Vulkan] Fragment profile="
+                 <<(fastFragment?"optimized":"baseline")<<"\n";
+        const auto fs=spirv(shaderFile(fastFragment?"raster_fast.frag.spv":"raster.frag.spv"));
         VkShaderModule modules[2]{};
         for(int i=0;i<2;i++){
             const auto& code=i?fs:vs;

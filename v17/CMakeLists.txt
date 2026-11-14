@@ -126,6 +126,19 @@ if(WIN32)
                     VERBATIM)
                 list(APPEND V17_VULKAN_SPIRV "${spv}")
             endforeach()
+            # Two fragment variants from the same source. Baseline remains the
+            # default, opt-in with CSE_WARP_VK_FAST_FRAGMENT=1 for paired A/B.
+            set(fast_frag_spv "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders/raster_fast.frag.spv")
+            add_custom_command(OUTPUT "${fast_frag_spv}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders"
+                COMMAND "${V17_GLSLANG_VALIDATOR}"
+                    -V --target-env vulkan1.3 -DCSE_WARP_VK_FAST_FRAGMENT=1
+                    "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster.frag"
+                    -o "${fast_frag_spv}"
+                DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster.frag"
+                VERBATIM)
+            list(APPEND V17_VULKAN_SPIRV "${fast_frag_spv}")
             set(box_spv "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders/raster_box.vert.spv")
             add_custom_command(OUTPUT "${box_spv}"
                 COMMAND ${CMAKE_COMMAND} -E make_directory
