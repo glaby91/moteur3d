@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout V17 Vulkan branch
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Install Qt6 desktop MSVC2022
         uses: jurplel/install-qt-action@v4
         with:
@@ -63,14 +63,27 @@ jobs:
           cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DV17_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER" "-DM3D_REQUIRE_VULKAN=ON"
           if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed' }
       - name: FINAL COMPILE - V17 Qt, shared core and Vulkan GPU tests
+        id: compile
         shell: pwsh
         run: |
           cmake --build build-v17 --config Release --parallel 4 --target moteur3d_v17 v17_vulkan_mesh_smoke v17_vulkan_version_smoke v17_vulkan_gpu_smoke v17_vulkan_ab_bench
           if ($LASTEXITCODE -ne 0) { throw 'Vulkan final Windows build failed' }
       - name: Confirm native Vulkan output and geometry smoke
+        id: smoke
+        if: ${{ steps.compile.outcome == 'success' }}
+        continue-on-error: true
         shell: pwsh
         run: |
           $exe='build-v17/Release'
+          New-Item -ItemType Directory -Force 'diagnostics-vulkan' | Out-Null
+          $qtBin=Join-Path $env:QT_ROOT_DIR 'bin'
+          $vkBin=Join-Path $env:VULKAN_SDK 'Bin'
+          $coreBin=(Resolve-Path 'build-v17/v16/Release').Path
+          $env:PATH="$qtBin;$vkBin;$coreBin;$((Resolve-Path $exe).Path);$env:PATH"
+          @("commit=$env:GITHUB_SHA", "qtBin=$qtBin", "vulkanBin=$vkBin", "coreBin=$coreBin") |
+            Set-Content 'diagnostics-vulkan/environment.txt'
+          Get-ChildItem $exe -Filter '*.dll' -Name |
+            Out-File 'diagnostics-vulkan/dlls.txt'
           foreach ($p in @('moteur3d_v17.exe','moteur3d_v16_core.dll',
                         'v17_vulkan_gpu_smoke.exe','v17_vulkan_ab_bench.exe','v17_vulkan_mesh_smoke.exe','v17_vulkan_version_smoke.exe',
                         'vulkan/raster.vert.spv','vulkan/raster.frag.spv',
@@ -78,12 +91,24 @@ jobs:
             if (!(Test-Path "$exe/$p")) { throw "Missing Vulkan output: $p" }
             Write-Host "Verified: $p"
           }
-          & "$exe/v17_vulkan_mesh_smoke.exe"
-          if ($LASTEXITCODE -ne 0) { throw 'GPU-free Vulkan mesh smoke failed' }
-          & "$exe/v17_vulkan_version_smoke.exe"
-          if ($LASTEXITCODE -ne 0) { throw 'Vulkan 1.3.204 policy smoke failed' }
-          Write-Host 'GPU smoke is not run on virtual runner: physical HD620 Vulkan ICD required.'
+          $failures=@()
+          foreach ($name in @('v17_vulkan_mesh_smoke','v17_vulkan_version_smoke')) {
+            Write-Host "Starting $name"
+            & "$exe/$name.exe" *>&1 | Tee-Object -FilePath "diagnostics-vulkan/$name.txt"
+            $exitCode=$LASTEXITCODE
+            $exitHex=[Convert]::ToString([int]$exitCode,16).PadLeft(8,'0')
+            $report="$name exit_code=$exitCode exit_hex=0x$exitHex"
+            Write-Host $report
+            Add-Content "diagnostics-vulkan/$name.txt" $report
+            if($exitCode -ne 0) { $failures+= $report }
+          }
+          if($failures.Count -gt 0) {
+            throw ("Vulkan smoke failure(s): " + ($failures -join '; '))
+          }
+          Write-Host 'GPU smoke intentionally not run on virtual runner: physical HD620 ICD required.'
       - name: Package executable for actual Intel HD620 test
+        id: package
+        if: ${{ always() && steps.compile.outcome == 'success' }}
         shell: pwsh
         run: |
           $src='build-v17/Release'
@@ -97,13 +122,27 @@ jobs:
           Copy-Item "$src/pavillon01" "$dest/pavillon01" -Recurse -Force
           Copy-Item v17/vulkan/README.md "$dest/README_VULKAN.md"
           Copy-Item v17/vulkan/LANCER_AB_VULKAN_HD620.bat "$dest/LANCER_AB_VULKAN_HD620.bat"
+          if (Test-Path 'diagnostics-vulkan') {
+            Copy-Item 'diagnostics-vulkan' "$dest/diagnostics" -Recurse -Force
+          }
           & "$env:QT_ROOT_DIR/bin/windeployqt.exe" --release --no-translations "$dest/moteur3d_v17.exe"
           if ($LASTEXITCODE -ne 0) { throw 'Qt deployment failed' }
           Write-Host 'Package ready for Intel HD620 with installed Vulkan runtime 1.3.204.'
       - name: Publish experimental Vulkan Raster Windows bundle
+        id: upload
+        if: ${{ always() && steps.compile.outcome == 'success' && steps.package.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: CSE-WARP-V17-Vulkan-1.3.204-Raster-Windows-HD620
           path: dist-v17-vulkan/
           retention-days: 14
           if-no-files-found: error
+      - name: Enforce smoke-test and publication status after diagnostic upload
+        if: always()
+        shell: pwsh
+        run: |
+          if ('${{ steps.compile.outcome }}' -ne 'success') { throw 'Vulkan compilation failed' }
+          if ('${{ steps.package.outcome }}' -ne 'success') { throw 'Vulkan package creation failed' }
+          if ('${{ steps.upload.outcome }}' -ne 'success') { throw 'Vulkan package upload failed' }
+          if ('${{ steps.smoke.outcome }}' -ne 'success') { throw 'Vulkan smoke tests failed; diagnostics are included in uploaded artifact' }
+          Write-Host 'All Vulkan CI checks passed; physical HD620 still requires local validation.'

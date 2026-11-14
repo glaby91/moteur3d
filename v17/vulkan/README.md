@@ -52,3 +52,7 @@ La V17 pleine DirectX11 reste la référence fonctionnelle et de performance.
 - [Barrières et synchronisation](https://docs.vulkan.org/samples/latest/samples/performance/pipeline_barriers/README.html)
 
 Les optimisations multithread secondaires, timeline semaphores et trois frames in flight n'ont **pas** été ajoutées arbitrairement : elles peuvent améliorer le débit mais aggraver la latence sur la HD620 ; elles demandent une mesure avec notre Raster.
+
+## Diagnostic CI Windows (ajout novembre 2026)
+
+Le workflow exécute les tests GPU-indépendants avec les chemins Qt, Vulkan SDK et moteur V16 visibles. Les codes de sortie Windows sont enregistrés en décimal et hexadécimal ; les contrôles de maillage signalent leurs valeurs en erreur. Si la compilation réussit mais qu'un smoke échoue, le ZIP de diagnostic est quand même publié (répertoire `diagnostics/`), puis le workflow reste **en échec**. Un statut CI vert ne démontre toujours pas la validité des rendus GPU sur l'Intel HD620, qui doit être testée séparément.
