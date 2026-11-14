@@ -6,6 +6,7 @@
 #include <vulkan/vulkan.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <windows.h>
 #endif
 #include <algorithm>
@@ -276,7 +277,7 @@ class VulkanRaster final {
     }
     void configure(){
         VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
-        app.pApplicationName="CSE WARP V17 Vulkan Native Raster";app.apiVersion=VK_API_VERSION_1_0;
+        app.pApplicationName="CSE WARP V17 Vulkan Native Raster";app.apiVersion=VK_API_VERSION_1_2;
         VkInstanceCreateInfo i{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};i.pApplicationInfo=&app;
         vkcheck(vkCreateInstance(&i,nullptr,&instance_),"create instance");
         uint32_t n=0;vkcheck(vkEnumeratePhysicalDevices(instance_,&n,nullptr),"enumerate GPUs");
@@ -286,7 +287,7 @@ class VulkanRaster final {
         int best=-1;
         for(auto pd:devices){
             VkPhysicalDeviceProperties props{};vkGetPhysicalDeviceProperties(pd,&props);
-            if(props.deviceType==VK_PHYSICAL_DEVICE_TYPE_CPU)continue;
+            if(props.deviceType==VK_PHYSICAL_DEVICE_TYPE_CPU || props.apiVersion<VK_API_VERSION_1_2)continue;
             uint32_t qn=0;vkGetPhysicalDeviceQueueFamilyProperties(pd,&qn,nullptr);
             std::vector<VkQueueFamilyProperties> qs(qn);
             vkGetPhysicalDeviceQueueFamilyProperties(pd,&qn,qs.data());
@@ -297,7 +298,7 @@ class VulkanRaster final {
                 break;
             }
         }
-        if(!physical_)throw std::runtime_error("No hardware Vulkan graphics device");
+        if(!physical_)throw std::runtime_error("Vulkan 1.2-capable hardware graphics device not found; use DX11 or update driver");
         vkGetPhysicalDeviceProperties(physical_,&props_);
         vkGetPhysicalDeviceMemoryProperties(physical_,&memoryTypes_);
         vkGetPhysicalDeviceFeatures(physical_,&features_);
