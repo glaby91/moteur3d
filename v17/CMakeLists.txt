@@ -139,6 +139,30 @@ if(WIN32)
     endif()
 endif()
 
+# Dedicated Vulkan regression tests. GPU-free mesh parity always runs.
+add_executable(v17_vulkan_mesh_smoke "vulkan/tests/mesh_smoke.cpp")
+target_include_directories(v17_vulkan_mesh_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vulkan")
+target_link_libraries(v17_vulkan_mesh_smoke PRIVATE moteur3d_v16_core Qt6::Core)
+add_test(NAME v17_vulkan_mesh_tessellation COMMAND v17_vulkan_mesh_smoke)
+if(WIN32 AND Vulkan_FOUND)
+    add_executable(v17_vulkan_gpu_smoke "vulkan/tests/vulkan_gpu_smoke.cpp")
+    target_include_directories(v17_vulkan_gpu_smoke PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+    target_link_libraries(v17_vulkan_gpu_smoke PRIVATE moteur3d_v16_core Qt6::Gui)
+    if(TARGET v17_vulkan_spirv)
+        add_dependencies(v17_vulkan_gpu_smoke v17_vulkan_spirv)
+        add_custom_command(TARGET v17_vulkan_gpu_smoke POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_FILE_DIR:v17_vulkan_gpu_smoke>/vulkan"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${V17_VULKAN_SPIRV}
+                "$<TARGET_FILE_DIR:v17_vulkan_gpu_smoke>/vulkan"
+            VERBATIM)
+    endif()
+    # CI only compiles this test. Run it on real Intel HD620 with a Vulkan ICD.
+endif()
+
 # Repeatable original 30s PCM diagnostic loop; no copyright-sensitive downloads
 # and no external audio processing tool required by the Windows build.
 if(WIN32)
