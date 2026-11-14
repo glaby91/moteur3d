@@ -2563,11 +2563,11 @@ private:
         // Explain an abnormal delay rather than displaying "Calcul..." forever.
         // This watchdog does not claim to cancel a driver-blocked D3D call.
         if(raster){
-            QTimer::singleShot(30000,this,[this,serial,token]{
+            QTimer::singleShot(30000,this,[this,serial,token,vulkan]{
                 if(serial->load()==token && watcher_.isRunning() && !closingRequested_)
-                    statusBar()->showMessage(QStringLiteral(
-                        QStringLiteral("Rendu %1 actif depuis plus de 30 secondes. ").arg(vulkan?QStringLiteral("Vulkan"):QStringLiteral("DirectX 11")) + 
-                        "GPU ou pilote possiblement saturé ; aucun basculement CPU."));
+                    statusBar()->showMessage(
+                        QStringLiteral("Rendu %1 actif depuis plus de 30 secondes. GPU ou pilote possiblement saturé ; aucun basculement CPU.")
+                        .arg(vulkan?QStringLiteral("Vulkan"):QStringLiteral("DirectX 11")));
             });
         }
         const auto shadowCache=cpuShadows_;
