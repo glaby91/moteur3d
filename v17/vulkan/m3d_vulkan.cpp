@@ -123,6 +123,7 @@ class VulkanRaster final {
     Buffer vertices_,transparent_,boxTemplate_,boxInstances_,foliageTemplate_,foliageInstances_,uniform_,readback_;
     uint32_t vertexCount_=0,transparentCount_=0,boxCount_=0,foliageCount_=0,foliageTemplateCount_=0;
     std::vector<vkmesh::TransparentTriangle> glass_;
+    std::vector<size_t> glassOrder_; // reused across frames; preserves original sort order
     std::vector<Chunk> chunks_,boxChunks_,foliageChunks_;
     std::vector<uint32_t> stagingColors_;
     std::array<int32_t,kMaxMaterials> protectedLayer_{};
@@ -292,6 +293,84 @@ class VulkanRaster final {
         writes[4].pImageInfo=&highAlbedo;writes[5].pImageInfo=&highSurface;
         vkUpdateDescriptorSets(device_,uint32_t(writes.size()),writes.data(),0,nullptr);
     }
+    // Pipeline cache is driver-specific but NEVER scene-specific. Cache is
+    // optional and never allowed to change the shader/pipeline parameters.
+    std::filesystem::path pipelineCacheFile() const {
+#ifdef _WIN32
+        wchar_t dir[32768]{};
+        const DWORD len=GetEnvironmentVariableW(L"LOCALAPPDATA",dir,32768);
+        if(len==0 || len>=32768)return {};
+        static constexpr char hex[]="0123456789abcdef";
+        std::string name=std::to_string(props_.vendorID)+"-"+
+            std::to_string(props_.deviceID)+"-"+
+            std::to_string(props_.driverVersion)+"-";
+        for(uint8_t b:props_.pipelineCacheUUID){
+            name.push_back(hex[b>>4]);name.push_back(hex[b&15]);
+        }
+        return std::filesystem::path(dir)/L"CSE-WARP"/L"VulkanCache"/(name+".bin");
+#else
+        return {};
+#endif
+    }
+    std::vector<uint8_t> readPipelineCache() const noexcept {
+        try{
+            const auto file=pipelineCacheFile();
+            if(file.empty())return {};
+            std::ifstream in(file,std::ios::binary|std::ios::ate);
+            if(!in)return {};
+            const auto n=in.tellg();
+            if(n<32 || n>32*1024*1024)return {};
+            std::vector<uint8_t> bytes(size_t(n),0);
+            in.seekg(0);
+            in.read(reinterpret_cast<char*>(bytes.data()),std::streamsize(bytes.size()));
+            if(!in)return {};
+            uint32_t h[4]{};
+            std::memcpy(h,bytes.data(),sizeof(h));
+            if(h[0]<32 || h[0]>bytes.size() ||
+               h[1]!=uint32_t(VK_PIPELINE_CACHE_HEADER_VERSION_ONE) ||
+               h[2]!=props_.vendorID || h[3]!=props_.deviceID ||
+               std::memcmp(bytes.data()+16,props_.pipelineCacheUUID,VK_UUID_SIZE)!=0)
+                return {};
+            return bytes;
+        }catch(...){return {};}
+    }
+    void writePipelineCache() const noexcept {
+        if(!pipelineCache_)return;
+        try{
+            size_t n=0;
+            if(vkGetPipelineCacheData(device_,pipelineCache_,&n,nullptr)!=VK_SUCCESS ||
+               n<32 || n>32*1024*1024)return;
+            std::vector<uint8_t> bytes(n);
+            if(vkGetPipelineCacheData(device_,pipelineCache_,&n,bytes.data())!=VK_SUCCESS)
+                return;
+            bytes.resize(n);
+            const auto target=pipelineCacheFile();
+            if(target.empty())return;
+            std::error_code ec;
+            std::filesystem::create_directories(target.parent_path(),ec);
+            if(ec)return;
+#ifdef _WIN32
+            auto temporary=target;
+            temporary+=L"."+std::to_wstring(GetCurrentProcessId())+L".tmp";
+#else
+            auto temporary=target;
+            temporary+=".tmp";
+#endif
+            {
+                std::ofstream out(temporary,std::ios::binary|std::ios::trunc);
+                if(!out)return;
+                out.write(reinterpret_cast<const char*>(bytes.data()),std::streamsize(bytes.size()));
+                if(!out)return;
+            }
+            std::filesystem::rename(temporary,target,ec);
+            if(ec){
+                std::filesystem::remove(target,ec);
+                ec.clear();
+                std::filesystem::rename(temporary,target,ec);
+            }
+            if(ec)std::filesystem::remove(temporary,ec);
+        }catch(...){/* A failed cache write must never affect rendering. */}
+    }
     void configure(){
         // Explicit minimum selected for this experiment: Vulkan API 1.3.204.
         // The installed SDK/loader and physical device versions are independent.
@@ -450,8 +529,19 @@ class VulkanRaster final {
         rp.dependencyCount=2;rp.pDependencies=dep;
         vkcheck(vkCreateRenderPass(device_,&rp,nullptr,&renderPass_),"render pass");
         VkPipelineCacheCreateInfo pc{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
-        vkcheck(vkCreatePipelineCache(device_,&pc,nullptr,&pipelineCache_),"pipeline cache");
+        const std::vector<uint8_t> initialCache=readPipelineCache();
+        pc.initialDataSize=initialCache.size();
+        pc.pInitialData=initialCache.empty()?nullptr:initialCache.data();
+        VkResult cacheResult=vkCreatePipelineCache(device_,&pc,nullptr,&pipelineCache_);
+        if(cacheResult!=VK_SUCCESS){
+            // Driver may reject stale cache for reasons beyond UUID/version.
+            pc.initialDataSize=0;pc.pInitialData=nullptr;
+            vkcheck(vkCreatePipelineCache(device_,&pc,nullptr,&pipelineCache_),
+                    "create fresh pipeline cache");
+        }
         buildPipelines();
+        // Pipelines are already created; cache I/O is outside the frame loop.
+        writePipelineCache();
         started_=true;
     }
     void buildPipelines(){
@@ -812,6 +902,7 @@ class VulkanRaster final {
             }
         }
         glass_=std::move(mesh.transparent);
+        glassOrder_.resize(glass_.size());
         transparentCount_=uint32_t(glass_.size()*3);
         if(transparentCount_)transparent_=buffer(size_t(transparentCount_)*sizeof(Vertex),
                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
@@ -979,14 +1070,13 @@ public:
             }
             if(transparentCount_){
                 // CPU depth-sort transparent triangles every frame, then draw with depth-test but no depth-write.
-                std::vector<size_t> order(glass_.size());
-                std::iota(order.begin(),order.end(),size_t(0));
-                std::sort(order.begin(),order.end(),[&](size_t a,size_t b){
+                std::iota(glassOrder_.begin(),glassOrder_.end(),size_t(0));
+                std::sort(glassOrder_.begin(),glassOrder_.end(),[&](size_t a,size_t b){
                     return dot(glass_[a].center-cam.eye,cam.f)>dot(glass_[b].center-cam.eye,cam.f);
                 });
                 auto* dest=static_cast<Vertex*>(transparent_.mapped);
-                for(size_t i=0;i<order.size();i++)
-                    memcpy(dest+3*i,glass_[order[i]].v,3*sizeof(Vertex));
+                for(size_t i=0;i<glassOrder_.size();i++)
+                    memcpy(dest+3*i,glass_[glassOrder_[i]].v,3*sizeof(Vertex));
                 flush(transparent_);
                 VkDeviceSize off=0;VkBuffer vb=transparent_.handle;
                 vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,alphaPipeline_);

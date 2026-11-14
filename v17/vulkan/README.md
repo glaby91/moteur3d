@@ -96,3 +96,11 @@ Ce mécanisme est **générique**, sans référence au nom, à la position, à l
 - Si la résolution source, les capacités GPU ou le budget protégé de 256 MiB ne permettent pas d'honorer la demande, **le moteur refuse explicitement le rendu plutôt que de réduire silencieusement la qualité**. Les autres matériaux restent soumis au moteur automatique.
 
 À noter : le backend Vulkan actuel ne charge qu'un niveau de mip dans ses images GPU, pour les deux catégories. Cette mise à niveau protège surtout la **résolution effective** face au budget des textures multiples. Un véritable streaming trilineaire/LOD gradué reste un chantier séparé ; la politique `preserve` devra être respectée lors de son introduction. Les autres paramètres de qualité GPU/DX11 sont inchangés.
+
+## Optimisations générales supplémentaires : réemploi et cache de pipelines
+
+- **Tri transparent sans allocations récurrentes :** le tableau d'indices est conservé entre frames, réinitialisé avec l'ordre original à chaque frame, puis trié exactement avec le même comparateur. Ni l'ordre de dessin, ni les textures, ni les effets ne changent.
+- **Cache Vulkan persistant de compilation de pipelines :** écrit dans `%LOCALAPPDATA%/CSE-WARP/VulkanCache/`. La clé et l'entête prennent en compte fabricant, modèle, version du pilote, UUID interne et version d'entête Vulkan. Toute donnée incohérente est rejetée et recompilée automatiquement. Le cache ne contient **aucune donnée de scène** et ne modifie jamais les paramètres des shaders, du Z-buffer, de la transparence ou du MSAA. Il réduit potentiellement le coût du démarrage/chargement des pipelines, **pas le temps GPU de chaque image**.
+- L'optimisation optionnelle BGRA et le profil fragment restent désactivés par défaut tant que des campagnes A/B qualité ne les ont pas validés sur plusieurs scènes.
+
+Les frames en vol et un Z-prepass ne sont pas automatiquement activés ici : sur la présentation Qt actuellement synchrone, une file GPU asynchrone impose une gestion explicite des images/latences, et un Z-prepass doit respecter transparence et surfaces coplanaires. Les ajouter sans mesures et sans tests de parité pourrait dégrader le rendu ; ils restent des travaux expérimentaux distincts et génériques.
