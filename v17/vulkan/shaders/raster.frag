@@ -112,7 +112,15 @@ void main() {
  }
  color+=f.emission[m].rgb*max(0.0,f.emission[m].a);
  color=mix(color,f.sky.rgb,clamp(length(world-f.eye.xyz)/1800.0,0.0,0.28));
- color=color/(color+vec3(1.0));
- color=pow(max(color,vec3(0.0)),vec3(1.0/2.2));
+ if(f.misc.y<0.5){
+   // Original Vulkan: legacy UNORM framebuffer, old tone/gamma path.
+   color=color/(color+vec3(1.0));
+   color=pow(max(color,vec3(0.0)),vec3(1.0/2.2));
+ }else{
+   // DX11 parity experiment: DX11 color RTV is sRGB, and its default
+   // shader emits LINEAR lighting with no manual gamma/pow.
+   // The Vulkan _SRGB attachment performs the encode exactly once.
+   color=max(color,vec3(0.0));
+ }
  result=vec4(color,clamp(f.materialProps[m].z,0.02,1.0));
 }

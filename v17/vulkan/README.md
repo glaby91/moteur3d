@@ -138,3 +138,13 @@ Le calcul du budget **ne diminue pas** la résolution du niveau 0. Si la mémoir
 ## Vérification finale multi-scènes (non spécifique au rendu)
 
 Le build Windows livre quatre scènes de référence indépendantes : `pavillon01`, `material-lab`, `pripyat-photo2scene-proof` et `benchmark-civic` (générée avant CMake). Le nouveau lanceur `LANCER_QUALITE_VULKAN_MULTISCENE_HD620.bat` rend **12 positions par scène** à 1366×768 avec les mêmes réglages de référence DX11 / Vulkan (Vulkan Z-prepass permanent). Chaque rapport contient des PNG DX11/Vulkan et une carte d'écarts de couleur. Toutes les scènes sont des **fixtures de validation uniquement** : aucun nom de scène ne déclenche une fonctionnalité ou une optimisation dans le code du moteur. Un échec conserve les logs et les résultats déjà générés ; il ne prétend jamais que le backend est prêt à fusionner sur `master`.
+
+## Recherche cause majeure de divergence de luminance Vulkan / DX11 : cible sRGB (test opt-in)
+
+La campagne quatre scènes sur Intel HD620 montre des rendus Vulkan nettement plus sombres (MAE RGB globale 20,38–37,44 sur 255). L'audit trouve une divergence concrète : DirectX11 utilise un render target `DXGI_FORMAT_R8G8B8A8_UNORM_SRGB` et sa sortie shader linéaire, alors que Vulkan utilise `VK_FORMAT_R8G8B8A8_UNORM` avec `color/(1+color)` puis `pow(...,1/2.2)`. Le ciel Vulkan est une couleur uniforme, alors que DirectX11 a un shader atmosphérique.
+
+Une **expérience isolée** `CSE_WARP_VK_SRGB_COLOR_TEST=1` demande une vraie cible `VK_FORMAT_R8G8B8A8_SRGB` (ou BGRA sRGB si l'option de lecture BGRA est activée) et laisse la cible effectuer l'encodage sRGB une seule fois, sans le tone map/gamma manuel hérités. Le GPU est interrogé avant création du pipeline et un manque de capacités provoque une erreur explicite. **Par défaut le rendu original reste strictement inchangé** jusqu'à validation de la fidélité et des performances.
+
+Lancer `LANCER_SRGB_VULKAN_HD620.bat` pour comparer **8 campagnes de 12 images** (les 4 scènes, deux chemins Vulkan), avec même Z-prepass permanent, textures, shader PBR et caméra. Chaque campagne produit `last_frame_rgb_mae`, les images DX11/Vulkan, ainsi que la heatmap des écarts. L'archive `CSE_WARP_VULKAN_SRGB_FIDELITE_HD620.zip` permet de confirmer ou d'infirmer l'hypothèse avant de changer les valeurs par défaut. Cette expérience ne porte pas encore le ciel atmosphérique ni les paramètres avancés d'exposition et d'illumination globale.
+
+Les conversions sRGB sur écriture d'un attachment et sur clear sont définies dans la spécification Khronos : https://docs.vulkan.org/spec/latest/chapters/framebuffer.html et https://docs.vulkan.org/spec/latest/chapters/clears.html.
