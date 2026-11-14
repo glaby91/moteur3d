@@ -281,8 +281,24 @@ class VulkanRaster final {
         vkUpdateDescriptorSets(device_,uint32_t(writes.size()),writes.data(),0,nullptr);
     }
     void configure(){
+        // The HD620 user's runtime currently reports 1.3.204; the physical
+        // device may expose a different version. Query both, never infer features.
+        uint32_t instanceVersion=VK_API_VERSION_1_0;
+        auto enumerateVersion=reinterpret_cast<PFN_vkEnumerateInstanceVersion>(
+            vkGetInstanceProcAddr(VK_NULL_HANDLE,"vkEnumerateInstanceVersion"));
+        if(enumerateVersion)
+            vkcheck(enumerateVersion(&instanceVersion),"query Vulkan loader version");
+        if(instanceVersion<VK_API_VERSION_1_2)
+            throw std::runtime_error("Vulkan runtime below 1.2; install a compatible Intel driver");
         VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
-        app.pApplicationName="CSE WARP V17 Vulkan Native Raster";app.apiVersion=VK_API_VERSION_1_2;
+        app.pApplicationName="CSE WARP V17 Vulkan Native Raster";
+        app.apiVersion=std::min(instanceVersion,VK_API_VERSION_1_3);
+        std::clog<<"[CSE WARP Vulkan] Loader="
+                 <<VK_VERSION_MAJOR(instanceVersion)<<"."
+                 <<VK_VERSION_MINOR(instanceVersion)<<"."
+                 <<VK_VERSION_PATCH(instanceVersion)
+                 <<" requested="<<VK_VERSION_MAJOR(app.apiVersion)<<"."
+                 <<VK_VERSION_MINOR(app.apiVersion)<<"\n";
         VkInstanceCreateInfo i{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};i.pApplicationInfo=&app;
         vkcheck(vkCreateInstance(&i,nullptr,&instance_),"create instance");
         uint32_t n=0;vkcheck(vkEnumeratePhysicalDevices(instance_,&n,nullptr),"enumerate GPUs");
