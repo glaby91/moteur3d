@@ -2,8 +2,8 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 echo ========================================================
-echo CSE WARP - DX11 / VULKAN 1.2+ RASTER A/B (HD620)
-echo SDK/loader 1.3.204 accepted. GPU support is checked at runtime.
+echo CSE WARP - DX11 / VULKAN 1.3.204+ RASTER A/B (HD620)
+echo Vulkan loader and GPU must each support API 1.3.204 or higher.
 echo ========================================================
 if not exist "v17_vulkan_ab_bench.exe" (
   echo Missing v17_vulkan_ab_bench.exe. Extract entire build artifact.
