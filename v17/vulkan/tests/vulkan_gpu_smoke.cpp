@@ -28,8 +28,8 @@ int main(int argc,char**argv){
         std::wcerr<<L"Vulkan renderer failed: "<<error<<L"\n";return 2;
     }
     // A single opaque triangle must be submitted twice: Z-only + shaded.
-    if(pixels.size()!=size_t(w*h)||!stats.gpu||stats.gpuDrawCalls!=2){
-        std::cerr<<"Expected exactly two draw calls for always-on Vulkan Z-prepass; got "
+    if(pixels.size()!=size_t(w*h)||!stats.gpu||stats.gpuDrawCalls!=3){
+        std::cerr<<"Expected three Vulkan calls (sky, Z-prepass, shaded); got "
                  <<stats.gpuDrawCalls<<"\n";return 3;
     }
     bool nonBackground=false;

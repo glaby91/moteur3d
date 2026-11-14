@@ -99,7 +99,7 @@ jobs:
             Out-File 'diagnostics-vulkan/dlls.txt'
           foreach ($p in @('moteur3d_v17.exe','moteur3d_v16_core.dll',
                         'v17_vulkan_gpu_smoke.exe','v17_vulkan_ab_bench.exe','v17_vulkan_mesh_smoke.exe','v17_vulkan_mipmap_smoke.exe','v17_vulkan_readback_smoke.exe','v17_vulkan_version_smoke.exe',
-                        'vulkan/raster.vert.spv','vulkan/raster.frag.spv','vulkan/raster_fast.frag.spv',
+                        'vulkan/raster.vert.spv','vulkan/raster.frag.spv','vulkan/raster_fast.frag.spv','vulkan/sky.vert.spv','vulkan/sky.frag.spv',
                         'vulkan/raster_box.vert.spv','vulkan/raster_foliage.vert.spv')) {
             if (!(Test-Path "$exe/$p")) { throw "Missing Vulkan output: $p" }
             Write-Host "Verified: $p"

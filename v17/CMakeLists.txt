@@ -126,6 +126,21 @@ if(WIN32)
                     VERBATIM)
                 list(APPEND V17_VULKAN_SPIRV "${spv}")
             endforeach()
+            # Fullscreen atmospheric sky: V17 DX11 model ported to native GLSL.
+            set(sky_spv)
+            foreach(stage IN ITEMS vert frag)
+                set(skyOut "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders/sky.${stage}.spv")
+                add_custom_command(OUTPUT "${skyOut}"
+                    COMMAND ${CMAKE_COMMAND} -E make_directory
+                        "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders"
+                    COMMAND "${V17_GLSLANG_VALIDATOR}"
+                        -V --target-env vulkan1.3
+                        "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/sky.${stage}"
+                        -o "${skyOut}"
+                    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/sky.${stage}"
+                    VERBATIM)
+                list(APPEND V17_VULKAN_SPIRV "${skyOut}")
+            endforeach()
             # Two fragment variants from the same source. Baseline remains the
             # default, opt-in with CSE_WARP_VK_FAST_FRAGMENT=1 for paired A/B.
             set(fast_frag_spv "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders/raster_fast.frag.spv")

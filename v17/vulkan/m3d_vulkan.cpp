@@ -6,6 +6,7 @@
 #include "m3d_vulkan_version.h"
 #include "m3d_vulkan_readback.h"
 #include "m3d_vulkan_mips.h"
+#include "../weather/clouds.h"
 #include <vulkan/vulkan.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -53,6 +54,7 @@ struct alignas(16) Uniforms {
     float material[kMaxMaterials][4]{},emission[kMaxMaterials][4]{};
     float lightPos[kLights][4]{},lightRgb[kLights][4]{},misc[4]{};
     float textureDetail[kMaxMaterials][4]{}; // x = protected layer, -1 for auto
+    float skyZenith[4]{},skyHorizon[4]{},skyWind[4]{},skyViewport[4]{};
 };
 static_assert(sizeof(Uniforms)%16==0,"std140 uniform size must be aligned");
 struct Chunk {uint32_t first=0,count=0;V lo{},hi{};};
@@ -115,6 +117,7 @@ class VulkanRaster final {
     VkPipelineLayout layout_=VK_NULL_HANDLE;
     VkPipeline opaquePipeline_=VK_NULL_HANDLE,alphaPipeline_=VK_NULL_HANDLE,boxPipeline_=VK_NULL_HANDLE,foliagePipeline_=VK_NULL_HANDLE;
     VkPipeline depthOpaque_=VK_NULL_HANDLE,depthBox_=VK_NULL_HANDLE,depthFoliage_=VK_NULL_HANDLE;
+    VkPipeline skyPipeline_=VK_NULL_HANDLE;
     VkPipelineCache pipelineCache_=VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool_=VK_NULL_HANDLE;
     VkDescriptorSetLayout descriptorLayout_=VK_NULL_HANDLE;
@@ -745,6 +748,33 @@ class VulkanRaster final {
         vkcheck(vkCreateGraphicsPipelines(device_,pipelineCache_,1,&pi,nullptr,&foliagePipeline_),"instanced foliage Vulkan pipeline");
         depthPipeline(&depthFoliage_,"instanced foliage depth-only Vulkan pipeline");
         vkDestroyShaderModule(device_,foliageModule,nullptr);
+
+        // Dedicated fullscreen sky pass (no vertex buffer, no depth test or write).
+        // Vulkan pipeline/descriptor layout follows the official Khronos contract.
+        const auto skyVsCode=spirv(shaderFile("sky.vert.spv"));
+        const auto skyFsCode=spirv(shaderFile("sky.frag.spv"));
+        VkShaderModule skyModules[2]{};
+        for(int i=0;i<2;++i){
+            const auto& code=i?skyFsCode:skyVsCode;
+            VkShaderModuleCreateInfo info{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+            info.codeSize=code.size()*sizeof(uint32_t);info.pCode=code.data();
+            vkcheck(vkCreateShaderModule(device_,&info,nullptr,&skyModules[i]),"sky SPIR-V shader");
+        }
+        VkPipelineShaderStageCreateInfo skyStages[2]={stages[0],stages[1]};
+        skyStages[0].module=skyModules[0];
+        skyStages[1].module=skyModules[1];
+        VkPipelineVertexInputStateCreateInfo emptyVertex{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+        VkPipelineDepthStencilStateCreateInfo skyDepth=ds;
+        skyDepth.depthTestEnable=VK_FALSE;
+        skyDepth.depthWriteEnable=VK_FALSE;
+        VkGraphicsPipelineCreateInfo skyPi=pi;
+        skyPi.pStages=skyStages;
+        skyPi.pVertexInputState=&emptyVertex;
+        skyPi.pDepthStencilState=&skyDepth;
+        vkcheck(vkCreateGraphicsPipelines(device_,pipelineCache_,1,&skyPi,nullptr,&skyPipeline_),
+                "atmospheric sky Vulkan graphics pipeline");
+        vkDestroyShaderModule(device_,skyModules[0],nullptr);
+        vkDestroyShaderModule(device_,skyModules[1],nullptr);
         vkDestroyShaderModule(device_,modules[0],nullptr);
         vkDestroyShaderModule(device_,modules[1],nullptr);
     }
@@ -1059,6 +1089,31 @@ class VulkanRaster final {
         f.sunDir[0]=sun.x;f.sunDir[1]=sun.y;f.sunDir[2]=sun.z;f.sunDir[3]=daylight;
         const V sk=scene.underwaterEnvironment?V{7,27,39}:skyHorizon*.65f+skyZenith*.35f;
         f.sky[0]=sk.x/255.f;f.sky[1]=sk.y/255.f;f.sky[2]=sk.z/255.f;
+        // Reuse the V17 weather model and DX11 atmospheric constants.
+        cse::weather::CloudState weather;
+        weather.coverage=.28f;weather.opacity=.65f;
+        weather.windEastMetersPerSecond=12.f;
+        weather.windNorthMetersPerSecond=3.5f;
+        static const auto cloudEpoch=Clock::now();
+        const char* animate=std::getenv("M3D_V17_ANIMATE_CLOUDS");
+        const double elapsed=(animate && std::strcmp(animate,"1")==0)?
+            std::chrono::duration<double>(Clock::now()-cloudEpoch).count():0.0;
+        const auto clouds=cse::weather::cirrusAt(
+            weather,elapsed,std::asin(clampf(sun.y,-1.f,1.f))*180.0f/3.14159265f);
+        f.skyZenith[0]=skyZenith.x/255.f;
+        f.skyZenith[1]=skyZenith.y/255.f;
+        f.skyZenith[2]=skyZenith.z/255.f;
+        f.skyZenith[3]=clouds.opacity;
+        f.skyHorizon[0]=skyHorizon.x/255.f;
+        f.skyHorizon[1]=skyHorizon.y/255.f;
+        f.skyHorizon[2]=skyHorizon.z/255.f;
+        f.skyHorizon[3]=clouds.coverage;
+        f.skyWind[0]=clouds.uOffset;
+        f.skyWind[1]=clouds.vOffset;
+        f.skyWind[2]=solarHour;
+        f.skyViewport[0]=float(width_);
+        f.skyViewport[1]=float(height_);
+        f.skyViewport[2]=scene.underwaterEnvironment?1.f:0.f;
         f.shadowBase[0]=shadows.base.x;f.shadowBase[1]=shadows.base.y;f.shadowBase[2]=shadows.base.z;
         f.shadowBase[3]=shadows.span;
         f.shadowRight[0]=shadows.right.x;f.shadowRight[1]=shadows.right.y;f.shadowRight[2]=shadows.right.z;
@@ -1112,6 +1167,7 @@ public:
         free(readback_);free(uniform_);free(vertices_);free(transparent_);free(boxTemplate_);free(boxInstances_);free(foliageTemplate_);free(foliageInstances_);
         free(color_);free(depth_);free(albedo_);free(surface_);free(shadow_);
         free(detailAlbedo_);free(detailSurface_);
+        if(skyPipeline_)vkDestroyPipeline(device_,skyPipeline_,nullptr);
         if(depthFoliage_)vkDestroyPipeline(device_,depthFoliage_,nullptr);
         if(depthBox_)vkDestroyPipeline(device_,depthBox_,nullptr);
         if(depthOpaque_)vkDestroyPipeline(device_,depthOpaque_,nullptr);
@@ -1162,6 +1218,9 @@ public:
             vkCmdSetViewport(cmd_,0,1,&viewport);vkCmdSetScissor(cmd_,0,1,&scissor);
             vkCmdBindDescriptorSets(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,layout_,0,1,&descriptor_,0,nullptr);
             uint64_t drawCalls=0;
+            // Sky is drawn first; no depth is written and no scene triangles are used.
+            vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,skyPipeline_);
+            vkCmdDraw(cmd_,3,1,0,0);++drawCalls;
             // Same opaque draw order and exact vertices in both passes. The
             // optional prepass only writes depth, never color. Transparent
             // triangles are drawn once, AFTER the opaque color pass.
