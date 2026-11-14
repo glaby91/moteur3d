@@ -166,7 +166,10 @@ add_executable(v17_vulkan_mesh_smoke "vulkan/tests/mesh_smoke.cpp")
 target_include_directories(v17_vulkan_mesh_smoke PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14"
     "${CMAKE_CURRENT_SOURCE_DIR}/vulkan")
-target_link_libraries(v17_vulkan_mesh_smoke PRIVATE moteur3d_v16_core Qt6::Core)
+# CPU-only mesh regression: deliberately do not load the full V16 GPU-enabled
+# shared DLL (and its DirectX/Qt/Vulkan loader dependencies) on CI runners.
+# A fixture-local groundMaterial() is supplied by mesh_smoke.cpp.
+# The actual shared engine DLL is still built/packaged and used by GPU tests.
 add_test(NAME v17_vulkan_mesh_tessellation COMMAND v17_vulkan_mesh_smoke)
 if(WIN32 AND Vulkan_FOUND)
     add_executable(v17_vulkan_version_smoke "vulkan/tests/version_smoke.cpp")

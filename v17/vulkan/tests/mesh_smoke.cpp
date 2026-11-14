@@ -5,6 +5,12 @@
 #include <cmath>
 #include <exception>
 #include <iostream>
+// Local ground-material fixture only: avoids importing the entire V16 engine DLL
+// into this geometry-only test. The renderer itself continues using the real
+// groundMaterial() implementation from m3d_intersection.cpp.
+namespace m3d {
+int groundMaterial(const Scene&, V) { return 0; }
+}
 int main() {
     try {
         std::cout << "Starting GPU-independent Vulkan mesh test" << std::endl;

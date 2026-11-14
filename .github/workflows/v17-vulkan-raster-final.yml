@@ -131,7 +131,7 @@ jobs:
       - name: Publish experimental Vulkan Raster Windows bundle
         id: upload
         if: ${{ always() && steps.compile.outcome == 'success' && steps.package.outcome == 'success' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: CSE-WARP-V17-Vulkan-1.3.204-Raster-Windows-HD620
           path: dist-v17-vulkan/

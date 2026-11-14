@@ -56,3 +56,5 @@ Les optimisations multithread secondaires, timeline semaphores et trois frames i
 ## Diagnostic CI Windows (ajout novembre 2026)
 
 Le workflow exécute les tests GPU-indépendants avec les chemins Qt, Vulkan SDK et moteur V16 visibles. Les codes de sortie Windows sont enregistrés en décimal et hexadécimal ; les contrôles de maillage signalent leurs valeurs en erreur. Si la compilation réussit mais qu'un smoke échoue, le ZIP de diagnostic est quand même publié (répertoire `diagnostics/`), puis le workflow reste **en échec**. Un statut CI vert ne démontre toujours pas la validité des rendus GPU sur l'Intel HD620, qui doit être testée séparément.
+
+Le test `v17_vulkan_mesh_smoke` vérifie uniquement la géométrie CPU du convertisseur de maillage. Il est compilé **sans dépendance au moteur partagé V16** pour éviter une fausse panne de chargement DLL sur les runners Windows. Il utilise un matériau de sol local déterministe ; cela ne remplace ni le test de chargement du moteur partagé ni les tests du GPU Vulkan. La publication CI utilise `actions/upload-artifact@v6` (runtime Node.js 24).
