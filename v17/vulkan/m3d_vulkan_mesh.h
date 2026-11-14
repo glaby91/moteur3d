@@ -149,9 +149,44 @@ public:
     }
 };
 
-inline MeshBuilder build(const Scene& scene) {
+struct BoxInstance {
+    float lo[3],uvScale;
+    float hi[3];uint32_t material;
+    float dimensions[3];uint32_t uvMode;
+};
+static_assert(sizeof(BoxInstance)==48,"Vulkan and DX11 box instance formats must match");
+inline MeshBuilder build(const Scene& scene,std::vector<BoxInstance>* boxes=nullptr) {
     MeshBuilder mesh;
-    for (const Obj& o : scene.obj) {
+    std::vector<uint8_t> skip;
+    if(boxes) {
+        skip.assign(scene.obj.size(),0);
+        for(const SourceBox& source:scene.sourceBoxes) {
+            if(source.triangleCount!=12 || source.material>=scene.mat.size() ||
+               scene.mat[source.material].transmissionPercent>0 ||
+               size_t(source.firstTriangle)+12>scene.obj.size())continue;
+            bool valid=true;
+            for(size_t k=source.firstTriangle;k<size_t(source.firstTriangle)+12;k++) {
+                if(skip[k] || scene.obj[k].kind!=Kind::Triangle ||
+                   uint32_t(scene.obj[k].mat)!=source.material){valid=false;break;}
+            }
+            if(!valid)continue;
+            BoxInstance inst{};
+            inst.lo[0]=source.mn.x;inst.lo[1]=source.mn.y;inst.lo[2]=source.mn.z;
+            inst.hi[0]=source.mx.x;inst.hi[1]=source.mx.y;inst.hi[2]=source.mx.z;
+            inst.dimensions[0]=source.mx.x-source.mn.x;
+            inst.dimensions[1]=source.mx.y-source.mn.y;
+            inst.dimensions[2]=source.mx.z-source.mn.z;
+            inst.material=source.material;
+            const auto& name=scene.mat[source.material].name;
+            inst.uvMode=(name=="cse_energetik_fresco"||
+                         name=="cse_personnage_facade")?2u:1u;
+            boxes->push_back(inst);
+            for(size_t k=source.firstTriangle;k<size_t(source.firstTriangle)+12;k++)skip[k]=1;
+        }
+    }
+    for(size_t objectIndex=0;objectIndex<scene.obj.size();objectIndex++) {
+        if(!skip.empty()&&skip[objectIndex])continue;
+        const Obj& o=scene.obj[objectIndex];
         const uint32_t m=o.mat;
         const float scale=uvScaleForMaterial(scene,m);
         mesh.transparentMaterial=m<scene.mat.size() && scene.mat[m].transmissionPercent>0;
@@ -160,7 +195,18 @@ inline MeshBuilder build(const Scene& scene) {
             mesh.tri(o.a,o.b,o.c,o.n0,o.n1,o.n2,
                      o.uv0.x,o.uv0.y,o.uv1.x,o.uv1.y,o.uv2.x,o.uv2.y,m);
             break;
-          case Kind::Box: mesh.box(o.mn,o.mx,m,scale);break;
+          case Kind::Box:
+            if(boxes&&!mesh.transparentMaterial){
+                BoxInstance inst{};
+                inst.lo[0]=o.mn.x;inst.lo[1]=o.mn.y;inst.lo[2]=o.mn.z;
+                inst.hi[0]=o.mx.x;inst.hi[1]=o.mx.y;inst.hi[2]=o.mx.z;
+                inst.dimensions[0]=o.mx.x-o.mn.x;
+                inst.dimensions[1]=o.mx.y-o.mn.y;
+                inst.dimensions[2]=o.mx.z-o.mn.z;
+                inst.uvScale=scale;inst.material=m;inst.uvMode=0;
+                boxes->push_back(inst);
+            }else mesh.box(o.mn,o.mx,m,scale);
+            break;
           case Kind::RoundBox: mesh.roundedBox(o.mn,o.mx,o.r,m,scale);break;
           case Kind::Capsule: mesh.capsule(o.a,o.b,o.r,m);break;
           case Kind::Cone: mesh.frustum(o.a,o.n0,o.len,o.r,o.r1,m);break;
