@@ -1,0 +1,124 @@
+name: CSE WARP V17.437 - frame pacing and default GPU benchmark
+on:
+  push:
+    branches: [feature/v17-437-frame-pacing-benchmark-261113]
+    paths:
+      - .github/workflows/v17-437-frame-pacing.yml
+      - v17/**
+      - tools/summarize_v437_bench.py
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  windows-v437:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    env:
+      GH_TOKEN: ${{ github.token }}
+      QT_QPA_PLATFORM: offscreen
+      M3D_V16_FORCE_WARP: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Restore validated V17.436 package including Ukrainian radio
+        shell: pwsh
+        run: |
+          gh run download 43412989541 --repo glaby91/moteur3d --name CSE-WARP-V17.436-AUDIO-4HP-433-434-Windows-x64 --dir dist-v437
+          if($LASTEXITCODE -ne 0){throw "V17.436 release baseline unavailable"}
+          foreach($p in @("moteur3d_v17.exe","moteur3d_v16_core.dll","audio/pripyat_radio.wav","audio/speaker_layout.json","benchmark-civic/scene-v7-corrections.json","benchmark-civic/textures/energetik_fresco_mosaic.jpg")){
+            if(!(Test-Path "dist-v437/$p")){throw "Missing baseline $p"}
+          }
+          (Get-FileHash "dist-v437/audio/pripyat_radio.wav" -Algorithm SHA256).Hash | Set-Content audio-baseline.txt
+          (Get-FileHash "dist-v437/benchmark-civic/textures/energetik_fresco_mosaic.jpg" -Algorithm SHA256).Hash | Set-Content fresco-baseline.txt
+      - name: Build Windows V17.437 app, default GPU benchmark and all smoke tests
+        shell: pwsh
+        run: |
+          node scenes/v16/benchmark-civic/generate.cjs --all
+          if($LASTEXITCODE -ne 0){throw "Scene generator failed"}
+          cmake -S v17 -B build-v437 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=437
+          if($LASTEXITCODE -ne 0){throw "V17.437 configuration failed"}
+          cmake --build build-v437 --config Release --target moteur3d_v17 moteur3d_v17_benchmark moteur3d_v17_gpu_trajectory v17_frame_pacing_smoke v17_camera_diagnostic_smoke v17_walk_controller_smoke --parallel 4
+          if($LASTEXITCODE -ne 0){throw "V17.437 compile failed"}
+      - name: Run 437 frame pacing statistics, 434 camera, 433 navigation regressions
+        shell: pwsh
+        run: |
+          ctest --test-dir build-v437 -C Release -R "v17_frame_pacing_statistical_regression|v17_camera_diagnostic_roundtrip|v17_walk_stairs_collision" --output-on-failure
+          if($LASTEXITCODE -ne 0){throw "Frame pacing or camera regression failed"}
+      - name: Three default 433 GPU A/B test modes (real DX11 WARP software in CI)
+        shell: pwsh
+        run: |
+          $scene="dist-v437/benchmark-civic/scene-v7-corrections.json"
+          $exe="build-v437/Release/moteur3d_v17_gpu_trajectory.exe"
+          $profiles=@(
+            @{name="default_z_on_aabb_off";z="on";aabb="off"},
+            @{name="reference_z_off_aabb_off";z="off";aabb="off"},
+            @{name="candidate_z_on_aabb_on";z="on";aabb="on"}
+          )
+          foreach($p in $profiles){
+            & $exe $scene "ci-v437/$($p.name)" --ci-smoke "--z-prepass=$($p.z)" "--light-aabb=$($p.aabb)"
+            if($LASTEXITCODE -ne 0){throw "GPU profile $($p.name) failed"}
+          }
+          python tools/summarize_v437_bench.py ci-v437
+          if($LASTEXITCODE -ne 0){throw "Default A/B summary missing"}
+      - name: Assemble portable V17.437 with intact scene, radio and benchmark launcher
+        shell: pwsh
+        run: |
+          Copy-Item build-v437/Release/moteur3d_v17.exe dist-v437/moteur3d_v17.exe -Force
+          Copy-Item build-v437/Release/moteur3d_v17_benchmark.exe dist-v437/moteur3d_v17_benchmark.exe -Force
+          Copy-Item build-v437/Release/moteur3d_v17_gpu_trajectory.exe dist-v437/moteur3d_v17_gpu_trajectory.exe -Force
+          Copy-Item build-v437/v16/Release/moteur3d_v16_core.dll dist-v437/moteur3d_v16_core.dll -Force
+          Copy-Item v17/tools/BENCH_FLUIDITE_PAR_DEFAUT_V437.ps1 dist-v437/BENCH_FLUIDITE_PAR_DEFAUT_V437.ps1 -Force
+          Copy-Item v17/tools/LANCER_BENCH_FLUIDITE_V437.bat dist-v437/LANCER_BENCH_FLUIDITE_V437.bat -Force
+          Copy-Item tools/summarize_v437_bench.py dist-v437/summarize_v437_bench.py -Force
+          Copy-Item ci-v437/COMPARAISON-V17.437.csv dist-v437/REFERENCE-CI-V17.437.csv -Force
+          $audio=(Get-FileHash "dist-v437/audio/pripyat_radio.wav" -Algorithm SHA256).Hash
+          $fresco=(Get-FileHash "dist-v437/benchmark-civic/textures/energetik_fresco_mosaic.jpg" -Algorithm SHA256).Hash
+          if($audio -ne (Get-Content audio-baseline.txt -Raw).Trim()){throw "Validated Ukrainian radio unexpectedly modified"}
+          if($fresco -ne (Get-Content fresco-baseline.txt -Raw).Trim()){throw "Historic fresco unexpectedly modified"}
+          $env:GITHUB_SHA | Set-Content dist-v437/REVISION.txt -Encoding ascii
+          @'
+          CSE WARP V17.437 — stable frame presentation + default benchmark.
+          V17.436 architectural scene, four speakers and Ukrainian broadcast preserved.
+          Fixed: camera movement no longer invalidates every outstanding GPU image.
+          Qt presentation intervals are recorded during exploration.
+          Outils -> Exporter benchmark fluidité writes CSV+JSON to Documents/CSE WARP/Benchmarks.
+          Double-click LANCER_BENCH_FLUIDITE_V437.bat for a complete 3-run hardware benchmark:
+          90 frames x3; default Z-prepass=ON, light AABB=OFF; comparison with both OFF
+          and Z=ON+AABB=ON. 1366x768, PBR 2048, MSAA 2x, hardware DirectX11.
+          The auto GPU benchmark reports GPU render durations. Qt present jitter is
+          measured separately by exploring and exporting the live image cadence.
+          No silent fallbacks to lower-quality raster or CPU.
+          '@ | Set-Content dist-v437/LIRE_EN_PREMIER-V17.437.txt -Encoding UTF8
+      - name: Verify actual Qt GUI two-pass DirectX11 software render
+        shell: pwsh
+        timeout-minutes: 8
+        run: |
+          $exe=(Resolve-Path "dist-v437/moteur3d_v17.exe").Path
+          $scene=(Resolve-Path "dist-v437/pavillon01/scene.json").Path
+          $proc=Start-Process -FilePath $exe -ArgumentList @("--smoke-repeat-raster",$scene) -WorkingDirectory (Resolve-Path "dist-v437").Path -PassThru -Wait
+          if($proc.ExitCode -ne 0){throw "V17.437 GUI native smoke failed"}
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: CSE-WARP-V17.437-FRAME-PACING-DEFAULT-BENCH-Windows-x64
+          path: dist-v437/
+          retention-days: 21
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: V17.437-DEFAULT-BENCHMARK-CI-3-AB
+          path: ci-v437/
+          retention-days: 14
+          if-no-files-found: warn

@@ -1,0 +1,111 @@
+name: CSE WARP — 10 actual CC0 tree meshes pilot
+run-name: CSE WARP — 10 imported trees (GLB to WARP)
+on:
+  push:
+    branches:
+      - feature/v17-380-global-architectural-rebuild-261112
+    paths:
+      - '.github/workflows/v17-ten-trees-pilot.yml'
+      - 'scenes/v16/benchmark-civic/import_trees_pilot.py'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_v16_bridge.cpp'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: cse-warp-trees-pilot
+  cancel-in-progress: true
+jobs:
+  pilot-windows:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - name: Qt6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Acquire verified CC0 Kenney source and convert real GLB triangles
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check trimesh numpy
+          if($LASTEXITCODE -ne 0){throw 'GLB converter dependencies missing'}
+          node scenes/v16/benchmark-civic/generate.cjs --all
+          if($LASTEXITCODE -ne 0){throw 'Base scene generator failed'}
+          python scenes/v16/benchmark-civic/landscape_v4.py --root scenes/v16/benchmark-civic
+          if($LASTEXITCODE -ne 0){throw 'V4 landscape generator failed'}
+          python scenes/v16/benchmark-civic/import_trees_pilot.py --root scenes/v16/benchmark-civic
+          if($LASTEXITCODE -ne 0){throw 'Kenney CC0 importer failed'}
+          $root='scenes/v16/benchmark-civic'
+          $g=Get-Content "$root/geometry/trees-pilot.json" -Raw|ConvertFrom-Json
+          $i=Get-Content "$root/instances/v4-trees-pilot.json" -Raw|ConvertFrom-Json
+          $report=Get-Content "$root/reports/trees-pilot.json" -Raw|ConvertFrom-Json
+          $pilots=@($i.instances|Where-Object {$_.parent -eq 'Nature/Arbres pilotes GLB CC0'})
+          if($report.trees -ne 10 -or $pilots.Count -lt 10 -or $g.meshes.Count -lt 5){throw 'Missing imported source meshes'}
+          foreach($mesh in $g.meshes){
+            if($mesh.type -ne 'triangle_mesh' -or $mesh.faces.Count -eq 0 -or $mesh.vertices.Count -eq 0){
+              throw "Invalid GLB mesh: $($mesh.id)"
+            }
+          }
+          Write-Host "IMPORTED 10 TREES: $($g.meshes.Count) meshes; $($report.triangles) unique triangles"
+      - name: Compile actual updated WARP mesh loader
+        shell: pwsh
+        run: |
+          cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=402
+          if($LASTEXITCODE -ne 0){throw 'Configure failed'}
+          cmake --build build-v17 --config Release --parallel 4
+          if($LASTEXITCODE -ne 0){throw 'Compile failed'}
+      - name: Render ten-tree scene with actual DirectX11 WARP
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          M3D_V16_GPU_GI_SAMPLES: '0'
+          M3D_PRIMARY_RAYS_25: '0'
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=(Resolve-Path "build-v17/Release/moteur3d_v17_benchmark.exe").Path
+          $root='scenes/v16/benchmark-civic'
+          $scene=(Resolve-Path "$root/scene-v4-trees-pilot.json").Path
+          & $exe $scene "build-v17/trees-pilot-test" --quick --camera-id v4_face --hour 14 --raster-msaa 1 --readback-depth 1
+          if($LASTEXITCODE -ne 0){throw 'Pilot scene WARP render failed'}
+          $summary=Get-ChildItem "build-v17/trees-pilot-test" -Recurse -Filter summary.json|Select-Object -First 1
+          if(!$summary){throw 'Missing render summary'}
+          $doc=Get-Content $summary.FullName -Raw|ConvertFrom-Json
+          $case=@($doc.cases|Where-Object {$_.backend -eq 'V17_D3D11_Raster'})[0]
+          if(!$case -or $case.status -ne 'ok'){throw 'GLB tree WARP render failed'}
+          Write-Host "GLB TREE RENDER OK — FPS $($case.streamFps)"
+      - name: Package scene-only pilot and reports
+        if: success()
+        shell: pwsh
+        run: |
+          $root='scenes/v16/benchmark-civic'
+          $dst='build-v17/CSE-WARP-V17-V4-10-ARBRES-GLB-PILOTE/benchmark-civic'
+          New-Item -ItemType Directory -Force "$dst/geometry","$dst/instances","$dst/reports"|Out-Null
+          foreach($folder in @('cameras','environment','lighting','materials','pbr','textures')){
+            Copy-Item -Recurse "$root/$folder" "$dst/$folder" -Force
+          }
+          Copy-Item "$root/scene-v4-trees-pilot.json" "$dst/"
+          Copy-Item "$root/geometry/benchmark.json" "$dst/geometry/"
+          Copy-Item "$root/geometry/trees-pilot.json" "$dst/geometry/"
+          Copy-Item "$root/instances/v4-trees-pilot.json" "$dst/instances/"
+          Copy-Item "$root/reports/trees-pilot.json" "$dst/reports/"
+          Copy-Item "$root/import_trees_pilot.py" "$dst/"
+          Copy-Item -Recurse "build-v17/trees-pilot-test" "build-v17/CSE-WARP-V17-V4-10-ARBRES-GLB-PILOTE/benchmark-results"
+          @'
+          CSE WARP pilot: 10 real imported Kenney Nature Kit 2.1 trees.
+          License: CC0 1.0, https://kenney.nl/assets/nature-kit
+          Scene: benchmark-civic/scene-v4-trees-pilot.json
+          Requires V17 build with geometry type triangle_mesh support.
+          Older V17.392 cannot load the imported meshes.
+          Kenney is stylized low-poly and not photorealistic.
+          '@|Set-Content -Encoding UTF8 "build-v17/CSE-WARP-V17-V4-10-ARBRES-GLB-PILOTE/README.txt"
+          Compress-Archive -Path "build-v17/CSE-WARP-V17-V4-10-ARBRES-GLB-PILOTE/*" -DestinationPath "build-v17/CSE-WARP-V17-V4-10-ARBRES-GLB-PILOTE.zip" -Force
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: CSE-WARP-V17-V4-10-ARBRES-GLB-PILOTE
+          path: build-v17/CSE-WARP-V17-V4-10-ARBRES-GLB-PILOTE.zip
+          retention-days: 14

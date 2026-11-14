@@ -1,0 +1,11 @@
+/build/
+/dist/
+/scene_rapture.bin
+/moteur3d_v1314_scene.bin
+/moteur3d_orange_macro.bin
+/native_smoke.exe
+/moteur3d_v14_native.cpp
+/moteur3d_v14_native.obj
+/moteur3d_v14_native.res
+/Moteur3D-Natif-x64-*.exe
+/Moteur3D-Natif-x64-*.zip

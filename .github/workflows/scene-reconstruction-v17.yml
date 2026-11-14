@@ -1,0 +1,129 @@
+name: CSE WARP — reconstructed scene only / frozen V17.370
+run-name: V17 reconstructed palace — monument, trees, flowers — no engine build
+on:
+  push:
+    branches:
+      - feature/v17-376-scene-reconstruction-261112
+    paths:
+      - 'scenes/v16/benchmark-civic/**'
+      - '.github/workflows/scene-reconstruction-v17.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: v17-geometric-scene-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  render:
+    name: Reconstruct scene, native QA and 5-camera A/B (unchanged engine)
+    runs-on: windows-2022
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v5
+      - name: Node runtime
+        run: node --version
+      - name: Generate 3 actual scene profiles and validate geometry
+        shell: pwsh
+        run: |
+          node scenes/v16/benchmark-civic/generate.cjs --all
+          if ($LASTEXITCODE -ne 0) { throw 'Reconstructed scene generation failed' }
+          node scenes/v16/benchmark-civic/validate.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Reconstructed scene structural QA failed' }
+      - name: Install Python Pillow for comparing true rendered images
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Pillow
+        shell: pwsh
+        run: python -m pip install Pillow==11.3.0
+      - name: Fetch frozen V17.370 Windows executable (no compilation)
+        uses: actions/download-artifact@v4
+        with:
+          name: CSE-WARP-V17.370-Windows-x64
+          run-id: 43195320997
+          repository: glaby91/moteur3d
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: fixed-v17
+      - name: Confirm exact engine version and required source artwork
+        shell: pwsh
+        run: |
+          $engine = "fixed-v17/moteur3d_v17_benchmark.exe"
+          if (!(Test-Path $engine)) { throw "Frozen Windows engine missing" }
+          $version = (Get-Content "fixed-v17/BUILD_NUMBER.txt" -Raw).Trim()
+          if ($version -ne '370') { throw "Refusing altered engine build: $version" }
+          if (!(Test-Path "fixed-v17/benchmark-civic/scene.json")) { throw "Frozen reference scene missing" }
+          Write-Host 'ENGINE_BINARY_FROZEN=V17.370'
+      - name: Render matching views from frozen previous scene and reconstructed scene
+        shell: pwsh
+        timeout-minutes: 24
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          M3D_V16_GPU_GI_SAMPLES: '0'
+          M3D_PRIMARY_RAYS_25: '0'
+        run: |
+          $engine = (Resolve-Path "fixed-v17/moteur3d_v17_benchmark.exe").Path
+          $reference = (Resolve-Path "fixed-v17/benchmark-civic/scene.json").Path
+          $reconstructed = (Resolve-Path "scenes/v16/benchmark-civic/scene.json").Path
+          $views = @(
+            @{id='facade';hour=14},
+            @{id='passerelle';hour=14},
+            @{id='vue_haut';hour=14},
+            @{id='piscine_soir';hour=19},
+            @{id='hall';hour=19}
+          )
+          foreach ($view in $views) {
+            foreach ($variant in @('previous','reconstructed')) {
+              $sceneFile = if ($variant -eq 'previous') { $reference } else { $reconstructed }
+              $target = Join-Path "results/v17-geometric" "$variant/$($view.id)"
+              New-Item -ItemType Directory -Force $target | Out-Null
+              & $engine $sceneFile $target --smoke --camera-id $view.id --hour $view.hour
+              if ($LASTEXITCODE -ne 0) { throw "Failed actual WARP scene render $variant/$($view.id)" }
+              $pictures = @(Get-ChildItem $target -Recurse -Filter "raster_$($view.id)_640x360_depth1.png")
+              if ($pictures.Count -ne 1 -or $pictures[0].Length -lt 1500) {
+                throw "Missing native PNG: $variant/$($view.id)"
+              }
+              Write-Host "REAL_RENDER $variant/$($view.id) = $($pictures[0].Length) bytes"
+            }
+          }
+          python scenes/v16/benchmark-civic/compare_reconstruction.py results/v17-geometric
+          if ($LASTEXITCODE -ne 0) { throw "Native before/after image comparison failed" }
+      - name: Close-up art direction audit — monument, flowers, trees at 1366x768
+        shell: pwsh
+        timeout-minutes: 12
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          M3D_V16_GPU_GI_SAMPLES: '0'
+        run: |
+          node scenes/v16/benchmark-civic/make_detail_views.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot generate close-up cameras' }
+          $engine = (Resolve-Path "fixed-v17/moteur3d_v17_benchmark.exe").Path
+          $detailed = (Resolve-Path "scenes/v16/benchmark-civic/scene-detail.json").Path
+          foreach ($view in @('monument_detail','parterre_detail','arbres_detail')) {
+            $target = Join-Path "results/v17-geometric/details" $view
+            New-Item -ItemType Directory -Force $target | Out-Null
+            & $engine $detailed $target --quick --camera-id $view --hour 14
+            if ($LASTEXITCODE -ne 0) { throw "Close-up WARP render failed: $view" }
+            $png = @(Get-ChildItem $target -Recurse -Filter "raster_${view}_1366x768_depth1.png")
+            if ($png.Count -ne 1 -or $png[0].Length -lt 3500) {
+              throw "Close-up high-resolution PNG missing: $view"
+            }
+            Write-Host "ART_REVIEW $view = $($png[0].Length) bytes"
+          }
+      - name: Save generated source-only scene (for direct loading into unchanged V17)
+        shell: pwsh
+        if: success()
+        run: |
+          Copy-Item scenes/v16/benchmark-civic/scene.json results/v17-geometric/scene.json
+          Copy-Item scenes/v16/benchmark-civic/instances/leger.json results/v17-geometric/reconstructed-instances.json
+          Copy-Item scenes/v16/benchmark-civic/geometry/benchmark.json results/v17-geometric/geometry.json
+          Copy-Item scenes/v16/benchmark-civic/materials/pripyat-reuse.json results/v17-geometric/materials.json
+          Copy-Item scenes/v16/benchmark-civic/lighting/day.json results/v17-geometric/lighting.json
+      - name: Publish native WARP A/B images, generated scene and data
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17-RECONSTRUCTION-${{ github.run_number }}
+          path: results/v17-geometric/
+          if-no-files-found: warn
+          retention-days: 30

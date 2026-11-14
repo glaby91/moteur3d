@@ -1,0 +1,26 @@
+name: V17.380 — Ten-pass architectural preflight (no Qt, no raster)
+on:
+  push:
+    branches:
+      - feature/v17-380-global-architectural-rebuild-261112
+    paths:
+      - '.github/workflows/v17-380-ten-pass-preflight.yml'
+      - 'v17/tools/palais_ten_passes.cjs'
+      - 'scenes/v16/benchmark-civic/generate.cjs'
+      - 'scenes/v16/benchmark-civic/rebuild-objects.cjs'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: v17-380-ten-pass-preflight-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate lightweight civic scene
+        run: node scenes/v16/benchmark-civic/generate.cjs --all
+      - name: Validate all ten design modifications without raster renders
+        run: node v17/tools/palais_ten_passes.cjs --scene scenes/v16/benchmark-civic --check-only

@@ -1,0 +1,50 @@
+name: CSE WARP V5 — validation des fleurs densifiées
+run-name: WARP V5 — 320 fleurs GLB, deux prises de vue réelles
+on:
+  push:
+    branches: [feature/v17-420-v5-vegetation-pots-paving-water-261112]
+    paths: [.github/workflows/v17-v5-dense-flowers-warp.yml]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  flower-views:
+    runs-on: windows-2022
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      M3D_V16_FORCE_WARP: '1'
+      M3D_V17_EXPERIMENT_Z_PREPASS: '0'
+    steps:
+      - name: Retrieve exact approved V5 with 320 original GLB flowers
+        shell: pwsh
+        run: |
+          gh run download 43291679352 --repo glaby91/moteur3d --name CSE-WARP-V17.420-V5-Windows-x64 --dir warp
+          if($LASTEXITCODE -ne 0){throw 'Cannot download approved V5'}
+          $r=Get-Content 'warp/benchmark-civic/reports/revision-v5-verification.json' -Raw|ConvertFrom-Json
+          if($r.newGLBFlowerPositions -ne 320){throw 'Not the densely planted V5'}
+      - name: Temporary camera positions for front and side flower clusters
+        shell: pwsh
+        run: |
+          $path='warp/benchmark-civic/cameras/v4.json'
+          $doc=Get-Content $path -Raw|ConvertFrom-Json
+          $doc.cameras += [pscustomobject]@{id='v5_fleurs_denses_face';name='Fleurs GLB en bordure et gazanias';position=@(13.5,2.25,88.2);target=@(13.5,1.1,78);fovDegrees=52.0}
+          $doc.cameras += [pscustomobject]@{id='v5_fleurs_denses_cote';name='Massif GLB vu de cote';position=@(-13.0,2.25,89.3);target=@(-13.0,1.1,79);fovDegrees=52.0}
+          $doc|ConvertTo-Json -Depth 40|Set-Content $path -Encoding utf8
+          New-Item -ItemType Directory -Force 'WARP-FLEURS-320'|Out-Null
+      - name: Real DX11 WARP native benchmark renders, full scene, 1366x768
+        shell: pwsh
+        run: |
+          foreach($id in @('v5_fleurs_denses_face','v5_fleurs_denses_cote')){
+            & 'warp/moteur3d_v17_benchmark.exe' 'warp/benchmark-civic/scene-v5-complete.json' 'benchmark' --quick --camera-id $id --hour 14 --raster-msaa 1 --raster-lod-percent 100 --raster-lod-enabled 0
+            if($LASTEXITCODE -ne 0){throw "WARP 320 flowers render failed: $id"}
+            $images=@(Get-ChildItem benchmark -Recurse -Filter "raster_${id}_1366x768_depth1.png")
+            if($images.Count -ne 1 -or $images[0].Length -lt 2500){throw "Missing WARP PNG: $id"}
+            Copy-Item $images[0].FullName "WARP-FLEURS-320/$id.png"
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V17.420-V5-320-FLEURS-2-RENDUS
+          path: WARP-FLEURS-320/
+          if-no-files-found: error
+          retention-days: 30

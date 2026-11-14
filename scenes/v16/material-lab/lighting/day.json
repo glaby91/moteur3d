@@ -1,0 +1,6 @@
+{
+  "format": "m3d-lighting-v1",
+  "hour": 16.5,
+  "lights": [],
+  "notes": "Scene-specific solar hour only; shading stays in the shared renderer, not per scene."
+}

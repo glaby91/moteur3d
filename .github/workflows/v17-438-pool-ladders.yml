@@ -1,0 +1,78 @@
+name: CSE WARP V17.438 - climb and descend pool ladders
+on:
+  push:
+    branches: [feature/v17-438-pool-ladders-interactive-261113]
+    paths:
+      - .github/workflows/v17-438-pool-ladders.yml
+      - v17/**
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  windows-pool-ladders:
+    runs-on: windows-2022
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+      QT_QPA_PLATFORM: offscreen
+      M3D_V16_FORCE_WARP: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Restore validated V17.437 with original audio and pool scene
+        shell: pwsh
+        run: |
+          gh run download 43415880874 --repo glaby91/moteur3d --name CSE-WARP-V17.437-FRAME-PACING-DEFAULT-BENCH-Windows-x64 --dir dist-v438
+          if($LASTEXITCODE -ne 0){throw "V17.437 validated portable baseline unavailable"}
+          foreach($p in @("moteur3d_v17.exe","moteur3d_v16_core.dll","audio/pripyat_radio.wav","benchmark-civic/scene-v7-corrections.json")){
+            if(!(Test-Path "dist-v438/$p")){throw "Missing baseline $p"}
+          }
+      - name: Compile native GUI, frame pacing and four-ladder traversal
+        shell: pwsh
+        run: |
+          cmake -S v17 -B build-v438 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=438
+          if($LASTEXITCODE -ne 0){throw "Configuration failed"}
+          cmake --build build-v438 --config Release --target moteur3d_v17 v17_pool_ladder_smoke v17_frame_pacing_smoke v17_walk_controller_smoke v17_camera_diagnostic_smoke --parallel 4
+          if($LASTEXITCODE -ne 0){throw "C++ build failed"}
+      - name: Validate up/down on all 4 ladders, wall limits and existing systems
+        shell: pwsh
+        run: |
+          ctest --test-dir build-v438 -C Release -R "v17_pool_ladder_bidirectional|v17_frame_pacing_statistical_regression|v17_walk_stairs_collision|v17_camera_diagnostic_roundtrip" --output-on-failure
+          if($LASTEXITCODE -ne 0){throw "Traversal regression failure"}
+      - name: Rebuild portable 438, preserve validated scene and Ukrainian radio
+        shell: pwsh
+        run: |
+          Copy-Item build-v438/Release/moteur3d_v17.exe dist-v438/moteur3d_v17.exe -Force
+          Copy-Item build-v438/v16/Release/moteur3d_v16_core.dll dist-v438/moteur3d_v16_core.dll -Force
+          @'
+          CSE WARP V17.438 beta -- pool ladders.
+          In walk mode, move directly beside one of four pool ladders,
+          then press E once to climb down or up. Move in the pool by ZQSD.
+          Press E near the same ladder to return to the deck.
+          Preserves the complete V17.437 benchmark tools, Ukrainian audio
+          and architecture. The blocked internal staircase is recorded
+          separately (GitHub issue #54), not changed by this build.
+          '@ | Set-Content dist-v438/LIRE-438-ECHELLES-PISCINE.txt -Encoding UTF8
+          $env:GITHUB_SHA | Set-Content dist-v438/REVISION.txt -Encoding ascii
+      - name: Software DX11 GUI two-frame smoke test
+        shell: pwsh
+        timeout-minutes: 8
+        run: |
+          $exe=(Resolve-Path "dist-v438/moteur3d_v17.exe").Path
+          $scene=(Resolve-Path "dist-v438/pavillon01/scene.json").Path
+          $proc=Start-Process -FilePath $exe -ArgumentList @("--smoke-repeat-raster",$scene) -WorkingDirectory (Resolve-Path "dist-v438").Path -PassThru -Wait
+          if($proc.ExitCode -ne 0){throw "GPU GUI two-pass smoke failed"}
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: CSE-WARP-V17.438-ECHELLES-PISCINE-Windows-x64
+          path: dist-v438/
+          retention-days: 21
+          if-no-files-found: error

@@ -1,0 +1,32 @@
+{
+  "format": "m3d-scene-v16",
+  "name": "Pavillon 01",
+  "version": 1,
+  "units": "m",
+  "sectors": [
+    {
+      "id": "pavillon01",
+      "geometry": [
+        "geometry/house.json"
+      ],
+      "instances": [
+        "instances/house.json"
+      ],
+      "materials": [
+        "materials/house.json"
+      ],
+      "pbr": [
+        "pbr/house.json"
+      ],
+      "lighting": [
+        "lighting/day.json"
+      ],
+      "cameras": [
+        "cameras/views.json"
+      ],
+      "environment": [
+        "environment/site.json"
+      ]
+    }
+  ]
+}

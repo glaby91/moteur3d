@@ -1,0 +1,235 @@
+name: V17.380 FAST — architectural reconstruction and Z prepass benchmark
+run-name: V17.${{ github.run_number }} FAST — V4 Z-Prepass A-B
+on:
+  # Explicit opt-in only: experimental prepass must not affect daily builds.
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: v17-v4-z-fast-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-fast:
+    runs-on: windows-2022
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Qt6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Generate and validate exact new V4 scene
+        shell: pwsh
+        run: |
+          node scenes/v16/benchmark-civic/generate.cjs --all
+          if($LASTEXITCODE -ne 0){throw 'Scene generator failed'}
+          node scenes/v16/benchmark-civic/validate.cjs
+          if($LASTEXITCODE -ne 0){throw 'Scene validator failed'}
+          python scenes/v16/benchmark-civic/landscape_v4.py --root scenes/v16/benchmark-civic
+          if($LASTEXITCODE -ne 0){throw 'V4 generator failed'}
+          $budget=Get-Content scenes/v16/benchmark-civic/stats/v4-budget.json -Raw | ConvertFrom-Json
+          if($budget.v4_triangles -lt 1000000 -or $budget.v4_triangles -gt 1200000){throw "Unexpected V4 triangles: $($budget.v4_triangles)"}
+          Write-Host "V4 SOURCE TRIANGLES: $($budget.v4_triangles)"
+      - name: Architectural scene consistency and lighting count
+        shell: pwsh
+        run: |
+          $root='scenes/v16/benchmark-civic'
+          $scene=Get-Content "$root/scene-v4.json" -Raw | ConvertFrom-Json
+          $data=Get-Content "$root/instances/v4.json" -Raw | ConvertFrom-Json
+          $lights=Get-Content "$root/lighting/day.json" -Raw | ConvertFrom-Json
+          $objects=@($data.instances)
+          $groups=@($objects | ForEach-Object {$_.parent})
+          if($lights.lights.Count -ne 60){throw "Wrong light count: $($lights.lights.Count)"}
+          if(@($groups|Where-Object {$_ -like 'Interieur/Galeries/Garde-corps 1er etage*'}).Count -lt 40){throw 'First-floor guardrails missing'}
+          if(@($groups|Where-Object {$_ -like 'Architecture/Facade/Jardinieres ceramique POP 1970*'}).Count -lt 30){throw 'Colorful ceramic planters missing'}
+          if(@($groups|Where-Object {$_ -like 'Interieur/Piscine/Fresque Energetik originale*'}).Count -ne 1){throw 'Mounted original pool fresco missing'}
+          if(@($groups|Where-Object {$_ -like '*Joints verticaux*' -or $_ -like '*Joints horizontaux*'}).Count -gt 0){throw 'Aliased physical mosaic grout remains'}
+          $water=@($objects|Where-Object {$_.parent -eq 'Interieur/Piscine olympique/Eau'})
+          if($water.Count -ne 1 -or $water[0].size[0] -lt 49.9 -or $water[0].size[2] -lt 24.9){throw 'Incomplete pool water surface'}
+          Write-Host "V17.380 ARCHITECTURAL CHECKS PASS; lights=$($lights.lights.Count); source objects=$($objects.Count)"
+      - name: Configure and compile Windows
+        shell: pwsh
+        run: |
+          cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=380
+          if($LASTEXITCODE -ne 0){throw 'Configure failed'}
+          cmake --build build-v17 --config Release --parallel 4
+          if($LASTEXITCODE -ne 0){throw 'Compile failed'}
+          foreach($name in @('moteur3d_v17.exe','moteur3d_v17_benchmark.exe','moteur3d_v16_core.dll')){
+            if(!(Test-Path "build-v17/Release/$name")){throw "Missing $name"}
+          }
+      - name: Benchmark actual V4 scene — paired Z on/off with no hidden scene changes
+        shell: pwsh
+        timeout-minutes: 24
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          M3D_V16_GPU_GI_SAMPLES: '0'
+          M3D_PRIMARY_RAYS_25: '0'
+        run: |
+          $ErrorActionPreference='Stop'
+          $root='build-v17/v4-z-comparison'
+          New-Item -ItemType Directory -Force "$root/png" | Out-Null
+          $exe=(Resolve-Path "build-v17/Release/moteur3d_v17_benchmark.exe").Path
+          $scene=(Resolve-Path "scenes/v16/benchmark-civic/scene-v4.json").Path
+          $cases=@(
+            @{id='v4_face';hour=14},
+            @{id='v4_monument';hour=14},
+            @{id='v4_piscine';hour=19},
+            @{id='v4_hall';hour=19}
+          )
+          $data=@()
+          foreach($camera in $cases){
+            foreach($enabled in @(0,1)){
+              if($enabled -eq 1){$env:M3D_V17_EXPERIMENT_Z_PREPASS='1'}
+              else{Remove-Item Env:M3D_V17_EXPERIMENT_Z_PREPASS -ErrorAction SilentlyContinue}
+              $mode=if($enabled -eq 1){'zprepass'}else{'reference'}
+              $tag="$($camera.id)-$mode"
+              $out="$root/$tag"
+              & $exe $scene $out --quick --camera-id $camera.id --hour $camera.hour --raster-msaa 2 --readback-depth 1
+              if($LASTEXITCODE -ne 0){throw "Render failed $tag"}
+              $summary=Get-ChildItem $out -Recurse -Filter summary.json | Select-Object -First 1
+              if(!$summary){throw "Missing JSON $tag"}
+              $doc=Get-Content $summary.FullName -Raw | ConvertFrom-Json
+              $case=@($doc.cases | Where-Object {$_.backend -eq 'V17_D3D11_Raster'})[0]
+              if(!$case -or $case.status -ne 'ok'){throw "Raster invalid $tag"}
+              $png=Get-ChildItem $out -Recurse -Filter 'raster_*.png' | Select-Object -First 1
+              if(!$png){throw "Missing PNG $tag"}
+              Copy-Item $png.FullName "$root/png/$tag.png"
+              $data += [pscustomobject]@{
+                camera=$camera.id;mode=$mode;msaa=2;hour=$camera.hour
+                gpuDrawMs=$case.gpuDrawMs
+                gpuTransferMs=$case.gpuTransferMs
+                cpuSubmitMs=$case.cpuSubmitMs
+                cpuMapWaitMs=$case.cpuMapWaitMs
+                frameMeanMs=$case.meanMs
+                streamFps=$case.streamFps
+                drawCalls=$case.gpuDrawCalls
+                triangles=$case.submittedTriangles
+              }
+            }
+          }
+          Remove-Item Env:M3D_V17_EXPERIMENT_Z_PREPASS -ErrorAction SilentlyContinue
+          $data|Export-Csv "$root/v4-z-raw.csv" -NoTypeInformation -Encoding utf8
+          $comparison=@()
+          foreach($cam in $cases.id){
+            $a=@($data|Where-Object {$_.camera -eq $cam -and $_.mode -eq 'reference'})[0]
+            $b=@($data|Where-Object {$_.camera -eq $cam -and $_.mode -eq 'zprepass'})[0]
+            $same=((Get-FileHash "$root/png/$cam-reference.png" -Algorithm SHA256).Hash -eq (Get-FileHash "$root/png/$cam-zprepass.png" -Algorithm SHA256).Hash)
+            $comparison += [pscustomobject]@{
+              camera=$cam;imageSha256Identical=$same
+              referenceDrawMs=$a.gpuDrawMs;prepassDrawMs=$b.gpuDrawMs
+              drawSavingsPercent=if($a.gpuDrawMs -gt 0){[math]::Round(100*($a.gpuDrawMs-$b.gpuDrawMs)/$a.gpuDrawMs,2)}else{0}
+              referenceCpuSubmitMs=$a.cpuSubmitMs;prepassCpuSubmitMs=$b.cpuSubmitMs
+              referenceFps=$a.streamFps;prepassFps=$b.streamFps
+              fpsChangePercent=if($a.streamFps -gt 0){[math]::Round(100*($b.streamFps/$a.streamFps-1),2)}else{0}
+            }
+          }
+          $comparison|Export-Csv "$root/v4-z-comparison.csv" -NoTypeInformation -Encoding utf8
+          $comparison|Format-Table -AutoSize|Out-String|Write-Host
+          $comparison|ConvertTo-Json|Out-File "$root/v4-z-comparison.json" -Encoding utf8
+          if($data.Count -ne 8){throw 'Incomplete benchmark'}
+          if(@($comparison|Where-Object {-not $_.imageSha256Identical}).Count -gt 0){
+            Write-Warning 'Visual mismatch detected: do not enable prepass by default until validated.'
+          }
+      - name: WARP lossless readback A-B — pixel parity and GPU transfer
+        shell: pwsh
+        timeout-minutes: 16
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          M3D_V16_GPU_GI_SAMPLES: '0'
+          M3D_PRIMARY_RAYS_25: '0'
+        run: |
+          $ErrorActionPreference='Stop'
+          $exe=(Resolve-Path "build-v17/Release/moteur3d_v17_benchmark.exe").Path
+          $scene=(Resolve-Path "scenes/v16/benchmark-civic/scene-v4.json").Path
+          $base='build-v17/v4-z-comparison/readback-ab'
+          New-Item -ItemType Directory -Force "$base" | Out-Null
+          $data=@()
+          foreach($camera in @('v4_face','v4_piscine')){
+            foreach($msaa in @(1,2)){
+              foreach($legacy in @(0,1)){
+                if($legacy -eq 1){$env:M3D_V17_LEGACY_DOUBLE_COPY='1'}
+                else{Remove-Item Env:M3D_V17_LEGACY_DOUBLE_COPY -ErrorAction SilentlyContinue}
+                $tag="$camera-msaa$msaa-legacy$legacy"
+                $out="$base/$tag"
+                & $exe $scene $out --smoke --camera-id $camera --hour 19 --raster-msaa $msaa --readback-depth 1
+                if($LASTEXITCODE -ne 0){throw "WARP readback failed: $tag"}
+                $summary=Get-ChildItem $out -Recurse -Filter summary.json | Select-Object -First 1
+                $doc=Get-Content $summary.FullName -Raw | ConvertFrom-Json
+                $case=@($doc.cases | Where-Object {$_.backend -eq 'V17_D3D11_Raster'})[0]
+                if(!$case -or $case.status -ne 'ok'){throw "WARP readback result invalid: $tag"}
+                $png=Get-ChildItem $out -Recurse -Filter 'raster_*.png' | Select-Object -First 1
+                if(!$png){throw "Missing PNG: $tag"}
+                $data += [pscustomobject]@{tag=$tag;camera=$camera;msaa=$msaa;legacy=$legacy
+                  sha=(Get-FileHash $png.FullName -Algorithm SHA256).Hash
+                  transferMs=$case.gpuTransferMs;meanMs=$case.meanMs;fps=$case.streamFps}
+              }
+              $pair=@($data | Where-Object {$_.camera -eq $camera -and $_.msaa -eq $msaa})
+              if($pair.Count -ne 2 -or $pair[0].sha -ne $pair[1].sha){
+                throw "PIXEL PARITY FAILED $camera MSAA=$msaa: new direct readback differs from the legacy reference"
+              }
+              Write-Host "PIXEL EXACT $camera MSAA=$msaa"
+            }
+          }
+          Remove-Item Env:M3D_V17_LEGACY_DOUBLE_COPY -ErrorAction SilentlyContinue
+          $data|Export-Csv "$base/readback-comparison.csv" -NoTypeInformation -Encoding utf8
+          $data|ConvertTo-Json|Out-File "$base/readback-comparison.json" -Encoding utf8
+          if($data.Count -ne 8){throw 'Readback A/B incomplete'}
+      - name: Package launchable V17 engine + full V4 scene + A-B results
+        shell: pwsh
+        run: |
+          $root='dist-v17-v4-z'
+          New-Item -ItemType Directory -Force "$root/benchmark-civic" | Out-Null
+          foreach($name in @('moteur3d_v17.exe','moteur3d_v17_benchmark.exe','moteur3d_v17_benchui.exe','moteur3d_v16_core.dll')){
+            Copy-Item "build-v17/Release/$name" "$root/" -ErrorAction Stop
+          }
+          foreach($name in @('pavillon01','shaders')){
+            if(Test-Path "build-v17/Release/$name"){Copy-Item "build-v17/Release/$name" "$root/$name" -Recurse}
+          }
+          # Preserve all shipped non-V4 data, then overlay the generated V4.
+          if(Test-Path 'build-v17/Release/benchmark-civic'){
+            Copy-Item 'build-v17/Release/benchmark-civic/*' "$root/benchmark-civic/" -Recurse -Force
+          }
+          Copy-Item 'scenes/v16/benchmark-civic/*' "$root/benchmark-civic/" -Recurse -Force
+          Copy-Item 'build-v17/v4-z-comparison' "$root/benchmark-V4-Z" -Recurse
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set M3D_V17_EXPERIMENT_Z_PREPASS=1
+          start "" "moteur3d_v17.exe"
+          '@ | Out-File "$root/START_V4_Z_PREPASS.bat" -Encoding ascii
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set M3D_V17_EXPERIMENT_Z_PREPASS=
+          start "" "moteur3d_v17.exe"
+          '@ | Out-File "$root/START_V4_REFERENCE.bat" -Encoding ascii
+          @'
+          Scene V4 1.1M triangles. Open benchmark-civic/scene-v4.json in CSE WARP.
+          START_V4_Z_PREPASS.bat enables the experimental prepass.
+          START_V4_REFERENCE.bat uses unchanged reference rendering.
+          Benchmark CSV/JSON and captured PNGs: benchmark-V4-Z/
+          Windows package with Qt runtime. WARP results are NOT Intel HD 620 results.
+          '@|Out-File "$root/README-V4-Z.txt" -Encoding utf8
+          git rev-parse HEAD|Out-File "$root/REVISION.txt" -Encoding ascii
+          '380'|Out-File "$root/BUILD_NUMBER.txt" -Encoding ascii
+          windeployqt --release --no-translations "$root/moteur3d_v17.exe"
+          if($LASTEXITCODE -ne 0){throw 'Qt deployment failed'}
+          windeployqt --release --no-translations "$root/moteur3d_v17_benchui.exe"
+          if($LASTEXITCODE -ne 0){throw 'Qt benchui deployment failed'}
+          if(!(Test-Path "$root/benchmark-civic/scene-v4.json")){throw 'V4 scene missing from package'}
+      - name: Upload FAST A-B results only
+        uses: actions/upload-artifact@v6
+        with:
+          name: V17.380-V4-Z-BENCH
+          path: build-v17/v4-z-comparison/
+          if-no-files-found: error
+      - name: Upload portable V4 Z-Prepass Windows package
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17.380-RECONSTRUCTION-V4-Windows-x64
+          path: dist-v17-v4-z/
+          if-no-files-found: error

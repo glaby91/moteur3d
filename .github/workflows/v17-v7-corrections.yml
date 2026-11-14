@@ -1,0 +1,263 @@
+name: CSE WARP V17.427 — native renderer, corrected scene and WARP
+on:
+  push:
+    branches: [feature/v17-v7-corrections-scene-261112]
+    paths: [tools/upgrade_scene_v7.py, .github/workflows/v17-v7-corrections.yml, 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp', 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lighting.cpp']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  windows-v7:
+    runs-on: windows-2022
+    timeout-minutes: 50
+    env:
+      GH_TOKEN: ${{ github.token }}
+      QT_QPA_PLATFORM: offscreen
+      M3D_V16_FORCE_WARP: '1'
+      M3D_V17_EXPERIMENT_Z_PREPASS: '0'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install Qt6 for native Windows rendering
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Install scene geometry dependencies
+        shell: pwsh
+        run: |
+          python -m pip install --only-binary=:all: "numpy>=2" "Pillow>=11" "shapely>=2.1.2"
+          if($LASTEXITCODE -ne 0){throw "Dependencies failed"}
+      - name: Restore verified V6 portable Windows package
+        shell: pwsh
+        run: |
+          gh run download 43302001952 --repo glaby91/moteur3d --name CSE-WARP-V17.420-V6-MONUMENT-Windows-x64 --dir dist-v7
+          if($LASTEXITCODE -ne 0){throw "V6 download failed"}
+          if(!(Test-Path dist-v7/benchmark-civic/scene-v6-monument.json)){throw "Missing V6 reference"}
+      - name: Apply validated V17.421 memory-corrected Windows renderer
+        shell: pwsh
+        run: |
+          gh run download 43306205112 --repo glaby91/moteur3d --name CSE-WARP-V17.421-LOWRAM-ENGINE-PATCH --dir patch
+          if($LASTEXITCODE -ne 0){throw "Low RAM patch download failed"}
+          foreach($p in @("moteur3d_v17.exe","moteur3d_v17_benchmark.exe","moteur3d_v16_core.dll")){
+            Copy-Item "patch/build-v17/Release/$p" "dist-v7/$p" -Force
+          }
+      - name: Compile native V17 with color and water fixes
+        shell: pwsh
+        run: |
+          node scenes/v16/benchmark-civic/generate.cjs --all
+          if($LASTEXITCODE -ne 0){throw "Benchmark scene generation failed"}
+          cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=427
+          if($LASTEXITCODE -ne 0){throw "CMake configuration failed"}
+          cmake --build build-v17 --config Release --parallel 4
+          if($LASTEXITCODE -ne 0){throw "Actual Windows engine compilation failed"}
+          foreach($p in @("moteur3d_v17.exe","moteur3d_v17_benchmark.exe","moteur3d_v16_core.dll")){
+            if(!(Test-Path "build-v17/Release/$p")){throw "Missing newly compiled $p"}
+            Copy-Item "dist-v7/$p" "dist-v7/BASELINE-V17.421-$p" -Force
+            Copy-Item "build-v17/Release/$p" "dist-v7/$p" -Force
+          }
+      - name: Create non-destructive V7 scene
+        shell: pwsh
+        run: |
+          python tools/upgrade_scene_v7.py --root dist-v7/benchmark-civic
+          if($LASTEXITCODE -ne 0){throw "V7 geometry failed"}
+      - name: Validate topology, asset references and native image pixels
+        shell: pwsh
+        run: |
+          @'
+          import json
+          from pathlib import Path
+          from PIL import Image
+          r=Path("dist-v7/benchmark-civic")
+          s=json.loads((r/"scene-v7-corrections.json").read_text(encoding="utf8"))["sectors"][0]
+          for category in ("instances","geometry","materials","pbr","cameras","lighting","environment"):
+              assert all((r/path).is_file() for path in s[category]),category
+          a=json.loads((r/s["instances"][0]).read_text(encoding="utf8"))["instances"]
+          gm={m["id"] for p in s["geometry"] for m in json.loads((r/p).read_text(encoding="utf8"))["meshes"]}
+          mm={m["id"] for p in s["materials"] for m in json.loads((r/p).read_text(encoding="utf8"))["materials"]}
+          assert len({o["id"] for o in a})==len(a)
+          assert all(o["geometry"] in gm and o["material"] in mm for o in a)
+          t=json.loads((r/"reports/v7-corrections.json").read_text(encoding="utf8"))
+          assert t["remainingBenchSeatSections"]==80
+          assert t["retainedRealTrees"]==52
+          assert len(t["pitRadiiM"])==26
+          assert t["hillHeightM"]==3.2
+          assert t["plinthEmbeddedIntoHillM"]==.38
+          assert t["hillSummitFlatNormalizedRadius"]==.28
+          assert t["isolatedToyFlowerSpheresRemoved"]==24
+          assert not any(o["parent"]=="Place/Jardins/Fleurs basses" for o in a)
+          assert t["largeEngravedPanels"]==8
+          assert t["nativeEngravingPixelsPerFace"]==[2048,512]
+          assert sum(o["parent"]=="Place/Monument marteau faucille/Gravure bilingue" for o in a)==8
+          assert t["retainedLitLampPosts"]==10
+          assert sum(o["parent"]=="Mobilier/Lampadaires" for o in a)==20
+          assert t["topCorniceRealLights"]==12 and t["plazaRealLights"]==10
+          lighting=json.loads((r/"lighting/v7-evening.json").read_text(encoding="utf8"))
+          assert len(lighting["lights"])==82
+          assert sum(o["parent"]=="Architecture/Palais/Facade/Eclairage sous corniche" for o in a)==12
+          assert t["frontStairWidthM"]==68.2 and t["lateralParvisTransitions"]==8
+          assert t["muralAtriumCentralSlabs"]==0
+          assert t["muralSightlineRemovedPoolEndRailParts"]==35
+          assert t["poolEndGuardrailNearEndPreserved"]==34
+          assert t["galleryRightInboardSlabsRemoved"]==6
+          assert t["galleryRightOldRailPartsRemoved"]>=20
+          assert t["galleryRightOuterFootwayPreserved"] is True
+          assert t["galleryRightNewRailSections"]==3
+          assert t["hangingMuralOccludingPennantsRemoved"]==22
+          assert t["obsoletePoolStairInstancesRemoved"]==76
+          assert t["experimentalPoolStairInstancesRemaining"]==0
+          assert t["closedFormerStairFloorSlabs"]==3
+          assert not any(o["parent"].startswith(("Interieur/Hall/Grand escalier",
+                   "Interieur/Hall/Palier raccord escalier",
+                   "Interieur/Escalier galerie","Interieur/Escalier V7")) for o in a)
+          assert not any(o["parent"]=="Interieur/Galeries/Plancher avec tremie" for o in a)
+          assert sum(o["parent"]=="Interieur/Galeries/V7 fermeture tremie ancien escalier"
+                     for o in a)==1
+          assert sum(o["parent"]=="Interieur/Galeries/V7 coursive exterieure conservee"
+                     and o["position"][1] in (4.5,9.0,13.5) for o in a)==3
+          assert t["floatingLuminaireMeshesRemoved"]==154
+          assert t["isolatedHallLightBlocksRemoved"]==2
+          removed_light_groups=("Interieur/Hall/Plafonniers/",
+             "Interieur/Piscine olympique/Plafonniers/",
+             "Interieur/Piscine olympique/Lumière linéaire",
+             "Interieur/Galeries/Sous mezzanine/",
+             "Interieur/Hall/Appliques murales",
+             "Interieur/Piscine olympique/Appliques galerie")
+          assert not any(o["parent"].startswith(removed_light_groups) for o in a)
+          assert not any(o["parent"]=="Interieur/Hall/Panneaux" for o in a)
+          assert t["curtainWallMissingBaysGlazed"]==16
+          assert t["curtainWallClerestoryBaysGlazed"]==22
+          assert t["curtainWallNewMetalMullionsAndTransoms"]==468
+          assert sum(o["parent"]=="Architecture/Palais/Mur-rideau V7/Vitrages rajoutes" for o in a)==16
+          assert sum(o["parent"]=="Architecture/Palais/Mur-rideau V7/Vitrages bandeau haut" for o in a)==22
+          assert not any(o["parent"].startswith("Architecture/Palais/Mur-rideau V7/Vitrages")
+                   and o["position"][1]==2.6 and abs(o["position"][0])<7.0
+                   for o in a), "Entrance blocked by added glass"
+          assert not any(o["parent"]=="Architecture/Palais/Mur-rideau V7/Vitrages bandeau haut"
+                   and abs(o["position"][0])<9.0 for o in a), "Mosaic obscured"
+          assert not any(o["parent"].startswith("Interieur/Piscine olympique/Fanions/")
+                         for o in a)
+          assert any(o["parent"]=="Interieur/Piscine olympique/Lignes d’eau"
+                     for o in a), "Pool lane dividers must remain"
+          assert sum(o["parent"].startswith("Interieur/Galeries/Garde-corps 1er etage/")
+                     and abs(o["position"][0]-28.5)<.01 for o in a)==0
+          assert sum(o["parent"]=="Interieur/Galeries/V7 Garde-corps recules/Main courante"
+                     for o in a)==3
+          assert any(o["id"]=="v7_gallery_right_third_floor_narrow" for o in a)
+          assert not any(o["parent"] in ("Interieur/Galeries","Interieur/Galeries/Plancher avec tremie")
+                     and 20<o["position"][0]<45
+                     and any(abs(o["position"][1]-h)<.01 for h in (4.5,9.,13.5))
+                     and o["position"][0]-o["size"][0]/2<38.8 for o in a)
+          assert sum(o["parent"]=="Interieur/Piscine olympique/Garde-corps" and
+                     abs(o["position"][2]+45.6)<.01 for o in a)==0
+          assert sum(o["parent"]=="Interieur/Piscine olympique/Garde-corps" and
+                     abs(o["position"][2]+18.4)<.01 for o in a)==34
+          assert sum(o["parent"]=="Interieur/Piscine olympique/Main courante" and
+                     abs(o["position"][2]+44.64)<.01 for o in a)==0
+          assert sum(o["parent"]=="Interieur/Piscine olympique/Main courante" and
+                     abs(o["position"][2]+19.36)<.01 for o in a)==1
+          assert not any(o["parent"]=="Interieur/Galeries" and o["position"][1]>=4.4
+               and abs(o["position"][0])<.1 and o["position"][2]<-43 for o in a)
+          assert not any(o["parent"].startswith("Interieur/Galeries/Garde-corps 1er etage/")
+               and abs(o["position"][2]+45.3)<.2 and abs(o["position"][0])<28.1 for o in a)
+          assert sum(o["parent"]=="Place/Parvis/Transitions laterales sans trou" for o in a)==8
+          assert all(o["size"][0]==68.2 for o in a if o["parent"]=="Place/Escalier monumental")
+          assert t["frescoTiles"]==8 and abs(t["frescoAspectRatio"]-2048/930)<1e-6
+          assert len([o for o in a if o["parent"].endswith("/Garde-corps continus")])==0
+          assert not any(o["parent"] in ("Place/Jardins/Arbustes","Place/Jardins devant entrée") for o in a)
+          src=Image.open(r/"textures/energetik_fresco_mosaic.jpg").convert("RGB")
+          restored=Image.new("RGB",src.size)
+          for y in range(2):
+              for x in range(4):
+                  tile=Image.open(r/f"textures/revision/v7/energetik_tile_{y}_{x}.png")
+                  restored.paste(tile,(512*x,465*y))
+          assert src.tobytes()==restored.tobytes(),"fresco source pixels altered"
+          assert (r/"scene-v6-monument.json").is_file() and (r/"scene-v5-complete.json").is_file()
+          print("V17.427 SCENE PASS — GLB, plinth, letters, lamps, mosaic and geometry")
+          '@ | python -
+          if($LASTEXITCODE -ne 0){throw "V7 structure invalid"}
+      - name: Real DX11 WARP test at 1366x768
+        shell: pwsh
+        run: |
+          & dist-v7/moteur3d_v17_benchmark.exe dist-v7/benchmark-civic/scene-v7-corrections.json v7-renders --quick --camera-id v4_face --hour 14.75 --raster-msaa 1 --raster-lod-percent 100 --raster-lod-enabled 0
+          if($LASTEXITCODE -ne 0){throw "V7 WARP raster failed"}
+          $img=@(Get-ChildItem v7-renders -Recurse -Filter "raster_v4_face_1366x768_depth1.png")
+          if($img.Count -ne 1 -or $img[0].Length -lt 10000){throw "Missing actual V7 render"}
+          New-Item -ItemType Directory -Force -Path v7-images | Out-Null
+          Copy-Item $img[0].FullName v7-images/V7-FACADE-WARP-1366x768.png
+      - name: Real DX11 WARP test of giant tiled pool fresco
+        shell: pwsh
+        run: |
+          & dist-v7/moteur3d_v17_benchmark.exe dist-v7/benchmark-civic/scene-v7-corrections.json v7-pool --smoke --camera-id v7_pool_fresco --hour 14.75 --raster-msaa 1
+          if($LASTEXITCODE -ne 0){throw "V7 fresco WARP render failed"}
+          $img=@(Get-ChildItem v7-pool -Recurse -Filter "raster_v7_pool_fresco_640x360_depth1.png")
+          if($img.Count -ne 1 -or $img[0].Length -lt 1000){throw "Missing fresco render"}
+          Copy-Item $img[0].FullName v7-images/V7-FRESQUE-WARP-640x360.png
+      - name: Real D3D11 WARP camera 07 — verify formerly obstructed mural sightline
+        shell: pwsh
+        run: |
+          & dist-v7/moteur3d_v17_benchmark.exe dist-v7/benchmark-civic/scene-v7-corrections.json v7-gallery-check --smoke --camera-id v4_piscine --hour 14.75 --raster-msaa 1
+          if($LASTEXITCODE -ne 0){throw "Camera 07 real WARP render failed"}
+          $img=@(Get-ChildItem v7-gallery-check -Recurse -Filter "raster_v4_piscine_640x360_depth1.png")
+          if($img.Count -ne 1 -or $img[0].Length -lt 1000){throw "Camera 07 mural image missing"}
+          Copy-Item $img[0].FullName v7-images/V7-CAMERA-07-FRESQUE-SANS-GALERIE-WARP-640x360.png
+      - name: Inspect repaired glass, empty pool staircase and east passage
+        shell: pwsh
+        run: |
+          foreach($id in @("v7_curtain_wall_detail","v7_pool_stairs_removed","v7_east_gallery_closed")){
+            & dist-v7/moteur3d_v17_benchmark.exe dist-v7/benchmark-civic/scene-v7-corrections.json "v7-$id" --smoke --camera-id $id --hour 14.75 --raster-msaa 1
+            if($LASTEXITCODE -ne 0){throw "New V7 regression view failed: $id"}
+            $img=@(Get-ChildItem "v7-$id" -Recurse -Filter "raster_$($id)_640x360_depth1.png")
+            if($img.Count -ne 1 -or $img[0].Length -lt 1000){throw "Missing actual raster: $id"}
+            Copy-Item $img[0].FullName "v7-images/$id.png"
+          }
+      - name: Compare daytime and dusk DX11 raster, including new lamp fixtures
+        shell: pwsh
+        run: |
+          foreach($camera in @("v6_monument_front","v4_piscine","v7_curtain_wall_detail")){
+            foreach($hour in @("14.75","19.00")){
+              $safe=$hour.Replace(".","_")
+              $dest="v7-compare-$camera-$safe"
+              & dist-v7/moteur3d_v17_benchmark.exe dist-v7/benchmark-civic/scene-v7-corrections.json $dest --smoke --camera-id $camera --hour $hour --raster-msaa 1
+              if($LASTEXITCODE -ne 0){throw "WARP failed: $camera $hour"}
+              $img=@(Get-ChildItem $dest -Recurse -Filter "raster_$($camera)_640x360_depth1.png")
+              if($img.Count -ne 1 -or $img[0].Length -lt 1000){throw "Missing image: $camera $hour"}
+              Copy-Item $img[0].FullName "v7-images/V17-427-$camera-$safe.png"
+            }
+          }
+      - name: Package all V7 executable and scenes
+        shell: pwsh
+        run: |
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set "M3D_V17_EXPERIMENT_Z_PREPASS="
+          start "" "moteur3d_v17.exe" "benchmark-civic\scene-v7-corrections.json"
+          '@ | Out-File dist-v7/DEMARRER_CSE_WARP_V7.bat -Encoding ascii
+          @'
+          CSE WARP V17.427 / V7: scene corrections and freshly built native renderer.
+          The original V5/V6 reference files remain available.
+          Windows DX11 software WARP smoke benchmark; HD620 hardware FPS
+          and full scene navigation need validation on the user's computer.
+          Experimental Z prepass OFF by default.
+          '@ | Out-File dist-v7/LIRE_EN_PREMIER-V7.txt -Encoding utf8
+          Copy-Item tools/upgrade_scene_v7.py dist-v7/upgrade_scene_v7.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V17.427-V7-SCENE-RENDU-Windows-x64
+          path: dist-v7/
+          retention-days: 21
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V7-VUES-REELLES-WARP
+          path: v7-images/
+          retention-days: 21
+          if-no-files-found: error

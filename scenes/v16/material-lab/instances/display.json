@@ -1,0 +1,515 @@
+{
+  "format": "m3d-instances-v1",
+  "instances": [
+    {
+      "id": "ground",
+      "parent": "Atelier/Exterieur",
+      "geometry": "unit_box",
+      "material": "meadow",
+      "position": [
+        0,
+        -0.28,
+        0
+      ],
+      "size": [
+        30,
+        0.45,
+        21
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "plinth",
+      "parent": "Atelier/Fondation",
+      "geometry": "unit_box",
+      "material": "architect_concrete",
+      "position": [
+        0,
+        0.15,
+        -2
+      ],
+      "size": [
+        18,
+        0.4,
+        8
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "brick_wall",
+      "parent": "Atelier/Murs",
+      "geometry": "unit_box",
+      "material": "brick_clay",
+      "position": [
+        -4.7,
+        3.2,
+        -3.9
+      ],
+      "size": [
+        8.5,
+        5.9,
+        0.48
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "plaster_wall",
+      "parent": "Atelier/Murs",
+      "geometry": "unit_box",
+      "material": "lime_plaster",
+      "position": [
+        4.15,
+        3.2,
+        -3.9
+      ],
+      "size": [
+        8.5,
+        5.9,
+        0.48
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "return_brick",
+      "parent": "Atelier/Murs",
+      "geometry": "unit_box",
+      "material": "brick_clay",
+      "position": [
+        -8.7,
+        3,
+        -1
+      ],
+      "size": [
+        0.4,
+        5.9,
+        6
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "stone_side_wall",
+      "parent": "Atelier/Murs",
+      "geometry": "unit_box",
+      "material": "slate_stone",
+      "position": [
+        8.6,
+        3,
+        -1
+      ],
+      "size": [
+        0.4,
+        5.9,
+        6
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "roof",
+      "parent": "Atelier/Toit",
+      "geometry": "unit_box",
+      "material": "roof_bitumen",
+      "position": [
+        0,
+        6.3,
+        -2
+      ],
+      "size": [
+        18,
+        0.27,
+        8
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "roof_edge",
+      "parent": "Atelier/Toit",
+      "geometry": "unit_box",
+      "material": "steel",
+      "position": [
+        0,
+        6.42,
+        2.06
+      ],
+      "size": [
+        18,
+        0.07,
+        0.22
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "deck",
+      "parent": "Atelier/Terrasse",
+      "geometry": "unit_box",
+      "material": "timber",
+      "position": [
+        0,
+        0.1,
+        4.3
+      ],
+      "size": [
+        13.8,
+        0.2,
+        3.8
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "deck_board_0",
+      "parent": "Atelier/Terrasse/Lames",
+      "geometry": "unit_box",
+      "material": "timber",
+      "position": [
+        -6.1,
+        0.24,
+        4.3
+      ],
+      "size": [
+        1.12,
+        0.055,
+        3.65
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "deck_board_1",
+      "parent": "Atelier/Terrasse/Lames",
+      "geometry": "unit_box",
+      "material": "timber",
+      "position": [
+        -4.89,
+        0.24,
+        4.3
+      ],
+      "size": [
+        1.12,
+        0.055,
+        3.65
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "deck_board_2",
+      "parent": "Atelier/Terrasse/Lames",
+      "geometry": "unit_box",
+      "material": "timber",
+      "position": [
+        -3.6799999999999997,
+        0.24,
+        4.3
+      ],
+      "size": [
+        1.12,
+        0.055,
+        3.65
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "deck_board_3",
+      "parent": "Atelier/Terrasse/Lames",
+      "geometry": "unit_box",
+      "material": "timber",
+      "position": [
+        -2.4699999999999998,
+        0.24,
+        4.3
+      ],
+      "size": [
+        1.12,
+        0.055,
+        3.65
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "deck_board_4",
+      "parent": "Atelier/Terrasse/Lames",
+      "geometry": "unit_box",
+      "material": "timber",
+      "position": [
+        -1.2599999999999998,
+        0.24,
+        4.3
+      ],
+      "size": [
+        1.12,
+        0.055,
+        3.65
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "deck_board_5",
+      "parent": "Atelier/Terrasse/Lames",
+      "geometry": "unit_box",
+      "material": "timber",
+      "position": [
+        -0.04999999999999982,
+        0.24,
+        4.3
+      ],
+      "size": [
+        1.12,
+        0.055,
+        3.65
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "deck_board_6",
+      "parent": "Atelier/Terrasse/Lames",
+      "geometry": "unit_box",
+      "material": "timber",
+      "position": [
+        1.1600000000000001,
+        0.24,
+        4.3
+      ],
+      "size": [
+        1.12,
+        0.055,
+        3.65
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "deck_board_7",
+      "parent": "Atelier/Terrasse/Lames",
+      "geometry": "unit_box",
+      "material": "timber",
+      "position": [
+        2.369999999999999,
+        0.24,
+        4.3
+      ],
+      "size": [
+        1.12,
+        0.055,
+        3.65
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "deck_board_8",
+      "parent": "Atelier/Terrasse/Lames",
+      "geometry": "unit_box",
+      "material": "timber",
+      "position": [
+        3.58,
+        0.24,
+        4.3
+      ],
+      "size": [
+        1.12,
+        0.055,
+        3.65
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "deck_board_9",
+      "parent": "Atelier/Terrasse/Lames",
+      "geometry": "unit_box",
+      "material": "timber",
+      "position": [
+        4.790000000000001,
+        0.24,
+        4.3
+      ],
+      "size": [
+        1.12,
+        0.055,
+        3.65
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "deck_board_10",
+      "parent": "Atelier/Terrasse/Lames",
+      "geometry": "unit_box",
+      "material": "timber",
+      "position": [
+        6,
+        0.24,
+        4.3
+      ],
+      "size": [
+        1.12,
+        0.055,
+        3.65
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "transparent_window",
+      "parent": "Atelier/Vitrages",
+      "geometry": "unit_box",
+      "material": "transparent_glass",
+      "position": [
+        3.1,
+        2.8,
+        2.035
+      ],
+      "size": [
+        4,
+        4.3,
+        0.055
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "window_mullion_0",
+      "parent": "Atelier/Vitrages",
+      "geometry": "unit_box",
+      "material": "steel",
+      "position": [
+        1.6,
+        2.8,
+        2.085
+      ],
+      "size": [
+        0.044,
+        4.3,
+        0.05
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "window_mullion_1",
+      "parent": "Atelier/Vitrages",
+      "geometry": "unit_box",
+      "material": "steel",
+      "position": [
+        3.1,
+        2.8,
+        2.085
+      ],
+      "size": [
+        0.044,
+        4.3,
+        0.05
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "window_mullion_2",
+      "parent": "Atelier/Vitrages",
+      "geometry": "unit_box",
+      "material": "steel",
+      "position": [
+        4.6,
+        2.8,
+        2.085
+      ],
+      "size": [
+        0.044,
+        4.3,
+        0.05
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "stone_pier",
+      "parent": "Atelier/Details",
+      "geometry": "unit_box",
+      "material": "slate_stone",
+      "position": [
+        -7.9,
+        2.9,
+        1.7
+      ],
+      "size": [
+        0.65,
+        5.3,
+        0.65
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "timber_soffit",
+      "parent": "Atelier/Details",
+      "geometry": "unit_box",
+      "material": "timber",
+      "position": [
+        -1.6,
+        5.8,
+        1.88
+      ],
+      "size": [
+        7.4,
+        0.24,
+        0.16
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "brick_panel",
+      "parent": "Atelier/Details",
+      "geometry": "unit_box",
+      "material": "brick_clay",
+      "position": [
+        -3.9,
+        1.8,
+        2.02
+      ],
+      "size": [
+        3.8,
+        3.4,
+        0.15
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "metal_orb",
+      "parent": "Atelier/Echantillons",
+      "geometry": "unit_sphere",
+      "material": "steel",
+      "position": [
+        -5,
+        1.35,
+        6.5
+      ],
+      "size": [
+        1.55,
+        1.55,
+        1.55
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "stone_orb",
+      "parent": "Atelier/Echantillons",
+      "geometry": "unit_sphere",
+      "material": "slate_stone",
+      "position": [
+        -1.6,
+        1.35,
+        6.5
+      ],
+      "size": [
+        1.55,
+        1.55,
+        1.55
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "water_panel",
+      "parent": "Atelier/Echantillons",
+      "geometry": "unit_box",
+      "material": "water_test",
+      "position": [
+        5,
+        0.41,
+        7
+      ],
+      "size": [
+        3.1,
+        0.13,
+        2.2
+      ],
+      "rotationY": 0
+    }
+  ]
+}

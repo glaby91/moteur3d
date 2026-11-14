@@ -1,0 +1,268 @@
+#!/usr/bin/env node
+// V17.317: structural and spatial validation, not just instance accounting.
+'use strict';
+const fs=require('node:fs');
+const path=require('node:path');
+const crypto=require('node:crypto');
+const base=__dirname;
+const root=path.resolve(base,'../../..');
+const origin=JSON.parse(fs.readFileSync(path.resolve(root,'assets/materials/pripyat-v17/catalogue.json'),'utf8'));
+function check(ok,message){if(!ok)throw new Error(message);}
+const sourceIds=origin.materials.map(m=>m.id);
+check(sourceIds.length===22&&new Set(sourceIds).size===22,'Original Pripyat material set changed');
+const required=['geometry/benchmark.json','materials/pripyat-reuse.json','cameras/views.json',
+ 'lighting/day.json','scene.json','scene-lourd.json','scene-extreme.json',
+ 'textures/energetik_fresco_mosaic.jpg',
+ 'textures/personnage_facade_mosaique.jpg'];
+for(const file of required)check(fs.existsSync(path.resolve(base,file)),'Missing '+file);
+const sceneMosaic=fs.readFileSync(path.resolve(base,'textures/energetik_fresco_mosaic.jpg'));
+const originalMosaic=fs.readFileSync(path.resolve(root,
+ 'experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/textures/energetik_fresco_mosaic.jpg'));
+check(sceneMosaic.equals(originalMosaic),'The copied Energetik mural is not byte-exact');
+const portrait=fs.readFileSync(path.resolve(base,'textures/personnage_facade_mosaique.jpg'));
+const portraitDigest=crypto.createHash('sha256').update(portrait).digest('hex');
+check(portraitDigest==='9336fd983194cfc4d1f13475049a5405fc182e4f20a6220c6f447fc454c1c9eb',
+ 'User-supplied exterior artwork was altered or replaced');
+check(portrait[0]===0xff&&portrait[1]===0xd8&&portrait.at(-2)===0xff&&
+ portrait.at(-1)===0xd9,'Exterior mosaic is not a complete JPEG');
+function read(file){return JSON.parse(fs.readFileSync(path.resolve(base,file),'utf8'));}
+const materials=read('materials/pripyat-reuse.json').materials;
+const allIds=materials.map(m=>m.id);
+check(materials.length>sourceIds.length&&new Set(allIds).size===materials.length&&
+  materials.slice(0,sourceIds.length).every((m,i)=>m.id===sourceIds[i]),
+  'Original source materials must be followed by unique scene materials');
+check(origin.materials.every((m,i)=>JSON.stringify(m)===JSON.stringify(materials[i])),
+ 'Original material recipes or ordering changed');
+// Keep the evening artificial-light rig stable across all load profiles.
+const lamps=read('lighting/day.json').lights;
+check(lamps.length===60,'Expected 60 architecture-placed sources, instead of 171');
+check(lamps.every(l=>l.position.length===3 &&
+  l.position.every(Number.isFinite) && Number.isFinite(l.intensity) &&
+  l.intensity>0 && l.radius>0 && l.intensity<=2),
+  'Invalid or excessively intense fixture');
+check(lamps.filter(l=>l.position[1]===16.0).length===12,'12 functional pool lights missing');
+check(lamps.filter(l=>l.position[1]===7.1).length===8,'8 functional hall lights missing');
+check(lamps.length<=256,'DX11 constant buffer supports at most 256 lights');
+const validMaterials=new Set(allIds);
+const meshes=new Set(read('geometry/benchmark.json').meshes.map(m=>m.id));
+const cameras=read('cameras/views.json').cameras;
+const hallCamera=cameras.find(c=>c.id==='hall');
+check(hallCamera&&Math.abs(hallCamera.position[1]-hallCamera.target[1])<.5 &&
+  hallCamera.position[2]>hallCamera.target[2]+4,
+  'Hall camera must aim horizontally at the fresco, not into the ceiling');
+check(cameras.length>=11&&cameras.some(c=>c.id==='hall_ensemble')&&
+ cameras.some(c=>c.id==='piscine_soir')&&cameras.some(c=>c.id==='bassin')&&
+ cameras.some(c=>c.id==='etage')&&cameras.some(c=>c.id==='vestiaires'),
+ 'Pool, gallery and changing rooms cameras missing');
+for(const [profile,target,cap,sceneFile] of [
+ ['leger',20000,512,'scene.json'],['lourd',150000,1024,'scene-lourd.json'],
+ ['extreme',500000,1024,'scene-extreme.json']
+]){
+ const scene=read(sceneFile),sector=scene.sectors?.[0];
+ check(scene.format==='m3d-scene-v16'&&sector,'Bad scene '+profile);
+ for(const kind of ['geometry','materials','pbr','instances','cameras','lighting','environment']){
+  for(const item of sector[kind]||[]){
+   const full=path.resolve(base,item);
+   check(full.startsWith(base+path.sep)&&fs.existsSync(full),'Escaping/missing '+item);
+  }
+ }
+ const inst=read('instances/'+profile+'.json').instances;
+ const pbr=read('pbr/pripyat-reuse-'+profile+'.json');
+ const stats=read('stats/'+profile+'.json');
+ const seen=new Set();let boxCount=0;
+ for(const o of inst){
+  check(o.id&&!seen.has(o.id),'Duplicate object id '+o.id);
+  seen.add(o.id);
+  check(meshes.has(o.geometry)&&validMaterials.has(o.material),'Unresolved material/geometry '+o.id);
+  check(o.size?.length===3&&o.position?.length===3,'Invalid geometry '+o.id);
+  check([...o.size,...o.position].every(Number.isFinite)&&o.size.every(v=>v>0),
+   'Degenerate geometry '+o.id);
+  if(o.geometry==='unit_box')boxCount++;
+  check(!/^(Architecture\/Aile|Architecture\/Passerelle|Horizon\/|Mobilier\/Bancs|Mobilier\/Abribus|Place\/Bassin|Interieur\/Auditorium)/.test(o.parent),
+   'Unwanted additional building or external furniture '+o.parent);
+ }
+ check(boxCount*12>=target&&inst.length<=65000,'Stress profile out of range');
+ check(stats.totalInstances===inst.length&&stats.boxes===boxCount,'Incorrect geometry stats');
+ check(pbr.sets.length===materials.length&&pbr.sets.every(x=>x.resolution<=(x.imageFile?2048:cap)),
+  'Unexpected PBR cap or missing local textures');
+ const frescoSet=pbr.sets.find(m=>m.id==='tex_cse_energetik_fresco');
+ check(frescoSet&&frescoSet.imageFile==='textures/energetik_fresco_mosaic.jpg',
+  'The genuine Energetik fresco is not used by PBR');
+ const portraitSet=pbr.sets.find(m=>m.id==='tex_cse_personnage_facade');
+ check(portraitSet&&portraitSet.imageFile==='textures/personnage_facade_mosaique.jpg',
+  'User supplied character artwork must be loaded as the facade texture');
+ const select=prefix=>inst.filter(o=>o.parent.startsWith(prefix));
+ const unique=(prefix)=>{const a=select(prefix);check(a.length>=1,'Missing '+prefix);return a;};
+ const pool=unique('Interieur/Piscine olympique/Fond');
+ check(pool.some(p=>p.size[0]===50&&p.size[2]===25),
+  'Olympic 50 x 25 m basin not dimensionally correct');
+ check(unique('Interieur/Piscine olympique/Eau').some(o=>o.position[2]===-32&&o.material==='cse_pool_water'),
+  'Water needs the new translucent scene-specific material');
+ const poolWater=materials.find(m=>m.id==='cse_pool_water');
+ check(poolWater&&poolWater.transmission>=.4&&poolWater.ior>=1.3&&poolWater.ior<=1.34,
+  'Pool water must be a transparent dielectric');
+ check(select('Interieur/Piscine olympique/Bandes carrelage fond').length===5,
+  'Floor markers must remain readable beneath water');
+ check(select('Interieur/Piscine olympique/Pilastres latéraux').length>=12,
+  'Pool side walls missing architectural depth');
+ check(select('Interieur/Piscine olympique/Bancs latéraux').length>=6,
+  'Pool gallery benches missing');
+ const poolRegion=[-25,25,-44.5,-19.5];
+ // No solid central gallery floors: preserve tall clear water volume.
+ for(const x of select('Interieur/Galeries')){
+  const [px,,pz]=x.position,[w,,d]=x.size;
+  const intersects=px+w/2>poolRegion[0]&&px-w/2<poolRegion[1]&&
+   pz+d/2>poolRegion[2]&&pz-d/2<poolRegion[3];
+  check(!intersects,'Upper floor collides with pool air volume: '+x.id);
+ }
+ check(select('Interieur/Escalier galerie').length>=27,'Gallery stairs missing');
+ check(select('Interieur/Piscine olympique/Lumière linéaire').length>=4,'Linear lamps missing');
+ check(select('Interieur/Piscine olympique/Plafonniers/Diffuseur').length===24,'24 shared pool decorative diffusers required');
+ check(select('Interieur/Hall/Plafonniers/Diffuseur').length===20,
+  'Hall light bars must be modeled as visible luminaires');
+ check(select('Interieur/Piscine olympique/Frise ligne eau').length===4,
+  'Pool ceramic waterline must be visible on four sides');
+ check(select('Interieur/Piscine olympique/Fanions/Tissu').length===20,
+  'Swimming flags missing');
+ check(select('Interieur/Piscine olympique/Echelles/Marches immergees').length===20&&
+    select('Interieur/Piscine olympique/Echelles/Montants immerges').length===8&&
+    select('Interieur/Piscine olympique/Echelles/Mains courantes continues').length===536&&
+    select('Interieur/Piscine olympique/Echelles/Platines fixation plage').length===8,
+  'Physical pool ladders incomplete: 4 ladders, 5 treads each, continuous handrails and deck fastenings required');
+ check(select('Interieur/Piscine olympique/Lignes d’eau').length>120,'Lane dividers missing');
+ const fresco=unique('Interieur/Piscine/Fresque Energetik originale');
+ check(fresco.length===1&&fresco[0].material==='cse_energetik_fresco'&&
+   Math.abs(fresco[0].size[0]/fresco[0].size[1]-9.5/4.3)<.01&&
+   fresco[0].position[2]<-54.0,
+   'Energetik artwork must keep its proportions on the pool-facing wall');
+ const lobbyStairs=select('Interieur/Hall/Grand escalier').filter(o=>
+   o.parent==='Interieur/Hall/Grand escalier');
+ check(lobbyStairs.length===25,'Grand foyer staircase needs 25 accessible treads');
+ for(let i=1;i<lobbyStairs.length;i++){
+  const previous=lobbyStairs[i-1],next=lobbyStairs[i];
+  check(next.position[2]-previous.position[2]<.35&&
+    next.position[1]-previous.position[1]<.34,
+    'Grand staircase has an unwalkable gap or rise');
+ }
+ const lastStair=lobbyStairs.at(-1);
+ check(Math.abs(lastStair.position[1]+lastStair.size[1]/2-4.5)<.03&&
+   lastStair.position[2]>-13.7,
+  'Grand staircase must meet the y=4.5 entrance gallery');
+ check(unique('Interieur/Piscine/Fresque/Mur porteur').length===1,'Rear wall fresco support missing');
+ // First-floor access MUST have a cut-out so the player does not hit
+ // an overhead slab while climbing the last steps (1.70 m eye height).
+ for(const g of select('Interieur/Galeries').filter(o=>o.position[1]===4.5)){
+  const [x,,z]=g.position,[w,,d]=g.size;
+  const intersectsStairShaft=(x+w/2>-17.6&&x-w/2<-12.4&&
+    z+d/2>-13.5&&z-d/2<-9.2);
+  check(!intersectsStairShaft,'Headroom obstructed above hall staircase');
+ }
+ const west=select('Interieur/Vestiaires et douches ouest');
+ const east=select('Interieur/Vestiaires est et locaux techniques');
+ check(west.length>=35&&east.length>=8,
+  'Indoor locker rooms, shower fixtures or service rooms missing');
+ for(const o of [...west,...east]){
+  const [x,,z]=o.position;
+  check(Math.abs(x)>30.5,'Locker facilities intersect pool promenade');
+  check(z>=-55&&z<=-26,'Locker facilities escaped the main building footprint');
+ }
+ const corridorDoor=select('Interieur/Vestiaires et douches ouest/Mur accès');
+ check(corridorDoor.length===2&&
+  Math.abs(corridorDoor[0].position[2]-corridorDoor[1].position[2])===11,
+  'Poolside locker-room entrance is not 4 m wide');
+ const exteriorArt=inst.filter(o=>o.material==='cse_personnage_facade');
+ check(exteriorArt.length===1&&
+   exteriorArt[0].parent==='Architecture/Palais/Mosaique extérieure du personnage/Image fournie par utilisateur'&&
+   exteriorArt[0].position[0]===0&&
+   exteriorArt[0].position[2]>-4.0&&
+   exteriorArt[0].size[0]===8&&
+   exteriorArt[0].size[1]===13.05,
+  'External character mosaic is not on the central facade');
+ check(exteriorArt[0].position[1]-exteriorArt[0].size[1]/2>4.5,
+  'Outdoor mural overlaps the walkable entrance');
+ const otherFresco=inst.filter(o=>o.material==='cse_energetik_fresco');
+ check(otherFresco.length===1&&otherFresco[0].position[2]<-54.0,'Energetik artwork not against pool wall');
+ check(select('Architecture/Palais/Mosaique extérieure du personnage/Joints').length===0,'Aliasing-prone grout strips remain');
+ check(select('Architecture/Palais/Mosaique extérieure du personnage/Encadrement').length===4,
+  'External mural is not framed');
+ check(!inst.some(o=>o.parent.startsWith('Interieur/Piscine olympique/')&&o.material==='cse_personnage_facade'),'Exterior character placed in pool');
+ const rooftop=select('Architecture/Palais/Enseigne lumineuse toit');
+ check(rooftop.length>=140,'Sober rooftop lettering geometry incomplete');
+ check(select('Architecture/Palais/Enseigne lumineuse toit/Lettres ЭНЕРГЕТИК').length>=120,
+  'Cyrillic illuminated Energetik lettering missing');
+ check(select('Architecture/Palais/Enseigne lumineuse toit/Neon rouge').length===2,
+  'Red neon marquee border missing');
+ check(select('Architecture/Palais/Banderoles toit/Tissu').length===10,
+  'Both fabric roof banners must be present');
+ check(select('Architecture/Palais/Facade/Corniches').length===4&&
+   select('Architecture/Palais/Facade/Pilastres').length===6,
+  'Sober facade architectural detailing missing');
+ check(lamps.filter(l=>l.position[1]===4.0).length===8,'Architectural facade lights missing');
+ const seat=select('Place/Banc ovale béton/Assise');
+ check(seat.length===96,'Concrete oval must have 96 uninterrupted sections');
+ for(const x of seat){
+  const dx=(x.position[0]-37)/16.45,dz=(x.position[2]-52)/10.5;
+  check(Math.abs(dx*dx+dz*dz-1)<.01,'Seat is not an oval: '+x.id);
+ }
+ // Visual-structure regressions: do not bring back the rooftop spikes or
+ // turn street trees into simple poles with a single spherical canopy.
+ check(select('Architecture/Palais/Acrotere').length===1,
+  'Continuous roof parapet missing');
+ check(select('Architecture/Palais/Enseigne fictive').length===0,
+  'The obsolete 80-post rooftop sign has returned');
+ const trunks=inst.filter(o=>o.parent==='Nature/Arbres');
+ check(trunks.length>=26&&
+   trunks.filter(o=>Math.abs(o.position[0])<85&&o.position[2]>0).length>=26,
+  'At least 26 visible poplars/birches must frame the plaza');
+ check(inst.filter(o=>o.parent==='Nature/Arbres/Branches').length===4*trunks.length,
+  'Tree branches need four real geometric lobes per trunk');
+ check(select('Nature/Arbres/Houppier').length>=5*trunks.length,
+  'Five asymmetrical foliage canopies are required per tree');
+ check(select('Place/Butte végétalisée/Fleurs et feuillages').length>200,
+  'Colourful planted mound incomplete');
+ check(select('Place/Butte végétalisée/Petales').length>=180,
+  'Individual flower petals missing');
+ check(select('Place/Jardins/Arbustes').length>=24,
+  'Sidewalk shrubs missing');
+ check(select('Place/Monument soviétique fictif').length>=55,
+  'New two-figure monumental sculpture incomplete');
+ check(select('Place/Monument soviétique fictif/Silhouettes').length>=45,
+  'Two detailed figures are required, not the old block statue');
+ check(select('Place/Monument soviétique fictif/Silhouettes').length>=48,
+  'Both reconstructed figures need sculpted body, hands and facial details');
+ check(select('Place/Monument soviétique fictif/Silhouettes/Jeunesse/Torse sculpté').length===1&&
+   select('Place/Monument soviétique fictif/Silhouettes/Science/Torse sculpté').length===1,
+   'Continuous ellipsoid torso must replace the ribbed multi-slice statues');
+ check(select('Place/Monument soviétique fictif/Silhouettes/Torse galbé').length===0&&
+   select('Place/Monument soviétique fictif/Silhouettes/Jeunesse/Drapé vertical').length<=4,
+   'Obsolete accordioned figure geometry returned');
+ check(select('Place/Monument soviétique fictif/Silhouettes/Jeunesse/Visage').length>=1&&
+   select('Place/Monument soviétique fictif/Silhouettes/Science/Visage').length>=1,
+  'Both sculpted facial volumes are required');
+ check(select('Nature/Arbres/Branches secondaires').length>=12*trunks.length,
+  'Thin secondary branches missing from the reconstructed trees');
+ check(select('Nature/Arbres/Houppier').length>=22*trunks.length,
+  '22 separate foliage lobes per tree are required');
+ check(select('Place/Butte végétalisée/Petales').length>=700,
+  'Reconstructed flowers need hundreds of individual radial petals');
+ check(select('Place/Butte végétalisée/Fleurs et feuillages').length>=230,
+  'The original soil mound requires low green groundcover');
+ check(select('Place/Butte végétalisée/Coeurs').length>=130,
+  'Flower centers missing');
+ check(!inst.some(o=>o.parent.endsWith('/Drape simple')||
+   o.parent.endsWith('/Flamme bronze')||o.parent.endsWith('/Flambeau')),
+  'Crude original statue objects are still emitted');
+ check(select('Place/Monument soviétique fictif/Flambeau').length===0&&
+   select('Place/Monument soviétique fictif/Rayons').length===0,
+  'Outdated torch and rooftop-like spikes on monument returned');
+ const entranceGlass=select('Architecture/Palais/Verriere').filter(o=>
+    o.position[1]<5&&Math.abs(o.position[0])<5);
+ check(entranceGlass.length===0,'Glass blocks the 10-m main doorway');
+ const steps=select('Place/Escalier monumental');
+ const landing=unique('Place/Parvis d’entrée')[0];
+ check(steps.length===4&&
+  steps.some(o=>o.position[2]-o.size[2]/2<=landing.position[2]+landing.size[2]/2+.03),
+  'Monumental steps do not physically meet the entrance terrace');
+ process.stdout.write(profile+' PASS: single palace, pool 50x25, two distinct artworks (exterior portrait/hall Energetik), oval bench, '+ 
+    inst.length+' objects, '+boxCount*12+' minimum triangles\n');
+}

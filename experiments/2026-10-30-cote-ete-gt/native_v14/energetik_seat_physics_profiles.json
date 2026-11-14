@@ -1,0 +1,99 @@
+{
+  "schema": "m3d-physics-material-profiles-v1",
+  "units": {
+    "mass": "kg",
+    "volume": "m3",
+    "density": "kg/m3",
+    "force": "N",
+    "area": "m2",
+    "length": "m",
+    "stress_and_modulus": "Pa",
+    "strain": "dimensionless",
+    "damping_ratio": "dimensionless"
+  },
+  "calculationDefinitions": {
+    "density_kg_m3": "mass_kg / volume_m3",
+    "engineering_strain": "displacement_m / initial_length_m",
+    "engineering_stress_pa": "force_n / loaded_area_m2",
+    "secant_modulus_pa": "engineering_stress_pa / engineering_strain",
+    "foam_model": "Use a measured stress-strain curve for nonlinear compression; do not infer foam behavior from the visual texture."
+  },
+  "profiles": [
+    {
+      "id": "seat_steel",
+      "visualMaterialId": "metal",
+      "category": "steel_frame_and_hardware",
+      "physicsModel": "rigid_linear_elastic",
+      "measurements": { "mass_kg": null, "volume_m3": null, "force_n": null, "loaded_area_m2": null, "initial_length_m": null, "displacement_m": null },
+      "density_kg_m3": null,
+      "young_modulus_pa": null,
+      "poisson_ratio": null,
+      "shear_modulus_pa": null,
+      "bulk_modulus_pa": null,
+      "damping_ratio": null,
+      "compression_curve": [],
+      "status": "parameters_unmeasured"
+    },
+    {
+      "id": "seat_shell_wood",
+      "visualMaterialId": "wood",
+      "category": "wood_or_laminated_board",
+      "physicsModel": "rigid_orthotropic_elastic",
+      "measurements": { "mass_kg": null, "volume_m3": null, "force_n": null, "loaded_area_m2": null, "initial_length_m": null, "displacement_m": null },
+      "density_kg_m3": null,
+      "young_modulus_pa": null,
+      "poisson_ratio": null,
+      "shear_modulus_pa": null,
+      "bulk_modulus_pa": null,
+      "damping_ratio": null,
+      "compression_curve": [],
+      "status": "material_type_to_confirm"
+    },
+    {
+      "id": "seat_upholstery_cover",
+      "visualMaterialId": "seatFabricClean",
+      "category": "upholstery_cover_fabric_or_vinyl",
+      "physicsModel": "thin_membrane_attached_to_foam",
+      "measurements": { "mass_kg": null, "volume_m3": null, "areal_mass_kg_m2": null, "force_n": null, "loaded_area_m2": null, "initial_length_m": null, "displacement_m": null },
+      "density_kg_m3": null,
+      "young_modulus_pa": null,
+      "poisson_ratio": null,
+      "shear_modulus_pa": null,
+      "bulk_modulus_pa": null,
+      "damping_ratio": null,
+      "compression_curve": [],
+      "status": "cover_composition_to_confirm"
+    },
+    {
+      "id": "seat_stitched_trim",
+      "visualMaterialId": "seatTrim",
+      "category": "seam_and_piping",
+      "physicsModel": "flexible_detail_attached_to_cover",
+      "measurements": { "mass_kg": null, "volume_m3": null, "areal_mass_kg_m2": null, "force_n": null, "loaded_area_m2": null, "initial_length_m": null, "displacement_m": null },
+      "density_kg_m3": null,
+      "young_modulus_pa": null,
+      "poisson_ratio": null,
+      "shear_modulus_pa": null,
+      "bulk_modulus_pa": null,
+      "damping_ratio": null,
+      "compression_curve": [],
+      "status": "parameters_unmeasured"
+    },
+    {
+      "id": "seat_foam_core",
+      "visualMaterialId": null,
+      "category": "polyurethane_foam_assumption",
+      "physicsModel": "compressible_nonlinear_solid",
+      "rendered_as_separate_layer": false,
+      "measurements": { "mass_kg": null, "volume_m3": null, "force_n": null, "loaded_area_m2": null, "initial_length_m": null, "displacement_m": null },
+      "density_kg_m3": null,
+      "young_modulus_pa": null,
+      "poisson_ratio": null,
+      "shear_modulus_pa": null,
+      "bulk_modulus_pa": null,
+      "damping_ratio": null,
+      "compression_curve": [],
+      "status": "foam_type_and_parameters_to_measure"
+    }
+  ]
+}

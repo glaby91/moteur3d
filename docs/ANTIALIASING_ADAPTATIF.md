@@ -1,20 +1,18 @@
 # Moteur 3D — antialiasing adaptatif
 
-Statut : **spécification validée ; implémentation et benchmarks à réaliser**.
+Statut : **première implémentation CPU, avec validation sur la scène native**.
 
-## Objectif
+## Principe actif
 
-Obtenir une qualité visuelle proche du MSAA 16× avec un coût se rapprochant du MSAA 4×, sans garantir ce résultat avant mesures.
+- Le rendu principal utilise la résolution sélectionnée; le SSAA 4× n’est plus proposé par l’interface.
+- Le mode par défaut repère les pixels dont la luminance diffère nettement de celle des pixels nord, sud, est et ouest, puis mélange leur couleur avec la moyenne de ces quatre voisins.
+- Un seuil de contraste protège les aplats et une grande partie des détails de texture. Le mode natif sans filtre et le FSAA 16× restent disponibles pour comparaison.
+- Les mipmaps et le filtrage bilinéaire des textures restent indépendants de ce traitement d’image.
 
-## Stratégie
+## Mesure initiale
 
-- MSAA 4× par défaut si le pipeline graphique le permet.
-- Adaptation du traitement selon la taille projetée des objets, les silhouettes, les détails fins et la stabilité temporelle.
-- Préservation des objets de quelques pixels ou sous-pixel pour limiter scintillement, disparition et aliasing en mouvement.
-- Qualité renforcée localement sur les contours seulement si le gain visuel justifie son coût ; un niveau MSAA différent par objet dans un même framebuffer n'est pas présumé possible. Évaluer passes dédiées, filtrage temporel et post-traitement.
-- Réduire les calculs d'éclairage inutiles sur surfaces homogènes, sans confondre échantillonnage de couverture MSAA et calculs de shading.
-- Conserver la conception d'objets par assemblage de primitives mathématiques et la conversion optionnelle en triangles dans l'éditeur 3D.
+Sur la scène V13.14, à 960 × 540 et 8 threads dans l’environnement de mesure, le rendu natif a pris environ 77 ms. Le post-traitement quatre voisins a pris une médiane d’environ 2 ms sur cinq passages. Ces résultats donnent le coût de cette machine et de cette définition, pas une promesse de temps sur tous les PC.
 
-## Validation
+## Limites et vérification visuelle
 
-Comparer en scènes identiques sans AA, MSAA 4× et MSAA 16× lorsque disponible ; mesurer temps GPU médian/p95 et mémoire ; vérifier contours, fins détails et stabilité lors des déplacements. Ne pas supposer qu'un passage de 16× à 4× multiplie la vitesse par quatre : il réduit le nombre d'échantillons de couverture de 75 %, mais le gain effectif dépend du pipeline et du matériel.
+Le filtre travaille sur les couleurs de l’image, sans tampon de profondeur ni identifiant d’objet. Il adoucit donc certaines transitions de texture contrastées proches d’une arête, et ne reconstitue pas exactement la couverture géométrique sous-pixel. Comparer les silhouettes, les lignes fines, les détails texturés et la scène en mouvement avec le mode natif et le FSAA 16× avant d’ajuster le seuil ou le mélange.

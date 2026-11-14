@@ -1,0 +1,278 @@
+{
+  "format": "m3d-instances-v1",
+  "instances": [
+    {
+      "id": "travée_00",
+      "parent": "Photo2Scene/Plan-Façade-Diagnostic",
+      "geometry": "unit_box",
+      "material": "reference_corner",
+      "position": [
+        0,
+        1.1266438666450453,
+        0
+      ],
+      "size": [
+        0.035,
+        2.2532877332900907,
+        0.035
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "travée_01",
+      "parent": "Photo2Scene/Plan-Façade-Diagnostic",
+      "geometry": "unit_box",
+      "material": "diagnostic_pillar",
+      "position": [
+        -1,
+        1.1266438666450453,
+        0
+      ],
+      "size": [
+        0.035,
+        2.2532877332900907,
+        0.035
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "travée_02",
+      "parent": "Photo2Scene/Plan-Façade-Diagnostic",
+      "geometry": "unit_box",
+      "material": "diagnostic_pillar",
+      "position": [
+        -2,
+        1.1266438666450453,
+        0
+      ],
+      "size": [
+        0.035,
+        2.2532877332900907,
+        0.035
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "travée_03",
+      "parent": "Photo2Scene/Plan-Façade-Diagnostic",
+      "geometry": "unit_box",
+      "material": "diagnostic_pillar",
+      "position": [
+        -3,
+        1.1266438666450453,
+        0
+      ],
+      "size": [
+        0.035,
+        2.2532877332900907,
+        0.035
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "travée_04",
+      "parent": "Photo2Scene/Plan-Façade-Diagnostic",
+      "geometry": "unit_box",
+      "material": "diagnostic_pillar",
+      "position": [
+        -4,
+        1.1266438666450453,
+        0
+      ],
+      "size": [
+        0.035,
+        2.2532877332900907,
+        0.035
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "travée_05",
+      "parent": "Photo2Scene/Plan-Façade-Diagnostic",
+      "geometry": "unit_box",
+      "material": "diagnostic_pillar",
+      "position": [
+        -5,
+        1.1266438666450453,
+        0
+      ],
+      "size": [
+        0.035,
+        2.2532877332900907,
+        0.035
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "travée_06",
+      "parent": "Photo2Scene/Plan-Façade-Diagnostic",
+      "geometry": "unit_box",
+      "material": "diagnostic_pillar",
+      "position": [
+        -6,
+        1.1266438666450453,
+        0
+      ],
+      "size": [
+        0.035,
+        2.2532877332900907,
+        0.035
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "travée_07",
+      "parent": "Photo2Scene/Plan-Façade-Diagnostic",
+      "geometry": "unit_box",
+      "material": "diagnostic_pillar",
+      "position": [
+        -7,
+        1.1266438666450453,
+        0
+      ],
+      "size": [
+        0.035,
+        2.2532877332900907,
+        0.035
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "travée_08",
+      "parent": "Photo2Scene/Plan-Façade-Diagnostic",
+      "geometry": "unit_box",
+      "material": "diagnostic_pillar",
+      "position": [
+        -8,
+        1.1266438666450453,
+        0
+      ],
+      "size": [
+        0.035,
+        2.2532877332900907,
+        0.035
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "travée_09",
+      "parent": "Photo2Scene/Plan-Façade-Diagnostic",
+      "geometry": "unit_box",
+      "material": "diagnostic_pillar",
+      "position": [
+        -9,
+        1.1266438666450453,
+        0
+      ],
+      "size": [
+        0.035,
+        2.2532877332900907,
+        0.035
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "travée_10",
+      "parent": "Photo2Scene/Plan-Façade-Diagnostic",
+      "geometry": "unit_box",
+      "material": "diagnostic_pillar",
+      "position": [
+        -10,
+        1.1266438666450453,
+        0
+      ],
+      "size": [
+        0.035,
+        2.2532877332900907,
+        0.035
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "travée_11",
+      "parent": "Photo2Scene/Plan-Façade-Diagnostic",
+      "geometry": "unit_box",
+      "material": "diagnostic_pillar",
+      "position": [
+        -11,
+        1.1266438666450453,
+        0
+      ],
+      "size": [
+        0.035,
+        2.2532877332900907,
+        0.035
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "travée_12",
+      "parent": "Photo2Scene/Plan-Façade-Diagnostic",
+      "geometry": "unit_box",
+      "material": "diagnostic_pillar",
+      "position": [
+        -12,
+        1.1266438666450453,
+        0
+      ],
+      "size": [
+        0.035,
+        2.2532877332900907,
+        0.035
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "travée_13",
+      "parent": "Photo2Scene/Plan-Façade-Diagnostic",
+      "geometry": "unit_box",
+      "material": "diagnostic_pillar",
+      "position": [
+        -13,
+        1.1266438666450453,
+        0
+      ],
+      "size": [
+        0.035,
+        2.2532877332900907,
+        0.035
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "niveau_bas",
+      "parent": "Photo2Scene/Plan-Façade-Diagnostic",
+      "geometry": "unit_box",
+      "material": "level_line",
+      "position": [
+        -6.5,
+        0,
+        0
+      ],
+      "size": [
+        13.06,
+        0.035,
+        0.035
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "niveau_haut",
+      "parent": "Photo2Scene/Plan-Façade-Diagnostic",
+      "geometry": "unit_box",
+      "material": "level_line",
+      "position": [
+        -6.5,
+        2.2532877332900907,
+        0
+      ],
+      "size": [
+        13.06,
+        0.035,
+        0.035
+      ],
+      "rotationY": 0
+    }
+  ],
+  "warning": "0.035 bay line thickness is illustrative, not measured. Missing side/rear facade and roof depths intentionally excluded."
+}

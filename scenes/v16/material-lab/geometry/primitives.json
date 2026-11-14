@@ -1,0 +1,23 @@
+{
+  "format": "m3d-geometry-v1",
+  "units": "m",
+  "meshes": [
+    {
+      "id": "unit_box",
+      "type": "box",
+      "size": [
+        1,
+        1,
+        1
+      ],
+      "uv": "planar_per_face"
+    },
+    {
+      "id": "unit_sphere",
+      "type": "uv_sphere",
+      "segments": 16,
+      "rings": 10,
+      "uv": "spherical"
+    }
+  ]
+}

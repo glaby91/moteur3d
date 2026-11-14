@@ -1,0 +1,44 @@
+{
+  "format": "m3d-materials-v1",
+  "materials": [
+    {
+      "id": "diagnostic_pillar",
+      "baseColor": [
+        0.96,
+        0.67,
+        0.21
+      ],
+      "roughness": 0.6,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_diagnostic_pillar"
+    },
+    {
+      "id": "level_line",
+      "baseColor": [
+        0.18,
+        0.86,
+        0.41
+      ],
+      "roughness": 0.6,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_level_line"
+    },
+    {
+      "id": "reference_corner",
+      "baseColor": [
+        1,
+        0.31,
+        0.17
+      ],
+      "roughness": 0.6,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_reference_corner"
+    }
+  ]
+}

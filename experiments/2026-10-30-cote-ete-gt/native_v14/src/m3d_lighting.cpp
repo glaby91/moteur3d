@@ -1,0 +1,49 @@
+#include "m3d_engine.h"
+#include "../../../../v17/weather/solar_cycle.h"
+
+namespace m3d {
+V sun=norm({.70f,.78f,-.714f}),skyZenith={126,170,209},skyHorizon={244,185,134},sunTint={255,246,223};
+float daylight=1.f,lampFactor=0.f,solarHour=14.75f;
+std::vector<Light> pointLights;
+void updateLighting(float hour){
+ solarHour=hour;
+ // Solar elevation and azimuth change together, not elevation alone:
+ // the roof and façade normal maps reveal different relief as the sun moves.
+ const auto solar=cse::weather::solarMotion(hour);
+ daylight=solar.daylight;
+ float dusk=clampf(1.f-std::abs(hour-18.3f)/2.3f,0.f,1.f);
+ float dawn=clampf(1.f-std::abs(hour-7.1f)/1.8f,0.f,1.f);
+ float warm=std::max(dusk,dawn*.72f);
+ // Automatic dusk AND night/dawn lamps: old time-only rule turned all lamps
+ // off after midnight, preventing a believable complete 24-hour cycle.
+ lampFactor=clampf((.38f-daylight)/.38f,0.f,1.f);
+ // True full-sweep 24-hour trajectory: the solar disc follows the shadows.
+ // Previously the azimuth moved only ~6.9 degrees/hour and the midnight
+ // altitude was stuck at -0.16, making the sun look almost stationary.
+ sun={solar.east,solar.up,solar.north};
+ // Neutral airy zenith, slightly warm haze near the horizon.
+ // Keep day surfaces below overexposure: the shaders provide the contrast.
+ const V dayZenith={122,172,217},nightZenith={11,17,32};
+ const V dayHorizon={219,225,230},nightHorizon={29,35,53};
+ skyZenith=dayZenith*daylight+nightZenith*(1.f-daylight);
+ skyHorizon=dayHorizon*daylight+nightHorizon*(1.f-daylight);
+ // Twilight warmth belongs near the sun, not as an all-frame sepia veil.
+ // Small horizon-specific warm term fades out completely at full night.
+ const float warmHorizon=warm*daylight*.10f;
+ skyHorizon=skyHorizon*(1.f-warmHorizon)+V{235,198,174}*warmHorizon;
+ sunTint=V{255,246,225}*(1.f-warm)+V{255,173,112}*warm;
+ pointLights.clear();
+ if(lampFactor>.005f){
+  pointLights.push_back({{6.35f,.72f,-4.2f},11.5f,3.2f*lampFactor,{255,166,92}});
+  pointLights.push_back({{7.65f,.72f,-11.6f},11.5f,2.5f*lampFactor,{255,194,126}});
+  for(int i=0;i<14;i++)pointLights.push_back({{4.87f,4.58f,-12.f-18.f*i},14.f,5.8f*lampFactor,{255,151,72}});
+  // Phares chauds des trois voitures, assez bas pour éclairer la chaussée.
+  pointLights.push_back({{-2.05f,.53f,-9.95f},8.f,1.8f*lampFactor,{255,218,172}});
+  pointLights.push_back({{2.12f,.44f,-10.65f},7.f,1.35f*lampFactor,{255,218,172}});
+  pointLights.push_back({{-2.10f,.31f,-18.05f},6.f,1.1f*lampFactor,{255,218,172}});
+  pointLights.push_back({{2.15f,.66f,-32.75f},7.5f,1.1f*lampFactor,{255,218,172}});
+  pointLights.push_back({{-2.0f,.65f,-46.1f},7.f,.95f*lampFactor,{255,218,172}});
+  pointLights.push_back({{2.1f,.68f,-58.6f},8.f,1.05f*lampFactor,{255,218,172}});
+ }
+}
+}

@@ -1,0 +1,17 @@
+{
+  "format": "m3d-environment-v1",
+  "sky": "clear",
+  "groundSize": [
+    30,
+    26
+  ],
+  "units": "m",
+  "coordinateSystem": "Y-up",
+  "siteCenter": [
+    0,
+    0,
+    1
+  ],
+  "targetMarginMeters": 5,
+  "notes": "Pavillon 01: terrain compact 30 x 26 m pour 18 x 12 m de maison, terrasse courte, bassin resserré, 3 arbres et 6 massifs. Cadres camera fixes."
+}
