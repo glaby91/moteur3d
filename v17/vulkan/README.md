@@ -105,8 +105,16 @@ Ce mécanisme est **générique**, sans référence au nom, à la position, à l
 
 Les frames en vol et un Z-prepass ne sont pas automatiquement activés ici : sur la présentation Qt actuellement synchrone, une file GPU asynchrone impose une gestion explicite des images/latences, et un Z-prepass doit respecter transparence et surfaces coplanaires. Les ajouter sans mesures et sans tests de parité pourrait dégrader le rendu ; ils restent des travaux expérimentaux distincts et génériques.
 
-## Z-prepass opaque générique, option de test sans réduction de qualité
+## Z-prepass Vulkan : activé de façon permanente
 
-Le moteur propose `CSE_WARP_VK_DEPTH_PREPASS=1` : il exécute un premier rendu **sans fragment shader ni écritures couleur**, en réutilisant exactement la géométrie opaque et les pipelines d'instances (boîtes, feuillage). Le rendu couleur est ensuite exécuté dans l'ordre habituel et les surfaces transparentes sont toujours dessinées une seule fois après les opaques. Aucun identifiant de scène, distance particulière ou décor nommé n'est consulté. Par défaut **désactivé**.
+Le pipeline Vulkan exécute systématiquement son **Z-prepass opaque** (shader vertex uniquement, écritures couleur désactivées), puis le rendu couleur PBR et enfin les surfaces transparentes une seule fois. La création des trois pipelines de profondeur se fait à l'initialisation. Aucun benchmark A/B ni contrôle adaptatif ne se déroule au démarrage ou par frame. Il n'existe **plus de variable d'environnement** pour modifier ce comportement.
 
-Un prépass peut réduire les calculs de shading de fragments opaques masqués, mais double le travail vertex et peut modifier les décisions du test de profondeur en cas de coplanarité. C'est pourquoi son adoption automatique exige d'abord **parité stricte des 40 empreintes par image** et amélioration mesurée sur plusieurs scènes. Exécuter `LANCER_ZPREPASS_VULKAN_HD620.bat` pour le benchmark ABBA (RGBA et shader fast fixés, seul le prépass change). La variable n'est pas destinée à être activée sur `master` sans validation.
+Sur la campagne Intel HD620 de 160 images (Pavillon 01, 40 positions répétées), la médiane est passée d'environ 24,52 ms à 14,49 ms, soit environ +69,3 % de débit théorique. Les 40 empreintes images étaient identiques sur cette scène de test. Cela **ne garantit pas** la parité sur des scènes ou des géométries non testées.
+
+L'ancien lanceur de comparaison on/off `LANCER_ZPREPASS_VULKAN_HD620.bat` a été remplacé, sous le même nom pour compatibilité, par une **validation du Z-prepass permanent** : smoke GPU (2 draw calls sur un triangle) puis 40 images et empreintes sous le backend actuel. Il produit `CSE_WARP_VULKAN_ZPREPASS_DEFAULT_HD620.zip`. La métadonnée JSON `vulkan_depth_prepass` vaut toujours `true` et `vulkan_depth_prepass_policy` vaut `always_on_no_runtime_comparison`. Les anciens ZIP sont les archives historiques du comparatif on/off.
+
+## État d'intégration de la dernière V17 / master
+
+**Ne pas confondre validation de l'optimisation Z-prepass et parité complète du backend Vulkan.** Vulkan fonctionne sur l'Intel HD620 et la CI Windows teste la compilation, le chargeur API, la géométrie et les canaux couleur. La branche expérimentale ajoute déjà Vulkan comme choix distinct dans la fenêtre Qt V17, et la branche master conserve DirectX11 comme rendu de référence.
+
+La fusion vers master n'est **pas encore approuvée** : les sorties Vulkan et DirectX11 ne sont pas visuellement équivalentes, et les fonctionnalités PBR avancées, eau, ciel, MSAA, mipmaps et filtrage/LOD ne sont pas toutes portées. Notre politique est de ne pas régresser en qualité par rapport à DirectX11. Les tests GPU réels restent nécessaires : eau, transparence, fresques haute résolution, textures protégées, changements de scène et exploration. La présence du Z-prepass ne règle pas ces écarts.

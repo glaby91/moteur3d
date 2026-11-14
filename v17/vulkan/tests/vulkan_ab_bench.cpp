@@ -119,8 +119,8 @@ int main(int argc,char** argv) {
  doc["vulkan_fragment_profile"]=(shaderMode && std::strcmp(shaderMode,"1")==0)?"optimized":"baseline";
  const char* readbackMode=std::getenv("CSE_WARP_VK_BGRA_READBACK");
  doc["vulkan_readback_profile"]=(readbackMode && std::strcmp(readbackMode,"1")==0)?"bgra8_native":"rgba8_legacy";
- const char* prepassMode=std::getenv("CSE_WARP_VK_DEPTH_PREPASS");
- doc["vulkan_depth_prepass"]=(prepassMode && std::strcmp(prepassMode,"1")==0);
+ doc["vulkan_depth_prepass"]=true;
+ doc["vulkan_depth_prepass_policy"]="always_on_no_runtime_comparison";
  doc["dx11_median_ms"]=median(dxTimes);doc["vulkan_median_ms"]=median(vkTimes);
  doc["dx11_p95_ms"]=p95(dxTimes);doc["vulkan_p95_ms"]=p95(vkTimes);
  doc["vulkan_vs_dx11_median_speedup"]=median(vkTimes)>0?median(dxTimes)/median(vkTimes):0.0;

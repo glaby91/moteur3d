@@ -1,44 +1,37 @@
 @echo off
 setlocal EnableExtensions
 cd /d "%~dp0"
-echo ================================================================
-echo CSE WARP Vulkan - OPAQUE Z-PREPASS A/B - ALL SCENES
-echo Vulkan original vs generic Z-prepass ABBA, same quality.
-echo Per-frame checksums must be identical before any activation.
-echo ================================================================
+echo ===============================================================
+echo CSE WARP V17 - VALIDATION GPU VULKAN Z-PREPASS PERMANENT HD620
+echo Le prepass est integre au backend: aucun interrupteur, aucun A/B.
+echo 40 images, empreintes et comparaison DirectX11 de reference.
+echo ===============================================================
 if not exist "v17_vulkan_ab_bench.exe" goto missing
-if not exist "vulkan\raster_fast.frag.spv" goto missing
+if not exist "v17_vulkan_gpu_smoke.exe" goto missing
+if not exist "vulkan\raster.frag.spv" goto missing
 set "SCENE=benchmark-civic\scene.json"
 if not exist "%SCENE%" set "SCENE=pavillon01\scene.json"
 if not exist "%SCENE%" goto missing
-set "CSE_WARP_VK_FAST_FRAGMENT=1"
+echo Scene: %SCENE%
+set "CSE_WARP_VK_FAST_FRAGMENT=0"
 set "CSE_WARP_VK_BGRA_READBACK=0"
-set "CSE_WARP_VK_DEPTH_PREPASS=0"
-echo [1/4] Without prepass A
-"v17_vulkan_ab_bench.exe" "%SCENE%" "VK_Z_OFF_A" 40 1366 768 >"vk_z_off_a.log" 2>&1
+echo Test fonctionnel materiel avec prepass permanent...
+"v17_vulkan_gpu_smoke.exe" "vulkan_zprepass_smoke.png" >"vulkan_zprepass_smoke.log" 2>&1
 if errorlevel 1 goto fail
-set "CSE_WARP_VK_DEPTH_PREPASS=1"
-echo [2/4] With prepass A
-"v17_vulkan_ab_bench.exe" "%SCENE%" "VK_Z_ON_A" 40 1366 768 >"vk_z_on_a.log" 2>&1
+echo Mesure de 40 images sur le backend de production Vulkan...
+"v17_vulkan_ab_bench.exe" "%SCENE%" "VK_ZPREPASS_DEFAULT" 40 1366 768 >"vk_zprepass_default.log" 2>&1
 if errorlevel 1 goto fail
-echo [3/4] With prepass B
-"v17_vulkan_ab_bench.exe" "%SCENE%" "VK_Z_ON_B" 40 1366 768 >"vk_z_on_b.log" 2>&1
-if errorlevel 1 goto fail
-set "CSE_WARP_VK_DEPTH_PREPASS=0"
-echo [4/4] Without prepass B
-"v17_vulkan_ab_bench.exe" "%SCENE%" "VK_Z_OFF_B" 40 1366 768 >"vk_z_off_b.log" 2>&1
-if errorlevel 1 goto fail
-powershell -NoProfile -Command "Compress-Archive -Path 'VK_Z_OFF_A','VK_Z_OFF_B','VK_Z_ON_A','VK_Z_ON_B','vk_z_off_a.log','vk_z_off_b.log','vk_z_on_a.log','vk_z_on_b.log' -DestinationPath 'CSE_WARP_VULKAN_ZPREPASS_HD620.zip' -Force"
+powershell -NoProfile -Command "Compress-Archive -Path 'VK_ZPREPASS_DEFAULT','vulkan_zprepass_smoke.png','vulkan_zprepass_smoke.log','vk_zprepass_default.log' -DestinationPath 'CSE_WARP_VULKAN_ZPREPASS_DEFAULT_HD620.zip' -Force"
 if errorlevel 1 goto fail
 echo.
-echo DONE: CSE_WARP_VULKAN_ZPREPASS_HD620.zip
+echo DONE: CSE_WARP_VULKAN_ZPREPASS_DEFAULT_HD620.zip
 pause
 exit /b 0
 :missing
-echo Missing benchmark, scene or shaders. Extract the complete artifact.
+echo Archive incomplete. Extraire TOUS les fichiers du build GitHub.
 pause
 exit /b 2
 :fail
-echo Z-prepass benchmark failed. Keep and send logs.
+echo Echec de la validation Z-prepass: transmettre les journaux disponibles.
 pause
 exit /b 1

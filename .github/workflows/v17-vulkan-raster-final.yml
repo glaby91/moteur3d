@@ -68,6 +68,17 @@ jobs:
         run: |
           cmake --build build-v17 --config Release --parallel 4 --target moteur3d_v17 v17_vulkan_mesh_smoke v17_vulkan_readback_smoke v17_vulkan_version_smoke v17_vulkan_gpu_smoke v17_vulkan_ab_bench
           if ($LASTEXITCODE -ne 0) { throw 'Vulkan final Windows build failed' }
+      - name: Assert always-on Vulkan Z-prepass contract
+        if: ${{ steps.compile.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          $renderer=Get-Content 'v17/vulkan/m3d_vulkan.cpp' -Raw
+          $benchmark=Get-Content 'v17/vulkan/tests/vulkan_ab_bench.cpp' -Raw
+          if ($renderer.Contains('CSE_WARP_VK_DEPTH_PREPASS')) { throw 'Unexpected Vulkan depth runtime switch' }
+          if (!$renderer.Contains('drawOpaque(true);') -or !$renderer.Contains('drawOpaque(false);')) { throw 'Mandatory Vulkan opaque depth/color pass missing' }
+          if (!$renderer.Contains('depthPipeline(&depthOpaque_') -or !$renderer.Contains('depthPipeline(&depthBox_') -or !$renderer.Contains('depthPipeline(&depthFoliage_')) { throw 'Depth-only shader pipelines missing' }
+          if (!$benchmark.Contains('vulkan_depth_prepass_policy')) { throw 'Benchmark prepass metadata missing' }
+          Write-Host 'PASS Vulkan always-on opaque Z-prepass source contract'
       - name: Confirm native Vulkan output and geometry smoke
         id: smoke
         if: ${{ steps.compile.outcome == 'success' }}

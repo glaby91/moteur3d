@@ -27,7 +27,11 @@ int main(int argc,char**argv){
     if(!renderVulkanPreview(scene,sm,c,w,h,pixels,stats,error)){
         std::wcerr<<L"Vulkan renderer failed: "<<error<<L"\n";return 2;
     }
-    if(pixels.size()!=size_t(w*h)||!stats.gpu||stats.gpuDrawCalls==0)return 3;
+    // A single opaque triangle must be submitted twice: Z-only + shaded.
+    if(pixels.size()!=size_t(w*h)||!stats.gpu||stats.gpuDrawCalls!=2){
+        std::cerr<<"Expected exactly two draw calls for always-on Vulkan Z-prepass; got "
+                 <<stats.gpuDrawCalls<<"\n";return 3;
+    }
     bool nonBackground=false;
     const auto ref=pixels.front();
     for(auto p:pixels)if(p!=ref){nonBackground=true;break;}

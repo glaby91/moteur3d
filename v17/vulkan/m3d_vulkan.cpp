@@ -114,7 +114,6 @@ class VulkanRaster final {
     VkPipelineLayout layout_=VK_NULL_HANDLE;
     VkPipeline opaquePipeline_=VK_NULL_HANDLE,alphaPipeline_=VK_NULL_HANDLE,boxPipeline_=VK_NULL_HANDLE,foliagePipeline_=VK_NULL_HANDLE;
     VkPipeline depthOpaque_=VK_NULL_HANDLE,depthBox_=VK_NULL_HANDLE,depthFoliage_=VK_NULL_HANDLE;
-    bool depthPrepass_=false;
     VkPipelineCache pipelineCache_=VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool_=VK_NULL_HANDLE;
     VkDescriptorSetLayout descriptorLayout_=VK_NULL_HANDLE;
@@ -438,9 +437,9 @@ class VulkanRaster final {
             colorFormat_=VK_FORMAT_B8G8R8A8_UNORM;
         }
         std::clog<<"[CSE WARP Vulkan] Readback color="<<(bgraReadback_?"BGRA8 Qt-native":"RGBA8 legacy")<<"\n";
-        const char* prepass=std::getenv("CSE_WARP_VK_DEPTH_PREPASS");
-        depthPrepass_=prepass && std::strcmp(prepass,"1")==0;
-        std::clog<<"[CSE WARP Vulkan] Generic opaque Z-prepass="<<(depthPrepass_?"on":"off")<<"\n";
+        // Always-on engine pipeline: no per-frame or startup A/B decision.
+        // DX11 has its own independent renderer and is not modified.
+        std::clog<<"[CSE WARP Vulkan] Generic opaque Z-prepass=always-on (no runtime toggle)\n";
         std::clog<<"[CSE WARP Vulkan] GPU="<<adapter_
                  <<" version="<<VK_VERSION_MAJOR(props_.apiVersion)<<"."
                  <<VK_VERSION_MINOR(props_.apiVersion)<<"."
@@ -620,7 +619,7 @@ class VulkanRaster final {
             pi.stageCount=stagesBefore;
         };
         vkcheck(vkCreateGraphicsPipelines(device_,pipelineCache_,1,&pi,nullptr,&opaquePipeline_),"opaque Vulkan pipeline");
-        if(depthPrepass_)depthPipeline(&depthOpaque_,"opaque depth-only Vulkan pipeline");
+        depthPipeline(&depthOpaque_,"opaque depth-only Vulkan pipeline");
         blend.blendEnable=VK_TRUE;blend.srcColorBlendFactor=VK_BLEND_FACTOR_SRC_ALPHA;
         blend.dstColorBlendFactor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         blend.colorBlendOp=VK_BLEND_OP_ADD;
@@ -653,7 +652,7 @@ class VulkanRaster final {
         ds.depthWriteEnable=VK_TRUE;
         blend.blendEnable=VK_FALSE;
         vkcheck(vkCreateGraphicsPipelines(device_,pipelineCache_,1,&pi,nullptr,&boxPipeline_),"instanced box Vulkan pipeline");
-        if(depthPrepass_)depthPipeline(&depthBox_,"instanced box depth-only Vulkan pipeline");
+        depthPipeline(&depthBox_,"instanced box depth-only Vulkan pipeline");
         vkDestroyShaderModule(device_,boxModule,nullptr);
         // Shared canopy geometry: V17 CPU-generated foliage uses a 32-byte instance.
         const auto foliageCode=spirv(shaderFile("raster_foliage.vert.spv"));
@@ -676,7 +675,7 @@ class VulkanRaster final {
         vi.vertexBindingDescriptionCount=2;vi.pVertexBindingDescriptions=folBindings.data();
         vi.vertexAttributeDescriptionCount=uint32_t(folAttrs.size());vi.pVertexAttributeDescriptions=folAttrs.data();
         vkcheck(vkCreateGraphicsPipelines(device_,pipelineCache_,1,&pi,nullptr,&foliagePipeline_),"instanced foliage Vulkan pipeline");
-        if(depthPrepass_)depthPipeline(&depthFoliage_,"instanced foliage depth-only Vulkan pipeline");
+        depthPipeline(&depthFoliage_,"instanced foliage depth-only Vulkan pipeline");
         vkDestroyShaderModule(device_,foliageModule,nullptr);
         vkDestroyShaderModule(device_,modules[0],nullptr);
         vkDestroyShaderModule(device_,modules[1],nullptr);
@@ -1099,8 +1098,8 @@ public:
                 }
             }
             };
-            if(depthPrepass_)drawOpaque(true);
-            drawOpaque(false);
+            drawOpaque(true);  // Mandatory depth-only opaque pass.
+            drawOpaque(false); // Unmodified color shading; glass remains a single pass.
             if(transparentCount_){
                 // CPU depth-sort transparent triangles every frame, then draw with depth-test but no depth-write.
                 std::iota(glassOrder_.begin(),glassOrder_.end(),size_t(0));
