@@ -58,6 +58,29 @@ jobs:
           $vk = Get-Content build-vulkan-dx11/smoke_vulkan.json -Raw | ConvertFrom-Json
           if ($dx.checksum -ne $vk.checksum) { throw "Shader output mismatch: D3D11=$($dx.checksum), Vulkan=$($vk.checksum)" }
           Write-Host "PASS: matching integer result checksum $($dx.checksum)"
+      - name: Validate turbo cached, direct, compute-only, and pipeline variants on SwiftShader
+        shell: pwsh
+        run: |
+          Push-Location build-vulkan-dx11/Release
+          $options = @(
+            @('cached', '1', 'smoke_turbo_cached'),
+            @('direct', '1', 'smoke_turbo_direct'),
+            @('compute', '1', 'smoke_turbo_compute'),
+            @('cached', '2', 'smoke_turbo_ring2'),
+            @('direct', '3', 'smoke_turbo_ring3'),
+            @('compute', '3', 'smoke_turbo_compute_ring3')
+          )
+          $expected = (Get-Content ../smoke_dx11.json -Raw | ConvertFrom-Json).checksum
+          foreach ($t in $options) {
+            $mode, $inflight, $name = $t
+            ./cse_warp_vk_dx11_bench.exe --api vulkan --allow-software --vk-mode $mode --vk-inflight $inflight --width 320 --height 180 --loops 8 --warmup 1 --repeat 4 --output "../$name"
+            if ($LASTEXITCODE -ne 0) { throw "$name failed" }
+            $result = Get-Content "../$name.json" -Raw | ConvertFrom-Json
+            if ($result.checksum -ne $expected) { throw "$name checksum mismatch: $($result.checksum) != $expected" }
+            if ($result.samples.Count -ne 4) { throw "$name sample count mismatch" }
+            Write-Host "PASS $name with checksum $expected"
+          }
+          Pop-Location
       - name: Prepare portable Windows x64 package
         shell: pwsh
         run: |
@@ -75,4 +98,6 @@ jobs:
             build-vulkan-dx11/probe.txt
             build-vulkan-dx11/smoke_*.json
             build-vulkan-dx11/smoke_*.csv
+            build-vulkan-dx11/smoke_turbo*.json
+            build-vulkan-dx11/smoke_turbo*.csv
           retention-days: 14
