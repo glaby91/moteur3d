@@ -149,17 +149,66 @@ public:
     }
 };
 
+inline std::vector<GpuVertex> makeFoliageTemplate(int segments,int rings,int leaves){
+    MeshBuilder mesh;
+    const auto point=[&](int ring,int segment){
+        const float latitude=float(ring)*PI/rings;
+        const float azimuth=float(segment)*2.f*PI/segments;
+        const float ripple=1.f+.075f*std::sin(5.f*azimuth+2.f*latitude)
+                             +.055f*std::cos(9.f*azimuth-3.f*latitude)
+                             +.04f*std::sin(7.f*latitude+4.f*azimuth);
+        const float widest=std::sin(latitude)*ripple;
+        return V{widest*std::cos(azimuth),std::cos(latitude),
+                 widest*std::sin(azimuth)};
+    };
+    auto add=[&](V p,V q,V r,V uv0,V uv1,V uv2){
+        V n=norm(cross(q-p,r-p));
+        if(dot(n,p)<0.f){std::swap(q,r);std::swap(uv1,uv2);n=norm(cross(q-p,r-p));}
+        mesh.tri(p,q,r,n,n,n,uv0.x,uv0.y,uv1.x,uv1.y,uv2.x,uv2.y,0);
+    };
+    for(int ring=0;ring<rings;++ring)for(int segment=0;segment<segments;++segment){
+        const V a=point(ring,segment),b=point(ring+1,segment);
+        const V c=point(ring+1,segment+1),d=point(ring,segment+1);
+        if(ring>0)add(a,b,d,
+            {float(segment)/segments,float(ring)/rings},
+            {float(segment)/segments,float(ring+1)/rings},
+            {float(segment+1)/segments,float(ring)/rings});
+        if(ring<rings-1)add(b,c,d,
+            {float(segment)/segments,float(ring+1)/rings},
+            {float(segment+1)/segments,float(ring+1)/rings},
+            {float(segment+1)/segments,float(ring)/rings});
+    }
+    for(int i=0;i<leaves;++i){
+        const float azimuth=float(i)*2.39996323f;
+        const float elevation=.35f*std::sin(i*1.731f);
+        const float cy=std::sin(elevation),radius=std::cos(elevation);
+        const V n=norm({radius*std::cos(azimuth),cy,radius*std::sin(azimuth)});
+        const V center=n*.93f;
+        const V helper=std::abs(n.y)<.8f?V{0,1,0}:V{1,0,0};
+        const V tangent=norm(cross(n,helper));
+        const float width=(.12f+.035f*float(i%3))*2.f;
+        const float height=width*(1.15f+.20f*float(i%4));
+        const V base=center-tangent*(width*.45f);
+        const V end=center+tangent*(width*.4f)+V{0,height*.24f,0}+n*(height*.24f);
+        const V sides=center+V{0,height*.4f,0};
+        mesh.tri(base,sides,end,n,n,n,0,0,.5f,1.f,1,0,0);
+    }
+    return std::move(mesh.vertices);
+}
+struct FoliageInstance {float center[3];uint32_t material;float radii[3];float padding;};
+static_assert(sizeof(FoliageInstance)==32,"Foliage GPU instance format");
 struct BoxInstance {
     float lo[3],uvScale;
     float hi[3];uint32_t material;
     float dimensions[3];uint32_t uvMode;
 };
 static_assert(sizeof(BoxInstance)==48,"Vulkan and DX11 box instance formats must match");
-inline MeshBuilder build(const Scene& scene,std::vector<BoxInstance>* boxes=nullptr) {
+inline MeshBuilder build(const Scene& scene,std::vector<BoxInstance>* boxes=nullptr,
+                         std::vector<FoliageInstance>* canopies=nullptr) {
     MeshBuilder mesh;
     std::vector<uint8_t> skip;
+    if(boxes||canopies)skip.assign(scene.obj.size(),0);
     if(boxes) {
-        skip.assign(scene.obj.size(),0);
         for(const SourceBox& source:scene.sourceBoxes) {
             if(source.triangleCount!=12 || source.material>=scene.mat.size() ||
                scene.mat[source.material].transmissionPercent>0 ||
@@ -182,6 +231,25 @@ inline MeshBuilder build(const Scene& scene,std::vector<BoxInstance>* boxes=null
                          name=="cse_personnage_facade")?2u:1u;
             boxes->push_back(inst);
             for(size_t k=source.firstTriangle;k<size_t(source.firstTriangle)+12;k++)skip[k]=1;
+        }
+    }
+    if(canopies){
+        for(const SourceFoliage& source:scene.sourceFoliage){
+            const size_t start=source.firstTriangle,end=start+source.triangleCount;
+            if(source.triangleCount==0||end>scene.obj.size()||
+               source.material>=scene.mat.size()||
+               scene.mat[source.material].transmissionPercent>0||
+               source.radii.x<=0.f||source.radii.y<=0.f||source.radii.z<=0.f)continue;
+            bool valid=true;
+            for(size_t k=start;k<end;k++)if(skip[k] || scene.obj[k].kind!=Kind::Triangle ||
+                uint32_t(scene.obj[k].mat)!=source.material){valid=false;break;}
+            if(!valid)continue;
+            FoliageInstance inst{};
+            inst.center[0]=source.center.x;inst.center[1]=source.center.y;inst.center[2]=source.center.z;
+            inst.radii[0]=source.radii.x;inst.radii[1]=source.radii.y;inst.radii[2]=source.radii.z;
+            inst.material=source.material;
+            canopies->push_back(inst);
+            for(size_t k=start;k<end;k++)skip[k]=1;
         }
     }
     for(size_t objectIndex=0;objectIndex<scene.obj.size();objectIndex++) {
