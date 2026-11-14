@@ -111,7 +111,7 @@ int main(int argc,char** argv) {
   std::cout<<i<<" dx11="<<dxMs<<"ms vulkan="<<vkMs<<"ms GPU Vulkan="<<vkStats.gpuDrawMs<<"ms\n";
  }
  QJsonObject doc;
- doc["target"]="CSE WARP V17 Vulkan 1.2 min (1.3 when exposed by driver)";
+ doc["target"]="CSE WARP V17 Vulkan API 1.3.204 minimum on loader and GPU";
  doc["scene"]=sceneFile;doc["width"]=width;doc["height"]=height;doc["frames"]=frames;
  doc["dx11_median_ms"]=median(dxTimes);doc["vulkan_median_ms"]=median(vkTimes);
  doc["dx11_p95_ms"]=p95(dxTimes);doc["vulkan_p95_ms"]=p95(vkTimes);
