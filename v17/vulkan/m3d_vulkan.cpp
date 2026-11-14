@@ -962,7 +962,7 @@ class VulkanRaster final {
     }
     void textures(const Scene& scene){
         free(albedo_);free(surface_);
-        free(detailAlbedo_);free(detailSurface_;
+        free(detailAlbedo_);free(detailSurface_);
         protectedLayer_.fill(-1);
         const uint32_t layers=uint32_t(std::max<size_t>(1,std::min<size_t>(kMaxMaterials,scene.mat.size())));
         if(layers>props_.limits.maxImageArrayLayers)
