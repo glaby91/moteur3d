@@ -1,4 +1,4 @@
-name: CSE WARP V17 Vulkan 1.2+ Raster - final Windows compile
+name: CSE WARP V17 Vulkan 1.3.204+ Raster - final Windows compile
 run-name: Vulkan Raster V17 - five-pass final Windows build
 on:
   push:
@@ -101,7 +101,7 @@ jobs:
       - name: Publish experimental Vulkan Raster Windows bundle
         uses: actions/upload-artifact@v4
         with:
-          name: CSE-WARP-V17-Vulkan-1.2-1.3-Raster-Windows-HD620
+          name: CSE-WARP-V17-Vulkan-1.3.204-Raster-Windows-HD620
           path: dist-v17-vulkan/
           retention-days: 14
           if-no-files-found: error
