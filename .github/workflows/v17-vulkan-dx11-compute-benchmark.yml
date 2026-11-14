@@ -22,6 +22,13 @@ jobs:
           cache: true
           stripdown: true
           install_swiftshader: true
+      - name: Force the known SwiftShader Vulkan ICD (CI only)
+        shell: pwsh
+        run: |
+          $icd = Get-ChildItem 'C:\\hostedtoolcache\\windows\\swiftshader' -Recurse -Filter vk_swiftshader_icd.json -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $icd) { throw 'SwiftShader Vulkan ICD JSON not found' }
+          Write-Host "CI Vulkan ICD: $icd"
+          "VK_ICD_FILENAMES=$icd" >> $env:GITHUB_ENV
       - name: Configure CMake for isolated benchmark
         shell: pwsh
         run: >-
@@ -35,8 +42,10 @@ jobs:
         shell: pwsh
         run: |
           $exe = 'build-vulkan-dx11/Release/cse_warp_vk_dx11_bench.exe'
-          & $exe --probe | Tee-Object -FilePath build-vulkan-dx11/probe.txt
-          if ($LASTEXITCODE -ne 0) { throw 'Probe failed' }
+          & $exe --help
+          if ($LASTEXITCODE -ne 0) { throw "Help failed exit=$LASTEXITCODE" }
+          & $exe --probe 2>&1 | Tee-Object -FilePath build-vulkan-dx11/probe.txt
+          if ($LASTEXITCODE -ne 0) { throw "Probe failed exit=$LASTEXITCODE" }
       - name: Functional smoke D3D11 WARP (NOT representative HD620 timing)
         shell: pwsh
         run: |
