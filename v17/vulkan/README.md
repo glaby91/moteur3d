@@ -68,3 +68,5 @@ Le profil par défaut reste **baseline**. Un profil **optimized** sélectionnabl
 Les améliorations écartées à ce stade : multiplier les command buffers et ajouter plusieurs frames GPU en vol dans le chemin QImage synchrone (sans refonte API Qt asynchrone, cela ne supprime pas le readback nécessaire), réallouer les descriptors par image (ils sont déjà persistants) ou réduire textures/résolution pour fausser le comparatif.
 
 Sources Khronos : https://docs.vulkan.org/samples/latest/samples/performance/command_buffer_usage/README.html ; https://docs.vulkan.org/samples/latest/samples/performance/descriptor_management/README.html ; https://docs.vulkan.org/samples/latest/samples/performance/pipeline_barriers/README.html .
+
+Les quatre campagnes sont sauvegardées comme quatre répertoires distincts dans l'archive, pour conserver les quatre fichiers `ab_results.json` et leurs captures sans conflit de nom.

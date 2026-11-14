@@ -28,7 +28,7 @@ set "CSE_WARP_VK_FAST_FRAGMENT=0"
 echo [4/4] Vulkan baseline B
 "v17_vulkan_ab_bench.exe" "%SCENE%" "VK_BASE_B" 40 1366 768 >"vk_base_b.log" 2>&1
 if errorlevel 1 goto fail
-powershell -NoProfile -Command "Compress-Archive -Path 'VK_BASE_A\*','VK_BASE_B\*','VK_FAST_A\*','VK_FAST_B\*','vk_base_a.log','vk_base_b.log','vk_fast_a.log','vk_fast_b.log' -DestinationPath 'CSE_WARP_VULKAN_OPTIMISATION_HD620.zip' -Force"
+powershell -NoProfile -Command "Compress-Archive -Path 'VK_BASE_A','VK_BASE_B','VK_FAST_A','VK_FAST_B','vk_base_a.log','vk_base_b.log','vk_fast_a.log','vk_fast_b.log' -DestinationPath 'CSE_WARP_VULKAN_OPTIMISATION_HD620.zip' -Force"
 if errorlevel 1 goto fail
 echo.
 echo Complete: CSE_WARP_VULKAN_OPTIMISATION_HD620.zip
