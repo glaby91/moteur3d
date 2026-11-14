@@ -60,7 +60,12 @@ struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,dept
     // Number of actual primary BVH queries before pixel reconstruction.
     uint64_t primarySamples=0; };
 struct Light { V p; float radius,intensity; V color; };
-struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPercent=0; float refractiveIndex=1.5f; float metallic=0.f, roughnessScale=1.f; std::vector<Level> mip,normalMip,roughnessMip; std::vector<ColorLevel> colorMip; };
+struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPercent=0; float refractiveIndex=1.5f; float metallic=0.f, roughnessScale=1.f; std::vector<Level> mip,normalMip,roughnessMip; std::vector<ColorLevel> colorMip;
+    // Scene-authored optional texture quality policy. Default auto: renderer decides.
+    // Preserve: dedicated full-resolution GPU tier, independent of camera distance.
+    bool preserveTextureDetail=false;
+    uint32_t minimumTextureResolution=0;
+};
 struct Scene { bool underwaterEnvironment=false; bool finiteGround=false; bool useLegacyWorldLights=true; std::vector<Obj> obj; std::vector<SourceBox> sourceBoxes; std::vector<SourceFoliage> sourceFoliage; std::vector<Node> node; std::vector<uint32_t> order; std::vector<Material> mat; std::vector<Light> lights; int32_t root=-1;
  // V16 builder assigns a unique identity after scene construction. Tracked scenes
  // are immutable except for explicit editor mutations, which MUST call

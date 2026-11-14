@@ -78,3 +78,21 @@ Le chemin historique rend dans `VK_FORMAT_R8G8B8A8_UNORM`, puis le CPU permute l
 **Validation :** exécuter `LANCER_PIPELINE_VULKAN_HD620.bat`. Il force le **même shader optimisé** dans les quatre passes ABBA et ne change que le format/copie : RGBA A, BGRA A, BGRA B, RGBA B, chacune avec 40 images + échauffement en 1366x768. Les fichiers JSON contiennent `vulkan_readback_profile`, `vulkan_pixel_convert_ms` et maintenant une empreinte `vulkan_frame_hash` **par image**, afin de vérifier les 40 positions, pas seulement celle du premier PNG. Le CPU-only `v17_vulkan_readback_smoke` contrôle les canaux couleur sur le runner CI ; la performance réelle et la compatibilité GPU doivent être confirmées sur l'Intel HD620.
 
 Le rendu Qt reste synchronisé avec une copie GPU→CPU. Ce changement n'ajoute pas artificiellement plusieurs frames en vol ; pour supprimer cette copie il faudrait une interface Qt utilisant une texture Vulkan/swapchain, à concevoir séparément. Références Khronos : https://docs.vulkan.org/spec/latest/chapters/formats.html et https://docs.vulkan.org/guide/latest/formats.html.
+
+## Qualité de texture par matériau : moteur automatique, descripteur prioritaire
+
+Ce mécanisme est **générique**, sans référence au nom, à la position, à la distance ou à la géométrie d'une scène particulière. Dans une ressource `materials/*.json` (ou, par défaut, dans le `textureSet` correspondant), chaque matériau peut déclarer :
+
+```json
+"textureDetail": {
+  "mode": "preserve",
+  "minResolution": 2048
+}
+```
+
+- `mode: "auto"` ou champ absent : le moteur décide librement de la résolution selon son budget GPU, comportement historique inchangé.
+- `mode: "preserve"` : le matériau est placé dans un **ensemble de textures haute résolution séparé**. `minResolution` (puissance de deux entre 64 et 2048) indique la qualité minimale attendue ; en l'absence de valeur, on utilise la résolution déclarée du textureSet. La qualité reste maintenue quelle que soit la distance de caméra.
+- La politique de l'entrée matériau prime sur celle du textureSet. Aucun identifiant de scène (fresque, piscine, etc.) n'est codé dans le moteur.
+- Si la résolution source, les capacités GPU ou le budget protégé de 256 MiB ne permettent pas d'honorer la demande, **le moteur refuse explicitement le rendu plutôt que de réduire silencieusement la qualité**. Les autres matériaux restent soumis au moteur automatique.
+
+À noter : le backend Vulkan actuel ne charge qu'un niveau de mip dans ses images GPU, pour les deux catégories. Cette mise à niveau protège surtout la **résolution effective** face au budget des textures multiples. Un véritable streaming trilineaire/LOD gradué reste un chantier séparé ; la politique `preserve` devra être respectée lors de son introduction. Les autres paramètres de qualité GPU/DX11 sont inchangés.

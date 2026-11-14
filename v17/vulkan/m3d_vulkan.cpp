@@ -51,6 +51,7 @@ struct alignas(16) Uniforms {
     float shadowBase[4]{},shadowRight[4]{},shadowUp[4]{};
     float material[kMaxMaterials][4]{},emission[kMaxMaterials][4]{};
     float lightPos[kLights][4]{},lightRgb[kLights][4]{},misc[4]{};
+    float textureDetail[kMaxMaterials][4]{}; // x = protected layer, -1 for auto
 };
 static_assert(sizeof(Uniforms)%16==0,"std140 uniform size must be aligned");
 struct Chunk {uint32_t first=0,count=0;V lo{},hi{};};
@@ -117,13 +118,14 @@ class VulkanRaster final {
     VkDescriptorSetLayout descriptorLayout_=VK_NULL_HANDLE;
     VkDescriptorSet descriptor_=VK_NULL_HANDLE;
     VkSampler albedoSampler_=VK_NULL_HANDLE,shadowSampler_=VK_NULL_HANDLE;
-    Texture color_,depth_,albedo_,surface_,shadow_;
+    Texture color_,depth_,albedo_,surface_,shadow_,detailAlbedo_,detailSurface_;
     VkFramebuffer framebuffer_=VK_NULL_HANDLE;
     Buffer vertices_,transparent_,boxTemplate_,boxInstances_,foliageTemplate_,foliageInstances_,uniform_,readback_;
     uint32_t vertexCount_=0,transparentCount_=0,boxCount_=0,foliageCount_=0,foliageTemplateCount_=0;
     std::vector<vkmesh::TransparentTriangle> glass_;
     std::vector<Chunk> chunks_,boxChunks_,foliageChunks_;
     std::vector<uint32_t> stagingColors_;
+    std::array<int32_t,kMaxMaterials> protectedLayer_{};
     uint32_t width_=0,height_=0;
     uint64_t sceneIdentity_=0,sceneRevision_=~uint64_t(0);
     size_t sceneObjects_=0,sceneMaterials_=0;
@@ -278,13 +280,16 @@ class VulkanRaster final {
         VkDescriptorImageInfo a{albedoSampler_,albedo_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo n{albedoSampler_,surface_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo s{shadowSampler_,shadow_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        std::array<VkWriteDescriptorSet,4> writes{};
-        for(uint32_t i=0;i<4;i++){
+        VkDescriptorImageInfo highAlbedo{albedoSampler_,detailAlbedo_.view?detailAlbedo_.view:albedo_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo highSurface{albedoSampler_,detailSurface_.view?detailSurface_.view:surface_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        std::array<VkWriteDescriptorSet,6> writes{};
+        for(uint32_t i=0;i<6;i++){
             auto& w=writes[i];w.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             w.dstSet=descriptor_;w.dstBinding=i;w.descriptorCount=1;
             w.descriptorType=i?VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         }
         writes[0].pBufferInfo=&u;writes[1].pImageInfo=&a;writes[2].pImageInfo=&n;writes[3].pImageInfo=&s;
+        writes[4].pImageInfo=&highAlbedo;writes[5].pImageInfo=&highSurface;
         vkUpdateDescriptorSets(device_,uint32_t(writes.size()),writes.data(),0,nullptr);
     }
     void configure(){
@@ -375,17 +380,17 @@ class VulkanRaster final {
         VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
         qi.queryType=VK_QUERY_TYPE_TIMESTAMP;qi.queryCount=2;
         vkcheck(vkCreateQueryPool(device_,&qi,nullptr,&queries_),"GPU timestamps");
-        VkDescriptorSetLayoutBinding bindings[4]{};
-        for(uint32_t j=0;j<4;j++){
+        VkDescriptorSetLayoutBinding bindings[6]{};
+        for(uint32_t j=0;j<6;j++){
             bindings[j].binding=j;bindings[j].descriptorCount=1;
             bindings[j].descriptorType=j?VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             bindings[j].stageFlags=j?VK_SHADER_STAGE_FRAGMENT_BIT:(VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT);
         }
         VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-        li.bindingCount=4;li.pBindings=bindings;
+        li.bindingCount=6;li.pBindings=bindings;
         vkcheck(vkCreateDescriptorSetLayout(device_,&li,nullptr,&descriptorLayout_),"descriptor layout");
         VkDescriptorPoolSize pools[2]={{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,1},
-                                        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,3}};
+                                        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,5}};
         VkDescriptorPoolCreateInfo p{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         p.maxSets=1;p.poolSizeCount=2;p.pPoolSizes=pools;
         vkcheck(vkCreateDescriptorPool(device_,&p,nullptr,&descriptorPool_),"descriptor pool");
@@ -588,6 +593,8 @@ class VulkanRaster final {
     }
     void textures(const Scene& scene){
         free(albedo_);free(surface_);
+        free(detailAlbedo_);free(detailSurface_);
+        protectedLayer_.fill(-1);
         const uint32_t layers=uint32_t(std::max<size_t>(1,std::min<size_t>(kMaxMaterials,scene.mat.size())));
         if(layers>props_.limits.maxImageArrayLayers)
             throw std::runtime_error("GPU maxImageArrayLayers insufficient for scene");
@@ -647,6 +654,81 @@ class VulkanRaster final {
         }
         uploadImage(albedo_,alb.data(),alb.size()*sizeof(uint32_t));
         uploadImage(surface_,surf.data(),surf.size()*sizeof(uint32_t));
+
+        // A separate GPU texture tier for any scene-authored 'preserve' material.
+        // Only those materials consume high-resolution memory; default auto
+        // materials retain the exact historical budget, sampling and colors.
+        std::vector<uint32_t> protectedIds;
+        uint32_t highSide=0;
+        for(uint32_t m=0;m<scene.mat.size();++m){
+            const Material& material=scene.mat[m];
+            if(!material.preserveTextureDetail)continue;
+            if(material.colorMip.empty()||material.colorMip.front().size<material.minimumTextureResolution)
+                throw std::runtime_error("Texture preservation impossible: source mip missing for "+material.name);
+            highSide=std::max(highSide,material.colorMip.front().size);
+            protectedLayer_[m]=int32_t(protectedIds.size());
+            protectedIds.push_back(m);
+        }
+        if(!protectedIds.empty()){
+            if(highSide>props_.limits.maxImageDimension2D ||
+               protectedIds.size()>props_.limits.maxImageArrayLayers)
+                throw std::runtime_error("GPU cannot preserve requested texture resolution/layers");
+            const uint64_t needed=uint64_t(highSide)*highSide*protectedIds.size()*8ull;
+            // Hard guard protects smaller integrated GPUs: fail explicitly rather
+            // than ever silently downscale a protected material.
+            constexpr uint64_t kMaxProtectedBytes=256ull*1024ull*1024ull;
+            if(needed>kMaxProtectedBytes)
+                throw std::runtime_error("Protected PBR textures exceed 256 MiB budget; split assets or raise compatible GPU capacity");
+            detailAlbedo_=image(highSide,highSide,uint32_t(protectedIds.size()),
+                VK_FORMAT_R8G8B8A8_SRGB,VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                VK_IMAGE_ASPECT_COLOR_BIT,true);
+            detailSurface_=image(highSide,highSide,uint32_t(protectedIds.size()),
+                VK_FORMAT_R8G8B8A8_UNORM,VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                VK_IMAGE_ASPECT_COLOR_BIT,true);
+            const size_t layerPixels=size_t(highSide)*highSide;
+            std::vector<uint32_t> albedoHigh(layerPixels*protectedIds.size(),0xff808080u);
+            std::vector<uint32_t> surfaceHigh(layerPixels*protectedIds.size(),0xffff8080u);
+            for(size_t layer=0;layer<protectedIds.size();++layer){
+                const Material& mat=scene.mat[protectedIds[layer]];
+                const ColorLevel* color=nearestLevel(mat.colorMip,highSide);
+                const Level* legacy=nearestLevel(mat.mip,highSide);
+                const Level* normal=nearestLevel(mat.normalMip,highSide);
+                const Level* rough=nearestLevel(mat.roughnessMip,highSide);
+                if(!color || color->size<mat.minimumTextureResolution)
+                    throw std::runtime_error("Protected color mip resolution below descriptor minimum: "+mat.name);
+                for(uint32_t y=0;y<highSide;y++)for(uint32_t x=0;x<highSide;x++){
+                    const size_t dst=layer*layerPixels+size_t(y)*highSide+x;
+                    uint32_t rgb=0x999999u;
+                    if(color&&!color->p.empty()&&color->size){
+                        const size_t at=size_t(y*color->size/highSide)*color->size+(x*color->size/highSide);
+                        if(at<color->p.size())rgb=color->p[at]&0xffffffu;
+                    }else if(legacy&&!legacy->p.empty()&&legacy->size){
+                        const size_t at=size_t(y*legacy->size/highSide)*legacy->size+(x*legacy->size/highSide);
+                        if(at<legacy->p.size())rgb=unpack565(legacy->p[at]);
+                    }
+                    albedoHigh[dst]=rgba8(rgb);
+                    uint32_t n=0x8080ffu;
+                    if(normal&&!normal->p.empty()&&normal->size){
+                        const size_t at=size_t(y*normal->size/highSide)*normal->size+(x*normal->size/highSide);
+                        if(at<normal->p.size())n=unpack565(normal->p[at]);
+                    }
+                    uint32_t rv=255;
+                    if(rough&&!rough->p.empty()&&rough->size){
+                        const size_t at=size_t(y*rough->size/highSide)*rough->size+(x*rough->size/highSide);
+                        if(at<rough->p.size()){
+                            const uint32_t c=unpack565(rough->p[at]);
+                            rv=((c>>16&255u)+(c>>8&255u)+(c&255u))/3;
+                        }
+                    }
+                    surfaceHigh[dst]=(n>>16&255u)|((n>>8&255u)<<8)|((n&255u)<<16)|(rv<<24);
+                }
+            }
+            uploadImage(detailAlbedo_,albedoHigh.data(),albedoHigh.size()*sizeof(uint32_t));
+            uploadImage(detailSurface_,surfaceHigh.data(),surfaceHigh.size()*sizeof(uint32_t));
+            std::clog<<"[CSE WARP Vulkan] Protected texture tier: "<<protectedIds.size()
+                     <<" materials, "<<highSide<<"x"<<highSide<<", "<<needed/(1024*1024)
+                     <<" MiB, no distance-based LOD reduction\n";
+        }
     }
     void updateShadow(const ShadowMap& sh){
         if(sh.d.data()==shadowData_&&uint32_t(sh.size)==shadowSize_&&shadow_.image&&cachedSolarHour_==solarHour)return;
@@ -782,6 +864,7 @@ class VulkanRaster final {
         f.shadowUp[3]=shadow_.width;
         for(size_t i=0;i<scene.mat.size()&&i<kMaxMaterials;i++){
             const Material& m=scene.mat[i];
+            f.textureDetail[i][0]=float(protectedLayer_[i]);
             f.material[i][0]=clampf(m.metallic,0.f,1.f);
             f.material[i][1]=clampf(m.roughnessScale,.08f,1.f);
             f.material[i][2]=1.f-float(m.transmissionPercent)/100.f;
@@ -819,6 +902,7 @@ public:
         if(framebuffer_)vkDestroyFramebuffer(device_,framebuffer_,nullptr);
         free(readback_);free(uniform_);free(vertices_);free(transparent_);free(boxTemplate_);free(boxInstances_);free(foliageTemplate_);free(foliageInstances_);
         free(color_);free(depth_);free(albedo_);free(surface_);free(shadow_);
+        free(detailAlbedo_);free(detailSurface_);
         if(foliagePipeline_)vkDestroyPipeline(device_,foliagePipeline_,nullptr);
         if(boxPipeline_)vkDestroyPipeline(device_,boxPipeline_,nullptr);
         if(alphaPipeline_)vkDestroyPipeline(device_,alphaPipeline_,nullptr);

@@ -10,10 +10,13 @@ layout(set=0,binding=0,std140) uniform Frame {
  vec4 materialProps[256], emission[256];
  vec4 lightPos[16],lightRgb[16];
  vec4 misc;
+ vec4 textureDetail[256];
 } f;
 layout(set=0,binding=1) uniform sampler2DArray albedo;
 layout(set=0,binding=2) uniform sampler2DArray normalRough;
 layout(set=0,binding=3) uniform sampler2D shadowMap;
+layout(set=0,binding=4) uniform sampler2DArray preservedAlbedo;
+layout(set=0,binding=5) uniform sampler2DArray preservedNormalRough;
 const float pi=3.14159265;
 float visibility(vec3 p) {
  if(f.shadowUp.w<2.0) return 1.0;
@@ -31,8 +34,20 @@ float visibility(vec3 p) {
 }
 void main() {
  int m=int(material);
- vec3 base=texture(albedo,vec3(uv,float(m))).rgb;
- vec4 nm=texture(normalRough,vec3(uv,float(m)));
+ vec3 base;
+ vec4 nm;
+ float protectedLayer=f.textureDetail[m].x;
+ if(protectedLayer<0.0) {
+   // Preserve the exact automatic path for all existing materials.
+   base=texture(albedo,vec3(uv,float(m))).rgb;
+   nm=texture(normalRough,vec3(uv,float(m)));
+ } else {
+   // Compute derivatives before divergent texture selection. Protected
+   // material always samples its full-resolution tier, even at distance.
+   vec2 du=dFdx(uv), dv=dFdy(uv);
+   base=textureGrad(preservedAlbedo,vec3(uv,protectedLayer),du,dv).rgb;
+   nm=textureGrad(preservedNormalRough,vec3(uv,protectedLayer),du,dv);
+ }
  vec3 n=normalize(normal);
  // Only compute tangent basis if a normal map exists.
  if(f.materialProps[m].w>0.5) {

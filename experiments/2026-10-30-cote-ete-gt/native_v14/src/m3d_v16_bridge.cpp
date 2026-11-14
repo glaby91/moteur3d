@@ -626,8 +626,39 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
         if(!sets.contains(texId)){result.error="Missing texture set: "+texId;return result;}
         const auto set=sets.value(texId);
         const int requested=int(set.value("resolution").toInt(1024));
+        // Scene descriptor policy, never a scene-specific renderer exception:
+        // material.textureDetail overrides textureSet.textureDetail.
+        const QJsonValue policyValue=j.contains("textureDetail")?
+            j.value("textureDetail"):set.value("textureDetail");
+        if(!policyValue.isUndefined() && !policyValue.isObject()){
+            result.error="textureDetail must be an object for material: "+id;return result;
+        }
+        const QJsonObject policy=policyValue.toObject();
+        const QString mode=policy.value("mode").toString("auto");
+        if(mode!="auto" && mode!="preserve"){
+            result.error="textureDetail.mode must be auto or preserve: "+id;return result;
+        }
+        const QJsonValue floorValue=policy.value("minResolution");
+        if(!floorValue.isUndefined() && (!floorValue.isDouble() ||
+             floorValue.toInt(-1)<64 || floorValue.toInt(-1)>2048 ||
+             (floorValue.toInt(-1)&(floorValue.toInt(-1)-1)))){
+            result.error="Invalid textureDetail.minResolution (power of 2, 64..2048): "+id;
+            return result;
+        }
+        const int minimum=floorValue.isUndefined()?requested:floorValue.toInt();
         int size=std::min(maxTextureResolution,requested);
         if(size<64||size>2048||(size&(size-1))){result.error="Invalid mip resolution";return result;}
+        if(mode=="preserve"){
+            // Explicit preservation may override global auto resolution, but
+            // never invent missing texels or silently degrade quality.
+            if(minimum>requested){
+                result.error="Protected material minResolution exceeds source texture resolution: "+id;
+                return result;
+            }
+            size=std::max(size,minimum);
+            material.preserveTextureDetail=true;
+            material.minimumTextureResolution=uint32_t(minimum);
+        }
         generatePbr(material,base,rough,set.value("pattern").toString("plaster"),size);
         // Restrict optional painting source to the loaded scene's own root.
         const QString imageRel=set.value("imageFile").toString();
