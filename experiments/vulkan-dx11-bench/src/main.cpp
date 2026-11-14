@@ -36,21 +36,30 @@ static std::string esc(const std::string& s){std::string o;for(unsigned char c:s
 static uint64_t fnv(const std::vector<uint32_t>& x){uint64_t h=14695981039346656037ull;for(uint32_t v:x)for(int i=0;i<4;++i){h^=(v>>(i*8))&255u;h*=1099511628211ull;}return h;}
 static std::string hex(uint64_t x){char buf[40];sprintf_s(buf,"%016llx",static_cast<unsigned long long>(x));return buf;}
 struct Params{uint32_t w=1366,h=768,loops=32,seed=0xC5E17201u;};
-struct Sample{std::string api;int index=0;double gpuMs=-1,wallMs=-1;uint64_t checksum=0;};
-struct Config{Params p;int warmup=5,repeat=30;std::string api="both",output="vulkan_dx11_result";bool probe=false,allowSoftware=false,warp=false;};
+struct Sample{std::string api;int index=0;double gpuMs=-1,wallMs=-1;uint64_t checksum=0;double recordMs=0,submitMs=0,waitMs=0,invalidateMs=0,copyCpuMs=0;};
+struct Config{Params p;int warmup=5,repeat=30,vkInFlight=1;std::string api="both",output="vulkan_dx11_result",vkMode="legacy";bool probe=false,allowSoftware=false,warp=false,vkReuse=true;};
 static Config parse(int argc,char**argv){Config c;for(int i=1;i<argc;++i){std::string k=argv[i];
  auto val=[&](){must(i+1<argc,"Missing value for "+k);return std::string(argv[++i]);};
  if(k=="--width")c.p.w=uint32_t(std::stoul(val()));else if(k=="--height")c.p.h=uint32_t(std::stoul(val()));
  else if(k=="--loops")c.p.loops=uint32_t(std::stoul(val()));else if(k=="--seed")c.p.seed=uint32_t(std::stoul(val()));
  else if(k=="--warmup")c.warmup=std::stoi(val());else if(k=="--repeat")c.repeat=std::stoi(val());
  else if(k=="--api")c.api=val();else if(k=="--output")c.output=val();else if(k=="--probe")c.probe=true;
+ else if(k=="--vk-mode")c.vkMode=val();else if(k=="--vk-inflight")c.vkInFlight=std::stoi(val());
+ else if(k=="--vk-record")c.vkReuse=false;
  else if(k=="--allow-software")c.allowSoftware=true;else if(k=="--warp")c.warp=true;
  else if(k=="--help"){std::cout<<"CSE WARP Vulkan vs D3D11 COMPUTE microbenchmark (NOT V17 Raster)\n"
  <<"--probe | --api both|vulkan|dx11 --width 1366 --height 768 --loops 32 --warmup 5 --repeat 30 --output prefix\n"
+ <<"--vk-mode legacy|cached|direct|compute --vk-inflight 1|2|3 --vk-record (disable reusable commands)\n"
+ <<"cached: HOST_CACHED staging, persistent mapping; direct: UMA accessible output; compute: no per-run readback\n"
  <<"--allow-software: permit CPU Vulkan ICD (diagnostic ONLY). --warp: D3D11 WARP (diagnostic ONLY).\n";exit(0);}
  else throw std::runtime_error("Unknown argument: "+k);
  }
  must(c.api=="both"||c.api=="vulkan"||c.api=="dx11","Invalid --api");
+ must(c.vkMode=="legacy"||c.vkMode=="cached"||c.vkMode=="direct"||c.vkMode=="compute","Invalid --vk-mode");
+ must(c.vkInFlight>=1&&c.vkInFlight<=3,"--vk-inflight must be 1,2 or 3");
+ must(c.vkInFlight==1||c.api=="vulkan","Pipelined tests require --api vulkan (not paired)");
+ must(c.vkInFlight==1||c.vkMode!="legacy","Legacy mode has no async ring; select cached/direct/compute");
+ must(c.vkMode!="compute"||c.api=="vulkan","Compute-only mode has no per-dispatch readback: use --api vulkan");
  must(c.p.w>0&&c.p.h>0&&c.p.w<=4096&&c.p.h<=4096&&uint64_t(c.p.w)*c.p.h<=8000000,"Invalid image size");
  must(c.p.loops>0&&c.p.loops<=512&&c.warmup>=0&&c.warmup<=50&&c.repeat>=1&&c.repeat<=500,"Invalid workload");
  must(c.api!="both"||(!c.warp&&!c.allowSoftware),"Do not compare different software ICDs in paired mode");
@@ -215,6 +224,7 @@ public:
   if(hashOutput)s.checksum=fnv(pixels);return s;
  }
 };
+#include "vulkan_turbo.h"
 static double pct(const std::vector<double>& a,double p){auto x=a;std::sort(x.begin(),x.end());if(x.empty())return -1;return x[size_t(std::ceil(p*x.size()))-1];}
 static double mean(const std::vector<double>& a){return a.empty()?-1:std::accumulate(a.begin(),a.end(),0.0)/double(a.size());}
 static void summary(const std::vector<Sample>& all,const std::string& api){std::vector<double> g,w;for(const auto& s:all)if(s.api==api){if(s.gpuMs>=0)g.push_back(s.gpuMs);w.push_back(s.wallMs);}
@@ -224,23 +234,35 @@ int main(int argc,char**argv){try{
  auto adapters=dxgiAdapters();for(const auto& x:adapters)std::cout<<"DXGI "<<utf8(x.desc.Description)<<" vendor="<<x.desc.VendorId<<" device="<<x.desc.DeviceId<<"\n";
  auto vs=VkBench::enumerate();for(const auto& v:vs)std::cout<<"Vulkan "<<v<<"\n";if(c.probe)return 0;
  char exe[MAX_PATH]{};GetModuleFileNameA(nullptr,exe,MAX_PATH);std::string shader=std::string(exe);auto pos=shader.find_last_of("/\\");shader=(pos==std::string::npos?std::string():shader.substr(0,pos+1))+"benchmark.comp.spv";
- std::unique_ptr<VkBench> vk;std::unique_ptr<DxBench> dx;
- if(c.api!="dx11")vk=std::make_unique<VkBench>(c.p,shader,c.allowSoftware);
- if(c.api!="vulkan")dx=std::make_unique<DxBench>(c.p,vk?vk->vendor:0,vk?vk->deviceId:0,c.warp);
- if(vk)std::cout<<"SELECT Vulkan="<<vk->deviceName<<" vendor="<<vk->vendor<<" device="<<vk->deviceId<<"\n";
- if(dx)std::cout<<"SELECT D3D11="<<dx->deviceName<<" vendor="<<dx->vendor<<" device="<<dx->deviceId<<"\n";
- if(vk&&dx)must(!vk->software&&!dx->software&&vk->vendor==dx->vendor&&vk->deviceId==dx->deviceId,"Paired benchmark requires the SAME PHYSICAL GPU");
- std::vector<Sample> samples;uint64_t hashDx=0,hashVk=0;
- auto one=[&](bool isVk,int index,bool check){Sample s=isVk?vk->run(index,check):dx->run(index,check);if(check){if(isVk)hashVk=s.checksum;else hashDx=s.checksum;}if(index>=0)samples.push_back(s);};
- for(int i=0;i<c.warmup;i++){if(dx)one(false,-1,false);if(vk)one(true,-1,false);}
- for(int i=0;i<c.repeat;i++){
-  bool check=i==c.repeat-1;
-  if(dx&&vk){if((i&1)==0){one(false,i,check);one(true,i,check);}else{one(true,i,check);one(false,i,check);}}
-  else if(dx)one(false,i,check);else one(true,i,check);
+ std::unique_ptr<VkBench> vk;std::unique_ptr<VkTurboBench> turbo;std::unique_ptr<DxBench> dx;
+ if(c.api!="dx11"){
+  if(c.vkMode=="legacy")vk=std::make_unique<VkBench>(c.p,shader,c.allowSoftware);
+  else turbo=std::make_unique<VkTurboBench>(c.p,shader,c.vkMode,c.vkInFlight,c.vkReuse,c.allowSoftware);
  }
- if(vk&&dx){must(hashDx==hashVk,"DX11/Vulkan output hash mismatch: "+hex(hashDx)+" vs "+hex(hashVk));std::cout<<"OUTPUT BIT-EXACT PASS checksum="<<hex(hashVk)<<"\n";}
- else std::cout<<"OUTPUT checksum="<<hex(vk?hashVk:hashDx)<<" (single API; no cross-API validation)\n";
- if(dx)summary(samples,"dx11");if(vk)summary(samples,"vulkan");
+ uint32_t vVendor=vk?vk->vendor:turbo?turbo->vendor:0;
+ uint32_t vDevice=vk?vk->deviceId:turbo?turbo->deviceId:0;
+ if(c.api!="vulkan")dx=std::make_unique<DxBench>(c.p,vVendor,vDevice,c.warp);
+ if(vk)std::cout<<"SELECT Vulkan="<<vk->deviceName<<" vendor="<<vVendor<<" device="<<vDevice<<"\n";
+ if(turbo)std::cout<<"SELECT Vulkan Turbo="<<turbo->deviceName<<" vendor="<<vVendor<<" device="<<vDevice<<"\n";
+ if(dx)std::cout<<"SELECT D3D11="<<dx->deviceName<<" vendor="<<dx->vendor<<" device="<<dx->deviceId<<"\n";
+ if((vk||turbo)&&dx)must(!(vk?vk->software:turbo->software)&&!dx->software&&vVendor==dx->vendor&&vDevice==dx->deviceId,"Paired benchmark requires the SAME PHYSICAL GPU");
+ std::vector<Sample> samples;uint64_t hashDx=0,hashVk=0;
+ auto one=[&](bool isVk,int index,bool check){Sample s=isVk?(turbo?turbo->run(index,check):vk->run(index,check)):dx->run(index,check);if(check){if(isVk)hashVk=s.checksum;else hashDx=s.checksum;}if(index>=0)samples.push_back(s);};
+ if(turbo&&c.vkInFlight>1){
+  samples=turbo->runBatch(c.warmup,c.repeat);hashVk=turbo->checksum();
+  std::cout<<"TURBO PIPELINE jobs="<<c.repeat<<" elapsed_ms="<<turbo->batchElapsedMs()
+           <<" jobs_per_second="<<1000.0*double(c.repeat)/turbo->batchElapsedMs()<<"\n";
+ }else{
+  for(int i=0;i<c.warmup;i++){if(dx)one(false,-1,false);if(vk||turbo)one(true,-1,false);}
+  for(int i=0;i<c.repeat;i++){
+   bool check=i==c.repeat-1;
+   if(dx&&(vk||turbo)){if((i&1)==0){one(false,i,check);one(true,i,check);}else{one(true,i,check);one(false,i,check);}}
+   else if(dx)one(false,i,check);else one(true,i,check);
+  }
+ }
+ if((vk||turbo)&&dx){must(hashDx==hashVk,"DX11/Vulkan output hash mismatch: "+hex(hashDx)+" vs "+hex(hashVk));std::cout<<"OUTPUT BIT-EXACT PASS checksum="<<hex(hashVk)<<"\n";}
+ else std::cout<<"OUTPUT checksum="<<hex((vk||turbo)?hashVk:hashDx)<<" (single API; no cross-API validation)\n";
+ if(dx)summary(samples,"dx11");if(vk||turbo)summary(samples,"vulkan");
  std::ofstream csv(c.output+".csv");must(bool(csv),"Cannot write CSV");csv<<"order,api,repetition,gpu_compute_ms,wall_dispatch_copy_ms\n";int order=0;csv<<std::fixed<<std::setprecision(6);
  for(const auto&s:samples)csv<<order++<<","<<s.api<<","<<s.index<<","<<s.gpuMs<<","<<s.wallMs<<"\n";
  std::ofstream json(c.output+".json");must(bool(json),"Cannot write JSON");json<<"{\n  \"benchmark\": \"compute_shader_integer_stress_not_v17_raster\",\n  \"resolution\": ["<<c.p.w<<","<<c.p.h<<"],\n  \"loops\": "<<c.p.loops<<", \"warmup\": "<<c.warmup<<", \"repetitions\": "<<c.repeat<<",\n  \"device_dx11\": \""<<esc(dx?dx->deviceName:"")<<"\",\n  \"device_vulkan\": \""<<esc(vk?vk->deviceName:"")<<"\",\n  \"pci_vendor\": "<<(vk?vk->vendor:dx?dx->vendor:0)<<", \"pci_device\": "<<(vk?vk->deviceId:dx?dx->deviceId:0)<<",\n  \"bit_exact\": "<<(vk&&dx?"true":"null")<<", \"checksum\": \""<<hex(vk?hashVk:hashDx)<<"\",\n  \"samples\": [\n";
