@@ -105,7 +105,7 @@ endif()
 # Vulkan 1.3.204 minimum Raster backend: compile native GLSL shaders to SPIR-V.
 # Pipeline assembly is done once per worker thread, not in the per-frame path.
 if(WIN32)
-    find_package(Vulkan QUIET)
+    find_package(Vulkan 1.3.204 QUIET)
     if(Vulkan_FOUND)
         find_program(V17_GLSLANG_VALIDATOR NAMES glslangValidator glslangValidator.exe
             HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/Bin32")
@@ -169,6 +169,11 @@ target_include_directories(v17_vulkan_mesh_smoke PRIVATE
 target_link_libraries(v17_vulkan_mesh_smoke PRIVATE moteur3d_v16_core Qt6::Core)
 add_test(NAME v17_vulkan_mesh_tessellation COMMAND v17_vulkan_mesh_smoke)
 if(WIN32 AND Vulkan_FOUND)
+    add_executable(v17_vulkan_version_smoke "vulkan/tests/version_smoke.cpp")
+    target_include_directories(v17_vulkan_version_smoke PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/vulkan")
+    target_link_libraries(v17_vulkan_version_smoke PRIVATE Vulkan::Vulkan)
+    add_test(NAME v17_vulkan_1_3_204_policy COMMAND v17_vulkan_version_smoke)
     add_executable(v17_vulkan_gpu_smoke "vulkan/tests/vulkan_gpu_smoke.cpp")
     target_include_directories(v17_vulkan_gpu_smoke PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")

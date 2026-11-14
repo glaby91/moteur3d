@@ -38,7 +38,11 @@ if(WIN32)
     target_link_libraries(moteur3d_v16_core PUBLIC d3d11 d3d12 dxgi d3dcompiler)
     # Experimental V17 Vulkan renderer lives in the shared engine DLL.
     # An optional backend must not break the stock DX11-only V17 build.
-    find_package(Vulkan QUIET)
+    option(M3D_REQUIRE_VULKAN "Require Vulkan SDK 1.3.204+ for native raster Windows CI" OFF)
+    find_package(Vulkan 1.3.204 QUIET)
+    if(M3D_REQUIRE_VULKAN AND NOT Vulkan_FOUND)
+        message(FATAL_ERROR "Vulkan SDK 1.3.204+ is mandatory for this build")
+    endif()
     if(Vulkan_FOUND)
         target_sources(moteur3d_v16_core PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/../v17/vulkan/m3d_vulkan.cpp")

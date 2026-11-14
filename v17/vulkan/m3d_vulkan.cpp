@@ -3,6 +3,7 @@
 // Offscreen color is read back for the current Qt QImage host. No swapchain.
 #include "m3d_engine.h"
 #include "m3d_vulkan_mesh.h"
+#include "m3d_vulkan_version.h"
 #include <vulkan/vulkan.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -284,13 +285,13 @@ class VulkanRaster final {
     void configure(){
         // Explicit minimum selected for this experiment: Vulkan API 1.3.204.
         // The installed SDK/loader and physical device versions are independent.
-        constexpr uint32_t kMinimumVulkanVersion=VK_MAKE_API_VERSION(0,1,3,204);
+        constexpr uint32_t kMinimumVulkanVersion=vulkanVersion::minimum;
         uint32_t instanceVersion=VK_API_VERSION_1_0;
         auto enumerateVersion=reinterpret_cast<PFN_vkEnumerateInstanceVersion>(
             vkGetInstanceProcAddr(VK_NULL_HANDLE,"vkEnumerateInstanceVersion"));
         if(enumerateVersion)
             vkcheck(enumerateVersion(&instanceVersion),"query Vulkan loader version");
-        if(instanceVersion<kMinimumVulkanVersion)
+        if(!vulkanVersion::supported(instanceVersion))
             throw std::runtime_error("Vulkan loader below required API 1.3.204; update Vulkan runtime / Intel graphics driver");
         VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
         app.pApplicationName="CSE WARP V17 Vulkan Native Raster";
@@ -316,7 +317,7 @@ class VulkanRaster final {
                      <<VK_VERSION_MAJOR(props.apiVersion)<<"."
                      <<VK_VERSION_MINOR(props.apiVersion)<<"."
                      <<VK_VERSION_PATCH(props.apiVersion)<<"\n";
-            if(props.apiVersion<kMinimumVulkanVersion)continue;
+            if(!vulkanVersion::supported(props.apiVersion))continue;
             uint32_t qn=0;vkGetPhysicalDeviceQueueFamilyProperties(pd,&qn,nullptr);
             std::vector<VkQueueFamilyProperties> qs(qn);
             vkGetPhysicalDeviceQueueFamilyProperties(pd,&qn,qs.data());

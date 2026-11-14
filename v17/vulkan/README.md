@@ -4,14 +4,14 @@
 
 ## Compatibilité avec ton installation 1.3.204
 
-Le minimum requis est désormais **Vulkan API 1.3.204**, aussi bien pour le chargeur que pour le GPU physique. L'installation Vulkan 1.3.204 signalée par l'utilisateur ne démontre pas à elle seule la version API du pilote graphique Intel HD620 ; le backend contrôle les deux indépendamment et signale une incompatibilité si le pilote expose une version inférieure. Les shaders SPIR-V sont compilés pour la cible Vulkan 1.3. Les fonctionnalités optionnelles restent soumises à vérification ; annoncer 1.3.204 ne les rend pas automatiquement disponibles.
+Le minimum requis est désormais **Vulkan API 1.3.204**, aussi bien pour le chargeur que pour le GPU physique. Le SDK utilisé pour compiler doit lui aussi être en version 1.3.204 ou supérieure ; la CI utilise actuellement un SDK 1.4 compatible. L'installation Vulkan 1.3.204 signalée par l'utilisateur ne démontre pas à elle seule la version API du pilote graphique Intel HD620 ; le backend contrôle les deux indépendamment et signale une incompatibilité si le pilote expose une version inférieure. Les shaders SPIR-V sont compilés pour la cible Vulkan 1.3. Les fonctionnalités optionnelles restent soumises à vérification ; annoncer 1.3.204 ne les rend pas automatiquement disponibles. **Attention : la spécification Vulkan ignore le champ patch lors de `vkCreateInstance` ; notre rejet des versions <1.3.204 est volontairement plus strict que le minimum technique des fonctions Vulkan 1.3.** Un pilote exposant 1.3 avec un patch inférieur sera donc refusé.
 
 La carte HD620 doit exposer une queue graphique Vulkan, les textures/attachments nécessaires, et une mémoire `HOST_VISIBLE` pour le buffer de lecture. L'exécutable signale les erreurs ; il n'effectue pas de repli silencieux CPU.
 
 ## Implémenté
 
 - Instance et device Vulkan natifs, queue graphique, commande primaire, render pass, framebuffer offscreen couleur RGBA8 + Z-buffer, lecture de l'image pour Qt.
-- GLSL/SPIR-V 1.2 vertex/fragment, matériaux par couche, lighting PBR simplifié (normal/roughness, métal, fresnel, soleil, 16 lumières, ombres PCF 3×3).
+- GLSL/SPIR-V ciblant Vulkan 1.3, vertex/fragment, matériaux par couche, lighting PBR simplifié (normal/roughness, métal, fresnel, soleil, 16 lumières, ombres PCF 3×3).
 - Géométrie issue des **mêmes définitions V17** : triangles, boîtes, boîtes arrondies, cônes, ellipsoïdes, capsules, terrain et UV.
 - Conservation des sources instanciables pour les **boîtes** (une géométrie partagée + attributs par instance) et le **feuillage source** (maillage 12×6 + feuilles).
 - Transparence géométrique avec tri CPU arrière→avant, test Z et pas d'écriture Z.
@@ -38,7 +38,7 @@ La V17 pleine DirectX11 reste la référence fonctionnelle et de performance.
 
 ## Cinq passes de revue statique avant compilation finale
 
-1. **API/architecture** : Scene/Camera/Stats conservées, backend séparé, version 1.2 min, runtime 1.3 négocié ; DX11 intact.
+1. **API/architecture** : Scene/Camera/Stats conservées, backend séparé, version minimale 1.3.204 sur chargeur et GPU ; DX11 intact.
 2. **Maillages/performance** : même triangulation, boîtes instanciées, frustum batches ; suppression des régressions évidentes sur les boîtes massives.
 3. **Mémoire/PBR** : feuillage instancié, budget textures adaptatif, tableaux de textures et views compatibles même avec une couche, staging `HOST_CACHED`.
 4. **Synchronisation/UI** : queues/fences, image barriers, stats GPU, exploration et watchdog Qt, invalidation sur heure solaire, compilation shaders SPIR-V.

@@ -60,19 +60,19 @@ jobs:
       - name: Configure shared V17 engine with Vulkan enabled
         shell: pwsh
         run: |
-          cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DV17_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER"
+          cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DV17_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER" "-DM3D_REQUIRE_VULKAN=ON"
           if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed' }
       - name: FINAL COMPILE - V17 Qt, shared core and Vulkan GPU tests
         shell: pwsh
         run: |
-          cmake --build build-v17 --config Release --parallel 4 --target moteur3d_v17 v17_vulkan_mesh_smoke v17_vulkan_gpu_smoke v17_vulkan_ab_bench
+          cmake --build build-v17 --config Release --parallel 4 --target moteur3d_v17 v17_vulkan_mesh_smoke v17_vulkan_version_smoke v17_vulkan_gpu_smoke v17_vulkan_ab_bench
           if ($LASTEXITCODE -ne 0) { throw 'Vulkan final Windows build failed' }
       - name: Confirm native Vulkan output and geometry smoke
         shell: pwsh
         run: |
           $exe='build-v17/Release'
           foreach ($p in @('moteur3d_v17.exe','moteur3d_v16_core.dll',
-                        'v17_vulkan_gpu_smoke.exe','v17_vulkan_ab_bench.exe','v17_vulkan_mesh_smoke.exe',
+                        'v17_vulkan_gpu_smoke.exe','v17_vulkan_ab_bench.exe','v17_vulkan_mesh_smoke.exe','v17_vulkan_version_smoke.exe',
                         'vulkan/raster.vert.spv','vulkan/raster.frag.spv',
                         'vulkan/raster_box.vert.spv','vulkan/raster_foliage.vert.spv')) {
             if (!(Test-Path "$exe/$p")) { throw "Missing Vulkan output: $p" }
@@ -80,6 +80,8 @@ jobs:
           }
           & "$exe/v17_vulkan_mesh_smoke.exe"
           if ($LASTEXITCODE -ne 0) { throw 'GPU-free Vulkan mesh smoke failed' }
+          & "$exe/v17_vulkan_version_smoke.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Vulkan 1.3.204 policy smoke failed' }
           Write-Host 'GPU smoke is not run on virtual runner: physical HD620 Vulkan ICD required.'
       - name: Package executable for actual Intel HD620 test
         shell: pwsh
@@ -88,7 +90,7 @@ jobs:
           $dest='dist-v17-vulkan'
           New-Item -ItemType Directory -Force $dest | Out-Null
           foreach ($name in @('moteur3d_v17.exe','moteur3d_v16_core.dll',
-                              'v17_vulkan_gpu_smoke.exe','v17_vulkan_ab_bench.exe','v17_vulkan_mesh_smoke.exe')) {
+                              'v17_vulkan_gpu_smoke.exe','v17_vulkan_ab_bench.exe','v17_vulkan_mesh_smoke.exe','v17_vulkan_version_smoke.exe')) {
             Copy-Item "$src/$name" "$dest/" -Force
           }
           Copy-Item "$src/vulkan" "$dest/vulkan" -Recurse -Force
