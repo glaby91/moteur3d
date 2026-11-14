@@ -4,6 +4,7 @@
 #include "m3d_engine.h"
 #include "m3d_vulkan_mesh.h"
 #include "m3d_vulkan_version.h"
+#include "m3d_vulkan_readback.h"
 #include <vulkan/vulkan.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -15,6 +16,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <cstdlib>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -130,6 +132,8 @@ class VulkanRaster final {
     uint32_t shadowSize_=0;
     float cachedSolarHour_=std::numeric_limits<float>::quiet_NaN();
     std::string adapter_;
+    bool bgraReadback_=false;
+    VkFormat colorFormat_=VK_FORMAT_R8G8B8A8_UNORM;
     bool started_=false;
     static double ms(Clock::time_point start,Clock::time_point end) {
         return std::chrono::duration<double,std::milli>(end-start).count();
@@ -334,6 +338,20 @@ class VulkanRaster final {
         vkGetPhysicalDeviceMemoryProperties(physical_,&memoryTypes_);
         vkGetPhysicalDeviceFeatures(physical_,&features_);
         adapter_=props_.deviceName;
+        // Optional color-format experiment: BGRA8 matches Qt ARGB32 byte order
+        // on little-endian Windows. Leave RGBA8 as the default reference.
+        const char* requestedBgra=std::getenv("CSE_WARP_VK_BGRA_READBACK");
+        if(requestedBgra && std::strcmp(requestedBgra,"1")==0) {
+            VkFormatProperties format{};
+            vkGetPhysicalDeviceFormatProperties(physical_,VK_FORMAT_B8G8R8A8_UNORM,&format);
+            constexpr VkFormatFeatureFlags needed=VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
+                VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+            if((format.optimalTilingFeatures & needed)!=needed)
+                throw std::runtime_error("BGRA8 readback unsupported by physical Vulkan GPU (COLOR_ATTACHMENT, BLEND and TRANSFER_SRC); unset CSE_WARP_VK_BGRA_READBACK");
+            bgraReadback_=true;
+            colorFormat_=VK_FORMAT_B8G8R8A8_UNORM;
+        }
+        std::clog<<"[CSE WARP Vulkan] Readback color="<<(bgraReadback_?"BGRA8 Qt-native":"RGBA8 legacy")<<"\n";
         std::clog<<"[CSE WARP Vulkan] GPU="<<adapter_
                  <<" version="<<VK_VERSION_MAJOR(props_.apiVersion)<<"."
                  <<VK_VERSION_MINOR(props_.apiVersion)<<"."
@@ -393,7 +411,7 @@ class VulkanRaster final {
         vkcheck(vkCreateSampler(device_,&si,nullptr,&shadowSampler_),"shadow sampler");
         uniform_=buffer(sizeof(Uniforms),VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
         VkAttachmentDescription attach[2]{};
-        attach[0].format=VK_FORMAT_R8G8B8A8_UNORM;
+        attach[0].format=colorFormat_;
         attach[0].samples=VK_SAMPLE_COUNT_1_BIT;
         attach[0].loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;
         attach[0].storeOp=VK_ATTACHMENT_STORE_OP_STORE;
@@ -551,7 +569,7 @@ class VulkanRaster final {
         framebuffer_=VK_NULL_HANDLE;
         free(color_);free(depth_);free(readback_);
         width_=w;height_=h;
-        color_=image(w,h,1,VK_FORMAT_R8G8B8A8_UNORM,
+        color_=image(w,h,1,colorFormat_,
                      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT,VK_IMAGE_ASPECT_COLOR_BIT);
         VkAttachmentDescription a{}; // depth format selected to match supported device features.
         (void)a;
@@ -911,11 +929,9 @@ public:
             const auto copied=Clock::now();
             invalidate(readback_);
             pixels.resize(size_t(w)*h);
-            const auto* rgba=static_cast<const uint32_t*>(readback_.mapped);
-            for(size_t i=0;i<pixels.size();i++){
-                uint32_t c=rgba[i];
-                pixels[i]=0xff000000u|((c&255u)<<16)|(c&0x0000ff00u)|((c>>16)&255u);
-            }
+            const auto* mapped=static_cast<const uint32_t*>(readback_.mapped);
+            vkreadback::toArgb32(mapped,pixels.data(),pixels.size(),
+                bgraReadback_?vkreadback::PixelBytes::Bgra8:vkreadback::PixelBytes::Rgba8);
             stats=Stats{};
             stats.gpu=true;stats.gpuDrawCalls=drawCalls;
             stats.gpuBoxInstances=boxCount_;

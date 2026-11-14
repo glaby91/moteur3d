@@ -70,3 +70,11 @@ Les améliorations écartées à ce stade : multiplier les command buffers et aj
 Sources Khronos : https://docs.vulkan.org/samples/latest/samples/performance/command_buffer_usage/README.html ; https://docs.vulkan.org/samples/latest/samples/performance/descriptor_management/README.html ; https://docs.vulkan.org/samples/latest/samples/performance/pipeline_barriers/README.html .
 
 Les quatre campagnes sont sauvegardées comme quatre répertoires distincts dans l'archive, pour conserver les quatre fichiers `ab_results.json` et leurs captures sans conflit de nom.
+
+## Pipeline GPU vers Qt : BGRA8 natif (expérience A/B)
+
+Le chemin historique rend dans `VK_FORMAT_R8G8B8A8_UNORM`, puis le CPU permute les canaux pour `QImage::Format_ARGB32`. Le nouveau chemin **opt-in** `CSE_WARP_VK_BGRA_READBACK=1` rend directement dans `VK_FORMAT_B8G8R8A8_UNORM`, dont l'ordre des octets correspond au QImage Windows little-endian : le CPU ne fait plus de permutation, seulement une copie avec alpha forcé opaque comme dans le chemin historique. Si la carte n'annonce pas `COLOR_ATTACHMENT`, `COLOR_ATTACHMENT_BLEND` et `TRANSFER_SRC` pour ce format, le moteur signale une erreur claire ; le chemin de référence (variable absente ou égale à 0) reste intact.
+
+**Validation :** exécuter `LANCER_PIPELINE_VULKAN_HD620.bat`. Il force le **même shader optimisé** dans les quatre passes ABBA et ne change que le format/copie : RGBA A, BGRA A, BGRA B, RGBA B, chacune avec 40 images + échauffement en 1366x768. Les fichiers JSON contiennent `vulkan_readback_profile`, `vulkan_pixel_convert_ms` et maintenant une empreinte `vulkan_frame_hash` **par image**, afin de vérifier les 40 positions, pas seulement celle du premier PNG. Le CPU-only `v17_vulkan_readback_smoke` contrôle les canaux couleur sur le runner CI ; la performance réelle et la compatibilité GPU doivent être confirmées sur l'Intel HD620.
+
+Le rendu Qt reste synchronisé avec une copie GPU→CPU. Ce changement n'ajoute pas artificiellement plusieurs frames en vol ; pour supprimer cette copie il faudrait une interface Qt utilisant une texture Vulkan/swapchain, à concevoir séparément. Références Khronos : https://docs.vulkan.org/spec/latest/chapters/formats.html et https://docs.vulkan.org/guide/latest/formats.html.

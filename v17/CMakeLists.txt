@@ -175,6 +175,10 @@ if(WIN32)
 endif()
 
 # Dedicated Vulkan regression tests. GPU-free mesh parity always runs.
+add_executable(v17_vulkan_readback_smoke "vulkan/tests/readback_smoke.cpp")
+target_include_directories(v17_vulkan_readback_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/vulkan")
+add_test(NAME v17_vulkan_rgba_bgra_argb32_parity COMMAND v17_vulkan_readback_smoke)
 add_executable(v17_vulkan_mesh_smoke "vulkan/tests/mesh_smoke.cpp")
 target_include_directories(v17_vulkan_mesh_smoke PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14"
