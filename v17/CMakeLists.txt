@@ -182,7 +182,20 @@ if(WIN32 AND Vulkan_FOUND)
                 "$<TARGET_FILE_DIR:v17_vulkan_gpu_smoke>/vulkan"
             VERBATIM)
     endif()
-    # CI only compiles this test. Run it on real Intel HD620 with a Vulkan ICD.
+    add_executable(v17_vulkan_ab_bench "vulkan/tests/vulkan_ab_bench.cpp")
+    target_include_directories(v17_vulkan_ab_bench PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+    target_link_libraries(v17_vulkan_ab_bench PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
+    if(TARGET v17_vulkan_spirv)
+        add_dependencies(v17_vulkan_ab_bench v17_vulkan_spirv)
+        add_custom_command(TARGET v17_vulkan_ab_bench POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_FILE_DIR:v17_vulkan_ab_bench>/vulkan"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${V17_VULKAN_SPIRV}
+                "$<TARGET_FILE_DIR:v17_vulkan_ab_bench>/vulkan"
+            VERBATIM)
+    endif()
+    # CI compiles native raster; actual A/B frames require DX11 + Vulkan on HD620.
 endif()
 
 # Repeatable original 30s PCM diagnostic loop; no copyright-sensitive downloads
