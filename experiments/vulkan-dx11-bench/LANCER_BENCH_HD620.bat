@@ -32,7 +32,7 @@ echo === I : GPU compute sans lecture, 3 travaux en vol ===
 call :run compute_ring3 --api vulkan --vk-mode compute --vk-inflight 3 || goto failed
 echo.
 echo === ZIP des resultats ===
-powershell -NoProfile -Command "Compress-Archive -Path 'bench_hd620_*.json','bench_hd620_*.csv','vulkan_dx11_probe.txt' -DestinationPath 'CSE_WARP_HD620_TURBO_RESULTS.zip' -Force" 
+powershell -NoProfile -Command "Compress-Archive -Path 'bench_hd620_*.json','bench_hd620_*.csv','bench_hd620_*.log','vulkan_dx11_probe.txt' -DestinationPath 'CSE_WARP_HD620_TURBO_RESULTS.zip' -Force" 
 if errorlevel 1 (
  echo Attention : echec ZIP, les JSON CSV sont toujours disponibles.
 ) else (
@@ -50,7 +50,8 @@ exit /b 1
 :run
 set "NAME=%~1"
 shift
-"%EXE%" %OPT% %1 %2 %3 %4 %5 %6 %7 %8 %9 --output "bench_hd620_%NAME%"
+"%EXE%" %OPT% %1 %2 %3 %4 %5 %6 %7 %8 %9 --output "bench_hd620_%NAME%" > "bench_hd620_%NAME%.log" 2>&1
+type "bench_hd620_%NAME%.log"
 if errorlevel 1 (
  echo ECHEC VARIANTE %NAME% - consulter le message ci-dessus.
  pause
