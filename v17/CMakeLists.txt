@@ -119,7 +119,7 @@ if(WIN32)
                     COMMAND ${CMAKE_COMMAND} -E make_directory
                         "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders"
                     COMMAND "${V17_GLSLANG_VALIDATOR}"
-                        -V --target-env vulkan1.0
+                        -V --target-env vulkan1.2
                         "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster.${stage}"
                         -o "${spv}"
                     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster.${stage}"
