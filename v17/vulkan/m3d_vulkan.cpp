@@ -126,6 +126,7 @@ class VulkanRaster final {
     const Scene* scenePointer_=nullptr;
     const float* shadowData_=nullptr;
     uint32_t shadowSize_=0;
+    float cachedSolarHour_=std::numeric_limits<float>::quiet_NaN();
     std::string adapter_;
     bool started_=false;
     static double ms(Clock::time_point start,Clock::time_point end) {
@@ -615,7 +616,7 @@ class VulkanRaster final {
         uploadImage(surface_,surf.data(),surf.size()*sizeof(uint32_t));
     }
     void updateShadow(const ShadowMap& sh){
-        if(sh.d.data()==shadowData_&&uint32_t(sh.size)==shadowSize_&&shadow_.image)return;
+        if(sh.d.data()==shadowData_&&uint32_t(sh.size)==shadowSize_&&shadow_.image&&cachedSolarHour_==solarHour)return;
         const uint32_t size=(sh.size>0&&sh.size<=4096&&sh.d.size()==size_t(sh.size)*sh.size)?
                              uint32_t(sh.size):1;
         if(!shadow_.image||shadow_.width!=size){
@@ -627,7 +628,7 @@ class VulkanRaster final {
         const float far=1e9f;
         uploadImage(shadow_,size==1?static_cast<const void*>(&far):
                     static_cast<const void*>(sh.d.data()),size_t(size)*size*sizeof(float));
-        shadowData_=sh.d.data();shadowSize_=uint32_t(sh.size);
+        shadowData_=sh.d.data();shadowSize_=uint32_t(sh.size);cachedSolarHour_=solarHour;
         updateDescriptors();
     }
     void rebuild(const Scene& scene){
