@@ -107,7 +107,7 @@ class VulkanRaster final {
     VkQueryPool queries_=VK_NULL_HANDLE;
     VkRenderPass renderPass_=VK_NULL_HANDLE;
     VkPipelineLayout layout_=VK_NULL_HANDLE;
-    VkPipeline opaquePipeline_=VK_NULL_HANDLE,alphaPipeline_=VK_NULL_HANDLE,boxPipeline_=VK_NULL_HANDLE;
+    VkPipeline opaquePipeline_=VK_NULL_HANDLE,alphaPipeline_=VK_NULL_HANDLE,boxPipeline_=VK_NULL_HANDLE,foliagePipeline_=VK_NULL_HANDLE;
     VkPipelineCache pipelineCache_=VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool_=VK_NULL_HANDLE;
     VkDescriptorSetLayout descriptorLayout_=VK_NULL_HANDLE;
@@ -115,10 +115,10 @@ class VulkanRaster final {
     VkSampler albedoSampler_=VK_NULL_HANDLE,shadowSampler_=VK_NULL_HANDLE;
     Texture color_,depth_,albedo_,surface_,shadow_;
     VkFramebuffer framebuffer_=VK_NULL_HANDLE;
-    Buffer vertices_,transparent_,boxTemplate_,boxInstances_,uniform_,readback_;
-    uint32_t vertexCount_=0,transparentCount_=0,boxCount_=0;
+    Buffer vertices_,transparent_,boxTemplate_,boxInstances_,foliageTemplate_,foliageInstances_,uniform_,readback_;
+    uint32_t vertexCount_=0,transparentCount_=0,boxCount_=0,foliageCount_=0,foliageTemplateCount_=0;
     std::vector<vkmesh::TransparentTriangle> glass_;
-    std::vector<Chunk> chunks_,boxChunks_;
+    std::vector<Chunk> chunks_,boxChunks_,foliageChunks_;
     std::vector<uint32_t> stagingColors_;
     uint32_t width_=0,height_=0;
     uint64_t sceneIdentity_=0,sceneRevision_=~uint64_t(0);
@@ -479,6 +479,28 @@ class VulkanRaster final {
         blend.blendEnable=VK_FALSE;
         vkcheck(vkCreateGraphicsPipelines(device_,pipelineCache_,1,&pi,nullptr,&boxPipeline_),"instanced box Vulkan pipeline");
         vkDestroyShaderModule(device_,boxModule,nullptr);
+        // Shared canopy geometry: V17 CPU-generated foliage uses a 32-byte instance.
+        const auto foliageCode=spirv(shaderFile("raster_foliage.vert.spv"));
+        VkShaderModule foliageModule=VK_NULL_HANDLE;
+        VkShaderModuleCreateInfo folCI{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+        folCI.codeSize=foliageCode.size()*4;folCI.pCode=foliageCode.data();
+        vkcheck(vkCreateShaderModule(device_,&folCI,nullptr,&foliageModule),"foliage shader module");
+        stages[0].module=foliageModule;
+        std::array<VkVertexInputBindingDescription,2> folBindings{{
+            {0,sizeof(Vertex),VK_VERTEX_INPUT_RATE_VERTEX},
+            {1,sizeof(vkmesh::FoliageInstance),VK_VERTEX_INPUT_RATE_INSTANCE}
+        }};
+        std::array<VkVertexInputAttributeDescription,8> folAttrs{};
+        for(size_t i=0;i<4;i++)folAttrs[i]=attrs[i];
+        using Foliage=vkmesh::FoliageInstance;
+        folAttrs[4]={4,1,VK_FORMAT_R32G32B32_SFLOAT,uint32_t(offsetof(Foliage,center))};
+        folAttrs[5]={5,1,VK_FORMAT_R32_UINT,uint32_t(offsetof(Foliage,material))};
+        folAttrs[6]={6,1,VK_FORMAT_R32G32B32_SFLOAT,uint32_t(offsetof(Foliage,radii))};
+        folAttrs[7]={7,1,VK_FORMAT_R32_SFLOAT,uint32_t(offsetof(Foliage,padding))};
+        vi.vertexBindingDescriptionCount=2;vi.pVertexBindingDescriptions=folBindings.data();
+        vi.vertexAttributeDescriptionCount=uint32_t(folAttrs.size());vi.pVertexAttributeDescriptions=folAttrs.data();
+        vkcheck(vkCreateGraphicsPipelines(device_,pipelineCache_,1,&pi,nullptr,&foliagePipeline_),"instanced foliage Vulkan pipeline");
+        vkDestroyShaderModule(device_,foliageModule,nullptr);
         vkDestroyShaderModule(device_,modules[0],nullptr);
         vkDestroyShaderModule(device_,modules[1],nullptr);
     }
@@ -566,10 +588,13 @@ class VulkanRaster final {
     void rebuild(const Scene& scene){
         if(scene.mat.size()>kMaxMaterials)throw std::runtime_error("Vulkan port: more than 256 materials");
         free(vertices_);free(transparent_);free(boxTemplate_);free(boxInstances_);
-        glass_.clear();chunks_.clear();boxChunks_.clear();boxCount_=0;
+        free(foliageTemplate_);free(foliageInstances_);
+        glass_.clear();chunks_.clear();boxChunks_.clear();foliageChunks_.clear();
+        boxCount_=0;foliageCount_=0;foliageTemplateCount_=0;
         std::vector<vkmesh::BoxInstance> boxData;
-        vkmesh::MeshBuilder mesh=vkmesh::build(scene,&boxData);
-        if(mesh.vertices.empty()&&mesh.transparent.empty()&&boxData.empty())
+        std::vector<vkmesh::FoliageInstance> foliageData;
+        vkmesh::MeshBuilder mesh=vkmesh::build(scene,&boxData,&foliageData);
+        if(mesh.vertices.empty()&&mesh.transparent.empty()&&boxData.empty()&&foliageData.empty())
             throw std::runtime_error("Vulkan: scene contains no rasterizable geometry");
         if(mesh.vertices.size()+mesh.transparent.size()*3>12000000u)
             throw std::runtime_error("Vulkan scene exceeds 12M vertex safety limit");
@@ -598,6 +623,31 @@ class VulkanRaster final {
                     }
                 }
                 boxChunks_.push_back(chunk);
+            }
+        }
+        if(!foliageData.empty()){
+            auto tpl=vkmesh::makeFoliageTemplate(12,6,12);
+            if(tpl.empty()||tpl.size()%3)throw std::runtime_error("Foliage template invalid");
+            foliageTemplate_=uploadVertices(tpl.data(),tpl.size()*sizeof(Vertex));
+            foliageInstances_=uploadVertices(foliageData.data(),foliageData.size()*sizeof(vkmesh::FoliageInstance));
+            foliageTemplateCount_=uint32_t(tpl.size());foliageCount_=uint32_t(foliageData.size());
+            constexpr size_t foliageBatch=128;
+            for(size_t first=0;first<foliageData.size();first+=foliageBatch){
+                const size_t end=std::min(first+foliageBatch,foliageData.size());
+                Chunk chunk;chunk.first=uint32_t(first);chunk.count=uint32_t(end-first);
+                const auto& start=foliageData[first];
+                chunk.lo={start.center[0]-start.radii[0],start.center[1]-start.radii[1],start.center[2]-start.radii[2]};
+                chunk.hi={start.center[0]+start.radii[0],start.center[1]+start.radii[1],start.center[2]+start.radii[2]};
+                for(size_t i=first+1;i<end;i++){
+                    const auto& obj=foliageData[i];
+                    for(int a=0;a<3;a++){
+                        float* lo=a==0?&chunk.lo.x:a==1?&chunk.lo.y:&chunk.lo.z;
+                        float* hi=a==0?&chunk.hi.x:a==1?&chunk.hi.y:&chunk.hi.z;
+                        *lo=std::min(*lo,obj.center[a]-obj.radii[a]*1.25f);
+                        *hi=std::max(*hi,obj.center[a]+obj.radii[a]*1.25f);
+                    }
+                }
+                foliageChunks_.push_back(chunk);
             }
         }
         glass_=std::move(mesh.transparent);
@@ -688,8 +738,9 @@ public:
         if(!device_){if(instance_)vkDestroyInstance(instance_,nullptr);return;}
         vkDeviceWaitIdle(device_);
         if(framebuffer_)vkDestroyFramebuffer(device_,framebuffer_,nullptr);
-        free(readback_);free(uniform_);free(vertices_);free(transparent_);free(boxTemplate_);free(boxInstances_);
+        free(readback_);free(uniform_);free(vertices_);free(transparent_);free(boxTemplate_);free(boxInstances_);free(foliageTemplate_);free(foliageInstances_);
         free(color_);free(depth_);free(albedo_);free(surface_);free(shadow_);
+        if(foliagePipeline_)vkDestroyPipeline(device_,foliagePipeline_,nullptr);
         if(boxPipeline_)vkDestroyPipeline(device_,boxPipeline_,nullptr);
         if(alphaPipeline_)vkDestroyPipeline(device_,alphaPipeline_,nullptr);
         if(opaquePipeline_)vkDestroyPipeline(device_,opaquePipeline_,nullptr);
@@ -750,6 +801,16 @@ public:
                 vkCmdBindVertexBuffers(cmd_,0,2,boxVBs,boxOffsets);
                 for(const Chunk& chunk:boxChunks_)if(visible(chunk,cam)){
                     vkCmdDraw(cmd_,36,chunk.count,0,chunk.first);
+                    ++drawCalls;
+                }
+            }
+            if(foliageCount_){
+                vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,foliagePipeline_);
+                VkBuffer buffers[2]={foliageTemplate_.handle,foliageInstances_.handle};
+                VkDeviceSize offsets[2]{0,0};
+                vkCmdBindVertexBuffers(cmd_,0,2,buffers,offsets);
+                for(const Chunk& chunk:foliageChunks_)if(visible(chunk,cam)){
+                    vkCmdDraw(cmd_,foliageTemplateCount_,chunk.count,0,chunk.first);
                     ++drawCalls;
                 }
             }
