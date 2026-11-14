@@ -1,0 +1,18 @@
+#version 450
+// Identical uint arithmetic as the D3D11 HLSL kernel in src/main.cpp.
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+layout(set = 0, binding = 0, std430) buffer Output { uint values[]; } dest;
+layout(push_constant) uniform Settings { uint width; uint height; uint loops; uint seed; } settings;
+void main() {
+    uvec3 gid = gl_GlobalInvocationID;
+    if (gid.x >= settings.width || gid.y >= settings.height) return;
+    uint index = gid.y * settings.width + gid.x;
+    uint v = index ^ settings.seed;
+    for (uint n = 0; n < settings.loops; ++n) {
+        v ^= v << 13;
+        v ^= v >> 17;
+        v ^= v << 5;
+        v = v * 1664525u + 1013904223u;
+    }
+    dest.values[index] = v;
+}

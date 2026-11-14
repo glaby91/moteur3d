@@ -1,0 +1,78 @@
+name: "CSE WARP V17 EXPERIMENT - Vulkan vs D3D11 Compute A-B"
+on:
+  push:
+    branches:
+      - experiment/v17-vulkan-vs-dx11-hd620-261114
+    paths:
+      - 'experiments/vulkan-dx11-bench/**'
+      - '.github/workflows/v17-vulkan-dx11-compute-benchmark.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Vulkan SDK and software ICD for functional tests
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: '1.4.309.0'
+          cache: true
+          stripdown: true
+          install_swiftshader: true
+      - name: Configure CMake for isolated benchmark
+        shell: pwsh
+        run: >-
+          cmake -S experiments/vulkan-dx11-bench
+          -B build-vulkan-dx11
+          -G "Visual Studio 17 2022" -A x64
+      - name: Compile HLSL and GLSL Vulkan/DX11 benchmark
+        shell: pwsh
+        run: cmake --build build-vulkan-dx11 --config Release --parallel 2
+      - name: Probe available APIs
+        shell: pwsh
+        run: |
+          $exe = 'build-vulkan-dx11/Release/cse_warp_vk_dx11_bench.exe'
+          & $exe --probe | Tee-Object -FilePath build-vulkan-dx11/probe.txt
+          if ($LASTEXITCODE -ne 0) { throw 'Probe failed' }
+      - name: Functional smoke D3D11 WARP (NOT representative HD620 timing)
+        shell: pwsh
+        run: |
+          Push-Location build-vulkan-dx11/Release
+          ./cse_warp_vk_dx11_bench.exe --api dx11 --warp --width 320 --height 180 --loops 8 --warmup 1 --repeat 2 --output ../smoke_dx11
+          if ($LASTEXITCODE -ne 0) { throw 'D3D11 WARP smoke failed' }
+          Pop-Location
+      - name: Functional smoke Vulkan SwiftShader (NOT comparable timing)
+        shell: pwsh
+        run: |
+          Push-Location build-vulkan-dx11/Release
+          ./cse_warp_vk_dx11_bench.exe --api vulkan --allow-software --width 320 --height 180 --loops 8 --warmup 1 --repeat 2 --output ../smoke_vulkan
+          if ($LASTEXITCODE -ne 0) { throw 'Vulkan software ICD smoke failed' }
+          Pop-Location
+      - name: Verify output equality (different CPU rasterizers, no perf claim)
+        shell: pwsh
+        run: |
+          $dx = Get-Content build-vulkan-dx11/smoke_dx11.json -Raw | ConvertFrom-Json
+          $vk = Get-Content build-vulkan-dx11/smoke_vulkan.json -Raw | ConvertFrom-Json
+          if ($dx.checksum -ne $vk.checksum) { throw "Shader output mismatch: D3D11=$($dx.checksum), Vulkan=$($vk.checksum)" }
+          Write-Host "PASS: matching integer result checksum $($dx.checksum)"
+      - name: Prepare portable Windows x64 package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist-vulkan-dx11 -Force | Out-Null
+          Copy-Item build-vulkan-dx11/Release/cse_warp_vk_dx11_bench.exe dist-vulkan-dx11/
+          Copy-Item build-vulkan-dx11/Release/benchmark.comp.spv dist-vulkan-dx11/
+          Copy-Item experiments/vulkan-dx11-bench/LANCER_BENCH_HD620.bat dist-vulkan-dx11/
+          Copy-Item experiments/vulkan-dx11-bench/README.md dist-vulkan-dx11/
+      - name: Publish portable benchmark (driver Vulkan required on target)
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V17-Vulkan-DX11-Compute-Bench-Windows-x64
+          path: |
+            dist-vulkan-dx11/**
+            build-vulkan-dx11/probe.txt
+            build-vulkan-dx11/smoke_*.json
+            build-vulkan-dx11/smoke_*.csv
+          retention-days: 14
