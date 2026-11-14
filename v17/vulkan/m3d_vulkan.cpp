@@ -625,8 +625,8 @@ class VulkanRaster final {
                           VK_IMAGE_USAGE_TRANSFER_DST_BIT|VK_IMAGE_USAGE_SAMPLED_BIT,VK_IMAGE_ASPECT_COLOR_BIT);
         }
         // A new upload starts from UNDEFINED, as all old content is overwritten.
-        const float far=1e9f;
-        uploadImage(shadow_,size==1?static_cast<const void*>(&far):
+        const float fallbackShadowDepth=1e9f;
+        uploadImage(shadow_,size==1?static_cast<const void*>(&fallbackShadowDepth):
                     static_cast<const void*>(sh.d.data()),size_t(size)*size*sizeof(float));
         shadowData_=sh.d.data();shadowSize_=uint32_t(sh.size);cachedSolarHour_=solarHour;
         updateDescriptors();
