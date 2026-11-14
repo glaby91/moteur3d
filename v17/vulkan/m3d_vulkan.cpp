@@ -53,10 +53,10 @@ struct Chunk {uint32_t first=0,count=0;V lo{},hi{};};
 std::vector<uint32_t> spirv(const std::filesystem::path& file){
     std::ifstream in(file,std::ios::binary|std::ios::ate);
     if(!in)throw std::runtime_error("Missing Vulkan SPIR-V shader: "+file.u8string());
-    const auto size=in.tellg();
-    if(size<=0||(size%std::streamoff(4))!=0)throw std::runtime_error("Invalid SPIR-V bytes: "+file.u8string());
-    std::vector<uint32_t> result(size_t(size)/4u);
-    in.seekg(0);in.read(reinterpret_cast<char*>(result.data()),size);
+    const std::streamoff byteCount=static_cast<std::streamoff>(in.tellg());
+    if(byteCount<=0||(byteCount%4)!=0)throw std::runtime_error("Invalid SPIR-V bytes: "+file.u8string());
+    std::vector<uint32_t> result(static_cast<size_t>(byteCount)/4u);
+    in.seekg(0);in.read(reinterpret_cast<char*>(result.data()),static_cast<std::streamsize>(byteCount));
     if(!in)throw std::runtime_error("Incomplete SPIR-V shader: "+file.u8string());
     return result;
 }
