@@ -78,6 +78,15 @@ jobs:
           if (!$renderer.Contains('drawOpaque(true);') -or !$renderer.Contains('drawOpaque(false);')) { throw 'Mandatory Vulkan opaque depth/color pass missing' }
           if (!$renderer.Contains('depthPipeline(&depthOpaque_') -or !$renderer.Contains('depthPipeline(&depthBox_') -or !$renderer.Contains('depthPipeline(&depthFoliage_')) { throw 'Depth-only shader pipelines missing' }
           if (!$benchmark.Contains('vulkan_depth_prepass_policy')) { throw 'Benchmark prepass metadata missing' }
+          $skyVert=Get-Content 'v17/vulkan/shaders/sky.vert' -Raw
+          $skyFrag=Get-Content 'v17/vulkan/shaders/sky.frag' -Raw
+          if (!$skyVert.Contains('gl_Position=vec4(ndc,1.0,1.0)')) { throw 'Sky must be at far depth 1' }
+          if (!$skyFrag.Contains('layout(early_fragment_tests) in;')) { throw 'Sky early-Z shader missing' }
+          if (!$renderer.Contains('skyDepth.depthCompareOp=VK_COMPARE_OP_EQUAL')) { throw 'Sky must be depth-masked by opaque prepass' }
+          $begin=$renderer.IndexOf('drawOpaque(true); // Mandatory')
+          $skyDraw=$renderer.IndexOf('vkCmdDraw(cmd_,3,1,0,0);++drawCalls;')
+          $opaqueColor=$renderer.IndexOf('drawOpaque(false); // Identical')
+          if ($begin -lt 0 -or $skyDraw -le $begin -or $opaqueColor -le $skyDraw) { throw 'Sky must render between prepass and opaque color' }
           if (!$renderer.Contains('srgbColorEnabled_=!requestedSrgb')) { throw 'sRGB default policy missing' }
           if (!$renderer.Contains('CSE_WARP_VK_SRGB_COLOR_TEST=0')) { throw 'Legacy diagnostic override missing' }
           Write-Host 'PASS Vulkan always-on opaque Z-prepass source contract'

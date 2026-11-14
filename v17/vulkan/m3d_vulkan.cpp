@@ -765,8 +765,12 @@ class VulkanRaster final {
         skyStages[1].module=skyModules[1];
         VkPipelineVertexInputStateCreateInfo emptyVertex{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
         VkPipelineDepthStencilStateCreateInfo skyDepth=ds;
-        skyDepth.depthTestEnable=VK_FALSE;
+        // Opaque Z-prepass is guaranteed before sky. Depth EQUAL=1.0 means
+        // only background (or transparency without opaque depth) shades sky.
+        // This removes cloud work hidden by buildings without changing sky pixels.
+        skyDepth.depthTestEnable=VK_TRUE;
         skyDepth.depthWriteEnable=VK_FALSE;
+        skyDepth.depthCompareOp=VK_COMPARE_OP_EQUAL;
         VkGraphicsPipelineCreateInfo skyPi=pi;
         skyPi.pStages=skyStages;
         skyPi.pVertexInputState=&emptyVertex;
@@ -1218,12 +1222,11 @@ public:
             vkCmdSetViewport(cmd_,0,1,&viewport);vkCmdSetScissor(cmd_,0,1,&scissor);
             vkCmdBindDescriptorSets(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,layout_,0,1,&descriptor_,0,nullptr);
             uint64_t drawCalls=0;
-            // Sky is drawn first; no depth is written and no scene triangles are used.
-            vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,skyPipeline_);
-            vkCmdDraw(cmd_,3,1,0,0);++drawCalls;
-            // Same opaque draw order and exact vertices in both passes. The
-            // optional prepass only writes depth, never color. Transparent
-            // triangles are drawn once, AFTER the opaque color pass.
+            // Opaque depth is generated first. The sky then runs only for
+            // background pixels (depth still == 1) through early depth tests.
+            // No new visual approximation: opaque color and transparencies
+            // retain their exact passes, and sky runs under transparent glass.
+            // Transparent triangles are drawn once after the opaque color pass.
             auto drawOpaque=[&](bool depthOnly){
                 if(vertexCount_){
                 vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,depthOnly?depthOpaque_:opaquePipeline_);
@@ -1254,8 +1257,11 @@ public:
                 }
             }
             };
-            drawOpaque(true);  // Mandatory depth-only opaque pass.
-            drawOpaque(false); // Unmodified color shading; glass remains a single pass.
+            drawOpaque(true); // Mandatory depth-only opaque pass.
+            // One fullscreen triangle; sky shader skipped where opaque depth is < 1.
+            vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,skyPipeline_);
+            vkCmdDraw(cmd_,3,1,0,0);++drawCalls;
+            drawOpaque(false); // Identical opaque color pass; glass once afterwards.
             if(transparentCount_){
                 // CPU depth-sort transparent triangles every frame, then draw with depth-test but no depth-write.
                 std::iota(glassOrder_.begin(),glassOrder_.end(),size_t(0));

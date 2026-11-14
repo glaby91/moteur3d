@@ -1,5 +1,6 @@
 #version 450
 // Port of V17 DirectX11 kCloudSkyShader: shared world-locked sky, no scene IDs.
+layout(early_fragment_tests) in; // Skip shader for pixels covered by prepass depth.
 layout(location=0) out vec4 outColor;
 layout(set=0,binding=0,std140) uniform Frame {
  vec4 eye,forward,right,up,sun,sky;
