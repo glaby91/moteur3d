@@ -1,0 +1,107 @@
+name: CSE WARP V17 Vulkan 1.2+ Raster - final Windows compile
+run-name: Vulkan Raster V17 - five-pass final Windows build
+on:
+  push:
+    branches:
+      - experiment/v17-vulkan-raster-backend-261114
+    paths:
+      - 'v17/**'
+      - 'v16/**'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/**'
+      - '.github/workflows/v17-vulkan-raster-final.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: cse-warp-v17-vulkan-final
+  cancel-in-progress: true
+jobs:
+  windows:
+    name: Windows 2022 MSVC - Vulkan Raster shaders and A/B
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - name: Checkout V17 Vulkan branch
+        uses: actions/checkout@v4
+      - name: Install Qt6 desktop MSVC2022
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Install Vulkan SDK (no SwiftShader network dependency)
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: '1.4.309.0'
+          cache: true
+          stripdown: true
+          install_swiftshader: false
+      - name: Check Vulkan shader compiler and Qt
+        shell: pwsh
+        run: |
+          $glslang = Join-Path $env:VULKAN_SDK 'Bin/glslangValidator.exe'
+          if (!(Test-Path $glslang)) { throw "Vulkan SDK glslangValidator not found at $glslang" }
+          & $glslang --version
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot run glslangValidator' }
+          if (!(Test-Path (Join-Path $env:QT_ROOT_DIR 'bin/windeployqt.exe'))) {
+            throw "Qt windeployqt not found"
+          }
+      - name: Prepare original V17 benchmark-civic generated scene
+        shell: pwsh
+        run: |
+          node scenes/v16/benchmark-civic/generate.cjs --all
+          if ($LASTEXITCODE -ne 0) { throw 'Scene generator failed' }
+          node scenes/v16/benchmark-civic/validate.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Scene validation failed' }
+          python scenes/v16/benchmark-civic/landscape_v4.py --root scenes/v16/benchmark-civic
+          if ($LASTEXITCODE -ne 0) { throw 'Scene landscape generation failed' }
+      - name: Configure shared V17 engine with Vulkan enabled
+        shell: pwsh
+        run: |
+          cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DV17_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER"
+          if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed' }
+      - name: FINAL COMPILE - V17 Qt, shared core and Vulkan GPU tests
+        shell: pwsh
+        run: |
+          cmake --build build-v17 --config Release --parallel 4 --target moteur3d_v17 v17_vulkan_mesh_smoke v17_vulkan_gpu_smoke v17_vulkan_ab_bench
+          if ($LASTEXITCODE -ne 0) { throw 'Vulkan final Windows build failed' }
+      - name: Confirm native Vulkan output and geometry smoke
+        shell: pwsh
+        run: |
+          $exe='build-v17/Release'
+          foreach ($p in @('moteur3d_v17.exe','moteur3d_v16_core.dll',
+                        'v17_vulkan_gpu_smoke.exe','v17_vulkan_ab_bench.exe','v17_vulkan_mesh_smoke.exe',
+                        'vulkan/raster.vert.spv','vulkan/raster.frag.spv',
+                        'vulkan/raster_box.vert.spv','vulkan/raster_foliage.vert.spv')) {
+            if (!(Test-Path "$exe/$p")) { throw "Missing Vulkan output: $p" }
+            Write-Host "Verified: $p"
+          }
+          & "$exe/v17_vulkan_mesh_smoke.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'GPU-free Vulkan mesh smoke failed' }
+          Write-Host 'GPU smoke is not run on virtual runner: physical HD620 Vulkan ICD required.'
+      - name: Package executable for actual Intel HD620 test
+        shell: pwsh
+        run: |
+          $src='build-v17/Release'
+          $dest='dist-v17-vulkan'
+          New-Item -ItemType Directory -Force $dest | Out-Null
+          foreach ($name in @('moteur3d_v17.exe','moteur3d_v16_core.dll',
+                              'v17_vulkan_gpu_smoke.exe','v17_vulkan_ab_bench.exe','v17_vulkan_mesh_smoke.exe')) {
+            Copy-Item "$src/$name" "$dest/" -Force
+          }
+          Copy-Item "$src/vulkan" "$dest/vulkan" -Recurse -Force
+          Copy-Item "$src/pavillon01" "$dest/pavillon01" -Recurse -Force
+          Copy-Item v17/vulkan/README.md "$dest/README_VULKAN.md"
+          Copy-Item v17/vulkan/LANCER_AB_VULKAN_HD620.bat "$dest/LANCER_AB_VULKAN_HD620.bat"
+          & "$env:QT_ROOT_DIR/bin/windeployqt.exe" --release --no-translations "$dest/moteur3d_v17.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Qt deployment failed' }
+          Write-Host 'Package ready for Intel HD620 with installed Vulkan runtime 1.3.204.'
+      - name: Publish experimental Vulkan Raster Windows bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V17-Vulkan-1.2-1.3-Raster-Windows-HD620
+          path: dist-v17-vulkan/
+          retention-days: 14
+          if-no-files-found: error
