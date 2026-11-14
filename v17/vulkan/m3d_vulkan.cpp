@@ -182,7 +182,7 @@ class VulkanRaster final {
         b={};
     }
     Texture image(uint32_t w,uint32_t h,uint32_t layers,VkFormat format,
-                  VkImageUsageFlags usage,VkImageAspectFlags aspect){
+                  VkImageUsageFlags usage,VkImageAspectFlags aspect,bool forceArrayView=false){
         Texture t;t.width=w;t.height=h;t.layers=layers;t.format=format;
         VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
         ci.imageType=VK_IMAGE_TYPE_2D;ci.format=format;ci.extent={w,h,1};
@@ -195,7 +195,7 @@ class VulkanRaster final {
         vkcheck(vkAllocateMemory(device_,&mem,nullptr,&t.memory),"allocate image");
         vkcheck(vkBindImageMemory(device_,t.image,t.memory,0),"bind image");
         VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-        vi.image=t.image;vi.viewType=layers>1?VK_IMAGE_VIEW_TYPE_2D_ARRAY:VK_IMAGE_VIEW_TYPE_2D;
+        vi.image=t.image;vi.viewType=(forceArrayView||layers>1)?VK_IMAGE_VIEW_TYPE_2D_ARRAY:VK_IMAGE_VIEW_TYPE_2D;
         vi.format=format;vi.subresourceRange.aspectMask=aspect;
         vi.subresourceRange.levelCount=1;vi.subresourceRange.layerCount=layers;
         vkcheck(vkCreateImageView(device_,&vi,nullptr,&t.view),"create view");
@@ -574,9 +574,9 @@ class VulkanRaster final {
                  <<" texture-side="<<side<<" pixels, budget="<<budget/(1024*1024)<<" MiB\n";
 
         albedo_=image(side,side,layers,VK_FORMAT_R8G8B8A8_SRGB,
-                      VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_ASPECT_COLOR_BIT);
+                      VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_ASPECT_COLOR_BIT,true);
         surface_=image(side,side,layers,VK_FORMAT_R8G8B8A8_UNORM,
-                       VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_ASPECT_COLOR_BIT);
+                       VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_ASPECT_COLOR_BIT,true);
         std::vector<uint32_t> alb(size_t(side)*side*layers,0xff808080u);
         std::vector<uint32_t> surf(alb.size(),0xffFF8080u); // norm (128,128,255), roughness 255
         for(uint32_t layer=0;layer<layers&&layer<scene.mat.size();layer++){
