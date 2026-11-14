@@ -1,3 +1,31 @@
+## Campagne TURBO en une passe (14 novembre 2026)
+
+**LANCER_BENCH_HD620.bat** effectue neuf tests à 1366x768, 32 itérations par pixel, 6 warmups et 30 répétitions par variante, puis crée **CSE_WARP_HD620_TURBO_RESULTS.zip** contenant les JSON, CSV et diagnostic. Il ne porte pas le Raster V17 vers Vulkan.
+
+| Variante | Configuration | Ce qui change |
+| --- | --- | --- |
+| A baseline | DX11 + Vulkan legacy | Benchmark précédent, référence conservée |
+| B cached | DX11 + Vulkan cached | Mémoire staging HOST_CACHED privilégiée, mapping persistant, commandes réutilisées |
+| C direct | DX11 + Vulkan direct | Sortie shader directement accessible au CPU, sans staging |
+| D cached_record | Vulkan cached + vk-record | Réenregistrement des commandes pour mesurer son coût |
+| E/F cached_ring2/3 | Vulkan cached, 2/3 travaux | Ring de buffers, fences, timestamps et commandes |
+| G direct_ring3 | Vulkan direct, 3 travaux | Accès direct et pipeline |
+| H/I compute_only/ring3 | Vulkan compute, 1/3 travaux | Suppression de la lecture CPU par dispatch ; vérification checksum séparée |
+
+**Précautions :** les temps totaux ne sont directement comparables qu'à politique de lecture et synchronisation équivalente. Dans les modes compute, la vérification du résultat se fait hors chronométrage ; les temps totaux n'incluent donc PAS la même opération que dans les modes avec lecture CPU. Avec plusieurs travaux en vol, consulter le débit global (pipeline_wall_ms et jobs/s), et pas uniquement la latence moyenne de chaque travail. Aucune de ces mesures ne représente les FPS du moteur Raster.
+
+Les nouvelles colonnes CSV sont record_ms, submit_ms, wait_ms, invalidate_ms et cpu_copy_ms, en plus du temps GPU et du wall. Les attributs mémoire réellement sélectionnés HOST_CACHED, HOST_COHERENT et DEVICE_LOCAL sont imprimés dans les logs. Certains pilotes ne proposent pas de mémoire HOST_CACHED adaptée : c'est une propriété à vérifier, pas à inventer.
+
+Aucun overclocking, réglage GPU risqué ni modification du pilote n'est réalisé par le benchmark.
+
+Références officielles :
+- https://docs.vulkan.org/spec/latest/chapters/memory.html
+- https://docs.vulkan.org/samples/latest/samples/performance/command_buffer_usage/README.html
+- https://docs.vulkan.org/guide/latest/profiling.html
+- https://docs.vulkan.org/tutorial/latest/03_Drawing_a_triangle/03_Drawing/03_Frames_in_flight.html
+
+---
+
 # CSE WARP — banc exploratoire Vulkan vs DirectX11 sur Intel HD620
 
 **Statut : branche expérimentale isolée. Ne modifie pas V17, ses shaders de rendu, ni les scènes.**
