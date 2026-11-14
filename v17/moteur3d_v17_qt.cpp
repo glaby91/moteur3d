@@ -927,7 +927,8 @@ private:
     void toggleExploration(){
         if(exploring_){stopExploration();return;}
         if(!runtime_||runtime_->cameras.isEmpty())return;
-        if(backendBox_->currentIndex()!=4)backendBox_->setCurrentIndex(4);
+        if(backendBox_->currentIndex()!=4 && backendBox_->currentIndex()!=5)
+            backendBox_->setCurrentIndex(4);
         if(!freeCameraActive_)activateFreeCamera();
         // An Intel HD 620 cannot reasonably sustain 8x MSAA during continuous
         // navigation of the large V8 scene. Temporarily lower AA to 2x ONLY
@@ -1294,7 +1295,8 @@ private:
         settings.setValue(QStringLiteral("Raster/LODPercent"),q.lodQualityPercent);
         settings.setValue(QStringLiteral("Raster/Culling"),q.frustumCulling);
         settings.setValue(QStringLiteral("Raster/DynamicLOD"),q.dynamicLod);
-        if(runtime_&&backendBox_&&backendBox_->currentIndex()==4)requestRender();
+        if(runtime_&&backendBox_&&
+           (backendBox_->currentIndex()==4||backendBox_->currentIndex()==5))requestRender();
     }
     void stopRadio(){
         radioAudio_.stop();
@@ -2080,7 +2082,7 @@ private:
             requestRender();
         });
         connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int index){
-            if(exploring_ && index!=4)stopExploration();
+            if(exploring_ && index!=4 && index!=5)stopExploration();
             const bool gi=index==2||index==3;
             directSamples_->setEnabled(index==0);
             denoiseDirect_->setEnabled(index==0);
@@ -2129,7 +2131,7 @@ private:
         skyAnimationTimer_.setInterval(33);
         connect(&skyAnimationTimer_,&QTimer::timeout,this,[this]{
             if(sceneLoading_||!runtime_||!hasRenderedPose_||lastImage_.isNull()||
-               !backendBox_||backendBox_->currentIndex()!=4)return;
+               !backendBox_||(backendBox_->currentIndex()!=4 && backendBox_->currentIndex()!=5))return;
             if(!cloudAnimationBox_->isChecked()&&!dayNightCycleBox_->isChecked()&&
                canvas_->hasSkyFrame())return;
             const auto camera=v16::makeCamera(lastRenderedPose_,
@@ -2564,7 +2566,7 @@ private:
             QTimer::singleShot(30000,this,[this,serial,token]{
                 if(serial->load()==token && watcher_.isRunning() && !closingRequested_)
                     statusBar()->showMessage(QStringLiteral(
-                        "Rendu DirectX 11 actif depuis plus de 30 secondes. "
+                        QStringLiteral("Rendu %1 actif depuis plus de 30 secondes. ").arg(vulkan?QStringLiteral("Vulkan"):QStringLiteral("DirectX 11")) + 
                         "GPU ou pilote possiblement saturé ; aucun basculement CPU."));
             });
         }
