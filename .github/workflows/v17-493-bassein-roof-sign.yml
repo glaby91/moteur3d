@@ -1,0 +1,90 @@
+name: V17.493 - Remplacement enseigne toit piscine BASSEIN
+on:
+  push:
+    branches: [feature/v17-493-piscine-enseigne-bassein-261114]
+    paths:
+      - .github/workflows/v17-493-bassein-roof-sign.yml
+      - tools/v493_build_bassein_glb.py
+      - tools/v493_replace_roof_sign.py
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  swap-rooftop-sign:
+    runs-on: windows-2022
+    timeout-minutes: 65
+    env:
+      GH_TOKEN: ${{ github.token }}
+      QT_QPA_PLATFORM: offscreen
+      M3D_V16_FORCE_WARP: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Download EXACT original V17.493 package
+        shell: pwsh
+        run: |
+          gh run download 43530238045 --repo glaby91/moteur3d --name CSE-WARP-V17.493-Windows-x64 --dir stage-v493
+          if($LASTEXITCODE -ne 0){throw "Original V17.493 package unavailable"}
+          if(!(Test-Path stage-v493/benchmark-civic/scene.json)){throw "Missing original V17.493 pool scene"}
+          if(!(Test-Path stage-v493/moteur3d_v17.exe)){throw "Missing 493 executable"}
+          $version=Get-Content stage-v493/BUILD_NUMBER.txt -Raw -ErrorAction SilentlyContinue
+          $manifest=Get-Content stage-v493/RELEASE-MANIFEST.json -Raw -ErrorAction SilentlyContinue
+          if(($version -notmatch '493') -and ($manifest -notmatch '17.493')){throw "Wrong V17.493 package"}
+      - name: Install dependencies for approved GLB source geometry
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check numpy pillow trimesh shapely opencv-python-headless matplotlib
+          if($LASTEXITCODE -ne 0){throw "GLB dependencies missing"}
+      - name: Rebuild approved 112-object roof GLB
+        shell: pwsh
+        run: |
+          $font=python -c "from matplotlib import get_data_path; import os; print(os.path.join(get_data_path(),'fonts','ttf','DejaVuSans-Bold.ttf'))"
+          $env:CSE_WARP_FONT=($font | Select-Object -Last 1).Trim()
+          if(!(Test-Path $env:CSE_WARP_FONT)){throw "DejaVuSans-Bold missing"}
+          python tools/v493_build_bassein_glb.py --out sign-bassein-v493.glb
+          if($LASTEXITCODE -ne 0){throw "Sign GLB build failed"}
+          if((Get-Item sign-bassein-v493.glb).Length -lt 100000){throw "GLB incomplete"}
+      - name: Replace only the existing V17.493 rooftop sign
+        shell: pwsh
+        run: |
+          python tools/v493_replace_roof_sign.py --package stage-v493 --glb sign-bassein-v493.glb
+          if($LASTEXITCODE -ne 0){throw "Roof replacement failed"}
+          $r=Get-Content stage-v493/benchmark-civic/V493_BASSEIN_SIGN_INSTALL.json -Raw | ConvertFrom-Json
+          if($r.addedSignObjects -ne 112 -or $r.addedTriangles -lt 14000 -or $r.removedSignObjects -lt 50){throw "Rooftop sign validation failed"}
+          if($r.originalUnchangedObjects -lt 5000){throw "Unrelated scene geometry lost"}
+      - name: Verify modified V493 scene on actual DX11 raster (software GPU)
+        shell: pwsh
+        timeout-minutes: 18
+        run: |
+          $env:PATH=(Resolve-Path stage-v493).Path+";"+$env:PATH
+          $env:QT_PLUGIN_PATH=(Resolve-Path stage-v493).Path
+          $exe="stage-v493/moteur3d_v17_benchmark.exe"
+          if(!(Test-Path $exe)){$exe="stage-v493/outils/benchmark/moteur3d_v17_benchmark.exe"}
+          $scene=(Resolve-Path stage-v493/benchmark-civic/scene.json).Path
+          & $exe $scene qa-v493-bassein-roof --smoke --camera-id v4_face --hour 19 --raster-msaa 1
+          if($LASTEXITCODE -ne 0){throw "DX11 smoke V493 scene failed"}
+          $images=@(Get-ChildItem qa-v493-bassein-roof -Recurse -Filter raster_*.png -File)
+          if($images.Count -lt 1 -or $images[0].Length -lt 1000){throw "No real DX11 scene image"}
+          Copy-Item $images[0].FullName stage-v493/V493-BASSEIN-VUE-REELLE-DX11.png
+      - name: Verify unchanged V493 executable and archive modified scene
+        shell: pwsh
+        run: |
+          $v=[Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path stage-v493/moteur3d_v17.exe).Path)
+          if($v.FileMajorPart -ne 17 -or $v.FileMinorPart -ne 493){throw "Not the original 17.493 executable"}
+          git rev-parse HEAD | Set-Content stage-v493/REVISION_BASSEIN_SIGN.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V17.493-PISCINE-ENSEIGNE-BASSEIN-Windows-x64
+          path: stage-v493/
+          if-no-files-found: error
+          retention-days: 21
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CSE-WARP-V17.493-ENSEIGNE-APERCU-DX11
+          path: qa-v493-bassein-roof/
+          if-no-files-found: warn
+          retention-days: 21
