@@ -102,6 +102,43 @@ target_compile_definitions(moteur3d_v17 PRIVATE CSE_WARP_BUILD_NUMBER=${V17_BUIL
 if(MSVC)
     target_compile_options(moteur3d_v17 PRIVATE /O2 /EHsc /utf-8)
 endif()
+# Vulkan 1.0 experimental Raster backend: compile native GLSL shaders to SPIR-V.
+# Pipeline assembly is done once per worker thread, not in the per-frame path.
+if(WIN32)
+    find_package(Vulkan QUIET)
+    if(Vulkan_FOUND)
+        find_program(V17_GLSLANG_VALIDATOR NAMES glslangValidator glslangValidator.exe
+            HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/Bin32")
+        if(NOT V17_GLSLANG_VALIDATOR)
+            message(WARNING "Vulkan SDK present but glslangValidator not found: Vulkan preview requires SPIR-V shaders")
+        else()
+            set(V17_VULKAN_SPIRV)
+            foreach(stage IN ITEMS vert frag)
+                set(spv "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders/raster.${stage}.spv")
+                add_custom_command(OUTPUT "${spv}"
+                    COMMAND ${CMAKE_COMMAND} -E make_directory
+                        "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders"
+                    COMMAND "${V17_GLSLANG_VALIDATOR}"
+                        -V --target-env vulkan1.0
+                        "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster.${stage}"
+                        -o "${spv}"
+                    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster.${stage}"
+                    VERBATIM)
+                list(APPEND V17_VULKAN_SPIRV "${spv}")
+            endforeach()
+            add_custom_target(v17_vulkan_spirv DEPENDS ${V17_VULKAN_SPIRV})
+            add_dependencies(moteur3d_v17 v17_vulkan_spirv)
+            add_custom_command(TARGET moteur3d_v17 POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_FILE_DIR:moteur3d_v17>/vulkan"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${V17_VULKAN_SPIRV}
+                    "$<TARGET_FILE_DIR:moteur3d_v17>/vulkan"
+                VERBATIM)
+        endif()
+    endif()
+endif()
+
 # Repeatable original 30s PCM diagnostic loop; no copyright-sensitive downloads
 # and no external audio processing tool required by the Windows build.
 if(WIN32)
