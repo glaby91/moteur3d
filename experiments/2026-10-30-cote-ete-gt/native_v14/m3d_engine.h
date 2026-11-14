@@ -65,6 +65,11 @@ struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPe
     // Preserve: dedicated full-resolution GPU tier, independent of camera distance.
     bool preserveTextureDetail=false;
     uint32_t minimumTextureResolution=0;
+    // Optional scene-authored emission. Old materials keep the legacy shader
+    // behavior; an explicit JSON "emission" overrides material-name aliases.
+    V emissionColor{};
+    float emissionIntensity=0.f;
+    bool emissionAuthored=false;
 };
 struct Scene { bool underwaterEnvironment=false; bool finiteGround=false; bool useLegacyWorldLights=true; std::vector<Obj> obj; std::vector<SourceBox> sourceBoxes; std::vector<SourceFoliage> sourceFoliage; std::vector<Node> node; std::vector<uint32_t> order; std::vector<Material> mat; std::vector<Light> lights; int32_t root=-1;
  // V16 builder assigns a unique identity after scene construction. Tracked scenes

@@ -1042,14 +1042,19 @@ class VulkanRaster final {
             f.material[i][1]=clampf(m.roughnessScale,.08f,1.f);
             f.material[i][2]=1.f-float(m.transmissionPercent)/100.f;
             f.material[i][3]=m.normalMip.empty()?0.f:1.f;
-            const auto& name=m.name;
-            float strength=0.f;V emission{0,0,0};
-            if(name=="cse_neon_red"){emission={1.f,.09f,.035f};strength=1.65f;}
-            else if(name=="cse_neon_cyan"){emission={.03f,.89f,1.f};strength=1.50f;}
-            else if(name=="cse_neon_gold"){emission={1.f,.72f,.24f};strength=1.35f;}
-            else if(name=="cse_pool_strip"){emission={.83f,.91f,1.f};strength=.24f;}
-            else if(name=="lamp"){emission={1.f,.65f,.36f};strength=.75f+1.9f*lampFactor;}
-            else if(name=="led"){emission={1.f,.85f,.65f};strength=.48f+.85f*lampFactor;}
+            V emission=m.emissionColor;
+            float strength=m.emissionIntensity;
+            if(!m.emissionAuthored){
+                // Backwards compatibility only: explicit descriptor always wins.
+                // This block will disappear when legacy scenes are migrated.
+                const auto& name=m.name;
+                if(name=="cse_neon_red"){emission={1.f,.09f,.035f};strength=1.65f;}
+                else if(name=="cse_neon_cyan"){emission={.03f,.89f,1.f};strength=1.50f;}
+                else if(name=="cse_neon_gold"){emission={1.f,.72f,.24f};strength=1.35f;}
+                else if(name=="cse_pool_strip"){emission={.83f,.91f,1.f};strength=.24f;}
+                else if(name=="lamp"){emission={1.f,.65f,.36f};strength=.75f+1.9f*lampFactor;}
+                else if(name=="led"){emission={1.f,.85f,.65f};strength=.48f+.85f*lampFactor;}
+            }
             f.emission[i][0]=emission.x;f.emission[i][1]=emission.y;f.emission[i][2]=emission.z;
             f.emission[i][3]=strength;
         }

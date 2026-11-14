@@ -127,6 +127,30 @@ int main(int argc,char** argv) {
  doc["dx11_last_hash"]=QString::number(dxHash,16);
  doc["vulkan_last_hash"]=QString::number(vkHash,16);
  doc["pixel_parity_claim"]=false; // first-port PBR/shader parity explicitly NOT established
+ // Visual diagnostic occurs AFTER all timed frames, never inside timings.
+ // Red heatmap: per-pixel max RGB deviation scaled by 4 for visibility.
+ if(dxPixels.size()==vkPixels.size() && dxPixels.size()==size_t(width)*height){
+  double errorSum=0.;
+  uint64_t majorDifference=0;
+  QImage diff(width,height,QImage::Format_ARGB32);
+  auto* out=reinterpret_cast<uint32_t*>(diff.bits());
+  for(size_t p=0;p<dxPixels.size();p++){
+   const uint32_t a=dxPixels[p],b=vkPixels[p];
+   const int dr=std::abs(int((a>>16)&255)-int((b>>16)&255));
+   const int dg=std::abs(int((a>>8)&255)-int((b>>8)&255));
+   const int db=std::abs(int(a&255)-int(b&255));
+   const int worst=std::max({dr,dg,db});
+   errorSum+=dr+dg+db;
+   if(worst>30)majorDifference++;
+   out[p]=0xff000000u|(uint32_t(std::min(255,worst*4))<<16);
+  }
+  doc["last_frame_rgb_mae"]=errorSum/(3.*double(dxPixels.size()));
+  doc["last_frame_pixels_difference_over_30_percent"]=100.*double(majorDifference)/double(dxPixels.size());
+  if(!png(QDir(outDir).filePath("dx11_last.png"),dxPixels,width,height) ||
+     !png(QDir(outDir).filePath("vulkan_last.png"),vkPixels,width,height) ||
+     !diff.save(QDir(outDir).filePath("vulkan_vs_dx11_last_diff.png"),"PNG"))
+    std::cerr<<"WARNING: cannot write last-frame visual diagnostics\n";
+ }
  doc["samples"]=samples;
  QFile f(QDir(outDir).filePath("ab_results.json"));
  if(!f.open(QIODevice::WriteOnly|QIODevice::Truncate)||

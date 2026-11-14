@@ -622,6 +622,32 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
         material.refractiveIndex=f(j.value("ior"),1.5f);
         material.metallic=metal;
         material.roughnessScale=clampf(f(j.value("roughnessScale"),1.f),.01f,2.f);
+        // Explicit, generic emissive material declaration. Not tied to any
+        // scene, object name or light-strip identity.
+        if(j.contains("emission")){
+            const QJsonValue emissionValue=j.value("emission");
+            if(!emissionValue.isObject()){
+                result.error="emission must be an object for material: "+id;return result;
+            }
+            const QJsonObject emission=emissionValue.toObject();
+            const QJsonArray rgb=emission.value("color").toArray();
+            const QJsonValue intensity=emission.value("intensity");
+            if(rgb.size()!=3 || !intensity.isDouble()){
+                result.error="emission requires color [r,g,b] and numeric intensity: "+id;
+                return result;
+            }
+            material.emissionColor=v3(emission.value("color"),{0,0,0});
+            material.emissionIntensity=float(intensity.toDouble());
+            const V c=material.emissionColor;
+            if(!finite3(c)||c.x<0.f||c.y<0.f||c.z<0.f||
+               c.x>1.f||c.y>1.f||c.z>1.f ||
+               !std::isfinite(material.emissionIntensity)||
+               material.emissionIntensity<0.f||material.emissionIntensity>100.f){
+                result.error="Invalid emission color/intensity for material: "+id;
+                return result;
+            }
+            material.emissionAuthored=true;
+        }
         const auto texId=j.value("textureSet").toString();
         if(!sets.contains(texId)){result.error="Missing texture set: "+texId;return result;}
         const auto set=sets.value(texId);
