@@ -102,7 +102,7 @@ target_compile_definitions(moteur3d_v17 PRIVATE CSE_WARP_BUILD_NUMBER=${V17_BUIL
 if(MSVC)
     target_compile_options(moteur3d_v17 PRIVATE /O2 /EHsc /utf-8)
 endif()
-# Vulkan 1.0 experimental Raster backend: compile native GLSL shaders to SPIR-V.
+# Vulkan 1.3.204 minimum Raster backend: compile native GLSL shaders to SPIR-V.
 # Pipeline assembly is done once per worker thread, not in the per-frame path.
 if(WIN32)
     find_package(Vulkan QUIET)
@@ -119,7 +119,7 @@ if(WIN32)
                     COMMAND ${CMAKE_COMMAND} -E make_directory
                         "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders"
                     COMMAND "${V17_GLSLANG_VALIDATOR}"
-                        -V --target-env vulkan1.2
+                        -V --target-env vulkan1.3
                         "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster.${stage}"
                         -o "${spv}"
                     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster.${stage}"
@@ -131,7 +131,7 @@ if(WIN32)
                 COMMAND ${CMAKE_COMMAND} -E make_directory
                     "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders"
                 COMMAND "${V17_GLSLANG_VALIDATOR}"
-                    -V --target-env vulkan1.2
+                    -V --target-env vulkan1.3
                     "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster_box.vert"
                     -o "${box_spv}"
                 DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster_box.vert"
@@ -142,7 +142,7 @@ if(WIN32)
                 COMMAND ${CMAKE_COMMAND} -E make_directory
                     "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders"
                 COMMAND "${V17_GLSLANG_VALIDATOR}"
-                    -V --target-env vulkan1.2
+                    -V --target-env vulkan1.3
                     "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster_foliage.vert"
                     -o "${foliage_spv}"
                 DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster_foliage.vert"
