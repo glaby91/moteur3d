@@ -48,7 +48,26 @@ jobs:
         id: build
         shell: pwsh
         run: cmake --build build-vulkan-dx11 --config Release --parallel 2
+      - name: Resolve Windows Vulkan loader DLL for launch and portable ZIP
+        id: loader
+        shell: pwsh
+        run: |
+          $paths = @(
+            "$env:VULKAN_SDK\runtime\x64\vulkan-1.dll",
+            "$env:VULKAN_SDK\Bin\vulkan-1.dll",
+            "$env:SystemRoot\System32\vulkan-1.dll"
+          )
+          $dll = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if ($dll) {
+            Write-Host "Vulkan loader found: $dll"
+            Copy-Item $dll 'build-vulkan-dx11/Release/vulkan-1.dll' -Force
+            "present=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Warning "No vulkan-1.dll on runner; Windows executable launch tests skipped. GPU vendor drivers provide loader on physical HD620."
+            "present=false" >> $env:GITHUB_OUTPUT
+          }
       - name: Probe available APIs
+        if: steps.loader.outputs.present == 'true'
         shell: pwsh
         run: |
           $exe = 'build-vulkan-dx11/Release/cse_warp_vk_dx11_bench.exe'
@@ -57,6 +76,7 @@ jobs:
           & $exe --probe 2>&1 | Tee-Object -FilePath build-vulkan-dx11/probe.txt
           if ($LASTEXITCODE -ne 0) { throw "Probe failed exit=$LASTEXITCODE" }
       - name: Functional smoke D3D11 WARP (NOT representative HD620 timing)
+        if: steps.loader.outputs.present == 'true'
         shell: pwsh
         run: |
           Push-Location build-vulkan-dx11/Release
@@ -64,7 +84,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'D3D11 WARP smoke failed' }
           Pop-Location
       - name: Functional smoke Vulkan SwiftShader (NOT comparable timing)
-        if: steps.vk_icd.outputs.present == 'true'
+        if: steps.vk_icd.outputs.present == 'true' && steps.loader.outputs.present == 'true'
         shell: pwsh
         run: |
           Push-Location build-vulkan-dx11/Release
@@ -110,6 +130,7 @@ jobs:
           New-Item -ItemType Directory dist-vulkan-dx11 -Force | Out-Null
           Copy-Item build-vulkan-dx11/Release/cse_warp_vk_dx11_bench.exe dist-vulkan-dx11/
           Copy-Item build-vulkan-dx11/Release/benchmark.comp.spv dist-vulkan-dx11/
+          if (Test-Path 'build-vulkan-dx11/Release/vulkan-1.dll') { Copy-Item build-vulkan-dx11/Release/vulkan-1.dll dist-vulkan-dx11/ }
           Copy-Item experiments/vulkan-dx11-bench/LANCER_BENCH_HD620.bat dist-vulkan-dx11/
           Copy-Item experiments/vulkan-dx11-bench/README.md dist-vulkan-dx11/
       - name: Publish portable benchmark (driver Vulkan required on target)
