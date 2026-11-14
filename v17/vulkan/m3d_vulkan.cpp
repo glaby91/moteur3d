@@ -107,7 +107,7 @@ class VulkanRaster final {
     VkQueryPool queries_=VK_NULL_HANDLE;
     VkRenderPass renderPass_=VK_NULL_HANDLE;
     VkPipelineLayout layout_=VK_NULL_HANDLE;
-    VkPipeline opaquePipeline_=VK_NULL_HANDLE,alphaPipeline_=VK_NULL_HANDLE;
+    VkPipeline opaquePipeline_=VK_NULL_HANDLE,alphaPipeline_=VK_NULL_HANDLE,boxPipeline_=VK_NULL_HANDLE;
     VkPipelineCache pipelineCache_=VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool_=VK_NULL_HANDLE;
     VkDescriptorSetLayout descriptorLayout_=VK_NULL_HANDLE;
@@ -115,10 +115,10 @@ class VulkanRaster final {
     VkSampler albedoSampler_=VK_NULL_HANDLE,shadowSampler_=VK_NULL_HANDLE;
     Texture color_,depth_,albedo_,surface_,shadow_;
     VkFramebuffer framebuffer_=VK_NULL_HANDLE;
-    Buffer vertices_,transparent_,uniform_,readback_;
-    uint32_t vertexCount_=0,transparentCount_=0;
+    Buffer vertices_,transparent_,boxTemplate_,boxInstances_,uniform_,readback_;
+    uint32_t vertexCount_=0,transparentCount_=0,boxCount_=0;
     std::vector<vkmesh::TransparentTriangle> glass_;
-    std::vector<Chunk> chunks_;
+    std::vector<Chunk> chunks_,boxChunks_;
     std::vector<uint32_t> stagingColors_;
     uint32_t width_=0,height_=0;
     uint64_t sceneIdentity_=0,sceneRevision_=~uint64_t(0);
@@ -453,6 +453,32 @@ class VulkanRaster final {
         blend.alphaBlendOp=VK_BLEND_OP_ADD;
         ds.depthWriteEnable=VK_FALSE;
         vkcheck(vkCreateGraphicsPipelines(device_,pipelineCache_,1,&pi,nullptr,&alphaPipeline_),"transparent Vulkan pipeline");
+        // Third pipeline: original V17 instanced box geometry, no CPU tessellation per box.
+        const auto boxCode=spirv(shaderFile("raster_box.vert.spv"));
+        VkShaderModule boxModule=VK_NULL_HANDLE;
+        VkShaderModuleCreateInfo boxCI{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+        boxCI.codeSize=boxCode.size()*4;boxCI.pCode=boxCode.data();
+        vkcheck(vkCreateShaderModule(device_,&boxCI,nullptr,&boxModule),"box shader module");
+        stages[0].module=boxModule;
+        std::array<VkVertexInputBindingDescription,2> boxBindings{{
+            {0,sizeof(Vertex),VK_VERTEX_INPUT_RATE_VERTEX},
+            {1,sizeof(vkmesh::BoxInstance),VK_VERTEX_INPUT_RATE_INSTANCE}
+        }};
+        std::array<VkVertexInputAttributeDescription,10> boxAttrs{};
+        for(size_t i=0;i<4;i++)boxAttrs[i]=attrs[i];
+        using Box=vkmesh::BoxInstance;
+        boxAttrs[4]={4,1,VK_FORMAT_R32G32B32_SFLOAT,uint32_t(offsetof(Box,lo))};
+        boxAttrs[5]={5,1,VK_FORMAT_R32_SFLOAT,uint32_t(offsetof(Box,uvScale))};
+        boxAttrs[6]={6,1,VK_FORMAT_R32G32B32_SFLOAT,uint32_t(offsetof(Box,hi))};
+        boxAttrs[7]={7,1,VK_FORMAT_R32_UINT,uint32_t(offsetof(Box,material))};
+        boxAttrs[8]={8,1,VK_FORMAT_R32G32B32_SFLOAT,uint32_t(offsetof(Box,dimensions))};
+        boxAttrs[9]={9,1,VK_FORMAT_R32_UINT,uint32_t(offsetof(Box,uvMode))};
+        vi.vertexBindingDescriptionCount=2;vi.pVertexBindingDescriptions=boxBindings.data();
+        vi.vertexAttributeDescriptionCount=uint32_t(boxAttrs.size());vi.pVertexAttributeDescriptions=boxAttrs.data();
+        ds.depthWriteEnable=VK_TRUE;
+        blend.blendEnable=VK_FALSE;
+        vkcheck(vkCreateGraphicsPipelines(device_,pipelineCache_,1,&pi,nullptr,&boxPipeline_),"instanced box Vulkan pipeline");
+        vkDestroyShaderModule(device_,boxModule,nullptr);
         vkDestroyShaderModule(device_,modules[0],nullptr);
         vkDestroyShaderModule(device_,modules[1],nullptr);
     }
@@ -539,14 +565,41 @@ class VulkanRaster final {
     }
     void rebuild(const Scene& scene){
         if(scene.mat.size()>kMaxMaterials)throw std::runtime_error("Vulkan port: more than 256 materials");
-        free(vertices_);free(transparent_);glass_.clear();chunks_.clear();
-        vkmesh::MeshBuilder mesh=vkmesh::build(scene);
-        if(mesh.vertices.empty()&&mesh.transparent.empty())
+        free(vertices_);free(transparent_);free(boxTemplate_);free(boxInstances_);
+        glass_.clear();chunks_.clear();boxChunks_.clear();boxCount_=0;
+        std::vector<vkmesh::BoxInstance> boxData;
+        vkmesh::MeshBuilder mesh=vkmesh::build(scene,&boxData);
+        if(mesh.vertices.empty()&&mesh.transparent.empty()&&boxData.empty())
             throw std::runtime_error("Vulkan: scene contains no rasterizable geometry");
         if(mesh.vertices.size()+mesh.transparent.size()*3>12000000u)
             throw std::runtime_error("Vulkan scene exceeds 12M vertex safety limit");
         vertexCount_=uint32_t(mesh.vertices.size());
         if(vertexCount_)vertices_=uploadVertices(mesh.vertices.data(),size_t(vertexCount_)*sizeof(Vertex));
+        if(!boxData.empty()){
+            vkmesh::MeshBuilder cube;
+            cube.box({0,0,0},{1,1,1},0,1.f);
+            if(cube.vertices.size()!=36u)throw std::runtime_error("Invalid V17 box template");
+            boxTemplate_=uploadVertices(cube.vertices.data(),cube.vertices.size()*sizeof(Vertex));
+            boxInstances_=uploadVertices(boxData.data(),boxData.size()*sizeof(vkmesh::BoxInstance));
+            boxCount_=uint32_t(boxData.size());
+            constexpr size_t boxBatch=128;
+            for(size_t first=0;first<boxData.size();first+=boxBatch){
+                const size_t end=std::min(first+boxBatch,boxData.size());
+                Chunk chunk;chunk.first=uint32_t(first);chunk.count=uint32_t(end-first);
+                chunk.lo={boxData[first].lo[0],boxData[first].lo[1],boxData[first].lo[2]};
+                chunk.hi={boxData[first].hi[0],boxData[first].hi[1],boxData[first].hi[2]};
+                for(size_t i=first+1;i<end;i++){
+                    const auto& box=boxData[i];
+                    for(int ax=0;ax<3;ax++){
+                        float* lo=ax==0?&chunk.lo.x:ax==1?&chunk.lo.y:&chunk.lo.z;
+                        float* hi=ax==0?&chunk.hi.x:ax==1?&chunk.hi.y:&chunk.hi.z;
+                        *lo=std::min(*lo,box.lo[ax]);
+                        *hi=std::max(*hi,box.hi[ax]);
+                    }
+                }
+                boxChunks_.push_back(chunk);
+            }
+        }
         glass_=std::move(mesh.transparent);
         transparentCount_=uint32_t(glass_.size()*3);
         if(transparentCount_)transparent_=buffer(size_t(transparentCount_)*sizeof(Vertex),
@@ -635,8 +688,9 @@ public:
         if(!device_){if(instance_)vkDestroyInstance(instance_,nullptr);return;}
         vkDeviceWaitIdle(device_);
         if(framebuffer_)vkDestroyFramebuffer(device_,framebuffer_,nullptr);
-        free(readback_);free(uniform_);free(vertices_);free(transparent_);
+        free(readback_);free(uniform_);free(vertices_);free(transparent_);free(boxTemplate_);free(boxInstances_);
         free(color_);free(depth_);free(albedo_);free(surface_);free(shadow_);
+        if(boxPipeline_)vkDestroyPipeline(device_,boxPipeline_,nullptr);
         if(alphaPipeline_)vkDestroyPipeline(device_,alphaPipeline_,nullptr);
         if(opaquePipeline_)vkDestroyPipeline(device_,opaquePipeline_,nullptr);
         if(pipelineCache_)vkDestroyPipelineCache(device_,pipelineCache_,nullptr);
@@ -687,6 +741,16 @@ public:
                 vkCmdBindVertexBuffers(cmd_,0,1,&vb,&off);
                 for(const Chunk& c:chunks_)if(visible(c,cam)){
                     vkCmdDraw(cmd_,c.count,1,c.first,0);drawCalls++;
+                }
+            }
+            if(boxCount_){
+                vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,boxPipeline_);
+                VkBuffer boxVBs[2]={boxTemplate_.handle,boxInstances_.handle};
+                VkDeviceSize boxOffsets[2]{0,0};
+                vkCmdBindVertexBuffers(cmd_,0,2,boxVBs,boxOffsets);
+                for(const Chunk& chunk:boxChunks_)if(visible(chunk,cam)){
+                    vkCmdDraw(cmd_,36,chunk.count,0,chunk.first);
+                    ++drawCalls;
                 }
             }
             if(transparentCount_){
