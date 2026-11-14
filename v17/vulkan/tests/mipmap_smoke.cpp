@@ -6,4 +6,7 @@ static_assert(m3d::vkmips::levelCount(2048)==12,"2048");
 static_assert(m3d::vkmips::extent(512,9)==1,"final");
 static_assert(m3d::vkmips::extent(512,99)==1,"clamped");
 static_assert(m3d::vkmips::texelsPerLayer(4)==21,"full chain");
+static_assert(m3d::vkmips::texelsForLevels(4,1)==16,"base protected");
+static_assert(m3d::vkmips::texelsForLevels(4,2)==20,"partial mips");
+static_assert(m3d::vkmips::texelsForLevels(4,3)==21,"full chain via budget");
 int main(){std::cout<<"PASS Vulkan mipmap policy 512:10, 2048:12, down to 1x1\n";return 0;}

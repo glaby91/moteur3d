@@ -766,7 +766,7 @@ class VulkanRaster final {
         uint32_t side=128;
         for(uint32_t candidate:{256u,512u,1024u,2048u})
             if(candidate<=props_.limits.maxImageDimension2D &&
-               vkmips::texelsPerLayer(candidate)*layers*8ull<=budget)side=candidate;
+               uint64_t(candidate)*candidate*layers*8ull<=budget)side=candidate;
         if(side>props_.limits.maxImageDimension2D)
             throw std::runtime_error("GPU image dimensions too small");
         auto supportsLinearBlit=[&](VkFormat format){
@@ -778,7 +778,16 @@ class VulkanRaster final {
         };
         const bool supported=supportsLinearBlit(VK_FORMAT_R8G8B8A8_SRGB) &&
                              supportsLinearBlit(VK_FORMAT_R8G8B8A8_UNORM);
-        const uint32_t levels=supported?vkmips::levelCount(side):1u;
+        uint32_t levels=1;
+        if(supported){
+            for(uint32_t n=2;n<=vkmips::levelCount(side);n++){
+                if(vkmips::texelsForLevels(side,n)*layers*8ull<=budget)
+                    levels=n;
+                else break;
+            }
+        }
+        // Never reduce the original base texture resolution to fit mips.
+        // If the budget is tight, keep fewer mips; preserve level 0.
         std::clog<<"[CSE WARP Vulkan] PBR array layers="<<layers
                  <<" texture-side="<<side<<" pixels, mip-levels="<<levels
                  <<" trilinear="<<(levels>1?"yes":"unsupported")<<", budget="
