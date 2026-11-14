@@ -131,11 +131,15 @@ jobs:
           }
           Copy-Item "$src/vulkan" "$dest/vulkan" -Recurse -Force
           Copy-Item "$src/pavillon01" "$dest/pavillon01" -Recurse -Force
+          Copy-Item "$src/material-lab" "$dest/material-lab" -Recurse -Force
+          Copy-Item "$src/pripyat-photo2scene-proof" "$dest/pripyat-photo2scene-proof" -Recurse -Force
+          Copy-Item "$src/benchmark-civic" "$dest/benchmark-civic" -Recurse -Force
           Copy-Item v17/vulkan/README.md "$dest/README_VULKAN.md"
           Copy-Item v17/vulkan/LANCER_AB_VULKAN_HD620.bat "$dest/LANCER_AB_VULKAN_HD620.bat"
           Copy-Item v17/vulkan/LANCER_OPTIMISATION_VULKAN_HD620.bat "$dest/LANCER_OPTIMISATION_VULKAN_HD620.bat"
           Copy-Item v17/vulkan/LANCER_PIPELINE_VULKAN_HD620.bat "$dest/LANCER_PIPELINE_VULKAN_HD620.bat"
           Copy-Item v17/vulkan/LANCER_ZPREPASS_VULKAN_HD620.bat "$dest/LANCER_ZPREPASS_VULKAN_HD620.bat"
+          Copy-Item v17/vulkan/LANCER_QUALITE_VULKAN_MULTISCENE_HD620.bat "$dest/LANCER_QUALITE_VULKAN_MULTISCENE_HD620.bat"
           if (Test-Path 'diagnostics-vulkan') {
             Copy-Item 'diagnostics-vulkan' "$dest/diagnostics" -Recurse -Force
           }

@@ -134,3 +134,7 @@ Le benchmark A/B génère maintenant `dx11_last.png`, `vulkan_last.png` et `vulk
 ### Garantie de non-régression du niveau de détail principal
 
 Le calcul du budget **ne diminue pas** la résolution du niveau 0. Si la mémoire disponible ne permet que deux niveaux, le sampler dispose de deux mips et non d'une chaîne complète. Si seul le niveau 0 tient dans le budget, le filtrage reste celui de l'ancienne version. Cette règle s'applique également aux matériaux non protégés et est vérifiée par le smoke des budgets partiels.
+
+## Vérification finale multi-scènes (non spécifique au rendu)
+
+Le build Windows livre quatre scènes de référence indépendantes : `pavillon01`, `material-lab`, `pripyat-photo2scene-proof` et `benchmark-civic` (générée avant CMake). Le nouveau lanceur `LANCER_QUALITE_VULKAN_MULTISCENE_HD620.bat` rend **12 positions par scène** à 1366×768 avec les mêmes réglages de référence DX11 / Vulkan (Vulkan Z-prepass permanent). Chaque rapport contient des PNG DX11/Vulkan et une carte d'écarts de couleur. Toutes les scènes sont des **fixtures de validation uniquement** : aucun nom de scène ne déclenche une fonctionnalité ou une optimisation dans le code du moteur. Un échec conserve les logs et les résultats déjà générés ; il ne prétend jamais que le backend est prêt à fusionner sur `master`.
