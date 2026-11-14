@@ -212,13 +212,18 @@ class VulkanRaster final {
         bi.flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkcheck(vkBeginCommandBuffer(cmd_,&bi),"begin commands");
     }
-    void submit(){
+    void submit(double* submissionMs=nullptr,double* waitMs=nullptr){
         vkcheck(vkEndCommandBuffer(cmd_),"end commands");
         VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
         si.commandBufferCount=1;si.pCommandBuffers=&cmd_;
+        const auto start=Clock::now();
         vkcheck(vkQueueSubmit(queue_,1,&si,fence_),"submit commands");
+        const auto issued=Clock::now();
         vkcheck(vkWaitForFences(device_,1,&fence_,VK_TRUE,UINT64_MAX),"wait GPU");
+        const auto completed=Clock::now();
         vkcheck(vkResetFences(device_,1,&fence_),"reset fence");
+        if(submissionMs)*submissionMs=ms(start,issued);
+        if(waitMs)*waitMs=ms(issued,completed);
     }
     void barrier(Texture& t,VkImageLayout from,VkImageLayout to,
                  VkAccessFlags src,VkAccessFlags dst,VkPipelineStageFlags srcStage,VkPipelineStageFlags dstStage){
@@ -303,6 +308,10 @@ class VulkanRaster final {
         vkGetPhysicalDeviceMemoryProperties(physical_,&memoryTypes_);
         vkGetPhysicalDeviceFeatures(physical_,&features_);
         adapter_=props_.deviceName;
+        std::clog<<"[CSE WARP Vulkan] GPU="<<adapter_
+                 <<" version="<<VK_VERSION_MAJOR(props_.apiVersion)<<"."
+                 <<VK_VERSION_MINOR(props_.apiVersion)<<"."
+                 <<VK_VERSION_PATCH(props_.apiVersion)<<" driver="<<props_.driverVersion<<"\n";
         float priority=1.f;
         VkDeviceQueueCreateInfo queue{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
         queue.queueFamilyIndex=family_;queue.queueCount=1;queue.pQueuePriorities=&priority;
@@ -523,6 +532,9 @@ class VulkanRaster final {
         fb.renderPass=renderPass_;fb.attachmentCount=2;fb.pAttachments=views;fb.width=w;fb.height=h;fb.layers=1;
         vkcheck(vkCreateFramebuffer(device_,&fb,nullptr,&framebuffer_),"Vulkan framebuffer");
         readback_=buffer(VkDeviceSize(w)*h*4,VK_BUFFER_USAGE_TRANSFER_DST_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,true);
+        std::clog<<"[CSE WARP Vulkan] Readback memory HOST_CACHED="
+                 <<bool(readback_.flags&VK_MEMORY_PROPERTY_HOST_CACHED_BIT)
+                 <<" HOST_COHERENT="<<bool(readback_.flags&VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)<<"\n";
     }
     void textures(const Scene& scene){
         free(albedo_);free(surface_);
@@ -541,6 +553,8 @@ class VulkanRaster final {
                uint64_t(candidate)*candidate*layers*8ull<=budget)side=candidate;
         if(side>props_.limits.maxImageDimension2D)
             throw std::runtime_error("GPU image dimensions too small");
+        std::clog<<"[CSE WARP Vulkan] PBR array layers="<<layers
+                 <<" texture-side="<<side<<" pixels, budget="<<budget/(1024*1024)<<" MiB\n";
 
         albedo_=image(side,side,layers,VK_FORMAT_R8G8B8A8_SRGB,
                       VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_ASPECT_COLOR_BIT);
@@ -860,8 +874,8 @@ public:
             barrier.buffer=readback_.handle;barrier.size=VK_WHOLE_SIZE;
             vkCmdPipelineBarrier(cmd_,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,
                                  0,nullptr,1,&barrier,0,nullptr);
-            const auto submitted=Clock::now();
-            submit();
+            double submissionMs=0,waitMs=0;
+            submit(&submissionMs,&waitMs);
             const auto copied=Clock::now();
             invalidate(readback_);
             pixels.resize(size_t(w)*h);
@@ -872,8 +886,10 @@ public:
             }
             stats=Stats{};
             stats.gpu=true;stats.gpuDrawCalls=drawCalls;
-            stats.cpuSubmitMs=ms(started,submitted);
-            stats.cpuMapWaitMs=ms(submitted,copied);
+            stats.gpuBoxInstances=boxCount_;
+            stats.gpuFoliageInstances=foliageCount_;
+            stats.cpuSubmitMs=submissionMs;
+            stats.cpuMapWaitMs=waitMs;
             stats.cpuPixelConvertMs=ms(copied,Clock::now());
             stats.readbackBufferCount=1;
             stats.ms=ms(started,Clock::now());
