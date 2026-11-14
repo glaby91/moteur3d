@@ -99,6 +99,8 @@ Stats renderGiAccumulatePass(const Scene& scene,const ShadowMap& shadow,
 RendererCapabilities detectRendererCapabilities() noexcept;
 bool renderCompute11Preview(const Scene& s,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
 bool renderDirectX11Preview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
+// Experimental Vulkan 1.0 Raster GPU backend; offscreen ARGB32 preview, shared Scene/Camera API.
+bool renderVulkanPreview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
 // Renderer quality is a shared public API: embedded host software and the
 // standalone Qt interface modify exactly the same settings. Each DX11 frame
 // takes one atomic snapshot, preventing partial UI/worker configuration.
