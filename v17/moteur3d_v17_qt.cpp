@@ -1737,11 +1737,17 @@ private:
             QStringLiteral("GPU D3D11 Compute — rapide, ombres + verre"),
             QStringLiteral("CPU Éclairage global — 2 rebonds (qualité réglable)"),
             QStringLiteral("CPU Éclairage global — 4 rebonds (qualité réglable)"),
-            QStringLiteral("V17 GPU D3D11 Raster — exploration rapide")
+            QStringLiteral("V17 GPU D3D11 Raster — exploration rapide"),
+            QStringLiteral("V17 Vulkan Raster — expérimental (GPU matériel)")
         });
 #ifndef _WIN32
         backendBox_->setItemData(1,0,Qt::UserRole-1);
         backendBox_->setItemData(4,0,Qt::UserRole-1);
+        backendBox_->setItemData(5,0,Qt::UserRole-1);
+#endif
+#if !M3D_V17_VULKAN_ENABLED
+        backendBox_->setItemData(5,0,Qt::UserRole-1);
+        backendBox_->setItemData(5,QStringLiteral("Vulkan SDK absent lors de la compilation"),Qt::ToolTipRole);
 #endif
         qualityBox_=new QComboBox;
         // Keep native and Full HD side by side. Store explicit width/height
@@ -2539,8 +2545,9 @@ private:
         const int w=renderSize.width();
         const int h=renderSize.height();
         const int backend=backendBox_->currentIndex();
-        const bool wantGpu=backend==1||backend==4;
-        const bool raster=backend==4;
+        const bool wantGpu=backend==1||backend==4||backend==5;
+        const bool raster=backend==4||backend==5;
+        const bool vulkan=backend==5;
         const bool globalIllumination=backend==2||backend==3;
         const bool edgeAA=edgeAa_->isChecked();
         const unsigned sampleCount=globalIllumination?
@@ -2563,7 +2570,7 @@ private:
         }
         const auto shadowCache=cpuShadows_;
         watcher_.setFuture(QtConcurrent::run(&renderPool_,[this,serial,token,snapshot,preset,w,h,wantGpu,
-            globalIllumination,raster,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache,renderHour,shadowHour]{
+            globalIllumination,raster,vulkan,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache,renderHour,shadowHour]{
             Result result;
             result.cameraPose=preset;
             result.generation=token;
@@ -2591,10 +2598,13 @@ private:
                             shadowCache->shadow=shadow;
                         }
                     }
-                    ok=renderDirectX11Preview(snapshot->renderScene,*shadow,camera,w,h,pixels,stats,reason);
+                    ok=vulkan?renderVulkanPreview(snapshot->renderScene,*shadow,camera,w,h,pixels,stats,reason)
+                             :renderDirectX11Preview(snapshot->renderScene,*shadow,camera,w,h,pixels,stats,reason);
                     if(ok){
-                        result.renderer=QStringLiteral("V17 D3D11 Raster — géométrie matérielle");
-                        if(rasterHybridLightingEnabled())
+                        result.renderer=vulkan
+                            ?QStringLiteral("V17 Vulkan Raster — portage expérimental")
+                            :QStringLiteral("V17 D3D11 Raster — géométrie matérielle");
+                        if(!vulkan && rasterHybridLightingEnabled())
                             result.renderer+=rasterGiCacheLoaded()
                               ?QStringLiteral(" — GI transport pré-calculée")
                               :QStringLiteral(" — sondes approximatives (sans table GI)");
@@ -2608,10 +2618,12 @@ private:
                     // CPU ray tracing as an invisible fallback. That used to
                     // look like an indefinitely stalled D3D11 render.
                     result.error=QStringLiteral(
-                        "Échec du rendu GPU DirectX 11 : %1. "
+                        "Échec du rendu GPU %1 : %2. "
                         "Aucun basculement automatique vers le CPU.")
+                        .arg(vulkan?QStringLiteral("Vulkan"):QStringLiteral("DirectX11"))
                         .arg(QString::fromStdWString(reason));
-                    result.renderer=QStringLiteral("V17 GPU D3D11 — erreur");
+                    result.renderer=vulkan?QStringLiteral("V17 Vulkan — erreur")
+                                            :QStringLiteral("V17 GPU D3D11 — erreur");
                     return result;
                 }
             }
