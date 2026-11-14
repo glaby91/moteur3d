@@ -15,6 +15,7 @@ layout(set=0,binding=0,std140) uniform Frame {
  vec4 misc;
  vec4 textureDetail[256];
  vec4 skyZenith,skyHorizon,skyWind,skyViewport;
+ vec4 giOrigin,giInvSpan,giInfo;
 } f;
 layout(location=0) out vec2 uv;
 layout(location=1) out vec3 normal;

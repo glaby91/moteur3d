@@ -648,6 +648,14 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
             }
             material.emissionAuthored=true;
         }
+        if(j.contains("surfaceModel")){
+            const QString surface=j.value("surfaceModel").toString();
+            if(surface!="standard" && surface!="water"){
+                result.error="surfaceModel must be standard or water: "+id;
+                return result;
+            }
+            material.surfaceAuthored=true;material.waterSurface=(surface=="water");
+        }
         const auto texId=j.value("textureSet").toString();
         if(!sets.contains(texId)){result.error="Missing texture set: "+texId;return result;}
         const auto set=sets.value(texId);

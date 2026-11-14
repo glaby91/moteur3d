@@ -70,6 +70,8 @@ struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPe
     V emissionColor{};
     float emissionIntensity=0.f;
     bool emissionAuthored=false;
+    bool waterSurface=false;
+    bool surfaceAuthored=false;
 };
 struct Scene { bool underwaterEnvironment=false; bool finiteGround=false; bool useLegacyWorldLights=true; std::vector<Obj> obj; std::vector<SourceBox> sourceBoxes; std::vector<SourceFoliage> sourceFoliage; std::vector<Node> node; std::vector<uint32_t> order; std::vector<Material> mat; std::vector<Light> lights; int32_t root=-1;
  // V16 builder assigns a unique identity after scene construction. Tracked scenes
@@ -139,6 +141,7 @@ float rasterColorExposure();
 void setRasterColorExposure(float exposure);
 // Selects scene-specific offline GI cache, reloaded on every explicit set.
 void setRasterGiCachePath(const std::filesystem::path& path);
+std::filesystem::path rasterGiCachePath();
 bool rasterGiCacheLoaded();
 bool setRasterQualitySettings(const RasterQualitySettings& settings,std::wstring& error);
 // -1: follow existing opt-in environment variable (standalone benchmarks).

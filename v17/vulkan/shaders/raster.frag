@@ -12,12 +12,15 @@ layout(set=0,binding=0,std140) uniform Frame {
  vec4 misc;
  vec4 textureDetail[256];
  vec4 skyZenith,skyHorizon,skyWind,skyViewport;
+ vec4 giOrigin,giInvSpan,giInfo;
 } f;
 layout(set=0,binding=1) uniform sampler2DArray albedo;
 layout(set=0,binding=2) uniform sampler2DArray normalRough;
 layout(set=0,binding=3) uniform sampler2D shadowMap;
 layout(set=0,binding=4) uniform sampler2DArray preservedAlbedo;
 layout(set=0,binding=5) uniform sampler2DArray preservedNormalRough;
+layout(set=0,binding=6) uniform sampler3D giCurrent;
+layout(set=0,binding=7) uniform sampler3D giNext;
 const float pi=3.14159265;
 float visibility(vec3 p) {
  if(f.shadowUp.w<2.0) return 1.0;
@@ -50,6 +53,13 @@ void main() {
    nm=textureGrad(preservedNormalRough,vec3(uv,protectedLayer),du,dv);
  }
  vec3 n=normalize(normal);
+ bool poolWater=f.textureDetail[m].y>0.5;
+ if(poolWater && n.y>0.75){
+   float waveA=sin(world.x*2.1+world.z*.75);
+   float waveB=cos(world.z*2.8-world.x*.45);
+   n=normalize(n+vec3(.028*waveA,0.0,.025*waveB));
+   base=mix(base,vec3(.055,.38,.55),.62);
+ }
  // Only compute tangent basis if a normal map exists.
  if(f.materialProps[m].w>0.5) {
    vec3 dx=dFdx(world),dy=dFdy(world);
@@ -112,6 +122,26 @@ void main() {
    color+=base*f.lightRgb[i].rgb*f.lightRgb[i].a*falloff*max(0.0,dot(n,normalize(delta)))*0.38;
  }
  color+=f.emission[m].rgb*max(0.0,f.emission[m].a);
+ if(f.giInfo.x>.5){
+   vec3 p=clamp((world-f.giOrigin.xyz)*f.giInvSpan.xyz,vec3(0.0),vec3(1.0));
+   vec3 irradiance=max(mix(texture(giCurrent,p),texture(giNext,p),f.giInfo.y).rgb,vec3(0.0));
+   color+=base*(irradiance-(0.28+0.34*f.sun.w)*hemi);
+ }
+ if(poolWater){
+   vec3 v=normalize(f.eye.xyz-world);
+   float incidence=1.0-clamp(dot(n,v),0.0,1.0);
+   float fresnelWater=.02+.98*pow(incidence,5.0);
+   float stripe=pow(clamp(.5+.5*sin(world.x*1.4+world.z*.37),0.0,1.0),14.0);
+   color=mix(color,vec3(.24,.57,.69),.07+fresnelWater*.20);
+   color+=vec3(.19,.32,.37)*stripe*(.025+.13*fresnelWater);
+   float opacity=mix(.08,.24,clamp(fresnelWater*1.75,0.0,1.0));
+   if(f.misc.y<.5){
+     color=color/(color+vec3(1.0));
+     color=pow(max(color,vec3(0.0)),vec3(1.0/2.2));
+   }else color=max(color,vec3(0.0));
+   result=vec4(color,opacity);
+   return;
+ }
  color=mix(color,f.sky.rgb,clamp(length(world-f.eye.xyz)/1800.0,0.0,0.28));
  if(f.misc.y<0.5){
    // Original Vulkan: legacy UNORM framebuffer, old tone/gamma path.

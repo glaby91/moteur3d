@@ -10,6 +10,7 @@ layout(set=0,binding=0,std140) uniform Frame {
  vec4 misc;
  vec4 textureDetail[256];
  vec4 skyZenith,skyHorizon,skyWind,skyViewport;
+ vec4 giOrigin,giInvSpan,giInfo;
 } f;
 float skyHash(vec2 p){
  vec3 q=fract(vec3(p.x,p.y,p.x)*.1031);

@@ -7,6 +7,7 @@
 #include "m3d_vulkan_readback.h"
 #include "m3d_vulkan_mips.h"
 #include "../weather/clouds.h"
+#include "../../experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_gi_bake.h"
 #include <vulkan/vulkan.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -46,7 +47,7 @@ struct Texture {
     VkDeviceMemory memory=VK_NULL_HANDLE;
     VkImageView view=VK_NULL_HANDLE;
     VkFormat format=VK_FORMAT_UNDEFINED;
-    uint32_t width=0,height=0,layers=0,mips=1;
+    uint32_t width=0,height=0,depth=1,layers=0,mips=1;
 };
 struct alignas(16) Uniforms {
     float eye[4]{},forward[4]{},right[4]{},up[4]{},sunDir[4]{},sky[4]{};
@@ -55,6 +56,7 @@ struct alignas(16) Uniforms {
     float lightPos[kLights][4]{},lightRgb[kLights][4]{},misc[4]{};
     float textureDetail[kMaxMaterials][4]{}; // x = protected layer, -1 for auto
     float skyZenith[4]{},skyHorizon[4]{},skyWind[4]{},skyViewport[4]{};
+    float giOrigin[4]{},giInvSpan[4]{},giInfo[4]{};
 };
 static_assert(sizeof(Uniforms)%16==0,"std140 uniform size must be aligned");
 struct Chunk {uint32_t first=0,count=0;V lo{},hi{};};
@@ -124,6 +126,14 @@ class VulkanRaster final {
     VkDescriptorSet descriptor_=VK_NULL_HANDLE;
     VkSampler albedoSampler_=VK_NULL_HANDLE,protectedSampler_=VK_NULL_HANDLE,shadowSampler_=VK_NULL_HANDLE;
     Texture color_,depth_,albedo_,surface_,shadow_,detailAlbedo_,detailSurface_;
+    Texture gi0_,gi1_;
+    VkSampler giSampler_=VK_NULL_HANDLE;
+    gibake::Table giTable_{};
+    std::filesystem::path giPath_{};
+    uint64_t giSceneHash_=0;
+    bool giAvailable_=false,gi0Uploaded_=false,gi1Uploaded_=false;
+    int giHour0_=-1,giHour1_=-1;
+    float giMix_=0.f;
     VkFramebuffer framebuffer_=VK_NULL_HANDLE;
     Buffer vertices_,transparent_,boxTemplate_,boxInstances_,foliageTemplate_,foliageInstances_,uniform_,readback_;
     uint32_t vertexCount_=0,transparentCount_=0,boxCount_=0,foliageCount_=0,foliageTemplateCount_=0;
@@ -217,6 +227,96 @@ class VulkanRaster final {
         vi.subresourceRange.levelCount=mipLevels;vi.subresourceRange.layerCount=layers;
         vkcheck(vkCreateImageView(device_,&vi,nullptr,&t.view),"create view");
         return t;
+    }
+
+    Texture image3D(uint32_t w,uint32_t h,uint32_t d){
+        Texture t;t.width=w;t.height=h;t.depth=d;t.layers=1;t.mips=1;
+        t.format=VK_FORMAT_R32G32B32A32_SFLOAT;
+        VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+        ci.imageType=VK_IMAGE_TYPE_3D;ci.format=t.format;ci.extent={w,h,d};
+        ci.mipLevels=1;ci.arrayLayers=1;ci.samples=VK_SAMPLE_COUNT_1_BIT;
+        ci.tiling=VK_IMAGE_TILING_OPTIMAL;
+        ci.usage=VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        ci.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
+        vkcheck(vkCreateImage(device_,&ci,nullptr,&t.image),"GI 3D image");
+        VkMemoryRequirements req{};vkGetImageMemoryRequirements(device_,t.image,&req);
+        VkMemoryAllocateInfo mem{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+        mem.allocationSize=req.size;
+        mem.memoryTypeIndex=type(req.memoryTypeBits,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+        vkcheck(vkAllocateMemory(device_,&mem,nullptr,&t.memory),"GI 3D memory");
+        vkcheck(vkBindImageMemory(device_,t.image,t.memory,0),"GI 3D bind");
+        VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+        vi.image=t.image;vi.viewType=VK_IMAGE_VIEW_TYPE_3D;vi.format=t.format;
+        vi.subresourceRange.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+        vi.subresourceRange.levelCount=1;vi.subresourceRange.layerCount=1;
+        vkcheck(vkCreateImageView(device_,&vi,nullptr,&t.view),"GI 3D view");
+        return t;
+    }
+    void uploadProbe(Texture& t,const float* data,size_t bytes,bool uploaded){
+        Buffer stage=buffer(VkDeviceSize(bytes),VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                            VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+        memcpy(stage.mapped,data,bytes);flush(stage);
+        begin();
+        barrier(t,uploaded?VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL:VK_IMAGE_LAYOUT_UNDEFINED,
+                VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                uploaded?VK_ACCESS_SHADER_READ_BIT:0,VK_ACCESS_TRANSFER_WRITE_BIT,
+                uploaded?VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT:VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT);
+        VkBufferImageCopy region{};
+        region.imageSubresource.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.layerCount=1;
+        region.imageExtent={t.width,t.height,t.depth};
+        vkCmdCopyBufferToImage(cmd_,stage.handle,t.image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&region);
+        barrier(t,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT,
+                VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        submit();free(stage);
+    }
+    void ensureGI(const Scene& scene){
+        giAvailable_=false;
+        if(!rasterHybridLightingEnabled())return;
+        const auto path=rasterGiCachePath();
+        if(path.empty())return;
+        const uint64_t hash=gibake::signature(scene);
+        if(path!=giPath_||hash!=giSceneHash_){
+            giPath_=path;giSceneHash_=hash;
+            giTable_=gibake::Table{};
+            gibake::Table candidate;std::string reason;
+            if(gibake::readFile(path,candidate,reason)&&candidate.valid()&&
+                candidate.sceneHash==hash&&candidate.nx<=128&&
+                candidate.ny<=128&&candidate.nz<=128){
+                VkFormatProperties p{};
+                vkGetPhysicalDeviceFormatProperties(physical_,VK_FORMAT_R32G32B32A32_SFLOAT,&p);
+                constexpr VkFormatFeatureFlags required=VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT|
+                    VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+                if((p.optimalTilingFeatures&required)==required)
+                    giTable_=std::move(candidate);
+                else std::clog<<"[CSE WARP Vulkan] GPU cannot linearly filter GI 3D float textures\n";
+            }else std::clog<<"[CSE WARP Vulkan] GI cache absent, invalid or different scene\n";
+            giHour0_=giHour1_=-1;
+            if(giTable_.valid()&&(gi0_.width!=giTable_.nx||gi0_.height!=giTable_.ny||
+                                   gi0_.depth!=giTable_.nz)){
+                free(gi0_);free(gi1_);
+                gi0_=image3D(giTable_.nx,giTable_.ny,giTable_.nz);
+                gi1_=image3D(giTable_.nx,giTable_.ny,giTable_.nz);
+                gi0Uploaded_=gi1Uploaded_=false;
+            }
+        }
+        if(!giTable_.valid())return;
+        unsigned h0=0,h1=0;float mix=0;
+        gibake::hourIndices(giTable_,solarHour,h0,h1,mix);
+        const size_t frame=giTable_.voxelCount()*4;
+        if(giHour0_!=int(h0)){
+            uploadProbe(gi0_,giTable_.rgba.data()+size_t(h0)*frame,
+                        frame*sizeof(float),gi0Uploaded_);
+            gi0Uploaded_=true;giHour0_=int(h0);
+        }
+        if(giHour1_!=int(h1)){
+            uploadProbe(gi1_,giTable_.rgba.data()+size_t(h1)*frame,
+                        frame*sizeof(float),gi1Uploaded_);
+            gi1Uploaded_=true;giHour1_=int(h1);
+        }
+        giMix_=mix;giAvailable_=true;updateDescriptors();
     }
     void free(Texture& t){
         if(t.view)vkDestroyImageView(device_,t.view,nullptr);
@@ -326,21 +426,24 @@ class VulkanRaster final {
         submit();free(stage);return vertex;
     }
     void updateDescriptors(){
-        if(!uniform_.handle||!albedo_.view||!surface_.view||!shadow_.view)return;
+        if(!uniform_.handle||!albedo_.view||!surface_.view||!shadow_.view||!gi0_.view||!gi1_.view)return;
         VkDescriptorBufferInfo u{uniform_.handle,0,sizeof(Uniforms)};
         VkDescriptorImageInfo a{albedoSampler_,albedo_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo n{albedoSampler_,surface_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo s{shadowSampler_,shadow_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo highAlbedo{protectedSampler_,detailAlbedo_.view?detailAlbedo_.view:albedo_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo highSurface{protectedSampler_,detailSurface_.view?detailSurface_.view:surface_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        std::array<VkWriteDescriptorSet,6> writes{};
-        for(uint32_t i=0;i<6;i++){
+        VkDescriptorImageInfo giLow{giSampler_,gi0_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo giHigh{giSampler_,gi1_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        std::array<VkWriteDescriptorSet,8> writes{};
+        for(uint32_t i=0;i<8;i++){
             auto& w=writes[i];w.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             w.dstSet=descriptor_;w.dstBinding=i;w.descriptorCount=1;
             w.descriptorType=i?VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         }
         writes[0].pBufferInfo=&u;writes[1].pImageInfo=&a;writes[2].pImageInfo=&n;writes[3].pImageInfo=&s;
         writes[4].pImageInfo=&highAlbedo;writes[5].pImageInfo=&highSurface;
+        writes[6].pImageInfo=&giLow;writes[7].pImageInfo=&giHigh;
         vkUpdateDescriptorSets(device_,uint32_t(writes.size()),writes.data(),0,nullptr);
     }
     // Pipeline cache is driver-specific but NEVER scene-specific. Cache is
@@ -532,17 +635,17 @@ class VulkanRaster final {
         VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
         qi.queryType=VK_QUERY_TYPE_TIMESTAMP;qi.queryCount=2;
         vkcheck(vkCreateQueryPool(device_,&qi,nullptr,&queries_),"GPU timestamps");
-        VkDescriptorSetLayoutBinding bindings[6]{};
-        for(uint32_t j=0;j<6;j++){
+        VkDescriptorSetLayoutBinding bindings[8]{};
+        for(uint32_t j=0;j<8;j++){
             bindings[j].binding=j;bindings[j].descriptorCount=1;
             bindings[j].descriptorType=j?VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             bindings[j].stageFlags=j?VK_SHADER_STAGE_FRAGMENT_BIT:(VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT);
         }
         VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-        li.bindingCount=6;li.pBindings=bindings;
+        li.bindingCount=8;li.pBindings=bindings;
         vkcheck(vkCreateDescriptorSetLayout(device_,&li,nullptr,&descriptorLayout_),"descriptor layout");
         VkDescriptorPoolSize pools[2]={{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,1},
-                                        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,5}};
+                                        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,7}};
         VkDescriptorPoolCreateInfo p{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         p.maxSets=1;p.poolSizeCount=2;p.pPoolSizes=pools;
         vkcheck(vkCreateDescriptorPool(device_,&p,nullptr,&descriptorPool_),"descriptor pool");
@@ -568,6 +671,9 @@ class VulkanRaster final {
         si.addressModeV=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         si.anisotropyEnable=VK_FALSE;si.minFilter=VK_FILTER_NEAREST;si.magFilter=VK_FILTER_NEAREST;
         vkcheck(vkCreateSampler(device_,&si,nullptr,&shadowSampler_),"shadow sampler");
+        si.minFilter=VK_FILTER_LINEAR;si.magFilter=VK_FILTER_LINEAR;
+        si.mipmapMode=VK_SAMPLER_MIPMAP_MODE_NEAREST;si.maxLod=0.f;
+        vkcheck(vkCreateSampler(device_,&si,nullptr,&giSampler_),"GI sampler");
         uniform_=buffer(sizeof(Uniforms),VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
         VkAttachmentDescription attach[2]{};
         attach[0].format=colorFormat_;
@@ -615,6 +721,11 @@ class VulkanRaster final {
                     "create fresh pipeline cache");
         }
         buildPipelines();
+        gi0_=image3D(1,1,1);gi1_=image3D(1,1,1);
+        const float blackProbe[4]={0.f,0.f,0.f,1.f};
+        uploadProbe(gi0_,blackProbe,sizeof(blackProbe),false);
+        uploadProbe(gi1_,blackProbe,sizeof(blackProbe),false);
+        gi0Uploaded_=gi1Uploaded_=true;
         // Pipelines are already created; cache I/O is outside the frame loop.
         writePipelineCache();
         started_=true;
@@ -808,6 +919,7 @@ class VulkanRaster final {
     void textures(const Scene& scene){
         free(albedo_);free(surface_);
         free(detailAlbedo_);free(detailSurface_);
+        free(gi0_);free(gi1_);
         protectedLayer_.fill(-1);
         const uint32_t layers=uint32_t(std::max<size_t>(1,std::min<size_t>(kMaxMaterials,scene.mat.size())));
         if(layers>props_.limits.maxImageArrayLayers)
@@ -1127,6 +1239,8 @@ class VulkanRaster final {
         for(size_t i=0;i<scene.mat.size()&&i<kMaxMaterials;i++){
             const Material& m=scene.mat[i];
             f.textureDetail[i][0]=float(protectedLayer_[i]);
+            f.textureDetail[i][1]=(m.surfaceAuthored?m.waterSurface:
+                                      m.name=="cse_pool_water")?1.f:0.f;
             f.material[i][0]=clampf(m.metallic,0.f,1.f);
             f.material[i][1]=clampf(m.roughnessScale,.08f,1.f);
             f.material[i][2]=1.f-float(m.transmissionPercent)/100.f;
@@ -1158,6 +1272,14 @@ class VulkanRaster final {
         };
         for(const Light& l:pointLights)addLight(l);
         for(const Light& l:scene.lights)addLight(l);
+        if(giAvailable_){
+            f.giOrigin[0]=giTable_.origin.x;f.giOrigin[1]=giTable_.origin.y;
+            f.giOrigin[2]=giTable_.origin.z;
+            f.giInvSpan[0]=1.f/std::max(.001f,giTable_.span.x);
+            f.giInvSpan[1]=1.f/std::max(.001f,giTable_.span.y);
+            f.giInvSpan[2]=1.f/std::max(.001f,giTable_.span.z);
+            f.giInfo[0]=1.f;f.giInfo[1]=giMix_;
+        }
         f.misc[0]=float(lights);
         f.misc[1]=srgbColorEnabled_?1.f:0.f; // linear shader -> sRGB framebuffer output
         memcpy(uniform_.mapped,&f,sizeof(f));flush(uniform_);
@@ -1171,6 +1293,7 @@ public:
         free(readback_);free(uniform_);free(vertices_);free(transparent_);free(boxTemplate_);free(boxInstances_);free(foliageTemplate_);free(foliageInstances_);
         free(color_);free(depth_);free(albedo_);free(surface_);free(shadow_);
         free(detailAlbedo_);free(detailSurface_);
+        free(gi0_);free(gi1_);
         if(skyPipeline_)vkDestroyPipeline(device_,skyPipeline_,nullptr);
         if(depthFoliage_)vkDestroyPipeline(device_,depthFoliage_,nullptr);
         if(depthBox_)vkDestroyPipeline(device_,depthBox_,nullptr);
@@ -1185,6 +1308,7 @@ public:
         if(albedoSampler_)vkDestroySampler(device_,albedoSampler_,nullptr);
         if(protectedSampler_)vkDestroySampler(device_,protectedSampler_,nullptr);
         if(shadowSampler_)vkDestroySampler(device_,shadowSampler_,nullptr);
+        if(giSampler_)vkDestroySampler(device_,giSampler_,nullptr);
         if(descriptorPool_)vkDestroyDescriptorPool(device_,descriptorPool_,nullptr);
         if(descriptorLayout_)vkDestroyDescriptorSetLayout(device_,descriptorLayout_,nullptr);
         if(queries_)vkDestroyQueryPool(device_,queries_,nullptr);
@@ -1205,6 +1329,7 @@ public:
                  ||sceneIdentity_!=scene.gpuCacheIdentity||sceneRevision_!=scene.gpuCacheRevision;
             if(changed)rebuild(scene);
             updateShadow(shadows);
+            ensureGI(scene);
             updateUniforms(scene,shadows,cam);
             VkViewport viewport{0.f,0.f,float(w),float(h),0.f,1.f};
             VkRect2D scissor{{0,0},{uint32_t(w),uint32_t(h)}};
