@@ -1,5 +1,5 @@
 @echo off
-setlocal EnableExtensions EnableDelayedExpansion
+setlocal EnableExtensions DisableDelayedExpansion
 cd /d "%~dp0"
 echo ====================================================================
 echo CSE WARP V17 - Finition Vulkan DX11 / Eau GI MSAA
@@ -28,7 +28,8 @@ for %%Q in (1 2 4) do (
   )
  )
 )
-powershell -NoProfile -Command "$f=@(Get-ChildItem -Directory -Filter 'FINITIONS_*')+@(Get-ChildItem -File -Filter 'finitions_*.log'); if(!$f.Count){exit 1}; Compress-Archive -Path ($f | Select-Object -ExpandProperty FullName) -DestinationPath 'CSE_WARP_VULKAN_FINITIONS_HD620.zip' -Force"
+rem Independent rescue tool: ZIP can be recreated without rerunning benchmarks.
+call "%~dp0CREER_ZIP_FINITIONS_HD620.bat"
 if errorlevel 1 goto fail
 echo.
 echo DONE: CSE_WARP_VULKAN_FINITIONS_HD620.zip

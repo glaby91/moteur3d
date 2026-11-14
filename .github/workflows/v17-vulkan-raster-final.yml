@@ -132,6 +132,27 @@ jobs:
             throw ("Vulkan smoke failure(s): " + ($failures -join '; '))
           }
           Write-Host 'GPU smoke intentionally not run on virtual runner: physical HD620 ICD required.'
+      - name: Validate ZIP recovery script on synthetic benchmark outputs
+        shell: pwsh
+        run: |
+          $testRoot = Join-Path $env:RUNNER_TEMP 'vulkan-zip-smoke'
+          $resultDir = Join-Path $testRoot 'FINITIONS_pavillon01_MSAA2'
+          New-Item -ItemType Directory -Path $resultDir -Force | Out-Null
+          Set-Content -LiteralPath (Join-Path $resultDir 'metrics.json') -Value '{"ok":true}'
+          Set-Content -LiteralPath (Join-Path $testRoot 'finitions_pavillon01_MSAA2.log') -Value 'benchmark complete'
+          & "$env:GITHUB_WORKSPACE/v17/vulkan/CREER_ZIP_FINITIONS_HD620.ps1" -Root $testRoot
+          if ($LASTEXITCODE -ne 0) { throw 'ZIP recovery script failed with synthetic benchmark' }
+          Add-Type -AssemblyName System.IO.Compression
+          $zipPath=Join-Path $testRoot 'CSE_WARP_VULKAN_FINITIONS_HD620.zip'
+          $zip=[System.IO.Compression.ZipFile]::OpenRead($zipPath)
+          try {
+            $names=@($zip.Entries | ForEach-Object { $_.FullName })
+            if (!($names -contains 'FINITIONS_pavillon01_MSAA2/metrics.json') -or
+                !($names -contains 'finitions_pavillon01_MSAA2.log')) {
+              throw "Missing benchmark results in ZIP: $($names -join ', ')"
+            }
+          } finally { $zip.Dispose() }
+          Write-Host 'PASS: recoverable ZIP contains a benchmark directory and logs'
       - name: Package executable for actual Intel HD620 test
         id: package
         if: ${{ always() && steps.compile.outcome == 'success' }}
@@ -157,6 +178,8 @@ jobs:
           Copy-Item v17/vulkan/LANCER_QUALITE_VULKAN_MULTISCENE_HD620.bat "$dest/LANCER_QUALITE_VULKAN_MULTISCENE_HD620.bat"
           Copy-Item v17/vulkan/LANCER_SRGB_VULKAN_HD620.bat "$dest/LANCER_SRGB_VULKAN_HD620.bat"
           Copy-Item v17/vulkan/LANCER_FINITIONS_VULKAN_HD620.bat "$dest/LANCER_FINITIONS_VULKAN_HD620.bat"
+          Copy-Item v17/vulkan/CREER_ZIP_FINITIONS_HD620.bat "$dest/CREER_ZIP_FINITIONS_HD620.bat"
+          Copy-Item v17/vulkan/CREER_ZIP_FINITIONS_HD620.ps1 "$dest/CREER_ZIP_FINITIONS_HD620.ps1"
           if (Test-Path 'diagnostics-vulkan') {
             Copy-Item 'diagnostics-vulkan' "$dest/diagnostics" -Recurse -Force
           }

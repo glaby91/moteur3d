@@ -185,3 +185,9 @@ Le MSAA Vulkan est demandé à 2× par défaut (pour la HD620) avec `CSE_WARP_VK
 ## Campagne de finition unifiée HD620
 
 Le lanceur `LANCER_FINITIONS_VULKAN_HD620.bat` exécute les 4 scènes sous MSAA demandé 1×/2×/4× (12 vues chacune). Le benchmark configure aussi **DirectX11 avec le même nombre d'échantillons demandé**, ce qui évite de comparer par erreur DirectX11 4× et Vulkan 2×. En cas de repli automatique à 1×/2× sous Vulkan, le nombre réellement actif figure dans le log. Sortie unique : `CSE_WARP_VULKAN_FINITIONS_HD620.zip` avec PNG DX11/Vulkan, métriques, heatmaps et logs. La GI est vérifiable dans l'application si un cache `.m3dgi` valable est chargé et l'éclairage hybride activé ; elle n'est pas artificiellement activée dans ce test en l'absence de cache.
+
+## Correctif ZIP de la campagne de finition HD620
+
+Dans la build #29, `LANCER_FINITIONS_VULKAN_HD620.bat` activait `EnableDelayedExpansion` puis utilisait `if(!$f.Count)` dans une commande PowerShell en ligne. L'interpréteur CMD peut absorber le `!` et inverser la condition : les campagnes terminent, mais la compression échoue. La build corrigée désactive cette expansion et délègue l'archivage à `CREER_ZIP_FINITIONS_HD620.ps1` via `CREER_ZIP_FINITIONS_HD620.bat`. Le compresseur utilise `System.IO.Compression.ZipArchive` avec copie par flux (Zip64), vérifie le nombre de fichiers et les longueurs, puis remplace atomiquement l'archive précédente. Les fichiers de tests ne sont jamais supprimés.
+
+**Si les benchmarks ont déjà été exécutés, lancer seulement `CREER_ZIP_FINITIONS_HD620.bat` : aucun nouveau rendu.** Un échec conserve les résultats et écrit `ZIP_FINITIONS_HD620.log`. Le ZIP final s'appelle `CSE_WARP_VULKAN_FINITIONS_HD620.zip`.
