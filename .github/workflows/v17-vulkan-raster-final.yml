@@ -78,6 +78,8 @@ jobs:
           if (!$renderer.Contains('drawOpaque(true);') -or !$renderer.Contains('drawOpaque(false);')) { throw 'Mandatory Vulkan opaque depth/color pass missing' }
           if (!$renderer.Contains('depthPipeline(&depthOpaque_') -or !$renderer.Contains('depthPipeline(&depthBox_') -or !$renderer.Contains('depthPipeline(&depthFoliage_')) { throw 'Depth-only shader pipelines missing' }
           if (!$benchmark.Contains('vulkan_depth_prepass_policy')) { throw 'Benchmark prepass metadata missing' }
+          if (!$renderer.Contains('srgbColorEnabled_=!requestedSrgb')) { throw 'sRGB default policy missing' }
+          if (!$renderer.Contains('CSE_WARP_VK_SRGB_COLOR_TEST=0')) { throw 'Legacy diagnostic override missing' }
           Write-Host 'PASS Vulkan always-on opaque Z-prepass source contract'
       - name: Confirm native Vulkan output and geometry smoke
         id: smoke

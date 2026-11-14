@@ -5,7 +5,7 @@ echo ===================================================================
 echo CSE WARP - VULKAN vs DIRECTX11 / COLOR MANAGEMENT FIDELITY A/B
 echo Legacy UNORM vs linear shader to sRGB render target
 echo Same scene, camera, resolution, Z-prepass, textures, geometry.
-echo All scenes are tests. This feature does NOT run by default.
+echo sRGB is the default. Test only: compare with legacy UNORM.
 echo ===================================================================
 if not exist "v17_vulkan_ab_bench.exe" goto missing
 if not exist "vulkan\raster.frag.spv" goto missing
@@ -15,7 +15,7 @@ set "ERRORS="
 for %%S in (pavillon01 material-lab pripyat-photo2scene-proof benchmark-civic) do (
  if exist "%%S\scene.json" (
   echo [%%S] Legacy RGBA UNORM baseline
-  set "CSE_WARP_VK_SRGB_COLOR_TEST="
+  set "CSE_WARP_VK_SRGB_COLOR_TEST=0"
   call :legacy "%%S"
   echo [%%S] Hardware SRGB attachment, linear shader
   set "CSE_WARP_VK_SRGB_COLOR_TEST=1"
@@ -29,7 +29,7 @@ powershell -NoProfile -Command "$dirs=Get-ChildItem -Directory -Filter 'COLOR_*'
 if errorlevel 1 goto fail
 echo.
 echo DONE: CSE_WARP_VULKAN_SRGB_FIDELITE_HD620.zip
-echo Send ZIP: compare MAE and heatmaps without changing engine defaults.
+echo Send ZIP: compare MAE and heatmaps; default remains sRGB.
 if defined ERRORS (
  echo WARNING: Some tests failed. Check archived logs.
  pause

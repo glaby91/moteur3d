@@ -148,3 +148,11 @@ Une **expérience isolée** `CSE_WARP_VK_SRGB_COLOR_TEST=1` demande une vraie ci
 Lancer `LANCER_SRGB_VULKAN_HD620.bat` pour comparer **8 campagnes de 12 images** (les 4 scènes, deux chemins Vulkan), avec même Z-prepass permanent, textures, shader PBR et caméra. Chaque campagne produit `last_frame_rgb_mae`, les images DX11/Vulkan, ainsi que la heatmap des écarts. L'archive `CSE_WARP_VULKAN_SRGB_FIDELITE_HD620.zip` permet de confirmer ou d'infirmer l'hypothèse avant de changer les valeurs par défaut. Cette expérience ne porte pas encore le ciel atmosphérique ni les paramètres avancés d'exposition et d'illumination globale.
 
 Les conversions sRGB sur écriture d'un attachment et sur clear sont définies dans la spécification Khronos : https://docs.vulkan.org/spec/latest/chapters/framebuffer.html et https://docs.vulkan.org/spec/latest/chapters/clears.html.
+
+## Traitement des couleurs Vulkan validé sur HD620 — sRGB par défaut
+
+Les 8 campagnes de 12 images de novembre 2026 confirment l'amélioration dans les 4 scènes de référence. L'erreur RVB moyenne face à DX11 sur la dernière image passe : Pavillon 01 25,35 → 6,62 (-73,9 %), laboratoire matériaux 24,76 → 6,44 (-74,0 %), Pripiat Photo2Scene 37,44 → 6,13 (-83,6 %), scène civique 20,38 → 6,45 (-68,3 %).
+
+**Le rendu sRGB matériel est désormais le défaut du backend Vulkan**, sans benchmark au démarrage et sans comparaison par image. L'ancien rendu UNORM est conservé uniquement pour diagnostic via `CSE_WARP_VK_SRGB_COLOR_TEST=0`. Le lanceur A/B force désormais 0 puis 1. Un GPU ne prenant pas en charge une cible sRGB adaptée échoue explicitement, plutôt que d'introduire un changement de couleur silencieux.
+
+Les temps médians Vulkan sont respectivement 12,35 → 10,53 ms ; 10,28 → 8,60 ms ; 8,18 → 6,97 ms ; 22,94 → 23,26 ms. Ces essais non alternés ne prouvent pas un gain général de vitesse. Restent à porter : ciel atmosphérique, eau, MSAA et traitements de lumière avancés. **Aucune fusion master.**

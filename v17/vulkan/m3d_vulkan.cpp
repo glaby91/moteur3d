@@ -138,7 +138,7 @@ class VulkanRaster final {
     float cachedSolarHour_=std::numeric_limits<float>::quiet_NaN();
     std::string adapter_;
     bool bgraReadback_=false;
-    bool srgbColorExperiment_=false;
+    bool srgbColorEnabled_=false;
     VkFormat colorFormat_=VK_FORMAT_R8G8B8A8_UNORM;
     bool started_=false;
     static double ms(Clock::time_point start,Clock::time_point end) {
@@ -482,26 +482,27 @@ class VulkanRaster final {
             bgraReadback_=true;
             colorFormat_=VK_FORMAT_B8G8R8A8_UNORM;
         }
-        // An isolated DX11 color-management parity experiment. DX11 uses an
-        // sRGB color attachment and writes linear shader values; Vulkan's
-        // original UNORM + manual gamma path remains the default reference.
+        // HD620 4-scene fidelity validation: sRGB hardware target is default.
+        // Explicit CSE_WARP_VK_SRGB_COLOR_TEST=0 restores old UNORM for diagnostics.
         const char* requestedSrgb=std::getenv("CSE_WARP_VK_SRGB_COLOR_TEST");
-        if(requestedSrgb && std::strcmp(requestedSrgb,"1")==0){
+        if(requestedSrgb && std::strcmp(requestedSrgb,"0")!=0 &&
+           std::strcmp(requestedSrgb,"1")!=0)
+            throw std::runtime_error("CSE_WARP_VK_SRGB_COLOR_TEST accepts only 0 or 1");
+        srgbColorEnabled_=!requestedSrgb || std::strcmp(requestedSrgb,"0")!=0;
+        if(srgbColorEnabled_){
             const VkFormat candidate=bgraReadback_?
                 VK_FORMAT_B8G8R8A8_SRGB:VK_FORMAT_R8G8B8A8_SRGB;
             VkFormatProperties properties{};
             vkGetPhysicalDeviceFormatProperties(physical_,candidate,&properties);
             constexpr VkFormatFeatureFlags required=VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BIT |
-                VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT |
-                VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
+                VK_FORMAT_FEATURE_COLOR_ATTACHMENT_BLEND_BIT | VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
             if((properties.optimalTilingFeatures & required)!=required)
-                throw std::runtime_error("GPU lacks sRGB render target (attachment/blend/readback); unset CSE_WARP_VK_SRGB_COLOR_TEST");
-            srgbColorExperiment_=true;
+                throw std::runtime_error("GPU lacks sRGB framebuffer support; use DirectX11 or set CSE_WARP_VK_SRGB_COLOR_TEST=0 for legacy diagnostics");
             colorFormat_=candidate;
         }
         std::clog<<"[CSE WARP Vulkan] Readback color="<<(bgraReadback_?"BGRA8":"RGBA8")
-                 <<" transfer="<<(srgbColorExperiment_?"sRGB hardware experiment":"legacy UNORM")
-                 <<" (CSE_WARP_VK_SRGB_COLOR_TEST=1 experimental)\n";
+                 <<" transfer="<<(srgbColorEnabled_?"sRGB hardware default":"legacy UNORM diagnostic")
+                 <<" (no calibration, =0 legacy diagnostic)\n";
         // Always-on engine pipeline: no per-frame or startup A/B decision.
         // DX11 has its own independent renderer and is not modified.
         std::clog<<"[CSE WARP Vulkan] Generic opaque Z-prepass=always-on (no runtime toggle)\n";
@@ -1099,7 +1100,7 @@ class VulkanRaster final {
         for(const Light& l:pointLights)addLight(l);
         for(const Light& l:scene.lights)addLight(l);
         f.misc[0]=float(lights);
-        f.misc[1]=srgbColorExperiment_?1.f:0.f; // linear shader -> sRGB framebuffer output
+        f.misc[1]=srgbColorEnabled_?1.f:0.f; // linear shader -> sRGB framebuffer output
         memcpy(uniform_.mapped,&f,sizeof(f));flush(uniform_);
     }
 public:
