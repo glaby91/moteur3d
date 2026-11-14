@@ -13,23 +13,23 @@ if errorlevel 1 (echo ERREUR diagnostic Vulkan.&type vulkan_dx11_probe.txt&pause
 type vulkan_dx11_probe.txt
 echo.
 echo === A : Reference originale DX11 et Vulkan ===
-call :run baseline --api both --vk-mode legacy
+call :run baseline --api both --vk-mode legacy || goto failed
 echo === B : HOST_CACHED + persistent map, memes sorties ===
-call :run cached --api both --vk-mode cached
+call :run cached --api both --vk-mode cached || goto failed
 echo === C : Buffer directement accessible CPU, sans staging ===
-call :run direct --api both --vk-mode direct
+call :run direct --api both --vk-mode direct || goto failed
 echo === D : Mem cache avec commande re-enregistree ===
-call :run cached_record --api vulkan --vk-mode cached --vk-record
+call :run cached_record --api vulkan --vk-mode cached --vk-record || goto failed
 echo === E : HOST_CACHED et 2 travaux en vol ===
-call :run cached_ring2 --api vulkan --vk-mode cached --vk-inflight 2
+call :run cached_ring2 --api vulkan --vk-mode cached --vk-inflight 2 || goto failed
 echo === F : HOST_CACHED et 3 travaux en vol ===
-call :run cached_ring3 --api vulkan --vk-mode cached --vk-inflight 3
+call :run cached_ring3 --api vulkan --vk-mode cached --vk-inflight 3 || goto failed
 echo === G : Acces direct et 3 travaux en vol ===
-call :run direct_ring3 --api vulkan --vk-mode direct --vk-inflight 3
+call :run direct_ring3 --api vulkan --vk-mode direct --vk-inflight 3 || goto failed
 echo === H : GPU compute sans lecture de 4 Mio par dispatch ===
-call :run compute_only --api vulkan --vk-mode compute
+call :run compute_only --api vulkan --vk-mode compute || goto failed
 echo === I : GPU compute sans lecture, 3 travaux en vol ===
-call :run compute_ring3 --api vulkan --vk-mode compute --vk-inflight 3
+call :run compute_ring3 --api vulkan --vk-mode compute --vk-inflight 3 || goto failed
 echo.
 echo === ZIP des resultats ===
 powershell -NoProfile -Command "Compress-Archive -Path 'bench_hd620_*.json','bench_hd620_*.csv','vulkan_dx11_probe.txt' -DestinationPath 'CSE_WARP_HD620_TURBO_RESULTS.zip' -Force" 
@@ -42,10 +42,15 @@ echo Resultats conserves dans le repertoire courant.
 pause
 exit /b 0
 
+:failed
+echo Erreur dans la campagne : fichiers precedents conserves.
+pause
+exit /b 1
+
 :run
 set "NAME=%~1"
 shift
-"%EXE%" %OPT% %* --output "bench_hd620_%NAME%"
+"%EXE%" %OPT% %1 %2 %3 %4 %5 %6 %7 %8 %9 --output "bench_hd620_%NAME%"
 if errorlevel 1 (
  echo ECHEC VARIANTE %NAME% - consulter le message ci-dessus.
  pause
