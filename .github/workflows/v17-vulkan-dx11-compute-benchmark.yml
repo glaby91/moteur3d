@@ -25,7 +25,7 @@ jobs:
       - name: Force the known SwiftShader Vulkan ICD (CI only)
         shell: pwsh
         run: |
-          $icd = Get-ChildItem 'C:\\hostedtoolcache\\windows\\swiftshader' -Recurse -Filter vk_swiftshader_icd.json -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          $icd = Get-ChildItem 'C:\hostedtoolcache\windows\swiftshader' -Recurse -Filter vk_swiftshader_icd.json -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
           if (-not $icd) { throw 'SwiftShader Vulkan ICD JSON not found' }
           Write-Host "CI Vulkan ICD: $icd"
           "VK_ICD_FILENAMES=$icd" >> $env:GITHUB_ENV
@@ -36,6 +36,7 @@ jobs:
           -B build-vulkan-dx11
           -G "Visual Studio 17 2022" -A x64
       - name: Compile HLSL and GLSL Vulkan/DX11 benchmark
+        id: build
         shell: pwsh
         run: cmake --build build-vulkan-dx11 --config Release --parallel 2
       - name: Probe available APIs
@@ -91,6 +92,7 @@ jobs:
           }
           Pop-Location
       - name: Prepare portable Windows x64 package
+        if: ${{ always() && steps.build.outcome == 'success' }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory dist-vulkan-dx11 -Force | Out-Null
@@ -99,6 +101,7 @@ jobs:
           Copy-Item experiments/vulkan-dx11-bench/LANCER_BENCH_HD620.bat dist-vulkan-dx11/
           Copy-Item experiments/vulkan-dx11-bench/README.md dist-vulkan-dx11/
       - name: Publish portable benchmark (driver Vulkan required on target)
+        if: ${{ always() && steps.build.outcome == 'success' }}
         uses: actions/upload-artifact@v4
         with:
           name: CSE-WARP-V17-Vulkan-DX11-Compute-Bench-Windows-x64
