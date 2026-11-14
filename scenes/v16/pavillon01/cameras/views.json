@@ -1,0 +1,95 @@
+{
+  "format": "m3d-cameras-v1",
+  "cameras": [
+    {
+      "id": "facade",
+      "name": "01 · Façade complète et bassin",
+      "position": [
+        18,
+        10,
+        25
+      ],
+      "target": [
+        0,
+        3.1,
+        3.5
+      ],
+      "fovDegrees": 62
+    },
+    {
+      "id": "jardin",
+      "name": "02 · Jardin et terrasse",
+      "position": [
+        -18,
+        8,
+        23
+      ],
+      "target": [
+        -0.5,
+        2.6,
+        5
+      ],
+      "fovDegrees": 63
+    },
+    {
+      "id": "entree",
+      "name": "03 · Entrée nord",
+      "position": [
+        17,
+        7,
+        -23
+      ],
+      "target": [
+        0,
+        3,
+        -2
+      ],
+      "fovDegrees": 62
+    },
+    {
+      "id": "salon",
+      "name": "04 · Salon intérieur",
+      "position": [
+        -5,
+        1.7,
+        3
+      ],
+      "target": [
+        1,
+        1.6,
+        -2
+      ],
+      "fovDegrees": 74
+    },
+    {
+      "id": "etage",
+      "name": "05 · Étage / chambres",
+      "position": [
+        -5,
+        4.8,
+        2
+      ],
+      "target": [
+        1,
+        5.1,
+        -3.5
+      ],
+      "fovDegrees": 69
+    },
+    {
+      "id": "vue_aerienne",
+      "name": "06 · Vue aérienne",
+      "position": [
+        22,
+        19,
+        23
+      ],
+      "target": [
+        0,
+        2.8,
+        2
+      ],
+      "fovDegrees": 60
+    }
+  ]
+}

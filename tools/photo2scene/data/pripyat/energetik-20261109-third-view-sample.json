@@ -1,0 +1,279 @@
+{
+  "image": {
+    "id": "energetik-third-original-20261109",
+    "width": 1920,
+    "height": 1080,
+    "sha256": "2d50f5834718ef02e92cf9406455ccc79dbec6fd3eafa4e91511c3f1ce34af92"
+  },
+  "fit_families": [
+    "roof_or_upper_opening",
+    "interior_horizontal",
+    "terrace_bandeau"
+  ],
+  "line_groups": {
+    "roof_or_upper_opening": [
+      [
+        1340.5,
+        488.4,
+        1430.8,
+        478.1
+      ],
+      [
+        942.1,
+        534.7,
+        1009.5,
+        526.6
+      ],
+      [
+        1008.2,
+        538.5,
+        960.6,
+        544
+      ],
+      [
+        894.4,
+        546.8,
+        920.7,
+        543.6
+      ],
+      [
+        921.8,
+        543.5,
+        990.7,
+        536.5
+      ],
+      [
+        929.4,
+        547.3,
+        881.8,
+        553.5
+      ],
+      [
+        1380.7,
+        489.8,
+        1344.3,
+        493.9
+      ],
+      [
+        1428.1,
+        484.5,
+        1384.4,
+        489.6
+      ],
+      [
+        1349.2,
+        509.4,
+        1395.4,
+        503.8
+      ]
+    ],
+    "interior_horizontal": [
+      [
+        1131.8,
+        592.6,
+        1185.7,
+        587.8
+      ],
+      [
+        1252,
+        581.9,
+        1309.4,
+        576.7
+      ],
+      [
+        1315.6,
+        576.1,
+        1373.2,
+        572
+      ],
+      [
+        1090.5,
+        596.4,
+        1121.9,
+        593.6
+      ],
+      [
+        1191.9,
+        587.1,
+        1244.4,
+        582.6
+      ],
+      [
+        1381.8,
+        571.5,
+        1443.2,
+        565.3
+      ],
+      [
+        1024.4,
+        602.3,
+        1070.6,
+        598.3
+      ]
+    ],
+    "terrace_bandeau": [
+      [
+        1436.9,
+        653.2,
+        1405.6,
+        654.5
+      ],
+      [
+        1343.1,
+        657.5,
+        1316.7,
+        659.2
+      ],
+      [
+        1375.6,
+        655.6,
+        1350.6,
+        657.2
+      ],
+      [
+        1123.1,
+        697.1,
+        1081.8,
+        698.7
+      ],
+      [
+        1068.3,
+        696.5,
+        1043.2,
+        698.9
+      ],
+      [
+        1181.9,
+        693.9,
+        1140.7,
+        696.1
+      ],
+      [
+        910.6,
+        719.2,
+        884.4,
+        718.4
+      ],
+      [
+        1086.9,
+        701,
+        1123.1,
+        699.5
+      ]
+    ],
+    "vertical_facade": [
+      [
+        1017.8,
+        604.4,
+        1017.5,
+        740.6
+      ],
+      [
+        1434.8,
+        568.1,
+        1438.1,
+        669.5
+      ],
+      [
+        872.4,
+        618.1,
+        870.5,
+        740.6
+      ],
+      [
+        967.7,
+        609.4,
+        966.6,
+        743.1
+      ],
+      [
+        1374,
+        573.1,
+        1376.1,
+        654.4
+      ],
+      [
+        1451.5,
+        680.7,
+        1448.2,
+        564.3
+      ],
+      [
+        917.3,
+        613.1,
+        917.5,
+        706.9
+      ],
+      [
+        1125.6,
+        594.4,
+        1125.3,
+        671.9
+      ]
+    ],
+    "right_return": [
+      [
+        1490.2,
+        520.8,
+        1565.5,
+        579.1
+      ],
+      [
+        1431.2,
+        477.8,
+        1475.9,
+        509.4
+      ],
+      [
+        1541.1,
+        602.7,
+        1520.1,
+        582.4
+      ],
+      [
+        1571.1,
+        589.1,
+        1524.1,
+        554.4
+      ],
+      [
+        1498.6,
+        536.2,
+        1474.6,
+        520.2
+      ]
+    ]
+  },
+  "extraction": {
+    "method": "OpenCV Line Segment Detector LSD_REFINE_STD + CLAHE on user original; semantically gated candidate regions in pixels",
+    "all_detected_segments": 5234,
+    "stored_segments_are": "representative subset, not complete extraction",
+    "annotation_status": "unverified; mixed window edges and architectural bands; require manual review before camera estimation"
+  },
+  "visual_identification": [
+    "facade main colonnade",
+    "sign ENERGETIK on roof",
+    "front-right building corner",
+    "lateral right facade partly obscured",
+    "asphalt foreground plaza",
+    "poplar trees occluding left bays and right return"
+  ],
+  "matching": {
+    "photo1": {
+      "method": "mutual SIFT ratio 0.65",
+      "candidates": 2,
+      "verified": 0
+    },
+    "photo2": {
+      "method": "mutual SIFT ratio 0.65",
+      "candidates": 1,
+      "verified": 0
+    },
+    "triangulation": "not permitted"
+  },
+  "verification": {
+    "fov": "not identifiable",
+    "depth": "not identifiable",
+    "units": "do not report 3D distances until camera and ground/unique corresponding features validated"
+  }
+}

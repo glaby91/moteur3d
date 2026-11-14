@@ -1,0 +1,148 @@
+{
+  "image": {
+    "id": "energetik-second-20261109",
+    "width": 1024,
+    "height": 680,
+    "sha256": "2c33d8fe328ba558bfd79e0759616bf1473a28f5729d7c6c70d60200237c20a5"
+  },
+  "line_groups": {
+    "roof": [
+      [
+        38.15,
+        213.36,
+        278.12,
+        188.05
+      ],
+      [
+        278,
+        188.01,
+        460.76,
+        170.82
+      ],
+      [
+        459.23,
+        171.26,
+        539.53,
+        165.14
+      ],
+      [
+        684.25,
+        154.62,
+        739.36,
+        152.73
+      ]
+    ],
+    "upper_openings": [
+      [
+        34.38,
+        268.13,
+        78.23,
+        264.41
+      ],
+      [
+        196.88,
+        254.41,
+        249.52,
+        249.84
+      ],
+      [
+        448.15,
+        234.77,
+        511.94,
+        230.33
+      ],
+      [
+        658.11,
+        221.6,
+        721.88,
+        218.16
+      ],
+      [
+        875.69,
+        210.02,
+        938.07,
+        207.81
+      ]
+    ],
+    "balcony_front": [
+      [
+        144.47,
+        405.61,
+        89.36,
+        407.62
+      ],
+      [
+        309.34,
+        400.72,
+        188.09,
+        404.31
+      ],
+      [
+        649.37,
+        388.05,
+        604.34,
+        389.37
+      ],
+      [
+        880.65,
+        368.68,
+        819.34,
+        370.98
+      ]
+    ],
+    "columns": [
+      [
+        134.74,
+        260.56,
+        123.81,
+        404.33
+      ],
+      [
+        190.32,
+        255.54,
+        182.31,
+        403.01
+      ],
+      [
+        311.28,
+        245.57,
+        307.04,
+        393.09
+      ],
+      [
+        450.07,
+        355.61,
+        447.61,
+        216.84
+      ],
+      [
+        581.55,
+        215.75,
+        589.35,
+        386.93
+      ],
+      [
+        722.23,
+        210.7,
+        735.4,
+        375.64
+      ],
+      [
+        889.6,
+        334.35,
+        875.49,
+        210.5
+      ]
+    ]
+  },
+  "counts_all_lsd": {
+    "total": 2497,
+    "roof": 13,
+    "upper_openings": 14,
+    "balcony_front": 12,
+    "columns": 18
+  },
+  "notes": "Representative high-length segments only in this committed subset. Full local extraction and image diagnostics have more candidates. Some levels are not guaranteed to be exactly parallel in the physical scene.",
+  "status": "unverified pixel geometry candidates, no 3D distances",
+  "cross_view_matches": "none accepted; naive SIFT+RANSAC produced mismatches"
+}

@@ -1,0 +1,727 @@
+{
+  "format": "photo2scene-warp-facade-unit-lattice-v1",
+  "subject": "Palais Energetik (Pripyat)",
+  "annotation_status": "manually placed candidates from original pixels, NOT independently verified or historical measurements",
+  "plane": "Main front colonnade only, right-to-left bay index; side wall not solved",
+  "gauge": {
+    "one_horizontal_bay": 1,
+    "front_plane_z": 0,
+    "top_level_y": "h unknown; fitted shared height in bay units",
+    "bottom_level_y": 0,
+    "physical_meters_per_unit": null
+  },
+  "models": "hypotheses: repeated identical bays, rectilinear colonnade, three independent centered square-pixel pinhole cameras, no image lens distortion",
+  "images_not_redistributed": true,
+  "photos": [
+    {
+      "file": "image(20261109-192551).png",
+      "id": "oblique_01",
+      "width": 516,
+      "height": 387,
+      "sha256": "5652f4a61edac6ddf30ef1a3dd728e50600ce139bb7f7dabafdc10dbd911d1c5",
+      "focal_initial_px": 530,
+      "anchors": [
+        {
+          "id": "bay0-top",
+          "bay": 0,
+          "level": "top",
+          "pixel": [
+            389,
+            74
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay1-top",
+          "bay": 1,
+          "level": "top",
+          "pixel": [
+            355,
+            82
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay2-top",
+          "bay": 2,
+          "level": "top",
+          "pixel": [
+            315,
+            93
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay3-top",
+          "bay": 3,
+          "level": "top",
+          "pixel": [
+            282,
+            103
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay4-top",
+          "bay": 4,
+          "level": "top",
+          "pixel": [
+            258,
+            110
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay5-top",
+          "bay": 5,
+          "level": "top",
+          "pixel": [
+            229,
+            119
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay6-top",
+          "bay": 6,
+          "level": "top",
+          "pixel": [
+            207,
+            125
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay7-top",
+          "bay": 7,
+          "level": "top",
+          "pixel": [
+            190,
+            130
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay8-top",
+          "bay": 8,
+          "level": "top",
+          "pixel": [
+            167,
+            134
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay9-top",
+          "bay": 9,
+          "level": "top",
+          "pixel": [
+            152,
+            143
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay0-bottom",
+          "bay": 0,
+          "level": "bottom",
+          "pixel": [
+            393,
+            172
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay1-bottom",
+          "bay": 1,
+          "level": "bottom",
+          "pixel": [
+            356,
+            183
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay2-bottom",
+          "bay": 2,
+          "level": "bottom",
+          "pixel": [
+            315,
+            188
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay3-bottom",
+          "bay": 3,
+          "level": "bottom",
+          "pixel": [
+            283,
+            192
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay4-bottom",
+          "bay": 4,
+          "level": "bottom",
+          "pixel": [
+            257,
+            197
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay5-bottom",
+          "bay": 5,
+          "level": "bottom",
+          "pixel": [
+            230,
+            201
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay6-bottom",
+          "bay": 6,
+          "level": "bottom",
+          "pixel": [
+            206,
+            205
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay7-bottom",
+          "bay": 7,
+          "level": "bottom",
+          "pixel": [
+            189,
+            207
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay8-bottom",
+          "bay": 8,
+          "level": "bottom",
+          "pixel": [
+            166,
+            210
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay9-bottom",
+          "bay": 9,
+          "level": "bottom",
+          "pixel": [
+            149,
+            212
+          ],
+          "role": "holdout"
+        }
+      ]
+    },
+    {
+      "file": "image(20261109-194942).png",
+      "id": "frontal_02",
+      "width": 1024,
+      "height": 680,
+      "sha256": "2c33d8fe328ba558bfd79e0759616bf1473a28f5729d7c6c70d60200237c20a5",
+      "focal_initial_px": 2200,
+      "anchors": [
+        {
+          "id": "bay1-top",
+          "bay": 1,
+          "level": "top",
+          "pixel": [
+            940,
+            210
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay2-top",
+          "bay": 2,
+          "level": "top",
+          "pixel": [
+            875,
+            211
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay3-top",
+          "bay": 3,
+          "level": "top",
+          "pixel": [
+            805,
+            214
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay4-top",
+          "bay": 4,
+          "level": "top",
+          "pixel": [
+            730,
+            218
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay5-top",
+          "bay": 5,
+          "level": "top",
+          "pixel": [
+            659,
+            221
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay6-top",
+          "bay": 6,
+          "level": "top",
+          "pixel": [
+            589,
+            225
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay7-top",
+          "bay": 7,
+          "level": "top",
+          "pixel": [
+            519,
+            229
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay8-top",
+          "bay": 8,
+          "level": "top",
+          "pixel": [
+            447,
+            234
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay9-top",
+          "bay": 9,
+          "level": "top",
+          "pixel": [
+            382,
+            239
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay10-top",
+          "bay": 10,
+          "level": "top",
+          "pixel": [
+            315,
+            245
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay11-top",
+          "bay": 11,
+          "level": "top",
+          "pixel": [
+            252,
+            249
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay12-top",
+          "bay": 12,
+          "level": "top",
+          "pixel": [
+            190,
+            254
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay13-top",
+          "bay": 13,
+          "level": "top",
+          "pixel": [
+            135,
+            258
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay1-bottom",
+          "bay": 1,
+          "level": "bottom",
+          "pixel": [
+            944,
+            369
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay2-bottom",
+          "bay": 2,
+          "level": "bottom",
+          "pixel": [
+            881,
+            377
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay3-bottom",
+          "bay": 3,
+          "level": "bottom",
+          "pixel": [
+            810,
+            382
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay4-bottom",
+          "bay": 4,
+          "level": "bottom",
+          "pixel": [
+            735,
+            383
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay5-bottom",
+          "bay": 5,
+          "level": "bottom",
+          "pixel": [
+            662,
+            386
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay6-bottom",
+          "bay": 6,
+          "level": "bottom",
+          "pixel": [
+            594,
+            389
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay7-bottom",
+          "bay": 7,
+          "level": "bottom",
+          "pixel": [
+            526,
+            390
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay8-bottom",
+          "bay": 8,
+          "level": "bottom",
+          "pixel": [
+            452,
+            393
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay9-bottom",
+          "bay": 9,
+          "level": "bottom",
+          "pixel": [
+            384,
+            397
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay10-bottom",
+          "bay": 10,
+          "level": "bottom",
+          "pixel": [
+            317,
+            400
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay11-bottom",
+          "bay": 11,
+          "level": "bottom",
+          "pixel": [
+            252,
+            402
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay12-bottom",
+          "bay": 12,
+          "level": "bottom",
+          "pixel": [
+            191,
+            404
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay13-bottom",
+          "bay": 13,
+          "level": "bottom",
+          "pixel": [
+            131,
+            406
+          ],
+          "role": "holdout"
+        }
+      ]
+    },
+    {
+      "file": "image(20261109-200649).png",
+      "id": "distant_03",
+      "width": 1920,
+      "height": 1080,
+      "sha256": "2d50f5834718ef02e92cf9406455ccc79dbec6fd3eafa4e91511c3f1ce34af92",
+      "focal_initial_px": 2700,
+      "anchors": [
+        {
+          "id": "bay0-top",
+          "bay": 0,
+          "level": "top",
+          "pixel": [
+            1245,
+            477
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay1-top",
+          "bay": 1,
+          "level": "top",
+          "pixel": [
+            1185,
+            485
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay2-top",
+          "bay": 2,
+          "level": "top",
+          "pixel": [
+            1131,
+            492
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay3-top",
+          "bay": 3,
+          "level": "top",
+          "pixel": [
+            1075,
+            499
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay4-top",
+          "bay": 4,
+          "level": "top",
+          "pixel": [
+            1021,
+            506
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay5-top",
+          "bay": 5,
+          "level": "top",
+          "pixel": [
+            972,
+            512
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay6-top",
+          "bay": 6,
+          "level": "top",
+          "pixel": [
+            924,
+            518
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay7-top",
+          "bay": 7,
+          "level": "top",
+          "pixel": [
+            875,
+            525
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay8-top",
+          "bay": 8,
+          "level": "top",
+          "pixel": [
+            831,
+            531
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay9-top",
+          "bay": 9,
+          "level": "top",
+          "pixel": [
+            792,
+            537
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay10-top",
+          "bay": 10,
+          "level": "top",
+          "pixel": [
+            752,
+            541
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay0-bottom",
+          "bay": 0,
+          "level": "bottom",
+          "pixel": [
+            1250,
+            737
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay1-bottom",
+          "bay": 1,
+          "level": "bottom",
+          "pixel": [
+            1190,
+            738
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay2-bottom",
+          "bay": 2,
+          "level": "bottom",
+          "pixel": [
+            1130,
+            739
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay3-bottom",
+          "bay": 3,
+          "level": "bottom",
+          "pixel": [
+            1075,
+            742
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay4-bottom",
+          "bay": 4,
+          "level": "bottom",
+          "pixel": [
+            1021,
+            743
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay5-bottom",
+          "bay": 5,
+          "level": "bottom",
+          "pixel": [
+            968,
+            744
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay6-bottom",
+          "bay": 6,
+          "level": "bottom",
+          "pixel": [
+            923,
+            748
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay7-bottom",
+          "bay": 7,
+          "level": "bottom",
+          "pixel": [
+            872,
+            750
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay8-bottom",
+          "bay": 8,
+          "level": "bottom",
+          "pixel": [
+            827,
+            750
+          ],
+          "role": "fit"
+        },
+        {
+          "id": "bay9-bottom",
+          "bay": 9,
+          "level": "bottom",
+          "pixel": [
+            788,
+            751
+          ],
+          "role": "holdout"
+        },
+        {
+          "id": "bay10-bottom",
+          "bay": 10,
+          "level": "bottom",
+          "pixel": [
+            751,
+            750
+          ],
+          "role": "fit"
+        }
+      ]
+    }
+  ]
+}

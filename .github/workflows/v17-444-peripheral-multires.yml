@@ -1,0 +1,104 @@
+name: CSE WARP V17.444 - DX11 peripheral multires A/B
+on:
+  push:
+    branches: [experiment/v17-444-peripheral-multires-dx11-261113]
+    paths:
+      - .github/workflows/v17-444-peripheral-multires.yml
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp
+      - docs/performance/V17.444-PERIPHERAL-MULTIRES-DX11-EXPERIMENT.md
+      - tools/LANCER_BENCH_V17_444_MULTIREZ.bat
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build-windows-and-ab-warp:
+    runs-on: windows-2022
+    timeout-minutes: 70
+    env:
+      QT_QPA_PLATFORM: offscreen
+      M3D_V16_FORCE_WARP: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Generate identical scene for reference and multires
+        shell: pwsh
+        run: |
+          node scenes/v16/benchmark-civic/generate.cjs --all
+          if($LASTEXITCODE -ne 0){throw "Scene generator failed"}
+      - name: Compile native DirectX11 renderer and benchmark
+        shell: pwsh
+        run: |
+          cmake -S v17 -B build-v444 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=444
+          if($LASTEXITCODE -ne 0){throw "CMake configure failed"}
+          cmake --build build-v444 --config Release --target moteur3d_v17_benchmark --parallel 4
+          if($LASTEXITCODE -ne 0){throw "Native Windows C++ / HLSL compile failed"}
+          if(!(Test-Path build-v444/Release/moteur3d_v17_benchmark.exe)){throw "Missing binary"}
+          if(!(Test-Path build-v444/v16/Release/moteur3d_v16_core.dll)){throw "Missing engine core DLL"}
+      - name: Run repeatable baseline versus multires (software WARP only)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force v444-ab | Out-Null
+          $env:PATH=(Resolve-Path "build-v444/v16/Release").Path+";"+$env:PATH
+          $results=@()
+          $exe="build-v444/Release/moteur3d_v17_benchmark.exe"
+          $scene="scenes/v16/benchmark-civic/scene.json"
+          foreach($cam in @("bassin","piscine_soir")){
+            foreach($mode in @("baseline","multires")){
+              $env:M3D_V17_PERIPHERAL_MULTIREZ=if($mode -eq "multires"){"1"}else{"0"}
+              foreach($rep in @(1,2,3)){
+                $out="v444-ab/$cam-$mode-$rep"
+                & $exe $scene $out --smoke --camera-id $cam --hour 19 --raster-msaa 1
+                if($LASTEXITCODE -ne 0){throw "Failed run $cam $mode $rep"}
+                $summary=Get-ChildItem $out -Recurse -Filter summary.json | Select-Object -First 1
+                if(!$summary){throw "Missing summary: $out"}
+                $json=Get-Content $summary.FullName -Raw | ConvertFrom-Json
+                $row=@($json.cases | Where-Object {$_.backend -eq "V17_D3D11_Raster"})[0]
+                if(!$row){throw "No GPU case: $out"}
+                $image=Get-ChildItem $out -Recurse -Filter "raster_*.png" | Select-Object -First 1
+                if(!$image -or $image.Length -lt 1000){throw "Missing rendered image: $out"}
+                $results += [pscustomobject]@{camera=$cam;mode=$mode;iteration=$rep;meanMs=$row.meanMs;gpuDrawMs=$row.gpuDrawMs;image=$image.Name}
+              }
+            }
+          }
+          $results | Export-Csv "v444-ab/trials.csv" -NoTypeInformation -Encoding utf8
+          $report=@()
+          foreach($cam in @("bassin","piscine_soir")){
+            $a=@($results|Where-Object {$_.camera -eq $cam -and $_.mode -eq "baseline"}|Select-Object -ExpandProperty gpuDrawMs|Sort-Object)
+            $b=@($results|Where-Object {$_.camera -eq $cam -and $_.mode -eq "multires"}|Select-Object -ExpandProperty gpuDrawMs|Sort-Object)
+            $x=[double]$a[1];$y=[double]$b[1]
+            $percent=if($x -gt 0){[math]::Round(100*($x-$y)/$x,2)}else{0}
+            $report += [pscustomobject]@{camera=$cam;baselineMedianGpuDrawMs=$x;multiMedianGpuDrawMs=$y;gainPercent=$percent;threshold15Passed=($percent -ge 15)}
+            Write-Host "$cam : baseline $x ms / multires $y ms / delta $percent % [WARP CPU software, NOT HD620]"
+          }
+          $report | Export-Csv "v444-ab/summary.csv" -NoTypeInformation -Encoding utf8
+          $report | ConvertTo-Json | Set-Content "v444-ab/summary.json" -Encoding utf8
+      - name: Assemble optional Dell HD620 A/B benchmark
+        if: success()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force v444-hd620/benchmark-civic | Out-Null
+          Copy-Item build-v444/Release/moteur3d_v17_benchmark.exe v444-hd620/moteur3d_v17_benchmark.exe -Force
+          Copy-Item build-v444/v16/Release/moteur3d_v16_core.dll v444-hd620/moteur3d_v16_core.dll -Force
+          Copy-Item scenes/v16/benchmark-civic/* v444-hd620/benchmark-civic/ -Recurse -Force
+          Copy-Item tools/LANCER_BENCH_V17_444_MULTIREZ.bat v444-hd620/ -Force
+          & "$env:QT_ROOT_DIR/bin/windeployqt.exe" --no-translations v444-hd620/moteur3d_v17_benchmark.exe
+          if($LASTEXITCODE -ne 0){throw "Qt deployment failed"}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: CSE-WARP-V17.444-CI-WARP-MULTIREZ-AB
+          path: v444-ab/
+          retention-days: 21
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: CSE-WARP-V17.444-HD620-BENCH-EXPERIMENTAL
+          path: v444-hd620/
+          retention-days: 21

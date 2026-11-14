@@ -1,0 +1,26 @@
+{
+  "format": "m3d-pbr-v1",
+  "sets": [
+    {
+      "id": "tex_diagnostic_pillar",
+      "material": "diagnostic_pillar",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 64
+    },
+    {
+      "id": "tex_level_line",
+      "material": "level_line",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 64
+    },
+    {
+      "id": "tex_reference_corner",
+      "material": "reference_corner",
+      "pattern": "metal",
+      "recipe": "metal",
+      "resolution": 64
+    }
+  ]
+}

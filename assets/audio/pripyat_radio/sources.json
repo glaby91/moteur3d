@@ -1,0 +1,39 @@
+{
+  "title": "CSE WARP — Ukrainian radio-style reconstruction (modern sources)",
+  "historical_broadcast": false,
+  "generated_year": 2026,
+  "generated_output": "generated/ukrainian_radio_reconstruction.ogg",
+  "notes": "Playlist of modern recordings. Spoken Wikipedia entries are NOT 1970s radio. Dates and authors preserved in credits. Preserve share-alike terms for audio adaptations.",
+  "tracks": [
+    {
+      "id": "spoken-uk-music-1",
+      "title": "Українська музика — Traditional ethnic (spoken article including Viy excerpts)",
+      "commons_filename": "Uk-Music_of_Ukraine_part_1_Traditional_ethnic.ogg",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Uk-Music_of_Ukraine_part_1_Traditional_ethnic.ogg",
+      "duration_seconds": 1046,
+      "recording_date": "2009-01-03",
+      "license": "CC BY-SA 3.0",
+      "attribution": "Narrators Andrew Krizhanovsky and Anatoly Krizhanovsky; Wikipedia contributors to Українська музика; Viy (licensed music excerpts)"
+    },
+    {
+      "id": "lysenko-shevtchenko",
+      "title": "Ой крикнули сірі гуси — Mykola Lysenko / Taras Shevchenko",
+      "commons_filename": "Lysenko-Oj_kryknuly_siri_husy.ogg",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Lysenko-Oj_kryknuly_siri_husy.ogg",
+      "duration_seconds": 229,
+      "recording_date": "2012-11-06",
+      "license": "CC BY-SA 3.0",
+      "attribution": "Mykola Lysenko (music), Taras Shevchenko (lyrics), Ivanna Shturmak (voice), Oleksandr Kozarenko (piano), Юрій Булка (recording and post-processing)"
+    },
+    {
+      "id": "spoken-uk-music-2",
+      "title": "Українська музика — Professional music formation (spoken article)",
+      "commons_filename": "Uk-Music_of_Ukraine_part_2_professional_music_formation.ogg",
+      "source_page": "https://commons.wikimedia.org/wiki/File:Uk-Music_of_Ukraine_part_2_professional_music_formation.ogg",
+      "duration_seconds": 709,
+      "recording_date": "2009-01-03",
+      "license": "Public-domain dedication claimed for recording; underlying Wikipedia text is CC BY-SA",
+      "attribution": "Narrators Andrew Krizhanovsky and Anatoly Krizhanovsky; Wikipedia contributors to Українська музика"
+    }
+  ]
+}

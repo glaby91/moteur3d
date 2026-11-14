@@ -1,0 +1,73 @@
+name: CSE WARP — scene-only adaptive campaign (frozen V17.370)
+run-name: Scene Pripiat — ${{ github.event.inputs.passes || '10' }} feedback passes — no rebuild
+on:
+  workflow_dispatch:
+    inputs:
+      passes:
+        description: "Number of adaptive passes, 1 through 10"
+        type: choice
+        options: ['1', '3', '5', '10']
+        default: '10'
+  push:
+    branches:
+      - feature/v17-365-paysage-monument-sobre-261112
+    paths:
+      - 'scenes/v16/benchmark-civic/adaptive_campaign.py'
+      - '.github/workflows/scene-palais-adaptive.yml'
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: scene-only-adaptive-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  scene:
+    name: Ten WARP visual feedback passes without compiling the engine
+    runs-on: windows-2022
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v5
+      - name: Python and image metrics
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install Pillow (only image analysis)
+        shell: pwsh
+        run: python -m pip install "Pillow==11.3.0"
+      - name: Download immutable Windows V17.370 package from successful run
+        uses: actions/download-artifact@v4
+        with:
+          name: CSE-WARP-V17.370-Windows-x64
+          run-id: 43195320997
+          repository: glaby91/moteur3d
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: fixed-v17
+      - name: Verify fixed motor and scene
+        shell: pwsh
+        run: |
+          if (!(Test-Path "fixed-v17/moteur3d_v17_benchmark.exe")) { throw "Frozen V17 benchmark executable missing" }
+          if (!(Test-Path "fixed-v17/benchmark-civic/scene.json")) { throw "Frozen civic scene missing" }
+          $build = (Get-Content "fixed-v17/BUILD_NUMBER.txt" -Raw).Trim()
+          if ($build -ne '370') { throw "Unapproved engine build $build (required V17.370)" }
+          Write-Host "Fixed engine V17.$build — 0 engine source files recompiled"
+      - name: Run adaptive scene-only campaign (native DX11 WARP)
+        shell: pwsh
+        timeout-minutes: 40
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          M3D_V16_GPU_GI_SAMPLES: '0'
+        run: |
+          $passes = if ('${{ github.event.inputs.passes }}') { [int]'${{ github.event.inputs.passes }}' } else { 10 }
+          python scenes/v16/benchmark-civic/adaptive_campaign.py --engine fixed-v17/moteur3d_v17_benchmark.exe --scene fixed-v17/benchmark-civic --output results/adaptive-scene --passes $passes
+          if ($LASTEXITCODE -ne 0) { throw "Adaptive campaign failed (see image reports)" }
+          $r = Get-Content "results/adaptive-scene/result.json" -Raw | ConvertFrom-Json
+          if ($r.passes_completed -ne $passes) { throw "Incomplete native campaign" }
+          Write-Host "SCENE_ONLY_RESULT: $($r.passes_completed) passes, $($r.accepted) kept, $($r.rolled_back) rollback"
+      - name: Publish 5 fixed-camera images per pass and decisions
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17.370-scene-adaptive-${{ github.run_number }}
+          path: results/adaptive-scene/
+          if-no-files-found: warn
+          retention-days: 30

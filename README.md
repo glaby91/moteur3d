@@ -1,8 +1,74 @@
-# moteur3d
+# CSE WARP BetaX — Moteur3D (V17, branche master)
+
+**Base de développement actuelle : V17.493 + enseigne piscine « БАССЕЙН » (14 novembre 2026).** Le moteur principal est **DirectX 11 Raster** ; le mode CPU sert de comparaison et de diagnostic, pas de moteur de jeu.
+
+- [Compiler et récupérer le paquet Windows](https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v17.yml)
+- [Audit de promotion et risques connus](docs/V17_493_MASTER_AUDIT_2026-11-14.md)
+- [Référence technique V17](v17/README.md)
+- [Compilation V17.493 complète validée](https://github.com/glaby91/moteur3d/actions/runs/43530238045) et [compilation scène БАССЕЙН validée](https://github.com/glaby91/moteur3d/actions/runs/43532638652).
+
+**Statut : bêta de développement**, non version stable : cadence 25 ms non vérifiée sur Intel HD 620 ; le build de la scène approuvée à 186 matériaux dépend encore d'une archive GitHub Actions ancienne. Avant toute publication finale, conserver définitivement la scène et ses ressources.
+
+---
+
+## Archives du moteur V1–V14 (historique conservé)
 
 Moteur 3D expérimental (archives QBasic + démonstrations HTML/JavaScript).
 
-## Version expérimentale actuelle — V9.2, rendu 16:10 plus rapide (19 octobre 2026)
+## Parcours détaillé du moteur 3D — branche côte d’été (30–31 octobre 2026)
+
+### Ancienne version de travail (historique) : V14 native
+
+Le build Qt courant ajoute un affichage GPU temps réel facultatif **Direct3D 11** (Windows), tandis que le ray tracing CPU reste le mode complet par défaut. La résolution initiale est **1366 × 768**, adaptée au Vostro ; les résolutions supérieures restent disponibles. L’affichage GPU simplifie l’éclairage et ne calcule pas les effets raytracés CPU. Voir [la note Direct3D 11](experiments/2026-10-30-cote-ete-gt/native_v14/docs/DIRECTX11-GPU-PREVIEW.md).
+
+**[Application native Qt](experiments/2026-10-30-cote-ete-gt/native_v14/)** · [Build Windows et téléchargements](https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v14-qt.yml) · [Référence navigateur V13.16](experiments/2026-10-30-cote-ete-gt/moteur3d_v1316_cpu_workers_2026.html) · [Architecture CPU / FPGA](docs/CPU_FPGA_RENDER_BACKEND.md) · [Choix mémoire et carte FPGA](docs/FPGA_MEMORY_AND_BOARD_SELECTION.md)
+
+La V14 Qt est une application **C++17 native Windows/Linux** avec un panneau de commandes. Le ray tracing CPU utilise un BVH et des tuiles parallèles ; sous Windows, un aperçu raster facultatif exploite Direct3D 11. Les diagnostics distinguent le mode GPU du rendu CPU complet. Le binaire Windows 64 bits est produit par GitHub Actions.
+
+La V14 est le premier port natif: le modèle et le décor sont encore une reconstruction simplifiée du design détaillé de la V13.16. Les temps de l’aperçu Linux ne prédisent pas les performances Windows; le gain doit être comparé sur le PC cible avec une résolution et une scène identiques.
+
+### Implémentation de référence navigateur — V13.16
+
+La version V13.16 reste une démonstration HTML/JavaScript autonome de lancer de rayons sur CPU, affichée dans Canvas. Elle sépare le moteur de son backend via une API de frame et de tuiles, puis calcule réellement les tuiles 16 × 16 avec des Web Workers CPU. Ce moteur navigateur historique reste utile comme référence visuelle, mais son lanceur Windows est seulement un wrapper qui ouvre la page HTML.
+
+La V13.14 propose une sortie **Full HD (1920 × 1080)** et plusieurs résolutions internes. Le mode réduit recommandé calcule **1680 × 945**, puis agrandit l’image en 1920 × 1080. Il lance **1 587 600 rayons au lieu de 2 073 600**, soit **23,4 % de rayons en moins**. Cette économie de rayons ne garantit pas la même baisse du temps total : elle dépend aussi du BVH, des textures, des ombres et du navigateur.
+
+**Comparaison utilisateur V13.14, Full HD et mêmes réglages :** le mode natif (1920 × 1080) lance 2 073 600 rayons et prend **4 882,9 ms** ; le mode équilibré (1680 × 945, agrandi en Full HD) lance 1 587 600 rayons et prend **4 429,6 ms**. Les rayons diminuent de **23,4 %**, mais le temps total baisse de **9,3 %** (453,3 ms). Le temps BVH passe de 2 868,5 à 2 545,5 ms (−11,3 %) et l’éclairage/textures de 1 151,4 à 989,7 ms (−14,0 %). En équilibré, le moteur a compté 3 799 490 tests géométriques, 20 233 042 nœuds BVH visités, 39 623 644 tests AABB, 4 712 540 texels lus et 7 557 852 lectures de profondeur d’ombre. La charge moyenne par rayon reste proche : 25,0 tests AABB, 2,4 tests géométriques, 3,0 texels et 4,8 lectures d’ombre. Ce relevé provient des deux captures du poste utilisateur ; les millisecondes dépendent du navigateur et de l’ordonnancement.
+
+L’agrandissement Canvas lisse l’image, mais ne recrée pas les détails absents du calcul interne. L’anti-crénelage FXAA en post-traitement et le calcul fovéé (davantage de détails au centre, réduction légère aux bords) restent des pistes, non des fonctions intégrées à la V13.14.
+
+### Étapes de conception et de construction
+
+| Versions | Étapes réalisées |
+|---|---|
+| **V9.2** | Base de rendu logiciel 16:10 : rayons caméra, primitives analytiques, BVH, textures RGB565, mipmaps, ombres par carte Z, rendu progressif et compteurs de coût. Le ciel et les nuages peuvent être évalués sur une grille angulaire interpolée. Le réglage de résolution interne propose des compromis entre précision et nombre de rayons. |
+| **V9.3** | Création de la scène urbaine Manhattan/Silent Hill : façades, mobilier de rue, escaliers de secours, chaussée humide, éclairages locaux chauds, brume et créature organique à silhouette élancée, bras levé et appendices courbés. |
+| **V9.4–V9.8** | Ajout de maillages lissés et augmentation du niveau de détail. Construction d’un coupé GT classique dans la scène ; amélioration du vitrage fastback et de la géométrie de la créature. |
+| **V9.9–V10.5** | Intégration plus complète de la carrosserie et de l’habitacle ; vitrage arrière raccordé au pavillon ; corrections de proportions et de silhouette avec une caisse GT plus longue, basse et large. |
+| **V11.0–V11.2** | Remplacement de la scène urbaine par une route côtière estivale. Conception d’un coupé restomod 2026 à partir du fastback initial, avec carrosserie cuivre, pavillon effilé, lunette plongeante, phares ronds, pneus et jantes détaillés. La V11.2 est décrite dans le projet avec une coque d’environ 93 000 triangles. |
+| **V11.3–V11.9** | Corrections successives du modèle : placement des roues, léger débord latéral, dégagement des pneus dans les ailes, arches continues, vitre latérale arrière et raccords des vitrages ; détails de carrosserie, pneus et jantes. |
+| **V12.0** | Révision des volumes : coffre raccourci, arrière plus massif, arches élargies et grille avant mieux alignée. |
+| **V13.0–V13.1** | Reprise du design fastback d’origine avec une interprétation Manta/Cayman restomod. Refonte des raccords pare-brise/pavillon/vitres/lunette/coffre ; correction des pointes d’ailes et de la hauteur apparente des pneus. |
+| **V13.2–V13.5** | Ajout des éléments de scène côtière : soleil bas, deux sources lumineuses locales, éclairage de route, mer et vagues, palmiers et trois voitures rouge, violette et orange. Une capture de rendu V13.5 est archivée dans le dossier. |
+| **V13.6–V13.8** | Optimisation du lancer de rayons : passage des rayons caméra par le BVH spatial, réutilisation des inverses de direction et stockage scalaire des bornes de nœuds. La capture utilisateur V13.7 indique 3 889,4 ms à 640 × 400 ; celle de V13.8 indique 3 351,5 ms. Ces temps dépendent du poste et des réglages. |
+| **V13.9–V13.10** | Une représentation compacte des bornes a d’abord causé une erreur de rendu ; la version suivante a corrigé les limites de projection. La régression reste dans l’historique, pas dans la version courante. |
+| **V13.11–V13.12** | Essai de parcours BVH en tableaux typés, abandonné après une hausse du temps mesuré. Retour au parcours scalaire, ajout d’une construction BVH SAH à 12 compartiments et de compteurs de travail : tests AABB, tests géométriques, lectures de texels et accès à la carte d’ombre. Sur une capture utilisateur V13.12 à 640 × 400 : 559 612 tests géométriques, 3 045 933 nœuds BVH visités, 5 990 398 tests AABB et 474,3 ms au total. |
+| **V13.13–V13.14** | Ajout de la sortie Full HD 16:9, distincte de la résolution interne. La V13.14 propose le calcul interne à 1680 × 945, agrandi en 1920 × 1080, soit 23,4 % de rayons en moins que le natif. Plusieurs niveaux restent sélectionnables pour comparer qualité et coût. |
+| **V13.15** | Introduction d’une frontière de backend CPU versionnée avec démarrage, rendu par tuile et fin de frame; le calcul demeure alors mono-thread. |
+| **V13.16** | Référence navigateur parallèle par Web Workers. Ancien lanceur Windows: ouvre la page HTML, sans moteur natif intégré. |
+| **V14 native** | Premier exécutable autonome C++17/Win32: scène côtière reconstruite, lancer de rayons CPU, BVH, rendu par tuiles et multi-threading; image dessinée directement dans une fenêtre native, sans navigateur ni GPU. Le portage du design détaillé reste à poursuivre. |
+
+### Bancs d’essai et éléments non intégrés
+
+Les pages HTML comportent aussi des panneaux de diagnostic et d’expérimentation : compteurs de parcours BVH, carte des régions de visibilité, comparaison entre interpolation RGB et patches de surface, essai de reprojection d’une image N vers N+1, et charge de workers concurrents.
+
+Ces panneaux servent à comparer des méthodes. La carte de visibilité vérifie ses zones par comparaison avec l’image complète ; les patches et la reprojection restent des prototypes ; les images N+1 du banc workers sont synthétiques et ne sont pas produites par le moteur principal. Ils ne constituent donc pas des optimisations intégrées ni des gains validés.
+
+Les versions V1 à V9.2 et les expériences historiques sont conservées plus bas dans ce README. Pour comparer des performances, il faut garder le même navigateur, le même poste, la même caméra, les mêmes options d’éclairage et d’ombre et comparer les compteurs avec une résolution interne identique. Les millisecondes ne sont comparables que sur le même environnement.
+
+---
+
+## Référence historique — V9.2, rendu 16:10 plus rapide (19 octobre 2026)
 
 **[Ouvrir V9.2 — ray casting 16:10, ciel optimisé et précision réglable](experiments/2026-10-19-v9-2-fast-sky-16x10/index.html)** · [Documentation et tests V9.2](experiments/2026-10-19-v9-2-fast-sky-16x10/README.md)
 
@@ -35,7 +101,7 @@ La V9 explore une nouvelle architecture : **un seul rayon primaire par pixel**, 
 ---
 ## Version précédente — V8, textures adaptatives (19 octobre 2026)
 
-**[Ouvrir V8 — textures RGB565 + mipmaps 8 à 4096](experiments/2026-10-19-v8-mipmaps-textures/index.html)** · [documentation, mesures et limites](experiments/2026-10-19-v8-mipmaps-textures/README.md)
+**[Ouvrir V8 — textures RGB565 + mipmaps 8 à 4096](experiments/2026-10-19-v8-mipmaps-textures/index.html)** · [documentation, mesures et limites V8](experiments/2026-10-19-v8-mipmaps-textures/README.md)
 
 Le moteur V8 utilise toujours les **28 416 triangles de V7**, son **Z-buffer caméra** et sa **source lumineuse Z stabilisée**. Les textures procédurales de l'écorce, du feuillage, de l'herbe, de la pierre et du bois sont échantillonnées par UV perspective-correctes. L'écorce possède une pyramide RGB565 **4096² → 8² (10 niveaux réels)**, construite progressivement ; les autres matériaux possèdent une pyramide 256² → 8². La sélection du mip dépend des dérivées UV par pixel (donc distance, taille apparente et inclinaison), avec filtres nearest/bilinéaire/trilinéaire, diagnostic coloré des niveaux et contrôle de la distance caméra 4–22 m. **C'est un prototype CPU, pas un rendu FPGA validé.**
 
@@ -52,7 +118,7 @@ Le moteur V8 utilise toujours les **28 416 triangles de V7**, son **Z-buffer cam
 - Ombres : filtrage spatial **PCF 4 × 4** et choix de diffusion **Faible / Douces / Très douces**.
 - Contours géométriques : adoucissement colorimétrique optionnel **sans altérer le Z-buffer** ; il ne s'agit pas encore de MSAA 4×.
 - Optimisation lumineuse : **8 422 triangles natifs** utilisés pour les cartes Z des ombres, sans retrait de géométrie du rendu caméra.
-- Statut : tests automatisés de fonctionnement et d'occultation réussis ; fluidité et qualité visuelle à confirmer dans un navigateur réel.
+- Statut : tests automatisés de fonctionnement et d'occultation réussis ; fluidité et qualité visuelle à confirmer dans un navigateur.
 
 **Historique :** les expériences V1 à V6 ci-dessous sont archivées comme points de comparaison ; leurs mentions de « dernière version » reflètent la date de chaque expérimentation, pas la version recommandée aujourd'hui.
 
@@ -84,7 +150,7 @@ Le stuttering ne se manifeste plus d'après l'essai utilisateur. Le compteur « 
 
 ## Révision expérimentale V4 — stabilisation des ombres (19 octobre 2026)
 
-- [Ouvrir le code du simulateur V4](experiments/2026-10-19-shadow-stabilized-v4/index.html)
+- [Ouvrir le simulateur V4](experiments/2026-10-19-shadow-stabilized-v4/index.html)
 - [Diagnostic et protocole de test](experiments/2026-10-19-shadow-stabilized-v4/README.md)
 
 L'image géométrique reste identique à V3. Les ombres utilisent maintenant **deux cartes Z de la même et unique lumière**, avec interpolation continue des tests de profondeur pour limiter les sauts. Le mode « Ombres stabilisées » est activé par défaut et désactivable pour comparer; les performances en navigateur réel restent à mesurer.

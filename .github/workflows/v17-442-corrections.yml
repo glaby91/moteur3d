@@ -1,0 +1,132 @@
+name: CSE WARP V17.442 - architectural and walking fixes
+on:
+  push:
+    branches: [feature/v17-442-corrections-anomalies-261113]
+    paths:
+      - .github/workflows/v17-442-corrections.yml
+      - tools/package_archives_v441.py
+      - v17/**
+      - experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_walk_controller.h
+      - tools/patch_scene_v442.py
+      - tools/package_clean_v442.py
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  windows-clean-release:
+    runs-on: windows-2022
+    timeout-minutes: 75
+    env:
+      GH_TOKEN: ${{ github.token }}
+      QT_QPA_PLATFORM: offscreen
+      M3D_V16_FORCE_WARP: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Restore approved V17.440 scene, assets and Windows Qt runtime
+        shell: pwsh
+        run: |
+          gh run download 43426585141 --repo glaby91/moteur3d --name CSE-WARP-V17.440-AUDIT-GLOBAL-Windows-x64 --dir dist-stage
+          if($LASTEXITCODE -ne 0){throw "Baseline V440 is not accessible"}
+          foreach($p in @("moteur3d_v17.exe","moteur3d_v16_core.dll",
+                          "benchmark-civic/scene-v440-audit.json",
+                          "benchmark-civic/textures/energetik_fresco_mosaic.jpg",
+                          "audio/pripyat_radio.wav","platforms/qwindows.dll")){
+            if(!(Test-Path "dist-stage/$p")){throw "Missing baseline: $p"}
+          }
+          (Get-FileHash dist-stage/audio/pripyat_radio.wav -Algorithm SHA256).Hash | Set-Content radio.sha256
+          (Get-FileHash dist-stage/benchmark-civic/textures/energetik_fresco_mosaic.jpg -Algorithm SHA256).Hash | Set-Content fresco.sha256
+      - name: Apply documented conservative scene corrections ANO-010,011,012
+        shell: pwsh
+        run: |
+          python tools/patch_scene_v442.py --source dist-stage
+          if($LASTEXITCODE -ne 0){throw "Scene patch failed"}
+          if(!(Test-Path dist-stage/benchmark-civic/scene-v442-corrections.json)){throw "V442 scene missing"}
+      - name: Compile ALL deliverable executables in same build 17.442
+        shell: pwsh
+        run: |
+          cmake -S v17 -B build-v442 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DV17_BUILD_NUMBER=442
+          if($LASTEXITCODE -ne 0){throw "Configuration failed"}
+          cmake --build build-v442 --config Release --target moteur3d_v17 moteur3d_v17_benchmark moteur3d_v17_benchui moteur3d_v17_campaign moteur3d_v17_gibake moteur3d_v17_gpu_trajectory v17_pool_ladder_smoke v17_walk_controller_smoke v17_frame_pacing_smoke v17_camera_diagnostic_smoke --parallel 4
+          if($LASTEXITCODE -ne 0){throw "Clean release build failed"}
+          ctest --test-dir build-v442 -C Release -R "v17_pool_ladder_bidirectional|v17_frame_pacing_statistical_regression|v17_walk_stairs_collision|v17_camera_diagnostic_roundtrip" --output-on-failure
+          if($LASTEXITCODE -ne 0){throw "Regression tests failed"}
+          foreach($exe in @("moteur3d_v17.exe","moteur3d_v17_benchmark.exe",
+                             "moteur3d_v17_benchui.exe","moteur3d_v17_campaign.exe",
+                             "moteur3d_v17_gibake.exe","moteur3d_v17_gpu_trajectory.exe")){
+            $path="build-v442/Release/$exe"
+            if(!(Test-Path $path)){throw "Missing recompiled executable $path"}
+            $v=[System.Diagnostics.FileVersionInfo]::GetVersionInfo((Resolve-Path $path).Path)
+            Write-Host "$exe — file version $($v.FileVersion)"
+            if($v.FileMajorPart -ne 17 -or $v.FileMinorPart -ne 442){
+              throw "Wrong executable version in $exe — $($v.FileVersion)"
+            }
+            Copy-Item $path "dist-stage/$exe" -Force
+          }
+          Copy-Item build-v442/v16/Release/moteur3d_v16_core.dll dist-stage/moteur3d_v16_core.dll -Force
+      - name: Assemble dependency-closed user package and independent development archive
+        shell: pwsh
+        run: |
+          $rev=(git rev-parse HEAD).Trim()
+          python tools/package_clean_v442.py --source dist-stage --dest dist-clean --revision $rev
+          if($LASTEXITCODE -ne 0){throw "Clean packaging failed"}
+          python tools/package_archives_v441.py --source dist-stage --clean dist-clean --dest dist-archives
+          if($LASTEXITCODE -ne 0){throw "Developer archive packaging failed"}
+          $manifest=Get-Content dist-clean/RELEASE-MANIFEST.json -Raw | ConvertFrom-Json
+          if($manifest.version -ne "17.442"){throw "Wrong package version"}
+          if($manifest.scene -ne "benchmark-civic/scene.json"){throw "Wrong default scene"}
+          if(@(Get-ChildItem dist-clean -Filter *.exe).Count -ne 1){throw "Multiple engine executables in package root"}
+          if(@(Get-ChildItem dist-clean/benchmark-civic -Filter scene*.json).Count -ne 1){throw "Multiple scene entrypoints"}
+          if(!(Test-Path dist-clean/outils/benchmark/moteur3d_v17_benchui.exe)){throw "Benchmark UI missing"}
+          if(!(Test-Path dist-clean/outils/gi/moteur3d_v17_gibake.exe)){throw "GI tool missing"}
+          if((Get-FileHash dist-clean/audio/pripyat_radio.wav -Algorithm SHA256).Hash -ne (Get-Content radio.sha256 -Raw).Trim()){throw "Radio altered"}
+          if((Get-FileHash dist-clean/benchmark-civic/textures/energetik_fresco_mosaic.jpg -Algorithm SHA256).Hash -ne (Get-Content fresco.sha256 -Raw).Trim()){throw "Original fresco altered"}
+          foreach($exe in Get-ChildItem dist-clean -Recurse -Filter *.exe){
+            $v=[System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe.FullName)
+            if($v.FileMajorPart -ne 17 -or $v.FileMinorPart -ne 442){
+              throw "Stale exe in clean release: $($exe.FullName) version $($v.FileVersion)"
+            }
+          }
+      - name: Validate clean standalone folder with real V8 scene on DirectX 11 WARP
+        shell: pwsh
+        timeout-minutes: 15
+        run: |
+          $exe=(Resolve-Path dist-clean/moteur3d_v17.exe).Path
+          $scene=(Resolve-Path dist-clean/benchmark-civic/scene.json).Path
+          $proc=Start-Process -FilePath $exe -ArgumentList @("--smoke-repeat-raster",$scene) -WorkingDirectory (Resolve-Path dist-clean).Path -PassThru -Wait
+          if($proc.ExitCode -ne 0){throw "Clean V17.442 GUI failed standalone WARP scene test"}
+      - name: Check fresh benchmark runner with copied scene and DLL search path
+        shell: pwsh
+        timeout-minutes: 12
+        run: |
+          $env:PATH=(Resolve-Path dist-clean).Path+";"+$env:PATH
+          $env:QT_PLUGIN_PATH=(Resolve-Path dist-clean).Path
+          $scene=(Resolve-Path dist-clean/benchmark-civic/scene.json).Path
+          & dist-clean/outils/benchmark/moteur3d_v17_benchmark.exe $scene bench-clean-smoke --smoke --raster-msaa 2
+          if($LASTEXITCODE -ne 0){throw "Fresh separate benchmark runner failed"}
+      - name: Upload clean standalone Windows package
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: CSE-WARP-V17.442-PROPRE-Windows-x64
+          path: dist-clean/
+          retention-days: 21
+          if-no-files-found: error
+      - name: Upload historical scene files and benchmark archives separately
+        uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: CSE-WARP-V17.442-ARCHIVES-DEVELOPPEMENT
+          path: dist-archives/
+          retention-days: 21
+          if-no-files-found: error

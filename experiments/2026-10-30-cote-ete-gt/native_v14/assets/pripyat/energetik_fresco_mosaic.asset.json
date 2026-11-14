@@ -1,0 +1,45 @@
+{
+  "id": "energetik_fresco_mosaic",
+  "label": "Energetik foyer staircase mosaic",
+  "format": "glTF 2.0 GLB",
+  "dimensionsMeters": {
+    "width": 9.5,
+    "height": 4.3,
+    "thickness": 0
+  },
+  "texture": {
+    "source": "textures/energetik_fresco_mosaic.jpg",
+    "width": 2048,
+    "height": 930,
+    "colorSpace": "sRGB",
+    "ratio": 2.20215,
+    "nativeMipSource": "textures/energetik_fresco_mosaic.m3dpbr.gz",
+    "nativeMipGenerator": "tools/generate_energetik_fresco_map.py"
+  },
+  "material": {
+    "metallicFactor": 0,
+    "roughnessFactor": 0.72,
+    "nativeMaterialId": "energetikFresco"
+  },
+  "nativePlacement": {
+    "position": [8.12, 2.0, -41.55],
+    "rotationDegrees": [0, 0, 0],
+    "normal": [-1, 0, 0],
+    "widthAxis": [0, 0, 1],
+    "verticalAxis": [0, 1, 0]
+  },
+  "unrealPlacementFromLocalXY": {
+    "position": [8.12, 2.0, -41.55],
+    "rotationDegrees": [0, -90, 0]
+  },
+  "provenance": {
+    "kind": "generated reconstruction",
+    "references": "Four user-provided views of the Energetik mural/mosaic",
+    "historicalAccuracy": "interpretive; damaged areas are inferred, not photogrammetric"
+  },
+  "validation": {
+    "glbStructure": "generated locally",
+    "nativeScenePlacement": "authored in scene source; render comparison pending",
+    "unrealEditorImport": "pending"
+  }
+}

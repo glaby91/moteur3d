@@ -1,0 +1,193 @@
+name: CSE WARP V16 — multi-scene lighting — Windows x64
+on:
+  push:
+    branches:
+      - feature/v16-modular-scene-dispatch
+      - feature/v16-pavillon01-gpu-cpu-lighting-parity-261110
+      - fix/v16-pavillon01-persistent-render-time-261110
+      - feature/v16-dell-native-1366x768-fhd-261110
+    paths:
+      - 'v16/**'
+      - 'scenes/v16/pavillon01/**'
+      - 'scenes/v16/material-lab/**'
+      - 'scenes/v16/pripyat-photo2scene-proof/**'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_v16_bridge.*'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_scene_v16.*'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/moteur3d_v16_qt.cpp'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/m3d_engine.h'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_shading.cpp'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_compute11.cpp'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/shaders/**'
+      - '.github/workflows/build-moteur3d-v16.yml'
+  pull_request:
+    paths:
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/moteur3d_v16_qt.cpp'
+      - 'v16/**'
+      - 'scenes/v16/pavillon01/**'
+      - 'scenes/v16/material-lab/**'
+      - 'scenes/v16/pripyat-photo2scene-proof/**'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_v16_bridge.*'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_compute11.cpp'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/shaders/**'
+      - '.github/workflows/build-moteur3d-v16.yml'
+  workflow_dispatch:
+jobs:
+  windows:
+    name: Windows x64 MSVC Qt6 — build, tests, PNG, package
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Qt6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Configure
+        shell: pwsh
+        run: cmake -S v16 -B build-v16 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+      - name: Compile
+        run: cmake --build build-v16 --config Release --parallel 4
+      - name: Diagnose Qt runtime and test process exit codes
+        shell: pwsh
+        run: |
+          Write-Host "Qt6Core.dll on PATH:"
+          where.exe Qt6Core.dll
+          Write-Host "Qt6Gui.dll on PATH:"
+          where.exe Qt6Gui.dll
+          Write-Host "Scene test:"
+          & "build-v16/Release/v16_scene_check.exe" "scenes/v16/pavillon01/scene.json"
+          Write-Host "v16_scene_check exit code: $LASTEXITCODE"
+          Write-Host "Render test:"
+          & "build-v16/Release/v16_render_smoke.exe" "scenes/v16/pavillon01/scene.json" "build-v16/pavillon01-smoke.png"
+          Write-Host "v16_render_smoke exit code: $LASTEXITCODE"
+          exit 0
+      - name: Validate multi-scene lighting and graphics
+        run: ctest --test-dir build-v16 -C Release --verbose --output-on-failure
+      - name: Verify benchmark reports
+        shell: pwsh
+        run: |
+          $csv = @(Get-ChildItem -Path "build-v16/benchmark-tests" -Filter "results.csv" -Recurse -ErrorAction SilentlyContinue)
+          $json = @(Get-ChildItem -Path "build-v16/benchmark-tests" -Filter "summary.json" -Recurse -ErrorAction SilentlyContinue)
+          $png = @(Get-ChildItem -Path "build-v16/benchmark-tests" -Filter "*.png" -Recurse -ErrorAction SilentlyContinue)
+          if ($csv.Count -lt 1 -or $json.Count -lt 1 -or $png.Count -lt 1) { throw "Benchmark export missing CSV, JSON or PNG" }
+          Write-Host "Benchmark export verified: $($csv.Count) CSV, $($json.Count) JSON, $($png.Count) PNG"
+      - name: Verify CPU preview PNG
+        shell: pwsh
+        run: |
+          if (!(Test-Path "build-v16/pavillon01-smoke.png")) {
+            throw "Le test de ray tracing CPU n'a pas généré pavillon01-smoke.png"
+          }
+          $png = Get-Item "build-v16/pavillon01-smoke.png"
+          if ($png.Length -lt 1000) {
+            throw "Le rendu CPU semble vide ($($png.Length) octets)"
+          }
+          Write-Host "Aperçu CPU validé : $($png.Length) octets"
+      - name: Verify actual WARP Compute render
+        shell: pwsh
+        run: |
+          if (!(Test-Path "build-v16/pavillon01-gpu-warp.png")) {
+            throw "Missing Direct3D11 WARP GPU preview"
+          }
+          $item = Get-Item "build-v16/pavillon01-gpu-warp.png"
+          if ($item.Length -lt 1000) { throw "GPU WARP preview appears blank" }
+          Write-Host "GPU Compute WARP rendering verified: $($item.Length) bytes"
+      - name: Verify native Dell 1366x768 PNG dimensions
+        shell: pwsh
+        run: |
+          $path = "build-v16/pavillon01-gpu-warp-native-1366x768.png"
+          if (!(Test-Path $path)) { throw "Native Dell image missing: $path" }
+          $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $path))
+          if ($bytes.Length -lt 1000) { throw "Native Dell PNG appears blank" }
+          $w = ([int]$bytes[16] -shl 24) -bor ([int]$bytes[17] -shl 16) -bor ([int]$bytes[18] -shl 8) -bor [int]$bytes[19]
+          $h = ([int]$bytes[20] -shl 24) -bor ([int]$bytes[21] -shl 16) -bor ([int]$bytes[22] -shl 8) -bor [int]$bytes[23]
+          if ($w -ne 1366 -or $h -ne 768) { throw "Expected Dell native 1366x768, got $w x $h" }
+          Write-Host "Verified native Dell GPU image: $w x $h, $($bytes.Length) bytes"
+      - name: Verify GI Full HD preview PNG
+        shell: pwsh
+        run: |
+          $gi = "build-v16/pavillon01-gi-smoke.png"
+          if (!(Test-Path $gi)) { throw "GI path tracing did not produce a PNG" }
+          if ((Get-Item $gi).Length -lt 1000) { throw "GI image is blank" }
+          Write-Host "Full HD GI preview created."
+      - name: Verify Full HD PNG dimensions
+        shell: pwsh
+        run: |
+          foreach ($path in @("build-v16/pavillon01-smoke.png", "build-v16/pavillon01-gpu-warp.png", "build-v16/pavillon01-gi-smoke.png", "build-v16/pavillon01-smoke-17h.png", "build-v16/pavillon01-gpu-warp-17h.png", "build-v16/material-lab-cpu.png", "build-v16/material-lab-gpu.png", "build-v16/material-lab-gi.png", "build-v16/material-lab-cpu-17h.png", "build-v16/material-lab-gpu-17h.png")) {
+            if (!(Test-Path $path)) { throw "Reference PNG missing: $path" }
+            $bytes = [System.IO.File]::ReadAllBytes((Resolve-Path $path))
+            if ($bytes.Length -lt 24) { throw "Invalid PNG header: $path" }
+            $w = ([int]$bytes[16] -shl 24) -bor ([int]$bytes[17] -shl 16) -bor ([int]$bytes[18] -shl 8) -bor [int]$bytes[19]
+            $h = ([int]$bytes[20] -shl 24) -bor ([int]$bytes[21] -shl 16) -bor ([int]$bytes[22] -shl 8) -bor [int]$bytes[23]
+            if ($w -ne 1920 -or $h -ne 1080) { throw "Reference image is not Full HD: $path ($w x $h)" }
+            Write-Host "Verified Full HD 1920x1080: $path"
+          }
+          $benchmarkPng = Get-ChildItem "build-v16/benchmark-tests" -Filter "*.png" -Recurse | Select-Object -First 1
+          if (!$benchmarkPng) { throw "Missing benchmark PNG" }
+          $bytes = [System.IO.File]::ReadAllBytes($benchmarkPng.FullName)
+          $w = ([int]$bytes[16] -shl 24) -bor ([int]$bytes[17] -shl 16) -bor ([int]$bytes[18] -shl 8) -bor [int]$bytes[19]
+          $h = ([int]$bytes[20] -shl 24) -bor ([int]$bytes[21] -shl 16) -bor ([int]$bytes[22] -shl 8) -bor [int]$bytes[23]
+          if ($w -ne 1920 -or $h -ne 1080) { throw "Benchmark image is not Full HD: ($w x $h)" }
+          Write-Host "Verified Full HD benchmark: $($benchmarkPng.FullName)"
+      - name: Quantify GPU versus CPU GI material/color differences
+        shell: pwsh
+        run: |
+          python -m pip install --disable-pip-version-check "numpy>=1.26,<3" "pillow>=10,<13"
+          python v16/tools/compare_cpu_gpu.py "build-v16/pavillon01-gi-smoke.png" "build-v16/pavillon01-gpu-warp.png" "build-v16/parity-pavillon01"
+          if ($LASTEXITCODE -ne 0) { throw "CPU/GPU comparison failed" }
+          python v16/tools/compare_cpu_gpu.py "build-v16/pavillon01-gi-smoke.png" "build-v16/pavillon01-gpu-warp-direct-only.png" "build-v16/parity-gpu-direct-only"
+          if ($LASTEXITCODE -ne 0) { throw "CPU/GPU direct-only comparison failed" }
+          if (!(Test-Path "build-v16/parity-pavillon01/cpu_gpu_comparison.json")) { throw "GPU parity report absent" }
+          if (!(Test-Path "build-v16/parity-gpu-direct-only/cpu_gpu_comparison.json")) { throw "GPU direct-only report absent" }
+      - name: Upload GPU/CPU visual QA images (small artifact)
+        uses: actions/upload-artifact@v4
+        with:
+          name: V16-Pavillon01-GPU-Visual-QA
+          path: |
+            build-v16/parity-pavillon01/cpu_gpu_triptych.jpg
+            build-v16/parity-pavillon01/cpu_gpu_comparison.json
+            build-v16/parity-pavillon01/difference_x3.png
+            build-v16/parity-gpu-direct-only/cpu_gpu_comparison.json
+            build-v16/pavillon01-gpu-warp.png
+            build-v16/pavillon01-gpu-warp-native-1366x768.png
+            build-v16/pavillon01-gi-smoke.png
+          if-no-files-found: error
+      - name: Package EXE + Pavillon 01 + Qt6 dependencies
+        shell: pwsh
+        run: |
+          New-Item -Type Directory -Path "dist" -Force | Out-Null
+          Copy-Item "build-v16/Release/moteur3d_v16.exe" "dist/"
+          Copy-Item "build-v16/Release/moteur3d_v16_core.dll" "dist/"
+          Copy-Item "build-v16/Release/moteur3d_v16_benchmark.exe" "dist/"
+          Copy-Item "build-v16/Release/moteur3d_v16_benchui.exe" "dist/"
+          Copy-Item "build-v16/benchmark-tests" "dist/benchmark-tests" -Recurse
+          Copy-Item "build-v16/pavillon01-smoke.png" "dist/Pavillon01-CPU-Preview.png"
+          Copy-Item "build-v16/pavillon01-gi-smoke.png" "dist/Pavillon01-CPU-GI-FHD-Preview.png"
+          Copy-Item "build-v16/pavillon01-gpu-warp.png" "dist/Pavillon01-GPU-WARP-Preview.png"
+          Copy-Item "build-v16/pavillon01-gpu-warp-native-1366x768.png" "dist/Pavillon01-GPU-WARP-Natif-1366x768.png"
+          Copy-Item "build-v16/parity-pavillon01" "dist/parity-pavillon01" -Recurse
+          Copy-Item "build-v16/parity-gpu-direct-only" "dist/parity-gpu-direct-only" -Recurse
+          Copy-Item "build-v16/pavillon01-gpu-warp-direct-only.png" "dist/Pavillon01-GPU-Sans-GI-Preview.png"
+          Copy-Item "build-v16/pavillon01-smoke-17h.png" "dist/Pavillon01-CPU-Soleil-Rasant-17h-FHD.png"
+          Copy-Item "build-v16/pavillon01-gpu-warp-17h.png" "dist/Pavillon01-GPU-Soleil-Rasant-17h-FHD.png"
+          Copy-Item "build-v16/material-lab-cpu.png" "dist/Atelier-Materiaux-CPU-FHD.png"
+          Copy-Item "build-v16/material-lab-gi.png" "dist/Atelier-Materiaux-CPU-GI-FHD.png"
+          Copy-Item "build-v16/material-lab-gpu.png" "dist/Atelier-Materiaux-GPU-FHD.png"
+          Copy-Item "build-v16/material-lab-cpu-17h.png" "dist/Atelier-Materiaux-CPU-17h-FHD.png"
+          Copy-Item "build-v16/material-lab-gpu-17h.png" "dist/Atelier-Materiaux-GPU-17h-FHD.png"
+          git rev-parse HEAD | Out-File "dist/REVISION.txt" -Encoding ascii
+          Copy-Item "build-v16/Release/pavillon01" "dist/pavillon01" -Recurse
+          Copy-Item "build-v16/Release/material-lab" "dist/material-lab" -Recurse
+          Copy-Item "build-v16/Release/pripyat-photo2scene-proof" "dist/pripyat-photo2scene-proof" -Recurse
+          Copy-Item "build-v16/Release/shaders" "dist/shaders" -Recurse
+          windeployqt --release --no-translations dist/moteur3d_v16.exe
+          windeployqt --release --no-translations dist/moteur3d_v16_benchui.exe
+      - name: Upload complete Windows package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Moteur3D-V16-Pavillon01-Windows-x64
+          path: dist/
+          if-no-files-found: error

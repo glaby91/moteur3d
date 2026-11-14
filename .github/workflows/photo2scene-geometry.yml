@@ -1,0 +1,120 @@
+name: Photo2Scene WARP — geometry regression tests
+
+on:
+  push:
+    branches:
+      - feature/v16-modular-scene-dispatch
+    paths:
+      - 'tools/photo2scene/**'
+      - '.github/workflows/photo2scene-geometry.yml'
+  pull_request:
+    paths:
+      - 'tools/photo2scene/**'
+      - '.github/workflows/photo2scene-geometry.yml'
+  workflow_dispatch:
+
+jobs:
+  geometry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install numerical geometry solvers (no AI inference)
+        run: python3 -m pip install "numpy>=1.26,<3" "scipy>=1.13,<2" "opencv-python-headless>=4.9,<5"
+      - name: Python unit geometry and multiview regression tests
+        run: python3 -m unittest discover -s tools/photo2scene/tests -v
+      - name: Compute synthetic ground homography and camera FOV
+        run: |
+          python3 tools/photo2scene/photo2scene.py analyse tools/photo2scene/examples/synthetic-ground-anchors.json -o ground-result.json
+          python3 tools/photo2scene/photo2scene.py analyse tools/photo2scene/examples/synthetic-orthogonal-vanishing.json -o fov-result.json
+          python3 - <<'PY'
+          import json
+          a=json.load(open("ground-result.json"))
+          b=json.load(open("fov-result.json"))
+          assert a["planes"]["ground"]["fitting"]["rms_px"] < 1e-5
+          assert a["planes"]["ground"]["held_out_validation"]["rms_px"] < 1e-5
+          f=b["camera_intrinsics_estimate"]
+          assert abs(f["focal_length_px"]-1200.0) < 1e-4
+          assert 70.0 < f["fov_horizontal_deg"] < 80.0
+          print("Synthetic photo geometry tests PASSED")
+          PY
+      - name: Run Photo2Scene WARP on original Energetik pixel annotations
+        run: |
+          python3 tools/photo2scene/photo2scene.py analyse tools/photo2scene/data/pripyat/energetik-20261109-original-lines.json -o energetik-camera-preliminary.json
+          python3 - <<'PY'
+          import json
+          result=json.load(open("energetik-camera-preliminary.json"))
+          f=result["camera_intrinsics_estimate"]
+          v=result["vanishing_points"]
+          print("Energetik (unverified assumptions), FOV horizontal =",
+                round(f["fov_horizontal_deg"],2),"degrees")
+          print("Front VP:",v["facade_longitudinale"]["pixel"])
+          print("Side VP:",v["retour_lateral"]["pixel"])
+          assert 55 < f["fov_horizontal_deg"] < 80
+          assert v["facade_longitudinale"]["segments"] == 10
+          assert v["retour_lateral"]["segments"] == 5
+          assert not result.get("planes"), "No unsupported 3D or ground-plane depths"
+          PY
+      - name: Measure second Energetik facade without assuming a new FOV
+        run: |
+          python3 tools/photo2scene/facade_linefit.py tools/photo2scene/data/pripyat/energetik-20261109-second-view-sample.json -o energetik-second-linefit.json
+          python3 - <<'PY'
+          import json
+          report=json.load(open("energetik-second-linefit.json"))
+          assert len(report["structural_level_line_fits"])==3
+          assert report["fov_horizontal_deg"] is None
+          assert report["three_dimensional_distances"] is None
+          assert report["calibration_status"]=="NOT_VALIDATED"
+          print("Second-view facade line-fit QA PASS: no invented FOV or depth")
+          PY
+      - name: Measure third Energetik Full HD photograph without inventing geometry
+        run: |
+          python3 tools/photo2scene/facade_linefit.py tools/photo2scene/data/pripyat/energetik-20261109-third-view-sample.json -o energetik-third-linefit.json
+          python3 - <<'PY'
+          import json
+          result=json.load(open("energetik-third-linefit.json"))
+          assert len(result["structural_level_line_fits"]) == 3
+          assert not result["stable_common_vanishing_point"]
+          assert result["calibration_status"] == "NOT_VALIDATED"
+          assert result["fov_horizontal_deg"] is None
+          assert result["three_dimensional_distances"] is None
+          print("Third photo: 1920x1080 candidate segment fits, no false 3D claims")
+          PY
+      - name: Solve three-camera 3D facade rig and export OBJ without historical-scale claims
+        run: |
+          python3 tools/photo2scene/multiview_facade.py tools/photo2scene/data/pripyat/energetik-20261109-threeview-facade-anchors.json -o reprojection-3d
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          p=json.loads(Path("reprojection-3d/facade-calibration.json").read_text())
+          assert len(p["cameras"])==3
+          assert p["status"]=="EXPERIMENTAL_PARTIAL_FRONT_FACADE"
+          assert p["gauge"]["meters_per_bay"] is None
+          assert p["optimization"]["success"]
+          assert all(c["holdout"]["rms_px"]<10 for c in p["cameras"])
+          assert Path("reprojection-3d/energetik-front-plane-units.obj").stat().st_size > 100
+          print("3 cameras optimized; native OBJ saved; holdout residuals verified")
+          PY
+      - name: Reconstruct conditional three-camera front plane and export OBJ
+        run: |
+          python3 tools/photo2scene/three_view_front_plane.py tools/photo2scene/data/pripyat/energetik-three-view-front-plane-annotations.json --output energetik-three-camera-front-plane.json --obj energetik-front-plane-bay-units.obj
+          python3 - <<'PY'
+          import json
+          q=json.load(open("energetik-three-camera-front-plane.json"))
+          assert q["solver"]["converged"]
+          assert all(c["holdout_rms_px"]<7 for c in q["photos"])
+          assert "side return depth" in q["unknown"]
+          print("Front facade only: 3 conditional camera models validated on held-out points")
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Photo2Scene-WARP-Energetik-3D-calibration-and-reports
+          path: |
+            ground-result.json
+            fov-result.json
+            energetik-camera-preliminary.json
+            energetik-second-linefit.json
+            energetik-third-linefit.json
+            energetik-three-camera-front-plane.json
+            energetik-front-plane-bay-units.obj
+            reprojection-3d/
+          if-no-files-found: error

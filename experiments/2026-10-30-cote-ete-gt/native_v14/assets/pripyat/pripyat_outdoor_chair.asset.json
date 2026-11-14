@@ -1,0 +1,54 @@
+{
+  "schema": "m3d-asset-instance-v1",
+  "asset": "pripyat-cheap-outdoor-chair",
+  "variant": "worn_intact",
+  "origin": [
+    0,
+    0,
+    0
+  ],
+  "rotationY": 0,
+  "scale": 1,
+  "dimensionsMetres": [
+    0.5,
+    0.85,
+    0.54
+  ],
+  "objectRange": [
+    0,
+    24
+  ],
+  "objectCount": 24,
+  "components": [
+    {
+      "id": "painted_tube_frame",
+      "objectCount": 17,
+      "materialIds": [
+        "prp_steel_painted",
+        "prp_steel_rusted"
+      ]
+    },
+    {
+      "id": "weathered_wood_slats",
+      "objectCount": 7,
+      "materialIds": [
+        "prp_wood_weathered"
+      ]
+    }
+  ],
+  "damageState": "worn_intact",
+  "glb": "pripyat_outdoor_chair.glb",
+  "format": "glTF 2.0 binary",
+  "textureMaps": [
+    "baseColor",
+    "normal",
+    "metallicRoughness"
+  ],
+  "textureResolution": 2048,
+  "proceduralTextures": true,
+  "materials": [
+    "seatSupportPaint",
+    "seatSteel",
+    "seatWood"
+  ]
+}

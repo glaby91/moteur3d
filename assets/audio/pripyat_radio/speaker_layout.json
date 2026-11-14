@@ -1,0 +1,65 @@
+{
+  "format": "cse-warp-radio-speakers-v1",
+  "units": "m",
+  "scene": "benchmark-civic",
+  "description": "Four compact orange-red Soviet-inspired public address horns mounted on front entry pilasters. Fictional reconstruction, not historic surveyed speakers.",
+  "loudspeakers": [
+    {
+      "id": "hp1",
+      "position": [
+        -30,
+        3.05,
+        -3.62
+      ],
+      "front": [
+        -0.18,
+        -0.342,
+        0.923
+      ]
+    },
+    {
+      "id": "hp2",
+      "position": [
+        -12,
+        3.05,
+        -3.62
+      ],
+      "front": [
+        -0.07,
+        -0.342,
+        0.937
+      ]
+    },
+    {
+      "id": "hp3",
+      "position": [
+        12,
+        3.05,
+        -3.62
+      ],
+      "front": [
+        0.07,
+        -0.342,
+        0.937
+      ]
+    },
+    {
+      "id": "hp4",
+      "position": [
+        30,
+        3.05,
+        -3.62
+      ],
+      "front": [
+        0.18,
+        -0.342,
+        0.923
+      ]
+    }
+  ],
+  "cone": {
+    "innerDegrees": 65,
+    "outerDegrees": 125
+  },
+  "audioFile": "audio/pripyat_radio.wav"
+}

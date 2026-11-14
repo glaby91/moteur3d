@@ -1,0 +1,154 @@
+{
+  "version": "15.0-beta.3",
+  "source": "scene_pripyat_central.js",
+  "note": "Functional assignments; entries with status planned are not guaranteed present on every surface",
+  "rooms": {
+    "EXTERIOR": {
+      "paving": [
+        "stone",
+        "concrete"
+      ],
+      "road": [
+        "asphalt"
+      ],
+      "facade": [
+        "concrete",
+        "plaster",
+        "volcanicTuff",
+        "rust"
+      ],
+      "windows": [
+        "glass",
+        "windowdark"
+      ],
+      "frames": {
+        "materials": [
+          "windowFrame"
+        ],
+        "status": "planned"
+      }
+    },
+    "RDC_FOYER": {
+      "floor": [
+        "floorTerrazzo"
+      ],
+      "walls": [
+        "plaster",
+        "paintPeeling"
+      ],
+      "fresco": [
+        "energetikFresco"
+      ],
+      "ceiling": {
+        "materials": [
+          "ceilingFlaked"
+        ],
+        "status": "planned"
+      }
+    },
+    "RDC_AUDITORIUM": {
+      "floor": [
+        "floorConcreteDust"
+      ],
+      "walls": [
+        "volcanicTuff",
+        "plaster"
+      ],
+      "seats": [
+        "seatVinylBrown",
+        "seatFabric"
+      ],
+      "ceiling": [
+        "concrete",
+        "debris"
+      ]
+    },
+    "RDC_STAGE": {
+      "deck": [
+        "stageWood"
+      ],
+      "curtains": [
+        "curtain",
+        "seatFabricWorn"
+      ],
+      "screen": [
+        "cinemaScreen"
+      ]
+    },
+    "RDC_SERVICE": {
+      "floor": [
+        "floorCeramic",
+        "floorTerrazzo"
+      ],
+      "walls": [
+        "paintPeeling",
+        "wallDamp",
+        "wallCeramic"
+      ],
+      "pipes": [
+        "pipePaint"
+      ],
+      "doors": {
+        "materials": [
+          "doorPaint"
+        ],
+        "status": "planned"
+      }
+    },
+    "UPPER_SPORT": {
+      "floor": [
+        "floorGym"
+      ],
+      "equipment": [
+        "wood",
+        "metal"
+      ],
+      "ringCanvas": [
+        "boxingCanvas"
+      ],
+      "ringRopes": [
+        "boxingRope"
+      ]
+    },
+    "UPPER_LIBRARY": {
+      "floor": [
+        "floorParquet"
+      ],
+      "walls": [
+        "paintPeeling",
+        "wallDamp"
+      ],
+      "furniture": [
+        "wood"
+      ],
+      "paper": {
+        "materials": [
+          "paperAged"
+        ],
+        "status": "planned"
+      }
+    },
+    "UPPER_EAST": {
+      "floor": [
+        "floorCeramic"
+      ],
+      "walls": [
+        "plaster",
+        "concrete"
+      ]
+    },
+    "STAIRS_ROOF": {
+      "steps": [
+        "stone",
+        "concrete"
+      ],
+      "rails": [
+        "rust",
+        "metal"
+      ],
+      "pipes": [
+        "pipePaint"
+      ]
+    }
+  }
+}
