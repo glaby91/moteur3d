@@ -126,6 +126,17 @@ if(WIN32)
                     VERBATIM)
                 list(APPEND V17_VULKAN_SPIRV "${spv}")
             endforeach()
+            set(box_spv "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders/raster_box.vert.spv")
+            add_custom_command(OUTPUT "${box_spv}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders"
+                COMMAND "${V17_GLSLANG_VALIDATOR}"
+                    -V --target-env vulkan1.2
+                    "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster_box.vert"
+                    -o "${box_spv}"
+                DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster_box.vert"
+                VERBATIM)
+            list(APPEND V17_VULKAN_SPIRV "${box_spv}")
             add_custom_target(v17_vulkan_spirv DEPENDS ${V17_VULKAN_SPIRV})
             add_dependencies(moteur3d_v17 v17_vulkan_spirv)
             add_custom_command(TARGET moteur3d_v17 POST_BUILD
