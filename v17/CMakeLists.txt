@@ -175,6 +175,11 @@ if(WIN32)
 endif()
 
 # Dedicated Vulkan regression tests. GPU-free mesh parity always runs.
+add_executable(v17_vulkan_mipmap_smoke "vulkan/tests/mipmap_smoke.cpp")
+target_include_directories(v17_vulkan_mipmap_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/vulkan")
+add_test(NAME v17_vulkan_mipmap_policy COMMAND v17_vulkan_mipmap_smoke)
+
 add_executable(v17_vulkan_readback_smoke "vulkan/tests/readback_smoke.cpp")
 target_include_directories(v17_vulkan_readback_smoke PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/vulkan")

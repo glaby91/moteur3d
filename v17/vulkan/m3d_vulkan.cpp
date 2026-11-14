@@ -5,6 +5,7 @@
 #include "m3d_vulkan_mesh.h"
 #include "m3d_vulkan_version.h"
 #include "m3d_vulkan_readback.h"
+#include "m3d_vulkan_mips.h"
 #include <vulkan/vulkan.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -44,7 +45,7 @@ struct Texture {
     VkDeviceMemory memory=VK_NULL_HANDLE;
     VkImageView view=VK_NULL_HANDLE;
     VkFormat format=VK_FORMAT_UNDEFINED;
-    uint32_t width=0,height=0,layers=0;
+    uint32_t width=0,height=0,layers=0,mips=1;
 };
 struct alignas(16) Uniforms {
     float eye[4]{},forward[4]{},right[4]{},up[4]{},sunDir[4]{},sky[4]{};
@@ -118,7 +119,7 @@ class VulkanRaster final {
     VkDescriptorPool descriptorPool_=VK_NULL_HANDLE;
     VkDescriptorSetLayout descriptorLayout_=VK_NULL_HANDLE;
     VkDescriptorSet descriptor_=VK_NULL_HANDLE;
-    VkSampler albedoSampler_=VK_NULL_HANDLE,shadowSampler_=VK_NULL_HANDLE;
+    VkSampler albedoSampler_=VK_NULL_HANDLE,protectedSampler_=VK_NULL_HANDLE,shadowSampler_=VK_NULL_HANDLE;
     Texture color_,depth_,albedo_,surface_,shadow_,detailAlbedo_,detailSurface_;
     VkFramebuffer framebuffer_=VK_NULL_HANDLE;
     Buffer vertices_,transparent_,boxTemplate_,boxInstances_,foliageTemplate_,foliageInstances_,uniform_,readback_;
@@ -192,11 +193,13 @@ class VulkanRaster final {
         b={};
     }
     Texture image(uint32_t w,uint32_t h,uint32_t layers,VkFormat format,
-                  VkImageUsageFlags usage,VkImageAspectFlags aspect,bool forceArrayView=false){
-        Texture t;t.width=w;t.height=h;t.layers=layers;t.format=format;
+                  VkImageUsageFlags usage,VkImageAspectFlags aspect,bool forceArrayView=false,uint32_t mipLevels=1){
+        Texture t;t.width=w;t.height=h;t.layers=layers;t.format=format;t.mips=mipLevels;
+        if(!mipLevels||mipLevels>vkmips::levelCount(std::max(w,h)))
+            throw std::runtime_error("Invalid Vulkan texture mip count");
         VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
         ci.imageType=VK_IMAGE_TYPE_2D;ci.format=format;ci.extent={w,h,1};
-        ci.mipLevels=1;ci.arrayLayers=layers;ci.samples=VK_SAMPLE_COUNT_1_BIT;
+        ci.mipLevels=mipLevels;ci.arrayLayers=layers;ci.samples=VK_SAMPLE_COUNT_1_BIT;
         ci.tiling=VK_IMAGE_TILING_OPTIMAL;ci.usage=usage;ci.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
         vkcheck(vkCreateImage(device_,&ci,nullptr,&t.image),"create image");
         VkMemoryRequirements req{};vkGetImageMemoryRequirements(device_,t.image,&req);
@@ -207,7 +210,7 @@ class VulkanRaster final {
         VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         vi.image=t.image;vi.viewType=(forceArrayView||layers>1)?VK_IMAGE_VIEW_TYPE_2D_ARRAY:VK_IMAGE_VIEW_TYPE_2D;
         vi.format=format;vi.subresourceRange.aspectMask=aspect;
-        vi.subresourceRange.levelCount=1;vi.subresourceRange.layerCount=layers;
+        vi.subresourceRange.levelCount=mipLevels;vi.subresourceRange.layerCount=layers;
         vkcheck(vkCreateImageView(device_,&vi,nullptr,&t.view),"create view");
         return t;
     }
@@ -244,7 +247,7 @@ class VulkanRaster final {
         b.srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
         b.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
         b.image=t.image;b.subresourceRange.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
-        b.subresourceRange.levelCount=1;b.subresourceRange.layerCount=t.layers;
+        b.subresourceRange.levelCount=t.mips;b.subresourceRange.layerCount=t.layers;
         vkCmdPipelineBarrier(cmd_,srcStage,dstStage,0,0,nullptr,0,nullptr,1,&b);
     }
     void uploadImage(Texture& tex,const void* src,size_t bytes){
@@ -258,8 +261,50 @@ class VulkanRaster final {
         region.imageSubresource.layerCount=tex.layers;
         region.imageExtent={tex.width,tex.height,1};
         vkCmdCopyBufferToImage(cmd_,stage.handle,tex.image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&region);
-        barrier(tex,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,VK_ACCESS_TRANSFER_WRITE_BIT,
-                VK_ACCESS_SHADER_READ_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        if(tex.mips>1){
+            // Generate all layers once at texture upload. Never generate mips per frame.
+            auto moveLevel=[&](uint32_t level,VkImageLayout oldLayout,
+                 VkImageLayout newLayout,VkAccessFlags src,VkAccessFlags dst,
+                 VkPipelineStageFlags srcStage,VkPipelineStageFlags dstStage){
+                VkImageMemoryBarrier b{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+                b.oldLayout=oldLayout;b.newLayout=newLayout;
+                b.srcAccessMask=src;b.dstAccessMask=dst;
+                b.srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
+                b.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
+                b.image=tex.image;b.subresourceRange.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+                b.subresourceRange.baseMipLevel=level;b.subresourceRange.levelCount=1;
+                b.subresourceRange.layerCount=tex.layers;
+                vkCmdPipelineBarrier(cmd_,srcStage,dstStage,0,0,nullptr,0,nullptr,1,&b);
+            };
+            for(uint32_t i=1;i<tex.mips;i++){
+                moveLevel(i-1,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,VK_ACCESS_TRANSFER_WRITE_BIT,
+                    VK_ACCESS_TRANSFER_READ_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT);
+                VkImageBlit b{};
+                b.srcSubresource.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+                b.srcSubresource.mipLevel=i-1;b.srcSubresource.layerCount=tex.layers;
+                b.dstSubresource.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+                b.dstSubresource.mipLevel=i;b.dstSubresource.layerCount=tex.layers;
+                b.srcOffsets[1]={int32_t(vkmips::extent(tex.width,i-1)),
+                                 int32_t(vkmips::extent(tex.height,i-1)),1};
+                b.dstOffsets[1]={int32_t(vkmips::extent(tex.width,i)),
+                                 int32_t(vkmips::extent(tex.height,i)),1};
+                vkCmdBlitImage(cmd_,tex.image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                               tex.image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&b,VK_FILTER_LINEAR);
+            }
+            for(uint32_t i=0;i<tex.mips;i++){
+                const bool final=i+1==tex.mips;
+                moveLevel(i,final?VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    final?VK_ACCESS_TRANSFER_WRITE_BIT:VK_ACCESS_TRANSFER_READ_BIT,
+                    VK_ACCESS_SHADER_READ_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+            }
+        }else{
+            barrier(tex,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                    VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
+        }
         submit();free(stage);
     }
     Buffer uploadVertices(const void* src,size_t bytes){
@@ -282,8 +327,8 @@ class VulkanRaster final {
         VkDescriptorImageInfo a{albedoSampler_,albedo_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo n{albedoSampler_,surface_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo s{shadowSampler_,shadow_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkDescriptorImageInfo highAlbedo{albedoSampler_,detailAlbedo_.view?detailAlbedo_.view:albedo_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        VkDescriptorImageInfo highSurface{albedoSampler_,detailSurface_.view?detailSurface_.view:surface_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo highAlbedo{protectedSampler_,detailAlbedo_.view?detailAlbedo_.view:albedo_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        VkDescriptorImageInfo highSurface{protectedSampler_,detailSurface_.view?detailSurface_.view:surface_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         std::array<VkWriteDescriptorSet,6> writes{};
         for(uint32_t i=0;i<6;i++){
             auto& w=writes[i];w.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -491,8 +536,10 @@ class VulkanRaster final {
         si.addressModeW=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         si.anisotropyEnable=features_.samplerAnisotropy;
         si.maxAnisotropy=features_.samplerAnisotropy?std::min(8.f,props_.limits.maxSamplerAnisotropy):1.f;
-        si.maxLod=0.f;
+        si.maxLod=32.f; // Auto tier: GPU trilinear down to last valid mip.
         vkcheck(vkCreateSampler(device_,&si,nullptr,&albedoSampler_),"texture sampler");
+        si.maxLod=0.f;  // Preserve tier: never lower resolution with distance.
+        vkcheck(vkCreateSampler(device_,&si,nullptr,&protectedSampler_),"protected sampler");
         si.addressModeU=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         si.addressModeV=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
         si.anisotropyEnable=VK_FALSE;si.minFilter=VK_FILTER_NEAREST;si.magFilter=VK_FILTER_NEAREST;
@@ -719,16 +766,29 @@ class VulkanRaster final {
         uint32_t side=128;
         for(uint32_t candidate:{256u,512u,1024u,2048u})
             if(candidate<=props_.limits.maxImageDimension2D &&
-               uint64_t(candidate)*candidate*layers*8ull<=budget)side=candidate;
+               vkmips::texelsPerLayer(candidate)*layers*8ull<=budget)side=candidate;
         if(side>props_.limits.maxImageDimension2D)
             throw std::runtime_error("GPU image dimensions too small");
+        auto supportsLinearBlit=[&](VkFormat format){
+            VkFormatProperties properties{};
+            vkGetPhysicalDeviceFormatProperties(physical_,format,&properties);
+            constexpr VkFormatFeatureFlags required=VK_FORMAT_FEATURE_BLIT_SRC_BIT |
+               VK_FORMAT_FEATURE_BLIT_DST_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+            return (properties.optimalTilingFeatures&required)==required;
+        };
+        const bool supported=supportsLinearBlit(VK_FORMAT_R8G8B8A8_SRGB) &&
+                             supportsLinearBlit(VK_FORMAT_R8G8B8A8_UNORM);
+        const uint32_t levels=supported?vkmips::levelCount(side):1u;
         std::clog<<"[CSE WARP Vulkan] PBR array layers="<<layers
-                 <<" texture-side="<<side<<" pixels, budget="<<budget/(1024*1024)<<" MiB\n";
-
+                 <<" texture-side="<<side<<" pixels, mip-levels="<<levels
+                 <<" trilinear="<<(levels>1?"yes":"unsupported")<<", budget="
+                 <<budget/(1024*1024)<<" MiB\n";
+        const VkImageUsageFlags usage=VK_IMAGE_USAGE_SAMPLED_BIT |
+            VK_IMAGE_USAGE_TRANSFER_DST_BIT | (levels>1?VK_IMAGE_USAGE_TRANSFER_SRC_BIT:0u);
         albedo_=image(side,side,layers,VK_FORMAT_R8G8B8A8_SRGB,
-                      VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_ASPECT_COLOR_BIT,true);
+                      usage,VK_IMAGE_ASPECT_COLOR_BIT,true,levels);
         surface_=image(side,side,layers,VK_FORMAT_R8G8B8A8_UNORM,
-                       VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_ASPECT_COLOR_BIT,true);
+                       usage,VK_IMAGE_ASPECT_COLOR_BIT,true,levels);
         std::vector<uint32_t> alb(size_t(side)*side*layers,0xff808080u);
         std::vector<uint32_t> surf(alb.size(),0xffFF8080u); // norm (128,128,255), roughness 255
         for(uint32_t layer=0;layer<layers&&layer<scene.mat.size();layer++){
@@ -1027,6 +1087,7 @@ public:
         if(layout_)vkDestroyPipelineLayout(device_,layout_,nullptr);
         if(renderPass_)vkDestroyRenderPass(device_,renderPass_,nullptr);
         if(albedoSampler_)vkDestroySampler(device_,albedoSampler_,nullptr);
+        if(protectedSampler_)vkDestroySampler(device_,protectedSampler_,nullptr);
         if(shadowSampler_)vkDestroySampler(device_,shadowSampler_,nullptr);
         if(descriptorPool_)vkDestroyDescriptorPool(device_,descriptorPool_,nullptr);
         if(descriptorLayout_)vkDestroyDescriptorSetLayout(device_,descriptorLayout_,nullptr);

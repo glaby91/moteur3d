@@ -66,7 +66,7 @@ jobs:
         id: compile
         shell: pwsh
         run: |
-          cmake --build build-v17 --config Release --parallel 4 --target moteur3d_v17 v17_vulkan_mesh_smoke v17_vulkan_readback_smoke v17_vulkan_version_smoke v17_vulkan_gpu_smoke v17_vulkan_ab_bench
+          cmake --build build-v17 --config Release --parallel 4 --target moteur3d_v17 v17_vulkan_mesh_smoke v17_vulkan_mipmap_smoke v17_vulkan_readback_smoke v17_vulkan_version_smoke v17_vulkan_gpu_smoke v17_vulkan_ab_bench
           if ($LASTEXITCODE -ne 0) { throw 'Vulkan final Windows build failed' }
       - name: Assert always-on Vulkan Z-prepass contract
         if: ${{ steps.compile.outcome == 'success' }}
@@ -96,14 +96,14 @@ jobs:
           Get-ChildItem $exe -Filter '*.dll' -Name |
             Out-File 'diagnostics-vulkan/dlls.txt'
           foreach ($p in @('moteur3d_v17.exe','moteur3d_v16_core.dll',
-                        'v17_vulkan_gpu_smoke.exe','v17_vulkan_ab_bench.exe','v17_vulkan_mesh_smoke.exe','v17_vulkan_readback_smoke.exe','v17_vulkan_version_smoke.exe',
+                        'v17_vulkan_gpu_smoke.exe','v17_vulkan_ab_bench.exe','v17_vulkan_mesh_smoke.exe','v17_vulkan_mipmap_smoke.exe','v17_vulkan_readback_smoke.exe','v17_vulkan_version_smoke.exe',
                         'vulkan/raster.vert.spv','vulkan/raster.frag.spv','vulkan/raster_fast.frag.spv',
                         'vulkan/raster_box.vert.spv','vulkan/raster_foliage.vert.spv')) {
             if (!(Test-Path "$exe/$p")) { throw "Missing Vulkan output: $p" }
             Write-Host "Verified: $p"
           }
           $failures=@()
-          foreach ($name in @('v17_vulkan_mesh_smoke','v17_vulkan_readback_smoke','v17_vulkan_version_smoke')) {
+          foreach ($name in @('v17_vulkan_mesh_smoke','v17_vulkan_mipmap_smoke','v17_vulkan_readback_smoke','v17_vulkan_version_smoke')) {
             Write-Host "Starting $name"
             & "$exe/$name.exe" *>&1 | Tee-Object -FilePath "diagnostics-vulkan/$name.txt"
             $exitCode=$LASTEXITCODE
@@ -126,7 +126,7 @@ jobs:
           $dest='dist-v17-vulkan'
           New-Item -ItemType Directory -Force $dest | Out-Null
           foreach ($name in @('moteur3d_v17.exe','moteur3d_v16_core.dll',
-                              'v17_vulkan_gpu_smoke.exe','v17_vulkan_ab_bench.exe','v17_vulkan_mesh_smoke.exe','v17_vulkan_readback_smoke.exe','v17_vulkan_version_smoke.exe')) {
+                              'v17_vulkan_gpu_smoke.exe','v17_vulkan_ab_bench.exe','v17_vulkan_mesh_smoke.exe','v17_vulkan_mipmap_smoke.exe','v17_vulkan_readback_smoke.exe','v17_vulkan_version_smoke.exe')) {
             Copy-Item "$src/$name" "$dest/" -Force
           }
           Copy-Item "$src/vulkan" "$dest/vulkan" -Recurse -Force
