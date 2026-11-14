@@ -655,6 +655,8 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
                 return result;
             }
             material.surfaceAuthored=true;material.waterSurface=(surface=="water");
+            if(material.waterSurface&&!j.contains("transmission"))
+                material.transmissionPercent=90;
         }
         const auto texId=j.value("textureSet").toString();
         if(!sets.contains(texId)){result.error="Missing texture set: "+texId;return result;}

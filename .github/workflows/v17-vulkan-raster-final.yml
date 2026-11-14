@@ -83,6 +83,10 @@ jobs:
           if (!$skyVert.Contains('gl_Position=vec4(ndc,1.0,1.0)')) { throw 'Sky must be at far depth 1' }
           if (!$skyFrag.Contains('layout(early_fragment_tests) in;')) { throw 'Sky early-Z shader missing' }
           if (!$renderer.Contains('skyDepth.depthCompareOp=VK_COMPARE_OP_EQUAL')) { throw 'Sky must be depth-masked by opaque prepass' }
+          $fragment=Get-Content 'v17/vulkan/shaders/raster.frag' -Raw
+          if (!$renderer.Contains('sub.pResolveAttachments=') -or !$renderer.Contains('ms.rasterizationSamples=msaaSamples_')) { throw 'MSAA inline resolve missing' }
+          if (!$renderer.Contains('ensureGI(scene);') -or !$fragment.Contains('sampler3D giCurrent')) { throw 'Baked GI 3D path missing' }
+          if (!$fragment.Contains('fresnelWater') -or !$renderer.Contains('f.textureDetail[i][1]')) { throw 'Water shading missing' }
           $begin=$renderer.IndexOf('drawOpaque(true); // Mandatory')
           $skyDraw=$renderer.IndexOf('vkCmdDraw(cmd_,3,1,0,0);++drawCalls;')
           $opaqueColor=$renderer.IndexOf('drawOpaque(false); // Identical')

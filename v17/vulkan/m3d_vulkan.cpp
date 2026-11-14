@@ -125,12 +125,13 @@ class VulkanRaster final {
     VkDescriptorSetLayout descriptorLayout_=VK_NULL_HANDLE;
     VkDescriptorSet descriptor_=VK_NULL_HANDLE;
     VkSampler albedoSampler_=VK_NULL_HANDLE,protectedSampler_=VK_NULL_HANDLE,shadowSampler_=VK_NULL_HANDLE;
-    Texture color_,depth_,albedo_,surface_,shadow_,detailAlbedo_,detailSurface_;
+    Texture color_,msColor_,depth_,albedo_,surface_,shadow_,detailAlbedo_,detailSurface_;
     Texture gi0_,gi1_;
     VkSampler giSampler_=VK_NULL_HANDLE;
     gibake::Table giTable_{};
     std::filesystem::path giPath_{};
-    uint64_t giSceneHash_=0;
+    uint64_t giSceneHash_=0,giSceneIdentity_=0,giSceneRevision_=~uint64_t(0);
+    const Scene* giScenePointer_=nullptr;
     bool giAvailable_=false,gi0Uploaded_=false,gi1Uploaded_=false;
     int giHour0_=-1,giHour1_=-1;
     float giMix_=0.f;
@@ -154,6 +155,9 @@ class VulkanRaster final {
     bool srgbColorEnabled_=false;
     VkFormat colorFormat_=VK_FORMAT_R8G8B8A8_UNORM;
     bool started_=false;
+    uint32_t msaaSetting_=2;
+    VkSampleCountFlagBits msaaSamples_=VK_SAMPLE_COUNT_1_BIT;
+    VkFormat depthFormat_=VK_FORMAT_D32_SFLOAT;
     static double ms(Clock::time_point start,Clock::time_point end) {
         return std::chrono::duration<double,std::milli>(end-start).count();
     }
@@ -207,13 +211,13 @@ class VulkanRaster final {
         b={};
     }
     Texture image(uint32_t w,uint32_t h,uint32_t layers,VkFormat format,
-                  VkImageUsageFlags usage,VkImageAspectFlags aspect,bool forceArrayView=false,uint32_t mipLevels=1){
+                  VkImageUsageFlags usage,VkImageAspectFlags aspect,bool forceArrayView=false,uint32_t mipLevels=1,VkSampleCountFlagBits samples=VK_SAMPLE_COUNT_1_BIT){
         Texture t;t.width=w;t.height=h;t.layers=layers;t.format=format;t.mips=mipLevels;
         if(!mipLevels||mipLevels>vkmips::levelCount(std::max(w,h)))
             throw std::runtime_error("Invalid Vulkan texture mip count");
         VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
         ci.imageType=VK_IMAGE_TYPE_2D;ci.format=format;ci.extent={w,h,1};
-        ci.mipLevels=mipLevels;ci.arrayLayers=layers;ci.samples=VK_SAMPLE_COUNT_1_BIT;
+        ci.mipLevels=mipLevels;ci.arrayLayers=layers;ci.samples=samples;
         ci.tiling=VK_IMAGE_TILING_OPTIMAL;ci.usage=usage;ci.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
         vkcheck(vkCreateImage(device_,&ci,nullptr,&t.image),"create image");
         VkMemoryRequirements req{};vkGetImageMemoryRequirements(device_,t.image,&req);
@@ -277,8 +281,13 @@ class VulkanRaster final {
         if(!rasterHybridLightingEnabled())return;
         const auto path=rasterGiCachePath();
         if(path.empty())return;
-        const uint64_t hash=gibake::signature(scene);
-        if(path!=giPath_||hash!=giSceneHash_){
+        const bool changed=path!=giPath_||giScenePointer_!=&scene||
+            giSceneIdentity_!=scene.gpuCacheIdentity||
+            giSceneRevision_!=scene.gpuCacheRevision||scene.gpuCacheIdentity==0;
+        if(changed){
+            giScenePointer_=&scene;giSceneIdentity_=scene.gpuCacheIdentity;
+            giSceneRevision_=scene.gpuCacheRevision;
+            const uint64_t hash=gibake::signature(scene);
             giPath_=path;giSceneHash_=hash;
             giTable_=gibake::Table{};
             gibake::Table candidate;std::string reason;
@@ -612,6 +621,35 @@ class VulkanRaster final {
         // Always-on engine pipeline: no per-frame or startup A/B decision.
         // DX11 has its own independent renderer and is not modified.
         std::clog<<"[CSE WARP Vulkan] Generic opaque Z-prepass=always-on (no runtime toggle)\n";
+        // Query the exact color and depth image sample counts as Khronos recommends.
+        VkFormatProperties dp{};
+        vkGetPhysicalDeviceFormatProperties(physical_,depthFormat_,&dp);
+        if(!(dp.optimalTilingFeatures&VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT))
+            depthFormat_=VK_FORMAT_D16_UNORM;
+        auto capabilities=[&](VkFormat fmt,VkImageUsageFlags usage){
+            VkImageFormatProperties result{};
+            return vkGetPhysicalDeviceImageFormatProperties(physical_,fmt,VK_IMAGE_TYPE_2D,
+                VK_IMAGE_TILING_OPTIMAL,usage,0,&result)==VK_SUCCESS
+                ?result.sampleCounts:VkSampleCountFlags(0);
+        };
+        const VkSampleCountFlags supported=props_.limits.framebufferColorSampleCounts&
+            props_.limits.framebufferDepthSampleCounts&
+            capabilities(colorFormat_,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)&
+            capabilities(depthFormat_,VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+        const char* msaa=std::getenv("CSE_WARP_VK_MSAA");
+        if(msaa){
+            if(std::strcmp(msaa,"1")==0)msaaSetting_=1;
+            else if(std::strcmp(msaa,"2")==0)msaaSetting_=2;
+            else if(std::strcmp(msaa,"4")==0)msaaSetting_=4;
+            else throw std::runtime_error("CSE_WARP_VK_MSAA accepts 1, 2, or 4");
+        }
+        msaaSamples_=(msaaSetting_>=4&&(supported&VK_SAMPLE_COUNT_4_BIT))?
+            VK_SAMPLE_COUNT_4_BIT:(msaaSetting_>=2&&(supported&VK_SAMPLE_COUNT_2_BIT))?
+            VK_SAMPLE_COUNT_2_BIT:VK_SAMPLE_COUNT_1_BIT;
+        if(!(supported&msaaSamples_))
+            throw std::runtime_error("No supported Vulkan color/depth framebuffer sample count");
+        std::clog<<"[CSE WARP Vulkan] MSAA requested="<<msaaSetting_
+                 <<" active="<<uint32_t(msaaSamples_)<<" inline resolve\n";
         std::clog<<"[CSE WARP Vulkan] GPU="<<adapter_
                  <<" version="<<VK_VERSION_MAJOR(props_.apiVersion)<<"."
                  <<VK_VERSION_MINOR(props_.apiVersion)<<"."
@@ -675,26 +713,30 @@ class VulkanRaster final {
         si.mipmapMode=VK_SAMPLER_MIPMAP_MODE_NEAREST;si.maxLod=0.f;
         vkcheck(vkCreateSampler(device_,&si,nullptr,&giSampler_),"GI sampler");
         uniform_=buffer(sizeof(Uniforms),VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-        VkAttachmentDescription attach[2]{};
+        VkAttachmentDescription attach[3]{};
         attach[0].format=colorFormat_;
-        attach[0].samples=VK_SAMPLE_COUNT_1_BIT;
+        attach[0].samples=msaaSamples_;
         attach[0].loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;
-        attach[0].storeOp=VK_ATTACHMENT_STORE_OP_STORE;
+        attach[0].storeOp=msaaSamples_==VK_SAMPLE_COUNT_1_BIT?VK_ATTACHMENT_STORE_OP_STORE:VK_ATTACHMENT_STORE_OP_DONT_CARE;
         attach[0].initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;
-        attach[0].finalLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
-        VkFormat depthFormat=VK_FORMAT_D32_SFLOAT;
-        VkFormatProperties supported{};vkGetPhysicalDeviceFormatProperties(physical_,depthFormat,&supported);
-        if(!(supported.optimalTilingFeatures&VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT))
-            depthFormat=VK_FORMAT_D16_UNORM;
-        attach[1].format=depthFormat;attach[1].samples=VK_SAMPLE_COUNT_1_BIT;
+        attach[0].finalLayout=msaaSamples_==VK_SAMPLE_COUNT_1_BIT?VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        attach[1].format=depthFormat_;attach[1].samples=msaaSamples_;
         attach[1].loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;
         attach[1].storeOp=VK_ATTACHMENT_STORE_OP_DONT_CARE;
         attach[1].initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;
         attach[1].finalLayout=VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        VkAttachmentReference refs[2]={{0,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
-                                        {1,VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL}};
+        // MSAA color + MSAA depth + inline single-sample color resolve.
+        attach[2].format=colorFormat_;attach[2].samples=VK_SAMPLE_COUNT_1_BIT;
+        attach[2].loadOp=VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        attach[2].storeOp=VK_ATTACHMENT_STORE_OP_STORE;
+        attach[2].initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;
+        attach[2].finalLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        VkAttachmentReference refs[3]={{0,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
+                                        {1,VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL},
+                                        {2,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}};
         VkSubpassDescription sub{};sub.pipelineBindPoint=VK_PIPELINE_BIND_POINT_GRAPHICS;
         sub.colorAttachmentCount=1;sub.pColorAttachments=&refs[0];sub.pDepthStencilAttachment=&refs[1];
+        sub.pResolveAttachments=msaaSamples_==VK_SAMPLE_COUNT_1_BIT?nullptr:&refs[2];
         VkSubpassDependency dep[2]{};
         dep[0].srcSubpass=VK_SUBPASS_EXTERNAL;dep[0].dstSubpass=0;
         dep[0].srcStageMask=VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
@@ -706,7 +748,7 @@ class VulkanRaster final {
         dep[1].srcAccessMask=VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
         dep[1].dstAccessMask=VK_ACCESS_TRANSFER_READ_BIT;
         VkRenderPassCreateInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
-        rp.attachmentCount=2;rp.pAttachments=attach;rp.subpassCount=1;rp.pSubpasses=&sub;
+        rp.attachmentCount=msaaSamples_==VK_SAMPLE_COUNT_1_BIT?2:3;rp.pAttachments=attach;rp.subpassCount=1;rp.pSubpasses=&sub;
         rp.dependencyCount=2;rp.pDependencies=dep;
         vkcheck(vkCreateRenderPass(device_,&rp,nullptr,&renderPass_),"render pass");
         VkPipelineCacheCreateInfo pc{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
@@ -769,7 +811,7 @@ class VulkanRaster final {
         rs.polygonMode=VK_POLYGON_MODE_FILL;rs.lineWidth=1.f;rs.cullMode=VK_CULL_MODE_NONE;
         rs.frontFace=VK_FRONT_FACE_COUNTER_CLOCKWISE;
         VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
-        ms.rasterizationSamples=VK_SAMPLE_COUNT_1_BIT;
+        ms.rasterizationSamples=msaaSamples_;
         VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
         ds.depthTestEnable=VK_TRUE;ds.depthWriteEnable=VK_TRUE;
         ds.depthCompareOp=VK_COMPARE_OP_LESS_OR_EQUAL;
@@ -897,19 +939,21 @@ class VulkanRaster final {
         if(w==width_&&h==height_)return;
         if(framebuffer_)vkDestroyFramebuffer(device_,framebuffer_,nullptr);
         framebuffer_=VK_NULL_HANDLE;
-        free(color_);free(depth_);free(readback_);
+        free(color_);free(msColor_);free(depth_);free(readback_);
         width_=w;height_=h;
         color_=image(w,h,1,colorFormat_,
                      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT,VK_IMAGE_ASPECT_COLOR_BIT);
-        VkAttachmentDescription a{}; // depth format selected to match supported device features.
-        (void)a;
-        VkFormat df=VK_FORMAT_D32_SFLOAT;VkFormatProperties fp{};
-        vkGetPhysicalDeviceFormatProperties(physical_,df,&fp);
-        if(!(fp.optimalTilingFeatures&VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT))df=VK_FORMAT_D16_UNORM;
-        depth_=image(w,h,1,df,VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,VK_IMAGE_ASPECT_DEPTH_BIT);
-        VkImageView views[2]={color_.view,depth_.view};
+        if(msaaSamples_!=VK_SAMPLE_COUNT_1_BIT)
+            msColor_=image(w,h,1,colorFormat_,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+                           VK_IMAGE_ASPECT_COLOR_BIT,false,1,msaaSamples_);
+        depth_=image(w,h,1,depthFormat_,VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
+                     VK_IMAGE_ASPECT_DEPTH_BIT,false,1,msaaSamples_);
+        VkImageView views[3]={msaaSamples_==VK_SAMPLE_COUNT_1_BIT?color_.view:msColor_.view,
+                              depth_.view,color_.view};
         VkFramebufferCreateInfo fb{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-        fb.renderPass=renderPass_;fb.attachmentCount=2;fb.pAttachments=views;fb.width=w;fb.height=h;fb.layers=1;
+        fb.renderPass=renderPass_;
+        fb.attachmentCount=msaaSamples_==VK_SAMPLE_COUNT_1_BIT?2:3;
+        fb.pAttachments=views;fb.width=w;fb.height=h;fb.layers=1;
         vkcheck(vkCreateFramebuffer(device_,&fb,nullptr,&framebuffer_),"Vulkan framebuffer");
         readback_=buffer(VkDeviceSize(w)*h*4,VK_BUFFER_USAGE_TRANSFER_DST_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,true);
         std::clog<<"[CSE WARP Vulkan] Readback memory HOST_CACHED="
@@ -918,8 +962,7 @@ class VulkanRaster final {
     }
     void textures(const Scene& scene){
         free(albedo_);free(surface_);
-        free(detailAlbedo_);free(detailSurface_);
-        free(gi0_);free(gi1_);
+        free(detailAlbedo_);free(detailSurface_;
         protectedLayer_.fill(-1);
         const uint32_t layers=uint32_t(std::max<size_t>(1,std::min<size_t>(kMaxMaterials,scene.mat.size())));
         if(layers>props_.limits.maxImageArrayLayers)
@@ -1239,8 +1282,8 @@ class VulkanRaster final {
         for(size_t i=0;i<scene.mat.size()&&i<kMaxMaterials;i++){
             const Material& m=scene.mat[i];
             f.textureDetail[i][0]=float(protectedLayer_[i]);
-            f.textureDetail[i][1]=(m.surfaceAuthored?m.waterSurface:
-                                      m.name=="cse_pool_water")?1.f:0.f;
+            f.textureDetail[i][1]=(m.waterSurface||
+                  (!m.surfaceAuthored && m.name=="cse_pool_water"))?1.f:0.f;
             f.material[i][0]=clampf(m.metallic,0.f,1.f);
             f.material[i][1]=clampf(m.roughnessScale,.08f,1.f);
             f.material[i][2]=1.f-float(m.transmissionPercent)/100.f;
@@ -1291,7 +1334,7 @@ public:
         vkDeviceWaitIdle(device_);
         if(framebuffer_)vkDestroyFramebuffer(device_,framebuffer_,nullptr);
         free(readback_);free(uniform_);free(vertices_);free(transparent_);free(boxTemplate_);free(boxInstances_);free(foliageTemplate_);free(foliageInstances_);
-        free(color_);free(depth_);free(albedo_);free(surface_);free(shadow_);
+        free(color_);free(msColor_);free(depth_);free(albedo_);free(surface_);free(shadow_);
         free(detailAlbedo_);free(detailSurface_);
         free(gi0_);free(gi1_);
         if(skyPipeline_)vkDestroyPipeline(device_,skyPipeline_,nullptr);
@@ -1336,13 +1379,13 @@ public:
             begin();
             vkCmdResetQueryPool(cmd_,queries_,0,2);
             vkCmdWriteTimestamp(cmd_,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,queries_,0);
-            VkClearValue clears[2]{};
+            VkClearValue clears[3]{};
             const V sky=scene.underwaterEnvironment?V{7,27,39}:skyHorizon*.65f+skyZenith*.35f;
             clears[0].color={{sky.x/255.f,sky.y/255.f,sky.z/255.f,1.f}};
             clears[1].depthStencil={1.f,0};
             VkRenderPassBeginInfo pass{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
             pass.renderPass=renderPass_;pass.framebuffer=framebuffer_;
-            pass.renderArea=scissor;pass.clearValueCount=2;pass.pClearValues=clears;
+            pass.renderArea=scissor;pass.clearValueCount=msaaSamples_==VK_SAMPLE_COUNT_1_BIT?2:3;pass.pClearValues=clears;
             vkCmdBeginRenderPass(cmd_,&pass,VK_SUBPASS_CONTENTS_INLINE);
             vkCmdSetViewport(cmd_,0,1,&viewport);vkCmdSetScissor(cmd_,0,1,&scissor);
             vkCmdBindDescriptorSets(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,layout_,0,1,&descriptor_,0,nullptr);
