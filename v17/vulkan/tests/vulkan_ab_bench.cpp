@@ -64,6 +64,24 @@ int main(int argc,char** argv) {
  if(!built){std::cerr<<"Scene build: "<<built.error.toStdString()<<"\n";return 2;}
  const auto& scene=built.runtime.renderScene;
  if(built.runtime.cameras.isEmpty()){std::cerr<<"No scene cameras\n";return 2;}
+ // Benchmark equivalence: DX11 and Vulkan request the same sample count.
+ // Vulkan may still fall back if the GPU reports a lower supported count.
+ unsigned msaaRequest=2;
+ if(const char* option=std::getenv("CSE_WARP_VK_MSAA")){
+  if(std::strcmp(option,"1")==0)msaaRequest=1;
+  else if(std::strcmp(option,"2")==0)msaaRequest=2;
+  else if(std::strcmp(option,"4")==0)msaaRequest=4;
+  else {std::cerr<<"Invalid CSE_WARP_VK_MSAA; use 1, 2 or 4\n";return 2;}
+ }
+ auto quality=m3d::rasterQualitySettings();
+ quality.msaaSamples=msaaRequest;
+ std::wstring qualityError;
+ if(!m3d::setRasterQualitySettings(quality,qualityError)){
+  std::wcerr<<L"Cannot align DX11 MSAA with Vulkan: "<<qualityError<<L"\n";
+  return 2;
+ }
+ std::cout<<"[CSE WARP A/B] requested MSAA="<<msaaRequest
+          <<" for DX11 and Vulkan; compare effective samples in GPU log\n";
  m3d::updateLighting(14.75f);
  m3d::Stats shadowStats{};
  const auto shadow=m3d::buildShadow(scene,shadowStats);
@@ -123,6 +141,7 @@ int main(int argc,char** argv) {
  doc["vulkan_color_profile"]=(!colorTest || std::strcmp(colorTest,"0")!=0)?"srgb_rt_linear_default":"unorm_rt_legacy_diagnostic";
  doc["vulkan_depth_prepass"]=true;
  doc["vulkan_depth_prepass_policy"]="always_on_no_runtime_comparison";
+ doc["msaa_requested_for_both_backends"]=int(msaaRequest);
  doc["dx11_median_ms"]=median(dxTimes);doc["vulkan_median_ms"]=median(vkTimes);
  doc["dx11_p95_ms"]=p95(dxTimes);doc["vulkan_p95_ms"]=p95(vkTimes);
  doc["vulkan_vs_dx11_median_speedup"]=median(vkTimes)>0?median(dxTimes)/median(vkTimes):0.0;
