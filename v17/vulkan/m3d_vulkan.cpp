@@ -113,6 +113,8 @@ class VulkanRaster final {
     VkRenderPass renderPass_=VK_NULL_HANDLE;
     VkPipelineLayout layout_=VK_NULL_HANDLE;
     VkPipeline opaquePipeline_=VK_NULL_HANDLE,alphaPipeline_=VK_NULL_HANDLE,boxPipeline_=VK_NULL_HANDLE,foliagePipeline_=VK_NULL_HANDLE;
+    VkPipeline depthOpaque_=VK_NULL_HANDLE,depthBox_=VK_NULL_HANDLE,depthFoliage_=VK_NULL_HANDLE;
+    bool depthPrepass_=false;
     VkPipelineCache pipelineCache_=VK_NULL_HANDLE;
     VkDescriptorPool descriptorPool_=VK_NULL_HANDLE;
     VkDescriptorSetLayout descriptorLayout_=VK_NULL_HANDLE;
@@ -436,6 +438,9 @@ class VulkanRaster final {
             colorFormat_=VK_FORMAT_B8G8R8A8_UNORM;
         }
         std::clog<<"[CSE WARP Vulkan] Readback color="<<(bgraReadback_?"BGRA8 Qt-native":"RGBA8 legacy")<<"\n";
+        const char* prepass=std::getenv("CSE_WARP_VK_DEPTH_PREPASS");
+        depthPrepass_=prepass && std::strcmp(prepass,"1")==0;
+        std::clog<<"[CSE WARP Vulkan] Generic opaque Z-prepass="<<(depthPrepass_?"on":"off")<<"\n";
         std::clog<<"[CSE WARP Vulkan] GPU="<<adapter_
                  <<" version="<<VK_VERSION_MAJOR(props_.apiVersion)<<"."
                  <<VK_VERSION_MINOR(props_.apiVersion)<<"."
@@ -599,7 +604,23 @@ class VulkanRaster final {
         pi.pViewportState=&vp;pi.pRasterizationState=&rs;pi.pMultisampleState=&ms;
         pi.pDepthStencilState=&ds;pi.pColorBlendState=&cb;pi.pDynamicState=&dy;
         pi.layout=layout_;pi.renderPass=renderPass_;
+        // Optional opaque depth-only pipeline: same vertex shader and geometry,
+        // but NO fragment shader or color writes. Transparent draw is excluded.
+        // State is restored exactly for the normal color pass.
+        auto depthPipeline=[&](VkPipeline* result,const char* label){
+            const uint32_t stagesBefore=pi.stageCount;
+            const VkColorComponentFlags maskBefore=blend.colorWriteMask;
+            const VkBool32 writeBefore=ds.depthWriteEnable;
+            pi.stageCount=1; // vertex only; fragment shader never runs.
+            blend.colorWriteMask=0;
+            ds.depthWriteEnable=VK_TRUE;
+            vkcheck(vkCreateGraphicsPipelines(device_,pipelineCache_,1,&pi,nullptr,result),label);
+            ds.depthWriteEnable=writeBefore;
+            blend.colorWriteMask=maskBefore;
+            pi.stageCount=stagesBefore;
+        };
         vkcheck(vkCreateGraphicsPipelines(device_,pipelineCache_,1,&pi,nullptr,&opaquePipeline_),"opaque Vulkan pipeline");
+        if(depthPrepass_)depthPipeline(&depthOpaque_,"opaque depth-only Vulkan pipeline");
         blend.blendEnable=VK_TRUE;blend.srcColorBlendFactor=VK_BLEND_FACTOR_SRC_ALPHA;
         blend.dstColorBlendFactor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         blend.colorBlendOp=VK_BLEND_OP_ADD;
@@ -632,6 +653,7 @@ class VulkanRaster final {
         ds.depthWriteEnable=VK_TRUE;
         blend.blendEnable=VK_FALSE;
         vkcheck(vkCreateGraphicsPipelines(device_,pipelineCache_,1,&pi,nullptr,&boxPipeline_),"instanced box Vulkan pipeline");
+        if(depthPrepass_)depthPipeline(&depthBox_,"instanced box depth-only Vulkan pipeline");
         vkDestroyShaderModule(device_,boxModule,nullptr);
         // Shared canopy geometry: V17 CPU-generated foliage uses a 32-byte instance.
         const auto foliageCode=spirv(shaderFile("raster_foliage.vert.spv"));
@@ -654,6 +676,7 @@ class VulkanRaster final {
         vi.vertexBindingDescriptionCount=2;vi.pVertexBindingDescriptions=folBindings.data();
         vi.vertexAttributeDescriptionCount=uint32_t(folAttrs.size());vi.pVertexAttributeDescriptions=folAttrs.data();
         vkcheck(vkCreateGraphicsPipelines(device_,pipelineCache_,1,&pi,nullptr,&foliagePipeline_),"instanced foliage Vulkan pipeline");
+        if(depthPrepass_)depthPipeline(&depthFoliage_,"instanced foliage depth-only Vulkan pipeline");
         vkDestroyShaderModule(device_,foliageModule,nullptr);
         vkDestroyShaderModule(device_,modules[0],nullptr);
         vkDestroyShaderModule(device_,modules[1],nullptr);
@@ -994,6 +1017,9 @@ public:
         free(readback_);free(uniform_);free(vertices_);free(transparent_);free(boxTemplate_);free(boxInstances_);free(foliageTemplate_);free(foliageInstances_);
         free(color_);free(depth_);free(albedo_);free(surface_);free(shadow_);
         free(detailAlbedo_);free(detailSurface_);
+        if(depthFoliage_)vkDestroyPipeline(device_,depthFoliage_,nullptr);
+        if(depthBox_)vkDestroyPipeline(device_,depthBox_,nullptr);
+        if(depthOpaque_)vkDestroyPipeline(device_,depthOpaque_,nullptr);
         if(foliagePipeline_)vkDestroyPipeline(device_,foliagePipeline_,nullptr);
         if(boxPipeline_)vkDestroyPipeline(device_,boxPipeline_,nullptr);
         if(alphaPipeline_)vkDestroyPipeline(device_,alphaPipeline_,nullptr);
@@ -1040,8 +1066,12 @@ public:
             vkCmdSetViewport(cmd_,0,1,&viewport);vkCmdSetScissor(cmd_,0,1,&scissor);
             vkCmdBindDescriptorSets(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,layout_,0,1,&descriptor_,0,nullptr);
             uint64_t drawCalls=0;
-            if(vertexCount_){
-                vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,opaquePipeline_);
+            // Same opaque draw order and exact vertices in both passes. The
+            // optional prepass only writes depth, never color. Transparent
+            // triangles are drawn once, AFTER the opaque color pass.
+            auto drawOpaque=[&](bool depthOnly){
+                if(vertexCount_){
+                vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,depthOnly?depthOpaque_:opaquePipeline_);
                 VkDeviceSize off=0;VkBuffer vb=vertices_.handle;
                 vkCmdBindVertexBuffers(cmd_,0,1,&vb,&off);
                 for(const Chunk& c:chunks_)if(visible(c,cam)){
@@ -1049,7 +1079,7 @@ public:
                 }
             }
             if(boxCount_){
-                vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,boxPipeline_);
+                vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,depthOnly?depthBox_:boxPipeline_);
                 VkBuffer boxVBs[2]={boxTemplate_.handle,boxInstances_.handle};
                 VkDeviceSize boxOffsets[2]{0,0};
                 vkCmdBindVertexBuffers(cmd_,0,2,boxVBs,boxOffsets);
@@ -1059,7 +1089,7 @@ public:
                 }
             }
             if(foliageCount_){
-                vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,foliagePipeline_);
+                vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,depthOnly?depthFoliage_:foliagePipeline_);
                 VkBuffer buffers[2]={foliageTemplate_.handle,foliageInstances_.handle};
                 VkDeviceSize offsets[2]{0,0};
                 vkCmdBindVertexBuffers(cmd_,0,2,buffers,offsets);
@@ -1068,6 +1098,9 @@ public:
                     ++drawCalls;
                 }
             }
+            };
+            if(depthPrepass_)drawOpaque(true);
+            drawOpaque(false);
             if(transparentCount_){
                 // CPU depth-sort transparent triangles every frame, then draw with depth-test but no depth-write.
                 std::iota(glassOrder_.begin(),glassOrder_.end(),size_t(0));

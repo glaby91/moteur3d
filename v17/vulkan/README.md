@@ -104,3 +104,9 @@ Ce mécanisme est **générique**, sans référence au nom, à la position, à l
 - L'optimisation optionnelle BGRA et le profil fragment restent désactivés par défaut tant que des campagnes A/B qualité ne les ont pas validés sur plusieurs scènes.
 
 Les frames en vol et un Z-prepass ne sont pas automatiquement activés ici : sur la présentation Qt actuellement synchrone, une file GPU asynchrone impose une gestion explicite des images/latences, et un Z-prepass doit respecter transparence et surfaces coplanaires. Les ajouter sans mesures et sans tests de parité pourrait dégrader le rendu ; ils restent des travaux expérimentaux distincts et génériques.
+
+## Z-prepass opaque générique, option de test sans réduction de qualité
+
+Le moteur propose `CSE_WARP_VK_DEPTH_PREPASS=1` : il exécute un premier rendu **sans fragment shader ni écritures couleur**, en réutilisant exactement la géométrie opaque et les pipelines d'instances (boîtes, feuillage). Le rendu couleur est ensuite exécuté dans l'ordre habituel et les surfaces transparentes sont toujours dessinées une seule fois après les opaques. Aucun identifiant de scène, distance particulière ou décor nommé n'est consulté. Par défaut **désactivé**.
+
+Un prépass peut réduire les calculs de shading de fragments opaques masqués, mais double le travail vertex et peut modifier les décisions du test de profondeur en cas de coplanarité. C'est pourquoi son adoption automatique exige d'abord **parité stricte des 40 empreintes par image** et amélioration mesurée sur plusieurs scènes. Exécuter `LANCER_ZPREPASS_VULKAN_HD620.bat` pour le benchmark ABBA (RGBA et shader fast fixés, seul le prépass change). La variable n'est pas destinée à être activée sur `master` sans validation.
