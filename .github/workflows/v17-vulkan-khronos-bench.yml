@@ -1,0 +1,96 @@
+name: CSE WARP V17.32 Vulkan Khronos — Instrumented Windows HD620
+run-name: WARP Vulkan Khronos baseline — Windows x64
+on:
+  push:
+    branches:
+      - experiment/v17-vulkan-khronos-bench-261115
+    paths:
+      - 'v17/**'
+      - '.github/workflows/v17-vulkan-khronos-bench.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: cse-warp-khronos-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: '1.4.309.0'
+          cache: true
+          stripdown: true
+          install_swiftshader: false
+      - name: Validate Khronos instrumentation, shader UBO contract and sources
+        shell: pwsh
+        run: |
+          $src=Get-Content v17/vulkan/m3d_vulkan.cpp -Raw
+          if(!$src.Contains('khronos::capture(sample);') -or !$src.Contains('vkWaitForFences(device_') -or !$src.Contains('vkQueuePresentKHR')) { throw 'Native Vulkan telemetry/render path missing' }
+          foreach($file in @('raster.vert','raster_box.vert','raster_foliage.vert','raster.frag','sky.frag')){
+            $shader=Get-Content "v17/vulkan/shaders/$file" -Raw
+            if(!$shader.Contains('lightPos[64],lightRgb[64]')){throw "64-light uniform mismatch in $file"}
+          }
+          if(!(Test-Path v17/vulkan/tests/khronos_bench.cpp)){throw 'Missing synthetic native benchmark'}
+      - name: Configure real V17 Vulkan engine
+        shell: pwsh
+        run: |
+          cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DM3D_REQUIRE_VULKAN=ON" "-DV17_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER"
+          if($LASTEXITCODE -ne 0){throw 'CMake configure failed'}
+      - name: Build instrumented original engine plus native Win32 benchmark
+        shell: pwsh
+        run: |
+          cmake --build build-v17 --config Release --parallel 4 --target v17_vulkan_khronos_bench v17_vulkan_ab_bench v17_vulkan_gpu_smoke v17_vulkan_mesh_smoke
+          if($LASTEXITCODE -ne 0){throw 'Khronos compile failed'}
+      - name: Run GPU-independent mesh regression
+        shell: pwsh
+        run: |
+          & build-v17/Release/v17_vulkan_mesh_smoke.exe
+          if($LASTEXITCODE -ne 0){throw 'Mesh smoke failed'}
+      - name: Assemble fully deployable Windows benchmark
+        shell: pwsh
+        run: |
+          $dist='CSE-WARP-V17.32-KHRONOS-HD620'
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          foreach($name in @('v17_vulkan_khronos_bench.exe','v17_vulkan_ab_bench.exe','v17_vulkan_gpu_smoke.exe')){
+            $path="build-v17/Release/$name"
+            if(!(Test-Path $path)){throw "Missing exe $name"}
+            Copy-Item $path "$dist/$name"
+          }
+          $dll=Get-ChildItem build-v17 -Recurse -File -Filter 'moteur3d_v16_core.dll' | Select-Object -First 1
+          if(!$dll){throw 'Cannot locate compiled shared V16/V17 engine DLL'}
+          Copy-Item $dll.FullName "$dist/moteur3d_v16_core.dll"
+          if(!(Test-Path 'build-v17/Release/vulkan/raster.frag.spv')){throw 'Missing GLSL compiled shaders'}
+          Copy-Item 'build-v17/Release/vulkan' "$dist/vulkan" -Recurse
+          Copy-Item 'v17/vulkan/khronos/RUN_KHRONOS_HD620.ps1' "$dist/"
+          Copy-Item 'v17/vulkan/khronos/LANCER_KHRONOS_HD620.bat' "$dist/"
+          Copy-Item 'v17/vulkan/khronos/README.md' "$dist/README_KHRONOS.txt"
+          Copy-Item 'scenes/v16/pavillon01' "$dist/pavillon01" -Recurse
+          & "$env:QT_ROOT_DIR/bin/windeployqt.exe" --release --no-translations "$dist/v17_vulkan_ab_bench.exe"
+          if($LASTEXITCODE -ne 0){throw 'Qt runtime deployment failed'}
+          $metadata=@(
+            'Engine base: CSE WARP Vulkan V17.32',
+            'Engine commit: d7c2118906214e989dd88a6077b575fa38b1f0ea',
+            "Instrumented commit: $env:GITHUB_SHA",
+            'Instrumentation includes real Win32 Vulkan WSI plus CPU/GPU timestamps.',
+            'Requires physical Vulkan 1.3.204+ GPU and driver. Do not run benchmarks on CI virtual renderer.'
+          )
+          $metadata | Set-Content "$dist/BUILD_SOURCE.txt"
+          Write-Host "Package ready; use LANCER_KHRONOS_HD620.bat on actual Intel HD620."
+      - name: Publish runnable Khronos test package
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17.32-KHRONOS-INSTRUMENTED-HD620
+          path: CSE-WARP-V17.32-KHRONOS-HD620/
+          retention-days: 14
+          if-no-files-found: error
