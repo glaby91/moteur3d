@@ -128,6 +128,10 @@ bool renderVulkanPreview(const Scene& s,const ShadowMap& sm,const Camera& cam,in
 // be destroyed while their owning thread, Win32 window and runtime are alive.
 void releaseVulkanPreviewForCurrentThread();
 void releaseVulkanDirectForCurrentThread();
+// Optional photographic night hemisphere, 2:1 UV (zenith top, horizon bottom).
+// Copied once at startup; a missing panorama keeps the procedural fallback.
+// RGBA8 tightly packed rows, width*height*4 bytes; null clears the asset.
+void setVulkanCelestialPanoramaRGBA(const uint8_t* rgba,int width,int height);
 // Native Win32 Vulkan surface: no CPU pixel readback and no QImage.
 // The HWND is created on the Qt UI thread; VkSwapchainKHR is owned by the
 // persistent raster worker. Never pass a destroyed or temporary HWND.
