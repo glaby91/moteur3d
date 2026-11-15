@@ -240,7 +240,25 @@ if(WIN32 AND Vulkan_FOUND)
                 "$<TARGET_FILE_DIR:v17_vulkan_ab_bench>/vulkan"
             VERBATIM)
     endif()
-    # CI compiles native raster; actual A/B frames require DX11 + Vulkan on HD620.
+    # Khronos diagnostics run in the ORIGINAL Vulkan engine through native Win32 WSI.
+    add_executable(v17_vulkan_khronos_bench "vulkan/tests/khronos_bench.cpp")
+    target_include_directories(v17_vulkan_khronos_bench PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+    target_link_libraries(v17_vulkan_khronos_bench PRIVATE moteur3d_v16_core user32 gdi32)
+    target_compile_definitions(v17_vulkan_khronos_bench PRIVATE CSE_WARP_BUILD_NUMBER=${V17_BUILD_NUMBER})
+    if(MSVC)
+        target_compile_options(v17_vulkan_khronos_bench PRIVATE /O2 /EHsc /utf-8)
+    endif()
+    if(TARGET v17_vulkan_spirv)
+        add_dependencies(v17_vulkan_khronos_bench v17_vulkan_spirv)
+        add_custom_command(TARGET v17_vulkan_khronos_bench POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_FILE_DIR:v17_vulkan_khronos_bench>/vulkan"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${V17_VULKAN_SPIRV} "$<TARGET_FILE_DIR:v17_vulkan_khronos_bench>/vulkan"
+            VERBATIM)
+    endif()
+    # CI builds on virtual GPU; real WSI timing results come from Intel HD620.
 endif()
 
 # Repeatable original 30s PCM diagnostic loop; no copyright-sensitive downloads
