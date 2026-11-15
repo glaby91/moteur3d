@@ -42,6 +42,13 @@ namespace m3d { namespace {
 using Clock=std::chrono::steady_clock;
 using Vertex=vkmesh::GpuVertex;
 constexpr uint32_t kMaxMaterials=256, kLights=64;
+struct CelestialPanorama {
+    uint32_t width=0,height=0;
+    std::vector<uint8_t> rgba;
+};
+// Immutable asset shared by DX11/Qt startup and Vulkan renderer contexts.
+std::mutex celestialMutex;
+std::shared_ptr<const CelestialPanorama> celestialAsset;
 void vkcheck(VkResult code,const char* name) {
     if(code!=VK_SUCCESS)throw std::runtime_error(std::string(name)+" Vulkan error "+std::to_string(int(code)));
 }
@@ -149,7 +156,10 @@ class VulkanRaster final {
     VkSampler albedoSampler_=VK_NULL_HANDLE,protectedSampler_=VK_NULL_HANDLE,shadowSampler_=VK_NULL_HANDLE;
     Texture color_,msColor_,depth_,albedo_,surface_,shadow_,detailAlbedo_,detailSurface_;
     Texture gi0_,gi1_;
-    VkSampler giSampler_=VK_NULL_HANDLE;
+    VkSampler giSampler_=VK_NULL_HANDLE,celestialSampler_=VK_NULL_HANDLE;
+    Texture celestial_;
+    std::shared_ptr<const CelestialPanorama> celestialSource_;
+    bool celestialLoaded_=false;
     gibake::Table giTable_{};
     std::filesystem::path giPath_{};
     uint64_t giSceneHash_=0,giSceneIdentity_=0,giSceneRevision_=~uint64_t(0);
@@ -780,7 +790,7 @@ class VulkanRaster final {
         submit();free(stage);return vertex;
     }
     void updateDescriptors(){
-        if(!uniform_.handle||!albedo_.view||!surface_.view||!shadow_.view||!gi0_.view||!gi1_.view)return;
+        if(!uniform_.handle||!albedo_.view||!surface_.view||!shadow_.view||!gi0_.view||!gi1_.view||!celestial_.view)return;
         VkDescriptorBufferInfo u{uniform_.handle,0,sizeof(Uniforms)};
         VkDescriptorImageInfo a{albedoSampler_,albedo_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo n{albedoSampler_,surface_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
@@ -789,8 +799,9 @@ class VulkanRaster final {
         VkDescriptorImageInfo highSurface{protectedSampler_,detailSurface_.view?detailSurface_.view:surface_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo giLow{giSampler_,gi0_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
         VkDescriptorImageInfo giHigh{giSampler_,gi1_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-        std::array<VkWriteDescriptorSet,8> writes{};
-        for(uint32_t i=0;i<8;i++){
+        VkDescriptorImageInfo starMap{celestialSampler_,celestial_.view,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+        std::array<VkWriteDescriptorSet,9> writes{};
+        for(uint32_t i=0;i<9;i++){
             auto& w=writes[i];w.sType=VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             w.dstSet=descriptor_;w.dstBinding=i;w.descriptorCount=1;
             w.descriptorType=i?VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
@@ -798,6 +809,7 @@ class VulkanRaster final {
         writes[0].pBufferInfo=&u;writes[1].pImageInfo=&a;writes[2].pImageInfo=&n;writes[3].pImageInfo=&s;
         writes[4].pImageInfo=&highAlbedo;writes[5].pImageInfo=&highSurface;
         writes[6].pImageInfo=&giLow;writes[7].pImageInfo=&giHigh;
+        writes[8].pImageInfo=&starMap;
         vkUpdateDescriptorSets(device_,uint32_t(writes.size()),writes.data(),0,nullptr);
         activeDescriptorReady_=true;
     }
@@ -1054,17 +1066,17 @@ class VulkanRaster final {
         VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
         qi.queryType=VK_QUERY_TYPE_TIMESTAMP;qi.queryCount=3;
         vkcheck(vkCreateQueryPool(device_,&qi,nullptr,&queries_),"GPU timestamps");
-        VkDescriptorSetLayoutBinding bindings[8]{};
-        for(uint32_t j=0;j<8;j++){
+        VkDescriptorSetLayoutBinding bindings[9]{};
+        for(uint32_t j=0;j<9;j++){
             bindings[j].binding=j;bindings[j].descriptorCount=1;
             bindings[j].descriptorType=j?VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             bindings[j].stageFlags=j?VK_SHADER_STAGE_FRAGMENT_BIT:(VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT);
         }
         VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
-        li.bindingCount=8;li.pBindings=bindings;
+        li.bindingCount=9;li.pBindings=bindings;
         vkcheck(vkCreateDescriptorSetLayout(device_,&li,nullptr,&descriptorLayout_),"descriptor layout");
         VkDescriptorPoolSize pools[2]={{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,2},
-                                        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,14}};
+                                        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,16}};
         VkDescriptorPoolCreateInfo p{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         p.maxSets=2;p.poolSizeCount=2;p.pPoolSizes=pools;
         vkcheck(vkCreateDescriptorPool(device_,&p,nullptr,&descriptorPool_),"descriptor pool");
@@ -1093,6 +1105,12 @@ class VulkanRaster final {
         si.minFilter=VK_FILTER_LINEAR;si.magFilter=VK_FILTER_LINEAR;
         si.mipmapMode=VK_SAMPLER_MIPMAP_MODE_NEAREST;si.maxLod=0.f;
         vkcheck(vkCreateSampler(device_,&si,nullptr,&giSampler_),"GI sampler");
+        si.addressModeU=VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        si.addressModeV=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        si.addressModeW=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        si.mipmapMode=VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        si.maxLod=32.f;
+        vkcheck(vkCreateSampler(device_,&si,nullptr,&celestialSampler_),"sky hemisphere sampler");
         uniform_=buffer(sizeof(Uniforms),VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
         VkAttachmentDescription attach[3]{};
         attach[0].format=colorFormat_;
@@ -1504,6 +1522,47 @@ class VulkanRaster final {
                      <<" MiB, no distance-based LOD reduction\n";
         }
     }
+    void updateCelestialPanorama(){
+        std::shared_ptr<const CelestialPanorama> source;
+        {
+            std::lock_guard<std::mutex> guard(celestialMutex);
+            source=celestialAsset;
+        }
+        if(celestial_.view && celestialSource_==source)return;
+        // GPU texture survives frames; replacing it requires retiring both slots.
+        drainPendingFrames();
+        free(celestial_);
+        celestialLoaded_=false;
+        if(source && source->width<=props_.limits.maxImageDimension2D &&
+           source->height<=props_.limits.maxImageDimension2D &&
+           source->rgba.size()==size_t(source->width)*source->height*4u){
+            constexpr VkFormat format=VK_FORMAT_R8G8B8A8_SRGB;
+            VkFormatProperties fmt{};
+            vkGetPhysicalDeviceFormatProperties(physical_,format,&fmt);
+            constexpr VkFormatFeatureFlags needed=VK_FORMAT_FEATURE_BLIT_SRC_BIT|
+                VK_FORMAT_FEATURE_BLIT_DST_BIT|VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+            const bool mipsSupported=(fmt.optimalTilingFeatures&needed)==needed;
+            const uint32_t mipCount=mipsSupported?vkmips::levelCount(
+                std::max(source->width,source->height)):1u;
+            celestial_=image(source->width,source->height,1,format,
+                VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT|
+                (mipsSupported?VK_IMAGE_USAGE_TRANSFER_SRC_BIT:0u),
+                VK_IMAGE_ASPECT_COLOR_BIT,false,mipCount);
+            uploadImage(celestial_,source->rgba.data(),source->rgba.size());
+            celestialLoaded_=true;
+            std::clog<<"[CSE WARP Vulkan] Photographic hemisphere uploaded once: "
+                     <<source->width<<"x"<<source->height<<", mips="<<mipCount<<"\n";
+        }else{
+            const uint32_t black=0xff000000u;
+            celestial_=image(1,1,1,VK_FORMAT_R8G8B8A8_SRGB,
+                VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                VK_IMAGE_ASPECT_COLOR_BIT);
+            uploadImage(celestial_,&black,sizeof(black));
+        }
+        celestialSource_=std::move(source);
+        activeDescriptorReady_=false;
+        for(auto& slot:frameSlots_)slot.descriptorReady=false;
+    }
     void updateShadow(const ShadowMap& sh){
         // The supplied immutable ShadowMap already represents a quantized
         // V17.493 15-minute sun bin. Sun/sky UBOs may change every frame
@@ -1735,6 +1794,7 @@ class VulkanRaster final {
         f.skyViewport[0]=float(width_);
         f.skyViewport[1]=float(height_);
         f.skyViewport[2]=scene.underwaterEnvironment?1.f:0.f;
+        f.skyViewport[3]=celestialLoaded_?1.f:0.f;
         f.shadowBase[0]=shadows.base.x;f.shadowBase[1]=shadows.base.y;f.shadowBase[2]=shadows.base.z;
         f.shadowBase[3]=shadows.span;
         f.shadowRight[0]=shadows.right.x;f.shadowRight[1]=shadows.right.y;f.shadowRight[2]=shadows.right.z;
@@ -1827,7 +1887,7 @@ public:
         free(readback_);free(uniform_);free(vertices_);free(transparent_);free(boxTemplate_);free(boxInstances_);free(foliageTemplate_);free(foliageInstances_);
         free(color_);free(msColor_);free(depth_);free(albedo_);free(surface_);free(shadow_);
         free(detailAlbedo_);free(detailSurface_);
-        free(gi0_);free(gi1_);
+        free(gi0_);free(gi1_);free(celestial_);
         checkpoint("BUFFERS_TEXTURES_RELEASED");
         if(skyPipeline_)vkDestroyPipeline(device_,skyPipeline_,nullptr);
         if(depthFoliage_)vkDestroyPipeline(device_,depthFoliage_,nullptr);
@@ -1844,6 +1904,7 @@ public:
         if(protectedSampler_)vkDestroySampler(device_,protectedSampler_,nullptr);
         if(shadowSampler_)vkDestroySampler(device_,shadowSampler_,nullptr);
         if(giSampler_)vkDestroySampler(device_,giSampler_,nullptr);
+        if(celestialSampler_)vkDestroySampler(device_,celestialSampler_,nullptr);
         if(descriptorPool_)vkDestroyDescriptorPool(device_,descriptorPool_,nullptr);
         if(descriptorLayout_)vkDestroyDescriptorSetLayout(device_,descriptorLayout_,nullptr);
         if(queries_)vkDestroyQueryPool(device_,queries_,nullptr);
@@ -1904,6 +1965,7 @@ public:
             updateShadow(shadows);
             const auto shadowEnd=Clock::now();
             ensureGI(scene);
+            updateCelestialPanorama();
             const auto giEnd=Clock::now();
             if(!activeDescriptorReady_)updateDescriptors();
             updateUniforms(scene,shadows,cam);
@@ -2087,6 +2149,19 @@ public:
     }
 };
 } // namespace
+
+void setVulkanCelestialPanoramaRGBA(const uint8_t* rgba,int width,int height){
+    std::shared_ptr<const CelestialPanorama> replacement;
+    if(rgba&&width>0&&height>0&&width<=8192&&height<=4096 &&
+       size_t(width)==size_t(height)*2u){
+        auto data=std::make_shared<CelestialPanorama>();
+        data->width=uint32_t(width);data->height=uint32_t(height);
+        data->rgba.assign(rgba,rgba+size_t(width)*height*4u);
+        replacement=std::move(data);
+    }
+    std::lock_guard<std::mutex> guard(celestialMutex);
+    celestialAsset=std::move(replacement);
+}
 
 // Make Vulkan optional for CPU and DirectX11. The MSVC linker delay-loads
 // vulkan-1.dll; check explicitly before making ANY Vulkan API call to avoid
