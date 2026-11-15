@@ -2,6 +2,18 @@
 // Requires Vulkan API 1.3.204, native GPU raster of the existing Scene and Camera.
 // Two paths: legacy offscreen QImage A/B tests, or native Win32 Vulkan swapchain.
 // The direct path sends rendered GPU pixels to the window without CPU readback.
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef VK_USE_PLATFORM_WIN32_KHR
+#define VK_USE_PLATFORM_WIN32_KHR 1
+#endif
+#include <windows.h>
+#endif
 #include "m3d_engine.h"
 #include "m3d_vulkan_mesh.h"
 #include "m3d_vulkan_version.h"
@@ -9,12 +21,6 @@
 #include "m3d_vulkan_mips.h"
 #include "../weather/clouds.h"
 #include "../../experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_gi_bake.h"
-#ifdef _WIN32
-#define WIN32_LEAN_AND_MEAN
-#define NOMINMAX
-#include <windows.h>
-#define VK_USE_PLATFORM_WIN32_KHR 1
-#endif
 #include <vulkan/vulkan.h>
 #include <algorithm>
 #include <array>
@@ -108,7 +114,7 @@ class VulkanRaster final {
     // Only the direct renderer creates a surface and swapchain. The existing
     // preview/benchmark renderer remains completely offscreen.
     void* presentWindow_=nullptr;
-    VkSurfaceKHR surface_=VK_NULL_HANDLE;
+    VkSurfaceKHR displaySurface_=VK_NULL_HANDLE;
     VkSwapchainKHR swapchain_=VK_NULL_HANDLE;
     std::vector<VkImage> swapImages_;
     std::vector<VkSemaphore> imageReady_;
@@ -351,9 +357,9 @@ class VulkanRaster final {
     // not by a QImage or a CPU-mediated texture upload. The existing offscreen
     // render pass remains intact and is blitted GPU-to-GPU to the swapchain.
     void createSwapchain(uint32_t preferredW,uint32_t preferredH){
-        if(!surface_)return;
+        if(!displaySurface_)return;
         VkSurfaceCapabilitiesKHR caps{};
-        vkcheck(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_,surface_,&caps),
+        vkcheck(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_,displaySurface_,&caps),
                 "surface capabilities");
         if(!(caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT))
             throw std::runtime_error("Win32 surface cannot accept Vulkan GPU transfer destination");
@@ -370,11 +376,11 @@ class VulkanRaster final {
            swapExtent_.height==extent.height)return;
 
         uint32_t nFormats=0;
-        vkcheck(vkGetPhysicalDeviceSurfaceFormatsKHR(physical_,surface_,&nFormats,nullptr),
+        vkcheck(vkGetPhysicalDeviceSurfaceFormatsKHR(physical_,displaySurface_,&nFormats,nullptr),
                 "surface format count");
         if(!nFormats)throw std::runtime_error("No Vulkan swapchain surface format");
         std::vector<VkSurfaceFormatKHR> formats(nFormats);
-        vkcheck(vkGetPhysicalDeviceSurfaceFormatsKHR(physical_,surface_,&nFormats,formats.data()),
+        vkcheck(vkGetPhysicalDeviceSurfaceFormatsKHR(physical_,displaySurface_,&nFormats,formats.data()),
                 "surface formats");
         VkSurfaceFormatKHR chosen{};
         for(const auto& f:formats){
@@ -397,10 +403,10 @@ class VulkanRaster final {
             throw std::runtime_error("GPU cannot blit Vulkan sRGB color to display");
 
         uint32_t nModes=0;
-        vkcheck(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_,surface_,&nModes,nullptr),
+        vkcheck(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_,displaySurface_,&nModes,nullptr),
                 "surface present-mode count");
         std::vector<VkPresentModeKHR> modes(nModes);
-        if(nModes)vkcheck(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_,surface_,&nModes,
+        if(nModes)vkcheck(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_,displaySurface_,&nModes,
                                                                     modes.data()),"present modes");
         // FIFO is always available; MAILBOX may reduce visible stutter
         // without allowing tearing when available. No hidden CPU fallback.
@@ -421,7 +427,7 @@ class VulkanRaster final {
         }
         if(swapchain_)vkcheck(vkDeviceWaitIdle(device_),"wait GPU before swapchain resize");
         VkSwapchainCreateInfoKHR ci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
-        ci.surface=surface_;ci.minImageCount=actualCount;
+        ci.surface=displaySurface_;ci.minImageCount=actualCount;
         ci.imageFormat=chosen.format;ci.imageColorSpace=chosen.colorSpace;
         ci.imageExtent=extent;ci.imageArrayLayers=1;
         ci.imageUsage=VK_IMAGE_USAGE_TRANSFER_DST_BIT;
@@ -746,9 +752,10 @@ class VulkanRaster final {
 #ifdef _WIN32
         if(presentWindow_){
             VkWin32SurfaceCreateInfoKHR si{VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR};
-            si.hinstance=GetModuleHandleW(nullptr);
+            si.hinstance=reinterpret_cast<HINSTANCE>(
+                GetWindowLongPtrW(reinterpret_cast<HWND>(presentWindow_),GWLP_HINSTANCE));
             si.hwnd=reinterpret_cast<HWND>(presentWindow_);
-            vkcheck(vkCreateWin32SurfaceKHR(instance_,&si,nullptr,&surface_),"Win32 Vulkan surface");
+            vkcheck(vkCreateWin32SurfaceKHR(instance_,&si,nullptr,&displaySurface_),"Win32 Vulkan surface");
         }
 #endif
         uint32_t n=0;vkcheck(vkEnumeratePhysicalDevices(instance_,&n,nullptr),"enumerate GPUs");
@@ -768,9 +775,9 @@ class VulkanRaster final {
             std::vector<VkQueueFamilyProperties> qs(qn);
             vkGetPhysicalDeviceQueueFamilyProperties(pd,&qn,qs.data());
             for(uint32_t j=0;j<qn;j++)if(qs[j].queueFlags&VK_QUEUE_GRAPHICS_BIT){
-                if(surface_){
+                if(displaySurface_){
                     VkBool32 supportsPresent=VK_FALSE;
-                    vkcheck(vkGetPhysicalDeviceSurfaceSupportKHR(pd,j,surface_,&supportsPresent),
+                    vkcheck(vkGetPhysicalDeviceSurfaceSupportKHR(pd,j,displaySurface_,&supportsPresent),
                             "GPU graphics/present queue compatibility");
                     if(!supportsPresent)continue;
                 }
@@ -863,9 +870,9 @@ class VulkanRaster final {
         VkDeviceCreateInfo d{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
         d.queueCreateInfoCount=1;d.pQueueCreateInfos=&queue;d.pEnabledFeatures=&enable;
         const char* swapchainExtension=VK_KHR_SWAPCHAIN_EXTENSION_NAME;
-        if(surface_){d.enabledExtensionCount=1;d.ppEnabledExtensionNames=&swapchainExtension;}
+        if(displaySurface_){d.enabledExtensionCount=1;d.ppEnabledExtensionNames=&swapchainExtension;}
         vkcheck(vkCreateDevice(physical_,&d,nullptr,&device_),"create GPU device");
-        if(surface_){
+        if(displaySurface_){
             VkSemaphoreCreateInfo sem{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
             vkcheck(vkCreateSemaphore(device_,&sem,nullptr,&imageAcquired_),
                     "swapchain acquire semaphore");
@@ -1163,7 +1170,7 @@ class VulkanRaster final {
         fb.attachmentCount=msaaSamples_==VK_SAMPLE_COUNT_1_BIT?2:3;
         fb.pAttachments=views;fb.width=w;fb.height=h;fb.layers=1;
         vkcheck(vkCreateFramebuffer(device_,&fb,nullptr,&framebuffer_),"Vulkan framebuffer");
-        if(!surface_)readback_=buffer(VkDeviceSize(w)*h*4,VK_BUFFER_USAGE_TRANSFER_DST_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,true);
+        if(!displaySurface_)readback_=buffer(VkDeviceSize(w)*h*4,VK_BUFFER_USAGE_TRANSFER_DST_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,true);
         std::clog<<"[CSE WARP Vulkan] Readback memory HOST_CACHED="
                  <<bool(readback_.flags&VK_MEMORY_PROPERTY_HOST_CACHED_BIT)
                  <<" HOST_COHERENT="<<bool(readback_.flags&VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)<<"\n";
@@ -1539,7 +1546,7 @@ public:
     explicit VulkanRaster(void* win32Window=nullptr):presentWindow_(win32Window){}
     ~VulkanRaster(){
         if(!device_){
-            if(surface_&&instance_)vkDestroySurfaceKHR(instance_,surface_,nullptr);
+            if(displaySurface_&&instance_)vkDestroySurfaceKHR(instance_,displaySurface_,nullptr);
             if(instance_)vkDestroyInstance(instance_,nullptr);
             return;
         }
@@ -1573,7 +1580,7 @@ public:
         if(fence_)vkDestroyFence(device_,fence_,nullptr);
         if(commands_)vkDestroyCommandPool(device_,commands_,nullptr);
         vkDestroyDevice(device_,nullptr);
-        if(surface_)vkDestroySurfaceKHR(instance_,surface_,nullptr);
+        if(displaySurface_)vkDestroySurfaceKHR(instance_,displaySurface_,nullptr);
         if(instance_)vkDestroyInstance(instance_,nullptr);
     }
     bool render(const Scene& scene,const ShadowMap& shadows,const Camera& cam,
@@ -1582,7 +1589,7 @@ public:
         try {
             if(w<1||h<1||w>4096||h>4096)throw std::runtime_error("Invalid render size");
             if(!started_)configure();
-            if(surface_){
+            if(displaySurface_){
                 createSwapchain(uint32_t(w),uint32_t(h));
                 w=int(swapExtent_.width);h=int(swapExtent_.height);
             }
@@ -1594,7 +1601,7 @@ public:
             updateShadow(shadows);
             ensureGI(scene);
             updateUniforms(scene,shadows,cam);
-            const int acquiredIndex=surface_?int(acquireSwapImage()):-1;
+            const int acquiredIndex=displaySurface_?int(acquireSwapImage()):-1;
             VkViewport viewport{0.f,0.f,float(w),float(h),0.f,1.f};
             VkRect2D scissor{{0,0},{uint32_t(w),uint32_t(h)}};
             begin();
