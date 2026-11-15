@@ -124,6 +124,10 @@ bool renderCompute11Preview(const Scene& s,const Camera& cam,int w,int h,std::ve
 bool renderDirectX11Preview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
 // Experimental Vulkan 1.0 Raster GPU backend; offscreen ARGB32 preview, shared Scene/Camera API.
 bool renderVulkanPreview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
+// Explicit cleanup is useful for standalone diagnostics: Vulkan objects must
+// be destroyed while their owning thread, Win32 window and runtime are alive.
+void releaseVulkanPreviewForCurrentThread();
+void releaseVulkanDirectForCurrentThread();
 // Native Win32 Vulkan surface: no CPU pixel readback and no QImage.
 // The HWND is created on the Qt UI thread; VkSwapchainKHR is owned by the
 // persistent raster worker. Never pass a destroyed or temporary HWND.
