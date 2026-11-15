@@ -2,6 +2,8 @@
 // Port of V17 DirectX11 kCloudSkyShader: shared world-locked sky, no scene IDs.
 layout(early_fragment_tests) in; // Skip shader for pixels covered by prepass depth.
 layout(location=0) out vec4 outColor;
+// Original 4096x2048 photographic hemisphere (zenith at top, horizon at bottom).
+layout(set=0,binding=8) uniform sampler2D celestialPanorama;
 layout(set=0,binding=0,std140) uniform Frame {
  vec4 eye,forward,right,up,sun,sky;
  vec4 shadowBase,shadowRight,shadowUp;
@@ -48,24 +50,35 @@ void main(){
    col=mix(col,cloudColor,cloud*opacity);
  }
  if(d.y>0.0 && day<.20){
-   vec2 starUV=vec2(atan(d.z,d.x)/6.28318530718+.5+f.skyWind.z/24.0,
-     asin(clamp(d.y,-1.0,1.0))/3.14159265359+.5)*vec2(360.0,180.0);
-   vec2 starCell=floor(starUV);
-   float chance=skyHash(starCell+vec2(19.79,91.73));
-   vec2 center=vec2(skyHash(starCell+vec2(41.11,12.77)),
-                     skyHash(starCell+vec2(13.47,59.19)));
-   float radius=mix(.10,.18,skyHash(starCell+vec2(29.5,97.3)));
-   float footprint=max(max(fwidth(starUV.x),fwidth(starUV.y))*.5,.018);
-   float disc=1.0-smoothstep(radius-footprint,radius+footprint,
-                             length(fract(starUV)-center));
-   float bright=mix(.60,1.55,skyHash(starCell+vec2(2.19,6.37)));
-   float horizonFade=smoothstep(.09,.29,d.y);
+   float horizonFade=smoothstep(.025,.14,d.y);
    float night=1.0-smoothstep(.01,.18,day);
    float cloudMask=smoothstep(.60-coverage*.27,.73-coverage*.22,cirrus(d))*opacity;
-   vec3 hue=mix(vec3(.65,.79,1.0),vec3(1.0,.93,.82),
-                 skyHash(starCell+vec2(73.9,5.8)));
-   col+=hue*disc*step(.987,chance)*bright*horizonFade*night*
-        (1.0-clamp(cloudMask,0.0,1.0));
+   if(f.skyViewport.w>.5){
+     // Hemisphere latitude: zenith=v0 and horizon=v1; world-space azimuth
+     // uses horizontal repeat to avoid seams, independent from camera motion.
+     vec2 photoUV=vec2(atan(d.z,d.x)/6.28318530718+.5+f.skyWind.z/24.0,
+          acos(clamp(d.y,0.0,1.0))/1.57079632679);
+     vec3 photograph=texture(celestialPanorama,photoUV).rgb;
+     col=mix(col,photograph,clamp(night*horizonFade*
+               (1.0-clamp(cloudMask,0.0,1.0)),0.0,1.0));
+   }else{
+     // Retain procedurally generated stars when the optional photograph is absent.
+     vec2 starUV=vec2(atan(d.z,d.x)/6.28318530718+.5+f.skyWind.z/24.0,
+       asin(clamp(d.y,-1.0,1.0))/3.14159265359+.5)*vec2(360.0,180.0);
+     vec2 starCell=floor(starUV);
+     float chance=skyHash(starCell+vec2(19.79,91.73));
+     vec2 center=vec2(skyHash(starCell+vec2(41.11,12.77)),
+                       skyHash(starCell+vec2(13.47,59.19)));
+     float radius=mix(.10,.18,skyHash(starCell+vec2(29.5,97.3)));
+     float footprint=max(max(fwidth(starUV.x),fwidth(starUV.y))*.5,.018);
+     float disc=1.0-smoothstep(radius-footprint,radius+footprint,
+                               length(fract(starUV)-center));
+     float bright=mix(.60,1.55,skyHash(starCell+vec2(2.19,6.37)));
+     vec3 hue=mix(vec3(.65,.79,1.0),vec3(1.0,.93,.82),
+                   skyHash(starCell+vec2(73.9,5.8)));
+     col+=hue*disc*step(.987,chance)*bright*horizonFade*night*
+          (1.0-clamp(cloudMask,0.0,1.0));
+   }
  }
  if(f.sun.y>0.0){
    float x=clamp(dot(d,normalize(f.sun.xyz)),0.0,1.0);
