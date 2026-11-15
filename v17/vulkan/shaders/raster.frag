@@ -8,7 +8,7 @@ layout(set=0,binding=0,std140) uniform Frame {
  vec4 eye,forward,right,up,sun,sky;
  vec4 shadowBase,shadowRight,shadowUp;
  vec4 materialProps[256], emission[256];
- vec4 lightPos[16],lightRgb[16];
+ vec4 lightPos[64],lightRgb[64];
  vec4 misc;
  vec4 textureDetail[256];
  vec4 skyZenith,skyHorizon,skyWind,skyViewport;
@@ -102,7 +102,7 @@ void main() {
 #ifdef CSE_WARP_VK_FAST_FRAGMENT
  }
 #endif
- for(int i=0;i<16;i++){
+ for(int i=0;i<64;i++){
    if(i>=int(f.misc.x))break;
    vec3 delta=f.lightPos[i].xyz-world;
 #ifdef CSE_WARP_VK_FAST_FRAGMENT
