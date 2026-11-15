@@ -71,8 +71,10 @@ public:
                 const float skyG=mix(mix(35.f,17.f,h),mix(225.f,172.f,h),day);
                 const float skyB=mix(mix(53.f,32.f,h),mix(230.f,217.f,h),day);
                 float r=skyR,g=skyG,b=skyB;
+                float cloudVisibility=1.f;
                 if(cloudsEnabled&&d.y>-.02f){
                     float cloud=cloudAt(d,drift);
+                    cloudVisibility=1.f-std::clamp(cloud*.78f,0.f,1.f);
                     const float opacity=.65f*smoothstep(.01f,.16f,d.y)*cloud;
                     r=mix(r,mix(7.f,200.f,day),opacity);
                     g=mix(g,mix(10.f,215.f,day),opacity);
@@ -102,8 +104,7 @@ public:
                     const float photoB=mix(mix(float(qBlue(row0[ax])),float(qBlue(row0[bx])),tx),
                                            mix(float(qBlue(row1[ax])),float(qBlue(row1[bx])),tx),ty);
                     float photoWeight=night*smoothstep(.025f,.14f,d.y);
-                    if(cloudsEnabled)photoWeight*=1.f-
-                        std::clamp(cloudAt(d,drift)*.78f,0.f,1.f);
+                    photoWeight*=cloudVisibility;
                     r=mix(r,photoR,photoWeight);
                     g=mix(g,photoG,photoWeight);
                     b=mix(b,photoB,photoWeight);
