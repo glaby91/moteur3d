@@ -5,6 +5,7 @@ on:
     branches:
       - experiment/v17-vulkan-khronos-bench-261115
       - experiment/v17-vulkan-hd620-optimized-261115
+      - experiment/v17-vulkan-hd620-diag-exit-fix-261115
     paths:
       - 'v17/**'
       - '.github/workflows/v17-vulkan-khronos-bench.yml'
@@ -43,6 +44,16 @@ jobs:
             if(!$shader.Contains('lightPos[64],lightRgb[64]')){throw "64-light uniform mismatch in $file"}
           }
           if(!(Test-Path v17/vulkan/tests/khronos_bench.cpp)){throw 'Missing synthetic native benchmark'}
+      - name: Check Windows diagnostic lifecycle and batch quoting
+        shell: pwsh
+        run: |
+          $bat=Get-Content 'v17/vulkan/khronos/DIAGNOSTIC_ECRAN_NOIR.bat' -Raw
+          if($bat.Contains('echo >>>') -or $bat.Contains('echo <<<')){throw 'Unsafe cmd.exe echo redirection markers'}
+          if(!$bat.Contains('02_MAGENTA.log') -or !$bat.Contains('03_REAL_GPU.log')){throw 'Missing stage logs'}
+          if(!$bat.Contains('echo Offscreen exit code:')){throw 'Missing stage status'}
+          $cli=Get-Content 'v17/vulkan/tests/khronos_bench.cpp' -Raw
+          if(!$cli.Contains('releaseVulkanPreviewForCurrentThread()') -or
+             !$cli.Contains('releaseVulkanDirectForCurrentThread()')){throw 'Missing explicit GPU teardown'}
       - name: Configure real V17 Vulkan engine
         shell: pwsh
         run: |
@@ -63,7 +74,7 @@ jobs:
       - name: Assemble fully deployable Windows benchmark
         shell: pwsh
         run: |
-          $dist='CSE-WARP-V17.32-OPTIMIZED-HD620'
+          $dist='CSE-WARP-V17.32-OPTIMIZED-DIAG-FIX-HD620'
           New-Item -ItemType Directory -Force $dist | Out-Null
           foreach($name in @('moteur3d_v17.exe','v17_vulkan_khronos_bench.exe','v17_vulkan_ab_bench.exe','v17_vulkan_gpu_smoke.exe')){
             $path="build-v17/Release/$name"
@@ -93,6 +104,8 @@ jobs:
             'Engine commit: d7c2118906214e989dd88a6077b575fa38b1f0ea',
             "Optimized commit: $env:GITHUB_SHA",
             'A/B controls: CSE_WARP_VK_OPT_INCREMENTAL=0/1, CSE_WARP_VK_FRAMES_IN_FLIGHT=1/2, CSE_WARP_VK_FAST_FRAGMENT=0/1',
+            'Fix: CMD diagnostic escaped; explicit GPU cleanup before process shutdown and before HWND deletion.',
+            'Physical HD620 exit-code verification is required. 0xC0000409 cause is not yet conclusively established.',
             'No Vulkan GPU is present on GitHub CI: compile, source and CPU-only tests are not a HD620 performance validation.',
             'Instrumentation includes real Win32 Vulkan WSI plus CPU/GPU timestamps.',
             'Requires physical Vulkan 1.3.204+ GPU and driver. Do not run benchmarks on CI virtual renderer.'
@@ -102,7 +115,7 @@ jobs:
       - name: Publish runnable Khronos test package
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.32-OPTIMIZED-AB-HD620
-          path: CSE-WARP-V17.32-OPTIMIZED-HD620/
+          name: CSE-WARP-V17.32-OPTIMIZED-DIAG-FIX-HD620
+          path: CSE-WARP-V17.32-OPTIMIZED-DIAG-FIX-HD620/
           retention-days: 14
           if-no-files-found: error
