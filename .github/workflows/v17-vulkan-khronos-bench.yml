@@ -50,7 +50,7 @@ jobs:
       - name: Build instrumented original engine plus native Win32 benchmark
         shell: pwsh
         run: |
-          cmake --build build-v17 --config Release --parallel 4 --target v17_vulkan_khronos_bench v17_vulkan_ab_bench v17_vulkan_gpu_smoke v17_vulkan_mesh_smoke
+          cmake --build build-v17 --config Release --parallel 4 --target moteur3d_v17 v17_vulkan_khronos_bench v17_vulkan_ab_bench v17_vulkan_gpu_smoke v17_vulkan_mesh_smoke
           if($LASTEXITCODE -ne 0){throw 'Khronos compile failed'}
       - name: Run GPU-independent mesh regression
         shell: pwsh
@@ -62,7 +62,7 @@ jobs:
         run: |
           $dist='CSE-WARP-V17.32-KHRONOS-HD620'
           New-Item -ItemType Directory -Force $dist | Out-Null
-          foreach($name in @('v17_vulkan_khronos_bench.exe','v17_vulkan_ab_bench.exe','v17_vulkan_gpu_smoke.exe')){
+          foreach($name in @('moteur3d_v17.exe','v17_vulkan_khronos_bench.exe','v17_vulkan_ab_bench.exe','v17_vulkan_gpu_smoke.exe')){
             $path="build-v17/Release/$name"
             if(!(Test-Path $path)){throw "Missing exe $name"}
             Copy-Item $path "$dist/$name"
@@ -76,8 +76,13 @@ jobs:
           Copy-Item 'v17/vulkan/khronos/LANCER_KHRONOS_HD620.bat' "$dist/"
           Copy-Item 'v17/vulkan/khronos/README.md' "$dist/README_KHRONOS.txt"
           Copy-Item 'scenes/v16/pavillon01' "$dist/pavillon01" -Recurse
+          if(Test-Path 'build-v17/Release/benchmark-civic'){Copy-Item 'build-v17/Release/benchmark-civic' "$dist/benchmark-civic" -Recurse}
+          if(Test-Path 'build-v17/Release/material-lab'){Copy-Item 'build-v17/Release/material-lab' "$dist/material-lab" -Recurse}
+          if(Test-Path 'build-v17/Release/pripyat-photo2scene-proof'){Copy-Item 'build-v17/Release/pripyat-photo2scene-proof' "$dist/pripyat-photo2scene-proof" -Recurse}
           & "$env:QT_ROOT_DIR/bin/windeployqt.exe" --release --no-translations "$dist/v17_vulkan_ab_bench.exe"
           if($LASTEXITCODE -ne 0){throw 'Qt runtime deployment failed'}
+          & "$env:QT_ROOT_DIR/bin/windeployqt.exe" --release --no-translations "$dist/moteur3d_v17.exe"
+          if($LASTEXITCODE -ne 0){throw 'Qt UI deployment failed'}
           $metadata=@(
             'Engine base: CSE WARP Vulkan V17.32',
             'Engine commit: d7c2118906214e989dd88a6077b575fa38b1f0ea',
