@@ -6,7 +6,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 try {
     Add-Type -AssemblyName System.IO.Compression
-    $rootPath = (Resolve-Path -LiteralPath $Root).ProviderPath.TrimEnd([char]'\\',[char]'/')
+    $rootPath = (Resolve-Path -LiteralPath $Root).ProviderPath.TrimEnd([char]92,[char]'/')
     $results = @(Get-ChildItem -LiteralPath $rootPath -Directory -Filter 'FINITIONS_*')
     $logs = @(Get-ChildItem -LiteralPath $rootPath -File -Filter 'finitions_*.log')
     $files = New-Object 'System.Collections.Generic.List[System.IO.FileInfo]'
@@ -34,7 +34,7 @@ try {
         try {
             $index = 0
             foreach ($file in $files) {
-                $relative = $file.FullName.Substring($rootPath.Length).TrimStart([char]'\\',[char]'/').Replace('\\','/')
+                $relative = $file.FullName.Substring($rootPath.Length).TrimStart([char]92,[char]'/').Replace([char]92,[char]47)
                 $entry = $zip.CreateEntry($relative,[System.IO.Compression.CompressionLevel]::Fastest)
                 $source = [System.IO.File]::OpenRead($file.FullName)
                 try {
