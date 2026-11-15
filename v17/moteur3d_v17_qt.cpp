@@ -2707,8 +2707,27 @@ private:
                             shadow=shadowCache->shadow;
                         else {
                             Stats shadowStats;
+                            const auto shadowStart=std::chrono::steady_clock::now();
                             shadow=std::make_shared<ShadowMap>(
                                 buildShadow(snapshot->renderScene,shadowStats));
+                            // Optional diagnostic of the 1,024 x 1,024 CPU ray
+                            // shadow pass. This cost occurs outside VulkanRaster
+                            // and cannot appear in its GPU-only CSV timings.
+                            const QByteArray shadowProfile=qgetenv("CSE_WARP_VK_SHADOW_PROFILE");
+                            if(!shadowProfile.isEmpty()){
+                                const auto shadowElapsed=std::chrono::duration<double,std::milli>(
+                                    std::chrono::steady_clock::now()-shadowStart).count();
+                                QFile log(QString::fromLocal8Bit(shadowProfile));
+                                if(log.open(QIODevice::WriteOnly|QIODevice::Append|QIODevice::Text)){
+                                    const QString line=QStringLiteral("%1,shadow_build_ms=%2,solar_hour=%3,shadow_bin=%4,backend=%5\\n")
+                                        .arg(QDateTime::currentMSecsSinceEpoch())
+                                        .arg(shadowElapsed,0,'f',3)
+                                        .arg(renderHour,0,'f',5)
+                                        .arg(shadowHour,0,'f',2)
+                                        .arg(vulkan?QStringLiteral("Vulkan"):QStringLiteral("DX11"));
+                                    log.write(line.toUtf8());
+                                }
+                            }
                             shadowCache->scene=snapshot;shadowCache->hour=shadowHour;
                             shadowCache->shadow=shadow;
                         }
