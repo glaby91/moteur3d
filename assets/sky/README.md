@@ -29,7 +29,11 @@ artistic rotation, not a sidereal simulation calibrated to Pripyat latitude.
 Photo fades in at night, fades out around the horizon, and stays masked by
 animated cirrus.
 
-Vulkan uploads one dedicated sRGB 2D image with mipmaps when supported;
+Vulkan uploads one dedicated sRGB 2D image with mipmaps when supported.
+On HD620 the default GPU texture is 2048x1024, generated once from the
+approved 4096x2048 source (much lower shared-memory use). Set
+`CSE_WARP_SKYDOME_4K=1` before launching to use the full 4096x2048 GPU image.
+
 GPU sampling occurs in the fullscreen sky pass, without a CPU readback.
 The DirectX 11 interactive GUI uses the independent Qt celestial compositor;
 standalone DX11 benchmark shaders retain their procedural fallback.
