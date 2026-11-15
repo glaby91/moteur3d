@@ -173,7 +173,19 @@ class VulkanRaster final {
     // Persistent CPU copy and mapped instance buffer for mutable opaque boxes.
     // Identical sizes/materials mean only altered 48-byte instances are written.
     std::vector<vkmesh::BoxInstance> boxCpuCache_;
+    std::array<float,4> cachedGroundBounds_{};
     bool fastBoxCache_=false;
+    static std::array<float,4> groundBounds(const Scene& scene){
+        if(scene.obj.empty())return {};
+        float minX=scene.obj.front().mn.x,maxX=scene.obj.front().mx.x;
+        float minZ=scene.obj.front().mn.z,maxZ=scene.obj.front().mx.z;
+        for(const auto& obj:scene.obj){
+            minX=std::min(minX,obj.mn.x);maxX=std::max(maxX,obj.mx.x);
+            minZ=std::min(minZ,obj.mn.z);maxZ=std::max(maxZ,obj.mx.z);
+        }
+        return {std::floor(minX-4.f),std::ceil(maxX+4.f),
+                std::floor(minZ-4.f),std::ceil(maxZ+4.f)};
+    }
     static bool incrementalEnabled(){
         const char* disabled=std::getenv("CSE_WARP_VK_OPT_INCREMENTAL");
         return !disabled || std::strcmp(disabled,"0")!=0;
@@ -1394,7 +1406,9 @@ class VulkanRaster final {
     bool updateBoxInstances(const Scene& scene){
         if(!fastBoxCache_ || !boxInstances_.mapped ||
            !scene.sourceBoxes.empty() || !scene.sourceFoliage.empty() ||
-           scene.finiteGround || scene.obj.size()!=boxCpuCache_.size() ||
+           scene.finiteGround || scene.mat.size()!=1 ||
+           cachedGroundBounds_!=groundBounds(scene) ||
+           scene.obj.size()!=boxCpuCache_.size() ||
            scene.obj.size()!=boxCount_)return false;
         bool dirty=false;
         for(size_t i=0;i<scene.obj.size();++i){
@@ -1459,7 +1473,7 @@ class VulkanRaster final {
             // Complex static scenes retain the faster GPU-local staging path.
             const bool candidate=incrementalEnabled() && !scene.finiteGround &&
                 scene.sourceBoxes.empty() && scene.sourceFoliage.empty() &&
-                boxData.size()==scene.obj.size() && mesh.vertices.empty() &&
+                boxData.size()==scene.obj.size() && scene.mat.size()==1 &&
                 mesh.transparent.empty() && std::all_of(scene.obj.begin(),scene.obj.end(),
                 [&](const Obj& o){return o.kind==Kind::Box &&
                     o.mat<scene.mat.size() && scene.mat[o.mat].transmissionPercent==0;});
@@ -1474,6 +1488,7 @@ class VulkanRaster final {
                     boxData.size()*sizeof(vkmesh::BoxInstance));
                 flush(boxInstances_);
                 boxCpuCache_=boxData;
+                cachedGroundBounds_=groundBounds(scene);
                 fastBoxCache_=true;
             }else{
                 boxInstances_=uploadVertices(boxData.data(),boxData.size()*sizeof(vkmesh::BoxInstance));
