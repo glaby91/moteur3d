@@ -79,7 +79,14 @@ struct Scene { bool underwaterEnvironment=false; bool finiteGround=false; bool u
  // markGpuContentChanged(). Legacy/untracked scenes (identity == 0) retain
  // the full byte-for-byte scene hash as a safe fallback.
  uint64_t gpuCacheIdentity=0, gpuCacheRevision=0;
+ // Independent GPU invalidation epochs for Vulkan incremental updates.
+ // The legacy invalidator remains conservative (geometry AND material data).
+ uint64_t gpuGeometryRevision=0, gpuMaterialRevision=0;
  void markGpuContentChanged(){++gpuCacheRevision;}
+ // Geometry-only changes preserve all immutable GPU material/PBR textures.
+ void markGpuGeometryChanged(){++gpuGeometryRevision;++gpuCacheRevision;}
+ // Material revisions also invalidate texture descriptors and PBR arrays.
+ void markGpuMaterialsChanged(){++gpuMaterialRevision;++gpuCacheRevision;}
 };
 struct ShadowMap { int size=1024; float span=30,dist=42; V base={0,1.5f,0},right,up;std::vector<float>d,min,max; };
 extern V sun,skyZenith,skyHorizon,sunTint;
