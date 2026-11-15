@@ -641,14 +641,41 @@ jobs:
           # Reject the Khronos-only synthetic scene: the V17.493 complete scene is required.
           $scene=Get-Content "$dst/benchmark-civic/scene.json" -Raw | ConvertFrom-Json
           $sector=$scene.sectors[0]
-          $mat=Get-Content (Join-Path "$dst/benchmark-civic" $sector.materials[0]) -Raw | ConvertFrom-Json
-          $pbr=Get-Content (Join-Path "$dst/benchmark-civic" $sector.pbr[0]) -Raw | ConvertFrom-Json
-          if (@($mat.materials).Count -ne 186 -or @($pbr.sets).Count -ne 183) {
-            throw 'Final V17.493 material/PBR scene was overwritten'
-          }
-          if (!(Test-Path "$dst/benchmark-civic/V493_BASSEIN_SIGN_INSTALL.json")) {
+          $materialFile=Join-Path "$dst/benchmark-civic" $sector.materials[0]
+          $pbrFile=Join-Path "$dst/benchmark-civic" $sector.pbr[0]
+          $mat=Get-Content $materialFile -Raw | ConvertFrom-Json
+          $pbr=Get-Content $pbrFile -Raw | ConvertFrom-Json
+          $signReport="$dst/benchmark-civic/V493_BASSEIN_SIGN_INSTALL.json"
+          if (!(Test-Path $signReport)) {
             throw 'Approved V17.493 BASSEIN sign was not installed'
           }
+          $report=Get-Content $signReport -Raw | ConvertFrom-Json
+          $added=[int]$report.addedMaterials
+          if ($added -lt 0 -or $added -gt 69 -or $report.addedSignObjects -ne 112 -or
+              $report.addedTriangles -lt 14000 -or $report.originalUnchangedObjects -lt 5000) {
+            throw 'V17.493 BASSEIN installation report invalid'
+          }
+          # Verify the approved V17.444 backup BEFORE adding approved sign:
+          # exactly 186 materials and 183 PBR sets must be present. The sign
+          # legitimately adds one PBR set for each new non-emissive material.
+          $baseMaterials="$materialFile.pre-bassein-v493.bak"
+          $basePbr="$pbrFile.pre-bassein-v493.bak"
+          if (!(Test-Path $baseMaterials) -or !(Test-Path $basePbr)) {
+            throw 'Approved original materials/PBR backups missing after BASSEIN installation'
+          }
+          $originalMat=Get-Content $baseMaterials -Raw | ConvertFrom-Json
+          $originalPbr=Get-Content $basePbr -Raw | ConvertFrom-Json
+          if (@($originalMat.materials).Count -ne 186 -or @($originalPbr.sets).Count -ne 183) {
+            throw 'V17.493 approved base material/PBR inventory changed'
+          }
+          $expectedMat=186+$added
+          $expectedPbr=183+$added
+          if (@($mat.materials).Count -ne $expectedMat -or
+              @($pbr.sets).Count -ne $expectedPbr) {
+            throw "V17.493 scene inventory mismatch: expected $expectedMat materials and $expectedPbr PBR sets after sign"
+          }
+          Write-Host "V17.493 materials: original 186 + sign $added = $expectedMat"
+          Write-Host "V17.493 PBR sets: original 183 + sign $added = $expectedPbr"
           if (!(Test-Path "$dst/audio/pripyat_radio.wav")) {throw 'V17.493 Ukrainian radio missing'}
           git rev-parse HEAD | Set-Content "$dst/VULKAN_INTEGRATION_COMMIT.txt"
           @(
