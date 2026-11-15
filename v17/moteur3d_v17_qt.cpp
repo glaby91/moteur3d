@@ -1845,6 +1845,11 @@ private:
         backendBox_->setItemData(5,0,Qt::UserRole-1);
         backendBox_->setItemData(5,QStringLiteral("Vulkan SDK absent lors de la compilation"),Qt::ToolTipRole);
 #endif
+#ifdef _WIN32
+        // Default Windows user path: native D3D11 raster with DXGI presentation.
+        // Vulkan and all CPU/compute options remain selectable.
+        backendBox_->setCurrentIndex(4);
+#endif
         // Compact quick controls remain visible while either sidebar tab is open.
         auto* fastBackend=new QComboBox(camerasToolbar);
         fastBackend->setMinimumWidth(210);
