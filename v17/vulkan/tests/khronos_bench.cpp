@@ -181,6 +181,10 @@ int main(int argc,char** argv){
                  <<" gpu_valid="<<stats.gpuTimingValid
                  <<" brightest="<<brightest<<" pixels_different="<<different
                  <<" nonblack_approx="<<nonBlack<<" total_pixels="<<pixels.size()<<"\n";
+        // Release DLL-owned Vulkan resources before CRT shutdown.
+        std::cerr<<"[WARP Khronos] OFFSCREEN explicit cleanup BEGIN"<<std::endl;
+        m3d::releaseVulkanPreviewForCurrentThread();
+        std::cerr<<"[WARP Khronos] OFFSCREEN explicit cleanup COMPLETE"<<std::endl;
         if(brightest<15 || different==0){
             std::cerr<<"[WARP Khronos] OFFSCREEN BLACK/FLAT: no valid image; do not trust visual perf\n";
             return 9;
@@ -241,6 +245,9 @@ int main(int argc,char** argv){
         m3d::Stats stats{};
         if(!m3d::renderVulkanDirectPresent(scene,shadow,cam,w,h,hwnd,stats,error)){
             std::wcerr<<L"Vulkan direct presentation failed: "<<error<<L"\n";
+            std::cerr<<"[WARP Khronos] DIRECT explicit cleanup BEGIN"<<std::endl;
+            m3d::releaseVulkanDirectForCurrentThread();
+            std::cerr<<"[WARP Khronos] DIRECT explicit cleanup COMPLETE"<<std::endl;
             DestroyWindow(hwnd);
             return 4;
         }
@@ -253,6 +260,10 @@ int main(int argc,char** argv){
                      <<" wait_ms="<<stats.cpuMapWaitMs<<"\n";
         }
     }
+    // Destroy VkSurfaceKHR while its Win32 HWND is still valid.
+    std::cerr<<"[WARP Khronos] DIRECT explicit cleanup BEGIN"<<std::endl;
+    m3d::releaseVulkanDirectForCurrentThread();
+    std::cerr<<"[WARP Khronos] DIRECT explicit cleanup COMPLETE"<<std::endl;
     DestroyWindow(hwnd);
     std::cerr<<"[WARP Khronos] completed frames="<<frames
              <<" duration_seconds="<<seconds<<" (CSV in CSE_WARP_VK_KHRONOS_CSV)\n";
