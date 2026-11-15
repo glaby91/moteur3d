@@ -44,6 +44,31 @@ jobs:
           cache: true
           stripdown: true
           install_swiftshader: false
+      - name: Make the SDK Vulkan loader available to native Windows CI smoke tests
+        shell: pwsh
+        run: |
+          # The V17 shared engine imports vulkan-1.dll even when a smoke test
+          # only exercises the CPU scene loader. Clean GitHub Windows runners
+          # do not necessarily ship a system Vulkan loader/GPU driver.
+          # Resolve the *SDK's own* loader for CI; never silently deploy it
+          # over the target machine's driver-managed Vulkan installation.
+          $sdk=$env:VULKAN_SDK
+          if (!$sdk -or !(Test-Path $sdk)) { throw 'Vulkan SDK installation unavailable' }
+          $loader=Join-Path $sdk 'Bin/vulkan-1.dll'
+          if (!(Test-Path $loader)) {
+            $found=Get-ChildItem $sdk -Recurse -File -Filter 'vulkan-1.dll' |
+              Where-Object { $_.FullName -notmatch '([\\/])Lib([\\/])' } | Select-Object -First 1
+            if (!$found) { throw 'SDK Vulkan loader vulkan-1.dll not found; cannot run native Windows smoke' }
+            $loader=$found.FullName
+          }
+          $loaderDir=Split-Path $loader -Parent
+          Write-Host "CI Vulkan loader: $loader"
+          $loaderDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $env:PATH="$loaderDir;$env:PATH"
+          # Explicitly assert dependencies before any scene test; missing
+          # loader used to appear as Windows exit -1073741515 (0xC0000135).
+          & where.exe vulkan-1.dll
+          if ($LASTEXITCODE -ne 0) { throw 'Vulkan SDK loader is not resolvable via PATH' }
       - name: Generate benchmark scenes from reusable Pripyat material library
         shell: pwsh
         run: |
