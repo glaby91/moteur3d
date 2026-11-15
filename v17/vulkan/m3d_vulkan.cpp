@@ -1790,12 +1790,21 @@ class VulkanRaster final {
 public:
     explicit VulkanRaster(void* win32Window=nullptr):presentWindow_(win32Window){}
     ~VulkanRaster(){
+        // Opt-in teardown breadcrumbs to distinguish GPU shutdown from
+        // Windows CRT/thread-local runtime termination (0xC0000409).
+        const bool trace=std::getenv("CSE_WARP_VK_DIAG_TEARDOWN")!=nullptr;
+        auto checkpoint=[&](const char* stage){
+            if(trace)std::cerr<<"[WARP Vulkan] cleanup "<<stage<<std::endl;
+        };
+        checkpoint("BEGIN");
         if(!device_){
             if(displaySurface_&&instance_)vkDestroySurfaceKHR(instance_,displaySurface_,nullptr);
             if(instance_)vkDestroyInstance(instance_,nullptr);
             return;
         }
-        vkDeviceWaitIdle(device_);
+        checkpoint("DEVICE_IDLE_BEGIN");
+        const VkResult idleResult=vkDeviceWaitIdle(device_);
+        if(trace)std::cerr<<"[WARP Vulkan] cleanup DEVICE_IDLE_RESULT "<<int(idleResult)<<std::endl;
         // The active slot lives in the original members. The inactive slot
         // must be destroyed explicitly before the shared device/descriptors.
         for(FrameSlot& slot:frameSlots_){
@@ -1808,6 +1817,7 @@ public:
             if(slot.commands)vkDestroyCommandPool(device_,slot.commands,nullptr);
             slot=FrameSlot{};
         }
+        checkpoint("FRAME_SLOTS_RELEASED");
         if(framebuffer_)vkDestroyFramebuffer(device_,framebuffer_,nullptr);
         for(VkSemaphore sem:imageReady_)if(sem)vkDestroySemaphore(device_,sem,nullptr);
         if(imageAcquired_)vkDestroySemaphore(device_,imageAcquired_,nullptr);
@@ -1816,6 +1826,7 @@ public:
         free(color_);free(msColor_);free(depth_);free(albedo_);free(surface_);free(shadow_);
         free(detailAlbedo_);free(detailSurface_);
         free(gi0_);free(gi1_);
+        checkpoint("BUFFERS_TEXTURES_RELEASED");
         if(skyPipeline_)vkDestroyPipeline(device_,skyPipeline_,nullptr);
         if(depthFoliage_)vkDestroyPipeline(device_,depthFoliage_,nullptr);
         if(depthBox_)vkDestroyPipeline(device_,depthBox_,nullptr);
@@ -1836,9 +1847,12 @@ public:
         if(queries_)vkDestroyQueryPool(device_,queries_,nullptr);
         if(fence_)vkDestroyFence(device_,fence_,nullptr);
         if(commands_)vkDestroyCommandPool(device_,commands_,nullptr);
+        checkpoint("DEVICE_OBJECTS_RELEASED");
         vkDestroyDevice(device_,nullptr);
+        checkpoint("DEVICE_DESTROYED");
         if(displaySurface_)vkDestroySurfaceKHR(instance_,displaySurface_,nullptr);
         if(instance_)vkDestroyInstance(instance_,nullptr);
+        checkpoint("INSTANCE_DESTROYED");
     }
     bool render(const Scene& scene,const ShadowMap& shadows,const Camera& cam,
                 int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error){
@@ -2073,28 +2087,38 @@ public:
 };
 } // namespace
 
+// Explicit current-thread ownership, rather than an opaque thread_local
+// instance that can only be destroyed during DLL/CRT thread detach.
+namespace {
+thread_local std::unique_ptr<VulkanRaster> tlsPreviewRenderer;
+thread_local std::unique_ptr<VulkanRaster> tlsDirectRenderer;
+thread_local void* tlsDirectWindow=nullptr;
+}
+void releaseVulkanPreviewForCurrentThread(){
+    tlsPreviewRenderer.reset();
+}
+void releaseVulkanDirectForCurrentThread(){
+    // Destroy the native VkSurfaceKHR while its Win32 HWND is still valid.
+    tlsDirectRenderer.reset();
+    tlsDirectWindow=nullptr;
+}
 bool renderVulkanPreview(const Scene& scene,const ShadowMap& shadow,const Camera& camera,
                          int w,int h,std::vector<uint32_t>& out,Stats& stats,std::wstring& error){
-    // Vulkan contexts may not be driven simultaneously from multiple threads.
-    // Each Qt worker owns its own resources, like the existing D3D11 backend.
-    thread_local VulkanRaster renderer;
-    return renderer.render(scene,shadow,camera,w,h,out,stats,error);
+    // One Vulkan context per Qt worker; standalone tools may release early.
+    if(!tlsPreviewRenderer)tlsPreviewRenderer=std::make_unique<VulkanRaster>();
+    return tlsPreviewRenderer->render(scene,shadow,camera,w,h,out,stats,error);
 }
 
 bool renderVulkanDirectPresent(const Scene& scene,const ShadowMap& shadow,const Camera& camera,
                                int w,int h,void* nativeWindow,Stats& stats,std::wstring& error){
     if(!nativeWindow){error=L"Null native HWND for Vulkan presentation";return false;}
-    // Independent device/command context on the same persistent Qt worker.
-    // Never mutate the well-tested offscreen A/B renderer.
-    thread_local std::unique_ptr<VulkanRaster> direct;
-    thread_local void* activeWindow=nullptr;
-    if(!direct || activeWindow!=nativeWindow){
-        direct.reset();
-        direct=std::make_unique<VulkanRaster>(nativeWindow);
-        activeWindow=nativeWindow;
+    if(!tlsDirectRenderer || tlsDirectWindow!=nativeWindow){
+        releaseVulkanDirectForCurrentThread();
+        tlsDirectRenderer=std::make_unique<VulkanRaster>(nativeWindow);
+        tlsDirectWindow=nativeWindow;
     }
     std::vector<uint32_t> noCpuImage;
-    return direct->render(scene,shadow,camera,w,h,noCpuImage,stats,error);
+    return tlsDirectRenderer->render(scene,shadow,camera,w,h,noCpuImage,stats,error);
 }
 
 } // namespace m3d
