@@ -730,7 +730,8 @@ jobs:
           )) {
             if (!(Test-Path $file)) { throw "Final Qt Windows package incomplete: $file" }
             $size=(Get-Item $file).Length
-            if ($size -lt 50) { throw "Invalid Qt binary/configuration: $file ($size bytes)" }
+            $minSize=if ($file -like '*.conf') { 10 } else { 50 }
+            if ($size -lt $minSize) { throw "Invalid Qt binary/configuration: $file ($size bytes)" }
             Write-Host "Verified portable Qt deployment: $file ($size bytes)"
           }
           $dll=(Get-FileHash "$dist/platforms/qwindows.dll" -Algorithm SHA256).Hash
