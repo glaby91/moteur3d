@@ -2625,10 +2625,18 @@ private:
         }
         const uint64_t token=serial->fetch_add(1)+1;
         auto snapshot=runtime_;
-        const float renderHour=snapshot->daylightHour;
-        // Shadows are materially unchanged within this 15-minute sky bin.
-        // The expensive map is rebuilt at most once per 0.25 simulated hour,
-        // not for each cloud frame or every fractional hour change.
+        const bool directPresent=nativeVulkanSelected();
+        // V17.493 uses an independent 30 Hz Qt sky compositor. Vulkan WSI
+        // bypasses that QWidget, so sample the SAME monotonic solar clock on
+        // each native frame rather than the slower 1.5 s UI spinbox timer.
+        // Never modify the approved solarMotion() or walking controller.
+        const float renderHour=(directPresent && dayNightCycleBox_ &&
+                                dayNightCycleBox_->isChecked() && dayNightClock_.isValid())
+            ?float(cse::weather::cycleHour(dayNightOriginHour_,
+                              double(dayNightClock_.elapsed())/1000.0))
+            :snapshot->daylightHour;
+        // Architectural shadow rays stay at the V17.493 15-minute cadence.
+        // Decouple them from smooth Vulkan sky/celestial shader uniforms.
         const float shadowHour=std::floor(renderHour*4.f)*.25f;
         auto preset=activeCameraPose();
         updateCameraHud();
@@ -2644,7 +2652,6 @@ private:
         int w=renderSize.width();
         int h=renderSize.height();
         const int backend=backendBox_->currentIndex();
-        const bool directPresent=nativeVulkanSelected();
         // A swapchain always targets the visible child window's real pixel
         // extent; the offscreen quality resolution is irrelevant in this mode.
         if(directPresent && nativeWindow_){
