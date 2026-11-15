@@ -192,7 +192,7 @@ class VulkanRaster final {
     }
     static vkdirty::Key sceneKey(const Scene& s){
         return {&s,s.gpuCacheIdentity,s.gpuCacheRevision,
-                s.gpuGeometryRevision,s.gpuMaterialRevision,
+                s.gpuGeometryRevision,s.gpuMaterialRevision,s.gpuParametersRevision,
                 s.obj.size(),s.mat.size()};
     }
     const float* shadowData_=nullptr;
