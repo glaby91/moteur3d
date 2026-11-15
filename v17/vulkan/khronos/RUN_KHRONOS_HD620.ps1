@@ -45,8 +45,18 @@ foreach($case in $cases){
   $argsList=@('--width','1366','--height','768','--cubes',"$($case.Cubes)",'--lights',"$($case.Lights)",'--motion',$case.Motion,'--seconds',"$Seconds")
   $rc=-999
   try{
-   $proc=Start-Process -FilePath $exe -ArgumentList $argsList -WorkingDirectory $base -PassThru -Wait -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-   $rc=$proc.ExitCode
+   $proc=Start-Process -FilePath $exe -ArgumentList $argsList -WorkingDirectory $base -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+   # Never hang the complete 36-case campaign if the Intel Vulkan driver stalls.
+   $limit=[Math]::Max(90,$Seconds+90)
+   try {
+    Wait-Process -Id $proc.Id -Timeout $limit -ErrorAction Stop
+    $proc.Refresh()
+    $rc=$proc.ExitCode
+   } catch {
+    "BENCHMARK TIMEOUT after $limit s; process stopped; continuing with next case." | Add-Content $stderr
+    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+    $rc=124
+   }
   }catch{ $_ | Out-String | Add-Content $stderr }
   $manifest += [pscustomobject]@{Run=$name;Scenario=$case.Name;Repeat=$rep;Cubes=$case.Cubes;Lights=$case.Lights;Motion=$case.Motion;RequestedImages=$case.Images;RequestedPresent=$case.Present;MSAA=$case.Msaa;DurationSeconds=$Seconds;WarmupSeconds=$WarmupSeconds;ExitCode=$rc;Csv="$name.csv"}
   Write-Host "Exit=$rc Frames CSV exists=$([bool](Test-Path $out))"
