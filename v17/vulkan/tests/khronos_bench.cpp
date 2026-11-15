@@ -254,4 +254,9 @@ int main(int argc,char** argv){
              <<" duration_seconds="<<seconds<<" (CSV in CSE_WARP_VK_KHRONOS_CSV)\n";
     return frames?0:5;
 }
+// MSVC GUI subsystem entry point: no extra DOS console per benchmark case.
+// __argc/__argv are supplied by the MSVC CRT and preserve the existing CLI.
+int WINAPI WinMain(HINSTANCE,HINSTANCE,LPSTR,int){
+    return main(__argc,__argv);
+}
 #endif
