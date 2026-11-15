@@ -40,7 +40,7 @@
 namespace m3d { namespace {
 using Clock=std::chrono::steady_clock;
 using Vertex=vkmesh::GpuVertex;
-constexpr uint32_t kMaxMaterials=256, kLights=16;
+constexpr uint32_t kMaxMaterials=256, kLights=64;
 void vkcheck(VkResult code,const char* name) {
     if(code!=VK_SUCCESS)throw std::runtime_error(std::string(name)+" Vulkan error "+std::to_string(int(code)));
 }
