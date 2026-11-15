@@ -132,6 +132,7 @@ void releaseVulkanDirectForCurrentThread();
 // Copied once at startup; a missing panorama keeps the procedural fallback.
 // RGBA8 tightly packed rows, width*height*4 bytes; null clears the asset.
 void setVulkanCelestialPanoramaRGBA(const uint8_t* rgba,int width,int height);
+void setVulkanSkyCloudMotion(float speed);
 // Native Win32 Vulkan surface: no CPU pixel readback and no QImage.
 // The HWND is created on the Qt UI thread; VkSwapchainKHR is owned by the
 // persistent raster worker. Never pass a destroyed or temporary HWND.
