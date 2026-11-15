@@ -20,6 +20,7 @@
 #include "m3d_vulkan_readback.h"
 #include "m3d_vulkan_mips.h"
 #include "khronos_capture.h"
+#include "vulkan_dirty_policy.h"
 #include "../weather/clouds.h"
 #include "../../experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_gi_bake.h"
 #include <vulkan/vulkan.h>
@@ -168,6 +169,20 @@ class VulkanRaster final {
     uint64_t sceneIdentity_=0,sceneRevision_=~uint64_t(0);
     size_t sceneObjects_=0,sceneMaterials_=0;
     const Scene* scenePointer_=nullptr;
+    vkdirty::Key sceneKey_{};
+    // Persistent CPU copy and mapped instance buffer for mutable opaque boxes.
+    // Identical sizes/materials mean only altered 48-byte instances are written.
+    std::vector<vkmesh::BoxInstance> boxCpuCache_;
+    bool fastBoxCache_=false;
+    static bool incrementalEnabled(){
+        const char* disabled=std::getenv("CSE_WARP_VK_OPT_INCREMENTAL");
+        return !disabled || std::strcmp(disabled,"0")!=0;
+    }
+    static vkdirty::Key sceneKey(const Scene& s){
+        return {&s,s.gpuCacheIdentity,s.gpuCacheRevision,
+                s.gpuGeometryRevision,s.gpuMaterialRevision,
+                s.obj.size(),s.mat.size()};
+    }
     const float* shadowData_=nullptr;
     uint32_t shadowSize_=0;
     float cachedSolarHour_=std::numeric_limits<float>::quiet_NaN();
@@ -1373,10 +1388,61 @@ class VulkanRaster final {
         shadowData_=sh.d.data();shadowSize_=uint32_t(sh.size);cachedSolarHour_=solarHour;
         updateDescriptors();
     }
-    void rebuild(const Scene& scene){
+    // No geometry generation, allocation or texture upload when a mutable
+    // scene contains only opaque instances of the already cached box mesh.
+    // Same byte layout, material UV mapping and chunk culling as vkmesh::build().
+    bool updateBoxInstances(const Scene& scene){
+        if(!fastBoxCache_ || !boxInstances_.mapped ||
+           !scene.sourceBoxes.empty() || !scene.sourceFoliage.empty() ||
+           scene.finiteGround || scene.obj.size()!=boxCpuCache_.size() ||
+           scene.obj.size()!=boxCount_)return false;
+        bool dirty=false;
+        for(size_t i=0;i<scene.obj.size();++i){
+            const Obj& obj=scene.obj[i];
+            if(obj.kind!=Kind::Box || obj.mat>=scene.mat.size() ||
+               scene.mat[obj.mat].transmissionPercent>0)return false;
+            vkmesh::BoxInstance inst{};
+            inst.lo[0]=obj.mn.x;inst.lo[1]=obj.mn.y;inst.lo[2]=obj.mn.z;
+            inst.hi[0]=obj.mx.x;inst.hi[1]=obj.mx.y;inst.hi[2]=obj.mx.z;
+            inst.dimensions[0]=obj.mx.x-obj.mn.x;
+            inst.dimensions[1]=obj.mx.y-obj.mn.y;
+            inst.dimensions[2]=obj.mx.z-obj.mn.z;
+            inst.material=obj.mat;
+            inst.uvScale=vkmesh::uvScaleForMaterial(scene,obj.mat);
+            inst.uvMode=0;
+            if(std::memcmp(&inst,&boxCpuCache_[i],sizeof(inst))==0)continue;
+            std::memcpy(static_cast<char*>(boxInstances_.mapped)+i*sizeof(inst),
+                        &inst,sizeof(inst));
+            boxCpuCache_[i]=inst;
+            dirty=true;
+        }
+        if(dirty){
+            flush(boxInstances_); // host-coherent memory is already visible
+            // Refit the existing coarse bounds for correct moving-object culling.
+            for(Chunk& chunk:boxChunks_){
+                const size_t begin=chunk.first;
+                const size_t end=begin+chunk.count;
+                const auto& a=boxCpuCache_[begin];
+                chunk.lo={a.lo[0],a.lo[1],a.lo[2]};
+                chunk.hi={a.hi[0],a.hi[1],a.hi[2]};
+                for(size_t i=begin+1;i<end;++i){
+                    const auto& b=boxCpuCache_[i];
+                    chunk.lo.x=std::min(chunk.lo.x,b.lo[0]);
+                    chunk.lo.y=std::min(chunk.lo.y,b.lo[1]);
+                    chunk.lo.z=std::min(chunk.lo.z,b.lo[2]);
+                    chunk.hi.x=std::max(chunk.hi.x,b.hi[0]);
+                    chunk.hi.y=std::max(chunk.hi.y,b.hi[1]);
+                    chunk.hi.z=std::max(chunk.hi.z,b.hi[2]);
+                }
+            }
+        }
+        return true;
+    }
+    void rebuild(const Scene& scene,bool uploadPbr){
         if(scene.mat.size()>kMaxMaterials)throw std::runtime_error("Vulkan port: more than 256 materials");
         free(vertices_);free(transparent_);free(boxTemplate_);free(boxInstances_);
         free(foliageTemplate_);free(foliageInstances_);
+        fastBoxCache_=false;boxCpuCache_.clear();
         glass_.clear();chunks_.clear();boxChunks_.clear();foliageChunks_.clear();
         boxCount_=0;foliageCount_=0;foliageTemplateCount_=0;
         std::vector<vkmesh::BoxInstance> boxData;
@@ -1389,11 +1455,29 @@ class VulkanRaster final {
         vertexCount_=uint32_t(mesh.vertices.size());
         if(vertexCount_)vertices_=uploadVertices(mesh.vertices.data(),size_t(vertexCount_)*sizeof(Vertex));
         if(!boxData.empty()){
+            // Only pure instanced boxes use a host-visible persistent buffer.
+            // Complex static scenes retain the faster GPU-local staging path.
+            const bool candidate=incrementalEnabled() && !scene.finiteGround &&
+                scene.sourceBoxes.empty() && scene.sourceFoliage.empty() &&
+                boxData.size()==scene.obj.size() && mesh.vertices.empty() &&
+                mesh.transparent.empty() && std::all_of(scene.obj.begin(),scene.obj.end(),
+                [&](const Obj& o){return o.kind==Kind::Box &&
+                    o.mat<scene.mat.size() && scene.mat[o.mat].transmissionPercent==0;});
             vkmesh::MeshBuilder cube;
             cube.box({0,0,0},{1,1,1},0,1.f);
             if(cube.vertices.size()!=36u)throw std::runtime_error("Invalid V17 box template");
             boxTemplate_=uploadVertices(cube.vertices.data(),cube.vertices.size()*sizeof(Vertex));
-            boxInstances_=uploadVertices(boxData.data(),boxData.size()*sizeof(vkmesh::BoxInstance));
+            if(candidate){
+                boxInstances_=buffer(VkDeviceSize(boxData.size()*sizeof(vkmesh::BoxInstance)),
+                    VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+                std::memcpy(boxInstances_.mapped,boxData.data(),
+                    boxData.size()*sizeof(vkmesh::BoxInstance));
+                flush(boxInstances_);
+                boxCpuCache_=boxData;
+                fastBoxCache_=true;
+            }else{
+                boxInstances_=uploadVertices(boxData.data(),boxData.size()*sizeof(vkmesh::BoxInstance));
+            }
             boxCount_=uint32_t(boxData.size());
             constexpr size_t boxBatch=128;
             for(size_t first=0;first<boxData.size();first+=boxBatch){
@@ -1457,11 +1541,15 @@ class VulkanRaster final {
             }
             chunks_.push_back(c);
         }
-        textures(scene);
+        // PBR arrays are immutable across geometry-only revisions. Avoid
+        // reallocating/uploading tens or hundreds of MiB for moving geometry.
+        if(uploadPbr || !albedo_.image){
+            textures(scene);
+            updateDescriptors();
+        }
         sceneIdentity_=scene.gpuCacheIdentity;
         sceneRevision_=scene.gpuCacheRevision;
         sceneObjects_=scene.obj.size();sceneMaterials_=scene.mat.size();scenePointer_=&scene;
-        updateDescriptors();
     }
     bool visible(const Chunk& c,const Camera& cam) const{
         const V center=(c.lo+c.hi)*.5f;
@@ -1618,10 +1706,17 @@ public:
             const auto swapchainEnd=Clock::now();
             if(width_!=uint32_t(w)||height_!=uint32_t(h))targets(uint32_t(w),uint32_t(h));
             const auto targetsEnd=Clock::now();
-            const bool changed=scenePointer_!=&scene||sceneObjects_!=scene.obj.size()
-                 ||sceneMaterials_!=scene.mat.size()||scene.gpuCacheIdentity==0
-                 ||sceneIdentity_!=scene.gpuCacheIdentity||sceneRevision_!=scene.gpuCacheRevision;
-            if(changed)rebuild(scene);
+            const auto nextKey=sceneKey(scene);
+            auto invalidation=vkdirty::classify(sceneKey_,nextKey);
+            // A/B opt-out retains the original all-or-nothing behavior.
+            if(!incrementalEnabled() && invalidation!=vkdirty::Update::None)
+                invalidation=vkdirty::Update::Full;
+            const bool changed=invalidation!=vkdirty::Update::None;
+            if(changed){
+                if(invalidation==vkdirty::Update::Full || !updateBoxInstances(scene))
+                    rebuild(scene,invalidation==vkdirty::Update::Full);
+                sceneKey_=nextKey;
+            }
             const auto rebuiltEnd=Clock::now();
             updateShadow(shadows);
             const auto shadowEnd=Clock::now();
