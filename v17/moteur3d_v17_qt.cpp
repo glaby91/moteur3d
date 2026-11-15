@@ -132,6 +132,10 @@ public:
         update();
     }
     bool hasSkyFrame()const{return !skyImage_.isNull()&&!skyDirty_;}
+    void setCelestialPanorama(const QImage& image){
+        skyComposer_.setPanorama(image);
+        skyDirty_=true;
+    }
     void invalidateSky(){skyDirty_=true;}
     void drawSky(const m3d::Camera& camera,float hour,double seconds,
                  bool cloudsEnabled,bool fastWeather){
@@ -301,6 +305,21 @@ public:
         renderPool_.setMaxThreadCount(1);
         renderPool_.setExpiryTimeout(-1);
         createUi();
+        // The user-approved photographic hemisphere is optional at runtime:
+        // a missing asset keeps all existing procedural stars and cannot block
+        // scene loading or Vulkan setup. Decode it only once, never per frame.
+        const QString nightSkyFile=QDir(QCoreApplication::applicationDirPath())
+            .filePath(QStringLiteral("assets/sky/CSE_WARP_ciel_nocturne_hemisphere_UV_4096x2048.png"));
+        const QImage nightSky(nightSkyFile);
+        if(!nightSky.isNull()&&nightSky.width()==4096&&nightSky.height()==2048){
+            canvas_->setCelestialPanorama(nightSky);
+            const QImage rgba=nightSky.convertToFormat(QImage::Format_RGBA8888);
+            m3d::setVulkanCelestialPanoramaRGBA(rgba.constBits(),rgba.width(),rgba.height());
+            std::fprintf(stderr,"[CSE WARP SKY] Photographic hemisphere loaded: 4096x2048\\n");
+        }else{
+            std::fprintf(stderr,"[CSE WARP SKY] Optional 4096x2048 panorama missing or invalid; procedural fallback\\n");
+            m3d::setVulkanCelestialPanoramaRGBA(nullptr,0,0);
+        }
         // A stationary camera must always display the native full-resolution
         // raster, regardless of the experimental launcher environment.
         peripheralExperimentEnabled_=
