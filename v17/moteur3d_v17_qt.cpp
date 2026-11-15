@@ -1164,6 +1164,14 @@ protected:
         return QMainWindow::event(e);
     }
     bool eventFilter(QObject* watched,QEvent* event) override{
+        if(watched==nativeWindow_ && event->type()==QEvent::Resize &&
+           nativeDirectSelected() && runtime_ && !sceneLoading_){
+            // DXGI swapchain extent must track the physical child HWND size.
+            // Defer until Qt finishes its native window resize transaction.
+            QTimer::singleShot(0,this,[this]{
+                if(nativeDirectSelected()&&!closingRequested_)requestRender();
+            });
+        }
         if((watched==canvas_||watched==nativeWindow_) && exploring_){
             if(watched==nativeWindow_ &&
                (event->type()==QEvent::KeyPress || event->type()==QEvent::KeyRelease)){
@@ -2180,7 +2188,8 @@ private:
                     canvas_->setFocus();
                     captureMouseLook();
                 }
-                if(qualityBox_&&qualityBox_->currentIndex()==0)requestRender();
+                if(nativeDirectSelected() || (qualityBox_&&qualityBox_->currentIndex()==0))
+                    requestRender();
             });
         });
 
