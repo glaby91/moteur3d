@@ -4,7 +4,7 @@
 int main(){
  using namespace m3d::vkdirty;
  int scene=1;
- Key baseline{&scene,42,0,0,0,256,8};
+ Key baseline{&scene,42,0,0,0,0,256,8};
  assert(classify({},baseline)==Update::Full);
  assert(classify(baseline,baseline)==Update::None);
  Key cam=baseline; // camera moves do not invalidate GPU resources
@@ -15,6 +15,10 @@ int main(){
  assert(classify(baseline,legacy)==Update::Full);
  Key mats=baseline;mats.revision++;mats.materialsRevision++;
  assert(classify(baseline,mats)==Update::Full);
+ Key param=baseline;param.revision++;param.parametersRevision++;
+ assert(classify(baseline,param)==Update::None);
+ Key paramThenGeometry=param;paramThenGeometry.revision++;paramThenGeometry.geometryRevision++;
+ assert(classify(baseline,paramThenGeometry)==Update::Geometry);
  Key count=baseline;count.objects++;
  assert(classify(baseline,count)==Update::Geometry);
  Key identity=baseline;identity.identity++;
