@@ -206,6 +206,101 @@ class VulkanRaster final {
     uint32_t msaaSetting_=2;
     VkSampleCountFlagBits msaaSamples_=VK_SAMPLE_COUNT_1_BIT;
     VkFormat depthFormat_=VK_FORMAT_D32_SFLOAT;
+    // Two GPU frames in flight without modifying the established shading path.
+    // All per-frame mutable state is owned by the slot rather than shared.
+    // Static meshes and material textures are reused; mutation drains pending
+    // frames before freeing or rewriting a shared GPU resource.
+    struct FrameSlot {
+        VkCommandPool commands=VK_NULL_HANDLE;
+        VkCommandBuffer cmd=VK_NULL_HANDLE;
+        VkFence fence=VK_NULL_HANDLE;
+        VkQueryPool queries=VK_NULL_HANDLE;
+        VkSemaphore acquired=VK_NULL_HANDLE;
+        VkDescriptorSet descriptor=VK_NULL_HANDLE;
+        VkFramebuffer framebuffer=VK_NULL_HANDLE;
+        Texture color{},msColor{},depth{};
+        Buffer readback{},transparent{},uniform{};
+        uint32_t width=0,height=0;
+        bool pending=false,descriptorReady=false;
+    };
+    std::array<FrameSlot,2> frameSlots_{};
+    bool asyncFrames_=false,frameSlotsReady_=false;
+    int activeSlot_=0;
+    uint64_t submittedFrames_=0;
+    bool activePending_=false,activeDescriptorReady_=false;
+    Stats completedGpuStats_{};
+    void swapSlot(FrameSlot& slot){
+        using std::swap;
+        swap(commands_,slot.commands);swap(cmd_,slot.cmd);
+        swap(fence_,slot.fence);swap(queries_,slot.queries);
+        swap(imageAcquired_,slot.acquired);swap(descriptor_,slot.descriptor);
+        swap(framebuffer_,slot.framebuffer);
+        swap(color_,slot.color);swap(msColor_,slot.msColor);swap(depth_,slot.depth);
+        swap(readback_,slot.readback);swap(transparent_,slot.transparent);
+        swap(uniform_,slot.uniform);
+        swap(width_,slot.width);swap(height_,slot.height);
+        swap(activePending_,slot.pending);
+        swap(activeDescriptorReady_,slot.descriptorReady);
+    }
+    void collectCompletedGpuTiming(){
+        uint64_t stamp[3]{};
+        if(vkGetQueryPoolResults(device_,queries_,0,3,sizeof(stamp),stamp,
+                                 sizeof(uint64_t),VK_QUERY_RESULT_64_BIT)==VK_SUCCESS &&
+           stamp[2]>=stamp[1] && stamp[1]>=stamp[0]){
+            const double period=double(props_.limits.timestampPeriod)*1e-6;
+            completedGpuStats_.gpuDrawMs=double(stamp[1]-stamp[0])*period;
+            completedGpuStats_.gpuTransferMs=double(stamp[2]-stamp[1])*period;
+            completedGpuStats_.gpuTotalMs=double(stamp[2]-stamp[0])*period;
+            completedGpuStats_.gpuTimingValid=true;
+        }
+    }
+    void waitActiveSlot(){
+        if(!activePending_)return;
+        vkcheck(vkWaitForFences(device_,1,&fence_,VK_TRUE,UINT64_MAX),
+                "retire in-flight frame");
+        collectCompletedGpuTiming();
+        activePending_=false;
+    }
+    void useFrameSlot(int slot){
+        if(activeSlot_==slot)return;
+        swapSlot(frameSlots_[activeSlot_]);
+        swapSlot(frameSlots_[slot]);
+        activeSlot_=slot;
+        waitActiveSlot();
+    }
+    void drainPendingFrames(){
+        if(!asyncFrames_ || !frameSlotsReady_)return;
+        // Expensive only for actual geometry/material/light resource changes,
+        // never for camera movement through a static scene.
+        vkcheck(vkDeviceWaitIdle(device_),"drain GPU before scene mutation");
+        if(activePending_){collectCompletedGpuTiming();activePending_=false;}
+        for(auto& slot:frameSlots_)slot.pending=false;
+    }
+    void allocateSecondFrame(){
+        if(!asyncFrames_ || frameSlotsReady_)return;
+        swapSlot(frameSlots_[0]); // preserve configured first slot
+        VkCommandPoolCreateInfo ci{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
+        ci.queueFamilyIndex=family_;
+        vkcheck(vkCreateCommandPool(device_,&ci,nullptr,&commands_),"second-frame pool");
+        VkCommandBufferAllocateInfo ca{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        ca.commandPool=commands_;ca.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY;ca.commandBufferCount=1;
+        vkcheck(vkAllocateCommandBuffers(device_,&ca,&cmd_),"second-frame commands");
+        VkFenceCreateInfo fc{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        vkcheck(vkCreateFence(device_,&fc,nullptr,&fence_),"second-frame fence");
+        VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+        qi.queryType=VK_QUERY_TYPE_TIMESTAMP;qi.queryCount=3;
+        vkcheck(vkCreateQueryPool(device_,&qi,nullptr,&queries_),"second-frame timestamps");
+        VkSemaphoreCreateInfo sem{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+        vkcheck(vkCreateSemaphore(device_,&sem,nullptr,&imageAcquired_),"second-frame image acquired");
+        uniform_=buffer(sizeof(Uniforms),VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+        VkDescriptorSetAllocateInfo da{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        da.descriptorPool=descriptorPool_;da.descriptorSetCount=1;da.pSetLayouts=&descriptorLayout_;
+        vkcheck(vkAllocateDescriptorSets(device_,&da,&descriptor_),"second-frame descriptor");
+        swapSlot(frameSlots_[1]); // both slots stored, current empty
+        swapSlot(frameSlots_[0]); // restore first slot
+        frameSlotsReady_=true;
+        std::clog<<"[CSE WARP Vulkan] Two frames in flight enabled (separate targets/UBO/queries/fences)\n";
+    }
     static double ms(Clock::time_point start,Clock::time_point end) {
         return std::chrono::duration<double,std::milli>(end-start).count();
     }
