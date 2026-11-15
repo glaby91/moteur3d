@@ -17,7 +17,7 @@
 - Lancer `LANCER_COMPARAISON_AB.bat` pour deux campagnes comparables de 12 scénarios à 1280×720, 8 s par test. Les ZIP `*_baseline_*.zip` et `*_optimized_*.zip` sont produits séparément.
 - Lancer `LANCER_KHRONOS_HD620.bat` pour la campagne optimisée complète : 12 scénarios × 3 répétitions × 20 s.
 - Pour lancer une campagne particulière :
-  `powershell -NoProfile -ExecutionPolicy Bypass -File RUN_KHRONOS_HD620.ps1 -Profile optimized -Seconds 12 -Repetitions 2`
+  `powershell -NoProfile -ExecutionPolicy Bypass -File RUN_KHRONOS_HD620.ps1 -Variant optimized -Seconds 12 -Repetitions 2`
 
 ## Paramètres de comparaison (avant le lancement du processus)
 
