@@ -1793,6 +1793,18 @@ public:
             return;
         }
         vkDeviceWaitIdle(device_);
+        // The active slot lives in the original members. The inactive slot
+        // must be destroyed explicitly before the shared device/descriptors.
+        for(FrameSlot& slot:frameSlots_){
+            if(slot.framebuffer)vkDestroyFramebuffer(device_,slot.framebuffer,nullptr);
+            if(slot.acquired)vkDestroySemaphore(device_,slot.acquired,nullptr);
+            free(slot.readback);free(slot.uniform);free(slot.transparent);
+            free(slot.color);free(slot.msColor);free(slot.depth);
+            if(slot.queries)vkDestroyQueryPool(device_,slot.queries,nullptr);
+            if(slot.fence)vkDestroyFence(device_,slot.fence,nullptr);
+            if(slot.commands)vkDestroyCommandPool(device_,slot.commands,nullptr);
+            slot=FrameSlot{};
+        }
         if(framebuffer_)vkDestroyFramebuffer(device_,framebuffer_,nullptr);
         for(VkSemaphore sem:imageReady_)if(sem)vkDestroySemaphore(device_,sem,nullptr);
         if(imageAcquired_)vkDestroySemaphore(device_,imageAcquired_,nullptr);
