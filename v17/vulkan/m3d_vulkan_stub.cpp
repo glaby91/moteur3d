@@ -1,5 +1,6 @@
 #include "m3d_engine.h"
 namespace m3d {
+void setVulkanCelestialPanoramaRGBA(const uint8_t*,int,int){}
 void releaseVulkanPreviewForCurrentThread(){}
 void releaseVulkanDirectForCurrentThread(){}
 bool renderVulkanPreview(const Scene&,const ShadowMap&,const Camera&,int,int,
