@@ -1788,10 +1788,13 @@ private:
         directDisplayBox_=new QCheckBox(QStringLiteral(
             "Vulkan : affichage direct GPU (swapchain expérimentale)"));
 #ifdef _WIN32
-        directDisplayBox_->setChecked(true);
+        // WARP Vulkan V17.32: GPU-native presentation is the *startup default*.
+        // Do not restore a previous disabled state: users can still uncheck it
+        // explicitly for a single session to use the CPU/QImage comparison.
+        directDisplayBox_->setCheckState(Qt::Checked);
         directDisplayBox_->setToolTip(QStringLiteral(
-            "Présente l'image dans une surface Windows native Vulkan, sans GPU→CPU→QImage. "
-            "Les captures/benchmarks utilisent le chemin classique si cette case est décochée."));
+            "Activé par défaut : présentation Vulkan native via swapchain GPU, sans GPU→CPU→QImage. "
+            "Décocher manuellement pour utiliser le chemin classique de capture ou de comparaison."));
 #else
         directDisplayBox_->setChecked(false);
         directDisplayBox_->setEnabled(false);
