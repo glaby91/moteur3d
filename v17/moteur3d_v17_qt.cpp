@@ -70,6 +70,8 @@
 #include <QTabWidget>
 #include <QTreeWidget>
 #include <QVBoxLayout>
+#include <QStackedLayout>
+#include <QWindow>
 #include <QtConcurrent/QtConcurrentRun>
 #include <atomic>
 #include <cmath>
@@ -107,6 +109,7 @@ struct Result {
     double milliseconds=0;
     bool gpu=false;
     bool skyCompositing=false; // DX11 sky pixels are transparent for Qt compositor
+    bool directPresented=false; // Native Vulkan swapchain: no CPU image and no QImage
     // Reject finished frames after a camera, material, backend or scene change.
     uint64_t generation=0;
     quintptr renderThread=0;
@@ -272,7 +275,22 @@ public:
         canvas_->setFocusPolicy(Qt::StrongFocus);
         canvas_->setMouseTracking(true);
         canvas_->installEventFilter(this);
-        setCentralWidget(canvas_);
+        // Keep Qt docks and controls. The optional native Vulkan child HWND
+        // replaces only the central image, never the entire application.
+        auto* viewportRoot=new QWidget(this);
+        viewportStack_=new QStackedLayout(viewportRoot);
+        viewportStack_->setContentsMargins(0,0,0,0);
+        viewportStack_->addWidget(canvas_);
+        nativeWindow_=new QWindow;
+        nativeWindow_->setSurfaceType(QSurface::RasterSurface);
+        nativeWindow_->setFlags(Qt::FramelessWindowHint);
+        nativeWindow_->installEventFilter(this);
+        nativeContainer_=QWidget::createWindowContainer(nativeWindow_,viewportRoot,
+                                                        Qt::FramelessWindowHint);
+        nativeContainer_->setFocusPolicy(Qt::StrongFocus);
+        viewportStack_->addWidget(nativeContainer_);
+        viewportStack_->setCurrentWidget(canvas_);
+        setCentralWidget(viewportRoot);
         frameTimer_.setInterval(16);
         connect(&frameTimer_, &QTimer::timeout, this, [this]{ frameTick(); });
         // The D3D11 preview owns a thread_local device and texture cache.
@@ -346,6 +364,14 @@ public:
                 if(pending_){pending_=false;requestRender();}
                 return;
             }
+            if(outcome.directPresented){
+                // Vulkan submitted a swapchain image directly. No hidden
+                // QImage and no per-frame GPU-to-CPU readback.
+                lastRenderedPose_=outcome.cameraPose;
+                hasRenderedPose_=true;
+                lastCompletedRenderMs_=outcome.milliseconds;
+                recordImagePresented(); // count submitted/presented frames
+            }
             if(!outcome.image.isNull()){
                 lastImage_=outcome.image;
                 lastRenderedPose_=outcome.cameraPose;
@@ -354,7 +380,8 @@ public:
                 canvas_->setImage(outcome.image);
                 canvas_->enableSkyCompositing(outcome.skyCompositing);
             }
-            if(outcome.error.isEmpty()&&!outcome.image.isNull()){
+            if(outcome.error.isEmpty()&&
+               (outcome.directPresented||!outcome.image.isNull())){
                 const QString milliseconds=QString::number(outcome.milliseconds,'f',1);
                 const QString seconds=QString::number(outcome.milliseconds/1000.0,'f',1);
                 renderTimeLabel_->setText(QStringLiteral("Dernier rendu : %1 ms (%2 s)")
@@ -370,7 +397,8 @@ public:
                 ?QStringLiteral("%1 — %2 ms")
                       .arg(outcome.renderer).arg(outcome.milliseconds,0,'f',1)
                 :outcome.error);
-            if(exploring_ && outcome.error.isEmpty() && !outcome.image.isNull()){
+            if(exploring_ && outcome.error.isEmpty() &&
+               (outcome.directPresented||!outcome.image.isNull())){
                 if(frameClock_.isValid()){
                     const qint64 frameMs=frameClock_.elapsed();
                     if(frameMs>0)renderTimeLabel_->setText(
@@ -620,6 +648,10 @@ private:
     QSlider* radioVolumeSlider_=nullptr;
 
     ImageView* canvas_=nullptr;
+    QWindow* nativeWindow_=nullptr;
+    QWidget* nativeContainer_=nullptr;
+    QStackedLayout* viewportStack_=nullptr;
+    QCheckBox* directDisplayBox_=nullptr;
     QTimer frameTimer_;
     QTimer skyAnimationTimer_;
     QElapsedTimer skyMotionClock_;
@@ -878,14 +910,22 @@ private:
     void captureMouseLook(){
         if(!exploring_||mouseCaptured_||!canvas_||!isActiveWindow())return;
         mouseCaptured_=true;
-        canvas_->setCursor(Qt::BlankCursor);
-        canvas_->setFocus(Qt::OtherFocusReason);
-        QCursor::setPos(canvas_->mapToGlobal(canvas_->rect().center()));
+        if(nativeVulkanSelected()){
+            nativeWindow_->setCursor(Qt::BlankCursor);
+            focusRenderViewport();
+            QCursor::setPos(nativeWindow_->mapToGlobal(
+                QPoint(nativeWindow_->width()/2,nativeWindow_->height()/2)));
+        }else{
+            canvas_->setCursor(Qt::BlankCursor);
+            canvas_->setFocus(Qt::OtherFocusReason);
+            QCursor::setPos(canvas_->mapToGlobal(canvas_->rect().center()));
+        }
     }
     void releaseMouseLook(){
         if(!mouseCaptured_)return;
         mouseCaptured_=false;
         if(canvas_)canvas_->unsetCursor();
+        if(nativeWindow_)nativeWindow_->unsetCursor();
     }
     void setMotionResolution(bool active){
         const bool next=peripheralExperimentEnabled_&&active;
@@ -927,7 +967,8 @@ private:
     void toggleExploration(){
         if(exploring_){stopExploration();return;}
         if(!runtime_||runtime_->cameras.isEmpty())return;
-        if(backendBox_->currentIndex()!=4)backendBox_->setCurrentIndex(4);
+        if(backendBox_->currentIndex()!=4 && backendBox_->currentIndex()!=5)
+            backendBox_->setCurrentIndex(4);
         if(!freeCameraActive_)activateFreeCamera();
         // An Intel HD 620 cannot reasonably sustain 8x MSAA during continuous
         // navigation of the large V8 scene. Temporarily lower AA to 2x ONLY
@@ -1102,7 +1143,14 @@ protected:
         return QMainWindow::event(e);
     }
     bool eventFilter(QObject* watched,QEvent* event) override{
-        if(watched==canvas_ && exploring_){
+        if((watched==canvas_||watched==nativeWindow_) && exploring_){
+            if(watched==nativeWindow_ &&
+               (event->type()==QEvent::KeyPress || event->type()==QEvent::KeyRelease)){
+                if(event->type()==QEvent::KeyPress)
+                    keyPressEvent(static_cast<QKeyEvent*>(event));
+                else keyReleaseEvent(static_cast<QKeyEvent*>(event));
+                return true;
+            }
             if(event->type()==QEvent::MouseButtonPress){
                 auto* e=static_cast<QMouseEvent*>(event);
                 if(!mouseCaptured_)captureMouseLook();
@@ -1124,7 +1172,10 @@ protected:
             }
             if(event->type()==QEvent::MouseMove && mouseCaptured_){
                 auto* e=static_cast<QMouseEvent*>(event);
-                const QPoint center=canvas_->rect().center();
+                const bool direct=watched==nativeWindow_;
+                const QPoint center=direct?
+                    QPoint(nativeWindow_->width()/2,nativeWindow_->height()/2):
+                    canvas_->rect().center();
                 const QPoint delta=e->pos()-center;
                 // Qt generates a synthetic move when the cursor is recentered.
                 // Ignore it. No click is required to look around.
@@ -1136,7 +1187,8 @@ protected:
                 pitch_=clampf(pitch_-dy*sensitivity,-1.48f,1.48f);
                 lastMouseLookMotion_.restart();
                 updateLook();
-                QCursor::setPos(canvas_->mapToGlobal(center));
+                QCursor::setPos(direct?nativeWindow_->mapToGlobal(center):
+                                          canvas_->mapToGlobal(center));
                 return true;
             }
         }
@@ -1294,7 +1346,8 @@ private:
         settings.setValue(QStringLiteral("Raster/LODPercent"),q.lodQualityPercent);
         settings.setValue(QStringLiteral("Raster/Culling"),q.frustumCulling);
         settings.setValue(QStringLiteral("Raster/DynamicLOD"),q.dynamicLod);
-        if(runtime_&&backendBox_&&backendBox_->currentIndex()==4)requestRender();
+        if(runtime_&&backendBox_&&
+           (backendBox_->currentIndex()==4||backendBox_->currentIndex()==5))requestRender();
     }
     void stopRadio(){
         radioAudio_.stop();
@@ -1732,16 +1785,36 @@ private:
         auto* form=new QFormLayout;
         cameraBox_=new QComboBox;
         backendBox_=new QComboBox;
+        directDisplayBox_=new QCheckBox(QStringLiteral(
+            "Vulkan : affichage direct GPU (swapchain expérimentale)"));
+#ifdef _WIN32
+        // WARP Vulkan V17.32: GPU-native presentation is the *startup default*.
+        // Do not restore a previous disabled state: users can still uncheck it
+        // explicitly for a single session to use the CPU/QImage comparison.
+        directDisplayBox_->setCheckState(Qt::Checked);
+        directDisplayBox_->setToolTip(QStringLiteral(
+            "Activé par défaut : présentation Vulkan native via swapchain GPU, sans GPU→CPU→QImage. "
+            "Décocher manuellement pour utiliser le chemin classique de capture ou de comparaison."));
+#else
+        directDisplayBox_->setChecked(false);
+        directDisplayBox_->setEnabled(false);
+#endif
         backendBox_->addItems({
             QStringLiteral("CPU Ray Tracing PBR — direct"),
             QStringLiteral("GPU D3D11 Compute — rapide, ombres + verre"),
             QStringLiteral("CPU Éclairage global — 2 rebonds (qualité réglable)"),
             QStringLiteral("CPU Éclairage global — 4 rebonds (qualité réglable)"),
-            QStringLiteral("V17 GPU D3D11 Raster — exploration rapide")
+            QStringLiteral("V17 GPU D3D11 Raster — exploration rapide"),
+            QStringLiteral("V17 Vulkan Raster — expérimental (GPU matériel)")
         });
 #ifndef _WIN32
         backendBox_->setItemData(1,0,Qt::UserRole-1);
         backendBox_->setItemData(4,0,Qt::UserRole-1);
+        backendBox_->setItemData(5,0,Qt::UserRole-1);
+#endif
+#if !M3D_V17_VULKAN_ENABLED
+        backendBox_->setItemData(5,0,Qt::UserRole-1);
+        backendBox_->setItemData(5,QStringLiteral("Vulkan SDK absent lors de la compilation"),Qt::ToolTipRole);
 #endif
         qualityBox_=new QComboBox;
         // Keep native and Full HD side by side. Store explicit width/height
@@ -1823,6 +1896,7 @@ private:
         azimuth_->setValue(0);
         form->addRow(QStringLiteral("Caméra"),cameraBox_);
         form->addRow(QStringLiteral("Méthode de rendu"),backendBox_);
+        form->addRow(directDisplayBox_);
         form->addRow(QStringLiteral("Résolution"),qualityBox_);
         form->addRow(QStringLiteral("Échantillons CPU direct"),directSamples_);
         form->addRow(QStringLiteral("Échantillons GI"),giSamples_);
@@ -2074,13 +2148,18 @@ private:
             requestRender();
         });
         connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int index){
-            if(exploring_ && index!=4)stopExploration();
+            if(exploring_ && index!=4 && index!=5)stopExploration();
             const bool gi=index==2||index==3;
             directSamples_->setEnabled(index==0);
             denoiseDirect_->setEnabled(index==0);
             giSamples_->setEnabled(gi);
             progressiveGi_->setEnabled(gi);
             denoiseGi_->setEnabled(gi);
+            switchNativeVulkanViewport();
+            requestRender();
+        });
+        connect(directDisplayBox_,&QCheckBox::toggled,this,[this](bool){
+            switchNativeVulkanViewport();
             requestRender();
         });
         connect(qualityBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){requestRender();});
@@ -2123,7 +2202,7 @@ private:
         skyAnimationTimer_.setInterval(33);
         connect(&skyAnimationTimer_,&QTimer::timeout,this,[this]{
             if(sceneLoading_||!runtime_||!hasRenderedPose_||lastImage_.isNull()||
-               !backendBox_||backendBox_->currentIndex()!=4)return;
+               !backendBox_||(backendBox_->currentIndex()!=4 && backendBox_->currentIndex()!=5))return;
             if(!cloudAnimationBox_->isChecked()&&!dayNightCycleBox_->isChecked()&&
                canvas_->hasSkyFrame())return;
             const auto camera=v16::makeCamera(lastRenderedPose_,
@@ -2212,7 +2291,7 @@ private:
         m.metallic=float(metallic_->value());
         // Required for GPU fast-path cache invalidation. The shadow map itself
         // depends only on geometry/sun, not on metallicity or roughness.
-        runtime_->renderScene.markGpuContentChanged();
+        runtime_->renderScene.markGpuParametersChanged();
         requestRender();
     }
     void saveMaterials(){
@@ -2428,6 +2507,32 @@ private:
         resourceTree_->expandToDepth(0);
         catalog->setExpanded(true);
     }
+
+    bool nativeVulkanSelected() const{
+#ifdef _WIN32
+        return backendBox_ && backendBox_->currentIndex()==5 &&
+               directDisplayBox_ && directDisplayBox_->isChecked();
+#else
+        return false;
+#endif
+    }
+    void focusRenderViewport(){
+        if(nativeVulkanSelected()&&nativeWindow_){
+            nativeContainer_->setFocus(Qt::OtherFocusReason);
+            nativeWindow_->requestActivate();
+        }else if(canvas_)canvas_->setFocus(Qt::OtherFocusReason);
+    }
+    void switchNativeVulkanViewport(){
+        if(!viewportStack_)return;
+        const bool direct=nativeVulkanSelected();
+        viewportStack_->setCurrentWidget(direct?nativeContainer_:canvas_);
+        if(direct){
+            // Do not offer a stale DX11/QImage capture as if it came from Vulkan.
+            lastImage_=QImage{};
+            statusBar()->showMessage(QStringLiteral(
+                "Vulkan écran direct : swapchain GPU, sans QImage ; capture via mode classique"),7000);
+        }
+    }
     void resetPacing(){
         pacingSamples_.clear();
         pacingRejected_=0;
@@ -2536,11 +2641,21 @@ private:
             renderSize.setWidth(std::max(64,renderSize.width()));
             renderSize.setHeight(std::max(64,renderSize.height()));
         }
-        const int w=renderSize.width();
-        const int h=renderSize.height();
+        int w=renderSize.width();
+        int h=renderSize.height();
         const int backend=backendBox_->currentIndex();
-        const bool wantGpu=backend==1||backend==4;
-        const bool raster=backend==4;
+        const bool directPresent=nativeVulkanSelected();
+        // A swapchain always targets the visible child window's real pixel
+        // extent; the offscreen quality resolution is irrelevant in this mode.
+        if(directPresent && nativeWindow_){
+            const qreal dpr=nativeWindow_->devicePixelRatio();
+            renderSize=QSize(std::max(64,int(nativeWindow_->width()*dpr)),
+                             std::max(64,int(nativeWindow_->height()*dpr)));
+        }
+        const quintptr nativeHandle=directPresent?quintptr(nativeWindow_->winId()):0;
+        const bool wantGpu=backend==1||backend==4||backend==5;
+        const bool raster=backend==4||backend==5;
+        const bool vulkan=backend==5;
         const bool globalIllumination=backend==2||backend==3;
         const bool edgeAA=edgeAa_->isChecked();
         const unsigned sampleCount=globalIllumination?
@@ -2554,16 +2669,16 @@ private:
         // Explain an abnormal delay rather than displaying "Calcul..." forever.
         // This watchdog does not claim to cancel a driver-blocked D3D call.
         if(raster){
-            QTimer::singleShot(30000,this,[this,serial,token]{
+            QTimer::singleShot(30000,this,[this,serial,token,vulkan]{
                 if(serial->load()==token && watcher_.isRunning() && !closingRequested_)
-                    statusBar()->showMessage(QStringLiteral(
-                        "Rendu DirectX 11 actif depuis plus de 30 secondes. "
-                        "GPU ou pilote possiblement saturé ; aucun basculement CPU."));
+                    statusBar()->showMessage(
+                        QStringLiteral("Rendu %1 actif depuis plus de 30 secondes. GPU ou pilote possiblement saturé ; aucun basculement CPU.")
+                        .arg(vulkan?QStringLiteral("Vulkan"):QStringLiteral("DirectX 11")));
             });
         }
         const auto shadowCache=cpuShadows_;
         watcher_.setFuture(QtConcurrent::run(&renderPool_,[this,serial,token,snapshot,preset,w,h,wantGpu,
-            globalIllumination,raster,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache,renderHour,shadowHour]{
+            globalIllumination,raster,vulkan,directPresent,nativeHandle,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache,renderHour,shadowHour]{
             Result result;
             result.cameraPose=preset;
             result.generation=token;
@@ -2591,10 +2706,18 @@ private:
                             shadowCache->shadow=shadow;
                         }
                     }
-                    ok=renderDirectX11Preview(snapshot->renderScene,*shadow,camera,w,h,pixels,stats,reason);
+                    ok=vulkan?
+                        (directPresent?
+                            renderVulkanDirectPresent(snapshot->renderScene,*shadow,camera,w,h,
+                                                      reinterpret_cast<void*>(nativeHandle),stats,reason):
+                            renderVulkanPreview(snapshot->renderScene,*shadow,camera,w,h,pixels,stats,reason)):
+                        renderDirectX11Preview(snapshot->renderScene,*shadow,camera,w,h,pixels,stats,reason);
+                    result.directPresented=ok&&directPresent;
                     if(ok){
-                        result.renderer=QStringLiteral("V17 D3D11 Raster — géométrie matérielle");
-                        if(rasterHybridLightingEnabled())
+                        result.renderer=vulkan
+                            ?QStringLiteral("V17 Vulkan Raster — portage expérimental")
+                            :QStringLiteral("V17 D3D11 Raster — géométrie matérielle");
+                        if(!vulkan && rasterHybridLightingEnabled())
                             result.renderer+=rasterGiCacheLoaded()
                               ?QStringLiteral(" — GI transport pré-calculée")
                               :QStringLiteral(" — sondes approximatives (sans table GI)");
@@ -2608,10 +2731,12 @@ private:
                     // CPU ray tracing as an invisible fallback. That used to
                     // look like an indefinitely stalled D3D11 render.
                     result.error=QStringLiteral(
-                        "Échec du rendu GPU DirectX 11 : %1. "
+                        "Échec du rendu GPU %1 : %2. "
                         "Aucun basculement automatique vers le CPU.")
+                        .arg(vulkan?QStringLiteral("Vulkan"):QStringLiteral("DirectX11"))
                         .arg(QString::fromStdWString(reason));
-                    result.renderer=QStringLiteral("V17 GPU D3D11 — erreur");
+                    result.renderer=vulkan?QStringLiteral("V17 Vulkan — erreur")
+                                            :QStringLiteral("V17 GPU D3D11 — erreur");
                     return result;
                 }
             }
@@ -2692,6 +2817,10 @@ private:
             }else result.gpu=true;
             result.milliseconds=stats.ms;
             result.renderer+=QStringLiteral(" — %1×%2").arg(w).arg(h);
+            if(result.directPresented){
+                result.renderer+=QStringLiteral(" — écran GPU direct (swapchain)");
+                return result; // No 4-byte-per-pixel CPU/QImage allocation.
+            }
             if(edgeAA && !raster && pixels.size()==size_t(w)*size_t(h))
                 pixels=antialiasEdges4(pixels,w,h,4,false);
             if(pixels.size()!=size_t(w)*h){

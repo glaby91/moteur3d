@@ -60,14 +60,37 @@ struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,dept
     // Number of actual primary BVH queries before pixel reconstruction.
     uint64_t primarySamples=0; };
 struct Light { V p; float radius,intensity; V color; };
-struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPercent=0; float refractiveIndex=1.5f; float metallic=0.f, roughnessScale=1.f; std::vector<Level> mip,normalMip,roughnessMip; std::vector<ColorLevel> colorMip; };
+struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPercent=0; float refractiveIndex=1.5f; float metallic=0.f, roughnessScale=1.f; std::vector<Level> mip,normalMip,roughnessMip; std::vector<ColorLevel> colorMip;
+    // Scene-authored optional texture quality policy. Default auto: renderer decides.
+    // Preserve: dedicated full-resolution GPU tier, independent of camera distance.
+    bool preserveTextureDetail=false;
+    uint32_t minimumTextureResolution=0;
+    // Optional scene-authored emission. Old materials keep the legacy shader
+    // behavior; an explicit JSON "emission" overrides material-name aliases.
+    V emissionColor{};
+    float emissionIntensity=0.f;
+    bool emissionAuthored=false;
+    bool waterSurface=false;
+    bool surfaceAuthored=false;
+};
 struct Scene { bool underwaterEnvironment=false; bool finiteGround=false; bool useLegacyWorldLights=true; std::vector<Obj> obj; std::vector<SourceBox> sourceBoxes; std::vector<SourceFoliage> sourceFoliage; std::vector<Node> node; std::vector<uint32_t> order; std::vector<Material> mat; std::vector<Light> lights; int32_t root=-1;
  // V16 builder assigns a unique identity after scene construction. Tracked scenes
  // are immutable except for explicit editor mutations, which MUST call
  // markGpuContentChanged(). Legacy/untracked scenes (identity == 0) retain
  // the full byte-for-byte scene hash as a safe fallback.
  uint64_t gpuCacheIdentity=0, gpuCacheRevision=0;
+ // Independent GPU invalidation epochs for Vulkan incremental updates.
+ // The legacy invalidator remains conservative (geometry AND material data).
+ uint64_t gpuGeometryRevision=0, gpuMaterialRevision=0, gpuParametersRevision=0;
  void markGpuContentChanged(){++gpuCacheRevision;}
+ // Geometry-only changes preserve all immutable GPU material/PBR textures.
+ void markGpuGeometryChanged(){++gpuGeometryRevision;++gpuCacheRevision;}
+ // Material texture changes invalidate PBR arrays and descriptors.
+ void markGpuMaterialsChanged(){++gpuMaterialRevision;++gpuCacheRevision;}
+ // Metallicity/roughness/emission and other scalar values are sent through
+ // Vulkan uniforms; keep texture arrays and meshes unchanged. Other backends
+ // still see the general gpuCacheRevision invalidation.
+ void markGpuParametersChanged(){++gpuParametersRevision;++gpuCacheRevision;}
 };
 struct ShadowMap { int size=1024; float span=30,dist=42; V base={0,1.5f,0},right,up;std::vector<float>d,min,max; };
 extern V sun,skyZenith,skyHorizon,sunTint;
@@ -99,6 +122,17 @@ Stats renderGiAccumulatePass(const Scene& scene,const ShadowMap& shadow,
 RendererCapabilities detectRendererCapabilities() noexcept;
 bool renderCompute11Preview(const Scene& s,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
 bool renderDirectX11Preview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
+// Experimental Vulkan 1.0 Raster GPU backend; offscreen ARGB32 preview, shared Scene/Camera API.
+bool renderVulkanPreview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
+// Explicit cleanup is useful for standalone diagnostics: Vulkan objects must
+// be destroyed while their owning thread, Win32 window and runtime are alive.
+void releaseVulkanPreviewForCurrentThread();
+void releaseVulkanDirectForCurrentThread();
+// Native Win32 Vulkan surface: no CPU pixel readback and no QImage.
+// The HWND is created on the Qt UI thread; VkSwapchainKHR is owned by the
+// persistent raster worker. Never pass a destroyed or temporary HWND.
+bool renderVulkanDirectPresent(const Scene& s,const ShadowMap& sm,const Camera& cam,
+                               int w,int h,void* nativeWindow,Stats& stats,std::wstring& error);
 // Renderer quality is a shared public API: embedded host software and the
 // standalone Qt interface modify exactly the same settings. Each DX11 frame
 // takes one atomic snapshot, preventing partial UI/worker configuration.
@@ -127,6 +161,7 @@ float rasterColorExposure();
 void setRasterColorExposure(float exposure);
 // Selects scene-specific offline GI cache, reloaded on every explicit set.
 void setRasterGiCachePath(const std::filesystem::path& path);
+std::filesystem::path rasterGiCachePath();
 bool rasterGiCacheLoaded();
 bool setRasterQualitySettings(const RasterQualitySettings& settings,std::wstring& error);
 // -1: follow existing opt-in environment variable (standalone benchmarks).

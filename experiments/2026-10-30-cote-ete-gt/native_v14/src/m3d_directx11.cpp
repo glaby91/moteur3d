@@ -921,6 +921,12 @@ public:
             else if(name=="lamp"){emissionR=1.f;emissionG=166.f/255.f;emissionB=91.f/255.f;emissionStrength=.75f+1.9f*lampFactor;}
             else if(name=="led"){emissionR=1.f;emissionG=217.f/255.f;emissionB=165.f/255.f;emissionStrength=.48f+.85f*lampFactor;}
             else if(name=="taillight"){emissionR=1.f;emissionG=28.f/255.f;emissionB=12.f/255.f;emissionStrength=1.25f*lampFactor;}
+            if(scene.mat[m].surfaceAuthored && scene.mat[m].waterSurface){
+                // Generic authored water matches the legacy DX11 water model.
+                emissionStrength=-1.f;
+                spec=.85f;power=58.f;
+                diffuseBase=.25f;diffuseDay=.26f;diffuseDirect=.18f;
+            }
             if(name=="sea"){spec=.46f;power=25.f;}
             else if(name=="puddle"){spec=.64f;power=18.f;}
             else if(name=="glass"||name=="raptureGlass"){spec=.27f;power=34.f;}
@@ -2323,6 +2329,10 @@ void setRasterGiCachePath(const std::filesystem::path& file){
     giTableLoaded.store(false,std::memory_order_release);
 }
 bool rasterGiCacheLoaded(){return giTableLoaded.load(std::memory_order_acquire);}
+std::filesystem::path rasterGiCachePath(){
+    std::lock_guard<std::mutex> lock(giPathMutex);
+    return giFilePath;
+}
 void setRasterPeripheralMultiresOverride(int mode){
     peripheralOverride.store(std::clamp(mode,-1,1),std::memory_order_release);
 }
@@ -2376,6 +2386,7 @@ float rasterColorExposure(){return 1.f;}
 void setRasterColorExposure(float){}
 void setRasterGiCachePath(const std::filesystem::path&){}
 bool rasterGiCacheLoaded(){return false;}
+std::filesystem::path rasterGiCachePath(){return {};}
 void setRasterPeripheralMultiresOverride(int){}
 void setRasterCloudTimeScale(float){}
 bool setRasterQualitySettings(const RasterQualitySettings&,std::wstring& error){error=L"DirectX 11 indisponible sur cet OS.";return false;}
