@@ -683,10 +683,23 @@ public:
         audioTimer_.stop();
         stopRadio();
         renderSerial_->fetch_add(1);
-        // All async tasks hold independent snapshots. Wait before QObject
-        // destruction so no worker can post into the destroyed window.
+        // Drain both producers before destroying QWindow/QWidget. The native
+        // Win32 HWND must outlive the DXGI swapchain and VkSurfaceKHR.
         loadWatcher_.waitForFinished();
         watcher_.waitForFinished();
+#if defined(_WIN32)
+        // Raster backends keep thread_local Vulkan/D3D11 contexts in the
+        // dedicated one-worker pool. Destroy them on their owning thread
+        // BEFORE QWidget::createWindowContainer destroys its child HWND.
+        // This also covers closing directly after the first native frame.
+        auto cleanup=QtConcurrent::run(&renderPool_,[]{
+            releaseDirectX11NativeForCurrentThread();
+            releaseVulkanDirectForCurrentThread();
+            releaseVulkanPreviewForCurrentThread();
+        });
+        cleanup.waitForFinished();
+#endif
+        if(viewportStack_ && canvas_)viewportStack_->setCurrentWidget(canvas_);
     }
 private:
     int textureResolution_=2048;
