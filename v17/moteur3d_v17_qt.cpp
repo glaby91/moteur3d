@@ -2452,6 +2452,17 @@ private:
             QStringLiteral("/benchmark-civic"),Qt::CaseInsensitive);
         const bool extremeStress=QFileInfo(outcome.path).fileName()
             ==QStringLiteral("scene-extreme.json");
+        // Explicit benchmark launcher override only: ordinary scene launches
+        // keep their existing DX11 Raster default and user controls.
+        const bool vulkanProfile=isStressScene &&
+            qEnvironmentVariable("CSE_WARP_VK_PROFILE_MODE")==QStringLiteral("1");
+#if defined(_WIN32) && M3D_V17_VULKAN_ENABLED
+        if(vulkanProfile){
+            directDisplayBox_->setChecked(true);
+            backendBox_->setCurrentIndex(5); // Vulkan Raster, native WSI
+            dayNightCycleBox_->setChecked(true); // exercise solar/shadow updates
+        }else
+#endif
         if(isStressScene)backendBox_->setCurrentIndex(4);
         sceneLoading_=false;
         canvas_->setPlaceholder(extremeStress
