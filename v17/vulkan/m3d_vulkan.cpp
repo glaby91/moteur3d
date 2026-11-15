@@ -49,6 +49,7 @@ struct CelestialPanorama {
 // Immutable asset shared by DX11/Qt startup and Vulkan renderer contexts.
 std::mutex celestialMutex;
 std::shared_ptr<const CelestialPanorama> celestialAsset;
+std::atomic<float> celestialCloudMotion{24.f};
 void vkcheck(VkResult code,const char* name) {
     if(code!=VK_SUCCESS)throw std::runtime_error(std::string(name)+" Vulkan error "+std::to_string(int(code)));
 }
@@ -1771,13 +1772,15 @@ class VulkanRaster final {
         f.sky[0]=sk.x/255.f;f.sky[1]=sk.y/255.f;f.sky[2]=sk.z/255.f;
         // Reuse the V17 weather model and DX11 atmospheric constants.
         cse::weather::CloudState weather;
-        weather.coverage=.28f;weather.opacity=.65f;
+        const float cloudSpeed=celestialCloudMotion.load(std::memory_order_acquire);
+        weather.coverage=cloudSpeed>0.f?.28f:0.f;
+        weather.opacity=cloudSpeed>0.f?.65f:0.f;
         weather.windEastMetersPerSecond=12.f;
         weather.windNorthMetersPerSecond=3.5f;
         static const auto cloudEpoch=Clock::now();
         const char* animate=std::getenv("M3D_V17_ANIMATE_CLOUDS");
         const double elapsed=(animate && std::strcmp(animate,"1")==0)?
-            std::chrono::duration<double>(Clock::now()-cloudEpoch).count():0.0;
+            std::chrono::duration<double>(Clock::now()-cloudEpoch).count()*cloudSpeed:0.0;
         const auto clouds=cse::weather::cirrusAt(
             weather,elapsed,std::asin(clampf(sun.y,-1.f,1.f))*180.0f/3.14159265f);
         f.skyZenith[0]=skyZenith.x/255.f;
@@ -2149,6 +2152,10 @@ public:
     }
 };
 } // namespace
+
+void setVulkanSkyCloudMotion(float speed){
+    celestialCloudMotion.store(std::clamp(speed,0.f,300.f),std::memory_order_release);
+}
 
 void setVulkanCelestialPanoramaRGBA(const uint8_t* rgba,int width,int height){
     std::shared_ptr<const CelestialPanorama> replacement;
