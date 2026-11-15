@@ -674,13 +674,21 @@ class VulkanRaster final {
             si.signalSemaphoreCount=1;si.pSignalSemaphores=&imageReady_.at(size_t(presentIndex));
         }
         const auto start=Clock::now();
+        const bool asyncSubmit=asyncFrames_ && frameSlotsReady_ && presentIndex>=0;
+        if(asyncSubmit)vkcheck(vkResetFences(device_,1,&fence_),"reset async frame fence");
         vkcheck(vkQueueSubmit(queue_,1,&si,fence_),"submit commands");
         const auto issued=Clock::now();
-        vkcheck(vkWaitForFences(device_,1,&fence_,VK_TRUE,UINT64_MAX),"wait GPU");
-        const auto completed=Clock::now();
-        vkcheck(vkResetFences(device_,1,&fence_),"reset fence");
-        if(submissionMs)*submissionMs=ms(start,issued);
-        if(waitMs)*waitMs=ms(issued,completed);
+        if(asyncSubmit){
+            activePending_=true;
+            if(submissionMs)*submissionMs=ms(start,issued);
+            if(waitMs)*waitMs=0.0; // GPU wait measured on slot retirement
+        }else{
+            vkcheck(vkWaitForFences(device_,1,&fence_,VK_TRUE,UINT64_MAX),"wait GPU");
+            const auto completed=Clock::now();
+            vkcheck(vkResetFences(device_,1,&fence_),"reset fence");
+            if(submissionMs)*submissionMs=ms(start,issued);
+            if(waitMs)*waitMs=ms(issued,completed);
+        }
     }
     void barrier(Texture& t,VkImageLayout from,VkImageLayout to,
                  VkAccessFlags src,VkAccessFlags dst,VkPipelineStageFlags srcStage,VkPipelineStageFlags dstStage){
@@ -784,6 +792,7 @@ class VulkanRaster final {
         writes[4].pImageInfo=&highAlbedo;writes[5].pImageInfo=&highSurface;
         writes[6].pImageInfo=&giLow;writes[7].pImageInfo=&giHigh;
         vkUpdateDescriptorSets(device_,uint32_t(writes.size()),writes.data(),0,nullptr);
+        activeDescriptorReady_=true;
     }
     // Pipeline cache is driver-specific but NEVER scene-specific. Cache is
     // optional and never allowed to change the shader/pipeline parameters.
@@ -1019,6 +1028,13 @@ class VulkanRaster final {
             VkSemaphoreCreateInfo sem{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
             vkcheck(vkCreateSemaphore(device_,&sem,nullptr,&imageAcquired_),
                     "swapchain acquire semaphore");
+            const char* requestedFrames=std::getenv("CSE_WARP_VK_FRAMES_IN_FLIGHT");
+            if(requestedFrames && std::strcmp(requestedFrames,"1")!=0 &&
+               std::strcmp(requestedFrames,"2")!=0)
+                throw std::runtime_error("CSE_WARP_VK_FRAMES_IN_FLIGHT accepts 1 or 2");
+            // Dedicated HD620 optimization branch defaults to two when testing
+            // native WSI. CSE_WARP_VK_FRAMES_IN_FLIGHT=1 restores baseline.
+            asyncFrames_=!requestedFrames || std::strcmp(requestedFrames,"2")==0;
         }
         vkGetDeviceQueue(device_,family_,0,&queue_);
         VkCommandPoolCreateInfo cp{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};cp.queueFamilyIndex=family_;
@@ -1040,10 +1056,10 @@ class VulkanRaster final {
         VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
         li.bindingCount=8;li.pBindings=bindings;
         vkcheck(vkCreateDescriptorSetLayout(device_,&li,nullptr,&descriptorLayout_),"descriptor layout");
-        VkDescriptorPoolSize pools[2]={{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,1},
-                                        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,7}};
+        VkDescriptorPoolSize pools[2]={{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,2},
+                                        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,14}};
         VkDescriptorPoolCreateInfo p{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-        p.maxSets=1;p.poolSizeCount=2;p.pPoolSizes=pools;
+        p.maxSets=2;p.poolSizeCount=2;p.pPoolSizes=pools;
         vkcheck(vkCreateDescriptorPool(device_,&p,nullptr,&descriptorPool_),"descriptor pool");
         VkDescriptorSetAllocateInfo da{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
         da.descriptorPool=descriptorPool_;da.descriptorSetCount=1;da.pSetLayouts=&descriptorLayout_;
@@ -1135,7 +1151,9 @@ class VulkanRaster final {
         // Compare baseline and experimental fragment shader without modifying
         // DX11 or the default Vulkan profile. One renderer instance per process.
         const char* selected=std::getenv("CSE_WARP_VK_FAST_FRAGMENT");
-        const bool fastFragment=selected && std::strcmp(selected,"1")==0;
+        // This optimization branch defaults to the exact-output shader
+        // elimination path; =0 restores the original full-cost shader.
+        const bool fastFragment=!selected || std::strcmp(selected,"0")!=0;
         std::clog<<"[CSE WARP Vulkan] Fragment profile="
                  <<(fastFragment?"optimized":"baseline")<<"\n";
         const auto fs=spirv(shaderFile(fastFragment?"raster_fast.frag.spv":"raster.frag.spv"));
