@@ -243,7 +243,9 @@ if(WIN32 AND Vulkan_FOUND)
             VERBATIM)
     endif()
     # Khronos diagnostics run in the ORIGINAL Vulkan engine through native Win32 WSI.
-    add_executable(v17_vulkan_khronos_bench "vulkan/tests/khronos_bench.cpp")
+    # Windows GUI subsystem prevents one persistent DOS window per test.
+    # The native Vulkan render window is still visible and logs still redirect.
+    add_executable(v17_vulkan_khronos_bench WIN32 "vulkan/tests/khronos_bench.cpp")
     target_include_directories(v17_vulkan_khronos_bench PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
     target_link_libraries(v17_vulkan_khronos_bench PRIVATE moteur3d_v16_core user32 gdi32)
