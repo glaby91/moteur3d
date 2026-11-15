@@ -621,7 +621,8 @@ jobs:
                                'v17_vulkan_ab_bench.exe','v17_vulkan_gpu_smoke.exe')) {
             Copy-Item "build-v17/Release/$name" "$dst/$name" -ErrorAction Stop
           }
-          foreach ($name in @('DIAGNOSTIC_ECRAN_NOIR.bat','LANCER_COMPARAISON_AB.bat','LANCER_KHRONOS_HD620.bat')) {
+          foreach ($name in @('DIAGNOSTIC_ECRAN_NOIR.bat','LANCER_COMPARAISON_AB.bat',
+                               'LANCER_KHRONOS_HD620.bat','LANCER_V493_VULKAN_PROFILE.bat')) {
             Copy-Item "v17/vulkan/khronos/$name" "$dst/$name" -ErrorAction Stop
           }
           # Reject the Khronos-only synthetic scene: the V17.493 complete scene is required.
