@@ -22,9 +22,10 @@ inline Update classify(const Key& oldKey,const Key& now) {
        oldKey.materialsRevision!=now.materialsRevision||
        oldKey.legacyRevision()!=now.legacyRevision())
         return Update::Full;
-    if(oldKey.objects!=now.objects||oldKey.revision!=now.revision||
+    if(oldKey.objects!=now.objects||
        oldKey.geometryRevision!=now.geometryRevision)
         return Update::Geometry;
+    // gpuParametersRevision changes only need per-frame uniform writes.
     return Update::None;
 }
 }} // namespace m3d::vkdirty
