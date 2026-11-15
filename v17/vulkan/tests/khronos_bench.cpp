@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -136,6 +137,60 @@ int main(int argc,char** argv){
                  <<"--motion orbit|fixed|translate|spin --seconds 1..600 "
                  <<"--width 1366 --height 768\n";
         return 2;
+    }
+    const std::string preflight=argText(argc,argv,"--offscreen-check","");
+    if(!preflight.empty()){
+        // Offscreen reference uses the same shaders and rasterizer, but does
+        // NOT use Win32 WSI. Save an actual 32-bit BMP to check rendering.
+        m3d::updateLighting(14.75f);
+        const m3d::Scene reference=makeScene(cubes,lights);
+        m3d::ShadowMap shadow{};shadow.size=1;shadow.d={1.e9f};
+        shadow.span=10.f;shadow.dist=20.f;
+        const auto camera=makeCamera(0.f,w,h,motion);
+        m3d::Stats stats{};std::wstring error;
+        std::vector<uint32_t> pixels;
+        if(!m3d::renderVulkanPreview(reference,shadow,camera,w,h,pixels,stats,error)){
+            std::wcerr<<L"[WARP Khronos] OFFSCREEN FAILED: "<<error<<L"\n";return 6;
+        }
+        if(pixels.size()!=size_t(w)*size_t(h)){
+            std::cerr<<"[WARP Khronos] OFFSCREEN FAILED incorrect pixel count\n";return 7;
+        }
+        BITMAPFILEHEADER fh{};fh.bfType=0x4d42;
+        fh.bfOffBits=sizeof(BITMAPFILEHEADER)+sizeof(BITMAPINFOHEADER);
+        fh.bfSize=fh.bfOffBits+DWORD(pixels.size()*sizeof(uint32_t));
+        BITMAPINFOHEADER info{};info.biSize=sizeof(info);
+        info.biWidth=w;info.biHeight=-h;info.biPlanes=1;
+        info.biBitCount=32;info.biCompression=BI_RGB;
+        info.biSizeImage=DWORD(pixels.size()*sizeof(uint32_t));
+        std::ofstream image(preflight,std::ios::binary|std::ios::trunc);
+        if(!image){std::cerr<<"Cannot open offscreen BMP path\n";return 8;}
+        image.write(reinterpret_cast<const char*>(&fh),sizeof(fh));
+        image.write(reinterpret_cast<const char*>(&info),sizeof(info));
+        image.write(reinterpret_cast<const char*>(pixels.data()),std::streamsize(info.biSizeImage));
+        image.close();
+        unsigned brightest=0;size_t nonBlack=0,different=0;
+        const uint32_t first=pixels.front()&0x00ffffffu;
+        for(const uint32_t px:pixels){
+            const uint32_t rgb=px&0x00ffffffu;
+            brightest=std::max(brightest,unsigned(std::max({rgb&255u,(rgb>>8)&255u,(rgb>>16)&255u})));
+            if(rgb!=first)++different;
+            if(rgb>0x000a0a0au)++nonBlack;
+        }
+        std::cerr<<"[WARP Khronos] OFFSCREEN reference saved: "<<preflight
+                 <<" gpu_draw_ms="<<stats.gpuDrawMs
+                 <<" gpu_valid="<<stats.gpuTimingValid
+                 <<" brightest="<<brightest<<" pixels_different="<<different
+                 <<" nonblack_approx="<<nonBlack<<" total_pixels="<<pixels.size()<<"\n";
+        if(brightest<15 || different==0){
+            std::cerr<<"[WARP Khronos] OFFSCREEN BLACK/FLAT: no valid image; do not trust visual perf\n";
+            return 9;
+        }
+        return 0;
+    }
+    const bool probe=argText(argc,argv,"--visual-probe","0")=="1";
+    if(probe){
+        _putenv_s("CSE_WARP_VK_KHRONOS_VISUAL_PROBE","1");
+        std::cerr<<"[WARP Khronos] VISUAL PROBE ACTIVE: window MUST be magenta.\n";
     }
     SetProcessDPIAware();
     WNDCLASSW wc{};wc.lpfnWndProc=wndProc;wc.hInstance=GetModuleHandleW(nullptr);
