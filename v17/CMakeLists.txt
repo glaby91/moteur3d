@@ -262,6 +262,26 @@ if(WIN32 AND Vulkan_FOUND)
                 ${V17_VULKAN_SPIRV} "$<TARGET_FILE_DIR:v17_vulkan_khronos_bench>/vulkan"
             VERBATIM)
     endif()
+    # Independent console-subsystem diagnostic built from IDENTICAL source.
+    # It inherits the calling BAT's cmd.exe console and helps identify GUI CRT
+    # shutdown issues such as the HD620 0xC0000409 after a valid BMP.
+    add_executable(v17_vulkan_khronos_console "vulkan/tests/khronos_bench.cpp")
+    target_include_directories(v17_vulkan_khronos_console PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+    target_link_libraries(v17_vulkan_khronos_console PRIVATE moteur3d_v16_core user32 gdi32)
+    target_compile_definitions(v17_vulkan_khronos_console PRIVATE CSE_WARP_BUILD_NUMBER=${V17_BUILD_NUMBER})
+    if(MSVC)
+        target_compile_options(v17_vulkan_khronos_console PRIVATE /O2 /EHsc /utf-8)
+    endif()
+    if(TARGET v17_vulkan_spirv)
+        add_dependencies(v17_vulkan_khronos_console v17_vulkan_spirv)
+        add_custom_command(TARGET v17_vulkan_khronos_console POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_FILE_DIR:v17_vulkan_khronos_console>/vulkan"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${V17_VULKAN_SPIRV} "$<TARGET_FILE_DIR:v17_vulkan_khronos_console>/vulkan"
+            VERBATIM)
+    endif()
     # CI builds on virtual GPU; real WSI timing results come from Intel HD620.
 endif()
 
