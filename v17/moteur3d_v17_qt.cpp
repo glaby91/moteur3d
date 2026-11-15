@@ -74,6 +74,7 @@
 #include <QWindow>
 #include <QtConcurrent/QtConcurrentRun>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstring>
 #include <cstdio>
@@ -2719,7 +2720,7 @@ private:
                                     std::chrono::steady_clock::now()-shadowStart).count();
                                 QFile log(QString::fromLocal8Bit(shadowProfile));
                                 if(log.open(QIODevice::WriteOnly|QIODevice::Append|QIODevice::Text)){
-                                    const QString line=QStringLiteral("%1,shadow_build_ms=%2,solar_hour=%3,shadow_bin=%4,backend=%5\\n")
+                                    const QString line=QStringLiteral("%1,shadow_build_ms=%2,solar_hour=%3,shadow_bin=%4,backend=%5\n")
                                         .arg(QDateTime::currentMSecsSinceEpoch())
                                         .arg(shadowElapsed,0,'f',3)
                                         .arg(renderHour,0,'f',5)
