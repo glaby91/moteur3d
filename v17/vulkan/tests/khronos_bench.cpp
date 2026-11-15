@@ -231,7 +231,7 @@ int main(int argc,char** argv){
         if(t>=float(seconds))break;
         if(motion=="spin"){
             addSpinningCube(scene,t*.65f);
-            scene.markGpuContentChanged();
+            scene.markGpuGeometryChanged();
         }
         const auto cam=makeCamera(t,w,h,motion);
         m3d::Stats stats{};
