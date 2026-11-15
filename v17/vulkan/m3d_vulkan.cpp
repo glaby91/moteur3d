@@ -197,7 +197,6 @@ class VulkanRaster final {
     }
     const float* shadowData_=nullptr;
     uint32_t shadowSize_=0;
-    float cachedSolarHour_=std::numeric_limits<float>::quiet_NaN();
     std::string adapter_;
     bool bgraReadback_=false;
     bool srgbColorEnabled_=false;
@@ -1506,7 +1505,10 @@ class VulkanRaster final {
         }
     }
     void updateShadow(const ShadowMap& sh){
-        if(sh.d.data()==shadowData_&&uint32_t(sh.size)==shadowSize_&&shadow_.image&&cachedSolarHour_==solarHour)return;
+        // The supplied immutable ShadowMap already represents a quantized
+        // V17.493 15-minute sun bin. Sun/sky UBOs may change every frame
+        // without invalidating GPU shadow textures or draining the pipeline.
+        if(sh.d.data()==shadowData_&&uint32_t(sh.size)==shadowSize_&&shadow_.image)return;
         const uint32_t size=(sh.size>0&&sh.size<=4096&&sh.d.size()==size_t(sh.size)*sh.size)?
                              uint32_t(sh.size):1;
         if(!shadow_.image||shadow_.width!=size){
@@ -1518,7 +1520,7 @@ class VulkanRaster final {
         const float fallbackShadowDepth=1e9f;
         uploadImage(shadow_,size==1?static_cast<const void*>(&fallbackShadowDepth):
                     static_cast<const void*>(sh.d.data()),size_t(size)*size*sizeof(float));
-        shadowData_=sh.d.data();shadowSize_=uint32_t(sh.size);cachedSolarHour_=solarHour;
+        shadowData_=sh.d.data();shadowSize_=uint32_t(sh.size);
         updateDescriptors();
     }
     // No geometry generation, allocation or texture upload when a mutable
@@ -1866,8 +1868,7 @@ public:
                 const auto incoming=sceneKey(scene);
                 const bool sceneModified=vkdirty::classify(sceneKey_,incoming)!=vkdirty::Update::None;
                 const bool shadowModified=shadowData_!=shadows.d.data() ||
-                    shadowSize_!=uint32_t(shadows.size) ||
-                    cachedSolarHour_!=solarHour;
+                    shadowSize_!=uint32_t(shadows.size);
                 const bool resourceMutation=sceneModified||shadowModified||
                     (swapExtent_.width && (swapExtent_.width!=uint32_t(w)||
                                             swapExtent_.height!=uint32_t(h)));
