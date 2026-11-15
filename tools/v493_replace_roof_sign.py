@@ -50,6 +50,18 @@ def main():
     removed_brackets=sum('_bracket_' in i.get('id','') for i in removed_fixtures)
     if removed_lamps!=6 or removed_brackets!=6:
         raise SystemExit(f'Expected 6 alternating upper facade lamps and supports; got {removed_lamps} and {removed_brackets}')
+    pool_prefix='v8_pool_real_ceiling_luminaire_'
+    removed_pool_lights=[i for i in old if i.get('id','').startswith(pool_prefix)]
+    if len(removed_pool_lights)!=6:
+        raise SystemExit(f'Expected 6 original pool ceiling lamps; got {len(removed_pool_lights)}')
+    # Replace six longitudinal 3.1 m strips with one crosswise bar.
+    # Its emitting area (18.6 x 0.31 m) matches the six original bars exactly.
+    pool_cross_light={'id':'v498_pool_ceiling_cross_light',
+        'parent':'Interieur/Piscine olympique/Plafond/Luminaire transversal unique',
+        'geometry':'unit_box','material':'v8_neutral_swim_light',
+        'position':[0.0,17.32,-32.0],'size':[18.6,0.14,0.31]}
+    if any(i.get('id')==pool_cross_light['id'] for i in old):
+        raise SystemExit('Replacement transverse pool lamp already exists')
     if len(remove)<50 or len(remove)>500:raise SystemExit(f'Unexpected old sign count: {len(remove)}')
     if not any('Lettres' in i['parent'] for i in remove) or not any('Panneau' in i['parent'] for i in remove):
         raise SystemExit('Roof sign members not found')
@@ -118,23 +130,25 @@ def main():
     for p in (folder/'scene.json',ip,mp,pp):
         shutil.copy2(p,p.with_suffix(p.suffix+'.pre-bassein-v493.bak'))
     sec['geometry'].append(newgeometry)
-    instances['instances']=[i for i in old if not i.get('parent','').startswith(PREFIX) and not alternate_fixture(i)]+newinst
+    instances['instances']=[i for i in old if not i.get('parent','').startswith(PREFIX) and not alternate_fixture(i) and not i.get('id','').startswith(pool_prefix)]+newinst+[pool_cross_light]
     materials['materials'].extend(newmats)
     pbr['sets'].extend(newsets)
     sc['name']=sc.get('name','')+' — enseigne toiture БАССЕЙН'
     save(folder/newgeometry,{'format':'m3d-geometry-v16','units':'m','meshes':newgeos})
     save(folder/'scene.json',sc);save(ip,instances);save(mp,materials);save(pp,pbr)
     shutil.copy2(a.glb,folder/'CSE_WARP_BASSEIN_toiture_v497.glb')
-    info={'base':'CSE WARP V17.493','revision':'V17.497 rooftop-sign/facade-light correction',
+    info={'base':'CSE WARP V17.493','revision':'V17.498 rooftop-sign/facade-light/pool-ceiling-light correction',
           'removedSignObjects':len(remove),'addedSignObjects':len(newinst),
           'addedMaterials':len(newmats),'addedTriangles':sum(len(m['faces']) for m in newgeos),
           'removedUpperFacadeLamps':removed_lamps,'removedUpperFacadeSupports':removed_brackets,
-          'originalUnchangedObjects':len(old)-len(remove)-len(removed_fixtures),
+          'removedPoolCeilingLights':len(removed_pool_lights),'addedPoolCeilingLights':1,
+          'poolLightDirection':'crosswise-x','poolLightEmittingAreaRatio':1.0,
+          'originalUnchangedObjects':len(old)-len(remove)-len(removed_fixtures)-len(removed_pool_lights),
           'signUniformScaleFactor':2.0,
           'signDimensionsMeters':{'width':round(float(bounds[1,0]-bounds[0,0]),2),
                                   'height':round(float(bounds[1,2]-bounds[0,2]),2)},
           'glbSHA256':hashlib.sha256(a.glb.read_bytes()).hexdigest(),
-          'mountWorldOriginXYZ':ORIGIN,'note':'Only the roof sign and alternating upper-cornice lamp pairs were changed'}
-    save(folder/'V493_BASSEIN_SIGN_INSTALL.json',info)
+          'mountWorldOriginXYZ':ORIGIN,'note':'Roof sign scaled x2 and seated on roof; alternating upper-cornice lamps removed; pool lights replaced by one crosswise fixture'}
+    save(folder/'V498_SCENE_INSTALL.json',info)
     print(json.dumps(info,ensure_ascii=False,indent=2))
 if __name__=='__main__':main()

@@ -1,5 +1,5 @@
-name: CSE WARP V17.497 — Qt native viewport lifecycle — Windows HD620
-run-name: V17.497 fermeture GPU native + UI — CI ${{ github.run_number }}
+name: CSE WARP V17.498 — rooftop and pool lighting scene update — Windows HD620
+run-name: V17.498 scène BASSEIN et éclairages — CI ${{ github.run_number }}
 on:
   push:
     branches:
@@ -76,7 +76,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Ten-pass fast design preflight failed' }
       - name: Configure
         shell: pwsh
-        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_BUILD_NUMBER=497
+        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_BUILD_NUMBER=498
       - name: Compile
         run: cmake --build build-v17 --config Release --parallel 4
       - name: Verify native DX11 startup UI and Vulkan selection (Qt offscreen)
@@ -146,7 +146,7 @@ jobs:
             $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
             Write-Host "$name — $($version.ProductName) — $($version.FileVersion)"
             if ($version.FileMajorPart -ne 17 -or
-                $version.FileMinorPart -ne 497 -or
+                $version.FileMinorPart -ne 498 -or
                 $version.FileBuildPart -ne 0 -or $version.FilePrivatePart -ne 0) {
               throw "Invalid V17.3 GitHub build version in $name : $($version.FileVersion)"
             }
@@ -607,7 +607,7 @@ jobs:
             throw "No day/night difference in delivered DX11 images"
           }
           Write-Host "READY: approved 186-material scene, 82 PBR artworks, radio, distinct DAY/NIGHT sky rendered"
-      - name: V17.497 - Corriger l'enseigne de toiture et alléger l'éclairage de façade
+      - name: V17.498 - Corriger l'enseigne et les éclairages de la piscine
         shell: pwsh
         timeout-minutes: 20
         env:
@@ -625,18 +625,20 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "BASSEIN GLB generation failed" }
           python tools/v493_replace_roof_sign.py --package dist-v17 --glb build-v17/sign-bassein-v493.glb --allow-unversioned
           if ($LASTEXITCODE -ne 0) { throw "BASSEIN integration failed" }
-          $report = Get-Content "dist-v17/benchmark-civic/V497_BASSEIN_SIGN_INSTALL.json" -Raw | ConvertFrom-Json
+          $report = Get-Content "dist-v17/benchmark-civic/V498_SCENE_INSTALL.json" -Raw | ConvertFrom-Json
           if ($report.addedSignObjects -ne 112 -or $report.addedTriangles -lt 14000 -or
               $report.removedSignObjects -lt 50 -or $report.originalUnchangedObjects -lt 5000 -or
               $report.removedUpperFacadeLamps -ne 6 -or $report.removedUpperFacadeSupports -ne 6 -or
-              $report.signUniformScaleFactor -ne 2.0) {
+              $report.signUniformScaleFactor -ne 2.0 -or
+              $report.removedPoolCeilingLights -ne 6 -or $report.addedPoolCeilingLights -ne 1 -or
+              $report.poolLightDirection -ne 'crosswise-x' -or $report.poolLightEmittingAreaRatio -ne 1.0) {
             throw "BASSEIN visual scene integrity regression"
           }
           & "dist-v17/moteur3d_v17_benchmark.exe" "dist-v17/benchmark-civic/scene.json" "build-v17/bassein-shipping-smoke" --smoke --camera-id v4_face --hour 19 --raster-msaa 1
           if ($LASTEXITCODE -ne 0) { throw "BASSEIN final DX11 WARP smoke failed" }
           $image = Get-ChildItem "build-v17/bassein-shipping-smoke" -Recurse -Filter 'raster_*.png' -File | Select-Object -First 1
           if (!$image -or $image.Length -lt 1000) { throw "BASSEIN final DX11 preview missing" }
-          Copy-Item $image.FullName "dist-v17/benchmark-civic/V497_BASSEIN_FINAL_DX11.png"
+          Copy-Item $image.FullName "dist-v17/benchmark-civic/V498_SCENE_FINAL_DX11.png"
           Write-Host "READY: CSE WARP V17 build, 186-material reference scene + approved BASSEIN sign."
       - name: Install Vulkan into COMPLETE V17.494 after approved scene restoration
         shell: pwsh
@@ -662,7 +664,7 @@ jobs:
           $pbrFile=Join-Path "$dst/benchmark-civic" $sector.pbr[0]
           $mat=Get-Content $materialFile -Raw | ConvertFrom-Json
           $pbr=Get-Content $pbrFile -Raw | ConvertFrom-Json
-          $signReport="$dst/benchmark-civic/V497_BASSEIN_SIGN_INSTALL.json"
+          $signReport="$dst/benchmark-civic/V498_SCENE_INSTALL.json"
           if (!(Test-Path $signReport)) {
             throw 'Approved V17.493 BASSEIN sign was not installed'
           }
@@ -671,7 +673,9 @@ jobs:
           if ($added -lt 0 -or $added -gt 69 -or $report.addedSignObjects -ne 112 -or
               $report.addedTriangles -lt 14000 -or $report.originalUnchangedObjects -lt 5000 -or
               $report.removedUpperFacadeLamps -ne 6 -or $report.removedUpperFacadeSupports -ne 6 -or
-              $report.signUniformScaleFactor -ne 2.0) {
+              $report.signUniformScaleFactor -ne 2.0 -or
+              $report.removedPoolCeilingLights -ne 6 -or $report.addedPoolCeilingLights -ne 1 -or
+              $report.poolLightDirection -ne 'crosswise-x' -or $report.poolLightEmittingAreaRatio -ne 1.0) {
             throw 'V17.493 BASSEIN installation report invalid'
           }
           # Verify the approved V17.444 backup BEFORE adding approved sign:
@@ -698,7 +702,7 @@ jobs:
           if (!(Test-Path "$dst/audio/pripyat_radio.wav")) {throw 'V17.493 Ukrainian radio missing'}
           git rev-parse HEAD | Set-Content "$dst/VULKAN_INTEGRATION_COMMIT.txt"
           @(
-            'CSE WARP V17.497 DXGI lifecycle + Vulkan HD620',
+            'CSE WARP V17.498 DXGI lifecycle + Vulkan HD620',
             'Source baseline: master V17.493 beta + BASSEIN sign',
             'Native Vulkan WSI, two frames in flight, incremental PBR cache, diagnostics',
             'Hardware FPS, weather smoothness and periodic stutter REQUIRE real HD620 verification.'
@@ -760,7 +764,7 @@ jobs:
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.497-DXGI-VIEWPORT-LIFECYCLE-VULKAN
+          name: CSE-WARP-V17.498-DXGI-VIEWPORT-LIFECYCLE-VULKAN
           path: dist-v17/
           if-no-files-found: error
       - name: Benchmark GI hors ligne — trois scènes, trois cuissons et sept relectures
