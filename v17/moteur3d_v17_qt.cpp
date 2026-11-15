@@ -2830,6 +2830,9 @@ private:
                                                       reinterpret_cast<void*>(nativeHandle),stats,reason):
                             renderVulkanPreview(snapshot->renderScene,*shadow,camera,w,h,pixels,stats,reason);
                     }else{
+                        // Vulkan WSI and DXGI must never own swapchains for the
+                        // same child HWND at the same time.
+                        releaseVulkanDirectForCurrentThread();
                         ok=directPresent?
                             renderDirectX11Native(snapshot->renderScene,*shadow,camera,w,h,
                                                    reinterpret_cast<void*>(nativeHandle),stats,reason):
