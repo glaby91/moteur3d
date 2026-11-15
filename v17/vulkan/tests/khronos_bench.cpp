@@ -241,7 +241,7 @@ int main(int argc,char** argv){
             return 4;
         }
         ++frames;
-        if(frames%120==0){
+        if(frames%120==0 && std::getenv("CSE_WARP_VK_VERBOSE_FRAMES")){
             std::cerr<<"[WARP Khronos] frame="<<frames
                      <<" cpu_ms="<<stats.ms
                      <<" gpu_draw_ms="<<stats.gpuDrawMs
