@@ -1,6 +1,7 @@
 // CSE WARP V17 Vulkan Raster (experimental independent backend).
 // Requires Vulkan API 1.3.204, native GPU raster of the existing Scene and Camera.
-// Offscreen color is read back for the current Qt QImage host. No swapchain.
+// Two paths: legacy offscreen QImage A/B tests, or native Win32 Vulkan swapchain.
+// The direct path sends rendered GPU pixels to the window without CPU readback.
 #include "m3d_engine.h"
 #include "m3d_vulkan_mesh.h"
 #include "m3d_vulkan_version.h"
@@ -8,12 +9,13 @@
 #include "m3d_vulkan_mips.h"
 #include "../weather/clouds.h"
 #include "../../experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_gi_bake.h"
-#include <vulkan/vulkan.h>
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#define VK_USE_PLATFORM_WIN32_KHR 1
 #endif
+#include <vulkan/vulkan.h>
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -103,6 +105,17 @@ template<typename T>const T* nearestLevel(const std::vector<T>& levels,uint32_t 
     return found;
 }
 class VulkanRaster final {
+    // Only the direct renderer creates a surface and swapchain. The existing
+    // preview/benchmark renderer remains completely offscreen.
+    void* presentWindow_=nullptr;
+    VkSurfaceKHR surface_=VK_NULL_HANDLE;
+    VkSwapchainKHR swapchain_=VK_NULL_HANDLE;
+    std::vector<VkImage> swapImages_;
+    std::vector<VkSemaphore> imageReady_;
+    VkSemaphore imageAcquired_=VK_NULL_HANDLE;
+    VkExtent2D swapExtent_{};
+    VkFormat swapFormat_=VK_FORMAT_UNDEFINED;
+    bool swapDirty_=false;
     VkInstance instance_=VK_NULL_HANDLE;
     VkPhysicalDevice physical_=VK_NULL_HANDLE;
     VkDevice device_=VK_NULL_HANDLE;
@@ -333,16 +346,184 @@ class VulkanRaster final {
         if(t.memory)vkFreeMemory(device_,t.memory,nullptr);
         t={};
     }
+
+    // A native child HWND owned by Qt; its pixels are presented by Vulkan,
+    // not by a QImage or a CPU-mediated texture upload. The existing offscreen
+    // render pass remains intact and is blitted GPU-to-GPU to the swapchain.
+    void createSwapchain(uint32_t preferredW,uint32_t preferredH){
+        if(!surface_)return;
+        VkSurfaceCapabilitiesKHR caps{};
+        vkcheck(vkGetPhysicalDeviceSurfaceCapabilitiesKHR(physical_,surface_,&caps),
+                "surface capabilities");
+        if(!(caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_DST_BIT))
+            throw std::runtime_error("Win32 surface cannot accept Vulkan GPU transfer destination");
+        VkExtent2D extent=caps.currentExtent;
+        if(extent.width==UINT32_MAX){
+            extent.width=std::max(caps.minImageExtent.width,
+                         std::min(preferredW,caps.maxImageExtent.width));
+            extent.height=std::max(caps.minImageExtent.height,
+                          std::min(preferredH,caps.maxImageExtent.height));
+        }
+        if(extent.width==0||extent.height==0)
+            throw std::runtime_error("Native Vulkan viewport has no visible pixels");
+        if(swapchain_&&!swapDirty_&&swapExtent_.width==extent.width&&
+           swapExtent_.height==extent.height)return;
+
+        uint32_t nFormats=0;
+        vkcheck(vkGetPhysicalDeviceSurfaceFormatsKHR(physical_,surface_,&nFormats,nullptr),
+                "surface format count");
+        if(!nFormats)throw std::runtime_error("No Vulkan swapchain surface format");
+        std::vector<VkSurfaceFormatKHR> formats(nFormats);
+        vkcheck(vkGetPhysicalDeviceSurfaceFormatsKHR(physical_,surface_,&nFormats,formats.data()),
+                "surface formats");
+        VkSurfaceFormatKHR chosen{};
+        for(const auto& f:formats){
+            if(f.colorSpace!=VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)continue;
+            if(f.format!=VK_FORMAT_B8G8R8A8_SRGB&&
+               f.format!=VK_FORMAT_R8G8B8A8_SRGB)continue;
+            VkFormatProperties properties{};
+            vkGetPhysicalDeviceFormatProperties(physical_,f.format,&properties);
+            if(properties.optimalTilingFeatures&VK_FORMAT_FEATURE_BLIT_DST_BIT){
+                chosen=f;break;
+            }
+        }
+        // Preserve sRGB. Do not silently substitute UNORM (would darken all
+        // pixels after the hardware sRGB framebuffer conversion).
+        if(chosen.format==VK_FORMAT_UNDEFINED)
+            throw std::runtime_error("No sRGB transfer-destination swapchain; use existing QImage mode");
+        VkFormatProperties sourceProperties{};
+        vkGetPhysicalDeviceFormatProperties(physical_,colorFormat_,&sourceProperties);
+        if(!(sourceProperties.optimalTilingFeatures&VK_FORMAT_FEATURE_BLIT_SRC_BIT))
+            throw std::runtime_error("GPU cannot blit Vulkan sRGB color to display");
+
+        uint32_t nModes=0;
+        vkcheck(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_,surface_,&nModes,nullptr),
+                "surface present-mode count");
+        std::vector<VkPresentModeKHR> modes(nModes);
+        if(nModes)vkcheck(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_,surface_,&nModes,
+                                                                    modes.data()),"present modes");
+        // FIFO is always available; MAILBOX may reduce visible stutter
+        // without allowing tearing when available. No hidden CPU fallback.
+        VkPresentModeKHR mode=VK_PRESENT_MODE_FIFO_KHR;
+        if(std::find(modes.begin(),modes.end(),VK_PRESENT_MODE_MAILBOX_KHR)!=modes.end())
+            mode=VK_PRESENT_MODE_MAILBOX_KHR;
+        const uint32_t imageCount=std::max(caps.minImageCount,3u);
+        uint32_t actualCount=caps.maxImageCount?
+            std::min(imageCount,caps.maxImageCount):imageCount;
+        VkCompositeAlphaFlagBitsKHR alpha=VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+        if(!(caps.supportedCompositeAlpha&alpha)){
+            for(VkCompositeAlphaFlagBitsKHR candidate:{
+                VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
+                VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
+                VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR}){
+                if(caps.supportedCompositeAlpha&candidate){alpha=candidate;break;}
+            }
+        }
+        if(swapchain_)vkcheck(vkDeviceWaitIdle(device_),"wait GPU before swapchain resize");
+        VkSwapchainCreateInfoKHR ci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
+        ci.surface=surface_;ci.minImageCount=actualCount;
+        ci.imageFormat=chosen.format;ci.imageColorSpace=chosen.colorSpace;
+        ci.imageExtent=extent;ci.imageArrayLayers=1;
+        ci.imageUsage=VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        ci.imageSharingMode=VK_SHARING_MODE_EXCLUSIVE;
+        ci.preTransform=caps.currentTransform;
+        ci.compositeAlpha=alpha;ci.presentMode=mode;ci.clipped=VK_TRUE;
+        ci.oldSwapchain=swapchain_;
+        VkSwapchainKHR newSwapchain=VK_NULL_HANDLE;
+        vkcheck(vkCreateSwapchainKHR(device_,&ci,nullptr,&newSwapchain),"create WSI swapchain");
+        for(VkSemaphore sem:imageReady_)vkDestroySemaphore(device_,sem,nullptr);
+        imageReady_.clear();
+        if(swapchain_)vkDestroySwapchainKHR(device_,swapchain_,nullptr);
+        swapchain_=newSwapchain;
+        uint32_t nImages=0;
+        vkcheck(vkGetSwapchainImagesKHR(device_,swapchain_,&nImages,nullptr),
+                "swapchain image count");
+        swapImages_.resize(nImages);
+        vkcheck(vkGetSwapchainImagesKHR(device_,swapchain_,&nImages,swapImages_.data()),
+                "swapchain image list");
+        imageReady_.resize(nImages,VK_NULL_HANDLE);
+        VkSemaphoreCreateInfo sem{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+        for(auto& slot:imageReady_)
+            vkcheck(vkCreateSemaphore(device_,&sem,nullptr,&slot),"per-image present semaphore");
+        swapExtent_=extent;swapFormat_=chosen.format;swapDirty_=false;
+        std::clog<<"[CSE WARP Vulkan] DIRECT DISPLAY via Win32 Vulkan swapchain: "
+                 <<extent.width<<"x"<<extent.height
+                 <<" images="<<nImages<<" mode="<<(mode==VK_PRESENT_MODE_MAILBOX_KHR?"MAILBOX":"FIFO")
+                 <<" GPU blit, no QImage, no mapped readback\n";
+    }
+    uint32_t acquireSwapImage(){
+        uint32_t index=0;
+        VkResult status=vkAcquireNextImageKHR(device_,swapchain_,UINT64_MAX,
+                                               imageAcquired_,VK_NULL_HANDLE,&index);
+        if(status==VK_ERROR_OUT_OF_DATE_KHR){
+            swapDirty_=true;
+            createSwapchain(swapExtent_.width,swapExtent_.height);
+            status=vkAcquireNextImageKHR(device_,swapchain_,UINT64_MAX,
+                                         imageAcquired_,VK_NULL_HANDLE,&index);
+        }
+        if(status!=VK_SUCCESS&&status!=VK_SUBOPTIMAL_KHR)
+            throw std::runtime_error("Acquire native Vulkan display image: "+std::to_string(int(status)));
+        if(status==VK_SUBOPTIMAL_KHR)swapDirty_=true;
+        return index;
+    }
+    void recordSwapchainBlit(uint32_t index){
+        VkImage image=swapImages_.at(index);
+        VkImageMemoryBarrier enter{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        enter.oldLayout=VK_IMAGE_LAYOUT_UNDEFINED;
+        enter.newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        enter.dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
+        enter.srcQueueFamilyIndex=enter.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
+        enter.image=image;enter.subresourceRange.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+        enter.subresourceRange.levelCount=1;enter.subresourceRange.layerCount=1;
+        vkCmdPipelineBarrier(cmd_,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+                             VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,nullptr,0,nullptr,1,&enter);
+        VkImageBlit blit{};
+        blit.srcSubresource.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.srcSubresource.layerCount=1;
+        blit.dstSubresource.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+        blit.dstSubresource.layerCount=1;
+        blit.srcOffsets[1]={int32_t(width_),int32_t(height_),1};
+        blit.dstOffsets[1]={int32_t(swapExtent_.width),int32_t(swapExtent_.height),1};
+        vkCmdBlitImage(cmd_,color_.image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                       image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&blit,VK_FILTER_NEAREST);
+        VkImageMemoryBarrier exit{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+        exit.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+        exit.newLayout=VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        exit.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
+        exit.srcQueueFamilyIndex=exit.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
+        exit.image=image;exit.subresourceRange.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+        exit.subresourceRange.levelCount=1;exit.subresourceRange.layerCount=1;
+        vkCmdPipelineBarrier(cmd_,VK_PIPELINE_STAGE_TRANSFER_BIT,
+                             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,0,0,nullptr,0,nullptr,1,&exit);
+    }
+    void presentSwapImage(uint32_t index){
+        VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+        present.waitSemaphoreCount=1;present.pWaitSemaphores=&imageReady_[index];
+        present.swapchainCount=1;present.pSwapchains=&swapchain_;
+        present.pImageIndices=&index;
+        const VkResult status=vkQueuePresentKHR(queue_,&present);
+        if(status==VK_SUBOPTIMAL_KHR||status==VK_ERROR_OUT_OF_DATE_KHR){
+            swapDirty_=true;
+            return;
+        }
+        vkcheck(status,"present swapchain image");
+    }
     void begin(){
         vkcheck(vkResetCommandPool(device_,commands_,0),"reset commands");
         VkCommandBufferBeginInfo bi{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
         bi.flags=VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
         vkcheck(vkBeginCommandBuffer(cmd_,&bi),"begin commands");
     }
-    void submit(double* submissionMs=nullptr,double* waitMs=nullptr){
+    void submit(double* submissionMs=nullptr,double* waitMs=nullptr,int presentIndex=-1){
         vkcheck(vkEndCommandBuffer(cmd_),"end commands");
         VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
         si.commandBufferCount=1;si.pCommandBuffers=&cmd_;
+        VkPipelineStageFlags acquireStage=VK_PIPELINE_STAGE_TRANSFER_BIT;
+        if(presentIndex>=0){
+            si.waitSemaphoreCount=1;si.pWaitSemaphores=&imageAcquired_;
+            si.pWaitDstStageMask=&acquireStage;
+            si.signalSemaphoreCount=1;si.pSignalSemaphores=&imageReady_.at(size_t(presentIndex));
+        }
         const auto start=Clock::now();
         vkcheck(vkQueueSubmit(queue_,1,&si,fence_),"submit commands");
         const auto issued=Clock::now();
@@ -555,7 +736,21 @@ class VulkanRaster final {
                  <<VK_VERSION_MINOR(app.apiVersion)<<"."
                  <<VK_VERSION_PATCH(app.apiVersion)<<"\n";
         VkInstanceCreateInfo i{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};i.pApplicationInfo=&app;
+#ifdef _WIN32
+        const char* surfaceExtensions[]={VK_KHR_SURFACE_EXTENSION_NAME,VK_KHR_WIN32_SURFACE_EXTENSION_NAME};
+        if(presentWindow_){i.enabledExtensionCount=2;i.ppEnabledExtensionNames=surfaceExtensions;}
+#else
+        if(presentWindow_)throw std::runtime_error("Native Vulkan presentation is Windows-only");
+#endif
         vkcheck(vkCreateInstance(&i,nullptr,&instance_),"create instance");
+#ifdef _WIN32
+        if(presentWindow_){
+            VkWin32SurfaceCreateInfoKHR si{VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR};
+            si.hinstance=GetModuleHandleW(nullptr);
+            si.hwnd=reinterpret_cast<HWND>(presentWindow_);
+            vkcheck(vkCreateWin32SurfaceKHR(instance_,&si,nullptr,&surface_),"Win32 Vulkan surface");
+        }
+#endif
         uint32_t n=0;vkcheck(vkEnumeratePhysicalDevices(instance_,&n,nullptr),"enumerate GPUs");
         if(!n)throw std::runtime_error("No Vulkan GPU/driver installed");
         std::vector<VkPhysicalDevice> devices(n);
@@ -573,6 +768,12 @@ class VulkanRaster final {
             std::vector<VkQueueFamilyProperties> qs(qn);
             vkGetPhysicalDeviceQueueFamilyProperties(pd,&qn,qs.data());
             for(uint32_t j=0;j<qn;j++)if(qs[j].queueFlags&VK_QUEUE_GRAPHICS_BIT){
+                if(surface_){
+                    VkBool32 supportsPresent=VK_FALSE;
+                    vkcheck(vkGetPhysicalDeviceSurfaceSupportKHR(pd,j,surface_,&supportsPresent),
+                            "GPU graphics/present queue compatibility");
+                    if(!supportsPresent)continue;
+                }
                 const int score=(props.deviceType==VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU?100:
                                  props.deviceType==VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU?90:10);
                 if(score>best){best=score;physical_=pd;family_=j;}
@@ -661,7 +862,14 @@ class VulkanRaster final {
         enable.samplerAnisotropy=features_.samplerAnisotropy;
         VkDeviceCreateInfo d{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
         d.queueCreateInfoCount=1;d.pQueueCreateInfos=&queue;d.pEnabledFeatures=&enable;
+        const char* swapchainExtension=VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+        if(surface_){d.enabledExtensionCount=1;d.ppEnabledExtensionNames=&swapchainExtension;}
         vkcheck(vkCreateDevice(physical_,&d,nullptr,&device_),"create GPU device");
+        if(surface_){
+            VkSemaphoreCreateInfo sem{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+            vkcheck(vkCreateSemaphore(device_,&sem,nullptr,&imageAcquired_),
+                    "swapchain acquire semaphore");
+        }
         vkGetDeviceQueue(device_,family_,0,&queue_);
         VkCommandPoolCreateInfo cp{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};cp.queueFamilyIndex=family_;
         vkcheck(vkCreateCommandPool(device_,&cp,nullptr,&commands_),"command pool");
@@ -955,7 +1163,7 @@ class VulkanRaster final {
         fb.attachmentCount=msaaSamples_==VK_SAMPLE_COUNT_1_BIT?2:3;
         fb.pAttachments=views;fb.width=w;fb.height=h;fb.layers=1;
         vkcheck(vkCreateFramebuffer(device_,&fb,nullptr,&framebuffer_),"Vulkan framebuffer");
-        readback_=buffer(VkDeviceSize(w)*h*4,VK_BUFFER_USAGE_TRANSFER_DST_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,true);
+        if(!surface_)readback_=buffer(VkDeviceSize(w)*h*4,VK_BUFFER_USAGE_TRANSFER_DST_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,true);
         std::clog<<"[CSE WARP Vulkan] Readback memory HOST_CACHED="
                  <<bool(readback_.flags&VK_MEMORY_PROPERTY_HOST_CACHED_BIT)
                  <<" HOST_COHERENT="<<bool(readback_.flags&VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)<<"\n";
@@ -1328,11 +1536,18 @@ class VulkanRaster final {
         memcpy(uniform_.mapped,&f,sizeof(f));flush(uniform_);
     }
 public:
-    VulkanRaster()=default;
+    explicit VulkanRaster(void* win32Window=nullptr):presentWindow_(win32Window){}
     ~VulkanRaster(){
-        if(!device_){if(instance_)vkDestroyInstance(instance_,nullptr);return;}
+        if(!device_){
+            if(surface_&&instance_)vkDestroySurfaceKHR(instance_,surface_,nullptr);
+            if(instance_)vkDestroyInstance(instance_,nullptr);
+            return;
+        }
         vkDeviceWaitIdle(device_);
         if(framebuffer_)vkDestroyFramebuffer(device_,framebuffer_,nullptr);
+        for(VkSemaphore sem:imageReady_)if(sem)vkDestroySemaphore(device_,sem,nullptr);
+        if(imageAcquired_)vkDestroySemaphore(device_,imageAcquired_,nullptr);
+        if(swapchain_)vkDestroySwapchainKHR(device_,swapchain_,nullptr);
         free(readback_);free(uniform_);free(vertices_);free(transparent_);free(boxTemplate_);free(boxInstances_);free(foliageTemplate_);free(foliageInstances_);
         free(color_);free(msColor_);free(depth_);free(albedo_);free(surface_);free(shadow_);
         free(detailAlbedo_);free(detailSurface_);
@@ -1358,6 +1573,7 @@ public:
         if(fence_)vkDestroyFence(device_,fence_,nullptr);
         if(commands_)vkDestroyCommandPool(device_,commands_,nullptr);
         vkDestroyDevice(device_,nullptr);
+        if(surface_)vkDestroySurfaceKHR(instance_,surface_,nullptr);
         if(instance_)vkDestroyInstance(instance_,nullptr);
     }
     bool render(const Scene& scene,const ShadowMap& shadows,const Camera& cam,
@@ -1366,6 +1582,10 @@ public:
         try {
             if(w<1||h<1||w>4096||h>4096)throw std::runtime_error("Invalid render size");
             if(!started_)configure();
+            if(surface_){
+                createSwapchain(uint32_t(w),uint32_t(h));
+                w=int(swapExtent_.width);h=int(swapExtent_.height);
+            }
             if(width_!=uint32_t(w)||height_!=uint32_t(h))targets(uint32_t(w),uint32_t(h));
             const bool changed=scenePointer_!=&scene||sceneObjects_!=scene.obj.size()
                  ||sceneMaterials_!=scene.mat.size()||scene.gpuCacheIdentity==0
@@ -1374,6 +1594,7 @@ public:
             updateShadow(shadows);
             ensureGI(scene);
             updateUniforms(scene,shadows,cam);
+            const int acquiredIndex=surface_?int(acquireSwapImage()):-1;
             VkViewport viewport{0.f,0.f,float(w),float(h),0.f,1.f};
             VkRect2D scissor{{0,0},{uint32_t(w),uint32_t(h)}};
             begin();
@@ -1447,6 +1668,8 @@ public:
             }
             vkCmdEndRenderPass(cmd_);
             vkCmdWriteTimestamp(cmd_,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,queries_,1);
+            if(acquiredIndex>=0)recordSwapchainBlit(uint32_t(acquiredIndex));
+            if(acquiredIndex<0){
             VkBufferImageCopy bc{};
             bc.imageSubresource.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;bc.imageSubresource.layerCount=1;
             bc.imageExtent={uint32_t(w),uint32_t(h),1};
@@ -1460,22 +1683,28 @@ public:
             barrier.buffer=readback_.handle;barrier.size=VK_WHOLE_SIZE;
             vkCmdPipelineBarrier(cmd_,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,
                                  0,nullptr,1,&barrier,0,nullptr);
+            }
             double submissionMs=0,waitMs=0;
-            submit(&submissionMs,&waitMs);
+            submit(&submissionMs,&waitMs,acquiredIndex);
             const auto copied=Clock::now();
-            invalidate(readback_);
-            pixels.resize(size_t(w)*h);
-            const auto* mapped=static_cast<const uint32_t*>(readback_.mapped);
-            vkreadback::toArgb32(mapped,pixels.data(),pixels.size(),
-                bgraReadback_?vkreadback::PixelBytes::Bgra8:vkreadback::PixelBytes::Rgba8);
+            if(acquiredIndex>=0){
+                presentSwapImage(uint32_t(acquiredIndex));
+                pixels.clear();
+            }else{
+                invalidate(readback_);
+                pixels.resize(size_t(w)*h);
+                const auto* mapped=static_cast<const uint32_t*>(readback_.mapped);
+                vkreadback::toArgb32(mapped,pixels.data(),pixels.size(),
+                    bgraReadback_?vkreadback::PixelBytes::Bgra8:vkreadback::PixelBytes::Rgba8);
+            }
             stats=Stats{};
             stats.gpu=true;stats.gpuDrawCalls=drawCalls;
             stats.gpuBoxInstances=boxCount_;
             stats.gpuFoliageInstances=foliageCount_;
             stats.cpuSubmitMs=submissionMs;
             stats.cpuMapWaitMs=waitMs;
-            stats.cpuPixelConvertMs=ms(copied,Clock::now());
-            stats.readbackBufferCount=1;
+            stats.cpuPixelConvertMs=acquiredIndex>=0?0.0:ms(copied,Clock::now());
+            stats.readbackBufferCount=acquiredIndex>=0?0:1;
             stats.ms=ms(started,Clock::now());
             const auto freq=props_.limits.timestampPeriod;
             uint64_t stamps[2]{};
@@ -1500,6 +1729,22 @@ bool renderVulkanPreview(const Scene& scene,const ShadowMap& shadow,const Camera
     // Each Qt worker owns its own resources, like the existing D3D11 backend.
     thread_local VulkanRaster renderer;
     return renderer.render(scene,shadow,camera,w,h,out,stats,error);
+}
+
+bool renderVulkanDirectPresent(const Scene& scene,const ShadowMap& shadow,const Camera& camera,
+                               int w,int h,void* nativeWindow,Stats& stats,std::wstring& error){
+    if(!nativeWindow){error=L"Null native HWND for Vulkan presentation";return false;}
+    // Independent device/command context on the same persistent Qt worker.
+    // Never mutate the well-tested offscreen A/B renderer.
+    thread_local std::unique_ptr<VulkanRaster> direct;
+    thread_local void* activeWindow=nullptr;
+    if(!direct || activeWindow!=nativeWindow){
+        direct.reset();
+        direct=std::make_unique<VulkanRaster>(nativeWindow);
+        activeWindow=nativeWindow;
+    }
+    std::vector<uint32_t> noCpuImage;
+    return direct->render(scene,shadow,camera,w,h,noCpuImage,stats,error);
 }
 
 } // namespace m3d

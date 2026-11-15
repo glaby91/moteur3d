@@ -113,6 +113,11 @@ bool renderCompute11Preview(const Scene& s,const Camera& cam,int w,int h,std::ve
 bool renderDirectX11Preview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
 // Experimental Vulkan 1.0 Raster GPU backend; offscreen ARGB32 preview, shared Scene/Camera API.
 bool renderVulkanPreview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
+// Native Win32 Vulkan surface: no CPU pixel readback and no QImage.
+// The HWND is created on the Qt UI thread; VkSwapchainKHR is owned by the
+// persistent raster worker. Never pass a destroyed or temporary HWND.
+bool renderVulkanDirectPresent(const Scene& s,const ShadowMap& sm,const Camera& cam,
+                               int w,int h,void* nativeWindow,Stats& stats,std::wstring& error);
 // Renderer quality is a shared public API: embedded host software and the
 // standalone Qt interface modify exactly the same settings. Each DX11 frame
 // takes one atomic snapshot, preventing partial UI/worker configuration.
