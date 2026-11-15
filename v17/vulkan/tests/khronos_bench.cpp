@@ -196,10 +196,14 @@ int main(int argc,char** argv){
     WNDCLASSW wc{};wc.lpfnWndProc=wndProc;wc.hInstance=GetModuleHandleW(nullptr);
     wc.lpszClassName=L"CSEWARP_Khronos_Vulkan_Window";
     if(!RegisterClassW(&wc)){std::cerr<<"Win32 RegisterClass failed\n";return 3;}
-    RECT size{0,0,w,h};AdjustWindowRect(&size,WS_OVERLAPPEDWINDOW,FALSE);
+    const bool borderless=std::getenv("CSE_WARP_VK_BENCH_BORDERLESS")!=nullptr;
+    const DWORD style=borderless?WS_POPUP:WS_OVERLAPPEDWINDOW;
+    RECT size{0,0,w,h};AdjustWindowRect(&size,style,FALSE);
+    const int windowWidth=size.right-size.left,windowHeight=size.bottom-size.top;
+    const int posX=borderless?std::max(0,(GetSystemMetrics(SM_CXSCREEN)-windowWidth)/2):CW_USEDEFAULT;
+    const int posY=borderless?std::max(0,(GetSystemMetrics(SM_CYSCREEN)-windowHeight)/2):CW_USEDEFAULT;
     HWND hwnd=CreateWindowExW(0,wc.lpszClassName,L"CSE WARP V17.32 | Vulkan Khronos GPU Profiling",
-        WS_OVERLAPPEDWINDOW,CW_USEDEFAULT,CW_USEDEFAULT,
-        size.right-size.left,size.bottom-size.top,
+        style,posX,posY,windowWidth,windowHeight,
         nullptr,nullptr,wc.hInstance,nullptr);
     if(!hwnd){std::cerr<<"Win32 CreateWindow failed\n";return 3;}
     ShowWindow(hwnd,SW_SHOWNORMAL);UpdateWindow(hwnd);
