@@ -228,6 +228,7 @@ class VulkanRaster final {
     int activeSlot_=0;
     uint64_t submittedFrames_=0;
     bool activePending_=false,activeDescriptorReady_=false;
+    double frameRetireWaitMs_=0.0,frameDrainWaitMs_=0.0;
     Stats completedGpuStats_{};
     void swapSlot(FrameSlot& slot){
         using std::swap;
@@ -266,13 +267,17 @@ class VulkanRaster final {
         swapSlot(frameSlots_[activeSlot_]);
         swapSlot(frameSlots_[slot]);
         activeSlot_=slot;
+        const auto before=Clock::now();
         waitActiveSlot();
+        frameRetireWaitMs_=ms(before,Clock::now());
     }
     void drainPendingFrames(){
         if(!asyncFrames_ || !frameSlotsReady_)return;
         // Expensive only for actual geometry/material/light resource changes,
         // never for camera movement through a static scene.
+        const auto before=Clock::now();
         vkcheck(vkDeviceWaitIdle(device_),"drain GPU before scene mutation");
+        frameDrainWaitMs_=ms(before,Clock::now());
         if(activePending_){collectCompletedGpuTiming();activePending_=false;}
         for(auto& slot:frameSlots_)slot.pending=false;
     }
@@ -1826,6 +1831,26 @@ public:
         try {
             if(w<1||h<1||w>4096||h>4096)throw std::runtime_error("Invalid render size");
             if(!started_)configure();
+            frameRetireWaitMs_=frameDrainWaitMs_=0.0;
+            if(asyncFrames_){
+                allocateSecondFrame();
+                const auto incoming=sceneKey(scene);
+                const bool sceneModified=vkdirty::classify(sceneKey_,incoming)!=vkdirty::Update::None;
+                const bool shadowModified=shadowData_!=shadows.d.data() ||
+                    shadowSize_!=uint32_t(shadows.size) ||
+                    cachedSolarHour_!=solarHour;
+                const bool resourceMutation=sceneModified||shadowModified||
+                    (swapExtent_.width && (swapExtent_.width!=uint32_t(w)||
+                                            swapExtent_.height!=uint32_t(h)));
+                if(resourceMutation){
+                    drainPendingFrames();
+                    // Descriptor resources may have been reallocated after
+                    // the drain; refresh each frame's descriptor on next use.
+                    activeDescriptorReady_=false;
+                    for(auto& slot:frameSlots_)slot.descriptorReady=false;
+                }
+                useFrameSlot(int(submittedFrames_%2));
+            }
             const auto setupEnd=Clock::now();
             if(displaySurface_){
                 createSwapchain(uint32_t(w),uint32_t(h));
@@ -1850,6 +1875,7 @@ public:
             const auto shadowEnd=Clock::now();
             ensureGI(scene);
             const auto giEnd=Clock::now();
+            if(!activeDescriptorReady_)updateDescriptors();
             updateUniforms(scene,shadows,cam);
             const auto uniformsEnd=Clock::now();
             const int acquiredIndex=displaySurface_?int(acquireSwapImage()):-1;
@@ -1912,6 +1938,14 @@ public:
             vkCmdDraw(cmd_,3,1,0,0);++drawCalls;
             drawOpaque(false); // Identical opaque color pass; glass once afterwards.
             if(transparentCount_){
+                // Each frame owns its transparent vertex storage while two
+                // command buffers are simultaneously in flight.
+                if(!transparent_.mapped ||
+                   transparent_.size<size_t(transparentCount_)*sizeof(Vertex)){
+                    free(transparent_);
+                    transparent_=buffer(size_t(transparentCount_)*sizeof(Vertex),
+                        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+                }
                 // CPU depth-sort transparent triangles every frame, then draw with depth-test but no depth-write.
                 std::iota(glassOrder_.begin(),glassOrder_.end(),size_t(0));
                 std::sort(glassOrder_.begin(),glassOrder_.end(),[&](size_t a,size_t b){
@@ -1961,18 +1995,28 @@ public:
                     bgraReadback_?vkreadback::PixelBytes::Bgra8:vkreadback::PixelBytes::Rgba8);
             }
             const auto presentingEnd=Clock::now();
+            if(asyncFrames_ && frameSlotsReady_ && acquiredIndex>=0)
+                ++submittedFrames_;
             stats=Stats{};
             stats.gpu=true;stats.gpuDrawCalls=drawCalls;
             stats.gpuBoxInstances=boxCount_;
             stats.gpuFoliageInstances=foliageCount_;
             stats.cpuSubmitMs=submissionMs;
-            stats.cpuMapWaitMs=waitMs;
+            stats.cpuMapWaitMs=waitMs+frameRetireWaitMs_+frameDrainWaitMs_;
             stats.cpuPixelConvertMs=acquiredIndex>=0?0.0:ms(copied,Clock::now());
             stats.readbackBufferCount=acquiredIndex>=0?0:1;
             stats.ms=ms(started,Clock::now());
             const auto freq=props_.limits.timestampPeriod;
             uint64_t stamps[3]{};
-            if(vkGetQueryPoolResults(device_,queries_,0,3,sizeof(stamps),stamps,sizeof(uint64_t),VK_QUERY_RESULT_64_BIT)==VK_SUCCESS
+            if(asyncFrames_ && frameSlotsReady_){
+                // Timestamps are harvested when the previous slot retires.
+                // Never block the render loop just to read a current-frame
+                // timestamp. GPU telemetry is delayed by up to two frames.
+                stats.gpuDrawMs=completedGpuStats_.gpuDrawMs;
+                stats.gpuTransferMs=completedGpuStats_.gpuTransferMs;
+                stats.gpuTotalMs=completedGpuStats_.gpuTotalMs;
+                stats.gpuTimingValid=completedGpuStats_.gpuTimingValid;
+            }else if(vkGetQueryPoolResults(device_,queries_,0,3,sizeof(stamps),stamps,sizeof(uint64_t),VK_QUERY_RESULT_64_BIT)==VK_SUCCESS
                &&stamps[2]>=stamps[1] && stamps[1]>=stamps[0]){
                 stats.gpuDrawMs=double(stamps[1]-stamps[0])*double(freq)*1e-6;
                 stats.gpuTransferMs=double(stamps[2]-stamps[1])*double(freq)*1e-6;
