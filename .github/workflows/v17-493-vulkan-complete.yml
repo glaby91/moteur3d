@@ -56,7 +56,7 @@ jobs:
           if (!$backend.Contains('vulkanRuntimeAvailable(error)')) {
             throw 'Missing graceful error handling when Vulkan loader is absent'
           }
-          Write-Host 'V17.493 CPU/DX11 require no Vulkan runtime. Native scene test verifies this once built.'
+          Write-Host 'V17.494 CPU/DX11 require no Vulkan runtime. Native scene test verifies this once built.'
       - name: Generate benchmark scenes from reusable Pripyat material library
         shell: pwsh
         run: |
@@ -621,7 +621,7 @@ jobs:
           if (!$image -or $image.Length -lt 1000) { throw "BASSEIN final DX11 preview missing" }
           Copy-Item $image.FullName "dist-v17/benchmark-civic/V493_BASSEIN_FINAL_DX11.png"
           Write-Host "READY: CSE WARP V17 build, 186-material reference scene + approved BASSEIN sign."
-      - name: Install Vulkan into COMPLETE V17.493 after approved scene restoration
+      - name: Install Vulkan into COMPLETE V17.494 after approved scene restoration
         shell: pwsh
         run: |
           $dst='dist-v17'
@@ -679,7 +679,7 @@ jobs:
           if (!(Test-Path "$dst/audio/pripyat_radio.wav")) {throw 'V17.493 Ukrainian radio missing'}
           git rev-parse HEAD | Set-Content "$dst/VULKAN_INTEGRATION_COMMIT.txt"
           @(
-            'CSE WARP V17.493 COMPLETE + experimental Vulkan HD620',
+            'CSE WARP V17.494 DXGI direct + Vulkan HD620',
             'Source baseline: master V17.493 beta + BASSEIN sign',
             'Native Vulkan WSI, two frames in flight, incremental PBR cache, diagnostics',
             'Hardware FPS, weather smoothness and periodic stutter REQUIRE real HD620 verification.'
@@ -741,7 +741,7 @@ jobs:
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.493-COMPLETE-VULKAN-HD620
+          name: CSE-WARP-V17.494-DXGI-DIRECT-VULKAN-HD620
           path: dist-v17/
           if-no-files-found: error
       - name: Benchmark GI hors ligne — trois scènes, trois cuissons et sept relectures
