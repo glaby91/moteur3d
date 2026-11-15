@@ -8,10 +8,10 @@
 namespace m3d { namespace vkdirty {
 struct Key {
     const void* address=nullptr;
-    uint64_t identity=0, revision=0, geometryRevision=0, materialsRevision=0;
+    uint64_t identity=0, revision=0, geometryRevision=0, materialsRevision=0, parametersRevision=0;
     size_t objects=0, materials=0;
     uint64_t legacyRevision() const {
-        return revision-geometryRevision-materialsRevision; // unsigned wrap is intentional
+        return revision-geometryRevision-materialsRevision-parametersRevision; // unsigned wrap
     }
 };
 enum class Update : uint8_t { None, Geometry, Full };
