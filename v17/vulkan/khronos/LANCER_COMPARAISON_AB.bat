@@ -10,7 +10,7 @@ echo            shaders optimises (rendu PBR conserve)
 echo ===================================================
 echo.
 echo ETAPE A: reference (12 scenarios de 8 s)
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0RUN_KHRONOS_HD620.ps1" -Profile baseline -Seconds 8 -Repetitions 1 -WarmupSeconds 2 -Width 1280 -Height 720
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0RUN_KHRONOS_HD620.ps1" -Variant baseline -Seconds 8 -Repetitions 1 -WarmupSeconds 2 -Width 1280 -Height 720
 if errorlevel 1 (
  echo La campagne A a signale une erreur. Verifier les logs.
  pause
@@ -18,7 +18,7 @@ if errorlevel 1 (
 )
 echo.
 echo ETAPE B: version optimisee (12 scenarios de 8 s)
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0RUN_KHRONOS_HD620.ps1" -Profile optimized -Seconds 8 -Repetitions 1 -WarmupSeconds 2 -Width 1280 -Height 720
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0RUN_KHRONOS_HD620.ps1" -Variant optimized -Seconds 8 -Repetitions 1 -WarmupSeconds 2 -Width 1280 -Height 720
 if errorlevel 1 (
  echo La campagne B a signale une erreur. Verifier les logs.
  pause
