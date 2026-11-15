@@ -93,6 +93,22 @@ jobs:
           if ($begin -lt 0 -or $skyDraw -le $begin -or $opaqueColor -le $skyDraw) { throw 'Sky must render between prepass and opaque color' }
           if (!$renderer.Contains('srgbColorEnabled_=!requestedSrgb')) { throw 'sRGB default policy missing' }
           if (!$renderer.Contains('CSE_WARP_VK_SRGB_COLOR_TEST=0')) { throw 'Legacy diagnostic override missing' }
+          # Native-display path keeps the deterministic offscreen benchmark.
+          $directSrc=Get-Content 'v17/vulkan/m3d_vulkan.cpp' -Raw
+          $hostSrc=Get-Content 'v17/moteur3d_v17_qt.cpp' -Raw
+          if (!$directSrc.Contains('vkCreateWin32SurfaceKHR') -or
+              !$directSrc.Contains('vkCreateSwapchainKHR') -or
+              !$directSrc.Contains('vkCmdBlitImage(cmd_') -or
+              !$directSrc.Contains('vkQueuePresentKHR') -or
+              !$directSrc.Contains('si.pWaitSemaphores=&imageAcquired_')) {
+            throw 'Real native Vulkan WSI presentation or GPU semaphores missing'
+          }
+          if (!$hostSrc.Contains('createWindowContainer(nativeWindow_') -or
+              !$hostSrc.Contains('renderVulkanDirectPresent(') -or
+              !$hostSrc.Contains('result.directPresented')) {
+            throw 'Native Vulkan Qt window/worker integration missing'
+          }
+          Write-Host 'PASS Vulkan GPU-to-swapchain display path; CPU QImage A/B mode retained'
           Write-Host 'PASS Vulkan always-on opaque Z-prepass source contract'
       - name: Confirm native Vulkan output and geometry smoke
         id: smoke
