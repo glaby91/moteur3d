@@ -656,6 +656,7 @@ private:
     QTimer frameTimer_;
     QTimer skyAnimationTimer_;
     QElapsedTimer skyMotionClock_;
+    qint64 lastVulkanIdleSkyRequestMs_=-1000;
     QTimer dayNightTimer_;
     QElapsedTimer dayNightClock_;
     double dayNightOriginHour_=14.75;
@@ -2198,12 +2199,28 @@ private:
             settings.setValue(QStringLiteral("Raster/FilmicTonemap"),enabled);
             if(backendBox_&&backendBox_->currentIndex()==4)requestRender();
         });
-        // Independent 30Hz sky compositor: never waits for the GPU, never
-        // requests a geometry or shadow render just to animate weather.
+        // DX11/QImage: lightweight, independent 30 Hz sky compositor.
+        // Native Vulkan has no QImage at all: present a new GPU frame when
+        // stationary so clouds and the solar sky do not freeze outside explore.
+        // Coalesce idle refreshes (20 Hz cap); exploring already renders
+        // continuously, and the in-flight guard prevents render queue buildup.
         skyAnimationTimer_.setInterval(33);
         connect(&skyAnimationTimer_,&QTimer::timeout,this,[this]{
-            if(sceneLoading_||!runtime_||!hasRenderedPose_||lastImage_.isNull()||
-               !backendBox_||(backendBox_->currentIndex()!=4 && backendBox_->currentIndex()!=5))return;
+            if(sceneLoading_||!runtime_||!backendBox_)return;
+            if(nativeVulkanSelected()){
+                if(!exploring_&&(cloudAnimationBox_->isChecked()||
+                                  dayNightCycleBox_->isChecked())&&
+                   !watcher_.isRunning()&&!pending_){
+                    const qint64 now=skyMotionClock_.elapsed();
+                    if(now-lastVulkanIdleSkyRequestMs_>=50){
+                        lastVulkanIdleSkyRequestMs_=now;
+                        requestRender();
+                    }
+                }
+                return;
+            }
+            if(!hasRenderedPose_||lastImage_.isNull()||
+               (backendBox_->currentIndex()!=4 && backendBox_->currentIndex()!=5))return;
             if(!cloudAnimationBox_->isChecked()&&!dayNightCycleBox_->isChecked()&&
                canvas_->hasSkyFrame())return;
             const auto camera=v16::makeCamera(lastRenderedPose_,
