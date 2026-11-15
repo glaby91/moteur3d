@@ -305,6 +305,7 @@ public:
         renderPool_.setMaxThreadCount(1);
         renderPool_.setExpiryTimeout(-1);
         createUi();
+        m3d::setVulkanSkyCloudMotion(24.f);
         // The user-approved photographic hemisphere is optional at runtime:
         // a missing asset keeps all existing procedural stars and cannot block
         // scene loading or Vulkan setup. Decode it only once, never per frame.
@@ -2264,8 +2265,10 @@ private:
         // Weather animation deliberately faster than the old almost-static sky.
         m3d::setRasterCloudTimeScale(24.f);
         connect(cloudAnimationBox_,&QCheckBox::toggled,this,[this](bool enabled){
-            m3d::setRasterCloudTimeScale(!enabled?0.f:
-                (dayNightCycleBox_->isChecked()?240.f:24.f));
+            const float speed=!enabled?0.f:
+                (dayNightCycleBox_->isChecked()?240.f:24.f);
+            m3d::setRasterCloudTimeScale(speed);
+            m3d::setVulkanSkyCloudMotion(speed);
             canvas_->invalidateSky();
         });
         dayNightTimer_.setInterval(1500); // Architectural lighting is slower than 30Hz sky
@@ -2288,8 +2291,10 @@ private:
                 dayNightClock_.start();
                 dayNightTimer_.start();
             }else dayNightTimer_.stop();
-            m3d::setRasterCloudTimeScale(!cloudAnimationBox_->isChecked()?0.f:
-                (enabled?240.f:24.f));
+            const float speed=!cloudAnimationBox_->isChecked()?0.f:
+                (enabled?240.f:24.f);
+            m3d::setRasterCloudTimeScale(speed);
+            m3d::setVulkanSkyCloudMotion(speed);
         });
         connect(sunHour_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double hour){
             // A deliberate manual time change reanchors the running clock.
