@@ -37,6 +37,13 @@ public:
                 .45f+random(seed)*.75f,random(seed),random(seed)});
         }
     }
+    // The supplied photograph is mapped as an inner hemisphere (v=0 zenith,
+    // v=1 horizon). The original 4096x2048 file stays untouched on disk.
+    void setPanorama(const QImage& source){
+        panorama_=source.isNull()?QImage{}:
+            source.scaled(QSize(2048,1024),Qt::IgnoreAspectRatio,
+                          Qt::SmoothTransformation).convertToFormat(QImage::Format_RGB32);
+    }
     void render(QImage& out,const m3d::Camera& cam,float hour,double elapsedSeconds,
                 bool cloudsEnabled,bool fastWeather){
         if(out.size()!=QSize(Width,Height)||out.format()!=QImage::Format_RGB32)
@@ -71,6 +78,36 @@ public:
                     g=mix(g,mix(10.f,215.f,day),opacity);
                     b=mix(b,mix(16.f,232.f,day),opacity);
                 }
+                if(!panorama_.isNull()&&night>.001f&&d.y>0.f){
+                    // Seamless equirectangular hemisphere: world-locked and
+                    // rotating with the solar clock, not with camera position.
+                    const float twoPi=6.283185307179586f;
+                    float u=std::atan2(d.z,d.x)/twoPi+.5f+hour/24.f;
+                    u-=std::floor(u);
+                    const float v=std::acos(std::clamp(d.y,0.f,1.f))/1.57079632679f;
+                    const float px=u*panorama_.width()-.5f;
+                    const float py=v*(panorama_.height()-1);
+                    const int ix=int(std::floor(px));
+                    const int iy=std::clamp(int(std::floor(py)),0,panorama_.height()-1);
+                    const int jy=std::min(iy+1,panorama_.height()-1);
+                    const float tx=px-std::floor(px),ty=py-float(iy);
+                    const int ax=(ix%panorama_.width()+panorama_.width())%panorama_.width();
+                    const int bx=(ax+1)%panorama_.width();
+                    const auto* row0=reinterpret_cast<const uint32_t*>(panorama_.constScanLine(iy));
+                    const auto* row1=reinterpret_cast<const uint32_t*>(panorama_.constScanLine(jy));
+                    const float photoR=mix(mix(float(qRed(row0[ax])),float(qRed(row0[bx])),tx),
+                                           mix(float(qRed(row1[ax])),float(qRed(row1[bx])),tx),ty);
+                    const float photoG=mix(mix(float(qGreen(row0[ax])),float(qGreen(row0[bx])),tx),
+                                           mix(float(qGreen(row1[ax])),float(qGreen(row1[bx])),tx),ty);
+                    const float photoB=mix(mix(float(qBlue(row0[ax])),float(qBlue(row0[bx])),tx),
+                                           mix(float(qBlue(row1[ax])),float(qBlue(row1[bx])),tx),ty);
+                    float photoWeight=night*smoothstep(.025f,.14f,d.y);
+                    if(cloudsEnabled)photoWeight*=1.f-
+                        std::clamp(cloudAt(d,drift)*.78f,0.f,1.f);
+                    r=mix(r,photoR,photoWeight);
+                    g=mix(g,photoG,photoWeight);
+                    b=mix(b,photoB,photoWeight);
+                }
                 if(sun.up>0.f){
                     const float dot=d.x*sunDir.x+d.y*sunDir.y+d.z*sunDir.z;
                     const float disk=smoothstep(.99975f,.99994f,dot);
@@ -85,7 +122,7 @@ public:
                       |uint32_t(std::clamp(int(b),0,255));
             }
         }
-        if(night>.01f){
+        if(night>.01f && panorama_.isNull()){
             QPainter painter(&out);
             painter.setRenderHint(QPainter::Antialiasing,true);
             constexpr float twoPi=6.283185307f;
@@ -118,6 +155,7 @@ public:
     }
 private:
     struct Star{m3d::V direction;float radius,temperature,brightness;};
+    QImage panorama_;
     std::vector<uint8_t> cloudAtlas_;
     std::vector<Star> stars_;
     static float smoothstep(float lo,float hi,float v){
