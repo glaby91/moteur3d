@@ -41,6 +41,7 @@ jobs:
         uses: jakoch/install-vulkan-sdk-action@v1
         with:
           vulkan_version: '1.4.309.0'
+          install_runtime: true
           cache: true
           stripdown: true
           install_swiftshader: false
@@ -54,11 +55,18 @@ jobs:
           # over the target machine's driver-managed Vulkan installation.
           $sdk=$env:VULKAN_SDK
           if (!$sdk -or !(Test-Path $sdk)) { throw 'Vulkan SDK installation unavailable' }
-          $loader=Join-Path $sdk 'Bin/vulkan-1.dll'
+          # jakoch/install-vulkan-sdk-action installs the Windows 64-bit
+          # Vulkan runtime separately at <VULKAN_SDK>/runtime/x64 when
+          # install_runtime: true (SDK Bin is not the runtime location).
+          $loader=Join-Path $sdk 'runtime/x64/vulkan-1.dll'
           if (!(Test-Path $loader)) {
             $found=Get-ChildItem $sdk -Recurse -File -Filter 'vulkan-1.dll' |
-              Where-Object { $_.FullName -notmatch '([\\/])Lib([\\/])' } | Select-Object -First 1
-            if (!$found) { throw 'SDK Vulkan loader vulkan-1.dll not found; cannot run native Windows smoke' }
+              Where-Object { $_.FullName -match '[\\/]x64[\\/]' -or
+                             $_.FullName -match '[\\/]Bin[\\/]' } |
+              Select-Object -First 1
+            if (!$found) {
+              throw 'Vulkan Windows x64 runtime missing despite install_runtime: true'
+            }
             $loader=$found.FullName
           }
           $loaderDir=Split-Path $loader -Parent
