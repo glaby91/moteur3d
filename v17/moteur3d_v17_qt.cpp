@@ -313,7 +313,15 @@ public:
         const QImage nightSky(nightSkyFile);
         if(!nightSky.isNull()&&nightSky.width()==4096&&nightSky.height()==2048){
             canvas_->setCelestialPanorama(nightSky);
-            const QImage rgba=nightSky.convertToFormat(QImage::Format_RGBA8888);
+            // 2048x1024 is sufficient for the Dell 1366x768 viewport and
+            // avoids a persistent 43 MiB 4K GPU texture on shared-memory HD620.
+            // CSE_WARP_SKYDOME_4K=1 opts into the original 4096x2048 GPU texture.
+            const bool fullSky=qEnvironmentVariable("CSE_WARP_SKYDOME_4K")==
+                QStringLiteral("1");
+            const QImage gpuSky=fullSky?nightSky:
+                nightSky.scaled(QSize(2048,1024),Qt::IgnoreAspectRatio,
+                                Qt::SmoothTransformation);
+            const QImage rgba=gpuSky.convertToFormat(QImage::Format_RGBA8888);
             m3d::setVulkanCelestialPanoramaRGBA(rgba.constBits(),rgba.width(),rgba.height());
             std::fprintf(stderr,"[CSE WARP SKY] Photographic hemisphere loaded: 4096x2048\\n");
         }else{
