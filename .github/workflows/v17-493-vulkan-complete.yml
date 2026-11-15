@@ -84,9 +84,15 @@ jobs:
         env:
           QT_QPA_PLATFORM: 'offscreen'
         run: |
-          & "build-v17/Release/moteur3d_v17.exe" --smoke-native-ui
-          $rc=$LASTEXITCODE
-          Write-Host ("Native Qt UI smoke exit: {0} / 0x{1:X8}" -f $rc,[uint32]($rc -band 0xFFFFFFFFL))
+          $exe = (Resolve-Path "build-v17/Release/moteur3d_v17.exe").Path
+          $stdout = Join-Path $env:RUNNER_TEMP "v17-native-ui-smoke.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "v17-native-ui-smoke.stderr.log"
+          $process = Start-Process -FilePath $exe -ArgumentList @("--smoke-native-ui") -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          $rc = [int]$process.ExitCode
+          Write-Host "Native Qt UI smoke exit: $rc"
+          foreach ($log in @($stdout, $stderr)) {
+            if (Test-Path $log) { Get-Content $log | ForEach-Object { Write-Host $_ } }
+          }
           if ($rc -ne 0) { throw "DX11 native viewport lifecycle exit failed (actual Windows process code $rc)" }
       - name: Verify Vulkan assets and GPU-independent regression tests
         shell: pwsh
