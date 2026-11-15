@@ -74,6 +74,7 @@ jobs:
           Copy-Item 'build-v17/Release/vulkan' "$dist/vulkan" -Recurse
           Copy-Item 'v17/vulkan/khronos/RUN_KHRONOS_HD620.ps1' "$dist/"
           Copy-Item 'v17/vulkan/khronos/LANCER_KHRONOS_HD620.bat' "$dist/"
+          Copy-Item 'v17/vulkan/khronos/DIAGNOSTIC_ECRAN_NOIR.bat' "$dist/"
           Copy-Item 'v17/vulkan/khronos/README.md' "$dist/README_KHRONOS.txt"
           Copy-Item 'scenes/v16/pavillon01' "$dist/pavillon01" -Recurse
           if(Test-Path 'build-v17/Release/benchmark-civic'){Copy-Item 'build-v17/Release/benchmark-civic' "$dist/benchmark-civic" -Recurse}
