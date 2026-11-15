@@ -50,6 +50,7 @@ jobs:
           $bat=Get-Content 'v17/vulkan/khronos/DIAGNOSTIC_ECRAN_NOIR.bat' -Raw
           if($bat.Contains('echo >>>') -or $bat.Contains('echo <<<')){throw 'Unsafe cmd.exe echo redirection markers'}
           if(!$bat.Contains('02_MAGENTA.log') -or !$bat.Contains('03_REAL_GPU.log')){throw 'Missing stage logs'}
+          if(!$bat.Contains('v17_vulkan_khronos_console.exe')){throw 'Missing console-subsystem diagnostic fallback'}
           if(!$bat.Contains('echo Offscreen exit code:')){throw 'Missing stage status'}
           $cli=Get-Content 'v17/vulkan/tests/khronos_bench.cpp' -Raw
           if(!$cli.Contains('releaseVulkanPreviewForCurrentThread()') -or
@@ -62,7 +63,7 @@ jobs:
       - name: Build instrumented original engine plus native Win32 benchmark
         shell: pwsh
         run: |
-          cmake --build build-v17 --config Release --parallel 4 --target moteur3d_v17 v17_vulkan_khronos_bench v17_vulkan_ab_bench v17_vulkan_gpu_smoke v17_vulkan_mesh_smoke v17_vulkan_dirty_policy_smoke
+          cmake --build build-v17 --config Release --parallel 4 --target moteur3d_v17 v17_vulkan_khronos_bench v17_vulkan_khronos_console v17_vulkan_ab_bench v17_vulkan_gpu_smoke v17_vulkan_mesh_smoke v17_vulkan_dirty_policy_smoke
           if($LASTEXITCODE -ne 0){throw 'Khronos compile failed'}
       - name: Run GPU-independent mesh regression
         shell: pwsh
@@ -76,7 +77,7 @@ jobs:
         run: |
           $dist='CSE-WARP-V17.32-OPTIMIZED-DIAG-FIX-HD620'
           New-Item -ItemType Directory -Force $dist | Out-Null
-          foreach($name in @('moteur3d_v17.exe','v17_vulkan_khronos_bench.exe','v17_vulkan_ab_bench.exe','v17_vulkan_gpu_smoke.exe')){
+          foreach($name in @('moteur3d_v17.exe','v17_vulkan_khronos_bench.exe','v17_vulkan_khronos_console.exe','v17_vulkan_ab_bench.exe','v17_vulkan_gpu_smoke.exe')){
             $path="build-v17/Release/$name"
             if(!(Test-Path $path)){throw "Missing exe $name"}
             Copy-Item $path "$dist/$name"
