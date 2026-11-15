@@ -111,7 +111,7 @@ struct Result {
     bool gpu=false;
     bool skyCompositing=false; // DX11 sky pixels are transparent for Qt compositor
     bool directPresented=false; // DXGI or Vulkan native swapchain, no QImage
-    bool nativeFallback=false; // DXGI unavailable: revert visibly to classic Qt
+    bool nativeFallback=false; // Native WSI unavailable: show the Vulkan QImage preview
     // Reject finished frames after a camera, material, backend or scene change.
     uint64_t generation=0;
     quintptr renderThread=0;
@@ -380,7 +380,7 @@ public:
             const auto outcome=watcher_.result();
             if(sceneLoading_)return;
             if(outcome.nativeFallback && directDisplayBox_){
-                // Native DXGI failed; keep the recovered QImage visible,
+                // Native DXGI/Vulkan presentation failed; keep the recovered image visible,
                 // and don't retry a failing swapchain every camera frame.
                 const QSignalBlocker blocked(directDisplayBox_);
                 directDisplayBox_->setChecked(false);
@@ -2820,14 +2820,18 @@ private:
         // bypasses that QWidget, so sample the SAME monotonic solar clock on
         // each native frame rather than the slower 1.5 s UI spinbox timer.
         // Never modify the approved solarMotion() or walking controller.
+        const int backend=backendBox_->currentIndex();
         const float renderHour=(directPresent && dayNightCycleBox_ &&
                                 dayNightCycleBox_->isChecked() && dayNightClock_.isValid())
             ?float(cse::weather::cycleHour(dayNightOriginHour_,
                               double(dayNightClock_.elapsed())/1000.0))
             :snapshot->daylightHour;
-        // Architectural shadow rays stay at the V17.493 15-minute cadence.
-        // Decouple them from smooth Vulkan sky/celestial shader uniforms.
-        const float shadowHour=std::floor(renderHour*4.f)*.25f;
+        // Keep lighting smooth, but rebuild the expensive 1024² CPU shadow map
+        // only once per simulated hour during DirectX day/night. At 24h/6min,
+        // this cuts rebuild stalls from every 3.75s to every 15s without lowering map quality.
+        const bool stableDxDayNight=backend==4 && dayNightCycleBox_ && dayNightCycleBox_->isChecked();
+        const float shadowStepHours=stableDxDayNight?1.0f:.25f;
+        const float shadowHour=std::floor(renderHour/shadowStepHours)*shadowStepHours;
         auto preset=activeCameraPose();
         updateCameraHud();
         QSize renderSize=qualityBox_->currentData().toSize();
@@ -2841,7 +2845,6 @@ private:
         }
         int w=renderSize.width();
         int h=renderSize.height();
-        const int backend=backendBox_->currentIndex();
         // A swapchain always targets the visible child window's real pixel
         // extent; the offscreen quality resolution is irrelevant in this mode.
         if(directPresent && nativeWindow_){
@@ -2893,6 +2896,7 @@ private:
             const auto camera=v16::makeCamera(preset,w,h);
             std::vector<uint32_t> pixels;
             Stats stats;
+            double shadowBuildMs=0.0;
             bool ok=false;
             if(wantGpu){
                 std::wstring reason;
@@ -2909,18 +2913,18 @@ private:
                             const auto shadowStart=std::chrono::steady_clock::now();
                             shadow=std::make_shared<ShadowMap>(
                                 buildShadow(snapshot->renderScene,shadowStats));
+                            shadowBuildMs=std::chrono::duration<double,std::milli>(
+                                std::chrono::steady_clock::now()-shadowStart).count();
                             // Optional diagnostic of the 1,024 x 1,024 CPU ray
                             // shadow pass. This cost occurs outside VulkanRaster
                             // and cannot appear in its GPU-only CSV timings.
                             const QByteArray shadowProfile=qgetenv("CSE_WARP_VK_SHADOW_PROFILE");
                             if(!shadowProfile.isEmpty()){
-                                const auto shadowElapsed=std::chrono::duration<double,std::milli>(
-                                    std::chrono::steady_clock::now()-shadowStart).count();
                                 QFile log(QString::fromLocal8Bit(shadowProfile));
                                 if(log.open(QIODevice::WriteOnly|QIODevice::Append|QIODevice::Text)){
                                     const QString line=QStringLiteral("%1,shadow_build_ms=%2,solar_hour=%3,shadow_bin=%4,backend=%5\n")
                                         .arg(QDateTime::currentMSecsSinceEpoch())
-                                        .arg(shadowElapsed,0,'f',3)
+                                        .arg(shadowBuildMs,0,'f',3)
                                         .arg(renderHour,0,'f',5)
                                         .arg(shadowHour,0,'f',2)
                                         .arg(vulkan?QStringLiteral("Vulkan"):QStringLiteral("DX11"));
@@ -2933,10 +2937,26 @@ private:
                     }
                     if(vulkan){
                         releaseDirectX11NativeForCurrentThread(); // HWND is shared by the native view
-                        ok=directPresent?
-                            renderVulkanDirectPresent(snapshot->renderScene,*shadow,camera,w,h,
-                                                      reinterpret_cast<void*>(nativeHandle),stats,reason):
-                            renderVulkanPreview(snapshot->renderScene,*shadow,camera,w,h,pixels,stats,reason);
+                        if(directPresent){
+                            ok=renderVulkanDirectPresent(snapshot->renderScene,*shadow,camera,w,h,
+                                reinterpret_cast<void*>(nativeHandle),stats,reason);
+                            if(!ok){
+                                const std::wstring nativeReason=reason;
+                                releaseVulkanDirectForCurrentThread();
+                                reason.clear();
+                                ok=renderVulkanPreview(snapshot->renderScene,*shadow,camera,w,h,
+                                                       pixels,stats,reason);
+                                result.nativeFallback=ok;
+                                if(!ok){
+                                    const std::wstring previewReason=reason;
+                                    reason=L"Vulkan native presentation failed: "+nativeReason+
+                                           L"; Vulkan image preview also failed: "+previewReason;
+                                }
+                            }
+                        }else{
+                            ok=renderVulkanPreview(snapshot->renderScene,*shadow,camera,w,h,
+                                                   pixels,stats,reason);
+                        }
                     }else{
                         // Vulkan WSI and DXGI must never own swapchains for the
                         // same child HWND at the same time.
@@ -3059,10 +3079,12 @@ private:
                     ?QStringLiteral("CPU Ray Tracing — %1 spp, ombres en cache").arg(sampleCount)
                     :QStringLiteral("CPU Ray Tracing — %1 spp, ombres calculées").arg(sampleCount);
             }else result.gpu=true;
-            result.milliseconds=stats.ms;
+            result.milliseconds=stats.ms+shadowBuildMs;
             result.renderer+=QStringLiteral(" — %1×%2").arg(w).arg(h);
             if(result.nativeFallback)
-                result.renderer+=QStringLiteral(" — secours QImage (DXGI indisponible)");
+                result.renderer+=vulkan
+                    ?QStringLiteral(" — secours image Vulkan via QImage (WSI indisponible)")
+                    :QStringLiteral(" — secours QImage (DXGI indisponible)");
             if(result.directPresented){
                 result.renderer+=QStringLiteral(" — écran GPU direct (swapchain)");
                 return result; // No 4-byte-per-pixel CPU/QImage allocation.

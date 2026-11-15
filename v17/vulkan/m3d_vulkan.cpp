@@ -649,17 +649,19 @@ class VulkanRaster final {
         vkCmdPipelineBarrier(cmd_,VK_PIPELINE_STAGE_TRANSFER_BIT,
                              VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,0,0,nullptr,0,nullptr,1,&exit);
     }
-    void presentSwapImage(uint32_t index){
+    bool presentSwapImage(uint32_t index){
         VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
         present.waitSemaphoreCount=1;present.pWaitSemaphores=&imageReady_[index];
         present.swapchainCount=1;present.pSwapchains=&swapchain_;
         present.pImageIndices=&index;
         const VkResult status=vkQueuePresentKHR(queue_,&present);
-        if(status==VK_SUBOPTIMAL_KHR||status==VK_ERROR_OUT_OF_DATE_KHR){
+        if(status==VK_ERROR_OUT_OF_DATE_KHR){
             swapDirty_=true;
-            return;
+            return false; // Do not report a frame that never reached the window.
         }
+        if(status==VK_SUBOPTIMAL_KHR){swapDirty_=true;return true;}
         vkcheck(status,"present swapchain image");
+        return true;
     }
     void begin(){
         vkcheck(vkResetCommandPool(device_,commands_,0),"reset commands");
@@ -2015,7 +2017,8 @@ public:
             const auto copied=Clock::now();
             const auto presentingStart=Clock::now();
             if(acquiredIndex>=0){
-                presentSwapImage(uint32_t(acquiredIndex));
+                if(!presentSwapImage(uint32_t(acquiredIndex)))
+                    throw std::runtime_error("Vulkan swapchain became out of date before presentation");
                 pixels.clear();
             }else{
                 invalidate(readback_);
