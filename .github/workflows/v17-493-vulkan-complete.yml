@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - integration/v17-493-complete-vulkan-hd620-261115
+      - integration/v17-493-skydome-photo-261115
     paths:
       - 'v17/**'
       - 'v16/**'
@@ -12,6 +13,7 @@ on:
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/**'
       - '.github/workflows/v17-493-vulkan-complete.yml'
       - 'tools/v493_*'
+      - 'assets/sky/**'
   pull_request:
     paths:
       - 'v17/**'
@@ -630,6 +632,17 @@ jobs:
             throw 'Vulkan SPIR-V files missing from V17.493 build'
           }
           Copy-Item $vulkan "$dst/vulkan" -Recurse -Force
+          # The user-approved photographic hemisphere is distributed as a
+          # separate sky-asset pack until its original bytes live in GitHub.
+          New-Item -ItemType Directory -Force "$dst/assets/sky" | Out-Null
+          Copy-Item "assets/sky/README.md" "$dst/assets/sky/README.md" -Force
+          $starPhoto="assets/sky/CSE_WARP_ciel_nocturne_hemisphere_UV_4096x2048.png"
+          if (Test-Path $starPhoto) {
+            Copy-Item $starPhoto "$dst/assets/sky/" -Force
+            Write-Host 'Approved 4096x2048 night panorama included in package'
+          } else {
+            Write-Warning 'Approved sky image lives in external asset ZIP; extract CSE_WARP_SKYDOME_ASSET_V493.zip at application root'
+          }
           foreach ($name in @('v17_vulkan_khronos_bench.exe','v17_vulkan_khronos_console.exe',
                                'v17_vulkan_ab_bench.exe','v17_vulkan_gpu_smoke.exe')) {
             Copy-Item "build-v17/Release/$name" "$dst/$name" -ErrorAction Stop
@@ -741,7 +754,7 @@ jobs:
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.493-COMPLETE-VULKAN-HD620
+          name: CSE-WARP-V17.493-SKYDOME-PHOTO-HD620
           path: dist-v17/
           if-no-files-found: error
       - name: Benchmark GI hors ligne — trois scènes, trois cuissons et sept relectures
