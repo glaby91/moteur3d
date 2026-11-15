@@ -499,8 +499,20 @@ class VulkanRaster final {
         blit.dstSubresource.layerCount=1;
         blit.srcOffsets[1]={int32_t(width_),int32_t(height_),1};
         blit.dstOffsets[1]={int32_t(swapExtent_.width),int32_t(swapExtent_.height),1};
-        vkCmdBlitImage(cmd_,color_.image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-                       image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&blit,VK_FILTER_NEAREST);
+        // Optional magenta WSI self-test: if the native window still stays
+        // black, the issue is after rendering (swapchain/presentation/window).
+        const char* probe=std::getenv("CSE_WARP_VK_KHRONOS_VISUAL_PROBE");
+        if(probe && std::strcmp(probe,"1")==0){
+            const VkClearColorValue marker{{1.f,0.f,.85f,1.f}};
+            VkImageSubresourceRange range{};
+            range.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+            range.levelCount=1;range.layerCount=1;
+            vkCmdClearColorImage(cmd_,image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                 &marker,1,&range);
+        }else{
+            vkCmdBlitImage(cmd_,color_.image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                           image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&blit,VK_FILTER_NEAREST);
+        }
         VkImageMemoryBarrier exit{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
         exit.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
         exit.newLayout=VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
