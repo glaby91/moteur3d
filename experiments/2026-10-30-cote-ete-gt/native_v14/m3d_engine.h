@@ -122,6 +122,11 @@ Stats renderGiAccumulatePass(const Scene& scene,const ShadowMap& shadow,
 RendererCapabilities detectRendererCapabilities() noexcept;
 bool renderCompute11Preview(const Scene& s,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
 bool renderDirectX11Preview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
+// Native HWND DXGI flip-model presentation: no GPU->CPU readback. Call on
+// the same persistent renderer thread; desktop Qt owns the HWND lifetime.
+bool renderDirectX11Native(const Scene& s,const ShadowMap& sm,const Camera& cam,
+    int w,int h,void* hwnd,Stats& stats,std::wstring& error);
+void releaseDirectX11NativeForCurrentThread();
 // Experimental Vulkan 1.0 Raster GPU backend; offscreen ARGB32 preview, shared Scene/Camera API.
 bool renderVulkanPreview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
 // Explicit cleanup is useful for standalone diagnostics: Vulkan objects must

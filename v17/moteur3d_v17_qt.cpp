@@ -110,7 +110,8 @@ struct Result {
     double milliseconds=0;
     bool gpu=false;
     bool skyCompositing=false; // DX11 sky pixels are transparent for Qt compositor
-    bool directPresented=false; // Native Vulkan swapchain: no CPU image and no QImage
+    bool directPresented=false; // DXGI or Vulkan native swapchain, no QImage
+    bool nativeFallback=false; // DXGI unavailable: revert visibly to classic Qt
     // Reject finished frames after a camera, material, backend or scene change.
     uint64_t generation=0;
     quintptr renderThread=0;
@@ -321,6 +322,11 @@ public:
         // A permanent status-bar widget outlives temporary render/progress
         // messages. QStatusBar::showMessage(..., 15000) used to erase the
         // completed render time after 15 seconds.
+        nativeHudLabel_=new QLabel(QStringLiteral("CAM —"),this);
+        nativeHudLabel_->setMinimumWidth(215);
+        statusBar()->addPermanentWidget(nativeHudLabel_);
+        nativeFpsLabel_=new QLabel(QStringLiteral("FPS —"),this);
+        statusBar()->addPermanentWidget(nativeFpsLabel_);
         renderTimeLabel_=new QLabel(QStringLiteral("Dernier rendu : —"),this);
         renderTimeLabel_->setObjectName(QStringLiteral("v16LastRenderTime"));
         statusBar()->addPermanentWidget(renderTimeLabel_);
@@ -358,6 +364,13 @@ public:
             }
             const auto outcome=watcher_.result();
             if(sceneLoading_)return;
+            if(outcome.nativeFallback && directDisplayBox_){
+                // Native DXGI failed; keep the recovered QImage visible,
+                // and don't retry a failing swapchain every camera frame.
+                const QSignalBlocker blocked(directDisplayBox_);
+                directDisplayBox_->setChecked(false);
+                switchNativeRenderViewport();
+            }
             // A previous scene may finish after the user has opened a new one.
             // Never show its image or overwrite the current status bar.
             if(outcome.generation!=renderSerial_->load()){
@@ -649,6 +662,8 @@ private:
     QSlider* radioVolumeSlider_=nullptr;
 
     ImageView* canvas_=nullptr;
+    QLabel* nativeHudLabel_=nullptr;
+    QLabel* nativeFpsLabel_=nullptr;
     QWindow* nativeWindow_=nullptr;
     QWidget* nativeContainer_=nullptr;
     QStackedLayout* viewportStack_=nullptr;
@@ -708,6 +723,9 @@ private:
             canvas_->setCameraHud({},false);return;
         }
         const auto pose=activeCameraPose();
+        if(nativeHudLabel_)nativeHudLabel_->setText(
+            QStringLiteral("CAM X:%1 Y:%2 Z:%3")
+                .arg(pose.eye.x,0,'f',1).arg(pose.eye.y,0,'f',1).arg(pose.eye.z,0,'f',1));
         const QString label=QStringLiteral("CAM %1 | %2")
             .arg(freeCameraActive_?QStringLiteral("Libre"):QStringLiteral("Préréglée"),
                  pose.name.isEmpty()?pose.id:pose.name);
@@ -912,7 +930,7 @@ private:
     void captureMouseLook(){
         if(!exploring_||mouseCaptured_||!canvas_||!isActiveWindow())return;
         mouseCaptured_=true;
-        if(nativeVulkanSelected()){
+        if(nativeDirectSelected()){
             nativeWindow_->setCursor(Qt::BlankCursor);
             focusRenderViewport();
             QCursor::setPos(nativeWindow_->mapToGlobal(
@@ -940,6 +958,7 @@ private:
         setMotionResolution(false);
         exploring_=false;
         if(canvas_)canvas_->setFpsOverlay(0.0,false);
+        if(nativeFpsLabel_)nativeFpsLabel_->setText(QStringLiteral("FPS —"));
         if(freeCameraActive_)freeCamera_.fov=scopeBaseFov_;
         resetScopeForCamera();
         if(explorationQualityOverride_){
@@ -1788,14 +1807,14 @@ private:
         cameraBox_=new QComboBox;
         backendBox_=new QComboBox;
         directDisplayBox_=new QCheckBox(QStringLiteral(
-            "Vulkan : affichage direct GPU (swapchain expérimentale)"));
+            "Affichage GPU direct (DirectX 11 / Vulkan)"));
 #ifdef _WIN32
         // WARP Vulkan V17.32: GPU-native presentation is the *startup default*.
         // Do not restore a previous disabled state: users can still uncheck it
         // explicitly for a single session to use the CPU/QImage comparison.
         directDisplayBox_->setCheckState(Qt::Checked);
         directDisplayBox_->setToolTip(QStringLiteral(
-            "Activé par défaut : présentation Vulkan native via swapchain GPU, sans GPU→CPU→QImage. "
+            "Activé par défaut pour DirectX 11 et Vulkan : swapchain native, sans lecture GPU→CPU→QImage. "
             "Décocher manuellement pour utiliser le chemin classique de capture ou de comparaison."));
 #else
         directDisplayBox_->setChecked(false);
@@ -1818,6 +1837,22 @@ private:
         backendBox_->setItemData(5,0,Qt::UserRole-1);
         backendBox_->setItemData(5,QStringLiteral("Vulkan SDK absent lors de la compilation"),Qt::ToolTipRole);
 #endif
+        // Compact quick controls remain visible while either sidebar tab is open.
+        auto* fastBackend=new QComboBox(camerasToolbar);
+        fastBackend->setMinimumWidth(210);
+        fastBackend->setMaximumWidth(330);
+        for(int i=0;i<backendBox_->count();++i)
+            fastBackend->addItem(backendBox_->itemText(i));
+        fastBackend->setCurrentIndex(backendBox_->currentIndex());
+        camerasToolbar->addSeparator();
+        camerasToolbar->addWidget(new QLabel(QStringLiteral("Moteur : "),camerasToolbar));
+        camerasToolbar->addWidget(fastBackend);
+        auto* quickRender=camerasToolbar->addAction(QStringLiteral("Actualiser"));
+        connect(quickRender,&QAction::triggered,this,[this]{requestRender();});
+        connect(fastBackend,qOverload<int>(&QComboBox::currentIndexChanged),
+                backendBox_,&QComboBox::setCurrentIndex);
+        connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),
+                fastBackend,&QComboBox::setCurrentIndex);
         qualityBox_=new QComboBox;
         // Keep native and Full HD side by side. Store explicit width/height
         // instead of deriving them from an index or assuming exact 16:9.
@@ -2092,6 +2127,14 @@ private:
         right->setWidget(rightScroll);
         addDockWidget(Qt::RightDockWidgetArea,right);
         right->setMinimumWidth(295);
+        // Organize Scene / Rendering as tabs on one right sidebar.
+        // Both panels remain accessible; the 3D viewport gets the former
+        // left-dock width back (important at 1366x768 on the Dell).
+        setDockOptions(dockOptions() | QMainWindow::AllowTabbedDocks);
+        removeDockWidget(left);
+        addDockWidget(Qt::RightDockWidgetArea,left);
+        tabifyDockWidget(right,left);
+        right->raise();
         // True fullscreen (not just hidden docks), preserving the editor
         // layout for a reversible F11 return.
         auto* viewMenu=menuBar()->addMenu(QStringLiteral("Affichage"));
@@ -2157,11 +2200,11 @@ private:
             giSamples_->setEnabled(gi);
             progressiveGi_->setEnabled(gi);
             denoiseGi_->setEnabled(gi);
-            switchNativeVulkanViewport();
+            switchNativeRenderViewport();
             requestRender();
         });
         connect(directDisplayBox_,&QCheckBox::toggled,this,[this](bool){
-            switchNativeVulkanViewport();
+            switchNativeRenderViewport();
             requestRender();
         });
         connect(qualityBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){requestRender();});
@@ -2207,7 +2250,7 @@ private:
         skyAnimationTimer_.setInterval(33);
         connect(&skyAnimationTimer_,&QTimer::timeout,this,[this]{
             if(sceneLoading_||!runtime_||!backendBox_)return;
-            if(nativeVulkanSelected()){
+            if(nativeDirectSelected()){
                 if(!exploring_&&(cloudAnimationBox_->isChecked()||
                                   dayNightCycleBox_->isChecked())&&
                    !watcher_.isRunning()&&!pending_){
@@ -2537,29 +2580,31 @@ private:
         catalog->setExpanded(true);
     }
 
-    bool nativeVulkanSelected() const{
+    bool nativeDirectSelected() const{
 #ifdef _WIN32
-        return backendBox_ && backendBox_->currentIndex()==5 &&
+        return backendBox_ && (backendBox_->currentIndex()==4 ||
+               backendBox_->currentIndex()==5) &&
                directDisplayBox_ && directDisplayBox_->isChecked();
 #else
         return false;
 #endif
     }
     void focusRenderViewport(){
-        if(nativeVulkanSelected()&&nativeWindow_){
+        if(nativeDirectSelected()&&nativeWindow_){
             nativeContainer_->setFocus(Qt::OtherFocusReason);
             nativeWindow_->requestActivate();
         }else if(canvas_)canvas_->setFocus(Qt::OtherFocusReason);
     }
-    void switchNativeVulkanViewport(){
+    void switchNativeRenderViewport(){
         if(!viewportStack_)return;
-        const bool direct=nativeVulkanSelected();
+        const bool direct=nativeDirectSelected();
         viewportStack_->setCurrentWidget(direct?nativeContainer_:canvas_);
         if(direct){
-            // Do not offer a stale DX11/QImage capture as if it came from Vulkan.
+            // Do not display an old capture after choosing native presentation.
             lastImage_=QImage{};
             statusBar()->showMessage(QStringLiteral(
-                "Vulkan écran direct : swapchain GPU, sans QImage ; capture via mode classique"),7000);
+                "Affichage natif DX11/Vulkan : swapchain GPU, sans QImage ; "
+                "décocher pour les captures PNG"),7000);
         }
     }
     void resetPacing(){
@@ -2588,6 +2633,8 @@ private:
                 const double fps=1000.0/interval;
                 fpsFiltered_=fpsFiltered_==0.0?fps:(fpsFiltered_*.72+fps*.28);
                 canvas_->setFpsOverlay(fpsFiltered_,true);
+                if(nativeFpsLabel_)nativeFpsLabel_->setText(
+                    QStringLiteral("%1 FPS").arg(fpsFiltered_,0,'f',1));
             }
         }
         lastPresentMs_=ms;
@@ -2654,7 +2701,7 @@ private:
         }
         const uint64_t token=serial->fetch_add(1)+1;
         auto snapshot=runtime_;
-        const bool directPresent=nativeVulkanSelected();
+        const bool directPresent=nativeDirectSelected();
         // V17.493 uses an independent 30 Hz Qt sky compositor. Vulkan WSI
         // bypasses that QWidget, so sample the SAME monotonic solar clock on
         // each native frame rather than the slower 1.5 s UI spinbox timer.
@@ -2732,6 +2779,7 @@ private:
             bool ok=false;
             if(wantGpu){
                 std::wstring reason;
+                if(!raster)releaseDirectX11NativeForCurrentThread();
                 if(raster){
                     std::shared_ptr<const ShadowMap> shadow;
                     {
@@ -2766,13 +2814,28 @@ private:
                             shadowCache->shadow=shadow;
                         }
                     }
-                    ok=vulkan?
-                        (directPresent?
+                    if(vulkan){
+                        releaseDirectX11NativeForCurrentThread(); // HWND is shared by the native view
+                        ok=directPresent?
                             renderVulkanDirectPresent(snapshot->renderScene,*shadow,camera,w,h,
                                                       reinterpret_cast<void*>(nativeHandle),stats,reason):
-                            renderVulkanPreview(snapshot->renderScene,*shadow,camera,w,h,pixels,stats,reason)):
-                        renderDirectX11Preview(snapshot->renderScene,*shadow,camera,w,h,pixels,stats,reason);
-                    result.directPresented=ok&&directPresent;
+                            renderVulkanPreview(snapshot->renderScene,*shadow,camera,w,h,pixels,stats,reason);
+                    }else{
+                        ok=directPresent?
+                            renderDirectX11Native(snapshot->renderScene,*shadow,camera,w,h,
+                                                   reinterpret_cast<void*>(nativeHandle),stats,reason):
+                            renderDirectX11Preview(snapshot->renderScene,*shadow,camera,w,h,pixels,stats,reason);
+                        if(!ok && directPresent){
+                            // DXGI can be unavailable on remote desktop / certain drivers:
+                            // recover the original full-quality CPU/QImage preview.
+                            releaseDirectX11NativeForCurrentThread();
+                            reason.clear();
+                            ok=renderDirectX11Preview(snapshot->renderScene,*shadow,camera,w,h,
+                                                      pixels,stats,reason);
+                            result.nativeFallback=ok;
+                        }
+                    }
+                    result.directPresented=ok&&directPresent&&!result.nativeFallback;
                     if(ok){
                         result.renderer=vulkan
                             ?QStringLiteral("V17 Vulkan Raster — portage expérimental")
@@ -2801,6 +2864,7 @@ private:
                 }
             }
             if(!ok){
+                releaseDirectX11NativeForCurrentThread();
                 pixels.resize(size_t(w)*size_t(h));
                 std::shared_ptr<const ShadowMap> shadow;
                 bool shadowReused=false;
@@ -2877,6 +2941,8 @@ private:
             }else result.gpu=true;
             result.milliseconds=stats.ms;
             result.renderer+=QStringLiteral(" — %1×%2").arg(w).arg(h);
+            if(result.nativeFallback)
+                result.renderer+=QStringLiteral(" — secours QImage (DXGI indisponible)");
             if(result.directPresented){
                 result.renderer+=QStringLiteral(" — écran GPU direct (swapchain)");
                 return result; // No 4-byte-per-pixel CPU/QImage allocation.

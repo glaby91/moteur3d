@@ -1,5 +1,5 @@
-name: CSE WARP V17.493 COMPLETE + Vulkan 1.3 — Windows HD620
-run-name: V17.493 complete + Vulkan — CI ${{ github.run_number }}
+name: CSE WARP V17.494 — DirectX 11 DXGI + Vulkan 1.3 — Windows HD620
+run-name: V17.494 DXGI direct + interface reorganisée — CI ${{ github.run_number }}
 on:
   push:
     branches:
@@ -76,7 +76,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Ten-pass fast design preflight failed' }
       - name: Configure
         shell: pwsh
-        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_BUILD_NUMBER=493
+        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_BUILD_NUMBER=494
       - name: Compile
         run: cmake --build build-v17 --config Release --parallel 4
       - name: Verify Vulkan assets and GPU-independent regression tests
@@ -131,7 +131,7 @@ jobs:
             $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
             Write-Host "$name — $($version.ProductName) — $($version.FileVersion)"
             if ($version.FileMajorPart -ne 17 -or
-                $version.FileMinorPart -ne 493 -or
+                $version.FileMinorPart -ne 494 -or
                 $version.FileBuildPart -ne 0 -or $version.FilePrivatePart -ne 0) {
               throw "Invalid V17.3 GitHub build version in $name : $($version.FileVersion)"
             }
