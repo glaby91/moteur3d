@@ -11,6 +11,8 @@ if not exist "benchmark-civic\scene.json" (
  pause
  exit /b 1
 )
+rem Force Vulkan Raster + native direct presentation + day/night only for this benchmark.
+set "CSE_WARP_VK_PROFILE_MODE=1"
 set "CSE_WARP_VK_FRAMES_IN_FLIGHT=2"
 set "CSE_WARP_VK_OPT_INCREMENTAL=1"
 set "CSE_WARP_VK_FAST_FRAGMENT=1"
@@ -21,8 +23,8 @@ del /q "%CSE_WARP_VK_SHADOW_PROFILE%" 2>nul
 echo ==============================================================
 echo CSE WARP V17.493 COMPLETE - Vulkan HD620 full-scene profiler
 echo ==============================================================
-echo In the application select Vulkan Raster with direct GPU display.
-echo Check the 24h day-night simulation and start exploration.
+echo Vulkan Raster, direct GPU presentation and day/night are selected automatically.
+echo Start exploration, move and rotate the camera, then change camera views.
 echo Stay in the scene at least 25 seconds, then exit the application.
 echo The script will create an archive with actual frame and shadow data.
 echo.
