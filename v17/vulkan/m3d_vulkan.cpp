@@ -680,7 +680,10 @@ class VulkanRaster final {
         }
         const auto start=Clock::now();
         const bool asyncSubmit=asyncFrames_ && frameSlotsReady_ && presentIndex>=0;
-        if(asyncSubmit)vkcheck(vkResetFences(device_,1,&fence_),"reset async frame fence");
+        // After draining an asynchronous frame, a fence may remain signaled.
+        // Reset before *any* new submission, including synchronous uploads.
+        if(asyncFrames_ && frameSlotsReady_)
+            vkcheck(vkResetFences(device_,1,&fence_),"reset reusable frame fence");
         vkcheck(vkQueueSubmit(queue_,1,&si,fence_),"submit commands");
         const auto issued=Clock::now();
         if(asyncSubmit){
