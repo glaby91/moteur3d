@@ -11,7 +11,7 @@ layout(set=0,binding=0,std140) uniform Frame {
  vec4 eye,forward,right,up,sun,sky;
  vec4 shadowBase,shadowRight,shadowUp;
  vec4 material[256], emission[256];
- vec4 lightPos[16],lightRgb[16];
+ vec4 lightPos[64],lightRgb[64];
  vec4 misc;
  vec4 textureDetail[256];
  vec4 skyZenith,skyHorizon,skyWind,skyViewport;
