@@ -685,6 +685,58 @@ jobs:
             'Hardware FPS, weather smoothness and periodic stutter REQUIRE real HD620 verification.'
           ) | Set-Content "$dst/VULKAN_INTEGRATION_README.txt"
           Write-Host 'PASS: V17.493 complete (186 materials, 183 PBR sets, approved sign and radio) + Vulkan'
+      - name: Force deploy and verify the Qt Windows platform plugin in shipping package
+        shell: pwsh
+        run: |
+          # Qt platform DLLs are not interchangeable with arbitrary Qt builds.
+          # Always use the SAME Qt 6.8.3 msvc2022_64 installation as the app.
+          $dist='dist-v17'
+          $qt=$env:QT_ROOT_DIR
+          if (!$qt -or !(Test-Path "$qt/plugins/platforms/qwindows.dll")) {
+            throw "Qt Windows platform plugin missing from build toolchain: $qt"
+          }
+          $platforms=Join-Path $dist 'platforms'
+          New-Item -ItemType Directory -Path $platforms -Force | Out-Null
+          Copy-Item "$qt/plugins/platforms/qwindows.dll" "$platforms/qwindows.dll" -Force -ErrorAction Stop
+          foreach ($plugin in @('qoffscreen.dll','qminimal.dll')) {
+            $source=Join-Path "$qt/plugins/platforms" $plugin
+            if (Test-Path $source) { Copy-Item $source (Join-Path $platforms $plugin) -Force -ErrorAction Stop }
+          }
+          # Qt's portable plugin layout: <application-dir>/platforms/qwindows.dll
+          # Explicitly restrict plugin discovery to the shipped application
+          # rather than a system Python/Qt installation.
+          @'
+          [Paths]
+          Prefix = .
+          Plugins = .
+          '@ | Set-Content "$dist/qt.conf" -Encoding ascii
+          # windeployqt should have supplied runtime DLLs. Verify them, and
+          # recover them from the exact Qt used for compilation if omitted.
+          foreach ($lib in @('Qt6Core.dll','Qt6Gui.dll','Qt6Widgets.dll')) {
+            if (!(Test-Path "$dist/$lib")) {
+              $source=Join-Path "$qt/bin" $lib
+              if (!(Test-Path $source)) { throw "Required Qt dependency missing: $lib" }
+              Copy-Item $source "$dist/$lib" -Force -ErrorAction Stop
+            }
+          }
+          foreach ($file in @(
+            "$dist/moteur3d_v17.exe",
+            "$dist/moteur3d_v16_core.dll",
+            "$dist/platforms/qwindows.dll",
+            "$dist/Qt6Core.dll",
+            "$dist/Qt6Gui.dll",
+            "$dist/Qt6Widgets.dll",
+            "$dist/qt.conf"
+          )) {
+            if (!(Test-Path $file)) { throw "Final Qt Windows package incomplete: $file" }
+            $size=(Get-Item $file).Length
+            if ($size -lt 50) { throw "Invalid Qt binary/configuration: $file ($size bytes)" }
+            Write-Host "Verified portable Qt deployment: $file ($size bytes)"
+          }
+          $dll=(Get-FileHash "$dist/platforms/qwindows.dll" -Algorithm SHA256).Hash
+          "Qt platform: windows (Qt 6.8.3 MSVC2022 x64)" | Set-Content "$dist/Qt_Windows_Deployment.txt"
+          "qwindows.dll SHA256: $dll" | Add-Content "$dist/Qt_Windows_Deployment.txt"
+          Write-Host "PASS: Qt Windows platform plugin qwindows.dll included in distributable"
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
