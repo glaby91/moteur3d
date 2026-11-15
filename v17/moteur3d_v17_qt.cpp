@@ -302,6 +302,21 @@ public:
         renderPool_.setMaxThreadCount(1);
         renderPool_.setExpiryTimeout(-1);
         createUi();
+        // The combo box selected DirectX BEFORE its currentIndexChanged signal
+        // was connected. Activate its native child now, before show() and
+        // before asynchronous scene loading requests the first image.
+        // Existing GUI smokes require the reference QImage path on CI's
+        // offscreen Qt platform; the native-UI policy smoke is excluded.
+        const QStringList args=QCoreApplication::arguments();
+        if(args.contains(QStringLiteral("--smoke-scene-switch")) ||
+           args.contains(QStringLiteral("--smoke-repeat-raster")) ||
+           args.contains(QStringLiteral("--smoke-walking-collisions")) ||
+           args.contains(QStringLiteral("--smoke-scope-mouse")) ||
+           args.contains(QStringLiteral("--smoke-immersive-mouse"))){
+            const QSignalBlocker blocked(directDisplayBox_);
+            directDisplayBox_->setChecked(false);
+        }
+        switchNativeRenderViewport();
         // A stationary camera must always display the native full-resolution
         // raster, regardless of the experimental launcher environment.
         peripheralExperimentEnabled_=
@@ -430,6 +445,29 @@ public:
         canvas_->setPlaceholder(QStringLiteral("CSE WARP V17\nChargement de la scène…"));
         if(!scenePath.isEmpty())
             QTimer::singleShot(0,this,[this,scenePath]{openScene(scenePath);});
+    }
+    // UI contract smoke: no GPU or scene needed. A packaged Windows build
+    // must start in DX11-native mode and keep Vulkan selectable in both combos.
+    void smokeNativeUi(){
+        QTimer::singleShot(0,this,[this]{
+#if defined(_WIN32)
+            auto* quick=findChild<QComboBox*>(QStringLiteral("v17QuickRenderer"));
+            const bool ok=backendBox_ && backendBox_->count()==6 &&
+                backendBox_->currentIndex()==4 && directDisplayBox_->isChecked() &&
+                backendBox_->itemText(5).contains(QStringLiteral("Vulkan")) &&
+                (backendBox_->model()->flags(backendBox_->model()->index(5,0)) &
+                    Qt::ItemIsEnabled) &&
+                quick && quick->count()==6 &&
+                quick->itemText(5).contains(QStringLiteral("Vulkan")) &&
+                viewportStack_->currentWidget()==nativeContainer_;
+            std::fprintf(stderr,"V17 NATIVE GUI: %s, stack=%d, vulkan=%d\n",
+                ok?"PASS":"FAIL",viewportStack_->currentIndex(),
+                backendBox_->count()>5?5:-1);
+            QCoreApplication::exit(ok?0:46);
+#else
+            QCoreApplication::exit(0);
+#endif
+        });
     }
     // GUI smoke: first scene must load asynchronously before we request
     // another scene; the replacement must render a new (non-stale) image.
@@ -668,6 +706,8 @@ private:
     QWidget* nativeContainer_=nullptr;
     QStackedLayout* viewportStack_=nullptr;
     QCheckBox* directDisplayBox_=nullptr;
+    bool nativeReadyRetryQueued_=false;
+    int nativeReadyAttempts_=0;
     QTimer frameTimer_;
     QTimer skyAnimationTimer_;
     QElapsedTimer skyMotionClock_;
@@ -1850,12 +1890,20 @@ private:
         // Vulkan and all CPU/compute options remain selectable.
         backendBox_->setCurrentIndex(4);
 #endif
-        // Compact quick controls remain visible while either sidebar tab is open.
+        // Keep the backend choice visible at 1366px: six long camera names
+        // previously consumed the entire top toolbar and hid the renderer.
         auto* fastBackend=new QComboBox(camerasToolbar);
-        fastBackend->setMinimumWidth(210);
+        fastBackend->setObjectName(QStringLiteral("v17QuickRenderer"));
+        fastBackend->setMinimumWidth(220);
         fastBackend->setMaximumWidth(330);
-        for(int i=0;i<backendBox_->count();++i)
-            fastBackend->addItem(backendBox_->itemText(i));
+        for(int i=0;i<backendBox_->count();++i){
+            fastBackend->addItem(i==4?QStringLiteral("DirectX 11 Raster"):
+                (i==5?QStringLiteral("Vulkan Raster"):
+                backendBox_->itemText(i)));
+            fastBackend->setItemData(i,backendBox_->itemData(i,Qt::UserRole-1),
+                                    Qt::UserRole-1);
+            fastBackend->setItemData(i,backendBox_->itemText(i),Qt::ToolTipRole);
+        }
         fastBackend->setCurrentIndex(backendBox_->currentIndex());
         camerasToolbar->addSeparator();
         camerasToolbar->addWidget(new QLabel(QStringLiteral("Moteur : "),camerasToolbar));
@@ -2508,7 +2556,9 @@ private:
         for(int i=0;i<quickCameraActions_.size();++i){
             const bool valid=i<runtime_->cameras.size();
             quickCameraActions_[i]->setEnabled(valid);
-            quickCameraActions_[i]->setText(valid ? QStringLiteral("%1 · %2").arg(i+1).arg(runtime_->cameras[i].name) : QString::number(i+1));
+            // Full camera names remain in the side selector and tooltip;
+            // the toolbar uses compact numbers so DX11 / Vulkan stay visible.
+            quickCameraActions_[i]->setText(QString::number(i+1));
             quickCameraActions_[i]->setToolTip(valid ? QStringLiteral("Vue %1 — touche %2").arg(runtime_->cameras[i].name).arg(i+1) : QString());
         }
         cameraBox_->blockSignals(false);
@@ -2539,6 +2589,7 @@ private:
 #endif
         if(isStressScene)backendBox_->setCurrentIndex(4);
         sceneLoading_=false;
+        switchNativeRenderViewport();
         canvas_->setPlaceholder(extremeStress
             ?QStringLiteral("Scène extrême chargée. Cliquez sur Calculer l'image pour lancer le rendu.")
             :QStringLiteral("Scène chargée. Calcul de la première image…"));
@@ -2612,6 +2663,8 @@ private:
     void switchNativeRenderViewport(){
         if(!viewportStack_)return;
         const bool direct=nativeDirectSelected();
+        const QWidget* target=direct?nativeContainer_:canvas_;
+        if(viewportStack_->currentWidget()==target)return;
         viewportStack_->setCurrentWidget(direct?nativeContainer_:canvas_);
         if(direct){
             // Do not display an old capture after choosing native presentation.
@@ -2707,6 +2760,40 @@ private:
     }
     void requestRender(){
         if(sceneLoading_||!runtime_||runtime_->cameras.isEmpty())return;
+        // Never submit DXGI/Vulkan to an unshown QWindow (Qt initializes
+        // hidden native children at 100x0, previously clamped to 100x64).
+        // Wait for QWidget::createWindowContainer to own a visible, sized HWND.
+        if(nativeDirectSelected()){
+            if(viewportStack_->currentWidget()!=nativeContainer_)
+                switchNativeRenderViewport();
+            const QSize child=nativeWindow_->size();
+            const QSize container=nativeContainer_->size();
+            const bool ready=nativeContainer_->isVisible() &&
+                nativeWindow_->isVisible() &&
+                container.width()>=320 && container.height()>=200 &&
+                child.width()>=320 && child.height()>=200 &&
+                std::abs(child.width()-container.width())<=4 &&
+                std::abs(child.height()-container.height())<=4;
+            if(!ready){
+                if(++nativeReadyAttempts_>40){
+                    nativeReadyAttempts_=0;
+                    // Don't lie about successful presentation into a hidden
+                    // 100x64 swapchain. Restore the lossless QImage path.
+                    directDisplayBox_->setChecked(false);
+                    statusBar()->showMessage(QStringLiteral(
+                        "Fenêtre GPU native indisponible : mode Qt classique rétabli."),12000);
+                }else if(!nativeReadyRetryQueued_){
+                    nativeReadyRetryQueued_=true;
+                    QTimer::singleShot(50,this,[this]{
+                        nativeReadyRetryQueued_=false;
+                        if(!closingRequested_&&!sceneLoading_&&runtime_)
+                            requestRender();
+                    });
+                }
+                return;
+            }
+            nativeReadyAttempts_=0;
+        }
         const auto serial=renderSerial_;
         if(watcher_.isRunning()){
             pending_=true; // Camera movement must not invalidate a finished image.
@@ -2746,8 +2833,11 @@ private:
         // extent; the offscreen quality resolution is irrelevant in this mode.
         if(directPresent && nativeWindow_){
             const qreal dpr=nativeWindow_->devicePixelRatio();
-            renderSize=QSize(std::max(64,int(nativeWindow_->width()*dpr)),
-                             std::max(64,int(nativeWindow_->height()*dpr)));
+            // The QWidget container is the layout authority; the child
+            // QWindow is known to have the same logical extent (guard above).
+            const QSize logicalSize=nativeContainer_->size();
+            renderSize=QSize(std::max(320,int(logicalSize.width()*dpr)),
+                             std::max(200,int(logicalSize.height()*dpr)));
             // The camera and renderer MUST use the native viewport dimensions.
             // Previously only renderSize changed: w/h still held the small Qt
             // canvas dimensions, stretching the Vulkan image on F11 fullscreen.
@@ -3021,14 +3111,17 @@ int main(int argc,char** argv){
         && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-scope-mouse");
     const bool immersiveSmoke=argc>=3
         && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-immersive-mouse");
+    const bool nativeUiSmoke=argc>=2
+        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-native-ui");
     // Use the same Windows V17 brand icon for Qt titlebar/Alt-Tab/taskbar.
     // The ICO is also embedded in the EXE's native Win32 resources.
     const QString iconPath=QCoreApplication::applicationDirPath()
         +QStringLiteral("/cse_warp_v17.ico");
     if(QFileInfo::exists(iconPath))app.setWindowIcon(QIcon(iconPath));
-    const QString path=switchSmoke||repeatSmoke||walkingSmoke||scopeSmoke||immersiveSmoke
+    const QString path=nativeUiSmoke?QString():
+        (switchSmoke||repeatSmoke||walkingSmoke||scopeSmoke||immersiveSmoke
         ?QString::fromLocal8Bit(argv[2])
-        :(argc>1?QString::fromLocal8Bit(argv[1]):defaultPath());
+        :(argc>1?QString::fromLocal8Bit(argv[1]):defaultPath()));
     // The smoke test uses reduced texture resolution to stay viable on
     // CI's software-only WARP device. Normal V17 keeps full 2048 PBR.
     V17Window window(path,(switchSmoke||repeatSmoke||walkingSmoke||scopeSmoke||immersiveSmoke)?256:2048);
@@ -3037,6 +3130,7 @@ int main(int argc,char** argv){
     if(walkingSmoke)window.smokeWalkingCollisionPreference();
     if(scopeSmoke)window.smokeScopedAim();
     if(immersiveSmoke)window.smokeImmersiveMouse();
+    if(nativeUiSmoke)window.smokeNativeUi();
     if(!app.windowIcon().isNull())window.setWindowIcon(app.windowIcon());
     window.show();
     return app.exec();
