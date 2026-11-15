@@ -25,6 +25,8 @@ set "RC1=%ERRORLEVEL%"
 echo Offscreen exit code: %RC1%
 echo.
 echo STEP 2/3 - Native GPU swapchain, magenta fill.
+rem Validate the optimized two-frames-in-flight presentation path.
+set "CSE_WARP_VK_FRAMES_IN_FLIGHT=2"
 echo EXPECTED WINDOW COLOR: BRIGHT MAGENTA
 set "CSE_WARP_VK_KHRONOS_CSV=%OUT%\02_MAGENTA_GPU.csv"
 v17_vulkan_khronos_bench.exe --width 800 --height 450 --cubes 1 --lights 1 --motion fixed --seconds 5 --visual-probe 1 1> "%OUT%\02_MAGENTA.log" 2>&1
