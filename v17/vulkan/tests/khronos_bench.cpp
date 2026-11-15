@@ -149,7 +149,8 @@ int main(int argc,char** argv){
     if(!hwnd){std::cerr<<"Win32 CreateWindow failed\n";return 3;}
     ShowWindow(hwnd,SW_SHOWNORMAL);UpdateWindow(hwnd);
     m3d::updateLighting(14.75f);
-    m3d::pointLights.clear();
+    // Scene-local lights are passed through Scene::lights; do not link to
+    // the unexported global pointLights symbol from the core DLL.
     m3d::Scene scene=makeScene(cubes,lights);
     if(motion=="spin")addSpinningCube(scene,0.f); // intentionally rebuild each frame
     m3d::ShadowMap shadow{};
