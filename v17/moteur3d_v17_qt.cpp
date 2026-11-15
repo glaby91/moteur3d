@@ -2659,6 +2659,11 @@ private:
             const qreal dpr=nativeWindow_->devicePixelRatio();
             renderSize=QSize(std::max(64,int(nativeWindow_->width()*dpr)),
                              std::max(64,int(nativeWindow_->height()*dpr)));
+            // The camera and renderer MUST use the native viewport dimensions.
+            // Previously only renderSize changed: w/h still held the small Qt
+            // canvas dimensions, stretching the Vulkan image on F11 fullscreen.
+            w=renderSize.width();
+            h=renderSize.height();
         }
         const quintptr nativeHandle=directPresent?quintptr(nativeWindow_->winId()):0;
         const bool wantGpu=backend==1||backend==4||backend==5;
