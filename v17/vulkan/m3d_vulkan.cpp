@@ -19,6 +19,7 @@
 #include "m3d_vulkan_version.h"
 #include "m3d_vulkan_readback.h"
 #include "m3d_vulkan_mips.h"
+#include "khronos_capture.h"
 #include "../weather/clouds.h"
 #include "../../experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_gi_bake.h"
 #include <vulkan/vulkan.h>
@@ -122,6 +123,7 @@ class VulkanRaster final {
     VkExtent2D swapExtent_{};
     VkFormat swapFormat_=VK_FORMAT_UNDEFINED;
     bool swapDirty_=false;
+    VkPresentModeKHR swapMode_=VK_PRESENT_MODE_FIFO_KHR;
     VkInstance instance_=VK_NULL_HANDLE;
     VkPhysicalDevice physical_=VK_NULL_HANDLE;
     VkDevice device_=VK_NULL_HANDLE;
@@ -411,9 +413,16 @@ class VulkanRaster final {
         // FIFO is always available; MAILBOX may reduce visible stutter
         // without allowing tearing when available. No hidden CPU fallback.
         VkPresentModeKHR mode=VK_PRESENT_MODE_FIFO_KHR;
-        if(std::find(modes.begin(),modes.end(),VK_PRESENT_MODE_MAILBOX_KHR)!=modes.end())
+        const char* requestedMode=std::getenv("CSE_WARP_VK_BENCH_PRESENT_MODE");
+        if((!requestedMode || std::strcmp(requestedMode,"FIFO")!=0) &&
+           std::find(modes.begin(),modes.end(),VK_PRESENT_MODE_MAILBOX_KHR)!=modes.end())
             mode=VK_PRESENT_MODE_MAILBOX_KHR;
-        const uint32_t imageCount=std::max(caps.minImageCount,3u);
+        uint32_t requestedImages=3;
+        if(const char* n=std::getenv("CSE_WARP_VK_BENCH_SWAP_IMAGES")){
+            if(std::strcmp(n,"2")==0)requestedImages=2;
+            else if(std::strcmp(n,"3")!=0)throw std::runtime_error("CSE_WARP_VK_BENCH_SWAP_IMAGES accepts 2 or 3");
+        }
+        const uint32_t imageCount=std::max(caps.minImageCount,requestedImages);
         uint32_t actualCount=caps.maxImageCount?
             std::min(imageCount,caps.maxImageCount):imageCount;
         VkCompositeAlphaFlagBitsKHR alpha=VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
@@ -451,7 +460,7 @@ class VulkanRaster final {
         VkSemaphoreCreateInfo sem{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
         for(auto& slot:imageReady_)
             vkcheck(vkCreateSemaphore(device_,&sem,nullptr,&slot),"per-image present semaphore");
-        swapExtent_=extent;swapFormat_=chosen.format;swapDirty_=false;
+        swapExtent_=extent;swapFormat_=chosen.format;swapMode_=mode;swapDirty_=false;
         std::clog<<"[CSE WARP Vulkan] DIRECT DISPLAY via Win32 Vulkan swapchain: "
                  <<extent.width<<"x"<<extent.height
                  <<" images="<<nImages<<" mode="<<(mode==VK_PRESENT_MODE_MAILBOX_KHR?"MAILBOX":"FIFO")
@@ -886,7 +895,7 @@ class VulkanRaster final {
         VkFenceCreateInfo fc{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
         vkcheck(vkCreateFence(device_,&fc,nullptr,&fence_),"fence");
         VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
-        qi.queryType=VK_QUERY_TYPE_TIMESTAMP;qi.queryCount=2;
+        qi.queryType=VK_QUERY_TYPE_TIMESTAMP;qi.queryCount=3;
         vkcheck(vkCreateQueryPool(device_,&qi,nullptr,&queries_),"GPU timestamps");
         VkDescriptorSetLayoutBinding bindings[8]{};
         for(uint32_t j=0;j<8;j++){
@@ -1589,23 +1598,32 @@ public:
         try {
             if(w<1||h<1||w>4096||h>4096)throw std::runtime_error("Invalid render size");
             if(!started_)configure();
+            const auto setupEnd=Clock::now();
             if(displaySurface_){
                 createSwapchain(uint32_t(w),uint32_t(h));
                 w=int(swapExtent_.width);h=int(swapExtent_.height);
             }
+            const auto swapchainEnd=Clock::now();
             if(width_!=uint32_t(w)||height_!=uint32_t(h))targets(uint32_t(w),uint32_t(h));
+            const auto targetsEnd=Clock::now();
             const bool changed=scenePointer_!=&scene||sceneObjects_!=scene.obj.size()
                  ||sceneMaterials_!=scene.mat.size()||scene.gpuCacheIdentity==0
                  ||sceneIdentity_!=scene.gpuCacheIdentity||sceneRevision_!=scene.gpuCacheRevision;
             if(changed)rebuild(scene);
+            const auto rebuiltEnd=Clock::now();
             updateShadow(shadows);
+            const auto shadowEnd=Clock::now();
             ensureGI(scene);
+            const auto giEnd=Clock::now();
             updateUniforms(scene,shadows,cam);
+            const auto uniformsEnd=Clock::now();
             const int acquiredIndex=displaySurface_?int(acquireSwapImage()):-1;
+            const auto acquireEnd=Clock::now();
             VkViewport viewport{0.f,0.f,float(w),float(h),0.f,1.f};
             VkRect2D scissor{{0,0},{uint32_t(w),uint32_t(h)}};
+            const auto recordingStart=Clock::now();
             begin();
-            vkCmdResetQueryPool(cmd_,queries_,0,2);
+            vkCmdResetQueryPool(cmd_,queries_,0,3);
             vkCmdWriteTimestamp(cmd_,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,queries_,0);
             VkClearValue clears[3]{};
             const V sky=scene.underwaterEnvironment?V{7,27,39}:skyHorizon*.65f+skyZenith*.35f;
@@ -1691,9 +1709,12 @@ public:
             vkCmdPipelineBarrier(cmd_,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,
                                  0,nullptr,1,&barrier,0,nullptr);
             }
+            vkCmdWriteTimestamp(cmd_,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,queries_,2);
+            const auto recordingEnd=Clock::now();
             double submissionMs=0,waitMs=0;
             submit(&submissionMs,&waitMs,acquiredIndex);
             const auto copied=Clock::now();
+            const auto presentingStart=Clock::now();
             if(acquiredIndex>=0){
                 presentSwapImage(uint32_t(acquiredIndex));
                 pixels.clear();
@@ -1704,6 +1725,7 @@ public:
                 vkreadback::toArgb32(mapped,pixels.data(),pixels.size(),
                     bgraReadback_?vkreadback::PixelBytes::Bgra8:vkreadback::PixelBytes::Rgba8);
             }
+            const auto presentingEnd=Clock::now();
             stats=Stats{};
             stats.gpu=true;stats.gpuDrawCalls=drawCalls;
             stats.gpuBoxInstances=boxCount_;
@@ -1714,11 +1736,38 @@ public:
             stats.readbackBufferCount=acquiredIndex>=0?0:1;
             stats.ms=ms(started,Clock::now());
             const auto freq=props_.limits.timestampPeriod;
-            uint64_t stamps[2]{};
-            if(vkGetQueryPoolResults(device_,queries_,0,2,sizeof(stamps),stamps,sizeof(uint64_t),VK_QUERY_RESULT_64_BIT)==VK_SUCCESS
-               &&stamps[1]>=stamps[0]){
+            uint64_t stamps[3]{};
+            if(vkGetQueryPoolResults(device_,queries_,0,3,sizeof(stamps),stamps,sizeof(uint64_t),VK_QUERY_RESULT_64_BIT)==VK_SUCCESS
+               &&stamps[2]>=stamps[1] && stamps[1]>=stamps[0]){
                 stats.gpuDrawMs=double(stamps[1]-stamps[0])*double(freq)*1e-6;
-                stats.gpuTotalMs=stats.gpuDrawMs;stats.gpuTimingValid=true;
+                stats.gpuTransferMs=double(stamps[2]-stamps[1])*double(freq)*1e-6;
+                stats.gpuTotalMs=double(stamps[2]-stamps[0])*double(freq)*1e-6;
+                stats.gpuTimingValid=true;
+            }
+            if(const char* csv=std::getenv("CSE_WARP_VK_KHRONOS_CSV");csv&&*csv){
+                const auto frameEnd=Clock::now();
+                static thread_local Clock::time_point prevFrameEnd{};
+                khronos::Sample sample{};
+                sample.width=uint32_t(w);sample.height=uint32_t(h);
+                sample.direct=acquiredIndex>=0;sample.swapchainImages=uint32_t(swapImages_.size());
+                sample.presentMode=sample.direct?(swapMode_==VK_PRESENT_MODE_MAILBOX_KHR?"MAILBOX":"FIFO"):"OFFSCREEN";
+                sample.msaa=uint32_t(msaaSamples_);sample.objects=uint32_t(scene.obj.size());
+                sample.lights=uint32_t(std::min<size_t>(kLights,pointLights.size()+scene.lights.size()));
+                sample.sceneRevision=scene.gpuCacheRevision;sample.rebuilt=changed;
+                sample.draws=drawCalls;sample.boxInstances=boxCount_;
+                sample.total=ms(started,frameEnd);sample.setup=ms(started,setupEnd);
+                sample.swapchain=ms(setupEnd,swapchainEnd);sample.targets=ms(swapchainEnd,targetsEnd);
+                sample.rebuild=ms(targetsEnd,rebuiltEnd);sample.shadow=ms(rebuiltEnd,shadowEnd);
+                sample.gi=ms(shadowEnd,giEnd);sample.uniforms=ms(giEnd,uniformsEnd);
+                sample.acquire=ms(uniformsEnd,acquireEnd);sample.record=ms(recordingStart,recordingEnd);
+                sample.submit=submissionMs;sample.fence=waitMs;
+                sample.present=sample.direct?ms(presentingStart,presentingEnd):0.0;
+                sample.readback=sample.direct?0.0:ms(presentingStart,presentingEnd);
+                sample.presentInterval=prevFrameEnd.time_since_epoch().count()?ms(prevFrameEnd,frameEnd):0.0;
+                prevFrameEnd=frameEnd;
+                sample.gpuDraw=stats.gpuDrawMs;sample.gpuTransfer=stats.gpuTransferMs;
+                sample.gpuTotal=stats.gpuTotalMs;sample.gpuValid=stats.gpuTimingValid;
+                khronos::capture(sample);
             }
             error.clear();return true;
         }catch(const std::exception& e){
