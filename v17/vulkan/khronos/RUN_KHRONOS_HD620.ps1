@@ -91,7 +91,8 @@ foreach($run in $manifest){
        [string]::IsNullOrWhiteSpace($sample.present_interval_ms)){ $skipped++;continue }
     $frameMs=[double]::Parse($sample.cpu_total_ms,$culture)
     $interval=[double]::Parse($sample.present_interval_ms,$culture)
-    if(![double]::IsFinite($frameMs) -or ![double]::IsFinite($interval) -or $frameMs -lt 0){$skipped++;continue}
+    if([double]::IsNaN($frameMs) -or [double]::IsInfinity($frameMs) -or
+       [double]::IsNaN($interval) -or [double]::IsInfinity($interval) -or $frameMs -lt 0){$skipped++;continue}
     $elapsed += $frameMs
     if($elapsed -gt 1000*$WarmupSeconds){$measured += $sample}
    }catch{ $skipped++ }
