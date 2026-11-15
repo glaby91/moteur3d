@@ -1,4 +1,11 @@
-param([ValidateRange(3,600)][int]$Seconds=20,[ValidateRange(1,8)][int]$Repetitions=3,[ValidateRange(0,120)][int]$WarmupSeconds=4)
+param(
+ [ValidateRange(3,600)][int]$Seconds=20,
+ [ValidateRange(1,8)][int]$Repetitions=3,
+ [ValidateRange(0,120)][int]$WarmupSeconds=4,
+ [ValidateSet('optimized','baseline')][string]$Profile='optimized',
+ [ValidateRange(128,4096)][int]$Width=1280,
+ [ValidateRange(128,4096)][int]$Height=720
+)
 $ErrorActionPreference='Stop'
 $base=Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $base
@@ -7,9 +14,10 @@ if(!(Test-Path $exe)){throw 'Missing v17_vulkan_khronos_bench.exe: extract the f
 if(!(Test-Path (Join-Path $base 'vulkan/raster.frag.spv'))){throw 'Missing Vulkan SPIR-V shaders.'}
 $culture=[Globalization.CultureInfo]::InvariantCulture
 $stamp=Get-Date -Format 'yyyyMMdd_HHmmss'
-$results=Join-Path $base "KHRONOS_V17_32_HD620_$stamp"
+$results=Join-Path $base "KHRONOS_V17_32_HD620_${Profile}_$stamp"
 New-Item -ItemType Directory -Path $results -Force | Out-Null
-"Engine: CSE WARP Vulkan V17.32 source d7c2118906214e989dd88a6077b575fa38b1f0ea; Khronos test branch." | Set-Content (Join-Path $results 'environment.txt')
+"Engine: CSE WARP Vulkan V17.32 HD620 optimized experiment; original base d7c2118906214e989dd88a6077b575fa38b1f0ea." | Set-Content (Join-Path $results 'environment.txt')
+"Profile=$Profile; Target=${Width}x${Height}; Repetitions=$Repetitions; Seconds=$Seconds" | Add-Content (Join-Path $results 'environment.txt')
 "Windows: $([Environment]::OSVersion.VersionString)" | Add-Content (Join-Path $results 'environment.txt')
 Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion,AdapterRAM | Format-List | Out-String | Add-Content (Join-Path $results 'environment.txt')
 Get-CimInstance Win32_Processor | Select-Object Name,NumberOfCores,NumberOfLogicalProcessors | Format-List | Out-String | Add-Content (Join-Path $results 'environment.txt')
@@ -40,9 +48,15 @@ foreach($case in $cases){
   $env:CSE_WARP_VK_BENCH_SWAP_IMAGES=$case.Images
   $env:CSE_WARP_VK_BENCH_PRESENT_MODE=$case.Present
   $env:CSE_WARP_VK_MSAA=$case.Msaa
-  $env:CSE_WARP_VK_FAST_FRAGMENT='0'
-  Write-Host "CSE WARP Vulkan: $name"
-  $argsList=@('--width','1366','--height','768','--cubes',"$($case.Cubes)",'--lights',"$($case.Lights)",'--motion',$case.Motion,'--seconds',"$Seconds")
+  # A/B controls: all three optimization families are switched together.
+  $optimized=$Profile -eq 'optimized'
+  $env:CSE_WARP_VK_FAST_FRAGMENT=if($optimized){'1'}else{'0'}
+  $env:CSE_WARP_VK_FRAMES_IN_FLIGHT=if($optimized){'2'}else{'1'}
+  $env:CSE_WARP_VK_OPT_INCREMENTAL=if($optimized){'1'}else{'0'}
+  $env:CSE_WARP_VK_BENCH_BORDERLESS='1'
+  Remove-Item Env:CSE_WARP_VK_VERBOSE_FRAMES -ErrorAction SilentlyContinue
+  Write-Host "CSE WARP Vulkan: $Profile $name (${Width}x${Height})"
+  $argsList=@('--width',"$Width",'--height',"$Height",'--cubes',"$($case.Cubes)",'--lights',"$($case.Lights)",'--motion',$case.Motion,'--seconds',"$Seconds")
   $rc=-999
   try{
    $proc=Start-Process -FilePath $exe -ArgumentList $argsList -WorkingDirectory $base -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
@@ -58,7 +72,7 @@ foreach($case in $cases){
     $rc=124
    }
   }catch{ $_ | Out-String | Add-Content $stderr }
-  $manifest += [pscustomobject]@{Run=$name;Scenario=$case.Name;Repeat=$rep;Cubes=$case.Cubes;Lights=$case.Lights;Motion=$case.Motion;RequestedImages=$case.Images;RequestedPresent=$case.Present;MSAA=$case.Msaa;DurationSeconds=$Seconds;WarmupSeconds=$WarmupSeconds;ExitCode=$rc;Csv="$name.csv"}
+  $manifest += [pscustomobject]@{Run=$name;Profile=$Profile;Resolution="${Width}x${Height}";FramesInFlight=$env:CSE_WARP_VK_FRAMES_IN_FLIGHT;Incremental=$env:CSE_WARP_VK_OPT_INCREMENTAL;FastFragment=$env:CSE_WARP_VK_FAST_FRAGMENT;Scenario=$case.Name;Repeat=$rep;Cubes=$case.Cubes;Lights=$case.Lights;Motion=$case.Motion;RequestedImages=$case.Images;RequestedPresent=$case.Present;MSAA=$case.Msaa;DurationSeconds=$Seconds;WarmupSeconds=$WarmupSeconds;ExitCode=$rc;Csv="$name.csv"}
   Write-Host "Exit=$rc Frames CSV exists=$([bool](Test-Path $out))"
  }
 }
@@ -69,11 +83,27 @@ foreach($run in $manifest){
  if(!(Test-Path $csv)){$summary += [pscustomobject]@{Run=$run.Run;Frames=0;FPS=0;P50_ms=0;P95_ms=0;P99_ms=0;GPU_ms=0;Fence_ms=0;Stutters50ms=0;Status='NO_CSV'};continue}
  $elapsed=0.0
  $measured=@()
- foreach($sample in @(Import-Csv -LiteralPath $csv)){
-  $elapsed += [double]::Parse($sample.cpu_total_ms,$culture)
-  if($elapsed -gt 1000*$WarmupSeconds){$measured += $sample}
+ $skipped=0
+ try{
+  foreach($sample in @(Import-Csv -LiteralPath $csv)){
+   try{
+    if([string]::IsNullOrWhiteSpace($sample.cpu_total_ms) -or
+       [string]::IsNullOrWhiteSpace($sample.present_interval_ms)){ $skipped++;continue }
+    $frameMs=[double]::Parse($sample.cpu_total_ms,$culture)
+    $interval=[double]::Parse($sample.present_interval_ms,$culture)
+    if(![double]::IsFinite($frameMs) -or ![double]::IsFinite($interval) -or $frameMs -lt 0){$skipped++;continue}
+    $elapsed += $frameMs
+    if($elapsed -gt 1000*$WarmupSeconds){$measured += $sample}
+   }catch{ $skipped++ }
+  }
+ }catch{
+  "CSV analysis import failed for $($run.Run): $_" | Add-Content (Join-Path $results 'analysis_errors.log')
  }
- if(!$measured.Count){continue}
+ if($skipped){"$($run.Run): ignored $skipped invalid/incomplete CSV rows" | Add-Content (Join-Path $results 'analysis_errors.log')}
+ if(!$measured.Count){
+  $summary += [pscustomobject]@{Run=$run.Run;Frames=0;FPS=0;P50_ms=0;P95_ms=0;P99_ms=0;GPU_ms=0;Fence_ms=0;Stutters50ms=0;Status='NO_VALID_FRAMES'}
+  continue
+ }
  $pacing=@($measured | ForEach-Object { [double]::Parse($_.present_interval_ms,$culture) } | Where-Object {$_ -gt 0} | Sort-Object)
  $gpu=@($measured | Where-Object gpu_valid -eq '1' | ForEach-Object {[double]::Parse($_.gpu_total_ms,$culture)})
  $fences=@($measured | ForEach-Object {[double]::Parse($_.cpu_fence_wait_ms,$culture)})
