@@ -2291,7 +2291,7 @@ private:
         m.metallic=float(metallic_->value());
         // Required for GPU fast-path cache invalidation. The shadow map itself
         // depends only on geometry/sun, not on metallicity or roughness.
-        runtime_->renderScene.markGpuContentChanged();
+        runtime_->renderScene.markGpuParametersChanged();
         requestRender();
     }
     void saveMaterials(){
