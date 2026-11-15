@@ -49,6 +49,13 @@ if(WIN32)
         target_include_directories(moteur3d_v16_core PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/../v17/vulkan")
         target_link_libraries(moteur3d_v16_core PRIVATE Vulkan::Vulkan)
+        # Vulkan is optional at runtime. Avoid an eager vulkan-1.dll import,
+        # otherwise ALL V17.493 CPU and DX11 tools fail with STATUS_DLL_NOT_FOUND
+        # on clean CI or systems without the Vulkan runtime installed.
+        if(MSVC)
+            target_link_options(moteur3d_v16_core PRIVATE "/DELAYLOAD:vulkan-1.dll")
+            target_link_libraries(moteur3d_v16_core PRIVATE delayimp)
+        endif()
         target_compile_definitions(moteur3d_v16_core PUBLIC M3D_V17_VULKAN_ENABLED=1)
     else()
         target_sources(moteur3d_v16_core PRIVATE

@@ -41,42 +41,22 @@ jobs:
         uses: jakoch/install-vulkan-sdk-action@v1
         with:
           vulkan_version: '1.4.309.0'
-          install_runtime: true
+          install_runtime: false
           cache: true
           stripdown: true
           install_swiftshader: false
-      - name: Make the SDK Vulkan loader available to native Windows CI smoke tests
+      - name: Assert Vulkan is optional at runtime on this GPU-less runner
         shell: pwsh
         run: |
-          # The V17 shared engine imports vulkan-1.dll even when a smoke test
-          # only exercises the CPU scene loader. Clean GitHub Windows runners
-          # do not necessarily ship a system Vulkan loader/GPU driver.
-          # Resolve the *SDK's own* loader for CI; never silently deploy it
-          # over the target machine's driver-managed Vulkan installation.
-          $sdk=$env:VULKAN_SDK
-          if (!$sdk -or !(Test-Path $sdk)) { throw 'Vulkan SDK installation unavailable' }
-          # jakoch/install-vulkan-sdk-action installs the Windows 64-bit
-          # Vulkan runtime separately at <VULKAN_SDK>/runtime/x64 when
-          # install_runtime: true (SDK Bin is not the runtime location).
-          $loader=Join-Path $sdk 'runtime/x64/vulkan-1.dll'
-          if (!(Test-Path $loader)) {
-            $found=Get-ChildItem $sdk -Recurse -File -Filter 'vulkan-1.dll' |
-              Where-Object { $_.FullName -match '[\\/]x64[\\/]' -or
-                             $_.FullName -match '[\\/]Bin[\\/]' } |
-              Select-Object -First 1
-            if (!$found) {
-              throw 'Vulkan Windows x64 runtime missing despite install_runtime: true'
-            }
-            $loader=$found.FullName
+          $cmake=Get-Content v16/CMakeLists.txt -Raw
+          if (!$cmake.Contains('/DELAYLOAD:vulkan-1.dll')) {
+            throw 'Missing Windows delay-load contract for optional Vulkan'
           }
-          $loaderDir=Split-Path $loader -Parent
-          Write-Host "CI Vulkan loader: $loader"
-          $loaderDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          $env:PATH="$loaderDir;$env:PATH"
-          # Explicitly assert dependencies before any scene test; missing
-          # loader used to appear as Windows exit -1073741515 (0xC0000135).
-          & where.exe vulkan-1.dll
-          if ($LASTEXITCODE -ne 0) { throw 'Vulkan SDK loader is not resolvable via PATH' }
+          $backend=Get-Content v17/vulkan/m3d_vulkan.cpp -Raw
+          if (!$backend.Contains('vulkanRuntimeAvailable(error)')) {
+            throw 'Missing graceful error handling when Vulkan loader is absent'
+          }
+          Write-Host 'V17.493 CPU/DX11 require no Vulkan runtime. Native scene test verifies this once built.'
       - name: Generate benchmark scenes from reusable Pripyat material library
         shell: pwsh
         run: |

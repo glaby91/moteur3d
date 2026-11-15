@@ -2088,6 +2088,21 @@ public:
 };
 } // namespace
 
+// Make Vulkan optional for CPU and DirectX11. The MSVC linker delay-loads
+// vulkan-1.dll; check explicitly before making ANY Vulkan API call to avoid
+// unhandled delayimp loader exceptions when a driver/runtime is absent.
+namespace {
+bool vulkanRuntimeAvailable(std::wstring& error){
+    // Keep the successful loader reference alive through renderer teardown.
+    static const HMODULE loader=LoadLibraryW(L"vulkan-1.dll");
+    if(!loader){
+        error=L"Vulkan runtime vulkan-1.dll unavailable. "
+              L"Install a Vulkan 1.3-capable display driver or select DirectX 11.";
+        return false;
+    }
+    return true;
+}
+}
 // Explicit current-thread ownership, rather than an opaque thread_local
 // instance that can only be destroyed during DLL/CRT thread detach.
 namespace {
@@ -2106,6 +2121,7 @@ void releaseVulkanDirectForCurrentThread(){
 bool renderVulkanPreview(const Scene& scene,const ShadowMap& shadow,const Camera& camera,
                          int w,int h,std::vector<uint32_t>& out,Stats& stats,std::wstring& error){
     // One Vulkan context per Qt worker; standalone tools may release early.
+    if(!vulkanRuntimeAvailable(error))return false;
     if(!tlsPreviewRenderer)tlsPreviewRenderer=std::make_unique<VulkanRaster>();
     return tlsPreviewRenderer->render(scene,shadow,camera,w,h,out,stats,error);
 }
@@ -2113,6 +2129,7 @@ bool renderVulkanPreview(const Scene& scene,const ShadowMap& shadow,const Camera
 bool renderVulkanDirectPresent(const Scene& scene,const ShadowMap& shadow,const Camera& camera,
                                int w,int h,void* nativeWindow,Stats& stats,std::wstring& error){
     if(!nativeWindow){error=L"Null native HWND for Vulkan presentation";return false;}
+    if(!vulkanRuntimeAvailable(error))return false;
     if(!tlsDirectRenderer || tlsDirectWindow!=nativeWindow){
         releaseVulkanDirectForCurrentThread();
         tlsDirectRenderer=std::make_unique<VulkanRaster>(nativeWindow);
