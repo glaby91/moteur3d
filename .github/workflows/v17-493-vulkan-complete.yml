@@ -553,7 +553,7 @@ jobs:
             }
           }
           if (!(Test-Path "$approved/V498_SCENE_INSTALL.json") -or
-              !(Test-Path "$approved/audio/pripyat_radio.wav")) {
+              !(Test-Path "base-v499/audio/pripyat_radio.wav")) {
             throw "V17.499 scene corrections or radio missing"
           }
           Remove-Item "dist-v17/benchmark-civic" -Recurse -Force -ErrorAction Stop
