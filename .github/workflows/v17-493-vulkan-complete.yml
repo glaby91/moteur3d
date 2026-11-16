@@ -1,5 +1,5 @@
-name: CSE WARP V17.500 — Vulkan display recovery and stable DirectX day/night — Windows HD620
-run-name: V17.500 Vulkan visible + cycle solaire stable — CI ${{ github.run_number }}
+name: CSE WARP V17.501 — Vulkan visible viewport and stable DirectX day/night — Windows HD620
+run-name: V17.501 Vulkan viewport Qt + cycle solaire stable — CI ${{ github.run_number }}
 on:
   push:
     branches:
@@ -77,7 +77,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Ten-pass fast design preflight failed' }
       - name: Configure
         shell: pwsh
-        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_BUILD_NUMBER=500
+        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_BUILD_NUMBER=501
       - name: Compile
         run: cmake --build build-v17 --config Release --parallel 4
       - name: Verify native DX11 startup UI and Vulkan selection (Qt offscreen)
@@ -566,7 +566,7 @@ jobs:
           start "" "moteur3d_v17.exe" "benchmark-civic\\scene.json"
           '@ | Set-Content "dist-v17/LANCER_CSE_WARP.bat" -Encoding ascii
           @'
-          CSE WARP BetaX V17.500
+          CSE WARP BetaX V17.501
           Starting scene: exact approved V17.499 scene package, with V17.500 monument anchoring.
           Scene revision appears in the title bar after loading. The banner also shows system RAM use.
           '@ | Set-Content "dist-v17/README.txt" -Encoding utf8
@@ -650,7 +650,7 @@ jobs:
           if (!(Test-Path "$dst/audio/pripyat_radio.wav")) {throw 'V17.493 Ukrainian radio missing'}
           git rev-parse HEAD | Set-Content "$dst/VULKAN_INTEGRATION_COMMIT.txt"
           @(
-            'CSE WARP V17.500 DXGI lifecycle + Vulkan HD620',
+            'CSE WARP V17.501 Vulkan Qt viewport + DXGI',
             'Source baseline: master V17.493 beta + BASSEIN sign',
             'Native Vulkan WSI, two frames in flight, incremental PBR cache, diagnostics',
             'Hardware FPS, weather smoothness and periodic stutter REQUIRE real HD620 verification.'
@@ -712,7 +712,7 @@ jobs:
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.500-DXGI-VIEWPORT-LIFECYCLE-VULKAN
+          name: CSE-WARP-V17.501-VULKAN-VISIBLE-VIEWPORT-DX11
           path: dist-v17/
           if-no-files-found: error
       - name: Benchmark GI hors ligne — trois scènes, trois cuissons et sept relectures
