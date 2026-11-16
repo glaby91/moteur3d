@@ -1904,15 +1904,15 @@ private:
         cameraBox_=new QComboBox;
         backendBox_=new QComboBox;
         directDisplayBox_=new QCheckBox(QStringLiteral(
-            "Affichage GPU direct (DirectX 11 / Vulkan)"));
+            "Affichage GPU direct natif (DX11)"));
 #ifdef _WIN32
-        // WARP Vulkan V17.32: GPU-native presentation is the *startup default*.
-        // Do not restore a previous disabled state: users can still uncheck it
-        // explicitly for a single session to use the CPU/QImage comparison.
+        // Native presentation is enabled by default for DX11 only. Vulkan
+        // uses its GPU-rendered image through the Qt viewport until native WSI
+        // has been verified on the user's Intel HD620.
         directDisplayBox_->setCheckState(Qt::Checked);
         directDisplayBox_->setToolTip(QStringLiteral(
-            "Activé par défaut pour DirectX 11 et Vulkan : swapchain native, sans lecture GPU→CPU→QImage. "
-            "Décocher manuellement pour utiliser le chemin classique de capture ou de comparaison."));
+            "DX11 : swapchain native, sans lecture GPU→CPU→QImage. "
+            "Vulkan : rendu GPU affiché dans le viewport Qt pour garantir sa visibilité."));
 #else
         directDisplayBox_->setChecked(false);
         directDisplayBox_->setEnabled(false);
@@ -2306,6 +2306,12 @@ private:
         connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int index){
             if(exploring_ && index!=4 && index!=5)stopExploration();
             const bool gi=index==2||index==3;
+            directDisplayBox_->setEnabled(index==4);
+            directDisplayBox_->setToolTip(index==5
+                ?QStringLiteral("Vulkan est rendu sur le GPU puis affiché dans le viewport Qt. "
+                                "La présentation native Vulkan sera réactivée après validation WSI sur HD620.")
+                :QStringLiteral("DX11 : swapchain native, sans lecture GPU→CPU→QImage. "
+                               "Décochez pour revenir au viewport Qt."));
             directSamples_->setEnabled(index==0);
             denoiseDirect_->setEnabled(index==0);
             giSamples_->setEnabled(gi);
@@ -2699,8 +2705,10 @@ private:
 
     bool nativeDirectSelected() const{
 #ifdef _WIN32
-        return backendBox_ && (backendBox_->currentIndex()==4 ||
-               backendBox_->currentIndex()==5) &&
+        // Keep Vulkan on the Qt image viewport until native WSI has been
+        // verified on real Intel hardware. Vulkan still renders on the GPU;
+        // only its final image readback/presentation uses the proven Qt path.
+        return backendBox_ && backendBox_->currentIndex()==4 &&
                directDisplayBox_ && directDisplayBox_->isChecked();
 #else
         return false;
