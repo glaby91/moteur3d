@@ -2730,7 +2730,7 @@ private:
             // Do not display an old capture after choosing native presentation.
             lastImage_=QImage{};
             statusBar()->showMessage(QStringLiteral(
-                "Affichage natif DX11/Vulkan : swapchain GPU, sans QImage ; "
+                "Affichage natif DX11 : swapchain GPU, sans QImage ; "
                 "décocher pour les captures PNG"),7000);
         }
     }
