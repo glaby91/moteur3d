@@ -633,8 +633,9 @@ class VulkanRaster final {
         blit.dstSubresource.layerCount=1;
         blit.srcOffsets[1]={int32_t(width_),int32_t(height_),1};
         blit.dstOffsets[1]={int32_t(swapExtent_.width),int32_t(swapExtent_.height),1};
-        // Optional magenta WSI self-test: if the native window still stays
-        // black, the issue is after rendering (swapchain/presentation/window).
+        // Probe 1 clears the swapchain (WSI only). Probe 2 clears the actual
+        // scene framebuffer, then uses the exact production framebuffer->WSI
+        // blit. This separates presentation from scene rasterization.
         const char* probe=std::getenv("CSE_WARP_VK_KHRONOS_VISUAL_PROBE");
         if(probe && std::strcmp(probe,"1")==0){
             const VkClearColorValue marker{{1.f,0.f,.85f,1.f}};
@@ -644,6 +645,38 @@ class VulkanRaster final {
             vkCmdClearColorImage(cmd_,image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                                  &marker,1,&range);
         }else{
+            if(probe && std::strcmp(probe,"2")==0){
+                VkImageMemoryBarrier sourceToWrite{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+                sourceToWrite.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                sourceToWrite.newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                sourceToWrite.srcAccessMask=VK_ACCESS_TRANSFER_READ_BIT;
+                sourceToWrite.dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
+                sourceToWrite.srcQueueFamilyIndex=sourceToWrite.dstQueueFamilyIndex=
+                    VK_QUEUE_FAMILY_IGNORED;
+                sourceToWrite.image=color_.image;
+                sourceToWrite.subresourceRange.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+                sourceToWrite.subresourceRange.levelCount=1;
+                sourceToWrite.subresourceRange.layerCount=1;
+                vkCmdPipelineBarrier(cmd_,VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,nullptr,0,nullptr,1,&sourceToWrite);
+                const VkClearColorValue sourceMarker{{0.f,1.f,.15f,1.f}};
+                VkImageSubresourceRange sourceRange{};
+                sourceRange.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+                sourceRange.levelCount=1;sourceRange.layerCount=1;
+                vkCmdClearColorImage(cmd_,color_.image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                                     &sourceMarker,1,&sourceRange);
+                VkImageMemoryBarrier sourceToRead{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+                sourceToRead.oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                sourceToRead.newLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                sourceToRead.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
+                sourceToRead.dstAccessMask=VK_ACCESS_TRANSFER_READ_BIT;
+                sourceToRead.srcQueueFamilyIndex=sourceToRead.dstQueueFamilyIndex=
+                    VK_QUEUE_FAMILY_IGNORED;
+                sourceToRead.image=color_.image;
+                sourceToRead.subresourceRange=sourceRange;
+                vkCmdPipelineBarrier(cmd_,VK_PIPELINE_STAGE_TRANSFER_BIT,
+                    VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,nullptr,0,nullptr,1,&sourceToRead);
+            }
             vkCmdBlitImage(cmd_,color_.image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                            image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&blit,VK_FILTER_NEAREST);
         }
@@ -2054,6 +2087,27 @@ public:
             stats.gpu=true;stats.gpuDrawCalls=drawCalls;
             stats.gpuBoxInstances=boxCount_;
             stats.gpuFoliageInstances=foliageCount_;
+            if(acquiredIndex>=0 && std::getenv("CSE_WARP_VK_SCENE_DIAGNOSTIC")){
+                static unsigned diagnosticFrames=0;
+                if(diagnosticFrames++<12){
+                    std::error_code ec;
+                    const auto logPath=std::filesystem::temp_directory_path(ec)/
+                        "CSE_WARP_VK_SCENE_DIAGNOSTIC.txt";
+                    if(!ec){
+                        std::ofstream log(logPath,std::ios::app);
+                        if(log)log<<"frame="<<diagnosticFrames
+                            <<" extent="<<w<<"x"<<h
+                            <<" drawCalls="<<drawCalls
+                            <<" meshVertices="<<vertexCount_
+                            <<" gpuDrawCalls="<<drawCalls
+                            <<" boxes="<<boxCount_<<" foliage="<<foliageCount_
+                            <<" eye=("<<cam.eye.x<<","<<cam.eye.y<<","<<cam.eye.z<<")"
+                            <<" forward=("<<cam.f.x<<","<<cam.f.y<<","<<cam.f.z<<")"
+                            <<" probe="<<(std::getenv("CSE_WARP_VK_KHRONOS_VISUAL_PROBE")?
+                                std::getenv("CSE_WARP_VK_KHRONOS_VISUAL_PROBE"):"0")<<"\\n";
+                    }
+                }
+            }
             stats.cpuSubmitMs=submissionMs;
             stats.cpuMapWaitMs=waitMs+frameRetireWaitMs_+frameDrainWaitMs_;
             stats.cpuPixelConvertMs=acquiredIndex>=0?0.0:ms(copied,Clock::now());
