@@ -293,11 +293,9 @@ public:
         viewportStack_->setContentsMargins(0,0,0,0);
         viewportStack_->addWidget(canvas_);
         nativeWindow_=new QWindow;
-        // The child HWND is presented to by our Vulkan WSI renderer.
-        // Declare the correct Qt surface type BEFORE createWindowContainer
-        // creates the native window; RasterSurface can leave Qt treating this
-        // HWND as a software-paint target while Vulkan presents to it directly.
-        nativeWindow_->setSurfaceType(QSurface::VulkanSurface);
+        // The native child is reserved for DXGI. Vulkan presents a QImage in
+        // the Qt canvas so a successful vkQueuePresentKHR can never hide a frame.
+        nativeWindow_->setSurfaceType(QSurface::RasterSurface);
         nativeWindow_->setFlags(Qt::FramelessWindowHint);
         nativeWindow_->installEventFilter(this);
         nativeContainer_=QWidget::createWindowContainer(nativeWindow_,viewportRoot,
@@ -459,14 +457,13 @@ public:
         if(!scenePath.isEmpty())
             QTimer::singleShot(0,this,[this,scenePath]{openScene(scenePath);});
     }
-    // UI contract smoke: no GPU or scene needed. A packaged Windows build
-    // must start in DX11-native mode and expose a Vulkan-compatible embedded QWindow.
+    // UI contract smoke: DX11 uses its native child; Vulkan must stay on the Qt canvas.
     void smokeNativeUi(){
         QTimer::singleShot(0,this,[this]{
 #if defined(_WIN32)
             auto* quick=findChild<QComboBox*>(QStringLiteral("v17QuickRenderer"));
-            const bool ok=backendBox_ && backendBox_->count()==6 &&
-                nativeWindow_ && nativeWindow_->surfaceType()==QSurface::VulkanSurface &&
+            const bool dx11Ready=backendBox_ && backendBox_->count()==6 &&
+                nativeWindow_ && nativeWindow_->surfaceType()==QSurface::RasterSurface &&
                 backendBox_->currentIndex()==4 && directDisplayBox_->isChecked() &&
                 backendBox_->itemText(5).contains(QStringLiteral("Vulkan")) &&
                 (backendBox_->model()->flags(backendBox_->model()->index(5,0)) &
@@ -474,9 +471,15 @@ public:
                 quick && quick->count()==6 &&
                 quick->itemText(5).contains(QStringLiteral("Vulkan")) &&
                 viewportStack_->currentWidget()==nativeContainer_;
-            std::fprintf(stderr,"V17 NATIVE GUI: %s, stack=%d, vulkan=%d\n",
-                ok?"PASS":"FAIL",viewportStack_->currentIndex(),
-                backendBox_->count()>5?5:-1);
+            backendBox_->setCurrentIndex(5);
+            const bool vulkanVisiblePath=!nativeDirectSelected() &&
+                !directDisplayBox_->isEnabled() &&
+                viewportStack_->currentWidget()==canvas_;
+            backendBox_->setCurrentIndex(4);
+            switchNativeRenderViewport();
+            const bool ok=dx11Ready&&vulkanVisiblePath;
+            std::fprintf(stderr,"V17 RENDER VIEWPORT: %s, Vulkan=Qt image canvas\n",
+                ok?"PASS":"FAIL");
             QCoreApplication::exit(ok?0:46);
 #else
             QCoreApplication::exit(0);
@@ -1909,15 +1912,13 @@ private:
         cameraBox_=new QComboBox;
         backendBox_=new QComboBox;
         directDisplayBox_=new QCheckBox(QStringLiteral(
-            "Affichage GPU direct natif (DX11 / Vulkan)"));
+            "Affichage GPU direct natif (DX11)"));
 #ifdef _WIN32
-        // Native GPU presentation is enabled by default for both raster backends.
-        // The Vulkan child window is explicitly marked VulkanSurface before Qt
-        // creates its HWND so the WSI swapchain targets the intended viewport.
+        // DX11 may present through DXGI. Vulkan renders on the GPU, then Qt
+        // displays the returned image so every completed frame stays visible.
         directDisplayBox_->setCheckState(Qt::Checked);
         directDisplayBox_->setToolTip(QStringLiteral(
-            "DirectX 11 et Vulkan : swapchain GPU native, sans lecture GPU→CPU→QImage. "
-            "Décocher pour utiliser l'aperçu Qt."));
+            "DX11 : swapchain native. Vulkan : rendu GPU affiché dans le viewport Qt."));
 #else
         directDisplayBox_->setChecked(false);
         directDisplayBox_->setEnabled(false);
@@ -2311,12 +2312,10 @@ private:
         connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int index){
             if(exploring_ && index!=4 && index!=5)stopExploration();
             const bool gi=index==2||index==3;
-            directDisplayBox_->setEnabled(index==4||index==5);
+            directDisplayBox_->setEnabled(index==4);
             directDisplayBox_->setToolTip(index==5
-                ?QStringLiteral("Vulkan : swapchain native reliée à la QWindow Qt "
-                                "de type VulkanSurface. Décocher pour afficher l'aperçu Qt.")
-                :QStringLiteral("DX11 : swapchain native, sans lecture GPU→CPU→QImage. "
-                               "Décochez pour revenir au viewport Qt."));
+                ?QStringLiteral("Vulkan : rendu sur le GPU, image transférée au viewport Qt.")
+                :QStringLiteral("DX11 : swapchain native. Décochez pour afficher le rendu via Qt."));
             directSamples_->setEnabled(index==0);
             denoiseDirect_->setEnabled(index==0);
             giSamples_->setEnabled(gi);
@@ -2710,10 +2709,9 @@ private:
 
     bool nativeDirectSelected() const{
 #ifdef _WIN32
-        // Both native raster backends target this Vulkan-compatible child
-        // QWindow. Vulkan must use the same HWND that Qt embeds in the viewport.
-        return backendBox_ && (backendBox_->currentIndex()==4 ||
-               backendBox_->currentIndex()==5) &&
+        // Only DX11 owns the native child HWND. Vulkan always returns pixels
+        // to the Qt image canvas; its WSI success code is not a visibility test.
+        return backendBox_ && backendBox_->currentIndex()==4 &&
                directDisplayBox_ && directDisplayBox_->isChecked();
 #else
         return false;
@@ -3030,7 +3028,7 @@ private:
                     result.directPresented=ok&&directPresent&&!result.nativeFallback;
                     if(ok){
                         result.renderer=vulkan
-                            ?QStringLiteral("V17 Vulkan Raster — portage expérimental")
+                            ?QStringLiteral("V17 Vulkan Raster — image GPU affichée via Qt")
                             :QStringLiteral("V17 D3D11 Raster — géométrie matérielle");
                         if(!vulkan && rasterHybridLightingEnabled())
                             result.renderer+=rasterGiCacheLoaded()
