@@ -53,10 +53,9 @@ def main(root):
   add(tag+"_shoe","v500_anchor_box",sm,(x,top+.035,z),(w,.07,d),tag+"/Platine acier")
   gap=max(0,y-(top+.07))
   if gap>.035:add(tag+"_support","v500_anchor_box",sm,(x,top+.07+gap/2,z-.045),(.15,gap,.12),tag+"/Jambe de reprise")
-  for dx in (-w*.31,w*.31):
-   for dz in (-d*.30,d*.30):
-    add(tag+"_rod","v500_anchor_box",sm,(x+dx,top-.145,z+dz),(.038,.38,.038),tag+"/Tige ancree")
-    add(tag+"_nut","v500_anchor_hex",sm,(x+dx,top+.071,z+dz),(.105,.055,.105),tag+"/Ecrou visible")
+  for bi,(dx,dz) in enumerate(((-w*.31,-d*.30),(-w*.31,d*.30),(w*.31,-d*.30),(w*.31,d*.30))):
+    add(tag+"_rod_"+str(bi),"v500_anchor_box",sm,(x+dx,top-.145,z+dz),(.038,.38,.038),tag+"/Tige ancree")
+    add(tag+"_nut_"+str(bi),"v500_anchor_hex",sm,(x+dx,top+.071,z+dz),(.105,.055,.105),tag+"/Ecrou visible")
   attached+=1
  if attached!=2:raise RuntimeError("Both lower sculpture feet must be anchored")
  removed=0

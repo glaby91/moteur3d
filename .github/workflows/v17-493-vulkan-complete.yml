@@ -1,5 +1,5 @@
 name: CSE WARP V17.500 — Vulkan display recovery and stable DirectX day/night — Windows HD620
-run-name: V17.499 Vulkan visible + cycle solaire stable — CI ${{ github.run_number }}
+run-name: V17.500 Vulkan visible + cycle solaire stable — CI ${{ github.run_number }}
 on:
   push:
     branches:
@@ -717,7 +717,7 @@ jobs:
           if (!(Test-Path "$dst/audio/pripyat_radio.wav")) {throw 'V17.493 Ukrainian radio missing'}
           git rev-parse HEAD | Set-Content "$dst/VULKAN_INTEGRATION_COMMIT.txt"
           @(
-            'CSE WARP V17.499 DXGI lifecycle + Vulkan HD620',
+            'CSE WARP V17.500 DXGI lifecycle + Vulkan HD620',
             'Source baseline: master V17.493 beta + BASSEIN sign',
             'Native Vulkan WSI, two frames in flight, incremental PBR cache, diagnostics',
             'Hardware FPS, weather smoothness and periodic stutter REQUIRE real HD620 verification.'
