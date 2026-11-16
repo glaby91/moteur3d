@@ -1,6 +1,7 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+set "M3D_V17_VK_PROFILE_MODE=1"
 set "CSE_WARP_VK_KHRONOS_VISUAL_PROBE=2"
 set "CSE_WARP_VK_SCENE_DIAGNOSTIC=1"
 echo V17.504 Vulkan source-image probe
