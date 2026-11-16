@@ -2100,7 +2100,7 @@ public:
                             <<" extent="<<w<<"x"<<h
                             <<" drawCalls="<<drawCalls
                             <<" meshVertices="<<vertexCount_
-                            <<" visibleChunksDrawn="<<drawCalls
+                            <<" drawCallCount="<<drawCalls
                             <<" boxes="<<boxCount_<<" foliage="<<foliageCount_
                             <<" eye=("<<cam.eye.x<<","<<cam.eye.y<<","<<cam.eye.z<<")"
                             <<" forward=("<<cam.f.x<<","<<cam.f.y<<","<<cam.f.z<<")"
