@@ -1,5 +1,5 @@
-name: CSE WARP V17.501 — Vulkan visible viewport and stable DirectX day/night — Windows HD620
-run-name: V17.501 Vulkan viewport Qt + cycle solaire stable — CI ${{ github.run_number }}
+name: CSE WARP V17.501 — Vulkan WSI to Qt child surface — Windows HD620
+run-name: V17.501 surface Vulkan Qt + cycle solaire stable — CI ${{ github.run_number }}
 on:
   push:
     branches:
@@ -80,7 +80,7 @@ jobs:
         run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_BUILD_NUMBER=501
       - name: Compile
         run: cmake --build build-v17 --config Release --parallel 4
-      - name: Verify native DX11 startup UI and Vulkan selection (Qt offscreen)
+      - name: Verify Vulkan Qt child surface and DX11 startup UI (Qt offscreen)
         shell: pwsh
         env:
           QT_QPA_PLATFORM: 'offscreen'
@@ -650,7 +650,7 @@ jobs:
           if (!(Test-Path "$dst/audio/pripyat_radio.wav")) {throw 'V17.493 Ukrainian radio missing'}
           git rev-parse HEAD | Set-Content "$dst/VULKAN_INTEGRATION_COMMIT.txt"
           @(
-            'CSE WARP V17.501 Vulkan Qt viewport + DXGI',
+            'CSE WARP V17.501 Vulkan Qt WSI surface + DXGI',
             'Source baseline: master V17.493 beta + BASSEIN sign',
             'Native Vulkan WSI, two frames in flight, incremental PBR cache, diagnostics',
             'Hardware FPS, weather smoothness and periodic stutter REQUIRE real HD620 verification.'
@@ -712,7 +712,7 @@ jobs:
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.501-VULKAN-VISIBLE-VIEWPORT-DX11
+          name: CSE-WARP-V17.501-VULKAN-QT-WSI-DX11
           path: dist-v17/
           if-no-files-found: error
       - name: Benchmark GI hors ligne — trois scènes, trois cuissons et sept relectures
