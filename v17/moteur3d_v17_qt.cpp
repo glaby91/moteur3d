@@ -89,6 +89,7 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#include <windows.h>
 #include <dxgi1_2.h>
 // Some Windows SDK headers still expose min/max macros; the native renderer
 // already uses std::min/std::max extensively and must not be macro-expanded.
@@ -102,6 +103,14 @@
 
 using namespace m3d;
 namespace {
+int systemMemoryLoadPercent(){
+#if defined(_WIN32)
+    MEMORYSTATUSEX state{}; state.dwLength=sizeof(state);
+    return GlobalMemoryStatusEx(&state)?int(state.dwMemoryLoad):-1;
+#else
+    return -1;
+#endif
+}
 struct Result {
     QImage image;
     v16::CameraPreset cameraPose;
@@ -1389,6 +1398,18 @@ private:
     v16::CameraPreset beforeAnomalyCamera_{};
     bool hasBeforeAnomalyCamera_=false;
     QLabel* anomalyPanelLabel_=nullptr;
+    QLabel* sceneRevisionLabel_=nullptr;
+    QLabel* systemMemoryLabel_=nullptr;
+    QProgressBar* systemMemoryBar_=nullptr;
+    QTimer* memoryRefreshTimer_=nullptr;
+
+    void updateMemoryBanner(){
+        if(!systemMemoryLabel_||!systemMemoryBar_)return;
+        const int percent=systemMemoryLoadPercent();
+        if(percent<0){systemMemoryLabel_->setText(QStringLiteral("RAM n/d"));systemMemoryBar_->setValue(0);return;}
+        systemMemoryLabel_->setText(QStringLiteral("RAM %1 %").arg(percent));
+        systemMemoryBar_->setValue(percent);
+    }
 
     void displayRasterSettings(const RasterQualitySettings& q){
         const QSignalBlocker msaaBlocker(rasterMsaaBox_);
@@ -1693,6 +1714,21 @@ private:
             camerasToolbar->addAction(action);
             camerasMenu->addAction(action);
         }
+        camerasToolbar->addSeparator();
+        sceneRevisionLabel_=new QLabel(QStringLiteral("Scène —"),camerasToolbar);
+        sceneRevisionLabel_->setMinimumWidth(108);
+        sceneRevisionLabel_->setToolTip(QStringLiteral("Révision du manifeste de la scène chargée"));
+        camerasToolbar->addWidget(sceneRevisionLabel_);
+        systemMemoryLabel_=new QLabel(QStringLiteral("RAM —"),camerasToolbar);
+        systemMemoryLabel_->setToolTip(QStringLiteral("Charge de la mémoire physique système"));
+        camerasToolbar->addWidget(systemMemoryLabel_);
+        systemMemoryBar_=new QProgressBar(camerasToolbar);
+        systemMemoryBar_->setRange(0,100); systemMemoryBar_->setTextVisible(false);
+        systemMemoryBar_->setFixedSize(68,12);
+        camerasToolbar->addWidget(systemMemoryBar_);
+        memoryRefreshTimer_=new QTimer(this);
+        connect(memoryRefreshTimer_,&QTimer::timeout,this,[this]{updateMemoryBanner();});
+        memoryRefreshTimer_->start(1500); updateMemoryBanner();
         // V17.443 - one-click regression review at the EXACT user-reported
         // viewpoints, independent of the six artistic camera presets.
         auto* anomaliesMenu=menuBar()->addMenu(QStringLiteral("Anomalies"));
@@ -2544,8 +2580,11 @@ private:
         canvas_->enableSkyCompositing(false);
         renderTimeLabel_->setText(QStringLiteral("Dernier rendu : —"));
         materialLabel_->setText(QStringLiteral("Sélectionner un matériau dans le catalogue"));
-        setWindowTitle(QStringLiteral("CSE WARP Beta X V17.%1 — %2")
-            .arg(CSE_WARP_BUILD_NUMBER).arg(runtime_->title));
+        const QString sceneRevision=outcome.database.revision.trimmed();
+        if(sceneRevisionLabel_)sceneRevisionLabel_->setText(sceneRevision.isEmpty()?QStringLiteral("Scène —"):QStringLiteral("Scène %1").arg(sceneRevision));
+        const QString revisionSuffix=sceneRevision.isEmpty()?QStringLiteral("Scène sans révision"):QStringLiteral("Scène %1").arg(sceneRevision);
+        setWindowTitle(QStringLiteral("CSE WARP Beta X V17.%1 — %2 — %3")
+            .arg(CSE_WARP_BUILD_NUMBER).arg(runtime_->title,revisionSuffix));
         sunHour_->blockSignals(true);
         sunHour_->setValue(double(runtime_->daylightHour));
         sunHour_->blockSignals(false);
