@@ -297,7 +297,7 @@ public:
         viewportStack_->setContentsMargins(0,0,0,0);
         viewportStack_->addWidget(canvas_);
 #if defined(_WIN32) && M3D_V17_VULKAN_ENABLED
-        qtVulkanInstance_=new QVulkanInstance(this);
+        qtVulkanInstance_=new QVulkanInstance();
         qtVulkanInstance_->setApiVersion(QVersionNumber(1,3,204));
         if(!qtVulkanInstance_->create()){
             qWarning()<<"Qt Vulkan instance creation failed; Vulkan will use its Qt image fallback"
@@ -740,10 +740,12 @@ public:
         cleanup.waitForFinished();
 #endif
 #if defined(_WIN32) && M3D_V17_VULKAN_ENABLED
-        if(nativeWindow_&&qtVulkanInstance_){
+        if(nativeWindow_){
             nativeWindow_->destroy();
             nativeWindow_->setVulkanInstance(nullptr);
         }
+        delete qtVulkanInstance_;
+        qtVulkanInstance_=nullptr;
 #endif
         if(viewportStack_ && canvas_)viewportStack_->setCurrentWidget(canvas_);
     }
