@@ -1370,7 +1370,8 @@ class VulkanRaster final {
         free(color_);free(msColor_);free(depth_);free(readback_);
         width_=w;height_=h;
         color_=image(w,h,1,colorFormat_,
-                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT,VK_IMAGE_ASPECT_COLOR_BIT);
+                     VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT|
+                     VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_ASPECT_COLOR_BIT);
         if(msaaSamples_!=VK_SAMPLE_COUNT_1_BIT)
             msColor_=image(w,h,1,colorFormat_,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
                            VK_IMAGE_ASPECT_COLOR_BIT,false,1,msaaSamples_);
@@ -2099,7 +2100,7 @@ public:
                             <<" extent="<<w<<"x"<<h
                             <<" drawCalls="<<drawCalls
                             <<" meshVertices="<<vertexCount_
-                            <<" gpuDrawCalls="<<drawCalls
+                            <<" visibleChunksDrawn="<<drawCalls
                             <<" boxes="<<boxCount_<<" foliage="<<foliageCount_
                             <<" eye=("<<cam.eye.x<<","<<cam.eye.y<<","<<cam.eye.z<<")"
                             <<" forward=("<<cam.f.x<<","<<cam.f.y<<","<<cam.f.z<<")"
