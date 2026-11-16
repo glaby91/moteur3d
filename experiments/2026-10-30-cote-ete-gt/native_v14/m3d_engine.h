@@ -133,11 +133,14 @@ bool renderVulkanPreview(const Scene& s,const ShadowMap& sm,const Camera& cam,in
 // be destroyed while their owning thread, Win32 window and runtime are alive.
 void releaseVulkanPreviewForCurrentThread();
 void releaseVulkanDirectForCurrentThread();
-// Native Win32 Vulkan surface: no CPU pixel readback and no QImage.
-// The HWND is created on the Qt UI thread; VkSwapchainKHR is owned by the
-// persistent raster worker. Never pass a destroyed or temporary HWND.
+// Native Vulkan WSI: no CPU pixel readback and no QImage. When the host is
+// Qt, pass its QVulkanInstance and QWindow surface so the renderer presents
+// through the exact surface Qt associated with the embedded Vulkan window.
+// Standalone Win32 callers may omit these handles and let the renderer own WSI.
 bool renderVulkanDirectPresent(const Scene& s,const ShadowMap& sm,const Camera& cam,
-                               int w,int h,void* nativeWindow,Stats& stats,std::wstring& error);
+                               int w,int h,void* nativeWindow,Stats& stats,std::wstring& error,
+                               void* sharedVulkanInstance=nullptr,
+                               uintptr_t sharedVulkanSurface=0);
 // Renderer quality is a shared public API: embedded host software and the
 // standalone Qt interface modify exactly the same settings. Each DX11 frame
 // takes one atomic snapshot, preventing partial UI/worker configuration.

@@ -36,10 +36,16 @@
 #include <memory>
 #include <numeric>
 #include <stdexcept>
+#include <type_traits>
 #include <vector>
 
 namespace m3d { namespace {
 using Clock=std::chrono::steady_clock;
+template<class Handle>
+Handle vulkanHandleFromBits(uintptr_t bits) noexcept{
+    if constexpr(std::is_pointer_v<Handle>)return reinterpret_cast<Handle>(bits);
+    else return static_cast<Handle>(bits);
+}
 using Vertex=vkmesh::GpuVertex;
 constexpr uint32_t kMaxMaterials=256, kLights=64;
 void vkcheck(VkResult code,const char* name) {
@@ -126,6 +132,8 @@ class VulkanRaster final {
     bool swapDirty_=false;
     VkPresentModeKHR swapMode_=VK_PRESENT_MODE_FIFO_KHR;
     VkInstance instance_=VK_NULL_HANDLE;
+    bool ownsInstance_=true;
+    bool ownsSurface_=true;
     VkPhysicalDevice physical_=VK_NULL_HANDLE;
     VkDevice device_=VK_NULL_HANDLE;
     VkQueue queue_=VK_NULL_HANDLE;
@@ -902,16 +910,18 @@ class VulkanRaster final {
                  <<" requested="<<VK_VERSION_MAJOR(app.apiVersion)<<"."
                  <<VK_VERSION_MINOR(app.apiVersion)<<"."
                  <<VK_VERSION_PATCH(app.apiVersion)<<"\n";
-        VkInstanceCreateInfo i{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};i.pApplicationInfo=&app;
+        if(!instance_){
+            VkInstanceCreateInfo i{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};i.pApplicationInfo=&app;
 #ifdef _WIN32
-        const char* surfaceExtensions[]={VK_KHR_SURFACE_EXTENSION_NAME,VK_KHR_WIN32_SURFACE_EXTENSION_NAME};
-        if(presentWindow_){i.enabledExtensionCount=2;i.ppEnabledExtensionNames=surfaceExtensions;}
+            const char* surfaceExtensions[]={VK_KHR_SURFACE_EXTENSION_NAME,VK_KHR_WIN32_SURFACE_EXTENSION_NAME};
+            if(presentWindow_){i.enabledExtensionCount=2;i.ppEnabledExtensionNames=surfaceExtensions;}
 #else
-        if(presentWindow_)throw std::runtime_error("Native Vulkan presentation is Windows-only");
+            if(presentWindow_)throw std::runtime_error("Native Vulkan presentation is Windows-only");
 #endif
-        vkcheck(vkCreateInstance(&i,nullptr,&instance_),"create instance");
+            vkcheck(vkCreateInstance(&i,nullptr,&instance_),"create instance");
+        }
 #ifdef _WIN32
-        if(presentWindow_){
+        if(presentWindow_&&!displaySurface_){
             VkWin32SurfaceCreateInfoKHR si{VK_STRUCTURE_TYPE_WIN32_SURFACE_CREATE_INFO_KHR};
             si.hinstance=reinterpret_cast<HINSTANCE>(
                 GetWindowLongPtrW(reinterpret_cast<HWND>(presentWindow_),GWLP_HINSTANCE));
@@ -1792,7 +1802,17 @@ class VulkanRaster final {
         memcpy(uniform_.mapped,&f,sizeof(f));flush(uniform_);
     }
 public:
-    explicit VulkanRaster(void* win32Window=nullptr):presentWindow_(win32Window){}
+    explicit VulkanRaster(void* win32Window=nullptr,void* sharedInstance=nullptr,
+                          uintptr_t sharedSurface=0):presentWindow_(win32Window){
+        if(sharedInstance||sharedSurface){
+            if(!sharedInstance||!sharedSurface)
+                throw std::runtime_error("Qt Vulkan WSI requires both VkInstance and QWindow VkSurfaceKHR");
+            instance_=reinterpret_cast<VkInstance>(sharedInstance);
+            displaySurface_=vulkanHandleFromBits<VkSurfaceKHR>(sharedSurface);
+            ownsInstance_=false;
+            ownsSurface_=false;
+        }
+    }
     ~VulkanRaster(){
         // Opt-in teardown breadcrumbs to distinguish GPU shutdown from
         // Windows CRT/thread-local runtime termination (0xC0000409).
@@ -1802,8 +1822,8 @@ public:
         };
         checkpoint("BEGIN");
         if(!device_){
-            if(displaySurface_&&instance_)vkDestroySurfaceKHR(instance_,displaySurface_,nullptr);
-            if(instance_)vkDestroyInstance(instance_,nullptr);
+            if(ownsSurface_&&displaySurface_&&instance_)vkDestroySurfaceKHR(instance_,displaySurface_,nullptr);
+            if(ownsInstance_&&instance_)vkDestroyInstance(instance_,nullptr);
             return;
         }
         checkpoint("DEVICE_IDLE_BEGIN");
@@ -1854,8 +1874,8 @@ public:
         checkpoint("DEVICE_OBJECTS_RELEASED");
         vkDestroyDevice(device_,nullptr);
         checkpoint("DEVICE_DESTROYED");
-        if(displaySurface_)vkDestroySurfaceKHR(instance_,displaySurface_,nullptr);
-        if(instance_)vkDestroyInstance(instance_,nullptr);
+        if(ownsSurface_&&displaySurface_)vkDestroySurfaceKHR(instance_,displaySurface_,nullptr);
+        if(ownsInstance_&&instance_)vkDestroyInstance(instance_,nullptr);
         checkpoint("INSTANCE_DESTROYED");
     }
     bool render(const Scene& scene,const ShadowMap& shadows,const Camera& cam,
@@ -2112,14 +2132,19 @@ namespace {
 thread_local std::unique_ptr<VulkanRaster> tlsPreviewRenderer;
 thread_local std::unique_ptr<VulkanRaster> tlsDirectRenderer;
 thread_local void* tlsDirectWindow=nullptr;
+thread_local void* tlsDirectSharedInstance=nullptr;
+thread_local uintptr_t tlsDirectSharedSurface=0;
 }
 void releaseVulkanPreviewForCurrentThread(){
     tlsPreviewRenderer.reset();
 }
 void releaseVulkanDirectForCurrentThread(){
-    // Destroy the native VkSurfaceKHR while its Win32 HWND is still valid.
+    // Destroy device/swapchain objects while the Win32 HWND and borrowed Qt
+    // Vulkan surface are still alive. QVulkanInstance owns its VkSurfaceKHR.
     tlsDirectRenderer.reset();
     tlsDirectWindow=nullptr;
+    tlsDirectSharedInstance=nullptr;
+    tlsDirectSharedSurface=0;
 }
 bool renderVulkanPreview(const Scene& scene,const ShadowMap& shadow,const Camera& camera,
                          int w,int h,std::vector<uint32_t>& out,Stats& stats,std::wstring& error){
@@ -2130,13 +2155,19 @@ bool renderVulkanPreview(const Scene& scene,const ShadowMap& shadow,const Camera
 }
 
 bool renderVulkanDirectPresent(const Scene& scene,const ShadowMap& shadow,const Camera& camera,
-                               int w,int h,void* nativeWindow,Stats& stats,std::wstring& error){
+                               int w,int h,void* nativeWindow,Stats& stats,std::wstring& error,
+                               void* sharedVulkanInstance,uintptr_t sharedVulkanSurface){
     if(!nativeWindow){error=L"Null native HWND for Vulkan presentation";return false;}
     if(!vulkanRuntimeAvailable(error))return false;
-    if(!tlsDirectRenderer || tlsDirectWindow!=nativeWindow){
+    if(!tlsDirectRenderer || tlsDirectWindow!=nativeWindow ||
+       tlsDirectSharedInstance!=sharedVulkanInstance ||
+       tlsDirectSharedSurface!=sharedVulkanSurface){
         releaseVulkanDirectForCurrentThread();
-        tlsDirectRenderer=std::make_unique<VulkanRaster>(nativeWindow);
+        tlsDirectRenderer=std::make_unique<VulkanRaster>(
+            nativeWindow,sharedVulkanInstance,sharedVulkanSurface);
         tlsDirectWindow=nativeWindow;
+        tlsDirectSharedInstance=sharedVulkanInstance;
+        tlsDirectSharedSurface=sharedVulkanSurface;
     }
     std::vector<uint32_t> noCpuImage;
     return tlsDirectRenderer->render(scene,shadow,camera,w,h,noCpuImage,stats,error);

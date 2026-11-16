@@ -72,6 +72,10 @@
 #include <QVBoxLayout>
 #include <QStackedLayout>
 #include <QWindow>
+#if defined(_WIN32) && M3D_V17_VULKAN_ENABLED
+#include <QVulkanInstance>
+#include <QVersionNumber>
+#endif
 #include <QtConcurrent/QtConcurrentRun>
 #include <atomic>
 #include <chrono>
@@ -292,10 +296,26 @@ public:
         viewportStack_=new QStackedLayout(viewportRoot);
         viewportStack_->setContentsMargins(0,0,0,0);
         viewportStack_->addWidget(canvas_);
+#if defined(_WIN32) && M3D_V17_VULKAN_ENABLED
+        qtVulkanInstance_=new QVulkanInstance(this);
+        qtVulkanInstance_->setApiVersion(QVersionNumber(1,3,204));
+        if(!qtVulkanInstance_->create()){
+            qWarning()<<"Qt Vulkan instance creation failed; Vulkan will use its Qt image fallback"
+                      <<qtVulkanInstance_->errorCode();
+            delete qtVulkanInstance_;
+            qtVulkanInstance_=nullptr;
+        }
+#endif
         nativeWindow_=new QWindow;
-        // The native child is reserved for DXGI. Vulkan presents a QImage in
-        // the Qt canvas so a successful vkQueuePresentKHR can never hide a frame.
+        // Qt owns the embedded window surface; the Vulkan engine adopts the
+        // same instance/surface before it creates its swapchain.
+#if defined(_WIN32) && M3D_V17_VULKAN_ENABLED
+        nativeWindow_->setSurfaceType(qtVulkanInstance_
+            ?QSurface::VulkanSurface:QSurface::RasterSurface);
+        if(qtVulkanInstance_)nativeWindow_->setVulkanInstance(qtVulkanInstance_);
+#else
         nativeWindow_->setSurfaceType(QSurface::RasterSurface);
+#endif
         nativeWindow_->setFlags(Qt::FramelessWindowHint);
         nativeWindow_->installEventFilter(this);
         nativeContainer_=QWidget::createWindowContainer(nativeWindow_,viewportRoot,
@@ -457,13 +477,14 @@ public:
         if(!scenePath.isEmpty())
             QTimer::singleShot(0,this,[this,scenePath]{openScene(scenePath);});
     }
-    // UI contract smoke: DX11 uses its native child; Vulkan must stay on the Qt canvas.
+    // UI contract smoke: DX11 and an available QVulkanInstance use the native child.
     void smokeNativeUi(){
         QTimer::singleShot(0,this,[this]{
 #if defined(_WIN32)
             auto* quick=findChild<QComboBox*>(QStringLiteral("v17QuickRenderer"));
             const bool dx11Ready=backendBox_ && backendBox_->count()==6 &&
-                nativeWindow_ && nativeWindow_->surfaceType()==QSurface::RasterSurface &&
+                nativeWindow_ && nativeWindow_->surfaceType()==
+                    (qtVulkanSurfaceAvailable()?QSurface::VulkanSurface:QSurface::RasterSurface) &&
                 backendBox_->currentIndex()==4 && directDisplayBox_->isChecked() &&
                 backendBox_->itemText(5).contains(QStringLiteral("Vulkan")) &&
                 (backendBox_->model()->flags(backendBox_->model()->index(5,0)) &
@@ -472,13 +493,15 @@ public:
                 quick->itemText(5).contains(QStringLiteral("Vulkan")) &&
                 viewportStack_->currentWidget()==nativeContainer_;
             backendBox_->setCurrentIndex(5);
-            const bool vulkanVisiblePath=!nativeDirectSelected() &&
-                !directDisplayBox_->isEnabled() &&
-                viewportStack_->currentWidget()==canvas_;
+            const bool vulkanVisiblePath=qtVulkanSurfaceAvailable()
+                ?nativeDirectSelected() && directDisplayBox_->isEnabled() &&
+                 viewportStack_->currentWidget()==nativeContainer_
+                :!nativeDirectSelected() && !directDisplayBox_->isEnabled() &&
+                 viewportStack_->currentWidget()==canvas_;
             backendBox_->setCurrentIndex(4);
             switchNativeRenderViewport();
             const bool ok=dx11Ready&&vulkanVisiblePath;
-            std::fprintf(stderr,"V17 RENDER VIEWPORT: %s, Vulkan=Qt image canvas\n",
+            std::fprintf(stderr,"V17 RENDER VIEWPORT: %s, Vulkan=Qt WSI/direct or Qt-image fallback\n",
                 ok?"PASS":"FAIL");
             QCoreApplication::exit(ok?0:46);
 #else
@@ -716,6 +739,12 @@ public:
         });
         cleanup.waitForFinished();
 #endif
+#if defined(_WIN32) && M3D_V17_VULKAN_ENABLED
+        if(nativeWindow_&&qtVulkanInstance_){
+            nativeWindow_->destroy();
+            nativeWindow_->setVulkanInstance(nullptr);
+        }
+#endif
         if(viewportStack_ && canvas_)viewportStack_->setCurrentWidget(canvas_);
     }
 private:
@@ -733,6 +762,9 @@ private:
     QLabel* nativeHudLabel_=nullptr;
     QLabel* nativeFpsLabel_=nullptr;
     QWindow* nativeWindow_=nullptr;
+#if defined(_WIN32) && M3D_V17_VULKAN_ENABLED
+    QVulkanInstance* qtVulkanInstance_=nullptr;
+#endif
     QWidget* nativeContainer_=nullptr;
     QStackedLayout* viewportStack_=nullptr;
     QCheckBox* directDisplayBox_=nullptr;
@@ -1912,13 +1944,14 @@ private:
         cameraBox_=new QComboBox;
         backendBox_=new QComboBox;
         directDisplayBox_=new QCheckBox(QStringLiteral(
-            "Affichage GPU direct natif (DX11)"));
+            "Affichage GPU direct natif (DX11 / Vulkan)"));
 #ifdef _WIN32
-        // DX11 may present through DXGI. Vulkan renders on the GPU, then Qt
-        // displays the returned image so every completed frame stays visible.
+        // Both raster backends present into a native Qt child window. Vulkan
+        // direct mode is enabled only when Qt could create its Vulkan instance.
         directDisplayBox_->setCheckState(Qt::Checked);
         directDisplayBox_->setToolTip(QStringLiteral(
-            "DX11 : swapchain native. Vulkan : rendu GPU affiché dans le viewport Qt."));
+            "DX11 : swapchain DXGI. Vulkan : swapchain WSI via la surface Qt. "
+            "Décocher pour afficher l'image Vulkan dans le canvas Qt."));
 #else
         directDisplayBox_->setChecked(false);
         directDisplayBox_->setEnabled(false);
@@ -2312,9 +2345,11 @@ private:
         connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int index){
             if(exploring_ && index!=4 && index!=5)stopExploration();
             const bool gi=index==2||index==3;
-            directDisplayBox_->setEnabled(index==4);
+            directDisplayBox_->setEnabled(index==4 || (index==5&&qtVulkanSurfaceAvailable()));
             directDisplayBox_->setToolTip(index==5
-                ?QStringLiteral("Vulkan : rendu sur le GPU, image transférée au viewport Qt.")
+                ?(qtVulkanSurfaceAvailable()
+                    ?QStringLiteral("Vulkan : présentation directe par la surface Qt / swapchain.")
+                    :QStringLiteral("QVulkanInstance indisponible : rendu Vulkan par image Qt."))
                 :QStringLiteral("DX11 : swapchain native. Décochez pour afficher le rendu via Qt."));
             directSamples_->setEnabled(index==0);
             denoiseDirect_->setEnabled(index==0);
@@ -2707,11 +2742,19 @@ private:
         catalog->setExpanded(true);
     }
 
+    bool qtVulkanSurfaceAvailable() const{
+#if defined(_WIN32) && M3D_V17_VULKAN_ENABLED
+        return qtVulkanInstance_!=nullptr;
+#else
+        return false;
+#endif
+    }
     bool nativeDirectSelected() const{
 #ifdef _WIN32
-        // Only DX11 owns the native child HWND. Vulkan always returns pixels
-        // to the Qt image canvas; its WSI success code is not a visibility test.
-        return backendBox_ && backendBox_->currentIndex()==4 &&
+        // DX11 uses DXGI; Vulkan uses Qt's QVulkanInstance surface. Both
+        // present directly into the visible native child window.
+        return backendBox_ && (backendBox_->currentIndex()==4 ||
+               (backendBox_->currentIndex()==5 && qtVulkanSurfaceAvailable())) &&
                directDisplayBox_ && directDisplayBox_->isChecked();
 #else
         return false;
@@ -2914,6 +2957,30 @@ private:
         const bool wantGpu=backend==1||backend==4||backend==5;
         const bool raster=backend==4||backend==5;
         const bool vulkan=backend==5;
+        void* sharedVulkanInstance=nullptr;
+        uintptr_t sharedVulkanSurface=0;
+#if defined(_WIN32) && M3D_V17_VULKAN_ENABLED
+        if(vulkan&&directPresent){
+            const VkSurfaceKHR qtSurface=
+                QVulkanInstance::surfaceForWindow(nativeWindow_);
+            if(qtVulkanInstance_&&qtVulkanInstance_->vkInstance()&&
+               qtSurface!=VK_NULL_HANDLE){
+                sharedVulkanInstance=
+                    reinterpret_cast<void*>(qtVulkanInstance_->vkInstance());
+                static_assert(sizeof(qtSurface)<=sizeof(sharedVulkanSurface),
+                              "VkSurfaceKHR does not fit the opaque host handle");
+                std::memcpy(&sharedVulkanSurface,&qtSurface,sizeof(qtSurface));
+            }else{
+                qWarning()<<"Qt did not provide a Vulkan surface for the embedded viewport;"
+                             "switching this frame to Qt image presentation";
+                const QSignalBlocker blocked(directDisplayBox_);
+                directDisplayBox_->setChecked(false);
+                switchNativeRenderViewport();
+                QTimer::singleShot(0,this,[this]{requestRender();});
+                return;
+            }
+        }
+#endif
         const bool globalIllumination=backend==2||backend==3;
         const bool edgeAA=edgeAa_->isChecked();
         const unsigned sampleCount=globalIllumination?
@@ -2936,7 +3003,9 @@ private:
         }
         const auto shadowCache=cpuShadows_;
         watcher_.setFuture(QtConcurrent::run(&renderPool_,[this,serial,token,snapshot,preset,w,h,wantGpu,
-            globalIllumination,raster,vulkan,directPresent,nativeHandle,edgeAA,sampleCount,maxBounces,progressive,denoise,denoiseDirect,shadowCache,renderHour,shadowHour]{
+            globalIllumination,raster,vulkan,directPresent,nativeHandle,sharedVulkanInstance,
+            sharedVulkanSurface,edgeAA,sampleCount,maxBounces,progressive,denoise,
+            denoiseDirect,shadowCache,renderHour,shadowHour]{
             Result result;
             result.cameraPose=preset;
             result.generation=token;
@@ -2989,7 +3058,8 @@ private:
                         releaseDirectX11NativeForCurrentThread(); // HWND is shared by the native view
                         if(directPresent){
                             ok=renderVulkanDirectPresent(snapshot->renderScene,*shadow,camera,w,h,
-                                reinterpret_cast<void*>(nativeHandle),stats,reason);
+                                reinterpret_cast<void*>(nativeHandle),stats,reason,
+                                sharedVulkanInstance,sharedVulkanSurface);
                             if(!ok){
                                 const std::wstring nativeReason=reason;
                                 releaseVulkanDirectForCurrentThread();
