@@ -1309,8 +1309,8 @@ protected:
                 if(nativeDirectSelected()&&!closingRequested_)requestRender();
             });
         }
-        if((watched==canvas_||watched==nativeWindow_) && exploring_){
-            if(watched==nativeWindow_ &&
+        if((watched==canvas_||watched==nativeWindow_||watched==nativeContainer_) && exploring_){
+            if((watched==nativeWindow_||watched==nativeContainer_) &&
                (event->type()==QEvent::KeyPress || event->type()==QEvent::KeyRelease)){
                 if(event->type()==QEvent::KeyPress)
                     keyPressEvent(static_cast<QKeyEvent*>(event));
@@ -1322,12 +1322,12 @@ protected:
                 if(!mouseCaptured_)captureMouseLook();
                 if(e->button()==Qt::RightButton){
                     rightMouseHeld_=true;
-                    canvas_->setFocus();
+                    focusRenderViewport();
                     return true;
                 }
                 if(e->button()==Qt::LeftButton){
                     leftMouseHeld_=true;
-                    canvas_->setFocus();
+                    focusRenderViewport();
                     return true;
                 }
             }
@@ -1338,7 +1338,7 @@ protected:
             }
             if(event->type()==QEvent::MouseMove && mouseCaptured_){
                 auto* e=static_cast<QMouseEvent*>(event);
-                const bool direct=watched==nativeWindow_;
+                const bool direct=nativeDirectSelected()&&watched!=canvas_;
                 const QPoint center=direct?
                     QPoint(nativeWindow_->width()/2,nativeWindow_->height()/2):
                     canvas_->rect().center();
