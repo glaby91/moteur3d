@@ -1,6 +1,6 @@
 # CSE WARP Beta X — V17
 
-**Référence de développement (14/11/2026) : V17.493, scène БАССЕЙН dans le paquet Windows après restauration de la scène approuvée.** Le raster DX11 est le moteur principal, le CPU le comparateur ; [audit master](../docs/V17_493_MASTER_AUDIT_2026-11-14.md).
+**Base de scène : V17.493, scène БАССЕЙН restaurée. Révision logicielle en cours : V17.521.** Cette révision isole chaque backend dans sa propre fenêtre native : CPU ray tracing, D3D11 compute, GI2, GI4, raster DX11 et raster Vulkan. DX11 et Vulkan peuvent présenter directement dans leur HWND dédié ou passer par une image Qt. L’audit de la scène de référence reste [l’audit master V17.493](../docs/V17_493_MASTER_AUDIT_2026-11-14.md).
 
 **V17 = architecture temps réel en construction, sans abandonner les moteurs CPU et GPU V16.**
 
@@ -9,10 +9,10 @@
 ## Prototype V17-1 — déjà implémenté
 
 - `v17/moteur3d_v17_qt.cpp` : fenêtre V17, mode Exploration, clic gauche + souris pour regarder, ZQSD/flèches (AZERTY) pour se déplacer, Maj pour accélérer, espace/Ctrl pour monter/descendre, Échap pour arrêter.
-- `v17/CMakeLists.txt` : **réutilise directement le moteur V16 complet** (CPU ray tracing, CPU GI, D3D11 Compute, D3D11 Raster et scènes), sans recoder de moteur.
-- Rasterisation GPU existante ajoutée comme cinquième méthode, avec caches des ombres et scène chargée. Éclairage raster encore de première génération : l'amélioration de la chaleur, du verre et du PBR est une **étape ultérieure**.
+- `v17/CMakeLists.txt` : **réutilise directement le moteur V16 complet** (CPU ray tracing, CPU GI, D3D11 Compute, D3D11 Raster, Vulkan Raster et scènes), sans recoder de moteur.
+- Le raster DX11 est la cinquième méthode et Vulkan la sixième ; les deux utilisent la scène chargée et le cache d’ombres. L’éclairage raster reste de première génération : l’amélioration de la chaleur, du verre et du PBR est une **étape ultérieure**.
 - FPS mesurés à l'écran pendant l'exploration et durée de rendu disponible.
-- **Limitation temporaire essentielle :** raster DirectX11 renvoie encore les pixels vers le CPU pour affichage dans Qt. Donc l'affichage direct d'une texture GPU, le vsync et les 25 ms **ne sont pas encore obtenus**. Il faudra remplacer ce readback et profiler la GPU HD620.
+- **Présentation directe expérimentale :** le raster DX11 et le raster Vulkan proposent un chemin swapchain dans des fenêtres natives distinctes, sans readback par image. Le mode Qt/QImage reste disponible. Le fonctionnement de la présentation directe, du mouvement caméra et des animations doit encore être confirmé sur le Dell HD620 ; les résultats CI WARP ne suffisent pas à valider le comportement matériel.
 - Build Windows sur GitHub Actions avec `actions/checkout@v5` et `actions/upload-artifact@v6`, tests de non-régression V16 conservés.
 
 ## Tester sur le Dell
