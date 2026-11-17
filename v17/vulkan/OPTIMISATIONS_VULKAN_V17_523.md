@@ -2,7 +2,7 @@
 
 **Date :** 17 novembre 2026  
 **Base examinée :** branche `codex/v17.522-vulkan-present-lifetime`  
-**Nature :** revue statique du backend `v17/vulkan/m3d_vulkan.cpp`; aucune mesure ni compilation n'a été faite dans cet environnement. Les pistes ci-dessous sont donc des hypothèses à valider sur le Dell / Intel HD 620.
+**Nature :** revue statique du backend `v17/vulkan/m3d_vulkan.cpp`. Un micro-changement de tri est inclus dans cette branche, mais il reste à compiler et mesurer sur le Dell / Intel HD 620.
 
 ## État déjà présent dans la branche 522
 
@@ -20,7 +20,7 @@ Ces points ne sont donc pas à réimplémenter comme des nouveautés.
 
 Dans la boucle de rendu, les centres des triangles transparents sont reprojetés dans le comparateur de `std::sort` à chaque comparaison, puis les sommets sont recopiés dans le buffer transparent. C'est une piste plausible pour la baisse de fluidité pendant le mouvement de caméra.
 
-**Essai ciblé :** calculer une fois par frame la profondeur de chaque triangle, trier des paires profondeur/indice, puis remplir le buffer existant. Garder le même ordre de transparence et les mêmes données de sommets. Comparer les temps CPU de tri, de copie et le frametime p50/p95 sur une trajectoire caméra fixe, avant/après. Ne conserver le changement que si le benchmark montre un gain reproductible et aucune différence d'image.
+**Changement inclus dans cette branche :** une profondeur par triangle est calculée une fois par image, puis le tri compare les profondeurs pré-calculées. L'ordre de transparence visé et les sommets envoyés restent inchangés. Cela évite de refaire deux produits scalaires pour chaque comparaison du tri. Le gain n'est pas mesuré : compiler, comparer le temps CPU de tri/copie et le frametime p50/p95 sur la même trajectoire caméra, et vérifier l'image avant d'intégrer.
 
 ### P1 — Exploiter les mesures déjà instrumentées avant de toucher aux files GPU
 
