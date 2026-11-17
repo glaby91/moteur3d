@@ -190,24 +190,23 @@ public:
         fpsText_=next;
         scheduleQtPaint();
     }
-    static void drawCameraHud(QPainter& painter,const QRect& bounds,const QStringList& lines){
+    static void drawCameraHud(QPainter& painter,const QRect& bounds,const QStringList& lines,
+                              int rightInset=0){
         if(lines.isEmpty()||bounds.width()<240||bounds.height()<110)return;
         painter.save();
         QFont font=painter.font();font.setFamily(QStringLiteral("Consolas"));font.setPointSize(9);
         painter.setFont(font);
         const QFontMetrics fm(font);
-        int longest=0;
-        for(const auto& t:lines)longest=std::max(longest,fm.horizontalAdvance(t));
-        const int pad=12,lh=fm.height()+3;
-        const QRect panel(bounds.left()+12,bounds.top()+12,
-                          std::min(bounds.width()-24,longest+pad*2),lh*lines.size()+pad*2);
+        const int pad=10;
+        const QRect panel(bounds.left()+8,bounds.top()+8,
+                          std::max(120,bounds.width()-16-std::max(0,rightInset)),
+                          fm.height()+pad*2);
         painter.setPen(Qt::NoPen);painter.setBrush(QColor(10,18,27,208));
-        painter.drawRoundedRect(panel,8,8);
-        for(int i=0;i<lines.size();++i){
-            painter.setPen(i==0?QColor(140,224,245):QColor(236,243,249));
-            painter.drawText(panel.left()+pad,panel.top()+pad+fm.ascent()+i*lh,
-                fm.elidedText(lines[i],Qt::ElideRight,panel.width()-pad*2));
-        }
+        painter.drawRoundedRect(panel,6,6);
+        painter.setPen(QColor(226,239,247));
+        painter.drawText(panel.adjusted(pad,0,-pad,0),Qt::AlignVCenter|Qt::AlignLeft,
+            fm.elidedText(lines.join(QStringLiteral("   |   ")),Qt::ElideRight,
+                          panel.width()-pad*2));
         painter.restore();
     }
 protected:
@@ -265,7 +264,7 @@ protected:
             p.drawEllipse(center,1.75,1.75);
             p.restore();
         }
-        if(hudEnabled_)drawCameraHud(p,dst,hudLines_);
+        if(hudEnabled_)drawCameraHud(p,dst,hudLines_,fpsVisible_?105:0);
         if(fpsVisible_){
             // Count completed presentations, not a theoretical GPU FPS claim.
             p.save();
@@ -360,8 +359,8 @@ public:
         nativeRendererOverlay_=new QLabel(this,
             Qt::Tool|Qt::FramelessWindowHint|Qt::WindowDoesNotAcceptFocus);
         nativeRendererOverlay_->setObjectName(QStringLiteral("v17NativeRendererStamp"));
-        nativeRendererOverlay_->setGeometry(12,12,470,50);
-        nativeRendererOverlay_->setWordWrap(true);
+        nativeRendererOverlay_->setGeometry(12,12,470,34);
+        nativeRendererOverlay_->setWordWrap(false);
         nativeRendererOverlay_->setAttribute(Qt::WA_TransparentForMouseEvents);
         nativeRendererOverlay_->setStyleSheet(QStringLiteral(
             "QLabel { color: #dff7ff; background: rgba(9,15,22,220); "
@@ -418,9 +417,9 @@ public:
         // completed render time after 15 seconds.
         nativeHudLabel_=new QLabel(QStringLiteral("CAM —"),this);
         nativeHudLabel_->setMinimumWidth(215);
-        statusBar()->addPermanentWidget(nativeHudLabel_);
+        nativeHudLabel_->hide(); // Camera details belong in the render-window HUD.
         nativeFpsLabel_=new QLabel(QStringLiteral("FPS —"),this);
-        statusBar()->addPermanentWidget(nativeFpsLabel_);
+        nativeFpsLabel_->hide(); // Avoid duplicating the render-window FPS badge.
         renderTimeLabel_=new QLabel(QStringLiteral("Dernier rendu : —"),this);
         renderTimeLabel_->setObjectName(QStringLiteral("v16LastRenderTime"));
         statusBar()->addPermanentWidget(renderTimeLabel_);
@@ -571,7 +570,7 @@ public:
                 if(frameClock_.isValid()){
                     const qint64 frameMs=frameClock_.elapsed();
                     if(frameMs>0)renderTimeLabel_->setText(
-                        QStringLiteral("V17 : %1 ms · %2 FPS calculés")
+                        QStringLiteral("%1 ms · %2 FPS")
                             .arg(frameMs).arg(1000.0/double(frameMs),0,'f',1));
                 }
             } else if(exploring_ && !outcome.error.isEmpty()){
@@ -1214,7 +1213,7 @@ private:
     void toggleExploration(){
         if(exploring_){stopExploration();return;}
         if(!runtime_||runtime_->cameras.isEmpty())return;
-        if(backendBox_->currentIndex()!=4 && backendBox_->currentIndex()!=5)
+        if(!supportsExplorationBackend(backendBox_->currentIndex()))
             backendBox_->setCurrentIndex(4);
         if(!freeCameraActive_)activateFreeCamera();
         // An Intel HD 620 cannot reasonably sustain 8x MSAA during continuous
@@ -1357,6 +1356,11 @@ private:
         // Avoid queued stale frames. CPU draw/readback is still a V17-1
         // limitation and cannot yet guarantee the 25 ms target.
         if(!watcher_.isRunning()){frameClock_.start();requestRender();}
+    }
+    static bool supportsExplorationBackend(int index){
+        // HLSL compute is available for slower full-quality camera exploration
+        // through the existing QImage output. V17 raster remains the fast path.
+        return index==1||index==4||index==5;
     }
 protected:
     void closeEvent(QCloseEvent* event) override {
@@ -2477,7 +2481,7 @@ private:
             requestRender();
         });
         connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int index){
-            if(exploring_ && index!=4 && index!=5)stopExploration();
+            if(exploring_ && !supportsExplorationBackend(index))stopExploration();
             const bool gi=index==2||index==3;
             directDisplayBox_->setEnabled(index==4 || (index==5&&vulkanDirectAvailable()));
             directDisplayBox_->setToolTip(index==5
@@ -3087,12 +3091,24 @@ private:
         QString name=backendBox_->currentText();
         if(index==4)name=QStringLiteral("V17 D3D11 Raster");
         else if(index==5)name=QStringLiteral("V17 Vulkan Raster");
+        QSize requestedSize=qualityBox_?qualityBox_->currentData().toSize():QSize{};
+        if(!requestedSize.isValid()||requestedSize.isEmpty()){
+            requestedSize=canvas_?canvas_->size().boundedTo(QSize(1600,900)):QSize(1000,680);
+            requestedSize.setWidth(std::max(64,requestedSize.width()));
+            requestedSize.setHeight(std::max(64,requestedSize.height()));
+        }
         const bool direct=(index==4||index==5)&&directDisplayBox_&&directDisplayBox_->isChecked();
+        if(direct&&canvas_){
+            const qreal dpr=canvas_->devicePixelRatioF();
+            requestedSize=QSize(std::max(320,int(canvas_->width()*dpr)),
+                                std::max(200,int(canvas_->height()*dpr)));
+        }
         if(direct&&index>=0&&index<int(nativeDirectFailed_.size())&&
            nativeDirectFailed_[size_t(index)])
             name+=QStringLiteral(" — direct demandé, QImage actif après échec");
         else name+=direct?QStringLiteral(" — Direct GPU (swapchain)")
                          :QStringLiteral(" — affichage Qt (QImage)");
+        name+=QStringLiteral(" — %1×%2 demandé").arg(requestedSize.width()).arg(requestedSize.height());
         return name;
     }
     void updateRendererStamp(){
@@ -3107,17 +3123,25 @@ private:
                 ?QStringLiteral("Affiché : aucun rendu pour l’instant")
                 :QStringLiteral("Affiché : %1").arg(displayed);
             const QString waiting=pending
-                ?QStringLiteral("\nDemandé : %1").arg(requested):QString{};
+                ?QStringLiteral("Demandé : %1").arg(requested):QString{};
             // Direct swapchain presentation bypasses ImageView::paintEvent,
             // including its camera HUD. Keep the live camera readout on the
             // native output window as well as in the controls status bar.
             const QString camera=cameraHudEnabled_&&nativeHudLabel_&&
                     !nativeHudLabel_->text().isEmpty()
-                ?QStringLiteral("\n%1").arg(nativeHudLabel_->text()):QString{};
-            nativeRendererOverlay_->setText(shown+waiting+camera);
+                ?nativeHudLabel_->text():QString{};
+            QStringList overlayLines;
+            overlayLines<<shown;
+            if(!waiting.isEmpty())overlayLines<<waiting;
+            if(!camera.isEmpty())overlayLines<<camera;
+            const QString overlay=overlayLines.join(QStringLiteral("   |   "));
             if(canvas_){
                 nativeRendererOverlay_->move(canvas_->mapToGlobal(QPoint(12,12)));
-                nativeRendererOverlay_->setFixedSize(470,70);
+                const int width=std::max(220,canvas_->width()-24);
+                nativeRendererOverlay_->setFixedSize(width,34);
+                const QFontMetrics metrics(nativeRendererOverlay_->font());
+                nativeRendererOverlay_->setText(
+                    metrics.elidedText(overlay,Qt::ElideRight,width-20));
             }
             nativeRendererOverlay_->setVisible(nativeDirectSelected()&&canvas_&&canvas_->isVisible());
             if(nativeDirectSelected()&&canvas_&&canvas_->isVisible())
@@ -3129,6 +3153,7 @@ private:
         const int index=std::clamp(backendBox_->currentIndex(),0,
                                    int(backendWindows_.size())-1);
         const bool backendChanged=outputBackendIndex_!=index;
+        const QRect explorationRenderGeometry=canvas_?canvas_->geometry():QRect{};
         outputBackendIndex_=index;
         canvas_=backendWindows_[size_t(index)];
         // Keep the native status overlay owned and stacked with the renderer
@@ -3157,6 +3182,11 @@ private:
             view->setNativePresentation((i==index&&direct)||preserveInFlightPresent);
             if(i==index){
                 if(isVisible()){
+                    // Preserve the established left render pane when the
+                    // user changes backend during an active exploration.
+                    if(exploring_&&explorationWindowLayoutActive_&&
+                       !explorationRenderGeometry.isEmpty())
+                        view->setGeometry(explorationRenderGeometry);
                     if(view->isMinimized())view->showNormal();
                     else view->show();
                     view->raise();
