@@ -20,6 +20,13 @@ struct Sample {
     double renderMs = 0;
     double cameraLagMs = 0;
     unsigned pendingRequests = 0;
+    double simulatedHour = -1.0;
+    double shadowBuildMs = 0.0;
+    double shadowBucketHour = -1.0;
+    double gpuDrawMs = 0.0;
+    double gpuTransferMs = 0.0;
+    double gpuSubmitMs = 0.0;
+    double gpuWaitMs = 0.0;
 };
 struct Summary {
     size_t frames = 0;
