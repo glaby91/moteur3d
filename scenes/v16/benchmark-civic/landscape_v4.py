@@ -174,7 +174,16 @@ def main(root):
     # Backrests are on the OUTSIDE so a person can face the planted mound.
     seats=[o for o in instances if o['parent']=='Place/Banc ovale béton/Assise']
     assert len(seats)==96
+    # The V3 generator added 0.10 m to each side of every seat segment.
+    # After the 2x oval transform this left a 0.20 m overlap between modules.
+    # Trim that excess from each module's local -X (left) end, keeping the
+    # opposite end and all existing feet in place.
+    seat_left_trim_m=0.20
     for seat in seats:
+        theta=math.radians(float(seat.get('rotationY',0.0)))
+        seat['position'][0]=q(seat['position'][0]+(seat_left_trim_m/2)*math.cos(theta))
+        seat['position'][2]=q(seat['position'][2]-(seat_left_trim_m/2)*math.sin(theta))
+        seat['size'][0]=q(seat['size'][0]-seat_left_trim_m)
         x,_,z=seat['position']
         nx=(x-CENTER_X)/(32.9*32.9)
         nz=(z-CENTER_Z)/(21.0*21.0)
@@ -182,7 +191,7 @@ def main(root):
         xback=x+.64*nx/norm
         zback=z+.64*nz/norm
         box('Place/Banc ovale béton/V4b Dossier continu','prp_concrete_raw',
-            xback,1.23,zback,seat['size'][0]+.04,.54,.17,
+            xback,1.23,zback,max(.1,seat['size'][0]-.02),.54,.17,
             seat.get('rotationY',0))
     # Also retain the sober original metal/inset features from V3.
 
