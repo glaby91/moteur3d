@@ -353,7 +353,9 @@ public:
         nativeContainer_=QWidget::createWindowContainer(nativeWindow_,viewportRoot,
                                                         Qt::FramelessWindowHint);
         nativeContainer_->setFocusPolicy(Qt::StrongFocus);
-        nativeRendererOverlay_=new QLabel(nativeContainer_);
+        nativeContainer_->installEventFilter(this);
+        nativeRendererOverlay_=new QLabel(this,
+            Qt::Tool|Qt::FramelessWindowHint|Qt::WindowDoesNotAcceptFocus);
         nativeRendererOverlay_->setObjectName(QStringLiteral("v17NativeRendererStamp"));
         nativeRendererOverlay_->setGeometry(12,12,470,50);
         nativeRendererOverlay_->setWordWrap(true);
@@ -2851,8 +2853,12 @@ private:
             const QString waiting=pending
                 ?QStringLiteral("\nDemandé : %1").arg(requested):QString{};
             nativeRendererOverlay_->setText(shown+waiting);
+            if(nativeContainer_){
+                nativeRendererOverlay_->move(nativeContainer_->mapToGlobal(QPoint(12,12)));
+                nativeRendererOverlay_->setFixedSize(470,50);
+            }
             nativeRendererOverlay_->setVisible(nativeDirectSelected());
-            nativeRendererOverlay_->raise();
+            if(nativeDirectSelected())nativeRendererOverlay_->raise();
         }
     }
     void switchNativeRenderViewport(){
