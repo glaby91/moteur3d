@@ -300,7 +300,8 @@ private:
         for(const auto& line:lines)longest=std::max(longest,fm.horizontalAdvance(line));
         const int pad=9,lh=fm.height()+3;
         const int panelWidth=std::min(bounds.width()-24,longest+pad*2);
-        const QRect panel(bounds.left()+12,bounds.top()+12,panelWidth,lh*lines.size()+pad*2);
+        const int panelHeight=lh*lines.size()+pad*2;
+        const QRect panel(bounds.left()+12,bounds.bottom()-panelHeight-12,panelWidth,panelHeight);
         p.setPen(Qt::NoPen);p.setBrush(QColor(9,15,22,220));p.drawRoundedRect(panel,6,6);
         for(int i=0;i<lines.size();++i){
             p.setPen(i==0?QColor(143,232,255):QColor(255,218,132));
