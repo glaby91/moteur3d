@@ -3191,6 +3191,7 @@ private:
         fpsFiltered_=0.0;
         pacingClock_.restart();
     }
+    void recordImagePresented(){ recordImagePresented(Result{}); }
     void recordImagePresented(const Result& outcome){
         if(!pacingClock_.isValid())pacingClock_.start();
         const qint64 ms=pacingClock_.elapsed();
