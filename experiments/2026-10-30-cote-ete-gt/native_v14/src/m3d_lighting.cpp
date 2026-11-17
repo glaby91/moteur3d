@@ -5,7 +5,7 @@ namespace m3d {
 V sun=norm({.70f,.78f,-.714f}),skyZenith={126,170,209},skyHorizon={244,185,134},sunTint={255,246,223};
 float daylight=1.f,lampFactor=0.f,solarHour=14.75f;
 std::vector<Light> pointLights;
-size_t pointLightCount() noexcept { return pointLights.size(); }
+std::size_t pointLightCount() noexcept { return pointLights.size(); }
 void updateLighting(float hour){
  solarHour=hour;
  // Solar elevation and azimuth change together, not elevation alone:
