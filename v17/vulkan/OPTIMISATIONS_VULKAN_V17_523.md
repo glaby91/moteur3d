@@ -26,6 +26,21 @@ Dans la boucle de rendu, les centres des triangles transparents sont reprojetés
 
 Faire une campagne identique caméra immobile / caméra en déplacement, et conserver les mesures CPU (préparation de scène, tri transparent, enregistrement), GPU dessin/transfert, attente au retirement et frametime. Cela déterminera si la limite est CPU, GPU ou synchronisation avant toute nouvelle optimisation.
 
+### P0 — Mesurer et supprimer les gels du cycle jour/nuit
+
+Le code UI a deux opérations susceptibles de produire les pauses observées, quel que soit le moteur :
+
+- Le cycle 24 h / 6 min actualise le sélecteur d'heure toutes les 1,5 s. Son signal valueChanged demande alors un nouveau rendu complet.
+- Le rendu raster recalcule la shadow map CPU à des paliers d'heure simulée. Le pas vaut 0,25 h pour Vulkan, soit environ toutes les 3,75 s ; DX11 raster utilise déjà 1 h, soit environ toutes les 15 s. Le compute reçoit lui aussi des demandes de rendu à chaque tick, alors que certaines vues prennent plusieurs secondes à calculer.
+
+Ce sont des causes probables à confirmer par mesures. Ne pas ralentir le cycle ni retirer les ombres à l'aveugle.
+
+**Outil proposé : campagne jour/nuit A/B de 6 minutes**, avec une version courte de 2 minutes pour les diagnostics. Elle doit utiliser la vraie fenêtre d'affichage direct, une scène et une caméra fixes, une résolution/qualité identiques, et exécuter DX11 puis Vulkan avec le même cycle. Le benchmark A/B hors écran existant ne suffit pas pour cela : il mesure une autre voie de présentation.
+
+Enregistrer en CSV, à chaque frame : heure simulée, intervalle entre présentations, durée de rendu, temps de construction de shadow map et son palier, temps GPU, attente de fence, soumission, nombre de demandes coalescées et backend. Le rapport JSON donne p50/p95/p99/max, FPS, pauses >100/250/500/1000 ms, reconstructions d'ombres et leurs heures, ainsi que la version, la scène, le GPU, le pilote, la résolution et les réglages. Capturer une image de référence à heures fixes pour vérifier que la stabilisation n'a pas changé l'éclairage.
+
+**Correction visée après la première mesure :** dissocier le tic visuel/heure affichée de la demande de rendu complet ; réutiliser ou préparer les ombres hors du chemin critique et harmoniser les paliers DX11/Vulkan. Si le compute ne tient pas le temps réel, conserver l'animation du ciel et coalescer les mises à jour d'éclairage de surface au lieu d'empiler ou d'invalider des rendus. Valider les gels sur la campagne entière avant de promouvoir la correction.
+
 ### P1 — Vérifier le plafond réel des lumières
 
 Le raster Vulkan et le shader compute HLSL ont tous deux un plafond de 64 lumières. Ce nombre est une limite interne du moteur, pas une limite de Vulkan. Le benchmark A/B journalise maintenant les lumières générées, les lumières de scène, le nombre transmis au shader et le nombre ignoré. Ne pas augmenter le plafond avant de confirmer qu'il est atteint : les deux voies ont le même plafond, donc il n'explique pas à lui seul leur différence de tonalité.
