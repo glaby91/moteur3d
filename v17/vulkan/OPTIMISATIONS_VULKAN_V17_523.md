@@ -35,9 +35,14 @@ Le code UI a deux opérations susceptibles de produire les pauses observées, qu
 
 Ce sont des causes probables à confirmer par mesures. Ne pas ralentir le cycle ni retirer les ombres à l'aveugle.
 
-**Outil proposé : campagne jour/nuit A/B de 6 minutes**, avec une version courte de 2 minutes pour les diagnostics. Elle doit utiliser la vraie fenêtre d'affichage direct, une scène et une caméra fixes, une résolution/qualité identiques, et exécuter DX11 puis Vulkan avec le même cycle. Le benchmark A/B hors écran existant ne suffit pas pour cela : il mesure une autre voie de présentation.
+**Deux niveaux de test sont nécessaires.**
 
-Enregistrer en CSV, à chaque frame : heure simulée, intervalle entre présentations, durée de rendu, temps de construction de shadow map et son palier, temps GPU, attente de fence, soumission, nombre de demandes coalescées et backend. Le rapport JSON donne p50/p95/p99/max, FPS, pauses >100/250/500/1000 ms, reconstructions d'ombres et leurs heures, ainsi que la version, la scène, le GPU, le pilote, la résolution et les réglages. Capturer une image de référence à heures fixes pour vérifier que la stabilisation n'a pas changé l'éclairage.
+1. **Test fonctionnel de 6 minutes par moteur** : il couvre une fois le cycle complet jour/nuit et vérifie que les mises à jour de lumière et d'ombres passent bien aux heures attendues. Une variante de 2 minutes sert au diagnostic rapide, mais ne valide pas le cycle complet.
+2. **Test d'endurance de 30 minutes par moteur** : cinq cycles jour/nuit, après échauffement. Cela aide à révéler les gels intermittents, l'accumulation de demandes, une dérive mémoire ou une dégradation progressive. Lancer DX11 et Vulkan séparément, avec la vraie fenêtre directe, la même scène, caméra fixe, résolution et qualité ; cela représente environ une heure de mesure pour les deux moteurs.
+
+Le test de 6 minutes valide le cycle, pas la stabilité longue durée. Pour une validation candidate de livraison, une session de 60 minutes par moteur peut compléter l'endurance, surtout après toute modification de synchronisation ou de gestion mémoire. Le benchmark A/B hors écran existant ne suffit pas : il mesure une autre voie de présentation.
+
+Enregistrer en CSV, à chaque frame : heure simulée, intervalle entre présentations, durée de rendu, temps de construction de shadow map et son palier, temps GPU, attente de fence, soumission, nombre de demandes coalescées et backend. Le rapport JSON donne p50/p95/p99/max, FPS, pauses >100/250/500/1000 ms, reconstructions d'ombres et leurs heures, ainsi que la version, la scène, le GPU, le pilote, la résolution et les réglages. Suivre aussi le heartbeat UI, la mémoire du processus et les erreurs de périphérique pendant l'endurance. Capturer des images aux mêmes heures simulées pour vérifier que la stabilisation n'a pas changé l'éclairage.
 
 **Correction visée après la première mesure :** dissocier le tic visuel/heure affichée de la demande de rendu complet ; réutiliser ou préparer les ombres hors du chemin critique et harmoniser les paliers DX11/Vulkan. Si le compute ne tient pas le temps réel, conserver l'animation du ciel et coalescer les mises à jour d'éclairage de surface au lieu d'empiler ou d'invalider des rendus. Valider les gels sur la campagne entière avant de promouvoir la correction.
 
