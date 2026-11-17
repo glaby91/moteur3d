@@ -26,6 +26,18 @@ Dans la boucle de rendu, les centres des triangles transparents sont reprojetés
 
 Faire une campagne identique caméra immobile / caméra en déplacement, et conserver les mesures CPU (préparation de scène, tri transparent, enregistrement), GPU dessin/transfert, attente au retirement et frametime. Cela déterminera si la limite est CPU, GPU ou synchronisation avant toute nouvelle optimisation.
 
+### P1 — Vérifier le plafond réel des lumières
+
+Le raster Vulkan et le shader compute HLSL ont tous deux un plafond de 64 lumières. Ce nombre est une limite interne du moteur, pas une limite de Vulkan. Le benchmark A/B journalise maintenant les lumières générées, les lumières de scène, le nombre transmis au shader et le nombre ignoré. Ne pas augmenter le plafond avant de confirmer qu'il est atteint : les deux voies ont le même plafond, donc il n'explique pas à lui seul leur différence de tonalité.
+
+### P1 — Rapprocher l'éclairage raster du compute sans perdre la netteté
+
+Le retour visuel prioritaire est précis : le raster conserve mieux le détail des textures, mais paraît plus froid ; le compute donne une lumière indirecte plus crédible et plus chaude, avec des artefacts. La cible est de garder la netteté raster et de rapprocher l'éclairage diffus du compute, sans reprendre son bruit ni corriger l'écart en montant simplement l'exposition.
+
+Le raster Vulkan sait déjà lire une table GI 3D, mais seulement si l'option hybride est active et si le cache est valide pour la signature exacte de la scène. En l'absence de cache valide, il reste sur le soleil, l'ambiance hémisphérique et les lumières directes ; le log l'indique. Première étape : faire le comparatif compute/raster sur la même caméra, même heure, même résolution et même exposition, puis confirmer que Vulkan charge bien la table GI correspondant à la scène. Si elle est absente ou rejetée, corriger ce chargement avant de retoucher le shader.
+
+Le critère d'acceptation sera une lumière de sol et un rebond diffus plus chauds, des textures toujours aussi nettes, sans réintroduire les artefacts du compute ; mesurer le frametime avant/après sur HD 620. Si la table GI n'est pas assez stable, étudier une irradiance basse fréquence préfiltrée plutôt qu'un bruit de rayons par pixel.
+
 ### P2 — Synchronization2, comme migration de lisibilité et de vérification
 
 Migrer ensemble les barrières et la soumission de la voie Vulkan vers `vkCmdPipelineBarrier2` / `vkQueueSubmit2`, en gardant exactement les dépendances et étapes actuelles. L'objectif est de rendre les dépendances plus explicites et plus faciles à auditer ; **aucun gain FPS n'est présumé**. Garder le chemin de rendu et l'image de référence inchangés.
