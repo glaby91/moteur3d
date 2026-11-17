@@ -22,7 +22,7 @@ permissions:
   contents: read
   actions: read
 concurrency:
-  group: cse-warp-v17-${{ github.ref }}
+  group: cse-warp-v17-522-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   windows:

@@ -149,12 +149,12 @@ public:
         if(!enabled)update();
     }
     bool nativePresentation()const{return nativePresentation_;}
-    void setImage(QImage im){image_=std::move(im);paintPending_=true;update();}
+    void setImage(QImage im){image_=std::move(im);paintPending_=true;scheduleQtPaint();}
     void enableSkyCompositing(bool enabled){
         skyCompositing_=enabled;
         if(!enabled)skyImage_=QImage{};
         else skyDirty_=true;
-        update();
+        scheduleQtPaint();
     }
     bool hasSkyFrame()const{return !skyImage_.isNull()&&!skyDirty_;}
     void invalidateSky(){skyDirty_=true;}
@@ -163,23 +163,23 @@ public:
         if(!skyCompositing_)return;
         skyComposer_.render(skyImage_,camera,hour,seconds,cloudsEnabled,fastWeather);
         skyDirty_=false;
-        update();
+        scheduleQtPaint();
     }
     void onPresented(std::function<void()> callback){presented_=std::move(callback);}
-    void setPlaceholder(const QString& message){placeholder_=message;update();}
+    void setPlaceholder(const QString& message){placeholder_=message;scheduleQtPaint();}
     void setRendererStamp(QString displayed,QString requested){
         if(displayedRenderer_==displayed&&requestedRenderer_==requested)return;
-        displayedRenderer_=std::move(displayed);requestedRenderer_=std::move(requested);update();
+        displayedRenderer_=std::move(displayed);requestedRenderer_=std::move(requested);scheduleQtPaint();
     }
     void setCameraHud(QStringList lines,bool enabled){
         if(hudLines_==lines&&hudEnabled_==enabled)return;
-        hudLines_=std::move(lines);hudEnabled_=enabled;update();
+        hudLines_=std::move(lines);hudEnabled_=enabled;scheduleQtPaint();
     }
     void setScopeOverlay(float level){
         level=std::clamp(level,0.f,1.f);
         if(std::abs(scopeLevel_-level)<.002f)return;
         scopeLevel_=level;
-        update();
+        scheduleQtPaint();
     }
     void setFpsOverlay(double fps,bool visible){
         const QString next=visible&&fps>0.0
@@ -188,7 +188,7 @@ public:
         if(fpsVisible_==visible&&fpsText_==next)return;
         fpsVisible_=visible;
         fpsText_=next;
-        update();
+        scheduleQtPaint();
     }
     static void drawCameraHud(QPainter& painter,const QRect& bounds,const QStringList& lines){
         if(lines.isEmpty()||bounds.width()<240||bounds.height()<110)return;
@@ -285,6 +285,10 @@ protected:
         }
     }
 private:
+    // In native WSI mode Qt does not own the pixels in this HWND. Camera HUD,
+    // FPS and renderer-stamp changes must not schedule a Qt repaint that can
+    // clear the just-presented Vulkan swapchain image to the widget background.
+    void scheduleQtPaint(){if(!nativePresentation_)update();}
     QImage image_;
     QImage skyImage_;
     cse::weather::SkyCompositor skyComposer_;
@@ -2967,12 +2971,9 @@ private:
         const int renderWidth=area.width()-bandWidth;
         const QRect renderRect(area.left(),area.top(),renderWidth,area.height());
         const QRect bandRect(area.left()+renderWidth,area.top(),bandWidth,area.height());
-        // setGeometry() does not leave Qt's maximized state. Normalize both
-        // top-level windows first so the requested left/right layout takes effect.
-        if(canvas_->isMinimized()||canvas_->isMaximized()||canvas_->isFullScreen())
-            canvas_->showNormal();
+        if(canvas_->isMinimized()||canvas_->isFullScreen())canvas_->showNormal();
         canvas_->setGeometry(renderRect);
-        if(isMinimized()||isMaximized()||isFullScreen())showNormal();
+        if(isMinimized()||isFullScreen())showNormal();
         setGeometry(bandRect);
         show();
         raise();
