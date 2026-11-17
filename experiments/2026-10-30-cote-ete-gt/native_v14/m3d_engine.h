@@ -97,7 +97,7 @@ extern V sun,skyZenith,skyHorizon,sunTint;
 extern float daylight,lampFactor,solarHour;
 extern std::vector<Light> pointLights;
 // Exported accessor for DLL consumers; global data symbols are not exported by MSVC.
-size_t pointLightCount() noexcept;
+std::size_t pointLightCount() noexcept;
 void updateLighting(float hour);
 bool loadScene(const std::filesystem::path& path,Scene& s,std::wstring& error);
 inline bool loadScene(const wchar_t* path,Scene& s,std::wstring& error){return loadScene(std::filesystem::path(path),s,error);}
