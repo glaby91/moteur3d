@@ -5,6 +5,7 @@
 #include "camera_diagnostic.h"
 #include "anomaly_catalog.h"
 #include "frame_pacing.h"
+#include "day_night_render_policy.h"
 #include "pool_ladder.h"
 #include "weather/solar_cycle.h"
 #include "weather/sky_compositor.h"
@@ -3423,12 +3424,12 @@ private:
             ?float(cse::weather::cycleHour(dayNightOriginHour_,
                               double(dayNightClock_.elapsed())/1000.0))
             :snapshot->daylightHour;
-        // Keep lighting smooth, but rebuild the expensive 1024² CPU shadow map
-        // only once per simulated hour during DirectX day/night. At 24h/6min,
-        // this cuts rebuild stalls from every 3.75s to every 15s without lowering map quality.
-        const bool stableDxDayNight=backend==4 && dayNightCycleBox_ && dayNightCycleBox_->isChecked();
-        const float shadowStepHours=stableDxDayNight?1.0f:.25f;
-        const float shadowHour=std::floor(renderHour/shadowStepHours)*shadowStepHours;
+        // Keep sun/light values continuous; raster DX11 and Vulkan reuse one
+        // CPU shadow map per simulated hour during the accelerated day/night cycle.
+        // This avoids Vulkan's previous 1024² shadow rebuild every 3.75 real seconds.
+        const bool dayNightActive=dayNightCycleBox_&&dayNightCycleBox_->isChecked();
+        const float shadowStepHours=cse::daynight::shadowStepHours(backend,dayNightActive);
+        const float shadowHour=cse::daynight::shadowBucketHour(renderHour,shadowStepHours);
         auto preset=activeCameraPose();
         updateCameraHud();
         QSize renderSize=qualityBox_->currentData().toSize();
