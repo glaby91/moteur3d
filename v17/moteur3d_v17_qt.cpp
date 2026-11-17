@@ -2608,6 +2608,11 @@ private:
             applyingDayNightTick_=false;
         });
         connect(dayNightCycleBox_,&QCheckBox::toggled,this,[this](bool enabled){
+            if(!enabled&&dayNightBenchmarkPending_){
+                dayNightBenchmarkPending_=false;
+                ++dayNightBenchmarkGeneration_;
+                statusBar()->showMessage(QStringLiteral("Échauffement de la campagne annulé."),5000);
+            }
             if(enabled){
                 dayNightOriginHour_=sunHour_->value();
                 dayNightClock_.start();
@@ -3231,9 +3236,9 @@ private:
         const uint64_t generation=++dayNightBenchmarkGeneration_;
         dayNightBenchmarkDurationSeconds_=durationSeconds;
         dayNightBenchmarkStartHour_=14.75;
-        dayNightBenchmarkPending_=true;
         if(dayNightCycleBox_&&dayNightCycleBox_->isChecked())
             dayNightCycleBox_->setChecked(false);
+        dayNightBenchmarkPending_=true;
         sunHour_->setValue(dayNightBenchmarkStartHour_);
         dayNightOriginHour_=dayNightBenchmarkStartHour_;
         dayNightCycleBox_->setChecked(true);
