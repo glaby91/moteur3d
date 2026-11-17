@@ -1,5 +1,5 @@
-name: CSE WARP V17.522 — diagnostic WSI et exploration en bandeau — Windows HD620
-run-name: V17.522 fenêtres DX11 / Vulkan / CPU, diagnostic WSI — CI ${{ github.run_number }}
+name: CSE WARP V17.523 — diagnostic WSI et exploration en bandeau — Windows HD620
+run-name: V17.523 fenêtres DX11 / Vulkan / CPU, diagnostic WSI — CI ${{ github.run_number }}
 on:
   push:
     branches:
@@ -77,7 +77,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Ten-pass fast design preflight failed' }
       - name: Configure
         shell: pwsh
-        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_BUILD_NUMBER=522
+        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_BUILD_NUMBER=523
       - name: Compile
         run: cmake --build build-v17 --config Release --parallel 4
       - name: Verify six unique native backend HWNDs and renderer switching
@@ -147,7 +147,7 @@ jobs:
             if ($version.FileMajorPart -ne 17 -or
                 $version.FileMinorPart -ne 522 -or
                 $version.FileBuildPart -ne 0 -or $version.FilePrivatePart -ne 0) {
-              throw "Invalid V17.522 Windows build version in $name : $($version.FileVersion)"
+              throw "Invalid V17.523 Windows build version in $name : $($version.FileVersion)"
             }
           }
       - name: Validate light complex scene in native V17 loader
@@ -390,7 +390,7 @@ jobs:
           start "" "moteur3d_v17.exe" "benchmark-civic\\scene.json"
           '@ | Set-Content "dist-v17/LANCER_CSE_WARP.bat" -Encoding ascii
           @'
-          CSE WARP BetaX V17.522
+          CSE WARP BetaX V17.523
           Starting scene: exact approved V17.499 scene package, with V17.500 monument anchoring.
           Scene revision appears in the title bar after loading. The banner also shows system RAM use.
           '@ | Set-Content "dist-v17/README.txt" -Encoding utf8
@@ -413,7 +413,7 @@ jobs:
           if ($scene.revision -ne 'V17.500') { throw "Scene revision metadata missing" }
           & "dist-v17/moteur3d_v17_benchmark.exe" "dist-v17/benchmark-civic/scene.json" "build-v17/v500-anchored-scene-smoke" --smoke --camera-id v4_face --hour 19 --raster-msaa 1
           if ($LASTEXITCODE -ne 0) { throw "V17.500 anchored scene failed DirectX11 load/render" }
-      - name: Package dedicated V17.522 renderer windows after approved scene restoration
+      - name: Package dedicated V17.523 renderer windows after approved scene restoration
         shell: pwsh
         run: |
           $dst='dist-v17'
@@ -477,7 +477,7 @@ jobs:
           if (!(Test-Path "$dst/audio/pripyat_radio.wav")) {throw 'V17.493 Ukrainian radio missing'}
           git rev-parse HEAD | Set-Content "$dst/VULKAN_INTEGRATION_COMMIT.txt"
           @(
-            'CSE WARP V17.522 — isolated top-level HWND per rendering backend',
+            'CSE WARP V17.523 — isolated top-level HWND per rendering backend',
             'Source baseline: master V17.493 beta + BASSEIN sign',
             'Vulkan uses its dedicated top-level HWND; DX11, CPU, compute and GI each use a separate output window',
             'Direct WSI failures preserve the requested toggle, show the QImage recovery, and log reason plus HWND metadata under Documents/CSE WARP/Diagnostics',
@@ -541,7 +541,7 @@ jobs:
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.522-ISOLATED-BACKEND-WINDOWS-FULL-BENCHMARK
+          name: CSE-WARP-V17.523-ISOLATED-BACKEND-WINDOWS-FULL-BENCHMARK
           path: dist-v17/
           if-no-files-found: error
       - name: Benchmark GI hors ligne — trois scènes, trois cuissons et sept relectures
