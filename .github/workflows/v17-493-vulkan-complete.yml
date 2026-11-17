@@ -145,7 +145,7 @@ jobs:
             $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
             Write-Host "$name — $($version.ProductName) — $($version.FileVersion)"
             if ($version.FileMajorPart -ne 17 -or
-                $version.FileMinorPart -ne 522 -or
+                $version.FileMinorPart -ne 523 -or
                 $version.FileBuildPart -ne 0 -or $version.FilePrivatePart -ne 0) {
               throw "Invalid V17.523 Windows build version in $name : $($version.FileVersion)"
             }
