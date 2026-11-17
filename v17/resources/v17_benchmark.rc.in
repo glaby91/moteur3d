@@ -13,11 +13,11 @@ BEGIN
   BLOCK "040904E4"
   BEGIN
    VALUE "CompanyName", "CSE WARP\0"
-   VALUE "FileDescription", "CSE WARP V17.@V17_BUILD_NUMBER@ — Benchmark DirectX 11\0"
+   VALUE "FileDescription", "CSE WARP V17.@V17_BUILD_NUMBER@ — Full Benchmark DX11 Vulkan CPU direct\0"
    VALUE "FileVersion", "17.@V17_BUILD_NUMBER@\0"
    VALUE "InternalName", "moteur3d_v17_benchui\0"
    VALUE "OriginalFilename", "moteur3d_v17_benchui.exe\0"
-   VALUE "ProductName", "CSE WARP V17.@V17_BUILD_NUMBER@ Benchmark\0"
+   VALUE "ProductName", "CSE WARP V17.@V17_BUILD_NUMBER@ Full Benchmark\0"
    VALUE "ProductVersion", "17.@V17_BUILD_NUMBER@\0"
   END
  END

@@ -38,13 +38,14 @@ class BenchmarkWindow final : public QMainWindow {
 public:
     explicit BenchmarkWindow(const QString& scenePath,QStringList rasterArgs={})
         :qualityArgs_(std::move(rasterArgs)){
-        setWindowTitle(QStringLiteral("CSE WARP Beta X V17.%1 — Benchmark DirectX 11")
+        setWindowTitle(QStringLiteral("CSE WARP Beta X V17.%1 — Full Benchmark")
             .arg(CSE_WARP_BUILD_NUMBER));
         resize(820,590);
         auto* content=new QWidget(this);auto* layout=new QVBoxLayout(content);
         auto* intro=new QLabel(QStringLiteral(
-            "Benchmark V17 : DirectX 11 Raster (temps rendu + lecture GPU). Export automatique "
-            "CSV, JSON et PNG dans un sous-dossier horodaté. FPS estimés hors affichage Qt."));
+            "Full Benchmark : DirectX 11 Raster, Vulkan Raster et Ray Tracing CPU direct. "
+            "Mesures répétées sur les mêmes scènes et caméras; exports CSV, JSON, HTML et PNG. "
+            "Les temps GPU incluent la lecture hors écran, pas la présentation native Qt/WSI."));
         intro->setWordWrap(true);layout->addWidget(intro);
         if(!qualityArgs_.isEmpty()){
             auto* qualityInfo=new QLabel(QStringLiteral(
@@ -66,9 +67,9 @@ public:
         compare_=new QCheckBox(QStringLiteral("Comparer avec V16 : Compute HLSL et ray tracing CPU"));
         layout->addWidget(quick_);layout->addWidget(compare_);
         campaign_=new QCheckBox(QStringLiteral(
-            "Campagne complète : plusieurs scènes, résolutions, caméras, GPU/CPU et statistiques"),this);
+            "Full Benchmark : DirectX 11 Raster + Vulkan Raster + CPU Ray Tracing direct"),this);
         campaign_->setToolTip(QStringLiteral(
-            "Une seule compilation. Répète les mesures dans un ordre équilibré pour identifier une vraie tendance."));
+            "Compare les trois voies de rendu sur les mêmes scènes/caméras; les passes CPU utilisent 320 × 180 à 1 spp pour rester praticables."));
         layout->addWidget(campaign_);
         auto* campaignOptions=new QFormLayout;
         rounds_=new QSpinBox(this);
@@ -86,7 +87,7 @@ public:
             "Inclure les scènes fournies : pavillon, complexe léger/lourd/extrême, matériaux"),this);
         allScenes_->setChecked(true);
         cpuScaling_=new QCheckBox(QStringLiteral(
-            "Mesurer aussi le CPU (1/2/4/8/16/32 threads possibles) et Compute GPU"),this);
+            "Ajouter le profil CPU (1/2/4/8/16/32 threads) et le diagnostic Compute DX11"),this);
         cpuScaling_->setChecked(true);
         layout->addWidget(allScenes_);
         layout->addWidget(cpuScaling_);
@@ -98,6 +99,9 @@ public:
             rounds_->setEnabled(enabled);frames_->setEnabled(enabled);
             warmup_->setEnabled(enabled);allScenes_->setEnabled(enabled);
             cpuScaling_->setEnabled(enabled);
+            start_->setText(enabled
+                ?QStringLiteral("Lancer le Full Benchmark V17.%1").arg(CSE_WARP_BUILD_NUMBER)
+                :QStringLiteral("Lancer le benchmark DX11 V17.%1").arg(CSE_WARP_BUILD_NUMBER));
         });
         auto* gpuOptions=new QFormLayout;
         readback_=new QComboBox(this);
@@ -113,10 +117,10 @@ public:
             readback_->setEnabled(!checked&&!campaign_->isChecked());
         });
         layout->addWidget(new QLabel(QStringLiteral(
-            "Complet : deux caméras, 1366 × 768 et Full HD, 12 images par cas ; "
-            "médiane, P95, P99 et image PNG. Les performances WARP ne sont pas celles de la HD 620.")));
+            "Full Benchmark : deux caméras, 1366 × 768 et Full HD pour DX11/Vulkan, puis CPU direct "
+            "320 × 180 à 1 spp; médiane, P95, P99 et PNG. Le CPU et le GPU sont détaillés séparément.")));
         auto* controls=new QHBoxLayout;
-        start_=new QPushButton(QStringLiteral("Lancer le benchmark V17.%1")
+        start_=new QPushButton(QStringLiteral("Lancer le Full Benchmark V17.%1")
             .arg(CSE_WARP_BUILD_NUMBER));
         stop_=new QPushButton(QStringLiteral("Arrêter"));
         open_=new QPushButton(QStringLiteral("Ouvrir le dossier"));
@@ -128,7 +132,7 @@ public:
         layout->addWidget(status_);
         setCentralWidget(content);
         auto* help=menuBar()->addMenu(QStringLiteral("Aide"));
-        auto* about=help->addAction(QStringLiteral("À propos du Benchmark V17.%1…")
+        auto* about=help->addAction(QStringLiteral("À propos du Full Benchmark V17.%1…")
             .arg(CSE_WARP_BUILD_NUMBER));
         connect(about,&QAction::triggered,this,[this]{
             QString revision=QStringLiteral("développement");
@@ -137,15 +141,13 @@ public:
             if(file.open(QIODevice::ReadOnly|QIODevice::Text))
                 revision=QString::fromUtf8(file.readAll()).trimmed().left(12);
             QMessageBox::about(this,
-                QStringLiteral("Benchmark CSE WARP V17.%1").arg(CSE_WARP_BUILD_NUMBER),
-                QStringLiteral("<h3>CSE WARP V17.%1 — Benchmark DirectX 11</h3>"
+                QStringLiteral("Full Benchmark CSE WARP V17.%1").arg(CSE_WARP_BUILD_NUMBER),
+                QStringLiteral("<h3>CSE WARP V17.%1 — Full Benchmark</h3>"
                     "<p>Version 17.%1 — <b>Build GitHub : %1</b><br/>"
                     "Révision GitHub : %2</p>"
-                    "<p>Mesure Raster D3D11 : premier rendu, P50/P95/P99, "
-                    "FPS théoriques et triangles soumis au GPU.</p>"
-                    "<p>Chronométrage GPU DirectX 11 par timestamp/disjoint, "
-                    "attente CPU Map, conversion des pixels, "
-                    "comparaison de lecture à 1, 2 et 3 buffers.</p>"
+                    "<p>Comparaison DX11 Raster et Vulkan Raster (rendu hors écran avec lecture) avec Ray Tracing CPU direct à 1 spp.</p>"
+                    "<p>Mesures par image et par série : P50/P95/P99, dispersion, temps GPU draw/transfer, attente CPU et conversion. "
+                    "La présentation native Qt/WSI n’est pas mesurée.</p>"
                     "<p>Résultats CSV/JSON/PNG, comparaison V16 optionnelle.</p>")
                     .arg(QString::number(CSE_WARP_BUILD_NUMBER),revision.toHtmlEscaped()));
         });
@@ -220,6 +222,7 @@ private:
             args<<QStringLiteral("--rounds")<<QString::number(rounds_->value())
                 <<QStringLiteral("--frames")<<QString::number(frames_->value())
                 <<QStringLiteral("--warmup")<<QString::number(warmup_->value());
+            args<<QStringLiteral("--full-benchmark");
             if(allScenes_->isChecked())args<<QStringLiteral("--all-scenes");
             if(cpuScaling_->isChecked())args<<QStringLiteral("--include-cpu");
         }else{
@@ -232,7 +235,7 @@ private:
         args.append(qualityArgs_);
         log_->clear();
         status_->setText(campaign_->isChecked()
-            ?QStringLiteral("Campagne multi-séries en cours — CSV/JSON/HTML enregistrés après chaque scène…")
+            ?QStringLiteral("Full Benchmark en cours — DX11, Vulkan et CPU direct; CSV/JSON/HTML enregistrés après chaque scène…")
             :QStringLiteral("Benchmark en cours — export automatique actif…"));
         start_->setEnabled(false);stop_->setEnabled(true);
         process_.setWorkingDirectory(QCoreApplication::applicationDirPath());

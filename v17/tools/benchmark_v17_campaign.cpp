@@ -138,7 +138,7 @@ struct Samples {
 };
 struct Config{
     int rounds=6,frames=12,warmup=2;
-    bool smoke=false,simulation=false,allScenes=false,includeCpu=false;
+    bool smoke=false,simulation=false,allScenes=false,includeCpu=false,fullBenchmark=false;
     RasterQualitySettings quality{};
     QString selected,baseDir;
 };
@@ -214,6 +214,65 @@ bool runRasterBlock(const Scene& scene,const ShadowMap& shadows,const Camera& ca
     ++result.passes;
     return true;
 }
+
+template<typename RenderFn>
+bool runSynchronousBlock(Samples& result,int round,int frames,int warmup,
+                         RenderFn&& render,QTextStream& frameCsv){
+    std::vector<uint32_t> pixels;
+    Stats stats;std::wstring reason;
+    const auto invoke=[&](bool recordLatency){
+        reason.clear();
+        const auto start=Clock::now();
+        if(!render(pixels,stats,reason))return false;
+        if(pixels.size()!=size_t(result.w)*size_t(result.h)){
+            reason=L"Renderer returned an incomplete image";return false;
+        }
+        if(recordLatency)stats.ms=ms(start);
+        return true;
+    };
+    if(result.coldMs==0.){
+        const auto start=Clock::now();
+        if(!invoke(false)){
+            result.ok=false;result.error=QString::fromStdWString(reason);return false;
+        }
+        result.coldMs=ms(start);
+    }
+    for(int i=0;i<warmup;++i){
+        if(!invoke(false)){
+            result.ok=false;result.error=QString::fromStdWString(reason);return false;
+        }
+    }
+    const auto wall=Clock::now();
+    int received=0;
+    for(int i=0;i<frames;++i){
+        if(!invoke(true))break;
+        result.add(stats);
+        ++received;
+    }
+    const double wallDuration=ms(wall);
+    result.wallMs+=wallDuration;
+    if(received){
+        result.blockFps.push_back(received*1000./std::max(.001,wallDuration));
+        const int first=int(result.latency.size())-received;
+        for(int i=first;i<int(result.latency.size());++i){
+            frameCsv<<escapeCsv(result.scene)<<','<<escapeCsv(result.camera)<<','
+                <<escapeCsv(result.variant)<<','<<result.depth<<','<<round<<','
+                <<(i-first)<<','<<result.latency[size_t(i)]<<'\n';
+        }
+        frameCsv.flush();
+        if(result.baseline.empty())result.baseline=pixels;
+        else if(result.baseline!=pixels){
+            result.parity=false;reason=L"Non-deterministic frame pixels within one configuration";
+        }
+    }
+    if(received!=frames||!reason.empty()){
+        result.ok=false;
+        result.error=reason.empty()?QStringLiteral("Incomplete frame block"):QString::fromStdWString(reason);
+        return false;
+    }
+    ++result.passes;
+    return true;
+}
 void report(const QJsonObject& system,const std::vector<Samples>& cases,
             const QJsonArray& sideTests,QDir& dir,bool complete){
     QJsonArray rows;
@@ -246,7 +305,7 @@ void report(const QJsonObject& system,const std::vector<Samples>& cases,
     }else{
         for(const auto& c:cases)rows.append(c.json());
     }
-    const QJsonObject summary{{"schemaVersion",1},{"complete",complete},
+    const QJsonObject summary{{"schemaVersion",system.value("fullBenchmark").toBool()?2:1},{"complete",complete},
         {"system",system},{"cases",rows},{"subsystemTests",sideTests},
         {"completedUtc",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)}};
     writeJson(dir.filePath("summary.json"),summary);
@@ -254,14 +313,14 @@ void report(const QJsonObject& system,const std::vector<Samples>& cases,
     if(html.open(QIODevice::WriteOnly|QIODevice::Text|QIODevice::Truncate)){
         QTextStream out(&html);
         out<<"<!doctype html><html lang=\"fr\"><meta charset=\"utf-8\">"
-              "<title>CSE WARP V17 — campagne</title>"
+              "<title>CSE WARP V17 — Full Benchmark</title>"
               "<style>body{font:15px system-ui;max-width:1300px;margin:35px auto;"
               "padding:0 15px;color:#172336}table{border-collapse:collapse;width:100%}"
               "th,td{border-bottom:1px solid #ddd;padding:8px;text-align:right}"
               "td:first-child,th:first-child{text-align:left}th{background:#eaf0f8}"
-              "small{color:#596579}</style><h1>CSE WARP V17 — campagne complète</h1>"
-              "<p>Terminé : "<<(complete?"oui":"non")<<". Référence : GPU natif uniquement "
-              "sur la machine testée. Les FPS de pipeline ne sont pas les FPS écran.</p>"
+              "small{color:#596579}</style><h1>CSE WARP V17 — Full Benchmark</h1>"
+              "<p>Terminé : "<<(complete?"oui":"non")<<". Full Benchmark : DX11 Raster, "
+              "Vulkan Raster et Ray Tracing CPU direct. Les passes GPU mesurent le rendu hors écran avec lecture des pixels; elles ne mesurent pas la présentation native Qt/WSI.</p>"
               "<table><tr><th>Scène / caméra / variante</th><th>Pixels</th>"
               "<th>Buffers</th><th>Images</th><th>FPS débit</th><th>P50 ms</th>"
               "<th>P95 ms</th><th>Dispersion %</th><th>GPU draw ms</th>"
@@ -299,7 +358,7 @@ int main(int argc,char** argv){
     QTextStream out(stdout),err(stderr);
     const auto args=app.arguments();
     if(args.size()<3){
-        err<<"Usage: moteur3d_v17_campaign scene.json outdir [--rounds 6] "
+        err<<"Usage: moteur3d_v17_campaign scene.json outdir [--full-benchmark] [--rounds 6] "
               "[--frames 12] [--warmup 2] [--all-scenes] [--include-cpu] "
               "[--smoke] [--simulation] [--raster-msaa 1|2|4|8] [--raster-anisotropy 1|2|4|8|16] "
               "[--raster-lod-percent 50..200] [--raster-culling 0|1] "
@@ -311,6 +370,8 @@ int main(int argc,char** argv){
     cfg.baseDir=args[2];
     cfg.smoke=args.contains("--smoke");
     cfg.simulation=args.contains("--simulation");
+    cfg.fullBenchmark=args.contains("--full-benchmark");
+    if(cfg.fullBenchmark)setRasterCloudTimeScale(0.f);
     if(cfg.smoke&&cfg.simulation){
         err<<"--smoke and --simulation cannot be combined\n";return 2;
     }
@@ -350,7 +411,9 @@ int main(int argc,char** argv){
         err<<"Invalid raster settings: "<<QString::fromStdWString(error)<<"\n";return 2;
     }
     const QString stamp=QDateTime::currentDateTime().toString("yyyyMMdd_HHmmss_zzz");
-    const QString runName=QStringLiteral("CSE-WARP-V17.%1-CAMPAGNE-%2")
+    const QString runName=(cfg.fullBenchmark
+        ?QStringLiteral("CSE-WARP-V17.%1-FULL-BENCHMARK-%2")
+        :QStringLiteral("CSE-WARP-V17.%1-CAMPAGNE-%2"))
         .arg(CSE_WARP_BUILD_NUMBER).arg(stamp);
     if(!QDir(cfg.baseDir).mkpath(runName)){err<<"Cannot create output directory\n";return 3;}
     QDir dir(QDir(cfg.baseDir).filePath(runName));
@@ -360,7 +423,7 @@ int main(int argc,char** argv){
     QTextStream frameCsv(&raw);
     frameCsv<<"scene,camera,variant,readback_depth,round,frame,latency_ms\n";
     QJsonObject system{
-        {"engine","CSE WARP V17 complete benchmark campaign"},
+        {"engine",cfg.fullBenchmark?"CSE WARP V17 Full Benchmark":"CSE WARP V17 D3D11 campaign"},
         {"version",QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER)},
         {"timestampUtc",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
         {"os",QSysInfo::prettyProductName()},
@@ -369,6 +432,8 @@ int main(int argc,char** argv){
         {"qt",QStringLiteral(QT_VERSION_STR)},
         {"rounds",cfg.rounds},{"framesPerRound",cfg.frames},{"warmup",cfg.warmup},
         {"smoke",cfg.smoke},{"simulation",cfg.simulation},
+        {"fullBenchmark",cfg.fullBenchmark},{"includeCpuScaling",cfg.includeCpu},
+        {"backendMatrix",cfg.fullBenchmark?QJsonArray{QStringLiteral("D3D11 Raster preview/readback"),QStringLiteral("Vulkan Raster preview/readback"),QStringLiteral("CPU Ray Tracing PBR direct")}:QJsonArray{}},
         {"allScenes",cfg.allScenes},
         {"textureResolutionLimit",cfg.smoke||cfg.simulation?256:2048},
         {"simulationHardwareNote",cfg.simulation
@@ -378,7 +443,7 @@ int main(int argc,char** argv){
             {"msaaRequested",msaa},{"anisotropy",aniso},{"lodPercent",lod},
             {"culling",cull!=0},{"lodEnabled",dynamic!=0}
         }},
-        {"timings","D3D11 GPU timestamp (draw/copy); CPU Map wait and pixel conversion; per-frame and per-block statistics. Not onscreen FPS or vsync."},
+        {"timings",cfg.fullBenchmark?"D3D11 and Vulkan preview/readback call latency plus CPU direct ray tracing; these are offscreen renderer timings, not Qt/native swapchain presentation FPS.":"D3D11 GPU timestamp (draw/copy); CPU Map wait and pixel conversion; per-frame and per-block statistics. Not onscreen FPS or vsync."},
         {"limitations","No precise per-shader-stage costs, VRAM usage or Qt presentation timer. CPU scaling uses a deliberately small separate workload."}
     };
     QFile revision(QCoreApplication::applicationDirPath()+"/REVISION.txt");
@@ -478,27 +543,59 @@ int main(int argc,char** argv){
                     entry.depth=depth;entry.requestedMsaa=msaa;
                     cases.push_back(std::move(entry));
                 }
-                // Balance run order to avoid always penalizing the last buffer
-                // depth after GPU thermal ramp or boost frequency changes.
+                size_t vkIndex=cases.size();
+                if(cfg.fullBenchmark){
+                    Samples vkCase;
+                    vkCase.scene=sceneName;vkCase.camera=preset.id;
+                    vkCase.variant=QStringLiteral("Vulkan Raster preview + readback");
+                    vkCase.w=size.width();vkCase.h=size.height();vkCase.depth=1;
+                    vkCase.requestedMsaa=msaa;
+                    cases.push_back(std::move(vkCase));
+                }
+                const auto renderVulkan=[&](std::vector<uint32_t>& image,Stats& frameStats,
+                                            std::wstring& why){
+                    auto& entry=cases[vkIndex];
+                    return renderVulkanPreview(runtime.renderScene,shadows,camera,
+                        entry.w,entry.h,image,frameStats,why);
+                };
+                // Rotate the order across four paths so Vulkan is not always
+                // measured after every DX11 pass at a higher GPU temperature.
+                const int modeCount=cfg.fullBenchmark?4:3;
                 for(int round=0;round<cfg.rounds;++round){
-                    for(int order=0;order<3;++order){
-                        const int depth=1+(order+round)%3;
-                        Samples& entry=cases[index+size_t(depth-1)];
-                        if(!entry.ok)continue;
-                        if(!runRasterBlock(runtime.renderScene,shadows,camera,entry,
-                                           round,cfg.frames,cfg.warmup,frameCsv)){
-                            allOk=false;
-                            err<<"FAILED "<<sceneName<<" depth "<<depth<<": "<<entry.error<<"\n";
+                    for(int order=0;order<modeCount;++order){
+                        const int mode=(order+round)%modeCount;
+                        if(cfg.fullBenchmark&&mode==3){
+                            auto& entry=cases[vkIndex];
+                            if(entry.ok&&!runSynchronousBlock(entry,round,cfg.frames,
+                                                               cfg.warmup,renderVulkan,frameCsv)){
+                                allOk=false;
+                                err<<"FAILED "<<sceneName<<" Vulkan: "<<entry.error<<"\n";
+                            }else if(entry.ok){
+                                out<<"  "<<preset.id<<" "<<size.width()<<"x"<<size.height()
+                                   <<" Vulkan round "<<(round+1)<<"/"<<cfg.rounds
+                                   <<" => "<<QString::number(entry.blockFps.back(),'f',2)
+                                   <<" renderer FPS (readback)\n";out.flush();
+                            }
                         }else{
-                            out<<"  "<<preset.id<<" "<<size.width()<<"x"<<size.height()
-                               <<" buffer "<<depth<<" round "<<(round+1)<<"/"<<cfg.rounds
-                               <<" => "<<QString::number(entry.blockFps.back(),'f',2)
-                               <<" pipeline FPS\n";out.flush();
+                            const int depth=mode+1;
+                            Samples& entry=cases[index+size_t(depth-1)];
+                            if(!entry.ok)continue;
+                            if(!runRasterBlock(runtime.renderScene,shadows,camera,entry,
+                                               round,cfg.frames,cfg.warmup,frameCsv)){
+                                allOk=false;
+                                err<<"FAILED "<<sceneName<<" depth "<<depth<<": "<<entry.error<<"\n";
+                            }else{
+                                out<<"  "<<preset.id<<" "<<size.width()<<"x"<<size.height()
+                                   <<" DX11 buffer "<<depth<<" round "<<(round+1)<<"/"<<cfg.rounds
+                                   <<" => "<<QString::number(entry.blockFps.back(),'f',2)
+                                   <<" pipeline FPS\n";out.flush();
+                            }
                         }
                     }
                 }
-                // Cross-mode image parity checked independently from in-mode
-                // per-round determinism.
+                // Compare the DX11 readback-depth variants independently from
+                // repeated-frame determinism. Vulkan is compared within its
+                // own backend and is reported as a separate case.
                 const auto& reference=cases[index].baseline;
                 for(size_t j=index;j<index+3;++j){
                     auto& entry=cases[j];
@@ -510,6 +607,15 @@ int main(int argc,char** argv){
                     if(!entry.baseline.empty()){
                         const QString name=QStringLiteral("images/scene%1_cam%2_%3x%4_depth%5.png")
                             .arg(sceneIndex).arg(cameraIndex).arg(entry.w).arg(entry.h).arg(entry.depth);
+                        if(writeImage(dir.filePath(name),entry.baseline,entry.w,entry.h))
+                            entry.image=name;
+                    }
+                }
+                if(cfg.fullBenchmark){
+                    auto& entry=cases[vkIndex];
+                    if(!entry.baseline.empty()){
+                        const QString name=QStringLiteral("images/full_scene%1_cam%2_%3x%4_vulkan.png")
+                            .arg(sceneIndex).arg(cameraIndex).arg(entry.w).arg(entry.h);
                         if(writeImage(dir.filePath(name),entry.baseline,entry.w,entry.h))
                             entry.image=name;
                     }
@@ -528,7 +634,7 @@ int main(int argc,char** argv){
         const bool pavilionPresent=std::any_of(unique.cbegin(),unique.cend(),
             [](const QString& p){return QFileInfo(p).dir().dirName().compare(
                 QStringLiteral("pavillon01"),Qt::CaseInsensitive)==0;});
-        if(cfg.includeCpu&&!cpuDone &&
+        if((cfg.includeCpu||cfg.fullBenchmark)&&!cpuDone &&
            (!cfg.allScenes || isPavilion ||
             (!pavilionPresent&&sceneIndex+1==unique.size()))){
             cpuDone=true;
@@ -542,7 +648,51 @@ int main(int argc,char** argv){
             std::vector<uint32_t> pixels;
             std::atomic<uint64_t> generation{1};
             const int available=std::clamp(QThread::idealThreadCount(),1,32);
-            for(int workers:{1,2,4,8,16,32}){
+            if(cfg.fullBenchmark){
+                Samples cpuCase;
+                cpuCase.scene=sceneName;cpuCase.camera=preset.id;
+                cpuCase.variant=QStringLiteral("CPU direct Ray Tracing PBR (1 spp, %1 threads)")
+                    .arg(available);
+                cpuCase.w=cpuW;cpuCase.h=cpuH;cpuCase.depth=1;
+                const size_t cpuIndex=cases.size();
+                cases.push_back(std::move(cpuCase));
+                auto& entry=cases[cpuIndex];
+                const auto renderCpu=[&](std::vector<uint32_t>& image,Stats& frameStats,
+                                         std::wstring& why){
+                    frameStats=render(runtime.renderScene,shadows,cam,cpuW,cpuH,image,
+                        unsigned(available),false,generation,1,1,false,false,false,3);
+                    if(image.size()!=size_t(cpuW)*size_t(cpuH)){
+                        why=L"CPU direct renderer returned an incomplete image";return false;
+                    }
+                    frameStats.ms=0.;
+                    frameStats.tests=0; // CPU intersection tests are not submitted triangles.
+                    return true;
+                };
+                const int cpuRounds=std::min(cfg.rounds,3);
+                const int cpuFrames=std::min(cfg.frames,6);
+                const int cpuWarmup=std::min(cfg.warmup,1);
+                tick=Clock::now();
+                for(int round=0;round<cpuRounds&&entry.ok;++round){
+                    if(!runSynchronousBlock(entry,
+                           round,cpuFrames,cpuWarmup,renderCpu,frameCsv)){
+                        allOk=false;
+                        err<<"FAILED "<<sceneName<<" CPU direct: "<<entry.error<<"\n";
+                        break;
+                    }
+                }
+                const double cpuElapsed=ms(tick);
+                side.append(subsystem(sceneName,"cpu_direct_full_benchmark",
+                    cpuElapsed,entry.ok,QStringLiteral("%1 spp, %2 threads, %3x%4; %5 rounds x %6 frames")
+                    .arg(1).arg(available).arg(cpuW).arg(cpuH).arg(cpuRounds).arg(cpuFrames)));
+                if(!entry.baseline.empty()){
+                    const QString name=QStringLiteral("images/full_scene%1_cpu_direct_%2x%3.png")
+                        .arg(sceneIndex).arg(cpuW).arg(cpuH);
+                    if(writeImage(dir.filePath(name),entry.baseline,cpuW,cpuH))
+                        entry.image=name;
+                }
+                report(system,cases,side,dir,false);
+            }
+            if(cfg.includeCpu)for(int workers:{1,2,4,8,16,32}){
                 if(workers>available)continue;
                 std::vector<double> times;
                 // CPU trend must use the same repeat count as the GPU
@@ -567,6 +717,7 @@ int main(int argc,char** argv){
                 out<<"  CPU "<<workers<<" threads "<<mean(times)
                    <<" ms @"<<cpuW<<"x"<<cpuH<<"\n";out.flush();
             }
+            if(cfg.includeCpu){
             tick=Clock::now();
             Stats computeStats;
             std::wstring computeError;
@@ -583,9 +734,11 @@ int main(int argc,char** argv){
                    <<QString::fromStdWString(computeError)<<"\n";
                 err.flush();
             }
+            }
         }
         report(system,cases,side,dir,false);
     }
+    if(cfg.fullBenchmark){releaseVulkanPreviewForCurrentThread();setRasterCloudTimeScale(1.f);}
     report(system,cases,side,dir,true);
     out<<"Campaign complete: "<<cases.size()<<" GPU cases, "
        <<side.size()<<" subsystem records; result "<<dir.absolutePath()<<"\n";
