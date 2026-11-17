@@ -1865,11 +1865,20 @@ private:
                 QMessageBox::information(this,QStringLiteral("Benchmark"),QStringLiteral("Charger une scène avant de lancer le benchmark."));
                 return;
             }
-            const QString path=QCoreApplication::applicationDirPath()
-                +QStringLiteral("/outils/benchmark/moteur3d_v17_benchui.exe");
-            if(!QFileInfo::exists(path)){
+            const QString appDir=QCoreApplication::applicationDirPath();
+            const QStringList candidates{
+                appDir+QStringLiteral("/outils/benchmark/moteur3d_v17_benchui.exe"),
+                appDir+QStringLiteral("/tools/benchmark/moteur3d_v17_benchui.exe"),
+                appDir+QStringLiteral("/moteur3d_v17_benchui.exe")
+            };
+            QString path;
+            for(const QString& candidate:candidates){
+                if(QFileInfo::exists(candidate)){path=candidate;break;}
+            }
+            if(path.isEmpty()){
                 QMessageBox::warning(this,QStringLiteral("Benchmark indisponible"),
-                                     QStringLiteral("Programme de benchmark introuvable : %1").arg(path));
+                    QStringLiteral("Programme de benchmark introuvable. Chemins vérifiés : %1")
+                        .arg(candidates.join(QStringLiteral("\n"))));
                 return;
             }
             // The benchmark is another process: the DLL's atomic settings
@@ -2394,10 +2403,12 @@ private:
             progressiveGi_->setEnabled(gi);
             denoiseGi_->setEnabled(gi);
             switchNativeRenderViewport();
+            restoreExplorationViewportFocus();
             requestRender();
         });
         connect(directDisplayBox_,&QCheckBox::toggled,this,[this](bool){
             switchNativeRenderViewport();
+            restoreExplorationViewportFocus();
             requestRender();
         });
         connect(qualityBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){requestRender();});
@@ -2802,6 +2813,19 @@ private:
             nativeContainer_->setFocus(Qt::OtherFocusReason);
             nativeWindow_->requestActivate();
         }else if(canvas_)canvas_->setFocus(Qt::OtherFocusReason);
+    }
+    void restoreExplorationViewportFocus(){
+        if(!exploring_)return;
+        // Changing the backend or the direct-display checkbox takes keyboard
+        // focus away from the render child. Keep the camera pose and rebind
+        // mouse-look to the newly selected viewport after Qt finishes swapping
+        // the stacked widget; otherwise Vulkan renders only the entry frame.
+        releaseMouseLook();
+        QTimer::singleShot(0,this,[this]{
+            if(!exploring_||closingRequested_)return;
+            focusRenderViewport();
+            captureMouseLook();
+        });
     }
     QString requestedRendererStamp() const {
         if(!backendBox_)return QStringLiteral("Rendu en attente");
