@@ -3070,7 +3070,11 @@ private:
             bool ok=false;
             if(wantGpu){
                 std::wstring reason;
-                if(!raster)releaseDirectX11NativeForCurrentThread();
+                if(!raster){
+                    releaseDirectX11NativeForCurrentThread();
+                    releaseVulkanDirectForCurrentThread();
+                    releaseVulkanPreviewForCurrentThread();
+                }
                 if(raster){
                     std::shared_ptr<const ShadowMap> shadow;
                     {
@@ -3107,6 +3111,9 @@ private:
                     }
                     if(vulkan){
                         releaseDirectX11NativeForCurrentThread(); // HWND is shared by the native view
+                        // Keep one Vulkan device/resource set resident for the selected path.
+                        if(directPresent)releaseVulkanPreviewForCurrentThread();
+                        else releaseVulkanDirectForCurrentThread();
                         if(directPresent){
                             ok=renderVulkanDirectPresent(snapshot->renderScene,*shadow,camera,w,h,
                                 reinterpret_cast<void*>(nativeHandle),stats,reason,
@@ -3131,8 +3138,10 @@ private:
                         }
                     }else{
                         // Vulkan WSI and DXGI must never own swapchains for the
-                        // same child HWND at the same time.
+                        // same child HWND at the same time. Also release the
+                        // offscreen renderer when leaving Vulkan.
                         releaseVulkanDirectForCurrentThread();
+                        releaseVulkanPreviewForCurrentThread();
                         ok=directPresent?
                             renderDirectX11Native(snapshot->renderScene,*shadow,camera,w,h,
                                                    reinterpret_cast<void*>(nativeHandle),stats,reason):
@@ -3178,6 +3187,11 @@ private:
                                             :QStringLiteral("V17 GPU D3D11 — erreur");
                     return result;
                 }
+            }
+            if(!wantGpu){
+                releaseDirectX11NativeForCurrentThread();
+                releaseVulkanDirectForCurrentThread();
+                releaseVulkanPreviewForCurrentThread();
             }
             if(!ok){
                 releaseDirectX11NativeForCurrentThread();

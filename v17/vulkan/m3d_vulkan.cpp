@@ -210,6 +210,7 @@ class VulkanRaster final {
     bool srgbColorEnabled_=false;
     VkFormat colorFormat_=VK_FORMAT_R8G8B8A8_UNORM;
     bool started_=false;
+    bool depthPrepassEnabled_=false;
     uint32_t msaaSetting_=2;
     VkSampleCountFlagBits msaaSamples_=VK_SAMPLE_COUNT_1_BIT;
     VkFormat depthFormat_=VK_FORMAT_D32_SFLOAT;
@@ -1030,9 +1031,12 @@ class VulkanRaster final {
         std::clog<<"[CSE WARP Vulkan] Readback color="<<(bgraReadback_?"BGRA8":"RGBA8")
                  <<" transfer="<<(srgbColorEnabled_?"sRGB hardware default":"legacy UNORM diagnostic")
                  <<" (no calibration, =0 legacy diagnostic)\n";
-        // Always-on engine pipeline: no per-frame or startup A/B decision.
-        // DX11 has its own independent renderer and is not modified.
-        std::clog<<"[CSE WARP Vulkan] Generic opaque Z-prepass=always-on (no runtime toggle)\n";
+        // Match the DX11 production default: the extra geometry pass is opt-in.
+        // Use M3D_V17_EXPERIMENT_Z_PREPASS=1 to compare on the target GPU.
+        const char* zPrepassEnv=std::getenv("M3D_V17_EXPERIMENT_Z_PREPASS");
+        depthPrepassEnabled_=zPrepassEnv&&std::strcmp(zPrepassEnv,"1")==0;
+        std::clog<<"[CSE WARP Vulkan] Opaque Z-prepass="
+                 <<(depthPrepassEnabled_?"enabled (experimental)":"disabled (default)")<<"\n";
         // Query the exact color and depth image sample counts as Khronos recommends.
         VkFormatProperties dp{};
         vkGetPhysicalDeviceFormatProperties(physical_,depthFormat_,&dp);
@@ -1344,12 +1348,11 @@ class VulkanRaster final {
         skyStages[1].module=skyModules[1];
         VkPipelineVertexInputStateCreateInfo emptyVertex{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
         VkPipelineDepthStencilStateCreateInfo skyDepth=ds;
-        // Opaque Z-prepass is guaranteed before sky. Depth EQUAL=1.0 means
-        // only background (or transparency without opaque depth) shades sky.
-        // This removes cloud work hidden by buildings without changing sky pixels.
-        skyDepth.depthTestEnable=VK_TRUE;
+        // With the optional prepass, shade only untouched background pixels.
+        // Otherwise draw the sky first and let the opaque color pass overwrite it.
+        skyDepth.depthTestEnable=depthPrepassEnabled_?VK_TRUE:VK_FALSE;
         skyDepth.depthWriteEnable=VK_FALSE;
-        skyDepth.depthCompareOp=VK_COMPARE_OP_EQUAL;
+        skyDepth.depthCompareOp=depthPrepassEnabled_?VK_COMPARE_OP_EQUAL:VK_COMPARE_OP_ALWAYS;
         VkGraphicsPipelineCreateInfo skyPi=pi;
         skyPi.pStages=skyStages;
         skyPi.pVertexInputState=&emptyVertex;
@@ -2016,8 +2019,8 @@ public:
                 }
             }
             };
-            drawOpaque(true); // Mandatory depth-only opaque pass.
-            // One fullscreen triangle; sky shader skipped where opaque depth is < 1.
+            if(depthPrepassEnabled_)drawOpaque(true);
+            // One fullscreen triangle; with the prepass, sky skips opaque pixels.
             vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,skyPipeline_);
             vkCmdDraw(cmd_,3,1,0,0);++drawCalls;
             drawOpaque(false); // Identical opaque color pass; glass once afterwards.
