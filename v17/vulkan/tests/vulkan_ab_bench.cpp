@@ -84,7 +84,7 @@ int main(int argc,char** argv) {
           <<" for DX11 and Vulkan; compare effective samples in GPU log\n";
  m3d::updateLighting(14.75f);
  constexpr size_t kVulkanLightLimit=64;
- const size_t generatedPointLights=m3d::pointLights.size();
+ const size_t generatedPointLights=m3d::pointLightCount();
  const size_t sceneLights=scene.lights.size();
  const size_t availableLights=generatedPointLights+sceneLights;
  const size_t uploadedLights=std::min(kVulkanLightLimit,availableLights);
