@@ -4,6 +4,9 @@
 #define NOMINMAX
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <winreg.h>
+#include <d3d11.h>
+#include <intrin.h>
 #include <psapi.h>
 #include <pdh.h>
 #include <pdhmsg.h>
@@ -24,8 +27,10 @@
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <numeric>
 #include <string>
@@ -33,6 +38,7 @@
 #pragma comment(lib,"psapi.lib")
 #pragma comment(lib,"pdh.lib")
 #pragma comment(lib,"dxgi.lib")
+#pragma comment(lib,"advapi32.lib")
 using namespace m3d;
 using Clock=std::chrono::steady_clock;
 using Microsoft::WRL::ComPtr;
@@ -99,6 +105,9 @@ class VideoMemory {
  ComPtr<IDXGIAdapter3> gpu_;
 public:
  QString adapterName="indisponible",vendor="unknown";
+ uint32_t deviceId=0,subsystemId=0,revision=0;
+ uint64_t adapterLuid=0;
+ double dedicatedVideoMemoryMb=-1;
  bool adapterFound=false;
  VideoMemory(){
   ComPtr<IDXGIFactory1> factory;
@@ -110,8 +119,19 @@ public:
    adapterFound=true;
    adapterName=QString::fromWCharArray(d.Description);
    vendor=QStringLiteral("0x%1").arg(d.VendorId,4,16,QChar('0'));
+   deviceId=d.DeviceId;subsystemId=d.SubSysId;revision=d.Revision;
+   adapterLuid=(uint64_t(uint32_t(d.AdapterLuid.HighPart))<<32)|d.AdapterLuid.LowPart;
+   dedicatedVideoMemoryMb=mb(d.DedicatedVideoMemory);
   }
   adapter.As(&gpu_);
+ }
+ IDXGIAdapter* adapter()const{return gpu_.Get();}
+ QJsonObject metadata()const{
+  return {{ "name",adapterName},{"vendorId",vendor},
+          {"deviceId",QStringLiteral("0x%1").arg(deviceId,4,16,QChar('0'))},
+          {"subsystemId",QStringLiteral("0x%1").arg(subsystemId,8,16,QChar('0'))},
+          {"revision",int(revision)},{"adapterLuid",QStringLiteral("0x%1").arg(adapterLuid,16,16,QChar('0'))},
+          {"dedicatedVideoMemoryMb",number(dedicatedVideoMemoryMb)}};
  }
  QJsonObject sample()const{
   QJsonObject obj;
@@ -128,6 +148,121 @@ public:
   return obj;
  }
 };
+QString registryText(LPCWSTR valueName){
+ WCHAR value[256]{};DWORD bytes=sizeof(value);
+ const LONG status=RegGetValueW(HKEY_LOCAL_MACHINE,
+   L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion",valueName,
+   RRF_RT_REG_SZ,nullptr,value,&bytes);
+ return status==ERROR_SUCCESS?QString::fromWCharArray(value):QString();
+}
+QJsonObject osMetadata(){
+ struct RtlVersionInfo {
+  ULONG size,major,minor,build,platform;
+  WCHAR servicePack[128];
+ };
+ RtlVersionInfo v{};v.size=sizeof(v);
+ using RtlGetVersionFn=LONG (WINAPI*)(RtlVersionInfo*);
+ const HMODULE ntdll=GetModuleHandleW(L"ntdll.dll");
+ const auto getVersion=ntdll?reinterpret_cast<RtlGetVersionFn>(
+     GetProcAddress(ntdll,"RtlGetVersion")):nullptr;
+ const QString productName=registryText(L"ProductName");
+ const QString displayVersion=registryText(L"DisplayVersion");
+ QJsonObject result{{"name",productName.isEmpty()?QStringLiteral("Windows"):productName},
+                    {"version","unknown"}};
+ if(!displayVersion.isEmpty())result["displayVersion"]=displayVersion;
+ if(getVersion&&getVersion(&v)==0){
+  result["major"]=int(v.major);result["minor"]=int(v.minor);
+  result["build"]=int(v.build);result["platformId"]=int(v.platform);
+  result["servicePack"]=QString::fromWCharArray(v.servicePack);
+  result["version"]=QStringLiteral("%1.%2.%3").arg(v.major).arg(v.minor).arg(v.build);
+  DWORD product=0;
+  if(GetProductInfo(v.major,v.minor,0,0,&product))
+   result["productTypeCode"]=int(product);
+ }
+ return result;
+}
+QJsonObject cpuMetadata(){
+ int r[4]{};__cpuid(r,0);
+ char vendor[13]{};
+ std::memcpy(vendor+0,&r[1],4);std::memcpy(vendor+4,&r[3],4);
+ std::memcpy(vendor+8,&r[2],4);
+ __cpuid(r,0x80000000);
+ const unsigned maxExtended=unsigned(r[0]);
+ char brand[49]{};
+ int signatureRegs[4]{};__cpuid(signatureRegs,1);
+ const unsigned signature=unsigned(signatureRegs[0]);
+ const unsigned baseFamily=(signature>>8)&0x0f;
+ const unsigned baseModel=(signature>>4)&0x0f;
+ const unsigned extendedFamily=(signature>>20)&0xff;
+ const unsigned extendedModel=(signature>>16)&0x0f;
+ const unsigned family=baseFamily==0x0f?baseFamily+extendedFamily:baseFamily;
+ const unsigned model=(baseFamily==0x06||baseFamily==0x0f)
+    ?baseModel+(extendedModel<<4):baseModel;
+ if(maxExtended>=0x80000004){
+  for(unsigned leaf=0;leaf<3;++leaf){
+   __cpuid(r,int(0x80000002+leaf));
+   std::memcpy(brand+leaf*16,r,sizeof(r));
+  }
+ }
+ SYSTEM_INFO info{};GetSystemInfo(&info);
+ DWORD physicalCores=0;DWORD bytes=0;
+ GetLogicalProcessorInformationEx(RelationProcessorCore,nullptr,&bytes);
+ if(bytes){
+  std::vector<uint8_t> storage(bytes);
+  auto* p=reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(storage.data());
+  if(GetLogicalProcessorInformationEx(RelationProcessorCore,p,&bytes)){
+   BYTE* cursor=storage.data();BYTE* end=cursor+bytes;
+   while(cursor<end){
+    auto* entry=reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX>(cursor);
+    if(!entry->Size)break;
+    if(entry->Relationship==RelationProcessorCore)++physicalCores;
+    cursor+=entry->Size;
+   }
+  }
+ }
+ return {{"vendor",QString::fromLatin1(vendor)},
+         {"brand",QString::fromLocal8Bit(brand).trimmed()},
+         {"signature",QStringLiteral("0x%1").arg(signature,8,16,QChar('0'))},
+         {"family",int(family)},{"model",int(model)},{"stepping",int(signature&0x0f)},
+         {"physicalCores",int(physicalCores)},
+         {"logicalProcessors",int(info.dwNumberOfProcessors)}};
+}
+QJsonObject ramMetadata(){
+ MEMORYSTATUSEX m{};m.dwLength=sizeof(m);
+ if(!GlobalMemoryStatusEx(&m))return {{"available",false}};
+ return {{"available",true},
+         {"totalPhysicalMb",mb(m.ullTotalPhys)},
+         {"availablePhysicalAtStartMb",mb(m.ullAvailPhys)},
+         {"totalPageFileMb",mb(m.ullTotalPageFile)}};
+}
+QString featureLevelName(D3D_FEATURE_LEVEL f){
+ switch(f){
+  case D3D_FEATURE_LEVEL_12_1:return QStringLiteral("12_1");
+  case D3D_FEATURE_LEVEL_12_0:return QStringLiteral("12_0");
+  case D3D_FEATURE_LEVEL_11_1:return QStringLiteral("11_1");
+  case D3D_FEATURE_LEVEL_11_0:return QStringLiteral("11_0");
+  case D3D_FEATURE_LEVEL_10_1:return QStringLiteral("10_1");
+  case D3D_FEATURE_LEVEL_10_0:return QStringLiteral("10_0");
+  case D3D_FEATURE_LEVEL_9_3:return QStringLiteral("9_3");
+  default:return QStringLiteral("unknown");
+ }
+}
+QJsonObject directXMetadata(IDXGIAdapter* adapter){
+ const D3D_FEATURE_LEVEL requested[]{
+  D3D_FEATURE_LEVEL_12_1,D3D_FEATURE_LEVEL_12_0,
+  D3D_FEATURE_LEVEL_11_1,D3D_FEATURE_LEVEL_11_0,
+  D3D_FEATURE_LEVEL_10_1,D3D_FEATURE_LEVEL_10_0,
+  D3D_FEATURE_LEVEL_9_3
+ };
+ ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;
+ D3D_FEATURE_LEVEL obtained{};
+ const HRESULT hr=D3D11CreateDevice(adapter,adapter?D3D_DRIVER_TYPE_UNKNOWN:D3D_DRIVER_TYPE_HARDWARE,nullptr,0,
+   requested,UINT(sizeof(requested)/sizeof(requested[0])),D3D11_SDK_VERSION,&device,&obtained,&context);
+ return {{"api","Direct3D 11"},
+         {"maximumHardwareFeatureLevel",SUCCEEDED(hr)?featureLevelName(obtained):QStringLiteral("unavailable")},
+         {"probeHresult",QStringLiteral("0x%1").arg(uint32_t(hr),8,16,QChar('0'))},
+         {"note","Reports the highest hardware feature level accepted by D3D11CreateDevice."}};
+}
 double pct(const std::vector<double>& values,double p){
  if(values.empty())return -1;
  auto x=values;
@@ -183,7 +318,12 @@ int main(int argc,char**argv){
   qunsetenv("M3D_V16_FORCE_WARP");
   if(!VideoMemory{}.adapterFound){err<<"No DirectX GPU adapter, hardware benchmark impossible\n";return 4;}
  }
+ VideoMemory video;
  const auto started=Clock::now();
+ const QJsonObject osInfo=osMetadata();
+ const QJsonObject cpuInfo=cpuMetadata();
+ const QJsonObject ramInfo=ramMetadata();
+ const QJsonObject dxInfo=directXMetadata(video.adapter());
  auto loaded=v16::loadScene(sceneFile);
  if(!loaded){err<<"Scene load error: "<<loaded.error<<"\n";return 5;}
  auto built=v16::buildRuntime(loaded.scene,smoke?256:2048);
@@ -202,7 +342,6 @@ int main(int argc,char**argv){
  updateLighting(14.75f);
  Stats shadowStats;
  auto shadow=buildShadow(rt.renderScene,shadowStats);
- VideoMemory video;
  GpuUtil gpu;
  SYSTEM_INFO sys{};GetSystemInfo(&sys);
  const unsigned logical=std::max(1u,unsigned(sys.dwNumberOfProcessors));
@@ -311,11 +450,14 @@ int main(int argc,char**argv){
  const double avg=std::accumulate(times.begin(),times.end(),0.)/times.size();
  const double cpuAvg=std::accumulate(procCpu.begin(),procCpu.end(),0.)/procCpu.size();
  const auto mem=memory();
+ QJsonObject machine{{"os",osInfo},{"cpu",cpuInfo},{"ram",ramInfo},
+                    {"directX",dxInfo},{"gpu",video.metadata()}};
  QJsonObject summary{
   {"name","CSE WARP V17.510 GPU D3D11 Raster benchmark"},
-  {"driverMode",smoke?"Microsoft software WARP, CI only":"DirectX11 HARDWARE -- Intel HD620 when run on the Dell"},
+  {"system",machine},
+  {"driverMode",smoke?"Microsoft software WARP, CI only":"DirectX11 hardware on DXGI adapter 0"},
   {"adapterName",video.adapterName},{"adapterVendorId",video.vendor},
-  {"deviceIdentification","DXGI default adapter descriptor; verify HD620 on local machine"},
+  {"deviceIdentification","DXGI adapter 0; full vendor/device/subsystem identifiers are recorded under system.gpu"},
   {"scene",sceneFile},{"camera","v8_glazing_raccords"},
   {"zPrepassEnabled",zEnabled},{"lightAabbCullEnabled",lightAabbEnabled},
   {"width",w},{"height",h},{"msaaRequested",2},{"pbrTexturePx",smoke?256:2048},
@@ -339,11 +481,37 @@ int main(int argc,char**argv){
   {"gpuNote","GPU Engine utilization counters may be unavailable on some Windows versions. Blank CSV means unavailable; no fabricated zeros."},
   {"timingNote",fixedCamera?"Same camera pose rendered for all sample frames after two warmups; elapsed benchmark time can differ.":"Six seconds of deterministic virtual camera movement over 90 frames; elapsed benchmark time can differ."},
   {"featureFlagsNote","Z-prepass and experimental light AABB flags are captured from the actual environment used for this run."},
-  {"files","frames.csv, summary.json, frame_000.png, frame_045.png, frame_089.png"}
+  {"files","frames.csv, summary.json, system_info.txt, frame_000.png, frame_045.png, frame_089.png"}
  };
  if(!saveJson(results.filePath("summary.json"),QJsonObject{{"summary",summary},{"frames",samples}})){
   err<<"Cannot save summary.json\n";return 9;
  }
+ QFile systemFile(results.filePath("system_info.txt"));
+ if(!systemFile.open(QIODevice::WriteOnly|QIODevice::Text)){
+  err<<"Cannot save system_info.txt\n";return 9;
+ }
+ QTextStream report(&systemFile);
+ report<<"OS: "<<osInfo["name"].toString()<<" "<<osInfo["displayVersion"].toString()<<" ("<<osInfo["version"].toString()<<")\n";
+ report<<"CPUID vendor/signature: "<<cpuInfo["vendor"].toString()<<" / "<<cpuInfo["signature"].toString()<<"\n";
+ report<<"CPUID family / model / stepping: "<<cpuInfo["family"].toInt()<<" / "<<cpuInfo["model"].toInt()<<" / "<<cpuInfo["stepping"].toInt()<<"\n";
+ report<<"CPU: "<<cpuInfo["brand"].toString()<<"\n";
+ report<<"CPU cores / logical processors: "<<cpuInfo["physicalCores"].toInt()
+       <<" / "<<cpuInfo["logicalProcessors"].toInt()<<"\n";
+ report<<"RAM total / available at start (MiB): "
+       <<ramInfo["totalPhysicalMb"].toDouble()<<" / "
+       <<ramInfo["availablePhysicalAtStartMb"].toDouble()<<"\n";
+ report<<"DirectX API / max hardware feature level: "
+       <<dxInfo["api"].toString()<<" / "
+       <<dxInfo["maximumHardwareFeatureLevel"].toString()<<"\n";
+ report<<"GPU: "<<video.adapterName<<"\n";
+ report<<"GPU vendor ID / device ID: "<<video.metadata()["vendorId"].toString()
+       <<" / "<<video.metadata()["deviceId"].toString()<<"\n";
+ report<<"GPU subsystem ID / revision: "<<video.metadata()["subsystemId"].toString()
+       <<" / "<<video.metadata()["revision"].toInt()<<"\n";
+ report<<"Dedicated video memory (MiB): "<<video.dedicatedVideoMemoryMb<<"\n";
+ report<<"GPU driver/runtime: see summary.json; DirectX feature-level probe HRESULT: "
+       <<dxInfo["probeHresult"].toString()<<"\n";
+ systemFile.close();
  out<<"SUCCESS: targeted GPU benchmark with per-frame CSV + JSON in "<<target<<"\n";out.flush();
  return 0;
 }
