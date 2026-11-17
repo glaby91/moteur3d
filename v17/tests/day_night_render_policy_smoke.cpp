@@ -1,4 +1,4 @@
-#include "day_night_render_policy.h"
+#include "../day_night_render_policy.h"
 #include <cmath>
 #include <iostream>
 
