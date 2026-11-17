@@ -125,6 +125,7 @@ struct Result {
     bool skyCompositing=false; // DX11 sky pixels are transparent for Qt compositor
     bool directPresented=false; // DXGI or Vulkan native swapchain, no QImage
     bool nativeFallback=false; // Native WSI unavailable: show the Vulkan QImage preview
+    QString nativeFailure; // Preserve exact Vulkan/DXGI presentation error after image fallback
     // Reject finished frames after a camera, material, backend or scene change.
     uint64_t generation=0;
     quintptr renderThread=0;
@@ -423,6 +424,12 @@ public:
                 ++pacingRejected_;
                 if(pending_){pending_=false;requestRender();}
                 return;
+            }
+            if(outcome.nativeFallback&&!outcome.nativeFailure.isEmpty()){
+                const QString message=QStringLiteral("Vulkan natif indisponible : %1")
+                    .arg(outcome.nativeFailure);
+                qWarning().noquote()<<message;
+                statusBar()->showMessage(message,30000);
             }
             if(outcome.directPresented){
                 // Vulkan submitted a swapchain image directly. No hidden
@@ -3064,6 +3071,7 @@ private:
                                 sharedVulkanInstance,sharedVulkanSurface);
                             if(!ok){
                                 const std::wstring nativeReason=reason;
+                                result.nativeFailure=QString::fromStdWString(nativeReason);
                                 releaseVulkanDirectForCurrentThread();
                                 reason.clear();
                                 ok=renderVulkanPreview(snapshot->renderScene,*shadow,camera,w,h,
@@ -3203,10 +3211,14 @@ private:
             }else result.gpu=true;
             result.milliseconds=stats.ms+shadowBuildMs;
             result.renderer+=QStringLiteral(" — %1×%2").arg(w).arg(h);
-            if(result.nativeFallback)
+            if(result.nativeFallback){
                 result.renderer+=vulkan
                     ?QStringLiteral(" — secours image Vulkan via QImage (WSI indisponible)")
                     :QStringLiteral(" — secours QImage (DXGI indisponible)");
+                if(!result.nativeFailure.isEmpty())
+                    result.renderer+=QStringLiteral(" — échec présentation native : %1")
+                        .arg(result.nativeFailure);
+            }
             if(result.directPresented){
                 result.renderer+=QStringLiteral(" — écran GPU direct (swapchain)");
                 return result; // No 4-byte-per-pixel CPU/QImage allocation.

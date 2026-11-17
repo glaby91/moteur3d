@@ -1,5 +1,5 @@
-name: CSE WARP V17.510 — Vulkan direct Qt surface — Windows HD620
-run-name: V17.510 Vulkan direct Qt surface — CI ${{ github.run_number }}
+name: CSE WARP V17.511 — Vulkan direct Qt surface — Windows HD620
+run-name: V17.511 Vulkan direct Qt surface — CI ${{ github.run_number }}
 on:
   push:
     branches:
@@ -77,7 +77,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Ten-pass fast design preflight failed' }
       - name: Configure
         shell: pwsh
-        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_BUILD_NUMBER=510
+        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_BUILD_NUMBER=511
       - name: Compile
         run: cmake --build build-v17 --config Release --parallel 4
       - name: Verify Vulkan Qt child surface and DX11 startup UI (Qt offscreen)
@@ -147,9 +147,9 @@ jobs:
             $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
             Write-Host "$name — $($version.ProductName) — $($version.FileVersion)"
             if ($version.FileMajorPart -ne 17 -or
-                $version.FileMinorPart -ne 510 -or
+                $version.FileMinorPart -ne 511 -or
                 $version.FileBuildPart -ne 0 -or $version.FilePrivatePart -ne 0) {
-              throw "Invalid V17.510 Windows build version in $name : $($version.FileVersion)"
+              throw "Invalid V17.511 Windows build version in $name : $($version.FileVersion)"
             }
           }
       - name: Validate light complex scene in native V17 loader
@@ -392,7 +392,7 @@ jobs:
           start "" "moteur3d_v17.exe" "benchmark-civic\\scene.json"
           '@ | Set-Content "dist-v17/LANCER_CSE_WARP.bat" -Encoding ascii
           @'
-          CSE WARP BetaX V17.510
+          CSE WARP BetaX V17.511
           Starting scene: exact approved V17.499 scene package, with V17.500 monument anchoring.
           Scene revision appears in the title bar after loading. The banner also shows system RAM use.
           '@ | Set-Content "dist-v17/README.txt" -Encoding utf8
@@ -478,7 +478,7 @@ jobs:
           if (!(Test-Path "$dst/audio/pripyat_radio.wav")) {throw 'V17.493 Ukrainian radio missing'}
           git rev-parse HEAD | Set-Content "$dst/VULKAN_INTEGRATION_COMMIT.txt"
           @(
-            'CSE WARP V17.510 Vulkan WSI via Qt surface + DXGI',
+            'CSE WARP V17.511 Vulkan WSI via Qt surface + DXGI',
             'Source baseline: master V17.493 beta + BASSEIN sign',
             'Vulkan app viewport presents directly using the QWindow QVulkanInstance surface',
             'Hardware FPS, weather smoothness and periodic stutter REQUIRE real HD620 verification.'
@@ -540,7 +540,7 @@ jobs:
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.510-VULKAN-QT-DIRECT
+          name: CSE-WARP-V17.511-VULKAN-QT-DIRECT
           path: dist-v17/
           if-no-files-found: error
       - name: Benchmark GI hors ligne — trois scènes, trois cuissons et sept relectures
