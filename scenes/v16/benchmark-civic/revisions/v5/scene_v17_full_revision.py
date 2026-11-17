@@ -257,10 +257,13 @@ def main():
  objects=[]
  for n,(x,z) in enumerate(pot_centers):
   variant=n # use all eight approved GLB colour variants once
-  objects.extend(i3.place('pot'+str(variant),'Architecture/Facade/Grandes jardinières GLB 1970',[x,.08,z],[1,1,1],0,'pot'+str(n)))
-  treekey=['tree1','tree2','tree1','tree2','tree2','tree1','tree2','tree1'][n]
-  objects.extend(i3.place(treekey,'Architecture/Facade/Arbres elances GLB',[x,1.19,z],
-                         [1.35,3.55+.13*(n%3),1.35],n*27,'pottree'+str(n)))
+# Dalles du parvis : centre y=.118, épaisseur .075, donc dessus à .155 m.
+  # Le pot est posé 2,5 cm au-dessus pour éviter l'intersection avec le sol.
+  objects.extend(i3.place('pot'+str(variant),'Architecture/Facade/Grandes jardinières GLB 1970',[x,.18,z],[1,1,1],0,'pot'+str(n)))
+  # Le modèle Bush with Flowers donne une masse plus basse et large que les arbres
+  # élancés utilisés auparavant ; sa base entre légèrement dans le pot comme une motte.
+  objects.extend(i3.place('flower3','Architecture/Facade/Arbustes fleuris GLB',[x,1.28,z],
+                         [1.55,1.30,1.55],n*27,'potbush'+str(n)))
  # Original 26 trees replaced with actual complete mesh trees, including bark and leaves.
  rng=random.Random(20261112)
  treekeys=['tree1','pine1','tree2','pine2','curved']
@@ -341,7 +344,7 @@ def main():
  if i3.triangles['pot0']!=6944:raise RuntimeError('Approved pot no longer exact 6944 triangles')
  write(root/'geometry/revision-v5.json',{'format':'m3d-geometry-v1','units':'m','meshes':geo})
  write(root/'instances/v5-complete.json',{'format':'m3d-instances-v1','instances':final,
-      'notes':'V5: 8 approved wider-base GLB pots; GLB trees and flowers; concrete rings; paved actual holes; soil 2-10 mm grit; pool surface PBR.'})
+      'notes':'V5: 8 approved wider-base GLB pots seated above paving; compact flowering GLB shrubs; GLB trees and flowers; concrete rings; paved actual holes; soil 2-10 mm grit; pool surface PBR.'})
  write(root/'materials/revision-v5.json',materials)
  write(root/'pbr/revision-v5.json',pbr)
  manifest=json.loads(json.dumps(original));manifest['name']='CSE WARP V17 V5 - jardinières 1970, végétation GLB, fosses réelles, eau et terre PBR'
@@ -353,7 +356,7 @@ def main():
  info={'approvedPotBaseDiameterM':.92,'approvedPotTopDiameterM':1.77,'approvedPotHeightM':1.32,
        'potInstances':8,'potTrianglesEach':i3.triangles['pot0'],
        'replacedProceduralTreePositions':len(original_plant_centers),
-       'slenderTreesInPots':8,'newGLBFlowerPositions':flower_count,'newGrassPositions':92,
+       'compactFloweringBushesInPots':8,'newGLBFlowerPositions':flower_count,'newGrassPositions':92,
        'additionalFineGLBGroundcoverPositions':small_groundcover_count,
        'treePitCount':len(original_plant_centers),'realPavingCut':cut_report,
        'priorObjectTypesRemoved':dict(removed),'importedMeshTriangleCounts':i3.triangles,
