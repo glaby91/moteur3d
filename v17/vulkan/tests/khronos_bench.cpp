@@ -111,6 +111,7 @@ m3d::Scene makeScene(int cubes,int lights){
     return scene;
 }
 LRESULT CALLBACK wndProc(HWND hwnd,UINT msg,WPARAM w,LPARAM l){
+    if(msg==WM_KEYDOWN && w==VK_ESCAPE){PostQuitMessage(0);return 0;}
     if(msg==WM_DESTROY){PostQuitMessage(0);return 0;}
     return DefWindowProcW(hwnd,msg,w,l);
 }
@@ -130,12 +131,13 @@ int main(int argc,char** argv){
     const int lights=argNumber(argc,argv,"--lights",16);
     const int seconds=argNumber(argc,argv,"--seconds",15);
     const auto motion=argText(argc,argv,"--motion","orbit");
+    const bool continuous=argText(argc,argv,"--continuous","0")=="1";
     if(w<64||h<64||w>4096||h>4096||cubes<1||cubes>512||
-       lights<1||lights>64||seconds<1||seconds>600||
+       lights<1||lights>64||(!continuous&&(seconds<1||seconds>600))||
        (motion!="orbit"&&motion!="fixed"&&motion!="translate"&&motion!="spin")){
         std::cerr<<"Usage: v17_vulkan_khronos_bench --cubes 1..512 --lights 1..64 "
                  <<"--motion orbit|fixed|translate|spin --seconds 1..600 "
-                 <<"--width 1366 --height 768\n";
+                 <<"--continuous (Esc closes) --width 1366 --height 768\n";
         return 2;
     }
     const std::string preflight=argText(argc,argv,"--offscreen-check","");
@@ -206,7 +208,7 @@ int main(int argc,char** argv){
     const int windowWidth=size.right-size.left,windowHeight=size.bottom-size.top;
     const int posX=borderless?std::max(0,(GetSystemMetrics(SM_CXSCREEN)-windowWidth)/2):CW_USEDEFAULT;
     const int posY=borderless?std::max(0,(GetSystemMetrics(SM_CYSCREEN)-windowHeight)/2):CW_USEDEFAULT;
-    HWND hwnd=CreateWindowExW(0,wc.lpszClassName,L"CSE WARP V17.32 | Vulkan Khronos GPU Profiling",
+    HWND hwnd=CreateWindowExW(0,wc.lpszClassName,L"CSE WARP Vulkan direct — cube tournant (Échap ferme)",
         style,posX,posY,windowWidth,windowHeight,
         nullptr,nullptr,wc.hInstance,nullptr);
     if(!hwnd){std::cerr<<"Win32 CreateWindow failed\n";return 3;}
@@ -223,7 +225,8 @@ int main(int argc,char** argv){
              <<"cubes="<<cubes<<" activeLights="<<lights
              <<" motion="<<motion<<" duration="<<seconds<<"s"
              <<" client="<<w<<"x"<<h<<"\n";
-    if(motion=="spin")std::cerr<<"[WARP Khronos] spin deliberately marks scene changed: this measures resource rebuild cost.\n";
+    if(motion=="spin")std::cerr<<"[WARP Khronos] spin deliberately updates the tiny cube geometry each frame.\n";
+    if(continuous)std::cerr<<"[WARP Khronos] continuous mode: press Escape in the window to close.\n";
     std::wstring error;
     const auto start=Clock::now();
     uint64_t frames=0;
@@ -236,7 +239,7 @@ int main(int argc,char** argv){
         }
         if(stopped)break;
         const float t=float(std::chrono::duration<double>(Clock::now()-start).count());
-        if(t>=float(seconds))break;
+        if(!continuous&&t>=float(seconds))break;
         if(motion=="spin"){
             addSpinningCube(scene,t*.65f);
             scene.markGpuGeometryChanged();
