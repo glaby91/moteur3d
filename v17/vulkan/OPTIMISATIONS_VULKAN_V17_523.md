@@ -44,19 +44,21 @@ Le test de 6 minutes valide le cycle, pas la stabilité longue durée. Pour une 
 
 Enregistrer en CSV, à chaque frame : heure simulée, intervalle entre présentations, durée de rendu, temps de construction de shadow map et son palier, temps GPU, attente de fence, soumission, nombre de demandes coalescées et backend. Le rapport JSON donne p50/p95/p99/max, FPS, pauses >100/250/500/1000 ms, reconstructions d'ombres et leurs heures, ainsi que la version, la scène, le GPU, le pilote, la résolution et les réglages. Suivre aussi le heartbeat UI, la mémoire du processus et les erreurs de périphérique pendant l'endurance. Capturer des images aux mêmes heures simulées pour vérifier que la stabilisation n'a pas changé l'éclairage.
 
-**Correction visée après la première mesure :** dissocier le tic visuel/heure affichée de la demande de rendu complet ; réutiliser ou préparer les ombres hors du chemin critique et harmoniser les paliers DX11/Vulkan. Si le compute ne tient pas le temps réel, conserver l'animation du ciel et coalescer les mises à jour d'éclairage de surface au lieu d'empiler ou d'invalider des rendus. Valider les gels sur la campagne entière avant de promouvoir la correction.
+**Correction intégrée à la 17.523 :** pendant le cycle accéléré, DX11 et Vulkan réutilisent chacun la shadow map CPU sur des tranches d'une heure simulée, contre un quart d'heure auparavant pour Vulkan. Les valeurs du soleil et des lumières restent calculées à l'heure courante ; seul le rafraîchissement de la shadow map est moins fréquent. Un test GPU-free vérifie les pas et les tranches. Ce changement peut rendre les ombres moins à jour entre deux reconstructions : la campagne doit donc aussi vérifier leur comportement visuel.
+
+Le menu **Outils → Campagne jour/nuit — DX11/Vulkan direct** propose 6, 30 et 60 minutes. Il démarre après 10 secondes d'échauffement, garde la caméra fixe et exporte un CSV détaillé ainsi qu'un JSON récapitulatif dans Documents/CSE WARP/Benchmarks. Le CSV enregistre les intervalles entre présentations, durée de rendu, heure simulée, reconstruction/palier d'ombre et temps GPU disponibles. Le JSON rapporte notamment les pauses au-dessus de 100/250/500/1000 ms, la résolution, le backend, la scène et la version.
+
+Le test de 6 minutes couvre un cycle complet ; 30 minutes donne une première endurance (cinq cycles). Une heure par backend reste la validation recommandée avant livraison. L'intégration continue vérifie la compilation et les tests automatiques, mais elle ne remplace pas l'essai réel sur Intel HD 620 : la campagne doit y être exécutée séparément en DX11 puis Vulkan, aux mêmes réglages.
+
+Cette passe ne modifie ni les valeurs d'éclairage, ni les shaders/lumières du compute pour rapprocher les rendus. Le rendu Compute de la capture reste hors périmètre de la 17.523.
 
 ### P1 — Vérifier le plafond réel des lumières
 
 Le raster Vulkan et le shader compute HLSL ont tous deux un plafond de 64 lumières. Ce nombre est une limite interne du moteur, pas une limite de Vulkan. Le benchmark A/B journalise maintenant les lumières générées, les lumières de scène, le nombre transmis au shader et le nombre ignoré. Ne pas augmenter le plafond avant de confirmer qu'il est atteint : les deux voies ont le même plafond, donc il n'explique pas à lui seul leur différence de tonalité.
 
-### P1 — Rapprocher l'éclairage raster du compute sans perdre la netteté
+### Éclairage — hors périmètre de la 17.523
 
-Le retour visuel prioritaire est précis : le raster conserve mieux le détail des textures, mais paraît plus froid ; le compute donne une lumière indirecte plus crédible et plus chaude, avec des artefacts. La cible est de garder la netteté raster et de rapprocher l'éclairage diffus du compute, sans reprendre son bruit ni corriger l'écart en montant simplement l'exposition.
-
-Le raster Vulkan sait déjà lire une table GI 3D, mais seulement si l'option hybride est active et si le cache est valide pour la signature exacte de la scène. En l'absence de cache valide, il reste sur le soleil, l'ambiance hémisphérique et les lumières directes ; le log l'indique. Première étape : faire le comparatif compute/raster sur la même caméra, même heure, même résolution et même exposition, puis confirmer que Vulkan charge bien la table GI correspondant à la scène. Si elle est absente ou rejetée, corriger ce chargement avant de retoucher le shader.
-
-Le critère d'acceptation sera une lumière de sol et un rebond diffus plus chauds, des textures toujours aussi nettes, sans réintroduire les artefacts du compute ; mesurer le frametime avant/après sur HD 620. Si la table GI n'est pas assez stable, étudier une irradiance basse fréquence préfiltrée plutôt qu'un bruit de rayons par pixel.
+Aucune modification de couleur, d'intensité, de shader ou de stratégie de lumière n'est incluse dans cette version. L'objectif ici est la stabilité de la simulation jour/nuit et la mesure comparative DX11/Vulkan ; le rapprochement avec le rendu Compute sera traité séparément après cette validation.
 
 ### P2 — Synchronization2, comme migration de lisibilité et de vérification
 
