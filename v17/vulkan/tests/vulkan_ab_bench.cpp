@@ -83,6 +83,15 @@ int main(int argc,char** argv) {
  std::cout<<"[CSE WARP A/B] requested MSAA="<<msaaRequest
           <<" for DX11 and Vulkan; compare effective samples in GPU log\n";
  m3d::updateLighting(14.75f);
+ constexpr size_t kVulkanLightLimit=64;
+ const size_t generatedPointLights=m3d::pointLights.size();
+ const size_t sceneLights=scene.lights.size();
+ const size_t availableLights=generatedPointLights+sceneLights;
+ const size_t uploadedLights=std::min(kVulkanLightLimit,availableLights);
+ const size_t ignoredLights=availableLights-uploadedLights;
+ std::cout<<"[CSE WARP A/B] lights: generated="<<generatedPointLights
+          <<" scene="<<sceneLights<<" uploaded="<<uploadedLights
+          <<"/"<<kVulkanLightLimit<<" ignored="<<ignoredLights<<"\\n";
  m3d::Stats shadowStats{};
  const auto shadow=m3d::buildShadow(scene,shadowStats);
  const auto base=built.runtime.cameras.first();
@@ -133,6 +142,12 @@ int main(int argc,char** argv) {
  QJsonObject doc;
  doc["target"]="CSE WARP V17 Vulkan API 1.3.204 minimum on loader and GPU";
  doc["scene"]=sceneFile;doc["width"]=width;doc["height"]=height;doc["frames"]=frames;
+ doc["generated_point_light_count"]=qint64(generatedPointLights);
+ doc["scene_light_count"]=qint64(sceneLights);
+ doc["vulkan_light_limit"]=qint64(kVulkanLightLimit);
+ doc["vulkan_lights_uploaded"]=qint64(uploadedLights);
+ doc["vulkan_lights_ignored"]=qint64(ignoredLights);
+ doc["vulkan_light_limit_reached"]=availableLights>=kVulkanLightLimit;
  const char* shaderMode=std::getenv("CSE_WARP_VK_FAST_FRAGMENT");
  doc["vulkan_fragment_profile"]=(shaderMode && std::strcmp(shaderMode,"1")==0)?"optimized":"baseline";
  const char* readbackMode=std::getenv("CSE_WARP_VK_BGRA_READBACK");
