@@ -96,7 +96,8 @@ struct ShadowMap { int size=1024; float span=30,dist=42; V base={0,1.5f,0},right
 extern V sun,skyZenith,skyHorizon,sunTint;
 extern float daylight,lampFactor,solarHour;
 extern std::vector<Light> pointLights;
-// Exported accessor for DLL consumers; global data symbols are not exported by MSVC.\nsize_t pointLightCount() noexcept;
+// Exported accessor for DLL consumers; global data symbols are not exported by MSVC.
+size_t pointLightCount() noexcept;
 void updateLighting(float hour);
 bool loadScene(const std::filesystem::path& path,Scene& s,std::wstring& error);
 inline bool loadScene(const wchar_t* path,Scene& s,std::wstring& error){return loadScene(std::filesystem::path(path),s,error);}
