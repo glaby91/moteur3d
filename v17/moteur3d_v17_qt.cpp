@@ -126,6 +126,7 @@ struct Result {
     bool directPresented=false; // DXGI or Vulkan native swapchain, no QImage
     bool nativeFallback=false; // Native WSI unavailable: show the Vulkan QImage preview
     QString nativeFailure; // Preserve exact Vulkan/DXGI presentation error after image fallback
+    QString requestStamp;
     // Reject finished frames after a camera, material, backend or scene change.
     uint64_t generation=0;
     quintptr renderThread=0;
@@ -157,6 +158,10 @@ public:
     }
     void onPresented(std::function<void()> callback){presented_=std::move(callback);}
     void setPlaceholder(const QString& message){placeholder_=message;update();}
+    void setRendererStamp(QString displayed,QString requested){
+        if(displayedRenderer_==displayed&&requestedRenderer_==requested)return;
+        displayedRenderer_=std::move(displayed);requestedRenderer_=std::move(requested);update();
+    }
     void setCameraHud(QStringList lines,bool enabled){
         if(hudLines_==lines&&hudEnabled_==enabled)return;
         hudLines_=std::move(lines);hudEnabled_=enabled;update();
@@ -205,6 +210,7 @@ protected:
             p.drawText(rect().adjusted(30,20,-30,-20),Qt::AlignCenter|Qt::TextWordWrap,
                        placeholder_.isEmpty()?QStringLiteral("Ouvrir une scène V16 dans le menu Fichier")
                                              :placeholder_);
+            drawRendererStamp(p,rect());
             return;
         }
         QSize s=image_.size();
@@ -219,6 +225,7 @@ protected:
             p.setRenderHint(QPainter::SmoothPixmapTransform,false);
         }
         p.drawImage(dst,image_);
+        drawRendererStamp(p,dst);
         // Scoped reticle is only a 2D Qt overlay, with no effect on physical
         // position, collision rays or the raster/CPU renderer.
         if(scopeLevel_>.005f){
@@ -278,6 +285,30 @@ private:
     float scopeLevel_=0.f;
     bool fpsVisible_=false;
     QString fpsText_;
+    QString displayedRenderer_;
+    QString requestedRenderer_;
+    void drawRendererStamp(QPainter& p,const QRect& bounds){
+        if(bounds.width()<240||bounds.height()<80)return;
+        QStringList lines;
+        lines<<QStringLiteral("Affiché : %1").arg(displayedRenderer_.isEmpty()
+            ?QStringLiteral("aucun rendu pour l’instant"):displayedRenderer_);
+        if(!requestedRenderer_.isEmpty())
+            lines<<QStringLiteral("Demandé : %1").arg(requestedRenderer_);
+        p.save();
+        QFont f=p.font();f.setFamily(QStringLiteral("Consolas"));f.setPointSize(9);f.setBold(true);p.setFont(f);
+        const QFontMetrics fm(f);int longest=0;
+        for(const auto& line:lines)longest=std::max(longest,fm.horizontalAdvance(line));
+        const int pad=9,lh=fm.height()+3;
+        const int panelWidth=std::min(bounds.width()-24,longest+pad*2);
+        const QRect panel(bounds.left()+12,bounds.top()+12,panelWidth,lh*lines.size()+pad*2);
+        p.setPen(Qt::NoPen);p.setBrush(QColor(9,15,22,220));p.drawRoundedRect(panel,6,6);
+        for(int i=0;i<lines.size();++i){
+            p.setPen(i==0?QColor(143,232,255):QColor(255,218,132));
+            p.drawText(panel.left()+pad,panel.top()+pad+fm.ascent()+i*lh,
+                       fm.elidedText(lines[i],Qt::ElideRight,panel.width()-pad*2));
+        }
+        p.restore();
+    }
 };
 class V17Window final : public QMainWindow {
 public:
@@ -322,6 +353,15 @@ public:
         nativeContainer_=QWidget::createWindowContainer(nativeWindow_,viewportRoot,
                                                         Qt::FramelessWindowHint);
         nativeContainer_->setFocusPolicy(Qt::StrongFocus);
+        nativeRendererOverlay_=new QLabel(nativeContainer_);
+        nativeRendererOverlay_->setObjectName(QStringLiteral("v17NativeRendererStamp"));
+        nativeRendererOverlay_->setGeometry(12,12,470,50);
+        nativeRendererOverlay_->setWordWrap(true);
+        nativeRendererOverlay_->setAttribute(Qt::WA_TransparentForMouseEvents);
+        nativeRendererOverlay_->setStyleSheet(QStringLiteral(
+            "QLabel { color: #dff7ff; background: rgba(9,15,22,220); "
+            "border-radius: 6px; padding: 7px; font: bold 9pt \"Consolas\"; }"));
+        nativeRendererOverlay_->raise();
         viewportStack_->addWidget(nativeContainer_);
         viewportStack_->setCurrentWidget(canvas_);
         setCentralWidget(viewportRoot);
@@ -334,6 +374,7 @@ public:
         renderPool_.setMaxThreadCount(1);
         renderPool_.setExpiryTimeout(-1);
         createUi();
+        updateRendererStamp();
         // The combo box selected DirectX BEFORE its currentIndexChanged signal
         // was connected. Activate its native child now, before show() and
         // before asynchronous scene loading requests the first image.
@@ -430,6 +471,16 @@ public:
                     .arg(outcome.nativeFailure);
                 qWarning().noquote()<<message;
                 statusBar()->showMessage(message,30000);
+            }
+            if(outcome.error.isEmpty()&&(outcome.directPresented||!outcome.image.isNull())){
+                lastPresentedRenderer_=outcome.renderer;
+                lastPresentedRequest_=outcome.requestStamp;
+                if(!lastPresentedRenderer_.contains(QStringLiteral("(swapchain)"))&&
+                   !lastPresentedRenderer_.contains(QStringLiteral("(QImage)")))
+                    lastPresentedRenderer_+=outcome.directPresented
+                        ?QStringLiteral(" — Direct GPU (swapchain)")
+                        :QStringLiteral(" — affichage Qt (QImage)");
+                updateRendererStamp();
             }
             if(outcome.directPresented){
                 // Vulkan submitted a swapchain image directly. No hidden
@@ -770,6 +821,9 @@ private:
     ImageView* canvas_=nullptr;
     QLabel* nativeHudLabel_=nullptr;
     QLabel* nativeFpsLabel_=nullptr;
+    QLabel* nativeRendererOverlay_=nullptr;
+    QString lastPresentedRenderer_;
+    QString lastPresentedRequest_;
     QWindow* nativeWindow_=nullptr;
 #if defined(_WIN32) && M3D_V17_VULKAN_ENABLED
     QVulkanInstance* qtVulkanInstance_=nullptr;
@@ -2775,12 +2829,39 @@ private:
             nativeWindow_->requestActivate();
         }else if(canvas_)canvas_->setFocus(Qt::OtherFocusReason);
     }
+    QString requestedRendererStamp() const {
+        if(!backendBox_)return QStringLiteral("Rendu en attente");
+        const int index=backendBox_->currentIndex();
+        QString name=backendBox_->currentText();
+        if(index==4)name=QStringLiteral("V17 D3D11 Raster");
+        else if(index==5)name=QStringLiteral("V17 Vulkan Raster");
+        const bool direct=(index==4||index==5)&&directDisplayBox_&&directDisplayBox_->isChecked();
+        name+=direct?QStringLiteral(" — Direct GPU (swapchain)")
+                    :QStringLiteral(" — affichage Qt (QImage)");
+        return name;
+    }
+    void updateRendererStamp(){
+        const QString requested=requestedRendererStamp();
+        const bool pending=requested!=lastPresentedRequest_;
+        if(canvas_)canvas_->setRendererStamp(lastPresentedRenderer_,pending?requested:QString{});
+        if(nativeRendererOverlay_){
+            const QString shown=lastPresentedRenderer_.isEmpty()
+                ?QStringLiteral("Affiché : aucun rendu pour l’instant")
+                :QStringLiteral("Affiché : %1").arg(lastPresentedRenderer_);
+            const QString waiting=pending
+                ?QStringLiteral("\nDemandé : %1").arg(requested):QString{};
+            nativeRendererOverlay_->setText(shown+waiting);
+            nativeRendererOverlay_->setVisible(nativeDirectSelected());
+            nativeRendererOverlay_->raise();
+        }
+    }
     void switchNativeRenderViewport(){
         if(!viewportStack_)return;
         const bool direct=nativeDirectSelected();
         const QWidget* target=direct?nativeContainer_:canvas_;
-        if(viewportStack_->currentWidget()==target)return;
-        viewportStack_->setCurrentWidget(direct?nativeContainer_:canvas_);
+        if(viewportStack_->currentWidget()!=target)
+            viewportStack_->setCurrentWidget(direct?nativeContainer_:canvas_);
+        updateRendererStamp();
         if(direct){
             // Do not display an old capture after choosing native presentation.
             lastImage_=QImage{};
@@ -2874,6 +2955,7 @@ private:
         statusBar()->showMessage(QStringLiteral("Benchmark fluidité exporté : %1").arg(root),12000);
     }
     void requestRender(){
+        updateRendererStamp();
         if(sceneLoading_||!runtime_||runtime_->cameras.isEmpty())return;
         // Never submit DXGI/Vulkan to an unshown QWindow (Qt initializes
         // hidden native children at 100x0, previously clamped to 100x64).
@@ -2999,6 +3081,7 @@ private:
         const bool progressive=globalIllumination&&progressiveGi_->isChecked();
         const bool denoise=globalIllumination&&denoiseGi_->isChecked();
         const bool denoiseDirect=!globalIllumination&&!wantGpu&&denoiseDirect_->isChecked();
+        const QString requestStamp=requestedRendererStamp();
         statusBar()->showMessage(QStringLiteral("Calcul de l'image…"));
         // Explain an abnormal delay rather than displaying "Calcul..." forever.
         // This watchdog does not claim to cancel a driver-blocked D3D call.
@@ -3014,8 +3097,9 @@ private:
         watcher_.setFuture(QtConcurrent::run(&renderPool_,[this,serial,token,snapshot,preset,w,h,wantGpu,
             globalIllumination,raster,vulkan,directPresent,nativeHandle,sharedVulkanInstance,
             sharedVulkanSurface,edgeAA,sampleCount,maxBounces,progressive,denoise,
-            denoiseDirect,shadowCache,renderHour,shadowHour]{
+            denoiseDirect,shadowCache,renderHour,shadowHour,requestStamp]{
             Result result;
+            result.requestStamp=requestStamp;
             result.cameraPose=preset;
             result.generation=token;
             result.skyCompositing=raster;
@@ -3108,8 +3192,12 @@ private:
                     result.directPresented=ok&&directPresent&&!result.nativeFallback;
                     if(ok){
                         result.renderer=vulkan
-                            ?QStringLiteral("V17 Vulkan Raster — image GPU affichée via Qt")
-                            :QStringLiteral("V17 D3D11 Raster — géométrie matérielle");
+                            ?(result.directPresented
+                                ?QStringLiteral("V17 Vulkan Raster — Direct GPU (swapchain)")
+                                :QStringLiteral("V17 Vulkan Raster — affichage Qt (QImage)"))
+                            :(result.directPresented
+                                ?QStringLiteral("V17 D3D11 Raster — Direct GPU (swapchain)")
+                                :QStringLiteral("V17 D3D11 Raster — affichage Qt (QImage)"));
                         if(!vulkan && rasterHybridLightingEnabled())
                             result.renderer+=rasterGiCacheLoaded()
                               ?QStringLiteral(" — GI transport pré-calculée")
