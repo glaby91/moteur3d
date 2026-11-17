@@ -1200,12 +1200,10 @@ class VulkanRaster final {
     }
     void buildPipelines(){
         const auto vs=spirv(shaderFile("raster.vert.spv"));
-        // Compare baseline and experimental fragment shader without modifying
-        // DX11 or the default Vulkan profile. One renderer instance per process.
+        // Use the optimized profile by default for the HD620 exploration path.
+        // Set CSE_WARP_VK_FAST_FRAGMENT=0 to compare against the reference shader.
         const char* selected=std::getenv("CSE_WARP_VK_FAST_FRAGMENT");
-        // Keep the reference shader as default for reliable HD620 direct display.
-        // Set CSE_WARP_VK_FAST_FRAGMENT=1 to A/B test the experimental fast profile.
-        const bool fastFragment=selected && std::strcmp(selected,"1")==0;
+        const bool fastFragment=!selected || std::strcmp(selected,"0")!=0;
         std::clog<<"[CSE WARP Vulkan] Fragment profile="
                  <<(fastFragment?"optimized":"baseline")<<"\n";
         const auto fs=spirv(shaderFile(fastFragment?"raster_fast.frag.spv":"raster.frag.spv"));

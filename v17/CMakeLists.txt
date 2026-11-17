@@ -141,8 +141,8 @@ if(WIN32)
                     VERBATIM)
                 list(APPEND V17_VULKAN_SPIRV "${skyOut}")
             endforeach()
-            # Two fragment variants from the same source. Baseline remains the
-            # default, opt-in with CSE_WARP_VK_FAST_FRAGMENT=1 for paired A/B.
+            # Two fragment variants from the same source. Optimized is the
+            # runtime default; set CSE_WARP_VK_FAST_FRAGMENT=0 for reference A/B.
             set(fast_frag_spv "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders/raster_fast.frag.spv")
             add_custom_command(OUTPUT "${fast_frag_spv}"
                 COMMAND ${CMAKE_COMMAND} -E make_directory
