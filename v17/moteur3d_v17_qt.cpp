@@ -1,3717 +1,22 @@
-#include "m3d_engine.h"
-#include "src/m3d_walk_controller.h"
-#include "exploration_motion.h"
-#include "scope_zoom.h"
-#include "camera_diagnostic.h"
-#include "anomaly_catalog.h"
-#include "frame_pacing.h"
-#include "pool_ladder.h"
-#include "weather/solar_cycle.h"
-#include "weather/sky_compositor.h"
-#include "radio_audio.h"
-#include "src/m3d_scene_v16.h"
-#include "src/m3d_v16_bridge.h"
-#include <QAction>
-#include <QApplication>
-#include <QComboBox>
-#include <QCheckBox>
-#include <QCloseEvent>
-#include <QClipboard>
-#include <QCursor>
-#include <QGuiApplication>
-#include <QCoreApplication>
-#include <QDir>
-#include <QFile>
-#include <QSaveFile>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QDockWidget>
-#include <QDoubleSpinBox>
-#include <QFileDialog>
-#include <QFileInfo>
-#include <QKeySequence>
-#include <QToolBar>
-#include <QProcess>
-#include <QProgressBar>
-#include <QDateTime>
-#include <QStandardPaths>
-#include <QFormLayout>
-#include <QFutureWatcher>
-#include <QGroupBox>
-#include <QHBoxLayout>
-#include <QImage>
-#include <QIcon>
-#include <QLabel>
-#include <QElapsedTimer>
-#include <QKeyEvent>
-#include <QMouseEvent>
-#include <QSet>
-#include <QTimer>
-#include <QThreadPool>
-#include <QThread>
-#include <QMainWindow>
-#include <QMetaObject>
-#include <QMenuBar>
-#include <QMessageBox>
-#include <QPainter>
-#include <QPainterPath>
-#include <QPixmap>
-#include <QPushButton>
-#include <QScrollArea>
-#include <QScreen>
-#include <QSettings>
-#include <QSignalBlocker>
-#include <QSlider>
-#include <QSize>
-#include <QSpinBox>
-#include <QStatusBar>
-#include <QSysInfo>
-#include <QFontMetrics>
-#include <QTabWidget>
-#include <QTreeWidget>
-#include <QVBoxLayout>
-#include <QStackedLayout>
-#include <QWindow>
-#include <QtConcurrent/QtConcurrentRun>
-#include <atomic>
-#include <chrono>
-#include <cmath>
-#include <cstring>
-#include <cstdio>
-#include <memory>
-#include <functional>
-#include <limits>
-#include <mutex>
-#include <thread>
-#include <utility>
-#include <vector>
-#if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#include <dxgi1_2.h>
-// Some Windows SDK headers still expose min/max macros; the native renderer
-// already uses std::min/std::max extensively and must not be macro-expanded.
-#ifdef min
-#undef min
-#endif
-#ifdef max
-#undef max
-#endif
-#endif
-
-using namespace m3d;
-namespace {
-int systemMemoryLoadPercent(){
-#if defined(_WIN32)
-    MEMORYSTATUSEX state{}; state.dwLength=sizeof(state);
-    return GlobalMemoryStatusEx(&state)?int(state.dwMemoryLoad):-1;
-#else
-    return -1;
-#endif
-}
-struct Result {
-    QImage image;
-    v16::CameraPreset cameraPose;
-    QString renderer;
-    QString error;
-    double milliseconds=0;
-    bool gpu=false;
-    bool skyCompositing=false; // DX11 sky pixels are transparent for Qt compositor
-    bool directPresented=false; // DXGI or Vulkan native swapchain, no QImage
-    bool nativeFallback=false; // Native DXGI/WSI unavailable: show the QImage preview
-    QString nativeFailure; // Preserve exact Vulkan/DXGI presentation error after image fallback
-    QString nativeWindowDetails; // HWND, owning thread, client size and requested extent
-    QString requestStamp;
-    // Reject finished frames after a camera, material, backend or scene change.
-    uint64_t generation=0;
-    int backendIndex=-1;
-    quintptr renderThread=0;
-};
-struct SceneLoadOutcome {
-    QString path;
-    QString error;
-    v16::SceneDatabase database;
-    std::shared_ptr<v16::Runtime> runtime;
-    uint64_t generation=0;
-};
-class ImageView final : public QWidget {
-public:
-    explicit ImageView(QWidget* owner=nullptr):QWidget(owner){}
-    void setNativePresentation(bool enabled){
-        if(nativePresentation_==enabled)return;
-        nativePresentation_=enabled;
-        if(enabled)paintPending_=false;
-        setAttribute(Qt::WA_OpaquePaintEvent,enabled);
-        setAttribute(Qt::WA_NoSystemBackground,enabled);
-        if(!enabled)update();
-    }
-    bool nativePresentation()const{return nativePresentation_;}
-    void setImage(QImage im){image_=std::move(im);paintPending_=true;update();}
-    void enableSkyCompositing(bool enabled){
-        skyCompositing_=enabled;
-        if(!enabled)skyImage_=QImage{};
-        else skyDirty_=true;
-        update();
-    }
-    bool hasSkyFrame()const{return !skyImage_.isNull()&&!skyDirty_;}
-    void invalidateSky(){skyDirty_=true;}
-    void drawSky(const m3d::Camera& camera,float hour,double seconds,
-                 bool cloudsEnabled,bool fastWeather){
-        if(!skyCompositing_)return;
-        skyComposer_.render(skyImage_,camera,hour,seconds,cloudsEnabled,fastWeather);
-        skyDirty_=false;
-        update();
-    }
-    void onPresented(std::function<void()> callback){presented_=std::move(callback);}
-    void setPlaceholder(const QString& message){placeholder_=message;update();}
-    void setRendererStamp(QString displayed,QString requested){
-        if(displayedRenderer_==displayed&&requestedRenderer_==requested)return;
-        displayedRenderer_=std::move(displayed);requestedRenderer_=std::move(requested);update();
-    }
-    void setCameraHud(QStringList lines,bool enabled){
-        if(hudLines_==lines&&hudEnabled_==enabled)return;
-        hudLines_=std::move(lines);hudEnabled_=enabled;update();
-    }
-    void setScopeOverlay(float level){
-        level=std::clamp(level,0.f,1.f);
-        if(std::abs(scopeLevel_-level)<.002f)return;
-        scopeLevel_=level;
-        update();
-    }
-    void setFpsOverlay(double fps,bool visible){
-        const QString next=visible&&fps>0.0
-            ?QStringLiteral("%1 FPS").arg(fps,0,'f',1)
-            :QStringLiteral("FPS â€”");
-        if(fpsVisible_==visible&&fpsText_==next)return;
-        fpsVisible_=visible;
-        fpsText_=next;
-        update();
-    }
-    static void drawCameraHud(QPainter& painter,const QRect& bounds,const QStringList& lines){
-        if(lines.isEmpty()||bounds.width()<240||bounds.height()<110)return;
-        painter.save();
-        QFont font=painter.font();font.setFamily(QStringLiteral("Consolas"));font.setPointSize(9);
-        painter.setFont(font);
-        const QFontMetrics fm(font);
-        int longest=0;
-        for(const auto& t:lines)longest=std::max(longest,fm.horizontalAdvance(t));
-        const int pad=12,lh=fm.height()+3;
-        const QRect panel(bounds.left()+12,bounds.top()+12,
-                          std::min(bounds.width()-24,longest+pad*2),lh*lines.size()+pad*2);
-        painter.setPen(Qt::NoPen);painter.setBrush(QColor(10,18,27,208));
-        painter.drawRoundedRect(panel,8,8);
-        for(int i=0;i<lines.size();++i){
-            painter.setPen(i==0?QColor(140,224,245):QColor(236,243,249));
-            painter.drawText(panel.left()+pad,panel.top()+pad+fm.ascent()+i*lh,
-                fm.elidedText(lines[i],Qt::ElideRight,panel.width()-pad*2));
-        }
-        painter.restore();
-    }
-protected:
-    void paintEvent(QPaintEvent*) override {
-        // In direct mode this top-level HWND belongs to DXGI or Vulkan WSI.
-        // Qt must not repaint over a swapchain present.
-        if(nativePresentation_)return;
-        QPainter p(this);
-        p.fillRect(rect(),QColor(22,26,31));
-        if(image_.isNull()) {
-            p.setPen(QColor(180,191,204));
-            p.drawText(rect().adjusted(30,20,-30,-20),Qt::AlignCenter|Qt::TextWordWrap,
-                       placeholder_.isEmpty()?QStringLiteral("Ouvrir une scÃ¨ne V16 dans le menu Fichier")
-                                             :placeholder_);
-            drawRendererStamp(p,rect());
-            return;
-        }
-        QSize s=image_.size();
-        s.scale(size(),Qt::KeepAspectRatio);
-        QRect dst(QPoint((width()-s.width())/2,(height()-s.height())/2),s);
-        p.setRenderHint(QPainter::SmoothPixmapTransform,false);
-        if(skyCompositing_ && !skyImage_.isNull()) {
-            // The 512x288 independent weather layer is updated at 30Hz.
-            // The DX11 architectural foreground stays at its last good frame.
-            p.setRenderHint(QPainter::SmoothPixmapTransform,true);
-            p.drawImage(dst,skyImage_);
-            p.setRenderHint(QPainter::SmoothPixmapTransform,false);
-        }
-        p.drawImage(dst,image_);
-        drawRendererStamp(p,dst);
-        // Scoped reticle is only a 2D Qt overlay, with no effect on physical
-        // position, collision rays or the raster/CPU renderer.
-        if(scopeLevel_>.005f){
-            p.save();
-            p.setRenderHint(QPainter::Antialiasing,true);
-            const QPointF center=dst.center();
-            const qreal radius=qreal(std::min(dst.width(),dst.height()))*.405;
-            QPainterPath outside;
-            outside.setFillRule(Qt::OddEvenFill);
-            outside.addRect(dst);
-            outside.addEllipse(center,radius,radius);
-            p.fillPath(outside,QColor(0,0,0,int(135.f*scopeLevel_)));
-            p.setBrush(Qt::NoBrush);
-            p.setPen(QPen(QColor(228,236,231,int(195.f*scopeLevel_)),1.25));
-            p.drawEllipse(center,radius,radius);
-            const qreal line=qreal(std::max(12,int(radius*.14)));
-            const qreal gap=5.;
-            p.setPen(QPen(QColor(16,24,22,int(245.f*scopeLevel_)),1.8));
-            p.drawLine(QPointF(center.x()-line,center.y()),QPointF(center.x()-gap,center.y()));
-            p.drawLine(QPointF(center.x()+gap,center.y()),QPointF(center.x()+line,center.y()));
-            p.drawLine(QPointF(center.x(),center.y()-line),QPointF(center.x(),center.y()-gap));
-            p.drawLine(QPointF(center.x(),center.y()+gap),QPointF(center.x(),center.y()+line));
-            p.setBrush(QColor(230,238,235,int(190.f*scopeLevel_)));
-            p.setPen(Qt::NoPen);
-            p.drawEllipse(center,1.75,1.75);
-            p.restore();
-        }
-        if(hudEnabled_)drawCameraHud(p,dst,hudLines_);
-        if(fpsVisible_){
-            // Count completed presentations, not a theoretical GPU FPS claim.
-            p.save();
-            QFont f=p.font();f.setFamily(QStringLiteral("Consolas"));f.setPointSize(10);
-            f.setBold(true);p.setFont(f);
-            const int width=std::max(87,p.fontMetrics().horizontalAdvance(fpsText_)+18);
-            const QRect badge(dst.right()-width-10,dst.top()+10,width,28);
-            p.setPen(Qt::NoPen);p.setBrush(QColor(9,15,22,213));
-            p.drawRoundedRect(badge,6,6);
-            p.setPen(QColor(178,238,222));
-            p.drawText(badge,Qt::AlignCenter,fpsText_);
-            p.restore();
-        }
-        if(paintPending_){
-            paintPending_=false;
-            if(presented_)presented_();
-        }
-    }
-private:
-    QImage image_;
-    QImage skyImage_;
-    cse::weather::SkyCompositor skyComposer_;
-    bool skyCompositing_=false,skyDirty_=true;
-    bool paintPending_=false;
-    bool nativePresentation_=false;
-    std::function<void()> presented_;
-    QString placeholder_;
-    QStringList hudLines_;
-    bool hudEnabled_=true;
-    float scopeLevel_=0.f;
-    bool fpsVisible_=false;
-    QString fpsText_;
-    QString displayedRenderer_;
-    QString requestedRenderer_;
-    void drawRendererStamp(QPainter& p,const QRect& bounds){
-        if(bounds.width()<240||bounds.height()<80)return;
-        QStringList lines;
-        lines<<QStringLiteral("AffichÃ© : %1").arg(displayedRenderer_.isEmpty()
-            ?QStringLiteral("aucun rendu pour lâ€™instant"):displayedRenderer_);
-        if(!requestedRenderer_.isEmpty())
-            lines<<QStringLiteral("DemandÃ© : %1").arg(requestedRenderer_);
-        p.save();
-        QFont f=p.font();f.setFamily(QStringLiteral("Consolas"));f.setPointSize(9);f.setBold(true);p.setFont(f);
-        const QFontMetrics fm(f);int longest=0;
-        for(const auto& line:lines)longest=std::max(longest,fm.horizontalAdvance(line));
-        const int pad=9,lh=fm.height()+3;
-        const int panelWidth=std::min(bounds.width()-24,longest+pad*2);
-        const int panelHeight=lh*lines.size()+pad*2;
-        const QRect panel(bounds.left()+12,bounds.bottom()-panelHeight-12,panelWidth,panelHeight);
-        p.setPen(Qt::NoPen);p.setBrush(QColor(9,15,22,220));p.drawRoundedRect(panel,6,6);
-        for(int i=0;i<lines.size();++i){
-            p.setPen(i==0?QColor(143,232,255):QColor(255,218,132));
-            p.drawText(panel.left()+pad,panel.top()+pad+fm.ascent()+i*lh,
-                       fm.elidedText(lines[i],Qt::ElideRight,panel.width()-pad*2));
-        }
-        p.restore();
-    }
-};
-class V17Window final : public QMainWindow {
-public:
-    explicit V17Window(QString scenePath,int textureResolution=2048)
-        :textureResolution_(textureResolution){
-        setWindowTitle(QStringLiteral("CSE WARP Beta X â€” V17.%1 Exploration")
-            .arg(CSE_WARP_BUILD_NUMBER));
-        resize(1510,900);
-        setMinimumSize(1100,670);
-        // Every backend gets its own independent top-level HWND. Direct DX11
-        // and Vulkan present into their own ImageView HWND; CPU/compute/QImage
-        // modes paint into the matching window through the same view class.
-        // None of the render targets is embedded in the controls window.
-        for(int i=0;i<int(backendWindows_.size());++i){
-            // No owner window: Windows must allow the controls and each
-            // backend output to be raised independently.
-            auto* view=new ImageView;
-            view->setWindowFlag(Qt::Window,true);
-            view->setAttribute(Qt::WA_NativeWindow);
-            view->setFocusPolicy(Qt::StrongFocus);
-            view->setMouseTracking(true);
-            view->resize(1000,680);
-            view->move(pos()+QPoint(36,70));
-            view->setWindowTitle(QStringLiteral("CSE WARP â€” rendu dÃ©diÃ© â€” backend %1")
-                .arg(i+1));
-            view->installEventFilter(this);
-            view->onPresented([this]{recordImagePresented();});
-            backendWindows_[size_t(i)]=view;
-        }
-        canvas_=backendWindows_[4];
-        nativeRendererOverlay_=new QLabel(this,
-            Qt::Tool|Qt::FramelessWindowHint|Qt::WindowDoesNotAcceptFocus);
-        nativeRendererOverlay_->setObjectName(QStringLiteral("v17NativeRendererStamp"));
-        nativeRendererOverlay_->setGeometry(12,12,470,50);
-        nativeRendererOverlay_->setWordWrap(true);
-        nativeRendererOverlay_->setAttribute(Qt::WA_TransparentForMouseEvents);
-        nativeRendererOverlay_->setStyleSheet(QStringLiteral(
-            "QLabel { color: #dff7ff; background: rgba(9,15,22,220); "
-            "border-radius: 6px; padding: 7px; font: bold 9pt \"Consolas\"; }"));
-        nativeRendererOverlay_->raise();
-        auto* controlsPlaceholder=new QLabel(
-            QStringLiteral("Chaque backend possÃ¨de sa fenÃªtre de rendu dÃ©diÃ©e. "
-                           "SÃ©lectionnez un moteur puis actualisez la scÃ¨ne."),this);
-        controlsPlaceholder->setAlignment(Qt::AlignCenter);
-        setCentralWidget(controlsPlaceholder);
-        frameTimer_.setInterval(16);
-        connect(&frameTimer_, &QTimer::timeout, this, [this]{ frameTick(); });
-        // The D3D11 preview owns a thread_local device and texture cache.
-        // A single persistent QtConcurrent worker keeps GPU resources on
-        // the SAME thread across all subsequent renders and camera changes.
-        // Using Qt's global pool can build a new device for every worker.
-        renderPool_.setMaxThreadCount(1);
-        renderPool_.setExpiryTimeout(-1);
-        createUi();
-        updateRendererStamp();
-        // The combo box selected DirectX BEFORE its currentIndexChanged signal
-        // was connected. Select its dedicated output window now, before show() and
-        // before asynchronous scene loading requests the first image.
-        // Existing GUI smokes require the reference QImage path on CI's
-        // offscreen Qt platform; the native-UI policy smoke is excluded.
-        const QStringList args=QCoreApplication::arguments();
-        if(args.contains(QStringLiteral("--smoke-scene-switch")) ||
-           args.contains(QStringLiteral("--smoke-repeat-raster")) ||
-           args.contains(QStringLiteral("--smoke-walking-collisions")) ||
-           args.contains(QStringLiteral("--smoke-scope-mouse")) ||
-           args.contains(QStringLiteral("--smoke-immersive-mouse"))){
-            const QSignalBlocker blocked(directDisplayBox_);
-            directDisplayBox_->setChecked(false);
-        }
-        selectBackendOutputWindow();
-        // A stationary camera must always display the native full-resolution
-        // raster, regardless of the experimental launcher environment.
-        peripheralExperimentEnabled_=
-            qEnvironmentVariable("M3D_V17_PERIPHERAL_MULTIREZ")==QStringLiteral("1");
-        setRasterPeripheralMultiresOverride(0);
-        pacingClock_.start();
-        skyMotionClock_.start();
-        audioTimer_.setInterval(50); // 20 Hz spatial updates, independent from GPU images.
-        connect(&audioTimer_,&QTimer::timeout,this,[this]{
-            if(!radioPlaying_ || !runtime_)return;
-            const auto pose=activeCameraPose();
-            const float eye[3]{pose.eye.x,pose.eye.y,pose.eye.z};
-            const float target[3]{pose.target.x,pose.target.y,pose.target.z};
-            radioAudio_.update(eye,target);
-        });
-        audioTimer_.start();
-        // A permanent status-bar widget outlives temporary render/progress
-        // messages. QStatusBar::showMessage(..., 15000) used to erase the
-        // completed render time after 15 seconds.
-        nativeHudLabel_=new QLabel(QStringLiteral("CAM â€”"),this);
-        nativeHudLabel_->setMinimumWidth(215);
-        statusBar()->addPermanentWidget(nativeHudLabel_);
-        nativeFpsLabel_=new QLabel(QStringLiteral("FPS â€”"),this);
-        statusBar()->addPermanentWidget(nativeFpsLabel_);
-        renderTimeLabel_=new QLabel(QStringLiteral("Dernier rendu : â€”"),this);
-        renderTimeLabel_->setObjectName(QStringLiteral("v16LastRenderTime"));
-        statusBar()->addPermanentWidget(renderTimeLabel_);
-        explorationSpeedLabel_=new QLabel(this);
-        explorationSpeedLabel_->setObjectName(QStringLiteral("v17ExplorationSpeed"));
-        statusBar()->addPermanentWidget(explorationSpeedLabel_);
-        explorationSpeedLabel_->hide();
-        sceneLoadLabel_=new QLabel(this);
-        sceneLoadLabel_->setText(QStringLiteral("Chargement de la scÃ¨neâ€¦"));
-        sceneLoadProgress_=new QProgressBar(this);
-        sceneLoadProgress_->setRange(0,100);
-        sceneLoadProgress_->setValue(0);
-        sceneLoadProgress_->setMaximumWidth(255);
-        sceneLoadProgress_->setTextVisible(true);
-        statusBar()->addWidget(sceneLoadLabel_,1);
-        statusBar()->addWidget(sceneLoadProgress_);
-        sceneLoadLabel_->hide();
-        sceneLoadProgress_->hide();
-        connect(&loadWatcher_,&QFutureWatcher<SceneLoadOutcome>::finished,this,
-                [this]{
-                    if(closingRequested_){
-                        if(!loadWatcher_.isRunning())QTimer::singleShot(0,this,[this]{close();});
-                        return;
-                    }
-                    finishSceneLoad();
-                });
-        connect(&watcher_,&QFutureWatcher<Result>::finished,this,[this]{
-            // A stale finished notification can arrive after setFuture()
-            // already started another render. result() would block the GUI
-            // waiting for that new render: never call it while still running.
-            if(watcher_.isRunning())return;
-            if(closingRequested_){
-                QTimer::singleShot(0,this,[this]{close();});
-                return;
-            }
-            const auto outcome=watcher_.result();
-            if(sceneLoading_)return;
-            // A previous scene may finish after the user has opened a new one.
-            // Never show its image or overwrite the current status bar.
-            if(outcome.generation!=renderSerial_->load()){
-                ++pacingRejected_;
-                if(pending_){pending_=false;requestRender();}
-                return;
-            }
-            const bool nativePresentationFailed=!outcome.nativeFailure.isEmpty();
-            if(nativePresentationFailed){
-                // Retain failures even if the user switched backends while
-                // the native WSI call was still in flight.
-                const int failedBackend=outcome.backendIndex;
-                if(failedBackend>=0&&failedBackend<int(nativeDirectFailed_.size())){
-                    nativeDirectFailed_[size_t(failedBackend)]=true;
-                    nativeDirectFailureReason_[size_t(failedBackend)]=outcome.nativeFailure;
-                }
-                const QString backend=failedBackend==5
-                    ?QStringLiteral("Vulkan"):QStringLiteral("DX11");
-                const QString message=QStringLiteral(
-                    "%1 direct a Ã©chouÃ© : %2\n%3")
-                    .arg(backend,outcome.nativeFailure,outcome.nativeWindowDetails);
-                qWarning().noquote()<<message;
-                saveNativePresentationDiagnostic(backend,outcome.nativeFailure,
-                                                  outcome.nativeWindowDetails);
-            }
-            if(outcome.backendIndex!=backendBox_->currentIndex()){
-                // A queued frame belongs to its original backend HWND. Never
-                // paint or report it as if it came from the newly selected one.
-                if(pending_){pending_=false;requestRender();}
-                return;
-            }
-            if(outcome.error.isEmpty()&&!outcome.nativeFallback&&
-               outcome.directPresented!=nativeDirectSelected()){
-                // Direct-display was toggled while this frame was in flight.
-                // Keep the frame's original HWND mode until completion, then
-                // immediately render again using the newly requested mode.
-                pending_=false;
-                requestRender();
-                return;
-            }
-            if(nativePresentationFailed){
-                // Keep the checked request, but stop retrying the unusable
-                // swapchain every camera frame. Toggling off/on retries it.
-                selectBackendOutputWindow();
-            }
-            if(outcome.error.isEmpty()&&(outcome.directPresented||!outcome.image.isNull())){
-                lastPresentedRenderer_=outcome.renderer;
-                if(!lastPresentedRenderer_.contains(QStringLiteral("(swapchain)"))&&
-                   !lastPresentedRenderer_.contains(QStringLiteral("(QImage)")))
-                    lastPresentedRenderer_+=outcome.directPresented
-                        ?QStringLiteral(" â€” Direct GPU (swapchain)")
-                        :QStringLiteral(" â€” affichage Qt (QImage)");
-                backendLastRenderer_[size_t(outcome.backendIndex)]=lastPresentedRenderer_;
-                backendLastRequest_[size_t(outcome.backendIndex)]=nativePresentationFailed
-                    ?requestedRendererStamp():outcome.requestStamp;
-                updateRendererStamp();
-            }
-            if(outcome.directPresented){
-                // Vulkan submitted a swapchain image directly. No hidden
-                // QImage and no per-frame GPU-to-CPU readback.
-                lastRenderedPose_=outcome.cameraPose;
-                hasRenderedPose_=true;
-                lastCompletedRenderMs_=outcome.milliseconds;
-                recordImagePresented(); // count submitted/presented frames
-            }
-            if(!outcome.image.isNull()){
-                lastImage_=outcome.image;
-                lastRenderedPose_=outcome.cameraPose;
-                hasRenderedPose_=true;
-                lastCompletedRenderMs_=outcome.milliseconds;
-                canvas_->setImage(outcome.image);
-                canvas_->enableSkyCompositing(outcome.skyCompositing);
-            }
-            if(outcome.error.isEmpty()&&
-               (outcome.directPresented||!outcome.image.isNull())){
-                const QString milliseconds=QString::number(outcome.milliseconds,'f',1);
-                const QString seconds=QString::number(outcome.milliseconds/1000.0,'f',1);
-                renderTimeLabel_->setText(QStringLiteral("Dernier rendu : %1 ms (%2 s)")
-                                              .arg(milliseconds,seconds));
-                renderTimeLabel_->setToolTip(
-                    QStringLiteral("%1\nTemps de calcul : %2 ms (%3 s). "
-                                   "Cette valeur exclut certains traitements de post-production.")
-                        .arg(outcome.renderer,milliseconds,seconds));
-            }
-            // The completion message itself also remains until another action.
-            // Errors leave the last successful render time visible.
-            const int completedBackend=outcome.backendIndex;
-            const bool directFallbackActive=directDisplayBox_&&directDisplayBox_->isChecked()&&
-                completedBackend>=0&&completedBackend<int(nativeDirectFailed_.size())&&
-                nativeDirectFailed_[size_t(completedBackend)];
-            if(nativePresentationFailed||directFallbackActive){
-                const QString backend=completedBackend==5
-                    ?QStringLiteral("Vulkan"):QStringLiteral("DX11");
-                const QString detail=completedBackend>=0&&
-                        completedBackend<int(nativeDirectFailureReason_.size())&&
-                        !nativeDirectFailureReason_[size_t(completedBackend)].isEmpty()
-                    ?nativeDirectFailureReason_[size_t(completedBackend)]
-                    :QStringLiteral("cause native non disponible");
-                const QString recovery=outcome.image.isNull()
-                    ?QStringLiteral("QImage de secours Ã©galement indisponible")
-                    :QStringLiteral("QImage actif aprÃ¨s Ã©chec direct");
-                statusBar()->showMessage(QStringLiteral(
-                    "%1 â€” %2 : %3. Diagnostic : %4. DÃ©cochez puis recochez pour retenter.")
-                    .arg(backend,recovery,detail,nativeDiagnosticLogPath()),30000);
-            }else statusBar()->showMessage(outcome.error.isEmpty()
-                ?QStringLiteral("%1 â€” %2 ms")
-                      .arg(outcome.renderer).arg(outcome.milliseconds,0,'f',1)
-                :outcome.error);
-            if(exploring_ && outcome.error.isEmpty() &&
-               (outcome.directPresented||!outcome.image.isNull())){
-                if(frameClock_.isValid()){
-                    const qint64 frameMs=frameClock_.elapsed();
-                    if(frameMs>0)renderTimeLabel_->setText(
-                        QStringLiteral("V17 : %1 ms Â· %2 FPS calculÃ©s")
-                            .arg(frameMs).arg(1000.0/double(frameMs),0,'f',1));
-                }
-            } else if(exploring_ && !outcome.error.isEmpty()){
-                stopExploration();
-            }
-            if(pending_){pending_=false;requestRender();}
-            else if(exploring_ && !sceneLoading_ && runtime_)requestRender();
-        });
-        // Return from the constructor immediately. The first scene is built
-        // on a worker after show(), so Windows always shows the main window.
-        canvas_->setPlaceholder(QStringLiteral("CSE WARP V17\nChargement de la scÃ¨neâ€¦"));
-        if(!scenePath.isEmpty())
-            QTimer::singleShot(0,this,[this,scenePath]{openScene(scenePath);});
-    }
-    // UI contract smoke: each renderer owns a unique top-level HWND.
-    void smokeNativeUi(){
-        QTimer::singleShot(0,this,[this]{
-#if defined(_WIN32)
-            auto* quick=findChild<QComboBox*>(QStringLiteral("v17QuickRenderer"));
-            QSet<quintptr> handles;
-            bool allWindows=true;
-            for(auto* view:backendWindows_){
-                if(!view||!view->isWindow())allWindows=false;
-                else handles.insert(quintptr(view->winId()));
-            }
-            const bool dx11Ready=backendBox_ && backendBox_->count()==6 &&
-                backendWindows_[4] && backendWindows_[4]->isWindow() &&
-                backendBox_->currentIndex()==4 && directDisplayBox_->isChecked() &&
-                backendBox_->itemText(5).contains(QStringLiteral("Vulkan")) &&
-                (backendBox_->model()->flags(backendBox_->model()->index(5,0)) &
-                    Qt::ItemIsEnabled) &&
-                quick && quick->count()==6 &&
-                quick->itemText(5).contains(QStringLiteral("Vulkan")) &&
-                canvas_==backendWindows_[4] && canvas_->testAttribute(Qt::WA_NativeWindow);
-            backendBox_->setCurrentIndex(5);
-            const bool vulkanVisiblePath=nativeDirectSelected() &&
-                directDisplayBox_->isEnabled() &&
-                canvas_==backendWindows_[5] && canvas_!=backendWindows_[4] &&
-                backendWindows_[5]->isVisible() && !backendWindows_[4]->isVisible();
-            backendBox_->setCurrentIndex(4);
-            selectBackendOutputWindow();
-            const bool ok=dx11Ready&&vulkanVisiblePath&&allWindows&&handles.size()==6;
-            std::fprintf(stderr,"V17 BACKEND WINDOWS: %s, six unique top-level HWNDs\n",
-                ok?"PASS":"FAIL");
-            QCoreApplication::exit(ok?0:46);
-#else
-            QCoreApplication::exit(0);
-#endif
-        });
-    }
-    // GUI smoke: first scene must load asynchronously before we request
-    // another scene; the replacement must render a new (non-stale) image.
-    void smokeSceneSwitch(const QString& secondScene){
-        auto* poll=new QTimer(this);
-        auto phase=std::make_shared<int>(0);
-        poll->setInterval(100);
-        connect(poll,&QTimer::timeout,this,[this,secondScene,poll,phase]{
-            if(*phase==0){
-                if(sceneLoading_ || !runtime_)return;
-                *phase=1;
-                openScene(secondScene);
-                return;
-            }
-            if(sceneLoading_||!runtime_||watcher_.isRunning()||pending_
-               ||lastImage_.isNull())return;
-            if(QFileInfo(scenePath_).absoluteFilePath()
-                !=QFileInfo(secondScene).absoluteFilePath()){
-                std::fprintf(stderr,"V17 SCENE SWITCH: wrong scene loaded\\n");
-                QCoreApplication::exit(22);
-                return;
-            }
-            std::fprintf(stderr,"V17 SCENE SWITCH: new scene rendered %dx%d\\n",
-                lastImage_.width(),lastImage_.height());
-            poll->stop();
-            QCoreApplication::exit(0);
-        });
-        poll->start();
-        QTimer::singleShot(120000,this,[]{
-            std::fprintf(stderr,"V17 SCENE SWITCH: timed out\\n");
-            QCoreApplication::exit(23);
-        });
-    }
-    // Dedicated GPU regression: exercise two independent button-equivalent
-    // render requests on the same scene and assert worker/cache affinity.
-    // The first render starts normally after asynchronous scene loading.
-    void smokeRepeatRaster(){
-        backendBox_->setCurrentIndex(4);
-        auto count=std::make_shared<int>(0);
-        auto firstThread=std::make_shared<quintptr>(0);
-        connect(&watcher_,&QFutureWatcher<Result>::finished,this,
-            [this,count,firstThread]{
-                if(watcher_.isRunning()||sceneLoading_||!runtime_)return;
-                const Result result=watcher_.result();
-                if(result.generation!=renderSerial_->load())return;
-                if(!result.gpu||result.image.isNull()||!result.error.isEmpty()){
-                    std::fprintf(stderr,"V17 REPEAT RASTER: failed render %d: %s\n",
-                        *count+1,result.error.toUtf8().constData());
-                    QCoreApplication::exit(31);
-                    return;
-                }
-                if(*count==0){
-                    *firstThread=result.renderThread;
-                    std::fprintf(stderr,
-                        "V17 REPEAT RASTER: first GPU frame %.2f ms, worker %llu\n",
-                        result.milliseconds,
-                        static_cast<unsigned long long>(result.renderThread));
-                    ++*count;
-                    QTimer::singleShot(0,this,[this]{requestRender();});
-                    return;
-                }
-                if(result.renderThread!=*firstThread){
-                    std::fprintf(stderr,"V17 REPEAT RASTER: GPU worker changed!\n");
-                    QCoreApplication::exit(32);
-                    return;
-                }
-                std::fprintf(stderr,
-                    "V17 REPEAT RASTER: second GPU frame %.2f ms, same worker %llu\n",
-                    result.milliseconds,
-                    static_cast<unsigned long long>(result.renderThread));
-                QCoreApplication::exit(0);
-            });
-        QTimer::singleShot(120000,this,[]{
-            std::fprintf(stderr,"V17 REPEAT RASTER: timed out\n");
-            QCoreApplication::exit(33);
-        });
-    }
-    // Regression: recalling an anomaly must not switch the user's walking
-    // preference to free flight. Previously that disabling was persisted in
-    // QSettings and removed ALL collision checks on subsequent launches.
-    void smokeWalkingCollisionPreference(){
-        auto* poll=new QTimer(this);
-        poll->setInterval(100);
-        connect(poll,&QTimer::timeout,this,[this,poll]{
-            if(sceneLoading_||!runtime_||!walkingModeBox_)return;
-            poll->stop();
-            QSettings prefs(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-            const QVariant previous=prefs.value(QStringLiteral("Exploration/Walking"));
-            walkingModeBox_->setChecked(true);
-            prefs.setValue(QStringLiteral("Exploration/Walking"),true);
-            prefs.sync();
-            selectAnomaly(0); // ANO-005 has a precisely measured camera pose.
-            const bool okAfterSelect=walkingModeBox_->isChecked()
-                &&walkingCollisionSyncPending_
-                &&prefs.value(QStringLiteral("Exploration/Walking")).toBool();
-            returnBeforeAnomaly();
-            prefs.sync();
-            const bool okAfterReturn=walkingModeBox_->isChecked()
-                &&walkingCollisionSyncPending_
-                &&prefs.value(QStringLiteral("Exploration/Walking")).toBool();
-            // Restore the prior preference after the smoke test.
-            {
-                QSignalBlocker block(walkingModeBox_);
-                walkingModeBox_->setChecked(previous.isValid()?previous.toBool():true);
-            }
-            if(previous.isValid())prefs.setValue(QStringLiteral("Exploration/Walking"),previous);
-            else prefs.remove(QStringLiteral("Exploration/Walking"));
-            prefs.sync();
-            if(!okAfterSelect||!okAfterReturn){
-                std::fprintf(stderr,
-                    "V17 COLLISION PREFERENCE FAILED: afterSelect=%d afterReturn=%d\\n",
-                    int(okAfterSelect),int(okAfterReturn));
-                QCoreApplication::exit(38);
-                return;
-            }
-            std::puts("V17 COLLISION PREFERENCE PASS: anomaly pose + return retain walking preference");
-            QCoreApplication::exit(0);
-        });
-        poll->start();
-        QTimer::singleShot(120000,this,[]{
-            std::fprintf(stderr,"V17 COLLISION PREFERENCE: timeout\\n");
-            QCoreApplication::exit(39);
-        });
-    }
-    // GUI integration smoke: actual Qt RMB events on the canvas, FOV narrows
-    // while aiming, and release/stop restores the original camera exactly.
-    // Does not change walking mode or camera position.
-    void smokeScopedAim(){
-        auto* poll=new QTimer(this);
-        poll->setInterval(100);
-        connect(poll,&QTimer::timeout,this,[this,poll]{
-            if(sceneLoading_||!runtime_||runtime_->cameras.isEmpty())return;
-            poll->stop();
-            if(!freeCameraActive_)activateFreeCamera();
-            exploring_=true;
-            const float originalFov=freeCamera_.fov;
-            const V originalEye=freeCamera_.eye;
-            QMouseEvent down(QEvent::MouseButtonPress,QPointF(40,40),
-                             Qt::RightButton,Qt::RightButton,Qt::NoModifier);
-            QCoreApplication::sendEvent(canvas_,&down);
-            const bool activated=rightMouseHeld_;
-            scopeBlend_=cse::scope::advance(scopeBlend_,rightMouseHeld_,.08f);
-            freeCamera_.fov=cse::scope::effectiveFov(scopeBaseFov_,scopeBlend_);
-            const bool magnified=freeCamera_.fov<originalFov-1.f;
-            QMouseEvent up(QEvent::MouseButtonRelease,QPointF(40,40),
-                           Qt::RightButton,Qt::NoButton,Qt::NoModifier);
-            QCoreApplication::sendEvent(canvas_,&up);
-            const bool released=!rightMouseHeld_;
-            stopExploration();
-            const bool restored=std::abs(freeCamera_.fov-originalFov)<.0005f;
-            const bool unchanged=length(freeCamera_.eye-originalEye)<.0005f;
-            if(!(activated&&magnified&&released&&restored&&unchanged)){
-                std::fprintf(stderr,
-                    "V17 SCOPE MOUSE FAIL: down=%d zoom=%d up=%d fov=%d eye=%d\\n",
-                    int(activated),int(magnified),int(released),int(restored),int(unchanged));
-                QCoreApplication::exit(44);return;
-            }
-            std::puts("V17 SCOPE MOUSE PASS: press/release and original FOV, position preserved");
-            QCoreApplication::exit(0);
-        });
-        poll->start();
-        QTimer::singleShot(120000,this,[]{
-            std::fprintf(stderr,"V17 SCOPE MOUSE TIMEOUT\\n");
-            QCoreApplication::exit(45);
-        });
-    }
-    // Real Qt event regression for free-look, true F11 fullscreen and return.
-    // Test uses a synthetic motion delta; no physical mouse is required on CI.
-    void smokeImmersiveMouse(){
-        auto* poll=new QTimer(this);
-        poll->setInterval(100);
-        connect(poll,&QTimer::timeout,this,[this,poll]{
-            if(sceneLoading_||!runtime_||runtime_->cameras.isEmpty())return;
-            poll->stop();
-            activateFreeCamera();
-            exploring_=true;
-            mouseCaptured_=true;
-            canvas_->setCursor(Qt::BlankCursor);
-            const float originalYaw=yaw_;
-            const V originalEye=freeCamera_.eye;
-            const QPoint center=canvas_->rect().center();
-            QMouseEvent move(QEvent::MouseMove,QPointF(center+QPoint(16,-9)),
-                Qt::NoButton,Qt::NoButton,Qt::NoModifier);
-            QCoreApplication::sendEvent(canvas_,&move);
-            const bool freeLookWorked=std::abs(yaw_-originalYaw)>.01f;
-            const bool eyeUnchanged=length(freeCamera_.eye-originalEye)<.0005f;
-            const bool fpsReady=canvas_->isVisible();
-            immersiveAction_->setChecked(true);
-            QCoreApplication::processEvents();
-            const bool full=canvas_->isFullScreen();
-            immersiveAction_->setChecked(false);
-            QCoreApplication::processEvents();
-            const bool back=!canvas_->isFullScreen()
-                &&menuBar()->isVisible()&&statusBar()->isVisible();
-            stopExploration();
-            if(!(freeLookWorked&&eyeUnchanged&&full&&back&&fpsReady)){
-                std::fprintf(stderr,
-                    "IMMERSIVE MOUSE FAILED: move=%d eye=%d full=%d back=%d canvas=%d\\n",
-                    int(freeLookWorked),int(eyeUnchanged),int(full),int(back),int(fpsReady));
-                QCoreApplication::exit(49);return;
-            }
-            std::puts("IMMERSIVE MOUSE PASS: no-button look, true F11 fullscreen and restored editor");
-            QCoreApplication::exit(0);
-        });
-        poll->start();
-        QTimer::singleShot(120000,this,[]{
-            std::fprintf(stderr,"IMMERSIVE MOUSE TIMEOUT\\n");
-            QCoreApplication::exit(50);
-        });
-    }
-    ~V17Window() override {
-        audioTimer_.stop();
-        stopRadio();
-        renderSerial_->fetch_add(1);
-        // Drain both producers before destroying backend output windows. Their
-        // Win32 HWNDs must outlive DXGI swapchains and VkSurfaceKHR objects.
-        loadWatcher_.waitForFinished();
-        watcher_.waitForFinished();
-#if defined(_WIN32)
-        // Raster backends keep thread_local Vulkan/D3D11 contexts in the
-        // dedicated one-worker pool. Destroy them on their owning thread
-        // BEFORE their dedicated top-level HWNDs are destroyed.
-        // This also covers closing directly after the first native frame.
-        auto cleanup=QtConcurrent::run(&renderPool_,[]{
-            releaseDirectX11NativeForCurrentThread();
-            releaseVulkanDirectForCurrentThread();
-            releaseVulkanPreviewForCurrentThread();
-        });
-        cleanup.waitForFinished();
-#endif
-        for(auto* view:backendWindows_){
-            if(view){
-                view->setNativePresentation(false);
-                delete view;
-            }
-        }
-    }
-private:
-    int textureResolution_=2048;
-    QPushButton* radioToggleButton_=nullptr;
-    QLabel* radioStatusLabel_=nullptr;
-    bool radioPlaying_=false;
-    bool radioAutoplayEnabled_=true;
-    cse::RadioAudio radioAudio_;
-    QTimer audioTimer_;
-    std::array<cse::RadioSpeaker,4> radioSpeakers_{};
-    QSlider* radioVolumeSlider_=nullptr;
-
-    ImageView* canvas_=nullptr;
-    std::array<ImageView*,6> backendWindows_{};
-    std::array<QString,6> backendLastRenderer_{};
-    std::array<QString,6> backendLastRequest_{};
-    std::array<bool,6> nativeDirectFailed_{};
-    std::array<QString,6> nativeDirectFailureReason_{};
-    int outputBackendIndex_=-1;
-    int activeRenderBackend_=-1;
-    bool activeRenderDirect_=false;
-    QLabel* nativeHudLabel_=nullptr;
-    QLabel* nativeFpsLabel_=nullptr;
-    QLabel* nativeRendererOverlay_=nullptr;
-    QString lastPresentedRenderer_;
-    QCheckBox* directDisplayBox_=nullptr;
-    bool nativeReadyRetryQueued_=false;
-    int nativeReadyAttempts_=0;
-    QDockWidget* sceneExplorerDock_=nullptr;
-    QDockWidget* renderControlsDock_=nullptr;
-    QDockWidget* anomalyReviewDock_=nullptr;
-    QRect explorationSavedMainGeometry_;
-    QRect explorationSavedRenderGeometry_;
-    QSize explorationSavedMinimumSize_;
-    bool explorationSavedSceneDockVisible_=false;
-    bool explorationSavedControlsDockVisible_=false;
-    bool explorationSavedReviewDockVisible_=false;
-    bool explorationSavedMenuVisible_=true;
-    bool explorationSavedMainMaximized_=false;
-    bool explorationSavedMainFullScreen_=false;
-    bool explorationSavedRenderMaximized_=false;
-    bool explorationSavedRenderFullScreen_=false;
-    bool explorationWindowLayoutActive_=false;
-    QTimer frameTimer_;
-    QTimer skyAnimationTimer_;
-    QElapsedTimer skyMotionClock_;
-    qint64 lastVulkanIdleSkyRequestMs_=-1000;
-    QTimer dayNightTimer_;
-    QElapsedTimer dayNightClock_;
-    double dayNightOriginHour_=14.75;
-    bool applyingDayNightTick_=false;
-    QElapsedTimer frameClock_;
-    QElapsedTimer motionClock_;
-    QSet<int> keysDown_;
-    QPoint previousMouse_;
-    v16::CameraPreset freeCamera_;
-    walk::State walkingState_{};
-    cse::pool_ladder::Motion poolLadderMotion_{};
-    QCheckBox* walkingModeBox_=nullptr;
-    bool exploring_=false,freeCameraActive_=false,leftMouseHeld_=false,rightMouseHeld_=false;
-    bool mouseCaptured_=false;
-    bool peripheralExperimentEnabled_=false,peripheralDuringMotion_=false;
-    QElapsedTimer lastMouseLookMotion_;
-    QAction* immersiveAction_=nullptr;
-    double fpsFiltered_=0.0;
-    float scopeBaseFov_=65.f,scopeBlend_=0.f;
-    // Exact anomaly/replayed camera is kept until the next walking input.
-    // This does not disable or persistently alter the user's collision mode.
-    bool walkingCollisionSyncPending_=false;
-    bool explorationQualityOverride_=false;
-    RasterQualitySettings explorationOriginalQuality_{};
-    float yaw_=0.f,pitch_=0.f;
-    bool cameraHudEnabled_=true;
-    bool hasRenderedPose_=false;
-    v16::CameraPreset lastRenderedPose_;
-    QPushButton* explorationButton_=nullptr;
-    QLabel* explorationHelp_=nullptr;
-    QLabel* explorationSpeedLabel_=nullptr;
-    v16::CameraPreset activeCameraPose() const {
-        if(freeCameraActive_)return freeCamera_;
-        v16::CameraPreset pose;
-        if(!runtime_||runtime_->cameras.isEmpty())return pose;
-        const int idx=std::clamp(cameraBox_->currentIndex(),0,int(runtime_->cameras.size())-1);
-        pose=runtime_->cameras[idx];
-        const V dir=pose.eye-pose.target;
-        const float angle=float(azimuth_->value())*PI/180.f;
-        pose.eye={pose.target.x+dir.x*std::cos(angle)+dir.z*std::sin(angle),
-                  pose.eye.y,
-                  pose.target.z-dir.x*std::sin(angle)+dir.z*std::cos(angle)};
-        return pose;
-    }
-    void updateCameraHud(){
-        if(!canvas_)return;
-        if(!runtime_||runtime_->cameras.isEmpty()){
-            canvas_->setCameraHud({},false);return;
-        }
-        const auto pose=activeCameraPose();
-        if(nativeHudLabel_)nativeHudLabel_->setText(
-            QStringLiteral("CAM X:%1 Y:%2 Z:%3")
-                .arg(pose.eye.x,0,'f',1).arg(pose.eye.y,0,'f',1).arg(pose.eye.z,0,'f',1));
-        const QString label=QStringLiteral("CAM %1 | %2")
-            .arg(freeCameraActive_?QStringLiteral("Libre"):QStringLiteral("PrÃ©rÃ©glÃ©e"),
-                 pose.name.isEmpty()?pose.id:pose.name);
-        canvas_->setCameraHud(cse::camera_diagnostic::hudLines(pose,label),cameraHudEnabled_);
-    }
-    static QString gpuAdapterLabel(){
-#if defined(_WIN32)
-        IDXGIFactory1* factory=nullptr;
-        if(SUCCEEDED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))){
-            IDXGIAdapter1* adapter=nullptr;
-            if(SUCCEEDED(factory->EnumAdapters1(0,&adapter))){
-                DXGI_ADAPTER_DESC1 d{};
-                const HRESULT hr=adapter->GetDesc1(&d);
-                adapter->Release();factory->Release();
-                if(SUCCEEDED(hr))return QString::fromWCharArray(d.Description);
-            }else factory->Release();
-        }
-#endif
-        return QStringLiteral("Non dÃ©tectÃ©");
-    }
-    QString githubRevision() const {
-        QFile f(QCoreApplication::applicationDirPath()+QStringLiteral("/REVISION.txt"));
-        return f.open(QIODevice::ReadOnly|QIODevice::Text)
-            ?QString::fromUtf8(f.readAll()).trimmed().left(12)
-            :QStringLiteral("dÃ©veloppement local");
-    }
-    static QJsonObject sceneCameraReport(const v16::CameraPreset& pose,
-        const QString& manifest,const QString& title,const QString& image,
-        const QSize imageSize,const QString& revision) {
-        return {
-            {"format",QString::fromLatin1(cse::camera_diagnostic::formatId)},
-            {"createdAtUtc",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
-            {"engine",QStringLiteral("CSE WARP Beta X")},
-            {"version",QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER)},
-            {"revision",revision},
-            {"scene",QJsonObject{{"manifestFile",QFileInfo(manifest).fileName()},
-                                 {"title",title},{"originalPath",manifest}}},
-            {"camera",cse::camera_diagnostic::toJson(pose)},
-            {"image",image},
-            {"resolution",QJsonObject{{"width",imageSize.width()},{"height",imageSize.height()}}},
-            {"units",QStringLiteral("metres")},
-            {"coordinateConvention",QStringLiteral("Y vertical; yaw 0 degrees points toward -Z; positive yaw rotates toward +X")}
-        };
-    }
-    void copyLiveCamera(){
-        if(!runtime_||runtime_->cameras.isEmpty())return;
-        const auto report=sceneCameraReport(activeCameraPose(),scenePath_,runtime_->title,
-                                             QString(),QSize(),githubRevision());
-        QGuiApplication::clipboard()->setText(
-            QString::fromUtf8(QJsonDocument(report).toJson(QJsonDocument::Indented)));
-        statusBar()->showMessage(QStringLiteral("Position camÃ©ra et identitÃ© de la scÃ¨ne copiÃ©es."),5000);
-    }
-    void captureAnomaly(){
-        if(!runtime_||lastImage_.isNull()||!hasRenderedPose_){
-            QMessageBox::information(this,QStringLiteral("Capture d'anomalie"),
-                QStringLiteral("Une image doit Ãªtre rendue avant d'enregistrer l'anomalie."));
-            return;
-        }
-        // During navigation the CPU-readback image may lag behind the live camera.
-        // Always export the exact pose associated with the accepted rendered frame.
-        const QString documents=QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation);
-        const QString folder=QDir(documents.isEmpty()?QDir::homePath():documents)
-            .filePath(QStringLiteral("CSE WARP/Anomalies"));
-        if(!QDir().mkpath(folder)){
-            QMessageBox::warning(this,QStringLiteral("Capture d'anomalie"),
-                                 QStringLiteral("Dossier inaccessible : %1").arg(folder));
-            return;
-        }
-        const QString stamp=QDateTime::currentDateTimeUtc().toString("yyyyMMdd-HHmmss-zzz");
-        const QString base=QDir(folder).filePath(QStringLiteral("ANOMALIE_%1").arg(stamp));
-        const QString imageFile=base+QStringLiteral(".png");
-        const QString jsonFile=base+QStringLiteral(".json");
-        QImage annotated=lastImage_.copy();
-        {
-            QPainter painter(&annotated);
-            ImageView::drawCameraHud(painter,annotated.rect(),
-                cse::camera_diagnostic::hudLines(lastRenderedPose_,
-                    QStringLiteral("CAMÃ‰RA DU RENDU / V17.%1").arg(CSE_WARP_BUILD_NUMBER)));
-        }
-        if(!annotated.save(imageFile,"PNG")){
-            QMessageBox::warning(this,QStringLiteral("Capture d'anomalie"),
-                                 QStringLiteral("Ã‰chec de l'enregistrement PNG."));
-            return;
-        }
-        QJsonObject report=sceneCameraReport(lastRenderedPose_,scenePath_,runtime_->title,
-            QFileInfo(imageFile).fileName(),lastImage_.size(),githubRevision());
-        report.insert("renderInProgressAtCapture",watcher_.isRunning());
-        report.insert("liveCameraAtCapture",cse::camera_diagnostic::toJson(activeCameraPose()));
-        report.insert("note",QStringLiteral(
-            "camera correspond prÃ©cisÃ©ment au PNG enregistrÃ©; liveCameraAtCapture est informative."));
-        QSaveFile file(jsonFile);
-        if(!file.open(QIODevice::WriteOnly) ||
-           file.write(QJsonDocument(report).toJson(QJsonDocument::Indented))<0 ||
-           !file.commit()){
-            QFile::remove(imageFile);
-            QMessageBox::warning(this,QStringLiteral("Capture d'anomalie"),
-                                 QStringLiteral("Ã‰chec de l'enregistrement JSON."));
-            return;
-        }
-        statusBar()->showMessage(QStringLiteral("Anomalie sauvegardÃ©e : %1").arg(base),15000);
-        QMessageBox::information(this,QStringLiteral("Anomalie enregistrÃ©e"),
-            QStringLiteral("Capture PNG et coordonnÃ©es exactes disponibles dans :\n%1").arg(folder));
-    }
-    void restoreAnomalyCamera(){
-        if(!runtime_||runtime_->cameras.isEmpty()){
-            QMessageBox::information(this,QStringLiteral("Restaurer une camÃ©ra"),
-                                     QStringLiteral("Charge d'abord la scÃ¨ne concernÃ©e."));
-            return;
-        }
-        const QString path=QFileDialog::getOpenFileName(this,
-            QStringLiteral("Restaurer une camÃ©ra d'anomalie"),
-            QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
-                +QStringLiteral("/CSE WARP/Anomalies"),
-            QStringLiteral("Rapport camÃ©ra CSE WARP (*.json)"));
-        if(path.isEmpty())return;
-        QFile file(path);
-        if(!file.open(QIODevice::ReadOnly)){
-            QMessageBox::warning(this,QStringLiteral("Restaurer une camÃ©ra"),
-                                 QStringLiteral("Impossible d'ouvrir le rapport."));return;
-        }
-        QJsonParseError parsing;
-        const auto doc=QJsonDocument::fromJson(file.readAll(),&parsing);
-        const auto root=doc.object();
-        if(parsing.error!=QJsonParseError::NoError ||
-           root.value("format").toString()!=QString::fromLatin1(cse::camera_diagnostic::formatId)){
-            QMessageBox::warning(this,QStringLiteral("Restaurer une camÃ©ra"),
-                                 QStringLiteral("Format incompatible ou JSON invalide."));return;
-        }
-        const auto scene=root.value("scene").toObject();
-        if(scene.value("manifestFile").toString()!=QFileInfo(scenePath_).fileName() ||
-           scene.value("title").toString()!=runtime_->title){
-            QMessageBox::warning(this,QStringLiteral("ScÃ¨ne diffÃ©rente"),
-                QStringLiteral("La capture appartient Ã  une autre scÃ¨ne. Charge d'abord cette scÃ¨ne pour Ã©viter toute erreur architecturale."));
-            return;
-        }
-        v16::CameraPreset pose;
-        QString error;
-        if(!cse::camera_diagnostic::fromJson(root.value("camera").toObject(),pose,error)){
-            QMessageBox::warning(this,QStringLiteral("Restaurer une camÃ©ra"),error);return;
-        }
-        keysDown_.clear();
-        // Preserve the exact screenshot pose without switching the
-        // collision mode (which previously persisted "Vol libre" in QSettings).
-        // On the next user movement, resynchronize feet with the real scene.
-        freeCamera_=pose;
-        resetScopeForCamera();
-        walkingCollisionSyncPending_=true;
-        const V dir=norm(pose.target-pose.eye);
-        yaw_=std::atan2(dir.x,-dir.z);
-        pitch_=std::asin(clampf(dir.y,-.99f,.99f));
-        freeCameraActive_=true;
-        updateExplorationSpeedIndicator();
-        updateCameraHud();
-        requestRender();
-        canvas_->setFocus();
-        statusBar()->showMessage(QStringLiteral("Point de vue d'anomalie restaurÃ© depuis %1").arg(path),12000);
-    }
-    void updateExplorationSpeedIndicator(){
-        if(!explorationSpeedLabel_)return;
-        if(!exploring_){
-            explorationSpeedLabel_->hide();
-            return;
-        }
-        const bool fast=keysDown_.contains(Qt::Key_Shift);
-        const bool walking=walkingModeBox_&&walkingModeBox_->isChecked();
-        explorationSpeedLabel_->setText(
-            QStringLiteral("%1 Â· %2")
-                .arg(walking?QStringLiteral("Marche"):QStringLiteral("Vol libre"))
-                .arg(fast?QStringLiteral("Vitesse Ã—3 (Maj)")
-                         :QStringLiteral("Vitesse Ã—1")));
-        explorationSpeedLabel_->show();
-    }
-    void resetScopeForCamera(){
-        rightMouseHeld_=false;
-        scopeBlend_=0.f;
-        scopeBaseFov_=freeCamera_.fov;
-        if(canvas_)canvas_->setScopeOverlay(0.f);
-    }
-    void activateFreeCamera(){
-        if(!runtime_||runtime_->cameras.isEmpty())return;
-        const int idx=std::clamp(cameraBox_->currentIndex(),0,int(runtime_->cameras.size())-1);
-        freeCamera_=runtime_->cameras[idx];
-        resetScopeForCamera();
-        const V dir=norm(freeCamera_.target-freeCamera_.eye);
-        yaw_=std::atan2(dir.x,-dir.z);
-        pitch_=std::asin(clampf(dir.y,-.99f,.99f));
-        freeCameraActive_=true;
-        walkingCollisionSyncPending_=false;
-        if(walkingModeBox_&&walkingModeBox_->isChecked()){
-            walk::spawn(runtime_->renderScene,freeCamera_.eye,walkingState_);
-            freeCamera_.eye=walk::eye(walkingState_);
-            updateLook();
-        }
-        updateCameraHud();
-    }
-    void updateLook(){
-        const V forward{std::sin(yaw_)*std::cos(pitch_),std::sin(pitch_),
-                        -std::cos(yaw_)*std::cos(pitch_)};
-        freeCamera_.target=freeCamera_.eye+forward;
-        updateCameraHud();
-    }
-    void captureMouseLook(){
-        if(!exploring_||mouseCaptured_||!canvas_||
-           (!isActiveWindow()&&!canvas_->isActiveWindow()))return;
-        mouseCaptured_=true;
-        canvas_->setCursor(Qt::BlankCursor);
-        focusRenderViewport();
-        QCursor::setPos(canvas_->mapToGlobal(canvas_->rect().center()));
-    }
-    void releaseMouseLook(){
-        if(!mouseCaptured_)return;
-        mouseCaptured_=false;
-        if(canvas_)canvas_->unsetCursor();
-        for(auto* view:backendWindows_)if(view)view->unsetCursor();
-    }
-    void setMotionResolution(bool active){
-        const bool next=peripheralExperimentEnabled_&&active;
-        if(peripheralDuringMotion_==next)return;
-        peripheralDuringMotion_=next;
-        setRasterPeripheralMultiresOverride(next?1:0);
-    }
-    void stopExploration(){
-        releaseMouseLook();
-        setMotionResolution(false);
-        exploring_=false;
-        if(canvas_)canvas_->setFpsOverlay(0.0,false);
-        if(nativeFpsLabel_)nativeFpsLabel_->setText(QStringLiteral("FPS â€”"));
-        if(freeCameraActive_)freeCamera_.fov=scopeBaseFov_;
-        resetScopeForCamera();
-        if(explorationQualityOverride_){
-            std::wstring error;
-            if(setRasterQualitySettings(explorationOriginalQuality_,error))
-                displayRasterSettings(explorationOriginalQuality_);
-            explorationQualityOverride_=false;
-        }
-        frameTimer_.stop();
-        keysDown_.clear();
-        poolLadderMotion_={};
-        leftMouseHeld_=false;
-        rightMouseHeld_=false;
-        lastMouseLookMotion_.invalidate();
-        updateExplorationSpeedIndicator();
-        if(!closingRequested_)restoreExplorationWindows();
-        if(explorationButton_)explorationButton_->setText(QStringLiteral("DÃ©marrer exploration (V17)"));
-        if(explorationHelp_)explorationHelp_->setText(QStringLiteral(
-            "ZQSD / flÃ¨ches : marcher Â· souris : regarder librement Â· clic droit : lunette Ã—3\n"
-            "F11 : plein Ã©cran Â· Ã‰chap : arrÃªter Â· E : Ã©chelle Â· Maj : accÃ©lÃ©rer Â· Vol libre : Espace / Ctrl."));
-        // A delayed multires GPU frame could still be on screen when Esc
-        // stops exploration. Queue a final guaranteed full-resolution image.
-        if(!closingRequested_&&!sceneLoading_&&runtime_)
-            QTimer::singleShot(0,this,[this]{
-                if(!exploring_&&!closingRequested_&&runtime_)requestRender();
-            });
-    }
-    void toggleExploration(){
-        if(exploring_){stopExploration();return;}
-        if(!runtime_||runtime_->cameras.isEmpty())return;
-        if(backendBox_->currentIndex()!=4 && backendBox_->currentIndex()!=5)
-            backendBox_->setCurrentIndex(4);
-        if(!freeCameraActive_)activateFreeCamera();
-        // An Intel HD 620 cannot reasonably sustain 8x MSAA during continuous
-        // navigation of the large V8 scene. Temporarily lower AA to 2x ONLY
-        // while moving. Restore the user's precise settings on exit.
-        const auto adapter=gpuAdapterLabel();
-        if(adapter.contains(QStringLiteral("HD Graphics 620"),Qt::CaseInsensitive)
-           ||adapter.contains(QStringLiteral("UHD Graphics 620"),Qt::CaseInsensitive)){
-            const auto q=rasterQualitySettings();
-            if(q.msaaSamples>2){
-                auto interactive=q;
-                interactive.msaaSamples=2;
-                interactive.anisotropy=std::min<unsigned>(q.anisotropy,8);
-                std::wstring error;
-                if(setRasterQualitySettings(interactive,error)){
-                    explorationOriginalQuality_=q;
-                    explorationQualityOverride_=true;
-                    displayRasterSettings(interactive);
-                    statusBar()->showMessage(QStringLiteral(
-                        "HD 620 : exploration MSAA 2x temporaire ; qualitÃ© initiale restaurÃ©e Ã  l'arrÃªt"),7000);
-                }
-            }
-        }
-        exploring_=true;
-        setMotionResolution(false);
-        resetPacing();
-        canvas_->setFpsOverlay(0.0,true);
-        if(walkingModeBox_&&!walkingModeBox_->isChecked()){
-            statusBar()->showMessage(QStringLiteral(
-                "Vol libre : collisions dÃ©sactivÃ©es. Cochez Â« Marcher au sol Â» pour bloquer murs et obstacles."),10000);
-        }
-        poolLadderMotion_={};
-        motionClock_.start();
-        frameClock_.invalidate();
-        lastMouseLookMotion_.invalidate();
-        if(explorationButton_)explorationButton_->setText(QStringLiteral("ArrÃªter exploration"));
-        updateCameraHud();
-        frameTimer_.start();
-        updateExplorationSpeedIndicator();
-        arrangeExplorationWindows();
-        captureMouseLook();
-    }
-    void frameTick(){
-        if(!exploring_||!runtime_||!freeCameraActive_)return;
-        const float dt=std::min(0.08f,float(motionClock_.restart())/1000.f);
-        const float nextScope=cse::scope::advance(scopeBlend_,rightMouseHeld_,dt);
-        if(nextScope!=scopeBlend_){
-            scopeBlend_=nextScope;
-            freeCamera_.fov=cse::scope::effectiveFov(scopeBaseFov_,scopeBlend_);
-            canvas_->setScopeOverlay(scopeBlend_);
-            updateCameraHud();
-        }
-        V forward{std::sin(yaw_)*std::cos(pitch_),std::sin(pitch_),
-                  -std::cos(yaw_)*std::cos(pitch_)};
-        V horizontal=norm(V{forward.x,0,forward.z});
-        V right=norm(cross(horizontal,V{0,1,0}));
-        V move{};
-        if(keysDown_.contains(Qt::Key_Z)||keysDown_.contains(Qt::Key_W)||keysDown_.contains(Qt::Key_Up))move=move+horizontal;
-        if(keysDown_.contains(Qt::Key_S)||keysDown_.contains(Qt::Key_Down))move=move-horizontal;
-        if(keysDown_.contains(Qt::Key_D)||keysDown_.contains(Qt::Key_Right))move=move+right;
-        if(keysDown_.contains(Qt::Key_Q)||keysDown_.contains(Qt::Key_A)||keysDown_.contains(Qt::Key_Left))move=move-right;
-        const bool mouseRecentlyMoved=lastMouseLookMotion_.isValid()&&
-            lastMouseLookMotion_.elapsed()<180;
-        const bool moving=length(move)>.01f||poolLadderMotion_.active();
-        // The scoped sight remains fully sharp. On stopping, raster returns
-        // to full resolution within 180ms, without any temporal reprojection.
-        setMotionResolution((moving||mouseRecentlyMoved)&&
-            !rightMouseHeld_&&scopeBlend_<.05f);
-        if(walkingModeBox_&&walkingModeBox_->isChecked()){
-            // A recalled anomaly camera can be above a floor or behind a wall.
-            // Keep its precise eye position until the user actually navigates.
-            // Never reuse stale feet from before camera teleportation.
-            if(walkingCollisionSyncPending_ && length(move)>.01f){
-                walk::spawn(runtime_->renderScene,freeCamera_.eye,walkingState_);
-                freeCamera_.eye=walk::eye(walkingState_);
-                walkingCollisionSyncPending_=false;
-                updateLook();
-            }
-            if(poolLadderMotion_.active()){
-                const bool climbing=poolLadderMotion_.up;
-                const auto p=poolLadderMotion_.advance(dt);
-                walkingState_.feet={p.x,p.y,p.z};
-                freeCamera_.eye=walk::eye(walkingState_);
-                updateLook();
-                if(!poolLadderMotion_.active() && climbing){
-                    // Re-establish dry ground contact after climbing over coping.
-                    const V eye=walk::eye(walkingState_);
-                    walk::spawn(runtime_->renderScene,eye,walkingState_);
-                    freeCamera_.eye=walk::eye(walkingState_);
-                    updateLook();
-                }
-                if(!watcher_.isRunning()){frameClock_.start();requestRender();}
-                return;
-            }
-            const V currentFeet=walkingState_.feet;
-            if(scenePath_.contains(QStringLiteral("benchmark-civic"),Qt::CaseInsensitive) &&
-               cse::pool_ladder::inWater({currentFeet.x,currentFeet.y,currentFeet.z})){
-                const float speed=cse::exploration::speedMetersPerSecond(false)*.55f;
-                const V horizontalMotion=length(move)>.01f?norm(move)*(dt*speed):V{};
-                const auto p=cse::pool_ladder::walkInWater(
-                    {currentFeet.x,currentFeet.y,currentFeet.z},horizontalMotion.x,horizontalMotion.z);
-                walkingState_.feet={p.x,p.y,p.z};
-                freeCamera_.eye=walk::eye(walkingState_);
-                updateLook();
-                if(!watcher_.isRunning()){frameClock_.start();requestRender();}
-                return;
-            }
-            // Walking is always horizontal input. Height follows geometry:
-            // floor, stairs, landings, slopes and gravity on unsupported areas.
-            // Shift is an exact 3Ã— multiplier; the deterministic walker still
-            // subdivides large motion into <= 8.5cm steps for collision safety.
-            const float speed=cse::exploration::speedMetersPerSecond(
-                keysDown_.contains(Qt::Key_Shift));
-            const V displacement=length(move)>.01f?norm(move)*(dt*speed):V{};
-            const V oldEye=freeCamera_.eye;
-            const walk::State beforeStep=walkingState_;
-            walk::advance(runtime_->renderScene,walkingState_,displacement,dt);
-            // The water volume is reached ONLY through the actual ladder
-            // interaction. Don't let numerical walker tunnelling bypass the
-            // tiled coping (a V17.437 user-found regression).
-            if(scenePath_.contains(QStringLiteral("benchmark-civic"),Qt::CaseInsensitive)
-                && beforeStep.feet.y<1.0f && walkingState_.feet.y<1.0f){
-                const auto dry=[](const V& feet){
-                    return !(std::abs(feet.x)<24.92f &&
-                        feet.z>-44.45f && feet.z<-19.55f);
-                };
-                if(dry(beforeStep.feet)&&!dry(walkingState_.feet))
-                    walkingState_=beforeStep;
-            }
-            freeCamera_.eye=walk::eye(walkingState_);
-            if(length(freeCamera_.eye-oldEye)>.00001f)updateLook();
-        }else{
-            if(keysDown_.contains(Qt::Key_Space))move.y+=1.f;
-            if(keysDown_.contains(Qt::Key_Control))move.y-=1.f;
-            if(length(move)>.01f){
-                freeCamera_.eye=freeCamera_.eye+norm(move)*(dt*cse::exploration::speedMetersPerSecond(keysDown_.contains(Qt::Key_Shift)));
-                updateLook();
-            }
-        }
-        // Avoid queued stale frames. CPU draw/readback is still a V17-1
-        // limitation and cannot yet guarantee the 25 ms target.
-        if(!watcher_.isRunning()){frameClock_.start();requestRender();}
-    }
-protected:
-    void closeEvent(QCloseEvent* event) override {
-        // A synchronous D3D11 Map/readback cannot be forcibly cancelled.
-        // Keep the UI visible while a worker is winding down instead of
-        // leaving a hidden "zombie" process in Task Manager.
-        if(watcher_.isRunning()||loadWatcher_.isRunning()){
-            closingRequested_=true;
-            stopExploration();
-            renderSerial_->fetch_add(1);
-            statusBar()->showMessage(QStringLiteral(
-                "Fermeture demandÃ©e : fin du calcul en coursâ€¦ "
-                "Si le pilote GPU est bloquÃ©, utilisez le Gestionnaire des tÃ¢ches."));
-            event->ignore();
-            return;
-        }
-        // The controls window owns the application lifetime. Closing it must
-        // not leave any independent renderer window keeping Qt alive.
-        for(auto* view:backendWindows_)if(view)view->hide();
-        QMainWindow::closeEvent(event);
-    }
-    bool event(QEvent* e) override {
-        if(e->type()==QEvent::WindowActivate&&exploring_){
-            QTimer::singleShot(0,this,[this]{
-                if(exploring_&&!closingRequested_)captureMouseLook();
-            });
-        }
-        if(e->type()==QEvent::WindowDeactivate){
-            // Output views are separate top-level windows. Give Qt one event
-            // turn to activate the renderer before treating this as Alt+Tab.
-            QTimer::singleShot(0,this,[this]{
-                if(!isActiveWindow()&&(!canvas_||!canvas_->isActiveWindow())){
-                    releaseMouseLook();
-                    rightMouseHeld_=false;
-                }
-            });
-        }
-        return QMainWindow::event(e);
-    }
-    bool eventFilter(QObject* watched,QEvent* event) override{
-        if(watched==canvas_&&event->type()==QEvent::WindowActivate&&exploring_)
-            QTimer::singleShot(0,this,[this]{if(exploring_)captureMouseLook();});
-        if(watched==canvas_ && event->type()==QEvent::Resize &&
-           nativeDirectSelected() && runtime_ && !sceneLoading_){
-            // The backend's private swapchain must follow its top-level HWND.
-            // Defer until Qt finishes the native resize transaction.
-            QTimer::singleShot(0,this,[this]{
-                if(nativeDirectSelected()&&!closingRequested_)requestRender();
-            });
-        }
-        if(watched==canvas_ && exploring_){
-            if(event->type()==QEvent::KeyPress || event->type()==QEvent::KeyRelease){
-                if(event->type()==QEvent::KeyPress)
-                    keyPressEvent(static_cast<QKeyEvent*>(event));
-                else keyReleaseEvent(static_cast<QKeyEvent*>(event));
-                return true;
-            }
-            if(event->type()==QEvent::MouseButtonPress){
-                auto* e=static_cast<QMouseEvent*>(event);
-                if(!mouseCaptured_)captureMouseLook();
-                if(e->button()==Qt::RightButton){
-                    rightMouseHeld_=true;
-                    focusRenderViewport();
-                    return true;
-                }
-                if(e->button()==Qt::LeftButton){
-                    leftMouseHeld_=true;
-                    focusRenderViewport();
-                    return true;
-                }
-            }
-            if(event->type()==QEvent::MouseButtonRelease){
-                auto* e=static_cast<QMouseEvent*>(event);
-                if(e->button()==Qt::RightButton){rightMouseHeld_=false;return true;}
-                if(e->button()==Qt::LeftButton){leftMouseHeld_=false;return true;}
-            }
-            if(event->type()==QEvent::MouseMove && mouseCaptured_){
-                auto* e=static_cast<QMouseEvent*>(event);
-                const QPoint center=canvas_->rect().center();
-                const QPoint delta=e->pos()-center;
-                // Qt generates a synthetic move when the cursor is recentered.
-                // Ignore it. No click is required to look around.
-                if(delta.isNull())return true;
-                const float dx=clampf(float(delta.x()),-160.f,160.f);
-                const float dy=clampf(float(delta.y()),-160.f,160.f);
-                const float sensitivity=.005f*cse::scope::mouseSensitivity(scopeBlend_);
-                yaw_+=dx*sensitivity;
-                pitch_=clampf(pitch_-dy*sensitivity,-1.48f,1.48f);
-                lastMouseLookMotion_.restart();
-                updateLook();
-                QCursor::setPos(canvas_->mapToGlobal(center));
-                return true;
-            }
-        }
-        return QMainWindow::eventFilter(watched,event);
-    }
-    void keyPressEvent(QKeyEvent* e) override{
-        if(e->key()==Qt::Key_F11 && immersiveAction_){
-            immersiveAction_->setChecked(!immersiveAction_->isChecked());
-            e->accept();return;
-        }
-        if(exploring_){
-            if(e->key()==Qt::Key_Escape){
-                stopExploration();
-                if(immersiveAction_&&immersiveAction_->isChecked())
-                    immersiveAction_->setChecked(false);
-                e->accept();return;
-            }
-            if(e->key()==Qt::Key_Tab){
-                if(mouseCaptured_)releaseMouseLook();else captureMouseLook();
-                e->accept();return;
-            }
-            if(e->key()==Qt::Key_E && !e->isAutoRepeat() &&
-               walkingModeBox_ && walkingModeBox_->isChecked() &&
-               scenePath_.contains(QStringLiteral("benchmark-civic"),Qt::CaseInsensitive)){
-                if(walkingCollisionSyncPending_&&runtime_){
-                    walk::spawn(runtime_->renderScene,freeCamera_.eye,walkingState_);
-                    freeCamera_.eye=walk::eye(walkingState_);
-                    walkingCollisionSyncPending_=false;
-                    updateLook();
-                }
-                const V feet=walkingState_.feet;
-                if(poolLadderMotion_.begin({feet.x,feet.y,feet.z})){
-                    keysDown_.clear();
-                    statusBar()->showMessage(poolLadderMotion_.up
-                        ?QStringLiteral("Piscine : montÃ©e de l'Ã©chelle en coursâ€¦")
-                        :QStringLiteral("Piscine : descente de l'Ã©chelle en coursâ€¦"),3000);
-                    e->accept();return;
-                }
-            }
-            if(!e->isAutoRepeat()){
-                keysDown_.insert(e->key());
-                if(e->key()==Qt::Key_Shift)updateExplorationSpeedIndicator();
-            }
-            e->accept();return;
-        }
-        QMainWindow::keyPressEvent(e);
-    }
-    void keyReleaseEvent(QKeyEvent* e) override{
-        if(exploring_){if(!e->isAutoRepeat()){keysDown_.remove(e->key());if(e->key()==Qt::Key_Shift)updateExplorationSpeedIndicator();}e->accept();return;}
-        QMainWindow::keyReleaseEvent(e);
-    }
-private:
-    QTreeWidget* sceneTree_=nullptr;
-    QTreeWidget* resourceTree_=nullptr;
-    QComboBox* cameraBox_=nullptr;
-    QVector<QAction*> quickCameraActions_;
-    QComboBox* backendBox_=nullptr;
-    QComboBox* qualityBox_=nullptr;
-    QComboBox* rasterPresetBox_=nullptr;
-    QComboBox* rasterMsaaBox_=nullptr;
-    QComboBox* rasterAnisoBox_=nullptr;
-    QComboBox* rasterLodBox_=nullptr;
-    QCheckBox* rasterCullBox_=nullptr;
-    QCheckBox* rasterDynamicLodBox_=nullptr;
-    QComboBox* giSamples_=nullptr;
-    QComboBox* directSamples_=nullptr;
-    QCheckBox* progressiveGi_=nullptr;
-    QCheckBox* denoiseGi_=nullptr;
-    QCheckBox* denoiseDirect_=nullptr;
-    QCheckBox* edgeAa_=nullptr;
-    QSlider* azimuth_=nullptr;
-    QDoubleSpinBox* sunHour_=nullptr;
-    QCheckBox* cloudAnimationBox_=nullptr;
-    QCheckBox* dayNightCycleBox_=nullptr;
-    QCheckBox* hybridLightBox_=nullptr;
-    QCheckBox* filmicToneBox_=nullptr;
-    QCheckBox* colorEnergyBox_=nullptr;
-    QDoubleSpinBox* colorExposureBox_=nullptr;
-    QPushButton* bakeGiButton_=nullptr;
-    QProcess* bakeGiProcess_=nullptr;
-    QString bakingScenePath_;
-    QDoubleSpinBox* roughness_=nullptr;
-    QDoubleSpinBox* metallic_=nullptr;
-    QLabel* materialLabel_=nullptr;
-    QLabel* renderTimeLabel_=nullptr;
-    QFutureWatcher<Result> watcher_;
-    QThreadPool renderPool_;
-    QFutureWatcher<SceneLoadOutcome> loadWatcher_;
-    QLabel* sceneLoadLabel_=nullptr;
-    QProgressBar* sceneLoadProgress_=nullptr;
-    bool sceneLoading_=false;
-    uint64_t sceneLoadGeneration_=0;
-    QString queuedScenePath_;
-    std::shared_ptr<std::atomic<uint64_t>> renderSerial_=std::make_shared<std::atomic<uint64_t>>(0);
-    std::shared_ptr<v16::Runtime> runtime_;
-    // The sun and scene geometry do not change when navigating cameras.
-    // Reuse an identical shadow map across CPU renders of the same runtime.
-    struct CpuShadowCache {
-        std::mutex mutex;
-        std::weak_ptr<v16::Runtime> scene;
-        std::shared_ptr<const ShadowMap> shadow;
-        float hour=-1.f;
-    };
-    std::shared_ptr<CpuShadowCache> cpuShadows_=std::make_shared<CpuShadowCache>();
-    bool pending_=false, updatingControls_=false, closingRequested_=false;
-    QElapsedTimer pacingClock_;
-    qint64 lastPresentMs_=-1;
-    double lastCompletedRenderMs_=0.0;
-    uint64_t pacingRejected_=0, pacingQueued_=0;
-    std::vector<cse::pacing::Sample> pacingSamples_;
-    static constexpr int pacingCapacity_=5000;
-    int selectedMaterial_=-1;
-    QString scenePath_;
-    QString materialsPath_;
-    int currentAnomaly_=-1;
-    v16::CameraPreset beforeAnomalyCamera_{};
-    bool hasBeforeAnomalyCamera_=false;
-    QLabel* anomalyPanelLabel_=nullptr;
-    QLabel* sceneRevisionLabel_=nullptr;
-    QLabel* systemMemoryLabel_=nullptr;
-    QProgressBar* systemMemoryBar_=nullptr;
-    QTimer* memoryRefreshTimer_=nullptr;
-
-    void updateMemoryBanner(){
-        if(!systemMemoryLabel_||!systemMemoryBar_)return;
-        const int percent=systemMemoryLoadPercent();
-        if(percent<0){systemMemoryLabel_->setText(QStringLiteral("RAM n/d"));systemMemoryBar_->setValue(0);return;}
-        systemMemoryLabel_->setText(QStringLiteral("RAM %1 %").arg(percent));
-        systemMemoryBar_->setValue(percent);
-    }
-
-    void displayRasterSettings(const RasterQualitySettings& q){
-        const QSignalBlocker msaaBlocker(rasterMsaaBox_);
-        const QSignalBlocker anisoBlocker(rasterAnisoBox_);
-        const QSignalBlocker lodBlocker(rasterLodBox_);
-        const QSignalBlocker cullBlocker(rasterCullBox_);
-        const QSignalBlocker dynamicBlocker(rasterDynamicLodBox_);
-        rasterMsaaBox_->setCurrentIndex(rasterMsaaBox_->findData(int(q.msaaSamples)));
-        rasterAnisoBox_->setCurrentIndex(rasterAnisoBox_->findData(int(q.anisotropy)));
-        rasterLodBox_->setCurrentIndex(rasterLodBox_->findData(int(q.lodQualityPercent)));
-        rasterCullBox_->setChecked(q.frustumCulling);
-        rasterDynamicLodBox_->setChecked(q.dynamicLod);
-        rasterLodBox_->setEnabled(q.dynamicLod);
-    }
-    void applyRasterSettings(bool userCustom){
-        if(!rasterPresetBox_||!rasterMsaaBox_)return;
-        if(userCustom){
-            const QSignalBlocker blocker(rasterPresetBox_);
-            rasterPresetBox_->setCurrentIndex(4);
-        }
-        RasterQualitySettings q;
-        q.msaaSamples=rasterMsaaBox_->currentData().toUInt();
-        q.anisotropy=rasterAnisoBox_->currentData().toUInt();
-        q.lodQualityPercent=rasterLodBox_->currentData().toUInt();
-        q.frustumCulling=rasterCullBox_->isChecked();
-        q.dynamicLod=rasterDynamicLodBox_->isChecked();
-        rasterLodBox_->setEnabled(q.dynamicLod);
-        std::wstring error;
-        if(!setRasterQualitySettings(q,error)){
-            statusBar()->showMessage(QString::fromStdWString(error),7000);
-            return;
-        }
-        QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-        settings.setValue(QStringLiteral("Raster/Preset"),rasterPresetBox_->currentIndex());
-        settings.setValue(QStringLiteral("Raster/MSAA"),q.msaaSamples);
-        settings.setValue(QStringLiteral("Raster/Anisotropy"),q.anisotropy);
-        settings.setValue(QStringLiteral("Raster/LODPercent"),q.lodQualityPercent);
-        settings.setValue(QStringLiteral("Raster/Culling"),q.frustumCulling);
-        settings.setValue(QStringLiteral("Raster/DynamicLOD"),q.dynamicLod);
-        if(runtime_&&backendBox_&&
-           (backendBox_->currentIndex()==4||backendBox_->currentIndex()==5))requestRender();
-    }
-    void stopRadio(){
-        radioAudio_.stop();
-        radioPlaying_=false;
-        if(radioToggleButton_)radioToggleButton_->setText(QStringLiteral("Reprendre la radio"));
-        if(radioStatusLabel_)radioStatusLabel_->setText(QStringLiteral("Radio arrÃªtÃ©e"));
-    }
-    bool loadSpeakerLayout(){
-        const QString path=QDir(QCoreApplication::applicationDirPath()).filePath(
-            QStringLiteral("audio/speaker_layout.json"));
-        QFile file(path);
-        if(!file.open(QIODevice::ReadOnly))return false;
-        const auto doc=QJsonDocument::fromJson(file.readAll());
-        if(!doc.isObject())return false;
-        const QJsonArray sources=doc.object().value(QStringLiteral("loudspeakers")).toArray();
-        if(sources.size()!=4)return false;
-        for(int i=0;i<4;++i){
-            if(!sources[i].isObject())return false;
-            const auto obj=sources[i].toObject();
-            const auto pos=obj.value(QStringLiteral("position")).toArray();
-            const auto front=obj.value(QStringLiteral("front")).toArray();
-            if(pos.size()!=3||front.size()!=3)return false;
-            for(int axis=0;axis<3;++axis){
-                const double p=pos[axis].toDouble(std::numeric_limits<double>::quiet_NaN());
-                const double f=front[axis].toDouble(std::numeric_limits<double>::quiet_NaN());
-                if(!std::isfinite(p)||!std::isfinite(f))return false;
-                radioSpeakers_[i].position[axis]=float(p);
-                radioSpeakers_[i].front[axis]=float(f);
-            }
-        }
-        return true;
-    }
-    void playRadio(){
-        const QString path=QDir(QCoreApplication::applicationDirPath()).filePath(
-            QStringLiteral("audio/pripyat_radio.wav"));
-        if(!QFileInfo::exists(path)){
-            if(radioStatusLabel_)radioStatusLabel_->setText(
-                QStringLiteral("Fichier WAV absent : audio/pripyat_radio.wav"));
-            return;
-        }
-        if(!loadSpeakerLayout()){
-            if(radioStatusLabel_)radioStatusLabel_->setText(
-                QStringLiteral("Implantation des 4 HP introuvable ou invalide"));
-            return;
-        }
-        radioAudio_.setVolume(radioVolumeSlider_?float(radioVolumeSlider_->value())/500.f:.20f);
-        radioPlaying_=radioAudio_.start(path.toStdWString(),radioSpeakers_);
-        if(radioToggleButton_)radioToggleButton_->setText(radioPlaying_
-            ?QStringLiteral("ArrÃªter la radio"):QStringLiteral("Reprendre la radio"));
-        if(radioStatusLabel_)radioStatusLabel_->setText(radioPlaying_
-            ?QStringLiteral("4 HP spatialisÃ©s Â· XAudio2 / X3DAudio Â· WAV de test")
-            :QStringLiteral("Audio 3D indisponible (pilote ou WAV incorrect)"));
-    }
-    void refreshRadioForScene(const QString& path){
-        stopRadio();
-        const QString lower=path.toLower();
-        const bool isSquare=lower.contains(QStringLiteral("benchmark-civic"))
-            ||lower.contains(QStringLiteral("pripyat"))
-            ||lower.contains(QStringLiteral("energetik"));
-        if(isSquare&&radioAutoplayEnabled_)playRadio();
-    }
-
-    void selectAnomaly(int index){
-        if(index<0||index>=int(cse::anomalies::records.size()))return;
-        if(!runtime_||runtime_->cameras.isEmpty()){
-            QMessageBox::information(this,QStringLiteral("Anomalies"),
-                QStringLiteral("Chargez la scene du palais avant de consulter le registre."));
-            return;
-        }
-        if(!scenePath_.contains(QStringLiteral("benchmark-civic"),Qt::CaseInsensitive)){
-            QMessageBox::warning(this,QStringLiteral("Anomalies"),
-                QStringLiteral("Les positions sont relevees dans le palais benchmark-civic. Ouvrez cette scene avant de les utiliser."));
-            return;
-        }
-        const auto& a=cse::anomalies::records[size_t(index)];
-        if(!hasBeforeAnomalyCamera_){
-            beforeAnomalyCamera_=activeCameraPose();
-            hasBeforeAnomalyCamera_=true;
-        }
-        currentAnomaly_=index;
-        if(a.cameraKnown){
-            // Camera recalls preserve a precise reference view. Do not
-            // silently disable walking/collisions or overwrite QSettings.
-            // Only resynchronize the walking state on the next movement.
-            keysDown_.clear();
-            poolLadderMotion_={};
-            const float yr=a.yaw*PI/180.f;
-            const float pr=a.pitch*PI/180.f;
-            freeCamera_.eye={a.x,a.y,a.z};
-            walkingCollisionSyncPending_=true;
-            freeCamera_.fov=a.fov;
-            resetScopeForCamera();
-            freeCamera_.id=QString::fromLatin1(a.id);
-            freeCamera_.name=QString::fromUtf8(a.title);
-            yaw_=yr;pitch_=pr;
-            freeCameraActive_=true;
-            updateLook();
-            requestRender();
-            canvas_->setFocus();
-        }else{
-            // ANO-014 has no measured coordinates; keep the current pose.
-            // The user can select exterior camera 01 or walk to any paving joint.
-            statusBar()->showMessage(QStringLiteral(
-                "ANO-014 : pas de coordonnees mesurees. Selectionnez une vue exterieure puis marchez sur les joints."),13000);
-        }
-        updateAnomalyPanel();
-    }
-    void updateAnomalyPanel(){
-        if(!anomalyPanelLabel_)return;
-        if(currentAnomaly_<0){
-            anomalyPanelLabel_->setText(QStringLiteral(
-                "Choisissez ANO-005 a ANO-014 depuis le menu Anomalies."));
-            return;
-        }
-        const auto& a=cse::anomalies::records[size_t(currentAnomaly_)];
-        anomalyPanelLabel_->setText(
-            QStringLiteral("%1 - %2\n%3\n%4")
-              .arg(QString::fromLatin1(a.id),
-                   QString::fromUtf8(a.title),
-                   QString::fromUtf8(a.check),
-                   a.correctedCandidate?QStringLiteral("Modification codee : a valider")
-                                       :QStringLiteral("Anomalie encore ouverte")));
-        anomalyPanelLabel_->setWordWrap(true);
-        statusBar()->showMessage(
-            QStringLiteral("%1 : %2").arg(QString::fromLatin1(a.id),QString::fromUtf8(a.check)),
-            12000);
-    }
-    void saveAnomalyVerdict(const QString& verdict){
-        if(currentAnomaly_<0)return;
-        const auto& a=cse::anomalies::records[size_t(currentAnomaly_)];
-        // Separate file per attempt: do not overwrite the evidence from another
-        // version or previous review. No external storage or telemetry.
-        const QString root=QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
-            +QStringLiteral("/CSE-WARP-Anomalies");
-        if(!QDir().mkpath(root)){
-            QMessageBox::warning(this,QStringLiteral("Anomalies"),
-                QStringLiteral("Impossible de creer le dossier : %1").arg(root));
-            return;
-        }
-        const QString timestamp=QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz"));
-        const QString path=root+QStringLiteral("/")
-            +QString::fromLatin1(a.id)+QStringLiteral("-V17.%1-").arg(CSE_WARP_BUILD_NUMBER)
-            +timestamp+QStringLiteral(".json");
-        const QJsonObject record{
-            {QStringLiteral("format"),QStringLiteral("cse-warp-anomaly-review-v1")},
-            {QStringLiteral("version"),QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER)},
-            {QStringLiteral("anomalyId"),QString::fromLatin1(a.id)},
-            {QStringLiteral("title"),QString::fromUtf8(a.title)},
-            {QStringLiteral("expected"),QString::fromUtf8(a.check)},
-            {QStringLiteral("verdict"),verdict},
-            {QStringLiteral("scene"),QFileInfo(scenePath_).fileName()},
-            {QStringLiteral("timestamp"),QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
-            {QStringLiteral("referencePoseKnown"),a.cameraKnown},
-            {QStringLiteral("camera"),cse::camera_diagnostic::toJson(activeCameraPose())}
-        };
-        QSaveFile file(path);
-        if(!file.open(QIODevice::WriteOnly)||
-            file.write(QJsonDocument(record).toJson(QJsonDocument::Indented))<0||
-            !file.commit()){
-            QMessageBox::warning(this,QStringLiteral("Anomalies"),
-               QStringLiteral("Echec d'enregistrement : %1").arg(path));
-            return;
-        }
-        statusBar()->showMessage(QStringLiteral("%1 : verdict %2 sauvegarde : %3")
-            .arg(QString::fromLatin1(a.id),verdict,path),14000);
-    }
-    void returnBeforeAnomaly(){
-        if(!hasBeforeAnomalyCamera_)return;
-        const auto pose=beforeAnomalyCamera_;
-        // Return to the old camera without changing the selected navigation
-        // mode or disabling obstacle collisions in saved preferences.
-        freeCamera_=pose;
-        resetScopeForCamera();
-        walkingCollisionSyncPending_=true;
-        const V dir=norm(pose.target-pose.eye);
-        yaw_=std::atan2(dir.x,-dir.z);
-        pitch_=std::asin(clampf(dir.y,-.99f,.99f));
-        freeCameraActive_=true;
-        hasBeforeAnomalyCamera_=false;
-        currentAnomaly_=-1;
-        updateAnomalyPanel();
-        updateCameraHud();
-        requestRender();
-        canvas_->setFocus();
-    }
-
-    void createUi(){
-        auto* file=menuBar()->addMenu(QStringLiteral("Fichier"));
-        auto* captureAction=file->addAction(QStringLiteral("Capturer une anomalie (PNG + camÃ©ra JSON)â€¦"));
-        captureAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+A")));
-        connect(captureAction,&QAction::triggered,this,[this]{captureAnomaly();});
-        auto* restoreAction=file->addAction(QStringLiteral("Restaurer une camÃ©ra d'anomalieâ€¦"));
-        restoreAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+O")));
-        connect(restoreAction,&QAction::triggered,this,[this]{restoreAnomalyCamera();});
-        auto* copyPoseAction=file->addAction(QStringLiteral("Copier la position camÃ©ra (JSON)"));
-        copyPoseAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+C")));
-        connect(copyPoseAction,&QAction::triggered,this,[this]{copyLiveCamera();});
-        file->addSeparator();
-        auto* open=file->addAction(QStringLiteral("Ouvrir une scÃ¨ne V16 (scene.json)â€¦"));
-        connect(open,&QAction::triggered,this,[this]{
-            const QString chosen=QFileDialog::getOpenFileName(
-                this,QStringLiteral("ScÃ¨ne V16"),QFileInfo(scenePath_).absolutePath(),
-                QStringLiteral("Manifeste V16 (scene.json);;JSON (*.json)"));
-            if(!chosen.isEmpty())openScene(chosen);
-        });
-        auto* benchmarkScenes=file->addMenu(QStringLiteral("ScÃ¨nes benchmark architecturales"));
-        for(const auto& profile:QVector<QPair<QString,QString>>{
-            {QStringLiteral("LÃ©ger â€” 20 000 triangles"),QStringLiteral("scene.json")},
-            {QStringLiteral("Lourd â€” 150 000 triangles"),QStringLiteral("scene-lourd.json")},
-            {QStringLiteral("ExtrÃªme â€” 500 000+ triangles"),QStringLiteral("scene-extreme.json")}}){
-            auto* action=benchmarkScenes->addAction(profile.first);
-            const QString sceneFile=profile.second;
-            connect(action,&QAction::triggered,this,[this,sceneFile]{
-                const QString target=QCoreApplication::applicationDirPath()
-                    +QStringLiteral("/benchmark-civic/")+sceneFile;
-                if(!QFileInfo::exists(target)){
-                    QMessageBox::warning(this,QStringLiteral("ScÃ¨ne benchmark manquante"),
-                        QStringLiteral("La scÃ¨ne n'est pas installÃ©e : %1").arg(target));
-                    return;
-                }
-                if(sceneFile==QStringLiteral("scene-extreme.json")&&
-                    QMessageBox::question(this,QStringLiteral("Profil extrÃªme"),
-                        QStringLiteral("Ce niveau contient au moins 500 000 triangles. "
-                                       "Il utilise beaucoup de RAM et peut Ãªtre lent sur Intel HD 620. "
-                                       "Charger la scÃ¨ne sans lancer automatiquement son rendu ?"))
-                          !=QMessageBox::Yes)return;
-                openScene(target);
-            });
-        }
-        auto* saveMaterialsAction=file->addAction(QStringLiteral("Enregistrer les matÃ©riaux PBRâ€¦"));
-        connect(saveMaterialsAction,&QAction::triggered,this,[this]{saveMaterials();});
-        auto* save=file->addAction(QStringLiteral("Exporter l'image PNGâ€¦"));
-        connect(save,&QAction::triggered,this,[this]{
-            if(lastImage_.isNull()){QMessageBox::information(this,"PNG","Aucune image calculÃ©e.");return;}
-            const QString path=QFileDialog::getSaveFileName(this,"Exporter PNG","pavillon01-v16.png","PNG (*.png)");
-            if(!path.isEmpty()&&!lastImage_.save(path,"PNG"))
-                QMessageBox::warning(this,"PNG","Ã‰chec de l'enregistrement.");
-        });
-        auto* quit=file->addAction(QStringLiteral("Quitter"));
-        connect(quit,&QAction::triggered,this,&QWidget::close);
-
-        // One-click camera presets are independent from the detailed settings panel.
-        auto* camerasMenu=menuBar()->addMenu(QStringLiteral("CamÃ©ras"));
-        auto* camerasToolbar=addToolBar(QStringLiteral("CamÃ©ras Â· 1 Ã  6"));
-        camerasToolbar->setMovable(false);
-        camerasToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
-        for(int i=0;i<6;++i){
-            auto* action=new QAction(QString::number(i+1),this);
-            action->setShortcut(QKeySequence(QString::number(i+1)));
-            action->setShortcutContext(Qt::ApplicationShortcut);
-            action->setEnabled(false);
-            const int index=i;
-            connect(action,&QAction::triggered,this,[this,index]{
-                if(!runtime_||index>=runtime_->cameras.size())return;
-                const bool changed=cameraBox_->currentIndex()!=index;
-                cameraBox_->setCurrentIndex(index);
-                azimuth_->setValue(0);
-                if(!changed)requestRender();
-            });
-            quickCameraActions_.append(action);
-            camerasToolbar->addAction(action);
-            camerasMenu->addAction(action);
-        }
-        camerasToolbar->addSeparator();
-        sceneRevisionLabel_=new QLabel(QStringLiteral("ScÃ¨ne â€”"),camerasToolbar);
-        sceneRevisionLabel_->setMinimumWidth(108);
-        sceneRevisionLabel_->setToolTip(QStringLiteral("RÃ©vision du manifeste de la scÃ¨ne chargÃ©e"));
-        camerasToolbar->addWidget(sceneRevisionLabel_);
-        systemMemoryLabel_=new QLabel(QStringLiteral("RAM â€”"),camerasToolbar);
-        systemMemoryLabel_->setToolTip(QStringLiteral("Charge de la mÃ©moire physique systÃ¨me"));
-        camerasToolbar->addWidget(systemMemoryLabel_);
-        systemMemoryBar_=new QProgressBar(camerasToolbar);
-        systemMemoryBar_->setRange(0,100); systemMemoryBar_->setTextVisible(false);
-        systemMemoryBar_->setFixedSize(68,12);
-        camerasToolbar->addWidget(systemMemoryBar_);
-        memoryRefreshTimer_=new QTimer(this);
-        connect(memoryRefreshTimer_,&QTimer::timeout,this,[this]{updateMemoryBanner();});
-        memoryRefreshTimer_->start(1500); updateMemoryBanner();
-        // V17.443 - one-click regression review at the EXACT user-reported
-        // viewpoints, independent of the six artistic camera presets.
-        auto* anomaliesMenu=menuBar()->addMenu(QStringLiteral("Anomalies"));
-        for(int i=0;i<int(cse::anomalies::records.size());++i){
-            const auto& a=cse::anomalies::records[size_t(i)];
-            const QString name=QStringLiteral("%1 - %2%3")
-                .arg(QString::fromLatin1(a.id),
-                     QString::fromUtf8(a.title),
-                     a.cameraKnown?QString():QStringLiteral(" (position a definir)"));
-            auto* act=anomaliesMenu->addAction(name);
-            connect(act,&QAction::triggered,this,[this,i]{selectAnomaly(i);});
-        }
-        anomaliesMenu->addSeparator();
-        auto* prevAnomaly=anomaliesMenu->addAction(QStringLiteral("Anomalie precedente"));
-        prevAnomaly->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+Left")));
-        connect(prevAnomaly,&QAction::triggered,this,[this]{
-            selectAnomaly(currentAnomaly_<0?0:std::max(0,currentAnomaly_-1));
-        });
-        auto* nextAnomaly=anomaliesMenu->addAction(QStringLiteral("Anomalie suivante"));
-        nextAnomaly->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+Right")));
-        connect(nextAnomaly,&QAction::triggered,this,[this]{
-            selectAnomaly(currentAnomaly_<0?0:std::min(int(cse::anomalies::records.size())-1,currentAnomaly_+1));
-        });
-        auto* restoreAnomaly=anomaliesMenu->addAction(QStringLiteral("Retour a la position initiale"));
-        connect(restoreAnomaly,&QAction::triggered,this,[this]{returnBeforeAnomaly();});
-        auto* reviewDock=new QDockWidget(QStringLiteral("Validation des anomalies"),this);
-        anomalyReviewDock_=reviewDock;
-        auto* reviewWidget=new QWidget(reviewDock);
-        auto* reviewLayout=new QVBoxLayout(reviewWidget);
-        anomalyPanelLabel_=new QLabel(QStringLiteral(
-            "Choisissez ANO-005 a ANO-014 depuis le menu Anomalies."),reviewWidget);
-        anomalyPanelLabel_->setWordWrap(true);
-        reviewLayout->addWidget(anomalyPanelLabel_);
-        auto* reviewButtons=new QHBoxLayout;
-        for(const auto& verdict:QVector<QPair<QString,QString>>{
-            {QStringLiteral("Conforme"),QStringLiteral("conforme")},
-            {QStringLiteral("Presente"),QStringLiteral("toujours_presente")},
-            {QStringLiteral("A revoir"),QStringLiteral("a_revoir")}}){
-            auto* button=new QPushButton(verdict.first,reviewWidget);
-            connect(button,&QPushButton::clicked,this,[this,verdict]{
-                saveAnomalyVerdict(verdict.second);
-            });
-            reviewButtons->addWidget(button);
-        }
-        reviewLayout->addLayout(reviewButtons);
-        reviewDock->setWidget(reviewWidget);
-        addDockWidget(Qt::BottomDockWidgetArea,reviewDock);
-        reviewDock->setVisible(false);
-        connect(anomaliesMenu,&QMenu::aboutToShow,reviewDock,[reviewDock]{
-            reviewDock->show();
-        });
-
-        auto* toolsMenu=menuBar()->addMenu(QStringLiteral("Outils"));
-        auto* pacingAction=toolsMenu->addAction(QStringLiteral("Exporter benchmark fluiditÃ© (CSV + JSON)"));
-        connect(pacingAction,&QAction::triggered,this,[this]{exportPacing();});
-        auto* benchmarkAction=toolsMenu->addAction(
-            QStringLiteral("Benchmark V17.%1 â€” performancesâ€¦").arg(CSE_WARP_BUILD_NUMBER));
-        connect(benchmarkAction,&QAction::triggered,this,[this]{
-            if(scenePath_.isEmpty()){
-                QMessageBox::information(this,QStringLiteral("Benchmark"),QStringLiteral("Charger une scÃ¨ne avant de lancer le benchmark."));
-                return;
-            }
-            const QString appDir=QCoreApplication::applicationDirPath();
-            const QStringList candidates{
-                appDir+QStringLiteral("/outils/benchmark/moteur3d_v17_benchui.exe"),
-                appDir+QStringLiteral("/tools/benchmark/moteur3d_v17_benchui.exe"),
-                appDir+QStringLiteral("/moteur3d_v17_benchui.exe")
-            };
-            QString path;
-            for(const QString& candidate:candidates){
-                if(QFileInfo::exists(candidate)){path=candidate;break;}
-            }
-            if(path.isEmpty()){
-                QMessageBox::warning(this,QStringLiteral("Benchmark indisponible"),
-                    QStringLiteral("Programme de benchmark introuvable. Chemins vÃ©rifiÃ©s : %1")
-                        .arg(candidates.join(QStringLiteral("\n"))));
-                return;
-            }
-            // The benchmark is another process: the DLL's atomic settings
-            // cannot be shared implicitly. Transfer the active Raster quality
-            // explicitly so all image/performance comparisons use the exact
-            // same MSAA, anisotropy, LOD and culling configuration.
-            const auto q=rasterQualitySettings();
-            const QStringList arguments{
-                scenePath_,
-                QStringLiteral("--raster-msaa"),QString::number(q.msaaSamples),
-                QStringLiteral("--raster-anisotropy"),QString::number(q.anisotropy),
-                QStringLiteral("--raster-lod-percent"),QString::number(q.lodQualityPercent),
-                QStringLiteral("--raster-culling"),QString::number(q.frustumCulling?1:0),
-                QStringLiteral("--raster-lod-enabled"),QString::number(q.dynamicLod?1:0)
-            };
-            if(!QProcess::startDetached(path,arguments,QCoreApplication::applicationDirPath()))
-                QMessageBox::critical(this,QStringLiteral("Benchmark"),QStringLiteral("Impossible d'ouvrir la fenÃªtre de benchmark."));
-        });
-        auto* helpMenu=menuBar()->addMenu(QStringLiteral("Aide"));
-        auto* aboutAction=helpMenu->addAction(
-            QStringLiteral("Ã€ propos de CSE WARP V17.%1â€¦").arg(CSE_WARP_BUILD_NUMBER));
-        connect(aboutAction,&QAction::triggered,this,[this]{
-            const QString gpu=gpuAdapterLabel();
-            const QString revision=githubRevision();
-            const QString compileDate=QString::fromLatin1(__DATE__ " " __TIME__);
-            const auto quality=rasterQualitySettings();
-            const bool zEnabled=backendBox_->currentIndex()==5
-                ?qEnvironmentVariable("M3D_V17_DISABLE_Z_PREPASS")!=QStringLiteral("1")
-                :qEnvironmentVariable("M3D_V17_EXPERIMENT_Z_PREPASS")==QStringLiteral("1");
-            const bool lightEnabled=qEnvironmentVariable("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL")==QStringLiteral("1");
-            const QString backend=backendBox_?backendBox_->currentText():QStringLiteral("indÃ©terminÃ©");
-            const QString details=QStringLiteral(
-                "CSE WARP Beta X / V17.%1\\n"
-                "RÃ©vision GitHub : %2\\n"
-                "Compilation : %3\\n"
-                "SystÃ¨me : %4\\n"
-                "Adaptateur principal DXGI : %5\\n"
-                "Rendu sÃ©lectionnÃ© : %6\\n"
-                "Qt : %7\\n"
-                "MSAA : %8x | Anisotropie : %9x | PBR : %10 px\\n"
-                "Z-prepass expÃ©rimental : %11 | Rejet AABB lampes : %12\\n"
-                "HUD camÃ©ra / rapports d'anomalies PNG+JSON / restauration : disponibles")
-                .arg(CSE_WARP_BUILD_NUMBER)
-                .arg(revision).arg(compileDate).arg(QSysInfo::prettyProductName())
-                .arg(gpu).arg(backend).arg(QString::fromLatin1(qVersion()))
-                .arg(quality.msaaSamples).arg(quality.anisotropy)
-                .arg(textureResolution_).arg(zEnabled?QStringLiteral("ON"):QStringLiteral("OFF"))
-                .arg(lightEnabled?QStringLiteral("ON"):QStringLiteral("OFF"));
-            QMessageBox message(this);
-            message.setWindowTitle(QStringLiteral("Ã€ propos de CSE WARP V17.%1").arg(CSE_WARP_BUILD_NUMBER));
-            message.setIcon(QMessageBox::Information);
-            message.setTextFormat(Qt::RichText);
-            message.setText(QStringLiteral(
-                "<h3>CSE WARP Beta X â€” V17.%1</h3>"
-                "<p><b>RÃ©vision :</b> %2<br/><b>Compilation :</b> %3</p>"
-                "<p><b>GPU principal (DXGI) :</b> %4<br/><b>Rendu :</b> %5</p>"
-                "<p><b>Navigation :</b> HUD position X/Y/Z, cap, inclinaison et FOV.<br/>"
-                "<b>Diagnostic architectural :</b> capture PNG + position JSON restaurable.<br/>"
-                "<b>Raster :</b> Z-prepass %6, rejet AABB lumiÃ¨res %7 (expÃ©rimentaux).</p>"
-                "<p><b>Configuration :</b> Qt %8 ; MSAA %9x ; PBR %10 px.</p>")
-                .arg(CSE_WARP_BUILD_NUMBER).arg(revision.toHtmlEscaped())
-                .arg(compileDate.toHtmlEscaped()).arg(gpu.toHtmlEscaped())
-                .arg(backend.toHtmlEscaped())
-                .arg(zEnabled?QStringLiteral("ON"):QStringLiteral("OFF"))
-                .arg(lightEnabled?QStringLiteral("ON"):QStringLiteral("OFF"))
-                .arg(QString::fromLatin1(qVersion()))
-                .arg(quality.msaaSamples).arg(textureResolution_));
-            auto* copy=message.addButton(QStringLiteral("Copier les informations systÃ¨me"),QMessageBox::ActionRole);
-            message.addButton(QMessageBox::Ok);
-            message.exec();
-            if(message.clickedButton()==copy)QGuiApplication::clipboard()->setText(details);
-        });
-
-        auto* left=new QDockWidget(QStringLiteral("Explorateur de scÃ¨ne"),this);
-        sceneExplorerDock_=left;
-        auto* tabs=new QTabWidget;
-        sceneTree_=new QTreeWidget;
-        sceneTree_->setHeaderLabels({QStringLiteral("HiÃ©rarchie"),QStringLiteral("MatÃ©riau")});
-        resourceTree_=new QTreeWidget;
-        resourceTree_->setHeaderLabels({QStringLiteral("Ressource"),QStringLiteral("Origine")});
-        tabs->addTab(sceneTree_,QStringLiteral("Objets"));
-        tabs->addTab(resourceTree_,QStringLiteral("Ressources"));
-        left->setWidget(tabs);
-        addDockWidget(Qt::LeftDockWidgetArea,left);
-        left->resize(360,720);
-
-        auto* right=new QDockWidget(QStringLiteral("Rendu et matÃ©riaux"),this);
-        renderControlsDock_=right;
-        auto* controls=new QWidget;
-        auto* vertical=new QVBoxLayout(controls);
-        radioToggleButton_=new QPushButton(QStringLiteral("Reprendre la radio"),controls);
-        radioStatusLabel_=new QLabel(QStringLiteral("Radio arrÃªtÃ©e"),controls);
-        radioStatusLabel_->setWordWrap(true);
-        vertical->addWidget(new QLabel(QStringLiteral("SON AMBIANT â€” RADIO UKRAINIENNE"),controls));
-        vertical->addWidget(radioToggleButton_);
-        vertical->addWidget(radioStatusLabel_);
-        radioVolumeSlider_=new QSlider(Qt::Horizontal,controls);
-        radioVolumeSlider_->setRange(0,100);
-        radioVolumeSlider_->setValue(65);
-        radioVolumeSlider_->setToolTip(QStringLiteral("Volume de la radio 3D (0 Ã  100 %)"));
-        vertical->addWidget(new QLabel(QStringLiteral("Volume radio"),controls));
-        vertical->addWidget(radioVolumeSlider_);
-        connect(radioVolumeSlider_,&QSlider::valueChanged,this,[this](int value){
-            radioAudio_.setVolume(float(value)/500.f);
-        });
-        connect(radioToggleButton_,&QPushButton::clicked,this,[this]{
-            if(radioPlaying_){radioAutoplayEnabled_=false;stopRadio();}
-            else{radioAutoplayEnabled_=true;playRadio();}
-        });
-        auto* form=new QFormLayout;
-        cameraBox_=new QComboBox;
-        backendBox_=new QComboBox;
-        directDisplayBox_=new QCheckBox(QStringLiteral(
-            "Affichage GPU direct natif (DX11 / Vulkan)"));
-#ifdef _WIN32
-        // Vulkan direct presentation uses an engine-owned Win32 surface on the
-        // private top-level HWND, isolated from every other renderer window.
-        directDisplayBox_->setCheckState(Qt::Checked);
-        directDisplayBox_->setToolTip(QStringLiteral(
-            "DX11 et Vulkan prÃ©sentent dans leur HWND dÃ©diÃ©. DÃ©cocher pour afficher "
-            "le rendu de ce backend via QImage."));
-#else
-        directDisplayBox_->setChecked(false);
-        directDisplayBox_->setEnabled(false);
-#endif
-        backendBox_->addItems({
-            QStringLiteral("CPU Ray Tracing PBR â€” direct"),
-            QStringLiteral("GPU D3D11 Compute â€” rapide, ombres + verre"),
-            QStringLiteral("CPU Ã‰clairage global â€” 2 rebonds (qualitÃ© rÃ©glable)"),
-            QStringLiteral("CPU Ã‰clairage global â€” 4 rebonds (qualitÃ© rÃ©glable)"),
-            QStringLiteral("V17 GPU D3D11 Raster â€” exploration rapide"),
-            QStringLiteral("V17 Vulkan Raster â€” expÃ©rimental (GPU matÃ©riel)")
-        });
-#ifndef _WIN32
-        backendBox_->setItemData(1,0,Qt::UserRole-1);
-        backendBox_->setItemData(4,0,Qt::UserRole-1);
-        backendBox_->setItemData(5,0,Qt::UserRole-1);
-#endif
-#if !M3D_V17_VULKAN_ENABLED
-        backendBox_->setItemData(5,0,Qt::UserRole-1);
-        backendBox_->setItemData(5,QStringLiteral("Vulkan SDK absent lors de la compilation"),Qt::ToolTipRole);
-#endif
-#ifdef _WIN32
-        // Default Windows user path: native D3D11 raster with DXGI presentation.
-        // Vulkan and all CPU/compute options remain selectable.
-        backendBox_->setCurrentIndex(4);
-#endif
-        // Keep the backend choice visible at 1366px: six long camera names
-        // previously consumed the entire top toolbar and hid the renderer.
-        auto* fastBackend=new QComboBox(camerasToolbar);
-        fastBackend->setObjectName(QStringLiteral("v17QuickRenderer"));
-        fastBackend->setMinimumWidth(220);
-        fastBackend->setMaximumWidth(330);
-        for(int i=0;i<backendBox_->count();++i){
-            fastBackend->addItem(i==4?QStringLiteral("DirectX 11 Raster"):
-                (i==5?QStringLiteral("Vulkan Raster"):
-                backendBox_->itemText(i)));
-            fastBackend->setItemData(i,backendBox_->itemData(i,Qt::UserRole-1),
-                                    Qt::UserRole-1);
-            fastBackend->setItemData(i,backendBox_->itemText(i),Qt::ToolTipRole);
-        }
-        fastBackend->setCurrentIndex(backendBox_->currentIndex());
-        camerasToolbar->addSeparator();
-        camerasToolbar->addWidget(new QLabel(QStringLiteral("Moteur : "),camerasToolbar));
-        camerasToolbar->addWidget(fastBackend);
-        auto* quickRender=camerasToolbar->addAction(QStringLiteral("Actualiser"));
-        connect(quickRender,&QAction::triggered,this,[this]{requestRender();});
-        connect(fastBackend,qOverload<int>(&QComboBox::currentIndexChanged),
-                backendBox_,&QComboBox::setCurrentIndex);
-        connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),
-                fastBackend,&QComboBox::setCurrentIndex);
-        qualityBox_=new QComboBox;
-        // Keep native and Full HD side by side. Store explicit width/height
-        // instead of deriving them from an index or assuming exact 16:9.
-        qualityBox_->addItem(QStringLiteral("Viewport adaptatif â€” taille de la fenÃªtre moteur"),QSize());
-        qualityBox_->addItem(QStringLiteral("Dell natif 1366 Ã— 768"),QSize(1366,768));
-        qualityBox_->addItem(QStringLiteral("Full HD 1920 Ã— 1080"),QSize(1920,1080));
-        qualityBox_->addItem(QStringLiteral("QHD 2560 Ã— 1440"),QSize(2560,1440));
-        qualityBox_->addItem(QStringLiteral("4K UHD 3840 Ã— 2160"),QSize(3840,2160));
-        qualityBox_->setCurrentIndex(0); // Full-panel display by default; Dell 1366x768 remains available.
-        directSamples_=new QComboBox;
-        for(int n:{1,4,16})
-            directSamples_->addItem(QStringLiteral("%1 Ã©chantillon(s) / pixel").arg(n),n);
-        directSamples_->setCurrentIndex(0);
-        giSamples_=new QComboBox;
-        for(int n:{4,8,16,32,64})
-            giSamples_->addItem(QStringLiteral("%1 Ã©chantillons / pixel").arg(n),n);
-        giSamples_->setCurrentIndex(2); // Native Full HD quality baseline: 16 spp.
-        giSamples_->setEnabled(false);
-        progressiveGi_=new QCheckBox(QStringLiteral("GI progressive (afficher les passes)"));
-        progressiveGi_->setChecked(true);
-        progressiveGi_->setEnabled(false);
-        denoiseGi_=new QCheckBox(QStringLiteral("DÃ©bruitage GI bilatÃ©ral (optionnel)"));
-        denoiseGi_->setChecked(true);
-        denoiseGi_->setEnabled(false);
-        denoiseDirect_=new QCheckBox(QStringLiteral("DÃ©bruitage CPU direct (bilatÃ©ral)"));
-        denoiseDirect_->setChecked(false); // avoid blurring PBR details by default
-        sunHour_=new QDoubleSpinBox;
-        sunHour_->setRange(0.0,23.99);
-        sunHour_->setDecimals(2);
-        sunHour_->setSingleStep(.25);
-        sunHour_->setSuffix(QStringLiteral(" h"));
-        sunHour_->setValue(14.75);
-        sunHour_->setToolTip(QStringLiteral("Soleil et Ã©clairage de 00 h Ã  24 h â€” aube, jour, crÃ©puscule, nuit"));
-        cloudAnimationBox_=new QCheckBox(QStringLiteral("Nuages animÃ©s sur le ciel"));
-        cloudAnimationBox_->setChecked(true);
-        cloudAnimationBox_->setToolTip(QStringLiteral(
-            "VÃ©ritables cirrus calculÃ©s par le shader DirectX11. La scÃ¨ne reste nette."));
-        dayNightCycleBox_=new QCheckBox(QStringLiteral("Simulation jour/nuit (24 h en 6 min)"));
-        dayNightCycleBox_->setChecked(false);
-        dayNightCycleBox_->setToolTip(QStringLiteral(
-            "Fait progresser le soleil, le ciel, les ombres et les Ã©clairages du bÃ¢timent."));
-        // Two independent controls avoid coupling global illumination and
-        // output tone mapping. Preserve the existing hybrid preference, while
-        // the new filmic shoulder defaults OFF to avoid V17.309 wash-out.
-        hybridLightBox_=new QCheckBox(QStringLiteral("Rebonds indirects 3D (bÃªta)"));
-        hybridLightBox_->setToolTip(QStringLiteral(
-            "Sondes prÃ©calculÃ©es, ciel plus froid, rebonds colorÃ©s et zones abritÃ©es.\n"
-            "Ne change pas le traitement tonal."));
-        // Calibrated linear-light energy path. Does not modify sRGB textures
-        // or flatten dielectric reflections; legacy lighting remains A/B.
-        colorEnergyBox_=new QCheckBox(QStringLiteral("Couleurs fidÃ¨les et lumiÃ¨re Ã©quilibrÃ©e"));
-        colorEnergyBox_->setToolTip(QStringLiteral(
-            "Ã‰quilibre l'Ã©clairage ambiant, le soleil et les reflets du bÃ©ton\n"
-            "dans l'espace linÃ©aire, sans filtre de saturation ni flou PBR."));
-        colorExposureBox_=new QDoubleSpinBox;
-        colorExposureBox_->setRange(.65,1.45);
-        colorExposureBox_->setDecimals(2);
-        colorExposureBox_->setSingleStep(.05);
-        colorExposureBox_->setToolTip(QStringLiteral(
-            "RÃ©glage fin de l'exposition du nouveau modÃ¨le. 1,00 = neutre.\n"
-            "PrÃ©serve la teinte et la saturation des matÃ©riaux."));
-        filmicToneBox_=new QCheckBox(QStringLiteral("Compression tonale filmique (optionnelle)"));
-        filmicToneBox_->setToolTip(QStringLiteral(
-            "Adoucit les hautes lumiÃ¨res sans remonter les demi-teintes.\n"
-            "IndÃ©pendant des sondes indirectes."));
-        QSettings hybridPrefs(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-        hybridLightBox_->setChecked(hybridPrefs.value(QStringLiteral("Raster/HybridLighting"),true).toBool());
-        filmicToneBox_->setChecked(hybridPrefs.value(QStringLiteral("Raster/FilmicTonemap"),false).toBool());
-        colorEnergyBox_->setChecked(hybridPrefs.value(QStringLiteral("Raster/ColorEnergyBalance"),true).toBool());
-        colorExposureBox_->setValue(hybridPrefs.value(QStringLiteral("Raster/ColorExposure"),1.0).toDouble());
-        colorExposureBox_->setEnabled(colorEnergyBox_->isChecked());
-        m3d::setRasterHybridLightingEnabled(hybridLightBox_->isChecked());
-        m3d::setRasterFilmicTonemapEnabled(filmicToneBox_->isChecked());
-        m3d::setRasterColorEnergyBalanceEnabled(colorEnergyBox_->isChecked());
-        m3d::setRasterColorExposure(float(colorExposureBox_->value()));
-        azimuth_=new QSlider(Qt::Horizontal);
-        azimuth_->setRange(-180,180);
-        azimuth_->setValue(0);
-        form->addRow(QStringLiteral("CamÃ©ra"),cameraBox_);
-        form->addRow(QStringLiteral("MÃ©thode de rendu"),backendBox_);
-        form->addRow(directDisplayBox_);
-        form->addRow(QStringLiteral("RÃ©solution"),qualityBox_);
-        form->addRow(QStringLiteral("Ã‰chantillons CPU direct"),directSamples_);
-        form->addRow(QStringLiteral("Ã‰chantillons GI"),giSamples_);
-        form->addRow(QStringLiteral("Heure solaire"),sunHour_);
-        form->addRow(cloudAnimationBox_);
-        form->addRow(dayNightCycleBox_);
-        form->addRow(hybridLightBox_);
-        form->addRow(colorEnergyBox_);
-        form->addRow(QStringLiteral("Exposition linÃ©aire"),colorExposureBox_);
-        form->addRow(filmicToneBox_);
-        form->addRow(QStringLiteral("Rotation camÃ©ra"),azimuth_);
-        vertical->addLayout(form);
-        vertical->addWidget(progressiveGi_);
-        vertical->addWidget(denoiseGi_);
-        vertical->addWidget(denoiseDirect_);
-        edgeAa_=new QCheckBox(QStringLiteral("Antialiasing des contours"));
-        edgeAa_->setChecked(true);
-        vertical->addWidget(edgeAa_);
-        // One quality source for Qt and embedding host applications.
-        // All controls update an atomic engine snapshot; the GPU worker
-        // applies the new settings only at the next frame boundary.
-        auto* rasterQuality=new QGroupBox(QStringLiteral("QualitÃ© Raster DirectX 11"));
-        auto* rasterForm=new QFormLayout(rasterQuality);
-        rasterPresetBox_=new QComboBox;
-        rasterPresetBox_->addItems({
-            QStringLiteral("Performance"),
-            QStringLiteral("Ã‰quilibrÃ©e"),
-            QStringLiteral("Ã‰levÃ©e â€” qualitÃ© historique"),
-            QStringLiteral("Ultra â€” finesse maximale"),
-            QStringLiteral("PersonnalisÃ©e")
-        });
-        rasterForm->addRow(QStringLiteral("PrÃ©rÃ©glage"),rasterPresetBox_);
-        rasterMsaaBox_=new QComboBox;
-        for(int v:{1,2,4,8})
-            rasterMsaaBox_->addItem(QStringLiteral("MSAA %1Ã—").arg(v),v);
-        rasterForm->addRow(QStringLiteral("Anti-aliasing GPU"),rasterMsaaBox_);
-        rasterAnisoBox_=new QComboBox;
-        for(int v:{1,2,4,8,16})
-            rasterAnisoBox_->addItem(QStringLiteral("Anisotropie %1Ã—").arg(v),v);
-        rasterForm->addRow(QStringLiteral("Textures PBR"),rasterAnisoBox_);
-        rasterLodBox_=new QComboBox;
-        for(int v:{50,60,75,85,100,125,150,180,200})
-            rasterLodBox_->addItem(QStringLiteral("QualitÃ© LOD %1 %").arg(v),v);
-        rasterForm->addRow(QStringLiteral("Distance dÃ©tails"),rasterLodBox_);
-        rasterCullBox_=new QCheckBox(QStringLiteral("Ne pas calculer les objets hors camÃ©ra"));
-        rasterForm->addRow(rasterCullBox_);
-        rasterDynamicLodBox_=new QCheckBox(QStringLiteral("LOD adaptatif des objets Ã©loignÃ©s"));
-        rasterForm->addRow(rasterDynamicLodBox_);
-        vertical->addWidget(rasterQuality);
-        QSettings stored(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-        int initialPreset=std::clamp(stored.value(QStringLiteral("Raster/Preset"),2).toInt(),0,4);
-        // An embedding host may configure the raster API BEFORE launching
-        // Qt. Respect it unless the user already saved UI preferences.
-        auto initialQuality=stored.contains(QStringLiteral("Raster/Preset"))
-            ?rasterQualityProfile(RasterQualityProfile(std::min(initialPreset,3)))
-            :rasterQualitySettings();
-        if(!stored.contains(QStringLiteral("Raster/Preset"))){
-            initialPreset=4;
-            for(int candidate=0;candidate<4;++candidate){
-                const auto q=rasterQualityProfile(RasterQualityProfile(candidate));
-                if(q.msaaSamples==initialQuality.msaaSamples &&
-                   q.anisotropy==initialQuality.anisotropy &&
-                   q.lodQualityPercent==initialQuality.lodQualityPercent &&
-                   q.frustumCulling==initialQuality.frustumCulling &&
-                   q.dynamicLod==initialQuality.dynamicLod){
-                    initialPreset=candidate;break;
-                }
-            }
-        }
-        if(initialPreset==4){
-            initialQuality.msaaSamples=stored.value(QStringLiteral("Raster/MSAA"),4).toUInt();
-            initialQuality.anisotropy=stored.value(QStringLiteral("Raster/Anisotropy"),16).toUInt();
-            initialQuality.lodQualityPercent=stored.value(QStringLiteral("Raster/LODPercent"),100).toUInt();
-            initialQuality.frustumCulling=stored.value(QStringLiteral("Raster/Culling"),true).toBool();
-            initialQuality.dynamicLod=stored.value(QStringLiteral("Raster/DynamicLOD"),true).toBool();
-        }
-        if(rasterMsaaBox_->findData(int(initialQuality.msaaSamples))<0||
-           rasterAnisoBox_->findData(int(initialQuality.anisotropy))<0||
-           rasterLodBox_->findData(int(initialQuality.lodQualityPercent))<0){
-            initialPreset=2;initialQuality=rasterQualityProfile(RasterQualityProfile::High);
-        }
-        rasterPresetBox_->setCurrentIndex(initialPreset);
-        displayRasterSettings(initialQuality);
-        std::wstring qualityError;
-        setRasterQualitySettings(initialQuality,qualityError);
-        connect(rasterPresetBox_,qOverload<int>(&QComboBox::currentIndexChanged),
-                this,[this](int selected){
-            if(selected>=0&&selected<4)
-                displayRasterSettings(rasterQualityProfile(RasterQualityProfile(selected)));
-            applyRasterSettings(false);
-        });
-        for(auto* combo:{rasterMsaaBox_,rasterAnisoBox_,rasterLodBox_}){
-            connect(combo,qOverload<int>(&QComboBox::currentIndexChanged),
-                    this,[this](int){applyRasterSettings(true);});
-        }
-        connect(rasterCullBox_,&QCheckBox::toggled,this,
-                [this](bool){applyRasterSettings(true);});
-        connect(rasterDynamicLodBox_,&QCheckBox::toggled,this,
-                [this](bool){applyRasterSettings(true);});
-        explorationButton_=new QPushButton(QStringLiteral("DÃ©marrer exploration (V17)"));
-        vertical->addWidget(explorationButton_);
-        walkingModeBox_=new QCheckBox(QStringLiteral("Marcher au sol (yeux Ã  1,70 m, escaliers et obstacles)"));
-        walkingModeBox_->setToolTip(QStringLiteral(
-            "Marche Ã  hauteur d'homme, monte les marches de 34 cm au maximum,\n"
-            "descend les paliers et bloque les murs. DÃ©cochez pour voler librement."));
-        QSettings walkPreferences(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-        walkingModeBox_->setChecked(walkPreferences.value(QStringLiteral("Exploration/Walking"),true).toBool());
-        vertical->addWidget(walkingModeBox_);
-        explorationHelp_=new QLabel(QStringLiteral(
-            "ZQSD / flÃ¨ches : marcher Â· souris libre : orienter la camÃ©ra Â· clic droit : zoom Ã—3\\n"
-            "F11 : plein Ã©cran Â· Ã‰chap : arrÃªter Â· E : Ã©chelle Â· Ctrl+Maj+A : anomalie PNG+JSON."));
-        explorationHelp_->setWordWrap(true);
-        vertical->addWidget(explorationHelp_);
-        connect(explorationButton_,&QPushButton::clicked,this,[this]{toggleExploration();});
-        bakeGiButton_=new QPushButton(QStringLiteral("PrÃ©calculer la table GI (ray tracing CPU)"));
-        bakeGiButton_->setToolTip(QStringLiteral(
-            "Calcule les vrais rebonds sur les surfaces et Ã©crit une table GI pour 25 heures solaires.\n"
-            "OpÃ©ration hors ligne dans un programme sÃ©parÃ©, sans ralentir chaque image."));
-        bakeGiButton_->setEnabled(false);
-        vertical->addWidget(bakeGiButton_);
-        bakeGiProcess_=new QProcess(this);
-        connect(bakeGiButton_,&QPushButton::clicked,this,[this]{
-            if(scenePath_.isEmpty()||bakeGiProcess_->state()!=QProcess::NotRunning)return;
-            const QString exe=QCoreApplication::applicationDirPath()
-                +QStringLiteral("/outils/gi/moteur3d_v17_gibake.exe");
-            if(!QFileInfo::exists(exe)){
-                QMessageBox::warning(this,QStringLiteral("PrÃ©calcul GI"),
-                    QStringLiteral("ExÃ©cutable moteur3d_v17_gibake.exe absent du dossier de l'application."));
-                return;
-            }
-            bakingScenePath_=scenePath_;
-            bakeGiButton_->setEnabled(false);
-            bakeGiButton_->setText(QStringLiteral("Calcul de la table GI en coursâ€¦"));
-            statusBar()->showMessage(QStringLiteral(
-                "PrÃ©calcul hors ligne : rayons et rebonds sur les surfaces de la scÃ¨neâ€¦"));
-            bakeGiProcess_->setProgram(exe);
-            bakeGiProcess_->setArguments({bakingScenePath_,
-                                         bakingScenePath_+QStringLiteral(".m3dgi")});
-            bakeGiProcess_->start();
-        });
-        connect(bakeGiProcess_,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),
-                this,[this](int exitCode,QProcess::ExitStatus exitStatus){
-            bakeGiButton_->setText(QStringLiteral("PrÃ©calculer la table GI (ray tracing CPU)"));
-            bakeGiButton_->setEnabled(bool(runtime_));
-            if(exitStatus!=QProcess::NormalExit||exitCode!=0){
-                statusBar()->showMessage(QStringLiteral(
-                    "Ã‰chec prÃ©calcul GI : %1").arg(QString::fromUtf8(
-                        bakeGiProcess_->readAllStandardError()).left(200)),15000);
-                return;
-            }
-            if(bakingScenePath_!=scenePath_)return; // scene switched during bake
-            setRasterGiCachePath(std::filesystem::path(
-                (scenePath_+QStringLiteral(".m3dgi")).toStdWString()));
-            statusBar()->showMessage(QStringLiteral(
-                "Table GI enregistrÃ©e pour %1 â€” rebonds chargÃ©s au prochain rendu.")
-                .arg(QFileInfo(scenePath_).fileName()),16000);
-            requestRender();
-        });
-        connect(walkingModeBox_,&QCheckBox::toggled,this,[this](bool enabled){
-            updateExplorationSpeedIndicator();
-            QSettings preferences(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-            preferences.setValue(QStringLiteral("Exploration/Walking"),enabled);
-            if(exploring_&&freeCameraActive_&&runtime_){
-                if(enabled){
-                    walk::spawn(runtime_->renderScene,freeCamera_.eye,walkingState_);
-                    walkingCollisionSyncPending_=false;
-                    freeCamera_.eye=walk::eye(walkingState_);
-                    updateLook();
-                }
-                requestRender();
-            }
-        });
-        auto* renderButton=new QPushButton(QStringLiteral("Calculer l'image"));
-        vertical->addWidget(renderButton);
-        auto* materials=new QGroupBox(QStringLiteral("MatÃ©riau sÃ©lectionnÃ©"));
-        auto* matForm=new QFormLayout(materials);
-        materialLabel_=new QLabel(QStringLiteral("SÃ©lectionner un matÃ©riau dans le catalogue"));
-        materialLabel_->setWordWrap(true);
-        roughness_=new QDoubleSpinBox;
-        roughness_->setRange(.01,1.0);roughness_->setSingleStep(.05);roughness_->setDecimals(2);
-        metallic_=new QDoubleSpinBox;
-        metallic_->setRange(0,1);metallic_->setSingleStep(.05);metallic_->setDecimals(2);
-        matForm->addRow(materialLabel_);
-        matForm->addRow(QStringLiteral("RugositÃ© Ã—"),roughness_);
-        matForm->addRow(QStringLiteral("MÃ©tallicitÃ©"),metallic_);
-        vertical->addWidget(materials);
-        vertical->addStretch(1);
-        auto* rightScroll=new QScrollArea;
-        rightScroll->setWidgetResizable(true);
-        rightScroll->setWidget(controls);
-        right->setWidget(rightScroll);
-        addDockWidget(Qt::RightDockWidgetArea,right);
-        right->setMinimumWidth(295);
-        // Organize Scene / Rendering as tabs on one right sidebar.
-        // Both panels remain accessible; the 3D viewport gets the former
-        // left-dock width back (important at 1366x768 on the Dell).
-        setDockOptions(dockOptions() | QMainWindow::AllowTabbedDocks);
-        removeDockWidget(left);
-        addDockWidget(Qt::RightDockWidgetArea,left);
-        tabifyDockWidget(right,left);
-        right->raise();
-        // F11 controls the dedicated render window, leaving these controls
-        // available behind it.
-        auto* viewMenu=menuBar()->addMenu(QStringLiteral("Affichage"));
-        auto* hudToggle=viewMenu->addAction(QStringLiteral("Afficher les coordonnÃ©es camÃ©ra (HUD)"));
-        hudToggle->setCheckable(true);
-        QSettings hudSettings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-        cameraHudEnabled_=hudSettings.value(QStringLiteral("Camera/ShowHUD"),true).toBool();
-        hudToggle->setChecked(cameraHudEnabled_);
-        connect(hudToggle,&QAction::toggled,this,[this](bool enabled){
-            cameraHudEnabled_=enabled;
-            QSettings cfg(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-            cfg.setValue(QStringLiteral("Camera/ShowHUD"),enabled);
-            updateCameraHud();
-            updateRendererStamp();
-        });
-        immersiveAction_=viewMenu->addAction(QStringLiteral("Plein Ã©cran 3D (F11)"));
-        immersiveAction_->setCheckable(true);
-        immersiveAction_->setShortcut(QKeySequence(Qt::Key_F11));
-        immersiveAction_->setShortcutContext(Qt::ApplicationShortcut);
-        // Application shortcut keeps F11 available while a render window has focus.
-        addAction(immersiveAction_);
-        for(auto* view:backendWindows_)if(view)view->addAction(immersiveAction_);
-        connect(immersiveAction_,&QAction::toggled,this,[this](bool enabled){
-            if(!canvas_)return;
-            if(enabled){canvas_->showFullScreen();canvas_->raise();}
-            else canvas_->showNormal();
-            QTimer::singleShot(0,this,[this]{
-                if(exploring_){
-                    releaseMouseLook();
-                    canvas_->setFocus();
-                    captureMouseLook();
-                }
-                if(nativeDirectSelected() || (qualityBox_&&qualityBox_->currentIndex()==0))
-                    requestRender();
-            });
-        });
-
-        connect(renderButton,&QPushButton::clicked,this,[this]{requestRender();});
-        connect(cameraBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){
-            azimuth_->setValue(0);
-            if(exploring_)activateFreeCamera();
-            else freeCameraActive_=false;
-            updateCameraHud();
-            requestRender();
-        });
-        connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int index){
-            if(exploring_ && index!=4 && index!=5)stopExploration();
-            const bool gi=index==2||index==3;
-            directDisplayBox_->setEnabled(index==4 || (index==5&&vulkanDirectAvailable()));
-            directDisplayBox_->setToolTip(index==5
-                ?(vulkanDirectAvailable()
-                    ?QStringLiteral("Vulkan : swapchain Win32 dans sa fenÃªtre dÃ©diÃ©e.")
-                    :QStringLiteral("Vulkan Win32 WSI indisponible dans cette compilation."))
-                :QStringLiteral("DX11 : swapchain dans sa fenÃªtre dÃ©diÃ©e. DÃ©cochez pour afficher lâ€™image Qt."));
-            directSamples_->setEnabled(index==0);
-            denoiseDirect_->setEnabled(index==0);
-            giSamples_->setEnabled(gi);
-            progressiveGi_->setEnabled(gi);
-            denoiseGi_->setEnabled(gi);
-            selectBackendOutputWindow();
-            restoreExplorationViewportFocus();
-            requestRender();
-        });
-        connect(directDisplayBox_,&QCheckBox::toggled,this,[this](bool){
-            if(backendBox_){
-                const int index=backendBox_->currentIndex();
-                if(index>=0&&index<int(nativeDirectFailed_.size())){
-                    nativeDirectFailed_[size_t(index)]=false;
-                    nativeDirectFailureReason_[size_t(index)].clear();
-                }
-            }
-            nativeReadyAttempts_=0;
-            selectBackendOutputWindow();
-            updateRendererStamp();
-            restoreExplorationViewportFocus();
-            requestRender();
-        });
-        connect(qualityBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){requestRender();});
-        connect(directSamples_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){if(backendBox_->currentIndex()==0)requestRender();});
-        connect(giSamples_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){if(backendBox_->currentIndex()==2||backendBox_->currentIndex()==3)requestRender();});
-        connect(progressiveGi_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()==2||backendBox_->currentIndex()==3)requestRender();});
-        connect(denoiseGi_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()==2||backendBox_->currentIndex()==3)requestRender();});
-        connect(denoiseDirect_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()==0)requestRender();});
-        connect(edgeAa_,&QCheckBox::toggled,this,[this](bool){requestRender();});
-        connect(azimuth_,&QSlider::sliderReleased,this,[this]{updateCameraHud();requestRender();});
-        connect(hybridLightBox_,&QCheckBox::toggled,this,[this](bool enabled){
-            m3d::setRasterHybridLightingEnabled(enabled);
-            QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-            settings.setValue(QStringLiteral("Raster/HybridLighting"),enabled);
-            if(backendBox_&&backendBox_->currentIndex()==4)requestRender();
-        });
-        connect(colorEnergyBox_,&QCheckBox::toggled,this,[this](bool enabled){
-            m3d::setRasterColorEnergyBalanceEnabled(enabled);
-            colorExposureBox_->setEnabled(enabled);
-            QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-            settings.setValue(QStringLiteral("Raster/ColorEnergyBalance"),enabled);
-            if(backendBox_&&backendBox_->currentIndex()==4)requestRender();
-        });
-        connect(colorExposureBox_,qOverload<double>(&QDoubleSpinBox::valueChanged),
-                this,[this](double value){
-            m3d::setRasterColorExposure(float(value));
-            QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-            settings.setValue(QStringLiteral("Raster/ColorExposure"),value);
-            if(backendBox_&&backendBox_->currentIndex()==4&&colorEnergyBox_->isChecked())
-                requestRender();
-        });
-        connect(filmicToneBox_,&QCheckBox::toggled,this,[this](bool enabled){
-            m3d::setRasterFilmicTonemapEnabled(enabled);
-            QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-            settings.setValue(QStringLiteral("Raster/FilmicTonemap"),enabled);
-            if(backendBox_&&backendBox_->currentIndex()==4)requestRender();
-        });
-        // DX11/QImage: lightweight, independent 30 Hz sky compositor.
-        // Native Vulkan has no QImage at all: present a new GPU frame when
-        // stationary so clouds and the solar sky do not freeze outside explore.
-        // Coalesce idle refreshes (20 Hz cap); exploring already renders
-        // continuously, and the in-flight guard prevents render queue buildup.
-        skyAnimationTimer_.setInterval(33);
-        connect(&skyAnimationTimer_,&QTimer::timeout,this,[this]{
-            if(sceneLoading_||!runtime_||!backendBox_)return;
-            if(nativeDirectSelected()){
-                if(!exploring_&&(cloudAnimationBox_->isChecked()||
-                                  dayNightCycleBox_->isChecked())&&
-                   !watcher_.isRunning()&&!pending_){
-                    const qint64 now=skyMotionClock_.elapsed();
-                    if(now-lastVulkanIdleSkyRequestMs_>=50){
-                        lastVulkanIdleSkyRequestMs_=now;
-                        requestRender();
-                    }
-                }
-                return;
-            }
-            if(!hasRenderedPose_||lastImage_.isNull()||
-               (backendBox_->currentIndex()!=4 && backendBox_->currentIndex()!=5))return;
-            if(!cloudAnimationBox_->isChecked()&&!dayNightCycleBox_->isChecked()&&
-               canvas_->hasSkyFrame())return;
-            const auto camera=v16::makeCamera(lastRenderedPose_,
-                                               lastImage_.width(),lastImage_.height());
-            const float hour=dayNightCycleBox_->isChecked()
-                ?float(cse::weather::cycleHour(dayNightOriginHour_,
-                       double(dayNightClock_.elapsed())/1000.0))
-                :float(sunHour_->value());
-            const double seconds=double(skyMotionClock_.elapsed())/1000.0;
-            canvas_->drawSky(camera,hour,seconds,
-                cloudAnimationBox_->isChecked(),dayNightCycleBox_->isChecked());
-        });
-        skyAnimationTimer_.start();
-        // Weather animation deliberately faster than the old almost-static sky.
-        m3d::setRasterCloudTimeScale(24.f);
-        connect(cloudAnimationBox_,&QCheckBox::toggled,this,[this](bool enabled){
-            m3d::setRasterCloudTimeScale(!enabled?0.f:
-                (dayNightCycleBox_->isChecked()?240.f:24.f));
-            canvas_->invalidateSky();
-        });
-        dayNightTimer_.setInterval(1500); // Architectural lighting is slower than 30Hz sky
-        connect(&dayNightTimer_,&QTimer::timeout,this,[this]{
-            if(!runtime_ || sceneLoading_)return;
-            // Simulated time advances independently of GPU frame duration.
-            // Elapsed time is absolute since the start, never accumulated
-            // from successful frames. Long HD620 GPU frames cannot freeze
-            // or stretch the 6-minute day/night cycle.
-            const double seconds=double(dayNightClock_.elapsed())/1000.0;
-            const double next=cse::weather::cycleHour(dayNightOriginHour_,seconds);
-            if(std::abs(next-sunHour_->value())<.01)return;
-            applyingDayNightTick_=true;
-            sunHour_->setValue(next);
-            applyingDayNightTick_=false;
-        });
-        connect(dayNightCycleBox_,&QCheckBox::toggled,this,[this](bool enabled){
-            if(enabled){
-                dayNightOriginHour_=sunHour_->value();
-                dayNightClock_.start();
-                dayNightTimer_.start();
-            }else dayNightTimer_.stop();
-            m3d::setRasterCloudTimeScale(!cloudAnimationBox_->isChecked()?0.f:
-                (enabled?240.f:24.f));
-        });
-        connect(sunHour_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double hour){
-            // A deliberate manual time change reanchors the running clock.
-            if(dayNightCycleBox_ && dayNightCycleBox_->isChecked() &&
-               !applyingDayNightTick_){
-                dayNightOriginHour_=hour;
-                dayNightClock_.restart();
-            }
-            if(!runtime_)return;
-            // No UI-thread wait for a slow DX11 frame. Only the latest hour
-            // is queued, and in-flight frames retain their captured hour.
-            runtime_->daylightHour=float(hour);
-            canvas_->invalidateSky();
-            requestRender();
-        });
-        connect(roughness_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double){modifyMaterial();});
-        connect(metallic_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double){modifyMaterial();});
-        connect(resourceTree_,&QTreeWidget::itemClicked,this,[this](QTreeWidgetItem* item,int){
-            const QString key=item->data(0,Qt::UserRole).toString();
-            if(runtime_&&runtime_->materialIndex.contains(key))chooseMaterial(runtime_->materialIndex.value(key),key);
-        });
-        connect(sceneTree_,&QTreeWidget::itemClicked,this,[this](QTreeWidgetItem* item,int){
-            const QString key=item->data(0,Qt::UserRole).toString();
-            if(runtime_&&runtime_->materialIndex.contains(key))chooseMaterial(runtime_->materialIndex.value(key),key);
-        });
-    }
-    QImage lastImage_;
-    void chooseMaterial(int id,const QString& name){
-        if(!runtime_||id<0||id>=int(runtime_->renderScene.mat.size()))return;
-        selectedMaterial_=id;updatingControls_=true;
-        materialLabel_->setText(name);
-        const auto& m=runtime_->renderScene.mat[size_t(id)];
-        roughness_->setValue(m.roughnessScale);
-        metallic_->setValue(m.metallic);
-        updatingControls_=false;
-    }
-    void modifyMaterial(){
-        if(updatingControls_||!runtime_||selectedMaterial_<0)return;
-        // Only mutate scene resources once the previous render no longer reads them.
-        renderSerial_->fetch_add(1);
-        if(watcher_.isRunning())watcher_.waitForFinished();
-        auto& m=runtime_->renderScene.mat[size_t(selectedMaterial_)];
-        m.roughnessScale=float(roughness_->value());
-        m.metallic=float(metallic_->value());
-        // Required for GPU fast-path cache invalidation. The shadow map itself
-        // depends only on geometry/sun, not on metallicity or roughness.
-        runtime_->renderScene.markGpuParametersChanged();
-        requestRender();
-    }
-    void saveMaterials(){
-        if(materialsPath_.isEmpty()||!runtime_){QMessageBox::warning(this,"MatÃ©riaux","Aucun catalogue chargÃ©.");return;}
-        if(watcher_.isRunning())watcher_.waitForFinished();
-        QFile file(materialsPath_);
-        if(!file.open(QIODevice::ReadOnly)){QMessageBox::critical(this,"MatÃ©riaux",file.errorString());return;}
-        const auto document=QJsonDocument::fromJson(file.readAll());
-        file.close();
-        if(!document.isObject()){QMessageBox::critical(this,"MatÃ©riaux","Fichier JSON invalide.");return;}
-        QJsonObject root=document.object();
-        QJsonArray materials=root.value("materials").toArray();
-        for(int i=0;i<materials.size();++i){
-            auto j=materials[i].toObject();
-            const QString id=j.value("id").toString();
-            if(!runtime_->materialIndex.contains(id))continue;
-            const auto& m=runtime_->renderScene.mat[size_t(runtime_->materialIndex.value(id))];
-            j.insert("roughnessScale",double(m.roughnessScale));
-            j.insert("metallic",double(m.metallic));
-            materials[i]=j;
-        }
-        root.insert("materials",materials);
-        QSaveFile output(materialsPath_);
-        if(!output.open(QIODevice::WriteOnly)){
-            QMessageBox::critical(this,"MatÃ©riaux",output.errorString());return;
-        }
-        const auto content=QJsonDocument(root).toJson(QJsonDocument::Indented);
-        if(output.write(content)!=content.size()||!output.commit()){
-            QMessageBox::critical(this,"MatÃ©riaux","Ã‰criture du catalogue impossible.");return;
-        }
-        statusBar()->showMessage(QStringLiteral("MatÃ©riaux enregistrÃ©s dans %1").arg(materialsPath_),15000);
-    }
-    void openScene(const QString& path){
-        if(path.isEmpty())return;
-        if(exploring_)stopExploration();
-        freeCameraActive_=false;
-        // Invalidates previous scene/camera frame without waiting on its GPU.
-        renderSerial_->fetch_add(1);
-        pending_=false;
-        queuedScenePath_=path;
-        ++sceneLoadGeneration_;
-        sceneLoading_=true;
-        sceneLoadProgress_->setValue(0);
-        sceneLoadLabel_->setText(QStringLiteral("Chargement de la scÃ¨neâ€¦"));
-        sceneLoadLabel_->show();
-        sceneLoadProgress_->show();
-        lastImage_=QImage{};
-        hasRenderedPose_=false;
-        for(auto* view:backendWindows_){
-            if(!view)continue;
-            // A native-present worker cannot be interrupted mid-Present. Keep
-            // Qt from painting over its HWND until that frame leaves the GPU.
-            const bool preserveInFlightPresent=watcher_.isRunning()&&
-                activeRenderDirect_&&activeRenderBackend_>=0&&
-                activeRenderBackend_<int(backendWindows_.size())&&
-                view==backendWindows_[size_t(activeRenderBackend_)];
-            view->setNativePresentation(preserveInFlightPresent);
-            view->setImage(QImage{});
-            view->setCameraHud({},false);
-            view->enableSkyCompositing(false);
-            view->setPlaceholder(QStringLiteral("CSE WARP V17\nChargement de la scÃ¨neâ€¦"));
-        }
-        backendLastRenderer_.fill(QString{});
-        backendLastRequest_.fill(QString{});
-        hasRenderedPose_=false;
-        freeCameraActive_=false;
-        cameraBox_->setEnabled(false);
-        if(explorationButton_)explorationButton_->setEnabled(false);
-        if(bakeGiButton_)bakeGiButton_->setEnabled(false);
-        if(bakeGiProcess_&&bakeGiProcess_->state()!=QProcess::NotRunning)
-            bakeGiProcess_->kill();
-        if(!loadWatcher_.isRunning())beginSceneLoad();
-    }
-    void beginSceneLoad(){
-        if(queuedScenePath_.isEmpty())return;
-        const QString path=std::exchange(queuedScenePath_,QString{});
-        const uint64_t token=sceneLoadGeneration_;
-        const int resolution=textureResolution_;
-        sceneLoadProgress_->setValue(5);
-        sceneLoadLabel_->setText(QStringLiteral("Lecture JSON et ressourcesâ€¦"));
-        loadWatcher_.setFuture(QtConcurrent::run([this,path,token,resolution]{
-            SceneLoadOutcome outcome;
-            outcome.path=path;
-            outcome.generation=token;
-            const auto loaded=v16::loadScene(path);
-            if(!loaded){outcome.error=loaded.error;return outcome;}
-            outcome.database=loaded.scene;
-            auto build=v16::buildRuntime(loaded.scene,resolution,
-                [this,token](int percent,const QString& description){
-                    QMetaObject::invokeMethod(this,[this,token,percent,description]{
-                        if(!sceneLoading_||token!=sceneLoadGeneration_)return;
-                        sceneLoadProgress_->setValue(percent);
-                        sceneLoadLabel_->setText(description);
-                        canvas_->setPlaceholder(
-                            QStringLiteral("CSE WARP V17\nChargement de la scÃ¨neâ€¦\n%1")
-                                .arg(description));
-                    },Qt::QueuedConnection);
-                });
-            if(!build){outcome.error=build.error;return outcome;}
-            outcome.runtime=std::make_shared<v16::Runtime>(std::move(build.runtime));
-            return outcome;
-        }));
-    }
-    void finishSceneLoad(){
-        if(loadWatcher_.isRunning())return; // an older completion was queued
-        const SceneLoadOutcome outcome=loadWatcher_.result();
-        if(outcome.generation!=sceneLoadGeneration_ || !queuedScenePath_.isEmpty()){
-            if(!queuedScenePath_.isEmpty())beginSceneLoad();
-            return; // obsolete load; never apply its resources to new scene
-        }
-        if(!outcome.error.isEmpty()||!outcome.runtime){
-            sceneLoading_=false;
-            sceneLoadLabel_->hide();
-            sceneLoadProgress_->hide();
-            cameraBox_->setEnabled(bool(runtime_));
-            if(explorationButton_)explorationButton_->setEnabled(bool(runtime_));
-            canvas_->setPlaceholder(QStringLiteral("Chargement impossible : %1").arg(outcome.error));
-            statusBar()->showMessage(QStringLiteral("Erreur de chargement : %1").arg(outcome.error));
-            QMessageBox::warning(this,QStringLiteral("Chargement de la scÃ¨ne"),outcome.error);
-            return;
-        }
-        const auto replacement=outcome.runtime;
-        // Apply a complete, validated runtime in one GUI-thread transaction.
-        renderSerial_->fetch_add(1);
-        pending_=false;
-        runtime_=replacement;
-        lastImage_=QImage{};
-        canvas_->setImage(QImage{});  // Do not keep displaying an old scene.
-        canvas_->enableSkyCompositing(false);
-        renderTimeLabel_->setText(QStringLiteral("Dernier rendu : â€”"));
-        materialLabel_->setText(QStringLiteral("SÃ©lectionner un matÃ©riau dans le catalogue"));
-        const QString sceneRevision=outcome.database.revision.trimmed();
-        if(sceneRevisionLabel_)sceneRevisionLabel_->setText(sceneRevision.isEmpty()?QStringLiteral("ScÃ¨ne â€”"):QStringLiteral("ScÃ¨ne %1").arg(sceneRevision));
-        const QString revisionSuffix=sceneRevision.isEmpty()?QStringLiteral("ScÃ¨ne sans rÃ©vision"):QStringLiteral("ScÃ¨ne %1").arg(sceneRevision);
-        setWindowTitle(QStringLiteral("CSE WARP Beta X V17.%1 â€” %2 â€” %3")
-            .arg(CSE_WARP_BUILD_NUMBER).arg(runtime_->title,revisionSuffix));
-        sunHour_->blockSignals(true);
-        sunHour_->setValue(double(runtime_->daylightHour));
-        sunHour_->blockSignals(false);
-        scenePath_=outcome.path;
-        refreshRadioForScene(scenePath_);
-        setRasterGiCachePath(std::filesystem::path(
-            (scenePath_+QStringLiteral(".m3dgi")).toStdWString()));
-        if(bakeGiButton_)bakeGiButton_->setEnabled(true);
-        materialsPath_.clear();
-        for(const auto& sector:outcome.database.sectors){
-            const auto entries=sector.resources.value(QStringLiteral("materials"));
-            if(!entries.isEmpty()){
-                materialsPath_=QDir(QFileInfo(outcome.path).absolutePath()).absoluteFilePath(entries.front().path);
-                break;
-            }
-        }
-        selectedMaterial_=-1;
-        cameraBox_->blockSignals(true);
-        cameraBox_->clear();
-        for(const auto& c:runtime_->cameras)cameraBox_->addItem(c.name);
-        for(int i=0;i<quickCameraActions_.size();++i){
-            const bool valid=i<runtime_->cameras.size();
-            quickCameraActions_[i]->setEnabled(valid);
-            // Full camera names remain in the side selector and tooltip;
-            // the toolbar uses compact numbers so DX11 / Vulkan stay visible.
-            quickCameraActions_[i]->setText(QString::number(i+1));
-            quickCameraActions_[i]->setToolTip(valid ? QStringLiteral("Vue %1 â€” touche %2").arg(runtime_->cameras[i].name).arg(i+1) : QString());
-        }
-        cameraBox_->blockSignals(false);
-        updateCameraHud();
-        populateTrees(outcome.database);
-        statusBar()->showMessage(QStringLiteral("%1 â€” %2 objets, %3 triangles, %4 matÃ©riaux, PBR %5 px")
-            .arg(runtime_->title)
-            .arg(runtime_->objects.size())
-            .arg(runtime_->renderScene.obj.size())
-            .arg(runtime_->renderScene.mat.size())
-            .arg(runtime_->textureResolution));
-        // The stress scene must start with the actual V17 DX11 Raster backend
-        // instead of CPU ray tracing, which scales poorly with 500k triangles.
-        const bool isStressScene=QFileInfo(outcome.path).absolutePath().endsWith(
-            QStringLiteral("/benchmark-civic"),Qt::CaseInsensitive);
-        const bool extremeStress=QFileInfo(outcome.path).fileName()
-            ==QStringLiteral("scene-extreme.json");
-        // Explicit benchmark launcher override only: ordinary scene launches
-        // keep their existing DX11 Raster default and user controls.
-        const bool vulkanProfile=isStressScene &&
-            qEnvironmentVariable("CSE_WARP_VK_PROFILE_MODE")==QStringLiteral("1");
-#if defined(_WIN32) && M3D_V17_VULKAN_ENABLED
-        if(vulkanProfile){
-            directDisplayBox_->setChecked(true);
-            backendBox_->setCurrentIndex(5); // Vulkan Raster, native WSI
-            dayNightCycleBox_->setChecked(true); // exercise solar/shadow updates
-        }else
-#endif
-        if(isStressScene)backendBox_->setCurrentIndex(4);
-        sceneLoading_=false;
-        selectBackendOutputWindow();
-        canvas_->setPlaceholder(extremeStress
-            ?QStringLiteral("ScÃ¨ne extrÃªme chargÃ©e. Cliquez sur Calculer l'image pour lancer le rendu.")
-            :QStringLiteral("ScÃ¨ne chargÃ©e. Calcul de la premiÃ¨re imageâ€¦"));
-        sceneLoadLabel_->hide();
-        sceneLoadProgress_->hide();
-        cameraBox_->setEnabled(true);
-        if(explorationButton_)explorationButton_->setEnabled(true);
-        if(!extremeStress)requestRender();
-        else statusBar()->showMessage(QStringLiteral(
-            "Profil extrÃªme : rendu manuel conseillÃ© pour limiter la consommation mÃ©moire."));
-    }
-    void populateTrees(const v16::SceneDatabase& database){
-        sceneTree_->clear();resourceTree_->clear();
-        QHash<QString,QTreeWidgetItem*> nodes;
-        auto* root=new QTreeWidgetItem(sceneTree_,{database.name,QStringLiteral("V16")});
-        nodes.insert(QString(),root);
-        for(const auto& object:runtime_->objects){
-            QString walk;
-            QTreeWidgetItem* parent=root;
-            for(const auto& part:object.parent.split('/',Qt::SkipEmptyParts)){
-                walk+=QStringLiteral("/")+part;
-                if(!nodes.contains(walk))nodes.insert(walk,new QTreeWidgetItem(parent,{part,QStringLiteral("Groupe")}));
-                parent=nodes.value(walk);
-            }
-            auto* leaf=new QTreeWidgetItem(parent,{object.id,object.material});
-            leaf->setData(0,Qt::UserRole,object.material);
-        }
-        for(const auto& sector:database.sectors){
-            for(auto it=sector.resources.constBegin();it!=sector.resources.constEnd();++it){
-                auto* category=new QTreeWidgetItem(resourceTree_,{it.key(),sector.id});
-                for(const auto& resource:it.value())
-                    new QTreeWidgetItem(category,{QFileInfo(resource.path).fileName(),resource.path});
-            }
-        }
-        auto* catalog=new QTreeWidgetItem(resourceTree_,{QStringLiteral("Catalogue des matÃ©riaux"),QStringLiteral("partagÃ©s")});
-        for(auto it=runtime_->materialIndex.cbegin();it!=runtime_->materialIndex.cend();++it){
-            const auto& m=runtime_->renderScene.mat[size_t(it.value())];
-            auto* leaf=new QTreeWidgetItem(catalog,{it.key(),QStringLiteral("PBR partagÃ©")});
-            leaf->setData(0,Qt::UserRole,it.key());
-            auto addChannel=[&](const QString& label,size_t count,int size){
-                auto* channel=new QTreeWidgetItem(leaf,{label,
-                    QStringLiteral("%1Â² â†’ 1Â² / %2 mipmaps").arg(size).arg(count)});
-                channel->setData(0,Qt::UserRole,it.key());
-            };
-            if(!m.colorMip.empty())addChannel(QStringLiteral("Albedo â€” sRGB"),m.colorMip.size(),int(m.colorMip.front().size));
-            if(!m.normalMip.empty())addChannel(QStringLiteral("Normal â€” linÃ©aire"),m.normalMip.size(),int(m.normalMip.front().size));
-            if(!m.roughnessMip.empty())addChannel(QStringLiteral("RugositÃ© â€” linÃ©aire"),m.roughnessMip.size(),int(m.roughnessMip.front().size));
-            new QTreeWidgetItem(leaf,{QStringLiteral("MÃ©tallicitÃ©"),QString::number(m.metallic,'f',2)});
-            new QTreeWidgetItem(leaf,{QStringLiteral("Transmission"),QString::number(m.transmissionPercent)});
-        }
-        sceneTree_->expandToDepth(2);
-        resourceTree_->expandToDepth(0);
-        catalog->setExpanded(true);
-    }
-
-    bool vulkanDirectAvailable() const{
-#if defined(_WIN32) && M3D_V17_VULKAN_ENABLED
-        return true;
-#else
-        return false;
-#endif
-    }
-    bool nativeDirectSelected() const{
-#ifdef _WIN32
-        // Each native backend presents into its own backend-specific top-level
-        // ImageView HWND; DXGI and Vulkan never share a target window.
-        if(!backendBox_||!directDisplayBox_||!directDisplayBox_->isChecked())return false;
-        const int index=backendBox_->currentIndex();
-        return (index==4||(index==5&&vulkanDirectAvailable()))&&
-               !nativeDirectFailed_[size_t(index)];
-#else
-        return false;
-#endif
-    }
-    void focusRenderViewport(){
-        if(canvas_){
-            canvas_->setFocus(Qt::OtherFocusReason);
-            canvas_->raise();
-            canvas_->activateWindow();
-        }
-    }
-    void restoreExplorationViewportFocus(){
-        if(!exploring_)return;
-        // Changing the backend or direct-display mode moves focus between
-        // independent top-level views. Rebind mouse-look after Qt activates
-        // the newly selected output window.
-        releaseMouseLook();
-        QTimer::singleShot(0,this,[this]{
-            if(!exploring_||closingRequested_)return;
-            focusRenderViewport();
-            captureMouseLook();
-        });
-    }
-    void arrangeExplorationWindows(){
-        if(explorationWindowLayoutActive_||!canvas_)return;
-        QScreen* screen=QGuiApplication::screenAt(frameGeometry().center());
-        if(!screen)screen=QGuiApplication::primaryScreen();
-        if(!screen)return;
-        const QRect area=screen->availableGeometry();
-        if(area.width()<900||area.height()<500)return;
-
-        explorationSavedMainGeometry_=geometry();
-        explorationSavedRenderGeometry_=canvas_->geometry();
-        explorationSavedMinimumSize_=minimumSize();
-        explorationSavedMainMaximized_=isMaximized();
-        explorationSavedMainFullScreen_=isFullScreen();
-        explorationSavedRenderMaximized_=canvas_->isMaximized();
-        explorationSavedRenderFullScreen_=canvas_->isFullScreen();
-        explorationSavedSceneDockVisible_=sceneExplorerDock_&&sceneExplorerDock_->isVisible();
-        explorationSavedControlsDockVisible_=renderControlsDock_&&renderControlsDock_->isVisible();
-        explorationSavedReviewDockVisible_=anomalyReviewDock_&&anomalyReviewDock_->isVisible();
-        explorationSavedMenuVisible_=menuBar()&&menuBar()->isVisible();
-        explorationWindowLayoutActive_=true;
-
-        // Compact the controls into the right-hand band; hide secondary panels
-        // and keep the renderer in the larger left window.
-        if(sceneExplorerDock_)sceneExplorerDock_->hide();
-        if(anomalyReviewDock_)anomalyReviewDock_->hide();
-        if(renderControlsDock_){
-            renderControlsDock_->show();
-            renderControlsDock_->raise();
-        }
-        if(centralWidget())centralWidget()->hide();
-        if(menuBar())menuBar()->hide();
-        setMinimumSize(360,500);
-        const int bandWidth=std::clamp(area.width()/4,380,480);
-        const int renderWidth=area.width()-bandWidth;
-        const QRect renderRect(area.left(),area.top(),renderWidth,area.height());
-        const QRect bandRect(area.left()+renderWidth,area.top(),bandWidth,area.height());
-        if(canvas_->isMinimized()||canvas_->isFullScreen())canvas_->showNormal();
-        canvas_->setGeometry(renderRect);
-        if(isMinimized()||isFullScreen())showNormal();
-        setGeometry(bandRect);
-        show();
-        raise();
-        canvas_->show();
-        focusRenderViewport();
-        updateRendererStamp();
-        QTimer::singleShot(0,this,[this]{
-            if(exploring_&&!closingRequested_){
-                focusRenderViewport();
-                captureMouseLook();
-            }
-        });
-    }
-    void restoreExplorationWindows(){
-        if(!explorationWindowLayoutActive_)return;
-        explorationWindowLayoutActive_=false;
-        setMinimumSize(explorationSavedMinimumSize_);
-        if(centralWidget())centralWidget()->show();
-        if(menuBar())menuBar()->setVisible(explorationSavedMenuVisible_);
-        if(sceneExplorerDock_)sceneExplorerDock_->setVisible(explorationSavedSceneDockVisible_);
-        if(renderControlsDock_)renderControlsDock_->setVisible(explorationSavedControlsDockVisible_);
-        if(anomalyReviewDock_)anomalyReviewDock_->setVisible(explorationSavedReviewDockVisible_);
-        if(!explorationSavedMainGeometry_.isEmpty())setGeometry(explorationSavedMainGeometry_);
-        if(canvas_&&!explorationSavedRenderGeometry_.isEmpty())
-            canvas_->setGeometry(explorationSavedRenderGeometry_);
-        if(explorationSavedMainFullScreen_)showFullScreen();
-        else if(explorationSavedMainMaximized_)showMaximized();
-        if(canvas_){
-            if(explorationSavedRenderFullScreen_)canvas_->showFullScreen();
-            else if(explorationSavedRenderMaximized_)canvas_->showMaximized();
-        }
-        raise();
-        activateWindow();
-        updateRendererStamp();
-    }
-    QString describeNativeWindow(quintptr nativeHandle,QSize requested,qreal dpr) const{
-#if defined(_WIN32)
-        const HWND hwnd=reinterpret_cast<HWND>(nativeHandle);
-        DWORD ownerProcess=0;
-        const DWORD ownerThread=hwnd?GetWindowThreadProcessId(hwnd,&ownerProcess):0;
-        RECT client{};
-        const bool hasClient=hwnd&&GetClientRect(hwnd,&client);
-        wchar_t className[128]{};
-        const int classLength=hwnd?GetClassNameW(hwnd,className,128):0;
-        const QString classText=classLength>0
-            ?QString::fromWCharArray(className,classLength):QStringLiteral("<indisponible>");
-        const auto hinstance=hwnd?GetWindowLongPtrW(hwnd,GWLP_HINSTANCE):0;
-        const auto style=hwnd?GetWindowLongPtrW(hwnd,GWL_STYLE):0;
-        const auto exStyle=hwnd?GetWindowLongPtrW(hwnd,GWL_EXSTYLE):0;
-        return QStringLiteral(
-            "HWND=0x%1 IsWindow=%2 ownerThread=%3 process=%4 HINSTANCE=0x%5 "
-            "style=0x%6 exStyle=0x%7 class=%8 client=%9x%10 target=%11x%12 DPR=%13")
-            .arg(QString::number(qulonglong(nativeHandle),16))
-            .arg(hwnd&&IsWindow(hwnd)?1:0)
-            .arg(ownerThread).arg(ownerProcess)
-            .arg(QString::number(qulonglong(hinstance),16))
-            .arg(QString::number(qulonglong(style),16))
-            .arg(QString::number(qulonglong(exStyle),16))
-            .arg(classText)
-            .arg(hasClient?client.right-client.left:0)
-            .arg(hasClient?client.bottom-client.top:0)
-            .arg(requested.width()).arg(requested.height())
-            .arg(dpr,0,'f',3);
-#else
-        Q_UNUSED(nativeHandle);
-        return QStringLiteral("Win32 window diagnostics unavailable; target=%1x%2 DPR=%3")
-            .arg(requested.width()).arg(requested.height()).arg(dpr,0,'f',3);
-#endif
-    }
-    QString nativeDiagnosticLogPath() const{
-        return QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
-            +QStringLiteral("/CSE WARP/Diagnostics/V17.522-native-presentation.jsonl");
-    }
-    void saveNativePresentationDiagnostic(const QString& backend,
-                                          const QString& reason,
-                                          const QString& windowDetails){
-        const QString path=nativeDiagnosticLogPath();
-        const QString directory=QFileInfo(path).absolutePath();
-        QDir().mkpath(directory);
-        QFile file(path);
-        if(file.open(QIODevice::WriteOnly|QIODevice::Append|QIODevice::Text)){
-            const QJsonObject record{
-                {QStringLiteral("time"),QDateTime::currentDateTime().toString(Qt::ISODateWithMs)},
-                {QStringLiteral("version"),QStringLiteral("17.522")},
-                {QStringLiteral("backend"),backend},
-                {QStringLiteral("reason"),reason},
-                {QStringLiteral("window"),windowDetails}
-            };
-            file.write(QJsonDocument(record).toJson(QJsonDocument::Compact));
-            file.write("\n");
-        }
-        const QString summary=reason.isEmpty()
-            ?QStringLiteral("cause native non fournie par le backend")
-            :reason;
-        statusBar()->showMessage(QStringLiteral(
-            "%1 direct indisponible ; QImage actif. %2 â€” diagnostic dÃ©taillÃ© : %3. "
-            "DÃ©cochez puis recochez lâ€™option pour retenter.")
-            .arg(backend,summary,path),30000);
-    }
-    QString requestedRendererStamp() const {
-        if(!backendBox_)return QStringLiteral("Rendu en attente");
-        const int index=backendBox_->currentIndex();
-        QString name=backendBox_->currentText();
-        if(index==4)name=QStringLiteral("V17 D3D11 Raster");
-        else if(index==5)name=QStringLiteral("V17 Vulkan Raster");
-        const bool direct=(index==4||index==5)&&directDisplayBox_&&directDisplayBox_->isChecked();
-        if(direct&&index>=0&&index<int(nativeDirectFailed_.size())&&
-           nativeDirectFailed_[size_t(index)])
-            name+=QStringLiteral(" â€” direct demandÃ©, QImage actif aprÃ¨s Ã©chec");
-        else name+=direct?QStringLiteral(" â€” Direct GPU (swapchain)")
-                         :QStringLiteral(" â€” affichage Qt (QImage)");
-        return name;
-    }
-    void updateRendererStamp(){
-        const QString requested=requestedRendererStamp();
-        const int index=backendBox_?std::clamp(backendBox_->currentIndex(),0,
-            int(backendWindows_.size())-1):0;
-        const QString displayed=backendLastRenderer_[size_t(index)];
-        const bool pending=requested!=backendLastRequest_[size_t(index)];
-        if(canvas_)canvas_->setRendererStamp(displayed,pending?requested:QString{});
-        if(nativeRendererOverlay_){
-            const QString shown=displayed.isEmpty()
-                ?QStringLiteral("AffichÃ© : aucun rendu pour lâ€™instant")
-                :QStringLiteral("AffichÃ© : %1").arg(displayed);
-            const QString waiting=pending
-                ?QStringLiteral("\nDemandÃ© : %1").arg(requested):QString{};
-            // Direct swapchain presentation bypasses ImageView::paintEvent,
-            // including its camera HUD. Keep the live camera readout on the
-            // native output window as well as in the controls status bar.
-            const QString camera=cameraHudEnabled_&&nativeHudLabel_&&
-                    !nativeHudLabel_->text().isEmpty()
-                ?QStringLiteral("\n%1").arg(nativeHudLabel_->text()):QString{};
-            nativeRendererOverlay_->setText(shown+waiting+camera);
-            if(canvas_){
-                nativeRendererOverlay_->move(canvas_->mapToGlobal(QPoint(12,12)));
-                nativeRendererOverlay_->setFixedSize(470,70);
-            }
-            nativeRendererOverlay_->setVisible(nativeDirectSelected()&&canvas_&&canvas_->isVisible());
-            if(nativeDirectSelected()&&canvas_&&canvas_->isVisible())
-                nativeRendererOverlay_->raise();
-        }
-    }
-    void selectBackendOutputWindow(){
-        if(!backendBox_)return;
-        const int index=std::clamp(backendBox_->currentIndex(),0,
-                                   int(backendWindows_.size())-1);
-        const bool backendChanged=outputBackendIndex_!=index;
-        outputBackendIndex_=index;
-        canvas_=backendWindows_[size_t(index)];
-        // Keep the native status overlay owned and stacked with the renderer
-        // HWND, not with the controls window on the other side of the screen.
-        if(nativeRendererOverlay_&&nativeRendererOverlay_->parentWidget()!=canvas_)
-            nativeRendererOverlay_->setParent(canvas_,
-                Qt::Tool|Qt::FramelessWindowHint|Qt::WindowDoesNotAcceptFocus);
-        canvas_->setWindowTitle(QStringLiteral("CSE WARP V17.%1 â€” %2 â€” fenÃªtre dÃ©diÃ©e")
-            .arg(CSE_WARP_BUILD_NUMBER).arg(backendBox_->itemText(index)));
-        const bool direct=nativeDirectSelected();
-        if(backendChanged||direct){
-            // The global export/sky state belongs to the selected output.
-            // Never carry another backend's QImage into this window.
-            lastImage_=QImage{};
-            hasRenderedPose_=false;
-            canvas_->setImage(QImage{});
-            canvas_->enableSkyCompositing(false);
-            backendLastRenderer_[size_t(index)].clear();
-            backendLastRequest_[size_t(index)].clear();
-        }
-        for(int i=0;i<int(backendWindows_.size());++i){
-            auto* view=backendWindows_[size_t(i)];
-            if(!view)continue;
-            const bool preserveInFlightPresent=watcher_.isRunning()&&
-                activeRenderDirect_&&i==activeRenderBackend_;
-            view->setNativePresentation((i==index&&direct)||preserveInFlightPresent);
-            if(i==index){
-                if(isVisible()){
-                    if(view->isMinimized())view->showNormal();
-                    else view->show();
-                    view->raise();
-                }
-            }else view->hide();
-        }
-        updateRendererStamp();
-        if(direct){
-            statusBar()->showMessage(QStringLiteral(
-                "FenÃªtre backend dÃ©diÃ©e â€” affichage GPU direct (swapchain), sans QImage ; "
-                "dÃ©cocher pour les captures PNG"),7000);
-        }
-    }
-    void resetPacing(){
-        pacingSamples_.clear();
-        pacingRejected_=0;
-        pacingQueued_=0;
-        lastPresentMs_=-1;
-        lastCompletedRenderMs_=0.0;
-        fpsFiltered_=0.0;
-        pacingClock_.restart();
-    }
-    void recordImagePresented(){
-        if(!pacingClock_.isValid())pacingClock_.start();
-        const qint64 ms=pacingClock_.elapsed();
-        if(exploring_){
-            cse::pacing::Sample sample{};
-            sample.timestampMs=ms;
-            sample.intervalMs=lastPresentMs_>=0?double(ms-lastPresentMs_):0.0;
-            sample.renderMs=lastCompletedRenderMs_;
-            sample.pendingRequests=unsigned(pacingQueued_);
-            if(pacingSamples_.size()>=pacingCapacity_)
-                pacingSamples_.erase(pacingSamples_.begin());
-            pacingSamples_.push_back(sample);
-            const double interval=lastPresentMs_>=0?double(ms-lastPresentMs_):0.0;
-            if(interval>=1.0){
-                const double fps=1000.0/interval;
-                fpsFiltered_=fpsFiltered_==0.0?fps:(fpsFiltered_*.72+fps*.28);
-                canvas_->setFpsOverlay(fpsFiltered_,true);
-                if(nativeFpsLabel_)nativeFpsLabel_->setText(
-                    QStringLiteral("%1 FPS").arg(fpsFiltered_,0,'f',1));
-            }
-        }
-        lastPresentMs_=ms;
-    }
-    void exportPacing(){
-        if(pacingSamples_.empty()){
-            QMessageBox::information(this,QStringLiteral("Benchmark fluiditÃ©"),
-                QStringLiteral("DÃ©marrer l'exploration et se dÃ©placer avant d'exporter."));
-            return;
-        }
-        const QString root=QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
-            +QStringLiteral("/CSE WARP/Benchmarks");
-        QDir().mkpath(root);
-        const QString name=QStringLiteral("V17.%1-PACING-").arg(CSE_WARP_BUILD_NUMBER)
-            +QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-hhmmss"));
-        const auto stats=cse::pacing::summarize(pacingSamples_,pacingRejected_,pacingQueued_);
-        QJsonArray records;
-        QString csv=QStringLiteral("timestamp_ms,present_interval_ms,render_ms,requests_queued\n");
-        for(const auto& sample:pacingSamples_){
-            records.push_back(QJsonObject{
-                {"timestampMs",double(sample.timestampMs)},
-                {"presentIntervalMs",sample.intervalMs},
-                {"renderMs",sample.renderMs},
-                {"queuedRequests",int(sample.pendingRequests)}
-            });
-            csv+=QStringLiteral("%1,%2,%3,%4\n")
-                .arg(sample.timestampMs).arg(sample.intervalMs,0,'f',3)
-                .arg(sample.renderMs,0,'f',3).arg(sample.pendingRequests);
-        }
-        const QJsonObject summary{
-            {"version",QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER)},
-            {"scene",scenePath_},
-            {"backend",backendBox_->currentText()},
-            {"frameCount",int(stats.frames)},
-            {"medianPresentMs",stats.medianPresentMs},
-            {"meanPresentMs",stats.meanPresentMs},
-            {"p95PresentMs",stats.p95PresentMs},
-            {"p99PresentMs",stats.p99PresentMs},
-            {"worstPresentMs",stats.worstPresentMs},
-            {"medianRenderMs",stats.medianRenderMs},
-            {"stutterPercent",stats.stutterPercent},
-            {"queuedRequests",double(stats.queued)},
-            {"invalidatedFrames",double(stats.invalidated)},
-            {"zPrepass",backendBox_->currentIndex()==5
-                ?qEnvironmentVariable("M3D_V17_DISABLE_Z_PREPASS")!=QStringLiteral("1")
-                :qEnvironmentVariable("M3D_V17_EXPERIMENT_Z_PREPASS")==QStringLiteral("1")},
-            {"lightAabbCull",qEnvironmentVariable("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL")==QStringLiteral("1")}
-        };
-        QFile jsonFile(root+QStringLiteral("/")+name+QStringLiteral(".json"));
-        QFile csvFile(root+QStringLiteral("/")+name+QStringLiteral(".csv"));
-        if(!jsonFile.open(QIODevice::WriteOnly) || !csvFile.open(QIODevice::WriteOnly)){
-            QMessageBox::warning(this,QStringLiteral("Benchmark"),QStringLiteral("Impossible d'Ã©crire les rÃ©sultats."));
-            return;
-        }
-        jsonFile.write(QJsonDocument(QJsonObject{{"summary",summary},{"frames",records}}).toJson());
-        csvFile.write(csv.toUtf8());
-        statusBar()->showMessage(QStringLiteral("Benchmark fluiditÃ© exportÃ© : %1").arg(root),12000);
-    }
-    void requestRender(){
-        updateRendererStamp();
-        if(sceneLoading_||!runtime_||runtime_->cameras.isEmpty())return;
-        // Select the persistent top-level output HWND dedicated to this backend
-        // before creating its DXGI/Vulkan surface.
-        if(backendBox_){
-            const int selected=std::clamp(backendBox_->currentIndex(),0,
-                                          int(backendWindows_.size())-1);
-            if(canvas_!=backendWindows_[size_t(selected)]||!canvas_->isVisible()||
-               canvas_->nativePresentation()!=nativeDirectSelected())
-                selectBackendOutputWindow();
-        }
-        if(nativeDirectSelected()){
-            if(!canvas_->isVisible())
-                selectBackendOutputWindow();
-            const QSize target=canvas_->size();
-            const bool ready=canvas_->isVisible() &&
-                target.width()>=320 && target.height()>=200 &&
-                canvas_->testAttribute(Qt::WA_NativeWindow);
-            if(!ready){
-                if(++nativeReadyAttempts_>40){
-                    nativeReadyAttempts_=0;
-                    // Keep the requested mode checked, latch this backend to
-                    // QImage, and allow the user to retry by toggling it.
-                    const int failedBackend=backendBox_->currentIndex();
-                    if(failedBackend>=0&&failedBackend<int(nativeDirectFailed_.size())){
-                        nativeDirectFailed_[size_t(failedBackend)]=true;
-                        nativeDirectFailureReason_[size_t(failedBackend)]=
-                            QStringLiteral("La fenÃªtre nâ€™a pas fourni un HWND visible aux dimensions requises.");
-                    }
-                    const QString backend=failedBackend==5
-                        ?QStringLiteral("Vulkan"):QStringLiteral("DX11");
-                    const QString windowDetails=describeNativeWindow(
-                        quintptr(canvas_->winId()),target,canvas_->devicePixelRatioF());
-                    if(failedBackend>=0&&failedBackend<int(nativeDirectFailureReason_.size()))
-                        saveNativePresentationDiagnostic(
-                            backend,nativeDirectFailureReason_[size_t(failedBackend)],windowDetails);
-                    selectBackendOutputWindow();
-                    QTimer::singleShot(0,this,[this]{
-                        if(!closingRequested_&&!sceneLoading_&&runtime_)requestRender();
-                    });
-                }else if(!nativeReadyRetryQueued_){
-                    nativeReadyRetryQueued_=true;
-                    QTimer::singleShot(50,this,[this]{
-                        nativeReadyRetryQueued_=false;
-                        if(!closingRequested_&&!sceneLoading_&&runtime_)
-                            requestRender();
-                    });
-                }
-                return;
-            }
-            nativeReadyAttempts_=0;
-        }
-        const auto serial=renderSerial_;
-        if(watcher_.isRunning()){
-            pending_=true; // Camera movement must not invalidate a finished image.
-            ++pacingQueued_;
-            return;
-        }
-        const uint64_t token=serial->fetch_add(1)+1;
-        auto snapshot=runtime_;
-        ImageView* const outputView=canvas_;
-        const int requestedBackend=backendBox_->currentIndex();
-        const bool directPresent=nativeDirectSelected();
-        activeRenderBackend_=requestedBackend;
-        activeRenderDirect_=directPresent;
-        // V17.493 uses an independent 30 Hz Qt sky compositor. Vulkan WSI
-        // bypasses that QWidget, so sample the SAME monotonic solar clock on
-        // each native frame rather than the slower 1.5 s UI spinbox timer.
-        // Never modify the approved solarMotion() or walking controller.
-        const int backend=backendBox_->currentIndex();
-        const float renderHour=(directPresent && dayNightCycleBox_ &&
-                                dayNightCycleBox_->isChecked() && dayNightClock_.isValid())
-            ?float(cse::weather::cycleHour(dayNightOriginHour_,
-                              double(dayNightClock_.elapsed())/1000.0))
-            :snapshot->daylightHour;
-        // Keep lighting smooth, but rebuild the expensive 1024Â² CPU shadow map
-        // only once per simulated hour during DirectX day/night. At 24h/6min,
-        // this cuts rebuild stalls from every 3.75s to every 15s without lowering map quality.
-        const bool stableDxDayNight=backend==4 && dayNightCycleBox_ && dayNightCycleBox_->isChecked();
-        const float shadowStepHours=stableDxDayNight?1.0f:.25f;
-        const float shadowHour=std::floor(renderHour/shadowStepHours)*shadowStepHours;
-        auto preset=activeCameraPose();
-        updateCameraHud();
-        QSize renderSize=qualityBox_->currentData().toSize();
-        if(!renderSize.isValid() || renderSize.isEmpty()) {
-            // Render to the viewport's *actual* aspect ratio, not the monitor
-            // resolution; that used to letterbox the 3D image in a tiny strip.
-            // Keep a bounded pixel budget on integrated GPUs.
-            renderSize=canvas_->size().boundedTo(QSize(1600,900));
-            renderSize.setWidth(std::max(64,renderSize.width()));
-            renderSize.setHeight(std::max(64,renderSize.height()));
-        }
-        int w=renderSize.width();
-        int h=renderSize.height();
-        // A swapchain always targets this backend's visible top-level HWND
-        // extent; the offscreen quality resolution is irrelevant in this mode.
-        if(directPresent && outputView){
-            const qreal dpr=outputView->devicePixelRatioF();
-            const QSize logicalSize=outputView->size();
-            renderSize=QSize(std::max(320,int(logicalSize.width()*dpr)),
-                             std::max(200,int(logicalSize.height()*dpr)));
-            // The camera and renderer MUST use the native viewport dimensions.
-            // Previously only renderSize changed: w/h still held the small Qt
-            // canvas dimensions, stretching the Vulkan image on F11 fullscreen.
-            w=renderSize.width();
-            h=renderSize.height();
-        }
-        const quintptr nativeHandle=directPresent?quintptr(outputView->winId()):0;
-        const qreal nativeDpr=directPresent&&outputView?outputView->devicePixelRatioF():1.0;
-        const QString nativeWindowDetails=directPresent
-            ?describeNativeWindow(nativeHandle,QSize(w,h),nativeDpr):QString{};
-        const bool wantGpu=backend==1||backend==4||backend==5;
-        const bool raster=backend==4||backend==5;
-        const bool vulkan=backend==5;
-        void* sharedVulkanInstance=nullptr;
-        uintptr_t sharedVulkanSurface=0;
-#if defined(_WIN32) && M3D_V17_VULKAN_ENABLED
-        // Leave shared Vulkan handles null. VulkanRaster creates its own instance
-        // and Win32 surface from nativeHandle, as in the passing hardware diagnostic.
-#endif
-        const bool globalIllumination=backend==2||backend==3;
-        const bool edgeAA=edgeAa_->isChecked();
-        const unsigned sampleCount=globalIllumination?
-            unsigned(giSamples_->currentData().toInt()):
-            (wantGpu?1u:unsigned(directSamples_->currentData().toInt()));
-        const unsigned maxBounces=backend==2?2u:4u;
-        const bool progressive=globalIllumination&&progressiveGi_->isChecked();
-        const bool denoise=globalIllumination&&denoiseGi_->isChecked();
-        const bool denoiseDirect=!globalIllumination&&!wantGpu&&denoiseDirect_->isChecked();
-        const QString requestStamp=requestedRendererStamp();
-        statusBar()->showMessage(QStringLiteral("Calcul de l'imageâ€¦"));
-        // Explain an abnormal delay rather than displaying "Calcul..." forever.
-        // This watchdog does not claim to cancel a driver-blocked D3D call.
-        if(raster){
-            QTimer::singleShot(30000,this,[this,serial,token,vulkan]{
-                if(serial->load()==token && watcher_.isRunning() && !closingRequested_)
-                    statusBar()->showMessage(
-                        QStringLiteral("Rendu %1 actif depuis plus de 30 secondes. GPU ou pilote possiblement saturÃ© ; aucun basculement CPU.")
-                        .arg(vulkan?QStringLiteral("Vulkan"):QStringLiteral("DirectX 11")));
-            });
-        }
-        const auto shadowCache=cpuShadows_;
-        watcher_.setFuture(QtConcurrent::run(&renderPool_,[this,serial,token,snapshot,preset,w,h,wantGpu,
-            globalIllumination,raster,vulkan,directPresent,nativeHandle,sharedVulkanInstance,
-            sharedVulkanSurface,edgeAA,sampleCount,maxBounces,progressive,denoise,outputView,requestedBackend,
-            nativeWindowDetails,
-            denoiseDirect,shadowCache,renderHour,shadowHour,requestStamp]{
-            Result result;
-            result.requestStamp=requestStamp;
-            result.cameraPose=preset;
-            result.generation=token;
-            result.backendIndex=requestedBackend;
-            result.nativeWindowDetails=nativeWindowDetails;
-            result.skyCompositing=raster;
-            result.renderThread=reinterpret_cast<quintptr>(QThread::currentThreadId());
-#if defined(_WIN32)
-            if(!result.nativeWindowDetails.isEmpty())
-                result.nativeWindowDetails+=QStringLiteral(" renderThreadWin32=%1 renderThreadQt=0x%2")
-                    .arg(GetCurrentThreadId())
-                    .arg(QString::number(qulonglong(result.renderThread),16));
-#endif
-            updateLighting(renderHour);
-            const auto camera=v16::makeCamera(preset,w,h);
-            std::vector<uint32_t> pixels;
-            Stats stats;
-            double shadowBuildMs=0.0;
-            bool ok=false;
-            if(wantGpu){
-                std::wstring reason;
-                if(!raster){
-                    releaseDirectX11NativeForCurrentThread();
-                    releaseVulkanDirectForCurrentThread();
-                    releaseVulkanPreviewForCurrentThread();
-                }
-                if(raster){
-                    std::shared_ptr<const ShadowMap> shadow;
-                    {
-                        std::lock_guard<std::mutex> lock(shadowCache->mutex);
-                        if(shadowCache->scene.lock()==snapshot &&
-                           shadowCache->hour==shadowHour&&shadowCache->shadow)
-                            shadow=shadowCache->shadow;
-                        else {
-                            Stats shadowStats;
-                            const auto shadowStart=std::chrono::steady_clock::now();
-                            shadow=std::make_shared<ShadowMap>(
-                                buildShadow(snapshot->renderScene,shadowStats));
-                            shadowBuildMs=std::chrono::duration<double,std::milli>(
-                                std::chrono::steady_clock::now()-shadowStart).count();
-                            // Optional diagnostic of the 1,024 x 1,024 CPU ray
-                            // shadow pass. This cost occurs outside VulkanRaster
-                            // and cannot appear in its GPU-only CSV timings.
-                            const QByteArray shadowProfile=qgetenv("CSE_WARP_VK_SHADOW_PROFILE");
-                            if(!shadowProfile.isEmpty()){
-                                QFile log(QString::fromLocal8Bit(shadowProfile));
-                                if(log.open(QIODevice::WriteOnly|QIODevice::Append|QIODevice::Text)){
-                                    const QString line=QStringLiteral("%1,shadow_build_ms=%2,solar_hour=%3,shadow_bin=%4,backend=%5\n")
-                                        .arg(QDateTime::currentMSecsSinceEpoch())
-                                        .arg(shadowBuildMs,0,'f',3)
-                                        .arg(renderHour,0,'f',5)
-                                        .arg(shadowHour,0,'f',2)
-                                        .arg(vulkan?QStringLiteral("Vulkan"):QStringLiteral("DX11"));
-                                    log.write(line.toUtf8());
-                                }
-                            }
-                            shadowCache->scene=snapshot;shadowCache->hour=shadowHour;
-                            shadowCache->shadow=shadow;
-                        }
-                    }
-                    if(vulkan){
-                        releaseDirectX11NativeForCurrentThread(); // DXGI belongs to a different backend HWND.
-                        // Keep one Vulkan device/resource set resident for the selected path.
-                        if(directPresent)releaseVulkanPreviewForCurrentThread();
-                        else releaseVulkanDirectForCurrentThread();
-                        if(directPresent){
-                            ok=renderVulkanDirectPresent(snapshot->renderScene,*shadow,camera,w,h,
-                                reinterpret_cast<void*>(nativeHandle),stats,reason,
-                                sharedVulkanInstance,sharedVulkanSurface);
-                            if(!ok){
-                                const std::wstring nativeReason=reason;
-                                result.nativeFailure=QString::fromStdWString(nativeReason);
-                                releaseVulkanDirectForCurrentThread();
-                                reason.clear();
-                                ok=renderVulkanPreview(snapshot->renderScene,*shadow,camera,w,h,
-                                                       pixels,stats,reason);
-                                result.nativeFallback=ok;
-                                if(!ok){
-                                    const std::wstring previewReason=reason;
-                                    reason=L"Vulkan native presentation failed: "+nativeReason+
-                                           L"; Vulkan image preview also failed: "+previewReason;
-                                }
-                            }
-                        }else{
-                            ok=renderVulkanPreview(snapshot->renderScene,*shadow,camera,w,h,
-                                                   pixels,stats,reason);
-                        }
-                    }else{
-                        // Vulkan WSI and DXGI must never own swapchains for the
-                        // same backend HWND at the same time. Also release the
-                        // offscreen renderer when leaving Vulkan.
-                        releaseVulkanDirectForCurrentThread();
-                        releaseVulkanPreviewForCurrentThread();
-                        ok=directPresent?
-                            renderDirectX11Native(snapshot->renderScene,*shadow,camera,w,h,
-                                                   reinterpret_cast<void*>(nativeHandle),stats,reason):
-                            renderDirectX11Preview(snapshot->renderScene,*shadow,camera,w,h,pixels,stats,reason);
-                        if(!ok && directPresent){
-                            // DXGI can be unavailable on remote desktop / certain drivers:
-                            // recover the original full-quality CPU/QImage preview.
-                            const std::wstring nativeReason=reason;
-                            result.nativeFailure=QString::fromStdWString(nativeReason);
-                            releaseDirectX11NativeForCurrentThread();
-                            reason.clear();
-                            ok=renderDirectX11Preview(snapshot->renderScene,*shadow,camera,w,h,
-                                                      pixels,stats,reason);
-                            result.nativeFallback=ok;
-                            if(!ok){
-                                const std::wstring previewReason=reason;
-                                reason=L"DXGI native presentation failed: "+nativeReason+
-                                       L"; DirectX 11 image preview also failed: "+previewReason;
-                            }
-                        }
-                    }
-                    result.directPresented=ok&&directPresent&&!result.nativeFallback;
-                    if(ok){
-                        result.renderer=vulkan
-                            ?(result.directPresented
-                                ?QStringLiteral("V17 Vulkan Raster â€” Direct GPU (swapchain)")
-                                :QStringLiteral("V17 Vulkan Raster â€” affichage Qt (QImage)"))
-                            :(result.directPresented
-                                ?QStringLiteral("V17 D3D11 Raster â€” Direct GPU (swapchain)")
-                                :QStringLiteral("V17 D3D11 Raster â€” affichage Qt (QImage)"));
-                        if(!vulkan && rasterHybridLightingEnabled())
-                            result.renderer+=rasterGiCacheLoaded()
-                              ?QStringLiteral(" â€” GI transport prÃ©-calculÃ©e")
-                              :QStringLiteral(" â€” sondes approximatives (sans table GI)");
-                    }
-                }else{
-                    ok=renderCompute11Preview(snapshot->renderScene,camera,w,h,pixels,stats,reason);
-                    if(ok)result.renderer=QStringLiteral("V16 D3D11 Compute â€” GI adaptative");
-                }
-                if(!ok){
-                    // Never send hundreds of thousands of triangles through
-                    // CPU ray tracing as an invisible fallback. That used to
-                    // look like an indefinitely stalled D3D11 render.
-                    result.error=QStringLiteral(
-                        "Ã‰chec du rendu GPU %1 : %2. "
-                        "Aucun basculement automatique vers le CPU.")
-                        .arg(vulkan?QStringLiteral("Vulkan"):QStringLiteral("DirectX11"))
-                        .arg(QString::fromStdWString(reason));
-                    result.renderer=vulkan?QStringLiteral("V17 Vulkan â€” erreur")
-                                            :QStringLiteral("V17 GPU D3D11 â€” erreur");
-                    return result;
-                }
-            }
-            if(!wantGpu){
-                releaseDirectX11NativeForCurrentThread();
-                releaseVulkanDirectForCurrentThread();
-                releaseVulkanPreviewForCurrentThread();
-            }
-            if(!ok){
-                releaseDirectX11NativeForCurrentThread();
-                pixels.resize(size_t(w)*size_t(h));
-                std::shared_ptr<const ShadowMap> shadow;
-                bool shadowReused=false;
-                {
-                    std::lock_guard<std::mutex> lock(shadowCache->mutex);
-                    if(shadowCache->scene.lock()==snapshot &&
-                       shadowCache->hour==shadowHour && shadowCache->shadow){
-                        shadow=shadowCache->shadow;
-                        shadowReused=true;
-                    }else{
-                        Stats shadowStats;
-                        shadow=std::make_shared<ShadowMap>(
-                            buildShadow(snapshot->renderScene,shadowStats));
-                        shadowCache->scene=snapshot;
-                        shadowCache->hour=shadowHour;
-                        shadowCache->shadow=shadow;
-                    }
-                }
-                const unsigned workers=std::max(1u,std::min(8u,std::thread::hardware_concurrency()));
-                if(globalIllumination){
-                    std::vector<V> hdrAccum;
-                    unsigned completed=0;
-                    double totalMs=0;
-                    while(completed<sampleCount){
-                        if(serial->load()!=token)return result;
-                        const unsigned batch=progressive?
-                            std::min(std::max(1u,completed),sampleCount-completed):
-                            sampleCount-completed;
-                        const auto pass=renderGiAccumulatePass(
-                            snapshot->renderScene,*shadow,camera,w,h,hdrAccum,pixels,
-                            completed,batch,workers,*serial,token,maxBounces);
-                        if(serial->load()!=token)return result;
-                        completed+=batch;
-                        totalMs+=pass.ms;
-                        std::vector<uint32_t> display=pixels;
-                        // Filtering is separate from HDR accumulation, so the
-                        // next batch never feeds on blurred/tonemapped pixels.
-                        if(denoise&&completed>=4)
-                            display=denoiseBilateral(display,w,h,workers);
-                        if(edgeAA)display=antialiasEdges4(display,w,h,4,false);
-                        QImage image(w,h,QImage::Format_ARGB32);
-                        for(int y=0;y<h;++y)
-                            std::memcpy(image.scanLine(y),display.data()+size_t(y)*w,size_t(w)*4);
-                        if(progressive&&completed<sampleCount){
-                            QMetaObject::invokeMethod(this,
-                                [this,serial,token,outputView,count=completed,target=sampleCount,w,h,image=std::move(image)]() mutable {
-                                    if(serial->load()!=token)return;
-                                    if(outputView==canvas_)lastImage_=image;
-                                    outputView->setImage(std::move(image));
-                                    statusBar()->showMessage(
-                                        QStringLiteral("GI progressive â€” %1 / %2 Ã©chantillons (%3Ã—%4)")
-                                            .arg(count).arg(target).arg(w).arg(h));
-                                },Qt::QueuedConnection);
-                        }else{
-                            result.image=std::move(image);
-                        }
-                    }
-                    result.renderer=QStringLiteral("CPU GI â€” %1 rebonds, %2 spp, HDR%3 â€” %4Ã—%5")
-                        .arg(maxBounces).arg(sampleCount)
-                        .arg(denoise?QStringLiteral(", dÃ©bruitÃ©"):QString())
-                        .arg(w).arg(h);
-                    result.milliseconds=totalMs;
-                    return result;
-                }
-                // Reuse the active render generation so CPU fallback/direct
-                // rays stop promptly when the scene or camera is changed.
-                stats=m3d::render(snapshot->renderScene,*shadow,camera,w,h,pixels,
-                                  workers,false,*serial,token,sampleCount,false,false,false,3);
-                if(serial->load()!=token)return result;
-                if(denoiseDirect) pixels=denoiseBilateral(pixels,w,h,workers);
-                result.renderer=shadowReused
-                    ?QStringLiteral("CPU Ray Tracing â€” %1 spp, ombres en cache").arg(sampleCount)
-                    :QStringLiteral("CPU Ray Tracing â€” %1 spp, ombres calculÃ©es").arg(sampleCount);
-            }else result.gpu=true;
-            result.milliseconds=stats.ms+shadowBuildMs;
-            result.renderer+=QStringLiteral(" â€” %1Ã—%2").arg(w).arg(h);
-            if(result.nativeFallback){
-                result.renderer+=vulkan
-                    ?QStringLiteral(" â€” secours image Vulkan via QImage (WSI indisponible)")
-                    :QStringLiteral(" â€” secours QImage (DXGI indisponible)");
-                if(!result.nativeFailure.isEmpty())
-                    result.renderer+=QStringLiteral(" â€” Ã©chec prÃ©sentation native : %1")
-                        .arg(result.nativeFailure);
-            }
-            if(result.directPresented){
-                result.renderer+=QStringLiteral(" â€” Ã©cran GPU direct (swapchain)");
-                return result; // No 4-byte-per-pixel CPU/QImage allocation.
-            }
-            if(edgeAA && !raster && pixels.size()==size_t(w)*size_t(h))
-                pixels=antialiasEdges4(pixels,w,h,4,false);
-            if(pixels.size()!=size_t(w)*h){
-                result.error+=QStringLiteral("Image incomplÃ¨te");
-                return result;
-            }
-            QImage image(w,h,QImage::Format_ARGB32);
-            for(int y=0;y<h;y++)std::memcpy(image.scanLine(y),pixels.data()+size_t(y)*w,size_t(w)*4);
-            result.image=std::move(image);
-            return result;
-        }));
-    }
-};
-QString defaultPath(){
-    const QString app=QCoreApplication::applicationDirPath();
-    const QStringList candidates{
-        // The clean package always opens the latest validated V8/V440 scene.
-        // Explicit CLI scene arguments still override the default.
-        app+QStringLiteral("/benchmark-civic/scene.json"),
-        app+QStringLiteral("/benchmark-civic/scene-v440-audit.json"),
-        app+QStringLiteral("/scenes/v16/benchmark-civic/scene-v4.json"),
-        QDir::currentPath()+QStringLiteral("/scenes/v16/benchmark-civic/scene-v4.json"),
-        app+QStringLiteral("/pavillon01/scene.json"),
-        app+QStringLiteral("/scenes/v16/pavillon01/scene.json"),
-        QDir::currentPath()+QStringLiteral("/scenes/v16/pavillon01/scene.json")
-    };
-    for(const auto& path:candidates)if(QFileInfo::exists(path))return path;
-    return QString();
-}
-}
-int main(int argc,char** argv){
-    QApplication app(argc,argv);
-    // Separate benchmark utilities need access to Qt and the V16 renderer
-    // DLL in this installation root, even when launched from a subdirectory.
-    const QByteArray installRoot=QCoreApplication::applicationDirPath().toLocal8Bit();
-    qputenv("PATH",installRoot+";"+qgetenv("PATH"));
-    qputenv("QT_PLUGIN_PATH",installRoot);
-    // GUI animation is intentionally opt-in; offline GPU benchmarks remain
-    // deterministic for strict RGB parity and regression comparisons.
-    qputenv("M3D_V17_ANIMATE_CLOUDS","1");
-    // Split only interactive raster output into a sky backdrop and an
-    // alpha-preserving architecture foreground. Benchmarks stay unchanged.
-    qputenv("M3D_V17_SPLIT_SKY","1");
-    QCoreApplication::setApplicationName(QStringLiteral("CSE WARP Beta X V17.%1")
-        .arg(CSE_WARP_BUILD_NUMBER));
-    QCoreApplication::setApplicationVersion(QStringLiteral("17.%1")
-        .arg(CSE_WARP_BUILD_NUMBER));
-    const bool switchSmoke=argc>=4
-        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-scene-switch");
-    const bool repeatSmoke=argc>=3
-        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-repeat-raster");
-    const bool walkingSmoke=argc>=3
-        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-walking-collisions");
-    const bool scopeSmoke=argc>=3
-        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-scope-mouse");
-    const bool immersiveSmoke=argc>=3
-        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-immersive-mouse");
-    const bool nativeUiSmoke=argc>=2
-        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-native-ui");
-    // Use the same Windows V17 brand icon for Qt titlebar/Alt-Tab/taskbar.
-    // The ICO is also embedded in the EXE's native Win32 resources.
-    const QString iconPath=QCoreApplication::applicationDirPath()
-        +QStringLiteral("/cse_warp_v17.ico");
-    if(QFileInfo::exists(iconPath))app.setWindowIcon(QIcon(iconPath));
-    const QString path=nativeUiSmoke?QString():
-        (switchSmoke||repeatSmoke||walkingSmoke||scopeSmoke||immersiveSmoke
-        ?QString::fromLocal8Bit(argv[2])
-        :(argc>1?QString::fromLocal8Bit(argv[1]):defaultPath()));
-    // The smoke test uses reduced texture resolution to stay viable on
-    // CI's software-only WARP device. Normal V17 keeps full 2048 PBR.
-    V17Window window(path,(switchSmoke||repeatSmoke||walkingSmoke||scopeSmoke||immersiveSmoke)?256:2048);
-    if(switchSmoke)window.smokeSceneSwitch(QString::fromLocal8Bit(argv[3]));
-    if(repeatSmoke)window.smokeRepeatRaster();
-    if(walkingSmoke)window.smokeWalkingCollisionPreference();
-    if(scopeSmoke)window.smokeScopedAim();
-    if(immersiveSmoke)window.smokeImmersiveMouse();
-    if(nativeUiSmoke)window.smokeNativeUi();
-    if(!app.windowIcon().isNull())window.setWindowIcon(app.windowIcon());
-    window.show();
-    return app.exec();
-}
+2ı{şj-zê÷vı{ª×)¤¥¹±Õ‘”€‰´Í‘}•¹¥¹”¹ ˆ(¥¹±Õ‘”€‰ÍÉŒ½´Í‘}İ…±­}½¹ÑÉ½±±•È¹ ˆ(¥¹±Õ‘”€‰•áÁ±½É…Ñ¥½¹}µ½Ñ¥½¸¹ ˆ(¥¹±Õ‘”€‰Í½Á•}é½½´¹ ˆ(¥¹±Õ‘”€‰…µ•É…}‘¥…¹½ÍÑ¥Œ¹ ˆ(¥¹±Õ‘”€‰…¹½µ…±å}…Ñ…±½œ¹ ˆ(¥¹±Õ‘”€‰™É…µ•}Á…¥¹œ¹ ˆ(¥¹±Õ‘”€‰Á½½±}±…‘‘•È¹ ˆ(¥¹±Õ‘”€‰İ•…Ñ¡•È½Í½±…É}å±”¹ ˆ(¥¹±Õ‘”€‰İ•…Ñ¡•È½Í­å}½µÁ½Í¥Ñ½È¹ ˆ(¥¹±Õ‘”€‰É…‘¥½}…Õ‘¥¼¹ ˆ(¥¹±Õ‘”€‰ÍÉŒ½´Í‘}Í•¹•}ØÄØ¹ ˆ(¥¹±Õ‘”€‰ÍÉŒ½´Í‘}ØÄÙ}‰É¥‘”¹ ˆ(¥¹±Õ‘”€ñEÑ¥½¸ø(¥¹±Õ‘”€ñEÁÁ±¥…Ñ¥½¸ø(¥¹±Õ‘”€ñE½µ‰½	½àø(¥¹±Õ‘”€ñE¡•­	½àø(¥¹±Õ‘”€ñE±½Í•Ù•¹Ğø(¥¹±Õ‘”€ñE±¥Á‰½…Éø(¥¹±Õ‘”€ñEÕÉÍ½Èø(¥¹±Õ‘”€ñEÕ¥ÁÁ±¥…Ñ¥½¸ø(¥¹±Õ‘”€ñE½É•ÁÁ±¥…Ñ¥½¸ø(¥¹±Õ‘”€ñE¥Èø(¥¹±Õ‘”€ñE¥±”ø(¥¹±Õ‘”€ñEM…Ù•¥±”ø(¥¹±Õ‘”€ñE)Í½¹ÉÉ…äø(¥¹±Õ‘”€ñE)Í½¹½Õµ•¹Ğø(¥¹±Õ‘”€ñE)Í½¹=‰©•Ğø(¥¹±Õ‘”€ñE½­]¥‘•Ğø(¥¹±Õ‘”€ñE½Õ‰±•MÁ¥¹	½àø(¥¹±Õ‘”€ñE¥±•¥…±½œø(¥¹±Õ‘”€ñE¥±•%¹™¼ø(¥¹±Õ‘”€ñE-•åM•ÅÕ•¹”ø(¥¹±Õ‘”€ñEQ½½±	…Èø(¥¹±Õ‘”€ñEAÉ½•ÍÌø(¥¹±Õ‘”€ñEAÉ½É•ÍÍ	…Èø(¥¹±Õ‘”€ñE…Ñ•Q¥µ”ø(¥¹±Õ‘”€ñEMÑ…¹‘…É‘A…Ñ¡Ìø(¥¹±Õ‘”€ñE½Éµ1…å½ÕĞø(¥¹±Õ‘”€ñEÕÑÕÉ•]…Ñ¡•Èø(¥¹±Õ‘”€ñEÉ½ÕÁ	½àø(¥¹±Õ‘”€ñE!	½á1…å½ÕĞø(¥¹±Õ‘”€ñE%µ…”ø(¥¹±Õ‘”€ñE%½¸ø(¥¹±Õ‘”€ñE1…‰•°ø(¥¹±Õ‘”€ñE±…ÁÍ•‘Q¥µ•Èø(¥¹±Õ‘”€ñE-•åÙ•¹Ğø(¥¹±Õ‘”€ñE5½ÕÍ•Ù•¹Ğø(¥¹±Õ‘”€ñEM•Ğø(¥¹±Õ‘”€ñEQ¥µ•Èø(¥¹±Õ‘”€ñEQ¡É•…‘A½½°ø(¥¹±Õ‘”€ñEQ¡É•…ø(¥¹±Õ‘”€ñE5…¥¹]¥¹‘½Üø(¥¹±Õ‘”€ñE5•Ñ…=‰©•Ğø(¥¹±Õ‘”€ñE5•¹Õ	…Èø(¥¹±Õ‘”€ñE5•ÍÍ…•	½àø(¥¹±Õ‘”€ñEA…¥¹Ñ•Èø(¥¹±Õ‘”€ñEA…¥¹Ñ•ÉA…Ñ ø(¥¹±Õ‘”€ñEA¥áµ…Àø(¥¹±Õ‘”€ñEAÕÍ¡	ÕÑÑ½¸ø(¥¹±Õ‘”€ñEMÉ½±±É•„ø(¥¹±Õ‘”€ñEMÉ••¸ø(¥¹±Õ‘”€ñEM•ÑÑ¥¹Ìø(¥¹±Õ‘”€ñEM¥¹…±	±½­•Èø(¥¹±Õ‘”€ñEM±¥‘•Èø(¥¹±Õ‘”€ñEM¥é”ø(¥¹±Õ‘”€ñEMÁ¥¹	½àø(¥¹±Õ‘”€ñEMÑ…ÑÕÍ	…Èø(¥¹±Õ‘”€ñEMåÍ%¹™¼ø(¥¹±Õ‘”€ñE½¹Ñ5•ÑÉ¥Ìø(¥¹±Õ‘”€ñEQ…‰]¥‘•Ğø(¥¹±Õ‘”€ñEQÉ••]¥‘•Ğø(¥¹±Õ‘”€ñEY	½á1…å½ÕĞø(¥¹±Õ‘”€ñEMÑ…­•‘1…å½ÕĞø(¥¹±Õ‘”€ñE]¥¹‘½Üø(¥¹±Õ‘”€ñEÑ½¹ÕÉÉ•¹Ğ½EÑ½¹ÕÉÉ•¹ÑIÕ¸ø(¥¹±Õ‘”€ñ…Ñ½µ¥Œø(¥¹±Õ‘”€ñ¡É½¹¼ø(¥¹±Õ‘”€ñµ…Ñ ø(¥¹±Õ‘”€ñÍÑÉ¥¹œø(¥¹±Õ‘”€ñÍÑ‘¥¼ø(¥¹±Õ‘”€ñµ•µ½Éäø(¥¹±Õ‘”€ñ™Õ¹Ñ¥½¹…°ø(¥¹±Õ‘”€ñ±¥µ¥ÑÌø(¥¹±Õ‘”€ñµÕÑ•àø(¥¹±Õ‘”€ñÑ¡É•…ø(¥¹±Õ‘”€ñÕÑ¥±¥Ñäø(¥¹±Õ‘”€ñÙ•Ñ½Èø(¥˜‘•™¥¹•¡}]%8ÌÈ¤(¥™¹‘•˜9=5%95`(‘•™¥¹”9=5%95`(•¹‘¥˜(¥¹±Õ‘”€ñİ¥¹‘½İÌ¹ ø(¥¹±Õ‘”€ñ‘á¤Å|È¹ ø(¼¼M½µ”]¥¹‘½İÌM,¡•…‘•ÉÌÍÑ¥±°•áÁ½Í”µ¥¸½µ…àµ…É½ÌìÑ¡”¹…Ñ¥Ù”É•¹‘•É•È(¼¼…±É•…‘äÕÍ•ÌÍÑèéµ¥¸½ÍÑèéµ…à•áÑ•¹Í¥Ù•±ä…¹µÕÍĞ¹½Ğ‰”µ…É¼µ•áÁ…¹‘•¸(¥™‘•˜µ¥¸(Õ¹‘•˜µ¥¸(•¹‘¥˜(¥™‘•˜µ…à(Õ¹‘•˜µ…à(•¹‘¥˜(•¹‘¥˜()ÕÍ¥¹œ¹…µ•ÍÁ…”´Íì)¹…µ•ÍÁ…”ì)¥¹ĞÍåÍÑ•µ5•µ½Éå1½…‘A•É•¹Ğ ¥ì(¥˜‘•™¥¹•¡}]%8ÌÈ¤(€€€55=IeMQQUM`ÍÑ…Ñ•íôìÍÑ…Ñ”¹‘İ1•¹Ñ õÍ¥é•½˜¡ÍÑ…Ñ”¤ì(€€€É•ÑÕÉ¸±½‰…±5•µ½ÉåMÑ…ÑÕÍà ™ÍÑ…Ñ”¤ı¥¹Ğ¡ÍÑ…Ñ”¹‘İ5•µ½Éå1½…¤è´Äì(•±Í”(€€€É•ÑÕÉ¸€´Äì(•¹‘¥˜)ô)ÍÑÉÕĞI•ÍÕ±Ğì(€€€E%µ…”¥µ…”ì(€€€ØÄØèé…µ•É…AÉ•Í•Ğ…µ•É…A½Í”ì(€€€EMÑÉ¥¹œÉ•¹‘•É•Èì(€€€EMÑÉ¥¹œ•ÉÉ½Èì(€€€‘½Õ‰±”µ¥±±¥Í•½¹‘ÌôÀì(€€€‰½½°ÁÔõ™…±Í”ì(€€€‰½½°Í­å½µÁ½Í¥Ñ¥¹œõ™…±Í”ì€¼¼`ÄÄÍ­äÁ¥á•±Ì…É”ÑÉ…¹ÍÁ…É•¹Ğ™½ÈEĞ½µÁ½Í¥Ñ½È(€€€‰½½°‘¥É•ÑAÉ•Í•¹Ñ•õ™…±Í”ì€¼¼a$½ÈYÕ±­…¸¹…Ñ¥Ù”Íİ…Á¡…¥¸°¹¼E%µ…”(€€€‰½½°¹…Ñ¥Ù•…±±‰…¬õ™…±Í”ì€¼¼9…Ñ¥Ù”a$½]M$Õ¹…Ù…¥±…‰±”èÍ¡½ÜÑ¡”E%µ…”ÁÉ•Ù¥•Ü(€€€EMÑÉ¥¹œ¹…Ñ¥Ù•…¥±ÕÉ”ì€¼¼AÉ•Í•ÉÙ”•á…ĞYÕ±­…¸½a$ÁÉ•Í•¹Ñ…Ñ¥½¸•ÉÉ½È…™Ñ•È¥µ…”™…±±‰…¬(€€€EMÑÉ¥¹œ¹…Ñ¥Ù•]¥¹‘½İ•Ñ…¥±Ìì€¼¼!]9°½İ¹¥¹œÑ¡É•…°±¥•¹ĞÍ¥é”…¹É•ÅÕ•ÍÑ••áÑ•¹Ğ(€€€EMÑÉ¥¹œÉ•ÅÕ•ÍÑMÑ…µÀì(€€€€¼¼I•©•Ğ™¥¹¥Í¡•™É…µ•Ì…™Ñ•È„…µ•É„°µ…Ñ•É¥…°°‰…­•¹½ÈÍ•¹”¡…¹”¸(€€€Õ¥¹ĞØÑ}Ğ•¹•É…Ñ¥½¸ôÀì(€€€¥¹Ğ‰…­•¹‘%¹‘•àô´Äì(€€€ÅÕ¥¹ÑÁÑÈÉ•¹‘•ÉQ¡É•…ôÀì)ôì)ÍÑÉÕĞM•¹•1½…‘=ÕÑ½µ”ì(€€€EMÑÉ¥¹œÁ…Ñ ì(€€€EMÑÉ¥¹œ•ÉÉ½Èì(€€€ØÄØèéM•¹•…Ñ…‰…Í”‘…Ñ…‰…Í”ì(€€€ÍÑèéÍ¡…É•‘}ÁÑÈñØÄØèéIÕ¹Ñ¥µ”øÉÕ¹Ñ¥µ”ì(€€€Õ¥¹ĞØÑ}Ğ•¹•É…Ñ¥½¸ôÀì)ôì)±…ÍÌ%µ…•Y¥•Ü™¥¹…°€èÁÕ‰±¥ŒE]¥‘•Ğì)ÁÕ‰±¥Œè(€€€•áÁ±¥¥Ğ%µ…•Y¥•Ü¡E]¥‘•Ğ¨½İ¹•Èõ¹Õ±±ÁÑÈ¤éE]¥‘•Ğ¡½İ¹•È¥íô(€€€Ù½¥Í•Ñ9…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¸¡‰½½°•¹…‰±•¥ì(€€€€€€€¥˜¡¹…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¹|ôõ•¹…‰±•¥É•ÑÕÉ¸ì(€€€€€€€¹…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¹|õ•¹…‰±•ì(€€€€€€€¥˜¡•¹…‰±•¥Á…¥¹ÑA•¹‘¥¹|õ™…±Í”ì(€€€€€€€Í•ÑÑÑÉ¥‰ÕÑ”¡EĞèé]}=Á…ÅÕ•A…¥¹ÑÙ•¹Ğ±•¹…‰±•¤ì(€€€€€€€Í•ÑÑÑÉ¥‰ÕÑ”¡EĞèé]}9½MåÍÑ•µ	…­É½Õ¹±•¹…‰±•¤ì(€€€€€€€¥˜ …•¹…‰±•¥ÕÁ‘…Ñ” ¤ì(€€€ô(€€€‰½½°¹…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¸ ¥½¹ÍÑíÉ•ÑÕÉ¸¹…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¹|íô(€€€Ù½¥Í•Ñ%µ…”¡E%µ…”¥´¥í¥µ…•|õÍÑèéµ½Ù”¡¥´¤íÁ…¥¹ÑA•¹‘¥¹|õÑÉÕ”íÕÁ‘…Ñ” ¤íô(€€€Ù½¥•¹…‰±•M­å½µÁ½Í¥Ñ¥¹œ¡‰½½°•¹…‰±•¥ì(€€€€€€€Í­å½µÁ½Í¥Ñ¥¹|õ•¹…‰±•ì(€€€€€€€¥˜ …•¹…‰±•¥Í­å%µ…•|õE%µ…•íôì(€€€€€€€•±Í”Í­å¥ÉÑå|õÑÉÕ”ì(€€€€€€€ÕÁ‘…Ñ” ¤ì(€€€ô(€€€‰½½°¡…ÍM­åÉ…µ” ¥½¹ÍÑíÉ•ÑÕÉ¸€…Í­å%µ…•|¹¥Í9Õ±° ¤˜˜…Í­å¥ÉÑå|íô(€€€Ù½¥¥¹Ù…±¥‘…Ñ•M­ä ¥íÍ­å¥ÉÑå|õÑÉÕ”íô(€€€Ù½¥‘É…İM­ä¡½¹ÍĞ´Íèé…µ•É„˜…µ•É„±™±½…Ğ¡½ÕÈ±‘½Õ‰±”Í•½¹‘Ì°(€€€€€€€€€€€€€€€€‰½½°±½Õ‘Í¹…‰±•±‰½½°™…ÍÑ]•…Ñ¡•È¥ì(€€€€€€€¥˜ …Í­å½µÁ½Í¥Ñ¥¹|¥É•ÑÕÉ¸ì(€€€€€€€Í­å½µÁ½Í•É|¹É•¹‘•È¡Í­å%µ…•|±…µ•É„±¡½ÕÈ±Í•½¹‘Ì±±½Õ‘Í¹…‰±•±™…ÍÑ]•…Ñ¡•È¤ì(€€€€€€€Í­å¥ÉÑå|õ™…±Í”ì(€€€€€€€ÕÁ‘…Ñ” ¤ì(€€€ô(€€€Ù½¥½¹AÉ•Í•¹Ñ•¡ÍÑèé™Õ¹Ñ¥½¸ñÙ½¥ ¤ø…±±‰…¬¥íÁÉ•Í•¹Ñ•‘|õÍÑèéµ½Ù”¡…±±‰…¬¤íô(€€€Ù½¥Í•ÑA±…•¡½±‘•È¡½¹ÍĞEMÑÉ¥¹œ˜µ•ÍÍ…”¥íÁ±…•¡½±‘•É|õµ•ÍÍ…”íÕÁ‘…Ñ” ¤íô(€€€Ù½¥Í•ÑI•¹‘•É•ÉMÑ…µÀ¡EMÑÉ¥¹œ‘¥ÍÁ±…å•±EMÑÉ¥¹œÉ•ÅÕ•ÍÑ•¥ì(€€€€€€€¥˜¡‘¥ÍÁ±…å•‘I•¹‘•É•É|ôõ‘¥ÍÁ±…å•˜™É•ÅÕ•ÍÑ•‘I•¹‘•É•É|ôõÉ•ÅÕ•ÍÑ•¥É•ÑÕÉ¸ì(€€€€€€€‘¥ÍÁ±…å•‘I•¹‘•É•É|õÍÑèéµ½Ù”¡‘¥ÍÁ±…å•¤íÉ•ÅÕ•ÍÑ•‘I•¹‘•É•É|õÍÑèéµ½Ù”¡É•ÅÕ•ÍÑ•¤íÕÁ‘…Ñ” ¤ì(€€€ô(€€€Ù½¥Í•Ñ…µ•É…!Õ¡EMÑÉ¥¹1¥ÍĞ±¥¹•Ì±‰½½°•¹…‰±•¥ì(€€€€€€€¥˜¡¡Õ‘1¥¹•Í|ôõ±¥¹•Ì˜™¡Õ‘¹…‰±•‘|ôõ•¹…‰±•¥É•ÑÕÉ¸ì(€€€€€€€¡Õ‘1¥¹•Í|õÍÑèéµ½Ù”¡±¥¹•Ì¤í¡Õ‘¹…‰±•‘|õ•¹…‰±•íÕÁ‘…Ñ” ¤ì(€€€ô(€€€Ù½¥Í•ÑM½Á•=Ù•É±…ä¡™±½…Ğ±•Ù•°¥ì(€€€€€€€±•Ù•°õÍÑèé±…µÀ¡±•Ù•°°À¹˜°Ä¹˜¤ì(€€€€€€€¥˜¡ÍÑèé…‰Ì¡Í½Á•1•Ù•±|µ±•Ù•°¤ğ¸ÀÀÉ˜¥É•ÑÕÉ¸ì(€€€€€€€Í½Á•1•Ù•±|õ±•Ù•°ì(€€€€€€€ÕÁ‘…Ñ” ¤ì(€€€ô(€€€Ù½¥Í•ÑÁÍ=Ù•É±…ä¡‘½Õ‰±”™ÁÌ±‰½½°Ù¥Í¥‰±”¥ì(€€€€€€€½¹ÍĞEMÑÉ¥¹œ¹•áĞõÙ¥Í¥‰±”˜™™ÁÌøÀ¸À(€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ˆ”ÄALˆ¤¹…Éœ¡™ÁÌ°À°˜œ°Ä¤(€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ‰ALƒŠPˆ¤ì(€€€€€€€¥˜¡™ÁÍY¥Í¥‰±•|ôõÙ¥Í¥‰±”˜™™ÁÍQ•áÑ|ôõ¹•áĞ¥É•ÑÕÉ¸ì(€€€€€€€™ÁÍY¥Í¥‰±•|õÙ¥Í¥‰±”ì(€€€€€€€™ÁÍQ•áÑ|õ¹•áĞì(€€€€€€€ÕÁ‘…Ñ” ¤ì(€€€ô(€€€ÍÑ…Ñ¥ŒÙ½¥‘É…İ…µ•É…!Õ¡EA…¥¹Ñ•È˜Á…¥¹Ñ•È±½¹ÍĞEI•Ğ˜‰½Õ¹‘Ì±½¹ÍĞEMÑÉ¥¹1¥ÍĞ˜±¥¹•Ì¥ì(€€€€€€€¥˜¡±¥¹•Ì¹¥ÍµÁÑä ¥ññ‰½Õ¹‘Ì¹İ¥‘Ñ  ¤ğÈĞÁññ‰½Õ¹‘Ì¹¡•¥¡Ğ ¤ğÄÄÀ¥É•ÑÕÉ¸ì(€€€€€€€Á…¥¹Ñ•È¹Í…Ù” ¤ì(€€€€€€€E½¹Ğ™½¹ĞõÁ…¥¹Ñ•È¹™½¹Ğ ¤í™½¹Ğ¹Í•Ñ…µ¥±ä¡EMÑÉ¥¹1¥Ñ•É…° ‰½¹Í½±…Ìˆ¤¤í™½¹Ğ¹Í•ÑA½¥¹ÑM¥é” ä¤ì(€€€€€€€Á…¥¹Ñ•È¹Í•Ñ½¹Ğ¡™½¹Ğ¤ì(€€€€€€€½¹ÍĞE½¹Ñ5•ÑÉ¥Ì™´¡™½¹Ğ¤ì(€€€€€€€¥¹Ğ±½¹•ÍĞôÀì(€€€€€€€™½È¡½¹ÍĞ…ÕÑ¼˜Ğé±¥¹•Ì¥±½¹•ÍĞõÍÑèéµ…à¡±½¹•ÍĞ±™´¹¡½É¥é½¹Ñ…±‘Ù…¹”¡Ğ¤¤ì(€€€€€€€½¹ÍĞ¥¹ĞÁ…ôÄÈ±± õ™´¹¡•¥¡Ğ ¤¬Ìì(€€€€€€€½¹ÍĞEI•ĞÁ…¹•°¡‰½Õ¹‘Ì¹±•™Ğ ¤¬ÄÈ±‰½Õ¹‘Ì¹Ñ½À ¤¬ÄÈ°(€€€€€€€€€€€€€€€€€€€€€€€€€ÍÑèéµ¥¸¡‰½Õ¹‘Ì¹İ¥‘Ñ  ¤´ÈĞ±±½¹•ÍĞ­Á…¨È¤±± ©±¥¹•Ì¹Í¥é” ¤­Á…¨È¤ì(€€€€€€€Á…¥¹Ñ•È¹Í•ÑA•¸¡EĞèé9½A•¸¤íÁ…¥¹Ñ•È¹Í•Ñ	ÉÕÍ ¡E½±½È ÄÀ°Äà°ÈÜ°ÈÀà¤¤ì(€€€€€€€Á…¥¹Ñ•È¹‘É…İI½Õ¹‘•‘I•Ğ¡Á…¹•°°à°à¤ì(€€€€€€€™½È¡¥¹Ğ¤ôÀí¤ñ±¥¹•Ì¹Í¥é” ¤ì¬­¤¥ì(€€€€€€€€€€€Á…¥¹Ñ•È¹Í•ÑA•¸¡¤ôôÀıE½±½È ÄĞÀ°ÈÈĞ°ÈĞÔ¤éE½±½È ÈÌØ°ÈĞÌ°ÈĞä¤¤ì(€€€€€€€€€€€Á…¥¹Ñ•È¹‘É…İQ•áĞ¡Á…¹•°¹±•™Ğ ¤­Á…±Á…¹•°¹Ñ½À ¤­Á…­™´¹…Í•¹Ğ ¤­¤©± °(€€€€€€€€€€€€€€€™´¹•±¥‘•‘Q•áĞ¡±¥¹•Ím¥t±EĞèé±¥‘•I¥¡Ğ±Á…¹•°¹İ¥‘Ñ  ¤µÁ…¨È¤¤ì(€€€€€€€ô(€€€€€€€Á…¥¹Ñ•È¹É•ÍÑ½É” ¤ì(€€€ô)ÁÉ½Ñ•Ñ•è(€€€Ù½¥Á…¥¹ÑÙ•¹Ğ¡EA…¥¹ÑÙ•¹Ğ¨¤½Ù•ÉÉ¥‘”ì(€€€€€€€€¼¼%¸‘¥É•Ğµ½‘”Ñ¡¥ÌÑ½Àµ±•Ù•°!]9‰•±½¹ÌÑ¼a$½ÈYÕ±­…¸]M$¸(€€€€€€€€¼¼EĞµÕÍĞ¹½ĞÉ•Á…¥¹Ğ½Ù•È„Íİ…Á¡…¥¸ÁÉ•Í•¹Ğ¸(€€€€€€€¥˜¡¹…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¹|¥É•ÑÕÉ¸ì(€€€€€€€EA…¥¹Ñ•ÈÀ¡Ñ¡¥Ì¤ì(€€€€€€€À¹™¥±±I•Ğ¡É•Ğ ¤±E½±½È ÈÈ°ÈØ°ÌÄ¤¤ì(€€€€€€€¥˜¡¥µ…•|¹¥Í9Õ±° ¤¤ì(€€€€€€€€€€€À¹Í•ÑA•¸¡E½±½È ÄàÀ°ÄäÄ°ÈÀĞ¤¤ì(€€€€€€€€€€€À¹‘É…İQ•áĞ¡É•Ğ ¤¹…‘©ÕÍÑ• ÌÀ°ÈÀ°´ÌÀ°´ÈÀ¤±EĞèé±¥¹•¹Ñ•ÉñEĞèéQ•áÑ]½É‘]É…À°(€€€€€€€€€€€€€€€€€€€€€€Á±…•¡½±‘•É|¹¥ÍµÁÑä ¤ıEMÑÉ¥¹1¥Ñ•É…° ‰=ÕÙÉ¥ÈÕ¹”Í¡¹”XÄØ‘…¹Ì±”µ•¹Ô¥¡¥•Èˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€éÁ±…•¡½±‘•É|¤ì(€€€€€€€€€€€‘É…İI•¹‘•É•ÉMÑ…µÀ¡À±É•Ğ ¤¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€EM¥é”Ìõ¥µ…•|¹Í¥é” ¤ì(€€€€€€€Ì¹Í…±”¡Í¥é” ¤±EĞèé-••ÁÍÁ•ÑI…Ñ¥¼¤ì(€€€€€€€EI•Ğ‘ÍĞ¡EA½¥¹Ğ ¡İ¥‘Ñ  ¤µÌ¹İ¥‘Ñ  ¤¤¼È°¡¡•¥¡Ğ ¤µÌ¹¡•¥¡Ğ ¤¤¼È¤±Ì¤ì(€€€€€€€À¹Í•ÑI•¹‘•É!¥¹Ğ¡EA…¥¹Ñ•ÈèéMµ½½Ñ¡A¥áµ…ÁQÉ…¹Í™½É´±™…±Í”¤ì(€€€€€€€¥˜¡Í­å½µÁ½Í¥Ñ¥¹|€˜˜€…Í­å%µ…•|¹¥Í9Õ±° ¤¤ì(€€€€€€€€€€€€¼¼Q¡”€ÔÄÉàÈàà¥¹‘•Á•¹‘•¹Ğİ•…Ñ¡•È±…å•È¥ÌÕÁ‘…Ñ•…Ğ€ÌÁ!è¸(€€€€€€€€€€€€¼¼Q¡”`ÄÄ…É¡¥Ñ•ÑÕÉ…°™½É•É½Õ¹ÍÑ…åÌ…Ğ¥ÑÌ±…ÍĞ½½™É…µ”¸(€€€€€€€€€€€À¹Í•ÑI•¹‘•É!¥¹Ğ¡EA…¥¹Ñ•ÈèéMµ½½Ñ¡A¥áµ…ÁQÉ…¹Í™½É´±ÑÉÕ”¤ì(€€€€€€€€€€€À¹‘É…İ%µ…”¡‘ÍĞ±Í­å%µ…•|¤ì(€€€€€€€€€€€À¹Í•ÑI•¹‘•É!¥¹Ğ¡EA…¥¹Ñ•ÈèéMµ½½Ñ¡A¥áµ…ÁQÉ…¹Í™½É´±™…±Í”¤ì(€€€€€€€ô(€€€€€€€À¹‘É…İ%µ…”¡‘ÍĞ±¥µ…•|¤ì(€€€€€€€‘É…İI•¹‘•É•ÉMÑ…µÀ¡À±‘ÍĞ¤ì(€€€€€€€€¼¼M½Á•É•Ñ¥±”¥Ì½¹±ä„€ÉEĞ½Ù•É±…ä°İ¥Ñ ¹¼•™™•Ğ½¸Á¡åÍ¥…°(€€€€€€€€¼¼Á½Í¥Ñ¥½¸°½±±¥Í¥½¸É…åÌ½ÈÑ¡”É…ÍÑ•È½ATÉ•¹‘•É•È¸(€€€€€€€¥˜¡Í½Á•1•Ù•±|ø¸ÀÀÕ˜¥ì(€€€€€€€€€€€À¹Í…Ù” ¤ì(€€€€€€€€€€€À¹Í•ÑI•¹‘•É!¥¹Ğ¡EA…¥¹Ñ•Èèé¹Ñ¥…±¥…Í¥¹œ±ÑÉÕ”¤ì(€€€€€€€€€€€½¹ÍĞEA½¥¹Ñ•¹Ñ•Èõ‘ÍĞ¹•¹Ñ•È ¤ì(€€€€€€€€€€€½¹ÍĞÅÉ•…°É…‘¥ÕÌõÅÉ•…°¡ÍÑèéµ¥¸¡‘ÍĞ¹İ¥‘Ñ  ¤±‘ÍĞ¹¡•¥¡Ğ ¤¤¤¨¸ĞÀÔì(€€€€€€€€€€€EA…¥¹Ñ•ÉA…Ñ ½ÕÑÍ¥‘”ì(€€€€€€€€€€€½ÕÑÍ¥‘”¹Í•Ñ¥±±IÕ±”¡EĞèé=‘‘Ù•¹¥±°¤ì(€€€€€€€€€€€½ÕÑÍ¥‘”¹…‘‘I•Ğ¡‘ÍĞ¤ì(€€€€€€€€€€€½ÕÑÍ¥‘”¹…‘‘±±¥ÁÍ”¡•¹Ñ•È±É…‘¥ÕÌ±É…‘¥ÕÌ¤ì(€€€€€€€€€€€À¹™¥±±A…Ñ ¡½ÕÑÍ¥‘”±E½±½È À°À°À±¥¹Ğ ÄÌÔ¹˜©Í½Á•1•Ù•±|¤¤¤ì(€€€€€€€€€€€À¹Í•Ñ	ÉÕÍ ¡EĞèé9½	ÉÕÍ ¤ì(€€€€€€€€€€€À¹Í•ÑA•¸¡EA•¸¡E½±½È ÈÈà°ÈÌØ°ÈÌÄ±¥¹Ğ ÄäÔ¹˜©Í½Á•1•Ù•±|¤¤°Ä¸ÈÔ¤¤ì(€€€€€€€€€€€À¹‘É…İ±±¥ÁÍ”¡•¹Ñ•È±É…‘¥ÕÌ±É…‘¥ÕÌ¤ì(€€€€€€€€€€€½¹ÍĞÅÉ•…°±¥¹”õÅÉ•…°¡ÍÑèéµ…à ÄÈ±¥¹Ğ¡É…‘¥ÕÌ¨¸ÄĞ¤¤¤ì(€€€€€€€€€€€½¹ÍĞÅÉ•…°…ÀôÔ¸ì(€€€€€€€€€€€À¹Í•ÑA•¸¡EA•¸¡E½±½È ÄØ°ÈĞ°ÈÈ±¥¹Ğ ÈĞÔ¹˜©Í½Á•1•Ù•±|¤¤°Ä¸à¤¤ì(€€€€€€€€€€€À¹‘É…İ1¥¹”¡EA½¥¹Ñ¡•¹Ñ•È¹à ¤µ±¥¹”±•¹Ñ•È¹ä ¤¤±EA½¥¹Ñ¡•¹Ñ•È¹à ¤µ…À±•¹Ñ•È¹ä ¤¤¤ì(€€€€€€€€€€€À¹‘É…İ1¥¹”¡EA½¥¹Ñ¡•¹Ñ•È¹à ¤­…À±•¹Ñ•È¹ä ¤¤±EA½¥¹Ñ¡•¹Ñ•È¹à ¤­±¥¹”±•¹Ñ•È¹ä ¤¤¤ì(€€€€€€€€€€€À¹‘É…İ1¥¹”¡EA½¥¹Ñ¡•¹Ñ•È¹à ¤±•¹Ñ•È¹ä ¤µ±¥¹”¤±EA½¥¹Ñ¡•¹Ñ•È¹à ¤±•¹Ñ•È¹ä ¤µ…À¤¤ì(€€€€€€€€€€€À¹‘É…İ1¥¹”¡EA½¥¹Ñ¡•¹Ñ•È¹à ¤±•¹Ñ•È¹ä ¤­…À¤±EA½¥¹Ñ¡•¹Ñ•È¹à ¤±•¹Ñ•È¹ä ¤­±¥¹”¤¤ì(€€€€€€€€€€€À¹Í•Ñ	ÉÕÍ ¡E½±½È ÈÌÀ°ÈÌà°ÈÌÔ±¥¹Ğ ÄäÀ¹˜©Í½Á•1•Ù•±|¤¤¤ì(€€€€€€€€€€€À¹Í•ÑA•¸¡EĞèé9½A•¸¤ì(€€€€€€€€€€€À¹‘É…İ±±¥ÁÍ”¡•¹Ñ•È°Ä¸ÜÔ°Ä¸ÜÔ¤ì(€€€€€€€€€€€À¹É•ÍÑ½É” ¤ì(€€€€€€€ô(€€€€€€€¥˜¡¡Õ‘¹…‰±•‘|¥‘É…İ…µ•É…!Õ¡À±‘ÍĞ±¡Õ‘1¥¹•Í|¤ì(€€€€€€€¥˜¡™ÁÍY¥Í¥‰±•|¥ì(€€€€€€€€€€€€¼¼½Õ¹Ğ½µÁ±•Ñ•ÁÉ•Í•¹Ñ…Ñ¥½¹Ì°¹½Ğ„Ñ¡•½É•Ñ¥…°ATAL±…¥´¸(€€€€€€€€€€€À¹Í…Ù” ¤ì(€€€€€€€€€€€E½¹Ğ˜õÀ¹™½¹Ğ ¤í˜¹Í•Ñ…µ¥±ä¡EMÑÉ¥¹1¥Ñ•É…° ‰½¹Í½±…Ìˆ¤¤í˜¹Í•ÑA½¥¹ÑM¥é” ÄÀ¤ì(€€€€€€€€€€€˜¹Í•Ñ	½±¡ÑÉÕ”¤íÀ¹Í•Ñ½¹Ğ¡˜¤ì(€€€€€€€€€€€½¹ÍĞ¥¹Ğİ¥‘Ñ õÍÑèéµ…à àÜ±À¹™½¹Ñ5•ÑÉ¥Ì ¤¹¡½É¥é½¹Ñ…±‘Ù…¹”¡™ÁÍQ•áÑ|¤¬Äà¤ì(€€€€€€€€€€€½¹ÍĞEI•Ğ‰…‘”¡‘ÍĞ¹É¥¡Ğ ¤µİ¥‘Ñ ´ÄÀ±‘ÍĞ¹Ñ½À ¤¬ÄÀ±İ¥‘Ñ °Èà¤ì(€€€€€€€€€€€À¹Í•ÑA•¸¡EĞèé9½A•¸¤íÀ¹Í•Ñ	ÉÕÍ ¡E½±½È ä°ÄÔ°ÈÈ°ÈÄÌ¤¤ì(€€€€€€€€€€€À¹‘É…İI½Õ¹‘•‘I•Ğ¡‰…‘”°Ø°Ø¤ì(€€€€€€€€€€€À¹Í•ÑA•¸¡E½±½È ÄÜà°ÈÌà°ÈÈÈ¤¤ì(€€€€€€€€€€€À¹‘É…İQ•áĞ¡‰…‘”±EĞèé±¥¹•¹Ñ•È±™ÁÍQ•áÑ|¤ì(€€€€€€€€€€€À¹É•ÍÑ½É” ¤ì(€€€€€€€ô(€€€€€€€¥˜¡Á…¥¹ÑA•¹‘¥¹|¥ì(€€€€€€€€€€€Á…¥¹ÑA•¹‘¥¹|õ™…±Í”ì(€€€€€€€€€€€¥˜¡ÁÉ•Í•¹Ñ•‘|¥ÁÉ•Í•¹Ñ•‘| ¤ì(€€€€€€€ô(€€€ô)ÁÉ¥Ù…Ñ”è(€€€E%µ…”¥µ…•|ì(€€€E%µ…”Í­å%µ…•|ì(€€€Í”èéİ•…Ñ¡•ÈèéM­å½µÁ½Í¥Ñ½ÈÍ­å½µÁ½Í•É|ì(€€€‰½½°Í­å½µÁ½Í¥Ñ¥¹|õ™…±Í”±Í­å¥ÉÑå|õÑÉÕ”ì(€€€‰½½°Á…¥¹ÑA•¹‘¥¹|õ™…±Í”ì(€€€‰½½°¹…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¹|õ™…±Í”ì(€€€ÍÑèé™Õ¹Ñ¥½¸ñÙ½¥ ¤øÁÉ•Í•¹Ñ•‘|ì(€€€EMÑÉ¥¹œÁ±…•¡½±‘•É|ì(€€€EMÑÉ¥¹1¥ÍĞ¡Õ‘1¥¹•Í|ì(€€€‰½½°¡Õ‘¹…‰±•‘|õÑÉÕ”ì(€€€™±½…ĞÍ½Á•1•Ù•±|ôÀ¹˜ì(€€€‰½½°™ÁÍY¥Í¥‰±•|õ™…±Í”ì(€€€EMÑÉ¥¹œ™ÁÍQ•áÑ|ì(€€€EMÑÉ¥¹œ‘¥ÍÁ±…å•‘I•¹‘•É•É|ì(€€€EMÑÉ¥¹œÉ•ÅÕ•ÍÑ•‘I•¹‘•É•É|ì(€€€Ù½¥‘É…İI•¹‘•É•ÉMÑ…µÀ¡EA…¥¹Ñ•È˜À±½¹ÍĞEI•Ğ˜‰½Õ¹‘Ì¥ì(€€€€€€€¥˜¡‰½Õ¹‘Ì¹İ¥‘Ñ  ¤ğÈĞÁññ‰½Õ¹‘Ì¹¡•¥¡Ğ ¤ğàÀ¥É•ÑÕÉ¸ì(€€€€€€€EMÑÉ¥¹1¥ÍĞ±¥¹•Ìì(€€€€€€€±¥¹•ÌğñEMÑÉ¥¹1¥Ñ•É…° ‰™™¥£¤€è€”Äˆ¤¹…Éœ¡‘¥ÍÁ±…å•‘I•¹‘•É•É|¹¥ÍµÁÑä ¤(€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ‰…ÕÕ¸É•¹‘ÔÁ½ÕÈ³Še¥¹ÍÑ…¹Ğˆ¤é‘¥ÍÁ±…å•‘I•¹‘•É•É|¤ì(€€€€€€€¥˜ …É•ÅÕ•ÍÑ•‘I•¹‘•É•É|¹¥ÍµÁÑä ¤¤(€€€€€€€€€€€±¥¹•ÌğñEMÑÉ¥¹1¥Ñ•É…° ‰•µ…¹“¤€è€”Äˆ¤¹…Éœ¡É•ÅÕ•ÍÑ•‘I•¹‘•É•É|¤ì(€€€€€€€À¹Í…Ù” ¤ì(€€€€€€€E½¹Ğ˜õÀ¹™½¹Ğ ¤í˜¹Í•Ñ…µ¥±ä¡EMÑÉ¥¹1¥Ñ•É…° ‰½¹Í½±…Ìˆ¤¤í˜¹Í•ÑA½¥¹ÑM¥é” ä¤í˜¹Í•Ñ	½±¡ÑÉÕ”¤íÀ¹Í•Ñ½¹Ğ¡˜¤ì(€€€€€€€½¹ÍĞE½¹Ñ5•ÑÉ¥Ì™´¡˜¤í¥¹Ğ±½¹•ÍĞôÀì(€€€€€€€™½È¡½¹ÍĞ…ÕÑ¼˜±¥¹”é±¥¹•Ì¥±½¹•ÍĞõÍÑèéµ…à¡±½¹•ÍĞ±™´¹¡½É¥é½¹Ñ…±‘Ù…¹”¡±¥¹”¤¤ì(€€€€€€€½¹ÍĞ¥¹ĞÁ…ôä±± õ™´¹¡•¥¡Ğ ¤¬Ìì(€€€€€€€½¹ÍĞ¥¹ĞÁ…¹•±]¥‘Ñ õÍÑèéµ¥¸¡‰½Õ¹‘Ì¹İ¥‘Ñ  ¤´ÈĞ±±½¹•ÍĞ­Á…¨È¤ì(€€€€€€€½¹ÍĞ¥¹ĞÁ…¹•±!•¥¡Ğõ± ©±¥¹•Ì¹Í¥é” ¤­Á…¨Èì(€€€€€€€½¹ÍĞEI•ĞÁ…¹•°¡‰½Õ¹‘Ì¹±•™Ğ ¤¬ÄÈ±‰½Õ¹‘Ì¹‰½ÑÑ½´ ¤µÁ…¹•±!•¥¡Ğ´ÄÈ±Á…¹•±]¥‘Ñ ±Á…¹•±!•¥¡Ğ¤ì(€€€€€€€À¹Í•ÑA•¸¡EĞèé9½A•¸¤íÀ¹Í•Ñ	ÉÕÍ ¡E½±½È ä°ÄÔ°ÈÈ°ÈÈÀ¤¤íÀ¹‘É…İI½Õ¹‘•‘I•Ğ¡Á…¹•°°Ø°Ø¤ì(€€€€€€€™½È¡¥¹Ğ¤ôÀí¤ñ±¥¹•Ì¹Í¥é” ¤ì¬­¤¥ì(€€€€€€€€€€€À¹Í•ÑA•¸¡¤ôôÀıE½±½È ÄĞÌ°ÈÌÈ°ÈÔÔ¤éE½±½È ÈÔÔ°ÈÄà°ÄÌÈ¤¤ì(€€€€€€€€€€€À¹‘É…İQ•áĞ¡Á…¹•°¹±•™Ğ ¤­Á…±Á…¹•°¹Ñ½À ¤­Á…­™´¹…Í•¹Ğ ¤­¤©± °(€€€€€€€€€€€€€€€€€€€€€€™´¹•±¥‘•‘Q•áĞ¡±¥¹•Ím¥t±EĞèé±¥‘•I¥¡Ğ±Á…¹•°¹İ¥‘Ñ  ¤µÁ…¨È¤¤ì(€€€€€€€ô(€€€€€€€À¹É•ÍÑ½É” ¤ì(€€€ô)ôì)±…ÍÌXÄİ]¥¹‘½Ü™¥¹…°€èÁÕ‰±¥ŒE5…¥¹]¥¹‘½Üì)ÁÕ‰±¥Œè(€€€•áÁ±¥¥ĞXÄİ]¥¹‘½Ü¡EMÑÉ¥¹œÍ•¹•A…Ñ ±¥¹ĞÑ•áÑÕÉ•I•Í½±ÕÑ¥½¸ôÈÀĞà¤(€€€€€€€€éÑ•áÑÕÉ•I•Í½±ÕÑ¥½¹|¡Ñ•áÑÕÉ•I•Í½±ÕÑ¥½¸¥ì(€€€€€€€Í•Ñ]¥¹‘½İQ¥Ñ±”¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@	•Ñ„`ƒŠPXÄÜ¸”ÄáÁ±½É…Ñ¥½¸ˆ¤(€€€€€€€€€€€€¹…Éœ¡M}]IA}	U%1}9U5	H¤¤ì(€€€€€€€É•Í¥é” ÄÔÄÀ°äÀÀ¤ì(€€€€€€€Í•Ñ5¥¹¥µÕµM¥é” ÄÄÀÀ°ØÜÀ¤ì(€€€€€€€€¼¼Ù•Éä‰…­•¹•ÑÌ¥ÑÌ½İ¸¥¹‘•Á•¹‘•¹ĞÑ½Àµ±•Ù•°!]9¸¥É•Ğ`ÄÄ(€€€€€€€€¼¼…¹YÕ±­…¸ÁÉ•Í•¹Ğ¥¹Ñ¼Ñ¡•¥È½İ¸%µ…•Y¥•Ü!]9ìAT½½µÁÕÑ”½E%µ…”(€€€€€€€€¼¼µ½‘•ÌÁ…¥¹Ğ¥¹Ñ¼Ñ¡”µ…Ñ¡¥¹œİ¥¹‘½ÜÑ¡É½Õ Ñ¡”Í…µ”Ù¥•Ü±…ÍÌ¸(€€€€€€€€¼¼9½¹”½˜Ñ¡”É•¹‘•ÈÑ…É•ÑÌ¥Ì•µ‰•‘‘•¥¸Ñ¡”½¹ÑÉ½±Ìİ¥¹‘½Ü¸(€€€€€€€™½È¡¥¹Ğ¤ôÀí¤ñ¥¹Ğ¡‰…­•¹‘]¥¹‘½İÍ|¹Í¥é” ¤¤ì¬­¤¥ì(€€€€€€€€€€€€¼¼9¼½İ¹•Èİ¥¹‘½Üè]¥¹‘½İÌµÕÍĞ…±±½ÜÑ¡”½¹ÑÉ½±Ì…¹•… (€€€€€€€€€€€€¼¼‰…­•¹½ÕÑÁÕĞÑ¼‰”É…¥Í•¥¹‘•Á•¹‘•¹Ñ±ä¸(€€€€€€€€€€€…ÕÑ¼¨Ù¥•Üõ¹•Ü%µ…•Y¥•Üì(€€€€€€€€€€€Ù¥•Ü´ùÍ•Ñ]¥¹‘½İ±…œ¡EĞèé]¥¹‘½Ü±ÑÉÕ”¤ì(€€€€€€€€€€€Ù¥•Ü´ùÍ•ÑÑÑÉ¥‰ÕÑ”¡EĞèé]}9…Ñ¥Ù•]¥¹‘½Ü¤ì(€€€€€€€€€€€Ù¥•Ü´ùÍ•Ñ½ÕÍA½±¥ä¡EĞèéMÑÉ½¹½ÕÌ¤ì(€€€€€€€€€€€Ù¥•Ü´ùÍ•Ñ5½ÕÍ•QÉ…­¥¹œ¡ÑÉÕ”¤ì(€€€€€€€€€€€Ù¥•Ü´ùÉ•Í¥é” ÄÀÀÀ°ØàÀ¤ì(€€€€€€€€€€€Ù¥•Ü´ùµ½Ù”¡Á½Ì ¤­EA½¥¹Ğ ÌØ°ÜÀ¤¤ì(€€€€€€€€€€€Ù¥•Ü´ùÍ•Ñ]¥¹‘½İQ¥Ñ±”¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@ƒŠPÉ•¹‘Ô“¥‘§¤ƒŠP‰…­•¹€”Äˆ¤(€€€€€€€€€€€€€€€€¹…Éœ¡¤¬Ä¤¤ì(€€€€€€€€€€€Ù¥•Ü´ù¥¹ÍÑ…±±Ù•¹Ñ¥±Ñ•È¡Ñ¡¥Ì¤ì(€€€€€€€€€€€Ù¥•Ü´ù½¹AÉ•Í•¹Ñ•¡mÑ¡¥ÍuíÉ•½É‘%µ…•AÉ•Í•¹Ñ• ¤íô¤ì(€€€€€€€€€€€‰…­•¹‘]¥¹‘½İÍ}mÍ¥é•}Ğ¡¤¥tõÙ¥•Üì(€€€€€€€ô(€€€€€€€…¹Ù…Í|õ‰…­•¹‘]¥¹‘½İÍ}lÑtì(€€€€€€€¹…Ñ¥Ù•I•¹‘•É•É=Ù•É±…å|õ¹•ÜE1…‰•°¡Ñ¡¥Ì°(€€€€€€€€€€€EĞèéQ½½±ñEĞèéÉ…µ•±•ÍÍ]¥¹‘½İ!¥¹ÑñEĞèé]¥¹‘½İ½•Í9½Ñ•ÁÑ½ÕÌ¤ì(€€€€€€€¹…Ñ¥Ù•I•¹‘•É•É=Ù•É±…å|´ùÍ•Ñ=‰©•Ñ9…µ”¡EMÑÉ¥¹1¥Ñ•É…° ‰ØÄİ9…Ñ¥Ù•I•¹‘•É•ÉMÑ…µÀˆ¤¤ì(€€€€€€€¹…Ñ¥Ù•I•¹‘•É•É=Ù•É±…å|´ùÍ•Ñ•½µ•ÑÉä ÄÈ°ÄÈ°ĞÜÀ°ÔÀ¤ì(€€€€€€€¹…Ñ¥Ù•I•¹‘•É•É=Ù•É±…å|´ùÍ•Ñ]½É‘]É…À¡ÑÉÕ”¤ì(€€€€€€€¹…Ñ¥Ù•I•¹‘•É•É=Ù•É±…å|´ùÍ•ÑÑÑÉ¥‰ÕÑ”¡EĞèé]}QÉ…¹ÍÁ…É•¹Ñ½É5½ÕÍ•Ù•¹ÑÌ¤ì(€€€€€€€¹…Ñ¥Ù•I•¹‘•É•É=Ù•É±…å|´ùÍ•ÑMÑå±•M¡••Ğ¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€‰E1…‰•°ì½±½Èè€‘™˜İ™˜ì‰…­É½Õ¹èÉ‰„ ä°ÄÔ°ÈÈ°ÈÈÀ¤ì€ˆ(€€€€€€€€€€€€‰‰½É‘•ÈµÉ…‘¥ÕÌè€ÙÁàìÁ…‘‘¥¹œè€İÁàì™½¹Ğè‰½±€åÁĞp‰½¹Í½±…Ípˆìôˆ¤¤ì(€€€€€€€¹…Ñ¥Ù•I•¹‘•É•É=Ù•É±…å|´ùÉ…¥Í” ¤ì(€€€€€€€…ÕÑ¼¨½¹ÑÉ½±ÍA±…•¡½±‘•Èõ¹•ÜE1…‰•° (€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰¡…ÅÕ”‰…­•¹Á½ÍÏ¡‘”Í„™•»©ÑÉ”‘”É•¹‘Ô“¥‘§¥”¸€ˆ(€€€€€€€€€€€€€€€€€€€€€€€€€€€‰O¥±•Ñ¥½¹¹•èÕ¸µ½Ñ•ÕÈÁÕ¥Ì…ÑÕ…±¥Í•è±„Í¡¹”¸ˆ¤±Ñ¡¥Ì¤ì(€€€€€€€½¹ÑÉ½±ÍA±…•¡½±‘•È´ùÍ•Ñ±¥¹µ•¹Ğ¡EĞèé±¥¹•¹Ñ•È¤ì(€€€€€€€Í•Ñ•¹ÑÉ…±]¥‘•Ğ¡½¹ÑÉ½±ÍA±…•¡½±‘•È¤ì(€€€€€€€™É…µ•Q¥µ•É|¹Í•Ñ%¹Ñ•ÉÙ…° ÄØ¤ì(€€€€€€€½¹¹•Ğ ™™É…µ•Q¥µ•É|°€™EQ¥µ•ÈèéÑ¥µ•½ÕĞ°Ñ¡¥Ì°mÑ¡¥Íuì™É…µ•Q¥¬ ¤ìô¤ì(€€€€€€€€¼¼Q¡”ÍÄÄÁÉ•Ù¥•Ü½İ¹Ì„Ñ¡É•…‘}±½…°‘•Ù¥”…¹Ñ•áÑÕÉ”…¡”¸(€€€€€€€€¼¼Í¥¹±”Á•ÉÍ¥ÍÑ•¹ĞEÑ½¹ÕÉÉ•¹Ğİ½É­•È­••ÁÌATÉ•Í½ÕÉ•Ì½¸(€€€€€€€€¼¼Ñ¡”M5Ñ¡É•……É½ÍÌ…±°ÍÕ‰Í•ÅÕ•¹ĞÉ•¹‘•ÉÌ…¹…µ•É„¡…¹•Ì¸(€€€€€€€€¼¼UÍ¥¹œEĞÌ±½‰…°Á½½°…¸‰Õ¥±„¹•Ü‘•Ù¥”™½È•Ù•Éäİ½É­•È¸(€€€€€€€É•¹‘•ÉA½½±|¹Í•Ñ5…áQ¡É•…‘½Õ¹Ğ Ä¤ì(€€€€€€€É•¹‘•ÉA½½±|¹Í•ÑáÁ¥ÉåQ¥µ•½ÕĞ ´Ä¤ì(€€€€€€€É•…Ñ•U¤ ¤ì(€€€€€€€ÕÁ‘…Ñ•I•¹‘•É•ÉMÑ…µÀ ¤ì(€€€€€€€€¼¼Q¡”½µ‰¼‰½àÍ•±•Ñ•¥É•Ñ`	=I¥ÑÌÕÉÉ•¹Ñ%¹‘•á¡…¹•Í¥¹…°(€€€€€€€€¼¼İ…Ì½¹¹•Ñ•¸M•±•Ğ¥ÑÌ‘•‘¥…Ñ•½ÕÑÁÕĞİ¥¹‘½Ü¹½Ü°‰•™½É”Í¡½Ü ¤…¹(€€€€€€€€¼¼‰•™½É”…Íå¹¡É½¹½ÕÌÍ•¹”±½…‘¥¹œÉ•ÅÕ•ÍÑÌÑ¡”™¥ÉÍĞ¥µ…”¸(€€€€€€€€¼¼á¥ÍÑ¥¹œU$Íµ½­•ÌÉ•ÅÕ¥É”Ñ¡”É•™•É•¹”E%µ…”Á…Ñ ½¸$Ì(€€€€€€€€¼¼½™™ÍÉ••¸EĞÁ±…Ñ™½É´ìÑ¡”¹…Ñ¥Ù”µU$Á½±¥äÍµ½­”¥Ì•á±Õ‘•¸(€€€€€€€½¹ÍĞEMÑÉ¥¹1¥ÍĞ…ÉÌõE½É•ÁÁ±¥…Ñ¥½¸èé…ÉÕµ•¹ÑÌ ¤ì(€€€€€€€¥˜¡…ÉÌ¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ˆ´µÍµ½­”µÍ•¹”µÍİ¥Ñ ˆ¤¤ñğ(€€€€€€€€€€…ÉÌ¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ˆ´µÍµ½­”µÉ•Á•…ĞµÉ…ÍÑ•Èˆ¤¤ñğ(€€€€€€€€€€…ÉÌ¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ˆ´µÍµ½­”µİ…±­¥¹œµ½±±¥Í¥½¹Ìˆ¤¤ñğ(€€€€€€€€€€…ÉÌ¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ˆ´µÍµ½­”µÍ½Á”µµ½ÕÍ”ˆ¤¤ñğ(€€€€€€€€€€…ÉÌ¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ˆ´µÍµ½­”µ¥µµ•ÉÍ¥Ù”µµ½ÕÍ”ˆ¤¤¥ì(€€€€€€€€€€€½¹ÍĞEM¥¹…±	±½­•È‰±½­•¡‘¥É•Ñ¥ÍÁ±…å	½á|¤ì(€€€€€€€€€€€‘¥É•Ñ¥ÍÁ±…å	½á|´ùÍ•Ñ¡•­•¡™…±Í”¤ì(€€€€€€€ô(€€€€€€€Í•±•Ñ	…­•¹‘=ÕÑÁÕÑ]¥¹‘½Ü ¤ì(€€€€€€€€¼¼ÍÑ…Ñ¥½¹…Éä…µ•É„µÕÍĞ…±İ…åÌ‘¥ÍÁ±…äÑ¡”¹…Ñ¥Ù”™Õ±°µÉ•Í½±ÕÑ¥½¸(€€€€€€€€¼¼É…ÍÑ•È°É•…É‘±•ÍÌ½˜Ñ¡”•áÁ•É¥µ•¹Ñ…°±…Õ¹¡•È•¹Ù¥É½¹µ•¹Ğ¸(€€€€€€€Á•É¥Á¡•É…±áÁ•É¥µ•¹Ñ¹…‰±•‘|ô(€€€€€€€€€€€Å¹Ù¥É½¹µ•¹ÑY…É¥…‰±” ‰4Í}XÄİ}AI%A!I1}5U1Q%Ihˆ¤ôõEMÑÉ¥¹1¥Ñ•É…° ˆÄˆ¤ì(€€€€€€€Í•ÑI…ÍÑ•ÉA•É¥Á¡•É…±5Õ±Ñ¥É•Í=Ù•ÉÉ¥‘” À¤ì(€€€€€€€Á…¥¹±½­|¹ÍÑ…ÉĞ ¤ì(€€€€€€€Í­å5½Ñ¥½¹±½­|¹ÍÑ…ÉĞ ¤ì(€€€€€€€…Õ‘¥½Q¥µ•É|¹Í•Ñ%¹Ñ•ÉÙ…° ÔÀ¤ì€¼¼€ÈÀ!èÍÁ…Ñ¥…°ÕÁ‘…Ñ•Ì°¥¹‘•Á•¹‘•¹Ğ™É½´AT¥µ…•Ì¸(€€€€€€€½¹¹•Ğ ™…Õ‘¥½Q¥µ•É|°™EQ¥µ•ÈèéÑ¥µ•½ÕĞ±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€¥˜ …É…‘¥½A±…å¥¹|ñğ€…ÉÕ¹Ñ¥µ•|¥É•ÑÕÉ¸ì(€€€€€€€€€€€½¹ÍĞ…ÕÑ¼Á½Í”õ…Ñ¥Ù•…µ•É…A½Í” ¤ì(€€€€€€€€€€€½¹ÍĞ™±½…Ğ•å•lÍuíÁ½Í”¹•å”¹à±Á½Í”¹•å”¹ä±Á½Í”¹•å”¹éôì(€€€€€€€€€€€½¹ÍĞ™±½…ĞÑ…É•ÑlÍuíÁ½Í”¹Ñ…É•Ğ¹à±Á½Í”¹Ñ…É•Ğ¹ä±Á½Í”¹Ñ…É•Ğ¹éôì(€€€€€€€€€€€É…‘¥½Õ‘¥½|¹ÕÁ‘…Ñ”¡•å”±Ñ…É•Ğ¤ì(€€€€€€€ô¤ì(€€€€€€€…Õ‘¥½Q¥µ•É|¹ÍÑ…ÉĞ ¤ì(€€€€€€€€¼¼Á•Éµ…¹•¹ĞÍÑ…ÑÕÌµ‰…Èİ¥‘•Ğ½ÕÑ±¥Ù•ÌÑ•µÁ½É…ÉäÉ•¹‘•È½ÁÉ½É•ÍÌ(€€€€€€€€¼¼µ•ÍÍ…•Ì¸EMÑ…ÑÕÍ	…ÈèéÍ¡½İ5•ÍÍ…” ¸¸¸°€ÄÔÀÀÀ¤ÕÍ•Ñ¼•É…Í”Ñ¡”(€€€€€€€€¼¼½µÁ±•Ñ•É•¹‘•ÈÑ¥µ”…™Ñ•È€ÄÔÍ•½¹‘Ì¸(€€€€€€€¹…Ñ¥Ù•!Õ‘1…‰•±|õ¹•ÜE1…‰•°¡EMÑÉ¥¹1¥Ñ•É…° ‰4ƒŠPˆ¤±Ñ¡¥Ì¤ì(€€€€€€€¹…Ñ¥Ù•!Õ‘1…‰•±|´ùÍ•Ñ5¥¹¥µÕµ]¥‘Ñ  ÈÄÔ¤ì(€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ù…‘‘A•Éµ…¹•¹Ñ]¥‘•Ğ¡¹…Ñ¥Ù•!Õ‘1…‰•±|¤ì(€€€€€€€¹…Ñ¥Ù•ÁÍ1…‰•±|õ¹•ÜE1…‰•°¡EMÑÉ¥¹1¥Ñ•É…° ‰ALƒŠPˆ¤±Ñ¡¥Ì¤ì(€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ù…‘‘A•Éµ…¹•¹Ñ]¥‘•Ğ¡¹…Ñ¥Ù•ÁÍ1…‰•±|¤ì(€€€€€€€É•¹‘•ÉQ¥µ•1…‰•±|õ¹•ÜE1…‰•°¡EMÑÉ¥¹1¥Ñ•É…° ‰•É¹¥•ÈÉ•¹‘Ô€èƒŠPˆ¤±Ñ¡¥Ì¤ì(€€€€€€€É•¹‘•ÉQ¥µ•1…‰•±|´ùÍ•Ñ=‰©•Ñ9…µ”¡EMÑÉ¥¹1¥Ñ•É…° ‰ØÄÙ1…ÍÑI•¹‘•ÉQ¥µ”ˆ¤¤ì(€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ù…‘‘A•Éµ…¹•¹Ñ]¥‘•Ğ¡É•¹‘•ÉQ¥µ•1…‰•±|¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹MÁ••‘1…‰•±|õ¹•ÜE1…‰•°¡Ñ¡¥Ì¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹MÁ••‘1…‰•±|´ùÍ•Ñ=‰©•Ñ9…µ”¡EMÑÉ¥¹1¥Ñ•É…° ‰ØÄİáÁ±½É…Ñ¥½¹MÁ••ˆ¤¤ì(€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ù…‘‘A•Éµ…¹•¹Ñ]¥‘•Ğ¡•áÁ±½É…Ñ¥½¹MÁ••‘1…‰•±|¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹MÁ••‘1…‰•±|´ù¡¥‘” ¤ì(€€€€€€€Í•¹•1½…‘1…‰•±|õ¹•ÜE1…‰•°¡Ñ¡¥Ì¤ì(€€€€€€€Í•¹•1½…‘1…‰•±|´ùÍ•ÑQ•áĞ¡EMÑÉ¥¹1¥Ñ•É…° ‰¡…É•µ•¹Ğ‘”±„Í¡¹—Š˜ˆ¤¤ì(€€€€€€€Í•¹•1½…‘AÉ½É•ÍÍ|õ¹•ÜEAÉ½É•ÍÍ	…È¡Ñ¡¥Ì¤ì(€€€€€€€Í•¹•1½…‘AÉ½É•ÍÍ|´ùÍ•ÑI…¹” À°ÄÀÀ¤ì(€€€€€€€Í•¹•1½…‘AÉ½É•ÍÍ|´ùÍ•ÑY…±Õ” À¤ì(€€€€€€€Í•¹•1½…‘AÉ½É•ÍÍ|´ùÍ•Ñ5…á¥µÕµ]¥‘Ñ  ÈÔÔ¤ì(€€€€€€€Í•¹•1½…‘AÉ½É•ÍÍ|´ùÍ•ÑQ•áÑY¥Í¥‰±”¡ÑÉÕ”¤ì(€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ù…‘‘]¥‘•Ğ¡Í•¹•1½…‘1…‰•±|°Ä¤ì(€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ù…‘‘]¥‘•Ğ¡Í•¹•1½…‘AÉ½É•ÍÍ|¤ì(€€€€€€€Í•¹•1½…‘1…‰•±|´ù¡¥‘” ¤ì(€€€€€€€Í•¹•1½…‘AÉ½É•ÍÍ|´ù¡¥‘” ¤ì(€€€€€€€½¹¹•Ğ ™±½…‘]…Ñ¡•É|°™EÕÑÕÉ•]…Ñ¡•ÈñM•¹•1½…‘=ÕÑ½µ”øèé™¥¹¥Í¡•±Ñ¡¥Ì°(€€€€€€€€€€€€€€€mÑ¡¥Íuì(€€€€€€€€€€€€€€€€€€€¥˜¡±½Í¥¹I•ÅÕ•ÍÑ•‘|¥ì(€€€€€€€€€€€€€€€€€€€€€€€¥˜ …±½…‘]…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¤¥EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ À±Ñ¡¥Ì±mÑ¡¥Íuí±½Í” ¤íô¤ì(€€€€€€€€€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€€€€™¥¹¥Í¡M•¹•1½… ¤ì(€€€€€€€€€€€€€€€ô¤ì(€€€€€€€½¹¹•Ğ ™İ…Ñ¡•É|°™EÕÑÕÉ•]…Ñ¡•ÈñI•ÍÕ±Ğøèé™¥¹¥Í¡•±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€€¼¼ÍÑ…±”™¥¹¥Í¡•¹½Ñ¥™¥…Ñ¥½¸…¸…ÉÉ¥Ù”…™Ñ•ÈÍ•ÑÕÑÕÉ” ¤(€€€€€€€€€€€€¼¼…±É•…‘äÍÑ…ÉÑ•…¹½Ñ¡•ÈÉ•¹‘•È¸É•ÍÕ±Ğ ¤İ½Õ±‰±½¬Ñ¡”U$(€€€€€€€€€€€€¼¼İ…¥Ñ¥¹œ™½ÈÑ¡…Ğ¹•ÜÉ•¹‘•Èè¹•Ù•È…±°¥Ğİ¡¥±”ÍÑ¥±°ÉÕ¹¹¥¹œ¸(€€€€€€€€€€€¥˜¡İ…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¤¥É•ÑÕÉ¸ì(€€€€€€€€€€€¥˜¡±½Í¥¹I•ÅÕ•ÍÑ•‘|¥ì(€€€€€€€€€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ À±Ñ¡¥Ì±mÑ¡¥Íuí±½Í” ¤íô¤ì(€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€½¹ÍĞ…ÕÑ¼½ÕÑ½µ”õİ…Ñ¡•É|¹É•ÍÕ±Ğ ¤ì(€€€€€€€€€€€¥˜¡Í•¹•1½…‘¥¹|¥É•ÑÕÉ¸ì(€€€€€€€€€€€€¼¼ÁÉ•Ù¥½ÕÌÍ•¹”µ…ä™¥¹¥Í …™Ñ•ÈÑ¡”ÕÍ•È¡…Ì½Á•¹•„¹•Ü½¹”¸(€€€€€€€€€€€€¼¼9•Ù•ÈÍ¡½Ü¥ÑÌ¥µ…”½È½Ù•ÉİÉ¥Ñ”Ñ¡”ÕÉÉ•¹ĞÍÑ…ÑÕÌ‰…È¸(€€€€€€€€€€€¥˜¡½ÕÑ½µ”¹•¹•É…Ñ¥½¸„õÉ•¹‘•ÉM•É¥…±|´ù±½… ¤¥ì(€€€€€€€€€€€€€€€€¬­Á…¥¹I•©•Ñ•‘|ì(€€€€€€€€€€€€€€€¥˜¡Á•¹‘¥¹|¥íÁ•¹‘¥¹|õ™…±Í”íÉ•ÅÕ•ÍÑI•¹‘•È ¤íô(€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€½¹ÍĞ‰½½°¹…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¹…¥±•ô…½ÕÑ½µ”¹¹…Ñ¥Ù•…¥±ÕÉ”¹¥ÍµÁÑä ¤ì(€€€€€€€€€€€¥˜¡¹…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¹…¥±•¥ì(€€€€€€€€€€€€€€€€¼¼I•Ñ…¥¸™…¥±ÕÉ•Ì•Ù•¸¥˜Ñ¡”ÕÍ•ÈÍİ¥Ñ¡•‰…­•¹‘Ìİ¡¥±”(€€€€€€€€€€€€€€€€¼¼Ñ¡”¹…Ñ¥Ù”]M$…±°İ…ÌÍÑ¥±°¥¸™±¥¡Ğ¸(€€€€€€€€€€€€€€€½¹ÍĞ¥¹Ğ™…¥±•‘	…­•¹õ½ÕÑ½µ”¹‰…­•¹‘%¹‘•àì(€€€€€€€€€€€€€€€¥˜¡™…¥±•‘	…­•¹øôÀ˜™™…¥±•‘	…­•¹ñ¥¹Ğ¡¹…Ñ¥Ù•¥É•Ñ…¥±•‘|¹Í¥é” ¤¤¥ì(€€€€€€€€€€€€€€€€€€€¹…Ñ¥Ù•¥É•Ñ…¥±•‘}mÍ¥é•}Ğ¡™…¥±•‘	…­•¹¥tõÑÉÕ”ì(€€€€€€€€€€€€€€€€€€€¹…Ñ¥Ù•¥É•Ñ…¥±ÕÉ•I•…Í½¹}mÍ¥é•}Ğ¡™…¥±•‘	…­•¹¥tõ½ÕÑ½µ”¹¹…Ñ¥Ù•…¥±ÕÉ”ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œ‰…­•¹õ™…¥±•‘	…­•¹ôôÔ(€€€€€€€€€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ‰YÕ±­…¸ˆ¤éEMÑÉ¥¹1¥Ñ•É…° ‰`ÄÄˆ¤ì(€€€€€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œµ•ÍÍ…”õEMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€€€€€€€€€ˆ”Ä‘¥É•Ğ„ƒ¥¡½×¤€è€”Éq¸”Ìˆ¤(€€€€€€€€€€€€€€€€€€€€¹…Éœ¡‰…­•¹±½ÕÑ½µ”¹¹…Ñ¥Ù•…¥±ÕÉ”±½ÕÑ½µ”¹¹…Ñ¥Ù•]¥¹‘½İ•Ñ…¥±Ì¤ì(€€€€€€€€€€€€€€€Å]…É¹¥¹œ ¤¹¹½ÅÕ½Ñ” ¤ğñµ•ÍÍ…”ì(€€€€€€€€€€€€€€€Í…Ù•9…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¹¥…¹½ÍÑ¥Œ¡‰…­•¹±½ÕÑ½µ”¹¹…Ñ¥Ù•…¥±ÕÉ”°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€½ÕÑ½µ”¹¹…Ñ¥Ù•]¥¹‘½İ•Ñ…¥±Ì¤ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡½ÕÑ½µ”¹‰…­•¹‘%¹‘•à„õ‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤¥ì(€€€€€€€€€€€€€€€€¼¼ÅÕ•Õ•™É…µ”‰•±½¹ÌÑ¼¥ÑÌ½É¥¥¹…°‰…­•¹!]9¸9•Ù•È(€€€€€€€€€€€€€€€€¼¼Á…¥¹Ğ½ÈÉ•Á½ÉĞ¥Ğ…Ì¥˜¥Ğ…µ”™É½´Ñ¡”¹•İ±äÍ•±•Ñ•½¹”¸(€€€€€€€€€€€€€€€¥˜¡Á•¹‘¥¹|¥íÁ•¹‘¥¹|õ™…±Í”íÉ•ÅÕ•ÍÑI•¹‘•È ¤íô(€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡½ÕÑ½µ”¹•ÉÉ½È¹¥ÍµÁÑä ¤˜˜…½ÕÑ½µ”¹¹…Ñ¥Ù•…±±‰…¬˜˜(€€€€€€€€€€€€€€½ÕÑ½µ”¹‘¥É•ÑAÉ•Í•¹Ñ•„õ¹…Ñ¥Ù•¥É•ÑM•±•Ñ• ¤¥ì(€€€€€€€€€€€€€€€€¼¼¥É•Ğµ‘¥ÍÁ±…äİ…ÌÑ½±•İ¡¥±”Ñ¡¥Ì™É…µ”İ…Ì¥¸™±¥¡Ğ¸(€€€€€€€€€€€€€€€€¼¼-••ÀÑ¡”™É…µ”Ì½É¥¥¹…°!]9µ½‘”Õ¹Ñ¥°½µÁ±•Ñ¥½¸°Ñ¡•¸(€€€€€€€€€€€€€€€€¼¼¥µµ•‘¥…Ñ•±äÉ•¹‘•È……¥¸ÕÍ¥¹œÑ¡”¹•İ±äÉ•ÅÕ•ÍÑ•µ½‘”¸(€€€€€€€€€€€€€€€Á•¹‘¥¹|õ™…±Í”ì(€€€€€€€€€€€€€€€É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡¹…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¹…¥±•¥ì(€€€€€€€€€€€€€€€€¼¼-••ÀÑ¡”¡•­•É•ÅÕ•ÍĞ°‰ÕĞÍÑ½ÀÉ•ÑÉå¥¹œÑ¡”Õ¹ÕÍ…‰±”(€€€€€€€€€€€€€€€€¼¼Íİ…Á¡…¥¸•Ù•Éä…µ•É„™É…µ”¸Q½±¥¹œ½™˜½½¸É•ÑÉ¥•Ì¥Ğ¸(€€€€€€€€€€€€€€€Í•±•Ñ	…­•¹‘=ÕÑÁÕÑ]¥¹‘½Ü ¤ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡½ÕÑ½µ”¹•ÉÉ½È¹¥ÍµÁÑä ¤˜˜¡½ÕÑ½µ”¹‘¥É•ÑAÉ•Í•¹Ñ•‘ñğ…½ÕÑ½µ”¹¥µ…”¹¥Í9Õ±° ¤¤¥ì(€€€€€€€€€€€€€€€±…ÍÑAÉ•Í•¹Ñ•‘I•¹‘•É•É|õ½ÕÑ½µ”¹É•¹‘•É•Èì(€€€€€€€€€€€€€€€¥˜ …±…ÍÑAÉ•Í•¹Ñ•‘I•¹‘•É•É|¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ˆ¡Íİ…Á¡…¥¸¤ˆ¤¤˜˜(€€€€€€€€€€€€€€€€€€€…±…ÍÑAÉ•Í•¹Ñ•‘I•¹‘•É•É|¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ˆ¡E%µ…”¤ˆ¤¤¤(€€€€€€€€€€€€€€€€€€€±…ÍÑAÉ•Í•¹Ñ•‘I•¹‘•É•É|¬õ½ÕÑ½µ”¹‘¥É•ÑAÉ•Í•¹Ñ•(€€€€€€€€€€€€€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ˆƒŠP¥É•ĞAT€¡Íİ…Á¡…¥¸¤ˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ˆƒŠP…™™¥¡…”EĞ€¡E%µ…”¤ˆ¤ì(€€€€€€€€€€€€€€€‰…­•¹‘1…ÍÑI•¹‘•É•É}mÍ¥é•}Ğ¡½ÕÑ½µ”¹‰…­•¹‘%¹‘•à¥tõ±…ÍÑAÉ•Í•¹Ñ•‘I•¹‘•É•É|ì(€€€€€€€€€€€€€€€‰…­•¹‘1…ÍÑI•ÅÕ•ÍÑ}mÍ¥é•}Ğ¡½ÕÑ½µ”¹‰…­•¹‘%¹‘•à¥tõ¹…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¹…¥±•(€€€€€€€€€€€€€€€€€€€€ıÉ•ÅÕ•ÍÑ•‘I•¹‘•É•ÉMÑ…µÀ ¤é½ÕÑ½µ”¹É•ÅÕ•ÍÑMÑ…µÀì(€€€€€€€€€€€€€€€ÕÁ‘…Ñ•I•¹‘•É•ÉMÑ…µÀ ¤ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡½ÕÑ½µ”¹‘¥É•ÑAÉ•Í•¹Ñ•¥ì(€€€€€€€€€€€€€€€€¼¼YÕ±­…¸ÍÕ‰µ¥ÑÑ•„Íİ…Á¡…¥¸¥µ…”‘¥É•Ñ±ä¸9¼¡¥‘‘•¸(€€€€€€€€€€€€€€€€¼¼E%µ…”…¹¹¼Á•Èµ™É…µ”ATµÑ¼µATÉ•…‘‰…¬¸(€€€€€€€€€€€€€€€±…ÍÑI•¹‘•É•‘A½Í•|õ½ÕÑ½µ”¹…µ•É…A½Í”ì(€€€€€€€€€€€€€€€¡…ÍI•¹‘•É•‘A½Í•|õÑÉÕ”ì(€€€€€€€€€€€€€€€±…ÍÑ½µÁ±•Ñ•‘I•¹‘•É5Í|õ½ÕÑ½µ”¹µ¥±±¥Í•½¹‘Ìì(€€€€€€€€€€€€€€€É•½É‘%µ…•AÉ•Í•¹Ñ• ¤ì€¼¼½Õ¹ĞÍÕ‰µ¥ÑÑ•½ÁÉ•Í•¹Ñ•™É…µ•Ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜ …½ÕÑ½µ”¹¥µ…”¹¥Í9Õ±° ¤¥ì(€€€€€€€€€€€€€€€±…ÍÑ%µ…•|õ½ÕÑ½µ”¹¥µ…”ì(€€€€€€€€€€€€€€€±…ÍÑI•¹‘•É•‘A½Í•|õ½ÕÑ½µ”¹…µ•É…A½Í”ì(€€€€€€€€€€€€€€€¡…ÍI•¹‘•É•‘A½Í•|õÑÉÕ”ì(€€€€€€€€€€€€€€€±…ÍÑ½µÁ±•Ñ•‘I•¹‘•É5Í|õ½ÕÑ½µ”¹µ¥±±¥Í•½¹‘Ìì(€€€€€€€€€€€€€€€…¹Ù…Í|´ùÍ•Ñ%µ…”¡½ÕÑ½µ”¹¥µ…”¤ì(€€€€€€€€€€€€€€€…¹Ù…Í|´ù•¹…‰±•M­å½µÁ½Í¥Ñ¥¹œ¡½ÕÑ½µ”¹Í­å½µÁ½Í¥Ñ¥¹œ¤ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡½ÕÑ½µ”¹•ÉÉ½È¹¥ÍµÁÑä ¤˜˜(€€€€€€€€€€€€€€€¡½ÕÑ½µ”¹‘¥É•ÑAÉ•Í•¹Ñ•‘ñğ…½ÕÑ½µ”¹¥µ…”¹¥Í9Õ±° ¤¤¥ì(€€€€€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œµ¥±±¥Í•½¹‘ÌõEMÑÉ¥¹œèé¹Õµ‰•È¡½ÕÑ½µ”¹µ¥±±¥Í•½¹‘Ì°˜œ°Ä¤ì(€€€€€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œÍ•½¹‘ÌõEMÑÉ¥¹œèé¹Õµ‰•È¡½ÕÑ½µ”¹µ¥±±¥Í•½¹‘Ì¼ÄÀÀÀ¸À°˜œ°Ä¤ì(€€€€€€€€€€€€€€€É•¹‘•ÉQ¥µ•1…‰•±|´ùÍ•ÑQ•áĞ¡EMÑÉ¥¹1¥Ñ•É…° ‰•É¹¥•ÈÉ•¹‘Ô€è€”ÄµÌ€ ”ÈÌ¤ˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡µ¥±±¥Í•½¹‘Ì±Í•½¹‘Ì¤¤ì(€€€€€€€€€€€€€€€É•¹‘•ÉQ¥µ•1…‰•±|´ùÍ•ÑQ½½±Q¥À (€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ˆ”Åq¹Q•µÁÌ‘”…±Õ°€è€”ÈµÌ€ ”ÌÌ¤¸€ˆ(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€‰•ÑÑ”Ù…±•ÕÈ•á±ÕĞ•ÉÑ…¥¹ÌÑÉ…¥Ñ•µ•¹ÑÌ‘”Á½ÍĞµÁÉ½‘ÕÑ¥½¸¸ˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡½ÕÑ½µ”¹É•¹‘•É•È±µ¥±±¥Í•½¹‘Ì±Í•½¹‘Ì¤¤ì(€€€€€€€€€€€ô(€€€€€€€€€€€€¼¼Q¡”½µÁ±•Ñ¥½¸µ•ÍÍ…”¥ÑÍ•±˜…±Í¼É•µ…¥¹ÌÕ¹Ñ¥°…¹½Ñ¡•È…Ñ¥½¸¸(€€€€€€€€€€€€¼¼ÉÉ½ÉÌ±•…Ù”Ñ¡”±…ÍĞÍÕ•ÍÍ™Õ°É•¹‘•ÈÑ¥µ”Ù¥Í¥‰±”¸(€€€€€€€€€€€½¹ÍĞ¥¹Ğ½µÁ±•Ñ•‘	…­•¹õ½ÕÑ½µ”¹‰…­•¹‘%¹‘•àì(€€€€€€€€€€€½¹ÍĞ‰½½°‘¥É•Ñ…±±‰…­Ñ¥Ù”õ‘¥É•Ñ¥ÍÁ±…å	½á|˜™‘¥É•Ñ¥ÍÁ±…å	½á|´ù¥Í¡•­• ¤˜˜(€€€€€€€€€€€€€€€½µÁ±•Ñ•‘	…­•¹øôÀ˜™½µÁ±•Ñ•‘	…­•¹ñ¥¹Ğ¡¹…Ñ¥Ù•¥É•Ñ…¥±•‘|¹Í¥é” ¤¤˜˜(€€€€€€€€€€€€€€€¹…Ñ¥Ù•¥É•Ñ…¥±•‘}mÍ¥é•}Ğ¡½µÁ±•Ñ•‘	…­•¹¥tì(€€€€€€€€€€€¥˜¡¹…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¹…¥±•‘ññ‘¥É•Ñ…±±‰…­Ñ¥Ù”¥ì(€€€€€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œ‰…­•¹õ½µÁ±•Ñ•‘	…­•¹ôôÔ(€€€€€€€€€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ‰YÕ±­…¸ˆ¤éEMÑÉ¥¹1¥Ñ•É…° ‰`ÄÄˆ¤ì(€€€€€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œ‘•Ñ…¥°õ½µÁ±•Ñ•‘	…­•¹øôÀ˜˜(€€€€€€€€€€€€€€€€€€€€€€€½µÁ±•Ñ•‘	…­•¹ñ¥¹Ğ¡¹…Ñ¥Ù•¥É•Ñ…¥±ÕÉ•I•…Í½¹|¹Í¥é” ¤¤˜˜(€€€€€€€€€€€€€€€€€€€€€€€€…¹…Ñ¥Ù•¥É•Ñ…¥±ÕÉ•I•…Í½¹}mÍ¥é•}Ğ¡½µÁ±•Ñ•‘	…­•¹¥t¹¥ÍµÁÑä ¤(€€€€€€€€€€€€€€€€€€€€ı¹…Ñ¥Ù•¥É•Ñ…¥±ÕÉ•I•…Í½¹}mÍ¥é•}Ğ¡½µÁ±•Ñ•‘	…­•¹¥t(€€€€€€€€€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ‰…ÕÍ”¹…Ñ¥Ù”¹½¸‘¥ÍÁ½¹¥‰±”ˆ¤ì(€€€€€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œÉ•½Ù•Éäõ½ÕÑ½µ”¹¥µ…”¹¥Í9Õ±° ¤(€€€€€€€€€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ‰E%µ…”‘”Í•½ÕÉÌƒ¥…±•µ•¹Ğ¥¹‘¥ÍÁ½¹¥‰±”ˆ¤(€€€€€€€€€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ‰E%µ…”…Ñ¥˜…ÁË¡Ìƒ¥¡•Œ‘¥É•Ğˆ¤ì(€€€€€€€€€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€€€€€€€€€ˆ”ÄƒŠP€”È€è€”Ì¸¥…¹½ÍÑ¥Œ€è€”Ğ¸¥½¡•èÁÕ¥ÌÉ•½¡•èÁ½ÕÈÉ•Ñ•¹Ñ•È¸ˆ¤(€€€€€€€€€€€€€€€€€€€€¹…Éœ¡‰…­•¹±É•½Ù•Éä±‘•Ñ…¥°±¹…Ñ¥Ù•¥…¹½ÍÑ¥1½A…Ñ  ¤¤°ÌÀÀÀÀ¤ì(€€€€€€€€€€€õ•±Í”ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡½ÕÑ½µ”¹•ÉÉ½È¹¥ÍµÁÑä ¤(€€€€€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ˆ”ÄƒŠP€”ÈµÌˆ¤(€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡½ÕÑ½µ”¹É•¹‘•É•È¤¹…Éœ¡½ÕÑ½µ”¹µ¥±±¥Í•½¹‘Ì°À°˜œ°Ä¤(€€€€€€€€€€€€€€€€é½ÕÑ½µ”¹•ÉÉ½È¤ì(€€€€€€€€€€€¥˜¡•áÁ±½É¥¹|€˜˜½ÕÑ½µ”¹•ÉÉ½È¹¥ÍµÁÑä ¤€˜˜(€€€€€€€€€€€€€€€¡½ÕÑ½µ”¹‘¥É•ÑAÉ•Í•¹Ñ•‘ñğ…½ÕÑ½µ”¹¥µ…”¹¥Í9Õ±° ¤¤¥ì(€€€€€€€€€€€€€€€¥˜¡™É…µ•±½­|¹¥ÍY…±¥ ¤¥ì(€€€€€€€€€€€€€€€€€€€½¹ÍĞÅ¥¹ĞØĞ™É…µ•5Ìõ™É…µ•±½­|¹•±…ÁÍ• ¤ì(€€€€€€€€€€€€€€€€€€€¥˜¡™É…µ•5ÌøÀ¥É•¹‘•ÉQ¥µ•1…‰•±|´ùÍ•ÑQ•áĞ (€€€€€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰XÄÜ€è€”ÄµÌƒ
+Ü€”ÈAL…±Õ³¥Ìˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡™É…µ•5Ì¤¹…Éœ ÄÀÀÀ¸À½‘½Õ‰±”¡™É…µ•5Ì¤°À°˜œ°Ä¤¤ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€ô•±Í”¥˜¡•áÁ±½É¥¹|€˜˜€…½ÕÑ½µ”¹•ÉÉ½È¹¥ÍµÁÑä ¤¥ì(€€€€€€€€€€€€€€€ÍÑ½ÁáÁ±½É…Ñ¥½¸ ¤ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡Á•¹‘¥¹|¥íÁ•¹‘¥¹|õ™…±Í”íÉ•ÅÕ•ÍÑI•¹‘•È ¤íô(€€€€€€€€€€€•±Í”¥˜¡•áÁ±½É¥¹|€˜˜€…Í•¹•1½…‘¥¹|€˜˜ÉÕ¹Ñ¥µ•|¥É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€ô¤ì(€€€€€€€€¼¼I•ÑÕÉ¸™É½´Ñ¡”½¹ÍÑÉÕÑ½È¥µµ•‘¥…Ñ•±ä¸Q¡”™¥ÉÍĞÍ•¹”¥Ì‰Õ¥±Ğ(€€€€€€€€¼¼½¸„İ½É­•È…™Ñ•ÈÍ¡½Ü ¤°Í¼]¥¹‘½İÌ…±İ…åÌÍ¡½İÌÑ¡”µ…¥¸İ¥¹‘½Ü¸(€€€€€€€…¹Ù…Í|´ùÍ•ÑA±…•¡½±‘•È¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@XÄİq¹¡…É•µ•¹Ğ‘”±„Í¡¹—Š˜ˆ¤¤ì(€€€€€€€¥˜ …Í•¹•A…Ñ ¹¥ÍµÁÑä ¤¤(€€€€€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ À±Ñ¡¥Ì±mÑ¡¥Ì±Í•¹•A…Ñ¡uí½Á•¹M•¹”¡Í•¹•A…Ñ ¤íô¤ì(€€€ô(€€€€¼¼U$½¹ÑÉ…ĞÍµ½­”è•… É•¹‘•É•È½İ¹Ì„Õ¹¥ÅÕ”Ñ½Àµ±•Ù•°!]9¸(€€€Ù½¥Íµ½­•9…Ñ¥Ù•U¤ ¥ì(€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ À±Ñ¡¥Ì±mÑ¡¥Íuì(¥˜‘•™¥¹•¡}]%8ÌÈ¤(€€€€€€€€€€€…ÕÑ¼¨ÅÕ¥¬õ™¥¹‘¡¥±ñE½µ‰½	½à¨ø¡EMÑÉ¥¹1¥Ñ•É…° ‰ØÄİEÕ¥­I•¹‘•É•Èˆ¤¤ì(€€€€€€€€€€€EM•ĞñÅÕ¥¹ÑÁÑÈø¡…¹‘±•Ìì(€€€€€€€€€€€‰½½°…±±]¥¹‘½İÌõÑÉÕ”ì(€€€€€€€€€€€™½È¡…ÕÑ¼¨Ù¥•Üé‰…­•¹‘]¥¹‘½İÍ|¥ì(€€€€€€€€€€€€€€€¥˜ …Ù¥•İñğ…Ù¥•Ü´ù¥Í]¥¹‘½Ü ¤¥…±±]¥¹‘½İÌõ™…±Í”ì(€€€€€€€€€€€€€€€•±Í”¡…¹‘±•Ì¹¥¹Í•ÉĞ¡ÅÕ¥¹ÑÁÑÈ¡Ù¥•Ü´ùİ¥¹% ¤¤¤ì(€€€€€€€€€€€ô(€€€€€€€€€€€½¹ÍĞ‰½½°‘àÄÅI•…‘äõ‰…­•¹‘	½á|€˜˜‰…­•¹‘	½á|´ù½Õ¹Ğ ¤ôôØ€˜˜(€€€€€€€€€€€€€€€‰…­•¹‘]¥¹‘½İÍ}lÑt€˜˜‰…­•¹‘]¥¹‘½İÍ}lÑt´ù¥Í]¥¹‘½Ü ¤€˜˜(€€€€€€€€€€€€€€€‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ôôĞ€˜˜‘¥É•Ñ¥ÍÁ±…å	½á|´ù¥Í¡•­• ¤€˜˜(€€€€€€€€€€€€€€€‰…­•¹‘	½á|´ù¥Ñ•µQ•áĞ Ô¤¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰YÕ±­…¸ˆ¤¤€˜˜(€€€€€€€€€€€€€€€€¡‰…­•¹‘	½á|´ùµ½‘•° ¤´ù™±…Ì¡‰…­•¹‘	½á|´ùµ½‘•° ¤´ù¥¹‘•à Ô°À¤¤€˜(€€€€€€€€€€€€€€€€€€€EĞèé%Ñ•µ%Í¹…‰±•¤€˜˜(€€€€€€€€€€€€€€€ÅÕ¥¬€˜˜ÅÕ¥¬´ù½Õ¹Ğ ¤ôôØ€˜˜(€€€€€€€€€€€€€€€ÅÕ¥¬´ù¥Ñ•µQ•áĞ Ô¤¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰YÕ±­…¸ˆ¤¤€˜˜(€€€€€€€€€€€€€€€…¹Ù…Í|ôõ‰…­•¹‘]¥¹‘½İÍ}lÑt€˜˜…¹Ù…Í|´ùÑ•ÍÑÑÑÉ¥‰ÕÑ”¡EĞèé]}9…Ñ¥Ù•]¥¹‘½Ü¤ì(€€€€€€€€€€€‰…­•¹‘	½á|´ùÍ•ÑÕÉÉ•¹Ñ%¹‘•à Ô¤ì(€€€€€€€€€€€½¹ÍĞ‰½½°ÙÕ±­…¹Y¥Í¥‰±•A…Ñ õ¹…Ñ¥Ù•¥É•ÑM•±•Ñ• ¤€˜˜(€€€€€€€€€€€€€€€‘¥É•Ñ¥ÍÁ±…å	½á|´ù¥Í¹…‰±• ¤€˜˜(€€€€€€€€€€€€€€€…¹Ù…Í|ôõ‰…­•¹‘]¥¹‘½İÍ}lÕt€˜˜…¹Ù…Í|„õ‰…­•¹‘]¥¹‘½İÍ}lÑt€˜˜(€€€€€€€€€€€€€€€‰…­•¹‘]¥¹‘½İÍ}lÕt´ù¥ÍY¥Í¥‰±” ¤€˜˜€…‰…­•¹‘]¥¹‘½İÍ}lÑt´ù¥ÍY¥Í¥‰±” ¤ì(€€€€€€€€€€€‰…­•¹‘	½á|´ùÍ•ÑÕÉÉ•¹Ñ%¹‘•à Ğ¤ì(€€€€€€€€€€€Í•±•Ñ	…­•¹‘=ÕÑÁÕÑ]¥¹‘½Ü ¤ì(€€€€€€€€€€€½¹ÍĞ‰½½°½¬õ‘àÄÅI•…‘ä˜™ÙÕ±­…¹Y¥Í¥‰±•A…Ñ ˜™…±±]¥¹‘½İÌ˜™¡…¹‘±•Ì¹Í¥é” ¤ôôØì(€€€€€€€€€€€ÍÑèé™ÁÉ¥¹Ñ˜¡ÍÑ‘•ÉÈ°‰XÄÜ	-9]%9=]Lè€•Ì°Í¥àÕ¹¥ÅÕ”Ñ½Àµ±•Ù•°!]9Íq¸ˆ°(€€€€€€€€€€€€€€€½¬ü‰AMLˆè‰%0ˆ¤ì(€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èé•á¥Ğ¡½¬üÀèĞØ¤ì(•±Í”(€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èé•á¥Ğ À¤ì(•¹‘¥˜(€€€€€€€ô¤ì(€€€ô(€€€€¼¼U$Íµ½­”è™¥ÉÍĞÍ•¹”µÕÍĞ±½……Íå¹¡É½¹½ÕÍ±ä‰•™½É”İ”É•ÅÕ•ÍĞ(€€€€¼¼…¹½Ñ¡•ÈÍ•¹”ìÑ¡”É•Á±…•µ•¹ĞµÕÍĞÉ•¹‘•È„¹•Ü€¡¹½¸µÍÑ…±”¤¥µ…”¸(€€€Ù½¥Íµ½­•M•¹•Mİ¥Ñ ¡½¹ÍĞEMÑÉ¥¹œ˜Í•½¹‘M•¹”¥ì(€€€€€€€…ÕÑ¼¨Á½±°õ¹•ÜEQ¥µ•È¡Ñ¡¥Ì¤ì(€€€€€€€…ÕÑ¼Á¡…Í”õÍÑèéµ…­•}Í¡…É•ñ¥¹Ğø À¤ì(€€€€€€€Á½±°´ùÍ•Ñ%¹Ñ•ÉÙ…° ÄÀÀ¤ì(€€€€€€€½¹¹•Ğ¡Á½±°°™EQ¥µ•ÈèéÑ¥µ•½ÕĞ±Ñ¡¥Ì±mÑ¡¥Ì±Í•½¹‘M•¹”±Á½±°±Á¡…Í•uì(€€€€€€€€€€€¥˜ ©Á¡…Í”ôôÀ¥ì(€€€€€€€€€€€€€€€¥˜¡Í•¹•1½…‘¥¹|ñğ€…ÉÕ¹Ñ¥µ•|¥É•ÑÕÉ¸ì(€€€€€€€€€€€€€€€€©Á¡…Í”ôÄì(€€€€€€€€€€€€€€€½Á•¹M•¹”¡Í•½¹‘M•¹”¤ì(€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡Í•¹•1½…‘¥¹}ñğ…ÉÕ¹Ñ¥µ•}ññİ…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¥ññÁ•¹‘¥¹|(€€€€€€€€€€€€€€ññ±…ÍÑ%µ…•|¹¥Í9Õ±° ¤¥É•ÑÕÉ¸ì(€€€€€€€€€€€¥˜¡E¥±•%¹™¼¡Í•¹•A…Ñ¡|¤¹…‰Í½±ÕÑ•¥±•A…Ñ  ¤(€€€€€€€€€€€€€€€€„õE¥±•%¹™¼¡Í•½¹‘M•¹”¤¹…‰Í½±ÕÑ•¥±•A…Ñ  ¤¥ì(€€€€€€€€€€€€€€€ÍÑèé™ÁÉ¥¹Ñ˜¡ÍÑ‘•ÉÈ°‰XÄÜM9M]%Q èİÉ½¹œÍ•¹”±½…‘•‘qq¸ˆ¤ì(€€€€€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èé•á¥Ğ ÈÈ¤ì(€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€ÍÑèé™ÁÉ¥¹Ñ˜¡ÍÑ‘•ÉÈ°‰XÄÜM9M]%Q è¹•ÜÍ•¹”É•¹‘•É•€•‘à•‘qq¸ˆ°(€€€€€€€€€€€€€€€±…ÍÑ%µ…•|¹İ¥‘Ñ  ¤±±…ÍÑ%µ…•|¹¡•¥¡Ğ ¤¤ì(€€€€€€€€€€€Á½±°´ùÍÑ½À ¤ì(€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èé•á¥Ğ À¤ì(€€€€€€€ô¤ì(€€€€€€€Á½±°´ùÍÑ…ÉĞ ¤ì(€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ ÄÈÀÀÀÀ±Ñ¡¥Ì±muì(€€€€€€€€€€€ÍÑèé™ÁÉ¥¹Ñ˜¡ÍÑ‘•ÉÈ°‰XÄÜM9M]%Q èÑ¥µ•½ÕÑqq¸ˆ¤ì(€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èé•á¥Ğ ÈÌ¤ì(€€€€€€€ô¤ì(€€€ô(€€€€¼¼•‘¥…Ñ•ATÉ•É•ÍÍ¥½¸è•á•É¥Í”Ñİ¼¥¹‘•Á•¹‘•¹Ğ‰ÕÑÑ½¸µ•ÅÕ¥Ù…±•¹Ğ(€€€€¼¼É•¹‘•ÈÉ•ÅÕ•ÍÑÌ½¸Ñ¡”Í…µ”Í•¹”…¹…ÍÍ•ÉĞİ½É­•È½…¡”…™™¥¹¥Ñä¸(€€€€¼¼Q¡”™¥ÉÍĞÉ•¹‘•ÈÍÑ…ÉÑÌ¹½Éµ…±±ä…™Ñ•È…Íå¹¡É½¹½ÕÌÍ•¹”±½…‘¥¹œ¸(€€€Ù½¥Íµ½­•I•Á•…ÑI…ÍÑ•È ¥ì(€€€€€€€‰…­•¹‘	½á|´ùÍ•ÑÕÉÉ•¹Ñ%¹‘•à Ğ¤ì(€€€€€€€…ÕÑ¼½Õ¹ĞõÍÑèéµ…­•}Í¡…É•ñ¥¹Ğø À¤ì(€€€€€€€…ÕÑ¼™¥ÉÍÑQ¡É•…õÍÑèéµ…­•}Í¡…É•ñÅÕ¥¹ÑÁÑÈø À¤ì(€€€€€€€½¹¹•Ğ ™İ…Ñ¡•É|°™EÕÑÕÉ•]…Ñ¡•ÈñI•ÍÕ±Ğøèé™¥¹¥Í¡•±Ñ¡¥Ì°(€€€€€€€€€€€mÑ¡¥Ì±½Õ¹Ğ±™¥ÉÍÑQ¡É•…‘uì(€€€€€€€€€€€€€€€¥˜¡İ…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¥ññÍ•¹•1½…‘¥¹}ñğ…ÉÕ¹Ñ¥µ•|¥É•ÑÕÉ¸ì(€€€€€€€€€€€€€€€½¹ÍĞI•ÍÕ±ĞÉ•ÍÕ±Ğõİ…Ñ¡•É|¹É•ÍÕ±Ğ ¤ì(€€€€€€€€€€€€€€€¥˜¡É•ÍÕ±Ğ¹•¹•É…Ñ¥½¸„õÉ•¹‘•ÉM•É¥…±|´ù±½… ¤¥É•ÑÕÉ¸ì(€€€€€€€€€€€€€€€¥˜ …É•ÍÕ±Ğ¹ÁÕññÉ•ÍÕ±Ğ¹¥µ…”¹¥Í9Õ±° ¥ñğ…É•ÍÕ±Ğ¹•ÉÉ½È¹¥ÍµÁÑä ¤¥ì(€€€€€€€€€€€€€€€€€€€ÍÑèé™ÁÉ¥¹Ñ˜¡ÍÑ‘•ÉÈ°‰XÄÜIAPIMQHè™…¥±•É•¹‘•È€•è€•Íq¸ˆ°(€€€€€€€€€€€€€€€€€€€€€€€€©½Õ¹Ğ¬Ä±É•ÍÕ±Ğ¹•ÉÉ½È¹Ñ½UÑ˜à ¤¹½¹ÍÑ…Ñ„ ¤¤ì(€€€€€€€€€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èé•á¥Ğ ÌÄ¤ì(€€€€€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€¥˜ ©½Õ¹ĞôôÀ¥ì(€€€€€€€€€€€€€€€€€€€€©™¥ÉÍÑQ¡É•…õÉ•ÍÕ±Ğ¹É•¹‘•ÉQ¡É•…ì(€€€€€€€€€€€€€€€€€€€ÍÑèé™ÁÉ¥¹Ñ˜¡ÍÑ‘•ÉÈ°(€€€€€€€€€€€€€€€€€€€€€€€€‰XÄÜIAPIMQHè™¥ÉÍĞAT™É…µ”€”¸É˜µÌ°İ½É­•È€•±±Õq¸ˆ°(€€€€€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹µ¥±±¥Í•½¹‘Ì°(€€€€€€€€€€€€€€€€€€€€€€€ÍÑ…Ñ¥}…ÍĞñÕ¹Í¥¹•±½¹œ±½¹œø¡É•ÍÕ±Ğ¹É•¹‘•ÉQ¡É•…¤¤ì(€€€€€€€€€€€€€€€€€€€€¬¬©½Õ¹Ğì(€€€€€€€€€€€€€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ À±Ñ¡¥Ì±mÑ¡¥ÍuíÉ•ÅÕ•ÍÑI•¹‘•È ¤íô¤ì(€€€€€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€¥˜¡É•ÍÕ±Ğ¹É•¹‘•ÉQ¡É•…„ô©™¥ÉÍÑQ¡É•…¥ì(€€€€€€€€€€€€€€€€€€€ÍÑèé™ÁÉ¥¹Ñ˜¡ÍÑ‘•ÉÈ°‰XÄÜIAPIMQHèATİ½É­•È¡…¹•…q¸ˆ¤ì(€€€€€€€€€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èé•á¥Ğ ÌÈ¤ì(€€€€€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€ÍÑèé™ÁÉ¥¹Ñ˜¡ÍÑ‘•ÉÈ°(€€€€€€€€€€€€€€€€€€€€‰XÄÜIAPIMQHèÍ•½¹AT™É…µ”€”¸É˜µÌ°Í…µ”İ½É­•È€•±±Õq¸ˆ°(€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹µ¥±±¥Í•½¹‘Ì°(€€€€€€€€€€€€€€€€€€€ÍÑ…Ñ¥}…ÍĞñÕ¹Í¥¹•±½¹œ±½¹œø¡É•ÍÕ±Ğ¹É•¹‘•ÉQ¡É•…¤¤ì(€€€€€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èé•á¥Ğ À¤ì(€€€€€€€€€€€ô¤ì(€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ ÄÈÀÀÀÀ±Ñ¡¥Ì±muì(€€€€€€€€€€€ÍÑèé™ÁÉ¥¹Ñ˜¡ÍÑ‘•ÉÈ°‰XÄÜIAPIMQHèÑ¥µ•½ÕÑq¸ˆ¤ì(€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èé•á¥Ğ ÌÌ¤ì(€€€€€€€ô¤ì(€€€ô(€€€€¼¼I•É•ÍÍ¥½¸èÉ•…±±¥¹œ…¸…¹½µ…±äµÕÍĞ¹½ĞÍİ¥Ñ Ñ¡”ÕÍ•ÈÌİ…±­¥¹œ(€€€€¼¼ÁÉ•™•É•¹”Ñ¼™É•”™±¥¡Ğ¸AÉ•Ù¥½ÕÍ±äÑ¡…Ğ‘¥Í…‰±¥¹œİ…ÌÁ•ÉÍ¥ÍÑ•¥¸(€€€€¼¼EM•ÑÑ¥¹Ì…¹É•µ½Ù•10½±±¥Í¥½¸¡•­Ì½¸ÍÕ‰Í•ÅÕ•¹Ğ±…Õ¹¡•Ì¸(€€€Ù½¥Íµ½­•]…±­¥¹½±±¥Í¥½¹AÉ•™•É•¹” ¥ì(€€€€€€€…ÕÑ¼¨Á½±°õ¹•ÜEQ¥µ•È¡Ñ¡¥Ì¤ì(€€€€€€€Á½±°´ùÍ•Ñ%¹Ñ•ÉÙ…° ÄÀÀ¤ì(€€€€€€€½¹¹•Ğ¡Á½±°°™EQ¥µ•ÈèéÑ¥µ•½ÕĞ±Ñ¡¥Ì±mÑ¡¥Ì±Á½±±uì(€€€€€€€€€€€¥˜¡Í•¹•1½…‘¥¹}ñğ…ÉÕ¹Ñ¥µ•}ñğ…İ…±­¥¹5½‘•	½á|¥É•ÑÕÉ¸ì(€€€€€€€€€€€Á½±°´ùÍÑ½À ¤ì(€€€€€€€€€€€EM•ÑÑ¥¹ÌÁÉ•™Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰M]I@XÄÜˆ¤¤ì(€€€€€€€€€€€½¹ÍĞEY…É¥…¹ĞÁÉ•Ù¥½ÕÌõÁÉ•™Ì¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰áÁ±½É…Ñ¥½¸½]…±­¥¹œˆ¤¤ì(€€€€€€€€€€€İ…±­¥¹5½‘•	½á|´ùÍ•Ñ¡•­•¡ÑÉÕ”¤ì(€€€€€€€€€€€ÁÉ•™Ì¹Í•ÑY…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰áÁ±½É…Ñ¥½¸½]…±­¥¹œˆ¤±ÑÉÕ”¤ì(€€€€€€€€€€€ÁÉ•™Ì¹Íå¹Œ ¤ì(€€€€€€€€€€€Í•±•Ñ¹½µ…±ä À¤ì€¼¼9<´ÀÀÔ¡…Ì„ÁÉ•¥Í•±äµ•…ÍÕÉ•…µ•É„Á½Í”¸(€€€€€€€€€€€½¹ÍĞ‰½½°½­™Ñ•ÉM•±•Ğõİ…±­¥¹5½‘•	½á|´ù¥Í¡•­• ¤(€€€€€€€€€€€€€€€€˜™İ…±­¥¹½±±¥Í¥½¹Må¹A•¹‘¥¹|(€€€€€€€€€€€€€€€€˜™ÁÉ•™Ì¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰áÁ±½É…Ñ¥½¸½]…±­¥¹œˆ¤¤¹Ñ½	½½° ¤ì(€€€€€€€€€€€É•ÑÕÉ¹	•™½É•¹½µ…±ä ¤ì(€€€€€€€€€€€ÁÉ•™Ì¹Íå¹Œ ¤ì(€€€€€€€€€€€½¹ÍĞ‰½½°½­™Ñ•ÉI•ÑÕÉ¸õİ…±­¥¹5½‘•	½á|´ù¥Í¡•­• ¤(€€€€€€€€€€€€€€€€˜™İ…±­¥¹½±±¥Í¥½¹Må¹A•¹‘¥¹|(€€€€€€€€€€€€€€€€˜™ÁÉ•™Ì¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰áÁ±½É…Ñ¥½¸½]…±­¥¹œˆ¤¤¹Ñ½	½½° ¤ì(€€€€€€€€€€€€¼¼I•ÍÑ½É”Ñ¡”ÁÉ¥½ÈÁÉ•™•É•¹”…™Ñ•ÈÑ¡”Íµ½­”Ñ•ÍĞ¸(€€€€€€€€€€€ì(€€€€€€€€€€€€€€€EM¥¹…±	±½­•È‰±½¬¡İ…±­¥¹5½‘•	½á|¤ì(€€€€€€€€€€€€€€€İ…±­¥¹5½‘•	½á|´ùÍ•Ñ¡•­•¡ÁÉ•Ù¥½ÕÌ¹¥ÍY…±¥ ¤ıÁÉ•Ù¥½ÕÌ¹Ñ½	½½° ¤éÑÉÕ”¤ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡ÁÉ•Ù¥½ÕÌ¹¥ÍY…±¥ ¤¥ÁÉ•™Ì¹Í•ÑY…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰áÁ±½É…Ñ¥½¸½]…±­¥¹œˆ¤±ÁÉ•Ù¥½ÕÌ¤ì(€€€€€€€€€€€•±Í”ÁÉ•™Ì¹É•µ½Ù”¡EMÑÉ¥¹1¥Ñ•É…° ‰áÁ±½É…Ñ¥½¸½]…±­¥¹œˆ¤¤ì(€€€€€€€€€€€ÁÉ•™Ì¹Íå¹Œ ¤ì(€€€€€€€€€€€¥˜ …½­™Ñ•ÉM•±•Ññğ…½­™Ñ•ÉI•ÑÕÉ¸¥ì(€€€€€€€€€€€€€€€ÍÑèé™ÁÉ¥¹Ñ˜¡ÍÑ‘•ÉÈ°(€€€€€€€€€€€€€€€€€€€€‰XÄÜ=11%M%=8AII9%1è…™Ñ•ÉM•±•Ğô•…™Ñ•ÉI•ÑÕÉ¸ô•‘qq¸ˆ°(€€€€€€€€€€€€€€€€€€€¥¹Ğ¡½­™Ñ•ÉM•±•Ğ¤±¥¹Ğ¡½­™Ñ•ÉI•ÑÕÉ¸¤¤ì(€€€€€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èé•á¥Ğ Ìà¤ì(€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€ÍÑèéÁÕÑÌ ‰XÄÜ=11%M%=8AII9AMLè…¹½µ…±äÁ½Í”€¬É•ÑÕÉ¸É•Ñ…¥¸İ…±­¥¹œÁÉ•™•É•¹”ˆ¤ì(€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èé•á¥Ğ À¤ì(€€€€€€€ô¤ì(€€€€€€€Á½±°´ùÍÑ…ÉĞ ¤ì(€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ ÄÈÀÀÀÀ±Ñ¡¥Ì±muì(€€€€€€€€€€€ÍÑèé™ÁÉ¥¹Ñ˜¡ÍÑ‘•ÉÈ°‰XÄÜ=11%M%=8AII9èÑ¥µ•½ÕÑqq¸ˆ¤ì(€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èé•á¥Ğ Ìä¤ì(€€€€€€€ô¤ì(€€€ô(€€€€¼¼U$¥¹Ñ•É…Ñ¥½¸Íµ½­”è…ÑÕ…°EĞI5•Ù•¹ÑÌ½¸Ñ¡”…¹Ù…Ì°=X¹…ÉÉ½İÌ(€€€€¼¼İ¡¥±”…¥µ¥¹œ°…¹É•±•…Í”½ÍÑ½ÀÉ•ÍÑ½É•ÌÑ¡”½É¥¥¹…°…µ•É„•á…Ñ±ä¸(€€€€¼¼½•Ì¹½Ğ¡…¹”İ…±­¥¹œµ½‘”½È…µ•É„Á½Í¥Ñ¥½¸¸(€€€Ù½¥Íµ½­•M½Á•‘¥´ ¥ì(€€€€€€€…ÕÑ¼¨Á½±°õ¹•ÜEQ¥µ•È¡Ñ¡¥Ì¤ì(€€€€€€€Á½±°´ùÍ•Ñ%¹Ñ•ÉÙ…° ÄÀÀ¤ì(€€€€€€€½¹¹•Ğ¡Á½±°°™EQ¥µ•ÈèéÑ¥µ•½ÕĞ±Ñ¡¥Ì±mÑ¡¥Ì±Á½±±uì(€€€€€€€€€€€¥˜¡Í•¹•1½…‘¥¹}ñğ…ÉÕ¹Ñ¥µ•}ññÉÕ¹Ñ¥µ•|´ù…µ•É…Ì¹¥ÍµÁÑä ¤¥É•ÑÕÉ¸ì(€€€€€€€€€€€Á½±°´ùÍÑ½À ¤ì(€€€€€€€€€€€¥˜ …™É••…µ•É…Ñ¥Ù•|¥…Ñ¥Ù…Ñ•É••…µ•É„ ¤ì(€€€€€€€€€€€•áÁ±½É¥¹|õÑÉÕ”ì(€€€€€€€€€€€½¹ÍĞ™±½…Ğ½É¥¥¹…±½Øõ™É••…µ•É…|¹™½Øì(€€€€€€€€€€€½¹ÍĞX½É¥¥¹…±å”õ™É••…µ•É…|¹•å”ì(€€€€€€€€€€€E5½ÕÍ•Ù•¹Ğ‘½İ¸¡EÙ•¹Ğèé5½ÕÍ•	ÕÑÑ½¹AÉ•ÍÌ±EA½¥¹Ñ ĞÀ°ĞÀ¤°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€EĞèéI¥¡Ñ	ÕÑÑ½¸±EĞèéI¥¡Ñ	ÕÑÑ½¸±EĞèé9½5½‘¥™¥•È¤ì(€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èéÍ•¹‘Ù•¹Ğ¡…¹Ù…Í|°™‘½İ¸¤ì(€€€€€€€€€€€½¹ÍĞ‰½½°…Ñ¥Ù…Ñ•õÉ¥¡Ñ5½ÕÍ•!•±‘|ì(€€€€€€€€€€€Í½Á•	±•¹‘|õÍ”èéÍ½Á”èé…‘Ù…¹”¡Í½Á•	±•¹‘|±É¥¡Ñ5½ÕÍ•!•±‘|°¸Àá˜¤ì(€€€€€€€€€€€™É••…µ•É…|¹™½ØõÍ”èéÍ½Á”èé•™™•Ñ¥Ù•½Ø¡Í½Á•	…Í•½Ù|±Í½Á•	±•¹‘|¤ì(€€€€€€€€€€€½¹ÍĞ‰½½°µ…¹¥™¥•õ™É••…µ•É…|¹™½Øñ½É¥¥¹…±½Ø´Ä¹˜ì(€€€€€€€€€€€E5½ÕÍ•Ù•¹ĞÕÀ¡EÙ•¹Ğèé5½ÕÍ•	ÕÑÑ½¹I•±•…Í”±EA½¥¹Ñ ĞÀ°ĞÀ¤°(€€€€€€€€€€€€€€€€€€€€€€€€€€EĞèéI¥¡Ñ	ÕÑÑ½¸±EĞèé9½	ÕÑÑ½¸±EĞèé9½5½‘¥™¥•È¤ì(€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èéÍ•¹‘Ù•¹Ğ¡…¹Ù…Í|°™ÕÀ¤ì(€€€€€€€€€€€½¹ÍĞ‰½½°É•±•…Í•ô…É¥¡Ñ5½ÕÍ•!•±‘|ì(€€€€€€€€€€€ÍÑ½ÁáÁ±½É…Ñ¥½¸ ¤ì(€€€€€€€€€€€½¹ÍĞ‰½½°É•ÍÑ½É•õÍÑèé…‰Ì¡™É••…µ•É…|¹™½Øµ½É¥¥¹…±½Ø¤ğ¸ÀÀÀÕ˜ì(€€€€€€€€€€€½¹ÍĞ‰½½°Õ¹¡…¹•õ±•¹Ñ ¡™É••…µ•É…|¹•å”µ½É¥¥¹…±å”¤ğ¸ÀÀÀÕ˜ì(€€€€€€€€€€€¥˜ „¡…Ñ¥Ù…Ñ•˜™µ…¹¥™¥•˜™É•±•…Í•˜™É•ÍÑ½É•˜™Õ¹¡…¹•¤¥ì(€€€€€€€€€€€€€€€ÍÑèé™ÁÉ¥¹Ñ˜¡ÍÑ‘•ÉÈ°(€€€€€€€€€€€€€€€€€€€€‰XÄÜM=A5=UM%0è‘½İ¸ô•é½½´ô•ÕÀô•™½Øô••å”ô•‘qq¸ˆ°(€€€€€€€€€€€€€€€€€€€¥¹Ğ¡…Ñ¥Ù…Ñ•¤±¥¹Ğ¡µ…¹¥™¥•¤±¥¹Ğ¡É•±•…Í•¤±¥¹Ğ¡É•ÍÑ½É•¤±¥¹Ğ¡Õ¹¡…¹•¤¤ì(€€€€€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èé•á¥Ğ ĞĞ¤íÉ•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€ÍÑèéÁÕÑÌ ‰XÄÜM=A5=UMAMLèÁÉ•ÍÌ½É•±•…Í”…¹½É¥¥¹…°=X°Á½Í¥Ñ¥½¸ÁÉ•Í•ÉÙ•ˆ¤ì(€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èé•á¥Ğ À¤ì(€€€€€€€ô¤ì(€€€€€€€Á½±°´ùÍÑ…ÉĞ ¤ì(€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ ÄÈÀÀÀÀ±Ñ¡¥Ì±muì(€€€€€€€€€€€ÍÑèé™ÁÉ¥¹Ñ˜¡ÍÑ‘•ÉÈ°‰XÄÜM=A5=UMQ%5=UQqq¸ˆ¤ì(€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èé•á¥Ğ ĞÔ¤ì(€€€€€€€ô¤ì(€€€ô(€€€€¼¼I•…°EĞ•Ù•¹ĞÉ•É•ÍÍ¥½¸™½È™É•”µ±½½¬°ÑÉÕ”ÄÄ™Õ±±ÍÉ••¸…¹É•ÑÕÉ¸¸(€€€€¼¼Q•ÍĞÕÍ•Ì„Íå¹Ñ¡•Ñ¥Œµ½Ñ¥½¸‘•±Ñ„ì¹¼Á¡åÍ¥…°µ½ÕÍ”¥ÌÉ•ÅÕ¥É•½¸$¸(€€€Ù½¥Íµ½­•%µµ•ÉÍ¥Ù•5½ÕÍ” ¥ì(€€€€€€€…ÕÑ¼¨Á½±°õ¹•ÜEQ¥µ•È¡Ñ¡¥Ì¤ì(€€€€€€€Á½±°´ùÍ•Ñ%¹Ñ•ÉÙ…° ÄÀÀ¤ì(€€€€€€€½¹¹•Ğ¡Á½±°°™EQ¥µ•ÈèéÑ¥µ•½ÕĞ±Ñ¡¥Ì±mÑ¡¥Ì±Á½±±uì(€€€€€€€€€€€¥˜¡Í•¹•1½…‘¥¹}ñğ…ÉÕ¹Ñ¥µ•}ññÉÕ¹Ñ¥µ•|´ù…µ•É…Ì¹¥ÍµÁÑä ¤¥É•ÑÕÉ¸ì(€€€€€€€€€€€Á½±°´ùÍÑ½À ¤ì(€€€€€€€€€€€…Ñ¥Ù…Ñ•É••…µ•É„ ¤ì(€€€€€€€€€€€•áÁ±½É¥¹|õÑÉÕ”ì(€€€€€€€€€€€µ½ÕÍ•…ÁÑÕÉ•‘|õÑÉÕ”ì(€€€€€€€€€€€…¹Ù…Í|´ùÍ•ÑÕÉÍ½È¡EĞèé	±…¹­ÕÉÍ½È¤ì(€€€€€€€€€€€½¹ÍĞ™±½…Ğ½É¥¥¹…±e…Üõå…İ|ì(€€€€€€€€€€€½¹ÍĞX½É¥¥¹…±å”õ™É••…µ•É…|¹•å”ì(€€€€€€€€€€€½¹ÍĞEA½¥¹Ğ•¹Ñ•Èõ…¹Ù…Í|´ùÉ•Ğ ¤¹•¹Ñ•È ¤ì(€€€€€€€€€€€E5½ÕÍ•Ù•¹Ğµ½Ù”¡EÙ•¹Ğèé5½ÕÍ•5½Ù”±EA½¥¹Ñ¡•¹Ñ•È­EA½¥¹Ğ ÄØ°´ä¤¤°(€€€€€€€€€€€€€€€EĞèé9½	ÕÑÑ½¸±EĞèé9½	ÕÑÑ½¸±EĞèé9½5½‘¥™¥•È¤ì(€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èéÍ•¹‘Ù•¹Ğ¡…¹Ù…Í|°™µ½Ù”¤ì(€€€€€€€€€€€½¹ÍĞ‰½½°™É••1½½­]½É­•õÍÑèé…‰Ì¡å…İ|µ½É¥¥¹…±e…Ü¤ø¸ÀÅ˜ì(€€€€€€€€€€€½¹ÍĞ‰½½°•å•U¹¡…¹•õ±•¹Ñ ¡™É••…µ•É…|¹•å”µ½É¥¥¹…±å”¤ğ¸ÀÀÀÕ˜ì(€€€€€€€€€€€½¹ÍĞ‰½½°™ÁÍI•…‘äõ…¹Ù…Í|´ù¥ÍY¥Í¥‰±” ¤ì(€€€€€€€€€€€¥µµ•ÉÍ¥Ù•Ñ¥½¹|´ùÍ•Ñ¡•­•¡ÑÉÕ”¤ì(€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èéÁÉ½•ÍÍÙ•¹ÑÌ ¤ì(€€€€€€€€€€€½¹ÍĞ‰½½°™Õ±°õ…¹Ù…Í|´ù¥ÍÕ±±MÉ••¸ ¤ì(€€€€€€€€€€€¥µµ•ÉÍ¥Ù•Ñ¥½¹|´ùÍ•Ñ¡•­•¡™…±Í”¤ì(€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èéÁÉ½•ÍÍÙ•¹ÑÌ ¤ì(€€€€€€€€€€€½¹ÍĞ‰½½°‰…¬ô……¹Ù…Í|´ù¥ÍÕ±±MÉ••¸ ¤(€€€€€€€€€€€€€€€€˜™µ•¹Õ	…È ¤´ù¥ÍY¥Í¥‰±” ¤˜™ÍÑ…ÑÕÍ	…È ¤´ù¥ÍY¥Í¥‰±” ¤ì(€€€€€€€€€€€ÍÑ½ÁáÁ±½É…Ñ¥½¸ ¤ì(€€€€€€€€€€€¥˜ „¡™É••1½½­]½É­•˜™•å•U¹¡…¹•˜™™Õ±°˜™‰…¬˜™™ÁÍI•…‘ä¤¥ì(€€€€€€€€€€€€€€€ÍÑèé™ÁÉ¥¹Ñ˜¡ÍÑ‘•ÉÈ°(€€€€€€€€€€€€€€€€€€€€‰%55IM%Y5=UM%1èµ½Ù”ô••å”ô•™Õ±°ô•‰…¬ô•…¹Ù…Ìô•‘qq¸ˆ°(€€€€€€€€€€€€€€€€€€€¥¹Ğ¡™É••1½½­]½É­•¤±¥¹Ğ¡•å•U¹¡…¹•¤±¥¹Ğ¡™Õ±°¤±¥¹Ğ¡‰…¬¤±¥¹Ğ¡™ÁÍI•…‘ä¤¤ì(€€€€€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èé•á¥Ğ Ğä¤íÉ•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€ÍÑèéÁÕÑÌ ‰%55IM%Y5=UMAMLè¹¼µ‰ÕÑÑ½¸±½½¬°ÑÉÕ”ÄÄ™Õ±±ÍÉ••¸…¹É•ÍÑ½É••‘¥Ñ½Èˆ¤ì(€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èé•á¥Ğ À¤ì(€€€€€€€ô¤ì(€€€€€€€Á½±°´ùÍÑ…ÉĞ ¤ì(€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ ÄÈÀÀÀÀ±Ñ¡¥Ì±muì(€€€€€€€€€€€ÍÑèé™ÁÉ¥¹Ñ˜¡ÍÑ‘•ÉÈ°‰%55IM%Y5=UMQ%5=UQqq¸ˆ¤ì(€€€€€€€€€€€E½É•ÁÁ±¥…Ñ¥½¸èé•á¥Ğ ÔÀ¤ì(€€€€€€€ô¤ì(€€€ô(€€€ùXÄİ]¥¹‘½Ü ¤½Ù•ÉÉ¥‘”ì(€€€€€€€…Õ‘¥½Q¥µ•É|¹ÍÑ½À ¤ì(€€€€€€€ÍÑ½ÁI…‘¥¼ ¤ì(€€€€€€€É•¹‘•ÉM•É¥…±|´ù™•Ñ¡}…‘ Ä¤ì(€€€€€€€€¼¼É…¥¸‰½Ñ ÁÉ½‘Õ•ÉÌ‰•™½É”‘•ÍÑÉ½å¥¹œ‰…­•¹½ÕÑÁÕĞİ¥¹‘½İÌ¸Q¡•¥È(€€€€€€€€¼¼]¥¸ÌÈ!]9ÌµÕÍĞ½ÕÑ±¥Ù”a$Íİ…Á¡…¥¹Ì…¹Y­MÕÉ™…•-!H½‰©•ÑÌ¸(€€€€€€€±½…‘]…Ñ¡•É|¹İ…¥Ñ½É¥¹¥Í¡• ¤ì(€€€€€€€İ…Ñ¡•É|¹İ…¥Ñ½É¥¹¥Í¡• ¤ì(¥˜‘•™¥¹•¡}]%8ÌÈ¤(€€€€€€€€¼¼I…ÍÑ•È‰…­•¹‘Ì­••ÀÑ¡É•…‘}±½…°YÕ±­…¸½ÍÄÄ½¹Ñ•áÑÌ¥¸Ñ¡”(€€€€€€€€¼¼‘•‘¥…Ñ•½¹”µİ½É­•ÈÁ½½°¸•ÍÑÉ½äÑ¡•´½¸Ñ¡•¥È½İ¹¥¹œÑ¡É•…(€€€€€€€€¼¼	=IÑ¡•¥È‘•‘¥…Ñ•Ñ½Àµ±•Ù•°!]9Ì…É”‘•ÍÑÉ½å•¸(€€€€€€€€¼¼Q¡¥Ì…±Í¼½Ù•ÉÌ±½Í¥¹œ‘¥É•Ñ±ä…™Ñ•ÈÑ¡”™¥ÉÍĞ¹…Ñ¥Ù”™É…µ”¸(€€€€€€€…ÕÑ¼±•…¹ÕÀõEÑ½¹ÕÉÉ•¹ĞèéÉÕ¸ ™É•¹‘•ÉA½½±|±muì(€€€€€€€€€€€É•±•…Í•¥É•Ñ`ÄÅ9…Ñ¥Ù•½ÉÕÉÉ•¹ÑQ¡É•… ¤ì(€€€€€€€€€€€É•±•…Í•YÕ±­…¹¥É•Ñ½ÉÕÉÉ•¹ÑQ¡É•… ¤ì(€€€€€€€€€€€É•±•…Í•YÕ±­…¹AÉ•Ù¥•İ½ÉÕÉÉ•¹ÑQ¡É•… ¤ì(€€€€€€€ô¤ì(€€€€€€€±•…¹ÕÀ¹İ…¥Ñ½É¥¹¥Í¡• ¤ì(•¹‘¥˜(€€€€€€€™½È¡…ÕÑ¼¨Ù¥•Üé‰…­•¹‘]¥¹‘½İÍ|¥ì(€€€€€€€€€€€¥˜¡Ù¥•Ü¥ì(€€€€€€€€€€€€€€€Ù¥•Ü´ùÍ•Ñ9…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¸¡™…±Í”¤ì(€€€€€€€€€€€€€€€‘•±•Ñ”Ù¥•Üì(€€€€€€€€€€€ô(€€€€€€€ô(€€€ô)ÁÉ¥Ù…Ñ”è(€€€¥¹ĞÑ•áÑÕÉ•I•Í½±ÕÑ¥½¹|ôÈÀĞàì(€€€EAÕÍ¡	ÕÑÑ½¸¨É…‘¥½Q½±•	ÕÑÑ½¹|õ¹Õ±±ÁÑÈì(€€€E1…‰•°¨É…‘¥½MÑ…ÑÕÍ1…‰•±|õ¹Õ±±ÁÑÈì(€€€‰½½°É…‘¥½A±…å¥¹|õ™…±Í”ì(€€€‰½½°É…‘¥½ÕÑ½Á±…å¹…‰±•‘|õÑÉÕ”ì(€€€Í”èéI…‘¥½Õ‘¥¼É…‘¥½Õ‘¥½|ì(€€€EQ¥µ•È…Õ‘¥½Q¥µ•É|ì(€€€ÍÑèé…ÉÉ…äñÍ”èéI…‘¥½MÁ•…­•È°ĞøÉ…‘¥½MÁ•…­•ÉÍ}íôì(€€€EM±¥‘•È¨É…‘¥½Y½±Õµ•M±¥‘•É|õ¹Õ±±ÁÑÈì((€€€%µ…•Y¥•Ü¨…¹Ù…Í|õ¹Õ±±ÁÑÈì(€€€ÍÑèé…ÉÉ…äñ%µ…•Y¥•Ü¨°Øø‰…­•¹‘]¥¹‘½İÍ}íôì(€€€ÍÑèé…ÉÉ…äñEMÑÉ¥¹œ°Øø‰…­•¹‘1…ÍÑI•¹‘•É•É}íôì(€€€ÍÑèé…ÉÉ…äñEMÑÉ¥¹œ°Øø‰…­•¹‘1…ÍÑI•ÅÕ•ÍÑ}íôì(€€€ÍÑèé…ÉÉ…äñ‰½½°°Øø¹…Ñ¥Ù•¥É•Ñ…¥±•‘}íôì(€€€ÍÑèé…ÉÉ…äñEMÑÉ¥¹œ°Øø¹…Ñ¥Ù•¥É•Ñ…¥±ÕÉ•I•…Í½¹}íôì(€€€¥¹Ğ½ÕÑÁÕÑ	…­•¹‘%¹‘•á|ô´Äì(€€€¥¹Ğ…Ñ¥Ù•I•¹‘•É	…­•¹‘|ô´Äì(€€€‰½½°…Ñ¥Ù•I•¹‘•É¥É•Ñ|õ™…±Í”ì(€€€E1…‰•°¨¹…Ñ¥Ù•!Õ‘1…‰•±|õ¹Õ±±ÁÑÈì(€€€E1…‰•°¨¹…Ñ¥Ù•ÁÍ1…‰•±|õ¹Õ±±ÁÑÈì(€€€E1…‰•°¨¹…Ñ¥Ù•I•¹‘•É•É=Ù•É±…å|õ¹Õ±±ÁÑÈì(€€€EMÑÉ¥¹œ±…ÍÑAÉ•Í•¹Ñ•‘I•¹‘•É•É|ì(€€€E¡•­	½à¨‘¥É•Ñ¥ÍÁ±…å	½á|õ¹Õ±±ÁÑÈì(€€€‰½½°¹…Ñ¥Ù•I•…‘åI•ÑÉåEÕ•Õ•‘|õ™…±Í”ì(€€€¥¹Ğ¹…Ñ¥Ù•I•…‘åÑÑ•µÁÑÍ|ôÀì(€€€E½­]¥‘•Ğ¨Í•¹•áÁ±½É•É½­|õ¹Õ±±ÁÑÈì(€€€E½­]¥‘•Ğ¨É•¹‘•É½¹ÑÉ½±Í½­|õ¹Õ±±ÁÑÈì(€€€E½­]¥‘•Ğ¨…¹½µ…±åI•Ù¥•İ½­|õ¹Õ±±ÁÑÈì(€€€EI•Ğ•áÁ±½É…Ñ¥½¹M…Ù•‘5…¥¹•½µ•ÑÉå|ì(€€€EI•Ğ•áÁ±½É…Ñ¥½¹M…Ù•‘I•¹‘•É•½µ•ÑÉå|ì(€€€EM¥é”•áÁ±½É…Ñ¥½¹M…Ù•‘5¥¹¥µÕµM¥é•|ì(€€€‰½½°•áÁ±½É…Ñ¥½¹M…Ù•‘M•¹•½­Y¥Í¥‰±•|õ™…±Í”ì(€€€‰½½°•áÁ±½É…Ñ¥½¹M…Ù•‘½¹ÑÉ½±Í½­Y¥Í¥‰±•|õ™…±Í”ì(€€€‰½½°•áÁ±½É…Ñ¥½¹M…Ù•‘I•Ù¥•İ½­Y¥Í¥‰±•|õ™…±Í”ì(€€€‰½½°•áÁ±½É…Ñ¥½¹M…Ù•‘5•¹ÕY¥Í¥‰±•|õÑÉÕ”ì(€€€‰½½°•áÁ±½É…Ñ¥½¹M…Ù•‘5…¥¹5…á¥µ¥é•‘|õ™…±Í”ì(€€€‰½½°•áÁ±½É…Ñ¥½¹M…Ù•‘5…¥¹Õ±±MÉ••¹|õ™…±Í”ì(€€€‰½½°•áÁ±½É…Ñ¥½¹M…Ù•‘I•¹‘•É5…á¥µ¥é•‘|õ™…±Í”ì(€€€‰½½°•áÁ±½É…Ñ¥½¹M…Ù•‘I•¹‘•ÉÕ±±MÉ••¹|õ™…±Í”ì(€€€‰½½°•áÁ±½É…Ñ¥½¹]¥¹‘½İ1…å½ÕÑÑ¥Ù•|õ™…±Í”ì(€€€EQ¥µ•È™É…µ•Q¥µ•É|ì(€€€EQ¥µ•ÈÍ­å¹¥µ…Ñ¥½¹Q¥µ•É|ì(€€€E±…ÁÍ•‘Q¥µ•ÈÍ­å5½Ñ¥½¹±½­|ì(€€€Å¥¹ĞØĞ±…ÍÑYÕ±­…¹%‘±•M­åI•ÅÕ•ÍÑ5Í|ô´ÄÀÀÀì(€€€EQ¥µ•È‘…å9¥¡ÑQ¥µ•É|ì(€€€E±…ÁÍ•‘Q¥µ•È‘…å9¥¡Ñ±½­|ì(€€€‘½Õ‰±”‘…å9¥¡Ñ=É¥¥¹!½ÕÉ|ôÄĞ¸ÜÔì(€€€‰½½°…ÁÁ±å¥¹…å9¥¡ÑQ¥­|õ™…±Í”ì(€€€E±…ÁÍ•‘Q¥µ•È™É…µ•±½­|ì(€€€E±…ÁÍ•‘Q¥µ•Èµ½Ñ¥½¹±½­|ì(€€€EM•Ğñ¥¹Ğø­•åÍ½İ¹|ì(€€€EA½¥¹ĞÁÉ•Ù¥½ÕÍ5½ÕÍ•|ì(€€€ØÄØèé…µ•É…AÉ•Í•Ğ™É••…µ•É…|ì(€€€İ…±¬èéMÑ…Ñ”İ…±­¥¹MÑ…Ñ•}íôì(€€€Í”èéÁ½½±}±…‘‘•Èèé5½Ñ¥½¸Á½½±1…‘‘•É5½Ñ¥½¹}íôì(€€€E¡•­	½à¨İ…±­¥¹5½‘•	½á|õ¹Õ±±ÁÑÈì(€€€‰½½°•áÁ±½É¥¹|õ™…±Í”±™É••…µ•É…Ñ¥Ù•|õ™…±Í”±±•™Ñ5½ÕÍ•!•±‘|õ™…±Í”±É¥¡Ñ5½ÕÍ•!•±‘|õ™…±Í”ì(€€€‰½½°µ½ÕÍ•…ÁÑÕÉ•‘|õ™…±Í”ì(€€€‰½½°Á•É¥Á¡•É…±áÁ•É¥µ•¹Ñ¹…‰±•‘|õ™…±Í”±Á•É¥Á¡•É…±ÕÉ¥¹5½Ñ¥½¹|õ™…±Í”ì(€€€E±…ÁÍ•‘Q¥µ•È±…ÍÑ5½ÕÍ•1½½­5½Ñ¥½¹|ì(€€€EÑ¥½¸¨¥µµ•ÉÍ¥Ù•Ñ¥½¹|õ¹Õ±±ÁÑÈì(€€€‘½Õ‰±”™ÁÍ¥±Ñ•É•‘|ôÀ¸Àì(€€€™±½…ĞÍ½Á•	…Í•½Ù|ôØÔ¹˜±Í½Á•	±•¹‘|ôÀ¹˜ì(€€€€¼¼á…Ğ…¹½µ…±ä½É•Á±…å•…µ•É„¥Ì­•ÁĞÕ¹Ñ¥°Ñ¡”¹•áĞİ…±­¥¹œ¥¹ÁÕĞ¸(€€€€¼¼Q¡¥Ì‘½•Ì¹½Ğ‘¥Í…‰±”½ÈÁ•ÉÍ¥ÍÑ•¹Ñ±ä…±Ñ•ÈÑ¡”ÕÍ•ÈÌ½±±¥Í¥½¸µ½‘”¸(€€€‰½½°İ…±­¥¹½±±¥Í¥½¹Må¹A•¹‘¥¹|õ™…±Í”ì(€€€‰½½°•áÁ±½É…Ñ¥½¹EÕ…±¥Ñå=Ù•ÉÉ¥‘•|õ™…±Í”ì(€€€I…ÍÑ•ÉEÕ…±¥ÑåM•ÑÑ¥¹Ì•áÁ±½É…Ñ¥½¹=É¥¥¹…±EÕ…±¥Ñå}íôì(€€€™±½…Ğå…İ|ôÀ¹˜±Á¥Ñ¡|ôÀ¹˜ì(€€€‰½½°…µ•É…!Õ‘¹…‰±•‘|õÑÉÕ”ì(€€€‰½½°¡…ÍI•¹‘•É•‘A½Í•|õ™…±Í”ì(€€€ØÄØèé…µ•É…AÉ•Í•Ğ±…ÍÑI•¹‘•É•‘A½Í•|ì(€€€EAÕÍ¡	ÕÑÑ½¸¨•áÁ±½É…Ñ¥½¹	ÕÑÑ½¹|õ¹Õ±±ÁÑÈì(€€€E1…‰•°¨•áÁ±½É…Ñ¥½¹!•±Á|õ¹Õ±±ÁÑÈì(€€€E1…‰•°¨•áÁ±½É…Ñ¥½¹MÁ••‘1…‰•±|õ¹Õ±±ÁÑÈì(€€€ØÄØèé…µ•É…AÉ•Í•Ğ…Ñ¥Ù•…µ•É…A½Í” ¤½¹ÍĞì(€€€€€€€¥˜¡™É••…µ•É…Ñ¥Ù•|¥É•ÑÕÉ¸™É••…µ•É…|ì(€€€€€€€ØÄØèé…µ•É…AÉ•Í•ĞÁ½Í”ì(€€€€€€€¥˜ …ÉÕ¹Ñ¥µ•}ññÉÕ¹Ñ¥µ•|´ù…µ•É…Ì¹¥ÍµÁÑä ¤¥É•ÑÕÉ¸Á½Í”ì(€€€€€€€½¹ÍĞ¥¹Ğ¥‘àõÍÑèé±…µÀ¡…µ•É…	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤°À±¥¹Ğ¡ÉÕ¹Ñ¥µ•|´ù…µ•É…Ì¹Í¥é” ¤¤´Ä¤ì(€€€€€€€Á½Í”õÉÕ¹Ñ¥µ•|´ù…µ•É…Ím¥‘átì(€€€€€€€½¹ÍĞX‘¥ÈõÁ½Í”¹•å”µÁ½Í”¹Ñ…É•Ğì(€€€€€€€½¹ÍĞ™±½…Ğ…¹±”õ™±½…Ğ¡…é¥µÕÑ¡|´ùÙ…±Õ” ¤¤©A$¼ÄàÀ¹˜ì(€€€€€€€Á½Í”¹•å”õíÁ½Í”¹Ñ…É•Ğ¹à­‘¥È¹à©ÍÑèé½Ì¡…¹±”¤­‘¥È¹è©ÍÑèéÍ¥¸¡…¹±”¤°(€€€€€€€€€€€€€€€€€Á½Í”¹•å”¹ä°(€€€€€€€€€€€€€€€€€Á½Í”¹Ñ…É•Ğ¹èµ‘¥È¹à©ÍÑèéÍ¥¸¡…¹±”¤­‘¥È¹è©ÍÑèé½Ì¡…¹±”¥ôì(€€€€€€€É•ÑÕÉ¸Á½Í”ì(€€€ô(€€€Ù½¥ÕÁ‘…Ñ•…µ•É…!Õ ¥ì(€€€€€€€¥˜ ……¹Ù…Í|¥É•ÑÕÉ¸ì(€€€€€€€¥˜ …ÉÕ¹Ñ¥µ•}ññÉÕ¹Ñ¥µ•|´ù…µ•É…Ì¹¥ÍµÁÑä ¤¥ì(€€€€€€€€€€€…¹Ù…Í|´ùÍ•Ñ…µ•É…!Õ¡íô±™…±Í”¤íÉ•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€½¹ÍĞ…ÕÑ¼Á½Í”õ…Ñ¥Ù•…µ•É…A½Í” ¤ì(€€€€€€€¥˜¡¹…Ñ¥Ù•!Õ‘1…‰•±|¥¹…Ñ¥Ù•!Õ‘1…‰•±|´ùÍ•ÑQ•áĞ (€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰4`è”Ädè”Èhè”Ìˆ¤(€€€€€€€€€€€€€€€€¹…Éœ¡Á½Í”¹•å”¹à°À°˜œ°Ä¤¹…Éœ¡Á½Í”¹•å”¹ä°À°˜œ°Ä¤¹…Éœ¡Á½Í”¹•å”¹è°À°˜œ°Ä¤¤ì(€€€€€€€½¹ÍĞEMÑÉ¥¹œ±…‰•°õEMÑÉ¥¹1¥Ñ•É…° ‰4€”Äğ€”Èˆ¤(€€€€€€€€€€€€¹…Éœ¡™É••…µ•É…Ñ¥Ù•|ıEMÑÉ¥¹1¥Ñ•É…° ‰1¥‰É”ˆ¤éEMÑÉ¥¹1¥Ñ•É…° ‰AË¥Ë¥³¥”ˆ¤°(€€€€€€€€€€€€€€€€Á½Í”¹¹…µ”¹¥ÍµÁÑä ¤ıÁ½Í”¹¥éÁ½Í”¹¹…µ”¤ì(€€€€€€€…¹Ù…Í|´ùÍ•Ñ…µ•É…!Õ¡Í”èé…µ•É…}‘¥…¹½ÍÑ¥Œèé¡Õ‘1¥¹•Ì¡Á½Í”±±…‰•°¤±…µ•É…!Õ‘¹…‰±•‘|¤ì(€€€ô(€€€ÍÑ…Ñ¥ŒEMÑÉ¥¹œÁÕ‘…ÁÑ•É1…‰•° ¥ì(¥˜‘•™¥¹•¡}]%8ÌÈ¤(€€€€€€€%a%…Ñ½ÉäÄ¨™…Ñ½Éäõ¹Õ±±ÁÑÈì(€€€€€€€¥˜¡MU¡É•…Ñ•a%…Ñ½ÉäÄ¡%%}AAY}IL ™™…Ñ½Éä¤¤¤¥ì(€€€€€€€€€€€%a%‘…ÁÑ•ÈÄ¨…‘…ÁÑ•Èõ¹Õ±±ÁÑÈì(€€€€€€€€€€€¥˜¡MU¡™…Ñ½Éä´ù¹Õµ‘…ÁÑ•ÉÌÄ À°™…‘…ÁÑ•È¤¤¥ì(€€€€€€€€€€€€€€€a%}AQI}MÄ‘íôì(€€€€€€€€€€€€€€€½¹ÍĞ!IMU1P¡Èõ…‘…ÁÑ•È´ù•Ñ•ÍŒÄ ™¤ì(€€€€€€€€€€€€€€€…‘…ÁÑ•È´ùI•±•…Í” ¤í™…Ñ½Éä´ùI•±•…Í” ¤ì(€€€€€€€€€€€€€€€¥˜¡MU¡¡È¤¥É•ÑÕÉ¸EMÑÉ¥¹œèé™É½µ]¡…ÉÉÉ…ä¡¹•ÍÉ¥ÁÑ¥½¸¤ì(€€€€€€€€€€€õ•±Í”™…Ñ½Éä´ùI•±•…Í” ¤ì(€€€€€€€ô(•¹‘¥˜(€€€€€€€É•ÑÕÉ¸EMÑÉ¥¹1¥Ñ•É…° ‰9½¸“¥Ñ•Ó¤ˆ¤ì(€€€ô(€€€EMÑÉ¥¹œ¥Ñ¡Õ‰I•Ù¥Í¥½¸ ¤½¹ÍĞì(€€€€€€€E¥±”˜¡E½É•ÁÁ±¥…Ñ¥½¸èé…ÁÁ±¥…Ñ¥½¹¥ÉA…Ñ  ¤­EMÑÉ¥¹1¥Ñ•É…° ˆ½IY%M%=8¹ÑáĞˆ¤¤ì(€€€€€€€É•ÑÕÉ¸˜¹½Á•¸¡E%=•Ù¥”èéI•…‘=¹±åñE%=•Ù¥”èéQ•áĞ¤(€€€€€€€€€€€€ıEMÑÉ¥¹œèé™É½µUÑ˜à¡˜¹É•…‘±° ¤¤¹ÑÉ¥µµ• ¤¹±•™Ğ ÄÈ¤(€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ‰“¥Ù•±½ÁÁ•µ•¹Ğ±½…°ˆ¤ì(€€€ô(€€€ÍÑ…Ñ¥ŒE)Í½¹=‰©•ĞÍ•¹•…µ•É…I•Á½ÉĞ¡½¹ÍĞØÄØèé…µ•É…AÉ•Í•Ğ˜Á½Í”°(€€€€€€€½¹ÍĞEMÑÉ¥¹œ˜µ…¹¥™•ÍĞ±½¹ÍĞEMÑÉ¥¹œ˜Ñ¥Ñ±”±½¹ÍĞEMÑÉ¥¹œ˜¥µ…”°(€€€€€€€½¹ÍĞEM¥é”¥µ…•M¥é”±½¹ÍĞEMÑÉ¥¹œ˜É•Ù¥Í¥½¸¤ì(€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€ì‰™½Éµ…Ğˆ±EMÑÉ¥¹œèé™É½µ1…Ñ¥¸Ä¡Í”èé…µ•É…}‘¥…¹½ÍÑ¥Œèé™½Éµ…Ñ%¥ô°(€€€€€€€€€€€ì‰É•…Ñ•‘ÑUÑŒˆ±E…Ñ•Q¥µ”èéÕÉÉ•¹Ñ…Ñ•Q¥µ•UÑŒ ¤¹Ñ½MÑÉ¥¹œ¡EĞèé%M=…Ñ•]¥Ñ¡5Ì¥ô°(€€€€€€€€€€€ì‰•¹¥¹”ˆ±EMÑÉ¥¹1¥Ñ•É…° ‰M]I@	•Ñ„`ˆ¥ô°(€€€€€€€€€€€ì‰Ù•ÉÍ¥½¸ˆ±EMÑÉ¥¹1¥Ñ•É…° ˆÄÜ¸”Äˆ¤¹…Éœ¡M}]IA}	U%1}9U5	H¥ô°(€€€€€€€€€€€ì‰É•Ù¥Í¥½¸ˆ±É•Ù¥Í¥½¹ô°(€€€€€€€€€€€ì‰Í•¹”ˆ±E)Í½¹=‰©•Ñíì‰µ…¹¥™•ÍÑ¥±”ˆ±E¥±•%¹™¼¡µ…¹¥™•ÍĞ¤¹™¥±•9…µ” ¥ô°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€ì‰Ñ¥Ñ±”ˆ±Ñ¥Ñ±•ô±ì‰½É¥¥¹…±A…Ñ ˆ±µ…¹¥™•ÍÑõõô°(€€€€€€€€€€€ì‰…µ•É„ˆ±Í”èé…µ•É…}‘¥…¹½ÍÑ¥ŒèéÑ½)Í½¸¡Á½Í”¥ô°(€€€€€€€€€€€ì‰¥µ…”ˆ±¥µ…•ô°(€€€€€€€€€€€ì‰É•Í½±ÕÑ¥½¸ˆ±E)Í½¹=‰©•Ñíì‰İ¥‘Ñ ˆ±¥µ…•M¥é”¹İ¥‘Ñ  ¥ô±ì‰¡•¥¡Ğˆ±¥µ…•M¥é”¹¡•¥¡Ğ ¥õõô°(€€€€€€€€€€€ì‰Õ¹¥ÑÌˆ±EMÑÉ¥¹1¥Ñ•É…° ‰µ•ÑÉ•Ìˆ¥ô°(€€€€€€€€€€€ì‰½½É‘¥¹…Ñ•½¹Ù•¹Ñ¥½¸ˆ±EMÑÉ¥¹1¥Ñ•É…° ‰dÙ•ÉÑ¥…°ìå…Ü€À‘•É••ÌÁ½¥¹ÑÌÑ½İ…É€µhìÁ½Í¥Ñ¥Ù”å…ÜÉ½Ñ…Ñ•ÌÑ½İ…É€­`ˆ¥ô(€€€€€€€ôì(€€€ô(€€€Ù½¥½Áå1¥Ù•…µ•É„ ¥ì(€€€€€€€¥˜ …ÉÕ¹Ñ¥µ•}ññÉÕ¹Ñ¥µ•|´ù…µ•É…Ì¹¥ÍµÁÑä ¤¥É•ÑÕÉ¸ì(€€€€€€€½¹ÍĞ…ÕÑ¼É•Á½ÉĞõÍ•¹•…µ•É…I•Á½ÉĞ¡…Ñ¥Ù•…µ•É…A½Í” ¤±Í•¹•A…Ñ¡|±ÉÕ¹Ñ¥µ•|´ùÑ¥Ñ±”°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹œ ¤±EM¥é” ¤±¥Ñ¡Õ‰I•Ù¥Í¥½¸ ¤¤ì(€€€€€€€EÕ¥ÁÁ±¥…Ñ¥½¸èé±¥Á‰½…É ¤´ùÍ•ÑQ•áĞ (€€€€€€€€€€€EMÑÉ¥¹œèé™É½µUÑ˜à¡E)Í½¹½Õµ•¹Ğ¡É•Á½ÉĞ¤¹Ñ½)Í½¸¡E)Í½¹½Õµ•¹Ğèé%¹‘•¹Ñ•¤¤¤ì(€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° ‰A½Í¥Ñ¥½¸…·¥É„•Ğ¥‘•¹Ñ¥Ó¤‘”±„Í¡¹”½Á§¥•Ì¸ˆ¤°ÔÀÀÀ¤ì(€€€ô(€€€Ù½¥…ÁÑÕÉ•¹½µ…±ä ¥ì(€€€€€€€¥˜ …ÉÕ¹Ñ¥µ•}ññ±…ÍÑ%µ…•|¹¥Í9Õ±° ¥ñğ…¡…ÍI•¹‘•É•‘A½Í•|¥ì(€€€€€€€€€€€E5•ÍÍ…•	½àèé¥¹™½Éµ…Ñ¥½¸¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰…ÁÑÕÉ”…¹½µ…±¥”ˆ¤°(€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰U¹”¥µ…”‘½¥Ğƒ©ÑÉ”É•¹‘Õ”…Ù…¹Ğ•¹É•¥ÍÑÉ•È°…¹½µ…±¥”¸ˆ¤¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€€¼¼ÕÉ¥¹œ¹…Ù¥…Ñ¥½¸Ñ¡”ATµÉ•…‘‰…¬¥µ…”µ…ä±…œ‰•¡¥¹Ñ¡”±¥Ù”…µ•É„¸(€€€€€€€€¼¼±İ…åÌ•áÁ½ÉĞÑ¡”•á…ĞÁ½Í”…ÍÍ½¥…Ñ•İ¥Ñ Ñ¡”…•ÁÑ•É•¹‘•É•™É…µ”¸(€€€€€€€½¹ÍĞEMÑÉ¥¹œ‘½Õµ•¹ÑÌõEMÑ…¹‘…É‘A…Ñ¡ÌèéİÉ¥Ñ…‰±•1½…Ñ¥½¸¡EMÑ…¹‘…É‘A…Ñ¡Ìèé½Õµ•¹ÑÍ1½…Ñ¥½¸¤ì(€€€€€€€½¹ÍĞEMÑÉ¥¹œ™½±‘•ÈõE¥È¡‘½Õµ•¹ÑÌ¹¥ÍµÁÑä ¤ıE¥Èèé¡½µ•A…Ñ  ¤é‘½Õµ•¹ÑÌ¤(€€€€€€€€€€€€¹™¥±•A…Ñ ¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@½¹½µ…±¥•Ìˆ¤¤ì(€€€€€€€¥˜ …E¥È ¤¹µ­Á…Ñ ¡™½±‘•È¤¥ì(€€€€€€€€€€€E5•ÍÍ…•	½àèéİ…É¹¥¹œ¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰…ÁÑÕÉ”…¹½µ…±¥”ˆ¤°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰½ÍÍ¥•È¥¹…•ÍÍ¥‰±”€è€”Äˆ¤¹…Éœ¡™½±‘•È¤¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€½¹ÍĞEMÑÉ¥¹œÍÑ…µÀõE…Ñ•Q¥µ”èéÕÉÉ•¹Ñ…Ñ•Q¥µ•UÑŒ ¤¹Ñ½MÑÉ¥¹œ ‰åååå55‘µ!!µµÍÌµééèˆ¤ì(€€€€€€€½¹ÍĞEMÑÉ¥¹œ‰…Í”õE¥È¡™½±‘•È¤¹™¥±•A…Ñ ¡EMÑÉ¥¹1¥Ñ•É…° ‰9=51%|”Äˆ¤¹…Éœ¡ÍÑ…µÀ¤¤ì(€€€€€€€½¹ÍĞEMÑÉ¥¹œ¥µ…•¥±”õ‰…Í”­EMÑÉ¥¹1¥Ñ•É…° ˆ¹Á¹œˆ¤ì(€€€€€€€½¹ÍĞEMÑÉ¥¹œ©Í½¹¥±”õ‰…Í”­EMÑÉ¥¹1¥Ñ•É…° ˆ¹©Í½¸ˆ¤ì(€€€€€€€E%µ…”…¹¹½Ñ…Ñ•õ±…ÍÑ%µ…•|¹½Áä ¤ì(€€€€€€€ì(€€€€€€€€€€€EA…¥¹Ñ•ÈÁ…¥¹Ñ•È ™…¹¹½Ñ…Ñ•¤ì(€€€€€€€€€€€%µ…•Y¥•Üèé‘É…İ…µ•É…!Õ¡Á…¥¹Ñ•È±…¹¹½Ñ…Ñ•¹É•Ğ ¤°(€€€€€€€€€€€€€€€Í”èé…µ•É…}‘¥…¹½ÍÑ¥Œèé¡Õ‘1¥¹•Ì¡±…ÍÑI•¹‘•É•‘A½Í•|°(€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰7%ITI9T€¼XÄÜ¸”Äˆ¤¹…Éœ¡M}]IA}	U%1}9U5	H¤¤¤ì(€€€€€€€ô(€€€€€€€¥˜ ……¹¹½Ñ…Ñ•¹Í…Ù”¡¥µ…•¥±”°‰A9ˆ¤¥ì(€€€€€€€€€€€E5•ÍÍ…•	½àèéİ…É¹¥¹œ¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰…ÁÑÕÉ”…¹½µ…±¥”ˆ¤°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‹%¡•Œ‘”°•¹É•¥ÍÑÉ•µ•¹ĞA9¸ˆ¤¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€E)Í½¹=‰©•ĞÉ•Á½ÉĞõÍ•¹•…µ•É…I•Á½ÉĞ¡±…ÍÑI•¹‘•É•‘A½Í•|±Í•¹•A…Ñ¡|±ÉÕ¹Ñ¥µ•|´ùÑ¥Ñ±”°(€€€€€€€€€€€E¥±•%¹™¼¡¥µ…•¥±”¤¹™¥±•9…µ” ¤±±…ÍÑ%µ…•|¹Í¥é” ¤±¥Ñ¡Õ‰I•Ù¥Í¥½¸ ¤¤ì(€€€€€€€É•Á½ÉĞ¹¥¹Í•ÉĞ ‰É•¹‘•É%¹AÉ½É•ÍÍÑ…ÁÑÕÉ”ˆ±İ…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¤¤ì(€€€€€€€É•Á½ÉĞ¹¥¹Í•ÉĞ ‰±¥Ù•…µ•É…Ñ…ÁÑÕÉ”ˆ±Í”èé…µ•É…}‘¥…¹½ÍÑ¥ŒèéÑ½)Í½¸¡…Ñ¥Ù•…µ•É…A½Í” ¤¤¤ì(€€€€€€€É•Á½ÉĞ¹¥¹Í•ÉĞ ‰¹½Ñ”ˆ±EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€‰…µ•É„½ÉÉ•ÍÁ½¹ÁË¥¥Ï¥µ•¹Ğ…ÔA9•¹É•¥ÍÑË¤ì±¥Ù•…µ•É…Ñ…ÁÑÕÉ”•ÍĞ¥¹™½Éµ…Ñ¥Ù”¸ˆ¤¤ì(€€€€€€€EM…Ù•¥±”™¥±”¡©Í½¹¥±”¤ì(€€€€€€€¥˜ …™¥±”¹½Á•¸¡E%=•Ù¥”èé]É¥Ñ•=¹±ä¤ñğ(€€€€€€€€€€™¥±”¹İÉ¥Ñ”¡E)Í½¹½Õµ•¹Ğ¡É•Á½ÉĞ¤¹Ñ½)Í½¸¡E)Í½¹½Õµ•¹Ğèé%¹‘•¹Ñ•¤¤ğÀñğ(€€€€€€€€€€€…™¥±”¹½µµ¥Ğ ¤¥ì(€€€€€€€€€€€E¥±”èéÉ•µ½Ù”¡¥µ…•¥±”¤ì(€€€€€€€€€€€E5•ÍÍ…•	½àèéİ…É¹¥¹œ¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰…ÁÑÕÉ”…¹½µ…±¥”ˆ¤°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‹%¡•Œ‘”°•¹É•¥ÍÑÉ•µ•¹Ğ)M=8¸ˆ¤¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° ‰¹½µ…±¥”Í…ÕÙ•…É“¥”€è€”Äˆ¤¹…Éœ¡‰…Í”¤°ÄÔÀÀÀ¤ì(€€€€€€€E5•ÍÍ…•	½àèé¥¹™½Éµ…Ñ¥½¸¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰¹½µ…±¥”•¹É•¥ÍÑË¥”ˆ¤°(€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰…ÁÑÕÉ”A9•Ğ½½É‘½¹»¥•Ì•á…Ñ•Ì‘¥ÍÁ½¹¥‰±•Ì‘…¹Ì€éq¸”Äˆ¤¹…Éœ¡™½±‘•È¤¤ì(€€€ô(€€€Ù½¥É•ÍÑ½É•¹½µ…±å…µ•É„ ¥ì(€€€€€€€¥˜ …ÉÕ¹Ñ¥µ•}ññÉÕ¹Ñ¥µ•|´ù…µ•É…Ì¹¥ÍµÁÑä ¤¥ì(€€€€€€€€€€€E5•ÍÍ…•	½àèé¥¹™½Éµ…Ñ¥½¸¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰I•ÍÑ…ÕÉ•ÈÕ¹”…·¥É„ˆ¤°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰¡…É”…‰½É±„Í¡¹”½¹•É»¥”¸ˆ¤¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€½¹ÍĞEMÑÉ¥¹œÁ…Ñ õE¥±•¥…±½œèé•Ñ=Á•¹¥±•9…µ”¡Ñ¡¥Ì°(€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰I•ÍÑ…ÕÉ•ÈÕ¹”…·¥É„…¹½µ…±¥”ˆ¤°(€€€€€€€€€€€EMÑ…¹‘…É‘A…Ñ¡ÌèéİÉ¥Ñ…‰±•1½…Ñ¥½¸¡EMÑ…¹‘…É‘A…Ñ¡Ìèé½Õµ•¹ÑÍ1½…Ñ¥½¸¤(€€€€€€€€€€€€€€€€­EMÑÉ¥¹1¥Ñ•É…° ˆ½M]I@½¹½µ…±¥•Ìˆ¤°(€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰I…ÁÁ½ÉĞ…·¥É„M]I@€ ¨¹©Í½¸¤ˆ¤¤ì(€€€€€€€¥˜¡Á…Ñ ¹¥ÍµÁÑä ¤¥É•ÑÕÉ¸ì(€€€€€€€E¥±”™¥±”¡Á…Ñ ¤ì(€€€€€€€¥˜ …™¥±”¹½Á•¸¡E%=•Ù¥”èéI•…‘=¹±ä¤¥ì(€€€€€€€€€€€E5•ÍÍ…•	½àèéİ…É¹¥¹œ¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰I•ÍÑ…ÕÉ•ÈÕ¹”…·¥É„ˆ¤°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰%µÁ½ÍÍ¥‰±”½ÕÙÉ¥È±”É…ÁÁ½ÉĞ¸ˆ¤¤íÉ•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€E)Í½¹A…ÉÍ•ÉÉ½ÈÁ…ÉÍ¥¹œì(€€€€€€€½¹ÍĞ…ÕÑ¼‘½ŒõE)Í½¹½Õµ•¹Ğèé™É½µ)Í½¸¡™¥±”¹É•…‘±° ¤°™Á…ÉÍ¥¹œ¤ì(€€€€€€€½¹ÍĞ…ÕÑ¼É½½Ğõ‘½Œ¹½‰©•Ğ ¤ì(€€€€€€€¥˜¡Á…ÉÍ¥¹œ¹•ÉÉ½È„õE)Í½¹A…ÉÍ•ÉÉ½Èèé9½ÉÉ½Èñğ(€€€€€€€€€€É½½Ğ¹Ù…±Õ” ‰™½Éµ…Ğˆ¤¹Ñ½MÑÉ¥¹œ ¤„õEMÑÉ¥¹œèé™É½µ1…Ñ¥¸Ä¡Í”èé…µ•É…}‘¥…¹½ÍÑ¥Œèé™½Éµ…Ñ%¤¥ì(€€€€€€€€€€€E5•ÍÍ…•	½àèéİ…É¹¥¹œ¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰I•ÍÑ…ÕÉ•ÈÕ¹”…·¥É„ˆ¤°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰½Éµ…Ğ¥¹½µÁ…Ñ¥‰±”½Ô)M=8¥¹Ù…±¥‘”¸ˆ¤¤íÉ•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€½¹ÍĞ…ÕÑ¼Í•¹”õÉ½½Ğ¹Ù…±Õ” ‰Í•¹”ˆ¤¹Ñ½=‰©•Ğ ¤ì(€€€€€€€¥˜¡Í•¹”¹Ù…±Õ” ‰µ…¹¥™•ÍÑ¥±”ˆ¤¹Ñ½MÑÉ¥¹œ ¤„õE¥±•%¹™¼¡Í•¹•A…Ñ¡|¤¹™¥±•9…µ” ¤ñğ(€€€€€€€€€€Í•¹”¹Ù…±Õ” ‰Ñ¥Ñ±”ˆ¤¹Ñ½MÑÉ¥¹œ ¤„õÉÕ¹Ñ¥µ•|´ùÑ¥Ñ±”¥ì(€€€€€€€€€€€E5•ÍÍ…•	½àèéİ…É¹¥¹œ¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰M¡¹”‘¥™›¥É•¹Ñ”ˆ¤°(€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰1„…ÁÑÕÉ”…ÁÁ…ÉÑ¥•¹Ğƒ€Õ¹”…ÕÑÉ”Í¡¹”¸¡…É”…‰½É•ÑÑ”Í¡¹”Á½ÕÈƒ¥Ù¥Ñ•ÈÑ½ÕÑ”•ÉÉ•ÕÈ…É¡¥Ñ•ÑÕÉ…±”¸ˆ¤¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€ØÄØèé…µ•É…AÉ•Í•ĞÁ½Í”ì(€€€€€€€EMÑÉ¥¹œ•ÉÉ½Èì(€€€€€€€¥˜ …Í”èé…µ•É…}‘¥…¹½ÍÑ¥Œèé™É½µ)Í½¸¡É½½Ğ¹Ù…±Õ” ‰…µ•É„ˆ¤¹Ñ½=‰©•Ğ ¤±Á½Í”±•ÉÉ½È¤¥ì(€€€€€€€€€€€E5•ÍÍ…•	½àèéİ…É¹¥¹œ¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰I•ÍÑ…ÕÉ•ÈÕ¹”…·¥É„ˆ¤±•ÉÉ½È¤íÉ•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€­•åÍ½İ¹|¹±•…È ¤ì(€€€€€€€€¼¼AÉ•Í•ÉÙ”Ñ¡”•á…ĞÍÉ••¹Í¡½ĞÁ½Í”İ¥Ñ¡½ÕĞÍİ¥Ñ¡¥¹œÑ¡”(€€€€€€€€¼¼½±±¥Í¥½¸µ½‘”€¡İ¡¥ ÁÉ•Ù¥½ÕÍ±äÁ•ÉÍ¥ÍÑ•€‰Y½°±¥‰É”ˆ¥¸EM•ÑÑ¥¹Ì¤¸(€€€€€€€€¼¼=¸Ñ¡”¹•áĞÕÍ•Èµ½Ù•µ•¹Ğ°É•Íå¹¡É½¹¥é”™••Ğİ¥Ñ Ñ¡”É•…°Í•¹”¸(€€€€€€€™É••…µ•É…|õÁ½Í”ì(€€€€€€€É•Í•ÑM½Á•½É…µ•É„ ¤ì(€€€€€€€İ…±­¥¹½±±¥Í¥½¹Må¹A•¹‘¥¹|õÑÉÕ”ì(€€€€€€€½¹ÍĞX‘¥Èõ¹½É´¡Á½Í”¹Ñ…É•ĞµÁ½Í”¹•å”¤ì(€€€€€€€å…İ|õÍÑèé…Ñ…¸È¡‘¥È¹à°µ‘¥È¹è¤ì(€€€€€€€Á¥Ñ¡|õÍÑèé…Í¥¸¡±…µÁ˜¡‘¥È¹ä°´¸äå˜°¸äå˜¤¤ì(€€€€€€€™É••…µ•É…Ñ¥Ù•|õÑÉÕ”ì(€€€€€€€ÕÁ‘…Ñ•áÁ±½É…Ñ¥½¹MÁ••‘%¹‘¥…Ñ½È ¤ì(€€€€€€€ÕÁ‘…Ñ•…µ•É…!Õ ¤ì(€€€€€€€É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€…¹Ù…Í|´ùÍ•Ñ½ÕÌ ¤ì(€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° ‰A½¥¹Ğ‘”ÙÕ”…¹½µ…±¥”É•ÍÑ…ÕË¤‘•ÁÕ¥Ì€”Äˆ¤¹…Éœ¡Á…Ñ ¤°ÄÈÀÀÀ¤ì(€€€ô(€€€Ù½¥ÕÁ‘…Ñ•áÁ±½É…Ñ¥½¹MÁ••‘%¹‘¥…Ñ½È ¥ì(€€€€€€€¥˜ …•áÁ±½É…Ñ¥½¹MÁ••‘1…‰•±|¥É•ÑÕÉ¸ì(€€€€€€€¥˜ …•áÁ±½É¥¹|¥ì(€€€€€€€€€€€•áÁ±½É…Ñ¥½¹MÁ••‘1…‰•±|´ù¡¥‘” ¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€½¹ÍĞ‰½½°™…ÍĞõ­•åÍ½İ¹|¹½¹Ñ…¥¹Ì¡EĞèé-•å}M¡¥™Ğ¤ì(€€€€€€€½¹ÍĞ‰½½°İ…±­¥¹œõİ…±­¥¹5½‘•	½á|˜™İ…±­¥¹5½‘•	½á|´ù¥Í¡•­• ¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹MÁ••‘1…‰•±|´ùÍ•ÑQ•áĞ (€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ˆ”Äƒ
+Ü€”Èˆ¤(€€€€€€€€€€€€€€€€¹…Éœ¡İ…±­¥¹œıEMÑÉ¥¹1¥Ñ•É…° ‰5…É¡”ˆ¤éEMÑÉ¥¹1¥Ñ•É…° ‰Y½°±¥‰É”ˆ¤¤(€€€€€€€€€€€€€€€€¹…Éœ¡™…ÍĞıEMÑÉ¥¹1¥Ñ•É…° ‰Y¥Ñ•ÍÍ”ƒ\Ì€¡5…¨¤ˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ‰Y¥Ñ•ÍÍ”ƒ\Äˆ¤¤¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹MÁ••‘1…‰•±|´ùÍ¡½Ü ¤ì(€€€ô(€€€Ù½¥É•Í•ÑM½Á•½É…µ•É„ ¥ì(€€€€€€€É¥¡Ñ5½ÕÍ•!•±‘|õ™…±Í”ì(€€€€€€€Í½Á•	±•¹‘|ôÀ¹˜ì(€€€€€€€Í½Á•	…Í•½Ù|õ™É••…µ•É…|¹™½Øì(€€€€€€€¥˜¡…¹Ù…Í|¥…¹Ù…Í|´ùÍ•ÑM½Á•=Ù•É±…ä À¹˜¤ì(€€€ô(€€€Ù½¥…Ñ¥Ù…Ñ•É••…µ•É„ ¥ì(€€€€€€€¥˜ …ÉÕ¹Ñ¥µ•}ññÉÕ¹Ñ¥µ•|´ù…µ•É…Ì¹¥ÍµÁÑä ¤¥É•ÑÕÉ¸ì(€€€€€€€½¹ÍĞ¥¹Ğ¥‘àõÍÑèé±…µÀ¡…µ•É…	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤°À±¥¹Ğ¡ÉÕ¹Ñ¥µ•|´ù…µ•É…Ì¹Í¥é” ¤¤´Ä¤ì(€€€€€€€™É••…µ•É…|õÉÕ¹Ñ¥µ•|´ù…µ•É…Ím¥‘átì(€€€€€€€É•Í•ÑM½Á•½É…µ•É„ ¤ì(€€€€€€€½¹ÍĞX‘¥Èõ¹½É´¡™É••…µ•É…|¹Ñ…É•Ğµ™É••…µ•É…|¹•å”¤ì(€€€€€€€å…İ|õÍÑèé…Ñ…¸È¡‘¥È¹à°µ‘¥È¹è¤ì(€€€€€€€Á¥Ñ¡|õÍÑèé…Í¥¸¡±…µÁ˜¡‘¥È¹ä°´¸äå˜°¸äå˜¤¤ì(€€€€€€€™É••…µ•É…Ñ¥Ù•|õÑÉÕ”ì(€€€€€€€İ…±­¥¹½±±¥Í¥½¹Må¹A•¹‘¥¹|õ™…±Í”ì(€€€€€€€¥˜¡İ…±­¥¹5½‘•	½á|˜™İ…±­¥¹5½‘•	½á|´ù¥Í¡•­• ¤¥ì(€€€€€€€€€€€İ…±¬èéÍÁ…İ¸¡ÉÕ¹Ñ¥µ•|´ùÉ•¹‘•ÉM•¹”±™É••…µ•É…|¹•å”±İ…±­¥¹MÑ…Ñ•|¤ì(€€€€€€€€€€€™É••…µ•É…|¹•å”õİ…±¬èé•å”¡İ…±­¥¹MÑ…Ñ•|¤ì(€€€€€€€€€€€ÕÁ‘…Ñ•1½½¬ ¤ì(€€€€€€€ô(€€€€€€€ÕÁ‘…Ñ•…µ•É…!Õ ¤ì(€€€ô(€€€Ù½¥ÕÁ‘…Ñ•1½½¬ ¥ì(€€€€€€€½¹ÍĞX™½Éİ…É‘íÍÑèéÍ¥¸¡å…İ|¤©ÍÑèé½Ì¡Á¥Ñ¡|¤±ÍÑèéÍ¥¸¡Á¥Ñ¡|¤°(€€€€€€€€€€€€€€€€€€€€€€€€µÍÑèé½Ì¡å…İ|¤©ÍÑèé½Ì¡Á¥Ñ¡|¥ôì(€€€€€€€™É••…µ•É…|¹Ñ…É•Ğõ™É••…µ•É…|¹•å”­™½Éİ…Éì(€€€€€€€ÕÁ‘…Ñ•…µ•É…!Õ ¤ì(€€€ô(€€€Ù½¥…ÁÑÕÉ•5½ÕÍ•1½½¬ ¥ì(€€€€€€€¥˜ …•áÁ±½É¥¹}ññµ½ÕÍ•…ÁÑÕÉ•‘}ñğ……¹Ù…Í}ñğ(€€€€€€€€€€€ …¥ÍÑ¥Ù•]¥¹‘½Ü ¤˜˜……¹Ù…Í|´ù¥ÍÑ¥Ù•]¥¹‘½Ü ¤¤¥É•ÑÕÉ¸ì(€€€€€€€µ½ÕÍ•…ÁÑÕÉ•‘|õÑÉÕ”ì(€€€€€€€…¹Ù…Í|´ùÍ•ÑÕÉÍ½È¡EĞèé	±…¹­ÕÉÍ½È¤ì(€€€€€€€™½ÕÍI•¹‘•ÉY¥•İÁ½ÉĞ ¤ì(€€€€€€€EÕÉÍ½ÈèéÍ•ÑA½Ì¡…¹Ù…Í|´ùµ…ÁQ½±½‰…°¡…¹Ù…Í|´ùÉ•Ğ ¤¹•¹Ñ•È ¤¤¤ì(€€€ô(€€€Ù½¥É•±•…Í•5½ÕÍ•1½½¬ ¥ì(€€€€€€€¥˜ …µ½ÕÍ•…ÁÑÕÉ•‘|¥É•ÑÕÉ¸ì(€€€€€€€µ½ÕÍ•…ÁÑÕÉ•‘|õ™…±Í”ì(€€€€€€€¥˜¡…¹Ù…Í|¥…¹Ù…Í|´ùÕ¹Í•ÑÕÉÍ½È ¤ì(€€€€€€€™½È¡…ÕÑ¼¨Ù¥•Üé‰…­•¹‘]¥¹‘½İÍ|¥¥˜¡Ù¥•Ü¥Ù¥•Ü´ùÕ¹Í•ÑÕÉÍ½È ¤ì(€€€ô(€€€Ù½¥Í•Ñ5½Ñ¥½¹I•Í½±ÕÑ¥½¸¡‰½½°…Ñ¥Ù”¥ì(€€€€€€€½¹ÍĞ‰½½°¹•áĞõÁ•É¥Á¡•É…±áÁ•É¥µ•¹Ñ¹…‰±•‘|˜™…Ñ¥Ù”ì(€€€€€€€¥˜¡Á•É¥Á¡•É…±ÕÉ¥¹5½Ñ¥½¹|ôõ¹•áĞ¥É•ÑÕÉ¸ì(€€€€€€€Á•É¥Á¡•É…±ÕÉ¥¹5½Ñ¥½¹|õ¹•áĞì(€€€€€€€Í•ÑI…ÍÑ•ÉA•É¥Á¡•É…±5Õ±Ñ¥É•Í=Ù•ÉÉ¥‘”¡¹•áĞüÄèÀ¤ì(€€€ô(€€€Ù½¥ÍÑ½ÁáÁ±½É…Ñ¥½¸ ¥ì(€€€€€€€É•±•…Í•5½ÕÍ•1½½¬ ¤ì(€€€€€€€Í•Ñ5½Ñ¥½¹I•Í½±ÕÑ¥½¸¡™…±Í”¤ì(€€€€€€€•áÁ±½É¥¹|õ™…±Í”ì(€€€€€€€¥˜¡…¹Ù…Í|¥…¹Ù…Í|´ùÍ•ÑÁÍ=Ù•É±…ä À¸À±™…±Í”¤ì(€€€€€€€¥˜¡¹…Ñ¥Ù•ÁÍ1…‰•±|¥¹…Ñ¥Ù•ÁÍ1…‰•±|´ùÍ•ÑQ•áĞ¡EMÑÉ¥¹1¥Ñ•É…° ‰ALƒŠPˆ¤¤ì(€€€€€€€¥˜¡™É••…µ•É…Ñ¥Ù•|¥™É••…µ•É…|¹™½ØõÍ½Á•	…Í•½Ù|ì(€€€€€€€É•Í•ÑM½Á•½É…µ•É„ ¤ì(€€€€€€€¥˜¡•áÁ±½É…Ñ¥½¹EÕ…±¥Ñå=Ù•ÉÉ¥‘•|¥ì(€€€€€€€€€€€ÍÑèéİÍÑÉ¥¹œ•ÉÉ½Èì(€€€€€€€€€€€¥˜¡Í•ÑI…ÍÑ•ÉEÕ…±¥ÑåM•ÑÑ¥¹Ì¡•áÁ±½É…Ñ¥½¹=É¥¥¹…±EÕ…±¥Ñå|±•ÉÉ½È¤¤(€€€€€€€€€€€€€€€‘¥ÍÁ±…åI…ÍÑ•ÉM•ÑÑ¥¹Ì¡•áÁ±½É…Ñ¥½¹=É¥¥¹…±EÕ…±¥Ñå|¤ì(€€€€€€€€€€€•áÁ±½É…Ñ¥½¹EÕ…±¥Ñå=Ù•ÉÉ¥‘•|õ™…±Í”ì(€€€€€€€ô(€€€€€€€™É…µ•Q¥µ•É|¹ÍÑ½À ¤ì(€€€€€€€­•åÍ½İ¹|¹±•…È ¤ì(€€€€€€€Á½½±1…‘‘•É5½Ñ¥½¹|õíôì(€€€€€€€±•™Ñ5½ÕÍ•!•±‘|õ™…±Í”ì(€€€€€€€É¥¡Ñ5½ÕÍ•!•±‘|õ™…±Í”ì(€€€€€€€±…ÍÑ5½ÕÍ•1½½­5½Ñ¥½¹|¹¥¹Ù…±¥‘…Ñ” ¤ì(€€€€€€€ÕÁ‘…Ñ•áÁ±½É…Ñ¥½¹MÁ••‘%¹‘¥…Ñ½È ¤ì(€€€€€€€¥˜ …±½Í¥¹I•ÅÕ•ÍÑ•‘|¥É•ÍÑ½É•áÁ±½É…Ñ¥½¹]¥¹‘½İÌ ¤ì(€€€€€€€¥˜¡•áÁ±½É…Ñ¥½¹	ÕÑÑ½¹|¥•áÁ±½É…Ñ¥½¹	ÕÑÑ½¹|´ùÍ•ÑQ•áĞ¡EMÑÉ¥¹1¥Ñ•É…° ‰¥µ…ÉÉ•È•áÁ±½É…Ñ¥½¸€¡XÄÜ¤ˆ¤¤ì(€€€€€€€¥˜¡•áÁ±½É…Ñ¥½¹!•±Á|¥•áÁ±½É…Ñ¥½¹!•±Á|´ùÍ•ÑQ•áĞ¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€‰iEM€¼™³¡¡•Ì€èµ…É¡•Èƒ
+ÜÍ½ÕÉ¥Ì€èÉ•…É‘•È±¥‰É•µ•¹Ğƒ
+Ü±¥Œ‘É½¥Ğ€è±Õ¹•ÑÑ”ƒ\Íq¸ˆ(€€€€€€€€€€€€‰ÄÄ€èÁ±•¥¸ƒ¥É…¸ƒ
+Üƒ%¡…À€è…ÉË©Ñ•Èƒ
+Ü€èƒ¥¡•±±”ƒ
+Ü5…¨€è…¥³¥É•Èƒ
+ÜY½°±¥‰É”€èÍÁ…”€¼ÑÉ°¸ˆ¤¤ì(€€€€€€€€¼¼‘•±…å•µÕ±Ñ¥É•ÌAT™É…µ”½Õ±ÍÑ¥±°‰”½¸ÍÉ••¸İ¡•¸ÍŒ(€€€€€€€€¼¼ÍÑ½ÁÌ•áÁ±½É…Ñ¥½¸¸EÕ•Õ”„™¥¹…°Õ…É…¹Ñ••™Õ±°µÉ•Í½±ÕÑ¥½¸¥µ…”¸(€€€€€€€¥˜ …±½Í¥¹I•ÅÕ•ÍÑ•‘|˜˜…Í•¹•1½…‘¥¹|˜™ÉÕ¹Ñ¥µ•|¤(€€€€€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ À±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€€€€€¥˜ …•áÁ±½É¥¹|˜˜…±½Í¥¹I•ÅÕ•ÍÑ•‘|˜™ÉÕ¹Ñ¥µ•|¥É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€€€€€ô¤ì(€€€ô(€€€Ù½¥Ñ½±•áÁ±½É…Ñ¥½¸ ¥ì(€€€€€€€¥˜¡•áÁ±½É¥¹|¥íÍÑ½ÁáÁ±½É…Ñ¥½¸ ¤íÉ•ÑÕÉ¸íô(€€€€€€€¥˜ …ÉÕ¹Ñ¥µ•}ññÉÕ¹Ñ¥µ•|´ù…µ•É…Ì¹¥ÍµÁÑä ¤¥É•ÑÕÉ¸ì(€€€€€€€¥˜¡‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤„ôĞ€˜˜‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤„ôÔ¤(€€€€€€€€€€€‰…­•¹‘	½á|´ùÍ•ÑÕÉÉ•¹Ñ%¹‘•à Ğ¤ì(€€€€€€€¥˜ …™É••…µ•É…Ñ¥Ù•|¥…Ñ¥Ù…Ñ•É••…µ•É„ ¤ì(€€€€€€€€¼¼¸%¹Ñ•°!€ØÈÀ…¹¹½ĞÉ•…Í½¹…‰±äÍÕÍÑ…¥¸€áà5M‘ÕÉ¥¹œ½¹Ñ¥¹Õ½ÕÌ(€€€€€€€€¼¼¹…Ù¥…Ñ¥½¸½˜Ñ¡”±…É”XàÍ•¹”¸Q•µÁ½É…É¥±ä±½İ•ÈÑ¼€Éà=91d(€€€€€€€€¼¼İ¡¥±”µ½Ù¥¹œ¸I•ÍÑ½É”Ñ¡”ÕÍ•ÈÌÁÉ•¥Í”Í•ÑÑ¥¹Ì½¸•á¥Ğ¸(€€€€€€€½¹ÍĞ…ÕÑ¼…‘…ÁÑ•ÈõÁÕ‘…ÁÑ•É1…‰•° ¤ì(€€€€€€€¥˜¡…‘…ÁÑ•È¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰!É…Á¡¥Ì€ØÈÀˆ¤±EĞèé…Í•%¹Í•¹Í¥Ñ¥Ù”¤(€€€€€€€€€€ññ…‘…ÁÑ•È¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰U!É…Á¡¥Ì€ØÈÀˆ¤±EĞèé…Í•%¹Í•¹Í¥Ñ¥Ù”¤¥ì(€€€€€€€€€€€½¹ÍĞ…ÕÑ¼ÄõÉ…ÍÑ•ÉEÕ…±¥ÑåM•ÑÑ¥¹Ì ¤ì(€€€€€€€€€€€¥˜¡Ä¹µÍ……M…µÁ±•ÌøÈ¥ì(€€€€€€€€€€€€€€€…ÕÑ¼¥¹Ñ•É…Ñ¥Ù”õÄì(€€€€€€€€€€€€€€€¥¹Ñ•É…Ñ¥Ù”¹µÍ……M…µÁ±•ÌôÈì(€€€€€€€€€€€€€€€¥¹Ñ•É…Ñ¥Ù”¹…¹¥Í½ÑÉ½ÁäõÍÑèéµ¥¸ñÕ¹Í¥¹•ø¡Ä¹…¹¥Í½ÑÉ½Áä°à¤ì(€€€€€€€€€€€€€€€ÍÑèéİÍÑÉ¥¹œ•ÉÉ½Èì(€€€€€€€€€€€€€€€¥˜¡Í•ÑI…ÍÑ•ÉEÕ…±¥ÑåM•ÑÑ¥¹Ì¡¥¹Ñ•É…Ñ¥Ù”±•ÉÉ½È¤¥ì(€€€€€€€€€€€€€€€€€€€•áÁ±½É…Ñ¥½¹=É¥¥¹…±EÕ…±¥Ñå|õÄì(€€€€€€€€€€€€€€€€€€€•áÁ±½É…Ñ¥½¹EÕ…±¥Ñå=Ù•ÉÉ¥‘•|õÑÉÕ”ì(€€€€€€€€€€€€€€€€€€€‘¥ÍÁ±…åI…ÍÑ•ÉM•ÑÑ¥¹Ì¡¥¹Ñ•É…Ñ¥Ù”¤ì(€€€€€€€€€€€€€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€€€€€€€€€€€€€‰!€ØÈÀ€è•áÁ±½É…Ñ¥½¸5M€ÉàÑ•µÁ½É…¥É”€ìÅÕ…±¥Ó¤¥¹¥Ñ¥…±”É•ÍÑ…ÕË¥”ƒ€°…ÉË©Ğˆ¤°ÜÀÀÀ¤ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€ô(€€€€€€€ô(€€€€€€€•áÁ±½É¥¹|õÑÉÕ”ì(€€€€€€€Í•Ñ5½Ñ¥½¹I•Í½±ÕÑ¥½¸¡™…±Í”¤ì(€€€€€€€É•Í•ÑA…¥¹œ ¤ì(€€€€€€€…¹Ù…Í|´ùÍ•ÑÁÍ=Ù•É±…ä À¸À±ÑÉÕ”¤ì(€€€€€€€¥˜¡İ…±­¥¹5½‘•	½á|˜˜…İ…±­¥¹5½‘•	½á|´ù¥Í¡•­• ¤¥ì(€€€€€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€€€€€‰Y½°±¥‰É”€è½±±¥Í¥½¹Ì“¥Í…Ñ¥Û¥•Ì¸½¡•èƒ
+¬5…É¡•È…ÔÍ½°ƒ
+ìÁ½ÕÈ‰±½ÅÕ•ÈµÕÉÌ•Ğ½‰ÍÑ…±•Ì¸ˆ¤°ÄÀÀÀÀ¤ì(€€€€€€€ô(€€€€€€€Á½½±1…‘‘•É5½Ñ¥½¹|õíôì(€€€€€€€µ½Ñ¥½¹±½­|¹ÍÑ…ÉĞ ¤ì(€€€€€€€™É…µ•±½­|¹¥¹Ù…±¥‘…Ñ” ¤ì(€€€€€€€±…ÍÑ5½ÕÍ•1½½­5½Ñ¥½¹|¹¥¹Ù…±¥‘…Ñ” ¤ì(€€€€€€€¥˜¡•áÁ±½É…Ñ¥½¹	ÕÑÑ½¹|¥•áÁ±½É…Ñ¥½¹	ÕÑÑ½¹|´ùÍ•ÑQ•áĞ¡EMÑÉ¥¹1¥Ñ•É…° ‰ÉË©Ñ•È•áÁ±½É…Ñ¥½¸ˆ¤¤ì(€€€€€€€ÕÁ‘…Ñ•…µ•É…!Õ ¤ì(€€€€€€€™É…µ•Q¥µ•É|¹ÍÑ…ÉĞ ¤ì(€€€€€€€ÕÁ‘…Ñ•áÁ±½É…Ñ¥½¹MÁ••‘%¹‘¥…Ñ½È ¤ì(€€€€€€€…ÉÉ…¹•áÁ±½É…Ñ¥½¹]¥¹‘½İÌ ¤ì(€€€€€€€…ÁÑÕÉ•5½ÕÍ•1½½¬ ¤ì(€€€ô(€€€Ù½¥™É…µ•Q¥¬ ¥ì(€€€€€€€¥˜ …•áÁ±½É¥¹}ñğ…ÉÕ¹Ñ¥µ•}ñğ…™É••…µ•É…Ñ¥Ù•|¥É•ÑÕÉ¸ì(€€€€€€€½¹ÍĞ™±½…Ğ‘ĞõÍÑèéµ¥¸ À¸Àá˜±™±½…Ğ¡µ½Ñ¥½¹±½­|¹É•ÍÑ…ÉĞ ¤¤¼ÄÀÀÀ¹˜¤ì(€€€€€€€½¹ÍĞ™±½…Ğ¹•áÑM½Á”õÍ”èéÍ½Á”èé…‘Ù…¹”¡Í½Á•	±•¹‘|±É¥¡Ñ5½ÕÍ•!•±‘|±‘Ğ¤ì(€€€€€€€¥˜¡¹•áÑM½Á”„õÍ½Á•	±•¹‘|¥ì(€€€€€€€€€€€Í½Á•	±•¹‘|õ¹•áÑM½Á”ì(€€€€€€€€€€€™É••…µ•É…|¹™½ØõÍ”èéÍ½Á”èé•™™•Ñ¥Ù•½Ø¡Í½Á•	…Í•½Ù|±Í½Á•	±•¹‘|¤ì(€€€€€€€€€€€…¹Ù…Í|´ùÍ•ÑM½Á•=Ù•É±…ä¡Í½Á•	±•¹‘|¤ì(€€€€€€€€€€€ÕÁ‘…Ñ•…µ•É…!Õ ¤ì(€€€€€€€ô(€€€€€€€X™½Éİ…É‘íÍÑèéÍ¥¸¡å…İ|¤©ÍÑèé½Ì¡Á¥Ñ¡|¤±ÍÑèéÍ¥¸¡Á¥Ñ¡|¤°(€€€€€€€€€€€€€€€€€€µÍÑèé½Ì¡å…İ|¤©ÍÑèé½Ì¡Á¥Ñ¡|¥ôì(€€€€€€€X¡½É¥é½¹Ñ…°õ¹½É´¡Yí™½Éİ…É¹à°À±™½Éİ…É¹éô¤ì(€€€€€€€XÉ¥¡Ğõ¹½É´¡É½ÍÌ¡¡½É¥é½¹Ñ…°±YìÀ°Ä°Áô¤¤ì(€€€€€€€Xµ½Ù•íôì(€€€€€€€¥˜¡­•åÍ½İ¹|¹½¹Ñ…¥¹Ì¡EĞèé-•å}h¥ññ­•åÍ½İ¹|¹½¹Ñ…¥¹Ì¡EĞèé-•å}\¥ññ­•åÍ½İ¹|¹½¹Ñ…¥¹Ì¡EĞèé-•å}UÀ¤¥µ½Ù”õµ½Ù”­¡½É¥é½¹Ñ…°ì(€€€€€€€¥˜¡­•åÍ½İ¹|¹½¹Ñ…¥¹Ì¡EĞèé-•å}L¥ññ­•åÍ½İ¹|¹½¹Ñ…¥¹Ì¡EĞèé-•å}½İ¸¤¥µ½Ù”õµ½Ù”µ¡½É¥é½¹Ñ…°ì(€€€€€€€¥˜¡­•åÍ½İ¹|¹½¹Ñ…¥¹Ì¡EĞèé-•å}¥ññ­•åÍ½İ¹|¹½¹Ñ…¥¹Ì¡EĞèé-•å}I¥¡Ğ¤¥µ½Ù”õµ½Ù”­É¥¡Ğì(€€€€€€€¥˜¡­•åÍ½İ¹|¹½¹Ñ…¥¹Ì¡EĞèé-•å}D¥ññ­•åÍ½İ¹|¹½¹Ñ…¥¹Ì¡EĞèé-•å}¥ññ­•åÍ½İ¹|¹½¹Ñ…¥¹Ì¡EĞèé-•å}1•™Ğ¤¥µ½Ù”õµ½Ù”µÉ¥¡Ğì(€€€€€€€½¹ÍĞ‰½½°µ½ÕÍ•I••¹Ñ±å5½Ù•õ±…ÍÑ5½ÕÍ•1½½­5½Ñ¥½¹|¹¥ÍY…±¥ ¤˜˜(€€€€€€€€€€€±…ÍÑ5½ÕÍ•1½½­5½Ñ¥½¹|¹•±…ÁÍ• ¤ğÄàÀì(€€€€€€€½¹ÍĞ‰½½°µ½Ù¥¹œõ±•¹Ñ ¡µ½Ù”¤ø¸ÀÅ™ññÁ½½±1…‘‘•É5½Ñ¥½¹|¹…Ñ¥Ù” ¤ì(€€€€€€€€¼¼Q¡”Í½Á•Í¥¡ĞÉ•µ…¥¹Ì™Õ±±äÍ¡…ÉÀ¸=¸ÍÑ½ÁÁ¥¹œ°É…ÍÑ•ÈÉ•ÑÕÉ¹Ì(€€€€€€€€¼¼Ñ¼™Õ±°É•Í½±ÕÑ¥½¸İ¥Ñ¡¥¸€ÄàÁµÌ°İ¥Ñ¡½ÕĞ…¹äÑ•µÁ½É…°É•ÁÉ½©•Ñ¥½¸¸(€€€€€€€Í•Ñ5½Ñ¥½¹I•Í½±ÕÑ¥½¸ ¡µ½Ù¥¹ññµ½ÕÍ•I••¹Ñ±å5½Ù•¤˜˜(€€€€€€€€€€€€…É¥¡Ñ5½ÕÍ•!•±‘|˜™Í½Á•	±•¹‘|ğ¸ÀÕ˜¤ì(€€€€€€€¥˜¡İ…±­¥¹5½‘•	½á|˜™İ…±­¥¹5½‘•	½á|´ù¥Í¡•­• ¤¥ì(€€€€€€€€€€€€¼¼É•…±±•…¹½µ…±ä…µ•É„…¸‰”…‰½Ù”„™±½½È½È‰•¡¥¹„İ…±°¸(€€€€€€€€€€€€¼¼-••À¥ÑÌÁÉ•¥Í”•å”Á½Í¥Ñ¥½¸Õ¹Ñ¥°Ñ¡”ÕÍ•È…ÑÕ…±±ä¹…Ù¥…Ñ•Ì¸(€€€€€€€€€€€€¼¼9•Ù•ÈÉ•ÕÍ”ÍÑ…±”™••Ğ™É½´‰•™½É”…µ•É„Ñ•±•Á½ÉÑ…Ñ¥½¸¸(€€€€€€€€€€€¥˜¡İ…±­¥¹½±±¥Í¥½¹Må¹A•¹‘¥¹|€˜˜±•¹Ñ ¡µ½Ù”¤ø¸ÀÅ˜¥ì(€€€€€€€€€€€€€€€İ…±¬èéÍÁ…İ¸¡ÉÕ¹Ñ¥µ•|´ùÉ•¹‘•ÉM•¹”±™É••…µ•É…|¹•å”±İ…±­¥¹MÑ…Ñ•|¤ì(€€€€€€€€€€€€€€€™É••…µ•É…|¹•å”õİ…±¬èé•å”¡İ…±­¥¹MÑ…Ñ•|¤ì(€€€€€€€€€€€€€€€İ…±­¥¹½±±¥Í¥½¹Må¹A•¹‘¥¹|õ™…±Í”ì(€€€€€€€€€€€€€€€ÕÁ‘…Ñ•1½½¬ ¤ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡Á½½±1…‘‘•É5½Ñ¥½¹|¹…Ñ¥Ù” ¤¥ì(€€€€€€€€€€€€€€€½¹ÍĞ‰½½°±¥µ‰¥¹œõÁ½½±1…‘‘•É5½Ñ¥½¹|¹ÕÀì(€€€€€€€€€€€€€€€½¹ÍĞ…ÕÑ¼ÀõÁ½½±1…‘‘•É5½Ñ¥½¹|¹…‘Ù…¹”¡‘Ğ¤ì(€€€€€€€€€€€€€€€İ…±­¥¹MÑ…Ñ•|¹™••ĞõíÀ¹à±À¹ä±À¹éôì(€€€€€€€€€€€€€€€™É••…µ•É…|¹•å”õİ…±¬èé•å”¡İ…±­¥¹MÑ…Ñ•|¤ì(€€€€€€€€€€€€€€€ÕÁ‘…Ñ•1½½¬ ¤ì(€€€€€€€€€€€€€€€¥˜ …Á½½±1…‘‘•É5½Ñ¥½¹|¹…Ñ¥Ù” ¤€˜˜±¥µ‰¥¹œ¥ì(€€€€€€€€€€€€€€€€€€€€¼¼I”µ•ÍÑ…‰±¥Í ‘ÉäÉ½Õ¹½¹Ñ…Ğ…™Ñ•È±¥µ‰¥¹œ½Ù•È½Á¥¹œ¸(€€€€€€€€€€€€€€€€€€€½¹ÍĞX•å”õİ…±¬èé•å”¡İ…±­¥¹MÑ…Ñ•|¤ì(€€€€€€€€€€€€€€€€€€€İ…±¬èéÍÁ…İ¸¡ÉÕ¹Ñ¥µ•|´ùÉ•¹‘•ÉM•¹”±•å”±İ…±­¥¹MÑ…Ñ•|¤ì(€€€€€€€€€€€€€€€€€€€™É••…µ•É…|¹•å”õİ…±¬èé•å”¡İ…±­¥¹MÑ…Ñ•|¤ì(€€€€€€€€€€€€€€€€€€€ÕÁ‘…Ñ•1½½¬ ¤ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€¥˜ …İ…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¤¥í™É…µ•±½­|¹ÍÑ…ÉĞ ¤íÉ•ÅÕ•ÍÑI•¹‘•È ¤íô(€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€½¹ÍĞXÕÉÉ•¹Ñ••Ğõİ…±­¥¹MÑ…Ñ•|¹™••Ğì(€€€€€€€€€€€¥˜¡Í•¹•A…Ñ¡|¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰‰•¹¡µ…É¬µ¥Ù¥Œˆ¤±EĞèé…Í•%¹Í•¹Í¥Ñ¥Ù”¤€˜˜(€€€€€€€€€€€€€€Í”èéÁ½½±}±…‘‘•Èèé¥¹]…Ñ•È¡íÕÉÉ•¹Ñ••Ğ¹à±ÕÉÉ•¹Ñ••Ğ¹ä±ÕÉÉ•¹Ñ••Ğ¹éô¤¥ì(€€€€€€€€€€€€€€€½¹ÍĞ™±½…ĞÍÁ••õÍ”èé•áÁ±½É…Ñ¥½¸èéÍÁ••‘5•Ñ•ÉÍA•ÉM•½¹¡™…±Í”¤¨¸ÔÕ˜ì(€€€€€€€€€€€€€€€½¹ÍĞX¡½É¥é½¹Ñ…±5½Ñ¥½¸õ±•¹Ñ ¡µ½Ù”¤ø¸ÀÅ˜ı¹½É´¡µ½Ù”¤¨¡‘Ğ©ÍÁ••¤éYíôì(€€€€€€€€€€€€€€€½¹ÍĞ…ÕÑ¼ÀõÍ”èéÁ½½±}±…‘‘•Èèéİ…±­%¹]…Ñ•È (€€€€€€€€€€€€€€€€€€€íÕÉÉ•¹Ñ••Ğ¹à±ÕÉÉ•¹Ñ••Ğ¹ä±ÕÉÉ•¹Ñ••Ğ¹éô±¡½É¥é½¹Ñ…±5½Ñ¥½¸¹à±¡½É¥é½¹Ñ…±5½Ñ¥½¸¹è¤ì(€€€€€€€€€€€€€€€İ…±­¥¹MÑ…Ñ•|¹™••ĞõíÀ¹à±À¹ä±À¹éôì(€€€€€€€€€€€€€€€™É••…µ•É…|¹•å”õİ…±¬èé•å”¡İ…±­¥¹MÑ…Ñ•|¤ì(€€€€€€€€€€€€€€€ÕÁ‘…Ñ•1½½¬ ¤ì(€€€€€€€€€€€€€€€¥˜ …İ…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¤¥í™É…µ•±½­|¹ÍÑ…ÉĞ ¤íÉ•ÅÕ•ÍÑI•¹‘•È ¤íô(€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€€¼¼]…±­¥¹œ¥Ì…±İ…åÌ¡½É¥é½¹Ñ…°¥¹ÁÕĞ¸!•¥¡Ğ™½±±½İÌ•½µ•ÑÉäè(€€€€€€€€€€€€¼¼™±½½È°ÍÑ…¥ÉÌ°±…¹‘¥¹Ì°Í±½Á•Ì…¹É…Ù¥Ñä½¸Õ¹ÍÕÁÁ½ÉÑ•…É•…Ì¸(€€€€€€€€€€€€¼¼M¡¥™Ğ¥Ì…¸•á…Ğ€Ï\µÕ±Ñ¥Á±¥•ÈìÑ¡”‘•Ñ•Éµ¥¹¥ÍÑ¥Œİ…±­•ÈÍÑ¥±°(€€€€€€€€€€€€¼¼ÍÕ‰‘¥Ù¥‘•Ì±…É”µ½Ñ¥½¸¥¹Ñ¼€ğô€à¸Õ´ÍÑ•ÁÌ™½È½±±¥Í¥½¸Í…™•Ñä¸(€€€€€€€€€€€½¹ÍĞ™±½…ĞÍÁ••õÍ”èé•áÁ±½É…Ñ¥½¸èéÍÁ••‘5•Ñ•ÉÍA•ÉM•½¹ (€€€€€€€€€€€€€€€­•åÍ½İ¹|¹½¹Ñ…¥¹Ì¡EĞèé-•å}M¡¥™Ğ¤¤ì(€€€€€€€€€€€½¹ÍĞX‘¥ÍÁ±…•µ•¹Ğõ±•¹Ñ ¡µ½Ù”¤ø¸ÀÅ˜ı¹½É´¡µ½Ù”¤¨¡‘Ğ©ÍÁ••¤éYíôì(€€€€€€€€€€€½¹ÍĞX½±‘å”õ™É••…µ•É…|¹•å”ì(€€€€€€€€€€€½¹ÍĞİ…±¬èéMÑ…Ñ”‰•™½É•MÑ•Àõİ…±­¥¹MÑ…Ñ•|ì(€€€€€€€€€€€İ…±¬èé…‘Ù…¹”¡ÉÕ¹Ñ¥µ•|´ùÉ•¹‘•ÉM•¹”±İ…±­¥¹MÑ…Ñ•|±‘¥ÍÁ±…•µ•¹Ğ±‘Ğ¤ì(€€€€€€€€€€€€¼¼Q¡”İ…Ñ•ÈÙ½±Õµ”¥ÌÉ•…¡•=91dÑ¡É½Õ Ñ¡”…ÑÕ…°±…‘‘•È(€€€€€€€€€€€€¼¼¥¹Ñ•É…Ñ¥½¸¸½¸Ğ±•Ğ¹Õµ•É¥…°İ…±­•ÈÑÕ¹¹•±±¥¹œ‰åÁ…ÍÌÑ¡”(€€€€€€€€€€€€¼¼Ñ¥±•½Á¥¹œ€¡„XÄÜ¸ĞÌÜÕÍ•Èµ™½Õ¹É•É•ÍÍ¥½¸¤¸(€€€€€€€€€€€¥˜¡Í•¹•A…Ñ¡|¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰‰•¹¡µ…É¬µ¥Ù¥Œˆ¤±EĞèé…Í•%¹Í•¹Í¥Ñ¥Ù”¤(€€€€€€€€€€€€€€€€˜˜‰•™½É•MÑ•À¹™••Ğ¹äğÄ¸Á˜€˜˜İ…±­¥¹MÑ…Ñ•|¹™••Ğ¹äğÄ¸Á˜¥ì(€€€€€€€€€€€€€€€½¹ÍĞ…ÕÑ¼‘Éäõmt¡½¹ÍĞX˜™••Ğ¥ì(€€€€€€€€€€€€€€€€€€€É•ÑÕÉ¸€„¡ÍÑèé…‰Ì¡™••Ğ¹à¤ğÈĞ¸äÉ˜€˜˜(€€€€€€€€€€€€€€€€€€€€€€€™••Ğ¹èø´ĞĞ¸ĞÕ˜€˜˜™••Ğ¹èğ´Ää¸ÔÕ˜¤ì(€€€€€€€€€€€€€€€ôì(€€€€€€€€€€€€€€€¥˜¡‘Éä¡‰•™½É•MÑ•À¹™••Ğ¤˜˜…‘Éä¡İ…±­¥¹MÑ…Ñ•|¹™••Ğ¤¤(€€€€€€€€€€€€€€€€€€€İ…±­¥¹MÑ…Ñ•|õ‰•™½É•MÑ•Àì(€€€€€€€€€€€ô(€€€€€€€€€€€™É••…µ•É…|¹•å”õİ…±¬èé•å”¡İ…±­¥¹MÑ…Ñ•|¤ì(€€€€€€€€€€€¥˜¡±•¹Ñ ¡™É••…µ•É…|¹•å”µ½±‘å”¤ø¸ÀÀÀÀÅ˜¥ÕÁ‘…Ñ•1½½¬ ¤ì(€€€€€€€õ•±Í•ì(€€€€€€€€€€€¥˜¡­•åÍ½İ¹|¹½¹Ñ…¥¹Ì¡EĞèé-•å}MÁ…”¤¥µ½Ù”¹ä¬ôÄ¹˜ì(€€€€€€€€€€€¥˜¡­•åÍ½İ¹|¹½¹Ñ…¥¹Ì¡EĞèé-•å}½¹ÑÉ½°¤¥µ½Ù”¹ä´ôÄ¹˜ì(€€€€€€€€€€€¥˜¡±•¹Ñ ¡µ½Ù”¤ø¸ÀÅ˜¥ì(€€€€€€€€€€€€€€€™É••…µ•É…|¹•å”õ™É••…µ•É…|¹•å”­¹½É´¡µ½Ù”¤¨¡‘Ğ©Í”èé•áÁ±½É…Ñ¥½¸èéÍÁ••‘5•Ñ•ÉÍA•ÉM•½¹¡­•åÍ½İ¹|¹½¹Ñ…¥¹Ì¡EĞèé-•å}M¡¥™Ğ¤¤¤ì(€€€€€€€€€€€€€€€ÕÁ‘…Ñ•1½½¬ ¤ì(€€€€€€€€€€€ô(€€€€€€€ô(€€€€€€€€¼¼Ù½¥ÅÕ•Õ•ÍÑ…±”™É…µ•Ì¸AT‘É…Ü½É•…‘‰…¬¥ÌÍÑ¥±°„XÄÜ´Ä(€€€€€€€€¼¼±¥µ¥Ñ…Ñ¥½¸…¹…¹¹½Ğå•ĞÕ…É…¹Ñ•”Ñ¡”€ÈÔµÌÑ…É•Ğ¸(€€€€€€€¥˜ …İ…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¤¥í™É…µ•±½­|¹ÍÑ…ÉĞ ¤íÉ•ÅÕ•ÍÑI•¹‘•È ¤íô(€€€ô)ÁÉ½Ñ•Ñ•è(€€€Ù½¥±½Í•Ù•¹Ğ¡E±½Í•Ù•¹Ğ¨•Ù•¹Ğ¤½Ù•ÉÉ¥‘”ì(€€€€€€€€¼¼Íå¹¡É½¹½ÕÌÍÄÄ5…À½É•…‘‰…¬…¹¹½Ğ‰”™½É¥‰±ä…¹•±±•¸(€€€€€€€€¼¼-••ÀÑ¡”U$Ù¥Í¥‰±”İ¡¥±”„İ½É­•È¥Ìİ¥¹‘¥¹œ‘½İ¸¥¹ÍÑ•…½˜(€€€€€€€€¼¼±•…Ù¥¹œ„¡¥‘‘•¸€‰é½µ‰¥”ˆÁÉ½•ÍÌ¥¸Q…Í¬5…¹…•È¸(€€€€€€€¥˜¡İ…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¥ññ±½…‘]…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¤¥ì(€€€€€€€€€€€±½Í¥¹I•ÅÕ•ÍÑ•‘|õÑÉÕ”ì(€€€€€€€€€€€ÍÑ½ÁáÁ±½É…Ñ¥½¸ ¤ì(€€€€€€€€€€€É•¹‘•ÉM•É¥…±|´ù™•Ñ¡}…‘ Ä¤ì(€€€€€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€€€€€‰•Éµ•ÑÕÉ”‘•µ…¹“¥”€è™¥¸‘Ô…±Õ°•¸½ÕÉÏŠ˜€ˆ(€€€€€€€€€€€€€€€€‰M¤±”Á¥±½Ñ”AT•ÍĞ‰±½Å×¤°ÕÑ¥±¥Í•è±”•ÍÑ¥½¹¹…¥É”‘•ÌÓ‰¡•Ì¸ˆ¤¤ì(€€€€€€€€€€€•Ù•¹Ğ´ù¥¹½É” ¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€€¼¼Q¡”½¹ÑÉ½±Ìİ¥¹‘½Ü½İ¹ÌÑ¡”…ÁÁ±¥…Ñ¥½¸±¥™•Ñ¥µ”¸±½Í¥¹œ¥ĞµÕÍĞ(€€€€€€€€¼¼¹½Ğ±•…Ù”…¹ä¥¹‘•Á•¹‘•¹ĞÉ•¹‘•É•Èİ¥¹‘½Ü­••Á¥¹œEĞ…±¥Ù”¸(€€€€€€€™½È¡…ÕÑ¼¨Ù¥•Üé‰…­•¹‘]¥¹‘½İÍ|¥¥˜¡Ù¥•Ü¥Ù¥•Ü´ù¡¥‘” ¤ì(€€€€€€€E5…¥¹]¥¹‘½Üèé±½Í•Ù•¹Ğ¡•Ù•¹Ğ¤ì(€€€ô(€€€‰½½°•Ù•¹Ğ¡EÙ•¹Ğ¨”¤½Ù•ÉÉ¥‘”ì(€€€€€€€¥˜¡”´ùÑåÁ” ¤ôõEÙ•¹Ğèé]¥¹‘½İÑ¥Ù…Ñ”˜™•áÁ±½É¥¹|¥ì(€€€€€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ À±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€€€€€¥˜¡•áÁ±½É¥¹|˜˜…±½Í¥¹I•ÅÕ•ÍÑ•‘|¥…ÁÑÕÉ•5½ÕÍ•1½½¬ ¤ì(€€€€€€€€€€€ô¤ì(€€€€€€€ô(€€€€€€€¥˜¡”´ùÑåÁ” ¤ôõEÙ•¹Ğèé]¥¹‘½İ•…Ñ¥Ù…Ñ”¥ì(€€€€€€€€€€€€¼¼=ÕÑÁÕĞÙ¥•İÌ…É”Í•Á…É…Ñ”Ñ½Àµ±•Ù•°İ¥¹‘½İÌ¸¥Ù”EĞ½¹”•Ù•¹Ğ(€€€€€€€€€€€€¼¼ÑÕÉ¸Ñ¼…Ñ¥Ù…Ñ”Ñ¡”É•¹‘•É•È‰•™½É”ÑÉ•…Ñ¥¹œÑ¡¥Ì…Ì±Ğ­Q…ˆ¸(€€€€€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ À±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€€€€€¥˜ …¥ÍÑ¥Ù•]¥¹‘½Ü ¤˜˜ ……¹Ù…Í}ñğ……¹Ù…Í|´ù¥ÍÑ¥Ù•]¥¹‘½Ü ¤¤¥ì(€€€€€€€€€€€€€€€€€€€É•±•…Í•5½ÕÍ•1½½¬ ¤ì(€€€€€€€€€€€€€€€€€€€É¥¡Ñ5½ÕÍ•!•±‘|õ™…±Í”ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€ô¤ì(€€€€€€€ô(€€€€€€€É•ÑÕÉ¸E5…¥¹]¥¹‘½Üèé•Ù•¹Ğ¡”¤ì(€€€ô(€€€‰½½°•Ù•¹Ñ¥±Ñ•È¡E=‰©•Ğ¨İ…Ñ¡•±EÙ•¹Ğ¨•Ù•¹Ğ¤½Ù•ÉÉ¥‘•ì(€€€€€€€¥˜¡İ…Ñ¡•ôõ…¹Ù…Í|˜™•Ù•¹Ğ´ùÑåÁ” ¤ôõEÙ•¹Ğèé]¥¹‘½İÑ¥Ù…Ñ”˜™•áÁ±½É¥¹|¤(€€€€€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ À±Ñ¡¥Ì±mÑ¡¥Íuí¥˜¡•áÁ±½É¥¹|¥…ÁÑÕÉ•5½ÕÍ•1½½¬ ¤íô¤ì(€€€€€€€¥˜¡İ…Ñ¡•ôõ…¹Ù…Í|€˜˜•Ù•¹Ğ´ùÑåÁ” ¤ôõEÙ•¹ĞèéI•Í¥é”€˜˜(€€€€€€€€€€¹…Ñ¥Ù•¥É•ÑM•±•Ñ• ¤€˜˜ÉÕ¹Ñ¥µ•|€˜˜€…Í•¹•1½…‘¥¹|¥ì(€€€€€€€€€€€€¼¼Q¡”‰…­•¹ÌÁÉ¥Ù…Ñ”Íİ…Á¡…¥¸µÕÍĞ™½±±½Ü¥ÑÌÑ½Àµ±•Ù•°!]9¸(€€€€€€€€€€€€¼¼•™•ÈÕ¹Ñ¥°EĞ™¥¹¥Í¡•ÌÑ¡”¹…Ñ¥Ù”É•Í¥é”ÑÉ…¹Í…Ñ¥½¸¸(€€€€€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ À±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€€€€€¥˜¡¹…Ñ¥Ù•¥É•ÑM•±•Ñ• ¤˜˜…±½Í¥¹I•ÅÕ•ÍÑ•‘|¥É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€€€€€ô¤ì(€€€€€€€ô(€€€€€€€¥˜¡İ…Ñ¡•ôõ…¹Ù…Í|€˜˜•áÁ±½É¥¹|¥ì(€€€€€€€€€€€¥˜¡•Ù•¹Ğ´ùÑåÁ” ¤ôõEÙ•¹Ğèé-•åAÉ•ÍÌñğ•Ù•¹Ğ´ùÑåÁ” ¤ôõEÙ•¹Ğèé-•åI•±•…Í”¥ì(€€€€€€€€€€€€€€€¥˜¡•Ù•¹Ğ´ùÑåÁ” ¤ôõEÙ•¹Ğèé-•åAÉ•ÍÌ¤(€€€€€€€€€€€€€€€€€€€­•åAÉ•ÍÍÙ•¹Ğ¡ÍÑ…Ñ¥}…ÍĞñE-•åÙ•¹Ğ¨ø¡•Ù•¹Ğ¤¤ì(€€€€€€€€€€€€€€€•±Í”­•åI•±•…Í•Ù•¹Ğ¡ÍÑ…Ñ¥}…ÍĞñE-•åÙ•¹Ğ¨ø¡•Ù•¹Ğ¤¤ì(€€€€€€€€€€€€€€€É•ÑÕÉ¸ÑÉÕ”ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡•Ù•¹Ğ´ùÑåÁ” ¤ôõEÙ•¹Ğèé5½ÕÍ•	ÕÑÑ½¹AÉ•ÍÌ¥ì(€€€€€€€€€€€€€€€…ÕÑ¼¨”õÍÑ…Ñ¥}…ÍĞñE5½ÕÍ•Ù•¹Ğ¨ø¡•Ù•¹Ğ¤ì(€€€€€€€€€€€€€€€¥˜ …µ½ÕÍ•…ÁÑÕÉ•‘|¥…ÁÑÕÉ•5½ÕÍ•1½½¬ ¤ì(€€€€€€€€€€€€€€€¥˜¡”´ù‰ÕÑÑ½¸ ¤ôõEĞèéI¥¡Ñ	ÕÑÑ½¸¥ì(€€€€€€€€€€€€€€€€€€€É¥¡Ñ5½ÕÍ•!•±‘|õÑÉÕ”ì(€€€€€€€€€€€€€€€€€€€™½ÕÍI•¹‘•ÉY¥•İÁ½ÉĞ ¤ì(€€€€€€€€€€€€€€€€€€€É•ÑÕÉ¸ÑÉÕ”ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€¥˜¡”´ù‰ÕÑÑ½¸ ¤ôõEĞèé1•™Ñ	ÕÑÑ½¸¥ì(€€€€€€€€€€€€€€€€€€€±•™Ñ5½ÕÍ•!•±‘|õÑÉÕ”ì(€€€€€€€€€€€€€€€€€€€™½ÕÍI•¹‘•ÉY¥•İÁ½ÉĞ ¤ì(€€€€€€€€€€€€€€€€€€€É•ÑÕÉ¸ÑÉÕ”ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡•Ù•¹Ğ´ùÑåÁ” ¤ôõEÙ•¹Ğèé5½ÕÍ•	ÕÑÑ½¹I•±•…Í”¥ì(€€€€€€€€€€€€€€€…ÕÑ¼¨”õÍÑ…Ñ¥}…ÍĞñE5½ÕÍ•Ù•¹Ğ¨ø¡•Ù•¹Ğ¤ì(€€€€€€€€€€€€€€€¥˜¡”´ù‰ÕÑÑ½¸ ¤ôõEĞèéI¥¡Ñ	ÕÑÑ½¸¥íÉ¥¡Ñ5½ÕÍ•!•±‘|õ™…±Í”íÉ•ÑÕÉ¸ÑÉÕ”íô(€€€€€€€€€€€€€€€¥˜¡”´ù‰ÕÑÑ½¸ ¤ôõEĞèé1•™Ñ	ÕÑÑ½¸¥í±•™Ñ5½ÕÍ•!•±‘|õ™…±Í”íÉ•ÑÕÉ¸ÑÉÕ”íô(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡•Ù•¹Ğ´ùÑåÁ” ¤ôõEÙ•¹Ğèé5½ÕÍ•5½Ù”€˜˜µ½ÕÍ•…ÁÑÕÉ•‘|¥ì(€€€€€€€€€€€€€€€…ÕÑ¼¨”õÍÑ…Ñ¥}…ÍĞñE5½ÕÍ•Ù•¹Ğ¨ø¡•Ù•¹Ğ¤ì(€€€€€€€€€€€€€€€½¹ÍĞEA½¥¹Ğ•¹Ñ•Èõ…¹Ù…Í|´ùÉ•Ğ ¤¹•¹Ñ•È ¤ì(€€€€€€€€€€€€€€€½¹ÍĞEA½¥¹Ğ‘•±Ñ„õ”´ùÁ½Ì ¤µ•¹Ñ•Èì(€€€€€€€€€€€€€€€€¼¼EĞ•¹•É…Ñ•Ì„Íå¹Ñ¡•Ñ¥Œµ½Ù”İ¡•¸Ñ¡”ÕÉÍ½È¥ÌÉ••¹Ñ•É•¸(€€€€€€€€€€€€€€€€¼¼%¹½É”¥Ğ¸9¼±¥¬¥ÌÉ•ÅÕ¥É•Ñ¼±½½¬…É½Õ¹¸(€€€€€€€€€€€€€€€¥˜¡‘•±Ñ„¹¥Í9Õ±° ¤¥É•ÑÕÉ¸ÑÉÕ”ì(€€€€€€€€€€€€€€€½¹ÍĞ™±½…Ğ‘àõ±…µÁ˜¡™±½…Ğ¡‘•±Ñ„¹à ¤¤°´ÄØÀ¹˜°ÄØÀ¹˜¤ì(€€€€€€€€€€€€€€€½¹ÍĞ™±½…Ğ‘äõ±…µÁ˜¡™±½…Ğ¡‘•±Ñ„¹ä ¤¤°´ÄØÀ¹˜°ÄØÀ¹˜¤ì(€€€€€€€€€€€€€€€½¹ÍĞ™±½…ĞÍ•¹Í¥Ñ¥Ù¥Ñäô¸ÀÀÕ˜©Í”èéÍ½Á”èéµ½ÕÍ•M•¹Í¥Ñ¥Ù¥Ñä¡Í½Á•	±•¹‘|¤ì(€€€€€€€€€€€€€€€å…İ|¬õ‘à©Í•¹Í¥Ñ¥Ù¥Ñäì(€€€€€€€€€€€€€€€Á¥Ñ¡|õ±…µÁ˜¡Á¥Ñ¡|µ‘ä©Í•¹Í¥Ñ¥Ù¥Ñä°´Ä¸Ğá˜°Ä¸Ğá˜¤ì(€€€€€€€€€€€€€€€±…ÍÑ5½ÕÍ•1½½­5½Ñ¥½¹|¹É•ÍÑ…ÉĞ ¤ì(€€€€€€€€€€€€€€€ÕÁ‘…Ñ•1½½¬ ¤ì(€€€€€€€€€€€€€€€EÕÉÍ½ÈèéÍ•ÑA½Ì¡…¹Ù…Í|´ùµ…ÁQ½±½‰…°¡•¹Ñ•È¤¤ì(€€€€€€€€€€€€€€€É•ÑÕÉ¸ÑÉÕ”ì(€€€€€€€€€€€ô(€€€€€€€ô(€€€€€€€É•ÑÕÉ¸E5…¥¹]¥¹‘½Üèé•Ù•¹Ñ¥±Ñ•È¡İ…Ñ¡•±•Ù•¹Ğ¤ì(€€€ô(€€€Ù½¥­•åAÉ•ÍÍÙ•¹Ğ¡E-•åÙ•¹Ğ¨”¤½Ù•ÉÉ¥‘•ì(€€€€€€€¥˜¡”´ù­•ä ¤ôõEĞèé-•å}ÄÄ€˜˜¥µµ•ÉÍ¥Ù•Ñ¥½¹|¥ì(€€€€€€€€€€€¥µµ•ÉÍ¥Ù•Ñ¥½¹|´ùÍ•Ñ¡•­• …¥µµ•ÉÍ¥Ù•Ñ¥½¹|´ù¥Í¡•­• ¤¤ì(€€€€€€€€€€€”´ù…•ÁĞ ¤íÉ•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€¥˜¡•áÁ±½É¥¹|¥ì(€€€€€€€€€€€¥˜¡”´ù­•ä ¤ôõEĞèé-•å}Í…Á”¥ì(€€€€€€€€€€€€€€€ÍÑ½ÁáÁ±½É…Ñ¥½¸ ¤ì(€€€€€€€€€€€€€€€¥˜¡¥µµ•ÉÍ¥Ù•Ñ¥½¹|˜™¥µµ•ÉÍ¥Ù•Ñ¥½¹|´ù¥Í¡•­• ¤¤(€€€€€€€€€€€€€€€€€€€¥µµ•ÉÍ¥Ù•Ñ¥½¹|´ùÍ•Ñ¡•­•¡™…±Í”¤ì(€€€€€€€€€€€€€€€”´ù…•ÁĞ ¤íÉ•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡”´ù­•ä ¤ôõEĞèé-•å}Q…ˆ¥ì(€€€€€€€€€€€€€€€¥˜¡µ½ÕÍ•…ÁÑÕÉ•‘|¥É•±•…Í•5½ÕÍ•1½½¬ ¤í•±Í”…ÁÑÕÉ•5½ÕÍ•1½½¬ ¤ì(€€€€€€€€€€€€€€€”´ù…•ÁĞ ¤íÉ•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡”´ù­•ä ¤ôõEĞèé-•å}€˜˜€…”´ù¥ÍÕÑ½I•Á•…Ğ ¤€˜˜(€€€€€€€€€€€€€€İ…±­¥¹5½‘•	½á|€˜˜İ…±­¥¹5½‘•	½á|´ù¥Í¡•­• ¤€˜˜(€€€€€€€€€€€€€€Í•¹•A…Ñ¡|¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰‰•¹¡µ…É¬µ¥Ù¥Œˆ¤±EĞèé…Í•%¹Í•¹Í¥Ñ¥Ù”¤¥ì(€€€€€€€€€€€€€€€¥˜¡İ…±­¥¹½±±¥Í¥½¹Må¹A•¹‘¥¹|˜™ÉÕ¹Ñ¥µ•|¥ì(€€€€€€€€€€€€€€€€€€€İ…±¬èéÍÁ…İ¸¡ÉÕ¹Ñ¥µ•|´ùÉ•¹‘•ÉM•¹”±™É••…µ•É…|¹•å”±İ…±­¥¹MÑ…Ñ•|¤ì(€€€€€€€€€€€€€€€€€€€™É••…µ•É…|¹•å”õİ…±¬èé•å”¡İ…±­¥¹MÑ…Ñ•|¤ì(€€€€€€€€€€€€€€€€€€€İ…±­¥¹½±±¥Í¥½¹Må¹A•¹‘¥¹|õ™…±Í”ì(€€€€€€€€€€€€€€€€€€€ÕÁ‘…Ñ•1½½¬ ¤ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€½¹ÍĞX™••Ğõİ…±­¥¹MÑ…Ñ•|¹™••Ğì(€€€€€€€€€€€€€€€¥˜¡Á½½±1…‘‘•É5½Ñ¥½¹|¹‰•¥¸¡í™••Ğ¹à±™••Ğ¹ä±™••Ğ¹éô¤¥ì(€€€€€€€€€€€€€€€€€€€­•åÍ½İ¹|¹±•…È ¤ì(€€€€€€€€€€€€€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡Á½½±1…‘‘•É5½Ñ¥½¹|¹ÕÀ(€€€€€€€€€€€€€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ‰A¥Í¥¹”€èµ½¹Ó¥”‘”°Ÿ¥¡•±±”•¸½ÕÉÏŠ˜ˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ‰A¥Í¥¹”€è‘•Í•¹Ñ”‘”°Ÿ¥¡•±±”•¸½ÕÉÏŠ˜ˆ¤°ÌÀÀÀ¤ì(€€€€€€€€€€€€€€€€€€€”´ù…•ÁĞ ¤íÉ•ÑÕÉ¸ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜ …”´ù¥ÍÕÑ½I•Á•…Ğ ¤¥ì(€€€€€€€€€€€€€€€­•åÍ½İ¹|¹¥¹Í•ÉĞ¡”´ù­•ä ¤¤ì(€€€€€€€€€€€€€€€¥˜¡”´ù­•ä ¤ôõEĞèé-•å}M¡¥™Ğ¥ÕÁ‘…Ñ•áÁ±½É…Ñ¥½¹MÁ••‘%¹‘¥…Ñ½È ¤ì(€€€€€€€€€€€ô(€€€€€€€€€€€”´ù…•ÁĞ ¤íÉ•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€E5…¥¹]¥¹‘½Üèé­•åAÉ•ÍÍÙ•¹Ğ¡”¤ì(€€€ô(€€€Ù½¥­•åI•±•…Í•Ù•¹Ğ¡E-•åÙ•¹Ğ¨”¤½Ù•ÉÉ¥‘•ì(€€€€€€€¥˜¡•áÁ±½É¥¹|¥í¥˜ …”´ù¥ÍÕÑ½I•Á•…Ğ ¤¥í­•åÍ½İ¹|¹É•µ½Ù”¡”´ù­•ä ¤¤í¥˜¡”´ù­•ä ¤ôõEĞèé-•å}M¡¥™Ğ¥ÕÁ‘…Ñ•áÁ±½É…Ñ¥½¹MÁ••‘%¹‘¥…Ñ½È ¤íõ”´ù…•ÁĞ ¤íÉ•ÑÕÉ¸íô(€€€€€€€E5…¥¹]¥¹‘½Üèé­•åI•±•…Í•Ù•¹Ğ¡”¤ì(€€€ô)ÁÉ¥Ù…Ñ”è(€€€EQÉ••]¥‘•Ğ¨Í•¹•QÉ••|õ¹Õ±±ÁÑÈì(€€€EQÉ••]¥‘•Ğ¨É•Í½ÕÉ•QÉ••|õ¹Õ±±ÁÑÈì(€€€E½µ‰½	½à¨…µ•É…	½á|õ¹Õ±±ÁÑÈì(€€€EY•Ñ½ÈñEÑ¥½¸¨øÅÕ¥­…µ•É…Ñ¥½¹Í|ì(€€€E½µ‰½	½à¨‰…­•¹‘	½á|õ¹Õ±±ÁÑÈì(€€€E½µ‰½	½à¨ÅÕ…±¥Ñå	½á|õ¹Õ±±ÁÑÈì(€€€E½µ‰½	½à¨É…ÍÑ•ÉAÉ•Í•Ñ	½á|õ¹Õ±±ÁÑÈì(€€€E½µ‰½	½à¨É…ÍÑ•É5Í……	½á|õ¹Õ±±ÁÑÈì(€€€E½µ‰½	½à¨É…ÍÑ•É¹¥Í½	½á|õ¹Õ±±ÁÑÈì(€€€E½µ‰½	½à¨É…ÍÑ•É1½‘	½á|õ¹Õ±±ÁÑÈì(€€€E¡•­	½à¨É…ÍÑ•ÉÕ±±	½á|õ¹Õ±±ÁÑÈì(€€€E¡•­	½à¨É…ÍÑ•Éå¹…µ¥1½‘	½á|õ¹Õ±±ÁÑÈì(€€€E½µ‰½	½à¨¥M…µÁ±•Í|õ¹Õ±±ÁÑÈì(€€€E½µ‰½	½à¨‘¥É•ÑM…µÁ±•Í|õ¹Õ±±ÁÑÈì(€€€E¡•­	½à¨ÁÉ½É•ÍÍ¥Ù•¥|õ¹Õ±±ÁÑÈì(€€€E¡•­	½à¨‘•¹½¥Í•¥|õ¹Õ±±ÁÑÈì(€€€E¡•­	½à¨‘•¹½¥Í•¥É•Ñ|õ¹Õ±±ÁÑÈì(€€€E¡•­	½à¨•‘•…|õ¹Õ±±ÁÑÈì(€€€EM±¥‘•È¨…é¥µÕÑ¡|õ¹Õ±±ÁÑÈì(€€€E½Õ‰±•MÁ¥¹	½à¨ÍÕ¹!½ÕÉ|õ¹Õ±±ÁÑÈì(€€€E¡•­	½à¨±½Õ‘¹¥µ…Ñ¥½¹	½á|õ¹Õ±±ÁÑÈì(€€€E¡•­	½à¨‘…å9¥¡Ñå±•	½á|õ¹Õ±±ÁÑÈì(€€€E¡•­	½à¨¡å‰É¥‘1¥¡Ñ	½á|õ¹Õ±±ÁÑÈì(€€€E¡•­	½à¨™¥±µ¥Q½¹•	½á|õ¹Õ±±ÁÑÈì(€€€E¡•­	½à¨½±½É¹•Éå	½á|õ¹Õ±±ÁÑÈì(€€€E½Õ‰±•MÁ¥¹	½à¨½±½ÉáÁ½ÍÕÉ•	½á|õ¹Õ±±ÁÑÈì(€€€EAÕÍ¡	ÕÑÑ½¸¨‰…­•¥	ÕÑÑ½¹|õ¹Õ±±ÁÑÈì(€€€EAÉ½•ÍÌ¨‰…­•¥AÉ½•ÍÍ|õ¹Õ±±ÁÑÈì(€€€EMÑÉ¥¹œ‰…­¥¹M•¹•A…Ñ¡|ì(€€€E½Õ‰±•MÁ¥¹	½à¨É½Õ¡¹•ÍÍ|õ¹Õ±±ÁÑÈì(€€€E½Õ‰±•MÁ¥¹	½à¨µ•Ñ…±±¥|õ¹Õ±±ÁÑÈì(€€€E1…‰•°¨µ…Ñ•É¥…±1…‰•±|õ¹Õ±±ÁÑÈì(€€€E1…‰•°¨É•¹‘•ÉQ¥µ•1…‰•±|õ¹Õ±±ÁÑÈì(€€€EÕÑÕÉ•]…Ñ¡•ÈñI•ÍÕ±Ğøİ…Ñ¡•É|ì(€€€EQ¡É•…‘A½½°É•¹‘•ÉA½½±|ì(€€€EÕÑÕÉ•]…Ñ¡•ÈñM•¹•1½…‘=ÕÑ½µ”ø±½…‘]…Ñ¡•É|ì(€€€E1…‰•°¨Í•¹•1½…‘1…‰•±|õ¹Õ±±ÁÑÈì(€€€EAÉ½É•ÍÍ	…È¨Í•¹•1½…‘AÉ½É•ÍÍ|õ¹Õ±±ÁÑÈì(€€€‰½½°Í•¹•1½…‘¥¹|õ™…±Í”ì(€€€Õ¥¹ĞØÑ}ĞÍ•¹•1½…‘•¹•É…Ñ¥½¹|ôÀì(€€€EMÑÉ¥¹œÅÕ•Õ•‘M•¹•A…Ñ¡|ì(€€€ÍÑèéÍ¡…É•‘}ÁÑÈñÍÑèé…Ñ½µ¥ŒñÕ¥¹ĞØÑ}ĞøøÉ•¹‘•ÉM•É¥…±|õÍÑèéµ…­•}Í¡…É•ñÍÑèé…Ñ½µ¥ŒñÕ¥¹ĞØÑ}Ğøø À¤ì(€€€ÍÑèéÍ¡…É•‘}ÁÑÈñØÄØèéIÕ¹Ñ¥µ”øÉÕ¹Ñ¥µ•|ì(€€€€¼¼Q¡”ÍÕ¸…¹Í•¹”•½µ•ÑÉä‘¼¹½Ğ¡…¹”İ¡•¸¹…Ù¥…Ñ¥¹œ…µ•É…Ì¸(€€€€¼¼I•ÕÍ”…¸¥‘•¹Ñ¥…°Í¡…‘½Üµ…À…É½ÍÌATÉ•¹‘•ÉÌ½˜Ñ¡”Í…µ”ÉÕ¹Ñ¥µ”¸(€€€ÍÑÉÕĞÁÕM¡…‘½İ…¡”ì(€€€€€€€ÍÑèéµÕÑ•àµÕÑ•àì(€€€€€€€ÍÑèéİ•…­}ÁÑÈñØÄØèéIÕ¹Ñ¥µ”øÍ•¹”ì(€€€€€€€ÍÑèéÍ¡…É•‘}ÁÑÈñ½¹ÍĞM¡…‘½İ5…ÀøÍ¡…‘½Üì(€€€€€€€™±½…Ğ¡½ÕÈô´Ä¹˜ì(€€€ôì(€€€ÍÑèéÍ¡…É•‘}ÁÑÈñÁÕM¡…‘½İ…¡”øÁÕM¡…‘½İÍ|õÍÑèéµ…­•}Í¡…É•ñÁÕM¡…‘½İ…¡”ø ¤ì(€€€‰½½°Á•¹‘¥¹|õ™…±Í”°ÕÁ‘…Ñ¥¹½¹ÑÉ½±Í|õ™…±Í”°±½Í¥¹I•ÅÕ•ÍÑ•‘|õ™…±Í”ì(€€€E±…ÁÍ•‘Q¥µ•ÈÁ…¥¹±½­|ì(€€€Å¥¹ĞØĞ±…ÍÑAÉ•Í•¹Ñ5Í|ô´Äì(€€€‘½Õ‰±”±…ÍÑ½µÁ±•Ñ•‘I•¹‘•É5Í|ôÀ¸Àì(€€€Õ¥¹ĞØÑ}ĞÁ…¥¹I•©•Ñ•‘|ôÀ°Á…¥¹EÕ•Õ•‘|ôÀì(€€€ÍÑèéÙ•Ñ½ÈñÍ”èéÁ…¥¹œèéM…µÁ±”øÁ…¥¹M…µÁ±•Í|ì(€€€ÍÑ…Ñ¥Œ½¹ÍÑ•áÁÈ¥¹ĞÁ…¥¹…Á…¥Ñå|ôÔÀÀÀì(€€€¥¹ĞÍ•±•Ñ•‘5…Ñ•É¥…±|ô´Äì(€€€EMÑÉ¥¹œÍ•¹•A…Ñ¡|ì(€€€EMÑÉ¥¹œµ…Ñ•É¥…±ÍA…Ñ¡|ì(€€€¥¹ĞÕÉÉ•¹Ñ¹½µ…±å|ô´Äì(€€€ØÄØèé…µ•É…AÉ•Í•Ğ‰•™½É•¹½µ…±å…µ•É…}íôì(€€€‰½½°¡…Í	•™½É•¹½µ…±å…µ•É…|õ™…±Í”ì(€€€E1…‰•°¨…¹½µ…±åA…¹•±1…‰•±|õ¹Õ±±ÁÑÈì(€€€E1…‰•°¨Í•¹•I•Ù¥Í¥½¹1…‰•±|õ¹Õ±±ÁÑÈì(€€€E1…‰•°¨ÍåÍÑ•µ5•µ½Éå1…‰•±|õ¹Õ±±ÁÑÈì(€€€EAÉ½É•ÍÍ	…È¨ÍåÍÑ•µ5•µ½Éå	…É|õ¹Õ±±ÁÑÈì(€€€EQ¥µ•È¨µ•µ½ÉåI•™É•Í¡Q¥µ•É|õ¹Õ±±ÁÑÈì((€€€Ù½¥ÕÁ‘…Ñ•5•µ½Éå	…¹¹•È ¥ì(€€€€€€€¥˜ …ÍåÍÑ•µ5•µ½Éå1…‰•±}ñğ…ÍåÍÑ•µ5•µ½Éå	…É|¥É•ÑÕÉ¸ì(€€€€€€€½¹ÍĞ¥¹ĞÁ•É•¹ĞõÍåÍÑ•µ5•µ½Éå1½…‘A•É•¹Ğ ¤ì(€€€€€€€¥˜¡Á•É•¹ĞğÀ¥íÍåÍÑ•µ5•µ½Éå1…‰•±|´ùÍ•ÑQ•áĞ¡EMÑÉ¥¹1¥Ñ•É…° ‰I4¸½ˆ¤¤íÍåÍÑ•µ5•µ½Éå	…É|´ùÍ•ÑY…±Õ” À¤íÉ•ÑÕÉ¸íô(€€€€€€€ÍåÍÑ•µ5•µ½Éå1…‰•±|´ùÍ•ÑQ•áĞ¡EMÑÉ¥¹1¥Ñ•É…° ‰I4€”Ä€”ˆ¤¹…Éœ¡Á•É•¹Ğ¤¤ì(€€€€€€€ÍåÍÑ•µ5•µ½Éå	…É|´ùÍ•ÑY…±Õ”¡Á•É•¹Ğ¤ì(€€€ô((€€€Ù½¥‘¥ÍÁ±…åI…ÍÑ•ÉM•ÑÑ¥¹Ì¡½¹ÍĞI…ÍÑ•ÉEÕ…±¥ÑåM•ÑÑ¥¹Ì˜Ä¥ì(€€€€€€€½¹ÍĞEM¥¹…±	±½­•ÈµÍ……	±½­•È¡É…ÍÑ•É5Í……	½á|¤ì(€€€€€€€½¹ÍĞEM¥¹…±	±½­•È…¹¥Í½	±½­•È¡É…ÍÑ•É¹¥Í½	½á|¤ì(€€€€€€€½¹ÍĞEM¥¹…±	±½­•È±½‘	±½­•È¡É…ÍÑ•É1½‘	½á|¤ì(€€€€€€€½¹ÍĞEM¥¹…±	±½­•ÈÕ±±	±½­•È¡É…ÍÑ•ÉÕ±±	½á|¤ì(€€€€€€€½¹ÍĞEM¥¹…±	±½­•È‘å¹…µ¥	±½­•È¡É…ÍÑ•Éå¹…µ¥1½‘	½á|¤ì(€€€€€€€É…ÍÑ•É5Í……	½á|´ùÍ•ÑÕÉÉ•¹Ñ%¹‘•à¡É…ÍÑ•É5Í……	½á|´ù™¥¹‘…Ñ„¡¥¹Ğ¡Ä¹µÍ……M…µÁ±•Ì¤¤¤ì(€€€€€€€É…ÍÑ•É¹¥Í½	½á|´ùÍ•ÑÕÉÉ•¹Ñ%¹‘•à¡É…ÍÑ•É¹¥Í½	½á|´ù™¥¹‘…Ñ„¡¥¹Ğ¡Ä¹…¹¥Í½ÑÉ½Áä¤¤¤ì(€€€€€€€É…ÍÑ•É1½‘	½á|´ùÍ•ÑÕÉÉ•¹Ñ%¹‘•à¡É…ÍÑ•É1½‘	½á|´ù™¥¹‘…Ñ„¡¥¹Ğ¡Ä¹±½‘EÕ…±¥ÑåA•É•¹Ğ¤¤¤ì(€€€€€€€É…ÍÑ•ÉÕ±±	½á|´ùÍ•Ñ¡•­•¡Ä¹™ÉÕÍÑÕµÕ±±¥¹œ¤ì(€€€€€€€É…ÍÑ•Éå¹…µ¥1½‘	½á|´ùÍ•Ñ¡•­•¡Ä¹‘å¹…µ¥1½¤ì(€€€€€€€É…ÍÑ•É1½‘	½á|´ùÍ•Ñ¹…‰±•¡Ä¹‘å¹…µ¥1½¤ì(€€€ô(€€€Ù½¥…ÁÁ±åI…ÍÑ•ÉM•ÑÑ¥¹Ì¡‰½½°ÕÍ•ÉÕÍÑ½´¥ì(€€€€€€€¥˜ …É…ÍÑ•ÉAÉ•Í•Ñ	½á}ñğ…É…ÍÑ•É5Í……	½á|¥É•ÑÕÉ¸ì(€€€€€€€¥˜¡ÕÍ•ÉÕÍÑ½´¥ì(€€€€€€€€€€€½¹ÍĞEM¥¹…±	±½­•È‰±½­•È¡É…ÍÑ•ÉAÉ•Í•Ñ	½á|¤ì(€€€€€€€€€€€É…ÍÑ•ÉAÉ•Í•Ñ	½á|´ùÍ•ÑÕÉÉ•¹Ñ%¹‘•à Ğ¤ì(€€€€€€€ô(€€€€€€€I…ÍÑ•ÉEÕ…±¥ÑåM•ÑÑ¥¹ÌÄì(€€€€€€€Ä¹µÍ……M…µÁ±•ÌõÉ…ÍÑ•É5Í……	½á|´ùÕÉÉ•¹Ñ…Ñ„ ¤¹Ñ½U%¹Ğ ¤ì(€€€€€€€Ä¹…¹¥Í½ÑÉ½ÁäõÉ…ÍÑ•É¹¥Í½	½á|´ùÕÉÉ•¹Ñ…Ñ„ ¤¹Ñ½U%¹Ğ ¤ì(€€€€€€€Ä¹±½‘EÕ…±¥ÑåA•É•¹ĞõÉ…ÍÑ•É1½‘	½á|´ùÕÉÉ•¹Ñ…Ñ„ ¤¹Ñ½U%¹Ğ ¤ì(€€€€€€€Ä¹™ÉÕÍÑÕµÕ±±¥¹œõÉ…ÍÑ•ÉÕ±±	½á|´ù¥Í¡•­• ¤ì(€€€€€€€Ä¹‘å¹…µ¥1½õÉ…ÍÑ•Éå¹…µ¥1½‘	½á|´ù¥Í¡•­• ¤ì(€€€€€€€É…ÍÑ•É1½‘	½á|´ùÍ•Ñ¹…‰±•¡Ä¹‘å¹…µ¥1½¤ì(€€€€€€€ÍÑèéİÍÑÉ¥¹œ•ÉÉ½Èì(€€€€€€€¥˜ …Í•ÑI…ÍÑ•ÉEÕ…±¥ÑåM•ÑÑ¥¹Ì¡Ä±•ÉÉ½È¤¥ì(€€€€€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹œèé™É½µMÑ‘]MÑÉ¥¹œ¡•ÉÉ½È¤°ÜÀÀÀ¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€EM•ÑÑ¥¹ÌÍ•ÑÑ¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰M]I@XÄÜˆ¤¤ì(€€€€€€€Í•ÑÑ¥¹Ì¹Í•ÑY…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½AÉ•Í•Ğˆ¤±É…ÍÑ•ÉAÉ•Í•Ñ	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤¤ì(€€€€€€€Í•ÑÑ¥¹Ì¹Í•ÑY…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½5Mˆ¤±Ä¹µÍ……M…µÁ±•Ì¤ì(€€€€€€€Í•ÑÑ¥¹Ì¹Í•ÑY…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½¹¥Í½ÑÉ½Áäˆ¤±Ä¹…¹¥Í½ÑÉ½Áä¤ì(€€€€€€€Í•ÑÑ¥¹Ì¹Í•ÑY…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½1=A•É•¹Ğˆ¤±Ä¹±½‘EÕ…±¥ÑåA•É•¹Ğ¤ì(€€€€€€€Í•ÑÑ¥¹Ì¹Í•ÑY…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½Õ±±¥¹œˆ¤±Ä¹™ÉÕÍÑÕµÕ±±¥¹œ¤ì(€€€€€€€Í•ÑÑ¥¹Ì¹Í•ÑY…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½å¹…µ¥1=ˆ¤±Ä¹‘å¹…µ¥1½¤ì(€€€€€€€¥˜¡ÉÕ¹Ñ¥µ•|˜™‰…­•¹‘	½á|˜˜(€€€€€€€€€€€¡‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ôôÑññ‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ôôÔ¤¥É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€ô(€€€Ù½¥ÍÑ½ÁI…‘¥¼ ¥ì(€€€€€€€É…‘¥½Õ‘¥½|¹ÍÑ½À ¤ì(€€€€€€€É…‘¥½A±…å¥¹|õ™…±Í”ì(€€€€€€€¥˜¡É…‘¥½Q½±•	ÕÑÑ½¹|¥É…‘¥½Q½±•	ÕÑÑ½¹|´ùÍ•ÑQ•áĞ¡EMÑÉ¥¹1¥Ñ•É…° ‰I•ÁÉ•¹‘É”±„É…‘¥¼ˆ¤¤ì(€€€€€€€¥˜¡É…‘¥½MÑ…ÑÕÍ1…‰•±|¥É…‘¥½MÑ…ÑÕÍ1…‰•±|´ùÍ•ÑQ•áĞ¡EMÑÉ¥¹1¥Ñ•É…° ‰I…‘¥¼…ÉË©Ó¥”ˆ¤¤ì(€€€ô(€€€‰½½°±½…‘MÁ•…­•É1…å½ÕĞ ¥ì(€€€€€€€½¹ÍĞEMÑÉ¥¹œÁ…Ñ õE¥È¡E½É•ÁÁ±¥…Ñ¥½¸èé…ÁÁ±¥…Ñ¥½¹¥ÉA…Ñ  ¤¤¹™¥±•A…Ñ  (€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰…Õ‘¥¼½ÍÁ•…­•É}±…å½ÕĞ¹©Í½¸ˆ¤¤ì(€€€€€€€E¥±”™¥±”¡Á…Ñ ¤ì(€€€€€€€¥˜ …™¥±”¹½Á•¸¡E%=•Ù¥”èéI•…‘=¹±ä¤¥É•ÑÕÉ¸™…±Í”ì(€€€€€€€½¹ÍĞ…ÕÑ¼‘½ŒõE)Í½¹½Õµ•¹Ğèé™É½µ)Í½¸¡™¥±”¹É•…‘±° ¤¤ì(€€€€€€€¥˜ …‘½Œ¹¥Í=‰©•Ğ ¤¥É•ÑÕÉ¸™…±Í”ì(€€€€€€€½¹ÍĞE)Í½¹ÉÉ…äÍ½ÕÉ•Ìõ‘½Œ¹½‰©•Ğ ¤¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰±½Õ‘ÍÁ•…­•ÉÌˆ¤¤¹Ñ½ÉÉ…ä ¤ì(€€€€€€€¥˜¡Í½ÕÉ•Ì¹Í¥é” ¤„ôĞ¥É•ÑÕÉ¸™…±Í”ì(€€€€€€€™½È¡¥¹Ğ¤ôÀí¤ğĞì¬­¤¥ì(€€€€€€€€€€€¥˜ …Í½ÕÉ•Ím¥t¹¥Í=‰©•Ğ ¤¥É•ÑÕÉ¸™…±Í”ì(€€€€€€€€€€€½¹ÍĞ…ÕÑ¼½‰¨õÍ½ÕÉ•Ím¥t¹Ñ½=‰©•Ğ ¤ì(€€€€€€€€€€€½¹ÍĞ…ÕÑ¼Á½Ìõ½‰¨¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰Á½Í¥Ñ¥½¸ˆ¤¤¹Ñ½ÉÉ…ä ¤ì(€€€€€€€€€€€½¹ÍĞ…ÕÑ¼™É½¹Ğõ½‰¨¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰™É½¹Ğˆ¤¤¹Ñ½ÉÉ…ä ¤ì(€€€€€€€€€€€¥˜¡Á½Ì¹Í¥é” ¤„ôÍññ™É½¹Ğ¹Í¥é” ¤„ôÌ¥É•ÑÕÉ¸™…±Í”ì(€€€€€€€€€€€™½È¡¥¹Ğ…á¥ÌôÀí…á¥ÌğÌì¬­…á¥Ì¥ì(€€€€€€€€€€€€€€€½¹ÍĞ‘½Õ‰±”ÀõÁ½Ím…á¥Ít¹Ñ½½Õ‰±”¡ÍÑèé¹Õµ•É¥}±¥µ¥ÑÌñ‘½Õ‰±”øèéÅÕ¥•Ñ}9…8 ¤¤ì(€€€€€€€€€€€€€€€½¹ÍĞ‘½Õ‰±”˜õ™É½¹Ñm…á¥Ít¹Ñ½½Õ‰±”¡ÍÑèé¹Õµ•É¥}±¥µ¥ÑÌñ‘½Õ‰±”øèéÅÕ¥•Ñ}9…8 ¤¤ì(€€€€€€€€€€€€€€€¥˜ …ÍÑèé¥Í™¥¹¥Ñ”¡À¥ñğ…ÍÑèé¥Í™¥¹¥Ñ”¡˜¤¥É•ÑÕÉ¸™…±Í”ì(€€€€€€€€€€€€€€€É…‘¥½MÁ•…­•ÉÍ}m¥t¹Á½Í¥Ñ¥½¹m…á¥Ítõ™±½…Ğ¡À¤ì(€€€€€€€€€€€€€€€É…‘¥½MÁ•…­•ÉÍ}m¥t¹™É½¹Ñm…á¥Ítõ™±½…Ğ¡˜¤ì(€€€€€€€€€€€ô(€€€€€€€ô(€€€€€€€É•ÑÕÉ¸ÑÉÕ”ì(€€€ô(€€€Ù½¥Á±…åI…‘¥¼ ¥ì(€€€€€€€½¹ÍĞEMÑÉ¥¹œÁ…Ñ õE¥È¡E½É•ÁÁ±¥…Ñ¥½¸èé…ÁÁ±¥…Ñ¥½¹¥ÉA…Ñ  ¤¤¹™¥±•A…Ñ  (€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰…Õ‘¥¼½ÁÉ¥Áå…Ñ}É…‘¥¼¹İ…Øˆ¤¤ì(€€€€€€€¥˜ …E¥±•%¹™¼èé•á¥ÍÑÌ¡Á…Ñ ¤¥ì(€€€€€€€€€€€¥˜¡É…‘¥½MÑ…ÑÕÍ1…‰•±|¥É…‘¥½MÑ…ÑÕÍ1…‰•±|´ùÍ•ÑQ•áĞ (€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰¥¡¥•È]X…‰Í•¹Ğ€è…Õ‘¥¼½ÁÉ¥Áå…Ñ}É…‘¥¼¹İ…Øˆ¤¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€¥˜ …±½…‘MÁ•…­•É1…å½ÕĞ ¤¥ì(€€€€€€€€€€€¥˜¡É…‘¥½MÑ…ÑÕÍ1…‰•±|¥É…‘¥½MÑ…ÑÕÍ1…‰•±|´ùÍ•ÑQ•áĞ (€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰%µÁ±…¹Ñ…Ñ¥½¸‘•Ì€Ğ!@¥¹ÑÉ½ÕÙ…‰±”½Ô¥¹Ù…±¥‘”ˆ¤¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€É…‘¥½Õ‘¥½|¹Í•ÑY½±Õµ”¡É…‘¥½Y½±Õµ•M±¥‘•É|ı™±½…Ğ¡É…‘¥½Y½±Õµ•M±¥‘•É|´ùÙ…±Õ” ¤¤¼ÔÀÀ¹˜è¸ÈÁ˜¤ì(€€€€€€€É…‘¥½A±…å¥¹|õÉ…‘¥½Õ‘¥½|¹ÍÑ…ÉĞ¡Á…Ñ ¹Ñ½MÑ‘]MÑÉ¥¹œ ¤±É…‘¥½MÁ•…­•ÉÍ|¤ì(€€€€€€€¥˜¡É…‘¥½Q½±•	ÕÑÑ½¹|¥É…‘¥½Q½±•	ÕÑÑ½¹|´ùÍ•ÑQ•áĞ¡É…‘¥½A±…å¥¹|(€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ‰ÉË©Ñ•È±„É…‘¥¼ˆ¤éEMÑÉ¥¹1¥Ñ•É…° ‰I•ÁÉ•¹‘É”±„É…‘¥¼ˆ¤¤ì(€€€€€€€¥˜¡É…‘¥½MÑ…ÑÕÍ1…‰•±|¥É…‘¥½MÑ…ÑÕÍ1…‰•±|´ùÍ•ÑQ•áĞ¡É…‘¥½A±…å¥¹|(€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ˆĞ!@ÍÁ…Ñ¥…±¥Ï¥Ìƒ
+ÜaÕ‘¥¼È€¼`ÍÕ‘¥¼ƒ
+Ü]X‘”Ñ•ÍĞˆ¤(€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ‰Õ‘¥¼€Í¥¹‘¥ÍÁ½¹¥‰±”€¡Á¥±½Ñ”½Ô]X¥¹½ÉÉ•Ğ¤ˆ¤¤ì(€€€ô(€€€Ù½¥É•™É•Í¡I…‘¥½½ÉM•¹”¡½¹ÍĞEMÑÉ¥¹œ˜Á…Ñ ¥ì(€€€€€€€ÍÑ½ÁI…‘¥¼ ¤ì(€€€€€€€½¹ÍĞEMÑÉ¥¹œ±½İ•ÈõÁ…Ñ ¹Ñ½1½İ•È ¤ì(€€€€€€€½¹ÍĞ‰½½°¥ÍMÅÕ…É”õ±½İ•È¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰‰•¹¡µ…É¬µ¥Ù¥Œˆ¤¤(€€€€€€€€€€€ññ±½İ•È¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰ÁÉ¥Áå…Ğˆ¤¤(€€€€€€€€€€€ññ±½İ•È¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰•¹•É•Ñ¥¬ˆ¤¤ì(€€€€€€€¥˜¡¥ÍMÅÕ…É”˜™É…‘¥½ÕÑ½Á±…å¹…‰±•‘|¥Á±…åI…‘¥¼ ¤ì(€€€ô((€€€Ù½¥Í•±•Ñ¹½µ…±ä¡¥¹Ğ¥¹‘•à¥ì(€€€€€€€¥˜¡¥¹‘•àğÁññ¥¹‘•àøõ¥¹Ğ¡Í”èé…¹½µ…±¥•ÌèéÉ•½É‘Ì¹Í¥é” ¤¤¥É•ÑÕÉ¸ì(€€€€€€€¥˜ …ÉÕ¹Ñ¥µ•}ññÉÕ¹Ñ¥µ•|´ù…µ•É…Ì¹¥ÍµÁÑä ¤¥ì(€€€€€€€€€€€E5•ÍÍ…•	½àèé¥¹™½Éµ…Ñ¥½¸¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰¹½µ…±¥•Ìˆ¤°(€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰¡…É•è±„Í•¹”‘ÔÁ…±…¥Ì…Ù…¹Ğ‘”½¹ÍÕ±Ñ•È±”É•¥ÍÑÉ”¸ˆ¤¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€¥˜ …Í•¹•A…Ñ¡|¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰‰•¹¡µ…É¬µ¥Ù¥Œˆ¤±EĞèé…Í•%¹Í•¹Í¥Ñ¥Ù”¤¥ì(€€€€€€€€€€€E5•ÍÍ…•	½àèéİ…É¹¥¹œ¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰¹½µ…±¥•Ìˆ¤°(€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰1•ÌÁ½Í¥Ñ¥½¹ÌÍ½¹ĞÉ•±•Ù••Ì‘…¹Ì±”Á…±…¥Ì‰•¹¡µ…É¬µ¥Ù¥Œ¸=ÕÙÉ•è•ÑÑ”Í•¹”…Ù…¹Ğ‘”±•ÌÕÑ¥±¥Í•È¸ˆ¤¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€½¹ÍĞ…ÕÑ¼˜„õÍ”èé…¹½µ…±¥•ÌèéÉ•½É‘ÍmÍ¥é•}Ğ¡¥¹‘•à¥tì(€€€€€€€¥˜ …¡…Í	•™½É•¹½µ…±å…µ•É…|¥ì(€€€€€€€€€€€‰•™½É•¹½µ…±å…µ•É…|õ…Ñ¥Ù•…µ•É…A½Í” ¤ì(€€€€€€€€€€€¡…Í	•™½É•¹½µ…±å…µ•É…|õÑÉÕ”ì(€€€€€€€ô(€€€€€€€ÕÉÉ•¹Ñ¹½µ…±å|õ¥¹‘•àì(€€€€€€€¥˜¡„¹…µ•É…-¹½İ¸¥ì(€€€€€€€€€€€€¼¼…µ•É„É•…±±ÌÁÉ•Í•ÉÙ”„ÁÉ•¥Í”É•™•É•¹”Ù¥•Ü¸¼¹½Ğ(€€€€€€€€€€€€¼¼Í¥±•¹Ñ±ä‘¥Í…‰±”İ…±­¥¹œ½½±±¥Í¥½¹Ì½È½Ù•ÉİÉ¥Ñ”EM•ÑÑ¥¹Ì¸(€€€€€€€€€€€€¼¼=¹±äÉ•Íå¹¡É½¹¥é”Ñ¡”İ…±­¥¹œÍÑ…Ñ”½¸Ñ¡”¹•áĞµ½Ù•µ•¹Ğ¸(€€€€€€€€€€€­•åÍ½İ¹|¹±•…È ¤ì(€€€€€€€€€€€Á½½±1…‘‘•É5½Ñ¥½¹|õíôì(€€€€€€€€€€€½¹ÍĞ™±½…ĞåÈõ„¹å…Ü©A$¼ÄàÀ¹˜ì(€€€€€€€€€€€½¹ÍĞ™±½…ĞÁÈõ„¹Á¥Ñ ©A$¼ÄàÀ¹˜ì(€€€€€€€€€€€™É••…µ•É…|¹•å”õí„¹à±„¹ä±„¹éôì(€€€€€€€€€€€İ…±­¥¹½±±¥Í¥½¹Må¹A•¹‘¥¹|õÑÉÕ”ì(€€€€€€€€€€€™É••…µ•É…|¹™½Øõ„¹™½Øì(€€€€€€€€€€€É•Í•ÑM½Á•½É…µ•É„ ¤ì(€€€€€€€€€€€™É••…µ•É…|¹¥õEMÑÉ¥¹œèé™É½µ1…Ñ¥¸Ä¡„¹¥¤ì(€€€€€€€€€€€™É••…µ•É…|¹¹…µ”õEMÑÉ¥¹œèé™É½µUÑ˜à¡„¹Ñ¥Ñ±”¤ì(€€€€€€€€€€€å…İ|õåÈíÁ¥Ñ¡|õÁÈì(€€€€€€€€€€€™É••…µ•É…Ñ¥Ù•|õÑÉÕ”ì(€€€€€€€€€€€ÕÁ‘…Ñ•1½½¬ ¤ì(€€€€€€€€€€€É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€€€€€…¹Ù…Í|´ùÍ•Ñ½ÕÌ ¤ì(€€€€€€€õ•±Í•ì(€€€€€€€€€€€€¼¼9<´ÀÄĞ¡…Ì¹¼µ•…ÍÕÉ•½½É‘¥¹…Ñ•Ìì­••ÀÑ¡”ÕÉÉ•¹ĞÁ½Í”¸(€€€€€€€€€€€€¼¼Q¡”ÕÍ•È…¸Í•±•Ğ•áÑ•É¥½È…µ•É„€ÀÄ½Èİ…±¬Ñ¼…¹äÁ…Ù¥¹œ©½¥¹Ğ¸(€€€€€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€€€€€‰9<´ÀÄĞ€èÁ…Ì‘”½½É‘½¹¹••Ìµ•ÍÕÉ••Ì¸M•±•Ñ¥½¹¹•èÕ¹”ÙÕ”•áÑ•É¥•ÕÉ”ÁÕ¥Ìµ…É¡•èÍÕÈ±•Ì©½¥¹ÑÌ¸ˆ¤°ÄÌÀÀÀ¤ì(€€€€€€€ô(€€€€€€€ÕÁ‘…Ñ•¹½µ…±åA…¹•° ¤ì(€€€ô(€€€Ù½¥ÕÁ‘…Ñ•¹½µ…±åA…¹•° ¥ì(€€€€€€€¥˜ ……¹½µ…±åA…¹•±1…‰•±|¥É•ÑÕÉ¸ì(€€€€€€€¥˜¡ÕÉÉ•¹Ñ¹½µ…±å|ğÀ¥ì(€€€€€€€€€€€…¹½µ…±åA…¹•±1…‰•±|´ùÍ•ÑQ•áĞ¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€€€€€‰¡½¥Í¥ÍÍ•è9<´ÀÀÔ„9<´ÀÄĞ‘•ÁÕ¥Ì±”µ•¹Ô¹½µ…±¥•Ì¸ˆ¤¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€½¹ÍĞ…ÕÑ¼˜„õÍ”èé…¹½µ…±¥•ÌèéÉ•½É‘ÍmÍ¥é•}Ğ¡ÕÉÉ•¹Ñ¹½µ…±å|¥tì(€€€€€€€…¹½µ…±åA…¹•±1…‰•±|´ùÍ•ÑQ•áĞ (€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ˆ”Ä€´€”Éq¸”Íq¸”Ğˆ¤(€€€€€€€€€€€€€€¹…Éœ¡EMÑÉ¥¹œèé™É½µ1…Ñ¥¸Ä¡„¹¥¤°(€€€€€€€€€€€€€€€€€€EMÑÉ¥¹œèé™É½µUÑ˜à¡„¹Ñ¥Ñ±”¤°(€€€€€€€€€€€€€€€€€€EMÑÉ¥¹œèé™É½µUÑ˜à¡„¹¡•¬¤°(€€€€€€€€€€€€€€€€€€„¹½ÉÉ•Ñ•‘…¹‘¥‘…Ñ”ıEMÑÉ¥¹1¥Ñ•É…° ‰5½‘¥™¥…Ñ¥½¸½‘•”€è„Ù…±¥‘•Èˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ‰¹½µ…±¥”•¹½É”½ÕÙ•ÉÑ”ˆ¤¤¤ì(€€€€€€€…¹½µ…±åA…¹•±1…‰•±|´ùÍ•Ñ]½É‘]É…À¡ÑÉÕ”¤ì(€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…” (€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ˆ”Ä€è€”Èˆ¤¹…Éœ¡EMÑÉ¥¹œèé™É½µ1…Ñ¥¸Ä¡„¹¥¤±EMÑÉ¥¹œèé™É½µUÑ˜à¡„¹¡•¬¤¤°(€€€€€€€€€€€€ÄÈÀÀÀ¤ì(€€€ô(€€€Ù½¥Í…Ù•¹½µ…±åY•É‘¥Ğ¡½¹ÍĞEMÑÉ¥¹œ˜Ù•É‘¥Ğ¥ì(€€€€€€€¥˜¡ÕÉÉ•¹Ñ¹½µ…±å|ğÀ¥É•ÑÕÉ¸ì(€€€€€€€½¹ÍĞ…ÕÑ¼˜„õÍ”èé…¹½µ…±¥•ÌèéÉ•½É‘ÍmÍ¥é•}Ğ¡ÕÉÉ•¹Ñ¹½µ…±å|¥tì(€€€€€€€€¼¼M•Á…É…Ñ”™¥±”Á•È…ÑÑ•µÁĞè‘¼¹½Ğ½Ù•ÉİÉ¥Ñ”Ñ¡”•Ù¥‘•¹”™É½´…¹½Ñ¡•È(€€€€€€€€¼¼Ù•ÉÍ¥½¸½ÈÁÉ•Ù¥½ÕÌÉ•Ù¥•Ü¸9¼•áÑ•É¹…°ÍÑ½É…”½ÈÑ•±•µ•ÑÉä¸(€€€€€€€½¹ÍĞEMÑÉ¥¹œÉ½½ĞõEMÑ…¹‘…É‘A…Ñ¡ÌèéİÉ¥Ñ…‰±•1½…Ñ¥½¸¡EMÑ…¹‘…É‘A…Ñ¡Ìèé½Õµ•¹ÑÍ1½…Ñ¥½¸¤(€€€€€€€€€€€€­EMÑÉ¥¹1¥Ñ•É…° ˆ½Mµ]I@µ¹½µ…±¥•Ìˆ¤ì(€€€€€€€¥˜ …E¥È ¤¹µ­Á…Ñ ¡É½½Ğ¤¥ì(€€€€€€€€€€€E5•ÍÍ…•	½àèéİ…É¹¥¹œ¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰¹½µ…±¥•Ìˆ¤°(€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰%µÁ½ÍÍ¥‰±”‘”É••È±”‘½ÍÍ¥•È€è€”Äˆ¤¹…Éœ¡É½½Ğ¤¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€½¹ÍĞEMÑÉ¥¹œÑ¥µ•ÍÑ…µÀõE…Ñ•Q¥µ”èéÕÉÉ•¹Ñ…Ñ•Q¥µ” ¤¹Ñ½MÑÉ¥¹œ¡EMÑÉ¥¹1¥Ñ•É…° ‰åååå55‘‘}!!µµÍÍ}ééèˆ¤¤ì(€€€€€€€½¹ÍĞEMÑÉ¥¹œÁ…Ñ õÉ½½Ğ­EMÑÉ¥¹1¥Ñ•É…° ˆ¼ˆ¤(€€€€€€€€€€€€­EMÑÉ¥¹œèé™É½µ1…Ñ¥¸Ä¡„¹¥¤­EMÑÉ¥¹1¥Ñ•É…° ˆµXÄÜ¸”Ä´ˆ¤¹…Éœ¡M}]IA}	U%1}9U5	H¤(€€€€€€€€€€€€­Ñ¥µ•ÍÑ…µÀ­EMÑÉ¥¹1¥Ñ•É…° ˆ¹©Í½¸ˆ¤ì(€€€€€€€½¹ÍĞE)Í½¹=‰©•ĞÉ•½É‘ì(€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰™½Éµ…Ğˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰Í”µİ…ÉÀµ…¹½µ…±äµÉ•Ù¥•ÜµØÄˆ¥ô°(€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰Ù•ÉÍ¥½¸ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ˆÄÜ¸”Äˆ¤¹…Éœ¡M}]IA}	U%1}9U5	H¥ô°(€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰…¹½µ…±å%ˆ¤±EMÑÉ¥¹œèé™É½µ1…Ñ¥¸Ä¡„¹¥¥ô°(€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰Ñ¥Ñ±”ˆ¤±EMÑÉ¥¹œèé™É½µUÑ˜à¡„¹Ñ¥Ñ±”¥ô°(€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰•áÁ•Ñ•ˆ¤±EMÑÉ¥¹œèé™É½µUÑ˜à¡„¹¡•¬¥ô°(€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰Ù•É‘¥Ğˆ¤±Ù•É‘¥Ñô°(€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰Í•¹”ˆ¤±E¥±•%¹™¼¡Í•¹•A…Ñ¡|¤¹™¥±•9…µ” ¥ô°(€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰Ñ¥µ•ÍÑ…µÀˆ¤±E…Ñ•Q¥µ”èéÕÉÉ•¹Ñ…Ñ•Q¥µ•UÑŒ ¤¹Ñ½MÑÉ¥¹œ¡EĞèé%M=…Ñ•]¥Ñ¡5Ì¥ô°(€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰É•™•É•¹•A½Í•-¹½İ¸ˆ¤±„¹…µ•É…-¹½İ¹ô°(€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰…µ•É„ˆ¤±Í”èé…µ•É…}‘¥…¹½ÍÑ¥ŒèéÑ½)Í½¸¡…Ñ¥Ù•…µ•É…A½Í” ¤¥ô(€€€€€€€ôì(€€€€€€€EM…Ù•¥±”™¥±”¡Á…Ñ ¤ì(€€€€€€€¥˜ …™¥±”¹½Á•¸¡E%=•Ù¥”èé]É¥Ñ•=¹±ä¥ñğ(€€€€€€€€€€€™¥±”¹İÉ¥Ñ”¡E)Í½¹½Õµ•¹Ğ¡É•½É¤¹Ñ½)Í½¸¡E)Í½¹½Õµ•¹Ğèé%¹‘•¹Ñ•¤¤ğÁñğ(€€€€€€€€€€€€…™¥±”¹½µµ¥Ğ ¤¥ì(€€€€€€€€€€€E5•ÍÍ…•	½àèéİ…É¹¥¹œ¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰¹½µ…±¥•Ìˆ¤°(€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰¡•Œ•¹É•¥ÍÑÉ•µ•¹Ğ€è€”Äˆ¤¹…Éœ¡Á…Ñ ¤¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° ˆ”Ä€èÙ•É‘¥Ğ€”ÈÍ…ÕÙ•…É‘”€è€”Ìˆ¤(€€€€€€€€€€€€¹…Éœ¡EMÑÉ¥¹œèé™É½µ1…Ñ¥¸Ä¡„¹¥¤±Ù•É‘¥Ğ±Á…Ñ ¤°ÄĞÀÀÀ¤ì(€€€ô(€€€Ù½¥É•ÑÕÉ¹	•™½É•¹½µ…±ä ¥ì(€€€€€€€¥˜ …¡…Í	•™½É•¹½µ…±å…µ•É…|¥É•ÑÕÉ¸ì(€€€€€€€½¹ÍĞ…ÕÑ¼Á½Í”õ‰•™½É•¹½µ…±å…µ•É…|ì(€€€€€€€€¼¼I•ÑÕÉ¸Ñ¼Ñ¡”½±…µ•É„İ¥Ñ¡½ÕĞ¡…¹¥¹œÑ¡”Í•±•Ñ•¹…Ù¥…Ñ¥½¸(€€€€€€€€¼¼µ½‘”½È‘¥Í…‰±¥¹œ½‰ÍÑ…±”½±±¥Í¥½¹Ì¥¸Í…Ù•ÁÉ•™•É•¹•Ì¸(€€€€€€€™É••…µ•É…|õÁ½Í”ì(€€€€€€€É•Í•ÑM½Á•½É…µ•É„ ¤ì(€€€€€€€İ…±­¥¹½±±¥Í¥½¹Må¹A•¹‘¥¹|õÑÉÕ”ì(€€€€€€€½¹ÍĞX‘¥Èõ¹½É´¡Á½Í”¹Ñ…É•ĞµÁ½Í”¹•å”¤ì(€€€€€€€å…İ|õÍÑèé…Ñ…¸È¡‘¥È¹à°µ‘¥È¹è¤ì(€€€€€€€Á¥Ñ¡|õÍÑèé…Í¥¸¡±…µÁ˜¡‘¥È¹ä°´¸äå˜°¸äå˜¤¤ì(€€€€€€€™É••…µ•É…Ñ¥Ù•|õÑÉÕ”ì(€€€€€€€¡…Í	•™½É•¹½µ…±å…µ•É…|õ™…±Í”ì(€€€€€€€ÕÉÉ•¹Ñ¹½µ…±å|ô´Äì(€€€€€€€ÕÁ‘…Ñ•¹½µ…±åA…¹•° ¤ì(€€€€€€€ÕÁ‘…Ñ•…µ•É…!Õ ¤ì(€€€€€€€É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€…¹Ù…Í|´ùÍ•Ñ½ÕÌ ¤ì(€€€ô((€€€Ù½¥É•…Ñ•U¤ ¥ì(€€€€€€€…ÕÑ¼¨™¥±”õµ•¹Õ	…È ¤´ù…‘‘5•¹Ô¡EMÑÉ¥¹1¥Ñ•É…° ‰¥¡¥•Èˆ¤¤ì(€€€€€€€…ÕÑ¼¨…ÁÑÕÉ•Ñ¥½¸õ™¥±”´ù…‘‘Ñ¥½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰…ÁÑÕÉ•ÈÕ¹”…¹½µ…±¥”€¡A9€¬…·¥É„)M=8§Š˜ˆ¤¤ì(€€€€€€€…ÁÑÕÉ•Ñ¥½¸´ùÍ•ÑM¡½ÉÑÕĞ¡E-•åM•ÅÕ•¹”¡EMÑÉ¥¹1¥Ñ•É…° ‰ÑÉ°­M¡¥™Ğ­ˆ¤¤¤ì(€€€€€€€½¹¹•Ğ¡…ÁÑÕÉ•Ñ¥½¸°™EÑ¥½¸èéÑÉ¥•É•±Ñ¡¥Ì±mÑ¡¥Íuí…ÁÑÕÉ•¹½µ…±ä ¤íô¤ì(€€€€€€€…ÕÑ¼¨É•ÍÑ½É•Ñ¥½¸õ™¥±”´ù…‘‘Ñ¥½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰I•ÍÑ…ÕÉ•ÈÕ¹”…·¥É„…¹½µ…±¥—Š˜ˆ¤¤ì(€€€€€€€É•ÍÑ½É•Ñ¥½¸´ùÍ•ÑM¡½ÉÑÕĞ¡E-•åM•ÅÕ•¹”¡EMÑÉ¥¹1¥Ñ•É…° ‰ÑÉ°­M¡¥™Ğ­<ˆ¤¤¤ì(€€€€€€€½¹¹•Ğ¡É•ÍÑ½É•Ñ¥½¸°™EÑ¥½¸èéÑÉ¥•É•±Ñ¡¥Ì±mÑ¡¥ÍuíÉ•ÍÑ½É•¹½µ…±å…µ•É„ ¤íô¤ì(€€€€€€€…ÕÑ¼¨½ÁåA½Í•Ñ¥½¸õ™¥±”´ù…‘‘Ñ¥½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰½Á¥•È±„Á½Í¥Ñ¥½¸…·¥É„€¡)M=8¤ˆ¤¤ì(€€€€€€€½ÁåA½Í•Ñ¥½¸´ùÍ•ÑM¡½ÉÑÕĞ¡E-•åM•ÅÕ•¹”¡EMÑÉ¥¹1¥Ñ•É…° ‰ÑÉ°­M¡¥™Ğ­ˆ¤¤¤ì(€€€€€€€½¹¹•Ğ¡½ÁåA½Í•Ñ¥½¸°™EÑ¥½¸èéÑÉ¥•É•±Ñ¡¥Ì±mÑ¡¥Íuí½Áå1¥Ù•…µ•É„ ¤íô¤ì(€€€€€€€™¥±”´ù…‘‘M•Á…É…Ñ½È ¤ì(€€€€€€€…ÕÑ¼¨½Á•¸õ™¥±”´ù…‘‘Ñ¥½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰=ÕÙÉ¥ÈÕ¹”Í¡¹”XÄØ€¡Í•¹”¹©Í½¸§Š˜ˆ¤¤ì(€€€€€€€½¹¹•Ğ¡½Á•¸°™EÑ¥½¸èéÑÉ¥•É•±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œ¡½Í•¸õE¥±•¥…±½œèé•Ñ=Á•¹¥±•9…µ” (€€€€€€€€€€€€€€€Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰M¡¹”XÄØˆ¤±E¥±•%¹™¼¡Í•¹•A…Ñ¡|¤¹…‰Í½±ÕÑ•A…Ñ  ¤°(€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰5…¹¥™•ÍÑ”XÄØ€¡Í•¹”¹©Í½¸¤ìí)M=8€ ¨¹©Í½¸¤ˆ¤¤ì(€€€€€€€€€€€¥˜ …¡½Í•¸¹¥ÍµÁÑä ¤¥½Á•¹M•¹”¡¡½Í•¸¤ì(€€€€€€€ô¤ì(€€€€€€€…ÕÑ¼¨‰•¹¡µ…É­M•¹•Ìõ™¥±”´ù…‘‘5•¹Ô¡EMÑÉ¥¹1¥Ñ•É…° ‰M¡¹•Ì‰•¹¡µ…É¬…É¡¥Ñ•ÑÕÉ…±•Ìˆ¤¤ì(€€€€€€€™½È¡½¹ÍĞ…ÕÑ¼˜ÁÉ½™¥±”éEY•Ñ½ÈñEA…¥ÈñEMÑÉ¥¹œ±EMÑÉ¥¹œøùì(€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰3¥•ÈƒŠP€ÈÀ€ÀÀÀÑÉ¥…¹±•Ìˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰Í•¹”¹©Í½¸ˆ¥ô°(€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰1½ÕÉƒŠP€ÄÔÀ€ÀÀÀÑÉ¥…¹±•Ìˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰Í•¹”µ±½ÕÉ¹©Í½¸ˆ¥ô°(€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰áÑË©µ”ƒŠP€ÔÀÀ€ÀÀÀ¬ÑÉ¥…¹±•Ìˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰Í•¹”µ•áÑÉ•µ”¹©Í½¸ˆ¥õô¥ì(€€€€€€€€€€€…ÕÑ¼¨…Ñ¥½¸õ‰•¹¡µ…É­M•¹•Ì´ù…‘‘Ñ¥½¸¡ÁÉ½™¥±”¹™¥ÉÍĞ¤ì(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œÍ•¹•¥±”õÁÉ½™¥±”¹Í•½¹ì(€€€€€€€€€€€½¹¹•Ğ¡…Ñ¥½¸°™EÑ¥½¸èéÑÉ¥•É•±Ñ¡¥Ì±mÑ¡¥Ì±Í•¹•¥±•uì(€€€€€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œÑ…É•ĞõE½É•ÁÁ±¥…Ñ¥½¸èé…ÁÁ±¥…Ñ¥½¹¥ÉA…Ñ  ¤(€€€€€€€€€€€€€€€€€€€€­EMÑÉ¥¹1¥Ñ•É…° ˆ½‰•¹¡µ…É¬µ¥Ù¥Œ¼ˆ¤­Í•¹•¥±”ì(€€€€€€€€€€€€€€€¥˜ …E¥±•%¹™¼èé•á¥ÍÑÌ¡Ñ…É•Ğ¤¥ì(€€€€€€€€€€€€€€€€€€€E5•ÍÍ…•	½àèéİ…É¹¥¹œ¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰M¡¹”‰•¹¡µ…É¬µ…¹ÅÕ…¹Ñ”ˆ¤°(€€€€€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰1„Í¡¹”¸•ÍĞÁ…Ì¥¹ÍÑ…±³¥”€è€”Äˆ¤¹…Éœ¡Ñ…É•Ğ¤¤ì(€€€€€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€¥˜¡Í•¹•¥±”ôõEMÑÉ¥¹1¥Ñ•É…° ‰Í•¹”µ•áÑÉ•µ”¹©Í½¸ˆ¤˜˜(€€€€€€€€€€€€€€€€€€€E5•ÍÍ…•	½àèéÅÕ•ÍÑ¥½¸¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰AÉ½™¥°•áÑË©µ”ˆ¤°(€€€€€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰”¹¥Ù•…Ô½¹Ñ¥•¹Ğ…Ôµ½¥¹Ì€ÔÀÀ€ÀÀÀÑÉ¥…¹±•Ì¸€ˆ(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€‰%°ÕÑ¥±¥Í”‰•…Õ½ÕÀ‘”I4•ĞÁ•ÕĞƒ©ÑÉ”±•¹ĞÍÕÈ%¹Ñ•°!€ØÈÀ¸€ˆ(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€‰¡…É•È±„Í¡¹”Í…¹Ì±…¹•È…ÕÑ½µ…Ñ¥ÅÕ•µ•¹ĞÍ½¸É•¹‘Ô€üˆ¤¤(€€€€€€€€€€€€€€€€€€€€€€€€€€„õE5•ÍÍ…•	½àèée•Ì¥É•ÑÕÉ¸ì(€€€€€€€€€€€€€€€½Á•¹M•¹”¡Ñ…É•Ğ¤ì(€€€€€€€€€€€ô¤ì(€€€€€€€ô(€€€€€€€…ÕÑ¼¨Í…Ù•5…Ñ•É¥…±ÍÑ¥½¸õ™¥±”´ù…‘‘Ñ¥½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰¹É•¥ÍÑÉ•È±•Ìµ…Ó¥É¥…ÕàA	KŠ˜ˆ¤¤ì(€€€€€€€½¹¹•Ğ¡Í…Ù•5…Ñ•É¥…±ÍÑ¥½¸°™EÑ¥½¸èéÑÉ¥•É•±Ñ¡¥Ì±mÑ¡¥ÍuíÍ…Ù•5…Ñ•É¥…±Ì ¤íô¤ì(€€€€€€€…ÕÑ¼¨Í…Ù”õ™¥±”´ù…‘‘Ñ¥½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰áÁ½ÉÑ•È°¥µ…”A9Š˜ˆ¤¤ì(€€€€€€€½¹¹•Ğ¡Í…Ù”°™EÑ¥½¸èéÑÉ¥•É•±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€¥˜¡±…ÍÑ%µ…•|¹¥Í9Õ±° ¤¥íE5•ÍÍ…•	½àèé¥¹™½Éµ…Ñ¥½¸¡Ñ¡¥Ì°‰A9ˆ°‰ÕÕ¹”¥µ…”…±Õ³¥”¸ˆ¤íÉ•ÑÕÉ¸íô(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œÁ…Ñ õE¥±•¥…±½œèé•ÑM…Ù•¥±•9…µ”¡Ñ¡¥Ì°‰áÁ½ÉÑ•ÈA9ˆ°‰Á…Ù¥±±½¸ÀÄµØÄØ¹Á¹œˆ°‰A9€ ¨¹Á¹œ¤ˆ¤ì(€€€€€€€€€€€¥˜ …Á…Ñ ¹¥ÍµÁÑä ¤˜˜…±…ÍÑ%µ…•|¹Í…Ù”¡Á…Ñ °‰A9ˆ¤¤(€€€€€€€€€€€€€€€E5•ÍÍ…•	½àèéİ…É¹¥¹œ¡Ñ¡¥Ì°‰A9ˆ°‹%¡•Œ‘”°•¹É•¥ÍÑÉ•µ•¹Ğ¸ˆ¤ì(€€€€€€€ô¤ì(€€€€€€€…ÕÑ¼¨ÅÕ¥Ğõ™¥±”´ù…‘‘Ñ¥½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰EÕ¥ÑÑ•Èˆ¤¤ì(€€€€€€€½¹¹•Ğ¡ÅÕ¥Ğ°™EÑ¥½¸èéÑÉ¥•É•±Ñ¡¥Ì°™E]¥‘•Ğèé±½Í”¤ì((€€€€€€€€¼¼=¹”µ±¥¬…µ•É„ÁÉ•Í•ÑÌ…É”¥¹‘•Á•¹‘•¹Ğ™É½´Ñ¡”‘•Ñ…¥±•Í•ÑÑ¥¹ÌÁ…¹•°¸(€€€€€€€…ÕÑ¼¨…µ•É…Í5•¹Ôõµ•¹Õ	…È ¤´ù…‘‘5•¹Ô¡EMÑÉ¥¹1¥Ñ•É…° ‰…·¥É…Ìˆ¤¤ì(€€€€€€€…ÕÑ¼¨…µ•É…ÍQ½½±‰…Èõ…‘‘Q½½±	…È¡EMÑÉ¥¹1¥Ñ•É…° ‰…·¥É…Ìƒ
+Ü€Äƒ€€Øˆ¤¤ì(€€€€€€€…µ•É…ÍQ½½±‰…È´ùÍ•Ñ5½Ù…‰±”¡™…±Í”¤ì(€€€€€€€…µ•É…ÍQ½½±‰…È´ùÍ•ÑQ½½±	ÕÑÑ½¹MÑå±”¡EĞèéQ½½±	ÕÑÑ½¹Q•áÑ=¹±ä¤ì(€€€€€€€™½È¡¥¹Ğ¤ôÀí¤ğØì¬­¤¥ì(€€€€€€€€€€€…ÕÑ¼¨…Ñ¥½¸õ¹•ÜEÑ¥½¸¡EMÑÉ¥¹œèé¹Õµ‰•È¡¤¬Ä¤±Ñ¡¥Ì¤ì(€€€€€€€€€€€…Ñ¥½¸´ùÍ•ÑM¡½ÉÑÕĞ¡E-•åM•ÅÕ•¹”¡EMÑÉ¥¹œèé¹Õµ‰•È¡¤¬Ä¤¤¤ì(€€€€€€€€€€€…Ñ¥½¸´ùÍ•ÑM¡½ÉÑÕÑ½¹Ñ•áĞ¡EĞèéÁÁ±¥…Ñ¥½¹M¡½ÉÑÕĞ¤ì(€€€€€€€€€€€…Ñ¥½¸´ùÍ•Ñ¹…‰±•¡™…±Í”¤ì(€€€€€€€€€€€½¹ÍĞ¥¹Ğ¥¹‘•àõ¤ì(€€€€€€€€€€€½¹¹•Ğ¡…Ñ¥½¸°™EÑ¥½¸èéÑÉ¥•É•±Ñ¡¥Ì±mÑ¡¥Ì±¥¹‘•áuì(€€€€€€€€€€€€€€€¥˜ …ÉÕ¹Ñ¥µ•}ññ¥¹‘•àøõÉÕ¹Ñ¥µ•|´ù…µ•É…Ì¹Í¥é” ¤¥É•ÑÕÉ¸ì(€€€€€€€€€€€€€€€½¹ÍĞ‰½½°¡…¹•õ…µ•É…	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤„õ¥¹‘•àì(€€€€€€€€€€€€€€€…µ•É…	½á|´ùÍ•ÑÕÉÉ•¹Ñ%¹‘•à¡¥¹‘•à¤ì(€€€€€€€€€€€€€€€…é¥µÕÑ¡|´ùÍ•ÑY…±Õ” À¤ì(€€€€€€€€€€€€€€€¥˜ …¡…¹•¥É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€€€€€ô¤ì(€€€€€€€€€€€ÅÕ¥­…µ•É…Ñ¥½¹Í|¹…ÁÁ•¹¡…Ñ¥½¸¤ì(€€€€€€€€€€€…µ•É…ÍQ½½±‰…È´ù…‘‘Ñ¥½¸¡…Ñ¥½¸¤ì(€€€€€€€€€€€…µ•É…Í5•¹Ô´ù…‘‘Ñ¥½¸¡…Ñ¥½¸¤ì(€€€€€€€ô(€€€€€€€…µ•É…ÍQ½½±‰…È´ù…‘‘M•Á…É…Ñ½È ¤ì(€€€€€€€Í•¹•I•Ù¥Í¥½¹1…‰•±|õ¹•ÜE1…‰•°¡EMÑÉ¥¹1¥Ñ•É…° ‰M¡¹”ƒŠPˆ¤±…µ•É…ÍQ½½±‰…È¤ì(€€€€€€€Í•¹•I•Ù¥Í¥½¹1…‰•±|´ùÍ•Ñ5¥¹¥µÕµ]¥‘Ñ  ÄÀà¤ì(€€€€€€€Í•¹•I•Ù¥Í¥½¹1…‰•±|´ùÍ•ÑQ½½±Q¥À¡EMÑÉ¥¹1¥Ñ•É…° ‰K¥Ù¥Í¥½¸‘Ôµ…¹¥™•ÍÑ”‘”±„Í¡¹”¡…ÉŸ¥”ˆ¤¤ì(€€€€€€€…µ•É…ÍQ½½±‰…È´ù…‘‘]¥‘•Ğ¡Í•¹•I•Ù¥Í¥½¹1…‰•±|¤ì(€€€€€€€ÍåÍÑ•µ5•µ½Éå1…‰•±|õ¹•ÜE1…‰•°¡EMÑÉ¥¹1¥Ñ•É…° ‰I4ƒŠPˆ¤±…µ•É…ÍQ½½±‰…È¤ì(€€€€€€€ÍåÍÑ•µ5•µ½Éå1…‰•±|´ùÍ•ÑQ½½±Q¥À¡EMÑÉ¥¹1¥Ñ•É…° ‰¡…É”‘”±„·¥µ½¥É”Á¡åÍ¥ÅÕ”ÍåÍÓ¡µ”ˆ¤¤ì(€€€€€€€…µ•É…ÍQ½½±‰…È´ù…‘‘]¥‘•Ğ¡ÍåÍÑ•µ5•µ½Éå1…‰•±|¤ì(€€€€€€€ÍåÍÑ•µ5•µ½Éå	…É|õ¹•ÜEAÉ½É•ÍÍ	…È¡…µ•É…ÍQ½½±‰…È¤ì(€€€€€€€ÍåÍÑ•µ5•µ½Éå	…É|´ùÍ•ÑI…¹” À°ÄÀÀ¤ìÍåÍÑ•µ5•µ½Éå	…É|´ùÍ•ÑQ•áÑY¥Í¥‰±”¡™…±Í”¤ì(€€€€€€€ÍåÍÑ•µ5•µ½Éå	…É|´ùÍ•Ñ¥á•‘M¥é” Øà°ÄÈ¤ì(€€€€€€€…µ•É…ÍQ½½±‰…È´ù…‘‘]¥‘•Ğ¡ÍåÍÑ•µ5•µ½Éå	…É|¤ì(€€€€€€€µ•µ½ÉåI•™É•Í¡Q¥µ•É|õ¹•ÜEQ¥µ•È¡Ñ¡¥Ì¤ì(€€€€€€€½¹¹•Ğ¡µ•µ½ÉåI•™É•Í¡Q¥µ•É|°™EQ¥µ•ÈèéÑ¥µ•½ÕĞ±Ñ¡¥Ì±mÑ¡¥ÍuíÕÁ‘…Ñ•5•µ½Éå	…¹¹•È ¤íô¤ì(€€€€€€€µ•µ½ÉåI•™É•Í¡Q¥µ•É|´ùÍÑ…ÉĞ ÄÔÀÀ¤ìÕÁ‘…Ñ•5•µ½Éå	…¹¹•È ¤ì(€€€€€€€€¼¼XÄÜ¸ĞĞÌ€´½¹”µ±¥¬É•É•ÍÍ¥½¸É•Ù¥•Ü…ĞÑ¡”aPÕÍ•ÈµÉ•Á½ÉÑ•(€€€€€€€€¼¼Ù¥•İÁ½¥¹ÑÌ°¥¹‘•Á•¹‘•¹Ğ½˜Ñ¡”Í¥à…ÉÑ¥ÍÑ¥Œ…µ•É„ÁÉ•Í•ÑÌ¸(€€€€€€€…ÕÑ¼¨…¹½µ…±¥•Í5•¹Ôõµ•¹Õ	…È ¤´ù…‘‘5•¹Ô¡EMÑÉ¥¹1¥Ñ•É…° ‰¹½µ…±¥•Ìˆ¤¤ì(€€€€€€€™½È¡¥¹Ğ¤ôÀí¤ñ¥¹Ğ¡Í”èé…¹½µ…±¥•ÌèéÉ•½É‘Ì¹Í¥é” ¤¤ì¬­¤¥ì(€€€€€€€€€€€½¹ÍĞ…ÕÑ¼˜„õÍ”èé…¹½µ…±¥•ÌèéÉ•½É‘ÍmÍ¥é•}Ğ¡¤¥tì(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œ¹…µ”õEMÑÉ¥¹1¥Ñ•É…° ˆ”Ä€´€”È”Ìˆ¤(€€€€€€€€€€€€€€€€¹…Éœ¡EMÑÉ¥¹œèé™É½µ1…Ñ¥¸Ä¡„¹¥¤°(€€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹œèé™É½µUÑ˜à¡„¹Ñ¥Ñ±”¤°(€€€€€€€€€€€€€€€€€€€€„¹…µ•É…-¹½İ¸ıEMÑÉ¥¹œ ¤éEMÑÉ¥¹1¥Ñ•É…° ˆ€¡Á½Í¥Ñ¥½¸„‘•™¥¹¥È¤ˆ¤¤ì(€€€€€€€€€€€…ÕÑ¼¨…Ğõ…¹½µ…±¥•Í5•¹Ô´ù…‘‘Ñ¥½¸¡¹…µ”¤ì(€€€€€€€€€€€½¹¹•Ğ¡…Ğ°™EÑ¥½¸èéÑÉ¥•É•±Ñ¡¥Ì±mÑ¡¥Ì±¥uíÍ•±•Ñ¹½µ…±ä¡¤¤íô¤ì(€€€€€€€ô(€€€€€€€…¹½µ…±¥•Í5•¹Ô´ù…‘‘M•Á…É…Ñ½È ¤ì(€€€€€€€…ÕÑ¼¨ÁÉ•Ù¹½µ…±äõ…¹½µ…±¥•Í5•¹Ô´ù…‘‘Ñ¥½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰¹½µ…±¥”ÁÉ••‘•¹Ñ”ˆ¤¤ì(€€€€€€€ÁÉ•Ù¹½µ…±ä´ùÍ•ÑM¡½ÉÑÕĞ¡E-•åM•ÅÕ•¹”¡EMÑÉ¥¹1¥Ñ•É…° ‰ÑÉ°­±Ğ­1•™Ğˆ¤¤¤ì(€€€€€€€½¹¹•Ğ¡ÁÉ•Ù¹½µ…±ä°™EÑ¥½¸èéÑÉ¥•É•±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€Í•±•Ñ¹½µ…±ä¡ÕÉÉ•¹Ñ¹½µ…±å|ğÀüÀéÍÑèéµ…à À±ÕÉÉ•¹Ñ¹½µ…±å|´Ä¤¤ì(€€€€€€€ô¤ì(€€€€€€€…ÕÑ¼¨¹•áÑ¹½µ…±äõ…¹½µ…±¥•Í5•¹Ô´ù…‘‘Ñ¥½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰¹½µ…±¥”ÍÕ¥Ù…¹Ñ”ˆ¤¤ì(€€€€€€€¹•áÑ¹½µ…±ä´ùÍ•ÑM¡½ÉÑÕĞ¡E-•åM•ÅÕ•¹”¡EMÑÉ¥¹1¥Ñ•É…° ‰ÑÉ°­±Ğ­I¥¡Ğˆ¤¤¤ì(€€€€€€€½¹¹•Ğ¡¹•áÑ¹½µ…±ä°™EÑ¥½¸èéÑÉ¥•É•±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€Í•±•Ñ¹½µ…±ä¡ÕÉÉ•¹Ñ¹½µ…±å|ğÀüÀéÍÑèéµ¥¸¡¥¹Ğ¡Í”èé…¹½µ…±¥•ÌèéÉ•½É‘Ì¹Í¥é” ¤¤´Ä±ÕÉÉ•¹Ñ¹½µ…±å|¬Ä¤¤ì(€€€€€€€ô¤ì(€€€€€€€…ÕÑ¼¨É•ÍÑ½É•¹½µ…±äõ…¹½µ…±¥•Í5•¹Ô´ù…‘‘Ñ¥½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰I•Ñ½ÕÈ„±„Á½Í¥Ñ¥½¸¥¹¥Ñ¥…±”ˆ¤¤ì(€€€€€€€½¹¹•Ğ¡É•ÍÑ½É•¹½µ…±ä°™EÑ¥½¸èéÑÉ¥•É•±Ñ¡¥Ì±mÑ¡¥ÍuíÉ•ÑÕÉ¹	•™½É•¹½µ…±ä ¤íô¤ì(€€€€€€€…ÕÑ¼¨É•Ù¥•İ½¬õ¹•ÜE½­]¥‘•Ğ¡EMÑÉ¥¹1¥Ñ•É…° ‰Y…±¥‘…Ñ¥½¸‘•Ì…¹½µ…±¥•Ìˆ¤±Ñ¡¥Ì¤ì(€€€€€€€…¹½µ…±åI•Ù¥•İ½­|õÉ•Ù¥•İ½¬ì(€€€€€€€…ÕÑ¼¨É•Ù¥•İ]¥‘•Ğõ¹•ÜE]¥‘•Ğ¡É•Ù¥•İ½¬¤ì(€€€€€€€…ÕÑ¼¨É•Ù¥•İ1…å½ÕĞõ¹•ÜEY	½á1…å½ÕĞ¡É•Ù¥•İ]¥‘•Ğ¤ì(€€€€€€€…¹½µ…±åA…¹•±1…‰•±|õ¹•ÜE1…‰•°¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€‰¡½¥Í¥ÍÍ•è9<´ÀÀÔ„9<´ÀÄĞ‘•ÁÕ¥Ì±”µ•¹Ô¹½µ…±¥•Ì¸ˆ¤±É•Ù¥•İ]¥‘•Ğ¤ì(€€€€€€€…¹½µ…±åA…¹•±1…‰•±|´ùÍ•Ñ]½É‘]É…À¡ÑÉÕ”¤ì(€€€€€€€É•Ù¥•İ1…å½ÕĞ´ù…‘‘]¥‘•Ğ¡…¹½µ…±åA…¹•±1…‰•±|¤ì(€€€€€€€…ÕÑ¼¨É•Ù¥•İ	ÕÑÑ½¹Ìõ¹•ÜE!	½á1…å½ÕĞì(€€€€€€€™½È¡½¹ÍĞ…ÕÑ¼˜Ù•É‘¥ĞéEY•Ñ½ÈñEA…¥ÈñEMÑÉ¥¹œ±EMÑÉ¥¹œøùì(€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰½¹™½Éµ”ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰½¹™½Éµ”ˆ¥ô°(€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰AÉ•Í•¹Ñ”ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰Ñ½Õ©½ÕÉÍ}ÁÉ•Í•¹Ñ”ˆ¥ô°(€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰É•Ù½¥Èˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰…}É•Ù½¥Èˆ¥õô¥ì(€€€€€€€€€€€…ÕÑ¼¨‰ÕÑÑ½¸õ¹•ÜEAÕÍ¡	ÕÑÑ½¸¡Ù•É‘¥Ğ¹™¥ÉÍĞ±É•Ù¥•İ]¥‘•Ğ¤ì(€€€€€€€€€€€½¹¹•Ğ¡‰ÕÑÑ½¸°™EAÕÍ¡	ÕÑÑ½¸èé±¥­•±Ñ¡¥Ì±mÑ¡¥Ì±Ù•É‘¥Ñuì(€€€€€€€€€€€€€€€Í…Ù•¹½µ…±åY•É‘¥Ğ¡Ù•É‘¥Ğ¹Í•½¹¤ì(€€€€€€€€€€€ô¤ì(€€€€€€€€€€€É•Ù¥•İ	ÕÑÑ½¹Ì´ù…‘‘]¥‘•Ğ¡‰ÕÑÑ½¸¤ì(€€€€€€€ô(€€€€€€€É•Ù¥•İ1…å½ÕĞ´ù…‘‘1…å½ÕĞ¡É•Ù¥•İ	ÕÑÑ½¹Ì¤ì(€€€€€€€É•Ù¥•İ½¬´ùÍ•Ñ]¥‘•Ğ¡É•Ù¥•İ]¥‘•Ğ¤ì(€€€€€€€…‘‘½­]¥‘•Ğ¡EĞèé	½ÑÑ½µ½­]¥‘•ÑÉ•„±É•Ù¥•İ½¬¤ì(€€€€€€€É•Ù¥•İ½¬´ùÍ•ÑY¥Í¥‰±”¡™…±Í”¤ì(€€€€€€€½¹¹•Ğ¡…¹½µ…±¥•Í5•¹Ô°™E5•¹Ôèé…‰½ÕÑQ½M¡½Ü±É•Ù¥•İ½¬±mÉ•Ù¥•İ½­uì(€€€€€€€€€€€É•Ù¥•İ½¬´ùÍ¡½Ü ¤ì(€€€€€€€ô¤ì((€€€€€€€…ÕÑ¼¨Ñ½½±Í5•¹Ôõµ•¹Õ	…È ¤´ù…‘‘5•¹Ô¡EMÑÉ¥¹1¥Ñ•É…° ‰=ÕÑ¥±Ìˆ¤¤ì(€€€€€€€…ÕÑ¼¨Á…¥¹Ñ¥½¸õÑ½½±Í5•¹Ô´ù…‘‘Ñ¥½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰áÁ½ÉÑ•È‰•¹¡µ…É¬™±Õ¥‘¥Ó¤€¡MX€¬)M=8¤ˆ¤¤ì(€€€€€€€½¹¹•Ğ¡Á…¥¹Ñ¥½¸°™EÑ¥½¸èéÑÉ¥•É•±Ñ¡¥Ì±mÑ¡¥Íuí•áÁ½ÉÑA…¥¹œ ¤íô¤ì(€€€€€€€…ÕÑ¼¨‰•¹¡µ…É­Ñ¥½¸õÑ½½±Í5•¹Ô´ù…‘‘Ñ¥½¸ (€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰	•¹¡µ…É¬XÄÜ¸”ÄƒŠPÁ•É™½Éµ…¹•ÏŠ˜ˆ¤¹…Éœ¡M}]IA}	U%1}9U5	H¤¤ì(€€€€€€€½¹¹•Ğ¡‰•¹¡µ…É­Ñ¥½¸°™EÑ¥½¸èéÑÉ¥•É•±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€¥˜¡Í•¹•A…Ñ¡|¹¥ÍµÁÑä ¤¥ì(€€€€€€€€€€€€€€€E5•ÍÍ…•	½àèé¥¹™½Éµ…Ñ¥½¸¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰	•¹¡µ…É¬ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰¡…É•ÈÕ¹”Í¡¹”…Ù…¹Ğ‘”±…¹•È±”‰•¹¡µ…É¬¸ˆ¤¤ì(€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œ…ÁÁ¥ÈõE½É•ÁÁ±¥…Ñ¥½¸èé…ÁÁ±¥…Ñ¥½¹¥ÉA…Ñ  ¤ì(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹1¥ÍĞ…¹‘¥‘…Ñ•Íì(€€€€€€€€€€€€€€€…ÁÁ¥È­EMÑÉ¥¹1¥Ñ•É…° ˆ½½ÕÑ¥±Ì½‰•¹¡µ…É¬½µ½Ñ•ÕÈÍ‘}ØÄİ}‰•¹¡Õ¤¹•á”ˆ¤°(€€€€€€€€€€€€€€€…ÁÁ¥È­EMÑÉ¥¹1¥Ñ•É…° ˆ½Ñ½½±Ì½‰•¹¡µ…É¬½µ½Ñ•ÕÈÍ‘}ØÄİ}‰•¹¡Õ¤¹•á”ˆ¤°(€€€€€€€€€€€€€€€…ÁÁ¥È­EMÑÉ¥¹1¥Ñ•É…° ˆ½µ½Ñ•ÕÈÍ‘}ØÄİ}‰•¹¡Õ¤¹•á”ˆ¤(€€€€€€€€€€€ôì(€€€€€€€€€€€EMÑÉ¥¹œÁ…Ñ ì(€€€€€€€€€€€™½È¡½¹ÍĞEMÑÉ¥¹œ˜…¹‘¥‘…Ñ”é…¹‘¥‘…Ñ•Ì¥ì(€€€€€€€€€€€€€€€¥˜¡E¥±•%¹™¼èé•á¥ÍÑÌ¡…¹‘¥‘…Ñ”¤¥íÁ…Ñ õ…¹‘¥‘…Ñ”í‰É•…¬íô(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡Á…Ñ ¹¥ÍµÁÑä ¤¥ì(€€€€€€€€€€€€€€€E5•ÍÍ…•	½àèéİ…É¹¥¹œ¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰	•¹¡µ…É¬¥¹‘¥ÍÁ½¹¥‰±”ˆ¤°(€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰AÉ½É…µµ”‘”‰•¹¡µ…É¬¥¹ÑÉ½ÕÙ…‰±”¸¡•µ¥¹ÌÛ¥É¥™§¥Ì€è€”Äˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡…¹‘¥‘…Ñ•Ì¹©½¥¸¡EMÑÉ¥¹1¥Ñ•É…° ‰q¸ˆ¤¤¤¤ì(€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€€¼¼Q¡”‰•¹¡µ…É¬¥Ì…¹½Ñ¡•ÈÁÉ½•ÍÌèÑ¡”10Ì…Ñ½µ¥ŒÍ•ÑÑ¥¹Ì(€€€€€€€€€€€€¼¼…¹¹½Ğ‰”Í¡…É•¥µÁ±¥¥Ñ±ä¸QÉ…¹Í™•ÈÑ¡”…Ñ¥Ù”I…ÍÑ•ÈÅÕ…±¥Ñä(€€€€€€€€€€€€¼¼•áÁ±¥¥Ñ±äÍ¼…±°¥µ…”½Á•É™½Éµ…¹”½µÁ…É¥Í½¹ÌÕÍ”Ñ¡”•á…Ğ(€€€€€€€€€€€€¼¼Í…µ”5M°…¹¥Í½ÑÉ½Áä°1=…¹Õ±±¥¹œ½¹™¥ÕÉ…Ñ¥½¸¸(€€€€€€€€€€€½¹ÍĞ…ÕÑ¼ÄõÉ…ÍÑ•ÉEÕ…±¥ÑåM•ÑÑ¥¹Ì ¤ì(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹1¥ÍĞ…ÉÕµ•¹ÑÍì(€€€€€€€€€€€€€€€Í•¹•A…Ñ¡|°(€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ˆ´µÉ…ÍÑ•ÈµµÍ…„ˆ¤±EMÑÉ¥¹œèé¹Õµ‰•È¡Ä¹µÍ……M…µÁ±•Ì¤°(€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ˆ´µÉ…ÍÑ•Èµ…¹¥Í½ÑÉ½Áäˆ¤±EMÑÉ¥¹œèé¹Õµ‰•È¡Ä¹…¹¥Í½ÑÉ½Áä¤°(€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ˆ´µÉ…ÍÑ•Èµ±½µÁ•É•¹Ğˆ¤±EMÑÉ¥¹œèé¹Õµ‰•È¡Ä¹±½‘EÕ…±¥ÑåA•É•¹Ğ¤°(€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ˆ´µÉ…ÍÑ•ÈµÕ±±¥¹œˆ¤±EMÑÉ¥¹œèé¹Õµ‰•È¡Ä¹™ÉÕÍÑÕµÕ±±¥¹œüÄèÀ¤°(€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ˆ´µÉ…ÍÑ•Èµ±½µ•¹…‰±•ˆ¤±EMÑÉ¥¹œèé¹Õµ‰•È¡Ä¹‘å¹…µ¥1½üÄèÀ¤(€€€€€€€€€€€ôì(€€€€€€€€€€€¥˜ …EAÉ½•ÍÌèéÍÑ…ÉÑ•Ñ…¡•¡Á…Ñ ±…ÉÕµ•¹ÑÌ±E½É•ÁÁ±¥…Ñ¥½¸èé…ÁÁ±¥…Ñ¥½¹¥ÉA…Ñ  ¤¤¤(€€€€€€€€€€€€€€€E5•ÍÍ…•	½àèéÉ¥Ñ¥…°¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰	•¹¡µ…É¬ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰%µÁ½ÍÍ¥‰±”½ÕÙÉ¥È±„™•»©ÑÉ”‘”‰•¹¡µ…É¬¸ˆ¤¤ì(€€€€€€€ô¤ì(€€€€€€€…ÕÑ¼¨¡•±Á5•¹Ôõµ•¹Õ	…È ¤´ù…‘‘5•¹Ô¡EMÑÉ¥¹1¥Ñ•É…° ‰¥‘”ˆ¤¤ì(€€€€€€€…ÕÑ¼¨…‰½ÕÑÑ¥½¸õ¡•±Á5•¹Ô´ù…‘‘Ñ¥½¸ (€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‹ ÁÉ½Á½Ì‘”M]I@XÄÜ¸”ÇŠ˜ˆ¤¹…Éœ¡M}]IA}	U%1}9U5	H¤¤ì(€€€€€€€½¹¹•Ğ¡…‰½ÕÑÑ¥½¸°™EÑ¥½¸èéÑÉ¥•É•±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œÁÔõÁÕ‘…ÁÑ•É1…‰•° ¤ì(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œÉ•Ù¥Í¥½¸õ¥Ñ¡Õ‰I•Ù¥Í¥½¸ ¤ì(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œ½µÁ¥±•…Ñ”õEMÑÉ¥¹œèé™É½µ1…Ñ¥¸Ä¡}}Q}|€ˆ€ˆ}}Q%5}|¤ì(€€€€€€€€€€€½¹ÍĞ…ÕÑ¼ÅÕ…±¥ÑäõÉ…ÍÑ•ÉEÕ…±¥ÑåM•ÑÑ¥¹Ì ¤ì(€€€€€€€€€€€½¹ÍĞ‰½½°é¹…‰±•õ‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ôôÔ(€€€€€€€€€€€€€€€€ıÅ¹Ù¥É½¹µ•¹ÑY…É¥…‰±” ‰4Í}XÄİ}%M	1}i}AIAMLˆ¤„õEMÑÉ¥¹1¥Ñ•É…° ˆÄˆ¤(€€€€€€€€€€€€€€€€éÅ¹Ù¥É½¹µ•¹ÑY…É¥…‰±” ‰4Í}XÄİ}aAI%59Q}i}AIAMLˆ¤ôõEMÑÉ¥¹1¥Ñ•É…° ˆÄˆ¤ì(€€€€€€€€€€€½¹ÍĞ‰½½°±¥¡Ñ¹…‰±•õÅ¹Ù¥É½¹µ•¹ÑY…É¥…‰±” ‰4Í}XÄİ}aAI%59Q}1%!Q}		}U10ˆ¤ôõEMÑÉ¥¹1¥Ñ•É…° ˆÄˆ¤ì(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œ‰…­•¹õ‰…­•¹‘	½á|ı‰…­•¹‘	½á|´ùÕÉÉ•¹ÑQ•áĞ ¤éEMÑÉ¥¹1¥Ñ•É…° ‰¥¹“¥Ñ•Éµ¥»¤ˆ¤ì(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œ‘•Ñ…¥±ÌõEMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€€€€€‰M]I@	•Ñ„`€¼XÄÜ¸”Åqq¸ˆ(€€€€€€€€€€€€€€€€‰K¥Ù¥Í¥½¸¥Ñ!Õˆ€è€”Éqq¸ˆ(€€€€€€€€€€€€€€€€‰½µÁ¥±…Ñ¥½¸€è€”Íqq¸ˆ(€€€€€€€€€€€€€€€€‰MåÍÓ¡µ”€è€”Ñqq¸ˆ(€€€€€€€€€€€€€€€€‰‘…ÁÑ…Ñ•ÕÈÁÉ¥¹¥Á…°a$€è€”Õqq¸ˆ(€€€€€€€€€€€€€€€€‰I•¹‘ÔÏ¥±•Ñ¥½¹»¤€è€”Ùqq¸ˆ(€€€€€€€€€€€€€€€€‰EĞ€è€”İqq¸ˆ(€€€€€€€€€€€€€€€€‰5M€è€”áàğ¹¥Í½ÑÉ½Á¥”€è€”åàğA	H€è€”ÄÀÁáqq¸ˆ(€€€€€€€€€€€€€€€€‰hµÁÉ•Á…ÍÌ•áÃ¥É¥µ•¹Ñ…°€è€”ÄÄğI•©•Ğ	±…µÁ•Ì€è€”ÄÉqq¸ˆ(€€€€€€€€€€€€€€€€‰!U…·¥É„€¼É…ÁÁ½ÉÑÌ…¹½µ…±¥•ÌA9­)M=8€¼É•ÍÑ…ÕÉ…Ñ¥½¸€è‘¥ÍÁ½¹¥‰±•Ìˆ¤(€€€€€€€€€€€€€€€€¹…Éœ¡M}]IA}	U%1}9U5	H¤(€€€€€€€€€€€€€€€€¹…Éœ¡É•Ù¥Í¥½¸¤¹…Éœ¡½µÁ¥±•…Ñ”¤¹…Éœ¡EMåÍ%¹™¼èéÁÉ•ÑÑåAÉ½‘ÕÑ9…µ” ¤¤(€€€€€€€€€€€€€€€€¹…Éœ¡ÁÔ¤¹…Éœ¡‰…­•¹¤¹…Éœ¡EMÑÉ¥¹œèé™É½µ1…Ñ¥¸Ä¡ÅY•ÉÍ¥½¸ ¤¤¤(€€€€€€€€€€€€€€€€¹…Éœ¡ÅÕ…±¥Ñä¹µÍ……M…µÁ±•Ì¤¹…Éœ¡ÅÕ…±¥Ñä¹…¹¥Í½ÑÉ½Áä¤(€€€€€€€€€€€€€€€€¹…Éœ¡Ñ•áÑÕÉ•I•Í½±ÕÑ¥½¹|¤¹…Éœ¡é¹…‰±•ıEMÑÉ¥¹1¥Ñ•É…° ‰=8ˆ¤éEMÑÉ¥¹1¥Ñ•É…° ‰=ˆ¤¤(€€€€€€€€€€€€€€€€¹…Éœ¡±¥¡Ñ¹…‰±•ıEMÑÉ¥¹1¥Ñ•É…° ‰=8ˆ¤éEMÑÉ¥¹1¥Ñ•É…° ‰=ˆ¤¤ì(€€€€€€€€€€€E5•ÍÍ…•	½àµ•ÍÍ…”¡Ñ¡¥Ì¤ì(€€€€€€€€€€€µ•ÍÍ…”¹Í•Ñ]¥¹‘½İQ¥Ñ±”¡EMÑÉ¥¹1¥Ñ•É…° ‹ ÁÉ½Á½Ì‘”M]I@XÄÜ¸”Äˆ¤¹…Éœ¡M}]IA}	U%1}9U5	H¤¤ì(€€€€€€€€€€€µ•ÍÍ…”¹Í•Ñ%½¸¡E5•ÍÍ…•	½àèé%¹™½Éµ…Ñ¥½¸¤ì(€€€€€€€€€€€µ•ÍÍ…”¹Í•ÑQ•áÑ½Éµ…Ğ¡EĞèéI¥¡Q•áĞ¤ì(€€€€€€€€€€€µ•ÍÍ…”¹Í•ÑQ•áĞ¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€€€€€ˆñ ÌùM]I@	•Ñ„`ƒŠPXÄÜ¸”Äğ½ Ìøˆ(€€€€€€€€€€€€€€€€ˆñÀøñˆùK¥Ù¥Í¥½¸€èğ½ˆø€”Èñ‰È¼øñˆù½µÁ¥±…Ñ¥½¸€èğ½ˆø€”Ìğ½Àøˆ(€€€€€€€€€€€€€€€€ˆñÀøñˆùATÁÉ¥¹¥Á…°€¡a$¤€èğ½ˆø€”Ğñ‰È¼øñˆùI•¹‘Ô€èğ½ˆø€”Ôğ½Àøˆ(€€€€€€€€€€€€€€€€ˆñÀøñˆù9…Ù¥…Ñ¥½¸€èğ½ˆø!UÁ½Í¥Ñ¥½¸`½d½h°…À°¥¹±¥¹…¥Í½¸•Ğ=X¸ñ‰È¼øˆ(€€€€€€€€€€€€€€€€ˆñˆù¥…¹½ÍÑ¥Œ…É¡¥Ñ•ÑÕÉ…°€èğ½ˆø…ÁÑÕÉ”A9€¬Á½Í¥Ñ¥½¸)M=8É•ÍÑ…ÕÉ…‰±”¸ñ‰È¼øˆ(€€€€€€€€€€€€€€€€ˆñˆùI…ÍÑ•È€èğ½ˆøhµÁÉ•Á…ÍÌ€”Ø°É•©•Ğ	±Õµ§¡É•Ì€”Ü€¡•áÃ¥É¥µ•¹Ñ…Õà¤¸ğ½Àøˆ(€€€€€€€€€€€€€€€€ˆñÀøñˆù½¹™¥ÕÉ…Ñ¥½¸€èğ½ˆøEĞ€”à€ì5M€”åà€ìA	H€”ÄÀÁà¸ğ½Àøˆ¤(€€€€€€€€€€€€€€€€¹…Éœ¡M}]IA}	U%1}9U5	H¤¹…Éœ¡É•Ù¥Í¥½¸¹Ñ½!Ñµ±Í…Á• ¤¤(€€€€€€€€€€€€€€€€¹…Éœ¡½µÁ¥±•…Ñ”¹Ñ½!Ñµ±Í…Á• ¤¤¹…Éœ¡ÁÔ¹Ñ½!Ñµ±Í…Á• ¤¤(€€€€€€€€€€€€€€€€¹…Éœ¡‰…­•¹¹Ñ½!Ñµ±Í…Á• ¤¤(€€€€€€€€€€€€€€€€¹…Éœ¡é¹…‰±•ıEMÑÉ¥¹1¥Ñ•É…° ‰=8ˆ¤éEMÑÉ¥¹1¥Ñ•É…° ‰=ˆ¤¤(€€€€€€€€€€€€€€€€¹…Éœ¡±¥¡Ñ¹…‰±•ıEMÑÉ¥¹1¥Ñ•É…° ‰=8ˆ¤éEMÑÉ¥¹1¥Ñ•É…° ‰=ˆ¤¤(€€€€€€€€€€€€€€€€¹…Éœ¡EMÑÉ¥¹œèé™É½µ1…Ñ¥¸Ä¡ÅY•ÉÍ¥½¸ ¤¤¤(€€€€€€€€€€€€€€€€¹…Éœ¡ÅÕ…±¥Ñä¹µÍ……M…µÁ±•Ì¤¹…Éœ¡Ñ•áÑÕÉ•I•Í½±ÕÑ¥½¹|¤¤ì(€€€€€€€€€€€…ÕÑ¼¨½Áäõµ•ÍÍ…”¹…‘‘	ÕÑÑ½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰½Á¥•È±•Ì¥¹™½Éµ…Ñ¥½¹ÌÍåÍÓ¡µ”ˆ¤±E5•ÍÍ…•	½àèéÑ¥½¹I½±”¤ì(€€€€€€€€€€€µ•ÍÍ…”¹…‘‘	ÕÑÑ½¸¡E5•ÍÍ…•	½àèé=¬¤ì(€€€€€€€€€€€µ•ÍÍ…”¹•á•Œ ¤ì(€€€€€€€€€€€¥˜¡µ•ÍÍ…”¹±¥­•‘	ÕÑÑ½¸ ¤ôõ½Áä¥EÕ¥ÁÁ±¥…Ñ¥½¸èé±¥Á‰½…É ¤´ùÍ•ÑQ•áĞ¡‘•Ñ…¥±Ì¤ì(€€€€€€€ô¤ì((€€€€€€€…ÕÑ¼¨±•™Ğõ¹•ÜE½­]¥‘•Ğ¡EMÑÉ¥¹1¥Ñ•É…° ‰áÁ±½É…Ñ•ÕÈ‘”Í¡¹”ˆ¤±Ñ¡¥Ì¤ì(€€€€€€€Í•¹•áÁ±½É•É½­|õ±•™Ğì(€€€€€€€…ÕÑ¼¨Ñ…‰Ìõ¹•ÜEQ…‰]¥‘•Ğì(€€€€€€€Í•¹•QÉ••|õ¹•ÜEQÉ••]¥‘•Ğì(€€€€€€€Í•¹•QÉ••|´ùÍ•Ñ!•…‘•É1…‰•±Ì¡íEMÑÉ¥¹1¥Ñ•É…° ‰!§¥É…É¡¥”ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰5…Ó¥É¥…Ôˆ¥ô¤ì(€€€€€€€É•Í½ÕÉ•QÉ••|õ¹•ÜEQÉ••]¥‘•Ğì(€€€€€€€É•Í½ÕÉ•QÉ••|´ùÍ•Ñ!•…‘•É1…‰•±Ì¡íEMÑÉ¥¹1¥Ñ•É…° ‰I•ÍÍ½ÕÉ”ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰=É¥¥¹”ˆ¥ô¤ì(€€€€€€€Ñ…‰Ì´ù…‘‘Q…ˆ¡Í•¹•QÉ••|±EMÑÉ¥¹1¥Ñ•É…° ‰=‰©•ÑÌˆ¤¤ì(€€€€€€€Ñ…‰Ì´ù…‘‘Q…ˆ¡É•Í½ÕÉ•QÉ••|±EMÑÉ¥¹1¥Ñ•É…° ‰I•ÍÍ½ÕÉ•Ìˆ¤¤ì(€€€€€€€±•™Ğ´ùÍ•Ñ]¥‘•Ğ¡Ñ…‰Ì¤ì(€€€€€€€…‘‘½­]¥‘•Ğ¡EĞèé1•™Ñ½­]¥‘•ÑÉ•„±±•™Ğ¤ì(€€€€€€€±•™Ğ´ùÉ•Í¥é” ÌØÀ°ÜÈÀ¤ì((€€€€€€€…ÕÑ¼¨É¥¡Ğõ¹•ÜE½­]¥‘•Ğ¡EMÑÉ¥¹1¥Ñ•É…° ‰I•¹‘Ô•Ğµ…Ó¥É¥…Õàˆ¤±Ñ¡¥Ì¤ì(€€€€€€€É•¹‘•É½¹ÑÉ½±Í½­|õÉ¥¡Ğì(€€€€€€€…ÕÑ¼¨½¹ÑÉ½±Ìõ¹•ÜE]¥‘•Ğì(€€€€€€€…ÕÑ¼¨Ù•ÉÑ¥…°õ¹•ÜEY	½á1…å½ÕĞ¡½¹ÑÉ½±Ì¤ì(€€€€€€€É…‘¥½Q½±•	ÕÑÑ½¹|õ¹•ÜEAÕÍ¡	ÕÑÑ½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰I•ÁÉ•¹‘É”±„É…‘¥¼ˆ¤±½¹ÑÉ½±Ì¤ì(€€€€€€€É…‘¥½MÑ…ÑÕÍ1…‰•±|õ¹•ÜE1…‰•°¡EMÑÉ¥¹1¥Ñ•É…° ‰I…‘¥¼…ÉË©Ó¥”ˆ¤±½¹ÑÉ½±Ì¤ì(€€€€€€€É…‘¥½MÑ…ÑÕÍ1…‰•±|´ùÍ•Ñ]½É‘]É…À¡ÑÉÕ”¤ì(€€€€€€€Ù•ÉÑ¥…°´ù…‘‘]¥‘•Ğ¡¹•ÜE1…‰•°¡EMÑÉ¥¹1¥Ñ•É…° ‰M=85	%9PƒŠPI%<U-I%9%99ˆ¤±½¹ÑÉ½±Ì¤¤ì(€€€€€€€Ù•ÉÑ¥…°´ù…‘‘]¥‘•Ğ¡É…‘¥½Q½±•	ÕÑÑ½¹|¤ì(€€€€€€€Ù•ÉÑ¥…°´ù…‘‘]¥‘•Ğ¡É…‘¥½MÑ…ÑÕÍ1…‰•±|¤ì(€€€€€€€É…‘¥½Y½±Õµ•M±¥‘•É|õ¹•ÜEM±¥‘•È¡EĞèé!½É¥é½¹Ñ…°±½¹ÑÉ½±Ì¤ì(€€€€€€€É…‘¥½Y½±Õµ•M±¥‘•É|´ùÍ•ÑI…¹” À°ÄÀÀ¤ì(€€€€€€€É…‘¥½Y½±Õµ•M±¥‘•É|´ùÍ•ÑY…±Õ” ØÔ¤ì(€€€€€€€É…‘¥½Y½±Õµ•M±¥‘•É|´ùÍ•ÑQ½½±Q¥À¡EMÑÉ¥¹1¥Ñ•É…° ‰Y½±Õµ”‘”±„É…‘¥¼€Í€ Àƒ€€ÄÀÀ€”¤ˆ¤¤ì(€€€€€€€Ù•ÉÑ¥…°´ù…‘‘]¥‘•Ğ¡¹•ÜE1…‰•°¡EMÑÉ¥¹1¥Ñ•É…° ‰Y½±Õµ”É…‘¥¼ˆ¤±½¹ÑÉ½±Ì¤¤ì(€€€€€€€Ù•ÉÑ¥…°´ù…‘‘]¥‘•Ğ¡É…‘¥½Y½±Õµ•M±¥‘•É|¤ì(€€€€€€€½¹¹•Ğ¡É…‘¥½Y½±Õµ•M±¥‘•É|°™EM±¥‘•ÈèéÙ…±Õ•¡…¹•±Ñ¡¥Ì±mÑ¡¥Ít¡¥¹ĞÙ…±Õ”¥ì(€€€€€€€€€€€É…‘¥½Õ‘¥½|¹Í•ÑY½±Õµ”¡™±½…Ğ¡Ù…±Õ”¤¼ÔÀÀ¹˜¤ì(€€€€€€€ô¤ì(€€€€€€€½¹¹•Ğ¡É…‘¥½Q½±•	ÕÑÑ½¹|°™EAÕÍ¡	ÕÑÑ½¸èé±¥­•±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€¥˜¡É…‘¥½A±…å¥¹|¥íÉ…‘¥½ÕÑ½Á±…å¹…‰±•‘|õ™…±Í”íÍÑ½ÁI…‘¥¼ ¤íô(€€€€€€€€€€€•±Í•íÉ…‘¥½ÕÑ½Á±…å¹…‰±•‘|õÑÉÕ”íÁ±…åI…‘¥¼ ¤íô(€€€€€€€ô¤ì(€€€€€€€…ÕÑ¼¨™½É´õ¹•ÜE½Éµ1…å½ÕĞì(€€€€€€€…µ•É…	½á|õ¹•ÜE½µ‰½	½àì(€€€€€€€‰…­•¹‘	½á|õ¹•ÜE½µ‰½	½àì(€€€€€€€‘¥É•Ñ¥ÍÁ±…å	½á|õ¹•ÜE¡•­	½à¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€‰™™¥¡…”AT‘¥É•Ğ¹…Ñ¥˜€¡`ÄÄ€¼YÕ±­…¸¤ˆ¤¤ì(¥™‘•˜}]%8ÌÈ(€€€€€€€€¼¼YÕ±­…¸‘¥É•ĞÁÉ•Í•¹Ñ…Ñ¥½¸ÕÍ•Ì…¸•¹¥¹”µ½İ¹•]¥¸ÌÈÍÕÉ™…”½¸Ñ¡”(€€€€€€€€¼¼ÁÉ¥Ù…Ñ”Ñ½Àµ±•Ù•°!]9°¥Í½±…Ñ•™É½´•Ù•Éä½Ñ¡•ÈÉ•¹‘•É•Èİ¥¹‘½Ü¸(€€€€€€€‘¥É•Ñ¥ÍÁ±…å	½á|´ùÍ•Ñ¡•­MÑ…Ñ”¡EĞèé¡•­•¤ì(€€€€€€€‘¥É•Ñ¥ÍÁ±…å	½á|´ùÍ•ÑQ½½±Q¥À¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€‰`ÄÄ•ĞYÕ±­…¸ÁË¥Í•¹Ñ•¹Ğ‘…¹Ì±•ÕÈ!]9“¥‘§¤¸¥½¡•ÈÁ½ÕÈ…™™¥¡•È€ˆ(€€€€€€€€€€€€‰±”É•¹‘Ô‘””‰…­•¹Ù¥„E%µ…”¸ˆ¤¤ì(•±Í”(€€€€€€€‘¥É•Ñ¥ÍÁ±…å	½á|´ùÍ•Ñ¡•­•¡™…±Í”¤ì(€€€€€€€‘¥É•Ñ¥ÍÁ±…å	½á|´ùÍ•Ñ¹…‰±•¡™…±Í”¤ì(•¹‘¥˜(€€€€€€€‰…­•¹‘	½á|´ù…‘‘%Ñ•µÌ¡ì(€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰ATI…äQÉ…¥¹œA	HƒŠP‘¥É•Ğˆ¤°(€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰ATÍÄÄ½µÁÕÑ”ƒŠPÉ…Á¥‘”°½µ‰É•Ì€¬Ù•ÉÉ”ˆ¤°(€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰ATƒ%±…¥É…”±½‰…°ƒŠP€ÈÉ•‰½¹‘Ì€¡ÅÕ…±¥Ó¤Ë¥±…‰±”¤ˆ¤°(€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰ATƒ%±…¥É…”±½‰…°ƒŠP€ĞÉ•‰½¹‘Ì€¡ÅÕ…±¥Ó¤Ë¥±…‰±”¤ˆ¤°(€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰XÄÜATÍÄÄI…ÍÑ•ÈƒŠP•áÁ±½É…Ñ¥½¸É…Á¥‘”ˆ¤°(€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰XÄÜYÕ±­…¸I…ÍÑ•ÈƒŠP•áÃ¥É¥µ•¹Ñ…°€¡ATµ…Ó¥É¥•°¤ˆ¤(€€€€€€€ô¤ì(¥™¹‘•˜}]%8ÌÈ(€€€€€€€‰…­•¹‘	½á|´ùÍ•Ñ%Ñ•µ…Ñ„ Ä°À±EĞèéUÍ•ÉI½±”´Ä¤ì(€€€€€€€‰…­•¹‘	½á|´ùÍ•Ñ%Ñ•µ…Ñ„ Ğ°À±EĞèéUÍ•ÉI½±”´Ä¤ì(€€€€€€€‰…­•¹‘	½á|´ùÍ•Ñ%Ñ•µ…Ñ„ Ô°À±EĞèéUÍ•ÉI½±”´Ä¤ì(•¹‘¥˜(¥˜€…4Í}XÄİ}YU1-9}9	1(€€€€€€€‰…­•¹‘	½á|´ùÍ•Ñ%Ñ•µ…Ñ„ Ô°À±EĞèéUÍ•ÉI½±”´Ä¤ì(€€€€€€€‰…­•¹‘	½á|´ùÍ•Ñ%Ñ•µ…Ñ„ Ô±EMÑÉ¥¹1¥Ñ•É…° ‰YÕ±­…¸M,…‰Í•¹Ğ±½ÉÌ‘”±„½µÁ¥±…Ñ¥½¸ˆ¤±EĞèéQ½½±Q¥ÁI½±”¤ì(•¹‘¥˜(¥™‘•˜}]%8ÌÈ(€€€€€€€€¼¼•™…Õ±Ğ]¥¹‘½İÌÕÍ•ÈÁ…Ñ è¹…Ñ¥Ù”ÍÄÄÉ…ÍÑ•Èİ¥Ñ a$ÁÉ•Í•¹Ñ…Ñ¥½¸¸(€€€€€€€€¼¼YÕ±­…¸…¹…±°AT½½µÁÕÑ”½ÁÑ¥½¹ÌÉ•µ…¥¸Í•±•Ñ…‰±”¸(€€€€€€€‰…­•¹‘	½á|´ùÍ•ÑÕÉÉ•¹Ñ%¹‘•à Ğ¤ì(•¹‘¥˜(€€€€€€€€¼¼-••ÀÑ¡”‰…­•¹¡½¥”Ù¥Í¥‰±”…Ğ€ÄÌØÙÁàèÍ¥à±½¹œ…µ•É„¹…µ•Ì(€€€€€€€€¼¼ÁÉ•Ù¥½ÕÍ±ä½¹ÍÕµ•Ñ¡”•¹Ñ¥É”Ñ½ÀÑ½½±‰…È…¹¡¥Ñ¡”É•¹‘•É•È¸(€€€€€€€…ÕÑ¼¨™…ÍÑ	…­•¹õ¹•ÜE½µ‰½	½à¡…µ•É…ÍQ½½±‰…È¤ì(€€€€€€€™…ÍÑ	…­•¹´ùÍ•Ñ=‰©•Ñ9…µ”¡EMÑÉ¥¹1¥Ñ•É…° ‰ØÄİEÕ¥­I•¹‘•É•Èˆ¤¤ì(€€€€€€€™…ÍÑ	…­•¹´ùÍ•Ñ5¥¹¥µÕµ]¥‘Ñ  ÈÈÀ¤ì(€€€€€€€™…ÍÑ	…­•¹´ùÍ•Ñ5…á¥µÕµ]¥‘Ñ  ÌÌÀ¤ì(€€€€€€€™½È¡¥¹Ğ¤ôÀí¤ñ‰…­•¹‘	½á|´ù½Õ¹Ğ ¤ì¬­¤¥ì(€€€€€€€€€€€™…ÍÑ	…­•¹´ù…‘‘%Ñ•´¡¤ôôĞıEMÑÉ¥¹1¥Ñ•É…° ‰¥É•Ñ`€ÄÄI…ÍÑ•Èˆ¤è(€€€€€€€€€€€€€€€€¡¤ôôÔıEMÑÉ¥¹1¥Ñ•É…° ‰YÕ±­…¸I…ÍÑ•Èˆ¤è(€€€€€€€€€€€€€€€‰…­•¹‘	½á|´ù¥Ñ•µQ•áĞ¡¤¤¤¤ì(€€€€€€€€€€€™…ÍÑ	…­•¹´ùÍ•Ñ%Ñ•µ…Ñ„¡¤±‰…­•¹‘	½á|´ù¥Ñ•µ…Ñ„¡¤±EĞèéUÍ•ÉI½±”´Ä¤°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€EĞèéUÍ•ÉI½±”´Ä¤ì(€€€€€€€€€€€™…ÍÑ	…­•¹´ùÍ•Ñ%Ñ•µ…Ñ„¡¤±‰…­•¹‘	½á|´ù¥Ñ•µQ•áĞ¡¤¤±EĞèéQ½½±Q¥ÁI½±”¤ì(€€€€€€€ô(€€€€€€€™…ÍÑ	…­•¹´ùÍ•ÑÕÉÉ•¹Ñ%¹‘•à¡‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤¤ì(€€€€€€€…µ•É…ÍQ½½±‰…È´ù…‘‘M•Á…É…Ñ½È ¤ì(€€€€€€€…µ•É…ÍQ½½±‰…È´ù…‘‘]¥‘•Ğ¡¹•ÜE1…‰•°¡EMÑÉ¥¹1¥Ñ•É…° ‰5½Ñ•ÕÈ€è€ˆ¤±…µ•É…ÍQ½½±‰…È¤¤ì(€€€€€€€…µ•É…ÍQ½½±‰…È´ù…‘‘]¥‘•Ğ¡™…ÍÑ	…­•¹¤ì(€€€€€€€…ÕÑ¼¨ÅÕ¥­I•¹‘•Èõ…µ•É…ÍQ½½±‰…È´ù…‘‘Ñ¥½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰ÑÕ…±¥Í•Èˆ¤¤ì(€€€€€€€½¹¹•Ğ¡ÅÕ¥­I•¹‘•È°™EÑ¥½¸èéÑÉ¥•É•±Ñ¡¥Ì±mÑ¡¥ÍuíÉ•ÅÕ•ÍÑI•¹‘•È ¤íô¤ì(€€€€€€€½¹¹•Ğ¡™…ÍÑ	…­•¹±Å=Ù•É±½…ñ¥¹Ğø ™E½µ‰½	½àèéÕÉÉ•¹Ñ%¹‘•á¡…¹•¤°(€€€€€€€€€€€€€€€‰…­•¹‘	½á|°™E½µ‰½	½àèéÍ•ÑÕÉÉ•¹Ñ%¹‘•à¤ì(€€€€€€€½¹¹•Ğ¡‰…­•¹‘	½á|±Å=Ù•É±½…ñ¥¹Ğø ™E½µ‰½	½àèéÕÉÉ•¹Ñ%¹‘•á¡…¹•¤°(€€€€€€€€€€€€€€€™…ÍÑ	…­•¹°™E½µ‰½	½àèéÍ•ÑÕÉÉ•¹Ñ%¹‘•à¤ì(€€€€€€€ÅÕ…±¥Ñå	½á|õ¹•ÜE½µ‰½	½àì(€€€€€€€€¼¼-••À¹…Ñ¥Ù”…¹Õ±°!Í¥‘”‰äÍ¥‘”¸MÑ½É”•áÁ±¥¥Ğİ¥‘Ñ ½¡•¥¡Ğ(€€€€€€€€¼¼¥¹ÍÑ•…½˜‘•É¥Ù¥¹œÑ¡•´™É½´…¸¥¹‘•à½È…ÍÍÕµ¥¹œ•á…Ğ€ÄØèä¸(€€€€€€€ÅÕ…±¥Ñå	½á|´ù…‘‘%Ñ•´¡EMÑÉ¥¹1¥Ñ•É…° ‰Y¥•İÁ½ÉĞ…‘…ÁÑ…Ñ¥˜ƒŠPÑ…¥±±”‘”±„™•»©ÑÉ”µ½Ñ•ÕÈˆ¤±EM¥é” ¤¤ì(€€€€€€€ÅÕ…±¥Ñå	½á|´ù…‘‘%Ñ•´¡EMÑÉ¥¹1¥Ñ•É…° ‰•±°¹…Ñ¥˜€ÄÌØØƒ\€ÜØàˆ¤±EM¥é” ÄÌØØ°ÜØà¤¤ì(€€€€€€€ÅÕ…±¥Ñå	½á|´ù…‘‘%Ñ•´¡EMÑÉ¥¹1¥Ñ•É…° ‰Õ±°!€ÄäÈÀƒ\€ÄÀàÀˆ¤±EM¥é” ÄäÈÀ°ÄÀàÀ¤¤ì(€€€€€€€ÅÕ…±¥Ñå	½á|´ù…‘‘%Ñ•´¡EMÑÉ¥¹1¥Ñ•É…° ‰E!€ÈÔØÀƒ\€ÄĞĞÀˆ¤±EM¥é” ÈÔØÀ°ÄĞĞÀ¤¤ì(€€€€€€€ÅÕ…±¥Ñå	½á|´ù…‘‘%Ñ•´¡EMÑÉ¥¹1¥Ñ•É…° ˆÑ,U!€ÌàĞÀƒ\€ÈÄØÀˆ¤±EM¥é” ÌàĞÀ°ÈÄØÀ¤¤ì(€€€€€€€ÅÕ…±¥Ñå	½á|´ùÍ•ÑÕÉÉ•¹Ñ%¹‘•à À¤ì€¼¼Õ±°µÁ…¹•°‘¥ÍÁ±…ä‰ä‘•™…Õ±Ğì•±°€ÄÌØÙàÜØàÉ•µ…¥¹Ì…Ù…¥±…‰±”¸(€€€€€€€‘¥É•ÑM…µÁ±•Í|õ¹•ÜE½µ‰½	½àì(€€€€€€€™½È¡¥¹Ğ¸éìÄ°Ğ°ÄÙô¤(€€€€€€€€€€€‘¥É•ÑM…µÁ±•Í|´ù…‘‘%Ñ•´¡EMÑÉ¥¹1¥Ñ•É…° ˆ”Äƒ¥¡…¹Ñ¥±±½¸¡Ì¤€¼Á¥á•°ˆ¤¹…Éœ¡¸¤±¸¤ì(€€€€€€€‘¥É•ÑM…µÁ±•Í|´ùÍ•ÑÕÉÉ•¹Ñ%¹‘•à À¤ì(€€€€€€€¥M…µÁ±•Í|õ¹•ÜE½µ‰½	½àì(€€€€€€€™½È¡¥¹Ğ¸éìĞ°à°ÄØ°ÌÈ°ØÑô¤(€€€€€€€€€€€¥M…µÁ±•Í|´ù…‘‘%Ñ•´¡EMÑÉ¥¹1¥Ñ•É…° ˆ”Äƒ¥¡…¹Ñ¥±±½¹Ì€¼Á¥á•°ˆ¤¹…Éœ¡¸¤±¸¤ì(€€€€€€€¥M…µÁ±•Í|´ùÍ•ÑÕÉÉ•¹Ñ%¹‘•à È¤ì€¼¼9…Ñ¥Ù”Õ±°!ÅÕ…±¥Ñä‰…Í•±¥¹”è€ÄØÍÁÀ¸(€€€€€€€¥M…µÁ±•Í|´ùÍ•Ñ¹…‰±•¡™…±Í”¤ì(€€€€€€€ÁÉ½É•ÍÍ¥Ù•¥|õ¹•ÜE¡•­	½à¡EMÑÉ¥¹1¥Ñ•É…° ‰$ÁÉ½É•ÍÍ¥Ù”€¡…™™¥¡•È±•ÌÁ…ÍÍ•Ì¤ˆ¤¤ì(€€€€€€€ÁÉ½É•ÍÍ¥Ù•¥|´ùÍ•Ñ¡•­•¡ÑÉÕ”¤ì(€€€€€€€ÁÉ½É•ÍÍ¥Ù•¥|´ùÍ•Ñ¹…‰±•¡™…±Í”¤ì(€€€€€€€‘•¹½¥Í•¥|õ¹•ÜE¡•­	½à¡EMÑÉ¥¹1¥Ñ•É…° ‰¥‰ÉÕ¥Ñ…”$‰¥±…Ó¥É…°€¡½ÁÑ¥½¹¹•°¤ˆ¤¤ì(€€€€€€€‘•¹½¥Í•¥|´ùÍ•Ñ¡•­•¡ÑÉÕ”¤ì(€€€€€€€‘•¹½¥Í•¥|´ùÍ•Ñ¹…‰±•¡™…±Í”¤ì(€€€€€€€‘•¹½¥Í•¥É•Ñ|õ¹•ÜE¡•­	½à¡EMÑÉ¥¹1¥Ñ•É…° ‰¥‰ÉÕ¥Ñ…”AT‘¥É•Ğ€¡‰¥±…Ó¥É…°¤ˆ¤¤ì(€€€€€€€‘•¹½¥Í•¥É•Ñ|´ùÍ•Ñ¡•­•¡™…±Í”¤ì€¼¼…Ù½¥‰±ÕÉÉ¥¹œA	H‘•Ñ…¥±Ì‰ä‘•™…Õ±Ğ(€€€€€€€ÍÕ¹!½ÕÉ|õ¹•ÜE½Õ‰±•MÁ¥¹	½àì(€€€€€€€ÍÕ¹!½ÕÉ|´ùÍ•ÑI…¹” À¸À°ÈÌ¸ää¤ì(€€€€€€€ÍÕ¹!½ÕÉ|´ùÍ•Ñ•¥µ…±Ì È¤ì(€€€€€€€ÍÕ¹!½ÕÉ|´ùÍ•ÑM¥¹±•MÑ•À ¸ÈÔ¤ì(€€€€€€€ÍÕ¹!½ÕÉ|´ùÍ•ÑMÕ™™¥à¡EMÑÉ¥¹1¥Ñ•É…° ˆ ˆ¤¤ì(€€€€€€€ÍÕ¹!½ÕÉ|´ùÍ•ÑY…±Õ” ÄĞ¸ÜÔ¤ì(€€€€€€€ÍÕ¹!½ÕÉ|´ùÍ•ÑQ½½±Q¥À¡EMÑÉ¥¹1¥Ñ•É…° ‰M½±•¥°•Ğƒ¥±…¥É…”‘”€ÀÀ ƒ€€ÈĞ ƒŠP…Õ‰”°©½ÕÈ°Ë¥ÁÕÍÕ±”°¹Õ¥Ğˆ¤¤ì(€€€€€€€±½Õ‘¹¥µ…Ñ¥½¹	½á|õ¹•ÜE¡•­	½à¡EMÑÉ¥¹1¥Ñ•É…° ‰9Õ…•Ì…¹¥·¥ÌÍÕÈ±”¥•°ˆ¤¤ì(€€€€€€€±½Õ‘¹¥µ…Ñ¥½¹	½á|´ùÍ•Ñ¡•­•¡ÑÉÕ”¤ì(€€€€€€€±½Õ‘¹¥µ…Ñ¥½¹	½á|´ùÍ•ÑQ½½±Q¥À¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€‰[¥É¥Ñ…‰±•Ì¥ÉÉÕÌ…±Õ³¥ÌÁ…È±”Í¡…‘•È¥É•Ñ`ÄÄ¸1„Í¡¹”É•ÍÑ”¹•ÑÑ”¸ˆ¤¤ì(€€€€€€€‘…å9¥¡Ñå±•	½á|õ¹•ÜE¡•­	½à¡EMÑÉ¥¹1¥Ñ•É…° ‰M¥µÕ±…Ñ¥½¸©½ÕÈ½¹Õ¥Ğ€ ÈĞ •¸€Øµ¥¸¤ˆ¤¤ì(€€€€€€€‘…å9¥¡Ñå±•	½á|´ùÍ•Ñ¡•­•¡™…±Í”¤ì(€€€€€€€‘…å9¥¡Ñå±•	½á|´ùÍ•ÑQ½½±Q¥À¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€‰…¥ĞÁÉ½É•ÍÍ•È±”Í½±•¥°°±”¥•°°±•Ì½µ‰É•Ì•Ğ±•Ìƒ¥±…¥É…•Ì‘Ô‹‰Ñ¥µ•¹Ğ¸ˆ¤¤ì(€€€€€€€€¼¼Qİ¼¥¹‘•Á•¹‘•¹Ğ½¹ÑÉ½±Ì…Ù½¥½ÕÁ±¥¹œ±½‰…°¥±±Õµ¥¹…Ñ¥½¸…¹(€€€€€€€€¼¼½ÕÑÁÕĞÑ½¹”µ…ÁÁ¥¹œ¸AÉ•Í•ÉÙ”Ñ¡”•á¥ÍÑ¥¹œ¡å‰É¥ÁÉ•™•É•¹”°İ¡¥±”(€€€€€€€€¼¼Ñ¡”¹•Ü™¥±µ¥ŒÍ¡½Õ±‘•È‘•™…Õ±ÑÌ=Ñ¼…Ù½¥XÄÜ¸ÌÀäİ…Í µ½ÕĞ¸(€€€€€€€¡å‰É¥‘1¥¡Ñ	½á|õ¹•ÜE¡•­	½à¡EMÑÉ¥¹1¥Ñ•É…° ‰I•‰½¹‘Ì¥¹‘¥É•ÑÌ€Í€¡‹©Ñ„¤ˆ¤¤ì(€€€€€€€¡å‰É¥‘1¥¡Ñ	½á|´ùÍ•ÑQ½½±Q¥À¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€‰M½¹‘•ÌÁË¥…±Õ³¥•Ì°¥•°Á±ÕÌ™É½¥°É•‰½¹‘Ì½±½Ë¥Ì•Ğé½¹•Ì…‰É¥Ó¥•Ì¹q¸ˆ(€€€€€€€€€€€€‰9”¡…¹”Á…Ì±”ÑÉ…¥Ñ•µ•¹ĞÑ½¹…°¸ˆ¤¤ì(€€€€€€€€¼¼…±¥‰É…Ñ•±¥¹•…Èµ±¥¡Ğ•¹•ÉäÁ…Ñ ¸½•Ì¹½Ğµ½‘¥™äÍIÑ•áÑÕÉ•Ì(€€€€€€€€¼¼½È™±…ÑÑ•¸‘¥•±•ÑÉ¥ŒÉ•™±•Ñ¥½¹Ìì±•…ä±¥¡Ñ¥¹œÉ•µ…¥¹Ì½¸(€€€€€€€½±½É¹•Éå	½á|õ¹•ÜE¡•­	½à¡EMÑÉ¥¹1¥Ñ•É…° ‰½Õ±•ÕÉÌ™¥“¡±•Ì•Ğ±Õµ§¡É”ƒ¥ÅÕ¥±¥‰Ë¥”ˆ¤¤ì(€€€€€€€½±½É¹•Éå	½á|´ùÍ•ÑQ½½±Q¥À¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€‹%ÅÕ¥±¥‰É”°Ÿ¥±…¥É…”…µ‰¥…¹Ğ°±”Í½±•¥°•Ğ±•ÌÉ•™±•ÑÌ‘Ô‹¥Ñ½¹q¸ˆ(€€€€€€€€€€€€‰‘…¹Ì°•ÍÁ…”±¥»¥…¥É”°Í…¹Ì™¥±ÑÉ”‘”Í…ÑÕÉ…Ñ¥½¸¹¤™±½ÔA	H¸ˆ¤¤ì(€€€€€€€½±½ÉáÁ½ÍÕÉ•	½á|õ¹•ÜE½Õ‰±•MÁ¥¹	½àì(€€€€€€€½±½ÉáÁ½ÍÕÉ•	½á|´ùÍ•ÑI…¹” ¸ØÔ°Ä¸ĞÔ¤ì(€€€€€€€½±½ÉáÁ½ÍÕÉ•	½á|´ùÍ•Ñ•¥µ…±Ì È¤ì(€€€€€€€½±½ÉáÁ½ÍÕÉ•	½á|´ùÍ•ÑM¥¹±•MÑ•À ¸ÀÔ¤ì(€€€€€€€½±½ÉáÁ½ÍÕÉ•	½á|´ùÍ•ÑQ½½±Q¥À¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€‰K¥±…”™¥¸‘”°•áÁ½Í¥Ñ¥½¸‘Ô¹½ÕÙ•…Ôµ½“¡±”¸€Ä°ÀÀ€ô¹•ÕÑÉ”¹q¸ˆ(€€€€€€€€€€€€‰AË¥Í•ÉÙ”±„Ñ•¥¹Ñ”•Ğ±„Í…ÑÕÉ…Ñ¥½¸‘•Ìµ…Ó¥É¥…Õà¸ˆ¤¤ì(€€€€€€€™¥±µ¥Q½¹•	½á|õ¹•ÜE¡•­	½à¡EMÑÉ¥¹1¥Ñ•É…° ‰½µÁÉ•ÍÍ¥½¸Ñ½¹…±”™¥±µ¥ÅÕ”€¡½ÁÑ¥½¹¹•±±”¤ˆ¤¤ì(€€€€€€€™¥±µ¥Q½¹•	½á|´ùÍ•ÑQ½½±Q¥À¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€‰‘½Õ¥Ğ±•Ì¡…ÕÑ•Ì±Õµ§¡É•ÌÍ…¹ÌÉ•µ½¹Ñ•È±•Ì‘•µ¤µÑ•¥¹Ñ•Ì¹q¸ˆ(€€€€€€€€€€€€‰%¹“¥Á•¹‘…¹Ğ‘•ÌÍ½¹‘•Ì¥¹‘¥É•Ñ•Ì¸ˆ¤¤ì(€€€€€€€EM•ÑÑ¥¹Ì¡å‰É¥‘AÉ•™Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰M]I@XÄÜˆ¤¤ì(€€€€€€€¡å‰É¥‘1¥¡Ñ	½á|´ùÍ•Ñ¡•­•¡¡å‰É¥‘AÉ•™Ì¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½!å‰É¥‘1¥¡Ñ¥¹œˆ¤±ÑÉÕ”¤¹Ñ½	½½° ¤¤ì(€€€€€€€™¥±µ¥Q½¹•	½á|´ùÍ•Ñ¡•­•¡¡å‰É¥‘AÉ•™Ì¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½¥±µ¥Q½¹•µ…Àˆ¤±™…±Í”¤¹Ñ½	½½° ¤¤ì(€€€€€€€½±½É¹•Éå	½á|´ùÍ•Ñ¡•­•¡¡å‰É¥‘AÉ•™Ì¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½½±½É¹•Éå	…±…¹”ˆ¤±ÑÉÕ”¤¹Ñ½	½½° ¤¤ì(€€€€€€€½±½ÉáÁ½ÍÕÉ•	½á|´ùÍ•ÑY…±Õ”¡¡å‰É¥‘AÉ•™Ì¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½½±½ÉáÁ½ÍÕÉ”ˆ¤°Ä¸À¤¹Ñ½½Õ‰±” ¤¤ì(€€€€€€€½±½ÉáÁ½ÍÕÉ•	½á|´ùÍ•Ñ¹…‰±•¡½±½É¹•Éå	½á|´ù¥Í¡•­• ¤¤ì(€€€€€€€´ÍèéÍ•ÑI…ÍÑ•É!å‰É¥‘1¥¡Ñ¥¹¹…‰±•¡¡å‰É¥‘1¥¡Ñ	½á|´ù¥Í¡•­• ¤¤ì(€€€€€€€´ÍèéÍ•ÑI…ÍÑ•É¥±µ¥Q½¹•µ…Á¹…‰±•¡™¥±µ¥Q½¹•	½á|´ù¥Í¡•­• ¤¤ì(€€€€€€€´ÍèéÍ•ÑI…ÍÑ•É½±½É¹•Éå	…±…¹•¹…‰±•¡½±½É¹•Éå	½á|´ù¥Í¡•­• ¤¤ì(€€€€€€€´ÍèéÍ•ÑI…ÍÑ•É½±½ÉáÁ½ÍÕÉ”¡™±½…Ğ¡½±½ÉáÁ½ÍÕÉ•	½á|´ùÙ…±Õ” ¤¤¤ì(€€€€€€€…é¥µÕÑ¡|õ¹•ÜEM±¥‘•È¡EĞèé!½É¥é½¹Ñ…°¤ì(€€€€€€€…é¥µÕÑ¡|´ùÍ•ÑI…¹” ´ÄàÀ°ÄàÀ¤ì(€€€€€€€…é¥µÕÑ¡|´ùÍ•ÑY…±Õ” À¤ì(€€€€€€€™½É´´ù…‘‘I½Ü¡EMÑÉ¥¹1¥Ñ•É…° ‰…·¥É„ˆ¤±…µ•É…	½á|¤ì(€€€€€€€™½É´´ù…‘‘I½Ü¡EMÑÉ¥¹1¥Ñ•É…° ‰7¥Ñ¡½‘”‘”É•¹‘Ôˆ¤±‰…­•¹‘	½á|¤ì(€€€€€€€™½É´´ù…‘‘I½Ü¡‘¥É•Ñ¥ÍÁ±…å	½á|¤ì(€€€€€€€™½É´´ù…‘‘I½Ü¡EMÑÉ¥¹1¥Ñ•É…° ‰K¥Í½±ÕÑ¥½¸ˆ¤±ÅÕ…±¥Ñå	½á|¤ì(€€€€€€€™½É´´ù…‘‘I½Ü¡EMÑÉ¥¹1¥Ñ•É…° ‹%¡…¹Ñ¥±±½¹ÌAT‘¥É•Ğˆ¤±‘¥É•ÑM…µÁ±•Í|¤ì(€€€€€€€™½É´´ù…‘‘I½Ü¡EMÑÉ¥¹1¥Ñ•É…° ‹%¡…¹Ñ¥±±½¹Ì$ˆ¤±¥M…µÁ±•Í|¤ì(€€€€€€€™½É´´ù…‘‘I½Ü¡EMÑÉ¥¹1¥Ñ•É…° ‰!•ÕÉ”Í½±…¥É”ˆ¤±ÍÕ¹!½ÕÉ|¤ì(€€€€€€€™½É´´ù…‘‘I½Ü¡±½Õ‘¹¥µ…Ñ¥½¹	½á|¤ì(€€€€€€€™½É´´ù…‘‘I½Ü¡‘…å9¥¡Ñå±•	½á|¤ì(€€€€€€€™½É´´ù…‘‘I½Ü¡¡å‰É¥‘1¥¡Ñ	½á|¤ì(€€€€€€€™½É´´ù…‘‘I½Ü¡½±½É¹•Éå	½á|¤ì(€€€€€€€™½É´´ù…‘‘I½Ü¡EMÑÉ¥¹1¥Ñ•É…° ‰áÁ½Í¥Ñ¥½¸±¥»¥…¥É”ˆ¤±½±½ÉáÁ½ÍÕÉ•	½á|¤ì(€€€€€€€™½É´´ù…‘‘I½Ü¡™¥±µ¥Q½¹•	½á|¤ì(€€€€€€€™½É´´ù…‘‘I½Ü¡EMÑÉ¥¹1¥Ñ•É…° ‰I½Ñ…Ñ¥½¸…·¥É„ˆ¤±…é¥µÕÑ¡|¤ì(€€€€€€€Ù•ÉÑ¥…°´ù…‘‘1…å½ÕĞ¡™½É´¤ì(€€€€€€€Ù•ÉÑ¥…°´ù…‘‘]¥‘•Ğ¡ÁÉ½É•ÍÍ¥Ù•¥|¤ì(€€€€€€€Ù•ÉÑ¥…°´ù…‘‘]¥‘•Ğ¡‘•¹½¥Í•¥|¤ì(€€€€€€€Ù•ÉÑ¥…°´ù…‘‘]¥‘•Ğ¡‘•¹½¥Í•¥É•Ñ|¤ì(€€€€€€€•‘•…|õ¹•ÜE¡•­	½à¡EMÑÉ¥¹1¥Ñ•É…° ‰¹Ñ¥…±¥…Í¥¹œ‘•Ì½¹Ñ½ÕÉÌˆ¤¤ì(€€€€€€€•‘•…|´ùÍ•Ñ¡•­•¡ÑÉÕ”¤ì(€€€€€€€Ù•ÉÑ¥…°´ù…‘‘]¥‘•Ğ¡•‘•…|¤ì(€€€€€€€€¼¼=¹”ÅÕ…±¥ÑäÍ½ÕÉ”™½ÈEĞ…¹•µ‰•‘‘¥¹œ¡½ÍĞ…ÁÁ±¥…Ñ¥½¹Ì¸(€€€€€€€€¼¼±°½¹ÑÉ½±ÌÕÁ‘…Ñ”…¸…Ñ½µ¥Œ•¹¥¹”Í¹…ÁÍ¡½ĞìÑ¡”ATİ½É­•È(€€€€€€€€¼¼…ÁÁ±¥•ÌÑ¡”¹•ÜÍ•ÑÑ¥¹Ì½¹±ä…ĞÑ¡”¹•áĞ™É…µ”‰½Õ¹‘…Éä¸(€€€€€€€…ÕÑ¼¨É…ÍÑ•ÉEÕ…±¥Ñäõ¹•ÜEÉ½ÕÁ	½à¡EMÑÉ¥¹1¥Ñ•É…° ‰EÕ…±¥Ó¤I…ÍÑ•È¥É•Ñ`€ÄÄˆ¤¤ì(€€€€€€€…ÕÑ¼¨É…ÍÑ•É½É´õ¹•ÜE½Éµ1…å½ÕĞ¡É…ÍÑ•ÉEÕ…±¥Ñä¤ì(€€€€€€€É…ÍÑ•ÉAÉ•Í•Ñ	½á|õ¹•ÜE½µ‰½	½àì(€€€€€€€É…ÍÑ•ÉAÉ•Í•Ñ	½á|´ù…‘‘%Ñ•µÌ¡ì(€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰A•É™½Éµ…¹”ˆ¤°(€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‹%ÅÕ¥±¥‰Ë¥”ˆ¤°(€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‹%±•Û¥”ƒŠPÅÕ…±¥Ó¤¡¥ÍÑ½É¥ÅÕ”ˆ¤°(€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰U±ÑÉ„ƒŠP™¥¹•ÍÍ”µ…á¥µ…±”ˆ¤°(€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰A•ÉÍ½¹¹…±¥Ï¥”ˆ¤(€€€€€€€ô¤ì(€€€€€€€É…ÍÑ•É½É´´ù…‘‘I½Ü¡EMÑÉ¥¹1¥Ñ•É…° ‰AË¥Ë¥±…”ˆ¤±É…ÍÑ•ÉAÉ•Í•Ñ	½á|¤ì(€€€€€€€É…ÍÑ•É5Í……	½á|õ¹•ÜE½µ‰½	½àì(€€€€€€€™½È¡¥¹ĞØéìÄ°È°Ğ°áô¤(€€€€€€€€€€€É…ÍÑ•É5Í……	½á|´ù…‘‘%Ñ•´¡EMÑÉ¥¹1¥Ñ•É…° ‰5M€”Ç\ˆ¤¹…Éœ¡Ø¤±Ø¤ì(€€€€€€€É…ÍÑ•É½É´´ù…‘‘I½Ü¡EMÑÉ¥¹1¥Ñ•É…° ‰¹Ñ¤µ…±¥…Í¥¹œATˆ¤±É…ÍÑ•É5Í……	½á|¤ì(€€€€€€€É…ÍÑ•É¹¥Í½	½á|õ¹•ÜE½µ‰½	½àì(€€€€€€€™½È¡¥¹ĞØéìÄ°È°Ğ°à°ÄÙô¤(€€€€€€€€€€€É…ÍÑ•É¹¥Í½	½á|´ù…‘‘%Ñ•´¡EMÑÉ¥¹1¥Ñ•É…° ‰¹¥Í½ÑÉ½Á¥”€”Ç\ˆ¤¹…Éœ¡Ø¤±Ø¤ì(€€€€€€€É…ÍÑ•É½É´´ù…‘‘I½Ü¡EMÑÉ¥¹1¥Ñ•É…° ‰Q•áÑÕÉ•ÌA	Hˆ¤±É…ÍÑ•É¹¥Í½	½á|¤ì(€€€€€€€É…ÍÑ•É1½‘	½á|õ¹•ÜE½µ‰½	½àì(€€€€€€€™½È¡¥¹ĞØéìÔÀ°ØÀ°ÜÔ°àÔ°ÄÀÀ°ÄÈÔ°ÄÔÀ°ÄàÀ°ÈÀÁô¤(€€€€€€€€€€€É…ÍÑ•É1½‘	½á|´ù…‘‘%Ñ•´¡EMÑÉ¥¹1¥Ñ•É…° ‰EÕ…±¥Ó¤1=€”Ä€”ˆ¤¹…Éœ¡Ø¤±Ø¤ì(€€€€€€€É…ÍÑ•É½É´´ù…‘‘I½Ü¡EMÑÉ¥¹1¥Ñ•É…° ‰¥ÍÑ…¹”“¥Ñ…¥±Ìˆ¤±É…ÍÑ•É1½‘	½á|¤ì(€€€€€€€É…ÍÑ•ÉÕ±±	½á|õ¹•ÜE¡•­	½à¡EMÑÉ¥¹1¥Ñ•É…° ‰9”Á…Ì…±Õ±•È±•Ì½‰©•ÑÌ¡½ÉÌ…·¥É„ˆ¤¤ì(€€€€€€€É…ÍÑ•É½É´´ù…‘‘I½Ü¡É…ÍÑ•ÉÕ±±	½á|¤ì(€€€€€€€É…ÍÑ•Éå¹…µ¥1½‘	½á|õ¹•ÜE¡•­	½à¡EMÑÉ¥¹1¥Ñ•É…° ‰1=…‘…ÁÑ…Ñ¥˜‘•Ì½‰©•ÑÌƒ¥±½¥»¥Ìˆ¤¤ì(€€€€€€€É…ÍÑ•É½É´´ù…‘‘I½Ü¡É…ÍÑ•Éå¹…µ¥1½‘	½á|¤ì(€€€€€€€Ù•ÉÑ¥…°´ù…‘‘]¥‘•Ğ¡É…ÍÑ•ÉEÕ…±¥Ñä¤ì(€€€€€€€EM•ÑÑ¥¹ÌÍÑ½É•¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰M]I@XÄÜˆ¤¤ì(€€€€€€€¥¹Ğ¥¹¥Ñ¥…±AÉ•Í•ĞõÍÑèé±…µÀ¡ÍÑ½É•¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½AÉ•Í•Ğˆ¤°È¤¹Ñ½%¹Ğ ¤°À°Ğ¤ì(€€€€€€€€¼¼¸•µ‰•‘‘¥¹œ¡½ÍĞµ…ä½¹™¥ÕÉ”Ñ¡”É…ÍÑ•ÈA$	=I±…Õ¹¡¥¹œ(€€€€€€€€¼¼EĞ¸I•ÍÁ•Ğ¥ĞÕ¹±•ÍÌÑ¡”ÕÍ•È…±É•…‘äÍ…Ù•U$ÁÉ•™•É•¹•Ì¸(€€€€€€€…ÕÑ¼¥¹¥Ñ¥…±EÕ…±¥ÑäõÍÑ½É•¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½AÉ•Í•Ğˆ¤¤(€€€€€€€€€€€€ıÉ…ÍÑ•ÉEÕ…±¥ÑåAÉ½™¥±”¡I…ÍÑ•ÉEÕ…±¥ÑåAÉ½™¥±”¡ÍÑèéµ¥¸¡¥¹¥Ñ¥…±AÉ•Í•Ğ°Ì¤¤¤(€€€€€€€€€€€€éÉ…ÍÑ•ÉEÕ…±¥ÑåM•ÑÑ¥¹Ì ¤ì(€€€€€€€¥˜ …ÍÑ½É•¹½¹Ñ…¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½AÉ•Í•Ğˆ¤¤¥ì(€€€€€€€€€€€¥¹¥Ñ¥…±AÉ•Í•ĞôĞì(€€€€€€€€€€€™½È¡¥¹Ğ…¹‘¥‘…Ñ”ôÀí…¹‘¥‘…Ñ”ğĞì¬­…¹‘¥‘…Ñ”¥ì(€€€€€€€€€€€€€€€½¹ÍĞ…ÕÑ¼ÄõÉ…ÍÑ•ÉEÕ…±¥ÑåAÉ½™¥±”¡I…ÍÑ•ÉEÕ…±¥ÑåAÉ½™¥±”¡…¹‘¥‘…Ñ”¤¤ì(€€€€€€€€€€€€€€€¥˜¡Ä¹µÍ……M…µÁ±•Ìôõ¥¹¥Ñ¥…±EÕ…±¥Ñä¹µÍ……M…µÁ±•Ì€˜˜(€€€€€€€€€€€€€€€€€€Ä¹…¹¥Í½ÑÉ½Áäôõ¥¹¥Ñ¥…±EÕ…±¥Ñä¹…¹¥Í½ÑÉ½Áä€˜˜(€€€€€€€€€€€€€€€€€€Ä¹±½‘EÕ…±¥ÑåA•É•¹Ğôõ¥¹¥Ñ¥…±EÕ…±¥Ñä¹±½‘EÕ…±¥ÑåA•É•¹Ğ€˜˜(€€€€€€€€€€€€€€€€€€Ä¹™ÉÕÍÑÕµÕ±±¥¹œôõ¥¹¥Ñ¥…±EÕ…±¥Ñä¹™ÉÕÍÑÕµÕ±±¥¹œ€˜˜(€€€€€€€€€€€€€€€€€€Ä¹‘å¹…µ¥1½ôõ¥¹¥Ñ¥…±EÕ…±¥Ñä¹‘å¹…µ¥1½¥ì(€€€€€€€€€€€€€€€€€€€¥¹¥Ñ¥…±AÉ•Í•Ğõ…¹‘¥‘…Ñ”í‰É•…¬ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€ô(€€€€€€€ô(€€€€€€€¥˜¡¥¹¥Ñ¥…±AÉ•Í•ĞôôĞ¥ì(€€€€€€€€€€€¥¹¥Ñ¥…±EÕ…±¥Ñä¹µÍ……M…µÁ±•ÌõÍÑ½É•¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½5Mˆ¤°Ğ¤¹Ñ½U%¹Ğ ¤ì(€€€€€€€€€€€¥¹¥Ñ¥…±EÕ…±¥Ñä¹…¹¥Í½ÑÉ½ÁäõÍÑ½É•¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½¹¥Í½ÑÉ½Áäˆ¤°ÄØ¤¹Ñ½U%¹Ğ ¤ì(€€€€€€€€€€€¥¹¥Ñ¥…±EÕ…±¥Ñä¹±½‘EÕ…±¥ÑåA•É•¹ĞõÍÑ½É•¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½1=A•É•¹Ğˆ¤°ÄÀÀ¤¹Ñ½U%¹Ğ ¤ì(€€€€€€€€€€€¥¹¥Ñ¥…±EÕ…±¥Ñä¹™ÉÕÍÑÕµÕ±±¥¹œõÍÑ½É•¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½Õ±±¥¹œˆ¤±ÑÉÕ”¤¹Ñ½	½½° ¤ì(€€€€€€€€€€€¥¹¥Ñ¥…±EÕ…±¥Ñä¹‘å¹…µ¥1½õÍÑ½É•¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½å¹…µ¥1=ˆ¤±ÑÉÕ”¤¹Ñ½	½½° ¤ì(€€€€€€€ô(€€€€€€€¥˜¡É…ÍÑ•É5Í……	½á|´ù™¥¹‘…Ñ„¡¥¹Ğ¡¥¹¥Ñ¥…±EÕ…±¥Ñä¹µÍ……M…µÁ±•Ì¤¤ğÁñğ(€€€€€€€€€€É…ÍÑ•É¹¥Í½	½á|´ù™¥¹‘…Ñ„¡¥¹Ğ¡¥¹¥Ñ¥…±EÕ…±¥Ñä¹…¹¥Í½ÑÉ½Áä¤¤ğÁñğ(€€€€€€€€€€É…ÍÑ•É1½‘	½á|´ù™¥¹‘…Ñ„¡¥¹Ğ¡¥¹¥Ñ¥…±EÕ…±¥Ñä¹±½‘EÕ…±¥ÑåA•É•¹Ğ¤¤ğÀ¥ì(€€€€€€€€€€€¥¹¥Ñ¥…±AÉ•Í•ĞôÈí¥¹¥Ñ¥…±EÕ…±¥ÑäõÉ…ÍÑ•ÉEÕ…±¥ÑåAÉ½™¥±”¡I…ÍÑ•ÉEÕ…±¥ÑåAÉ½™¥±”èé!¥ ¤ì(€€€€€€€ô(€€€€€€€É…ÍÑ•ÉAÉ•Í•Ñ	½á|´ùÍ•ÑÕÉÉ•¹Ñ%¹‘•à¡¥¹¥Ñ¥…±AÉ•Í•Ğ¤ì(€€€€€€€‘¥ÍÁ±…åI…ÍÑ•ÉM•ÑÑ¥¹Ì¡¥¹¥Ñ¥…±EÕ…±¥Ñä¤ì(€€€€€€€ÍÑèéİÍÑÉ¥¹œÅÕ…±¥ÑåÉÉ½Èì(€€€€€€€Í•ÑI…ÍÑ•ÉEÕ…±¥ÑåM•ÑÑ¥¹Ì¡¥¹¥Ñ¥…±EÕ…±¥Ñä±ÅÕ…±¥ÑåÉÉ½È¤ì(€€€€€€€½¹¹•Ğ¡É…ÍÑ•ÉAÉ•Í•Ñ	½á|±Å=Ù•É±½…ñ¥¹Ğø ™E½µ‰½	½àèéÕÉÉ•¹Ñ%¹‘•á¡…¹•¤°(€€€€€€€€€€€€€€€Ñ¡¥Ì±mÑ¡¥Ít¡¥¹ĞÍ•±•Ñ•¥ì(€€€€€€€€€€€¥˜¡Í•±•Ñ•øôÀ˜™Í•±•Ñ•ğĞ¤(€€€€€€€€€€€€€€€‘¥ÍÁ±…åI…ÍÑ•ÉM•ÑÑ¥¹Ì¡É…ÍÑ•ÉEÕ…±¥ÑåAÉ½™¥±”¡I…ÍÑ•ÉEÕ…±¥ÑåAÉ½™¥±”¡Í•±•Ñ•¤¤¤ì(€€€€€€€€€€€…ÁÁ±åI…ÍÑ•ÉM•ÑÑ¥¹Ì¡™…±Í”¤ì(€€€€€€€ô¤ì(€€€€€€€™½È¡…ÕÑ¼¨½µ‰¼éíÉ…ÍÑ•É5Í……	½á|±É…ÍÑ•É¹¥Í½	½á|±É…ÍÑ•É1½‘	½á}ô¥ì(€€€€€€€€€€€½¹¹•Ğ¡½µ‰¼±Å=Ù•É±½…ñ¥¹Ğø ™E½µ‰½	½àèéÕÉÉ•¹Ñ%¹‘•á¡…¹•¤°(€€€€€€€€€€€€€€€€€€€Ñ¡¥Ì±mÑ¡¥Ít¡¥¹Ğ¥í…ÁÁ±åI…ÍÑ•ÉM•ÑÑ¥¹Ì¡ÑÉÕ”¤íô¤ì(€€€€€€€ô(€€€€€€€½¹¹•Ğ¡É…ÍÑ•ÉÕ±±	½á|°™E¡•­	½àèéÑ½±•±Ñ¡¥Ì°(€€€€€€€€€€€€€€€mÑ¡¥Ít¡‰½½°¥í…ÁÁ±åI…ÍÑ•ÉM•ÑÑ¥¹Ì¡ÑÉÕ”¤íô¤ì(€€€€€€€½¹¹•Ğ¡É…ÍÑ•Éå¹…µ¥1½‘	½á|°™E¡•­	½àèéÑ½±•±Ñ¡¥Ì°(€€€€€€€€€€€€€€€mÑ¡¥Ít¡‰½½°¥í…ÁÁ±åI…ÍÑ•ÉM•ÑÑ¥¹Ì¡ÑÉÕ”¤íô¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹	ÕÑÑ½¹|õ¹•ÜEAÕÍ¡	ÕÑÑ½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰¥µ…ÉÉ•È•áÁ±½É…Ñ¥½¸€¡XÄÜ¤ˆ¤¤ì(€€€€€€€Ù•ÉÑ¥…°´ù…‘‘]¥‘•Ğ¡•áÁ±½É…Ñ¥½¹	ÕÑÑ½¹|¤ì(€€€€€€€İ…±­¥¹5½‘•	½á|õ¹•ÜE¡•­	½à¡EMÑÉ¥¹1¥Ñ•É…° ‰5…É¡•È…ÔÍ½°€¡å•Õàƒ€€Ä°ÜÀ´°•Í…±¥•ÉÌ•Ğ½‰ÍÑ…±•Ì¤ˆ¤¤ì(€€€€€€€İ…±­¥¹5½‘•	½á|´ùÍ•ÑQ½½±Q¥À¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€‰5…É¡”ƒ€¡…ÕÑ•ÕÈ¡½µµ”°µ½¹Ñ”±•Ìµ…É¡•Ì‘”€ÌĞ´…Ôµ…á¥µÕ´±q¸ˆ(€€€€€€€€€€€€‰‘•Í•¹±•ÌÁ…±¥•ÉÌ•Ğ‰±½ÅÕ”±•ÌµÕÉÌ¸¥½¡•èÁ½ÕÈÙ½±•È±¥‰É•µ•¹Ğ¸ˆ¤¤ì(€€€€€€€EM•ÑÑ¥¹Ìİ…±­AÉ•™•É•¹•Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰M]I@XÄÜˆ¤¤ì(€€€€€€€İ…±­¥¹5½‘•	½á|´ùÍ•Ñ¡•­•¡İ…±­AÉ•™•É•¹•Ì¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰áÁ±½É…Ñ¥½¸½]…±­¥¹œˆ¤±ÑÉÕ”¤¹Ñ½	½½° ¤¤ì(€€€€€€€Ù•ÉÑ¥…°´ù…‘‘]¥‘•Ğ¡İ…±­¥¹5½‘•	½á|¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹!•±Á|õ¹•ÜE1…‰•°¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€‰iEM€¼™³¡¡•Ì€èµ…É¡•Èƒ
+ÜÍ½ÕÉ¥Ì±¥‰É”€è½É¥•¹Ñ•È±„…·¥É„ƒ
+Ü±¥Œ‘É½¥Ğ€èé½½´ƒ\Íqq¸ˆ(€€€€€€€€€€€€‰ÄÄ€èÁ±•¥¸ƒ¥É…¸ƒ
+Üƒ%¡…À€è…ÉË©Ñ•Èƒ
+Ü€èƒ¥¡•±±”ƒ
+ÜÑÉ°­5…¨­€è…¹½µ…±¥”A9­)M=8¸ˆ¤¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹!•±Á|´ùÍ•Ñ]½É‘]É…À¡ÑÉÕ”¤ì(€€€€€€€Ù•ÉÑ¥…°´ù…‘‘]¥‘•Ğ¡•áÁ±½É…Ñ¥½¹!•±Á|¤ì(€€€€€€€½¹¹•Ğ¡•áÁ±½É…Ñ¥½¹	ÕÑÑ½¹|°™EAÕÍ¡	ÕÑÑ½¸èé±¥­•±Ñ¡¥Ì±mÑ¡¥ÍuíÑ½±•áÁ±½É…Ñ¥½¸ ¤íô¤ì(€€€€€€€‰…­•¥	ÕÑÑ½¹|õ¹•ÜEAÕÍ¡	ÕÑÑ½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰AË¥…±Õ±•È±„Ñ…‰±”$€¡É…äÑÉ…¥¹œAT¤ˆ¤¤ì(€€€€€€€‰…­•¥	ÕÑÑ½¹|´ùÍ•ÑQ½½±Q¥À¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€‰…±Õ±”±•ÌÙÉ…¥ÌÉ•‰½¹‘ÌÍÕÈ±•ÌÍÕÉ™…•Ì•Ğƒ¥É¥ĞÕ¹”Ñ…‰±”$Á½ÕÈ€ÈÔ¡•ÕÉ•ÌÍ½±…¥É•Ì¹q¸ˆ(€€€€€€€€€€€€‰=Ã¥É…Ñ¥½¸¡½ÉÌ±¥¹”‘…¹ÌÕ¸ÁÉ½É…µµ”Ï¥Á…Ë¤°Í…¹ÌÉ…±•¹Ñ¥È¡…ÅÕ”¥µ…”¸ˆ¤¤ì(€€€€€€€‰…­•¥	ÕÑÑ½¹|´ùÍ•Ñ¹…‰±•¡™…±Í”¤ì(€€€€€€€Ù•ÉÑ¥…°´ù…‘‘]¥‘•Ğ¡‰…­•¥	ÕÑÑ½¹|¤ì(€€€€€€€‰…­•¥AÉ½•ÍÍ|õ¹•ÜEAÉ½•ÍÌ¡Ñ¡¥Ì¤ì(€€€€€€€½¹¹•Ğ¡‰…­•¥	ÕÑÑ½¹|°™EAÕÍ¡	ÕÑÑ½¸èé±¥­•±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€¥˜¡Í•¹•A…Ñ¡|¹¥ÍµÁÑä ¥ññ‰…­•¥AÉ½•ÍÍ|´ùÍÑ…Ñ” ¤„õEAÉ½•ÍÌèé9½ÑIÕ¹¹¥¹œ¥É•ÑÕÉ¸ì(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œ•á”õE½É•ÁÁ±¥…Ñ¥½¸èé…ÁÁ±¥…Ñ¥½¹¥ÉA…Ñ  ¤(€€€€€€€€€€€€€€€€­EMÑÉ¥¹1¥Ñ•É…° ˆ½½ÕÑ¥±Ì½¤½µ½Ñ•ÕÈÍ‘}ØÄİ}¥‰…­”¹•á”ˆ¤ì(€€€€€€€€€€€¥˜ …E¥±•%¹™¼èé•á¥ÍÑÌ¡•á”¤¥ì(€€€€€€€€€€€€€€€E5•ÍÍ…•	½àèéİ…É¹¥¹œ¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰AË¥…±Õ°$ˆ¤°(€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰ã¥ÕÑ…‰±”µ½Ñ•ÕÈÍ‘}ØÄİ}¥‰…­”¹•á”…‰Í•¹Ğ‘Ô‘½ÍÍ¥•È‘”°…ÁÁ±¥…Ñ¥½¸¸ˆ¤¤ì(€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€‰…­¥¹M•¹•A…Ñ¡|õÍ•¹•A…Ñ¡|ì(€€€€€€€€€€€‰…­•¥	ÕÑÑ½¹|´ùÍ•Ñ¹…‰±•¡™…±Í”¤ì(€€€€€€€€€€€‰…­•¥	ÕÑÑ½¹|´ùÍ•ÑQ•áĞ¡EMÑÉ¥¹1¥Ñ•É…° ‰…±Õ°‘”±„Ñ…‰±”$•¸½ÕÉÏŠ˜ˆ¤¤ì(€€€€€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€€€€€‰AË¥…±Õ°¡½ÉÌ±¥¹”€èÉ…å½¹Ì•ĞÉ•‰½¹‘ÌÍÕÈ±•ÌÍÕÉ™…•Ì‘”±„Í¡¹—Š˜ˆ¤¤ì(€€€€€€€€€€€‰…­•¥AÉ½•ÍÍ|´ùÍ•ÑAÉ½É…´¡•á”¤ì(€€€€€€€€€€€‰…­•¥AÉ½•ÍÍ|´ùÍ•ÑÉÕµ•¹ÑÌ¡í‰…­¥¹M•¹•A…Ñ¡|°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€‰…­¥¹M•¹•A…Ñ¡|­EMÑÉ¥¹1¥Ñ•É…° ˆ¹´Í‘¤ˆ¥ô¤ì(€€€€€€€€€€€‰…­•¥AÉ½•ÍÍ|´ùÍÑ…ÉĞ ¤ì(€€€€€€€ô¤ì(€€€€€€€½¹¹•Ğ¡‰…­•¥AÉ½•ÍÍ|±Å=Ù•É±½…ñ¥¹Ğ±EAÉ½•ÍÌèéá¥ÑMÑ…ÑÕÌø ™EAÉ½•ÍÌèé™¥¹¥Í¡•¤°(€€€€€€€€€€€€€€€Ñ¡¥Ì±mÑ¡¥Ít¡¥¹Ğ•á¥Ñ½‘”±EAÉ½•ÍÌèéá¥ÑMÑ…ÑÕÌ•á¥ÑMÑ…ÑÕÌ¥ì(€€€€€€€€€€€‰…­•¥	ÕÑÑ½¹|´ùÍ•ÑQ•áĞ¡EMÑÉ¥¹1¥Ñ•É…° ‰AË¥…±Õ±•È±„Ñ…‰±”$€¡É…äÑÉ…¥¹œAT¤ˆ¤¤ì(€€€€€€€€€€€‰…­•¥	ÕÑÑ½¹|´ùÍ•Ñ¹…‰±•¡‰½½°¡ÉÕ¹Ñ¥µ•|¤¤ì(€€€€€€€€€€€¥˜¡•á¥ÑMÑ…ÑÕÌ„õEAÉ½•ÍÌèé9½Éµ…±á¥Ñññ•á¥Ñ½‘”„ôÀ¥ì(€€€€€€€€€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€€€€€€€€€‹%¡•ŒÁË¥…±Õ°$€è€”Äˆ¤¹…Éœ¡EMÑÉ¥¹œèé™É½µUÑ˜à (€€€€€€€€€€€€€€€€€€€€€€€‰…­•¥AÉ½•ÍÍ|´ùÉ•…‘±±MÑ…¹‘…É‘ÉÉ½È ¤¤¹±•™Ğ ÈÀÀ¤¤°ÄÔÀÀÀ¤ì(€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡‰…­¥¹M•¹•A…Ñ¡|„õÍ•¹•A…Ñ¡|¥É•ÑÕÉ¸ì€¼¼Í•¹”Íİ¥Ñ¡•‘ÕÉ¥¹œ‰…­”(€€€€€€€€€€€Í•ÑI…ÍÑ•É¥…¡•A…Ñ ¡ÍÑèé™¥±•ÍåÍÑ•´èéÁ…Ñ  (€€€€€€€€€€€€€€€€¡Í•¹•A…Ñ¡|­EMÑÉ¥¹1¥Ñ•É…° ˆ¹´Í‘¤ˆ¤¤¹Ñ½MÑ‘]MÑÉ¥¹œ ¤¤¤ì(€€€€€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€€€€€‰Q…‰±”$•¹É•¥ÍÑË¥”Á½ÕÈ€”ÄƒŠPÉ•‰½¹‘Ì¡…ÉŸ¥Ì…ÔÁÉ½¡…¥¸É•¹‘Ô¸ˆ¤(€€€€€€€€€€€€€€€€¹…Éœ¡E¥±•%¹™¼¡Í•¹•A…Ñ¡|¤¹™¥±•9…µ” ¤¤°ÄØÀÀÀ¤ì(€€€€€€€€€€€É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€ô¤ì(€€€€€€€½¹¹•Ğ¡İ…±­¥¹5½‘•	½á|°™E¡•­	½àèéÑ½±•±Ñ¡¥Ì±mÑ¡¥Ít¡‰½½°•¹…‰±•¥ì(€€€€€€€€€€€ÕÁ‘…Ñ•áÁ±½É…Ñ¥½¹MÁ••‘%¹‘¥…Ñ½È ¤ì(€€€€€€€€€€€EM•ÑÑ¥¹ÌÁÉ•™•É•¹•Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰M]I@XÄÜˆ¤¤ì(€€€€€€€€€€€ÁÉ•™•É•¹•Ì¹Í•ÑY…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰áÁ±½É…Ñ¥½¸½]…±­¥¹œˆ¤±•¹…‰±•¤ì(€€€€€€€€€€€¥˜¡•áÁ±½É¥¹|˜™™É••…µ•É…Ñ¥Ù•|˜™ÉÕ¹Ñ¥µ•|¥ì(€€€€€€€€€€€€€€€¥˜¡•¹…‰±•¥ì(€€€€€€€€€€€€€€€€€€€İ…±¬èéÍÁ…İ¸¡ÉÕ¹Ñ¥µ•|´ùÉ•¹‘•ÉM•¹”±™É••…µ•É…|¹•å”±İ…±­¥¹MÑ…Ñ•|¤ì(€€€€€€€€€€€€€€€€€€€İ…±­¥¹½±±¥Í¥½¹Må¹A•¹‘¥¹|õ™…±Í”ì(€€€€€€€€€€€€€€€€€€€™É••…µ•É…|¹•å”õİ…±¬èé•å”¡İ…±­¥¹MÑ…Ñ•|¤ì(€€€€€€€€€€€€€€€€€€€ÕÁ‘…Ñ•1½½¬ ¤ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€€€€€ô(€€€€€€€ô¤ì(€€€€€€€…ÕÑ¼¨É•¹‘•É	ÕÑÑ½¸õ¹•ÜEAÕÍ¡	ÕÑÑ½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰…±Õ±•È°¥µ…”ˆ¤¤ì(€€€€€€€Ù•ÉÑ¥…°´ù…‘‘]¥‘•Ğ¡É•¹‘•É	ÕÑÑ½¸¤ì(€€€€€€€…ÕÑ¼¨µ…Ñ•É¥…±Ìõ¹•ÜEÉ½ÕÁ	½à¡EMÑÉ¥¹1¥Ñ•É…° ‰5…Ó¥É¥…ÔÏ¥±•Ñ¥½¹»¤ˆ¤¤ì(€€€€€€€…ÕÑ¼¨µ…Ñ½É´õ¹•ÜE½Éµ1…å½ÕĞ¡µ…Ñ•É¥…±Ì¤ì(€€€€€€€µ…Ñ•É¥…±1…‰•±|õ¹•ÜE1…‰•°¡EMÑÉ¥¹1¥Ñ•É…° ‰O¥±•Ñ¥½¹¹•ÈÕ¸µ…Ó¥É¥…Ô‘…¹Ì±”…Ñ…±½Õ”ˆ¤¤ì(€€€€€€€µ…Ñ•É¥…±1…‰•±|´ùÍ•Ñ]½É‘]É…À¡ÑÉÕ”¤ì(€€€€€€€É½Õ¡¹•ÍÍ|õ¹•ÜE½Õ‰±•MÁ¥¹	½àì(€€€€€€€É½Õ¡¹•ÍÍ|´ùÍ•ÑI…¹” ¸ÀÄ°Ä¸À¤íÉ½Õ¡¹•ÍÍ|´ùÍ•ÑM¥¹±•MÑ•À ¸ÀÔ¤íÉ½Õ¡¹•ÍÍ|´ùÍ•Ñ•¥µ…±Ì È¤ì(€€€€€€€µ•Ñ…±±¥|õ¹•ÜE½Õ‰±•MÁ¥¹	½àì(€€€€€€€µ•Ñ…±±¥|´ùÍ•ÑI…¹” À°Ä¤íµ•Ñ…±±¥|´ùÍ•ÑM¥¹±•MÑ•À ¸ÀÔ¤íµ•Ñ…±±¥|´ùÍ•Ñ•¥µ…±Ì È¤ì(€€€€€€€µ…Ñ½É´´ù…‘‘I½Ü¡µ…Ñ•É¥…±1…‰•±|¤ì(€€€€€€€µ…Ñ½É´´ù…‘‘I½Ü¡EMÑÉ¥¹1¥Ñ•É…° ‰IÕ½Í¥Ó¤ƒ\ˆ¤±É½Õ¡¹•ÍÍ|¤ì(€€€€€€€µ…Ñ½É´´ù…‘‘I½Ü¡EMÑÉ¥¹1¥Ñ•É…° ‰7¥Ñ…±±¥¥Ó¤ˆ¤±µ•Ñ…±±¥|¤ì(€€€€€€€Ù•ÉÑ¥…°´ù…‘‘]¥‘•Ğ¡µ…Ñ•É¥…±Ì¤ì(€€€€€€€Ù•ÉÑ¥…°´ù…‘‘MÑÉ•Ñ  Ä¤ì(€€€€€€€…ÕÑ¼¨É¥¡ÑMÉ½±°õ¹•ÜEMÉ½±±É•„ì(€€€€€€€É¥¡ÑMÉ½±°´ùÍ•Ñ]¥‘•ÑI•Í¥é…‰±”¡ÑÉÕ”¤ì(€€€€€€€É¥¡ÑMÉ½±°´ùÍ•Ñ]¥‘•Ğ¡½¹ÑÉ½±Ì¤ì(€€€€€€€É¥¡Ğ´ùÍ•Ñ]¥‘•Ğ¡É¥¡ÑMÉ½±°¤ì(€€€€€€€…‘‘½­]¥‘•Ğ¡EĞèéI¥¡Ñ½­]¥‘•ÑÉ•„±É¥¡Ğ¤ì(€€€€€€€É¥¡Ğ´ùÍ•Ñ5¥¹¥µÕµ]¥‘Ñ  ÈäÔ¤ì(€€€€€€€€¼¼=É…¹¥é”M•¹”€¼I•¹‘•É¥¹œ…ÌÑ…‰Ì½¸½¹”É¥¡ĞÍ¥‘•‰…È¸(€€€€€€€€¼¼	½Ñ Á…¹•±ÌÉ•µ…¥¸…•ÍÍ¥‰±”ìÑ¡”€ÍÙ¥•İÁ½ÉĞ•ÑÌÑ¡”™½Éµ•È(€€€€€€€€¼¼±•™Ğµ‘½¬İ¥‘Ñ ‰…¬€¡¥µÁ½ÉÑ…¹Ğ…Ğ€ÄÌØÙàÜØà½¸Ñ¡”•±°¤¸(€€€€€€€Í•Ñ½­=ÁÑ¥½¹Ì¡‘½­=ÁÑ¥½¹Ì ¤ğE5…¥¹]¥¹‘½Üèé±±½İQ…‰‰•‘½­Ì¤ì(€€€€€€€É•µ½Ù•½­]¥‘•Ğ¡±•™Ğ¤ì(€€€€€€€…‘‘½­]¥‘•Ğ¡EĞèéI¥¡Ñ½­]¥‘•ÑÉ•„±±•™Ğ¤ì(€€€€€€€Ñ…‰¥™å½­]¥‘•Ğ¡É¥¡Ğ±±•™Ğ¤ì(€€€€€€€É¥¡Ğ´ùÉ…¥Í” ¤ì(€€€€€€€€¼¼ÄÄ½¹ÑÉ½±ÌÑ¡”‘•‘¥…Ñ•É•¹‘•Èİ¥¹‘½Ü°±•…Ù¥¹œÑ¡•Í”½¹ÑÉ½±Ì(€€€€€€€€¼¼…Ù…¥±…‰±”‰•¡¥¹¥Ğ¸(€€€€€€€…ÕÑ¼¨Ù¥•İ5•¹Ôõµ•¹Õ	…È ¤´ù…‘‘5•¹Ô¡EMÑÉ¥¹1¥Ñ•É…° ‰™™¥¡…”ˆ¤¤ì(€€€€€€€…ÕÑ¼¨¡Õ‘Q½±”õÙ¥•İ5•¹Ô´ù…‘‘Ñ¥½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰™™¥¡•È±•Ì½½É‘½¹»¥•Ì…·¥É„€¡!U¤ˆ¤¤ì(€€€€€€€¡Õ‘Q½±”´ùÍ•Ñ¡•­…‰±”¡ÑÉÕ”¤ì(€€€€€€€EM•ÑÑ¥¹Ì¡Õ‘M•ÑÑ¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰M]I@XÄÜˆ¤¤ì(€€€€€€€…µ•É…!Õ‘¹…‰±•‘|õ¡Õ‘M•ÑÑ¥¹Ì¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰…µ•É„½M¡½İ!Uˆ¤±ÑÉÕ”¤¹Ñ½	½½° ¤ì(€€€€€€€¡Õ‘Q½±”´ùÍ•Ñ¡•­•¡…µ•É…!Õ‘¹…‰±•‘|¤ì(€€€€€€€½¹¹•Ğ¡¡Õ‘Q½±”°™EÑ¥½¸èéÑ½±•±Ñ¡¥Ì±mÑ¡¥Ít¡‰½½°•¹…‰±•¥ì(€€€€€€€€€€€…µ•É…!Õ‘¹…‰±•‘|õ•¹…‰±•ì(€€€€€€€€€€€EM•ÑÑ¥¹Ì™œ¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰M]I@XÄÜˆ¤¤ì(€€€€€€€€€€€™œ¹Í•ÑY…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰…µ•É„½M¡½İ!Uˆ¤±•¹…‰±•¤ì(€€€€€€€€€€€ÕÁ‘…Ñ•…µ•É…!Õ ¤ì(€€€€€€€€€€€ÕÁ‘…Ñ•I•¹‘•É•ÉMÑ…µÀ ¤ì(€€€€€€€ô¤ì(€€€€€€€¥µµ•ÉÍ¥Ù•Ñ¥½¹|õÙ¥•İ5•¹Ô´ù…‘‘Ñ¥½¸¡EMÑÉ¥¹1¥Ñ•É…° ‰A±•¥¸ƒ¥É…¸€Í€¡ÄÄ¤ˆ¤¤ì(€€€€€€€¥µµ•ÉÍ¥Ù•Ñ¥½¹|´ùÍ•Ñ¡•­…‰±”¡ÑÉÕ”¤ì(€€€€€€€¥µµ•ÉÍ¥Ù•Ñ¥½¹|´ùÍ•ÑM¡½ÉÑÕĞ¡E-•åM•ÅÕ•¹”¡EĞèé-•å}ÄÄ¤¤ì(€€€€€€€¥µµ•ÉÍ¥Ù•Ñ¥½¹|´ùÍ•ÑM¡½ÉÑÕÑ½¹Ñ•áĞ¡EĞèéÁÁ±¥…Ñ¥½¹M¡½ÉÑÕĞ¤ì(€€€€€€€€¼¼ÁÁ±¥…Ñ¥½¸Í¡½ÉÑÕĞ­••ÁÌÄÄ…Ù…¥±…‰±”İ¡¥±”„É•¹‘•Èİ¥¹‘½Ü¡…Ì™½ÕÌ¸(€€€€€€€…‘‘Ñ¥½¸¡¥µµ•ÉÍ¥Ù•Ñ¥½¹|¤ì(€€€€€€€™½È¡…ÕÑ¼¨Ù¥•Üé‰…­•¹‘]¥¹‘½İÍ|¥¥˜¡Ù¥•Ü¥Ù¥•Ü´ù…‘‘Ñ¥½¸¡¥µµ•ÉÍ¥Ù•Ñ¥½¹|¤ì(€€€€€€€½¹¹•Ğ¡¥µµ•ÉÍ¥Ù•Ñ¥½¹|°™EÑ¥½¸èéÑ½±•±Ñ¡¥Ì±mÑ¡¥Ít¡‰½½°•¹…‰±•¥ì(€€€€€€€€€€€¥˜ ……¹Ù…Í|¥É•ÑÕÉ¸ì(€€€€€€€€€€€¥˜¡•¹…‰±•¥í…¹Ù…Í|´ùÍ¡½İÕ±±MÉ••¸ ¤í…¹Ù…Í|´ùÉ…¥Í” ¤íô(€€€€€€€€€€€•±Í”…¹Ù…Í|´ùÍ¡½İ9½Éµ…° ¤ì(€€€€€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ À±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€€€€€¥˜¡•áÁ±½É¥¹|¥ì(€€€€€€€€€€€€€€€€€€€É•±•…Í•5½ÕÍ•1½½¬ ¤ì(€€€€€€€€€€€€€€€€€€€…¹Ù…Í|´ùÍ•Ñ½ÕÌ ¤ì(€€€€€€€€€€€€€€€€€€€…ÁÑÕÉ•5½ÕÍ•1½½¬ ¤ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€¥˜¡¹…Ñ¥Ù•¥É•ÑM•±•Ñ• ¤ñğ€¡ÅÕ…±¥Ñå	½á|˜™ÅÕ…±¥Ñå	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ôôÀ¤¤(€€€€€€€€€€€€€€€€€€€É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€€€€€ô¤ì(€€€€€€€ô¤ì((€€€€€€€½¹¹•Ğ¡É•¹‘•É	ÕÑÑ½¸°™EAÕÍ¡	ÕÑÑ½¸èé±¥­•±Ñ¡¥Ì±mÑ¡¥ÍuíÉ•ÅÕ•ÍÑI•¹‘•È ¤íô¤ì(€€€€€€€½¹¹•Ğ¡…µ•É…	½á|±Å=Ù•É±½…ñ¥¹Ğø ™E½µ‰½	½àèéÕÉÉ•¹Ñ%¹‘•á¡…¹•¤±Ñ¡¥Ì±mÑ¡¥Ít¡¥¹Ğ¥ì(€€€€€€€€€€€…é¥µÕÑ¡|´ùÍ•ÑY…±Õ” À¤ì(€€€€€€€€€€€¥˜¡•áÁ±½É¥¹|¥…Ñ¥Ù…Ñ•É••…µ•É„ ¤ì(€€€€€€€€€€€•±Í”™É••…µ•É…Ñ¥Ù•|õ™…±Í”ì(€€€€€€€€€€€ÕÁ‘…Ñ•…µ•É…!Õ ¤ì(€€€€€€€€€€€É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€ô¤ì(€€€€€€€½¹¹•Ğ¡‰…­•¹‘	½á|±Å=Ù•É±½…ñ¥¹Ğø ™E½µ‰½	½àèéÕÉÉ•¹Ñ%¹‘•á¡…¹•¤±Ñ¡¥Ì±mÑ¡¥Ít¡¥¹Ğ¥¹‘•à¥ì(€€€€€€€€€€€¥˜¡•áÁ±½É¥¹|€˜˜¥¹‘•à„ôĞ€˜˜¥¹‘•à„ôÔ¥ÍÑ½ÁáÁ±½É…Ñ¥½¸ ¤ì(€€€€€€€€€€€½¹ÍĞ‰½½°¤õ¥¹‘•àôôÉññ¥¹‘•àôôÌì(€€€€€€€€€€€‘¥É•Ñ¥ÍÁ±…å	½á|´ùÍ•Ñ¹…‰±•¡¥¹‘•àôôĞñğ€¡¥¹‘•àôôÔ˜™ÙÕ±­…¹¥É•ÑÙ…¥±…‰±” ¤¤¤ì(€€€€€€€€€€€‘¥É•Ñ¥ÍÁ±…å	½á|´ùÍ•ÑQ½½±Q¥À¡¥¹‘•àôôÔ(€€€€€€€€€€€€€€€€ü¡ÙÕ±­…¹¥É•ÑÙ…¥±…‰±” ¤(€€€€€€€€€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ‰YÕ±­…¸€èÍİ…Á¡…¥¸]¥¸ÌÈ‘…¹ÌÍ„™•»©ÑÉ”“¥‘§¥”¸ˆ¤(€€€€€€€€€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ‰YÕ±­…¸]¥¸ÌÈ]M$¥¹‘¥ÍÁ½¹¥‰±”‘…¹Ì•ÑÑ”½µÁ¥±…Ñ¥½¸¸ˆ¤¤(€€€€€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ‰`ÄÄ€èÍİ…Á¡…¥¸‘…¹ÌÍ„™•»©ÑÉ”“¥‘§¥”¸¥½¡•èÁ½ÕÈ…™™¥¡•È³Še¥µ…”EĞ¸ˆ¤¤ì(€€€€€€€€€€€‘¥É•ÑM…µÁ±•Í|´ùÍ•Ñ¹…‰±•¡¥¹‘•àôôÀ¤ì(€€€€€€€€€€€‘•¹½¥Í•¥É•Ñ|´ùÍ•Ñ¹…‰±•¡¥¹‘•àôôÀ¤ì(€€€€€€€€€€€¥M…µÁ±•Í|´ùÍ•Ñ¹…‰±•¡¤¤ì(€€€€€€€€€€€ÁÉ½É•ÍÍ¥Ù•¥|´ùÍ•Ñ¹…‰±•¡¤¤ì(€€€€€€€€€€€‘•¹½¥Í•¥|´ùÍ•Ñ¹…‰±•¡¤¤ì(€€€€€€€€€€€Í•±•Ñ	…­•¹‘=ÕÑÁÕÑ]¥¹‘½Ü ¤ì(€€€€€€€€€€€É•ÍÑ½É•áÁ±½É…Ñ¥½¹Y¥•İÁ½ÉÑ½ÕÌ ¤ì(€€€€€€€€€€€É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€ô¤ì(€€€€€€€½¹¹•Ğ¡‘¥É•Ñ¥ÍÁ±…å	½á|°™E¡•­	½àèéÑ½±•±Ñ¡¥Ì±mÑ¡¥Ít¡‰½½°¥ì(€€€€€€€€€€€¥˜¡‰…­•¹‘	½á|¥ì(€€€€€€€€€€€€€€€½¹ÍĞ¥¹Ğ¥¹‘•àõ‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ì(€€€€€€€€€€€€€€€¥˜¡¥¹‘•àøôÀ˜™¥¹‘•àñ¥¹Ğ¡¹…Ñ¥Ù•¥É•Ñ…¥±•‘|¹Í¥é” ¤¤¥ì(€€€€€€€€€€€€€€€€€€€¹…Ñ¥Ù•¥É•Ñ…¥±•‘}mÍ¥é•}Ğ¡¥¹‘•à¥tõ™…±Í”ì(€€€€€€€€€€€€€€€€€€€¹…Ñ¥Ù•¥É•Ñ…¥±ÕÉ•I•…Í½¹}mÍ¥é•}Ğ¡¥¹‘•à¥t¹±•…È ¤ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€ô(€€€€€€€€€€€¹…Ñ¥Ù•I•…‘åÑÑ•µÁÑÍ|ôÀì(€€€€€€€€€€€Í•±•Ñ	…­•¹‘=ÕÑÁÕÑ]¥¹‘½Ü ¤ì(€€€€€€€€€€€ÕÁ‘…Ñ•I•¹‘•É•ÉMÑ…µÀ ¤ì(€€€€€€€€€€€É•ÍÑ½É•áÁ±½É…Ñ¥½¹Y¥•İÁ½ÉÑ½ÕÌ ¤ì(€€€€€€€€€€€É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€ô¤ì(€€€€€€€½¹¹•Ğ¡ÅÕ…±¥Ñå	½á|±Å=Ù•É±½…ñ¥¹Ğø ™E½µ‰½	½àèéÕÉÉ•¹Ñ%¹‘•á¡…¹•¤±Ñ¡¥Ì±mÑ¡¥Ít¡¥¹Ğ¥íÉ•ÅÕ•ÍÑI•¹‘•È ¤íô¤ì(€€€€€€€½¹¹•Ğ¡‘¥É•ÑM…µÁ±•Í|±Å=Ù•É±½…ñ¥¹Ğø ™E½µ‰½	½àèéÕÉÉ•¹Ñ%¹‘•á¡…¹•¤±Ñ¡¥Ì±mÑ¡¥Ít¡¥¹Ğ¥í¥˜¡‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ôôÀ¥É•ÅÕ•ÍÑI•¹‘•È ¤íô¤ì(€€€€€€€½¹¹•Ğ¡¥M…µÁ±•Í|±Å=Ù•É±½…ñ¥¹Ğø ™E½µ‰½	½àèéÕÉÉ•¹Ñ%¹‘•á¡…¹•¤±Ñ¡¥Ì±mÑ¡¥Ít¡¥¹Ğ¥í¥˜¡‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ôôÉññ‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ôôÌ¥É•ÅÕ•ÍÑI•¹‘•È ¤íô¤ì(€€€€€€€½¹¹•Ğ¡ÁÉ½É•ÍÍ¥Ù•¥|°™E¡•­	½àèéÑ½±•±Ñ¡¥Ì±mÑ¡¥Ít¡‰½½°¥í¥˜¡‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ôôÉññ‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ôôÌ¥É•ÅÕ•ÍÑI•¹‘•È ¤íô¤ì(€€€€€€€½¹¹•Ğ¡‘•¹½¥Í•¥|°™E¡•­	½àèéÑ½±•±Ñ¡¥Ì±mÑ¡¥Ít¡‰½½°¥í¥˜¡‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ôôÉññ‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ôôÌ¥É•ÅÕ•ÍÑI•¹‘•È ¤íô¤ì(€€€€€€€½¹¹•Ğ¡‘•¹½¥Í•¥É•Ñ|°™E¡•­	½àèéÑ½±•±Ñ¡¥Ì±mÑ¡¥Ít¡‰½½°¥í¥˜¡‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ôôÀ¥É•ÅÕ•ÍÑI•¹‘•È ¤íô¤ì(€€€€€€€½¹¹•Ğ¡•‘•…|°™E¡•­	½àèéÑ½±•±Ñ¡¥Ì±mÑ¡¥Ít¡‰½½°¥íÉ•ÅÕ•ÍÑI•¹‘•È ¤íô¤ì(€€€€€€€½¹¹•Ğ¡…é¥µÕÑ¡|°™EM±¥‘•ÈèéÍ±¥‘•ÉI•±•…Í•±Ñ¡¥Ì±mÑ¡¥ÍuíÕÁ‘…Ñ•…µ•É…!Õ ¤íÉ•ÅÕ•ÍÑI•¹‘•È ¤íô¤ì(€€€€€€€½¹¹•Ğ¡¡å‰É¥‘1¥¡Ñ	½á|°™E¡•­	½àèéÑ½±•±Ñ¡¥Ì±mÑ¡¥Ít¡‰½½°•¹…‰±•¥ì(€€€€€€€€€€€´ÍèéÍ•ÑI…ÍÑ•É!å‰É¥‘1¥¡Ñ¥¹¹…‰±•¡•¹…‰±•¤ì(€€€€€€€€€€€EM•ÑÑ¥¹ÌÍ•ÑÑ¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰M]I@XÄÜˆ¤¤ì(€€€€€€€€€€€Í•ÑÑ¥¹Ì¹Í•ÑY…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½!å‰É¥‘1¥¡Ñ¥¹œˆ¤±•¹…‰±•¤ì(€€€€€€€€€€€¥˜¡‰…­•¹‘	½á|˜™‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ôôĞ¥É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€ô¤ì(€€€€€€€½¹¹•Ğ¡½±½É¹•Éå	½á|°™E¡•­	½àèéÑ½±•±Ñ¡¥Ì±mÑ¡¥Ít¡‰½½°•¹…‰±•¥ì(€€€€€€€€€€€´ÍèéÍ•ÑI…ÍÑ•É½±½É¹•Éå	…±…¹•¹…‰±•¡•¹…‰±•¤ì(€€€€€€€€€€€½±½ÉáÁ½ÍÕÉ•	½á|´ùÍ•Ñ¹…‰±•¡•¹…‰±•¤ì(€€€€€€€€€€€EM•ÑÑ¥¹ÌÍ•ÑÑ¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰M]I@XÄÜˆ¤¤ì(€€€€€€€€€€€Í•ÑÑ¥¹Ì¹Í•ÑY…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½½±½É¹•Éå	…±…¹”ˆ¤±•¹…‰±•¤ì(€€€€€€€€€€€¥˜¡‰…­•¹‘	½á|˜™‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ôôĞ¥É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€ô¤ì(€€€€€€€½¹¹•Ğ¡½±½ÉáÁ½ÍÕÉ•	½á|±Å=Ù•É±½…ñ‘½Õ‰±”ø ™E½Õ‰±•MÁ¥¹	½àèéÙ…±Õ•¡…¹•¤°(€€€€€€€€€€€€€€€Ñ¡¥Ì±mÑ¡¥Ít¡‘½Õ‰±”Ù…±Õ”¥ì(€€€€€€€€€€€´ÍèéÍ•ÑI…ÍÑ•É½±½ÉáÁ½ÍÕÉ”¡™±½…Ğ¡Ù…±Õ”¤¤ì(€€€€€€€€€€€EM•ÑÑ¥¹ÌÍ•ÑÑ¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰M]I@XÄÜˆ¤¤ì(€€€€€€€€€€€Í•ÑÑ¥¹Ì¹Í•ÑY…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½½±½ÉáÁ½ÍÕÉ”ˆ¤±Ù…±Õ”¤ì(€€€€€€€€€€€¥˜¡‰…­•¹‘	½á|˜™‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ôôĞ˜™½±½É¹•Éå	½á|´ù¥Í¡•­• ¤¤(€€€€€€€€€€€€€€€É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€ô¤ì(€€€€€€€½¹¹•Ğ¡™¥±µ¥Q½¹•	½á|°™E¡•­	½àèéÑ½±•±Ñ¡¥Ì±mÑ¡¥Ít¡‰½½°•¹…‰±•¥ì(€€€€€€€€€€€´ÍèéÍ•ÑI…ÍÑ•É¥±µ¥Q½¹•µ…Á¹…‰±•¡•¹…‰±•¤ì(€€€€€€€€€€€EM•ÑÑ¥¹ÌÍ•ÑÑ¥¹Ì¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰M]I@XÄÜˆ¤¤ì(€€€€€€€€€€€Í•ÑÑ¥¹Ì¹Í•ÑY…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰I…ÍÑ•È½¥±µ¥Q½¹•µ…Àˆ¤±•¹…‰±•¤ì(€€€€€€€€€€€¥˜¡‰…­•¹‘	½á|˜™‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ôôĞ¥É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€ô¤ì(€€€€€€€€¼¼`ÄÄ½E%µ…”è±¥¡Ñİ•¥¡Ğ°¥¹‘•Á•¹‘•¹Ğ€ÌÀ!èÍ­ä½µÁ½Í¥Ñ½È¸(€€€€€€€€¼¼9…Ñ¥Ù”YÕ±­…¸¡…Ì¹¼E%µ…”…Ğ…±°èÁÉ•Í•¹Ğ„¹•ÜAT™É…µ”İ¡•¸(€€€€€€€€¼¼ÍÑ…Ñ¥½¹…ÉäÍ¼±½Õ‘Ì…¹Ñ¡”Í½±…ÈÍ­ä‘¼¹½Ğ™É••é”½ÕÑÍ¥‘”•áÁ±½É”¸(€€€€€€€€¼¼½…±•Í”¥‘±”É•™É•Í¡•Ì€ ÈÀ!è…À¤ì•áÁ±½É¥¹œ…±É•…‘äÉ•¹‘•ÉÌ(€€€€€€€€¼¼½¹Ñ¥¹Õ½ÕÍ±ä°…¹Ñ¡”¥¸µ™±¥¡ĞÕ…ÉÁÉ•Ù•¹ÑÌÉ•¹‘•ÈÅÕ•Õ”‰Õ¥±‘ÕÀ¸(€€€€€€€Í­å¹¥µ…Ñ¥½¹Q¥µ•É|¹Í•Ñ%¹Ñ•ÉÙ…° ÌÌ¤ì(€€€€€€€½¹¹•Ğ ™Í­å¹¥µ…Ñ¥½¹Q¥µ•É|°™EQ¥µ•ÈèéÑ¥µ•½ÕĞ±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€¥˜¡Í•¹•1½…‘¥¹}ñğ…ÉÕ¹Ñ¥µ•}ñğ…‰…­•¹‘	½á|¥É•ÑÕÉ¸ì(€€€€€€€€€€€¥˜¡¹…Ñ¥Ù•¥É•ÑM•±•Ñ• ¤¥ì(€€€€€€€€€€€€€€€¥˜ …•áÁ±½É¥¹|˜˜¡±½Õ‘¹¥µ…Ñ¥½¹	½á|´ù¥Í¡•­• ¥ñğ(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€‘…å9¥¡Ñå±•	½á|´ù¥Í¡•­• ¤¤˜˜(€€€€€€€€€€€€€€€€€€€…İ…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¤˜˜…Á•¹‘¥¹|¥ì(€€€€€€€€€€€€€€€€€€€½¹ÍĞÅ¥¹ĞØĞ¹½ÜõÍ­å5½Ñ¥½¹±½­|¹•±…ÁÍ• ¤ì(€€€€€€€€€€€€€€€€€€€¥˜¡¹½Üµ±…ÍÑYÕ±­…¹%‘±•M­åI•ÅÕ•ÍÑ5Í|øôÔÀ¥ì(€€€€€€€€€€€€€€€€€€€€€€€±…ÍÑYÕ±­…¹%‘±•M­åI•ÅÕ•ÍÑ5Í|õ¹½Üì(€€€€€€€€€€€€€€€€€€€€€€€É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜ …¡…ÍI•¹‘•É•‘A½Í•}ññ±…ÍÑ%µ…•|¹¥Í9Õ±° ¥ñğ(€€€€€€€€€€€€€€€¡‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤„ôĞ€˜˜‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤„ôÔ¤¥É•ÑÕÉ¸ì(€€€€€€€€€€€¥˜ …±½Õ‘¹¥µ…Ñ¥½¹	½á|´ù¥Í¡•­• ¤˜˜…‘…å9¥¡Ñå±•	½á|´ù¥Í¡•­• ¤˜˜(€€€€€€€€€€€€€€…¹Ù…Í|´ù¡…ÍM­åÉ…µ” ¤¥É•ÑÕÉ¸ì(€€€€€€€€€€€½¹ÍĞ…ÕÑ¼…µ•É„õØÄØèéµ…­•…µ•É„¡±…ÍÑI•¹‘•É•‘A½Í•|°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€±…ÍÑ%µ…•|¹İ¥‘Ñ  ¤±±…ÍÑ%µ…•|¹¡•¥¡Ğ ¤¤ì(€€€€€€€€€€€½¹ÍĞ™±½…Ğ¡½ÕÈõ‘…å9¥¡Ñå±•	½á|´ù¥Í¡•­• ¤(€€€€€€€€€€€€€€€€ı™±½…Ğ¡Í”èéİ•…Ñ¡•Èèéå±•!½ÕÈ¡‘…å9¥¡Ñ=É¥¥¹!½ÕÉ|°(€€€€€€€€€€€€€€€€€€€€€€‘½Õ‰±”¡‘…å9¥¡Ñ±½­|¹•±…ÁÍ• ¤¤¼ÄÀÀÀ¸À¤¤(€€€€€€€€€€€€€€€€é™±½…Ğ¡ÍÕ¹!½ÕÉ|´ùÙ…±Õ” ¤¤ì(€€€€€€€€€€€½¹ÍĞ‘½Õ‰±”Í•½¹‘Ìõ‘½Õ‰±”¡Í­å5½Ñ¥½¹±½­|¹•±…ÁÍ• ¤¤¼ÄÀÀÀ¸Àì(€€€€€€€€€€€…¹Ù…Í|´ù‘É…İM­ä¡…µ•É„±¡½ÕÈ±Í•½¹‘Ì°(€€€€€€€€€€€€€€€±½Õ‘¹¥µ…Ñ¥½¹	½á|´ù¥Í¡•­• ¤±‘…å9¥¡Ñå±•	½á|´ù¥Í¡•­• ¤¤ì(€€€€€€€ô¤ì(€€€€€€€Í­å¹¥µ…Ñ¥½¹Q¥µ•É|¹ÍÑ…ÉĞ ¤ì(€€€€€€€€¼¼]•…Ñ¡•È…¹¥µ…Ñ¥½¸‘•±¥‰•É…Ñ•±ä™…ÍÑ•ÈÑ¡…¸Ñ¡”½±…±µ½ÍĞµÍÑ…Ñ¥ŒÍ­ä¸(€€€€€€€´ÍèéÍ•ÑI…ÍÑ•É±½Õ‘Q¥µ•M…±” ÈĞ¹˜¤ì(€€€€€€€½¹¹•Ğ¡±½Õ‘¹¥µ…Ñ¥½¹	½á|°™E¡•­	½àèéÑ½±•±Ñ¡¥Ì±mÑ¡¥Ít¡‰½½°•¹…‰±•¥ì(€€€€€€€€€€€´ÍèéÍ•ÑI…ÍÑ•É±½Õ‘Q¥µ•M…±” …•¹…‰±•üÀ¹˜è(€€€€€€€€€€€€€€€€¡‘…å9¥¡Ñå±•	½á|´ù¥Í¡•­• ¤üÈĞÀ¹˜èÈĞ¹˜¤¤ì(€€€€€€€€€€€…¹Ù…Í|´ù¥¹Ù…±¥‘…Ñ•M­ä ¤ì(€€€€€€€ô¤ì(€€€€€€€‘…å9¥¡ÑQ¥µ•É|¹Í•Ñ%¹Ñ•ÉÙ…° ÄÔÀÀ¤ì€¼¼É¡¥Ñ•ÑÕÉ…°±¥¡Ñ¥¹œ¥ÌÍ±½İ•ÈÑ¡…¸€ÌÁ!èÍ­ä(€€€€€€€½¹¹•Ğ ™‘…å9¥¡ÑQ¥µ•É|°™EQ¥µ•ÈèéÑ¥µ•½ÕĞ±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€¥˜ …ÉÕ¹Ñ¥µ•|ñğÍ•¹•1½…‘¥¹|¥É•ÑÕÉ¸ì(€€€€€€€€€€€€¼¼M¥µÕ±…Ñ•Ñ¥µ”…‘Ù…¹•Ì¥¹‘•Á•¹‘•¹Ñ±ä½˜AT™É…µ”‘ÕÉ…Ñ¥½¸¸(€€€€€€€€€€€€¼¼±…ÁÍ•Ñ¥µ”¥Ì…‰Í½±ÕÑ”Í¥¹”Ñ¡”ÍÑ…ÉĞ°¹•Ù•È…ÕµÕ±…Ñ•(€€€€€€€€€€€€¼¼™É½´ÍÕ•ÍÍ™Õ°™É…µ•Ì¸1½¹œ!ØÈÀAT™É…µ•Ì…¹¹½Ğ™É••é”(€€€€€€€€€€€€¼¼½ÈÍÑÉ•Ñ Ñ¡”€Øµµ¥¹ÕÑ”‘…ä½¹¥¡Ğå±”¸(€€€€€€€€€€€½¹ÍĞ‘½Õ‰±”Í•½¹‘Ìõ‘½Õ‰±”¡‘…å9¥¡Ñ±½­|¹•±…ÁÍ• ¤¤¼ÄÀÀÀ¸Àì(€€€€€€€€€€€½¹ÍĞ‘½Õ‰±”¹•áĞõÍ”èéİ•…Ñ¡•Èèéå±•!½ÕÈ¡‘…å9¥¡Ñ=É¥¥¹!½ÕÉ|±Í•½¹‘Ì¤ì(€€€€€€€€€€€¥˜¡ÍÑèé…‰Ì¡¹•áĞµÍÕ¹!½ÕÉ|´ùÙ…±Õ” ¤¤ğ¸ÀÄ¥É•ÑÕÉ¸ì(€€€€€€€€€€€…ÁÁ±å¥¹…å9¥¡ÑQ¥­|õÑÉÕ”ì(€€€€€€€€€€€ÍÕ¹!½ÕÉ|´ùÍ•ÑY…±Õ”¡¹•áĞ¤ì(€€€€€€€€€€€…ÁÁ±å¥¹…å9¥¡ÑQ¥­|õ™…±Í”ì(€€€€€€€ô¤ì(€€€€€€€½¹¹•Ğ¡‘…å9¥¡Ñå±•	½á|°™E¡•­	½àèéÑ½±•±Ñ¡¥Ì±mÑ¡¥Ít¡‰½½°•¹…‰±•¥ì(€€€€€€€€€€€¥˜¡•¹…‰±•¥ì(€€€€€€€€€€€€€€€‘…å9¥¡Ñ=É¥¥¹!½ÕÉ|õÍÕ¹!½ÕÉ|´ùÙ…±Õ” ¤ì(€€€€€€€€€€€€€€€‘…å9¥¡Ñ±½­|¹ÍÑ…ÉĞ ¤ì(€€€€€€€€€€€€€€€‘…å9¥¡ÑQ¥µ•É|¹ÍÑ…ÉĞ ¤ì(€€€€€€€€€€€õ•±Í”‘…å9¥¡ÑQ¥µ•É|¹ÍÑ½À ¤ì(€€€€€€€€€€€´ÍèéÍ•ÑI…ÍÑ•É±½Õ‘Q¥µ•M…±” …±½Õ‘¹¥µ…Ñ¥½¹	½á|´ù¥Í¡•­• ¤üÀ¹˜è(€€€€€€€€€€€€€€€€¡•¹…‰±•üÈĞÀ¹˜èÈĞ¹˜¤¤ì(€€€€€€€ô¤ì(€€€€€€€½¹¹•Ğ¡ÍÕ¹!½ÕÉ|±Å=Ù•É±½…ñ‘½Õ‰±”ø ™E½Õ‰±•MÁ¥¹	½àèéÙ…±Õ•¡…¹•¤±Ñ¡¥Ì±mÑ¡¥Ít¡‘½Õ‰±”¡½ÕÈ¥ì(€€€€€€€€€€€€¼¼‘•±¥‰•É…Ñ”µ…¹Õ…°Ñ¥µ”¡…¹”É•…¹¡½ÉÌÑ¡”ÉÕ¹¹¥¹œ±½¬¸(€€€€€€€€€€€¥˜¡‘…å9¥¡Ñå±•	½á|€˜˜‘…å9¥¡Ñå±•	½á|´ù¥Í¡•­• ¤€˜˜(€€€€€€€€€€€€€€€……ÁÁ±å¥¹…å9¥¡ÑQ¥­|¥ì(€€€€€€€€€€€€€€€‘…å9¥¡Ñ=É¥¥¹!½ÕÉ|õ¡½ÕÈì(€€€€€€€€€€€€€€€‘…å9¥¡Ñ±½­|¹É•ÍÑ…ÉĞ ¤ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜ …ÉÕ¹Ñ¥µ•|¥É•ÑÕÉ¸ì(€€€€€€€€€€€€¼¼9¼U$µÑ¡É•…İ…¥Ğ™½È„Í±½Ü`ÄÄ™É…µ”¸=¹±äÑ¡”±…Ñ•ÍĞ¡½ÕÈ(€€€€€€€€€€€€¼¼¥ÌÅÕ•Õ•°…¹¥¸µ™±¥¡Ğ™É…µ•ÌÉ•Ñ…¥¸Ñ¡•¥È…ÁÑÕÉ•¡½ÕÈ¸(€€€€€€€€€€€ÉÕ¹Ñ¥µ•|´ù‘…å±¥¡Ñ!½ÕÈõ™±½…Ğ¡¡½ÕÈ¤ì(€€€€€€€€€€€…¹Ù…Í|´ù¥¹Ù…±¥‘…Ñ•M­ä ¤ì(€€€€€€€€€€€É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€ô¤ì(€€€€€€€½¹¹•Ğ¡É½Õ¡¹•ÍÍ|±Å=Ù•É±½…ñ‘½Õ‰±”ø ™E½Õ‰±•MÁ¥¹	½àèéÙ…±Õ•¡…¹•¤±Ñ¡¥Ì±mÑ¡¥Ít¡‘½Õ‰±”¥íµ½‘¥™å5…Ñ•É¥…° ¤íô¤ì(€€€€€€€½¹¹•Ğ¡µ•Ñ…±±¥|±Å=Ù•É±½…ñ‘½Õ‰±”ø ™E½Õ‰±•MÁ¥¹	½àèéÙ…±Õ•¡…¹•¤±Ñ¡¥Ì±mÑ¡¥Ít¡‘½Õ‰±”¥íµ½‘¥™å5…Ñ•É¥…° ¤íô¤ì(€€€€€€€½¹¹•Ğ¡É•Í½ÕÉ•QÉ••|°™EQÉ••]¥‘•Ğèé¥Ñ•µ±¥­•±Ñ¡¥Ì±mÑ¡¥Ít¡EQÉ••]¥‘•Ñ%Ñ•´¨¥Ñ•´±¥¹Ğ¥ì(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œ­•äõ¥Ñ•´´ù‘…Ñ„ À±EĞèéUÍ•ÉI½±”¤¹Ñ½MÑÉ¥¹œ ¤ì(€€€€€€€€€€€¥˜¡ÉÕ¹Ñ¥µ•|˜™ÉÕ¹Ñ¥µ•|´ùµ…Ñ•É¥…±%¹‘•à¹½¹Ñ…¥¹Ì¡­•ä¤¥¡½½Í•5…Ñ•É¥…°¡ÉÕ¹Ñ¥µ•|´ùµ…Ñ•É¥…±%¹‘•à¹Ù…±Õ”¡­•ä¤±­•ä¤ì(€€€€€€€ô¤ì(€€€€€€€½¹¹•Ğ¡Í•¹•QÉ••|°™EQÉ••]¥‘•Ğèé¥Ñ•µ±¥­•±Ñ¡¥Ì±mÑ¡¥Ít¡EQÉ••]¥‘•Ñ%Ñ•´¨¥Ñ•´±¥¹Ğ¥ì(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œ­•äõ¥Ñ•´´ù‘…Ñ„ À±EĞèéUÍ•ÉI½±”¤¹Ñ½MÑÉ¥¹œ ¤ì(€€€€€€€€€€€¥˜¡ÉÕ¹Ñ¥µ•|˜™ÉÕ¹Ñ¥µ•|´ùµ…Ñ•É¥…±%¹‘•à¹½¹Ñ…¥¹Ì¡­•ä¤¥¡½½Í•5…Ñ•É¥…°¡ÉÕ¹Ñ¥µ•|´ùµ…Ñ•É¥…±%¹‘•à¹Ù…±Õ”¡­•ä¤±­•ä¤ì(€€€€€€€ô¤ì(€€€ô(€€€E%µ…”±…ÍÑ%µ…•|ì(€€€Ù½¥¡½½Í•5…Ñ•É¥…°¡¥¹Ğ¥±½¹ÍĞEMÑÉ¥¹œ˜¹…µ”¥ì(€€€€€€€¥˜ …ÉÕ¹Ñ¥µ•}ññ¥ğÁññ¥øõ¥¹Ğ¡ÉÕ¹Ñ¥µ•|´ùÉ•¹‘•ÉM•¹”¹µ…Ğ¹Í¥é” ¤¤¥É•ÑÕÉ¸ì(€€€€€€€Í•±•Ñ•‘5…Ñ•É¥…±|õ¥íÕÁ‘…Ñ¥¹½¹ÑÉ½±Í|õÑÉÕ”ì(€€€€€€€µ…Ñ•É¥…±1…‰•±|´ùÍ•ÑQ•áĞ¡¹…µ”¤ì(€€€€€€€½¹ÍĞ…ÕÑ¼˜´õÉÕ¹Ñ¥µ•|´ùÉ•¹‘•ÉM•¹”¹µ…ÑmÍ¥é•}Ğ¡¥¥tì(€€€€€€€É½Õ¡¹•ÍÍ|´ùÍ•ÑY…±Õ”¡´¹É½Õ¡¹•ÍÍM…±”¤ì(€€€€€€€µ•Ñ…±±¥|´ùÍ•ÑY…±Õ”¡´¹µ•Ñ…±±¥Œ¤ì(€€€€€€€ÕÁ‘…Ñ¥¹½¹ÑÉ½±Í|õ™…±Í”ì(€€€ô(€€€Ù½¥µ½‘¥™å5…Ñ•É¥…° ¥ì(€€€€€€€¥˜¡ÕÁ‘…Ñ¥¹½¹ÑÉ½±Í}ñğ…ÉÕ¹Ñ¥µ•}ññÍ•±•Ñ•‘5…Ñ•É¥…±|ğÀ¥É•ÑÕÉ¸ì(€€€€€€€€¼¼=¹±äµÕÑ…Ñ”Í•¹”É•Í½ÕÉ•Ì½¹”Ñ¡”ÁÉ•Ù¥½ÕÌÉ•¹‘•È¹¼±½¹•ÈÉ•…‘ÌÑ¡•´¸(€€€€€€€É•¹‘•ÉM•É¥…±|´ù™•Ñ¡}…‘ Ä¤ì(€€€€€€€¥˜¡İ…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¤¥İ…Ñ¡•É|¹İ…¥Ñ½É¥¹¥Í¡• ¤ì(€€€€€€€…ÕÑ¼˜´õÉÕ¹Ñ¥µ•|´ùÉ•¹‘•ÉM•¹”¹µ…ÑmÍ¥é•}Ğ¡Í•±•Ñ•‘5…Ñ•É¥…±|¥tì(€€€€€€€´¹É½Õ¡¹•ÍÍM…±”õ™±½…Ğ¡É½Õ¡¹•ÍÍ|´ùÙ…±Õ” ¤¤ì(€€€€€€€´¹µ•Ñ…±±¥Œõ™±½…Ğ¡µ•Ñ…±±¥|´ùÙ…±Õ” ¤¤ì(€€€€€€€€¼¼I•ÅÕ¥É•™½ÈAT™…ÍĞµÁ…Ñ …¡”¥¹Ù…±¥‘…Ñ¥½¸¸Q¡”Í¡…‘½Üµ…À¥ÑÍ•±˜(€€€€€€€€¼¼‘•Á•¹‘Ì½¹±ä½¸•½µ•ÑÉä½ÍÕ¸°¹½Ğ½¸µ•Ñ…±±¥¥Ñä½ÈÉ½Õ¡¹•ÍÌ¸(€€€€€€€ÉÕ¹Ñ¥µ•|´ùÉ•¹‘•ÉM•¹”¹µ…É­ÁÕA…É…µ•Ñ•ÉÍ¡…¹• ¤ì(€€€€€€€É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€ô(€€€Ù½¥Í…Ù•5…Ñ•É¥…±Ì ¥ì(€€€€€€€¥˜¡µ…Ñ•É¥…±ÍA…Ñ¡|¹¥ÍµÁÑä ¥ñğ…ÉÕ¹Ñ¥µ•|¥íE5•ÍÍ…•	½àèéİ…É¹¥¹œ¡Ñ¡¥Ì°‰5…Ó¥É¥…Õàˆ°‰ÕÕ¸…Ñ…±½Õ”¡…ÉŸ¤¸ˆ¤íÉ•ÑÕÉ¸íô(€€€€€€€¥˜¡İ…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¤¥İ…Ñ¡•É|¹İ…¥Ñ½É¥¹¥Í¡• ¤ì(€€€€€€€E¥±”™¥±”¡µ…Ñ•É¥…±ÍA…Ñ¡|¤ì(€€€€€€€¥˜ …™¥±”¹½Á•¸¡E%=•Ù¥”èéI•…‘=¹±ä¤¥íE5•ÍÍ…•	½àèéÉ¥Ñ¥…°¡Ñ¡¥Ì°‰5…Ó¥É¥…Õàˆ±™¥±”¹•ÉÉ½ÉMÑÉ¥¹œ ¤¤íÉ•ÑÕÉ¸íô(€€€€€€€½¹ÍĞ…ÕÑ¼‘½Õµ•¹ĞõE)Í½¹½Õµ•¹Ğèé™É½µ)Í½¸¡™¥±”¹É•…‘±° ¤¤ì(€€€€€€€™¥±”¹±½Í” ¤ì(€€€€€€€¥˜ …‘½Õµ•¹Ğ¹¥Í=‰©•Ğ ¤¥íE5•ÍÍ…•	½àèéÉ¥Ñ¥…°¡Ñ¡¥Ì°‰5…Ó¥É¥…Õàˆ°‰¥¡¥•È)M=8¥¹Ù…±¥‘”¸ˆ¤íÉ•ÑÕÉ¸íô(€€€€€€€E)Í½¹=‰©•ĞÉ½½Ğõ‘½Õµ•¹Ğ¹½‰©•Ğ ¤ì(€€€€€€€E)Í½¹ÉÉ…äµ…Ñ•É¥…±ÌõÉ½½Ğ¹Ù…±Õ” ‰µ…Ñ•É¥…±Ìˆ¤¹Ñ½ÉÉ…ä ¤ì(€€€€€€€™½È¡¥¹Ğ¤ôÀí¤ñµ…Ñ•É¥…±Ì¹Í¥é” ¤ì¬­¤¥ì(€€€€€€€€€€€…ÕÑ¼¨õµ…Ñ•É¥…±Ím¥t¹Ñ½=‰©•Ğ ¤ì(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œ¥õ¨¹Ù…±Õ” ‰¥ˆ¤¹Ñ½MÑÉ¥¹œ ¤ì(€€€€€€€€€€€¥˜ …ÉÕ¹Ñ¥µ•|´ùµ…Ñ•É¥…±%¹‘•à¹½¹Ñ…¥¹Ì¡¥¤¥½¹Ñ¥¹Õ”ì(€€€€€€€€€€€½¹ÍĞ…ÕÑ¼˜´õÉÕ¹Ñ¥µ•|´ùÉ•¹‘•ÉM•¹”¹µ…ÑmÍ¥é•}Ğ¡ÉÕ¹Ñ¥µ•|´ùµ…Ñ•É¥…±%¹‘•à¹Ù…±Õ”¡¥¤¥tì(€€€€€€€€€€€¨¹¥¹Í•ÉĞ ‰É½Õ¡¹•ÍÍM…±”ˆ±‘½Õ‰±”¡´¹É½Õ¡¹•ÍÍM…±”¤¤ì(€€€€€€€€€€€¨¹¥¹Í•ÉĞ ‰µ•Ñ…±±¥Œˆ±‘½Õ‰±”¡´¹µ•Ñ…±±¥Œ¤¤ì(€€€€€€€€€€€µ…Ñ•É¥…±Ím¥tõ¨ì(€€€€€€€ô(€€€€€€€É½½Ğ¹¥¹Í•ÉĞ ‰µ…Ñ•É¥…±Ìˆ±µ…Ñ•É¥…±Ì¤ì(€€€€€€€EM…Ù•¥±”½ÕÑÁÕĞ¡µ…Ñ•É¥…±ÍA…Ñ¡|¤ì(€€€€€€€¥˜ …½ÕÑÁÕĞ¹½Á•¸¡E%=•Ù¥”èé]É¥Ñ•=¹±ä¤¥ì(€€€€€€€€€€€E5•ÍÍ…•	½àèéÉ¥Ñ¥…°¡Ñ¡¥Ì°‰5…Ó¥É¥…Õàˆ±½ÕÑÁÕĞ¹•ÉÉ½ÉMÑÉ¥¹œ ¤¤íÉ•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€½¹ÍĞ…ÕÑ¼½¹Ñ•¹ĞõE)Í½¹½Õµ•¹Ğ¡É½½Ğ¤¹Ñ½)Í½¸¡E)Í½¹½Õµ•¹Ğèé%¹‘•¹Ñ•¤ì(€€€€€€€¥˜¡½ÕÑÁÕĞ¹İÉ¥Ñ”¡½¹Ñ•¹Ğ¤„õ½¹Ñ•¹Ğ¹Í¥é” ¥ñğ…½ÕÑÁÕĞ¹½µµ¥Ğ ¤¥ì(€€€€€€€€€€€E5•ÍÍ…•	½àèéÉ¥Ñ¥…°¡Ñ¡¥Ì°‰5…Ó¥É¥…Õàˆ°‹%É¥ÑÕÉ”‘Ô…Ñ…±½Õ”¥µÁ½ÍÍ¥‰±”¸ˆ¤íÉ•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° ‰5…Ó¥É¥…Õà•¹É•¥ÍÑË¥Ì‘…¹Ì€”Äˆ¤¹…Éœ¡µ…Ñ•É¥…±ÍA…Ñ¡|¤°ÄÔÀÀÀ¤ì(€€€ô(€€€Ù½¥½Á•¹M•¹”¡½¹ÍĞEMÑÉ¥¹œ˜Á…Ñ ¥ì(€€€€€€€¥˜¡Á…Ñ ¹¥ÍµÁÑä ¤¥É•ÑÕÉ¸ì(€€€€€€€¥˜¡•áÁ±½É¥¹|¥ÍÑ½ÁáÁ±½É…Ñ¥½¸ ¤ì(€€€€€€€™É••…µ•É…Ñ¥Ù•|õ™…±Í”ì(€€€€€€€€¼¼%¹Ù…±¥‘…Ñ•ÌÁÉ•Ù¥½ÕÌÍ•¹”½…µ•É„™É…µ”İ¥Ñ¡½ÕĞİ…¥Ñ¥¹œ½¸¥ÑÌAT¸(€€€€€€€É•¹‘•ÉM•É¥…±|´ù™•Ñ¡}…‘ Ä¤ì(€€€€€€€Á•¹‘¥¹|õ™…±Í”ì(€€€€€€€ÅÕ•Õ•‘M•¹•A…Ñ¡|õÁ…Ñ ì(€€€€€€€€¬­Í•¹•1½…‘•¹•É…Ñ¥½¹|ì(€€€€€€€Í•¹•1½…‘¥¹|õÑÉÕ”ì(€€€€€€€Í•¹•1½…‘AÉ½É•ÍÍ|´ùÍ•ÑY…±Õ” À¤ì(€€€€€€€Í•¹•1½…‘1…‰•±|´ùÍ•ÑQ•áĞ¡EMÑÉ¥¹1¥Ñ•É…° ‰¡…É•µ•¹Ğ‘”±„Í¡¹—Š˜ˆ¤¤ì(€€€€€€€Í•¹•1½…‘1…‰•±|´ùÍ¡½Ü ¤ì(€€€€€€€Í•¹•1½…‘AÉ½É•ÍÍ|´ùÍ¡½Ü ¤ì(€€€€€€€±…ÍÑ%µ…•|õE%µ…•íôì(€€€€€€€¡…ÍI•¹‘•É•‘A½Í•|õ™…±Í”ì(€€€€€€€™½È¡…ÕÑ¼¨Ù¥•Üé‰…­•¹‘]¥¹‘½İÍ|¥ì(€€€€€€€€€€€¥˜ …Ù¥•Ü¥½¹Ñ¥¹Õ”ì(€€€€€€€€€€€€¼¼¹…Ñ¥Ù”µÁÉ•Í•¹Ğİ½É­•È…¹¹½Ğ‰”¥¹Ñ•ÉÉÕÁÑ•µ¥µAÉ•Í•¹Ğ¸-••À(€€€€€€€€€€€€¼¼EĞ™É½´Á…¥¹Ñ¥¹œ½Ù•È¥ÑÌ!]9Õ¹Ñ¥°Ñ¡…Ğ™É…µ”±•…Ù•ÌÑ¡”AT¸(€€€€€€€€€€€½¹ÍĞ‰½½°ÁÉ•Í•ÉÙ•%¹±¥¡ÑAÉ•Í•¹Ğõİ…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¤˜˜(€€€€€€€€€€€€€€€…Ñ¥Ù•I•¹‘•É¥É•Ñ|˜™…Ñ¥Ù•I•¹‘•É	…­•¹‘|øôÀ˜˜(€€€€€€€€€€€€€€€…Ñ¥Ù•I•¹‘•É	…­•¹‘|ñ¥¹Ğ¡‰…­•¹‘]¥¹‘½İÍ|¹Í¥é” ¤¤˜˜(€€€€€€€€€€€€€€€Ù¥•Üôõ‰…­•¹‘]¥¹‘½İÍ}mÍ¥é•}Ğ¡…Ñ¥Ù•I•¹‘•É	…­•¹‘|¥tì(€€€€€€€€€€€Ù¥•Ü´ùÍ•Ñ9…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¸¡ÁÉ•Í•ÉÙ•%¹±¥¡ÑAÉ•Í•¹Ğ¤ì(€€€€€€€€€€€Ù¥•Ü´ùÍ•Ñ%µ…”¡E%µ…•íô¤ì(€€€€€€€€€€€Ù¥•Ü´ùÍ•Ñ…µ•É…!Õ¡íô±™…±Í”¤ì(€€€€€€€€€€€Ù¥•Ü´ù•¹…‰±•M­å½µÁ½Í¥Ñ¥¹œ¡™…±Í”¤ì(€€€€€€€€€€€Ù¥•Ü´ùÍ•ÑA±…•¡½±‘•È¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@XÄİq¹¡…É•µ•¹Ğ‘”±„Í¡¹—Š˜ˆ¤¤ì(€€€€€€€ô(€€€€€€€‰…­•¹‘1…ÍÑI•¹‘•É•É|¹™¥±°¡EMÑÉ¥¹íô¤ì(€€€€€€€‰…­•¹‘1…ÍÑI•ÅÕ•ÍÑ|¹™¥±°¡EMÑÉ¥¹íô¤ì(€€€€€€€¡…ÍI•¹‘•É•‘A½Í•|õ™…±Í”ì(€€€€€€€™É••…µ•É…Ñ¥Ù•|õ™…±Í”ì(€€€€€€€…µ•É…	½á|´ùÍ•Ñ¹…‰±•¡™…±Í”¤ì(€€€€€€€¥˜¡•áÁ±½É…Ñ¥½¹	ÕÑÑ½¹|¥•áÁ±½É…Ñ¥½¹	ÕÑÑ½¹|´ùÍ•Ñ¹…‰±•¡™…±Í”¤ì(€€€€€€€¥˜¡‰…­•¥	ÕÑÑ½¹|¥‰…­•¥	ÕÑÑ½¹|´ùÍ•Ñ¹…‰±•¡™…±Í”¤ì(€€€€€€€¥˜¡‰…­•¥AÉ½•ÍÍ|˜™‰…­•¥AÉ½•ÍÍ|´ùÍÑ…Ñ” ¤„õEAÉ½•ÍÌèé9½ÑIÕ¹¹¥¹œ¤(€€€€€€€€€€€‰…­•¥AÉ½•ÍÍ|´ù­¥±° ¤ì(€€€€€€€¥˜ …±½…‘]…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¤¥‰•¥¹M•¹•1½… ¤ì(€€€ô(€€€Ù½¥‰•¥¹M•¹•1½… ¥ì(€€€€€€€¥˜¡ÅÕ•Õ•‘M•¹•A…Ñ¡|¹¥ÍµÁÑä ¤¥É•ÑÕÉ¸ì(€€€€€€€½¹ÍĞEMÑÉ¥¹œÁ…Ñ õÍÑèé•á¡…¹”¡ÅÕ•Õ•‘M•¹•A…Ñ¡|±EMÑÉ¥¹íô¤ì(€€€€€€€½¹ÍĞÕ¥¹ĞØÑ}ĞÑ½­•¸õÍ•¹•1½…‘•¹•É…Ñ¥½¹|ì(€€€€€€€½¹ÍĞ¥¹ĞÉ•Í½±ÕÑ¥½¸õÑ•áÑÕÉ•I•Í½±ÕÑ¥½¹|ì(€€€€€€€Í•¹•1½…‘AÉ½É•ÍÍ|´ùÍ•ÑY…±Õ” Ô¤ì(€€€€€€€Í•¹•1½…‘1…‰•±|´ùÍ•ÑQ•áĞ¡EMÑÉ¥¹1¥Ñ•É…° ‰1•ÑÕÉ”)M=8•ĞÉ•ÍÍ½ÕÉ•ÏŠ˜ˆ¤¤ì(€€€€€€€±½…‘]…Ñ¡•É|¹Í•ÑÕÑÕÉ”¡EÑ½¹ÕÉÉ•¹ĞèéÉÕ¸¡mÑ¡¥Ì±Á…Ñ ±Ñ½­•¸±É•Í½±ÕÑ¥½¹uì(€€€€€€€€€€€M•¹•1½…‘=ÕÑ½µ”½ÕÑ½µ”ì(€€€€€€€€€€€½ÕÑ½µ”¹Á…Ñ õÁ…Ñ ì(€€€€€€€€€€€½ÕÑ½µ”¹•¹•É…Ñ¥½¸õÑ½­•¸ì(€€€€€€€€€€€½¹ÍĞ…ÕÑ¼±½…‘•õØÄØèé±½…‘M•¹”¡Á…Ñ ¤ì(€€€€€€€€€€€¥˜ …±½…‘•¥í½ÕÑ½µ”¹•ÉÉ½Èõ±½…‘•¹•ÉÉ½ÈíÉ•ÑÕÉ¸½ÕÑ½µ”íô(€€€€€€€€€€€½ÕÑ½µ”¹‘…Ñ…‰…Í”õ±½…‘•¹Í•¹”ì(€€€€€€€€€€€…ÕÑ¼‰Õ¥±õØÄØèé‰Õ¥±‘IÕ¹Ñ¥µ”¡±½…‘•¹Í•¹”±É•Í½±ÕÑ¥½¸°(€€€€€€€€€€€€€€€mÑ¡¥Ì±Ñ½­•¹t¡¥¹ĞÁ•É•¹Ğ±½¹ÍĞEMÑÉ¥¹œ˜‘•ÍÉ¥ÁÑ¥½¸¥ì(€€€€€€€€€€€€€€€€€€€E5•Ñ…=‰©•Ğèé¥¹Ù½­•5•Ñ¡½¡Ñ¡¥Ì±mÑ¡¥Ì±Ñ½­•¸±Á•É•¹Ğ±‘•ÍÉ¥ÁÑ¥½¹uì(€€€€€€€€€€€€€€€€€€€€€€€¥˜ …Í•¹•1½…‘¥¹}ññÑ½­•¸„õÍ•¹•1½…‘•¹•É…Ñ¥½¹|¥É•ÑÕÉ¸ì(€€€€€€€€€€€€€€€€€€€€€€€Í•¹•1½…‘AÉ½É•ÍÍ|´ùÍ•ÑY…±Õ”¡Á•É•¹Ğ¤ì(€€€€€€€€€€€€€€€€€€€€€€€Í•¹•1½…‘1…‰•±|´ùÍ•ÑQ•áĞ¡‘•ÍÉ¥ÁÑ¥½¸¤ì(€€€€€€€€€€€€€€€€€€€€€€€…¹Ù…Í|´ùÍ•ÑA±…•¡½±‘•È (€€€€€€€€€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰M]I@XÄİq¹¡…É•µ•¹Ğ‘”±„Í¡¹—Š™q¸”Äˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡‘•ÍÉ¥ÁÑ¥½¸¤¤ì(€€€€€€€€€€€€€€€€€€€ô±EĞèéEÕ•Õ•‘½¹¹•Ñ¥½¸¤ì(€€€€€€€€€€€€€€€ô¤ì(€€€€€€€€€€€¥˜ …‰Õ¥±¥í½ÕÑ½µ”¹•ÉÉ½Èõ‰Õ¥±¹•ÉÉ½ÈíÉ•ÑÕÉ¸½ÕÑ½µ”íô(€€€€€€€€€€€½ÕÑ½µ”¹ÉÕ¹Ñ¥µ”õÍÑèéµ…­•}Í¡…É•ñØÄØèéIÕ¹Ñ¥µ”ø¡ÍÑèéµ½Ù”¡‰Õ¥±¹ÉÕ¹Ñ¥µ”¤¤ì(€€€€€€€€€€€É•ÑÕÉ¸½ÕÑ½µ”ì(€€€€€€€ô¤¤ì(€€€ô(€€€Ù½¥™¥¹¥Í¡M•¹•1½… ¥ì(€€€€€€€¥˜¡±½…‘]…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¤¥É•ÑÕÉ¸ì€¼¼…¸½±‘•È½µÁ±•Ñ¥½¸İ…ÌÅÕ•Õ•(€€€€€€€½¹ÍĞM•¹•1½…‘=ÕÑ½µ”½ÕÑ½µ”õ±½…‘]…Ñ¡•É|¹É•ÍÕ±Ğ ¤ì(€€€€€€€¥˜¡½ÕÑ½µ”¹•¹•É…Ñ¥½¸„õÍ•¹•1½…‘•¹•É…Ñ¥½¹|ñğ€…ÅÕ•Õ•‘M•¹•A…Ñ¡|¹¥ÍµÁÑä ¤¥ì(€€€€€€€€€€€¥˜ …ÅÕ•Õ•‘M•¹•A…Ñ¡|¹¥ÍµÁÑä ¤¥‰•¥¹M•¹•1½… ¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì€¼¼½‰Í½±•Ñ”±½…ì¹•Ù•È…ÁÁ±ä¥ÑÌÉ•Í½ÕÉ•ÌÑ¼¹•ÜÍ•¹”(€€€€€€€ô(€€€€€€€¥˜ …½ÕÑ½µ”¹•ÉÉ½È¹¥ÍµÁÑä ¥ñğ…½ÕÑ½µ”¹ÉÕ¹Ñ¥µ”¥ì(€€€€€€€€€€€Í•¹•1½…‘¥¹|õ™…±Í”ì(€€€€€€€€€€€Í•¹•1½…‘1…‰•±|´ù¡¥‘” ¤ì(€€€€€€€€€€€Í•¹•1½…‘AÉ½É•ÍÍ|´ù¡¥‘” ¤ì(€€€€€€€€€€€…µ•É…	½á|´ùÍ•Ñ¹…‰±•¡‰½½°¡ÉÕ¹Ñ¥µ•|¤¤ì(€€€€€€€€€€€¥˜¡•áÁ±½É…Ñ¥½¹	ÕÑÑ½¹|¥•áÁ±½É…Ñ¥½¹	ÕÑÑ½¹|´ùÍ•Ñ¹…‰±•¡‰½½°¡ÉÕ¹Ñ¥µ•|¤¤ì(€€€€€€€€€€€…¹Ù…Í|´ùÍ•ÑA±…•¡½±‘•È¡EMÑÉ¥¹1¥Ñ•É…° ‰¡…É•µ•¹Ğ¥µÁ½ÍÍ¥‰±”€è€”Äˆ¤¹…Éœ¡½ÕÑ½µ”¹•ÉÉ½È¤¤ì(€€€€€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° ‰ÉÉ•ÕÈ‘”¡…É•µ•¹Ğ€è€”Äˆ¤¹…Éœ¡½ÕÑ½µ”¹•ÉÉ½È¤¤ì(€€€€€€€€€€€E5•ÍÍ…•	½àèéİ…É¹¥¹œ¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰¡…É•µ•¹Ğ‘”±„Í¡¹”ˆ¤±½ÕÑ½µ”¹•ÉÉ½È¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€½¹ÍĞ…ÕÑ¼É•Á±…•µ•¹Ğõ½ÕÑ½µ”¹ÉÕ¹Ñ¥µ”ì(€€€€€€€€¼¼ÁÁ±ä„½µÁ±•Ñ”°Ù…±¥‘…Ñ•ÉÕ¹Ñ¥µ”¥¸½¹”U$µÑ¡É•…ÑÉ…¹Í…Ñ¥½¸¸(€€€€€€€É•¹‘•ÉM•É¥…±|´ù™•Ñ¡}…‘ Ä¤ì(€€€€€€€Á•¹‘¥¹|õ™…±Í”ì(€€€€€€€ÉÕ¹Ñ¥µ•|õÉ•Á±…•µ•¹Ğì(€€€€€€€±…ÍÑ%µ…•|õE%µ…•íôì(€€€€€€€…¹Ù…Í|´ùÍ•Ñ%µ…”¡E%µ…•íô¤ì€€¼¼¼¹½Ğ­••À‘¥ÍÁ±…å¥¹œ…¸½±Í•¹”¸(€€€€€€€…¹Ù…Í|´ù•¹…‰±•M­å½µÁ½Í¥Ñ¥¹œ¡™…±Í”¤ì(€€€€€€€É•¹‘•ÉQ¥µ•1…‰•±|´ùÍ•ÑQ•áĞ¡EMÑÉ¥¹1¥Ñ•É…° ‰•É¹¥•ÈÉ•¹‘Ô€èƒŠPˆ¤¤ì(€€€€€€€µ…Ñ•É¥…±1…‰•±|´ùÍ•ÑQ•áĞ¡EMÑÉ¥¹1¥Ñ•É…° ‰O¥±•Ñ¥½¹¹•ÈÕ¸µ…Ó¥É¥…Ô‘…¹Ì±”…Ñ…±½Õ”ˆ¤¤ì(€€€€€€€½¹ÍĞEMÑÉ¥¹œÍ•¹•I•Ù¥Í¥½¸õ½ÕÑ½µ”¹‘…Ñ…‰…Í”¹É•Ù¥Í¥½¸¹ÑÉ¥µµ• ¤ì(€€€€€€€¥˜¡Í•¹•I•Ù¥Í¥½¹1…‰•±|¥Í•¹•I•Ù¥Í¥½¹1…‰•±|´ùÍ•ÑQ•áĞ¡Í•¹•I•Ù¥Í¥½¸¹¥ÍµÁÑä ¤ıEMÑÉ¥¹1¥Ñ•É…° ‰M¡¹”ƒŠPˆ¤éEMÑÉ¥¹1¥Ñ•É…° ‰M¡¹”€”Äˆ¤¹…Éœ¡Í•¹•I•Ù¥Í¥½¸¤¤ì(€€€€€€€½¹ÍĞEMÑÉ¥¹œÉ•Ù¥Í¥½¹MÕ™™¥àõÍ•¹•I•Ù¥Í¥½¸¹¥ÍµÁÑä ¤ıEMÑÉ¥¹1¥Ñ•É…° ‰M¡¹”Í…¹ÌË¥Ù¥Í¥½¸ˆ¤éEMÑÉ¥¹1¥Ñ•É…° ‰M¡¹”€”Äˆ¤¹…Éœ¡Í•¹•I•Ù¥Í¥½¸¤ì(€€€€€€€Í•Ñ]¥¹‘½İQ¥Ñ±”¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@	•Ñ„`XÄÜ¸”ÄƒŠP€”ÈƒŠP€”Ìˆ¤(€€€€€€€€€€€€¹…Éœ¡M}]IA}	U%1}9U5	H¤¹…Éœ¡ÉÕ¹Ñ¥µ•|´ùÑ¥Ñ±”±É•Ù¥Í¥½¹MÕ™™¥à¤¤ì(€€€€€€€ÍÕ¹!½ÕÉ|´ù‰±½­M¥¹…±Ì¡ÑÉÕ”¤ì(€€€€€€€ÍÕ¹!½ÕÉ|´ùÍ•ÑY…±Õ”¡‘½Õ‰±”¡ÉÕ¹Ñ¥µ•|´ù‘…å±¥¡Ñ!½ÕÈ¤¤ì(€€€€€€€ÍÕ¹!½ÕÉ|´ù‰±½­M¥¹…±Ì¡™…±Í”¤ì(€€€€€€€Í•¹•A…Ñ¡|õ½ÕÑ½µ”¹Á…Ñ ì(€€€€€€€É•™É•Í¡I…‘¥½½ÉM•¹”¡Í•¹•A…Ñ¡|¤ì(€€€€€€€Í•ÑI…ÍÑ•É¥…¡•A…Ñ ¡ÍÑèé™¥±•ÍåÍÑ•´èéÁ…Ñ  (€€€€€€€€€€€€¡Í•¹•A…Ñ¡|­EMÑÉ¥¹1¥Ñ•É…° ˆ¹´Í‘¤ˆ¤¤¹Ñ½MÑ‘]MÑÉ¥¹œ ¤¤¤ì(€€€€€€€¥˜¡‰…­•¥	ÕÑÑ½¹|¥‰…­•¥	ÕÑÑ½¹|´ùÍ•Ñ¹…‰±•¡ÑÉÕ”¤ì(€€€€€€€µ…Ñ•É¥…±ÍA…Ñ¡|¹±•…È ¤ì(€€€€€€€™½È¡½¹ÍĞ…ÕÑ¼˜Í•Ñ½Èé½ÕÑ½µ”¹‘…Ñ…‰…Í”¹Í•Ñ½ÉÌ¥ì(€€€€€€€€€€€½¹ÍĞ…ÕÑ¼•¹ÑÉ¥•ÌõÍ•Ñ½È¹É•Í½ÕÉ•Ì¹Ù…±Õ”¡EMÑÉ¥¹1¥Ñ•É…° ‰µ…Ñ•É¥…±Ìˆ¤¤ì(€€€€€€€€€€€¥˜ …•¹ÑÉ¥•Ì¹¥ÍµÁÑä ¤¥ì(€€€€€€€€€€€€€€€µ…Ñ•É¥…±ÍA…Ñ¡|õE¥È¡E¥±•%¹™¼¡½ÕÑ½µ”¹Á…Ñ ¤¹…‰Í½±ÕÑ•A…Ñ  ¤¤¹…‰Í½±ÕÑ•¥±•A…Ñ ¡•¹ÑÉ¥•Ì¹™É½¹Ğ ¤¹Á…Ñ ¤ì(€€€€€€€€€€€€€€€‰É•…¬ì(€€€€€€€€€€€ô(€€€€€€€ô(€€€€€€€Í•±•Ñ•‘5…Ñ•É¥…±|ô´Äì(€€€€€€€…µ•É…	½á|´ù‰±½­M¥¹…±Ì¡ÑÉÕ”¤ì(€€€€€€€…µ•É…	½á|´ù±•…È ¤ì(€€€€€€€™½È¡½¹ÍĞ…ÕÑ¼˜ŒéÉÕ¹Ñ¥µ•|´ù…µ•É…Ì¥…µ•É…	½á|´ù…‘‘%Ñ•´¡Œ¹¹…µ”¤ì(€€€€€€€™½È¡¥¹Ğ¤ôÀí¤ñÅÕ¥­…µ•É…Ñ¥½¹Í|¹Í¥é” ¤ì¬­¤¥ì(€€€€€€€€€€€½¹ÍĞ‰½½°Ù…±¥õ¤ñÉÕ¹Ñ¥µ•|´ù…µ•É…Ì¹Í¥é” ¤ì(€€€€€€€€€€€ÅÕ¥­…µ•É…Ñ¥½¹Í}m¥t´ùÍ•Ñ¹…‰±•¡Ù…±¥¤ì(€€€€€€€€€€€€¼¼Õ±°…µ•É„¹…µ•ÌÉ•µ…¥¸¥¸Ñ¡”Í¥‘”Í•±•Ñ½È…¹Ñ½½±Ñ¥Àì(€€€€€€€€€€€€¼¼Ñ¡”Ñ½½±‰…ÈÕÍ•Ì½µÁ…Ğ¹Õµ‰•ÉÌÍ¼`ÄÄ€¼YÕ±­…¸ÍÑ…äÙ¥Í¥‰±”¸(€€€€€€€€€€€ÅÕ¥­…µ•É…Ñ¥½¹Í}m¥t´ùÍ•ÑQ•áĞ¡EMÑÉ¥¹œèé¹Õµ‰•È¡¤¬Ä¤¤ì(€€€€€€€€€€€ÅÕ¥­…µ•É…Ñ¥½¹Í}m¥t´ùÍ•ÑQ½½±Q¥À¡Ù…±¥€üEMÑÉ¥¹1¥Ñ•É…° ‰YÕ”€”ÄƒŠPÑ½Õ¡”€”Èˆ¤¹…Éœ¡ÉÕ¹Ñ¥µ•|´ù…µ•É…Ím¥t¹¹…µ”¤¹…Éœ¡¤¬Ä¤€èEMÑÉ¥¹œ ¤¤ì(€€€€€€€ô(€€€€€€€…µ•É…	½á|´ù‰±½­M¥¹…±Ì¡™…±Í”¤ì(€€€€€€€ÕÁ‘…Ñ•…µ•É…!Õ ¤ì(€€€€€€€Á½ÁÕ±…Ñ•QÉ••Ì¡½ÕÑ½µ”¹‘…Ñ…‰…Í”¤ì(€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° ˆ”ÄƒŠP€”È½‰©•ÑÌ°€”ÌÑÉ¥…¹±•Ì°€”Ğµ…Ó¥É¥…Õà°A	H€”ÔÁàˆ¤(€€€€€€€€€€€€¹…Éœ¡ÉÕ¹Ñ¥µ•|´ùÑ¥Ñ±”¤(€€€€€€€€€€€€¹…Éœ¡ÉÕ¹Ñ¥µ•|´ù½‰©•ÑÌ¹Í¥é” ¤¤(€€€€€€€€€€€€¹…Éœ¡ÉÕ¹Ñ¥µ•|´ùÉ•¹‘•ÉM•¹”¹½‰¨¹Í¥é” ¤¤(€€€€€€€€€€€€¹…Éœ¡ÉÕ¹Ñ¥µ•|´ùÉ•¹‘•ÉM•¹”¹µ…Ğ¹Í¥é” ¤¤(€€€€€€€€€€€€¹…Éœ¡ÉÕ¹Ñ¥µ•|´ùÑ•áÑÕÉ•I•Í½±ÕÑ¥½¸¤¤ì(€€€€€€€€¼¼Q¡”ÍÑÉ•ÍÌÍ•¹”µÕÍĞÍÑ…ÉĞİ¥Ñ Ñ¡”…ÑÕ…°XÄÜ`ÄÄI…ÍÑ•È‰…­•¹(€€€€€€€€¼¼¥¹ÍÑ•…½˜ATÉ…äÑÉ…¥¹œ°İ¡¥ Í…±•ÌÁ½½É±äİ¥Ñ €ÔÀÁ¬ÑÉ¥…¹±•Ì¸(€€€€€€€½¹ÍĞ‰½½°¥ÍMÑÉ•ÍÍM•¹”õE¥±•%¹™¼¡½ÕÑ½µ”¹Á…Ñ ¤¹…‰Í½±ÕÑ•A…Ñ  ¤¹•¹‘Í]¥Ñ  (€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ˆ½‰•¹¡µ…É¬µ¥Ù¥Œˆ¤±EĞèé…Í•%¹Í•¹Í¥Ñ¥Ù”¤ì(€€€€€€€½¹ÍĞ‰½½°•áÑÉ•µ•MÑÉ•ÍÌõE¥±•%¹™¼¡½ÕÑ½µ”¹Á…Ñ ¤¹™¥±•9…µ” ¤(€€€€€€€€€€€€ôõEMÑÉ¥¹1¥Ñ•É…° ‰Í•¹”µ•áÑÉ•µ”¹©Í½¸ˆ¤ì(€€€€€€€€¼¼áÁ±¥¥Ğ‰•¹¡µ…É¬±…Õ¹¡•È½Ù•ÉÉ¥‘”½¹±äè½É‘¥¹…ÉäÍ•¹”±…Õ¹¡•Ì(€€€€€€€€¼¼­••ÀÑ¡•¥È•á¥ÍÑ¥¹œ`ÄÄI…ÍÑ•È‘•™…Õ±Ğ…¹ÕÍ•È½¹ÑÉ½±Ì¸(€€€€€€€½¹ÍĞ‰½½°ÙÕ±­…¹AÉ½™¥±”õ¥ÍMÑÉ•ÍÍM•¹”€˜˜(€€€€€€€€€€€Å¹Ù¥É½¹µ•¹ÑY…É¥…‰±” ‰M}]IA}Y-}AI=%1}5=ˆ¤ôõEMÑÉ¥¹1¥Ñ•É…° ˆÄˆ¤ì(¥˜‘•™¥¹•¡}]%8ÌÈ¤€˜˜4Í}XÄİ}YU1-9}9	1(€€€€€€€¥˜¡ÙÕ±­…¹AÉ½™¥±”¥ì(€€€€€€€€€€€‘¥É•Ñ¥ÍÁ±…å	½á|´ùÍ•Ñ¡•­•¡ÑÉÕ”¤ì(€€€€€€€€€€€‰…­•¹‘	½á|´ùÍ•ÑÕÉÉ•¹Ñ%¹‘•à Ô¤ì€¼¼YÕ±­…¸I…ÍÑ•È°¹…Ñ¥Ù”]M$(€€€€€€€€€€€‘…å9¥¡Ñå±•	½á|´ùÍ•Ñ¡•­•¡ÑÉÕ”¤ì€¼¼•á•É¥Í”Í½±…È½Í¡…‘½ÜÕÁ‘…Ñ•Ì(€€€€€€€õ•±Í”(•¹‘¥˜(€€€€€€€¥˜¡¥ÍMÑÉ•ÍÍM•¹”¥‰…­•¹‘	½á|´ùÍ•ÑÕÉÉ•¹Ñ%¹‘•à Ğ¤ì(€€€€€€€Í•¹•1½…‘¥¹|õ™…±Í”ì(€€€€€€€Í•±•Ñ	…­•¹‘=ÕÑÁÕÑ]¥¹‘½Ü ¤ì(€€€€€€€…¹Ù…Í|´ùÍ•ÑA±…•¡½±‘•È¡•áÑÉ•µ•MÑÉ•ÍÌ(€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ‰M¡¹”•áÑË©µ”¡…ÉŸ¥”¸±¥ÅÕ•èÍÕÈ…±Õ±•È°¥µ…”Á½ÕÈ±…¹•È±”É•¹‘Ô¸ˆ¤(€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ‰M¡¹”¡…ÉŸ¥”¸…±Õ°‘”±„ÁÉ•µ§¡É”¥µ…—Š˜ˆ¤¤ì(€€€€€€€Í•¹•1½…‘1…‰•±|´ù¡¥‘” ¤ì(€€€€€€€Í•¹•1½…‘AÉ½É•ÍÍ|´ù¡¥‘” ¤ì(€€€€€€€…µ•É…	½á|´ùÍ•Ñ¹…‰±•¡ÑÉÕ”¤ì(€€€€€€€¥˜¡•áÁ±½É…Ñ¥½¹	ÕÑÑ½¹|¥•áÁ±½É…Ñ¥½¹	ÕÑÑ½¹|´ùÍ•Ñ¹…‰±•¡ÑÉÕ”¤ì(€€€€€€€¥˜ …•áÑÉ•µ•MÑÉ•ÍÌ¥É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€•±Í”ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€‰AÉ½™¥°•áÑË©µ”€èÉ•¹‘Ôµ…¹Õ•°½¹Í•¥±³¤Á½ÕÈ±¥µ¥Ñ•È±„½¹Í½µµ…Ñ¥½¸·¥µ½¥É”¸ˆ¤¤ì(€€€ô(€€€Ù½¥Á½ÁÕ±…Ñ•QÉ••Ì¡½¹ÍĞØÄØèéM•¹•…Ñ…‰…Í”˜‘…Ñ…‰…Í”¥ì(€€€€€€€Í•¹•QÉ••|´ù±•…È ¤íÉ•Í½ÕÉ•QÉ••|´ù±•…È ¤ì(€€€€€€€E!…Í ñEMÑÉ¥¹œ±EQÉ••]¥‘•Ñ%Ñ•´¨ø¹½‘•Ìì(€€€€€€€…ÕÑ¼¨É½½Ğõ¹•ÜEQÉ••]¥‘•Ñ%Ñ•´¡Í•¹•QÉ••|±í‘…Ñ…‰…Í”¹¹…µ”±EMÑÉ¥¹1¥Ñ•É…° ‰XÄØˆ¥ô¤ì(€€€€€€€¹½‘•Ì¹¥¹Í•ÉĞ¡EMÑÉ¥¹œ ¤±É½½Ğ¤ì(€€€€€€€™½È¡½¹ÍĞ…ÕÑ¼˜½‰©•ĞéÉÕ¹Ñ¥µ•|´ù½‰©•ÑÌ¥ì(€€€€€€€€€€€EMÑÉ¥¹œİ…±¬ì(€€€€€€€€€€€EQÉ••]¥‘•Ñ%Ñ•´¨Á…É•¹ĞõÉ½½Ğì(€€€€€€€€€€€™½È¡½¹ÍĞ…ÕÑ¼˜Á…ÉĞé½‰©•Ğ¹Á…É•¹Ğ¹ÍÁ±¥Ğ œ¼œ±EĞèéM­¥ÁµÁÑåA…ÉÑÌ¤¥ì(€€€€€€€€€€€€€€€İ…±¬¬õEMÑÉ¥¹1¥Ñ•É…° ˆ¼ˆ¤­Á…ÉĞì(€€€€€€€€€€€€€€€¥˜ …¹½‘•Ì¹½¹Ñ…¥¹Ì¡İ…±¬¤¥¹½‘•Ì¹¥¹Í•ÉĞ¡İ…±¬±¹•ÜEQÉ••]¥‘•Ñ%Ñ•´¡Á…É•¹Ğ±íÁ…ÉĞ±EMÑÉ¥¹1¥Ñ•É…° ‰É½ÕÁ”ˆ¥ô¤¤ì(€€€€€€€€€€€€€€€Á…É•¹Ğõ¹½‘•Ì¹Ù…±Õ”¡İ…±¬¤ì(€€€€€€€€€€€ô(€€€€€€€€€€€…ÕÑ¼¨±•…˜õ¹•ÜEQÉ••]¥‘•Ñ%Ñ•´¡Á…É•¹Ğ±í½‰©•Ğ¹¥±½‰©•Ğ¹µ…Ñ•É¥…±ô¤ì(€€€€€€€€€€€±•…˜´ùÍ•Ñ…Ñ„ À±EĞèéUÍ•ÉI½±”±½‰©•Ğ¹µ…Ñ•É¥…°¤ì(€€€€€€€ô(€€€€€€€™½È¡½¹ÍĞ…ÕÑ¼˜Í•Ñ½Èé‘…Ñ…‰…Í”¹Í•Ñ½ÉÌ¥ì(€€€€€€€€€€€™½È¡…ÕÑ¼¥ĞõÍ•Ñ½È¹É•Í½ÕÉ•Ì¹½¹ÍÑ	•¥¸ ¤í¥Ğ„õÍ•Ñ½È¹É•Í½ÕÉ•Ì¹½¹ÍÑ¹ ¤ì¬­¥Ğ¥ì(€€€€€€€€€€€€€€€…ÕÑ¼¨…Ñ•½Éäõ¹•ÜEQÉ••]¥‘•Ñ%Ñ•´¡É•Í½ÕÉ•QÉ••|±í¥Ğ¹­•ä ¤±Í•Ñ½È¹¥‘ô¤ì(€€€€€€€€€€€€€€€™½È¡½¹ÍĞ…ÕÑ¼˜É•Í½ÕÉ”é¥Ğ¹Ù…±Õ” ¤¤(€€€€€€€€€€€€€€€€€€€¹•ÜEQÉ••]¥‘•Ñ%Ñ•´¡…Ñ•½Éä±íE¥±•%¹™¼¡É•Í½ÕÉ”¹Á…Ñ ¤¹™¥±•9…µ” ¤±É•Í½ÕÉ”¹Á…Ñ¡ô¤ì(€€€€€€€€€€€ô(€€€€€€€ô(€€€€€€€…ÕÑ¼¨…Ñ…±½œõ¹•ÜEQÉ••]¥‘•Ñ%Ñ•´¡É•Í½ÕÉ•QÉ••|±íEMÑÉ¥¹1¥Ñ•É…° ‰…Ñ…±½Õ”‘•Ìµ…Ó¥É¥…Õàˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰Á…ÉÑ…Ÿ¥Ìˆ¥ô¤ì(€€€€€€€™½È¡…ÕÑ¼¥ĞõÉÕ¹Ñ¥µ•|´ùµ…Ñ•É¥…±%¹‘•à¹‰•¥¸ ¤í¥Ğ„õÉÕ¹Ñ¥µ•|´ùµ…Ñ•É¥…±%¹‘•à¹•¹ ¤ì¬­¥Ğ¥ì(€€€€€€€€€€€½¹ÍĞ…ÕÑ¼˜´õÉÕ¹Ñ¥µ•|´ùÉ•¹‘•ÉM•¹”¹µ…ÑmÍ¥é•}Ğ¡¥Ğ¹Ù…±Õ” ¤¥tì(€€€€€€€€€€€…ÕÑ¼¨±•…˜õ¹•ÜEQÉ••]¥‘•Ñ%Ñ•´¡…Ñ…±½œ±í¥Ğ¹­•ä ¤±EMÑÉ¥¹1¥Ñ•É…° ‰A	HÁ…ÉÑ…Ÿ¤ˆ¥ô¤ì(€€€€€€€€€€€±•…˜´ùÍ•Ñ…Ñ„ À±EĞèéUÍ•ÉI½±”±¥Ğ¹­•ä ¤¤ì(€€€€€€€€€€€…ÕÑ¼…‘‘¡…¹¹•°õl™t¡½¹ÍĞEMÑÉ¥¹œ˜±…‰•°±Í¥é•}Ğ½Õ¹Ğ±¥¹ĞÍ¥é”¥ì(€€€€€€€€€€€€€€€…ÕÑ¼¨¡…¹¹•°õ¹•ÜEQÉ••]¥‘•Ñ%Ñ•´¡±•…˜±í±…‰•°°(€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ˆ”Ç
+ÈƒŠH€Ç
+È€¼€”Èµ¥Áµ…ÁÌˆ¤¹…Éœ¡Í¥é”¤¹…Éœ¡½Õ¹Ğ¥ô¤ì(€€€€€€€€€€€€€€€¡…¹¹•°´ùÍ•Ñ…Ñ„ À±EĞèéUÍ•ÉI½±”±¥Ğ¹­•ä ¤¤ì(€€€€€€€€€€€ôì(€€€€€€€€€€€¥˜ …´¹½±½É5¥À¹•µÁÑä ¤¥…‘‘¡…¹¹•°¡EMÑÉ¥¹1¥Ñ•É…° ‰±‰•‘¼ƒŠPÍIˆ¤±´¹½±½É5¥À¹Í¥é” ¤±¥¹Ğ¡´¹½±½É5¥À¹™É½¹Ğ ¤¹Í¥é”¤¤ì(€€€€€€€€€€€¥˜ …´¹¹½Éµ…±5¥À¹•µÁÑä ¤¥…‘‘¡…¹¹•°¡EMÑÉ¥¹1¥Ñ•É…° ‰9½Éµ…°ƒŠP±¥»¥…¥É”ˆ¤±´¹¹½Éµ…±5¥À¹Í¥é” ¤±¥¹Ğ¡´¹¹½Éµ…±5¥À¹™É½¹Ğ ¤¹Í¥é”¤¤ì(€€€€€€€€€€€¥˜ …´¹É½Õ¡¹•ÍÍ5¥À¹•µÁÑä ¤¥…‘‘¡…¹¹•°¡EMÑÉ¥¹1¥Ñ•É…° ‰IÕ½Í¥Ó¤ƒŠP±¥»¥…¥É”ˆ¤±´¹É½Õ¡¹•ÍÍ5¥À¹Í¥é” ¤±¥¹Ğ¡´¹É½Õ¡¹•ÍÍ5¥À¹™É½¹Ğ ¤¹Í¥é”¤¤ì(€€€€€€€€€€€¹•ÜEQÉ••]¥‘•Ñ%Ñ•´¡±•…˜±íEMÑÉ¥¹1¥Ñ•É…° ‰7¥Ñ…±±¥¥Ó¤ˆ¤±EMÑÉ¥¹œèé¹Õµ‰•È¡´¹µ•Ñ…±±¥Œ°˜œ°È¥ô¤ì(€€€€€€€€€€€¹•ÜEQÉ••]¥‘•Ñ%Ñ•´¡±•…˜±íEMÑÉ¥¹1¥Ñ•É…° ‰QÉ…¹Íµ¥ÍÍ¥½¸ˆ¤±EMÑÉ¥¹œèé¹Õµ‰•È¡´¹ÑÉ…¹Íµ¥ÍÍ¥½¹A•É•¹Ğ¥ô¤ì(€€€€€€€ô(€€€€€€€Í•¹•QÉ••|´ù•áÁ…¹‘Q½•ÁÑ  È¤ì(€€€€€€€É•Í½ÕÉ•QÉ••|´ù•áÁ…¹‘Q½•ÁÑ  À¤ì(€€€€€€€…Ñ…±½œ´ùÍ•ÑáÁ…¹‘•¡ÑÉÕ”¤ì(€€€ô((€€€‰½½°ÙÕ±­…¹¥É•ÑÙ…¥±…‰±” ¤½¹ÍÑì(¥˜‘•™¥¹•¡}]%8ÌÈ¤€˜˜4Í}XÄİ}YU1-9}9	1(€€€€€€€É•ÑÕÉ¸ÑÉÕ”ì(•±Í”(€€€€€€€É•ÑÕÉ¸™…±Í”ì(•¹‘¥˜(€€€ô(€€€‰½½°¹…Ñ¥Ù•¥É•ÑM•±•Ñ• ¤½¹ÍÑì(¥™‘•˜}]%8ÌÈ(€€€€€€€€¼¼… ¹…Ñ¥Ù”‰…­•¹ÁÉ•Í•¹ÑÌ¥¹Ñ¼¥ÑÌ½İ¸‰…­•¹µÍÁ•¥™¥ŒÑ½Àµ±•Ù•°(€€€€€€€€¼¼%µ…•Y¥•Ü!]9ìa$…¹YÕ±­…¸¹•Ù•ÈÍ¡…É”„Ñ…É•Ğİ¥¹‘½Ü¸(€€€€€€€¥˜ …‰…­•¹‘	½á}ñğ…‘¥É•Ñ¥ÍÁ±…å	½á}ñğ…‘¥É•Ñ¥ÍÁ±…å	½á|´ù¥Í¡•­• ¤¥É•ÑÕÉ¸™…±Í”ì(€€€€€€€½¹ÍĞ¥¹Ğ¥¹‘•àõ‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ì(€€€€€€€É•ÑÕÉ¸€¡¥¹‘•àôôÑñğ¡¥¹‘•àôôÔ˜™ÙÕ±­…¹¥É•ÑÙ…¥±…‰±” ¤¤¤˜˜(€€€€€€€€€€€€€€€…¹…Ñ¥Ù•¥É•Ñ…¥±•‘}mÍ¥é•}Ğ¡¥¹‘•à¥tì(•±Í”(€€€€€€€É•ÑÕÉ¸™…±Í”ì(•¹‘¥˜(€€€ô(€€€Ù½¥™½ÕÍI•¹‘•ÉY¥•İÁ½ÉĞ ¥ì(€€€€€€€¥˜¡…¹Ù…Í|¥ì(€€€€€€€€€€€…¹Ù…Í|´ùÍ•Ñ½ÕÌ¡EĞèé=Ñ¡•É½ÕÍI•…Í½¸¤ì(€€€€€€€€€€€…¹Ù…Í|´ùÉ…¥Í” ¤ì(€€€€€€€€€€€…¹Ù…Í|´ù…Ñ¥Ù…Ñ•]¥¹‘½Ü ¤ì(€€€€€€€ô(€€€ô(€€€Ù½¥É•ÍÑ½É•áÁ±½É…Ñ¥½¹Y¥•İÁ½ÉÑ½ÕÌ ¥ì(€€€€€€€¥˜ …•áÁ±½É¥¹|¥É•ÑÕÉ¸ì(€€€€€€€€¼¼¡…¹¥¹œÑ¡”‰…­•¹½È‘¥É•Ğµ‘¥ÍÁ±…äµ½‘”µ½Ù•Ì™½ÕÌ‰•Ñİ••¸(€€€€€€€€¼¼¥¹‘•Á•¹‘•¹ĞÑ½Àµ±•Ù•°Ù¥•İÌ¸I•‰¥¹µ½ÕÍ”µ±½½¬…™Ñ•ÈEĞ…Ñ¥Ù…Ñ•Ì(€€€€€€€€¼¼Ñ¡”¹•İ±äÍ•±•Ñ•½ÕÑÁÕĞİ¥¹‘½Ü¸(€€€€€€€É•±•…Í•5½ÕÍ•1½½¬ ¤ì(€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ À±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€¥˜ …•áÁ±½É¥¹}ññ±½Í¥¹I•ÅÕ•ÍÑ•‘|¥É•ÑÕÉ¸ì(€€€€€€€€€€€™½ÕÍI•¹‘•ÉY¥•İÁ½ÉĞ ¤ì(€€€€€€€€€€€…ÁÑÕÉ•5½ÕÍ•1½½¬ ¤ì(€€€€€€€ô¤ì(€€€ô(€€€Ù½¥…ÉÉ…¹•áÁ±½É…Ñ¥½¹]¥¹‘½İÌ ¥ì(€€€€€€€¥˜¡•áÁ±½É…Ñ¥½¹]¥¹‘½İ1…å½ÕÑÑ¥Ù•}ñğ……¹Ù…Í|¥É•ÑÕÉ¸ì(€€€€€€€EMÉ••¸¨ÍÉ••¸õEÕ¥ÁÁ±¥…Ñ¥½¸èéÍÉ••¹Ğ¡™É…µ••½µ•ÑÉä ¤¹•¹Ñ•È ¤¤ì(€€€€€€€¥˜ …ÍÉ••¸¥ÍÉ••¸õEÕ¥ÁÁ±¥…Ñ¥½¸èéÁÉ¥µ…ÉåMÉ••¸ ¤ì(€€€€€€€¥˜ …ÍÉ••¸¥É•ÑÕÉ¸ì(€€€€€€€½¹ÍĞEI•Ğ…É•„õÍÉ••¸´ù…Ù…¥±…‰±••½µ•ÑÉä ¤ì(€€€€€€€¥˜¡…É•„¹İ¥‘Ñ  ¤ğäÀÁññ…É•„¹¡•¥¡Ğ ¤ğÔÀÀ¥É•ÑÕÉ¸ì((€€€€€€€•áÁ±½É…Ñ¥½¹M…Ù•‘5…¥¹•½µ•ÑÉå|õ•½µ•ÑÉä ¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹M…Ù•‘I•¹‘•É•½µ•ÑÉå|õ…¹Ù…Í|´ù•½µ•ÑÉä ¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹M…Ù•‘5¥¹¥µÕµM¥é•|õµ¥¹¥µÕµM¥é” ¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹M…Ù•‘5…¥¹5…á¥µ¥é•‘|õ¥Í5…á¥µ¥é• ¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹M…Ù•‘5…¥¹Õ±±MÉ••¹|õ¥ÍÕ±±MÉ••¸ ¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹M…Ù•‘I•¹‘•É5…á¥µ¥é•‘|õ…¹Ù…Í|´ù¥Í5…á¥µ¥é• ¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹M…Ù•‘I•¹‘•ÉÕ±±MÉ••¹|õ…¹Ù…Í|´ù¥ÍÕ±±MÉ••¸ ¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹M…Ù•‘M•¹•½­Y¥Í¥‰±•|õÍ•¹•áÁ±½É•É½­|˜™Í•¹•áÁ±½É•É½­|´ù¥ÍY¥Í¥‰±” ¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹M…Ù•‘½¹ÑÉ½±Í½­Y¥Í¥‰±•|õÉ•¹‘•É½¹ÑÉ½±Í½­|˜™É•¹‘•É½¹ÑÉ½±Í½­|´ù¥ÍY¥Í¥‰±” ¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹M…Ù•‘I•Ù¥•İ½­Y¥Í¥‰±•|õ…¹½µ…±åI•Ù¥•İ½­|˜™…¹½µ…±åI•Ù¥•İ½­|´ù¥ÍY¥Í¥‰±” ¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹M…Ù•‘5•¹ÕY¥Í¥‰±•|õµ•¹Õ	…È ¤˜™µ•¹Õ	…È ¤´ù¥ÍY¥Í¥‰±” ¤ì(€€€€€€€•áÁ±½É…Ñ¥½¹]¥¹‘½İ1…å½ÕÑÑ¥Ù•|õÑÉÕ”ì((€€€€€€€€¼¼½µÁ…ĞÑ¡”½¹ÑÉ½±Ì¥¹Ñ¼Ñ¡”É¥¡Ğµ¡…¹‰…¹ì¡¥‘”Í•½¹‘…ÉäÁ…¹•±Ì(€€€€€€€€¼¼…¹­••ÀÑ¡”É•¹‘•É•È¥¸Ñ¡”±…É•È±•™Ğİ¥¹‘½Ü¸(€€€€€€€¥˜¡Í•¹•áÁ±½É•É½­|¥Í•¹•áÁ±½É•É½­|´ù¡¥‘” ¤ì(€€€€€€€¥˜¡…¹½µ…±åI•Ù¥•İ½­|¥…¹½µ…±åI•Ù¥•İ½­|´ù¡¥‘” ¤ì(€€€€€€€¥˜¡É•¹‘•É½¹ÑÉ½±Í½­|¥ì(€€€€€€€€€€€É•¹‘•É½¹ÑÉ½±Í½­|´ùÍ¡½Ü ¤ì(€€€€€€€€€€€É•¹‘•É½¹ÑÉ½±Í½­|´ùÉ…¥Í” ¤ì(€€€€€€€ô(€€€€€€€¥˜¡•¹ÑÉ…±]¥‘•Ğ ¤¥•¹ÑÉ…±]¥‘•Ğ ¤´ù¡¥‘” ¤ì(€€€€€€€¥˜¡µ•¹Õ	…È ¤¥µ•¹Õ	…È ¤´ù¡¥‘” ¤ì(€€€€€€€Í•Ñ5¥¹¥µÕµM¥é” ÌØÀ°ÔÀÀ¤ì(€€€€€€€½¹ÍĞ¥¹Ğ‰…¹‘]¥‘Ñ õÍÑèé±…µÀ¡…É•„¹İ¥‘Ñ  ¤¼Ğ°ÌàÀ°ĞàÀ¤ì(€€€€€€€½¹ÍĞ¥¹ĞÉ•¹‘•É]¥‘Ñ õ…É•„¹İ¥‘Ñ  ¤µ‰…¹‘]¥‘Ñ ì(€€€€€€€½¹ÍĞEI•ĞÉ•¹‘•ÉI•Ğ¡…É•„¹±•™Ğ ¤±…É•„¹Ñ½À ¤±É•¹‘•É]¥‘Ñ ±…É•„¹¡•¥¡Ğ ¤¤ì(€€€€€€€½¹ÍĞEI•Ğ‰…¹‘I•Ğ¡…É•„¹±•™Ğ ¤­É•¹‘•É]¥‘Ñ ±…É•„¹Ñ½À ¤±‰…¹‘]¥‘Ñ ±…É•„¹¡•¥¡Ğ ¤¤ì(€€€€€€€€¼¼Í•Ñ•½µ•ÑÉä ¤‘½•Ì¹½Ğ±•…Ù”EĞÌµ…á¥µ¥é•ÍÑ…Ñ”¸9½Éµ…±¥é”‰½Ñ (€€€€€€€€¼¼Ñ½Àµ±•Ù•°İ¥¹‘½İÌ™¥ÉÍĞÍ¼Ñ¡”É•ÅÕ•ÍÑ•±•™Ğ½É¥¡Ğ±…å½ÕĞÑ…­•Ì•™™•Ğ¸(€€€€€€€¥˜¡…¹Ù…Í|´ù¥Í5¥¹¥µ¥é• ¥ññ…¹Ù…Í|´ù¥Í5…á¥µ¥é• ¥ññ…¹Ù…Í|´ù¥ÍÕ±±MÉ••¸ ¤¤(€€€€€€€€€€€…¹Ù…Í|´ùÍ¡½İ9½Éµ…° ¤ì(€€€€€€€…¹Ù…Í|´ùÍ•Ñ•½µ•ÑÉä¡É•¹‘•ÉI•Ğ¤ì(€€€€€€€¥˜¡¥Í5¥¹¥µ¥é• ¥ññ¥Í5…á¥µ¥é• ¥ññ¥ÍÕ±±MÉ••¸ ¤¥Í¡½İ9½Éµ…° ¤ì(€€€€€€€Í•Ñ•½µ•ÑÉä¡‰…¹‘I•Ğ¤ì(€€€€€€€Í¡½Ü ¤ì(€€€€€€€É…¥Í” ¤ì(€€€€€€€…¹Ù…Í|´ùÍ¡½Ü ¤ì(€€€€€€€™½ÕÍI•¹‘•ÉY¥•İÁ½ÉĞ ¤ì(€€€€€€€ÕÁ‘…Ñ•I•¹‘•É•ÉMÑ…µÀ ¤ì(€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ À±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€¥˜¡•áÁ±½É¥¹|˜˜…±½Í¥¹I•ÅÕ•ÍÑ•‘|¥ì(€€€€€€€€€€€€€€€™½ÕÍI•¹‘•ÉY¥•İÁ½ÉĞ ¤ì(€€€€€€€€€€€€€€€…ÁÑÕÉ•5½ÕÍ•1½½¬ ¤ì(€€€€€€€€€€€ô(€€€€€€€ô¤ì(€€€ô(€€€Ù½¥É•ÍÑ½É•áÁ±½É…Ñ¥½¹]¥¹‘½İÌ ¥ì(€€€€€€€¥˜ …•áÁ±½É…Ñ¥½¹]¥¹‘½İ1…å½ÕÑÑ¥Ù•|¥É•ÑÕÉ¸ì(€€€€€€€•áÁ±½É…Ñ¥½¹]¥¹‘½İ1…å½ÕÑÑ¥Ù•|õ™…±Í”ì(€€€€€€€Í•Ñ5¥¹¥µÕµM¥é”¡•áÁ±½É…Ñ¥½¹M…Ù•‘5¥¹¥µÕµM¥é•|¤ì(€€€€€€€¥˜¡•¹ÑÉ…±]¥‘•Ğ ¤¥•¹ÑÉ…±]¥‘•Ğ ¤´ùÍ¡½Ü ¤ì(€€€€€€€¥˜¡µ•¹Õ	…È ¤¥µ•¹Õ	…È ¤´ùÍ•ÑY¥Í¥‰±”¡•áÁ±½É…Ñ¥½¹M…Ù•‘5•¹ÕY¥Í¥‰±•|¤ì(€€€€€€€¥˜¡Í•¹•áÁ±½É•É½­|¥Í•¹•áÁ±½É•É½­|´ùÍ•ÑY¥Í¥‰±”¡•áÁ±½É…Ñ¥½¹M…Ù•‘M•¹•½­Y¥Í¥‰±•|¤ì(€€€€€€€¥˜¡É•¹‘•É½¹ÑÉ½±Í½­|¥É•¹‘•É½¹ÑÉ½±Í½­|´ùÍ•ÑY¥Í¥‰±”¡•áÁ±½É…Ñ¥½¹M…Ù•‘½¹ÑÉ½±Í½­Y¥Í¥‰±•|¤ì(€€€€€€€¥˜¡…¹½µ…±åI•Ù¥•İ½­|¥…¹½µ…±åI•Ù¥•İ½­|´ùÍ•ÑY¥Í¥‰±”¡•áÁ±½É…Ñ¥½¹M…Ù•‘I•Ù¥•İ½­Y¥Í¥‰±•|¤ì(€€€€€€€¥˜ …•áÁ±½É…Ñ¥½¹M…Ù•‘5…¥¹•½µ•ÑÉå|¹¥ÍµÁÑä ¤¥Í•Ñ•½µ•ÑÉä¡•áÁ±½É…Ñ¥½¹M…Ù•‘5…¥¹•½µ•ÑÉå|¤ì(€€€€€€€¥˜¡…¹Ù…Í|˜˜…•áÁ±½É…Ñ¥½¹M…Ù•‘I•¹‘•É•½µ•ÑÉå|¹¥ÍµÁÑä ¤¤(€€€€€€€€€€€…¹Ù…Í|´ùÍ•Ñ•½µ•ÑÉä¡•áÁ±½É…Ñ¥½¹M…Ù•‘I•¹‘•É•½µ•ÑÉå|¤ì(€€€€€€€¥˜¡•áÁ±½É…Ñ¥½¹M…Ù•‘5…¥¹Õ±±MÉ••¹|¥Í¡½İÕ±±MÉ••¸ ¤ì(€€€€€€€•±Í”¥˜¡•áÁ±½É…Ñ¥½¹M…Ù•‘5…¥¹5…á¥µ¥é•‘|¥Í¡½İ5…á¥µ¥é• ¤ì(€€€€€€€¥˜¡…¹Ù…Í|¥ì(€€€€€€€€€€€¥˜¡•áÁ±½É…Ñ¥½¹M…Ù•‘I•¹‘•ÉÕ±±MÉ••¹|¥…¹Ù…Í|´ùÍ¡½İÕ±±MÉ••¸ ¤ì(€€€€€€€€€€€•±Í”¥˜¡•áÁ±½É…Ñ¥½¹M…Ù•‘I•¹‘•É5…á¥µ¥é•‘|¥…¹Ù…Í|´ùÍ¡½İ5…á¥µ¥é• ¤ì(€€€€€€€ô(€€€€€€€É…¥Í” ¤ì(€€€€€€€…Ñ¥Ù…Ñ•]¥¹‘½Ü ¤ì(€€€€€€€ÕÁ‘…Ñ•I•¹‘•É•ÉMÑ…µÀ ¤ì(€€€ô(€€€EMÑÉ¥¹œ‘•ÍÉ¥‰•9…Ñ¥Ù•]¥¹‘½Ü¡ÅÕ¥¹ÑÁÑÈ¹…Ñ¥Ù•!…¹‘±”±EM¥é”É•ÅÕ•ÍÑ•±ÅÉ•…°‘ÁÈ¤½¹ÍÑì(¥˜‘•™¥¹•¡}]%8ÌÈ¤(€€€€€€€½¹ÍĞ!]9¡İ¹õÉ•¥¹Ñ•ÉÁÉ•Ñ}…ÍĞñ!]9ø¡¹…Ñ¥Ù•!…¹‘±”¤ì(€€€€€€€]=I½İ¹•ÉAÉ½•ÍÌôÀì(€€€€€€€½¹ÍĞ]=I½İ¹•ÉQ¡É•…õ¡İ¹ı•Ñ]¥¹‘½İQ¡É•…‘AÉ½•ÍÍ%¡¡İ¹°™½İ¹•ÉAÉ½•ÍÌ¤èÀì(€€€€€€€IP±¥•¹Ñíôì(€€€€€€€½¹ÍĞ‰½½°¡…Í±¥•¹Ğõ¡İ¹˜™•Ñ±¥•¹ÑI•Ğ¡¡İ¹°™±¥•¹Ğ¤ì(€€€€€€€İ¡…É}Ğ±…ÍÍ9…µ•lÄÈáuíôì(€€€€€€€½¹ÍĞ¥¹Ğ±…ÍÍ1•¹Ñ õ¡İ¹ı•Ñ±…ÍÍ9…µ•\¡¡İ¹±±…ÍÍ9…µ”°ÄÈà¤èÀì(€€€€€€€½¹ÍĞEMÑÉ¥¹œ±…ÍÍQ•áĞõ±…ÍÍ1•¹Ñ øÀ(€€€€€€€€€€€€ıEMÑÉ¥¹œèé™É½µ]¡…ÉÉÉ…ä¡±…ÍÍ9…µ”±±…ÍÍ1•¹Ñ ¤éEMÑÉ¥¹1¥Ñ•É…° ˆñ¥¹‘¥ÍÁ½¹¥‰±”øˆ¤ì(€€€€€€€½¹ÍĞ…ÕÑ¼¡¥¹ÍÑ…¹”õ¡İ¹ı•Ñ]¥¹‘½İ1½¹AÑÉ\¡¡İ¹±]1A}!%9MQ9¤èÀì(€€€€€€€½¹ÍĞ…ÕÑ¼ÍÑå±”õ¡İ¹ı•Ñ]¥¹‘½İ1½¹AÑÉ\¡¡İ¹±]1}MQe1¤èÀì(€€€€€€€½¹ÍĞ…ÕÑ¼•áMÑå±”õ¡İ¹ı•Ñ]¥¹‘½İ1½¹AÑÉ\¡¡İ¹±]1}aMQe1¤èÀì(€€€€€€€É•ÑÕÉ¸EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€‰!]9ôÁà”Ä%Í]¥¹‘½Üô”È½İ¹•ÉQ¡É•…ô”ÌÁÉ½•ÍÌô”Ğ!%9MQ9ôÁà”Ô€ˆ(€€€€€€€€€€€€‰ÍÑå±”ôÁà”Ø•áMÑå±”ôÁà”Ü±…ÍÌô”à±¥•¹Ğô”åà”ÄÀÑ…É•Ğô”ÄÅà”ÄÈAHô”ÄÌˆ¤(€€€€€€€€€€€€¹…Éœ¡EMÑÉ¥¹œèé¹Õµ‰•È¡ÅÕ±½¹±½¹œ¡¹…Ñ¥Ù•!…¹‘±”¤°ÄØ¤¤(€€€€€€€€€€€€¹…Éœ¡¡İ¹˜™%Í]¥¹‘½Ü¡¡İ¹¤üÄèÀ¤(€€€€€€€€€€€€¹…Éœ¡½İ¹•ÉQ¡É•…¤¹…Éœ¡½İ¹•ÉAÉ½•ÍÌ¤(€€€€€€€€€€€€¹…Éœ¡EMÑÉ¥¹œèé¹Õµ‰•È¡ÅÕ±½¹±½¹œ¡¡¥¹ÍÑ…¹”¤°ÄØ¤¤(€€€€€€€€€€€€¹…Éœ¡EMÑÉ¥¹œèé¹Õµ‰•È¡ÅÕ±½¹±½¹œ¡ÍÑå±”¤°ÄØ¤¤(€€€€€€€€€€€€¹…Éœ¡EMÑÉ¥¹œèé¹Õµ‰•È¡ÅÕ±½¹±½¹œ¡•áMÑå±”¤°ÄØ¤¤(€€€€€€€€€€€€¹…Éœ¡±…ÍÍQ•áĞ¤(€€€€€€€€€€€€¹…Éœ¡¡…Í±¥•¹Ğı±¥•¹Ğ¹É¥¡Ğµ±¥•¹Ğ¹±•™ĞèÀ¤(€€€€€€€€€€€€¹…Éœ¡¡…Í±¥•¹Ğı±¥•¹Ğ¹‰½ÑÑ½´µ±¥•¹Ğ¹Ñ½ÀèÀ¤(€€€€€€€€€€€€¹…Éœ¡É•ÅÕ•ÍÑ•¹İ¥‘Ñ  ¤¤¹…Éœ¡É•ÅÕ•ÍÑ•¹¡•¥¡Ğ ¤¤(€€€€€€€€€€€€¹…Éœ¡‘ÁÈ°À°˜œ°Ì¤ì(•±Í”(€€€€€€€E}U9UM¡¹…Ñ¥Ù•!…¹‘±”¤ì(€€€€€€€É•ÑÕÉ¸EMÑÉ¥¹1¥Ñ•É…° ‰]¥¸ÌÈİ¥¹‘½Ü‘¥…¹½ÍÑ¥ÌÕ¹…Ù…¥±…‰±”ìÑ…É•Ğô”Åà”ÈAHô”Ìˆ¤(€€€€€€€€€€€€¹…Éœ¡É•ÅÕ•ÍÑ•¹İ¥‘Ñ  ¤¤¹…Éœ¡É•ÅÕ•ÍÑ•¹¡•¥¡Ğ ¤¤¹…Éœ¡‘ÁÈ°À°˜œ°Ì¤ì(•¹‘¥˜(€€€ô(€€€EMÑÉ¥¹œ¹…Ñ¥Ù•¥…¹½ÍÑ¥1½A…Ñ  ¤½¹ÍÑì(€€€€€€€É•ÑÕÉ¸EMÑ…¹‘…É‘A…Ñ¡ÌèéİÉ¥Ñ…‰±•1½…Ñ¥½¸¡EMÑ…¹‘…É‘A…Ñ¡Ìèé½Õµ•¹ÑÍ1½…Ñ¥½¸¤(€€€€€€€€€€€€­EMÑÉ¥¹1¥Ñ•É…° ˆ½M]I@½¥…¹½ÍÑ¥Ì½XÄÜ¸ÔÈÈµ¹…Ñ¥Ù”µÁÉ•Í•¹Ñ…Ñ¥½¸¹©Í½¹°ˆ¤ì(€€€ô(€€€Ù½¥Í…Ù•9…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¹¥…¹½ÍÑ¥Œ¡½¹ÍĞEMÑÉ¥¹œ˜‰…­•¹°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œ˜É•…Í½¸°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œ˜İ¥¹‘½İ•Ñ…¥±Ì¥ì(€€€€€€€½¹ÍĞEMÑÉ¥¹œÁ…Ñ õ¹…Ñ¥Ù•¥…¹½ÍÑ¥1½A…Ñ  ¤ì(€€€€€€€½¹ÍĞEMÑÉ¥¹œ‘¥É•Ñ½ÉäõE¥±•%¹™¼¡Á…Ñ ¤¹…‰Í½±ÕÑ•A…Ñ  ¤ì(€€€€€€€E¥È ¤¹µ­Á…Ñ ¡‘¥É•Ñ½Éä¤ì(€€€€€€€E¥±”™¥±”¡Á…Ñ ¤ì(€€€€€€€¥˜¡™¥±”¹½Á•¸¡E%=•Ù¥”èé]É¥Ñ•=¹±åñE%=•Ù¥”èéÁÁ•¹‘ñE%=•Ù¥”èéQ•áĞ¤¥ì(€€€€€€€€€€€½¹ÍĞE)Í½¹=‰©•ĞÉ•½É‘ì(€€€€€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰Ñ¥µ”ˆ¤±E…Ñ•Q¥µ”èéÕÉÉ•¹Ñ…Ñ•Q¥µ” ¤¹Ñ½MÑÉ¥¹œ¡EĞèé%M=…Ñ•]¥Ñ¡5Ì¥ô°(€€€€€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰Ù•ÉÍ¥½¸ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ˆÄÜ¸ÔÈÈˆ¥ô°(€€€€€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰‰…­•¹ˆ¤±‰…­•¹‘ô°(€€€€€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰É•…Í½¸ˆ¤±É•…Í½¹ô°(€€€€€€€€€€€€€€€íEMÑÉ¥¹1¥Ñ•É…° ‰İ¥¹‘½Üˆ¤±İ¥¹‘½İ•Ñ…¥±Íô(€€€€€€€€€€€ôì(€€€€€€€€€€€™¥±”¹İÉ¥Ñ”¡E)Í½¹½Õµ•¹Ğ¡É•½É¤¹Ñ½)Í½¸¡E)Í½¹½Õµ•¹Ğèé½µÁ…Ğ¤¤ì(€€€€€€€€€€€™¥±”¹İÉ¥Ñ” ‰q¸ˆ¤ì(€€€€€€€ô(€€€€€€€½¹ÍĞEMÑÉ¥¹œÍÕµµ…ÉäõÉ•…Í½¸¹¥ÍµÁÑä ¤(€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ‰…ÕÍ”¹…Ñ¥Ù”¹½¸™½ÕÉ¹¥”Á…È±”‰…­•¹ˆ¤(€€€€€€€€€€€€éÉ•…Í½¸ì(€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€ˆ”Ä‘¥É•Ğ¥¹‘¥ÍÁ½¹¥‰±”€ìE%µ…”…Ñ¥˜¸€”ÈƒŠP‘¥…¹½ÍÑ¥Œ“¥Ñ…¥±³¤€è€”Ì¸€ˆ(€€€€€€€€€€€€‰¥½¡•èÁÕ¥ÌÉ•½¡•è³Še½ÁÑ¥½¸Á½ÕÈÉ•Ñ•¹Ñ•È¸ˆ¤(€€€€€€€€€€€€¹…Éœ¡‰…­•¹±ÍÕµµ…Éä±Á…Ñ ¤°ÌÀÀÀÀ¤ì(€€€ô(€€€EMÑÉ¥¹œÉ•ÅÕ•ÍÑ•‘I•¹‘•É•ÉMÑ…µÀ ¤½¹ÍĞì(€€€€€€€¥˜ …‰…­•¹‘	½á|¥É•ÑÕÉ¸EMÑÉ¥¹1¥Ñ•É…° ‰I•¹‘Ô•¸…ÑÑ•¹Ñ”ˆ¤ì(€€€€€€€½¹ÍĞ¥¹Ğ¥¹‘•àõ‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ì(€€€€€€€EMÑÉ¥¹œ¹…µ”õ‰…­•¹‘	½á|´ùÕÉÉ•¹ÑQ•áĞ ¤ì(€€€€€€€¥˜¡¥¹‘•àôôĞ¥¹…µ”õEMÑÉ¥¹1¥Ñ•É…° ‰XÄÜÍÄÄI…ÍÑ•Èˆ¤ì(€€€€€€€•±Í”¥˜¡¥¹‘•àôôÔ¥¹…µ”õEMÑÉ¥¹1¥Ñ•É…° ‰XÄÜYÕ±­…¸I…ÍÑ•Èˆ¤ì(€€€€€€€½¹ÍĞ‰½½°‘¥É•Ğô¡¥¹‘•àôôÑññ¥¹‘•àôôÔ¤˜™‘¥É•Ñ¥ÍÁ±…å	½á|˜™‘¥É•Ñ¥ÍÁ±…å	½á|´ù¥Í¡•­• ¤ì(€€€€€€€¥˜¡‘¥É•Ğ˜™¥¹‘•àøôÀ˜™¥¹‘•àñ¥¹Ğ¡¹…Ñ¥Ù•¥É•Ñ…¥±•‘|¹Í¥é” ¤¤˜˜(€€€€€€€€€€¹…Ñ¥Ù•¥É•Ñ…¥±•‘}mÍ¥é•}Ğ¡¥¹‘•à¥t¤(€€€€€€€€€€€¹…µ”¬õEMÑÉ¥¹1¥Ñ•É…° ˆƒŠP‘¥É•Ğ‘•µ…¹“¤°E%µ…”…Ñ¥˜…ÁË¡Ìƒ¥¡•Œˆ¤ì(€€€€€€€•±Í”¹…µ”¬õ‘¥É•ĞıEMÑÉ¥¹1¥Ñ•É…° ˆƒŠP¥É•ĞAT€¡Íİ…Á¡…¥¸¤ˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ˆƒŠP…™™¥¡…”EĞ€¡E%µ…”¤ˆ¤ì(€€€€€€€É•ÑÕÉ¸¹…µ”ì(€€€ô(€€€Ù½¥ÕÁ‘…Ñ•I•¹‘•É•ÉMÑ…µÀ ¥ì(€€€€€€€½¹ÍĞEMÑÉ¥¹œÉ•ÅÕ•ÍÑ•õÉ•ÅÕ•ÍÑ•‘I•¹‘•É•ÉMÑ…µÀ ¤ì(€€€€€€€½¹ÍĞ¥¹Ğ¥¹‘•àõ‰…­•¹‘	½á|ıÍÑèé±…µÀ¡‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤°À°(€€€€€€€€€€€¥¹Ğ¡‰…­•¹‘]¥¹‘½İÍ|¹Í¥é” ¤¤´Ä¤èÀì(€€€€€€€½¹ÍĞEMÑÉ¥¹œ‘¥ÍÁ±…å•õ‰…­•¹‘1…ÍÑI•¹‘•É•É}mÍ¥é•}Ğ¡¥¹‘•à¥tì(€€€€€€€½¹ÍĞ‰½½°Á•¹‘¥¹œõÉ•ÅÕ•ÍÑ•„õ‰…­•¹‘1…ÍÑI•ÅÕ•ÍÑ}mÍ¥é•}Ğ¡¥¹‘•à¥tì(€€€€€€€¥˜¡…¹Ù…Í|¥…¹Ù…Í|´ùÍ•ÑI•¹‘•É•ÉMÑ…µÀ¡‘¥ÍÁ±…å•±Á•¹‘¥¹œıÉ•ÅÕ•ÍÑ•éEMÑÉ¥¹íô¤ì(€€€€€€€¥˜¡¹…Ñ¥Ù•I•¹‘•É•É=Ù•É±…å|¥ì(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œÍ¡½İ¸õ‘¥ÍÁ±…å•¹¥ÍµÁÑä ¤(€€€€€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ‰™™¥£¤€è…ÕÕ¸É•¹‘ÔÁ½ÕÈ³Še¥¹ÍÑ…¹Ğˆ¤(€€€€€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ‰™™¥£¤€è€”Äˆ¤¹…Éœ¡‘¥ÍÁ±…å•¤ì(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œİ…¥Ñ¥¹œõÁ•¹‘¥¹œ(€€€€€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ‰q¹•µ…¹“¤€è€”Äˆ¤¹…Éœ¡É•ÅÕ•ÍÑ•¤éEMÑÉ¥¹íôì(€€€€€€€€€€€€¼¼¥É•ĞÍİ…Á¡…¥¸ÁÉ•Í•¹Ñ…Ñ¥½¸‰åÁ…ÍÍ•Ì%µ…•Y¥•ÜèéÁ…¥¹ÑÙ•¹Ğ°(€€€€€€€€€€€€¼¼¥¹±Õ‘¥¹œ¥ÑÌ…µ•É„!U¸-••ÀÑ¡”±¥Ù”…µ•É„É•…‘½ÕĞ½¸Ñ¡”(€€€€€€€€€€€€¼¼¹…Ñ¥Ù”½ÕÑÁÕĞİ¥¹‘½Ü…Ìİ•±°…Ì¥¸Ñ¡”½¹ÑÉ½±ÌÍÑ…ÑÕÌ‰…È¸(€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œ…µ•É„õ…µ•É…!Õ‘¹…‰±•‘|˜™¹…Ñ¥Ù•!Õ‘1…‰•±|˜˜(€€€€€€€€€€€€€€€€€€€€…¹…Ñ¥Ù•!Õ‘1…‰•±|´ùÑ•áĞ ¤¹¥ÍµÁÑä ¤(€€€€€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ‰q¸”Äˆ¤¹…Éœ¡¹…Ñ¥Ù•!Õ‘1…‰•±|´ùÑ•áĞ ¤¤éEMÑÉ¥¹íôì(€€€€€€€€€€€¹…Ñ¥Ù•I•¹‘•É•É=Ù•É±…å|´ùÍ•ÑQ•áĞ¡Í¡½İ¸­İ…¥Ñ¥¹œ­…µ•É„¤ì(€€€€€€€€€€€¥˜¡…¹Ù…Í|¥ì(€€€€€€€€€€€€€€€¹…Ñ¥Ù•I•¹‘•É•É=Ù•É±…å|´ùµ½Ù”¡…¹Ù…Í|´ùµ…ÁQ½±½‰…°¡EA½¥¹Ğ ÄÈ°ÄÈ¤¤¤ì(€€€€€€€€€€€€€€€¹…Ñ¥Ù•I•¹‘•É•É=Ù•É±…å|´ùÍ•Ñ¥á•‘M¥é” ĞÜÀ°ÜÀ¤ì(€€€€€€€€€€€ô(€€€€€€€€€€€¹…Ñ¥Ù•I•¹‘•É•É=Ù•É±…å|´ùÍ•ÑY¥Í¥‰±”¡¹…Ñ¥Ù•¥É•ÑM•±•Ñ• ¤˜™…¹Ù…Í|˜™…¹Ù…Í|´ù¥ÍY¥Í¥‰±” ¤¤ì(€€€€€€€€€€€¥˜¡¹…Ñ¥Ù•¥É•ÑM•±•Ñ• ¤˜™…¹Ù…Í|˜™…¹Ù…Í|´ù¥ÍY¥Í¥‰±” ¤¤(€€€€€€€€€€€€€€€¹…Ñ¥Ù•I•¹‘•É•É=Ù•É±…å|´ùÉ…¥Í” ¤ì(€€€€€€€ô(€€€ô(€€€Ù½¥Í•±•Ñ	…­•¹‘=ÕÑÁÕÑ]¥¹‘½Ü ¥ì(€€€€€€€¥˜ …‰…­•¹‘	½á|¥É•ÑÕÉ¸ì(€€€€€€€½¹ÍĞ¥¹Ğ¥¹‘•àõÍÑèé±…µÀ¡‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤°À°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€¥¹Ğ¡‰…­•¹‘]¥¹‘½İÍ|¹Í¥é” ¤¤´Ä¤ì(€€€€€€€½¹ÍĞ‰½½°‰…­•¹‘¡…¹•õ½ÕÑÁÕÑ	…­•¹‘%¹‘•á|„õ¥¹‘•àì(€€€€€€€½ÕÑÁÕÑ	…­•¹‘%¹‘•á|õ¥¹‘•àì(€€€€€€€…¹Ù…Í|õ‰…­•¹‘]¥¹‘½İÍ}mÍ¥é•}Ğ¡¥¹‘•à¥tì(€€€€€€€€¼¼-••ÀÑ¡”¹…Ñ¥Ù”ÍÑ…ÑÕÌ½Ù•É±…ä½İ¹•…¹ÍÑ…­•İ¥Ñ Ñ¡”É•¹‘•É•È(€€€€€€€€¼¼!]9°¹½Ğİ¥Ñ Ñ¡”½¹ÑÉ½±Ìİ¥¹‘½Ü½¸Ñ¡”½Ñ¡•ÈÍ¥‘”½˜Ñ¡”ÍÉ••¸¸(€€€€€€€¥˜¡¹…Ñ¥Ù•I•¹‘•É•É=Ù•É±…å|˜™¹…Ñ¥Ù•I•¹‘•É•É=Ù•É±…å|´ùÁ…É•¹Ñ]¥‘•Ğ ¤„õ…¹Ù…Í|¤(€€€€€€€€€€€¹…Ñ¥Ù•I•¹‘•É•É=Ù•É±…å|´ùÍ•ÑA…É•¹Ğ¡…¹Ù…Í|°(€€€€€€€€€€€€€€€EĞèéQ½½±ñEĞèéÉ…µ•±•ÍÍ]¥¹‘½İ!¥¹ÑñEĞèé]¥¹‘½İ½•Í9½Ñ•ÁÑ½ÕÌ¤ì(€€€€€€€…¹Ù…Í|´ùÍ•Ñ]¥¹‘½İQ¥Ñ±”¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@XÄÜ¸”ÄƒŠP€”ÈƒŠP™•»©ÑÉ”“¥‘§¥”ˆ¤(€€€€€€€€€€€€¹…Éœ¡M}]IA}	U%1}9U5	H¤¹…Éœ¡‰…­•¹‘	½á|´ù¥Ñ•µQ•áĞ¡¥¹‘•à¤¤¤ì(€€€€€€€½¹ÍĞ‰½½°‘¥É•Ğõ¹…Ñ¥Ù•¥É•ÑM•±•Ñ• ¤ì(€€€€€€€¥˜¡‰…­•¹‘¡…¹•‘ññ‘¥É•Ğ¥ì(€€€€€€€€€€€€¼¼Q¡”±½‰…°•áÁ½ÉĞ½Í­äÍÑ…Ñ”‰•±½¹ÌÑ¼Ñ¡”Í•±•Ñ•½ÕÑÁÕĞ¸(€€€€€€€€€€€€¼¼9•Ù•È…ÉÉä…¹½Ñ¡•È‰…­•¹ÌE%µ…”¥¹Ñ¼Ñ¡¥Ìİ¥¹‘½Ü¸(€€€€€€€€€€€±…ÍÑ%µ…•|õE%µ…•íôì(€€€€€€€€€€€¡…ÍI•¹‘•É•‘A½Í•|õ™…±Í”ì(€€€€€€€€€€€…¹Ù…Í|´ùÍ•Ñ%µ…”¡E%µ…•íô¤ì(€€€€€€€€€€€…¹Ù…Í|´ù•¹…‰±•M­å½µÁ½Í¥Ñ¥¹œ¡™…±Í”¤ì(€€€€€€€€€€€‰…­•¹‘1…ÍÑI•¹‘•É•É}mÍ¥é•}Ğ¡¥¹‘•à¥t¹±•…È ¤ì(€€€€€€€€€€€‰…­•¹‘1…ÍÑI•ÅÕ•ÍÑ}mÍ¥é•}Ğ¡¥¹‘•à¥t¹±•…È ¤ì(€€€€€€€ô(€€€€€€€™½È¡¥¹Ğ¤ôÀí¤ñ¥¹Ğ¡‰…­•¹‘]¥¹‘½İÍ|¹Í¥é” ¤¤ì¬­¤¥ì(€€€€€€€€€€€…ÕÑ¼¨Ù¥•Üõ‰…­•¹‘]¥¹‘½İÍ}mÍ¥é•}Ğ¡¤¥tì(€€€€€€€€€€€¥˜ …Ù¥•Ü¥½¹Ñ¥¹Õ”ì(€€€€€€€€€€€½¹ÍĞ‰½½°ÁÉ•Í•ÉÙ•%¹±¥¡ÑAÉ•Í•¹Ğõİ…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¤˜˜(€€€€€€€€€€€€€€€…Ñ¥Ù•I•¹‘•É¥É•Ñ|˜™¤ôõ…Ñ¥Ù•I•¹‘•É	…­•¹‘|ì(€€€€€€€€€€€Ù¥•Ü´ùÍ•Ñ9…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¸ ¡¤ôõ¥¹‘•à˜™‘¥É•Ğ¥ññÁÉ•Í•ÉÙ•%¹±¥¡ÑAÉ•Í•¹Ğ¤ì(€€€€€€€€€€€¥˜¡¤ôõ¥¹‘•à¥ì(€€€€€€€€€€€€€€€¥˜¡¥ÍY¥Í¥‰±” ¤¥ì(€€€€€€€€€€€€€€€€€€€¥˜¡Ù¥•Ü´ù¥Í5¥¹¥µ¥é• ¤¥Ù¥•Ü´ùÍ¡½İ9½Éµ…° ¤ì(€€€€€€€€€€€€€€€€€€€•±Í”Ù¥•Ü´ùÍ¡½Ü ¤ì(€€€€€€€€€€€€€€€€€€€Ù¥•Ü´ùÉ…¥Í” ¤ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€õ•±Í”Ù¥•Ü´ù¡¥‘” ¤ì(€€€€€€€ô(€€€€€€€ÕÁ‘…Ñ•I•¹‘•É•ÉMÑ…µÀ ¤ì(€€€€€€€¥˜¡‘¥É•Ğ¥ì(€€€€€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€€€€€‰•»©ÑÉ”‰…­•¹“¥‘§¥”ƒŠP…™™¥¡…”AT‘¥É•Ğ€¡Íİ…Á¡…¥¸¤°Í…¹ÌE%µ…”€ì€ˆ(€€€€€€€€€€€€€€€€‰“¥½¡•ÈÁ½ÕÈ±•Ì…ÁÑÕÉ•ÌA9ˆ¤°ÜÀÀÀ¤ì(€€€€€€€ô(€€€ô(€€€Ù½¥É•Í•ÑA…¥¹œ ¥ì(€€€€€€€Á…¥¹M…µÁ±•Í|¹±•…È ¤ì(€€€€€€€Á…¥¹I•©•Ñ•‘|ôÀì(€€€€€€€Á…¥¹EÕ•Õ•‘|ôÀì(€€€€€€€±…ÍÑAÉ•Í•¹Ñ5Í|ô´Äì(€€€€€€€±…ÍÑ½µÁ±•Ñ•‘I•¹‘•É5Í|ôÀ¸Àì(€€€€€€€™ÁÍ¥±Ñ•É•‘|ôÀ¸Àì(€€€€€€€Á…¥¹±½­|¹É•ÍÑ…ÉĞ ¤ì(€€€ô(€€€Ù½¥É•½É‘%µ…•AÉ•Í•¹Ñ• ¥ì(€€€€€€€¥˜ …Á…¥¹±½­|¹¥ÍY…±¥ ¤¥Á…¥¹±½­|¹ÍÑ…ÉĞ ¤ì(€€€€€€€½¹ÍĞÅ¥¹ĞØĞµÌõÁ…¥¹±½­|¹•±…ÁÍ• ¤ì(€€€€€€€¥˜¡•áÁ±½É¥¹|¥ì(€€€€€€€€€€€Í”èéÁ…¥¹œèéM…µÁ±”Í…µÁ±•íôì(€€€€€€€€€€€Í…µÁ±”¹Ñ¥µ•ÍÑ…µÁ5ÌõµÌì(€€€€€€€€€€€Í…µÁ±”¹¥¹Ñ•ÉÙ…±5Ìõ±…ÍÑAÉ•Í•¹Ñ5Í|øôÀı‘½Õ‰±”¡µÌµ±…ÍÑAÉ•Í•¹Ñ5Í|¤èÀ¸Àì(€€€€€€€€€€€Í…µÁ±”¹É•¹‘•É5Ìõ±…ÍÑ½µÁ±•Ñ•‘I•¹‘•É5Í|ì(€€€€€€€€€€€Í…µÁ±”¹Á•¹‘¥¹I•ÅÕ•ÍÑÌõÕ¹Í¥¹•¡Á…¥¹EÕ•Õ•‘|¤ì(€€€€€€€€€€€¥˜¡Á…¥¹M…µÁ±•Í|¹Í¥é” ¤øõÁ…¥¹…Á…¥Ñå|¤(€€€€€€€€€€€€€€€Á…¥¹M…µÁ±•Í|¹•É…Í”¡Á…¥¹M…µÁ±•Í|¹‰•¥¸ ¤¤ì(€€€€€€€€€€€Á…¥¹M…µÁ±•Í|¹ÁÕÍ¡}‰…¬¡Í…µÁ±”¤ì(€€€€€€€€€€€½¹ÍĞ‘½Õ‰±”¥¹Ñ•ÉÙ…°õ±…ÍÑAÉ•Í•¹Ñ5Í|øôÀı‘½Õ‰±”¡µÌµ±…ÍÑAÉ•Í•¹Ñ5Í|¤èÀ¸Àì(€€€€€€€€€€€¥˜¡¥¹Ñ•ÉÙ…°øôÄ¸À¥ì(€€€€€€€€€€€€€€€½¹ÍĞ‘½Õ‰±”™ÁÌôÄÀÀÀ¸À½¥¹Ñ•ÉÙ…°ì(€€€€€€€€€€€€€€€™ÁÍ¥±Ñ•É•‘|õ™ÁÍ¥±Ñ•É•‘|ôôÀ¸Àı™ÁÌè¡™ÁÍ¥±Ñ•É•‘|¨¸ÜÈ­™ÁÌ¨¸Èà¤ì(€€€€€€€€€€€€€€€…¹Ù…Í|´ùÍ•ÑÁÍ=Ù•É±…ä¡™ÁÍ¥±Ñ•É•‘|±ÑÉÕ”¤ì(€€€€€€€€€€€€€€€¥˜¡¹…Ñ¥Ù•ÁÍ1…‰•±|¥¹…Ñ¥Ù•ÁÍ1…‰•±|´ùÍ•ÑQ•áĞ (€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ˆ”ÄALˆ¤¹…Éœ¡™ÁÍ¥±Ñ•É•‘|°À°˜œ°Ä¤¤ì(€€€€€€€€€€€ô(€€€€€€€ô(€€€€€€€±…ÍÑAÉ•Í•¹Ñ5Í|õµÌì(€€€ô(€€€Ù½¥•áÁ½ÉÑA…¥¹œ ¥ì(€€€€€€€¥˜¡Á…¥¹M…µÁ±•Í|¹•µÁÑä ¤¥ì(€€€€€€€€€€€E5•ÍÍ…•	½àèé¥¹™½Éµ…Ñ¥½¸¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰	•¹¡µ…É¬™±Õ¥‘¥Ó¤ˆ¤°(€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰¥µ…ÉÉ•È°•áÁ±½É…Ñ¥½¸•ĞÍ”“¥Á±…•È…Ù…¹Ğ•áÁ½ÉÑ•È¸ˆ¤¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€½¹ÍĞEMÑÉ¥¹œÉ½½ĞõEMÑ…¹‘…É‘A…Ñ¡ÌèéİÉ¥Ñ…‰±•1½…Ñ¥½¸¡EMÑ…¹‘…É‘A…Ñ¡Ìèé½Õµ•¹ÑÍ1½…Ñ¥½¸¤(€€€€€€€€€€€€­EMÑÉ¥¹1¥Ñ•É…° ˆ½M]I@½	•¹¡µ…É­Ìˆ¤ì(€€€€€€€E¥È ¤¹µ­Á…Ñ ¡É½½Ğ¤ì(€€€€€€€½¹ÍĞEMÑÉ¥¹œ¹…µ”õEMÑÉ¥¹1¥Ñ•É…° ‰XÄÜ¸”ÄµA%9´ˆ¤¹…Éœ¡M}]IA}	U%1}9U5	H¤(€€€€€€€€€€€€­E…Ñ•Q¥µ”èéÕÉÉ•¹Ñ…Ñ•Q¥µ” ¤¹Ñ½MÑÉ¥¹œ¡EMÑÉ¥¹1¥Ñ•É…° ‰åååå55‘µ¡¡µµÍÌˆ¤¤ì(€€€€€€€½¹ÍĞ…ÕÑ¼ÍÑ…ÑÌõÍ”èéÁ…¥¹œèéÍÕµµ…É¥é”¡Á…¥¹M…µÁ±•Í|±Á…¥¹I•©•Ñ•‘|±Á…¥¹EÕ•Õ•‘|¤ì(€€€€€€€E)Í½¹ÉÉ…äÉ•½É‘Ìì(€€€€€€€EMÑÉ¥¹œÍØõEMÑÉ¥¹1¥Ñ•É…° ‰Ñ¥µ•ÍÑ…µÁ}µÌ±ÁÉ•Í•¹Ñ}¥¹Ñ•ÉÙ…±}µÌ±É•¹‘•É}µÌ±É•ÅÕ•ÍÑÍ}ÅÕ•Õ•‘q¸ˆ¤ì(€€€€€€€™½È¡½¹ÍĞ…ÕÑ¼˜Í…µÁ±”éÁ…¥¹M…µÁ±•Í|¥ì(€€€€€€€€€€€É•½É‘Ì¹ÁÕÍ¡}‰…¬¡E)Í½¹=‰©•Ñì(€€€€€€€€€€€€€€€ì‰Ñ¥µ•ÍÑ…µÁ5Ìˆ±‘½Õ‰±”¡Í…µÁ±”¹Ñ¥µ•ÍÑ…µÁ5Ì¥ô°(€€€€€€€€€€€€€€€ì‰ÁÉ•Í•¹Ñ%¹Ñ•ÉÙ…±5Ìˆ±Í…µÁ±”¹¥¹Ñ•ÉÙ…±5Íô°(€€€€€€€€€€€€€€€ì‰É•¹‘•É5Ìˆ±Í…µÁ±”¹É•¹‘•É5Íô°(€€€€€€€€€€€€€€€ì‰ÅÕ•Õ•‘I•ÅÕ•ÍÑÌˆ±¥¹Ğ¡Í…µÁ±”¹Á•¹‘¥¹I•ÅÕ•ÍÑÌ¥ô(€€€€€€€€€€€ô¤ì(€€€€€€€€€€€ÍØ¬õEMÑÉ¥¹1¥Ñ•É…° ˆ”Ä°”È°”Ì°”Ñq¸ˆ¤(€€€€€€€€€€€€€€€€¹…Éœ¡Í…µÁ±”¹Ñ¥µ•ÍÑ…µÁ5Ì¤¹…Éœ¡Í…µÁ±”¹¥¹Ñ•ÉÙ…±5Ì°À°˜œ°Ì¤(€€€€€€€€€€€€€€€€¹…Éœ¡Í…µÁ±”¹É•¹‘•É5Ì°À°˜œ°Ì¤¹…Éœ¡Í…µÁ±”¹Á•¹‘¥¹I•ÅÕ•ÍÑÌ¤ì(€€€€€€€ô(€€€€€€€½¹ÍĞE)Í½¹=‰©•ĞÍÕµµ…Éåì(€€€€€€€€€€€ì‰Ù•ÉÍ¥½¸ˆ±EMÑÉ¥¹1¥Ñ•É…° ˆÄÜ¸”Äˆ¤¹…Éœ¡M}]IA}	U%1}9U5	H¥ô°(€€€€€€€€€€€ì‰Í•¹”ˆ±Í•¹•A…Ñ¡}ô°(€€€€€€€€€€€ì‰‰…­•¹ˆ±‰…­•¹‘	½á|´ùÕÉÉ•¹ÑQ•áĞ ¥ô°(€€€€€€€€€€€ì‰™É…µ•½Õ¹Ğˆ±¥¹Ğ¡ÍÑ…ÑÌ¹™É…µ•Ì¥ô°(€€€€€€€€€€€ì‰µ•‘¥…¹AÉ•Í•¹Ñ5Ìˆ±ÍÑ…ÑÌ¹µ•‘¥…¹AÉ•Í•¹Ñ5Íô°(€€€€€€€€€€€ì‰µ•…¹AÉ•Í•¹Ñ5Ìˆ±ÍÑ…ÑÌ¹µ•…¹AÉ•Í•¹Ñ5Íô°(€€€€€€€€€€€ì‰ÀäÕAÉ•Í•¹Ñ5Ìˆ±ÍÑ…ÑÌ¹ÀäÕAÉ•Í•¹Ñ5Íô°(€€€€€€€€€€€ì‰ÀäåAÉ•Í•¹Ñ5Ìˆ±ÍÑ…ÑÌ¹ÀäåAÉ•Í•¹Ñ5Íô°(€€€€€€€€€€€ì‰İ½ÉÍÑAÉ•Í•¹Ñ5Ìˆ±ÍÑ…ÑÌ¹İ½ÉÍÑAÉ•Í•¹Ñ5Íô°(€€€€€€€€€€€ì‰µ•‘¥…¹I•¹‘•É5Ìˆ±ÍÑ…ÑÌ¹µ•‘¥…¹I•¹‘•É5Íô°(€€€€€€€€€€€ì‰ÍÑÕÑÑ•ÉA•É•¹Ğˆ±ÍÑ…ÑÌ¹ÍÑÕÑÑ•ÉA•É•¹Ñô°(€€€€€€€€€€€ì‰ÅÕ•Õ•‘I•ÅÕ•ÍÑÌˆ±‘½Õ‰±”¡ÍÑ…ÑÌ¹ÅÕ•Õ•¥ô°(€€€€€€€€€€€ì‰¥¹Ù…±¥‘…Ñ•‘É…µ•Ìˆ±‘½Õ‰±”¡ÍÑ…ÑÌ¹¥¹Ù…±¥‘…Ñ•¥ô°(€€€€€€€€€€€ì‰éAÉ•Á…ÍÌˆ±‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ôôÔ(€€€€€€€€€€€€€€€€ıÅ¹Ù¥É½¹µ•¹ÑY…É¥…‰±” ‰4Í}XÄİ}%M	1}i}AIAMLˆ¤„õEMÑÉ¥¹1¥Ñ•É…° ˆÄˆ¤(€€€€€€€€€€€€€€€€éÅ¹Ù¥É½¹µ•¹ÑY…É¥…‰±” ‰4Í}XÄİ}aAI%59Q}i}AIAMLˆ¤ôõEMÑÉ¥¹1¥Ñ•É…° ˆÄˆ¥ô°(€€€€€€€€€€€ì‰±¥¡Ñ…‰‰Õ±°ˆ±Å¹Ù¥É½¹µ•¹ÑY…É¥…‰±” ‰4Í}XÄİ}aAI%59Q}1%!Q}		}U10ˆ¤ôõEMÑÉ¥¹1¥Ñ•É…° ˆÄˆ¥ô(€€€€€€€ôì(€€€€€€€E¥±”©Í½¹¥±”¡É½½Ğ­EMÑÉ¥¹1¥Ñ•É…° ˆ¼ˆ¤­¹…µ”­EMÑÉ¥¹1¥Ñ•É…° ˆ¹©Í½¸ˆ¤¤ì(€€€€€€€E¥±”ÍÙ¥±”¡É½½Ğ­EMÑÉ¥¹1¥Ñ•É…° ˆ¼ˆ¤­¹…µ”­EMÑÉ¥¹1¥Ñ•É…° ˆ¹ÍØˆ¤¤ì(€€€€€€€¥˜ …©Í½¹¥±”¹½Á•¸¡E%=•Ù¥”èé]É¥Ñ•=¹±ä¤ñğ€…ÍÙ¥±”¹½Á•¸¡E%=•Ù¥”èé]É¥Ñ•=¹±ä¤¥ì(€€€€€€€€€€€E5•ÍÍ…•	½àèéİ…É¹¥¹œ¡Ñ¡¥Ì±EMÑÉ¥¹1¥Ñ•É…° ‰	•¹¡µ…É¬ˆ¤±EMÑÉ¥¹1¥Ñ•É…° ‰%µÁ½ÍÍ¥‰±”Ÿ¥É¥É”±•ÌË¥ÍÕ±Ñ…ÑÌ¸ˆ¤¤ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€©Í½¹¥±”¹İÉ¥Ñ”¡E)Í½¹½Õµ•¹Ğ¡E)Í½¹=‰©•Ñíì‰ÍÕµµ…Éäˆ±ÍÕµµ…Éåô±ì‰™É…µ•Ìˆ±É•½É‘Íõô¤¹Ñ½)Í½¸ ¤¤ì(€€€€€€€ÍÙ¥±”¹İÉ¥Ñ”¡ÍØ¹Ñ½UÑ˜à ¤¤ì(€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° ‰	•¹¡µ…É¬™±Õ¥‘¥Ó¤•áÁ½ÉÓ¤€è€”Äˆ¤¹…Éœ¡É½½Ğ¤°ÄÈÀÀÀ¤ì(€€€ô(€€€Ù½¥É•ÅÕ•ÍÑI•¹‘•È ¥ì(€€€€€€€ÕÁ‘…Ñ•I•¹‘•É•ÉMÑ…µÀ ¤ì(€€€€€€€¥˜¡Í•¹•1½…‘¥¹}ñğ…ÉÕ¹Ñ¥µ•}ññÉÕ¹Ñ¥µ•|´ù…µ•É…Ì¹¥ÍµÁÑä ¤¥É•ÑÕÉ¸ì(€€€€€€€€¼¼M•±•ĞÑ¡”Á•ÉÍ¥ÍÑ•¹ĞÑ½Àµ±•Ù•°½ÕÑÁÕĞ!]9‘•‘¥…Ñ•Ñ¼Ñ¡¥Ì‰…­•¹(€€€€€€€€¼¼‰•™½É”É•…Ñ¥¹œ¥ÑÌa$½YÕ±­…¸ÍÕÉ™…”¸(€€€€€€€¥˜¡‰…­•¹‘	½á|¥ì(€€€€€€€€€€€½¹ÍĞ¥¹ĞÍ•±•Ñ•õÍÑèé±…µÀ¡‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤°À°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€¥¹Ğ¡‰…­•¹‘]¥¹‘½İÍ|¹Í¥é” ¤¤´Ä¤ì(€€€€€€€€€€€¥˜¡…¹Ù…Í|„õ‰…­•¹‘]¥¹‘½İÍ}mÍ¥é•}Ğ¡Í•±•Ñ•¥uñğ……¹Ù…Í|´ù¥ÍY¥Í¥‰±” ¥ñğ(€€€€€€€€€€€€€€…¹Ù…Í|´ù¹…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¸ ¤„õ¹…Ñ¥Ù•¥É•ÑM•±•Ñ• ¤¤(€€€€€€€€€€€€€€€Í•±•Ñ	…­•¹‘=ÕÑÁÕÑ]¥¹‘½Ü ¤ì(€€€€€€€ô(€€€€€€€¥˜¡¹…Ñ¥Ù•¥É•ÑM•±•Ñ• ¤¥ì(€€€€€€€€€€€¥˜ ……¹Ù…Í|´ù¥ÍY¥Í¥‰±” ¤¤(€€€€€€€€€€€€€€€Í•±•Ñ	…­•¹‘=ÕÑÁÕÑ]¥¹‘½Ü ¤ì(€€€€€€€€€€€½¹ÍĞEM¥é”Ñ…É•Ğõ…¹Ù…Í|´ùÍ¥é” ¤ì(€€€€€€€€€€€½¹ÍĞ‰½½°É•…‘äõ…¹Ù…Í|´ù¥ÍY¥Í¥‰±” ¤€˜˜(€€€€€€€€€€€€€€€Ñ…É•Ğ¹İ¥‘Ñ  ¤øôÌÈÀ€˜˜Ñ…É•Ğ¹¡•¥¡Ğ ¤øôÈÀÀ€˜˜(€€€€€€€€€€€€€€€…¹Ù…Í|´ùÑ•ÍÑÑÑÉ¥‰ÕÑ”¡EĞèé]}9…Ñ¥Ù•]¥¹‘½Ü¤ì(€€€€€€€€€€€¥˜ …É•…‘ä¥ì(€€€€€€€€€€€€€€€¥˜ ¬­¹…Ñ¥Ù•I•…‘åÑÑ•µÁÑÍ|øĞÀ¥ì(€€€€€€€€€€€€€€€€€€€¹…Ñ¥Ù•I•…‘åÑÑ•µÁÑÍ|ôÀì(€€€€€€€€€€€€€€€€€€€€¼¼-••ÀÑ¡”É•ÅÕ•ÍÑ•µ½‘”¡•­•°±…Ñ Ñ¡¥Ì‰…­•¹Ñ¼(€€€€€€€€€€€€€€€€€€€€¼¼E%µ…”°…¹…±±½ÜÑ¡”ÕÍ•ÈÑ¼É•ÑÉä‰äÑ½±¥¹œ¥Ğ¸(€€€€€€€€€€€€€€€€€€€½¹ÍĞ¥¹Ğ™…¥±•‘	…­•¹õ‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ì(€€€€€€€€€€€€€€€€€€€¥˜¡™…¥±•‘	…­•¹øôÀ˜™™…¥±•‘	…­•¹ñ¥¹Ğ¡¹…Ñ¥Ù•¥É•Ñ…¥±•‘|¹Í¥é” ¤¤¥ì(€€€€€€€€€€€€€€€€€€€€€€€¹…Ñ¥Ù•¥É•Ñ…¥±•‘}mÍ¥é•}Ğ¡™…¥±•‘	…­•¹¥tõÑÉÕ”ì(€€€€€€€€€€€€€€€€€€€€€€€¹…Ñ¥Ù•¥É•Ñ…¥±ÕÉ•I•…Í½¹}mÍ¥é•}Ğ¡™…¥±•‘	…­•¹¥tô(€€€€€€€€€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰1„™•»©ÑÉ”»Še„Á…Ì™½ÕÉ¹¤Õ¸!]9Ù¥Í¥‰±”…Õà‘¥µ•¹Í¥½¹ÌÉ•ÅÕ¥Í•Ì¸ˆ¤ì(€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œ‰…­•¹õ™…¥±•‘	…­•¹ôôÔ(€€€€€€€€€€€€€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ‰YÕ±­…¸ˆ¤éEMÑÉ¥¹1¥Ñ•É…° ‰`ÄÄˆ¤ì(€€€€€€€€€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œİ¥¹‘½İ•Ñ…¥±Ìõ‘•ÍÉ¥‰•9…Ñ¥Ù•]¥¹‘½Ü (€€€€€€€€€€€€€€€€€€€€€€€ÅÕ¥¹ÑÁÑÈ¡…¹Ù…Í|´ùİ¥¹% ¤¤±Ñ…É•Ğ±…¹Ù…Í|´ù‘•Ù¥•A¥á•±I…Ñ¥½ ¤¤ì(€€€€€€€€€€€€€€€€€€€¥˜¡™…¥±•‘	…­•¹øôÀ˜™™…¥±•‘	…­•¹ñ¥¹Ğ¡¹…Ñ¥Ù•¥É•Ñ…¥±ÕÉ•I•…Í½¹|¹Í¥é” ¤¤¤(€€€€€€€€€€€€€€€€€€€€€€€Í…Ù•9…Ñ¥Ù•AÉ•Í•¹Ñ…Ñ¥½¹¥…¹½ÍÑ¥Œ (€€€€€€€€€€€€€€€€€€€€€€€€€€€‰…­•¹±¹…Ñ¥Ù•¥É•Ñ…¥±ÕÉ•I•…Í½¹}mÍ¥é•}Ğ¡™…¥±•‘	…­•¹¥t±İ¥¹‘½İ•Ñ…¥±Ì¤ì(€€€€€€€€€€€€€€€€€€€Í•±•Ñ	…­•¹‘=ÕÑÁÕÑ]¥¹‘½Ü ¤ì(€€€€€€€€€€€€€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ À±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€€€€€€€€€€€€€¥˜ …±½Í¥¹I•ÅÕ•ÍÑ•‘|˜˜…Í•¹•1½…‘¥¹|˜™ÉÕ¹Ñ¥µ•|¥É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€€€€€€€€€€€€€ô¤ì(€€€€€€€€€€€€€€€õ•±Í”¥˜ …¹…Ñ¥Ù•I•…‘åI•ÑÉåEÕ•Õ•‘|¥ì(€€€€€€€€€€€€€€€€€€€¹…Ñ¥Ù•I•…‘åI•ÑÉåEÕ•Õ•‘|õÑÉÕ”ì(€€€€€€€€€€€€€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ ÔÀ±Ñ¡¥Ì±mÑ¡¥Íuì(€€€€€€€€€€€€€€€€€€€€€€€¹…Ñ¥Ù•I•…‘åI•ÑÉåEÕ•Õ•‘|õ™…±Í”ì(€€€€€€€€€€€€€€€€€€€€€€€¥˜ …±½Í¥¹I•ÅÕ•ÍÑ•‘|˜˜…Í•¹•1½…‘¥¹|˜™ÉÕ¹Ñ¥µ•|¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€É•ÅÕ•ÍÑI•¹‘•È ¤ì(€€€€€€€€€€€€€€€€€€€ô¤ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€€€€€ô(€€€€€€€€€€€¹…Ñ¥Ù•I•…‘åÑÑ•µÁÑÍ|ôÀì(€€€€€€€ô(€€€€€€€½¹ÍĞ…ÕÑ¼Í•É¥…°õÉ•¹‘•ÉM•É¥…±|ì(€€€€€€€¥˜¡İ…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¤¥ì(€€€€€€€€€€€Á•¹‘¥¹|õÑÉÕ”ì€¼¼…µ•É„µ½Ù•µ•¹ĞµÕÍĞ¹½Ğ¥¹Ù…±¥‘…Ñ”„™¥¹¥Í¡•¥µ…”¸(€€€€€€€€€€€€¬­Á…¥¹EÕ•Õ•‘|ì(€€€€€€€€€€€É•ÑÕÉ¸ì(€€€€€€€ô(€€€€€€€½¹ÍĞÕ¥¹ĞØÑ}ĞÑ½­•¸õÍ•É¥…°´ù™•Ñ¡}…‘ Ä¤¬Äì(€€€€€€€…ÕÑ¼Í¹…ÁÍ¡½ĞõÉÕ¹Ñ¥µ•|ì(€€€€€€€%µ…•Y¥•Ü¨½¹ÍĞ½ÕÑÁÕÑY¥•Üõ…¹Ù…Í|ì(€€€€€€€½¹ÍĞ¥¹ĞÉ•ÅÕ•ÍÑ•‘	…­•¹õ‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ì(€€€€€€€½¹ÍĞ‰½½°‘¥É•ÑAÉ•Í•¹Ğõ¹…Ñ¥Ù•¥É•ÑM•±•Ñ• ¤ì(€€€€€€€…Ñ¥Ù•I•¹‘•É	…­•¹‘|õÉ•ÅÕ•ÍÑ•‘	…­•¹ì(€€€€€€€…Ñ¥Ù•I•¹‘•É¥É•Ñ|õ‘¥É•ÑAÉ•Í•¹Ğì(€€€€€€€€¼¼XÄÜ¸ĞäÌÕÍ•Ì…¸¥¹‘•Á•¹‘•¹Ğ€ÌÀ!èEĞÍ­ä½µÁ½Í¥Ñ½È¸YÕ±­…¸]M$(€€€€€€€€¼¼‰åÁ…ÍÍ•ÌÑ¡…ĞE]¥‘•Ğ°Í¼Í…µÁ±”Ñ¡”M5µ½¹½Ñ½¹¥ŒÍ½±…È±½¬½¸(€€€€€€€€¼¼•… ¹…Ñ¥Ù”™É…µ”É…Ñ¡•ÈÑ¡…¸Ñ¡”Í±½İ•È€Ä¸ÔÌU$ÍÁ¥¹‰½àÑ¥µ•È¸(€€€€€€€€¼¼9•Ù•Èµ½‘¥™äÑ¡”…ÁÁÉ½Ù•Í½±…É5½Ñ¥½¸ ¤½Èİ…±­¥¹œ½¹ÑÉ½±±•È¸(€€€€€€€½¹ÍĞ¥¹Ğ‰…­•¹õ‰…­•¹‘	½á|´ùÕÉÉ•¹Ñ%¹‘•à ¤ì(€€€€€€€½¹ÍĞ™±½…ĞÉ•¹‘•É!½ÕÈô¡‘¥É•ÑAÉ•Í•¹Ğ€˜˜‘…å9¥¡Ñå±•	½á|€˜˜(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€‘…å9¥¡Ñå±•	½á|´ù¥Í¡•­• ¤€˜˜‘…å9¥¡Ñ±½­|¹¥ÍY…±¥ ¤¤(€€€€€€€€€€€€ı™±½…Ğ¡Í”èéİ•…Ñ¡•Èèéå±•!½ÕÈ¡‘…å9¥¡Ñ=É¥¥¹!½ÕÉ|°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€‘½Õ‰±”¡‘…å9¥¡Ñ±½­|¹•±…ÁÍ• ¤¤¼ÄÀÀÀ¸À¤¤(€€€€€€€€€€€€éÍ¹…ÁÍ¡½Ğ´ù‘…å±¥¡Ñ!½ÕÈì(€€€€€€€€¼¼-••À±¥¡Ñ¥¹œÍµ½½Ñ °‰ÕĞÉ•‰Õ¥±Ñ¡”•áÁ•¹Í¥Ù”€ÄÀÈÓ
+ÈATÍ¡…‘½Üµ…À(€€€€€€€€¼¼½¹±ä½¹”Á•ÈÍ¥µÕ±…Ñ•¡½ÕÈ‘ÕÉ¥¹œ¥É•Ñ`‘…ä½¹¥¡Ğ¸Ğ€ÈÑ ¼Ùµ¥¸°(€€€€€€€€¼¼Ñ¡¥ÌÕÑÌÉ•‰Õ¥±ÍÑ…±±Ì™É½´•Ù•Éä€Ì¸ÜÕÌÑ¼•Ù•Éä€ÄÕÌİ¥Ñ¡½ÕĞ±½İ•É¥¹œµ…ÀÅÕ…±¥Ñä¸(€€€€€€€½¹ÍĞ‰½½°ÍÑ…‰±•á…å9¥¡Ğõ‰…­•¹ôôĞ€˜˜‘…å9¥¡Ñå±•	½á|€˜˜‘…å9¥¡Ñå±•	½á|´ù¥Í¡•­• ¤ì(€€€€€€€½¹ÍĞ™±½…ĞÍ¡…‘½İMÑ•Á!½ÕÉÌõÍÑ…‰±•á…å9¥¡ĞüÄ¸Á˜è¸ÈÕ˜ì(€€€€€€€½¹ÍĞ™±½…ĞÍ¡…‘½İ!½ÕÈõÍÑèé™±½½È¡É•¹‘•É!½ÕÈ½Í¡…‘½İMÑ•Á!½ÕÉÌ¤©Í¡…‘½İMÑ•Á!½ÕÉÌì(€€€€€€€…ÕÑ¼ÁÉ•Í•Ğõ…Ñ¥Ù•…µ•É…A½Í” ¤ì(€€€€€€€ÕÁ‘…Ñ•…µ•É…!Õ ¤ì(€€€€€€€EM¥é”É•¹‘•ÉM¥é”õÅÕ…±¥Ñå	½á|´ùÕÉÉ•¹Ñ…Ñ„ ¤¹Ñ½M¥é” ¤ì(€€€€€€€¥˜ …É•¹‘•ÉM¥é”¹¥ÍY…±¥ ¤ñğÉ•¹‘•ÉM¥é”¹¥ÍµÁÑä ¤¤ì(€€€€€€€€€€€€¼¼I•¹‘•ÈÑ¼Ñ¡”Ù¥•İÁ½ÉĞÌ€©…ÑÕ…°¨…ÍÁ•ĞÉ…Ñ¥¼°¹½ĞÑ¡”µ½¹¥Ñ½È(€€€€€€€€€€€€¼¼É•Í½±ÕÑ¥½¸ìÑ¡…ĞÕÍ•Ñ¼±•ÑÑ•É‰½àÑ¡”€Í¥µ…”¥¸„Ñ¥¹äÍÑÉ¥À¸(€€€€€€€€€€€€¼¼-••À„‰½Õ¹‘•Á¥á•°‰Õ‘•Ğ½¸¥¹Ñ•É…Ñ•AUÌ¸(€€€€€€€€€€€É•¹‘•ÉM¥é”õ…¹Ù…Í|´ùÍ¥é” ¤¹‰½Õ¹‘•‘Q¼¡EM¥é” ÄØÀÀ°äÀÀ¤¤ì(€€€€€€€€€€€É•¹‘•ÉM¥é”¹Í•Ñ]¥‘Ñ ¡ÍÑèéµ…à ØĞ±É•¹‘•ÉM¥é”¹İ¥‘Ñ  ¤¤¤ì(€€€€€€€€€€€É•¹‘•ÉM¥é”¹Í•Ñ!•¥¡Ğ¡ÍÑèéµ…à ØĞ±É•¹‘•ÉM¥é”¹¡•¥¡Ğ ¤¤¤ì(€€€€€€€ô(€€€€€€€¥¹ĞÜõÉ•¹‘•ÉM¥é”¹İ¥‘Ñ  ¤ì(€€€€€€€¥¹Ğ õÉ•¹‘•ÉM¥é”¹¡•¥¡Ğ ¤ì(€€€€€€€€¼¼Íİ…Á¡…¥¸…±İ…åÌÑ…É•ÑÌÑ¡¥Ì‰…­•¹ÌÙ¥Í¥‰±”Ñ½Àµ±•Ù•°!]9(€€€€€€€€¼¼•áÑ•¹ĞìÑ¡”½™™ÍÉ••¸ÅÕ…±¥ÑäÉ•Í½±ÕÑ¥½¸¥Ì¥ÉÉ•±•Ù…¹Ğ¥¸Ñ¡¥Ìµ½‘”¸(€€€€€€€¥˜¡‘¥É•ÑAÉ•Í•¹Ğ€˜˜½ÕÑÁÕÑY¥•Ü¥ì(€€€€€€€€€€€½¹ÍĞÅÉ•…°‘ÁÈõ½ÕÑÁÕÑY¥•Ü´ù‘•Ù¥•A¥á•±I…Ñ¥½ ¤ì(€€€€€€€€€€€½¹ÍĞEM¥é”±½¥…±M¥é”õ½ÕÑÁÕÑY¥•Ü´ùÍ¥é” ¤ì(€€€€€€€€€€€É•¹‘•ÉM¥é”õEM¥é”¡ÍÑèéµ…à ÌÈÀ±¥¹Ğ¡±½¥…±M¥é”¹İ¥‘Ñ  ¤©‘ÁÈ¤¤°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€ÍÑèéµ…à ÈÀÀ±¥¹Ğ¡±½¥…±M¥é”¹¡•¥¡Ğ ¤©‘ÁÈ¤¤¤ì(€€€€€€€€€€€€¼¼Q¡”…µ•É„…¹É•¹‘•É•È5UMPÕÍ”Ñ¡”¹…Ñ¥Ù”Ù¥•İÁ½ÉĞ‘¥µ•¹Í¥½¹Ì¸(€€€€€€€€€€€€¼¼AÉ•Ù¥½ÕÍ±ä½¹±äÉ•¹‘•ÉM¥é”¡…¹•èÜ½ ÍÑ¥±°¡•±Ñ¡”Íµ…±°EĞ(€€€€€€€€€€€€¼¼…¹Ù…Ì‘¥µ•¹Í¥½¹Ì°ÍÑÉ•Ñ¡¥¹œÑ¡”YÕ±­…¸¥µ…”½¸ÄÄ™Õ±±ÍÉ••¸¸(€€€€€€€€€€€ÜõÉ•¹‘•ÉM¥é”¹İ¥‘Ñ  ¤ì(€€€€€€€€€€€ õÉ•¹‘•ÉM¥é”¹¡•¥¡Ğ ¤ì(€€€€€€€ô(€€€€€€€½¹ÍĞÅÕ¥¹ÑÁÑÈ¹…Ñ¥Ù•!…¹‘±”õ‘¥É•ÑAÉ•Í•¹ĞıÅÕ¥¹ÑÁÑÈ¡½ÕÑÁÕÑY¥•Ü´ùİ¥¹% ¤¤èÀì(€€€€€€€½¹ÍĞÅÉ•…°¹…Ñ¥Ù•ÁÈõ‘¥É•ÑAÉ•Í•¹Ğ˜™½ÕÑÁÕÑY¥•Üı½ÕÑÁÕÑY¥•Ü´ù‘•Ù¥•A¥á•±I…Ñ¥½ ¤èÄ¸Àì(€€€€€€€½¹ÍĞEMÑÉ¥¹œ¹…Ñ¥Ù•]¥¹‘½İ•Ñ…¥±Ìõ‘¥É•ÑAÉ•Í•¹Ğ(€€€€€€€€€€€€ı‘•ÍÉ¥‰•9…Ñ¥Ù•]¥¹‘½Ü¡¹…Ñ¥Ù•!…¹‘±”±EM¥é”¡Ü± ¤±¹…Ñ¥Ù•ÁÈ¤éEMÑÉ¥¹íôì(€€€€€€€½¹ÍĞ‰½½°İ…¹ÑÁÔõ‰…­•¹ôôÅññ‰…­•¹ôôÑññ‰…­•¹ôôÔì(€€€€€€€½¹ÍĞ‰½½°É…ÍÑ•Èõ‰…­•¹ôôÑññ‰…­•¹ôôÔì(€€€€€€€½¹ÍĞ‰½½°ÙÕ±­…¸õ‰…­•¹ôôÔì(€€€€€€€Ù½¥¨Í¡…É•‘YÕ±­…¹%¹ÍÑ…¹”õ¹Õ±±ÁÑÈì(€€€€€€€Õ¥¹ÑÁÑÉ}ĞÍ¡…É•‘YÕ±­…¹MÕÉ™…”ôÀì(¥˜‘•™¥¹•¡}]%8ÌÈ¤€˜˜4Í}XÄİ}YU1-9}9	1(€€€€€€€€¼¼1•…Ù”Í¡…É•YÕ±­…¸¡…¹‘±•Ì¹Õ±°¸YÕ±­…¹I…ÍÑ•ÈÉ•…Ñ•Ì¥ÑÌ½İ¸¥¹ÍÑ…¹”(€€€€€€€€¼¼…¹]¥¸ÌÈÍÕÉ™…”™É½´¹…Ñ¥Ù•!…¹‘±”°…Ì¥¸Ñ¡”Á…ÍÍ¥¹œ¡…É‘İ…É”‘¥…¹½ÍÑ¥Œ¸(•¹‘¥˜(€€€€€€€½¹ÍĞ‰½½°±½‰…±%±±Õµ¥¹…Ñ¥½¸õ‰…­•¹ôôÉññ‰…­•¹ôôÌì(€€€€€€€½¹ÍĞ‰½½°•‘•õ•‘•…|´ù¥Í¡•­• ¤ì(€€€€€€€½¹ÍĞÕ¹Í¥¹•Í…µÁ±•½Õ¹Ğõ±½‰…±%±±Õµ¥¹…Ñ¥½¸ü(€€€€€€€€€€€Õ¹Í¥¹•¡¥M…µÁ±•Í|´ùÕÉÉ•¹Ñ…Ñ„ ¤¹Ñ½%¹Ğ ¤¤è(€€€€€€€€€€€€¡İ…¹ÑÁÔüÅÔéÕ¹Í¥¹•¡‘¥É•ÑM…µÁ±•Í|´ùÕÉÉ•¹Ñ…Ñ„ ¤¹Ñ½%¹Ğ ¤¤¤ì(€€€€€€€½¹ÍĞÕ¹Í¥¹•µ…á	½Õ¹•Ìõ‰…­•¹ôôÈüÉÔèÑÔì(€€€€€€€½¹ÍĞ‰½½°ÁÉ½É•ÍÍ¥Ù”õ±½‰…±%±±Õµ¥¹…Ñ¥½¸˜™ÁÉ½É•ÍÍ¥Ù•¥|´ù¥Í¡•­• ¤ì(€€€€€€€½¹ÍĞ‰½½°‘•¹½¥Í”õ±½‰…±%±±Õµ¥¹…Ñ¥½¸˜™‘•¹½¥Í•¥|´ù¥Í¡•­• ¤ì(€€€€€€€½¹ÍĞ‰½½°‘•¹½¥Í•¥É•Ğô…±½‰…±%±±Õµ¥¹…Ñ¥½¸˜˜…İ…¹ÑÁÔ˜™‘•¹½¥Í•¥É•Ñ|´ù¥Í¡•­• ¤ì(€€€€€€€½¹ÍĞEMÑÉ¥¹œÉ•ÅÕ•ÍÑMÑ…µÀõÉ•ÅÕ•ÍÑ•‘I•¹‘•É•ÉMÑ…µÀ ¤ì(€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…”¡EMÑÉ¥¹1¥Ñ•É…° ‰…±Õ°‘”°¥µ…—Š˜ˆ¤¤ì(€€€€€€€€¼¼áÁ±…¥¸…¸…‰¹½Éµ…°‘•±…äÉ…Ñ¡•ÈÑ¡…¸‘¥ÍÁ±…å¥¹œ€‰…±Õ°¸¸¸ˆ™½É•Ù•È¸(€€€€€€€€¼¼Q¡¥Ìİ…Ñ¡‘½œ‘½•Ì¹½Ğ±…¥´Ñ¼…¹•°„‘É¥Ù•Èµ‰±½­•Í…±°¸(€€€€€€€¥˜¡É…ÍÑ•È¥ì(€€€€€€€€€€€EQ¥µ•ÈèéÍ¥¹±•M¡½Ğ ÌÀÀÀÀ±Ñ¡¥Ì±mÑ¡¥Ì±Í•É¥…°±Ñ½­•¸±ÙÕ±­…¹uì(€€€€€€€€€€€€€€€¥˜¡Í•É¥…°´ù±½… ¤ôõÑ½­•¸€˜˜İ…Ñ¡•É|¹¥ÍIÕ¹¹¥¹œ ¤€˜˜€…±½Í¥¹I•ÅÕ•ÍÑ•‘|¤(€€€€€€€€€€€€€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…” (€€€€€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰I•¹‘Ô€”Ä…Ñ¥˜‘•ÁÕ¥ÌÁ±ÕÌ‘”€ÌÀÍ•½¹‘•Ì¸AT½ÔÁ¥±½Ñ”Á½ÍÍ¥‰±•µ•¹ĞÍ…ÑÕË¤€ì…ÕÕ¸‰…ÍÕ±•µ•¹ĞAT¸ˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡ÙÕ±­…¸ıEMÑÉ¥¹1¥Ñ•É…° ‰YÕ±­…¸ˆ¤éEMÑÉ¥¹1¥Ñ•É…° ‰¥É•Ñ`€ÄÄˆ¤¤¤ì(€€€€€€€€€€€ô¤ì(€€€€€€€ô(€€€€€€€½¹ÍĞ…ÕÑ¼Í¡…‘½İ…¡”õÁÕM¡…‘½İÍ|ì(€€€€€€€İ…Ñ¡•É|¹Í•ÑÕÑÕÉ”¡EÑ½¹ÕÉÉ•¹ĞèéÉÕ¸ ™É•¹‘•ÉA½½±|±mÑ¡¥Ì±Í•É¥…°±Ñ½­•¸±Í¹…ÁÍ¡½Ğ±ÁÉ•Í•Ğ±Ü± ±İ…¹ÑÁÔ°(€€€€€€€€€€€±½‰…±%±±Õµ¥¹…Ñ¥½¸±É…ÍÑ•È±ÙÕ±­…¸±‘¥É•ÑAÉ•Í•¹Ğ±¹…Ñ¥Ù•!…¹‘±”±Í¡…É•‘YÕ±­…¹%¹ÍÑ…¹”°(€€€€€€€€€€€Í¡…É•‘YÕ±­…¹MÕÉ™…”±•‘•±Í…µÁ±•½Õ¹Ğ±µ…á	½Õ¹•Ì±ÁÉ½É•ÍÍ¥Ù”±‘•¹½¥Í”±½ÕÑÁÕÑY¥•Ü±É•ÅÕ•ÍÑ•‘	…­•¹°(€€€€€€€€€€€¹…Ñ¥Ù•]¥¹‘½İ•Ñ…¥±Ì°(€€€€€€€€€€€‘•¹½¥Í•¥É•Ğ±Í¡…‘½İ…¡”±É•¹‘•É!½ÕÈ±Í¡…‘½İ!½ÕÈ±É•ÅÕ•ÍÑMÑ…µÁuì(€€€€€€€€€€€I•ÍÕ±ĞÉ•ÍÕ±Ğì(€€€€€€€€€€€É•ÍÕ±Ğ¹É•ÅÕ•ÍÑMÑ…µÀõÉ•ÅÕ•ÍÑMÑ…µÀì(€€€€€€€€€€€É•ÍÕ±Ğ¹…µ•É…A½Í”õÁÉ•Í•Ğì(€€€€€€€€€€€É•ÍÕ±Ğ¹•¹•É…Ñ¥½¸õÑ½­•¸ì(€€€€€€€€€€€É•ÍÕ±Ğ¹‰…­•¹‘%¹‘•àõÉ•ÅÕ•ÍÑ•‘	…­•¹ì(€€€€€€€€€€€É•ÍÕ±Ğ¹¹…Ñ¥Ù•]¥¹‘½İ•Ñ…¥±Ìõ¹…Ñ¥Ù•]¥¹‘½İ•Ñ…¥±Ìì(€€€€€€€€€€€É•ÍÕ±Ğ¹Í­å½µÁ½Í¥Ñ¥¹œõÉ…ÍÑ•Èì(€€€€€€€€€€€É•ÍÕ±Ğ¹É•¹‘•ÉQ¡É•…õÉ•¥¹Ñ•ÉÁÉ•Ñ}…ÍĞñÅÕ¥¹ÑÁÑÈø¡EQ¡É•…èéÕÉÉ•¹ÑQ¡É•…‘% ¤¤ì(¥˜‘•™¥¹•¡}]%8ÌÈ¤(€€€€€€€€€€€¥˜ …É•ÍÕ±Ğ¹¹…Ñ¥Ù•]¥¹‘½İ•Ñ…¥±Ì¹¥ÍµÁÑä ¤¤(€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹¹…Ñ¥Ù•]¥¹‘½İ•Ñ…¥±Ì¬õEMÑÉ¥¹1¥Ñ•É…° ˆÉ•¹‘•ÉQ¡É•…‘]¥¸ÌÈô”ÄÉ•¹‘•ÉQ¡É•…‘EĞôÁà”Èˆ¤(€€€€€€€€€€€€€€€€€€€€¹…Éœ¡•ÑÕÉÉ•¹ÑQ¡É•…‘% ¤¤(€€€€€€€€€€€€€€€€€€€€¹…Éœ¡EMÑÉ¥¹œèé¹Õµ‰•È¡ÅÕ±½¹±½¹œ¡É•ÍÕ±Ğ¹É•¹‘•ÉQ¡É•…¤°ÄØ¤¤ì(•¹‘¥˜(€€€€€€€€€€€ÕÁ‘…Ñ•1¥¡Ñ¥¹œ¡É•¹‘•É!½ÕÈ¤ì(€€€€€€€€€€€½¹ÍĞ…ÕÑ¼…µ•É„õØÄØèéµ…­•…µ•É„¡ÁÉ•Í•Ğ±Ü± ¤ì(€€€€€€€€€€€ÍÑèéÙ•Ñ½ÈñÕ¥¹ĞÌÉ}ĞøÁ¥á•±Ìì(€€€€€€€€€€€MÑ…ÑÌÍÑ…ÑÌì(€€€€€€€€€€€‘½Õ‰±”Í¡…‘½İ	Õ¥±‘5ÌôÀ¸Àì(€€€€€€€€€€€‰½½°½¬õ™…±Í”ì(€€€€€€€€€€€¥˜¡İ…¹ÑÁÔ¥ì(€€€€€€€€€€€€€€€ÍÑèéİÍÑÉ¥¹œÉ•…Í½¸ì(€€€€€€€€€€€€€€€¥˜ …É…ÍÑ•È¥ì(€€€€€€€€€€€€€€€€€€€É•±•…Í•¥É•Ñ`ÄÅ9…Ñ¥Ù•½ÉÕÉÉ•¹ÑQ¡É•… ¤ì(€€€€€€€€€€€€€€€€€€€É•±•…Í•YÕ±­…¹¥É•Ñ½ÉÕÉÉ•¹ÑQ¡É•… ¤ì(€€€€€€€€€€€€€€€€€€€É•±•…Í•YÕ±­…¹AÉ•Ù¥•İ½ÉÕÉÉ•¹ÑQ¡É•… ¤ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€¥˜¡É…ÍÑ•È¥ì(€€€€€€€€€€€€€€€€€€€ÍÑèéÍ¡…É•‘}ÁÑÈñ½¹ÍĞM¡…‘½İ5…ÀøÍ¡…‘½Üì(€€€€€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€€€€€ÍÑèé±½­}Õ…ÉñÍÑèéµÕÑ•àø±½¬¡Í¡…‘½İ…¡”´ùµÕÑ•à¤ì(€€€€€€€€€€€€€€€€€€€€€€€¥˜¡Í¡…‘½İ…¡”´ùÍ•¹”¹±½¬ ¤ôõÍ¹…ÁÍ¡½Ğ€˜˜(€€€€€€€€€€€€€€€€€€€€€€€€€€Í¡…‘½İ…¡”´ù¡½ÕÈôõÍ¡…‘½İ!½ÕÈ˜™Í¡…‘½İ…¡”´ùÍ¡…‘½Ü¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€Í¡…‘½ÜõÍ¡…‘½İ…¡”´ùÍ¡…‘½Üì(€€€€€€€€€€€€€€€€€€€€€€€•±Í”ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€MÑ…ÑÌÍ¡…‘½İMÑ…ÑÌì(€€€€€€€€€€€€€€€€€€€€€€€€€€€½¹ÍĞ…ÕÑ¼Í¡…‘½İMÑ…ÉĞõÍÑèé¡É½¹¼èéÍÑ•…‘å}±½¬èé¹½Ü ¤ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€Í¡…‘½ÜõÍÑèéµ…­•}Í¡…É•ñM¡…‘½İ5…Àø (€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€‰Õ¥±‘M¡…‘½Ü¡Í¹…ÁÍ¡½Ğ´ùÉ•¹‘•ÉM•¹”±Í¡…‘½İMÑ…ÑÌ¤¤ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€Í¡…‘½İ	Õ¥±‘5ÌõÍÑèé¡É½¹¼èé‘ÕÉ…Ñ¥½¸ñ‘½Õ‰±”±ÍÑèéµ¥±±¤ø (€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€ÍÑèé¡É½¹¼èéÍÑ•…‘å}±½¬èé¹½Ü ¤µÍ¡…‘½İMÑ…ÉĞ¤¹½Õ¹Ğ ¤ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€¼¼=ÁÑ¥½¹…°‘¥…¹½ÍÑ¥Œ½˜Ñ¡”€Ä°ÀÈĞà€Ä°ÀÈĞATÉ…ä(€€€€€€€€€€€€€€€€€€€€€€€€€€€€¼¼Í¡…‘½ÜÁ…ÍÌ¸Q¡¥Ì½ÍĞ½ÕÉÌ½ÕÑÍ¥‘”YÕ±­…¹I…ÍÑ•È(€€€€€€€€€€€€€€€€€€€€€€€€€€€€¼¼…¹…¹¹½Ğ…ÁÁ•…È¥¸¥ÑÌATµ½¹±äMXÑ¥µ¥¹Ì¸(€€€€€€€€€€€€€€€€€€€€€€€€€€€½¹ÍĞE	åÑ•ÉÉ…äÍ¡…‘½İAÉ½™¥±”õÅ•Ñ•¹Ø ‰M}]IA}Y-}M!=]}AI=%1ˆ¤ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€¥˜ …Í¡…‘½İAÉ½™¥±”¹¥ÍµÁÑä ¤¥ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€E¥±”±½œ¡EMÑÉ¥¹œèé™É½µ1½…°á	¥Ğ¡Í¡…‘½İAÉ½™¥±”¤¤ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€¥˜¡±½œ¹½Á•¸¡E%=•Ù¥”èé]É¥Ñ•=¹±åñE%=•Ù¥”èéÁÁ•¹‘ñE%=•Ù¥”èéQ•áĞ¤¥ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€½¹ÍĞEMÑÉ¥¹œ±¥¹”õEMÑÉ¥¹1¥Ñ•É…° ˆ”Ä±Í¡…‘½İ}‰Õ¥±‘}µÌô”È±Í½±…É}¡½ÕÈô”Ì±Í¡…‘½İ}‰¥¸ô”Ğ±‰…­•¹ô”Õq¸ˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡E…Ñ•Q¥µ”èéÕÉÉ•¹Ñ5M•ÍM¥¹•Á½  ¤¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡Í¡…‘½İ	Õ¥±‘5Ì°À°˜œ°Ì¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡É•¹‘•É!½ÕÈ°À°˜œ°Ô¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡Í¡…‘½İ!½ÕÈ°À°˜œ°È¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡ÙÕ±­…¸ıEMÑÉ¥¹1¥Ñ•É…° ‰YÕ±­…¸ˆ¤éEMÑÉ¥¹1¥Ñ•É…° ‰`ÄÄˆ¤¤ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€±½œ¹İÉ¥Ñ”¡±¥¹”¹Ñ½UÑ˜à ¤¤ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€€€€€€€€€€€€Í¡…‘½İ…¡”´ùÍ•¹”õÍ¹…ÁÍ¡½ĞíÍ¡…‘½İ…¡”´ù¡½ÕÈõÍ¡…‘½İ!½ÕÈì(€€€€€€€€€€€€€€€€€€€€€€€€€€€Í¡…‘½İ…¡”´ùÍ¡…‘½ÜõÍ¡…‘½Üì(€€€€€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€€€€¥˜¡ÙÕ±­…¸¥ì(€€€€€€€€€€€€€€€€€€€€€€€É•±•…Í•¥É•Ñ`ÄÅ9…Ñ¥Ù•½ÉÕÉÉ•¹ÑQ¡É•… ¤ì€¼¼a$‰•±½¹ÌÑ¼„‘¥™™•É•¹Ğ‰…­•¹!]9¸(€€€€€€€€€€€€€€€€€€€€€€€€¼¼-••À½¹”YÕ±­…¸‘•Ù¥”½É•Í½ÕÉ”Í•ĞÉ•Í¥‘•¹Ğ™½ÈÑ¡”Í•±•Ñ•Á…Ñ ¸(€€€€€€€€€€€€€€€€€€€€€€€¥˜¡‘¥É•ÑAÉ•Í•¹Ğ¥É•±•…Í•YÕ±­…¹AÉ•Ù¥•İ½ÉÕÉÉ•¹ÑQ¡É•… ¤ì(€€€€€€€€€€€€€€€€€€€€€€€•±Í”É•±•…Í•YÕ±­…¹¥É•Ñ½ÉÕÉÉ•¹ÑQ¡É•… ¤ì(€€€€€€€€€€€€€€€€€€€€€€€¥˜¡‘¥É•ÑAÉ•Í•¹Ğ¥ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€½¬õÉ•¹‘•ÉYÕ±­…¹¥É•ÑAÉ•Í•¹Ğ¡Í¹…ÁÍ¡½Ğ´ùÉ•¹‘•ÉM•¹”°©Í¡…‘½Ü±…µ•É„±Ü± °(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€É•¥¹Ñ•ÉÁÉ•Ñ}…ÍĞñÙ½¥¨ø¡¹…Ñ¥Ù•!…¹‘±”¤±ÍÑ…ÑÌ±É•…Í½¸°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€Í¡…É•‘YÕ±­…¹%¹ÍÑ…¹”±Í¡…É•‘YÕ±­…¹MÕÉ™…”¤ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€¥˜ …½¬¥ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€½¹ÍĞÍÑèéİÍÑÉ¥¹œ¹…Ñ¥Ù•I•…Í½¸õÉ•…Í½¸ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹¹…Ñ¥Ù•…¥±ÕÉ”õEMÑÉ¥¹œèé™É½µMÑ‘]MÑÉ¥¹œ¡¹…Ñ¥Ù•I•…Í½¸¤ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€É•±•…Í•YÕ±­…¹¥É•Ñ½ÉÕÉÉ•¹ÑQ¡É•… ¤ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€É•…Í½¸¹±•…È ¤ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€½¬õÉ•¹‘•ÉYÕ±­…¹AÉ•Ù¥•Ü¡Í¹…ÁÍ¡½Ğ´ùÉ•¹‘•ÉM•¹”°©Í¡…‘½Ü±…µ•É„±Ü± °(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€Á¥á•±Ì±ÍÑ…ÑÌ±É•…Í½¸¤ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹¹…Ñ¥Ù•…±±‰…¬õ½¬ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€¥˜ …½¬¥ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€½¹ÍĞÍÑèéİÍÑÉ¥¹œÁÉ•Ù¥•İI•…Í½¸õÉ•…Í½¸ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€É•…Í½¸õ0‰YÕ±­…¸¹…Ñ¥Ù”ÁÉ•Í•¹Ñ…Ñ¥½¸™…¥±•è€ˆ­¹…Ñ¥Ù•I•…Í½¸¬(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€0ˆìYÕ±­…¸¥µ…”ÁÉ•Ù¥•Ü…±Í¼™…¥±•è€ˆ­ÁÉ•Ù¥•İI•…Í½¸ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€€€€€€€€õ•±Í•ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€½¬õÉ•¹‘•ÉYÕ±­…¹AÉ•Ù¥•Ü¡Í¹…ÁÍ¡½Ğ´ùÉ•¹‘•ÉM•¹”°©Í¡…‘½Ü±…µ•É„±Ü± °(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€Á¥á•±Ì±ÍÑ…ÑÌ±É•…Í½¸¤ì(€€€€€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€€€€õ•±Í•ì(€€€€€€€€€€€€€€€€€€€€€€€€¼¼YÕ±­…¸]M$…¹a$µÕÍĞ¹•Ù•È½İ¸Íİ…Á¡…¥¹Ì™½ÈÑ¡”(€€€€€€€€€€€€€€€€€€€€€€€€¼¼Í…µ”‰…­•¹!]9…ĞÑ¡”Í…µ”Ñ¥µ”¸±Í¼É•±•…Í”Ñ¡”(€€€€€€€€€€€€€€€€€€€€€€€€¼¼½™™ÍÉ••¸É•¹‘•É•Èİ¡•¸±•…Ù¥¹œYÕ±­…¸¸(€€€€€€€€€€€€€€€€€€€€€€€É•±•…Í•YÕ±­…¹¥É•Ñ½ÉÕÉÉ•¹ÑQ¡É•… ¤ì(€€€€€€€€€€€€€€€€€€€€€€€É•±•…Í•YÕ±­…¹AÉ•Ù¥•İ½ÉÕÉÉ•¹ÑQ¡É•… ¤ì(€€€€€€€€€€€€€€€€€€€€€€€½¬õ‘¥É•ÑAÉ•Í•¹Ğü(€€€€€€€€€€€€€€€€€€€€€€€€€€€É•¹‘•É¥É•Ñ`ÄÅ9…Ñ¥Ù”¡Í¹…ÁÍ¡½Ğ´ùÉ•¹‘•ÉM•¹”°©Í¡…‘½Ü±…µ•É„±Ü± °(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€É•¥¹Ñ•ÉÁÉ•Ñ}…ÍĞñÙ½¥¨ø¡¹…Ñ¥Ù•!…¹‘±”¤±ÍÑ…ÑÌ±É•…Í½¸¤è(€€€€€€€€€€€€€€€€€€€€€€€€€€€É•¹‘•É¥É•Ñ`ÄÅAÉ•Ù¥•Ü¡Í¹…ÁÍ¡½Ğ´ùÉ•¹‘•ÉM•¹”°©Í¡…‘½Ü±…µ•É„±Ü± ±Á¥á•±Ì±ÍÑ…ÑÌ±É•…Í½¸¤ì(€€€€€€€€€€€€€€€€€€€€€€€¥˜ …½¬€˜˜‘¥É•ÑAÉ•Í•¹Ğ¥ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€¼¼a$…¸‰”Õ¹…Ù…¥±…‰±”½¸É•µ½Ñ”‘•Í­Ñ½À€¼•ÉÑ…¥¸‘É¥Ù•ÉÌè(€€€€€€€€€€€€€€€€€€€€€€€€€€€€¼¼É•½Ù•ÈÑ¡”½É¥¥¹…°™Õ±°µÅÕ…±¥ÑäAT½E%µ…”ÁÉ•Ù¥•Ü¸(€€€€€€€€€€€€€€€€€€€€€€€€€€€½¹ÍĞÍÑèéİÍÑÉ¥¹œ¹…Ñ¥Ù•I•…Í½¸õÉ•…Í½¸ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹¹…Ñ¥Ù•…¥±ÕÉ”õEMÑÉ¥¹œèé™É½µMÑ‘]MÑÉ¥¹œ¡¹…Ñ¥Ù•I•…Í½¸¤ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€É•±•…Í•¥É•Ñ`ÄÅ9…Ñ¥Ù•½ÉÕÉÉ•¹ÑQ¡É•… ¤ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€É•…Í½¸¹±•…È ¤ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€½¬õÉ•¹‘•É¥É•Ñ`ÄÅAÉ•Ù¥•Ü¡Í¹…ÁÍ¡½Ğ´ùÉ•¹‘•ÉM•¹”°©Í¡…‘½Ü±…µ•É„±Ü± °(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€Á¥á•±Ì±ÍÑ…ÑÌ±É•…Í½¸¤ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹¹…Ñ¥Ù•…±±‰…¬õ½¬ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€¥˜ …½¬¥ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€½¹ÍĞÍÑèéİÍÑÉ¥¹œÁÉ•Ù¥•İI•…Í½¸õÉ•…Í½¸ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€É•…Í½¸õ0‰a$¹…Ñ¥Ù”ÁÉ•Í•¹Ñ…Ñ¥½¸™…¥±•è€ˆ­¹…Ñ¥Ù•I•…Í½¸¬(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€0ˆì¥É•Ñ`€ÄÄ¥µ…”ÁÉ•Ù¥•Ü…±Í¼™…¥±•è€ˆ­ÁÉ•Ù¥•İI•…Í½¸ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹‘¥É•ÑAÉ•Í•¹Ñ•õ½¬˜™‘¥É•ÑAÉ•Í•¹Ğ˜˜…É•ÍÕ±Ğ¹¹…Ñ¥Ù•…±±‰…¬ì(€€€€€€€€€€€€€€€€€€€¥˜¡½¬¥ì(€€€€€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹É•¹‘•É•ÈõÙÕ±­…¸(€€€€€€€€€€€€€€€€€€€€€€€€€€€€ü¡É•ÍÕ±Ğ¹‘¥É•ÑAÉ•Í•¹Ñ•(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ‰XÄÜYÕ±­…¸I…ÍÑ•ÈƒŠP¥É•ĞAT€¡Íİ…Á¡…¥¸¤ˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ‰XÄÜYÕ±­…¸I…ÍÑ•ÈƒŠP…™™¥¡…”EĞ€¡E%µ…”¤ˆ¤¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€€è¡É•ÍÕ±Ğ¹‘¥É•ÑAÉ•Í•¹Ñ•(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ‰XÄÜÍÄÄI…ÍÑ•ÈƒŠP¥É•ĞAT€¡Íİ…Á¡…¥¸¤ˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ‰XÄÜÍÄÄI…ÍÑ•ÈƒŠP…™™¥¡…”EĞ€¡E%µ…”¤ˆ¤¤ì(€€€€€€€€€€€€€€€€€€€€€€€¥˜ …ÙÕ±­…¸€˜˜É…ÍÑ•É!å‰É¥‘1¥¡Ñ¥¹¹…‰±• ¤¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹É•¹‘•É•È¬õÉ…ÍÑ•É¥…¡•1½…‘• ¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ˆƒŠP$ÑÉ…¹ÍÁ½ÉĞÁË¤µ…±Õ³¥”ˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ˆƒŠPÍ½¹‘•Ì…ÁÁÉ½á¥µ…Ñ¥Ù•Ì€¡Í…¹ÌÑ…‰±”$¤ˆ¤ì(€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€õ•±Í•ì(€€€€€€€€€€€€€€€€€€€½¬õÉ•¹‘•É½µÁÕÑ”ÄÅAÉ•Ù¥•Ü¡Í¹…ÁÍ¡½Ğ´ùÉ•¹‘•ÉM•¹”±…µ•É„±Ü± ±Á¥á•±Ì±ÍÑ…ÑÌ±É•…Í½¸¤ì(€€€€€€€€€€€€€€€€€€€¥˜¡½¬¥É•ÍÕ±Ğ¹É•¹‘•É•ÈõEMÑÉ¥¹1¥Ñ•É…° ‰XÄØÍÄÄ½µÁÕÑ”ƒŠP$…‘…ÁÑ…Ñ¥Ù”ˆ¤ì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€¥˜ …½¬¥ì(€€€€€€€€€€€€€€€€€€€€¼¼9•Ù•ÈÍ•¹¡Õ¹‘É•‘Ì½˜Ñ¡½ÕÍ…¹‘Ì½˜ÑÉ¥…¹±•ÌÑ¡É½Õ (€€€€€€€€€€€€€€€€€€€€¼¼ATÉ…äÑÉ…¥¹œ…Ì…¸¥¹Ù¥Í¥‰±”™…±±‰…¬¸Q¡…ĞÕÍ•Ñ¼(€€€€€€€€€€€€€€€€€€€€¼¼±½½¬±¥­”…¸¥¹‘•™¥¹¥Ñ•±äÍÑ…±±•ÍÄÄÉ•¹‘•È¸(€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹•ÉÉ½ÈõEMÑÉ¥¹1¥Ñ•É…° (€€€€€€€€€€€€€€€€€€€€€€€€‹%¡•Œ‘ÔÉ•¹‘ÔAT€”Ä€è€”È¸€ˆ(€€€€€€€€€€€€€€€€€€€€€€€€‰ÕÕ¸‰…ÍÕ±•µ•¹Ğ…ÕÑ½µ…Ñ¥ÅÕ”Ù•ÉÌ±”AT¸ˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡ÙÕ±­…¸ıEMÑÉ¥¹1¥Ñ•É…° ‰YÕ±­…¸ˆ¤éEMÑÉ¥¹1¥Ñ•É…° ‰¥É•Ñ`ÄÄˆ¤¤(€€€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡EMÑÉ¥¹œèé™É½µMÑ‘]MÑÉ¥¹œ¡É•…Í½¸¤¤ì(€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹É•¹‘•É•ÈõÙÕ±­…¸ıEMÑÉ¥¹1¥Ñ•É…° ‰XÄÜYÕ±­…¸ƒŠP•ÉÉ•ÕÈˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ‰XÄÜATÍÄÄƒŠP•ÉÉ•ÕÈˆ¤ì(€€€€€€€€€€€€€€€€€€€É•ÑÕÉ¸É•ÍÕ±Ğì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜ …İ…¹ÑÁÔ¥ì(€€€€€€€€€€€€€€€É•±•…Í•¥É•Ñ`ÄÅ9…Ñ¥Ù•½ÉÕÉÉ•¹ÑQ¡É•… ¤ì(€€€€€€€€€€€€€€€É•±•…Í•YÕ±­…¹¥É•Ñ½ÉÕÉÉ•¹ÑQ¡É•… ¤ì(€€€€€€€€€€€€€€€É•±•…Í•YÕ±­…¹AÉ•Ù¥•İ½ÉÕÉÉ•¹ÑQ¡É•… ¤ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜ …½¬¥ì(€€€€€€€€€€€€€€€É•±•…Í•¥É•Ñ`ÄÅ9…Ñ¥Ù•½ÉÕÉÉ•¹ÑQ¡É•… ¤ì(€€€€€€€€€€€€€€€Á¥á•±Ì¹É•Í¥é”¡Í¥é•}Ğ¡Ü¤©Í¥é•}Ğ¡ ¤¤ì(€€€€€€€€€€€€€€€ÍÑèéÍ¡…É•‘}ÁÑÈñ½¹ÍĞM¡…‘½İ5…ÀøÍ¡…‘½Üì(€€€€€€€€€€€€€€€‰½½°Í¡…‘½İI•ÕÍ•õ™…±Í”ì(€€€€€€€€€€€€€€€ì(€€€€€€€€€€€€€€€€€€€ÍÑèé±½­}Õ…ÉñÍÑèéµÕÑ•àø±½¬¡Í¡…‘½İ…¡”´ùµÕÑ•à¤ì(€€€€€€€€€€€€€€€€€€€¥˜¡Í¡…‘½İ…¡”´ùÍ•¹”¹±½¬ ¤ôõÍ¹…ÁÍ¡½Ğ€˜˜(€€€€€€€€€€€€€€€€€€€€€€Í¡…‘½İ…¡”´ù¡½ÕÈôõÍ¡…‘½İ!½ÕÈ€˜˜Í¡…‘½İ…¡”´ùÍ¡…‘½Ü¥ì(€€€€€€€€€€€€€€€€€€€€€€€Í¡…‘½ÜõÍ¡…‘½İ…¡”´ùÍ¡…‘½Üì(€€€€€€€€€€€€€€€€€€€€€€€Í¡…‘½İI•ÕÍ•õÑÉÕ”ì(€€€€€€€€€€€€€€€€€€€õ•±Í•ì(€€€€€€€€€€€€€€€€€€€€€€€MÑ…ÑÌÍ¡…‘½İMÑ…ÑÌì(€€€€€€€€€€€€€€€€€€€€€€€Í¡…‘½ÜõÍÑèéµ…­•}Í¡…É•ñM¡…‘½İ5…Àø (€€€€€€€€€€€€€€€€€€€€€€€€€€€‰Õ¥±‘M¡…‘½Ü¡Í¹…ÁÍ¡½Ğ´ùÉ•¹‘•ÉM•¹”±Í¡…‘½İMÑ…ÑÌ¤¤ì(€€€€€€€€€€€€€€€€€€€€€€€Í¡…‘½İ…¡”´ùÍ•¹”õÍ¹…ÁÍ¡½Ğì(€€€€€€€€€€€€€€€€€€€€€€€Í¡…‘½İ…¡”´ù¡½ÕÈõÍ¡…‘½İ!½ÕÈì(€€€€€€€€€€€€€€€€€€€€€€€Í¡…‘½İ…¡”´ùÍ¡…‘½ÜõÍ¡…‘½Üì(€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€½¹ÍĞÕ¹Í¥¹•İ½É­•ÉÌõÍÑèéµ…à ÅÔ±ÍÑèéµ¥¸ áÔ±ÍÑèéÑ¡É•…èé¡…É‘İ…É•}½¹ÕÉÉ•¹ä ¤¤¤ì(€€€€€€€€€€€€€€€¥˜¡±½‰…±%±±Õµ¥¹…Ñ¥½¸¥ì(€€€€€€€€€€€€€€€€€€€ÍÑèéÙ•Ñ½ÈñXø¡‘ÉÕ´ì(€€€€€€€€€€€€€€€€€€€Õ¹Í¥¹•½µÁ±•Ñ•ôÀì(€€€€€€€€€€€€€€€€€€€‘½Õ‰±”Ñ½Ñ…±5ÌôÀì(€€€€€€€€€€€€€€€€€€€İ¡¥±”¡½µÁ±•Ñ•ñÍ…µÁ±•½Õ¹Ğ¥ì(€€€€€€€€€€€€€€€€€€€€€€€¥˜¡Í•É¥…°´ù±½… ¤„õÑ½­•¸¥É•ÑÕÉ¸É•ÍÕ±Ğì(€€€€€€€€€€€€€€€€€€€€€€€½¹ÍĞÕ¹Í¥¹•‰…Ñ õÁÉ½É•ÍÍ¥Ù”ü(€€€€€€€€€€€€€€€€€€€€€€€€€€€ÍÑèéµ¥¸¡ÍÑèéµ…à ÅÔ±½µÁ±•Ñ•¤±Í…µÁ±•½Õ¹Ğµ½µÁ±•Ñ•¤è(€€€€€€€€€€€€€€€€€€€€€€€€€€€Í…µÁ±•½Õ¹Ğµ½µÁ±•Ñ•ì(€€€€€€€€€€€€€€€€€€€€€€€½¹ÍĞ…ÕÑ¼Á…ÍÌõÉ•¹‘•É¥ÕµÕ±…Ñ•A…ÍÌ (€€€€€€€€€€€€€€€€€€€€€€€€€€€Í¹…ÁÍ¡½Ğ´ùÉ•¹‘•ÉM•¹”°©Í¡…‘½Ü±…µ•É„±Ü± ±¡‘ÉÕ´±Á¥á•±Ì°(€€€€€€€€€€€€€€€€€€€€€€€€€€€½µÁ±•Ñ•±‰…Ñ ±İ½É­•ÉÌ°©Í•É¥…°±Ñ½­•¸±µ…á	½Õ¹•Ì¤ì(€€€€€€€€€€€€€€€€€€€€€€€¥˜¡Í•É¥…°´ù±½… ¤„õÑ½­•¸¥É•ÑÕÉ¸É•ÍÕ±Ğì(€€€€€€€€€€€€€€€€€€€€€€€½µÁ±•Ñ•¬õ‰…Ñ ì(€€€€€€€€€€€€€€€€€€€€€€€Ñ½Ñ…±5Ì¬õÁ…ÍÌ¹µÌì(€€€€€€€€€€€€€€€€€€€€€€€ÍÑèéÙ•Ñ½ÈñÕ¥¹ĞÌÉ}Ğø‘¥ÍÁ±…äõÁ¥á•±Ìì(€€€€€€€€€€€€€€€€€€€€€€€€¼¼¥±Ñ•É¥¹œ¥ÌÍ•Á…É…Ñ”™É½´!H…ÕµÕ±…Ñ¥½¸°Í¼Ñ¡”(€€€€€€€€€€€€€€€€€€€€€€€€¼¼¹•áĞ‰…Ñ ¹•Ù•È™••‘Ì½¸‰±ÕÉÉ•½Ñ½¹•µ…ÁÁ•Á¥á•±Ì¸(€€€€€€€€€€€€€€€€€€€€€€€¥˜¡‘•¹½¥Í”˜™½µÁ±•Ñ•øôĞ¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€‘¥ÍÁ±…äõ‘•¹½¥Í•	¥±…Ñ•É…°¡‘¥ÍÁ±…ä±Ü± ±İ½É­•ÉÌ¤ì(€€€€€€€€€€€€€€€€€€€€€€€¥˜¡•‘•¥‘¥ÍÁ±…äõ…¹Ñ¥…±¥…Í‘•ÌĞ¡‘¥ÍÁ±…ä±Ü± °Ğ±™…±Í”¤ì(€€€€€€€€€€€€€€€€€€€€€€€E%µ…”¥µ…”¡Ü± ±E%µ…”èé½Éµ…Ñ}IÌÈ¤ì(€€€€€€€€€€€€€€€€€€€€€€€™½È¡¥¹ĞäôÀíäñ ì¬­ä¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€ÍÑèéµ•µÁä¡¥µ…”¹Í…¹1¥¹”¡ä¤±‘¥ÍÁ±…ä¹‘…Ñ„ ¤­Í¥é•}Ğ¡ä¤©Ü±Í¥é•}Ğ¡Ü¤¨Ğ¤ì(€€€€€€€€€€€€€€€€€€€€€€€¥˜¡ÁÉ½É•ÍÍ¥Ù”˜™½µÁ±•Ñ•ñÍ…µÁ±•½Õ¹Ğ¥ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€E5•Ñ…=‰©•Ğèé¥¹Ù½­•5•Ñ¡½¡Ñ¡¥Ì°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€mÑ¡¥Ì±Í•É¥…°±Ñ½­•¸±½ÕÑÁÕÑY¥•Ü±½Õ¹Ğõ½µÁ±•Ñ•±Ñ…É•ĞõÍ…µÁ±•½Õ¹Ğ±Ü± ±¥µ…”õÍÑèéµ½Ù”¡¥µ…”¥t ¤µÕÑ…‰±”ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€¥˜¡Í•É¥…°´ù±½… ¤„õÑ½­•¸¥É•ÑÕÉ¸ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€¥˜¡½ÕÑÁÕÑY¥•Üôõ…¹Ù…Í|¥±…ÍÑ%µ…•|õ¥µ…”ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€½ÕÑÁÕÑY¥•Ü´ùÍ•Ñ%µ…”¡ÍÑèéµ½Ù”¡¥µ…”¤¤ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€ÍÑ…ÑÕÍ	…È ¤´ùÍ¡½İ5•ÍÍ…” (€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€EMÑÉ¥¹1¥Ñ•É…° ‰$ÁÉ½É•ÍÍ¥Ù”ƒŠP€”Ä€¼€”Èƒ¥¡…¹Ñ¥±±½¹Ì€ ”Ï\”Ğ¤ˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡½Õ¹Ğ¤¹…Éœ¡Ñ…É•Ğ¤¹…Éœ¡Ü¤¹…Éœ¡ ¤¤ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€ô±EĞèéEÕ•Õ•‘½¹¹•Ñ¥½¸¤ì(€€€€€€€€€€€€€€€€€€€€€€€õ•±Í•ì(€€€€€€€€€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹¥µ…”õÍÑèéµ½Ù”¡¥µ…”¤ì(€€€€€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹É•¹‘•É•ÈõEMÑÉ¥¹1¥Ñ•É…° ‰AT$ƒŠP€”ÄÉ•‰½¹‘Ì°€”ÈÍÁÀ°!H”ÌƒŠP€”Ó\”Ôˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡µ…á	½Õ¹•Ì¤¹…Éœ¡Í…µÁ±•½Õ¹Ğ¤(€€€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡‘•¹½¥Í”ıEMÑÉ¥¹1¥Ñ•É…° ˆ°“¥‰ÉÕ¥Ó¤ˆ¤éEMÑÉ¥¹œ ¤¤(€€€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡Ü¤¹…Éœ¡ ¤ì(€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹µ¥±±¥Í•½¹‘ÌõÑ½Ñ…±5Ìì(€€€€€€€€€€€€€€€€€€€É•ÑÕÉ¸É•ÍÕ±Ğì(€€€€€€€€€€€€€€€ô(€€€€€€€€€€€€€€€€¼¼I•ÕÍ”Ñ¡”…Ñ¥Ù”É•¹‘•È•¹•É…Ñ¥½¸Í¼AT™…±±‰…¬½‘¥É•Ğ(€€€€€€€€€€€€€€€€¼¼É…åÌÍÑ½ÀÁÉ½µÁÑ±äİ¡•¸Ñ¡”Í•¹”½È…µ•É„¥Ì¡…¹•¸(€€€€€€€€€€€€€€€ÍÑ…ÑÌõ´ÍèéÉ•¹‘•È¡Í¹…ÁÍ¡½Ğ´ùÉ•¹‘•ÉM•¹”°©Í¡…‘½Ü±…µ•É„±Ü± ±Á¥á•±Ì°(€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€İ½É­•ÉÌ±™…±Í”°©Í•É¥…°±Ñ½­•¸±Í…µÁ±•½Õ¹Ğ±™…±Í”±™…±Í”±™…±Í”°Ì¤ì(€€€€€€€€€€€€€€€¥˜¡Í•É¥…°´ù±½… ¤„õÑ½­•¸¥É•ÑÕÉ¸É•ÍÕ±Ğì(€€€€€€€€€€€€€€€¥˜¡‘•¹½¥Í•¥É•Ğ¤Á¥á•±Ìõ‘•¹½¥Í•	¥±…Ñ•É…°¡Á¥á•±Ì±Ü± ±İ½É­•ÉÌ¤ì(€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹É•¹‘•É•ÈõÍ¡…‘½İI•ÕÍ•(€€€€€€€€€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ‰ATI…äQÉ…¥¹œƒŠP€”ÄÍÁÀ°½µ‰É•Ì•¸…¡”ˆ¤¹…Éœ¡Í…µÁ±•½Õ¹Ğ¤(€€€€€€€€€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ‰ATI…äQÉ…¥¹œƒŠP€”ÄÍÁÀ°½µ‰É•Ì…±Õ³¥•Ìˆ¤¹…Éœ¡Í…µÁ±•½Õ¹Ğ¤ì(€€€€€€€€€€€õ•±Í”É•ÍÕ±Ğ¹ÁÔõÑÉÕ”ì(€€€€€€€€€€€É•ÍÕ±Ğ¹µ¥±±¥Í•½¹‘ÌõÍÑ…ÑÌ¹µÌ­Í¡…‘½İ	Õ¥±‘5Ìì(€€€€€€€€€€€É•ÍÕ±Ğ¹É•¹‘•É•È¬õEMÑÉ¥¹1¥Ñ•É…° ˆƒŠP€”Ç\”Èˆ¤¹…Éœ¡Ü¤¹…Éœ¡ ¤ì(€€€€€€€€€€€¥˜¡É•ÍÕ±Ğ¹¹…Ñ¥Ù•…±±‰…¬¥ì(€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹É•¹‘•É•È¬õÙÕ±­…¸(€€€€€€€€€€€€€€€€€€€€ıEMÑÉ¥¹1¥Ñ•É…° ˆƒŠPÍ•½ÕÉÌ¥µ…”YÕ±­…¸Ù¥„E%µ…”€¡]M$¥¹‘¥ÍÁ½¹¥‰±”¤ˆ¤(€€€€€€€€€€€€€€€€€€€€éEMÑÉ¥¹1¥Ñ•É…° ˆƒŠPÍ•½ÕÉÌE%µ…”€¡a$¥¹‘¥ÍÁ½¹¥‰±”¤ˆ¤ì(€€€€€€€€€€€€€€€¥˜ …É•ÍÕ±Ğ¹¹…Ñ¥Ù•…¥±ÕÉ”¹¥ÍµÁÑä ¤¤(€€€€€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹É•¹‘•É•È¬õEMÑÉ¥¹1¥Ñ•É…° ˆƒŠPƒ¥¡•ŒÁË¥Í•¹Ñ…Ñ¥½¸¹…Ñ¥Ù”€è€”Äˆ¤(€€€€€€€€€€€€€€€€€€€€€€€€¹…Éœ¡É•ÍÕ±Ğ¹¹…Ñ¥Ù•…¥±ÕÉ”¤ì(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡É•ÍÕ±Ğ¹‘¥É•ÑAÉ•Í•¹Ñ•¥ì(€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹É•¹‘•É•È¬õEMÑÉ¥¹1¥Ñ•É…° ˆƒŠPƒ¥É…¸AT‘¥É•Ğ€¡Íİ…Á¡…¥¸¤ˆ¤ì(€€€€€€€€€€€€€€€É•ÑÕÉ¸É•ÍÕ±Ğì€¼¼9¼€Ğµ‰åÑ”µÁ•ÈµÁ¥á•°AT½E%µ…”…±±½…Ñ¥½¸¸(€€€€€€€€€€€ô(€€€€€€€€€€€¥˜¡•‘•€˜˜€…É…ÍÑ•È€˜˜Á¥á•±Ì¹Í¥é” ¤ôõÍ¥é•}Ğ¡Ü¤©Í¥é•}Ğ¡ ¤¤(€€€€€€€€€€€€€€€Á¥á•±Ìõ…¹Ñ¥…±¥…Í‘•ÌĞ¡Á¥á•±Ì±Ü± °Ğ±™…±Í”¤ì(€€€€€€€€€€€¥˜¡Á¥á•±Ì¹Í¥é” ¤„õÍ¥é•}Ğ¡Ü¤© ¥ì(€€€€€€€€€€€€€€€É•ÍÕ±Ğ¹•ÉÉ½È¬õEMÑÉ¥¹1¥Ñ•É…° ‰%µ…”¥¹½µÁ³¡Ñ”ˆ¤ì(€€€€€€€€€€€€€€€É•ÑÕÉ¸É•ÍÕ±Ğì(€€€€€€€€€€€ô(€€€€€€€€€€€E%µ…”¥µ…”¡Ü± ±E%µ…”èé½Éµ…Ñ}IÌÈ¤ì(€€€€€€€€€€€™½È¡¥¹ĞäôÀíäñ íä¬¬¥ÍÑèéµ•µÁä¡¥µ…”¹Í…¹1¥¹”¡ä¤±Á¥á•±Ì¹‘…Ñ„ ¤­Í¥é•}Ğ¡ä¤©Ü±Í¥é•}Ğ¡Ü¤¨Ğ¤ì(€€€€€€€€€€€É•ÍÕ±Ğ¹¥µ…”õÍÑèéµ½Ù”¡¥µ…”¤ì(€€€€€€€€€€€É•ÑÕÉ¸É•ÍÕ±Ğì(€€€€€€€ô¤¤ì(€€€ô)ôì)EMÑÉ¥¹œ‘•™…Õ±ÑA…Ñ  ¥ì(€€€½¹ÍĞEMÑÉ¥¹œ…ÁÀõE½É•ÁÁ±¥…Ñ¥½¸èé…ÁÁ±¥…Ñ¥½¹¥ÉA…Ñ  ¤ì(€€€½¹ÍĞEMÑÉ¥¹1¥ÍĞ…¹‘¥‘…Ñ•Íì(€€€€€€€€¼¼Q¡”±•…¸Á…­…”…±İ…åÌ½Á•¹ÌÑ¡”±…Ñ•ÍĞÙ…±¥‘…Ñ•Xà½XĞĞÀÍ•¹”¸(€€€€€€€€¼¼áÁ±¥¥Ğ1$Í•¹”…ÉÕµ•¹ÑÌÍÑ¥±°½Ù•ÉÉ¥‘”Ñ¡”‘•™…Õ±Ğ¸(€€€€€€€…ÁÀ­EMÑÉ¥¹1¥Ñ•É…° ˆ½‰•¹¡µ…É¬µ¥Ù¥Œ½Í•¹”¹©Í½¸ˆ¤°(€€€€€€€…ÁÀ­EMÑÉ¥¹1¥Ñ•É…° ˆ½‰•¹¡µ…É¬µ¥Ù¥Œ½Í•¹”µØĞĞÀµ…Õ‘¥Ğ¹©Í½¸ˆ¤°(€€€€€€€…ÁÀ­EMÑÉ¥¹1¥Ñ•É…° ˆ½Í•¹•Ì½ØÄØ½‰•¹¡µ…É¬µ¥Ù¥Œ½Í•¹”µØĞ¹©Í½¸ˆ¤°(€€€€€€€E¥ÈèéÕÉÉ•¹ÑA…Ñ  ¤­EMÑÉ¥¹1¥Ñ•É…° ˆ½Í•¹•Ì½ØÄØ½‰•¹¡µ…É¬µ¥Ù¥Œ½Í•¹”µØĞ¹©Í½¸ˆ¤°(€€€€€€€…ÁÀ­EMÑÉ¥¹1¥Ñ•É…° ˆ½Á…Ù¥±±½¸ÀÄ½Í•¹”¹©Í½¸ˆ¤°(€€€€€€€…ÁÀ­EMÑÉ¥¹1¥Ñ•É…° ˆ½Í•¹•Ì½ØÄØ½Á…Ù¥±±½¸ÀÄ½Í•¹”¹©Í½¸ˆ¤°(€€€€€€€E¥ÈèéÕÉÉ•¹ÑA…Ñ  ¤­EMÑÉ¥¹1¥Ñ•É…° ˆ½Í•¹•Ì½ØÄØ½Á…Ù¥±±½¸ÀÄ½Í•¹”¹©Í½¸ˆ¤(€€€ôì(€€€™½È¡½¹ÍĞ…ÕÑ¼˜Á…Ñ é…¹‘¥‘…Ñ•Ì¥¥˜¡E¥±•%¹™¼èé•á¥ÍÑÌ¡Á…Ñ ¤¥É•ÑÕÉ¸Á…Ñ ì(€€€É•ÑÕÉ¸EMÑÉ¥¹œ ¤ì)ô)ô)¥¹Ğµ…¥¸¡¥¹Ğ…ÉŒ±¡…È¨¨…ÉØ¥ì(€€€EÁÁ±¥…Ñ¥½¸…ÁÀ¡…ÉŒ±…ÉØ¤ì(€€€€¼¼M•Á…É…Ñ”‰•¹¡µ…É¬ÕÑ¥±¥Ñ¥•Ì¹••…•ÍÌÑ¼EĞ…¹Ñ¡”XÄØÉ•¹‘•É•È(€€€€¼¼10¥¸Ñ¡¥Ì¥¹ÍÑ…±±…Ñ¥½¸É½½Ğ°•Ù•¸İ¡•¸±…Õ¹¡•™É½´„ÍÕ‰‘¥É•Ñ½Éä¸(€€€½¹ÍĞE	åÑ•ÉÉ…ä¥¹ÍÑ…±±I½½ĞõE½É•ÁÁ±¥…Ñ¥½¸èé…ÁÁ±¥…Ñ¥½¹¥ÉA…Ñ  ¤¹Ñ½1½…°á	¥Ğ ¤ì(€€€ÅÁÕÑ•¹Ø ‰AQ ˆ±¥¹ÍÑ…±±I½½Ğ¬ˆìˆ­Å•Ñ•¹Ø ‰AQ ˆ¤¤ì(€€€ÅÁÕÑ•¹Ø ‰EQ}A1U%9}AQ ˆ±¥¹ÍÑ…±±I½½Ğ¤ì(€€€€¼¼U$…¹¥µ…Ñ¥½¸¥Ì¥¹Ñ•¹Ñ¥½¹…±±ä½ÁĞµ¥¸ì½™™±¥¹”AT‰•¹¡µ…É­ÌÉ•µ…¥¸(€€€€¼¼‘•Ñ•Éµ¥¹¥ÍÑ¥Œ™½ÈÍÑÉ¥ĞIÁ…É¥Ñä…¹É•É•ÍÍ¥½¸½µÁ…É¥Í½¹Ì¸(€€€ÅÁÕÑ•¹Ø ‰4Í}XÄİ}9%5Q}1=ULˆ°ˆÄˆ¤ì(€€€€¼¼MÁ±¥Ğ½¹±ä¥¹Ñ•É…Ñ¥Ù”É…ÍÑ•È½ÕÑÁÕĞ¥¹Ñ¼„Í­ä‰…­‘É½À…¹…¸(€€€€¼¼…±Á¡„µÁÉ•Í•ÉÙ¥¹œ…É¡¥Ñ•ÑÕÉ”™½É•É½Õ¹¸	•¹¡µ…É­ÌÍÑ…äÕ¹¡…¹•¸(€€€ÅÁÕÑ•¹Ø ‰4Í}XÄİ}MA1%Q}M-dˆ°ˆÄˆ¤ì(€€€E½É•ÁÁ±¥…Ñ¥½¸èéÍ•ÑÁÁ±¥…Ñ¥½¹9…µ”¡EMÑÉ¥¹1¥Ñ•É…° ‰M]I@	•Ñ„`XÄÜ¸”Äˆ¤(€€€€€€€€¹…Éœ¡M}]IA}	U%1}9U5	H¤¤ì(€€€E½É•ÁÁ±¥…Ñ¥½¸èéÍ•ÑÁÁ±¥…Ñ¥½¹Y•ÉÍ¥½¸¡EMÑÉ¥¹1¥Ñ•É…° ˆÄÜ¸”Äˆ¤(€€€€€€€€¹…Éœ¡M}]IA}	U%1}9U5	H¤¤ì(€€€½¹ÍĞ‰½½°Íİ¥Ñ¡Mµ½­”õ…ÉŒøôĞ(€€€€€€€€˜˜EMÑÉ¥¹œèé™É½µ1½…°á	¥Ğ¡…ÉÙlÅt¤ôõEMÑÉ¥¹1¥Ñ•É…° ˆ´µÍµ½­”µÍ•¹”µÍİ¥Ñ ˆ¤ì(€€€½¹ÍĞ‰½½°É•Á•…ÑMµ½­”õ…ÉŒøôÌ(€€€€€€€€˜˜EMÑÉ¥¹œèé™É½µ1½…°á	¥Ğ¡…ÉÙlÅt¤ôõEMÑÉ¥¹1¥Ñ•É…° ˆ´µÍµ½­”µÉ•Á•…ĞµÉ…ÍÑ•Èˆ¤ì(€€€½¹ÍĞ‰½½°İ…±­¥¹Mµ½­”õ…ÉŒøôÌ(€€€€€€€€˜˜EMÑÉ¥¹œèé™É½µ1½…°á	¥Ğ¡…ÉÙlÅt¤ôõEMÑÉ¥¹1¥Ñ•É…° ˆ´µÍµ½­”µİ…±­¥¹œµ½±±¥Í¥½¹Ìˆ¤ì(€€€½¹ÍĞ‰½½°Í½Á•Mµ½­”õ…ÉŒøôÌ(€€€€€€€€˜˜EMÑÉ¥¹œèé™É½µ1½…°á	¥Ğ¡…ÉÙlÅt¤ôõEMÑÉ¥¹1¥Ñ•É…° ˆ´µÍµ½­”µÍ½Á”µµ½ÕÍ”ˆ¤ì(€€€½¹ÍĞ‰½½°¥µµ•ÉÍ¥Ù•Mµ½­”õ…ÉŒøôÌ(€€€€€€€€˜˜EMÑÉ¥¹œèé™É½µ1½…°á	¥Ğ¡…ÉÙlÅt¤ôõEMÑÉ¥¹1¥Ñ•É…° ˆ´µÍµ½­”µ¥µµ•ÉÍ¥Ù”µµ½ÕÍ”ˆ¤ì(€€€½¹ÍĞ‰½½°¹…Ñ¥Ù•U¥Mµ½­”õ…ÉŒøôÈ(€€€€€€€€˜˜EMÑÉ¥¹œèé™É½µ1½…°á	¥Ğ¡…ÉÙlÅt¤ôõEMÑÉ¥¹1¥Ñ•É…° ˆ´µÍµ½­”µ¹…Ñ¥Ù”µÕ¤ˆ¤ì(€€€€¼¼UÍ”Ñ¡”Í…µ”]¥¹‘½İÌXÄÜ‰É…¹¥½¸™½ÈEĞÑ¥Ñ±•‰…È½±ĞµQ…ˆ½Ñ…Í­‰…È¸(€€€€¼¼Q¡”%<¥Ì…±Í¼•µ‰•‘‘•¥¸Ñ¡”aÌ¹…Ñ¥Ù”]¥¸ÌÈÉ•Í½ÕÉ•Ì¸(€€€½¹ÍĞEMÑÉ¥¹œ¥½¹A…Ñ õE½É•ÁÁ±¥…Ñ¥½¸èé…ÁÁ±¥…Ñ¥½¹¥ÉA…Ñ  ¤(€€€€€€€€­EMÑÉ¥¹1¥Ñ•É…° ˆ½Í•}İ…ÉÁ}ØÄÜ¹¥¼ˆ¤ì(€€€¥˜¡E¥±•%¹™¼èé•á¥ÍÑÌ¡¥½¹A…Ñ ¤¥…ÁÀ¹Í•Ñ]¥¹‘½İ%½¸¡E%½¸¡¥½¹A…Ñ ¤¤ì(€€€½¹ÍĞEMÑÉ¥¹œÁ…Ñ õ¹…Ñ¥Ù•U¥Mµ½­”ıEMÑÉ¥¹œ ¤è(€€€€€€€€¡Íİ¥Ñ¡Mµ½­•ññÉ•Á•…ÑMµ½­•ññİ…±­¥¹Mµ½­•ññÍ½Á•Mµ½­•ññ¥µµ•ÉÍ¥Ù•Mµ½­”(€€€€€€€€ıEMÑÉ¥¹œèé™É½µ1½…°á	¥Ğ¡…ÉÙlÉt¤(€€€€€€€€è¡…ÉŒøÄıEMÑÉ¥¹œèé™É½µ1½…°á	¥Ğ¡…ÉÙlÅt¤é‘•™…Õ±ÑA…Ñ  ¤¤¤ì(€€€€¼¼Q¡”Íµ½­”Ñ•ÍĞÕÍ•ÌÉ•‘Õ•Ñ•áÑÕÉ”É•Í½±ÕÑ¥½¸Ñ¼ÍÑ…äÙ¥…‰±”½¸(€€€€¼¼$ÌÍ½™Ñİ…É”µ½¹±ä]I@‘•Ù¥”¸9½Éµ…°XÄÜ­••ÁÌ™Õ±°€ÈÀĞàA	H¸(€€€XÄİ]¥¹‘½Üİ¥¹‘½Ü¡Á…Ñ °¡Íİ¥Ñ¡Mµ½­•ññÉ•Á•…ÑMµ½­•ññİ…±­¥¹Mµ½­•ññÍ½Á•Mµ½­•ññ¥µµ•ÉÍ¥Ù•Mµ½­”¤üÈÔØèÈÀĞà¤ì(€€€¥˜¡Íİ¥Ñ¡Mµ½­”¥İ¥¹‘½Ü¹Íµ½­•M•¹•Mİ¥Ñ ¡EMÑÉ¥¹œèé™É½µ1½…°á	¥Ğ¡…ÉÙlÍt¤¤ì(€€€¥˜¡É•Á•…ÑMµ½­”¥İ¥¹‘½Ü¹Íµ½­•I•Á•…ÑI…ÍÑ•È ¤ì(€€€¥˜¡İ…±­¥¹Mµ½­”¥İ¥¹‘½Ü¹Íµ½­•]…±­¥¹½±±¥Í¥½¹AÉ•™•É•¹” ¤ì(€€€¥˜¡Í½Á•Mµ½­”¥İ¥¹‘½Ü¹Íµ½­•M½Á•‘¥´ ¤ì(€€€¥˜¡¥µµ•ÉÍ¥Ù•Mµ½­”¥İ¥¹‘½Ü¹Íµ½­•%µµ•ÉÍ¥Ù•5½ÕÍ” ¤ì(€€€¥˜¡¹…Ñ¥Ù•U¥Mµ½­”¥İ¥¹‘½Ü¹Íµ½­•9…Ñ¥Ù•U¤ ¤ì(€€€¥˜ ……ÁÀ¹İ¥¹‘½İ%½¸ ¤¹¥Í9Õ±° ¤¥İ¥¹‘½Ü¹Í•Ñ]¥¹‘½İ%½¸¡…ÁÀ¹İ¥¹‘½İ%½¸ ¤¤ì(€€€İ¥¹‘½Ü¹Í¡½Ü ¤ì(€€€É•ÑÕÉ¸…ÁÀ¹•á•Œ ¤ì)ô(
