@@ -1,4 +1,4 @@
-// CSE WARP V17.432 -- dedicated hardware DirectX11 GPU trajectory benchmark.
+// CSE WARP V17.510 -- hardware DirectX11 benchmark (fixed camera or trajectory).
 // Only one existing scene, one glass-area camera, a six-second virtual movement.
 // Keeps the V17 raster shader and image quality unchanged. No full campaign.
 #define NOMINMAX
@@ -152,7 +152,7 @@ int main(int argc,char**argv){
  QCoreApplication app(argc,argv);
  QTextStream out(stdout),err(stderr);
  QStringList args=app.arguments();
- if(args.size()<3){err<<"Usage: CSE-WARP-GPU-TRAJET-BENCH.exe scene.json dossier_sortie [--ci-smoke] [--z-prepass=on|off] [--light-aabb=on|off]\n";return 2;}
+ if(args.size()<3){err<<"Usage: CSE-WARP-GPU-TRAJET-BENCH.exe scene.json dossier_sortie [--ci-smoke] [--fixed-camera] [--z-prepass=on|off] [--light-aabb=on|off]\n";return 2;}
  const auto configureSwitch=[&](const char* flag,const char* env)->bool{
   const QString option=QString::fromLatin1(flag);
   const bool on=args.contains(option+"=on"),off=args.contains(option+"=off");
@@ -167,6 +167,7 @@ int main(int argc,char**argv){
  const bool zEnabled=qgetenv("M3D_V17_EXPERIMENT_Z_PREPASS")=="1";
  const bool lightAabbEnabled=qgetenv("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL")=="1";
  const bool smoke=args.contains("--ci-smoke");
+ const bool fixedCamera=args.contains("--fixed-camera");
  const int w=smoke?640:1366,h=smoke?360:768;
  const int frames=smoke?4:90;
  const double virtualDuration=6.0;
@@ -206,18 +207,20 @@ int main(int argc,char**argv){
  SYSTEM_INFO sys{};GetSystemInfo(&sys);
  const unsigned logical=std::max(1u,unsigned(sys.dwNumberOfProcessors));
  const auto initialized=Clock::now();
- out<<"CSE WARP GPU D3D11 Raster trajectory, scene V17.430\n"
+ out<<"CSE WARP GPU D3D11 Raster "<<(fixedCamera?"fixed-camera":"trajectory")<<", scene V17.500\n"
     <<"Device: "<<video.adapterName<<"; "<<w<<"x"<<h<<"; frames="<<frames
-    <<"; virtual seconds="<<virtualDuration<<"; MSAA=2, PBR="<<(smoke?256:2048)
+    <<"; virtual seconds="<<(fixedCamera?0.0:virtualDuration)<<"; MSAA=2, PBR="<<(smoke?256:2048)
      <<"; Z-prepass="<<(zEnabled?"ON":"OFF")
      <<"; Local light AABB="<<(lightAabbEnabled?"ON":"OFF")<<"\n";
  out.flush();
 
  const auto shifted=[&](int n){
-  const float t=float(n)/float(std::max(1,frames-1));
   auto preset=*baseIt;
-  const float dx=(t-.5f)*5.4f; // same look direction, camera glides 5.4 m along glass
-  preset.eye.x+=dx;preset.target.x+=dx;
+  if(!fixedCamera){
+   const float t=float(n)/float(std::max(1,frames-1));
+   const float dx=(t-.5f)*5.4f; // same look direction, camera glides 5.4 m along glass
+   preset.eye.x+=dx;preset.target.x+=dx;
+  }
   return v16::makeCamera(preset,w,h);
  };
  std::vector<uint32_t> pixels;
@@ -244,7 +247,7 @@ int main(int argc,char**argv){
  double gpu3dSum=0;
  const auto runBegin=Clock::now();
  for(int i=0;i<frames;++i){
-  const double virtualT=virtualDuration*double(i)/double(frames-1);
+  const double virtualT=fixedCamera?0.0:virtualDuration*double(i)/double(frames-1);
   const auto cam=shifted(i);
   const double cpuStart=processCpuMs();
   const auto before=Clock::now();
@@ -309,15 +312,16 @@ int main(int argc,char**argv){
  const double cpuAvg=std::accumulate(procCpu.begin(),procCpu.end(),0.)/procCpu.size();
  const auto mem=memory();
  QJsonObject summary{
-  {"name","CSE WARP V17.432 GPU D3D11 Raster -- glass movement benchmark"},
+  {"name","CSE WARP V17.510 GPU D3D11 Raster benchmark"},
   {"driverMode",smoke?"Microsoft software WARP, CI only":"DirectX11 HARDWARE -- Intel HD620 when run on the Dell"},
   {"adapterName",video.adapterName},{"adapterVendorId",video.vendor},
   {"deviceIdentification","DXGI default adapter descriptor; verify HD620 on local machine"},
   {"scene",sceneFile},{"camera","v8_glazing_raccords"},
   {"zPrepassEnabled",zEnabled},{"lightAabbCullEnabled",lightAabbEnabled},
   {"width",w},{"height",h},{"msaaRequested",2},{"pbrTexturePx",smoke?256:2048},
-  {"sampleFrames",frames},{"virtualMovementSeconds",virtualDuration},
-  {"movementDistanceMeters",5.4},{"fixedScene",true},
+  {"sampleFrames",frames},{"cameraMode",fixedCamera?"fixed":"deterministic-trajectory"},
+  {"virtualMovementSeconds",fixedCamera?0.0:virtualDuration},
+  {"movementDistanceMeters",fixedCamera?0.0:5.4},{"fixedScene",true},
   {"logicalCpuCount",int(logical)},{"wallRenderSeconds",elapsed(runBegin,runEnd)/1000.0},
   {"preparationSeconds",elapsed(started,initialized)/1000.0},
   {"fpsDuringCalculation",1000.0/avg},
@@ -333,7 +337,7 @@ int main(int argc,char**argv){
        number(std::accumulate(gpuDrawTimes.begin(),gpuDrawTimes.end(),0.)/gpuDrawTimes.size())},
   {"memoryNote","DXGI local/shared usage represents adapter-wide usage, not this process only."},
   {"gpuNote","GPU Engine utilization counters may be unavailable on some Windows versions. Blank CSV means unavailable; no fabricated zeros."},
-  {"timingNote","Six seconds of deterministic virtual camera movement over 90 frames; elapsed benchmark time can differ."},
+  {"timingNote",fixedCamera?"Same camera pose rendered for all sample frames after two warmups; elapsed benchmark time can differ.":"Six seconds of deterministic virtual camera movement over 90 frames; elapsed benchmark time can differ."},
   {"featureFlagsNote","Z-prepass and experimental light AABB flags are captured from the actual environment used for this run."},
   {"files","frames.csv, summary.json, frame_000.png, frame_045.png, frame_089.png"}
  };

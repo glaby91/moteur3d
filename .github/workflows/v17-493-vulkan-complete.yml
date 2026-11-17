@@ -274,6 +274,8 @@ jobs:
           New-Item -Type Directory -Path "dist-v17" -Force | Out-Null
           Copy-Item "build-v17/Release/moteur3d_v17.exe" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v17_benchmark.exe" "dist-v17/"
+          Copy-Item "build-v17/Release/moteur3d_v17_gpu_trajectory.exe" "dist-v17/"
+          Copy-Item "v17/LANCER_BENCHMARK_DIRECTX11.bat" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v17_gibake.exe" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v17_campaign.exe" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v17_benchui.exe" "dist-v17/"
