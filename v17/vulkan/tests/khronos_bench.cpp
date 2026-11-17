@@ -218,7 +218,7 @@ int main(int argc,char** argv){
     const DWORD ownerThread=GetWindowThreadProcessId(hwnd,&ownerProcess);
     std::cerr<<"[WARP Khronos] WSI window HWND=0x"<<std::hex
              <<reinterpret_cast<uintptr_t>(hwnd)
-             <<" HINSTANCE=0x"<<reinterpret_cast<uintptr_t>(
+             <<" HINSTANCE=0x"<<static_cast<uintptr_t>(
                     GetWindowLongPtrW(hwnd,GWLP_HINSTANCE))
              <<" style=0x"<<GetWindowLongPtrW(hwnd,GWL_STYLE)
              <<" exStyle=0x"<<GetWindowLongPtrW(hwnd,GWL_EXSTYLE)
