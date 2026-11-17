@@ -1896,7 +1896,9 @@ private:
             const QString revision=githubRevision();
             const QString compileDate=QString::fromLatin1(__DATE__ " " __TIME__);
             const auto quality=rasterQualitySettings();
-            const bool zEnabled=qEnvironmentVariable("M3D_V17_EXPERIMENT_Z_PREPASS")==QStringLiteral("1");
+            const bool zEnabled=backendBox_->currentIndex()==5
+                ?qEnvironmentVariable("M3D_V17_DISABLE_Z_PREPASS")!=QStringLiteral("1")
+                :qEnvironmentVariable("M3D_V17_EXPERIMENT_Z_PREPASS")==QStringLiteral("1");
             const bool lightEnabled=qEnvironmentVariable("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL")==QStringLiteral("1");
             const QString backend=backendBox_?backendBox_->currentText():QStringLiteral("indéterminé");
             const QString details=QStringLiteral(
@@ -2917,7 +2919,9 @@ private:
             {"stutterPercent",stats.stutterPercent},
             {"queuedRequests",double(stats.queued)},
             {"invalidatedFrames",double(stats.invalidated)},
-            {"zPrepass",qEnvironmentVariable("M3D_V17_EXPERIMENT_Z_PREPASS")==QStringLiteral("1")},
+            {"zPrepass",backendBox_->currentIndex()==5
+                ?qEnvironmentVariable("M3D_V17_DISABLE_Z_PREPASS")!=QStringLiteral("1")
+                :qEnvironmentVariable("M3D_V17_EXPERIMENT_Z_PREPASS")==QStringLiteral("1")},
             {"lightAabbCull",qEnvironmentVariable("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL")==QStringLiteral("1")}
         };
         QFile jsonFile(root+QStringLiteral("/")+name+QStringLiteral(".json"));

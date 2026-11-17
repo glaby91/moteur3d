@@ -1031,12 +1031,12 @@ class VulkanRaster final {
         std::clog<<"[CSE WARP Vulkan] Readback color="<<(bgraReadback_?"BGRA8":"RGBA8")
                  <<" transfer="<<(srgbColorEnabled_?"sRGB hardware default":"legacy UNORM diagnostic")
                  <<" (no calibration, =0 legacy diagnostic)\n";
-        // Match the DX11 production default: the extra geometry pass is opt-in.
-        // Use M3D_V17_EXPERIMENT_Z_PREPASS=1 to compare on the target GPU.
-        const char* zPrepassEnv=std::getenv("M3D_V17_EXPERIMENT_Z_PREPASS");
-        depthPrepassEnabled_=zPrepassEnv&&std::strcmp(zPrepassEnv,"1")==0;
+        // Keep the measured Vulkan path as the default. An opt-out is available
+        // for controlled A/B comparisons on the same scene and camera.
+        const char* disableZPrepass=std::getenv("M3D_V17_DISABLE_Z_PREPASS");
+        depthPrepassEnabled_=!(disableZPrepass&&std::strcmp(disableZPrepass,"1")==0);
         std::clog<<"[CSE WARP Vulkan] Opaque Z-prepass="
-                 <<(depthPrepassEnabled_?"enabled (experimental)":"disabled (default)")<<"\n";
+                 <<(depthPrepassEnabled_?"enabled (default)":"disabled (diagnostic)")<<"\n";
         // Query the exact color and depth image sample counts as Khronos recommends.
         VkFormatProperties dp{};
         vkGetPhysicalDeviceFormatProperties(physical_,depthFormat_,&dp);
