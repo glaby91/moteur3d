@@ -181,6 +181,7 @@ class VulkanRaster final {
     uint32_t vertexCount_=0,transparentCount_=0,boxCount_=0,foliageCount_=0,foliageTemplateCount_=0;
     std::vector<vkmesh::TransparentTriangle> glass_;
     std::vector<size_t> glassOrder_; // reused across frames; preserves original sort order
+    std::vector<float> glassDepth_; // cached per-triangle camera depth for this frame
     std::vector<Chunk> chunks_,boxChunks_,foliageChunks_;
     std::vector<uint32_t> stagingColors_;
     std::array<int32_t,kMaxMaterials> protectedLayer_{};
@@ -1755,6 +1756,7 @@ class VulkanRaster final {
         }
         glass_=std::move(mesh.transparent);
         glassOrder_.resize(glass_.size());
+        glassDepth_.resize(glass_.size());
         transparentCount_=uint32_t(glass_.size()*3);
         if(transparentCount_)transparent_=buffer(size_t(transparentCount_)*sizeof(Vertex),
                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
@@ -2082,10 +2084,13 @@ public:
                     transparent_=buffer(size_t(transparentCount_)*sizeof(Vertex),
                         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
                 }
-                // CPU depth-sort transparent triangles every frame, then draw with depth-test but no depth-write.
+                // Cache one depth per triangle so std::sort compares scalar keys instead of
+                // recalculating both camera-space depths on every comparison.
+                for(size_t i=0;i<glass_.size();++i)
+                    glassDepth_[i]=dot(glass_[i].center-cam.eye,cam.f);
                 std::iota(glassOrder_.begin(),glassOrder_.end(),size_t(0));
                 std::sort(glassOrder_.begin(),glassOrder_.end(),[&](size_t a,size_t b){
-                    return dot(glass_[a].center-cam.eye,cam.f)>dot(glass_[b].center-cam.eye,cam.f);
+                    return glassDepth_[a]>glassDepth_[b];
                 });
                 auto* dest=static_cast<Vertex*>(transparent_.mapped);
                 for(size_t i=0;i<glassOrder_.size();i++)
