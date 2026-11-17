@@ -59,6 +59,7 @@
 #include <QPixmap>
 #include <QPushButton>
 #include <QScrollArea>
+#include <QScreen>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QSlider>
@@ -120,11 +121,13 @@ struct Result {
     bool gpu=false;
     bool skyCompositing=false; // DX11 sky pixels are transparent for Qt compositor
     bool directPresented=false; // DXGI or Vulkan native swapchain, no QImage
-    bool nativeFallback=false; // Native WSI unavailable: show the Vulkan QImage preview
+    bool nativeFallback=false; // Native DXGI/WSI unavailable: show the QImage preview
     QString nativeFailure; // Preserve exact Vulkan/DXGI presentation error after image fallback
+    QString nativeWindowDetails; // HWND, owning thread, client size and requested extent
     QString requestStamp;
     // Reject finished frames after a camera, material, backend or scene change.
     uint64_t generation=0;
+    int backendIndex=-1;
     quintptr renderThread=0;
 };
 struct SceneLoadOutcome {
@@ -136,6 +139,16 @@ struct SceneLoadOutcome {
 };
 class ImageView final : public QWidget {
 public:
+    explicit ImageView(QWidget* owner=nullptr):QWidget(owner){}
+    void setNativePresentation(bool enabled){
+        if(nativePresentation_==enabled)return;
+        nativePresentation_=enabled;
+        if(enabled)paintPending_=false;
+        setAttribute(Qt::WA_OpaquePaintEvent,enabled);
+        setAttribute(Qt::WA_NoSystemBackground,enabled);
+        if(!enabled)update();
+    }
+    bool nativePresentation()const{return nativePresentation_;}
     void setImage(QImage im){image_=std::move(im);paintPending_=true;update();}
     void enableSkyCompositing(bool enabled){
         skyCompositing_=enabled;
@@ -199,6 +212,9 @@ public:
     }
 protected:
     void paintEvent(QPaintEvent*) override {
+        // In direct mode this top-level HWND belongs to DXGI or Vulkan WSI.
+        // Qt must not repaint over a swapchain present.
+        if(nativePresentation_)return;
         QPainter p(this);
         p.fillRect(rect(),QColor(22,26,31));
         if(image_.isNull()) {
@@ -274,6 +290,7 @@ private:
     cse::weather::SkyCompositor skyComposer_;
     bool skyCompositing_=false,skyDirty_=true;
     bool paintPending_=false;
+    bool nativePresentation_=false;
     std::function<void()> presented_;
     QString placeholder_;
     QStringList hudLines_;
@@ -315,26 +332,27 @@ public:
             .arg(CSE_WARP_BUILD_NUMBER));
         resize(1510,900);
         setMinimumSize(1100,670);
-        canvas_=new ImageView;
-        canvas_->setFocusPolicy(Qt::StrongFocus);
-        canvas_->setMouseTracking(true);
-        canvas_->installEventFilter(this);
-        // Keep Qt docks and controls. The optional native Vulkan child HWND
-        // replaces only the central image, never the entire application.
-        auto* viewportRoot=new QWidget(this);
-        viewportStack_=new QStackedLayout(viewportRoot);
-        viewportStack_->setContentsMargins(0,0,0,0);
-        viewportStack_->addWidget(canvas_);
-        nativeWindow_=new QWindow;
-        // Qt owns this child HWND. Direct Vulkan creates its own Win32 surface
-        // from that HWND, matching the standalone WSI path already tested on HD620.
-        nativeWindow_->setSurfaceType(QSurface::RasterSurface);
-        nativeWindow_->setFlags(Qt::FramelessWindowHint);
-        nativeWindow_->installEventFilter(this);
-        nativeContainer_=QWidget::createWindowContainer(nativeWindow_,viewportRoot,
-                                                        Qt::FramelessWindowHint);
-        nativeContainer_->setFocusPolicy(Qt::StrongFocus);
-        nativeContainer_->installEventFilter(this);
+        // Every backend gets its own independent top-level HWND. Direct DX11
+        // and Vulkan present into their own ImageView HWND; CPU/compute/QImage
+        // modes paint into the matching window through the same view class.
+        // None of the render targets is embedded in the controls window.
+        for(int i=0;i<int(backendWindows_.size());++i){
+            // No owner window: Windows must allow the controls and each
+            // backend output to be raised independently.
+            auto* view=new ImageView;
+            view->setWindowFlag(Qt::Window,true);
+            view->setAttribute(Qt::WA_NativeWindow);
+            view->setFocusPolicy(Qt::StrongFocus);
+            view->setMouseTracking(true);
+            view->resize(1000,680);
+            view->move(pos()+QPoint(36,70));
+            view->setWindowTitle(QStringLiteral("CSE WARP — rendu dédié — backend %1")
+                .arg(i+1));
+            view->installEventFilter(this);
+            view->onPresented([this]{recordImagePresented();});
+            backendWindows_[size_t(i)]=view;
+        }
+        canvas_=backendWindows_[4];
         nativeRendererOverlay_=new QLabel(this,
             Qt::Tool|Qt::FramelessWindowHint|Qt::WindowDoesNotAcceptFocus);
         nativeRendererOverlay_->setObjectName(QStringLiteral("v17NativeRendererStamp"));
@@ -345,9 +363,11 @@ public:
             "QLabel { color: #dff7ff; background: rgba(9,15,22,220); "
             "border-radius: 6px; padding: 7px; font: bold 9pt \"Consolas\"; }"));
         nativeRendererOverlay_->raise();
-        viewportStack_->addWidget(nativeContainer_);
-        viewportStack_->setCurrentWidget(canvas_);
-        setCentralWidget(viewportRoot);
+        auto* controlsPlaceholder=new QLabel(
+            QStringLiteral("Chaque backend possède sa fenêtre de rendu dédiée. "
+                           "Sélectionnez un moteur puis actualisez la scène."),this);
+        controlsPlaceholder->setAlignment(Qt::AlignCenter);
+        setCentralWidget(controlsPlaceholder);
         frameTimer_.setInterval(16);
         connect(&frameTimer_, &QTimer::timeout, this, [this]{ frameTick(); });
         // The D3D11 preview owns a thread_local device and texture cache.
@@ -359,7 +379,7 @@ public:
         createUi();
         updateRendererStamp();
         // The combo box selected DirectX BEFORE its currentIndexChanged signal
-        // was connected. Activate its native child now, before show() and
+        // was connected. Select its dedicated output window now, before show() and
         // before asynchronous scene loading requests the first image.
         // Existing GUI smokes require the reference QImage path on CI's
         // offscreen Qt platform; the native-UI policy smoke is excluded.
@@ -372,7 +392,7 @@ public:
             const QSignalBlocker blocked(directDisplayBox_);
             directDisplayBox_->setChecked(false);
         }
-        switchNativeRenderViewport();
+        selectBackendOutputWindow();
         // A stationary camera must always display the native full-resolution
         // raster, regardless of the experimental launcher environment.
         peripheralExperimentEnabled_=
@@ -380,7 +400,6 @@ public:
         setRasterPeripheralMultiresOverride(0);
         pacingClock_.start();
         skyMotionClock_.start();
-        canvas_->onPresented([this]{recordImagePresented();});
         audioTimer_.setInterval(50); // 20 Hz spatial updates, independent from GPU images.
         connect(&audioTimer_,&QTimer::timeout,this,[this]{
             if(!radioPlaying_ || !runtime_)return;
@@ -435,13 +454,6 @@ public:
             }
             const auto outcome=watcher_.result();
             if(sceneLoading_)return;
-            if(outcome.nativeFallback && directDisplayBox_){
-                // Native DXGI/Vulkan presentation failed; keep the recovered image visible,
-                // and don't retry a failing swapchain every camera frame.
-                const QSignalBlocker blocked(directDisplayBox_);
-                directDisplayBox_->setChecked(false);
-                switchNativeRenderViewport();
-            }
             // A previous scene may finish after the user has opened a new one.
             // Never show its image or overwrite the current status bar.
             if(outcome.generation!=renderSerial_->load()){
@@ -449,20 +461,54 @@ public:
                 if(pending_){pending_=false;requestRender();}
                 return;
             }
-            if(outcome.nativeFallback&&!outcome.nativeFailure.isEmpty()){
-                const QString message=QStringLiteral("Vulkan natif indisponible : %1")
-                    .arg(outcome.nativeFailure);
+            const bool nativePresentationFailed=!outcome.nativeFailure.isEmpty();
+            if(nativePresentationFailed){
+                // Retain failures even if the user switched backends while
+                // the native WSI call was still in flight.
+                const int failedBackend=outcome.backendIndex;
+                if(failedBackend>=0&&failedBackend<int(nativeDirectFailed_.size())){
+                    nativeDirectFailed_[size_t(failedBackend)]=true;
+                    nativeDirectFailureReason_[size_t(failedBackend)]=outcome.nativeFailure;
+                }
+                const QString backend=failedBackend==5
+                    ?QStringLiteral("Vulkan"):QStringLiteral("DX11");
+                const QString message=QStringLiteral(
+                    "%1 direct a échoué : %2\n%3")
+                    .arg(backend,outcome.nativeFailure,outcome.nativeWindowDetails);
                 qWarning().noquote()<<message;
-                statusBar()->showMessage(message,30000);
+                saveNativePresentationDiagnostic(backend,outcome.nativeFailure,
+                                                  outcome.nativeWindowDetails);
+            }
+            if(outcome.backendIndex!=backendBox_->currentIndex()){
+                // A queued frame belongs to its original backend HWND. Never
+                // paint or report it as if it came from the newly selected one.
+                if(pending_){pending_=false;requestRender();}
+                return;
+            }
+            if(outcome.error.isEmpty()&&!outcome.nativeFallback&&
+               outcome.directPresented!=nativeDirectSelected()){
+                // Direct-display was toggled while this frame was in flight.
+                // Keep the frame's original HWND mode until completion, then
+                // immediately render again using the newly requested mode.
+                pending_=false;
+                requestRender();
+                return;
+            }
+            if(nativePresentationFailed){
+                // Keep the checked request, but stop retrying the unusable
+                // swapchain every camera frame. Toggling off/on retries it.
+                selectBackendOutputWindow();
             }
             if(outcome.error.isEmpty()&&(outcome.directPresented||!outcome.image.isNull())){
                 lastPresentedRenderer_=outcome.renderer;
-                lastPresentedRequest_=outcome.requestStamp;
                 if(!lastPresentedRenderer_.contains(QStringLiteral("(swapchain)"))&&
                    !lastPresentedRenderer_.contains(QStringLiteral("(QImage)")))
                     lastPresentedRenderer_+=outcome.directPresented
                         ?QStringLiteral(" — Direct GPU (swapchain)")
                         :QStringLiteral(" — affichage Qt (QImage)");
+                backendLastRenderer_[size_t(outcome.backendIndex)]=lastPresentedRenderer_;
+                backendLastRequest_[size_t(outcome.backendIndex)]=nativePresentationFailed
+                    ?requestedRendererStamp():outcome.requestStamp;
                 updateRendererStamp();
             }
             if(outcome.directPresented){
@@ -494,7 +540,25 @@ public:
             }
             // The completion message itself also remains until another action.
             // Errors leave the last successful render time visible.
-            statusBar()->showMessage(outcome.error.isEmpty()
+            const int completedBackend=outcome.backendIndex;
+            const bool directFallbackActive=directDisplayBox_&&directDisplayBox_->isChecked()&&
+                completedBackend>=0&&completedBackend<int(nativeDirectFailed_.size())&&
+                nativeDirectFailed_[size_t(completedBackend)];
+            if(nativePresentationFailed||directFallbackActive){
+                const QString backend=completedBackend==5
+                    ?QStringLiteral("Vulkan"):QStringLiteral("DX11");
+                const QString detail=completedBackend>=0&&
+                        completedBackend<int(nativeDirectFailureReason_.size())&&
+                        !nativeDirectFailureReason_[size_t(completedBackend)].isEmpty()
+                    ?nativeDirectFailureReason_[size_t(completedBackend)]
+                    :QStringLiteral("cause native non disponible");
+                const QString recovery=outcome.image.isNull()
+                    ?QStringLiteral("QImage de secours également indisponible")
+                    :QStringLiteral("QImage actif après échec direct");
+                statusBar()->showMessage(QStringLiteral(
+                    "%1 — %2 : %3. Diagnostic : %4. Décochez puis recochez pour retenter.")
+                    .arg(backend,recovery,detail,nativeDiagnosticLogPath()),30000);
+            }else statusBar()->showMessage(outcome.error.isEmpty()
                 ?QStringLiteral("%1 — %2 ms")
                       .arg(outcome.renderer).arg(outcome.milliseconds,0,'f',1)
                 :outcome.error);
@@ -518,28 +582,35 @@ public:
         if(!scenePath.isEmpty())
             QTimer::singleShot(0,this,[this,scenePath]{openScene(scenePath);});
     }
-    // UI contract smoke: DX11 and Win32 Vulkan WSI use the native child HWND.
+    // UI contract smoke: each renderer owns a unique top-level HWND.
     void smokeNativeUi(){
         QTimer::singleShot(0,this,[this]{
 #if defined(_WIN32)
             auto* quick=findChild<QComboBox*>(QStringLiteral("v17QuickRenderer"));
+            QSet<quintptr> handles;
+            bool allWindows=true;
+            for(auto* view:backendWindows_){
+                if(!view||!view->isWindow())allWindows=false;
+                else handles.insert(quintptr(view->winId()));
+            }
             const bool dx11Ready=backendBox_ && backendBox_->count()==6 &&
-                nativeWindow_ && nativeWindow_->surfaceType()==QSurface::RasterSurface &&
+                backendWindows_[4] && backendWindows_[4]->isWindow() &&
                 backendBox_->currentIndex()==4 && directDisplayBox_->isChecked() &&
                 backendBox_->itemText(5).contains(QStringLiteral("Vulkan")) &&
                 (backendBox_->model()->flags(backendBox_->model()->index(5,0)) &
                     Qt::ItemIsEnabled) &&
                 quick && quick->count()==6 &&
                 quick->itemText(5).contains(QStringLiteral("Vulkan")) &&
-                viewportStack_->currentWidget()==nativeContainer_;
+                canvas_==backendWindows_[4] && canvas_->testAttribute(Qt::WA_NativeWindow);
             backendBox_->setCurrentIndex(5);
             const bool vulkanVisiblePath=nativeDirectSelected() &&
                 directDisplayBox_->isEnabled() &&
-                viewportStack_->currentWidget()==nativeContainer_;
+                canvas_==backendWindows_[5] && canvas_!=backendWindows_[4] &&
+                backendWindows_[5]->isVisible() && !backendWindows_[4]->isVisible();
             backendBox_->setCurrentIndex(4);
-            switchNativeRenderViewport();
-            const bool ok=dx11Ready&&vulkanVisiblePath;
-            std::fprintf(stderr,"V17 RENDER VIEWPORT: %s, Vulkan=Win32 WSI/direct or Qt-image fallback\n",
+            selectBackendOutputWindow();
+            const bool ok=dx11Ready&&vulkanVisiblePath&&allWindows&&handles.size()==6;
+            std::fprintf(stderr,"V17 BACKEND WINDOWS: %s, six unique top-level HWNDs\n",
                 ok?"PASS":"FAIL");
             QCoreApplication::exit(ok?0:46);
 #else
@@ -735,11 +806,10 @@ public:
             const bool fpsReady=canvas_->isVisible();
             immersiveAction_->setChecked(true);
             QCoreApplication::processEvents();
-            const bool full=QWidget::isFullScreen()
-                &&!menuBar()->isVisible()&&!statusBar()->isVisible();
+            const bool full=canvas_->isFullScreen();
             immersiveAction_->setChecked(false);
             QCoreApplication::processEvents();
-            const bool back=!QWidget::isFullScreen()
+            const bool back=!canvas_->isFullScreen()
                 &&menuBar()->isVisible()&&statusBar()->isVisible();
             stopExploration();
             if(!(freeLookWorked&&eyeUnchanged&&full&&back&&fpsReady)){
@@ -761,14 +831,14 @@ public:
         audioTimer_.stop();
         stopRadio();
         renderSerial_->fetch_add(1);
-        // Drain both producers before destroying QWindow/QWidget. The native
-        // Win32 HWND must outlive the DXGI swapchain and VkSurfaceKHR.
+        // Drain both producers before destroying backend output windows. Their
+        // Win32 HWNDs must outlive DXGI swapchains and VkSurfaceKHR objects.
         loadWatcher_.waitForFinished();
         watcher_.waitForFinished();
 #if defined(_WIN32)
         // Raster backends keep thread_local Vulkan/D3D11 contexts in the
         // dedicated one-worker pool. Destroy them on their owning thread
-        // BEFORE QWidget::createWindowContainer destroys its child HWND.
+        // BEFORE their dedicated top-level HWNDs are destroyed.
         // This also covers closing directly after the first native frame.
         auto cleanup=QtConcurrent::run(&renderPool_,[]{
             releaseDirectX11NativeForCurrentThread();
@@ -777,10 +847,12 @@ public:
         });
         cleanup.waitForFinished();
 #endif
-#if defined(_WIN32)
-        if(nativeWindow_)nativeWindow_->destroy();
-#endif
-        if(viewportStack_ && canvas_)viewportStack_->setCurrentWidget(canvas_);
+        for(auto* view:backendWindows_){
+            if(view){
+                view->setNativePresentation(false);
+                delete view;
+            }
+        }
     }
 private:
     int textureResolution_=2048;
@@ -794,17 +866,36 @@ private:
     QSlider* radioVolumeSlider_=nullptr;
 
     ImageView* canvas_=nullptr;
+    std::array<ImageView*,6> backendWindows_{};
+    std::array<QString,6> backendLastRenderer_{};
+    std::array<QString,6> backendLastRequest_{};
+    std::array<bool,6> nativeDirectFailed_{};
+    std::array<QString,6> nativeDirectFailureReason_{};
+    int outputBackendIndex_=-1;
+    int activeRenderBackend_=-1;
+    bool activeRenderDirect_=false;
     QLabel* nativeHudLabel_=nullptr;
     QLabel* nativeFpsLabel_=nullptr;
     QLabel* nativeRendererOverlay_=nullptr;
     QString lastPresentedRenderer_;
-    QString lastPresentedRequest_;
-    QWindow* nativeWindow_=nullptr;
-    QWidget* nativeContainer_=nullptr;
-    QStackedLayout* viewportStack_=nullptr;
     QCheckBox* directDisplayBox_=nullptr;
     bool nativeReadyRetryQueued_=false;
     int nativeReadyAttempts_=0;
+    QDockWidget* sceneExplorerDock_=nullptr;
+    QDockWidget* renderControlsDock_=nullptr;
+    QDockWidget* anomalyReviewDock_=nullptr;
+    QRect explorationSavedMainGeometry_;
+    QRect explorationSavedRenderGeometry_;
+    QSize explorationSavedMinimumSize_;
+    bool explorationSavedSceneDockVisible_=false;
+    bool explorationSavedControlsDockVisible_=false;
+    bool explorationSavedReviewDockVisible_=false;
+    bool explorationSavedMenuVisible_=true;
+    bool explorationSavedMainMaximized_=false;
+    bool explorationSavedMainFullScreen_=false;
+    bool explorationSavedRenderMaximized_=false;
+    bool explorationSavedRenderFullScreen_=false;
+    bool explorationWindowLayoutActive_=false;
     QTimer frameTimer_;
     QTimer skyAnimationTimer_;
     QElapsedTimer skyMotionClock_;
@@ -826,7 +917,6 @@ private:
     bool peripheralExperimentEnabled_=false,peripheralDuringMotion_=false;
     QElapsedTimer lastMouseLookMotion_;
     QAction* immersiveAction_=nullptr;
-    std::vector<std::pair<QWidget*,bool>> fullscreenRestore_;
     double fpsFiltered_=0.0;
     float scopeBaseFov_=65.f,scopeBlend_=0.f;
     // Exact anomaly/replayed camera is kept until the next walking input.
@@ -1065,24 +1155,18 @@ private:
         updateCameraHud();
     }
     void captureMouseLook(){
-        if(!exploring_||mouseCaptured_||!canvas_||!isActiveWindow())return;
+        if(!exploring_||mouseCaptured_||!canvas_||
+           (!isActiveWindow()&&!canvas_->isActiveWindow()))return;
         mouseCaptured_=true;
-        if(nativeDirectSelected()){
-            nativeWindow_->setCursor(Qt::BlankCursor);
-            focusRenderViewport();
-            QCursor::setPos(nativeWindow_->mapToGlobal(
-                QPoint(nativeWindow_->width()/2,nativeWindow_->height()/2)));
-        }else{
-            canvas_->setCursor(Qt::BlankCursor);
-            canvas_->setFocus(Qt::OtherFocusReason);
-            QCursor::setPos(canvas_->mapToGlobal(canvas_->rect().center()));
-        }
+        canvas_->setCursor(Qt::BlankCursor);
+        focusRenderViewport();
+        QCursor::setPos(canvas_->mapToGlobal(canvas_->rect().center()));
     }
     void releaseMouseLook(){
         if(!mouseCaptured_)return;
         mouseCaptured_=false;
         if(canvas_)canvas_->unsetCursor();
-        if(nativeWindow_)nativeWindow_->unsetCursor();
+        for(auto* view:backendWindows_)if(view)view->unsetCursor();
     }
     void setMotionResolution(bool active){
         const bool next=peripheralExperimentEnabled_&&active;
@@ -1111,6 +1195,7 @@ private:
         rightMouseHeld_=false;
         lastMouseLookMotion_.invalidate();
         updateExplorationSpeedIndicator();
+        if(!closingRequested_)restoreExplorationWindows();
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Démarrer exploration (V17)"));
         if(explorationHelp_)explorationHelp_->setText(QStringLiteral(
             "ZQSD / flèches : marcher · souris : regarder librement · clic droit : lunette ×3\n"
@@ -1165,7 +1250,7 @@ private:
         updateCameraHud();
         frameTimer_.start();
         updateExplorationSpeedIndicator();
-        canvas_->setFocus();
+        arrangeExplorationWindows();
         captureMouseLook();
     }
     void frameTick(){
@@ -1284,6 +1369,9 @@ protected:
             event->ignore();
             return;
         }
+        // The controls window owns the application lifetime. Closing it must
+        // not leave any independent renderer window keeping Qt alive.
+        for(auto* view:backendWindows_)if(view)view->hide();
         QMainWindow::closeEvent(event);
     }
     bool event(QEvent* e) override {
@@ -1293,25 +1381,30 @@ protected:
             });
         }
         if(e->type()==QEvent::WindowDeactivate){
-            // Alt+Tab / focus loss must never leave the pointer hidden or
-            // the rifle scope button logically stuck in the pressed state.
-            releaseMouseLook();
-            rightMouseHeld_=false;
+            // Output views are separate top-level windows. Give Qt one event
+            // turn to activate the renderer before treating this as Alt+Tab.
+            QTimer::singleShot(0,this,[this]{
+                if(!isActiveWindow()&&(!canvas_||!canvas_->isActiveWindow())){
+                    releaseMouseLook();
+                    rightMouseHeld_=false;
+                }
+            });
         }
         return QMainWindow::event(e);
     }
     bool eventFilter(QObject* watched,QEvent* event) override{
-        if(watched==nativeWindow_ && event->type()==QEvent::Resize &&
+        if(watched==canvas_&&event->type()==QEvent::WindowActivate&&exploring_)
+            QTimer::singleShot(0,this,[this]{if(exploring_)captureMouseLook();});
+        if(watched==canvas_ && event->type()==QEvent::Resize &&
            nativeDirectSelected() && runtime_ && !sceneLoading_){
-            // DXGI swapchain extent must track the physical child HWND size.
-            // Defer until Qt finishes its native window resize transaction.
+            // The backend's private swapchain must follow its top-level HWND.
+            // Defer until Qt finishes the native resize transaction.
             QTimer::singleShot(0,this,[this]{
                 if(nativeDirectSelected()&&!closingRequested_)requestRender();
             });
         }
-        if((watched==canvas_||watched==nativeWindow_||watched==nativeContainer_) && exploring_){
-            if((watched==nativeWindow_||watched==nativeContainer_) &&
-               (event->type()==QEvent::KeyPress || event->type()==QEvent::KeyRelease)){
+        if(watched==canvas_ && exploring_){
+            if(event->type()==QEvent::KeyPress || event->type()==QEvent::KeyRelease){
                 if(event->type()==QEvent::KeyPress)
                     keyPressEvent(static_cast<QKeyEvent*>(event));
                 else keyReleaseEvent(static_cast<QKeyEvent*>(event));
@@ -1338,10 +1431,7 @@ protected:
             }
             if(event->type()==QEvent::MouseMove && mouseCaptured_){
                 auto* e=static_cast<QMouseEvent*>(event);
-                const bool direct=nativeDirectSelected()&&watched!=canvas_;
-                const QPoint center=direct?
-                    QPoint(nativeWindow_->width()/2,nativeWindow_->height()/2):
-                    canvas_->rect().center();
+                const QPoint center=canvas_->rect().center();
                 const QPoint delta=e->pos()-center;
                 // Qt generates a synthetic move when the cursor is recentered.
                 // Ignore it. No click is required to look around.
@@ -1353,8 +1443,7 @@ protected:
                 pitch_=clampf(pitch_-dy*sensitivity,-1.48f,1.48f);
                 lastMouseLookMotion_.restart();
                 updateLook();
-                QCursor::setPos(direct?nativeWindow_->mapToGlobal(center):
-                                          canvas_->mapToGlobal(center));
+                QCursor::setPos(canvas_->mapToGlobal(center));
                 return true;
             }
         }
@@ -1830,6 +1919,7 @@ private:
         auto* restoreAnomaly=anomaliesMenu->addAction(QStringLiteral("Retour a la position initiale"));
         connect(restoreAnomaly,&QAction::triggered,this,[this]{returnBeforeAnomaly();});
         auto* reviewDock=new QDockWidget(QStringLiteral("Validation des anomalies"),this);
+        anomalyReviewDock_=reviewDock;
         auto* reviewWidget=new QWidget(reviewDock);
         auto* reviewLayout=new QVBoxLayout(reviewWidget);
         anomalyPanelLabel_=new QLabel(QStringLiteral(
@@ -1953,6 +2043,7 @@ private:
         });
 
         auto* left=new QDockWidget(QStringLiteral("Explorateur de scène"),this);
+        sceneExplorerDock_=left;
         auto* tabs=new QTabWidget;
         sceneTree_=new QTreeWidget;
         sceneTree_->setHeaderLabels({QStringLiteral("Hiérarchie"),QStringLiteral("Matériau")});
@@ -1965,6 +2056,7 @@ private:
         left->resize(360,720);
 
         auto* right=new QDockWidget(QStringLiteral("Rendu et matériaux"),this);
+        renderControlsDock_=right;
         auto* controls=new QWidget;
         auto* vertical=new QVBoxLayout(controls);
         radioToggleButton_=new QPushButton(QStringLiteral("Reprendre la radio"),controls);
@@ -1993,11 +2085,11 @@ private:
             "Affichage GPU direct natif (DX11 / Vulkan)"));
 #ifdef _WIN32
         // Vulkan direct presentation uses an engine-owned Win32 surface on the
-        // native child HWND; the QWindow itself stays a plain Qt raster child.
+        // private top-level HWND, isolated from every other renderer window.
         directDisplayBox_->setCheckState(Qt::Checked);
         directDisplayBox_->setToolTip(QStringLiteral(
-            "DX11 : swapchain DXGI. Vulkan : swapchain Win32 WSI créée par le moteur "
-            "sur la fenêtre Qt native. Décocher pour afficher via QImage."));
+            "DX11 et Vulkan présentent dans leur HWND dédié. Décocher pour afficher "
+            "le rendu de ce backend via QImage."));
 #else
         directDisplayBox_->setChecked(false);
         directDisplayBox_->setEnabled(false);
@@ -2051,7 +2143,7 @@ private:
         qualityBox_=new QComboBox;
         // Keep native and Full HD side by side. Store explicit width/height
         // instead of deriving them from an index or assuming exact 16:9.
-        qualityBox_->addItem(QStringLiteral("Viewport adaptatif — taille du panneau 3D"),QSize());
+        qualityBox_->addItem(QStringLiteral("Viewport adaptatif — taille de la fenêtre moteur"),QSize());
         qualityBox_->addItem(QStringLiteral("Dell natif 1366 × 768"),QSize(1366,768));
         qualityBox_->addItem(QStringLiteral("Full HD 1920 × 1080"),QSize(1920,1080));
         qualityBox_->addItem(QStringLiteral("QHD 2560 × 1440"),QSize(2560,1440));
@@ -2330,8 +2422,8 @@ private:
         addDockWidget(Qt::RightDockWidgetArea,left);
         tabifyDockWidget(right,left);
         right->raise();
-        // True fullscreen (not just hidden docks), preserving the editor
-        // layout for a reversible F11 return.
+        // F11 controls the dedicated render window, leaving these controls
+        // available behind it.
         auto* viewMenu=menuBar()->addMenu(QStringLiteral("Affichage"));
         auto* hudToggle=viewMenu->addAction(QStringLiteral("Afficher les coordonnées caméra (HUD)"));
         hudToggle->setCheckable(true);
@@ -2343,32 +2435,19 @@ private:
             QSettings cfg(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
             cfg.setValue(QStringLiteral("Camera/ShowHUD"),enabled);
             updateCameraHud();
+            updateRendererStamp();
         });
         immersiveAction_=viewMenu->addAction(QStringLiteral("Plein écran 3D (F11)"));
         immersiveAction_->setCheckable(true);
         immersiveAction_->setShortcut(QKeySequence(Qt::Key_F11));
         immersiveAction_->setShortcutContext(Qt::ApplicationShortcut);
-        // F11 must remain available even while the menu bar is hidden.
+        // Application shortcut keeps F11 available while a render window has focus.
         addAction(immersiveAction_);
+        for(auto* view:backendWindows_)if(view)view->addAction(immersiveAction_);
         connect(immersiveAction_,&QAction::toggled,this,[this](bool enabled){
-            if(enabled){
-                fullscreenRestore_.clear();
-                const auto hideRemembered=[this](QWidget* w){
-                    if(!w)return;
-                    fullscreenRestore_.emplace_back(w,w->isVisible());
-                    w->hide();
-                };
-                for(auto* dock:findChildren<QDockWidget*>())hideRemembered(dock);
-                for(auto* bar:findChildren<QToolBar*>())hideRemembered(bar);
-                hideRemembered(menuBar());
-                hideRemembered(statusBar());
-                showFullScreen();
-            }else{
-                showNormal();
-                for(const auto& entry:fullscreenRestore_)
-                    if(entry.first)entry.first->setVisible(entry.second);
-                fullscreenRestore_.clear();
-            }
+            if(!canvas_)return;
+            if(enabled){canvas_->showFullScreen();canvas_->raise();}
+            else canvas_->showNormal();
             QTimer::singleShot(0,this,[this]{
                 if(exploring_){
                     releaseMouseLook();
@@ -2394,20 +2473,29 @@ private:
             directDisplayBox_->setEnabled(index==4 || (index==5&&vulkanDirectAvailable()));
             directDisplayBox_->setToolTip(index==5
                 ?(vulkanDirectAvailable()
-                    ?QStringLiteral("Vulkan : swapchain Win32 sur le HWND natif de la vue.")
+                    ?QStringLiteral("Vulkan : swapchain Win32 dans sa fenêtre dédiée.")
                     :QStringLiteral("Vulkan Win32 WSI indisponible dans cette compilation."))
-                :QStringLiteral("DX11 : swapchain native. Décochez pour afficher le rendu via Qt."));
+                :QStringLiteral("DX11 : swapchain dans sa fenêtre dédiée. Décochez pour afficher l’image Qt."));
             directSamples_->setEnabled(index==0);
             denoiseDirect_->setEnabled(index==0);
             giSamples_->setEnabled(gi);
             progressiveGi_->setEnabled(gi);
             denoiseGi_->setEnabled(gi);
-            switchNativeRenderViewport();
+            selectBackendOutputWindow();
             restoreExplorationViewportFocus();
             requestRender();
         });
         connect(directDisplayBox_,&QCheckBox::toggled,this,[this](bool){
-            switchNativeRenderViewport();
+            if(backendBox_){
+                const int index=backendBox_->currentIndex();
+                if(index>=0&&index<int(nativeDirectFailed_.size())){
+                    nativeDirectFailed_[size_t(index)]=false;
+                    nativeDirectFailureReason_[size_t(index)].clear();
+                }
+            }
+            nativeReadyAttempts_=0;
+            selectBackendOutputWindow();
+            updateRendererStamp();
             restoreExplorationViewportFocus();
             requestRender();
         });
@@ -2603,11 +2691,26 @@ private:
         sceneLoadLabel_->setText(QStringLiteral("Chargement de la scène…"));
         sceneLoadLabel_->show();
         sceneLoadProgress_->show();
-        canvas_->setImage(QImage{});
-        canvas_->setCameraHud({},false);
+        lastImage_=QImage{};
+        hasRenderedPose_=false;
+        for(auto* view:backendWindows_){
+            if(!view)continue;
+            // A native-present worker cannot be interrupted mid-Present. Keep
+            // Qt from painting over its HWND until that frame leaves the GPU.
+            const bool preserveInFlightPresent=watcher_.isRunning()&&
+                activeRenderDirect_&&activeRenderBackend_>=0&&
+                activeRenderBackend_<int(backendWindows_.size())&&
+                view==backendWindows_[size_t(activeRenderBackend_)];
+            view->setNativePresentation(preserveInFlightPresent);
+            view->setImage(QImage{});
+            view->setCameraHud({},false);
+            view->enableSkyCompositing(false);
+            view->setPlaceholder(QStringLiteral("CSE WARP V17\nChargement de la scène…"));
+        }
+        backendLastRenderer_.fill(QString{});
+        backendLastRequest_.fill(QString{});
         hasRenderedPose_=false;
         freeCameraActive_=false;
-        canvas_->setPlaceholder(QStringLiteral("CSE WARP V17\nChargement de la scène…"));
         cameraBox_->setEnabled(false);
         if(explorationButton_)explorationButton_->setEnabled(false);
         if(bakeGiButton_)bakeGiButton_->setEnabled(false);
@@ -2734,7 +2837,7 @@ private:
 #endif
         if(isStressScene)backendBox_->setCurrentIndex(4);
         sceneLoading_=false;
-        switchNativeRenderViewport();
+        selectBackendOutputWindow();
         canvas_->setPlaceholder(extremeStress
             ?QStringLiteral("Scène extrême chargée. Cliquez sur Calculer l'image pour lancer le rendu.")
             :QStringLiteral("Scène chargée. Calcul de la première image…"));
@@ -2799,33 +2902,172 @@ private:
     }
     bool nativeDirectSelected() const{
 #ifdef _WIN32
-        // DX11 uses DXGI; Vulkan uses an engine-owned Win32 surface on the
-        // same native Qt child HWND. Both present directly into the viewport.
-        return backendBox_ && (backendBox_->currentIndex()==4 ||
-               (backendBox_->currentIndex()==5 && vulkanDirectAvailable())) &&
-               directDisplayBox_ && directDisplayBox_->isChecked();
+        // Each native backend presents into its own backend-specific top-level
+        // ImageView HWND; DXGI and Vulkan never share a target window.
+        if(!backendBox_||!directDisplayBox_||!directDisplayBox_->isChecked())return false;
+        const int index=backendBox_->currentIndex();
+        return (index==4||(index==5&&vulkanDirectAvailable()))&&
+               !nativeDirectFailed_[size_t(index)];
 #else
         return false;
 #endif
     }
     void focusRenderViewport(){
-        if(nativeDirectSelected()&&nativeWindow_){
-            nativeContainer_->setFocus(Qt::OtherFocusReason);
-            nativeWindow_->requestActivate();
-        }else if(canvas_)canvas_->setFocus(Qt::OtherFocusReason);
+        if(canvas_){
+            canvas_->setFocus(Qt::OtherFocusReason);
+            canvas_->raise();
+            canvas_->activateWindow();
+        }
     }
     void restoreExplorationViewportFocus(){
         if(!exploring_)return;
-        // Changing the backend or the direct-display checkbox takes keyboard
-        // focus away from the render child. Keep the camera pose and rebind
-        // mouse-look to the newly selected viewport after Qt finishes swapping
-        // the stacked widget; otherwise Vulkan renders only the entry frame.
+        // Changing the backend or direct-display mode moves focus between
+        // independent top-level views. Rebind mouse-look after Qt activates
+        // the newly selected output window.
         releaseMouseLook();
         QTimer::singleShot(0,this,[this]{
             if(!exploring_||closingRequested_)return;
             focusRenderViewport();
             captureMouseLook();
         });
+    }
+    void arrangeExplorationWindows(){
+        if(explorationWindowLayoutActive_||!canvas_)return;
+        QScreen* screen=QGuiApplication::screenAt(frameGeometry().center());
+        if(!screen)screen=QGuiApplication::primaryScreen();
+        if(!screen)return;
+        const QRect area=screen->availableGeometry();
+        if(area.width()<900||area.height()<500)return;
+
+        explorationSavedMainGeometry_=geometry();
+        explorationSavedRenderGeometry_=canvas_->geometry();
+        explorationSavedMinimumSize_=minimumSize();
+        explorationSavedMainMaximized_=isMaximized();
+        explorationSavedMainFullScreen_=isFullScreen();
+        explorationSavedRenderMaximized_=canvas_->isMaximized();
+        explorationSavedRenderFullScreen_=canvas_->isFullScreen();
+        explorationSavedSceneDockVisible_=sceneExplorerDock_&&sceneExplorerDock_->isVisible();
+        explorationSavedControlsDockVisible_=renderControlsDock_&&renderControlsDock_->isVisible();
+        explorationSavedReviewDockVisible_=anomalyReviewDock_&&anomalyReviewDock_->isVisible();
+        explorationSavedMenuVisible_=menuBar()&&menuBar()->isVisible();
+        explorationWindowLayoutActive_=true;
+
+        // Compact the controls into the right-hand band; hide secondary panels
+        // and keep the renderer in the larger left window.
+        if(sceneExplorerDock_)sceneExplorerDock_->hide();
+        if(anomalyReviewDock_)anomalyReviewDock_->hide();
+        if(renderControlsDock_){
+            renderControlsDock_->show();
+            renderControlsDock_->raise();
+        }
+        if(centralWidget())centralWidget()->hide();
+        if(menuBar())menuBar()->hide();
+        setMinimumSize(360,500);
+        const int bandWidth=std::clamp(area.width()/4,380,480);
+        const int renderWidth=area.width()-bandWidth;
+        const QRect renderRect(area.left(),area.top(),renderWidth,area.height());
+        const QRect bandRect(area.left()+renderWidth,area.top(),bandWidth,area.height());
+        if(canvas_->isMinimized()||canvas_->isFullScreen())canvas_->showNormal();
+        canvas_->setGeometry(renderRect);
+        if(isMinimized()||isFullScreen())showNormal();
+        setGeometry(bandRect);
+        show();
+        raise();
+        canvas_->show();
+        focusRenderViewport();
+        updateRendererStamp();
+        QTimer::singleShot(0,this,[this]{
+            if(exploring_&&!closingRequested_){
+                focusRenderViewport();
+                captureMouseLook();
+            }
+        });
+    }
+    void restoreExplorationWindows(){
+        if(!explorationWindowLayoutActive_)return;
+        explorationWindowLayoutActive_=false;
+        setMinimumSize(explorationSavedMinimumSize_);
+        if(centralWidget())centralWidget()->show();
+        if(menuBar())menuBar()->setVisible(explorationSavedMenuVisible_);
+        if(sceneExplorerDock_)sceneExplorerDock_->setVisible(explorationSavedSceneDockVisible_);
+        if(renderControlsDock_)renderControlsDock_->setVisible(explorationSavedControlsDockVisible_);
+        if(anomalyReviewDock_)anomalyReviewDock_->setVisible(explorationSavedReviewDockVisible_);
+        if(!explorationSavedMainGeometry_.isEmpty())setGeometry(explorationSavedMainGeometry_);
+        if(canvas_&&!explorationSavedRenderGeometry_.isEmpty())
+            canvas_->setGeometry(explorationSavedRenderGeometry_);
+        if(explorationSavedMainFullScreen_)showFullScreen();
+        else if(explorationSavedMainMaximized_)showMaximized();
+        if(canvas_){
+            if(explorationSavedRenderFullScreen_)canvas_->showFullScreen();
+            else if(explorationSavedRenderMaximized_)canvas_->showMaximized();
+        }
+        raise();
+        activateWindow();
+        updateRendererStamp();
+    }
+    QString describeNativeWindow(quintptr nativeHandle,QSize requested,qreal dpr) const{
+#if defined(_WIN32)
+        const HWND hwnd=reinterpret_cast<HWND>(nativeHandle);
+        DWORD ownerProcess=0;
+        const DWORD ownerThread=hwnd?GetWindowThreadProcessId(hwnd,&ownerProcess):0;
+        RECT client{};
+        const bool hasClient=hwnd&&GetClientRect(hwnd,&client);
+        wchar_t className[128]{};
+        const int classLength=hwnd?GetClassNameW(hwnd,className,128):0;
+        const QString classText=classLength>0
+            ?QString::fromWCharArray(className,classLength):QStringLiteral("<indisponible>");
+        const auto hinstance=hwnd?GetWindowLongPtrW(hwnd,GWLP_HINSTANCE):0;
+        const auto style=hwnd?GetWindowLongPtrW(hwnd,GWL_STYLE):0;
+        const auto exStyle=hwnd?GetWindowLongPtrW(hwnd,GWL_EXSTYLE):0;
+        return QStringLiteral(
+            "HWND=0x%1 IsWindow=%2 ownerThread=%3 process=%4 HINSTANCE=0x%5 "
+            "style=0x%6 exStyle=0x%7 class=%8 client=%9x%10 target=%11x%12 DPR=%13")
+            .arg(QString::number(qulonglong(nativeHandle),16))
+            .arg(hwnd&&IsWindow(hwnd)?1:0)
+            .arg(ownerThread).arg(ownerProcess)
+            .arg(QString::number(qulonglong(hinstance),16))
+            .arg(QString::number(qulonglong(style),16))
+            .arg(QString::number(qulonglong(exStyle),16))
+            .arg(classText)
+            .arg(hasClient?client.right-client.left:0)
+            .arg(hasClient?client.bottom-client.top:0)
+            .arg(requested.width()).arg(requested.height())
+            .arg(dpr,0,'f',3);
+#else
+        Q_UNUSED(nativeHandle);
+        return QStringLiteral("Win32 window diagnostics unavailable; target=%1x%2 DPR=%3")
+            .arg(requested.width()).arg(requested.height()).arg(dpr,0,'f',3);
+#endif
+    }
+    QString nativeDiagnosticLogPath() const{
+        return QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
+            +QStringLiteral("/CSE WARP/Diagnostics/V17.522-native-presentation.jsonl");
+    }
+    void saveNativePresentationDiagnostic(const QString& backend,
+                                          const QString& reason,
+                                          const QString& windowDetails){
+        const QString path=nativeDiagnosticLogPath();
+        const QString directory=QFileInfo(path).absolutePath();
+        QDir().mkpath(directory);
+        QFile file(path);
+        if(file.open(QIODevice::WriteOnly|QIODevice::Append|QIODevice::Text)){
+            const QJsonObject record{
+                {QStringLiteral("time"),QDateTime::currentDateTime().toString(Qt::ISODateWithMs)},
+                {QStringLiteral("version"),QStringLiteral("17.522")},
+                {QStringLiteral("backend"),backend},
+                {QStringLiteral("reason"),reason},
+                {QStringLiteral("window"),windowDetails}
+            };
+            file.write(QJsonDocument(record).toJson(QJsonDocument::Compact));
+            file.write("\n");
+        }
+        const QString summary=reason.isEmpty()
+            ?QStringLiteral("cause native non fournie par le backend")
+            :reason;
+        statusBar()->showMessage(QStringLiteral(
+            "%1 direct indisponible ; QImage actif. %2 — diagnostic détaillé : %3. "
+            "Décochez puis recochez l’option pour retenter.")
+            .arg(backend,summary,path),30000);
     }
     QString requestedRendererStamp() const {
         if(!backendBox_)return QStringLiteral("Rendu en attente");
@@ -2834,41 +3076,85 @@ private:
         if(index==4)name=QStringLiteral("V17 D3D11 Raster");
         else if(index==5)name=QStringLiteral("V17 Vulkan Raster");
         const bool direct=(index==4||index==5)&&directDisplayBox_&&directDisplayBox_->isChecked();
-        name+=direct?QStringLiteral(" — Direct GPU (swapchain)")
-                    :QStringLiteral(" — affichage Qt (QImage)");
+        if(direct&&index>=0&&index<int(nativeDirectFailed_.size())&&
+           nativeDirectFailed_[size_t(index)])
+            name+=QStringLiteral(" — direct demandé, QImage actif après échec");
+        else name+=direct?QStringLiteral(" — Direct GPU (swapchain)")
+                         :QStringLiteral(" — affichage Qt (QImage)");
         return name;
     }
     void updateRendererStamp(){
         const QString requested=requestedRendererStamp();
-        const bool pending=requested!=lastPresentedRequest_;
-        if(canvas_)canvas_->setRendererStamp(lastPresentedRenderer_,pending?requested:QString{});
+        const int index=backendBox_?std::clamp(backendBox_->currentIndex(),0,
+            int(backendWindows_.size())-1):0;
+        const QString displayed=backendLastRenderer_[size_t(index)];
+        const bool pending=requested!=backendLastRequest_[size_t(index)];
+        if(canvas_)canvas_->setRendererStamp(displayed,pending?requested:QString{});
         if(nativeRendererOverlay_){
-            const QString shown=lastPresentedRenderer_.isEmpty()
+            const QString shown=displayed.isEmpty()
                 ?QStringLiteral("Affiché : aucun rendu pour l’instant")
-                :QStringLiteral("Affiché : %1").arg(lastPresentedRenderer_);
+                :QStringLiteral("Affiché : %1").arg(displayed);
             const QString waiting=pending
                 ?QStringLiteral("\nDemandé : %1").arg(requested):QString{};
-            nativeRendererOverlay_->setText(shown+waiting);
-            if(nativeContainer_){
-                nativeRendererOverlay_->move(nativeContainer_->mapToGlobal(QPoint(12,12)));
-                nativeRendererOverlay_->setFixedSize(470,50);
+            // Direct swapchain presentation bypasses ImageView::paintEvent,
+            // including its camera HUD. Keep the live camera readout on the
+            // native output window as well as in the controls status bar.
+            const QString camera=cameraHudEnabled_&&nativeHudLabel_&&
+                    !nativeHudLabel_->text().isEmpty()
+                ?QStringLiteral("\n%1").arg(nativeHudLabel_->text()):QString{};
+            nativeRendererOverlay_->setText(shown+waiting+camera);
+            if(canvas_){
+                nativeRendererOverlay_->move(canvas_->mapToGlobal(QPoint(12,12)));
+                nativeRendererOverlay_->setFixedSize(470,70);
             }
-            nativeRendererOverlay_->setVisible(nativeDirectSelected());
-            if(nativeDirectSelected())nativeRendererOverlay_->raise();
+            nativeRendererOverlay_->setVisible(nativeDirectSelected()&&canvas_&&canvas_->isVisible());
+            if(nativeDirectSelected()&&canvas_&&canvas_->isVisible())
+                nativeRendererOverlay_->raise();
         }
     }
-    void switchNativeRenderViewport(){
-        if(!viewportStack_)return;
+    void selectBackendOutputWindow(){
+        if(!backendBox_)return;
+        const int index=std::clamp(backendBox_->currentIndex(),0,
+                                   int(backendWindows_.size())-1);
+        const bool backendChanged=outputBackendIndex_!=index;
+        outputBackendIndex_=index;
+        canvas_=backendWindows_[size_t(index)];
+        // Keep the native status overlay owned and stacked with the renderer
+        // HWND, not with the controls window on the other side of the screen.
+        if(nativeRendererOverlay_&&nativeRendererOverlay_->parentWidget()!=canvas_)
+            nativeRendererOverlay_->setParent(canvas_,
+                Qt::Tool|Qt::FramelessWindowHint|Qt::WindowDoesNotAcceptFocus);
+        canvas_->setWindowTitle(QStringLiteral("CSE WARP V17.%1 — %2 — fenêtre dédiée")
+            .arg(CSE_WARP_BUILD_NUMBER).arg(backendBox_->itemText(index)));
         const bool direct=nativeDirectSelected();
-        const QWidget* target=direct?nativeContainer_:canvas_;
-        if(viewportStack_->currentWidget()!=target)
-            viewportStack_->setCurrentWidget(direct?nativeContainer_:canvas_);
+        if(backendChanged||direct){
+            // The global export/sky state belongs to the selected output.
+            // Never carry another backend's QImage into this window.
+            lastImage_=QImage{};
+            hasRenderedPose_=false;
+            canvas_->setImage(QImage{});
+            canvas_->enableSkyCompositing(false);
+            backendLastRenderer_[size_t(index)].clear();
+            backendLastRequest_[size_t(index)].clear();
+        }
+        for(int i=0;i<int(backendWindows_.size());++i){
+            auto* view=backendWindows_[size_t(i)];
+            if(!view)continue;
+            const bool preserveInFlightPresent=watcher_.isRunning()&&
+                activeRenderDirect_&&i==activeRenderBackend_;
+            view->setNativePresentation((i==index&&direct)||preserveInFlightPresent);
+            if(i==index){
+                if(isVisible()){
+                    if(view->isMinimized())view->showNormal();
+                    else view->show();
+                    view->raise();
+                }
+            }else view->hide();
+        }
         updateRendererStamp();
         if(direct){
-            // Do not display an old capture after choosing native presentation.
-            lastImage_=QImage{};
             statusBar()->showMessage(QStringLiteral(
-                "Affichage natif DX11/Vulkan : swapchain GPU, sans QImage ; "
+                "Fenêtre backend dédiée — affichage GPU direct (swapchain), sans QImage ; "
                 "décocher pour les captures PNG"),7000);
         }
     }
@@ -2961,28 +3247,44 @@ private:
     void requestRender(){
         updateRendererStamp();
         if(sceneLoading_||!runtime_||runtime_->cameras.isEmpty())return;
-        // Never submit DXGI/Vulkan to an unshown QWindow (Qt initializes
-        // hidden native children at 100x0, previously clamped to 100x64).
-        // Wait for QWidget::createWindowContainer to own a visible, sized HWND.
+        // Select the persistent top-level output HWND dedicated to this backend
+        // before creating its DXGI/Vulkan surface.
+        if(backendBox_){
+            const int selected=std::clamp(backendBox_->currentIndex(),0,
+                                          int(backendWindows_.size())-1);
+            if(canvas_!=backendWindows_[size_t(selected)]||!canvas_->isVisible()||
+               canvas_->nativePresentation()!=nativeDirectSelected())
+                selectBackendOutputWindow();
+        }
         if(nativeDirectSelected()){
-            if(viewportStack_->currentWidget()!=nativeContainer_)
-                switchNativeRenderViewport();
-            const QSize child=nativeWindow_->size();
-            const QSize container=nativeContainer_->size();
-            const bool ready=nativeContainer_->isVisible() &&
-                nativeWindow_->isVisible() &&
-                container.width()>=320 && container.height()>=200 &&
-                child.width()>=320 && child.height()>=200 &&
-                std::abs(child.width()-container.width())<=4 &&
-                std::abs(child.height()-container.height())<=4;
+            if(!canvas_->isVisible())
+                selectBackendOutputWindow();
+            const QSize target=canvas_->size();
+            const bool ready=canvas_->isVisible() &&
+                target.width()>=320 && target.height()>=200 &&
+                canvas_->testAttribute(Qt::WA_NativeWindow);
             if(!ready){
                 if(++nativeReadyAttempts_>40){
                     nativeReadyAttempts_=0;
-                    // Don't lie about successful presentation into a hidden
-                    // 100x64 swapchain. Restore the lossless QImage path.
-                    directDisplayBox_->setChecked(false);
-                    statusBar()->showMessage(QStringLiteral(
-                        "Fenêtre GPU native indisponible : mode Qt classique rétabli."),12000);
+                    // Keep the requested mode checked, latch this backend to
+                    // QImage, and allow the user to retry by toggling it.
+                    const int failedBackend=backendBox_->currentIndex();
+                    if(failedBackend>=0&&failedBackend<int(nativeDirectFailed_.size())){
+                        nativeDirectFailed_[size_t(failedBackend)]=true;
+                        nativeDirectFailureReason_[size_t(failedBackend)]=
+                            QStringLiteral("La fenêtre n’a pas fourni un HWND visible aux dimensions requises.");
+                    }
+                    const QString backend=failedBackend==5
+                        ?QStringLiteral("Vulkan"):QStringLiteral("DX11");
+                    const QString windowDetails=describeNativeWindow(
+                        quintptr(canvas_->winId()),target,canvas_->devicePixelRatioF());
+                    if(failedBackend>=0&&failedBackend<int(nativeDirectFailureReason_.size()))
+                        saveNativePresentationDiagnostic(
+                            backend,nativeDirectFailureReason_[size_t(failedBackend)],windowDetails);
+                    selectBackendOutputWindow();
+                    QTimer::singleShot(0,this,[this]{
+                        if(!closingRequested_&&!sceneLoading_&&runtime_)requestRender();
+                    });
                 }else if(!nativeReadyRetryQueued_){
                     nativeReadyRetryQueued_=true;
                     QTimer::singleShot(50,this,[this]{
@@ -3003,7 +3305,11 @@ private:
         }
         const uint64_t token=serial->fetch_add(1)+1;
         auto snapshot=runtime_;
+        ImageView* const outputView=canvas_;
+        const int requestedBackend=backendBox_->currentIndex();
         const bool directPresent=nativeDirectSelected();
+        activeRenderBackend_=requestedBackend;
+        activeRenderDirect_=directPresent;
         // V17.493 uses an independent 30 Hz Qt sky compositor. Vulkan WSI
         // bypasses that QWidget, so sample the SAME monotonic solar clock on
         // each native frame rather than the slower 1.5 s UI spinbox timer.
@@ -3033,13 +3339,11 @@ private:
         }
         int w=renderSize.width();
         int h=renderSize.height();
-        // A swapchain always targets the visible child window's real pixel
+        // A swapchain always targets this backend's visible top-level HWND
         // extent; the offscreen quality resolution is irrelevant in this mode.
-        if(directPresent && nativeWindow_){
-            const qreal dpr=nativeWindow_->devicePixelRatio();
-            // The QWidget container is the layout authority; the child
-            // QWindow is known to have the same logical extent (guard above).
-            const QSize logicalSize=nativeContainer_->size();
+        if(directPresent && outputView){
+            const qreal dpr=outputView->devicePixelRatioF();
+            const QSize logicalSize=outputView->size();
             renderSize=QSize(std::max(320,int(logicalSize.width()*dpr)),
                              std::max(200,int(logicalSize.height()*dpr)));
             // The camera and renderer MUST use the native viewport dimensions.
@@ -3048,7 +3352,10 @@ private:
             w=renderSize.width();
             h=renderSize.height();
         }
-        const quintptr nativeHandle=directPresent?quintptr(nativeWindow_->winId()):0;
+        const quintptr nativeHandle=directPresent?quintptr(outputView->winId()):0;
+        const qreal nativeDpr=directPresent&&outputView?outputView->devicePixelRatioF():1.0;
+        const QString nativeWindowDetails=directPresent
+            ?describeNativeWindow(nativeHandle,QSize(w,h),nativeDpr):QString{};
         const bool wantGpu=backend==1||backend==4||backend==5;
         const bool raster=backend==4||backend==5;
         const bool vulkan=backend==5;
@@ -3082,14 +3389,23 @@ private:
         const auto shadowCache=cpuShadows_;
         watcher_.setFuture(QtConcurrent::run(&renderPool_,[this,serial,token,snapshot,preset,w,h,wantGpu,
             globalIllumination,raster,vulkan,directPresent,nativeHandle,sharedVulkanInstance,
-            sharedVulkanSurface,edgeAA,sampleCount,maxBounces,progressive,denoise,
+            sharedVulkanSurface,edgeAA,sampleCount,maxBounces,progressive,denoise,outputView,requestedBackend,
+            nativeWindowDetails,
             denoiseDirect,shadowCache,renderHour,shadowHour,requestStamp]{
             Result result;
             result.requestStamp=requestStamp;
             result.cameraPose=preset;
             result.generation=token;
+            result.backendIndex=requestedBackend;
+            result.nativeWindowDetails=nativeWindowDetails;
             result.skyCompositing=raster;
             result.renderThread=reinterpret_cast<quintptr>(QThread::currentThreadId());
+#if defined(_WIN32)
+            if(!result.nativeWindowDetails.isEmpty())
+                result.nativeWindowDetails+=QStringLiteral(" renderThreadWin32=%1 renderThreadQt=0x%2")
+                    .arg(GetCurrentThreadId())
+                    .arg(QString::number(qulonglong(result.renderThread),16));
+#endif
             updateLighting(renderHour);
             const auto camera=v16::makeCamera(preset,w,h);
             std::vector<uint32_t> pixels;
@@ -3138,7 +3454,7 @@ private:
                         }
                     }
                     if(vulkan){
-                        releaseDirectX11NativeForCurrentThread(); // HWND is shared by the native view
+                        releaseDirectX11NativeForCurrentThread(); // DXGI belongs to a different backend HWND.
                         // Keep one Vulkan device/resource set resident for the selected path.
                         if(directPresent)releaseVulkanPreviewForCurrentThread();
                         else releaseVulkanDirectForCurrentThread();
@@ -3166,7 +3482,7 @@ private:
                         }
                     }else{
                         // Vulkan WSI and DXGI must never own swapchains for the
-                        // same child HWND at the same time. Also release the
+                        // same backend HWND at the same time. Also release the
                         // offscreen renderer when leaving Vulkan.
                         releaseVulkanDirectForCurrentThread();
                         releaseVulkanPreviewForCurrentThread();
@@ -3177,11 +3493,18 @@ private:
                         if(!ok && directPresent){
                             // DXGI can be unavailable on remote desktop / certain drivers:
                             // recover the original full-quality CPU/QImage preview.
+                            const std::wstring nativeReason=reason;
+                            result.nativeFailure=QString::fromStdWString(nativeReason);
                             releaseDirectX11NativeForCurrentThread();
                             reason.clear();
                             ok=renderDirectX11Preview(snapshot->renderScene,*shadow,camera,w,h,
                                                       pixels,stats,reason);
                             result.nativeFallback=ok;
+                            if(!ok){
+                                const std::wstring previewReason=reason;
+                                reason=L"DXGI native presentation failed: "+nativeReason+
+                                       L"; DirectX 11 image preview also failed: "+previewReason;
+                            }
                         }
                     }
                     result.directPresented=ok&&directPresent&&!result.nativeFallback;
@@ -3268,10 +3591,10 @@ private:
                             std::memcpy(image.scanLine(y),display.data()+size_t(y)*w,size_t(w)*4);
                         if(progressive&&completed<sampleCount){
                             QMetaObject::invokeMethod(this,
-                                [this,serial,token,count=completed,target=sampleCount,w,h,image=std::move(image)]() mutable {
+                                [this,serial,token,outputView,count=completed,target=sampleCount,w,h,image=std::move(image)]() mutable {
                                     if(serial->load()!=token)return;
-                                    lastImage_=std::move(image);
-                                    canvas_->setImage(lastImage_);
+                                    if(outputView==canvas_)lastImage_=image;
+                                    outputView->setImage(std::move(image));
                                     statusBar()->showMessage(
                                         QStringLiteral("GI progressive — %1 / %2 échantillons (%3×%4)")
                                             .arg(count).arg(target).arg(w).arg(h));

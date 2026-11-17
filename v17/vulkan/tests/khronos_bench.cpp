@@ -213,6 +213,20 @@ int main(int argc,char** argv){
         nullptr,nullptr,wc.hInstance,nullptr);
     if(!hwnd){std::cerr<<"Win32 CreateWindow failed\n";return 3;}
     ShowWindow(hwnd,SW_SHOWNORMAL);UpdateWindow(hwnd);
+    RECT client{};GetClientRect(hwnd,&client);
+    DWORD ownerProcess=0;
+    const DWORD ownerThread=GetWindowThreadProcessId(hwnd,&ownerProcess);
+    std::cerr<<"[WARP Khronos] WSI window HWND=0x"<<std::hex
+             <<reinterpret_cast<uintptr_t>(hwnd)
+             <<" HINSTANCE=0x"<<reinterpret_cast<uintptr_t>(
+                    GetWindowLongPtrW(hwnd,GWLP_HINSTANCE))
+             <<" style=0x"<<GetWindowLongPtrW(hwnd,GWL_STYLE)
+             <<" exStyle=0x"<<GetWindowLongPtrW(hwnd,GWL_EXSTYLE)
+             <<std::dec<<" ownerThread="<<ownerThread
+             <<" renderThread="<<GetCurrentThreadId()
+             <<" process="<<ownerProcess
+             <<" client="<<client.right-client.left<<"x"<<client.bottom-client.top
+             <<" requested="<<w<<"x"<<h<<"\n";
     m3d::updateLighting(14.75f);
     // Scene-local lights are passed through Scene::lights; do not link to
     // the unexported global pointLights symbol from the core DLL.
