@@ -257,7 +257,7 @@ def main():
  objects=[]
  for n,(x,z) in enumerate(pot_centers):
   variant=n # use all eight approved GLB colour variants once
-# Dalles du parvis : centre y=.118, épaisseur .075, donc dessus à .155 m.
+  # Dalles du parvis : centre y=.118, épaisseur .075, donc dessus à .155 m.
   # Le pot est posé 2,5 cm au-dessus pour éviter l'intersection avec le sol.
   objects.extend(i3.place('pot'+str(variant),'Architecture/Facade/Grandes jardinières GLB 1970',[x,.18,z],[1,1,1],0,'pot'+str(n)))
   # Le modèle Bush with Flowers donne une masse plus basse et large que les arbres
