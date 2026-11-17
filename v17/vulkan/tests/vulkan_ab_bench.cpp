@@ -91,7 +91,7 @@ int main(int argc,char** argv) {
  const size_t ignoredLights=availableLights-uploadedLights;
  std::cout<<"[CSE WARP A/B] lights: generated="<<generatedPointLights
           <<" scene="<<sceneLights<<" uploaded="<<uploadedLights
-          <<"/"<<kVulkanLightLimit<<" ignored="<<ignoredLights<<"\\n";
+          <<"/"<<kVulkanLightLimit<<" ignored="<<ignoredLights<<"\n";
  m3d::Stats shadowStats{};
  const auto shadow=m3d::buildShadow(scene,shadowStats);
  const auto base=built.runtime.cameras.first();
