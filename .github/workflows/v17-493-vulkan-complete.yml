@@ -275,6 +275,8 @@ jobs:
           Copy-Item "build-v17/Release/moteur3d_v17_gpu_trajectory.exe" "dist-v17/"
           Copy-Item "v17/LANCER_BENCHMARK_DIRECTX11.bat" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v17_gibake.exe" "dist-v17/"
+          New-Item -ItemType Directory -Force "dist-v17/outils/gi" | Out-Null
+          Copy-Item "build-v17/Release/moteur3d_v17_gibake.exe" "dist-v17/outils/gi/" -Force
           Copy-Item "build-v17/Release/moteur3d_v17_campaign.exe" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v17_benchui.exe" "dist-v17/"
           Copy-Item "build-v17/v16/Release/moteur3d_v16.exe" "dist-v17/"
@@ -521,6 +523,8 @@ jobs:
           }
           foreach ($file in @(
             "$dist/moteur3d_v17.exe",
+            "$dist/moteur3d_v17_gibake.exe",
+            "$dist/outils/gi/moteur3d_v17_gibake.exe",
             "$dist/moteur3d_v16_core.dll",
             "$dist/platforms/qwindows.dll",
             "$dist/Qt6Core.dll",

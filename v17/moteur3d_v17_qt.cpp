@@ -2348,11 +2348,16 @@ private:
         bakeGiProcess_=new QProcess(this);
         connect(bakeGiButton_,&QPushButton::clicked,this,[this]{
             if(scenePath_.isEmpty()||bakeGiProcess_->state()!=QProcess::NotRunning)return;
-            const QString exe=QCoreApplication::applicationDirPath()
-                +QStringLiteral("/outils/gi/moteur3d_v17_gibake.exe");
+            const QString appDir=QCoreApplication::applicationDirPath();
+            QString exe=appDir+QStringLiteral("/outils/gi/moteur3d_v17_gibake.exe");
+            // V17 distributables historically placed auxiliary tools beside
+            // the main executable. Prefer the organized path, then accept that
+            // existing package layout so GI bake works with either archive.
+            if(!QFileInfo::exists(exe))
+                exe=appDir+QStringLiteral("/moteur3d_v17_gibake.exe");
             if(!QFileInfo::exists(exe)){
                 QMessageBox::warning(this,QStringLiteral("Précalcul GI"),
-                    QStringLiteral("Exécutable moteur3d_v17_gibake.exe absent du dossier de l'application."));
+                    QStringLiteral("Exécutable moteur3d_v17_gibake.exe introuvable dans outils/gi ni à côté de l'application."));
                 return;
             }
             bakingScenePath_=scenePath_;
@@ -2971,9 +2976,12 @@ private:
         const int renderWidth=area.width()-bandWidth;
         const QRect renderRect(area.left(),area.top(),renderWidth,area.height());
         const QRect bandRect(area.left()+renderWidth,area.top(),bandWidth,area.height());
-        if(canvas_->isMinimized()||canvas_->isFullScreen())canvas_->showNormal();
+        // setGeometry() does not leave Qt's maximized state. Normalize both
+        // top-level windows first so the requested left/right layout takes effect.
+        if(canvas_->isMinimized()||canvas_->isMaximized()||canvas_->isFullScreen())
+            canvas_->showNormal();
         canvas_->setGeometry(renderRect);
-        if(isMinimized()||isFullScreen())showNormal();
+        if(isMinimized()||isMaximized()||isFullScreen())showNormal();
         setGeometry(bandRect);
         show();
         raise();

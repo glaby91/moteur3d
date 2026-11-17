@@ -758,7 +758,11 @@ class VulkanRaster final {
         vkcheck(vkEndCommandBuffer(cmd_),"end commands");
         VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
         si.commandBufferCount=1;si.pCommandBuffers=&cmd_;
-        VkPipelineStageFlags acquireStage=VK_PIPELINE_STAGE_TRANSFER_BIT;
+        // The acquired image is first touched by a TOP_OF_PIPE -> TRANSFER
+        // layout transition. Waiting only at TRANSFER can let the transition
+        // run before WSI has released the image on some drivers. Cover the
+        // complete command buffer so the first transition is also protected.
+        VkPipelineStageFlags acquireStage=VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
         if(presentIndex>=0){
             si.waitSemaphoreCount=1;si.pWaitSemaphores=&imageAcquired_;
             si.pWaitDstStageMask=&acquireStage;
@@ -1134,9 +1138,13 @@ class VulkanRaster final {
             if(requestedFrames && std::strcmp(requestedFrames,"1")!=0 &&
                std::strcmp(requestedFrames,"2")!=0)
                 throw std::runtime_error("CSE_WARP_VK_FRAMES_IN_FLIGHT accepts 1 or 2");
-            // Dedicated HD620 optimization branch defaults to two when testing
-            // native WSI. CSE_WARP_VK_FRAMES_IN_FLIGHT=1 restores baseline.
-            asyncFrames_=!requestedFrames || std::strcmp(requestedFrames,"2")==0;
+            // Keep native presentation on the serial, fence-complete baseline
+            // unless two frames are explicitly requested for profiling. This
+            // avoids exposing the experimental async path as the default on
+            // drivers where WSI and camera-driven presents are not yet proven.
+            asyncFrames_=requestedFrames && std::strcmp(requestedFrames,"2")==0;
+            std::clog<<"[CSE WARP Vulkan] native frames in flight="
+                     <<(asyncFrames_?2:1)<<" (set CSE_WARP_VK_FRAMES_IN_FLIGHT=2 to profile async)\n";
         }
         vkGetDeviceQueue(device_,family_,0,&queue_);
         VkCommandPoolCreateInfo cp{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};cp.queueFamilyIndex=family_;
