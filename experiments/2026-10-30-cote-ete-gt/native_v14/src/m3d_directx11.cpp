@@ -293,7 +293,9 @@ float4 PSMain(VSOut i):SV_TARGET {
             float3 rawBitangent = (-dpdx * duvdy.x + dpdy * duvdx.x) / determinant;
             tangent = normalize(tangent - normal * dot(normal, tangent));
             float3 bitangent = normalize(cross(normal, tangent)) * (dot(cross(normal, tangent), rawBitangent) < 0.0 ? -1.0 : 1.0);
-            normal = normalize(tangent * detailNormal.x + bitangent * detailNormal.y + normal * detailNormal.z);
+            // V17.600: a modest tangent-space gain restores visible material relief
+            // without tessellation or changing silhouette geometry.
+            normal = normalize(tangent * (detailNormal.x * 1.25) + bitangent * (detailNormal.y * 1.25) + normal * detailNormal.z);
         }
     }
     float diffuse = saturate(dot(normal, normalize(lightDir)));
@@ -440,7 +442,7 @@ float4 PSMain(VSOut i):SV_TARGET {
         float3 positive=max(color,0.0);
         float luminance=dot(positive,float3(.2126,.7152,.0722));
         float adjusted=luminance*colorControls.y;
-        float compressed=adjusted/(1.0+.82*max(adjusted-.63,0.0));
+        float compressed=adjusted/(1.0+.70*max(adjusted-.63,0.0));
         color=positive*(compressed/max(luminance,0.000001));
     }
     if(poolWater){

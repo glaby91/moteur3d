@@ -12,13 +12,15 @@ La campagne complète peut inclure les scènes fournies et deux caméras par sc�
 
 ## Lancer
 
-Ouvrir `moteur3d_v17_benchui.exe`, laisser coché **Full Benchmark : DirectX 11 Raster + Vulkan Raster + CPU Ray Tracing direct**, régler séries/images/échauffement, puis lancer.
+Le package V17.600 n'installe pas d'interface de benchmark dans le moteur. Depuis une invite de commandes, lancer `LANCER_BENCHMARK.bat` avec le manifeste de scène, le dossier de sortie et les options souhaitées. Le benchmark tourne dans la console et ne démarre pas l'interface principale.
 
 En ligne de commande :
 
 ```text
-moteur3d_v17_campaign.exe <scene.json> <dossier-sortie> --full-benchmark
+LANCER_BENCHMARK.bat <scene.json> <dossier-sortie> --full-benchmark
 ```
+
+Le lanceur appelle `moteur3d_v17_campaign.exe`.
 
 Ajouter `--all-scenes` pour toutes les scènes livrées et `--include-cpu` pour le profil multi-thread CPU et le diagnostic Compute DX11.
 

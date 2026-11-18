@@ -34,6 +34,7 @@
 #include <QToolBar>
 #include <QProcess>
 #include <QProgressBar>
+#include <QRegularExpression>
 #include <QDateTime>
 #include <QStandardPaths>
 #include <QFormLayout>
@@ -931,6 +932,11 @@ private:
     bool cameraHudEnabled_=true;
     bool hasRenderedPose_=false;
     v16::CameraPreset lastRenderedPose_;
+    int selectedSceneCameraIndex() const {
+        if(!runtime_||runtime_->cameras.isEmpty()||!cameraBox_)return 0;
+        const int source=cameraBox_->currentData().toInt();
+        return std::clamp(source,0,int(runtime_->cameras.size())-1);
+    }
     QPushButton* explorationButton_=nullptr;
     QLabel* explorationHelp_=nullptr;
     QLabel* explorationSpeedLabel_=nullptr;
@@ -938,7 +944,7 @@ private:
         if(freeCameraActive_)return freeCamera_;
         v16::CameraPreset pose;
         if(!runtime_||runtime_->cameras.isEmpty())return pose;
-        const int idx=std::clamp(cameraBox_->currentIndex(),0,int(runtime_->cameras.size())-1);
+        const int idx=selectedSceneCameraIndex();
         pose=runtime_->cameras[idx];
         const V dir=pose.eye-pose.target;
         const float angle=float(azimuth_->value())*PI/180.f;
@@ -1136,7 +1142,7 @@ private:
     }
     void activateFreeCamera(){
         if(!runtime_||runtime_->cameras.isEmpty())return;
-        const int idx=std::clamp(cameraBox_->currentIndex(),0,int(runtime_->cameras.size())-1);
+        const int idx=selectedSceneCameraIndex();
         freeCamera_=runtime_->cameras[idx];
         resetScopeForCamera();
         const V dir=norm(freeCamera_.target-freeCamera_.eye);
@@ -1852,6 +1858,7 @@ private:
                 openScene(target);
             });
         }
+        benchmarkScenes->menuAction()->setVisible(false);
         auto* saveMaterialsAction=file->addAction(QStringLiteral("Enregistrer les matériaux PBR…"));
         connect(saveMaterialsAction,&QAction::triggered,this,[this]{saveMaterials();});
         auto* save=file->addAction(QStringLiteral("Exporter l'image PNG…"));
@@ -1876,7 +1883,7 @@ private:
             action->setEnabled(false);
             const int index=i;
             connect(action,&QAction::triggered,this,[this,index]{
-                if(!runtime_||index>=runtime_->cameras.size())return;
+                if(!runtime_||index>=cameraBox_->count())return;
                 const bool changed=cameraBox_->currentIndex()!=index;
                 cameraBox_->setCurrentIndex(index);
                 azimuth_->setValue(0);
@@ -1995,6 +2002,7 @@ private:
             if(!QProcess::startDetached(path,arguments,QCoreApplication::applicationDirPath()))
                 QMessageBox::critical(this,QStringLiteral("Benchmark"),QStringLiteral("Impossible d'ouvrir la fenêtre de benchmark."));
         });
+        toolsMenu->menuAction()->setVisible(false);
         auto* helpMenu=menuBar()->addMenu(QStringLiteral("Aide"));
         auto* aboutAction=helpMenu->addAction(
             QStringLiteral("À propos de CSE WARP V17.%1…").arg(CSE_WARP_BUILD_NUMBER));
@@ -2343,10 +2351,9 @@ private:
         explorationHelp_->setWordWrap(true);
         vertical->addWidget(explorationHelp_);
         connect(explorationButton_,&QPushButton::clicked,this,[this]{toggleExploration();});
-        bakeGiButton_=new QPushButton(QStringLiteral("Précalculer GI DX11/Vulkan (ray tracing CPU)"));
+        bakeGiButton_=new QPushButton(QStringLiteral("Précalculer la table GI (ray tracing CPU)"));
         bakeGiButton_->setToolTip(QStringLiteral(
-            "Calcule en CPU par ray tracing une table de rebonds GI pour 25 heures solaires.\n"
-            "La table est réutilisée par les rendus raster DirectX 11 et Vulkan. Les modes CPU Ray Tracing et CPU GI calculent leurs rebonds directement.\n"
+            "Calcule les vrais rebonds sur les surfaces et écrit une table GI pour 25 heures solaires.\n"
             "Opération hors ligne dans un programme séparé, sans ralentir chaque image."));
         bakeGiButton_->setEnabled(false);
         vertical->addWidget(bakeGiButton_);
@@ -2377,7 +2384,7 @@ private:
         });
         connect(bakeGiProcess_,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),
                 this,[this](int exitCode,QProcess::ExitStatus exitStatus){
-            bakeGiButton_->setText(QStringLiteral("Précalculer GI DX11/Vulkan (ray tracing CPU)"));
+            bakeGiButton_->setText(QStringLiteral("Précalculer la table GI (ray tracing CPU)"));
             bakeGiButton_->setEnabled(bool(runtime_));
             if(exitStatus!=QProcess::NormalExit||exitCode!=0){
                 statusBar()->showMessage(QStringLiteral(
@@ -2814,14 +2821,34 @@ private:
         selectedMaterial_=-1;
         cameraBox_->blockSignals(true);
         cameraBox_->clear();
-        for(const auto& c:runtime_->cameras)cameraBox_->addItem(c.name);
+        const QVector<QString> preferredCameraIds{
+            QStringLiteral("v4_place"),QStringLiteral("v4_aerienne"),
+            QStringLiteral("v6_monument_contrechamp"),QStringLiteral("v7_pool_fresco"),
+            QStringLiteral("v4_hall"),QStringLiteral("v523_cupola_exterieure"),
+            QStringLiteral("v523_cupola_interieure"),QStringLiteral("v523_cupola_arriere")};
+        QVector<int> visibleCameras;
+        for(const QString& id:preferredCameraIds){
+            for(int i=0;i<runtime_->cameras.size();++i){
+                if(runtime_->cameras[i].id==id){visibleCameras.append(i);break;}
+            }
+        }
+        if(visibleCameras.isEmpty()){
+            for(int i=0;i<std::min(8,int(runtime_->cameras.size()));++i)visibleCameras.append(i);
+        }
+        for(int i:visibleCameras){
+            QString name=runtime_->cameras[i].name;
+            name.remove(QRegularExpression(QStringLiteral("^V\\d+(?:\\.\\d+)?\\s*[·—-]\\s*"),
+                                           QRegularExpression::CaseInsensitiveOption));
+            cameraBox_->addItem(name,i);
+        }
         for(int i=0;i<quickCameraActions_.size();++i){
-            const bool valid=i<runtime_->cameras.size();
+            const bool valid=i<visibleCameras.size();
             quickCameraActions_[i]->setEnabled(valid);
             // Full camera names remain in the side selector and tooltip;
             // the toolbar uses compact numbers so DX11 / Vulkan stay visible.
             quickCameraActions_[i]->setText(QString::number(i+1));
-            quickCameraActions_[i]->setToolTip(valid ? QStringLiteral("Vue %1 — touche %2").arg(runtime_->cameras[i].name).arg(i+1) : QString());
+            quickCameraActions_[i]->setToolTip(valid ? QStringLiteral("Vue %1 — touche %2")
+                .arg(cameraBox_->itemText(i)).arg(i+1) : QString());
         }
         cameraBox_->blockSignals(false);
         updateCameraHud();
