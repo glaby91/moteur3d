@@ -41,6 +41,8 @@ int main(int argc,char** argv){
     const double setupMs=double(timer.elapsed());
     const Scene& scene=built.runtime.renderScene;
     gibake::Options opt;
+    // Keep the full-GI smoke benchmark bounded; normal package/UI bakes use the denser production defaults.
+    if(smoke&&fullGi){opt.nx=12;opt.ny=6;opt.nz=12;}
     if(smoke&&!fullGi){opt.nx=4;opt.ny=3;opt.nz=4;opt.rays=8;
               opt.frames=5;opt.firstHour=8.f;opt.stepHours=2.5f;}
     const uint64_t hash=gibake::signature(scene);
