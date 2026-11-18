@@ -131,7 +131,8 @@ jobs:
           CSE-WARP V17.420 — V5 complete scene (engine: validated V17.417, no rebuild)
           Start DEMARRER_CSE_WARP_V5.bat. EXE default also loads new V5 scene.
           8 exact approved large-base retro GLB planters (92cm base, 177cm rim).
-          26 medium-poly real GLB trees + 8 slender planter trees + 26 cut-out concrete tree pits.
+          26 medium-poly real GLB trees + 8 compact flowering shrubs in planters + 26 cut-out concrete tree pits.
+          Planter bases are set at 0.18 m to sit above the 0.155 m plaza paving surface.
           320 genuine GLB flower positions in dense clusters (Poly Haven Empodium+Gazania) and 92 grass tufts.
           PBR microgravel soil, native bump, subtly rippled pool water material.
           Experimental Z-prepass OFF. Old V4 comparison: DEMARRER_V4_ORIGINALE.bat.
