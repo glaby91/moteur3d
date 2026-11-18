@@ -228,7 +228,8 @@ def patch(package: Path, revision: str):
             for part in (0, 1):
                 garden_trees.append({"id": f"v600_garden_tree_{side}_{n}_{part}",
                     "parent": "Place/Jardins/Arbres de lisière",
-                    "geometry": f"{asset}_{part}", "material": f"asset_mat_{asset}_{part}",
+                    "geometry": f"{asset}_{part}",
+                    "material": f"asset_mat_{asset.removeprefix('asset_')}_{part}",
                     "position": [side * 60.0, 0.16, z], "size": [7.2, 7.2, 7.2],
                     "rotationY": (side * 13.0 + n * 29.0) % 360})
     instances["instances"].extend(garden_trees)
@@ -363,6 +364,13 @@ def verify(package: Path, revision: str):
     garden_trees = [x for x in inst if x.get("id", "").startswith("v600_garden_tree_")]
     if len(garden_trees) != 12 or any(x.get("id", "").startswith("rev_tree") for x in inst):
         raise ValueError("Exterior trees were not replaced by the six controlled garden trees")
+    available_meshes = {m.get("id") for rel in sector["geometry"]
+                        for m in read(root / rel).get("meshes", [])}
+    available_materials = {m.get("id") for rel in sector["materials"]
+                           for m in read(root / rel).get("materials", [])}
+    for tree in garden_trees:
+        if tree.get("geometry") not in available_meshes or tree.get("material") not in available_materials:
+            raise ValueError(f"Garden tree references missing scene data: {tree.get('id')}")
     garden_lamps = [x for x in inst if x.get("parent") == "Place/Eclairage/Lampadaires de lisière"]
     if len(garden_lamps) != 16:
         raise ValueError("Garden edge lighting must contain eight matching post/globe fixtures")
