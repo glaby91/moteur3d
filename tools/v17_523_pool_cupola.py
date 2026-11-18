@@ -298,7 +298,7 @@ def install(package: Path):
         "cupolaDimensionsMeters": {"length": dims[0], "span": dims[1], "rise": dims[2]},
         "baseElevationMeters": 19.9,
         "closedGlassGables": len(end_caps),
-        "gableRadialMullions": len(end_caps) * len(gable_mullion_angles),
+        "gableRadialMullions": len(end_caps) * 5,
         "continuousRoofEaves": 4,
         "roofJoint": "closed rectangular steel curb embedded below the roof plane",
         "endCapPlanes": end_caps,
