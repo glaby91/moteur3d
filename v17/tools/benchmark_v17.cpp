@@ -86,7 +86,7 @@ int main(int argc,char** argv){
         sourceRevision=QString::fromUtf8(revFile.readAll()).trimmed().left(12);
     QTextStream out(stdout),err(stderr);
     if(argc<3){
-        err<<"Usage: moteur3d_v17_benchmark.exe scene.json output_dir [--quick] [--fhd-stills] [--compare-v16] [--smoke] [--readback-depth 1|2|3] [--compare-readback] [--all-cameras] [--camera-id bassin] [--hour 19]\n";
+        err<<"Usage: moteur3d_v17_benchmark.exe scene.json output_dir [--quick] [--fhd-stills] [--compare-v16] [--smoke] [--readback-depth 1|2|3] [--compare-readback] [--all-cameras] [--camera-id id] [--cpu-direct-still --cpu-direct-width 960 --cpu-direct-height 540] [--hour 19]\n";
         return 2;
     }
     const QString scenePath=QFileInfo(QString::fromLocal8Bit(argv[1])).absoluteFilePath();
@@ -150,6 +150,26 @@ int main(int argc,char** argv){
     const bool quick=smoke||args.contains(QStringLiteral("--quick"));
     const bool compare=args.contains(QStringLiteral("--compare-v16"))&&!smoke;
     const bool compareReadback=args.contains(QStringLiteral("--compare-readback"));
+    const bool cpuDirectStill=args.contains(QStringLiteral("--cpu-direct-still"));
+    int cpuStillWidth=960,cpuStillHeight=540;
+    const auto parseCpuStillDimension=[&](QString option,int& value)->bool{
+        const int index=args.indexOf(option);
+        if(index<0)return true;
+        bool ok=false;
+        const int parsed=index+1<args.size()?args[index+1].toInt(&ok):0;
+        if(!ok||parsed<320||parsed>1920){
+            err<<option<<" expects a value from 320 to 1920\n";
+            return false;
+        }
+        value=parsed;
+        return true;
+    };
+    if(!parseCpuStillDimension(QStringLiteral("--cpu-direct-width"),cpuStillWidth)||
+       !parseCpuStillDimension(QStringLiteral("--cpu-direct-height"),cpuStillHeight))return 2;
+    if(cpuDirectStill&&requestedCamera.isEmpty()){
+        err<<"--cpu-direct-still requires --camera-id\n";
+        return 2;
+    }
     int readbackDepth=1;
     const int depthOption=args.indexOf(QStringLiteral("--readback-depth"));
     if(depthOption>=0){
@@ -190,7 +210,8 @@ int main(int argc,char** argv){
     const auto shadow=buildShadow(runtime.renderScene,shadowStats);
     const double shadowMs=elapsedMs(begin);
     QJsonObject system{
-        {"engine","CSE WARP Beta X V17 D3D11 Raster"},
+        {"engine",cpuDirectStill?QStringLiteral("CSE WARP V17 CPU Direct Ray Tracing PBR"):
+                                  QStringLiteral("CSE WARP Beta X V17 D3D11 Raster")},
         {"version",QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER)},
         {"buildNumber",QString::number(CSE_WARP_BUILD_NUMBER)},{"revision",sourceRevision},
         {"scene",scenePath},{"sceneName",runtime.title},
@@ -286,6 +307,44 @@ int main(int argc,char** argv){
         }
     }else{
         for(int i=0;i<cameras;++i)selectedCameras.push_back(i);
+    }
+    if(cpuDirectStill){
+        if(selectedCameras.size()!=1){
+            err<<"--cpu-direct-still requires exactly one selected camera\n";
+            return 2;
+        }
+        const auto& preset=runtime.cameras[selectedCameras.front()];
+        const auto camera=v16::makeCamera(preset,cpuStillWidth,cpuStillHeight);
+        std::vector<uint32_t> pixels;
+        pixels.resize(size_t(cpuStillWidth)*size_t(cpuStillHeight));
+        std::atomic<uint64_t> generation{1};
+        const unsigned workers=unsigned(std::clamp(QThread::idealThreadCount(),1,8));
+        begin=Clock::now();
+        const Stats stats=render(runtime.renderScene,shadow,camera,cpuStillWidth,cpuStillHeight,
+            pixels,workers,false,generation,1,1,false,false,false,3);
+        const double wallMs=elapsedMs(begin);
+        const QString image=QStringLiteral("images/cpu_direct_raytracing_%1_%2x%3.png")
+            .arg(preset.id).arg(cpuStillWidth).arg(cpuStillHeight);
+        if(!writeImage(directory.filePath(image),pixels,cpuStillWidth,cpuStillHeight)){
+            err<<"CPU direct ray-tracing render produced no valid PNG\n";
+            return 6;
+        }
+        QJsonObject record{{"backend","CPU Ray Tracing PBR — direct"},
+            {"camera",preset.id},{"width",cpuStillWidth},{"height",cpuStillHeight},
+            {"coldMs",wallMs},{"engineMs",stats.ms},{"spp",1},
+            {"threads",int(workers)},{"status","ok"},{"image",image},
+            {"error",QString()}};
+        addTimings(record,{wallMs});
+        append(record);
+        QJsonObject summary{{"engine","CSE WARP V17 CPU Direct Ray Tracing PBR"},
+            {"version",QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER)},
+            {"buildNumber",QString::number(CSE_WARP_BUILD_NUMBER)},
+            {"revision",sourceRevision},{"run",runName},{"system",system},
+            {"cases",results},{"completedUtc",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
+            {"successful",succeeded},{"skipped",skipped},{"failed",failed}};
+        if(!writeJson(directory.filePath("summary.json"),summary))return 5;
+        out<<"CPU direct ray-tracing image saved to "<<directory.filePath(image)<<"\n";
+        return succeeded==1?0:6;
     }
     const int measuredFrames=fhdStills?1:smoke?2:quick?6:12;
     for(const int cameraIndex:selectedCameras){

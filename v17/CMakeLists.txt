@@ -102,6 +102,189 @@ target_compile_definitions(moteur3d_v17 PRIVATE CSE_WARP_BUILD_NUMBER=${V17_BUIL
 if(MSVC)
     target_compile_options(moteur3d_v17 PRIVATE /O2 /EHsc /utf-8)
 endif()
+# Vulkan 1.3.204 minimum Raster backend: compile native GLSL shaders to SPIR-V.
+# Pipeline assembly is done once per worker thread, not in the per-frame path.
+if(WIN32)
+    find_package(Vulkan 1.3.204 QUIET)
+    if(Vulkan_FOUND)
+        find_program(V17_GLSLANG_VALIDATOR NAMES glslangValidator glslangValidator.exe
+            HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/Bin32")
+        if(NOT V17_GLSLANG_VALIDATOR)
+            message(WARNING "Vulkan SDK present but glslangValidator not found: Vulkan preview requires SPIR-V shaders")
+        else()
+            set(V17_VULKAN_SPIRV)
+            foreach(stage IN ITEMS vert frag)
+                set(spv "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders/raster.${stage}.spv")
+                add_custom_command(OUTPUT "${spv}"
+                    COMMAND ${CMAKE_COMMAND} -E make_directory
+                        "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders"
+                    COMMAND "${V17_GLSLANG_VALIDATOR}"
+                        -V --target-env vulkan1.3
+                        "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster.${stage}"
+                        -o "${spv}"
+                    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster.${stage}"
+                    VERBATIM)
+                list(APPEND V17_VULKAN_SPIRV "${spv}")
+            endforeach()
+            # Fullscreen atmospheric sky: V17 DX11 model ported to native GLSL.
+            set(sky_spv)
+            foreach(stage IN ITEMS vert frag)
+                set(skyOut "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders/sky.${stage}.spv")
+                add_custom_command(OUTPUT "${skyOut}"
+                    COMMAND ${CMAKE_COMMAND} -E make_directory
+                        "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders"
+                    COMMAND "${V17_GLSLANG_VALIDATOR}"
+                        -V --target-env vulkan1.3
+                        "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/sky.${stage}"
+                        -o "${skyOut}"
+                    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/sky.${stage}"
+                    VERBATIM)
+                list(APPEND V17_VULKAN_SPIRV "${skyOut}")
+            endforeach()
+            # Two fragment variants from the same source. Optimized is the
+            # runtime default; set CSE_WARP_VK_FAST_FRAGMENT=0 for reference A/B.
+            set(fast_frag_spv "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders/raster_fast.frag.spv")
+            add_custom_command(OUTPUT "${fast_frag_spv}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders"
+                COMMAND "${V17_GLSLANG_VALIDATOR}"
+                    -V --target-env vulkan1.3 -DCSE_WARP_VK_FAST_FRAGMENT=1
+                    "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster.frag"
+                    -o "${fast_frag_spv}"
+                DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster.frag"
+                VERBATIM)
+            list(APPEND V17_VULKAN_SPIRV "${fast_frag_spv}")
+            set(box_spv "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders/raster_box.vert.spv")
+            add_custom_command(OUTPUT "${box_spv}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders"
+                COMMAND "${V17_GLSLANG_VALIDATOR}"
+                    -V --target-env vulkan1.3
+                    "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster_box.vert"
+                    -o "${box_spv}"
+                DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster_box.vert"
+                VERBATIM)
+            list(APPEND V17_VULKAN_SPIRV "${box_spv}")
+            set(foliage_spv "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders/raster_foliage.vert.spv")
+            add_custom_command(OUTPUT "${foliage_spv}"
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders"
+                COMMAND "${V17_GLSLANG_VALIDATOR}"
+                    -V --target-env vulkan1.3
+                    "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster_foliage.vert"
+                    -o "${foliage_spv}"
+                DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/raster_foliage.vert"
+                VERBATIM)
+            list(APPEND V17_VULKAN_SPIRV "${foliage_spv}")
+            add_custom_target(v17_vulkan_spirv DEPENDS ${V17_VULKAN_SPIRV})
+            add_dependencies(moteur3d_v17 v17_vulkan_spirv)
+            add_custom_command(TARGET moteur3d_v17 POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_FILE_DIR:moteur3d_v17>/vulkan"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    ${V17_VULKAN_SPIRV}
+                    "$<TARGET_FILE_DIR:moteur3d_v17>/vulkan"
+                VERBATIM)
+        endif()
+    endif()
+endif()
+
+# Dedicated Vulkan regression tests. GPU-free mesh parity always runs.
+add_executable(v17_vulkan_dirty_policy_smoke "vulkan/tests/dirty_policy_smoke.cpp")
+add_test(NAME v17_vulkan_incremental_dirty_policy COMMAND v17_vulkan_dirty_policy_smoke)
+add_executable(v17_vulkan_mipmap_smoke "vulkan/tests/mipmap_smoke.cpp")
+target_include_directories(v17_vulkan_mipmap_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/vulkan")
+add_test(NAME v17_vulkan_mipmap_policy COMMAND v17_vulkan_mipmap_smoke)
+
+add_executable(v17_vulkan_readback_smoke "vulkan/tests/readback_smoke.cpp")
+target_include_directories(v17_vulkan_readback_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/vulkan")
+add_test(NAME v17_vulkan_rgba_bgra_argb32_parity COMMAND v17_vulkan_readback_smoke)
+add_executable(v17_vulkan_mesh_smoke "vulkan/tests/mesh_smoke.cpp")
+target_include_directories(v17_vulkan_mesh_smoke PRIVATE
+    "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14"
+    "${CMAKE_CURRENT_SOURCE_DIR}/vulkan")
+# CPU-only mesh regression: deliberately do not load the full V16 GPU-enabled
+# shared DLL (and its DirectX/Qt/Vulkan loader dependencies) on CI runners.
+# A fixture-local groundMaterial() is supplied by mesh_smoke.cpp.
+# The actual shared engine DLL is still built/packaged and used by GPU tests.
+add_test(NAME v17_vulkan_mesh_tessellation COMMAND v17_vulkan_mesh_smoke)
+if(WIN32 AND Vulkan_FOUND)
+    add_executable(v17_vulkan_version_smoke "vulkan/tests/version_smoke.cpp")
+    target_include_directories(v17_vulkan_version_smoke PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/vulkan")
+    target_link_libraries(v17_vulkan_version_smoke PRIVATE Vulkan::Vulkan)
+    add_test(NAME v17_vulkan_1_3_204_policy COMMAND v17_vulkan_version_smoke)
+    add_executable(v17_vulkan_gpu_smoke "vulkan/tests/vulkan_gpu_smoke.cpp")
+    target_include_directories(v17_vulkan_gpu_smoke PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+    target_link_libraries(v17_vulkan_gpu_smoke PRIVATE moteur3d_v16_core Qt6::Gui)
+    if(TARGET v17_vulkan_spirv)
+        add_dependencies(v17_vulkan_gpu_smoke v17_vulkan_spirv)
+        add_custom_command(TARGET v17_vulkan_gpu_smoke POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_FILE_DIR:v17_vulkan_gpu_smoke>/vulkan"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${V17_VULKAN_SPIRV}
+                "$<TARGET_FILE_DIR:v17_vulkan_gpu_smoke>/vulkan"
+            VERBATIM)
+    endif()
+    add_executable(v17_vulkan_ab_bench "vulkan/tests/vulkan_ab_bench.cpp")
+    target_include_directories(v17_vulkan_ab_bench PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+    target_link_libraries(v17_vulkan_ab_bench PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
+    if(TARGET v17_vulkan_spirv)
+        add_dependencies(v17_vulkan_ab_bench v17_vulkan_spirv)
+        add_custom_command(TARGET v17_vulkan_ab_bench POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_FILE_DIR:v17_vulkan_ab_bench>/vulkan"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different ${V17_VULKAN_SPIRV}
+                "$<TARGET_FILE_DIR:v17_vulkan_ab_bench>/vulkan"
+            VERBATIM)
+    endif()
+    # Khronos diagnostics run in the ORIGINAL Vulkan engine through native Win32 WSI.
+    # Windows GUI subsystem prevents one persistent DOS window per test.
+    # The native Vulkan render window is still visible and logs still redirect.
+    add_executable(v17_vulkan_khronos_bench WIN32 "vulkan/tests/khronos_bench.cpp")
+    target_include_directories(v17_vulkan_khronos_bench PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+    target_link_libraries(v17_vulkan_khronos_bench PRIVATE moteur3d_v16_core user32 gdi32)
+    target_compile_definitions(v17_vulkan_khronos_bench PRIVATE CSE_WARP_BUILD_NUMBER=${V17_BUILD_NUMBER})
+    if(MSVC)
+        target_compile_options(v17_vulkan_khronos_bench PRIVATE /O2 /EHsc /utf-8)
+    endif()
+    if(TARGET v17_vulkan_spirv)
+        add_dependencies(v17_vulkan_khronos_bench v17_vulkan_spirv)
+        add_custom_command(TARGET v17_vulkan_khronos_bench POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_FILE_DIR:v17_vulkan_khronos_bench>/vulkan"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${V17_VULKAN_SPIRV} "$<TARGET_FILE_DIR:v17_vulkan_khronos_bench>/vulkan"
+            VERBATIM)
+    endif()
+    # Independent console-subsystem diagnostic built from IDENTICAL source.
+    # It inherits the calling BAT's cmd.exe console and helps identify GUI CRT
+    # shutdown issues such as the HD620 0xC0000409 after a valid BMP.
+    add_executable(v17_vulkan_khronos_console "vulkan/tests/khronos_bench.cpp")
+    target_include_directories(v17_vulkan_khronos_console PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+    target_link_libraries(v17_vulkan_khronos_console PRIVATE moteur3d_v16_core user32 gdi32)
+    target_compile_definitions(v17_vulkan_khronos_console PRIVATE CSE_WARP_BUILD_NUMBER=${V17_BUILD_NUMBER})
+    if(MSVC)
+        target_compile_options(v17_vulkan_khronos_console PRIVATE /O2 /EHsc /utf-8)
+    endif()
+    if(TARGET v17_vulkan_spirv)
+        add_dependencies(v17_vulkan_khronos_console v17_vulkan_spirv)
+        add_custom_command(TARGET v17_vulkan_khronos_console POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_FILE_DIR:v17_vulkan_khronos_console>/vulkan"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${V17_VULKAN_SPIRV} "$<TARGET_FILE_DIR:v17_vulkan_khronos_console>/vulkan"
+            VERBATIM)
+    endif()
+    # CI builds on virtual GPU; real WSI timing results come from Intel HD620.
+endif()
+
 # Repeatable original 30s PCM diagnostic loop; no copyright-sensitive downloads
 # and no external audio processing tool required by the Windows build.
 if(WIN32)

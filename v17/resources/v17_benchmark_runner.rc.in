@@ -13,11 +13,11 @@ BEGIN
   BLOCK "040904E4"
   BEGIN
    VALUE "CompanyName", "CSE WARP\0"
-   VALUE "FileDescription", "CSE WARP V17.@V17_BUILD_NUMBER@ — Benchmark Runner\0"
+   VALUE "FileDescription", "CSE WARP V17.@V17_BUILD_NUMBER@ — Full Benchmark Runner\0"
    VALUE "FileVersion", "17.@V17_BUILD_NUMBER@\0"
    VALUE "InternalName", "moteur3d_v17_benchmark\0"
    VALUE "OriginalFilename", "moteur3d_v17_benchmark.exe\0"
-   VALUE "ProductName", "CSE WARP V17.@V17_BUILD_NUMBER@ Benchmark\0"
+   VALUE "ProductName", "CSE WARP V17.@V17_BUILD_NUMBER@ Full Benchmark\0"
    VALUE "ProductVersion", "17.@V17_BUILD_NUMBER@\0"
   END
  END

@@ -622,12 +622,79 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
         material.refractiveIndex=f(j.value("ior"),1.5f);
         material.metallic=metal;
         material.roughnessScale=clampf(f(j.value("roughnessScale"),1.f),.01f,2.f);
+        // Explicit, generic emissive material declaration. Not tied to any
+        // scene, object name or light-strip identity.
+        if(j.contains("emission")){
+            const QJsonValue emissionValue=j.value("emission");
+            if(!emissionValue.isObject()){
+                result.error="emission must be an object for material: "+id;return result;
+            }
+            const QJsonObject emission=emissionValue.toObject();
+            const QJsonArray rgb=emission.value("color").toArray();
+            const QJsonValue intensity=emission.value("intensity");
+            if(rgb.size()!=3 || !intensity.isDouble()){
+                result.error="emission requires color [r,g,b] and numeric intensity: "+id;
+                return result;
+            }
+            material.emissionColor=v3(emission.value("color"),{0,0,0});
+            material.emissionIntensity=float(intensity.toDouble());
+            const V c=material.emissionColor;
+            if(!finite3(c)||c.x<0.f||c.y<0.f||c.z<0.f||
+               c.x>1.f||c.y>1.f||c.z>1.f ||
+               !std::isfinite(material.emissionIntensity)||
+               material.emissionIntensity<0.f||material.emissionIntensity>100.f){
+                result.error="Invalid emission color/intensity for material: "+id;
+                return result;
+            }
+            material.emissionAuthored=true;
+        }
+        if(j.contains("surfaceModel")){
+            const QString surface=j.value("surfaceModel").toString();
+            if(surface!="standard" && surface!="water"){
+                result.error="surfaceModel must be standard or water: "+id;
+                return result;
+            }
+            material.surfaceAuthored=true;material.waterSurface=(surface=="water");
+            if(material.waterSurface&&!j.contains("transmission"))
+                material.transmissionPercent=90;
+        }
         const auto texId=j.value("textureSet").toString();
         if(!sets.contains(texId)){result.error="Missing texture set: "+texId;return result;}
         const auto set=sets.value(texId);
         const int requested=int(set.value("resolution").toInt(1024));
+        // Scene descriptor policy, never a scene-specific renderer exception:
+        // material.textureDetail overrides textureSet.textureDetail.
+        const QJsonValue policyValue=j.contains("textureDetail")?
+            j.value("textureDetail"):set.value("textureDetail");
+        if(!policyValue.isUndefined() && !policyValue.isObject()){
+            result.error="textureDetail must be an object for material: "+id;return result;
+        }
+        const QJsonObject policy=policyValue.toObject();
+        const QString mode=policy.value("mode").toString("auto");
+        if(mode!="auto" && mode!="preserve"){
+            result.error="textureDetail.mode must be auto or preserve: "+id;return result;
+        }
+        const QJsonValue floorValue=policy.value("minResolution");
+        if(!floorValue.isUndefined() && (!floorValue.isDouble() ||
+             floorValue.toInt(-1)<64 || floorValue.toInt(-1)>2048 ||
+             (floorValue.toInt(-1)&(floorValue.toInt(-1)-1)))){
+            result.error="Invalid textureDetail.minResolution (power of 2, 64..2048): "+id;
+            return result;
+        }
+        const int minimum=floorValue.isUndefined()?requested:floorValue.toInt();
         int size=std::min(maxTextureResolution,requested);
         if(size<64||size>2048||(size&(size-1))){result.error="Invalid mip resolution";return result;}
+        if(mode=="preserve"){
+            // Explicit preservation may override global auto resolution, but
+            // never invent missing texels or silently degrade quality.
+            if(minimum>requested){
+                result.error="Protected material minResolution exceeds source texture resolution: "+id;
+                return result;
+            }
+            size=std::max(size,minimum);
+            material.preserveTextureDetail=true;
+            material.minimumTextureResolution=uint32_t(minimum);
+        }
         generatePbr(material,base,rough,set.value("pattern").toString("plaster"),size);
         // Restrict optional painting source to the loaded scene's own root.
         const QString imageRel=set.value("imageFile").toString();
@@ -647,6 +714,10 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
                 return result;
             }
             if(!replaceAlbedoWithImage(material,imageCanonical,result.error))return result;
+            // Keep the generated maps for GPU previews, but identify the image
+            // as flat artwork for the CPU PBR shading path.
+            material.imageAlbedo=true;
+            material.imageAlbedoRoughness=rough;
         }
         result.runtime.textureResolution=std::max(result.runtime.textureResolution,size);
         result.runtime.materialIndex.insert(id,int(render.mat.size()));

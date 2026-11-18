@@ -7,6 +7,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <d3d11.h>
+#include <dxgi1_2.h>
 #include <d3dcompiler.h>
 #include <wrl/client.h>
 #include <cstddef>
@@ -786,12 +787,24 @@ class DirectX11Preview {
 public:
     bool render(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,
                 std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error) {
-        // Retain the original exact-image synchronous API. The pipelined API
-        // deliberately lives alongside this path and is opt-in in the bench.
+        // The exported offline benchmark and PNG path are unchanged.
+        releasePresenter();
         return enqueue(scene,shadows,cam,w,h,1,error)&&receive(pixels,stats,error);
     }
+    bool present(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,
+                 HWND hwnd,Stats& stats,std::wstring& error) {
+        if(!hwnd || !IsWindow(hwnd)){error=L"Fenêtre native DirectX 11 indisponible.";return false;}
+        return enqueue(scene,shadows,cam,w,h,1,error,hwnd,&stats);
+    }
+    void releasePresenter() {
+        if(context_ && swapchain_)context_->Flush();
+        swapchain_.Reset();
+        nativeHwnd_=nullptr;
+        nativeW_=nativeH_=0;
+    }
     bool enqueue(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,
-                 unsigned depth,std::wstring& error) {
+                 unsigned depth,std::wstring& error,
+                 HWND nativeHwnd=nullptr,Stats* nativeStats=nullptr) {
         const auto started=Clock::now();
         if(w<=0||h<=0){error=L"Résolution GPU invalide.";return false;}
         if(depth<1||depth>3){error=L"Profondeur des tampons GPU attendue : 1 à 3.";return false;}
@@ -831,7 +844,8 @@ public:
            !ensureTargets(w,h,quality.msaaSamples,error)||
            (multires&&!ensureMultires(w,h,error))||
            !ensureAnisotropy(quality.anisotropy,error)||
-           !ensureReadback(depth,w,h,error))return false;
+           (nativeHwnd?!ensureSwapchain(nativeHwnd,w,h,error):
+                        !ensureReadback(depth,w,h,error)))return false;
         const unsigned slotIndex=nextReadbackSlot_;
         ReadbackSlot& slot=readbackSlots_[slotIndex];
         slot.cpuStarted=started;
@@ -921,6 +935,12 @@ public:
             else if(name=="lamp"){emissionR=1.f;emissionG=166.f/255.f;emissionB=91.f/255.f;emissionStrength=.75f+1.9f*lampFactor;}
             else if(name=="led"){emissionR=1.f;emissionG=217.f/255.f;emissionB=165.f/255.f;emissionStrength=.48f+.85f*lampFactor;}
             else if(name=="taillight"){emissionR=1.f;emissionG=28.f/255.f;emissionB=12.f/255.f;emissionStrength=1.25f*lampFactor;}
+            if(scene.mat[m].surfaceAuthored && scene.mat[m].waterSurface){
+                // Generic authored water matches the legacy DX11 water model.
+                emissionStrength=-1.f;
+                spec=.85f;power=58.f;
+                diffuseBase=.25f;diffuseDay=.26f;diffuseDirect=.18f;
+            }
             if(name=="sea"){spec=.46f;power=25.f;}
             else if(name=="puddle"){spec=.64f;power=18.f;}
             else if(name=="glass"||name=="raptureGlass"){spec=.27f;power=34.f;}
@@ -1008,7 +1028,8 @@ public:
         cloudCB.wind[0]=clouds.uOffset;cloudCB.wind[1]=clouds.vOffset;
         cloudCB.wind[2]=solarHour; // Night stars rotate with the time of day.
         const char* splitSky=std::getenv("M3D_V17_SPLIT_SKY");
-        cloudCB.wind[3]=(splitSky && std::strcmp(splitSky,"1")==0)?1.f:0.f;
+        // Native flip presentation needs its GPU sky; only QImage uses the split alpha sky.
+        cloudCB.wind[3]=(!nativeHwnd && splitSky && std::strcmp(splitSky,"1")==0)?1.f:0.f;
         cloudCB.coverage=clouds.coverage;cloudCB.opacity=clouds.opacity;
         D3D11_MAPPED_SUBRESOURCE cloudMapped{};
         if(FAILED(context_->Map(skyConstants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&cloudMapped))){
@@ -1326,6 +1347,51 @@ public:
             ID3D11ShaderResourceView* empty[]={nullptr,nullptr};
             context_->PSSetShaderResources(0,2,empty);
         }else if(!drawScene(rtv_.Get(),dsv_.Get(),w,h,false,false))return false;
+        // Native DXGI presentation: all transfers remain on the GPU. The
+        // offscreen raster and MSAA targets are reused; no CPU staging,
+        // Map, swizzle, QImage or Qt painter is touched on this path.
+        if(nativeHwnd){
+            context_->OMSetRenderTargets(0,nullptr,nullptr);
+            if(sampleCount_>1&&!multires)
+                context_->ResolveSubresource(resolve_.Get(),0,target_.Get(),0,
+                                              DXGI_FORMAT_R8G8B8A8_UNORM);
+            ID3D11Texture2D* gpuSource=multires?mergeTex_.Get():
+                (sampleCount_>1?resolve_.Get():target_.Get());
+            ComPtr<ID3D11Texture2D> backBuffer;
+            HRESULT hr=swapchain_->GetBuffer(0,IID_PPV_ARGS(&backBuffer));
+            if(FAILED(hr)){
+                error=L"DirectX 11 : tampon DXGI inaccessible.";
+                releasePresenter();return false;
+            }
+            context_->CopyResource(backBuffer.Get(),gpuSource);
+            backBuffer.Reset(); // flip-model swapchain must not retain the backbuffer
+            if(slot.queryReady){
+                context_->End(slot.afterDraw.Get());
+                context_->End(slot.afterCopy.Get());
+                context_->End(slot.disjoint.Get());
+            }
+            hr=swapchain_->Present(0,0); // unthrottled, no CPU readback
+            if(FAILED(hr)){
+                error=L"DirectX 11 : échec de présentation DXGI.";
+                releasePresenter();return false;
+            }
+            if(nativeStats){
+                *nativeStats={};
+                nativeStats->gpu=true;
+                nativeStats->threads=0;
+                nativeStats->readbackBufferCount=0;
+                nativeStats->gpuDrawCalls=drawCalls;
+                nativeStats->gpuBoxInstances=submittedBoxInstances;
+                nativeStats->gpuEllipseInstances=submittedEllipseInstances;
+                nativeStats->gpuFoliageInstances=submittedFoliageInstances;
+                nativeStats->tests=submittedVertices/3+uint64_t(submittedBoxInstances)*12+
+                    submittedEllipseTriangles+submittedFoliageTriangles+transparent_.size();
+                nativeStats->ms=std::chrono::duration<double,std::milli>(
+                    Clock::now()-started).count();
+                nativeStats->cpuSubmitMs=nativeStats->ms;
+            }
+            return true;
+        }
         // GPU timestamps surround the actual draw commands and the queued
         // GPU copy. They do not include any CPU-side GetData/Map blocking.
         if(slot.queryReady)context_->End(slot.afterDraw.Get());
@@ -1477,9 +1543,9 @@ private:
         giTableLoaded.store(false,std::memory_order_release);
         // Compatibility fallback if a scene has not yet been baked. This
         // retains the V17.310 reference path exactly and is NOT real GI.
-        // Static, geometry-aware low-frequency indirect light probes.
-        // A small capped volume keeps setup reasonable on Intel HD 620.
-        constexpr UINT nx=16,ny=8,nz=16;
+        // The coarse fallback exposed probe-cell patches on large flat walls.
+        // Match the denser offline GI defaults while keeping render cost fixed.
+        constexpr UINT nx=24,ny=10,nz=24;
         V lo{INF,INF,INF},hi{-INF,-INF,-INF};
         for(const Obj& o:scene.obj){
             const V a=o.mn,b=o.mx;
@@ -2217,6 +2283,35 @@ private:
         samplerAnisotropy_=aniso;
         return true;
     }
+    bool ensureSwapchain(HWND hwnd,int w,int h,std::wstring& error){
+        if(swapchain_ && hwnd==nativeHwnd_ && w==nativeW_ && h==nativeH_)return true;
+        releasePresenter();
+        ComPtr<IDXGIDevice> dxgiDevice;
+        ComPtr<IDXGIAdapter> adapter;
+        ComPtr<IDXGIFactory2> factory;
+        if(FAILED(device_.As(&dxgiDevice))||
+           FAILED(dxgiDevice->GetAdapter(&adapter))||
+           FAILED(adapter->GetParent(IID_PPV_ARGS(&factory)))){
+            error=L"DirectX 11 : fabrique DXGI 1.2 indisponible.";return false;
+        }
+        DXGI_SWAP_CHAIN_DESC1 desc{};
+        desc.Width=UINT(w);desc.Height=UINT(h);
+        desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.Stereo=FALSE;desc.SampleDesc.Count=1;
+        desc.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        desc.BufferCount=2;desc.Scaling=DXGI_SCALING_STRETCH;
+        desc.SwapEffect=DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+        desc.AlphaMode=DXGI_ALPHA_MODE_IGNORE;
+        const HRESULT hr=factory->CreateSwapChainForHwnd(
+            device_.Get(),hwnd,&desc,nullptr,nullptr,&swapchain_);
+        if(FAILED(hr)){
+            error=L"DirectX 11 : création de la swapchain DXGI impossible.";
+            return false;
+        }
+        factory->MakeWindowAssociation(hwnd,DXGI_MWA_NO_ALT_ENTER);
+        nativeHwnd_=hwnd;nativeW_=w;nativeH_=h;
+        return true;
+    }
     bool ensureReadback(unsigned depth,int w,int h,std::wstring& error){
         if(depth==readbackDepth_ && readbackSlots_[0].staging)return true;
         if(!pending_.empty()){
@@ -2253,6 +2348,9 @@ private:
         return true;
     }
     ComPtr<ID3D11Device> device_;ComPtr<ID3D11DeviceContext> context_;
+    ComPtr<IDXGISwapChain1> swapchain_;
+    HWND nativeHwnd_=nullptr;
+    int nativeW_=0,nativeH_=0;
     ComPtr<ID3D11VertexShader> vs_,boxVs_,ellipseVs_,mergeVs_,skyVs_;
     ComPtr<ID3D11PixelShader> ps_,mergePs_,skyPs_;
     ComPtr<ID3D11InputLayout> layout_,boxLayout_,ellipseLayout_;
@@ -2323,6 +2421,10 @@ void setRasterGiCachePath(const std::filesystem::path& file){
     giTableLoaded.store(false,std::memory_order_release);
 }
 bool rasterGiCacheLoaded(){return giTableLoaded.load(std::memory_order_acquire);}
+std::filesystem::path rasterGiCachePath(){
+    std::lock_guard<std::mutex> lock(giPathMutex);
+    return giFilePath;
+}
 void setRasterPeripheralMultiresOverride(int mode){
     peripheralOverride.store(std::clamp(mode,-1,1),std::memory_order_release);
 }
@@ -2346,6 +2448,14 @@ static DirectX11Preview& rasterThreadContext(){
 }
 bool renderDirectX11Preview(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error) {
     return rasterThreadContext().render(scene,shadows,cam,w,h,pixels,stats,error);
+}
+bool renderDirectX11Native(const Scene& scene,const ShadowMap& shadows,const Camera& cam,
+                            int w,int h,void* hwnd,Stats& stats,std::wstring& error){
+    return rasterThreadContext().present(scene,shadows,cam,w,h,
+                                         reinterpret_cast<HWND>(hwnd),stats,error);
+}
+void releaseDirectX11NativeForCurrentThread(){
+    rasterThreadContext().releasePresenter();
 }
 bool enqueueDirectX11Preview(const Scene& scene,const ShadowMap& shadows,const Camera& cam,
                             int w,int h,unsigned depth,std::wstring& error){
@@ -2376,10 +2486,13 @@ float rasterColorExposure(){return 1.f;}
 void setRasterColorExposure(float){}
 void setRasterGiCachePath(const std::filesystem::path&){}
 bool rasterGiCacheLoaded(){return false;}
+std::filesystem::path rasterGiCachePath(){return {};}
 void setRasterPeripheralMultiresOverride(int){}
 void setRasterCloudTimeScale(float){}
 bool setRasterQualitySettings(const RasterQualitySettings&,std::wstring& error){error=L"DirectX 11 indisponible sur cet OS.";return false;}
 bool renderDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,std::vector<uint32_t>&,Stats&,std::wstring& error) { error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false; }
+bool renderDirectX11Native(const Scene&,const ShadowMap&,const Camera&,int,int,void*,Stats&,std::wstring& error){error=L"Présentation DXGI disponible uniquement sous Windows.";return false;}
+void releaseDirectX11NativeForCurrentThread(){}
 bool enqueueDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,unsigned,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}
 bool receiveDirectX11Preview(std::vector<uint32_t>&,Stats&,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}
 }
