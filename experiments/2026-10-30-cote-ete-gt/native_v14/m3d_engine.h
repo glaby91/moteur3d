@@ -60,7 +60,11 @@ struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,dept
     // Number of actual primary BVH queries before pixel reconstruction.
     uint64_t primarySamples=0; };
 struct Light { V p; float radius,intensity; V color; };
-struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPercent=0; float refractiveIndex=1.5f; float metallic=0.f, roughnessScale=1.f; std::vector<Level> mip,normalMip,roughnessMip; std::vector<ColorLevel> colorMip;
+struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPercent=0; float refractiveIndex=1.5f; float metallic=0.f, roughnessScale=1.f; std::vector<Level> mip,normalMip,roughnessMip;
+    // Image albedo has no authored tangent normal or roughness map. CPU PBR
+    // must not inherit the procedural surface recipe used to seed its mip chains.
+    bool imageAlbedo=false;
+    float imageAlbedoRoughness=.72f; std::vector<ColorLevel> colorMip;
     // Scene-authored optional texture quality policy. Default auto: renderer decides.
     // Preserve: dedicated full-resolution GPU tier, independent of camera distance.
     bool preserveTextureDetail=false;
