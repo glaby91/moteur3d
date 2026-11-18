@@ -1543,9 +1543,9 @@ private:
         giTableLoaded.store(false,std::memory_order_release);
         // Compatibility fallback if a scene has not yet been baked. This
         // retains the V17.310 reference path exactly and is NOT real GI.
-        // Static, geometry-aware low-frequency indirect light probes.
-        // A small capped volume keeps setup reasonable on Intel HD 620.
-        constexpr UINT nx=16,ny=8,nz=16;
+        // The coarse fallback exposed probe-cell patches on large flat walls.
+        // Match the denser offline GI defaults while keeping render cost fixed.
+        constexpr UINT nx=24,ny=10,nz=24;
         V lo{INF,INF,INF},hi{-INF,-INF,-INF};
         for(const Obj& o:scene.obj){
             const V a=o.mn,b=o.mx;
