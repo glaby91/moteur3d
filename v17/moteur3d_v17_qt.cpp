@@ -2559,8 +2559,15 @@ private:
         connect(&skyAnimationTimer_,&QTimer::timeout,this,[this]{
             if(sceneLoading_||!runtime_||!backendBox_)return;
             if(nativeDirectSelected()){
-                if(!exploring_&&(cloudAnimationBox_->isChecked()||
-                                  dayNightCycleBox_->isChecked())&&
+                const bool cycle=dayNightCycleBox_->isChecked();
+                const bool fastNativeRefresh=
+                    cse::daynight::shouldRequestFastNativeIdleRefresh(
+                        cycle,cloudAnimationBox_->isChecked());
+                // The 1.5 s solar-hour timer already requests the full direct
+                // scene render during day/night playback. The former 50 ms
+                // idle-sky path kept the entire raster pipeline saturated and
+                // made the day/night image appear frozen on slower GPUs.
+                if(!exploring_&&fastNativeRefresh&&
                    !watcher_.isRunning()&&!pending_){
                     const qint64 now=skyMotionClock_.elapsed();
                     if(now-lastVulkanIdleSkyRequestMs_>=50){
