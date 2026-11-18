@@ -12,6 +12,10 @@ Sur l’archive Windows approuvée V17.444, après installation CPU de la coupol
 
 Ce résultat montre que la géométrie offre des trajets directs depuis les panneaux échantillonnés. Il ne prouve pas que le calcul CPU donne la bonne énergie ou couleur au rebond ; le chemin d’albédo sans UV reste une piste distincte et concrète à corriger dans le moteur.
 
+## Correctif PBR V17.541
+
+Le CPU PBR traite désormais les matériaux albedo-image sans hériter des normales et de la rugosité procédurales du motif de génération. La Fresnel renforcée est réservée aux matériaux explicitement déclarés avec `surfaceModel: "water"`; un vitrage ne devient donc pas de l’eau du seul fait que son IOR est proche. Le générateur de la scène livrée marque explicitement l’eau du bassin.
+
 ## Exécution
 
 ```powershell
