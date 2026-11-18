@@ -18,6 +18,7 @@ on:
   pull_request:
     paths:
       - 'v17/**'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/**'
       - '.github/workflows/build-moteur3d-v17.yml'
   workflow_dispatch:
 permissions:
