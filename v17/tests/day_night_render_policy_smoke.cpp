@@ -10,12 +10,17 @@ bool near(float actual, float expected) {
 int main() {
     using cse::daynight::shadowBucketHour;
     using cse::daynight::shadowStepHours;
+    using cse::daynight::shouldRequestFastNativeIdleRefresh;
     const bool ok =
         near(shadowStepHours(4, true), 1.0f) && // DX11 raster
         near(shadowStepHours(5, true), 1.0f) && // Vulkan raster
         near(shadowStepHours(4, false), 0.25f) &&
         near(shadowStepHours(5, false), 0.25f) &&
         near(shadowStepHours(2, true), 0.25f) && // Compute remains unchanged
+        !shouldRequestFastNativeIdleRefresh(true, false) &&
+        !shouldRequestFastNativeIdleRefresh(true, true) &&
+        shouldRequestFastNativeIdleRefresh(false, true) &&
+        !shouldRequestFastNativeIdleRefresh(false, false) &&
         near(shadowBucketHour(14.75f, 1.0f), 14.0f) &&
         near(shadowBucketHour(15.25f, 1.0f), 15.0f) &&
         near(shadowBucketHour(15.25f, 0.25f), 15.25f) &&
