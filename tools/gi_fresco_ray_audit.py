@@ -113,39 +113,114 @@ def scene_triangles(package: Path, sector):
     return triangles, instances, unsupported
 
 
-def first_hit(origin, direction, triangles, max_distance, source_id):
+def build_bvh(triangles):
+    entries = []
+    for tri in triangles:
+        points = tri[:3]
+        bounds = tuple((min(p[k] for p in points), max(p[k] for p in points))
+                       for k in range(3))
+        center = tuple(sum(p[k] for p in points) / 3.0 for k in range(3))
+        entries.append((tri, bounds, center))
+
+    def make_node(items):
+        bounds = tuple((min(item[1][k][0] for item in items),
+                        max(item[1][k][1] for item in items)) for k in range(3))
+        if len(items) <= 12:
+            return (bounds, None, None, tuple(item[0] for item in items))
+        axis = max(range(3), key=lambda k: bounds[k][1] - bounds[k][0])
+        items.sort(key=lambda item: item[2][axis])
+        mid = len(items) // 2
+        return (bounds, make_node(items[:mid]), make_node(items[mid:]), ())
+
+    return make_node(entries)
+
+
+def ray_box(origin, direction, bounds, limit):
+    near, far = 0.0, limit
+    for axis in range(3):
+        if abs(direction[axis]) < 1e-12:
+            if origin[axis] < bounds[axis][0] or origin[axis] > bounds[axis][1]:
+                return None
+            continue
+        inv = 1.0 / direction[axis]
+        t0 = (bounds[axis][0] - origin[axis]) * inv
+        t1 = (bounds[axis][1] - origin[axis]) * inv
+        if t0 > t1:
+            t0, t1 = t1, t0
+        near, far = max(near, t0), min(far, t1)
+        if far < max(near, 1e-4):
+            return None
+    return near
+
+
+def first_hit(origin, direction, bvh, max_distance, source_id):
     nearest = max_distance
     result = None
-    for tri in triangles:
-        if tri[3] == source_id:
+    stack = [(bvh, 0.0)]
+    while stack:
+        node, entry = stack.pop()
+        if entry > nearest:
             continue
-        t = tri_hit(origin, direction, tri[:3], nearest)
-        if t is not None:
-            nearest = t
-            result = (tri, t)
+        bounds, left, right, leaf = node
+        if leaf:
+            for tri in leaf:
+                if tri[3] == source_id:
+                    continue
+                t = tri_hit(origin, direction, tri[:3], nearest)
+                if t is not None:
+                    nearest = t
+                    result = (tri, t)
+            continue
+        children = []
+        for child in (left, right):
+            tnear = ray_box(origin, direction, child[0], nearest)
+            if tnear is not None:
+                children.append((child, tnear))
+        # LIFO: visit the closest child first for a tighter nearest-hit bound.
+        stack.extend(sorted(children, key=lambda item: item[1], reverse=True))
     return result
 
 
 def sample_points(instances, triangles):
-    fresco = next((i for i in instances if i.get("material") == "cse_energetik_fresco"), None)
+    # The generated V17 scene used one wide fresco box; the approved V17.444
+    # package instead ships eight baked triangle panels with per-panel
+    # materials. Resolve both formats from their semantic parent/material.
+    frescos = [i for i in instances
+               if i.get("material") == "cse_energetik_fresco"
+               or i.get("material", "").startswith("v7_fresco_")]
     water = next((i for i in instances if i.get("material") == "cse_pool_water"), None)
     glass = next((i for i in instances if i.get("material") == "v8_clear_roof_glass"), None)
-    if not fresco or not water or not glass:
-        raise ValueError(f"Required targets missing: fresco={bool(fresco)}, water={bool(water)}, glass={bool(glass)}")
+    if not frescos or not water or not glass:
+        raise ValueError(f"Required targets missing: fresco_panels={len(frescos)}, water={bool(water)}, glass={bool(glass)}")
 
-    fp, fs = fresco["position"], fresco["size"]
-    # The mural's pool-facing face is +Z; take six interior points, offset
-    # toward the room so their rays do not begin on the source triangles.
+    # Pick up to eight points from actual pool-facing fresco triangles. This
+    # works for both the box mural and the UV-baked multi-panel artwork.
     sources = []
-    for fy in (.25, .75):
-        for fx in (.2, .5, .8):
-            p = transform((fx-.5, fy-.5, .5005), fresco)
-            sources.append((p, f"fresco_u{fx:.1f}_v{fy:.2f}"))
+    for fresco in frescos:
+        front = []
+        for tri in triangles:
+            if tri[3] != fresco.get("id"):
+                continue
+            n = cross(vsub(tri[1], tri[0]), vsub(tri[2], tri[0]))
+            if n[2] > 1e-8:
+                center = tuple(sum(v[k] for v in tri[:3]) / 3.0 for k in range(3))
+                front.append(center)
+        if front:
+            p = tuple(sum(point[k] for point in front) / len(front) for k in range(3))
+            sources.append((vadd(p, (0.0, 0.0, .015)), fresco.get("id", "fresco")))
+        elif fresco.get("material") == "cse_energetik_fresco":
+            # Box surfaces use face triangles whose winding can vary with scale.
+            fx, fy = .5, .5
+            sources.append((transform((fx-.5, fy-.5, .5005), fresco), fresco.get("id", "fresco")))
+    if not sources:
+        raise ValueError("Fresco instances were found, but no pool-facing source points could be sampled")
 
     wp, ws = water["position"], water["size"]
     water_targets = []
+    # Pick lane centers between the nine floating ropes. Even tenths would
+    # place the sample points directly on the rope lines in this scene.
     for fx in (.2, .5, .8):
-        for fz in (.2, .4, .6, .8):
+        for fz in (.15, .35, .55, .75):
             p = transform((fx-.5, .5001, fz-.5), water)
             water_targets.append((p, water["id"], "water"))
 
@@ -157,7 +232,7 @@ def sample_points(instances, triangles):
     for tri in glass_tris[::stride][:24]:
         p = tuple(sum(v[k] for v in tri[:3])/3.0 for k in range(3))
         glass_targets.append((p, glass["id"], "cupola_glass"))
-    return sources, water_targets + glass_targets, fresco
+    return sources, water_targets + glass_targets, frescos
 
 
 def audit(package: Path, output: Path):
@@ -166,7 +241,8 @@ def audit(package: Path, output: Path):
     if len(sectors) != 1:
         raise ValueError(f"Expected one packaged scene sector, found {len(sectors)}")
     triangles, instances, unsupported = scene_triangles(package, sectors[0])
-    sources, targets, fresco = sample_points(instances, triangles)
+    bvh = build_bvh(triangles)
+    sources, targets, frescos = sample_points(instances, triangles)
     counts = Counter(); blockers = Counter(); rows = []; svg_rays = []
     target_tests = 0
     for source, source_name in sources:
@@ -175,7 +251,7 @@ def audit(package: Path, output: Path):
             distance = math.sqrt(dot(direction_vector, direction_vector))
             direction = vmul(direction_vector, 1.0/distance)
             origin = vadd(source, (0.0, 0.0, .015))
-            hit = first_hit(origin, direction, triangles, distance+.02, fresco["id"])
+            hit = first_hit(origin, direction, bvh, distance+.02, source_name)
             target_tests += 1
             if hit and hit[0][3] == target_id:
                 status, obstruction, endpoint = "VISIBLE_PATH", kind, target
@@ -210,10 +286,10 @@ def audit(package: Path, output: Path):
         "scene_name": scene.get("name"),
         "camera_reference": {"position_m":[32.918,2.245,-23.540],
                              "heading_deg":274.6,"inclination_deg":11.3,"fov_deg":68},
-        "method": "CPU ray/triangle visibility from six points on the pool-facing fresco face to the packaged water and cupola-glass surfaces; renderer shading is not evaluated",
+        "method": f"CPU ray/triangle visibility from {len(sources)} sampled points on pool-facing fresco panels to packaged water and cupola-glass surfaces; renderer shading is not evaluated",
         "geometry_triangles_tested": len(triangles),
         "instances_skipped_by_primitive_type": dict(unsupported),
-        "fresco_instance": fresco.get("id"),
+        "fresco_instances": [f.get("id") for f in frescos],
         "target_path_tests": target_tests,
         "visible_or_clear_paths_by_target": dict(counts),
         "blocked_paths": sum(blockers.values()),
@@ -285,6 +361,11 @@ def self_test():
     tri=((-.5,-.5,1),(.5,-.5,1),(0,.5,1))
     assert abs(tri_hit((0,0,0),(0,0,1),tri,10)-1.0)<1e-9
     assert tri_hit((2,0,0),(0,0,1),tri,10) is None
+    near=(*tri,"target","test","target")
+    bvh=build_bvh([near])
+    hit=first_hit((0,0,0),(0,0,1),bvh,10,"source")
+    assert hit and abs(hit[1]-1.0)<1e-9
+    assert first_hit((0,0,0),(0,0,1),bvh,10,"target") is None
     print("fresco ray audit math self-test: PASS")
 
 
