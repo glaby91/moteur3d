@@ -426,7 +426,8 @@ jobs:
           if ($report.revision -ne 'V17.523' -or $report.removedFlatSkylightInstances -ne 19 -or
               $report.addedCupolaMeshes -ne 3 -or $report.addedCupolaInstances -ne 3 -or
               $report.addedTriangles -lt 3500 -or $report.addedTriangles -gt 6000 -or
-              $report.closedGlassGables -ne 2 -or $report.continuousRoofEaves -ne 2 -or
+              $report.closedGlassGables -ne 2 -or $report.gableRadialMullions -ne 10 -or
+              $report.continuousRoofEaves -ne 4 -or
               $report.cupolaDimensionsMeters.length -ne 60 -or
               $report.cupolaDimensionsMeters.span -ne 34 -or
               $report.lightingChanged -or $report.rendererChanged -or @($report.cameras).Count -ne 3) {

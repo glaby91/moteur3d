@@ -151,6 +151,21 @@ def build_geometry():
             beam_box(arch_vertices, arch_faces, add(foot, (0.0, -0.36, 0.0)),
                      add(foot, (0.0, 0.12, 0.0)), shoe_a, shoe_b, 0.48, 0.24)
 
+    # Finish each transparent gable with visible radial steel mullions.  The
+    # curved terminal arch alone left the end glazing visually unframed, so
+    # from outside it read as an unfinished/open end.  These five spokes per
+    # end span the whole glass fan and tie into the terminal arch and curb.
+    gable_mullion_angles = [angles[i] for i in (4, 8, 12, 16, 20)]
+    for x in (x0 + 0.06, x1 - 0.06):
+        center = (x, base_y + 0.045, z_center)
+        for angle in gable_mullion_angles:
+            end = point(x, angle, 0.045)
+            direction = normalize(sub(end, center))
+            across = (1.0, 0.0, 0.0)
+            in_plane = normalize(cross(direction, across))
+            beam_box(arch_vertices, arch_faces, center, end,
+                     across, in_plane, 0.12, 0.10)
+
     # Continuous eaves curbs close the seam between the vault and the flat
     # roof.  Their lower half is embedded below the roof plane for a visible,
     # gap-free structural joint along both long sides.
@@ -159,6 +174,15 @@ def build_geometry():
         beam_box(arch_vertices, arch_faces,
                  (x0, base_y - 0.02, z), (x1, base_y - 0.02, z),
                  (0.0, 0.0, 1.0), (0.0, 1.0, 0.0), 0.30, 0.34)
+
+    # Close the perimeter curb at both short ends as well.  The four beams
+    # form one continuous, roof-embedded rectangular flashing around the
+    # opening, rather than two long rails that stop at unconnected ends.
+    for x in (x0, x1):
+        beam_box(arch_vertices, arch_faces,
+                 (x, base_y - 0.02, z_center - half_span),
+                 (x, base_y - 0.02, z_center + half_span),
+                 (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), 0.30, 0.34)
 
     # Longitudinal purlins follow the ellipse and tie every arch together.
     rail_vertices, rail_faces = [], []
@@ -274,8 +298,9 @@ def install(package: Path):
         "cupolaDimensionsMeters": {"length": dims[0], "span": dims[1], "rise": dims[2]},
         "baseElevationMeters": 19.9,
         "closedGlassGables": len(end_caps),
-        "continuousRoofEaves": 2,
-        "roofJoint": "continuous steel eaves curbs embedded below the roof plane",
+        "gableRadialMullions": len(end_caps) * len(gable_mullion_angles),
+        "continuousRoofEaves": 4,
+        "roofJoint": "closed rectangular steel curb embedded below the roof plane",
         "endCapPlanes": end_caps,
         "cameras": list(camera_ids),
         "materialsReused": ["v8_clear_roof_glass", "v8_mullion_dark_steel"],
