@@ -2343,9 +2343,10 @@ private:
         explorationHelp_->setWordWrap(true);
         vertical->addWidget(explorationHelp_);
         connect(explorationButton_,&QPushButton::clicked,this,[this]{toggleExploration();});
-        bakeGiButton_=new QPushButton(QStringLiteral("Précalculer la table GI (ray tracing CPU)"));
+        bakeGiButton_=new QPushButton(QStringLiteral("Précalculer GI DX11/Vulkan (ray tracing CPU)"));
         bakeGiButton_->setToolTip(QStringLiteral(
-            "Calcule les vrais rebonds sur les surfaces et écrit une table GI pour 25 heures solaires.\n"
+            "Calcule en CPU par ray tracing une table de rebonds GI pour 25 heures solaires.\n"
+            "La table est réutilisée par les rendus raster DirectX 11 et Vulkan. Les modes CPU Ray Tracing et CPU GI calculent leurs rebonds directement.\n"
             "Opération hors ligne dans un programme séparé, sans ralentir chaque image."));
         bakeGiButton_->setEnabled(false);
         vertical->addWidget(bakeGiButton_);
@@ -2376,7 +2377,7 @@ private:
         });
         connect(bakeGiProcess_,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),
                 this,[this](int exitCode,QProcess::ExitStatus exitStatus){
-            bakeGiButton_->setText(QStringLiteral("Précalculer la table GI (ray tracing CPU)"));
+            bakeGiButton_->setText(QStringLiteral("Précalculer GI DX11/Vulkan (ray tracing CPU)"));
             bakeGiButton_->setEnabled(bool(runtime_));
             if(exitStatus!=QProcess::NormalExit||exitCode!=0){
                 statusBar()->showMessage(QStringLiteral(
