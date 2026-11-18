@@ -740,12 +740,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'V17.600 final cupola package render failed' }
           & 'dist-v17/moteur3d_v17_benchmark.exe' 'dist-v17/benchmark-civic/scene.json' 'build-v17/final-600-plaza' --smoke --camera-id v4_place --hour 19 --raster-msaa 1
           if ($LASTEXITCODE -ne 0) { throw 'V17.600 final plaza package render failed' }
-          foreach ($pair in @(@('build-v17/final-600-pool','pool-fresco'),@('build-v17/final-600-cupola','cupola'),@('build-v17/final-600-plaza','plaza'))) {
+          & 'dist-v17/moteur3d_v17_benchmark.exe' 'dist-v17/benchmark-civic/scene.json' 'build-v17/final-600-garden' --smoke --camera-id v600_garden_view --hour 18 --raster-msaa 1
+          if ($LASTEXITCODE -ne 0) { throw 'V17.600 final garden exterior package render failed' }
+          foreach ($pair in @(@('build-v17/final-600-pool','pool-fresco'),@('build-v17/final-600-cupola','cupola'),@('build-v17/final-600-plaza','plaza'),@('build-v17/final-600-garden','garden-global'))) {
             $img=Get-ChildItem $pair[0] -Recurse -Filter '*.png' -File | Where-Object { $_.Length -gt 1000 } | Select-Object -First 1
             if (!$img) { throw "V17.600 $($pair[1]) render missing or blank" }
             Copy-Item $img.FullName "dist-v17/benchmark-civic/V17.600-$($pair[1])-WARP.png"
           }
-          Write-Host 'READY: final package rendered with DX11 WARP and CPU ray tracing after all scene overlays.'
+          Write-Host 'READY: final package rendered with DX11 WARP and CPU ray tracing, including the requested garden-side global view.'
       - name: Audit CPU light paths from the pool fresco
         shell: pwsh
         run: |

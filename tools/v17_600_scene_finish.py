@@ -63,14 +63,16 @@ def patch(package: Path, revision: str):
     lighting = read(lights_path)
 
     # A single full-resolution source image and global UVs remove the eight
-    # independently sampled/cropped image tiles that created visible joins.
+    # independently sampled/cropped image tiles. The D3D image path stores V=0
+    # at the bottom edge, so reverse the source rows when assigning UV bands.
     fresco_meshes = [m for m in geometry["meshes"] if m.get("id", "").startswith("v7_fresco_quad_")]
     if len(fresco_meshes) != 8:
         raise ValueError(f"Expected eight delivered V7 fresco panels, found {len(fresco_meshes)}")
     for mesh in fresco_meshes:
         row, col = (int(x) for x in mesh["id"].split("_")[-2:])
-        mesh["uv"] = [[col / 4, row / 2], [(col + 1) / 4, row / 2],
-                      [(col + 1) / 4, (row + 1) / 2], [col / 4, (row + 1) / 2]]
+        v0, v1 = 1 - (row + 1) / 2, 1 - row / 2
+        mesh["uv"] = [[col / 4, v0], [(col + 1) / 4, v0],
+                      [(col + 1) / 4, v1], [col / 4, v1]]
     fresco_instances = [i for i in instances["instances"] if i.get("id", "").startswith("v7_fresco_")
                         and i.get("id", "").endswith("_inst")]
     if len(fresco_instances) != 8:
@@ -91,6 +93,7 @@ def patch(package: Path, revision: str):
     shared["imageFile"] = "textures/energetik_fresco_mosaic.jpg"
     shared["resolution"] = 2048
     shared["channels"] = ["albedo"]
+    shared["textureDetail"] = {"mode": "preserve", "minResolution": 2048}
     shared["status"] = "V17.600 shared image across all eight wall panels"
     for row in range(2):
         for col in range(4):
@@ -177,7 +180,18 @@ def patch(package: Path, revision: str):
         "v523_cupola_exterieure": "06 · Coupole, extérieur",
         "v523_cupola_interieure": "07 · Coupole, intérieur",
         "v523_cupola_arriere": "08 · Coupole, arrière",
+        "v600_garden_view": "09 · Jardin, butte et façade",
     }
+    garden_camera = locate(cameras["cameras"], "v600_garden_view")
+    if garden_camera is None:
+        garden_camera = {"id": "v600_garden_view"}
+        cameras["cameras"].append(garden_camera)
+    # Center the shot on the garden-to-palace axis from the garden side. This
+    # keeps the hill, red transition strip, both tree rows, and full façade in
+    # frame instead of looking diagonally across the plaza.
+    garden_camera.update({"name": clean_names["v600_garden_view"],
+        "position": [0.0, 18.0, 145.0], "target": [0.0, 8.0, 25.0],
+        "fovDegrees": 78})
     for c in cameras["cameras"]:
         if c.get("id") in clean_names:
             c["name"] = clean_names[c["id"]]
@@ -197,6 +211,28 @@ def patch(package: Path, revision: str):
     if trees_moved != 72:
         raise ValueError(f"Expected 72 planter/tree mesh instances, relocated {trees_moved}")
 
+    # Remove the scattered exterior tree groups and replant a restrained,
+    # symmetric line of broadleaf trees along the far edges of the plaza.
+    # Keep the mound, oval seat, entrance axis, and the full façade sightline clear.
+    before_trees = len(instances["instances"])
+    instances["instances"] = [i for i in instances["instances"]
+                               if not (i.get("id", "").startswith("rev_tree") and
+                                       i.get("parent") == "Nature/Arbres medium-poly GLB")]
+    removed_trees = before_trees - len(instances["instances"])
+    if removed_trees != 52:
+        raise ValueError(f"Expected to remove 26 exterior trees (52 meshes), removed {removed_trees}")
+    garden_trees = []
+    for side in (-1, 1):
+        for n, z in enumerate((27.0, 52.0, 77.0)):
+            asset = "asset_tree1" if n != 1 else "asset_tree2"
+            for part in (0, 1):
+                garden_trees.append({"id": f"v600_garden_tree_{side}_{n}_{part}",
+                    "parent": "Place/Jardins/Arbres de lisière",
+                    "geometry": f"{asset}_{part}", "material": f"asset_mat_{asset}_{part}",
+                    "position": [side * 60.0, 0.16, z], "size": [7.2, 7.2, 7.2],
+                    "rotationY": (side * 13.0 + n * 29.0) % 360})
+    instances["instances"].extend(garden_trees)
+
     # Build a restrained continuous pale route from the building entrance to
     # the existing hill. It stays one slab, avoiding another tiled ground patch.
     if not locate(geometry["meshes"], "v600_civic_light_band"):
@@ -215,26 +251,47 @@ def patch(package: Path, revision: str):
             "material": "v600_pale_paving", "position": [0, 0.03, 40],
             "size": [1, 1, 1], "rotationY": 0})
 
-    # Rebalance the existing perimeter fixtures into a lower, softer path rhythm
-    # while keeping the same number of point lights and total light budget.
-    path_lights = [l for l in lighting["lights"] if abs(l.get("position", [0])[0]) == 65
-                   and 20 <= l.get("position", [0, 0, 0])[2] <= 66]
-    if len(path_lights) != 10:
-        raise ValueError(f"Expected ten existing plaza perimeter lights, found {len(path_lights)}")
-    for n, light in enumerate(path_lights):
-        if n < 6:
-            side = -1 if n % 2 == 0 else 1
-            row = n // 2
-            light["position"] = [side * 4.2, 0.85, 24.0 + row * 12.0]
-            light["radius"] = 7.0
-        else:
-            # Four dim points trace the existing oval bench perimeter.
-            ring = ((-17.0, 67.0), (17.0, 67.0), (-11.0, 82.0), (11.0, 82.0))
-            light["position"] = [*ring[n - 6], 0.85]
-            light["position"] = [light["position"][0], 0.85, light["position"][1]]
-            light["radius"] = 5.0
-        light["intensity"] = 0.62
-        light["color"] = [255, 237, 207]
+    # Replace scattered exterior lamp-post geometry and data with eight
+    # matching warm fixtures on the plaza's outer contour.
+    old_lamps = [i for i in instances["instances"]
+                 if i.get("parent") == "Mobilier/Lampadaires"]
+    instances["instances"] = [i for i in instances["instances"]
+                               if i.get("parent") != "Mobilier/Lampadaires"]
+    if len(old_lamps) < 16 or len(old_lamps) % 2:
+        raise ValueError(f"Expected paired exterior lamp geometry, found {len(old_lamps)} instances")
+    exterior_lights = [l for l in lighting["lights"]
+                       if abs(abs(l.get("position", [0])[0]) - 65.0) < 0.01 and
+                       20.0 <= l.get("position", [0, 0, 0])[2] <= 66.0]
+    if len(exterior_lights) != 10:
+        raise ValueError(f"Expected ten old exterior point lights, found {len(exterior_lights)}")
+    lighting["lights"] = [l for l in lighting["lights"] if l not in exterior_lights]
+    garden_lamp_positions = [(side * 55.0, z) for side in (-1, 1) for z in (28.0, 46.0, 64.0, 82.0)]
+    for n, (x, z) in enumerate(garden_lamp_positions):
+        instances["instances"].append({"id": f"v600_garden_lamp_{n}_post",
+            "parent": "Place/Eclairage/Lampadaires de lisière", "geometry": "unit_box",
+            "material": "prp_steel_painted", "position": [x, 1.75, z],
+            "size": [0.20, 3.5, 0.20], "rotationY": 0})
+        instances["instances"].append({"id": f"v600_garden_lamp_{n}_globe",
+            "parent": "Place/Eclairage/Lampadaires de lisière", "geometry": "unit_sphere",
+            "material": "lamp", "position": [x, 3.58, z],
+            "size": [0.42, 0.42, 0.42], "rotationY": 0})
+        lighting["lights"].append({"position": [x, 3.45, z], "radius": 10.0,
+            "intensity": 0.58, "color": [255, 224, 183]})
+
+    # Thin red inlay across the plaza marks the transition between the palace
+    # forecourt and garden. It sits just beyond the entrance stair run.
+    if not locate(geometry["meshes"], "v600_garden_red_inlay"):
+        geometry["meshes"].append({"id": "v600_garden_red_inlay", "type": "box",
+                                   "size": [88.0, 0.045, 0.22], "uv": "planar_per_face"})
+    materials["materials"].append({"id": "v600_garden_red_inlay", "baseColor": [0.58, 0.08, 0.055],
+        "roughness": 0.78, "metallic": 0.0, "transmission": 0.0, "ior": 1.5,
+        "textureSet": "tex_v600_garden_red_inlay", "origin": "V17.600 red plaza-to-garden inlay"})
+    pbr["sets"].append({"id": "tex_v600_garden_red_inlay", "material": "v600_garden_red_inlay",
+        "pattern": "smooth_plaster", "resolution": 512, "channels": ["albedo", "normal", "roughness"]})
+    instances["instances"].append({"id": "v600_garden_red_inlay_inst",
+        "parent": "Place/Transition vers la butte/Liseré rouge", "geometry": "v600_garden_red_inlay",
+        "material": "v600_garden_red_inlay", "position": [0, 0.16, 34.0],
+        "size": [1, 1, 1], "rotationY": 0})
 
     scene["revision"] = revision
     scene["name"] = "CSE WARP — Palais, piscine et coupole coulissante"
@@ -248,7 +305,9 @@ def patch(package: Path, revision: str):
     write(scene_path, scene)
     return {"revision": revision, "frescoPanels": len(fresco_meshes), "sharedFrescoImage": shared["imageFile"],
             "cupolaLeaves": len(sections), "cupolaGuideRails": 3, "relocatedPlanterMeshes": trees_moved,
-            "pathLightsRebalanced": len(path_lights), "sceneRevision": scene["revision"]}
+            "exteriorTreesRemoved": removed_trees // 2, "gardenTreesReplanted": len(garden_trees) // 2,
+            "gardenLampPosts": len(garden_lamp_positions), "redGardenInlay": True,
+            "gardenPresentationCamera": "v600_garden_view", "sceneRevision": scene["revision"]}
 
 
 def verify(package: Path, revision: str):
@@ -283,11 +342,14 @@ def verify(package: Path, revision: str):
     image = locate(pbr, "tex_cse_energetik_fresco")
     if not image or not (root / image["imageFile"]).is_file():
         raise ValueError("Shared full-resolution fresco texture is missing")
+    if image.get("textureDetail") != {"mode": "preserve", "minResolution": 2048}:
+        raise ValueError("Fresco high-resolution preservation policy is missing")
     for mesh in read(root / "geometry/v7-corrections.json")["meshes"]:
         if mesh.get("id", "").startswith("v7_fresco_quad_"):
             row, col = (int(x) for x in mesh["id"].split("_")[-2:])
-            expected = [[col/4, row/2], [(col+1)/4, row/2],
-                        [(col+1)/4, (row+1)/2], [col/4, (row+1)/2]]
+            v0, v1 = 1 - (row + 1) / 2, 1 - row / 2
+            expected = [[col/4, v0], [(col+1)/4, v0],
+                        [(col+1)/4, v1], [col/4, v1]]
             if mesh.get("uv") != expected:
                 raise ValueError(f"Fresco panel UVs do not map into the shared image: {mesh['id']}")
     cupola = read(root / "geometry/v523-pool-cupola.json")["meshes"]
@@ -298,8 +360,24 @@ def verify(package: Path, revision: str):
     rail_instances = [x for x in inst if x.get("id", "").startswith("v600_cupola_guide_")]
     if len(rail_instances) != 6:
         raise ValueError("Final scene does not contain paired guide rails on both eaves")
+    garden_trees = [x for x in inst if x.get("id", "").startswith("v600_garden_tree_")]
+    if len(garden_trees) != 12 or any(x.get("id", "").startswith("rev_tree") for x in inst):
+        raise ValueError("Exterior trees were not replaced by the six controlled garden trees")
+    garden_lamps = [x for x in inst if x.get("parent") == "Place/Eclairage/Lampadaires de lisière"]
+    if len(garden_lamps) != 16:
+        raise ValueError("Garden edge lighting must contain eight matching post/globe fixtures")
+    if not locate(inst, "v600_garden_red_inlay_inst"):
+        raise ValueError("Red plaza-to-garden inlay is missing")
+    garden_camera = locate(read(root / "cameras/v8-nine-anomalies.json")["cameras"], "v600_garden_view")
+    if garden_camera is None:
+        raise ValueError("Garden presentation camera is missing")
+    if (garden_camera.get("position") != [0.0, 18.0, 145.0] or
+            garden_camera.get("target") != [0.0, 8.0, 25.0]):
+        raise ValueError("Garden camera must show the landscape from the garden side")
     return {"revision": revision, "manifestResources": "complete", "frescoPanels": 8,
-            "sharedTexture": image["imageFile"], "cupolaLeaves": 3, "guideRails": 3}
+            "sharedTexture": image["imageFile"], "cupolaLeaves": 3, "guideRails": 3,
+            "gardenTrees": 6, "gardenLampFixtures": 8, "redGardenInlay": True,
+            "gardenCamera": "v600_garden_view"}
 
 
 def self_test():
@@ -312,16 +390,20 @@ def self_test():
         raise ValueError("Synthetic cupola test found an uncovered seam or no overlap")
     for row in range(2):
         for col in range(4):
-            uv = [[col/4, row/2], [(col+1)/4, row/2],
-                  [(col+1)/4, (row+1)/2], [col/4, (row+1)/2]]
+            v0, v1 = 1 - (row + 1) / 2, 1 - row / 2
+            uv = [[col/4, v0], [(col+1)/4, v0],
+                  [(col+1)/4, v1], [col/4, v1]]
             if uv[1][0] != uv[2][0] or uv[0][0] != uv[3][0]:
                 raise ValueError("Synthetic fresco UV partition is discontinuous")
             if col < 3 and uv[1][0] != (col+1)/4:
                 raise ValueError("Synthetic fresco horizontal UV boundary mismatch")
-            if row < 1 and uv[3][1] != (row+1)/2:
-                raise ValueError("Synthetic fresco vertical UV boundary mismatch")
+            if row == 0 and (uv[0][1] != .5 or uv[2][1] != 1.0):
+                raise ValueError("Synthetic fresco top row samples the wrong half of the source")
+            if row == 1 and (uv[0][1] != 0.0 or uv[2][1] != .5):
+                raise ValueError("Synthetic fresco bottom row samples the wrong half of the source")
     return {"syntheticCupolaAngleSamples": len(coverage), "minimumSectionCoverage": min(coverage),
-            "maximumSectionOverlap": max(coverage), "frescoUVTiles": 8, "status": "PASS"}
+            "maximumSectionOverlap": max(coverage), "frescoUVTiles": 8,
+            "frescoTopBottomOrientation": "corrected", "status": "PASS"}
 
 
 def main():

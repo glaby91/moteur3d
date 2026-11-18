@@ -2825,7 +2825,8 @@ private:
             QStringLiteral("v4_place"),QStringLiteral("v4_aerienne"),
             QStringLiteral("v6_monument_contrechamp"),QStringLiteral("v7_pool_fresco"),
             QStringLiteral("v4_hall"),QStringLiteral("v523_cupola_exterieure"),
-            QStringLiteral("v523_cupola_interieure"),QStringLiteral("v523_cupola_arriere")};
+            QStringLiteral("v523_cupola_interieure"),QStringLiteral("v523_cupola_arriere"),
+            QStringLiteral("v600_garden_view")};
         QVector<int> visibleCameras;
         for(const QString& id:preferredCameraIds){
             for(int i=0;i<runtime_->cameras.size();++i){
@@ -2833,7 +2834,7 @@ private:
             }
         }
         if(visibleCameras.isEmpty()){
-            for(int i=0;i<std::min(8,int(runtime_->cameras.size()));++i)visibleCameras.append(i);
+            for(int i=0;i<std::min(9,int(runtime_->cameras.size()));++i)visibleCameras.append(i);
         }
         for(int i:visibleCameras){
             QString name=runtime_->cameras[i].name;
