@@ -14,6 +14,7 @@ on:
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/**'
       - '.github/workflows/build-moteur3d-v17.yml'
       - 'tools/v493_*'
+      - 'tools/gi_fresco_ray_audit.py'
   pull_request:
     paths:
       - 'v17/**'
@@ -696,11 +697,29 @@ jobs:
           Run LANCER_CSE_WARP.bat to open the scene.
           "@ | Set-Content "dist-v17/README.txt" -Encoding utf8
           Write-Host "READY: $expectedSceneRevision shipping scene contains and renders the corrected pool cupola."
+      - name: Audit CPU light paths from the pool fresco
+        shell: pwsh
+        run: |
+          python tools/gi_fresco_ray_audit.py --self-test
+          if ($LASTEXITCODE -ne 0) { throw 'Fresco ray audit math self-test failed' }
+          python tools/gi_fresco_ray_audit.py --package dist-v17/benchmark-civic --output build-v17/fresco-ray-audit
+          if ($LASTEXITCODE -ne 0) { throw 'Fresco-to-water/cupola ray visibility audit failed' }
+          foreach ($p in @("build-v17/fresco-ray-audit/fresco-ray-bundle.svg",
+                           "build-v17/fresco-ray-audit/fresco-ray-paths.csv",
+                           "build-v17/fresco-ray-audit/fresco-ray-report.json")) {
+            if (!(Test-Path $p)) { throw "Fresco ray audit output missing: $p" }
+          }
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
           name: CSE-WARP-V17.${{ github.run_number }}-Windows-x64
           path: dist-v17/
+          if-no-files-found: error
+      - name: Upload fresco ray audit visualization
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17.${{ github.run_number }}-fresco-ray-audit
+          path: build-v17/fresco-ray-audit/
           if-no-files-found: error
       - name: Benchmark GI hors ligne — trois scènes, trois cuissons et sept relectures
         shell: pwsh
