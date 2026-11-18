@@ -714,6 +714,10 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
                 return result;
             }
             if(!replaceAlbedoWithImage(material,imageCanonical,result.error))return result;
+            // Keep the generated maps for GPU previews, but identify the image
+            // as flat artwork for the CPU PBR shading path.
+            material.imageAlbedo=true;
+            material.imageAlbedoRoughness=rough;
         }
         result.runtime.textureResolution=std::max(result.runtime.textureResolution,size);
         result.runtime.materialIndex.insert(id,int(render.mat.size()));
