@@ -242,6 +242,21 @@ def install(package: Path, scene_revision: str = "V17.523"):
     instance_path = package / instance_relative
     instances_doc = read(instance_path)
     instances = instances_doc["instances"]
+    # The CPU PBR renderer must distinguish pool water from glass even when
+    # both materials happen to use a similar index of refraction.
+    pool_water_objects = [obj for obj in instances
+                          if obj.get("parent") == "Interieur/Piscine olympique/Eau"]
+    if len(pool_water_objects) != 1:
+        raise ValueError(f"Expected one pool water surface; found {len(pool_water_objects)}")
+    material_path = package / sector["materials"][0]
+    materials_doc = read(material_path)
+    pool_water_id = pool_water_objects[0].get("material")
+    pool_water_material = next((item for item in materials_doc["materials"]
+                                if item.get("id") == pool_water_id), None)
+    if pool_water_material is None:
+        raise ValueError(f"Pool water material is missing: {pool_water_id}")
+    pool_water_material["surfaceModel"] = "water"
+    write(material_path, materials_doc)
     initial_instance_count = len(instances)
     old = [obj for obj in instances
            if obj.get("parent", "").startswith("Architecture/Palais/Verriere haute")]
