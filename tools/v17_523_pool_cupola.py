@@ -166,23 +166,23 @@ def build_geometry():
             beam_box(arch_vertices, arch_faces, center, end,
                      across, in_plane, 0.12, 0.10)
 
-    # Continuous eaves curbs close the seam between the vault and the flat
-    # roof.  Their lower half is embedded below the roof plane for a visible,
-    # gap-free structural joint along both long sides.
+    # A separate brushed-stainless curb makes the roof joint readable against
+    # the dark roofing.  The lower half embeds below the roof plane.
+    curb_vertices, curb_faces = [], []
     for side in (-1, 1):
         z = z_center + side * half_span
-        beam_box(arch_vertices, arch_faces,
+        beam_box(curb_vertices, curb_faces,
                  (x0, base_y - 0.02, z), (x1, base_y - 0.02, z),
-                 (0.0, 0.0, 1.0), (0.0, 1.0, 0.0), 0.30, 0.34)
+                 (0.0, 0.0, 1.0), (0.0, 1.0, 0.0), 0.42, 0.38)
 
     # Close the perimeter curb at both short ends as well.  The four beams
     # form one continuous, roof-embedded rectangular flashing around the
     # opening, rather than two long rails that stop at unconnected ends.
     for x in (x0, x1):
-        beam_box(arch_vertices, arch_faces,
+        beam_box(curb_vertices, curb_faces,
                  (x, base_y - 0.02, z_center - half_span),
                  (x, base_y - 0.02, z_center + half_span),
-                 (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), 0.30, 0.34)
+                 (1.0, 0.0, 0.0), (0.0, 1.0, 0.0), 0.42, 0.38)
 
     # Longitudinal purlins follow the ellipse and tie every arch together.
     rail_vertices, rail_faces = [], []
@@ -205,6 +205,9 @@ def build_geometry():
         {"id": "v523_pool_cupola_purlins", "type": "triangle_mesh",
          "vertices": rail_vertices, "faces": rail_faces,
          "uv": [[0.0, 0.0] for _ in rail_vertices]},
+        {"id": "v523_pool_cupola_roof_curb", "type": "triangle_mesh",
+         "vertices": curb_vertices, "faces": curb_faces,
+         "uv": [[0.0, 0.0] for _ in curb_vertices]},
     ]
     for mesh in meshes:
         if not mesh["vertices"] or not mesh["faces"]:
@@ -233,6 +236,8 @@ def install(package: Path):
         raise ValueError("Approved clear glass material is missing")
     if "v8_mullion_dark_steel" not in {m["id"] for m in read(package / sector["materials"][0])["materials"]}:
         raise ValueError("Approved dark steel material is missing")
+    if "v8_inox_brushed_316L" not in {m["id"] for m in read(package / sector["materials"][0])["materials"]}:
+        raise ValueError("Approved brushed stainless steel material is missing")
 
     instance_path = package / instance_relative
     instances_doc = read(instance_path)
@@ -261,6 +266,10 @@ def install(package: Path):
         {"id": "v523_pool_cupola_purlins",
          "parent": "Architecture/Palais/Piscine/Verriere voutee/Lisses longitudinales",
          "geometry": "v523_pool_cupola_purlins", "material": "v8_mullion_dark_steel",
+         "position": [0.0, 0.0, 0.0], "size": [1.0, 1.0, 1.0], "rotationY": 0},
+        {"id": "v523_pool_cupola_roof_curb",
+         "parent": "Architecture/Palais/Piscine/Verriere voutee/Costiere inox raccord toiture",
+         "geometry": "v523_pool_cupola_roof_curb", "material": "v8_inox_brushed_316L",
          "position": [0.0, 0.0, 0.0], "size": [1.0, 1.0, 1.0], "rotationY": 0},
     ]
     instances.extend(cupola_instances)
@@ -300,10 +309,11 @@ def install(package: Path):
         "closedGlassGables": len(end_caps),
         "gableRadialMullions": len(end_caps) * 5,
         "continuousRoofEaves": 4,
-        "roofJoint": "closed rectangular steel curb embedded below the roof plane",
+        "roofJoint": "closed rectangular brushed stainless curb embedded below the roof plane",
         "endCapPlanes": end_caps,
         "cameras": list(camera_ids),
-        "materialsReused": ["v8_clear_roof_glass", "v8_mullion_dark_steel"],
+        "materialsReused": ["v8_clear_roof_glass", "v8_mullion_dark_steel",
+                            "v8_inox_brushed_316L"],
         "lightingChanged": False,
         "rendererChanged": False,
     }
