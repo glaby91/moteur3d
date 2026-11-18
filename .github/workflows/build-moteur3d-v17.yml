@@ -22,6 +22,7 @@ on:
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/**'
       - 'tools/v17_523_*'
       - 'tools/v17_600_scene_finish.py'
+      - 'tools/gi_fresco_ray_audit.py'
       - '.github/workflows/build-moteur3d-v17.yml'
   workflow_dispatch:
 permissions:

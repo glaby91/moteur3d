@@ -189,7 +189,11 @@ def sample_points(instances, triangles):
                if i.get("material") == "cse_energetik_fresco"
                or i.get("material", "").startswith("v7_fresco_")]
     water = next((i for i in instances if i.get("material") == "cse_pool_water"), None)
-    glass = next((i for i in instances if i.get("material") == "v8_clear_roof_glass"), None)
+    # V17.600 replaces the former single clear roof mesh with three nested,
+    # tinted sliding leaves. Keep accepting the legacy roof for older packages.
+    glass = next((i for i in instances if i.get("material") in {
+        "v8_clear_roof_glass", "v600_tinted_glass"
+    }), None)
     if not frescos or not water or not glass:
         raise ValueError(f"Required targets missing: fresco_panels={len(frescos)}, water={bool(water)}, glass={bool(glass)}")
 
