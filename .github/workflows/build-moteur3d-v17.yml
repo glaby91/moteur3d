@@ -19,6 +19,7 @@ on:
     paths:
       - 'v17/**'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/**'
+      - 'tools/v17_523_*'
       - '.github/workflows/build-moteur3d-v17.yml'
   workflow_dispatch:
 permissions:
@@ -672,10 +673,10 @@ jobs:
           $report = Get-Content "dist-v17/benchmark-civic/V523_POOL_CUPOLA.json" -Raw | ConvertFrom-Json
           if ($report.revision -ne 'V17.523' -or $report.sceneRevision -ne $expectedSceneRevision -or
               $report.removedFlatSkylightInstances -ne 19 -or
-              $report.addedCupolaMeshes -ne 4 -or $report.addedCupolaInstances -ne 4 -or
+              $report.addedCupolaMeshes -ne 5 -or $report.addedCupolaInstances -ne 5 -or
               $report.addedTriangles -lt 3500 -or $report.addedTriangles -gt 6000 -or
               $report.closedGlassGables -ne 2 -or $report.gableRadialMullions -ne 10 -or
-              $report.continuousRoofEaves -ne 4 -or
+              $report.continuousRoofEaves -ne 4 -or $report.opaqueCrownArcDegrees -ne 60 -or
               $report.cupolaDimensionsMeters.length -ne 60 -or
               $report.cupolaDimensionsMeters.span -ne 34 -or
               $report.lightingChanged -or $report.rendererChanged -or @($report.cameras).Count -ne 3) {
