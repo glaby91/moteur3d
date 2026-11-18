@@ -1,0 +1,148 @@
+name: "CSE WARP V17 EXPERIMENT - Vulkan vs D3D11 Compute A-B"
+on:
+  push:
+    branches:
+      - experiment/v17-vulkan-vs-dx11-hd620-261114
+    paths:
+      - 'experiments/vulkan-dx11-bench/**'
+      - '.github/workflows/v17-vulkan-dx11-compute-benchmark.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: cse-warp-vulkan-dx11-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows-x64:
+    runs-on: windows-2022
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Vulkan SDK and software ICD for functional tests
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: '1.4.309.0'
+          cache: true
+          stripdown: true
+          install_swiftshader: false
+      - name: Detect optional SwiftShader ICD (do not download on CI)
+        id: vk_icd
+        shell: pwsh
+        run: |
+          $icd = Get-ChildItem 'C:\hostedtoolcache\windows\swiftshader' -Recurse -Filter vk_swiftshader_icd.json -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty FullName
+          if ($icd) {
+            Write-Host "Using optional Vulkan software ICD: $icd"
+            "VK_ICD_FILENAMES=$icd" >> $env:GITHUB_ENV
+            "present=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Host "No software Vulkan ICD on Windows runner. Vulkan smoke tests intentionally skipped; HD620 hardware validation required."
+            "present=false" >> $env:GITHUB_OUTPUT
+          }
+      - name: Configure CMake for isolated benchmark
+        shell: pwsh
+        run: >-
+          cmake -S experiments/vulkan-dx11-bench
+          -B build-vulkan-dx11
+          -G "Visual Studio 17 2022" -A x64
+      - name: Compile HLSL and GLSL Vulkan/DX11 benchmark
+        id: build
+        shell: pwsh
+        run: cmake --build build-vulkan-dx11 --config Release --parallel 2
+      - name: Resolve Windows Vulkan loader DLL for launch and portable ZIP
+        id: loader
+        shell: pwsh
+        run: |
+          $paths = @(
+            "$env:VULKAN_SDK\runtime\x64\vulkan-1.dll",
+            "$env:VULKAN_SDK\Bin\vulkan-1.dll",
+            "$env:SystemRoot\System32\vulkan-1.dll"
+          )
+          $dll = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if ($dll) {
+            Write-Host "Vulkan loader found: $dll"
+            Copy-Item $dll 'build-vulkan-dx11/Release/vulkan-1.dll' -Force
+            "present=true" >> $env:GITHUB_OUTPUT
+          } else {
+            Write-Warning "No vulkan-1.dll on runner; Windows executable launch tests skipped. GPU vendor drivers provide loader on physical HD620."
+            "present=false" >> $env:GITHUB_OUTPUT
+          }
+      - name: Probe available APIs
+        if: steps.loader.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          $exe = 'build-vulkan-dx11/Release/cse_warp_vk_dx11_bench.exe'
+          & $exe --help
+          if ($LASTEXITCODE -ne 0) { throw "Help failed exit=$LASTEXITCODE" }
+          & $exe --probe 2>&1 | Tee-Object -FilePath build-vulkan-dx11/probe.txt
+          if ($LASTEXITCODE -ne 0) { throw "Probe failed exit=$LASTEXITCODE" }
+      - name: Functional smoke D3D11 WARP (NOT representative HD620 timing)
+        if: steps.loader.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          Push-Location build-vulkan-dx11/Release
+          ./cse_warp_vk_dx11_bench.exe --api dx11 --warp --width 320 --height 180 --loops 8 --warmup 1 --repeat 2 --output ../smoke_dx11
+          if ($LASTEXITCODE -ne 0) { throw 'D3D11 WARP smoke failed' }
+          Pop-Location
+      - name: Functional smoke Vulkan SwiftShader (NOT comparable timing)
+        if: steps.vk_icd.outputs.present == 'true' && steps.loader.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          Push-Location build-vulkan-dx11/Release
+          ./cse_warp_vk_dx11_bench.exe --api vulkan --allow-software --width 320 --height 180 --loops 8 --warmup 1 --repeat 2 --output ../smoke_vulkan
+          if ($LASTEXITCODE -ne 0) { throw 'Vulkan software ICD smoke failed' }
+          Pop-Location
+      - name: Verify output equality (different CPU rasterizers, no perf claim)
+        if: steps.vk_icd.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          $dx = Get-Content build-vulkan-dx11/smoke_dx11.json -Raw | ConvertFrom-Json
+          $vk = Get-Content build-vulkan-dx11/smoke_vulkan.json -Raw | ConvertFrom-Json
+          if ($dx.checksum -ne $vk.checksum) { throw "Shader output mismatch: D3D11=$($dx.checksum), Vulkan=$($vk.checksum)" }
+          Write-Host "PASS: matching integer result checksum $($dx.checksum)"
+      - name: Validate turbo cached, direct, compute-only, and pipeline variants on SwiftShader
+        if: steps.vk_icd.outputs.present == 'true'
+        shell: pwsh
+        run: |
+          Push-Location build-vulkan-dx11/Release
+          $options = @(
+            @('cached', '1', 'smoke_turbo_cached'),
+            @('direct', '1', 'smoke_turbo_direct'),
+            @('compute', '1', 'smoke_turbo_compute'),
+            @('cached', '2', 'smoke_turbo_ring2'),
+            @('direct', '3', 'smoke_turbo_ring3'),
+            @('compute', '3', 'smoke_turbo_compute_ring3')
+          )
+          $expected = (Get-Content ../smoke_dx11.json -Raw | ConvertFrom-Json).checksum
+          foreach ($t in $options) {
+            $mode, $inflight, $name = $t
+            ./cse_warp_vk_dx11_bench.exe --api vulkan --allow-software --vk-mode $mode --vk-inflight $inflight --width 320 --height 180 --loops 8 --warmup 1 --repeat 4 --output "../$name"
+            if ($LASTEXITCODE -ne 0) { throw "$name failed" }
+            $result = Get-Content "../$name.json" -Raw | ConvertFrom-Json
+            if ($result.checksum -ne $expected) { throw "$name checksum mismatch: $($result.checksum) != $expected" }
+            if ($result.samples.Count -ne 4) { throw "$name sample count mismatch" }
+            Write-Host "PASS $name with checksum $expected"
+          }
+          Pop-Location
+      - name: Prepare portable Windows x64 package
+        if: ${{ always() && steps.build.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory dist-vulkan-dx11 -Force | Out-Null
+          Copy-Item build-vulkan-dx11/Release/cse_warp_vk_dx11_bench.exe dist-vulkan-dx11/
+          Copy-Item build-vulkan-dx11/Release/benchmark.comp.spv dist-vulkan-dx11/
+          if (Test-Path 'build-vulkan-dx11/Release/vulkan-1.dll') { Copy-Item build-vulkan-dx11/Release/vulkan-1.dll dist-vulkan-dx11/ }
+          Copy-Item experiments/vulkan-dx11-bench/LANCER_BENCH_HD620.bat dist-vulkan-dx11/
+          Copy-Item experiments/vulkan-dx11-bench/README.md dist-vulkan-dx11/
+      - name: Publish portable benchmark (driver Vulkan required on target)
+        if: ${{ always() && steps.build.outcome == 'success' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: CSE-WARP-V17-Vulkan-DX11-Compute-Bench-Windows-x64
+          path: |
+            dist-vulkan-dx11/**
+            build-vulkan-dx11/probe.txt
+            build-vulkan-dx11/smoke_*.json
+            build-vulkan-dx11/smoke_*.csv
+            build-vulkan-dx11/smoke_turbo*.json
+            build-vulkan-dx11/smoke_turbo*.csv
+          retention-days: 14
