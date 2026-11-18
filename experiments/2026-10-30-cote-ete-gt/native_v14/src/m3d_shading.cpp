@@ -78,7 +78,7 @@ static V mappedNormal(const Material&m,const Obj&o,V n,float u,float v,float foo
  V tex=sampleMipChain(m.normalMip,u,v,footprint,st),q=norm({tex.x/127.5f-1.f,tex.y/127.5f-1.f,tex.z/127.5f-1.f});
  return norm(t*q.x+b*q.y+n*q.z);
 }
-V shade(const Scene&s,const ShadowMap&sm,const Camera&cam,const Ray&r,const Hit&h,Stats&st,bool fog,bool reflections){if(h.id==-1)return sky(r.d,fog,s.underwaterEnvironment);V p=h.p,n=h.n;int mi=h.id==-2?groundMaterial(s,p):h.mat;const std::string&mat=s.mat[mi].name;const bool carPaint=mat.rfind("sports",0)==0||mat=="carSilver"||mat=="carBlue"||mat=="carGreen"||mat=="classicBody";const bool raptureSurface=mat=="raptureStone"||mat=="raptureBronze"||mat=="raptureGlass";V uv;float footprint=1,worldFootprint=h.t*cam.pixelAngle;const Obj*o=h.id>=0?&s.obj[h.id]:nullptr;if(h.id==-2){uv={p.x*.34f,p.z*.34f,.34f};}else{uv=uvAt(s,*o,p,n);float slope=std::max(.16f,std::abs(dot(n,r.d)));worldFootprint=h.t*cam.pixelAngle/slope;footprint=float(albedoSize(s.mat[mi]))*worldFootprint*uv.z;}const Material&material=s.mat[mi];if(o&&!material.normalMip.empty())n=mappedNormal(material,*o,n,uv.x,uv.y,footprint,st);else n=bumpNormal(mat,p,n,worldFootprint);V base=texSample(material,uv.x,uv.y,footprint,st);float roughness=material.roughnessMip.empty()?.72f:clampf(sampleMipChain(material.roughnessMip,uv.x,uv.y,footprint,st).x/255.f,.08f,.98f);roughness=clampf(roughness*material.roughnessScale,.04f,.98f);float ndotl=std::max(0.f,dot(n,sun)),vis=daylight>.001f?visibility(sm,p+n*.025f,&st):1.f,direct=ndotl*vis*daylight,diffuseLevel=mat=="foam"?.60f+.30f*daylight+.24f*direct:mat=="orange"?.34f+.43f*daylight+.26f*direct:carPaint?.32f+.42f*daylight+.32f*direct:raptureSurface?.42f+.28f*daylight+.50f*direct:.30f+.44f*daylight+.56f*direct;// Generic daylight shading: a normal-facing sky model helps *any* scene
+V shade(const Scene&s,const ShadowMap&sm,const Camera&cam,const Ray&r,const Hit&h,Stats&st,bool fog,bool reflections){if(h.id==-1)return sky(r.d,fog,s.underwaterEnvironment);V p=h.p,n=h.n;int mi=h.id==-2?groundMaterial(s,p):h.mat;const std::string&mat=s.mat[mi].name;const bool carPaint=mat.rfind("sports",0)==0||mat=="carSilver"||mat=="carBlue"||mat=="carGreen"||mat=="classicBody";const bool raptureSurface=mat=="raptureStone"||mat=="raptureBronze"||mat=="raptureGlass";V uv;float footprint=1,worldFootprint=h.t*cam.pixelAngle;const Obj*o=h.id>=0?&s.obj[h.id]:nullptr;if(h.id==-2){uv={p.x*.34f,p.z*.34f,.34f};}else{uv=uvAt(s,*o,p,n);float slope=std::max(.16f,std::abs(dot(n,r.d)));worldFootprint=h.t*cam.pixelAngle/slope;footprint=float(albedoSize(s.mat[mi]))*worldFootprint*uv.z;}const Material&material=s.mat[mi];if(o&&!material.imageAlbedo&&!material.normalMip.empty())n=mappedNormal(material,*o,n,uv.x,uv.y,footprint,st);else if(!material.imageAlbedo)n=bumpNormal(mat,p,n,worldFootprint);V base=texSample(material,uv.x,uv.y,footprint,st);float roughness=material.imageAlbedo?material.imageAlbedoRoughness:(material.roughnessMip.empty()?.72f:clampf(sampleMipChain(material.roughnessMip,uv.x,uv.y,footprint,st).x/255.f,.08f,.98f));roughness=clampf(roughness*material.roughnessScale,.04f,.98f);float ndotl=std::max(0.f,dot(n,sun)),vis=daylight>.001f?visibility(sm,p+n*.025f,&st):1.f,direct=ndotl*vis*daylight,diffuseLevel=mat=="foam"?.60f+.30f*daylight+.24f*direct:mat=="orange"?.34f+.43f*daylight+.26f*direct:carPaint?.32f+.42f*daylight+.32f*direct:raptureSurface?.42f+.28f*daylight+.50f*direct:.30f+.44f*daylight+.56f*direct;// Generic daylight shading: a normal-facing sky model helps *any* scene
  // reveal relief in its own PBR normal maps without scene-name rules.
  if(!s.underwaterEnvironment){
    const float skyFacing=clampf(.5f+.5f*n.y,0.f,1.f);
@@ -111,12 +111,10 @@ V traceColor(const Scene&s,const ShadowMap&sm,const Camera&cam,const Ray&input,S
   const float eta=entering?1.f/ior:ior;
   const float sin2=std::max(0.f,1.f-cosine*cosine),k=1.f-eta*eta*sin2;
   const bool totalInternalReflection=k<=0.f;
-  // Pavillon 01 pool: retain a sky/building reflection even for a shallow,
-  // low-transmission water surface. Non-water glass keeps physical Schlick F0.
-  // Use measured medium properties, not a scene name or an object label.
-  // The GPU Preview uses the same water IOR/transmission classification.
-  const bool architecturalWater=(material.transmissionPercent>5 &&
-      material.refractiveIndex>1.28f && material.refractiveIndex<1.38f);
+  // Only explicitly declared water receives the pool's boosted Fresnel
+  // reflection. Glass can share water's IOR without becoming a water surface.
+  const bool architecturalWater=(material.surfaceAuthored && material.waterSurface &&
+      material.transmissionPercent>5);
   const float waterEdge=std::pow(1.f-cosine,3.f);
   const float reflectedWeight=totalInternalReflection?1.f:
       architecturalWater?clampf(.15f+.32f*waterEdge,0.f,.72f):fresnel;
@@ -163,9 +161,9 @@ static V offlinePbrShade(const Scene&s,const ShadowMap&sm,const Camera&cam,const
  const Obj* o=h.id>=0?&s.obj[h.id]:nullptr;V n=dot(h.n,r.d)>0.f?h.n*-1.f:h.n,uv;float footprint=1.f,worldFootprint=h.t*cam.pixelAngle;
  if(h.id==-2)uv={h.p.x*.34f,h.p.z*.34f,.34f};
  else{uv=uvAt(s,*o,h.p,n);const float slope=std::max(.16f,std::abs(dot(n,r.d)));worldFootprint=h.t*cam.pixelAngle/slope;footprint=float(albedoSize(material))*worldFootprint*uv.z;}
- if(o&&!material.normalMip.empty())n=mappedNormal(material,*o,n,uv.x,uv.y,footprint,st);else n=bumpNormal(name,h.p,n,worldFootprint);
+ if(o&&!material.imageAlbedo&&!material.normalMip.empty())n=mappedNormal(material,*o,n,uv.x,uv.y,footprint,st);else if(!material.imageAlbedo)n=bumpNormal(name,h.p,n,worldFootprint);
  const V base=rgbBytesToLinear(texSample(material,uv.x,uv.y,footprint,st));
- float roughness=material.roughnessMip.empty()?.72f:clampf(sampleMipChain(material.roughnessMip,uv.x,uv.y,footprint,st).x/255.f,.08f,.98f);roughness=clampf(roughness*material.roughnessScale,.04f,.98f);
+ float roughness=material.imageAlbedo?material.imageAlbedoRoughness:(material.roughnessMip.empty()?.72f:clampf(sampleMipChain(material.roughnessMip,uv.x,uv.y,footprint,st).x/255.f,.08f,.98f));roughness=clampf(roughness*material.roughnessScale,.04f,.98f);
  // V4 defines reflectivity, transmission and IOR, but no metallic channel.
  // Preserve reflectivity as dielectric F0; never reinterpret it as metallicity.
  const float f0Level=material.reflectivityPercent?clampf(float(material.reflectivityPercent)*.01f,.02f,.95f):.04f;
