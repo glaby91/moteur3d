@@ -30,13 +30,13 @@
 #include <cmath>
 #include <cstring>
 #include <cstdlib>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <numeric>
 #include <stdexcept>
 #include <type_traits>
+#include <utility>
 #include <vector>
 
 namespace m3d { namespace {
@@ -124,12 +124,23 @@ class VulkanRaster final {
     void* presentWindow_=nullptr;
     VkSurfaceKHR displaySurface_=VK_NULL_HANDLE;
     VkSwapchainKHR swapchain_=VK_NULL_HANDLE;
+    struct RetiredSwapchain {
+        VkSwapchainKHR handle=VK_NULL_HANDLE;
+        std::vector<VkSemaphore> presentSemaphores;
+    };
+    std::vector<RetiredSwapchain> retiredSwapchains_;
     std::vector<VkImage> swapImages_;
     std::vector<VkSemaphore> imageReady_;
     VkSemaphore imageAcquired_=VK_NULL_HANDLE;
+    VkFence imageAcquiredFence_=VK_NULL_HANDLE;
     VkExtent2D swapExtent_{};
     VkFormat swapFormat_=VK_FORMAT_UNDEFINED;
     bool swapDirty_=false;
+    // Khronos' pre-maintenance1 retirement pattern: old swapchains and their
+    // present-wait semaphores survive until the first image from the new chain
+    // has itself been presented and reacquired.
+    bool retireMarkerPending_=false;
+    uint32_t retireMarkerImage_=UINT32_MAX;
     VkPresentModeKHR swapMode_=VK_PRESENT_MODE_FIFO_KHR;
     VkInstance instance_=VK_NULL_HANDLE;
     bool ownsInstance_=true;
@@ -222,6 +233,7 @@ class VulkanRaster final {
         VkCommandPool commands=VK_NULL_HANDLE;
         VkCommandBuffer cmd=VK_NULL_HANDLE;
         VkFence fence=VK_NULL_HANDLE;
+        VkFence acquiredFence=VK_NULL_HANDLE;
         VkQueryPool queries=VK_NULL_HANDLE;
         VkSemaphore acquired=VK_NULL_HANDLE;
         VkDescriptorSet descriptor=VK_NULL_HANDLE;
@@ -241,7 +253,8 @@ class VulkanRaster final {
     void swapSlot(FrameSlot& slot){
         using std::swap;
         swap(commands_,slot.commands);swap(cmd_,slot.cmd);
-        swap(fence_,slot.fence);swap(queries_,slot.queries);
+        swap(fence_,slot.fence);swap(imageAcquiredFence_,slot.acquiredFence);
+        swap(queries_,slot.queries);
         swap(imageAcquired_,slot.acquired);swap(descriptor_,slot.descriptor);
         swap(framebuffer_,slot.framebuffer);
         swap(color_,slot.color);swap(msColor_,slot.msColor);swap(depth_,slot.depth);
@@ -305,6 +318,9 @@ class VulkanRaster final {
         vkcheck(vkCreateQueryPool(device_,&qi,nullptr,&queries_),"second-frame timestamps");
         VkSemaphoreCreateInfo sem{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
         vkcheck(vkCreateSemaphore(device_,&sem,nullptr,&imageAcquired_),"second-frame image acquired");
+        VkFenceCreateInfo acquiredFence{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        vkcheck(vkCreateFence(device_,&acquiredFence,nullptr,&imageAcquiredFence_),
+                "second-frame image acquired fence");
         uniform_=buffer(sizeof(Uniforms),VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
         VkDescriptorSetAllocateInfo da{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
         da.descriptorPool=descriptorPool_;da.descriptorSetCount=1;da.pSetLayouts=&descriptorLayout_;
@@ -490,9 +506,18 @@ class VulkanRaster final {
         t={};
     }
 
-    // A native child HWND owned by Qt; its pixels are presented by Vulkan,
-    // not by a QImage or a CPU-mediated texture upload. The existing offscreen
-    // render pass remains intact and is blitted GPU-to-GPU to the swapchain.
+    void destroyRetiredSwapchains(){
+        for(auto& retired:retiredSwapchains_){
+            for(VkSemaphore semaphore:retired.presentSemaphores)
+                if(semaphore)vkDestroySemaphore(device_,semaphore,nullptr);
+            if(retired.handle)vkDestroySwapchainKHR(device_,retired.handle,nullptr);
+        }
+        retiredSwapchains_.clear();
+        retireMarkerPending_=false;
+        retireMarkerImage_=UINT32_MAX;
+    }
+    // Pixels are presented by Vulkan, not by a QImage or CPU-mediated upload.
+    // The existing offscreen render pass remains intact and is blitted GPU-to-GPU.
     void createSwapchain(uint32_t preferredW,uint32_t preferredH){
         if(!displaySurface_)return;
         VkSurfaceCapabilitiesKHR caps{};
@@ -569,7 +594,6 @@ class VulkanRaster final {
                 if(caps.supportedCompositeAlpha&candidate){alpha=candidate;break;}
             }
         }
-        if(swapchain_)vkcheck(vkDeviceWaitIdle(device_),"wait GPU before swapchain resize");
         VkSwapchainCreateInfoKHR ci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
         ci.surface=displaySurface_;ci.minImageCount=actualCount;
         ci.imageFormat=chosen.format;ci.imageColorSpace=chosen.colorSpace;
@@ -581,10 +605,17 @@ class VulkanRaster final {
         ci.oldSwapchain=swapchain_;
         VkSwapchainKHR newSwapchain=VK_NULL_HANDLE;
         vkcheck(vkCreateSwapchainKHR(device_,&ci,nullptr,&newSwapchain),"create WSI swapchain");
-        for(VkSemaphore sem:imageReady_)vkDestroySemaphore(device_,sem,nullptr);
-        imageReady_.clear();
-        if(swapchain_)vkDestroySwapchainKHR(device_,swapchain_,nullptr);
+        if(swapchain_){
+            // vkDeviceWaitIdle does not prove that the presentation engine has
+            // consumed every present-wait semaphore. Keep the retired chain and
+            // its semaphores until a new-chain present has completed and its
+            // image is reacquired (tracked by acquireSwapImage below).
+            retiredSwapchains_.push_back({swapchain_,std::move(imageReady_)});
+            imageReady_.clear();
+        }
         swapchain_=newSwapchain;
+        retireMarkerPending_=!retiredSwapchains_.empty();
+        retireMarkerImage_=UINT32_MAX;
         uint32_t nImages=0;
         vkcheck(vkGetSwapchainImagesKHR(device_,swapchain_,&nImages,nullptr),
                 "swapchain image count");
@@ -603,17 +634,26 @@ class VulkanRaster final {
     }
     uint32_t acquireSwapImage(){
         uint32_t index=0;
-        VkResult status=vkAcquireNextImageKHR(device_,swapchain_,UINT64_MAX,
-                                               imageAcquired_,VK_NULL_HANDLE,&index);
+        auto acquire=[&]{
+            vkcheck(vkResetFences(device_,1,&imageAcquiredFence_),
+                    "reset swapchain acquire retirement fence");
+            return vkAcquireNextImageKHR(device_,swapchain_,UINT64_MAX,
+                                         imageAcquired_,imageAcquiredFence_,&index);
+        };
+        VkResult status=acquire();
         if(status==VK_ERROR_OUT_OF_DATE_KHR){
             swapDirty_=true;
             createSwapchain(swapExtent_.width,swapExtent_.height);
-            status=vkAcquireNextImageKHR(device_,swapchain_,UINT64_MAX,
-                                         imageAcquired_,VK_NULL_HANDLE,&index);
+            status=acquire();
         }
         if(status!=VK_SUCCESS&&status!=VK_SUBOPTIMAL_KHR)
             throw std::runtime_error("Acquire native Vulkan display image: "+std::to_string(int(status)));
         if(status==VK_SUBOPTIMAL_KHR)swapDirty_=true;
+        if(retireMarkerPending_&&index==retireMarkerImage_){
+            vkcheck(vkWaitForFences(device_,1,&imageAcquiredFence_,VK_TRUE,UINT64_MAX),
+                    "wait for first replacement-chain present before retirement");
+            destroyRetiredSwapchains();
+        }
         return index;
     }
     void recordSwapchainBlit(uint32_t index){
@@ -701,8 +741,11 @@ class VulkanRaster final {
             swapDirty_=true;
             return false; // Do not report a frame that never reached the window.
         }
+        if(status!=VK_SUCCESS&&status!=VK_SUBOPTIMAL_KHR)
+            vkcheck(status,"present swapchain image");
+        if(retireMarkerPending_&&retireMarkerImage_==UINT32_MAX)
+            retireMarkerImage_=index;
         if(status==VK_SUBOPTIMAL_KHR){swapDirty_=true;return true;}
-        vkcheck(status,"present swapchain image");
         return true;
     }
     void begin(){
@@ -715,7 +758,11 @@ class VulkanRaster final {
         vkcheck(vkEndCommandBuffer(cmd_),"end commands");
         VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
         si.commandBufferCount=1;si.pCommandBuffers=&cmd_;
-        VkPipelineStageFlags acquireStage=VK_PIPELINE_STAGE_TRANSFER_BIT;
+        // The acquired image is first touched by a TOP_OF_PIPE -> TRANSFER
+        // layout transition. Waiting only at TRANSFER can let the transition
+        // run before WSI has released the image on some drivers. Cover the
+        // complete command buffer so the first transition is also protected.
+        VkPipelineStageFlags acquireStage=VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
         if(presentIndex>=0){
             si.waitSemaphoreCount=1;si.pWaitSemaphores=&imageAcquired_;
             si.pWaitDstStageMask=&acquireStage;
@@ -1084,13 +1131,20 @@ class VulkanRaster final {
             VkSemaphoreCreateInfo sem{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
             vkcheck(vkCreateSemaphore(device_,&sem,nullptr,&imageAcquired_),
                     "swapchain acquire semaphore");
+            VkFenceCreateInfo acquireFence{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+            vkcheck(vkCreateFence(device_,&acquireFence,nullptr,&imageAcquiredFence_),
+                    "swapchain acquire retirement fence");
             const char* requestedFrames=std::getenv("CSE_WARP_VK_FRAMES_IN_FLIGHT");
             if(requestedFrames && std::strcmp(requestedFrames,"1")!=0 &&
                std::strcmp(requestedFrames,"2")!=0)
                 throw std::runtime_error("CSE_WARP_VK_FRAMES_IN_FLIGHT accepts 1 or 2");
-            // Dedicated HD620 optimization branch defaults to two when testing
-            // native WSI. CSE_WARP_VK_FRAMES_IN_FLIGHT=1 restores baseline.
-            asyncFrames_=!requestedFrames || std::strcmp(requestedFrames,"2")==0;
+            // Keep native presentation on the serial, fence-complete baseline
+            // unless two frames are explicitly requested for profiling. This
+            // avoids exposing the experimental async path as the default on
+            // drivers where WSI and camera-driven presents are not yet proven.
+            asyncFrames_=requestedFrames && std::strcmp(requestedFrames,"2")==0;
+            std::clog<<"[CSE WARP Vulkan] native frames in flight="
+                     <<(asyncFrames_?2:1)<<" (set CSE_WARP_VK_FRAMES_IN_FLIGHT=2 to profile async)\n";
         }
         vkGetDeviceQueue(device_,family_,0,&queue_);
         VkCommandPoolCreateInfo cp{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};cp.queueFamilyIndex=family_;
@@ -1869,6 +1923,7 @@ public:
         for(FrameSlot& slot:frameSlots_){
             if(slot.framebuffer)vkDestroyFramebuffer(device_,slot.framebuffer,nullptr);
             if(slot.acquired)vkDestroySemaphore(device_,slot.acquired,nullptr);
+            if(slot.acquiredFence)vkDestroyFence(device_,slot.acquiredFence,nullptr);
             free(slot.readback);free(slot.uniform);free(slot.transparent);
             free(slot.color);free(slot.msColor);free(slot.depth);
             if(slot.queries)vkDestroyQueryPool(device_,slot.queries,nullptr);
@@ -1880,7 +1935,9 @@ public:
         if(framebuffer_)vkDestroyFramebuffer(device_,framebuffer_,nullptr);
         for(VkSemaphore sem:imageReady_)if(sem)vkDestroySemaphore(device_,sem,nullptr);
         if(imageAcquired_)vkDestroySemaphore(device_,imageAcquired_,nullptr);
+        if(imageAcquiredFence_)vkDestroyFence(device_,imageAcquiredFence_,nullptr);
         if(swapchain_)vkDestroySwapchainKHR(device_,swapchain_,nullptr);
+        destroyRetiredSwapchains();
         free(readback_);free(uniform_);free(vertices_);free(transparent_);free(boxTemplate_);free(boxInstances_);free(foliageTemplate_);free(foliageInstances_);
         free(color_);free(msColor_);free(depth_);free(albedo_);free(surface_);free(shadow_);
         free(detailAlbedo_);free(detailSurface_);
