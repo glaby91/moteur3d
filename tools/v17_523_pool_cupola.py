@@ -74,10 +74,10 @@ def beam_box(vertices, faces, start, end, axis_a, axis_b, width_a, width_b):
 
 
 def build_geometry():
-    # Existing glass opening: 60 x 34 m around the pool hall.  The new vault
-    # sits inside that opening with a small service/roof margin on every edge.
-    x0, x1 = -28.0, 28.0
-    z_center, half_span = -30.0, 16.25
+    # Match the existing 60 x 34 m roof opening edge-to-edge.  The previous
+    # inset left an exposed strip of the opening and unsealed barrel ends.
+    x0, x1 = -30.0, 30.0
+    z_center, half_span = -30.0, 17.0
     base_y, rise = 19.90, 3.35
     arch_segments = 24
     arch_count = 11
@@ -91,8 +91,9 @@ def build_geometry():
         return (x, y, z)
 
     # Glass is divided into real, slightly curved panels between structural
-    # ribs.  Double-sided triangles keep the inner surface visible in both
-    # engine paths while retaining a single clean optical surface.
+    # ribs.  Triangle intersections and the raster backends are two-sided, so
+    # emit each physical pane once; coincident reverse faces caused ambiguous
+    # normals in the GI and duplicated transparent fragments.
     glass_vertices = []
     glass_uv = []
     glass_faces = []
@@ -113,7 +114,24 @@ def build_geometry():
                              ((bay + 1) / (arch_count - 1), section / arch_segments)))
             front = ((base, base + 1, base + 2), (base, base + 2, base + 3))
             glass_faces.extend(front)
-            glass_faces.extend(tuple(reversed(face)) for face in front)
+
+    # Close both barrel ends with curved glass gables.  They sit just inside
+    # the terminal steel arches and join the eaves at the roof plane.
+    end_caps = []
+    for x, outward_sign in ((x0 + 0.06, -1), (x1 - 0.06, 1)):
+        cap_base = len(glass_vertices)
+        cap_center = (x, base_y, z_center)
+        glass_vertices.append(rounded(cap_center))
+        glass_uv.append((0.0, 0.5))
+        for i, angle in enumerate(angles):
+            glass_vertices.append(rounded(point(x, angle, 0.045)))
+            glass_uv.append((1.0, i / arch_segments))
+        for i in range(arch_segments):
+            a, b = cap_base + 1 + i, cap_base + 2 + i
+            # Winding faces outward from the respective gable end.
+            face = (cap_base, a, b) if outward_sign > 0 else (cap_base, b, a)
+            glass_faces.append(face)
+        end_caps.append({"x": round(x, 3), "outward": outward_sign})
 
     arch_vertices, arch_faces = [], []
     for x in rib_x:
@@ -124,13 +142,23 @@ def build_geometry():
             across = (1.0, 0.0, 0.0)
             depth = normalize(cross(tangent, across))
             beam_box(arch_vertices, arch_faces, p0, p1, across, depth, 0.30, 0.24)
-        # Small steel shoes make the arch feet visibly land on the roof edge.
+        # Steel shoes extend below the roof plane so every arch is seated into
+        # the curb instead of appearing to hover on the glazing edge.
         for angle in (-math.pi / 2, math.pi / 2):
             foot = point(x, angle)
             shoe_a = (1.0, 0.0, 0.0)
             shoe_b = (0.0, 0.0, 1.0)
-            beam_box(arch_vertices, arch_faces, add(foot, (0.0, -0.10, 0.0)),
-                     add(foot, (0.0, 0.10, 0.0)), shoe_a, shoe_b, 0.48, 0.20)
+            beam_box(arch_vertices, arch_faces, add(foot, (0.0, -0.36, 0.0)),
+                     add(foot, (0.0, 0.12, 0.0)), shoe_a, shoe_b, 0.48, 0.24)
+
+    # Continuous eaves curbs close the seam between the vault and the flat
+    # roof.  Their lower half is embedded below the roof plane for a visible,
+    # gap-free structural joint along both long sides.
+    for side in (-1, 1):
+        z = z_center + side * half_span
+        beam_box(arch_vertices, arch_faces,
+                 (x0, base_y - 0.02, z), (x1, base_y - 0.02, z),
+                 (0.0, 0.0, 1.0), (0.0, 1.0, 0.0), 0.30, 0.34)
 
     # Longitudinal purlins follow the ellipse and tie every arch together.
     rail_vertices, rail_faces = [], []
@@ -163,7 +191,7 @@ def build_geometry():
     triangle_count = sum(len(mesh["faces"]) for mesh in meshes)
     if not 3500 <= triangle_count <= 6000:
         raise ValueError(f"Cupola triangle budget outside expected range: {triangle_count}")
-    return meshes, triangle_count, (x1 - x0, half_span * 2, rise)
+    return meshes, triangle_count, (x1 - x0, half_span * 2, rise), end_caps
 
 
 def install(package: Path):
@@ -195,7 +223,7 @@ def install(package: Path):
         raise ValueError("Flat roof glass surface not found")
     instances = [obj for obj in instances if obj["id"] not in old_ids]
 
-    meshes, triangles, dims = build_geometry()
+    meshes, triangles, dims, end_caps = build_geometry()
     write(package / geometry_path, {"format": "m3d-geometry-v1", "units": "m", "meshes": meshes})
     cupola_instances = [
         {"id": "v523_pool_cupola_glazing",
@@ -245,6 +273,10 @@ def install(package: Path):
         "addedTriangles": triangles,
         "cupolaDimensionsMeters": {"length": dims[0], "span": dims[1], "rise": dims[2]},
         "baseElevationMeters": 19.9,
+        "closedGlassGables": len(end_caps),
+        "continuousRoofEaves": 2,
+        "roofJoint": "continuous steel eaves curbs embedded below the roof plane",
+        "endCapPlanes": end_caps,
         "cameras": list(camera_ids),
         "materialsReused": ["v8_clear_roof_glass", "v8_mullion_dark_steel"],
         "lightingChanged": False,
