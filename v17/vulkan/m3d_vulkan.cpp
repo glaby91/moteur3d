@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 33890)
-Total output lines: 2289
-
 // CSE WARP V17 Vulkan Raster (experimental independent backend).
 // Requires Vulkan API 1.3.204, native GPU raster of the existing Scene and Camera.
 // Two paths: legacy offscreen QImage A/B tests, or native Win32 Vulkan swapchain.
@@ -1078,7 +1075,229 @@ class VulkanRaster final {
                 throw std::runtime_error("GPU lacks sRGB framebuffer support; use DirectX11 or set CSE_WARP_VK_SRGB_COLOR_TEST=0 for legacy diagnostics");
             colorFormat_=candidate;
         }
-        std::clog<<"[CSE WARP Vulkan] Readb…3890 tokens truncated….depthTestEnable=VK_TRUE;ds.depthWriteEnable=VK_TRUE;
+        std::clog<<"[CSE WARP Vulkan] Readback color="<<(bgraReadback_?"BGRA8":"RGBA8")
+                 <<" transfer="<<(srgbColorEnabled_?"sRGB hardware default":"legacy UNORM diagnostic")
+                 <<" (no calibration, =0 legacy diagnostic)\n";
+        // Keep the measured Vulkan path as the default. An opt-out is available
+        // for controlled A/B comparisons on the same scene and camera.
+        const char* disableZPrepass=std::getenv("M3D_V17_DISABLE_Z_PREPASS");
+        depthPrepassEnabled_=!(disableZPrepass&&std::strcmp(disableZPrepass,"1")==0);
+        std::clog<<"[CSE WARP Vulkan] Opaque Z-prepass="
+                 <<(depthPrepassEnabled_?"enabled (default)":"disabled (diagnostic)")<<"\n";
+        // Query the exact color and depth image sample counts as Khronos recommends.
+        VkFormatProperties dp{};
+        vkGetPhysicalDeviceFormatProperties(physical_,depthFormat_,&dp);
+        if(!(dp.optimalTilingFeatures&VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT))
+            depthFormat_=VK_FORMAT_D16_UNORM;
+        auto capabilities=[&](VkFormat fmt,VkImageUsageFlags usage){
+            VkImageFormatProperties result{};
+            return vkGetPhysicalDeviceImageFormatProperties(physical_,fmt,VK_IMAGE_TYPE_2D,
+                VK_IMAGE_TILING_OPTIMAL,usage,0,&result)==VK_SUCCESS
+                ?result.sampleCounts:VkSampleCountFlags(0);
+        };
+        const VkSampleCountFlags supported=props_.limits.framebufferColorSampleCounts&
+            props_.limits.framebufferDepthSampleCounts&
+            capabilities(colorFormat_,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT)&
+            capabilities(depthFormat_,VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+        const char* msaa=std::getenv("CSE_WARP_VK_MSAA");
+        if(msaa){
+            if(std::strcmp(msaa,"1")==0)msaaSetting_=1;
+            else if(std::strcmp(msaa,"2")==0)msaaSetting_=2;
+            else if(std::strcmp(msaa,"4")==0)msaaSetting_=4;
+            else throw std::runtime_error("CSE_WARP_VK_MSAA accepts 1, 2, or 4");
+        }
+        msaaSamples_=(msaaSetting_>=4&&(supported&VK_SAMPLE_COUNT_4_BIT))?
+            VK_SAMPLE_COUNT_4_BIT:(msaaSetting_>=2&&(supported&VK_SAMPLE_COUNT_2_BIT))?
+            VK_SAMPLE_COUNT_2_BIT:VK_SAMPLE_COUNT_1_BIT;
+        if(!(supported&msaaSamples_))
+            throw std::runtime_error("No supported Vulkan color/depth framebuffer sample count");
+        std::clog<<"[CSE WARP Vulkan] MSAA requested="<<msaaSetting_
+                 <<" active="<<uint32_t(msaaSamples_)<<" inline resolve\n";
+        std::clog<<"[CSE WARP Vulkan] GPU="<<adapter_
+                 <<" version="<<VK_VERSION_MAJOR(props_.apiVersion)<<"."
+                 <<VK_VERSION_MINOR(props_.apiVersion)<<"."
+                 <<VK_VERSION_PATCH(props_.apiVersion)<<" driver="<<props_.driverVersion<<"\n";
+        float priority=1.f;
+        VkDeviceQueueCreateInfo queue{VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO};
+        queue.queueFamilyIndex=family_;queue.queueCount=1;queue.pQueuePriorities=&priority;
+        VkPhysicalDeviceFeatures enable{};
+        enable.samplerAnisotropy=features_.samplerAnisotropy;
+        VkDeviceCreateInfo d{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
+        d.queueCreateInfoCount=1;d.pQueueCreateInfos=&queue;d.pEnabledFeatures=&enable;
+        const char* swapchainExtension=VK_KHR_SWAPCHAIN_EXTENSION_NAME;
+        if(displaySurface_){d.enabledExtensionCount=1;d.ppEnabledExtensionNames=&swapchainExtension;}
+        vkcheck(vkCreateDevice(physical_,&d,nullptr,&device_),"create GPU device");
+        if(displaySurface_){
+            VkSemaphoreCreateInfo sem{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+            vkcheck(vkCreateSemaphore(device_,&sem,nullptr,&imageAcquired_),
+                    "swapchain acquire semaphore");
+            VkFenceCreateInfo acquireFence{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+            vkcheck(vkCreateFence(device_,&acquireFence,nullptr,&imageAcquiredFence_),
+                    "swapchain acquire retirement fence");
+            const char* requestedFrames=std::getenv("CSE_WARP_VK_FRAMES_IN_FLIGHT");
+            if(requestedFrames && std::strcmp(requestedFrames,"1")!=0 &&
+               std::strcmp(requestedFrames,"2")!=0)
+                throw std::runtime_error("CSE_WARP_VK_FRAMES_IN_FLIGHT accepts 1 or 2");
+            // Keep native presentation on the serial, fence-complete baseline
+            // unless two frames are explicitly requested for profiling. This
+            // avoids exposing the experimental async path as the default on
+            // drivers where WSI and camera-driven presents are not yet proven.
+            asyncFrames_=requestedFrames && std::strcmp(requestedFrames,"2")==0;
+            std::clog<<"[CSE WARP Vulkan] native frames in flight="
+                     <<(asyncFrames_?2:1)<<" (set CSE_WARP_VK_FRAMES_IN_FLIGHT=2 to profile async)\n";
+        }
+        vkGetDeviceQueue(device_,family_,0,&queue_);
+        VkCommandPoolCreateInfo cp{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};cp.queueFamilyIndex=family_;
+        vkcheck(vkCreateCommandPool(device_,&cp,nullptr,&commands_),"command pool");
+        VkCommandBufferAllocateInfo ca{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        ca.commandPool=commands_;ca.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY;ca.commandBufferCount=1;
+        vkcheck(vkAllocateCommandBuffers(device_,&ca,&cmd_),"command buffer");
+        VkFenceCreateInfo fc{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        vkcheck(vkCreateFence(device_,&fc,nullptr,&fence_),"fence");
+        VkQueryPoolCreateInfo qi{VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO};
+        qi.queryType=VK_QUERY_TYPE_TIMESTAMP;qi.queryCount=3;
+        vkcheck(vkCreateQueryPool(device_,&qi,nullptr,&queries_),"GPU timestamps");
+        VkDescriptorSetLayoutBinding bindings[8]{};
+        for(uint32_t j=0;j<8;j++){
+            bindings[j].binding=j;bindings[j].descriptorCount=1;
+            bindings[j].descriptorType=j?VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER:VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            bindings[j].stageFlags=j?VK_SHADER_STAGE_FRAGMENT_BIT:(VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT);
+        }
+        VkDescriptorSetLayoutCreateInfo li{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        li.bindingCount=8;li.pBindings=bindings;
+        vkcheck(vkCreateDescriptorSetLayout(device_,&li,nullptr,&descriptorLayout_),"descriptor layout");
+        VkDescriptorPoolSize pools[2]={{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER,2},
+                                        {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,14}};
+        VkDescriptorPoolCreateInfo p{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
+        p.maxSets=2;p.poolSizeCount=2;p.pPoolSizes=pools;
+        vkcheck(vkCreateDescriptorPool(device_,&p,nullptr,&descriptorPool_),"descriptor pool");
+        VkDescriptorSetAllocateInfo da{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+        da.descriptorPool=descriptorPool_;da.descriptorSetCount=1;da.pSetLayouts=&descriptorLayout_;
+        vkcheck(vkAllocateDescriptorSets(device_,&da,&descriptor_),"descriptor");
+        VkPipelineLayoutCreateInfo pl{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        pl.setLayoutCount=1;pl.pSetLayouts=&descriptorLayout_;
+        vkcheck(vkCreatePipelineLayout(device_,&pl,nullptr,&layout_),"pipeline layout");
+        VkSamplerCreateInfo si{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        si.magFilter=VK_FILTER_LINEAR;si.minFilter=VK_FILTER_LINEAR;
+        si.mipmapMode=VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        si.addressModeU=VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        si.addressModeV=VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        si.addressModeW=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        si.anisotropyEnable=features_.samplerAnisotropy;
+        si.maxAnisotropy=features_.samplerAnisotropy?std::min(8.f,props_.limits.maxSamplerAnisotropy):1.f;
+        si.maxLod=32.f; // Auto tier: GPU trilinear down to last valid mip.
+        vkcheck(vkCreateSampler(device_,&si,nullptr,&albedoSampler_),"texture sampler");
+        si.maxLod=0.f;  // Preserve tier: never lower resolution with distance.
+        vkcheck(vkCreateSampler(device_,&si,nullptr,&protectedSampler_),"protected sampler");
+        si.addressModeU=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        si.addressModeV=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        si.anisotropyEnable=VK_FALSE;si.minFilter=VK_FILTER_NEAREST;si.magFilter=VK_FILTER_NEAREST;
+        vkcheck(vkCreateSampler(device_,&si,nullptr,&shadowSampler_),"shadow sampler");
+        si.minFilter=VK_FILTER_LINEAR;si.magFilter=VK_FILTER_LINEAR;
+        si.mipmapMode=VK_SAMPLER_MIPMAP_MODE_NEAREST;si.maxLod=0.f;
+        vkcheck(vkCreateSampler(device_,&si,nullptr,&giSampler_),"GI sampler");
+        uniform_=buffer(sizeof(Uniforms),VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+        VkAttachmentDescription attach[3]{};
+        attach[0].format=colorFormat_;
+        attach[0].samples=msaaSamples_;
+        attach[0].loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;
+        attach[0].storeOp=msaaSamples_==VK_SAMPLE_COUNT_1_BIT?VK_ATTACHMENT_STORE_OP_STORE:VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        attach[0].initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;
+        attach[0].finalLayout=msaaSamples_==VK_SAMPLE_COUNT_1_BIT?VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL:VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        attach[1].format=depthFormat_;attach[1].samples=msaaSamples_;
+        attach[1].loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;
+        attach[1].storeOp=VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        attach[1].initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;
+        attach[1].finalLayout=VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        // MSAA color + MSAA depth + inline single-sample color resolve.
+        attach[2].format=colorFormat_;attach[2].samples=VK_SAMPLE_COUNT_1_BIT;
+        attach[2].loadOp=VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        attach[2].storeOp=VK_ATTACHMENT_STORE_OP_STORE;
+        attach[2].initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;
+        attach[2].finalLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+        VkAttachmentReference refs[3]={{0,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL},
+                                        {1,VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL},
+                                        {2,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL}};
+        VkSubpassDescription sub{};sub.pipelineBindPoint=VK_PIPELINE_BIND_POINT_GRAPHICS;
+        sub.colorAttachmentCount=1;sub.pColorAttachments=&refs[0];sub.pDepthStencilAttachment=&refs[1];
+        sub.pResolveAttachments=msaaSamples_==VK_SAMPLE_COUNT_1_BIT?nullptr:&refs[2];
+        VkSubpassDependency dep[2]{};
+        dep[0].srcSubpass=VK_SUBPASS_EXTERNAL;dep[0].dstSubpass=0;
+        dep[0].srcStageMask=VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        dep[0].dstStageMask=VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT|VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
+        dep[0].dstAccessMask=VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT|VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        dep[1].srcSubpass=0;dep[1].dstSubpass=VK_SUBPASS_EXTERNAL;
+        dep[1].srcStageMask=VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        dep[1].dstStageMask=VK_PIPELINE_STAGE_TRANSFER_BIT;
+        dep[1].srcAccessMask=VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+        dep[1].dstAccessMask=VK_ACCESS_TRANSFER_READ_BIT;
+        VkRenderPassCreateInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+        rp.attachmentCount=msaaSamples_==VK_SAMPLE_COUNT_1_BIT?2:3;rp.pAttachments=attach;rp.subpassCount=1;rp.pSubpasses=&sub;
+        rp.dependencyCount=2;rp.pDependencies=dep;
+        vkcheck(vkCreateRenderPass(device_,&rp,nullptr,&renderPass_),"render pass");
+        VkPipelineCacheCreateInfo pc{VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO};
+        const std::vector<uint8_t> initialCache=readPipelineCache();
+        pc.initialDataSize=initialCache.size();
+        pc.pInitialData=initialCache.empty()?nullptr:initialCache.data();
+        VkResult cacheResult=vkCreatePipelineCache(device_,&pc,nullptr,&pipelineCache_);
+        if(cacheResult!=VK_SUCCESS){
+            // Driver may reject stale cache for reasons beyond UUID/version.
+            pc.initialDataSize=0;pc.pInitialData=nullptr;
+            vkcheck(vkCreatePipelineCache(device_,&pc,nullptr,&pipelineCache_),
+                    "create fresh pipeline cache");
+        }
+        buildPipelines();
+        gi0_=image3D(1,1,1);gi1_=image3D(1,1,1);
+        const float blackProbe[4]={0.f,0.f,0.f,1.f};
+        uploadProbe(gi0_,blackProbe,sizeof(blackProbe),false);
+        uploadProbe(gi1_,blackProbe,sizeof(blackProbe),false);
+        gi0Uploaded_=gi1Uploaded_=true;
+        // Pipelines are already created; cache I/O is outside the frame loop.
+        writePipelineCache();
+        started_=true;
+    }
+    void buildPipelines(){
+        const auto vs=spirv(shaderFile("raster.vert.spv"));
+        // Use the optimized profile by default for the HD620 exploration path.
+        // Set CSE_WARP_VK_FAST_FRAGMENT=0 to compare against the reference shader.
+        const char* selected=std::getenv("CSE_WARP_VK_FAST_FRAGMENT");
+        const bool fastFragment=!selected || std::strcmp(selected,"0")!=0;
+        std::clog<<"[CSE WARP Vulkan] Fragment profile="
+                 <<(fastFragment?"optimized":"baseline")<<"\n";
+        const auto fs=spirv(shaderFile(fastFragment?"raster_fast.frag.spv":"raster.frag.spv"));
+        VkShaderModule modules[2]{};
+        for(int i=0;i<2;i++){
+            const auto& code=i?fs:vs;
+            VkShaderModuleCreateInfo ci{VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+            ci.codeSize=code.size()*4;ci.pCode=code.data();
+            vkcheck(vkCreateShaderModule(device_,&ci,nullptr,&modules[i]),"shader module");
+        }
+        VkPipelineShaderStageCreateInfo stages[2]{};
+        for(int i=0;i<2;i++){
+            stages[i].sType=VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+            stages[i].stage=i?VK_SHADER_STAGE_FRAGMENT_BIT:VK_SHADER_STAGE_VERTEX_BIT;
+            stages[i].module=modules[i];stages[i].pName="main";
+        }
+        VkVertexInputBindingDescription vb{0,sizeof(Vertex),VK_VERTEX_INPUT_RATE_VERTEX};
+        VkVertexInputAttributeDescription attrs[4]{
+            {0,0,VK_FORMAT_R32G32B32_SFLOAT,offsetof(Vertex,p)},
+            {1,0,VK_FORMAT_R32G32B32_SFLOAT,offsetof(Vertex,n)},
+            {2,0,VK_FORMAT_R32G32_SFLOAT,offsetof(Vertex,uv)},
+            {3,0,VK_FORMAT_R32_UINT,offsetof(Vertex,material)}};
+        VkPipelineVertexInputStateCreateInfo vi{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+        vi.vertexBindingDescriptionCount=1;vi.pVertexBindingDescriptions=&vb;
+        vi.vertexAttributeDescriptionCount=4;vi.pVertexAttributeDescriptions=attrs;
+        VkPipelineInputAssemblyStateCreateInfo ia{VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+        ia.topology=VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        VkPipelineViewportStateCreateInfo vp{VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+        vp.viewportCount=1;vp.scissorCount=1;
+        VkPipelineRasterizationStateCreateInfo rs{VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
+        rs.polygonMode=VK_POLYGON_MODE_FILL;rs.lineWidth=1.f;rs.cullMode=VK_CULL_MODE_NONE;
+        rs.frontFace=VK_FRONT_FACE_COUNTER_CLOCKWISE;
+        VkPipelineMultisampleStateCreateInfo ms{VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+        ms.rasterizationSamples=msaaSamples_;
+        VkPipelineDepthStencilStateCreateInfo ds{VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+        ds.depthTestEnable=VK_TRUE;ds.depthWriteEnable=VK_TRUE;
         ds.depthCompareOp=VK_COMPARE_OP_LESS_OR_EQUAL;
         VkPipelineColorBlendAttachmentState blend{};
         blend.colorWriteMask=VK_COLOR_COMPONENT_R_BIT|VK_COLOR_COMPONENT_G_BIT|VK_COLOR_COMPONENT_B_BIT|VK_COLOR_COMPONENT_A_BIT;
