@@ -8,7 +8,8 @@
 #include <cstdint>
 namespace m3d::gibake {
 struct Options {
-    unsigned nx=12,ny=6,nz=12,rays=16,bounces=2;
+    // Dense enough for large flat walls: the former 12x6x12 grid exposed probe-cell lighting patches.
+    unsigned nx=24,ny=10,nz=24,rays=16,bounces=2;
     unsigned frames=25;
     float firstHour=7.f,stepHours=.5f;
 };
