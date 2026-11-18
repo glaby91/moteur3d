@@ -5,6 +5,7 @@
 #include "camera_diagnostic.h"
 #include "anomaly_catalog.h"
 #include "frame_pacing.h"
+#include "day_night_render_policy.h"
 #include "pool_ladder.h"
 #include "weather/solar_cycle.h"
 #include "weather/sky_compositor.h"
@@ -125,6 +126,8 @@ struct Result {
     QString nativeFailure; // Preserve exact Vulkan/DXGI presentation error after image fallback
     QString nativeWindowDetails; // HWND, owning thread, client size and requested extent
     QString requestStamp;
+    double simulatedHour=-1.0,shadowBuildMs=0.0,shadowBucketHour=-1.0;
+    double gpuDrawMs=0.0,gpuTransferMs=0.0,gpuSubmitMs=0.0,gpuWaitMs=0.0;
     // Reject finished frames after a camera, material, backend or scene change.
     uint64_t generation=0;
     int backendIndex=-1;
@@ -520,7 +523,7 @@ public:
                 lastRenderedPose_=outcome.cameraPose;
                 hasRenderedPose_=true;
                 lastCompletedRenderMs_=outcome.milliseconds;
-                recordImagePresented(); // count submitted/presented frames
+                recordImagePresented(outcome); // count submitted/presented frames
             }
             if(!outcome.image.isNull()){
                 lastImage_=outcome.image;
@@ -904,9 +907,15 @@ private:
     QElapsedTimer skyMotionClock_;
     qint64 lastVulkanIdleSkyRequestMs_=-1000;
     QTimer dayNightTimer_;
+    QTimer dayNightBenchmarkTimer_;
     QElapsedTimer dayNightClock_;
     double dayNightOriginHour_=14.75;
     bool applyingDayNightTick_=false;
+    bool dayNightBenchmarkPending_=false,dayNightBenchmarkRunning_=false;
+    bool lastPacingIsDayNightBenchmark_=false;
+    uint64_t dayNightBenchmarkGeneration_=0;
+    int dayNightBenchmarkDurationSeconds_=0;
+    double dayNightBenchmarkStartHour_=14.75;
     QElapsedTimer frameClock_;
     QElapsedTimer motionClock_;
     QSet<int> keysDown_;
@@ -1956,6 +1965,13 @@ private:
         auto* toolsMenu=menuBar()->addMenu(QStringLiteral("Outils"));
         auto* pacingAction=toolsMenu->addAction(QStringLiteral("Exporter benchmark fluidité (CSV + JSON)"));
         connect(pacingAction,&QAction::triggered,this,[this]{exportPacing();});
+        auto* dayNightBenchMenu=toolsMenu->addMenu(QStringLiteral("Campagne jour/nuit — DX11/Vulkan direct"));
+        auto* dayNight6=dayNightBenchMenu->addAction(QStringLiteral("6 min — un cycle complet"));
+        connect(dayNight6,&QAction::triggered,this,[this]{startDayNightBenchmark(6*60);});
+        auto* dayNight30=dayNightBenchMenu->addAction(QStringLiteral("30 min — endurance"));
+        connect(dayNight30,&QAction::triggered,this,[this]{startDayNightBenchmark(30*60);});
+        auto* dayNight60=dayNightBenchMenu->addAction(QStringLiteral("60 min — validation longue"));
+        connect(dayNight60,&QAction::triggered,this,[this]{startDayNightBenchmark(60*60);});
         auto* benchmarkAction=toolsMenu->addAction(
             QStringLiteral("Benchmark V17.%1 — performances…").arg(CSE_WARP_BUILD_NUMBER));
         connect(benchmarkAction,&QAction::triggered,this,[this]{
@@ -2556,8 +2572,15 @@ private:
         connect(&skyAnimationTimer_,&QTimer::timeout,this,[this]{
             if(sceneLoading_||!runtime_||!backendBox_)return;
             if(nativeDirectSelected()){
-                if(!exploring_&&(cloudAnimationBox_->isChecked()||
-                                  dayNightCycleBox_->isChecked())&&
+                const bool cycle=dayNightCycleBox_->isChecked();
+                const bool fastNativeRefresh=
+                    cse::daynight::shouldRequestFastNativeIdleRefresh(
+                        cycle,cloudAnimationBox_->isChecked());
+                // The 1.5 s solar-hour timer already requests the full direct
+                // scene render during day/night playback. The former 50 ms
+                // idle-sky path kept the entire raster pipeline saturated and
+                // made the day/night image appear frozen on slower GPUs.
+                if(!exploring_&&fastNativeRefresh&&
                    !watcher_.isRunning()&&!pending_){
                     const qint64 now=skyMotionClock_.elapsed();
                     if(now-lastVulkanIdleSkyRequestMs_>=50){
@@ -2589,6 +2612,8 @@ private:
                 (dayNightCycleBox_->isChecked()?240.f:24.f));
             canvas_->invalidateSky();
         });
+        dayNightBenchmarkTimer_.setSingleShot(true);
+        connect(&dayNightBenchmarkTimer_,&QTimer::timeout,this,[this]{finishDayNightBenchmark();});
         dayNightTimer_.setInterval(1500); // Architectural lighting is slower than 30Hz sky
         connect(&dayNightTimer_,&QTimer::timeout,this,[this]{
             if(!runtime_ || sceneLoading_)return;
@@ -2604,6 +2629,11 @@ private:
             applyingDayNightTick_=false;
         });
         connect(dayNightCycleBox_,&QCheckBox::toggled,this,[this](bool enabled){
+            if(!enabled&&dayNightBenchmarkPending_){
+                dayNightBenchmarkPending_=false;
+                ++dayNightBenchmarkGeneration_;
+                statusBar()->showMessage(QStringLiteral("Échauffement de la campagne annulé."),5000);
+            }
             if(enabled){
                 dayNightOriginHour_=sunHour_->value();
                 dayNightClock_.start();
@@ -3202,6 +3232,7 @@ private:
     }
     void resetPacing(){
         pacingSamples_.clear();
+        lastPacingIsDayNightBenchmark_=false;
         pacingRejected_=0;
         pacingQueued_=0;
         lastPresentMs_=-1;
@@ -3209,16 +3240,24 @@ private:
         fpsFiltered_=0.0;
         pacingClock_.restart();
     }
-    void recordImagePresented(){
+    void recordImagePresented(){ recordImagePresented(Result{}); }
+    void recordImagePresented(const Result& outcome){
         if(!pacingClock_.isValid())pacingClock_.start();
         const qint64 ms=pacingClock_.elapsed();
-        if(exploring_){
+        if(exploring_||dayNightBenchmarkRunning_){
             cse::pacing::Sample sample{};
             sample.timestampMs=ms;
             sample.intervalMs=lastPresentMs_>=0?double(ms-lastPresentMs_):0.0;
             sample.renderMs=lastCompletedRenderMs_;
             sample.pendingRequests=unsigned(pacingQueued_);
-            if(pacingSamples_.size()>=pacingCapacity_)
+            sample.simulatedHour=outcome.simulatedHour;
+            sample.shadowBuildMs=outcome.shadowBuildMs;
+            sample.shadowBucketHour=outcome.shadowBucketHour;
+            sample.gpuDrawMs=outcome.gpuDrawMs;
+            sample.gpuTransferMs=outcome.gpuTransferMs;
+            sample.gpuSubmitMs=outcome.gpuSubmitMs;
+            sample.gpuWaitMs=outcome.gpuWaitMs;
+            if(!dayNightBenchmarkRunning_&&pacingSamples_.size()>=pacingCapacity_)
                 pacingSamples_.erase(pacingSamples_.begin());
             pacingSamples_.push_back(sample);
             const double interval=lastPresentMs_>=0?double(ms-lastPresentMs_):0.0;
@@ -3231,6 +3270,54 @@ private:
             }
         }
         lastPresentMs_=ms;
+    }
+    void startDayNightBenchmark(int durationSeconds){
+        if(dayNightBenchmarkPending_||dayNightBenchmarkRunning_){
+            QMessageBox::information(this,QStringLiteral("Campagne jour/nuit"),
+                QStringLiteral("Une campagne est déjà en cours."));
+            return;
+        }
+        if(!runtime_||sceneLoading_||exploring_||watcher_.isRunning()||
+           !backendBox_||(backendBox_->currentIndex()!=4&&backendBox_->currentIndex()!=5)||
+           !nativeDirectSelected()){
+            QMessageBox::information(this,QStringLiteral("Campagne jour/nuit"),
+                QStringLiteral("Charge une scène, quitte l'exploration, puis sélectionne DX11 ou Vulkan avec l'affichage GPU direct activé."));
+            return;
+        }
+        const uint64_t generation=++dayNightBenchmarkGeneration_;
+        dayNightBenchmarkDurationSeconds_=durationSeconds;
+        dayNightBenchmarkStartHour_=14.75;
+        if(dayNightCycleBox_&&dayNightCycleBox_->isChecked())
+            dayNightCycleBox_->setChecked(false);
+        dayNightBenchmarkPending_=true;
+        sunHour_->setValue(dayNightBenchmarkStartHour_);
+        dayNightOriginHour_=dayNightBenchmarkStartHour_;
+        dayNightCycleBox_->setChecked(true);
+        statusBar()->showMessage(QStringLiteral(
+            "Campagne jour/nuit : échauffement 10 s, puis mesure %1 min — ne pas déplacer la caméra.")
+            .arg(durationSeconds/60),12000);
+        QTimer::singleShot(10000,this,[this,generation,durationSeconds]{
+            if(generation!=dayNightBenchmarkGeneration_||!dayNightBenchmarkPending_||
+               !dayNightCycleBox_||!dayNightCycleBox_->isChecked())return;
+            dayNightBenchmarkPending_=false;
+            resetPacing();
+            dayNightBenchmarkRunning_=true;
+            lastPacingIsDayNightBenchmark_=true;
+            dayNightBenchmarkTimer_.start(durationSeconds*1000);
+            statusBar()->showMessage(QStringLiteral(
+                "Mesure jour/nuit en cours : %1 min — backend %2")
+                .arg(durationSeconds/60).arg(backendBox_->currentText()),12000);
+        });
+    }
+    void finishDayNightBenchmark(){
+        if(!dayNightBenchmarkRunning_)return;
+        dayNightBenchmarkTimer_.stop();
+        dayNightBenchmarkRunning_=false;
+        lastPacingIsDayNightBenchmark_=true;
+        if(dayNightCycleBox_&&dayNightCycleBox_->isChecked())
+            dayNightCycleBox_->setChecked(false);
+        statusBar()->showMessage(QStringLiteral("Campagne terminée — export CSV + JSON"),8000);
+        exportPacing();
     }
     void exportPacing(){
         if(pacingSamples_.empty()){
@@ -3245,20 +3332,45 @@ private:
             +QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-hhmmss"));
         const auto stats=cse::pacing::summarize(pacingSamples_,pacingRejected_,pacingQueued_);
         QJsonArray records;
-        QString csv=QStringLiteral("timestamp_ms,present_interval_ms,render_ms,requests_queued\n");
+        QString csv=QStringLiteral("timestamp_ms,present_interval_ms,render_ms,requests_queued,simulated_hour,shadow_build_ms,shadow_bucket_hour,gpu_draw_ms,gpu_transfer_ms,gpu_submit_ms,gpu_wait_ms\n");
         for(const auto& sample:pacingSamples_){
             records.push_back(QJsonObject{
                 {"timestampMs",double(sample.timestampMs)},
                 {"presentIntervalMs",sample.intervalMs},
                 {"renderMs",sample.renderMs},
-                {"queuedRequests",int(sample.pendingRequests)}
+                {"queuedRequests",int(sample.pendingRequests)},
+                {"simulatedHour",sample.simulatedHour},
+                {"shadowBuildMs",sample.shadowBuildMs},
+                {"shadowBucketHour",sample.shadowBucketHour},
+                {"gpuDrawMs",sample.gpuDrawMs},
+                {"gpuTransferMs",sample.gpuTransferMs},
+                {"gpuSubmitMs",sample.gpuSubmitMs},
+                {"gpuWaitMs",sample.gpuWaitMs}
             });
-            csv+=QStringLiteral("%1,%2,%3,%4\n")
+            csv+=QStringLiteral("%1,%2,%3,%4,%5,%6,%7,%8,%9,%10,%11\n")
                 .arg(sample.timestampMs).arg(sample.intervalMs,0,'f',3)
-                .arg(sample.renderMs,0,'f',3).arg(sample.pendingRequests);
+                .arg(sample.renderMs,0,'f',3).arg(sample.pendingRequests)
+                .arg(sample.simulatedHour,0,'f',5).arg(sample.shadowBuildMs,0,'f',3)
+                .arg(sample.shadowBucketHour,0,'f',3).arg(sample.gpuDrawMs,0,'f',3)
+                .arg(sample.gpuTransferMs,0,'f',3).arg(sample.gpuSubmitMs,0,'f',3)
+                .arg(sample.gpuWaitMs,0,'f',3);
         }
+        int over100=0,over250=0,over500=0,over1000=0;
+        for(const auto& sample:pacingSamples_){
+            const double ms=sample.intervalMs;
+            if(ms>100.)++over100;if(ms>250.)++over250;
+            if(ms>500.)++over500;if(ms>1000.)++over1000;
+        }
+        const QSize benchSize=canvas_?canvas_->size():QSize{};
         const QJsonObject summary{
             {"version",QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER)},
+            {"testType",lastPacingIsDayNightBenchmark_?QStringLiteral("day_night_direct"):QStringLiteral("exploration_pacing")},
+            {"dayNightDurationSeconds",lastPacingIsDayNightBenchmark_?dayNightBenchmarkDurationSeconds_:0},
+            {"dayNightStartHour",lastPacingIsDayNightBenchmark_?dayNightBenchmarkStartHour_:-1.0},
+            {"nativeDirect",nativeDirectSelected()},
+            {"width",benchSize.width()},{"height",benchSize.height()},
+            {"pauseCountOver100ms",over100},{"pauseCountOver250ms",over250},
+            {"pauseCountOver500ms",over500},{"pauseCountOver1000ms",over1000},
             {"scene",scenePath_},
             {"backend",backendBox_->currentText()},
             {"frameCount",int(stats.frames)},
@@ -3362,12 +3474,12 @@ private:
             ?float(cse::weather::cycleHour(dayNightOriginHour_,
                               double(dayNightClock_.elapsed())/1000.0))
             :snapshot->daylightHour;
-        // Keep lighting smooth, but rebuild the expensive 1024² CPU shadow map
-        // only once per simulated hour during DirectX day/night. At 24h/6min,
-        // this cuts rebuild stalls from every 3.75s to every 15s without lowering map quality.
-        const bool stableDxDayNight=backend==4 && dayNightCycleBox_ && dayNightCycleBox_->isChecked();
-        const float shadowStepHours=stableDxDayNight?1.0f:.25f;
-        const float shadowHour=std::floor(renderHour/shadowStepHours)*shadowStepHours;
+        // Keep sun/light values continuous; raster DX11 and Vulkan reuse one
+        // CPU shadow map per simulated hour during the accelerated day/night cycle.
+        // This avoids Vulkan's previous 1024² shadow rebuild every 3.75 real seconds.
+        const bool dayNightActive=dayNightCycleBox_&&dayNightCycleBox_->isChecked();
+        const float shadowStepHours=cse::daynight::shadowStepHours(backend,dayNightActive);
+        const float shadowHour=cse::daynight::shadowBucketHour(renderHour,shadowStepHours);
         auto preset=activeCameraPose();
         updateCameraHud();
         QSize renderSize=qualityBox_->currentData().toSize();
@@ -3662,6 +3774,13 @@ private:
                     ?QStringLiteral("CPU Ray Tracing — %1 spp, ombres en cache").arg(sampleCount)
                     :QStringLiteral("CPU Ray Tracing — %1 spp, ombres calculées").arg(sampleCount);
             }else result.gpu=true;
+            result.simulatedHour=renderHour;
+            result.shadowBuildMs=shadowBuildMs;
+            result.shadowBucketHour=shadowHour;
+            result.gpuDrawMs=stats.gpuDrawMs;
+            result.gpuTransferMs=stats.gpuTransferMs;
+            result.gpuSubmitMs=stats.cpuSubmitMs;
+            result.gpuWaitMs=stats.cpuMapWaitMs;
             result.milliseconds=stats.ms+shadowBuildMs;
             result.renderer+=QStringLiteral(" — %1×%2").arg(w).arg(h);
             if(result.nativeFallback){

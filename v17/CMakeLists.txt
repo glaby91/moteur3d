@@ -34,6 +34,8 @@ add_test(NAME v17_pool_ladder_bidirectional COMMAND v17_pool_ladder_smoke)
 # Frame-pacing regression is GPU-free: measurable present intervals and scene safety.
 add_executable(v17_frame_pacing_smoke "tests/frame_pacing_smoke.cpp")
 add_test(NAME v17_frame_pacing_statistical_regression COMMAND v17_frame_pacing_smoke)
+add_executable(v17_day_night_render_policy_smoke "tests/day_night_render_policy_smoke.cpp")
+add_test(NAME v17_day_night_shadow_refresh_policy COMMAND v17_day_night_render_policy_smoke)
 # GUI-independent regression for exact, portable architectural camera poses.
 add_executable(v17_camera_diagnostic_smoke
     "tests/camera_diagnostic_smoke.cpp")
