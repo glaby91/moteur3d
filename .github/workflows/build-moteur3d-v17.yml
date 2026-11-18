@@ -574,7 +574,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "BASSEIN GLB generation failed" }
           python tools/v493_replace_roof_sign.py --package dist-v17 --glb build-v17/sign-bassein-v493.glb --allow-unversioned
           if ($LASTEXITCODE -ne 0) { throw "BASSEIN integration failed" }
-          $report = Get-Content "dist-v17/benchmark-civic/V493_BASSEIN_SIGN_INSTALL.json" -Raw | ConvertFrom-Json
+          $report = Get-Content "dist-v17/benchmark-civic/V498_SCENE_INSTALL.json" -Raw | ConvertFrom-Json
           if ($report.addedSignObjects -ne 112 -or $report.addedTriangles -lt 14000 -or
               $report.removedSignObjects -lt 50 -or $report.originalUnchangedObjects -lt 5000) {
             throw "BASSEIN visual scene integrity regression"
