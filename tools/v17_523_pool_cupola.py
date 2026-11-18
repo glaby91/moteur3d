@@ -221,7 +221,7 @@ def build_geometry():
     return meshes, triangle_count, (x1 - x0, half_span * 2, rise), end_caps
 
 
-def install(package: Path):
+def install(package: Path, scene_revision: str = "V17.523"):
     package = package.resolve()
     scene_path = package / "scene.json"
     scene = read(scene_path)
@@ -293,12 +293,13 @@ def install(package: Path):
          "position": [0.0, 2.0, -12.0], "target": [0.0, 21.5, -32.0], "fovDegrees": 68},
     ))
     write(package / camera_path, cameras_doc)
-    scene["revision"] = "V17.523"
-    scene["name"] = "CSE WARP V17.523 — Palais et coupole vitrée de la piscine"
+    scene["revision"] = scene_revision
+    scene["name"] = f"CSE WARP {scene_revision} — Palais et coupole vitrée de la piscine"
     write(scene_path, scene)
 
     report = {
         "revision": "V17.523",
+        "sceneRevision": scene_revision,
         "feature": "approved restrained glazed pool cupola",
         "removedFlatSkylightInstances": len(old),
         "addedCupolaMeshes": len(meshes),
@@ -327,8 +328,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--package", required=True, type=Path,
                         help="Packaged V17 benchmark-civic directory")
+    parser.add_argument("--scene-revision", default="V17.523",
+                        help="Revision written to the packaged scene metadata")
     args = parser.parse_args()
-    report = install(args.package)
+    report = install(args.package, args.scene_revision)
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 
