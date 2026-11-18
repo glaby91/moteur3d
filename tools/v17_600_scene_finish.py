@@ -205,7 +205,10 @@ def patch(package: Path, revision: str):
     if not locate(materials["materials"], "v600_pale_paving"):
         materials["materials"].append({"id": "v600_pale_paving", "baseColor": [0.67, 0.65, 0.59],
             "roughness": 0.88, "metallic": 0.0, "transmission": 0.0, "ior": 1.5,
-            "origin": "V17.600 continuous light paving route"})
+            "textureSet": "tex_v600_pale_paving", "origin": "V17.600 continuous light paving route"})
+    if locate(pbr["sets"], "tex_v600_pale_paving") is None:
+        pbr["sets"].append({"id": "tex_v600_pale_paving", "material": "v600_pale_paving",
+            "pattern": "smooth_plaster", "resolution": 512, "channels": ["albedo", "normal", "roughness"]})
     if not any(i.get("id") == "v600_civic_light_band_inst" for i in instances["instances"]):
         instances["instances"].append({"id": "v600_civic_light_band_inst",
             "parent": "Extérieur/Place/Allée claire vers le monument", "geometry": "v600_civic_light_band",
@@ -258,13 +261,20 @@ def verify(package: Path, revision: str):
         for relative in sector.get(kind, []):
             if not (root / relative).is_file():
                 raise ValueError(f"Final package resource missing: {kind}/{relative}")
+    material_entries = read(root / "materials/v442-corrections.json")["materials"]
+    pbr_entries = read(root / "pbr/v440-audit.json")["sets"]
+    pbr_ids = {entry.get("id") for entry in pbr_entries}
+    for material in material_entries:
+        texture_set = material.get("textureSet")
+        if not texture_set or texture_set not in pbr_ids:
+            raise ValueError(f"Material {material.get('id')} has a missing texture set: {texture_set}")
     inst = read(root / "instances/v442-corrections.json")["instances"]
     f = [x for x in inst if x.get("id", "").startswith("v7_fresco_") and x.get("id", "").endswith("_inst")]
     if len(f) != 8 or {x.get("material") for x in f} != {"cse_energetik_fresco"}:
         raise ValueError("Fresco is not using one material across all eight panels")
-    if any(m.get("id", "").startswith("v7_fresco_") for m in read(root / "materials/v442-corrections.json")["materials"]):
+    if any(m.get("id", "").startswith("v7_fresco_") for m in material_entries):
         raise ValueError("Unused per-panel fresco materials remain in the shipped scene")
-    pbr = read(root / "pbr/v440-audit.json")["sets"]
+    pbr = pbr_entries
     if any(x.get("id", "").startswith("tex_v7_fresco_") for x in pbr):
         raise ValueError("Unused per-panel fresco textures remain in the shipped scene")
     wall = locate(inst, "v7_fresco_wall")
