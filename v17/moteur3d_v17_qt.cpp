@@ -3057,7 +3057,7 @@ private:
     }
     QString nativeDiagnosticLogPath() const{
         return QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
-            +QStringLiteral("/CSE WARP/Diagnostics/V17.522-native-presentation.jsonl");
+            +QStringLiteral("/CSE WARP/Diagnostics/V17.523-native-presentation.jsonl");
     }
     void saveNativePresentationDiagnostic(const QString& backend,
                                           const QString& reason,
@@ -3069,7 +3069,7 @@ private:
         if(file.open(QIODevice::WriteOnly|QIODevice::Append|QIODevice::Text)){
             const QJsonObject record{
                 {QStringLiteral("time"),QDateTime::currentDateTime().toString(Qt::ISODateWithMs)},
-                {QStringLiteral("version"),QStringLiteral("17.522")},
+                {QStringLiteral("version"),QStringLiteral("17.523")},
                 {QStringLiteral("backend"),backend},
                 {QStringLiteral("reason"),reason},
                 {QStringLiteral("window"),windowDetails}
