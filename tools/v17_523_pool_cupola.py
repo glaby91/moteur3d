@@ -97,23 +97,40 @@ def build_geometry():
     glass_vertices = []
     glass_uv = []
     glass_faces = []
+    # Replace the central 60-degree crown sector with roof metal.  The side
+    # arcs and end gables remain glazed, preserving daylight over the pool.
+    crown_start = arch_segments // 3
+    crown_end = 2 * arch_segments // 3
+    opaque_vertices = []
+    opaque_uv = []
+    opaque_faces = []
     rib_x = [x0 + (x1 - x0) * i / (arch_count - 1)
              for i in range(arch_count)]
     for bay in range(arch_count - 1):
         xa, xb = rib_x[bay], rib_x[bay + 1]
         for section in range(arch_segments):
             t0, t1 = angles[section], angles[section + 1]
-            base = len(glass_vertices)
-            glass_vertices.extend((rounded(point(xa, t0, 0.045)),
-                                   rounded(point(xa, t1, 0.045)),
-                                   rounded(point(xb, t1, 0.045)),
-                                   rounded(point(xb, t0, 0.045))))
-            glass_uv.extend(((bay / (arch_count - 1), section / arch_segments),
-                             (bay / (arch_count - 1), (section + 1) / arch_segments),
-                             ((bay + 1) / (arch_count - 1), (section + 1) / arch_segments),
-                             ((bay + 1) / (arch_count - 1), section / arch_segments)))
-            front = ((base, base + 1, base + 2), (base, base + 2, base + 3))
-            glass_faces.extend(front)
+            vertices = (rounded(point(xa, t0, 0.045)),
+                        rounded(point(xa, t1, 0.045)),
+                        rounded(point(xb, t1, 0.045)),
+                        rounded(point(xb, t0, 0.045)))
+            front = ((0, 1, 2), (0, 2, 3))
+            if crown_start <= section < crown_end:
+                base = len(opaque_vertices)
+                opaque_vertices.extend(vertices)
+                # Repeat the roof texture at roughly four-meter intervals.
+                u0, u1 = (xa - x0) / 4.0, (xb - x0) / 4.0
+                v0, v1 = (half_span + rise) * t0 / 4.0, (half_span + rise) * t1 / 4.0
+                opaque_uv.extend(((u0, v0), (u0, v1), (u1, v1), (u1, v0)))
+                opaque_faces.extend(tuple(base + index for index in face) for face in front)
+            else:
+                base = len(glass_vertices)
+                glass_vertices.extend(vertices)
+                glass_uv.extend(((bay / (arch_count - 1), section / arch_segments),
+                                 (bay / (arch_count - 1), (section + 1) / arch_segments),
+                                 ((bay + 1) / (arch_count - 1), (section + 1) / arch_segments),
+                                 ((bay + 1) / (arch_count - 1), section / arch_segments)))
+                glass_faces.extend(tuple(base + index for index in face) for face in front)
 
     # Close both barrel ends with curved glass gables.  They sit just inside
     # the terminal steel arches and join the eaves at the roof plane.
@@ -199,6 +216,8 @@ def build_geometry():
     meshes = [
         {"id": "v523_pool_cupola_glass", "type": "triangle_mesh",
          "vertices": glass_vertices, "faces": glass_faces, "uv": glass_uv},
+        {"id": "v550_pool_cupola_opaque_crown", "type": "triangle_mesh",
+         "vertices": opaque_vertices, "faces": opaque_faces, "uv": opaque_uv},
         {"id": "v523_pool_cupola_arches", "type": "triangle_mesh",
          "vertices": arch_vertices, "faces": arch_faces,
          "uv": [[0.0, 0.0] for _ in arch_vertices]},
@@ -274,6 +293,10 @@ def install(package: Path, scene_revision: str = "V17.523"):
          "parent": "Architecture/Palais/Piscine/Verriere voutee/Vitrage",
          "geometry": "v523_pool_cupola_glass", "material": "v8_clear_roof_glass",
          "position": [0.0, 0.0, 0.0], "size": [1.0, 1.0, 1.0], "rotationY": 0},
+        {"id": "v550_pool_cupola_opaque_crown",
+         "parent": "Architecture/Palais/Piscine/Verriere voutee/Panneaux opaques de couronnement",
+         "geometry": "v550_pool_cupola_opaque_crown", "material": "prp_roof_metal",
+         "position": [0.0, 0.0, 0.0], "size": [1.0, 1.0, 1.0], "rotationY": 0},
         {"id": "v523_pool_cupola_arches",
          "parent": "Architecture/Palais/Piscine/Verriere voutee/Arcs porteurs",
          "geometry": "v523_pool_cupola_arches", "material": "v8_mullion_dark_steel",
@@ -315,7 +338,7 @@ def install(package: Path, scene_revision: str = "V17.523"):
     report = {
         "revision": "V17.523",
         "sceneRevision": scene_revision,
-        "feature": "approved restrained glazed pool cupola",
+        "feature": "partially glazed pool cupola with opaque metal crown panels",
         "removedFlatSkylightInstances": len(old),
         "addedCupolaMeshes": len(meshes),
         "addedCupolaInstances": len(cupola_instances),
@@ -328,8 +351,9 @@ def install(package: Path, scene_revision: str = "V17.523"):
         "roofJoint": "closed rectangular brushed stainless curb embedded below the roof plane",
         "endCapPlanes": end_caps,
         "cameras": list(camera_ids),
-        "materialsReused": ["v8_clear_roof_glass", "v8_mullion_dark_steel",
-                            "v8_inox_brushed_316L"],
+        "materialsReused": ["v8_clear_roof_glass", "prp_roof_metal",
+                            "v8_mullion_dark_steel", "v8_inox_brushed_316L"],
+        "opaqueCrownArcDegrees": 60,
         "lightingChanged": False,
         "rendererChanged": False,
     }
