@@ -116,18 +116,18 @@ def apply_garden_redesign(package: Path, revision: str):
         len(light.get("position", [])) == 3 and
         ((round(light["position"][0], 3), round(light["position"][2], 3)) in old_lamp_positions and
          abs(light["position"][1] - 3.45) < 0.02 or
-         abs(light["position"][1] - 0.27) < 0.02 and abs(light["position"][0]) in (0.0, 38.0) and
+         abs(light["position"][1] - 0.29) < 0.02 and abs(light["position"][0]) in (0.0, 38.0) and
          round(light["position"][2]) in (31, 64, 80, 108)))]
 
     route_specs = [
-        ("south", [(0.0, 19.0), (0.0, 43.5)], 4.8),
+        ("south", [(0.0, 19.0), (0.0, 43.5)], 8.0),
         ("west", [(0.0, 43.5), (-15.0, 45.0), (-29.0, 49.0), (-37.0, 56.0),
                    (-39.0, 64.0), (-39.0, 80.0), (-37.0, 88.0), (-29.0, 95.0),
-                   (-15.0, 99.0), (0.0, 100.0)], 3.6),
+                   (-15.0, 99.0), (0.0, 100.0)], 6.0),
         ("east", [(0.0, 43.5), (15.0, 45.0), (29.0, 49.0), (37.0, 56.0),
                   (39.0, 64.0), (39.0, 80.0), (37.0, 88.0), (29.0, 95.0),
-                  (15.0, 99.0), (0.0, 100.0)], 3.6),
-        ("north", [(0.0, 100.0), (0.0, 122.0)], 4.8),
+                  (15.0, 99.0), (0.0, 100.0)], 6.0),
+        ("north", [(0.0, 100.0), (0.0, 122.0)], 8.0),
     ]
     routes = []
     for name, points, width in route_specs:
@@ -140,19 +140,20 @@ def apply_garden_redesign(package: Path, revision: str):
             "position": [0, 0, 0], "size": [1, 1, 1], "rotationY": 0})
         routes.append((name, points, width))
         for side in (-1, 1):
-            edge_points = _offset_path(points, side * (width * 0.5 - 0.09))
+            edge_width = 0.55
+            edge_points = _offset_path(points, side * (width * 0.5 - edge_width * 0.5))
             edge_id = f"v600_garden_edge_{name}_{'left' if side < 0 else 'right'}"
-            geometry["meshes"].append(ribbon_mesh(edge_id, edge_points, 0.18, 0.178))
+            geometry["meshes"].append(ribbon_mesh(edge_id, edge_points, edge_width, 0.178))
             instances["instances"].append({"id": f"{edge_id}_inst",
                 "parent": "Place/Allée/Liseré rouge intégré",
                 "geometry": edge_id, "material": "v600_garden_edge",
                 "position": [0, 0, 0], "size": [1, 1, 1], "rotationY": 0})
 
     materials["materials"].extend([
-        {"id": "v600_garden_route", "baseColor": [0.66, 0.64, 0.58],
+        {"id": "v600_garden_route", "baseColor": [0.75, 0.72, 0.64],
          "roughness": 0.90, "metallic": 0.0, "transmission": 0.0, "ior": 1.5,
          "textureSet": "tex_v600_garden_route", "origin": "V17.600 warm stone allée"},
-        {"id": "v600_garden_edge", "baseColor": [0.78, 0.14, 0.09],
+        {"id": "v600_garden_edge", "baseColor": [0.78, 0.10, 0.055],
          "roughness": 0.82, "metallic": 0.0, "transmission": 0.0, "ior": 1.5,
          "textureSet": "tex_v600_garden_edge", "origin": "V17.600 visible red brick inlay"},
     ])
@@ -165,8 +166,8 @@ def apply_garden_redesign(package: Path, revision: str):
 
     # Ten mature trees frame the outer plaza in two measured groups. The center
     # axis, oval bench and two branches around the mound stay open and walkable.
-    tree_positions = [(side * 57.0, z) for side in (-1, 1) for z in (31.0, 47.0, 97.0, 113.0)]
-    tree_positions.extend([(-69.0, 71.0), (69.0, 71.0)])
+    tree_positions = [(side * 51.0, z) for side in (-1, 1) for z in (31.0, 47.0, 97.0, 113.0)]
+    tree_positions.extend([(-57.0, 71.0), (57.0, 71.0)])
     for n, (x, z) in enumerate(tree_positions):
         asset = "asset_tree1" if n % 2 == 0 else "asset_tree2"
         for part in (0, 1):
@@ -174,7 +175,7 @@ def apply_garden_redesign(package: Path, revision: str):
                 "parent": "Place/Jardins/Arbres de lisière",
                 "geometry": f"{asset}_{part}",
                 "material": f"asset_mat_{asset.removeprefix('asset_')}_{part}",
-                "position": [x, 0.16, z], "size": [7.2, 7.2, 7.2],
+                "position": [x, 0.16, z], "size": [10.5, 13.0, 10.5],
                 "rotationY": (n * 37.0) % 360})
 
     # Six low amber floor lights are set into the route. They replace the row
@@ -185,16 +186,17 @@ def apply_garden_redesign(package: Path, revision: str):
         instances["instances"].append({"id": f"v600_garden_floor_light_{n}",
             "parent": "Place/Eclairage/Points lumineux intégrés au sol",
             "geometry": "unit_sphere", "material": "lamp", "position": [x, 0.192, z],
-            "size": [0.36, 0.045, 0.36], "rotationY": 0})
-        lighting["lights"].append({"position": [x, 0.27, z], "radius": 5.5,
-            "intensity": 0.22, "color": [255, 205, 150]})
+            "size": [0.58, 0.055, 0.58], "rotationY": 0})
+        lighting["lights"].append({"position": [x, 0.29, z], "radius": 6.0,
+            "intensity": 0.30, "color": [255, 205, 150]})
 
     write(geom_path, geometry)
     write(instances_path, instances)
     write(mats_path, materials)
     write(pbr_path, pbr)
     write(lights_path, lighting)
-    return {"walkwaySegments": len(route_specs), "redInlayStrips": 8,
+    return {"walkwaySegments": len(route_specs), "walkwayWidthsMeters": [8.0, 6.0, 6.0, 8.0],
+            "redInlayWidthMeters": 0.55, "redInlayStrips": 8,
             "gardenTrees": len(tree_positions), "groundLights": len(floor_lights),
             "moundAndOvalBenchPreserved": True, "entranceAxisClear": True}
 
@@ -559,6 +561,17 @@ def verify(package: Path, revision: str):
         raise ValueError("Garden route must contain four connected path segments and eight red edge strips")
     if not all(len(m.get("faces", [])) >= 2 for m in route_meshes + edge_meshes):
         raise ValueError("Garden route geometry contains an empty ribbon")
+    expected_route_widths = {"south": 8.0, "west": 6.0, "east": 6.0, "north": 8.0}
+    route_by_id = {m["id"]: m for m in route_meshes}
+    for section, expected in expected_route_widths.items():
+        mesh = route_by_id.get(f"v600_garden_route_{section}")
+        if mesh is None or abs(math.dist(mesh["vertices"][0], mesh["vertices"][1]) - expected) > .03:
+            raise ValueError(f"Garden route {section} is narrower than its approved design width")
+    if any(abs(math.dist(m["vertices"][0], m["vertices"][1]) - .55) > .03 for m in edge_meshes):
+        raise ValueError("Red garden inlays are not wide enough to read at the global camera distance")
+    tree_sizes = [x["size"] for x in garden_trees]
+    if any(size[1] < 12.9 for size in tree_sizes):
+        raise ValueError("Garden tree scale is too small for the approved global view")
     garden_camera = locate(read(root / "cameras/v8-nine-anomalies.json")["cameras"], "v600_garden_view")
     if garden_camera is None:
         raise ValueError("Garden presentation camera is missing")
