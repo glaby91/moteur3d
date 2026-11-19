@@ -135,10 +135,16 @@ V traceColor(const Scene&s,const ShadowMap&sm,const Camera&cam,const Ray&input,S
   // reflection. Glass can share water's IOR without becoming a water surface.
   const bool architecturalWater=(material.surfaceAuthored && material.waterSurface &&
       material.transmissionPercent>5);
+  // Generic transmission is the engine's thin-sheet glass model: one authored
+  // surface has no paired exit interface, so bending it with Snell here creates
+  // a false glass-to-air transition on back-face hits (and spurious TIR). Keep
+  // its Fresnel reflection, but let the transmitted ray continue straight.
+  const bool thinSheetTransmission=!architecturalWater;
   const float waterEdge=std::pow(1.f-cosine,3.f);
-  const float reflectedWeight=totalInternalReflection?1.f:
+  const bool appliesTotalInternalReflection=!thinSheetTransmission&&totalInternalReflection;
+  const float reflectedWeight=appliesTotalInternalReflection?1.f:
       architecturalWater?clampf(.15f+.32f*waterEdge,0.f,.72f):fresnel;
-  const float pass=totalInternalReflection?0.f:(transmission*.01f)*(1.f-fresnel);
+  const float pass=appliesTotalInternalReflection?0.f:(transmission*.01f)*(1.f-fresnel);
 
   V surface=shade(s,sm,cam,ray,hit,st,fog,false);
   result=result+surface*(remaining*std::max(0.f,1.f-pass-reflectedWeight));
@@ -151,7 +157,8 @@ V traceColor(const Scene&s,const ShadowMap&sm,const Camera&cam,const Ray&input,S
   remaining*=pass;
   if(remaining<.008f)return result;
   V direction=ray.d;
-  if(!totalInternalReflection)direction=norm(ray.d*eta+normal*(eta*cosine-std::sqrt(k)));
+  if(!thinSheetTransmission&&!totalInternalReflection)
+   direction=norm(ray.d*eta+normal*(eta*cosine-std::sqrt(k)));
   ignore=hit.id;ray={hit.p+direction*.002f,direction};
  }
  Hit tail;closest(s,ray,tail,&st,true,ignore);st.rays++;if(tail.id==-1)st.sky++;else st.hits++;
