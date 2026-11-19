@@ -94,7 +94,7 @@ def apply_garden_redesign(package: Path, revision: str):
     geometry, instances, materials, pbr, lighting = (
         read(geom_path), read(instances_path), read(mats_path), read(pbr_path), read(lights_path))
 
-    old_geometry_ids = {"v600_civic_light_band", "v600_garden_red_inlay"}
+    old_geometry_ids = {"v600_civic_light_band", "v600_garden_red_inlay", "v600_garden_threshold"}
     geometry["meshes"] = [m for m in geometry["meshes"] if
                            m.get("id") not in old_geometry_ids and
                            not m.get("id", "").startswith(("v600_garden_route_", "v600_garden_edge_"))]
@@ -107,6 +107,7 @@ def apply_garden_redesign(package: Path, revision: str):
         i.get("id", "").startswith(("v600_garden_tree_", "v600_garden_lamp_", "v600_garden_floor_light_",
                                       "v600_garden_red_inlay_", "v600_civic_light_band_",
                                       "v600_garden_route_", "v600_garden_edge_")) or
+        i.get("id", "").startswith("v600_garden_threshold_") or
         i.get("parent") in ("Mobilier/Lampadaires", "Place/Eclairage/Lampadaires de lisière") or
         (i.get("id", "").startswith("rev_tree") and i.get("parent") == "Nature/Arbres medium-poly GLB"))]
 
@@ -175,8 +176,19 @@ def apply_garden_redesign(package: Path, revision: str):
                 "parent": "Place/Jardins/Arbres de lisière",
                 "geometry": f"{asset}_{part}",
                 "material": f"asset_mat_{asset.removeprefix('asset_')}_{part}",
-                "position": [x, 0.16, z], "size": [10.5, 13.0, 10.5],
+                "position": [x, 0.16, z], "size": [12.0, 16.0, 12.0],
                 "rotationY": (n * 37.0) % 360})
+
+    # The red threshold marks the transition between the palace forecourt and
+    # the mound. Its two halves meet the allée edge and leave the center lane
+    # open, so the entrance remains a direct, unobstructed walk.
+    geometry["meshes"].append({"id": "v600_garden_threshold", "type": "box",
+                               "size": [40.0, 0.05, 0.65], "uv": "planar_per_face"})
+    for side in (-1, 1):
+        instances["instances"].append({"id": f"v600_garden_threshold_{'left' if side < 0 else 'right'}",
+            "parent": "Place/Allée/Seuil rouge entre le palais et la butte",
+            "geometry": "v600_garden_threshold", "material": "v600_garden_edge",
+            "position": [side * 25.0, 0.19, 35.0], "size": [1, 1, 1], "rotationY": 0})
 
     # Six low amber floor lights are set into the route. They replace the row
     # of tall posts and give a gentle guide without flooding the plaza.
@@ -197,6 +209,7 @@ def apply_garden_redesign(package: Path, revision: str):
     write(lights_path, lighting)
     return {"walkwaySegments": len(route_specs), "walkwayWidthsMeters": [10.0, 7.5, 7.5, 10.0],
             "redInlayWidthMeters": 0.75, "redInlayStrips": 8,
+            "redThresholdSegments": 2,
             "gardenTrees": len(tree_positions), "groundLights": len(floor_lights),
             "moundAndOvalBenchPreserved": True, "entranceAxisClear": True}
 
@@ -557,7 +570,9 @@ def verify(package: Path, revision: str):
     scene_geometry = [m for rel in sector["geometry"] for m in read(root / rel).get("meshes", [])]
     route_meshes = [m for m in scene_geometry if m.get("id", "").startswith("v600_garden_route_")]
     edge_meshes = [m for m in scene_geometry if m.get("id", "").startswith("v600_garden_edge_")]
-    if len(route_meshes) != 4 or len(edge_meshes) != 8:
+    threshold_mesh = locate(scene_geometry, "v600_garden_threshold")
+    threshold_instances = [x for x in inst if x.get("id", "").startswith("v600_garden_threshold_")]
+    if len(route_meshes) != 4 or len(edge_meshes) != 8 or threshold_mesh is None or len(threshold_instances) != 2:
         raise ValueError("Garden route must contain four connected path segments and eight red edge strips")
     if not all(len(m.get("faces", [])) >= 2 for m in route_meshes + edge_meshes):
         raise ValueError("Garden route geometry contains an empty ribbon")
@@ -570,7 +585,7 @@ def verify(package: Path, revision: str):
     if any(abs(math.dist(m["vertices"][0], m["vertices"][1]) - .75) > .03 for m in edge_meshes):
         raise ValueError("Red garden inlays are not wide enough to read at the global camera distance")
     tree_sizes = [x["size"] for x in garden_trees]
-    if any(size[1] < 12.9 for size in tree_sizes):
+    if any(size[1] < 15.9 for size in tree_sizes):
         raise ValueError("Garden tree scale is too small for the approved global view")
     garden_camera = locate(read(root / "cameras/v8-nine-anomalies.json")["cameras"], "v600_garden_view")
     if garden_camera is None:
@@ -581,7 +596,7 @@ def verify(package: Path, revision: str):
     return {"revision": revision, "manifestResources": "complete", "frescoPanels": 8,
             "sharedTexture": image["imageFile"], "cupolaLeaves": 3, "guideRails": 3,
             "gardenTrees": 10, "gardenGroundLights": 6, "gardenWalkwaySegments": 4,
-            "redGardenEdgeStrips": 8, "redGardenInlay": True,
+            "redGardenEdgeStrips": 8, "redGardenInlay": True, "redGardenThresholdSegments": 2,
             "gardenCamera": "v600_garden_view"}
 
 
