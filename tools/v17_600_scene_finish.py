@@ -97,7 +97,8 @@ def apply_garden_redesign(package: Path, revision: str):
     old_geometry_ids = {"v600_civic_light_band", "v600_garden_red_inlay", "v600_garden_threshold"}
     geometry["meshes"] = [m for m in geometry["meshes"] if
                            m.get("id") not in old_geometry_ids and
-                           not m.get("id", "").startswith(("v600_garden_route_", "v600_garden_edge_"))]
+                           not m.get("id", "").startswith(("v600_garden_route_", "v600_garden_edge_",
+                                                               "v600_garden_threshold_"))]
     old_material_ids = {"v600_pale_paving", "v600_garden_red_inlay", "v600_garden_route", "v600_garden_edge"}
     materials["materials"] = [m for m in materials["materials"] if m.get("id") not in old_material_ids]
     pbr["sets"] = [m for m in pbr["sets"] if m.get("id") not in {
@@ -182,13 +183,15 @@ def apply_garden_redesign(package: Path, revision: str):
     # The red threshold marks the transition between the palace forecourt and
     # the mound. Its two halves meet the allée edge and leave the center lane
     # open, so the entrance remains a direct, unobstructed walk.
-    geometry["meshes"].append({"id": "v600_garden_threshold", "type": "box",
-                               "size": [40.0, 0.05, 0.65], "uv": "planar_per_face"})
     for side in (-1, 1):
+        section = "left" if side < 0 else "right"
+        points = [(-48.0, 40.0), (-5.0, 40.0)] if side < 0 else [(5.0, 40.0), (48.0, 40.0)]
+        mesh_id = f"v600_garden_threshold_{section}_mesh"
+        geometry["meshes"].append(ribbon_mesh(mesh_id, points, 1.4, 0.178))
         instances["instances"].append({"id": f"v600_garden_threshold_{'left' if side < 0 else 'right'}",
             "parent": "Place/Allée/Seuil rouge entre le palais et la butte",
-            "geometry": "v600_garden_threshold", "material": "v600_garden_edge",
-            "position": [side * 25.0, 0.19, 35.0], "size": [1, 1, 1], "rotationY": 0})
+            "geometry": mesh_id, "material": "v600_garden_edge",
+            "position": [0, 0, 0], "size": [1, 1, 1], "rotationY": 0})
 
     # Six low amber floor lights are set into the route. They replace the row
     # of tall posts and give a gentle guide without flooding the plaza.
@@ -570,11 +573,11 @@ def verify(package: Path, revision: str):
     scene_geometry = [m for rel in sector["geometry"] for m in read(root / rel).get("meshes", [])]
     route_meshes = [m for m in scene_geometry if m.get("id", "").startswith("v600_garden_route_")]
     edge_meshes = [m for m in scene_geometry if m.get("id", "").startswith("v600_garden_edge_")]
-    threshold_mesh = locate(scene_geometry, "v600_garden_threshold")
+    threshold_meshes = [m for m in scene_geometry if m.get("id", "").startswith("v600_garden_threshold_")]
     threshold_instances = [x for x in inst if x.get("id", "").startswith("v600_garden_threshold_")]
-    if len(route_meshes) != 4 or len(edge_meshes) != 8 or threshold_mesh is None or len(threshold_instances) != 2:
+    if len(route_meshes) != 4 or len(edge_meshes) != 8 or len(threshold_meshes) != 2 or len(threshold_instances) != 2:
         raise ValueError("Garden route must contain four connected path segments and eight red edge strips")
-    if not all(len(m.get("faces", [])) >= 2 for m in route_meshes + edge_meshes):
+    if not all(len(m.get("faces", [])) >= 2 for m in route_meshes + edge_meshes + threshold_meshes):
         raise ValueError("Garden route geometry contains an empty ribbon")
     expected_route_widths = {"south": 10.0, "west": 7.5, "east": 7.5, "north": 10.0}
     route_by_id = {m["id"]: m for m in route_meshes}
@@ -584,6 +587,8 @@ def verify(package: Path, revision: str):
             raise ValueError(f"Garden route {section} is narrower than its approved design width")
     if any(abs(math.dist(m["vertices"][0], m["vertices"][1]) - .75) > .03 for m in edge_meshes):
         raise ValueError("Red garden inlays are not wide enough to read at the global camera distance")
+    if any(abs(math.dist(m["vertices"][0], m["vertices"][1]) - 1.4) > .03 for m in threshold_meshes):
+        raise ValueError("The red threshold must stay visible in the global garden view")
     tree_sizes = [x["size"] for x in garden_trees]
     if any(size[1] < 15.9 for size in tree_sizes):
         raise ValueError("Garden tree scale is too small for the approved global view")
