@@ -120,14 +120,14 @@ def apply_garden_redesign(package: Path, revision: str):
          round(light["position"][2]) in (31, 64, 80, 108)))]
 
     route_specs = [
-        ("south", [(0.0, 19.0), (0.0, 43.5)], 8.0),
+        ("south", [(0.0, 19.0), (0.0, 43.5)], 10.0),
         ("west", [(0.0, 43.5), (-15.0, 45.0), (-29.0, 49.0), (-37.0, 56.0),
                    (-39.0, 64.0), (-39.0, 80.0), (-37.0, 88.0), (-29.0, 95.0),
-                   (-15.0, 99.0), (0.0, 100.0)], 6.0),
+                   (-15.0, 99.0), (0.0, 100.0)], 7.5),
         ("east", [(0.0, 43.5), (15.0, 45.0), (29.0, 49.0), (37.0, 56.0),
                   (39.0, 64.0), (39.0, 80.0), (37.0, 88.0), (29.0, 95.0),
-                  (15.0, 99.0), (0.0, 100.0)], 6.0),
-        ("north", [(0.0, 100.0), (0.0, 122.0)], 8.0),
+                  (15.0, 99.0), (0.0, 100.0)], 7.5),
+        ("north", [(0.0, 100.0), (0.0, 122.0)], 10.0),
     ]
     routes = []
     for name, points, width in route_specs:
@@ -140,7 +140,7 @@ def apply_garden_redesign(package: Path, revision: str):
             "position": [0, 0, 0], "size": [1, 1, 1], "rotationY": 0})
         routes.append((name, points, width))
         for side in (-1, 1):
-            edge_width = 0.55
+            edge_width = 0.75
             edge_points = _offset_path(points, side * (width * 0.5 - edge_width * 0.5))
             edge_id = f"v600_garden_edge_{name}_{'left' if side < 0 else 'right'}"
             geometry["meshes"].append(ribbon_mesh(edge_id, edge_points, edge_width, 0.178))
@@ -150,10 +150,10 @@ def apply_garden_redesign(package: Path, revision: str):
                 "position": [0, 0, 0], "size": [1, 1, 1], "rotationY": 0})
 
     materials["materials"].extend([
-        {"id": "v600_garden_route", "baseColor": [0.75, 0.72, 0.64],
+        {"id": "v600_garden_route", "baseColor": [0.82, 0.78, 0.69],
          "roughness": 0.90, "metallic": 0.0, "transmission": 0.0, "ior": 1.5,
          "textureSet": "tex_v600_garden_route", "origin": "V17.600 warm stone allée"},
-        {"id": "v600_garden_edge", "baseColor": [0.78, 0.10, 0.055],
+        {"id": "v600_garden_edge", "baseColor": [0.90, 0.12, 0.065],
          "roughness": 0.82, "metallic": 0.0, "transmission": 0.0, "ior": 1.5,
          "textureSet": "tex_v600_garden_edge", "origin": "V17.600 visible red brick inlay"},
     ])
@@ -195,8 +195,8 @@ def apply_garden_redesign(package: Path, revision: str):
     write(mats_path, materials)
     write(pbr_path, pbr)
     write(lights_path, lighting)
-    return {"walkwaySegments": len(route_specs), "walkwayWidthsMeters": [8.0, 6.0, 6.0, 8.0],
-            "redInlayWidthMeters": 0.55, "redInlayStrips": 8,
+    return {"walkwaySegments": len(route_specs), "walkwayWidthsMeters": [10.0, 7.5, 7.5, 10.0],
+            "redInlayWidthMeters": 0.75, "redInlayStrips": 8,
             "gardenTrees": len(tree_positions), "groundLights": len(floor_lights),
             "moundAndOvalBenchPreserved": True, "entranceAxisClear": True}
 
@@ -367,8 +367,8 @@ def patch(package: Path, revision: str):
     # keeps the hill, red transition strip, both tree rows, and full façade in
     # frame instead of looking diagonally across the plaza.
     garden_camera.update({"name": clean_names["v600_garden_view"],
-        "position": [0.0, 18.0, 145.0], "target": [0.0, 8.0, 25.0],
-        "fovDegrees": 78})
+        "position": [0.0, 34.0, 145.0], "target": [0.0, 6.0, 25.0],
+        "fovDegrees": 74})
     for c in cameras["cameras"]:
         if c.get("id") in clean_names:
             c["name"] = clean_names[c["id"]]
@@ -561,13 +561,13 @@ def verify(package: Path, revision: str):
         raise ValueError("Garden route must contain four connected path segments and eight red edge strips")
     if not all(len(m.get("faces", [])) >= 2 for m in route_meshes + edge_meshes):
         raise ValueError("Garden route geometry contains an empty ribbon")
-    expected_route_widths = {"south": 8.0, "west": 6.0, "east": 6.0, "north": 8.0}
+    expected_route_widths = {"south": 10.0, "west": 7.5, "east": 7.5, "north": 10.0}
     route_by_id = {m["id"]: m for m in route_meshes}
     for section, expected in expected_route_widths.items():
         mesh = route_by_id.get(f"v600_garden_route_{section}")
         if mesh is None or abs(math.dist(mesh["vertices"][0], mesh["vertices"][1]) - expected) > .03:
             raise ValueError(f"Garden route {section} is narrower than its approved design width")
-    if any(abs(math.dist(m["vertices"][0], m["vertices"][1]) - .55) > .03 for m in edge_meshes):
+    if any(abs(math.dist(m["vertices"][0], m["vertices"][1]) - .75) > .03 for m in edge_meshes):
         raise ValueError("Red garden inlays are not wide enough to read at the global camera distance")
     tree_sizes = [x["size"] for x in garden_trees]
     if any(size[1] < 12.9 for size in tree_sizes):
@@ -575,8 +575,8 @@ def verify(package: Path, revision: str):
     garden_camera = locate(read(root / "cameras/v8-nine-anomalies.json")["cameras"], "v600_garden_view")
     if garden_camera is None:
         raise ValueError("Garden presentation camera is missing")
-    if (garden_camera.get("position") != [0.0, 18.0, 145.0] or
-            garden_camera.get("target") != [0.0, 8.0, 25.0]):
+    if (garden_camera.get("position") != [0.0, 34.0, 145.0] or
+            garden_camera.get("target") != [0.0, 6.0, 25.0]):
         raise ValueError("Garden camera must show the landscape from the garden side")
     return {"revision": revision, "manifestResources": "complete", "frescoPanels": 8,
             "sharedTexture": image["imageFile"], "cupolaLeaves": 3, "guideRails": 3,
