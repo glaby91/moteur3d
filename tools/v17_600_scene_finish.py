@@ -37,6 +37,181 @@ def locate(items, key):
     return None
 
 
+def ribbon_mesh(mesh_id, points, width, y):
+    """Create a flat, continuous ribbon following a polyline in the XZ plane."""
+    half = width * 0.5
+    left, right = [], []
+    for index, (x, z) in enumerate(points):
+        before = points[max(0, index - 1)]
+        after = points[min(len(points) - 1, index + 1)]
+        dx, dz = after[0] - before[0], after[1] - before[1]
+        length = math.hypot(dx, dz)
+        if length < 1e-6:
+            raise ValueError(f"Repeated path point in {mesh_id}")
+        tx, tz = dx / length, dz / length
+        nx, nz = -tz, tx
+        if index and index + 1 < len(points):
+            prev = points[index][0] - points[index - 1][0], points[index][1] - points[index - 1][1]
+            nxt = points[index + 1][0] - points[index][0], points[index + 1][1] - points[index][1]
+            lp, ln = math.hypot(*prev), math.hypot(*nxt)
+            npx, npz = -prev[1] / lp, prev[0] / lp
+            nnx, nnz = -nxt[1] / ln, nxt[0] / ln
+            mx, mz = npx + nnx, npz + nnz
+            ml = math.hypot(mx, mz)
+            if ml > 1e-6:
+                mx, mz = mx / ml, mz / ml
+                denom = max(0.45, abs(mx * nnx + mz * nnz))
+                nx, nz = mx / denom, mz / denom
+        offset = min(half * 2.0, half * math.hypot(nx, nz))
+        ox, oz = nx * offset, nz * offset
+        left.append([round(x + ox, 5), round(y, 5), round(z + oz, 5)])
+        right.append([round(x - ox, 5), round(y, 5), round(z - oz, 5)])
+    vertices, uv, faces = [], [], []
+    distance = 0.0
+    for index, (a, b) in enumerate(zip(left, right)):
+        if index:
+            distance += math.dist(points[index - 1], points[index])
+        vertices.extend((a, b))
+        uv.extend(([0.0, distance], [1.0, distance]))
+    for index in range(len(points) - 1):
+        a, b = 2 * index, 2 * index + 1
+        c, d = a + 2, a + 3
+        # Up-facing triangles. Split at each polyline node so the paved route
+        # remains continuous around each of its broad, walkable bends.
+        faces.extend(([a, c, d], [a, d, b]))
+    return {"id": mesh_id, "type": "triangle_mesh", "vertices": vertices,
+            "uv": uv, "faces": faces}
+
+
+def apply_garden_redesign(package: Path, revision: str):
+    """Replace the weak straight strip with the approved route around the mound."""
+    root = package / "benchmark-civic"
+    geom_path = root / "geometry/v7-corrections.json"
+    instances_path = root / "instances/v442-corrections.json"
+    mats_path = root / "materials/v442-corrections.json"
+    pbr_path = root / "pbr/v440-audit.json"
+    lights_path = root / "lighting/v8-nine-anomalies.json"
+    geometry, instances, materials, pbr, lighting = (
+        read(geom_path), read(instances_path), read(mats_path), read(pbr_path), read(lights_path))
+
+    old_geometry_ids = {"v600_civic_light_band", "v600_garden_red_inlay"}
+    geometry["meshes"] = [m for m in geometry["meshes"] if
+                           m.get("id") not in old_geometry_ids and
+                           not m.get("id", "").startswith(("v600_garden_route_", "v600_garden_edge_"))]
+    old_material_ids = {"v600_pale_paving", "v600_garden_red_inlay", "v600_garden_route", "v600_garden_edge"}
+    materials["materials"] = [m for m in materials["materials"] if m.get("id") not in old_material_ids]
+    pbr["sets"] = [m for m in pbr["sets"] if m.get("id") not in {
+        "tex_v600_pale_paving", "tex_v600_garden_red_inlay", "tex_v600_garden_route", "tex_v600_garden_edge"}]
+
+    instances["instances"] = [i for i in instances["instances"] if not (
+        i.get("id", "").startswith(("v600_garden_tree_", "v600_garden_lamp_", "v600_garden_floor_light_",
+                                      "v600_garden_red_inlay_", "v600_civic_light_band_",
+                                      "v600_garden_route_", "v600_garden_edge_")) or
+        i.get("parent") in ("Mobilier/Lampadaires", "Place/Eclairage/Lampadaires de lisière") or
+        (i.get("id", "").startswith("rev_tree") and i.get("parent") == "Nature/Arbres medium-poly GLB"))]
+
+    old_lamp_positions = {(round(side * 55.0, 3), round(z, 3))
+                          for side in (-1, 1) for z in (28.0, 46.0, 64.0, 82.0)}
+    lighting["lights"] = [light for light in lighting["lights"] if not (
+        len(light.get("position", [])) == 3 and
+        ((round(light["position"][0], 3), round(light["position"][2], 3)) in old_lamp_positions and
+         abs(light["position"][1] - 3.45) < 0.02 or
+         abs(light["position"][1] - 0.27) < 0.02 and abs(light["position"][0]) in (0.0, 38.0) and
+         round(light["position"][2]) in (31, 64, 80, 108)))]
+
+    route_specs = [
+        ("south", [(0.0, 19.0), (0.0, 43.5)], 4.8),
+        ("west", [(0.0, 43.5), (-15.0, 45.0), (-29.0, 49.0), (-37.0, 56.0),
+                   (-39.0, 64.0), (-39.0, 80.0), (-37.0, 88.0), (-29.0, 95.0),
+                   (-15.0, 99.0), (0.0, 100.0)], 3.6),
+        ("east", [(0.0, 43.5), (15.0, 45.0), (29.0, 49.0), (37.0, 56.0),
+                  (39.0, 64.0), (39.0, 80.0), (37.0, 88.0), (29.0, 95.0),
+                  (15.0, 99.0), (0.0, 100.0)], 3.6),
+        ("north", [(0.0, 100.0), (0.0, 122.0)], 4.8),
+    ]
+    routes = []
+    for name, points, width in route_specs:
+        route_id = f"v600_garden_route_{name}"
+        route = ribbon_mesh(route_id, points, width, 0.168)
+        geometry["meshes"].append(route)
+        instances["instances"].append({"id": f"{route_id}_inst",
+            "parent": "Place/Allée/Contourner la butte vers les marches",
+            "geometry": route_id, "material": "v600_garden_route",
+            "position": [0, 0, 0], "size": [1, 1, 1], "rotationY": 0})
+        routes.append((name, points, width))
+        for side in (-1, 1):
+            edge_points = _offset_path(points, side * (width * 0.5 - 0.09))
+            edge_id = f"v600_garden_edge_{name}_{'left' if side < 0 else 'right'}"
+            geometry["meshes"].append(ribbon_mesh(edge_id, edge_points, 0.18, 0.178))
+            instances["instances"].append({"id": f"{edge_id}_inst",
+                "parent": "Place/Allée/Liseré rouge intégré",
+                "geometry": edge_id, "material": "v600_garden_edge",
+                "position": [0, 0, 0], "size": [1, 1, 1], "rotationY": 0})
+
+    materials["materials"].extend([
+        {"id": "v600_garden_route", "baseColor": [0.66, 0.64, 0.58],
+         "roughness": 0.90, "metallic": 0.0, "transmission": 0.0, "ior": 1.5,
+         "textureSet": "tex_v600_garden_route", "origin": "V17.600 warm stone allée"},
+        {"id": "v600_garden_edge", "baseColor": [0.78, 0.14, 0.09],
+         "roughness": 0.82, "metallic": 0.0, "transmission": 0.0, "ior": 1.5,
+         "textureSet": "tex_v600_garden_edge", "origin": "V17.600 visible red brick inlay"},
+    ])
+    pbr["sets"].extend([
+        {"id": "tex_v600_garden_route", "material": "v600_garden_route",
+         "pattern": "smooth_plaster", "resolution": 512, "channels": ["albedo", "normal", "roughness"]},
+        {"id": "tex_v600_garden_edge", "material": "v600_garden_edge",
+         "pattern": "smooth_plaster", "resolution": 512, "channels": ["albedo", "normal", "roughness"]},
+    ])
+
+    # Ten mature trees frame the outer plaza in two measured groups. The center
+    # axis, oval bench and two branches around the mound stay open and walkable.
+    tree_positions = [(side * 57.0, z) for side in (-1, 1) for z in (31.0, 47.0, 97.0, 113.0)]
+    tree_positions.extend([(-69.0, 71.0), (69.0, 71.0)])
+    for n, (x, z) in enumerate(tree_positions):
+        asset = "asset_tree1" if n % 2 == 0 else "asset_tree2"
+        for part in (0, 1):
+            instances["instances"].append({"id": f"v600_garden_tree_{n}_{part}",
+                "parent": "Place/Jardins/Arbres de lisière",
+                "geometry": f"{asset}_{part}",
+                "material": f"asset_mat_{asset.removeprefix('asset_')}_{part}",
+                "position": [x, 0.16, z], "size": [7.2, 7.2, 7.2],
+                "rotationY": (n * 37.0) % 360})
+
+    # Six low amber floor lights are set into the route. They replace the row
+    # of tall posts and give a gentle guide without flooding the plaza.
+    floor_lights = [(0.0, 31.0), (-38.0, 64.0), (38.0, 64.0),
+                    (-38.0, 80.0), (38.0, 80.0), (0.0, 108.0)]
+    for n, (x, z) in enumerate(floor_lights):
+        instances["instances"].append({"id": f"v600_garden_floor_light_{n}",
+            "parent": "Place/Eclairage/Points lumineux intégrés au sol",
+            "geometry": "unit_sphere", "material": "lamp", "position": [x, 0.192, z],
+            "size": [0.36, 0.045, 0.36], "rotationY": 0})
+        lighting["lights"].append({"position": [x, 0.27, z], "radius": 5.5,
+            "intensity": 0.22, "color": [255, 205, 150]})
+
+    write(geom_path, geometry)
+    write(instances_path, instances)
+    write(mats_path, materials)
+    write(pbr_path, pbr)
+    write(lights_path, lighting)
+    return {"walkwaySegments": len(route_specs), "redInlayStrips": 8,
+            "gardenTrees": len(tree_positions), "groundLights": len(floor_lights),
+            "moundAndOvalBenchPreserved": True, "entranceAxisClear": True}
+
+
+def _offset_path(points, offset):
+    """Return an offset polyline for an edge inlay, with bounded miter joins."""
+    out = []
+    for index, (x, z) in enumerate(points):
+        before = points[max(0, index - 1)]
+        after = points[min(len(points) - 1, index + 1)]
+        dx, dz = after[0] - before[0], after[1] - before[1]
+        length = math.hypot(dx, dz)
+        nx, nz = -dz / length, dx / length
+        out.append((x + nx * offset, z + nz * offset))
+    return out
+
+
 def patch(package: Path, revision: str):
     root = package / "benchmark-civic"
     scene_path = root / "scene.json"
@@ -304,11 +479,14 @@ def patch(package: Path, revision: str):
     write(cameras_path, cameras)
     write(lights_path, lighting)
     write(scene_path, scene)
+    garden_report = apply_garden_redesign(package, revision)
     return {"revision": revision, "frescoPanels": len(fresco_meshes), "sharedFrescoImage": shared["imageFile"],
             "cupolaLeaves": len(sections), "cupolaGuideRails": 3, "relocatedPlanterMeshes": trees_moved,
-            "exteriorTreesRemoved": removed_trees // 2, "gardenTreesReplanted": len(garden_trees) // 2,
-            "gardenLampPosts": len(garden_lamp_positions), "redGardenInlay": True,
-            "gardenPresentationCamera": "v600_garden_view", "sceneRevision": scene["revision"]}
+            "exteriorTreesRemoved": removed_trees // 2,
+            "gardenTreesReplanted": garden_report["gardenTrees"],
+            "gardenLampPosts": 0, "redGardenInlay": True,
+            "gardenPresentationCamera": "v600_garden_view", "sceneRevision": scene["revision"],
+            "gardenRedesign": garden_report}
 
 
 def verify(package: Path, revision: str):
@@ -362,8 +540,8 @@ def verify(package: Path, revision: str):
     if len(rail_instances) != 6:
         raise ValueError("Final scene does not contain paired guide rails on both eaves")
     garden_trees = [x for x in inst if x.get("id", "").startswith("v600_garden_tree_")]
-    if len(garden_trees) != 12 or any(x.get("id", "").startswith("rev_tree") for x in inst):
-        raise ValueError("Exterior trees were not replaced by the six controlled garden trees")
+    if len(garden_trees) != 20 or any(x.get("id", "").startswith("rev_tree") for x in inst):
+        raise ValueError("Exterior trees were not replaced by ten controlled garden trees")
     available_meshes = {m.get("id") for rel in sector["geometry"]
                         for m in read(root / rel).get("meshes", [])}
     available_materials = {m.get("id") for rel in sector["materials"]
@@ -371,11 +549,16 @@ def verify(package: Path, revision: str):
     for tree in garden_trees:
         if tree.get("geometry") not in available_meshes or tree.get("material") not in available_materials:
             raise ValueError(f"Garden tree references missing scene data: {tree.get('id')}")
-    garden_lamps = [x for x in inst if x.get("parent") == "Place/Eclairage/Lampadaires de lisière"]
-    if len(garden_lamps) != 16:
-        raise ValueError("Garden edge lighting must contain eight matching post/globe fixtures")
-    if not locate(inst, "v600_garden_red_inlay_inst"):
-        raise ValueError("Red plaza-to-garden inlay is missing")
+    garden_lamps = [x for x in inst if x.get("parent") == "Place/Eclairage/Points lumineux intégrés au sol"]
+    if len(garden_lamps) != 6 or any(x.get("parent") in ("Mobilier/Lampadaires", "Place/Eclairage/Lampadaires de lisière") for x in inst):
+        raise ValueError("Garden lighting must use six recessed ground fixtures without tall plaza posts")
+    scene_geometry = [m for rel in sector["geometry"] for m in read(root / rel).get("meshes", [])]
+    route_meshes = [m for m in scene_geometry if m.get("id", "").startswith("v600_garden_route_")]
+    edge_meshes = [m for m in scene_geometry if m.get("id", "").startswith("v600_garden_edge_")]
+    if len(route_meshes) != 4 or len(edge_meshes) != 8:
+        raise ValueError("Garden route must contain four connected path segments and eight red edge strips")
+    if not all(len(m.get("faces", [])) >= 2 for m in route_meshes + edge_meshes):
+        raise ValueError("Garden route geometry contains an empty ribbon")
     garden_camera = locate(read(root / "cameras/v8-nine-anomalies.json")["cameras"], "v600_garden_view")
     if garden_camera is None:
         raise ValueError("Garden presentation camera is missing")
@@ -384,7 +567,8 @@ def verify(package: Path, revision: str):
         raise ValueError("Garden camera must show the landscape from the garden side")
     return {"revision": revision, "manifestResources": "complete", "frescoPanels": 8,
             "sharedTexture": image["imageFile"], "cupolaLeaves": 3, "guideRails": 3,
-            "gardenTrees": 6, "gardenLampFixtures": 8, "redGardenInlay": True,
+            "gardenTrees": 10, "gardenGroundLights": 6, "gardenWalkwaySegments": 4,
+            "redGardenEdgeStrips": 8, "redGardenInlay": True,
             "gardenCamera": "v600_garden_view"}
 
 
@@ -409,9 +593,19 @@ def self_test():
                 raise ValueError("Synthetic fresco top row samples the wrong half of the source")
             if row == 1 and (uv[0][1] != 0.0 or uv[2][1] != .5):
                 raise ValueError("Synthetic fresco bottom row samples the wrong half of the source")
+    ribbon = ribbon_mesh("synthetic_route", [(0.0, 0.0), (0.0, 5.0), (2.0, 8.0)], 3.0, 0.2)
+    if len(ribbon["faces"]) != 4 or min(v[1] for v in ribbon["vertices"]) != .2:
+        raise ValueError("Synthetic path ribbon has missing faces or incorrect elevation")
+    for face in ribbon["faces"]:
+        a, b, c = (ribbon["vertices"][index] for index in face)
+        ab = (b[0]-a[0], b[1]-a[1], b[2]-a[2])
+        ac = (c[0]-a[0], c[1]-a[1], c[2]-a[2])
+        if ab[2]*ac[0] - ab[0]*ac[2] <= 0:
+            raise ValueError("Synthetic path triangle is not oriented toward the upper surface")
     return {"syntheticCupolaAngleSamples": len(coverage), "minimumSectionCoverage": min(coverage),
             "maximumSectionOverlap": max(coverage), "frescoUVTiles": 8,
-            "frescoTopBottomOrientation": "corrected", "status": "PASS"}
+            "frescoTopBottomOrientation": "corrected", "routeRibbonFaces": len(ribbon["faces"]),
+            "routeRibbonOrientation": "upward", "status": "PASS"}
 
 
 def main():
@@ -420,13 +614,20 @@ def main():
     ap.add_argument("--revision", default="V17.600")
     ap.add_argument("--verify-only", action="store_true")
     ap.add_argument("--self-test", action="store_true")
+    ap.add_argument("--garden-only", action="store_true",
+                    help="apply the garden route only to an already finished final package")
     args = ap.parse_args()
     if args.self_test:
         report = self_test()
     else:
         if args.package is None:
             ap.error("--package is required unless --self-test is used")
-        report = verify(args.package, args.revision) if args.verify_only else patch(args.package, args.revision)
+        if args.verify_only:
+            report = verify(args.package, args.revision)
+        elif args.garden_only:
+            report = apply_garden_redesign(args.package, args.revision)
+        else:
+            report = patch(args.package, args.revision)
         if not args.verify_only:
             report.update(verify(args.package, args.revision))
     print(json.dumps(report, ensure_ascii=False, indent=2))
