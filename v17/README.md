@@ -6,7 +6,7 @@
 
 ## État de validation V17.600
 
-Le commit V17.600 a passé la CI Windows x64 : compilation Release avec Vulkan, contrôles du paquet, validations du chargeur de scènes, rendus de contrôle WARP, audit de rayons de la fresque et suite de régression V16/V17. L’artefact Windows est produit par GitHub Actions.
+Le commit moteur `ceaa6a6` (V17.600) a passé la [CI Windows x64, run 44437496051](https://github.com/glaby91/moteur3d/actions/runs/44437496051) : compilation Release avec Vulkan, contrôles du paquet, validations du chargeur de scènes, rendus de contrôle WARP, audit de rayons de la fresque et suite de régression V16/V17. L’artefact Windows est produit par GitHub Actions.
 
 Cette validation porte sur la compilation, les contrôles automatisés et les chemins de rendu exécutés en CI. Les rendus DX11 concernés utilisent WARP, l’adaptateur logiciel de Microsoft. Ils ne valident pas les performances sur une carte Intel ou NVIDIA, la fluidité en mouvement sur le Dell HD620, ni le rythme d’affichage du swapchain natif. Les images sont contrôlées automatiquement pour leur présence et leur intégrité ; cela ne remplace pas une inspection visuelle.
 
