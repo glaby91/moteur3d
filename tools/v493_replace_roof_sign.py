@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Replace only the existing V17.493 rooftop sign, using approved GLB geometry.
-Never rebuild the scene from older revisions; preserves 186 materials and every
-non-sign instance. Adds real triangle meshes for CSE WARP V16/V17 loader.
+Never rebuild the scene from older revisions; preserves scene materials and every
+non-sign instance in the primary instances resource. Adds real triangle meshes for CSE WARP V16/V17 loader.
 """
 import argparse, hashlib, json, shutil, re
 from pathlib import Path
@@ -34,8 +34,13 @@ def main():
     sc=read(folder/'scene.json')
     if sc.get('format')!='m3d-scene-v16' or len(sc.get('sectors',[]))!=1:raise SystemExit('Unsupported scene')
     sec=sc['sectors'][0]
-    for key in ('materials','pbr','instances'):
+    for key in ('materials','pbr'):
         if len(sec[key])!=1:raise SystemExit('Unexpected '+key+' references')
+    if not sec.get('instances'):
+        raise SystemExit('Scene has no instances resource')
+    # V17.603 separates the monument anchors into a second instances file.
+    # The approved roof/facade/pool objects live in the primary resource; leave
+    # the independently versioned anchors untouched.
     ip=folder/sec['instances'][0];mp=folder/sec['materials'][0];pp=folder/sec['pbr'][0]
     instances=read(ip);materials=read(mp);pbr=read(pp)
     old=instances['instances']
