@@ -44,7 +44,18 @@ def main():
     ip=folder/sec['instances'][0];mp=folder/sec['materials'][0];pp=folder/sec['pbr'][0]
     instances=read(ip);materials=read(mp);pbr=read(pp)
     old=instances['instances']
-    if any(i.get('id','').startswith(ID) for i in old):raise SystemExit('Already installed')
+    if any(i.get('id','').startswith(ID) for i in old):
+        # V17.603 already contains the approved sign and its verified install report.
+        # Treat this as a verified no-op instead of adding a duplicate or failing.
+        report_path=folder/'V498_SCENE_INSTALL.json'
+        if not report_path.is_file():
+            raise SystemExit('BASSEIN sign instances exist without their install report')
+        report=read(report_path)
+        if (report.get('addedSignObjects')!=112 or report.get('addedTriangles',0)<14000 or
+            report.get('removedSignObjects',0)<50 or report.get('originalUnchangedObjects',0)<5000):
+            raise SystemExit('Existing BASSEIN sign install report does not match the approved scene')
+        print(json.dumps(report,ensure_ascii=False,indent=2))
+        return
     remove=[i for i in old if i.get('parent','').startswith(PREFIX)]
     # Retain every other warm-white luminaire and its matching bracket on the upper cornice.
     def alternate_fixture(item):

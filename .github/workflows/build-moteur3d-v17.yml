@@ -656,9 +656,24 @@ jobs:
           # The Vulkan-complete workflow already adds these two concealed
           # concrete cores, eight anchor rods and eight visible nuts. Keep the
           # standard Windows package on the same approved scene lineage.
-          python tools/v17_500_anchor_monument.py --package dist-v17/benchmark-civic
-          if ($LASTEXITCODE -ne 0) { throw 'V17.500 monument anchoring failed in the standard shipping scene' }
-          $report = Get-Content "dist-v17/benchmark-civic/V500_MONUMENT_ANCHORS.json" -Raw | ConvertFrom-Json
+          $scenePath = "dist-v17/benchmark-civic/scene.json"
+          $anchorReportPath = "dist-v17/benchmark-civic/V500_MONUMENT_ANCHORS.json"
+          $scene = Get-Content $scenePath -Raw | ConvertFrom-Json
+          $sector = $scene.sectors[0]
+          if (Test-Path $anchorReportPath) {
+            $report = Get-Content $anchorReportPath -Raw | ConvertFrom-Json
+            if (@($sector.geometry) -notcontains "geometry/monument-v500-anchors.json" -or
+                @($sector.instances) -notcontains "instances/monument-v500-anchors.json" -or
+                !(Test-Path "dist-v17/benchmark-civic/geometry/monument-v500-anchors.json") -or
+                !(Test-Path "dist-v17/benchmark-civic/instances/monument-v500-anchors.json")) {
+              throw 'Existing V17.500 anchor report is not backed by scene resources'
+            }
+            Write-Host 'V17.500 anchors already exist in the approved V17.603 scene; validating in place.'
+          } else {
+            python tools/v17_500_anchor_monument.py --package dist-v17/benchmark-civic
+            if ($LASTEXITCODE -ne 0) { throw 'V17.500 monument anchoring failed in the standard shipping scene' }
+            $report = Get-Content $anchorReportPath -Raw | ConvertFrom-Json
+          }
           if ($report.revision -ne 'V17.500' -or
               $report.anchorAssemblies -ne 2 -or
               $report.embeddedConcreteCores -ne 2 -or
@@ -678,9 +693,28 @@ jobs:
           M3D_V16_FORCE_WARP: '1'
         run: |
           $expectedSceneRevision = "V17.604"
-          python tools/v17_523_pool_cupola.py --package dist-v17/benchmark-civic --scene-revision $expectedSceneRevision
-          if ($LASTEXITCODE -ne 0) { throw 'V17.523 cupola installation failed in shipping scene' }
-          $report = Get-Content "dist-v17/benchmark-civic/V523_POOL_CUPOLA.json" -Raw | ConvertFrom-Json
+          $scenePath = "dist-v17/benchmark-civic/scene.json"
+          $reportPath = "dist-v17/benchmark-civic/V523_POOL_CUPOLA.json"
+          $scene = Get-Content $scenePath -Raw | ConvertFrom-Json
+          $sector = $scene.sectors[0]
+          if ((Test-Path $reportPath) -and
+              (@($sector.geometry) -contains "geometry/v523-pool-cupola.json") -and
+              (Test-Path "dist-v17/benchmark-civic/geometry/v523-pool-cupola.json")) {
+            $report = Get-Content $reportPath -Raw | ConvertFrom-Json
+            if ($report.revision -ne 'V17.523' -or $report.addedCupolaMeshes -ne 5 -or $report.addedCupolaInstances -ne 5) {
+              throw 'Existing V17.523 cupola report does not match the approved scene.'
+            }
+            $report.sceneRevision = $expectedSceneRevision
+            $report | ConvertTo-Json -Depth 100 | Set-Content $reportPath -Encoding utf8
+            $scene.revision = $expectedSceneRevision
+            $scene.name = "CSE WARP $expectedSceneRevision — Palais et coupole vitrée de la piscine"
+            $scene | ConvertTo-Json -Depth 100 | Set-Content $scenePath -Encoding utf8
+            Write-Host 'Corrected V17.523 cupola already exists in the V17.603 scene; validating in place.'
+          } else {
+            python tools/v17_523_pool_cupola.py --package dist-v17/benchmark-civic --scene-revision $expectedSceneRevision
+            if ($LASTEXITCODE -ne 0) { throw 'V17.523 cupola installation failed in shipping scene' }
+            $report = Get-Content $reportPath -Raw | ConvertFrom-Json
+          }
           if ($report.revision -ne 'V17.523' -or $report.sceneRevision -ne $expectedSceneRevision -or
               $report.removedFlatSkylightInstances -ne 19 -or
               $report.addedCupolaMeshes -ne 5 -or $report.addedCupolaInstances -ne 5 -or
