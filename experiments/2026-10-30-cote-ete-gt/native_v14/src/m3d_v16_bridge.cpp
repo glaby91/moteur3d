@@ -852,6 +852,12 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
     report(96,QStringLiteral("Construction de l'accélérateur BVH"));
     render.root=buildBvh(render,0,int(render.order.size()));
     result.runtime.bvhBuildMs=stageElapsedMs();
+    stageStarted=std::chrono::steady_clock::now();
+    std::wstring lumaError;
+    buildLumaTraceBvh4(render,result.runtime.lumaTraceBvh4,lumaError);
+    if(!lumaError.empty())
+        result.runtime.lumaTraceBvhError=QString::fromStdWString(lumaError);
+    result.runtime.lumaTraceBvhBuildMs=stageElapsedMs();
     report(100,QStringLiteral("Scène prête"));
     return result;
 }

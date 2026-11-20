@@ -6,9 +6,10 @@ Base: V17.603 (`d50ba673187c80ddb41f78674575ae079bcbab4b`)
 ## First integration slice
 
 `m3d_lumatrace_bvh4` collapses V17's already-built binary BVH into the same
-56-byte four-child node layout consumed by LumaTrace's HLSL. BVH leaves retain
-their ranges into `Scene::order`. This slice does not create `GpuTriangle`
-records or copy vertex positions, normals, UVs, or materials.
+56-byte four-child node layout consumed by LumaTrace's HLSL. It runs once at
+scene load and is stored on `v16::Runtime` for later backend selection. BVH
+leaves retain their ranges into `Scene::order`. This slice does not create
+`GpuTriangle` records or copy vertex positions, normals, UVs, or materials.
 
 The adapter currently accepts triangle-only scenes. V17 analytic primitives
 must first be tessellated by the existing scene-to-raster path, or the backend
@@ -33,5 +34,7 @@ must not upload LumaTrace's 128-byte-per-triangle `GpuTriangle` structure.
 4. On first selection, turn off the cloud option for this backend; leave the
    existing checkbox enabled so the user can turn clouds back on to compare.
 
-This branch is experimental. The adapter has not yet been exercised by the
-renderer because the D3D11/HLSL integration is a separate step.
+The campaign benchmark reports the BVH4 preparation time and whether the
+loaded scene is supported. This branch is experimental. The adapter has not
+yet been exercised by the renderer because the D3D11/HLSL integration is a
+separate step.

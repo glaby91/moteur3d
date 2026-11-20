@@ -504,8 +504,13 @@ int main(int argc,char** argv){
         side.append(subsystem(sceneName,"pbr_mip_generation",runtime.pbrBuildMs));
         side.append(subsystem(sceneName,"geometry_instancing",runtime.geometryBuildMs));
         side.append(subsystem(sceneName,"bvh_build",runtime.bvhBuildMs));
+        side.append(subsystem(sceneName,"lumatrace_bvh4_prepare",
+            runtime.lumaTraceBvhBuildMs,runtime.lumaTraceBvhError.isEmpty(),
+            runtime.lumaTraceBvhError));
         out<<"  [detail] PBR "<<runtime.pbrBuildMs<<" ms ; instanciation "
-           <<runtime.geometryBuildMs<<" ms ; BVH "<<runtime.bvhBuildMs<<" ms\n";
+           <<runtime.geometryBuildMs<<" ms ; BVH "<<runtime.bvhBuildMs
+           <<" ms ; LumaTrace BVH4 "<<runtime.lumaTraceBvhBuildMs<<" ms"
+           <<(runtime.lumaTraceBvhError.isEmpty()?" prêt":" indisponible")<<"\n";
         out.flush();
         updateLighting(runtime.daylightHour);
         out<<"  [ombres] Preparation de la carte CPU...\n";out.flush();
