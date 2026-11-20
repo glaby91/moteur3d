@@ -19,6 +19,7 @@ set(M3D_RENDER_SOURCES
     "${NATIVE_SRC}/m3d_post.cpp"
     "${NATIVE_SRC}/m3d_simd.cpp"
     "${NATIVE_SRC}/m3d_compute11.cpp"
+    "${NATIVE_SRC}/m3d_lumatrace_bvh4.cpp"
     "${NATIVE_SRC}/m3d_directx11.cpp"
     "${NATIVE_SRC}/m3d_gi_bake.cpp"
     "${NATIVE_SRC}/m3d_dxr.cpp"
