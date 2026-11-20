@@ -166,10 +166,13 @@ def apply_garden_redesign(package: Path, revision: str):
          "pattern": "smooth_plaster", "resolution": 512, "channels": ["albedo", "normal", "roughness"]},
     ])
 
-    # Ten mature trees frame the outer plaza in two measured groups. The center
+    # Thirteen mature trees frame the outer plaza in measured groups. The center
     # axis, oval bench and two branches around the mound stay open and walkable.
     tree_positions = [(side * 51.0, z) for side in (-1, 1) for z in (31.0, 47.0, 97.0, 113.0)]
     tree_positions.extend([(-57.0, 71.0), (57.0, 71.0)])
+    # Restore the three edge trees present in the approved V17.600 reference:
+    # a pair at z=61 m and the west-side tree at z=85 m.
+    tree_positions.extend([(-51.0, 61.0), (51.0, 61.0), (-57.0, 85.0)])
     for n, (x, z) in enumerate(tree_positions):
         asset = "asset_tree1" if n % 2 == 0 else "asset_tree2"
         for part in (0, 1):
