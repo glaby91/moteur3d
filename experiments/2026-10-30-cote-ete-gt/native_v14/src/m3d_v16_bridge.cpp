@@ -355,6 +355,12 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
         else if(pattern=="concrete"||pattern=="plaster") {
             factor=.965f+.065f*(n-.5f)+.012f*(fine-.5f);
         }
+        else if(pattern=="smooth_plaster") {
+            // Large architectural wall faces should read as one continuous
+            // matte finish, without the repeated procedural mottling that
+            // looked like square tile panels at close range.
+            factor=.997f+.006f*(n-.5f);
+        }
         else if(pattern=="brick") {
             // Staggered bonds, dark mortar and uneven fired-clay tint.
             const float height=brickHeight(u,v);
@@ -400,7 +406,7 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
             const float b=2.f*PI*(u*2.f-v*3.f);
             normal=norm({.025f*std::cos(a)+.015f*std::cos(b),
                          .014f*std::sin(a)-.011f*std::sin(b),1.f});
-        } else if(pattern=="glass"||pattern=="metal"||pattern=="porcelain") {
+        } else if(pattern=="glass"||pattern=="metal"||pattern=="porcelain"||pattern=="smooth_plaster") {
             normal={0,0,1};
         } else if(pattern=="brick") {
             const float du=1.f/float(resolution),dv=du;
@@ -436,7 +442,8 @@ void generatePbr(Material& mat,V base,float roughness,const QString& pattern,int
             normal=norm({d,d*.55f,1.f});
         }
         nr.p[i]=rgb565({(normal.x+1)*.5f,(normal.y+1)*.5f,(normal.z+1)*.5f});
-        const float variation=pattern=="water"||pattern=="glass"?.006f:.055f;
+        const float variation=pattern=="water"||pattern=="glass"?.006f:
+                              pattern=="smooth_plaster"?.008f:.055f;
         const float r=clampf(roughness+(n-.5f)*variation,.03f,.98f);
         rr.p[i]=rgb565({r,r,r});
     }

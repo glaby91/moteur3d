@@ -1,8 +1,8 @@
 cmake_minimum_required(VERSION 3.24)
 project(CSE_WARP_V17 VERSION 17.0 LANGUAGES CXX)
-# GitHub Actions run number becomes the actual build number in both EXEs.
+# V17.600 is the product version; CI run ids are recorded separately in the package.
 # Local developer builds are explicitly numbered 0.
-set(V17_BUILD_NUMBER 0 CACHE STRING "CI run number for Windows version resource")
+set(V17_BUILD_NUMBER 0 CACHE STRING "Product build number for Windows version resource")
 if(NOT V17_BUILD_NUMBER MATCHES "^[0-9]+$")
     message(FATAL_ERROR "V17_BUILD_NUMBER must be an unsigned integer")
 endif()
@@ -429,7 +429,7 @@ if(MSVC)
     target_compile_options(moteur3d_v17_benchmark PRIVATE /O2 /EHsc /utf-8)
     target_compile_options(moteur3d_v17_benchui PRIVATE /O2 /EHsc /utf-8)
 endif()
-install(TARGETS moteur3d_v17 moteur3d_v17_benchmark moteur3d_v17_benchui moteur3d_v17_campaign
+install(TARGETS moteur3d_v17 moteur3d_v17_benchmark moteur3d_v17_campaign
     RUNTIME DESTINATION .)
 
 if(WIN32)

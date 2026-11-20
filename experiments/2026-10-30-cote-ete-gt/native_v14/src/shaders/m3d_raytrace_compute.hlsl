@@ -72,7 +72,8 @@ float3 linearToSrgb(float3 c) {
     return lerp(c*12.92f,1.055f*pow(c,1.f/2.4f)-.055f,step(.0031308f,c));
 }
 float3 encodeHdr(float3 radiance) {
-    float3 v=max(radiance,float3(0,0,0));
+    // Small midtone lift; black remains black and highlights still use ACES.
+    float3 v=max(radiance,float3(0,0,0))*1.08f;
     float3 aces=saturate((v*(2.51f*v+.03f))/(v*(2.43f*v+.59f)+.14f));
     return saturate(linearToSrgb(aces));
 }
@@ -175,7 +176,7 @@ float3 tangentSpaceNormal(GpuTriangle tri,float3 baseNormal,float3 mapped) {
     float3 tangent=normalize((e1*d2.y-e2*d1.y)/det);
     tangent=normalize(tangent-baseNormal*dot(baseNormal,tangent));
     float3 bitangent=cross(baseNormal,tangent)*((det<0.f)?-1.f:1.f);
-    return normalize(tangent*mapped.x+bitangent*mapped.y+baseNormal*mapped.z);
+    return normalize(tangent*(mapped.x*1.25f)+bitangent*(mapped.y*1.25f)+baseNormal*mapped.z);
 }
 // CPU offlinePbrShade's GGX/Smith/Schlick direct BRDF and hemispheric sky.
 // No invented GI bounce; indirectFill is zero until a validated probe exists.

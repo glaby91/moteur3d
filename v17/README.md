@@ -1,28 +1,31 @@
 # CSE WARP Beta X — V17
 
-**Base de scène : V17.493, scène БАССЕЙН restaurée. Révision logicielle : V17.523.** Cette révision conserve les fenêtres dédiées aux backends et installe une coupole vitrée basse au-dessus de la piscine. La coupole ferme ses deux pignons avec une verrière encadrée par cinq meneaux radiaux par extrémité. Une costière inox forme un raccord continu sur les quatre côtés et s’encastre sous le plan de toiture afin de rester visible contre le toit sombre. Trois caméras dédiées permettent de contrôler les raccords et l’intérieur. Les images de contrôle incluses dans le paquet sont produites par le moteur en CPU Ray Tracing PBR direct à 960 × 540. DX11 et Vulkan peuvent présenter directement dans leur HWND dédié ou passer par une image Qt. En cas d’échec direct, le choix reste visible, l’image QImage de secours est conservée et la cause ainsi que les caractéristiques du HWND sont consignées dans `Documents/CSE WARP/Diagnostics/V17.523-native-presentation.jsonl`. En exploration, les réglages forment un bandeau à droite et la fenêtre de rendu occupe la gauche ; l’agencement précédent est restauré à l’arrêt. L’audit de la scène de référence reste [l’audit master V17.493](../docs/V17_493_MASTER_AUDIT_2026-11-14.md).
+**Révision logicielle : V17.600.** La scène de référence conserve le palais Energetik, la piscine avec sa coupole vitrée basse, la fresque continue et le jardin retravaillé. La coupole ferme ses deux pignons par une verrière encadrée de cinq meneaux radiaux par extrémité ; une costière inox assure le raccord continu sur les quatre côtés. Trois caméras dédiées permettent d’en contrôler les raccords et l’intérieur. Les images de contrôle incluses dans le paquet sont produites par le moteur CPU Ray Tracing PBR direct à 960 × 540. DX11 et Vulkan peuvent présenter directement dans leur fenêtre native ou passer par une image Qt. Le chemin de présentation directe reste à valider sur le Dell HD620 ; les résultats CI WARP ne prédisent pas son comportement matériel.
 
 **V17 = architecture temps réel en construction, sans abandonner les moteurs CPU et GPU V16.**
 
-> **Historique V17-1 (ancien état)** : premier exécutable expérimental V17 — interface exploration, caméra WASD/souris, affichage continu, backend raster Direct3D11 réutilisé. Les 30/40 FPS et la qualité Call of Pripyat **ne sont pas encore validés**.
+## État de validation V17.600
+
+Le commit moteur `ceaa6a6` (V17.600) a passé la [CI Windows x64, run 44437496051](https://github.com/glaby91/moteur3d/actions/runs/44437496051) : compilation Release avec Vulkan, contrôles du paquet, validations du chargeur de scènes, rendus de contrôle WARP, audit de rayons de la fresque et suite de régression V16/V17. L’artefact Windows est produit par GitHub Actions.
+
+Cette validation porte sur la compilation, les contrôles automatisés et les chemins de rendu exécutés en CI. Les rendus DX11 concernés utilisent WARP, l’adaptateur logiciel de Microsoft. Ils ne valident pas les performances sur une carte Intel ou NVIDIA, la fluidité en mouvement sur le Dell HD620, ni le rythme d’affichage du swapchain natif. Les images sont contrôlées automatiquement pour leur présence et leur intégrité ; cela ne remplace pas une inspection visuelle.
+
+Aucun gain de performances BVH n’est établi par le seul statut « CI verte ». Pour comparer deux versions, utiliser le même ordinateur, la même scène, la même caméra, la même résolution, le même backend et les mêmes réglages ; répéter les mesures et comparer les médianes et percentiles. Séparer le temps de construction du BVH du temps de rendu. Pour DX11/Vulkan en présentation directe, le compteur CPU de soumission ne constitue pas une mesure de fin d’exécution GPU ni du temps de balayage écran. Voir [Full Benchmark](docs/FULL_BENCHMARK.md).
 
 ## Prototype V17-1 — déjà implémenté
 
 - `v17/moteur3d_v17_qt.cpp` : fenêtre V17, mode Exploration, clic gauche + souris pour regarder, ZQSD/flèches (AZERTY) pour se déplacer, Maj pour accélérer, espace/Ctrl pour monter/descendre, Échap pour arrêter.
 - `v17/CMakeLists.txt` : **réutilise directement le moteur V16 complet** (CPU ray tracing, CPU GI, D3D11 Compute, D3D11 Raster, Vulkan Raster et scènes), sans recoder de moteur.
 - Le raster DX11 est la cinquième méthode et Vulkan la sixième ; les deux utilisent la scène chargée et le cache d’ombres. L’éclairage raster reste de première génération : l’amélioration de la chaleur, du verre et du PBR est une **étape ultérieure**.
-- FPS mesurés à l'écran pendant l'exploration et durée de rendu disponible.
-- **Présentation directe expérimentale :** le raster DX11 et le raster Vulkan proposent un chemin swapchain dans des fenêtres natives distinctes, sans readback par image. Le mode Qt/QImage reste disponible. Le fonctionnement de la présentation directe, du mouvement caméra et des animations doit encore être confirmé sur le Dell HD620 ; les résultats CI WARP ne suffisent pas à valider le comportement matériel.
+- FPS mesurés à l'écran pendant l'exploration et durée de rendu disponible. Leur interprétation dépend du backend et du chemin de présentation ; voir les limites de mesure ci-dessus.
+- **Présentation directe expérimentale :** le raster DX11 et le raster Vulkan proposent un chemin swapchain dans des fenêtres natives distinctes, sans readback par image. Le mode Qt/QImage reste disponible. Le fonctionnement de la présentation directe, du mouvement caméra et des animations doit encore être confirmé sur le Dell HD620.
 - Build Windows sur GitHub Actions avec `actions/checkout@v5` et `actions/upload-artifact@v6`, tests de non-régression V16 conservés.
 
 ## Tester sur le Dell
 
-Ouvrir `moteur3d_v17.exe`, choisir le preset **Dell 1366×768**, et cliquer sur **Démarrer exploration (V17)**. Tester la caméra 02, noter la fluidité et les FPS. Comparer le backend **V17 GPU D3D11 Raster** avec le **V16 GPU D3D11 Compute** en mode image fixe, puis les modes CPU. Les chiffres Windows CI WARP ne prédisent pas le temps réel du HD620.
+Ouvrir `moteur3d_v17.exe`, choisir le preset **Dell 1366×768**, et cliquer sur **Démarrer exploration (V17)**. Tester la caméra 02, noter la fluidité et les FPS. Comparer le backend **V17 GPU D3D11 Raster** avec le **V16 GPU D3D11 Compute** en mode image fixe, puis les modes CPU. Noter le backend, la présentation directe ou Qt, la résolution, la caméra, le nombre d’échantillons et les temps de chargement/construction/rendu. Les chiffres Windows CI WARP ne prédisent pas le temps réel du HD620.
 
-
-Le document de référence, avec objectifs vérifiables, risques, conditions de validation et étapes de développement, est :
-
-**[Objectifs V17 — temps réel, DirectX 11 / OpenGL et qualité lumineuse](../docs/V17-OBJECTIFS-TEMPS-REEL-QUALITE-261110.md)**
+Le document de référence, avec objectifs vérifiables, risques, conditions de validation et étapes de développement, est : **[Objectifs V17 — temps réel, DirectX 11 / OpenGL et qualité lumineuse](../docs/V17-OBJECTIFS-TEMPS-REEL-QUALITE-261110.md)**.
 
 ## Priorités
 
@@ -31,7 +34,7 @@ Le document de référence, avec objectifs vérifiables, risques, conditions de 
 3. **Pipeline GPU hybride** : rasterisation matérielle + shaders PBR + GI ciblée, réutilisation temporelle, ombres et reflets spécialisés ; analyser d'abord DirectX 11 déjà présent, puis OpenGL/GLSL pour Qt et Linux.
 4. **CPU intégral conservé** : ray tracing + path tracing GI, ombres, verre/eau, tous les matériaux et export ; référence visuelle et calcul sans GPU.
 5. **Aucune régression V16** : conservez Full HD, QHD, 4K, scènes, assets et backend GPU Compute HLSL pour comparaisons.
-6. **Mesures sur la vraie machine** : ne pas assimiler timings WARP de CI et performances Intel HD620.
+6. **Mesures sur la vraie machine** : distinguer CI WARP, rendu hors écran, soumission CPU et temps GPU ; mesurer sur le matériel cible avant de déclarer une cible de FPS atteinte.
 
 ## Règle de développement
 

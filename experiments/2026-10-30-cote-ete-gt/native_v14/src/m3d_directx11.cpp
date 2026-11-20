@@ -126,6 +126,7 @@ struct FrameConstants {
     float materialOpacity[256][4];
     float materialDiffuse[256][4];
     float materialEmission[256][4];
+    float materialTextureDetail[256][4];
     float lightPositionRadius[256][4];
     float lightColorIntensity[256][4];
     uint32_t lightCount; float padding[3];
@@ -166,6 +167,7 @@ cbuffer Frame : register(b0) {
     float4 materialOpacity[256];
     float4 materialDiffuse[256];
     float4 materialEmission[256];
+    float4 materialTextureDetail[256];
     float4 lightPositionRadius[256];
     float4 lightColorIntensity[256];
     uint lightCount; float3 padding;
@@ -184,6 +186,7 @@ Texture2DArray<float> roughnessMap : register(t2);
 Texture2DArray<float4> normalMap : register(t3);
 Texture3D<float4> indirectProbes : register(t4);
 Texture3D<float4> indirectProbesNext : register(t5);
+Texture2DArray<float4> preservedAlbedo : register(t6);
 SamplerState wrapSampler : register(s0);
 SamplerState probeSampler : register(s1);
 struct VSIn { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; uint mat:MATERIAL; };
@@ -263,7 +266,17 @@ float4 PSMain(VSOut i):SV_TARGET {
     }
     // WRAP sampler already handles tiling. frac(uv) here broke automatic
     // derivatives at tile boundaries and forced inappropriate mip levels.
-    float3 base = albedo.Sample(wrapSampler, float3(i.uv, i.mat)).rgb;
+    float2 artworkDdx=ddx(i.uv),artworkDdy=ddy(i.uv);
+    float3 base;
+    float detailLayer=materialTextureDetail[i.mat].x;
+    if(detailLayer>=0.0) {
+        // Scene-authored preservation keeps paintings at their source tier,
+        // independent of the shared array budget used by ordinary materials.
+        base=preservedAlbedo.SampleGrad(wrapSampler,float3(i.uv,detailLayer),
+                                       artworkDdx,artworkDdy).rgb;
+    } else {
+        base=albedo.Sample(wrapSampler,float3(i.uv,i.mat)).rgb;
+    }
     float3 normal = normalize(i.n);
     const bool poolWater=materialEmission[i.mat].a < -0.5;
     // Dedicated animated-looking standing waves (static in world space) only on
@@ -293,7 +306,9 @@ float4 PSMain(VSOut i):SV_TARGET {
             float3 rawBitangent = (-dpdx * duvdy.x + dpdy * duvdx.x) / determinant;
             tangent = normalize(tangent - normal * dot(normal, tangent));
             float3 bitangent = normalize(cross(normal, tangent)) * (dot(cross(normal, tangent), rawBitangent) < 0.0 ? -1.0 : 1.0);
-            normal = normalize(tangent * detailNormal.x + bitangent * detailNormal.y + normal * detailNormal.z);
+            // V17.600: a modest tangent-space gain restores visible material relief
+            // without tessellation or changing silhouette geometry.
+            normal = normalize(tangent * (detailNormal.x * 1.25) + bitangent * (detailNormal.y * 1.25) + normal * detailNormal.z);
         }
     }
     float diffuse = saturate(dot(normal, normalize(lightDir)));
@@ -440,7 +455,7 @@ float4 PSMain(VSOut i):SV_TARGET {
         float3 positive=max(color,0.0);
         float luminance=dot(positive,float3(.2126,.7152,.0722));
         float adjusted=luminance*colorControls.y;
-        float compressed=adjusted/(1.0+.82*max(adjusted-.63,0.0));
+        float compressed=adjusted/(1.0+.70*max(adjusted-.63,0.0));
         color=positive*(compressed/max(luminance,0.000001));
     }
     if(poolWater){
@@ -865,6 +880,7 @@ public:
         cb.sky[1]=balanced?decodeSrgb(bg.y/255.f):bg.y/255.f;
         cb.sky[2]=balanced?decodeSrgb(bg.z/255.f):bg.z/255.f;
         cb.materialCount=uint32_t(std::max<size_t>(1,scene.mat.size()));
+        for(size_t m=0;m<256;m++)cb.materialTextureDetail[m][0]=-1.f;
         cb.shadowBase[0]=shadows.base.x;cb.shadowBase[1]=shadows.base.y;cb.shadowBase[2]=shadows.base.z;cb.shadowSpan=shadows.span;
         cb.shadowRight[0]=shadows.right.x;cb.shadowRight[1]=shadows.right.y;cb.shadowRight[2]=shadows.right.z;cb.shadowDist=shadows.dist;
         cb.shadowUp[0]=shadows.up.x;cb.shadowUp[1]=shadows.up.y;cb.shadowUp[2]=shadows.up.z;cb.shadowSize=float(shadows.size);
@@ -884,6 +900,8 @@ public:
         cb.colorControls[1]=exposure;
         for(size_t m=0;m<scene.mat.size()&&m<256;m++){
             const std::string& name=scene.mat[m].name;
+            if(preservedTextureLayers_[m]>=0)
+                cb.materialTextureDetail[m][0]=float(preservedTextureLayers_[m]);
             const bool carPaint=name.rfind("sports",0)==0||name=="carSilver"||name=="carBlue"||name=="carGreen"||name=="classicBody";
             const bool raptureSurface=name=="raptureStone"||name=="raptureBronze"||name=="raptureGlass";
             float r=1.f,g=1.f,b=1.f,strength=0.f;
@@ -1089,8 +1107,9 @@ public:
             context_->PSSetConstantBuffers(0,1,&cbuff);
             ID3D11ShaderResourceView* srvs[]={albedo_.Get(),shadowSrv_.Get(),
                 roughness_.Get(),normal_.Get(),hybrid?probeSrv_.Get():nullptr,
-                hybrid?(hasBakedGi_?probeNextSrv_.Get():probeSrv_.Get()):nullptr};
-            context_->PSSetShaderResources(0,6,srvs);
+                hybrid?(hasBakedGi_?probeNextSrv_.Get():probeSrv_.Get()):nullptr,
+                preservedAlbedo_?preservedAlbedo_.Get():albedo_.Get()};
+            context_->PSSetShaderResources(0,7,srvs);
             ID3D11SamplerState* samplers[]={sampler_.Get(),probeSampler_.Get()};
             context_->PSSetSamplers(0,2,samplers);
         
@@ -1837,6 +1856,7 @@ private:
         // An edited scene may retain the same std::vector address: revision
         // tracking is required to refresh its GPU PBR/mesh resources.
         vertices_.Reset();transparentVertices_.Reset();albedo_.Reset();
+        preservedAlbedo_.Reset();preservedTextureLayers_.fill(-1);
         probeSrv_.Reset();probeTexture_.Reset();
         probeNextSrv_.Reset();probeNextTexture_.Reset();
         hasBakedGi_=false;bakedGi_=gibake::Table{};
@@ -2177,6 +2197,82 @@ private:
         if(FAILED(device_->CreateTexture2D(&td,roughSub.data(),&roughTexture))){error=L"Chargement des rugosités dans DirectX 11 impossible.";return false;}
         sv.Format=td.Format;
         if(FAILED(device_->CreateShaderResourceView(roughTexture.Get(),&sv,&roughness_))){error=L"Création de la table de rugosités DirectX 11 impossible.";return false;}
+        // Keep scene-authored paintings in a small independent texture array.
+        // The ordinary atlas can drop to 256px on crowded scenes; this tier
+        // preserves requested mural detail without enlarging every material.
+        std::vector<uint32_t> preservedIds;
+        UINT preservedSize=0;
+        for(UINT m=0;m<scene.mat.size()&&m<256;m++){
+            const Material& material=scene.mat[m];
+            if(!material.preserveTextureDetail)continue;
+            if(material.colorMip.empty()||
+               material.colorMip.front().size<material.minimumTextureResolution){
+                error=L"Protected texture source resolution is unavailable.";return false;
+            }
+            preservedTextureLayers_[m]=int32_t(preservedIds.size());
+            preservedIds.push_back(m);
+            preservedSize=std::max(preservedSize,material.colorMip.front().size);
+        }
+        preservedAlbedo_.Reset();
+        if(!preservedIds.empty()){
+            if(preservedSize>2048){error=L"Protected texture exceeds 2048px.";return false;}
+            uint64_t preservedTexels=0;
+            for(UINT level=preservedSize;level>0;level>>=1)
+                preservedTexels+=uint64_t(level)*uint64_t(level);
+            const uint64_t preservedBytes=preservedTexels*preservedIds.size()*4ull;
+            constexpr uint64_t kMaxPreservedAlbedoBytes=256ull*1024ull*1024ull;
+            if(preservedBytes>kMaxPreservedAlbedoBytes){
+                error=L"Protected textures exceed the 256 MiB GPU budget.";return false;
+            }
+            UINT preservedMips=1;
+            for(UINT level=preservedSize;level>1;level>>=1)++preservedMips;
+            std::vector<std::vector<uint32_t>> highPixels(preservedIds.size()*preservedMips);
+            std::vector<D3D11_SUBRESOURCE_DATA> highSub(preservedIds.size()*preservedMips);
+            for(size_t layer=0;layer<preservedIds.size();layer++){
+                const Material& material=scene.mat[preservedIds[layer]];
+                for(UINT level=0;level<preservedMips;level++){
+                    const UINT targetSize=std::max(1u,preservedSize>>level);
+                    const ColorLevel& source=material.colorMip[
+                        std::min<size_t>(level,material.colorMip.size()-1)];
+                    if(!source.size||source.p.size()<size_t(source.size)*source.size){
+                        error=L"Invalid protected texture color mip.";return false;
+                    }
+                    const size_t atLayer=layer*preservedMips+level;
+                    auto& pixels=highPixels[atLayer];
+                    pixels.resize(size_t(targetSize)*targetSize);
+                    for(UINT y=0;y<targetSize;y++)for(UINT x=0;x<targetSize;x++){
+                        const UINT sx=std::min(source.size-1,UINT(uint64_t(x)*source.size/targetSize));
+                        const UINT sy=std::min(source.size-1,UINT(uint64_t(y)*source.size/targetSize));
+                        const uint32_t color=source.p[size_t(sy)*source.size+sx];
+                        const uint32_t r=(color>>16)&255,g=(color>>8)&255,b=color&255;
+                        pixels[size_t(y)*targetSize+x]=0xff000000u|(b<<16)|(g<<8)|r;
+                    }
+                    highSub[atLayer].pSysMem=pixels.data();
+                    highSub[atLayer].SysMemPitch=targetSize*4;
+                    highSub[atLayer].SysMemSlicePitch=targetSize*targetSize*4;
+                }
+            }
+            D3D11_TEXTURE2D_DESC highDesc{};
+            highDesc.Width=preservedSize;highDesc.Height=preservedSize;
+            highDesc.MipLevels=preservedMips;highDesc.ArraySize=UINT(preservedIds.size());
+            highDesc.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+            highDesc.SampleDesc.Count=1;highDesc.Usage=D3D11_USAGE_IMMUTABLE;
+            highDesc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+            ComPtr<ID3D11Texture2D> highTexture;
+            if(FAILED(device_->CreateTexture2D(&highDesc,highSub.data(),&highTexture))){
+                error=L"Failed to create protected artwork texture array.";return false;
+            }
+            D3D11_SHADER_RESOURCE_VIEW_DESC highView{};
+            highView.Format=highDesc.Format;highView.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+            highView.Texture2DArray.MipLevels=preservedMips;
+            highView.Texture2DArray.ArraySize=UINT(preservedIds.size());
+            if(FAILED(device_->CreateShaderResourceView(highTexture.Get(),&highView,&preservedAlbedo_))){
+                error=L"Failed to create protected artwork shader view.";return false;
+            }
+            std::clog<<"[CSE WARP D3D11] Protected artwork tier: "<<preservedIds.size()
+                     <<" materials, "<<preservedSize<<"x"<<preservedSize
+                     <<", "<<preservedBytes/(1024*1024)<<" MiB\n";
+        }
         sceneKey_=scene.obj.data();objectCount_=scene.obj.size();
         sceneIdentity_=scene.gpuCacheIdentity;sceneRevision_=scene.gpuCacheRevision;
         boxInstancingEnabled_=useBoxInstancing;
@@ -2363,7 +2459,10 @@ private:
     std::array<UINT,3> foliageVertexCounts_{{0,0,0}};
     std::vector<GpuEllipseInstance> foliage_;
     UINT foliageInstanceCount_=0;
-    ComPtr<ID3D11RasterizerState> raster_,scissorRaster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_,skyDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_,probeSampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_,probeSrv_;ComPtr<ID3D11Texture3D> probeTexture_,probeNextTexture_;
+    ComPtr<ID3D11RasterizerState> raster_,scissorRaster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_,skyDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_,probeSampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_,probeSrv_,preservedAlbedo_;ComPtr<ID3D11Texture3D> probeTexture_,probeNextTexture_;
+    std::array<int32_t,256> preservedTextureLayers_=[](){
+        std::array<int32_t,256> layers{};layers.fill(-1);return layers;
+    }();
     ComPtr<ID3D11ShaderResourceView> probeNextSrv_;
     gibake::Table bakedGi_{};bool hasBakedGi_=false;
     uint64_t loadedGiFileRevision_=0;
