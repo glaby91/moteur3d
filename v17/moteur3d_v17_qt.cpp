@@ -481,8 +481,8 @@ public:
                     nativeDirectFailed_[size_t(failedBackend)]=true;
                     nativeDirectFailureReason_[size_t(failedBackend)]=outcome.nativeFailure;
                 }
-                const QString backend=failedBackend==5
-                    ?QStringLiteral("Vulkan"):QStringLiteral("DX11");
+                const QString backend=failedBackend==5?QStringLiteral("Vulkan"):
+                    (failedBackend==6?QStringLiteral("LumaTrace"):QStringLiteral("DX11"));
                 const QString message=QStringLiteral(
                     "%1 direct a échoué : %2\n%3")
                     .arg(backend,outcome.nativeFailure,outcome.nativeWindowDetails);
@@ -556,8 +556,8 @@ public:
                 completedBackend>=0&&completedBackend<int(nativeDirectFailed_.size())&&
                 nativeDirectFailed_[size_t(completedBackend)];
             if(nativePresentationFailed||directFallbackActive){
-                const QString backend=completedBackend==5
-                    ?QStringLiteral("Vulkan"):QStringLiteral("DX11");
+                const QString backend=completedBackend==5?QStringLiteral("Vulkan"):
+                    (completedBackend==6?QStringLiteral("LumaTrace"):QStringLiteral("DX11"));
                 const QString detail=completedBackend>=0&&
                         completedBackend<int(nativeDirectFailureReason_.size())&&
                         !nativeDirectFailureReason_[size_t(completedBackend)].isEmpty()
@@ -604,13 +604,13 @@ public:
                 if(!view||!view->isWindow())allWindows=false;
                 else handles.insert(quintptr(view->winId()));
             }
-            const bool dx11Ready=backendBox_ && backendBox_->count()==6 &&
+            const bool dx11Ready=backendBox_ && backendBox_->count()==7 &&
                 backendWindows_[4] && backendWindows_[4]->isWindow() &&
                 backendBox_->currentIndex()==4 && directDisplayBox_->isChecked() &&
                 backendBox_->itemText(5).contains(QStringLiteral("Vulkan")) &&
                 (backendBox_->model()->flags(backendBox_->model()->index(5,0)) &
                     Qt::ItemIsEnabled) &&
-                quick && quick->count()==6 &&
+                quick && quick->count()==7 &&
                 quick->itemText(5).contains(QStringLiteral("Vulkan")) &&
                 canvas_==backendWindows_[4] && canvas_->testAttribute(Qt::WA_NativeWindow);
             backendBox_->setCurrentIndex(5);
@@ -620,8 +620,8 @@ public:
                 backendWindows_[5]->isVisible() && !backendWindows_[4]->isVisible();
             backendBox_->setCurrentIndex(4);
             selectBackendOutputWindow();
-            const bool ok=dx11Ready&&vulkanVisiblePath&&allWindows&&handles.size()==6;
-            std::fprintf(stderr,"V17 BACKEND WINDOWS: %s, six unique top-level HWNDs\n",
+            const bool ok=dx11Ready&&vulkanVisiblePath&&allWindows&&handles.size()==7;
+            std::fprintf(stderr,"V17 BACKEND WINDOWS: %s, seven unique top-level HWNDs\n",
                 ok?"PASS":"FAIL");
             QCoreApplication::exit(ok?0:46);
 #else
@@ -878,11 +878,11 @@ private:
     QSlider* radioVolumeSlider_=nullptr;
 
     ImageView* canvas_=nullptr;
-    std::array<ImageView*,6> backendWindows_{};
-    std::array<QString,6> backendLastRenderer_{};
-    std::array<QString,6> backendLastRequest_{};
-    std::array<bool,6> nativeDirectFailed_{};
-    std::array<QString,6> nativeDirectFailureReason_{};
+    std::array<ImageView*,7> backendWindows_{};
+    std::array<QString,7> backendLastRenderer_{};
+    std::array<QString,7> backendLastRequest_{};
+    std::array<bool,7> nativeDirectFailed_{};
+    std::array<QString,7> nativeDirectFailureReason_{};
     int outputBackendIndex_=-1;
     int activeRenderBackend_=-1;
     bool activeRenderDirect_=false;
@@ -1375,7 +1375,7 @@ private:
     static bool supportsExplorationBackend(int index){
         // HLSL compute is available for slower full-quality camera exploration
         // through the existing QImage output. V17 raster remains the fast path.
-        return index==1||index==4||index==5;
+        return index==1||index==4||index==5||index==6;
     }
 protected:
     void closeEvent(QCloseEvent* event) override {
@@ -1540,6 +1540,7 @@ private:
     QSlider* azimuth_=nullptr;
     QDoubleSpinBox* sunHour_=nullptr;
     QCheckBox* cloudAnimationBox_=nullptr;
+    bool lumaTraceCloudDefaultApplied_=false;
     QCheckBox* dayNightCycleBox_=nullptr;
     QCheckBox* hybridLightBox_=nullptr;
     QCheckBox* filmicToneBox_=nullptr;
@@ -1637,7 +1638,8 @@ private:
         settings.setValue(QStringLiteral("Raster/Culling"),q.frustumCulling);
         settings.setValue(QStringLiteral("Raster/DynamicLOD"),q.dynamicLod);
         if(runtime_&&backendBox_&&
-           (backendBox_->currentIndex()==4||backendBox_->currentIndex()==5))requestRender();
+           (backendBox_->currentIndex()==4||backendBox_->currentIndex()==5||
+            backendBox_->currentIndex()==6))requestRender();
     }
     void stopRadio(){
         radioAudio_.stop();
@@ -2122,13 +2124,13 @@ private:
         cameraBox_=new QComboBox;
         backendBox_=new QComboBox;
         directDisplayBox_=new QCheckBox(QStringLiteral(
-            "Affichage GPU direct natif (DX11 / Vulkan)"));
+            "Affichage GPU direct natif (DX11 / Vulkan / LumaTrace)"));
 #ifdef _WIN32
         // Vulkan direct presentation uses an engine-owned Win32 surface on the
         // private top-level HWND, isolated from every other renderer window.
         directDisplayBox_->setCheckState(Qt::Checked);
         directDisplayBox_->setToolTip(QStringLiteral(
-            "DX11 et Vulkan présentent dans leur HWND dédié. Décocher pour afficher "
+            "DX11, Vulkan et LumaTrace présentent dans leur HWND dédié. Décocher pour afficher "
             "le rendu de ce backend via QImage."));
 #else
         directDisplayBox_->setChecked(false);
@@ -2140,12 +2142,14 @@ private:
             QStringLiteral("CPU Éclairage global — 2 rebonds (qualité réglable)"),
             QStringLiteral("CPU Éclairage global — 4 rebonds (qualité réglable)"),
             QStringLiteral("V17 GPU D3D11 Raster — exploration rapide"),
-            QStringLiteral("V17 Vulkan Raster — expérimental (GPU matériel)")
+            QStringLiteral("V17 Vulkan Raster — expérimental (GPU matériel)"),
+            QStringLiteral("LumaTrace BVH4 — test (éclairage GPU)")
         });
 #ifndef _WIN32
         backendBox_->setItemData(1,0,Qt::UserRole-1);
         backendBox_->setItemData(4,0,Qt::UserRole-1);
         backendBox_->setItemData(5,0,Qt::UserRole-1);
+        backendBox_->setItemData(6,0,Qt::UserRole-1);
 #endif
 #if !M3D_V17_VULKAN_ENABLED
         backendBox_->setItemData(5,0,Qt::UserRole-1);
@@ -2156,7 +2160,7 @@ private:
         // Vulkan and all CPU/compute options remain selectable.
         backendBox_->setCurrentIndex(4);
 #endif
-        // Keep the backend choice visible at 1366px: six long camera names
+        // Keep the backend choice visible at 1366px: renderer names
         // previously consumed the entire top toolbar and hid the renderer.
         auto* fastBackend=new QComboBox(camerasToolbar);
         fastBackend->setObjectName(QStringLiteral("v17QuickRenderer"));
@@ -2165,7 +2169,8 @@ private:
         for(int i=0;i<backendBox_->count();++i){
             fastBackend->addItem(i==4?QStringLiteral("DirectX 11 Raster"):
                 (i==5?QStringLiteral("Vulkan Raster"):
-                backendBox_->itemText(i)));
+                (i==6?QStringLiteral("LumaTrace BVH4"):
+                backendBox_->itemText(i))));
             fastBackend->setItemData(i,backendBox_->itemData(i,Qt::UserRole-1),
                                     Qt::UserRole-1);
             fastBackend->setItemData(i,backendBox_->itemText(i),Qt::ToolTipRole);
@@ -2530,13 +2535,19 @@ private:
         });
         connect(backendBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int index){
             if(exploring_ && !supportsExplorationBackend(index))stopExploration();
+            if(index==6&&!lumaTraceCloudDefaultApplied_){
+                lumaTraceCloudDefaultApplied_=true;
+                cloudAnimationBox_->setChecked(false);
+            }
             const bool gi=index==2||index==3;
-            directDisplayBox_->setEnabled(index==4 || (index==5&&vulkanDirectAvailable()));
-            directDisplayBox_->setToolTip(index==5
+            directDisplayBox_->setEnabled(index==4||index==6||(index==5&&vulkanDirectAvailable()));
+            directDisplayBox_->setToolTip(index==6
+                ?QStringLiteral("LumaTrace : présentation DX11 native. Les nuages sont coupés par défaut ; réactivez la case Nuages pour comparer.")
+                :(index==5
                 ?(vulkanDirectAvailable()
                     ?QStringLiteral("Vulkan : swapchain Win32 dans sa fenêtre dédiée.")
                     :QStringLiteral("Vulkan Win32 WSI indisponible dans cette compilation."))
-                :QStringLiteral("DX11 : swapchain dans sa fenêtre dédiée. Décochez pour afficher l’image Qt."));
+                :QStringLiteral("DX11 : swapchain dans sa fenêtre dédiée. Décochez pour afficher l’image Qt.")));
             directSamples_->setEnabled(index==0);
             denoiseDirect_->setEnabled(index==0);
             giSamples_->setEnabled(gi);
@@ -2572,28 +2583,28 @@ private:
             m3d::setRasterHybridLightingEnabled(enabled);
             QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
             settings.setValue(QStringLiteral("Raster/HybridLighting"),enabled);
-            if(backendBox_&&backendBox_->currentIndex()==4)requestRender();
+            if(backendBox_&&(backendBox_->currentIndex()==4||backendBox_->currentIndex()==6))requestRender();
         });
         connect(colorEnergyBox_,&QCheckBox::toggled,this,[this](bool enabled){
             m3d::setRasterColorEnergyBalanceEnabled(enabled);
             colorExposureBox_->setEnabled(enabled);
             QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
             settings.setValue(QStringLiteral("Raster/ColorEnergyBalance"),enabled);
-            if(backendBox_&&backendBox_->currentIndex()==4)requestRender();
+            if(backendBox_&&(backendBox_->currentIndex()==4||backendBox_->currentIndex()==6))requestRender();
         });
         connect(colorExposureBox_,qOverload<double>(&QDoubleSpinBox::valueChanged),
                 this,[this](double value){
             m3d::setRasterColorExposure(float(value));
             QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
             settings.setValue(QStringLiteral("Raster/ColorExposure"),value);
-            if(backendBox_&&backendBox_->currentIndex()==4&&colorEnergyBox_->isChecked())
+            if(backendBox_&&(backendBox_->currentIndex()==4||backendBox_->currentIndex()==6)&&colorEnergyBox_->isChecked())
                 requestRender();
         });
         connect(filmicToneBox_,&QCheckBox::toggled,this,[this](bool enabled){
             m3d::setRasterFilmicTonemapEnabled(enabled);
             QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
             settings.setValue(QStringLiteral("Raster/FilmicTonemap"),enabled);
-            if(backendBox_&&backendBox_->currentIndex()==4)requestRender();
+            if(backendBox_&&(backendBox_->currentIndex()==4||backendBox_->currentIndex()==6))requestRender();
         });
         // DX11/QImage: lightweight, independent 30 Hz sky compositor.
         // Native Vulkan has no QImage at all: present a new GPU frame when
@@ -2616,7 +2627,8 @@ private:
                 return;
             }
             if(!hasRenderedPose_||lastImage_.isNull()||
-               (backendBox_->currentIndex()!=4 && backendBox_->currentIndex()!=5))return;
+               (backendBox_->currentIndex()!=4 && backendBox_->currentIndex()!=5 &&
+                backendBox_->currentIndex()!=6))return;
             if(!cloudAnimationBox_->isChecked()&&!dayNightCycleBox_->isChecked()&&
                canvas_->hasSkyFrame())return;
             const auto camera=v16::makeCamera(lastRenderedPose_,
@@ -2633,9 +2645,13 @@ private:
         // Weather animation deliberately faster than the old almost-static sky.
         m3d::setRasterCloudTimeScale(24.f);
         connect(cloudAnimationBox_,&QCheckBox::toggled,this,[this](bool enabled){
+            m3d::setRasterCloudsEnabled(enabled);
             m3d::setRasterCloudTimeScale(!enabled?0.f:
                 (dayNightCycleBox_->isChecked()?240.f:24.f));
             canvas_->invalidateSky();
+            if(backendBox_&&(backendBox_->currentIndex()==4||
+                             backendBox_->currentIndex()==5||
+                             backendBox_->currentIndex()==6))requestRender();
         });
         dayNightTimer_.setInterval(1500); // Update simulated time without queuing a render every tick
         connect(&dayNightTimer_,&QTimer::timeout,this,[this]{
@@ -2662,7 +2678,7 @@ private:
             if(!enabled&&runtime_){
                 {std::lock_guard<std::mutex> lock(cpuShadows_->mutex);cpuShadows_->hour=-1.f;}
                 const int backend=backendBox_?backendBox_->currentIndex():-1;
-                if(backend==4||backend==5)requestRender();
+                if(backend==4||backend==5||backend==6)requestRender();
             }
         });
         connect(sunHour_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double hour){
@@ -2682,7 +2698,7 @@ private:
             // image; queuing those on every solar tick looks like a frozen UI.
             if(applyingDayNightTick_){
                 const int backend=backendBox_?backendBox_->currentIndex():-1;
-                if(backend!=4&&backend!=5)return;
+                if(backend!=4&&backend!=5&&backend!=6)return;
                 const qint64 now=dayNightClock_.elapsed();
                 if(watcher_.isRunning()||now-lastDayNightRenderMs_<5000)return;
                 lastDayNightRenderMs_=now;
@@ -3003,7 +3019,7 @@ private:
         // ImageView HWND; DXGI and Vulkan never share a target window.
         if(!backendBox_||!directDisplayBox_||!directDisplayBox_->isChecked())return false;
         const int index=backendBox_->currentIndex();
-        return (index==4||(index==5&&vulkanDirectAvailable()))&&
+        return (index==4||index==6||(index==5&&vulkanDirectAvailable()))&&
                !nativeDirectFailed_[size_t(index)];
 #else
         return false;
@@ -3175,13 +3191,14 @@ private:
         QString name=backendBox_->currentText();
         if(index==4)name=QStringLiteral("V17 D3D11 Raster");
         else if(index==5)name=QStringLiteral("V17 Vulkan Raster");
+        else if(index==6)name=QStringLiteral("V17 LumaTrace BVH4");
         QSize requestedSize=qualityBox_?qualityBox_->currentData().toSize():QSize{};
         if(!requestedSize.isValid()||requestedSize.isEmpty()){
             requestedSize=canvas_?canvas_->size().boundedTo(QSize(1600,900)):QSize(1000,680);
             requestedSize.setWidth(std::max(64,requestedSize.width()));
             requestedSize.setHeight(std::max(64,requestedSize.height()));
         }
-        const bool direct=(index==4||index==5)&&directDisplayBox_&&directDisplayBox_->isChecked();
+        const bool direct=(index==4||index==5||index==6)&&directDisplayBox_&&directDisplayBox_->isChecked();
         if(direct&&canvas_){
             const qreal dpr=canvas_->devicePixelRatioF();
             requestedSize=QSize(std::max(320,int(canvas_->width()*dpr)),
@@ -3400,8 +3417,8 @@ private:
                         nativeDirectFailureReason_[size_t(failedBackend)]=
                             QStringLiteral("La fenêtre n’a pas fourni un HWND visible aux dimensions requises.");
                     }
-                    const QString backend=failedBackend==5
-                        ?QStringLiteral("Vulkan"):QStringLiteral("DX11");
+                    const QString backend=failedBackend==5?QStringLiteral("Vulkan"):
+                        (failedBackend==6?QStringLiteral("LumaTrace"):QStringLiteral("DX11"));
                     const QString windowDetails=describeNativeWindow(
                         quintptr(canvas_->winId()),target,canvas_->devicePixelRatioF());
                     if(failedBackend>=0&&failedBackend<int(nativeDirectFailureReason_.size()))
@@ -3486,9 +3503,10 @@ private:
         const qreal nativeDpr=directPresent&&outputView?outputView->devicePixelRatioF():1.0;
         const QString nativeWindowDetails=directPresent
             ?describeNativeWindow(nativeHandle,QSize(w,h),nativeDpr):QString{};
-        const bool wantGpu=backend==1||backend==4||backend==5;
-        const bool raster=backend==4||backend==5;
+        const bool wantGpu=backend==1||backend==4||backend==5||backend==6;
+        const bool raster=backend==4||backend==5||backend==6;
         const bool vulkan=backend==5;
+        const bool lumaTrace=backend==6;
         void* sharedVulkanInstance=nullptr;
         uintptr_t sharedVulkanSurface=0;
 #if defined(_WIN32) && M3D_V17_VULKAN_ENABLED
@@ -3518,7 +3536,7 @@ private:
         }
         const auto shadowCache=cpuShadows_;
         watcher_.setFuture(QtConcurrent::run(&renderPool_,[this,serial,token,snapshot,preset,w,h,wantGpu,
-            globalIllumination,raster,vulkan,directPresent,nativeHandle,sharedVulkanInstance,
+            globalIllumination,raster,vulkan,lumaTrace,directPresent,nativeHandle,sharedVulkanInstance,
             sharedVulkanSurface,edgeAA,sampleCount,maxBounces,progressive,denoise,outputView,requestedBackend,
             nativeWindowDetails,
             denoiseDirect,shadowCache,renderHour,shadowHour,requestStamp]{
@@ -3583,7 +3601,36 @@ private:
                             shadowCache->shadow=shadow;
                         }
                     }
-                    if(vulkan){
+                    if(lumaTrace){
+                        releaseVulkanDirectForCurrentThread();
+                        releaseVulkanPreviewForCurrentThread();
+                        if(!snapshot->lumaTraceBvhError.isEmpty()){
+                            reason=snapshot->lumaTraceBvhError.toStdWString();
+                        }else if(snapshot->lumaTraceBvh4.nodes.empty()){
+                            reason=L"Le BVH4 LumaTrace n’a pas été construit pour cette scène.";
+                        }else if(directPresent){
+                            ok=renderLumaTraceNative(snapshot->renderScene,snapshot->lumaTraceBvh4,
+                                *shadow,camera,w,h,reinterpret_cast<void*>(nativeHandle),stats,reason);
+                            if(!ok){
+                                const std::wstring nativeReason=reason;
+                                result.nativeFailure=QString::fromStdWString(nativeReason);
+                                releaseDirectX11NativeForCurrentThread();
+                                reason.clear();
+                                ok=renderLumaTracePreview(snapshot->renderScene,snapshot->lumaTraceBvh4,
+                                    *shadow,camera,w,h,pixels,stats,reason);
+                                result.nativeFallback=ok;
+                                if(!ok){
+                                    const std::wstring previewReason=reason;
+                                    reason=L"LumaTrace DXGI natif en échec : "+nativeReason+
+                                           L" ; aperçu LumaTrace également en échec : "+previewReason;
+                                }
+                            }
+                        }else{
+                            releaseDirectX11NativeForCurrentThread();
+                            ok=renderLumaTracePreview(snapshot->renderScene,snapshot->lumaTraceBvh4,
+                                *shadow,camera,w,h,pixels,stats,reason);
+                        }
+                    }else if(vulkan){
                         releaseDirectX11NativeForCurrentThread(); // DXGI belongs to a different backend HWND.
                         // Keep one Vulkan device/resource set resident for the selected path.
                         if(directPresent)releaseVulkanPreviewForCurrentThread();
@@ -3639,14 +3686,18 @@ private:
                     }
                     result.directPresented=ok&&directPresent&&!result.nativeFallback;
                     if(ok){
-                        result.renderer=vulkan
+                        result.renderer=lumaTrace
+                            ?(result.directPresented
+                                ?QStringLiteral("V17 LumaTrace BVH4 — Direct GPU (swapchain)")
+                                :QStringLiteral("V17 LumaTrace BVH4 — affichage Qt (QImage)"))
+                            :vulkan
                             ?(result.directPresented
                                 ?QStringLiteral("V17 Vulkan Raster — Direct GPU (swapchain)")
                                 :QStringLiteral("V17 Vulkan Raster — affichage Qt (QImage)"))
                             :(result.directPresented
                                 ?QStringLiteral("V17 D3D11 Raster — Direct GPU (swapchain)")
                                 :QStringLiteral("V17 D3D11 Raster — affichage Qt (QImage)"));
-                        if(!vulkan && rasterHybridLightingEnabled())
+                        if(!vulkan&&!lumaTrace && rasterHybridLightingEnabled())
                             result.renderer+=rasterGiCacheLoaded()
                               ?QStringLiteral(" — GI transport pré-calculée")
                               :QStringLiteral(" — sondes approximatives (sans table GI)");
@@ -3662,10 +3713,12 @@ private:
                     result.error=QStringLiteral(
                         "Échec du rendu GPU %1 : %2. "
                         "Aucun basculement automatique vers le CPU.")
-                        .arg(vulkan?QStringLiteral("Vulkan"):QStringLiteral("DirectX11"))
+                        .arg(lumaTrace?QStringLiteral("LumaTrace BVH4"):
+                             (vulkan?QStringLiteral("Vulkan"):QStringLiteral("DirectX11")))
                         .arg(QString::fromStdWString(reason));
-                    result.renderer=vulkan?QStringLiteral("V17 Vulkan — erreur")
-                                            :QStringLiteral("V17 GPU D3D11 — erreur");
+                    result.renderer=lumaTrace?QStringLiteral("V17 LumaTrace BVH4 — erreur"):
+                        (vulkan?QStringLiteral("V17 Vulkan — erreur")
+                               :QStringLiteral("V17 GPU D3D11 — erreur"));
                     return result;
                 }
             }

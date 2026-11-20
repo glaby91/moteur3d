@@ -19,6 +19,7 @@
 #include <vector>
 #include "src/m3d_physics.h"
 namespace m3d {
+struct LumaTraceBvh4;
 constexpr float PI=3.14159265358979323846f, INF=std::numeric_limits<float>::infinity();
 struct V { float x=0,y=0,z=0; V operator+(V b)const{return{x+b.x,y+b.y,z+b.z};} V operator-(V b)const{return{x-b.x,y-b.y,z-b.z};} V operator*(float s)const{return{x*s,y*s,z*s};} V operator/(float s)const{return{x/s,y/s,z/s};} };
 inline float dot(V a,V b){return a.x*b.x+a.y*b.y+a.z*b.z;} inline V cross(V a,V b){return{a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};} inline float length(V a){return std::sqrt(dot(a,a));} inline V norm(V a){float l=length(a);return l>1e-20f?a/l:V{0,1,0};} inline float clampf(float x,float a,float b){return std::max(a,std::min(b,x));}
@@ -130,6 +131,12 @@ bool renderDirectX11Preview(const Scene& s,const ShadowMap& sm,const Camera& cam
 // the same persistent renderer thread; desktop Qt owns the HWND lifetime.
 bool renderDirectX11Native(const Scene& s,const ShadowMap& sm,const Camera& cam,
     int w,int h,void* hwnd,Stats& stats,std::wstring& error);
+bool renderLumaTracePreview(const Scene& s,const LumaTraceBvh4& bvh4,
+    const ShadowMap& sm,const Camera& cam,int w,int h,
+    std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
+bool renderLumaTraceNative(const Scene& s,const LumaTraceBvh4& bvh4,
+    const ShadowMap& sm,const Camera& cam,int w,int h,void* hwnd,
+    Stats& stats,std::wstring& error);
 void releaseDirectX11NativeForCurrentThread();
 // Experimental Vulkan 1.0 Raster GPU backend; offscreen ARGB32 preview, shared Scene/Camera API.
 bool renderVulkanPreview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
@@ -183,6 +190,7 @@ void setRasterPeripheralMultiresOverride(int mode);
 // GUI animation scale: 0=frozen, 24=normal sky, 240=accelerated 24h cycle.
 // Headless benchmarks retain 1 for deterministic pixel parity.
 void setRasterCloudTimeScale(float scale);
+void setRasterCloudsEnabled(bool enabled);
 
 
 // Experimental pipelined D3D11 readback. Enqueue issues an ordered frame render
