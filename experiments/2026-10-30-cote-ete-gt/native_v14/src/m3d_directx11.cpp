@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 41077)
-Total output lines: 2723
-
 #include "m3d_engine.h"
 #include "m3d_gi_bake.h"
 #include "m3d_lumatrace_bvh4.h"
@@ -1459,7 +1456,92 @@ public:
             context_->ResolveSubresource(resolve_.Get(),0,target_.Get(),0,DXGI_FORMAT_R8G8B8A8_UNORM);
             context_->CopyResource(slot.staging.Get(),resolve_.Get());
         }else if(legacyReadback&&std::strcmp(legacyReadback,"1")==0){
-            context_->CopyRes…1077 tokens truncated…d::milli>(finished-slot.cpuStarted).count();
+            context_->CopyResource(resolve_.Get(),target_.Get());
+            context_->CopyResource(slot.staging.Get(),resolve_.Get());
+        }else{
+            context_->CopyResource(slot.staging.Get(),target_.Get());
+        }
+        }
+        if(slot.queryReady){
+            context_->End(slot.afterCopy.Get());
+            context_->End(slot.disjoint.Get());
+        }
+        slot.submitted={};
+        slot.submitted.gpu=true;slot.submitted.threads=0;
+        slot.submitted.readbackBufferCount=depth;
+        slot.submitted.gpuDrawCalls=drawCalls;
+        slot.submitted.gpuBoxInstances=submittedBoxInstances;
+        slot.submitted.gpuEllipseInstances=submittedEllipseInstances;
+        slot.submitted.gpuFoliageInstances=submittedFoliageInstances;
+        slot.submitted.tests=submittedVertices/3+uint64_t(submittedBoxInstances)*12
+            +submittedEllipseTriangles+submittedFoliageTriangles+transparent_.size();
+        slot.copyQueued=Clock::now();
+        slot.submitted.cpuSubmitMs=std::chrono::duration<double,std::milli>(
+            slot.copyQueued-started).count();
+        pending_.push_back(slotIndex);
+        lastSubmissionQualityBits_=qualityBits;
+        lastSubmissionHybrid_=hybrid;
+        lastSubmissionTone_=tone;
+        lastSubmissionBalanced_=balanced;
+        lastSubmissionExposure_=exposure;
+        lastSubmissionMultires_=multires;
+        nextReadbackSlot_=(slotIndex+1u)%readbackDepth_;
+        return true;
+    }
+    bool receive(std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error){
+        if(pending_.empty()){error=L"Aucune image GPU en attente.";return false;}
+        ReadbackSlot& slot=readbackSlots_[pending_.front()];
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        const auto mapStarted=Clock::now();
+        const HRESULT hr=context_->Map(slot.staging.Get(),0,D3D11_MAP_READ,0,&mapped);
+        if(FAILED(hr)){error=L"Lecture différée DirectX 11 impossible.";return false;}
+        const auto mapDone=Clock::now();
+        pixels.resize(size_t(slot.width)*size_t(slot.height));
+        const char* disableFastSwizzle=std::getenv("M3D_V17_DISABLE_FAST_SWIZZLE");
+        const bool fastSwizzle=!(disableFastSwizzle&&std::strcmp(disableFastSwizzle,"1")==0);
+        const char* skyCompositor=std::getenv("M3D_V17_SPLIT_SKY");
+        const bool preserveAlpha=skyCompositor&&std::strcmp(skyCompositor,"1")==0;
+        auto packPixel=[preserveAlpha](uint32_t rgba)->uint32_t {
+            uint32_t r=rgba&255u,g=(rgba>>8)&255u,b=(rgba>>16)&255u;
+            if(!preserveAlpha)return 0xff000000u|(r<<16)|(g<<8)|b;
+            const uint32_t a=(rgba>>24)&255u;
+            if(a==0)return 0;
+            if(a<255){
+                // GPU transparency was blended over transparent black.
+                // Convert the premultiplied color to straight ARGB32 for Qt.
+                r=std::min(255u,(r*255u+a/2u)/a);
+                g=std::min(255u,(g*255u+a/2u)/a);
+                b=std::min(255u,(b*255u+a/2u)/a);
+            }
+            return (a<<24)|(r<<16)|(g<<8)|b;
+        };
+        for(int y=0;y<slot.height;++y){
+            const uint8_t* row=static_cast<const uint8_t*>(mapped.pData)
+                +size_t(y)*mapped.RowPitch;
+            uint32_t* dest=pixels.data()+size_t(y)*slot.width;
+            if(fastSwizzle){
+                // Windows x64: R8G8B8A8_UNORM is a little-endian DWORD
+                // 0xAABBGGRR. QImage::Format_ARGB32 expects 0xFFRRGGBB.
+                // One aligned 32-bit load replaces three byte loads.
+                const uint32_t* src=reinterpret_cast<const uint32_t*>(row);
+                for(int x=0;x<slot.width;++x){
+                    const uint32_t rgba=src[x];
+                    dest[x]=packPixel(rgba);
+                }
+            }else{
+                // Unmodified reference path for pixel-exact A/B.
+                for(int x=0;x<slot.width;++x){
+                    const uint8_t* p=row+size_t(x)*4;
+                    const uint32_t rgba=uint32_t(p[0])|(uint32_t(p[1])<<8)
+                        |(uint32_t(p[2])<<16)|(uint32_t(p[3])<<24);
+                    dest[x]=packPixel(rgba);
+                }
+            }
+        }
+        context_->Unmap(slot.staging.Get(),0);
+        const auto finished=Clock::now();
+        stats=slot.submitted;
+        stats.ms=std::chrono::duration<double,std::milli>(finished-slot.cpuStarted).count();
         stats.postMs=std::chrono::duration<double,std::milli>(finished-slot.copyQueued).count();
         stats.cpuMapWaitMs=std::chrono::duration<double,std::milli>(mapDone-mapStarted).count();
         stats.cpuPixelConvertMs=std::chrono::duration<double,std::milli>(finished-mapDone).count();
