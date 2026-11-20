@@ -1,11 +1,25 @@
 cmake_minimum_required(VERSION 3.24)
 project(CSE_WARP_V17 VERSION 17.0 LANGUAGES CXX)
-# V17.600 is the product version; CI run ids are recorded separately in the package.
-# Local developer builds are explicitly numbered 0.
-set(V17_BUILD_NUMBER 0 CACHE STRING "Product build number for Windows version resource")
-if(NOT V17_BUILD_NUMBER MATCHES "^[0-9]+$")
-    message(FATAL_ERROR "V17_BUILD_NUMBER must be an unsigned integer")
+# Product, component and scene revisions are independent version axes.
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/version.json" V17_VERSION_JSON)
+string(JSON V17_ENGINE_MAJOR GET "${V17_VERSION_JSON}" engine major)
+string(JSON V17_BUILD_NUMBER GET "${V17_VERSION_JSON}" engine build)
+string(JSON V17_COMPONENT_PBR GET "${V17_VERSION_JSON}" components pbr)
+string(JSON V17_COMPONENT_CPU_LIGHTING GET "${V17_VERSION_JSON}" components cpuLighting)
+string(JSON V17_COMPONENT_DIRECTX11 GET "${V17_VERSION_JSON}" components directx11)
+string(JSON V17_COMPONENT_VULKAN GET "${V17_VERSION_JSON}" components vulkan)
+if(V17_BUILD_NUMBER LESS 10)
+    set(V17_BUILD_PADDED "00${V17_BUILD_NUMBER}")
+elseif(V17_BUILD_NUMBER LESS 100)
+    set(V17_BUILD_PADDED "0${V17_BUILD_NUMBER}")
+else()
+    set(V17_BUILD_PADDED "${V17_BUILD_NUMBER}")
 endif()
+set(V17_PRODUCT_VERSION "${V17_ENGINE_MAJOR}.${V17_BUILD_PADDED}")
+set(V17_CI_BUILD_NUMBER "LOCAL" CACHE STRING "Official GitHub Actions run number")
+set(V17_GIT_SHA "unknown" CACHE STRING "Git commit included in this build")
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/v17_build_info.h.in"
+               "${CMAKE_CURRENT_BINARY_DIR}/v17_build_info.h" @ONLY)
 if(V17_BUILD_NUMBER GREATER 65535)
     message(FATAL_ERROR "Windows file version build component must fit 16 bits")
 endif()
@@ -92,6 +106,7 @@ else()
         "${CMAKE_CURRENT_SOURCE_DIR}/radio_audio.cpp")
 endif()
 target_include_directories(moteur3d_v17 PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
 target_link_libraries(moteur3d_v17 PRIVATE moteur3d_v16_core Qt6::Widgets Qt6::Concurrent)
 if(WIN32)

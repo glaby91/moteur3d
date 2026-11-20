@@ -1,5 +1,5 @@
-name: CSE WARP V17.600 — Windows x64 exploration
-run-name: CSE WARP V17.600 — Windows x64 (CI ${{ github.run_number }})
+name: CSE WARP V17.001 — Windows x64 release
+run-name: CSE WARP V17.001 — Windows x64 (GitHub build ${{ github.run_number }})
 on:
   push:
     branches:
@@ -72,7 +72,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Ten-pass fast design preflight failed' }
       - name: Configure
         shell: pwsh
-        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_BUILD_NUMBER=600
+        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER -DV17_GIT_SHA=$env:GITHUB_SHA
       - name: Compile
         run: cmake --build build-v17 --config Release --parallel 4
       - name: Verify V17 executable and shared V16 engine
@@ -109,9 +109,9 @@ jobs:
             $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
             Write-Host "$name — $($version.ProductName) — $($version.FileVersion)"
             if ($version.FileMajorPart -ne 17 -or
-                $version.FileMinorPart -ne 600 -or
+                $version.FileMinorPart -ne 1 -or
                 $version.FileBuildPart -ne 0 -or $version.FilePrivatePart -ne 0) {
-              throw "Invalid V17.3 GitHub build version in $name : $($version.FileVersion)"
+              throw "Invalid V17.001 product version in $name : $($version.FileVersion)"
             }
           }
       - name: Validate light complex scene in native V17 loader
@@ -481,8 +481,19 @@ jobs:
             Copy-Item "v17/vulkan/khronos/$name" "dist-v17/$name" -Force -ErrorAction Stop
           }
           git rev-parse HEAD | Out-File "dist-v17/REVISION.txt" -Encoding ascii
-          '600' | Out-File "dist-v17/BUILD_NUMBER.txt" -Encoding ascii
+          $version = Get-Content "v17/version.json" -Raw | ConvertFrom-Json
+          $product = "{0}.{1:D3}" -f $version.engine.major, $version.engine.build
+          $product | Out-File "dist-v17/PRODUCT_VERSION.txt" -Encoding ascii
+          $product | Out-File "dist-v17/BUILD_NUMBER.txt" -Encoding ascii
           $env:GITHUB_RUN_NUMBER | Out-File "dist-v17/CI_RUN_NUMBER.txt" -Encoding ascii
+          $metadata = [ordered]@{
+            productVersion = $product
+            githubActionsRun = $env:GITHUB_RUN_NUMBER
+            gitCommit = $env:GITHUB_SHA
+            sceneVersion = "17.604"
+            componentRevisions = $version.components
+          }
+          $metadata | ConvertTo-Json -Depth 5 | Out-File "dist-v17/BUILD_INFO.json" -Encoding utf8
           if (!(Test-Path "dist-v17/BUILD_NUMBER.txt")) { throw "Build number missing" }
           # Production starts with experimental Z-prepass disabled. 
           # Z-prepass remains an opt-in internal test; do not ship a launcher.
@@ -534,81 +545,79 @@ jobs:
           if (!$pic -or $pic.Length -lt 1200) { throw 'Final tree scene preview missing or empty' }
           Copy-Item $pic.FullName "dist-v17/benchmark-civic/10-arbres-V17-WARP.png"
           Write-Host "READY: V17 Windows package opens corrected V4 + 10 trees by default"
-      - name: Restore approved V17.444 scene (186 materials) and radio — verify shipped package
+      - name: Restore approved V17.603 scene delta and verify corrected source package
         shell: pwsh
         timeout-minutes: 15
         env:
           GH_TOKEN: ${{ github.token }}
-          M3D_V16_FORCE_WARP: '1'
-          M3D_V16_GPU_GI_SAMPLES: '0'
         run: |
-          # The previous V17.484 package silently shipped the synthetic generated
-          # scene instead of the user's approved 186-material V17.444 scene.
-          # Recover the exact immutable approved artifact before publishing.
-          gh run download 43512499128 --repo glaby91/moteur3d --name CSE-WARP-V17.444-EXPERIMENTAL-Windows-x64-Scene-V443 --dir approved-v444
-          if ($LASTEXITCODE -ne 0) { throw "Approved V17.444 scene artifact download failed" }
-          $approved = "approved-v444/benchmark-civic"
-          $manifest = Get-Content "$approved/scene.json" -Raw | ConvertFrom-Json
-          if (@($manifest.sectors).Count -ne 1) { throw "Approved scene must contain one complete sector" }
-          $sector = $manifest.sectors[0]
-          if (@($sector.materials).Count -ne 1 -or @($sector.pbr).Count -ne 1) {
-            throw "Approved scene has missing material/PBR manifest"
+          # Always start from the frozen V17.600 package and apply the exact, reviewed
+          # V17.603 scene delta. Never restore the superseded V17.444 scene.
+          gh run download 44647231652 --repo glaby91/moteur3d --name CSE-WARP-V17.600-Windows-x64 --dir approved-v600
+          if ($LASTEXITCODE -ne 0) { throw "Approved V17.600 base package download failed" }
+          $approved = "approved-v600/benchmark-civic"
+          if (!(Test-Path "$approved/scene.json")) { throw "V17.600 base scene is missing" }
+
+          $parts = @(Get-ChildItem "tools/assets/v17_603_scene_overlay" -Filter 'part-*.bin' | Sort-Object Name)
+          if ($parts.Count -ne 43) { throw "Expected 43 committed V17.603 scene delta chunks, found $($parts.Count)" }
+          $zipPath = "build-v17/v17.600-to-v17.603-scene-overlay.zip"
+          New-Item -ItemType Directory -Force "build-v17" | Out-Null
+          $out = [System.IO.File]::Open($zipPath, [System.IO.FileMode]::Create)
+          try { foreach ($part in $parts) { $bytes = [System.IO.File]::ReadAllBytes($part.FullName); $out.Write($bytes,0,$bytes.Length) } }
+          finally { $out.Dispose() }
+          $overlayRoot = "build-v17/v17.603-scene-overlay"
+          Expand-Archive -LiteralPath $zipPath -DestinationPath $overlayRoot -Force
+          $overlayManifest = Get-Content "$overlayRoot/overlay_manifest.json" -Raw | ConvertFrom-Json
+          if ($overlayManifest.format -ne "cse-warp-scene-delta-v17.600-to-v17.603") {
+            throw "Unexpected V17.603 scene overlay format"
           }
+          foreach ($relative in $overlayManifest.delete) {
+            Remove-Item (Join-Path $approved $relative) -Force -ErrorAction SilentlyContinue
+          }
+          foreach ($relative in $overlayManifest.replace) {
+            $source = Join-Path "$overlayRoot/benchmark-civic" $relative
+            if (!(Test-Path $source)) { throw "V17.603 scene delta file missing: $relative" }
+            $destination = Join-Path $approved $relative
+            New-Item -ItemType Directory -Force (Split-Path $destination -Parent) | Out-Null
+            Copy-Item $source $destination -Force
+          }
+
+          $scene = Get-Content "$approved/scene.json" -Raw | ConvertFrom-Json
+          if ($scene.revision -ne "V17.603") { throw "Expected V17.603 source scene, found $($scene.revision)" }
+          $sector = $scene.sectors[0]
           $materials = Get-Content (Join-Path $approved $sector.materials[0]) -Raw | ConvertFrom-Json
           $pbr = Get-Content (Join-Path $approved $sector.pbr[0]) -Raw | ConvertFrom-Json
-          if (@($materials.materials).Count -ne 186 -or @($pbr.sets).Count -ne 183) {
-            throw "Wrong scene: expected exactly 186 materials and 183 PBR sets"
+          if (@($materials.materials).Count -ne 148 -or @($pbr.sets).Count -ne 145) {
+            throw "Wrong scene source: expected V17.603 with 148 materials and 145 PBR sets"
           }
-          foreach ($kind in @("geometry","instances","materials","pbr","lighting","cameras","environment")) {
-            foreach ($relative in @($sector.$kind)) {
-              if (!(Test-Path (Join-Path $approved $relative))) {
-                throw "Approved V17.444 resource missing: $kind / $relative"
-              }
-            }
+          $instances = Get-Content (Join-Path $approved $sector.instances[0]) -Raw | ConvertFrom-Json
+          $plants = @($instances.instances | Where-Object { $_.id -like 'v601_indoor_plant_*' })
+          $positions = @($plants | ForEach-Object { "$($_.position[0]),$($_.position[1]),$($_.position[2])" } | Sort-Object -Unique)
+          if ($plants.Count -ne 30 -or $positions.Count -ne 8 -or
+              @($plants | Where-Object { $_.position[1] -ne 0.56 -or $_.position[2] -ne -14.0 }).Count -ne 0) {
+            throw "V17.603 aligned indoor plants failed source-scene validation"
           }
-          $imageCount = 0
-          foreach ($set in $pbr.sets) {
-            if ($set.imageFile) {
-              if (!(Test-Path (Join-Path $approved $set.imageFile))) {
-                throw "Approved V17.444 PBR image missing: $($set.imageFile)"
-              }
-              $imageCount++
-            }
+          $trees = @($instances.instances | Where-Object { $_.id -like 'v600_garden_tree_*' })
+          if ($trees.Count -ne 26) { throw "Expected 13 V17.603 plaza trees, found $($trees.Count) mesh instances" }
+          $decks = @($instances.instances | Where-Object { $_.id -like 'v439_floor_deck_*' })
+          $levels = @($decks | ForEach-Object { [math]::Round($_.position[1],3) } | Sort-Object -Unique)
+          if ($decks.Count -ne 5 -or $levels.Count -ne 1 -or $levels[0] -ne 9.164) {
+            throw "V17.603 floor-deck validation failed; only the approved middle level should remain"
           }
-          if ($imageCount -ne 82) { throw "Approved scene should reference 82 intact PBR image assets" }
-          if (!(Test-Path "approved-v444/audio/pripyat_radio.wav")) {
-            throw "Approved Ukrainian radio WAV missing"
+          if (@($instances.instances | Where-Object { $_.id -like 'rev_pot*' -or $_.id -like 'rev_pottree*' }).Count -ne 0) {
+            throw "Superseded decorative planters were reintroduced"
           }
           Remove-Item "dist-v17/benchmark-civic" -Recurse -Force -ErrorAction Stop
           Copy-Item $approved "dist-v17/benchmark-civic" -Recurse -Force
-          if (Test-Path "dist-v17/audio") { Remove-Item "dist-v17/audio" -Recurse -Force }
-          Copy-Item "approved-v444/audio" "dist-v17/audio" -Recurse -Force
-          Remove-Item "dist-v17/START_V4_REFERENCE.bat" -ErrorAction SilentlyContinue
-          Remove-Item "dist-v17/README-V4.txt" -ErrorAction SilentlyContinue
-          @'
-          @echo off
-          cd /d "%~dp0"
-          start "" "moteur3d_v17.exe" "benchmark-civic\scene.json"
-          '@ | Set-Content "dist-v17/LANCER_CSE_WARP.bat" -Encoding ascii
+          Remove-Item "dist-v17/audio" -Recurse -Force -ErrorAction SilentlyContinue
           @'
           CSE WARP BetaX — V17 package
-          Default validated scene: V17.444, 186 materials, 183 PBR sets, 82 original image textures.
-          Run LANCER_CSE_WARP.bat or moteur3d_v17.exe to open the approved scene.
-          Ukrainian radio and reference artworks are packaged with the scene.
+          Default validated scene: V17.603 corrected palace.
+          Scene source: frozen V17.600 Windows package plus the reviewed V17.603 scene delta.
+          Indoor plants stay aligned beside the glazed facade; only the approved middle floor deck remains.
+          Run LANCER_CSE_WARP.bat to open the scene.
           '@ | Set-Content "dist-v17/README.txt" -Encoding utf8
-          # Smoke-test the exact scene we are going to deliver, not a substitute.
-          & "dist-v17/moteur3d_v17_benchmark.exe" "dist-v17/benchmark-civic/scene.json" "build-v17/approved-v444-shipping-smoke" --smoke --camera-id v4_face --hour 14 --raster-msaa 1
-          if ($LASTEXITCODE -ne 0) { throw "Approved 186-material scene failed final DirectX11 WARP render" }
-          & "dist-v17/moteur3d_v17_benchmark.exe" "dist-v17/benchmark-civic/scene.json" "build-v17/approved-v444-night-smoke" --smoke --camera-id v4_face --hour 2 --raster-msaa 1
-          if ($LASTEXITCODE -ne 0) { throw "Night-time cloud/lighting smoke failed" }
-          $dayImage=Get-ChildItem "build-v17/approved-v444-shipping-smoke" -Filter 'raster_*.png' -Recurse | Select-Object -First 1
-          $nightImage=Get-ChildItem "build-v17/approved-v444-night-smoke" -Filter 'raster_*.png' -Recurse | Select-Object -First 1
-          if (!$dayImage -or !$nightImage) { throw "Missing day/night DX11 sky preview PNG" }
-          if ((Get-FileHash $dayImage.FullName -Algorithm SHA256).Hash -eq
-              (Get-FileHash $nightImage.FullName -Algorithm SHA256).Hash) {
-            throw "No day/night difference in delivered DX11 images"
-          }
-          Write-Host "READY: approved 186-material scene, 82 PBR artworks, radio, distinct DAY/NIGHT sky rendered"
+          Write-Host "READY: V17.603 source verified — 8 aligned plants, 13 plaza trees, middle floor only."
       - name: V17.493 - Enregistrer la nouvelle enseigne BASSEIN dans le paquet final
         shell: pwsh
         timeout-minutes: 20
@@ -647,9 +656,24 @@ jobs:
           # The Vulkan-complete workflow already adds these two concealed
           # concrete cores, eight anchor rods and eight visible nuts. Keep the
           # standard Windows package on the same approved scene lineage.
-          python tools/v17_500_anchor_monument.py --package dist-v17/benchmark-civic
-          if ($LASTEXITCODE -ne 0) { throw 'V17.500 monument anchoring failed in the standard shipping scene' }
-          $report = Get-Content "dist-v17/benchmark-civic/V500_MONUMENT_ANCHORS.json" -Raw | ConvertFrom-Json
+          $scenePath = "dist-v17/benchmark-civic/scene.json"
+          $anchorReportPath = "dist-v17/benchmark-civic/V500_MONUMENT_ANCHORS.json"
+          $scene = Get-Content $scenePath -Raw | ConvertFrom-Json
+          $sector = $scene.sectors[0]
+          if (Test-Path $anchorReportPath) {
+            $report = Get-Content $anchorReportPath -Raw | ConvertFrom-Json
+            if (@($sector.geometry) -notcontains "geometry/monument-v500-anchors.json" -or
+                @($sector.instances) -notcontains "instances/monument-v500-anchors.json" -or
+                !(Test-Path "dist-v17/benchmark-civic/geometry/monument-v500-anchors.json") -or
+                !(Test-Path "dist-v17/benchmark-civic/instances/monument-v500-anchors.json")) {
+              throw 'Existing V17.500 anchor report is not backed by scene resources'
+            }
+            Write-Host 'V17.500 anchors already exist in the approved V17.603 scene; validating in place.'
+          } else {
+            python tools/v17_500_anchor_monument.py --package dist-v17/benchmark-civic
+            if ($LASTEXITCODE -ne 0) { throw 'V17.500 monument anchoring failed in the standard shipping scene' }
+            $report = Get-Content $anchorReportPath -Raw | ConvertFrom-Json
+          }
           if ($report.revision -ne 'V17.500' -or
               $report.anchorAssemblies -ne 2 -or
               $report.embeddedConcreteCores -ne 2 -or
@@ -668,10 +692,29 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           M3D_V16_FORCE_WARP: '1'
         run: |
-          $expectedSceneRevision = "V17.600"
-          python tools/v17_523_pool_cupola.py --package dist-v17/benchmark-civic --scene-revision $expectedSceneRevision
-          if ($LASTEXITCODE -ne 0) { throw 'V17.523 cupola installation failed in shipping scene' }
-          $report = Get-Content "dist-v17/benchmark-civic/V523_POOL_CUPOLA.json" -Raw | ConvertFrom-Json
+          $expectedSceneRevision = "V17.604"
+          $scenePath = "dist-v17/benchmark-civic/scene.json"
+          $reportPath = "dist-v17/benchmark-civic/V523_POOL_CUPOLA.json"
+          $scene = Get-Content $scenePath -Raw | ConvertFrom-Json
+          $sector = $scene.sectors[0]
+          if ((Test-Path $reportPath) -and
+              (@($sector.geometry) -contains "geometry/v523-pool-cupola.json") -and
+              (Test-Path "dist-v17/benchmark-civic/geometry/v523-pool-cupola.json")) {
+            $report = Get-Content $reportPath -Raw | ConvertFrom-Json
+            if ($report.revision -ne 'V17.523' -or $report.addedCupolaMeshes -ne 5 -or $report.addedCupolaInstances -ne 5) {
+              throw 'Existing V17.523 cupola report does not match the approved scene.'
+            }
+            $report.sceneRevision = $expectedSceneRevision
+            $report | ConvertTo-Json -Depth 100 | Set-Content $reportPath -Encoding utf8
+            $scene.revision = $expectedSceneRevision
+            $scene.name = "CSE WARP $expectedSceneRevision — Palais et coupole vitrée de la piscine"
+            $scene | ConvertTo-Json -Depth 100 | Set-Content $scenePath -Encoding utf8
+            Write-Host 'Corrected V17.523 cupola already exists in the V17.603 scene; validating in place.'
+          } else {
+            python tools/v17_523_pool_cupola.py --package dist-v17/benchmark-civic --scene-revision $expectedSceneRevision
+            if ($LASTEXITCODE -ne 0) { throw 'V17.523 cupola installation failed in shipping scene' }
+            $report = Get-Content $reportPath -Raw | ConvertFrom-Json
+          }
           if ($report.revision -ne 'V17.523' -or $report.sceneRevision -ne $expectedSceneRevision -or
               $report.removedFlatSkylightInstances -ne 19 -or
               $report.addedCupolaMeshes -ne 5 -or $report.addedCupolaInstances -ne 5 -or
@@ -700,7 +743,7 @@ jobs:
           Run LANCER_CSE_WARP.bat to open the scene.
           "@ | Set-Content "dist-v17/README.txt" -Encoding utf8
           Write-Host "READY: $expectedSceneRevision shipping scene contains and renders the corrected pool cupola."
-      - name: V17.600 — Final package finishing pass and multi-view render regressions
+      - name: V17.001 — Final package finishing pass and multi-view render regressions
         shell: pwsh
         timeout-minutes: 25
         env:
@@ -708,14 +751,14 @@ jobs:
           M3D_V16_GPU_GI_SAMPLES: '0'
         run: |
           python tools/v17_600_scene_finish.py --self-test
-          if ($LASTEXITCODE -ne 0) { throw 'V17.600 synthetic geometry continuity test failed' }
-          python tools/v17_600_scene_finish.py --package dist-v17 --revision V17.600
-          if ($LASTEXITCODE -ne 0) { throw 'V17.600 package finishing pass or structural validation failed' }
-          python tools/v17_600_scene_finish.py --package dist-v17 --revision V17.600 --verify-only
-          if ($LASTEXITCODE -ne 0) { throw 'V17.600 final package resource validation failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'V17.001 synthetic geometry continuity test failed' }
+          python tools/v17_600_scene_finish.py --package dist-v17 --revision V17.604 --garden-only
+          if ($LASTEXITCODE -ne 0) { throw 'V17.604 scene finishing pass or structural validation failed' }
+          python tools/v17_600_scene_finish.py --package dist-v17 --revision V17.604 --verify-only
+          if ($LASTEXITCODE -ne 0) { throw 'V17.604 final scene resource validation failed' }
           Remove-Item 'dist-v17/DEMARRER_CSE_WARP_10_ARBRES.bat','dist-v17/DEMARRER_V4_SANS_ARBRES.bat' -ErrorAction SilentlyContinue
           @'
-          CSE WARP V17.600
+          CSE WARP V17.001
           Scene: Palais Energetik, piscine, fresque continue et coupole à trois vantaux.
           Lancer LANCER_CSE_WARP.bat pour ouvrir le moteur.
           Lancer LANCER_BENCHMARK.bat avec le manifeste de scène, un dossier de sortie et les options souhaitées pour lancer le benchmark sans ouvrir l'interface.
@@ -735,17 +778,17 @@ jobs:
           pause
           '@ | Set-Content 'dist-v17/LANCER_BENCHMARK.bat' -Encoding ascii
           & 'dist-v17/moteur3d_v17_benchmark.exe' 'dist-v17/benchmark-civic/scene.json' 'build-v17/final-600-pool' --smoke --camera-id v7_pool_fresco --hour 14 --raster-msaa 1 --cpu-direct-still --cpu-direct-width 640 --cpu-direct-height 360
-          if ($LASTEXITCODE -ne 0) { throw 'V17.600 final fresco package raster/CPU render failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'V17.001 final fresco package raster/CPU render failed' }
           & 'dist-v17/moteur3d_v17_benchmark.exe' 'dist-v17/benchmark-civic/scene.json' 'build-v17/final-600-cupola' --smoke --camera-id v523_cupola_exterieure --hour 14 --raster-msaa 1
-          if ($LASTEXITCODE -ne 0) { throw 'V17.600 final cupola package render failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'V17.001 final cupola package render failed' }
           & 'dist-v17/moteur3d_v17_benchmark.exe' 'dist-v17/benchmark-civic/scene.json' 'build-v17/final-600-plaza' --smoke --camera-id v4_place --hour 19 --raster-msaa 1
-          if ($LASTEXITCODE -ne 0) { throw 'V17.600 final plaza package render failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'V17.001 final plaza package render failed' }
           & 'dist-v17/moteur3d_v17_benchmark.exe' 'dist-v17/benchmark-civic/scene.json' 'build-v17/final-600-garden' --smoke --camera-id v600_garden_view --hour 18 --raster-msaa 1
-          if ($LASTEXITCODE -ne 0) { throw 'V17.600 final garden exterior package render failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'V17.001 final garden exterior package render failed' }
           foreach ($pair in @(@('build-v17/final-600-pool','pool-fresco'),@('build-v17/final-600-cupola','cupola'),@('build-v17/final-600-plaza','plaza'),@('build-v17/final-600-garden','garden-global'))) {
             $img=Get-ChildItem $pair[0] -Recurse -Filter '*.png' -File | Where-Object { $_.Length -gt 1000 } | Select-Object -First 1
-            if (!$img) { throw "V17.600 $($pair[1]) render missing or blank" }
-            Copy-Item $img.FullName "dist-v17/benchmark-civic/V17.600-$($pair[1])-WARP.png"
+            if (!$img) { throw "V17.001 $($pair[1]) render missing or blank" }
+            Copy-Item $img.FullName "dist-v17/benchmark-civic/V17.001-$($pair[1])-WARP.png"
           }
           Write-Host 'READY: final package rendered with DX11 WARP and CPU ray tracing, including the requested garden-side global view.'
       - name: Audit CPU light paths from the pool fresco
@@ -763,13 +806,13 @@ jobs:
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.600-Windows-x64
+          name: CSE-WARP-V17.001-GitHub-${{ github.run_number }}-Windows-x64
           path: dist-v17/
           if-no-files-found: error
       - name: Upload fresco ray audit visualization
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.600-fresco-ray-audit
+          name: CSE-WARP-V17.001-GitHub-${{ github.run_number }}-fresco-ray-audit
           path: build-v17/fresco-ray-audit/
           if-no-files-found: error
       - name: Benchmark GI hors ligne — trois scènes, trois cuissons et sept relectures
@@ -878,7 +921,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.600-Total-Simulation-WARP
+          name: CSE-WARP-V17.001-GitHub-${{ github.run_number }}-Total-Simulation-WARP
           path: build-v17/total-simulation/
           if-no-files-found: warn
       # The V17-specific scene-switch and D3D11 benchmark smoke checks have

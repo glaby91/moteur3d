@@ -1,0 +1,12 @@
+{
+  "engine": {
+    "major": 17,
+    "build": 1
+  },
+  "components": {
+    "pbr": "001",
+    "cpuLighting": "001",
+    "directx11": "001",
+    "vulkan": "001"
+  }
+}

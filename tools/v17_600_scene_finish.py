@@ -86,6 +86,11 @@ def ribbon_mesh(mesh_id, points, width, y):
 def apply_garden_redesign(package: Path, revision: str):
     """Replace the weak straight strip with the approved route around the mound."""
     root = package / "benchmark-civic"
+    scene_path = root / "scene.json"
+    scene = read(scene_path)
+    scene["revision"] = revision
+    scene["sceneVersion"] = revision
+    write(scene_path, scene)
     geom_path = root / "geometry/v7-corrections.json"
     instances_path = root / "instances/v442-corrections.json"
     mats_path = root / "materials/v442-corrections.json"
@@ -105,7 +110,7 @@ def apply_garden_redesign(package: Path, revision: str):
         "tex_v600_pale_paving", "tex_v600_garden_red_inlay", "tex_v600_garden_route", "tex_v600_garden_edge"}]
 
     instances["instances"] = [i for i in instances["instances"] if not (
-        i.get("id", "").startswith(("v600_garden_tree_", "v600_garden_lamp_", "v600_garden_floor_light_",
+        i.get("id", "").startswith(("v600_garden_lamp_", "v600_garden_floor_light_",
                                       "v600_garden_red_inlay_", "v600_civic_light_band_",
                                       "v600_garden_route_", "v600_garden_edge_")) or
         i.get("id", "").startswith("v600_garden_threshold_") or
@@ -166,19 +171,11 @@ def apply_garden_redesign(package: Path, revision: str):
          "pattern": "smooth_plaster", "resolution": 512, "channels": ["albedo", "normal", "roughness"]},
     ])
 
-    # Ten mature trees frame the outer plaza in two measured groups. The center
-    # axis, oval bench and two branches around the mound stay open and walkable.
-    tree_positions = [(side * 51.0, z) for side in (-1, 1) for z in (31.0, 47.0, 97.0, 113.0)]
-    tree_positions.extend([(-57.0, 71.0), (57.0, 71.0)])
-    for n, (x, z) in enumerate(tree_positions):
-        asset = "asset_tree1" if n % 2 == 0 else "asset_tree2"
-        for part in (0, 1):
-            instances["instances"].append({"id": f"v600_garden_tree_{n}_{part}",
-                "parent": "Place/Jardins/Arbres de lisière",
-                "geometry": f"{asset}_{part}",
-                "material": f"asset_mat_{asset.removeprefix('asset_')}_{part}",
-                "position": [x, 0.16, z], "size": [12.0, 16.0, 12.0],
-                "rotationY": (n * 37.0) % 360})
+    # Preserve the approved V17.603 tree models and their 13 plaza placements.
+    tree_positions = sorted({tuple(i["position"]) for i in instances["instances"]
+                             if i.get("id", "").startswith("v600_garden_tree_")})
+    if len(tree_positions) != 13:
+        raise ValueError(f"Expected 13 approved V17.603 plaza trees, found {len(tree_positions)}")
 
     # The red threshold marks the transition between the palace forecourt and
     # the mound. Its two halves meet the allée edge and leave the center lane
@@ -558,8 +555,20 @@ def verify(package: Path, revision: str):
     if len(rail_instances) != 6:
         raise ValueError("Final scene does not contain paired guide rails on both eaves")
     garden_trees = [x for x in inst if x.get("id", "").startswith("v600_garden_tree_")]
-    if len(garden_trees) != 20 or any(x.get("id", "").startswith("rev_tree") for x in inst):
-        raise ValueError("Exterior trees were not replaced by ten controlled garden trees")
+    if len(garden_trees) != 26 or any(x.get("id", "").startswith("rev_tree") for x in inst):
+        raise ValueError("Exterior trees were not replaced by thirteen controlled garden trees")
+    indoor_plants = [x for x in inst if x.get("id", "").startswith("v601_indoor_plant_")]
+    plant_positions = {tuple(x.get("position", [])) for x in indoor_plants}
+    if len(indoor_plants) != 30 or len(plant_positions) != 8:
+        raise ValueError("Final scene must contain the eight approved indoor plants")
+    if {p[2] for p in plant_positions} != {-14.0} or {p[1] for p in plant_positions} != {0.56}:
+        raise ValueError("Indoor plants must stay aligned beside the glazed facade at z=-14 m")
+    if any(x.get("id", "").startswith(("rev_pot", "rev_pottree")) for x in inst):
+        raise ValueError("Legacy decorative facade planters were reintroduced")
+    floor_decks = [x for x in inst if x.get("id", "").startswith("v439_floor_deck_")]
+    floor_levels = sorted({round(x.get("position", [0,0,0])[1], 3) for x in floor_decks})
+    if len(floor_decks) != 5 or floor_levels != [9.164]:
+        raise ValueError("The corrected scene must retain only the approved middle floor deck")
     available_meshes = {m.get("id") for rel in sector["geometry"]
                         for m in read(root / rel).get("meshes", [])}
     available_materials = {m.get("id") for rel in sector["materials"]
@@ -567,6 +576,9 @@ def verify(package: Path, revision: str):
     for tree in garden_trees:
         if tree.get("geometry") not in available_meshes or tree.get("material") not in available_materials:
             raise ValueError(f"Garden tree references missing scene data: {tree.get('id')}")
+    for plant in indoor_plants:
+        if plant.get("geometry") not in available_meshes or plant.get("material") not in available_materials:
+            raise ValueError(f"Indoor plant references missing scene data: {plant.get('id')}")
     garden_lamps = [x for x in inst if x.get("parent") == "Place/Eclairage/Points lumineux intégrés au sol"]
     if len(garden_lamps) != 6 or any(x.get("parent") in ("Mobilier/Lampadaires", "Place/Eclairage/Lampadaires de lisière") for x in inst):
         raise ValueError("Garden lighting must use six recessed ground fixtures without tall plaza posts")
@@ -600,7 +612,7 @@ def verify(package: Path, revision: str):
         raise ValueError("Garden camera must show the landscape from the garden side")
     return {"revision": revision, "manifestResources": "complete", "frescoPanels": 8,
             "sharedTexture": image["imageFile"], "cupolaLeaves": 3, "guideRails": 3,
-            "gardenTrees": 10, "gardenGroundLights": 6, "gardenWalkwaySegments": 4,
+            "gardenTrees": 13, "gardenGroundLights": 6, "gardenWalkwaySegments": 4,
             "redGardenEdgeStrips": 8, "redGardenInlay": True, "redGardenThresholdSegments": 2,
             "gardenCamera": "v600_garden_view"}
 
@@ -668,3 +680,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
