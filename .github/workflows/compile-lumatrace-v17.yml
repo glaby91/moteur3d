@@ -1,0 +1,42 @@
+name: Compile LumaTrace V17 — Windows x64
+run-name: LumaTrace V17 compile — ${{ github.sha }}
+on:
+  push:
+    branches:
+      - codex/v17-lumatrace-backend-test
+    paths:
+      - 'v17/**'
+      - 'v16/**'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/**'
+      - '.github/workflows/compile-lumatrace-v17.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: compile-lumatrace-v17-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  compile:
+    name: V17 + shared V16 engine — MSVC x64
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Qt 6.8.3
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Configure V17
+        shell: pwsh
+        run: >-
+          cmake -S v17 -B build-v17-lumatrace -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+          -DM3D_REQUIRE_VULKAN=OFF
+          -DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER
+          -DV17_GIT_SHA=$env:GITHUB_SHA
+      - name: Compile V17 application and shared engine
+        run: cmake --build build-v17-lumatrace --config Release --target moteur3d_v17 --parallel 4
