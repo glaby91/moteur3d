@@ -246,7 +246,7 @@ protected:
         if(hudVisible_)drawRendererStamp(p,dst);
         // Scoped reticle is only a 2D Qt overlay, with no effect on physical
         // position, collision rays or the raster/CPU renderer.
-        if(scopeLevel_>.005f){
+        if(hudVisible_&&scopeLevel_>.005f){
             p.save();
             p.setRenderHint(QPainter::Antialiasing,true);
             const QPointF center=dst.center();
