@@ -2661,7 +2661,8 @@ private:
                 (enabled?240.f:24.f));
             if(!enabled&&runtime_){
                 {std::lock_guard<std::mutex> lock(cpuShadows_->mutex);cpuShadows_->hour=-1.f;}
-                requestRender();
+                const int backend=backendBox_?backendBox_->currentIndex():-1;
+                if(backend==4||backend==5)requestRender();
             }
         });
         connect(sunHour_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double hour){
