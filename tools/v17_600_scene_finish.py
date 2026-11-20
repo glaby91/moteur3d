@@ -561,8 +561,8 @@ def verify(package: Path, revision: str):
     if len(rail_instances) != 6:
         raise ValueError("Final scene does not contain paired guide rails on both eaves")
     garden_trees = [x for x in inst if x.get("id", "").startswith("v600_garden_tree_")]
-    if len(garden_trees) != 20 or any(x.get("id", "").startswith("rev_tree") for x in inst):
-        raise ValueError("Exterior trees were not replaced by ten controlled garden trees")
+    if len(garden_trees) != 26 or any(x.get("id", "").startswith("rev_tree") for x in inst):
+        raise ValueError("Exterior trees were not replaced by thirteen controlled garden trees")
     available_meshes = {m.get("id") for rel in sector["geometry"]
                         for m in read(root / rel).get("meshes", [])}
     available_materials = {m.get("id") for rel in sector["materials"]
@@ -603,7 +603,7 @@ def verify(package: Path, revision: str):
         raise ValueError("Garden camera must show the landscape from the garden side")
     return {"revision": revision, "manifestResources": "complete", "frescoPanels": 8,
             "sharedTexture": image["imageFile"], "cupolaLeaves": 3, "guideRails": 3,
-            "gardenTrees": 10, "gardenGroundLights": 6, "gardenWalkwaySegments": 4,
+            "gardenTrees": 13, "gardenGroundLights": 6, "gardenWalkwaySegments": 4,
             "redGardenEdgeStrips": 8, "redGardenInlay": True, "redGardenThresholdSegments": 2,
             "gardenCamera": "v600_garden_view"}
 
