@@ -1,5 +1,5 @@
-name: CSE WARP V17.600 — Windows x64 exploration
-run-name: CSE WARP V17.600 — Windows x64 (CI ${{ github.run_number }})
+name: CSE WARP V17.001 — Windows x64 release
+run-name: CSE WARP V17.001 — Windows x64 (GitHub build ${{ github.run_number }})
 on:
   push:
     branches:
@@ -72,7 +72,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Ten-pass fast design preflight failed' }
       - name: Configure
         shell: pwsh
-        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_BUILD_NUMBER=600
+        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER -DV17_GIT_SHA=$env:GITHUB_SHA
       - name: Compile
         run: cmake --build build-v17 --config Release --parallel 4
       - name: Verify V17 executable and shared V16 engine
@@ -109,9 +109,9 @@ jobs:
             $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
             Write-Host "$name — $($version.ProductName) — $($version.FileVersion)"
             if ($version.FileMajorPart -ne 17 -or
-                $version.FileMinorPart -ne 600 -or
+                $version.FileMinorPart -ne 1 -or
                 $version.FileBuildPart -ne 0 -or $version.FilePrivatePart -ne 0) {
-              throw "Invalid V17.3 GitHub build version in $name : $($version.FileVersion)"
+              throw "Invalid V17.001 product version in $name : $($version.FileVersion)"
             }
           }
       - name: Validate light complex scene in native V17 loader
@@ -481,8 +481,19 @@ jobs:
             Copy-Item "v17/vulkan/khronos/$name" "dist-v17/$name" -Force -ErrorAction Stop
           }
           git rev-parse HEAD | Out-File "dist-v17/REVISION.txt" -Encoding ascii
-          '600' | Out-File "dist-v17/BUILD_NUMBER.txt" -Encoding ascii
+          $version = Get-Content "v17/version.json" -Raw | ConvertFrom-Json
+          $product = "{0}.{1:D3}" -f $version.engine.major, $version.engine.build
+          $product | Out-File "dist-v17/PRODUCT_VERSION.txt" -Encoding ascii
+          $product | Out-File "dist-v17/BUILD_NUMBER.txt" -Encoding ascii
           $env:GITHUB_RUN_NUMBER | Out-File "dist-v17/CI_RUN_NUMBER.txt" -Encoding ascii
+          $metadata = [ordered]@{
+            productVersion = $product
+            githubActionsRun = $env:GITHUB_RUN_NUMBER
+            gitCommit = $env:GITHUB_SHA
+            sceneVersion = "17.604"
+            componentRevisions = $version.components
+          }
+          $metadata | ConvertTo-Json -Depth 5 | Out-File "dist-v17/BUILD_INFO.json" -Encoding utf8
           if (!(Test-Path "dist-v17/BUILD_NUMBER.txt")) { throw "Build number missing" }
           # Production starts with experimental Z-prepass disabled. 
           # Z-prepass remains an opt-in internal test; do not ship a launcher.
@@ -668,7 +679,7 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           M3D_V16_FORCE_WARP: '1'
         run: |
-          $expectedSceneRevision = "V17.600"
+          $expectedSceneRevision = "V17.604"
           python tools/v17_523_pool_cupola.py --package dist-v17/benchmark-civic --scene-revision $expectedSceneRevision
           if ($LASTEXITCODE -ne 0) { throw 'V17.523 cupola installation failed in shipping scene' }
           $report = Get-Content "dist-v17/benchmark-civic/V523_POOL_CUPOLA.json" -Raw | ConvertFrom-Json
@@ -700,7 +711,7 @@ jobs:
           Run LANCER_CSE_WARP.bat to open the scene.
           "@ | Set-Content "dist-v17/README.txt" -Encoding utf8
           Write-Host "READY: $expectedSceneRevision shipping scene contains and renders the corrected pool cupola."
-      - name: V17.600 — Final package finishing pass and multi-view render regressions
+      - name: V17.001 — Final package finishing pass and multi-view render regressions
         shell: pwsh
         timeout-minutes: 25
         env:
@@ -708,14 +719,14 @@ jobs:
           M3D_V16_GPU_GI_SAMPLES: '0'
         run: |
           python tools/v17_600_scene_finish.py --self-test
-          if ($LASTEXITCODE -ne 0) { throw 'V17.600 synthetic geometry continuity test failed' }
-          python tools/v17_600_scene_finish.py --package dist-v17 --revision V17.600
-          if ($LASTEXITCODE -ne 0) { throw 'V17.600 package finishing pass or structural validation failed' }
-          python tools/v17_600_scene_finish.py --package dist-v17 --revision V17.600 --verify-only
-          if ($LASTEXITCODE -ne 0) { throw 'V17.600 final package resource validation failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'V17.001 synthetic geometry continuity test failed' }
+          python tools/v17_600_scene_finish.py --package dist-v17 --revision V17.604
+          if ($LASTEXITCODE -ne 0) { throw 'V17.604 scene finishing pass or structural validation failed' }
+          python tools/v17_600_scene_finish.py --package dist-v17 --revision V17.604 --verify-only
+          if ($LASTEXITCODE -ne 0) { throw 'V17.604 final scene resource validation failed' }
           Remove-Item 'dist-v17/DEMARRER_CSE_WARP_10_ARBRES.bat','dist-v17/DEMARRER_V4_SANS_ARBRES.bat' -ErrorAction SilentlyContinue
           @'
-          CSE WARP V17.600
+          CSE WARP V17.001
           Scene: Palais Energetik, piscine, fresque continue et coupole à trois vantaux.
           Lancer LANCER_CSE_WARP.bat pour ouvrir le moteur.
           Lancer LANCER_BENCHMARK.bat avec le manifeste de scène, un dossier de sortie et les options souhaitées pour lancer le benchmark sans ouvrir l'interface.
@@ -735,17 +746,17 @@ jobs:
           pause
           '@ | Set-Content 'dist-v17/LANCER_BENCHMARK.bat' -Encoding ascii
           & 'dist-v17/moteur3d_v17_benchmark.exe' 'dist-v17/benchmark-civic/scene.json' 'build-v17/final-600-pool' --smoke --camera-id v7_pool_fresco --hour 14 --raster-msaa 1 --cpu-direct-still --cpu-direct-width 640 --cpu-direct-height 360
-          if ($LASTEXITCODE -ne 0) { throw 'V17.600 final fresco package raster/CPU render failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'V17.001 final fresco package raster/CPU render failed' }
           & 'dist-v17/moteur3d_v17_benchmark.exe' 'dist-v17/benchmark-civic/scene.json' 'build-v17/final-600-cupola' --smoke --camera-id v523_cupola_exterieure --hour 14 --raster-msaa 1
-          if ($LASTEXITCODE -ne 0) { throw 'V17.600 final cupola package render failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'V17.001 final cupola package render failed' }
           & 'dist-v17/moteur3d_v17_benchmark.exe' 'dist-v17/benchmark-civic/scene.json' 'build-v17/final-600-plaza' --smoke --camera-id v4_place --hour 19 --raster-msaa 1
-          if ($LASTEXITCODE -ne 0) { throw 'V17.600 final plaza package render failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'V17.001 final plaza package render failed' }
           & 'dist-v17/moteur3d_v17_benchmark.exe' 'dist-v17/benchmark-civic/scene.json' 'build-v17/final-600-garden' --smoke --camera-id v600_garden_view --hour 18 --raster-msaa 1
-          if ($LASTEXITCODE -ne 0) { throw 'V17.600 final garden exterior package render failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'V17.001 final garden exterior package render failed' }
           foreach ($pair in @(@('build-v17/final-600-pool','pool-fresco'),@('build-v17/final-600-cupola','cupola'),@('build-v17/final-600-plaza','plaza'),@('build-v17/final-600-garden','garden-global'))) {
             $img=Get-ChildItem $pair[0] -Recurse -Filter '*.png' -File | Where-Object { $_.Length -gt 1000 } | Select-Object -First 1
-            if (!$img) { throw "V17.600 $($pair[1]) render missing or blank" }
-            Copy-Item $img.FullName "dist-v17/benchmark-civic/V17.600-$($pair[1])-WARP.png"
+            if (!$img) { throw "V17.001 $($pair[1]) render missing or blank" }
+            Copy-Item $img.FullName "dist-v17/benchmark-civic/V17.001-$($pair[1])-WARP.png"
           }
           Write-Host 'READY: final package rendered with DX11 WARP and CPU ray tracing, including the requested garden-side global view.'
       - name: Audit CPU light paths from the pool fresco
@@ -763,13 +774,13 @@ jobs:
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.600-Windows-x64
+          name: CSE-WARP-V17.001-GitHub-${{ github.run_number }}-Windows-x64
           path: dist-v17/
           if-no-files-found: error
       - name: Upload fresco ray audit visualization
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.600-fresco-ray-audit
+          name: CSE-WARP-V17.001-GitHub-${{ github.run_number }}-fresco-ray-audit
           path: build-v17/fresco-ray-audit/
           if-no-files-found: error
       - name: Benchmark GI hors ligne — trois scènes, trois cuissons et sept relectures
@@ -878,7 +889,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.600-Total-Simulation-WARP
+          name: CSE-WARP-V17.001-GitHub-${{ github.run_number }}-Total-Simulation-WARP
           path: build-v17/total-simulation/
           if-no-files-found: warn
       # The V17-specific scene-switch and D3D11 benchmark smoke checks have

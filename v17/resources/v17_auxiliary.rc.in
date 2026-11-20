@@ -11,9 +11,9 @@ BEGIN
   BLOCK "040904E4"
   BEGIN
    VALUE "CompanyName", "CSE WARP\0"
-   VALUE "FileDescription", "CSE WARP V17.@V17_BUILD_NUMBER@ - @V17_AUX_NAME@\0"
-   VALUE "FileVersion", "17.@V17_BUILD_NUMBER@\0"
-   VALUE "ProductVersion", "17.@V17_BUILD_NUMBER@\0"
+   VALUE "FileDescription", "CSE WARP V@V17_PRODUCT_VERSION@ - @V17_AUX_NAME@\0"
+   VALUE "FileVersion", "@V17_PRODUCT_VERSION@\0"
+   VALUE "ProductVersion", "@V17_PRODUCT_VERSION@\0"
    VALUE "InternalName", "@V17_AUX_NAME@\0"
    VALUE "OriginalFilename", "@V17_AUX_NAME@.exe\0"
    VALUE "ProductName", "CSE WARP Beta X\0"

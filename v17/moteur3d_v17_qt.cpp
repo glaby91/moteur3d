@@ -1,3 +1,4 @@
+#include "v17_build_info.h"
 #include "m3d_engine.h"
 #include "src/m3d_walk_controller.h"
 #include "exploration_motion.h"
@@ -172,6 +173,11 @@ public:
         if(displayedRenderer_==displayed&&requestedRenderer_==requested)return;
         displayedRenderer_=std::move(displayed);requestedRenderer_=std::move(requested);scheduleQtPaint();
     }
+    void setHudVisible(bool visible){
+        if(hudVisible_==visible)return;
+        hudVisible_=visible;
+        scheduleQtPaint();
+    }
     void setCameraHud(QStringList lines,bool enabled){
         if(hudLines_==lines&&hudEnabled_==enabled)return;
         hudLines_=std::move(lines);hudEnabled_=enabled;scheduleQtPaint();
@@ -222,7 +228,7 @@ protected:
             p.drawText(rect().adjusted(30,20,-30,-20),Qt::AlignCenter|Qt::TextWordWrap,
                        placeholder_.isEmpty()?QStringLiteral("Ouvrir une scène V16 dans le menu Fichier")
                                              :placeholder_);
-            drawRendererStamp(p,rect());
+            if(hudVisible_)drawRendererStamp(p,rect());
             return;
         }
         QSize s=image_.size();
@@ -237,7 +243,7 @@ protected:
             p.setRenderHint(QPainter::SmoothPixmapTransform,false);
         }
         p.drawImage(dst,image_);
-        drawRendererStamp(p,dst);
+        if(hudVisible_)drawRendererStamp(p,dst);
         // Scoped reticle is only a 2D Qt overlay, with no effect on physical
         // position, collision rays or the raster/CPU renderer.
         if(scopeLevel_>.005f){
@@ -265,8 +271,8 @@ protected:
             p.drawEllipse(center,1.75,1.75);
             p.restore();
         }
-        if(hudEnabled_)drawCameraHud(p,dst,hudLines_,fpsVisible_?105:0);
-        if(fpsVisible_){
+        if(hudVisible_&&hudEnabled_)drawCameraHud(p,dst,hudLines_,fpsVisible_?105:0);
+        if(hudVisible_&&fpsVisible_){
             // Count completed presentations, not a theoretical GPU FPS claim.
             p.save();
             QFont f=p.font();f.setFamily(QStringLiteral("Consolas"));f.setPointSize(10);
@@ -299,6 +305,7 @@ private:
     QString placeholder_;
     QStringList hudLines_;
     bool hudEnabled_=true;
+    bool hudVisible_=true;
     float scopeLevel_=0.f;
     bool fpsVisible_=false;
     QString fpsText_;
@@ -332,8 +339,8 @@ class V17Window final : public QMainWindow {
 public:
     explicit V17Window(QString scenePath,int textureResolution=2048)
         :textureResolution_(textureResolution){
-        setWindowTitle(QStringLiteral("CSE WARP Beta X — V17.%1 Exploration")
-            .arg(CSE_WARP_BUILD_NUMBER));
+        setWindowTitle(QStringLiteral("CSE WARP Beta X — V%1 Exploration")
+            .arg(CSE_WARP_PRODUCT_VERSION));
         resize(1510,900);
         setMinimumSize(1100,670);
         // Every backend gets its own independent top-level HWND. Direct DX11
@@ -863,7 +870,8 @@ private:
     QPushButton* radioToggleButton_=nullptr;
     QLabel* radioStatusLabel_=nullptr;
     bool radioPlaying_=false;
-    bool radioAutoplayEnabled_=true;
+    bool radioAutoplayEnabled_=false;
+    bool rendererHudVisible_=true;
     cse::RadioAudio radioAudio_;
     QTimer audioTimer_;
     std::array<cse::RadioSpeaker,4> radioSpeakers_{};
@@ -908,6 +916,7 @@ private:
     QElapsedTimer dayNightClock_;
     double dayNightOriginHour_=14.75;
     bool applyingDayNightTick_=false;
+    qint64 lastDayNightRenderMs_=-5000;
     QElapsedTimer frameClock_;
     QElapsedTimer motionClock_;
     QSet<int> keysDown_;
@@ -995,7 +1004,7 @@ private:
             {"format",QString::fromLatin1(cse::camera_diagnostic::formatId)},
             {"createdAtUtc",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)},
             {"engine",QStringLiteral("CSE WARP Beta X")},
-            {"version",QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER)},
+            {"version",QStringLiteral(CSE_WARP_PRODUCT_VERSION)},
             {"revision",revision},
             {"scene",QJsonObject{{"manifestFile",QFileInfo(manifest).fileName()},
                                  {"title",title},{"originalPath",manifest}}},
@@ -1039,7 +1048,7 @@ private:
             QPainter painter(&annotated);
             ImageView::drawCameraHud(painter,annotated.rect(),
                 cse::camera_diagnostic::hudLines(lastRenderedPose_,
-                    QStringLiteral("CAMÉRA DU RENDU / V17.%1").arg(CSE_WARP_BUILD_NUMBER)));
+                    QStringLiteral("CAMÉRA DU RENDU / V%1").arg(CSE_WARP_PRODUCT_VERSION)));
         }
         if(!annotated.save(imageFile,"PNG")){
             QMessageBox::warning(this,QStringLiteral("Capture d'anomalie"),
@@ -1633,7 +1642,7 @@ private:
     void stopRadio(){
         radioAudio_.stop();
         radioPlaying_=false;
-        if(radioToggleButton_)radioToggleButton_->setText(QStringLiteral("Reprendre la radio"));
+        if(radioToggleButton_)radioToggleButton_->setText(QStringLiteral("Activer la radio"));
         if(radioStatusLabel_)radioStatusLabel_->setText(QStringLiteral("Radio arrêtée"));
     }
     bool loadSpeakerLayout(){
@@ -1677,7 +1686,7 @@ private:
         radioAudio_.setVolume(radioVolumeSlider_?float(radioVolumeSlider_->value())/500.f:.20f);
         radioPlaying_=radioAudio_.start(path.toStdWString(),radioSpeakers_);
         if(radioToggleButton_)radioToggleButton_->setText(radioPlaying_
-            ?QStringLiteral("Arrêter la radio"):QStringLiteral("Reprendre la radio"));
+            ?QStringLiteral("Arrêter la radio"):QStringLiteral("Activer la radio"));
         if(radioStatusLabel_)radioStatusLabel_->setText(radioPlaying_
             ?QStringLiteral("4 HP spatialisés · XAudio2 / X3DAudio · WAV de test")
             :QStringLiteral("Audio 3D indisponible (pilote ou WAV incorrect)"));
@@ -1770,11 +1779,11 @@ private:
         }
         const QString timestamp=QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd_HHmmss_zzz"));
         const QString path=root+QStringLiteral("/")
-            +QString::fromLatin1(a.id)+QStringLiteral("-V17.%1-").arg(CSE_WARP_BUILD_NUMBER)
+            +QString::fromLatin1(a.id)+QStringLiteral("-V%1-").arg(CSE_WARP_PRODUCT_VERSION)
             +timestamp+QStringLiteral(".json");
         const QJsonObject record{
             {QStringLiteral("format"),QStringLiteral("cse-warp-anomaly-review-v1")},
-            {QStringLiteral("version"),QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER)},
+            {QStringLiteral("version"),QStringLiteral(CSE_WARP_PRODUCT_VERSION)},
             {QStringLiteral("anomalyId"),QString::fromLatin1(a.id)},
             {QStringLiteral("title"),QString::fromUtf8(a.title)},
             {QStringLiteral("expected"),QString::fromUtf8(a.check)},
@@ -1964,7 +1973,7 @@ private:
         auto* pacingAction=toolsMenu->addAction(QStringLiteral("Exporter benchmark fluidité (CSV + JSON)"));
         connect(pacingAction,&QAction::triggered,this,[this]{exportPacing();});
         auto* benchmarkAction=toolsMenu->addAction(
-            QStringLiteral("Benchmark V17.%1 — performances…").arg(CSE_WARP_BUILD_NUMBER));
+            QStringLiteral("Benchmark V%1 — performances…").arg(CSE_WARP_PRODUCT_VERSION));
         connect(benchmarkAction,&QAction::triggered,this,[this]{
             if(scenePath_.isEmpty()){
                 QMessageBox::information(this,QStringLiteral("Benchmark"),QStringLiteral("Charger une scène avant de lancer le benchmark."));
@@ -2005,7 +2014,7 @@ private:
         toolsMenu->menuAction()->setVisible(false);
         auto* helpMenu=menuBar()->addMenu(QStringLiteral("Aide"));
         auto* aboutAction=helpMenu->addAction(
-            QStringLiteral("À propos de CSE WARP V17.%1…").arg(CSE_WARP_BUILD_NUMBER));
+            QStringLiteral("À propos de CSE WARP V%1…").arg(CSE_WARP_PRODUCT_VERSION));
         connect(aboutAction,&QAction::triggered,this,[this]{
             const QString gpu=gpuAdapterLabel();
             const QString revision=githubRevision();
@@ -2016,8 +2025,9 @@ private:
                 :qEnvironmentVariable("M3D_V17_EXPERIMENT_Z_PREPASS")==QStringLiteral("1");
             const bool lightEnabled=qEnvironmentVariable("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL")==QStringLiteral("1");
             const QString backend=backendBox_?backendBox_->currentText():QStringLiteral("indéterminé");
+            const QString sceneRevision=sceneRevisionLabel_?sceneRevisionLabel_->text():QStringLiteral("Scène —");
             const QString details=QStringLiteral(
-                "CSE WARP Beta X / V17.%1\\n"
+                "CSE WARP Beta X / V%1\\n"
                 "Révision GitHub : %2\\n"
                 "Compilation : %3\\n"
                 "Système : %4\\n"
@@ -2026,32 +2036,46 @@ private:
                 "Qt : %7\\n"
                 "MSAA : %8x | Anisotropie : %9x | PBR : %10 px\\n"
                 "Z-prepass expérimental : %11 | Rejet AABB lampes : %12\\n"
+                "Build GitHub Actions : %13\\nScène : %14\\n"
+                "Composants : PBR-%15, CPU-%16, DX11-%17, Vulkan-%18\\n"
                 "HUD caméra / rapports d'anomalies PNG+JSON / restauration : disponibles")
-                .arg(CSE_WARP_BUILD_NUMBER)
+                .arg(CSE_WARP_PRODUCT_VERSION)
                 .arg(revision).arg(compileDate).arg(QSysInfo::prettyProductName())
                 .arg(gpu).arg(backend).arg(QString::fromLatin1(qVersion()))
                 .arg(quality.msaaSamples).arg(quality.anisotropy)
                 .arg(textureResolution_).arg(zEnabled?QStringLiteral("ON"):QStringLiteral("OFF"))
-                .arg(lightEnabled?QStringLiteral("ON"):QStringLiteral("OFF"));
+                .arg(lightEnabled?QStringLiteral("ON"):QStringLiteral("OFF"))
+                .arg(QStringLiteral(CSE_WARP_CI_BUILD)).arg(sceneRevision)
+                .arg(QStringLiteral(CSE_WARP_COMPONENT_PBR))
+                .arg(QStringLiteral(CSE_WARP_COMPONENT_CPU_LIGHTING))
+                .arg(QStringLiteral(CSE_WARP_COMPONENT_DIRECTX11))
+                .arg(QStringLiteral(CSE_WARP_COMPONENT_VULKAN));
             QMessageBox message(this);
-            message.setWindowTitle(QStringLiteral("À propos de CSE WARP V17.%1").arg(CSE_WARP_BUILD_NUMBER));
+            message.setWindowTitle(QStringLiteral("À propos de CSE WARP V%1").arg(CSE_WARP_PRODUCT_VERSION));
             message.setIcon(QMessageBox::Information);
             message.setTextFormat(Qt::RichText);
             message.setText(QStringLiteral(
-                "<h3>CSE WARP Beta X — V17.%1</h3>"
+                "<h3>CSE WARP Beta X — V%1</h3>"
                 "<p><b>Révision :</b> %2<br/><b>Compilation :</b> %3</p>"
                 "<p><b>GPU principal (DXGI) :</b> %4<br/><b>Rendu :</b> %5</p>"
                 "<p><b>Navigation :</b> HUD position X/Y/Z, cap, inclinaison et FOV.<br/>"
                 "<b>Diagnostic architectural :</b> capture PNG + position JSON restaurable.<br/>"
                 "<b>Raster :</b> Z-prepass %6, rejet AABB lumières %7 (expérimentaux).</p>"
-                "<p><b>Configuration :</b> Qt %8 ; MSAA %9x ; PBR %10 px.</p>")
-                .arg(CSE_WARP_BUILD_NUMBER).arg(revision.toHtmlEscaped())
+                "<p><b>Configuration :</b> Qt %8 ; MSAA %9x ; PBR %10 px.</p>"
+                "<p><b>Build GitHub Actions :</b> %11<br/><b>Scène :</b> %12</p>"
+                "<p><b>Révisions moteur :</b> PBR-%13 ; CPU-%14 ; DX11-%15 ; Vulkan-%16</p>")
+                .arg(CSE_WARP_PRODUCT_VERSION).arg(revision.toHtmlEscaped())
                 .arg(compileDate.toHtmlEscaped()).arg(gpu.toHtmlEscaped())
                 .arg(backend.toHtmlEscaped())
                 .arg(zEnabled?QStringLiteral("ON"):QStringLiteral("OFF"))
                 .arg(lightEnabled?QStringLiteral("ON"):QStringLiteral("OFF"))
                 .arg(QString::fromLatin1(qVersion()))
-                .arg(quality.msaaSamples).arg(textureResolution_));
+                .arg(quality.msaaSamples).arg(textureResolution_)
+                .arg(QStringLiteral(CSE_WARP_CI_BUILD)).arg(sceneRevision.toHtmlEscaped())
+                .arg(QStringLiteral(CSE_WARP_COMPONENT_PBR))
+                .arg(QStringLiteral(CSE_WARP_COMPONENT_CPU_LIGHTING))
+                .arg(QStringLiteral(CSE_WARP_COMPONENT_DIRECTX11))
+                .arg(QStringLiteral(CSE_WARP_COMPONENT_VULKAN)));
             auto* copy=message.addButton(QStringLiteral("Copier les informations système"),QMessageBox::ActionRole);
             message.addButton(QMessageBox::Ok);
             message.exec();
@@ -2075,7 +2099,7 @@ private:
         renderControlsDock_=right;
         auto* controls=new QWidget;
         auto* vertical=new QVBoxLayout(controls);
-        radioToggleButton_=new QPushButton(QStringLiteral("Reprendre la radio"),controls);
+        radioToggleButton_=new QPushButton(QStringLiteral("Activer la radio"),controls);
         radioStatusLabel_=new QLabel(QStringLiteral("Radio arrêtée"),controls);
         radioStatusLabel_->setWordWrap(true);
         vertical->addWidget(new QLabel(QStringLiteral("SON AMBIANT — RADIO UKRAINIENNE"),controls));
@@ -2446,6 +2470,22 @@ private:
         // F11 controls the dedicated render window, leaving these controls
         // available behind it.
         auto* viewMenu=menuBar()->addMenu(QStringLiteral("Affichage"));
+        auto* rendererHudAction=viewMenu->addAction(QStringLiteral("Afficher le HUD de la fenêtre de rendu (F2)"));
+        rendererHudAction->setCheckable(true);
+        QSettings rendererHudSettings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+        rendererHudVisible_=rendererHudSettings.value(QStringLiteral("Render/ShowHUD"),true).toBool();
+        rendererHudAction->setChecked(rendererHudVisible_);
+        rendererHudAction->setShortcut(QKeySequence(Qt::Key_F2));
+        rendererHudAction->setShortcutContext(Qt::ApplicationShortcut);
+        addAction(rendererHudAction);
+        for(auto* view:backendWindows_)if(view)view->addAction(rendererHudAction);
+        connect(rendererHudAction,&QAction::toggled,this,[this](bool visible){
+            rendererHudVisible_=visible;
+            QSettings cfg(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+            cfg.setValue(QStringLiteral("Render/ShowHUD"),visible);
+            updateRendererStamp();
+            if(canvas_)canvas_->setHudVisible(visible);
+        });
         auto* hudToggle=viewMenu->addAction(QStringLiteral("Afficher les coordonnées caméra (HUD)"));
         hudToggle->setCheckable(true);
         QSettings hudSettings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
@@ -2597,7 +2637,7 @@ private:
                 (dayNightCycleBox_->isChecked()?240.f:24.f));
             canvas_->invalidateSky();
         });
-        dayNightTimer_.setInterval(1500); // Architectural lighting is slower than 30Hz sky
+        dayNightTimer_.setInterval(1500); // Update simulated time without queuing a render every tick
         connect(&dayNightTimer_,&QTimer::timeout,this,[this]{
             if(!runtime_ || sceneLoading_)return;
             // Simulated time advances independently of GPU frame duration.
@@ -2619,6 +2659,10 @@ private:
             }else dayNightTimer_.stop();
             m3d::setRasterCloudTimeScale(!cloudAnimationBox_->isChecked()?0.f:
                 (enabled?240.f:24.f));
+            if(!enabled&&runtime_){
+                {std::lock_guard<std::mutex> lock(cpuShadows_->mutex);cpuShadows_->hour=-1.f;}
+                requestRender();
+            }
         });
         connect(sunHour_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double hour){
             // A deliberate manual time change reanchors the running clock.
@@ -2632,6 +2676,16 @@ private:
             // is queued, and in-flight frames retain their captured hour.
             runtime_->daylightHour=float(hour);
             canvas_->invalidateSky();
+            // Automatic cycle renders are restricted to the two live raster
+            // backends. CPU GI and CPU direct can take seconds or minutes per
+            // image; queuing those on every solar tick looks like a frozen UI.
+            if(applyingDayNightTick_){
+                const int backend=backendBox_?backendBox_->currentIndex():-1;
+                if(backend!=4&&backend!=5)return;
+                const qint64 now=dayNightClock_.elapsed();
+                if(watcher_.isRunning()||now-lastDayNightRenderMs_<5000)return;
+                lastDayNightRenderMs_=now;
+            }
             requestRender();
         });
         connect(roughness_,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this](double){modifyMaterial();});
@@ -2800,8 +2854,8 @@ private:
         const QString sceneRevision=outcome.database.revision.trimmed();
         if(sceneRevisionLabel_)sceneRevisionLabel_->setText(sceneRevision.isEmpty()?QStringLiteral("Scène —"):QStringLiteral("Scène %1").arg(sceneRevision));
         const QString revisionSuffix=sceneRevision.isEmpty()?QStringLiteral("Scène sans révision"):QStringLiteral("Scène %1").arg(sceneRevision);
-        setWindowTitle(QStringLiteral("CSE WARP Beta X V17.%1 — %2 — %3")
-            .arg(CSE_WARP_BUILD_NUMBER).arg(runtime_->title,revisionSuffix));
+        setWindowTitle(QStringLiteral("CSE WARP Beta X V%1 — %2 — %3")
+            .arg(CSE_WARP_PRODUCT_VERSION).arg(runtime_->title,revisionSuffix));
         sunHour_->blockSignals(true);
         sunHour_->setValue(double(runtime_->daylightHour));
         sunHour_->blockSignals(false);
@@ -3146,7 +3200,7 @@ private:
             int(backendWindows_.size())-1):0;
         const QString displayed=backendLastRenderer_[size_t(index)];
         const bool pending=requested!=backendLastRequest_[size_t(index)];
-        if(canvas_)canvas_->setRendererStamp(displayed,pending?requested:QString{});
+        if(canvas_){canvas_->setRendererStamp(displayed,pending?requested:QString{});canvas_->setHudVisible(rendererHudVisible_);}
         if(nativeRendererOverlay_){
             const QString shown=displayed.isEmpty()
                 ?QStringLiteral("Affiché : aucun rendu pour l’instant")
@@ -3156,7 +3210,7 @@ private:
             // Direct swapchain presentation bypasses ImageView::paintEvent,
             // including its camera HUD. Keep the live camera readout on the
             // native output window as well as in the controls status bar.
-            const QString camera=cameraHudEnabled_&&nativeHudLabel_&&
+            const QString camera=rendererHudVisible_&&cameraHudEnabled_&&nativeHudLabel_&&
                     !nativeHudLabel_->text().isEmpty()
                 ?nativeHudLabel_->text():QString{};
             QStringList overlayLines;
@@ -3172,7 +3226,7 @@ private:
                 nativeRendererOverlay_->setText(
                     metrics.elidedText(overlay,Qt::ElideRight,width-20));
             }
-            nativeRendererOverlay_->setVisible(nativeDirectSelected()&&canvas_&&canvas_->isVisible());
+            nativeRendererOverlay_->setVisible(rendererHudVisible_&&nativeDirectSelected()&&canvas_&&canvas_->isVisible());
             if(nativeDirectSelected()&&canvas_&&canvas_->isVisible())
                 nativeRendererOverlay_->raise();
         }
@@ -3190,8 +3244,8 @@ private:
         if(nativeRendererOverlay_&&nativeRendererOverlay_->parentWidget()!=canvas_)
             nativeRendererOverlay_->setParent(canvas_,
                 Qt::Tool|Qt::FramelessWindowHint|Qt::WindowDoesNotAcceptFocus);
-        canvas_->setWindowTitle(QStringLiteral("CSE WARP V17.%1 — %2 — fenêtre dédiée")
-            .arg(CSE_WARP_BUILD_NUMBER).arg(backendBox_->itemText(index)));
+        canvas_->setWindowTitle(QStringLiteral("CSE WARP V%1 — %2 — fenêtre dédiée")
+            .arg(CSE_WARP_PRODUCT_VERSION).arg(backendBox_->itemText(index)));
         const bool direct=nativeDirectSelected();
         if(backendChanged||direct){
             // The global export/sky state belongs to the selected output.
@@ -3270,7 +3324,7 @@ private:
         const QString root=QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation)
             +QStringLiteral("/CSE WARP/Benchmarks");
         QDir().mkpath(root);
-        const QString name=QStringLiteral("V17.%1-PACING-").arg(CSE_WARP_BUILD_NUMBER)
+        const QString name=QStringLiteral("V%1-PACING-").arg(CSE_WARP_PRODUCT_VERSION)
             +QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-hhmmss"));
         const auto stats=cse::pacing::summarize(pacingSamples_,pacingRejected_,pacingQueued_);
         QJsonArray records;
@@ -3287,7 +3341,7 @@ private:
                 .arg(sample.renderMs,0,'f',3).arg(sample.pendingRequests);
         }
         const QJsonObject summary{
-            {"version",QStringLiteral("17.%1").arg(CSE_WARP_BUILD_NUMBER)},
+            {"version",QStringLiteral(CSE_WARP_PRODUCT_VERSION)},
             {"scene",scenePath_},
             {"backend",backendBox_->currentText()},
             {"frameCount",int(stats.frames)},
@@ -3394,8 +3448,12 @@ private:
         // Keep lighting smooth, but rebuild the expensive 1024² CPU shadow map
         // only once per simulated hour during DirectX day/night. At 24h/6min,
         // this cuts rebuild stalls from every 3.75s to every 15s without lowering map quality.
-        const bool stableDxDayNight=backend==4 && dayNightCycleBox_ && dayNightCycleBox_->isChecked();
-        const float shadowStepHours=stableDxDayNight?1.0f:.25f;
+        // Keep the high-cost CPU shadow map fixed while the sun animates. Rebuilding
+        // it during the cycle creates periodic multi-second stalls in both raster APIs.
+        // The map is invalidated once when the cycle stops so the final sun position
+        // receives a matching shadow.
+        const bool animatedDayNight=dayNightCycleBox_&&dayNightCycleBox_->isChecked();
+        const float shadowStepHours=animatedDayNight?24.f:.25f;
         const float shadowHour=std::floor(renderHour/shadowStepHours)*shadowStepHours;
         auto preset=activeCameraPose();
         updateCameraHud();
@@ -3748,10 +3806,10 @@ int main(int argc,char** argv){
     // Split only interactive raster output into a sky backdrop and an
     // alpha-preserving architecture foreground. Benchmarks stay unchanged.
     qputenv("M3D_V17_SPLIT_SKY","1");
-    QCoreApplication::setApplicationName(QStringLiteral("CSE WARP Beta X V17.%1")
-        .arg(CSE_WARP_BUILD_NUMBER));
-    QCoreApplication::setApplicationVersion(QStringLiteral("17.%1")
-        .arg(CSE_WARP_BUILD_NUMBER));
+    QCoreApplication::setApplicationName(QStringLiteral("CSE WARP Beta X V%1")
+        .arg(CSE_WARP_PRODUCT_VERSION));
+    QCoreApplication::setApplicationVersion(QStringLiteral("%1")
+        .arg(CSE_WARP_PRODUCT_VERSION));
     const bool switchSmoke=argc>=4
         && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-scene-switch");
     const bool repeatSmoke=argc>=3
