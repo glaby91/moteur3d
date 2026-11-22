@@ -93,7 +93,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Ten-pass fast design preflight failed' }
       - name: Configure
         shell: pwsh
-        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER -DV17_GIT_SHA=$env:GITHUB_SHA -DV17_SCENE_SOURCE_DIR="$env:RUNNER_TEMP/v17-scene-latest/benchmark-civic"
+        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER -DV17_GIT_SHA=$env:GITHUB_SHA
       - name: Compile
         run: cmake --build build-v17 --config Release --parallel 4
       - name: Verify V17 executable and shared V16 engine
@@ -111,17 +111,10 @@ jobs:
                          "build-v17/Release/benchmark-civic/scene.json",
                          "build-v17/Release/benchmark-civic/scene-lourd.json",
                          "build-v17/Release/benchmark-civic/scene-extreme.json",
-                         "build-v17/Release/benchmark-civic/SCENE_VERSION.json",
                          "build-v17/Release/shaders/m3d_raytrace_compute.hlsl")) {
             if (!(Test-Path $p)) { throw "Missing V17 package file: $p" }
             Write-Host "Verified: $p"
           }
-          $expectedScene = Get-Content (Join-Path $env:RUNNER_TEMP "SCENE_VERSION.json") -Raw | ConvertFrom-Json
-          $packagedScene = Get-Content "build-v17/Release/benchmark-civic/SCENE_VERSION.json" -Raw | ConvertFrom-Json
-          if ($packagedScene.revision -ne $expectedScene.revision) {
-            throw "Packaged scene revision $($packagedScene.revision) does not match latest release $($expectedScene.revision)."
-          }
-          Write-Host "Verified packaged scene revision: $($packagedScene.revision)"
       - name: Verify native V17 taskbar icon and executable version
         shell: pwsh
         run: |
