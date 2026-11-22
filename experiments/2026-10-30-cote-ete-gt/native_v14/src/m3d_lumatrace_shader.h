@@ -1,7 +1,9 @@
 #pragma once
 namespace m3d::lumatrace_detail {
 inline constexpr char kComputeShader[] = R"HLSL(
-struct Vertex { float3 p; float3 n; float2 uv; uint material; uint primitiveId; };
+struct Vertex { float3 p; uint normalPacked; float2 uv; uint material; uint primitiveId; };
+float snorm10(uint bits){int v=(int)(bits&1023u);v=(v<<22)>>22;return max(-1.0,(float)v/511.0);}
+float3 decodeNormal(uint packed){return normalize(float3(snorm10(packed),snorm10(packed>>10),snorm10(packed>>20)));}
 struct Node { float3 lo; uint c0; float3 hi; uint c1; uint c2,c3,first,count,children,pad; };
 StructuredBuffer<Vertex> V : register(t0);
 StructuredBuffer<uint> Order : register(t1);
@@ -29,7 +31,7 @@ float3 light(uint id,float3 p,float3 n,float4 l,float3 color){float3 dv=l.xyz-p;
  if(ndl<=0||occluded(p+n*.018,dir,d,id))return 0;
  return color*(ndl*l.w/(1+d*d*.28));}
 [numthreads(64,1,1)] void CSShadeTriangles(uint3 tid:SV_DispatchThreadID){uint id=tid.x;if(id>=Counts.x)return;
- Vertex a=V[id*3],b=V[id*3+1],c=V[id*3+2];float3 p=(a.p+b.p+c.p)/3,n=normalize(a.n+b.n+c.n);
+ Vertex a=V[id*3],b=V[id*3+1],c=V[id*3+2];float3 p=(a.p+b.p+c.p)/3,n=normalize(decodeNormal(a.normalPacked)+decodeNormal(b.normalPacked)+decodeNormal(c.normalPacked));
  Radiance[id]=float4(light(id,p,n,LightA,ColorA.rgb)+light(id,p,n,LightB,ColorB.rgb),1);}
 )HLSL";
 }
