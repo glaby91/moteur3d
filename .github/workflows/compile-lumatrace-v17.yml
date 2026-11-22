@@ -12,6 +12,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: compile-lumatrace-v17-${{ github.ref }}
   cancel-in-progress: true
@@ -40,20 +41,26 @@ jobs:
           -DV17_GIT_SHA=$env:GITHUB_SHA
       - name: Compile V17 application and shared engine
         run: cmake --build build-v17-lumatrace --config Release --target moteur3d_v17 --parallel 4
-      - name: Deploy Qt runtime and prepare package
-        id: package
+      - name: Assemble complete V17 scene package with LumaTrace engine
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          $base = "dist-v17-lumatrace"
+          gh run download 44647231652 --repo glaby91/moteur3d --name CSE-WARP-V17.600-Windows-x64 --dir $base
+          if ($LASTEXITCODE -ne 0) { throw "Could not retrieve the complete V17.600 scene package" }
           $exe = Get-ChildItem -Path build-v17-lumatrace -Recurse -Filter moteur3d_v17.exe | Select-Object -First 1
-          if (-not $exe) { throw "moteur3d_v17.exe was not produced" }
-          $windeployqt = Join-Path $env:QT_ROOT_DIR "bin/windeployqt.exe"
-          & $windeployqt --release --no-translations --compiler-runtime $exe.FullName
+          $core = Get-ChildItem -Path build-v17-lumatrace -Recurse -Filter moteur3d_v16_core.dll | Select-Object -First 1
+          if (-not $exe -or -not $core) { throw "The LumaTrace executable or V16 engine DLL is missing" }
+          Copy-Item $exe.FullName (Join-Path $base "moteur3d_v17.exe") -Force
+          Copy-Item $core.FullName (Join-Path $base "moteur3d_v16_core.dll") -Force
+          if (!(Test-Path (Join-Path $base "benchmark-civic/scene.json"))) { throw "The default Pripyat scene is missing" }
+          windeployqt --release --no-translations "$base/moteur3d_v17.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          "dir=$($exe.DirectoryName)" >> $env:GITHUB_OUTPUT
       - name: Publish Windows x64 package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: LumaTrace-V17-Windows-x64
-          path: ${{ steps.package.outputs.dir }}
+          path: dist-v17-lumatrace/
           if-no-files-found: error
           compression-level: 6
