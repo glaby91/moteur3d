@@ -496,6 +496,24 @@ public:
                 if(pending_){pending_=false;requestRender();}
                 return;
             }
+            if(!outcome.error.isEmpty()){
+                // Keep the selected backend active and show its own failure in
+                // its dedicated viewport instead of leaving a misleading blank.
+                const int failedBackend=outcome.backendIndex;
+                if(failedBackend>=0&&failedBackend<int(backendLastRenderer_.size())){
+                    backendLastRenderer_[size_t(failedBackend)]=outcome.renderer;
+                    backendLastRequest_[size_t(failedBackend)]=outcome.requestStamp;
+                }
+                if(canvas_){
+                    canvas_->setNativePresentation(false);
+                    canvas_->setImage(QImage{});
+                    canvas_->setCameraHud({},false);
+                    canvas_->enableSkyCompositing(false);
+                    canvas_->setPlaceholder(QStringLiteral("%1\\n\\n%2")
+                        .arg(outcome.renderer,outcome.error));
+                }
+                updateRendererStamp();
+            }
             if(outcome.error.isEmpty()&&!outcome.nativeFallback&&
                outcome.directPresented!=nativeDirectSelected()){
                 // Direct-display was toggled while this frame was in flight.
