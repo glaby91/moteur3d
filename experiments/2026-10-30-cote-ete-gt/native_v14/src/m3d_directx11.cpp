@@ -2411,8 +2411,8 @@ private:
         lumaTraceGeometryEnabled_=lumaTrace;
         return true;
     }
-    struct LumaParams { uint32_t counts[4];float lightA[4],colorA[4],lightB[4],colorB[4]; };
-    static_assert(sizeof(LumaParams)==80,"LumaTrace HLSL constant packing");
+    struct LumaParams { uint32_t counts[4];float lights[64][4],colors[64][4]; };
+    static_assert(sizeof(LumaParams)==2064,"LumaTrace HLSL constant packing");
     bool ensureLumaTrace(const Scene& scene,const LumaTraceBvh4& bvh,std::wstring& error){
         if(verticesSrv_&&lumaSceneIdentity_==scene.gpuCacheIdentity&&lumaSceneRevision_==scene.gpuCacheRevision&&
            lumaBvhSrv_&&lumaOrderSrv_&&lumaRadianceSrv_&&lumaRadianceUav_&&lumaCompute_&&lumaParams_)return true;
@@ -2468,17 +2468,24 @@ private:
     }
     bool dispatchLumaTrace(const Scene& scene,std::wstring& error){
         if(scene.root<0||size_t(scene.root)>=scene.node.size()){error=L"Racine BVH4 invalide.";return false;}
-        LumaParams p{};p.counts[0]=lumaTriangleCount_;p.counts[1]=lumaOrderCount_;p.counts[2]=lumaNodeCount_;p.counts[3]=1;
+        LumaParams p{};p.counts[0]=lumaTriangleCount_;p.counts[1]=lumaOrderCount_;p.counts[2]=lumaNodeCount_;
         const Node& root=scene.node[size_t(scene.root)];const V center=(root.mn+root.mx)*.5f;
-        // LumaTrace radiance is reusable while geometry and lights stay fixed.
-        // Keep the diagnostic pair stationary; explicit light changes still alter the parameter key below.
-        constexpr float phase=0.f;
-        // Keep both animated point lights within two metres of the scene centre.
-        const float radius=1.4f;const V a=center+V{std::cos(phase)*radius,.75f+std::sin(phase)*.45f,std::sin(phase)*radius};
-        const V b=center+V{-std::cos(phase)*radius,.75f-std::sin(phase)*.45f,-std::sin(phase)*radius};
-        p.lightA[0]=a.x;p.lightA[1]=a.y;p.lightA[2]=a.z;p.lightA[3]=1.15f;p.lightB[0]=b.x;p.lightB[1]=b.y;p.lightB[2]=b.z;p.lightB[3]=1.15f;
-        p.colorA[0]=.12f;p.colorA[1]=.62f;p.colorA[2]=1.f;p.colorB[0]=1.f;p.colorB[1]=.39f;p.colorB[2]=.10f;
-        std::array<uint32_t,20> radianceKey{};std::memcpy(radianceKey.data(),&p,sizeof(p));
+        auto appendLight=[&](V pos,float intensity,V color){
+            if(p.counts[3]>=64)return;
+            const uint32_t i=p.counts[3]++;
+            p.lights[i][0]=pos.x;p.lights[i][1]=pos.y;p.lights[i][2]=pos.z;p.lights[i][3]=intensity;
+            p.colors[i][0]=color.x/255.f;p.colors[i][1]=color.y/255.f;p.colors[i][2]=color.z/255.f;
+        };
+        // Preserve the LumaTrace test pair, then prioritize scene exterior
+        // luminaires so the 64-source cap cannot silently drop the new row.
+        appendLight(center+V{1.4f,.75f,0.f},1.15f,{31,158,255});
+        appendLight(center+V{-1.4f,.75f,0.f},1.15f,{255,99,26});
+        for(const Light& l:pointLights)appendLight(l.p,l.intensity,l.color);
+        for(const Light& l:scene.lights)if(l.exterior)
+            appendLight(l.p,l.intensity*lampFactor,l.color);
+        for(const Light& l:scene.lights)if(!l.exterior)
+            appendLight(l.p,l.intensity,l.color);
+        std::array<uint32_t,sizeof(LumaParams)/sizeof(uint32_t)> radianceKey{};std::memcpy(radianceKey.data(),&p,sizeof(p));
         if(lumaRadianceCacheValid_&&radianceKey==lumaRadianceKey_)return true;
         D3D11_MAPPED_SUBRESOURCE m{};if(FAILED(context_->Map(lumaParams_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m))){error=L"Upload constantes LumaTrace impossible.";return false;}
         std::memcpy(m.pData,&p,sizeof(p));context_->Unmap(lumaParams_.Get(),0);

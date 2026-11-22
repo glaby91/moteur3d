@@ -10,7 +10,7 @@ Vertex loadVertex(uint id){uint byteOffset=id*32u;Vertex v;v.p=float3(asfloat(V.
 StructuredBuffer<uint> Order : register(t1);
 StructuredBuffer<Node> Bvh : register(t2);
 RWStructuredBuffer<float4> Radiance : register(u0);
-cbuffer Params : register(b0) { uint4 Counts; float4 LightA; float4 ColorA; float4 LightB; float4 ColorB; };
+cbuffer Params : register(b0) { uint4 Counts; float4 Lights[64]; float4 Colors[64]; };
 bool bounds(Node n,float3 o,float3 invD,float maxT,out float nearT){
  float3 a=(n.lo-o)*invD,b=(n.hi-o)*invD,lo=min(a,b),hi=max(a,b);
  nearT=max(max(lo.x,lo.y),max(lo.z,0));return min(min(hi.x,hi.y),min(hi.z,maxT))>=nearT;}
@@ -33,6 +33,7 @@ float3 light(uint id,float3 p,float3 n,float4 l,float3 color){float3 dv=l.xyz-p;
  return color*(ndl*l.w/(1+d*d*.28));}
 [numthreads(64,1,1)] void CSShadeTriangles(uint3 tid:SV_DispatchThreadID){uint id=tid.x;if(id>=Counts.x)return;
  Vertex a=loadVertex(id*3u),b=loadVertex(id*3u+1u),c=loadVertex(id*3u+2u);float3 p=(a.p+b.p+c.p)/3,n=normalize(decodeNormal(a.normalPacked)+decodeNormal(b.normalPacked)+decodeNormal(c.normalPacked));
- Radiance[id]=float4(light(id,p,n,LightA,ColorA.rgb)+light(id,p,n,LightB,ColorB.rgb),1);}
+ float3 sum=0;[loop]for(uint i=0;i<min(Counts.w,64u);++i)sum+=light(id,p,n,Lights[i],Colors[i].rgb);
+ Radiance[id]=float4(sum,1);}
 )HLSL";
 }
