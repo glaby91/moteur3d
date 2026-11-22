@@ -1,0 +1,664 @@
+name: CSE WARP V17.523 — coupole piscine et diagnostic WSI — Windows HD620
+run-name: V17.523 coupole piscine, fenêtres DX11 / Vulkan / CPU — CI ${{ github.run_number }}
+on:
+  push:
+    branches:
+      - integration/v17-493-complete-vulkan-hd620-261115
+    paths:
+      - 'v17/**'
+      - 'v16/**'
+      - 'scenes/v16/benchmark-civic/**'
+      - 'assets/materials/pripyat-v17/**'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/**'
+      - '.github/workflows/v17-493-vulkan-complete.yml'
+      - 'tools/v493_*'
+      - 'tools/v17_500_*'
+      - 'tools/v17_523_*'
+  pull_request:
+    paths:
+      - 'v17/**'
+      - 'tools/v17_523_*'
+      - '.github/workflows/v17-493-vulkan-complete.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: cse-warp-v17-523-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    name: Windows x64 — V17.build and V16 regression tests
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v5
+      - name: Qt6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Vulkan 1.3 SDK for hardware backend and SPIR-V compiler
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: '1.4.309.0'
+          install_runtime: false
+          cache: true
+          stripdown: true
+          install_swiftshader: false
+      - name: Assert Vulkan is optional at runtime on this GPU-less runner
+        shell: pwsh
+        run: |
+          $cmake=Get-Content v16/CMakeLists.txt -Raw
+          if (!$cmake.Contains('/DELAYLOAD:vulkan-1.dll')) {
+            throw 'Missing Windows delay-load contract for optional Vulkan'
+          }
+          $backend=Get-Content v17/vulkan/m3d_vulkan.cpp -Raw
+          if (!$backend.Contains('vulkanRuntimeAvailable(error)')) {
+            throw 'Missing graceful error handling when Vulkan loader is absent'
+          }
+          Write-Host 'V17.494 CPU/DX11 require no Vulkan runtime. Native scene test verifies this once built.'
+      - name: Generate benchmark scenes from reusable Pripyat material library
+        shell: pwsh
+        run: |
+          node --version
+          node scenes/v16/benchmark-civic/generate.cjs --all
+          node scenes/v16/benchmark-civic/validate.cjs
+          if ($LASTEXITCODE -ne 0) { throw "V17 scene validation failed" }
+          python scenes/v16/benchmark-civic/landscape_v4.py --root scenes/v16/benchmark-civic
+          if ($LASTEXITCODE -ne 0) { throw "V4 scene generation failed" }
+          foreach ($p in @("scene-v4.json","instances/v4.json","cameras/v4.json","stats/v4-budget.json")) {
+            if (!(Test-Path "scenes/v16/benchmark-civic/$p")) { throw "Missing generated V4 resource: $p" }
+          }
+      - name: Preflight ten design passes without rendering (regression guard)
+        shell: pwsh
+        run: |
+          node v17/tools/palais_ten_passes.cjs --scene scenes/v16/benchmark-civic --binary build-v17/Release/moteur3d_v17_benchmark.exe --check-only
+          if ($LASTEXITCODE -ne 0) { throw 'Ten-pass fast design preflight failed' }
+      - name: Configure
+        shell: pwsh
+        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_BUILD_NUMBER=523
+      - name: Compile
+        run: cmake --build build-v17 --config Release --parallel 4
+      - name: Verify six unique native backend HWNDs and renderer switching
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path "build-v17/Release/moteur3d_v17.exe").Path
+          $stdout = Join-Path $env:RUNNER_TEMP "v17-native-ui-smoke.stdout.log"
+          $stderr = Join-Path $env:RUNNER_TEMP "v17-native-ui-smoke.stderr.log"
+          $process = Start-Process -FilePath $exe -ArgumentList @("--smoke-native-ui") -Wait -PassThru -NoNewWindow -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          $rc = [int]$process.ExitCode
+          Write-Host "Native Qt UI smoke exit: $rc"
+          foreach ($log in @($stdout, $stderr)) {
+            if (Test-Path $log) { Get-Content $log | ForEach-Object { Write-Host $_ } }
+          }
+          if ($rc -ne 0) { throw "Backend HWND isolation smoke failed (actual Windows process code $rc)" }
+      - name: Verify Vulkan assets and GPU-independent regression tests
+        shell: pwsh
+        run: |
+          foreach ($f in @(
+            'build-v17/Release/v17_vulkan_mesh_smoke.exe',
+            'build-v17/Release/v17_vulkan_dirty_policy_smoke.exe',
+            'build-v17/Release/v17_vulkan_khronos_console.exe',
+            'build-v17/Release/v17_vulkan_ab_bench.exe',
+            'build-v17/Release/vulkan/raster.frag.spv',
+            'build-v17/Release/vulkan/raster_fast.frag.spv',
+            'build-v17/Release/vulkan/raster.vert.spv',
+            'build-v17/Release/vulkan/sky.frag.spv'
+          )) { if (!(Test-Path $f)) {throw "Missing Vulkan build asset: $f"} }
+          & 'build-v17/Release/v17_vulkan_mesh_smoke.exe'
+          if ($LASTEXITCODE -ne 0){throw 'Vulkan mesh regression failed'}
+          & 'build-v17/Release/v17_vulkan_dirty_policy_smoke.exe'
+          if ($LASTEXITCODE -ne 0){throw 'Vulkan revision-based invalidation regression failed'}
+          Write-Host 'Vulkan compiled. GPU hardware FPS and WSI must still be measured on physical HD620.'
+      - name: Verify V17 executable and shared V16 engine
+        shell: pwsh
+        run: |
+          foreach ($p in @("build-v17/Release/moteur3d_v17.exe",
+                         "build-v17/Release/moteur3d_v16_core.dll",
+                         "build-v17/Release/moteur3d_v17_benchmark.exe",
+                         "build-v17/Release/moteur3d_v17_gibake.exe",
+                         "build-v17/Release/moteur3d_v17_campaign.exe",
+                         "build-v17/Release/moteur3d_v17_benchui.exe",
+                         "build-v17/Release/cse_warp_v17.ico",
+                         "build-v17/Release/cse_warp_v17_bench.ico",
+                         "build-v17/Release/pavillon01/scene.json",
+                         "build-v17/Release/benchmark-civic/scene.json",
+                         "build-v17/Release/benchmark-civic/scene-lourd.json",
+                         "build-v17/Release/benchmark-civic/scene-extreme.json",
+                         "build-v17/Release/shaders/m3d_raytrace_compute.hlsl")) {
+            if (!(Test-Path $p)) { throw "Missing V17 package file: $p" }
+            Write-Host "Verified: $p"
+          }
+      - name: Verify native V17 taskbar icon and executable version
+        shell: pwsh
+        run: |
+          $engine = Get-Content "v17/version.json" -Raw | ConvertFrom-Json
+          $expectedMajor = [int]$engine.engine.major
+          $expectedMinor = [int]$engine.engine.build
+          $expectedLabel = "V$expectedMajor.$('{0:D3}' -f $expectedMinor)"
+          Add-Type -AssemblyName System.Drawing
+          foreach ($icon in @("build-v17/Release/cse_warp_v17.ico", "build-v17/Release/cse_warp_v17_bench.ico")) {
+            if ((Get-Item $icon).Length -lt 4000) { throw "Incomplete Windows ICO: $icon" }
+            $handle = [System.Drawing.Icon]::new((Resolve-Path $icon).Path)
+            if (!$handle) { throw "Cannot load Windows icon: $icon" }
+            $handle.Dispose()
+          }
+          foreach ($name in @("moteur3d_v17.exe", "moteur3d_v17_benchui.exe", "moteur3d_v17_benchmark.exe")) {
+            $exe = (Resolve-Path "build-v17/Release/$name").Path
+            $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
+            Write-Host "$name — $($version.ProductName) — $($version.FileVersion)"
+            if ($version.FileMajorPart -ne $expectedMajor -or
+                $version.FileMinorPart -ne $expectedMinor -or
+                $version.FileBuildPart -ne 0 -or $version.FilePrivatePart -ne 0) {
+              throw "Invalid $expectedLabel Windows build version in $name : $($version.FileVersion)"
+            }
+          }
+      - name: Validate light complex scene in native V17 loader
+        shell: pwsh
+        run: |
+          $log = "build-v17/v344-native-scene-smoke.log"
+          New-Item -ItemType Directory -Force (Split-Path $log -Parent) | Out-Null
+          # Avoid relying on native stderr piping/PowerShell Tee-Object behavior.
+          # Redirect stdout/stderr directly to a file and preserve exit code.
+          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" "scenes/v16/benchmark-civic/scene.json" 20000 1> $log 2>&1
+          $rc = $LASTEXITCODE
+          Write-Host "V17 native smoke exit code: $rc"
+          if (Test-Path $log) {
+            Get-Content $log | ForEach-Object { Write-Host "SCENE_DIAGNOSTIC: $_" }
+          } else {
+            Write-Warning "Native smoke produced no log; using process exit code."
+          }
+          if ($rc -ne 0) { throw "Complex scene fails in native V17 loader; exit $rc" }
+      - name: Verify real 25% primary rays on Pripyat pool 19h CPU and D3D11 Compute
+        shell: pwsh
+        timeout-minutes: 15
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          M3D_V16_GPU_GI_SAMPLES: '0'
+        run: |
+          & "build-v17/Release/v17_primary_quarter_pripyat_smoke.exe" "scenes/v16/benchmark-civic/scene.json" "build-v17/total-simulation/primary-quarter-pripyat"
+          if ($LASTEXITCODE -ne 0) { throw "Native primary-ray 25% Pripyat A/B failed" }
+          Get-Content "build-v17/total-simulation/primary-quarter-pripyat/primary-ray-ab.csv" | ForEach-Object { Write-Host $_ }
+      - name: V17 GUI scene switching while a previous render may still be active
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          QT_QPA_PLATFORM: 'offscreen'
+        run: |
+          $exe = (Resolve-Path "build-v17/Release/moteur3d_v17.exe").Path
+          $args = @("--smoke-scene-switch",
+                    "scenes/v16/pavillon01/scene.json",
+                    "scenes/v16/material-lab/scene.json")
+          $process = Start-Process -FilePath $exe -ArgumentList $args -Wait -PassThru
+          Write-Host "V17 scene-switch smoke exit: $($process.ExitCode)"
+          if ($process.ExitCode -ne 0) {
+            throw "V17 GUI failed to render after switching scenes (exit $($process.ExitCode))"
+          }
+      - name: Benchmark DX11 1/2/3 readback buffers with exact image parity
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          & "build-v17/Release/moteur3d_v17_benchmark.exe" "scenes/v16/pavillon01/scene.json" "build-v17/v17-bench-readback" --smoke --compare-readback --raster-msaa 2 --raster-anisotropy 8 --raster-lod-percent 85 --raster-culling 1 --raster-lod-enabled 1
+          if ($LASTEXITCODE -ne 0) { throw "Pipelined DX11 readback benchmark failed" }
+          $summary = Get-ChildItem "build-v17/v17-bench-readback" -Recurse -Filter summary.json | Select-Object -First 1
+          if (!$summary) { throw "No pipelined benchmark report" }
+          $result = Get-Content $summary.FullName -Raw | ConvertFrom-Json
+          if ($result.system.rasterQuality.msaaSamples -ne 2 -or
+              $result.system.rasterQuality.anisotropy -ne 8 -or
+              $result.system.rasterQuality.lodQualityPercent -ne 85) {
+            throw "Host-quality flags were not applied in the benchmark process"
+          }
+          $cases = @($result.cases | Where-Object { $_.backend -eq "V17_D3D11_Raster" })
+          if ($cases.Count -ne 3) { throw "Expected 1, 2 and 3 staging buffer benchmark cases" }
+          foreach ($depth in @(1,2,3)) {
+            $case = $cases | Where-Object { $_.readbackDepth -eq $depth } | Select-Object -First 1
+            if (!$case -or $case.status -ne "ok" -or !$case.pixelIdentical -or
+                $case.streamMeanMs -le 0 -or $case.cpuMapWaitMs -lt 0) {
+              throw "Depth $depth failed image parity or timing test"
+            }
+            Write-Host "DX11 depth $depth : throughput $($case.streamFps) FPS, GPU valid=$($case.gpuTimingValid), GPU total=$($case.gpuTotalMs) ms"
+          }
+      - name: Pixel-exact optimized vs reference PS and GPU readback conversion
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          $exe = "build-v17/Release/moteur3d_v17_benchmark.exe"
+          # First run uses the exact previous shader/conversion, the second
+          # runs the optimizations. Isolated processes ensure shader recompile.
+          foreach ($scene in @("scenes/v16/benchmark-civic/scene.json")) {
+            $name = if ($scene -like "*pavillon01*") { "pavillon" } else { "civic" }
+            $env:M3D_V17_DISABLE_SHADER_OPT = '1'
+            $env:M3D_V17_DISABLE_FAST_SWIZZLE = '1'
+            & $exe $scene "build-v17/shader-ab-$name-reference" --smoke --raster-msaa 2 --raster-anisotropy 8
+            if ($LASTEXITCODE -ne 0) { throw "Reference PS failed: $scene" }
+            Remove-Item Env:M3D_V17_DISABLE_SHADER_OPT -ErrorAction SilentlyContinue
+            Remove-Item Env:M3D_V17_DISABLE_FAST_SWIZZLE -ErrorAction SilentlyContinue
+            & $exe $scene "build-v17/shader-ab-$name-optimized" --smoke --raster-msaa 2 --raster-anisotropy 8
+            if ($LASTEXITCODE -ne 0) { throw "Optimized PS failed: $scene" }
+            $refImg = Get-ChildItem "build-v17/shader-ab-$name-reference" -Recurse -Filter "raster_*.png" | Select-Object -First 1
+            $optImg = Get-ChildItem "build-v17/shader-ab-$name-optimized" -Recurse -Filter "raster_*.png" | Select-Object -First 1
+            if (!$refImg -or !$optImg) { throw "Missing A/B image for $scene" }
+            if ((Get-FileHash $refImg.FullName -Algorithm SHA256).Hash -ne
+                (Get-FileHash $optImg.FullName -Algorithm SHA256).Hash) {
+              throw "Optimized pixel shader or swizzle changed a pixel: $scene"
+            }
+            $refSummary=Get-ChildItem "build-v17/shader-ab-$name-reference" -Recurse -Filter "summary.json" | Select-Object -First 1
+            $optSummary=Get-ChildItem "build-v17/shader-ab-$name-optimized" -Recurse -Filter "summary.json" | Select-Object -First 1
+            $before=Get-Content $refSummary.FullName -Raw | ConvertFrom-Json
+            $after=Get-Content $optSummary.FullName -Raw | ConvertFrom-Json
+            if ($before.system.pixelShaderOptimized -or $before.system.fastPixelSwizzle -or
+                !$after.system.pixelShaderOptimized -or !$after.system.fastPixelSwizzle) {
+              throw "A/B shader and conversion mode not correctly reported"
+            }
+            $referenceCase=@($before.cases | Where-Object { $_.backend -eq "V17_D3D11_Raster" })[0]
+            $optimizedCase=@($after.cases | Where-Object { $_.backend -eq "V17_D3D11_Raster" })[0]
+            if ($referenceCase.status -ne 'ok' -or $optimizedCase.status -ne 'ok' -or
+                $referenceCase.submittedTriangles -ne $optimizedCase.submittedTriangles) {
+              throw "A/B source geometry or rendering status mismatch: $scene"
+            }
+            Write-Host "A/B pixel-identical $name — reference mean $($referenceCase.meanMs) ms; optimized mean $($optimizedCase.meanMs) ms (WARP only)"
+          }
+      - name: Validate bit-identical parallel PBR and mixed-resolution Compute atlas
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          & "build-v17/Release/v17_pbr_compute_smoke.exe" "scenes/v16/pavillon01/scene.json"
+          if ($LASTEXITCODE -ne 0) {
+            throw "PBR parallel pixel equivalence or Compute mip atlas smoke failed"
+          }
+      - name: Package CSE WARP V17
+        shell: pwsh
+        run: |
+          New-Item -Type Directory -Path "dist-v17" -Force | Out-Null
+          Copy-Item "build-v17/Release/moteur3d_v17.exe" "dist-v17/"
+          Copy-Item "build-v17/Release/moteur3d_v17_benchmark.exe" "dist-v17/"
+          Copy-Item "build-v17/Release/moteur3d_v17_gpu_trajectory.exe" "dist-v17/"
+          Copy-Item "v17/LANCER_BENCHMARK_DIRECTX11.bat" "dist-v17/"
+          Copy-Item "build-v17/Release/moteur3d_v17_gibake.exe" "dist-v17/"
+          New-Item -ItemType Directory -Force "dist-v17/outils/gi" | Out-Null
+          Copy-Item "build-v17/Release/moteur3d_v17_gibake.exe" "dist-v17/outils/gi/" -Force
+          Copy-Item "build-v17/Release/moteur3d_v17_campaign.exe" "dist-v17/"
+          Copy-Item "build-v17/Release/moteur3d_v17_benchui.exe" "dist-v17/"
+          Copy-Item "build-v17/v16/Release/moteur3d_v16.exe" "dist-v17/"
+          Copy-Item "build-v17/Release/moteur3d_v16_core.dll" "dist-v17/"
+          Copy-Item "build-v17/Release/cse_warp_v17.ico" "dist-v17/"
+          Copy-Item "build-v17/Release/cse_warp_v17_bench.ico" "dist-v17/"
+          Copy-Item "build-v17/Release/pavillon01" "dist-v17/pavillon01" -Recurse
+          Copy-Item "build-v17/Release/benchmark-civic" "dist-v17/benchmark-civic" -Recurse
+          # Release CMake distribution includes the legacy benchmark scene only.
+          # Overlay the actual generated V4 scene, its instance/camera manifests,
+          # referenced textures and all PBR resources in the same relative paths.
+          Copy-Item "scenes/v16/benchmark-civic/*" "dist-v17/benchmark-civic/" -Recurse -Force -ErrorAction Stop
+          New-Item -ItemType Directory -Force "dist-v17/material-library/pripyat-v17/originaux" | Out-Null
+          Copy-Item "assets/materials/pripyat-v17/catalogue.json" "dist-v17/material-library/pripyat-v17/"
+          Copy-Item "assets/materials/pripyat-v17/README.md" "dist-v17/material-library/pripyat-v17/"
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/textures/prp_concrete_panel.m3dpbr.gz" "dist-v17/material-library/pripyat-v17/originaux/"
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/textures/prp_concrete_panel_source.jpg" "dist-v17/material-library/pripyat-v17/originaux/"
+          # Additional existing Pripyat hero materials/models are preserved as
+          # ORIGINAL sources for reuse, not imported into the fictional scene.
+          New-Item -ItemType Directory -Force "dist-v17/material-library/pripyat-v17/hero-assets" | Out-Null
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/textures/energetik_fresco_mosaic.jpg" "dist-v17/material-library/pripyat-v17/hero-assets/"
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_fresco_mosaic.glb" "dist-v17/material-library/pripyat-v17/hero-assets/"
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_fresco_mosaic.asset.json" "dist-v17/material-library/pripyat-v17/hero-assets/"
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_facade_bay.glb" "dist-v17/material-library/pripyat-v17/hero-assets/"
+          Copy-Item "experiments/2026-10-30-cote-ete-gt/native_v14/assets/pripyat/energetik_facade_bay.asset.json" "dist-v17/material-library/pripyat-v17/hero-assets/"
+          Copy-Item "build-v17/Release/material-lab" "dist-v17/material-lab" -Recurse
+          Copy-Item "build-v17/Release/pripyat-photo2scene-proof" "dist-v17/pripyat-photo2scene-proof" -Recurse
+          Copy-Item "build-v17/Release/shaders" "dist-v17/shaders" -Recurse
+          git rev-parse HEAD | Out-File "dist-v17/REVISION.txt" -Encoding ascii
+          $env:GITHUB_RUN_NUMBER | Out-File "dist-v17/BUILD_NUMBER.txt" -Encoding ascii
+          if (!(Test-Path "dist-v17/BUILD_NUMBER.txt")) { throw "Build number missing" }
+          # Production starts with experimental Z-prepass disabled. 
+          # Z-prepass remains an opt-in internal test; do not ship a launcher.
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set "M3D_V17_EXPERIMENT_Z_PREPASS="
+          start "" "moteur3d_v17.exe" "benchmark-civic\scene-v4.json"
+          '@ | Out-File "dist-v17/START_V4_REFERENCE.bat" -Encoding ascii
+          @'
+          CSE WARP V17 — Palais reconstruit V4
+          Normal launch uses stable rendering (experimental Z-prepass disabled).
+          Launch START_V4_REFERENCE.bat for the reference V4 scene.
+          Experimental Z-prepass is reserved for developer-only tests.
+          The executable defaults to benchmark-civic/scene-v4.json when no CLI path is provided.
+          WARP software timings do not represent Intel HD 620 GPU performance.
+          '@ | Out-File "dist-v17/README-V4.txt" -Encoding utf8
+          $root="dist-v17/benchmark-civic"
+          $scene=Get-Content "$root/scene-v4.json" -Raw | ConvertFrom-Json
+          $sector=$scene.sectors[0]
+          foreach ($kind in @("geometry","materials","pbr","instances","cameras","lighting","environment")) {
+            $names=@($sector.$kind)
+            if ($names.Count -eq 0) { throw "V4 scene manifest missing $kind" }
+            foreach ($name in $names) {
+              if (!(Test-Path (Join-Path $root $name))) { throw "V4 resource missing: $kind / $name" }
+            }
+          }
+          foreach ($p in @("scene-v4.json","instances/v4.json","cameras/v4.json","textures/energetik_fresco_mosaic.jpg","textures/personnage_facade_mosaique.jpg")) {
+            if (!(Test-Path "$root/$p")) { throw "Required V4 artifact missing: $p" }
+          }
+          windeployqt --release --no-translations dist-v17/moteur3d_v17.exe
+          windeployqt --release --no-translations dist-v17/moteur3d_v17_benchui.exe
+          windeployqt --release --no-translations dist-v17/moteur3d_v16.exe
+      - name: Import 10 CC0 GLB trees into full Windows V17 package and smoke test final launch scene
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          M3D_V16_GPU_GI_SAMPLES: '0'
+          M3D_V17_EXPERIMENT_Z_PREPASS: '0'
+        run: |
+          python -m pip install --disable-pip-version-check trimesh numpy
+          if ($LASTEXITCODE -ne 0) { throw 'Missing tree import dependencies' }
+          python scenes/v16/benchmark-civic/import_trees_pilot.py --root scenes/v16/benchmark-civic
+          if ($LASTEXITCODE -ne 0) { throw '10 CC0 GLB trees import failed' }
+          python tools/package_v17_trees.py --dist dist-v17 --source scenes/v16/benchmark-civic
+          if ($LASTEXITCODE -ne 0) { throw 'Full distribution assembly failed' }
+          & "dist-v17/moteur3d_v17_benchmark.exe" "dist-v17/benchmark-civic/scene-v4.json" "build-v17/final-v4-10-tree-smoke" --smoke --camera-id v4_face --hour 14 --raster-msaa 1 --readback-depth 1
+          if ($LASTEXITCODE -ne 0) { throw 'Final delivered V17 tree scene failed real DX11 WARP rendering' }
+          $pic=Get-ChildItem "build-v17/final-v4-10-tree-smoke" -Recurse -Filter 'raster_v4_face_*.png' | Select-Object -First 1
+          if (!$pic -or $pic.Length -lt 1200) { throw 'Final tree scene preview missing or empty' }
+          Copy-Item $pic.FullName "dist-v17/benchmark-civic/10-arbres-V17-WARP.png"
+          Write-Host "READY: V17 Windows package opens corrected V4 + 10 trees by default"
+      - name: Reprendre la scene exacte du paquet V17.499 valide
+        shell: pwsh
+        timeout-minutes: 15
+        env:
+          GH_TOKEN: ${{ github.token }}
+          M3D_V16_FORCE_WARP: '1'
+          M3D_V16_GPU_GI_SAMPLES: '0'
+        run: |
+          gh run download 43776734164 --repo glaby91/moteur3d --name CSE-WARP-V17.499-DXGI-VIEWPORT-LIFECYCLE-VULKAN --dir base-v499
+          if ($LASTEXITCODE -ne 0) { throw "V17.499 scene artifact download failed" }
+          $approved = "base-v499/benchmark-civic"
+          $manifest = Get-Content "$approved/scene.json" -Raw | ConvertFrom-Json
+          if (@($manifest.sectors).Count -ne 1) { throw "V17.499 scene must contain one complete sector" }
+          $sector = $manifest.sectors[0]
+          foreach ($kind in @("geometry","instances","materials","pbr","lighting","cameras","environment")) {
+            foreach ($relative in @($sector.$kind)) {
+              if (!(Test-Path (Join-Path $approved $relative))) { throw "V17.499 resource missing: $kind / $relative" }
+            }
+          }
+          if (!(Test-Path "$approved/V498_SCENE_INSTALL.json") -or
+              !(Test-Path "base-v499/audio/pripyat_radio.wav")) {
+            throw "V17.499 scene corrections or radio missing"
+          }
+          Remove-Item "dist-v17/benchmark-civic" -Recurse -Force -ErrorAction Stop
+          Copy-Item $approved "dist-v17/benchmark-civic" -Recurse -Force
+          if (Test-Path "dist-v17/audio") { Remove-Item "dist-v17/audio" -Recurse -Force }
+          Copy-Item "base-v499/audio" "dist-v17/audio" -Recurse -Force
+          @'
+          @echo off
+          cd /d "%~dp0"
+          start "" "moteur3d_v17.exe" "benchmark-civic\\scene.json"
+          '@ | Set-Content "dist-v17/LANCER_CSE_WARP.bat" -Encoding ascii
+          @'
+          CSE WARP BetaX V17.523
+          Starting scene: exact approved V17.499 scene package, with V17.500 monument anchoring.
+          Scene revision appears in the title bar after loading. The banner also shows system RAM use.
+          '@ | Set-Content "dist-v17/README.txt" -Encoding utf8
+          & "dist-v17/moteur3d_v17_benchmark.exe" "dist-v17/benchmark-civic/scene.json" "build-v17/v500-v499-base-day" --smoke --camera-id v4_face --hour 14 --raster-msaa 1
+          if ($LASTEXITCODE -ne 0) { throw "V17.499 base scene failed V17.500 DirectX11 load/render" }
+          $dayImage=Get-ChildItem "build-v17/v500-v499-base-day" -Filter 'raster_*.png' -Recurse | Select-Object -First 1
+          if (!$dayImage -or $dayImage.Length -lt 1000) { throw "Missing V17.499 package smoke image" }
+          Write-Host "READY: V17.499 scene, V17.500 anchors, Ukrainian radio and one validated DX11 render"
+      - name: V17.500 — Ancrages du monument et revision de scene
+        shell: pwsh
+        run: |
+          python tools/v17_500_anchor_monument.py --package dist-v17/benchmark-civic
+          if ($LASTEXITCODE -ne 0) { throw "Monument anchoring or scene revision failed" }
+          $report=Get-Content "dist-v17/benchmark-civic/V500_MONUMENT_ANCHORS.json" -Raw | ConvertFrom-Json
+          if ($report.anchorAssemblies -ne 2 -or $report.embeddedConcreteCores -ne 2 -or
+              $report.embeddedAnchorRods -ne 8 -or $report.visibleAnchorNuts -ne 8) {
+            throw "V17.500 monument anchor assembly is incomplete"
+          }
+          $scene=Get-Content "dist-v17/benchmark-civic/scene.json" -Raw | ConvertFrom-Json
+          if ($scene.revision -ne 'V17.500') { throw "Scene revision metadata missing" }
+          & "dist-v17/moteur3d_v17_benchmark.exe" "dist-v17/benchmark-civic/scene.json" "build-v17/v500-anchored-scene-smoke" --smoke --camera-id v4_face --hour 19 --raster-msaa 1
+          if ($LASTEXITCODE -ne 0) { throw "V17.500 anchored scene failed DirectX11 load/render" }
+      - name: V17.523 — Verrière voûtée de la piscine et vues CPU ray tracing
+        shell: pwsh
+        timeout-minutes: 30
+        run: |
+          python tools/v17_523_pool_cupola.py --package dist-v17/benchmark-civic
+          if ($LASTEXITCODE -ne 0) { throw "V17.523 cupola installation failed" }
+          $report=Get-Content "dist-v17/benchmark-civic/V523_POOL_CUPOLA.json" -Raw | ConvertFrom-Json
+          if ($report.revision -ne 'V17.523' -or $report.sceneRevision -ne 'V17.523' -or
+              $report.removedFlatSkylightInstances -ne 19 -or
+              $report.addedCupolaMeshes -ne 5 -or $report.addedCupolaInstances -ne 5 -or
+              $report.addedTriangles -lt 3500 -or $report.addedTriangles -gt 6000 -or
+              $report.closedGlassGables -ne 2 -or $report.gableRadialMullions -ne 10 -or
+              $report.continuousRoofEaves -ne 4 -or $report.opaqueCrownArcDegrees -ne 60 -or
+              $report.cupolaDimensionsMeters.length -ne 60 -or
+              $report.cupolaDimensionsMeters.span -ne 34 -or
+              $report.lightingChanged -or $report.rendererChanged -or @($report.cameras).Count -ne 3) {
+            throw 'V17.523 cupola must cover and join the roof opening with two closed glass gables'
+          }
+          $views=@('v523_cupola_exterieure','v523_cupola_arriere','v523_cupola_interieure')
+          $imageDir='dist-v17/benchmark-civic/raytracing-v523'
+          New-Item -ItemType Directory -Force $imageDir | Out-Null
+          foreach ($view in $views) {
+            $outDir="build-v17/v523-raytracing/$view"
+            & "build-v17/Release/moteur3d_v17_benchmark.exe" `
+              "dist-v17/benchmark-civic/scene.json" $outDir `
+              --cpu-direct-still --camera-id $view --cpu-direct-width 960 --cpu-direct-height 540
+            if ($LASTEXITCODE -ne 0) { throw "CPU direct ray tracing failed for $view" }
+            $file=Get-ChildItem $outDir -Recurse -Filter "cpu_direct_raytracing_${view}_960x540.png" | Select-Object -First 1
+            if (!$file -or $file.Length -lt 1000) { throw "Missing real CPU ray-tracing image for $view" }
+            Copy-Item $file.FullName (Join-Path $imageDir "$view.png") -Force
+          }
+          @{
+            revision='V17.523'
+            renderer='CSE WARP CPU Ray Tracing PBR — direct'
+            resolution='960x540'
+            samplesPerPixel=1
+            views=$views
+            source='Images rendered by moteur3d_v17_benchmark.exe from the packaged V17.523 scene'
+          } | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $imageDir 'RAYTRACING_VIEWS.json') -Encoding utf8
+          Write-Host 'PASS: approved cupola installed; three real CPU direct ray-tracing views saved into the V17.523 package'
+      - name: Package dedicated V17.523 renderer windows after approved scene restoration
+        shell: pwsh
+        run: |
+          $dst='dist-v17'
+          $vulkan='build-v17/Release/vulkan'
+          if (!(Test-Path "$vulkan/raster.frag.spv") -or !(Test-Path "$vulkan/sky.frag.spv")) {
+            throw 'Vulkan SPIR-V files missing from V17.493 build'
+          }
+          Copy-Item $vulkan "$dst/vulkan" -Recurse -Force
+          foreach ($name in @('v17_vulkan_khronos_bench.exe','v17_vulkan_khronos_console.exe',
+                               'v17_vulkan_ab_bench.exe','v17_vulkan_gpu_smoke.exe')) {
+            Copy-Item "build-v17/Release/$name" "$dst/$name" -ErrorAction Stop
+          }
+          foreach ($name in @('DIAGNOSTIC_ECRAN_NOIR.bat','LANCER_COMPARAISON_AB.bat',
+                               'LANCER_KHRONOS_HD620.bat','LANCER_V493_VULKAN_PROFILE.bat',
+                               'DIAGNOSTIC_VULKAN_QT_DIRECT.bat','DIAGNOSTIC_VULKAN_IMAGE_SOURCE.bat',
+                               'TEST_VULKAN_DIRECT_ANIMATION.bat')) {
+            Copy-Item "v17/vulkan/khronos/$name" "$dst/$name" -ErrorAction Stop
+          }
+          # Reject the Khronos-only synthetic scene: the V17.493 complete scene is required.
+          $scene=Get-Content "$dst/benchmark-civic/scene.json" -Raw | ConvertFrom-Json
+          $sector=$scene.sectors[0]
+          $materialFile=Join-Path "$dst/benchmark-civic" $sector.materials[0]
+          $pbrFile=Join-Path "$dst/benchmark-civic" $sector.pbr[0]
+          $mat=Get-Content $materialFile -Raw | ConvertFrom-Json
+          $pbr=Get-Content $pbrFile -Raw | ConvertFrom-Json
+          $signReport="$dst/benchmark-civic/V498_SCENE_INSTALL.json"
+          if (!(Test-Path $signReport)) {
+            throw 'Approved V17.493 BASSEIN sign was not installed'
+          }
+          $report=Get-Content $signReport -Raw | ConvertFrom-Json
+          $added=[int]$report.addedMaterials
+          if ($added -lt 0 -or $added -gt 69 -or $report.addedSignObjects -ne 112 -or
+              $report.addedTriangles -lt 14000 -or $report.originalUnchangedObjects -lt 5000 -or
+              $report.removedUpperFacadeLamps -ne 6 -or $report.removedUpperFacadeSupports -ne 6 -or
+              $report.signUniformScaleFactor -ne 2.0 -or
+              $report.removedPoolCeilingLights -ne 6 -or $report.addedPoolCeilingLights -ne 1 -or
+              $report.poolLightDirection -ne 'crosswise-x' -or $report.poolLightEmittingAreaRatio -ne 1.0) {
+            throw 'V17.493 BASSEIN installation report invalid'
+          }
+          # Verify the approved V17.444 backup BEFORE adding approved sign:
+          # exactly 186 materials and 183 PBR sets must be present. The sign
+          # legitimately adds one PBR set for each new non-emissive material.
+          $baseMaterials="$materialFile.pre-bassein-v493.bak"
+          $basePbr="$pbrFile.pre-bassein-v493.bak"
+          if (!(Test-Path $baseMaterials) -or !(Test-Path $basePbr)) {
+            throw 'Approved original materials/PBR backups missing after BASSEIN installation'
+          }
+          $originalMat=Get-Content $baseMaterials -Raw | ConvertFrom-Json
+          $originalPbr=Get-Content $basePbr -Raw | ConvertFrom-Json
+          if (@($originalMat.materials).Count -ne 186 -or @($originalPbr.sets).Count -ne 183) {
+            throw 'V17.493 approved base material/PBR inventory changed'
+          }
+          $expectedMat=186+$added
+          $expectedPbr=183+$added
+          if (@($mat.materials).Count -ne $expectedMat -or
+              @($pbr.sets).Count -ne $expectedPbr) {
+            throw "V17.493 scene inventory mismatch: expected $expectedMat materials and $expectedPbr PBR sets after sign"
+          }
+          Write-Host "V17.493 materials: original 186 + sign $added = $expectedMat"
+          Write-Host "V17.493 PBR sets: original 183 + sign $added = $expectedPbr"
+          if (!(Test-Path "$dst/audio/pripyat_radio.wav")) {throw 'V17.493 Ukrainian radio missing'}
+          git rev-parse HEAD | Set-Content "$dst/VULKAN_INTEGRATION_COMMIT.txt"
+          @(
+            'CSE WARP V17.523 — isolated top-level HWND per rendering backend',
+            'Source baseline: master V17.493 beta + BASSEIN sign',
+            'Vulkan uses its dedicated top-level HWND; DX11, CPU, compute and GI each use a separate output window',
+            'Direct WSI failures preserve the requested toggle, show the QImage recovery, and log reason plus HWND metadata under Documents/CSE WARP/Diagnostics',
+            'Exploration places the render window on the left and a compact controls band on the right; original layout is restored on stop',
+            'Hardware FPS, weather smoothness and periodic stutter REQUIRE real HD620 verification.'
+          ) | Set-Content "$dst/VULKAN_INTEGRATION_README.txt"
+          Write-Host 'PASS: V17.493 complete (186 materials, 183 PBR sets, approved sign and radio) + Vulkan'
+      - name: Force deploy and verify the Qt Windows platform plugin in shipping package
+        shell: pwsh
+        run: |
+          # Qt platform DLLs are not interchangeable with arbitrary Qt builds.
+          # Always use the SAME Qt 6.8.3 msvc2022_64 installation as the app.
+          $dist='dist-v17'
+          $qt=$env:QT_ROOT_DIR
+          if (!$qt -or !(Test-Path "$qt/plugins/platforms/qwindows.dll")) {
+            throw "Qt Windows platform plugin missing from build toolchain: $qt"
+          }
+          $platforms=Join-Path $dist 'platforms'
+          New-Item -ItemType Directory -Path $platforms -Force | Out-Null
+          Copy-Item "$qt/plugins/platforms/qwindows.dll" "$platforms/qwindows.dll" -Force -ErrorAction Stop
+          foreach ($plugin in @('qoffscreen.dll','qminimal.dll')) {
+            $source=Join-Path "$qt/plugins/platforms" $plugin
+            if (Test-Path $source) { Copy-Item $source (Join-Path $platforms $plugin) -Force -ErrorAction Stop }
+          }
+          # Qt's portable plugin layout: <application-dir>/platforms/qwindows.dll
+          # Explicitly restrict plugin discovery to the shipped application
+          # rather than a system Python/Qt installation.
+          @'
+          [Paths]
+          Prefix = .
+          Plugins = .
+          '@ | Set-Content "$dist/qt.conf" -Encoding ascii
+          # windeployqt should have supplied runtime DLLs. Verify them, and
+          # recover them from the exact Qt used for compilation if omitted.
+          foreach ($lib in @('Qt6Core.dll','Qt6Gui.dll','Qt6Widgets.dll')) {
+            if (!(Test-Path "$dist/$lib")) {
+              $source=Join-Path "$qt/bin" $lib
+              if (!(Test-Path $source)) { throw "Required Qt dependency missing: $lib" }
+              Copy-Item $source "$dist/$lib" -Force -ErrorAction Stop
+            }
+          }
+          foreach ($file in @(
+            "$dist/moteur3d_v17.exe",
+            "$dist/moteur3d_v17_gibake.exe",
+            "$dist/outils/gi/moteur3d_v17_gibake.exe",
+            "$dist/moteur3d_v16_core.dll",
+            "$dist/platforms/qwindows.dll",
+            "$dist/Qt6Core.dll",
+            "$dist/Qt6Gui.dll",
+            "$dist/Qt6Widgets.dll",
+            "$dist/qt.conf"
+          )) {
+            if (!(Test-Path $file)) { throw "Final Qt Windows package incomplete: $file" }
+            $size=(Get-Item $file).Length
+            $minSize=if ($file -like '*.conf') { 10 } else { 50 }
+            if ($size -lt $minSize) { throw "Invalid Qt binary/configuration: $file ($size bytes)" }
+            Write-Host "Verified portable Qt deployment: $file ($size bytes)"
+          }
+          $dll=(Get-FileHash "$dist/platforms/qwindows.dll" -Algorithm SHA256).Hash
+          "Qt platform: windows (Qt 6.8.3 MSVC2022 x64)" | Set-Content "$dist/Qt_Windows_Deployment.txt"
+          "qwindows.dll SHA256: $dll" | Add-Content "$dist/Qt_Windows_Deployment.txt"
+          Write-Host "PASS: Qt Windows platform plugin qwindows.dll included in distributable"
+      - name: Upload V17 Windows application
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17.523-POOL-CUPOLA-DIRECT-RAYTRACING-VIEWS
+          path: dist-v17/
+          if-no-files-found: error
+      - name: Benchmark GI hors ligne — trois scènes, trois cuissons et sept relectures
+        shell: pwsh
+        timeout-minutes: 25
+        run: |
+          $folder = "build-v17/total-simulation/gi-bench"
+          New-Item -ItemType Directory -Force $folder | Out-Null
+          $data = @()
+          foreach ($entry in @(
+            @{ name='pavillon'; scene='scenes/v16/pavillon01/scene.json' },
+            @{ name='materiaux'; scene='scenes/v16/material-lab/scene.json' },
+            @{ name='civique'; scene='scenes/v16/benchmark-civic/scene.json' }
+          )) {
+            $cache = Join-Path $folder ($entry.name + ".m3dgi")
+            $json = Join-Path $folder ($entry.name + ".json")
+            & "build-v17/Release/moteur3d_v17_gibake.exe" $entry.scene $cache --smoke --bench $json
+            if ($LASTEXITCODE -ne 0) { throw "GI bake failed for $($entry.name)" }
+            $row = Get-Content $json -Raw | ConvertFrom-Json
+            if ($row.result -ne 'PASS' -or $row.hours -ne 5 -or
+                $row.bakeRepetitions -ne 3 -or $row.cacheLoadRepetitions -ne 7) {
+              throw "Incomplete GI benchmark for $($entry.name)"
+            }
+            $data += [pscustomobject]@{
+              version = $row.version; scene = $entry.name
+              probes = $row.probes; hours = $row.hours; rays = $row.raysPerProbe
+              coldBakeMedianMs = $row.bakeColdMedianMs
+              diskLoadMedianMs = $row.diskLoadMedianMs
+              sampleInterpolatedMedianMs = $row.sampleInterpolatedMedianMs
+              sceneBuildMs = $row.sceneBuildMs
+            }
+          }
+          $data | Export-Csv (Join-Path $folder 'gi-benchmark-summary.csv') -NoTypeInformation
+          $data | Format-Table -AutoSize | Out-String | Write-Host
+      - name: Benchmark GI volume complet — 864 sondes, 25 heures, 3 cuissons
+        shell: pwsh
+        timeout-minutes: 25
+        run: |
+          $folder = "build-v17/total-simulation/gi-bench"
+          New-Item -ItemType Directory -Force $folder | Out-Null
+          $data = @()
+          foreach ($entry in @(
+            @{ name='pavillon'; scene='scenes/v16/pavillon01/scene.json' },
+            @{ name='materiaux'; scene='scenes/v16/material-lab/scene.json' },
+            @{ name='civique'; scene='scenes/v16/benchmark-civic/scene.json' }
+          )) {
+            $cache = Join-Path $folder ($entry.name + "-full.m3dgi")
+            $json = Join-Path $folder ($entry.name + "-full.json")
+            # PBR load kept at 256px to control runner RAM; GI volume is full.
+            & "build-v17/Release/moteur3d_v17_gibake.exe" $entry.scene $cache --smoke --full-gi --bench $json
+            if ($LASTEXITCODE -ne 0) { throw "GI full-table bake failed: $($entry.name)" }
+            $row = Get-Content $json -Raw | ConvertFrom-Json
+            if ($row.result -ne 'PASS' -or $row.probes -ne 864 -or $row.hours -ne 25 -or
+                $row.raysPerProbe -ne 16 -or $row.bakeRepetitions -ne 3 -or
+                $row.cacheLoadRepetitions -ne 7) {
+              throw "Incomplete full GI benchmark: $($entry.name)"
+            }
+            $data += [pscustomobject]@{
+              version = $row.version; scene = $entry.name
+              probes = $row.probes; hours = $row.hours; rays = $row.raysPerProbe
+              coldBakeMedianMs = $row.bakeColdMedianMs
+              diskLoadMedianMs = $row.diskLoadMedianMs
+              sampleInterpolatedMedianMs = $row.sampleInterpolatedMedianMs
+              sceneBuildMs = $row.sceneBuildMs
+            }
+          }
+          $data | Export-Csv (Join-Path $folder 'gi-benchmark-full.csv') -NoTypeInformation
+          $data | Format-Table -AutoSize | Out-String | Write-Host
+      - name: Full V16 and V17 regression suite (post-package)
+        run: ctest --test-dir build-v17 -C Release --verbose --output-on-failure

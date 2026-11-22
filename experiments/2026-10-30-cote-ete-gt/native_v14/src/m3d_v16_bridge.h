@@ -1,5 +1,6 @@
 #pragma once
 #include "m3d_engine.h"
+#include "m3d_lumatrace_bvh4.h"
 #include "m3d_scene_v16.h"
 #include <QHash>
 #include <QString>
@@ -24,10 +25,14 @@ struct Runtime {
     QString title;
     int textureResolution=0;
     float daylightHour=15.f;
+    // Prepared once with the scene. Nodes reference renderScene.order; they do
+    // not own or duplicate triangle geometry or the primitive-order array.
+    LumaTraceBvh4 lumaTraceBvh4;
+    QString lumaTraceBvhError;
     // Stage wall times measured during scene preparation (not rendering).
     // Exposed for V17 benchmarks and embedding applications to distinguish
     // expensive PBR generation from geometry instancing and BVH building.
-    double pbrBuildMs=0,geometryBuildMs=0,bvhBuildMs=0;
+    double pbrBuildMs=0,geometryBuildMs=0,bvhBuildMs=0,lumaTraceBvhBuildMs=0;
 };
 struct BuildResult {
     Runtime runtime;

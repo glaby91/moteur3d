@@ -1,5 +1,7 @@
 #include "m3d_engine.h"
 #include "m3d_gi_bake.h"
+#include "m3d_lumatrace_bvh4.h"
+#include "m3d_lumatrace_shader.h"
 #include "../../../../v17/weather/clouds.h"
 
 #if defined(_WIN32)
@@ -7,6 +9,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include <d3d11.h>
+#include <dxgi1_2.h>
 #include <d3dcompiler.h>
 #include <wrl/client.h>
 #include <cstddef>
@@ -40,6 +43,7 @@ std::atomic<bool> filmicTonemap{false};
 std::atomic<bool> colorEnergyBalance{false};
 std::atomic<float> colorExposure{1.f};
 std::atomic<float> cloudTimeScale{1.f};
+std::atomic<bool> rasterCloudsEnabled{true};
 // The GUI sets this to scene.json.m3dgi. Updated only on user action or
 // scene loading; render worker snapshots it when creating its probe texture.
 std::mutex giPathMutex;
@@ -93,7 +97,25 @@ RasterQualitySettings unpackQuality(uint64_t bits){
     q.dynamicLod=((bits>>33)&1u)!=0;
     return q;
 }
-struct GpuVertex { float p[3], n[3], uv[2]; uint32_t material; };
+struct GpuVertex { float p[3], n[3], uv[2]; uint32_t material,primitiveId; };
+static_assert(sizeof(GpuVertex)==40,"V17 raster vertex layout");
+// LumaTrace stores one shared raster/compute stream. Packing normals into a
+// 10-bit UNORM format with a signed-normal bias lowers its per-vertex footprint from 40 to 32 bytes
+// without quantizing world positions or texture coordinates.
+struct GpuVertexLuma {
+    float p[3];
+    uint32_t normalPacked;
+    float uv[2];
+    uint32_t material,primitiveId;
+};
+static_assert(sizeof(GpuVertexLuma)==32,"LumaTrace packed vertex layout");
+uint32_t packLumaNormal(const float n[3]){
+    const auto pack=[](float v)->uint32_t{
+        const uint32_t q=uint32_t(std::lround((std::clamp(v,-1.f,1.f)*0.5f+0.5f)*1023.f));
+        return q&0x3ffu;
+    };
+    return pack(n[0])|(pack(n[1])<<10)|(pack(n[2])<<20);
+}
 // Box geometry is immutable and shared. Per-object bounds/materials occupy
 // 32 bytes instead of duplicating 36 vertex records (~1.3 kB) per box.
 struct GpuBoxInstance {
@@ -125,6 +147,7 @@ struct FrameConstants {
     float materialOpacity[256][4];
     float materialDiffuse[256][4];
     float materialEmission[256][4];
+    float materialTextureDetail[256][4];
     float lightPositionRadius[256][4];
     float lightColorIntensity[256][4];
     uint32_t lightCount; float padding[3];
@@ -165,6 +188,7 @@ cbuffer Frame : register(b0) {
     float4 materialOpacity[256];
     float4 materialDiffuse[256];
     float4 materialEmission[256];
+    float4 materialTextureDetail[256];
     float4 lightPositionRadius[256];
     float4 lightColorIntensity[256];
     uint lightCount; float3 padding;
@@ -183,10 +207,12 @@ Texture2DArray<float> roughnessMap : register(t2);
 Texture2DArray<float4> normalMap : register(t3);
 Texture3D<float4> indirectProbes : register(t4);
 Texture3D<float4> indirectProbesNext : register(t5);
+Texture2DArray<float4> preservedAlbedo : register(t6);
+StructuredBuffer<float4> lumaTriangleRadiance : register(t7);
 SamplerState wrapSampler : register(s0);
 SamplerState probeSampler : register(s1);
-struct VSIn { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; uint mat:MATERIAL; };
-struct VSOut { float4 p:SV_POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; float3 world:TEXCOORD1; nointerpolation uint mat:MATERIAL; };
+struct VSIn { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; uint mat:MATERIAL; uint primitiveId:TRIID; };
+struct VSOut { float4 p:SV_POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; float3 world:TEXCOORD1; nointerpolation uint mat:MATERIAL; nointerpolation uint primitiveId:TEXCOORD2; };
 VSOut VSMain(VSIn i) {
     VSOut o;
     float3 q = i.p - eye;
@@ -198,12 +224,12 @@ VSOut VSMain(VSIn i) {
     // Keep the real camera-space z in w and clip space. Using safeZ here would
     // pull geometry behind the near plane onto the near plane instead of clipping it.
     o.p = float4(nx * safeZ, ny * safeZ, depth, z);
-    o.n = i.n; o.uv = i.uv; o.world=i.p; o.mat = min(i.mat, materialCount - 1);
+    o.n = i.n; o.uv = i.uv; o.world=i.p; o.mat = min(i.mat, materialCount - 1);o.primitiveId=i.primitiveId;
     return o;
 }
 struct VSBoxIn {
     float3 p:POSITION; float3 n:NORMAL; float2 unusedUv:TEXCOORD0;
-    uint unusedMaterial:MATERIAL;
+    uint unusedMaterial:MATERIAL;uint unusedPrimitiveId:TRIID;
     float3 boxLo:BOXMIN; float uvScale:BOXSCALE;
     float3 boxHi:BOXMAX; uint boxMat:BOXMAT;
     float3 boxSize:BOXSIZE;uint uvMode:BOXUVMODE;
@@ -232,12 +258,12 @@ VSOut VSBoxMain(VSBoxIn i) {
             :(abs(n.x)>=abs(n.z)?p.zy*i.uvScale:p.xy*i.uvScale);
     }
     VSIn raw;
-    raw.p=p;raw.n=n;raw.uv=uv;raw.mat=i.boxMat;
+    raw.p=p;raw.n=n;raw.uv=uv;raw.mat=i.boxMat;raw.primitiveId=i.unusedPrimitiveId;
     return VSMain(raw);
 }
 struct VSEllipseIn {
     float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0;
-    uint unusedMaterial:MATERIAL;
+    uint unusedMaterial:MATERIAL;uint unusedPrimitiveId:TRIID;
     float3 center:ELLIPSECENTER;uint ellipseMat:ELLIPSEMAT;
     float3 radii:ELLIPSERADII;float pad:ELLIPSEPAD;
 };
@@ -246,7 +272,7 @@ VSOut VSEllipseMain(VSEllipseIn i) {
     raw.p=i.center+i.p*i.radii;
     raw.n=normalize(i.n/max(i.radii,float3(.00001,.00001,.00001)));
     raw.uv=i.uv;
-    raw.mat=i.ellipseMat;
+    raw.mat=i.ellipseMat;raw.primitiveId=i.unusedPrimitiveId;
     return VSMain(raw);
 }
 float4 PSMain(VSOut i):SV_TARGET {
@@ -262,7 +288,17 @@ float4 PSMain(VSOut i):SV_TARGET {
     }
     // WRAP sampler already handles tiling. frac(uv) here broke automatic
     // derivatives at tile boundaries and forced inappropriate mip levels.
-    float3 base = albedo.Sample(wrapSampler, float3(i.uv, i.mat)).rgb;
+    float2 artworkDdx=ddx(i.uv),artworkDdy=ddy(i.uv);
+    float3 base;
+    float detailLayer=materialTextureDetail[i.mat].x;
+    if(detailLayer>=0.0) {
+        // Scene-authored preservation keeps paintings at their source tier,
+        // independent of the shared array budget used by ordinary materials.
+        base=preservedAlbedo.SampleGrad(wrapSampler,float3(i.uv,detailLayer),
+                                       artworkDdx,artworkDdy).rgb;
+    } else {
+        base=albedo.Sample(wrapSampler,float3(i.uv,i.mat)).rgb;
+    }
     float3 normal = normalize(i.n);
     const bool poolWater=materialEmission[i.mat].a < -0.5;
     // Dedicated animated-looking standing waves (static in world space) only on
@@ -292,7 +328,9 @@ float4 PSMain(VSOut i):SV_TARGET {
             float3 rawBitangent = (-dpdx * duvdy.x + dpdy * duvdx.x) / determinant;
             tangent = normalize(tangent - normal * dot(normal, tangent));
             float3 bitangent = normalize(cross(normal, tangent)) * (dot(cross(normal, tangent), rawBitangent) < 0.0 ? -1.0 : 1.0);
-            normal = normalize(tangent * detailNormal.x + bitangent * detailNormal.y + normal * detailNormal.z);
+            // V17.600: a modest tangent-space gain restores visible material relief
+            // without tessellation or changing silhouette geometry.
+            normal = normalize(tangent * (detailNormal.x * 1.25) + bitangent * (detailNormal.y * 1.25) + normal * detailNormal.z);
         }
     }
     float diffuse = saturate(dot(normal, normalize(lightDir)));
@@ -304,7 +342,8 @@ float4 PSMain(VSOut i):SV_TARGET {
     float shadowDistance = shadowDist - dot(shadowOffset, lightDir);
     if (shadowPixel.x >= 2 && shadowPixel.y >= 2 && shadowPixel.x < int(shadowSize) - 2 && shadowPixel.y < int(shadowSize) - 2) {
         float visible = 0.0;
-        [unroll] for (int sy = -1; sy <= 1; ++sy) [unroll] for (int sx = -1; sx <= 1; ++sx) {
+        [unroll] for (int sy = -1; sy <= 1; ++sy) [unroll] for (int sx = -1; sx <= 1; ++sx) { )";
+constexpr char kShaderPart2[] = R"(
             float storedDepth = shadowDepth.Load(int3(shadowPixel + int2(sx, sy), 0));
             visible += shadowDistance <= storedDepth + 0.095 ? 1.0 : 0.0;
         }
@@ -327,6 +366,8 @@ float4 PSMain(VSOut i):SV_TARGET {
     }
     float3 color = base*(ambientEnergy+sunEnergy)
                  + base*materialGlow[i.mat].rgb*materialGlow[i.mat].a;
+    if(peripheralControls.w>.5 && i.primitiveId!=0xffffffff)
+        color+=base*lumaTriangleRadiance[i.primitiveId].rgb;
     color += materialEmission[i.mat].rgb * max(materialEmission[i.mat].a,0.0);
     // The old warm (28,13,4) constant tinted *every* night material brown.
     // Keep a tiny near-neutral floor instead; actual lamps add local warmth.
@@ -373,13 +414,15 @@ float4 PSMain(VSOut i):SV_TARGET {
         float distance2 = dot(delta, delta);
         [branch] if (radius > 0.0 && distance2 <= radius2 * 1.000001) {
 #endif
-            float distanceToLight = length(delta);
-            if (distanceToLight < radius && distanceToLight > 0.0001) {
-                float edge = 1.0 - distanceToLight / radius;
-                float lambert = saturate(dot(normal, delta / distanceToLight));
-                float3 localIrradiance=lightColorIntensity[l].rgb
-                    *(edge*edge*lightColorIntensity[l].a*lambert*.27);
-                color += colorControls.x>0.5 ? base*localIrradiance : localIrradiance;
+            [branch] if (dot(normal, delta) > 0.0) {
+                float distanceToLight = length(delta);
+                if (distanceToLight < radius && distanceToLight > 0.0001) {
+                    float edge = 1.0 - distanceToLight / radius;
+                    float lambert = saturate(dot(normal, delta / distanceToLight));
+                    float3 localIrradiance=lightColorIntensity[l].rgb
+                        *(edge*edge*lightColorIntensity[l].a*lambert*.27);
+                    color += colorControls.x>0.5 ? base*localIrradiance : localIrradiance;
+                }
             }
 #if defined(M3D_V17_OPTIMIZE_PIXELS)
         }
@@ -439,7 +482,7 @@ float4 PSMain(VSOut i):SV_TARGET {
         float3 positive=max(color,0.0);
         float luminance=dot(positive,float3(.2126,.7152,.0722));
         float adjusted=luminance*colorControls.y;
-        float compressed=adjusted/(1.0+.82*max(adjusted-.63,0.0));
+        float compressed=adjusted/(1.0+.70*max(adjusted-.63,0.0));
         color=positive*(compressed/max(luminance,0.000001));
     }
     if(poolWater){
@@ -566,7 +609,7 @@ float4 PSC(CV v):SV_TARGET {
 }
 )";
 void put(GpuVertex& v,V p,V n,float u,float vv,uint32_t mat) {
-    v={{p.x,p.y,p.z},{n.x,n.y,n.z},{u,vv},mat};
+    v={{p.x,p.y,p.z},{n.x,n.y,n.z},{u,vv},mat,0};
 }
 float uvScaleForMaterial(const Scene& scene,uint32_t mat) {
     if(mat<scene.mat.size()){
@@ -589,9 +632,11 @@ public:
     std::vector<GpuVertex> vertices;
     std::vector<TransparentTriangle> transparent;
     bool transparentMaterial=false;
+    uint32_t currentPrimitiveId=0;
     void tri(V a,V b,V c,V na,V nb,V nc,float ua,float va,float ub,float vb,float uc,float vc,uint32_t mat) {
         if(vertices.size()+transparent.size()*3>12000000u)return;
         GpuVertex v[3]{};put(v[0],a,na,ua,va,mat);put(v[1],b,nb,ub,vb,mat);put(v[2],c,nc,uc,vc,mat);
+        for(auto& vertex:v)vertex.primitiveId=currentPrimitiveId;
         if(transparentMaterial){TransparentTriangle t{};std::copy(v,v+3,t.v);t.center=(a+b+c)/3.f;transparent.push_back(t);}
         else vertices.insert(vertices.end(),v,v+3);
     }
@@ -786,12 +831,33 @@ class DirectX11Preview {
 public:
     bool render(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,
                 std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error) {
-        // Retain the original exact-image synchronous API. The pipelined API
-        // deliberately lives alongside this path and is opt-in in the bench.
+        // The exported offline benchmark and PNG path are unchanged.
+        releasePresenter();
         return enqueue(scene,shadows,cam,w,h,1,error)&&receive(pixels,stats,error);
     }
+    bool renderLumaTrace(const Scene& scene,const LumaTraceBvh4& bvh,
+                const ShadowMap& shadows,const Camera& cam,int w,int h,
+                std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error){
+        releasePresenter();
+        return enqueue(scene,shadows,cam,w,h,1,error,nullptr,nullptr,&bvh)&&
+               receive(pixels,stats,error);
+    }
+    bool present(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,
+                 HWND hwnd,Stats& stats,std::wstring& error,
+                 const LumaTraceBvh4* lumaBvh=nullptr) {
+        if(!hwnd || !IsWindow(hwnd)){error=L"Fenêtre native DirectX 11 indisponible.";return false;}
+        return enqueue(scene,shadows,cam,w,h,1,error,hwnd,&stats,lumaBvh);
+    }
+    void releasePresenter() {
+        if(context_ && swapchain_)context_->Flush();
+        swapchain_.Reset();
+        nativeHwnd_=nullptr;
+        nativeW_=nativeH_=0;
+    }
     bool enqueue(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,
-                 unsigned depth,std::wstring& error) {
+                 unsigned depth,std::wstring& error,
+                 HWND nativeHwnd=nullptr,Stats* nativeStats=nullptr,
+                 const LumaTraceBvh4* lumaBvh=nullptr) {
         const auto started=Clock::now();
         if(w<=0||h<=0){error=L"Résolution GPU invalide.";return false;}
         if(depth<1||depth>3){error=L"Profondeur des tampons GPU attendue : 1 à 3.";return false;}
@@ -825,13 +891,18 @@ public:
             error=L"Vider les lectures différées avant de changer de scène ou de qualité.";
             return false;
         }
-        if(!ensureDevice(error)||!ensureScene(scene,error)||!ensureShadow(shadows,error)||
+        if(lumaBvh&&(lumaBvh->nodes.empty()||lumaBvh->primitiveCount==0)){
+            error=L"Le BVH4 LumaTrace n’a pas été préparé pour cette scène.";return false;
+        }
+        if(!ensureDevice(error)||!ensureScene(scene,error,lumaBvh!=nullptr)||!ensureShadow(shadows,error)||
            (hybrid&&!ensureProbeVolume(scene,error))||
            (hybrid&&!ensureGiHours(error))||
            !ensureTargets(w,h,quality.msaaSamples,error)||
            (multires&&!ensureMultires(w,h,error))||
            !ensureAnisotropy(quality.anisotropy,error)||
-           !ensureReadback(depth,w,h,error))return false;
+           (nativeHwnd?!ensureSwapchain(nativeHwnd,w,h,error):
+                        !ensureReadback(depth,w,h,error)))return false;
+        if(lumaBvh&&!ensureLumaTrace(scene,*lumaBvh,error))return false;
         const unsigned slotIndex=nextReadbackSlot_;
         ReadbackSlot& slot=readbackSlots_[slotIndex];
         slot.cpuStarted=started;
@@ -851,6 +922,7 @@ public:
         cb.sky[1]=balanced?decodeSrgb(bg.y/255.f):bg.y/255.f;
         cb.sky[2]=balanced?decodeSrgb(bg.z/255.f):bg.z/255.f;
         cb.materialCount=uint32_t(std::max<size_t>(1,scene.mat.size()));
+        for(size_t m=0;m<256;m++)cb.materialTextureDetail[m][0]=-1.f;
         cb.shadowBase[0]=shadows.base.x;cb.shadowBase[1]=shadows.base.y;cb.shadowBase[2]=shadows.base.z;cb.shadowSpan=shadows.span;
         cb.shadowRight[0]=shadows.right.x;cb.shadowRight[1]=shadows.right.y;cb.shadowRight[2]=shadows.right.z;cb.shadowDist=shadows.dist;
         cb.shadowUp[0]=shadows.up.x;cb.shadowUp[1]=shadows.up.y;cb.shadowUp[2]=shadows.up.z;cb.shadowSize=float(shadows.size);
@@ -868,8 +940,11 @@ public:
         cb.hybridControls[2]=tone?1.f:0.f;
         cb.colorControls[0]=balanced?1.f:0.f;
         cb.colorControls[1]=exposure;
+        cb.peripheralControls[3]=lumaBvh?1.f:0.f;
         for(size_t m=0;m<scene.mat.size()&&m<256;m++){
             const std::string& name=scene.mat[m].name;
+            if(preservedTextureLayers_[m]>=0)
+                cb.materialTextureDetail[m][0]=float(preservedTextureLayers_[m]);
             const bool carPaint=name.rfind("sports",0)==0||name=="carSilver"||name=="carBlue"||name=="carGreen"||name=="classicBody";
             const bool raptureSurface=name=="raptureStone"||name=="raptureBronze"||name=="raptureGlass";
             float r=1.f,g=1.f,b=1.f,strength=0.f;
@@ -890,7 +965,7 @@ public:
                 diffuseBase=.38f;diffuseDay=.37f;diffuseDirect=.44f;
             }
             if(name=="cse_pool_strip")strength=.38f; // subdued linear luminaire
-            else if(name=="lamp")strength=.45f+1.05f*lampFactor;
+            else if(name=="lamp")strength=1.5f*lampFactor;
             else if(name=="led")strength=1.35f*lampFactor;
             else if(name=="taillight")strength=1.05f*lampFactor;
             else if(name=="neon")strength=1.1f;
@@ -918,9 +993,15 @@ public:
                 emissionR=1.f;emissionG=.72f;emissionB=.24f;emissionStrength=1.35f;
                 strength=.45f;
             }
-            else if(name=="lamp"){emissionR=1.f;emissionG=166.f/255.f;emissionB=91.f/255.f;emissionStrength=.75f+1.9f*lampFactor;}
-            else if(name=="led"){emissionR=1.f;emissionG=217.f/255.f;emissionB=165.f/255.f;emissionStrength=.48f+.85f*lampFactor;}
+            else if(name=="lamp"){emissionR=1.f;emissionG=166.f/255.f;emissionB=91.f/255.f;emissionStrength=2.65f*lampFactor;}
+            else if(name=="led"){emissionR=1.f;emissionG=217.f/255.f;emissionB=165.f/255.f;emissionStrength=1.33f*lampFactor;}
             else if(name=="taillight"){emissionR=1.f;emissionG=28.f/255.f;emissionB=12.f/255.f;emissionStrength=1.25f*lampFactor;}
+            if(scene.mat[m].surfaceAuthored && scene.mat[m].waterSurface){
+                // Generic authored water matches the legacy DX11 water model.
+                emissionStrength=-1.f;
+                spec=.85f;power=58.f;
+                diffuseBase=.25f;diffuseDay=.26f;diffuseDirect=.18f;
+            }
             if(name=="sea"){spec=.46f;power=25.f;}
             else if(name=="puddle"){spec=.64f;power=18.f;}
             else if(name=="glass"||name=="raptureGlass"){spec=.27f;power=34.f;}
@@ -967,8 +1048,8 @@ public:
             // their existing scene-wide scale and remain functional by day.
             const bool exteriorFixture=(l.p.y>17.f&&l.p.z>-4.f&&l.p.z<-1.f)
                           ||(l.p.y>6.f&&l.p.y<9.f&&l.p.z>18.f);
-            const float factor=exteriorFixture ? (.12f+.88f*lampFactor) : 1.f;
-            appendLight(l,sceneLightScale*factor);
+            const float factor=(l.exterior||exteriorFixture)?lampFactor:sceneLightScale;
+            appendLight(l,factor);
         }
         D3D11_MAPPED_SUBRESOURCE mapped{};
         HRESULT hr=context_->Map(constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped);
@@ -1008,8 +1089,11 @@ public:
         cloudCB.wind[0]=clouds.uOffset;cloudCB.wind[1]=clouds.vOffset;
         cloudCB.wind[2]=solarHour; // Night stars rotate with the time of day.
         const char* splitSky=std::getenv("M3D_V17_SPLIT_SKY");
-        cloudCB.wind[3]=(splitSky && std::strcmp(splitSky,"1")==0)?1.f:0.f;
-        cloudCB.coverage=clouds.coverage;cloudCB.opacity=clouds.opacity;
+        // Native flip presentation needs its GPU sky; only QImage uses the split alpha sky.
+        cloudCB.wind[3]=(!nativeHwnd && splitSky && std::strcmp(splitSky,"1")==0)?1.f:0.f;
+        const bool showClouds=rasterCloudsEnabled.load(std::memory_order_acquire);
+        cloudCB.coverage=showClouds?clouds.coverage:0.f;
+        cloudCB.opacity=showClouds?clouds.opacity:0.f;
         D3D11_MAPPED_SUBRESOURCE cloudMapped{};
         if(FAILED(context_->Map(skyConstants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&cloudMapped))){
             error=L"Upload paramètres nuages impossible.";return false;
@@ -1018,6 +1102,7 @@ public:
         context_->Unmap(skyConstants_.Get(),0);
         const float clear[4]={cb.sky[0],cb.sky[1],cb.sky[2],1.f};
         if(slot.queryReady){context_->Begin(slot.disjoint.Get());context_->End(slot.start.Get());}
+        if(lumaBvh&&!dispatchLumaTrace(scene,error))return false;
         UINT submittedVertices=0,submittedBoxInstances=0;
         uint64_t drawCalls=0,submittedEllipseTriangles=0,submittedEllipseInstances=0;
         uint64_t submittedFoliageTriangles=0,submittedFoliageInstances=0;
@@ -1054,9 +1139,9 @@ public:
                     LONG(std::ceil(pw*.97f)),LONG(std::ceil(ph*.98f))};
                 context_->RSSetScissorRects(1,&rect);
             }
-            UINT stride=sizeof(GpuVertex),offset=0;
+            UINT stride=lumaBvh?UINT(sizeof(GpuVertexLuma)):UINT(sizeof(GpuVertex)),offset=0;
             ID3D11Buffer* vb=vertices_.Get();
-            context_->IASetInputLayout(layout_.Get());
+            context_->IASetInputLayout(lumaBvh?lumaLayout_.Get():layout_.Get());
             context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
             context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             context_->RSSetState(scissor?scissorRaster_.Get():raster_.Get());
@@ -1068,8 +1153,10 @@ public:
             context_->PSSetConstantBuffers(0,1,&cbuff);
             ID3D11ShaderResourceView* srvs[]={albedo_.Get(),shadowSrv_.Get(),
                 roughness_.Get(),normal_.Get(),hybrid?probeSrv_.Get():nullptr,
-                hybrid?(hasBakedGi_?probeNextSrv_.Get():probeSrv_.Get()):nullptr};
-            context_->PSSetShaderResources(0,6,srvs);
+                hybrid?(hasBakedGi_?probeNextSrv_.Get():probeSrv_.Get()):nullptr,
+                preservedAlbedo_?preservedAlbedo_.Get():albedo_.Get(),
+                lumaBvh?lumaRadianceSrv_.Get():nullptr};
+            context_->PSSetShaderResources(0,8,srvs);
             ID3D11SamplerState* samplers[]={sampler_.Get(),probeSampler_.Get()};
             context_->PSSetSamplers(0,2,samplers);
         
@@ -1077,12 +1164,13 @@ public:
         const char* noCull=std::getenv("M3D_V17_DISABLE_FRUSTUM_CULLING");
         const bool cullEnabled=quality.frustumCulling
             &&!(noCull && std::strcmp(noCull,"1")==0);
-        // Lightweight depth-only trial: reuse existing static/box geometry.
-        // No CPU ray casting, material evaluation or per-triangle sorting.
-        // The draw commands are repeated only for primary opaque occluders.
-        // Off by default; deliberately isolated from the production path.
+        // Reuse existing opaque geometry for the depth-only pass. This avoids
+        // repeating expensive pixel-light loops on hidden fragments; it does
+        // not add CPU ray casting, material work, or per-triangle sorting.
         const char* zPrepassEnv=std::getenv("M3D_V17_EXPERIMENT_Z_PREPASS");
-        const bool depthPrepass=zPrepassEnv&&std::strcmp(zPrepassEnv,"1")==0;
+        const char* disableZPrepass=std::getenv("M3D_V17_DISABLE_Z_PREPASS");
+        const bool depthPrepass=!(disableZPrepass&&std::strcmp(disableZPrepass,"1")==0)
+            &&!(zPrepassEnv&&std::strcmp(zPrepassEnv,"0")==0);
         if(depthPrepass){
             context_->OMSetRenderTargets(0,nullptr,ds);
             context_->PSSetShader(nullptr,nullptr,0);
@@ -1296,9 +1384,12 @@ public:
             D3D11_MAPPED_SUBRESOURCE transparentMap{};hr=context_->Map(transparentVertices_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&transparentMap);
             if(FAILED(hr)){error=L"Impossible de préparer les surfaces transparentes DirectX 11.";return false;}
             auto* out=static_cast<GpuVertex*>(transparentMap.pData);for(const auto& t:transparent_)for(const auto& v:t.v)*out++=v;context_->Unmap(transparentVertices_.Get(),0);
+            context_->IASetInputLayout(layout_.Get());
             UINT transparentStride=sizeof(GpuVertex);ID3D11Buffer* transparentBuffer=transparentVertices_.Get();context_->IASetVertexBuffers(0,1,&transparentBuffer,&transparentStride,&offset);
             context_->OMSetDepthStencilState(transparentDepth_.Get(),0);context_->OMSetBlendState(blend_.Get(),nullptr,0xffffffffu);context_->Draw(UINT(transparent_.size()*3),0);++drawCalls;
-            context_->OMSetBlendState(nullptr,nullptr,0xffffffffu);context_->OMSetDepthStencilState(depth_.Get(),0);context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
+            context_->OMSetBlendState(nullptr,nullptr,0xffffffffu);context_->OMSetDepthStencilState(depth_.Get(),0);
+            context_->IASetInputLayout(lumaBvh?lumaLayout_.Get():layout_.Get());
+            context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
         }
             return true;
         };
@@ -1326,6 +1417,51 @@ public:
             ID3D11ShaderResourceView* empty[]={nullptr,nullptr};
             context_->PSSetShaderResources(0,2,empty);
         }else if(!drawScene(rtv_.Get(),dsv_.Get(),w,h,false,false))return false;
+        // Native DXGI presentation: all transfers remain on the GPU. The
+        // offscreen raster and MSAA targets are reused; no CPU staging,
+        // Map, swizzle, QImage or Qt painter is touched on this path.
+        if(nativeHwnd){
+            context_->OMSetRenderTargets(0,nullptr,nullptr);
+            if(sampleCount_>1&&!multires)
+                context_->ResolveSubresource(resolve_.Get(),0,target_.Get(),0,
+                                              DXGI_FORMAT_R8G8B8A8_UNORM);
+            ID3D11Texture2D* gpuSource=multires?mergeTex_.Get():
+                (sampleCount_>1?resolve_.Get():target_.Get());
+            ComPtr<ID3D11Texture2D> backBuffer;
+            HRESULT hr=swapchain_->GetBuffer(0,IID_PPV_ARGS(&backBuffer));
+            if(FAILED(hr)){
+                error=L"DirectX 11 : tampon DXGI inaccessible.";
+                releasePresenter();return false;
+            }
+            context_->CopyResource(backBuffer.Get(),gpuSource);
+            backBuffer.Reset(); // flip-model swapchain must not retain the backbuffer
+            if(slot.queryReady){
+                context_->End(slot.afterDraw.Get());
+                context_->End(slot.afterCopy.Get());
+                context_->End(slot.disjoint.Get());
+            }
+            hr=swapchain_->Present(0,0); // unthrottled, no CPU readback
+            if(FAILED(hr)){
+                error=L"DirectX 11 : échec de présentation DXGI.";
+                releasePresenter();return false;
+            }
+            if(nativeStats){
+                *nativeStats={};
+                nativeStats->gpu=true;
+                nativeStats->threads=0;
+                nativeStats->readbackBufferCount=0;
+                nativeStats->gpuDrawCalls=drawCalls;
+                nativeStats->gpuBoxInstances=submittedBoxInstances;
+                nativeStats->gpuEllipseInstances=submittedEllipseInstances;
+                nativeStats->gpuFoliageInstances=submittedFoliageInstances;
+                nativeStats->tests=submittedVertices/3+uint64_t(submittedBoxInstances)*12+
+                    submittedEllipseTriangles+submittedFoliageTriangles+transparent_.size();
+                nativeStats->ms=std::chrono::duration<double,std::milli>(
+                    Clock::now()-started).count();
+                nativeStats->cpuSubmitMs=nativeStats->ms;
+            }
+            return true;
+        }
         // GPU timestamps surround the actual draw commands and the queued
         // GPU copy. They do not include any CPU-side GetData/Map blocking.
         if(slot.queryReady)context_->End(slot.afterDraw.Get());
@@ -1477,9 +1613,9 @@ private:
         giTableLoaded.store(false,std::memory_order_release);
         // Compatibility fallback if a scene has not yet been baked. This
         // retains the V17.310 reference path exactly and is NOT real GI.
-        // Static, geometry-aware low-frequency indirect light probes.
-        // A small capped volume keeps setup reasonable on Intel HD 620.
-        constexpr UINT nx=16,ny=8,nz=16;
+        // The coarse fallback exposed probe-cell patches on large flat walls.
+        // Match the denser offline GI defaults while keeping render cost fixed.
+        constexpr UINT nx=24,ny=10,nz=24;
         V lo{INF,INF,INF},hi{-INF,-INF,-INF};
         for(const Obj& o:scene.obj){
             const V a=o.mn,b=o.mx;
@@ -1618,6 +1754,8 @@ private:
             ?D3D_DRIVER_TYPE_WARP:D3D_DRIVER_TYPE_HARDWARE;
         HRESULT hr=D3D11CreateDevice(nullptr,driver,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,&feature,&context_);
         if(FAILED(hr)){error=L"Aucun périphérique Direct3D 11 matériel n’est disponible.";return false;}
+        // Keep each embedded HLSL literal below MSVC C2026 limits, then compile the unchanged source.
+        const std::string shaderSource = std::string(kShader) + kShaderPart2;
         ComPtr<ID3DBlob> vsCode,boxVsCode,ellipseVsCode,psCode,errors;
         auto shaderError=[&](const wchar_t* prefix){
             std::wstring result(prefix);
@@ -1630,19 +1768,24 @@ private:
             }
             return result;
         };
-        hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",nullptr,nullptr,"VSMain","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&vsCode,&errors);
+        hr=D3DCompile(shaderSource.c_str(),shaderSource.size(),"m3d_directx11_preview",nullptr,nullptr,"VSMain","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&vsCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation du vertex shader DirectX 11 impossible");return false;}
-        hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",nullptr,nullptr,"VSBoxMain","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&boxVsCode,&errors);
+        hr=D3DCompile(shaderSource.c_str(),shaderSource.size(),"m3d_directx11_preview",nullptr,nullptr,"VSBoxMain","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&boxVsCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation du shader d'instancing V17 impossible");return false;}
-        hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",nullptr,nullptr,
+        hr=D3DCompile(shaderSource.c_str(),shaderSource.size(),"m3d_directx11_preview",nullptr,nullptr,
                       "VSEllipseMain","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&ellipseVsCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation du shader LOD ellipsoïdes impossible");return false;}
         // The exact old shader can be selected to A/B test visual fidelity.
         // HLSL is compiled once at device creation, never per frame.
         const char* disableShaderOpt=std::getenv("M3D_V17_DISABLE_SHADER_OPT");
         const bool optimizePixels=!(disableShaderOpt&&std::strcmp(disableShaderOpt,"1")==0);
+        // The cheap three-axis rejection is safe for every local light and is
+        // part of the normal path. Keep the old opt-in variable compatible
+        // with benchmark launchers; the explicit disable flag wins.
         const char* lightCullEnv=std::getenv("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL");
-        const bool lightAabbCull=lightCullEnv&&std::strcmp(lightCullEnv,"1")==0;
+        const char* disableLightCull=std::getenv("M3D_V17_DISABLE_LIGHT_AABB_CULL");
+        const bool lightAabbCull=!(disableLightCull&&std::strcmp(disableLightCull,"1")==0)
+            &&!(lightCullEnv&&std::strcmp(lightCullEnv,"0")==0);
         const D3D_SHADER_MACRO pixelMacros[]={
             {"M3D_V17_OPTIMIZE_PIXELS","1"},
             {lightAabbCull?"M3D_V17_LIGHT_AABB_CULL":nullptr,lightAabbCull?"1":nullptr},
@@ -1655,7 +1798,7 @@ private:
         // conservative local-light rejection are independent A/B paths.
         const D3D_SHADER_MACRO* activeMacros=
             optimizePixels?pixelMacros:(lightAabbCull?lightCullOnlyMacros:nullptr);
-        hr=D3DCompile(kShader,sizeof(kShader)-1,"m3d_directx11_preview",
+        hr=D3DCompile(shaderSource.c_str(),shaderSource.size(),"m3d_directx11_preview",
             activeMacros,nullptr,"PSMain","ps_4_0",
             D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&psCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation du pixel shader DirectX 11 impossible");return false;}
@@ -1686,13 +1829,23 @@ private:
            error=L"Création shaders multires impossible.";return false;
         }
         if(FAILED(device_->CreateVertexShader(vsCode->GetBufferPointer(),vsCode->GetBufferSize(),nullptr,&vs_))||FAILED(device_->CreatePixelShader(psCode->GetBufferPointer(),psCode->GetBufferSize(),nullptr,&ps_))){error=L"Création des shaders DirectX 11 impossible.";return false;}
-        const D3D11_INPUT_ELEMENT_DESC input[]={{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,p),D3D11_INPUT_PER_VERTEX_DATA,0},{"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,n),D3D11_INPUT_PER_VERTEX_DATA,0},{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,offsetof(GpuVertex,uv),D3D11_INPUT_PER_VERTEX_DATA,0},{"MATERIAL",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertex,material),D3D11_INPUT_PER_VERTEX_DATA,0}};
-        if(FAILED(device_->CreateInputLayout(input,4,vsCode->GetBufferPointer(),vsCode->GetBufferSize(),&layout_))){error=L"Création du format de sommet DirectX 11 impossible.";return false;}
+        const D3D11_INPUT_ELEMENT_DESC input[]={{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,p),D3D11_INPUT_PER_VERTEX_DATA,0},{"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,n),D3D11_INPUT_PER_VERTEX_DATA,0},{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,offsetof(GpuVertex,uv),D3D11_INPUT_PER_VERTEX_DATA,0},{"MATERIAL",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertex,material),D3D11_INPUT_PER_VERTEX_DATA,0},{"TRIID",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertex,primitiveId),D3D11_INPUT_PER_VERTEX_DATA,0}};
+        if(FAILED(device_->CreateInputLayout(input,5,vsCode->GetBufferPointer(),vsCode->GetBufferSize(),&layout_))){error=L"Création du format de sommet DirectX 11 impossible.";return false;}
+        const D3D11_INPUT_ELEMENT_DESC lumaInput[]={
+            {"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertexLuma,p),D3D11_INPUT_PER_VERTEX_DATA,0},
+            {"NORMAL",0,DXGI_FORMAT_R10G10B10A2_UNORM,0,offsetof(GpuVertexLuma,normalPacked),D3D11_INPUT_PER_VERTEX_DATA,0},
+            {"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,offsetof(GpuVertexLuma,uv),D3D11_INPUT_PER_VERTEX_DATA,0},
+            {"MATERIAL",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertexLuma,material),D3D11_INPUT_PER_VERTEX_DATA,0},
+            {"TRIID",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertexLuma,primitiveId),D3D11_INPUT_PER_VERTEX_DATA,0}
+        };
+        if(FAILED(device_->CreateInputLayout(lumaInput,5,vsCode->GetBufferPointer(),vsCode->GetBufferSize(),&lumaLayout_))){
+            error=L"Création du format de sommet compact LumaTrace impossible.";return false;
+        }
         if(FAILED(device_->CreateVertexShader(boxVsCode->GetBufferPointer(),boxVsCode->GetBufferSize(),nullptr,&boxVs_))){
             error=L"Création du vertex shader d'instancing V17 impossible.";return false;
         }
         const D3D11_INPUT_ELEMENT_DESC boxInput[]={
-            input[0],input[1],input[2],input[3],
+            input[0],input[1],input[2],input[3],input[4],
             {"BOXMIN",0,DXGI_FORMAT_R32G32B32_FLOAT,1,0,D3D11_INPUT_PER_INSTANCE_DATA,1},
             {"BOXSCALE",0,DXGI_FORMAT_R32_FLOAT,1,12,D3D11_INPUT_PER_INSTANCE_DATA,1},
             {"BOXMAX",0,DXGI_FORMAT_R32G32B32_FLOAT,1,16,D3D11_INPUT_PER_INSTANCE_DATA,1},
@@ -1701,7 +1854,7 @@ private:
             {"BOXUVMODE",0,DXGI_FORMAT_R32_UINT,1,44,D3D11_INPUT_PER_INSTANCE_DATA,1}
         };
         const HRESULT boxLayoutResult=device_->CreateInputLayout(
-            boxInput,10,boxVsCode->GetBufferPointer(),boxVsCode->GetBufferSize(),&boxLayout_);
+            boxInput,11,boxVsCode->GetBufferPointer(),boxVsCode->GetBufferSize(),&boxLayout_);
         if(FAILED(boxLayoutResult)){
             error=L"Création du format des instances GPU impossible. HRESULT "
                   +std::to_wstring(uint32_t(boxLayoutResult));return false;
@@ -1711,14 +1864,14 @@ private:
             error=L"Création du shader GPU LOD impossible.";return false;
         }
         const D3D11_INPUT_ELEMENT_DESC ellipseInput[]={
-            input[0],input[1],input[2],input[3],
+            input[0],input[1],input[2],input[3],input[4],
             {"ELLIPSECENTER",0,DXGI_FORMAT_R32G32B32_FLOAT,1,0,D3D11_INPUT_PER_INSTANCE_DATA,1},
             {"ELLIPSEMAT",0,DXGI_FORMAT_R32_UINT,1,12,D3D11_INPUT_PER_INSTANCE_DATA,1},
             {"ELLIPSERADII",0,DXGI_FORMAT_R32G32B32_FLOAT,1,16,D3D11_INPUT_PER_INSTANCE_DATA,1},
             {"ELLIPSEPAD",0,DXGI_FORMAT_R32_FLOAT,1,28,D3D11_INPUT_PER_INSTANCE_DATA,1}
         };
         const HRESULT ellipseLayoutResult=device_->CreateInputLayout(
-            ellipseInput,8,ellipseVsCode->GetBufferPointer(),
+            ellipseInput,9,ellipseVsCode->GetBufferPointer(),
             ellipseVsCode->GetBufferSize(),&ellipseLayout_);
         if(FAILED(ellipseLayoutResult)){
             error=L"Format des instances ellipsoïdes incorrect. HRESULT "
@@ -1749,9 +1902,10 @@ private:
         if(FAILED(device_->CreateSamplerState(&sd,&probeSampler_))){error=L"Création du sampler des sondes indirectes impossible.";return false;}
         return true;
     }
-    bool ensureScene(const Scene& scene,std::wstring& error) {
+    bool ensureScene(const Scene& scene,std::wstring& error,bool lumaTrace) {
         const char* disableInstancing=std::getenv("M3D_V17_DISABLE_GPU_INSTANCING");
-        const bool useInstancing=!(disableInstancing && std::strcmp(disableInstancing,"1")==0);
+        const bool useInstancing=!lumaTrace &&
+            !(disableInstancing && std::strcmp(disableInstancing,"1")==0);
         const char* disableBoxes=std::getenv("M3D_V17_DISABLE_BOX_INSTANCING");
         const char* disableEllipses=std::getenv("M3D_V17_DISABLE_ELLIPSE_INSTANCING");
         const bool useBoxInstancing=useInstancing &&
@@ -1766,11 +1920,14 @@ private:
            boxInstancingEnabled_==useBoxInstancing &&
            ellipseInstancingEnabled_==useEllipseInstancing &&
            foliageInstancingEnabled_==useFoliageInstancing &&
+           lumaTraceGeometryEnabled_==lumaTrace &&
            sceneIdentity_==scene.gpuCacheIdentity &&
            sceneRevision_==scene.gpuCacheRevision)return true;
         // An edited scene may retain the same std::vector address: revision
         // tracking is required to refresh its GPU PBR/mesh resources.
         vertices_.Reset();transparentVertices_.Reset();albedo_.Reset();
+        verticesSrv_.Reset();
+        preservedAlbedo_.Reset();preservedTextureLayers_.fill(-1);
         probeSrv_.Reset();probeTexture_.Reset();
         probeNextSrv_.Reset();probeNextTexture_.Reset();
         hasBakedGi_=false;bakedGi_=gibake::Table{};
@@ -1784,6 +1941,8 @@ private:
         foliageInstances_.Reset();
         for(auto& buffer:foliageVertices_)buffer.Reset();
         foliageVertexCounts_.fill(0);foliage_.clear();foliageInstanceCount_=0;
+        lumaObjectToTriangle_.clear();lumaTriangleCount_=0;
+        if(lumaTrace)lumaObjectToTriangle_.assign(scene.obj.size(),0xffffffffu);
         MeshBuilder mesh;
         std::vector<GpuBoxInstance> boxData;
         // V16 JSON geometry is triangulated for CPU/Compute, but the source
@@ -1855,6 +2014,15 @@ private:
             const uint32_t m=o.mat;
             const float uvScale=uvScaleForMaterial(scene,m);
             mesh.transparentMaterial=m<scene.mat.size()&&scene.mat[m].transmissionPercent>0;
+            if(lumaTrace){
+                if(o.kind!=Kind::Triangle){
+                    error=L"LumaTrace BVH4 : les primitives analytiques ne sont pas encore prises en charge.";
+                    return false;
+                }
+                mesh.currentPrimitiveId=mesh.transparentMaterial?0xffffffffu:lumaTriangleCount_;
+                if(!mesh.transparentMaterial)
+                    lumaObjectToTriangle_[objectIndex]=lumaTriangleCount_++;
+            }else mesh.currentPrimitiveId=0;
             if(o.kind==Kind::Triangle)mesh.tri(o.a,o.b,o.c,o.n0,o.n1,o.n2,o.uv0.x,o.uv0.y,o.uv1.x,o.uv1.y,o.uv2.x,o.uv2.y,m);
             else if(o.kind==Kind::Box){
                 if(useBoxInstancing && !mesh.transparentMaterial){
@@ -1885,6 +2053,13 @@ private:
             mesh.transparentMaterial=false;
             if(mesh.vertices.size()+mesh.transparent.size()*3>12000000u){error=L"Scène trop grande pour l’aperçu DirectX 11 (limite de sécurité mémoire).";return false;}
         }
+        if(lumaTrace&&lumaTriangleCount_!=mesh.vertices.size()/3){
+            error=L"LumaTrace BVH4 : le flux de triangles opaque diverge du tampon GPU.";
+            return false;
+        }
+        // The optional V17 ground is not in Scene::order/BVH; leave it out of
+        // LumaTrace's per-triangle radiance lookup while keeping raster output.
+        mesh.currentPrimitiveId=lumaTrace?0xffffffffu:0u;
         mesh.ground(scene);
         if(mesh.vertices.size()+mesh.transparent.size()*3>12000000u){error=L"Scène trop grande pour l’aperçu DirectX 11 (limite de sécurité mémoire).";return false;}
         if(mesh.vertices.empty()&&mesh.transparent.empty()&&boxData.empty()&&ellipses_.empty()&&foliage_.empty()){
@@ -2021,7 +2196,56 @@ private:
                 }
                 chunks_.push_back(chunk);
             }
-            D3D11_BUFFER_DESC bd{};bd.ByteWidth=UINT(mesh.vertices.size()*sizeof(GpuVertex));bd.Usage=D3D11_USAGE_IMMUTABLE;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;D3D11_SUBRESOURCE_DATA init{};init.pSysMem=mesh.vertices.data();if(FAILED(device_->CreateBuffer(&bd,&init,&vertices_))){error=L"Allocation de la géométrie dans la mémoire GPU impossible.";return false;}vertexCount_=UINT(mesh.vertices.size());}
+            std::vector<GpuVertexLuma> packedLumaVertices;
+        const void* geometryData=mesh.vertices.data();
+        size_t geometryStride=sizeof(GpuVertex);
+        if(lumaTrace){
+            packedLumaVertices.resize(mesh.vertices.size());
+            for(size_t i=0;i<mesh.vertices.size();++i){
+                const GpuVertex& source=mesh.vertices[i];
+                GpuVertexLuma& packed=packedLumaVertices[i];
+                std::copy(std::begin(source.p),std::end(source.p),std::begin(packed.p));
+                packed.normalPacked=packLumaNormal(source.n);
+                std::copy(std::begin(source.uv),std::end(source.uv),std::begin(packed.uv));
+                packed.material=source.material;
+                packed.primitiveId=source.primitiveId;
+            }
+            geometryData=packedLumaVertices.data();
+            geometryStride=sizeof(GpuVertexLuma);
+        }
+        const size_t geometryBytes=mesh.vertices.size()*geometryStride;
+        if(geometryBytes>UINT_MAX){
+            error=L"Géométrie GPU trop volumineuse pour un tampon DirectX 11.";
+            return false;
+        }
+        D3D11_BUFFER_DESC bd{};
+        bd.ByteWidth=UINT(geometryBytes);
+        bd.Usage=D3D11_USAGE_IMMUTABLE;
+        bd.BindFlags=D3D11_BIND_VERTEX_BUFFER|(lumaTrace?D3D11_BIND_SHADER_RESOURCE:0u);
+        bd.MiscFlags=lumaTrace?D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS:0u;
+        bd.StructureByteStride=0u;
+        D3D11_SUBRESOURCE_DATA init{};init.pSysMem=geometryData;
+        const HRESULT geometryResult=device_->CreateBuffer(&bd,&init,&vertices_);
+        if(FAILED(geometryResult)){
+            error=L"Allocation de la géométrie GPU impossible ("+
+                std::to_wstring((geometryBytes+1048575u)/1048576u)+
+                L" Mio demandés, HRESULT "+
+                std::to_wstring(uint32_t(geometryResult))+L").";
+            return false;
+        }
+        vertexCount_=UINT(mesh.vertices.size());
+        if(lumaTrace){
+            D3D11_SHADER_RESOURCE_VIEW_DESC sv{};
+            sv.Format=DXGI_FORMAT_R32_TYPELESS;
+            sv.ViewDimension=D3D11_SRV_DIMENSION_BUFFEREX;
+            sv.BufferEx.FirstElement=0;
+            sv.BufferEx.NumElements=UINT(geometryBytes/sizeof(uint32_t));
+            sv.BufferEx.Flags=D3D11_BUFFEREX_SRV_FLAG_RAW;
+            if(FAILED(device_->CreateShaderResourceView(vertices_.Get(),&sv,&verticesSrv_))){
+                error=L"Vue brute compute de la géométrie impossible.";
+                return false;
+            }
+        }}
         if(!mesh.transparent.empty()){D3D11_BUFFER_DESC bd{};bd.ByteWidth=UINT(mesh.transparent.size()*3*sizeof(GpuVertex));bd.Usage=D3D11_USAGE_DYNAMIC;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;if(FAILED(device_->CreateBuffer(&bd,nullptr,&transparentVertices_))){error=L"Allocation du tampon des surfaces transparentes impossible.";return false;}}
         transparent_=std::move(mesh.transparent);
         // Material textures arrive at different sizes (256..2048), but D3D11
@@ -2111,12 +2335,171 @@ private:
         if(FAILED(device_->CreateTexture2D(&td,roughSub.data(),&roughTexture))){error=L"Chargement des rugosités dans DirectX 11 impossible.";return false;}
         sv.Format=td.Format;
         if(FAILED(device_->CreateShaderResourceView(roughTexture.Get(),&sv,&roughness_))){error=L"Création de la table de rugosités DirectX 11 impossible.";return false;}
+        // Keep scene-authored paintings in a small independent texture array.
+        // The ordinary atlas can drop to 256px on crowded scenes; this tier
+        // preserves requested mural detail without enlarging every material.
+        std::vector<uint32_t> preservedIds;
+        UINT preservedSize=0;
+        for(UINT m=0;m<scene.mat.size()&&m<256;m++){
+            const Material& material=scene.mat[m];
+            if(!material.preserveTextureDetail)continue;
+            if(material.colorMip.empty()||
+               material.colorMip.front().size<material.minimumTextureResolution){
+                error=L"Protected texture source resolution is unavailable.";return false;
+            }
+            preservedTextureLayers_[m]=int32_t(preservedIds.size());
+            preservedIds.push_back(m);
+            preservedSize=std::max(preservedSize,material.colorMip.front().size);
+        }
+        preservedAlbedo_.Reset();
+        if(!preservedIds.empty()){
+            if(preservedSize>2048){error=L"Protected texture exceeds 2048px.";return false;}
+            uint64_t preservedTexels=0;
+            for(UINT level=preservedSize;level>0;level>>=1)
+                preservedTexels+=uint64_t(level)*uint64_t(level);
+            const uint64_t preservedBytes=preservedTexels*preservedIds.size()*4ull;
+            constexpr uint64_t kMaxPreservedAlbedoBytes=256ull*1024ull*1024ull;
+            if(preservedBytes>kMaxPreservedAlbedoBytes){
+                error=L"Protected textures exceed the 256 MiB GPU budget.";return false;
+            }
+            UINT preservedMips=1;
+            for(UINT level=preservedSize;level>1;level>>=1)++preservedMips;
+            std::vector<std::vector<uint32_t>> highPixels(preservedIds.size()*preservedMips);
+            std::vector<D3D11_SUBRESOURCE_DATA> highSub(preservedIds.size()*preservedMips);
+            for(size_t layer=0;layer<preservedIds.size();layer++){
+                const Material& material=scene.mat[preservedIds[layer]];
+                for(UINT level=0;level<preservedMips;level++){
+                    const UINT targetSize=std::max(1u,preservedSize>>level);
+                    const ColorLevel& source=material.colorMip[
+                        std::min<size_t>(level,material.colorMip.size()-1)];
+                    if(!source.size||source.p.size()<size_t(source.size)*source.size){
+                        error=L"Invalid protected texture color mip.";return false;
+                    }
+                    const size_t atLayer=layer*preservedMips+level;
+                    auto& pixels=highPixels[atLayer];
+                    pixels.resize(size_t(targetSize)*targetSize);
+                    for(UINT y=0;y<targetSize;y++)for(UINT x=0;x<targetSize;x++){
+                        const UINT sx=std::min(source.size-1,UINT(uint64_t(x)*source.size/targetSize));
+                        const UINT sy=std::min(source.size-1,UINT(uint64_t(y)*source.size/targetSize));
+                        const uint32_t color=source.p[size_t(sy)*source.size+sx];
+                        const uint32_t r=(color>>16)&255,g=(color>>8)&255,b=color&255;
+                        pixels[size_t(y)*targetSize+x]=0xff000000u|(b<<16)|(g<<8)|r;
+                    }
+                    highSub[atLayer].pSysMem=pixels.data();
+                    highSub[atLayer].SysMemPitch=targetSize*4;
+                    highSub[atLayer].SysMemSlicePitch=targetSize*targetSize*4;
+                }
+            }
+            D3D11_TEXTURE2D_DESC highDesc{};
+            highDesc.Width=preservedSize;highDesc.Height=preservedSize;
+            highDesc.MipLevels=preservedMips;highDesc.ArraySize=UINT(preservedIds.size());
+            highDesc.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+            highDesc.SampleDesc.Count=1;highDesc.Usage=D3D11_USAGE_IMMUTABLE;
+            highDesc.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+            ComPtr<ID3D11Texture2D> highTexture;
+            if(FAILED(device_->CreateTexture2D(&highDesc,highSub.data(),&highTexture))){
+                error=L"Failed to create protected artwork texture array.";return false;
+            }
+            D3D11_SHADER_RESOURCE_VIEW_DESC highView{};
+            highView.Format=highDesc.Format;highView.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2DARRAY;
+            highView.Texture2DArray.MipLevels=preservedMips;
+            highView.Texture2DArray.ArraySize=UINT(preservedIds.size());
+            if(FAILED(device_->CreateShaderResourceView(highTexture.Get(),&highView,&preservedAlbedo_))){
+                error=L"Failed to create protected artwork shader view.";return false;
+            }
+            std::clog<<"[CSE WARP D3D11] Protected artwork tier: "<<preservedIds.size()
+                     <<" materials, "<<preservedSize<<"x"<<preservedSize
+                     <<", "<<preservedBytes/(1024*1024)<<" MiB\n";
+        }
         sceneKey_=scene.obj.data();objectCount_=scene.obj.size();
         sceneIdentity_=scene.gpuCacheIdentity;sceneRevision_=scene.gpuCacheRevision;
         boxInstancingEnabled_=useBoxInstancing;
         ellipseInstancingEnabled_=useEllipseInstancing;
         foliageInstancingEnabled_=useFoliageInstancing;
+        lumaTraceGeometryEnabled_=lumaTrace;
         return true;
+    }
+    struct LumaParams { uint32_t counts[4];float lights[64][4],colors[64][4]; };
+    static_assert(sizeof(LumaParams)==2064,"LumaTrace HLSL constant packing");
+    bool ensureLumaTrace(const Scene& scene,const LumaTraceBvh4& bvh,std::wstring& error){
+        if(verticesSrv_&&lumaSceneIdentity_==scene.gpuCacheIdentity&&lumaSceneRevision_==scene.gpuCacheRevision&&
+           lumaBvhSrv_&&lumaOrderSrv_&&lumaRadianceSrv_&&lumaRadianceUav_&&lumaCompute_&&lumaParams_)return true;
+        if(!verticesSrv_||!lumaTriangleCount_||bvh.nodes.empty()||bvh.primitiveCount!=scene.order.size()){
+            error=L"LumaTrace BVH4 : géométrie ou table de primitives incompatible.";return false;}
+        std::vector<uint32_t> order;order.reserve(scene.order.size());
+        for(uint32_t id:scene.order){if(id>=lumaObjectToTriangle_.size()){
+            error=L"LumaTrace BVH4 : indice de primitive hors limites.";return false;}
+            order.push_back(lumaObjectToTriangle_[id]);}
+        auto makeBuffer=[&](const void* data,size_t count,UINT stride,UINT bind,
+                            D3D11_USAGE usage,UINT cpu,ComPtr<ID3D11Buffer>& out)->bool{
+            if(!count||count>UINT_MAX/stride)return false;
+            D3D11_BUFFER_DESC d{};d.ByteWidth=UINT(count*stride);d.Usage=usage;d.BindFlags=bind;
+            d.MiscFlags=D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;d.StructureByteStride=stride;d.CPUAccessFlags=cpu;
+            D3D11_SUBRESOURCE_DATA init{};init.pSysMem=data;
+            return SUCCEEDED(device_->CreateBuffer(&d,data?&init:nullptr,&out));};
+        lumaRadianceCacheValid_=false;
+        lumaBvhBuffer_.Reset();lumaOrderBuffer_.Reset();lumaRadianceBuffer_.Reset();
+        lumaBvhSrv_.Reset();lumaOrderSrv_.Reset();lumaRadianceSrv_.Reset();lumaRadianceUav_.Reset();
+        if(!makeBuffer(bvh.nodes.data(),bvh.nodes.size(),sizeof(LumaTraceBvh4Node),D3D11_BIND_SHADER_RESOURCE,D3D11_USAGE_IMMUTABLE,0,lumaBvhBuffer_)||
+           !makeBuffer(order.data(),order.size(),sizeof(uint32_t),D3D11_BIND_SHADER_RESOURCE,D3D11_USAGE_IMMUTABLE,0,lumaOrderBuffer_)||
+           !makeBuffer(nullptr,lumaTriangleCount_,16,D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS,D3D11_USAGE_DEFAULT,0,lumaRadianceBuffer_)){
+            error=L"Allocation des tables GPU LumaTrace impossible.";return false;}
+        auto srv=[&](ID3D11Buffer* b,UINT count,ComPtr<ID3D11ShaderResourceView>& v){D3D11_SHADER_RESOURCE_VIEW_DESC d{};d.Format=DXGI_FORMAT_UNKNOWN;d.ViewDimension=D3D11_SRV_DIMENSION_BUFFER;d.Buffer.NumElements=count;return SUCCEEDED(device_->CreateShaderResourceView(b,&d,&v));};
+        if(!srv(lumaBvhBuffer_.Get(),UINT(bvh.nodes.size()),lumaBvhSrv_)||!srv(lumaOrderBuffer_.Get(),UINT(order.size()),lumaOrderSrv_)||!srv(lumaRadianceBuffer_.Get(),lumaTriangleCount_,lumaRadianceSrv_)){
+            error=L"Création des vues GPU LumaTrace impossible.";return false;}
+        D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};ud.Format=DXGI_FORMAT_UNKNOWN;ud.ViewDimension=D3D11_UAV_DIMENSION_BUFFER;ud.Buffer.NumElements=lumaTriangleCount_;
+        if(FAILED(device_->CreateUnorderedAccessView(lumaRadianceBuffer_.Get(),&ud,&lumaRadianceUav_))){error=L"UAV de radiance LumaTrace impossible.";return false;}
+        ComPtr<ID3DBlob> code,errors;HRESULT hr=D3DCompile(lumatrace_detail::kComputeShader,sizeof(lumatrace_detail::kComputeShader)-1,
+            "m3d_lumatrace_compute",nullptr,nullptr,"CSShadeTriangles","cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&code,&errors);
+        if(FAILED(hr)){
+            error=L"Compilation du compute shader LumaTrace impossible (HRESULT "+
+                std::to_wstring(uint32_t(hr))+L")";
+            if(errors&&errors->GetBufferPointer()){
+                error+=L": ";
+                const char* p=static_cast<const char*>(errors->GetBufferPointer());
+                const size_t n=std::min<size_t>(errors->GetBufferSize(),1024);
+                for(size_t i=0;i<n;++i)
+                    error.push_back(p[i]>=32&&p[i]<127?wchar_t(p[i]):L' ');
+            }
+            return false;
+        }
+        hr=device_->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&lumaCompute_);
+        if(FAILED(hr)){
+            error=L"Création du compute shader LumaTrace impossible (HRESULT "+
+                std::to_wstring(uint32_t(hr))+L").";
+            return false;
+        }
+        D3D11_BUFFER_DESC cd{};cd.ByteWidth=sizeof(LumaParams);cd.Usage=D3D11_USAGE_DYNAMIC;cd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;cd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+        if(FAILED(device_->CreateBuffer(&cd,nullptr,&lumaParams_))){error=L"Constantes compute LumaTrace impossibles.";return false;}
+        lumaNodeCount_=UINT(bvh.nodes.size());lumaOrderCount_=UINT(order.size());
+        lumaSceneIdentity_=scene.gpuCacheIdentity;lumaSceneRevision_=scene.gpuCacheRevision;return true;
+    }
+    bool dispatchLumaTrace(const Scene& scene,std::wstring& error){
+        if(scene.root<0||size_t(scene.root)>=scene.node.size()){error=L"Racine BVH4 invalide.";return false;}
+        LumaParams p{};p.counts[0]=lumaTriangleCount_;p.counts[1]=lumaOrderCount_;p.counts[2]=lumaNodeCount_;
+        const Node& root=scene.node[size_t(scene.root)];const V center=(root.mn+root.mx)*.5f;
+        auto appendLight=[&](V pos,float radius,float intensity,V color){
+            if(p.counts[3]>=64)return;
+            const uint32_t i=p.counts[3]++;
+            p.lights[i][0]=pos.x;p.lights[i][1]=pos.y;p.lights[i][2]=pos.z;p.lights[i][3]=radius;
+            p.colors[i][0]=color.x/255.f;p.colors[i][1]=color.y/255.f;p.colors[i][2]=color.z/255.f;p.colors[i][3]=intensity;
+        };
+        // Preserve the LumaTrace test pair, then prioritize scene exterior
+        // luminaires so the 64-source cap cannot silently drop the new row.
+        appendLight(center+V{1.4f,.75f,0.f},12.f,1.15f,{31,158,255});
+        appendLight(center+V{-1.4f,.75f,0.f},12.f,1.15f,{255,99,26});
+        for(const Light& l:pointLights)appendLight(l.p,l.radius,l.intensity,l.color);
+        for(const Light& l:scene.lights)if(l.exterior)
+            appendLight(l.p,l.radius,l.intensity*lampFactor,l.color);
+        for(const Light& l:scene.lights)if(!l.exterior)
+            appendLight(l.p,l.radius,l.intensity,l.color);
+        std::array<uint32_t,sizeof(LumaParams)/sizeof(uint32_t)> radianceKey{};std::memcpy(radianceKey.data(),&p,sizeof(p));
+        if(lumaRadianceCacheValid_&&radianceKey==lumaRadianceKey_)return true;
+        D3D11_MAPPED_SUBRESOURCE m{};if(FAILED(context_->Map(lumaParams_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m))){error=L"Upload constantes LumaTrace impossible.";return false;}
+        std::memcpy(m.pData,&p,sizeof(p));context_->Unmap(lumaParams_.Get(),0);
+        ID3D11ShaderResourceView* srvs[]={verticesSrv_.Get(),lumaOrderSrv_.Get(),lumaBvhSrv_.Get()};ID3D11UnorderedAccessView* uavs[]={lumaRadianceUav_.Get()};ID3D11Buffer* cbs[]={lumaParams_.Get()};
+        context_->CSSetShader(lumaCompute_.Get(),nullptr,0);context_->CSSetShaderResources(0,3,srvs);context_->CSSetUnorderedAccessViews(0,1,uavs,nullptr);context_->CSSetConstantBuffers(0,1,cbs);context_->Dispatch((lumaTriangleCount_+63)/64,1,1);
+        ID3D11UnorderedAccessView* nu[]={nullptr};ID3D11ShaderResourceView* ns[]={nullptr,nullptr,nullptr};context_->CSSetUnorderedAccessViews(0,1,nu,nullptr);context_->CSSetShaderResources(0,3,ns);context_->CSSetShader(nullptr,nullptr,0);lumaRadianceKey_=radianceKey;lumaRadianceCacheValid_=true;return true;
     }
     bool ensureTargets(int w,int h,unsigned msaa,std::wstring& error) {
         if(w==width_&&h==height_&&target_&&msaaPreference_==msaa)return true;
@@ -2217,6 +2600,35 @@ private:
         samplerAnisotropy_=aniso;
         return true;
     }
+    bool ensureSwapchain(HWND hwnd,int w,int h,std::wstring& error){
+        if(swapchain_ && hwnd==nativeHwnd_ && w==nativeW_ && h==nativeH_)return true;
+        releasePresenter();
+        ComPtr<IDXGIDevice> dxgiDevice;
+        ComPtr<IDXGIAdapter> adapter;
+        ComPtr<IDXGIFactory2> factory;
+        if(FAILED(device_.As(&dxgiDevice))||
+           FAILED(dxgiDevice->GetAdapter(&adapter))||
+           FAILED(adapter->GetParent(IID_PPV_ARGS(&factory)))){
+            error=L"DirectX 11 : fabrique DXGI 1.2 indisponible.";return false;
+        }
+        DXGI_SWAP_CHAIN_DESC1 desc{};
+        desc.Width=UINT(w);desc.Height=UINT(h);
+        desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;
+        desc.Stereo=FALSE;desc.SampleDesc.Count=1;
+        desc.BufferUsage=DXGI_USAGE_RENDER_TARGET_OUTPUT;
+        desc.BufferCount=2;desc.Scaling=DXGI_SCALING_STRETCH;
+        desc.SwapEffect=DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL;
+        desc.AlphaMode=DXGI_ALPHA_MODE_IGNORE;
+        const HRESULT hr=factory->CreateSwapChainForHwnd(
+            device_.Get(),hwnd,&desc,nullptr,nullptr,&swapchain_);
+        if(FAILED(hr)){
+            error=L"DirectX 11 : création de la swapchain DXGI impossible.";
+            return false;
+        }
+        factory->MakeWindowAssociation(hwnd,DXGI_MWA_NO_ALT_ENTER);
+        nativeHwnd_=hwnd;nativeW_=w;nativeH_=h;
+        return true;
+    }
     bool ensureReadback(unsigned depth,int w,int h,std::wstring& error){
         if(depth==readbackDepth_ && readbackSlots_[0].staging)return true;
         if(!pending_.empty()){
@@ -2253,10 +2665,20 @@ private:
         return true;
     }
     ComPtr<ID3D11Device> device_;ComPtr<ID3D11DeviceContext> context_;
+    ComPtr<IDXGISwapChain1> swapchain_;
+    HWND nativeHwnd_=nullptr;
+    int nativeW_=0,nativeH_=0;
     ComPtr<ID3D11VertexShader> vs_,boxVs_,ellipseVs_,mergeVs_,skyVs_;
     ComPtr<ID3D11PixelShader> ps_,mergePs_,skyPs_;
-    ComPtr<ID3D11InputLayout> layout_,boxLayout_,ellipseLayout_;
+    ComPtr<ID3D11InputLayout> layout_,lumaLayout_,boxLayout_,ellipseLayout_;
     ComPtr<ID3D11Buffer> skyConstants_,constants_,vertices_,transparentVertices_,boxVertices_,boxInstances_,ellipseInstances_,foliageInstances_;
+    ComPtr<ID3D11ShaderResourceView> verticesSrv_;
+    ComPtr<ID3D11Buffer> lumaBvhBuffer_,lumaOrderBuffer_,lumaRadianceBuffer_,lumaParams_;
+    ComPtr<ID3D11ShaderResourceView> lumaBvhSrv_,lumaOrderSrv_,lumaRadianceSrv_;
+    ComPtr<ID3D11UnorderedAccessView> lumaRadianceUav_;
+    ComPtr<ID3D11ComputeShader> lumaCompute_;
+    std::array<uint32_t,sizeof(LumaParams)/sizeof(uint32_t)> lumaRadianceKey_{};
+    bool lumaRadianceCacheValid_=false;
     std::array<ComPtr<ID3D11Buffer>,3> ellipseVertices_;
     std::array<UINT,3> ellipseVertexCounts_{{0,0,0}};
     std::vector<GpuEllipseInstance> ellipses_;
@@ -2265,7 +2687,10 @@ private:
     std::array<UINT,3> foliageVertexCounts_{{0,0,0}};
     std::vector<GpuEllipseInstance> foliage_;
     UINT foliageInstanceCount_=0;
-    ComPtr<ID3D11RasterizerState> raster_,scissorRaster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_,skyDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_,probeSampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_,probeSrv_;ComPtr<ID3D11Texture3D> probeTexture_,probeNextTexture_;
+    ComPtr<ID3D11RasterizerState> raster_,scissorRaster_;ComPtr<ID3D11DepthStencilState> depth_,transparentDepth_,skyDepth_;ComPtr<ID3D11BlendState> blend_;ComPtr<ID3D11SamplerState> sampler_,probeSampler_;ComPtr<ID3D11ShaderResourceView> albedo_,roughness_,normal_,shadowSrv_,probeSrv_,preservedAlbedo_;ComPtr<ID3D11Texture3D> probeTexture_,probeNextTexture_;
+    std::array<int32_t,256> preservedTextureLayers_=[](){
+        std::array<int32_t,256> layers{};layers.fill(-1);return layers;
+    }();
     ComPtr<ID3D11ShaderResourceView> probeNextSrv_;
     gibake::Table bakedGi_{};bool hasBakedGi_=false;
     uint64_t loadedGiFileRevision_=0;
@@ -2287,7 +2712,10 @@ private:
     std::vector<DrawChunk> chunks_,boxChunks_;
     UINT boxInstanceCount_=0;
     unsigned msaaPreference_=0,samplerAnisotropy_=16;
-    bool boxInstancingEnabled_=false,ellipseInstancingEnabled_=false,foliageInstancingEnabled_=false;
+    bool boxInstancingEnabled_=false,ellipseInstancingEnabled_=false,foliageInstancingEnabled_=false,lumaTraceGeometryEnabled_=false;
+    std::vector<uint32_t> lumaObjectToTriangle_;
+    uint32_t lumaTriangleCount_=0,lumaNodeCount_=0,lumaOrderCount_=0;
+    uint64_t lumaSceneIdentity_=0,lumaSceneRevision_=0;
     const Obj* sceneKey_=nullptr;size_t objectCount_=0;uint64_t sceneIdentity_=0,sceneRevision_=0;UINT vertexCount_=0;UINT sampleCount_=1,sampleQuality_=0;int width_=0,height_=0;
 };
 }
@@ -2323,12 +2751,17 @@ void setRasterGiCachePath(const std::filesystem::path& file){
     giTableLoaded.store(false,std::memory_order_release);
 }
 bool rasterGiCacheLoaded(){return giTableLoaded.load(std::memory_order_acquire);}
+std::filesystem::path rasterGiCachePath(){
+    std::lock_guard<std::mutex> lock(giPathMutex);
+    return giFilePath;
+}
 void setRasterPeripheralMultiresOverride(int mode){
     peripheralOverride.store(std::clamp(mode,-1,1),std::memory_order_release);
 }
 void setRasterCloudTimeScale(float x){
     cloudTimeScale.store(std::clamp(x,0.f,480.f),std::memory_order_release);
 }
+void setRasterCloudsEnabled(bool enabled){rasterCloudsEnabled.store(enabled,std::memory_order_release);}
 bool setRasterQualitySettings(const RasterQualitySettings& q,std::wstring& error){
     const auto validSample=q.msaaSamples==1||q.msaaSamples==2||q.msaaSamples==4||q.msaaSamples==8;
     const auto validAniso=q.anisotropy==1||q.anisotropy==2||
@@ -2346,6 +2779,22 @@ static DirectX11Preview& rasterThreadContext(){
 }
 bool renderDirectX11Preview(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error) {
     return rasterThreadContext().render(scene,shadows,cam,w,h,pixels,stats,error);
+}
+bool renderLumaTracePreview(const Scene& scene,const LumaTraceBvh4& bvh,const ShadowMap& shadows,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error){
+    return rasterThreadContext().renderLumaTrace(scene,bvh,shadows,cam,w,h,pixels,stats,error);
+}
+bool renderDirectX11Native(const Scene& scene,const ShadowMap& shadows,const Camera& cam,
+                            int w,int h,void* hwnd,Stats& stats,std::wstring& error){
+    return rasterThreadContext().present(scene,shadows,cam,w,h,
+                                         reinterpret_cast<HWND>(hwnd),stats,error);
+}
+bool renderLumaTraceNative(const Scene& scene,const LumaTraceBvh4& bvh,const ShadowMap& shadows,const Camera& cam,
+                            int w,int h,void* hwnd,Stats& stats,std::wstring& error){
+    return rasterThreadContext().present(scene,shadows,cam,w,h,
+        reinterpret_cast<HWND>(hwnd),stats,error,&bvh);
+}
+void releaseDirectX11NativeForCurrentThread(){
+    rasterThreadContext().releasePresenter();
 }
 bool enqueueDirectX11Preview(const Scene& scene,const ShadowMap& shadows,const Camera& cam,
                             int w,int h,unsigned depth,std::wstring& error){
@@ -2376,10 +2825,16 @@ float rasterColorExposure(){return 1.f;}
 void setRasterColorExposure(float){}
 void setRasterGiCachePath(const std::filesystem::path&){}
 bool rasterGiCacheLoaded(){return false;}
+std::filesystem::path rasterGiCachePath(){return {};}
 void setRasterPeripheralMultiresOverride(int){}
 void setRasterCloudTimeScale(float){}
+void setRasterCloudsEnabled(bool){}
 bool setRasterQualitySettings(const RasterQualitySettings&,std::wstring& error){error=L"DirectX 11 indisponible sur cet OS.";return false;}
 bool renderDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,std::vector<uint32_t>&,Stats&,std::wstring& error) { error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false; }
+bool renderDirectX11Native(const Scene&,const ShadowMap&,const Camera&,int,int,void*,Stats&,std::wstring& error){error=L"Présentation DXGI disponible uniquement sous Windows.";return false;}
+bool renderLumaTracePreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,std::vector<uint32_t>&,Stats&,std::wstring& error){error=L"LumaTrace DX11 disponible uniquement sous Windows.";return false;}
+bool renderLumaTraceNative(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,void*,Stats&,std::wstring& error){error=L"LumaTrace DX11 natif disponible uniquement sous Windows.";return false;}
+void releaseDirectX11NativeForCurrentThread(){}
 bool enqueueDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,unsigned,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}
 bool receiveDirectX11Preview(std::vector<uint32_t>&,Stats&,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}
 }

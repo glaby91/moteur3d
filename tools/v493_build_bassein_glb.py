@@ -10,6 +10,7 @@ from shapely import constrained_delaunay_triangles
 from trimesh.visual.material import PBRMaterial
 from trimesh.visual import TextureVisuals
 from pathlib import Path
+MODEL_SCALE=2.0
 parts=[]
 def mat(name,col,emissive=(0,0,0),metal=0,rough=.55):
     def rgb(v):return [int(max(0,min(255,c))) for c in v]+[255]
@@ -161,11 +162,13 @@ def create(filename):
     tube('Nageur_silhouette_avec_vague',[(6.39,-.32,1.58),(6.68,-.32,1.66),(7.02,-.32,1.57),(7.38,-.32,1.58)],.05,white)
     for x in (-7.13,-6.13,-5.4,-3.7,-2.0,-.2,1.5,3.3,4.7,5.8,7.2):
         cylinder(f'Suspente_{x:.1f}',(x,.37,.1),(x,.37,2.43),.016,metal,6)
+    # Uniform scaling preserves the sign proportions and leaves the roof feet at z=0.
+    for _,mesh in parts:mesh.vertices *= MODEL_SCALE
     scene=trimesh.Scene()
     for name,mesh in parts:scene.add_geometry(mesh,geom_name=name,node_name=name)
     output=Path(filename);output.parent.mkdir(parents=True,exist_ok=True)
     output.write_bytes(scene.export(file_type='glb'))
-    print('Created',output,'parts',len(parts),'triangles',sum(len(m.faces) for _,m in parts))
+    print('Created',output,'scale',MODEL_SCALE,'parts',len(parts),'triangles',sum(len(m.faces) for _,m in parts))
     assert len(parts)==112 and 14000<=sum(len(m.faces) for _,m in parts)<=17000
 
 if __name__=='__main__':

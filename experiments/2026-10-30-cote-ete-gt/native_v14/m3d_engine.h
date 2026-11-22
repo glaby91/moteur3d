@@ -19,6 +19,7 @@
 #include <vector>
 #include "src/m3d_physics.h"
 namespace m3d {
+struct LumaTraceBvh4;
 constexpr float PI=3.14159265358979323846f, INF=std::numeric_limits<float>::infinity();
 struct V { float x=0,y=0,z=0; V operator+(V b)const{return{x+b.x,y+b.y,z+b.z};} V operator-(V b)const{return{x-b.x,y-b.y,z-b.z};} V operator*(float s)const{return{x*s,y*s,z*s};} V operator/(float s)const{return{x/s,y/s,z/s};} };
 inline float dot(V a,V b){return a.x*b.x+a.y*b.y+a.z*b.z;} inline V cross(V a,V b){return{a.y*b.z-a.z*b.y,a.z*b.x-a.x*b.z,a.x*b.y-a.y*b.x};} inline float length(V a){return std::sqrt(dot(a,a));} inline V norm(V a){float l=length(a);return l>1e-20f?a/l:V{0,1,0};} inline float clampf(float x,float a,float b){return std::max(a,std::min(b,x));}
@@ -59,24 +60,53 @@ struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,dept
     unsigned threads=1; bool avx2=false,gpu=false;
     // Number of actual primary BVH queries before pixel reconstruction.
     uint64_t primarySamples=0; };
-struct Light { V p; float radius,intensity; V color; };
-struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPercent=0; float refractiveIndex=1.5f; float metallic=0.f, roughnessScale=1.f; std::vector<Level> mip,normalMip,roughnessMip; std::vector<ColorLevel> colorMip; };
+struct Light { V p; float radius,intensity; V color; bool exterior=false; };
+struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPercent=0; float refractiveIndex=1.5f; float metallic=0.f, roughnessScale=1.f; std::vector<Level> mip,normalMip,roughnessMip;
+    // Image albedo has no authored tangent normal or roughness map. CPU PBR
+    // must not inherit the procedural surface recipe used to seed its mip chains.
+    bool imageAlbedo=false;
+    float imageAlbedoRoughness=.72f; std::vector<ColorLevel> colorMip;
+    // Scene-authored optional texture quality policy. Default auto: renderer decides.
+    // Preserve: dedicated full-resolution GPU tier, independent of camera distance.
+    bool preserveTextureDetail=false;
+    uint32_t minimumTextureResolution=0;
+    // Optional scene-authored emission. Old materials keep the legacy shader
+    // behavior; an explicit JSON "emission" overrides material-name aliases.
+    V emissionColor{};
+    float emissionIntensity=0.f;
+    bool emissionAuthored=false;
+    bool waterSurface=false;
+    bool surfaceAuthored=false;
+};
 struct Scene { bool underwaterEnvironment=false; bool finiteGround=false; bool useLegacyWorldLights=true; std::vector<Obj> obj; std::vector<SourceBox> sourceBoxes; std::vector<SourceFoliage> sourceFoliage; std::vector<Node> node; std::vector<uint32_t> order; std::vector<Material> mat; std::vector<Light> lights; int32_t root=-1;
  // V16 builder assigns a unique identity after scene construction. Tracked scenes
  // are immutable except for explicit editor mutations, which MUST call
  // markGpuContentChanged(). Legacy/untracked scenes (identity == 0) retain
  // the full byte-for-byte scene hash as a safe fallback.
  uint64_t gpuCacheIdentity=0, gpuCacheRevision=0;
+ // Independent GPU invalidation epochs for Vulkan incremental updates.
+ // The legacy invalidator remains conservative (geometry AND material data).
+ uint64_t gpuGeometryRevision=0, gpuMaterialRevision=0, gpuParametersRevision=0;
  void markGpuContentChanged(){++gpuCacheRevision;}
+ // Geometry-only changes preserve all immutable GPU material/PBR textures.
+ void markGpuGeometryChanged(){++gpuGeometryRevision;++gpuCacheRevision;}
+ // Material texture changes invalidate PBR arrays and descriptors.
+ void markGpuMaterialsChanged(){++gpuMaterialRevision;++gpuCacheRevision;}
+ // Metallicity/roughness/emission and other scalar values are sent through
+ // Vulkan uniforms; keep texture arrays and meshes unchanged. Other backends
+ // still see the general gpuCacheRevision invalidation.
+ void markGpuParametersChanged(){++gpuParametersRevision;++gpuCacheRevision;}
 };
 struct ShadowMap { int size=1024; float span=30,dist=42; V base={0,1.5f,0},right,up;std::vector<float>d,min,max; };
 extern V sun,skyZenith,skyHorizon,sunTint;
 extern float daylight,lampFactor,solarHour;
 extern std::vector<Light> pointLights;
 void updateLighting(float hour);
+void setExteriorLightingEnabled(bool enabled) noexcept;
+bool exteriorLightingEnabled() noexcept;
 bool loadScene(const std::filesystem::path& path,Scene& s,std::wstring& error);
 inline bool loadScene(const wchar_t* path,Scene& s,std::wstring& error){return loadScene(std::filesystem::path(path),s,error);}
-void closest(const Scene& s,const Ray& r,Hit& best,Stats* st,bool ground=true,int ignoreObject=-1,bool ignoreTransparent=false);
+void closest(const Scene& s,const Ray& r,Hit& best,Stats* st,bool ground=true,int ignoreObject=-1,bool ignoreTransparent=false,float maxDistance=INF);
 int groundMaterial(const Scene& s,V p);
 ShadowMap buildShadow(const Scene& s,Stats& st);
 V shade(const Scene& s,const ShadowMap& sm,const Camera& cam,const Ray& r,const Hit& h,Stats& st,bool fog,bool reflections=true);
@@ -99,6 +129,31 @@ Stats renderGiAccumulatePass(const Scene& scene,const ShadowMap& shadow,
 RendererCapabilities detectRendererCapabilities() noexcept;
 bool renderCompute11Preview(const Scene& s,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
 bool renderDirectX11Preview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
+// Native HWND DXGI flip-model presentation: no GPU->CPU readback. Call on
+// the same persistent renderer thread; desktop Qt owns the HWND lifetime.
+bool renderDirectX11Native(const Scene& s,const ShadowMap& sm,const Camera& cam,
+    int w,int h,void* hwnd,Stats& stats,std::wstring& error);
+bool renderLumaTracePreview(const Scene& s,const LumaTraceBvh4& bvh4,
+    const ShadowMap& sm,const Camera& cam,int w,int h,
+    std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
+bool renderLumaTraceNative(const Scene& s,const LumaTraceBvh4& bvh4,
+    const ShadowMap& sm,const Camera& cam,int w,int h,void* hwnd,
+    Stats& stats,std::wstring& error);
+void releaseDirectX11NativeForCurrentThread();
+// Experimental Vulkan 1.0 Raster GPU backend; offscreen ARGB32 preview, shared Scene/Camera API.
+bool renderVulkanPreview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
+// Explicit cleanup is useful for standalone diagnostics: Vulkan objects must
+// be destroyed while their owning thread, Win32 window and runtime are alive.
+void releaseVulkanPreviewForCurrentThread();
+void releaseVulkanDirectForCurrentThread();
+// Native Vulkan WSI: no CPU pixel readback and no QImage. When the host is
+// Qt, pass its QVulkanInstance and QWindow surface so the renderer presents
+// through the exact surface Qt associated with the embedded Vulkan window.
+// Standalone Win32 callers may omit these handles and let the renderer own WSI.
+bool renderVulkanDirectPresent(const Scene& s,const ShadowMap& sm,const Camera& cam,
+                               int w,int h,void* nativeWindow,Stats& stats,std::wstring& error,
+                               void* sharedVulkanInstance=nullptr,
+                               uintptr_t sharedVulkanSurface=0);
 // Renderer quality is a shared public API: embedded host software and the
 // standalone Qt interface modify exactly the same settings. Each DX11 frame
 // takes one atomic snapshot, preventing partial UI/worker configuration.
@@ -127,6 +182,7 @@ float rasterColorExposure();
 void setRasterColorExposure(float exposure);
 // Selects scene-specific offline GI cache, reloaded on every explicit set.
 void setRasterGiCachePath(const std::filesystem::path& path);
+std::filesystem::path rasterGiCachePath();
 bool rasterGiCacheLoaded();
 bool setRasterQualitySettings(const RasterQualitySettings& settings,std::wstring& error);
 // -1: follow existing opt-in environment variable (standalone benchmarks).
@@ -136,6 +192,7 @@ void setRasterPeripheralMultiresOverride(int mode);
 // GUI animation scale: 0=frozen, 24=normal sky, 240=accelerated 24h cycle.
 // Headless benchmarks retain 1 for deterministic pixel parity.
 void setRasterCloudTimeScale(float scale);
+void setRasterCloudsEnabled(bool enabled);
 
 
 // Experimental pipelined D3D11 readback. Enqueue issues an ordered frame render

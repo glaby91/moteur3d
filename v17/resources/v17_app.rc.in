@@ -13,12 +13,12 @@ BEGIN
   BLOCK "040904E4"
   BEGIN
    VALUE "CompanyName", "CSE WARP\0"
-   VALUE "FileDescription", "CSE WARP Beta X V17.@V17_BUILD_NUMBER@ — Exploration 3D\0"
-   VALUE "FileVersion", "17.@V17_BUILD_NUMBER@\0"
+   VALUE "FileDescription", "CSE WARP Beta X V@V17_PRODUCT_VERSION@ — Exploration 3D\0"
+   VALUE "FileVersion", "@V17_PRODUCT_VERSION@\0"
    VALUE "InternalName", "moteur3d_v17\0"
    VALUE "OriginalFilename", "moteur3d_v17.exe\0"
-   VALUE "ProductName", "CSE WARP Beta X V17.@V17_BUILD_NUMBER@\0"
-   VALUE "ProductVersion", "17.@V17_BUILD_NUMBER@\0"
+   VALUE "ProductName", "CSE WARP Beta X V@V17_PRODUCT_VERSION@\0"
+   VALUE "ProductVersion", "@V17_PRODUCT_VERSION@\0"
   END
  END
  BLOCK "VarFileInfo"

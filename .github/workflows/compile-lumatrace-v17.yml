@@ -1,0 +1,87 @@
+name: Compile LumaTrace V17 — Windows x64
+run-name: LumaTrace V17 compile — ${{ github.sha }}
+on:
+  push:
+    branches:
+      - official/v17-lumatrace
+    paths:
+      - 'v17/**'
+      - 'v16/**'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/**'
+      - '.github/workflows/compile-lumatrace-v17.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: compile-lumatrace-v17-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  compile:
+    name: V17 + shared V16 engine — MSVC x64
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Qt 6.8.3
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Install Vulkan 1.3 SDK
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: '1.4.309.0'
+          install_runtime: false
+          cache: true
+          stripdown: true
+          install_swiftshader: false
+      - name: Configure V17
+        shell: pwsh
+        run: >-
+          cmake -S v17 -B build-v17-lumatrace -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+          -DM3D_REQUIRE_VULKAN=ON
+          -DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER
+          -DV17_GIT_SHA=$env:GITHUB_SHA
+      - name: Compile V17 application and shared engine
+        run: cmake --build build-v17-lumatrace --config Release --target moteur3d_v17 --parallel 4
+      - name: Assemble latest official scene with LumaTrace and Vulkan
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $base = "dist-v17-lumatrace"
+          New-Item -ItemType Directory -Force $base | Out-Null
+          $sceneVersionPath = Join-Path $base "SCENE_VERSION.json"
+          Invoke-WebRequest -Uri "https://github.com/glaby91/moteur3d-scene/releases/latest/download/SCENE_VERSION.json" -OutFile $sceneVersionPath
+          $sceneVersion = Get-Content $sceneVersionPath -Raw | ConvertFrom-Json
+          if (-not $sceneVersion.revision -or -not $sceneVersion.scene) { throw "The latest scene release manifest is invalid" }
+          Invoke-WebRequest -Uri "https://github.com/glaby91/moteur3d-scene/releases/latest/download/V17-scene.zip" -OutFile (Join-Path $base "scene.zip")
+          Expand-Archive -Path (Join-Path $base "scene.zip") -DestinationPath $base -Force
+          Remove-Item (Join-Path $base "scene.zip") -Force
+          if (-not (Test-Path (Join-Path $base "benchmark-civic/scene.json"))) { throw "The latest complex aquatique scene is missing" }
+          if ((Get-Content (Join-Path $base "SCENE_VERSION.json") -Raw | ConvertFrom-Json).revision -ne $sceneVersion.revision) { throw "Extracted scene revision differs from release manifest" }
+          Write-Host "Packaging scene revision $($sceneVersion.revision) from glaby91/moteur3d-scene"
+          $exe = Get-ChildItem -Path build-v17-lumatrace -Recurse -Filter moteur3d_v17.exe | Select-Object -First 1
+          $core = Get-ChildItem -Path build-v17-lumatrace -Recurse -Filter moteur3d_v16_core.dll | Select-Object -First 1
+          if (-not $exe -or -not $core) { throw "The LumaTrace executable or V16 engine DLL is missing" }
+          Copy-Item $exe.FullName (Join-Path $base "moteur3d_v17.exe") -Force
+          Copy-Item $core.FullName (Join-Path $base "moteur3d_v16_core.dll") -Force
+          $vulkanSource = Join-Path $exe.DirectoryName "vulkan"
+          if (!(Test-Path $vulkanSource)) { throw "The Vulkan SPIR-V shaders were not generated" }
+          New-Item -ItemType Directory -Force (Join-Path $base "vulkan") | Out-Null
+          Copy-Item (Join-Path $vulkanSource "*") (Join-Path $base "vulkan") -Force
+          if (!(Test-Path (Join-Path $base "benchmark-civic/scene.json"))) { throw "The complex aquatique scene is missing" }
+          windeployqt --release --no-translations "$base/moteur3d_v17.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Publish Windows x64 package
+        uses: actions/upload-artifact@v6
+        with:
+          name: LumaTrace-V17-Windows-x64
+          path: dist-v17-lumatrace/
+          if-no-files-found: error
+          compression-level: 6

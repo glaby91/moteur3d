@@ -1,10 +1,14 @@
 #include "m3d_engine.h"
 #include "../../../../v17/weather/solar_cycle.h"
+#include <atomic>
 
 namespace m3d {
 V sun=norm({.70f,.78f,-.714f}),skyZenith={126,170,209},skyHorizon={244,185,134},sunTint={255,246,223};
 float daylight=1.f,lampFactor=0.f,solarHour=14.75f;
 std::vector<Light> pointLights;
+namespace { std::atomic<bool> exteriorLighting{true}; bool sensorLightsOn=false; }
+void setExteriorLightingEnabled(bool enabled) noexcept { exteriorLighting.store(enabled,std::memory_order_relaxed); }
+bool exteriorLightingEnabled() noexcept { return exteriorLighting.load(std::memory_order_relaxed); }
 void updateLighting(float hour){
  solarHour=hour;
  // Solar elevation and azimuth change together, not elevation alone:
@@ -16,7 +20,12 @@ void updateLighting(float hour){
  float warm=std::max(dusk,dawn*.72f);
  // Automatic dusk AND night/dawn lamps: old time-only rule turned all lamps
  // off after midnight, preventing a believable complete 24-hour cycle.
- lampFactor=clampf((.38f-daylight)/.38f,0.f,1.f);
+ // Roof-level daylight sensor with hysteresis: turn on below 0.40 daylight,
+ // turn off only above 0.46. Fade through twilight instead of switching abruptly.
+ if(!sensorLightsOn && daylight<.40f)sensorLightsOn=true;
+ else if(sensorLightsOn && daylight>.46f)sensorLightsOn=false;
+ lampFactor=exteriorLighting.load(std::memory_order_relaxed)&&sensorLightsOn
+     ?clampf((.46f-daylight)/.24f,0.f,1.f):0.f;
  // True full-sweep 24-hour trajectory: the solar disc follows the shadows.
  // Previously the azimuth moved only ~6.9 degrees/hour and the midnight
  // altitude was stuck at -0.16, making the sun look almost stationary.

@@ -1,0 +1,13 @@
+{
+  "engine": {
+    "major": 17,
+    "build": 3
+  },
+  "components": {
+    "pbr": "001",
+    "cpuLighting": "003",
+    "directx11": "003",
+    "vulkan": "003",
+    "lumatrace": "009"
+  }
+}

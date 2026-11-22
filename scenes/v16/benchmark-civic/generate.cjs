@@ -754,7 +754,7 @@ function build(profileName,p){
 }
 function manifest(profile){
  const name='CSE WARP V17 — Complexe civique fictif ['+profile+']';
- return {format:'m3d-scene-v16',name,version:1,units:'m',
+ return {format:'m3d-scene-v16',name,revision:'V17.604',sceneVersion:'17.604',version:1,units:'m',
   source:'CSE WARP fictional benchmark; Pripyat PBR identifiers reused, not Pripyat geometry',
   sectors:[{id:'benchmark-'+profile,
    geometry:['geometry/benchmark.json'],

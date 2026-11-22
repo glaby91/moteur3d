@@ -40,10 +40,12 @@ cbuffer Frame : register(b0) {
     float3 sunColor; float skyFillStrength;
     uint lightCount; float sceneLightScale; float indirectFill; uint gpuIndirectSamples;
     uint adaptiveGI; uint indirectWidth; uint indirectHeight; uint primaryQuarter;
+    float exteriorLightScale; float3 framePadding;
 };
 struct GpuLight {
     float3 position; float radius;
     float3 color; float intensity;
+    uint exterior; uint3 padding;
 };
 StructuredBuffer<GpuBvhNode> Nodes : register(t0);
 StructuredBuffer<GpuTriangle> Triangles : register(t1);
@@ -72,7 +74,8 @@ float3 linearToSrgb(float3 c) {
     return lerp(c*12.92f,1.055f*pow(c,1.f/2.4f)-.055f,step(.0031308f,c));
 }
 float3 encodeHdr(float3 radiance) {
-    float3 v=max(radiance,float3(0,0,0));
+    // Small midtone lift; black remains black and highlights still use ACES.
+    float3 v=max(radiance,float3(0,0,0))*1.08f;
     float3 aces=saturate((v*(2.51f*v+.03f))/(v*(2.43f*v+.59f)+.14f));
     return saturate(linearToSrgb(aces));
 }
@@ -175,7 +178,7 @@ float3 tangentSpaceNormal(GpuTriangle tri,float3 baseNormal,float3 mapped) {
     float3 tangent=normalize((e1*d2.y-e2*d1.y)/det);
     tangent=normalize(tangent-baseNormal*dot(baseNormal,tangent));
     float3 bitangent=cross(baseNormal,tangent)*((det<0.f)?-1.f:1.f);
-    return normalize(tangent*mapped.x+bitangent*mapped.y+baseNormal*mapped.z);
+    return normalize(tangent*(mapped.x*1.25f)+bitangent*(mapped.y*1.25f)+baseNormal*mapped.z);
 }
 // CPU offlinePbrShade's GGX/Smith/Schlick direct BRDF and hemispheric sky.
 // No invented GI bounce; indirectFill is zero until a validated probe exists.
@@ -234,9 +237,19 @@ float3 shadeSurface(Ray ray,HitInfo hit,float3 n,float3 base,float roughness,
         float d2=dot(delta,delta),r2=light.radius*light.radius;
         if(d2<1.e-5f||d2>=r2)continue;
         float distance=sqrt(d2),edge=1.f-distance/light.radius;
+        float3 lightDir=delta/distance;
+        if(dot(n,lightDir)<=.0001f)continue;
+        float3 geom=normalize(cross(tri.p1-tri.p0,tri.p2-tri.p0));
+        if(dot(geom,ray.direction)>0.f)geom=-geom;
+        Ray pointShadow;pointShadow.origin=p+geom*.035f+lightDir*.025f;
+        pointShadow.direction=lightDir;
+        HitInfo pointBlocker;
+        uint pointVisibility=traceClosest(pointShadow,max(.001f,distance-.045f),
+                                           true,hit.primitive,pointBlocker);
+        if(pointVisibility==1u)continue;
         float3 radiance=srgbToLinear(light.color)*
-                        (light.intensity*sceneLightScale*edge*edge*.45f);
-        lit+=brdf(n,view,delta/distance,base,roughness,metallic,f0,radiance,1.f);
+                        (light.intensity*(light.exterior!=0?exteriorLightScale:sceneLightScale)*edge*edge*.45f);
+        lit+=brdf(n,view,lightDir,base,roughness,metallic,f0,radiance,1.f);
     }
     lit+=base*indirectFill;
     return max(lit,float3(0,0,0));

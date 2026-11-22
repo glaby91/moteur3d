@@ -41,6 +41,7 @@ LoadResult loadScene(const QString& manifestPath) {
         return result;
     }
     result.scene.name = manifest.value("name").toString();
+    result.scene.revision = manifest.value("revision").toString().trimmed();
     static const QStringList kinds = {"geometry", "instances", "materials", "pbr",
                                       "lighting", "cameras", "environment"};
     QSet<QString> sectorIds;

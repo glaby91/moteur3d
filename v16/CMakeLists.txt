@@ -19,6 +19,7 @@ set(M3D_RENDER_SOURCES
     "${NATIVE_SRC}/m3d_post.cpp"
     "${NATIVE_SRC}/m3d_simd.cpp"
     "${NATIVE_SRC}/m3d_compute11.cpp"
+    "${NATIVE_SRC}/m3d_lumatrace_bvh4.cpp"
     "${NATIVE_SRC}/m3d_directx11.cpp"
     "${NATIVE_SRC}/m3d_gi_bake.cpp"
     "${NATIVE_SRC}/m3d_dxr.cpp"
@@ -36,6 +37,36 @@ target_include_directories(moteur3d_v16_core PUBLIC "${NATIVE}")
 target_link_libraries(moteur3d_v16_core PUBLIC Threads::Threads Qt6::Core Qt6::Gui)
 if(WIN32)
     target_link_libraries(moteur3d_v16_core PUBLIC d3d11 d3d12 dxgi d3dcompiler)
+    # Experimental V17 Vulkan renderer lives in the shared engine DLL.
+    # An optional backend must not break the stock DX11-only V17 build.
+    option(M3D_REQUIRE_VULKAN "Require Vulkan SDK 1.3.204+ for native raster Windows CI" OFF)
+    find_package(Vulkan 1.3.204 QUIET)
+    if(M3D_REQUIRE_VULKAN AND NOT Vulkan_FOUND)
+        message(FATAL_ERROR "Vulkan SDK 1.3.204+ is mandatory for this build")
+    endif()
+    if(Vulkan_FOUND)
+        target_sources(moteur3d_v16_core PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/../v17/vulkan/m3d_vulkan.cpp")
+        target_include_directories(moteur3d_v16_core PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/../v17/vulkan")
+        target_link_libraries(moteur3d_v16_core PRIVATE Vulkan::Vulkan)
+        # Vulkan is optional at runtime. Avoid an eager vulkan-1.dll import,
+        # otherwise ALL V17.493 CPU and DX11 tools fail with STATUS_DLL_NOT_FOUND
+        # on clean CI or systems without the Vulkan runtime installed.
+        if(MSVC)
+            target_link_options(moteur3d_v16_core PRIVATE "/DELAYLOAD:vulkan-1.dll")
+            target_link_libraries(moteur3d_v16_core PRIVATE delayimp)
+        endif()
+        target_compile_definitions(moteur3d_v16_core PUBLIC M3D_V17_VULKAN_ENABLED=1)
+    else()
+        target_sources(moteur3d_v16_core PRIVATE
+            "${CMAKE_CURRENT_SOURCE_DIR}/../v17/vulkan/m3d_vulkan_stub.cpp")
+        target_compile_definitions(moteur3d_v16_core PUBLIC M3D_V17_VULKAN_ENABLED=0)
+    endif()
+else()
+    target_sources(moteur3d_v16_core PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../v17/vulkan/m3d_vulkan_stub.cpp")
+    target_compile_definitions(moteur3d_v16_core PUBLIC M3D_V17_VULKAN_ENABLED=0)
 endif()
 set(M3D_AVX_SOURCES
     "${NATIVE_SRC}/simd/avx2/post.cpp"
