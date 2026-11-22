@@ -116,6 +116,12 @@ jobs:
             if (!(Test-Path $p)) { throw "Missing V17 package file: $p" }
             Write-Host "Verified: $p"
           }
+          $expectedScene = Get-Content (Join-Path $env:RUNNER_TEMP "SCENE_VERSION.json") -Raw | ConvertFrom-Json
+          $packagedScene = Get-Content "build-v17/Release/benchmark-civic/SCENE_VERSION.json" -Raw | ConvertFrom-Json
+          if ($packagedScene.revision -ne $expectedScene.revision) {
+            throw "Packaged scene revision $($packagedScene.revision) does not match latest release $($expectedScene.revision)."
+          }
+          Write-Host "Verified packaged scene revision: $($packagedScene.revision)"
       - name: Verify native V17 taskbar icon and executable version
         shell: pwsh
         run: |
