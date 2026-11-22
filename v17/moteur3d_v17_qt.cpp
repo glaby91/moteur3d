@@ -715,26 +715,26 @@ public:
             if(sceneLoading_||!runtime_||!walkingModeBox_)return;
             poll->stop();
             QSettings prefs(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-            const QVariant previous=prefs.value(QStringLiteral("Exploration/Walking"));
+            const QVariant previous=prefs.value(QStringLiteral("Exploration/WalkingV17_600"));
             walkingModeBox_->setChecked(true);
-            prefs.setValue(QStringLiteral("Exploration/Walking"),true);
+            prefs.setValue(QStringLiteral("Exploration/WalkingV17_600"),true);
             prefs.sync();
             selectAnomaly(0); // ANO-005 has a precisely measured camera pose.
             const bool okAfterSelect=walkingModeBox_->isChecked()
                 &&walkingCollisionSyncPending_
-                &&prefs.value(QStringLiteral("Exploration/Walking")).toBool();
+                &&prefs.value(QStringLiteral("Exploration/WalkingV17_600")).toBool();
             returnBeforeAnomaly();
             prefs.sync();
             const bool okAfterReturn=walkingModeBox_->isChecked()
                 &&walkingCollisionSyncPending_
-                &&prefs.value(QStringLiteral("Exploration/Walking")).toBool();
+                &&prefs.value(QStringLiteral("Exploration/WalkingV17_600")).toBool();
             // Restore the prior preference after the smoke test.
             {
                 QSignalBlocker block(walkingModeBox_);
                 walkingModeBox_->setChecked(previous.isValid()?previous.toBool():true);
             }
-            if(previous.isValid())prefs.setValue(QStringLiteral("Exploration/Walking"),previous);
-            else prefs.remove(QStringLiteral("Exploration/Walking"));
+            if(previous.isValid())prefs.setValue(QStringLiteral("Exploration/WalkingV17_600"),previous);
+            else prefs.remove(QStringLiteral("Exploration/WalkingV17_600"));
             prefs.sync();
             if(!okAfterSelect||!okAfterReturn){
                 std::fprintf(stderr,
@@ -1160,7 +1160,22 @@ private:
         freeCameraActive_=true;
         walkingCollisionSyncPending_=false;
         if(walkingModeBox_&&walkingModeBox_->isChecked()){
-            walk::spawn(runtime_->renderScene,freeCamera_.eye,walkingState_);
+            bool grounded=walk::spawn(runtime_->renderScene,freeCamera_.eye,walkingState_);
+            // Pavillon 01's overview cameras sit outside the 30 x 26 m
+            // terrain. If no walkable surface lies below the selected view,
+            // start on the front terrace beside the basin instead of leaving
+            // the player suspended in the air.
+            if(!grounded&&scenePath_.contains(QStringLiteral("pavillon01"),Qt::CaseInsensitive)){
+                grounded=walk::spawn(runtime_->renderScene,V{-5.f,1.86f,9.1f},walkingState_);
+                if(grounded){
+                    statusBar()->showMessage(QStringLiteral(
+                        "Exploration au sol : départ sur la terrasse devant le bassin."),6000);
+                }
+            }
+            if(!grounded){
+                statusBar()->showMessage(QStringLiteral(
+                    "Aucun sol détecté sous cette caméra. Choisissez une vue extérieure ou décochez « Marcher au sol »."),9000);
+            }
             freeCamera_.eye=walk::eye(walkingState_);
             updateLook();
         }
@@ -2372,7 +2387,7 @@ private:
             "Marche à hauteur d'homme, monte les marches de 34 cm au maximum,\n"
             "descend les paliers et bloque les murs. Décochez pour voler librement."));
         QSettings walkPreferences(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-        walkingModeBox_->setChecked(walkPreferences.value(QStringLiteral("Exploration/Walking"),true).toBool());
+        walkingModeBox_->setChecked(walkPreferences.value(QStringLiteral("Exploration/WalkingV17_600"),true).toBool());
         vertical->addWidget(walkingModeBox_);
         explorationHelp_=new QLabel(QStringLiteral(
             "ZQSD / flèches : marcher · souris libre : orienter la caméra · clic droit : zoom ×3\\n"
@@ -2432,7 +2447,7 @@ private:
         connect(walkingModeBox_,&QCheckBox::toggled,this,[this](bool enabled){
             updateExplorationSpeedIndicator();
             QSettings preferences(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-            preferences.setValue(QStringLiteral("Exploration/Walking"),enabled);
+            preferences.setValue(QStringLiteral("Exploration/WalkingV17_600"),enabled);
             if(exploring_&&freeCameraActive_&&runtime_){
                 if(enabled){
                     walk::spawn(runtime_->renderScene,freeCamera_.eye,walkingState_);
