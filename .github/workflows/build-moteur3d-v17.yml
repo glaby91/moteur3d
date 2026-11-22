@@ -97,6 +97,10 @@ jobs:
       - name: Verify native V17 taskbar icon and executable version
         shell: pwsh
         run: |
+          $engine = Get-Content "v17/version.json" -Raw | ConvertFrom-Json
+          $expectedMajor = [int]$engine.engine.major
+          $expectedMinor = [int]$engine.engine.build
+          $expectedLabel = "V$expectedMajor.$('{0:D3}' -f $expectedMinor)"
           Add-Type -AssemblyName System.Drawing
           foreach ($icon in @("build-v17/Release/cse_warp_v17.ico", "build-v17/Release/cse_warp_v17_bench.ico")) {
             if ((Get-Item $icon).Length -lt 4000) { throw "Incomplete Windows ICO: $icon" }
@@ -108,10 +112,10 @@ jobs:
             $exe = (Resolve-Path "build-v17/Release/$name").Path
             $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
             Write-Host "$name — $($version.ProductName) — $($version.FileVersion)"
-            if ($version.FileMajorPart -ne 17 -or
-                $version.FileMinorPart -ne 1 -or
+            if ($version.FileMajorPart -ne $expectedMajor -or
+                $version.FileMinorPart -ne $expectedMinor -or
                 $version.FileBuildPart -ne 0 -or $version.FilePrivatePart -ne 0) {
-              throw "Invalid V17.001 product version in $name : $($version.FileVersion)"
+              throw "Invalid $expectedLabel product version in $name : $($version.FileVersion)"
             }
           }
       - name: Validate light complex scene in native V17 loader
