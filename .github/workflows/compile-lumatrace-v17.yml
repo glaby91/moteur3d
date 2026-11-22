@@ -40,3 +40,20 @@ jobs:
           -DV17_GIT_SHA=$env:GITHUB_SHA
       - name: Compile V17 application and shared engine
         run: cmake --build build-v17-lumatrace --config Release --target moteur3d_v17 --parallel 4
+      - name: Deploy Qt runtime and prepare package
+        id: package
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path build-v17-lumatrace -Recurse -Filter moteur3d_v17.exe | Select-Object -First 1
+          if (-not $exe) { throw "moteur3d_v17.exe was not produced" }
+          $windeployqt = Join-Path $env:QT_ROOT_DIR "bin/windeployqt.exe"
+          & $windeployqt --release --no-translations --compiler-runtime $exe.FullName
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          "dir=$($exe.DirectoryName)" >> $env:GITHUB_OUTPUT
+      - name: Publish Windows x64 package
+        uses: actions/upload-artifact@v4
+        with:
+          name: LumaTrace-V17-Windows-x64
+          path: ${{ steps.package.outputs.dir }}
+          if-no-files-found: error
+          compression-level: 6
