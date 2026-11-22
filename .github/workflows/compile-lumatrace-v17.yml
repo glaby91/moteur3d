@@ -5,6 +5,7 @@ on:
     branches:
       - codex/v17-lumatrace-backend-test
       - codex/lumatrace-memory-allocation-fix-2026-11-22
+      - codex/v17-scene-reference-release
     paths:
       - 'v17/**'
       - 'v16/**'
