@@ -5,7 +5,8 @@ struct Vertex { float3 p; uint normalPacked; float2 uv; uint material; uint prim
 float snorm10(uint bits){return (float)(bits&1023u)*(2.0/1023.0)-1.0;}
 float3 decodeNormal(uint packed){return normalize(float3(snorm10(packed),snorm10(packed>>10),snorm10(packed>>20)));}
 struct Node { float3 lo; uint c0; float3 hi; uint c1; uint c2,c3,first,count,children,pad; };
-StructuredBuffer<Vertex> V : register(t0);
+ByteAddressBuffer V : register(t0);
+Vertex loadVertex(uint id){uint base=id*32u;Vertex v;v.p=asfloat(V.Load3(base));v.normalPacked=V.Load(base+12u);v.uv=asfloat(V.Load2(base+16u));v.material=V.Load(base+24u);v.primitiveId=V.Load(base+28u);return v;}
 StructuredBuffer<uint> Order : register(t1);
 StructuredBuffer<Node> Bvh : register(t2);
 RWStructuredBuffer<float4> Radiance : register(u0);
@@ -14,7 +15,7 @@ bool bounds(Node n,float3 o,float3 invD,float maxT,out float nearT){
  float3 a=(n.lo-o)*invD,b=(n.hi-o)*invD,lo=min(a,b),hi=max(a,b);
  nearT=max(max(lo.x,lo.y),max(lo.z,0));return min(min(hi.x,hi.y),min(hi.z,maxT))>=nearT;}
 bool triangle(uint id,float3 o,float3 d,float maxT){
- Vertex a=V[id*3],b=V[id*3+1],c=V[id*3+2];float3 e1=b.p-a.p,e2=c.p-a.p,p=cross(d,e2);
+ Vertex a=loadVertex(id*3u),b=loadVertex(id*3u+1u),c=loadVertex(id*3u+2u);float3 e1=b.p-a.p,e2=c.p-a.p,p=cross(d,e2);
  float det=dot(e1,p);if(abs(det)<1.e-8)return false;float inv=rcp(det);float3 t=o-a.p;
  float u=dot(t,p)*inv;if(u<0||u>1)return false;float3 q=cross(t,e1);float v=dot(d,q)*inv;
  if(v<0||u+v>1)return false;float hit=dot(e2,q)*inv;return hit>.015&&hit<maxT;}
@@ -31,7 +32,7 @@ float3 light(uint id,float3 p,float3 n,float4 l,float3 color){float3 dv=l.xyz-p;
  if(ndl<=0||occluded(p+n*.018,dir,d,id))return 0;
  return color*(ndl*l.w/(1+d*d*.28));}
 [numthreads(64,1,1)] void CSShadeTriangles(uint3 tid:SV_DispatchThreadID){uint id=tid.x;if(id>=Counts.x)return;
- Vertex a=V[id*3],b=V[id*3+1],c=V[id*3+2];float3 p=(a.p+b.p+c.p)/3,n=normalize(decodeNormal(a.normalPacked)+decodeNormal(b.normalPacked)+decodeNormal(c.normalPacked));
+ Vertex a=loadVertex(id*3u),b=loadVertex(id*3u+1u),c=loadVertex(id*3u+2u);float3 p=(a.p+b.p+c.p)/3,n=normalize(decodeNormal(a.normalPacked)+decodeNormal(b.normalPacked)+decodeNormal(c.normalPacked));
  Radiance[id]=float4(light(id,p,n,LightA,ColorA.rgb)+light(id,p,n,LightB,ColorB.rgb),1);}
 )HLSL";
 }
