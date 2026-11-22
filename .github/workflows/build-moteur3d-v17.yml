@@ -566,10 +566,10 @@ jobs:
           if (!(Test-Path $scene) -or $manifest.repository -ne "glaby91/moteur3d-scene") {
             throw "Latest V17 scene release is unavailable."
           }
-          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" $scene 20000 1> "build-v17/latest-scene-load.log" 2>&1
+          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" $scene 20000 --generic 1> "build-v17/latest-scene-load.log" 2>&1
           if ($LASTEXITCODE -ne 0) {
             Get-Content "build-v17/latest-scene-load.log" | ForEach-Object { Write-Host $_ }
-            throw "Latest scene $($manifest.revision) failed native V17 scene loading."
+            throw "Latest scene $($manifest.revision) failed generic native V17 loading."
           }
           Write-Host "Validated latest V17 scene release: $($manifest.revision)"
       - name: Restore approved V17.603 scene delta and verify corrected source package
