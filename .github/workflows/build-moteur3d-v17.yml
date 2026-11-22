@@ -53,6 +53,38 @@ jobs:
           cache: true
           stripdown: true
           install_swiftshader: false
+      - name: Scene preflight — download latest standalone V17 reference scene
+        id: scene_preflight
+        shell: pwsh
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'V17-scene.zip'
+          $unpack = Join-Path $env:RUNNER_TEMP 'V17-scene-latest'
+          $uri = 'https://github.com/glaby91/moteur3d-scene/releases/latest/download/V17-scene.zip'
+          Invoke-WebRequest -Uri $uri -OutFile $archive
+          if (!(Test-Path $archive) -or (Get-Item $archive).Length -lt 1000000) { throw 'Latest standalone V17 scene release is missing or incomplete.' }
+          Expand-Archive -Path $archive -DestinationPath $unpack -Force
+          $manifestPath = Join-Path $unpack 'SCENE_VERSION.json'
+          $scenePath = Join-Path $unpack 'benchmark-civic/scene.json'
+          if (!(Test-Path $manifestPath) -or !(Test-Path $scenePath)) { throw 'Latest scene release lacks its manifest or scene entry point.' }
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $scene = Get-Content $scenePath -Raw | ConvertFrom-Json
+          if ($manifest.schema -ne 1 -or $manifest.scene -ne 'benchmark-civic/scene.json' -or
+              $manifest.revision -notmatch '^V17\.\d{3}$' -or $scene.revision -ne $manifest.revision) {
+            throw 'Latest standalone scene package has an invalid or mismatched revision.'
+          }
+          "revision=$($manifest.revision)" | Add-Content $env:GITHUB_OUTPUT
+          "source_commit=$($manifest.sourceCommit)" | Add-Content $env:GITHUB_OUTPUT
+          Write-Host "SCENE PREFLIGHT PASS: $($manifest.revision) from $($manifest.repository) at $($manifest.sourceCommit)."
+          @"
+          ## Standalone scene preflight: PASS
+
+          - Selected scene: **$($manifest.revision)**
+          - Scene repository: ``$($manifest.repository)``
+          - Source commit: ``$($manifest.sourceCommit)``
+          - Asset: ``$uri``
+
+          This exact scene release will be installed in the Windows package for all V17 backends.
+          "@ | Add-Content $env:GITHUB_STEP_SUMMARY
       - name: Generate benchmark scenes from reusable Pripyat material library
         shell: pwsh
         run: |
@@ -803,6 +835,32 @@ jobs:
                            "build-v17/fresco-ray-audit/fresco-ray-report.json")) {
             if (!(Test-Path $p)) { throw "Fresco ray audit output missing: $p" }
           }
+      - name: Install standalone reference scene in the all-backend package
+        shell: pwsh
+        run: |
+          $source = Join-Path $env:RUNNER_TEMP 'V17-scene-latest/benchmark-civic'
+          $manifestPath = Join-Path $env:RUNNER_TEMP 'V17-scene-latest/SCENE_VERSION.json'
+          $expected = '${{ steps.scene_preflight.outputs.revision }}'
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          if ($manifest.revision -ne $expected) { throw "Latest scene changed after preflight: expected $expected, found $($manifest.revision)." }
+          $scenePath = Join-Path $source 'scene.json'
+          $scene = Get-Content $scenePath -Raw | ConvertFrom-Json
+          if ($scene.revision -ne $expected) { throw "Reference scene revision mismatch: expected $expected, found $($scene.revision)." }
+          $target = 'dist-v17/benchmark-civic'
+          Remove-Item $target -Recurse -Force
+          Copy-Item $source $target -Recurse -Force
+          # Keep the legacy V4 launcher path compatible while making the standalone scene the actual default content.
+          Copy-Item "$target/scene.json" "$target/scene-v4.json" -Force
+          Copy-Item $manifestPath 'dist-v17/SCENE_VERSION.json' -Force
+          Copy-Item $manifestPath "$target/SCENE_VERSION.json" -Force
+          $expected | Out-File 'dist-v17/SCENE_REVISION.txt' -Encoding ascii
+          $buildInfoPath = 'dist-v17/BUILD_INFO.json'
+          $buildInfo = Get-Content $buildInfoPath -Raw | ConvertFrom-Json
+          $buildInfo.sceneVersion = $expected
+          $buildInfo.sceneRepository = $manifest.repository
+          $buildInfo.sceneSourceCommit = $manifest.sourceCommit
+          $buildInfo | ConvertTo-Json -Depth 8 | Out-File $buildInfoPath -Encoding utf8
+          Write-Host "Installed standalone scene $expected ($($manifest.sourceCommit)) in the shared V17 package used by every backend."
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
