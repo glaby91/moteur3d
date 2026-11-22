@@ -509,7 +509,7 @@ public:
                     canvas_->setImage(QImage{});
                     canvas_->setCameraHud({},false);
                     canvas_->enableSkyCompositing(false);
-                    canvas_->setPlaceholder(QStringLiteral("%1\\n\\n%2")
+                    canvas_->setPlaceholder(QStringLiteral("%1\n\n%2")
                         .arg(outcome.renderer,outcome.error));
                 }
                 updateRendererStamp();
