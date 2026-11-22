@@ -6,7 +6,7 @@ float snorm10(uint bits){return (float)(bits&1023u)*(2.0/1023.0)-1.0;}
 float3 decodeNormal(uint packed){return normalize(float3(snorm10(packed),snorm10(packed>>10),snorm10(packed>>20)));}
 struct Node { float3 lo; uint c0; float3 hi; uint c1; uint c2,c3,first,count,children,pad; };
 ByteAddressBuffer V : register(t0);
-Vertex loadVertex(uint id){uint base=id*32u;Vertex v;v.p=asfloat(V.Load3(base));v.normalPacked=V.Load(base+12u);v.uv=asfloat(V.Load2(base+16u));v.material=V.Load(base+24u);v.primitiveId=V.Load(base+28u);return v;}
+Vertex loadVertex(uint id){uint byteOffset=id*32u;Vertex v;v.p=float3(asfloat(V.Load(byteOffset)),asfloat(V.Load(byteOffset+4u)),asfloat(V.Load(byteOffset+8u)));v.normalPacked=V.Load(byteOffset+12u);v.uv=float2(asfloat(V.Load(byteOffset+16u)),asfloat(V.Load(byteOffset+20u)));v.material=V.Load(byteOffset+24u);v.primitiveId=V.Load(byteOffset+28u);return v;}
 StructuredBuffer<uint> Order : register(t1);
 StructuredBuffer<Node> Bvh : register(t2);
 RWStructuredBuffer<float4> Radiance : register(u0);
