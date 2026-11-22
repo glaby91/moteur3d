@@ -107,8 +107,7 @@ jobs:
           if (!(Test-Path $vulkanSource)) { throw "The Vulkan SPIR-V shaders were not generated" }
           New-Item -ItemType Directory -Force (Join-Path $base "vulkan") | Out-Null
           Copy-Item (Join-Path $vulkanSource "*") (Join-Path $base "vulkan") -Force
-          if (!(Test-Path (Join-Path $base "pavillon01/scene.json"))) { throw "The façade-and-basin scene is missing" }
-          if (!(Test-Path (Join-Path $base "benchmark-civic/scene.json"))) { throw "The default Pripyat scene is missing" }
+          if (!(Test-Path (Join-Path $base "benchmark-civic/scene.json"))) { throw "The standalone V17 reference scene is missing" }
           windeployqt --release --no-translations "$base/moteur3d_v17.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Publish Windows x64 package
