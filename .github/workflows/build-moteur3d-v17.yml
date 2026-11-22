@@ -146,7 +146,7 @@ jobs:
           New-Item -ItemType Directory -Force (Split-Path $log -Parent) | Out-Null
           # Avoid relying on native stderr piping/PowerShell Tee-Object behavior.
           # Redirect stdout/stderr directly to a file and preserve exit code.
-          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" "$env:RUNNER_TEMP/v17-scene-latest/benchmark-civic/scene.json" 20000 1> $log 2>&1
+          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" "$env:RUNNER_TEMP/v17-scene-latest/benchmark-civic/scene.json" 20000 --generic 1> $log 2>&1
           $rc = $LASTEXITCODE
           Write-Host "V17 native smoke exit code: $rc"
           if (Test-Path $log) {
@@ -154,7 +154,14 @@ jobs:
           } else {
             Write-Warning "Native smoke produced no log; using process exit code."
           }
-          if ($rc -ne 0) { throw "Complex scene fails in native V17 loader; exit $rc" }
+          if ($rc -ne 0) { throw "Latest scene fails generic native V17 loading; exit $rc" }
+          $legacyLog = "build-v17/v344-legacy-scene-smoke.log"
+          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" "scenes/v16/benchmark-civic/scene.json" 20000 1> $legacyLog 2>&1
+          $legacyRc = $LASTEXITCODE
+          if (Test-Path $legacyLog) {
+            Get-Content $legacyLog | ForEach-Object { Write-Host "LEGACY_SCENE_DIAGNOSTIC: $_" }
+          }
+          if ($legacyRc -ne 0) { throw "Legacy benchmark regression scene failed native V17 loading; exit $legacyRc" }
       - name: Verify real 25% primary rays on Pripyat pool 19h CPU and D3D11 Compute
         shell: pwsh
         timeout-minutes: 15
@@ -825,7 +832,7 @@ jobs:
           if ($packaged.revision -ne $expected.revision) {
             throw "Final package scene revision $($packaged.revision) differs from latest release $($expected.revision)."
           }
-          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" (Join-Path $sceneDestination "scene.json") 20000 1> "build-v17/final-latest-scene-load.log" 2>&1
+          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" (Join-Path $sceneDestination "scene.json") 20000 --generic 1> "build-v17/final-latest-scene-load.log" 2>&1
           if ($LASTEXITCODE -ne 0) {
             Get-Content "build-v17/final-latest-scene-load.log" | ForEach-Object { Write-Host $_ }
             throw "Final delivered scene $($packaged.revision) failed native V17 loading."
