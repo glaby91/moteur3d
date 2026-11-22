@@ -2214,8 +2214,8 @@ private:
         bd.ByteWidth=UINT(geometryBytes);
         bd.Usage=D3D11_USAGE_IMMUTABLE;
         bd.BindFlags=D3D11_BIND_VERTEX_BUFFER|(lumaTrace?D3D11_BIND_SHADER_RESOURCE:0u);
-        bd.MiscFlags=lumaTrace?D3D11_RESOURCE_MISC_BUFFER_STRUCTURED:0u;
-        bd.StructureByteStride=lumaTrace?UINT(geometryStride):0u;
+        bd.MiscFlags=lumaTrace?D3D11_RESOURCE_MISC_BUFFER_ALLOW_RAW_VIEWS:0u;
+        bd.StructureByteStride=0u;
         D3D11_SUBRESOURCE_DATA init{};init.pSysMem=geometryData;
         const HRESULT geometryResult=device_->CreateBuffer(&bd,&init,&vertices_);
         if(FAILED(geometryResult)){
@@ -2228,10 +2228,13 @@ private:
         vertexCount_=UINT(mesh.vertices.size());
         if(lumaTrace){
             D3D11_SHADER_RESOURCE_VIEW_DESC sv{};
-            sv.Format=DXGI_FORMAT_UNKNOWN;sv.ViewDimension=D3D11_SRV_DIMENSION_BUFFER;
-            sv.Buffer.NumElements=vertexCount_;
+            sv.Format=DXGI_FORMAT_R32_TYPELESS;
+            sv.ViewDimension=D3D11_SRV_DIMENSION_BUFFEREX;
+            sv.BufferEx.FirstElement=0;
+            sv.BufferEx.NumElements=UINT(geometryBytes/sizeof(uint32_t));
+            sv.BufferEx.Flags=D3D11_BUFFEREX_SRV_FLAG_RAW;
             if(FAILED(device_->CreateShaderResourceView(vertices_.Get(),&sv,&verticesSrv_))){
-                error=L"Vue compute partagée de la géométrie impossible.";
+                error=L"Vue brute compute de la géométrie impossible.";
                 return false;
             }
         }}
