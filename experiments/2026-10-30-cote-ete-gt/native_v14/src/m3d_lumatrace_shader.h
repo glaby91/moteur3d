@@ -2,7 +2,7 @@
 namespace m3d::lumatrace_detail {
 inline constexpr char kComputeShader[] = R"HLSL(
 struct Vertex { float3 p; uint normalPacked; float2 uv; uint material; uint primitiveId; };
-float snorm10(uint bits){int v=(int)(bits&1023u);v=(v<<22)>>22;return max(-1.0,(float)v/511.0);}
+float snorm10(uint bits){return (float)(bits&1023u)*(2.0/1023.0)-1.0;}
 float3 decodeNormal(uint packed){return normalize(float3(snorm10(packed),snorm10(packed>>10),snorm10(packed>>20)));}
 struct Node { float3 lo; uint c0; float3 hi; uint c1; uint c2,c3,first,count,children,pad; };
 StructuredBuffer<Vertex> V : register(t0);
