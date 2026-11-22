@@ -37,6 +37,27 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v5
+      - name: Download latest V17 scene release
+        shell: pwsh
+        run: |
+          $sceneRoot = Join-Path $env:RUNNER_TEMP "v17-scene-latest"
+          $archive = Join-Path $env:RUNNER_TEMP "V17-scene.zip"
+          $manifestPath = Join-Path $env:RUNNER_TEMP "SCENE_VERSION.json"
+          Invoke-WebRequest "https://github.com/glaby91/moteur3d-scene/releases/latest/download/SCENE_VERSION.json" -OutFile $manifestPath
+          Invoke-WebRequest "https://github.com/glaby91/moteur3d-scene/releases/latest/download/V17-scene.zip" -OutFile $archive
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          if ($manifest.repository -ne "glaby91/moteur3d-scene" -or
+              $manifest.scene -ne "benchmark-civic/scene.json" -or
+              $manifest.revision -notmatch "^V17\.\d{3}$") {
+            throw "Invalid latest V17 scene manifest."
+          }
+          Expand-Archive -LiteralPath $archive -DestinationPath $sceneRoot -Force
+          $sceneDirectory = Join-Path $sceneRoot "benchmark-civic"
+          if (!(Test-Path (Join-Path $sceneDirectory "scene.json"))) {
+            throw "Latest V17 scene archive does not contain benchmark-civic/scene.json."
+          }
+          Copy-Item $manifestPath (Join-Path $sceneDirectory "SCENE_VERSION.json") -Force
+          Write-Host "V17 package scene: $($manifest.revision) from glaby91/moteur3d-scene"
       - name: Qt6
         uses: jurplel/install-qt-action@v4
         with:
@@ -72,7 +93,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Ten-pass fast design preflight failed' }
       - name: Configure
         shell: pwsh
-        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER -DV17_GIT_SHA=$env:GITHUB_SHA
+        run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER -DV17_GIT_SHA=$env:GITHUB_SHA -DV17_SCENE_SOURCE_DIR="$env:RUNNER_TEMP/v17-scene-latest/benchmark-civic"
       - name: Compile
         run: cmake --build build-v17 --config Release --parallel 4
       - name: Verify V17 executable and shared V16 engine
@@ -90,6 +111,7 @@ jobs:
                          "build-v17/Release/benchmark-civic/scene.json",
                          "build-v17/Release/benchmark-civic/scene-lourd.json",
                          "build-v17/Release/benchmark-civic/scene-extreme.json",
+                         "build-v17/Release/benchmark-civic/SCENE_VERSION.json",
                          "build-v17/Release/shaders/m3d_raytrace_compute.hlsl")) {
             if (!(Test-Path $p)) { throw "Missing V17 package file: $p" }
             Write-Host "Verified: $p"
@@ -125,7 +147,7 @@ jobs:
           New-Item -ItemType Directory -Force (Split-Path $log -Parent) | Out-Null
           # Avoid relying on native stderr piping/PowerShell Tee-Object behavior.
           # Redirect stdout/stderr directly to a file and preserve exit code.
-          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" "scenes/v16/benchmark-civic/scene.json" 20000 1> $log 2>&1
+          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" "$env:RUNNER_TEMP/v17-scene-latest/benchmark-civic/scene.json" 20000 1> $log 2>&1
           $rc = $LASTEXITCODE
           Write-Host "V17 native smoke exit code: $rc"
           if (Test-Path $log) {
