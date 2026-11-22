@@ -2429,6 +2429,7 @@ private:
             d.MiscFlags=D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;d.StructureByteStride=stride;d.CPUAccessFlags=cpu;
             D3D11_SUBRESOURCE_DATA init{};init.pSysMem=data;
             return SUCCEEDED(device_->CreateBuffer(&d,data?&init:nullptr,&out));};
+        lumaRadianceCacheValid_=false;
         lumaBvhBuffer_.Reset();lumaOrderBuffer_.Reset();lumaRadianceBuffer_.Reset();
         lumaBvhSrv_.Reset();lumaOrderSrv_.Reset();lumaRadianceSrv_.Reset();lumaRadianceUav_.Reset();
         if(!makeBuffer(bvh.nodes.data(),bvh.nodes.size(),sizeof(LumaTraceBvh4Node),D3D11_BIND_SHADER_RESOURCE,D3D11_USAGE_IMMUTABLE,0,lumaBvhBuffer_)||
@@ -2469,17 +2470,21 @@ private:
         if(scene.root<0||size_t(scene.root)>=scene.node.size()){error=L"Racine BVH4 invalide.";return false;}
         LumaParams p{};p.counts[0]=lumaTriangleCount_;p.counts[1]=lumaOrderCount_;p.counts[2]=lumaNodeCount_;p.counts[3]=1;
         const Node& root=scene.node[size_t(scene.root)];const V center=(root.mn+root.mx)*.5f;
-        static const auto epoch=Clock::now();const float phase=float(std::chrono::duration<double>(Clock::now()-epoch).count()*.75);
+        // LumaTrace radiance is reusable while geometry and lights stay fixed.
+        // Keep the diagnostic pair stationary; explicit light changes still alter the parameter key below.
+        constexpr float phase=0.f;
         // Keep both animated point lights within two metres of the scene centre.
         const float radius=1.4f;const V a=center+V{std::cos(phase)*radius,.75f+std::sin(phase)*.45f,std::sin(phase)*radius};
         const V b=center+V{-std::cos(phase)*radius,.75f-std::sin(phase)*.45f,-std::sin(phase)*radius};
         p.lightA[0]=a.x;p.lightA[1]=a.y;p.lightA[2]=a.z;p.lightA[3]=1.15f;p.lightB[0]=b.x;p.lightB[1]=b.y;p.lightB[2]=b.z;p.lightB[3]=1.15f;
         p.colorA[0]=.12f;p.colorA[1]=.62f;p.colorA[2]=1.f;p.colorB[0]=1.f;p.colorB[1]=.39f;p.colorB[2]=.10f;
+        std::array<uint32_t,20> radianceKey{};std::memcpy(radianceKey.data(),&p,sizeof(p));
+        if(lumaRadianceCacheValid_&&radianceKey==lumaRadianceKey_)return true;
         D3D11_MAPPED_SUBRESOURCE m{};if(FAILED(context_->Map(lumaParams_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m))){error=L"Upload constantes LumaTrace impossible.";return false;}
         std::memcpy(m.pData,&p,sizeof(p));context_->Unmap(lumaParams_.Get(),0);
         ID3D11ShaderResourceView* srvs[]={verticesSrv_.Get(),lumaOrderSrv_.Get(),lumaBvhSrv_.Get()};ID3D11UnorderedAccessView* uavs[]={lumaRadianceUav_.Get()};ID3D11Buffer* cbs[]={lumaParams_.Get()};
         context_->CSSetShader(lumaCompute_.Get(),nullptr,0);context_->CSSetShaderResources(0,3,srvs);context_->CSSetUnorderedAccessViews(0,1,uavs,nullptr);context_->CSSetConstantBuffers(0,1,cbs);context_->Dispatch((lumaTriangleCount_+63)/64,1,1);
-        ID3D11UnorderedAccessView* nu[]={nullptr};ID3D11ShaderResourceView* ns[]={nullptr,nullptr,nullptr};context_->CSSetUnorderedAccessViews(0,1,nu,nullptr);context_->CSSetShaderResources(0,3,ns);context_->CSSetShader(nullptr,nullptr,0);return true;
+        ID3D11UnorderedAccessView* nu[]={nullptr};ID3D11ShaderResourceView* ns[]={nullptr,nullptr,nullptr};context_->CSSetUnorderedAccessViews(0,1,nu,nullptr);context_->CSSetShaderResources(0,3,ns);context_->CSSetShader(nullptr,nullptr,0);lumaRadianceKey_=radianceKey;lumaRadianceCacheValid_=true;return true;
     }
     bool ensureTargets(int w,int h,unsigned msaa,std::wstring& error) {
         if(w==width_&&h==height_&&target_&&msaaPreference_==msaa)return true;
@@ -2657,6 +2662,8 @@ private:
     ComPtr<ID3D11ShaderResourceView> lumaBvhSrv_,lumaOrderSrv_,lumaRadianceSrv_;
     ComPtr<ID3D11UnorderedAccessView> lumaRadianceUav_;
     ComPtr<ID3D11ComputeShader> lumaCompute_;
+    std::array<uint32_t,20> lumaRadianceKey_{};
+    bool lumaRadianceCacheValid_=false;
     std::array<ComPtr<ID3D11Buffer>,3> ellipseVertices_;
     std::array<UINT,3> ellipseVertexCounts_{{0,0,0}};
     std::vector<GpuEllipseInstance> ellipses_;
