@@ -2669,7 +2669,7 @@ private:
     ComPtr<ID3D11ShaderResourceView> lumaBvhSrv_,lumaOrderSrv_,lumaRadianceSrv_;
     ComPtr<ID3D11UnorderedAccessView> lumaRadianceUav_;
     ComPtr<ID3D11ComputeShader> lumaCompute_;
-    std::array<uint32_t,20> lumaRadianceKey_{};
+    std::array<uint32_t,sizeof(LumaParams)/sizeof(uint32_t)> lumaRadianceKey_{};
     bool lumaRadianceCacheValid_=false;
     std::array<ComPtr<ID3D11Buffer>,3> ellipseVertices_;
     std::array<UINT,3> ellipseVertexCounts_{{0,0,0}};
