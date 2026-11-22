@@ -14,7 +14,7 @@ cbuffer Params : register(b0) { uint4 Counts; float4 LightA; float4 ColorA; floa
 bool bounds(Node n,float3 o,float3 invD,float maxT,out float nearT){
  float3 a=(n.lo-o)*invD,b=(n.hi-o)*invD,lo=min(a,b),hi=max(a,b);
  nearT=max(max(lo.x,lo.y),max(lo.z,0));return min(min(hi.x,hi.y),min(hi.z,maxT))>=nearT;}
-bool triangle(uint id,float3 o,float3 d,float maxT){
+bool intersectsTriangle(uint id,float3 o,float3 d,float maxT){
  Vertex a=loadVertex(id*3u),b=loadVertex(id*3u+1u),c=loadVertex(id*3u+2u);float3 e1=b.p-a.p,e2=c.p-a.p,p=cross(d,e2);
  float det=dot(e1,p);if(abs(det)<1.e-8)return false;float inv=rcp(det);float3 t=o-a.p;
  float u=dot(t,p)*inv;if(u<0||u>1)return false;float3 q=cross(t,e1);float v=dot(d,q)*inv;
@@ -24,7 +24,7 @@ bool occluded(float3 o,float3 d,float maxT,uint source){
  float3 invD=rcp(sd);uint stack[64];uint top=1;stack[0]=0;
  [loop]while(top){Node n=Bvh[stack[--top]];float nt;if(!bounds(n,o,invD,maxT,nt))continue;
   if(n.count){[loop]for(uint j=0;j<n.count;++j){uint id=Order[n.first+j];
-   if(id!=0xffffffff&&id!=source&&id<Counts.x&&triangle(id,o,d,maxT))return true;}}
+   if(id!=0xffffffff&&id!=source&&id<Counts.x&&intersectsTriangle(id,o,d,maxT))return true;}}
   else{uint kids[4]={n.c0,n.c1,n.c2,n.c3};[loop]for(uint k=0;k<n.children&&top<60;++k)stack[top++]=kids[k];}}
  return false;}
 float3 light(uint id,float3 p,float3 n,float4 l,float3 color){float3 dv=l.xyz-p;float d=length(dv);
