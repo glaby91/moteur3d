@@ -98,7 +98,24 @@ RasterQualitySettings unpackQuality(uint64_t bits){
     return q;
 }
 struct GpuVertex { float p[3], n[3], uv[2]; uint32_t material,primitiveId; };
-static_assert(sizeof(GpuVertex)==40,"LumaTrace HLSL vertex layout");
+static_assert(sizeof(GpuVertex)==40,"V17 raster vertex layout");
+// LumaTrace stores one shared raster/compute stream. Packing normals into a
+// signed 10:10:10 format lowers its per-vertex footprint from 40 to 32 bytes
+// without quantizing world positions or texture coordinates.
+struct GpuVertexLuma {
+    float p[3];
+    uint32_t normalPacked;
+    float uv[2];
+    uint32_t material,primitiveId;
+};
+static_assert(sizeof(GpuVertexLuma)==32,"LumaTrace packed vertex layout");
+uint32_t packLumaNormal(const float n[3]){
+    const auto pack=[](float v)->uint32_t{
+        const int32_t q=int32_t(std::lround(std::clamp(v,-1.f,1.f)*511.f));
+        return uint32_t(q)&0x3ffu;
+    };
+    return pack(n[0])|(pack(n[1])<<10)|(pack(n[2])<<20);
+}
 // Box geometry is immutable and shared. Per-object bounds/materials occupy
 // 32 bytes instead of duplicating 36 vertex records (~1.3 kB) per box.
 struct GpuBoxInstance {
@@ -1120,9 +1137,9 @@ public:
                     LONG(std::ceil(pw*.97f)),LONG(std::ceil(ph*.98f))};
                 context_->RSSetScissorRects(1,&rect);
             }
-            UINT stride=sizeof(GpuVertex),offset=0;
+            UINT stride=lumaBvh?UINT(sizeof(GpuVertexLuma)):UINT(sizeof(GpuVertex)),offset=0;
             ID3D11Buffer* vb=vertices_.Get();
-            context_->IASetInputLayout(layout_.Get());
+            context_->IASetInputLayout(lumaBvh?lumaLayout_.Get():layout_.Get());
             context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
             context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             context_->RSSetState(scissor?scissorRaster_.Get():raster_.Get());
@@ -1364,9 +1381,12 @@ public:
             D3D11_MAPPED_SUBRESOURCE transparentMap{};hr=context_->Map(transparentVertices_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&transparentMap);
             if(FAILED(hr)){error=L"Impossible de préparer les surfaces transparentes DirectX 11.";return false;}
             auto* out=static_cast<GpuVertex*>(transparentMap.pData);for(const auto& t:transparent_)for(const auto& v:t.v)*out++=v;context_->Unmap(transparentVertices_.Get(),0);
+            context_->IASetInputLayout(layout_.Get());
             UINT transparentStride=sizeof(GpuVertex);ID3D11Buffer* transparentBuffer=transparentVertices_.Get();context_->IASetVertexBuffers(0,1,&transparentBuffer,&transparentStride,&offset);
             context_->OMSetDepthStencilState(transparentDepth_.Get(),0);context_->OMSetBlendState(blend_.Get(),nullptr,0xffffffffu);context_->Draw(UINT(transparent_.size()*3),0);++drawCalls;
-            context_->OMSetBlendState(nullptr,nullptr,0xffffffffu);context_->OMSetDepthStencilState(depth_.Get(),0);context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
+            context_->OMSetBlendState(nullptr,nullptr,0xffffffffu);context_->OMSetDepthStencilState(depth_.Get(),0);
+            context_->IASetInputLayout(lumaBvh?lumaLayout_.Get():layout_.Get());
+            context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
         }
             return true;
         };
@@ -1803,6 +1823,16 @@ private:
         if(FAILED(device_->CreateVertexShader(vsCode->GetBufferPointer(),vsCode->GetBufferSize(),nullptr,&vs_))||FAILED(device_->CreatePixelShader(psCode->GetBufferPointer(),psCode->GetBufferSize(),nullptr,&ps_))){error=L"Création des shaders DirectX 11 impossible.";return false;}
         const D3D11_INPUT_ELEMENT_DESC input[]={{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,p),D3D11_INPUT_PER_VERTEX_DATA,0},{"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,n),D3D11_INPUT_PER_VERTEX_DATA,0},{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,offsetof(GpuVertex,uv),D3D11_INPUT_PER_VERTEX_DATA,0},{"MATERIAL",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertex,material),D3D11_INPUT_PER_VERTEX_DATA,0},{"TRIID",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertex,primitiveId),D3D11_INPUT_PER_VERTEX_DATA,0}};
         if(FAILED(device_->CreateInputLayout(input,5,vsCode->GetBufferPointer(),vsCode->GetBufferSize(),&layout_))){error=L"Création du format de sommet DirectX 11 impossible.";return false;}
+        const D3D11_INPUT_ELEMENT_DESC lumaInput[]={
+            {"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertexLuma,p),D3D11_INPUT_PER_VERTEX_DATA,0},
+            {"NORMAL",0,DXGI_FORMAT_R10G10B10A2_SNORM,0,offsetof(GpuVertexLuma,normalPacked),D3D11_INPUT_PER_VERTEX_DATA,0},
+            {"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,offsetof(GpuVertexLuma,uv),D3D11_INPUT_PER_VERTEX_DATA,0},
+            {"MATERIAL",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertexLuma,material),D3D11_INPUT_PER_VERTEX_DATA,0},
+            {"TRIID",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertexLuma,primitiveId),D3D11_INPUT_PER_VERTEX_DATA,0}
+        };
+        if(FAILED(device_->CreateInputLayout(lumaInput,5,vsCode->GetBufferPointer(),vsCode->GetBufferSize(),&lumaLayout_))){
+            error=L"Création du format de sommet compact LumaTrace impossible.";return false;
+        }
         if(FAILED(device_->CreateVertexShader(boxVsCode->GetBufferPointer(),boxVsCode->GetBufferSize(),nullptr,&boxVs_))){
             error=L"Création du vertex shader d'instancing V17 impossible.";return false;
         }
@@ -2158,7 +2188,53 @@ private:
                 }
                 chunks_.push_back(chunk);
             }
-            D3D11_BUFFER_DESC bd{};bd.ByteWidth=UINT(mesh.vertices.size()*sizeof(GpuVertex));bd.Usage=D3D11_USAGE_IMMUTABLE;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER|(lumaTrace?D3D11_BIND_SHADER_RESOURCE:0u);bd.MiscFlags=lumaTrace?D3D11_RESOURCE_MISC_BUFFER_STRUCTURED:0u;bd.StructureByteStride=lumaTrace?UINT(sizeof(GpuVertex)):0u;D3D11_SUBRESOURCE_DATA init{};init.pSysMem=mesh.vertices.data();if(FAILED(device_->CreateBuffer(&bd,&init,&vertices_))){error=L"Allocation de la géométrie dans la mémoire GPU impossible.";return false;}vertexCount_=UINT(mesh.vertices.size());if(lumaTrace){D3D11_SHADER_RESOURCE_VIEW_DESC sv{};sv.Format=DXGI_FORMAT_UNKNOWN;sv.ViewDimension=D3D11_SRV_DIMENSION_BUFFER;sv.Buffer.NumElements=vertexCount_;if(FAILED(device_->CreateShaderResourceView(vertices_.Get(),&sv,&verticesSrv_))){error=L"Vue compute partagée de la géométrie impossible.";return false;}}}
+            std::vector<GpuVertexLuma> packedLumaVertices;
+        const void* geometryData=mesh.vertices.data();
+        size_t geometryStride=sizeof(GpuVertex);
+        if(lumaTrace){
+            packedLumaVertices.resize(mesh.vertices.size());
+            for(size_t i=0;i<mesh.vertices.size();++i){
+                const GpuVertex& source=mesh.vertices[i];
+                GpuVertexLuma& packed=packedLumaVertices[i];
+                std::copy(std::begin(source.p),std::end(source.p),std::begin(packed.p));
+                packed.normalPacked=packLumaNormal(source.n);
+                std::copy(std::begin(source.uv),std::end(source.uv),std::begin(packed.uv));
+                packed.material=source.material;
+                packed.primitiveId=source.primitiveId;
+            }
+            geometryData=packedLumaVertices.data();
+            geometryStride=sizeof(GpuVertexLuma);
+        }
+        const size_t geometryBytes=mesh.vertices.size()*geometryStride;
+        if(geometryBytes>UINT_MAX){
+            error=L"Géométrie GPU trop volumineuse pour un tampon DirectX 11.";
+            return false;
+        }
+        D3D11_BUFFER_DESC bd{};
+        bd.ByteWidth=UINT(geometryBytes);
+        bd.Usage=D3D11_USAGE_IMMUTABLE;
+        bd.BindFlags=D3D11_BIND_VERTEX_BUFFER|(lumaTrace?D3D11_BIND_SHADER_RESOURCE:0u);
+        bd.MiscFlags=lumaTrace?D3D11_RESOURCE_MISC_BUFFER_STRUCTURED:0u;
+        bd.StructureByteStride=lumaTrace?UINT(geometryStride):0u;
+        D3D11_SUBRESOURCE_DATA init{};init.pSysMem=geometryData;
+        const HRESULT geometryResult=device_->CreateBuffer(&bd,&init,&vertices_);
+        if(FAILED(geometryResult)){
+            error=L"Allocation de la géométrie GPU impossible ("+
+                std::to_wstring((geometryBytes+1048575u)/1048576u)+
+                L" Mio demandés, HRESULT "+
+                std::to_wstring(uint32_t(geometryResult))+L").";
+            return false;
+        }
+        vertexCount_=UINT(mesh.vertices.size());
+        if(lumaTrace){
+            D3D11_SHADER_RESOURCE_VIEW_DESC sv{};
+            sv.Format=DXGI_FORMAT_UNKNOWN;sv.ViewDimension=D3D11_SRV_DIMENSION_BUFFER;
+            sv.Buffer.NumElements=vertexCount_;
+            if(FAILED(device_->CreateShaderResourceView(vertices_.Get(),&sv,&verticesSrv_))){
+                error=L"Vue compute partagée de la géométrie impossible.";
+                return false;
+            }
+        }}
         if(!mesh.transparent.empty()){D3D11_BUFFER_DESC bd{};bd.ByteWidth=UINT(mesh.transparent.size()*3*sizeof(GpuVertex));bd.Usage=D3D11_USAGE_DYNAMIC;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;if(FAILED(device_->CreateBuffer(&bd,nullptr,&transparentVertices_))){error=L"Allocation du tampon des surfaces transparentes impossible.";return false;}}
         transparent_=std::move(mesh.transparent);
         // Material textures arrive at different sizes (256..2048), but D3D11
@@ -2554,7 +2630,7 @@ private:
     int nativeW_=0,nativeH_=0;
     ComPtr<ID3D11VertexShader> vs_,boxVs_,ellipseVs_,mergeVs_,skyVs_;
     ComPtr<ID3D11PixelShader> ps_,mergePs_,skyPs_;
-    ComPtr<ID3D11InputLayout> layout_,boxLayout_,ellipseLayout_;
+    ComPtr<ID3D11InputLayout> layout_,lumaLayout_,boxLayout_,ellipseLayout_;
     ComPtr<ID3D11Buffer> skyConstants_,constants_,vertices_,transparentVertices_,boxVertices_,boxInstances_,ellipseInstances_,foliageInstances_;
     ComPtr<ID3D11ShaderResourceView> verticesSrv_;
     ComPtr<ID3D11Buffer> lumaBvhBuffer_,lumaOrderBuffer_,lumaRadianceBuffer_,lumaParams_;
