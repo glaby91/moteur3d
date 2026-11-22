@@ -8,6 +8,6 @@
     "cpuLighting": "001",
     "directx11": "001",
     "vulkan": "001",
-    "lumatrace": "005"
+    "lumatrace": "006"
   }
 }
