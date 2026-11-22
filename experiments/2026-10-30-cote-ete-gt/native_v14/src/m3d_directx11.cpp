@@ -2442,7 +2442,24 @@ private:
         if(FAILED(device_->CreateUnorderedAccessView(lumaRadianceBuffer_.Get(),&ud,&lumaRadianceUav_))){error=L"UAV de radiance LumaTrace impossible.";return false;}
         ComPtr<ID3DBlob> code,errors;HRESULT hr=D3DCompile(lumatrace_detail::kComputeShader,sizeof(lumatrace_detail::kComputeShader)-1,
             "m3d_lumatrace_compute",nullptr,nullptr,"CSShadeTriangles","cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&code,&errors);
-        if(FAILED(hr)||FAILED(device_->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&lumaCompute_))){error=L"Compilation du compute shader LumaTrace impossible.";return false;}
+        if(FAILED(hr)){
+            error=L"Compilation du compute shader LumaTrace impossible (HRESULT "+
+                std::to_wstring(uint32_t(hr))+L")";
+            if(errors&&errors->GetBufferPointer()){
+                error+=L": ";
+                const char* p=static_cast<const char*>(errors->GetBufferPointer());
+                const size_t n=std::min<size_t>(errors->GetBufferSize(),1024);
+                for(size_t i=0;i<n;++i)
+                    error.push_back(p[i]>=32&&p[i]<127?wchar_t(p[i]):L' ');
+            }
+            return false;
+        }
+        hr=device_->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&lumaCompute_);
+        if(FAILED(hr)){
+            error=L"Création du compute shader LumaTrace impossible (HRESULT "+
+                std::to_wstring(uint32_t(hr))+L").";
+            return false;
+        }
         D3D11_BUFFER_DESC cd{};cd.ByteWidth=sizeof(LumaParams);cd.Usage=D3D11_USAGE_DYNAMIC;cd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;cd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
         if(FAILED(device_->CreateBuffer(&cd,nullptr,&lumaParams_))){error=L"Constantes compute LumaTrace impossibles.";return false;}
         lumaNodeCount_=UINT(bvh.nodes.size());lumaOrderCount_=UINT(order.size());
