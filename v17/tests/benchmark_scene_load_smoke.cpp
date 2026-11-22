@@ -13,6 +13,26 @@ int main(int argc,char** argv){
     if(!loaded){qCritical()<<"Cannot load benchmark JSON:"<<loaded.error;return 3;}
     auto built=m3d::v16::buildRuntime(loaded.scene,256);
     if(!built){qCritical()<<"Cannot build benchmark runtime:"<<built.error;return 4;}
+    if(argc>=4 && QString::fromLocal8Bit(argv[3])==QStringLiteral("--generic")){
+        const size_t triangles=built.runtime.renderScene.obj.size();
+        const size_t requested=QString::fromLocal8Bit(argv[2]).toULongLong();
+        if(triangles<requested || built.runtime.cameras.empty() ||
+           built.runtime.renderScene.mat.empty() || built.runtime.objects.empty()){
+            qCritical()<<"Invalid V17 scene package:"
+                       <<"triangles="<<qulonglong(triangles)
+                       <<"min="<<qulonglong(requested)
+                       <<"cameras="<<built.runtime.cameras.size()
+                       <<"materials="<<built.runtime.renderScene.mat.size()
+                       <<"instances="<<built.runtime.objects.size();
+            return 5;
+        }
+        qInfo()<<"V17 scene package loaded:"
+               <<qulonglong(triangles)<<"triangles,"
+               <<built.runtime.objects.size()<<"instances,"
+               <<built.runtime.cameras.size()<<"cameras,"
+               <<built.runtime.renderScene.mat.size()<<"materials";
+        return 0;
+    }
     const size_t triangles=built.runtime.renderScene.obj.size();
     const size_t requested=QString::fromLocal8Bit(argv[2]).toULongLong();
     if(triangles<requested || built.runtime.cameras.size()<6 ||
