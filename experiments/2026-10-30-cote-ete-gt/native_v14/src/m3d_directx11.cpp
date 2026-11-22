@@ -963,7 +963,7 @@ public:
                 diffuseBase=.38f;diffuseDay=.37f;diffuseDirect=.44f;
             }
             if(name=="cse_pool_strip")strength=.38f; // subdued linear luminaire
-            else if(name=="lamp")strength=.45f+1.05f*lampFactor;
+            else if(name=="lamp")strength=1.5f*lampFactor;
             else if(name=="led")strength=1.35f*lampFactor;
             else if(name=="taillight")strength=1.05f*lampFactor;
             else if(name=="neon")strength=1.1f;
@@ -991,8 +991,8 @@ public:
                 emissionR=1.f;emissionG=.72f;emissionB=.24f;emissionStrength=1.35f;
                 strength=.45f;
             }
-            else if(name=="lamp"){emissionR=1.f;emissionG=166.f/255.f;emissionB=91.f/255.f;emissionStrength=.75f+1.9f*lampFactor;}
-            else if(name=="led"){emissionR=1.f;emissionG=217.f/255.f;emissionB=165.f/255.f;emissionStrength=.48f+.85f*lampFactor;}
+            else if(name=="lamp"){emissionR=1.f;emissionG=166.f/255.f;emissionB=91.f/255.f;emissionStrength=2.65f*lampFactor;}
+            else if(name=="led"){emissionR=1.f;emissionG=217.f/255.f;emissionB=165.f/255.f;emissionStrength=1.33f*lampFactor;}
             else if(name=="taillight"){emissionR=1.f;emissionG=28.f/255.f;emissionB=12.f/255.f;emissionStrength=1.25f*lampFactor;}
             if(scene.mat[m].surfaceAuthored && scene.mat[m].waterSurface){
                 // Generic authored water matches the legacy DX11 water model.
@@ -1046,8 +1046,8 @@ public:
             // their existing scene-wide scale and remain functional by day.
             const bool exteriorFixture=(l.p.y>17.f&&l.p.z>-4.f&&l.p.z<-1.f)
                           ||(l.p.y>6.f&&l.p.y<9.f&&l.p.z>18.f);
-            const float factor=exteriorFixture ? (.12f+.88f*lampFactor) : 1.f;
-            appendLight(l,sceneLightScale*factor);
+            const float factor=(l.exterior||exteriorFixture)?lampFactor:sceneLightScale;
+            appendLight(l,factor);
         }
         D3D11_MAPPED_SUBRESOURCE mapped{};
         HRESULT hr=context_->Map(constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped);

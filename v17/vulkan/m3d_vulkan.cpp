@@ -1861,8 +1861,8 @@ class VulkanRaster final {
                 else if(name=="cse_neon_cyan"){emission={.03f,.89f,1.f};strength=1.50f;}
                 else if(name=="cse_neon_gold"){emission={1.f,.72f,.24f};strength=1.35f;}
                 else if(name=="cse_pool_strip"){emission={.83f,.91f,1.f};strength=.24f;}
-                else if(name=="lamp"){emission={1.f,.65f,.36f};strength=.75f+1.9f*lampFactor;}
-                else if(name=="led"){emission={1.f,.85f,.65f};strength=.48f+.85f*lampFactor;}
+                else if(name=="lamp"){emission={1.f,.65f,.36f};strength=2.65f*lampFactor;}
+                else if(name=="led"){emission={1.f,.85f,.65f};strength=1.33f*lampFactor;}
             }
             f.emission[i][0]=emission.x;f.emission[i][1]=emission.y;f.emission[i][2]=emission.z;
             f.emission[i][3]=strength;
@@ -1877,7 +1877,9 @@ class VulkanRaster final {
             f.lightRgb[j][2]=l.color.z/255.f;f.lightRgb[j][3]=l.intensity;
         };
         for(const Light& l:pointLights)addLight(l);
-        for(const Light& l:scene.lights)addLight(l);
+        // Exterior lamps are first so they remain in the fixed 64-light GPU buffer.
+        for(const Light& l:scene.lights)if(l.exterior){Light scaled=l;scaled.intensity*=lampFactor;addLight(scaled);}
+        for(const Light& l:scene.lights)if(!l.exterior)addLight(l);
         if(giAvailable_){
             f.giOrigin[0]=giTable_.origin.x;f.giOrigin[1]=giTable_.origin.y;
             f.giOrigin[2]=giTable_.origin.z;

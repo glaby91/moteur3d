@@ -3,8 +3,7 @@ run-name: LumaTrace V17 compile — ${{ github.sha }}
 on:
   push:
     branches:
-      - codex/v17-lumatrace-backend-test
-      - codex/lumatrace-memory-allocation-fix-2026-11-22
+      - official/v17-lumatrace
     paths:
       - 'v17/**'
       - 'v16/**'
@@ -50,14 +49,23 @@ jobs:
           -DV17_GIT_SHA=$env:GITHUB_SHA
       - name: Compile V17 application and shared engine
         run: cmake --build build-v17-lumatrace --config Release --target moteur3d_v17 --parallel 4
-      - name: Assemble V17.604 scene package with LumaTrace and Vulkan
+      - name: Assemble latest official scene with LumaTrace and Vulkan
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           $base = "dist-v17-lumatrace"
-          gh run download 44755434418 --repo glaby91/moteur3d --name CSE-WARP-V17.001-GitHub-574-Windows-x64 --dir $base
-          if ($LASTEXITCODE -ne 0) { throw "Could not retrieve the V17.604 scene package" }
+          New-Item -ItemType Directory -Force $base | Out-Null
+          $sceneVersionPath = Join-Path $base "SCENE_VERSION.json"
+          Invoke-WebRequest -Uri "https://github.com/glaby91/moteur3d-scene/releases/latest/download/SCENE_VERSION.json" -OutFile $sceneVersionPath
+          $sceneVersion = Get-Content $sceneVersionPath -Raw | ConvertFrom-Json
+          if (-not $sceneVersion.revision -or -not $sceneVersion.scene) { throw "The latest scene release manifest is invalid" }
+          Invoke-WebRequest -Uri "https://github.com/glaby91/moteur3d-scene/releases/latest/download/V17-scene.zip" -OutFile (Join-Path $base "scene.zip")
+          Expand-Archive -Path (Join-Path $base "scene.zip") -DestinationPath $base -Force
+          Remove-Item (Join-Path $base "scene.zip") -Force
+          if (-not (Test-Path (Join-Path $base "benchmark-civic/scene.json"))) { throw "The latest complex aquatique scene is missing" }
+          if ((Get-Content (Join-Path $base "SCENE_VERSION.json") -Raw | ConvertFrom-Json).revision -ne $sceneVersion.revision) { throw "Extracted scene revision differs from release manifest" }
+          Write-Host "Packaging scene revision $($sceneVersion.revision) from glaby91/moteur3d-scene"
           $exe = Get-ChildItem -Path build-v17-lumatrace -Recurse -Filter moteur3d_v17.exe | Select-Object -First 1
           $core = Get-ChildItem -Path build-v17-lumatrace -Recurse -Filter moteur3d_v16_core.dll | Select-Object -First 1
           if (-not $exe -or -not $core) { throw "The LumaTrace executable or V16 engine DLL is missing" }
@@ -67,8 +75,7 @@ jobs:
           if (!(Test-Path $vulkanSource)) { throw "The Vulkan SPIR-V shaders were not generated" }
           New-Item -ItemType Directory -Force (Join-Path $base "vulkan") | Out-Null
           Copy-Item (Join-Path $vulkanSource "*") (Join-Path $base "vulkan") -Force
-          if (!(Test-Path (Join-Path $base "pavillon01/scene.json"))) { throw "The façade-and-basin scene is missing" }
-          if (!(Test-Path (Join-Path $base "benchmark-civic/scene.json"))) { throw "The default Pripyat scene is missing" }
+          if (!(Test-Path (Join-Path $base "benchmark-civic/scene.json"))) { throw "The complex aquatique scene is missing" }
           windeployqt --release --no-translations "$base/moteur3d_v17.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Publish Windows x64 package

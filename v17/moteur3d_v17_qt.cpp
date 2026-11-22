@@ -1575,6 +1575,7 @@ private:
     QCheckBox* cloudAnimationBox_=nullptr;
     bool lumaTraceCloudDefaultApplied_=false;
     QCheckBox* dayNightCycleBox_=nullptr;
+    QCheckBox* exteriorLightsBox_=nullptr;
     QCheckBox* hybridLightBox_=nullptr;
     QCheckBox* filmicToneBox_=nullptr;
     QCheckBox* colorEnergyBox_=nullptr;
@@ -2259,6 +2260,10 @@ private:
         dayNightCycleBox_->setChecked(false);
         dayNightCycleBox_->setToolTip(QStringLiteral(
             "Fait progresser le soleil, le ciel, les ombres et les éclairages du bâtiment."));
+        exteriorLightsBox_=new QCheckBox(QStringLiteral("Éclairage extérieur automatique (façade + allée)"));
+        exteriorLightsBox_->setToolTip(QStringLiteral(
+            "Le capteur solaire active les lumières sous le seuil du soir et les éteint le jour.\n"
+            "Hystérésis intégrée pour éviter les clignotements au crépuscule."));
         // Two independent controls avoid coupling global illumination and
         // output tone mapping. Preserve the existing hybrid preference, while
         // the new filmic shoulder defaults OFF to avoid V17.309 wash-out.
@@ -2305,6 +2310,10 @@ private:
         form->addRow(QStringLiteral("Heure solaire"),sunHour_);
         form->addRow(cloudAnimationBox_);
         form->addRow(dayNightCycleBox_);
+        QSettings exteriorPrefs(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+        exteriorLightsBox_->setChecked(exteriorPrefs.value(QStringLiteral("Lighting/ExteriorAuto"),true).toBool());
+        m3d::setExteriorLightingEnabled(exteriorLightsBox_->isChecked());
+        form->addRow(exteriorLightsBox_);
         form->addRow(hybridLightBox_);
         form->addRow(colorEnergyBox_);
         form->addRow(QStringLiteral("Exposition linéaire"),colorExposureBox_);
@@ -2612,6 +2621,12 @@ private:
         connect(denoiseDirect_,&QCheckBox::toggled,this,[this](bool){if(backendBox_->currentIndex()==0)requestRender();});
         connect(edgeAa_,&QCheckBox::toggled,this,[this](bool){requestRender();});
         connect(azimuth_,&QSlider::sliderReleased,this,[this]{updateCameraHud();requestRender();});
+        connect(exteriorLightsBox_,&QCheckBox::toggled,this,[this](bool enabled){
+            m3d::setExteriorLightingEnabled(enabled);
+            QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+            settings.setValue(QStringLiteral("Lighting/ExteriorAuto"),enabled);
+            if(runtime_)requestRender();
+        });
         connect(hybridLightBox_,&QCheckBox::toggled,this,[this](bool enabled){
             m3d::setRasterHybridLightingEnabled(enabled);
             QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));

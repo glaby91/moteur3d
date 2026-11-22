@@ -23,10 +23,10 @@ struct alignas(16) GpuTri { float p0[3]; uint32_t material; float p1[3]; uint32_
 static_assert(sizeof(GpuTri)==128,"GPU triangle layout differs from HLSL");
 // Source albedo/roughness/normal maps are uploaded separately to a texture array.
 struct alignas(16) GpuMaterial { float albedo[3]; float roughnessScale; float metallic,transmission,ior,dielectricF0; };
-struct alignas(16) GpuLight { float position[3];float radius;float color[3];float intensity; };
-static_assert(sizeof(GpuLight)==32, "GPU point light layout mismatch");
+struct alignas(16) GpuLight { float position[3];float radius;float color[3];float intensity;uint32_t exterior;uint32_t padding[3]; };
+static_assert(sizeof(GpuLight)==48, "GPU point light layout mismatch");
 static_assert(sizeof(GpuMaterial)==32, "GPU material buffer layout mismatch");
-struct alignas(16) Params { float eye[3],tanHalf,forward[3],aspect,right[3],nearPlane,up[3],farPlane; uint32_t width,height,nodeCount,triangleCount,rootIndex,maxTraversal,materialCount,textureBaseSize; float sunDirection[3],ambientStrength; float skyZenith[3],skyStrength; float skyHorizon[3],sunStrength; float sunColor[3],skyFillStrength; uint32_t lightCount;float sceneLightScale,indirectFill;uint32_t gpuIndirectSamples;uint32_t adaptiveGI,indirectWidth,indirectHeight,primaryQuarter; };
+struct alignas(16) Params { float eye[3],tanHalf,forward[3],aspect,right[3],nearPlane,up[3],farPlane; uint32_t width,height,nodeCount,triangleCount,rootIndex,maxTraversal,materialCount,textureBaseSize; float sunDirection[3],ambientStrength; float skyZenith[3],skyStrength; float skyHorizon[3],sunStrength; float sunColor[3],skyFillStrength; uint32_t lightCount;float sceneLightScale,indirectFill;uint32_t gpuIndirectSamples;uint32_t adaptiveGI,indirectWidth,indirectHeight,primaryQuarter; float exteriorLightScale; float framePadding[3]; };
 static_assert(sizeof(Params)%16==0, "GPU constant buffer must be aligned");
 void v3(float* dst,V v){dst[0]=v.x;dst[1]=v.y;dst[2]=v.z;}
 template<class T> bool makeSrv(ID3D11Device* d,const std::vector<T>& values,ComPtr<ID3D11ShaderResourceView>& srv){
@@ -174,7 +174,7 @@ uint64_t hashScene(const Scene& scene) {
  scalar(scene.useLegacyWorldLights);
  for(const auto& l:scene.lights){
   scalar(l.p.x);scalar(l.p.y);scalar(l.p.z);
-  scalar(l.radius);scalar(l.intensity);
+  scalar(l.radius);scalar(l.intensity);scalar(l.exterior);
   scalar(l.color.x);scalar(l.color.y);scalar(l.color.z);
  }
  for(const auto& m:scene.mat){
@@ -348,14 +348,17 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
   // Only scene-authored lights belong to the V16 scene. This is the same
   // scene.lights list used by CPU offlinePbrShade().
   std::vector<GpuLight> lights;lights.reserve(std::max<size_t>(1,scene.lights.size()));
-  for(const auto& l:scene.lights){
+  auto appendSceneLight=[&](const Light& l){
    GpuLight g{};v3(g.position,l.p);g.radius=l.radius;
    g.color[0]=l.color.x/255.f;
    g.color[1]=l.color.y/255.f;
    g.color[2]=l.color.z/255.f;
-   g.intensity=l.intensity;
+   g.intensity=l.intensity;g.exterior=l.exterior?1u:0u;
    lights.push_back(g);
-  }
+  };
+  // Exterior sources must survive the 64-light compute shader cap.
+  for(const auto& l:scene.lights)if(l.exterior)appendSceneLight(l);
+  for(const auto& l:scene.lights)if(!l.exterior)appendSceneLight(l);
   if(lights.empty())lights.push_back(GpuLight{}); // valid nonempty SRV with lightCount=0
   ComPtr<ID3D11ShaderResourceView> s0,s1,s2,s3,s4,s5;
   if(!makeSrv(c.device.Get(),nodes,s0)||!makeSrv(c.device.Get(),triangles,s1)||
@@ -433,6 +436,7 @@ bool renderCompute11Preview(const Scene& scene,const Camera& cam,int w,int h,
  params.skyFillStrength=0.f;
  params.lightCount=std::min<uint32_t>(c.lightCount,64u);
  params.sceneLightScale=.42f+.58f*(1.f-daylight);
+ params.exteriorLightScale=lampFactor;
  params.indirectFill=0.f;
  // Two real secondary hemisphere samples by default. Setting 0 disables the
  // GPU bounce for performance comparisons; 1/2/4 enables graded quality.

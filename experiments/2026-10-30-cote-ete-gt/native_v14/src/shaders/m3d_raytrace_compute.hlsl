@@ -40,10 +40,12 @@ cbuffer Frame : register(b0) {
     float3 sunColor; float skyFillStrength;
     uint lightCount; float sceneLightScale; float indirectFill; uint gpuIndirectSamples;
     uint adaptiveGI; uint indirectWidth; uint indirectHeight; uint primaryQuarter;
+    float exteriorLightScale; float3 framePadding;
 };
 struct GpuLight {
     float3 position; float radius;
     float3 color; float intensity;
+    uint exterior; uint3 padding;
 };
 StructuredBuffer<GpuBvhNode> Nodes : register(t0);
 StructuredBuffer<GpuTriangle> Triangles : register(t1);
@@ -236,7 +238,7 @@ float3 shadeSurface(Ray ray,HitInfo hit,float3 n,float3 base,float roughness,
         if(d2<1.e-5f||d2>=r2)continue;
         float distance=sqrt(d2),edge=1.f-distance/light.radius;
         float3 radiance=srgbToLinear(light.color)*
-                        (light.intensity*sceneLightScale*edge*edge*.45f);
+                        (light.intensity*(light.exterior!=0?exteriorLightScale:sceneLightScale)*edge*edge*.45f);
         lit+=brdf(n,view,delta/distance,base,roughness,metallic,f0,radiance,1.f);
     }
     lit+=base*indirectFill;

@@ -60,7 +60,7 @@ struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,dept
     unsigned threads=1; bool avx2=false,gpu=false;
     // Number of actual primary BVH queries before pixel reconstruction.
     uint64_t primarySamples=0; };
-struct Light { V p; float radius,intensity; V color; };
+struct Light { V p; float radius,intensity; V color; bool exterior=false; };
 struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPercent=0; float refractiveIndex=1.5f; float metallic=0.f, roughnessScale=1.f; std::vector<Level> mip,normalMip,roughnessMip;
     // Image albedo has no authored tangent normal or roughness map. CPU PBR
     // must not inherit the procedural surface recipe used to seed its mip chains.
@@ -102,6 +102,8 @@ extern V sun,skyZenith,skyHorizon,sunTint;
 extern float daylight,lampFactor,solarHour;
 extern std::vector<Light> pointLights;
 void updateLighting(float hour);
+void setExteriorLightingEnabled(bool enabled) noexcept;
+bool exteriorLightingEnabled() noexcept;
 bool loadScene(const std::filesystem::path& path,Scene& s,std::wstring& error);
 inline bool loadScene(const wchar_t* path,Scene& s,std::wstring& error){return loadScene(std::filesystem::path(path),s,error);}
 void closest(const Scene& s,const Ray& r,Hit& best,Stats* st,bool ground=true,int ignoreObject=-1,bool ignoreTransparent=false);

@@ -596,6 +596,7 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
                 l.p=v3(j.value("position"));l.radius=f(j.value("radius"),8.f);
                 l.intensity=f(j.value("intensity"),1.f);
                 l.color=v3(j.value("color"),{255,220,190});
+                l.exterior=j.value("group").toString()==QStringLiteral("exterior");
                 render.lights.push_back(l);
             }
         }
