@@ -100,7 +100,7 @@ RasterQualitySettings unpackQuality(uint64_t bits){
 struct GpuVertex { float p[3], n[3], uv[2]; uint32_t material,primitiveId; };
 static_assert(sizeof(GpuVertex)==40,"V17 raster vertex layout");
 // LumaTrace stores one shared raster/compute stream. Packing normals into a
-// signed 10:10:10 format lowers its per-vertex footprint from 40 to 32 bytes
+// 10-bit UNORM format with a signed-normal bias lowers its per-vertex footprint from 40 to 32 bytes
 // without quantizing world positions or texture coordinates.
 struct GpuVertexLuma {
     float p[3];
@@ -111,8 +111,8 @@ struct GpuVertexLuma {
 static_assert(sizeof(GpuVertexLuma)==32,"LumaTrace packed vertex layout");
 uint32_t packLumaNormal(const float n[3]){
     const auto pack=[](float v)->uint32_t{
-        const int32_t q=int32_t(std::lround(std::clamp(v,-1.f,1.f)*511.f));
-        return uint32_t(q)&0x3ffu;
+        const uint32_t q=uint32_t(std::lround((std::clamp(v,-1.f,1.f)*0.5f+0.5f)*1023.f));
+        return q&0x3ffu;
     };
     return pack(n[0])|(pack(n[1])<<10)|(pack(n[2])<<20);
 }
@@ -1825,7 +1825,7 @@ private:
         if(FAILED(device_->CreateInputLayout(input,5,vsCode->GetBufferPointer(),vsCode->GetBufferSize(),&layout_))){error=L"Création du format de sommet DirectX 11 impossible.";return false;}
         const D3D11_INPUT_ELEMENT_DESC lumaInput[]={
             {"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertexLuma,p),D3D11_INPUT_PER_VERTEX_DATA,0},
-            {"NORMAL",0,DXGI_FORMAT_R10G10B10A2_SNORM,0,offsetof(GpuVertexLuma,normalPacked),D3D11_INPUT_PER_VERTEX_DATA,0},
+            {"NORMAL",0,DXGI_FORMAT_R10G10B10A2_UNORM,0,offsetof(GpuVertexLuma,normalPacked),D3D11_INPUT_PER_VERTEX_DATA,0},
             {"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,offsetof(GpuVertexLuma,uv),D3D11_INPUT_PER_VERTEX_DATA,0},
             {"MATERIAL",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertexLuma,material),D3D11_INPUT_PER_VERTEX_DATA,0},
             {"TRIID",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertexLuma,primitiveId),D3D11_INPUT_PER_VERTEX_DATA,0}
