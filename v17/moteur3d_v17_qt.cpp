@@ -2056,10 +2056,11 @@ private:
             const QString revision=githubRevision();
             const QString compileDate=QString::fromLatin1(__DATE__ " " __TIME__);
             const auto quality=rasterQualitySettings();
-            const bool zEnabled=backendBox_->currentIndex()==5
-                ?qEnvironmentVariable("M3D_V17_DISABLE_Z_PREPASS")!=QStringLiteral("1")
-                :qEnvironmentVariable("M3D_V17_EXPERIMENT_Z_PREPASS")==QStringLiteral("1");
-            const bool lightEnabled=qEnvironmentVariable("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL")==QStringLiteral("1");
+            const bool zEnabled=backendBox_->currentIndex()>=4
+                &&qEnvironmentVariable("M3D_V17_DISABLE_Z_PREPASS")!=QStringLiteral("1")
+                &&qEnvironmentVariable("M3D_V17_EXPERIMENT_Z_PREPASS")!=QStringLiteral("0");
+            const bool lightEnabled=qEnvironmentVariable("M3D_V17_DISABLE_LIGHT_AABB_CULL")!=QStringLiteral("1")
+                &&qEnvironmentVariable("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL")!=QStringLiteral("0");
             const QString backend=backendBox_?backendBox_->currentText():QStringLiteral("indéterminé");
             const QString sceneRevision=sceneRevisionLabel_?sceneRevisionLabel_->text():QStringLiteral("Scène —");
             const QString details=QStringLiteral(
@@ -2071,7 +2072,7 @@ private:
                 "Rendu sélectionné : %6\\n"
                 "Qt : %7\\n"
                 "MSAA : %8x | Anisotropie : %9x | PBR : %10 px\\n"
-                "Z-prepass expérimental : %11 | Rejet AABB lampes : %12\\n"
+                "Z-prepass GPU : %11 | Rejet de volume des lampes : %12\\n"
                 "Build GitHub Actions : %13\\nScène : %14\\n"
                 "Composants : PBR-%15, CPU-%16, DX11-%17, Vulkan-%18\\n"
                 "HUD caméra / rapports d'anomalies PNG+JSON / restauration : disponibles")
@@ -2096,7 +2097,7 @@ private:
                 "<p><b>GPU principal (DXGI) :</b> %4<br/><b>Rendu :</b> %5</p>"
                 "<p><b>Navigation :</b> HUD position X/Y/Z, cap, inclinaison et FOV.<br/>"
                 "<b>Diagnostic architectural :</b> capture PNG + position JSON restaurable.<br/>"
-                "<b>Raster :</b> Z-prepass %6, rejet AABB lumières %7 (expérimentaux).</p>"
+                "<b>Raster :</b> Z-prepass %6, rejet des lumières hors portée %7.</p>"
                 "<p><b>Configuration :</b> Qt %8 ; MSAA %9x ; PBR %10 px.</p>"
                 "<p><b>Build GitHub Actions :</b> %11<br/><b>Scène :</b> %12</p>"
                 "<p><b>Révisions moteur :</b> PBR-%13 ; CPU-%14 ; DX11-%15 ; Vulkan-%16</p>")
@@ -3420,10 +3421,11 @@ private:
             {"stutterPercent",stats.stutterPercent},
             {"queuedRequests",double(stats.queued)},
             {"invalidatedFrames",double(stats.invalidated)},
-            {"zPrepass",backendBox_->currentIndex()==5
-                ?qEnvironmentVariable("M3D_V17_DISABLE_Z_PREPASS")!=QStringLiteral("1")
-                :qEnvironmentVariable("M3D_V17_EXPERIMENT_Z_PREPASS")==QStringLiteral("1")},
-            {"lightAabbCull",qEnvironmentVariable("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL")==QStringLiteral("1")}
+            {"zPrepass",backendBox_->currentIndex()>=4
+                &&qEnvironmentVariable("M3D_V17_DISABLE_Z_PREPASS")!=QStringLiteral("1")
+                &&qEnvironmentVariable("M3D_V17_EXPERIMENT_Z_PREPASS")!=QStringLiteral("0")},
+            {"lightAabbCull",qEnvironmentVariable("M3D_V17_DISABLE_LIGHT_AABB_CULL")!=QStringLiteral("1")
+                &&qEnvironmentVariable("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL")!=QStringLiteral("0")}
         };
         QFile jsonFile(root+QStringLiteral("/")+name+QStringLiteral(".json"));
         QFile csvFile(root+QStringLiteral("/")+name+QStringLiteral(".csv"));

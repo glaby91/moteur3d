@@ -1,13 +1,13 @@
 {
   "engine": {
     "major": 17,
-    "build": 2
+    "build": 3
   },
   "components": {
     "pbr": "001",
-    "cpuLighting": "002",
-    "directx11": "002",
-    "vulkan": "002",
-    "lumatrace": "008"
+    "cpuLighting": "003",
+    "directx11": "003",
+    "vulkan": "003",
+    "lumatrace": "009"
   }
 }

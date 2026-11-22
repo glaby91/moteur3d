@@ -106,7 +106,7 @@ void setExteriorLightingEnabled(bool enabled) noexcept;
 bool exteriorLightingEnabled() noexcept;
 bool loadScene(const std::filesystem::path& path,Scene& s,std::wstring& error);
 inline bool loadScene(const wchar_t* path,Scene& s,std::wstring& error){return loadScene(std::filesystem::path(path),s,error);}
-void closest(const Scene& s,const Ray& r,Hit& best,Stats* st,bool ground=true,int ignoreObject=-1,bool ignoreTransparent=false);
+void closest(const Scene& s,const Ray& r,Hit& best,Stats* st,bool ground=true,int ignoreObject=-1,bool ignoreTransparent=false,float maxDistance=INF);
 int groundMaterial(const Scene& s,V p);
 ShadowMap buildShadow(const Scene& s,Stats& st);
 V shade(const Scene& s,const ShadowMap& sm,const Camera& cam,const Ray& r,const Hit& h,Stats& st,bool fog,bool reflections=true);

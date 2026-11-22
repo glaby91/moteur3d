@@ -27,13 +27,16 @@ bool occluded(float3 o,float3 d,float maxT,uint source){
    if(id!=0xffffffff&&id!=source&&id<Counts.x&&intersectsTriangle(id,o,d,maxT))return true;}}
   else{uint kids[4]={n.c0,n.c1,n.c2,n.c3};[loop]for(uint k=0;k<n.children&&top<60;++k)stack[top++]=kids[k];}}
  return false;}
-float3 light(uint id,float3 p,float3 n,float4 l,float3 color){float3 dv=l.xyz-p;float d=length(dv);
- if(d<1.e-4)return 0;float3 dir=dv/d;float ndl=saturate(dot(n,dir));
- if(ndl<=0||occluded(p+n*.018,dir,d,id))return 0;
- return color*(ndl*l.w/(1+d*d*.28));}
+float3 light(uint id,float3 p,float3 n,float4 l,float4 color){
+ float3 dv=l.xyz-p;float d2=dot(dv,dv),r=max(l.w,.05),r2=r*r;
+ if(d2<1.e-8||d2>=r2)return 0;
+ float d=sqrt(d2);float3 dir=dv/d;float ndl=saturate(dot(n,dir));
+ if(ndl<=0||occluded(p+n*.018,dir,max(.001,d-.035),id))return 0;
+ float edge=saturate(1-d/r);
+ return color.rgb*(ndl*color.a*edge*edge/(1+d2*.28));}
 [numthreads(64,1,1)] void CSShadeTriangles(uint3 tid:SV_DispatchThreadID){uint id=tid.x;if(id>=Counts.x)return;
  Vertex a=loadVertex(id*3u),b=loadVertex(id*3u+1u),c=loadVertex(id*3u+2u);float3 p=(a.p+b.p+c.p)/3,n=normalize(decodeNormal(a.normalPacked)+decodeNormal(b.normalPacked)+decodeNormal(c.normalPacked));
- float3 sum=0;[loop]for(uint i=0;i<min(Counts.w,64u);++i)sum+=light(id,p,n,Lights[i],Colors[i].rgb);
+ float3 sum=0;[loop]for(uint i=0;i<min(Counts.w,64u);++i)sum+=light(id,p,n,Lights[i],Colors[i]);
  Radiance[id]=float4(sum,1);}
 )HLSL";
 }

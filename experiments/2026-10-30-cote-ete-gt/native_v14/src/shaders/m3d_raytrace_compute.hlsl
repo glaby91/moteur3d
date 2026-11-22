@@ -237,9 +237,19 @@ float3 shadeSurface(Ray ray,HitInfo hit,float3 n,float3 base,float roughness,
         float d2=dot(delta,delta),r2=light.radius*light.radius;
         if(d2<1.e-5f||d2>=r2)continue;
         float distance=sqrt(d2),edge=1.f-distance/light.radius;
+        float3 lightDir=delta/distance;
+        if(dot(n,lightDir)<=.0001f)continue;
+        float3 geom=normalize(cross(tri.p1-tri.p0,tri.p2-tri.p0));
+        if(dot(geom,ray.direction)>0.f)geom=-geom;
+        Ray pointShadow;pointShadow.origin=p+geom*.035f+lightDir*.025f;
+        pointShadow.direction=lightDir;
+        HitInfo pointBlocker;
+        uint pointVisibility=traceClosest(pointShadow,max(.001f,distance-.045f),
+                                           true,hit.primitive,pointBlocker);
+        if(pointVisibility==1u)continue;
         float3 radiance=srgbToLinear(light.color)*
                         (light.intensity*(light.exterior!=0?exteriorLightScale:sceneLightScale)*edge*edge*.45f);
-        lit+=brdf(n,view,delta/distance,base,roughness,metallic,f0,radiance,1.f);
+        lit+=brdf(n,view,lightDir,base,roughness,metallic,f0,radiance,1.f);
     }
     lit+=base*indirectFill;
     return max(lit,float3(0,0,0));

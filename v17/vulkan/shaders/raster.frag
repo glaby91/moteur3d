@@ -106,9 +106,11 @@ void main() {
    if(i>=int(f.misc.x))break;
    vec3 delta=f.lightPos[i].xyz-world;
 #ifdef CSE_WARP_VK_FAST_FRAGMENT
-   // Radius rejection uses dot(), avoiding sqrt() and normalization outside
-   // influence. It retains the original attenuation inside the light radius.
+   // Reject the conservative light AABB and back-facing surfaces before
+   // distance/sqrt work. The radius test remains exact inside the sphere.
    float radius=max(0.05,f.lightPos[i].w);
+   if(any(greaterThan(abs(delta),vec3(radius))))continue;
+   if(dot(n,delta)<=0.0)continue;
    float distSquared=dot(delta,delta);
    if(distSquared>=radius*radius)continue;
    float dist=sqrt(distSquared);

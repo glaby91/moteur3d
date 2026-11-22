@@ -414,13 +414,15 @@ constexpr char kShaderPart2[] = R"(
         float distance2 = dot(delta, delta);
         [branch] if (radius > 0.0 && distance2 <= radius2 * 1.000001) {
 #endif
-            float distanceToLight = length(delta);
-            if (distanceToLight < radius && distanceToLight > 0.0001) {
-                float edge = 1.0 - distanceToLight / radius;
-                float lambert = saturate(dot(normal, delta / distanceToLight));
-                float3 localIrradiance=lightColorIntensity[l].rgb
-                    *(edge*edge*lightColorIntensity[l].a*lambert*.27);
-                color += colorControls.x>0.5 ? base*localIrradiance : localIrradiance;
+            [branch] if (dot(normal, delta) > 0.0) {
+                float distanceToLight = length(delta);
+                if (distanceToLight < radius && distanceToLight > 0.0001) {
+                    float edge = 1.0 - distanceToLight / radius;
+                    float lambert = saturate(dot(normal, delta / distanceToLight));
+                    float3 localIrradiance=lightColorIntensity[l].rgb
+                        *(edge*edge*lightColorIntensity[l].a*lambert*.27);
+                    color += colorControls.x>0.5 ? base*localIrradiance : localIrradiance;
+                }
             }
 #if defined(M3D_V17_OPTIMIZE_PIXELS)
         }
@@ -1162,12 +1164,13 @@ public:
         const char* noCull=std::getenv("M3D_V17_DISABLE_FRUSTUM_CULLING");
         const bool cullEnabled=quality.frustumCulling
             &&!(noCull && std::strcmp(noCull,"1")==0);
-        // Lightweight depth-only trial: reuse existing static/box geometry.
-        // No CPU ray casting, material evaluation or per-triangle sorting.
-        // The draw commands are repeated only for primary opaque occluders.
-        // Off by default; deliberately isolated from the production path.
+        // Reuse existing opaque geometry for the depth-only pass. This avoids
+        // repeating expensive pixel-light loops on hidden fragments; it does
+        // not add CPU ray casting, material work, or per-triangle sorting.
         const char* zPrepassEnv=std::getenv("M3D_V17_EXPERIMENT_Z_PREPASS");
-        const bool depthPrepass=zPrepassEnv&&std::strcmp(zPrepassEnv,"1")==0;
+        const char* disableZPrepass=std::getenv("M3D_V17_DISABLE_Z_PREPASS");
+        const bool depthPrepass=!(disableZPrepass&&std::strcmp(disableZPrepass,"1")==0)
+            &&!(zPrepassEnv&&std::strcmp(zPrepassEnv,"0")==0);
         if(depthPrepass){
             context_->OMSetRenderTargets(0,nullptr,ds);
             context_->PSSetShader(nullptr,nullptr,0);
@@ -1776,8 +1779,13 @@ private:
         // HLSL is compiled once at device creation, never per frame.
         const char* disableShaderOpt=std::getenv("M3D_V17_DISABLE_SHADER_OPT");
         const bool optimizePixels=!(disableShaderOpt&&std::strcmp(disableShaderOpt,"1")==0);
+        // The cheap three-axis rejection is safe for every local light and is
+        // part of the normal path. Keep the old opt-in variable compatible
+        // with benchmark launchers; the explicit disable flag wins.
         const char* lightCullEnv=std::getenv("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL");
-        const bool lightAabbCull=lightCullEnv&&std::strcmp(lightCullEnv,"1")==0;
+        const char* disableLightCull=std::getenv("M3D_V17_DISABLE_LIGHT_AABB_CULL");
+        const bool lightAabbCull=!(disableLightCull&&std::strcmp(disableLightCull,"1")==0)
+            &&!(lightCullEnv&&std::strcmp(lightCullEnv,"0")==0);
         const D3D_SHADER_MACRO pixelMacros[]={
             {"M3D_V17_OPTIMIZE_PIXELS","1"},
             {lightAabbCull?"M3D_V17_LIGHT_AABB_CULL":nullptr,lightAabbCull?"1":nullptr},
@@ -2470,21 +2478,21 @@ private:
         if(scene.root<0||size_t(scene.root)>=scene.node.size()){error=L"Racine BVH4 invalide.";return false;}
         LumaParams p{};p.counts[0]=lumaTriangleCount_;p.counts[1]=lumaOrderCount_;p.counts[2]=lumaNodeCount_;
         const Node& root=scene.node[size_t(scene.root)];const V center=(root.mn+root.mx)*.5f;
-        auto appendLight=[&](V pos,float intensity,V color){
+        auto appendLight=[&](V pos,float radius,float intensity,V color){
             if(p.counts[3]>=64)return;
             const uint32_t i=p.counts[3]++;
-            p.lights[i][0]=pos.x;p.lights[i][1]=pos.y;p.lights[i][2]=pos.z;p.lights[i][3]=intensity;
-            p.colors[i][0]=color.x/255.f;p.colors[i][1]=color.y/255.f;p.colors[i][2]=color.z/255.f;
+            p.lights[i][0]=pos.x;p.lights[i][1]=pos.y;p.lights[i][2]=pos.z;p.lights[i][3]=radius;
+            p.colors[i][0]=color.x/255.f;p.colors[i][1]=color.y/255.f;p.colors[i][2]=color.z/255.f;p.colors[i][3]=intensity;
         };
         // Preserve the LumaTrace test pair, then prioritize scene exterior
         // luminaires so the 64-source cap cannot silently drop the new row.
-        appendLight(center+V{1.4f,.75f,0.f},1.15f,{31,158,255});
-        appendLight(center+V{-1.4f,.75f,0.f},1.15f,{255,99,26});
-        for(const Light& l:pointLights)appendLight(l.p,l.intensity,l.color);
+        appendLight(center+V{1.4f,.75f,0.f},12.f,1.15f,{31,158,255});
+        appendLight(center+V{-1.4f,.75f,0.f},12.f,1.15f,{255,99,26});
+        for(const Light& l:pointLights)appendLight(l.p,l.radius,l.intensity,l.color);
         for(const Light& l:scene.lights)if(l.exterior)
-            appendLight(l.p,l.intensity*lampFactor,l.color);
+            appendLight(l.p,l.radius,l.intensity*lampFactor,l.color);
         for(const Light& l:scene.lights)if(!l.exterior)
-            appendLight(l.p,l.intensity,l.color);
+            appendLight(l.p,l.radius,l.intensity,l.color);
         std::array<uint32_t,sizeof(LumaParams)/sizeof(uint32_t)> radianceKey{};std::memcpy(radianceKey.data(),&p,sizeof(p));
         if(lumaRadianceCacheValid_&&radianceKey==lumaRadianceKey_)return true;
         D3D11_MAPPED_SUBRESOURCE m{};if(FAILED(context_->Map(lumaParams_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m))){error=L"Upload constantes LumaTrace impossible.";return false;}

@@ -296,11 +296,17 @@ int main(int argc,char**argv){
   if(off)qputenv(env,"0");
   return true;
  };
- if(!configureSwitch("--z-prepass","M3D_V17_EXPERIMENT_Z_PREPASS")||
-    !configureSwitch("--light-aabb","M3D_V17_EXPERIMENT_LIGHT_AABB_CULL"))
+ const bool zOn=args.contains(QStringLiteral("--z-prepass=on"));
+ const bool zOff=args.contains(QStringLiteral("--z-prepass=off"));
+ if(zOn&&zOff){err<<"Contradictory option: --z-prepass\n";return 2;}
+ if(zOn){qunsetenv("M3D_V17_DISABLE_Z_PREPASS");qputenv("M3D_V17_EXPERIMENT_Z_PREPASS","1");}
+ if(zOff){qputenv("M3D_V17_DISABLE_Z_PREPASS","1");qunsetenv("M3D_V17_EXPERIMENT_Z_PREPASS");}
+ if(!configureSwitch("--light-aabb","M3D_V17_EXPERIMENT_LIGHT_AABB_CULL"))
     return 2;
- const bool zEnabled=qgetenv("M3D_V17_EXPERIMENT_Z_PREPASS")=="1";
- const bool lightAabbEnabled=qgetenv("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL")=="1";
+ const bool zEnabled=qgetenv("M3D_V17_DISABLE_Z_PREPASS")!="1" &&
+     qgetenv("M3D_V17_EXPERIMENT_Z_PREPASS")!="0";
+ const bool lightAabbEnabled=qgetenv("M3D_V17_DISABLE_LIGHT_AABB_CULL")!="1" &&
+     qgetenv("M3D_V17_EXPERIMENT_LIGHT_AABB_CULL")!="0";
  const bool smoke=args.contains("--ci-smoke");
  const bool fixedCamera=args.contains("--fixed-camera");
  const int w=smoke?640:1366,h=smoke?360:768;
