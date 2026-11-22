@@ -40,6 +40,44 @@ jobs:
           cache: true
           stripdown: true
           install_swiftshader: false
+      - name: Scene preflight — download the latest standalone V17 scene
+        id: scene_preflight
+        shell: pwsh
+        run: |
+          $base = 'dist-v17-lumatrace'
+          New-Item -ItemType Directory -Force $base | Out-Null
+          $archive = Join-Path $env:RUNNER_TEMP 'V17-scene.zip'
+          $uri = 'https://github.com/glaby91/moteur3d-scene/releases/latest/download/V17-scene.zip'
+          Invoke-WebRequest -Uri $uri -OutFile $archive
+          if (!(Test-Path $archive) -or (Get-Item $archive).Length -lt 1000000) { throw 'Latest standalone V17 scene release is missing or incomplete.' }
+          $unpack = Join-Path $env:RUNNER_TEMP 'V17-scene-latest'
+          Expand-Archive -Path $archive -DestinationPath $unpack -Force
+          $manifestPath = Join-Path $unpack 'SCENE_VERSION.json'
+          $scenePath = Join-Path $unpack 'benchmark-civic/scene.json'
+          if (!(Test-Path $manifestPath) -or !(Test-Path $scenePath)) { throw 'Latest scene package lacks SCENE_VERSION.json or benchmark-civic/scene.json.' }
+          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
+          $scene = Get-Content $scenePath -Raw | ConvertFrom-Json
+          if ($manifest.schema -ne 1 -or $manifest.scene -ne 'benchmark-civic/scene.json' -or
+              $manifest.revision -notmatch '^V17\.\d{3}$' -or $scene.revision -ne $manifest.revision) {
+            throw 'Latest standalone scene package has an invalid or mismatched revision.'
+          }
+          Copy-Item (Join-Path $unpack 'benchmark-civic') (Join-Path $base 'benchmark-civic') -Recurse -Force
+          Copy-Item $manifestPath (Join-Path $base 'SCENE_VERSION.json') -Force
+          $versionText = "Revision: $($manifest.revision)`nSource commit: $($manifest.sourceCommit)`nRepository: $($manifest.repository)"
+          Set-Content (Join-Path $base 'SCENE_VERSION.txt') $versionText -Encoding utf8
+          "revision=$($manifest.revision)" | Add-Content $env:GITHUB_OUTPUT
+          "source_commit=$($manifest.sourceCommit)" | Add-Content $env:GITHUB_OUTPUT
+          Write-Host "SCENE PREFLIGHT PASS: $($manifest.revision) from $($manifest.repository) at $($manifest.sourceCommit)."
+          @"
+          ## Standalone scene preflight: PASS
+
+          - Selected reference scene: **$($manifest.revision)**
+          - Scene repository: ``$($manifest.repository)``
+          - Source commit: ``$($manifest.sourceCommit)``
+          - Download URL: ``$uri``
+
+          The same scene package is used regardless of the selected V17 render backend.
+          "@ | Add-Content $env:GITHUB_STEP_SUMMARY
       - name: Configure V17
         shell: pwsh
         run: >-
@@ -50,14 +88,15 @@ jobs:
           -DV17_GIT_SHA=$env:GITHUB_SHA
       - name: Compile V17 application and shared engine
         run: cmake --build build-v17-lumatrace --config Release --target moteur3d_v17 --parallel 4
-      - name: Assemble V17.604 scene package with LumaTrace and Vulkan
+      - name: Assemble the preflighted reference scene with every V17 backend
         shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           $base = "dist-v17-lumatrace"
-          gh run download 44755434418 --repo glaby91/moteur3d --name CSE-WARP-V17.001-GitHub-574-Windows-x64 --dir $base
-          if ($LASTEXITCODE -ne 0) { throw "Could not retrieve the V17.604 scene package" }
+          $expectedSceneRevision = '${{ steps.scene_preflight.outputs.revision }}'
+          $scenePath = Join-Path $base 'benchmark-civic/scene.json'
+          $sceneRevision = (Get-Content $scenePath -Raw | ConvertFrom-Json).revision
+          if ($sceneRevision -ne $expectedSceneRevision) { throw "Preflighted scene changed before assembly: expected $expectedSceneRevision, found $sceneRevision." }
+          Write-Host "ASSEMBLY SCENE: $sceneRevision from scene commit ${{ steps.scene_preflight.outputs.source_commit }}."
           $exe = Get-ChildItem -Path build-v17-lumatrace -Recurse -Filter moteur3d_v17.exe | Select-Object -First 1
           $core = Get-ChildItem -Path build-v17-lumatrace -Recurse -Filter moteur3d_v16_core.dll | Select-Object -First 1
           if (-not $exe -or -not $core) { throw "The LumaTrace executable or V16 engine DLL is missing" }
