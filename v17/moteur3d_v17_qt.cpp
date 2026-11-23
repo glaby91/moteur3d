@@ -3913,11 +3913,12 @@ private:
     }
 };
 QString defaultPath(){
-    // Use the last user-approved release scene across engine build versions.
+    // Reuse an approved user scene, unless this engine package already contains
+    // a newer validated revision.
     QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
     const QString installedScene=settings.value(QStringLiteral("Scene/InstalledLatestPath")).toString();
-    if(QFileInfo::exists(installedScene))return installedScene;
-    if(!installedScene.isEmpty())settings.remove(QStringLiteral("Scene/InstalledLatestPath"));
+    if(!installedScene.isEmpty()&&!QFileInfo::exists(installedScene))
+        settings.remove(QStringLiteral("Scene/InstalledLatestPath"));
     const QString app=QCoreApplication::applicationDirPath();
     const QStringList candidates{
         // The clean package always opens the latest validated V8/V440 scene.
@@ -3930,8 +3931,23 @@ QString defaultPath(){
         app+QStringLiteral("/scenes/v16/pavillon01/scene.json"),
         QDir::currentPath()+QStringLiteral("/scenes/v16/pavillon01/scene.json")
     };
-    for(const auto& path:candidates)if(QFileInfo::exists(path))return path;
-    return QString();
+    QString packagedScene;
+    for(const auto& path:candidates){
+        if(QFileInfo::exists(path)){packagedScene=path;break;}
+    }
+    auto revisionNumber=[](const QString& path){
+        QFile file(path);
+        if(!file.open(QIODevice::ReadOnly))return -1;
+        const auto object=QJsonDocument::fromJson(file.readAll()).object();
+        const auto match=QRegularExpression(QStringLiteral("^V17\\.(\\d+)$"))
+            .match(object.value(QStringLiteral("revision")).toString().trimmed());
+        return match.hasMatch()?match.captured(1).toInt():-1;
+    };
+    if(QFileInfo::exists(installedScene) &&
+       (packagedScene.isEmpty() ||
+        revisionNumber(installedScene)>=revisionNumber(packagedScene)))
+        return installedScene;
+    return packagedScene;
 }
 }
 int main(int argc,char** argv){
