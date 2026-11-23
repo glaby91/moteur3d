@@ -34,7 +34,7 @@ set(V17_SCENE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/benchmark-ci
 if(NOT EXISTS "${V17_SCENE_SOURCE_DIR}/scene.json")
     message(FATAL_ERROR "V17 scene package is missing scene.json: ${V17_SCENE_SOURCE_DIR}")
 endif()
-find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
+find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Multimedia)
 
 enable_testing()
 # CSE WARP Physics / Weather: deterministic fair-weather cirrus smoke test.
@@ -104,6 +104,12 @@ if(WIN32)
                    "${CMAKE_CURRENT_BINARY_DIR}/v17_benchmark_runner.rc" @ONLY)
     qt_add_executable(moteur3d_v17 WIN32
         "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_qt.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_cpu.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_compute.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_d3d11.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_lumatrace.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_vulkan.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/radio_audio.cpp"
         "${CMAKE_CURRENT_BINARY_DIR}/v17_app.rc")
     add_dependencies(moteur3d_v17 v17_icon_generator)
@@ -112,12 +118,18 @@ if(WIN32)
 else()
     qt_add_executable(moteur3d_v17
         "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_qt.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_cpu.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_compute.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_d3d11.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_lumatrace.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_vulkan.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/radio_audio.cpp")
 endif()
 target_include_directories(moteur3d_v17 PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
-target_link_libraries(moteur3d_v17 PRIVATE moteur3d_v16_core Qt6::Widgets Qt6::Concurrent)
+target_link_libraries(moteur3d_v17 PRIVATE moteur3d_v16_core Qt6::Widgets Qt6::Concurrent Qt6::Network Qt6::Multimedia)
 if(WIN32)
     # About dialog queries the DXGI primary adapter name without changing device selection.
     target_link_libraries(moteur3d_v17 PRIVATE dxgi xaudio2)

@@ -171,7 +171,7 @@ protected:
     bool eventFilter(QObject* watched,QEvent* event) override{
         if(event->type()==QEvent::KeyPress){
             auto* key=static_cast<QKeyEvent*>(event);
-            if(key->key()==Qt::Key_Tab){
+            if(key->key()==Qt::Key_Tab || key->key()==Qt::Key_Less || key->text()==QStringLiteral("<")){
                 requestReturn();key->accept();return true;
             }
             if(key->key()==Qt::Key_Escape){
@@ -181,7 +181,7 @@ protected:
         return QWidget::eventFilter(watched,event);
     }
     void keyPressEvent(QKeyEvent* event) override{
-        if(event->key()==Qt::Key_Tab){
+        if(event->key()==Qt::Key_Tab || event->key()==Qt::Key_Less || event->text()==QStringLiteral("<")){
             requestReturn();event->accept();return;
         }
         if(event->key()==Qt::Key_Escape){

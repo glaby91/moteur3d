@@ -66,6 +66,7 @@ jobs:
           host: windows
           target: desktop
           arch: win64_msvc2022_64
+          modules: qtmultimedia
           cache: true
       - name: Vulkan 1.3 SDK for the shipped native backend
         uses: jakoch/install-vulkan-sdk-action@v1
@@ -638,6 +639,15 @@ jobs:
           Remove-Item "dist-v17/benchmark-civic" -Recurse -Force -ErrorAction Stop
           Copy-Item $approved "dist-v17/benchmark-civic" -Recurse -Force
           Remove-Item "dist-v17/audio" -Recurse -Force -ErrorAction SilentlyContinue
+          $audioSource = "build-v17/Release/audio"
+          if (!(Test-Path "$audioSource/pripyat_radio.wav")) { throw "Generated radio WAV missing from build output" }
+          if ((Get-Item "$audioSource/pripyat_radio.wav").Length -lt 100000) { throw "Generated radio WAV is empty or truncated" }
+          if (!(Test-Path "$audioSource/speaker_layout.json")) { throw "Radio speaker layout missing from build output" }
+          Copy-Item $audioSource "dist-v17/audio" -Recurse -Force
+          foreach ($radioFile in @("dist-v17/audio/pripyat_radio.wav", "dist-v17/audio/speaker_layout.json")) {
+            if (!(Test-Path $radioFile)) { throw "Radio asset missing from final package: $radioFile" }
+          }
+          Write-Host "READY: WAV fallback and speaker layout are present in dist-v17/audio."
           @'
           CSE WARP BetaX — V17 package
           Default validated scene: V17.603 corrected palace.

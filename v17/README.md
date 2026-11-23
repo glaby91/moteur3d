@@ -53,3 +53,12 @@ Le comptage des triangles provient de la géométrie triangulée de la scène ch
 
 La modification est enregistrée sur une branche de travail et n’a pas encore été compilée.
 
+
+
+### Exploration : accroupissement et saut
+
+En mode « Marcher au sol », maintenir **Ctrl** permet de s’accroupir. La hauteur de vue et le gabarit de collision diminuent ; le personnage ne se redresse pas tant que le plafond est trop bas. **Espace** déclenche un saut uniquement depuis le sol. En vol libre, Espace et Ctrl gardent leurs commandes verticales.
+
+### Radio de scène
+
+La radio tente d’abord le flux Internet de la station, avec délai et repli automatique vers le WAV local si la playlist, le réseau ou la lecture échoue. Le paquet Windows contient le WAV de secours et l’implantation des quatre haut-parleurs ; la compilation échoue si l’un des deux fichiers manque.
