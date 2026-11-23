@@ -898,6 +898,7 @@ private:
     bool radioStreamPending_=false;
     bool radioUsingStream_=false;
     quint64 radioAttempt_=0;
+    quint64 radioPlayerAttempt_=0;
     bool rendererHudVisible_=true;
     cse::RadioAudio radioAudio_;
     QTimer audioTimer_;
@@ -1781,7 +1782,8 @@ private:
             radioPlayer_->setAudioOutput(radioOutput_);
             connect(radioPlayer_,&QMediaPlayer::playbackStateChanged,this,
                 [this](QMediaPlayer::PlaybackState state){
-                    if(state!=QMediaPlayer::PlayingState||!radioStreamPending_)return;
+                    if(state!=QMediaPlayer::PlayingState||!radioStreamPending_||
+                       radioPlayerAttempt_!=radioAttempt_)return;
                     radioStreamPending_=false;
                     radioUsingStream_=true;
                     radioPlaying_=true;
@@ -1791,7 +1793,8 @@ private:
                 });
             connect(radioPlayer_,&QMediaPlayer::errorOccurred,this,
                 [this](QMediaPlayer::Error,const QString& error){
-                    if(radioStreamPending_||radioUsingStream_)
+                    if((radioStreamPending_||radioUsingStream_)&&
+                       radioPlayerAttempt_==radioAttempt_)
                         fallbackToLocalRadio(error.isEmpty()
                             ?QStringLiteral("erreur de lecture du flux"):error);
                 });
@@ -1844,6 +1847,7 @@ private:
                 fallbackToLocalRadio(QStringLiteral("playlist M3U/PLS illisible"));
                 return;
             }
+            radioPlayerAttempt_=attempt;
             radioPlayer_->setSource(streamUrl);
             radioPlayer_->play();
         });
