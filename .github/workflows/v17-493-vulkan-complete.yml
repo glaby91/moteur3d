@@ -394,6 +394,7 @@ jobs:
           Copy-Item $approved "dist-v17/benchmark-civic" -Recurse -Force
           if (Test-Path "dist-v17/audio") { Remove-Item "dist-v17/audio" -Recurse -Force }
           Copy-Item "base-v499/audio" "dist-v17/audio" -Recurse -Force
+          Copy-Item "assets/audio/pripyat_radio/speaker_layout.json" "dist-v17/audio/speaker_layout.json" -Force
           foreach ($radioFile in @("dist-v17/audio/pripyat_radio.wav", "dist-v17/audio/speaker_layout.json")) {
             if (!(Test-Path $radioFile)) { throw "Final radio asset missing from Vulkan package: $radioFile" }
           }
