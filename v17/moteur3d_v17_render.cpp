@@ -245,7 +245,7 @@ Result execute(const Request& request){
     if(!validateRequest(request,result))return result;
 
     m3d::updateLighting(request.renderHour);
-    const auto camera=v16::makeCamera(request.cameraPose,request.width,request.height);
+    const auto camera=m3d::v16::makeCamera(request.cameraPose,request.width,request.height);
     RenderWork work;
     configureRenderWork(request,work);
 
