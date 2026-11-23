@@ -61,7 +61,7 @@ class VerifiedCC0Mirror:
             with urllib.request.urlopen(request, timeout=60) as response:
                 metadata = json.loads(response.read().decode("utf-8"))
             raw = base64.b64decode(metadata["content"])
-            blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\\0" + raw).hexdigest()
+            blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
             api_sha = metadata.get("sha", "")
             if blob != expected_sha or api_sha != expected_sha:
                 # Keep the guard strict and report every upstream discrepancy.
