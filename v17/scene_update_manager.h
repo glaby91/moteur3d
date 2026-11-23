@@ -11,6 +11,8 @@
 #include <QNetworkReply>
 #include <QNetworkRequest>
 #include <QProcess>
+#include <QPushButton>
+#include <QUuid>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSettings>
@@ -73,7 +75,7 @@ public:
                 setStatus(QStringLiteral("Scène à jour (%1).").arg(currentRevision_),8000);
                 return;
             }
-            QSettings settings;
+            QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
             if(settings.value(QStringLiteral("Scene/DeferredRevision")).toString()==latest){
                 setStatus(QStringLiteral("Une mise à jour de scène (%1) est disponible.").arg(latest),10000);
                 return;
@@ -179,15 +181,15 @@ private:
         }
         auto* process=new QProcess(this);
 #if defined(_WIN32)
-        process->start(QStringLiteral("powershell.exe"),
-            {QStringLiteral("-NoProfile"),QStringLiteral("-NonInteractive"),
+        process->setProgram(QStringLiteral("powershell.exe"));
+        process->setArguments({QStringLiteral("-NoProfile"),QStringLiteral("-NonInteractive"),
              QStringLiteral("-ExecutionPolicy"),QStringLiteral("Bypass"),
              QStringLiteral("-Command"),
              QStringLiteral("Expand-Archive -LiteralPath '%1' -DestinationPath '%2' -Force")
                 .arg(archivePath_).arg(stagingPath_)});
 #else
-        process->start(QStringLiteral("unzip"),
-            {QStringLiteral("-q"),QStringLiteral("-o"),archivePath_,
+        process->setProgram(QStringLiteral("unzip"));
+        process->setArguments({QStringLiteral("-q"),QStringLiteral("-o"),archivePath_,
              QStringLiteral("-d"),stagingPath_});
 #endif
         connect(process,qOverload<int,QProcess::ExitStatus>(&QProcess::finished),this,
