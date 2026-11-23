@@ -637,6 +637,28 @@ jobs:
           Remove-Item "dist-v17/benchmark-civic" -Recurse -Force -ErrorAction Stop
           Copy-Item $approved "dist-v17/benchmark-civic" -Recurse -Force
           Remove-Item "dist-v17/audio" -Recurse -Force -ErrorAction SilentlyContinue
+          # The approved-scene restore above clears stale package audio. Restore the
+          # current V17 build outputs so the radio can reload both assets after Stop.
+          $audioSource = "build-v17/Release/audio"
+          $wavSource = Join-Path $audioSource "pripyat_radio.wav"
+          $layoutSource = Join-Path $audioSource "speaker_layout.json"
+          if (!(Test-Path $wavSource) -or !(Test-Path $layoutSource)) {
+            throw "V17 radio package inputs are missing from the CMake build output."
+          }
+          $wavBytes = [System.IO.File]::ReadAllBytes($wavSource)
+          if ($wavBytes.Length -lt 44 -or
+              [System.Text.Encoding]::ASCII.GetString($wavBytes, 0, 4) -ne "RIFF" -or
+              [System.Text.Encoding]::ASCII.GetString($wavBytes, 8, 4) -ne "WAVE") {
+            throw "V17 radio WAV is not a valid RIFF/WAVE file."
+          }
+          $speakerLayout = Get-Content $layoutSource -Raw | ConvertFrom-Json
+          if (@($speakerLayout.loudspeakers).Count -ne 4) {
+            throw "V17 radio layout must contain exactly four loudspeakers."
+          }
+          New-Item -ItemType Directory -Force "dist-v17/audio" | Out-Null
+          Copy-Item $wavSource "dist-v17/audio/pripyat_radio.wav" -Force
+          Copy-Item $layoutSource "dist-v17/audio/speaker_layout.json" -Force
+          Write-Host "READY: radio WAV and four-speaker layout restored in final V17 package."
           @'
           CSE WARP BetaX — V17 package
           Default validated scene: V17.603 corrected palace.
