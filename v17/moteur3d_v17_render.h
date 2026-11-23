@@ -68,6 +68,9 @@ struct Request {
 };
 
 struct BackendResult {
+    QImage image;
+    QString renderer;
+    double milliseconds=0.0;
     std::vector<uint32_t> pixels;
     m3d::Stats stats;
     std::wstring reason;
