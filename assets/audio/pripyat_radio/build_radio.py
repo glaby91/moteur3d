@@ -11,8 +11,11 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
+from email.utils import parsedate_to_datetime
 
 HERE = Path(__file__).resolve().parent
 MANIFEST = HERE / "sources.json"
@@ -27,19 +30,36 @@ def download(source, destination):
         print("Cached:", destination.name)
         return
     url = source.get("download_url") or ("https://commons.wikimedia.org/wiki/Special:Redirect/file/" + urllib.parse.quote(source["commons_filename"]))
-    request = urllib.request.Request(url, headers={"User-Agent": "CSE-WARP-open-audio/1.0 (Wikimedia Commons source attribution)"})
+    request = urllib.request.Request(url, headers={"User-Agent": "CSE-WARP-open-audio/1.0 (https://github.com/glaby91/moteur3d; contact: 58001839+glaby91@users.noreply.github.com)"})
     temp = destination.with_suffix(destination.suffix + ".part")
     try:
-        with urllib.request.urlopen(request, timeout=90) as response, temp.open("wb") as stream:
-            written = 0
-            while True:
-                chunk = response.read(256 * 1024)
-                if not chunk:
-                    break
-                written += len(chunk)
-                if written > MAX_BYTES:
-                    raise ValueError("Download exceeds safety limit: " + source["commons_filename"])
-                stream.write(chunk)
+        for attempt in range(5):
+            try:
+                with urllib.request.urlopen(request, timeout=90) as response, temp.open("wb") as stream:
+                    written = 0
+                    while True:
+                        chunk = response.read(256 * 1024)
+                        if not chunk:
+                            break
+                        written += len(chunk)
+                        if written > MAX_BYTES:
+                            raise ValueError("Download exceeds safety limit: " + source["commons_filename"])
+                        stream.write(chunk)
+                break
+            except urllib.error.HTTPError as exc:
+                temp.unlink(missing_ok=True)
+                if exc.code not in (429, 503) or attempt == 4:
+                    raise
+                retry_after = exc.headers.get("Retry-After", "")
+                try:
+                    delay = max(5.0, float(retry_after))
+                except ValueError:
+                    try:
+                        delay = max(5.0, parsedate_to_datetime(retry_after).timestamp() - time.time())
+                    except (TypeError, ValueError, OverflowError):
+                        delay = 5.0 * (2 ** attempt)
+                print(f"HTTP {exc.code} for {destination.name}; retrying in {delay:.0f}s")
+                time.sleep(delay)
         if written < 1024:
             raise ValueError("Downloaded file is suspiciously small")
         temp.replace(destination)
