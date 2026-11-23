@@ -1707,8 +1707,6 @@ private:
                 .arg(pose.eye.x,0,'f',2).arg(pose.eye.y,0,'f',2).arg(pose.eye.z,0,'f',2);
         }
         data.solarHour=sunHour_?sunHour_->value():0.0;
-        data.daylight=double(m3d::daylight);
-        data.lampFactor=double(m3d::lampFactor);
         const int backend=backendBox_?backendBox_->currentIndex():-1;
         if(backend>=0&&backend<int(nativeDirectFailed_.size())&&
            nativeDirectFailed_[size_t(backend)]){
