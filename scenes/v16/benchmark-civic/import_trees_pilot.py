@@ -19,7 +19,7 @@ SOURCE_ORIGINAL = "https://kenney.nl/assets/nature-kit"
 MIRROR = "https://raw.githubusercontent.com/Hidencod/tge-assets/main/packs/nature-kit/"
 # Git blob IDs are exact content hashes of the public CC0 source mirror.
 EXPECTED = {
-    "tree-oak": "b136723ada4b5574b71f727120ab21fa579bf2fb",
+    "tree-oak": "0eee1d26da24da9daedcc48adf4f62689ec869a5",
     "tree-default": "13247443438a210c252d3324c511aba3cb3b392a",
     "tree-detailed": "8d59ea41e280a5ea9234ec1e503fb871c55021de",
     "tree-pinedefaulta": "f1217a9ee5b1d8f2027d39fe6bd151d20be5ab84",
