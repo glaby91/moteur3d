@@ -3782,7 +3782,6 @@ private:
         const bool wantGpu=backend==1||backend==4||backend==5||backend==6;
         const bool raster=backend==4||backend==5||backend==6;
         const bool vulkan=backend==5;
-        const bool lumaTrace=backend==6;
         void* sharedVulkanInstance=nullptr;
         uintptr_t sharedVulkanSurface=0;
 #if defined(_WIN32) && M3D_V17_VULKAN_ENABLED
