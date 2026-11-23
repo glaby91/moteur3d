@@ -4144,54 +4144,83 @@ QString defaultPath(){
     return QString();
 }
 }
-int main(int argc,char** argv){
-    QApplication app(argc,argv);
-    // Separate benchmark utilities need access to Qt and the V16 renderer
-    // DLL in this installation root, even when launched from a subdirectory.
+namespace {
+struct LaunchOptions {
+    bool switchSmoke=false;
+    bool repeatSmoke=false;
+    bool walkingSmoke=false;
+    bool scopeSmoke=false;
+    bool immersiveSmoke=false;
+    bool nativeUiSmoke=false;
+    QString scenePath;
+    int textureResolution=2048;
+};
+
+void configureRuntimeEnvironment(){
     const QByteArray installRoot=QCoreApplication::applicationDirPath().toLocal8Bit();
     qputenv("PATH",installRoot+";"+qgetenv("PATH"));
     qputenv("QT_PLUGIN_PATH",installRoot);
-    // GUI animation is intentionally opt-in; offline GPU benchmarks remain
-    // deterministic for strict RGB parity and regression comparisons.
+    // Keep animated clouds in the interactive renderer, not offline benchmarks.
     qputenv("M3D_V17_ANIMATE_CLOUDS","1");
-    // Split only interactive raster output into a sky backdrop and an
-    // alpha-preserving architecture foreground. Benchmarks stay unchanged.
     qputenv("M3D_V17_SPLIT_SKY","1");
+}
+
+void configureApplicationMetadata(){
     QCoreApplication::setApplicationName(QStringLiteral("CSE WARP Beta X V%1")
         .arg(CSE_WARP_PRODUCT_VERSION));
     QCoreApplication::setApplicationVersion(QStringLiteral("%1")
         .arg(CSE_WARP_PRODUCT_VERSION));
-    const bool switchSmoke=argc>=4
-        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-scene-switch");
-    const bool repeatSmoke=argc>=3
-        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-repeat-raster");
-    const bool walkingSmoke=argc>=3
-        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-walking-collisions");
-    const bool scopeSmoke=argc>=3
-        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-scope-mouse");
-    const bool immersiveSmoke=argc>=3
-        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-immersive-mouse");
-    const bool nativeUiSmoke=argc>=2
-        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-native-ui");
-    // Use the same Windows V17 brand icon for Qt titlebar/Alt-Tab/taskbar.
-    // The ICO is also embedded in the EXE's native Win32 resources.
+}
+
+QIcon loadApplicationIcon(){
     const QString iconPath=QCoreApplication::applicationDirPath()
         +QStringLiteral("/cse_warp_v17.ico");
-    if(QFileInfo::exists(iconPath))app.setWindowIcon(QIcon(iconPath));
-    const QString path=nativeUiSmoke?QString():
-        (switchSmoke||repeatSmoke||walkingSmoke||scopeSmoke||immersiveSmoke
-        ?QString::fromLocal8Bit(argv[2])
-        :(argc>1?QString::fromLocal8Bit(argv[1]):defaultPath()));
-    // The smoke test uses reduced texture resolution to stay viable on
-    // CI's software-only WARP device. Normal V17 keeps full 2048 PBR.
-    V17Window window(path,(switchSmoke||repeatSmoke||walkingSmoke||scopeSmoke||immersiveSmoke)?256:2048);
-    if(switchSmoke)window.smokeSceneSwitch(QString::fromLocal8Bit(argv[3]));
-    if(repeatSmoke)window.smokeRepeatRaster();
-    if(walkingSmoke)window.smokeWalkingCollisionPreference();
-    if(scopeSmoke)window.smokeScopedAim();
-    if(immersiveSmoke)window.smokeImmersiveMouse();
-    if(nativeUiSmoke)window.smokeNativeUi();
-    if(!app.windowIcon().isNull())window.setWindowIcon(app.windowIcon());
+    return QFileInfo::exists(iconPath)?QIcon(iconPath):QIcon{};
+}
+
+LaunchOptions parseLaunchOptions(int argc,char** argv){
+    LaunchOptions options;
+    const QString firstArgument=argc>1?QString::fromLocal8Bit(argv[1]):QString{};
+    options.switchSmoke=argc>=4&&firstArgument==QStringLiteral("--smoke-scene-switch");
+    options.repeatSmoke=argc>=3&&firstArgument==QStringLiteral("--smoke-repeat-raster");
+    options.walkingSmoke=argc>=3&&firstArgument==QStringLiteral("--smoke-walking-collisions");
+    options.scopeSmoke=argc>=3&&firstArgument==QStringLiteral("--smoke-scope-mouse");
+    options.immersiveSmoke=argc>=3&&firstArgument==QStringLiteral("--smoke-immersive-mouse");
+    options.nativeUiSmoke=argc>=2&&firstArgument==QStringLiteral("--smoke-native-ui");
+
+    const bool sceneSmoke=options.switchSmoke||options.repeatSmoke||options.walkingSmoke
+        ||options.scopeSmoke||options.immersiveSmoke;
+    options.textureResolution=sceneSmoke?256:2048;
+    if(!options.nativeUiSmoke){
+        options.scenePath=sceneSmoke?QString::fromLocal8Bit(argv[2])
+            :(argc>1?QString::fromLocal8Bit(argv[1]):defaultPath());
+    }
+    return options;
+}
+
+void runSmokeChecks(V17Window& window,const LaunchOptions& options){
+    if(options.switchSmoke)window.smokeSceneSwitch(QString::fromLocal8Bit(QCoreApplication::arguments().value(3).toLocal8Bit()));
+    if(options.repeatSmoke)window.smokeRepeatRaster();
+    if(options.walkingSmoke)window.smokeWalkingCollisionPreference();
+    if(options.scopeSmoke)window.smokeScopedAim();
+    if(options.immersiveSmoke)window.smokeImmersiveMouse();
+    if(options.nativeUiSmoke)window.smokeNativeUi();
+}
+}
+
+int main(int argc,char** argv){
+    QApplication app(argc,argv);
+    configureRuntimeEnvironment();
+    configureApplicationMetadata();
+
+    const QIcon icon=loadApplicationIcon();
+    if(!icon.isNull())app.setWindowIcon(icon);
+
+    const LaunchOptions options=parseLaunchOptions(argc,argv);
+    V17Window window(options.scenePath,options.textureResolution);
+    runSmokeChecks(window,options);
+
+    if(!icon.isNull())window.setWindowIcon(icon);
     window.show();
     return app.exec();
 }
