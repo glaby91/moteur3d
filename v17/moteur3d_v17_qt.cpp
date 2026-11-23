@@ -1234,6 +1234,7 @@ private:
         tabPressed_=false;
         releaseMouseLook();
         setMotionResolution(false);
+        if(qApp)qApp->removeEventFilter(this);
         exploring_=false;
         if(canvas_)canvas_->setFpsOverlay(0.0,false);
         if(nativeFpsLabel_)nativeFpsLabel_->setText(QStringLiteral("FPS —"));
@@ -1292,6 +1293,7 @@ private:
             }
         }
         exploring_=true;
+        if(qApp)qApp->installEventFilter(this); // Tab can be received by any native renderer HWND.
         setMotionResolution(false);
         resetPacing();
         canvas_->setFpsOverlay(0.0,true);
@@ -1455,6 +1457,28 @@ protected:
         return QMainWindow::event(e);
     }
     bool eventFilter(QObject* watched,QEvent* event) override{
+        // Direct-render mode uses a separate top-level HWND. Its focus can move
+        // between the Qt shell and renderer, and Qt also treats Tab as focus
+        // traversal. Catch it at QApplication level while exploration is active.
+        if(exploring_ && (event->type()==QEvent::KeyPress ||
+                          event->type()==QEvent::KeyRelease)){
+            auto* key=static_cast<QKeyEvent*>(event);
+            if(key->key()==Qt::Key_Tab){
+                key->accept();
+                const bool dashboardVisible=diagnosticsDashboard_ &&
+                                            diagnosticsDashboard_->isVisible();
+                if(dashboardVisible){
+                    // Ignore auto-repeat so holding Tab to open the panel does
+                    // not immediately close it on the next repeated key event.
+                    if(!key->isAutoRepeat() && event->type()==QEvent::KeyPress)
+                        closeDiagnosticsDashboard();
+                    return true;
+                }
+                if(event->type()==QEvent::KeyPress)beginTabPress(key);
+                else endTabPress(key);
+                return true;
+            }
+        }
         if(watched==canvas_&&event->type()==QEvent::WindowActivate&&exploring_)
             QTimer::singleShot(0,this,[this]{if(exploring_)captureMouseLook();});
         if(watched==canvas_&&event->type()==QEvent::Resize&&wristPanel_&&wristPanel_->isVisible())
