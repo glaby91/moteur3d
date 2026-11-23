@@ -16,19 +16,19 @@ import zipfile
 
 SOURCE = "https://github.com/Hidencod/tge-assets/tree/main/packs/nature-kit"
 SOURCE_ORIGINAL = "https://kenney.nl/assets/nature-kit"
-MIRROR = "https://raw.githubusercontent.com/Hidencod/tge-assets/main/packs/nature-kit/"
+MIRROR = "https://raw.githubusercontent.com/Hidencod/tge-assets/3d7e5c02b7dd9f15e3b839e3f058eeba0d7fd90b/packs/nature-kit/"
 # Git blob IDs are exact content hashes of the public CC0 source mirror.
 EXPECTED = {
     "tree-oak": "0eee1d26da24da9daedcc48adf4f62689ec869a5",
-    "tree-default": "13247443438a210c252d3324c511aba3cb3b392a",
-    "tree-detailed": "8d59ea41e280a5ea9234ec1e503fb871c55021de",
-    "tree-pinedefaulta": "f1217a9ee5b1d8f2027d39fe6bd151d20be5ab84",
-    "tree-pinedefaultb": "3ecbf261dbaf7ad183660d1e00e7c941fef6b0de",
-    "tree-fat": "55862c422bc6aa8f4c7882805c171ef0d8aa2e75",
-    "tree-thin": "82f68f14b55807b9f6071674aff016f7d5684e45",
-    "tree-tall": "78395a0af80d518fc48d78eaf6afbfff996d6a36",
-    "tree-pinetalla-detailed": "55fb026627db69fea1cbaba2b30f98b19063bcaa",
-    "tree-pinetallb-detailed": "e9fcb7c7d40eb52d67ae51dcaebfe3426422b20b",
+    "tree-default": "f47828217006ceb71f2df2d37bfb361b44935344",
+    "tree-detailed": "fb9d3a9b6d3b5dac19a6dbfd5c617ae07bab74b6",
+    "tree-pinedefaulta": "4e66647a6e5408fb311ce08106ee40a0ebde77fa",
+    "tree-pinedefaultb": "c0d4020f3ea4453801daca882314ee02cd155f3d",
+    "tree-fat": "c62128c0eca4812e6784349b362ce99ac325ef36",
+    "tree-thin": "3e959e80ae2a1cf518036005713bf6067cdfc2bb",
+    "tree-tall": "183c2bd2b4f8fdaaceb94523bcb233132307287f",
+    "tree-pinetalla-detailed": "04b215870fabdfb428636dad8514224ab64489bf",
+    "tree-pinetallb-detailed": "31a663c2bc895b34564ee1bae8699d46cca93231",
 }
 MODELS = list(EXPECTED)
 LOCATIONS = [
@@ -177,7 +177,7 @@ def main():
     save(root / "geometry/trees-pilot.json", geometry)
     save(root / "instances/v4-trees-pilot.json", instances)
     report = {
-        "author": "Kenney", "source": SOURCE, "original": SOURCE_ORIGINAL, "gitBlobShas": EXPECTED, "license": "CC0-1.0",
+        "author": "Kenney", "source": SOURCE, "sourceCommit": "3d7e5c02b7dd9f15e3b839e3f058eeba0d7fd90b", "original": SOURCE_ORIGINAL, "gitBlobShas": EXPECTED, "license": "CC0-1.0",
         "trees": 10, "sourceModels": MODELS, "positions": LOCATIONS,
         "instancesAdded": len(pilot_ids), "meshCount": len(geometry["meshes"]),
         "triangles": sum(len(m["faces"]) for m in geometry["meshes"]),
