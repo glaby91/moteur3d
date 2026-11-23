@@ -52,21 +52,30 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="Print playlist and exit (no downloads)")
     parser.add_argument("--download-only", action="store_true", help="Download original OGG files without transcoding")
+    parser.add_argument("--runtime-preview", action="store_true",
+                        help="Build a compact 60-second Ukrainian narration + song loop for the engine package")
     parser.add_argument("--output", type=Path, default=OUTPUT)
     args = parser.parse_args()
 
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     tracks = manifest["tracks"]
+    selected_tracks = tracks
+    if args.runtime_preview:
+        narration = next(t for t in tracks if t["id"].startswith("spoken-"))
+        song = next(t for t in tracks if t["id"] == "lysenko-shevtchenko")
+        selected_tracks = [narration, song]
     print("Program:", manifest["title"])
-    print("Not a historical broadcast. Approximate duration:", sum(t["duration_seconds"] for t in tracks), "seconds")
-    for track in tracks:
+    print("Not a historical broadcast. Approximate duration:", sum(t["duration_seconds"] for t in selected_tracks), "seconds")
+    if args.runtime_preview:
+        print("Runtime preview: first 60 seconds of narration followed by the complete licensed song.")
+    for track in selected_tracks:
         print(" -", track["title"], "|", track["license"], "|", track["source_page"])
     if args.dry_run:
         return 0
 
     paths = []
     included = []
-    for track in tracks:
+    for track in selected_tracks:
         path = CACHE / track["commons_filename"]
         try:
             download(track, path)
@@ -95,8 +104,10 @@ def main():
     # Phone/radio-band audio, with no artificial music, narration or unsupported historic claims.
     filters = []
     for idx in range(len(paths)):
+        trim = ",atrim=duration=60,asetpts=PTS-STARTPTS" if (
+            args.runtime_preview and included[idx]["id"].startswith("spoken-")) else ""
         filters.append(f"[{idx}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=mono,"
-                       f"highpass=f=240,lowpass=f=3500,volume=0.86[a{idx}]")
+                       f"highpass=f=240,lowpass=f=3500{trim},volume=0.86[a{idx}]")
     filters.append("".join(f"[a{idx}]" for idx in range(len(paths))) +
                    f"concat=n={len(paths)}:v=0:a=1[out]")
     cmd = ["ffmpeg", "-hide_banner", "-y"]
