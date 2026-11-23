@@ -18,7 +18,7 @@ namespace cse::v17render {
 
 struct Result {
     QImage image;
-    v16::CameraPreset cameraPose;
+    m3d::v16::CameraPreset cameraPose;
     QString renderer;
     QString error;
     double milliseconds=0.0;
@@ -36,17 +36,17 @@ struct Result {
 
 struct CpuShadowCache {
     std::mutex mutex;
-    std::weak_ptr<v16::Runtime> scene;
+    std::weak_ptr<m3d::v16::Runtime> scene;
     std::shared_ptr<const m3d::ShadowMap> shadow;
     float hour=-1.0f;
 };
 
 struct Request {
-    std::shared_ptr<v16::Runtime> scene;
+    std::shared_ptr<m3d::v16::Runtime> scene;
     std::shared_ptr<CpuShadowCache> shadowCache;
     std::shared_ptr<std::atomic<uint64_t>> serial;
     uint64_t generation=0;
-    v16::CameraPreset cameraPose;
+    m3d::v16::CameraPreset cameraPose;
     int width=0;
     int height=0;
     int backend=0;
