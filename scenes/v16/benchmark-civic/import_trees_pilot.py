@@ -6,6 +6,7 @@ scene-v4-trees-pilot.json + geometry/trees-pilot.json +
 instances/v4-trees-pilot.json + reports/trees-pilot.json.
 """
 import argparse
+import base64
 import copy
 import hashlib
 import io
@@ -14,9 +15,10 @@ import pathlib
 import urllib.request
 import zipfile
 
-SOURCE = "https://github.com/Hidencod/tge-assets/tree/main/packs/nature-kit"
+SOURCE = "https://github.com/Hidencod/tge-assets/tree/3d7e5c02b7dd9f15e3b839e3f058eeba0d7fd90b/packs/nature-kit"
 SOURCE_ORIGINAL = "https://kenney.nl/assets/nature-kit"
-MIRROR = "https://raw.githubusercontent.com/Hidencod/tge-assets/3d7e5c02b7dd9f15e3b839e3f058eeba0d7fd90b/packs/nature-kit/"
+API = "https://api.github.com/repos/Hidencod/tge-assets/contents/packs/nature-kit/"
+SOURCE_COMMIT = "3d7e5c02b7dd9f15e3b839e3f058eeba0d7fd90b"
 # Git blob IDs are exact content hashes of the public CC0 source mirror.
 EXPECTED = {
     "tree-oak": "0eee1d26da24da9daedcc48adf4f62689ec869a5",
@@ -52,16 +54,19 @@ class VerifiedCC0Mirror:
         mismatches = {}
         for model, expected_sha in EXPECTED.items():
             dest = cache.parent / (model + ".glb")
-            if dest.exists():
-                raw = dest.read_bytes()
-            else:
-                with urllib.request.urlopen(MIRROR + model + ".glb", timeout=60) as req:
-                    raw = req.read()
+            url = API + model + ".glb?ref=" + SOURCE_COMMIT
+            request = urllib.request.Request(
+                url, headers={"Accept": "application/vnd.github+json",
+                              "User-Agent": "CSE-WARP-V17-scene-import"})
+            with urllib.request.urlopen(request, timeout=60) as response:
+                metadata = json.loads(response.read().decode("utf-8"))
+            raw = base64.b64decode(metadata["content"])
             blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\\0" + raw).hexdigest()
-            if blob != expected_sha:
-                # Collect all changed upstream fingerprints in one CI run; the
-                # archive remains blocked until every fingerprint is reviewed.
-                mismatches[model] = blob
+            api_sha = metadata.get("sha", "")
+            if blob != expected_sha or api_sha != expected_sha:
+                # Keep the guard strict and report every upstream discrepancy.
+                mismatches[model] = {"expected": expected_sha,
+                                     "api": api_sha, "downloaded": blob}
                 continue
             dest.write_bytes(raw)
             self.data["Models/GLTF format/" + model + ".glb"] = raw
