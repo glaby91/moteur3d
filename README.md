@@ -36,21 +36,43 @@ La V17 réutilise le noyau partagé V16 pour les fonctions communes et les scèn
 
 La compilation de référence est le workflow [CSE WARP V17 — Windows x64](https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v17.yml). Il utilise Visual Studio 2022, CMake, Qt 6.8.3 et le SDK Vulkan. Il construit l’application, les outils de benchmark et les ressources, puis importe la dernière scène publiée dans le package.
 
-Pour une compilation locale Windows, installer Visual Studio 2022 C++ x64, CMake, Qt 6.8.3 et le SDK Vulkan 1.3 ou ultérieur, puis configurer et compiler :
+Pour compiler localement sous Windows avec la dernière scène, installer Visual Studio 2022 C++ x64, CMake, Qt 6.8.3 et le SDK Vulkan 1.3 ou ultérieur. Depuis la racine du dépôt moteur, enregistrer le script ci-dessous sous `COMPILER_V17_AVEC_DERNIERE_SCENE.bat`, ajuster `QT_ROOT` au chemin d’installation de Qt, puis lancer le fichier batch. Il télécharge les deux fichiers de la dernière release de scène, vérifie le manifeste et fournit le dossier extrait à CMake.
 
-```powershell
-cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="<chemin-vers-Qt>" -DM3D_REQUIRE_VULKAN=ON
+```bat
+@echo off
+setlocal
+cd /d "%~dp0"
+
+rem Adapter ce chemin à l'installation locale de Qt 6.8.3.
+set "QT_ROOT=C:\Qt\6.8.3\msvc2022_64"
+set "SCENE_ROOT=%TEMP%\cse-warp-v17-scene-latest"
+
+if not exist "%QT_ROOT%\lib\cmake\Qt6\Qt6Config.cmake" (
+  echo Qt 6.8.3 introuvable dans "%QT_ROOT%".
+  exit /b 1
+)
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $root=$env:SCENE_ROOT; if(Test-Path $root){Remove-Item $root -Recurse -Force}; New-Item -ItemType Directory -Force $root | Out-Null; $zip=Join-Path $root 'V17-scene.zip'; $manifestPath=Join-Path $root 'SCENE_VERSION.json'; Invoke-WebRequest 'https://github.com/glaby91/moteur3d-scene/releases/latest/download/SCENE_VERSION.json' -OutFile $manifestPath; Invoke-WebRequest 'https://github.com/glaby91/moteur3d-scene/releases/latest/download/V17-scene.zip' -OutFile $zip; $manifest=Get-Content $manifestPath -Raw | ConvertFrom-Json; if($manifest.repository -ne 'glaby91/moteur3d-scene' -or $manifest.scene -ne 'benchmark-civic/scene.json' -or $manifest.revision -notmatch '^V17\.\d{3}$'){throw 'Manifeste de scène invalide'}; Expand-Archive -LiteralPath $zip -DestinationPath $root -Force; $scene=Join-Path $root 'benchmark-civic'; if(!(Test-Path (Join-Path $scene 'scene.json'))){throw 'benchmark-civic/scene.json absent de l’archive'}; Copy-Item $manifestPath (Join-Path $scene 'SCENE_VERSION.json') -Force; Write-Host ('Scène récupérée : ' + $manifest.revision)"
+if errorlevel 1 exit /b 1
+
+cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=%QT_ROOT%" -DM3D_REQUIRE_VULKAN=ON "-DV17_SCENE_SOURCE_DIR=%SCENE_ROOT%\benchmark-civic"
+if errorlevel 1 exit /b 1
+
 cmake --build build-v17 --config Release --parallel 4
+if errorlevel 1 exit /b 1
+
+echo Compilation terminée. Exécutable : build-v17\Release\moteur3d_v17.exe
+endlocal
 ```
 
-La compilation locale ne télécharge pas automatiquement la scène distante. Pour obtenir le package prêt à lancer avec la scène la plus récente, utiliser le workflow GitHub Actions.
+Le moteur copie la scène indiquée par `V17_SCENE_SOURCE_DIR` dans le dossier de l’application lors de la compilation. Le binaire et la scène se trouvent donc sous `build-v17\Release`. La compilation locale construit le moteur et ses cibles CMake ; elle ne reproduit pas toutes les étapes de validation, de finition et de packaging exécutées par le workflow GitHub Actions.
 
 ## Benchmarks
 
 Le package inclut `LANCER_BENCHMARK.bat` et les exécutables de benchmark. Exemple depuis le dossier extrait :
 
 ```text
-LANCER_BENCHMARK.bat "benchmark-civic\scene.json" "results\run1" --full-benchmark --all-scenes --include-cpu
+LANCER_BENCHMARK.bat "benchmark-civic\\scene.json" "results\\run1" --full-benchmark --all-scenes --include-cpu
 ```
 
 Les rapports distinguent les temps de chargement, de préparation (dont la construction BVH) et de rendu. Pour comparer deux versions, conserver le même ordinateur, la même scène, la caméra, le backend, la résolution et les réglages ; comparer plusieurs passages et les percentiles, pas une image isolée.
