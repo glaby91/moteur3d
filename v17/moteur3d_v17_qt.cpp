@@ -1258,7 +1258,7 @@ private:
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Démarrer exploration (V17)"));
         if(explorationHelp_)explorationHelp_->setText(QStringLiteral(
             "ZQSD / flèches : marcher · souris : regarder librement · clic droit : lunette ×3\n"
-            "F11 : plein écran · Tab bref : Pip-Boy · Tab maintenu : interface plein écran · Échap : arrêter · E : échelle · Maj : accélérer · Vol libre : Espace / Ctrl."));
+            "F11 : plein écran · < bref : Pip-Boy · < maintenu : interface plein écran · Échap : arrêter · E : échelle · Maj : accélérer · Vol libre : Espace / Ctrl."));
         // A delayed multires GPU frame could still be on screen when Esc
         // stops exploration. Queue a final guaranteed full-resolution image.
         if(!closingRequested_&&!sceneLoading_&&runtime_)
@@ -1464,7 +1464,7 @@ protected:
         if(exploring_ && (event->type()==QEvent::KeyPress ||
                           event->type()==QEvent::KeyRelease)){
             auto* key=static_cast<QKeyEvent*>(event);
-            if(key->key()==Qt::Key_Tab){
+            if(key->key()==Qt::Key_Tab || key->key()==Qt::Key_Less){
                 key->accept();
                 const bool dashboardVisible=diagnosticsDashboard_ &&
                                             diagnosticsDashboard_->isVisible();
@@ -1495,7 +1495,7 @@ protected:
         if(watched==canvas_ && exploring_){
             if(event->type()==QEvent::KeyPress || event->type()==QEvent::KeyRelease){
                 auto* key=static_cast<QKeyEvent*>(event);
-                if(key->key()==Qt::Key_Tab){
+                if(key->key()==Qt::Key_Tab || key->key()==Qt::Key_Less){
                     if(event->type()==QEvent::KeyPress)beginTabPress(key);
                     else endTabPress(key);
                     key->accept();
@@ -1559,7 +1559,7 @@ protected:
                     immersiveAction_->setChecked(false);
                 e->accept();return;
             }
-            if(e->key()==Qt::Key_Tab){
+            if(e->key()==Qt::Key_Tab || e->key()==Qt::Key_Less){
                 beginTabPress(e);
                 e->accept();return;
             }
@@ -1591,7 +1591,7 @@ protected:
     }
     void keyReleaseEvent(QKeyEvent* e) override{
         if(exploring_){
-            if(e->key()==Qt::Key_Tab){endTabPress(e);e->accept();return;}
+            if(e->key()==Qt::Key_Tab || e->key()==Qt::Key_Less){endTabPress(e);e->accept();return;}
             if(!e->isAutoRepeat()){keysDown_.remove(e->key());if(e->key()==Qt::Key_Shift)updateExplorationSpeedIndicator();}
             e->accept();return;
         }
@@ -1836,13 +1836,25 @@ private:
         // can stay above Qt windows. Hide only its viewport while the full-screen
         // dashboard is open, then restore it when returning to exploration.
         dashboardRenderViewportHidden_=canvas_->isVisible();
-        if(dashboardRenderViewportHidden_)canvas_->hide();
+        if(dashboardRenderViewportHidden_){
+            canvas_->hide();
+#if defined(_WIN32)
+            if(canvas_->testAttribute(Qt::WA_WState_Created))
+                ShowWindow(reinterpret_cast<HWND>(canvas_->winId()),SW_HIDE);
+#endif
+        }
         if(QScreen* screen=canvas_->screen()){
             diagnosticsDashboard_->setGeometry(screen->geometry());
         }
         diagnosticsDashboard_->showFullScreen();
         diagnosticsDashboard_->raise();
         diagnosticsDashboard_->activateWindow();
+#if defined(_WIN32)
+        // The direct renderer may own a native topmost HWND. Force the Qt
+        // dashboard above it after the fullscreen transition has completed.
+        SetWindowPos(reinterpret_cast<HWND>(diagnosticsDashboard_->winId()),HWND_TOPMOST,
+                     0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_SHOWWINDOW);
+#endif
         diagnosticsDashboard_->setFocus(Qt::OtherFocusReason);
         refreshDiagnosticsDashboard();
         diagnosticsRefreshTimer_->start();
@@ -2185,7 +2197,7 @@ private:
         });
         auto* displayMenu=menuBar()->addMenu(QStringLiteral("Affichage"));
         auto* diagnosticsAction=displayMenu->addAction(
-            QStringLiteral("Tableau de bord moteur plein écran  ·  maintenir Tab"));
+            QStringLiteral("Tableau de bord moteur plein écran  ·  maintenir <"));
         connect(diagnosticsAction,&QAction::triggered,this,[this]{toggleDiagnosticsDashboard();});
         // V17.443 - one-click regression review at the EXACT user-reported
         // viewpoints, independent of the six artistic camera presets.
@@ -2653,7 +2665,7 @@ private:
         vertical->addWidget(walkingModeBox_);
         explorationHelp_=new QLabel(QStringLiteral(
             "ZQSD / flèches : marcher · souris libre : orienter la caméra · clic droit : zoom ×3\\n"
-            "F11 : plein écran · Tab bref : Pip-Boy · Tab maintenu : interface plein écran · Échap : arrêter · E : échelle · Ctrl+Maj+A : anomalie PNG+JSON."));
+            "F11 : plein écran · < bref : Pip-Boy · < maintenu : interface plein écran · Échap : arrêter · E : échelle · Ctrl+Maj+A : anomalie PNG+JSON."));
         explorationHelp_->setWordWrap(true);
         vertical->addWidget(explorationHelp_);
         connect(explorationButton_,&QPushButton::clicked,this,[this]{toggleExploration();});
