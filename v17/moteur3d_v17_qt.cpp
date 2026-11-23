@@ -4153,6 +4153,7 @@ struct LaunchOptions {
     bool immersiveSmoke=false;
     bool nativeUiSmoke=false;
     QString scenePath;
+    QString switchTargetPath;
     int textureResolution=2048;
 };
 
@@ -4191,6 +4192,7 @@ LaunchOptions parseLaunchOptions(int argc,char** argv){
     const bool sceneSmoke=options.switchSmoke||options.repeatSmoke||options.walkingSmoke
         ||options.scopeSmoke||options.immersiveSmoke;
     options.textureResolution=sceneSmoke?256:2048;
+    if(options.switchSmoke)options.switchTargetPath=QString::fromLocal8Bit(argv[3]);
     if(!options.nativeUiSmoke){
         options.scenePath=sceneSmoke?QString::fromLocal8Bit(argv[2])
             :(argc>1?QString::fromLocal8Bit(argv[1]):defaultPath());
@@ -4199,7 +4201,7 @@ LaunchOptions parseLaunchOptions(int argc,char** argv){
 }
 
 void runSmokeChecks(V17Window& window,const LaunchOptions& options){
-    if(options.switchSmoke)window.smokeSceneSwitch(QString::fromLocal8Bit(QCoreApplication::arguments().value(3).toLocal8Bit()));
+    if(options.switchSmoke)window.smokeSceneSwitch(options.switchTargetPath);
     if(options.repeatSmoke)window.smokeRepeatRaster();
     if(options.walkingSmoke)window.smokeWalkingCollisionPreference();
     if(options.scopeSmoke)window.smokeScopedAim();
