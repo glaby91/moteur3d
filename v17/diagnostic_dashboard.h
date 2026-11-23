@@ -104,6 +104,7 @@ public:
         auto* footer=new QLabel(QStringLiteral(
             "TAB / ÉCHAP : retour à l’exploration    ·    Les valeurs indisponibles sont signalées, jamais estimées. En affichage direct, le temps peut mesurer la soumission CPU, pas l’exécution GPU."));
         footer->setObjectName(QStringLiteral("muted"));
+        footer->setWordWrap(true);
         root->addWidget(footer);
         const auto children=findChildren<QWidget*>();
         for(auto* child:children)child->installEventFilter(this);
@@ -164,7 +165,6 @@ public:
 
 protected:
     bool eventFilter(QObject* watched,QEvent* event) override{
-        Q_UNUSED(watched);
         if(event->type()==QEvent::KeyPress){
             auto* key=static_cast<QKeyEvent*>(event);
             if(key->key()==Qt::Key_Tab||key->key()==Qt::Key_Escape){
@@ -237,7 +237,7 @@ private:
         grid->setContentsMargins(12,16,12,12);grid->setSpacing(12);
         fpsValue_=addMetric(grid,0,0,QStringLiteral("CADENCE"));
         renderValue_=addMetric(grid,1,0,QStringLiteral("DERNIER TEMPS MOTEUR / SOUMISSION"));
-        resolutionValue_=addMetric(grid,0,1,QStringLiteral("RÉSOLUTION ACTIVE"));
+        resolutionValue_=addMetric(grid,0,1,QStringLiteral("VIEWPORT ACTIF"));
         cameraValue_=addMetric(grid,1,1,QStringLiteral("CAMÉRA · X / Y / Z"));
         grid->setRowStretch(2,1);
         return page;
@@ -306,3 +306,4 @@ private:
 };
 
 } // namespace cse::diagnostics
+

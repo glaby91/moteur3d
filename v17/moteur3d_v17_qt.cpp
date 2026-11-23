@@ -1666,7 +1666,7 @@ private:
         data.sceneLoading=sceneLoading_;
         data.exploring=exploring_;
         if(runtime_){
-            data.sourceObjects=runtime_->objects.size();
+            data.sourceObjects=int(runtime_->objects.size());
             data.triangles=int(runtime_->renderScene.obj.size());
             data.materials=int(runtime_->renderScene.mat.size());
             data.lights=int(runtime_->renderScene.lights.size());
@@ -1687,10 +1687,14 @@ private:
            nativeDirectFailed_[size_t(backend)]){
             data.diagnosticStatus=QStringLiteral("Échec du swapchain direct");
             data.diagnosticDetail=nativeDirectFailureReason_[size_t(backend)];
-        }else{
+        }else if(backend==4||backend==5||backend==6){
             data.diagnosticStatus=QStringLiteral("Aucun échec de présentation signalé");
             data.diagnosticDetail=QStringLiteral(
                 "Ce panneau suit les erreurs de présentation native DX11/Vulkan/LumaTrace.");
+        }else{
+            data.diagnosticStatus=QStringLiteral("Sans swapchain direct");
+            data.diagnosticDetail=QStringLiteral(
+                "Le backend sélectionné n’utilise pas la présentation native directe.");
         }
         diagnosticsDashboard_->setData(data);
     }
