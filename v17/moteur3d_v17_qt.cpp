@@ -3913,6 +3913,11 @@ private:
     }
 };
 QString defaultPath(){
+    // Use the last user-approved release scene across engine build versions.
+    QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+    const QString installedScene=settings.value(QStringLiteral("Scene/InstalledLatestPath")).toString();
+    if(QFileInfo::exists(installedScene))return installedScene;
+    if(!installedScene.isEmpty())settings.remove(QStringLiteral("Scene/InstalledLatestPath"));
     const QString app=QCoreApplication::applicationDirPath();
     const QStringList candidates{
         // The clean package always opens the latest validated V8/V440 scene.
