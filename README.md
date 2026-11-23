@@ -69,7 +69,16 @@ Le moteur copie la scène indiquée par `V17_SCENE_SOURCE_DIR` dans le dossier d
 
 ## Évolutions futures
 
-Au démarrage, le moteur devra consulter le dépôt `moteur3d-scene` et comparer la révision de la scène locale à celle de la dernière release. Si la scène locale n’est pas à jour, un message indiquera les deux révisions et proposera le lien de téléchargement de la scène récente. Cette vérification reste à implémenter.
+La liste ci-dessous est **non exhaustive**. Ce sont des pistes et des objectifs à étudier, implémenter et valider ; ils ne sont pas tous réalisés.
+
+- **Actualisation de la scène au démarrage :** consulter le dépôt `moteur3d-scene`, comparer la révision locale à la dernière release et afficher un message avec les deux versions et le lien de téléchargement si la scène locale est dépassée. Cette vérification reste à implémenter.
+- **Qualité et coût de calcul :** viser le meilleur rendu possible avec le moins de calculs possible pour les modes interactifs. Le CPU Ray Tracing doit continuer à progresser comme référence de qualité visuelle.
+- **Raster DX11 :** poursuivre l’instancing, le regroupement spatial et le culling, ajouter du LOD sur les façades et le mobilier, puis améliorer le réglage PBR, de l’éclairage et des ombres sans dégrader l’image. La capacité cible de la roadmap va jusqu’à 2 millions de triangles ; elle reste à valider.
+- **Mesures et présentation DX11 :** valider le Z-prepass sur plusieurs vues, étudier la sélection des lumières locales par zones et une présentation native DXGI afin de réduire les copies GPU→CPU. Les gains attendus restent à mesurer sur le matériel cible.
+- **Eau DX11/Vulkan :** étudier des normales animées, des reflets d’environnement à faible coût et éventuellement des ombres raster, en vérifiant la qualité et la fluidité.
+- **Chargement et diagnostic :** étudier un cache PBR persistant et une télémétrie GPU plus détaillée pour réduire les temps de chargement et mieux localiser les coûts.
+
+Références : [roadmap Raster V17](v17/docs/RASTER_PERFORMANCE_ROADMAP.md), [plan Z-prepass, lumières et DXGI](docs/performance/V17.433-ZPREPASS-LOCAL-LIGHT-DXGI-PLAN.md), [piste d’amélioration de l’eau](docs/IDEES_FUTURES_EAU_DX11.md) et [audit global des optimisations](docs/audits/AUDIT_GLOBAL_CSE_WARP_FONCTIONNALITES_OPTIMISATIONS_2026-11-14.md).
 
 ## Benchmarks
 
