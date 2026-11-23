@@ -8,7 +8,7 @@
 
 ## Utilisation prévue
 
-Pendant l’exploration, `Tab` ouvre le tableau de bord plein écran. `Tab` ou `Échap` revient au viewport et réactive le regard souris. `F11` garde sa fonction actuelle. Le menu **Affichage → Tableau de bord moteur plein écran** permet aussi de l’ouvrir.
+Pendant l’exploration, `Tab` ouvre le tableau de bord plein écran. `Tab` revient au viewport et réactive le regard souris. `Échap` conserve sa fonction habituelle : il arrête le mode caméra et le tableau de bord se ferme avec lui. `F11` garde sa fonction actuelle. Le menu **Affichage → Tableau de bord moteur plein écran** permet aussi de l’ouvrir.
 
 Les pages sont **Aperçu**, **Scène**, **Lumières**, **Ressources** et **Diagnostic**. Le rafraîchissement se fait à 750 ms uniquement lorsque le panneau est visible.
 

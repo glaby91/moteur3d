@@ -1720,6 +1720,7 @@ private:
         if(!diagnosticsDashboard_){
             diagnosticsDashboard_=new cse::diagnostics::Dashboard(this);
             diagnosticsDashboard_->setReturnHandler([this]{closeDiagnosticsDashboard();});
+            diagnosticsDashboard_->setExitHandler([this]{stopExploration();});
             diagnosticsRefreshTimer_=new QTimer(this);
             diagnosticsRefreshTimer_->setInterval(750);
             connect(diagnosticsRefreshTimer_,&QTimer::timeout,this,

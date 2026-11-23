@@ -102,7 +102,7 @@ public:
         root->addWidget(pages_,1);
 
         auto* footer=new QLabel(QStringLiteral(
-            "TAB / ÉCHAP : retour à l’exploration    ·    Les valeurs indisponibles sont signalées, jamais estimées. En affichage direct, le temps peut mesurer la soumission CPU, pas l’exécution GPU."));
+            "TAB : retour à la scène    ·    ÉCHAP : arrêter le mode caméra    ·    Les valeurs indisponibles sont signalées, jamais estimées. En affichage direct, le temps peut mesurer la soumission CPU, pas l’exécution GPU."));
         footer->setObjectName(QStringLiteral("muted"));
         footer->setWordWrap(true);
         root->addWidget(footer);
@@ -111,6 +111,7 @@ public:
     }
 
     void setReturnHandler(std::function<void()> handler){returnHandler_=std::move(handler);}
+    void setExitHandler(std::function<void()> handler){exitHandler_=std::move(handler);}
 
     void setData(const DashboardData& d){
         engineValue_->setText(QStringLiteral("%1\nRévision %2")
@@ -167,15 +168,21 @@ protected:
     bool eventFilter(QObject* watched,QEvent* event) override{
         if(event->type()==QEvent::KeyPress){
             auto* key=static_cast<QKeyEvent*>(event);
-            if(key->key()==Qt::Key_Tab||key->key()==Qt::Key_Escape){
+            if(key->key()==Qt::Key_Tab){
                 requestReturn();key->accept();return true;
+            }
+            if(key->key()==Qt::Key_Escape){
+                requestExit();key->accept();return true;
             }
         }
         return QWidget::eventFilter(watched,event);
     }
     void keyPressEvent(QKeyEvent* event) override{
-        if(event->key()==Qt::Key_Tab||event->key()==Qt::Key_Escape){
+        if(event->key()==Qt::Key_Tab){
             requestReturn();event->accept();return;
+        }
+        if(event->key()==Qt::Key_Escape){
+            requestExit();event->accept();return;
         }
         QWidget::keyPressEvent(event);
     }
@@ -212,8 +219,10 @@ private:
     QLabel* presentationValue_=nullptr;
     QTabWidget* pages_=nullptr;
     std::function<void()> returnHandler_;
+    std::function<void()> exitHandler_;
 
     void requestReturn(){if(returnHandler_)returnHandler_();}
+    void requestExit(){if(exitHandler_)exitHandler_();}
 
     QLabel* addCard(QGridLayout* grid,int column,const QString& caption){
         auto* card=new QFrame;
