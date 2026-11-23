@@ -115,9 +115,9 @@ private:
     }
 
     QString dataRoot() const {
-        QString root=QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        QString root=QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation);
         if(root.isEmpty())root=QDir::home().filePath(QStringLiteral(".cse-warp"));
-        return root;
+        return QDir(root).filePath(QStringLiteral("CSE WARP/V17"));
     }
 
     void beginDownload(const QString& revision,QWidget* window) {
@@ -181,12 +181,16 @@ private:
         }
         auto* process=new QProcess(this);
 #if defined(_WIN32)
+        QString safeArchive=archivePath_;
+        QString safeStaging=stagingPath_;
+        safeArchive.replace(QStringLiteral("'"),QStringLiteral("''"));
+        safeStaging.replace(QStringLiteral("'"),QStringLiteral("''"));
         process->setProgram(QStringLiteral("powershell.exe"));
         process->setArguments({QStringLiteral("-NoProfile"),QStringLiteral("-NonInteractive"),
              QStringLiteral("-ExecutionPolicy"),QStringLiteral("Bypass"),
              QStringLiteral("-Command"),
              QStringLiteral("Expand-Archive -LiteralPath '%1' -DestinationPath '%2' -Force")
-                .arg(archivePath_).arg(stagingPath_)});
+                .arg(safeArchive).arg(safeStaging)});
 #else
         process->setProgram(QStringLiteral("unzip"));
         process->setArguments({QStringLiteral("-q"),QStringLiteral("-o"),archivePath_,
