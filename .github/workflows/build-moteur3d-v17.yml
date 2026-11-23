@@ -19,6 +19,7 @@ on:
   pull_request:
     paths:
       - 'v17/**'
+      - 'scenes/v16/benchmark-civic/**'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/**'
       - 'tools/v17_523_*'
       - 'tools/v17_600_scene_finish.py'
