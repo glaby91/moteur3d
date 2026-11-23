@@ -10,6 +10,7 @@
 #include "weather/solar_cycle.h"
 #include "weather/sky_compositor.h"
 #include "radio_audio.h"
+#include "diagnostic_dashboard.h"
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
 #include <QAction>
@@ -1226,6 +1227,8 @@ private:
         setRasterPeripheralMultiresOverride(next?1:0);
     }
     void stopExploration(){
+        if(diagnosticsDashboard_)diagnosticsDashboard_->hide();
+        if(diagnosticsRefreshTimer_)diagnosticsRefreshTimer_->stop();
         releaseMouseLook();
         setMotionResolution(false);
         exploring_=false;
@@ -1250,7 +1253,7 @@ private:
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Démarrer exploration (V17)"));
         if(explorationHelp_)explorationHelp_->setText(QStringLiteral(
             "ZQSD / flèches : marcher · souris : regarder librement · clic droit : lunette ×3\n"
-            "F11 : plein écran · Échap : arrêter · E : échelle · Maj : accélérer · Vol libre : Espace / Ctrl."));
+            "F11 : plein écran · Tab : tableau de bord · Échap : arrêter · E : échelle · Maj : accélérer · Vol libre : Espace / Ctrl."));
         // A delayed multires GPU frame could still be on screen when Esc
         // stops exploration. Queue a final guaranteed full-resolution image.
         if(!closingRequested_&&!sceneLoading_&&runtime_)
@@ -1460,6 +1463,14 @@ protected:
             });
         }
         if(watched==canvas_ && exploring_){
+            if(event->type()==QEvent::KeyPress){
+                auto* key=static_cast<QKeyEvent*>(event);
+                if(key->key()==Qt::Key_Tab&&!key->isAutoRepeat()){
+                    toggleDiagnosticsDashboard();
+                    key->accept();
+                    return true;
+                }
+            }
             if(event->type()==QEvent::KeyPress || event->type()==QEvent::KeyRelease){
                 if(event->type()==QEvent::KeyPress)
                     keyPressEvent(static_cast<QKeyEvent*>(event));
@@ -1518,7 +1529,7 @@ protected:
                 e->accept();return;
             }
             if(e->key()==Qt::Key_Tab){
-                if(mouseCaptured_)releaseMouseLook();else captureMouseLook();
+                toggleDiagnosticsDashboard();
                 e->accept();return;
             }
             if(e->key()==Qt::Key_E && !e->isAutoRepeat() &&
@@ -1624,6 +1635,9 @@ private:
     QLabel* systemMemoryLabel_=nullptr;
     QProgressBar* systemMemoryBar_=nullptr;
     QTimer* memoryRefreshTimer_=nullptr;
+    cse::diagnostics::Dashboard* diagnosticsDashboard_=nullptr;
+    QTimer* diagnosticsRefreshTimer_=nullptr;
+    QString sceneRevision_;
 
     void updateMemoryBanner(){
         if(!systemMemoryLabel_||!systemMemoryBar_)return;
@@ -1631,6 +1645,96 @@ private:
         if(percent<0){systemMemoryLabel_->setText(QStringLiteral("RAM n/d"));systemMemoryBar_->setValue(0);return;}
         systemMemoryLabel_->setText(QStringLiteral("RAM %1 %").arg(percent));
         systemMemoryBar_->setValue(percent);
+    }
+
+    void refreshDiagnosticsDashboard(){
+        if(!diagnosticsDashboard_)return;
+        cse::diagnostics::DashboardData data;
+        data.engineVersion=QStringLiteral("V%1").arg(CSE_WARP_PRODUCT_VERSION);
+        data.engineRevision=githubRevision();
+        data.sceneName=runtime_?runtime_->title:QString{};
+        data.sceneRevision=sceneRevision_;
+        data.backend=backendBox_?backendBox_->currentText():QString{};
+        data.presentation=canvas_&&canvas_->nativePresentation()
+            ?QStringLiteral("GPU direct · swapchain")
+            :QStringLiteral("Qt · image de présentation");
+        data.renderWidth=canvas_?canvas_->width():0;
+        data.renderHeight=canvas_?canvas_->height():0;
+        data.fps=fpsFiltered_;
+        data.lastRenderMs=lastCompletedRenderMs_;
+        data.systemMemoryPercent=systemMemoryLoadPercent();
+        data.sceneLoading=sceneLoading_;
+        data.exploring=exploring_;
+        if(runtime_){
+            data.sourceObjects=runtime_->objects.size();
+            data.triangles=int(runtime_->renderScene.obj.size());
+            data.materials=int(runtime_->renderScene.mat.size());
+            data.lights=int(runtime_->renderScene.lights.size());
+            data.textureResolution=runtime_->textureResolution;
+            for(const auto& material:runtime_->renderScene.mat)
+                if(material.imageAlbedo)++data.imageTextures;
+        }
+        if(freeCameraActive_){
+            const auto pose=activeCameraPose();
+            data.cameraPosition=QStringLiteral("X %1   Y %2   Z %3 m")
+                .arg(pose.eye.x,0,'f',2).arg(pose.eye.y,0,'f',2).arg(pose.eye.z,0,'f',2);
+        }
+        data.solarHour=sunHour_?sunHour_->value():0.0;
+        data.daylight=double(m3d::daylight);
+        data.lampFactor=double(m3d::lampFactor);
+        const int backend=backendBox_?backendBox_->currentIndex():-1;
+        if(backend>=0&&backend<int(nativeDirectFailed_.size())&&
+           nativeDirectFailed_[size_t(backend)]){
+            data.diagnosticStatus=QStringLiteral("Échec du swapchain direct");
+            data.diagnosticDetail=nativeDirectFailureReason_[size_t(backend)];
+        }else{
+            data.diagnosticStatus=QStringLiteral("Aucun échec de présentation signalé");
+            data.diagnosticDetail=QStringLiteral(
+                "Ce panneau suit les erreurs de présentation native DX11/Vulkan/LumaTrace.");
+        }
+        diagnosticsDashboard_->setData(data);
+    }
+    void closeDiagnosticsDashboard(){
+        if(!diagnosticsDashboard_||!diagnosticsDashboard_->isVisible())return;
+        diagnosticsDashboard_->hide();
+        if(diagnosticsRefreshTimer_)diagnosticsRefreshTimer_->stop();
+        if(exploring_&&!closingRequested_){
+            QTimer::singleShot(0,this,[this]{
+                if(exploring_&&!closingRequested_){
+                    focusRenderViewport();
+                    captureMouseLook();
+                }
+            });
+        }
+    }
+    void toggleDiagnosticsDashboard(){
+        if(!exploring_||!canvas_){
+            statusBar()->showMessage(QStringLiteral(
+                "Le tableau de bord est disponible pendant l’exploration."),4500);
+            return;
+        }
+        if(!diagnosticsDashboard_){
+            diagnosticsDashboard_=new cse::diagnostics::Dashboard(this);
+            diagnosticsDashboard_->setReturnHandler([this]{closeDiagnosticsDashboard();});
+            diagnosticsRefreshTimer_=new QTimer(this);
+            diagnosticsRefreshTimer_->setInterval(750);
+            connect(diagnosticsRefreshTimer_,&QTimer::timeout,this,
+                    [this]{refreshDiagnosticsDashboard();});
+        }
+        if(diagnosticsDashboard_->isVisible()){
+            closeDiagnosticsDashboard();
+            return;
+        }
+        releaseMouseLook();
+        if(QScreen* screen=canvas_->screen()){
+            diagnosticsDashboard_->setGeometry(screen->geometry());
+        }
+        diagnosticsDashboard_->showFullScreen();
+        diagnosticsDashboard_->raise();
+        diagnosticsDashboard_->activateWindow();
+        diagnosticsDashboard_->setFocus(Qt::OtherFocusReason);
+        refreshDiagnosticsDashboard();
+        diagnosticsRefreshTimer_->start();
     }
 
     void displayRasterSettings(const RasterQualitySettings& q){
@@ -1953,6 +2057,10 @@ private:
         memoryRefreshTimer_=new QTimer(this);
         connect(memoryRefreshTimer_,&QTimer::timeout,this,[this]{updateMemoryBanner();});
         memoryRefreshTimer_->start(1500); updateMemoryBanner();
+        auto* displayMenu=menuBar()->addMenu(QStringLiteral("Affichage"));
+        auto* diagnosticsAction=displayMenu->addAction(
+            QStringLiteral("Tableau de bord moteur plein écran  ·  Tab"));
+        connect(diagnosticsAction,&QAction::triggered,this,[this]{toggleDiagnosticsDashboard();});
         // V17.443 - one-click regression review at the EXACT user-reported
         // viewpoints, independent of the six artistic camera presets.
         auto* anomaliesMenu=menuBar()->addMenu(QStringLiteral("Anomalies"));
@@ -2419,7 +2527,7 @@ private:
         vertical->addWidget(walkingModeBox_);
         explorationHelp_=new QLabel(QStringLiteral(
             "ZQSD / flèches : marcher · souris libre : orienter la caméra · clic droit : zoom ×3\\n"
-            "F11 : plein écran · Échap : arrêter · E : échelle · Ctrl+Maj+A : anomalie PNG+JSON."));
+            "F11 : plein écran · Tab : tableau de bord · Échap : arrêter · E : échelle · Ctrl+Maj+A : anomalie PNG+JSON."));
         explorationHelp_->setWordWrap(true);
         vertical->addWidget(explorationHelp_);
         connect(explorationButton_,&QPushButton::clicked,this,[this]{toggleExploration();});
@@ -2918,6 +3026,7 @@ private:
         renderTimeLabel_->setText(QStringLiteral("Dernier rendu : —"));
         materialLabel_->setText(QStringLiteral("Sélectionner un matériau dans le catalogue"));
         const QString sceneRevision=outcome.database.revision.trimmed();
+        sceneRevision_=sceneRevision;
         if(sceneRevisionLabel_)sceneRevisionLabel_->setText(sceneRevision.isEmpty()?QStringLiteral("Scène —"):QStringLiteral("Scène %1").arg(sceneRevision));
         const QString revisionSuffix=sceneRevision.isEmpty()?QStringLiteral("Scène sans révision"):QStringLiteral("Scène %1").arg(sceneRevision);
         setWindowTitle(QStringLiteral("CSE WARP Beta X V%1 — %2 — %3")

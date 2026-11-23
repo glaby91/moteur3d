@@ -1,6 +1,6 @@
 # CSE WARP Beta X — V17
 
-**Révision logicielle : V17.600.** La scène de référence conserve le palais Energetik, la piscine avec sa coupole vitrée basse, la fresque continue et le jardin retravaillé. La coupole ferme ses deux pignons par une verrière encadrée de cinq meneaux radiaux par extrémité ; une costière inox assure le raccord continu sur les quatre côtés. Trois caméras dédiées permettent d’en contrôler les raccords et l’intérieur. Les images de contrôle incluses dans le paquet sont produites par le moteur CPU Ray Tracing PBR direct à 960 × 540. DX11 et Vulkan peuvent présenter directement dans leur fenêtre native ou passer par une image Qt. Le chemin de présentation directe reste à valider sur le Dell HD620 ; les résultats CI WARP ne prédisent pas son comportement matériel.
+**Révision moteur : V17.004.** La révision de la scène reste propre à son manifeste et est affichée séparément. La scène de référence conserve le palais Energetik, la piscine avec sa coupole vitrée basse, la fresque continue et le jardin retravaillé. La coupole ferme ses deux pignons par une verrière encadrée de cinq meneaux radiaux par extrémité ; une costière inox assure le raccord continu sur les quatre côtés. Trois caméras dédiées permettent d’en contrôler les raccords et l’intérieur. Les images de contrôle incluses dans le paquet sont produites par le moteur CPU Ray Tracing PBR direct à 960 × 540. DX11 et Vulkan peuvent présenter directement dans leur fenêtre native ou passer par une image Qt. Le chemin de présentation directe reste à valider sur le Dell HD620 ; les résultats CI WARP ne prédisent pas son comportement matériel.
 
 **V17 = architecture temps réel en construction, sans abandonner les moteurs CPU et GPU V16.**
 
@@ -41,3 +41,14 @@ Le document de référence, avec objectifs vérifiables, risques, conditions de 
 Chaque phase nécessite un accord explicite avant modification du moteur, compilation ou fusion. Voir le document de cadrage pour les **portes de validation V17-0 à V17-7**.
 
 **Base V16** : `feature/v16-dell-native-1366x768-fhd-261110`. La V17 ne doit pas être fusionnée dans `master` sans décision explicite.
+
+
+## Tableau de bord de diagnostic
+
+La branche `feature/v17-diagnostic-dashboard-tab-20261123` ajoute un panneau plein écran accessible avec `Tab` pendant l’exploration. Un nouvel appui sur `Tab`, ou `Échap`, revient au rendu ; `F11` conserve son comportement de plein écran du viewport.
+
+Le panneau sépare les pages **Aperçu**, **Scène**, **Lumières**, **Ressources** et **Diagnostic**. Il affiche la version et la révision Git du moteur, la révision fournie par le manifeste chargé, les objets source, triangles compilés, matériaux, albedos image, lumières, caméra, résolution, cadence, dernier temps moteur et charge mémoire système. Les valeurs non instrumentées (mémoire du processus et VRAM) sont explicitement signalées.
+
+Le comptage des triangles provient de la géométrie triangulée de la scène chargée. La révision moteur est la version produit compilée plus la révision Git empaquetée ; la révision de scène vient des métadonnées du manifeste. En présentation GPU directe, le temps affiché peut correspondre à la soumission CPU et ne constitue pas un temps GPU de fin d’exécution. Voir [la fiche de reprise et les limites](docs/DIAGNOSTIC_DASHBOARD.md).
+
+La modification est enregistrée sur une branche de travail et n’a pas encore été compilée.
