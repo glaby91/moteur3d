@@ -54,14 +54,14 @@ class VerifiedCC0Mirror:
             raw = dest.read_bytes() if dest.exists() else None
             if raw is not None:
                 cached_blob = hashlib.sha1(
-                    b"blob " + str(len(raw)).encode() + b"\\0" + raw
+                    b"blob " + str(len(raw)).encode() + bytes([0]) + raw
                 ).hexdigest()
                 if cached_blob != expected_sha:
                     raw = None  # Stale cache: refresh from the pinned source.
             if raw is None:
                 with urllib.request.urlopen(MIRROR + model + ".glb", timeout=60) as req:
                     raw = req.read()
-            blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\\0" + raw).hexdigest()
+            blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + bytes([0]) + raw).hexdigest()
             if blob != expected_sha:
                 raise RuntimeError("Unverified pinned CC0 GLB: " + model + " git blob SHA=" + blob)
             dest.write_bytes(raw)
