@@ -8,7 +8,7 @@
 
 ## Utilisation prévue
 
-Pendant l’exploration, `Tab` ouvre le tableau de bord plein écran. Un appui bref sur `Tab` affiche ou masque le Pip-Boy compact. Maintenir `Tab` environ 550 ms ouvre le tableau de bord plein écran ; un appui bref le ferme et revient au Pip-Boy. `Échap` arrête le mode caméra et ferme les deux interfaces. `F11` garde sa fonction actuelle. Le menu **Affichage → Tableau de bord moteur plein écran** permet aussi de l’ouvrir.
+Pendant l’exploration, un appui bref sur `Tab` affiche ou masque le Pip-Boy compact. Maintenir `Tab` environ 550 ms ouvre le tableau de bord plein écran ; un appui bref le ferme et revient au Pip-Boy. `Échap` arrête le mode caméra et ferme les deux interfaces. `F11` garde sa fonction actuelle. Le menu **Affichage → Tableau de bord moteur plein écran** permet aussi de l’ouvrir.
 
 Les pages sont **Aperçu**, **Scène**, **Lumières**, **Ressources** et **Diagnostic**. Le tableau compact et l’interface plein écran partagent les mêmes mesures, rafraîchies à 750 ms uniquement tant qu’une des interfaces est visible. Le délai d’appui long Tab est de 550 ms.
 

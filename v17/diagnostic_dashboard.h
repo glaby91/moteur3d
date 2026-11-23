@@ -4,6 +4,7 @@
 #include <QFont>
 #include <QFrame>
 #include <QGridLayout>
+#include <QHBoxLayout>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QPushButton>
