@@ -26,7 +26,7 @@ def download(source, destination):
     if destination.is_file() and destination.stat().st_size > 0:
         print("Cached:", destination.name)
         return
-    url = "https://commons.wikimedia.org/wiki/Special:Redirect/file/" + urllib.parse.quote(source["commons_filename"])
+    url = source.get("download_url") or ("https://commons.wikimedia.org/wiki/Special:Redirect/file/" + urllib.parse.quote(source["commons_filename"]))
     request = urllib.request.Request(url, headers={"User-Agent": "CSE-WARP-open-audio/1.0 (Wikimedia Commons source attribution)"})
     temp = destination.with_suffix(destination.suffix + ".part")
     try:
