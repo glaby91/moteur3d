@@ -417,15 +417,17 @@ public:
         setRasterPeripheralMultiresOverride(0);
         pacingClock_.start();
         skyMotionClock_.start();
-        audioTimer_.setInterval(50); // 20 Hz spatial updates, independent from GPU images.
+        audioTimer_.setInterval(50); // 20 Hz updates only while the local spatial WAV is active.
         connect(&audioTimer_,&QTimer::timeout,this,[this]{
-            if(!radioPlaying_ || !runtime_)return;
+            if(!radioAudio_.playing() || !runtime_){
+                audioTimer_.stop();
+                return;
+            }
             const auto pose=activeCameraPose();
             const float eye[3]{pose.eye.x,pose.eye.y,pose.eye.z};
             const float target[3]{pose.target.x,pose.target.y,pose.target.z};
             radioAudio_.update(eye,target);
         });
-        audioTimer_.start();
         // A permanent status-bar widget outlives temporary render/progress
         // messages. QStatusBar::showMessage(..., 15000) used to erase the
         // completed render time after 15 seconds.
@@ -1690,6 +1692,7 @@ private:
             backendBox_->currentIndex()==6))requestRender();
     }
     void stopRadio(){
+        audioTimer_.stop();
         ++radioAttempt_;
         radioStreamPending_=false;
         radioUsingStream_=false;
@@ -1765,6 +1768,8 @@ private:
         }
         setRadioVolume(radioVolumeSlider_?radioVolumeSlider_->value():65);
         radioPlaying_=radioAudio_.start(path.toStdWString(),radioSpeakers_);
+        if(radioPlaying_)audioTimer_.start();
+        else audioTimer_.stop();
         if(radioToggleButton_)radioToggleButton_->setText(radioPlaying_
             ?QStringLiteral("Arrêter la radio"):QStringLiteral("Activer la radio"));
         if(radioStatusLabel_)radioStatusLabel_->setText(radioPlaying_
@@ -1774,6 +1779,7 @@ private:
                 .arg(reason));
     }
     void playRadio(){
+        audioTimer_.stop();
         radioAudio_.stop();
         if(!radioNetwork_)radioNetwork_=new QNetworkAccessManager(this);
         if(!radioPlayer_){
