@@ -11,6 +11,7 @@
 #include "weather/sky_compositor.h"
 #include "radio_audio.h"
 #include "diagnostic_dashboard.h"
+#include "moteur3d_v17_render.h"
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
 #include <QAction>
@@ -115,24 +116,7 @@ int systemMemoryLoadPercent(){
     return -1;
 #endif
 }
-struct Result {
-    QImage image;
-    v16::CameraPreset cameraPose;
-    QString renderer;
-    QString error;
-    double milliseconds=0;
-    bool gpu=false;
-    bool skyCompositing=false; // DX11 sky pixels are transparent for Qt compositor
-    bool directPresented=false; // DXGI or Vulkan native swapchain, no QImage
-    bool nativeFallback=false; // Native DXGI/WSI unavailable: show the QImage preview
-    QString nativeFailure; // Preserve exact Vulkan/DXGI presentation error after image fallback
-    QString nativeWindowDetails; // HWND, owning thread, client size and requested extent
-    QString requestStamp;
-    // Reject finished frames after a camera, material, backend or scene change.
-    uint64_t generation=0;
-    int backendIndex=-1;
-    quintptr renderThread=0;
-};
+using Result = cse::v17render::Result;
 struct SceneLoadOutcome {
     QString path;
     QString error;
@@ -1645,13 +1629,8 @@ private:
     std::shared_ptr<v16::Runtime> runtime_;
     // The sun and scene geometry do not change when navigating cameras.
     // Reuse an identical shadow map across CPU renders of the same runtime.
-    struct CpuShadowCache {
-        std::mutex mutex;
-        std::weak_ptr<v16::Runtime> scene;
-        std::shared_ptr<const ShadowMap> shadow;
-        float hour=-1.f;
-    };
-    std::shared_ptr<CpuShadowCache> cpuShadows_=std::make_shared<CpuShadowCache>();
+    std::shared_ptr<cse::v17render::CpuShadowCache> cpuShadows_=
+        std::make_shared<cse::v17render::CpuShadowCache>();
     bool pending_=false, updatingControls_=false, closingRequested_=false;
     QElapsedTimer pacingClock_;
     qint64 lastPresentMs_=-1;
@@ -3832,299 +3811,46 @@ private:
             });
         }
         const auto shadowCache=cpuShadows_;
-        watcher_.setFuture(QtConcurrent::run(&renderPool_,[this,serial,token,snapshot,preset,w,h,wantGpu,
-            globalIllumination,raster,vulkan,lumaTrace,directPresent,nativeHandle,sharedVulkanInstance,
-            sharedVulkanSurface,edgeAA,sampleCount,maxBounces,progressive,denoise,outputView,requestedBackend,
-            nativeWindowDetails,
-            denoiseDirect,shadowCache,renderHour,shadowHour,requestStamp]{
-            Result result;
-            result.requestStamp=requestStamp;
-            result.cameraPose=preset;
-            result.generation=token;
-            result.backendIndex=requestedBackend;
-            result.nativeWindowDetails=nativeWindowDetails;
-            result.skyCompositing=raster;
-            result.renderThread=reinterpret_cast<quintptr>(QThread::currentThreadId());
-#if defined(_WIN32)
-            if(!result.nativeWindowDetails.isEmpty())
-                result.nativeWindowDetails+=QStringLiteral(" renderThreadWin32=%1 renderThreadQt=0x%2")
-                    .arg(GetCurrentThreadId())
-                    .arg(QString::number(qulonglong(result.renderThread),16));
-#endif
-            updateLighting(renderHour);
-            const auto camera=v16::makeCamera(preset,w,h);
-            std::vector<uint32_t> pixels;
-            Stats stats;
-            double shadowBuildMs=0.0;
-            bool ok=false;
-            if(wantGpu){
-                std::wstring reason;
-                if(!raster){
-                    releaseDirectX11NativeForCurrentThread();
-                    releaseVulkanDirectForCurrentThread();
-                    releaseVulkanPreviewForCurrentThread();
-                }
-                if(raster){
-                    std::shared_ptr<const ShadowMap> shadow;
-                    {
-                        std::lock_guard<std::mutex> lock(shadowCache->mutex);
-                        if(shadowCache->scene.lock()==snapshot &&
-                           shadowCache->hour==shadowHour&&shadowCache->shadow)
-                            shadow=shadowCache->shadow;
-                        else {
-                            Stats shadowStats;
-                            const auto shadowStart=std::chrono::steady_clock::now();
-                            shadow=std::make_shared<ShadowMap>(
-                                buildShadow(snapshot->renderScene,shadowStats));
-                            shadowBuildMs=std::chrono::duration<double,std::milli>(
-                                std::chrono::steady_clock::now()-shadowStart).count();
-                            // Optional diagnostic of the 1,024 x 1,024 CPU ray
-                            // shadow pass. This cost occurs outside VulkanRaster
-                            // and cannot appear in its GPU-only CSV timings.
-                            const QByteArray shadowProfile=qgetenv("CSE_WARP_VK_SHADOW_PROFILE");
-                            if(!shadowProfile.isEmpty()){
-                                QFile log(QString::fromLocal8Bit(shadowProfile));
-                                if(log.open(QIODevice::WriteOnly|QIODevice::Append|QIODevice::Text)){
-                                    const QString line=QStringLiteral("%1,shadow_build_ms=%2,solar_hour=%3,shadow_bin=%4,backend=%5\n")
-                                        .arg(QDateTime::currentMSecsSinceEpoch())
-                                        .arg(shadowBuildMs,0,'f',3)
-                                        .arg(renderHour,0,'f',5)
-                                        .arg(shadowHour,0,'f',2)
-                                        .arg(vulkan?QStringLiteral("Vulkan"):QStringLiteral("DX11"));
-                                    log.write(line.toUtf8());
-                                }
-                            }
-                            shadowCache->scene=snapshot;shadowCache->hour=shadowHour;
-                            shadowCache->shadow=shadow;
-                        }
-                    }
-                    if(lumaTrace){
-                        releaseVulkanDirectForCurrentThread();
-                        releaseVulkanPreviewForCurrentThread();
-                        if(!snapshot->lumaTraceBvhError.isEmpty()){
-                            reason=snapshot->lumaTraceBvhError.toStdWString();
-                        }else if(snapshot->lumaTraceBvh4.nodes.empty()){
-                            reason=L"Le BVH4 LumaTrace n’a pas été construit pour cette scène.";
-                        }else if(directPresent){
-                            ok=renderLumaTraceNative(snapshot->renderScene,snapshot->lumaTraceBvh4,
-                                *shadow,camera,w,h,reinterpret_cast<void*>(nativeHandle),stats,reason);
-                            if(!ok){
-                                const std::wstring nativeReason=reason;
-                                result.nativeFailure=QString::fromStdWString(nativeReason);
-                                releaseDirectX11NativeForCurrentThread();
-                                reason.clear();
-                                ok=renderLumaTracePreview(snapshot->renderScene,snapshot->lumaTraceBvh4,
-                                    *shadow,camera,w,h,pixels,stats,reason);
-                                result.nativeFallback=ok;
-                                if(!ok){
-                                    const std::wstring previewReason=reason;
-                                    reason=L"LumaTrace DXGI natif en échec : "+nativeReason+
-                                           L" ; aperçu LumaTrace également en échec : "+previewReason;
-                                }
-                            }
-                        }else{
-                            releaseDirectX11NativeForCurrentThread();
-                            ok=renderLumaTracePreview(snapshot->renderScene,snapshot->lumaTraceBvh4,
-                                *shadow,camera,w,h,pixels,stats,reason);
-                        }
-                    }else if(vulkan){
-                        releaseDirectX11NativeForCurrentThread(); // DXGI belongs to a different backend HWND.
-                        // Keep one Vulkan device/resource set resident for the selected path.
-                        if(directPresent)releaseVulkanPreviewForCurrentThread();
-                        else releaseVulkanDirectForCurrentThread();
-                        if(directPresent){
-                            ok=renderVulkanDirectPresent(snapshot->renderScene,*shadow,camera,w,h,
-                                reinterpret_cast<void*>(nativeHandle),stats,reason,
-                                sharedVulkanInstance,sharedVulkanSurface);
-                            if(!ok){
-                                const std::wstring nativeReason=reason;
-                                result.nativeFailure=QString::fromStdWString(nativeReason);
-                                releaseVulkanDirectForCurrentThread();
-                                reason.clear();
-                                ok=renderVulkanPreview(snapshot->renderScene,*shadow,camera,w,h,
-                                                       pixels,stats,reason);
-                                result.nativeFallback=ok;
-                                if(!ok){
-                                    const std::wstring previewReason=reason;
-                                    reason=L"Vulkan native presentation failed: "+nativeReason+
-                                           L"; Vulkan image preview also failed: "+previewReason;
-                                }
-                            }
-                        }else{
-                            ok=renderVulkanPreview(snapshot->renderScene,*shadow,camera,w,h,
-                                                   pixels,stats,reason);
-                        }
-                    }else{
-                        // Vulkan WSI and DXGI must never own swapchains for the
-                        // same backend HWND at the same time. Also release the
-                        // offscreen renderer when leaving Vulkan.
-                        releaseVulkanDirectForCurrentThread();
-                        releaseVulkanPreviewForCurrentThread();
-                        ok=directPresent?
-                            renderDirectX11Native(snapshot->renderScene,*shadow,camera,w,h,
-                                                   reinterpret_cast<void*>(nativeHandle),stats,reason):
-                            renderDirectX11Preview(snapshot->renderScene,*shadow,camera,w,h,pixels,stats,reason);
-                        if(!ok && directPresent){
-                            // DXGI can be unavailable on remote desktop / certain drivers:
-                            // recover the original full-quality CPU/QImage preview.
-                            const std::wstring nativeReason=reason;
-                            result.nativeFailure=QString::fromStdWString(nativeReason);
-                            releaseDirectX11NativeForCurrentThread();
-                            reason.clear();
-                            ok=renderDirectX11Preview(snapshot->renderScene,*shadow,camera,w,h,
-                                                      pixels,stats,reason);
-                            result.nativeFallback=ok;
-                            if(!ok){
-                                const std::wstring previewReason=reason;
-                                reason=L"DXGI native presentation failed: "+nativeReason+
-                                       L"; DirectX 11 image preview also failed: "+previewReason;
-                            }
-                        }
-                    }
-                    result.directPresented=ok&&directPresent&&!result.nativeFallback;
-                    if(ok){
-                        result.renderer=lumaTrace
-                            ?(result.directPresented
-                                ?QStringLiteral("V17 LumaTrace BVH4 — Direct GPU (swapchain)")
-                                :QStringLiteral("V17 LumaTrace BVH4 — affichage Qt (QImage)"))
-                            :vulkan
-                            ?(result.directPresented
-                                ?QStringLiteral("V17 Vulkan Raster — Direct GPU (swapchain)")
-                                :QStringLiteral("V17 Vulkan Raster — affichage Qt (QImage)"))
-                            :(result.directPresented
-                                ?QStringLiteral("V17 D3D11 Raster — Direct GPU (swapchain)")
-                                :QStringLiteral("V17 D3D11 Raster — affichage Qt (QImage)"));
-                        if(!vulkan&&!lumaTrace && rasterHybridLightingEnabled())
-                            result.renderer+=rasterGiCacheLoaded()
-                              ?QStringLiteral(" — GI transport pré-calculée")
-                              :QStringLiteral(" — sondes approximatives (sans table GI)");
-                    }
-                }else{
-                    ok=renderCompute11Preview(snapshot->renderScene,camera,w,h,pixels,stats,reason);
-                    if(ok)result.renderer=QStringLiteral("V16 D3D11 Compute — GI adaptative");
-                }
-                if(!ok){
-                    // Never send hundreds of thousands of triangles through
-                    // CPU ray tracing as an invisible fallback. That used to
-                    // look like an indefinitely stalled D3D11 render.
-                    result.error=QStringLiteral(
-                        "Échec du rendu GPU %1 : %2. "
-                        "Aucun basculement automatique vers le CPU.")
-                        .arg(lumaTrace?QStringLiteral("LumaTrace BVH4"):
-                             (vulkan?QStringLiteral("Vulkan"):QStringLiteral("DirectX11")))
-                        .arg(QString::fromStdWString(reason));
-                    result.renderer=lumaTrace?QStringLiteral("V17 LumaTrace BVH4 — erreur"):
-                        (vulkan?QStringLiteral("V17 Vulkan — erreur")
-                               :QStringLiteral("V17 GPU D3D11 — erreur"));
-                    return result;
-                }
-            }
-            if(!wantGpu){
-                releaseDirectX11NativeForCurrentThread();
-                releaseVulkanDirectForCurrentThread();
-                releaseVulkanPreviewForCurrentThread();
-            }
-            if(!ok){
-                releaseDirectX11NativeForCurrentThread();
-                pixels.resize(size_t(w)*size_t(h));
-                std::shared_ptr<const ShadowMap> shadow;
-                bool shadowReused=false;
-                {
-                    std::lock_guard<std::mutex> lock(shadowCache->mutex);
-                    if(shadowCache->scene.lock()==snapshot &&
-                       shadowCache->hour==shadowHour && shadowCache->shadow){
-                        shadow=shadowCache->shadow;
-                        shadowReused=true;
-                    }else{
-                        Stats shadowStats;
-                        shadow=std::make_shared<ShadowMap>(
-                            buildShadow(snapshot->renderScene,shadowStats));
-                        shadowCache->scene=snapshot;
-                        shadowCache->hour=shadowHour;
-                        shadowCache->shadow=shadow;
-                    }
-                }
-                const unsigned workers=std::max(1u,std::min(8u,std::thread::hardware_concurrency()));
-                if(globalIllumination){
-                    std::vector<V> hdrAccum;
-                    unsigned completed=0;
-                    double totalMs=0;
-                    while(completed<sampleCount){
-                        if(serial->load()!=token)return result;
-                        const unsigned batch=progressive?
-                            std::min(std::max(1u,completed),sampleCount-completed):
-                            sampleCount-completed;
-                        const auto pass=renderGiAccumulatePass(
-                            snapshot->renderScene,*shadow,camera,w,h,hdrAccum,pixels,
-                            completed,batch,workers,*serial,token,maxBounces);
-                        if(serial->load()!=token)return result;
-                        completed+=batch;
-                        totalMs+=pass.ms;
-                        std::vector<uint32_t> display=pixels;
-                        // Filtering is separate from HDR accumulation, so the
-                        // next batch never feeds on blurred/tonemapped pixels.
-                        if(denoise&&completed>=4)
-                            display=denoiseBilateral(display,w,h,workers);
-                        if(edgeAA)display=antialiasEdges4(display,w,h,4,false);
-                        QImage image(w,h,QImage::Format_ARGB32);
-                        for(int y=0;y<h;++y)
-                            std::memcpy(image.scanLine(y),display.data()+size_t(y)*w,size_t(w)*4);
-                        if(progressive&&completed<sampleCount){
-                            QMetaObject::invokeMethod(this,
-                                [this,serial,token,outputView,count=completed,target=sampleCount,w,h,image=std::move(image)]() mutable {
-                                    if(serial->load()!=token)return;
-                                    if(outputView==canvas_)lastImage_=image;
-                                    outputView->setImage(std::move(image));
-                                    statusBar()->showMessage(
-                                        QStringLiteral("GI progressive — %1 / %2 échantillons (%3×%4)")
-                                            .arg(count).arg(target).arg(w).arg(h));
-                                },Qt::QueuedConnection);
-                        }else{
-                            result.image=std::move(image);
-                        }
-                    }
-                    result.renderer=QStringLiteral("CPU GI — %1 rebonds, %2 spp, HDR%3 — %4×%5")
-                        .arg(maxBounces).arg(sampleCount)
-                        .arg(denoise?QStringLiteral(", débruité"):QString())
-                        .arg(w).arg(h);
-                    result.milliseconds=totalMs;
-                    return result;
-                }
-                // Reuse the active render generation so CPU fallback/direct
-                // rays stop promptly when the scene or camera is changed.
-                stats=m3d::render(snapshot->renderScene,*shadow,camera,w,h,pixels,
-                                  workers,false,*serial,token,sampleCount,false,false,false,3);
-                if(serial->load()!=token)return result;
-                if(denoiseDirect) pixels=denoiseBilateral(pixels,w,h,workers);
-                result.renderer=shadowReused
-                    ?QStringLiteral("CPU Ray Tracing — %1 spp, ombres en cache").arg(sampleCount)
-                    :QStringLiteral("CPU Ray Tracing — %1 spp, ombres calculées").arg(sampleCount);
-            }else result.gpu=true;
-            result.milliseconds=stats.ms+shadowBuildMs;
-            result.renderer+=QStringLiteral(" — %1×%2").arg(w).arg(h);
-            if(result.nativeFallback){
-                result.renderer+=vulkan
-                    ?QStringLiteral(" — secours image Vulkan via QImage (WSI indisponible)")
-                    :QStringLiteral(" — secours QImage (DXGI indisponible)");
-                if(!result.nativeFailure.isEmpty())
-                    result.renderer+=QStringLiteral(" — échec présentation native : %1")
-                        .arg(result.nativeFailure);
-            }
-            if(result.directPresented){
-                result.renderer+=QStringLiteral(" — écran GPU direct (swapchain)");
-                return result; // No 4-byte-per-pixel CPU/QImage allocation.
-            }
-            if(edgeAA && !raster && pixels.size()==size_t(w)*size_t(h))
-                pixels=antialiasEdges4(pixels,w,h,4,false);
-            if(pixels.size()!=size_t(w)*h){
-                result.error+=QStringLiteral("Image incomplète");
-                return result;
-            }
-            QImage image(w,h,QImage::Format_ARGB32);
-            for(int y=0;y<h;y++)std::memcpy(image.scanLine(y),pixels.data()+size_t(y)*w,size_t(w)*4);
-            result.image=std::move(image);
-            return result;
-        }));
+        cse::v17render::Request renderRequest;
+        renderRequest.scene=snapshot;
+        renderRequest.shadowCache=shadowCache;
+        renderRequest.serial=serial;
+        renderRequest.generation=token;
+        renderRequest.cameraPose=preset;
+        renderRequest.width=w;
+        renderRequest.height=h;
+        renderRequest.backend=requestedBackend;
+        renderRequest.directPresent=directPresent;
+        renderRequest.nativeHandle=nativeHandle;
+        renderRequest.sharedVulkanInstance=sharedVulkanInstance;
+        renderRequest.sharedVulkanSurface=sharedVulkanSurface;
+        renderRequest.edgeAA=edgeAA;
+        renderRequest.progressive=progressive;
+        renderRequest.denoise=denoise;
+        renderRequest.denoiseDirect=denoiseDirect;
+        renderRequest.sampleCount=sampleCount;
+        renderRequest.maxBounces=maxBounces;
+        renderRequest.renderHour=renderHour;
+        renderRequest.shadowHour=shadowHour;
+        renderRequest.nativeWindowDetails=nativeWindowDetails;
+        renderRequest.requestStamp=requestStamp;
+        renderRequest.publishProgressiveFrame=
+            [this,serial,token,outputView](QImage image,unsigned count,unsigned target,int frameWidth,int frameHeight){
+                QMetaObject::invokeMethod(this,
+                    [this,serial,token,outputView,count,target,frameWidth,frameHeight,
+                     image=std::move(image)]() mutable {
+                        if(serial->load()!=token)return;
+                        if(outputView==canvas_)lastImage_=image;
+                        outputView->setImage(std::move(image));
+                        statusBar()->showMessage(
+                            QStringLiteral("GI progressive — %1 / %2 échantillons (%3×%4)")
+                                .arg(count).arg(target).arg(frameWidth).arg(frameHeight));
+                    },Qt::QueuedConnection);
+            };
+        watcher_.setFuture(QtConcurrent::run(&renderPool_,
+            [request=std::move(renderRequest)]() mutable {
+                return cse::v17render::execute(request);
+            }));
     }
 };
 QString defaultPath(){
