@@ -49,6 +49,7 @@ class VerifiedCC0Mirror:
     def __init__(self, cache):
         self.data = {}
         cache.parent.mkdir(parents=True, exist_ok=True)
+        mismatches = {}
         for model, expected_sha in EXPECTED.items():
             dest = cache.parent / (model + ".glb")
             if dest.exists():
@@ -56,11 +57,17 @@ class VerifiedCC0Mirror:
             else:
                 with urllib.request.urlopen(MIRROR + model + ".glb", timeout=60) as req:
                     raw = req.read()
-            blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
+            blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\\0" + raw).hexdigest()
             if blob != expected_sha:
-                raise RuntimeError("Unverified CC0 GLB: " + model + " git blob SHA=" + blob)
+                # Collect all changed upstream fingerprints in one CI run; the
+                # archive remains blocked until every fingerprint is reviewed.
+                mismatches[model] = blob
+                continue
             dest.write_bytes(raw)
             self.data["Models/GLTF format/" + model + ".glb"] = raw
+        if mismatches:
+            raise RuntimeError("Unverified CC0 GLB Git blob SHA(s): " +
+                               json.dumps(mismatches, sort_keys=True))
     def namelist(self):
         return list(self.data)
     def read(self, path):
