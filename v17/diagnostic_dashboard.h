@@ -12,7 +12,9 @@
 #include <QTabWidget>
 #include <QVBoxLayout>
 #include <QWidget>
+#include <cmath>
 #include <functional>
+#include <limits>
 #include <utility>
 
 namespace cse::diagnostics {
@@ -39,8 +41,8 @@ struct DashboardData {
     double fps=0.0;
     double lastRenderMs=0.0;
     double solarHour=0.0;
-    double daylight=0.0;
-    double lampFactor=0.0;
+    double daylight=std::numeric_limits<double>::quiet_NaN();
+    double lampFactor=std::numeric_limits<double>::quiet_NaN();
     bool sceneLoading=false;
     bool exploring=false;
 };
@@ -140,8 +142,8 @@ public:
 
         pointLightValue_->setText(QStringLiteral("%1 lumières ponctuelles de scène").arg(d.lights));
         solarValue_->setText(QStringLiteral("%1 h").arg(d.solarHour,0,'f',2));
-        daylightValue_->setText(QStringLiteral("%1").arg(d.daylight,0,'f',2));
-        lampValue_->setText(QStringLiteral("%1").arg(d.lampFactor,0,'f',2));
+        daylightValue_->setText(std::isfinite(d.daylight)?QStringLiteral("%1").arg(d.daylight,0,'f',2):QStringLiteral("n/d"));
+        lampValue_->setText(std::isfinite(d.lampFactor)?QStringLiteral("%1").arg(d.lampFactor,0,'f',2):QStringLiteral("n/d"));
 
         ramValue_->setText(d.systemMemoryPercent>=0
             ?QStringLiteral("%1 %").arg(d.systemMemoryPercent):QStringLiteral("n/d"));
