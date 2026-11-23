@@ -17,6 +17,7 @@ on:
   pull_request:
     paths:
       - 'v17/**'
+      - 'scenes/v16/benchmark-civic/**'
       - 'tools/v17_523_*'
       - '.github/workflows/v17-493-vulkan-complete.yml'
   workflow_dispatch:
