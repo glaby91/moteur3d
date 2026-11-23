@@ -59,6 +59,34 @@ jobs:
           }
           Copy-Item $manifestPath (Join-Path $sceneDirectory "SCENE_VERSION.json") -Force
           Write-Host "V17 package scene: $($manifest.revision) from glaby91/moteur3d-scene"
+      - name: Build and verify licensed Ukrainian radio audio
+        shell: pwsh
+        timeout-minutes: 20
+        run: |
+          python -m pip install --disable-pip-version-check imageio-ffmpeg
+          if ($LASTEXITCODE -ne 0) { throw "Could not prepare FFmpeg for the radio asset" }
+          $ffmpeg = (python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())" | Select-Object -Last 1).Trim()
+          if (!(Test-Path $ffmpeg)) { throw "FFmpeg executable not found: $ffmpeg" }
+          $ffmpegDir = Split-Path $ffmpeg -Parent
+          Copy-Item $ffmpeg (Join-Path $ffmpegDir "ffmpeg.exe") -Force
+          $env:PATH = "$ffmpegDir;$env:PATH"
+          python assets/audio/pripyat_radio/build_radio.py --runtime-preview --output build-v17/radio-runtime/ukrainian_radio_reconstruction.ogg
+          if ($LASTEXITCODE -ne 0) { throw "Licensed Ukrainian radio audio could not be built" }
+          $wav = "build-v17/radio-runtime/pripyat_radio.wav"
+          if (!(Test-Path $wav)) { throw "Generated runtime radio WAV is missing" }
+          @'
+          import sys, wave
+          path = sys.argv[1]
+          with wave.open(path, "rb") as audio:
+              duration = audio.getnframes() / audio.getframerate()
+              assert audio.getnchannels() == 1, "radio WAV must be mono"
+              assert audio.getsampwidth() == 2, "radio WAV must be 16-bit PCM"
+              assert audio.getframerate() == 16000, "radio WAV must be 16 kHz"
+              assert 285 <= duration <= 295, f"radio programme is only {duration:.1f}s"
+              print(f"Verified radio programme: {duration:.1f}s, {audio.getnframes()} frames")
+          '@ | python - $wav
+          if ($LASTEXITCODE -ne 0) { throw "Radio content/duration verification failed" }
+          (Get-FileHash $wav -Algorithm SHA256).Hash | Set-Content "build-v17/radio-runtime/pripyat_radio.sha256" -Encoding ascii
       - name: Qt6
         uses: jurplel/install-qt-action@v4
         with:
@@ -879,33 +907,11 @@ jobs:
                            "build-v17/fresco-ray-audit/fresco-ray-report.json")) {
             if (!(Test-Path $p)) { throw "Fresco ray audit output missing: $p" }
           }
-      - name: Build and verify licensed Ukrainian radio audio
+      - name: Install verified radio audio into V17 package
         shell: pwsh
-        timeout-minutes: 20
         run: |
-          python -m pip install --disable-pip-version-check imageio-ffmpeg
-          if ($LASTEXITCODE -ne 0) { throw "Could not prepare FFmpeg for the radio asset" }
-          $ffmpeg = (python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())" | Select-Object -Last 1).Trim()
-          if (!(Test-Path $ffmpeg)) { throw "FFmpeg executable not found: $ffmpeg" }
-          $ffmpegDir = Split-Path $ffmpeg -Parent
-          Copy-Item $ffmpeg (Join-Path $ffmpegDir "ffmpeg.exe") -Force
-          $env:PATH = "$ffmpegDir;$env:PATH"
-          python assets/audio/pripyat_radio/build_radio.py --runtime-preview --output build-v17/radio-assets/ukrainian_radio_reconstruction.ogg
-          if ($LASTEXITCODE -ne 0) { throw "Licensed Ukrainian radio audio could not be built" }
-          $wav = "build-v17/radio-assets/pripyat_radio.wav"
-          if (!(Test-Path $wav)) { throw "Generated runtime radio WAV is missing" }
-          @'
-          import sys, wave
-          path = sys.argv[1]
-          with wave.open(path, "rb") as audio:
-              duration = audio.getnframes() / audio.getframerate()
-              assert audio.getnchannels() == 1, "radio WAV must be mono"
-              assert audio.getsampwidth() == 2, "radio WAV must be 16-bit PCM"
-              assert audio.getframerate() == 16000, "radio WAV must be 16 kHz"
-              assert 285 <= duration <= 295, f"radio programme is only {duration:.1f}s"
-              print(f"Verified radio programme: {duration:.1f}s, {audio.getnframes()} frames")
-          '@ | python - $wav
-          if ($LASTEXITCODE -ne 0) { throw "Radio content/duration verification failed" }
+          $wav = "build-v17/radio-runtime/pripyat_radio.wav"
+          if (!(Test-Path $wav)) { throw "Verified radio WAV is missing before packaging" }
           New-Item -ItemType Directory -Force "dist-v17/audio" | Out-Null
           Copy-Item $wav "dist-v17/audio/pripyat_radio.wav" -Force
           Copy-Item "assets/audio/pripyat_radio/CREDITS.md" "dist-v17/audio/CREDITS.md" -Force
@@ -914,7 +920,10 @@ jobs:
           Contenu : 60 secondes de narration ukrainienne puis un chant sous licence CC BY-SA 3.0.
           Lecture en boucle; attribution et licence du montage : CREDITS.md.
           '@ | Set-Content "dist-v17/audio/CONTENU_WAV.txt" -Encoding UTF8
-          Write-Host "READY: packaged radio is licensed Ukrainian narration and song, not the hiss-only test signal."
+          $expected = (Get-Content "build-v17/radio-runtime/pripyat_radio.sha256" -Raw).Trim()
+          $actual = (Get-FileHash "dist-v17/audio/pripyat_radio.wav" -Algorithm SHA256).Hash
+          if ($actual -ne $expected) { throw "Packaged radio audio differs from verified WAV" }
+          Write-Host "READY: package contains the verified licensed narration and song."
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
