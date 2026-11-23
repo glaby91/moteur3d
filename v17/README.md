@@ -52,3 +52,4 @@ Le panneau sépare les pages **Aperçu**, **Scène**, **Lumières**, **Ressource
 Le comptage des triangles provient de la géométrie triangulée de la scène chargée. La révision moteur est la version produit compilée plus la révision Git empaquetée ; la révision de scène vient des métadonnées du manifeste. En présentation GPU directe, le temps affiché peut correspondre à la soumission CPU et ne constitue pas un temps GPU de fin d’exécution. Voir [la fiche de reprise et les limites](docs/DIAGNOSTIC_DASHBOARD.md).
 
 La modification est enregistrée sur une branche de travail et n’a pas encore été compilée.
+
