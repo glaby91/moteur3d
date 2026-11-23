@@ -75,6 +75,7 @@ La liste ci-dessous est **non exhaustive**. Ce sont des pistes et des objectifs 
 - **Qualité et coût de calcul :** viser le meilleur rendu possible avec le moins de calculs possible pour les modes interactifs. Le CPU Ray Tracing doit continuer à progresser comme référence de qualité visuelle.
 - **Raster DX11 :** poursuivre l’instancing, le regroupement spatial et le culling, ajouter du LOD sur les façades et le mobilier, puis améliorer le réglage PBR, de l’éclairage et des ombres sans dégrader l’image. La capacité cible de la roadmap va jusqu’à 2 millions de triangles ; elle reste à valider.
 - **Mesures et présentation DX11 :** valider le Z-prepass sur plusieurs vues, étudier la sélection des lumières locales par zones et une présentation native DXGI afin de réduire les copies GPU→CPU. Les gains attendus restent à mesurer sur le matériel cible.
+- **LumaTrace :** étendre la gestion des lumières aux rebonds secondaires afin qu’elles contribuent aussi à l’éclairage indirect ; mesurer la qualité obtenue et le coût de calcul.
 - **Eau DX11/Vulkan :** étudier des normales animées, des reflets d’environnement à faible coût et éventuellement des ombres raster, en vérifiant la qualité et la fluidité.
 - **Physique :** préparer l’intégration d’un moteur de physique pour gérer les interactions et collisions de façon plus complète.
 - **Backend DXR / DirectX 12 :** étudier comme évolution possible un backend de ray tracing matériel DXR, avec détection des GPU compatibles et un chemin de repli pour les autres configurations.
