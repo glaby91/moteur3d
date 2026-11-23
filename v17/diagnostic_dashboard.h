@@ -84,7 +84,7 @@ public:
         heading->addWidget(eyebrow,0,0);
         heading->addWidget(title,1,0);
         heading->addWidget(subtitle,2,0);
-        auto* returnButton=new QPushButton(QStringLiteral("FERMER  ·  APPUI BREF TAB"));
+        auto* returnButton=new QPushButton(QStringLiteral("FERMER  ·  APPUI BREF <"));
         heading->addWidget(returnButton,0,1,3,1,Qt::AlignRight|Qt::AlignVCenter);
         connect(returnButton,&QPushButton::clicked,this,[this]{requestReturn();});
         root->addLayout(heading);
@@ -105,7 +105,7 @@ public:
         root->addWidget(pages_,1);
 
         auto* footer=new QLabel(QStringLiteral(
-            "TAB : retour au Pip-Boy    ·    ÉCHAP : arrêter le mode caméra    ·    Les valeurs indisponibles sont signalées, jamais estimées. En affichage direct, le temps peut mesurer la soumission CPU, pas l’exécution GPU."));
+            "< : retour au Pip-Boy    ·    ÉCHAP : arrêter le mode caméra    ·    Les valeurs indisponibles sont signalées, jamais estimées. En affichage direct, le temps peut mesurer la soumission CPU, pas l’exécution GPU."));
         footer->setObjectName(QStringLiteral("muted"));
         footer->setWordWrap(true);
         root->addWidget(footer);
@@ -361,7 +361,7 @@ public:
         lights_=addValue(metrics,0,1,QStringLiteral("LUMIÈRES"));
         memory_=addValue(metrics,1,1,QStringLiteral("RAM SYSTÈME"));
         layout->addLayout(metrics);
-        auto* footer=new QLabel(QStringLiteral("Appui bref : afficher/masquer  ·  Maintenir TAB : ouvrir"));
+        auto* footer=new QLabel(QStringLiteral("Appui bref : afficher/masquer  ·  Maintenir < : ouvrir"));
         footer->setObjectName(QStringLiteral("muted"));
         layout->addWidget(footer);
         outer->addWidget(panel);
