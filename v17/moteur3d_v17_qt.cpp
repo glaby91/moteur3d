@@ -1582,6 +1582,8 @@ protected:
         QMainWindow::keyReleaseEvent(e);
     }
 private:
+    QToolBar* camerasToolbar_=nullptr;
+    QPushButton* renderButton_=nullptr;
     QTreeWidget* sceneTree_=nullptr;
     QTreeWidget* resourceTree_=nullptr;
     QComboBox* cameraBox_=nullptr;
@@ -2073,7 +2075,7 @@ private:
         canvas_->setFocus();
     }
 
-    void createUi(){
+    void createMenusAndToolbar(){
         auto* file=menuBar()->addMenu(QStringLiteral("Fichier"));
         auto* captureAction=file->addAction(QStringLiteral("Capturer une anomalie (PNG + caméra JSON)…"));
         captureAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+A")));
@@ -2131,9 +2133,9 @@ private:
 
         // One-click camera presets are independent from the detailed settings panel.
         auto* camerasMenu=menuBar()->addMenu(QStringLiteral("Caméras"));
-        auto* camerasToolbar=addToolBar(QStringLiteral("Caméras · 1 à 6"));
-        camerasToolbar->setMovable(false);
-        camerasToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        auto* camerasToolbar_=addToolBar(QStringLiteral("Caméras · 1 à 6"));
+        camerasToolbar_->setMovable(false);
+        camerasToolbar_->setToolButtonStyle(Qt::ToolButtonTextOnly);
         for(int i=0;i<6;++i){
             auto* action=new QAction(QString::number(i+1),this);
             action->setShortcut(QKeySequence(QString::number(i+1)));
@@ -2148,21 +2150,21 @@ private:
                 if(!changed)requestRender();
             });
             quickCameraActions_.append(action);
-            camerasToolbar->addAction(action);
+            camerasToolbar_->addAction(action);
             camerasMenu->addAction(action);
         }
-        camerasToolbar->addSeparator();
-        sceneRevisionLabel_=new QLabel(QStringLiteral("Scène —"),camerasToolbar);
+        camerasToolbar_->addSeparator();
+        sceneRevisionLabel_=new QLabel(QStringLiteral("Scène —"),camerasToolbar_);
         sceneRevisionLabel_->setMinimumWidth(108);
         sceneRevisionLabel_->setToolTip(QStringLiteral("Révision du manifeste de la scène chargée"));
-        camerasToolbar->addWidget(sceneRevisionLabel_);
-        systemMemoryLabel_=new QLabel(QStringLiteral("RAM —"),camerasToolbar);
+        camerasToolbar_->addWidget(sceneRevisionLabel_);
+        systemMemoryLabel_=new QLabel(QStringLiteral("RAM —"),camerasToolbar_);
         systemMemoryLabel_->setToolTip(QStringLiteral("Charge de la mémoire physique système"));
-        camerasToolbar->addWidget(systemMemoryLabel_);
-        systemMemoryBar_=new QProgressBar(camerasToolbar);
+        camerasToolbar_->addWidget(systemMemoryLabel_);
+        systemMemoryBar_=new QProgressBar(camerasToolbar_);
         systemMemoryBar_->setRange(0,100); systemMemoryBar_->setTextVisible(false);
         systemMemoryBar_->setFixedSize(68,12);
-        camerasToolbar->addWidget(systemMemoryBar_);
+        camerasToolbar_->addWidget(systemMemoryBar_);
         memoryRefreshTimer_=new QTimer(this);
         connect(memoryRefreshTimer_,&QTimer::timeout,this,[this]{updateMemoryBanner();});
         memoryRefreshTimer_->start(1500); updateMemoryBanner();
@@ -2344,6 +2346,8 @@ private:
             if(message.clickedButton()==copy)QGuiApplication::clipboard()->setText(details);
         });
 
+    }
+    void createSceneExplorerDock(){
         auto* left=new QDockWidget(QStringLiteral("Explorateur de scène"),this);
         sceneExplorerDock_=left;
         auto* tabs=new QTabWidget;
@@ -2357,6 +2361,8 @@ private:
         addDockWidget(Qt::LeftDockWidgetArea,left);
         left->resize(360,720);
 
+    }
+    void createRenderSettingsDock(){
         auto* right=new QDockWidget(QStringLiteral("Rendu et matériaux"),this);
         renderControlsDock_=right;
         auto* controls=new QWidget;
@@ -2422,7 +2428,7 @@ private:
 #endif
         // Keep the backend choice visible at 1366px: renderer names
         // previously consumed the entire top toolbar and hid the renderer.
-        auto* fastBackend=new QComboBox(camerasToolbar);
+        auto* fastBackend=new QComboBox(camerasToolbar_);
         fastBackend->setObjectName(QStringLiteral("v17QuickRenderer"));
         fastBackend->setMinimumWidth(220);
         fastBackend->setMaximumWidth(330);
@@ -2436,10 +2442,10 @@ private:
             fastBackend->setItemData(i,backendBox_->itemText(i),Qt::ToolTipRole);
         }
         fastBackend->setCurrentIndex(backendBox_->currentIndex());
-        camerasToolbar->addSeparator();
-        camerasToolbar->addWidget(new QLabel(QStringLiteral("Moteur : "),camerasToolbar));
-        camerasToolbar->addWidget(fastBackend);
-        auto* quickRender=camerasToolbar->addAction(QStringLiteral("Actualiser"));
+        camerasToolbar_->addSeparator();
+        camerasToolbar_->addWidget(new QLabel(QStringLiteral("Moteur : "),camerasToolbar_));
+        camerasToolbar_->addWidget(fastBackend);
+        auto* quickRender=camerasToolbar_->addAction(QStringLiteral("Actualiser"));
         connect(quickRender,&QAction::triggered,this,[this]{requestRender();});
         connect(fastBackend,qOverload<int>(&QComboBox::currentIndexChanged),
                 backendBox_,&QComboBox::setCurrentIndex);
@@ -2711,8 +2717,8 @@ private:
                 requestRender();
             }
         });
-        auto* renderButton=new QPushButton(QStringLiteral("Calculer l'image"));
-        vertical->addWidget(renderButton);
+        renderButton_=new QPushButton(QStringLiteral("Calculer l'image"));
+        vertical->addWidget(renderButton_);
         auto* materials=new QGroupBox(QStringLiteral("Matériau sélectionné"));
         auto* matForm=new QFormLayout(materials);
         materialLabel_=new QLabel(QStringLiteral("Sélectionner un matériau dans le catalogue"));
@@ -2742,6 +2748,8 @@ private:
         right->raise();
         // F11 controls the dedicated render window, leaving these controls
         // available behind it.
+    }
+    void connectUiActions(){
         auto* viewMenu=menuBar()->addMenu(QStringLiteral("Affichage"));
         auto* rendererHudAction=viewMenu->addAction(QStringLiteral("Afficher le HUD de la fenêtre de rendu (F2)"));
         rendererHudAction->setCheckable(true);
@@ -2793,7 +2801,7 @@ private:
             });
         });
 
-        connect(renderButton,&QPushButton::clicked,this,[this]{requestRender();});
+        connect(renderButton_,&QPushButton::clicked,this,[this]{requestRender();});
         connect(cameraBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){
             azimuth_->setValue(0);
             if(exploring_)activateFreeCamera();
@@ -2988,7 +2996,12 @@ private:
         connect(sceneTree_,&QTreeWidget::itemClicked,this,[this](QTreeWidgetItem* item,int){
             const QString key=item->data(0,Qt::UserRole).toString();
             if(runtime_&&runtime_->materialIndex.contains(key))chooseMaterial(runtime_->materialIndex.value(key),key);
-        });
+        });    }
+    void createUi(){
+        createMenusAndToolbar();
+        createSceneExplorerDock();
+        createRenderSettingsDock();
+        connectUiActions();
     }
     QImage lastImage_;
     void chooseMaterial(int id,const QString& name){
