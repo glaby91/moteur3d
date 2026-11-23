@@ -63,6 +63,7 @@ jobs:
         shell: pwsh
         timeout-minutes: 20
         run: |
+          $env:PYTHONIOENCODING = "utf-8"
           python -m pip install --disable-pip-version-check imageio-ffmpeg
           if ($LASTEXITCODE -ne 0) { throw "Could not prepare FFmpeg for the radio asset" }
           $ffmpeg = (python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())" | Select-Object -Last 1).Trim()
