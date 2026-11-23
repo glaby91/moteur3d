@@ -1228,6 +1228,7 @@ private:
     }
     void stopExploration(){
         if(diagnosticsDashboard_)diagnosticsDashboard_->hide();
+        if(dashboardRenderViewportHidden_&&canvas_){canvas_->show();dashboardRenderViewportHidden_=false;}
         if(wristPanel_)wristPanel_->hide();
         if(diagnosticsRefreshTimer_)diagnosticsRefreshTimer_->stop();
         if(tabHoldTimer_)tabHoldTimer_->stop();
@@ -1674,6 +1675,7 @@ private:
     QTimer* tabHoldTimer_=nullptr;
     cse::diagnostics::WristPanel* wristPanel_=nullptr;
     bool tabPressed_=false;
+    bool dashboardRenderViewportHidden_=false;
     QString sceneRevision_;
 
     void updateMemoryBanner(){
@@ -1804,6 +1806,7 @@ private:
     void closeDiagnosticsDashboard(){
         if(!diagnosticsDashboard_||!diagnosticsDashboard_->isVisible())return;
         diagnosticsDashboard_->hide();
+        if(dashboardRenderViewportHidden_&&canvas_){canvas_->show();dashboardRenderViewportHidden_=false;}
         if(exploring_&&!closingRequested_){
             ensureDiagnosticsWidgets();
             positionWristPanel();
@@ -1829,6 +1832,11 @@ private:
         if(diagnosticsDashboard_->isVisible())return;
         wristPanel_->hide();
         releaseMouseLook();
+        // Direct GPU presentation owns a separate native top-level HWND which
+        // can stay above Qt windows. Hide only its viewport while the full-screen
+        // dashboard is open, then restore it when returning to exploration.
+        dashboardRenderViewportHidden_=canvas_->isVisible();
+        if(dashboardRenderViewportHidden_)canvas_->hide();
         if(QScreen* screen=canvas_->screen()){
             diagnosticsDashboard_->setGeometry(screen->geometry());
         }
