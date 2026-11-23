@@ -2935,7 +2935,7 @@ private:
         if(!pendingScene.isEmpty() &&
            QFileInfo(pendingScene).absoluteFilePath()==QFileInfo(scenePath_).absoluteFilePath()){
             // Persist only after the engine has accepted the downloaded scene.
-            QSettings settings;
+            QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
             settings.setValue(QStringLiteral("Scene/InstalledLatestPath"),scenePath_);
             settings.remove(QStringLiteral("Scene/DeferredRevision"));
             setProperty("v17.pendingSceneUpdatePath",QString());
