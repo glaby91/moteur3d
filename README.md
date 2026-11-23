@@ -67,6 +67,10 @@ endlocal
 
 Le moteur copie la scène indiquée par `V17_SCENE_SOURCE_DIR` dans le dossier de l’application lors de la compilation. Le binaire et la scène se trouvent donc sous `build-v17\Release`. La compilation locale construit le moteur et ses cibles CMake ; elle ne reproduit pas toutes les étapes de validation, de finition et de packaging exécutées par le workflow GitHub Actions.
 
+## Évolutions futures
+
+Au démarrage, le moteur devra consulter le dépôt `moteur3d-scene` et comparer la révision de la scène locale à celle de la dernière release. Si la scène locale n’est pas à jour, un message indiquera les deux révisions et proposera le lien de téléchargement de la scène récente. Cette vérification reste à implémenter.
+
 ## Benchmarks
 
 Le package inclut `LANCER_BENCHMARK.bat` et les exécutables de benchmark. Exemple depuis le dossier extrait :
