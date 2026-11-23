@@ -64,8 +64,22 @@ std::shared_ptr<const m3d::ShadowMap> getOrBuildShadow(
     return shadow;
 }
 
-Result execute(const Request& request){
-    Result result;
+
+namespace {
+
+struct RenderWork {
+    m3d::Stats stats;
+    std::vector<uint32_t> pixels;
+    double shadowBuildMs=0.0;
+    bool wantGpu=false;
+    bool raster=false;
+    bool globalIllumination=false;
+    bool vulkan=false;
+    bool lumaTrace=false;
+    bool ok=false;
+};
+
+void initializeResult(const Request& request,Result& result){
     result.requestStamp=request.requestStamp;
     result.cameraPose=request.cameraPose;
     result.generation=request.generation;
@@ -79,119 +93,125 @@ Result execute(const Request& request){
             .arg(GetCurrentThreadId())
             .arg(QString::number(qulonglong(result.renderThread),16));
 #endif
-    if(!request.scene||!request.serial||request.width<=0||request.height<=0){
-        result.error=QStringLiteral("Paramètres de rendu incomplets.");
-        return result;
+}
+
+bool validateRequest(const Request& request,Result& result){
+    if(request.scene&&request.serial&&request.width>0&&request.height>0)return true;
+    result.error=QStringLiteral("Paramètres de rendu incomplets.");
+    return false;
+}
+
+void configureRenderWork(const Request& request,RenderWork& work){
+    work.wantGpu=request.backend==1||request.backend==4||
+                  request.backend==5||request.backend==6;
+    work.raster=request.backend>=4&&request.backend<=6;
+    work.globalIllumination=request.backend==2||request.backend==3;
+    work.vulkan=request.backend==5;
+    work.lumaTrace=request.backend==6;
+}
+
+bool renderGpuBackend(const Request& request,const m3d::Camera& camera,
+                      Result& result,RenderWork& work){
+    if(!work.wantGpu)return true;
+
+    BackendResult backend;
+    if(work.raster){
+        const auto shadow=getOrBuildShadow(request,&work.shadowBuildMs,true);
+        if(!shadow){
+            result.error=QStringLiteral("Impossible de préparer les ombres de la scène.");
+            return false;
+        }
+        if(work.lumaTrace)backend=renderLumaTrace(request,camera,*shadow);
+        else if(work.vulkan)backend=renderVulkanRaster(request,camera,*shadow);
+        else backend=renderD3D11Raster(request,camera,*shadow);
+
+        work.ok=backend.ok;
+        work.stats=backend.stats;
+        work.pixels=std::move(backend.pixels);
+        result.nativeFailure=std::move(backend.nativeFailure);
+        result.nativeFallback=backend.nativeFallback;
+        result.directPresented=work.ok&&request.directPresent&&!result.nativeFallback;
+        if(work.ok){
+            result.renderer=work.lumaTrace
+                ?(result.directPresented
+                    ?QStringLiteral("V17 LumaTrace BVH4 — Direct GPU (swapchain)")
+                    :QStringLiteral("V17 LumaTrace BVH4 — affichage Qt (QImage)"))
+                :work.vulkan
+                ?(result.directPresented
+                    ?QStringLiteral("V17 Vulkan Raster — Direct GPU (swapchain)")
+                    :QStringLiteral("V17 Vulkan Raster — affichage Qt (QImage)"))
+                :(result.directPresented
+                    ?QStringLiteral("V17 D3D11 Raster — Direct GPU (swapchain)")
+                    :QStringLiteral("V17 D3D11 Raster — affichage Qt (QImage)"));
+            if(!work.vulkan&&!work.lumaTrace&&m3d::rasterHybridLightingEnabled())
+                result.renderer+=m3d::rasterGiCacheLoaded()
+                    ?QStringLiteral(" — GI transport pré-calculée")
+                    :QStringLiteral(" — sondes approximatives (sans table GI)");
+        }
+    }else{
+        backend=renderD3D11Compute(request,camera);
+        work.ok=backend.ok;
+        work.stats=backend.stats;
+        work.pixels=std::move(backend.pixels);
+        result.renderer=std::move(backend.renderer);
     }
 
-    m3d::updateLighting(request.renderHour);
-    const auto camera=v16::makeCamera(request.cameraPose,request.width,request.height);
-    double shadowBuildMs=0.0;
-    bool ok=false;
-    m3d::Stats stats;
-    std::vector<uint32_t> pixels;
+    if(work.ok)return true;
 
-    const bool wantGpu=request.backend==1||request.backend==4||
-                       request.backend==5||request.backend==6;
-    const bool raster=request.backend>=4&&request.backend<=6;
-    const bool globalIllumination=request.backend==2||request.backend==3;
-    const bool vulkan=request.backend==5;
-    const bool lumaTrace=request.backend==6;
+    result.error=QStringLiteral(
+        "Échec du rendu GPU %1 : %2. Aucun basculement automatique vers le CPU.")
+        .arg(work.lumaTrace?QStringLiteral("LumaTrace BVH4"):
+             (work.vulkan?QStringLiteral("Vulkan"):QStringLiteral("DirectX11")))
+        .arg(QString::fromStdWString(backend.reason));
+    result.renderer=work.lumaTrace?QStringLiteral("V17 LumaTrace BVH4 — erreur"):
+        (work.vulkan?QStringLiteral("V17 Vulkan — erreur")
+                   :QStringLiteral("V17 GPU D3D11 — erreur"));
+    return false;
+}
 
-    if(wantGpu){
-        BackendResult backend;
-        if(raster){
-            const auto shadow=getOrBuildShadow(request,&shadowBuildMs,true);
-            if(!shadow){
-                result.error=QStringLiteral("Impossible de préparer les ombres de la scène.");
-                return result;
-            }
-            if(lumaTrace)backend=renderLumaTrace(request,camera,*shadow);
-            else if(vulkan)backend=renderVulkanRaster(request,camera,*shadow);
-            else backend=renderD3D11Raster(request,camera,*shadow);
-
-            ok=backend.ok;
-            stats=backend.stats;
-            pixels=std::move(backend.pixels);
-            result.nativeFailure=std::move(backend.nativeFailure);
-            result.nativeFallback=backend.nativeFallback;
-            result.directPresented=ok&&request.directPresent&&!result.nativeFallback;
-            if(ok){
-                result.renderer=lumaTrace
-                    ?(result.directPresented
-                        ?QStringLiteral("V17 LumaTrace BVH4 — Direct GPU (swapchain)")
-                        :QStringLiteral("V17 LumaTrace BVH4 — affichage Qt (QImage)"))
-                    :vulkan
-                    ?(result.directPresented
-                        ?QStringLiteral("V17 Vulkan Raster — Direct GPU (swapchain)")
-                        :QStringLiteral("V17 Vulkan Raster — affichage Qt (QImage)"))
-                    :(result.directPresented
-                        ?QStringLiteral("V17 D3D11 Raster — Direct GPU (swapchain)")
-                        :QStringLiteral("V17 D3D11 Raster — affichage Qt (QImage)"));
-                if(!vulkan&&!lumaTrace&&m3d::rasterHybridLightingEnabled())
-                    result.renderer+=m3d::rasterGiCacheLoaded()
-                        ?QStringLiteral(" — GI transport pré-calculée")
-                        :QStringLiteral(" — sondes approximatives (sans table GI)");
-            }
-        }else{
-            backend=renderD3D11Compute(request,camera);
-            ok=backend.ok;
-            stats=backend.stats;
-            pixels=std::move(backend.pixels);
-            result.renderer=std::move(backend.renderer);
-        }
-
-        if(!ok){
-            result.error=QStringLiteral(
-                "Échec du rendu GPU %1 : %2. Aucun basculement automatique vers le CPU.")
-                .arg(lumaTrace?QStringLiteral("LumaTrace BVH4"):
-                     (vulkan?QStringLiteral("Vulkan"):QStringLiteral("DirectX11")))
-                .arg(QString::fromStdWString(backend.reason));
-            result.renderer=lumaTrace?QStringLiteral("V17 LumaTrace BVH4 — erreur"):
-                (vulkan?QStringLiteral("V17 Vulkan — erreur")
-                       :QStringLiteral("V17 GPU D3D11 — erreur"));
-            return result;
-        }
-    }
-
-    if(!wantGpu){
+bool renderCpuFallback(const Request& request,const m3d::Camera& camera,
+                       Result& result,RenderWork& work){
+    if(!work.wantGpu){
         m3d::releaseDirectX11NativeForCurrentThread();
         m3d::releaseVulkanDirectForCurrentThread();
         m3d::releaseVulkanPreviewForCurrentThread();
     }
-
-    if(!ok){
-        m3d::releaseDirectX11NativeForCurrentThread();
-        bool shadowReused=false;
-        if(request.shadowCache){
-            std::lock_guard<std::mutex> lock(request.shadowCache->mutex);
-            shadowReused=request.shadowCache->scene.lock()==request.scene&&
-                request.shadowCache->hour==request.shadowHour&&request.shadowCache->shadow;
-        }
-        const auto shadow=getOrBuildShadow(request,nullptr,false);
-        if(!shadow){
-            result.error=QStringLiteral("Impossible de préparer les ombres de la scène.");
-            return result;
-        }
-        BackendResult cpu=renderCpu(request,camera,*shadow,shadowReused);
-        if(cpu.cancelled||request.serial->load()!=request.generation)return result;
-        if(globalIllumination){
-            result.image=std::move(cpu.image);
-            result.renderer=std::move(cpu.renderer);
-            result.milliseconds=cpu.milliseconds;
-            return result;
-        }
-        stats=cpu.stats;
-        pixels=std::move(cpu.pixels);
-        result.renderer=std::move(cpu.renderer);
-    }else{
+    if(work.ok){
         result.gpu=true;
+        return true;
     }
 
-    result.milliseconds=stats.ms+shadowBuildMs;
+    m3d::releaseDirectX11NativeForCurrentThread();
+    bool shadowReused=false;
+    if(request.shadowCache){
+        std::lock_guard<std::mutex> lock(request.shadowCache->mutex);
+        shadowReused=request.shadowCache->scene.lock()==request.scene&&
+            request.shadowCache->hour==request.shadowHour&&request.shadowCache->shadow;
+    }
+    const auto shadow=getOrBuildShadow(request,nullptr,false);
+    if(!shadow){
+        result.error=QStringLiteral("Impossible de préparer les ombres de la scène.");
+        return false;
+    }
+    BackendResult cpu=renderCpu(request,camera,*shadow,shadowReused);
+    if(cpu.cancelled||request.serial->load()!=request.generation)return false;
+    if(work.globalIllumination){
+        result.image=std::move(cpu.image);
+        result.renderer=std::move(cpu.renderer);
+        result.milliseconds=cpu.milliseconds;
+        return false; // GI already produced its final QImage.
+    }
+    work.stats=cpu.stats;
+    work.pixels=std::move(cpu.pixels);
+    result.renderer=std::move(cpu.renderer);
+    return true;
+}
+
+Result finalizeResult(const Request& request,Result result,RenderWork& work){
+    result.milliseconds=work.stats.ms+work.shadowBuildMs;
     result.renderer+=QStringLiteral(" — %1×%2").arg(request.width).arg(request.height);
     if(result.nativeFallback){
-        result.renderer+=vulkan
+        result.renderer+=work.vulkan
             ?QStringLiteral(" — secours image Vulkan via QImage (WSI indisponible)")
             :QStringLiteral(" — secours QImage (DXGI indisponible)");
         if(!result.nativeFailure.isEmpty())
@@ -202,18 +222,35 @@ Result execute(const Request& request){
         result.renderer+=QStringLiteral(" — écran GPU direct (swapchain)");
         return result;
     }
-    if(request.edgeAA&&!raster&&pixels.size()==size_t(request.width)*size_t(request.height))
-        pixels=m3d::antialiasEdges4(pixels,request.width,request.height,4,false);
-    if(pixels.size()!=size_t(request.width)*size_t(request.height)){
+    if(request.edgeAA&&!work.raster&&
+       work.pixels.size()==size_t(request.width)*size_t(request.height))
+        work.pixels=m3d::antialiasEdges4(work.pixels,request.width,request.height,4,false);
+    if(work.pixels.size()!=size_t(request.width)*size_t(request.height)){
         result.error=QStringLiteral("Image incomplète");
         return result;
     }
     QImage image(request.width,request.height,QImage::Format_ARGB32);
     for(int y=0;y<request.height;++y)
-        std::memcpy(image.scanLine(y),pixels.data()+size_t(y)*request.width,
+        std::memcpy(image.scanLine(y),work.pixels.data()+size_t(y)*request.width,
                     size_t(request.width)*4);
     result.image=std::move(image);
     return result;
 }
 
+} // namespace
+
+Result execute(const Request& request){
+    Result result;
+    initializeResult(request,result);
+    if(!validateRequest(request,result))return result;
+
+    m3d::updateLighting(request.renderHour);
+    const auto camera=v16::makeCamera(request.cameraPose,request.width,request.height);
+    RenderWork work;
+    configureRenderWork(request,work);
+
+    if(!renderGpuBackend(request,camera,result,work))return result;
+    if(!renderCpuFallback(request,camera,result,work))return result;
+    return finalizeResult(request,std::move(result),work);
+}
 } // namespace cse::v17render
