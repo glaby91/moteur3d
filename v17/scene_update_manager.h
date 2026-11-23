@@ -21,6 +21,7 @@
 #include <QUrl>
 #include <QWidget>
 #include <functional>
+#include <utility>
 
 class V17SceneUpdateChecker final : public QObject {
 public:
