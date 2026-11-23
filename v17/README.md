@@ -45,7 +45,7 @@ Chaque phase nécessite un accord explicite avant modification du moteur, compil
 
 ## Tableau de bord de diagnostic
 
-La branche `feature/v17-diagnostic-dashboard-tab-20261123` ajoute un panneau plein écran accessible avec `Tab` pendant l’exploration. Un nouvel appui sur `Tab` revient au rendu ; `Échap` garde son rôle habituel et arrête le mode caméra (le tableau de bord se ferme avec lui). `F11` conserve son comportement de plein écran du viewport.
+La branche `feature/v17-diagnostic-dashboard-tab-20261123` ajoute un panneau plein écran accessible avec `Tab` pendant l’exploration. Un appui bref sur `Tab` affiche ou masque le Pip-Boy compact au poignet. Maintenir `Tab` environ 550 ms ouvre l’interface plein écran ; un appui bref la ferme et revient au Pip-Boy. `Échap` garde son rôle habituel et arrête le mode caméra (les deux interfaces se ferment avec lui). `F11` conserve son comportement de plein écran du viewport.
 
 Le panneau sépare les pages **Aperçu**, **Scène**, **Lumières**, **Ressources** et **Diagnostic**. Il affiche la version et la révision Git du moteur, la révision fournie par le manifeste chargé, les objets source, triangles compilés, matériaux, albedos image, lumières, caméra, résolution, cadence, dernier temps moteur et charge mémoire système. Les valeurs non instrumentées (mémoire du processus et VRAM) sont explicitement signalées.
 

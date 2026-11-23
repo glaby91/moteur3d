@@ -314,5 +314,92 @@ private:
     }
 };
 
+
+class WristPanel final : public QWidget {
+public:
+    explicit WristPanel(QWidget* parent=nullptr)
+        :QWidget(parent,Qt::Tool|Qt::FramelessWindowHint|Qt::WindowDoesNotAcceptFocus){
+        setWindowTitle(QStringLiteral("CSE WARP — Pip-Boy"));
+        setAttribute(Qt::WA_ShowWithoutActivating);
+        setAttribute(Qt::WA_TransparentForMouseEvents);
+        setFocusPolicy(Qt::NoFocus);
+        setFixedSize(370,190);
+        setStyleSheet(QStringLiteral(
+            "QWidget { background:transparent; color:#e4f0e2; font-family:'Segoe UI'; }"
+            "QFrame#panel { background:#111b18; border:2px solid #71966c; border-radius:14px; }"
+            "QLabel#brand { color:#a8d58f; font: bold 10pt 'Consolas'; letter-spacing:1px; }"
+            "QLabel#name { color:#eff7e9; font: bold 14pt 'Segoe UI'; }"
+            "QLabel#value { color:#d7edc6; font: bold 11pt 'Consolas'; }"
+            "QLabel#muted { color:#9ab09b; font: 8pt 'Segoe UI'; }"));
+        auto* outer=new QVBoxLayout(this);
+        outer->setContentsMargins(0,0,0,0);
+        auto* panel=new QFrame(this);
+        panel->setObjectName(QStringLiteral("panel"));
+        auto* layout=new QVBoxLayout(panel);
+        layout->setContentsMargins(15,11,15,10);
+        layout->setSpacing(6);
+        auto* heading=new QHBoxLayout;
+        auto* brand=new QLabel(QStringLiteral("CSE WARP  /  WRIST LINK"));
+        brand->setObjectName(QStringLiteral("brand"));
+        engine_=new QLabel(QStringLiteral("V17 —"));
+        engine_->setObjectName(QStringLiteral("muted"));
+        heading->addWidget(brand,1);
+        heading->addWidget(engine_,0,Qt::AlignRight);
+        layout->addLayout(heading);
+        scene_=new QLabel(QStringLiteral("Aucune scène chargée"));
+        scene_->setObjectName(QStringLiteral("name"));
+        scene_->setWordWrap(true);
+        layout->addWidget(scene_);
+        auto* metrics=new QGridLayout;
+        metrics->setHorizontalSpacing(16);
+        metrics->setVerticalSpacing(3);
+        fps_=addValue(metrics,0,0,QStringLiteral("FPS"));
+        triangles_=addValue(metrics,1,0,QStringLiteral("TRIANGLES"));
+        lights_=addValue(metrics,0,1,QStringLiteral("LUMIÈRES"));
+        memory_=addValue(metrics,1,1,QStringLiteral("RAM SYSTÈME"));
+        layout->addLayout(metrics);
+        auto* footer=new QLabel(QStringLiteral("Appui bref : afficher/masquer  ·  Maintenir TAB : ouvrir"));
+        footer->setObjectName(QStringLiteral("muted"));
+        layout->addWidget(footer);
+        outer->addWidget(panel);
+    }
+
+    void setData(const DashboardData& d){
+        engine_->setText(QStringLiteral("%1 · %2")
+            .arg(d.engineVersion,d.engineRevision.isEmpty()?QStringLiteral("n/d"):d.engineRevision));
+        scene_->setText(QStringLiteral("%1  ·  scène %2")
+            .arg(d.sceneName.isEmpty()?QStringLiteral("CSE WARP"):d.sceneName,
+                 d.sceneRevision.isEmpty()?QStringLiteral("n/d"):d.sceneRevision));
+        fps_->setText(d.fps>0.0?QStringLiteral("%1").arg(d.fps,0,'f',1):QStringLiteral("—"));
+        triangles_->setText(QString::number(d.triangles));
+        lights_->setText(QString::number(d.lights));
+        memory_->setText(d.systemMemoryPercent>=0
+            ?QStringLiteral("%1 %").arg(d.systemMemoryPercent):QStringLiteral("n/d"));
+    }
+
+private:
+    QLabel* engine_=nullptr;
+    QLabel* scene_=nullptr;
+    QLabel* fps_=nullptr;
+    QLabel* triangles_=nullptr;
+    QLabel* lights_=nullptr;
+    QLabel* memory_=nullptr;
+
+    static QLabel* addValue(QGridLayout* grid,int column,int row,const QString& caption){
+        auto* cell=new QWidget;
+        auto* layout=new QHBoxLayout(cell);
+        layout->setContentsMargins(0,0,0,0);
+        layout->setSpacing(6);
+        auto* label=new QLabel(caption);
+        label->setObjectName(QStringLiteral("muted"));
+        auto* value=new QLabel(QStringLiteral("—"));
+        value->setObjectName(QStringLiteral("value"));
+        layout->addWidget(label);
+        layout->addWidget(value,1,Qt::AlignRight);
+        grid->addWidget(cell,row,column);
+        return value;
+    }
+};
+
 } // namespace cse::diagnostics
 

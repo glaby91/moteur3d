@@ -1228,7 +1228,10 @@ private:
     }
     void stopExploration(){
         if(diagnosticsDashboard_)diagnosticsDashboard_->hide();
+        if(wristPanel_)wristPanel_->hide();
         if(diagnosticsRefreshTimer_)diagnosticsRefreshTimer_->stop();
+        if(tabHoldTimer_)tabHoldTimer_->stop();
+        tabPressed_=false;
         releaseMouseLook();
         setMotionResolution(false);
         exploring_=false;
@@ -1253,7 +1256,7 @@ private:
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Démarrer exploration (V17)"));
         if(explorationHelp_)explorationHelp_->setText(QStringLiteral(
             "ZQSD / flèches : marcher · souris : regarder librement · clic droit : lunette ×3\n"
-            "F11 : plein écran · Tab : tableau de bord · Échap : arrêter · E : échelle · Maj : accélérer · Vol libre : Espace / Ctrl."));
+            "F11 : plein écran · Tab bref : Pip-Boy · Tab maintenu : interface plein écran · Échap : arrêter · E : échelle · Maj : accélérer · Vol libre : Espace / Ctrl."));
         // A delayed multires GPU frame could still be on screen when Esc
         // stops exploration. Queue a final guaranteed full-resolution image.
         if(!closingRequested_&&!sceneLoading_&&runtime_)
@@ -1454,6 +1457,8 @@ protected:
     bool eventFilter(QObject* watched,QEvent* event) override{
         if(watched==canvas_&&event->type()==QEvent::WindowActivate&&exploring_)
             QTimer::singleShot(0,this,[this]{if(exploring_)captureMouseLook();});
+        if(watched==canvas_&&event->type()==QEvent::Resize&&wristPanel_&&wristPanel_->isVisible())
+            QTimer::singleShot(0,this,[this]{positionWristPanel();});
         if(watched==canvas_ && event->type()==QEvent::Resize &&
            nativeDirectSelected() && runtime_ && !sceneLoading_){
             // The backend's private swapchain must follow its top-level HWND.
@@ -1463,10 +1468,11 @@ protected:
             });
         }
         if(watched==canvas_ && exploring_){
-            if(event->type()==QEvent::KeyPress){
+            if(event->type()==QEvent::KeyPress || event->type()==QEvent::KeyRelease){
                 auto* key=static_cast<QKeyEvent*>(event);
-                if(key->key()==Qt::Key_Tab&&!key->isAutoRepeat()){
-                    toggleDiagnosticsDashboard();
+                if(key->key()==Qt::Key_Tab){
+                    if(event->type()==QEvent::KeyPress)beginTabPress(key);
+                    else endTabPress(key);
                     key->accept();
                     return true;
                 }
@@ -1529,7 +1535,7 @@ protected:
                 e->accept();return;
             }
             if(e->key()==Qt::Key_Tab){
-                toggleDiagnosticsDashboard();
+                beginTabPress(e);
                 e->accept();return;
             }
             if(e->key()==Qt::Key_E && !e->isAutoRepeat() &&
@@ -1559,7 +1565,11 @@ protected:
         QMainWindow::keyPressEvent(e);
     }
     void keyReleaseEvent(QKeyEvent* e) override{
-        if(exploring_){if(!e->isAutoRepeat()){keysDown_.remove(e->key());if(e->key()==Qt::Key_Shift)updateExplorationSpeedIndicator();}e->accept();return;}
+        if(exploring_){
+            if(e->key()==Qt::Key_Tab){endTabPress(e);e->accept();return;}
+            if(!e->isAutoRepeat()){keysDown_.remove(e->key());if(e->key()==Qt::Key_Shift)updateExplorationSpeedIndicator();}
+            e->accept();return;
+        }
         QMainWindow::keyReleaseEvent(e);
     }
 private:
@@ -1637,6 +1647,9 @@ private:
     QTimer* memoryRefreshTimer_=nullptr;
     cse::diagnostics::Dashboard* diagnosticsDashboard_=nullptr;
     QTimer* diagnosticsRefreshTimer_=nullptr;
+    QTimer* tabHoldTimer_=nullptr;
+    cse::diagnostics::WristPanel* wristPanel_=nullptr;
+    bool tabPressed_=false;
     QString sceneRevision_;
 
     void updateMemoryBanner(){
@@ -1647,8 +1660,22 @@ private:
         systemMemoryBar_->setValue(percent);
     }
 
+    void ensureDiagnosticsWidgets(){
+        if(!diagnosticsDashboard_){
+            diagnosticsDashboard_=new cse::diagnostics::Dashboard(this);
+            diagnosticsDashboard_->setReturnHandler([this]{closeDiagnosticsDashboard();});
+            diagnosticsDashboard_->setExitHandler([this]{stopExploration();});
+        }
+        if(!wristPanel_)wristPanel_=new cse::diagnostics::WristPanel(this);
+        if(!diagnosticsRefreshTimer_){
+            diagnosticsRefreshTimer_=new QTimer(this);
+            diagnosticsRefreshTimer_->setInterval(750);
+            connect(diagnosticsRefreshTimer_,&QTimer::timeout,this,
+                    [this]{refreshDiagnosticsDashboard();});
+        }
+    }
     void refreshDiagnosticsDashboard(){
-        if(!diagnosticsDashboard_)return;
+        if(!diagnosticsDashboard_&&!wristPanel_)return;
         cse::diagnostics::DashboardData data;
         data.engineVersion=QStringLiteral("V%1").arg(CSE_WARP_PRODUCT_VERSION);
         data.engineRevision=githubRevision();
@@ -1696,40 +1723,89 @@ private:
             data.diagnosticDetail=QStringLiteral(
                 "Le backend sélectionné n’utilise pas la présentation native directe.");
         }
-        diagnosticsDashboard_->setData(data);
+        if(diagnosticsDashboard_)diagnosticsDashboard_->setData(data);
+        if(wristPanel_&&wristPanel_->isVisible()){
+            wristPanel_->setData(data);
+            positionWristPanel();
+        }
+    }
+    void positionWristPanel(){
+        if(!wristPanel_||!canvas_)return;
+        const QPoint topLeft=canvas_->mapToGlobal(QPoint(
+            20,std::max(12,canvas_->height()-wristPanel_->height()-20)));
+        wristPanel_->move(topLeft);
+    }
+    void showWristPipboy(){
+        if(!exploring_||!canvas_){
+            statusBar()->showMessage(QStringLiteral(
+                "Le Pip-Boy est disponible pendant l’exploration."),3500);
+            return;
+        }
+        ensureDiagnosticsWidgets();
+        if(diagnosticsDashboard_->isVisible()){
+            closeDiagnosticsDashboard();
+            return;
+        }
+        if(wristPanel_->isVisible()){
+            wristPanel_->hide();
+            if(diagnosticsRefreshTimer_)diagnosticsRefreshTimer_->stop();
+            return;
+        }
+        positionWristPanel();
+        wristPanel_->show();
+        wristPanel_->raise();
+        refreshDiagnosticsDashboard();
+        diagnosticsRefreshTimer_->start();
+    }
+    void beginTabPress(QKeyEvent* event){
+        if(!event||event->isAutoRepeat()||tabPressed_)return;
+        tabPressed_=true;
+        ensureDiagnosticsWidgets();
+        if(!tabHoldTimer_){
+            tabHoldTimer_=new QTimer(this);
+            tabHoldTimer_->setSingleShot(true);
+            tabHoldTimer_->setInterval(550);
+            connect(tabHoldTimer_,&QTimer::timeout,this,[this]{
+                if(!tabPressed_||!exploring_)return;
+                tabPressed_=false;
+                openDiagnosticsDashboard();
+            });
+        }
+        tabHoldTimer_->start();
+    }
+    void endTabPress(QKeyEvent* event){
+        if(!event||event->isAutoRepeat()||!tabPressed_)return;
+        tabPressed_=false;
+        if(tabHoldTimer_)tabHoldTimer_->stop();
+        showWristPipboy();
     }
     void closeDiagnosticsDashboard(){
         if(!diagnosticsDashboard_||!diagnosticsDashboard_->isVisible())return;
         diagnosticsDashboard_->hide();
-        if(diagnosticsRefreshTimer_)diagnosticsRefreshTimer_->stop();
         if(exploring_&&!closingRequested_){
+            ensureDiagnosticsWidgets();
+            positionWristPanel();
+            wristPanel_->show();
+            wristPanel_->raise();
+            refreshDiagnosticsDashboard();
+            diagnosticsRefreshTimer_->start();
             QTimer::singleShot(0,this,[this]{
                 if(exploring_&&!closingRequested_){
                     focusRenderViewport();
                     captureMouseLook();
                 }
             });
-        }
+        }else if(diagnosticsRefreshTimer_)diagnosticsRefreshTimer_->stop();
     }
-    void toggleDiagnosticsDashboard(){
+    void openDiagnosticsDashboard(){
         if(!exploring_||!canvas_){
             statusBar()->showMessage(QStringLiteral(
                 "Le tableau de bord est disponible pendant l’exploration."),4500);
             return;
         }
-        if(!diagnosticsDashboard_){
-            diagnosticsDashboard_=new cse::diagnostics::Dashboard(this);
-            diagnosticsDashboard_->setReturnHandler([this]{closeDiagnosticsDashboard();});
-            diagnosticsDashboard_->setExitHandler([this]{stopExploration();});
-            diagnosticsRefreshTimer_=new QTimer(this);
-            diagnosticsRefreshTimer_->setInterval(750);
-            connect(diagnosticsRefreshTimer_,&QTimer::timeout,this,
-                    [this]{refreshDiagnosticsDashboard();});
-        }
-        if(diagnosticsDashboard_->isVisible()){
-            closeDiagnosticsDashboard();
-            return;
-        }
+        ensureDiagnosticsWidgets();
+        if(diagnosticsDashboard_->isVisible())return;
+        wristPanel_->hide();
         releaseMouseLook();
         if(QScreen* screen=canvas_->screen()){
             diagnosticsDashboard_->setGeometry(screen->geometry());
@@ -1740,6 +1816,13 @@ private:
         diagnosticsDashboard_->setFocus(Qt::OtherFocusReason);
         refreshDiagnosticsDashboard();
         diagnosticsRefreshTimer_->start();
+    }
+    void toggleDiagnosticsDashboard(){
+        if(diagnosticsDashboard_&&diagnosticsDashboard_->isVisible()){
+            closeDiagnosticsDashboard();
+            return;
+        }
+        openDiagnosticsDashboard();
     }
 
     void displayRasterSettings(const RasterQualitySettings& q){
@@ -2062,9 +2145,17 @@ private:
         memoryRefreshTimer_=new QTimer(this);
         connect(memoryRefreshTimer_,&QTimer::timeout,this,[this]{updateMemoryBanner();});
         memoryRefreshTimer_->start(1500); updateMemoryBanner();
+        tabHoldTimer_=new QTimer(this);
+        tabHoldTimer_->setSingleShot(true);
+        tabHoldTimer_->setInterval(550);
+        connect(tabHoldTimer_,&QTimer::timeout,this,[this]{
+            if(!tabPressed_||!exploring_)return;
+            tabPressed_=false;
+            openDiagnosticsDashboard();
+        });
         auto* displayMenu=menuBar()->addMenu(QStringLiteral("Affichage"));
         auto* diagnosticsAction=displayMenu->addAction(
-            QStringLiteral("Tableau de bord moteur plein écran  ·  Tab"));
+            QStringLiteral("Tableau de bord moteur plein écran  ·  maintenir Tab"));
         connect(diagnosticsAction,&QAction::triggered,this,[this]{toggleDiagnosticsDashboard();});
         // V17.443 - one-click regression review at the EXACT user-reported
         // viewpoints, independent of the six artistic camera presets.
@@ -2532,7 +2623,7 @@ private:
         vertical->addWidget(walkingModeBox_);
         explorationHelp_=new QLabel(QStringLiteral(
             "ZQSD / flèches : marcher · souris libre : orienter la caméra · clic droit : zoom ×3\\n"
-            "F11 : plein écran · Tab : tableau de bord · Échap : arrêter · E : échelle · Ctrl+Maj+A : anomalie PNG+JSON."));
+            "F11 : plein écran · Tab bref : Pip-Boy · Tab maintenu : interface plein écran · Échap : arrêter · E : échelle · Ctrl+Maj+A : anomalie PNG+JSON."));
         explorationHelp_->setWordWrap(true);
         vertical->addWidget(explorationHelp_);
         connect(explorationButton_,&QPushButton::clicked,this,[this]{toggleExploration();});
