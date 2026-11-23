@@ -2133,7 +2133,7 @@ private:
 
         // One-click camera presets are independent from the detailed settings panel.
         auto* camerasMenu=menuBar()->addMenu(QStringLiteral("Caméras"));
-        auto* camerasToolbar_=addToolBar(QStringLiteral("Caméras · 1 à 6"));
+        camerasToolbar_=addToolBar(QStringLiteral("Caméras · 1 à 6"));
         camerasToolbar_->setMovable(false);
         camerasToolbar_->setToolButtonStyle(Qt::ToolButtonTextOnly);
         for(int i=0;i<6;++i){
@@ -2742,9 +2742,9 @@ private:
         // Both panels remain accessible; the 3D viewport gets the former
         // left-dock width back (important at 1366x768 on the Dell).
         setDockOptions(dockOptions() | QMainWindow::AllowTabbedDocks);
-        removeDockWidget(left);
-        addDockWidget(Qt::RightDockWidgetArea,left);
-        tabifyDockWidget(right,left);
+        removeDockWidget(sceneExplorerDock_);
+        addDockWidget(Qt::RightDockWidgetArea,sceneExplorerDock_);
+        tabifyDockWidget(right,sceneExplorerDock_);
         right->raise();
         // F11 controls the dedicated render window, leaving these controls
         // available behind it.
