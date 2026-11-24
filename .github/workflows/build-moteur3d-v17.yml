@@ -587,44 +587,56 @@ jobs:
             Copy-Item $img.FullName "dist-v17/benchmark-civic/V17.001-$($pair[1])-WARP.png"
           }
           Write-Host 'READY: final package rendered with DX11 WARP and CPU ray tracing, including the requested garden-side global view.'
-      - name: Refresh final package with latest V17 scene release
+      - name: Validate latest V17 scene for the startup updater (keep it out of the engine package)
         shell: pwsh
         run: |
           $sceneSource = Join-Path $env:RUNNER_TEMP "v17-scene-latest/benchmark-civic"
-          $sceneDestination = "dist-v17/benchmark-civic"
           if (!(Test-Path (Join-Path $sceneSource "scene.json"))) {
-            throw "Latest V17 scene source disappeared before final packaging."
+            throw "Latest V17 scene source disappeared before validation."
           }
-          Copy-Item (Join-Path $sceneSource "*") $sceneDestination -Recurse -Force
           $expected = Get-Content (Join-Path $env:RUNNER_TEMP "SCENE_VERSION.json") -Raw | ConvertFrom-Json
-          $packaged = Get-Content (Join-Path $sceneDestination "SCENE_VERSION.json") -Raw | ConvertFrom-Json
-          if ($packaged.revision -ne $expected.revision) {
-            throw "Final package scene revision $($packaged.revision) differs from latest release $($expected.revision)."
+          if ($expected.revision -notmatch "^V17\\.\\d{3}$") {
+            throw "Invalid latest scene revision in downloaded manifest."
           }
-          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" (Join-Path $sceneDestination "scene.json") 20000 --generic 1> "build-v17/final-latest-scene-load.log" 2>&1
+          & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" (Join-Path $sceneSource "scene.json") 20000 --generic 1> "build-v17/final-latest-scene-load.log" 2>&1
           if ($LASTEXITCODE -ne 0) {
             Get-Content "build-v17/final-latest-scene-load.log" | ForEach-Object { Write-Host $_ }
-            throw "Final delivered scene $($packaged.revision) failed native V17 loading."
+            throw "Latest scene $($expected.revision) failed native V17 loading."
           }
-          Write-Host "READY: final V17 LumaTrace package contains scene $($packaged.revision)."
+          Write-Host "READY: latest scene $($expected.revision) is compatible with the V17.006 startup updater."
           @"
-          CSE WARP V17 LumaTrace
-          Scène de référence du complexe aquatique : $($packaged.revision)
-          Source : https://github.com/glaby91/moteur3d-scene
-          Lancer LANCER_CSE_WARP.bat pour ouvrir le moteur.
+          CSE WARP V17.006 — moteur seul
+          La scène de référence n’est pas incluse dans ce package.
+          Au démarrage, le moteur vérifie le dépôt moteur3d-scene et propose l’installation de la dernière scène publiée.
           "@ | Set-Content "dist-v17/README.txt" -Encoding utf8
       - name: Audit CPU light paths from the pool fresco
         shell: pwsh
         run: |
           python tools/gi_fresco_ray_audit.py --self-test
           if ($LASTEXITCODE -ne 0) { throw 'Fresco ray audit math self-test failed' }
-          python tools/gi_fresco_ray_audit.py --package dist-v17/benchmark-civic --output build-v17/fresco-ray-audit
+          python tools/gi_fresco_ray_audit.py --package "$env:RUNNER_TEMP/v17-scene-latest/benchmark-civic" --output build-v17/fresco-ray-audit
           if ($LASTEXITCODE -ne 0) { throw 'Fresco-to-water/cupola ray visibility audit failed' }
           foreach ($p in @("build-v17/fresco-ray-audit/fresco-ray-bundle.svg",
                            "build-v17/fresco-ray-audit/fresco-ray-paths.csv",
                            "build-v17/fresco-ray-audit/fresco-ray-report.json")) {
             if (!(Test-Path $p)) { throw "Fresco ray audit output missing: $p" }
           }
+      - name: Finalize engine-only package
+        shell: pwsh
+        run: |
+          $bundledScene = "dist-v17/benchmark-civic"
+          if (Test-Path $bundledScene) { Remove-Item $bundledScene -Recurse -Force }
+          if (Test-Path $bundledScene) { throw "Reference scene must not be bundled with the V17 engine." }
+          @'
+          @echo off
+          cd /d "%~dp0"
+          start "" "moteur3d_v17.exe"
+          '@ | Set-Content "dist-v17/LANCER_CSE_WARP.bat" -Encoding ascii
+          @'
+          CSE WARP V17.006 — moteur seul
+          Aucune scène n’est incluse dans ce package.
+          Au démarrage, CSE WARP vérifie la dernière scène publiée sur GitHub et propose de la télécharger et de l’installer dans le dossier utilisateur.
+          '@ | Set-Content "dist-v17/README.txt" -Encoding utf8
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
