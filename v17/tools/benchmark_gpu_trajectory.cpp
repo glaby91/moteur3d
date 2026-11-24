@@ -16,6 +16,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QSaveFile>
 #include <QFileInfo>
 #include <QImage>
 #include <QJsonArray>
@@ -271,10 +272,20 @@ double pct(const std::vector<double>& values,double p){
  const size_t a=size_t(i),b=std::min(x.size()-1,a+1);
  return x[a]+(x[b]-x[a])*(i-a);
 }
-bool saveJson(const QString &path,const QJsonObject& obj){
- QFile f(path);
- return f.open(QIODevice::WriteOnly|QIODevice::Truncate)
-  &&f.write(QJsonDocument(obj).toJson(QJsonDocument::Indented))>0;
+bool saveJson(const QString& path,const QJsonObject& obj) {
+    const QByteArray bytes=QJsonDocument(obj).toJson(QJsonDocument::Indented);
+    QSaveFile file(path);
+    if(!file.open(QIODevice::WriteOnly))return false;
+    qint64 offset=0;
+    while(offset<bytes.size()){
+        const qint64 written=file.write(bytes.constData()+offset,bytes.size()-offset);
+        if(written<=0){
+            file.cancelWriting();
+            return false;
+        }
+        offset+=written;
+    }
+    return file.commit();
 }
 bool savePng(const QString&path,const std::vector<uint32_t>& px,int w,int h){
  if(px.size()!=size_t(w)*h)return false;
