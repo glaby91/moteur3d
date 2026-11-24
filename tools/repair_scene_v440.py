@@ -5,6 +5,7 @@ Only touches newly named 440 resource files; preserved art/radio and original
 V8 and V439 files are not overwritten. Every fix has a named diagnostic.
 """
 import argparse, copy, hashlib, json, math
+from typing import Any
 from pathlib import Path
 F='Architecture/Palais/'
 P='Interieur/Piscine olympique/'
@@ -39,7 +40,7 @@ def build(root):
     originals={str(p.relative_to(root)):hashlib.sha256(p.read_bytes()).hexdigest()
        for p in root.glob('textures/**/*energetik*fresco*.jpg')}
     assert originals,'Fresco integrity check requires genuine image'
-    report=dict(version='V17.440',source='V17.439/V8',issues={},counts={},
+    report: dict[str, Any] = dict(version='V17.440',source='V17.439/V8',issues={},counts={},
                 validations=[],frescoHash=originals)
     ids={o['id'] for o in objs}
     def add(o):

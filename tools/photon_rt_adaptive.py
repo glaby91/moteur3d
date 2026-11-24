@@ -8,15 +8,20 @@ import argparse
 import csv
 import json
 from pathlib import Path
+from typing import cast
 
 import numpy as np
-from PIL import Image
+from PIL import Image  # type: ignore[import-not-found]
 from scipy.ndimage import distance_transform_edt
 from skimage.metrics import peak_signal_noise_ratio, structural_similarity
 
 
 def reconstruct(rgb, sampled):
-    _, indices = distance_transform_edt(~sampled, return_indices=True)
+    indices = distance_transform_edt(
+        ~sampled, return_distances=False, return_indices=True
+    )
+    if indices is None:
+        raise RuntimeError("distance_transform_edt did not return indices")
     return rgb[indices[0], indices[1]]
 
 
@@ -47,7 +52,9 @@ def compare(rgb, seed=100):
             'image': output,
             'rays': int(mask.sum()),
             'psnr_db': float(peak_signal_noise_ratio(rgb, output, data_range=255)),
-            'ssim': float(structural_similarity(rgb, output, channel_axis=2, data_range=255)),
+            'ssim': float(cast(float, structural_similarity(
+                rgb, output, channel_axis=2, data_range=255
+            ))),
             'mae': float(np.abs(rgb.astype(np.float32) - output).mean()),
         }
     return results

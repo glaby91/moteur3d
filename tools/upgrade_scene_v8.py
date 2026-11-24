@@ -53,7 +53,7 @@ def tube(name,path,radius=.0675,sides=20):
                 faces.extend([[prev,other,cur],[other,nxt,cur]])
     return mesh(name,vertices,faces,uv)
 
-def add_material(mats,pbr,id,colour,rough,metal=0,trans=0,pattern='metal',image=None,res=512):
+def add_material(mats,pbr,id,colour,rough,metal: float=0.0,trans: float=0.0,pattern='metal',image=None,res=512):
     assert not any(x['id']==id for x in mats['materials']),id
     mats['materials'].append(dict(id=id,baseColor=colour,roughness=rough,
        metallic=metal,transmission=trans,ior=1.333 if trans else 1.5,

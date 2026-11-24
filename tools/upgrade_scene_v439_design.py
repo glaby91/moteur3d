@@ -5,6 +5,7 @@ all meshes/lighting/audio and the validated four pool ladders.
 """
 import argparse, copy, hashlib, json, math
 from pathlib import Path
+from typing import Any
 
 F = "Architecture/Palais/"
 P = "Interieur/Piscine olympique/"
@@ -72,8 +73,10 @@ def build(root):
         ('v439_olive_tile',[.42,.46,.39],.86,'ceramic',None),
         ('v439_entry_art',[1.,1.,1.],.87,'image','textures/revision/v439/cse_parvis_mosaique.png')]
     for mid,rgb,rough,pat,img in colors:add_material(mats,pbr,mid,rgb,rough,pat,img)
-    report=dict(version='V17.439',baseline='V8',orig=original,materials=len(colors),
-                frescoHash=fresco_signatures,corrections={})
+    report: dict[str, Any] = dict(
+        version='V17.439',baseline='V8',orig=original,materials=len(colors),
+        frescoHash=fresco_signatures,corrections={}
+    )
 
     # Warm grey waxed concrete on dry structural floors. Blue water retains
     # the original ceramic design; surrounding vertical walls do not repeat blue.

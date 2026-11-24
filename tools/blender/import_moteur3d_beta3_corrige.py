@@ -2,10 +2,11 @@
 Usage: blender --python import_moteur3d_beta3_blender.py -- /path/to/scene_pripyat_central.bin
 Or run in Scripting; defaults to scene_pripyat_central.bin beside this script.
 """
-import bpy, struct, math, os, sys, mmap
-from mathutils import Vector
+import bpy, struct, math, os, sys, mmap  # type: ignore[reportMissingImports]
+from mathutils import Vector  # type: ignore[reportMissingImports]
 from collections import defaultdict, Counter
 from array import array
+from typing import Any, Literal, overload
 
 script_path = globals().get('__file__', '')
 ROOT = os.path.dirname(os.path.abspath(script_path)) if script_path and script_path.lower().endswith('.py') else os.path.dirname(bpy.data.filepath)
@@ -34,7 +35,11 @@ RENDER_PERCENT = 60
 # Set True to write a separate .blend file after import.
 SAVE_PROJECT = False
 
-def read(fmt):
+@overload
+def read(fmt: Literal['I']) -> int: ...
+@overload
+def read(fmt: Literal['IIIiIIII', 'BBH', 'fff', '24f', '8f', '7f', '13f', '6f']) -> tuple[Any, ...]: ...
+def read(fmt: str) -> int | tuple[Any, ...]:
     global pos
     result=struct.unpack_from('<'+fmt,raw,pos);pos+=struct.calcsize('<'+fmt)
     return result[0] if len(result)==1 else result
