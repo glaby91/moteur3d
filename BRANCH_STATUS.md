@@ -31,7 +31,7 @@ Pour continuer le travail contenu dans la PR #87, partir de `codex/scene-updater
 
 1. Pour poursuivre la PR #87, reprendre `codex/scene-updater-background`.
 2. Pour une autre modification du moteur, vérifier d’abord sa branche de base avec le propriétaire du travail ou une PR récente ; ne pas partir automatiquement de `master` ni d’une vieille branche nommée `feature/*`.
-3. Pour modifier les données de scène, utiliser `glaby91/moteur3d-scene` sur `main), puis publier la scène depuis ce dépôt.
+3. Pour modifier les données de scène, utiliser `glaby91/moteur3d-scene` sur `main`, puis publier la scène depuis ce dépôt.
 4. Les branches non actives sont **conservées**. Leur présence ne signifie pas qu’elles sont le point de départ actuel. Aucune branche n’a été supprimée, fermée, renommée ou déplacée pendant cet audit.
 5. Mettre à jour ce fichier quand la branche de travail active ou la PR de référence change.
 
