@@ -333,8 +333,7 @@ void report(const QJsonObject& system,const std::vector<Samples>& cases,
               "th,td{border-bottom:1px solid #ddd;padding:8px;text-align:right}"
               "td:first-child,th:first-child{text-align:left}th{background:#eaf0f8}"
               "small{color:#596579}</style><h1>CSE WARP V17 — Full Benchmark</h1>"
-              "<p>Terminé : "<<(complete?"oui":"non")<<". Full Benchmark : DX11 Raster, "
-              "Vulkan Raster et Ray Tracing CPU direct. Les passes GPU mesurent le rendu hors écran avec lecture des pixels; elles ne mesurent pas la présentation native Qt/WSI.</p>"
+              "<p>Terminé : "<<(complete?"oui":"non")<<". La campagne compare DX11 Raster, Vulkan Raster, LumaTrace BVH4, DX11 Compute, Ray Tracing CPU direct et GI CPU à 2/4 rebonds. Les passes GPU mesurent le rendu hors écran avec lecture des pixels; elles ne mesurent pas la présentation native Qt/WSI.</p>"
               "<table><tr><th>Scène / caméra / variante</th><th>Pixels</th>"
               "<th>Buffers</th><th>Images</th><th>FPS débit</th><th>P50 ms</th>"
               "<th>P95 ms</th><th>Dispersion %</th><th>GPU draw ms</th>"
@@ -608,9 +607,15 @@ int main(int argc,char** argv){
                             const size_t backendIndex=mode==3?vkIndex:lumaIndex;
                             auto& entry=cases[backendIndex];
                             const bool isLumaTrace=mode==4;
-                            auto& renderFn=isLumaTrace?renderLumaTrace:renderVulkan;
+                            const auto renderBackend=[&](std::vector<uint32_t>& image,
+                                                              Stats& frameStats,
+                                                              std::wstring& why){
+                                return isLumaTrace
+                                    ?renderLumaTrace(image,frameStats,why)
+                                    :renderVulkan(image,frameStats,why);
+                            };
                             if(entry.ok&&!runSynchronousBlock(entry,round,cfg.frames,
-                                                               cfg.warmup,renderFn,frameCsv)){
+                                                               cfg.warmup,renderBackend,frameCsv)){
                                 allOk=false;
                                 err<<"FAILED "<<sceneName<<" "
                                    <<(isLumaTrace?"LumaTrace BVH4":"Vulkan Raster")
