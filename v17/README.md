@@ -1,8 +1,8 @@
 # CSE WARP Beta X — V17
 
-**Révision moteur : V17.004.** La révision de la scène reste propre à son manifeste et est affichée séparément. La scène de référence conserve le palais Energetik, la piscine avec sa coupole vitrée basse, la fresque continue et le jardin retravaillé. La coupole ferme ses deux pignons par une verrière encadrée de cinq meneaux radiaux par extrémité ; une costière inox assure le raccord continu sur les quatre côtés. Trois caméras dédiées permettent d’en contrôler les raccords et l’intérieur. Les images de contrôle incluses dans le paquet sont produites par le moteur CPU Ray Tracing PBR direct à 960 × 540. DX11 et Vulkan peuvent présenter directement dans leur fenêtre native ou passer par une image Qt. Le chemin de présentation directe reste à valider sur le Dell HD620 ; les résultats CI WARP ne prédisent pas son comportement matériel.
+**Révision moteur : V17.006 · scène courante : V17.623.** La scène civique est publiée dans le dépôt séparé `glaby91/moteur3d-scene`; le workflow Windows récupère la release la plus récente, valide le manifeste, teste le chargement et l’empaquette avec le moteur. Au lancement, l’application ouvre la copie locale puis vérifie en arrière-plan si une révision plus récente est publiée.
 
-**V17 = architecture temps réel en construction, sans abandonner les moteurs CPU et GPU V16.**
+**V17 réunit l’exploration temps réel, les backends CPU/GPU et le noyau partagé avec V16.** DX11 Raster est le choix temps réel général ; Vulkan et LumaTrace sont expérimentaux. Le chemin de présentation GPU directe est disponible sous Windows, avec Qt/QImage comme solution de repli. La CI WARP ne mesure pas les performances du GPU matériel.
 
 V16 et V17 utilisent le même manifeste de modules de rendu : [`engine/render_modules.json`](../engine/render_modules.json). Il donne une révision par module ; CMake contrôle les entrées et place le manifeste dans le paquet. Une correction ciblée doit faire évoluer la révision du seul module concerné.
 
@@ -10,29 +10,29 @@ V16 et V17 utilisent le même manifeste de modules de rendu : [`engine/render_mo
 
 Le registre commun garde une organisation courte par responsabilité :
 
-- **DX11 Raster** : construction des maillages CPU (`d3d11_mesh`), shaders, puis orchestration et présentation raster. Le gros fichier raster reste à découper par étapes.
-- **Vulkan Raster** : maillage, politique de mise à jour, mipmaps, lecture d’image et cycle de vie des buffers/images (`vulkan_resources`). Le cœur `m3d_vulkan.cpp` reste à découper davantage.
+- **DX11 Raster** : construction des maillages CPU (`d3d11_mesh`), shaders et orchestration/presentation réparties entre les modules communs et raster.
+- **Vulkan Raster** : maillage, politique de mise à jour, mipmaps, lecture d’image et cycle de vie des buffers/images (`vulkan_resources`).
 - **LumaTrace CPU** : module `lumatrace_cpu`, sans dépendance graphique. Il convertit le BVH partagé en BVH4, valide les primitives et prépare la correspondance et l’ordre des triangles transmis au calcul.
 - **LumaTrace GPU Compute DX11** : module `lumatrace_gpu_compute`, distinct du CPU. Il possède les buffers GPU, le shader, le cache des radiances et le dispatch. Le raster DX11 affiche ensuite la géométrie éclairée.
 - Le rendu CPU PBR complet existe dans `cpu_renderer`, `cpu_intersection` et `cpu_lighting`, mais ce n’est pas un traceur LumaTrace CPU : LumaTrace reste un prototype d’éclairage GPU et n’a pas encore de noyau CPU de parcours et de calcul de radiance.
 
 Les dépendances et révisions sont inscrites dans le même manifeste. Les modules optionnels Vulkan et LumaTrace Compute ne sont ajoutés au build que lorsque leur backend est disponible. V16 et V17 assemblent les mêmes modules partagés ; ils ne maintiennent pas deux copies indépendantes du moteur.
 
-## État de validation V17.600
+## Validation historique V17.600
 
 Le commit moteur `ceaa6a6` (V17.600) a passé la [CI Windows x64, run 44437496051](https://github.com/glaby91/moteur3d/actions/runs/44437496051) : compilation Release avec Vulkan, contrôles du paquet, validations du chargeur de scènes, rendus de contrôle WARP, audit de rayons de la fresque et suite de régression V16/V17. L’artefact Windows est produit par GitHub Actions.
 
 Cette validation porte sur la compilation, les contrôles automatisés et les chemins de rendu exécutés en CI. Les rendus DX11 concernés utilisent WARP, l’adaptateur logiciel de Microsoft. Ils ne valident pas les performances sur une carte Intel ou NVIDIA, la fluidité en mouvement sur le Dell HD620, ni le rythme d’affichage du swapchain natif. Les images sont contrôlées automatiquement pour leur présence et leur intégrité ; cela ne remplace pas une inspection visuelle.
 
-Aucun gain de performances BVH n’est établi par le seul statut « CI verte ». Pour comparer deux versions, utiliser le même ordinateur, la même scène, la même caméra, la même résolution, le même backend et les mêmes réglages ; répéter les mesures et comparer les médianes et percentiles. Séparer le temps de construction du BVH du temps de rendu. Pour DX11/Vulkan en présentation directe, le compteur CPU de soumission ne constitue pas une mesure de fin d’exécution GPU ni du temps de balayage écran. Voir [Full Benchmark](docs/FULL_BENCHMARK.md).
+Aucun gain de performances BVH n’est établi par le seul statut « CI verte ». Pour comparer deux versions, utiliser le même ordinateur, la même scène, la même caméra, la même résolution, le même backend et les mêmes réglages ; répéter les mesures et comparer les médianes et percentiles. Séparer le temps de construction du BVH du temps de rendu. Pour DX11/Vulkan en présentation directe, le compteur CPU de soumission ne constitue pas une mesure de fin d’exécution GPU ni du temps de balayage écran. Voir [Full Benchmark](docs/FULL_BENCHMARK.md) et le README principal pour les commandes et options complètes.
 
-## Prototype V17-1 — déjà implémenté
+## Exploration et backends disponibles
 
-- `v17/moteur3d_v17_qt.cpp` : fenêtre V17, mode Exploration, clic gauche + souris pour regarder, ZQSD/flèches (AZERTY) pour se déplacer, Maj pour accélérer, espace/Ctrl pour monter/descendre, Échap pour arrêter.
+- `v17/moteur3d_v17_qt.cpp` : fenêtre V17, mode Exploration, ZQSD/flèches, souris, Maj, accroupissement, saut, échelles de piscine, Pip-Boy, radio et sélection du backend. Voir le README principal pour la table complète des touches.
 - `v17/CMakeLists.txt` : **réutilise directement le moteur V16 complet** (CPU ray tracing, CPU GI, D3D11 Compute, D3D11 Raster, Vulkan Raster et scènes), sans recoder de moteur.
-- Le raster DX11 est la cinquième méthode et Vulkan la sixième ; les deux utilisent la scène chargée et le cache d’ombres. L’éclairage raster reste de première génération : l’amélioration de la chaleur, du verre et du PBR est une **étape ultérieure**.
+- Les sept choix visibles sont CPU Ray Tracing PBR, D3D11 Compute, GI CPU à 2 et 4 rebonds, D3D11 Raster, Vulkan Raster et LumaTrace BVH4. Ils réutilisent la scène chargée ; DX11/Vulkan/LumaTrace disposent de fenêtres de rendu GPU dédiées selon la plateforme.
 - FPS mesurés à l'écran pendant l'exploration et durée de rendu disponible. Leur interprétation dépend du backend et du chemin de présentation ; voir les limites de mesure ci-dessus.
-- **Présentation directe expérimentale :** le raster DX11 et le raster Vulkan proposent un chemin swapchain dans des fenêtres natives distinctes, sans readback par image. Le mode Qt/QImage reste disponible. Le fonctionnement de la présentation directe, du mouvement caméra et des animations doit encore être confirmé sur le Dell HD620.
+- **Présentation GPU directe :** DX11, Vulkan et LumaTrace peuvent utiliser une swapchain native dédiée sous Windows ; Qt/QImage reste un chemin de repli. Une mesure CPU de soumission ne donne pas à elle seule le temps de fin GPU.
 - Build Windows sur GitHub Actions avec `actions/checkout@v5` et `actions/upload-artifact@v6`, tests de non-régression V16 conservés.
 
 ## Tester sur le Dell
@@ -52,21 +52,16 @@ Le document de référence, avec objectifs vérifiables, risques, conditions de 
 
 ## Règle de développement
 
-Chaque phase nécessite un accord explicite avant modification du moteur, compilation ou fusion. Voir le document de cadrage pour les **portes de validation V17-0 à V17-7**.
-
-**Base V16** : `feature/v16-dell-native-1366x768-fhd-261110`. La V17 ne doit pas être fusionnée dans `master` sans décision explicite.
+Les évolutions de V17 sont versionnées dans GitHub. Les modules partagés sont consignés dans [`engine/render_modules.json`](../engine/render_modules.json) et les builds Windows sont produits par GitHub Actions. La scène publiée séparément est contrôlée et empaquetée avec le moteur ; son gestionnaire peut proposer une version plus récente au lancement.
 
 
 ## Tableau de bord de diagnostic
 
-La branche `feature/v17-diagnostic-dashboard-tab-20261123` ajoute un Pip-Boy compact au poignet et un panneau plein écran pendant l’exploration. Un appui bref sur `Tab` affiche ou masque le Pip-Boy compact au poignet. Maintenir `Tab` environ 550 ms ouvre l’interface plein écran ; un appui bref la ferme et revient au Pip-Boy. `Échap` garde son rôle habituel et arrête le mode caméra (les deux interfaces se ferment avec lui). `F11` conserve son comportement de plein écran du viewport.
+Le moteur comprend un Pip-Boy compact au poignet et un panneau plein écran pendant l’exploration. Un appui bref sur `Tab` affiche ou masque le Pip-Boy compact au poignet. Maintenir `Tab` environ 550 ms ouvre l’interface plein écran ; un appui bref la ferme et revient au Pip-Boy. `Échap` garde son rôle habituel et arrête le mode caméra (les deux interfaces se ferment avec lui). `F11` conserve son comportement de plein écran du viewport.
 
 Le panneau sépare les pages **Aperçu**, **Scène**, **Lumières**, **Ressources** et **Diagnostic**. Il affiche la version et la révision Git du moteur, la révision fournie par le manifeste chargé, les objets source, triangles compilés, matériaux, albedos image, lumières, caméra, résolution, cadence, dernier temps moteur et charge mémoire système. Les valeurs non instrumentées (mémoire du processus et VRAM) sont explicitement signalées.
 
 Le comptage des triangles provient de la géométrie triangulée de la scène chargée. La révision moteur est la version produit compilée plus la révision Git empaquetée ; la révision de scène vient des métadonnées du manifeste. En présentation GPU directe, le temps affiché peut correspondre à la soumission CPU et ne constitue pas un temps GPU de fin d’exécution. Voir [la fiche de reprise et les limites](docs/DIAGNOSTIC_DASHBOARD.md).
-
-La modification est enregistrée sur une branche de travail et n’a pas encore été compilée.
-
 
 
 ### Exploration : accroupissement et saut
@@ -79,6 +74,6 @@ La radio tente d’abord le flux Internet de la station, avec délai et repli au
 
 ## Chargement et mise à jour de la scène
 
-La scène civique est distribuée séparément du moteur. Au démarrage, CSE WARP cherche d’abord une scène déjà installée dans les données utilisateur, puis les emplacements locaux prévus dans le paquet et le dépôt. Il charge immédiatement la scène locale trouvée ; la vérification GitHub ne retarde pas ce chargement.
+La scène civique est maintenue séparément dans `moteur3d-scene`, puis empaquetée avec le moteur à la compilation. Au démarrage, CSE WARP cherche d’abord une scène déjà installée dans les données utilisateur, puis `benchmark-civic/scene.json` dans le paquet. Il charge immédiatement la scène locale trouvée ; la vérification GitHub ne retarde pas ce chargement.
 
 Avec une scène locale, la première vérification réseau asynchrone attend 10 minutes après le chargement ; les suivantes sont espacées de 30 minutes. Si une révision plus récente est publiée, le moteur propose de la télécharger et de redémarrer. La scène courante reste active jusqu’à l’acceptation ; le moteur ne charge pas une seconde scène par-dessus la première. Si aucune scène civique n’est installée, le moteur vérifie immédiatement le dépôt, propose le téléchargement et ne charge la scène qu’une fois. « Plus tard » mémorise la révision proposée et évite de répéter la même alerte ; une nouvelle publication sera signalée.
