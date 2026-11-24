@@ -145,4 +145,53 @@ add_test(NAME v16_benchmark_quick
         "${CMAKE_CURRENT_BINARY_DIR}/benchmark-tests" --quick)
 set_tests_properties(v16_benchmark_quick PROPERTIES TIMEOUT 240)
 if(WIN32)
-    add_executable(v16_gpu_warp_smoke "${CMAKE_CURRENT_SOURCE_DIR}/tests/gpu_warp
+    add_executable(v16_gpu_warp_smoke "${CMAKE_CURRENT_SOURCE_DIR}/tests/gpu_warp_smoke.cpp")
+    target_link_libraries(v16_gpu_warp_smoke PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
+    if(MSVC)
+        target_compile_options(v16_gpu_warp_smoke PRIVATE /O2 /EHsc /utf-8)
+    endif()
+    add_test(NAME v16_gpu_compute_warp
+        COMMAND v16_gpu_warp_smoke "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01/scene.json"
+            "${CMAKE_CURRENT_BINARY_DIR}/pavillon01-gpu-warp.png")
+    set_tests_properties(v16_gpu_compute_warp
+        PROPERTIES TIMEOUT 240 ENVIRONMENT "M3D_V16_FORCE_WARP=1")
+    add_test(NAME v16_material_lab_gpu_warp
+        COMMAND v16_gpu_warp_smoke "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/material-lab/scene.json"
+            "${CMAKE_CURRENT_BINARY_DIR}/material-lab-gpu.png")
+    set_tests_properties(v16_material_lab_gpu_warp
+        PROPERTIES TIMEOUT 240 ENVIRONMENT "M3D_V16_FORCE_WARP=1")
+endif()
+if(WIN32)
+    add_executable(v16_shader_check "${CMAKE_CURRENT_SOURCE_DIR}/tests/shader_check.cpp")
+    target_link_libraries(v16_shader_check PRIVATE d3dcompiler)
+    add_test(NAME v16_hlsl_compute_shader
+        COMMAND v16_shader_check "${NATIVE_SRC}/shaders/m3d_raytrace_compute.hlsl")
+    set_tests_properties(v16_hlsl_compute_shader PROPERTIES TIMEOUT 60)
+endif()
+add_custom_command(TARGET moteur3d_v16 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01"
+        "$<TARGET_FILE_DIR:moteur3d_v16>/pavillon01"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/material-lab"
+        "$<TARGET_FILE_DIR:moteur3d_v16>/material-lab"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+        "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pripyat-photo2scene-proof"
+        "$<TARGET_FILE_DIR:moteur3d_v16>/pripyat-photo2scene-proof"
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+        "$<TARGET_FILE_DIR:moteur3d_v16>/shaders"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${NATIVE_SRC}/shaders/m3d_raytrace_compute.hlsl"
+        "$<TARGET_FILE_DIR:moteur3d_v16>/shaders/m3d_raytrace_compute.hlsl"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${M3D_MODULE_MANIFEST}"
+        "$<TARGET_FILE_DIR:moteur3d_v16>/render_modules.json"
+    VERBATIM)
+install(TARGETS moteur3d_v16 moteur3d_v16_core moteur3d_v16_benchmark moteur3d_v16_benchui
+    RUNTIME DESTINATION . LIBRARY DESTINATION . ARCHIVE DESTINATION lib)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01" DESTINATION .)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/material-lab" DESTINATION .)
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pripyat-photo2scene-proof" DESTINATION .)
+install(FILES "${NATIVE_SRC}/shaders/m3d_raytrace_compute.hlsl" DESTINATION shaders)
+install(FILES "${M3D_MODULE_MANIFEST}" DESTINATION .)
+# No V3/V4/V5 binary loader, exporter or legacy Qt application is linked into V16.
