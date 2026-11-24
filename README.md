@@ -11,11 +11,11 @@ Cette version est une candidate à l’évaluation, pas une version stable. Elle
 - Le build officiel #587 a chargé, validé et inclus V17.613 dans son package Windows.
 - Les fichiers de scène restent dans le dépôt séparé. Le workflow du moteur récupère la dernière release et l’intègre au package, qui peut ensuite être lancé hors ligne.
 
-## Package de scène — Pripiat, place centrale
+## Scène de Pripiat — place centrale
 
-Le package de données de la scène centrale de Pripiat comprend la place, le Palais de la Culture Energetik et l’hôtel Polissya. Il inclut le binaire natif de la scène, ses sources éditables et sa documentation, sans exécutable moteur.
+La scène centrale de Pripiat (place, Palais de la Culture Energetik et hôtel Polissya) **n’est pas intégrée au package du moteur V17**. Elle est disponible séparément en téléchargement, avec son binaire de scène, ses sources et sa documentation :
 
-[Télécharger le package de la scène centrale de Pripiat — Energetik, place et Polissya](https://github.com/glaby91/moteur3d-scene/releases/download/pripyat-scene-central-20261124.1/Pripyat-place-centrale-Energetik-Polissya.zip) · [Version et détails du package](https://github.com/glaby91/moteur3d-scene/releases/tag/pripyat-scene-central-20261124.1)
+[Télécharger la scène de Pripiat — Energetik, place et Polissya](https://github.com/glaby91/moteur3d-scene/releases/download/pripyat-scene-central-20261124.1/Pripyat-place-centrale-Energetik-Polissya.zip) · [Version et détails du package](https://github.com/glaby91/moteur3d-scene/releases/tag/pripyat-scene-central-20261124.1)
 
 ## Télécharger et lancer
 
