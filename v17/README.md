@@ -6,6 +6,17 @@
 
 V16 et V17 utilisent le même manifeste de modules de rendu : [`engine/render_modules.json`](../engine/render_modules.json). Il donne une révision par module ; CMake contrôle les entrées et place le manifeste dans le paquet. Une correction ciblée doit faire évoluer la révision du seul module concerné.
 
+## Modules de rendu
+
+Le registre commun garde une organisation courte par responsabilité :
+
+- **DX11 Raster** : construction des maillages CPU (`d3d11_mesh`), shaders, puis orchestration et présentation raster. Le gros fichier raster reste à découper par étapes.
+- **Vulkan Raster** : maillage, politique de mise à jour, mipmaps, lecture d’image et cycle de vie des buffers/images (`vulkan_resources`). Le cœur `m3d_vulkan.cpp` reste à découper davantage.
+- **LumaTrace CPU** : préparation de scène et conversion du BVH partagé en BVH4 (`lumatrace_bvh4`). C’est le travail CPU préalable au parcours GPU ; un noyau de rendu LumaTrace CPU n’existe pas encore.
+- **LumaTrace Compute DX11** : allocation des buffers BVH4, cache des radiances par triangle, compilation et dispatch du shader (`lumatrace_gpu_compute`). La présentation raster consomme ensuite cette radiance.
+
+Les dépendances et révisions sont inscrites dans le même manifeste. Les modules optionnels Vulkan et LumaTrace Compute ne sont ajoutés au build que lorsque leur backend est disponible. V16 et V17 assemblent les mêmes modules partagés ; ils ne maintiennent pas deux copies indépendantes du moteur.
+
 ## État de validation V17.600
 
 Le commit moteur `ceaa6a6` (V17.600) a passé la [CI Windows x64, run 44437496051](https://github.com/glaby91/moteur3d/actions/runs/44437496051) : compilation Release avec Vulkan, contrôles du paquet, validations du chargeur de scènes, rendus de contrôle WARP, audit de rayons de la fresque et suite de régression V16/V17. L’artefact Windows est produit par GitHub Actions.
@@ -47,20 +58,4 @@ Chaque phase nécessite un accord explicite avant modification du moteur, compil
 
 ## Tableau de bord de diagnostic
 
-La branche `feature/v17-diagnostic-dashboard-tab-20261123` ajoute un Pip-Boy compact au poignet et un panneau plein écran pendant l’exploration. Un appui bref sur `Tab` affiche ou masque le Pip-Boy compact au poignet. Maintenir `Tab` environ 550 ms ouvre l’interface plein écran ; un appui bref la ferme et revient au Pip-Boy. `Échap` garde son rôle habituel et arrête le mode caméra (les deux interfaces se ferment avec lui). `F11` conserve son comportement de plein écran du viewport.
-
-Le panneau sépare les pages **Aperçu**, **Scène**, **Lumières**, **Ressources** et **Diagnostic**. Il affiche la version et la révision Git du moteur, la révision fournie par le manifeste chargé, les objets source, triangles compilés, matériaux, albedos image, lumières, caméra, résolution, cadence, dernier temps moteur et charge mémoire système. Les valeurs non instrumentées (mémoire du processus et VRAM) sont explicitement signalées.
-
-Le comptage des triangles provient de la géométrie triangulée de la scène chargée. La révision moteur est la version produit compilée plus la révision Git empaquetée ; la révision de scène vient des métadonnées du manifeste. En présentation GPU directe, le temps affiché peut correspondre à la soumission CPU et ne constitue pas un temps GPU de fin d’exécution. Voir [la fiche de reprise et les limites](docs/DIAGNOSTIC_DASHBOARD.md).
-
-La modification est enregistrée sur une branche de travail et n’a pas encore été compilée.
-
-
-
-### Exploration : accroupissement et saut
-
-En mode « Marcher au sol », maintenir **Ctrl** permet de s’accroupir. La hauteur de vue et le gabarit de collision diminuent ; le personnage ne se redresse pas tant que le plafond est trop bas. **Espace** déclenche un saut uniquement depuis le sol. En vol libre, Espace et Ctrl gardent leurs commandes verticales.
-
-### Radio de scène
-
-La radio tente d’abord le flux Internet de la station, avec délai et repli automatique vers le WAV local si la playlist, le réseau ou la lecture échoue. Le paquet Windows contient le WAV de secours et l’implantation des quatre haut-parleurs ; la compilation échoue si l’un des deux fichiers manque.
+La branche `feature/v17-diagnostic-dashboard-tab-20261123` ajoute un Pip-Boy compact au poignet et un panneau plein écran pendant l’exploration. Un appui bref sur `Tab` affiche ou masque le Pip-Boy compact au poignet. Maintenir `Tab` environ 550 ms ouvre l’interface plein écran ; un appui bref la ferme et revient au Pip-Boy. `Échap` garde son rôle habituel et arrête le mode caméra (les deux interfaces se ferment avec lui). `F11` conserve son compo

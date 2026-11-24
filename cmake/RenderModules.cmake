@@ -44,6 +44,24 @@ function(m3d_validate_render_modules manifest repo_root)
             list(APPEND _m3d_seen_sources "${_m3d_source}")
         endforeach()
     endforeach()
+
+    # Optional dependency lists document the module graph in the same registry.
+    # Keep references valid so a module rename cannot silently orphan dependants.
+    foreach(_m3d_index RANGE 0 ${_m3d_last})
+        string(JSON _m3d_dependency_count ERROR_VARIABLE _m3d_dependency_error
+               LENGTH "${_m3d_modules_json}" modules ${_m3d_index} dependencies)
+        if(_m3d_dependency_error)
+            continue()
+        endif()
+        string(JSON _m3d_id GET "${_m3d_modules_json}" modules ${_m3d_index} id)
+        math(EXPR _m3d_dependency_last "${_m3d_dependency_count} - 1")
+        foreach(_m3d_dependency_index RANGE 0 ${_m3d_dependency_last})
+            string(JSON _m3d_dependency GET "${_m3d_modules_json}" modules ${_m3d_index} dependencies ${_m3d_dependency_index})
+            if(_m3d_dependency STREQUAL _m3d_id OR NOT _m3d_dependency IN_LIST _m3d_seen_ids)
+                message(FATAL_ERROR "Module '${_m3d_id}' has invalid dependency '${_m3d_dependency}'")
+            endif()
+        endforeach()
+    endforeach()
 endfunction()
 
 function(m3d_render_module_revision manifest module_id output_variable)

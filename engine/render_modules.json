@@ -100,6 +100,15 @@
       "sources": ["v17/vulkan/m3d_vulkan_readback.h"]
     },
     {
+      "id": "vulkan_resources",
+      "revision": "001",
+      "engines": ["v16", "v17"],
+      "optional": true,
+      "description": "Vulkan buffer, image and device-memory lifecycle",
+      "dependencies": ["vulkan_mipmap"],
+      "sources": ["v17/vulkan/m3d_vulkan_resources.cpp", "v17/vulkan/m3d_vulkan_resources.h"]
+    },
+    {
       "id": "d3d11_compute",
       "revision": "001",
       "engines": ["v16", "v17"],
@@ -128,11 +137,21 @@
       "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11_composite_shader.h"]
     },
     {
+      "id": "d3d11_mesh",
+      "revision": "001",
+      "engines": ["v16", "v17"],
+      "optional": false,
+      "description": "CPU-side DX11 scene geometry construction and visibility",
+      "dependencies": ["scene_runtime"],
+      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11_mesh.h"]
+    },
+    {
       "id": "d3d11_raster",
-      "revision": "004",
+      "revision": "005",
       "engines": ["v16", "v17"],
       "optional": false,
       "status": "single-source; internal feature extraction remains",
+      "dependencies": ["d3d11_mesh", "d3d11_raster_shader", "d3d11_sky_shader", "d3d11_peripheral_composite", "lumatrace_gpu_compute"],
       "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp"]
     },
     {
@@ -140,14 +159,18 @@
       "revision": "009",
       "engines": ["v16", "v17"],
       "optional": false,
-      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_bvh4.cpp"]
+      "description": "CPU scene preparation: collapse the shared binary BVH to BVH4 for LumaTrace GPU traversal",
+      "dependencies": ["scene_runtime"],
+      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_bvh4.cpp", "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_bvh4.h"]
     },
     {
-      "id": "lumatrace_shader",
-      "revision": "009",
+      "id": "lumatrace_gpu_compute",
+      "revision": "001",
       "engines": ["v16", "v17"],
-      "optional": false,
-      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_shader.h"]
+      "optional": true,
+      "description": "DX11 compute shader, BVH4 buffers, radiance cache and dispatch",
+      "dependencies": ["lumatrace_bvh4"],
+      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_gpu_d3d11.cpp", "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_gpu_d3d11.h", "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_shader.h"]
     },
     {
       "id": "dxr_backend",
@@ -158,10 +181,11 @@
     },
     {
       "id": "vulkan_raster",
-      "revision": "003",
+      "revision": "004",
       "engines": ["v16", "v17"],
       "optional": true,
       "status": "single-source; internal feature extraction remains",
+      "dependencies": ["vulkan_mesh", "vulkan_dirty_policy", "vulkan_mipmap", "vulkan_readback", "vulkan_resources"],
       "sources": [
         "v17/vulkan/m3d_vulkan.cpp",
         "v17/vulkan/m3d_vulkan_stub.cpp"
