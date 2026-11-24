@@ -1,6 +1,4 @@
-#pragma message("M3D_DIAG GPU header reached")
 #if defined(_WIN32)
-#pragma message("M3D_DIAG Windows guard active")
 #ifndef M3D_LUMATRACE_GPU_D3D11_H
 #define M3D_LUMATRACE_GPU_D3D11_H
 
