@@ -50,6 +50,8 @@ L'inspecteur Qt permet de modifier la rugosité multiplicative et la métallicit
 
 ## Backends et limites
 
+Les versions des modules de rendu consommés par V16 et V17 sont centralisées dans [`engine/render_modules.json`](../engine/render_modules.json). Les CMake V16/V17 vérifient les révisions et l'existence des sources au moment de la configuration ; le manifeste est également copié dans le paquet pour identifier les modules embarqués. Incrémenter uniquement la révision du module modifié.
+
 - **CPU :** ray tracing multithread, BVH de triangles, matériaux avec albedo/normal/roughness, vitrages, éclairages et AA des contours.
 - **D3D11 Compute :** prévisualisation des triangles/BVH sur Windows ; le shader HLSL n'offre **pas encore la parité visuelle PBR** avec le CPU. Si le matériel, le shader ou son chargement échoue, repli CPU.
 - **Qualité :** volumes architecturaux et mobilier de démonstration; détails de menuiserie, véritables assets GLB, cartes PBR photographiques et test sur machine Windows restent à approfondir.

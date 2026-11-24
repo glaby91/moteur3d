@@ -1,14 +1,20 @@
 cmake_minimum_required(VERSION 3.24)
 project(CSE_WARP_V17 VERSION 17.0 LANGUAGES CXX)
-# Product, component and scene revisions are independent version axes.
+# Product, module and scene revisions are independent version axes.
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/version.json" V17_VERSION_JSON)
 string(JSON V17_ENGINE_MAJOR GET "${V17_VERSION_JSON}" engine major)
 string(JSON V17_BUILD_NUMBER GET "${V17_VERSION_JSON}" engine build)
-string(JSON V17_COMPONENT_PBR GET "${V17_VERSION_JSON}" components pbr)
-string(JSON V17_COMPONENT_CPU_LIGHTING GET "${V17_VERSION_JSON}" components cpuLighting)
-string(JSON V17_COMPONENT_DIRECTX11 GET "${V17_VERSION_JSON}" components directx11)
-string(JSON V17_COMPONENT_VULKAN GET "${V17_VERSION_JSON}" components vulkan)
-string(JSON V17_COMPONENT_LUMATRACE GET "${V17_VERSION_JSON}" components lumatrace)
+string(JSON V17_MODULE_MANIFEST_RELATIVE GET "${V17_VERSION_JSON}" renderModules)
+get_filename_component(V17_MODULE_MANIFEST
+    "${CMAKE_CURRENT_SOURCE_DIR}/${V17_MODULE_MANIFEST_RELATIVE}" ABSOLUTE)
+get_filename_component(V17_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+include("${V17_REPOSITORY_ROOT}/cmake/RenderModules.cmake")
+m3d_validate_render_modules("${V17_MODULE_MANIFEST}" "${V17_REPOSITORY_ROOT}")
+m3d_render_module_revision("${V17_MODULE_MANIFEST}" cpu_shading V17_COMPONENT_PBR)
+m3d_render_module_revision("${V17_MODULE_MANIFEST}" cpu_lighting V17_COMPONENT_CPU_LIGHTING)
+m3d_render_module_revision("${V17_MODULE_MANIFEST}" d3d11_raster V17_COMPONENT_DIRECTX11)
+m3d_render_module_revision("${V17_MODULE_MANIFEST}" vulkan_raster V17_COMPONENT_VULKAN)
+m3d_render_module_revision("${V17_MODULE_MANIFEST}" lumatrace_bvh4 V17_COMPONENT_LUMATRACE)
 if(V17_BUILD_NUMBER LESS 10)
     set(V17_BUILD_PADDED "00${V17_BUILD_NUMBER}")
 elseif(V17_BUILD_NUMBER LESS 100)
@@ -338,6 +344,9 @@ if(WIN32)
     add_dependencies(moteur3d_v17 v17_radio_test_asset)
 endif()
 add_custom_command(TARGET moteur3d_v17 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${V17_MODULE_MANIFEST}"
+      "$<TARGET_FILE_DIR:moteur3d_v17>/render_modules.json"
     COMMAND ${CMAKE_COMMAND} -E make_directory
       "$<TARGET_FILE_DIR:moteur3d_v17>/audio"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different

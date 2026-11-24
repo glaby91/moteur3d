@@ -4,6 +4,8 @@
 
 **V17 = architecture temps réel en construction, sans abandonner les moteurs CPU et GPU V16.**
 
+V16 et V17 utilisent le même manifeste de modules de rendu : [`engine/render_modules.json`](../engine/render_modules.json). Il donne une révision par module ; CMake contrôle les entrées et place le manifeste dans le paquet. Une correction ciblée doit faire évoluer la révision du seul module concerné.
+
 ## État de validation V17.600
 
 Le commit moteur `ceaa6a6` (V17.600) a passé la [CI Windows x64, run 44437496051](https://github.com/glaby91/moteur3d/actions/runs/44437496051) : compilation Release avec Vulkan, contrôles du paquet, validations du chargeur de scènes, rendus de contrôle WARP, audit de rayons de la fresque et suite de régression V16/V17. L’artefact Windows est produit par GitHub Actions.

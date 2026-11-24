@@ -2,6 +2,9 @@
 #include "m3d_gi_bake.h"
 #include "m3d_lumatrace_bvh4.h"
 #include "m3d_lumatrace_shader.h"
+#include "m3d_directx11_raster_shader.h"
+#include "m3d_directx11_sky_shader.h"
+#include "m3d_directx11_composite_shader.h"
 #include "../../../../v17/weather/clouds.h"
 
 #if defined(_WIN32)
@@ -172,442 +175,13 @@ struct CloudConstants {
     float wind[4];
 };
 
-constexpr char kShader[] = R"(
-cbuffer Frame : register(b0) {
-    float3 eye; float tanHalf;
-    float3 forward; float aspect;
-    float3 right; float nearPlane;
-    float3 up; float farPlane;
-    float3 lightDir; float ambient;
-    float3 skyColor; uint materialCount;
-    float3 shadowBase; float shadowSpan;
-    float3 shadowRight; float shadowDist;
-    float3 shadowUp; float shadowSize;
-    float4 materialGlow[256];
-    float4 materialSpecular[256];
-    float4 materialOpacity[256];
-    float4 materialDiffuse[256];
-    float4 materialEmission[256];
-    float4 materialTextureDetail[256];
-    float4 lightPositionRadius[256];
-    float4 lightColorIntensity[256];
-    uint lightCount; float3 padding;
-    float4 indirectSky;
-    float4 indirectBounce;
-    float4 indirectSun;
-    float4 probeOrigin;
-    float4 probeInvSpan;
-    float4 hybridControls;
-    float4 colorControls;
-    float4 peripheralControls;
-};
-Texture2DArray<float4> albedo : register(t0);
-Texture2D<float> shadowDepth : register(t1);
-Texture2DArray<float> roughnessMap : register(t2);
-Texture2DArray<float4> normalMap : register(t3);
-Texture3D<float4> indirectProbes : register(t4);
-Texture3D<float4> indirectProbesNext : register(t5);
-Texture2DArray<float4> preservedAlbedo : register(t6);
-StructuredBuffer<float4> lumaTriangleRadiance : register(t7);
-SamplerState wrapSampler : register(s0);
-SamplerState probeSampler : register(s1);
-struct VSIn { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; uint mat:MATERIAL; uint primitiveId:TRIID; };
-struct VSOut { float4 p:SV_POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; float3 world:TEXCOORD1; nointerpolation uint mat:MATERIAL; nointerpolation uint primitiveId:TEXCOORD2; };
-VSOut VSMain(VSIn i) {
-    VSOut o;
-    float3 q = i.p - eye;
-    float z = dot(q, forward);
-    float safeZ = max(z, nearPlane);
-    float nx = dot(q, right) / (safeZ * tanHalf);
-    float ny = dot(q, up) * aspect / (safeZ * tanHalf);
-    float depth = (farPlane / (farPlane - nearPlane)) * z - (farPlane * nearPlane) / (farPlane - nearPlane);
-    // Keep the real camera-space z in w and clip space. Using safeZ here would
-    // pull geometry behind the near plane onto the near plane instead of clipping it.
-    o.p = float4(nx * safeZ, ny * safeZ, depth, z);
-    o.n = i.n; o.uv = i.uv; o.world=i.p; o.mat = min(i.mat, materialCount - 1);o.primitiveId=i.primitiveId;
-    return o;
-}
-struct VSBoxIn {
-    float3 p:POSITION; float3 n:NORMAL; float2 unusedUv:TEXCOORD0;
-    uint unusedMaterial:MATERIAL;uint unusedPrimitiveId:TRIID;
-    float3 boxLo:BOXMIN; float uvScale:BOXSCALE;
-    float3 boxHi:BOXMAX; uint boxMat:BOXMAT;
-    float3 boxSize:BOXSIZE;uint uvMode:BOXUVMODE;
-};
-VSOut VSBoxMain(VSBoxIn i) {
-    // Select the original box corners directly rather than recomputing a
-    // matrix: world coordinates and texture mapping match the legacy mesh.
-    float3 p=float3(i.p.x<0.5?i.boxLo.x:i.boxHi.x,
-                    i.p.y<0.5?i.boxLo.y:i.boxHi.y,
-                    i.p.z<0.5?i.boxLo.z:i.boxHi.z);
-    float3 n=i.n;
-    float2 uv;
-    if(i.uvMode==1 || i.uvMode==2){
-        // uvMode=1: normal scene PBR, repeat per metre.
-        // uvMode=2: image artwork, cover the entire box face once.
-        // The mirroring matches the original 12-triangle V16 source boxes.
-        float2 localUV=i.unusedUv;
-        if(n.z < -0.5 || n.x > 0.5)localUV.x=1.0-localUV.x;
-        if(n.y > 0.5)localUV.y=1.0-localUV.y;
-        float uLength=(abs(n.x)>0.5?i.boxSize.z:i.boxSize.x)*0.5;
-        float vLength=(abs(n.y)>0.5?i.boxSize.z:i.boxSize.y)*0.5;
-        uv=i.uvMode==2?localUV:localUV*float2(uLength,vLength);
-    }else{
-        uv=(abs(n.y)>=abs(n.x)&&abs(n.y)>=abs(n.z))
-            ?p.xz*i.uvScale
-            :(abs(n.x)>=abs(n.z)?p.zy*i.uvScale:p.xy*i.uvScale);
-    }
-    VSIn raw;
-    raw.p=p;raw.n=n;raw.uv=uv;raw.mat=i.boxMat;raw.primitiveId=i.unusedPrimitiveId;
-    return VSMain(raw);
-}
-struct VSEllipseIn {
-    float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0;
-    uint unusedMaterial:MATERIAL;uint unusedPrimitiveId:TRIID;
-    float3 center:ELLIPSECENTER;uint ellipseMat:ELLIPSEMAT;
-    float3 radii:ELLIPSERADII;float pad:ELLIPSEPAD;
-};
-VSOut VSEllipseMain(VSEllipseIn i) {
-    VSIn raw;
-    raw.p=i.center+i.p*i.radii;
-    raw.n=normalize(i.n/max(i.radii,float3(.00001,.00001,.00001)));
-    raw.uv=i.uv;
-    raw.mat=i.ellipseMat;raw.primitiveId=i.unusedPrimitiveId;
-    return VSMain(raw);
-}
-float4 PSMain(VSOut i):SV_TARGET {
-    // Smooth focus-lens / lighthouse geometry. The sharp center follows the
-    // camera's optical axis, with no rectangular hard cut or temporal reuse.
-    // Mode 0: original full-frame, 1: low-res surround, 2: full-res focus.
-    if(peripheralControls.x>.5) {
-        float2 uvScreen=i.p.xy*peripheralControls.yz;
-        float2 focus=(uvScreen-.5)/float2(.47,.48);
-        float radius=length(focus);
-        if(peripheralControls.x<1.5 && radius<.82) discard;
-        if(peripheralControls.x>1.5 && radius>1.0) discard;
-    }
-    // WRAP sampler already handles tiling. frac(uv) here broke automatic
-    // derivatives at tile boundaries and forced inappropriate mip levels.
-    float2 artworkDdx=ddx(i.uv),artworkDdy=ddy(i.uv);
-    float3 base;
-    float detailLayer=materialTextureDetail[i.mat].x;
-    if(detailLayer>=0.0) {
-        // Scene-authored preservation keeps paintings at their source tier,
-        // independent of the shared array budget used by ordinary materials.
-        base=preservedAlbedo.SampleGrad(wrapSampler,float3(i.uv,detailLayer),
-                                       artworkDdx,artworkDdy).rgb;
-    } else {
-        base=albedo.Sample(wrapSampler,float3(i.uv,i.mat)).rgb;
-    }
-    float3 normal = normalize(i.n);
-    const bool poolWater=materialEmission[i.mat].a < -0.5;
-    // Dedicated animated-looking standing waves (static in world space) only on
-    // the new translucent pool water. Avoid extra trig on every other material.
-    if(poolWater && normal.y>0.75){
-        float waveA=sin(i.world.x*2.1+i.world.z*.75);
-        float waveB=cos(i.world.z*2.8-i.world.x*.45);
-        normal=normalize(normal+float3(.028*waveA,0,.025*waveB));
-        base=lerp(base,float3(.055,.38,.55),.62);
-    }
-#if !defined(M3D_V17_OPTIMIZE_PIXELS)
-    float3 dpdx = ddx(i.world), dpdy = ddy(i.world);
-    float2 duvdx = ddx(i.uv), duvdy = ddy(i.uv);
-    float determinant = duvdx.x * duvdy.y - duvdx.y * duvdy.x;
-#endif
-    if (materialOpacity[i.mat].y > 0.5) {
-#if defined(M3D_V17_OPTIMIZE_PIXELS)
-        // The nointerpolation material index is uniform per primitive.
-        // Do not evaluate derivatives when normal mapping is disabled.
-        float3 dpdx = ddx(i.world), dpdy = ddy(i.world);
-        float2 duvdx = ddx(i.uv), duvdy = ddy(i.uv);
-        float determinant = duvdx.x * duvdy.y - duvdx.y * duvdy.x;
-#endif
-        float3 detailNormal = normalize(normalMap.Sample(wrapSampler, float3(i.uv, i.mat)).xyz * 2.0 - 1.0);
-        if (abs(determinant) > 0.000001) {
-            float3 tangent = (dpdx * duvdy.y - dpdy * duvdx.y) / determinant;
-            float3 rawBitangent = (-dpdx * duvdy.x + dpdy * duvdx.x) / determinant;
-            tangent = normalize(tangent - normal * dot(normal, tangent));
-            float3 bitangent = normalize(cross(normal, tangent)) * (dot(cross(normal, tangent), rawBitangent) < 0.0 ? -1.0 : 1.0);
-            // V17.600: a modest tangent-space gain restores visible material relief
-            // without tessellation or changing silhouette geometry.
-            normal = normalize(tangent * (detailNormal.x * 1.25) + bitangent * (detailNormal.y * 1.25) + normal * detailNormal.z);
-        }
-    }
-    float diffuse = saturate(dot(normal, normalize(lightDir)));
-    float3 shadowOffset = i.world - shadowBase;
-    float shadowFactor = 1.0;
-    float shadowScale = shadowSize / (2.0 * shadowSpan);
-    float shadowCenter = shadowSize * 0.5 - 0.5;
-    int2 shadowPixel = int2(round(float2(dot(shadowOffset, shadowRight), dot(shadowOffset, shadowUp)) * shadowScale + shadowCenter));
-    float shadowDistance = shadowDist - dot(shadowOffset, lightDir);
-    if (shadowPixel.x >= 2 && shadowPixel.y >= 2 && shadowPixel.x < int(shadowSize) - 2 && shadowPixel.y < int(shadowSize) - 2) {
-        float visible = 0.0;
-        [unroll] for (int sy = -1; sy <= 1; ++sy) [unroll] for (int sx = -1; sx <= 1; ++sx) { )";
-constexpr char kShaderPart2[] = R"(
-            float storedDepth = shadowDepth.Load(int3(shadowPixel + int2(sx, sy), 0));
-            visible += shadowDistance <= storedDepth + 0.095 ? 1.0 : 0.0;
-        }
-        shadowFactor = 0.16 + 0.84 * visible / 9.0;
-    }
-    float4 diffuseTerms = materialDiffuse[i.mat];
-    // Cheap hemispherical sky fill: upward surfaces receive slightly more
-    // ambient daylight than vertical walls and undersides. Direct lighting
-    // and the existing shadow map remain separate for stronger depth.
-    float hemisphere=saturate(normal.y*0.5+0.5);
-    float skyFill=lerp(0.86,1.10,hemisphere);
-    float ambientEnergy=(diffuseTerms.x+diffuseTerms.y*diffuseTerms.w)*skyFill;
-    float sunEnergy=diffuseTerms.z*diffuse*shadowFactor*diffuseTerms.w;
-    if(colorControls.x>0.5){
-        // Neutral concrete previously received ~.74 ambient + .56 sun:
-        // correct the LIGHT budget, not the pixels after they have clipped.
-        float sunlightVisibility=saturate((shadowFactor-.16)/.84);
-        ambientEnergy=lerp(.055,.335,diffuseTerms.w)*lerp(.77,1.03,hemisphere);
-        sunEnergy=.88*diffuse*sunlightVisibility*diffuseTerms.w;
-    }
-    float3 color = base*(ambientEnergy+sunEnergy)
-                 + base*materialGlow[i.mat].rgb*materialGlow[i.mat].a;
-    if(peripheralControls.w>.5 && i.primitiveId!=0xffffffff)
-        color+=base*lumaTriangleRadiance[i.primitiveId].rgb;
-    color += materialEmission[i.mat].rgb * max(materialEmission[i.mat].a,0.0);
-    // The old warm (28,13,4) constant tinted *every* night material brown.
-    // Keep a tiny near-neutral floor instead; actual lamps add local warmth.
-    color += float3(4.0, 5.0, 7.0) / 255.0 * (1.0 - diffuseTerms.w);
-    float3 viewDir = normalize(eye - i.world);
-    float3 reflectedLight = reflect(-normalize(lightDir), normal);
-    float roughness = roughnessMap.Sample(wrapSampler, float3(i.uv, i.mat));
-    float specularPower = materialSpecular[i.mat].y;
-    if (materialSpecular[i.mat].z > 0.5) {
-        specularPower = clamp(2.0 / max(roughness * roughness, 0.0001) - 2.0, 8.0, 80.0);
-    }
-    float specular = pow(saturate(dot(viewDir, reflectedLight)), specularPower)
-                   * materialSpecular[i.mat].x * shadowFactor * diffuseTerms.w;
-    // Use PBR metalness for the highlight tint and a cheap 5th-power
-    // Schlick grazing response. This avoids another expensive pow() call.
-    float metallic=saturate(materialSpecular[i.mat].w);
-    float grazing=1.0-saturate(dot(viewDir,normal));
-    float f2=grazing*grazing;
-    float fresnel=f2*f2*grazing;
-    float3 specTint=lerp(float3(178.0,202.0,214.0)/255.0,
-                         saturate(base*1.2),metallic);
-    if(colorControls.x>0.5){
-        // Dielectrics use neutral Fresnel F0 ~4%, not metallic steel blue.
-        // Keep glass specular response using transmission; maintain metals.
-        float glazing=1.0-saturate(materialOpacity[i.mat].x);
-        specTint=lerp(float3(.04,.04,.04),saturate(base),metallic);
-        specTint=lerp(specTint,float3(.24,.26,.28),saturate(glazing*1.8));
-    }
-    color += specTint * specular * (0.88+0.22*fresnel);
-    [loop] for (uint l = 0; l < lightCount; ++l) {
-        float3 delta = lightPositionRadius[l].xyz - i.world;
-        float radius = lightPositionRadius[l].w;
-#if defined(M3D_V17_LIGHT_AABB_CULL)
-        // Conservative light-volume rejection. A light outside ANY axis
-        // cannot contribute. Expand radius to preserve the legacy squared
-        // distance epsilon and avoid losing boundary pixels.
-        [branch] if (radius > 0.0 &&
-            all(abs(delta) <= radius * 1.000001)) {
-#endif
-#if defined(M3D_V17_OPTIMIZE_PIXELS)
-        // Reject far lights before computing length()/sqrt. Allow a
-        // conservative epsilon to keep the legacy threshold identical.
-        float radius2 = radius * radius;
-        float distance2 = dot(delta, delta);
-        [branch] if (radius > 0.0 && distance2 <= radius2 * 1.000001) {
-#endif
-            [branch] if (dot(normal, delta) > 0.0) {
-                float distanceToLight = length(delta);
-                if (distanceToLight < radius && distanceToLight > 0.0001) {
-                    float edge = 1.0 - distanceToLight / radius;
-                    float lambert = saturate(dot(normal, delta / distanceToLight));
-                    float3 localIrradiance=lightColorIntensity[l].rgb
-                        *(edge*edge*lightColorIntensity[l].a*lambert*.27);
-                    color += colorControls.x>0.5 ? base*localIrradiance : localIrradiance;
-                }
-            }
-#if defined(M3D_V17_OPTIMIZE_PIXELS)
-        }
-#endif
-#if defined(M3D_V17_LIGHT_AABB_CULL)
-        }
-#endif
-    }
-    if(hybridControls.x>0.5){
-        // Indirect probes modify AMBIENT energy instead of adding an extra
-        // full-strength light pass. This prevents washed-out concrete.
-        float3 position=saturate((i.world-probeOrigin.xyz)*probeInvSpan.xyz);
-        float4 probe=indirectProbes.SampleLevel(probeSampler,position,0);
-        if(hybridControls.w>.5){
-            const float4 nextProbe=indirectProbesNext.SampleLevel(probeSampler,position,0);
-            probe=lerp(probe,nextProbe,hybridControls.y);
-        }
-        float skyVisibility=saturate(probe.a);
-        float upward=saturate(normal.y*.5+.5);
-        float existingAmbient=ambientEnergy;
-        // Normalize the time-dependent sky color so daylight changes hue,
-        // but doesn't create energy from a second hemispherical fill.
-        float skyMean=max(dot(indirectSky.rgb,float3(.333333,.333333,.333333)),.001);
-        float3 skyTint=lerp(float3(1.0,1.0,1.0),
-                            indirectSky.rgb/skyMean,.22);
-        // Retain up to 92% of the legacy ambient in open air, but only
-        // 48% in occluded interiors. Static probe volume interpolates in XYZ.
-        float3 accessibleSky=existingAmbient
-                             *lerp(.48,.92,skyVisibility)*skyTint;
-        // Low-energy, material-colored bounce gives warmth to nearby walls
-        // without washing out roofs. Decays in exposed outdoor probes.
-        float3 reflected=indirectBounce.rgb*probe.rgb
-                         *(.12+.18*(1.0-upward))
-                         *(.80-.30*skyVisibility);
-        float3 indirect=accessibleSky+reflected;
-        if(hybridControls.w>.5){
-            // The offline cache stores real surface-to-probe illumination.
-            // Do not re-color it using the old empirical sky/bounce terms.
-            indirect=max(probe.rgb,0.0);
-        }
-        color+=base*(indirect-existingAmbient);
-        // The existing shadow map and dynamic direct sun remain unchanged;
-        // gently tint only the direct contribution at warm solar hours.
-        float sunContribution=diffuseTerms.z*diffuse*shadowFactor*diffuseTerms.w;
-        color+=base*sunContribution*(indirectSun.rgb-1.0)*.40;
-    }
-    if(hybridControls.z>0.5){
-        // Conservative display-referred shoulder, independently toggled.
-        // IMPORTANT: no sRGB gamma here; the legacy back buffer is UNORM
-        // and the V17.309 pow(1/2.2) incorrectly lifted ALL midtones.
-        float3 linearPositive=max(color,0.0);
-        color=linearPositive/(1.0+.70*max(linearPositive-.64,0.0));
-    }
-    if(colorControls.x>0.5){
-        // Color is LINEAR; SRGB RTV encodes exactly once. A shared
-        // luminance shoulder preserves chroma ratios while avoiding clips.
-        float3 positive=max(color,0.0);
-        float luminance=dot(positive,float3(.2126,.7152,.0722));
-        float adjusted=luminance*colorControls.y;
-        float compressed=adjusted/(1.0+.70*max(adjusted-.63,0.0));
-        color=positive*(compressed/max(luminance,0.000001));
-    }
-    if(poolWater){
-        // Grazing-angle Fresnel, soft cool highlights and bottom visibility
-        // through the transparent polygon. No DXR/SSR dependency.
-        const float incidence=1.0-saturate(dot(normal,viewDir));
-        const float fresnelWater=.02+.98*pow(incidence,5.0);
-        float stripe=pow(saturate(.5+.5*sin(i.world.x*1.4+i.world.z*.37)),14.0);
-        color=lerp(color,float3(.24,.57,.69),.07+fresnelWater*.20);
-        color+=float3(.19,.32,.37)*stripe*(.025+.13*fresnelWater);
-        // Underwater ladders must remain visible through the surface from the deck.
-        // Avoid the former 45% high-angle opaque cyan veil.
-        const float opacity=lerp(.08,.24,saturate(fresnelWater*1.75));
-        return float4(color,opacity);
-    }
-    return float4(color, materialOpacity[i.mat].x);
-}
-)";
+
+
 // World-locked, hemispherical cirrus. The procedural field is evaluated only
 // on uncovered background pixels; its cloud mask is never applied over objects.
-constexpr char kCloudSkyShader[] = R"(
-cbuffer Sky : register(b1) {
-    float3 forward; float tanHalf;
-    float3 right; float aspect;
-    float3 up; float pad0;
-    float3 sun; float day;
-    float3 zenith; float opacity;
-    float3 horizon; float coverage;
-    float4 wind;
-};
-struct SkyOut {float4 pos:SV_POSITION; float2 ndc:TEXCOORD0;};
-SkyOut VSSky(uint vid:SV_VertexID){
-    SkyOut o;
-    o.ndc=vid==0?float2(-1,-1):vid==1?float2(-1,3):float2(3,-1);
-    o.pos=float4(o.ndc,0,1);
-    return o;
-}
-float skyHash(float2 p){
-    float3 q=frac(float3(p.xyx)*.1031);
-    q+=dot(q,q.yzx+33.33);
-    return frac((q.x+q.y)*q.z);
-}
-float skyNoise(float2 p){
-    float2 k=floor(p),f=frac(p);f=f*f*(3-2*f);
-    return lerp(lerp(skyHash(k),skyHash(k+float2(1,0)),f.x),
-                lerp(skyHash(k+float2(0,1)),skyHash(k+1),f.x),f.y);
-}
-float4 PSSky(SkyOut i):SV_TARGET {
-    if(wind.w>.5) return float4(0,0,0,0);
-    float3 d=normalize(forward+right*(i.ndc.x*tanHalf)
-                             +up*(i.ndc.y*tanHalf/aspect));
-    float gradient=smoothstep(-.06,.60,d.y);
-    float3 col=lerp(horizon,zenith,gradient);
-    if(d.y>-.02){
-        float2 dome=d.xz/max(d.y+.18,.18);
-        float2 p=float2(dome.x*3.0,dome.y*2.0)+wind.xy*18.0;
-        float n=.56*skyNoise(p*.73)+.30*skyNoise(p*1.53+float2(7.1,11.3))
-               +.14*skyNoise(p*3.11-float2(3.7,8.2));
-        float cloud=smoothstep(.60-coverage*.27,.73-coverage*.22,n)
-                   *smoothstep(.01,.16,d.y);
-        float3 cloudColor=lerp(float3(.018,.025,.045),
-                                float3(.78,.84,.91),day);
-        col=lerp(col,cloudColor,cloud*opacity);
-    }
-    // Stable world-space star field. It appears only in the night sky, with
-    // soft subpixel points and natural occlusion from the animated clouds.
-    if(d.y>0.0 && day<0.20) {
-        float2 starUV=float2(atan2(d.z,d.x)/6.28318530718+0.5+wind.z/24.0,
-            asin(clamp(d.y,-1.0,1.0))/3.14159265359+0.5)*float2(360.0,180.0);
-        float2 starCell=floor(starUV);
-        float chance=skyHash(starCell+float2(19.79,91.73));
-        float2 center=float2(
-            skyHash(starCell+float2(41.11,12.77)),
-            skyHash(starCell+float2(13.47,59.19)));
-        float radius=lerp(.10,.18,skyHash(starCell+float2(29.5,97.3)));
-        float footprint=max(max(fwidth(starUV.x),fwidth(starUV.y))*.5,.018);
-        float disc=1.0-smoothstep(radius-footprint,radius+footprint,
-                                  length(frac(starUV)-center));
-        float bright=lerp(.60,1.55,skyHash(starCell+float2(2.19,6.37)));
-        float horizonFade=smoothstep(.09,.29,d.y);
-        float night=1.0-smoothstep(.01,.18,day);
-        float2 dome=d.xz/max(d.y+.18,.18);
-        float2 p=float2(dome.x*3.0,dome.y*2.0)+wind.xy*18.0;
-        float cloudNoise=.56*skyNoise(p*.73)
-            +.30*skyNoise(p*1.53+float2(7.1,11.3))
-            +.14*skyNoise(p*3.11-float2(3.7,8.2));
-        float cloudMask=smoothstep(.60-coverage*.27,
-                                   .73-coverage*.22,cloudNoise)*opacity;
-        float3 hue=lerp(float3(.65,.79,1.0),float3(1.0,.93,.82),
-            skyHash(starCell+float2(73.9,5.8)));
-        col+=hue*disc*step(.987,chance)*bright*horizonFade*night*
-            (1.0-saturate(cloudMask));
-    }
-    // The solar disc stays on the moving directional-light vector.
-    if(sun.y>0) {
-        float x=saturate(dot(d,normalize(sun)));
-        float disc=smoothstep(.99984,.99997,x);
-        float halo=pow(x,128.0)*.20;
-        float warm=saturate(1.0-sun.y*3.2);
-        float3 c=lerp(float3(.95,.96,1),float3(1,.63,.32),warm);
-        col+=c*(disc*.75+halo)*day;
-    }
-    return float4(max(col,0),1);
-}
-)";
 
-constexpr char kPeripheralComposite[] = R"(
-Texture2D<float4> lo : register(t0);
-Texture2D<float4> hi : register(t1);
-SamplerState bilinear : register(s0);
-struct CV {float4 p:SV_POSITION;float2 uv:TEXCOORD;};
-CV VSC(uint id:SV_VertexID) {
-    CV v;v.uv=float2(id==2?2.:0.,id==1?2.:0.);
-    v.p=float4(v.uv.x*2.-1.,1.-v.uv.y*2.,0.,1.);return v;
-}
-float4 PSC(CV v):SV_TARGET {
-    // Camera-centred elliptical focus: approximately half the picture stays
-    // razor sharp, followed by a soft 16%-radius transition like a headlamp.
-    // The edge always uses fresh pixels from this frame (never reprojection).
-    float2 focus=(v.uv-.5)/float2(.47,.48);
-    float radius=length(focus);
-    float fade=smoothstep(.84,1.0,radius);
-    return lerp(hi.Sample(bilinear,v.uv),lo.Sample(bilinear,v.uv),fade);
-}
-)";
+
+
 void put(GpuVertex& v,V p,V n,float u,float vv,uint32_t mat) {
     v={{p.x,p.y,p.z},{n.x,n.y,n.z},{u,vv},mat,0};
 }
@@ -1755,7 +1329,7 @@ private:
         HRESULT hr=D3D11CreateDevice(nullptr,driver,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,&feature,&context_);
         if(FAILED(hr)){error=L"Aucun périphérique Direct3D 11 matériel n’est disponible.";return false;}
         // Keep each embedded HLSL literal below MSVC C2026 limits, then compile the unchanged source.
-        const std::string shaderSource = std::string(kShader) + kShaderPart2;
+        const std::string shaderSource = std::string(dx11::shaders::raster::kShader) + dx11::shaders::raster::kShaderPart2;
         ComPtr<ID3DBlob> vsCode,boxVsCode,ellipseVsCode,psCode,errors;
         auto shaderError=[&](const wchar_t* prefix){
             std::wstring result(prefix);
@@ -1804,11 +1378,11 @@ private:
         if(FAILED(hr)){error=shaderError(L"Compilation du pixel shader DirectX 11 impossible");return false;}
         ComPtr<ID3DBlob> skyVsCode,skyPsCode;
         errors.Reset();
-        hr=D3DCompile(kCloudSkyShader,sizeof(kCloudSkyShader)-1,"CSE_WARP_CloudSky",
+        hr=D3DCompile(dx11::shaders::sky::kCloudSkyShader,sizeof(dx11::shaders::sky::kCloudSkyShader)-1,"CSE_WARP_CloudSky",
             nullptr,nullptr,"VSSky","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&skyVsCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation sommet ciel impossible");return false;}
         errors.Reset();
-        hr=D3DCompile(kCloudSkyShader,sizeof(kCloudSkyShader)-1,"CSE_WARP_CloudSky",
+        hr=D3DCompile(dx11::shaders::sky::kCloudSkyShader,sizeof(dx11::shaders::sky::kCloudSkyShader)-1,"CSE_WARP_CloudSky",
             nullptr,nullptr,"PSSky","ps_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&skyPsCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation nuages DirectX 11 impossible");return false;}
         if(FAILED(device_->CreateVertexShader(skyVsCode->GetBufferPointer(),
@@ -1818,10 +1392,10 @@ private:
             error=L"Impossible de créer les shaders de nuages.";return false;
         }
         ComPtr<ID3DBlob> mergeVS,mergePS;
-        errors.Reset();hr=D3DCompile(kPeripheralComposite,sizeof(kPeripheralComposite)-1,
+        errors.Reset();hr=D3DCompile(dx11::shaders::composite::kPeripheralComposite,sizeof(dx11::shaders::composite::kPeripheralComposite)-1,
             "v17_multires",nullptr,nullptr,"VSC","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&mergeVS,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation VS multires impossible");return false;}
-        errors.Reset();hr=D3DCompile(kPeripheralComposite,sizeof(kPeripheralComposite)-1,
+        errors.Reset();hr=D3DCompile(dx11::shaders::composite::kPeripheralComposite,sizeof(dx11::shaders::composite::kPeripheralComposite)-1,
             "v17_multires",nullptr,nullptr,"PSC","ps_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&mergePS,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation PS multires impossible");return false;}
         if(FAILED(device_->CreateVertexShader(mergeVS->GetBufferPointer(),mergeVS->GetBufferSize(),nullptr,&mergeVs_)) ||

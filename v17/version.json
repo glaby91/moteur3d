@@ -3,11 +3,5 @@
     "major": 17,
     "build": 4
   },
-  "components": {
-    "pbr": "001",
-    "cpuLighting": "003",
-    "directx11": "003",
-    "vulkan": "003",
-    "lumatrace": "009"
-  }
+  "renderModules": "../engine/render_modules.json"
 }
