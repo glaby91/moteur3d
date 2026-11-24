@@ -89,6 +89,25 @@ float3 directAt(uint source,float3 p,float3 n){
   sum+=light(source,p,n,Lights[i],Colors[i]);
  return sum;
 }
+float3 directBounceAt(uint source,float3 p,float3 n){
+ // Keep the eight strongest local contributions for secondary-hit shading.
+ uint selected[8];float scores[8];
+ [unroll]for(uint k=0;k<8;++k){selected[k]=0xffffffff;scores[k]=0;}
+ [loop]for(uint i=0;i<min(Counts.w,64u);++i){
+  float3 dv=Lights[i].xyz-p;float d2=dot(dv,dv),r=max(Lights[i].w,.05);
+  if(d2<1.e-8||d2>=r*r)continue;
+  float d=sqrt(d2),cosLight=saturate(dot(n,dv/d));
+  float edge=saturate(1-d/r);
+  float score=Colors[i].a*cosLight*edge*edge/(1+d2*.28);
+  uint weakest=0;
+  [unroll]for(uint k=1;k<8;++k)if(scores[k]<scores[weakest])weakest=k;
+  if(score>scores[weakest]){scores[weakest]=score;selected[weakest]=i;}
+ }
+ float3 sum=0;
+ [unroll]for(uint k=0;k<8;++k)
+  if(selected[k]!=0xffffffff)sum+=light(source,p,n,Lights[selected[k]],Colors[selected[k]]);
+ return sum;
+}
 uint hash32(uint x){
  x^=x>>16;x*=0x7feb352du;x^=x>>15;x*=0x846ca68bu;x^=x>>16;return x;
 }
@@ -126,7 +145,7 @@ float3 normalAtHit(uint id,float u,float v,float3 rayDirection){
   if(!traceClosest(p+n*.018,direction,1.e20,id,hitId,hitT,u,v))continue;
   float3 hitPosition=p+n*.018+direction*hitT;
   float3 hitNormal=normalAtHit(hitId,u,v,direction);
-  float3 hitDirect=directAt(hitId,hitPosition,hitNormal);
+  float3 hitDirect=directBounceAt(hitId,hitPosition,hitNormal);
   // One diffuse bounce. Four deterministic cosine-weighted rays are cached
   // with the light state, so unchanged scenes pay this cost only once.
   indirect+=Albedo[id].rgb*Albedo[hitId].rgb*(hitDirect/kPi);
