@@ -99,7 +99,7 @@ public:
                 if(prompt.clickedButton()==later)
                     settings.setValue(QStringLiteral("Scene/DeferredRevision"),latest);
                 setStatus(currentRevision_.isEmpty()
-                    ? QStringLiteral("Aucune scène civique locale installée.")
+                    ? QStringLiteral("Aucune scène civique de référence installée.")
                     : QStringLiteral("Scène %1 conservée.").arg(currentRevision_),8000);
                 return;
             }
