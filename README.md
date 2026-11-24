@@ -11,11 +11,13 @@ Cette version est une candidate à l’évaluation, pas une version stable. Elle
 - Le build officiel #587 a chargé, validé et inclus V17.613 dans son package Windows.
 - Les fichiers de scène restent dans le dépôt séparé. Le workflow du moteur récupère la dernière release et l’intègre au package, qui peut ensuite être lancé hors ligne.
 
-## Scène de Pripiat — place centrale
+## Scène de Pripiat — place centrale, compatible V16/V17
 
-La scène centrale de Pripiat (place, Palais de la Culture Energetik et hôtel Polissya) **n’est pas intégrée au package du moteur V17**. Elle est disponible séparément en téléchargement, avec son binaire de scène, ses sources et sa documentation :
+La scène centrale de Pripiat — place, Palais de la Culture Energetik et hôtel Polissya — **n’est pas intégrée au package du moteur V17**. Elle se télécharge séparément au format modulaire V16, puis s’ouvre dans V17 par **Fichier → Ouvrir une scène V16 (scene.json)…**, en sélectionnant `Pripyat-V16/pripyat/scene.json` après extraction. Le package contient les données, sources et documentation de la scène, sans exécutable moteur.
 
-[Télécharger la scène de Pripiat — Energetik, place et Polissya](https://github.com/glaby91/moteur3d-scene/releases/download/pripyat-scene-central-20261124.1/Pripyat-place-centrale-Energetik-Polissya.zip) · [Version et détails du package](https://github.com/glaby91/moteur3d-scene/releases/tag/pripyat-scene-central-20261124.1)
+[Télécharger le package compatible V16/V17 — Pripiat, Energetik, place et Polissya](https://github.com/glaby91/moteur3d-scene/releases/download/pripyat-scene-v16-compat-20261124.1/Pripyat-place-centrale-V16-V17-compatible.zip) · [Version et détails du package](https://github.com/glaby91/moteur3d-scene/releases/tag/pripyat-scene-v16-compat-20261124.1)
+
+Les formes arrondies du format V14 ont été converties en maillages triangulés ; le rendu des surfaces courbes et les textures PBR peuvent différer de la scène V14.
 
 ## Télécharger et lancer
 
