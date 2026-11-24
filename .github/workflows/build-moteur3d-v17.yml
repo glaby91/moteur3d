@@ -7,8 +7,10 @@ run-name: CSE WARP V17.006 — Windows x64 (GitHub build ${{ github.run_number }
       - feature/v17-diagnostic-dashboard-tab-20261123
       - feature/v17-realtime-architecture-roadmap-261110
       - feature/v17-380-global-architectural-rebuild-261112
+      - codex/scene-updater-background
     paths:
       - 'v17/**'
+      - 'v17/scene_update_manager.h'
       - 'v16/**'
       - 'scenes/v16/benchmark-civic/**'
       - 'assets/materials/pripyat-v17/**'
@@ -45,20 +47,35 @@ jobs:
           $sceneRoot = Join-Path $env:RUNNER_TEMP "v17-scene-latest"
           $archive = Join-Path $env:RUNNER_TEMP "V17-scene.zip"
           $manifestPath = Join-Path $env:RUNNER_TEMP "SCENE_VERSION.json"
-          Invoke-WebRequest "https://github.com/glaby91/moteur3d-scene/releases/latest/download/SCENE_VERSION.json" -OutFile $manifestPath
-          Invoke-WebRequest "https://github.com/glaby91/moteur3d-scene/releases/latest/download/V17-scene.zip" -OutFile $archive
+          $release = Invoke-RestMethod "https://api.github.com/repos/glaby91/moteur3d-scene/releases/latest"
+          $manifestAsset = $release.assets | Where-Object name -eq "SCENE_VERSION.json" | Select-Object -First 1
+          $archiveAsset = $release.assets | Where-Object name -eq "V17-scene.zip" | Select-Object -First 1
+          if (!$manifestAsset -or !$archiveAsset -or !$release.tag_name) {
+            throw "Latest V17 scene release is missing its manifest, archive, or tag."
+          }
+          Invoke-WebRequest $manifestAsset.browser_download_url -OutFile $manifestPath
+          Invoke-WebRequest $archiveAsset.browser_download_url -OutFile $archive
           $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
           if ($manifest.repository -ne "glaby91/moteur3d-scene" -or
               $manifest.scene -ne "benchmark-civic/scene.json" -or
-              $manifest.revision -notmatch "^V17\.\d{3}$") {
-            throw "Invalid latest V17 scene manifest."
+              $manifest.revision -notmatch "^V17\.\d{3}$" -or
+              $release.tag_name -notlike "scene-$($manifest.revision)-*") {
+            throw "Invalid latest V17 scene release manifest."
           }
           Expand-Archive -LiteralPath $archive -DestinationPath $sceneRoot -Force
           $sceneDirectory = Join-Path $sceneRoot "benchmark-civic"
-          if (!(Test-Path (Join-Path $sceneDirectory "scene.json"))) {
-            throw "Latest V17 scene archive does not contain benchmark-civic/scene.json."
+          $archiveManifestPath = Join-Path $sceneRoot "SCENE_VERSION.json"
+          if (!(Test-Path (Join-Path $sceneDirectory "scene.json")) -or
+              !(Test-Path $archiveManifestPath)) {
+            throw "Latest V17 scene archive is missing its scene or manifest."
           }
-          Copy-Item $manifestPath (Join-Path $sceneDirectory "SCENE_VERSION.json") -Force
+          $archiveManifest = Get-Content $archiveManifestPath -Raw | ConvertFrom-Json
+          $scene = Get-Content (Join-Path $sceneDirectory "scene.json") -Raw | ConvertFrom-Json
+          if ($archiveManifest.revision -ne $manifest.revision -or
+              $archiveManifest.repository -ne $manifest.repository -or
+              $scene.revision -ne $manifest.revision) {
+            throw "Latest V17 scene release contains mismatched manifest and archive revisions."
+          }
           Write-Host "V17 package scene: $($manifest.revision) from glaby91/moteur3d-scene"
       - name: Qt6
         uses: jurplel/install-qt-action@v4
