@@ -120,4 +120,102 @@ public:
                     V d0=u*std::cos(t0)+v*std::sin(t0),d1=u*std::cos(t1)+v*std::sin(t1);
                     auto point=[&](float phi,V d){float axial=(end?1.f:-1.f)*std::cos(phi);V n=d*std::sin(phi)+axis*axial;return std::pair<V,V>{centers[end]+axis*(axial*radius)+d*(std::sin(phi)*radius),n};};
                     auto p00=point(p0,d0),p01=point(p0,d1),p10=point(p1,d0),p11=point(p1,d1);
-          
+                    float u0=float(s)/slices,u1=float(s+1)/slices;float vBase=end?len*.55f:-radius*.55f;float v0=vBase+radius*.55f*float(ring)/capRings,v1=vBase+radius*.55f*float(ring+1)/capRings;
+                    tri(p00.first,p10.first,p11.first,p00.second,p10.second,p11.second,u0,v0,u0,v1,u1,v1,mat);
+                    tri(p00.first,p11.first,p01.first,p00.second,p11.second,p01.second,u0,v0,u1,v1,u1,v0,mat);
+                }
+            }
+        }
+        for(int s=0;s<slices;s++){
+            float t0=2*PI*float(s)/slices,t1=2*PI*float(s+1)/slices;V d0=u*std::cos(t0)+v*std::sin(t0),d1=u*std::cos(t1)+v*std::sin(t1);
+            V p0=a+d0*radius,p1=a+d1*radius,p2=b+d1*radius,p3=b+d0*radius;
+            tri(p0,p1,p2,d0,d1,d1,float(s)/slices,0,float(s+1)/slices,0,float(s+1)/slices,len*.55f,mat);tri(p0,p2,p3,d0,d1,d0,float(s)/slices,0,float(s+1)/slices,len*.55f,float(s)/slices,len*.55f,mat);
+        }
+    }
+    void ground(const Scene& scene) {
+        if (scene.obj.empty()) return;
+        V mn=scene.obj.front().mn,mx=scene.obj.front().mx;
+        for(const Obj& o:scene.obj){
+            mn.x=std::min(mn.x,o.mn.x);mn.z=std::min(mn.z,o.mn.z);
+            mx.x=std::max(mx.x,o.mx.x);mx.z=std::max(mx.z,o.mx.z);
+        }
+        const float step=.5f;
+        const float x0=std::floor(mn.x-4.f),z0=std::floor(mn.z-4.f);
+        const float x1=std::ceil(mx.x+4.f),z1=std::ceil(mx.z+4.f);
+        for(float z=z0;z<z1;z+=step)for(float x=x0;x<x1;x+=step){
+            if(vertices.size()>12000000u)return;
+            const uint32_t mat=uint32_t(std::max(0,groundMaterial(scene,{x+step*.5f,0,z+step*.5f})));
+            V a{x,0,z},b{x,0,z+step},c{x+step,0,z+step},d{x+step,0,z};
+            tri(a,b,c,{0,1,0},{0,1,0},{0,1,0},x*.34f,z*.34f,x*.34f,(z+step)*.34f,(x+step)*.34f,(z+step)*.34f,mat);
+            tri(a,c,d,{0,1,0},{0,1,0},{0,1,0},x*.34f,z*.34f,(x+step)*.34f,(z+step)*.34f,(x+step)*.34f,z*.34f,mat);
+        }
+    }
+};
+inline std::vector<GpuVertex> makeFoliageTemplate(int segments,int rings,int leaves){
+    MeshBuilder mesh;
+    const auto point=[&](int ring,int segment){
+        const float latitude=float(ring)*PI/rings;
+        const float azimuth=float(segment)*2.f*PI/segments;
+        const float ripple=1.f+.075f*std::sin(5.f*azimuth+2.f*latitude)
+                             +.055f*std::cos(9.f*azimuth-3.f*latitude)
+                             +.04f*std::sin(7.f*latitude+4.f*azimuth);
+        const float widest=std::sin(latitude)*ripple;
+        return V{widest*std::cos(azimuth),std::cos(latitude),
+                 widest*std::sin(azimuth)};
+    };
+    auto add=[&](V p,V q,V r,V uv0,V uv1,V uv2){
+        V n=norm(cross(q-p,r-p));
+        if(dot(n,p)<0.f){std::swap(q,r);std::swap(uv1,uv2);n=norm(cross(q-p,r-p));}
+        mesh.tri(p,q,r,n,n,n,uv0.x,uv0.y,uv1.x,uv1.y,uv2.x,uv2.y,0);
+    };
+    for(int ring=0;ring<rings;++ring)for(int segment=0;segment<segments;++segment){
+        const V a=point(ring,segment),b=point(ring+1,segment);
+        const V c=point(ring+1,segment+1),d=point(ring,segment+1);
+        if(ring>0)add(a,b,d,
+            {float(segment)/segments,float(ring)/rings},
+            {float(segment)/segments,float(ring+1)/rings},
+            {float(segment+1)/segments,float(ring)/rings});
+        if(ring<rings-1)add(b,c,d,
+            {float(segment)/segments,float(ring+1)/rings},
+            {float(segment+1)/segments,float(ring+1)/rings},
+            {float(segment+1)/segments,float(ring)/rings});
+    }
+    for(int i=0;i<leaves;++i){
+        const float azimuth=float(i)*2.39996323f;
+        const float elevation=.35f*std::sin(i*1.731f);
+        const float cy=std::sin(elevation),radius=std::cos(elevation);
+        const V n=norm({radius*std::cos(azimuth),cy,radius*std::sin(azimuth)});
+        const V center=n*.93f;
+        const V helper=std::abs(n.y)<.8f?V{0,1,0}:V{1,0,0};
+        const V tangent=norm(cross(n,helper));
+        const float width=(.12f+.035f*float(i%3))*2.f;
+        const float height=width*(1.15f+.20f*float(i%4));
+        const V base=center-tangent*(width*.45f);
+        const V end=center+tangent*(width*.4f)+V{0,height*.24f,0}+n*(height*.24f);
+        const V sides=center+V{0,height*.4f,0};
+        mesh.tri(base,sides,end,n,n,n,0,0,.5f,1.f,1,0,0);
+    }
+    return std::move(mesh.vertices);
+}
+struct DrawChunk {
+    uint32_t first=0, count=0;
+    V mn{}, mx{};
+};
+static bool visibleChunk(const DrawChunk& chunk,const Camera& camera) {
+    const V center=(chunk.mn+chunk.mx)*.5f;
+    const float radius=length(chunk.mx-chunk.mn)*.5f + .01f;
+    const V q=center-camera.eye;
+    const float z=dot(q,camera.f);
+    if(z+radius<.08f||z-radius>10000.f)return false;
+    const float x=dot(q,camera.r),y=dot(q,camera.u);
+    const float h=std::max(.001f,camera.tanHalf);
+    const float v=h/std::max(.001f,camera.aspect);
+    // Outward-facing frustum plane: sphere support radius is
+    // radius * sqrt(1+tanHalf^2). This is conservative on near-plane
+    // crossings and cannot cut partially visible geometry.
+    if(std::abs(x)>z*h+radius*std::sqrt(1.f+h*h))return false;
+    if(std::abs(y)>z*v+radius*std::sqrt(1.f+v*v))return false;
+    return true;
+}
+
+} // namespace m3d::d3d11
