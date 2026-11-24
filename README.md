@@ -3,6 +3,8 @@
 **Moteur : V17.006 · scène de référence courante : V17.623**
 CSE WARP V17 réunit l’interface d’exploration, plusieurs backends de rendu, le noyau moteur partagé avec V16, les outils de benchmark et un mécanisme de mise à jour de scène. La V17 reste une version expérimentale : les performances et la présentation native doivent être mesurées sur le GPU visé.
 
+> **Branche de travail du paquet V17.006 + scène V17.623 :** [`codex/v17-engine-benchmarks-readme`](https://github.com/glaby91/moteur3d/tree/codex/v17-engine-benchmarks-readme), proposée à `master` par la [PR #88](https://github.com/glaby91/moteur3d/pull/88). Voir [BRANCH_STATUS.md](BRANCH_STATUS.md) pour distinguer les branches conservées.
+
 ## Scène de référence et paquet Windows
 
 La scène « Palais et coupole vitrée de la piscine » est maintenue séparément dans [`glaby91/moteur3d-scene`](https://github.com/glaby91/moteur3d-scene). La release courante est [V17.623](https://github.com/glaby91/moteur3d-scene/releases/tag/scene-V17.623-36). Le workflow moteur récupère la dernière release au début de la compilation, vérifie le manifeste de l’archive et son numéro de révision, charge la scène avec le moteur, puis place **la scène complète et son manifeste dans le même paquet Windows que le moteur**. Le paquet est ainsi utilisable hors ligne dès son extraction.
