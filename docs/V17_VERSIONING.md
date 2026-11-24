@@ -4,7 +4,7 @@ Le numéro moteur, les révisions des modules de rendu, la révision de scène e
 
 - Version moteur : `engine.major` et `engine.build` dans `v17/version.json`. La série repart de `V17.000`; la révision courante de cette branche est `V17.006`.
 - Modules : leurs versions indépendantes sont suivies dans `engine/render_modules.json`. Une modification ciblée incrémente le module concerné.
-- Scène : la scène civique actuelle est `V17.613`, publiée dans le dépôt séparé `glaby91/moteur3d-scene`. La valeur de la release, issue du manifeste livré avec l'archive, fait foi.
+- Scène civique : la dernière release est `V17.613` dans `glaby91/moteur3d-scene`. Elle n’est pas embarquée dans le package moteur. Au démarrage, le moteur compare la révision locale à la release GitHub ; si elle manque ou est plus ancienne, il propose de télécharger et d’installer la scène dans le dossier utilisateur. La CI télécharge aussi la scène pour les contrôles, sans l’ajouter à l’artefact moteur.
 - Build CI : le numéro GitHub Actions identifie une exécution, pas une version du moteur.
 - Scène de diagnostic historique : le workflow `v17-493-vulkan-complete.yml` assemble encore une base `V17.499` avec les overlays `V17.500` et `V17.523`. Son artefact est explicitement étiqueté comme diagnostic et ne représente pas le package officiel V17.006 / scène V17.613.
 
