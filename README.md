@@ -1,19 +1,19 @@
 # CSE WARP — moteur 3D V17
 
-**Release Candidate V17.003 — 23 novembre 2026**  
+**Release Candidate V17.006 — 24 novembre 2026**  
 Cette version est une candidate à l’évaluation, pas une version stable. Elle réunit le moteur V17 avec LumaTrace et la scène de référence publiée séparément.
 
 ## Version et scène livrée
 
-- Moteur : **V17.003**
+- Moteur : **V17.006**
 - Révisions des composants : PBR **001**, éclairage CPU **003**, DirectX 11 **003**, Vulkan **003**, LumaTrace **009**.
 - Dernière scène publiée : **V17.613**, depuis le dépôt [moteur3d-scene](https://github.com/glaby91/moteur3d-scene) et sa [release V17.613](https://github.com/glaby91/moteur3d-scene/releases/tag/scene-V17.613-19).
-- Le build officiel #587 a chargé, validé et inclus V17.613 dans son package Windows.
+- Le build officiel #587 (moteur V17.003) a chargé, validé et inclus V17.613 dans son package Windows. Il sert de référence historique ; le build V17.006 de cette branche doit repasser par la CI.
 - Les fichiers de scène restent dans le dépôt séparé. Le workflow du moteur récupère la dernière release et l’intègre au package, qui peut ensuite être lancé hors ligne.
 
-## Télécharger et lancer
+## Dernier paquet validé avant V17.006
 
-Le [build Windows x64 officiel #587](https://github.com/glaby91/moteur3d/actions/runs/45080722276) a terminé avec succès.
+Le dernier paquet dont la compilation est validée est le [build Windows x64 #587 — V17.003](https://github.com/glaby91/moteur3d/actions/runs/45080722276). Il ne correspond pas à la présente révision V17.006.
 
 Télécharger l’artefact **CSE-WARP-V17.003-GitHub-587-Windows-x64**, extraire l’archive, puis lancer `LANCER_CSE_WARP.bat`. Le package contient la scène V17.613.
 
