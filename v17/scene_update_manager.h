@@ -93,7 +93,7 @@ public:
                 qWarning()<<"Invalid latest scene release metadata";
                 return;
             }
-            QNetworkRequest manifestRequest(QUrl(manifestUrl));
+            QNetworkRequest manifestRequest{QUrl(manifestUrl)};
             manifestRequest.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                                          QNetworkRequest::NoLessSafeRedirectPolicy);
             auto* manifestReply=network_->get(manifestRequest);
@@ -141,9 +141,9 @@ public:
                     return;
                 }
                 const QString promptText=currentRevision_.isEmpty()
-                    ? QStringLiteral("Aucune scène civique n’est installée. La dernière scène publiée est %1.\\n\\n"
+                    ? QStringLiteral("Aucune scène civique n’est installée. La dernière scène publiée est %1.\n\n"
                                      "Voulez-vous la télécharger et la charger maintenant ?").arg(latest)
-                    : QStringLiteral("La scène locale est %1 et la dernière publiée est %2.\\n\\n"
+                    : QStringLiteral("La scène locale est %1 et la dernière publiée est %2.\n\n"
                                      "Voulez-vous télécharger la mise à jour et redémarrer le moteur ?")
                         .arg(currentRevision_,latest);
                 QMessageBox prompt(QMessageBox::Information,
