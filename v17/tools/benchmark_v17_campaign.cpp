@@ -8,6 +8,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QSaveFile>
 #include <QFileInfo>
 #include <QImage>
 #include <QJsonArray>
@@ -39,10 +40,20 @@ using Clock=std::chrono::steady_clock;
 double ms(Clock::time_point start){
     return std::chrono::duration<double,std::milli>(Clock::now()-start).count();
 }
-bool writeJson(const QString& path,const QJsonObject& value){
-    QFile f(path);
-    return f.open(QIODevice::WriteOnly|QIODevice::Truncate)
-        &&f.write(QJsonDocument(value).toJson(QJsonDocument::Indented))>0;
+bool writeJson(const QString& path,const QJsonObject& value) {
+    const QByteArray bytes=QJsonDocument(value).toJson(QJsonDocument::Indented);
+    QSaveFile file(path);
+    if(!file.open(QIODevice::WriteOnly))return false;
+    qint64 offset=0;
+    while(offset<bytes.size()){
+        const qint64 written=file.write(bytes.constData()+offset,bytes.size()-offset);
+        if(written<=0){
+            file.cancelWriting();
+            return false;
+        }
+        offset+=written;
+    }
+    return file.commit();
 }
 bool writeImage(const QString& path,const std::vector<uint32_t>& pixels,int w,int h){
     if(pixels.size()!=size_t(w)*size_t(h))return false;
