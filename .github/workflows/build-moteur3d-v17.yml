@@ -838,7 +838,7 @@ jobs:
             throw "Latest V17 scene source disappeared before validation."
           }
           $expected = Get-Content (Join-Path $env:RUNNER_TEMP "SCENE_VERSION.json") -Raw | ConvertFrom-Json
-          if ($expected.revision -notmatch "^V17\\.\\d{3}$") {
+          if ($expected.revision -notmatch "^V17\.\d{3}$") {
             throw "Invalid latest scene revision in downloaded manifest."
           }
           & "build-v17/Release/v17_benchmark_scene_load_smoke.exe" (Join-Path $sceneSource "scene.json") 20000 --generic 1> "build-v17/final-latest-scene-load.log" 2>&1
