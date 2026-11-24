@@ -44,8 +44,8 @@ private:
                  ComPtr<ID3D11ShaderResourceView>& output);
     void reset() noexcept;
 
-    ComPtr<ID3D11Buffer> bvhBuffer_,orderBuffer_,radianceBuffer_,paramsBuffer_;
-    ComPtr<ID3D11ShaderResourceView> bvhSrv_,orderSrv_,radianceSrv_;
+    ComPtr<ID3D11Buffer> bvhBuffer_,orderBuffer_,albedoBuffer_,radianceBuffer_,paramsBuffer_;
+    ComPtr<ID3D11ShaderResourceView> bvhSrv_,orderSrv_,albedoSrv_,radianceSrv_;
     ComPtr<ID3D11UnorderedAccessView> radianceUav_;
     ComPtr<ID3D11ComputeShader> shader_;
     std::array<uint32_t,sizeof(Params)/sizeof(uint32_t)> radianceKey_{};
