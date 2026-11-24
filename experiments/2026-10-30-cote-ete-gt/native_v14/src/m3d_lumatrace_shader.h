@@ -153,4 +153,4 @@ float3 normalAtHit(uint id,float u,float v,float3 rayDirection){
  indirect/=kBounceSamples;
  Radiance[id]=float4(direct+indirect,1);
 }
-)HLSL
+)HLSL";
