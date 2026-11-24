@@ -84,9 +84,13 @@ float3 light(uint source,float3 p,float3 n,float4 l,float4 color){
  return color.rgb*(ndl*color.a*edge*edge/(1+d2*.28));
 }
 float3 sunlight(uint source,float3 p,float3 n){
- float3 direction=normalize(SunDirection.xyz);
+ if(SunColor.a<=0)return 0;
+ float3 direction=SunDirection.xyz;
+ float directionLength=dot(direction,direction);
+ if(directionLength<1.e-8)return 0;
+ direction*=rsqrt(directionLength);
  float ndl=saturate(dot(n,direction));
- if(ndl<=0||SunColor.a<=0||occluded(p+n*.018,direction,1.e20,source))return 0;
+ if(ndl<=0||occluded(p+n*.018,direction,1.e20,source))return 0;
  return SunColor.rgb*(SunColor.a*ndl);
 }
 float3 directAt(uint source,float3 p,float3 n){
