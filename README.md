@@ -11,6 +11,20 @@ Cette version est une candidate à l’évaluation, pas une version stable. Elle
 - Le build officiel #587 a chargé, validé et inclus V17.613 dans son package Windows.
 - Les fichiers de scène restent dans le dépôt séparé. Le workflow du moteur récupère la dernière release et l’intègre au package, qui peut ensuite être lancé hors ligne.
 
+## Comment une scène est décrite
+
+Une scène est un ensemble de données reliées entre elles. Le fichier d’entrée `scene.json` organise la scène par secteurs et indique où trouver les ressources utilisées.
+
+- **Géométrie** : décrit la forme d’un objet avec des sommets et des triangles, ou réutilise une forme de base comme une boîte ou une sphère.
+- **Instances** : placent les objets dans le monde. Une instance relie une géométrie et un matériau à une position, une taille et une rotation. Plusieurs instances peuvent réutiliser la même géométrie.
+- **Matériaux et textures** : définissent l’apparence des surfaces : couleur, texture, rugosité, aspect métallique et transparence.
+- **Éclairage** : les sources lumineuses sont décrites séparément des objets visibles, avec leur position, leur couleur, leur intensité, leur portée et leur groupe. Une surface lumineuse peut être visible sans éclairer à elle seule tout ce qui l’entoure.
+- **Caméras** : indiquent les points de vue disponibles, avec la position du regard et le champ de vision.
+
+Par exemple, un luminaire de place se décrit comme plusieurs objets placés ensemble : une collerette, un globe et quatre petites barres LED. Chaque partie possède sa géométrie, son matériau et sa position. Les sources lumineuses qui diffusent autour du luminaire sont ajoutées dans les données d’éclairage. Pour un banc, on décrit sa forme une fois, puis on crée une instance à l’endroit voulu avec son matériau béton.
+
+Le dépôt de scène conserve une archive de base et des scripts de correction versionnés. Ces scripts modifient les données, puis le workflow publie une nouvelle archive de scène. Le moteur récupère cette archive et l’intègre au package ; il n’est donc pas nécessaire de reconstruire la géométrie de la scène dans le code du moteur pour chaque correction.
+
 ## Scène de Pripiat — place centrale, compatible V16/V17
 
 La scène centrale de Pripiat — place, Palais de la Culture Energetik et hôtel Polissya — **n’est pas intégrée au package du moteur V17**. Elle se télécharge séparément au format modulaire V16, puis s’ouvre dans V17 par **Fichier → Ouvrir une scène V16 (scene.json)…**, en sélectionnant `Pripyat-V16/pripyat/scene.json` après extraction. Le package contient les données, sources et documentation de la scène, sans exécutable moteur.
