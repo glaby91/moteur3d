@@ -285,7 +285,7 @@ bool runSynchronousBlock(Samples& result,int round,int frames,int warmup,
     ++result.passes;
     return true;
 }
-void report(const QJsonObject& system,const std::vector<Samples>& cases,
+bool report(const QJsonObject& system,const std::vector<Samples>& cases,
             const QJsonArray& sideTests,QDir& dir,bool complete){
     QJsonArray rows;
     QFile csv(dir.filePath("campaign_results.csv"));
@@ -321,7 +321,7 @@ void report(const QJsonObject& system,const std::vector<Samples>& cases,
         {"system",system},{"cases",rows},{"subsystemTests",sideTests},
         {"completedUtc",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)}};
     if(!writeJson(dir.filePath("summary.json"),summary)){
-        err<<"Cannot write benchmark summary\n";return 5;
+        return false;
     }
     QFile html(dir.filePath("campaign_report.html"));
     if(html.open(QIODevice::WriteOnly|QIODevice::Text|QIODevice::Truncate)){
@@ -358,6 +358,7 @@ void report(const QJsonObject& system,const std::vector<Samples>& cases,
            <<QString::fromUtf8(QJsonDocument(sideTests).toJson(QJsonDocument::Indented)).toHtmlEscaped()
            <<"</pre></html>";
     }
+    return true;
 }
 QJsonObject subsystem(QString name,QString variant,double elapsed,bool ok=true,
                       QString note={}){
@@ -874,7 +875,10 @@ int main(int argc,char** argv){
         report(system,cases,side,dir,false);
     }
     if(cfg.fullBenchmark){releaseVulkanPreviewForCurrentThread();setRasterCloudTimeScale(1.f);}
-    report(system,cases,side,dir,true);
+    if(!report(system,cases,side,dir,true)){
+        err<<"Cannot write benchmark summary\n";
+        return 8;
+    }
     out<<"Campaign complete: "<<cases.size()<<" GPU cases, "
        <<side.size()<<" subsystem records; result "<<dir.absolutePath()<<"\n";
     return allOk?0:7;
