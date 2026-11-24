@@ -45,33 +45,23 @@ bool Compute::makeSrv(ID3D11Device* device,ID3D11Buffer* buffer,UINT count,
     return SUCCEEDED(device->CreateShaderResourceView(buffer,&desc,&output));
 }
 
-bool Compute::prepare(ID3D11Device* device,const Scene& scene,const LumaTraceBvh4& bvh,
-                      const std::vector<uint32_t>& objectToTriangle,uint32_t triangleCount,
-                      std::wstring& error) {
+bool Compute::prepare(ID3D11Device* device,const LumaTraceBvh4& bvh,
+                      const LumaTraceCpuScene& cpuScene,std::wstring& error) {
+    const uint32_t triangleCount=cpuScene.triangleCount;
     if(!device||!triangleCount||bvh.nodes.empty()||
-       bvh.primitiveCount!=scene.order.size()){
+       bvh.primitiveCount!=cpuScene.primitiveOrder.size()){
         error=L"LumaTrace BVH4 : géométrie ou table de primitives incompatible.";
         return false;
     }
-    if(sceneIdentity_==scene.gpuCacheIdentity&&sceneRevision_==scene.gpuCacheRevision&&
+    if(sceneIdentity_==cpuScene.sceneIdentity&&sceneRevision_==cpuScene.sceneRevision&&
        triangleCount_==triangleCount&&bvhSrv_&&orderSrv_&&radianceSrv_&&radianceUav_&&
        shader_&&paramsBuffer_)return true;
-
-    std::vector<uint32_t> order;
-    order.reserve(scene.order.size());
-    for(uint32_t id:scene.order){
-        if(id>=objectToTriangle.size()){
-            error=L"LumaTrace BVH4 : indice de primitive hors limites.";
-            return false;
-        }
-        order.push_back(objectToTriangle[id]);
-    }
 
     reset();
     if(!makeStructuredBuffer(device,bvh.nodes.data(),bvh.nodes.size(),
             sizeof(LumaTraceBvh4Node),D3D11_BIND_SHADER_RESOURCE,
             D3D11_USAGE_IMMUTABLE,bvhBuffer_)||
-       !makeStructuredBuffer(device,order.data(),order.size(),sizeof(uint32_t),
+       !makeStructuredBuffer(device,cpuScene.primitiveOrder.data(),cpuScene.primitiveOrder.size(),sizeof(uint32_t),
             D3D11_BIND_SHADER_RESOURCE,D3D11_USAGE_IMMUTABLE,orderBuffer_)||
        !makeStructuredBuffer(device,nullptr,triangleCount,16,
             D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS,
@@ -81,7 +71,7 @@ bool Compute::prepare(ID3D11Device* device,const Scene& scene,const LumaTraceBvh
         return false;
     }
     if(!makeSrv(device,bvhBuffer_.Get(),UINT(bvh.nodes.size()),bvhSrv_)||
-       !makeSrv(device,orderBuffer_.Get(),UINT(order.size()),orderSrv_)||
+       !makeSrv(device,orderBuffer_.Get(),UINT(cpuScene.primitiveOrder.size()),orderSrv_)||
        !makeSrv(device,radianceBuffer_.Get(),triangleCount,radianceSrv_)){
         error=L"Création des vues GPU LumaTrace impossible.";
         reset();
@@ -133,9 +123,9 @@ bool Compute::prepare(ID3D11Device* device,const Scene& scene,const LumaTraceBvh
     }
     triangleCount_=triangleCount;
     nodeCount_=uint32_t(bvh.nodes.size());
-    orderCount_=uint32_t(order.size());
-    sceneIdentity_=scene.gpuCacheIdentity;
-    sceneRevision_=scene.gpuCacheRevision;
+    orderCount_=uint32_t(cpuScene.primitiveOrder.size());
+    sceneIdentity_=cpuScene.sceneIdentity;
+    sceneRevision_=cpuScene.sceneRevision;
     return true;
 }
 
@@ -186,4 +176,23 @@ bool Compute::dispatch(ID3D11DeviceContext* context,ID3D11ShaderResourceView* ve
     std::memcpy(mapped.pData,&params,sizeof(params));
     context->Unmap(paramsBuffer_.Get(),0);
     ID3D11ShaderResourceView* srvs[]={vertexStream,orderSrv_.Get(),bvhSrv_.Get()};
-    ID3D11UnorderedAccessView* uavs[]={r
+    ID3D11UnorderedAccessView* uavs[]={radianceUav_.Get()};
+    ID3D11Buffer* constants[]={paramsBuffer_.Get()};
+    context->CSSetShader(shader_.Get(),nullptr,0);
+    context->CSSetShaderResources(0,3,srvs);
+    context->CSSetUnorderedAccessViews(0,1,uavs,nullptr);
+    context->CSSetConstantBuffers(0,1,constants);
+    context->Dispatch((triangleCount_+63)/64,1,1);
+    ID3D11UnorderedAccessView* noUavs[]={nullptr};
+    ID3D11ShaderResourceView* noSrvs[]={nullptr,nullptr,nullptr};
+    context->CSSetUnorderedAccessViews(0,1,noUavs,nullptr);
+    context->CSSetShaderResources(0,3,noSrvs);
+    context->CSSetShader(nullptr,nullptr,0);
+    radianceKey_=key;
+    radianceCacheValid_=true;
+    return true;
+}
+
+} // namespace m3d::lumatrace_gpu
+
+#endif // _WIN32
