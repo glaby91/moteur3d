@@ -113,6 +113,39 @@ int main(){
             "fast walking crossed solid wall (tunnelling at 7.5m/s)");
     require(fastWall.grounded,
             "fast walking lost ground contact against wall");
+    // V17 exploration jump: grounded takeoff gains height, then gravity
+    // returns the player to the same floor without losing collision state.
+    State jumper{};
+    require(spawn(scene,{0.f,1.7f,2.f},jumper),"jump spawn failed");
+    const float jumpStartY=jumper.feet.y;
+    require(jump(scene,jumper),"grounded player could not jump");
+    for(int i=0;i<8;++i)advance(scene,jumper,{0.f,0.f,0.f},.04f);
+    require(jumper.feet.y>jumpStartY+.35f,
+            "jump impulse did not lift the player");
+    for(int i=0;i<60&&!jumper.grounded;++i)
+        advance(scene,jumper,{0.f,0.f,0.f},.04f);
+    require(jumper.grounded&&std::abs(jumper.feet.y-jumpStartY)<.02f,
+            "jump did not land back on the floor");
+    // Crouching fits under a low ceiling; standing and jumping are blocked
+    // until the player has enough clearance.
+    Scene lowCeiling{};
+    top(lowCeiling,-5.f,5.f,-5.f,5.f,0.f);
+    top(lowCeiling,-5.f,5.f,-5.f,5.f,1.35f);
+    done(lowCeiling);
+    State croucher{};
+    require(spawn(lowCeiling,{0.f,1.3f,0.f},croucher),
+            "low-ceiling crouch spawn failed");
+    require(!canStand(lowCeiling,croucher),
+            "standing clearance check ignored low ceiling");
+    require(!jump(lowCeiling,croucher),
+            "player jumped into a low ceiling");
+    croucher.crouched=true;
+    require(std::abs(eye(croucher).y-1.02f)<.01f,
+            "crouched eye height is incorrect");
+    require(!ceilingBlocked(lowCeiling,croucher.feet,true),
+            "crouched player does not fit under low ceiling");
+    require(!jump(lowCeiling,croucher),
+            "player jumped while crouched");
     // V17.317: aerial 85-m camera must still resolve the real floor.
     State aerial{};
     require(spawn(scene,{0.f,85.f,2.f},aerial),"aerial preset failed to reach site");

@@ -108,7 +108,8 @@ bool loadScene(const std::filesystem::path& path,Scene& s,std::wstring& error);
 inline bool loadScene(const wchar_t* path,Scene& s,std::wstring& error){return loadScene(std::filesystem::path(path),s,error);}
 void closest(const Scene& s,const Ray& r,Hit& best,Stats* st,bool ground=true,int ignoreObject=-1,bool ignoreTransparent=false,float maxDistance=INF);
 int groundMaterial(const Scene& s,V p);
-ShadowMap buildShadow(const Scene& s,Stats& st);
+ShadowMap buildShadow(const Scene& s, Stats& st, const std::atomic<uint64_t> *generation = nullptr,
+                      uint64_t token = 0);
 V shade(const Scene& s,const ShadowMap& sm,const Camera& cam,const Ray& r,const Hit& h,Stats& st,bool fog,bool reflections=true);
 V traceColor(const Scene& s,const ShadowMap& sm,const Camera& cam,const Ray& r,Stats& st,bool fog);
 Camera camera(float angleDeg,float elevationDeg,float distance,int w,int h,V look=V{0,1,-8});

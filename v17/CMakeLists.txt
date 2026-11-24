@@ -73,6 +73,9 @@ add_executable(v17_primary_quarter_smoke "tests/primary_quarter_smoke.cpp")
 add_test(NAME v17_primary_quarter_exact_budget COMMAND v17_primary_quarter_smoke)
 # Reuse the proven V16 CPU, Compute and raster engines, plus their tests.
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../v16" "${CMAKE_CURRENT_BINARY_DIR}/v16")
+add_executable(v17_shadow_cancellation_smoke "tests/shadow_cancellation_smoke.cpp")
+target_link_libraries(v17_shadow_cancellation_smoke PRIVATE moteur3d_v16_core)
+add_test(NAME v17_shadow_generation_cancels COMMAND v17_shadow_cancellation_smoke)
 
 # The Windows ICO is compiled into the EXE so Explorer/taskbar recognize V17.
 # Generate all 16..256px sizes from the local brand artwork; no external download.
@@ -103,7 +106,14 @@ if(WIN32)
     configure_file("${CMAKE_CURRENT_SOURCE_DIR}/resources/v17_benchmark_runner.rc.in"
                    "${CMAKE_CURRENT_BINARY_DIR}/v17_benchmark_runner.rc" @ONLY)
     qt_add_executable(moteur3d_v17 WIN32
-        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_qt.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_main.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_window.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_window.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_camera.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_exploration.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_ui.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_scene.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/radio_audio.cpp"
         "${CMAKE_CURRENT_BINARY_DIR}/v17_app.rc")
     add_dependencies(moteur3d_v17 v17_icon_generator)
@@ -111,7 +121,14 @@ if(WIN32)
         PROPERTIES OBJECT_DEPENDS "${V17_ICON}")
 else()
     qt_add_executable(moteur3d_v17
-        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_qt.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_main.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_window.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_window.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_camera.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_exploration.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_ui.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_scene.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/radio_audio.cpp")
 endif()
 target_include_directories(moteur3d_v17 PRIVATE
@@ -125,6 +142,24 @@ endif()
 target_compile_definitions(moteur3d_v17 PRIVATE CSE_WARP_BUILD_NUMBER=${V17_BUILD_NUMBER})
 if(MSVC)
     target_compile_options(moteur3d_v17 PRIVATE /O2 /EHsc /utf-8)
+endif()
+if(WIN32)
+    find_program(V17_WINDEPLOYQT_EXECUTABLE
+        NAMES windeployqt windeployqt.exe
+        HINTS "${Qt6_DIR}/../../../bin")
+    if(V17_WINDEPLOYQT_EXECUTABLE)
+        add_custom_command(TARGET moteur3d_v17 POST_BUILD
+            COMMAND "${V17_WINDEPLOYQT_EXECUTABLE}"
+                --release
+                --no-translations
+                --no-opengl-sw
+                --dir "$<TARGET_FILE_DIR:moteur3d_v17>"
+                "$<TARGET_FILE:moteur3d_v17>"
+            COMMENT "Deploy Qt6 runtime DLLs and plugins"
+            VERBATIM)
+    else()
+        message(WARNING "windeployqt not found; Qt6 runtime DLLs will not be deployed")
+    endif()
 endif()
 # Vulkan 1.3.204 minimum Raster backend: compile native GLSL shaders to SPIR-V.
 # Pipeline assembly is done once per worker thread, not in the per-frame path.
