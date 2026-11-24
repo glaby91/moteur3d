@@ -3,7 +3,7 @@
 **Moteur : V17.006 · scène de référence courante : V17.623**
 CSE WARP V17 réunit l’interface d’exploration, plusieurs backends de rendu, le noyau moteur partagé avec V16, les outils de benchmark et un mécanisme de mise à jour de scène. La V17 reste une version expérimentale : les performances et la présentation native doivent être mesurées sur le GPU visé.
 
-> **Branche de travail du paquet V17.006 + scène V17.623 :** [`codex/v17-engine-benchmarks-readme`](https://github.com/glaby91/moteur3d/tree/codex/v17-engine-benchmarks-readme), proposée à `master` par la [PR #88](https://github.com/glaby91/moteur3d/pull/88). Voir [BRANCH_STATUS.md](BRANCH_STATUS.md) pour distinguer les branches conservées.
+> **Branche par défaut :** `master`. La livraison V17.006 avec scène V17.623 est fusionnée dans cette branche; voir [BRANCH_STATUS.md](BRANCH_STATUS.md) pour le repère des branches moteur conservées.
 
 ## Scène de référence et paquet Windows
 
@@ -16,7 +16,7 @@ Le programme vérifie ensuite les nouvelles releases en tâche de fond. Il ouvre
 - Workflow de compilation du moteur : [CSE WARP V17 — Windows x64](https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v17.yml)
 - Révision emballée : `SCENE_REVISION.txt` et `SCENE_VERSION.json`, à la racine du paquet ainsi que dans `benchmark-civic/`.
 
-Le build historique [V17.003 #587](https://github.com/glaby91/moteur3d/actions/runs/45080722276) n’est pas le paquet de cette révision. Le nouvel artefact Windows est publié par le workflow après validation de cette branche sur GitHub Actions.
+Le build historique [V17.003 #587](https://github.com/glaby91/moteur3d/actions/runs/45080722276) ne contient pas cette révision. Le paquet Windows V17.006 — build GitHub 683, avec la scène V17.623 — est disponible dans les artefacts du [workflow de compilation](https://github.com/glaby91/moteur3d/actions/runs/45493998985).
 
 ## Format de description des scènes
 
