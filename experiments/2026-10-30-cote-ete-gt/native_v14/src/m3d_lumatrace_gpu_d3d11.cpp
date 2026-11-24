@@ -4,6 +4,7 @@
 
 #include "m3d_lumatrace_shader.h"
 
+#include <d3dcompiler.h>
 #include <algorithm>
 #include <cstring>
 #include <limits>
