@@ -1,6 +1,6 @@
-#pragma once
-
 #if defined(_WIN32)
+#ifndef M3D_LUMATRACE_GPU_D3D11_H
+#define M3D_LUMATRACE_GPU_D3D11_H
 
 #include "m3d_lumatrace_cpu.h"
 
@@ -17,7 +17,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace m3d::lumatrace_gpu {
+namespace m3d { namespace lumatrace_gpu {
 using Microsoft::WRL::ComPtr;
 
 // Owns only LumaTrace's D3D11 compute resources and dispatch. Raster geometry,
@@ -34,8 +34,9 @@ private:
     struct alignas(16) Params {
         uint32_t counts[4];
         float lights[64][4],colors[64][4];
+        float sunDirection[4],sunColor[4];
     };
-    static_assert(sizeof(Params)==2064,"LumaTrace HLSL constant packing");
+    static_assert(sizeof(Params)==2096,"LumaTrace HLSL constant packing");
 
     bool makeStructuredBuffer(ID3D11Device* device,const void* data,size_t count,
                               UINT stride,UINT bind,D3D11_USAGE usage,
@@ -54,6 +55,7 @@ private:
     bool radianceCacheValid_=false;
 };
 
-} // namespace m3d::lumatrace_gpu
+} } // namespace m3d::lumatrace_gpu
 
+#endif // M3D_LUMATRACE_GPU_D3D11_H
 #endif // _WIN32

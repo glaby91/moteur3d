@@ -196,7 +196,7 @@ inline constexpr char kShaderPart2[] = R"(
         ambientEnergy=lerp(.055,.335,diffuseTerms.w)*lerp(.77,1.03,hemisphere);
         sunEnergy=.88*diffuse*sunlightVisibility*diffuseTerms.w;
     }
-    float3 color = base*(ambientEnergy+sunEnergy)
+    float3 color = base*(ambientEnergy+(peripheralControls.w>.5?0.0:sunEnergy))
                  + base*materialGlow[i.mat].rgb*materialGlow[i.mat].a;
     if(peripheralControls.w>.5 && i.primitiveId!=0xffffffff)
         color+=base*lumaTriangleRadiance[i.primitiveId].rgb;
@@ -229,6 +229,8 @@ inline constexpr char kShaderPart2[] = R"(
         specTint=lerp(specTint,float3(.24,.26,.28),saturate(glazing*1.8));
     }
     color += specTint * specular * (0.88+0.22*fresnel);
+    // LumaTrace supplies these direct lights with BVH visibility.
+    if(peripheralControls.w<=.5){
     [loop] for (uint l = 0; l < lightCount; ++l) {
         float3 delta = lightPositionRadius[l].xyz - i.world;
         float radius = lightPositionRadius[l].w;
@@ -262,6 +264,7 @@ inline constexpr char kShaderPart2[] = R"(
 #if defined(M3D_V17_LIGHT_AABB_CULL)
         }
 #endif
+    }
     }
     if(hybridControls.x>0.5){
         // Indirect probes modify AMBIENT energy instead of adding an extra

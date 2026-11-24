@@ -17,7 +17,7 @@ StructuredBuffer<uint> Order : register(t1);
 StructuredBuffer<Node> Bvh : register(t2);
 StructuredBuffer<float4> Albedo : register(t3);
 RWStructuredBuffer<float4> Radiance : register(u0);
-cbuffer Params : register(b0) { uint4 Counts; float4 Lights[64]; float4 Colors[64]; };
+cbuffer Params : register(b0) { uint4 Counts; float4 Lights[64]; float4 Colors[64]; float4 SunDirection; float4 SunColor; };
 static const float kPi=3.14159265359;
 static const uint kBounceSamples=4;
 bool bounds(Node n,float3 o,float3 invD,float maxT,out float nearT){
@@ -83,8 +83,18 @@ float3 light(uint source,float3 p,float3 n,float4 l,float4 color){
  float edge=saturate(1-d/r);
  return color.rgb*(ndl*color.a*edge*edge/(1+d2*.28));
 }
+float3 sunlight(uint source,float3 p,float3 n){
+ if(SunColor.a<=0)return 0;
+ float3 direction=SunDirection.xyz;
+ float directionLength=dot(direction,direction);
+ if(directionLength<1.e-8)return 0;
+ direction*=rsqrt(directionLength);
+ float ndl=saturate(dot(n,direction));
+ if(ndl<=0||occluded(p+n*.018,direction,1.e20,source))return 0;
+ return SunColor.rgb*(SunColor.a*ndl);
+}
 float3 directAt(uint source,float3 p,float3 n){
- float3 sum=0;
+ float3 sum=sunlight(source,p,n);
  [loop]for(uint i=0;i<min(Counts.w,64u);++i)
   sum+=light(source,p,n,Lights[i],Colors[i]);
  return sum;
@@ -106,6 +116,7 @@ float3 directBounceAt(uint source,float3 p,float3 n){
  float3 sum=0;
  [unroll]for(uint k=0;k<8;++k)
   if(selected[k]!=0xffffffff)sum+=light(source,p,n,Lights[selected[k]],Colors[selected[k]]);
+ sum+=sunlight(source,p,n);
  return sum;
 }
 uint hash32(uint x){
@@ -153,4 +164,6 @@ float3 normalAtHit(uint id,float u,float v,float3 rayDirection){
  indirect/=kBounceSamples;
  Radiance[id]=float4(direct+indirect,1);
 }
-)HLSL
+)HLSL";
+
+} // namespace m3d::lumatrace_detail

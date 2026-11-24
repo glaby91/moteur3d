@@ -1,8 +1,8 @@
-#include "m3d_lumatrace_gpu_d3d11.h"
-
 #if defined(_WIN32)
 
+#include "m3d_lumatrace_gpu_d3d11.h"
 #include "m3d_lumatrace_shader.h"
+
 
 #include <d3dcompiler.h>
 #include <algorithm>
@@ -11,7 +11,7 @@
 #include <string>
 #include <vector>
 
-namespace m3d::lumatrace_gpu {
+namespace m3d { namespace lumatrace_gpu {
 
 void Compute::reset() noexcept {
     bvhBuffer_.Reset();orderBuffer_.Reset();albedoBuffer_.Reset();radianceBuffer_.Reset();paramsBuffer_.Reset();
@@ -169,6 +169,16 @@ bool Compute::dispatch(ID3D11DeviceContext* context,ID3D11ShaderResourceView* ve
     for(const Light& light:scene.lights)if(!light.exterior)
         appendLight(light.p,light.radius,light.intensity,light.color);
 
+    // Trace the same sun direction used by the raster renderer through the BVH.
+    // This makes LumaTrace's direct term produce real cast shadows and lets
+    // the one-bounce rays carry daylight into the pool and covered surfaces.
+    const float daylight=std::max(0.f,std::sin(3.14159265359f*
+        clampf((solarHour-6.f)/13.f,0.f,1.f)));
+    params.sunDirection[0]=sun.x;params.sunDirection[1]=sun.y;
+    params.sunDirection[2]=sun.z;params.sunDirection[3]=0.f;
+    params.sunColor[0]=1.f;params.sunColor[1]=.97f;params.sunColor[2]=.91f;
+    params.sunColor[3]=.58f*daylight;
+
     std::array<uint32_t,sizeof(Params)/sizeof(uint32_t)> key{};
     std::memcpy(key.data(),&params,sizeof(params));
     if(radianceCacheValid_&&key==radianceKey_)return true;
@@ -198,6 +208,6 @@ bool Compute::dispatch(ID3D11DeviceContext* context,ID3D11ShaderResourceView* ve
     return true;
 }
 
-} // namespace m3d::lumatrace_gpu
+} } // namespace m3d::lumatrace_gpu
 
 #endif // _WIN32

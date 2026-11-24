@@ -184,7 +184,7 @@
     },
     {
       "id": "d3d11_raster_shader",
-      "revision": "001",
+      "revision": "002",
       "engines": [
         "v16",
         "v17"
@@ -275,7 +275,7 @@
     },
     {
       "id": "lumatrace_gpu_compute",
-      "revision": "003",
+      "revision": "005",
       "engines": [
         "v16",
         "v17"

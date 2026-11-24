@@ -76,3 +76,9 @@ En mode « Marcher au sol », maintenir **Ctrl** permet de s’accroupir. La hau
 ### Radio de scène
 
 La radio tente d’abord le flux Internet de la station, avec délai et repli automatique vers le WAV local si la playlist, le réseau ou la lecture échoue. Le paquet Windows contient le WAV de secours et l’implantation des quatre haut-parleurs ; la compilation échoue si l’un des deux fichiers manque.
+
+## Chargement et mise à jour de la scène
+
+La scène civique est distribuée séparément du moteur. Au démarrage, CSE WARP cherche d’abord une scène déjà installée dans les données utilisateur, puis les emplacements locaux prévus dans le paquet et le dépôt. Il charge immédiatement la scène locale trouvée ; la vérification GitHub ne retarde pas ce chargement.
+
+Avec une scène locale, la première vérification réseau asynchrone attend 10 minutes après le chargement ; les suivantes sont espacées de 30 minutes. Si une révision plus récente est publiée, le moteur propose de la télécharger et de redémarrer. La scène courante reste active jusqu’à l’acceptation ; le moteur ne charge pas une seconde scène par-dessus la première. Si aucune scène civique n’est installée, le moteur vérifie immédiatement le dépôt, propose le téléchargement et ne charge la scène qu’une fois. « Plus tard » mémorise la révision proposée et évite de répéter la même alerte ; une nouvelle publication sera signalée.
