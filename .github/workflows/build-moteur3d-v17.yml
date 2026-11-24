@@ -624,9 +624,12 @@ jobs:
       - name: Finalize engine-only package
         shell: pwsh
         run: |
-          $bundledScene = "dist-v17/benchmark-civic"
-          if (Test-Path $bundledScene) { Remove-Item $bundledScene -Recurse -Force }
-          if (Test-Path $bundledScene) { throw "Reference scene must not be bundled with the V17 engine." }
+          $sceneDirectories = @("benchmark-civic", "pavillon01", "material-lab", "pripyat-photo2scene-proof")
+          foreach ($name in $sceneDirectories) {
+            $path = Join-Path "dist-v17" $name
+            if (Test-Path $path) { Remove-Item $path -Recurse -Force }
+            if (Test-Path $path) { throw "Scene folder must not be bundled with the V17 engine: $name" }
+          }
           @'
           @echo off
           cd /d "%~dp0"
