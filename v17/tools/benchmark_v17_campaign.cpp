@@ -504,7 +504,7 @@ int main(int argc,char** argv){
         side.append(subsystem(sceneName,"pbr_mip_generation",runtime.pbrBuildMs));
         side.append(subsystem(sceneName,"geometry_instancing",runtime.geometryBuildMs));
         side.append(subsystem(sceneName,"bvh_build",runtime.bvhBuildMs));
-        side.append(subsystem(sceneName,"lumatrace_bvh4_prepare",
+        side.append(subsystem(sceneName,"lumatrace_cpu_prepare",
             runtime.lumaTraceBvhBuildMs,runtime.lumaTraceBvhError.isEmpty(),
             runtime.lumaTraceBvhError));
         out<<"  [detail] PBR "<<runtime.pbrBuildMs<<" ms ; instanciation "
