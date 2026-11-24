@@ -3,7 +3,6 @@
 #include "m3d_lumatrace_gpu_d3d11.h"
 #include "m3d_lumatrace_shader.h"
 
-static_assert(sizeof(::m3d::lumatrace_gpu::Compute)>0, "LumaTrace Compute declaration is not visible at global scope");
 
 #include <d3dcompiler.h>
 #include <algorithm>
