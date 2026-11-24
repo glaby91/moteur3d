@@ -23,6 +23,24 @@ Une scène est un ensemble de données reliées entre elles. Le fichier d’entr
 
 Par exemple, un luminaire de place se décrit comme plusieurs objets placés ensemble : une collerette, un globe et quatre petites barres LED. Chaque partie possède sa géométrie, son matériau et sa position. Les sources lumineuses qui diffusent autour du luminaire sont ajoutées dans les données d’éclairage. Pour un banc, on décrit sa forme une fois, puis on crée une instance à l’endroit voulu avec son matériau béton.
 
+### Exemple : placer un arbre
+
+L’arbre est un modèle de géométrie que l’on peut réutiliser. Une instance lui donne sa position dans la scène, sa taille et son orientation. Exemple schématique — les noms et coordonnées sont là pour illustrer :
+
+```json
+{
+  "id": "arbre_01",
+  "parent": "Place/Arbres",
+  "geometry": "mesh_arbre_feuillu",
+  "material": "materiau_arbre",
+  "position": [12.0, 0.0, 35.0],
+  "size": [1.0, 1.0, 1.0],
+  "rotationY": 25
+}
+```
+
+La position verticale `Y` ne suffit pas à garantir que le tronc touche le sol : il faut aussi connaître l’origine du modèle. Si le point d’origine est au milieu du tronc, placer l’arbre à `Y = 0` enfonce sa moitié inférieure dans le terrain. Si l’origine est à la base du tronc, `Y = 0` peut correspondre au niveau du sol. On ajuste ensuite la taille et la rotation sans modifier la forme source. Si le feuillage et le tronc utilisent des matériaux différents, le modèle les référence séparément.
+
 Le dépôt de scène conserve une archive de base et des scripts de correction versionnés. Ces scripts modifient les données, puis le workflow publie une nouvelle archive de scène. Le moteur récupère cette archive et l’intègre au package ; il n’est donc pas nécessaire de reconstruire la géométrie de la scène dans le code du moteur pour chaque correction.
 
 ## Scène de Pripiat — place centrale, compatible V16/V17
