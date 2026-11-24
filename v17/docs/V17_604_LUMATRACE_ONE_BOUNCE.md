@@ -9,7 +9,7 @@ Cette évolution ajoute au module GPU LumaTrace un premier éclairage indirect d
 - Un rayon d'ombre BVH est lancé vers chaque lumière depuis le centroïde du triangle. Il s'arrête dès qu'il trouve un obstacle.
 - Quatre directions cosinus pondérées, déterministes par triangle, échantillonnent un rebond diffus vers une autre surface.
 - À l'impact, le calcul réutilise les lumières et le test d'ombre existants, puis applique les albédos moyens des deux triangles.
-- La sortie est conservée dans le buffer structuré GPU LumaTrace. Le dispatch est réutilisé tant que la scène et les paramètres lumineux sont identiques.
+- La sortie est conservée dans le buffer structuré GPU LumaTrace, avec une radiance par triangle. Ce n'est pas une lightmap UV : cela évite d'imposer des UV2 et des atlas à toutes les ressources. Le dispatch est réutilisé tant que la scène et les paramètres lumineux sont identiques.
 
 ## Choix de performance
 
