@@ -18,6 +18,7 @@
 #include <QSettings>
 #include <QStandardPaths>
 #include <QStatusBar>
+#include <QTimer>
 #include <QUrl>
 #include <QWidget>
 #include <functional>
@@ -32,14 +33,18 @@ public:
     // moteur3d-scene release. The package remains untouched; accepted updates
     // are installed in the per-user data directory.
     void checkAtStartup(const QString& currentScene,const QString& currentRevision,
-                        QWidget* window,std::function<void(const QString&)> integrate) {
+                        QWidget* window,std::function<void(const QString&)> integrate,
+                        bool allowMissingScene=false) {
+        if(checking_||downloading_)return;
         const bool isCivicScene=currentScene.endsWith(QStringLiteral("/benchmark-civic/scene.json"),
                                   Qt::CaseInsensitive) ||
            currentScene.endsWith(QStringLiteral("\\benchmark-civic\\scene.json"),
                                   Qt::CaseInsensitive);
+        if(!isCivicScene&&!allowMissingScene)return;
         window_=window;
         integrate_=std::move(integrate);
         currentRevision_=isCivicScene?currentRevision.trimmed():QString{};
+        checking_=true;
         setStatus(QStringLiteral("Vérification de la scène de référence…"));
         QNetworkRequest request(QUrl(QStringLiteral(
             "https://github.com/glaby91/moteur3d-scene/releases/latest/download/SCENE_VERSION.json")));
@@ -51,6 +56,7 @@ public:
             const auto networkError=reply->error();
             const QString error=reply->errorString();
             reply->deleteLater();
+            checking_=false;
             if(networkError!=QNetworkReply::NoError){
                 setStatus(currentRevision_.isEmpty()
                     ? QStringLiteral("Vérification GitHub indisponible ; aucune scène civique locale.")
@@ -82,33 +88,36 @@ public:
                 return;
             }
             QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-            if(!currentRevision_.isEmpty() &&
-               settings.value(QStringLiteral("Scene/DeferredRevision")).toString()==latest){
+            if(settings.value(QStringLiteral("Scene/DeferredRevision")).toString()==latest){
                 setStatus(QStringLiteral("Une mise à jour de scène (%1) est disponible.").arg(latest),10000);
                 return;
             }
-            const QString localLabel=currentRevision_.isEmpty()
-                ? QStringLiteral("absente") : currentRevision_;
+            const QString promptText=currentRevision_.isEmpty()
+                ? QStringLiteral("Aucune scène civique n’est installée. La dernière scène publiée est %1.\n\n"
+                                 "Voulez-vous la télécharger et la charger maintenant ?").arg(latest)
+                : QStringLiteral("La scène locale est %1 et la dernière publiée est %2.\n\n"
+                                 "Voulez-vous télécharger la mise à jour et redémarrer le moteur ?")
+                    .arg(currentRevision_,latest);
             QMessageBox prompt(QMessageBox::Information,
                 QStringLiteral("Mise à jour de la scène CSE WARP"),
-                QStringLiteral("La scène civique locale est %1. La dernière scène publiée est %2.\n\n"
-                               "Voulez-vous la télécharger et l’intégrer maintenant ?")
-                    .arg(localLabel,latest),
+                promptText,
                 QMessageBox::NoButton,window_);
-            auto* accept=prompt.addButton(QStringLiteral("Télécharger et intégrer"),
+            auto* accept=prompt.addButton(currentRevision_.isEmpty()
+                                          ?QStringLiteral("Télécharger et charger")
+                                          :QStringLiteral("Télécharger et redémarrer"),
                                           QMessageBox::AcceptRole);
-            auto* later=prompt.addButton(QStringLiteral("Plus tard"),QMessageBox::RejectRole);
+            prompt.addButton(QStringLiteral("Plus tard"),QMessageBox::RejectRole);
             prompt.setDefaultButton(qobject_cast<QPushButton*>(accept));
             prompt.exec();
             if(prompt.clickedButton()!=accept){
-                if(prompt.clickedButton()==later)
-                    settings.setValue(QStringLiteral("Scene/DeferredRevision"),latest);
+                settings.setValue(QStringLiteral("Scene/DeferredRevision"),latest);
                 setStatus(currentRevision_.isEmpty()
                     ? QStringLiteral("Aucune scène civique de référence installée.")
                     : QStringLiteral("Scène %1 conservée.").arg(currentRevision_),8000);
                 return;
             }
             settings.remove(QStringLiteral("Scene/DeferredRevision"));
+            downloading_=true;
             beginDownload(latest,window_);
         });
     }
@@ -287,12 +296,15 @@ private:
         }
         QFile::remove(archivePath_);
         QDir(stagingPath_).removeRecursively();
-        setStatus(QStringLiteral("Scène %1 téléchargée et validée ; intégration en cours…")
+        downloading_=false;
+        setStatus(QStringLiteral("Scène %1 téléchargée et validée.")
                   .arg(expectedRevision_),15000);
         if(integrate_)integrate_(installedScene);
     }
 
     void fail(const QString& message) {
+        checking_=false;
+        downloading_=false;
         setStatus(message,20000);
         qWarning().noquote()<<message;
         if(window_)QMessageBox::warning(window_,QStringLiteral("Mise à jour de la scène"),message);
@@ -306,4 +318,6 @@ private:
     QString expectedRevision_;
     QString archivePath_;
     QString stagingPath_;
+    bool checking_=false;
+    bool downloading_=false;
 };
