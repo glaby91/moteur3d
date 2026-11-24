@@ -14,8 +14,8 @@
 namespace m3d::lumatrace_gpu {
 
 void Compute::reset() noexcept {
-    bvhBuffer_.Reset();orderBuffer_.Reset();radianceBuffer_.Reset();paramsBuffer_.Reset();
-    bvhSrv_.Reset();orderSrv_.Reset();radianceSrv_.Reset();radianceUav_.Reset();shader_.Reset();
+    bvhBuffer_.Reset();orderBuffer_.Reset();albedoBuffer_.Reset();radianceBuffer_.Reset();paramsBuffer_.Reset();
+    bvhSrv_.Reset();orderSrv_.Reset();albedoSrv_.Reset();radianceSrv_.Reset();radianceUav_.Reset();shader_.Reset();
     triangleCount_=nodeCount_=orderCount_=0;
     sceneIdentity_=sceneRevision_=0;
     radianceCacheValid_=false;
@@ -50,12 +50,13 @@ bool Compute::prepare(ID3D11Device* device,const LumaTraceBvh4& bvh,
                       const LumaTraceCpuScene& cpuScene,std::wstring& error) {
     const uint32_t triangleCount=cpuScene.triangleCount;
     if(!device||!triangleCount||bvh.nodes.empty()||
-       bvh.primitiveCount!=cpuScene.primitiveOrder.size()){
+       bvh.primitiveCount!=cpuScene.primitiveOrder.size()||
+       cpuScene.triangleAlbedo.size()!=triangleCount){
         error=L"LumaTrace BVH4 : géométrie ou table de primitives incompatible.";
         return false;
     }
     if(sceneIdentity_==cpuScene.sceneIdentity&&sceneRevision_==cpuScene.sceneRevision&&
-       triangleCount_==triangleCount&&bvhSrv_&&orderSrv_&&radianceSrv_&&radianceUav_&&
+       triangleCount_==triangleCount&&bvhSrv_&&orderSrv_&&albedoSrv_&&radianceSrv_&&radianceUav_&&
        shader_&&paramsBuffer_)return true;
 
     reset();
@@ -64,6 +65,8 @@ bool Compute::prepare(ID3D11Device* device,const LumaTraceBvh4& bvh,
             D3D11_USAGE_IMMUTABLE,bvhBuffer_)||
        !makeStructuredBuffer(device,cpuScene.primitiveOrder.data(),cpuScene.primitiveOrder.size(),sizeof(uint32_t),
             D3D11_BIND_SHADER_RESOURCE,D3D11_USAGE_IMMUTABLE,orderBuffer_)||
+       !makeStructuredBuffer(device,cpuScene.triangleAlbedo.data(),cpuScene.triangleAlbedo.size(),sizeof(std::array<float,4>),
+            D3D11_BIND_SHADER_RESOURCE,D3D11_USAGE_IMMUTABLE,albedoBuffer_)||
        !makeStructuredBuffer(device,nullptr,triangleCount,16,
             D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS,
             D3D11_USAGE_DEFAULT,radianceBuffer_)){
@@ -73,6 +76,7 @@ bool Compute::prepare(ID3D11Device* device,const LumaTraceBvh4& bvh,
     }
     if(!makeSrv(device,bvhBuffer_.Get(),UINT(bvh.nodes.size()),bvhSrv_)||
        !makeSrv(device,orderBuffer_.Get(),UINT(cpuScene.primitiveOrder.size()),orderSrv_)||
+       !makeSrv(device,albedoBuffer_.Get(),triangleCount,albedoSrv_)||
        !makeSrv(device,radianceBuffer_.Get(),triangleCount,radianceSrv_)){
         error=L"Création des vues GPU LumaTrace impossible.";
         reset();
@@ -133,7 +137,7 @@ bool Compute::prepare(ID3D11Device* device,const LumaTraceBvh4& bvh,
 bool Compute::dispatch(ID3D11DeviceContext* context,ID3D11ShaderResourceView* vertexStream,
                        const Scene& scene,std::wstring& error) {
     if(!context||!vertexStream||!shader_||!paramsBuffer_||!radianceUav_||
-       !bvhSrv_||!orderSrv_||!triangleCount_){
+       !bvhSrv_||!orderSrv_||!albedoSrv_||!triangleCount_){
         error=L"Ressources compute LumaTrace non préparées.";
         return false;
     }
@@ -176,18 +180,18 @@ bool Compute::dispatch(ID3D11DeviceContext* context,ID3D11ShaderResourceView* ve
     }
     std::memcpy(mapped.pData,&params,sizeof(params));
     context->Unmap(paramsBuffer_.Get(),0);
-    ID3D11ShaderResourceView* srvs[]={vertexStream,orderSrv_.Get(),bvhSrv_.Get()};
+    ID3D11ShaderResourceView* srvs[]={vertexStream,orderSrv_.Get(),bvhSrv_.Get(),albedoSrv_.Get()};
     ID3D11UnorderedAccessView* uavs[]={radianceUav_.Get()};
     ID3D11Buffer* constants[]={paramsBuffer_.Get()};
     context->CSSetShader(shader_.Get(),nullptr,0);
-    context->CSSetShaderResources(0,3,srvs);
+    context->CSSetShaderResources(0,4,srvs);
     context->CSSetUnorderedAccessViews(0,1,uavs,nullptr);
     context->CSSetConstantBuffers(0,1,constants);
     context->Dispatch((triangleCount_+63)/64,1,1);
     ID3D11UnorderedAccessView* noUavs[]={nullptr};
-    ID3D11ShaderResourceView* noSrvs[]={nullptr,nullptr,nullptr};
+    ID3D11ShaderResourceView* noSrvs[]={nullptr,nullptr,nullptr,nullptr};
     context->CSSetUnorderedAccessViews(0,1,noUavs,nullptr);
-    context->CSSetShaderResources(0,3,noSrvs);
+    context->CSSetShaderResources(0,4,noSrvs);
     context->CSSetShader(nullptr,nullptr,0);
     radianceKey_=key;
     radianceCacheValid_=true;
