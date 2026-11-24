@@ -3,6 +3,8 @@
 **Release Candidate V17.003 — 23 novembre 2026**  
 Cette version est une candidate à l’évaluation, pas une version stable. Elle réunit le moteur V17 avec LumaTrace et la scène de référence publiée séparément.
 
+> **Branche moteur en cours :** `codex/scene-updater-background` (PR brouillon [#87](https://github.com/glaby91/moteur3d/pull/87)), basée sur `feature/v17-604-lumatrace-one-bounce-cache`. La branche par défaut GitHub est `master` ; le détail des rôles et branches conservées est dans [BRANCH_STATUS.md](BRANCH_STATUS.md).
+
 ## Version et scène livrée
 
 - Moteur : **V17.003**
