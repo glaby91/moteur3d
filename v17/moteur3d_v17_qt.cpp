@@ -10,6 +10,7 @@
 #include "weather/solar_cycle.h"
 #include "weather/sky_compositor.h"
 #include "radio_audio.h"
+#include "scene_update_manager.h"
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
 #include <QAction>
@@ -2897,6 +2898,10 @@ private:
             return; // obsolete load; never apply its resources to new scene
         }
         if(!outcome.error.isEmpty()||!outcome.runtime){
+            const QString pendingScene=property("v17.pendingSceneUpdatePath").toString();
+            if(!pendingScene.isEmpty() &&
+               QFileInfo(pendingScene).absoluteFilePath()==QFileInfo(outcome.path).absoluteFilePath())
+                setProperty("v17.pendingSceneUpdatePath",QString());
             sceneLoading_=false;
             sceneLoadLabel_->hide();
             sceneLoadProgress_->hide();
@@ -2926,6 +2931,15 @@ private:
         sunHour_->setValue(double(runtime_->daylightHour));
         sunHour_->blockSignals(false);
         scenePath_=outcome.path;
+        const QString pendingScene=property("v17.pendingSceneUpdatePath").toString();
+        if(!pendingScene.isEmpty() &&
+           QFileInfo(pendingScene).absoluteFilePath()==QFileInfo(scenePath_).absoluteFilePath()){
+            // Persist only after the engine has accepted the downloaded scene.
+            QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+            settings.setValue(QStringLiteral("Scene/InstalledLatestPath"),scenePath_);
+            settings.remove(QStringLiteral("Scene/DeferredRevision"));
+            setProperty("v17.pendingSceneUpdatePath",QString());
+        }
         refreshRadioForScene(scenePath_);
         setRasterGiCachePath(std::filesystem::path(
             (scenePath_+QStringLiteral(".m3dgi")).toStdWString()));
@@ -3010,6 +3024,24 @@ private:
         if(!extremeStress)requestRender();
         else statusBar()->showMessage(QStringLiteral(
             "Profil extrême : rendu manuel conseillé pour limiter la consommation mémoire."));
+
+        // Check the reference scene once after the first successful load. Skip
+        // command-line smoke runs so automated/offline checks remain deterministic.
+        const auto arguments=QCoreApplication::arguments();
+        const bool smokeRun=std::any_of(arguments.cbegin(),arguments.cend(),
+            [](const QString& arg){return arg.startsWith(QStringLiteral("--smoke-"));});
+        if(isStressScene && !smokeRun &&
+           !property("v17.sceneUpdateCheckStarted").toBool()){
+            setProperty("v17.sceneUpdateCheckStarted",true);
+            QTimer::singleShot(1500,this,[this,sceneRevision]{
+                auto* checker=new V17SceneUpdateChecker(this);
+                checker->checkAtStartup(scenePath_,sceneRevision,this,
+                    [this](const QString& updatedPath){
+                        setProperty("v17.pendingSceneUpdatePath",updatedPath);
+                        openScene(updatedPath);
+                    });
+            });
+        }
     }
     void populateTrees(const v16::SceneDatabase& database){
         sceneTree_->clear();resourceTree_->clear();
@@ -3881,6 +3913,12 @@ private:
     }
 };
 QString defaultPath(){
+    // Reuse an approved user scene, unless this engine package already contains
+    // a newer validated revision.
+    QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+    const QString installedScene=settings.value(QStringLiteral("Scene/InstalledLatestPath")).toString();
+    if(!installedScene.isEmpty()&&!QFileInfo::exists(installedScene))
+        settings.remove(QStringLiteral("Scene/InstalledLatestPath"));
     const QString app=QCoreApplication::applicationDirPath();
     const QStringList candidates{
         // The clean package always opens the latest validated V8/V440 scene.
@@ -3893,8 +3931,23 @@ QString defaultPath(){
         app+QStringLiteral("/scenes/v16/pavillon01/scene.json"),
         QDir::currentPath()+QStringLiteral("/scenes/v16/pavillon01/scene.json")
     };
-    for(const auto& path:candidates)if(QFileInfo::exists(path))return path;
-    return QString();
+    QString packagedScene;
+    for(const auto& path:candidates){
+        if(QFileInfo::exists(path)){packagedScene=path;break;}
+    }
+    auto revisionNumber=[](const QString& path){
+        QFile file(path);
+        if(!file.open(QIODevice::ReadOnly))return -1;
+        const auto object=QJsonDocument::fromJson(file.readAll()).object();
+        const auto match=QRegularExpression(QStringLiteral("^V17\\.(\\d+)$"))
+            .match(object.value(QStringLiteral("revision")).toString().trimmed());
+        return match.hasMatch()?match.captured(1).toInt():-1;
+    };
+    if(QFileInfo::exists(installedScene) &&
+       (packagedScene.isEmpty() ||
+        revisionNumber(installedScene)>=revisionNumber(packagedScene)))
+        return installedScene;
+    return packagedScene;
 }
 }
 int main(int argc,char** argv){

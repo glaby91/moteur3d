@@ -19,6 +19,7 @@ on:
   pull_request:
     paths:
       - 'v17/**'
+      - 'scenes/v16/benchmark-civic/**'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/**'
       - 'tools/v17_523_*'
       - 'tools/v17_600_scene_finish.py'
@@ -58,6 +59,35 @@ jobs:
           }
           Copy-Item $manifestPath (Join-Path $sceneDirectory "SCENE_VERSION.json") -Force
           Write-Host "V17 package scene: $($manifest.revision) from glaby91/moteur3d-scene"
+      - name: Build and verify licensed Ukrainian radio audio
+        shell: pwsh
+        timeout-minutes: 20
+        run: |
+          $env:PYTHONIOENCODING = "utf-8"
+          python -m pip install --disable-pip-version-check imageio-ffmpeg
+          if ($LASTEXITCODE -ne 0) { throw "Could not prepare FFmpeg for the radio asset" }
+          $ffmpeg = (python -c "import imageio_ffmpeg; print(imageio_ffmpeg.get_ffmpeg_exe())" | Select-Object -Last 1).Trim()
+          if (!(Test-Path $ffmpeg)) { throw "FFmpeg executable not found: $ffmpeg" }
+          $ffmpegDir = Split-Path $ffmpeg -Parent
+          Copy-Item $ffmpeg (Join-Path $ffmpegDir "ffmpeg.exe") -Force
+          $env:PATH = "$ffmpegDir;$env:PATH"
+          python assets/audio/pripyat_radio/build_radio.py --runtime-preview --output build-v17/radio-runtime/ukrainian_radio_reconstruction.ogg
+          if ($LASTEXITCODE -ne 0) { throw "Licensed Ukrainian radio audio could not be built" }
+          $wav = "build-v17/radio-runtime/pripyat_radio.wav"
+          if (!(Test-Path $wav)) { throw "Generated runtime radio WAV is missing" }
+          @'
+          import sys, wave
+          path = sys.argv[1]
+          with wave.open(path, "rb") as audio:
+              duration = audio.getnframes() / audio.getframerate()
+              assert audio.getnchannels() == 1, "radio WAV must be mono"
+              assert audio.getsampwidth() == 2, "radio WAV must be 16-bit PCM"
+              assert audio.getframerate() == 16000, "radio WAV must be 16 kHz"
+              assert 285 <= duration <= 295, f"radio programme is only {duration:.1f}s"
+              print(f"Verified radio programme: {duration:.1f}s, {audio.getnframes()} frames")
+          '@ | python - $wav
+          if ($LASTEXITCODE -ne 0) { throw "Radio content/duration verification failed" }
+          (Get-FileHash $wav -Algorithm SHA256).Hash | Set-Content "build-v17/radio-runtime/pripyat_radio.sha256" -Encoding ascii
       - name: Qt6
         uses: jurplel/install-qt-action@v4
         with:
@@ -637,6 +667,28 @@ jobs:
           Remove-Item "dist-v17/benchmark-civic" -Recurse -Force -ErrorAction Stop
           Copy-Item $approved "dist-v17/benchmark-civic" -Recurse -Force
           Remove-Item "dist-v17/audio" -Recurse -Force -ErrorAction SilentlyContinue
+          # The approved-scene restore above clears stale package audio. Restore the
+          # current V17 build outputs so the radio can reload both assets after Stop.
+          $audioSource = "build-v17/Release/audio"
+          $wavSource = Join-Path $audioSource "pripyat_radio.wav"
+          $layoutSource = Join-Path $audioSource "speaker_layout.json"
+          if (!(Test-Path $wavSource) -or !(Test-Path $layoutSource)) {
+            throw "V17 radio package inputs are missing from the CMake build output."
+          }
+          $wavBytes = [System.IO.File]::ReadAllBytes($wavSource)
+          if ($wavBytes.Length -lt 44 -or
+              [System.Text.Encoding]::ASCII.GetString($wavBytes, 0, 4) -ne "RIFF" -or
+              [System.Text.Encoding]::ASCII.GetString($wavBytes, 8, 4) -ne "WAVE") {
+            throw "V17 radio WAV is not a valid RIFF/WAVE file."
+          }
+          $speakerLayout = Get-Content $layoutSource -Raw | ConvertFrom-Json
+          if (@($speakerLayout.loudspeakers).Count -ne 4) {
+            throw "V17 radio layout must contain exactly four loudspeakers."
+          }
+          New-Item -ItemType Directory -Force "dist-v17/audio" | Out-Null
+          Copy-Item $wavSource "dist-v17/audio/pripyat_radio.wav" -Force
+          Copy-Item $layoutSource "dist-v17/audio/speaker_layout.json" -Force
+          Write-Host "READY: radio WAV and four-speaker layout restored in final V17 package."
           @'
           CSE WARP BetaX — V17 package
           Default validated scene: V17.603 corrected palace.
@@ -856,6 +908,23 @@ jobs:
                            "build-v17/fresco-ray-audit/fresco-ray-report.json")) {
             if (!(Test-Path $p)) { throw "Fresco ray audit output missing: $p" }
           }
+      - name: Install verified radio audio into V17 package
+        shell: pwsh
+        run: |
+          $wav = "build-v17/radio-runtime/pripyat_radio.wav"
+          if (!(Test-Path $wav)) { throw "Verified radio WAV is missing before packaging" }
+          New-Item -ItemType Directory -Force "dist-v17/audio" | Out-Null
+          Copy-Item $wav "dist-v17/audio/pripyat_radio.wav" -Force
+          Copy-Item "assets/audio/pripyat_radio/CREDITS.md" "dist-v17/audio/CREDITS.md" -Force
+          @'
+          Montage radio ukrainien moderne, pas une émission historique des années 1970.
+          Contenu : 60 secondes de narration ukrainienne puis un chant sous licence CC BY-SA 3.0.
+          Lecture en boucle; attribution et licence du montage : CREDITS.md.
+          '@ | Set-Content "dist-v17/audio/CONTENU_WAV.txt" -Encoding UTF8
+          $expected = (Get-Content "build-v17/radio-runtime/pripyat_radio.sha256" -Raw).Trim()
+          $actual = (Get-FileHash "dist-v17/audio/pripyat_radio.wav" -Algorithm SHA256).Hash
+          if ($actual -ne $expected) { throw "Packaged radio audio differs from verified WAV" }
+          Write-Host "READY: package contains the verified licensed narration and song."
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:

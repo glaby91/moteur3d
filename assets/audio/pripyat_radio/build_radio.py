@@ -11,8 +11,11 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.parse
 import urllib.request
+from email.utils import parsedate_to_datetime
 
 HERE = Path(__file__).resolve().parent
 MANIFEST = HERE / "sources.json"
@@ -26,20 +29,37 @@ def download(source, destination):
     if destination.is_file() and destination.stat().st_size > 0:
         print("Cached:", destination.name)
         return
-    url = "https://commons.wikimedia.org/wiki/Special:Redirect/file/" + urllib.parse.quote(source["commons_filename"])
-    request = urllib.request.Request(url, headers={"User-Agent": "CSE-WARP-open-audio/1.0 (Wikimedia Commons source attribution)"})
+    url = source.get("download_url") or ("https://commons.wikimedia.org/wiki/Special:Redirect/file/" + urllib.parse.quote(source["commons_filename"]))
+    request = urllib.request.Request(url, headers={"User-Agent": "CSE-WARP-open-audio/1.0 (https://github.com/glaby91/moteur3d; contact: 58001839+glaby91@users.noreply.github.com)"})
     temp = destination.with_suffix(destination.suffix + ".part")
     try:
-        with urllib.request.urlopen(request, timeout=90) as response, temp.open("wb") as stream:
-            written = 0
-            while True:
-                chunk = response.read(256 * 1024)
-                if not chunk:
-                    break
-                written += len(chunk)
-                if written > MAX_BYTES:
-                    raise ValueError("Download exceeds safety limit: " + source["commons_filename"])
-                stream.write(chunk)
+        for attempt in range(5):
+            try:
+                with urllib.request.urlopen(request, timeout=90) as response, temp.open("wb") as stream:
+                    written = 0
+                    while True:
+                        chunk = response.read(256 * 1024)
+                        if not chunk:
+                            break
+                        written += len(chunk)
+                        if written > MAX_BYTES:
+                            raise ValueError("Download exceeds safety limit: " + source["commons_filename"])
+                        stream.write(chunk)
+                break
+            except urllib.error.HTTPError as exc:
+                temp.unlink(missing_ok=True)
+                if exc.code not in (429, 503) or attempt == 4:
+                    raise
+                retry_after = exc.headers.get("Retry-After", "")
+                try:
+                    delay = max(5.0, float(retry_after))
+                except ValueError:
+                    try:
+                        delay = max(5.0, parsedate_to_datetime(retry_after).timestamp() - time.time())
+                    except (TypeError, ValueError, OverflowError):
+                        delay = 5.0 * (2 ** attempt)
+                print(f"HTTP {exc.code} for {destination.name}; retrying in {delay:.0f}s")
+                time.sleep(delay)
         if written < 1024:
             raise ValueError("Downloaded file is suspiciously small")
         temp.replace(destination)
@@ -52,21 +72,30 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dry-run", action="store_true", help="Print playlist and exit (no downloads)")
     parser.add_argument("--download-only", action="store_true", help="Download original OGG files without transcoding")
+    parser.add_argument("--runtime-preview", action="store_true",
+                        help="Build a compact 60-second Ukrainian narration + song loop for the engine package")
     parser.add_argument("--output", type=Path, default=OUTPUT)
     args = parser.parse_args()
 
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
     tracks = manifest["tracks"]
+    selected_tracks = tracks
+    if args.runtime_preview:
+        narration = next(t for t in tracks if t["id"].startswith("spoken-"))
+        song = next(t for t in tracks if t["id"] == "lysenko-shevtchenko")
+        selected_tracks = [narration, song]
     print("Program:", manifest["title"])
-    print("Not a historical broadcast. Approximate duration:", sum(t["duration_seconds"] for t in tracks), "seconds")
-    for track in tracks:
+    print("Not a historical broadcast. Approximate duration:", sum(t["duration_seconds"] for t in selected_tracks), "seconds")
+    if args.runtime_preview:
+        print("Runtime preview: first 60 seconds of narration followed by the complete licensed song.")
+    for track in selected_tracks:
         print(" -", track["title"], "|", track["license"], "|", track["source_page"])
     if args.dry_run:
         return 0
 
     paths = []
     included = []
-    for track in tracks:
+    for track in selected_tracks:
         path = CACHE / track["commons_filename"]
         try:
             download(track, path)
@@ -95,8 +124,10 @@ def main():
     # Phone/radio-band audio, with no artificial music, narration or unsupported historic claims.
     filters = []
     for idx in range(len(paths)):
+        trim = ",atrim=duration=60,asetpts=PTS-STARTPTS" if (
+            args.runtime_preview and included[idx]["id"].startswith("spoken-")) else ""
         filters.append(f"[{idx}:a]aresample=44100,aformat=sample_fmts=fltp:channel_layouts=mono,"
-                       f"highpass=f=240,lowpass=f=3500,volume=0.86[a{idx}]")
+                       f"highpass=f=240,lowpass=f=3500{trim},volume=0.86[a{idx}]")
     filters.append("".join(f"[a{idx}]" for idx in range(len(paths))) +
                    f"concat=n={len(paths)}:v=0:a=1[out]")
     cmd = ["ffmpeg", "-hide_banner", "-y"]
