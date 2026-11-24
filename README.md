@@ -38,6 +38,8 @@ Télécharger l’artefact **CSE-WARP-V17.003-GitHub-587-Windows-x64**, extraire
 | **CPU Ray Tracing PBR** | Référence CPU plus lente pour les ombres et l’éclairage calculés par ray tracing. |
 | **CPU GI** | Calcul d’éclairage indirect et cuisson de tables GI, destiné aux rendus de qualité et aux comparaisons. |
 
+La radio d’ambiance peut lire la station **Всесоюзное радио** en flux Internet. Si le flux, la connexion ou le décodage échoue, le moteur bascule sur `audio/pripyat_radio.wav`, diffusé par les quatre haut-parleurs spatialisés de la scène. Le flux en ligne est lu en stéréo par la sortie audio système.
+
 La V17 réutilise le noyau partagé V16 pour les fonctions communes et les scènes. Le backend DirectX livré est **Direct3D 11** ; un backend **DXR / DirectX 12 n’est pas inclus** dans cette version.
 
 ## Compiler depuis les sources

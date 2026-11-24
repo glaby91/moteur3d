@@ -39,6 +39,7 @@ jobs:
           host: windows
           target: desktop
           arch: win64_msvc2022_64
+          modules: qtmultimedia
           cache: true
       - name: Vulkan 1.3 SDK for hardware backend and SPIR-V compiler
         uses: jakoch/install-vulkan-sdk-action@v1

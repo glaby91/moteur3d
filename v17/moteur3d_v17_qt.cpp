@@ -50,6 +50,12 @@
 #include <QMouseEvent>
 #include <QSet>
 #include <QTimer>
+#include <QAudioOutput>
+#include <QMediaPlayer>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QUrl>
 #include <QThreadPool>
 #include <QThread>
 #include <QMainWindow>
@@ -411,15 +417,17 @@ public:
         setRasterPeripheralMultiresOverride(0);
         pacingClock_.start();
         skyMotionClock_.start();
-        audioTimer_.setInterval(50); // 20 Hz spatial updates, independent from GPU images.
+        audioTimer_.setInterval(50); // 20 Hz updates only while the local spatial WAV is active.
         connect(&audioTimer_,&QTimer::timeout,this,[this]{
-            if(!radioPlaying_ || !runtime_)return;
+            if(!radioAudio_.playing() || !runtime_){
+                audioTimer_.stop();
+                return;
+            }
             const auto pose=activeCameraPose();
             const float eye[3]{pose.eye.x,pose.eye.y,pose.eye.z};
             const float target[3]{pose.target.x,pose.target.y,pose.target.z};
             radioAudio_.update(eye,target);
         });
-        audioTimer_.start();
         // A permanent status-bar widget outlives temporary render/progress
         // messages. QStatusBar::showMessage(..., 15000) used to erase the
         // completed render time after 15 seconds.
@@ -889,9 +897,17 @@ private:
     QLabel* radioStatusLabel_=nullptr;
     bool radioPlaying_=false;
     bool radioAutoplayEnabled_=false;
+    bool radioStreamPending_=false;
+    bool radioUsingStream_=false;
+    quint64 radioAttempt_=0;
+    quint64 radioPlayerAttempt_=0;
     bool rendererHudVisible_=true;
     cse::RadioAudio radioAudio_;
     QTimer audioTimer_;
+    QNetworkAccessManager* radioNetwork_=nullptr;
+    QNetworkReply* radioReply_=nullptr;
+    QMediaPlayer* radioPlayer_=nullptr;
+    QAudioOutput* radioOutput_=nullptr;
     std::array<cse::RadioSpeaker,4> radioSpeakers_{};
     QSlider* radioVolumeSlider_=nullptr;
 
@@ -1676,10 +1692,29 @@ private:
             backendBox_->currentIndex()==6))requestRender();
     }
     void stopRadio(){
+        audioTimer_.stop();
+        ++radioAttempt_;
+        radioStreamPending_=false;
+        radioUsingStream_=false;
+        if(radioReply_){
+            QObject::disconnect(radioReply_,nullptr,this,nullptr);
+            radioReply_->abort();
+            radioReply_->deleteLater();
+            radioReply_=nullptr;
+        }
+        if(radioPlayer_){
+            radioPlayer_->stop();
+            radioPlayer_->setSource(QUrl{});
+        }
         radioAudio_.stop();
         radioPlaying_=false;
         if(radioToggleButton_)radioToggleButton_->setText(QStringLiteral("Activer la radio"));
         if(radioStatusLabel_)radioStatusLabel_->setText(QStringLiteral("Radio arrêtée"));
+    }
+    void setRadioVolume(int value){
+        const float gain=float(value)/500.f;
+        radioAudio_.setVolume(gain);
+        if(radioOutput_)radioOutput_->setVolume(gain);
     }
     bool loadSpeakerLayout(){
         const QString path=QDir(QCoreApplication::applicationDirPath()).filePath(
@@ -1706,26 +1741,126 @@ private:
         }
         return true;
     }
-    void playRadio(){
+    void fallbackToLocalRadio(const QString& reason){
+        if(!radioStreamPending_&&!radioUsingStream_)return;
+        ++radioAttempt_;
+        radioStreamPending_=false;
+        radioUsingStream_=false;
+        if(radioReply_){
+            QObject::disconnect(radioReply_,nullptr,this,nullptr);
+            radioReply_->abort();
+            radioReply_->deleteLater();
+            radioReply_=nullptr;
+        }
+        if(radioPlayer_){
+            radioPlayer_->stop();
+            radioPlayer_->setSource(QUrl{});
+        }
         const QString path=QDir(QCoreApplication::applicationDirPath()).filePath(
             QStringLiteral("audio/pripyat_radio.wav"));
-        if(!QFileInfo::exists(path)){
+        if(!QFileInfo::exists(path)||!loadSpeakerLayout()){
+            radioPlaying_=false;
+            if(radioToggleButton_)radioToggleButton_->setText(QStringLiteral("Activer la radio"));
             if(radioStatusLabel_)radioStatusLabel_->setText(
-                QStringLiteral("Fichier WAV absent : audio/pripyat_radio.wav"));
+                QStringLiteral("Flux Internet indisponible (%1) et WAV local absent ou configuration des 4 HP invalide.")
+                    .arg(reason));
             return;
         }
-        if(!loadSpeakerLayout()){
-            if(radioStatusLabel_)radioStatusLabel_->setText(
-                QStringLiteral("Implantation des 4 HP introuvable ou invalide"));
-            return;
-        }
-        radioAudio_.setVolume(radioVolumeSlider_?float(radioVolumeSlider_->value())/500.f:.20f);
+        setRadioVolume(radioVolumeSlider_?radioVolumeSlider_->value():65);
         radioPlaying_=radioAudio_.start(path.toStdWString(),radioSpeakers_);
+        if(radioPlaying_)audioTimer_.start();
+        else audioTimer_.stop();
         if(radioToggleButton_)radioToggleButton_->setText(radioPlaying_
             ?QStringLiteral("Arrêter la radio"):QStringLiteral("Activer la radio"));
         if(radioStatusLabel_)radioStatusLabel_->setText(radioPlaying_
-            ?QStringLiteral("4 HP spatialisés · XAudio2 / X3DAudio · WAV de test")
-            :QStringLiteral("Audio 3D indisponible (pilote ou WAV incorrect)"));
+            ?QStringLiteral("Flux Internet indisponible (%1) · lecture du WAV local, spatialisé sur 4 HP.")
+                .arg(reason)
+            :QStringLiteral("Flux Internet indisponible (%1) · échec de lecture du WAV local.")
+                .arg(reason));
+    }
+    void playRadio(){
+        audioTimer_.stop();
+        radioAudio_.stop();
+        if(!radioNetwork_)radioNetwork_=new QNetworkAccessManager(this);
+        if(!radioPlayer_){
+            radioPlayer_=new QMediaPlayer(this);
+            radioOutput_=new QAudioOutput(this);
+            radioPlayer_->setAudioOutput(radioOutput_);
+            connect(radioPlayer_,&QMediaPlayer::playbackStateChanged,this,
+                [this](QMediaPlayer::PlaybackState state){
+                    if(state!=QMediaPlayer::PlayingState||!radioStreamPending_||
+                       radioPlayerAttempt_!=radioAttempt_)return;
+                    radioStreamPending_=false;
+                    radioUsingStream_=true;
+                    radioPlaying_=true;
+                    if(radioToggleButton_)radioToggleButton_->setText(QStringLiteral("Arrêter la radio"));
+                    if(radioStatusLabel_)radioStatusLabel_->setText(
+                        QStringLiteral("Radio soviétique en direct · flux Internet actif."));
+                });
+            connect(radioPlayer_,&QMediaPlayer::errorOccurred,this,
+                [this](QMediaPlayer::Error,const QString& error){
+                    if((radioStreamPending_||radioUsingStream_)&&
+                       radioPlayerAttempt_==radioAttempt_)
+                        fallbackToLocalRadio(error.isEmpty()
+                            ?QStringLiteral("erreur de lecture du flux"):error);
+                });
+        }
+        setRadioVolume(radioVolumeSlider_?radioVolumeSlider_->value():65);
+        radioStreamPending_=true;
+        radioUsingStream_=false;
+        radioPlaying_=true;
+        if(radioToggleButton_)radioToggleButton_->setText(QStringLiteral("Arrêter la radio"));
+        if(radioStatusLabel_)radioStatusLabel_->setText(
+            QStringLiteral("Connexion à la radio soviétique en ligne…"));
+        const quint64 attempt=++radioAttempt_;
+        QNetworkRequest request(QUrl(QStringLiteral(
+            "https://www.radioguide.fm/listen/russia/vsesouznoe-radio.m3u")));
+        request.setHeader(QNetworkRequest::UserAgentHeader,
+            QStringLiteral("CSE-WARP-V17/1.0"));
+        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+            QNetworkRequest::NoLessSafeRedirectPolicy);
+        QNetworkReply* reply=radioNetwork_->get(request);
+        radioReply_=reply;
+        connect(reply,&QNetworkReply::finished,this,[this,attempt,reply]{
+            if(radioReply_==reply)radioReply_=nullptr;
+            const auto error=reply->error();
+            const QString payload=QString::fromUtf8(reply->readAll());
+            const QUrl playlistUrl=reply->url();
+            reply->deleteLater();
+            if(attempt!=radioAttempt_||!radioStreamPending_)return;
+            if(error!=QNetworkReply::NoError){
+                fallbackToLocalRadio(reply->errorString());
+                return;
+            }
+            QUrl streamUrl;
+            const auto lines=payload.split(QRegularExpression(QStringLiteral("[\\r\\n]+")),
+                                           Qt::SkipEmptyParts);
+            for(QString line:lines){
+                line=line.trimmed();
+                if(line.isEmpty()||line.startsWith(QLatin1Char('#'))||
+                   line.startsWith(QLatin1Char('[')))continue;
+                const qsizetype equals=line.indexOf(QLatin1Char('='));
+                if(equals>0&&line.left(equals).trimmed().startsWith(
+                    QStringLiteral("File"),Qt::CaseInsensitive))
+                    line=line.mid(equals+1).trimmed();
+                QUrl candidate(line);
+                if(candidate.isRelative())candidate=playlistUrl.resolved(candidate);
+                const QString scheme=candidate.scheme().toLower();
+                if(candidate.isValid()&&(scheme==QStringLiteral("http")||
+                   scheme==QStringLiteral("https"))){streamUrl=candidate;break;}
+            }
+            if(streamUrl.isEmpty()){
+                fallbackToLocalRadio(QStringLiteral("playlist M3U/PLS illisible"));
+                return;
+            }
+            radioPlayerAttempt_=attempt;
+            radioPlayer_->setSource(streamUrl);
+            radioPlayer_->play();
+        });
+        QTimer::singleShot(15000,this,[this,attempt]{
+            if(attempt==radioAttempt_&&radioStreamPending_)
+                fallbackToLocalRadio(QStringLiteral("délai de connexion dépassé"));
+        });
     }
     void refreshRadioForScene(const QString& path){
         stopRadio();
@@ -2139,7 +2274,7 @@ private:
         radioToggleButton_=new QPushButton(QStringLiteral("Activer la radio"),controls);
         radioStatusLabel_=new QLabel(QStringLiteral("Radio arrêtée"),controls);
         radioStatusLabel_->setWordWrap(true);
-        vertical->addWidget(new QLabel(QStringLiteral("SON AMBIANT — RADIO UKRAINIENNE"),controls));
+        vertical->addWidget(new QLabel(QStringLiteral("SON AMBIANT — RADIO SOVIÉTIQUE EN LIGNE"),controls));
         vertical->addWidget(radioToggleButton_);
         vertical->addWidget(radioStatusLabel_);
         radioVolumeSlider_=new QSlider(Qt::Horizontal,controls);
@@ -2149,7 +2284,7 @@ private:
         vertical->addWidget(new QLabel(QStringLiteral("Volume radio"),controls));
         vertical->addWidget(radioVolumeSlider_);
         connect(radioVolumeSlider_,&QSlider::valueChanged,this,[this](int value){
-            radioAudio_.setVolume(float(value)/500.f);
+            setRadioVolume(value);
         });
         connect(radioToggleButton_,&QPushButton::clicked,this,[this]{
             if(radioPlaying_){radioAutoplayEnabled_=false;stopRadio();}
