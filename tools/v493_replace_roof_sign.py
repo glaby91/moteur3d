@@ -86,6 +86,8 @@ def main():
         if not (-20<x<20 and 19<y<27 and -5<z<-1):
             raise SystemExit('Old sign member outside expected roof bounds: '+item['id'])
     source=trimesh.load(a.glb,force='scene')
+    if not isinstance(source,trimesh.Scene):
+        raise TypeError('Expected the GLB to load as a trimesh scene')
     if len(source.geometry)!=112 or not 14000<=sum(len(m.faces) for m in source.geometry.values())<=17000:
         raise SystemExit('This is not the approved 112-object GLB')
     bounds=source.bounds

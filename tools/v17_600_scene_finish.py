@@ -11,6 +11,7 @@ import argparse
 import json
 import math
 from pathlib import Path
+from typing import Any
 
 CUPOLA_INTERVALS = [(-math.pi/2, -math.pi/6 + math.radians(1.0)),
                     (-math.pi/6 - math.radians(1.0), math.pi/6 + math.radians(1.0)),
@@ -310,8 +311,10 @@ def patch(package: Path, revision: str):
             all_vertices.extend(mesh["vertices"][n] for n in face)
             all_uv.extend(uv[n] if n < len(uv) else [0, 0] for n in face)
             all_faces.append([base, base + 1, base + 2])
-    sections = [dict(id=f"v600_cupola_leaf_{n}", type="triangle_mesh", vertices=[], uv=[], faces=[])
-                for n in range(3)]
+    sections: list[dict[str, Any]] = [
+        dict(id=f"v600_cupola_leaf_{n}", type="triangle_mesh", vertices=[], uv=[], faces=[])
+        for n in range(3)
+    ]
     # The small angular overlap avoids a visible daylight slit. Each outer leaf
     # sits slightly higher, like a real telescopic glazing stack.
     for face in all_faces:
@@ -372,7 +375,7 @@ def patch(package: Path, revision: str):
         "v523_cupola_arriere": "08 · Coupole, arrière",
         "v600_garden_view": "09 · Jardin, butte et façade",
     }
-    garden_camera = locate(cameras["cameras"], "v600_garden_view")
+    garden_camera: dict[str, Any] | None = locate(cameras["cameras"], "v600_garden_view")
     if garden_camera is None:
         garden_camera = {"id": "v600_garden_view"}
         cameras["cameras"].append(garden_camera)

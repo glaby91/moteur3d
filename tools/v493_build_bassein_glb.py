@@ -10,9 +10,10 @@ from shapely import constrained_delaunay_triangles
 from trimesh.visual.material import PBRMaterial
 from trimesh.visual import TextureVisuals
 from pathlib import Path
+from typing import cast
 MODEL_SCALE=2.0
 parts=[]
-def mat(name,col,emissive=(0,0,0),metal=0,rough=.55):
+def mat(name,col,emissive=(0,0,0),metal: float=0.0,rough=.55):
     def rgb(v):return [int(max(0,min(255,c))) for c in v]+[255]
     return PBRMaterial(name=name,baseColorFactor=rgb(col),metallicFactor=metal,roughnessFactor=rough,emissiveFactor=[float(v) for v in emissive],doubleSided=True)
 metal=mat('Charpente acier noir vieilli',(37,45,52),metal=.72)
@@ -167,7 +168,7 @@ def create(filename):
     scene=trimesh.Scene()
     for name,mesh in parts:scene.add_geometry(mesh,geom_name=name,node_name=name)
     output=Path(filename);output.parent.mkdir(parents=True,exist_ok=True)
-    output.write_bytes(scene.export(file_type='glb'))
+    output.write_bytes(cast(bytes, scene.export(file_type='glb')))
     print('Created',output,'scale',MODEL_SCALE,'parts',len(parts),'triangles',sum(len(m.faces) for _,m in parts))
     assert len(parts)==112 and 14000<=sum(len(m.faces) for _,m in parts)<=17000
 

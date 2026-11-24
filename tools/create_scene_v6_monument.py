@@ -10,10 +10,28 @@ as included: the new monument is original geometric modeling of the design.
 from __future__ import annotations
 import argparse, collections, copy, json, math, random
 from pathlib import Path
-import numpy as np
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
-from shapely.geometry import Polygon
-from shapely.ops import triangulate
+try:
+    import numpy as np  # type: ignore[import-not-found]
+except ImportError as exc:
+    raise SystemExit(
+        "Missing dependency 'numpy'. Install it in the active Python environment with: "
+        "python -m pip install numpy"
+    ) from exc
+try:
+    from PIL import Image, ImageDraw, ImageFont, ImageFilter  # type: ignore[import-not-found]
+except ImportError as exc:
+    raise SystemExit(
+        "Missing dependency 'Pillow'. Install it in the active Python environment with: "
+        "python -m pip install Pillow"
+    ) from exc
+try:
+    from shapely.geometry import Polygon  # type: ignore[reportMissingModuleSource]
+    from shapely.ops import triangulate  # type: ignore[reportMissingModuleSource]
+except ImportError as exc:
+    raise SystemExit(
+        "Missing dependency 'shapely'. Install it in the active Python environment with: "
+        "python -m pip install shapely"
+    ) from exc
 
 CX, CZ = 0.0, 72.0
 BASE_Y = 0.16

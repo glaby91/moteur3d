@@ -1,7 +1,51 @@
 #include "m3d_engine.h"
 
 namespace m3d {
-ShadowMap buildShadow(const Scene&s,Stats&st){ShadowMap m;m.right=norm(cross({0,1,0},sun));m.up=cross(m.right,sun);m.d.resize(m.size*m.size);for(int y=0;y<m.size;y++){float vy=((y+.5f)/m.size-.5f)*2*m.span;for(int x=0;x<m.size;x++){float vx=((x+.5f)/m.size-.5f)*2*m.span;V o=m.base+sun*m.dist+m.right*vx+m.up*vy;Ray r{o,sun*-1};Hit h;closest(s,r,h,&st,false,-1,true);m.d[y*m.size+x]=h.t;}}m.min.assign(m.d.size(),INF);m.max.assign(m.d.size(),-INF);for(int y=0;y<m.size;y++)for(int x=0;x<m.size;x++){float lo=INF,hi=-INF;for(int j=-2;j<=2;j++)for(int i=-2;i<=2;i++){float v=m.d[std::clamp(y+j,0,m.size-1)*m.size+std::clamp(x+i,0,m.size-1)];lo=std::min(lo,v);hi=std::max(hi,v);}m.min[y*m.size+x]=lo;m.max[y*m.size+x]=hi;}return m;}
+ShadowMap buildShadow(const Scene &s, Stats &st, const std::atomic<uint64_t> *generation, uint64_t token)
+{
+    ShadowMap m;
+    m.right = norm(cross({0, 1, 0}, sun));
+    m.up = cross(m.right, sun);
+    m.d.resize(size_t(m.size) * m.size);
+    for (int y = 0; y < m.size; y++)
+    {
+        const float vy = ((y + .5f) / m.size - .5f) * 2 * m.span;
+        for (int x = 0; x < m.size; x++)
+        {
+            if (generation && x % 32 == 0 && generation->load(std::memory_order_relaxed) != token)
+                return {};
+            const float vx = ((x + .5f) / m.size - .5f) * 2 * m.span;
+            const V origin = m.base + sun * m.dist + m.right * vx + m.up * vy;
+            Hit hit;
+            closest(s, {origin, sun * -1}, hit, &st, false, -1, true);
+            m.d[size_t(y) * m.size + x] = hit.t;
+        }
+    }
+
+    m.min.assign(m.d.size(), INF);
+    m.max.assign(m.d.size(), -INF);
+    for (int y = 0; y < m.size; y++)
+    {
+        if (generation && generation->load(std::memory_order_relaxed) != token)
+            return {};
+        for (int x = 0; x < m.size; x++)
+        {
+            float lo = INF, hi = -INF;
+            for (int j = -2; j <= 2; j++)
+                for (int i = -2; i <= 2; i++)
+                {
+                    const float value =
+                        m.d[size_t(std::clamp(y + j, 0, m.size - 1)) * m.size + std::clamp(x + i, 0, m.size - 1)];
+                    lo = std::min(lo, value);
+                    hi = std::max(hi, value);
+                }
+            const size_t index = size_t(y) * m.size + x;
+            m.min[index] = lo;
+            m.max[index] = hi;
+        }
+    }
+    return m;
+}
 static float visibility(const ShadowMap&m,V p,Stats*st){V q=p-m.base;float fac=m.size/(2*m.span),center=m.size*.5f-.5f;int x=(int)std::lround(dot(q,m.right)*fac+center),y=(int)std::lround(dot(q,m.up)*fac+center);if(x<2||y<2||x>=m.size-2||y>=m.size-2)return 1;int ix=y*m.size+x;float td=m.dist-dot(q,sun),bias=.095f;if(st)st->depthReads++;if(td<=m.min[ix]+bias)return 1;if(st)st->depthReads++;if(td>m.max[ix]+bias)return .28f;float v=0;for(int j=-2;j<=2;j++)for(int i=-2;i<=2;i++){if(st)st->depthReads++;v+=td<=m.d[(y+j)*m.size+x+i]+bias?1.f:0.f;}return .16f+.84f*v/25;}
 static V uvAt(const Scene&s,const Obj&o,V p,V n){
  if(o.kind==Kind::Triangle){

@@ -4,9 +4,19 @@ import argparse,copy,collections,json,math
 from pathlib import Path
 import numpy as np
 from PIL import Image,ImageDraw,ImageFont
-from shapely.geometry import Point,Polygon,box
-from shapely.ops import unary_union
-from shapely import constrained_delaunay_triangles
+from shapely.geometry import GeometryCollection,Point,Polygon,box
+from shapely.ops import triangulate,unary_union
+
+# Shapely added constrained Delaunay triangulation in 2.1. Resolve it
+# dynamically so older Shapely versions and static import checkers work too.
+try:
+    constrained_delaunay_triangles=__import__(
+        "shapely.ops",fromlist=["constrained_delaunay_triangles"]
+    ).constrained_delaunay_triangles
+except AttributeError:
+    def constrained_delaunay_triangles(polygon):
+        return GeometryCollection([tri for tri in triangulate(polygon)
+                                    if polygon.covers(tri)])
 
 def read(p):return json.loads(Path(p).read_text(encoding="utf-8-sig"))
 def write(p,data):

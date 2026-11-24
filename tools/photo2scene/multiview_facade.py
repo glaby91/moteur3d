@@ -23,8 +23,8 @@ def camera_matrix(focal: float, size: tuple[int, int]) -> np.ndarray:
 
 
 def scene_points(anchors: list[dict], height: float) -> np.ndarray:
-    return np.float64([[-float(a["bay"]), height if a["level"]=="top" else 0., 0.]
-                       for a in anchors])
+    return np.asarray([[-float(a["bay"]), height if a["level"]=="top" else 0., 0.]
+                       for a in anchors], dtype=np.float64)
 
 
 def project(camera_params: np.ndarray, anchors: list[dict],
@@ -38,7 +38,7 @@ def project(camera_params: np.ndarray, anchors: list[dict],
 
 
 def observed(anchors: list[dict]) -> np.ndarray:
-    return np.float64([a["pixel"] for a in anchors])
+    return np.asarray([a["pixel"] for a in anchors], dtype=np.float64)
 
 
 def split_anchors(photo: dict) -> tuple[list[dict],list[dict]]:
@@ -68,13 +68,13 @@ def solve(data: dict) -> tuple[dict,np.ndarray]:
                                   flags=cv2.SOLVEPNP_ITERATIVE)
         if not ok:
             raise ValueError("PnP initialization failed: "+photo["id"])
-        starts.extend([math.log(focal),*rvec.ravel(),*tvec.ravel()])
+        starts.extend([math.log(focal),*map(float,rvec.ravel()),*map(float,tvec.ravel())])
 
     lower=[math.log(.5)]
     upper=[math.log(10.)]
     for _ in photos:
-        lower.extend([math.log(80.),*([-np.inf]*6)])
-        upper.extend([math.log(20000.),*([np.inf]*6)])
+        lower.extend([math.log(80.),*([-math.inf]*6)])
+        upper.extend([math.log(20000.),*([math.inf]*6)])
 
     def residual(params: np.ndarray) -> np.ndarray:
         height=math.exp(float(params[0]))

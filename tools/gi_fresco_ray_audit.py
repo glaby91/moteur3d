@@ -90,8 +90,8 @@ def scene_triangles(package: Path, sector):
         if mesh_type == "box" or inst.get("geometry") == "unit_box":
             local_vertices, faces = unit_vertices, unit_faces
         elif mesh_type == "triangle_mesh":
-            local_vertices = mesh.get("vertices", [])
-            faces = mesh.get("faces", [])
+            local_vertices = mesh.get("vertices", []) if mesh else []
+            faces = mesh.get("faces", []) if mesh else []
         else:
             unsupported[str(mesh_type)] += 1
             continue
@@ -363,7 +363,8 @@ def write_svg(path, rays, sources, targets):
 
 def self_test():
     tri=((-.5,-.5,1),(.5,-.5,1),(0,.5,1))
-    assert abs(tri_hit((0,0,0),(0,0,1),tri,10)-1.0)<1e-9
+    tri_distance=tri_hit((0,0,0),(0,0,1),tri,10)
+    assert tri_distance is not None and abs(tri_distance-1.0)<1e-9
     assert tri_hit((2,0,0),(0,0,1),tri,10) is None
     near=(*tri,"target","test","target")
     bvh=build_bvh([near])

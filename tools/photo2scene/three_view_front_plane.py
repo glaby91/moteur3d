@@ -42,7 +42,7 @@ def solve(data, initial_focals=None):
         success,r,t=cv2.solvePnP(xyz,uv,K,None,flags=cv2.SOLVEPNP_ITERATIVE)
         if not success:
             raise ValueError("Camera initialization failed for "+photo["id"])
-        params.extend([math.log(focal),*r.ravel(),*t.ravel()])
+        params.extend([math.log(focal),*map(float,r.ravel()),*map(float,t.ravel())])
     def predict(i,points,p):
         height=math.exp(float(p[0]))
         k=1+7*i
