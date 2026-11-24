@@ -1,6 +1,6 @@
-#pragma once
-
 #if defined(_WIN32)
+#ifndef M3D_LUMATRACE_GPU_D3D11_H
+#define M3D_LUMATRACE_GPU_D3D11_H
 
 #include "m3d_lumatrace_cpu.h"
 
@@ -56,4 +56,5 @@ private:
 
 } } // namespace m3d::lumatrace_gpu
 
+#endif // M3D_LUMATRACE_GPU_D3D11_H
 #endif // _WIN32
