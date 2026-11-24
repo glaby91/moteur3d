@@ -41,6 +41,7 @@
 #include <vector>
 
 namespace m3d { namespace {
+namespace resources=vulkan::resources;
 using resources::Buffer;
 using resources::Texture;
 using Clock=std::chrono::steady_clock;
