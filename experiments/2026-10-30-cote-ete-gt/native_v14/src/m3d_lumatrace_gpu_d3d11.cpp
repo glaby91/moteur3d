@@ -1,7 +1,6 @@
-#include "m3d_lumatrace_gpu_d3d11.h"
-
 #if defined(_WIN32)
 
+#include "m3d_lumatrace_gpu_d3d11.h"
 #include "m3d_lumatrace_shader.h"
 
 #include <d3dcompiler.h>
@@ -11,7 +10,7 @@
 #include <string>
 #include <vector>
 
-namespace m3d::lumatrace_gpu {
+namespace m3d { namespace lumatrace_gpu {
 
 void Compute::reset() noexcept {
     bvhBuffer_.Reset();orderBuffer_.Reset();albedoBuffer_.Reset();radianceBuffer_.Reset();paramsBuffer_.Reset();
@@ -198,6 +197,6 @@ bool Compute::dispatch(ID3D11DeviceContext* context,ID3D11ShaderResourceView* ve
     return true;
 }
 
-} // namespace m3d::lumatrace_gpu
+} } // namespace m3d::lumatrace_gpu
 
 #endif // _WIN32
