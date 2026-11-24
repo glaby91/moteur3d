@@ -142,7 +142,7 @@ jobs:
               throw "Invalid $expectedLabel product version in $name : $($version.FileVersion)"
             }
           }
-      - name: Validate light complex scene in native V17 loader
+      - name: Validate compatible scene in native V17 loader
         shell: pwsh
         run: |
           $log = "build-v17/v344-native-scene-smoke.log"
@@ -845,9 +845,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) {
             Get-Content "build-v17/final-latest-scene-load.log" | ForEach-Object { Write-Host $_ }
             Write-Warning "Latest upstream scene $($expected.revision) is not loadable; see the loader log. The engine-only package continues without bundling it."
+            $LASTEXITCODE = 0
+          } else {
+            Write-Host "READY: latest scene $($expected.revision) passed native V17 loading."
           }
-          }
-          Write-Host "READY: latest scene $($expected.revision) is compatible with the V17.006 startup updater."
           @"
           CSE WARP V17.006 — moteur seul
           La scène de référence n’est pas incluse dans ce package.
