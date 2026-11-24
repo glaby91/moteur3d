@@ -6,7 +6,7 @@ on:
     paths:
       - .github/workflows/v17-436-audio-speakers.yml
       - v17/**
-      - tools/install_radio_speakers_v436.py
+      - tools/scene/migrations/install_radio_speakers_v436.py
       - assets/audio/pripyat_radio/**
       - scenes/v16/benchmark-civic/generate.cjs
   workflow_dispatch:
@@ -37,9 +37,9 @@ jobs:
       - name: Validate speaker source and deterministic packaging
         shell: pwsh
         run: |
-          python -m py_compile tools/install_radio_speakers_v436.py assets/audio/pripyat_radio/generate_test_wav.py
+          python -m py_compile tools/scene/migrations/install_radio_speakers_v436.py assets/audio/pripyat_radio/generate_test_wav.py
           if($LASTEXITCODE -ne 0){throw "Python syntax failed"}
-          python tools/install_radio_speakers_v436.py --self-test
+          python tools/scene/migrations/install_radio_speakers_v436.py --self-test
           if($LASTEXITCODE -ne 0){throw "4 speaker scene patch regression failed"}
           node --check scenes/v16/benchmark-civic/generate.cjs
           if($LASTEXITCODE -ne 0){throw "Scene generator JS failed"}
@@ -56,7 +56,7 @@ jobs:
         shell: pwsh
         run: |
           (Get-FileHash "dist-v436/benchmark-civic/scene-v7-corrections.json" -Algorithm SHA256).Hash | Set-Content scene-sha.txt
-          python tools/install_radio_speakers_v436.py --root dist-v436/benchmark-civic
+          python tools/scene/migrations/install_radio_speakers_v436.py --root dist-v436/benchmark-civic
           if($LASTEXITCODE -ne 0){throw "Four loudspeaker installation failed"}
           $before=(Get-Content scene-sha.txt -Raw).Trim()
           $after=(Get-FileHash "dist-v436/benchmark-civic/scene-v7-corrections.json" -Algorithm SHA256).Hash

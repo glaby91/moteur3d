@@ -15,7 +15,7 @@ if not exist "benchmark-civic\scene.json" (
   pause
   exit /b 1
 )
-echo CSE WARP 17.444 — DX11 GPU HARDWARE - BASSE RESOLUTION PERIPHERIQUE
+echo CSE WARP 17.444 - DX11 GPU HARDWARE - BASSE RESOLUTION PERIPHERIQUE
 echo Scene approuvee V17.443 ; camera v4_piscine ; 1366x768 ; MSAA 1
 echo 3 passages BASELINE et MULTIRES - meme resolution et meme vue.
 echo.

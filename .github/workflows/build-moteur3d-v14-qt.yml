@@ -6,7 +6,7 @@ on:
     paths:
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/**'
       - 'scenes/v16/pavillon01/**'
-      - 'tools/v16_scene_dispatch.py'
+      - 'tools/scene/dispatch/v16_scene_dispatch.py'
       - '.github/workflows/build-moteur3d-v14-qt.yml'
   workflow_dispatch:
 
@@ -30,7 +30,7 @@ jobs:
           python-version: '3.12'
       - name: Validate Pavillon01 JSON resources
         shell: pwsh
-        run: python tools/v16_scene_dispatch.py scenes/v16/pavillon01/scene.json --sector pavillon01
+        run: python tools/scene/dispatch/v16_scene_dispatch.py scenes/v16/pavillon01/scene.json --sector pavillon01
       - name: Configure MSVC
         shell: pwsh
         working-directory: experiments/2026-10-30-cote-ete-gt/native_v14

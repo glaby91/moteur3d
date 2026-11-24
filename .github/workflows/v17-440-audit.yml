@@ -7,7 +7,7 @@ on:
       - v17/**
       - v16/**
       - experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp
-      - tools/repair_scene_v440.py
+      - tools/scene/migrations/repair_scene_v440.py
       - scenes/v16/benchmark-civic/build-entry-mosaic-v440.cjs
   workflow_dispatch:
 permissions:
@@ -48,7 +48,7 @@ jobs:
         run: |
           node scenes/v16/benchmark-civic/build-entry-mosaic-v440.cjs dist-v440/benchmark-civic/textures/revision/v440/cse_parvis_mosaique.png
           if($LASTEXITCODE -ne 0){throw "Mosaic generation failed"}
-          python tools/repair_scene_v440.py --root dist-v440/benchmark-civic
+          python tools/scene/migrations/repair_scene_v440.py --root dist-v440/benchmark-civic
           if($LASTEXITCODE -ne 0){throw "V8 scene audit failed"}
           $r=Get-Content dist-v440/benchmark-civic/reports/v440-audit.json -Raw | ConvertFrom-Json
           if($r.counts.'02_hall_stair_rail_blockers_removed' -ne 7){throw "Old rail still blocks the hall stair"}

@@ -2,7 +2,7 @@ name: CSE WARP V17.428 — scene-only engraving correction
 on:
   push:
     branches: [feature/v17-428-engraving-clear-scene-261112]
-    paths: [tools/upgrade_scene_v7.py, .github/workflows/v17-428-scene-final.yml]
+    paths: [tools/scene/migrations/upgrade_scene_v7.py, .github/workflows/v17-428-scene-final.yml]
   workflow_dispatch:
 permissions:
   contents: read
@@ -36,7 +36,7 @@ jobs:
       - name: Regenerate V17.428 scenes and both 512px engraving tile rows
         shell: pwsh
         run: |
-          python tools/upgrade_scene_v7.py --root dist-v428/benchmark-civic
+          python tools/scene/migrations/upgrade_scene_v7.py --root dist-v428/benchmark-civic
           if($LASTEXITCODE -ne 0){throw "V17.428 geometry failed"}
           @'
           import json
@@ -83,7 +83,7 @@ jobs:
           The real V17.427 native renderer and original low-RAM backups are preserved.
           Run DEMARRER_CSE_WARP_V7.bat after extracting the whole ZIP.
           '@ | Out-File dist-v428/LIRE_EN_PREMIER-V17.428.txt -Encoding utf8
-          Copy-Item tools/upgrade_scene_v7.py dist-v428/upgrade_scene_v7.py -Force
+          Copy-Item tools/scene/migrations/upgrade_scene_v7.py dist-v428/upgrade_scene_v7.py -Force
       - uses: actions/upload-artifact@v4
         with:
           name: CSE-WARP-V17.428-V7-GRAVURE-CORRIGEE-Windows-x64

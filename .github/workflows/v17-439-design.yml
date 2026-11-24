@@ -5,7 +5,7 @@ on:
     paths:
       - .github/workflows/v17-439-design.yml
       - v17/**
-      - tools/upgrade_scene_v439_design.py
+      - tools/scene/migrations/upgrade_scene_v439_design.py
       - scenes/v16/benchmark-civic/**
   workflow_dispatch:
 permissions:
@@ -46,7 +46,7 @@ jobs:
         run: |
           node scenes/v16/benchmark-civic/build-entry-mosaic.cjs dist-v439/benchmark-civic/textures/revision/v439/cse_parvis_mosaique.png
           if($LASTEXITCODE -ne 0){throw "Mosaic raster generation failed"}
-          python tools/upgrade_scene_v439_design.py --root dist-v439/benchmark-civic
+          python tools/scene/migrations/upgrade_scene_v439_design.py --root dist-v439/benchmark-civic
           if($LASTEXITCODE -ne 0){throw "Scene design patch failed"}
           if((Get-FileHash dist-v439/benchmark-civic/textures/energetik_fresco_mosaic.jpg -Algorithm SHA256).Hash -ne (Get-Content wall-fresco.sha256 -Raw).Trim()){throw "Original fresco altered"}
           if((Get-FileHash dist-v439/audio/pripyat_radio.wav -Algorithm SHA256).Hash -ne (Get-Content radio.sha256 -Raw).Trim()){throw "Radio altered"}

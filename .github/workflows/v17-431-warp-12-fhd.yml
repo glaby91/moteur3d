@@ -4,7 +4,7 @@ on:
     branches: [feature/v17-431-warp-12-fhd-261113]
     paths:
       - .github/workflows/v17-431-warp-12-fhd.yml
-      - tools/add_v431_fhd_proof_cameras.py
+      - tools/scene/migrations/add_v431_fhd_proof_cameras.py
       - v17/tools/benchmark_v17.cpp
   workflow_dispatch:
 permissions:
@@ -62,7 +62,7 @@ jobs:
       - name: Add exactly four new camera viewpoints (geometry and mosaics untouched)
         shell: pwsh
         run: |
-          python tools/add_v431_fhd_proof_cameras.py --root dist-v431/benchmark-civic
+          python tools/scene/migrations/add_v431_fhd_proof_cameras.py --root dist-v431/benchmark-civic
           if($LASTEXITCODE -ne 0){throw "FHD camera manifest invalid"}
           $old=(Get-Content artwork-before.txt -Raw).Trim()
           $new=(Get-FileHash "dist-v431/benchmark-civic/textures/energetik_fresco_mosaic.jpg" -Algorithm SHA256).Hash

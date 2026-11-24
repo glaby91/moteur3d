@@ -4,8 +4,8 @@ Branch: feature/v16-modular-scene-dispatch, based on integration/moteur3d-unifie
 
 ## Current scope
 - A versioned scene.json manifest lists sectors and separately stored geometry, instances, materials, PBR, lights, cameras and environment resources.
-- tools/v16_scene_dispatch.py resolves references relative to the scene root, rejects escaping paths, duplicate sector identifiers, missing files and malformed JSON.
-- Run: python tools/v16_scene_dispatch.py scenes/v16/pripyat/scene.json
+- tools/scene/dispatch/v16_scene_dispatch.py resolves references relative to the scene root, rejects escaping paths, duplicate sector identifiers, missing files and malformed JSON.
+- Run: python tools/scene/dispatch/v16_scene_dispatch.py scenes/v16/pripyat/scene.json
 - Optional sector selection: --sector energetik
 - The Energetik example intentionally contains **empty placeholders**, not reconstructed assets.
 

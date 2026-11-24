@@ -2,7 +2,7 @@ name: CSE WARP V17.427 — native renderer, corrected scene and WARP
 on:
   push:
     branches: [feature/v17-v7-corrections-scene-261112]
-    paths: [tools/upgrade_scene_v7.py, .github/workflows/v17-v7-corrections.yml, 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp', 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lighting.cpp']
+    paths: [tools/scene/migrations/upgrade_scene_v7.py, .github/workflows/v17-v7-corrections.yml, 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp', 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lighting.cpp']
   workflow_dispatch:
 permissions:
   contents: read
@@ -66,7 +66,7 @@ jobs:
       - name: Create non-destructive V7 scene
         shell: pwsh
         run: |
-          python tools/upgrade_scene_v7.py --root dist-v7/benchmark-civic
+          python tools/scene/migrations/upgrade_scene_v7.py --root dist-v7/benchmark-civic
           if($LASTEXITCODE -ne 0){throw "V7 geometry failed"}
       - name: Validate topology, asset references and native image pixels
         shell: pwsh
@@ -248,7 +248,7 @@ jobs:
           and full scene navigation need validation on the user's computer.
           Experimental Z prepass OFF by default.
           '@ | Out-File dist-v7/LIRE_EN_PREMIER-V7.txt -Encoding utf8
-          Copy-Item tools/upgrade_scene_v7.py dist-v7/upgrade_scene_v7.py
+          Copy-Item tools/scene/migrations/upgrade_scene_v7.py dist-v7/upgrade_scene_v7.py
       - uses: actions/upload-artifact@v4
         with:
           name: CSE-WARP-V17.427-V7-SCENE-RENDU-Windows-x64

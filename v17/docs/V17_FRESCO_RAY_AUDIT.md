@@ -19,8 +19,8 @@ Le CPU PBR traite désormais les matériaux albedo-image sans hériter des norma
 ## Exécution
 
 ```powershell
-python tools/gi_fresco_ray_audit.py --self-test
-python tools/gi_fresco_ray_audit.py --package dist-v17/benchmark-civic --output build-v17/fresco-ray-audit
+python tools/audits/gi_fresco_ray_audit.py --self-test
+python tools/audits/gi_fresco_ray_audit.py --package dist-v17/benchmark-civic --output build-v17/fresco-ray-audit
 ```
 
 Le test échoue si aucun trajet échantillonné n’atteint l’eau ou la coupole. Un trajet visible combiné à l’absence de rebond coloré dans l’image oriente ensuite l’enquête vers le traitement GI/PBR plutôt que vers une occultation géométrique totale.

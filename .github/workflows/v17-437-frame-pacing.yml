@@ -5,7 +5,7 @@ on:
     paths:
       - .github/workflows/v17-437-frame-pacing.yml
       - v17/**
-      - tools/summarize_v437_bench.py
+      - tools/benchmarks/summarize_v437_bench.py
   workflow_dispatch:
 permissions:
   contents: read
@@ -69,7 +69,7 @@ jobs:
             & $exe $scene "ci-v437/$($p.name)" --ci-smoke "--z-prepass=$($p.z)" "--light-aabb=$($p.aabb)"
             if($LASTEXITCODE -ne 0){throw "GPU profile $($p.name) failed"}
           }
-          python tools/summarize_v437_bench.py ci-v437
+          python tools/benchmarks/summarize_v437_bench.py ci-v437
           if($LASTEXITCODE -ne 0){throw "Default A/B summary missing"}
       - name: Assemble portable V17.437 with intact scene, radio and benchmark launcher
         shell: pwsh
@@ -80,7 +80,7 @@ jobs:
           Copy-Item build-v437/v16/Release/moteur3d_v16_core.dll dist-v437/moteur3d_v16_core.dll -Force
           Copy-Item v17/tools/BENCH_FLUIDITE_PAR_DEFAUT_V437.ps1 dist-v437/BENCH_FLUIDITE_PAR_DEFAUT_V437.ps1 -Force
           Copy-Item v17/tools/LANCER_BENCH_FLUIDITE_V437.bat dist-v437/LANCER_BENCH_FLUIDITE_V437.bat -Force
-          Copy-Item tools/summarize_v437_bench.py dist-v437/summarize_v437_bench.py -Force
+          Copy-Item tools/benchmarks/summarize_v437_bench.py dist-v437/summarize_v437_bench.py -Force
           Copy-Item ci-v437/COMPARAISON-V17.437.csv dist-v437/REFERENCE-CI-V17.437.csv -Force
           $audio=(Get-FileHash "dist-v437/audio/pripyat_radio.wav" -Algorithm SHA256).Hash
           $fresco=(Get-FileHash "dist-v437/benchmark-civic/textures/energetik_fresco_mosaic.jpg" -Algorithm SHA256).Hash

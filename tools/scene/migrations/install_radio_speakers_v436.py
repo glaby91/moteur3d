@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 import tempfile
 
-BASE = Path(__file__).resolve().parents[1]
+BASE = Path(__file__).resolve().parents[3]
 LAYOUT = BASE / "assets/audio/pripyat_radio/speaker_layout.json"
 PREFIX = "Architecture/Palais/Sonorisation exterieure/V17.436"
 

@@ -5,11 +5,11 @@ Usage: python tools/photo2scene/photo2scene.py analyse data.json -o result.json
 Toutes les positions pixels sont des observations, pas des inférences fiables de l'IA.
 """
 from __future__ import annotations
+
 import argparse
 import json
 import math
 from pathlib import Path
-
 
 class GeometryError(ValueError):
     pass
@@ -20,48 +20,70 @@ def least_squares(rows: list[list[float]], values: list[float], n: int) -> list[
         raise GeometryError("Insufficient or malformed constraints")
     # Petits systèmes normalisés, pivotage partiel. Pour les gros réseaux:
     # SVD et solveur robuste (SciPy/OpenCV), dans une étape ultérieure.
-    a = [[sum(row[i] * row[j] for row in rows) for j in range(n)]
-         for i in range(n)]
-    b = [sum(row[i] * v for row, v in zip(rows, values)) for i in range(n)]
-    scale = max(abs(a[i][j]) for i in range(n) for j in range(n))
-    for i in range(n):
-        p = max(range(i, n), key=lambda k: abs(a[k][i]))
-        if not scale or abs(a[p][i]) <= 1e-11 * scale:
+    matrix = [
+        [sum(row[i] * row[j] for row in rows) for j in range(n)]
+        for i in range(n)
+    ]
+    target = [sum(row[i] * value for row, value in zip(rows, values)) for i in range(n)]
+    matrix_scale = max(abs(matrix[i][j]) for i in range(n) for j in range(n))
+    for column in range(n):
+        pivot = max(range(column, n), key=lambda row: abs(matrix[row][column]))
+        if not matrix_scale or abs(matrix[pivot][column]) <= 1e-11 * matrix_scale:
             raise GeometryError("Degenerate or nearly parallel constraints")
-        a[i], a[p] = a[p], a[i]
-        b[i], b[p] = b[p], b[i]
-        for k in range(i + 1, n):
-            f = a[k][i] / a[i][i]
-            for j in range(i, n):
-                a[k][j] -= f * a[i][j]
-            b[k] -= f * b[i]
-    x = [0.0] * n
-    for i in range(n - 1, -1, -1):
-        x[i] = (b[i] - sum(a[i][j] * x[j] for j in range(i + 1, n))) / a[i][i]
-    if not all(math.isfinite(v) for v in x):
+        matrix[column], matrix[pivot] = matrix[pivot], matrix[column]
+        target[column], target[pivot] = target[pivot], target[column]
+        for row in range(column + 1, n):
+            factor = matrix[row][column] / matrix[column][column]
+            for entry in range(column, n):
+                matrix[row][entry] -= factor * matrix[column][entry]
+            target[row] -= factor * target[column]
+
+    solution = [0.0] * n
+    for row in range(n - 1, -1, -1):
+        known_terms = sum(
+            matrix[row][column] * solution[column]
+            for column in range(row + 1, n)
+        )
+        solution[row] = (target[row] - known_terms) / matrix[row][row]
+    if not all(math.isfinite(value) for value in solution):
         raise GeometryError("Non-finite solution")
-    return x
+    return solution
 
 
 def line(a: list[float], b: list[float]) -> tuple[float, float, float]:
     if len(a) != 2 or len(b) != 2:
         raise GeometryError("A line segment requires two 2D endpoints")
-    aa, bb, cc = a[1] - b[1], b[0] - a[0], a[0] * b[1] - b[0] * a[1]
-    norm = math.hypot(aa, bb)
-    if norm < 1e-9:
+    coefficient_a = a[1] - b[1]
+    coefficient_b = b[0] - a[0]
+    coefficient_c = a[0] * b[1] - b[0] * a[1]
+    normalizer = math.hypot(coefficient_a, coefficient_b)
+    if normalizer < 1e-9:
         raise GeometryError("Coincident line endpoints")
-    return aa / norm, bb / norm, cc / norm
+    return (
+        coefficient_a / normalizer,
+        coefficient_b / normalizer,
+        coefficient_c / normalizer,
+    )
 
 
 def vanishing_point(segments: list[dict]) -> dict:
     if len(segments) < 2:
         raise GeometryError("At least two line segments required per direction")
     lines = [line(s["a"], s["b"]) for s in segments]
-    px, py = least_squares([[a, b] for a, b, _ in lines],
-                           [-c for _, _, c in lines], 2)
-    err = [abs(a * px + b * py + c) for a, b, c in lines]
-    return {"pixel": [px, py], "line_residual_rms_px":
-            math.sqrt(sum(e * e for e in err) / len(err)), "segments": len(lines)}
+    point_x, point_y = least_squares(
+        [[a, b] for a, b, _ in lines],
+        [-c for _, _, c in lines],
+        2,
+    )
+    errors = [
+        abs(a * point_x + b * point_y + c)
+        for a, b, c in lines
+    ]
+    return {
+        "pixel": [point_x, point_y],
+        "line_residual_rms_px": math.sqrt(sum(error * error for error in errors) / len(errors)),
+        "segments": len(lines),
+    }
 
 
 def fov_from_orthogonal_vps(vp1: list[float], vp2: list[float],
@@ -70,37 +92,59 @@ def fov_from_orthogonal_vps(vp1: list[float], vp2: list[float],
     # (v1-c).(v2-c) + f^2 = 0 si directions 3D orthogonales,
     # pixels carrés, skew nul, caméra sténopé et distorsion négligeable.
     cx, cy = principal if principal is not None else (width / 2, height / 2)
-    f2 = -((vp1[0]-cx)*(vp2[0]-cx)+(vp1[1]-cy)*(vp2[1]-cy))
-    if not math.isfinite(f2) or f2 <= 1e-8:
+    focal_squared = -(
+        (vp1[0] - cx) * (vp2[0] - cx)
+        + (vp1[1] - cy) * (vp2[1] - cy)
+    )
+    if not math.isfinite(focal_squared) or focal_squared <= 1e-8:
         raise GeometryError("Orthogonal-VP FOV is not identifiable under assumptions")
-    focal = math.sqrt(f2)
-    return {"focal_length_px": focal,
-            "fov_horizontal_deg": math.degrees(2*math.atan(width/(2*focal))),
-            "fov_vertical_deg": math.degrees(2*math.atan(height/(2*focal))),
-            "assumptions": ["orthogonal 3D vanishing directions", "pinhole camera",
-                            "square pixels", "zero skew", "no lens distortion",
-                            "principal point supplied or image center"]}
+    focal = math.sqrt(focal_squared)
+    return {
+        "focal_length_px": focal,
+        "fov_horizontal_deg": math.degrees(2 * math.atan(width / (2 * focal))),
+        "fov_vertical_deg": math.degrees(2 * math.atan(height / (2 * focal))),
+        "assumptions": [
+            "orthogonal 3D vanishing directions",
+            "pinhole camera",
+            "square pixels",
+            "zero skew",
+            "no lens distortion",
+            "principal point supplied or image center",
+        ],
+    }
 
 
 def _pn(pixel: list[float], w: int, h: int) -> tuple[float, float]:
-    return (pixel[0] - w/2)/(w/2), (pixel[1] - h/2)/(h/2)
+    return (pixel[0] - w / 2) / (w / 2), (pixel[1] - h / 2) / (h / 2)
 
 
 def _project(h: list[float], u: float, v: float) -> tuple[float, float]:
-    den = h[6]*u+h[7]*v+1
-    if abs(den) < 1e-10:
+    denominator = h[6] * u + h[7] * v + 1
+    if abs(denominator) < 1e-10:
         raise GeometryError("Point projects onto the line at infinity")
-    return ((h[0]*u+h[1]*v+h[2])/den, (h[3]*u+h[4]*v+h[5])/den)
+    pixel_x = (h[0] * u + h[1] * v + h[2]) / denominator
+    pixel_y = (h[3] * u + h[4] * v + h[5]) / denominator
+    return pixel_x, pixel_y
 
 
 def _back_project(h: list[float], x: float, y: float) -> tuple[float, float]:
-    a, b, c, d, e, f, g, k = h
-    aa, bb, cc = a-x*g, b-x*k, x-c
-    dd, ee, ff = d-y*g, e-y*k, y-f
-    den = aa*ee-bb*dd
-    if abs(den) < 1e-10:
+    h00, h01, h02, h10, h11, h12, h20, h21 = h
+    coefficient_00 = h00 - x * h20
+    coefficient_01 = h01 - x * h21
+    right_x = x - h02
+    coefficient_10 = h10 - y * h20
+    coefficient_11 = h11 - y * h21
+    right_y = y - h12
+    determinant = coefficient_00 * coefficient_11 - coefficient_01 * coefficient_10
+    if abs(determinant) < 1e-10:
         raise GeometryError("Pixel ray is parallel to the reference plane")
-    return ((cc*ee-bb*ff)/den, (aa*ff-cc*dd)/den)
+    scene_u = (
+        right_x * coefficient_11 - coefficient_01 * right_y
+    ) / determinant
+    scene_v = (
+        coefficient_00 * right_y - right_x * coefficient_10
+    ) / determinant
+    return scene_u, scene_v
 
 
 def fit_plane(anchors: list[dict], width: int, height: int,
@@ -108,82 +152,131 @@ def fit_plane(anchors: list[dict], width: int, height: int,
               holdout: list[dict] | None = None) -> dict:
     if len(anchors) < 4:
         raise GeometryError("A planar homography needs >= 4 non-collinear anchors")
-    rows, rhs = [], []
+    rows, targets = [], []
     for anchor in anchors:
-        u, v = anchor["scene_uv"]
-        x, y = _pn(anchor["pixel"], width, height)
-        rows.extend([[u,v,1,0,0,0,-u*x,-v*x],
-                     [0,0,0,u,v,1,-u*y,-v*y]])
-        rhs.extend([x,y])
-    h = least_squares(rows,rhs,8)
+        scene_u, scene_v = anchor["scene_uv"]
+        pixel_x, pixel_y = _pn(anchor["pixel"], width, height)
+        rows.extend([
+            [scene_u, scene_v, 1, 0, 0, 0, -scene_u * pixel_x, -scene_v * pixel_x],
+            [0, 0, 0, scene_u, scene_v, 1, -scene_u * pixel_y, -scene_v * pixel_y],
+        ])
+        targets.extend([pixel_x, pixel_y])
+    homography = least_squares(rows, targets, 8)
 
     def errors(items: list[dict]) -> dict:
-        e = []
-        for a in items:
-            u, v = a["scene_uv"]
-            px, py = _project(h,u,v)
-            tx, ty = _pn(a["pixel"],width,height)
-            e.append(math.hypot((px-tx)*width/2,(py-ty)*height/2))
-        return {"count":len(e),"rms_px":math.sqrt(sum(v*v for v in e)/len(e)) if e else None,
-                "max_px":max(e) if e else None}
+        pixel_errors = []
+        for item in items:
+            scene_u, scene_v = item["scene_uv"]
+            projected_x, projected_y = _project(homography, scene_u, scene_v)
+            observed_x, observed_y = _pn(item["pixel"], width, height)
+            pixel_errors.append(math.hypot(
+                (projected_x - observed_x) * width / 2,
+                (projected_y - observed_y) * height / 2,
+            ))
+        return {
+            "count": len(pixel_errors),
+            "rms_px": (
+                math.sqrt(sum(error * error for error in pixel_errors) / len(pixel_errors))
+                if pixel_errors else None
+            ),
+            "max_px": max(pixel_errors) if pixel_errors else None,
+        }
 
     converted = []
     for q in queries or []:
-        x,y = _pn(q["pixel"],width,height)
-        u,v = _back_project(h,x,y)
-        converted.append({"id":q["id"],"scene_uv":[u,v],
-                          "assumption":"queried pixel lies on this calibrated reference plane"})
-    return {"homography_scene_to_normalized_pixel":
-            [[h[0],h[1],h[2]],[h[3],h[4],h[5]],[h[6],h[7],1]],
-            "fitting":errors(anchors),"held_out_validation":errors(holdout or []),
-            "derived_plane_points":converted,
-            "warning":"Cannot infer off-plane depth or metric scale from this homography"}
+        pixel_x, pixel_y = _pn(q["pixel"], width, height)
+        scene_u, scene_v = _back_project(homography, pixel_x, pixel_y)
+        converted.append({
+            "id": q["id"],
+            "scene_uv": [scene_u, scene_v],
+            "assumption": "queried pixel lies on this calibrated reference plane",
+        })
+    return {
+        "homography_scene_to_normalized_pixel": [
+            [homography[0], homography[1], homography[2]],
+            [homography[3], homography[4], homography[5]],
+            [homography[6], homography[7], 1],
+        ],
+        "fitting": errors(anchors),
+        "held_out_validation": errors(holdout or []),
+        "derived_plane_points": converted,
+        "warning": "Cannot infer off-plane depth or metric scale from this homography",
+    }
+
+
+def _analyse_vanishing(config: dict, width: int, height: int) -> dict:
+    vanishing_points = {
+        name: vanishing_point(segments)
+        for name, segments in config["directions"].items()
+    }
+    result = {"vanishing_points": vanishing_points}
+    orthogonal_pair = config.get("orthogonal_pair")
+    if orthogonal_pair is not None:
+        if (
+            len(orthogonal_pair) != 2
+            or orthogonal_pair[0] not in vanishing_points
+            or orthogonal_pair[1] not in vanishing_points
+        ):
+            raise GeometryError("Unknown vanishing directions in orthogonal pair")
+        result["camera_intrinsics_estimate"] = fov_from_orthogonal_vps(
+            vanishing_points[orthogonal_pair[0]]["pixel"],
+            vanishing_points[orthogonal_pair[1]]["pixel"],
+            width,
+            height,
+            config.get("principal_point"),
+        )
+    return result
+
+
+def _analyse_planes(planes: list[dict], width: int, height: int) -> dict:
+    return {
+        plane["id"]: fit_plane(
+            plane["anchors"],
+            width,
+            height,
+            plane.get("query"),
+            plane.get("holdout"),
+        )
+        for plane in planes
+    }
 
 
 def analyse(data: dict) -> dict:
-    image=data["image"]
-    w,h=int(image["width"]),int(image["height"])
-    if w < 2 or h < 2:
+    image = data["image"]
+    width, height = int(image["width"]), int(image["height"])
+    if width < 2 or height < 2:
         raise GeometryError("Invalid image dimensions")
-    result={"photo_id":image["id"],"image_size_px":[w,h],
-            "method":"deterministic geometry from annotated image pixels","status":"calculated"}
+    result = {
+        "photo_id": image["id"],
+        "image_size_px": [width, height],
+        "method": "deterministic geometry from annotated image pixels",
+        "status": "calculated",
+    }
     if "vanishing" in data:
-        cfg=data["vanishing"]
-        vp={k:vanishing_point(v) for k,v in cfg["directions"].items()}
-        result["vanishing_points"]=vp
-        pair=cfg.get("orthogonal_pair")
-        if pair is not None:
-            if len(pair)!=2 or pair[0] not in vp or pair[1] not in vp:
-                raise GeometryError("Unknown vanishing directions in orthogonal pair")
-            result["camera_intrinsics_estimate"]=fov_from_orthogonal_vps(
-                vp[pair[0]]["pixel"],vp[pair[1]]["pixel"],w,h,
-                cfg.get("principal_point"))
+        result.update(_analyse_vanishing(data["vanishing"], width, height))
     if "planes" in data:
-        result["planes"]={}
-        for plane in data["planes"]:
-            result["planes"][plane["id"]]=fit_plane(
-                plane["anchors"],w,h,plane.get("query"),plane.get("holdout"))
+        result["planes"] = _analyse_planes(data["planes"], width, height)
     return result
 
 
 def main() -> int:
-    parser=argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command",choices=["analyse"])
-    parser.add_argument("input",type=Path,help="JSON of annotated pixel geometry")
-    parser.add_argument("-o","--output",type=Path,help="Write report JSON here")
-    a=parser.parse_args()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("command", choices=["analyse"])
+    parser.add_argument("input", type=Path, help="JSON of annotated pixel geometry")
+    parser.add_argument("-o", "--output", type=Path, help="Write report JSON here")
+    args = parser.parse_args()
     try:
-        result=analyse(json.loads(a.input.read_text(encoding="utf-8")))
+        result = analyse(json.loads(args.input.read_text(encoding="utf-8")))
     except (OSError, KeyError, TypeError, ValueError, IndexError) as exc:
-        parser.exit(2,f"Photo2Scene WARP: {exc}\n")
-    output=json.dumps(result,indent=2,ensure_ascii=False,allow_nan=False)+"\n"
-    if a.output:
-        a.output.parent.mkdir(parents=True,exist_ok=True)
-        a.output.write_text(output,encoding="utf-8")
+        parser.exit(2, f"Photo2Scene WARP: {exc}\n")
+    output = json.dumps(result, indent=2, ensure_ascii=False, allow_nan=False) + "\n"
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(output, encoding="utf-8")
     else:
-        print(output,end="")
+        print(output, end="")
     return 0
 
 
-if __name__=="__main__":
+if __name__ == "__main__":
     raise SystemExit(main())

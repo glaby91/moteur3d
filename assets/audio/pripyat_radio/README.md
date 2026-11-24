@@ -8,7 +8,7 @@ de Radio Kiev / Suspilne n'est inclus.
 
 ## Production (Windows, Linux)
 
-1. Installer Python 3.9+ et FFmpeg (`ffmpeg` dans le PATH).
+1. Installer Python 3.9+ et FFmpeg (`ffmpeg` et `ffprobe` dans le PATH pour créer le montage).
 2. Depuis ce dossier :
    ```sh
    python build_radio.py --dry-run
@@ -22,6 +22,13 @@ de Radio Kiev / Suspilne n'est inclus.
 `python build_radio.py --download-only` récupère les fichiers originaux sans traitement.
 L'étape de téléchargement nécessite l'accès à Wikimedia Commons ; **l'exécution
 du moteur 3D ne doit pas avoir besoin d'Internet**.
+
+Le manifeste épingle la taille et le SHA-1 publiés par Wikimedia Commons. Les
+fichiers téléchargés et ceux du cache sont vérifiés avant utilisation; avant le
+montage, `ffprobe` exige un unique flux audio OGG/Vorbis et une durée cohérente
+avec le manifeste. Si Commons remplace un fichier, le téléchargement est refusé
+jusqu'à vérification et mise à jour explicite de ces valeurs. `--download-only`
+vérifie l'intégrité, mais ne nécessite pas `ffprobe`.
 
 ## Intégration prévue dans la scène
 

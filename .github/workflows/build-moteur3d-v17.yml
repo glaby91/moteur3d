@@ -14,15 +14,15 @@ on:
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/**'
       - '.github/workflows/build-moteur3d-v17.yml'
       - 'tools/v493_*'
-      - 'tools/v17_600_scene_finish.py'
-      - 'tools/gi_fresco_ray_audit.py'
+      - 'tools/scene/migrations/v17_600_scene_finish.py'
+      - 'tools/audits/gi_fresco_ray_audit.py'
   pull_request:
     paths:
       - 'v17/**'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/**'
       - 'tools/v17_523_*'
-      - 'tools/v17_600_scene_finish.py'
-      - 'tools/gi_fresco_ray_audit.py'
+      - 'tools/scene/migrations/v17_600_scene_finish.py'
+      - 'tools/audits/gi_fresco_ray_audit.py'
       - '.github/workflows/build-moteur3d-v17.yml'
   workflow_dispatch:
 permissions:
@@ -659,9 +659,9 @@ jobs:
           $font=python -c "from matplotlib import get_data_path; import os; print(os.path.join(get_data_path(),'fonts','ttf','DejaVuSans-Bold.ttf'))"
           $env:CSE_WARP_FONT=($font | Select-Object -Last 1).Trim()
           if (!(Test-Path $env:CSE_WARP_FONT)) { throw "BASSEIN font missing" }
-          python tools/v493_build_bassein_glb.py --out build-v17/sign-bassein-v493.glb
+          python tools/scene/build/v493_build_bassein_glb.py --out build-v17/sign-bassein-v493.glb
           if ($LASTEXITCODE -ne 0) { throw "BASSEIN GLB generation failed" }
-          python tools/v493_replace_roof_sign.py --package dist-v17 --glb build-v17/sign-bassein-v493.glb --allow-unversioned
+          python tools/scene/migrations/v493_replace_roof_sign.py --package dist-v17 --glb build-v17/sign-bassein-v493.glb --allow-unversioned
           if ($LASTEXITCODE -ne 0) { throw "BASSEIN integration failed" }
           $report = Get-Content "dist-v17/benchmark-civic/V498_SCENE_INSTALL.json" -Raw | ConvertFrom-Json
           if ($report.addedSignObjects -ne 112 -or $report.addedTriangles -lt 14000 -or
@@ -697,7 +697,7 @@ jobs:
             }
             Write-Host 'V17.500 anchors already exist in the approved V17.603 scene; validating in place.'
           } else {
-            python tools/v17_500_anchor_monument.py --package dist-v17/benchmark-civic
+            python tools/scene/migrations/v17_500_anchor_monument.py --package dist-v17/benchmark-civic
             if ($LASTEXITCODE -ne 0) { throw 'V17.500 monument anchoring failed in the standard shipping scene' }
             $report = Get-Content $anchorReportPath -Raw | ConvertFrom-Json
           }
@@ -738,7 +738,7 @@ jobs:
             $scene | ConvertTo-Json -Depth 100 | Set-Content $scenePath -Encoding utf8
             Write-Host 'Corrected V17.523 cupola already exists in the V17.603 scene; validating in place.'
           } else {
-            python tools/v17_523_pool_cupola.py --package dist-v17/benchmark-civic --scene-revision $expectedSceneRevision
+            python tools/scene/migrations/v17_523_pool_cupola.py --package dist-v17/benchmark-civic --scene-revision $expectedSceneRevision
             if ($LASTEXITCODE -ne 0) { throw 'V17.523 cupola installation failed in shipping scene' }
             $report = Get-Content $reportPath -Raw | ConvertFrom-Json
           }
@@ -777,11 +777,11 @@ jobs:
           M3D_V16_FORCE_WARP: '1'
           M3D_V16_GPU_GI_SAMPLES: '0'
         run: |
-          python tools/v17_600_scene_finish.py --self-test
+          python tools/scene/migrations/v17_600_scene_finish.py --self-test
           if ($LASTEXITCODE -ne 0) { throw 'V17.001 synthetic geometry continuity test failed' }
-          python tools/v17_600_scene_finish.py --package dist-v17 --revision V17.604 --garden-only
+          python tools/scene/migrations/v17_600_scene_finish.py --package dist-v17 --revision V17.604 --garden-only
           if ($LASTEXITCODE -ne 0) { throw 'V17.604 scene finishing pass or structural validation failed' }
-          python tools/v17_600_scene_finish.py --package dist-v17 --revision V17.604 --verify-only
+          python tools/scene/migrations/v17_600_scene_finish.py --package dist-v17 --revision V17.604 --verify-only
           if ($LASTEXITCODE -ne 0) { throw 'V17.604 final scene resource validation failed' }
           Remove-Item 'dist-v17/DEMARRER_CSE_WARP_10_ARBRES.bat','dist-v17/DEMARRER_V4_SANS_ARBRES.bat' -ErrorAction SilentlyContinue
           @'
@@ -847,9 +847,9 @@ jobs:
       - name: Audit CPU light paths from the pool fresco
         shell: pwsh
         run: |
-          python tools/gi_fresco_ray_audit.py --self-test
+          python tools/audits/gi_fresco_ray_audit.py --self-test
           if ($LASTEXITCODE -ne 0) { throw 'Fresco ray audit math self-test failed' }
-          python tools/gi_fresco_ray_audit.py --package dist-v17/benchmark-civic --output build-v17/fresco-ray-audit
+          python tools/audits/gi_fresco_ray_audit.py --package dist-v17/benchmark-civic --output build-v17/fresco-ray-audit
           if ($LASTEXITCODE -ne 0) { throw 'Fresco-to-water/cupola ray visibility audit failed' }
           foreach ($p in @("build-v17/fresco-ray-audit/fresco-ray-bundle.svg",
                            "build-v17/fresco-ray-audit/fresco-ray-paths.csv",

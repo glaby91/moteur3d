@@ -6,7 +6,7 @@ on:
       - feature/v17-421-v6-monument-marteau-faucille-261112
     paths:
       - .github/workflows/v17-v6-monument-warp.yml
-      - tools/create_scene_v6_monument.py
+      - tools/scene/build/create_scene_v6_monument.py
   workflow_dispatch:
 permissions:
   contents: read
@@ -42,7 +42,7 @@ jobs:
       - name: Build V6 geometries and textures from actual V5 (no engine recompile)
         shell: pwsh
         run: |
-          python tools/create_scene_v6_monument.py --root dist-v6/benchmark-civic
+          python tools/scene/build/create_scene_v6_monument.py --root dist-v6/benchmark-civic
           if ($LASTEXITCODE -ne 0) { throw 'New V6 scene modeling failed' }
       - name: Validate mesh references, inscription, 5m sculpture, old V5 kept
         shell: pwsh
@@ -114,7 +114,7 @@ jobs:
           Sculpture is an original geometry inspired by the selected monument; the commercial TurboSquid model is not included.
           Inscription is a visual engraved-look texture; not deep-cut geometry.
           '@ | Out-File 'dist-v6/LIRE_EN_PREMIER-V6-MONUMENT.txt' -Encoding utf8
-          Copy-Item 'tools/create_scene_v6_monument.py' 'dist-v6/create_scene_v6_monument.py'
+          Copy-Item 'tools/scene/build/create_scene_v6_monument.py' 'dist-v6/create_scene_v6_monument.py'
       - name: Upload full tested portable Windows application and actual WARP views
         uses: actions/upload-artifact@v4
         with:

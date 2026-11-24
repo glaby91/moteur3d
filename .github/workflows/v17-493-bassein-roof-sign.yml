@@ -4,8 +4,8 @@ on:
     branches: [feature/v17-493-piscine-enseigne-bassein-261114]
     paths:
       - .github/workflows/v17-493-bassein-roof-sign.yml
-      - tools/v493_build_bassein_glb.py
-      - tools/v493_replace_roof_sign.py
+      - tools/scene/build/v493_build_bassein_glb.py
+      - tools/scene/migrations/v493_replace_roof_sign.py
   workflow_dispatch:
 permissions:
   contents: read
@@ -44,13 +44,13 @@ jobs:
           $font=python -c "from matplotlib import get_data_path; import os; print(os.path.join(get_data_path(),'fonts','ttf','DejaVuSans-Bold.ttf'))"
           $env:CSE_WARP_FONT=($font | Select-Object -Last 1).Trim()
           if(!(Test-Path $env:CSE_WARP_FONT)){throw "DejaVuSans-Bold missing"}
-          python tools/v493_build_bassein_glb.py --out sign-bassein-v493.glb
+          python tools/scene/build/v493_build_bassein_glb.py --out sign-bassein-v493.glb
           if($LASTEXITCODE -ne 0){throw "Sign GLB build failed"}
           if((Get-Item sign-bassein-v493.glb).Length -lt 100000){throw "GLB incomplete"}
       - name: Replace only the existing V17.493 rooftop sign
         shell: pwsh
         run: |
-          python tools/v493_replace_roof_sign.py --package stage-v493 --glb sign-bassein-v493.glb
+          python tools/scene/migrations/v493_replace_roof_sign.py --package stage-v493 --glb sign-bassein-v493.glb
           if($LASTEXITCODE -ne 0){throw "Roof replacement failed"}
           $r=Get-Content stage-v493/benchmark-civic/V493_BASSEIN_SIGN_INSTALL.json -Raw | ConvertFrom-Json
           if($r.addedSignObjects -ne 112 -or $r.addedTriangles -lt 14000 -or $r.removedSignObjects -lt 50){throw "Rooftop sign validation failed"}

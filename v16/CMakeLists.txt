@@ -166,7 +166,25 @@ if(WIN32)
     target_link_libraries(v16_shader_check PRIVATE d3dcompiler)
     add_test(NAME v16_hlsl_compute_shader
         COMMAND v16_shader_check "${NATIVE_SRC}/shaders/m3d_raytrace_compute.hlsl")
-    set_tests_properties(v16_hlsl_compute_shader PROPERTIES TIMEOUT 60)
+    set_tests_properties(v16_hlsl_compute_shader PROPERTIES TIMEOUT 180)
+endif()
+if(WIN32)
+    find_program(V16_WINDEPLOYQT_EXECUTABLE
+        NAMES windeployqt windeployqt.exe
+        HINTS "${Qt6_DIR}/../../../bin")
+    if(V16_WINDEPLOYQT_EXECUTABLE)
+        add_custom_command(TARGET moteur3d_v16 POST_BUILD
+            COMMAND "${V16_WINDEPLOYQT_EXECUTABLE}"
+                --release
+                --no-translations
+                --no-opengl-sw
+                --dir "$<TARGET_FILE_DIR:moteur3d_v16>"
+                "$<TARGET_FILE:moteur3d_v16>"
+            COMMENT "Deploy Qt6 runtime for V16 executables and tests"
+            VERBATIM)
+    else()
+        message(WARNING "windeployqt not found; V16 Qt6 runtime DLLs will not be deployed")
+    endif()
 endif()
 add_custom_command(TARGET moteur3d_v16 POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory

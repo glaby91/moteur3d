@@ -3,7 +3,7 @@ on:
   push:
     branches: [feature/v17-430-nine-anomalies-261113]
     paths:
-      - tools/upgrade_scene_v8.py
+      - tools/scene/migrations/upgrade_scene_v8.py
       - .github/workflows/v17-430-nine-anomalies.yml
   workflow_dispatch:
 permissions:
@@ -29,7 +29,7 @@ jobs:
         run: |
           python -m pip install --only-binary=:all: "Pillow>=11"
           if($LASTEXITCODE -ne 0){throw "Pillow install failed"}
-          python -m py_compile tools/upgrade_scene_v8.py
+          python -m py_compile tools/scene/migrations/upgrade_scene_v8.py
           if($LASTEXITCODE -ne 0){throw "V8 scene upgrade syntax failed"}
       - name: Restore verified V17.429 portable app with Shift x3
         shell: pwsh
@@ -45,7 +45,7 @@ jobs:
       - name: Apply exactly nine repairs (never touch V17.429 renderer or fresco)
         shell: pwsh
         run: |
-          python tools/upgrade_scene_v8.py --root dist-v430/benchmark-civic | Tee-Object -FilePath v430-generator-report.txt
+          python tools/scene/migrations/upgrade_scene_v8.py --root dist-v430/benchmark-civic | Tee-Object -FilePath v430-generator-report.txt
           if($LASTEXITCODE -ne 0){throw "Nine-anomaly scene generator failed"}
       - name: Independent checks — stairs, doors, glass, plot/ladder clearance, mosaic, lights
         shell: pwsh
@@ -156,7 +156,7 @@ jobs:
       - name: Package portable scene-only upgrade while preserving x3 app
         shell: pwsh
         run: |
-          Copy-Item tools/upgrade_scene_v8.py dist-v430/upgrade_scene_v8.py -Force
+          Copy-Item tools/scene/migrations/upgrade_scene_v8.py dist-v430/upgrade_scene_v8.py -Force
           Copy-Item v430-generator-report.txt dist-v430/VALIDATION-V17.430.txt -Force
           @'
           CSE WARP V17.430 — 9 documented anomalies corrected in V8 scene.

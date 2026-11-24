@@ -6,7 +6,7 @@ It compares uniform 25% sampling with adaptive 25% sampling of **existing real C
 
 Install: `python -m pip install numpy scipy pillow scikit-image`
 
-Run: `python tools/photon_rt_adaptive.py path/to/render1.png path/to/render2.png --output photon-rt-results`
+Run: `python tools/benchmarks/photon_rt_adaptive.py path/to/render1.png path/to/render2.png --output photon-rt-results`
 
 This is **not** an implementation of adaptive ray tracing in the V16/V17 native engine. The source PNGs already contain the full rendered image. FPS, wattage, GPU/CPU ray counts, and temporal reconstruction cannot be inferred from this offline test. Native integration requires changes to the ray scheduling path, and actual depth/motion/material buffers for temporal validation.
 

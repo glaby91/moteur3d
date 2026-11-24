@@ -52,10 +52,7 @@ def split_anchors(photo: dict) -> tuple[list[dict],list[dict]]:
     return train,hold
 
 
-def solve(data: dict) -> tuple[dict,np.ndarray]:
-    photos=data["photos"]
-    if len(photos)<2:
-        raise ValueError("At least two independent photographs required")
+def _prepare_fit(photos):
     starts=[math.log(2.4)]
     fit=[]
     for photo in photos:
@@ -75,20 +72,58 @@ def solve(data: dict) -> tuple[dict,np.ndarray]:
     for _ in photos:
         lower.extend([math.log(80.),*([-math.inf]*6)])
         upper.extend([math.log(20000.),*([math.inf]*6)])
+    return fit, np.asarray(starts,dtype=float), lower, upper
 
-    def residual(params: np.ndarray) -> np.ndarray:
-        height=math.exp(float(params[0]))
-        blocks=[]
-        for i,(size,train,_) in enumerate(fit):
-            p=params[1+i*7:8+i*7]
-            blocks.append((project(p,train,height,size)-observed(train)).ravel())
-        return np.concatenate(blocks)
 
-    optimized=least_squares(residual,np.asarray(starts,dtype=float),
+def _bundle_residual(params: np.ndarray, fit: list) -> np.ndarray:
+    height=math.exp(float(params[0]))
+    blocks=[]
+    for i,(size,train,_) in enumerate(fit):
+        camera_params=params[1+i*7:8+i*7]
+        blocks.append((project(camera_params,train,height,size)-observed(train)).ravel())
+    return np.concatenate(blocks)
+
+
+def _optimize_bundle(fit, starts, lower, upper):
+    def residual(params):
+        return _bundle_residual(params,fit)
+
+    optimized=least_squares(residual,starts,
         loss="soft_l1",f_scale=3.,max_nfev=400,bounds=(lower,upper),
         ftol=1e-10,xtol=1e-10,gtol=1e-10)
     if not optimized.success:
         raise ValueError("Bundle optimization did not converge: "+optimized.message)
+    return optimized
+
+
+def _camera_report(photo, size, train, hold, height, camera_params):
+    focal=math.exp(float(camera_params[0]))
+    mat,_=cv2.Rodrigues(np.asarray(camera_params[1:4]))
+    center=-(mat.T@camera_params[4:7])
+
+    def stats(points):
+        errors=np.linalg.norm(
+            project(camera_params,points,height,size)-observed(points),axis=1
+        )
+        return {"count":len(points),
+            "rms_px":float(np.sqrt(np.mean(errors*errors))),
+            "max_px":float(max(errors)),
+            "errors_by_anchor_px":{a["id"]:float(e) for a,e in zip(points,errors)}}
+
+    return {
+        "id":photo["id"],"source_sha256":photo["sha256"],"size_px":list(size),
+        "focal_px":focal,
+        "fov_horizontal_deg":math.degrees(2*math.atan(size[0]/(2*focal))),
+        "position_in_bay_units":center.tolist(),
+        "rvec_world_to_camera":list(map(float,camera_params[1:4])),
+        "tvec_world_to_camera":list(map(float,camera_params[4:7])),
+        "fit":stats(train),"holdout":stats(hold),
+        "caution":"Pinhole pose is CONDITIONAL on manual bay assignments and model assumptions"
+    }
+
+
+def _build_report(data, fit, optimized):
+    photos=data["photos"]
     params=optimized.x
     height=math.exp(float(params[0]))
     report={
@@ -113,29 +148,21 @@ def solve(data: dict) -> tuple[dict,np.ndarray]:
                       "fitted_pixels":sum(len(x[1]) for x in fit)*2},
       "cameras":[]
     }
-    for i,photo in enumerate(photos):
-        size,train,hold=fit[i]
-        p=params[1+i*7:8+i*7]
-        focal=math.exp(float(p[0]))
-        mat,_=cv2.Rodrigues(np.asarray(p[1:4]))
-        center=-(mat.T@p[4:7])
-        def stats(points):
-            errors=np.linalg.norm(project(p,points,height,size)-observed(points),axis=1)
-            return {"count":len(points),
-                "rms_px":float(np.sqrt(np.mean(errors*errors))),
-                "max_px":float(max(errors)),
-                "errors_by_anchor_px":{a["id"]:float(e) for a,e in zip(points,errors)}}
-        report["cameras"].append({
-            "id":photo["id"],"source_sha256":photo["sha256"],"size_px":list(size),
-            "focal_px":focal,
-            "fov_horizontal_deg":math.degrees(2*math.atan(size[0]/(2*focal))),
-            "position_in_bay_units":center.tolist(),
-            "rvec_world_to_camera":list(map(float,p[1:4])),
-            "tvec_world_to_camera":list(map(float,p[4:7])),
-            "fit":stats(train),"holdout":stats(hold),
-            "caution":"Pinhole pose is CONDITIONAL on manual bay assignments and model assumptions"
-        })
+    for i,(photo,(size,train,hold)) in enumerate(zip(photos,fit)):
+        camera_params=params[1+i*7:8+i*7]
+        report["cameras"].append(
+            _camera_report(photo,size,train,hold,height,camera_params)
+        )
     return report,params
+
+
+def solve(data: dict) -> tuple[dict,np.ndarray]:
+    photos=data["photos"]
+    if len(photos)<2:
+        raise ValueError("At least two independent photographs required")
+    fit,starts,lower,upper=_prepare_fit(photos)
+    optimized=_optimize_bundle(fit,starts,lower,upper)
+    return _build_report(data,fit,optimized)
 
 
 def export_obj(path: Path, height: float, max_bay: int) -> None:
@@ -191,6 +218,36 @@ def export_overlay(path: Path, photo: dict, camera: dict, params: np.ndarray,
     return str(path)
 
 
+def export_results(data: dict, report: dict, params: np.ndarray,
+                   output_dir: Path, originals_dir: Path | None) -> None:
+    max_bay=max(a["bay"] for photo in data["photos"] for a in photo["anchors"])
+    report["exported_bays"]={"from":0,"to":max_bay,
+                            "status":"repeated grid assumed; columns outside observed range omitted"}
+    (output_dir/"facade-calibration.json").write_text(
+        json.dumps(report,indent=2,ensure_ascii=False,allow_nan=False)+"\n",encoding="utf-8")
+    export_obj(output_dir/"energetik-front-plane-units.obj",
+               report["gauge"]["height_visible_colonnade_in_bays"],max_bay)
+    if originals_dir:
+        for i,photo in enumerate(data["photos"]):
+            overlay=export_overlay(output_dir/f"photo-{i+1}-reprojection.png",
+                photo,report["cameras"][i],params[1+i*7:8+i*7],
+                report["gauge"]["height_visible_colonnade_in_bays"],
+                originals_dir,max_bay)
+            print(overlay)
+
+
+def run(annotations: Path, output_dir: Path, originals_dir: Path | None) -> None:
+    data=json.loads(annotations.read_text(encoding="utf-8"))
+    report,params=solve(data)
+    output_dir.mkdir(parents=True,exist_ok=True)
+    export_results(data,report,params,output_dir,originals_dir)
+    print(json.dumps({"status":report["status"],"height_in_bays":
+          report["gauge"]["height_visible_colonnade_in_bays"],
+          "holdout_rms_px":[x["holdout"]["rms_px"] for x in report["cameras"]],
+          "fov_deg":[x["fov_horizontal_deg"] for x in report["cameras"]]},
+          indent=2))
+
+
 def main() -> None:
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("annotations",type=Path)
@@ -198,28 +255,7 @@ def main() -> None:
     parser.add_argument("--originals-dir",type=Path,
                         help="Optional local originals; never commit redistributed photos")
     args=parser.parse_args()
-    data=json.loads(args.annotations.read_text(encoding="utf-8"))
-    report,params=solve(data)
-    args.output_dir.mkdir(parents=True,exist_ok=True)
-    max_bay=max(a["bay"] for p in data["photos"] for a in p["anchors"])
-    report["exported_bays"]={"from":0,"to":max_bay,
-                            "status":"repeated grid assumed; columns outside observed range omitted"}
-    (args.output_dir/"facade-calibration.json").write_text(
-        json.dumps(report,indent=2,ensure_ascii=False,allow_nan=False)+"\n",encoding="utf-8")
-    export_obj(args.output_dir/"energetik-front-plane-units.obj",
-               report["gauge"]["height_visible_colonnade_in_bays"],max_bay)
-    if args.originals_dir:
-        for i,photo in enumerate(data["photos"]):
-            overlay=export_overlay(args.output_dir/f"photo-{i+1}-reprojection.png",
-                photo,report["cameras"][i],params[1+i*7:8+i*7],
-                report["gauge"]["height_visible_colonnade_in_bays"],
-                args.originals_dir,max_bay)
-            print(overlay)
-    print(json.dumps({"status":report["status"],"height_in_bays":
-          report["gauge"]["height_visible_colonnade_in_bays"],
-          "holdout_rms_px":[x["holdout"]["rms_px"] for x in report["cameras"]],
-          "fov_deg":[x["fov_horizontal_deg"] for x in report["cameras"]]},
-          indent=2))
+    run(args.annotations,args.output_dir,args.originals_dir)
 
 
 if __name__=="__main__":

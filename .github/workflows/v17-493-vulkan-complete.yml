@@ -357,7 +357,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Missing tree import dependencies' }
           python scenes/v16/benchmark-civic/import_trees_pilot.py --root scenes/v16/benchmark-civic
           if ($LASTEXITCODE -ne 0) { throw '10 CC0 GLB trees import failed' }
-          python tools/package_v17_trees.py --dist dist-v17 --source scenes/v16/benchmark-civic
+          python tools/packaging/package_v17_trees.py --dist dist-v17 --source scenes/v16/benchmark-civic
           if ($LASTEXITCODE -ne 0) { throw 'Full distribution assembly failed' }
           & "dist-v17/moteur3d_v17_benchmark.exe" "dist-v17/benchmark-civic/scene-v4.json" "build-v17/final-v4-10-tree-smoke" --smoke --camera-id v4_face --hour 14 --raster-msaa 1 --readback-depth 1
           if ($LASTEXITCODE -ne 0) { throw 'Final delivered V17 tree scene failed real DX11 WARP rendering' }
@@ -410,7 +410,7 @@ jobs:
       - name: V17.500 — Ancrages du monument et revision de scene
         shell: pwsh
         run: |
-          python tools/v17_500_anchor_monument.py --package dist-v17/benchmark-civic
+          python tools/scene/migrations/v17_500_anchor_monument.py --package dist-v17/benchmark-civic
           if ($LASTEXITCODE -ne 0) { throw "Monument anchoring or scene revision failed" }
           $report=Get-Content "dist-v17/benchmark-civic/V500_MONUMENT_ANCHORS.json" -Raw | ConvertFrom-Json
           if ($report.anchorAssemblies -ne 2 -or $report.embeddedConcreteCores -ne 2 -or
@@ -425,7 +425,7 @@ jobs:
         shell: pwsh
         timeout-minutes: 30
         run: |
-          python tools/v17_523_pool_cupola.py --package dist-v17/benchmark-civic
+          python tools/scene/migrations/v17_523_pool_cupola.py --package dist-v17/benchmark-civic
           if ($LASTEXITCODE -ne 0) { throw "V17.523 cupola installation failed" }
           $report=Get-Content "dist-v17/benchmark-civic/V523_POOL_CUPOLA.json" -Raw | ConvertFrom-Json
           if ($report.revision -ne 'V17.523' -or $report.sceneRevision -ne 'V17.523' -or

@@ -23,12 +23,51 @@ def bat(scene):
         'start "" "moteur3d_v17.exe" "benchmark-civic/' + scene + '"\r\n'
     )
 
+
+def validate_distribution(dist: Path, scene_dir: Path):
+    required = (
+        (dist / "moteur3d_v17.exe", "Missing V17 application"),
+        (dist / "Qt6Core.dll", "Missing Qt6 deployment"),
+        (dist / "moteur3d_v16_core.dll", "Missing native V16 core"),
+        (scene_dir / "scene-v4.json", "Missing V4 scene"),
+    )
+    for path, message in required:
+        if not path.is_file():
+            raise FileNotFoundError(message)
+
+
+def validate_tree_pilot(baseline, pilot, meshes, report):
+    tree_parts = [
+        item for item in pilot["instances"]
+        if item.get("parent") == "Nature/Arbres pilotes GLB CC0"
+    ]
+    if len(baseline["instances"]) < 9706:
+        raise ValueError("Missing corrected V4 pool ladders")
+    if len(tree_parts) != 20 or report["trees"] != 10:
+        raise ValueError("Incomplete pilot")
+    if len(meshes) != 20 or not all(mesh["type"] == "triangle_mesh" for mesh in meshes):
+        raise ValueError("Invalid meshes")
+    if sum(len(mesh["faces"]) for mesh in meshes) != report["triangles"]:
+        raise ValueError("Pilot triangle count does not match report")
+    if pilot["instances"][:len(baseline["instances"])] != baseline["instances"]:
+        raise ValueError("Pilot not generated from latest V4")
+    return tree_parts
+
+
+def validate_scene_dependencies(scene_dir: Path, scenes):
+    for scene in scenes:
+        sector = load(scene_dir / scene)["sectors"][0]
+        for section in ("geometry", "instances", "materials", "pbr", "lighting", "cameras", "environment"):
+            for dependency in sector[section]:
+                target = scene_dir / dependency
+                if not target.is_file():
+                    raise FileNotFoundError(f"Missing {scene} dependency {target}")
+                load(target)
+
+
 def assemble(dist: Path, source: Path):
     dst = dist / "benchmark-civic"
-    assert (dist / "moteur3d_v17.exe").is_file(), "Missing V17 application"
-    assert (dist / "Qt6Core.dll").is_file(), "Missing Qt6 deployment"
-    assert (dist / "moteur3d_v16_core.dll").is_file(), "Missing native V16 core"
-    assert (dst / "scene-v4.json").is_file(), "Missing V4 scene"
+    validate_distribution(dist, dst)
 
     # The V4 generator already contains the corrected pool ladders.
     original = load(dst / "scene-v4.json")
@@ -36,13 +75,7 @@ def assemble(dist: Path, source: Path):
     pilot = load(source / "instances/v4-trees-pilot.json")
     meshes = load(source / "geometry/trees-pilot.json")["meshes"]
     report = load(source / "reports/trees-pilot.json")
-    tree_parts = [x for x in pilot["instances"] if
-                  x.get("parent") == "Nature/Arbres pilotes GLB CC0"]
-    assert len(baseline["instances"]) >= 9706, "Missing corrected V4 pool ladders"
-    assert len(tree_parts) == 20 and report["trees"] == 10, "Incomplete pilot"
-    assert len(meshes) == 20 and all(m["type"] == "triangle_mesh" for m in meshes), "Invalid meshes"
-    assert sum(len(m["faces"]) for m in meshes) == report["triangles"]
-    assert pilot["instances"][:len(baseline["instances"])] == baseline["instances"], "Pilot not generated from latest V4"
+    tree_parts = validate_tree_pilot(baseline, pilot, meshes, report)
 
     for relative in ("geometry/trees-pilot.json", "instances/v4-trees-pilot.json",
                      "reports/trees-pilot.json"):
@@ -58,13 +91,9 @@ def assemble(dist: Path, source: Path):
     # EXE defaultPath points to scene-v4.json: opening EXE alone now loads trees.
     write(dst / "scene-v4.json", manifest)
 
-    for scene in ("scene-v4.json", "scene-v4-trees-pilot.json", "scene-v4-sans-arbres.json"):
-        sector = load(dst / scene)["sectors"][0]
-        for section in ("geometry","instances","materials","pbr","lighting","cameras","environment"):
-            for dep in sector[section]:
-                target = dst / dep
-                assert target.is_file(), f"Missing {scene} dependency {target}"
-                load(target)
+    validate_scene_dependencies(dst, (
+        "scene-v4.json", "scene-v4-trees-pilot.json", "scene-v4-sans-arbres.json"
+    ))
     for launcher, scene in (
         ("DEMARRER_CSE_WARP_10_ARBRES.bat","scene-v4-trees-pilot.json"),
         ("DEMARRER_V4_SANS_ARBRES.bat","scene-v4-sans-arbres.json"),

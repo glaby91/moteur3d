@@ -71,23 +71,41 @@ def box_faces():
     return v, faces
 
 
+def triangulate_face(vertices, face):
+    return (
+        (vertices[face[0]], vertices[a], vertices[b])
+        for a, b in zip(face[1:-1], face[2:])
+    )
+
+
+def triangle_overlaps_region(triangle, region):
+    return all(
+        max(point[axis] for point in triangle) >= region[axis * 2]
+        and min(point[axis] for point in triangle) <= region[axis * 2 + 1]
+        for axis in range(3)
+    )
+
+
 def scene_triangles(package: Path, sector):
-    meshes = {}
-    for rel in sector.get("geometry", []):
-        doc = read(package / rel)
-        for mesh in doc.get("meshes", []):
-            meshes[mesh["id"]] = mesh
-    instances = []
-    for rel in sector.get("instances", []):
-        instances.extend(read(package / rel).get("instances", []))
+    meshes = {
+        mesh["id"]: mesh
+        for rel in sector.get("geometry", [])
+        for mesh in read(package / rel).get("meshes", [])
+    }
+    instances = [
+        instance
+        for rel in sector.get("instances", [])
+        for instance in read(package / rel).get("instances", [])
+    ]
 
     triangles, unsupported = [], Counter()
     region = (-32.0, 32.0, -2.0, 26.0, -57.0, -8.0)  # x, y, z window around pool
     unit_vertices, unit_faces = box_faces()
     for inst in instances:
-        mesh = meshes.get(inst.get("geometry"))
-        mesh_type = mesh.get("type") if mesh else inst.get("geometry")
-        if mesh_type == "box" or inst.get("geometry") == "unit_box":
+        geometry_id = inst.get("geometry")
+        mesh = meshes.get(geometry_id)
+        mesh_type = mesh.get("type") if mesh else geometry_id
+        if mesh_type == "box" or geometry_id == "unit_box":
             local_vertices, faces = unit_vertices, unit_faces
         elif mesh_type == "triangle_mesh":
             local_vertices = mesh.get("vertices", []) if mesh else []
@@ -96,18 +114,13 @@ def scene_triangles(package: Path, sector):
             unsupported[str(mesh_type)] += 1
             continue
         world = [transform(p, inst) for p in local_vertices]
-        for face in faces:
-            if len(face) < 3:
-                continue
-            for j in range(1, len(face)-1):
-                tri = (world[face[0]], world[face[j]], world[face[j+1]])
-                xs = [p[0] for p in tri]; ys = [p[1] for p in tri]; zs = [p[2] for p in tri]
-                if (max(xs) < region[0] or min(xs) > region[1] or
-                    max(ys) < region[2] or min(ys) > region[3] or
-                    max(zs) < region[4] or min(zs) > region[5]):
-                    continue
-                triangles.append((*tri, inst.get("id", "?"), inst.get("material", "?"),
-                                  inst.get("parent", "")))
+        triangles.extend(
+            (*triangle, inst.get("id", "?"), inst.get("material", "?"),
+             inst.get("parent", ""))
+            for face in faces
+            for triangle in triangulate_face(world, face)
+            if triangle_overlaps_region(triangle, region)
+        )
     if not triangles:
         raise ValueError("No supported triangles found in the pool audit region")
     return triangles, instances, unsupported
@@ -273,7 +286,7 @@ def audit(package: Path, output: Path):
                          "target_x":target[0],"target_y":target[1],"target_z":target[2]})
             svg_rays.append((origin, endpoint, kind if status != "BLOCKED" else "blocked", status))
 
-    gi_source_path = (Path(__file__).resolve().parent.parent /
+    gi_source_path = (Path(__file__).resolve().parents[2] /
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_gi_bake.cpp")
     gi_source = gi_source_path.read_text(encoding="utf-8") if gi_source_path.is_file() else ""
     avg_mip_lookup = "colorMip.back().p.front()" in gi_source
@@ -363,6 +376,13 @@ def write_svg(path, rays, sources, targets):
 
 def self_test():
     tri=((-.5,-.5,1),(.5,-.5,1),(0,.5,1))
+    quad = ((0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0))
+    assert list(triangulate_face(quad, (0, 1, 2, 3))) == [
+        (quad[0], quad[1], quad[2]), (quad[0], quad[2], quad[3])
+    ]
+    assert list(triangulate_face(quad, (0, 1))) == []
+    assert triangle_overlaps_region(tri, (-1, 1, -1, 1, 0, 2))
+    assert not triangle_overlaps_region(tri, (-1, 1, -1, 1, 2, 3))
     tri_distance=tri_hit((0,0,0),(0,0,1),tri,10)
     assert tri_distance is not None and abs(tri_distance-1.0)<1e-9
     assert tri_hit((2,0,0),(0,0,1),tri,10) is None
