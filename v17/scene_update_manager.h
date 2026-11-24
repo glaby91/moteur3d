@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMessageBox>
@@ -210,7 +211,7 @@ private:
             fail(QStringLiteral("L’URL de l’archive de scène n’est pas définie."));
             return;
         }
-        QNetworkRequest request(QUrl(latestArchiveUrl_));
+        QNetworkRequest request{QUrl(latestArchiveUrl_)};
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                              QNetworkRequest::NoLessSafeRedirectPolicy);
         auto* reply=network_->get(request);
