@@ -102,7 +102,7 @@ Memory memoryUsage(){
 struct Samples {
     QString scene,camera,variant;
     int w=0,h=0,depth=1,requestedMsaa=0,passes=0;
-    bool ok=true,parity=true,gpuTimingValid=false;
+    bool ok=true,parity=true,gpuTimingValid=false,skipped=false;
     QString error,image;
     double coldMs=0,wallMs=0;
     uint64_t submittedTriangles=0,drawCalls=0;
@@ -141,7 +141,7 @@ struct Samples {
             {"cpuPixelConvertMs",mean(cpuSwizzle)},
             {"submittedTriangles",double(submittedTriangles)},
             {"gpuDrawCalls",double(drawCalls)},
-            {"pixelIdentical",parity},{"status",ok?"ok":"failed"},
+            {"pixelIdentical",parity},{"status",skipped?"skipped":(ok?"ok":"failed")},
             {"error",error},{"image",image},
             {"memoryWorkingMiB",m.workingMiB},{"memoryPeakMiB",m.peakMiB}
         };
@@ -333,7 +333,7 @@ void report(const QJsonObject& system,const std::vector<Samples>& cases,
               "th,td{border-bottom:1px solid #ddd;padding:8px;text-align:right}"
               "td:first-child,th:first-child{text-align:left}th{background:#eaf0f8}"
               "small{color:#596579}</style><h1>CSE WARP V17 — Full Benchmark</h1>"
-              "<p>Terminé : "<<(complete?"oui":"non")<<". La campagne compare DX11 Raster, Vulkan Raster, LumaTrace BVH4, DX11 Compute, Ray Tracing CPU direct et GI CPU à 2/4 rebonds. Les passes GPU mesurent le rendu hors écran avec lecture des pixels; elles ne mesurent pas la présentation native Qt/WSI.</p>"
+              "<p>Terminé : "<<(complete?"oui":"non")<<". La campagne compare DX11 Raster, Vulkan Raster, LumaTrace BVH4, DX11 Compute, Ray Tracing CPU direct et GI CPU à 2/4 rebonds. Les scènes dont la géométrie n’est pas compatible LumaTrace sont marquées « skipped ». Les passes GPU mesurent le rendu hors écran avec lecture des pixels; elles ne mesurent pas la présentation native Qt/WSI.</p>"
               "<table><tr><th>Scène / caméra / variante</th><th>Pixels</th>"
               "<th>Buffers</th><th>Images</th><th>FPS débit</th><th>P50 ms</th>"
               "<th>P95 ms</th><th>Dispersion %</th><th>GPU draw ms</th>"
@@ -577,6 +577,13 @@ int main(int argc,char** argv){
                     lumaCase.variant=QStringLiteral("LumaTrace BVH4 GPU lighting + Raster preview/readback");
                     lumaCase.w=size.width();lumaCase.h=size.height();lumaCase.depth=1;
                     lumaCase.requestedMsaa=msaa;
+                    if(runtime.lumaTraceBvh4.nodes.empty()){
+                        lumaCase.skipped=true;
+                        lumaCase.ok=false;
+                        lumaCase.error=runtime.lumaTraceBvhError.isEmpty()
+                            ?QStringLiteral("LumaTrace BVH4 unavailable for this scene geometry")
+                            :runtime.lumaTraceBvhError;
+                    }
                     cases.push_back(std::move(lumaCase));
                 }
                 const auto renderVulkan=[&](std::vector<uint32_t>& image,Stats& frameStats,
