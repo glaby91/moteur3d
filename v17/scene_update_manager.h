@@ -82,7 +82,8 @@ public:
                 return;
             }
             QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-            if(settings.value(QStringLiteral("Scene/DeferredRevision")).toString()==latest){
+            if(!currentRevision_.isEmpty() &&
+               settings.value(QStringLiteral("Scene/DeferredRevision")).toString()==latest){
                 setStatus(QStringLiteral("Une mise à jour de scène (%1) est disponible.").arg(latest),10000);
                 return;
             }
