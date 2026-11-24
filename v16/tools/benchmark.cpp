@@ -6,6 +6,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
+#include <QSaveFile>
 #include <QFileInfo>
 #include <QImage>
 #include <QJsonArray>
@@ -30,9 +31,19 @@ QString csvField(QString s) {
     return QStringLiteral("\"") + s + QStringLiteral("\"");
 }
 bool writeJson(const QString& path,const QJsonObject& value) {
-    QFile f(path);
-    if(!f.open(QIODevice::WriteOnly|QIODevice::Truncate))return false;
-    return f.write(QJsonDocument(value).toJson(QJsonDocument::Indented))>0;
+    const QByteArray bytes=QJsonDocument(value).toJson(QJsonDocument::Indented);
+    QSaveFile file(path);
+    if(!file.open(QIODevice::WriteOnly))return false;
+    qint64 offset=0;
+    while(offset<bytes.size()){
+        const qint64 written=file.write(bytes.constData()+offset,bytes.size()-offset);
+        if(written<=0){
+            file.cancelWriting();
+            return false;
+        }
+        offset+=written;
+    }
+    return file.commit();
 }
 bool writePng(const QString& path,const std::vector<uint32_t>& pixels,int w,int h) {
     if(pixels.size()!=size_t(w)*size_t(h))return false;
