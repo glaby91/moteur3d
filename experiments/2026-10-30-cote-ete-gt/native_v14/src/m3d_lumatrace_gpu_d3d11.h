@@ -34,8 +34,9 @@ private:
     struct alignas(16) Params {
         uint32_t counts[4];
         float lights[64][4],colors[64][4];
+        float sunDirection[4],sunColor[4];
     };
-    static_assert(sizeof(Params)==2064,"LumaTrace HLSL constant packing");
+    static_assert(sizeof(Params)==2096,"LumaTrace HLSL constant packing");
 
     bool makeStructuredBuffer(ID3D11Device* device,const void* data,size_t count,
                               UINT stride,UINT bind,D3D11_USAGE usage,
