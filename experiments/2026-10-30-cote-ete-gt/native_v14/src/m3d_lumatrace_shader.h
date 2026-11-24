@@ -154,3 +154,5 @@ float3 normalAtHit(uint id,float u,float v,float3 rayDirection){
  Radiance[id]=float4(direct+indirect,1);
 }
 )HLSL";
+
+} // namespace m3d::lumatrace_detail
