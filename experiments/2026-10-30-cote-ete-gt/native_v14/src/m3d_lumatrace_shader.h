@@ -58,8 +58,22 @@ bool traceClosest(float3 o,float3 d,float maxT,uint source,
  return hitId!=0xffffffff;
 }
 bool occluded(float3 o,float3 d,float maxT,uint source){
- uint hitId;float hitT,u,v;
- return traceClosest(o,d,maxT,source,hitId,hitT,u,v);
+ float3 safeD=float3(abs(d.x)<1.e-8?1.e-8:d.x,abs(d.y)<1.e-8?1.e-8:d.y,abs(d.z)<1.e-8?1.e-8:d.z);
+ float3 invD=rcp(safeD);uint stack[64];uint top=1;stack[0]=0;
+ [loop]while(top){
+  Node n=Bvh[stack[--top]];float nearT;
+  if(!bounds(n,o,invD,maxT,nearT))continue;
+  if(n.count){
+   [loop]for(uint j=0;j<n.count;++j){
+    uint id=Order[n.first+j];float t,u,v;
+    if(id!=0xffffffff&&id!=source&&id<Counts.x&&triangleHit(id,o,d,maxT,t,u,v))return true;
+   }
+  }else{
+   uint kids[4]={n.c0,n.c1,n.c2,n.c3};
+   [loop]for(uint k=0;k<n.children&&top<60;++k)stack[top++]=kids[k];
+  }
+ }
+ return false;
 }
 float3 light(uint source,float3 p,float3 n,float4 l,float4 color){
  float3 dv=l.xyz-p;float d2=dot(dv,dv),r=max(l.w,.05),r2=r*r;
