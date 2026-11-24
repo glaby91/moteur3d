@@ -677,4 +677,3 @@ class V17Window final : public QMainWindow
     void exportPacing();
     void requestRender();
 };
-QString defaultPath();
