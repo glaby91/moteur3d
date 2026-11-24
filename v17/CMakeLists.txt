@@ -34,13 +34,7 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Package the latest separately versioned V17 scene when CI supplies it.
-# Offline/local builds keep the checked-in scene as a deterministic fallback.
-set(V17_SCENE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/benchmark-civic"
-    CACHE PATH "Scene directory copied into the V17 application package")
-if(NOT EXISTS "${V17_SCENE_SOURCE_DIR}/scene.json")
-    message(FATAL_ERROR "V17 scene package is missing scene.json: ${V17_SCENE_SOURCE_DIR}")
-endif()
+# V17 packages only the engine. The app checks for and downloads the latest scene at startup.
 find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Multimedia)
 
 enable_testing()
@@ -362,21 +356,6 @@ add_custom_command(TARGET moteur3d_v17 POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
       "$<TARGET_FILE:moteur3d_v16_core>"
       "$<TARGET_FILE_DIR:moteur3d_v17>"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-      "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01"
-      "$<TARGET_FILE_DIR:moteur3d_v17>/pavillon01"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-      "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/material-lab"
-      "$<TARGET_FILE_DIR:moteur3d_v17>/material-lab"
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-      "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pripyat-photo2scene-proof"
-      "$<TARGET_FILE_DIR:moteur3d_v17>/pripyat-photo2scene-proof"
-    # Package the separately versioned V17 reference scene. CI downloads the
-    # latest validated release; local/offline builds use V17_SCENE_SOURCE_DIR's
-    # checked-in fallback.
-    COMMAND ${CMAKE_COMMAND} -E copy_directory
-      "${V17_SCENE_SOURCE_DIR}"
-      "$<TARGET_FILE_DIR:moteur3d_v17>/benchmark-civic"
     COMMAND ${CMAKE_COMMAND} -E make_directory
       "$<TARGET_FILE_DIR:moteur3d_v17>/shaders"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
