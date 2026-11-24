@@ -17,7 +17,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace m3d::lumatrace_gpu {
+namespace m3d { namespace lumatrace_gpu {
 using Microsoft::WRL::ComPtr;
 
 // Owns only LumaTrace's D3D11 compute resources and dispatch. Raster geometry,
@@ -54,6 +54,6 @@ private:
     bool radianceCacheValid_=false;
 };
 
-} // namespace m3d::lumatrace_gpu
+} } // namespace m3d::lumatrace_gpu
 
 #endif // _WIN32
