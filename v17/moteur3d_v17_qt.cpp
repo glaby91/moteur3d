@@ -3457,7 +3457,10 @@ private:
         const auto arguments=QCoreApplication::arguments();
         const bool smokeRun=std::any_of(arguments.cbegin(),arguments.cend(),
             [](const QString& arg){return arg.startsWith(QStringLiteral("--smoke-"));});
-        if(!smokeRun)QTimer::singleShot(1500,this,[this]{checkForLatestScene();});
+        // Let the already-installed scene settle and remain immediately usable.
+        // The first network check is deliberately deferred; later checks run
+        // on the updater's 30-minute timer without switching scenes in-place.
+        if(!smokeRun)QTimer::singleShot(10*60*1000,this,[this]{checkForLatestScene();});
     }
     void populateTrees(const v16::SceneDatabase& database){
         sceneTree_->clear();resourceTree_->clear();
