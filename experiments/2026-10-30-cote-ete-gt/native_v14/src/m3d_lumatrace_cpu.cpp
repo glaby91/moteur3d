@@ -60,7 +60,7 @@ bool prepareLumaTraceCpuScene(const Scene& scene,const LumaTraceBvh4& bvh,
                 return false;
             }
             out.objectToTriangle[i]=out.triangleCount++;
-            const V albedo=representativeAlbedo(scene,object.mat<0?scene.mat.size():std::size_t(object.mat));
+            const V albedo=representativeAlbedo(scene,std::size_t(object.mat));
             out.triangleAlbedo.push_back({albedo.x,albedo.y,albedo.z,1.f});
         }
     }
