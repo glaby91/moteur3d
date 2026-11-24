@@ -5,7 +5,10 @@
     {
       "id": "scene_runtime",
       "revision": "001",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
       "sources": [
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_scene_v16.cpp",
@@ -15,35 +18,58 @@
     {
       "id": "cpu_lighting",
       "revision": "003",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
-      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lighting.cpp"]
+      "sources": [
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lighting.cpp"
+      ]
     },
     {
       "id": "cpu_intersection",
       "revision": "001",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
-      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_intersection.cpp"]
+      "sources": [
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_intersection.cpp"
+      ]
     },
     {
       "id": "cpu_shading",
       "revision": "001",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
-      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_shading.cpp"]
+      "sources": [
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_shading.cpp"
+      ]
     },
     {
       "id": "cpu_renderer",
       "revision": "001",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
-      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_render.cpp"]
+      "sources": [
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_render.cpp"
+      ]
     },
     {
       "id": "cpu_hybrid_gi",
       "revision": "001",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
       "sources": [
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_hybrid.cpp",
@@ -53,14 +79,22 @@
     {
       "id": "cpu_postprocess",
       "revision": "001",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
-      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_post.cpp"]
+      "sources": [
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_post.cpp"
+      ]
     },
     {
       "id": "cpu_simd",
       "revision": "001",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
       "sources": [
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_simd.cpp",
@@ -74,118 +108,217 @@
     {
       "id": "vulkan_mesh",
       "revision": "001",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
-      "sources": ["v17/vulkan/m3d_vulkan_mesh.h"]
+      "sources": [
+        "v17/vulkan/m3d_vulkan_mesh.h"
+      ]
     },
     {
       "id": "vulkan_dirty_policy",
       "revision": "001",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
-      "sources": ["v17/vulkan/vulkan_dirty_policy.h"]
+      "sources": [
+        "v17/vulkan/vulkan_dirty_policy.h"
+      ]
     },
     {
       "id": "vulkan_mipmap",
       "revision": "001",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
-      "sources": ["v17/vulkan/m3d_vulkan_mips.h"]
+      "sources": [
+        "v17/vulkan/m3d_vulkan_mips.h"
+      ]
     },
     {
       "id": "vulkan_readback",
       "revision": "001",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
-      "sources": ["v17/vulkan/m3d_vulkan_readback.h"]
+      "sources": [
+        "v17/vulkan/m3d_vulkan_readback.h"
+      ]
     },
     {
       "id": "vulkan_resources",
       "revision": "001",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": true,
       "description": "Vulkan buffer, image and device-memory lifecycle",
-      "dependencies": ["vulkan_mipmap"],
-      "sources": ["v17/vulkan/m3d_vulkan_resources.cpp", "v17/vulkan/m3d_vulkan_resources.h"]
+      "dependencies": [
+        "vulkan_mipmap"
+      ],
+      "sources": [
+        "v17/vulkan/m3d_vulkan_resources.cpp",
+        "v17/vulkan/m3d_vulkan_resources.h"
+      ]
     },
     {
       "id": "d3d11_compute",
       "revision": "001",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
-      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_compute11.cpp"]
+      "sources": [
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_compute11.cpp"
+      ]
     },
     {
       "id": "d3d11_raster_shader",
       "revision": "001",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
-      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11_raster_shader.h"]
+      "sources": [
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11_raster_shader.h"
+      ]
     },
     {
       "id": "d3d11_sky_shader",
       "revision": "001",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
-      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11_sky_shader.h"]
+      "sources": [
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11_sky_shader.h"
+      ]
     },
     {
       "id": "d3d11_peripheral_composite",
       "revision": "001",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
-      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11_composite_shader.h"]
+      "sources": [
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11_composite_shader.h"
+      ]
     },
     {
       "id": "d3d11_mesh",
       "revision": "001",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
       "description": "CPU-side DX11 scene geometry construction and visibility",
-      "dependencies": ["scene_runtime"],
-      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11_mesh.h"]
+      "dependencies": [
+        "scene_runtime"
+      ],
+      "sources": [
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11_mesh.h"
+      ]
     },
     {
       "id": "d3d11_raster",
-      "revision": "005",
-      "engines": ["v16", "v17"],
+      "revision": "006",
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
       "status": "single-source; internal feature extraction remains",
-      "dependencies": ["d3d11_mesh", "d3d11_raster_shader", "d3d11_sky_shader", "d3d11_peripheral_composite", "lumatrace_gpu_compute"],
-      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp"]
+      "dependencies": [
+        "d3d11_mesh",
+        "d3d11_raster_shader",
+        "d3d11_sky_shader",
+        "d3d11_peripheral_composite",
+        "lumatrace_gpu_compute"
+      ],
+      "sources": [
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp"
+      ]
     },
     {
-      "id": "lumatrace_bvh4",
-      "revision": "009",
-      "engines": ["v16", "v17"],
+      "id": "lumatrace_cpu",
+      "revision": "001",
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
-      "description": "CPU scene preparation: collapse the shared binary BVH to BVH4 for LumaTrace GPU traversal",
-      "dependencies": ["scene_runtime"],
-      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_bvh4.cpp", "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_bvh4.h"]
+      "description": "CPU-only LumaTrace scene preparation: BVH4 conversion, primitive validation, triangle mapping and traversal order",
+      "dependencies": [
+        "scene_runtime"
+      ],
+      "sources": [
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_bvh4.cpp",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_bvh4.h",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_cpu.cpp",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_cpu.h"
+      ]
     },
     {
       "id": "lumatrace_gpu_compute",
-      "revision": "001",
-      "engines": ["v16", "v17"],
+      "revision": "002",
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": true,
-      "description": "DX11 compute shader, BVH4 buffers, radiance cache and dispatch",
-      "dependencies": ["lumatrace_bvh4"],
-      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_gpu_d3d11.cpp", "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_gpu_d3d11.h", "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_shader.h"]
+      "description": "DX11 GPU compute resources, shader compilation and dispatch; consumes CPU-prepared LumaTrace scene data",
+      "dependencies": [
+        "lumatrace_cpu"
+      ],
+      "sources": [
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_gpu_d3d11.cpp",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_gpu_d3d11.h",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_shader.h"
+      ]
     },
     {
       "id": "dxr_backend",
       "revision": "001",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": false,
-      "sources": ["experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_dxr.cpp"]
+      "sources": [
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_dxr.cpp"
+      ]
     },
     {
       "id": "vulkan_raster",
       "revision": "004",
-      "engines": ["v16", "v17"],
+      "engines": [
+        "v16",
+        "v17"
+      ],
       "optional": true,
       "status": "single-source; internal feature extraction remains",
-      "dependencies": ["vulkan_mesh", "vulkan_dirty_policy", "vulkan_mipmap", "vulkan_readback", "vulkan_resources"],
+      "dependencies": [
+        "vulkan_mesh",
+        "vulkan_dirty_policy",
+        "vulkan_mipmap",
+        "vulkan_readback",
+        "vulkan_resources"
+      ],
       "sources": [
         "v17/vulkan/m3d_vulkan.cpp",
         "v17/vulkan/m3d_vulkan_stub.cpp"
