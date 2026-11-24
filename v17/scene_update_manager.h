@@ -52,7 +52,9 @@ public:
             const QString error=reply->errorString();
             reply->deleteLater();
             if(networkError!=QNetworkReply::NoError){
-                setStatus(QStringLiteral("Vérification de scène indisponible (scène locale conservée)."));
+                setStatus(currentRevision_.isEmpty()
+                    ? QStringLiteral("Vérification GitHub indisponible ; aucune scène civique locale.")
+                    : QStringLiteral("Vérification de scène indisponible ; la scène locale est conservée."));
                 qInfo().noquote()<<"Scene update check unavailable:"<<error;
                 return;
             }
@@ -67,7 +69,9 @@ public:
                    QStringLiteral("benchmark-civic/scene.json") ||
                revisionNumber(latest)<0 ||
                (!currentRevision_.isEmpty() && revisionNumber(currentRevision_)<0)){
-                setStatus(QStringLiteral("Manifeste de scène invalide ; scène locale conservée."));
+                setStatus(currentRevision_.isEmpty()
+                    ? QStringLiteral("Manifeste GitHub invalide ; aucune scène civique locale.")
+                    : QStringLiteral("Manifeste GitHub invalide ; la scène locale est conservée."));
                 qWarning()<<"Invalid latest scene manifest";
                 return;
             }
@@ -86,7 +90,7 @@ public:
                 ? QStringLiteral("absente") : currentRevision_;
             QMessageBox prompt(QMessageBox::Information,
                 QStringLiteral("Mise à jour de la scène CSE WARP"),
-                QStringLiteral("La scène locale est %1. La dernière scène publiée est %2.\n\n"
+                QStringLiteral("La scène civique locale est %1. La dernière scène publiée est %2.\n\n"
                                "Voulez-vous la télécharger et l’intégrer maintenant ?")
                     .arg(localLabel,latest),
                 QMessageBox::NoButton,window_);
