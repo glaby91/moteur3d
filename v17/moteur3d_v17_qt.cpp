@@ -877,19 +877,43 @@ public:
     }
 
     void checkForLatestScene(){
-        if(property("v17.sceneUpdateCheckStarted").toBool())return;
-        setProperty("v17.sceneUpdateCheckStarted",true);
         const bool civicScene=scenePath_.contains(QStringLiteral("benchmark-civic/scene.json"),
                                                   Qt::CaseInsensitive) ||
             scenePath_.contains(QStringLiteral("benchmark-civic\\scene.json"),
                                 Qt::CaseInsensitive);
-        auto* checker=new V17SceneUpdateChecker(this);
-        checker->checkAtStartup(civicScene?scenePath_:QString{},
-                                civicScene?sceneRevision_:QString{},this,
+        if(!scenePath_.isEmpty()&&!civicScene)return;
+        if(!sceneUpdateChecker_){
+            sceneUpdateChecker_=new V17SceneUpdateChecker(this);
+            sceneUpdateTimer_=new QTimer(this);
+            sceneUpdateTimer_->setInterval(30*60*1000);
+            connect(sceneUpdateTimer_,&QTimer::timeout,this,[this]{checkForLatestScene();});
+            sceneUpdateTimer_->start();
+        }
+        sceneUpdateChecker_->checkAtStartup(civicScene?scenePath_:QString{},
+            civicScene?sceneRevision_:QString{},this,
             [this](const QString& updatedPath){
+                QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+                settings.setValue(QStringLiteral("Scene/InstalledLatestPath"),updatedPath);
+                if(runtime_){
+                    const bool started=QProcess::startDetached(
+                        QCoreApplication::applicationFilePath(),{updatedPath},
+                        QCoreApplication::applicationDirPath());
+                    if(started){
+                        statusBar()->showMessage(QStringLiteral(
+                            "Scène mise à jour : redémarrage de CSE WARP…"),5000);
+                        QApplication::quit();
+                    }else{
+                        statusBar()->showMessage(QStringLiteral(
+                            "Scène installée. Fermez puis relancez CSE WARP pour l’utiliser."),15000);
+                        QMessageBox::warning(this,QStringLiteral("Redémarrage nécessaire"),
+                            QStringLiteral("La nouvelle scène est installée, mais le redémarrage automatique "
+                                           "n’a pas pu démarrer. Relancez CSE WARP pour la charger."));
+                    }
+                    return;
+                }
                 setProperty("v17.pendingSceneUpdatePath",updatedPath);
                 openScene(updatedPath);
-            });
+            },scenePath_.isEmpty());
     }
 
 
@@ -1699,6 +1723,8 @@ private:
     bool tabPressed_=false;
     bool dashboardRenderViewportHidden_=false;
     QString sceneRevision_;
+    V17SceneUpdateChecker* sceneUpdateChecker_=nullptr;
+    QTimer* sceneUpdateTimer_=nullptr;
 
     void updateMemoryBanner(){
         if(!systemMemoryLabel_||!systemMemoryBar_)return;
