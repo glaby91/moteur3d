@@ -2,8 +2,7 @@
 
 #if defined(_WIN32)
 
-#include "m3d_engine.h"
-#include "m3d_lumatrace_bvh4.h"
+#include "m3d_lumatrace_cpu.h"
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -25,9 +24,8 @@ using Microsoft::WRL::ComPtr;
 // swapchain, presentation and CPU BVH construction remain separate modules.
 class Compute {
 public:
-    bool prepare(ID3D11Device* device,const Scene& scene,const LumaTraceBvh4& bvh,
-                 const std::vector<uint32_t>& objectToTriangle,uint32_t triangleCount,
-                 std::wstring& error);
+    bool prepare(ID3D11Device* device,const LumaTraceBvh4& bvh,
+                 const LumaTraceCpuScene& cpuScene,std::wstring& error);
     bool dispatch(ID3D11DeviceContext* context,ID3D11ShaderResourceView* vertexStream,
                   const Scene& scene,std::wstring& error);
     ID3D11ShaderResourceView* radianceSrv() const noexcept { return radianceSrv_.Get(); }
