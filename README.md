@@ -7,11 +7,11 @@ Cette version est une candidate à l’évaluation, pas une version stable. Elle
 
 - Moteur : **V17.006**
 - Révisions des composants : PBR **001**, éclairage CPU **003**, DirectX 11 **003**, Vulkan **003**, LumaTrace **009**.
-- Dernière scène publiée : **V17.613**, depuis le dépôt [moteur3d-scene](https://github.com/glaby91/moteur3d-scene) et sa [release V17.613](https://github.com/glaby91/moteur3d-scene/releases/tag/scene-V17.613-19).
+- Dernière scène civique publiée : **V17.613**, depuis le dépôt [moteur3d-scene](https://github.com/glaby91/moteur3d-scene) et sa [release V17.613](https://github.com/glaby91/moteur3d-scene/releases/tag/scene-V17.613-19). Elle n’est pas embarquée dans le paquet moteur V17.006.
 - Le build officiel #587 (moteur V17.003) a chargé, validé et inclus V17.613 dans son package Windows. Il sert de référence historique ; le build V17.006 de cette branche doit repasser par la CI.
-- Les fichiers de scène restent dans le dépôt séparé. Le workflow du moteur récupère la dernière release et l’intègre au package, qui peut ensuite être lancé hors ligne.
+- La scène reste dans son dépôt séparé. La CI la télécharge pour vérifier sa compatibilité, mais le package distribué contient le moteur sans la scène civique. Au démarrage, le moteur consulte GitHub : si la scène civique locale manque ou n’est pas à jour, il propose de télécharger la release et de l’installer dans le dossier utilisateur. La scène acceptée reste disponible hors ligne ensuite.
 
-## Dernier paquet validé avant V17.006
+## Dernier paquet validé avant V17.006 (historique)
 
 Le dernier paquet dont la compilation est validée est le [build Windows x64 #587 — V17.003](https://github.com/glaby91/moteur3d/actions/runs/45080722276). Il ne correspond pas à la présente révision V17.006.
 
