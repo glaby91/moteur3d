@@ -11,6 +11,8 @@ namespace m3d { namespace walk {
 struct Settings {
     float eyeHeight=1.70f;
     float bodyHeight=1.76f;
+    float crouchedEyeHeight=1.05f;
+    float crouchedBodyHeight=1.16f;
     float radius=.23f;
     float maxStepUp=.34f;
     float maxStepDown=.48f;
@@ -22,13 +24,15 @@ struct State {
     V feet{};
     float verticalVelocity=0.f;
     bool grounded=false;
+    bool crouched=false;
     // Keep a known safe landing point; a lost finite-ground contact must not
     // accelerate the player forever into empty world space.
     V lastSafeFeet{};
     bool hasSafeGround=false;
 };
 inline V eye(const State& state,const Settings& cfg={}) {
-    return state.feet+V{0.f,cfg.eyeHeight,0.f};
+    const float height=state.crouched?cfg.crouchedEyeHeight:cfg.eyeHeight;
+    return state.feet+V{0.f,height,0.f};
 }
 // Return the highest *walkable* hit within a small height interval, stepping
 // past non-walkable intersections (walls, underside of stair, ceiling).
@@ -93,7 +97,7 @@ inline bool spawn(const Scene& scene,V cameraEye,State& state,
     return state.grounded;
 }
 inline bool sideBlocked(const Scene& scene,V from,V to,
-                        float feetY,const Settings& cfg={}){
+                        float feetY,const Settings& cfg={},bool crouched=false){
     const V delta{to.x-from.x,0.f,to.z-from.z};
     const float d=length(delta);
     if(d<1e-6f)return false;
@@ -101,7 +105,10 @@ inline bool sideBlocked(const Scene& scene,V from,V to,
     const V side=norm(cross(direction,V{0.f,1.f,0.f}));
     // Sweep three rays across the person's width, at three heights. Exclude
     // stair risers below 34 cm so the stair-step support resolver can climb.
-    for(float h:{.38f,.98f,1.63f}){
+    const std::array<float,3> heights=crouched
+        ?std::array<float,3>{.25f,.65f,1.05f}
+        :std::array<float,3>{.38f,.98f,1.63f};
+    for(float h:heights){
         for(float lateral:{-0.80f,0.f,0.80f}){
             V start=V{from.x,feetY+h,from.z}
                     +direction*(cfg.radius*.90f)+side*(lateral*cfg.radius);
@@ -116,11 +123,25 @@ inline bool sideBlocked(const Scene& scene,V from,V to,
     return false;
 }
 inline bool ceilingBlocked(const Scene& scene,V feet,
-                           const Settings& cfg={}){
+                           const Settings& cfg={},bool crouched=false){
     Hit top{};
     closest(scene,Ray{feet+V{0.f,.42f,0.f},{0.f,1.f,0.f}},top,
             nullptr,false,-1,false);
-    return top.id>=0 && top.t<(cfg.bodyHeight-.42f);
+    const float bodyHeight=crouched?cfg.crouchedBodyHeight:cfg.bodyHeight;
+    return top.id>=0 && top.t<(bodyHeight-.42f);
+}
+inline bool setCrouched(const Scene& scene,State& state,bool crouched,
+                        const Settings& cfg={}){
+    if(!crouched&&state.crouched&&ceilingBlocked(scene,state.feet,cfg,false))
+        return false;
+    state.crouched=crouched;
+    return true;
+}
+inline bool jump(State& state,float impulse=3.4f){
+    if(!state.grounded||!std::isfinite(impulse)||impulse<=0.f)return false;
+    state.verticalVelocity=impulse;
+    state.grounded=false;
+    return true;
 }
 inline void advance(const Scene& scene,State& state,V motion,float dt,
                     const Settings& cfg={}){
@@ -168,8 +189,8 @@ inline void advance(const Scene& scene,State& state,V motion,float dt,
             }
             // While airborne keep falling; never teleport upwards to a
             // higher landing without the grounded step-up sequence.
-            if(sideBlocked(scene,from,next,std::max(from.y,next.y),cfg)||
-               ceilingBlocked(scene,next,cfg))return false;
+            if(sideBlocked(scene,from,next,std::max(from.y,next.y),cfg,state.crouched)||
+               ceilingBlocked(scene,next,cfg,state.crouched))return false;
             state.feet=next;
             if(supported&&state.grounded){
                 state.verticalVelocity=0.f;

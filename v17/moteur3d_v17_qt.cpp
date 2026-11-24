@@ -10,6 +10,9 @@
 #include "weather/solar_cycle.h"
 #include "weather/sky_compositor.h"
 #include "radio_audio.h"
+#include "scene_update_manager.h"
+#include "diagnostic_dashboard.h"
+#include "moteur3d_v17_render.h"
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
 #include <QAction>
@@ -50,6 +53,12 @@
 #include <QMouseEvent>
 #include <QSet>
 #include <QTimer>
+#include <QAudioOutput>
+#include <QMediaPlayer>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#include <QUrl>
 #include <QThreadPool>
 #include <QThread>
 #include <QMainWindow>
@@ -114,24 +123,7 @@ int systemMemoryLoadPercent(){
     return -1;
 #endif
 }
-struct Result {
-    QImage image;
-    v16::CameraPreset cameraPose;
-    QString renderer;
-    QString error;
-    double milliseconds=0;
-    bool gpu=false;
-    bool skyCompositing=false; // DX11 sky pixels are transparent for Qt compositor
-    bool directPresented=false; // DXGI or Vulkan native swapchain, no QImage
-    bool nativeFallback=false; // Native DXGI/WSI unavailable: show the QImage preview
-    QString nativeFailure; // Preserve exact Vulkan/DXGI presentation error after image fallback
-    QString nativeWindowDetails; // HWND, owning thread, client size and requested extent
-    QString requestStamp;
-    // Reject finished frames after a camera, material, backend or scene change.
-    uint64_t generation=0;
-    int backendIndex=-1;
-    quintptr renderThread=0;
-};
+using Result = cse::v17render::Result;
 struct SceneLoadOutcome {
     QString path;
     QString error;
@@ -883,15 +875,65 @@ public:
             }
         }
     }
+
+    void checkForLatestScene(){
+        const bool civicScene=scenePath_.contains(QStringLiteral("benchmark-civic/scene.json"),
+                                                  Qt::CaseInsensitive) ||
+            scenePath_.contains(QStringLiteral("benchmark-civic\\scene.json"),
+                                Qt::CaseInsensitive);
+        if(!scenePath_.isEmpty()&&!civicScene)return;
+        if(!sceneUpdateChecker_){
+            sceneUpdateChecker_=new V17SceneUpdateChecker(this);
+            sceneUpdateTimer_=new QTimer(this);
+            sceneUpdateTimer_->setInterval(30*60*1000);
+            connect(sceneUpdateTimer_,&QTimer::timeout,this,[this]{checkForLatestScene();});
+            sceneUpdateTimer_->start();
+        }
+        sceneUpdateChecker_->checkAtStartup(civicScene?scenePath_:QString{},
+            civicScene?sceneRevision_:QString{},this,
+            [this](const QString& updatedPath){
+                QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+                settings.setValue(QStringLiteral("Scene/InstalledLatestPath"),updatedPath);
+                if(runtime_){
+                    const bool started=QProcess::startDetached(
+                        QCoreApplication::applicationFilePath(),{updatedPath},
+                        QCoreApplication::applicationDirPath());
+                    if(started){
+                        statusBar()->showMessage(QStringLiteral(
+                            "Scène mise à jour : redémarrage de CSE WARP…"),5000);
+                        QApplication::quit();
+                    }else{
+                        statusBar()->showMessage(QStringLiteral(
+                            "Scène installée. Fermez puis relancez CSE WARP pour l’utiliser."),15000);
+                        QMessageBox::warning(this,QStringLiteral("Redémarrage nécessaire"),
+                            QStringLiteral("La nouvelle scène est installée, mais le redémarrage automatique "
+                                           "n’a pas pu démarrer. Relancez CSE WARP pour la charger."));
+                    }
+                    return;
+                }
+                setProperty("v17.pendingSceneUpdatePath",updatedPath);
+                openScene(updatedPath);
+            },scenePath_.isEmpty());
+    }
+
+
 private:
     int textureResolution_=2048;
     QPushButton* radioToggleButton_=nullptr;
     QLabel* radioStatusLabel_=nullptr;
     bool radioPlaying_=false;
     bool radioAutoplayEnabled_=false;
+    bool radioStreamPending_=false;
+    bool radioUsingStream_=false;
+    quint64 radioAttempt_=0;
+    quint64 radioPlayerAttempt_=0;
     bool rendererHudVisible_=true;
     cse::RadioAudio radioAudio_;
     QTimer audioTimer_;
+    QNetworkAccessManager* radioNetwork_=nullptr;
+    QNetworkReply* radioReply_=nullptr;
+    QMediaPlayer* radioPlayer_=nullptr;
+    QAudioOutput* radioOutput_=nullptr;
     std::array<cse::RadioSpeaker,4> radioSpeakers_{};
     QSlider* radioVolumeSlider_=nullptr;
 
@@ -941,6 +983,7 @@ private:
     QPoint previousMouse_;
     v16::CameraPreset freeCamera_;
     walk::State walkingState_{};
+    bool jumpRequested_=false;
     cse::pool_ladder::Motion poolLadderMotion_{};
     QCheckBox* walkingModeBox_=nullptr;
     bool exploring_=false,freeCameraActive_=false,leftMouseHeld_=false,rightMouseHeld_=false;
@@ -1226,8 +1269,16 @@ private:
         setRasterPeripheralMultiresOverride(next?1:0);
     }
     void stopExploration(){
+        jumpRequested_=false;
+        if(diagnosticsDashboard_)diagnosticsDashboard_->hide();
+        if(dashboardRenderViewportHidden_&&canvas_){canvas_->show();dashboardRenderViewportHidden_=false;}
+        if(wristPanel_)wristPanel_->hide();
+        if(diagnosticsRefreshTimer_)diagnosticsRefreshTimer_->stop();
+        if(tabHoldTimer_)tabHoldTimer_->stop();
+        tabPressed_=false;
         releaseMouseLook();
         setMotionResolution(false);
+        if(qApp)qApp->removeEventFilter(this);
         exploring_=false;
         if(canvas_)canvas_->setFpsOverlay(0.0,false);
         if(nativeFpsLabel_)nativeFpsLabel_->setText(QStringLiteral("FPS —"));
@@ -1250,7 +1301,7 @@ private:
         if(explorationButton_)explorationButton_->setText(QStringLiteral("Démarrer exploration (V17)"));
         if(explorationHelp_)explorationHelp_->setText(QStringLiteral(
             "ZQSD / flèches : marcher · souris : regarder librement · clic droit : lunette ×3\n"
-            "F11 : plein écran · Échap : arrêter · E : échelle · Maj : accélérer · Vol libre : Espace / Ctrl."));
+            "F11 : plein écran · < bref : Pip-Boy · < maintenu : interface plein écran · Échap : arrêter · Ctrl maintenu : s’accroupir · Espace : sauter au sol · E : échelle · Maj : accélérer · Vol libre : Espace / Ctrl."));
         // A delayed multires GPU frame could still be on screen when Esc
         // stops exploration. Queue a final guaranteed full-resolution image.
         if(!closingRequested_&&!sceneLoading_&&runtime_)
@@ -1286,6 +1337,7 @@ private:
             }
         }
         exploring_=true;
+        if(qApp)qApp->installEventFilter(this); // Tab can be received by any native renderer HWND.
         setMotionResolution(false);
         resetPacing();
         canvas_->setFpsOverlay(0.0,true);
@@ -1369,10 +1421,13 @@ private:
                 if(!watcher_.isRunning()){frameClock_.start();requestRender();}
                 return;
             }
-            // Walking is always horizontal input. Height follows geometry:
-            // floor, stairs, landings, slopes and gravity on unsupported areas.
-            // Shift is an exact 3× multiplier; the deterministic walker still
-            // subdivides large motion into <= 8.5cm steps for collision safety.
+            const bool wantsCrouch=keysDown_.contains(Qt::Key_Control);
+            walk::setCrouched(runtime_->renderScene,walkingState_,wantsCrouch);
+            if(jumpRequested_){
+                walk::jump(walkingState_);
+                jumpRequested_=false;
+            }
+            // Geometry supplies floor height, stairs, slopes, gravity and landing.
             const float speed=cse::exploration::speedMetersPerSecond(
                 keysDown_.contains(Qt::Key_Shift));
             const V displacement=length(move)>.01f?norm(move)*(dt*speed):V{};
@@ -1449,8 +1504,32 @@ protected:
         return QMainWindow::event(e);
     }
     bool eventFilter(QObject* watched,QEvent* event) override{
+        // Direct-render mode uses a separate top-level HWND. Its focus can move
+        // between the Qt shell and renderer, and Qt also treats Tab as focus
+        // traversal. Catch it at QApplication level while exploration is active.
+        if(exploring_ && (event->type()==QEvent::KeyPress ||
+                          event->type()==QEvent::KeyRelease)){
+            auto* key=static_cast<QKeyEvent*>(event);
+            if(isPipboyKey(key)){
+                key->accept();
+                const bool dashboardVisible=diagnosticsDashboard_ &&
+                                            diagnosticsDashboard_->isVisible();
+                if(dashboardVisible){
+                    // Ignore auto-repeat so holding Tab to open the panel does
+                    // not immediately close it on the next repeated key event.
+                    if(!key->isAutoRepeat() && event->type()==QEvent::KeyPress)
+                        closeDiagnosticsDashboard();
+                    return true;
+                }
+                if(event->type()==QEvent::KeyPress)beginTabPress(key);
+                else endTabPress(key);
+                return true;
+            }
+        }
         if(watched==canvas_&&event->type()==QEvent::WindowActivate&&exploring_)
             QTimer::singleShot(0,this,[this]{if(exploring_)captureMouseLook();});
+        if(watched==canvas_&&event->type()==QEvent::Resize&&wristPanel_&&wristPanel_->isVisible())
+            QTimer::singleShot(0,this,[this]{positionWristPanel();});
         if(watched==canvas_ && event->type()==QEvent::Resize &&
            nativeDirectSelected() && runtime_ && !sceneLoading_){
             // The backend's private swapchain must follow its top-level HWND.
@@ -1460,6 +1539,15 @@ protected:
             });
         }
         if(watched==canvas_ && exploring_){
+            if(event->type()==QEvent::KeyPress || event->type()==QEvent::KeyRelease){
+                auto* key=static_cast<QKeyEvent*>(event);
+                if(key->key()==Qt::Key_Tab || key->key()==Qt::Key_Less){
+                    if(event->type()==QEvent::KeyPress)beginTabPress(key);
+                    else endTabPress(key);
+                    key->accept();
+                    return true;
+                }
+            }
             if(event->type()==QEvent::KeyPress || event->type()==QEvent::KeyRelease){
                 if(event->type()==QEvent::KeyPress)
                     keyPressEvent(static_cast<QKeyEvent*>(event));
@@ -1517,8 +1605,8 @@ protected:
                     immersiveAction_->setChecked(false);
                 e->accept();return;
             }
-            if(e->key()==Qt::Key_Tab){
-                if(mouseCaptured_)releaseMouseLook();else captureMouseLook();
+            if(isPipboyKey(e)){
+                beginTabPress(e);
                 e->accept();return;
             }
             if(e->key()==Qt::Key_E && !e->isAutoRepeat() &&
@@ -1541,6 +1629,9 @@ protected:
             }
             if(!e->isAutoRepeat()){
                 keysDown_.insert(e->key());
+                if(e->key()==Qt::Key_Space && walkingModeBox_ &&
+                   walkingModeBox_->isChecked() && !poolLadderMotion_.active())
+                    jumpRequested_=true;
                 if(e->key()==Qt::Key_Shift)updateExplorationSpeedIndicator();
             }
             e->accept();return;
@@ -1548,10 +1639,16 @@ protected:
         QMainWindow::keyPressEvent(e);
     }
     void keyReleaseEvent(QKeyEvent* e) override{
-        if(exploring_){if(!e->isAutoRepeat()){keysDown_.remove(e->key());if(e->key()==Qt::Key_Shift)updateExplorationSpeedIndicator();}e->accept();return;}
+        if(exploring_){
+            if(e->key()==Qt::Key_Tab || e->key()==Qt::Key_Less){endTabPress(e);e->accept();return;}
+            if(!e->isAutoRepeat()){keysDown_.remove(e->key());if(e->key()==Qt::Key_Shift)updateExplorationSpeedIndicator();}
+            e->accept();return;
+        }
         QMainWindow::keyReleaseEvent(e);
     }
 private:
+    QToolBar* camerasToolbar_=nullptr;
+    QPushButton* renderButton_=nullptr;
     QTreeWidget* sceneTree_=nullptr;
     QTreeWidget* resourceTree_=nullptr;
     QComboBox* cameraBox_=nullptr;
@@ -1599,13 +1696,8 @@ private:
     std::shared_ptr<v16::Runtime> runtime_;
     // The sun and scene geometry do not change when navigating cameras.
     // Reuse an identical shadow map across CPU renders of the same runtime.
-    struct CpuShadowCache {
-        std::mutex mutex;
-        std::weak_ptr<v16::Runtime> scene;
-        std::shared_ptr<const ShadowMap> shadow;
-        float hour=-1.f;
-    };
-    std::shared_ptr<CpuShadowCache> cpuShadows_=std::make_shared<CpuShadowCache>();
+    std::shared_ptr<cse::v17render::CpuShadowCache> cpuShadows_=
+        std::make_shared<cse::v17render::CpuShadowCache>();
     bool pending_=false, updatingControls_=false, closingRequested_=false;
     QElapsedTimer pacingClock_;
     qint64 lastPresentMs_=-1;
@@ -1624,6 +1716,15 @@ private:
     QLabel* systemMemoryLabel_=nullptr;
     QProgressBar* systemMemoryBar_=nullptr;
     QTimer* memoryRefreshTimer_=nullptr;
+    cse::diagnostics::Dashboard* diagnosticsDashboard_=nullptr;
+    QTimer* diagnosticsRefreshTimer_=nullptr;
+    QTimer* tabHoldTimer_=nullptr;
+    cse::diagnostics::WristPanel* wristPanel_=nullptr;
+    bool tabPressed_=false;
+    bool dashboardRenderViewportHidden_=false;
+    QString sceneRevision_;
+    V17SceneUpdateChecker* sceneUpdateChecker_=nullptr;
+    QTimer* sceneUpdateTimer_=nullptr;
 
     void updateMemoryBanner(){
         if(!systemMemoryLabel_||!systemMemoryBar_)return;
@@ -1631,6 +1732,194 @@ private:
         if(percent<0){systemMemoryLabel_->setText(QStringLiteral("RAM n/d"));systemMemoryBar_->setValue(0);return;}
         systemMemoryLabel_->setText(QStringLiteral("RAM %1 %").arg(percent));
         systemMemoryBar_->setValue(percent);
+    }
+
+    void ensureDiagnosticsWidgets(){
+        if(!diagnosticsDashboard_){
+            diagnosticsDashboard_=new cse::diagnostics::Dashboard(this);
+            diagnosticsDashboard_->setReturnHandler([this]{closeDiagnosticsDashboard();});
+            diagnosticsDashboard_->setExitHandler([this]{stopExploration();});
+        }
+        if(!wristPanel_)wristPanel_=new cse::diagnostics::WristPanel(this);
+        if(!diagnosticsRefreshTimer_){
+            diagnosticsRefreshTimer_=new QTimer(this);
+            diagnosticsRefreshTimer_->setInterval(750);
+            connect(diagnosticsRefreshTimer_,&QTimer::timeout,this,
+                    [this]{refreshDiagnosticsDashboard();});
+        }
+    }
+    void refreshDiagnosticsDashboard(){
+        if(!diagnosticsDashboard_&&!wristPanel_)return;
+        cse::diagnostics::DashboardData data;
+        data.engineVersion=QStringLiteral("V%1").arg(CSE_WARP_PRODUCT_VERSION);
+        data.engineRevision=githubRevision();
+        data.sceneName=runtime_?runtime_->title:QString{};
+        data.sceneRevision=sceneRevision_;
+        data.backend=backendBox_?backendBox_->currentText():QString{};
+        data.presentation=canvas_&&canvas_->nativePresentation()
+            ?QStringLiteral("GPU direct · swapchain")
+            :QStringLiteral("Qt · image de présentation");
+        data.renderWidth=canvas_?canvas_->width():0;
+        data.renderHeight=canvas_?canvas_->height():0;
+        data.fps=fpsFiltered_;
+        data.lastRenderMs=lastCompletedRenderMs_;
+        data.systemMemoryPercent=systemMemoryLoadPercent();
+        data.sceneLoading=sceneLoading_;
+        data.exploring=exploring_;
+        if(runtime_){
+            data.sourceObjects=int(runtime_->objects.size());
+            data.triangles=int(runtime_->renderScene.obj.size());
+            data.materials=int(runtime_->renderScene.mat.size());
+            data.lights=int(runtime_->renderScene.lights.size());
+            data.textureResolution=runtime_->textureResolution;
+            for(const auto& material:runtime_->renderScene.mat)
+                if(material.imageAlbedo)++data.imageTextures;
+        }
+        if(freeCameraActive_){
+            const auto pose=activeCameraPose();
+            data.cameraPosition=QStringLiteral("X %1   Y %2   Z %3 m")
+                .arg(pose.eye.x,0,'f',2).arg(pose.eye.y,0,'f',2).arg(pose.eye.z,0,'f',2);
+        }
+        data.solarHour=sunHour_?sunHour_->value():0.0;
+        const int backend=backendBox_?backendBox_->currentIndex():-1;
+        if(backend>=0&&backend<int(nativeDirectFailed_.size())&&
+           nativeDirectFailed_[size_t(backend)]){
+            data.diagnosticStatus=QStringLiteral("Échec du swapchain direct");
+            data.diagnosticDetail=nativeDirectFailureReason_[size_t(backend)];
+        }else if(backend==4||backend==5||backend==6){
+            data.diagnosticStatus=QStringLiteral("Aucun échec de présentation signalé");
+            data.diagnosticDetail=QStringLiteral(
+                "Ce panneau suit les erreurs de présentation native DX11/Vulkan/LumaTrace.");
+        }else{
+            data.diagnosticStatus=QStringLiteral("Sans swapchain direct");
+            data.diagnosticDetail=QStringLiteral(
+                "Le backend sélectionné n’utilise pas la présentation native directe.");
+        }
+        if(diagnosticsDashboard_)diagnosticsDashboard_->setData(data);
+        if(wristPanel_&&wristPanel_->isVisible()){
+            wristPanel_->setData(data);
+            positionWristPanel();
+        }
+    }
+    void positionWristPanel(){
+        if(!wristPanel_||!canvas_)return;
+        const QPoint topLeft=canvas_->mapToGlobal(QPoint(
+            20,std::max(12,canvas_->height()-wristPanel_->height()-20)));
+        wristPanel_->move(topLeft);
+    }
+    void showWristPipboy(){
+        if(!exploring_||!canvas_){
+            statusBar()->showMessage(QStringLiteral(
+                "Le Pip-Boy est disponible pendant l’exploration."),3500);
+            return;
+        }
+        ensureDiagnosticsWidgets();
+        if(diagnosticsDashboard_->isVisible()){
+            closeDiagnosticsDashboard();
+            return;
+        }
+        if(wristPanel_->isVisible()){
+            wristPanel_->hide();
+            if(diagnosticsRefreshTimer_)diagnosticsRefreshTimer_->stop();
+            return;
+        }
+        positionWristPanel();
+        wristPanel_->show();
+        wristPanel_->raise();
+        refreshDiagnosticsDashboard();
+        diagnosticsRefreshTimer_->start();
+    }
+    static bool isPipboyKey(const QKeyEvent* event){
+        if(!event)return false;
+        return event->key()==Qt::Key_Tab || event->key()==Qt::Key_Less ||
+               event->text()==QStringLiteral("<") ||
+               (event->key()==Qt::Key_Comma &&
+                event->modifiers().testFlag(Qt::ShiftModifier));
+    }
+    void beginTabPress(QKeyEvent* event){
+        if(!event||event->isAutoRepeat()||tabPressed_)return;
+        tabPressed_=true;
+        ensureDiagnosticsWidgets();
+        if(!tabHoldTimer_){
+            tabHoldTimer_=new QTimer(this);
+            tabHoldTimer_->setSingleShot(true);
+            tabHoldTimer_->setInterval(550);
+            connect(tabHoldTimer_,&QTimer::timeout,this,[this]{
+                if(!tabPressed_||!exploring_)return;
+                tabPressed_=false;
+                openDiagnosticsDashboard();
+            });
+        }
+        tabHoldTimer_->start();
+    }
+    void endTabPress(QKeyEvent* event){
+        if(!event||event->isAutoRepeat()||!tabPressed_)return;
+        tabPressed_=false;
+        if(tabHoldTimer_)tabHoldTimer_->stop();
+        showWristPipboy();
+    }
+    void closeDiagnosticsDashboard(){
+        if(!diagnosticsDashboard_||!diagnosticsDashboard_->isVisible())return;
+        diagnosticsDashboard_->hide();
+        if(dashboardRenderViewportHidden_&&canvas_){canvas_->show();dashboardRenderViewportHidden_=false;}
+        if(exploring_&&!closingRequested_){
+            ensureDiagnosticsWidgets();
+            positionWristPanel();
+            wristPanel_->show();
+            wristPanel_->raise();
+            refreshDiagnosticsDashboard();
+            diagnosticsRefreshTimer_->start();
+            QTimer::singleShot(0,this,[this]{
+                if(exploring_&&!closingRequested_){
+                    focusRenderViewport();
+                    captureMouseLook();
+                }
+            });
+        }else if(diagnosticsRefreshTimer_)diagnosticsRefreshTimer_->stop();
+    }
+    void openDiagnosticsDashboard(){
+        if(!exploring_||!canvas_){
+            statusBar()->showMessage(QStringLiteral(
+                "Le tableau de bord est disponible pendant l’exploration."),4500);
+            return;
+        }
+        ensureDiagnosticsWidgets();
+        if(diagnosticsDashboard_->isVisible())return;
+        wristPanel_->hide();
+        releaseMouseLook();
+        // Direct GPU presentation owns a separate native top-level HWND which
+        // can stay above Qt windows. Hide only its viewport while the full-screen
+        // dashboard is open, then restore it when returning to exploration.
+        dashboardRenderViewportHidden_=canvas_->isVisible();
+        if(dashboardRenderViewportHidden_){
+            canvas_->hide();
+#if defined(_WIN32)
+            if(canvas_->testAttribute(Qt::WA_WState_Created))
+                ShowWindow(reinterpret_cast<HWND>(canvas_->winId()),SW_HIDE);
+#endif
+        }
+        if(QScreen* screen=canvas_->screen()){
+            diagnosticsDashboard_->setGeometry(screen->geometry());
+        }
+        diagnosticsDashboard_->showFullScreen();
+        diagnosticsDashboard_->raise();
+        diagnosticsDashboard_->activateWindow();
+#if defined(_WIN32)
+        // The direct renderer may own a native topmost HWND. Force the Qt
+        // dashboard above it after the fullscreen transition has completed.
+        SetWindowPos(reinterpret_cast<HWND>(diagnosticsDashboard_->winId()),HWND_TOPMOST,
+                     0,0,0,0,SWP_NOMOVE|SWP_NOSIZE|SWP_SHOWWINDOW);
+#endif
+        diagnosticsDashboard_->setFocus(Qt::OtherFocusReason);
+        refreshDiagnosticsDashboard();
+        diagnosticsRefreshTimer_->start();
+    }
+    void toggleDiagnosticsDashboard(){
+        if(diagnosticsDashboard_&&diagnosticsDashboard_->isVisible()){
+            closeDiagnosticsDashboard();
+            return;
+        }
+        openDiagnosticsDashboard();
     }
 
     void displayRasterSettings(const RasterQualitySettings& q){
@@ -1676,10 +1965,29 @@ private:
             backendBox_->currentIndex()==6))requestRender();
     }
     void stopRadio(){
+        audioTimer_.stop();
+        ++radioAttempt_;
+        radioStreamPending_=false;
+        radioUsingStream_=false;
+        if(radioReply_){
+            QObject::disconnect(radioReply_,nullptr,this,nullptr);
+            radioReply_->abort();
+            radioReply_->deleteLater();
+            radioReply_=nullptr;
+        }
+        if(radioPlayer_){
+            radioPlayer_->stop();
+            radioPlayer_->setSource(QUrl{});
+        }
         radioAudio_.stop();
         radioPlaying_=false;
         if(radioToggleButton_)radioToggleButton_->setText(QStringLiteral("Activer la radio"));
         if(radioStatusLabel_)radioStatusLabel_->setText(QStringLiteral("Radio arrêtée"));
+    }
+    void setRadioVolume(int value){
+        const float gain=float(value)/500.f;
+        radioAudio_.setVolume(gain);
+        if(radioOutput_)radioOutput_->setVolume(gain);
     }
     bool loadSpeakerLayout(){
         const QString path=QDir(QCoreApplication::applicationDirPath()).filePath(
@@ -1706,26 +2014,126 @@ private:
         }
         return true;
     }
-    void playRadio(){
+    void fallbackToLocalRadio(const QString& reason){
+        if(!radioStreamPending_&&!radioUsingStream_)return;
+        ++radioAttempt_;
+        radioStreamPending_=false;
+        radioUsingStream_=false;
+        if(radioReply_){
+            QObject::disconnect(radioReply_,nullptr,this,nullptr);
+            radioReply_->abort();
+            radioReply_->deleteLater();
+            radioReply_=nullptr;
+        }
+        if(radioPlayer_){
+            radioPlayer_->stop();
+            radioPlayer_->setSource(QUrl{});
+        }
         const QString path=QDir(QCoreApplication::applicationDirPath()).filePath(
             QStringLiteral("audio/pripyat_radio.wav"));
-        if(!QFileInfo::exists(path)){
+        if(!QFileInfo::exists(path)||!loadSpeakerLayout()){
+            radioPlaying_=false;
+            if(radioToggleButton_)radioToggleButton_->setText(QStringLiteral("Activer la radio"));
             if(radioStatusLabel_)radioStatusLabel_->setText(
-                QStringLiteral("Fichier WAV absent : audio/pripyat_radio.wav"));
+                QStringLiteral("Flux Internet indisponible (%1) et WAV local absent ou configuration des 4 HP invalide.")
+                    .arg(reason));
             return;
         }
-        if(!loadSpeakerLayout()){
-            if(radioStatusLabel_)radioStatusLabel_->setText(
-                QStringLiteral("Implantation des 4 HP introuvable ou invalide"));
-            return;
-        }
-        radioAudio_.setVolume(radioVolumeSlider_?float(radioVolumeSlider_->value())/500.f:.20f);
+        setRadioVolume(radioVolumeSlider_?radioVolumeSlider_->value():65);
         radioPlaying_=radioAudio_.start(path.toStdWString(),radioSpeakers_);
+        if(radioPlaying_)audioTimer_.start();
+        else audioTimer_.stop();
         if(radioToggleButton_)radioToggleButton_->setText(radioPlaying_
             ?QStringLiteral("Arrêter la radio"):QStringLiteral("Activer la radio"));
         if(radioStatusLabel_)radioStatusLabel_->setText(radioPlaying_
-            ?QStringLiteral("4 HP spatialisés · XAudio2 / X3DAudio · WAV de test")
-            :QStringLiteral("Audio 3D indisponible (pilote ou WAV incorrect)"));
+            ?QStringLiteral("Flux Internet indisponible (%1) · lecture du WAV local, spatialisé sur 4 HP.")
+                .arg(reason)
+            :QStringLiteral("Flux Internet indisponible (%1) · échec de lecture du WAV local.")
+                .arg(reason));
+    }
+    void playRadio(){
+        audioTimer_.stop();
+        radioAudio_.stop();
+        if(!radioNetwork_)radioNetwork_=new QNetworkAccessManager(this);
+        if(!radioPlayer_){
+            radioPlayer_=new QMediaPlayer(this);
+            radioOutput_=new QAudioOutput(this);
+            radioPlayer_->setAudioOutput(radioOutput_);
+            connect(radioPlayer_,&QMediaPlayer::playbackStateChanged,this,
+                [this](QMediaPlayer::PlaybackState state){
+                    if(state!=QMediaPlayer::PlayingState||!radioStreamPending_||
+                       radioPlayerAttempt_!=radioAttempt_)return;
+                    radioStreamPending_=false;
+                    radioUsingStream_=true;
+                    radioPlaying_=true;
+                    if(radioToggleButton_)radioToggleButton_->setText(QStringLiteral("Arrêter la radio"));
+                    if(radioStatusLabel_)radioStatusLabel_->setText(
+                        QStringLiteral("Radio soviétique en direct · flux Internet actif."));
+                });
+            connect(radioPlayer_,&QMediaPlayer::errorOccurred,this,
+                [this](QMediaPlayer::Error,const QString& error){
+                    if((radioStreamPending_||radioUsingStream_)&&
+                       radioPlayerAttempt_==radioAttempt_)
+                        fallbackToLocalRadio(error.isEmpty()
+                            ?QStringLiteral("erreur de lecture du flux"):error);
+                });
+        }
+        setRadioVolume(radioVolumeSlider_?radioVolumeSlider_->value():65);
+        radioStreamPending_=true;
+        radioUsingStream_=false;
+        radioPlaying_=true;
+        if(radioToggleButton_)radioToggleButton_->setText(QStringLiteral("Arrêter la radio"));
+        if(radioStatusLabel_)radioStatusLabel_->setText(
+            QStringLiteral("Connexion à la radio soviétique en ligne…"));
+        const quint64 attempt=++radioAttempt_;
+        QNetworkRequest request(QUrl(QStringLiteral(
+            "https://www.radioguide.fm/listen/russia/vsesouznoe-radio.m3u")));
+        request.setHeader(QNetworkRequest::UserAgentHeader,
+            QStringLiteral("CSE-WARP-V17/1.0"));
+        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+            QNetworkRequest::NoLessSafeRedirectPolicy);
+        QNetworkReply* reply=radioNetwork_->get(request);
+        radioReply_=reply;
+        connect(reply,&QNetworkReply::finished,this,[this,attempt,reply]{
+            if(radioReply_==reply)radioReply_=nullptr;
+            const auto error=reply->error();
+            const QString payload=QString::fromUtf8(reply->readAll());
+            const QUrl playlistUrl=reply->url();
+            reply->deleteLater();
+            if(attempt!=radioAttempt_||!radioStreamPending_)return;
+            if(error!=QNetworkReply::NoError){
+                fallbackToLocalRadio(reply->errorString());
+                return;
+            }
+            QUrl streamUrl;
+            const auto lines=payload.split(QRegularExpression(QStringLiteral("[\\r\\n]+")),
+                                           Qt::SkipEmptyParts);
+            for(QString line:lines){
+                line=line.trimmed();
+                if(line.isEmpty()||line.startsWith(QLatin1Char('#'))||
+                   line.startsWith(QLatin1Char('[')))continue;
+                const qsizetype equals=line.indexOf(QLatin1Char('='));
+                if(equals>0&&line.left(equals).trimmed().startsWith(
+                    QStringLiteral("File"),Qt::CaseInsensitive))
+                    line=line.mid(equals+1).trimmed();
+                QUrl candidate(line);
+                if(candidate.isRelative())candidate=playlistUrl.resolved(candidate);
+                const QString scheme=candidate.scheme().toLower();
+                if(candidate.isValid()&&(scheme==QStringLiteral("http")||
+                   scheme==QStringLiteral("https"))){streamUrl=candidate;break;}
+            }
+            if(streamUrl.isEmpty()){
+                fallbackToLocalRadio(QStringLiteral("playlist M3U/PLS illisible"));
+                return;
+            }
+            radioPlayerAttempt_=attempt;
+            radioPlayer_->setSource(streamUrl);
+            radioPlayer_->play();
+        });
+        QTimer::singleShot(15000,this,[this,attempt]{
+            if(attempt==radioAttempt_&&radioStreamPending_)
+                fallbackToLocalRadio(QStringLiteral("délai de connexion dépassé"));
+        });
     }
     void refreshRadioForScene(const QString& path){
         stopRadio();
@@ -1860,7 +2268,7 @@ private:
         canvas_->setFocus();
     }
 
-    void createUi(){
+    void createMenusAndToolbar(){
         auto* file=menuBar()->addMenu(QStringLiteral("Fichier"));
         auto* captureAction=file->addAction(QStringLiteral("Capturer une anomalie (PNG + caméra JSON)…"));
         captureAction->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+A")));
@@ -1918,9 +2326,9 @@ private:
 
         // One-click camera presets are independent from the detailed settings panel.
         auto* camerasMenu=menuBar()->addMenu(QStringLiteral("Caméras"));
-        auto* camerasToolbar=addToolBar(QStringLiteral("Caméras · 1 à 6"));
-        camerasToolbar->setMovable(false);
-        camerasToolbar->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        camerasToolbar_=addToolBar(QStringLiteral("Caméras · 1 à 6"));
+        camerasToolbar_->setMovable(false);
+        camerasToolbar_->setToolButtonStyle(Qt::ToolButtonTextOnly);
         for(int i=0;i<6;++i){
             auto* action=new QAction(QString::number(i+1),this);
             action->setShortcut(QKeySequence(QString::number(i+1)));
@@ -1935,24 +2343,36 @@ private:
                 if(!changed)requestRender();
             });
             quickCameraActions_.append(action);
-            camerasToolbar->addAction(action);
+            camerasToolbar_->addAction(action);
             camerasMenu->addAction(action);
         }
-        camerasToolbar->addSeparator();
-        sceneRevisionLabel_=new QLabel(QStringLiteral("Scène —"),camerasToolbar);
+        camerasToolbar_->addSeparator();
+        sceneRevisionLabel_=new QLabel(QStringLiteral("Scène —"),camerasToolbar_);
         sceneRevisionLabel_->setMinimumWidth(108);
         sceneRevisionLabel_->setToolTip(QStringLiteral("Révision du manifeste de la scène chargée"));
-        camerasToolbar->addWidget(sceneRevisionLabel_);
-        systemMemoryLabel_=new QLabel(QStringLiteral("RAM —"),camerasToolbar);
+        camerasToolbar_->addWidget(sceneRevisionLabel_);
+        systemMemoryLabel_=new QLabel(QStringLiteral("RAM —"),camerasToolbar_);
         systemMemoryLabel_->setToolTip(QStringLiteral("Charge de la mémoire physique système"));
-        camerasToolbar->addWidget(systemMemoryLabel_);
-        systemMemoryBar_=new QProgressBar(camerasToolbar);
+        camerasToolbar_->addWidget(systemMemoryLabel_);
+        systemMemoryBar_=new QProgressBar(camerasToolbar_);
         systemMemoryBar_->setRange(0,100); systemMemoryBar_->setTextVisible(false);
         systemMemoryBar_->setFixedSize(68,12);
-        camerasToolbar->addWidget(systemMemoryBar_);
+        camerasToolbar_->addWidget(systemMemoryBar_);
         memoryRefreshTimer_=new QTimer(this);
         connect(memoryRefreshTimer_,&QTimer::timeout,this,[this]{updateMemoryBanner();});
         memoryRefreshTimer_->start(1500); updateMemoryBanner();
+        tabHoldTimer_=new QTimer(this);
+        tabHoldTimer_->setSingleShot(true);
+        tabHoldTimer_->setInterval(550);
+        connect(tabHoldTimer_,&QTimer::timeout,this,[this]{
+            if(!tabPressed_||!exploring_)return;
+            tabPressed_=false;
+            openDiagnosticsDashboard();
+        });
+        auto* displayMenu=menuBar()->addMenu(QStringLiteral("Affichage"));
+        auto* diagnosticsAction=displayMenu->addAction(
+            QStringLiteral("Tableau de bord moteur plein écran  ·  maintenir <"));
+        connect(diagnosticsAction,&QAction::triggered,this,[this]{toggleDiagnosticsDashboard();});
         // V17.443 - one-click regression review at the EXACT user-reported
         // viewpoints, independent of the six artistic camera presets.
         auto* anomaliesMenu=menuBar()->addMenu(QStringLiteral("Anomalies"));
@@ -2119,6 +2539,8 @@ private:
             if(message.clickedButton()==copy)QGuiApplication::clipboard()->setText(details);
         });
 
+    }
+    void createSceneExplorerDock(){
         auto* left=new QDockWidget(QStringLiteral("Explorateur de scène"),this);
         sceneExplorerDock_=left;
         auto* tabs=new QTabWidget;
@@ -2132,6 +2554,8 @@ private:
         addDockWidget(Qt::LeftDockWidgetArea,left);
         left->resize(360,720);
 
+    }
+    void createRenderSettingsDock(){
         auto* right=new QDockWidget(QStringLiteral("Rendu et matériaux"),this);
         renderControlsDock_=right;
         auto* controls=new QWidget;
@@ -2149,7 +2573,7 @@ private:
         vertical->addWidget(new QLabel(QStringLiteral("Volume radio"),controls));
         vertical->addWidget(radioVolumeSlider_);
         connect(radioVolumeSlider_,&QSlider::valueChanged,this,[this](int value){
-            radioAudio_.setVolume(float(value)/500.f);
+            setRadioVolume(value);
         });
         connect(radioToggleButton_,&QPushButton::clicked,this,[this]{
             if(radioPlaying_){radioAutoplayEnabled_=false;stopRadio();}
@@ -2197,7 +2621,7 @@ private:
 #endif
         // Keep the backend choice visible at 1366px: renderer names
         // previously consumed the entire top toolbar and hid the renderer.
-        auto* fastBackend=new QComboBox(camerasToolbar);
+        auto* fastBackend=new QComboBox(camerasToolbar_);
         fastBackend->setObjectName(QStringLiteral("v17QuickRenderer"));
         fastBackend->setMinimumWidth(220);
         fastBackend->setMaximumWidth(330);
@@ -2211,10 +2635,10 @@ private:
             fastBackend->setItemData(i,backendBox_->itemText(i),Qt::ToolTipRole);
         }
         fastBackend->setCurrentIndex(backendBox_->currentIndex());
-        camerasToolbar->addSeparator();
-        camerasToolbar->addWidget(new QLabel(QStringLiteral("Moteur : "),camerasToolbar));
-        camerasToolbar->addWidget(fastBackend);
-        auto* quickRender=camerasToolbar->addAction(QStringLiteral("Actualiser"));
+        camerasToolbar_->addSeparator();
+        camerasToolbar_->addWidget(new QLabel(QStringLiteral("Moteur : "),camerasToolbar_));
+        camerasToolbar_->addWidget(fastBackend);
+        auto* quickRender=camerasToolbar_->addAction(QStringLiteral("Actualiser"));
         connect(quickRender,&QAction::triggered,this,[this]{requestRender();});
         connect(fastBackend,qOverload<int>(&QComboBox::currentIndexChanged),
                 backendBox_,&QComboBox::setCurrentIndex);
@@ -2419,7 +2843,7 @@ private:
         vertical->addWidget(walkingModeBox_);
         explorationHelp_=new QLabel(QStringLiteral(
             "ZQSD / flèches : marcher · souris libre : orienter la caméra · clic droit : zoom ×3\\n"
-            "F11 : plein écran · Échap : arrêter · E : échelle · Ctrl+Maj+A : anomalie PNG+JSON."));
+            "F11 : plein écran · < bref : Pip-Boy · < maintenu : interface plein écran · Échap : arrêter · E : échelle · Ctrl+Maj+A : anomalie PNG+JSON."));
         explorationHelp_->setWordWrap(true);
         vertical->addWidget(explorationHelp_);
         connect(explorationButton_,&QPushButton::clicked,this,[this]{toggleExploration();});
@@ -2486,8 +2910,8 @@ private:
                 requestRender();
             }
         });
-        auto* renderButton=new QPushButton(QStringLiteral("Calculer l'image"));
-        vertical->addWidget(renderButton);
+        renderButton_=new QPushButton(QStringLiteral("Calculer l'image"));
+        vertical->addWidget(renderButton_);
         auto* materials=new QGroupBox(QStringLiteral("Matériau sélectionné"));
         auto* matForm=new QFormLayout(materials);
         materialLabel_=new QLabel(QStringLiteral("Sélectionner un matériau dans le catalogue"));
@@ -2511,12 +2935,14 @@ private:
         // Both panels remain accessible; the 3D viewport gets the former
         // left-dock width back (important at 1366x768 on the Dell).
         setDockOptions(dockOptions() | QMainWindow::AllowTabbedDocks);
-        removeDockWidget(left);
-        addDockWidget(Qt::RightDockWidgetArea,left);
-        tabifyDockWidget(right,left);
+        removeDockWidget(sceneExplorerDock_);
+        addDockWidget(Qt::RightDockWidgetArea,sceneExplorerDock_);
+        tabifyDockWidget(right,sceneExplorerDock_);
         right->raise();
         // F11 controls the dedicated render window, leaving these controls
         // available behind it.
+    }
+    void connectUiActions(){
         auto* viewMenu=menuBar()->addMenu(QStringLiteral("Affichage"));
         auto* rendererHudAction=viewMenu->addAction(QStringLiteral("Afficher le HUD de la fenêtre de rendu (F2)"));
         rendererHudAction->setCheckable(true);
@@ -2568,7 +2994,7 @@ private:
             });
         });
 
-        connect(renderButton,&QPushButton::clicked,this,[this]{requestRender();});
+        connect(renderButton_,&QPushButton::clicked,this,[this]{requestRender();});
         connect(cameraBox_,qOverload<int>(&QComboBox::currentIndexChanged),this,[this](int){
             azimuth_->setValue(0);
             if(exploring_)activateFreeCamera();
@@ -2763,7 +3189,12 @@ private:
         connect(sceneTree_,&QTreeWidget::itemClicked,this,[this](QTreeWidgetItem* item,int){
             const QString key=item->data(0,Qt::UserRole).toString();
             if(runtime_&&runtime_->materialIndex.contains(key))chooseMaterial(runtime_->materialIndex.value(key),key);
-        });
+        });    }
+    void createUi(){
+        createMenusAndToolbar();
+        createSceneExplorerDock();
+        createRenderSettingsDock();
+        connectUiActions();
     }
     QImage lastImage_;
     void chooseMaterial(int id,const QString& name){
@@ -2897,6 +3328,10 @@ private:
             return; // obsolete load; never apply its resources to new scene
         }
         if(!outcome.error.isEmpty()||!outcome.runtime){
+            const QString pendingScene=property("v17.pendingSceneUpdatePath").toString();
+            if(!pendingScene.isEmpty() &&
+               QFileInfo(pendingScene).absoluteFilePath()==QFileInfo(outcome.path).absoluteFilePath())
+                setProperty("v17.pendingSceneUpdatePath",QString());
             sceneLoading_=false;
             sceneLoadLabel_->hide();
             sceneLoadProgress_->hide();
@@ -2918,6 +3353,7 @@ private:
         renderTimeLabel_->setText(QStringLiteral("Dernier rendu : —"));
         materialLabel_->setText(QStringLiteral("Sélectionner un matériau dans le catalogue"));
         const QString sceneRevision=outcome.database.revision.trimmed();
+        sceneRevision_=sceneRevision;
         if(sceneRevisionLabel_)sceneRevisionLabel_->setText(sceneRevision.isEmpty()?QStringLiteral("Scène —"):QStringLiteral("Scène %1").arg(sceneRevision));
         const QString revisionSuffix=sceneRevision.isEmpty()?QStringLiteral("Scène sans révision"):QStringLiteral("Scène %1").arg(sceneRevision);
         setWindowTitle(QStringLiteral("CSE WARP Beta X V%1 — %2 — %3")
@@ -2926,6 +3362,14 @@ private:
         sunHour_->setValue(double(runtime_->daylightHour));
         sunHour_->blockSignals(false);
         scenePath_=outcome.path;
+        const QString pendingScene=property("v17.pendingSceneUpdatePath").toString();
+        if(!pendingScene.isEmpty() &&
+           QFileInfo(pendingScene).absoluteFilePath()==QFileInfo(scenePath_).absoluteFilePath()){
+            QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+            settings.setValue(QStringLiteral("Scene/InstalledLatestPath"),scenePath_);
+            settings.remove(QStringLiteral("Scene/DeferredRevision"));
+            setProperty("v17.pendingSceneUpdatePath",QString());
+        }
         refreshRadioForScene(scenePath_);
         setRasterGiCachePath(std::filesystem::path(
             (scenePath_+QStringLiteral(".m3dgi")).toStdWString()));
@@ -3010,6 +3454,13 @@ private:
         if(!extremeStress)requestRender();
         else statusBar()->showMessage(QStringLiteral(
             "Profil extrême : rendu manuel conseillé pour limiter la consommation mémoire."));
+        const auto arguments=QCoreApplication::arguments();
+        const bool smokeRun=std::any_of(arguments.cbegin(),arguments.cend(),
+            [](const QString& arg){return arg.startsWith(QStringLiteral("--smoke-"));});
+        // Let the already-installed scene settle and remain immediately usable.
+        // The first network check is deliberately deferred; later checks run
+        // on the updater's 30-minute timer without switching scenes in-place.
+        if(!smokeRun)QTimer::singleShot(10*60*1000,this,[this]{checkForLatestScene();});
     }
     void populateTrees(const v16::SceneDatabase& database){
         sceneTree_->clear();resourceTree_->clear();
@@ -3556,7 +4007,6 @@ private:
         const bool wantGpu=backend==1||backend==4||backend==5||backend==6;
         const bool raster=backend==4||backend==5||backend==6;
         const bool vulkan=backend==5;
-        const bool lumaTrace=backend==6;
         void* sharedVulkanInstance=nullptr;
         uintptr_t sharedVulkanSurface=0;
 #if defined(_WIN32) && M3D_V17_VULKAN_ENABLED
@@ -3585,302 +4035,53 @@ private:
             });
         }
         const auto shadowCache=cpuShadows_;
-        watcher_.setFuture(QtConcurrent::run(&renderPool_,[this,serial,token,snapshot,preset,w,h,wantGpu,
-            globalIllumination,raster,vulkan,lumaTrace,directPresent,nativeHandle,sharedVulkanInstance,
-            sharedVulkanSurface,edgeAA,sampleCount,maxBounces,progressive,denoise,outputView,requestedBackend,
-            nativeWindowDetails,
-            denoiseDirect,shadowCache,renderHour,shadowHour,requestStamp]{
-            Result result;
-            result.requestStamp=requestStamp;
-            result.cameraPose=preset;
-            result.generation=token;
-            result.backendIndex=requestedBackend;
-            result.nativeWindowDetails=nativeWindowDetails;
-            result.skyCompositing=raster;
-            result.renderThread=reinterpret_cast<quintptr>(QThread::currentThreadId());
-#if defined(_WIN32)
-            if(!result.nativeWindowDetails.isEmpty())
-                result.nativeWindowDetails+=QStringLiteral(" renderThreadWin32=%1 renderThreadQt=0x%2")
-                    .arg(GetCurrentThreadId())
-                    .arg(QString::number(qulonglong(result.renderThread),16));
-#endif
-            updateLighting(renderHour);
-            const auto camera=v16::makeCamera(preset,w,h);
-            std::vector<uint32_t> pixels;
-            Stats stats;
-            double shadowBuildMs=0.0;
-            bool ok=false;
-            if(wantGpu){
-                std::wstring reason;
-                if(!raster){
-                    releaseDirectX11NativeForCurrentThread();
-                    releaseVulkanDirectForCurrentThread();
-                    releaseVulkanPreviewForCurrentThread();
-                }
-                if(raster){
-                    std::shared_ptr<const ShadowMap> shadow;
-                    {
-                        std::lock_guard<std::mutex> lock(shadowCache->mutex);
-                        if(shadowCache->scene.lock()==snapshot &&
-                           shadowCache->hour==shadowHour&&shadowCache->shadow)
-                            shadow=shadowCache->shadow;
-                        else {
-                            Stats shadowStats;
-                            const auto shadowStart=std::chrono::steady_clock::now();
-                            shadow=std::make_shared<ShadowMap>(
-                                buildShadow(snapshot->renderScene,shadowStats));
-                            shadowBuildMs=std::chrono::duration<double,std::milli>(
-                                std::chrono::steady_clock::now()-shadowStart).count();
-                            // Optional diagnostic of the 1,024 x 1,024 CPU ray
-                            // shadow pass. This cost occurs outside VulkanRaster
-                            // and cannot appear in its GPU-only CSV timings.
-                            const QByteArray shadowProfile=qgetenv("CSE_WARP_VK_SHADOW_PROFILE");
-                            if(!shadowProfile.isEmpty()){
-                                QFile log(QString::fromLocal8Bit(shadowProfile));
-                                if(log.open(QIODevice::WriteOnly|QIODevice::Append|QIODevice::Text)){
-                                    const QString line=QStringLiteral("%1,shadow_build_ms=%2,solar_hour=%3,shadow_bin=%4,backend=%5\n")
-                                        .arg(QDateTime::currentMSecsSinceEpoch())
-                                        .arg(shadowBuildMs,0,'f',3)
-                                        .arg(renderHour,0,'f',5)
-                                        .arg(shadowHour,0,'f',2)
-                                        .arg(vulkan?QStringLiteral("Vulkan"):QStringLiteral("DX11"));
-                                    log.write(line.toUtf8());
-                                }
-                            }
-                            shadowCache->scene=snapshot;shadowCache->hour=shadowHour;
-                            shadowCache->shadow=shadow;
-                        }
-                    }
-                    if(lumaTrace){
-                        releaseVulkanDirectForCurrentThread();
-                        releaseVulkanPreviewForCurrentThread();
-                        if(!snapshot->lumaTraceBvhError.isEmpty()){
-                            reason=snapshot->lumaTraceBvhError.toStdWString();
-                        }else if(snapshot->lumaTraceBvh4.nodes.empty()){
-                            reason=L"Le BVH4 LumaTrace n’a pas été construit pour cette scène.";
-                        }else if(directPresent){
-                            ok=renderLumaTraceNative(snapshot->renderScene,snapshot->lumaTraceBvh4,
-                                *shadow,camera,w,h,reinterpret_cast<void*>(nativeHandle),stats,reason);
-                            if(!ok){
-                                const std::wstring nativeReason=reason;
-                                result.nativeFailure=QString::fromStdWString(nativeReason);
-                                releaseDirectX11NativeForCurrentThread();
-                                reason.clear();
-                                ok=renderLumaTracePreview(snapshot->renderScene,snapshot->lumaTraceBvh4,
-                                    *shadow,camera,w,h,pixels,stats,reason);
-                                result.nativeFallback=ok;
-                                if(!ok){
-                                    const std::wstring previewReason=reason;
-                                    reason=L"LumaTrace DXGI natif en échec : "+nativeReason+
-                                           L" ; aperçu LumaTrace également en échec : "+previewReason;
-                                }
-                            }
-                        }else{
-                            releaseDirectX11NativeForCurrentThread();
-                            ok=renderLumaTracePreview(snapshot->renderScene,snapshot->lumaTraceBvh4,
-                                *shadow,camera,w,h,pixels,stats,reason);
-                        }
-                    }else if(vulkan){
-                        releaseDirectX11NativeForCurrentThread(); // DXGI belongs to a different backend HWND.
-                        // Keep one Vulkan device/resource set resident for the selected path.
-                        if(directPresent)releaseVulkanPreviewForCurrentThread();
-                        else releaseVulkanDirectForCurrentThread();
-                        if(directPresent){
-                            ok=renderVulkanDirectPresent(snapshot->renderScene,*shadow,camera,w,h,
-                                reinterpret_cast<void*>(nativeHandle),stats,reason,
-                                sharedVulkanInstance,sharedVulkanSurface);
-                            if(!ok){
-                                const std::wstring nativeReason=reason;
-                                result.nativeFailure=QString::fromStdWString(nativeReason);
-                                releaseVulkanDirectForCurrentThread();
-                                reason.clear();
-                                ok=renderVulkanPreview(snapshot->renderScene,*shadow,camera,w,h,
-                                                       pixels,stats,reason);
-                                result.nativeFallback=ok;
-                                if(!ok){
-                                    const std::wstring previewReason=reason;
-                                    reason=L"Vulkan native presentation failed: "+nativeReason+
-                                           L"; Vulkan image preview also failed: "+previewReason;
-                                }
-                            }
-                        }else{
-                            ok=renderVulkanPreview(snapshot->renderScene,*shadow,camera,w,h,
-                                                   pixels,stats,reason);
-                        }
-                    }else{
-                        // Vulkan WSI and DXGI must never own swapchains for the
-                        // same backend HWND at the same time. Also release the
-                        // offscreen renderer when leaving Vulkan.
-                        releaseVulkanDirectForCurrentThread();
-                        releaseVulkanPreviewForCurrentThread();
-                        ok=directPresent?
-                            renderDirectX11Native(snapshot->renderScene,*shadow,camera,w,h,
-                                                   reinterpret_cast<void*>(nativeHandle),stats,reason):
-                            renderDirectX11Preview(snapshot->renderScene,*shadow,camera,w,h,pixels,stats,reason);
-                        if(!ok && directPresent){
-                            // DXGI can be unavailable on remote desktop / certain drivers:
-                            // recover the original full-quality CPU/QImage preview.
-                            const std::wstring nativeReason=reason;
-                            result.nativeFailure=QString::fromStdWString(nativeReason);
-                            releaseDirectX11NativeForCurrentThread();
-                            reason.clear();
-                            ok=renderDirectX11Preview(snapshot->renderScene,*shadow,camera,w,h,
-                                                      pixels,stats,reason);
-                            result.nativeFallback=ok;
-                            if(!ok){
-                                const std::wstring previewReason=reason;
-                                reason=L"DXGI native presentation failed: "+nativeReason+
-                                       L"; DirectX 11 image preview also failed: "+previewReason;
-                            }
-                        }
-                    }
-                    result.directPresented=ok&&directPresent&&!result.nativeFallback;
-                    if(ok){
-                        result.renderer=lumaTrace
-                            ?(result.directPresented
-                                ?QStringLiteral("V17 LumaTrace BVH4 — Direct GPU (swapchain)")
-                                :QStringLiteral("V17 LumaTrace BVH4 — affichage Qt (QImage)"))
-                            :vulkan
-                            ?(result.directPresented
-                                ?QStringLiteral("V17 Vulkan Raster — Direct GPU (swapchain)")
-                                :QStringLiteral("V17 Vulkan Raster — affichage Qt (QImage)"))
-                            :(result.directPresented
-                                ?QStringLiteral("V17 D3D11 Raster — Direct GPU (swapchain)")
-                                :QStringLiteral("V17 D3D11 Raster — affichage Qt (QImage)"));
-                        if(!vulkan&&!lumaTrace && rasterHybridLightingEnabled())
-                            result.renderer+=rasterGiCacheLoaded()
-                              ?QStringLiteral(" — GI transport pré-calculée")
-                              :QStringLiteral(" — sondes approximatives (sans table GI)");
-                    }
-                }else{
-                    ok=renderCompute11Preview(snapshot->renderScene,camera,w,h,pixels,stats,reason);
-                    if(ok)result.renderer=QStringLiteral("V16 D3D11 Compute — GI adaptative");
-                }
-                if(!ok){
-                    // Never send hundreds of thousands of triangles through
-                    // CPU ray tracing as an invisible fallback. That used to
-                    // look like an indefinitely stalled D3D11 render.
-                    result.error=QStringLiteral(
-                        "Échec du rendu GPU %1 : %2. "
-                        "Aucun basculement automatique vers le CPU.")
-                        .arg(lumaTrace?QStringLiteral("LumaTrace BVH4"):
-                             (vulkan?QStringLiteral("Vulkan"):QStringLiteral("DirectX11")))
-                        .arg(QString::fromStdWString(reason));
-                    result.renderer=lumaTrace?QStringLiteral("V17 LumaTrace BVH4 — erreur"):
-                        (vulkan?QStringLiteral("V17 Vulkan — erreur")
-                               :QStringLiteral("V17 GPU D3D11 — erreur"));
-                    return result;
-                }
-            }
-            if(!wantGpu){
-                releaseDirectX11NativeForCurrentThread();
-                releaseVulkanDirectForCurrentThread();
-                releaseVulkanPreviewForCurrentThread();
-            }
-            if(!ok){
-                releaseDirectX11NativeForCurrentThread();
-                pixels.resize(size_t(w)*size_t(h));
-                std::shared_ptr<const ShadowMap> shadow;
-                bool shadowReused=false;
-                {
-                    std::lock_guard<std::mutex> lock(shadowCache->mutex);
-                    if(shadowCache->scene.lock()==snapshot &&
-                       shadowCache->hour==shadowHour && shadowCache->shadow){
-                        shadow=shadowCache->shadow;
-                        shadowReused=true;
-                    }else{
-                        Stats shadowStats;
-                        shadow=std::make_shared<ShadowMap>(
-                            buildShadow(snapshot->renderScene,shadowStats));
-                        shadowCache->scene=snapshot;
-                        shadowCache->hour=shadowHour;
-                        shadowCache->shadow=shadow;
-                    }
-                }
-                const unsigned workers=std::max(1u,std::min(8u,std::thread::hardware_concurrency()));
-                if(globalIllumination){
-                    std::vector<V> hdrAccum;
-                    unsigned completed=0;
-                    double totalMs=0;
-                    while(completed<sampleCount){
-                        if(serial->load()!=token)return result;
-                        const unsigned batch=progressive?
-                            std::min(std::max(1u,completed),sampleCount-completed):
-                            sampleCount-completed;
-                        const auto pass=renderGiAccumulatePass(
-                            snapshot->renderScene,*shadow,camera,w,h,hdrAccum,pixels,
-                            completed,batch,workers,*serial,token,maxBounces);
-                        if(serial->load()!=token)return result;
-                        completed+=batch;
-                        totalMs+=pass.ms;
-                        std::vector<uint32_t> display=pixels;
-                        // Filtering is separate from HDR accumulation, so the
-                        // next batch never feeds on blurred/tonemapped pixels.
-                        if(denoise&&completed>=4)
-                            display=denoiseBilateral(display,w,h,workers);
-                        if(edgeAA)display=antialiasEdges4(display,w,h,4,false);
-                        QImage image(w,h,QImage::Format_ARGB32);
-                        for(int y=0;y<h;++y)
-                            std::memcpy(image.scanLine(y),display.data()+size_t(y)*w,size_t(w)*4);
-                        if(progressive&&completed<sampleCount){
-                            QMetaObject::invokeMethod(this,
-                                [this,serial,token,outputView,count=completed,target=sampleCount,w,h,image=std::move(image)]() mutable {
-                                    if(serial->load()!=token)return;
-                                    if(outputView==canvas_)lastImage_=image;
-                                    outputView->setImage(std::move(image));
-                                    statusBar()->showMessage(
-                                        QStringLiteral("GI progressive — %1 / %2 échantillons (%3×%4)")
-                                            .arg(count).arg(target).arg(w).arg(h));
-                                },Qt::QueuedConnection);
-                        }else{
-                            result.image=std::move(image);
-                        }
-                    }
-                    result.renderer=QStringLiteral("CPU GI — %1 rebonds, %2 spp, HDR%3 — %4×%5")
-                        .arg(maxBounces).arg(sampleCount)
-                        .arg(denoise?QStringLiteral(", débruité"):QString())
-                        .arg(w).arg(h);
-                    result.milliseconds=totalMs;
-                    return result;
-                }
-                // Reuse the active render generation so CPU fallback/direct
-                // rays stop promptly when the scene or camera is changed.
-                stats=m3d::render(snapshot->renderScene,*shadow,camera,w,h,pixels,
-                                  workers,false,*serial,token,sampleCount,false,false,false,3);
-                if(serial->load()!=token)return result;
-                if(denoiseDirect) pixels=denoiseBilateral(pixels,w,h,workers);
-                result.renderer=shadowReused
-                    ?QStringLiteral("CPU Ray Tracing — %1 spp, ombres en cache").arg(sampleCount)
-                    :QStringLiteral("CPU Ray Tracing — %1 spp, ombres calculées").arg(sampleCount);
-            }else result.gpu=true;
-            result.milliseconds=stats.ms+shadowBuildMs;
-            result.renderer+=QStringLiteral(" — %1×%2").arg(w).arg(h);
-            if(result.nativeFallback){
-                result.renderer+=vulkan
-                    ?QStringLiteral(" — secours image Vulkan via QImage (WSI indisponible)")
-                    :QStringLiteral(" — secours QImage (DXGI indisponible)");
-                if(!result.nativeFailure.isEmpty())
-                    result.renderer+=QStringLiteral(" — échec présentation native : %1")
-                        .arg(result.nativeFailure);
-            }
-            if(result.directPresented){
-                result.renderer+=QStringLiteral(" — écran GPU direct (swapchain)");
-                return result; // No 4-byte-per-pixel CPU/QImage allocation.
-            }
-            if(edgeAA && !raster && pixels.size()==size_t(w)*size_t(h))
-                pixels=antialiasEdges4(pixels,w,h,4,false);
-            if(pixels.size()!=size_t(w)*h){
-                result.error+=QStringLiteral("Image incomplète");
-                return result;
-            }
-            QImage image(w,h,QImage::Format_ARGB32);
-            for(int y=0;y<h;y++)std::memcpy(image.scanLine(y),pixels.data()+size_t(y)*w,size_t(w)*4);
-            result.image=std::move(image);
-            return result;
-        }));
+        cse::v17render::Request renderRequest;
+        renderRequest.scene=snapshot;
+        renderRequest.shadowCache=shadowCache;
+        renderRequest.serial=serial;
+        renderRequest.generation=token;
+        renderRequest.cameraPose=preset;
+        renderRequest.width=w;
+        renderRequest.height=h;
+        renderRequest.backend=requestedBackend;
+        renderRequest.directPresent=directPresent;
+        renderRequest.nativeHandle=nativeHandle;
+        renderRequest.sharedVulkanInstance=sharedVulkanInstance;
+        renderRequest.sharedVulkanSurface=sharedVulkanSurface;
+        renderRequest.edgeAA=edgeAA;
+        renderRequest.progressive=progressive;
+        renderRequest.denoise=denoise;
+        renderRequest.denoiseDirect=denoiseDirect;
+        renderRequest.sampleCount=sampleCount;
+        renderRequest.maxBounces=maxBounces;
+        renderRequest.renderHour=renderHour;
+        renderRequest.shadowHour=shadowHour;
+        renderRequest.nativeWindowDetails=nativeWindowDetails;
+        renderRequest.requestStamp=requestStamp;
+        renderRequest.publishProgressiveFrame=
+            [this,serial,token,outputView](QImage image,unsigned count,unsigned target,int frameWidth,int frameHeight){
+                QMetaObject::invokeMethod(this,
+                    [this,serial,token,outputView,count,target,frameWidth,frameHeight,
+                     image=std::move(image)]() mutable {
+                        if(serial->load()!=token)return;
+                        if(outputView==canvas_)lastImage_=image;
+                        outputView->setImage(std::move(image));
+                        statusBar()->showMessage(
+                            QStringLiteral("GI progressive — %1 / %2 échantillons (%3×%4)")
+                                .arg(count).arg(target).arg(frameWidth).arg(frameHeight));
+                    },Qt::QueuedConnection);
+            };
+        watcher_.setFuture(QtConcurrent::run(&renderPool_,
+            [request=std::move(renderRequest)]() mutable {
+                return cse::v17render::execute(request);
+            }));
     }
 };
 QString defaultPath(){
+    QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
+    const QString installedScene=settings.value(QStringLiteral("Scene/InstalledLatestPath")).toString();
+    if(!installedScene.isEmpty()&&QFileInfo::exists(installedScene))return installedScene;
+    if(!installedScene.isEmpty())settings.remove(QStringLiteral("Scene/InstalledLatestPath"));
     const QString app=QCoreApplication::applicationDirPath();
     const QStringList candidates{
         // The clean package always opens the latest validated V8/V440 scene.
@@ -3897,54 +4098,89 @@ QString defaultPath(){
     return QString();
 }
 }
-int main(int argc,char** argv){
-    QApplication app(argc,argv);
-    // Separate benchmark utilities need access to Qt and the V16 renderer
-    // DLL in this installation root, even when launched from a subdirectory.
+namespace {
+struct LaunchOptions {
+    bool switchSmoke=false;
+    bool repeatSmoke=false;
+    bool walkingSmoke=false;
+    bool scopeSmoke=false;
+    bool immersiveSmoke=false;
+    bool nativeUiSmoke=false;
+    QString scenePath;
+    QString switchTargetPath;
+    int textureResolution=2048;
+};
+
+void configureRuntimeEnvironment(){
     const QByteArray installRoot=QCoreApplication::applicationDirPath().toLocal8Bit();
     qputenv("PATH",installRoot+";"+qgetenv("PATH"));
     qputenv("QT_PLUGIN_PATH",installRoot);
-    // GUI animation is intentionally opt-in; offline GPU benchmarks remain
-    // deterministic for strict RGB parity and regression comparisons.
+    // Keep animated clouds in the interactive renderer, not offline benchmarks.
     qputenv("M3D_V17_ANIMATE_CLOUDS","1");
-    // Split only interactive raster output into a sky backdrop and an
-    // alpha-preserving architecture foreground. Benchmarks stay unchanged.
     qputenv("M3D_V17_SPLIT_SKY","1");
+}
+
+void configureApplicationMetadata(){
     QCoreApplication::setApplicationName(QStringLiteral("CSE WARP Beta X V%1")
         .arg(CSE_WARP_PRODUCT_VERSION));
     QCoreApplication::setApplicationVersion(QStringLiteral("%1")
         .arg(CSE_WARP_PRODUCT_VERSION));
-    const bool switchSmoke=argc>=4
-        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-scene-switch");
-    const bool repeatSmoke=argc>=3
-        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-repeat-raster");
-    const bool walkingSmoke=argc>=3
-        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-walking-collisions");
-    const bool scopeSmoke=argc>=3
-        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-scope-mouse");
-    const bool immersiveSmoke=argc>=3
-        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-immersive-mouse");
-    const bool nativeUiSmoke=argc>=2
-        && QString::fromLocal8Bit(argv[1])==QStringLiteral("--smoke-native-ui");
-    // Use the same Windows V17 brand icon for Qt titlebar/Alt-Tab/taskbar.
-    // The ICO is also embedded in the EXE's native Win32 resources.
+}
+
+QIcon loadApplicationIcon(){
     const QString iconPath=QCoreApplication::applicationDirPath()
         +QStringLiteral("/cse_warp_v17.ico");
-    if(QFileInfo::exists(iconPath))app.setWindowIcon(QIcon(iconPath));
-    const QString path=nativeUiSmoke?QString():
-        (switchSmoke||repeatSmoke||walkingSmoke||scopeSmoke||immersiveSmoke
-        ?QString::fromLocal8Bit(argv[2])
-        :(argc>1?QString::fromLocal8Bit(argv[1]):defaultPath()));
-    // The smoke test uses reduced texture resolution to stay viable on
-    // CI's software-only WARP device. Normal V17 keeps full 2048 PBR.
-    V17Window window(path,(switchSmoke||repeatSmoke||walkingSmoke||scopeSmoke||immersiveSmoke)?256:2048);
-    if(switchSmoke)window.smokeSceneSwitch(QString::fromLocal8Bit(argv[3]));
-    if(repeatSmoke)window.smokeRepeatRaster();
-    if(walkingSmoke)window.smokeWalkingCollisionPreference();
-    if(scopeSmoke)window.smokeScopedAim();
-    if(immersiveSmoke)window.smokeImmersiveMouse();
-    if(nativeUiSmoke)window.smokeNativeUi();
-    if(!app.windowIcon().isNull())window.setWindowIcon(app.windowIcon());
+    return QFileInfo::exists(iconPath)?QIcon(iconPath):QIcon{};
+}
+
+LaunchOptions parseLaunchOptions(int argc,char** argv){
+    LaunchOptions options;
+    const QString firstArgument=argc>1?QString::fromLocal8Bit(argv[1]):QString{};
+    options.switchSmoke=argc>=4&&firstArgument==QStringLiteral("--smoke-scene-switch");
+    options.repeatSmoke=argc>=3&&firstArgument==QStringLiteral("--smoke-repeat-raster");
+    options.walkingSmoke=argc>=3&&firstArgument==QStringLiteral("--smoke-walking-collisions");
+    options.scopeSmoke=argc>=3&&firstArgument==QStringLiteral("--smoke-scope-mouse");
+    options.immersiveSmoke=argc>=3&&firstArgument==QStringLiteral("--smoke-immersive-mouse");
+    options.nativeUiSmoke=argc>=2&&firstArgument==QStringLiteral("--smoke-native-ui");
+
+    const bool sceneSmoke=options.switchSmoke||options.repeatSmoke||options.walkingSmoke
+        ||options.scopeSmoke||options.immersiveSmoke;
+    options.textureResolution=sceneSmoke?256:2048;
+    if(options.switchSmoke)options.switchTargetPath=QString::fromLocal8Bit(argv[3]);
+    if(!options.nativeUiSmoke){
+        options.scenePath=sceneSmoke?QString::fromLocal8Bit(argv[2])
+            :(argc>1?QString::fromLocal8Bit(argv[1]):defaultPath());
+    }
+    return options;
+}
+
+void runSmokeChecks(V17Window& window,const LaunchOptions& options){
+    if(options.switchSmoke)window.smokeSceneSwitch(options.switchTargetPath);
+    if(options.repeatSmoke)window.smokeRepeatRaster();
+    if(options.walkingSmoke)window.smokeWalkingCollisionPreference();
+    if(options.scopeSmoke)window.smokeScopedAim();
+    if(options.immersiveSmoke)window.smokeImmersiveMouse();
+    if(options.nativeUiSmoke)window.smokeNativeUi();
+}
+}
+
+int main(int argc,char** argv){
+    QApplication app(argc,argv);
+    configureRuntimeEnvironment();
+    configureApplicationMetadata();
+
+    const QIcon icon=loadApplicationIcon();
+    if(!icon.isNull())app.setWindowIcon(icon);
+
+    const LaunchOptions options=parseLaunchOptions(argc,argv);
+    V17Window window(options.scenePath,options.textureResolution);
+    runSmokeChecks(window,options);
+
+    if(!icon.isNull())window.setWindowIcon(icon);
     window.show();
+    const bool smokeRun=options.switchSmoke||options.repeatSmoke||options.walkingSmoke||
+        options.scopeSmoke||options.immersiveSmoke||options.nativeUiSmoke;
+    if(options.scenePath.isEmpty()&&!smokeRun)
+        QTimer::singleShot(1200,&window,[&window]{window.checkForLatestScene();});
     return app.exec();
 }

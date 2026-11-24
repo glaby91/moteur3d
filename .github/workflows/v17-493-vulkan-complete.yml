@@ -1,5 +1,5 @@
-name: CSE WARP V17.523 — coupole piscine et diagnostic WSI — Windows HD620
-run-name: V17.523 coupole piscine, fenêtres DX11 / Vulkan / CPU — CI ${{ github.run_number }}
+name: CSE WARP V17.006 — diagnostic scène historique V17.523 — Windows HD620
+run-name: V17.006 — diagnostic scène V17.523, fenêtres DX11 / Vulkan / CPU — CI ${{ github.run_number }}
 on:
   push:
     branches:
@@ -17,6 +17,7 @@ on:
   pull_request:
     paths:
       - 'v17/**'
+      - 'scenes/v16/benchmark-civic/**'
       - 'tools/v17_523_*'
       - '.github/workflows/v17-493-vulkan-complete.yml'
   workflow_dispatch:
@@ -39,6 +40,7 @@ jobs:
           host: windows
           target: desktop
           arch: win64_msvc2022_64
+          modules: qtmultimedia
           cache: true
       - name: Vulkan 1.3 SDK for hardware backend and SPIR-V compiler
         uses: jakoch/install-vulkan-sdk-action@v1
@@ -392,13 +394,20 @@ jobs:
           Copy-Item $approved "dist-v17/benchmark-civic" -Recurse -Force
           if (Test-Path "dist-v17/audio") { Remove-Item "dist-v17/audio" -Recurse -Force }
           Copy-Item "base-v499/audio" "dist-v17/audio" -Recurse -Force
+          Copy-Item "assets/audio/pripyat_radio/speaker_layout.json" "dist-v17/audio/speaker_layout.json" -Force
+          foreach ($radioFile in @("dist-v17/audio/pripyat_radio.wav", "dist-v17/audio/speaker_layout.json")) {
+            if (!(Test-Path $radioFile)) { throw "Final radio asset missing from Vulkan package: $radioFile" }
+          }
+          if ((Get-Item "dist-v17/audio/pripyat_radio.wav").Length -lt 100000) {
+            throw "Final Vulkan package WAV is empty or truncated"
+          }
           @'
           @echo off
           cd /d "%~dp0"
           start "" "moteur3d_v17.exe" "benchmark-civic\\scene.json"
           '@ | Set-Content "dist-v17/LANCER_CSE_WARP.bat" -Encoding ascii
           @'
-          CSE WARP BetaX V17.523
+          CSE WARP V17.006 — diagnostic scène historique V17.523
           Starting scene: exact approved V17.499 scene package, with V17.500 monument anchoring.
           Scene revision appears in the title bar after loading. The banner also shows system RAM use.
           '@ | Set-Content "dist-v17/README.txt" -Encoding utf8
@@ -560,7 +569,7 @@ jobs:
           '@ | Set-Content "$dist/qt.conf" -Encoding ascii
           # windeployqt should have supplied runtime DLLs. Verify them, and
           # recover them from the exact Qt used for compilation if omitted.
-          foreach ($lib in @('Qt6Core.dll','Qt6Gui.dll','Qt6Widgets.dll')) {
+          foreach ($lib in @('Qt6Core.dll','Qt6Gui.dll','Qt6Widgets.dll','Qt6Network.dll','Qt6Multimedia.dll')) {
             if (!(Test-Path "$dist/$lib")) {
               $source=Join-Path "$qt/bin" $lib
               if (!(Test-Path $source)) { throw "Required Qt dependency missing: $lib" }
@@ -576,6 +585,10 @@ jobs:
             "$dist/Qt6Core.dll",
             "$dist/Qt6Gui.dll",
             "$dist/Qt6Widgets.dll",
+            "$dist/Qt6Network.dll",
+            "$dist/Qt6Multimedia.dll",
+            "$dist/audio/pripyat_radio.wav",
+            "$dist/audio/speaker_layout.json",
             "$dist/qt.conf"
           )) {
             if (!(Test-Path $file)) { throw "Final Qt Windows package incomplete: $file" }
@@ -591,7 +604,7 @@ jobs:
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.523-POOL-CUPOLA-DIRECT-RAYTRACING-VIEWS
+          name: CSE-WARP-V17.006-DIAGNOSTIC-SCENE-V17.523-POOL-CUPOLA-RAYTRACING
           path: dist-v17/
           if-no-files-found: error
       - name: Benchmark GI hors ligne — trois scènes, trois cuissons et sept relectures

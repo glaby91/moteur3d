@@ -7,7 +7,9 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QByteArray>
 #include <QFile>
+#include <QSaveFile>
 #include <QFileInfo>
 #include <QImage>
 #include <QJsonArray>
@@ -39,10 +41,20 @@ using Clock=std::chrono::steady_clock;
 double ms(Clock::time_point start){
     return std::chrono::duration<double,std::milli>(Clock::now()-start).count();
 }
-bool writeJson(const QString& path,const QJsonObject& value){
-    QFile f(path);
-    return f.open(QIODevice::WriteOnly|QIODevice::Truncate)
-        &&f.write(QJsonDocument(value).toJson(QJsonDocument::Indented))>0;
+bool writeJson(const QString& path,const QJsonObject& value) {
+    const QByteArray bytes=QJsonDocument(value).toJson(QJsonDocument::Indented);
+    QSaveFile file(path);
+    if(!file.open(QIODevice::WriteOnly))return false;
+    qint64 offset=0;
+    while(offset<bytes.size()){
+        const qint64 written=file.write(bytes.constData()+offset,bytes.size()-offset);
+        if(written<=0){
+            file.cancelWriting();
+            return false;
+        }
+        offset+=written;
+    }
+    return file.commit();
 }
 bool writeImage(const QString& path,const std::vector<uint32_t>& pixels,int w,int h){
     if(pixels.size()!=size_t(w)*size_t(h))return false;
@@ -90,7 +102,7 @@ Memory memoryUsage(){
 struct Samples {
     QString scene,camera,variant;
     int w=0,h=0,depth=1,requestedMsaa=0,passes=0;
-    bool ok=true,parity=true,gpuTimingValid=false;
+    bool ok=true,parity=true,gpuTimingValid=false,skipped=false;
     QString error,image;
     double coldMs=0,wallMs=0;
     uint64_t submittedTriangles=0,drawCalls=0;
@@ -129,7 +141,7 @@ struct Samples {
             {"cpuPixelConvertMs",mean(cpuSwizzle)},
             {"submittedTriangles",double(submittedTriangles)},
             {"gpuDrawCalls",double(drawCalls)},
-            {"pixelIdentical",parity},{"status",ok?"ok":"failed"},
+            {"pixelIdentical",parity},{"status",skipped?"skipped":(ok?"ok":"failed")},
             {"error",error},{"image",image},
             {"memoryWorkingMiB",m.workingMiB},{"memoryPeakMiB",m.peakMiB}
         };
@@ -273,7 +285,7 @@ bool runSynchronousBlock(Samples& result,int round,int frames,int warmup,
     ++result.passes;
     return true;
 }
-void report(const QJsonObject& system,const std::vector<Samples>& cases,
+bool report(const QJsonObject& system,const std::vector<Samples>& cases,
             const QJsonArray& sideTests,QDir& dir,bool complete){
     QJsonArray rows;
     QFile csv(dir.filePath("campaign_results.csv"));
@@ -308,7 +320,9 @@ void report(const QJsonObject& system,const std::vector<Samples>& cases,
     const QJsonObject summary{{"schemaVersion",system.value("fullBenchmark").toBool()?2:1},{"complete",complete},
         {"system",system},{"cases",rows},{"subsystemTests",sideTests},
         {"completedUtc",QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs)}};
-    writeJson(dir.filePath("summary.json"),summary);
+    if(!writeJson(dir.filePath("summary.json"),summary)){
+        return false;
+    }
     QFile html(dir.filePath("campaign_report.html"));
     if(html.open(QIODevice::WriteOnly|QIODevice::Text|QIODevice::Truncate)){
         QTextStream out(&html);
@@ -319,8 +333,7 @@ void report(const QJsonObject& system,const std::vector<Samples>& cases,
               "th,td{border-bottom:1px solid #ddd;padding:8px;text-align:right}"
               "td:first-child,th:first-child{text-align:left}th{background:#eaf0f8}"
               "small{color:#596579}</style><h1>CSE WARP V17 — Full Benchmark</h1>"
-              "<p>Terminé : "<<(complete?"oui":"non")<<". Full Benchmark : DX11 Raster, "
-              "Vulkan Raster et Ray Tracing CPU direct. Les passes GPU mesurent le rendu hors écran avec lecture des pixels; elles ne mesurent pas la présentation native Qt/WSI.</p>"
+              "<p>Terminé : "<<(complete?"oui":"non")<<". La campagne compare DX11 Raster, Vulkan Raster, LumaTrace BVH4, DX11 Compute, Ray Tracing CPU direct et GI CPU à 2/4 rebonds. Les scènes dont la géométrie n’est pas compatible LumaTrace sont marquées « skipped ». Les passes GPU mesurent le rendu hors écran avec lecture des pixels; elles ne mesurent pas la présentation native Qt/WSI.</p>"
               "<table><tr><th>Scène / caméra / variante</th><th>Pixels</th>"
               "<th>Buffers</th><th>Images</th><th>FPS débit</th><th>P50 ms</th>"
               "<th>P95 ms</th><th>Dispersion %</th><th>GPU draw ms</th>"
@@ -345,6 +358,7 @@ void report(const QJsonObject& system,const std::vector<Samples>& cases,
            <<QString::fromUtf8(QJsonDocument(sideTests).toJson(QJsonDocument::Indented)).toHtmlEscaped()
            <<"</pre></html>";
     }
+    return true;
 }
 QJsonObject subsystem(QString name,QString variant,double elapsed,bool ok=true,
                       QString note={}){
@@ -433,7 +447,7 @@ int main(int argc,char** argv){
         {"rounds",cfg.rounds},{"framesPerRound",cfg.frames},{"warmup",cfg.warmup},
         {"smoke",cfg.smoke},{"simulation",cfg.simulation},
         {"fullBenchmark",cfg.fullBenchmark},{"includeCpuScaling",cfg.includeCpu},
-        {"backendMatrix",cfg.fullBenchmark?QJsonArray{QStringLiteral("D3D11 Raster preview/readback"),QStringLiteral("Vulkan Raster preview/readback"),QStringLiteral("CPU Ray Tracing PBR direct")}:QJsonArray{}},
+        {"backendMatrix",cfg.fullBenchmark?QJsonArray{QStringLiteral("D3D11 Raster preview/readback"),QStringLiteral("Vulkan Raster preview/readback"),QStringLiteral("LumaTrace BVH4 GPU preview/readback"),QStringLiteral("D3D11 Compute preview/readback at 320x180 or 96x54 simulation"),QStringLiteral("CPU Ray Tracing PBR direct"),QStringLiteral("CPU GI direct — 2 bounces, 1 spp"),QStringLiteral("CPU GI direct — 4 bounces, 1 spp")}:QJsonArray{}},
         {"allScenes",cfg.allScenes},
         {"textureResolutionLimit",cfg.smoke||cfg.simulation?256:2048},
         {"simulationHardwareNote",cfg.simulation
@@ -443,8 +457,8 @@ int main(int argc,char** argv){
             {"msaaRequested",msaa},{"anisotropy",aniso},{"lodPercent",lod},
             {"culling",cull!=0},{"lodEnabled",dynamic!=0}
         }},
-        {"timings",cfg.fullBenchmark?"D3D11 and Vulkan preview/readback call latency plus CPU direct ray tracing; these are offscreen renderer timings, not Qt/native swapchain presentation FPS.":"D3D11 GPU timestamp (draw/copy); CPU Map wait and pixel conversion; per-frame and per-block statistics. Not onscreen FPS or vsync."},
-        {"limitations","No precise per-shader-stage costs, VRAM usage or Qt presentation timer. CPU scaling uses a deliberately small separate workload."}
+        {"timings",cfg.fullBenchmark?"D3D11, Vulkan and LumaTrace preview/readback timings at selected camera sizes; Compute and CPU GI/direct use a separate fixed low-resolution workload. These are offscreen renderer timings, not Qt/native swapchain presentation FPS.":"D3D11 GPU timestamp (draw/copy); CPU Map wait and pixel conversion; per-frame and per-block statistics. Not onscreen FPS or vsync."},
+        {"limitations","No precise per-shader-stage costs, VRAM usage or Qt presentation timer. D3D11 Compute and CPU GI use a separate fixed low-resolution workload; GPU FPS values include readback and are not swapchain FPS."}
     };
     QFile revision(QCoreApplication::applicationDirPath()+"/REVISION.txt");
     if(revision.open(QIODevice::ReadOnly|QIODevice::Text))
@@ -504,7 +518,7 @@ int main(int argc,char** argv){
         side.append(subsystem(sceneName,"pbr_mip_generation",runtime.pbrBuildMs));
         side.append(subsystem(sceneName,"geometry_instancing",runtime.geometryBuildMs));
         side.append(subsystem(sceneName,"bvh_build",runtime.bvhBuildMs));
-        side.append(subsystem(sceneName,"lumatrace_bvh4_prepare",
+        side.append(subsystem(sceneName,"lumatrace_cpu_prepare",
             runtime.lumaTraceBvhBuildMs,runtime.lumaTraceBvhError.isEmpty(),
             runtime.lumaTraceBvhError));
         out<<"  [detail] PBR "<<runtime.pbrBuildMs<<" ms ; instanciation "
@@ -557,27 +571,67 @@ int main(int argc,char** argv){
                     vkCase.requestedMsaa=msaa;
                     cases.push_back(std::move(vkCase));
                 }
+                const size_t lumaIndex=cases.size();
+                if(cfg.fullBenchmark){
+                    Samples lumaCase;
+                    lumaCase.scene=sceneName;lumaCase.camera=preset.id;
+                    lumaCase.variant=QStringLiteral("LumaTrace BVH4 GPU lighting + Raster preview/readback");
+                    lumaCase.w=size.width();lumaCase.h=size.height();lumaCase.depth=1;
+                    lumaCase.requestedMsaa=msaa;
+                    if(runtime.lumaTraceBvh4.nodes.empty()){
+                        lumaCase.skipped=true;
+                        lumaCase.ok=false;
+                        lumaCase.error=runtime.lumaTraceBvhError.isEmpty()
+                            ?QStringLiteral("LumaTrace BVH4 unavailable for this scene geometry")
+                            :runtime.lumaTraceBvhError;
+                    }
+                    cases.push_back(std::move(lumaCase));
+                }
                 const auto renderVulkan=[&](std::vector<uint32_t>& image,Stats& frameStats,
                                             std::wstring& why){
                     auto& entry=cases[vkIndex];
                     return renderVulkanPreview(runtime.renderScene,shadows,camera,
                         entry.w,entry.h,image,frameStats,why);
                 };
-                // Rotate the order across four paths so Vulkan is not always
-                // measured after every DX11 pass at a higher GPU temperature.
-                const int modeCount=cfg.fullBenchmark?4:3;
+                const auto renderLumaTrace=[&](std::vector<uint32_t>& image,Stats& frameStats,
+                                               std::wstring& why){
+                    auto& entry=cases[lumaIndex];
+                    if(runtime.lumaTraceBvh4.nodes.empty()){
+                        why=runtime.lumaTraceBvhError.isEmpty()
+                            ?L"LumaTrace BVH4 is not available for this scene"
+                            :runtime.lumaTraceBvhError.toStdWString();
+                        return false;
+                    }
+                    return renderLumaTracePreview(runtime.renderScene,runtime.lumaTraceBvh4,
+                        shadows,camera,entry.w,entry.h,image,frameStats,why);
+                };
+                // Rotate five paths across rounds to avoid measuring the newer
+                // GPU backends only after the same raster mode and heat profile.
+                const int modeCount=cfg.fullBenchmark?5:3;
                 for(int round=0;round<cfg.rounds;++round){
                     for(int order=0;order<modeCount;++order){
                         const int mode=(order+round)%modeCount;
-                        if(cfg.fullBenchmark&&mode==3){
-                            auto& entry=cases[vkIndex];
+                        if(cfg.fullBenchmark&&(mode==3||mode==4)){
+                            const size_t backendIndex=mode==3?vkIndex:lumaIndex;
+                            auto& entry=cases[backendIndex];
+                            const bool isLumaTrace=mode==4;
+                            const auto renderBackend=[&](std::vector<uint32_t>& image,
+                                                              Stats& frameStats,
+                                                              std::wstring& why){
+                                return isLumaTrace
+                                    ?renderLumaTrace(image,frameStats,why)
+                                    :renderVulkan(image,frameStats,why);
+                            };
                             if(entry.ok&&!runSynchronousBlock(entry,round,cfg.frames,
-                                                               cfg.warmup,renderVulkan,frameCsv)){
+                                                               cfg.warmup,renderBackend,frameCsv)){
                                 allOk=false;
-                                err<<"FAILED "<<sceneName<<" Vulkan: "<<entry.error<<"\n";
+                                err<<"FAILED "<<sceneName<<" "
+                                   <<(isLumaTrace?"LumaTrace BVH4":"Vulkan Raster")
+                                   <<": "<<entry.error<<"\n";
                             }else if(entry.ok){
                                 out<<"  "<<preset.id<<" "<<size.width()<<"x"<<size.height()
-                                   <<" Vulkan round "<<(round+1)<<"/"<<cfg.rounds
+                                   <<" "<<(isLumaTrace?"LumaTrace BVH4":"Vulkan")
+                                   <<" round "<<(round+1)<<"/"<<cfg.rounds
                                    <<" => "<<QString::number(entry.blockFps.back(),'f',2)
                                    <<" renderer FPS (readback)\n";out.flush();
                             }
@@ -620,6 +674,15 @@ int main(int argc,char** argv){
                     auto& entry=cases[vkIndex];
                     if(!entry.baseline.empty()){
                         const QString name=QStringLiteral("images/full_scene%1_cam%2_%3x%4_vulkan.png")
+                            .arg(sceneIndex).arg(cameraIndex).arg(entry.w).arg(entry.h);
+                        if(writeImage(dir.filePath(name),entry.baseline,entry.w,entry.h))
+                            entry.image=name;
+                    }
+                }
+                if(cfg.fullBenchmark){
+                    auto& entry=cases[lumaIndex];
+                    if(!entry.baseline.empty()){
+                        const QString name=QStringLiteral("images/full_scene%1_cam%2_%3x%4_lumatrace.png")
                             .arg(sceneIndex).arg(cameraIndex).arg(entry.w).arg(entry.h);
                         if(writeImage(dir.filePath(name),entry.baseline,entry.w,entry.h))
                             entry.image=name;
@@ -722,7 +785,75 @@ int main(int argc,char** argv){
                 out<<"  CPU "<<workers<<" threads "<<mean(times)
                    <<" ms @"<<cpuW<<"x"<<cpuH<<"\n";out.flush();
             }
-            if(cfg.includeCpu){
+            if(cfg.fullBenchmark){
+                const auto runAuxiliary=[&](Samples sample,const QString& tag,
+                                            auto&& renderFn){
+                    const size_t caseIndex=cases.size();
+                    cases.push_back(std::move(sample));
+                    auto& entry=cases[caseIndex];
+                    const int auxiliaryRounds=std::min(cfg.rounds,3);
+                    const int auxiliaryFrames=std::min(cfg.frames,6);
+                    const int auxiliaryWarmup=std::min(cfg.warmup,1);
+                    tick=Clock::now();
+                    for(int round=0;round<auxiliaryRounds&&entry.ok;++round){
+                        if(!runSynchronousBlock(entry,round,auxiliaryFrames,
+                                                auxiliaryWarmup,renderFn,frameCsv)){
+                            allOk=false;
+                            err<<"FAILED "<<sceneName<<" "<<entry.variant
+                               <<": "<<entry.error<<"\n";
+                            break;
+                        }
+                    }
+                    const double elapsed=ms(tick);
+                    side.append(subsystem(sceneName,tag,elapsed,entry.ok,
+                        QStringLiteral("%1x%2; %3 rounds x %4 frames")
+                            .arg(entry.w).arg(entry.h).arg(auxiliaryRounds)
+                            .arg(auxiliaryFrames)));
+                    if(!entry.baseline.empty()){
+                        const QString name=QStringLiteral("images/full_scene%1_%2_%3x%4.png")
+                            .arg(sceneIndex).arg(tag).arg(entry.w).arg(entry.h);
+                        if(writeImage(dir.filePath(name),entry.baseline,entry.w,entry.h))
+                            entry.image=name;
+                    }
+                    report(system,cases,side,dir,false);
+                };
+                Samples computeCase;
+                computeCase.scene=sceneName;computeCase.camera=preset.id;
+                computeCase.variant=QStringLiteral("GPU D3D11 Compute — fixed diagnostic workload");
+                computeCase.w=cpuW;computeCase.h=cpuH;computeCase.depth=1;
+                const auto renderCompute=[&](std::vector<uint32_t>& image,Stats& stats,
+                                             std::wstring& why){
+                    return renderCompute11Preview(runtime.renderScene,cam,cpuW,cpuH,
+                                                   image,stats,why);
+                };
+                runAuxiliary(std::move(computeCase),
+                    cfg.simulation?QStringLiteral("d3d11_compute_96x54")
+                                  :QStringLiteral("d3d11_compute_320x180"),
+                    renderCompute);
+
+                for(const unsigned bounces:{2u,4u}){
+                    Samples giCase;
+                    giCase.scene=sceneName;giCase.camera=preset.id;
+                    giCase.variant=QStringLiteral("CPU GI direct — %1 bounces, 1 spp")
+                        .arg(bounces);
+                    giCase.w=cpuW;giCase.h=cpuH;giCase.depth=1;
+                    const auto renderGi=[&,bounces](std::vector<uint32_t>& image,
+                                                    Stats& stats,std::wstring& why){
+                        std::vector<V> accum;
+                        stats=renderGiAccumulatePass(runtime.renderScene,shadows,cam,
+                            cpuW,cpuH,accum,image,0,1,unsigned(available),
+                            generation,1,bounces);
+                        if(image.size()!=size_t(cpuW)*size_t(cpuH)){
+                            why=L"CPU GI renderer returned an incomplete image";
+                            return false;
+                        }
+                        return true;
+                    };
+                    runAuxiliary(std::move(giCase),
+                        QStringLiteral("cpu_gi_%1_bounces").arg(bounces),renderGi);
+                }
+            }
+            if(cfg.includeCpu&&!cfg.fullBenchmark){
             tick=Clock::now();
             Stats computeStats;
             std::wstring computeError;
@@ -744,7 +875,10 @@ int main(int argc,char** argv){
         report(system,cases,side,dir,false);
     }
     if(cfg.fullBenchmark){releaseVulkanPreviewForCurrentThread();setRasterCloudTimeScale(1.f);}
-    report(system,cases,side,dir,true);
+    if(!report(system,cases,side,dir,true)){
+        err<<"Cannot write benchmark summary\n";
+        return 8;
+    }
     out<<"Campaign complete: "<<cases.size()<<" GPU cases, "
        <<side.size()<<" subsystem records; result "<<dir.absolutePath()<<"\n";
     return allOk?0:7;

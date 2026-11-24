@@ -1,14 +1,21 @@
 cmake_minimum_required(VERSION 3.24)
 project(CSE_WARP_V17 VERSION 17.0 LANGUAGES CXX)
-# Product, component and scene revisions are independent version axes.
+# Product, module and scene revisions are independent version axes.
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/version.json" V17_VERSION_JSON)
 string(JSON V17_ENGINE_MAJOR GET "${V17_VERSION_JSON}" engine major)
 string(JSON V17_BUILD_NUMBER GET "${V17_VERSION_JSON}" engine build)
-string(JSON V17_COMPONENT_PBR GET "${V17_VERSION_JSON}" components pbr)
-string(JSON V17_COMPONENT_CPU_LIGHTING GET "${V17_VERSION_JSON}" components cpuLighting)
-string(JSON V17_COMPONENT_DIRECTX11 GET "${V17_VERSION_JSON}" components directx11)
-string(JSON V17_COMPONENT_VULKAN GET "${V17_VERSION_JSON}" components vulkan)
-string(JSON V17_COMPONENT_LUMATRACE GET "${V17_VERSION_JSON}" components lumatrace)
+string(JSON V17_MODULE_MANIFEST_RELATIVE GET "${V17_VERSION_JSON}" renderModules)
+get_filename_component(V17_MODULE_MANIFEST
+    "${CMAKE_CURRENT_SOURCE_DIR}/${V17_MODULE_MANIFEST_RELATIVE}" ABSOLUTE)
+get_filename_component(V17_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+include("${V17_REPOSITORY_ROOT}/cmake/RenderModules.cmake")
+m3d_validate_render_modules("${V17_MODULE_MANIFEST}" "${V17_REPOSITORY_ROOT}")
+m3d_render_module_revision("${V17_MODULE_MANIFEST}" cpu_shading V17_COMPONENT_PBR)
+m3d_render_module_revision("${V17_MODULE_MANIFEST}" cpu_lighting V17_COMPONENT_CPU_LIGHTING)
+m3d_render_module_revision("${V17_MODULE_MANIFEST}" d3d11_raster V17_COMPONENT_DIRECTX11)
+m3d_render_module_revision("${V17_MODULE_MANIFEST}" vulkan_raster V17_COMPONENT_VULKAN)
+m3d_render_module_revision("${V17_MODULE_MANIFEST}" lumatrace_cpu V17_COMPONENT_LUMATRACE)
+m3d_render_module_revision("${V17_MODULE_MANIFEST}" lumatrace_gpu_compute V17_COMPONENT_LUMATRACE_GPU)
 if(V17_BUILD_NUMBER LESS 10)
     set(V17_BUILD_PADDED "00${V17_BUILD_NUMBER}")
 elseif(V17_BUILD_NUMBER LESS 100)
@@ -34,7 +41,7 @@ set(V17_SCENE_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/benchmark-ci
 if(NOT EXISTS "${V17_SCENE_SOURCE_DIR}/scene.json")
     message(FATAL_ERROR "V17 scene package is missing scene.json: ${V17_SCENE_SOURCE_DIR}")
 endif()
-find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
+find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network Multimedia)
 
 enable_testing()
 # CSE WARP Physics / Weather: deterministic fair-weather cirrus smoke test.
@@ -104,6 +111,12 @@ if(WIN32)
                    "${CMAKE_CURRENT_BINARY_DIR}/v17_benchmark_runner.rc" @ONLY)
     qt_add_executable(moteur3d_v17 WIN32
         "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_qt.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_cpu.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_compute.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_d3d11.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_lumatrace.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_vulkan.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/radio_audio.cpp"
         "${CMAKE_CURRENT_BINARY_DIR}/v17_app.rc")
     add_dependencies(moteur3d_v17 v17_icon_generator)
@@ -112,12 +125,18 @@ if(WIN32)
 else()
     qt_add_executable(moteur3d_v17
         "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_qt.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_cpu.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_compute.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_d3d11.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_lumatrace.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_vulkan.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/radio_audio.cpp")
 endif()
 target_include_directories(moteur3d_v17 PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
-target_link_libraries(moteur3d_v17 PRIVATE moteur3d_v16_core Qt6::Widgets Qt6::Concurrent)
+target_link_libraries(moteur3d_v17 PRIVATE moteur3d_v16_core Qt6::Widgets Qt6::Concurrent Qt6::Network Qt6::Multimedia)
 if(WIN32)
     # About dialog queries the DXGI primary adapter name without changing device selection.
     target_link_libraries(moteur3d_v17 PRIVATE dxgi xaudio2)
@@ -326,6 +345,9 @@ if(WIN32)
     add_dependencies(moteur3d_v17 v17_radio_test_asset)
 endif()
 add_custom_command(TARGET moteur3d_v17 POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${V17_MODULE_MANIFEST}"
+      "$<TARGET_FILE_DIR:moteur3d_v17>/render_modules.json"
     COMMAND ${CMAKE_COMMAND} -E make_directory
       "$<TARGET_FILE_DIR:moteur3d_v17>/audio"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different

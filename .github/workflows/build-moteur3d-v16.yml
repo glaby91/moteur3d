@@ -163,6 +163,7 @@ jobs:
           Copy-Item "build-v16/Release/moteur3d_v16_core.dll" "dist/"
           Copy-Item "build-v16/Release/moteur3d_v16_benchmark.exe" "dist/"
           Copy-Item "build-v16/Release/moteur3d_v16_benchui.exe" "dist/"
+          Copy-Item "build-v16/Release/render_modules.json" "dist/render_modules.json" -Force -ErrorAction Stop
           Copy-Item "build-v16/benchmark-tests" "dist/benchmark-tests" -Recurse
           Copy-Item "build-v16/pavillon01-smoke.png" "dist/Pavillon01-CPU-Preview.png"
           Copy-Item "build-v16/pavillon01-gi-smoke.png" "dist/Pavillon01-CPU-GI-FHD-Preview.png"
@@ -179,6 +180,7 @@ jobs:
           Copy-Item "build-v16/material-lab-cpu-17h.png" "dist/Atelier-Materiaux-CPU-17h-FHD.png"
           Copy-Item "build-v16/material-lab-gpu-17h.png" "dist/Atelier-Materiaux-GPU-17h-FHD.png"
           git rev-parse HEAD | Out-File "dist/REVISION.txt" -Encoding ascii
+          if (!(Test-Path "dist/render_modules.json")) { throw "Render-module version manifest missing from V16 package" }
           Copy-Item "build-v16/Release/pavillon01" "dist/pavillon01" -Recurse
           Copy-Item "build-v16/Release/material-lab" "dist/material-lab" -Recurse
           Copy-Item "build-v16/Release/pripyat-photo2scene-proof" "dist/pripyat-photo2scene-proof" -Recurse

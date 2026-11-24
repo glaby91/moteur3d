@@ -1,34 +1,31 @@
 cmake_minimum_required(VERSION 3.24)
-project(Moteur3D_V16 VERSION 16.0 LANGUAGES CXX)
+file(READ "${CMAKE_CURRENT_LIST_DIR}/version.json" V16_VERSION_JSON)
+string(JSON V16_PRODUCT_VERSION GET "${V16_VERSION_JSON}" engineVersion)
+project(Moteur3D_V16 VERSION ${V16_PRODUCT_VERSION} LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Threads REQUIRED)
 find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
 
+set(M3D_REPOSITORY_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/..")
+set(M3D_MODULE_MANIFEST "${M3D_REPOSITORY_ROOT}/engine/render_modules.json")
+include("${M3D_REPOSITORY_ROOT}/cmake/RenderModules.cmake")
+m3d_validate_render_modules("${M3D_MODULE_MANIFEST}" "${M3D_REPOSITORY_ROOT}")
+m3d_render_module_sources("${M3D_MODULE_MANIFEST}" v16
+    "${M3D_REPOSITORY_ROOT}" M3D_RENDER_SOURCES)
 set(NATIVE "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
 set(NATIVE_SRC "${NATIVE}/src")
-set(M3D_RENDER_SOURCES
-    "${NATIVE_SRC}/m3d_scene_v16.cpp"
-    "${NATIVE_SRC}/m3d_v16_bridge.cpp"
-    "${NATIVE_SRC}/m3d_lighting.cpp"
-    "${NATIVE_SRC}/m3d_intersection.cpp"
-    "${NATIVE_SRC}/m3d_shading.cpp"
-    "${NATIVE_SRC}/m3d_render.cpp"
-    "${NATIVE_SRC}/m3d_hybrid.cpp"
-    "${NATIVE_SRC}/m3d_post.cpp"
-    "${NATIVE_SRC}/m3d_simd.cpp"
-    "${NATIVE_SRC}/m3d_compute11.cpp"
-    "${NATIVE_SRC}/m3d_lumatrace_bvh4.cpp"
-    "${NATIVE_SRC}/m3d_directx11.cpp"
-    "${NATIVE_SRC}/m3d_gi_bake.cpp"
-    "${NATIVE_SRC}/m3d_dxr.cpp"
-    "${NATIVE_SRC}/simd/avx2/post.cpp"
-    "${NATIVE_SRC}/simd/avx2/ray_generation.cpp"
-    "${NATIVE_SRC}/simd/avx2/triangle_intersection.cpp"
-    "${NATIVE_SRC}/simd/avx2/lighting.cpp"
-    "${NATIVE_SRC}/simd/avx2/texture_sampling.cpp"
-)
+m3d_render_module_source("${M3D_MODULE_MANIFEST}" vulkan_raster 0
+    "${M3D_REPOSITORY_ROOT}" M3D_VULKAN_SOURCE)
+m3d_render_module_source("${M3D_MODULE_MANIFEST}" vulkan_raster 1
+    "${M3D_REPOSITORY_ROOT}" M3D_VULKAN_STUB_SOURCE)
+m3d_render_module_source("${M3D_MODULE_MANIFEST}" vulkan_resources 0
+    "${M3D_REPOSITORY_ROOT}" M3D_VULKAN_RESOURCES_SOURCE)
+m3d_render_module_source("${M3D_MODULE_MANIFEST}" lumatrace_gpu_compute 0
+    "${M3D_REPOSITORY_ROOT}" M3D_LUMATRACE_GPU_SOURCE)
+configure_file("${M3D_MODULE_MANIFEST}"
+    "${CMAKE_CURRENT_BINARY_DIR}/render_modules.json" COPYONLY)
 add_library(moteur3d_v16_core SHARED ${M3D_RENDER_SOURCES})
 if(WIN32)
     set_target_properties(moteur3d_v16_core PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
@@ -36,6 +33,9 @@ endif()
 target_include_directories(moteur3d_v16_core PUBLIC "${NATIVE}")
 target_link_libraries(moteur3d_v16_core PUBLIC Threads::Threads Qt6::Core Qt6::Gui)
 if(WIN32)
+    # LumaTrace compute is an independent optional backend module, separate
+    # from the DX11 raster frame path that consumes its radiance buffer.
+    target_sources(moteur3d_v16_core PRIVATE "${M3D_LUMATRACE_GPU_SOURCE}")
     target_link_libraries(moteur3d_v16_core PUBLIC d3d11 d3d12 dxgi d3dcompiler)
     # Experimental V17 Vulkan renderer lives in the shared engine DLL.
     # An optional backend must not break the stock DX11-only V17 build.
@@ -46,7 +46,8 @@ if(WIN32)
     endif()
     if(Vulkan_FOUND)
         target_sources(moteur3d_v16_core PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/../v17/vulkan/m3d_vulkan.cpp")
+            "${M3D_VULKAN_SOURCE}"
+            "${M3D_VULKAN_RESOURCES_SOURCE}")
         target_include_directories(moteur3d_v16_core PRIVATE
             "${CMAKE_CURRENT_SOURCE_DIR}/../v17/vulkan")
         target_link_libraries(moteur3d_v16_core PRIVATE Vulkan::Vulkan)
@@ -60,21 +61,20 @@ if(WIN32)
         target_compile_definitions(moteur3d_v16_core PUBLIC M3D_V17_VULKAN_ENABLED=1)
     else()
         target_sources(moteur3d_v16_core PRIVATE
-            "${CMAKE_CURRENT_SOURCE_DIR}/../v17/vulkan/m3d_vulkan_stub.cpp")
+            "${M3D_VULKAN_STUB_SOURCE}")
         target_compile_definitions(moteur3d_v16_core PUBLIC M3D_V17_VULKAN_ENABLED=0)
     endif()
 else()
     target_sources(moteur3d_v16_core PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/../v17/vulkan/m3d_vulkan_stub.cpp")
+        "${M3D_VULKAN_STUB_SOURCE}")
     target_compile_definitions(moteur3d_v16_core PUBLIC M3D_V17_VULKAN_ENABLED=0)
 endif()
-set(M3D_AVX_SOURCES
-    "${NATIVE_SRC}/simd/avx2/post.cpp"
-    "${NATIVE_SRC}/simd/avx2/ray_generation.cpp"
-    "${NATIVE_SRC}/simd/avx2/triangle_intersection.cpp"
-    "${NATIVE_SRC}/simd/avx2/lighting.cpp"
-    "${NATIVE_SRC}/simd/avx2/texture_sampling.cpp"
-)
+set(M3D_AVX_SOURCES)
+foreach(M3D_SOURCE IN LISTS M3D_RENDER_SOURCES)
+    if(M3D_SOURCE MATCHES "/src/simd/avx2/")
+        list(APPEND M3D_AVX_SOURCES "${M3D_SOURCE}")
+    endif()
+endforeach()
 if(MSVC)
     set_source_files_properties(${M3D_AVX_SOURCES} PROPERTIES COMPILE_OPTIONS "/arch:AVX2")
     target_compile_options(moteur3d_v16_core PRIVATE /O2 /EHsc /utf-8)
@@ -183,6 +183,9 @@ add_custom_command(TARGET moteur3d_v16 POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${NATIVE_SRC}/shaders/m3d_raytrace_compute.hlsl"
         "$<TARGET_FILE_DIR:moteur3d_v16>/shaders/m3d_raytrace_compute.hlsl"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${M3D_MODULE_MANIFEST}"
+        "$<TARGET_FILE_DIR:moteur3d_v16>/render_modules.json"
     VERBATIM)
 install(TARGETS moteur3d_v16 moteur3d_v16_core moteur3d_v16_benchmark moteur3d_v16_benchui
     RUNTIME DESTINATION . LIBRARY DESTINATION . ARCHIVE DESTINATION lib)
@@ -190,4 +193,5 @@ install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pavillon01" DESTINA
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/material-lab" DESTINATION .)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/../scenes/v16/pripyat-photo2scene-proof" DESTINATION .)
 install(FILES "${NATIVE_SRC}/shaders/m3d_raytrace_compute.hlsl" DESTINATION shaders)
+install(FILES "${M3D_MODULE_MANIFEST}" DESTINATION .)
 # No V3/V4/V5 binary loader, exporter or legacy Qt application is linked into V16.

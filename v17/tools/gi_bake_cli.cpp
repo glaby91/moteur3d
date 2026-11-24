@@ -9,6 +9,7 @@
 #include <QFile>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSaveFile>
 #include <QString>
 #include <algorithm>
 #include <cmath>
@@ -118,9 +119,22 @@ int main(int argc,char** argv){
     result.insert("eveningG",double(evening.y));result.insert("eveningB",double(evening.z));
     const QJsonDocument doc(result);
     if(bench){
-        QFile f(report);
-        if(!f.open(QFile::WriteOnly|QFile::Truncate)||f.write(doc.toJson())<0){
+        const QByteArray bytes=doc.toJson(QJsonDocument::Indented);
+        QSaveFile f(report);
+        if(!f.open(QIODevice::WriteOnly)){
             qCritical()<<"Cannot save benchmark report"<<report;return 1;
+        }
+        qint64 offset=0;
+        while(offset<bytes.size()){
+            const qint64 written=f.write(bytes.constData()+offset,bytes.size()-offset);
+            if(written<=0){
+                f.cancelWriting();
+                qCritical()<<"Cannot complete benchmark report"<<report;return 1;
+            }
+            offset+=written;
+        }
+        if(!f.commit()){
+            qCritical()<<"Cannot commit benchmark report"<<report;return 1;
         }
     }
     qInfo().noquote()<<QString::fromUtf8(doc.toJson(QJsonDocument::Compact));

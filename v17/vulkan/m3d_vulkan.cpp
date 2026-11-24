@@ -18,6 +18,7 @@
 #include "m3d_vulkan_mesh.h"
 #include "m3d_vulkan_version.h"
 #include "m3d_vulkan_readback.h"
+#include "m3d_vulkan_resources.h"
 #include "m3d_vulkan_mips.h"
 #include "khronos_capture.h"
 #include "vulkan_dirty_policy.h"
@@ -40,6 +41,9 @@
 #include <vector>
 
 namespace m3d { namespace {
+namespace resources=vulkan::resources;
+using resources::Buffer;
+using resources::Texture;
 using Clock=std::chrono::steady_clock;
 template<class Handle>
 Handle vulkanHandleFromBits(uintptr_t bits) noexcept{
@@ -51,20 +55,6 @@ constexpr uint32_t kMaxMaterials=256, kLights=64;
 void vkcheck(VkResult code,const char* name) {
     if(code!=VK_SUCCESS)throw std::runtime_error(std::string(name)+" Vulkan error "+std::to_string(int(code)));
 }
-struct Buffer {
-    VkBuffer handle=VK_NULL_HANDLE;
-    VkDeviceMemory memory=VK_NULL_HANDLE;
-    void* mapped=nullptr;
-    VkDeviceSize size=0,allocation=0;
-    VkMemoryPropertyFlags flags=0;
-};
-struct Texture {
-    VkImage image=VK_NULL_HANDLE;
-    VkDeviceMemory memory=VK_NULL_HANDLE;
-    VkImageView view=VK_NULL_HANDLE;
-    VkFormat format=VK_FORMAT_UNDEFINED;
-    uint32_t width=0,height=0,depth=1,layers=0,mips=1;
-};
 struct alignas(16) Uniforms {
     float eye[4]{},forward[4]{},right[4]{},up[4]{},sunDir[4]{},sky[4]{};
     float shadowBase[4]{},shadowRight[4]{},shadowUp[4]{};
@@ -334,99 +324,22 @@ class VulkanRaster final {
         return std::chrono::duration<double,std::milli>(end-start).count();
     }
     uint32_t type(uint32_t bits,VkMemoryPropertyFlags required,bool cache=false)const {
-        int best=-1;uint32_t candidate=UINT32_MAX;
-        for(uint32_t i=0;i<memoryTypes_.memoryTypeCount;i++) {
-            if((bits & (1u<<i))==0)continue;
-            auto flags=memoryTypes_.memoryTypes[i].propertyFlags;
-            if((flags&required)!=required)continue;
-            int score=(cache&&(flags&VK_MEMORY_PROPERTY_HOST_CACHED_BIT)?64:0)
-                +(flags&VK_MEMORY_PROPERTY_HOST_COHERENT_BIT?8:0)
-                +(flags&VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT?4:0);
-            if(score>best){best=score;candidate=i;}
-        }
-        if(candidate==UINT32_MAX)throw std::runtime_error("No suitable Vulkan memory type");
-        return candidate;
+        return resources::findMemoryType(memoryTypes_,bits,required,cache);
     }
     Buffer buffer(VkDeviceSize bytes,VkBufferUsageFlags usage,VkMemoryPropertyFlags flags,bool preferCached=false){
-        Buffer b;b.size=bytes;
-        VkBufferCreateInfo ci{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
-        ci.size=bytes;ci.usage=usage;ci.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
-        vkcheck(vkCreateBuffer(device_,&ci,nullptr,&b.handle),"create buffer");
-        VkMemoryRequirements req{};vkGetBufferMemoryRequirements(device_,b.handle,&req);
-        const uint32_t index=type(req.memoryTypeBits,flags,preferCached);
-        b.flags=memoryTypes_.memoryTypes[index].propertyFlags;
-        b.allocation=req.size;
-        VkMemoryAllocateInfo a{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-        a.allocationSize=req.size;a.memoryTypeIndex=index;
-        vkcheck(vkAllocateMemory(device_,&a,nullptr,&b.memory),"allocate buffer");
-        vkcheck(vkBindBufferMemory(device_,b.handle,b.memory,0),"bind buffer");
-        if(b.flags&VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT)
-            vkcheck(vkMapMemory(device_,b.memory,0,VK_WHOLE_SIZE,0,&b.mapped),"map persistent buffer");
-        return b;
+        return resources::createBuffer(device_,memoryTypes_,bytes,usage,flags,preferCached);
     }
-    void flush(Buffer& b){
-        if((b.flags&VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)||!b.mapped)return;
-        VkMappedMemoryRange mr{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};
-        mr.memory=b.memory;mr.size=VK_WHOLE_SIZE;
-        vkcheck(vkFlushMappedMemoryRanges(device_,1,&mr),"flush mapped buffer");
-    }
-    void invalidate(Buffer& b){
-        if((b.flags&VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)||!b.mapped)return;
-        VkMappedMemoryRange mr{VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE};
-        mr.memory=b.memory;mr.size=VK_WHOLE_SIZE;
-        vkcheck(vkInvalidateMappedMemoryRanges(device_,1,&mr),"invalidate mapped buffer");
-    }
-    void free(Buffer& b){
-        if(b.mapped)vkUnmapMemory(device_,b.memory);
-        if(b.handle)vkDestroyBuffer(device_,b.handle,nullptr);
-        if(b.memory)vkFreeMemory(device_,b.memory,nullptr);
-        b={};
-    }
+    void flush(Buffer& b){resources::flushBuffer(device_,b);}
+    void invalidate(Buffer& b){resources::invalidateBuffer(device_,b);}
+    void free(Buffer& b){resources::destroyBuffer(device_,b);}
     Texture image(uint32_t w,uint32_t h,uint32_t layers,VkFormat format,
-                  VkImageUsageFlags usage,VkImageAspectFlags aspect,bool forceArrayView=false,uint32_t mipLevels=1,VkSampleCountFlagBits samples=VK_SAMPLE_COUNT_1_BIT){
-        Texture t;t.width=w;t.height=h;t.layers=layers;t.format=format;t.mips=mipLevels;
-        if(!mipLevels||mipLevels>vkmips::levelCount(std::max(w,h)))
-            throw std::runtime_error("Invalid Vulkan texture mip count");
-        VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-        ci.imageType=VK_IMAGE_TYPE_2D;ci.format=format;ci.extent={w,h,1};
-        ci.mipLevels=mipLevels;ci.arrayLayers=layers;ci.samples=samples;
-        ci.tiling=VK_IMAGE_TILING_OPTIMAL;ci.usage=usage;ci.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
-        vkcheck(vkCreateImage(device_,&ci,nullptr,&t.image),"create image");
-        VkMemoryRequirements req{};vkGetImageMemoryRequirements(device_,t.image,&req);
-        VkMemoryAllocateInfo mem{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-        mem.allocationSize=req.size;mem.memoryTypeIndex=type(req.memoryTypeBits,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        vkcheck(vkAllocateMemory(device_,&mem,nullptr,&t.memory),"allocate image");
-        vkcheck(vkBindImageMemory(device_,t.image,t.memory,0),"bind image");
-        VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-        vi.image=t.image;vi.viewType=(forceArrayView||layers>1)?VK_IMAGE_VIEW_TYPE_2D_ARRAY:VK_IMAGE_VIEW_TYPE_2D;
-        vi.format=format;vi.subresourceRange.aspectMask=aspect;
-        vi.subresourceRange.levelCount=mipLevels;vi.subresourceRange.layerCount=layers;
-        vkcheck(vkCreateImageView(device_,&vi,nullptr,&t.view),"create view");
-        return t;
+                  VkImageUsageFlags usage,VkImageAspectFlags aspect,bool forceArrayView=false,
+                  uint32_t mipLevels=1,VkSampleCountFlagBits samples=VK_SAMPLE_COUNT_1_BIT){
+        return resources::createImage(device_,memoryTypes_,w,h,layers,format,usage,aspect,
+                                      forceArrayView,mipLevels,samples);
     }
-
     Texture image3D(uint32_t w,uint32_t h,uint32_t d){
-        Texture t;t.width=w;t.height=h;t.depth=d;t.layers=1;t.mips=1;
-        t.format=VK_FORMAT_R32G32B32A32_SFLOAT;
-        VkImageCreateInfo ci{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-        ci.imageType=VK_IMAGE_TYPE_3D;ci.format=t.format;ci.extent={w,h,d};
-        ci.mipLevels=1;ci.arrayLayers=1;ci.samples=VK_SAMPLE_COUNT_1_BIT;
-        ci.tiling=VK_IMAGE_TILING_OPTIMAL;
-        ci.usage=VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT;
-        ci.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
-        vkcheck(vkCreateImage(device_,&ci,nullptr,&t.image),"GI 3D image");
-        VkMemoryRequirements req{};vkGetImageMemoryRequirements(device_,t.image,&req);
-        VkMemoryAllocateInfo mem{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-        mem.allocationSize=req.size;
-        mem.memoryTypeIndex=type(req.memoryTypeBits,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-        vkcheck(vkAllocateMemory(device_,&mem,nullptr,&t.memory),"GI 3D memory");
-        vkcheck(vkBindImageMemory(device_,t.image,t.memory,0),"GI 3D bind");
-        VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-        vi.image=t.image;vi.viewType=VK_IMAGE_VIEW_TYPE_3D;vi.format=t.format;
-        vi.subresourceRange.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
-        vi.subresourceRange.levelCount=1;vi.subresourceRange.layerCount=1;
-        vkcheck(vkCreateImageView(device_,&vi,nullptr,&t.view),"GI 3D view");
-        return t;
+        return resources::createImage3D(device_,memoryTypes_,w,h,d);
     }
     void uploadProbe(Texture& t,const float* data,size_t bytes,bool uploaded){
         Buffer stage=buffer(VkDeviceSize(bytes),VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
@@ -499,12 +412,7 @@ class VulkanRaster final {
         }
         giMix_=mix;giAvailable_=true;updateDescriptors();
     }
-    void free(Texture& t){
-        if(t.view)vkDestroyImageView(device_,t.view,nullptr);
-        if(t.image)vkDestroyImage(device_,t.image,nullptr);
-        if(t.memory)vkFreeMemory(device_,t.memory,nullptr);
-        t={};
-    }
+    void free(Texture& t){resources::destroyTexture(device_,t);}
 
     void destroyRetiredSwapchains(){
         for(auto& retired:retiredSwapchains_){

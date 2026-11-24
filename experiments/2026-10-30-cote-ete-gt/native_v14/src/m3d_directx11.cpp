@@ -1,7 +1,10 @@
 #include "m3d_engine.h"
 #include "m3d_gi_bake.h"
 #include "m3d_lumatrace_bvh4.h"
-#include "m3d_lumatrace_shader.h"
+#include "m3d_directx11_raster_shader.h"
+#include "m3d_directx11_sky_shader.h"
+#include "m3d_directx11_composite_shader.h"
+#include "m3d_directx11_mesh.h"
 #include "../../../../v17/weather/clouds.h"
 
 #if defined(_WIN32)
@@ -12,6 +15,7 @@
 #include <dxgi1_2.h>
 #include <d3dcompiler.h>
 #include <wrl/client.h>
+#include "m3d_lumatrace_gpu_d3d11.h"
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -26,6 +30,13 @@ using Microsoft::WRL::ComPtr;
 
 namespace m3d {
 namespace {
+using d3d11::GpuVertex;
+using d3d11::TransparentTriangle;
+using d3d11::MeshBuilder;
+using d3d11::DrawChunk;
+using d3d11::makeFoliageTemplate;
+using d3d11::uvScaleForMaterial;
+using d3d11::visibleChunk;
 // Single atomic configuration word: host and GUI may update quality while
 // the dedicated GPU worker is rendering. Each frame gets one full snapshot.
 // Bits: 0..7 MSAA, 8..15 anisotropy, 16..31 LOD quality percent,
@@ -97,11 +108,6 @@ RasterQualitySettings unpackQuality(uint64_t bits){
     q.dynamicLod=((bits>>33)&1u)!=0;
     return q;
 }
-struct GpuVertex { float p[3], n[3], uv[2]; uint32_t material,primitiveId; };
-static_assert(sizeof(GpuVertex)==40,"V17 raster vertex layout");
-// LumaTrace stores one shared raster/compute stream. Packing normals into a
-// 10-bit UNORM format with a signed-normal bias lowers its per-vertex footprint from 40 to 32 bytes
-// without quantizing world positions or texture coordinates.
 struct GpuVertexLuma {
     float p[3];
     uint32_t normalPacked;
@@ -131,7 +137,6 @@ struct GpuEllipseInstance {
     float radii[3];float padding;
 };
 static_assert(sizeof(GpuEllipseInstance)==32,"D3D11 ellipsoid instance size");
-struct TransparentTriangle { GpuVertex v[3]; V center; };
 struct FrameConstants {
     float eye[3], tanHalf;
     float forward[3], aspect;
@@ -172,652 +177,13 @@ struct CloudConstants {
     float wind[4];
 };
 
-constexpr char kShader[] = R"(
-cbuffer Frame : register(b0) {
-    float3 eye; float tanHalf;
-    float3 forward; float aspect;
-    float3 right; float nearPlane;
-    float3 up; float farPlane;
-    float3 lightDir; float ambient;
-    float3 skyColor; uint materialCount;
-    float3 shadowBase; float shadowSpan;
-    float3 shadowRight; float shadowDist;
-    float3 shadowUp; float shadowSize;
-    float4 materialGlow[256];
-    float4 materialSpecular[256];
-    float4 materialOpacity[256];
-    float4 materialDiffuse[256];
-    float4 materialEmission[256];
-    float4 materialTextureDetail[256];
-    float4 lightPositionRadius[256];
-    float4 lightColorIntensity[256];
-    uint lightCount; float3 padding;
-    float4 indirectSky;
-    float4 indirectBounce;
-    float4 indirectSun;
-    float4 probeOrigin;
-    float4 probeInvSpan;
-    float4 hybridControls;
-    float4 colorControls;
-    float4 peripheralControls;
-};
-Texture2DArray<float4> albedo : register(t0);
-Texture2D<float> shadowDepth : register(t1);
-Texture2DArray<float> roughnessMap : register(t2);
-Texture2DArray<float4> normalMap : register(t3);
-Texture3D<float4> indirectProbes : register(t4);
-Texture3D<float4> indirectProbesNext : register(t5);
-Texture2DArray<float4> preservedAlbedo : register(t6);
-StructuredBuffer<float4> lumaTriangleRadiance : register(t7);
-SamplerState wrapSampler : register(s0);
-SamplerState probeSampler : register(s1);
-struct VSIn { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; uint mat:MATERIAL; uint primitiveId:TRIID; };
-struct VSOut { float4 p:SV_POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; float3 world:TEXCOORD1; nointerpolation uint mat:MATERIAL; nointerpolation uint primitiveId:TEXCOORD2; };
-VSOut VSMain(VSIn i) {
-    VSOut o;
-    float3 q = i.p - eye;
-    float z = dot(q, forward);
-    float safeZ = max(z, nearPlane);
-    float nx = dot(q, right) / (safeZ * tanHalf);
-    float ny = dot(q, up) * aspect / (safeZ * tanHalf);
-    float depth = (farPlane / (farPlane - nearPlane)) * z - (farPlane * nearPlane) / (farPlane - nearPlane);
-    // Keep the real camera-space z in w and clip space. Using safeZ here would
-    // pull geometry behind the near plane onto the near plane instead of clipping it.
-    o.p = float4(nx * safeZ, ny * safeZ, depth, z);
-    o.n = i.n; o.uv = i.uv; o.world=i.p; o.mat = min(i.mat, materialCount - 1);o.primitiveId=i.primitiveId;
-    return o;
-}
-struct VSBoxIn {
-    float3 p:POSITION; float3 n:NORMAL; float2 unusedUv:TEXCOORD0;
-    uint unusedMaterial:MATERIAL;uint unusedPrimitiveId:TRIID;
-    float3 boxLo:BOXMIN; float uvScale:BOXSCALE;
-    float3 boxHi:BOXMAX; uint boxMat:BOXMAT;
-    float3 boxSize:BOXSIZE;uint uvMode:BOXUVMODE;
-};
-VSOut VSBoxMain(VSBoxIn i) {
-    // Select the original box corners directly rather than recomputing a
-    // matrix: world coordinates and texture mapping match the legacy mesh.
-    float3 p=float3(i.p.x<0.5?i.boxLo.x:i.boxHi.x,
-                    i.p.y<0.5?i.boxLo.y:i.boxHi.y,
-                    i.p.z<0.5?i.boxLo.z:i.boxHi.z);
-    float3 n=i.n;
-    float2 uv;
-    if(i.uvMode==1 || i.uvMode==2){
-        // uvMode=1: normal scene PBR, repeat per metre.
-        // uvMode=2: image artwork, cover the entire box face once.
-        // The mirroring matches the original 12-triangle V16 source boxes.
-        float2 localUV=i.unusedUv;
-        if(n.z < -0.5 || n.x > 0.5)localUV.x=1.0-localUV.x;
-        if(n.y > 0.5)localUV.y=1.0-localUV.y;
-        float uLength=(abs(n.x)>0.5?i.boxSize.z:i.boxSize.x)*0.5;
-        float vLength=(abs(n.y)>0.5?i.boxSize.z:i.boxSize.y)*0.5;
-        uv=i.uvMode==2?localUV:localUV*float2(uLength,vLength);
-    }else{
-        uv=(abs(n.y)>=abs(n.x)&&abs(n.y)>=abs(n.z))
-            ?p.xz*i.uvScale
-            :(abs(n.x)>=abs(n.z)?p.zy*i.uvScale:p.xy*i.uvScale);
-    }
-    VSIn raw;
-    raw.p=p;raw.n=n;raw.uv=uv;raw.mat=i.boxMat;raw.primitiveId=i.unusedPrimitiveId;
-    return VSMain(raw);
-}
-struct VSEllipseIn {
-    float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0;
-    uint unusedMaterial:MATERIAL;uint unusedPrimitiveId:TRIID;
-    float3 center:ELLIPSECENTER;uint ellipseMat:ELLIPSEMAT;
-    float3 radii:ELLIPSERADII;float pad:ELLIPSEPAD;
-};
-VSOut VSEllipseMain(VSEllipseIn i) {
-    VSIn raw;
-    raw.p=i.center+i.p*i.radii;
-    raw.n=normalize(i.n/max(i.radii,float3(.00001,.00001,.00001)));
-    raw.uv=i.uv;
-    raw.mat=i.ellipseMat;raw.primitiveId=i.unusedPrimitiveId;
-    return VSMain(raw);
-}
-float4 PSMain(VSOut i):SV_TARGET {
-    // Smooth focus-lens / lighthouse geometry. The sharp center follows the
-    // camera's optical axis, with no rectangular hard cut or temporal reuse.
-    // Mode 0: original full-frame, 1: low-res surround, 2: full-res focus.
-    if(peripheralControls.x>.5) {
-        float2 uvScreen=i.p.xy*peripheralControls.yz;
-        float2 focus=(uvScreen-.5)/float2(.47,.48);
-        float radius=length(focus);
-        if(peripheralControls.x<1.5 && radius<.82) discard;
-        if(peripheralControls.x>1.5 && radius>1.0) discard;
-    }
-    // WRAP sampler already handles tiling. frac(uv) here broke automatic
-    // derivatives at tile boundaries and forced inappropriate mip levels.
-    float2 artworkDdx=ddx(i.uv),artworkDdy=ddy(i.uv);
-    float3 base;
-    float detailLayer=materialTextureDetail[i.mat].x;
-    if(detailLayer>=0.0) {
-        // Scene-authored preservation keeps paintings at their source tier,
-        // independent of the shared array budget used by ordinary materials.
-        base=preservedAlbedo.SampleGrad(wrapSampler,float3(i.uv,detailLayer),
-                                       artworkDdx,artworkDdy).rgb;
-    } else {
-        base=albedo.Sample(wrapSampler,float3(i.uv,i.mat)).rgb;
-    }
-    float3 normal = normalize(i.n);
-    const bool poolWater=materialEmission[i.mat].a < -0.5;
-    // Dedicated animated-looking standing waves (static in world space) only on
-    // the new translucent pool water. Avoid extra trig on every other material.
-    if(poolWater && normal.y>0.75){
-        float waveA=sin(i.world.x*2.1+i.world.z*.75);
-        float waveB=cos(i.world.z*2.8-i.world.x*.45);
-        normal=normalize(normal+float3(.028*waveA,0,.025*waveB));
-        base=lerp(base,float3(.055,.38,.55),.62);
-    }
-#if !defined(M3D_V17_OPTIMIZE_PIXELS)
-    float3 dpdx = ddx(i.world), dpdy = ddy(i.world);
-    float2 duvdx = ddx(i.uv), duvdy = ddy(i.uv);
-    float determinant = duvdx.x * duvdy.y - duvdx.y * duvdy.x;
-#endif
-    if (materialOpacity[i.mat].y > 0.5) {
-#if defined(M3D_V17_OPTIMIZE_PIXELS)
-        // The nointerpolation material index is uniform per primitive.
-        // Do not evaluate derivatives when normal mapping is disabled.
-        float3 dpdx = ddx(i.world), dpdy = ddy(i.world);
-        float2 duvdx = ddx(i.uv), duvdy = ddy(i.uv);
-        float determinant = duvdx.x * duvdy.y - duvdx.y * duvdy.x;
-#endif
-        float3 detailNormal = normalize(normalMap.Sample(wrapSampler, float3(i.uv, i.mat)).xyz * 2.0 - 1.0);
-        if (abs(determinant) > 0.000001) {
-            float3 tangent = (dpdx * duvdy.y - dpdy * duvdx.y) / determinant;
-            float3 rawBitangent = (-dpdx * duvdy.x + dpdy * duvdx.x) / determinant;
-            tangent = normalize(tangent - normal * dot(normal, tangent));
-            float3 bitangent = normalize(cross(normal, tangent)) * (dot(cross(normal, tangent), rawBitangent) < 0.0 ? -1.0 : 1.0);
-            // V17.600: a modest tangent-space gain restores visible material relief
-            // without tessellation or changing silhouette geometry.
-            normal = normalize(tangent * (detailNormal.x * 1.25) + bitangent * (detailNormal.y * 1.25) + normal * detailNormal.z);
-        }
-    }
-    float diffuse = saturate(dot(normal, normalize(lightDir)));
-    float3 shadowOffset = i.world - shadowBase;
-    float shadowFactor = 1.0;
-    float shadowScale = shadowSize / (2.0 * shadowSpan);
-    float shadowCenter = shadowSize * 0.5 - 0.5;
-    int2 shadowPixel = int2(round(float2(dot(shadowOffset, shadowRight), dot(shadowOffset, shadowUp)) * shadowScale + shadowCenter));
-    float shadowDistance = shadowDist - dot(shadowOffset, lightDir);
-    if (shadowPixel.x >= 2 && shadowPixel.y >= 2 && shadowPixel.x < int(shadowSize) - 2 && shadowPixel.y < int(shadowSize) - 2) {
-        float visible = 0.0;
-        [unroll] for (int sy = -1; sy <= 1; ++sy) [unroll] for (int sx = -1; sx <= 1; ++sx) { )";
-constexpr char kShaderPart2[] = R"(
-            float storedDepth = shadowDepth.Load(int3(shadowPixel + int2(sx, sy), 0));
-            visible += shadowDistance <= storedDepth + 0.095 ? 1.0 : 0.0;
-        }
-        shadowFactor = 0.16 + 0.84 * visible / 9.0;
-    }
-    float4 diffuseTerms = materialDiffuse[i.mat];
-    // Cheap hemispherical sky fill: upward surfaces receive slightly more
-    // ambient daylight than vertical walls and undersides. Direct lighting
-    // and the existing shadow map remain separate for stronger depth.
-    float hemisphere=saturate(normal.y*0.5+0.5);
-    float skyFill=lerp(0.86,1.10,hemisphere);
-    float ambientEnergy=(diffuseTerms.x+diffuseTerms.y*diffuseTerms.w)*skyFill;
-    float sunEnergy=diffuseTerms.z*diffuse*shadowFactor*diffuseTerms.w;
-    if(colorControls.x>0.5){
-        // Neutral concrete previously received ~.74 ambient + .56 sun:
-        // correct the LIGHT budget, not the pixels after they have clipped.
-        float sunlightVisibility=saturate((shadowFactor-.16)/.84);
-        ambientEnergy=lerp(.055,.335,diffuseTerms.w)*lerp(.77,1.03,hemisphere);
-        sunEnergy=.88*diffuse*sunlightVisibility*diffuseTerms.w;
-    }
-    float3 color = base*(ambientEnergy+sunEnergy)
-                 + base*materialGlow[i.mat].rgb*materialGlow[i.mat].a;
-    if(peripheralControls.w>.5 && i.primitiveId!=0xffffffff)
-        color+=base*lumaTriangleRadiance[i.primitiveId].rgb;
-    color += materialEmission[i.mat].rgb * max(materialEmission[i.mat].a,0.0);
-    // The old warm (28,13,4) constant tinted *every* night material brown.
-    // Keep a tiny near-neutral floor instead; actual lamps add local warmth.
-    color += float3(4.0, 5.0, 7.0) / 255.0 * (1.0 - diffuseTerms.w);
-    float3 viewDir = normalize(eye - i.world);
-    float3 reflectedLight = reflect(-normalize(lightDir), normal);
-    float roughness = roughnessMap.Sample(wrapSampler, float3(i.uv, i.mat));
-    float specularPower = materialSpecular[i.mat].y;
-    if (materialSpecular[i.mat].z > 0.5) {
-        specularPower = clamp(2.0 / max(roughness * roughness, 0.0001) - 2.0, 8.0, 80.0);
-    }
-    float specular = pow(saturate(dot(viewDir, reflectedLight)), specularPower)
-                   * materialSpecular[i.mat].x * shadowFactor * diffuseTerms.w;
-    // Use PBR metalness for the highlight tint and a cheap 5th-power
-    // Schlick grazing response. This avoids another expensive pow() call.
-    float metallic=saturate(materialSpecular[i.mat].w);
-    float grazing=1.0-saturate(dot(viewDir,normal));
-    float f2=grazing*grazing;
-    float fresnel=f2*f2*grazing;
-    float3 specTint=lerp(float3(178.0,202.0,214.0)/255.0,
-                         saturate(base*1.2),metallic);
-    if(colorControls.x>0.5){
-        // Dielectrics use neutral Fresnel F0 ~4%, not metallic steel blue.
-        // Keep glass specular response using transmission; maintain metals.
-        float glazing=1.0-saturate(materialOpacity[i.mat].x);
-        specTint=lerp(float3(.04,.04,.04),saturate(base),metallic);
-        specTint=lerp(specTint,float3(.24,.26,.28),saturate(glazing*1.8));
-    }
-    color += specTint * specular * (0.88+0.22*fresnel);
-    [loop] for (uint l = 0; l < lightCount; ++l) {
-        float3 delta = lightPositionRadius[l].xyz - i.world;
-        float radius = lightPositionRadius[l].w;
-#if defined(M3D_V17_LIGHT_AABB_CULL)
-        // Conservative light-volume rejection. A light outside ANY axis
-        // cannot contribute. Expand radius to preserve the legacy squared
-        // distance epsilon and avoid losing boundary pixels.
-        [branch] if (radius > 0.0 &&
-            all(abs(delta) <= radius * 1.000001)) {
-#endif
-#if defined(M3D_V17_OPTIMIZE_PIXELS)
-        // Reject far lights before computing length()/sqrt. Allow a
-        // conservative epsilon to keep the legacy threshold identical.
-        float radius2 = radius * radius;
-        float distance2 = dot(delta, delta);
-        [branch] if (radius > 0.0 && distance2 <= radius2 * 1.000001) {
-#endif
-            [branch] if (dot(normal, delta) > 0.0) {
-                float distanceToLight = length(delta);
-                if (distanceToLight < radius && distanceToLight > 0.0001) {
-                    float edge = 1.0 - distanceToLight / radius;
-                    float lambert = saturate(dot(normal, delta / distanceToLight));
-                    float3 localIrradiance=lightColorIntensity[l].rgb
-                        *(edge*edge*lightColorIntensity[l].a*lambert*.27);
-                    color += colorControls.x>0.5 ? base*localIrradiance : localIrradiance;
-                }
-            }
-#if defined(M3D_V17_OPTIMIZE_PIXELS)
-        }
-#endif
-#if defined(M3D_V17_LIGHT_AABB_CULL)
-        }
-#endif
-    }
-    if(hybridControls.x>0.5){
-        // Indirect probes modify AMBIENT energy instead of adding an extra
-        // full-strength light pass. This prevents washed-out concrete.
-        float3 position=saturate((i.world-probeOrigin.xyz)*probeInvSpan.xyz);
-        float4 probe=indirectProbes.SampleLevel(probeSampler,position,0);
-        if(hybridControls.w>.5){
-            const float4 nextProbe=indirectProbesNext.SampleLevel(probeSampler,position,0);
-            probe=lerp(probe,nextProbe,hybridControls.y);
-        }
-        float skyVisibility=saturate(probe.a);
-        float upward=saturate(normal.y*.5+.5);
-        float existingAmbient=ambientEnergy;
-        // Normalize the time-dependent sky color so daylight changes hue,
-        // but doesn't create energy from a second hemispherical fill.
-        float skyMean=max(dot(indirectSky.rgb,float3(.333333,.333333,.333333)),.001);
-        float3 skyTint=lerp(float3(1.0,1.0,1.0),
-                            indirectSky.rgb/skyMean,.22);
-        // Retain up to 92% of the legacy ambient in open air, but only
-        // 48% in occluded interiors. Static probe volume interpolates in XYZ.
-        float3 accessibleSky=existingAmbient
-                             *lerp(.48,.92,skyVisibility)*skyTint;
-        // Low-energy, material-colored bounce gives warmth to nearby walls
-        // without washing out roofs. Decays in exposed outdoor probes.
-        float3 reflected=indirectBounce.rgb*probe.rgb
-                         *(.12+.18*(1.0-upward))
-                         *(.80-.30*skyVisibility);
-        float3 indirect=accessibleSky+reflected;
-        if(hybridControls.w>.5){
-            // The offline cache stores real surface-to-probe illumination.
-            // Do not re-color it using the old empirical sky/bounce terms.
-            indirect=max(probe.rgb,0.0);
-        }
-        color+=base*(indirect-existingAmbient);
-        // The existing shadow map and dynamic direct sun remain unchanged;
-        // gently tint only the direct contribution at warm solar hours.
-        float sunContribution=diffuseTerms.z*diffuse*shadowFactor*diffuseTerms.w;
-        color+=base*sunContribution*(indirectSun.rgb-1.0)*.40;
-    }
-    if(hybridControls.z>0.5){
-        // Conservative display-referred shoulder, independently toggled.
-        // IMPORTANT: no sRGB gamma here; the legacy back buffer is UNORM
-        // and the V17.309 pow(1/2.2) incorrectly lifted ALL midtones.
-        float3 linearPositive=max(color,0.0);
-        color=linearPositive/(1.0+.70*max(linearPositive-.64,0.0));
-    }
-    if(colorControls.x>0.5){
-        // Color is LINEAR; SRGB RTV encodes exactly once. A shared
-        // luminance shoulder preserves chroma ratios while avoiding clips.
-        float3 positive=max(color,0.0);
-        float luminance=dot(positive,float3(.2126,.7152,.0722));
-        float adjusted=luminance*colorControls.y;
-        float compressed=adjusted/(1.0+.70*max(adjusted-.63,0.0));
-        color=positive*(compressed/max(luminance,0.000001));
-    }
-    if(poolWater){
-        // Grazing-angle Fresnel, soft cool highlights and bottom visibility
-        // through the transparent polygon. No DXR/SSR dependency.
-        const float incidence=1.0-saturate(dot(normal,viewDir));
-        const float fresnelWater=.02+.98*pow(incidence,5.0);
-        float stripe=pow(saturate(.5+.5*sin(i.world.x*1.4+i.world.z*.37)),14.0);
-        color=lerp(color,float3(.24,.57,.69),.07+fresnelWater*.20);
-        color+=float3(.19,.32,.37)*stripe*(.025+.13*fresnelWater);
-        // Underwater ladders must remain visible through the surface from the deck.
-        // Avoid the former 45% high-angle opaque cyan veil.
-        const float opacity=lerp(.08,.24,saturate(fresnelWater*1.75));
-        return float4(color,opacity);
-    }
-    return float4(color, materialOpacity[i.mat].x);
-}
-)";
+
+
 // World-locked, hemispherical cirrus. The procedural field is evaluated only
 // on uncovered background pixels; its cloud mask is never applied over objects.
-constexpr char kCloudSkyShader[] = R"(
-cbuffer Sky : register(b1) {
-    float3 forward; float tanHalf;
-    float3 right; float aspect;
-    float3 up; float pad0;
-    float3 sun; float day;
-    float3 zenith; float opacity;
-    float3 horizon; float coverage;
-    float4 wind;
-};
-struct SkyOut {float4 pos:SV_POSITION; float2 ndc:TEXCOORD0;};
-SkyOut VSSky(uint vid:SV_VertexID){
-    SkyOut o;
-    o.ndc=vid==0?float2(-1,-1):vid==1?float2(-1,3):float2(3,-1);
-    o.pos=float4(o.ndc,0,1);
-    return o;
-}
-float skyHash(float2 p){
-    float3 q=frac(float3(p.xyx)*.1031);
-    q+=dot(q,q.yzx+33.33);
-    return frac((q.x+q.y)*q.z);
-}
-float skyNoise(float2 p){
-    float2 k=floor(p),f=frac(p);f=f*f*(3-2*f);
-    return lerp(lerp(skyHash(k),skyHash(k+float2(1,0)),f.x),
-                lerp(skyHash(k+float2(0,1)),skyHash(k+1),f.x),f.y);
-}
-float4 PSSky(SkyOut i):SV_TARGET {
-    if(wind.w>.5) return float4(0,0,0,0);
-    float3 d=normalize(forward+right*(i.ndc.x*tanHalf)
-                             +up*(i.ndc.y*tanHalf/aspect));
-    float gradient=smoothstep(-.06,.60,d.y);
-    float3 col=lerp(horizon,zenith,gradient);
-    if(d.y>-.02){
-        float2 dome=d.xz/max(d.y+.18,.18);
-        float2 p=float2(dome.x*3.0,dome.y*2.0)+wind.xy*18.0;
-        float n=.56*skyNoise(p*.73)+.30*skyNoise(p*1.53+float2(7.1,11.3))
-               +.14*skyNoise(p*3.11-float2(3.7,8.2));
-        float cloud=smoothstep(.60-coverage*.27,.73-coverage*.22,n)
-                   *smoothstep(.01,.16,d.y);
-        float3 cloudColor=lerp(float3(.018,.025,.045),
-                                float3(.78,.84,.91),day);
-        col=lerp(col,cloudColor,cloud*opacity);
-    }
-    // Stable world-space star field. It appears only in the night sky, with
-    // soft subpixel points and natural occlusion from the animated clouds.
-    if(d.y>0.0 && day<0.20) {
-        float2 starUV=float2(atan2(d.z,d.x)/6.28318530718+0.5+wind.z/24.0,
-            asin(clamp(d.y,-1.0,1.0))/3.14159265359+0.5)*float2(360.0,180.0);
-        float2 starCell=floor(starUV);
-        float chance=skyHash(starCell+float2(19.79,91.73));
-        float2 center=float2(
-            skyHash(starCell+float2(41.11,12.77)),
-            skyHash(starCell+float2(13.47,59.19)));
-        float radius=lerp(.10,.18,skyHash(starCell+float2(29.5,97.3)));
-        float footprint=max(max(fwidth(starUV.x),fwidth(starUV.y))*.5,.018);
-        float disc=1.0-smoothstep(radius-footprint,radius+footprint,
-                                  length(frac(starUV)-center));
-        float bright=lerp(.60,1.55,skyHash(starCell+float2(2.19,6.37)));
-        float horizonFade=smoothstep(.09,.29,d.y);
-        float night=1.0-smoothstep(.01,.18,day);
-        float2 dome=d.xz/max(d.y+.18,.18);
-        float2 p=float2(dome.x*3.0,dome.y*2.0)+wind.xy*18.0;
-        float cloudNoise=.56*skyNoise(p*.73)
-            +.30*skyNoise(p*1.53+float2(7.1,11.3))
-            +.14*skyNoise(p*3.11-float2(3.7,8.2));
-        float cloudMask=smoothstep(.60-coverage*.27,
-                                   .73-coverage*.22,cloudNoise)*opacity;
-        float3 hue=lerp(float3(.65,.79,1.0),float3(1.0,.93,.82),
-            skyHash(starCell+float2(73.9,5.8)));
-        col+=hue*disc*step(.987,chance)*bright*horizonFade*night*
-            (1.0-saturate(cloudMask));
-    }
-    // The solar disc stays on the moving directional-light vector.
-    if(sun.y>0) {
-        float x=saturate(dot(d,normalize(sun)));
-        float disc=smoothstep(.99984,.99997,x);
-        float halo=pow(x,128.0)*.20;
-        float warm=saturate(1.0-sun.y*3.2);
-        float3 c=lerp(float3(.95,.96,1),float3(1,.63,.32),warm);
-        col+=c*(disc*.75+halo)*day;
-    }
-    return float4(max(col,0),1);
-}
-)";
 
-constexpr char kPeripheralComposite[] = R"(
-Texture2D<float4> lo : register(t0);
-Texture2D<float4> hi : register(t1);
-SamplerState bilinear : register(s0);
-struct CV {float4 p:SV_POSITION;float2 uv:TEXCOORD;};
-CV VSC(uint id:SV_VertexID) {
-    CV v;v.uv=float2(id==2?2.:0.,id==1?2.:0.);
-    v.p=float4(v.uv.x*2.-1.,1.-v.uv.y*2.,0.,1.);return v;
-}
-float4 PSC(CV v):SV_TARGET {
-    // Camera-centred elliptical focus: approximately half the picture stays
-    // razor sharp, followed by a soft 16%-radius transition like a headlamp.
-    // The edge always uses fresh pixels from this frame (never reprojection).
-    float2 focus=(v.uv-.5)/float2(.47,.48);
-    float radius=length(focus);
-    float fade=smoothstep(.84,1.0,radius);
-    return lerp(hi.Sample(bilinear,v.uv),lo.Sample(bilinear,v.uv),fade);
-}
-)";
-void put(GpuVertex& v,V p,V n,float u,float vv,uint32_t mat) {
-    v={{p.x,p.y,p.z},{n.x,n.y,n.z},{u,vv},mat,0};
-}
-float uvScaleForMaterial(const Scene& scene,uint32_t mat) {
-    if(mat<scene.mat.size()){
-        const std::string& name=scene.mat[mat].name;
-        if(name=="seatSteel")return .95f;
-        if(name=="seatFabricClean"||name=="seatTrim"||name=="seatVinylBrown"||name=="seatSupportPaint")return .85f;
-        if(name=="seatWood")return .65f;
-        if(name=="mural")return .075f;
-        // The old 0.16 scale stretched the 1k surface maps over 6.25 m.
-        // Fine wear and normal detail then vanished at native output sizes.
-        if(name=="concrete")return .34f;
-        if(name=="stone"||name=="brick")return .28f;
-        if(name=="glass"||name=="raptureGlass"||name=="raptureStone")return .16f;
-    }
-    return .65f;
-}
 
-class MeshBuilder {
-public:
-    std::vector<GpuVertex> vertices;
-    std::vector<TransparentTriangle> transparent;
-    bool transparentMaterial=false;
-    uint32_t currentPrimitiveId=0;
-    void tri(V a,V b,V c,V na,V nb,V nc,float ua,float va,float ub,float vb,float uc,float vc,uint32_t mat) {
-        if(vertices.size()+transparent.size()*3>12000000u)return;
-        GpuVertex v[3]{};put(v[0],a,na,ua,va,mat);put(v[1],b,nb,ub,vb,mat);put(v[2],c,nc,uc,vc,mat);
-        for(auto& vertex:v)vertex.primitiveId=currentPrimitiveId;
-        if(transparentMaterial){TransparentTriangle t{};std::copy(v,v+3,t.v);t.center=(a+b+c)/3.f;transparent.push_back(t);}
-        else vertices.insert(vertices.end(),v,v+3);
-    }
-    static V boxUv(V p,V n,float scale) {
-        if(std::abs(n.y)>=std::abs(n.x)&&std::abs(n.y)>=std::abs(n.z))return {p.x*scale,p.z*scale,0};
-        if(std::abs(n.x)>=std::abs(n.z))return {p.z*scale,p.y*scale,0};
-        return {p.x*scale,p.y*scale,0};
-    }
-    void face(V a,V b,V c,V d,V n,uint32_t mat,float uvScale) {
-        V ta=boxUv(a,n,uvScale),tb=boxUv(b,n,uvScale),tc=boxUv(c,n,uvScale),td=boxUv(d,n,uvScale);
-        tri(a,b,c,n,n,n,ta.x,ta.y,tb.x,tb.y,tc.x,tc.y,mat);tri(a,c,d,n,n,n,ta.x,ta.y,tc.x,tc.y,td.x,td.y,mat);
-    }
-    void box(V mn,V mx,uint32_t mat,float uvScale) {
-        face({mn.x,mn.y,mn.z},{mn.x,mx.y,mn.z},{mx.x,mx.y,mn.z},{mx.x,mn.y,mn.z},{0,0,-1},mat,uvScale);
-        face({mx.x,mn.y,mx.z},{mx.x,mx.y,mx.z},{mn.x,mx.y,mx.z},{mn.x,mn.y,mx.z},{0,0,1},mat,uvScale);
-        face({mn.x,mn.y,mx.z},{mn.x,mx.y,mx.z},{mn.x,mx.y,mn.z},{mn.x,mn.y,mn.z},{-1,0,0},mat,uvScale);
-        face({mx.x,mn.y,mn.z},{mx.x,mx.y,mn.z},{mx.x,mx.y,mx.z},{mx.x,mn.y,mx.z},{1,0,0},mat,uvScale);
-        face({mn.x,mn.y,mx.z},{mn.x,mn.y,mn.z},{mx.x,mn.y,mn.z},{mx.x,mn.y,mx.z},{0,-1,0},mat,uvScale);
-        face({mn.x,mx.y,mn.z},{mn.x,mx.y,mx.z},{mx.x,mx.y,mx.z},{mx.x,mx.y,mn.z},{0,1,0},mat,uvScale);
-    }
-    void roundedBox(V mn,V mx,float radius,uint32_t mat,float uvScale) {
-        V center=(mn+mx)*.5f,half=(mx-mn)*.5f;
-        radius=std::max(0.f,std::min(radius,std::min({half.x,half.y,half.z})));
-        V inner{std::max(0.f,half.x-radius),std::max(0.f,half.y-radius),std::max(0.f,half.z-radius)};
-        auto coords=[](float h,float in){
-            std::vector<float> out{-h,-in,0.f,in,h};
-            std::sort(out.begin(),out.end());
-            out.erase(std::unique(out.begin(),out.end(),[](float a,float b){return std::abs(a-b)<1e-6f;}),out.end());
-            return out;
-        };
-        const auto xs=coords(half.x,inner.x),ys=coords(half.y,inner.y),zs=coords(half.z,inner.z);
-        auto emitFace=[&](int axis,float sign,const std::vector<float>& u,const std::vector<float>& v){
-            auto point=[&](float a,float b){V p=center;if(axis==0){p.x+=sign*half.x;p.y+=a;p.z+=b;}else if(axis==1){p.y+=sign*half.y;p.x+=a;p.z+=b;}else{p.z+=sign*half.z;p.x+=a;p.y+=b;}V q{clampf(p.x,center.x-inner.x,center.x+inner.x),clampf(p.y,center.y-inner.y,center.y+inner.y),clampf(p.z,center.z-inner.z,center.z+inner.z)};V n=norm(p-q);return std::pair<V,V>{q+n*radius,n};};
-            for(size_t y=0;y+1<v.size();y++)for(size_t x=0;x+1<u.size();x++){
-                auto p00=point(u[x],v[y]),p10=point(u[x+1],v[y]),p11=point(u[x+1],v[y+1]),p01=point(u[x],v[y+1]);
-                V uv00=boxUv(p00.first,p00.second,uvScale),uv10=boxUv(p10.first,p10.second,uvScale),uv11=boxUv(p11.first,p11.second,uvScale),uv01=boxUv(p01.first,p01.second,uvScale);
-                tri(p00.first,p10.first,p11.first,p00.second,p10.second,p11.second,uv00.x,uv00.y,uv10.x,uv10.y,uv11.x,uv11.y,mat);
-                tri(p00.first,p11.first,p01.first,p00.second,p11.second,p01.second,uv00.x,uv00.y,uv11.x,uv11.y,uv01.x,uv01.y,mat);
-            }
-        };
-        for(float s:{-1.f,1.f}){emitFace(0,s,ys,zs);emitFace(1,s,xs,zs);emitFace(2,s,xs,ys);}
-    }
-    void ellipsoid(V c,V r,uint32_t mat) {
-        const float radius=std::max({std::abs(r.x),std::abs(r.y),std::abs(r.z)});
-        const int rings=std::clamp(int(std::lround(8.f+radius*8.f)),8,32),slices=rings*2;
-        auto point=[&](int y,int x){float phi=PI*float(y)/rings,theta=2*PI*float(x)/slices;return V{c.x+r.x*std::sin(phi)*std::cos(theta),c.y+r.y*std::cos(phi),c.z+r.z*std::sin(phi)*std::sin(theta)};};
-        auto normal=[&](V p){return norm({(p.x-c.x)/std::max(1e-5f,r.x*r.x),(p.y-c.y)/std::max(1e-5f,r.y*r.y),(p.z-c.z)/std::max(1e-5f,r.z*r.z)});};
-        for(int y=0;y<rings;y++)for(int x=0;x<slices;x++){
-            V p00=point(y,x),p01=point(y,x+1),p10=point(y+1,x),p11=point(y+1,x+1);
-            V n00=normal(p00),n01=normal(p01),n10=normal(p10),n11=normal(p11);
-            float u0=2.5f*float(x)/slices,u1=2.5f*float(x+1)/slices,v0=2.5f*float(y)/rings,v1=2.5f*float(y+1)/rings;
-            tri(p00,p10,p11,n00,n10,n11,u0,v0,u0,v1,u1,v1,mat);
-            tri(p00,p11,p01,n00,n11,n01,u0,v0,u1,v1,u1,v0,mat);
-        }
-    }
-    void frustum(V a,V axis,float len,float r0,float r1,uint32_t mat) {
-        axis=norm(axis);V ref=std::abs(axis.y)<.9f?V{0,1,0}:V{1,0,0};V u=norm(cross(axis,ref)),v=cross(axis,u);constexpr int slices=12;V b=a+axis*len;
-        for(int i=0;i<slices;i++){
-            float t0=2*PI*i/slices,t1=2*PI*(i+1)/slices;V d0=u*std::cos(t0)+v*std::sin(t0),d1=u*std::cos(t1)+v*std::sin(t1);
-            V p0=a+d0*r0,p1=a+d1*r0,p2=b+d1*r1,p3=b+d0*r1;V n0=norm(d0*len-axis*(r1-r0)),n1=norm(d1*len-axis*(r1-r0));
-            tri(p0,p1,p2,n0,n1,n1,float(i)/slices,0,float(i+1)/slices,0,float(i+1)/slices,1,mat);
-            tri(p0,p2,p3,n0,n1,n0,float(i)/slices,0,float(i+1)/slices,1,float(i)/slices,1,mat);
-            tri(a,p1,p0,axis*-1,axis*-1,axis*-1,0,0,1,0,0,1,mat);tri(b,p3,p2,axis,axis,axis,0,0,0,1,1,1,mat);
-        }
-    }
-    void capsule(V a,V b,float radius,uint32_t mat) {
-        V axis=b-a;const float len=length(axis);if(len<1e-6f){ellipsoid(a,{radius,radius,radius},mat);return;}axis=axis/len;
-        V ref=std::abs(axis.y)<.9f?V{0,1,0}:V{1,0,0};V u=norm(cross(axis,ref)),v=norm(cross(axis,u));
-        constexpr int slices=12,capRings=4;V centers[2]={a,b};
-        for(int end=0;end<2;end++){
-            for(int ring=0;ring<capRings;ring++){
-                float p0=(PI*.5f)*float(ring)/capRings,p1=(PI*.5f)*float(ring+1)/capRings;
-                for(int s=0;s<slices;s++){
-                    float t0=2*PI*float(s)/slices,t1=2*PI*float(s+1)/slices;
-                    V d0=u*std::cos(t0)+v*std::sin(t0),d1=u*std::cos(t1)+v*std::sin(t1);
-                    auto point=[&](float phi,V d){float axial=(end?1.f:-1.f)*std::cos(phi);V n=d*std::sin(phi)+axis*axial;return std::pair<V,V>{centers[end]+axis*(axial*radius)+d*(std::sin(phi)*radius),n};};
-                    auto p00=point(p0,d0),p01=point(p0,d1),p10=point(p1,d0),p11=point(p1,d1);
-                    float u0=float(s)/slices,u1=float(s+1)/slices;float vBase=end?len*.55f:-radius*.55f;float v0=vBase+radius*.55f*float(ring)/capRings,v1=vBase+radius*.55f*float(ring+1)/capRings;
-                    tri(p00.first,p10.first,p11.first,p00.second,p10.second,p11.second,u0,v0,u0,v1,u1,v1,mat);
-                    tri(p00.first,p11.first,p01.first,p00.second,p11.second,p01.second,u0,v0,u1,v1,u1,v0,mat);
-                }
-            }
-        }
-        for(int s=0;s<slices;s++){
-            float t0=2*PI*float(s)/slices,t1=2*PI*float(s+1)/slices;V d0=u*std::cos(t0)+v*std::sin(t0),d1=u*std::cos(t1)+v*std::sin(t1);
-            V p0=a+d0*radius,p1=a+d1*radius,p2=b+d1*radius,p3=b+d0*radius;
-            tri(p0,p1,p2,d0,d1,d1,float(s)/slices,0,float(s+1)/slices,0,float(s+1)/slices,len*.55f,mat);tri(p0,p2,p3,d0,d1,d0,float(s)/slices,0,float(s+1)/slices,len*.55f,float(s)/slices,len*.55f,mat);
-        }
-    }
-    void ground(const Scene& scene) {
-        if (scene.obj.empty()) return;
-        V mn=scene.obj.front().mn,mx=scene.obj.front().mx;
-        for(const Obj& o:scene.obj){
-            mn.x=std::min(mn.x,o.mn.x);mn.z=std::min(mn.z,o.mn.z);
-            mx.x=std::max(mx.x,o.mx.x);mx.z=std::max(mx.z,o.mx.z);
-        }
-        const float step=.5f;
-        const float x0=std::floor(mn.x-4.f),z0=std::floor(mn.z-4.f);
-        const float x1=std::ceil(mx.x+4.f),z1=std::ceil(mx.z+4.f);
-        for(float z=z0;z<z1;z+=step)for(float x=x0;x<x1;x+=step){
-            if(vertices.size()>12000000u)return;
-            const uint32_t mat=uint32_t(std::max(0,groundMaterial(scene,{x+step*.5f,0,z+step*.5f})));
-            V a{x,0,z},b{x,0,z+step},c{x+step,0,z+step},d{x+step,0,z};
-            tri(a,b,c,{0,1,0},{0,1,0},{0,1,0},x*.34f,z*.34f,x*.34f,(z+step)*.34f,(x+step)*.34f,(z+step)*.34f,mat);
-            tri(a,c,d,{0,1,0},{0,1,0},{0,1,0},x*.34f,z*.34f,(x+step)*.34f,(z+step)*.34f,(x+step)*.34f,z*.34f,mat);
-        }
-    }
-};
 
-// A reusable canopy with the same deterministic ripple/leaf construction
-// as the V16 bridge. High LOD matches its 18x9 tessellation and 36 leaf
-// details; lower LODs only remove geometric detail at a distance.
-static std::vector<GpuVertex> makeFoliageTemplate(int segments,int rings,int leaves){
-    MeshBuilder mesh;
-    const auto point=[&](int ring,int segment){
-        const float latitude=float(ring)*PI/rings;
-        const float azimuth=float(segment)*2.f*PI/segments;
-        const float ripple=1.f+.075f*std::sin(5.f*azimuth+2.f*latitude)
-                             +.055f*std::cos(9.f*azimuth-3.f*latitude)
-                             +.04f*std::sin(7.f*latitude+4.f*azimuth);
-        const float widest=std::sin(latitude)*ripple;
-        return V{widest*std::cos(azimuth),std::cos(latitude),
-                 widest*std::sin(azimuth)};
-    };
-    auto add=[&](V p,V q,V r,V uv0,V uv1,V uv2){
-        V n=norm(cross(q-p,r-p));
-        if(dot(n,p)<0.f){std::swap(q,r);std::swap(uv1,uv2);n=norm(cross(q-p,r-p));}
-        mesh.tri(p,q,r,n,n,n,uv0.x,uv0.y,uv1.x,uv1.y,uv2.x,uv2.y,0);
-    };
-    for(int ring=0;ring<rings;++ring)for(int segment=0;segment<segments;++segment){
-        const V a=point(ring,segment),b=point(ring+1,segment);
-        const V c=point(ring+1,segment+1),d=point(ring,segment+1);
-        if(ring>0)add(a,b,d,
-            {float(segment)/segments,float(ring)/rings},
-            {float(segment)/segments,float(ring+1)/rings},
-            {float(segment+1)/segments,float(ring)/rings});
-        if(ring<rings-1)add(b,c,d,
-            {float(segment)/segments,float(ring+1)/rings},
-            {float(segment+1)/segments,float(ring+1)/rings},
-            {float(segment+1)/segments,float(ring)/rings});
-    }
-    for(int i=0;i<leaves;++i){
-        const float azimuth=float(i)*2.39996323f;
-        const float elevation=.35f*std::sin(i*1.731f);
-        const float cy=std::sin(elevation),radius=std::cos(elevation);
-        const V n=norm({radius*std::cos(azimuth),cy,radius*std::sin(azimuth)});
-        const V center=n*.93f;
-        const V helper=std::abs(n.y)<.8f?V{0,1,0}:V{1,0,0};
-        const V tangent=norm(cross(n,helper));
-        const float width=(.12f+.035f*float(i%3))*2.f;
-        const float height=width*(1.15f+.20f*float(i%4));
-        const V base=center-tangent*(width*.45f);
-        const V end=center+tangent*(width*.4f)+V{0,height*.24f,0}+n*(height*.24f);
-        const V sides=center+V{0,height*.4f,0};
-        mesh.tri(base,sides,end,n,n,n,0,0,.5f,1.f,1,0,0);
-    }
-    return std::move(mesh.vertices);
-}
-// Consecutive triangle batches are built once from the immutable mesh.
- // Their bounding spheres conservatively reject fully off-screen batches.
- // No geometry is edited or deleted: switch off for exact A/B comparisons.
-struct DrawChunk {
-    UINT first=0, count=0;
-    V mn{}, mx{};
-};
-static bool visibleChunk(const DrawChunk& chunk,const Camera& camera) {
-    const V center=(chunk.mn+chunk.mx)*.5f;
-    const float radius=length(chunk.mx-chunk.mn)*.5f + .01f;
-    const V q=center-camera.eye;
-    const float z=dot(q,camera.f);
-    if(z+radius<.08f||z-radius>10000.f)return false;
-    const float x=dot(q,camera.r),y=dot(q,camera.u);
-    const float h=std::max(.001f,camera.tanHalf);
-    const float v=h/std::max(.001f,camera.aspect);
-    // Outward-facing frustum plane: sphere support radius is
-    // radius * sqrt(1+tanHalf^2). This is conservative on near-plane
-    // crossings and cannot cut partially visible geometry.
-    if(std::abs(x)>z*h+radius*std::sqrt(1.f+h*h))return false;
-    if(std::abs(y)>z*v+radius*std::sqrt(1.f+v*v))return false;
-    return true;
-}
 class DirectX11Preview {
     using Clock=std::chrono::steady_clock;
     struct ReadbackSlot {
@@ -894,7 +260,7 @@ public:
         if(lumaBvh&&(lumaBvh->nodes.empty()||lumaBvh->primitiveCount==0)){
             error=L"Le BVH4 LumaTrace n’a pas été préparé pour cette scène.";return false;
         }
-        if(!ensureDevice(error)||!ensureScene(scene,error,lumaBvh!=nullptr)||!ensureShadow(shadows,error)||
+        if(!ensureDevice(error)||!ensureScene(scene,error,lumaBvh)||!ensureShadow(shadows,error)||
            (hybrid&&!ensureProbeVolume(scene,error))||
            (hybrid&&!ensureGiHours(error))||
            !ensureTargets(w,h,quality.msaaSamples,error)||
@@ -902,7 +268,7 @@ public:
            !ensureAnisotropy(quality.anisotropy,error)||
            (nativeHwnd?!ensureSwapchain(nativeHwnd,w,h,error):
                         !ensureReadback(depth,w,h,error)))return false;
-        if(lumaBvh&&!ensureLumaTrace(scene,*lumaBvh,error))return false;
+        if(lumaBvh&&!lumaTraceCompute_.prepare(device_.Get(),*lumaBvh,lumaCpuScene_,error))return false;
         const unsigned slotIndex=nextReadbackSlot_;
         ReadbackSlot& slot=readbackSlots_[slotIndex];
         slot.cpuStarted=started;
@@ -1102,7 +468,7 @@ public:
         context_->Unmap(skyConstants_.Get(),0);
         const float clear[4]={cb.sky[0],cb.sky[1],cb.sky[2],1.f};
         if(slot.queryReady){context_->Begin(slot.disjoint.Get());context_->End(slot.start.Get());}
-        if(lumaBvh&&!dispatchLumaTrace(scene,error))return false;
+        if(lumaBvh&&!lumaTraceCompute_.dispatch(context_.Get(),verticesSrv_.Get(),scene,error))return false;
         UINT submittedVertices=0,submittedBoxInstances=0;
         uint64_t drawCalls=0,submittedEllipseTriangles=0,submittedEllipseInstances=0;
         uint64_t submittedFoliageTriangles=0,submittedFoliageInstances=0;
@@ -1155,7 +521,7 @@ public:
                 roughness_.Get(),normal_.Get(),hybrid?probeSrv_.Get():nullptr,
                 hybrid?(hasBakedGi_?probeNextSrv_.Get():probeSrv_.Get()):nullptr,
                 preservedAlbedo_?preservedAlbedo_.Get():albedo_.Get(),
-                lumaBvh?lumaRadianceSrv_.Get():nullptr};
+                lumaBvh?lumaTraceCompute_.radianceSrv():nullptr};
             context_->PSSetShaderResources(0,8,srvs);
             ID3D11SamplerState* samplers[]={sampler_.Get(),probeSampler_.Get()};
             context_->PSSetSamplers(0,2,samplers);
@@ -1755,7 +1121,7 @@ private:
         HRESULT hr=D3D11CreateDevice(nullptr,driver,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,&feature,&context_);
         if(FAILED(hr)){error=L"Aucun périphérique Direct3D 11 matériel n’est disponible.";return false;}
         // Keep each embedded HLSL literal below MSVC C2026 limits, then compile the unchanged source.
-        const std::string shaderSource = std::string(kShader) + kShaderPart2;
+        const std::string shaderSource = std::string(dx11::shaders::raster::kShader) + dx11::shaders::raster::kShaderPart2;
         ComPtr<ID3DBlob> vsCode,boxVsCode,ellipseVsCode,psCode,errors;
         auto shaderError=[&](const wchar_t* prefix){
             std::wstring result(prefix);
@@ -1804,11 +1170,11 @@ private:
         if(FAILED(hr)){error=shaderError(L"Compilation du pixel shader DirectX 11 impossible");return false;}
         ComPtr<ID3DBlob> skyVsCode,skyPsCode;
         errors.Reset();
-        hr=D3DCompile(kCloudSkyShader,sizeof(kCloudSkyShader)-1,"CSE_WARP_CloudSky",
+        hr=D3DCompile(dx11::shaders::sky::kCloudSkyShader,sizeof(dx11::shaders::sky::kCloudSkyShader)-1,"CSE_WARP_CloudSky",
             nullptr,nullptr,"VSSky","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&skyVsCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation sommet ciel impossible");return false;}
         errors.Reset();
-        hr=D3DCompile(kCloudSkyShader,sizeof(kCloudSkyShader)-1,"CSE_WARP_CloudSky",
+        hr=D3DCompile(dx11::shaders::sky::kCloudSkyShader,sizeof(dx11::shaders::sky::kCloudSkyShader)-1,"CSE_WARP_CloudSky",
             nullptr,nullptr,"PSSky","ps_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&skyPsCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation nuages DirectX 11 impossible");return false;}
         if(FAILED(device_->CreateVertexShader(skyVsCode->GetBufferPointer(),
@@ -1818,10 +1184,10 @@ private:
             error=L"Impossible de créer les shaders de nuages.";return false;
         }
         ComPtr<ID3DBlob> mergeVS,mergePS;
-        errors.Reset();hr=D3DCompile(kPeripheralComposite,sizeof(kPeripheralComposite)-1,
+        errors.Reset();hr=D3DCompile(dx11::shaders::composite::kPeripheralComposite,sizeof(dx11::shaders::composite::kPeripheralComposite)-1,
             "v17_multires",nullptr,nullptr,"VSC","vs_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&mergeVS,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation VS multires impossible");return false;}
-        errors.Reset();hr=D3DCompile(kPeripheralComposite,sizeof(kPeripheralComposite)-1,
+        errors.Reset();hr=D3DCompile(dx11::shaders::composite::kPeripheralComposite,sizeof(dx11::shaders::composite::kPeripheralComposite)-1,
             "v17_multires",nullptr,nullptr,"PSC","ps_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&mergePS,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation PS multires impossible");return false;}
         if(FAILED(device_->CreateVertexShader(mergeVS->GetBufferPointer(),mergeVS->GetBufferSize(),nullptr,&mergeVs_)) ||
@@ -1902,7 +1268,8 @@ private:
         if(FAILED(device_->CreateSamplerState(&sd,&probeSampler_))){error=L"Création du sampler des sondes indirectes impossible.";return false;}
         return true;
     }
-    bool ensureScene(const Scene& scene,std::wstring& error,bool lumaTrace) {
+    bool ensureScene(const Scene& scene,std::wstring& error,const LumaTraceBvh4* lumaBvh) {
+        const bool lumaTrace=lumaBvh!=nullptr;
         const char* disableInstancing=std::getenv("M3D_V17_DISABLE_GPU_INSTANCING");
         const bool useInstancing=!lumaTrace &&
             !(disableInstancing && std::strcmp(disableInstancing,"1")==0);
@@ -1941,8 +1308,10 @@ private:
         foliageInstances_.Reset();
         for(auto& buffer:foliageVertices_)buffer.Reset();
         foliageVertexCounts_.fill(0);foliage_.clear();foliageInstanceCount_=0;
-        lumaObjectToTriangle_.clear();lumaTriangleCount_=0;
-        if(lumaTrace)lumaObjectToTriangle_.assign(scene.obj.size(),0xffffffffu);
+        lumaCpuScene_={};
+        if(lumaTrace&&!prepareLumaTraceCpuScene(scene,*lumaBvh,lumaCpuScene_,error))
+            return false;
+        const uint32_t lumaTriangleCount=lumaTrace?lumaCpuScene_.triangleCount:0;
         MeshBuilder mesh;
         std::vector<GpuBoxInstance> boxData;
         // V16 JSON geometry is triangulated for CPU/Compute, but the source
@@ -2019,9 +1388,7 @@ private:
                     error=L"LumaTrace BVH4 : les primitives analytiques ne sont pas encore prises en charge.";
                     return false;
                 }
-                mesh.currentPrimitiveId=mesh.transparentMaterial?0xffffffffu:lumaTriangleCount_;
-                if(!mesh.transparentMaterial)
-                    lumaObjectToTriangle_[objectIndex]=lumaTriangleCount_++;
+                mesh.currentPrimitiveId=lumaCpuScene_.objectToTriangle[objectIndex];
             }else mesh.currentPrimitiveId=0;
             if(o.kind==Kind::Triangle)mesh.tri(o.a,o.b,o.c,o.n0,o.n1,o.n2,o.uv0.x,o.uv0.y,o.uv1.x,o.uv1.y,o.uv2.x,o.uv2.y,m);
             else if(o.kind==Kind::Box){
@@ -2053,7 +1420,7 @@ private:
             mesh.transparentMaterial=false;
             if(mesh.vertices.size()+mesh.transparent.size()*3>12000000u){error=L"Scène trop grande pour l’aperçu DirectX 11 (limite de sécurité mémoire).";return false;}
         }
-        if(lumaTrace&&lumaTriangleCount_!=mesh.vertices.size()/3){
+        if(lumaTrace&&lumaTriangleCount!=mesh.vertices.size()/3){
             error=L"LumaTrace BVH4 : le flux de triangles opaque diverge du tampon GPU.";
             return false;
         }
@@ -2419,88 +1786,6 @@ private:
         lumaTraceGeometryEnabled_=lumaTrace;
         return true;
     }
-    struct LumaParams { uint32_t counts[4];float lights[64][4],colors[64][4]; };
-    static_assert(sizeof(LumaParams)==2064,"LumaTrace HLSL constant packing");
-    bool ensureLumaTrace(const Scene& scene,const LumaTraceBvh4& bvh,std::wstring& error){
-        if(verticesSrv_&&lumaSceneIdentity_==scene.gpuCacheIdentity&&lumaSceneRevision_==scene.gpuCacheRevision&&
-           lumaBvhSrv_&&lumaOrderSrv_&&lumaRadianceSrv_&&lumaRadianceUav_&&lumaCompute_&&lumaParams_)return true;
-        if(!verticesSrv_||!lumaTriangleCount_||bvh.nodes.empty()||bvh.primitiveCount!=scene.order.size()){
-            error=L"LumaTrace BVH4 : géométrie ou table de primitives incompatible.";return false;}
-        std::vector<uint32_t> order;order.reserve(scene.order.size());
-        for(uint32_t id:scene.order){if(id>=lumaObjectToTriangle_.size()){
-            error=L"LumaTrace BVH4 : indice de primitive hors limites.";return false;}
-            order.push_back(lumaObjectToTriangle_[id]);}
-        auto makeBuffer=[&](const void* data,size_t count,UINT stride,UINT bind,
-                            D3D11_USAGE usage,UINT cpu,ComPtr<ID3D11Buffer>& out)->bool{
-            if(!count||count>UINT_MAX/stride)return false;
-            D3D11_BUFFER_DESC d{};d.ByteWidth=UINT(count*stride);d.Usage=usage;d.BindFlags=bind;
-            d.MiscFlags=D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;d.StructureByteStride=stride;d.CPUAccessFlags=cpu;
-            D3D11_SUBRESOURCE_DATA init{};init.pSysMem=data;
-            return SUCCEEDED(device_->CreateBuffer(&d,data?&init:nullptr,&out));};
-        lumaRadianceCacheValid_=false;
-        lumaBvhBuffer_.Reset();lumaOrderBuffer_.Reset();lumaRadianceBuffer_.Reset();
-        lumaBvhSrv_.Reset();lumaOrderSrv_.Reset();lumaRadianceSrv_.Reset();lumaRadianceUav_.Reset();
-        if(!makeBuffer(bvh.nodes.data(),bvh.nodes.size(),sizeof(LumaTraceBvh4Node),D3D11_BIND_SHADER_RESOURCE,D3D11_USAGE_IMMUTABLE,0,lumaBvhBuffer_)||
-           !makeBuffer(order.data(),order.size(),sizeof(uint32_t),D3D11_BIND_SHADER_RESOURCE,D3D11_USAGE_IMMUTABLE,0,lumaOrderBuffer_)||
-           !makeBuffer(nullptr,lumaTriangleCount_,16,D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS,D3D11_USAGE_DEFAULT,0,lumaRadianceBuffer_)){
-            error=L"Allocation des tables GPU LumaTrace impossible.";return false;}
-        auto srv=[&](ID3D11Buffer* b,UINT count,ComPtr<ID3D11ShaderResourceView>& v){D3D11_SHADER_RESOURCE_VIEW_DESC d{};d.Format=DXGI_FORMAT_UNKNOWN;d.ViewDimension=D3D11_SRV_DIMENSION_BUFFER;d.Buffer.NumElements=count;return SUCCEEDED(device_->CreateShaderResourceView(b,&d,&v));};
-        if(!srv(lumaBvhBuffer_.Get(),UINT(bvh.nodes.size()),lumaBvhSrv_)||!srv(lumaOrderBuffer_.Get(),UINT(order.size()),lumaOrderSrv_)||!srv(lumaRadianceBuffer_.Get(),lumaTriangleCount_,lumaRadianceSrv_)){
-            error=L"Création des vues GPU LumaTrace impossible.";return false;}
-        D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};ud.Format=DXGI_FORMAT_UNKNOWN;ud.ViewDimension=D3D11_UAV_DIMENSION_BUFFER;ud.Buffer.NumElements=lumaTriangleCount_;
-        if(FAILED(device_->CreateUnorderedAccessView(lumaRadianceBuffer_.Get(),&ud,&lumaRadianceUav_))){error=L"UAV de radiance LumaTrace impossible.";return false;}
-        ComPtr<ID3DBlob> code,errors;HRESULT hr=D3DCompile(lumatrace_detail::kComputeShader,sizeof(lumatrace_detail::kComputeShader)-1,
-            "m3d_lumatrace_compute",nullptr,nullptr,"CSShadeTriangles","cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&code,&errors);
-        if(FAILED(hr)){
-            error=L"Compilation du compute shader LumaTrace impossible (HRESULT "+
-                std::to_wstring(uint32_t(hr))+L")";
-            if(errors&&errors->GetBufferPointer()){
-                error+=L": ";
-                const char* p=static_cast<const char*>(errors->GetBufferPointer());
-                const size_t n=std::min<size_t>(errors->GetBufferSize(),1024);
-                for(size_t i=0;i<n;++i)
-                    error.push_back(p[i]>=32&&p[i]<127?wchar_t(p[i]):L' ');
-            }
-            return false;
-        }
-        hr=device_->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&lumaCompute_);
-        if(FAILED(hr)){
-            error=L"Création du compute shader LumaTrace impossible (HRESULT "+
-                std::to_wstring(uint32_t(hr))+L").";
-            return false;
-        }
-        D3D11_BUFFER_DESC cd{};cd.ByteWidth=sizeof(LumaParams);cd.Usage=D3D11_USAGE_DYNAMIC;cd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;cd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
-        if(FAILED(device_->CreateBuffer(&cd,nullptr,&lumaParams_))){error=L"Constantes compute LumaTrace impossibles.";return false;}
-        lumaNodeCount_=UINT(bvh.nodes.size());lumaOrderCount_=UINT(order.size());
-        lumaSceneIdentity_=scene.gpuCacheIdentity;lumaSceneRevision_=scene.gpuCacheRevision;return true;
-    }
-    bool dispatchLumaTrace(const Scene& scene,std::wstring& error){
-        if(scene.root<0||size_t(scene.root)>=scene.node.size()){error=L"Racine BVH4 invalide.";return false;}
-        LumaParams p{};p.counts[0]=lumaTriangleCount_;p.counts[1]=lumaOrderCount_;p.counts[2]=lumaNodeCount_;
-        const Node& root=scene.node[size_t(scene.root)];const V center=(root.mn+root.mx)*.5f;
-        auto appendLight=[&](V pos,float radius,float intensity,V color){
-            if(p.counts[3]>=64)return;
-            const uint32_t i=p.counts[3]++;
-            p.lights[i][0]=pos.x;p.lights[i][1]=pos.y;p.lights[i][2]=pos.z;p.lights[i][3]=radius;
-            p.colors[i][0]=color.x/255.f;p.colors[i][1]=color.y/255.f;p.colors[i][2]=color.z/255.f;p.colors[i][3]=intensity;
-        };
-        // Preserve the LumaTrace test pair, then prioritize scene exterior
-        // luminaires so the 64-source cap cannot silently drop the new row.
-        appendLight(center+V{1.4f,.75f,0.f},12.f,1.15f,{31,158,255});
-        appendLight(center+V{-1.4f,.75f,0.f},12.f,1.15f,{255,99,26});
-        for(const Light& l:pointLights)appendLight(l.p,l.radius,l.intensity,l.color);
-        for(const Light& l:scene.lights)if(l.exterior)
-            appendLight(l.p,l.radius,l.intensity*lampFactor,l.color);
-        for(const Light& l:scene.lights)if(!l.exterior)
-            appendLight(l.p,l.radius,l.intensity,l.color);
-        std::array<uint32_t,sizeof(LumaParams)/sizeof(uint32_t)> radianceKey{};std::memcpy(radianceKey.data(),&p,sizeof(p));
-        if(lumaRadianceCacheValid_&&radianceKey==lumaRadianceKey_)return true;
-        D3D11_MAPPED_SUBRESOURCE m{};if(FAILED(context_->Map(lumaParams_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m))){error=L"Upload constantes LumaTrace impossible.";return false;}
-        std::memcpy(m.pData,&p,sizeof(p));context_->Unmap(lumaParams_.Get(),0);
-        ID3D11ShaderResourceView* srvs[]={verticesSrv_.Get(),lumaOrderSrv_.Get(),lumaBvhSrv_.Get()};ID3D11UnorderedAccessView* uavs[]={lumaRadianceUav_.Get()};ID3D11Buffer* cbs[]={lumaParams_.Get()};
-        context_->CSSetShader(lumaCompute_.Get(),nullptr,0);context_->CSSetShaderResources(0,3,srvs);context_->CSSetUnorderedAccessViews(0,1,uavs,nullptr);context_->CSSetConstantBuffers(0,1,cbs);context_->Dispatch((lumaTriangleCount_+63)/64,1,1);
-        ID3D11UnorderedAccessView* nu[]={nullptr};ID3D11ShaderResourceView* ns[]={nullptr,nullptr,nullptr};context_->CSSetUnorderedAccessViews(0,1,nu,nullptr);context_->CSSetShaderResources(0,3,ns);context_->CSSetShader(nullptr,nullptr,0);lumaRadianceKey_=radianceKey;lumaRadianceCacheValid_=true;return true;
-    }
     bool ensureTargets(int w,int h,unsigned msaa,std::wstring& error) {
         if(w==width_&&h==height_&&target_&&msaaPreference_==msaa)return true;
         if(!pending_.empty()){
@@ -2673,12 +1958,6 @@ private:
     ComPtr<ID3D11InputLayout> layout_,lumaLayout_,boxLayout_,ellipseLayout_;
     ComPtr<ID3D11Buffer> skyConstants_,constants_,vertices_,transparentVertices_,boxVertices_,boxInstances_,ellipseInstances_,foliageInstances_;
     ComPtr<ID3D11ShaderResourceView> verticesSrv_;
-    ComPtr<ID3D11Buffer> lumaBvhBuffer_,lumaOrderBuffer_,lumaRadianceBuffer_,lumaParams_;
-    ComPtr<ID3D11ShaderResourceView> lumaBvhSrv_,lumaOrderSrv_,lumaRadianceSrv_;
-    ComPtr<ID3D11UnorderedAccessView> lumaRadianceUav_;
-    ComPtr<ID3D11ComputeShader> lumaCompute_;
-    std::array<uint32_t,sizeof(LumaParams)/sizeof(uint32_t)> lumaRadianceKey_{};
-    bool lumaRadianceCacheValid_=false;
     std::array<ComPtr<ID3D11Buffer>,3> ellipseVertices_;
     std::array<UINT,3> ellipseVertexCounts_{{0,0,0}};
     std::vector<GpuEllipseInstance> ellipses_;
@@ -2713,9 +1992,8 @@ private:
     UINT boxInstanceCount_=0;
     unsigned msaaPreference_=0,samplerAnisotropy_=16;
     bool boxInstancingEnabled_=false,ellipseInstancingEnabled_=false,foliageInstancingEnabled_=false,lumaTraceGeometryEnabled_=false;
-    std::vector<uint32_t> lumaObjectToTriangle_;
-    uint32_t lumaTriangleCount_=0,lumaNodeCount_=0,lumaOrderCount_=0;
-    uint64_t lumaSceneIdentity_=0,lumaSceneRevision_=0;
+    LumaTraceCpuScene lumaCpuScene_;
+    lumatrace_gpu::Compute lumaTraceCompute_;
     const Obj* sceneKey_=nullptr;size_t objectCount_=0;uint64_t sceneIdentity_=0,sceneRevision_=0;UINT vertexCount_=0;UINT sampleCount_=1,sampleQuality_=0;int width_=0,height_=0;
 };
 }
