@@ -1,0 +1,36 @@
+{
+  "schemaVersion": 1,
+  "name": "CSE WARP V17 — parité de luminosité multi-backend",
+  "purpose": "Mesurer la luminosité des mêmes captures et vues entre DX11 Raster, Vulkan Raster et LumaTrace, sans modifier automatiquement l'exposition ni les moteurs.",
+  "captureSource": "moteur3d_v17_campaign.exe summary.json + captures PNG",
+  "sceneDefault": "benchmark-civic/scene.json",
+  "comparisonKey": ["scene", "camera", "width", "height"],
+  "reference": {
+    "backend": "D3D11 Raster",
+    "variantContains": "Raster GPU qualité constante",
+    "readbackDepth": 1
+  },
+  "backends": [
+    { "id": "d3d11", "label": "D3D11 Raster", "variantContains": "Raster GPU qualité constante", "toleranceRelative": 0.0 },
+    { "id": "vulkan", "label": "Vulkan Raster", "variantContains": "Vulkan Raster preview + readback", "toleranceRelative": 0.05 },
+    { "id": "lumatrace", "label": "LumaTrace BVH4", "variantContains": "LumaTrace BVH4 GPU lighting + Raster preview/readback", "toleranceRelative": 0.10 }
+  ],
+  "metrics": {
+    "primary": "mean Rec.709 luminance, decoded from sRGB PNG values to linear light",
+    "regions": "whole frame plus a normalized 3x3 screen grid",
+    "diagnostics": ["median luminance", "95th percentile luminance", "near-black pixel fraction", "near-white pixel fraction"],
+    "comparison": "relative to the matching D3D11 Raster capture; report only, no automatic correction"
+  },
+  "campaign": { "rounds": 4, "framesPerRound": 12, "warmup": 2, "mode": "full-benchmark", "allScenes": false },
+  "acceptance": {
+    "vulkan": "whole-frame mean within ±5% of D3D11; inspect regional rows before deciding",
+    "lumatrace": "whole-frame mean within ±10% of D3D11; treat as diagnostic because its lighting model may differ",
+    "important": "thresholds are first-pass review bands, not a claim that unlike lighting algorithms must be pixel-identical"
+  },
+  "limitations": [
+    "This first suite measures the package's existing scene and cameras; it does not create synthetic material-chart scenes.",
+    "CPU, Compute, and low-resolution diagnostics are intentionally excluded from cross-backend brightness parity.",
+    "The campaign must run on a real GPU for useful backend comparison; WARP is functional coverage only.",
+    "PNG transfer is assumed sRGB for the linear-luminance calculation; the report also preserves encoded-space-independent relative diagnostics only through this declared assumption."
+  ]
+}
