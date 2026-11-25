@@ -33,7 +33,7 @@ jobs:
           if($LASTEXITCODE){exit $LASTEXITCODE}
           mkdir route30
           Copy-Item build/Release/moteur3d_v17_campaign.exe route30/route30.exe
-          Copy-Item build/Release/moteur3d_v16_core.dll route30/
+          Copy-Item build/v16/Release/moteur3d_v16_core.dll route30/
           Copy-Item build/vulkan-shaders route30/vulkan -Recurse
           Compress-Archive route30/* route30.zip
           gh release create "route30-$env:GITHUB_SHA" route30.zip --target $env:GITHUB_SHA --prerelease --title "Benchmark parcours 30 secondes" --notes "Auxiliaire Windows x64 pour le package V17."
