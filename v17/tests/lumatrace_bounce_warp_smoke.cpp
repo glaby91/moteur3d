@@ -36,8 +36,10 @@ int main(int argc,char** argv){
     if(camera==built.runtime.cameras.cend()){
         qCritical()<<"The pool and fresco camera is missing from the scene";return 1;
     }
-    constexpr int w=960,h=540;
-    const auto cam=m3d::v16::makeCamera(*camera,w,h);
+    constexpr int w=1920,h=1080;
+    auto poolView=*camera;
+    poolView.target.y=6.8f; // Include a useful water area while retaining the fresco.
+    const auto cam=m3d::v16::makeCamera(poolView,w,h);
     m3d::setRasterHybridLightingEnabled(false);
     std::vector<uint32_t> direct,bounced,cached;
     m3d::Stats directStats,bounceStats,cacheStats;
@@ -59,14 +61,14 @@ int main(int argc,char** argv){
     }
     size_t changed=0;
     for(size_t i=0;i<direct.size()&&i<bounced.size();++i)changed+=direct[i]!=bounced[i];
-    // The lower fifth of this fixed pool/fresco camera is the water surface.
+    // The lower part of this pool/fresco camera is the water surface.
     // Measure actual water pixels, not the mural or deck, and reject the
     // barely measurable lift accepted by the original smoke threshold.
     double poolDirect=0.0,poolBounce=0.0;
     double poolDeltaR=0.0,poolDeltaG=0.0,poolDeltaB=0.0,poolAbsDelta=0.0;
     size_t poolPixels=0,poolBrighter=0;
     if(direct.size()==size_t(w*h)&&bounced.size()==size_t(w*h))
-    for(int y=h*37/45;y<h;++y)for(int x=w/40;x<w-w/40;++x){
+    for(int y=h*7/10;y<h;++y)for(int x=w/40;x<w-w/40;++x){
         const size_t i=size_t(y)*w+size_t(x);
         const QRgb a=qRgb((direct[i]>>16)&255,(direct[i]>>8)&255,direct[i]&255);
         const QRgb b=qRgb((bounced[i]>>16)&255,(bounced[i]>>8)&255,bounced[i]&255);
