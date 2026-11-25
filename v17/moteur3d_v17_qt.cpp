@@ -3355,6 +3355,7 @@ private:
         const QString sceneRevision=outcome.database.revision.trimmed();
         sceneRevision_=sceneRevision;
         if(sceneRevisionLabel_)sceneRevisionLabel_->setText(sceneRevision.isEmpty()?QStringLiteral("Scène —"):QStringLiteral("Scène %1").arg(sceneRevision));
+        updateBackendWindowTitle();
         const QString revisionSuffix=sceneRevision.isEmpty()?QStringLiteral("Scène sans révision"):QStringLiteral("Scène %1").arg(sceneRevision);
         setWindowTitle(QStringLiteral("CSE WARP Beta X V%1 — %2 — %3")
             .arg(CSE_WARP_PRODUCT_VERSION).arg(runtime_->title,revisionSuffix));
@@ -3749,6 +3750,14 @@ private:
                 nativeRendererOverlay_->raise();
         }
     }
+    void updateBackendWindowTitle(){
+        if(!canvas_||!backendBox_)return;
+        const QString sceneSuffix=sceneRevision_.isEmpty()?QStringLiteral("Scène —")
+            :QStringLiteral("Scène %1").arg(sceneRevision_);
+        canvas_->setWindowTitle(QStringLiteral("CSE WARP V%1 — %2 — %3 — fenêtre dédiée")
+            .arg(CSE_WARP_PRODUCT_VERSION).arg(sceneSuffix)
+            .arg(backendBox_->itemText(outputBackendIndex_)));
+    }
     void selectBackendOutputWindow(){
         if(!backendBox_)return;
         const int index=std::clamp(backendBox_->currentIndex(),0,
@@ -3762,8 +3771,7 @@ private:
         if(nativeRendererOverlay_&&nativeRendererOverlay_->parentWidget()!=canvas_)
             nativeRendererOverlay_->setParent(canvas_,
                 Qt::Tool|Qt::FramelessWindowHint|Qt::WindowDoesNotAcceptFocus);
-        canvas_->setWindowTitle(QStringLiteral("CSE WARP V%1 — %2 — fenêtre dédiée")
-            .arg(CSE_WARP_PRODUCT_VERSION).arg(backendBox_->itemText(index)));
+        updateBackendWindowTitle();
         const bool direct=nativeDirectSelected();
         if(backendChanged||direct){
             // The global export/sky state belongs to the selected output.
