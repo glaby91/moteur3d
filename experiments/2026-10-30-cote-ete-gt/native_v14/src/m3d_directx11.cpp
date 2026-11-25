@@ -410,11 +410,11 @@ constexpr char kShaderPart2[] = R"(
         specTint=lerp(specTint,float3(.24,.26,.28),saturate(glazing*1.8));
     }
     color += specTint * specular * (0.88+0.22*fresnel);
-    // Local point emitters also need a specular response. The old LumaTrace
-    // path skipped this because it disabled the raster diffuse-light loop;
-    // consequently wet pool water and glazing showed no lamp reflections.
-    // Keep diffuse energy owned by LumaTrace, but evaluate the emitter's
-    // reflected direction here, with the same finite light-volume falloff.
+    // Keep the raster fallback's diffuse point lights. In LumaTrace mode,
+    // visit local lights only for surfaces that can show a specular reflection.
+    const bool localSpecEligible=poolWater || materialOpacity[i.mat].x<.65 ||
+        roughness<.14 || (materialSpecular[i.mat].w>.08 && roughness<.50);
+    if(peripheralControls.w<.5 || localSpecEligible) {
     [loop] for (uint l = 0; l < lightCount; ++l) {
         float3 delta = lightPositionRadius[l].xyz - i.world;
         float radius = lightPositionRadius[l].w;
@@ -440,14 +440,16 @@ constexpr char kShaderPart2[] = R"(
                     *(edge*edge*lightColorIntensity[l].a*lambert*.27);
                 if(peripheralControls.w<.5)
                     color += colorControls.x>0.5 ? base*localIrradiance : localIrradiance;
-                float3 toLight=delta/distanceToLight;
-                float3 reflectedPoint=reflect(-toLight,normal);
-                float pointPower=clamp(specularPower,8.0,120.0);
-                float pointSpec=pow(saturate(dot(viewDir,reflectedPoint)),pointPower)
-                    *max(materialSpecular[i.mat].x,.035)
-                    *edge*edge*lightColorIntensity[l].a*.27;
-                color += specTint*lightColorIntensity[l].rgb*pointSpec
-                    *(0.88+0.22*fresnel);
+                if(localSpecEligible){
+                    float3 toLight=delta/distanceToLight;
+                    float3 reflectedPoint=reflect(-toLight,normal);
+                    float pointPower=clamp(specularPower,8.0,120.0);
+                    float pointSpec=pow(saturate(dot(viewDir,reflectedPoint)),pointPower)
+                        *max(materialSpecular[i.mat].x,.035)
+                        *edge*edge*lightColorIntensity[l].a*.27;
+                    color += specTint*lightColorIntensity[l].rgb*pointSpec
+                        *(0.88+0.22*fresnel);
+                }
             }
 #if defined(M3D_V17_OPTIMIZE_PIXELS)
         }
@@ -455,6 +457,7 @@ constexpr char kShaderPart2[] = R"(
 #if defined(M3D_V17_LIGHT_AABB_CULL)
         }
 #endif
+    }
     }
     if(hybridControls.x>0.5){
         // Indirect probes modify AMBIENT energy instead of adding an extra
@@ -1345,7 +1348,7 @@ public:
                                            {center.x+radius,center.y+radius,center.z+radius}};
                 if(cullEnabled&&!visibleChunk(bounds,activeCam))continue;
                 const float z=std::max(.10f,dot(center-activeCam.eye,activeCam.f));
-                const float projectedRadius=radius*float(w)/(2.f*std::max(.01f,activeCam.tanHalf)*z);
+                const float projectedRadius=radius*float(pw)/(2.f*std::max(.01f,activeCam.tanHalf)*z);
                 const float lodScale=100.f/float(quality.lodQualityPercent);
                 const int lod=(!lodEnabled||projectedRadius>=48.f*lodScale)?2
                     :(projectedRadius>=14.f*lodScale?1:0);
@@ -1398,7 +1401,7 @@ public:
                     {center.x+radius,center.y+radius,center.z+radius}};
                 if(cullEnabled&&!visibleChunk(bounds,activeCam))continue;
                 const float z=std::max(.10f,dot(center-activeCam.eye,activeCam.f));
-                const float projectedRadius=radius*float(w)/(2.f*std::max(.01f,activeCam.tanHalf)*z);
+                const float projectedRadius=radius*float(pw)/(2.f*std::max(.01f,activeCam.tanHalf)*z);
                 const float lodScale=100.f/float(quality.lodQualityPercent);
                 const int lod=(!lodEnabled||projectedRadius>=40.f*lodScale)?2
                     :(projectedRadius>=12.f*lodScale?1:0);
