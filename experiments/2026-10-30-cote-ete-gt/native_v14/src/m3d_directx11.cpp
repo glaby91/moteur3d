@@ -1236,10 +1236,10 @@ public:
             context_->PSSetShader(nullptr,nullptr,0);
             // Static opaque walls, floors and other architectural meshes.
             if(vertexCount_){
-                if(!cullEnabled)context_->DrawIndexed(indexCount_,0,0);
+                if(!cullEnabled){if(staticGeometryPreparationEnabled_)if(staticGeometryPreparationEnabled_)context_->DrawIndexed(indexCount_,0,0);else context_->Draw(vertexCount_,0);else context_->Draw(vertexCount_,0);}
                 else{
                     UINT start=0,count=0;
-                    auto flush=[&]{if(count){context_->DrawIndexed(count,start,0);count=0;}};
+                    auto flush=[&]{if(count){if(staticGeometryPreparationEnabled_)context_->DrawIndexed(count,start,0);else context_->Draw(count,start);count=0;}};
                     for(const DrawChunk& chunk:chunks_){
                         if(!visibleChunk(chunk,activeCam)){flush();continue;}
                         if(count&&start+count!=chunk.first)flush();
@@ -1290,7 +1290,7 @@ public:
                 UINT start=0,count=0;
                 auto flush=[&]{
                     if(!count)return;
-                    context_->DrawIndexed(count,start,0);
+                    if(staticGeometryPreparationEnabled_)context_->DrawIndexed(count,start,0);else context_->Draw(count,start);
                     ++drawCalls;
                     submittedVertices+=count;
                     count=0;
@@ -2356,11 +2356,14 @@ private:
             return false;
         }
         vertexCount_=UINT(prepared.vertices.size());indexCount_=UINT(prepared.indices.size());
-        D3D11_BUFFER_DESC indexDesc{};indexDesc.ByteWidth=UINT(prepared.indices.size()*sizeof(uint32_t));
-        indexDesc.Usage=D3D11_USAGE_IMMUTABLE;indexDesc.BindFlags=D3D11_BIND_INDEX_BUFFER;
-        D3D11_SUBRESOURCE_DATA indexInit{};indexInit.pSysMem=prepared.indices.data();
-        const HRESULT indexResult=device_->CreateBuffer(&indexDesc,&indexInit,&indexBuffer_);
-        if(FAILED(indexResult)){error=L"Allocation du tampon d’indices DirectX 11 impossible.";return false;}
+        if(useStaticGeometry){
+            D3D11_BUFFER_DESC indexDesc{};indexDesc.ByteWidth=UINT(prepared.indices.size()*sizeof(uint32_t));
+            indexDesc.Usage=D3D11_USAGE_IMMUTABLE;indexDesc.BindFlags=D3D11_BIND_INDEX_BUFFER;
+            D3D11_SUBRESOURCE_DATA indexInit{};indexInit.pSysMem=prepared.indices.data();
+            const HRESULT indexResult=device_->CreateBuffer(&indexDesc,&indexInit,&indexBuffer_);
+            if(FAILED(indexResult)){error=L"Allocation du tampon d’indices DirectX 11 impossible.";return false;}
+            indexCount_=UINT(prepared.indices.size());
+        }
         geometryUploadMs_=std::chrono::duration<double,std::milli>(Clock::now()-geometryUploadStarted).count();
         if(lumaTrace){
             D3D11_SHADER_RESOURCE_VIEW_DESC sv{};
