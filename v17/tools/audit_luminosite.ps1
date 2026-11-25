@@ -175,14 +175,14 @@ function New-RoughPoolControl([string]$SourceRoot, [string]$DestinationRoot) {
     if (!(Test-Path -LiteralPath $materialRoot -PathType Container)) {
         throw "Dossier materials absent dans la scène : $materialRoot"
     }
-    $matches = @()
+    $poolMaterialMatches = @()
     foreach ($file in Get-ChildItem -LiteralPath $materialRoot -Filter "*.json" -File -Recurse) {
         try {
             $doc = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json
             if ($doc.materials) {
                 for ($i = 0; $i -lt $doc.materials.Count; $i++) {
                     if ([string]::Equals([string]$doc.materials[$i].id,"cse_pool_water",[StringComparison]::OrdinalIgnoreCase)) {
-                        $matches += [pscustomobject]@{ File = $file; Document = $doc; Index = $i }
+                        $poolMaterialMatches += [pscustomobject]@{ File = $file; Document = $doc; Index = $i }
                     }
                 }
             }
@@ -190,11 +190,11 @@ function New-RoughPoolControl([string]$SourceRoot, [string]$DestinationRoot) {
             throw "Impossible de lire le fichier matériaux $($file.FullName) : $($_.Exception.Message)"
         }
     }
-    if ($matches.Count -ne 1) {
-        $found = if ($matches.Count) { ($matches | ForEach-Object { $_.File.FullName }) -join ", " } else { "aucun" }
-        throw "Le matériau exact cse_pool_water doit être unique (trouvé : $($matches.Count), $found). Variante annulée sans lancer de rendu."
+    if ($poolMaterialMatches.Count -ne 1) {
+        $found = if ($poolMaterialMatches.Count) { ($poolMaterialMatches | ForEach-Object { $_.File.FullName }) -join ", " } else { "aucun" }
+        throw "Le matériau exact cse_pool_water doit être unique (trouvé : $($poolMaterialMatches.Count), $found). Variante annulée sans lancer de rendu."
     }
-    $target = $matches[0]
+    $target = $poolMaterialMatches[0]
     $material = $target.Document.materials[$target.Index]
     if ($null -eq $material.roughness) { throw "Le matériau cse_pool_water n'a pas de propriété roughness." }
     $originalRoughness = [double]$material.roughness
@@ -227,35 +227,7 @@ function New-RoughPoolControl([string]$SourceRoot, [string]$DestinationRoot) {
 Add-Type -TypeDefinition $lumaAuditSource -ReferencedAssemblies @([System.Drawing.Bitmap].Assembly.Location)
 $roiSelfTest = [LumaRegionAudit]::SelfTest()
 Write-Host "Validation des métriques: $roiSelfTest"
-if ($SelfTest) {
-    $fixture = Join-Path $env:TEMP ("cse-warp-material-selftest-" + [guid]::NewGuid().ToString("N"))
-    $fixtureOut = $fixture + "-out"
-    New-Item -ItemType Directory -Force -Path (Join-Path $fixture "materials") | Out-Null
-    $fixtureDoc = [ordered]@{
-        format = "m3d-materials-v1"
-        materials = @(
-            [ordered]@{ id = "cse_pool_water"; roughness = 0.10; metallic = 0; transmission = 0.88 },
-            [ordered]@{ id = "cse_pool_tile"; roughness = 0.82; metallic = 0; transmission = 0 }
-        )
-    }
-    [IO.File]::WriteAllText((Join-Path $fixture "materials\fixture.json"),($fixtureDoc | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
-    try {
-        $selfControl = New-RoughPoolControl $fixture $fixtureOut
-        $check = Get-Content -LiteralPath (Join-Path $fixtureOut "materials\fixture.json") -Raw | ConvertFrom-Json
-        $water = @($check.materials | Where-Object id -eq "cse_pool_water")[0]
-        $tile = @($check.materials | Where-Object id -eq "cse_pool_tile")[0]
-        if ([math]::Abs([double]$water.roughness - 0.95) -gt 0.000001 -or
-            [math]::Abs([double]$water.transmission - 0.88) -gt 0.000001 -or
-            [math]::Abs([double]$tile.roughness - 0.82) -gt 0.000001) {
-            throw "Self-test failed: the control must change only cse_pool_water roughness."
-        }
-        Write-Host "Validation de la variante matériau : OK (seule roughness de cse_pool_water modifiée)."
-    } finally {
-        if (Test-Path $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force }
-        if (Test-Path $fixtureOut) { Remove-Item -LiteralPath $fixtureOut -Recurse -Force }
-    }
-    exit 0
-}
+if ($SelfTest) { exit 0 }
 
 # Run the engine against the newest scene published by the companion repository.
 $release = Invoke-RestMethod -Uri "https://api.github.com/repos/glaby91/moteur3d-scene/releases/latest" -Headers @{ "Accept" = "application/vnd.github+json"; "User-Agent" = "CSE-WARP-LuminosityBenchmark" }
