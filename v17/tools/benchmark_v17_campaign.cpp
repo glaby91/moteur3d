@@ -533,6 +533,14 @@ int main(int argc,char** argv){
             {"materialCount",int(runtime.renderScene.mat.size())},
             {"cameraCount",int(runtime.cameras.size())}});
         if(runtime.cameras.empty()){allOk=false;continue;}
+        int auditCameraIndex=0;
+        if(cfg.lightingAudit){
+            for(int i=0;i<int(runtime.cameras.size());++i)
+                if(runtime.cameras[i].id==QStringLiteral("v7_pool_fresco")){auditCameraIndex=i;break;}
+            if(runtime.cameras[auditCameraIndex].id!=QStringLiteral("v7_pool_fresco"))
+                for(int i=0;i<int(runtime.cameras.size());++i)
+                    if(runtime.cameras[i].id==QStringLiteral("v4_piscine")){auditCameraIndex=i;break;}
+        }
         const int cameras=(cfg.smoke||cfg.lightingAudit)?1:std::min(2,int(runtime.cameras.size()));
         const QVector<QSize> sizes=cfg.lightingAudit
             ?QVector<QSize>{QSize(1000,680)}
@@ -542,7 +550,7 @@ int main(int argc,char** argv){
                     ?QVector<QSize>{QSize(256,144),QSize(480,270)}
                     :QVector<QSize>{QSize(1366,768),QSize(1920,1080)};
         for(int cameraIndex=0;cameraIndex<cameras;++cameraIndex){
-            const auto& preset=runtime.cameras[cameraIndex];
+            const auto& preset=runtime.cameras[cfg.lightingAudit?auditCameraIndex:cameraIndex];
             for(const QSize size:sizes){
                 const auto camera=m3d::v16::makeCamera(preset,size.width(),size.height());
                 const QString variant=QStringLiteral("Raster GPU qualité constante");
