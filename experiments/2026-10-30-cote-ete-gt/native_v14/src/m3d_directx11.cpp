@@ -545,6 +545,10 @@ constexpr char kShaderPart2[] = R"(
                 }
             }
         }
+        // Transmission controls the water's opacity continuously; its Fresnel
+        // opacity remains the authored 100%-transmission appearance.
+        const float authoredTransmission=1.0-saturate(materialOpacity[i.mat].x);
+        opacity=1.0-authoredTransmission*(1.0-opacity);
         return float4(color,opacity);
     }
     return float4(color, materialOpacity[i.mat].x);
@@ -2136,7 +2140,11 @@ private:
             const Obj& o=scene.obj[objectIndex];
             const uint32_t m=o.mat;
             const float uvScale=uvScaleForMaterial(scene,m);
-            mesh.transparentMaterial=m<scene.mat.size()&&scene.mat[m].transmissionPercent>0;
+            const bool waterSurface=m<scene.mat.size() &&
+                (scene.mat[m].waterSurface ||
+                 (!scene.mat[m].surfaceAuthored && scene.mat[m].name=="cse_pool_water"));
+            mesh.transparentMaterial=m<scene.mat.size() &&
+                (scene.mat[m].transmissionPercent>0 || waterSurface);
             if(lumaTrace){
                 if(o.kind!=Kind::Triangle){
                     error=L"LumaTrace BVH4 : les primitives analytiques ne sont pas encore prises en charge.";
