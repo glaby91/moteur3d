@@ -155,6 +155,24 @@ public static class LumaRegionAudit {
         }
         b.Append("]}");return b.ToString();
     }
+    static double CompositeLinearY(byte[] p,int k,double bg) {
+        double a=p[k+3]/255.0;
+        double b=Lin(p[k]/255.0)*a+bg*(1.0-a);
+        double g=Lin(p[k+1]/255.0)*a+bg*(1.0-a);
+        double r=Lin(p[k+2]/255.0)*a+bg*(1.0-a);
+        return .2126*r+.7152*g+.0722*b;
+    }
+    static double ToSrgb(double x) {
+        x=Math.Max(0.0,Math.Min(1.0,x));
+        return x<=0.0031308?12.92*x:1.055*Math.Pow(x,1.0/2.4)-0.055;
+    }
+    static double CompositeDisplayY(byte[] p,int k,double bg) {
+        double a=p[k+3]/255.0;
+        double b=ToSrgb(Lin(p[k]/255.0)*a+bg*(1.0-a));
+        double g=ToSrgb(Lin(p[k+1]/255.0)*a+bg*(1.0-a));
+        double r=ToSrgb(Lin(p[k+2]/255.0)*a+bg*(1.0-a));
+        return .2126*r+.7152*g+.0722*b;
+    }
     public static string ComputePairedJson(LumaImage[] baseline,LumaImage[] control) {
         if(baseline==null||control==null||baseline.Length==0||baseline.Length!=control.Length)
             throw new ArgumentException("Baseline and control image sets must have matching backends.");
@@ -167,38 +185,69 @@ public static class LumaRegionAudit {
         regions.Add(Tuple.Create("full",0,0,w,h));
         for(int row=0;row<3;row++) for(int col=0;col<3;col++)
             regions.Add(Tuple.Create("grid_r"+(row+1)+"_c"+(col+1),(col*w)/3,(row*h)/3,((col+1)*w)/3,(row+1)*h/3));
-        var b=new StringBuilder("{\"mask\":\"For each backend, compare only pixels opaque in both its baseline and control captures.\",\"regions\":[");
+        string[] bgNames=new string[]{"black","mid_gray","white"};
+        double[] bgLinear=new double[]{0.0,Lin(128.0/255.0),1.0};
+        var b=new StringBuilder("{\\"mask\\":\\"Opaque-paired RGB compares pixels opaque in both captures for each backend; alpha coverage and linear-light composites include every pixel over fixed neutral backgrounds.\\",\\"compositeConvention\\":\\"Straight alpha; sRGB RGB decoded to linear, composited, then encoded to sRGB for display-Y.\\",\\"regions\\":[");
         for(int ri=0;ri<regions.Count;ri++) {
             if(ri>0)b.Append(',');
             var r=regions[ri];int x0=r.Item2,y0=r.Item3,x1=r.Item4,y1=r.Item5;
             long area=(long)(x1-x0)*(y1-y0);
-            b.Append("{\"name\":\"").Append(r.Item1).Append("\",\"x\":").Append(x0).Append(",\"y\":").Append(y0)
-             .Append(",\"width\":").Append(x1-x0).Append(",\"height\":").Append(y1-y0).Append(",\"backends\":[");
+            b.Append("{\\"name\\":\\"").Append(r.Item1).Append("\\",\\"x\\":").Append(x0).Append(",\\"y\\":").Append(y0)
+             .Append(",\\"width\\":").Append(x1-x0).Append(",\\"height\\":").Append(y1-y0).Append(",\\"backends\\":[");
             for(int j=0;j<baseline.Length;j++) {
                 if(j>0)b.Append(',');
                 int kControl=-1;
                 for(int q=0;q<control.Length;q++) if(String.Equals(baseline[j].Name,control[q].Name,StringComparison.OrdinalIgnoreCase)){kControl=q;break;}
                 if(kControl<0)throw new ArgumentException("Control capture missing backend "+baseline[j].Name);
-                long count=0;double baseD=0,baseL=0,controlD=0,controlL=0;
+                long opaqueCount=0,basePartial=0,controlPartial=0;
+                double baseAlpha=0,controlAlpha=0,baseD=0,baseL=0,controlD=0,controlL=0;
+                double[] baseCompD=new double[3],baseCompL=new double[3],controlCompD=new double[3],controlCompL=new double[3];
                 for(int y=y0;y<y1;y++)for(int x=x0;x<x1;x++){
-                    int k=(y*w+x)*4;
-                    if(baseline[j].BGRA[k+3]!=255||control[kControl].BGRA[k+3]!=255)continue;
-                    count++;
-                    baseD+=Y(baseline[j].BGRA,k,false);baseL+=Y(baseline[j].BGRA,k,true);
-                    controlD+=Y(control[kControl].BGRA,k,false);controlL+=Y(control[kControl].BGRA,k,true);
+                    int k=(y*w+x)*4;byte ba=baseline[j].BGRA[k+3],ca=control[kControl].BGRA[k+3];
+                    baseAlpha+=ba/255.0;controlAlpha+=ca/255.0;
+                    if(ba>0&&ba<255)basePartial++;
+                    if(ca>0&&ca<255)controlPartial++;
+                    if(ba==255&&ca==255){
+                        opaqueCount++;
+                        baseD+=Y(baseline[j].BGRA,k,false);baseL+=Y(baseline[j].BGRA,k,true);
+                        controlD+=Y(control[kControl].BGRA,k,false);controlL+=Y(control[kControl].BGRA,k,true);
+                    }
+                    for(int bg=0;bg<bgLinear.Length;bg++){
+                        baseCompD[bg]+=CompositeDisplayY(baseline[j].BGRA,k,bgLinear[bg]);
+                        baseCompL[bg]+=CompositeLinearY(baseline[j].BGRA,k,bgLinear[bg]);
+                        controlCompD[bg]+=CompositeDisplayY(control[kControl].BGRA,k,bgLinear[bg]);
+                        controlCompL[bg]+=CompositeLinearY(control[kControl].BGRA,k,bgLinear[bg]);
+                    }
                 }
-                double md=count>0?baseD/count:0,ml=count>0?baseL/count:0,cd=count>0?controlD/count:0,cl=count>0?controlL/count:0;
-                b.Append("{\"backend\":\"").Append(baseline[j].Name).Append("\",\"pairedOpaquePixels\":").Append(count)
-                 .Append(",\"pairedOpaqueCoveragePct\":").Append(N(area>0?100.0*count/area:0))
-                 .Append(",\"baselineMeanDisplayY_0_255\":").Append(N(255.0*md))
-                 .Append(",\"controlMeanDisplayY_0_255\":").Append(N(255.0*cd))
-                 .Append(",\"deltaDisplayPct\":");
+                double md=opaqueCount>0?baseD/opaqueCount:0,ml=opaqueCount>0?baseL/opaqueCount:0;
+                double cd=opaqueCount>0?controlD/opaqueCount:0,cl=opaqueCount>0?controlL/opaqueCount:0;
+                b.Append("{\\"backend\\":\\"").Append(baseline[j].Name).Append("\\",\\"pairedOpaquePixels\\":").Append(opaqueCount)
+                 .Append(",\\"pairedOpaqueCoveragePct\\").Append(":").Append(N(area>0?100.0*opaqueCount/area:0))
+                 .Append(",\\"baselineMeanAlphaPct\\":").Append(N(area>0?100.0*baseAlpha/area:0))
+                 .Append(",\\"controlMeanAlphaPct\\":").Append(N(area>0?100.0*controlAlpha/area:0))
+                 .Append(",\\"baselinePartialAlphaPct\\":").Append(N(area>0?100.0*basePartial/area:0))
+                 .Append(",\\"controlPartialAlphaPct\\":").Append(N(area>0?100.0*controlPartial/area:0))
+                 .Append(",\\"baselineMeanDisplayY_0_255\\":").Append(N(255.0*md))
+                 .Append(",\\"controlMeanDisplayY_0_255\\":").Append(N(255.0*cd))
+                 .Append(",\\"deltaDisplayPct\\":");
                 if(md>1e-12)b.Append(N(100.0*(cd/md-1.0)));else b.Append("null");
-                b.Append(",\"baselineMeanLinearY_0_1\":").Append(N(ml))
-                 .Append(",\"controlMeanLinearY_0_1\":").Append(N(cl))
-                 .Append(",\"deltaLinearPct\":");
+                b.Append(",\\"baselineMeanLinearY_0_1\\":").Append(N(ml))
+                 .Append(",\\"controlMeanLinearY_0_1\\":").Append(N(cl))
+                 .Append(",\\"deltaLinearPct\\":");
                 if(ml>1e-12)b.Append(N(100.0*(cl/ml-1.0)));else b.Append("null");
-                b.Append('}');
+                b.Append(",\\"composites\\":[");
+                for(int bg=0;bg<bgNames.Length;bg++){
+                    if(bg>0)b.Append(',');
+                    double bcd=area>0?baseCompD[bg]/area:0,ccd=area>0?controlCompD[bg]/area:0;
+                    double bcl=area>0?baseCompL[bg]/area:0,ccl=area>0?controlCompL[bg]/area:0;
+                    b.Append("{\\"background\\":\\"").Append(bgNames[bg]).Append("\\",\\"baselineMeanDisplayY_0_255\\":").Append(N(255.0*bcd))
+                     .Append(",\\"controlMeanDisplayY_0_255\\":").Append(N(255.0*ccd)).Append(",\\"deltaDisplayPct\\":");
+                    if(bcd>1e-12)b.Append(N(100.0*(ccd/bcd-1.0)));else b.Append("null");
+                    b.Append(",\\"baselineMeanLinearY_0_1\\":").Append(N(bcl)).Append(",\\"controlMeanLinearY_0_1\\":").Append(N(ccl)).Append(",\\"deltaLinearPct\\":");
+                    if(bcl>1e-12)b.Append(N(100.0*(ccl/bcl-1.0)));else b.Append("null");
+                    b.Append('}');
+                }
+                b.Append("]}");
             }
             b.Append("]}");
         }
@@ -219,7 +268,13 @@ public static class LumaRegionAudit {
         if(paired.IndexOf("\"deltaDisplayPct\":-50",StringComparison.Ordinal)<0 ||
            paired.IndexOf("\"pairedOpaqueCoveragePct\":100",StringComparison.Ordinal)<0)
             throw new InvalidOperationException("Self-test failed: paired mask must compare same opaque pixels and report -50%.");
-        return "OK: identical captures = 0%; half-level grayscale = -50%; ROI references and paired masks use matched opaque pixels.";
+        var translucent=new LumaImage{Name="DX11",Width=6,Height=6,BGRA=(byte[])a.BGRA.Clone()};
+        for(int i=0;i<36;i++)translucent.BGRA[i*4+3]=128;
+        string alphaPaired=ComputePairedJson(new LumaImage[]{a},new LumaImage[]{translucent});
+        if(alphaPaired.IndexOf("\"controlPartialAlphaPct\":100",StringComparison.Ordinal)<0 ||
+           alphaPaired.IndexOf("\"background\":\"white\"",StringComparison.Ordinal)<0)
+            throw new InvalidOperationException("Self-test failed: alpha coverage and fixed-background composites must be emitted.");
+        return "OK: opaque paired RGB, alpha coverage, and black/mid-gray/white composites.";
     }
 }
 "@
@@ -436,17 +491,33 @@ if ([string]$controlEngine.cases[0].camera -ne [string]$engine.cases[0].camera) 
 $pairedControlMeasure = [LumaRegionAudit]::ComputePairedJson($data,$controlData) | ConvertFrom-Json
 $controlDeltaRows = foreach ($region in $pairedControlMeasure.regions) {
     foreach ($backend in $region.backends) {
+        $black = $backend.composites | Where-Object { $_.background -eq "black" } | Select-Object -First 1
+        $midGray = $backend.composites | Where-Object { $_.background -eq "mid_gray" } | Select-Object -First 1
+        $white = $backend.composites | Where-Object { $_.background -eq "white" } | Select-Object -First 1
         [pscustomobject]@{
             region = $region.name; x = $region.x; y = $region.y; width = $region.width; height = $region.height
             backend = $backend.backend
             pairedOpaquePixels = $backend.pairedOpaquePixels
             pairedOpaqueCoveragePct = $backend.pairedOpaqueCoveragePct
+            baselineMeanAlphaPct = $backend.baselineMeanAlphaPct
+            transmissionControlMeanAlphaPct = $backend.controlMeanAlphaPct
+            baselinePartialAlphaPct = $backend.baselinePartialAlphaPct
+            transmissionControlPartialAlphaPct = $backend.controlPartialAlphaPct
             baselineMeanDisplayY_0_255 = $backend.baselineMeanDisplayY_0_255
             transmissionControlMeanDisplayY_0_255 = $backend.controlMeanDisplayY_0_255
             deltaDisplayPct = $backend.deltaDisplayPct
             baselineMeanLinearY_0_1 = $backend.baselineMeanLinearY_0_1
             transmissionControlMeanLinearY_0_1 = $backend.controlMeanLinearY_0_1
             deltaLinearPct = $backend.deltaLinearPct
+            blackBaselineDisplayY = $black.baselineMeanDisplayY_0_255
+            blackControlDisplayY = $black.controlMeanDisplayY_0_255
+            blackCompositeDeltaPct = $black.deltaDisplayPct
+            midGrayBaselineDisplayY = $midGray.baselineMeanDisplayY_0_255
+            midGrayControlDisplayY = $midGray.controlMeanDisplayY_0_255
+            midGrayCompositeDeltaPct = $midGray.deltaDisplayPct
+            whiteBaselineDisplayY = $white.baselineMeanDisplayY_0_255
+            whiteControlDisplayY = $white.controlMeanDisplayY_0_255
+            whiteCompositeDeltaPct = $white.deltaDisplayPct
         }
     }
 }
