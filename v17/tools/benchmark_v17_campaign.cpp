@@ -388,6 +388,15 @@ int main(int argc,char** argv){
     cfg.smoke=args.contains("--smoke");
     cfg.simulation=args.contains("--simulation");
     cfg.fullBenchmark=args.contains("--full-benchmark");
+    const int geometryPrepAt=args.indexOf("--geometry-prep");
+    if(geometryPrepAt>=0){
+        if(geometryPrepAt+1>=args.size() ||
+           (args[geometryPrepAt+1]!="on" && args[geometryPrepAt+1]!="off")){
+            err<<"--geometry-prep expects on or off\n";return 2;
+        }
+        cfg.geometryPrepEnabled=args[geometryPrepAt+1]=="on";
+    }
+    qputenv("M3D_V17_STATIC_GEOMETRY_PREP",cfg.geometryPrepEnabled?"1":"0");
     if(cfg.fullBenchmark)setRasterCloudTimeScale(0.f);
     if(cfg.smoke&&cfg.simulation){
         err<<"--smoke and --simulation cannot be combined\n";return 2;
@@ -450,6 +459,7 @@ int main(int argc,char** argv){
         {"rounds",cfg.rounds},{"framesPerRound",cfg.frames},{"warmup",cfg.warmup},
         {"smoke",cfg.smoke},{"simulation",cfg.simulation},
         {"fullBenchmark",cfg.fullBenchmark},{"includeCpuScaling",cfg.includeCpu},
+        {"geometryPreparationMode",cfg.geometryPrepEnabled?"on":"off"},
         {"backendMatrix",cfg.fullBenchmark?QJsonArray{QStringLiteral("D3D11 Raster preview/readback"),QStringLiteral("Vulkan Raster preview/readback"),QStringLiteral("CPU Ray Tracing PBR direct")}:QJsonArray{}},
         {"allScenes",cfg.allScenes},
         {"textureResolutionLimit",cfg.smoke||cfg.simulation?256:2048},
