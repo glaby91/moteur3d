@@ -1236,7 +1236,7 @@ public:
             context_->PSSetShader(nullptr,nullptr,0);
             // Static opaque walls, floors and other architectural meshes.
             if(vertexCount_){
-                if(!cullEnabled){if(staticGeometryPreparationEnabled_)if(staticGeometryPreparationEnabled_)context_->DrawIndexed(indexCount_,0,0);else context_->Draw(vertexCount_,0);else context_->Draw(vertexCount_,0);}
+                if(!cullEnabled){if(staticGeometryPreparationEnabled_)context_->DrawIndexed(indexCount_,0,0);else context_->Draw(vertexCount_,0);}
                 else{
                     UINT start=0,count=0;
                     auto flush=[&]{if(count){if(staticGeometryPreparationEnabled_)context_->DrawIndexed(count,start,0);else context_->Draw(count,start);count=0;}};
@@ -1281,7 +1281,8 @@ public:
         }
         if(vertexCount_){
             if(!cullEnabled){
-                context_->DrawIndexed(indexCount_,0,0);
+                if(staticGeometryPreparationEnabled_)context_->DrawIndexed(indexCount_,0,0);
+                else context_->Draw(vertexCount_,0);
                 ++drawCalls;
                 submittedVertices=vertexCount_;
             }else{
