@@ -159,6 +159,7 @@ struct FrameConstants {
     float hybridControls[4];
     float colorControls[4];
     float peripheralControls[4];
+    float reflectionControls[4];
 };
 
 // Independent sky constants avoid disturbing the existing PBR/shadow shader layout.
@@ -200,6 +201,7 @@ cbuffer Frame : register(b0) {
     float4 hybridControls;
     float4 colorControls;
     float4 peripheralControls;
+    float4 reflectionControls;
 };
 Texture2DArray<float4> albedo : register(t0);
 Texture2D<float> shadowDepth : register(t1);
@@ -209,6 +211,7 @@ Texture3D<float4> indirectProbes : register(t4);
 Texture3D<float4> indirectProbesNext : register(t5);
 Texture2DArray<float4> preservedAlbedo : register(t6);
 StructuredBuffer<float4> lumaTriangleRadiance : register(t7);
+Texture2D<float4> poolReflection : register(t8);
 SamplerState wrapSampler : register(s0);
 SamplerState probeSampler : register(s1);
 struct VSIn { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; uint mat:MATERIAL; uint primitiveId:TRIID; };
@@ -301,6 +304,8 @@ float4 PSMain(VSOut i):SV_TARGET {
     }
     float3 normal = normalize(i.n);
     const bool poolWater=materialEmission[i.mat].a < -0.5;
+    if(reflectionControls.x>.5 && reflectionControls.x<1.5 &&
+       (i.world.y<reflectionControls.w || poolWater || materialOpacity[i.mat].x<.45)) discard;
     // Dedicated animated-looking standing waves (static in world space) only on
     // the new translucent pool water. Avoid extra trig on every other material.
     if(poolWater && normal.y>0.75){
@@ -513,7 +518,14 @@ constexpr char kShaderPart2[] = R"(
         color+=float3(.19,.32,.37)*stripe*(.025+.13*fresnelWater);
         // Underwater ladders must remain visible through the surface from the deck.
         // Avoid the former 45% high-angle opaque cyan veil.
-        const float opacity=lerp(.08,.24,saturate(fresnelWater*1.75));
+        float opacity=lerp(.08,.24,saturate(fresnelWater*1.75));
+        if(reflectionControls.x>1.5){
+            float2 reflectionUv=i.p.xy*reflectionControls.yz+normal.xz*.012;
+            float3 reflectedScene=poolReflection.SampleLevel(probeSampler,saturate(reflectionUv),0).rgb;
+            const float reflectionWeight=saturate(.22+.62*fresnelWater);
+            color=lerp(color,reflectedScene,reflectionWeight);
+            opacity=lerp(opacity,.62,saturate(fresnelWater*1.45));
+        }
         return float4(color,opacity);
     }
     return float4(color, materialOpacity[i.mat].x);
@@ -914,6 +926,7 @@ public:
         }
         if(!ensureDevice(error)||!ensureScene(scene,error,lumaBvh!=nullptr)||!ensureShadow(shadows,error)||
            !ensureTargets(w,h,quality.msaaSamples,error)||
+           (lumaBvh&&!ensureReflectionTarget(std::max(1,w/2),std::max(1,h/2),error))||
            (multires&&!ensureMultires(w,h,error))||
            !ensureAnisotropy(quality.anisotropy,error)||
            (nativeHwnd?!ensureSwapchain(nativeHwnd,w,h,error):
@@ -1125,18 +1138,25 @@ public:
         UINT submittedVertices=0,submittedBoxInstances=0;
         uint64_t drawCalls=0,submittedEllipseTriangles=0,submittedEllipseInstances=0;
         uint64_t submittedFoliageTriangles=0,submittedFoliageInstances=0;
+        Camera activeCam=cam;
         auto drawScene=[&](ID3D11RenderTargetView* rt,ID3D11DepthStencilView* ds,
                            int pw,int ph,bool scissor,bool skipCore)->bool{
             if(multires){
                 cb.peripheralControls[0]=skipCore?1.f:(scissor?2.f:0.f);
                 cb.peripheralControls[1]=1.f/float(pw);
                 cb.peripheralControls[2]=1.f/float(ph);
-                D3D11_MAPPED_SUBRESOURCE mp{};
-                if(FAILED(context_->Map(constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mp))){
-                    error=L"Upload constantes multires impossible.";return false;
-                }
-                std::memcpy(mp.pData,&cb,sizeof(cb));context_->Unmap(constants_.Get(),0);
             }
+            cb.eye[0]=activeCam.eye.x;cb.eye[1]=activeCam.eye.y;cb.eye[2]=activeCam.eye.z;
+            cb.forward[0]=activeCam.f.x;cb.forward[1]=activeCam.f.y;cb.forward[2]=activeCam.f.z;
+            cb.right[0]=activeCam.r.x;cb.right[1]=activeCam.r.y;cb.right[2]=activeCam.r.z;
+            cb.up[0]=activeCam.u.x;cb.up[1]=activeCam.u.y;cb.up[2]=activeCam.u.z;
+            cb.tanHalf=activeCam.tanHalf;cb.aspect=activeCam.aspect;
+            cb.reflectionControls[1]=1.f/float(pw);cb.reflectionControls[2]=1.f/float(ph);
+            D3D11_MAPPED_SUBRESOURCE mp{};
+            if(FAILED(context_->Map(constants_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mp))){
+                error=L"Upload constantes de rendu impossible.";return false;
+            }
+            std::memcpy(mp.pData,&cb,sizeof(cb));context_->Unmap(constants_.Get(),0);
             context_->OMSetRenderTargets(1,&rt,ds);
             context_->ClearRenderTargetView(rt,clear);
             context_->ClearDepthStencilView(ds,D3D11_CLEAR_DEPTH,1.f,0);
@@ -1174,8 +1194,9 @@ public:
                 roughness_.Get(),normal_.Get(),hybrid?probeSrv_.Get():nullptr,
                 hybrid?(hasBakedGi_?probeNextSrv_.Get():probeSrv_.Get()):nullptr,
                 preservedAlbedo_?preservedAlbedo_.Get():albedo_.Get(),
-                lumaBvh?lumaRadianceSrv_.Get():nullptr};
-            context_->PSSetShaderResources(0,8,srvs);
+                lumaBvh?lumaRadianceSrv_.Get():nullptr,
+                (lumaBvh&&cb.reflectionControls[0]>1.5f)?reflectionSrv_.Get():nullptr};
+            context_->PSSetShaderResources(0,9,srvs);
             ID3D11SamplerState* samplers[]={sampler_.Get(),probeSampler_.Get()};
             context_->PSSetSamplers(0,2,samplers);
         
@@ -1199,7 +1220,7 @@ public:
                     UINT start=0,count=0;
                     auto flush=[&]{if(count){context_->Draw(count,start);count=0;}};
                     for(const DrawChunk& chunk:chunks_){
-                        if(!visibleChunk(chunk,cam)){flush();continue;}
+                        if(!visibleChunk(chunk,activeCam)){flush();continue;}
                         if(count&&start+count!=chunk.first)flush();
                         if(!count)start=chunk.first;
                         count+=chunk.count;
@@ -1222,7 +1243,7 @@ public:
                         if(count){context_->DrawInstanced(36,count,0,first);count=0;}
                     };
                     for(const DrawChunk& chunk:boxChunks_){
-                        if(!visibleChunk(chunk,cam)){flush();continue;}
+                        if(!visibleChunk(chunk,activeCam)){flush();continue;}
                         if(count&&first+count!=chunk.first)flush();
                         if(!count)first=chunk.first;
                         count+=chunk.count;
@@ -1254,7 +1275,7 @@ public:
                     count=0;
                 };
                 for(const DrawChunk& chunk:chunks_){
-                    if(!visibleChunk(chunk,cam)){flush();continue;}
+                    if(!visibleChunk(chunk,activeCam)){flush();continue;}
                     if(count && start+count!=chunk.first)flush();
                     if(!count)start=chunk.first;
                     count+=chunk.count;
@@ -1282,7 +1303,7 @@ public:
                 UINT first=0,count=0;
                 auto flush=[&]{drawBoxes(first,count);count=0;};
                 for(const DrawChunk& chunk:boxChunks_){
-                    if(!visibleChunk(chunk,cam)){flush();continue;}
+                    if(!visibleChunk(chunk,activeCam)){flush();continue;}
                     if(count && first+count!=chunk.first)flush();
                     if(!count)first=chunk.first;
                     count+=chunk.count;
@@ -1306,9 +1327,9 @@ public:
                 const float radius=std::max({sphere.radii[0],sphere.radii[1],sphere.radii[2]});
                 const DrawChunk bounds{0,0,{center.x-radius,center.y-radius,center.z-radius},
                                            {center.x+radius,center.y+radius,center.z+radius}};
-                if(cullEnabled&&!visibleChunk(bounds,cam))continue;
-                const float z=std::max(.10f,dot(center-cam.eye,cam.f));
-                const float projectedRadius=radius*float(w)/(2.f*std::max(.01f,cam.tanHalf)*z);
+                if(cullEnabled&&!visibleChunk(bounds,activeCam))continue;
+                const float z=std::max(.10f,dot(center-activeCam.eye,activeCam.f));
+                const float projectedRadius=radius*float(w)/(2.f*std::max(.01f,activeCam.tanHalf)*z);
                 const float lodScale=100.f/float(quality.lodQualityPercent);
                 const int lod=(!lodEnabled||projectedRadius>=48.f*lodScale)?2
                     :(projectedRadius>=14.f*lodScale?1:0);
@@ -1359,9 +1380,9 @@ public:
                 const float radius=std::max({plant.radii[0],plant.radii[1],plant.radii[2]});
                 const DrawChunk bounds{0,0,{center.x-radius,center.y-radius,center.z-radius},
                     {center.x+radius,center.y+radius,center.z+radius}};
-                if(cullEnabled&&!visibleChunk(bounds,cam))continue;
-                const float z=std::max(.10f,dot(center-cam.eye,cam.f));
-                const float projectedRadius=radius*float(w)/(2.f*std::max(.01f,cam.tanHalf)*z);
+                if(cullEnabled&&!visibleChunk(bounds,activeCam))continue;
+                const float z=std::max(.10f,dot(center-activeCam.eye,activeCam.f));
+                const float projectedRadius=radius*float(w)/(2.f*std::max(.01f,activeCam.tanHalf)*z);
                 const float lodScale=100.f/float(quality.lodQualityPercent);
                 const int lod=(!lodEnabled||projectedRadius>=40.f*lodScale)?2
                     :(projectedRadius>=12.f*lodScale?1:0);
@@ -1398,7 +1419,7 @@ public:
             context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
         }
         if(!transparent_.empty()){
-            std::sort(transparent_.begin(),transparent_.end(),[&](const TransparentTriangle& a,const TransparentTriangle& b){return dot(a.center-cam.eye,cam.f)>dot(b.center-cam.eye,cam.f);});
+            std::sort(transparent_.begin(),transparent_.end(),[&](const TransparentTriangle& a,const TransparentTriangle& b){return dot(a.center-activeCam.eye,activeCam.f)>dot(b.center-activeCam.eye,activeCam.f);});
             D3D11_MAPPED_SUBRESOURCE transparentMap{};hr=context_->Map(transparentVertices_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&transparentMap);
             if(FAILED(hr)){error=L"Impossible de préparer les surfaces transparentes DirectX 11.";return false;}
             auto* out=static_cast<GpuVertex*>(transparentMap.pData);for(const auto& t:transparent_)for(const auto& v:t.v)*out++=v;context_->Unmap(transparentVertices_.Get(),0);
@@ -1411,6 +1432,24 @@ public:
         }
             return true;
         };
+        if(lumaBvh){
+            constexpr float reflectionPlaneY=.02f;
+            const int reflectionW=std::max(1,w/2),reflectionH=std::max(1,h/2);
+            Camera reflectionCam=cam;
+            const V target=cam.eye+cam.f*50.f;
+            reflectionCam.eye.y=2.f*reflectionPlaneY-cam.eye.y;
+            reflectionCam.f=norm(target-reflectionCam.eye);
+            reflectionCam.r=norm(cross(reflectionCam.f,V{0,1,0}));
+            reflectionCam.u=norm(cross(reflectionCam.r,reflectionCam.f));
+            activeCam=reflectionCam;
+            cb.reflectionControls[0]=1.f;
+            cb.reflectionControls[3]=reflectionPlaneY;
+            if(!drawScene(reflectionRtv_.Get(),reflectionDsv_.Get(),
+                          reflectionW,reflectionH,false,false))return false;
+            context_->OMSetRenderTargets(0,nullptr,nullptr);
+            activeCam=cam;
+            cb.reflectionControls[0]=2.f;
+        }else cb.reflectionControls[0]=0.f;
         if(multires){
             if(!drawScene(lowRtv_.Get(),lowDsv_.Get(),lowW_,lowH_,false,true) ||
                !drawScene(rtv_.Get(),dsv_.Get(),w,h,true,false))return false;
@@ -2630,6 +2669,27 @@ private:
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&depthTexture_))||FAILED(device_->CreateDepthStencilView(depthTexture_.Get(),nullptr,&dsv_))){error=L"Création du tampon de profondeur DirectX 11 impossible.";return false;}
         return true;
     }
+    bool ensureReflectionTarget(int w,int h,std::wstring& error){
+        if(reflectionRtv_&&reflectionDsv_&&reflectionSrv_&&reflectionW_==w&&reflectionH_==h)return true;
+        reflectionTex_.Reset();reflectionDepth_.Reset();reflectionRtv_.Reset();
+        reflectionDsv_.Reset();reflectionSrv_.Reset();reflectionW_=w;reflectionH_=h;
+        D3D11_TEXTURE2D_DESC td{};td.Width=UINT(w);td.Height=UINT(h);td.MipLevels=1;td.ArraySize=1;
+        td.Format=DXGI_FORMAT_R8G8B8A8_TYPELESS;td.SampleDesc.Count=1;td.Usage=D3D11_USAGE_DEFAULT;
+        td.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
+        if(FAILED(device_->CreateTexture2D(&td,nullptr,&reflectionTex_))){error=L"Création de la texture de réflexion impossible.";return false;}
+        D3D11_RENDER_TARGET_VIEW_DESC rd{};rd.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        rd.ViewDimension=D3D11_RTV_DIMENSION_TEXTURE2D;
+        if(FAILED(device_->CreateRenderTargetView(reflectionTex_.Get(),&rd,&reflectionRtv_))){error=L"Vue de rendu de réflexion impossible.";return false;}
+        D3D11_SHADER_RESOURCE_VIEW_DESC sd{};sd.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;
+        sd.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;sd.Texture2D.MipLevels=1;
+        if(FAILED(device_->CreateShaderResourceView(reflectionTex_.Get(),&sd,&reflectionSrv_))){error=L"Texture de lecture de réflexion impossible.";return false;}
+        td.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;td.BindFlags=D3D11_BIND_DEPTH_STENCIL;
+        if(FAILED(device_->CreateTexture2D(&td,nullptr,&reflectionDepth_))||
+           FAILED(device_->CreateDepthStencilView(reflectionDepth_.Get(),nullptr,&reflectionDsv_))){
+            error=L"Tampon de profondeur de réflexion impossible.";return false;
+        }
+        return true;
+    }
     bool ensureMultires(int w,int h,std::wstring& error){
         int lw=std::max(1,w/2),lh=std::max(1,h/2);
         if(lowRtv_&&mergeRtv_&&lowW_==lw&&lowH_==lh)return true;
@@ -2783,6 +2843,11 @@ private:
     float giHourMix_=0.f;
     V probeOrigin_{},probeInvSpan_{};ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<float> shadowUploadCache_;std::vector<TransparentTriangle> transparent_;
     ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_,lowTex_,lowDepth_,mergeTex_;
+    ComPtr<ID3D11Texture2D> reflectionTex_,reflectionDepth_;
+    ComPtr<ID3D11RenderTargetView> reflectionRtv_;
+    ComPtr<ID3D11DepthStencilView> reflectionDsv_;
+    ComPtr<ID3D11ShaderResourceView> reflectionSrv_;
+    int reflectionW_=0,reflectionH_=0;
     ComPtr<ID3D11ShaderResourceView> targetSrv_,resolveSrv_,lowSrv_;
     ComPtr<ID3D11RenderTargetView> lowRtv_,mergeRtv_;
     ComPtr<ID3D11DepthStencilView> lowDsv_;
