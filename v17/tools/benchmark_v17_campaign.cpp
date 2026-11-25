@@ -698,7 +698,7 @@ int main(int argc,char** argv){
             out<<"  [diagnostic CPU/Compute] scene "<<sceneName
                <<" : "<<cfg.rounds<<" series de mesure par nombre de threads\n";
             out.flush();
-            const auto& preset=runtime.cameras.first();
+            const auto& preset=runtime.cameras[cfg.lightingAudit?auditCameraIndex:0];
             const int cpuW=cfg.simulation?96:(cfg.lightingAudit?1000:320);
             const int cpuH=cfg.simulation?54:(cfg.lightingAudit?680:180);
             const auto cam=m3d::v16::makeCamera(preset,cpuW,cpuH);
