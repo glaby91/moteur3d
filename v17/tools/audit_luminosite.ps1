@@ -169,10 +169,93 @@ public static class LumaRegionAudit {
     }
 }
 "@
+
+function New-RoughPoolControl([string]$SourceRoot, [string]$DestinationRoot) {
+    $materialRoot = Join-Path $SourceRoot "materials"
+    if (!(Test-Path -LiteralPath $materialRoot -PathType Container)) {
+        throw "Dossier materials absent dans la scène : $materialRoot"
+    }
+    $matches = @()
+    foreach ($file in Get-ChildItem -LiteralPath $materialRoot -Filter "*.json" -File -Recurse) {
+        try {
+            $doc = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json
+            if ($doc.materials) {
+                for ($i = 0; $i -lt $doc.materials.Count; $i++) {
+                    if ([string]::Equals([string]$doc.materials[$i].id,"cse_pool_water",[StringComparison]::OrdinalIgnoreCase)) {
+                        $matches += [pscustomobject]@{ File = $file; Document = $doc; Index = $i }
+                    }
+                }
+            }
+        } catch {
+            throw "Impossible de lire le fichier matériaux $($file.FullName) : $($_.Exception.Message)"
+        }
+    }
+    if ($matches.Count -ne 1) {
+        $found = if ($matches.Count) { ($matches | ForEach-Object { $_.File.FullName }) -join ", " } else { "aucun" }
+        throw "Le matériau exact cse_pool_water doit être unique (trouvé : $($matches.Count), $found). Variante annulée sans lancer de rendu."
+    }
+    $target = $matches[0]
+    $material = $target.Document.materials[$target.Index]
+    if ($null -eq $material.roughness) { throw "Le matériau cse_pool_water n'a pas de propriété roughness." }
+    $originalRoughness = [double]$material.roughness
+    if ($originalRoughness -lt 0 -or $originalRoughness -gt 1) { throw "Roughness hors plage [0,1] : $originalRoughness" }
+
+    if (Test-Path -LiteralPath $DestinationRoot) { Remove-Item -LiteralPath $DestinationRoot -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $DestinationRoot | Out-Null
+    Copy-Item -Path (Join-Path $SourceRoot "*") -Destination $DestinationRoot -Recurse -Force
+    $sourcePrefix = $SourceRoot.TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)) + [IO.Path]::DirectorySeparatorChar
+    $relative = $target.File.FullName.Substring($sourcePrefix.Length)
+    $destinationFile = Join-Path $DestinationRoot $relative
+    $material.roughness = 0.95
+    $json = $target.Document | ConvertTo-Json -Depth 100
+    [IO.File]::WriteAllText($destinationFile,$json,[Text.UTF8Encoding]::new($false))
+    $check = Get-Content -LiteralPath $destinationFile -Raw | ConvertFrom-Json
+    $checkMatches = @($check.materials | Where-Object { [string]::Equals([string]$_.id,"cse_pool_water",[StringComparison]::OrdinalIgnoreCase) })
+    if ($checkMatches.Count -ne 1 -or [math]::Abs([double]$checkMatches[0].roughness - 0.95) -gt 0.000001) {
+        throw "La validation du matériau témoin cse_pool_water a échoué."
+    }
+    return [pscustomobject]@{
+        materialId = "cse_pool_water"
+        materialFile = $relative.Replace("\","/")
+        baselineRoughness = $originalRoughness
+        controlRoughness = 0.95
+        otherMaterialPropertiesPreserved = $true
+        sceneCopyValidated = $true
+    }
+}
+
 Add-Type -TypeDefinition $lumaAuditSource -ReferencedAssemblies @([System.Drawing.Bitmap].Assembly.Location)
 $roiSelfTest = [LumaRegionAudit]::SelfTest()
 Write-Host "Validation des métriques: $roiSelfTest"
-if ($SelfTest) { exit 0 }
+if ($SelfTest) {
+    $fixture = Join-Path $env:TEMP ("cse-warp-material-selftest-" + [guid]::NewGuid().ToString("N"))
+    $fixtureOut = $fixture + "-out"
+    New-Item -ItemType Directory -Force -Path (Join-Path $fixture "materials") | Out-Null
+    $fixtureDoc = [ordered]@{
+        format = "m3d-materials-v1"
+        materials = @(
+            [ordered]@{ id = "cse_pool_water"; roughness = 0.10; metallic = 0; transmission = 0.88 },
+            [ordered]@{ id = "cse_pool_tile"; roughness = 0.82; metallic = 0; transmission = 0 }
+        )
+    }
+    [IO.File]::WriteAllText((Join-Path $fixture "materials\fixture.json"),($fixtureDoc | ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))
+    try {
+        $selfControl = New-RoughPoolControl $fixture $fixtureOut
+        $check = Get-Content -LiteralPath (Join-Path $fixtureOut "materials\fixture.json") -Raw | ConvertFrom-Json
+        $water = @($check.materials | Where-Object id -eq "cse_pool_water")[0]
+        $tile = @($check.materials | Where-Object id -eq "cse_pool_tile")[0]
+        if ([math]::Abs([double]$water.roughness - 0.95) -gt 0.000001 -or
+            [math]::Abs([double]$water.transmission - 0.88) -gt 0.000001 -or
+            [math]::Abs([double]$tile.roughness - 0.82) -gt 0.000001) {
+            throw "Self-test failed: the control must change only cse_pool_water roughness."
+        }
+        Write-Host "Validation de la variante matériau : OK (seule roughness de cse_pool_water modifiée)."
+    } finally {
+        if (Test-Path $fixture) { Remove-Item -LiteralPath $fixture -Recurse -Force }
+        if (Test-Path $fixtureOut) { Remove-Item -LiteralPath $fixtureOut -Recurse -Force }
+    }
+    exit 0
+}
 
 # Run the engine against the newest scene published by the companion repository.
 $release = Invoke-RestMethod -Uri "https://api.github.com/repos/glaby91/moteur3d-scene/releases/latest" -Headers @{ "Accept" = "application/vnd.github+json"; "User-Agent" = "CSE-WARP-LuminosityBenchmark" }
@@ -276,6 +359,67 @@ $report = [ordered]@{
     regionalLuminance = $regionMeasure
     metricSelfTest = $roiSelfTest
 }
+# Controlled material variant: duplicate the same scene and raise only pool-water roughness.
+$controlSceneRoot = Join-Path $Root "benchmark-civic-control-rough-water"
+$materialControl = New-RoughPoolControl $sceneRoot $controlSceneRoot
+$controlOutBase = Join-Path $campaign.FullName "control-rough-water"
+New-Item -ItemType Directory -Force -Path $controlOutBase | Out-Null
+Write-Host ""
+Write-Host "Contrôle matériau: cse_pool_water roughness $($materialControl.baselineRoughness) -> $($materialControl.controlRoughness)"
+& $exe (Join-Path $controlSceneRoot "scene.json") $controlOutBase --lighting-audit --raster-msaa 1 --raster-anisotropy 8 --raster-lod-percent 100 --raster-culling 1 --raster-lod-enabled 0
+if ($LASTEXITCODE -ne 0) { throw "Le rendu témoin matériau a échoué (code $LASTEXITCODE)." }
+$controlCampaign = Get-ChildItem -LiteralPath $controlOutBase -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (!$controlCampaign) { throw "Le moteur n'a pas créé de dossier de résultats pour la variante témoin." }
+$controlImages = Join-Path $controlCampaign.FullName "images"
+foreach ($name in $required.Keys) {
+    $pathCheck = Join-Path $controlImages $required[$name]
+    if (!(Test-Path -LiteralPath $pathCheck -PathType Leaf)) { throw "Image témoin $name absente : $pathCheck" }
+}
+$controlData = @()
+foreach ($name in $names) {
+    $controlData += [LumaAudit]::Read($name,(Join-Path $controlImages $required[$name]))
+}
+$controlMeasure = [LumaAudit]::ComputeJson($controlData) | ConvertFrom-Json
+$controlRegionMeasure = [LumaRegionAudit]::ComputeJson($controlData,"DX11") | ConvertFrom-Json
+$controlEngine = Get-Content -LiteralPath (Join-Path $controlCampaign.FullName "summary.json") -Raw | ConvertFrom-Json
+if ([string]$controlEngine.cases[0].camera -ne [string]$engine.cases[0].camera) {
+    throw "La caméra du rendu témoin diffère de la référence. Comparaison annulée."
+}
+$controlDeltaRows = foreach ($baseRegion in $regionMeasure.regions) {
+    $testRegion = $controlRegionMeasure.regions | Where-Object name -eq $baseRegion.name | Select-Object -First 1
+    foreach ($baseBackend in $baseRegion.backends) {
+        $testBackend = $testRegion.backends | Where-Object backend -eq $baseBackend.backend | Select-Object -First 1
+        if (!$testBackend) { continue }
+        $displayDelta = [double]$testBackend.meanDisplayY_0_255 - [double]$baseBackend.meanDisplayY_0_255
+        $linearDelta = [double]$testBackend.meanLinearY_0_1 - [double]$baseBackend.meanLinearY_0_1
+        [pscustomobject]@{
+            region = $baseRegion.name
+            backend = $baseBackend.backend
+            baselineMeanDisplayY_0_255 = $baseBackend.meanDisplayY_0_255
+            roughWaterMeanDisplayY_0_255 = $testBackend.meanDisplayY_0_255
+            deltaDisplayY = $displayDelta
+            deltaDisplayPct = if ([double]$baseBackend.meanDisplayY_0_255 -gt 0) { 100.0 * $displayDelta / [double]$baseBackend.meanDisplayY_0_255 } else { $null }
+            baselineMeanLinearY_0_1 = $baseBackend.meanLinearY_0_1
+            roughWaterMeanLinearY_0_1 = $testBackend.meanLinearY_0_1
+            deltaLinearY = $linearDelta
+            deltaLinearPct = if ([double]$baseBackend.meanLinearY_0_1 -gt 0) { 100.0 * $linearDelta / [double]$baseBackend.meanLinearY_0_1 } else { $null }
+            commonOpaqueCoverageBaselinePct = $baseRegion.commonOpaqueCoveragePct
+            commonOpaqueCoverageControlPct = $testRegion.commonOpaqueCoveragePct
+        }
+    }
+}
+$controlReport = [ordered]@{
+    variant = "same scene/camera/lights; only cse_pool_water roughness changed"
+    material = $materialControl
+    camera = $controlEngine.cases[0].camera
+    engineSummary = $controlEngine
+    luminance = $controlMeasure
+    roiReference = "DX11; each ROI is compared against the matching DX11 ROI"
+    regionalLuminance = $controlRegionMeasure
+    baselineToControlDelta = @($controlDeltaRows)
+}
+$report["materialControl"] = $controlReport
+
 $reportPath = Join-Path $campaign.FullName "luminosity_audit.json"
 $csvPath = Join-Path $campaign.FullName "luminosity_audit.csv"
 $report | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $reportPath -Encoding UTF8
@@ -295,8 +439,26 @@ $roiRows = foreach ($region in $regionMeasure.regions) {
 }
 $roiCsvPath = Join-Path $campaign.FullName "luminosity_regions.csv"
 $roiRows | Export-Csv -LiteralPath $roiCsvPath -NoTypeInformation -Encoding UTF8
+$controlReportPath = Join-Path $controlCampaign.FullName "material_control_audit.json"
+$controlReport | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath $controlReportPath -Encoding UTF8
+$controlMeasure.backends | Export-Csv -LiteralPath (Join-Path $controlCampaign.FullName "luminosity_audit.csv") -NoTypeInformation -Encoding UTF8
+$controlRoiRows = foreach ($region in $controlRegionMeasure.regions) {
+    foreach ($backend in $region.backends) {
+        [pscustomobject]@{
+            region = $region.name; x = $region.x; y = $region.y; width = $region.width; height = $region.height
+            commonOpaquePixels = $region.commonOpaquePixels; commonOpaqueCoveragePct = $region.commonOpaqueCoveragePct
+            backend = $backend.backend; meanDisplayY_0_255 = $backend.meanDisplayY_0_255
+            meanLinearY_0_1 = $backend.meanLinearY_0_1; p50LinearY_0_1 = $backend.p50LinearY_0_1
+            p95LinearY_0_1 = $backend.p95LinearY_0_1
+            deltaDisplayPctVsDX11SameRegion = $backend.deltaDisplayPctVsReference
+            deltaLinearPctVsDX11SameRegion = $backend.deltaLinearPctVsReference
+        }
+    }
+}
+$controlRoiRows | Export-Csv -LiteralPath (Join-Path $controlCampaign.FullName "luminosity_regions.csv") -NoTypeInformation -Encoding UTF8
+$controlDeltaRows | Export-Csv -LiteralPath (Join-Path $campaign.FullName "material_control_comparison.csv") -NoTypeInformation -Encoding UTF8
 Write-Host ""
-Write-Host "Mesures luminance (masque opaque commun):"
+Write-Host "Mesures luminance (masque opaque commun, scène originale):"
 $measure.backends | Format-Table backend,ownOpaquePct,commonOpaqueMeanDisplayY_0_255,commonOpaqueMeanLinearY_0_1,alphaZeroPct -AutoSize
 
 $zip = Join-Path $resultsRoot "CSE-WARP-luminosity-$runId.zip"
