@@ -59,6 +59,19 @@ int main(int argc,char** argv){
                                     shadow,cam,w,h,cached,cacheStats,error)){
         qCritical()<<"Cached LumaTrace one-bounce render failed:"<<QString::fromStdWString(error);return 1;
     }
+    auto cupola=std::find_if(built.runtime.cameras.cbegin(),built.runtime.cameras.cend(),
+        [](const m3d::v16::CameraPreset& p){return p.id==QStringLiteral("v523_cupola_exterieure");});
+    if(cupola==built.runtime.cameras.cend()){
+        qCritical()<<"The cupola camera is missing from the scene";return 1;
+    }
+    const auto cupolaCam=m3d::v16::makeCamera(*cupola,w,h);
+    std::vector<uint32_t> cupolaPixels;
+    m3d::Stats cupolaStats;
+    error.clear();
+    if(!m3d::renderLumaTracePreview(built.runtime.renderScene,built.runtime.lumaTraceBvh4,
+                                    shadow,cupolaCam,w,h,cupolaPixels,cupolaStats,error)){
+        qCritical()<<"LumaTrace cupola reflection render failed:"<<QString::fromStdWString(error);return 1;
+    }
     size_t changed=0;
     for(size_t i=0;i<direct.size()&&i<bounced.size();++i)changed+=direct[i]!=bounced[i];
     // The lower part of this pool/fresco camera is the water surface.
@@ -106,8 +119,17 @@ int main(int argc,char** argv){
     const QString output=QString::fromLocal8Bit(argv[2]);
     const QFileInfo outputInfo(output);
     const QString stem=outputInfo.path()+QDir::separator()+outputInfo.completeBaseName();
+    QImage cupolaImage(w,h,QImage::Format_ARGB32);
+    for(int y=0;y<h;++y){
+        auto* row=reinterpret_cast<QRgb*>(cupolaImage.scanLine(y));
+        for(int x=0;x<w;++x){
+            const size_t i=size_t(y)*w+size_t(x);
+            row[x]=qRgb((cupolaPixels[i]>>16)&255,(cupolaPixels[i]>>8)&255,cupolaPixels[i]&255);
+        }
+    }
     const bool saved=directImage.save(stem+QStringLiteral("-direct.png"),"PNG")&&
-        bounceImage.save(output,"PNG")&&deltaImage.save(stem+QStringLiteral("-difference-x8.png"),"PNG");
+        bounceImage.save(output,"PNG")&&deltaImage.save(stem+QStringLiteral("-difference-x8.png"),"PNG")&&
+        cupolaImage.save(stem+QStringLiteral("-cupola.png"),"PNG");
     if(!saved){qCritical()<<"Could not save LumaTrace comparison images";return 1;}
     std::printf("LumaTrace WARP comparison: changed=%zu/%zu; pool grayscale lift=%.3f/255; ",
         changed,direct.size(),poolLift);
