@@ -397,9 +397,11 @@ constexpr char kShaderPart2[] = R"(
         specTint=lerp(specTint,float3(.24,.26,.28),saturate(glazing*1.8));
     }
     color += specTint * specular * (0.88+0.22*fresnel);
-    // LumaTrace supplies the same local diffuse terms with BVH occlusion;
-    // evaluating these again here doubled every direct point light.
-    if(peripheralControls.w<.5) {
+    // Local point emitters also need a specular response. The old LumaTrace
+    // path skipped this because it disabled the raster diffuse-light loop;
+    // consequently wet pool water and glazing showed no lamp reflections.
+    // Keep diffuse energy owned by LumaTrace, but evaluate the emitter's
+    // reflected direction here, with the same finite light-volume falloff.
     [loop] for (uint l = 0; l < lightCount; ++l) {
         float3 delta = lightPositionRadius[l].xyz - i.world;
         float radius = lightPositionRadius[l].w;
@@ -423,7 +425,16 @@ constexpr char kShaderPart2[] = R"(
                 float lambert = saturate(dot(normal, delta / distanceToLight));
                 float3 localIrradiance=lightColorIntensity[l].rgb
                     *(edge*edge*lightColorIntensity[l].a*lambert*.27);
-                color += colorControls.x>0.5 ? base*localIrradiance : localIrradiance;
+                if(peripheralControls.w<.5)
+                    color += colorControls.x>0.5 ? base*localIrradiance : localIrradiance;
+                float3 toLight=delta/distanceToLight;
+                float3 reflectedPoint=reflect(-toLight,normal);
+                float pointPower=clamp(specularPower,8.0,120.0);
+                float pointSpec=pow(saturate(dot(viewDir,reflectedPoint)),pointPower)
+                    *max(materialSpecular[i.mat].x,.035)
+                    *edge*edge*lightColorIntensity[l].a*.27;
+                color += specTint*lightColorIntensity[l].rgb*pointSpec
+                    *(0.88+0.22*fresnel);
             }
 #if defined(M3D_V17_OPTIMIZE_PIXELS)
         }
@@ -431,7 +442,6 @@ constexpr char kShaderPart2[] = R"(
 #if defined(M3D_V17_LIGHT_AABB_CULL)
         }
 #endif
-    }
     }
     if(hybridControls.x>0.5){
         // Indirect probes modify AMBIENT energy instead of adding an extra
