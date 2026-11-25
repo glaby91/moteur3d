@@ -2319,13 +2319,17 @@ private:
         sourceVertexCount_=prepared.sourceVertexCount;uniqueVertexCount_=prepared.uniqueVertexCount;
         if(!prepared.vertices.empty()){
             constexpr size_t kChunkIndices=3u*4096u;
-            for(size_t start=0;start<prepared.indices.size();start+=kChunkIndices){
-                const size_t end=std::min(start+kChunkIndices,prepared.indices.size());
+            const size_t drawIndexCount=useStaticGeometry?prepared.indices.size():prepared.vertices.size();
+            const auto vertexAt=[&](size_t i)->const GpuVertex&{
+                return useStaticGeometry?prepared.vertices[prepared.indices[i]]:prepared.vertices[i];
+            };
+            for(size_t start=0;start<drawIndexCount;start+=kChunkIndices){
+                const size_t end=std::min(start+kChunkIndices,drawIndexCount);
                 DrawChunk chunk;chunk.first=UINT(start);chunk.count=UINT(end-start);
-                const auto& first=prepared.vertices[prepared.indices[start]];
+                const auto& first=vertexAt(start);
                 chunk.mn={first.p[0],first.p[1],first.p[2]};chunk.mx=chunk.mn;
                 for(size_t i=start;i<end;++i){
-                    const auto& v=prepared.vertices[prepared.indices[i]];
+                    const auto& v=vertexAt(i);
                     chunk.mn.x=std::min(chunk.mn.x,v.p[0]);chunk.mn.y=std::min(chunk.mn.y,v.p[1]);chunk.mn.z=std::min(chunk.mn.z,v.p[2]);
                     chunk.mx.x=std::max(chunk.mx.x,v.p[0]);chunk.mx.y=std::max(chunk.mx.y,v.p[1]);chunk.mx.z=std::max(chunk.mx.z,v.p[2]);
                 }
