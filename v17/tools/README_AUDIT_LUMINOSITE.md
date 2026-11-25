@@ -3,17 +3,23 @@
 ## Lancer
 
 Dans le package Windows complet CSE WARP V17, double-cliquer sur
-\`LANCER_BENCHMARK_LUMINOSITE.bat\`.
+`LANCER_BENCHMARK_LUMINOSITE.bat`.
 
-Le batch démarre \`moteur3d_v17_campaign.exe\` sans ouvrir l'interface. Il utilise
-la scène \`benchmark-civic/scene.json\` livrée avec ce package, la caméra
-\`v7_pool_fresco\` (repli \`v4_piscine\`, puis première caméra disponible), une
-image de 1000 × 680 et les quatre chemins de rendu : DX11, LumaTrace, Vulkan et
-CPU direct. Le moteur produit les PNG, les temps de rendu et le résumé système.
+Le batch pilote le moteur en mode campagne, sans ouvrir son interface. Le script
+récupère la dernière scène publiée par `glaby91/moteur3d-scene` et la place dans
+`benchmark-civic`. À la date de cette version, la scène publiée est
+`scene-V17.629-42`. Il vérifie ensuite la caméra `v7_pool_fresco` (repli sur
+`v4_piscine`, puis première caméra disponible) et lance les rendus DX11,
+LumaTrace, Vulkan et CPU direct à 1000 × 680.
+
+Le moteur enregistre lui-même les quatre PNG, les temps de rendu et son résumé.
+Le script calcule ensuite les métriques d'image et crée une archive ZIP locale.
+Aucune action dans l'interface du moteur n'est nécessaire.
 
 ## Comparaison d'image
 
 Le script vérifie la présence et la résolution des quatre PNG. Il calcule :
+
 - alpha transparent, alpha partiel et couverture opaque par backend ;
 - luminance Rec.709 affichée et linéaire sur les pixels opaques de chaque image ;
 - luminance sur le masque commun, constitué des pixels opaques dans les quatre PNG ;
@@ -25,15 +31,16 @@ reproductible des sorties d'image de cette même build, caméra et scène.
 
 ## Résultats et envoi GitHub
 
-Le dossier \`benchmark-results\` conserve les images, le rapport JSON/CSV et une
-archive ZIP. Si GitHub CLI est installé et connecté au compte ayant les droits
-d'écriture (\`gh auth login -h github.com\`), le script clone brièvement la branche
-\`benchmark/luminosity-audit-v1\`, puis pousse le dossier d'images/mesures dans :
+Le dossier `benchmark-results` conserve les images, le rapport JSON/CSV et une
+archive ZIP. Si Git et GitHub CLI sont installés et que GitHub CLI est connecté
+avec un compte ayant les droits d'écriture (`gh auth login -h github.com`), le
+script pousse les résultats dans la branche
+`benchmark/luminosity-audit-v1`, sous :
 
-\`benchmarks/luminosity-audit/runs/<horodatage>/\`
+`benchmarks/luminosity-audit/runs/<horodatage>/`
 
-Aucun jeton n'est demandé ni stocké par le script. Si Git ou GitHub CLI manque,
-le ZIP reste disponible localement pour être transmis manuellement. Le script ne
+Aucun jeton n'est demandé ni stocké par le script. Sans GitHub CLI ou sans
+connexion, les résultats et le ZIP restent disponibles localement. Le script ne
 modifie ni ne recompile les sources du moteur sur le PC.
 
 ## Limites des mesures
