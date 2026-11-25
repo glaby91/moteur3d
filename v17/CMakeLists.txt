@@ -409,6 +409,22 @@ else()
 endif()
 # The complete benchmark is a separate tool in the SAME Windows build:
 # no iterative recompilation is required to change rounds/cameras/buffers.
+if(WIN32)
+    add_executable(v17_route30 EXCLUDE_FROM_ALL tools/route30.cpp)
+    target_include_directories(v17_route30 PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+    target_link_libraries(v17_route30 PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui user32)
+    set_target_properties(v17_route30 PROPERTIES OUTPUT_NAME route30)
+    if(TARGET v17_vulkan_spirv)
+        add_dependencies(v17_route30 v17_vulkan_spirv)
+        add_custom_command(TARGET v17_route30 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:v17_route30>/vulkan"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${V17_VULKAN_SPIRV} "$<TARGET_FILE_DIR:v17_route30>/vulkan"
+            VERBATIM)
+    endif()
+endif()
+
 add_executable(moteur3d_v17_campaign
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmark_v17_campaign.cpp")
 target_include_directories(moteur3d_v17_campaign PRIVATE

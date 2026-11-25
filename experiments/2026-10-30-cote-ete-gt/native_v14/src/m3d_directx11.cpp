@@ -1525,7 +1525,16 @@ public:
                 context_->End(slot.afterCopy.Get());
                 context_->End(slot.disjoint.Get());
             }
-            hr=swapchain_->Present(0,0); // unthrottled, no CPU readback
+            // The visible route benchmark requests the same VSync policy as Vulkan FIFO.
+            static const UINT syncInterval = []() -> UINT {
+                const char* requested = std::getenv("CSE_WARP_DX_BENCH_PRESENT_INTERVAL");
+                return requested && std::strcmp(requested, "1") == 0 ? 1u : 0u;
+            }();
+            hr=swapchain_->Present(syncInterval,0);
+            if(syncInterval && hr==DXGI_STATUS_OCCLUDED){
+                error=L"DXGI presentation window is occluded.";
+                return false;
+            }
             if(FAILED(hr)){
                 error=L"DirectX 11 : échec de présentation DXGI.";
                 releasePresenter();return false;
