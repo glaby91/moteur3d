@@ -216,3 +216,10 @@ la cohérence de l'image, pas les FPS sur Intel HD 620.
 
 **Ne pas annoncer les cibles 40 ms (25 FPS) et 25 ms (40 FPS) comme atteintes.**
 Elles restent nos jalons d'optimisation pour le complexe extrême.
+
+## À faire — géométrie au chargement
+
+- [ ] Préparer une fois les maillages opaques statiques à l’ouverture de la scène, après triangulation et avant transfert GPU. Partager les sommets aux attributs identiques et réordonner les indices. Préserver les coutures UV, les normales, les matériaux et la correspondance des triangles avec le BVH4.
+- [ ] Prévoir un interrupteur pour comparer le chemin actuel et le chemin optimisé. Consigner le chemin effectivement utilisé par DirectX 11 Raster, Vulkan Raster et LumaTrace BVH4.
+- [ ] Pour chacun des trois backends, répéter le même trajet avec et sans optimisation sur la même machine, avec scène, caméras, éclairage, résolution et qualité identiques. Rapporter séparément le temps de préparation, le temps total d’ouverture, la mémoire des tampons et le temps de rendu par image (médiane et P95 en ms après échauffement).
+- [ ] Vérifier la fidélité des images aux mêmes positions. Confirmer la tendance sur plusieurs scènes et matériels avant toute activation par défaut.
