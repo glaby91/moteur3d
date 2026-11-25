@@ -16,6 +16,13 @@ if(!(Test-Path $exe)){
   Move-Item "$stage\bin" $cache
  } finally {Remove-Item $stage -Recurse -Force}
 }
+$pluginRoots=@($Root,(Join-Path $Root 'plugins')) | Where-Object {
+ Test-Path -LiteralPath (Join-Path $_ 'imageformats\qjpeg.dll') -PathType Leaf
+}
+if(!$pluginRoots){throw "Decodeur JPEG Qt absent du package: imageformats\qjpeg.dll introuvable sous $Root ou plugins."}
+$env:QT_PLUGIN_PATH=(@($pluginRoots)+@($env:QT_PLUGIN_PATH) -ne '') -join ';'
+$fresco=Join-Path $Root 'benchmark-civic\textures\energetik_fresco_mosaic.jpg'
+if(!(Test-Path -LiteralPath $fresco -PathType Leaf)){throw "Texture de fresque absente: $fresco"}
 $env:PATH="$Root;$env:PATH"
 $out=Join-Path $Root ('benchmark-results\parcours30-'+(Get-Date -Format yyyyMMdd-HHmmssfff))
 New-Item -Type Directory -Force $out | Out-Null
