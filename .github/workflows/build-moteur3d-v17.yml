@@ -75,6 +75,11 @@ jobs:
         run: cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR" -DM3D_REQUIRE_VULKAN=ON -DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER -DV17_GIT_SHA=$env:GITHUB_SHA
       - name: Compile
         run: cmake --build build-v17 --config Release --parallel 4
+      - name: Run static geometry preparation unit smoke
+        shell: pwsh
+        run: |
+          ctest --test-dir build-v17 -C Release -R "^v17_static_geometry_prepare_attributes$" --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'Static geometry preparation smoke failed' }
       - name: Verify V17 executable and shared V16 engine
         shell: pwsh
         run: |
@@ -104,14 +109,17 @@ jobs:
             if (!$handle) { throw "Cannot load Windows icon: $icon" }
             $handle.Dispose()
           }
+          $engineVersion = Get-Content "v17/version.json" -Raw | ConvertFrom-Json
+          $expectedMajor = [int]$engineVersion.engine.major
+          $expectedBuild = [int]$engineVersion.engine.build
           foreach ($name in @("moteur3d_v17.exe", "moteur3d_v17_benchui.exe", "moteur3d_v17_benchmark.exe")) {
             $exe = (Resolve-Path "build-v17/Release/$name").Path
             $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
             Write-Host "$name — $($version.ProductName) — $($version.FileVersion)"
-            if ($version.FileMajorPart -ne 17 -or
-                $version.FileMinorPart -ne 1 -or
+            if ($version.FileMajorPart -ne $expectedMajor -or
+                $version.FileMinorPart -ne $expectedBuild -or
                 $version.FileBuildPart -ne 0 -or $version.FilePrivatePart -ne 0) {
-              throw "Invalid V17.001 product version in $name : $($version.FileVersion)"
+              throw "Invalid V17 product version in $name : expected $expectedMajor.$expectedBuild.0.0, got $($version.FileVersion)"
             }
           }
       - name: Validate light complex scene in native V17 loader

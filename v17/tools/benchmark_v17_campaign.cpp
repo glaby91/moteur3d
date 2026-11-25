@@ -94,6 +94,10 @@ struct Samples {
     QString error,image;
     double coldMs=0,wallMs=0;
     uint64_t submittedTriangles=0,drawCalls=0;
+    uint64_t geometrySourceVertices=0,geometryUniqueVertices=0,geometryIndexCount=0;
+    uint64_t geometryVertexBytes=0,geometryIndexBytes=0;
+    double geometryPrepareMs=0.,geometryUploadMs=0.;
+    bool geometryPreparationEnabled=false;
     std::vector<double> latency,gpuDraw,gpuTransfer,gpuTotal,cpuSubmit,cpuWait,cpuSwizzle,blockFps;
     std::vector<uint32_t> baseline;
     void add(const Stats& s){
@@ -106,6 +110,11 @@ struct Samples {
         cpuSubmit.push_back(s.cpuSubmitMs);
         cpuWait.push_back(s.cpuMapWaitMs);
         cpuSwizzle.push_back(s.cpuPixelConvertMs);
+        geometryPreparationEnabled=s.geometryPreparationEnabled;
+        geometrySourceVertices=s.geometrySourceVertices;geometryUniqueVertices=s.geometryUniqueVertices;
+        geometryIndexCount=s.geometryIndexCount;geometryVertexBytes=s.geometryVertexBytes;
+        geometryIndexBytes=s.geometryIndexBytes;geometryPrepareMs=s.geometryPrepareMs;
+        geometryUploadMs=s.geometryUploadMs;
         submittedTriangles=s.tests;drawCalls=s.gpuDrawCalls;
     }
     QJsonObject json() const{
@@ -129,6 +138,13 @@ struct Samples {
             {"cpuPixelConvertMs",mean(cpuSwizzle)},
             {"submittedTriangles",double(submittedTriangles)},
             {"gpuDrawCalls",double(drawCalls)},
+            {"geometryPreparationEnabled",geometryPreparationEnabled},
+            {"geometrySourceVertices",double(geometrySourceVertices)},
+            {"geometryUniqueVertices",double(geometryUniqueVertices)},
+            {"geometryIndexCount",double(geometryIndexCount)},
+            {"geometryVertexBytes",double(geometryVertexBytes)},
+            {"geometryIndexBytes",double(geometryIndexBytes)},
+            {"geometryPrepareMs",geometryPrepareMs},{"geometryUploadMs",geometryUploadMs},
             {"pixelIdentical",parity},{"status",ok?"ok":"failed"},
             {"error",error},{"image",image},
             {"memoryWorkingMiB",m.workingMiB},{"memoryPeakMiB",m.peakMiB}
@@ -139,6 +155,7 @@ struct Samples {
 struct Config{
     int rounds=6,frames=12,warmup=2;
     bool smoke=false,simulation=false,allScenes=false,includeCpu=false,fullBenchmark=false;
+    bool geometryPrepEnabled=false,includeLumaTrace=false;
     RasterQualitySettings quality{};
     QString selected,baseDir;
 };
@@ -284,7 +301,9 @@ void report(const QJsonObject& system,const std::vector<Samples>& cases,
               "stream_fps,block_fps_median,block_fps_min,block_fps_max,"
               "gpu_draw_ms,gpu_transfer_ms,gpu_total_ms,cpu_submit_ms,"
               "cpu_map_wait_ms,cpu_pixel_convert_ms,triangles,draw_calls,"
-              "pixel_identical,status,error,image\n";
+              "geometry_prep_enabled,geometry_source_vertices,geometry_unique_vertices,"
+              "geometry_index_count,geometry_vertex_bytes,geometry_index_bytes,"
+              "geometry_prepare_ms,geometry_upload_ms,pixel_identical,status,error,image\n";
         for(const auto& c:cases){
             const auto j=c.json();rows.append(j);
             stream<<escapeCsv(c.scene)<<','<<escapeCsv(c.camera)<<','
@@ -299,6 +318,14 @@ void report(const QJsonObject& system,const std::vector<Samples>& cases,
                 <<j.value("gpuTotalMs").toDouble()<<','<<j.value("cpuSubmitMs").toDouble()<<','
                 <<j.value("cpuMapWaitMs").toDouble()<<','<<j.value("cpuPixelConvertMs").toDouble()<<','
                 <<j.value("submittedTriangles").toDouble()<<','<<j.value("gpuDrawCalls").toDouble()<<','
+                <<(c.geometryPreparationEnabled?"true":"false")<<','
+                <<j.value("geometrySourceVertices").toDouble()<<','
+                <<j.value("geometryUniqueVertices").toDouble()<<','
+                <<j.value("geometryIndexCount").toDouble()<<','
+                <<j.value("geometryVertexBytes").toDouble()<<','
+                <<j.value("geometryIndexBytes").toDouble()<<','
+                <<j.value("geometryPrepareMs").toDouble()<<','
+                <<j.value("geometryUploadMs").toDouble()<<','
                 <<(c.parity?"true":"false")<<','<<(c.ok?"ok":"failed")<<','
                 <<escapeCsv(c.error)<<','<<escapeCsv(c.image)<<'\n';
         }
@@ -362,7 +389,7 @@ int main(int argc,char** argv){
               "[--frames 12] [--warmup 2] [--all-scenes] [--include-cpu] "
               "[--smoke] [--simulation] [--raster-msaa 1|2|4|8] [--raster-anisotropy 1|2|4|8|16] "
               "[--raster-lod-percent 50..200] [--raster-culling 0|1] "
-              "[--raster-lod-enabled 0|1]\n";
+              "[--raster-lod-enabled 0|1] [--geometry-prep on|off] [--include-lumatrace]\n";
         return 2;
     }
     Config cfg;
@@ -371,6 +398,19 @@ int main(int argc,char** argv){
     cfg.smoke=args.contains("--smoke");
     cfg.simulation=args.contains("--simulation");
     cfg.fullBenchmark=args.contains("--full-benchmark");
+    cfg.includeLumaTrace=args.contains("--include-lumatrace");
+    if(cfg.includeLumaTrace&&!cfg.fullBenchmark){
+        err<<"--include-lumatrace requires --full-benchmark\n";return 2;
+    }
+    const int geometryPrepAt=args.indexOf("--geometry-prep");
+    if(geometryPrepAt>=0){
+        if(geometryPrepAt+1>=args.size() ||
+           (args[geometryPrepAt+1]!="on" && args[geometryPrepAt+1]!="off")){
+            err<<"--geometry-prep expects on or off\n";return 2;
+        }
+        cfg.geometryPrepEnabled=args[geometryPrepAt+1]=="on";
+    }
+    qputenv("M3D_V17_STATIC_GEOMETRY_PREP",cfg.geometryPrepEnabled?"1":"0");
     if(cfg.fullBenchmark)setRasterCloudTimeScale(0.f);
     if(cfg.smoke&&cfg.simulation){
         err<<"--smoke and --simulation cannot be combined\n";return 2;
@@ -433,6 +473,8 @@ int main(int argc,char** argv){
         {"rounds",cfg.rounds},{"framesPerRound",cfg.frames},{"warmup",cfg.warmup},
         {"smoke",cfg.smoke},{"simulation",cfg.simulation},
         {"fullBenchmark",cfg.fullBenchmark},{"includeCpuScaling",cfg.includeCpu},
+        {"includeLumaTrace",cfg.includeLumaTrace},
+        {"geometryPreparationMode",cfg.geometryPrepEnabled?"on":"off"},
         {"backendMatrix",cfg.fullBenchmark?QJsonArray{QStringLiteral("D3D11 Raster preview/readback"),QStringLiteral("Vulkan Raster preview/readback"),QStringLiteral("CPU Ray Tracing PBR direct")}:QJsonArray{}},
         {"allScenes",cfg.allScenes},
         {"textureResolutionLimit",cfg.smoke||cfg.simulation?256:2048},
@@ -443,9 +485,14 @@ int main(int argc,char** argv){
             {"msaaRequested",msaa},{"anisotropy",aniso},{"lodPercent",lod},
             {"culling",cull!=0},{"lodEnabled",dynamic!=0}
         }},
-        {"timings",cfg.fullBenchmark?"D3D11 and Vulkan preview/readback call latency plus CPU direct ray tracing; these are offscreen renderer timings, not Qt/native swapchain presentation FPS.":"D3D11 GPU timestamp (draw/copy); CPU Map wait and pixel conversion; per-frame and per-block statistics. Not onscreen FPS or vsync."},
+        {"timings",cfg.fullBenchmark?"D3D11, Vulkan and optional LumaTrace preview/readback call latency plus CPU direct ray tracing; offscreen timings, not native swapchain FPS.":"D3D11 GPU timestamp (draw/copy); CPU Map wait and pixel conversion; per-frame and per-block statistics. Not onscreen FPS or vsync."},
         {"limitations","No precise per-shader-stage costs, VRAM usage or Qt presentation timer. CPU scaling uses a deliberately small separate workload."}
     };
+    if(cfg.includeLumaTrace){
+        QJsonArray matrix=system.value("backendMatrix").toArray();
+        matrix.append(QStringLiteral("LumaTrace BVH4 preview/readback"));
+        system["backendMatrix"]=matrix;
+    }
     QFile revision(QCoreApplication::applicationDirPath()+"/REVISION.txt");
     if(revision.open(QIODevice::ReadOnly|QIODevice::Text))
         system["revision"]=QString::fromUtf8(revision.readAll()).trimmed().left(12);
@@ -563,9 +610,23 @@ int main(int argc,char** argv){
                     return renderVulkanPreview(runtime.renderScene,shadows,camera,
                         entry.w,entry.h,image,frameStats,why);
                 };
-                // Rotate the order across four paths so Vulkan is not always
-                // measured after every DX11 pass at a higher GPU temperature.
-                const int modeCount=cfg.fullBenchmark?4:3;
+                const size_t lumaIndex=cases.size();
+                if(cfg.fullBenchmark&&cfg.includeLumaTrace){
+                    Samples lumaCase;
+                    lumaCase.scene=sceneName;lumaCase.camera=preset.id;
+                    lumaCase.variant=QStringLiteral("LumaTrace BVH4 preview + readback");
+                    lumaCase.w=size.width();lumaCase.h=size.height();lumaCase.depth=1;
+                    lumaCase.requestedMsaa=msaa;
+                    cases.push_back(std::move(lumaCase));
+                }
+                const auto renderLumaTrace=[&](std::vector<uint32_t>& image,Stats& frameStats,
+                                               std::wstring& why){
+                    auto& entry=cases[lumaIndex];
+                    return renderLumaTracePreview(runtime.renderScene,runtime.lumaTraceBvh4,
+                        shadows,camera,entry.w,entry.h,image,frameStats,why);
+                };
+                // Rotate order over every enabled backend to reduce thermal bias.
+                const int modeCount=3+(cfg.fullBenchmark?1:0)+(cfg.includeLumaTrace?1:0);
                 for(int round=0;round<cfg.rounds;++round){
                     for(int order=0;order<modeCount;++order){
                         const int mode=(order+round)%modeCount;
@@ -578,6 +639,18 @@ int main(int argc,char** argv){
                             }else if(entry.ok){
                                 out<<"  "<<preset.id<<" "<<size.width()<<"x"<<size.height()
                                    <<" Vulkan round "<<(round+1)<<"/"<<cfg.rounds
+                                   <<" => "<<QString::number(entry.blockFps.back(),'f',2)
+                                   <<" renderer FPS (readback)\n";out.flush();
+                            }
+                        }else if(cfg.fullBenchmark&&cfg.includeLumaTrace&&mode==4){
+                            auto& entry=cases[lumaIndex];
+                            if(entry.ok&&!runSynchronousBlock(entry,round,cfg.frames,
+                                                               cfg.warmup,renderLumaTrace,frameCsv)){
+                                allOk=false;
+                                err<<"FAILED "<<sceneName<<" LumaTrace: "<<entry.error<<"\n";
+                            }else if(entry.ok){
+                                out<<"  "<<preset.id<<" "<<size.width()<<"x"<<size.height()
+                                   <<" LumaTrace round "<<(round+1)<<"/"<<cfg.rounds
                                    <<" => "<<QString::number(entry.blockFps.back(),'f',2)
                                    <<" renderer FPS (readback)\n";out.flush();
                             }
@@ -620,6 +693,15 @@ int main(int argc,char** argv){
                     auto& entry=cases[vkIndex];
                     if(!entry.baseline.empty()){
                         const QString name=QStringLiteral("images/full_scene%1_cam%2_%3x%4_vulkan.png")
+                            .arg(sceneIndex).arg(cameraIndex).arg(entry.w).arg(entry.h);
+                        if(writeImage(dir.filePath(name),entry.baseline,entry.w,entry.h))
+                            entry.image=name;
+                    }
+                }
+                if(cfg.fullBenchmark&&cfg.includeLumaTrace){
+                    auto& entry=cases[lumaIndex];
+                    if(!entry.baseline.empty()){
+                        const QString name=QStringLiteral("images/full_scene%1_cam%2_%3x%4_lumatrace.png")
                             .arg(sceneIndex).arg(cameraIndex).arg(entry.w).arg(entry.h);
                         if(writeImage(dir.filePath(name),entry.baseline,entry.w,entry.h))
                             entry.image=name;

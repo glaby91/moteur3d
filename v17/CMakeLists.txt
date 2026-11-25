@@ -60,6 +60,12 @@ add_test(NAME v17_camera_diagnostic_roundtrip COMMAND v17_camera_diagnostic_smok
 add_executable(v17_scope_zoom_smoke "tests/scope_zoom_smoke.cpp")
 add_test(NAME v17_scope_zoom_hold_release COMMAND v17_scope_zoom_smoke)
 
+# Exact CPU-only checks for the reusable static indexed-geometry preparation.
+add_executable(v17_static_geometry_prepare_smoke
+    "tests/static_geometry_prepare_smoke.cpp")
+add_test(NAME v17_static_geometry_prepare_attributes
+    COMMAND v17_static_geometry_prepare_smoke)
+
 # No GPU or Windows runtime required to verify exact 2x2 sample budget.
 add_executable(v17_primary_quarter_smoke "tests/primary_quarter_smoke.cpp")
 add_test(NAME v17_primary_quarter_exact_budget COMMAND v17_primary_quarter_smoke)
