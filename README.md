@@ -229,3 +229,11 @@ La version **LumaTrace BVH4** est un backend d’éclairage GPU expérimental. E
 - `docs/` et `v17/docs/` : architecture, validation, outils et protocoles de benchmark.
 
 Références : [Guide moteur V17](v17/README.md) · [Full Benchmark](v17/docs/FULL_BENCHMARK.md) · [Version moteur](v17/version.json) · [Pistes d’optimisation raster](v17/docs/RASTER_PERFORMANCE_ROADMAP.md).
+
+## Benchmark de déplacement de 30 secondes
+
+1. Télécharger [LANCER_PARCOURS_30S.bat](https://raw.githubusercontent.com/glaby91/moteur3d/benchmark/luminosity-audit-v1/v17/tools/LANCER_PARCOURS_30S.bat) et le placer dans le dossier du package Windows V17 contenant les DLL Qt et `benchmark-civic/scene.json`.
+2. Double-cliquer sur ce BAT à chaque campagne. Il récupère [le scénario PowerShell](https://github.com/glaby91/moteur3d/blob/benchmark/luminosity-audit-v1/v17/tools/route30.ps1) sur GitHub. Le scénario télécharge et garde en cache une version dédiée de l’outil de mesure et de son noyau. Le BAT du patch de transmission reste destiné à l’audit de luminosité.
+3. Récupérer `benchmark-results/parcours30-<date>.zip`. Le CSV contient le nombre d’images terminées dans les 30 secondes, les FPS et le temps moyen par rendu, dernière image commencée comprise.
+
+DX11 Raster, Vulkan Raster et LumaTrace suivent successivement le même déplacement latéral sinusoïdal depuis la caméra piscine/fresque, à 14 h 45 et en 1000 × 680. La position dépend du temps écoulé. Chaque backend dispose de deux images d’échauffement puis de 30 secondes mesurées. La mesure inclut la relecture GPU vers CPU. Prévoir environ 90 secondes plus le chargement et les échauffements.
