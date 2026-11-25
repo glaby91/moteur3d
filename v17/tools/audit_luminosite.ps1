@@ -155,6 +155,55 @@ public static class LumaRegionAudit {
         }
         b.Append("]}");return b.ToString();
     }
+    public static string ComputePairedJson(LumaImage[] baseline,LumaImage[] control) {
+        if(baseline==null||control==null||baseline.Length==0||baseline.Length!=control.Length)
+            throw new ArgumentException("Baseline and control image sets must have matching backends.");
+        int w=baseline[0].Width,h=baseline[0].Height;
+        foreach(var im in baseline) if(im.Width!=w||im.Height!=h||im.BGRA.Length!=w*h*4)
+            throw new ArgumentException("Baseline images must have identical dimensions.");
+        foreach(var im in control) if(im.Width!=w||im.Height!=h||im.BGRA.Length!=w*h*4)
+            throw new ArgumentException("Control images must match baseline dimensions.");
+        var regions=new List<Tuple<string,int,int,int,int>>();
+        regions.Add(Tuple.Create("full",0,0,w,h));
+        for(int row=0;row<3;row++) for(int col=0;col<3;col++)
+            regions.Add(Tuple.Create("grid_r"+(row+1)+"_c"+(col+1),(col*w)/3,(row*h)/3,((col+1)*w)/3,(row+1)*h/3));
+        var b=new StringBuilder("{\"mask\":\"For each backend, compare only pixels opaque in both its baseline and control captures.\",\"regions\":[");
+        for(int ri=0;ri<regions.Count;ri++) {
+            if(ri>0)b.Append(',');
+            var r=regions[ri];int x0=r.Item2,y0=r.Item3,x1=r.Item4,y1=r.Item5;
+            long area=(long)(x1-x0)*(y1-y0);
+            b.Append("{\"name\":\"").Append(r.Item1).Append("\",\"x\":").Append(x0).Append(",\"y\":").Append(y0)
+             .Append(",\"width\":").Append(x1-x0).Append(",\"height\":").Append(y1-y0).Append(",\"backends\":[");
+            for(int j=0;j<baseline.Length;j++) {
+                if(j>0)b.Append(',');
+                int kControl=-1;
+                for(int q=0;q<control.Length;q++) if(String.Equals(baseline[j].Name,control[q].Name,StringComparison.OrdinalIgnoreCase)){kControl=q;break;}
+                if(kControl<0)throw new ArgumentException("Control capture missing backend "+baseline[j].Name);
+                long count=0;double baseD=0,baseL=0,controlD=0,controlL=0;
+                for(int y=y0;y<y1;y++)for(int x=x0;x<x1;x++){
+                    int k=(y*w+x)*4;
+                    if(baseline[j].BGRA[k+3]!=255||control[kControl].BGRA[k+3]!=255)continue;
+                    count++;
+                    baseD+=Y(baseline[j].BGRA,k,false);baseL+=Y(baseline[j].BGRA,k,true);
+                    controlD+=Y(control[kControl].BGRA,k,false);controlL+=Y(control[kControl].BGRA,k,true);
+                }
+                double md=count>0?baseD/count:0,ml=count>0?baseL/count:0,cd=count>0?controlD/count:0,cl=count>0?controlL/count:0;
+                b.Append("{\"backend\":\"").Append(baseline[j].Name).Append("\",\"pairedOpaquePixels\":").Append(count)
+                 .Append(",\"pairedOpaqueCoveragePct\":").Append(N(area>0?100.0*count/area:0))
+                 .Append(",\"baselineMeanDisplayY_0_255\":").Append(N(255.0*md))
+                 .Append(",\"controlMeanDisplayY_0_255\":").Append(N(255.0*cd))
+                 .Append(",\"deltaDisplayPct\":");
+                if(md>1e-12)b.Append(N(100.0*(cd/md-1.0)));else b.Append("null");
+                b.Append(",\"baselineMeanLinearY_0_1\":").Append(N(ml))
+                 .Append(",\"controlMeanLinearY_0_1\":").Append(N(cl))
+                 .Append(",\"deltaLinearPct\":");
+                if(ml>1e-12)b.Append(N(100.0*(cl/ml-1.0)));else b.Append("null");
+                b.Append('}');
+            }
+            b.Append("]}");
+        }
+        b.Append("]}");return b.ToString();
+    }
     public static string SelfTest() {
         var a=new LumaImage{Name="DX11",Width=6,Height=6,BGRA=new byte[6*6*4]};
         var half=new LumaImage{Name="Half",Width=6,Height=6,BGRA=new byte[6*6*4]};
@@ -165,7 +214,12 @@ public static class LumaRegionAudit {
             throw new InvalidOperationException("Self-test failed: identical images must report 0% delta.");
         if(changed.IndexOf("\"deltaDisplayPctVsReference\":-50",StringComparison.Ordinal)<0)
             throw new InvalidOperationException("Self-test failed: half-brightness image must report -50% display-Y delta.");
-        return "OK: identical captures = 0%; half-level grayscale = -50%; ROI reference uses same region.";
+        var halfDx11=new LumaImage{Name="DX11",Width=6,Height=6,BGRA=(byte[])half.BGRA.Clone()};
+        string paired=ComputePairedJson(new LumaImage[]{a},new LumaImage[]{halfDx11});
+        if(paired.IndexOf("\"deltaDisplayPct\":-50",StringComparison.Ordinal)<0 ||
+           paired.IndexOf("\"pairedOpaqueCoveragePct\":100",StringComparison.Ordinal)<0)
+            throw new InvalidOperationException("Self-test failed: paired mask must compare same opaque pixels and report -50%.");
+        return "OK: identical captures = 0%; half-level grayscale = -50%; ROI references and paired masks use matched opaque pixels.";
     }
 }
 "@
@@ -379,29 +433,24 @@ $controlEngine = Get-Content -LiteralPath (Join-Path $controlCampaign.FullName "
 if ([string]$controlEngine.cases[0].camera -ne [string]$engine.cases[0].camera) {
     throw "La caméra du rendu témoin diffère de la référence. Comparaison annulée."
 }
-$controlDeltaRows = foreach ($baseRegion in $regionMeasure.regions) {
-    $testRegion = $controlRegionMeasure.regions | Where-Object name -eq $baseRegion.name | Select-Object -First 1
-    foreach ($baseBackend in $baseRegion.backends) {
-        $testBackend = $testRegion.backends | Where-Object backend -eq $baseBackend.backend | Select-Object -First 1
-        if (!$testBackend) { continue }
-        $displayDelta = [double]$testBackend.meanDisplayY_0_255 - [double]$baseBackend.meanDisplayY_0_255
-        $linearDelta = [double]$testBackend.meanLinearY_0_1 - [double]$baseBackend.meanLinearY_0_1
+$pairedControlMeasure = [LumaRegionAudit]::ComputePairedJson($data,$controlData) | ConvertFrom-Json
+$controlDeltaRows = foreach ($region in $pairedControlMeasure.regions) {
+    foreach ($backend in $region.backends) {
         [pscustomobject]@{
-            region = $baseRegion.name
-            backend = $baseBackend.backend
-            baselineMeanDisplayY_0_255 = $baseBackend.meanDisplayY_0_255
-            iorControlMeanDisplayY_0_255 = $testBackend.meanDisplayY_0_255
-            deltaDisplayY = $displayDelta
-            deltaDisplayPct = if ([double]$baseBackend.meanDisplayY_0_255 -gt 0) { 100.0 * $displayDelta / [double]$baseBackend.meanDisplayY_0_255 } else { $null }
-            baselineMeanLinearY_0_1 = $baseBackend.meanLinearY_0_1
-            iorControlMeanLinearY_0_1 = $testBackend.meanLinearY_0_1
-            deltaLinearY = $linearDelta
-            deltaLinearPct = if ([double]$baseBackend.meanLinearY_0_1 -gt 0) { 100.0 * $linearDelta / [double]$baseBackend.meanLinearY_0_1 } else { $null }
-            commonOpaqueCoverageBaselinePct = $baseRegion.commonOpaqueCoveragePct
-            commonOpaqueCoverageControlPct = $testRegion.commonOpaqueCoveragePct
+            region = $region.name; x = $region.x; y = $region.y; width = $region.width; height = $region.height
+            backend = $backend.backend
+            pairedOpaquePixels = $backend.pairedOpaquePixels
+            pairedOpaqueCoveragePct = $backend.pairedOpaqueCoveragePct
+            baselineMeanDisplayY_0_255 = $backend.baselineMeanDisplayY_0_255
+            iorControlMeanDisplayY_0_255 = $backend.controlMeanDisplayY_0_255
+            deltaDisplayPct = $backend.deltaDisplayPct
+            baselineMeanLinearY_0_1 = $backend.baselineMeanLinearY_0_1
+            iorControlMeanLinearY_0_1 = $backend.controlMeanLinearY_0_1
+            deltaLinearPct = $backend.deltaLinearPct
         }
     }
 }
+
 $controlReport = [ordered]@{
     variant = "same scene/camera/lights/material; only cse_pool_water IOR changed to 1.0 as a Fresnel-suppression proxy"
     material = $materialControl
@@ -410,6 +459,7 @@ $controlReport = [ordered]@{
     luminance = $controlMeasure
     roiReference = "DX11; each ROI is compared against the matching DX11 ROI"
     regionalLuminance = $controlRegionMeasure
+    pairedMaskMethod = $pairedControlMeasure.mask
     baselineToControlDelta = @($controlDeltaRows)
 }
 $report["materialControl"] = $controlReport
