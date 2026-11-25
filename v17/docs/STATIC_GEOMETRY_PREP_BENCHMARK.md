@@ -2,57 +2,52 @@
 
 Branche de travail : `perf/v17-static-geometry-prepare-261125`  
 Base : `official/v17-lumatrace`  
-État : spécification de chantier ; aucune performance n'est encore revendiquée.
+État : implémentation sur la branche de travail ; résultats de performance à mesurer sur le matériel cible.
 
 ## Objectif
 
-Préparer une fois, au chargement de la scène et après triangulation, la géométrie opaque statique destinée aux backends GPU. Réutiliser les sommets lorsque position, normale, UV et matériau sont identiques, puis réordonner les indices pour améliorer la localité de lecture.
+Préparer la géométrie opaque destinée aux backends GPU après triangulation. Fusionner les sommets strictement identiques sur l'ensemble de leurs attributs, puis les référencer dans un flux d'indices. L'ordre des triangles reste inchangé : cette première étape ne fait pas de réordonnancement pour le cache GPU.
 
-La géométrie transparente conserve son chemin et son ordre de composition. Le tableau CPU `Scene::obj`, l'ordre du BVH4 et les identifiants des triangles restent la référence de correspondance. La préparation GPU doit transporter une table explicite de correspondance vers les triangles source ; elle ne doit pas réordonner silencieusement `Scene::obj` ni casser `primitiveId` de LumaTrace.
+La géométrie transparente conserve son chemin et son ordre de composition. Le tableau CPU `Scene::obj`, l'ordre du BVH4 et les identifiants des triangles restent la référence. Pour LumaTrace, `primitiveId` est inclus dans la clé du sommet afin de ne pas fusionner des identifiants source différents.
 
 ## Entrée A/B du benchmark
 
-Ajouter le sélecteur `Préparation géométrique statique` au benchmark, avec trois modes :
+Le benchmark accepte :
 
-- `both` : exécuter automatiquement les deux variantes, optimisation activée puis désactivée ;
-- `on` : exécuter uniquement la variante préparée ;
-- `off` : exécuter uniquement la géométrie actuelle, référence.
+- `--geometry-prep on` : préparation activée ;
+- `--geometry-prep off` : chemin non indexé de référence.
 
-L'option doit être disponible pour **DX11 Raster, Vulkan Raster et LumaTrace BVH4**. Chaque backend doit rapporter le mode réellement utilisé. Pour les campagnes automatisées, exposer aussi `--geometry-prep=both|on|off`. Une variable d'environnement peut servir de forçage technique, mais le rapport doit enregistrer la source de configuration et la valeur effective.
+Lancer deux campagnes séparées, avec les mêmes scène, caméra, résolution, qualité, MSAA, échauffement et nombre d'images. Chaque lancement crée son propre processus et reconstruit ses ressources, ce qui évite qu'un cache du premier mode fausse le second. Le mode par défaut est `off`. Le rapport `summary.json` mémorise le mode effectif ; `campaign_results.csv` expose aussi les compteurs de géométrie.
 
-## Protocole identique
+Exemple :
 
-Pour chaque backend et chaque scène/caméra retenue, garder constants : matériel, scène, caméra, résolution, éclairage, qualité, MSAA et paramètres de rendu.
+```bat
+moteur3d_v17_campaign.exe scene.json bench-prep-off --geometry-prep off --rounds 6 --frames 12 --warmup 2
+moteur3d_v17_campaign.exe scene.json bench-prep-on  --geometry-prep on  --rounds 6 --frames 12 --warmup 2
+```
 
-- Faire un échauffement avant le chronométrage.
-- Mesurer séparément préparation de géométrie, transfert GPU et rendu par image.
-- Rapporter les temps en ms : médiane, P95 et nombre d'images mesurées.
-- Rapporter mémoire GPU estimée ou octets des buffers, sommets uniques, indices, triangles soumis et draw calls.
-- Sauvegarder les images de référence et calculer l'écart pixel à pixel / luminance linéaire entre variantes.
-- Pour LumaTrace, vérifier explicitement que le `primitiveId` reçu par chaque triangle correspond toujours à l'identifiant source utilisé par le BVH4 et la table de radiance.
-- Exécuter chaque variante dans un état de renderer propre ; ne pas laisser un cache construit par la première variante fausser le temps de la seconde. Inverser l'ordre lors d'une répétition pour contrôler l'effet de température/cache.
+Le commutateur s'applique aux chemins GPU DX11, Vulkan et LumaTrace utilisant la préparation de scène commune. Les cas CPU servent de contrôle et restent inchangés.
 
-## Champs à exporter
+## Mesures et interprétation
 
-Ajouter dans `summary.json` et `results.csv` :
+Pour chaque backend et variante, comparer les mêmes scènes, caméras et réglages. Le benchmark rapporte :
 
-`geometryPrepMode`, `geometryPrepEnabled`, `uniqueVertexCount`, `indexCount`, `vertexBufferBytes`, `indexBufferBytes`, `geometryPrepareMs`, `gpuUploadMs`, `renderMedianMs`, `renderP95Ms`, `measuredFrames`, `submittedTriangles`, `drawCalls`, `imageParity`, `backend`, `scene`, `camera`, `resolution`.
+- temps de rendu par image : médiane, P95, moyenne et débit ;
+- temps de préparation géométrique et d'upload ;
+- sommets source et uniques, nombre d'indices, tailles des buffers ;
+- triangles soumis, draw calls, mémoire du processus ;
+- image de référence et indicateur de stabilité pixel à l'intérieur de chaque configuration.
 
-Les mesures de temps d'ouverture et les temps de rendu par image doivent rester séparés. Ne pas déduire un gain de FPS du seul nombre de sommets supprimés.
+Les temps de préparation et d'upload ne sont pas inclus dans les temps d'image mesurés après échauffement. Une comparaison d'images entre les dossiers `on` et `off` est nécessaire pour valider la parité visuelle. Le benchmark ne doit pas revendiquer un gain avant la mesure réelle sur la machine cible.
 
-## Critères d'acceptation
+## Fonctions séparées
 
-1. Résultats A/B disponibles séparément pour DX11 Raster, Vulkan Raster et LumaTrace BVH4.
-2. La variante désactivée reproduit le chemin de référence.
-3. La géométrie opaque donne des images identiques ou des écarts expliqués par une tolérance définie ; transparence, coutures UV, normales, matériaux et ordre des surfaces transparentes sont préservés.
-4. La correspondance source ↔ triangles BVH4 / `primitiveId` est vérifiée.
-5. Le rapport permet de conclure sur le gain ou la régression en temps de rendu, préparation et mémoire, par backend.
-6. CI compilation et tests de régression verts ; benchmark matériel avant d'activer l'optimisation par défaut.
+Le code partagé sépare le hachage des sommets, leur comparaison exacte et la construction du flux préparé. Les uploads Vulkan séparent l'allocation/copie générique des buffers de sommets et d'indices. Les backends gardent chacun le choix du chemin indexé ou de référence.
 
-## Ordre d'implémentation
+## Suite de validation
 
-1. Introduire une représentation GPU préparée et immuable, construite une fois après triangulation.
-2. Ajouter un validateur CPU qui vérifie les attributs fusionnés et la correspondance avec les triangles source.
-3. Brancher DX11 Raster, Vulkan Raster et LumaTrace en conservant le chemin de référence commutable.
-4. Ajouter l'entrée A/B et les colonnes d'export ci-dessus.
-5. Compiler et exécuter les tests CI, puis comparer sur le matériel cible avant toute activation par défaut.
+1. Compiler le moteur et le test de fumée `static_geometry_prepare_smoke`.
+2. Lancer les deux campagnes A/B sur la même machine.
+3. Comparer P50/P95 et débit par backend, ainsi que temps de préparation/upload et mémoire.
+4. Vérifier l'écart d'image entre `on` et `off`, notamment les matériaux, les coutures UV et LumaTrace.
+5. Garder la préparation désactivée par défaut jusqu'à validation des résultats.
