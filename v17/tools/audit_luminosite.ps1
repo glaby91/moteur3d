@@ -222,7 +222,7 @@ public static class LumaRegionAudit {
                 double md=opaqueCount>0?baseD/opaqueCount:0,ml=opaqueCount>0?baseL/opaqueCount:0;
                 double cd=opaqueCount>0?controlD/opaqueCount:0,cl=opaqueCount>0?controlL/opaqueCount:0;
                 b.Append("{\\"backend\\":\\"").Append(baseline[j].Name).Append("\\",\\"pairedOpaquePixels\\":").Append(opaqueCount)
-                 .Append(",\\"pairedOpaqueCoveragePct\\").Append(":").Append(N(area>0?100.0*opaqueCount/area:0))
+                 .Append(",\"pairedOpaqueCoveragePct\":").Append(N(area>0?100.0*opaqueCount/area:0))
                  .Append(",\\"baselineMeanAlphaPct\\":").Append(N(area>0?100.0*baseAlpha/area:0))
                  .Append(",\\"controlMeanAlphaPct\\":").Append(N(area>0?100.0*controlAlpha/area:0))
                  .Append(",\\"baselinePartialAlphaPct\\":").Append(N(area>0?100.0*basePartial/area:0))
