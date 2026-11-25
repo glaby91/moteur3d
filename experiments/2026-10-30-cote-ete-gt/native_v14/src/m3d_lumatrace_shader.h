@@ -86,7 +86,13 @@ float3 directAtHit(uint id,float3 p,float3 n){
   float3 d=float3(cos(phi)*r,y,sin(phi)*r);uint hit;float t,u,v;
   if(!traceClosest(origin,d,1.e20,0xffffffff,hit,t,u,v))continue;
   float3 p=origin+d*t,n=normalAtHit(hit,u,v,d);float facing=saturate(dot(n,-d));if(facing<=0)continue;
-  float3 irradiance=DirectRadiance[hit].rgb+sunlight(hit,p,n);if(max(irradiance.x,max(irradiance.y,irradiance.z))<=1.e-5)continue;
+  // The raster shader lights surfaces with a broad ambient fill as well as
+  // explicit lamps and sun. Reuse a restrained equivalent here: otherwise
+  // surfaces with no point-light/sun hit (notably the pool-hall fresco) add no
+  // outgoing radiance and cannot tint nearby receivers. Keep the textured
+  // albedo lookup below; this is one cached diffuse transfer, not path tracing.
+  float3 irradiance=DirectRadiance[hit].rgb+sunlight(hit,p,n)+float3(.24,.24,.24);
+  if(max(irradiance.x,max(irradiance.y,irradiance.z))<=1.e-5)continue;
   sum+=albedoAtHit(hit,u,v)*irradiance*facing;++hits;
  }
  // Uniform sphere samples approximate the diffuse hemisphere irradiance;
