@@ -5,8 +5,14 @@
 Dans le package Windows complet CSE WARP V17, double-cliquer sur
 `LANCER_BENCHMARK_LUMINOSITE.bat`.
 
-Le batch pilote le moteur en mode campagne, sans ouvrir son interface. Le script
-récupère la dernière scène publiée par `glaby91/moteur3d-scene` et la place dans
+Le batch récupère le script PowerShell à la volée depuis la branche GitHub
+`benchmark/luminosity-audit-v1`, en épinglant le commit utilisé dans le rapport.
+Il exécute ensuite l'exécutable moteur déjà installé localement : il ne retélécharge
+ni le moteur ni son package. Si GitHub est inaccessible, il utilise la copie locale
+du script si elle existe.
+
+Le script distant récupère la dernière scène publiée par `glaby91/moteur3d-scene`
+et la place dans
 `benchmark-civic`. À la date de cette version, la scène publiée est
 `scene-V17.629-42`. Il vérifie ensuite la caméra `v7_pool_fresco` (repli sur
 `v4_piscine`, puis première caméra disponible) et lance les rendus DX11,
@@ -30,6 +36,10 @@ Les résultats ne sont pas une calibration photométrique, mais une comparaison
 reproductible des sorties d'image de cette même build, caméra et scène.
 
 ## Résultats et envoi GitHub
+
+Pour créer un nouveau cas de test, ajoute sa scène et ses ressources à la branche,
+puis adapte le script distant ; le prochain lancement les récupérera sans rebuild du
+moteur. Chaque rapport conserve le commit du script ayant piloté le run.
 
 Le dossier `benchmark-results` conserve les images, le rapport JSON/CSV et une
 archive ZIP. Si Git et GitHub CLI sont installés et que GitHub CLI est connecté

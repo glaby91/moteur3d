@@ -175,6 +175,7 @@ $measure = [LumaAudit]::ComputeJson($data) | ConvertFrom-Json
 $engine = Get-Content -LiteralPath (Join-Path $campaign.FullName "summary.json") -Raw | ConvertFrom-Json
 $report = [ordered]@{
     audit = "CSE WARP V17 lighting parity"
+    benchmarkScriptCommit = $env:CSE_WARP_BENCHMARK_SCRIPT_COMMIT
     createdLocal = (Get-Date).ToString("o")
     machine = [ordered]@{
         computer = $env:COMPUTERNAME
