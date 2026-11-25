@@ -1,54 +1,14 @@
 ﻿param(
     [string]$Root = $PSScriptRoot,
-    [string]$Branch = "benchmark/luminosity-audit-v1"
+    [string]$Branch = "benchmark/luminosity-audit-v1",
+    [switch]$SelfTest
 )
 $ErrorActionPreference = "Stop"
 $Root = [IO.Path]::GetFullPath($Root)
 $exe = Join-Path $Root "moteur3d_v17_campaign.exe"
 $scene = Join-Path $Root "benchmark-civic\scene.json"
 $sceneRoot = Join-Path $Root "benchmark-civic"
-# Run the engine against the newest scene published by the companion repository.
-$release = Invoke-RestMethod -Uri "https://api.github.com/repos/glaby91/moteur3d-scene/releases/latest" -Headers @{ "Accept" = "application/vnd.github+json"; "User-Agent" = "CSE-WARP-LuminosityBenchmark" }
-$sceneAsset = $release.assets | Where-Object { $_.name -eq "V17-scene.zip" } | Select-Object -First 1
-if (!$sceneAsset) { throw "Latest scene release $($release.tag_name) has no V17-scene.zip asset." }
-$stageRoot = Join-Path $env:TEMP ("cse-warp-scene-" + [guid]::NewGuid().ToString("N"))
-$archivePath = Join-Path $stageRoot "V17-scene.zip"
-$extractRoot = Join-Path $stageRoot "extract"
-New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
-try {
-    Invoke-WebRequest -Uri $sceneAsset.browser_download_url -OutFile $archivePath
-    Expand-Archive -LiteralPath $archivePath -DestinationPath $extractRoot -Force
-    $releaseScene = Get-ChildItem -LiteralPath $extractRoot -Directory -Recurse |
-        Where-Object { $_.Name -eq "benchmark-civic" -and (Test-Path (Join-Path $_.FullName "scene.json")) } |
-        Select-Object -First 1
-    if (!$releaseScene) {
-        $releaseScene = Get-Item -LiteralPath $extractRoot
-        if (!(Test-Path (Join-Path $releaseScene.FullName "scene.json"))) {
-            throw "Scene release archive $($release.tag_name) does not contain benchmark-civic/scene.json."
-        }
-    }
-    $script:sceneVersion = $release.tag_name
-    $versionFile = Get-ChildItem -LiteralPath $extractRoot -Filter "SCENE_VERSION.json" -File -Recurse | Select-Object -First 1
-    if ($versionFile) {
-        try {
-            $versionData = Get-Content -LiteralPath $versionFile.FullName -Raw | ConvertFrom-Json
-            if ($versionData.revision) { $script:sceneVersion = $versionData.revision }
-        } catch { Write-Warning "SCENE_VERSION.json unreadable; using release tag $($release.tag_name)." }
-    }
-    $stagedScene = Join-Path $stageRoot "benchmark-civic"
-    New-Item -ItemType Directory -Force -Path $stagedScene | Out-Null
-    Copy-Item -Path (Join-Path $releaseScene.FullName "*") -Destination $stagedScene -Recurse -Force
-    if (!(Test-Path -LiteralPath (Join-Path $stagedScene "scene.json") -PathType Leaf)) {
-        throw "Latest scene archive did not stage scene.json at the expected location."
-    }
-    $destinationScene = Join-Path $Root "benchmark-civic"
-    if (Test-Path -LiteralPath $destinationScene) { Remove-Item -LiteralPath $destinationScene -Recurse -Force }
-    Move-Item -LiteralPath $stagedScene -Destination $destinationScene
-    $scene = Join-Path $destinationScene "scene.json"
-    Write-Host "Scène la plus récente chargée: $script:sceneVersion ($($release.tag_name))"
-} finally {
-    if (Test-Path -LiteralPath $stageRoot) { Remove-Item -LiteralPath $stageRoot -Recurse -Force }
-}
+
 Add-Type -AssemblyName System.Drawing
 $lumaAuditSource = @"
 using System;
@@ -212,6 +172,50 @@ public static class LumaRegionAudit {
 Add-Type -TypeDefinition $lumaAuditSource -ReferencedAssemblies @([System.Drawing.Bitmap].Assembly.Location)
 $roiSelfTest = [LumaRegionAudit]::SelfTest()
 Write-Host "Validation des métriques: $roiSelfTest"
+if ($SelfTest) { exit 0 }
+
+# Run the engine against the newest scene published by the companion repository.
+$release = Invoke-RestMethod -Uri "https://api.github.com/repos/glaby91/moteur3d-scene/releases/latest" -Headers @{ "Accept" = "application/vnd.github+json"; "User-Agent" = "CSE-WARP-LuminosityBenchmark" }
+$sceneAsset = $release.assets | Where-Object { $_.name -eq "V17-scene.zip" } | Select-Object -First 1
+if (!$sceneAsset) { throw "Latest scene release $($release.tag_name) has no V17-scene.zip asset." }
+$stageRoot = Join-Path $env:TEMP ("cse-warp-scene-" + [guid]::NewGuid().ToString("N"))
+$archivePath = Join-Path $stageRoot "V17-scene.zip"
+$extractRoot = Join-Path $stageRoot "extract"
+New-Item -ItemType Directory -Force -Path $extractRoot | Out-Null
+try {
+    Invoke-WebRequest -Uri $sceneAsset.browser_download_url -OutFile $archivePath
+    Expand-Archive -LiteralPath $archivePath -DestinationPath $extractRoot -Force
+    $releaseScene = Get-ChildItem -LiteralPath $extractRoot -Directory -Recurse |
+        Where-Object { $_.Name -eq "benchmark-civic" -and (Test-Path (Join-Path $_.FullName "scene.json")) } |
+        Select-Object -First 1
+    if (!$releaseScene) {
+        $releaseScene = Get-Item -LiteralPath $extractRoot
+        if (!(Test-Path (Join-Path $releaseScene.FullName "scene.json"))) {
+            throw "Scene release archive $($release.tag_name) does not contain benchmark-civic/scene.json."
+        }
+    }
+    $script:sceneVersion = $release.tag_name
+    $versionFile = Get-ChildItem -LiteralPath $extractRoot -Filter "SCENE_VERSION.json" -File -Recurse | Select-Object -First 1
+    if ($versionFile) {
+        try {
+            $versionData = Get-Content -LiteralPath $versionFile.FullName -Raw | ConvertFrom-Json
+            if ($versionData.revision) { $script:sceneVersion = $versionData.revision }
+        } catch { Write-Warning "SCENE_VERSION.json unreadable; using release tag $($release.tag_name)." }
+    }
+    $stagedScene = Join-Path $stageRoot "benchmark-civic"
+    New-Item -ItemType Directory -Force -Path $stagedScene | Out-Null
+    Copy-Item -Path (Join-Path $releaseScene.FullName "*") -Destination $stagedScene -Recurse -Force
+    if (!(Test-Path -LiteralPath (Join-Path $stagedScene "scene.json") -PathType Leaf)) {
+        throw "Latest scene archive did not stage scene.json at the expected location."
+    }
+    $destinationScene = Join-Path $Root "benchmark-civic"
+    if (Test-Path -LiteralPath $destinationScene) { Remove-Item -LiteralPath $destinationScene -Recurse -Force }
+    Move-Item -LiteralPath $stagedScene -Destination $destinationScene
+    $scene = Join-Path $destinationScene "scene.json"
+    Write-Host "Scène la plus récente chargée: $script:sceneVersion ($($release.tag_name))"
+} finally {
+    if (Test-Path -LiteralPath $stageRoot) { Remove-Item -LiteralPath $stageRoot -Recurse -Force }
+}
 
 $resultsRoot = Join-Path $Root "benchmark-results"
 if (!(Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Exécutable absent : $exe" }
