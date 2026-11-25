@@ -2317,11 +2317,12 @@ private:
         if(!prepared.valid){error=L"Préparation de la géométrie statique DirectX 11 invalide.";return false;}
         staticGeometryPreparationEnabled_=useStaticGeometry;
         sourceVertexCount_=prepared.sourceVertexCount;uniqueVertexCount_=prepared.uniqueVertexCount;
-        if(!prepared.vertices.empty()){
+        const auto& geometryVertices=useStaticGeometry?prepared.vertices:mesh.vertices;
+        if(!geometryVertices.empty()){
             constexpr size_t kChunkIndices=3u*4096u;
-            const size_t drawIndexCount=useStaticGeometry?prepared.indices.size():mesh.vertices.size();
+            const size_t drawIndexCount=useStaticGeometry?prepared.indices.size():geometryVertices.size();
             const auto vertexAt=[&](size_t i)->const GpuVertex&{
-                return useStaticGeometry?prepared.vertices[prepared.indices[i]]:mesh.vertices[i];
+                return useStaticGeometry?prepared.vertices[prepared.indices[i]]:geometryVertices[i];
             };
             for(size_t start=0;start<drawIndexCount;start+=kChunkIndices){
                 const size_t end=std::min(start+kChunkIndices,drawIndexCount);
@@ -2336,12 +2337,12 @@ private:
                 chunks_.push_back(chunk);
             }
             std::vector<GpuVertexLuma> packedLumaVertices;
-            const void* geometryData=useStaticGeometry?static_cast<const void*>(prepared.vertices.data()):static_cast<const void*>(mesh.vertices.data());
+            const void* geometryData=geometryVertices.data();
             size_t geometryStride=sizeof(GpuVertex);
             if(lumaTrace){
-                packedLumaVertices.resize(prepared.vertices.size());
-                for(size_t i=0;i<prepared.vertices.size();++i){
-                    const GpuVertex& source=prepared.vertices[i];GpuVertexLuma& packed=packedLumaVertices[i];
+                packedLumaVertices.resize(geometryVertices.size());
+                for(size_t i=0;i<geometryVertices.size();++i){
+                    const GpuVertex& source=geometryVertices[i];GpuVertexLuma& packed=packedLumaVertices[i];
                     std::copy(std::begin(source.p),std::end(source.p),std::begin(packed.p));
                     packed.normalPacked=packLumaNormal(source.n);
                     std::copy(std::begin(source.uv),std::end(source.uv),std::begin(packed.uv));
@@ -2349,7 +2350,7 @@ private:
                 }
                 geometryData=packedLumaVertices.data();geometryStride=sizeof(GpuVertexLuma);
             }
-            const size_t geometryBytes=(useStaticGeometry?prepared.vertices.size():mesh.vertices.size())*geometryStride;
+            const size_t geometryBytes=geometryVertices.size()*geometryStride;
             geometryVertexBytes_=geometryBytes;
             geometryIndexBytes_=useStaticGeometry?prepared.indices.size()*sizeof(uint32_t):0u;
             const auto geometryUploadStarted=Clock::now();
@@ -2372,7 +2373,7 @@ private:
                 std::to_wstring(uint32_t(geometryResult))+L").";
             return false;
         }
-        vertexCount_=UINT(useStaticGeometry?prepared.vertices.size():mesh.vertices.size());indexCount_=useStaticGeometry?UINT(prepared.indices.size()):0u;
+        vertexCount_=UINT(geometryVertices.size());indexCount_=useStaticGeometry?UINT(prepared.indices.size()):0u;
         if(useStaticGeometry){
             D3D11_BUFFER_DESC indexDesc{};indexDesc.ByteWidth=UINT(prepared.indices.size()*sizeof(uint32_t));
             indexDesc.Usage=D3D11_USAGE_IMMUTABLE;indexDesc.BindFlags=D3D11_BIND_INDEX_BUFFER;
