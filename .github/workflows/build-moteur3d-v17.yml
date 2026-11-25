@@ -110,9 +110,9 @@ jobs:
             $version = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe)
             Write-Host "$name — $($version.ProductName) — $($version.FileVersion)"
             if ($version.FileMajorPart -ne 17 -or
-                $version.FileMinorPart -ne 1 -or
+                $version.FileMinorPart -ne 2 -or
                 $version.FileBuildPart -ne 0 -or $version.FilePrivatePart -ne 0) {
-              throw "Invalid V17.001 product version in $name : $($version.FileVersion)"
+              throw "Invalid V17.002 product version in $name : $($version.FileVersion)"
             }
           }
       - name: Validate light complex scene in native V17 loader
