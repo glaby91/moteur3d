@@ -91,9 +91,9 @@ function Invoke-Route30([string]$PackageRoot) {
         $env:QT_PLUGIN_PATH = (@($pluginRoots) + @($env:QT_PLUGIN_PATH) | Where-Object { $_ }) -join ';'
         $env:PATH = "$PackageRoot;$env:PATH"
 
-        $helperUrl = 'https://github.com/glaby91/moteur3d/releases/download/route30-f33ed2bf03ef7a2e068aeb93f0c4b91279553e95/route30.zip'
-        $helperHash = 'd81eb1a2b24ee2455d35ebd7a1426c834284224c9a2b0e2d74e7d6d18ac9acb8'
-        $toolZip = Get-RouteArchive $cache 'route30' $helperUrl $helperHash 407915
+        $helperUrl = 'https://github.com/glaby91/moteur3d/releases/download/route30-03c456f42c5c6612c4cd07e8206c895dc7f9bfde/route30.zip'
+        $helperHash = '147b6a130fc56cd65301ca851d0df5126280deb23daa20b6a698e3d329309731'
+        $toolZip = Get-RouteArchive $cache 'route30' $helperUrl $helperHash 410505
         $bin = Join-Path $stage 'bin'
         [IO.Compression.ZipFile]::ExtractToDirectory($toolZip, $bin)
         $exe = Join-Path $bin 'route30.exe'
@@ -102,10 +102,15 @@ function Invoke-Route30([string]$PackageRoot) {
         $versionPath = Join-Path $out 'SCENE_VERSION.json'
         Copy-Item -LiteralPath $scene.Manifest -Destination $versionPath
         $csv = Join-Path $out 'resultats.csv'
+        Write-Host 'Parcours GPU direct : 1280 x 720, VSync activee, 30 s par backend.'
         & $exe $scene.Path $csv
-        if ($LASTEXITCODE -ne 0) { throw "Echec moteur $LASTEXITCODE - sorties partielles : $out" }
+        $engineExit = $LASTEXITCODE
+        if (!(Test-Path -LiteralPath $csv -PathType Leaf)) {
+            throw "Aucun CSV produit (code moteur $engineExit). Dossier : $out"
+        }
         Get-Content -LiteralPath $csv
         Compress-Archive -LiteralPath @($csv, $versionPath) -DestinationPath "$out.zip"
+        if ($engineExit -ne 0) { throw "Campagne incomplete (code moteur $engineExit). Resultats : $out.zip" }
         Write-Host "Resultats : $out.zip"
     } finally {
         Remove-Item -LiteralPath $stage -Recurse -Force

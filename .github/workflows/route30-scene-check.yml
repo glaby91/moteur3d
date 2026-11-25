@@ -21,7 +21,7 @@ jobs:
           version: '6.8.3'
           arch: win64_msvc2022_64
           cache: true
-      - name: Launch the published BAT in a package without any scene
+      - name: Run the published BAT at 720p on real native swapchains
         shell: powershell
         env:
           M3D_V16_FORCE_WARP: '1'
@@ -47,24 +47,35 @@ jobs:
               $out = Get-ChildItem 'benchmark-results' -Directory | Select-Object -First 1
               $manifest = Get-Content (Join-Path $out.FullName 'SCENE_VERSION.json') -Raw | ConvertFrom-Json
               $rows = @(Import-Csv (Join-Path $out.FullName 'resultats.csv'))
-              $dx = $rows | Where-Object backend -eq DX11
-              if (!$dx -or [int]$dx.frames_started -lt 1 -or [double]$dx.elapsed_s -lt 30 -or
-                  $dx.camera -ne 'v7_pool_fresco' -or [double]$dx.hour -ne 14.75) {
-                  throw 'The engine did not load the scene and render the actual timed DX11 route.'
+              if (($rows.backend -join ',') -ne 'DX11,Vulkan,LumaTrace') { throw 'Missing backend.' }
+              foreach ($row in $rows) {
+                  if ($row.camera -ne 'v7_pool_fresco' -or [double]$row.hour -ne 14.75 -or
+                      $row.width -ne '1280' -or $row.height -ne '720' -or
+                      $row.presentation -ne 'native_swapchain' -or $row.vsync -ne 'on') {
+                      throw "Wrong native route configuration for $($row.backend)."
+                  }
+                  if ($row.status -eq 'ok') {
+                      if ($row.readback_buffers -ne '0' -or [int]$row.frames_completed_30s -lt 1 -or
+                          [int]$row.frames_started -lt [int]$row.frames_completed_30s -or
+                          [double]$row.elapsed_s -lt 30 -or [double]$row.mean_render_ms -le 0 -or
+                          [Math]::Abs([double]$row.fps_30s - [int]$row.frames_completed_30s / 30.0) -gt 0.001) {
+                          throw "Invalid 30-second direct presentation measurement for $($row.backend)."
+                      }
+                  } elseif ($row.backend -ne 'Vulkan' -or $row.status -ne 'error' -or $row.fps_30s -or
+                            $row.error -notmatch 'vulkan-1.dll unavailable|No hardware GPU exposing Vulkan|No Vulkan GPU/driver|create instance.*(-9|INCOMPATIBLE_DRIVER)') {
+                      throw "Unexpected native presentation failure for $($row.backend): $($row.error)"
+                  }
               }
-              if ($batCode -eq 0) {
-                  if (($rows.backend -join ',') -ne 'DX11,Vulkan,LumaTrace') { throw 'Missing backend.' }
-                  Add-Type -AssemblyName System.IO.Compression.FileSystem
-                  $zip = [IO.Compression.ZipFile]::OpenRead($out.FullName + '.zip')
-                  try {
-                      if (($zip.Entries.Name -notcontains 'SCENE_VERSION.json') -or
-                          ($zip.Entries.Name -notcontains 'resultats.csv')) { throw 'Incomplete result ZIP.' }
-                  } finally { $zip.Dispose() }
-              } elseif ($log -notmatch 'Vulkan warmup' -or
-                        $log -notmatch 'vulkan-1.dll unavailable|No hardware GPU exposing Vulkan|No Vulkan GPU/driver|create instance.*(-9|INCOMPATIBLE_DRIVER)') {
-                  throw "Unexpected engine failure ($batCode)."
-              }
-              "Real BAT, scene $($manifest.revision), DX11 WARP: $($dx.frames_started) frames started, $($dx.elapsed_s) s. Exit $batCode." | Add-Content $env:GITHUB_STEP_SUMMARY
+              $allOk = @($rows | Where-Object status -ne 'ok').Count -eq 0
+              if (($batCode -eq 0) -ne $allOk) { throw 'BAT exit code disagrees with CSV.' }
+              Add-Type -AssemblyName System.IO.Compression.FileSystem
+              $zip = [IO.Compression.ZipFile]::OpenRead($out.FullName + '.zip')
+              try {
+                  if (($zip.Entries.Name -notcontains 'SCENE_VERSION.json') -or
+                      ($zip.Entries.Name -notcontains 'resultats.csv')) { throw 'Incomplete result ZIP.' }
+              } finally { $zip.Dispose() }
+              "Real BAT, official scene $($manifest.revision) and 1280x720 native presentation." | Add-Content $env:GITHUB_STEP_SUMMARY
+              $rows | Select-Object backend,status,frames_completed_30s,readback_buffers,error | Format-Table -AutoSize
           } finally { Pop-Location }
           exit 0
       - name: Check scene reuse and repair with a broken installed scene
