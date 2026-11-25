@@ -84,6 +84,7 @@ using System.Drawing.Imaging;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Collections.Generic;
 
 public sealed class LumaImage {
     public string Name;
