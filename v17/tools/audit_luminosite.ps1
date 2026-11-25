@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Root = $PSScriptRoot,
     [string]$Branch = "benchmark/luminosity-audit-v1"
 )
