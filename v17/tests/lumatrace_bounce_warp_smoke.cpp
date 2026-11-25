@@ -44,21 +44,26 @@ int main(int argc,char** argv){
     std::vector<uint32_t> direct,bounced,cached;
     m3d::Stats directStats,bounceStats,cacheStats;
     std::wstring error;
+    std::fprintf(stderr,"[reflection-smoke] direct begin\\n");std::fflush(stderr);
     if(!m3d::renderLumaTracePreview(built.runtime.renderScene,built.runtime.lumaTraceBvh4,
                                     shadow,cam,w,h,direct,directStats,error)){
         qCritical()<<"LumaTrace direct render failed:"<<QString::fromStdWString(error);return 1;
     }
+    std::fprintf(stderr,"[reflection-smoke] direct complete\\n");std::fflush(stderr);
     m3d::setRasterHybridLightingEnabled(true);
     error.clear();
+    std::fprintf(stderr,"[reflection-smoke] bounce begin\\n");std::fflush(stderr);
     if(!m3d::renderLumaTracePreview(built.runtime.renderScene,built.runtime.lumaTraceBvh4,
                                     shadow,cam,w,h,bounced,bounceStats,error)){
         qCritical()<<"LumaTrace one-bounce render failed:"<<QString::fromStdWString(error);return 1;
     }
+    std::fprintf(stderr,"[reflection-smoke] bounce complete; cache begin\\n");std::fflush(stderr);
     error.clear();
     if(!m3d::renderLumaTracePreview(built.runtime.renderScene,built.runtime.lumaTraceBvh4,
                                     shadow,cam,w,h,cached,cacheStats,error)){
         qCritical()<<"Cached LumaTrace one-bounce render failed:"<<QString::fromStdWString(error);return 1;
     }
+    std::fprintf(stderr,"[reflection-smoke] cache complete\\n");std::fflush(stderr);
     auto cupola=std::find_if(built.runtime.cameras.cbegin(),built.runtime.cameras.cend(),
         [](const m3d::v16::CameraPreset& p){return p.id==QStringLiteral("v523_cupola_exterieure");});
     if(cupola==built.runtime.cameras.cend()){
@@ -67,11 +72,13 @@ int main(int argc,char** argv){
     const auto cupolaCam=m3d::v16::makeCamera(*cupola,w,h);
     std::vector<uint32_t> cupolaPixels;
     m3d::Stats cupolaStats;
+    std::fprintf(stderr,"[reflection-smoke] cupola begin\\n");std::fflush(stderr);
     error.clear();
     if(!m3d::renderLumaTracePreview(built.runtime.renderScene,built.runtime.lumaTraceBvh4,
                                     shadow,cupolaCam,w,h,cupolaPixels,cupolaStats,error)){
         qCritical()<<"LumaTrace cupola reflection render failed:"<<QString::fromStdWString(error);return 1;
     }
+    std::fprintf(stderr,"[reflection-smoke] cupola complete\\n");std::fflush(stderr);
     size_t changed=0;
     for(size_t i=0;i<direct.size()&&i<bounced.size();++i)changed+=direct[i]!=bounced[i];
     // The lower part of this pool/fresco camera is the water surface.
