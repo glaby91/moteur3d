@@ -17,16 +17,15 @@ Le benchmark accepte :
 - `--geometry-prep on` : préparation activée ;
 - `--geometry-prep off` : chemin non indexé de référence.
 
-Lancer deux campagnes séparées, avec les mêmes scène, caméra, résolution, qualité, MSAA, échauffement et nombre d'images. Chaque lancement crée son propre processus et reconstruit ses ressources, ce qui évite qu'un cache du premier mode fausse le second. Le mode par défaut est `off`. Le rapport `summary.json` mémorise le mode effectif ; `campaign_results.csv` expose aussi les compteurs de géométrie.
+Lancer deux campagnes séparées, avec les mêmes scène, caméra, résolution, qualité, MSAA, échauffement et nombre d'images. Chaque lancement crée son propre processus et reconstruit ses ressources, ce qui évite qu'un cache du premier mode fausse le second. Le mode par défaut est `off`. Le rapport `summary.json` mémorise le mode effectif ; `campaign_results.csv` expose aussi les compteurs de géométrie. `--full-benchmark` compare DX11 et Vulkan ; `--include-lumatrace` ajoute LumaTrace BVH4 à cette matrice (et nécessite `--full-benchmark`). Le CPU direct reste un témoin, sans effet de cette optimisation.
 
 Exemple :
 
 ```bat
-moteur3d_v17_campaign.exe scene.json bench-prep-off --geometry-prep off --rounds 6 --frames 12 --warmup 2
-moteur3d_v17_campaign.exe scene.json bench-prep-on  --geometry-prep on  --rounds 6 --frames 12 --warmup 2
+moteur3d_v17_campaign.exe scene.json bench-prep-off --full-benchmark --include-lumatrace --geometry-prep off --rounds 3 --frames 4 --warmup 1
+moteur3d_v17_campaign.exe scene.json bench-prep-on  --full-benchmark --include-lumatrace --geometry-prep on  --rounds 3 --frames 4 --warmup 1
 ```
 
-Le commutateur s'applique aux chemins GPU DX11, Vulkan et LumaTrace utilisant la préparation de scène commune. Les cas CPU servent de contrôle et restent inchangés.
 
 ## Mesures et interprétation
 
