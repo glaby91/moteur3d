@@ -164,6 +164,76 @@ public static class LumaAudit {
         b.Append("]}");return b.ToString();
     }
 }
+
+public static class LumaRegionAudit {
+    static double Lin(double x) { return x<=0.04045?x/12.92:Math.Pow((x+0.055)/1.055,2.4); }
+    static double Y(byte[] p,int k,bool linear) {
+        double b=p[k]/255.0,g=p[k+1]/255.0,r=p[k+2]/255.0;
+        if(linear){r=Lin(r);g=Lin(g);b=Lin(b);}
+        return .2126*r+.7152*g+.0722*b;
+    }
+    static string N(double x){return x.ToString("0.########",CultureInfo.InvariantCulture);}
+    public static string ComputeJson(LumaImage[] imgs,string reference) {
+        if(imgs==null||imgs.Length<2) throw new ArgumentException("At least two captures are required.");
+        int w=imgs[0].Width,h=imgs[0].Height;
+        foreach(var im in imgs) if(im.Width!=w||im.Height!=h||im.BGRA.Length!=w*h*4)
+            throw new ArgumentException("All captures must have identical dimensions.");
+        int refIndex=-1;
+        for(int j=0;j<imgs.Length;j++) if(String.Equals(imgs[j].Name,reference,StringComparison.OrdinalIgnoreCase)) refIndex=j;
+        if(refIndex<0) throw new ArgumentException("Reference backend not found: "+reference);
+        var regions=new List<Tuple<string,int,int,int,int>>();
+        regions.Add(Tuple.Create("full",0,0,w,h));
+        for(int row=0;row<3;row++) for(int col=0;col<3;col++)
+            regions.Add(Tuple.Create("grid_r"+(row+1)+"_c"+(col+1),(col*w)/3,(row*h)/3,((col+1)*w)/3,(row+1)*h/3));
+        var b=new StringBuilder("{\"referenceBackend\":\"").Append(reference).Append("\",\"grid\":\"3x3 normalized image cells; cell deltas compare against the same cell\",\"regions\":[");
+        for(int ri=0;ri<regions.Count;ri++){
+            if(ri>0)b.Append(',');
+            var r=regions[ri];int x0=r.Item2,y0=r.Item3,x1=r.Item4,y1=r.Item5;
+            long common=0,area=(long)(x1-x0)*(y1-y0);
+            double[] sumD=new double[imgs.Length],sumL=new double[imgs.Length];
+            var values=new List<double>[imgs.Length];for(int j=0;j<imgs.Length;j++)values[j]=new List<double>();
+            for(int y=y0;y<y1;y++)for(int x=x0;x<x1;x++){
+                int px=y*w+x,k=px*4;bool opaque=true;
+                for(int j=0;j<imgs.Length;j++)if(imgs[j].BGRA[k+3]!=255){opaque=false;break;}
+                if(!opaque)continue;
+                common++;
+                for(int j=0;j<imgs.Length;j++){double d=Y(imgs[j].BGRA,k,false),l=Y(imgs[j].BGRA,k,true);sumD[j]+=d;sumL[j]+=l;values[j].Add(l);}
+            }
+            b.Append("{\"name\":\"").Append(r.Item1).Append("\",\"x\":").Append(x0).Append(",\"y\":").Append(y0)
+             .Append(",\"width\":").Append(x1-x0).Append(",\"height\":").Append(y1-y0).Append(",\"commonOpaquePixels\":").Append(common)
+             .Append(",\"commonOpaqueCoveragePct\":").Append(N(area>0?100.0*common/area:0)).Append(",\"backends\":[");
+            double refD=common>0?sumD[refIndex]/common:0,refL=common>0?sumL[refIndex]/common:0;
+            for(int j=0;j<imgs.Length;j++){
+                if(j>0)b.Append(',');
+                values[j].Sort();int count=values[j].Count;
+                double meanD=common>0?sumD[j]/common:0,meanL=common>0?sumL[j]/common:0;
+                double p50=count>0?values[j][(int)Math.Floor((count-1)*0.50)]:0;
+                double p95=count>0?values[j][(int)Math.Floor((count-1)*0.95)]:0;
+                b.Append("{\"backend\":\"").Append(imgs[j].Name).Append("\",\"meanDisplayY_0_255\":").Append(N(255.0*meanD))
+                 .Append(",\"meanLinearY_0_1\":").Append(N(meanL)).Append(",\"p50LinearY_0_1\":").Append(N(p50))
+                 .Append(",\"p95LinearY_0_1\":").Append(N(p95)).Append(",\"deltaDisplayPctVsReference\":");
+                if(refD>1e-12)b.Append(N(100.0*(meanD/refD-1.0)));else b.Append("null");
+                b.Append(",\"deltaLinearPctVsReference\":");
+                if(refL>1e-12)b.Append(N(100.0*(meanL/refL-1.0)));else b.Append("null");
+                b.Append('}');
+            }
+            b.Append("]}");
+        }
+        b.Append("]}");return b.ToString();
+    }
+    public static string SelfTest() {
+        var a=new LumaImage{Name="DX11",Width=6,Height=6,BGRA=new byte[6*6*4]};
+        var half=new LumaImage{Name="Half",Width=6,Height=6,BGRA=new byte[6*6*4]};
+        for(int i=0;i<36;i++){int k=i*4;a.BGRA[k]=a.BGRA[k+1]=a.BGRA[k+2]=100;a.BGRA[k+3]=255;half.BGRA[k]=half.BGRA[k+1]=half.BGRA[k+2]=50;half.BGRA[k+3]=255;}
+        string same=ComputeJson(new LumaImage[]{a,a},"DX11");
+        string changed=ComputeJson(new LumaImage[]{a,half},"DX11");
+        if(same.IndexOf("\"deltaDisplayPctVsReference\":0",StringComparison.Ordinal)<0)
+            throw new InvalidOperationException("Self-test failed: identical images must report 0% delta.");
+        if(changed.IndexOf("\"deltaDisplayPctVsReference\":-50",StringComparison.Ordinal)<0)
+            throw new InvalidOperationException("Self-test failed: half-brightness image must report -50% display-Y delta.");
+        return "OK: identical captures = 0%; half-level grayscale = -50%; ROI reference uses same region.";
+    }
+}
 "@
 Add-Type -TypeDefinition $lumaAuditSource -ReferencedAssemblies @([System.Drawing.Bitmap].Assembly.Location)
 $names = @("CPU","DX11","Vulkan","LumaTrace")
@@ -172,6 +242,9 @@ foreach ($name in $names) {
     $data += [LumaAudit]::Read($name,(Join-Path $images $required[$name]))
 }
 $measure = [LumaAudit]::ComputeJson($data) | ConvertFrom-Json
+$regionMeasure = [LumaRegionAudit]::ComputeJson($data,"DX11") | ConvertFrom-Json
+$roiSelfTest = [LumaRegionAudit]::SelfTest()
+Write-Host "Validation des métriques: $roiSelfTest"
 $engine = Get-Content -LiteralPath (Join-Path $campaign.FullName "summary.json") -Raw | ConvertFrom-Json
 $report = [ordered]@{
     audit = "CSE WARP V17 lighting parity"
@@ -193,11 +266,29 @@ $report = [ordered]@{
     }
     engineSummary = $engine
     luminance = $measure
+    roiReference = "DX11; each ROI is compared against the matching DX11 ROI"
+    regionalLuminance = $regionMeasure
+    metricSelfTest = $roiSelfTest
 }
 $reportPath = Join-Path $campaign.FullName "luminosity_audit.json"
 $csvPath = Join-Path $campaign.FullName "luminosity_audit.csv"
 $report | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $reportPath -Encoding UTF8
 $measure.backends | Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding UTF8
+$roiRows = foreach ($region in $regionMeasure.regions) {
+    foreach ($backend in $region.backends) {
+        [pscustomobject]@{
+            region = $region.name; x = $region.x; y = $region.y; width = $region.width; height = $region.height
+            commonOpaquePixels = $region.commonOpaquePixels; commonOpaqueCoveragePct = $region.commonOpaqueCoveragePct
+            backend = $backend.backend; meanDisplayY_0_255 = $backend.meanDisplayY_0_255
+            meanLinearY_0_1 = $backend.meanLinearY_0_1; p50LinearY_0_1 = $backend.p50LinearY_0_1
+            p95LinearY_0_1 = $backend.p95LinearY_0_1
+            deltaDisplayPctVsDX11SameRegion = $backend.deltaDisplayPctVsReference
+            deltaLinearPctVsDX11SameRegion = $backend.deltaLinearPctVsReference
+        }
+    }
+}
+$roiCsvPath = Join-Path $campaign.FullName "luminosity_regions.csv"
+$roiRows | Export-Csv -LiteralPath $roiCsvPath -NoTypeInformation -Encoding UTF8
 Write-Host ""
 Write-Host "Mesures luminance (masque opaque commun):"
 $measure.backends | Format-Table backend,ownOpaquePct,commonOpaqueMeanDisplayY_0_255,commonOpaqueMeanLinearY_0_1,alphaZeroPct -AutoSize
