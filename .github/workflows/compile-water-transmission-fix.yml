@@ -1,0 +1,45 @@
+name: Compile water transmission fix — Windows x64
+on:
+  push:
+    branches:
+      - fix/v17-water-transmission-parity-261125
+    paths:
+      - 'v17/**'
+      - 'v16/**'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/**'
+      - '.github/workflows/compile-water-transmission-fix.yml'
+permissions:
+  contents: read
+jobs:
+  compile:
+    name: Compile V17 + shared engine (MSVC x64)
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Qt 6.8.3
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Install Vulkan 1.3 SDK
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: '1.4.309.0'
+          install_runtime: false
+          cache: true
+          stripdown: true
+          install_swiftshader: false
+      - name: Configure V17
+        shell: pwsh
+        run: >-
+          cmake -S v17 -B build-v17-water-fix -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
+          -DM3D_REQUIRE_VULKAN=ON
+          "-DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER"
+          "-DV17_GIT_SHA=$env:GITHUB_SHA"
+      - name: Compile V17 application and shared engine
+        run: cmake --build build-v17-water-fix --config Release --target moteur3d_v17 --parallel 4
