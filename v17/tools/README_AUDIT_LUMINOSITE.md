@@ -60,3 +60,26 @@ le contenu produit par les backends, pas la composition swapchain native ou le
 profil couleur de l'écran. Les timings CPU et GPU ne sont pas strictement
 comparables : CPU direct est un rendu ray tracing à 1 échantillon et le raster
 GPU reste un chemin raster.
+
+
+## Mesures par régions et contrôle du script
+
+La mise à jour ajoute un CSV de régions : une mesure plein cadre et une grille normalisée
+3 × 3. Pour chaque case, les quatre moteurs sont calculés sur les mêmes pixels opaques,
+puis comparés à DX11 dans cette même case. Cela évite le défaut de l'ancien rapport où
+une région pouvait être comparée à la moyenne du cadre complet. Le CSV contient la
+couverture du masque, la luminance affichée et linéaire moyenne, les percentiles P50/P95
+et les écarts relatifs par case.
+
+Le script exécute aussi un auto-contrôle synthétique avant de finaliser le rapport :
+images identiques = 0 % d'écart et niveaux de gris 100 contre 50 = -50 % en luminance
+affichée. Le résultat est repris dans luminosity_audit.json.
+
+La grille est géométrique, pas sémantique : les cellules ne sont pas encore étiquetées
+« eau », « fresque » ou « sol ». Le runner actuel pilote une seule scène et une caméra
+fixe v7_pool_fresco; il ne permet pas encore de varier automatiquement le nombre de
+sources lumineuses, les surfaces réfléchissantes ou le scénario jour/nuit. Les données
+de ce run permettront d'identifier les régions où l'écart est le plus fort. Pour attribuer
+la cause, il faudra ensuite un lot de scènes contrôlées (source seule, réflecteur seul,
+puis combinaison) et un scénario jour/nuit que le moteur peut charger sans modification
+manuelle des réglages entre les backends.
