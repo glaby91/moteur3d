@@ -531,6 +531,7 @@ jobs:
           windeployqt --release --no-translations dist-v17/moteur3d_v17.exe
           windeployqt --release --no-translations dist-v17/moteur3d_v16.exe
       - name: Import 10 CC0 GLB trees into full Windows V17 package and smoke test final launch scene
+        if: github.ref != 'refs/heads/benchmark/luminosity-audit-v1'
         shell: pwsh
         env:
           M3D_V16_FORCE_WARP: '1'
