@@ -100,6 +100,7 @@ jobs:
             ${{ runner.temp }}/lumatrace-bounce-latest-scene.png
             ${{ runner.temp }}/lumatrace-bounce-latest-scene-direct.png
             ${{ runner.temp }}/lumatrace-bounce-latest-scene-difference-x8.png
+            ${{ runner.temp }}/lumatrace-bounce-latest-scene-cupola.png
           if-no-files-found: error
           compression-level: 6
       - name: Publish Windows x64 package
