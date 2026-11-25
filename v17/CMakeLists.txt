@@ -26,7 +26,7 @@ if(V17_BUILD_NUMBER GREATER 65535)
 endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
+find_package(Qt6 6.2 REQUIRED COMPONENTS Core Gui Widgets Concurrent Network)
 
 enable_testing()
 # CSE WARP Physics / Weather: deterministic fair-weather cirrus smoke test.
@@ -109,7 +109,7 @@ endif()
 target_include_directories(moteur3d_v17 PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}"
     "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
-target_link_libraries(moteur3d_v17 PRIVATE moteur3d_v16_core Qt6::Widgets Qt6::Concurrent)
+target_link_libraries(moteur3d_v17 PRIVATE moteur3d_v16_core Qt6::Widgets Qt6::Concurrent Qt6::Network)
 if(WIN32)
     # About dialog queries the DXGI primary adapter name without changing device selection.
     target_link_libraries(moteur3d_v17 PRIVATE dxgi xaudio2)

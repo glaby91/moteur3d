@@ -45,8 +45,8 @@ jobs:
           cmake -S v17 -B build-v17-lumatrace -G "Visual Studio 17 2022" -A x64
           -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
           -DM3D_REQUIRE_VULKAN=ON
-          -DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER
-          -DV17_GIT_SHA=$env:GITHUB_SHA
+          "-DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER"
+          "-DV17_GIT_SHA=$env:GITHUB_SHA"
       - name: Compile V17 application and shared engine
         run: cmake --build build-v17-lumatrace --config Release --target moteur3d_v17 --parallel 4
       - name: Assemble latest official scene with LumaTrace and Vulkan
@@ -66,6 +66,7 @@ jobs:
           if (-not (Test-Path (Join-Path $base "benchmark-civic/scene.json"))) { throw "The latest complex aquatique scene is missing" }
           if ((Get-Content (Join-Path $base "SCENE_VERSION.json") -Raw | ConvertFrom-Json).revision -ne $sceneVersion.revision) { throw "Extracted scene revision differs from release manifest" }
           Write-Host "Packaging scene revision $($sceneVersion.revision) from glaby91/moteur3d-scene"
+          Set-Content -Path (Join-Path $base "REVISION.txt") -Value $env:GITHUB_SHA -NoNewline
           $exe = Get-ChildItem -Path build-v17-lumatrace -Recurse -Filter moteur3d_v17.exe | Select-Object -First 1
           $core = Get-ChildItem -Path build-v17-lumatrace -Recurse -Filter moteur3d_v16_core.dll | Select-Object -First 1
           if (-not $exe -or -not $core) { throw "The LumaTrace executable or V16 engine DLL is missing" }

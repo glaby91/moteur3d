@@ -56,6 +56,9 @@
 #include <QMetaObject>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
+#include <QNetworkRequest>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPixmap>
@@ -72,6 +75,8 @@
 #include <QFontMetrics>
 #include <QTabWidget>
 #include <QTreeWidget>
+#include <QUrl>
+#include <QVersionNumber>
 #include <QVBoxLayout>
 #include <QStackedLayout>
 #include <QWindow>
@@ -335,6 +340,69 @@ private:
         p.restore();
     }
 };
+// Checks the tiny official scene manifest off the UI/render threads. It never
+// downloads or replaces scene files; the user decides when to update/restart.
+class SceneUpdateWorker final : public QObject {
+public:
+    SceneUpdateWorker(QString installedRevision,
+                      std::function<void(QString)> onUpdateAvailable)
+        :installedRevision_(std::move(installedRevision)),
+         onUpdateAvailable_(std::move(onUpdateAvailable)){}
+
+    void start(){
+        manager_=new QNetworkAccessManager(this);
+        pollTimer_=new QTimer(this);
+        pollTimer_->setInterval(5*60*1000);
+        connect(pollTimer_,&QTimer::timeout,this,[this]{check();});
+        // Defer the first request so startup, scene loading and first render
+        // always take priority. Subsequent checks remain low-priority too.
+        QTimer::singleShot(60000,this,[this]{check();pollTimer_->start();});
+    }
+
+private:
+    void check(){
+        if(requestInFlight_||!manager_)return;
+        requestInFlight_=true;
+        QNetworkRequest request(QUrl(QStringLiteral(
+            "https://github.com/glaby91/moteur3d-scene/releases/latest/download/SCENE_VERSION.json")));
+        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
+                             QNetworkRequest::NoLessSafeRedirectPolicy);
+        request.setRawHeader("Cache-Control","no-cache");
+        request.setTransferTimeout(10000);
+        auto* reply=manager_->get(request);
+        connect(reply,&QNetworkReply::finished,this,[this,reply]{
+            requestInFlight_=false;
+            const QByteArray payload=reply->readAll();
+            const bool ok=reply->error()==QNetworkReply::NoError;
+            reply->deleteLater();
+            if(!ok)return; // Offline, DNS or proxy failure: retry next interval.
+            QJsonParseError parseError{};
+            const auto doc=QJsonDocument::fromJson(payload,&parseError);
+            const QString remote=doc.isObject()
+                ?doc.object().value(QStringLiteral("revision")).toString().trimmed()
+                :QString();
+            const auto localVersion=QVersionNumber::fromString(
+                installedRevision_.startsWith(QLatin1Char('V'))
+                    ?installedRevision_.mid(1):installedRevision_);
+            const auto remoteVersion=QVersionNumber::fromString(
+                remote.startsWith(QLatin1Char('V'))?remote.mid(1):remote);
+            if(parseError.error!=QJsonParseError::NoError||remote.isEmpty()||
+               remote==lastAnnouncedRevision_||localVersion.isNull()||
+               remoteVersion.isNull()||QVersionNumber::compare(remoteVersion,localVersion)<=0)
+                return;
+            lastAnnouncedRevision_=remote;
+            if(onUpdateAvailable_)onUpdateAvailable_(remote);
+        });
+    }
+
+    QString installedRevision_;
+    QString lastAnnouncedRevision_;
+    std::function<void(QString)> onUpdateAvailable_;
+    QNetworkAccessManager* manager_=nullptr;
+    QTimer* pollTimer_=nullptr;
+    bool requestInFlight_=false;
+};
+
 class V17Window final : public QMainWindow {
 public:
     explicit V17Window(QString scenePath,int textureResolution=2048)
@@ -610,6 +678,12 @@ public:
         canvas_->setPlaceholder(QStringLiteral("CSE WARP V17\nChargement de la scène…"));
         if(!scenePath.isEmpty())
             QTimer::singleShot(0,this,[this,scenePath]{openScene(scenePath);});
+        const bool automatedRun=args.contains(QStringLiteral("--smoke-scene-switch")) ||
+            args.contains(QStringLiteral("--smoke-repeat-raster")) ||
+            args.contains(QStringLiteral("--smoke-walking-collisions")) ||
+            args.contains(QStringLiteral("--smoke-scope-mouse")) ||
+            args.contains(QStringLiteral("--smoke-immersive-mouse"));
+        if(!automatedRun)startSceneUpdateChecker();
     }
     // UI contract smoke: each renderer owns a unique top-level HWND.
     void smokeNativeUi(){
@@ -857,6 +931,10 @@ public:
         });
     }
     ~V17Window() override {
+        if(sceneUpdateThread_.isRunning()){
+            sceneUpdateThread_.quit();
+            sceneUpdateThread_.wait(1500);
+        }
         audioTimer_.stop();
         stopRadio();
         renderSerial_->fetch_add(1);
@@ -1011,9 +1089,11 @@ private:
     }
     QString githubRevision() const {
         QFile f(QCoreApplication::applicationDirPath()+QStringLiteral("/REVISION.txt"));
-        return f.open(QIODevice::ReadOnly|QIODevice::Text)
-            ?QString::fromUtf8(f.readAll()).trimmed().left(12)
-            :QStringLiteral("développement local");
+        if(f.open(QIODevice::ReadOnly|QIODevice::Text))
+            return QString::fromUtf8(f.readAll()).trimmed().left(12);
+        const QString buildSha=QStringLiteral(CSE_WARP_GIT_SHA);
+        return !buildSha.isEmpty()&&buildSha!=QStringLiteral("unknown")
+            ?buildSha.left(12):QStringLiteral("développement local");
     }
     static QJsonObject sceneCameraReport(const v16::CameraPreset& pose,
         const QString& manifest,const QString& title,const QString& image,
@@ -1410,6 +1490,39 @@ private:
         // through the existing QImage output. V17 raster remains the fast path.
         return index==1||index==4||index==5||index==6;
     }
+    void startSceneUpdateChecker(){
+        QFile manifest(QDir(QCoreApplication::applicationDirPath())
+            .filePath(QStringLiteral("SCENE_VERSION.json")));
+        if(!manifest.open(QIODevice::ReadOnly))return; // Local/development builds.
+        const auto doc=QJsonDocument::fromJson(manifest.readAll());
+        const QString installed=doc.isObject()
+            ?doc.object().value(QStringLiteral("revision")).toString().trimmed()
+            :QString();
+        if(installed.isEmpty())return;
+
+        sceneUpdateNoticeLabel_=new QLabel(this);
+        sceneUpdateNoticeLabel_->setStyleSheet(QStringLiteral(
+            "QLabel { color: #145a32; background: #e9f7ef; padding: 2px 8px; }"));
+        sceneUpdateNoticeLabel_->hide();
+        statusBar()->addPermanentWidget(sceneUpdateNoticeLabel_);
+        auto* worker=new SceneUpdateWorker(installed,[this](QString revision){
+            QMetaObject::invokeMethod(this,[this,revision]{
+                if(!sceneUpdateNoticeLabel_)return;
+                const QString message=QStringLiteral(
+                    "Nouvelle scène %1 disponible — mettez à jour le package puis relancez.")
+                    .arg(revision);
+                sceneUpdateNoticeLabel_->setText(QStringLiteral("Scène %1 disponible")
+                    .arg(revision));
+                sceneUpdateNoticeLabel_->setToolTip(message);
+                sceneUpdateNoticeLabel_->show();
+                statusBar()->showMessage(message,30000);
+            },Qt::QueuedConnection);
+        });
+        worker->moveToThread(&sceneUpdateThread_);
+        connect(&sceneUpdateThread_,&QThread::started,worker,[worker]{worker->start();});
+        connect(&sceneUpdateThread_,&QThread::finished,worker,&QObject::deleteLater);
+        sceneUpdateThread_.start(QThread::LowestPriority);
+    }
 protected:
     void closeEvent(QCloseEvent* event) override {
         // A synchronous D3D11 Map/readback cannot be forcibly cancelled.
@@ -1427,6 +1540,10 @@ protected:
         }
         // The controls window owns the application lifetime. Closing it must
         // not leave any independent renderer window keeping Qt alive.
+        if(sceneUpdateThread_.isRunning()){
+            sceneUpdateThread_.quit();
+            sceneUpdateThread_.wait(1500);
+        }
         for(auto* view:backendWindows_)if(view)view->hide();
         QMainWindow::closeEvent(event);
     }
@@ -1589,6 +1706,8 @@ private:
     QLabel* renderTimeLabel_=nullptr;
     QFutureWatcher<Result> watcher_;
     QThreadPool renderPool_;
+    QThread sceneUpdateThread_;
+    QLabel* sceneUpdateNoticeLabel_=nullptr;
     QFutureWatcher<SceneLoadOutcome> loadWatcher_;
     QLabel* sceneLoadLabel_=nullptr;
     QProgressBar* sceneLoadProgress_=nullptr;
@@ -2073,7 +2192,7 @@ private:
                 "MSAA : %8x | Anisotropie : %9x | PBR : %10 px\\n"
                 "Z-prepass expérimental : %11 | Rejet AABB lampes : %12\\n"
                 "Build GitHub Actions : %13\\nScène : %14\\n"
-                "Composants : PBR-%15, CPU-%16, DX11-%17, Vulkan-%18\\n"
+                "Composants : PBR-%15, CPU-%16, DX11-%17, Vulkan-%18, LumaTrace-%19\\n"
                 "HUD caméra / rapports d'anomalies PNG+JSON / restauration : disponibles")
                 .arg(CSE_WARP_PRODUCT_VERSION)
                 .arg(revision).arg(compileDate).arg(QSysInfo::prettyProductName())
@@ -2085,7 +2204,8 @@ private:
                 .arg(QStringLiteral(CSE_WARP_COMPONENT_PBR))
                 .arg(QStringLiteral(CSE_WARP_COMPONENT_CPU_LIGHTING))
                 .arg(QStringLiteral(CSE_WARP_COMPONENT_DIRECTX11))
-                .arg(QStringLiteral(CSE_WARP_COMPONENT_VULKAN));
+                .arg(QStringLiteral(CSE_WARP_COMPONENT_VULKAN))
+                .arg(QStringLiteral(CSE_WARP_COMPONENT_LUMATRACE));
             QMessageBox message(this);
             message.setWindowTitle(QStringLiteral("À propos de CSE WARP V%1").arg(CSE_WARP_PRODUCT_VERSION));
             message.setIcon(QMessageBox::Information);
@@ -2099,7 +2219,8 @@ private:
                 "<b>Raster :</b> Z-prepass %6, rejet AABB lumières %7 (expérimentaux).</p>"
                 "<p><b>Configuration :</b> Qt %8 ; MSAA %9x ; PBR %10 px.</p>"
                 "<p><b>Build GitHub Actions :</b> %11<br/><b>Scène :</b> %12</p>"
-                "<p><b>Révisions moteur :</b> PBR-%13 ; CPU-%14 ; DX11-%15 ; Vulkan-%16</p>")
+                "<p><b>Révisions moteur :</b> PBR-%13 ; CPU-%14 ; DX11-%15 ; Vulkan-%16 ; "
+                "LumaTrace-%17</p>")
                 .arg(CSE_WARP_PRODUCT_VERSION).arg(revision.toHtmlEscaped())
                 .arg(compileDate.toHtmlEscaped()).arg(gpu.toHtmlEscaped())
                 .arg(backend.toHtmlEscaped())
@@ -2111,7 +2232,8 @@ private:
                 .arg(QStringLiteral(CSE_WARP_COMPONENT_PBR))
                 .arg(QStringLiteral(CSE_WARP_COMPONENT_CPU_LIGHTING))
                 .arg(QStringLiteral(CSE_WARP_COMPONENT_DIRECTX11))
-                .arg(QStringLiteral(CSE_WARP_COMPONENT_VULKAN)));
+                .arg(QStringLiteral(CSE_WARP_COMPONENT_VULKAN))
+                .arg(QStringLiteral(CSE_WARP_COMPONENT_LUMATRACE)));
             auto* copy=message.addButton(QStringLiteral("Copier les informations système"),QMessageBox::ActionRole);
             message.addButton(QMessageBox::Ok);
             message.exec();
