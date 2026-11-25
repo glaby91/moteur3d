@@ -131,7 +131,7 @@ public static class LumaAudit {
                 int k=px*4;byte a=imgs[j].BGRA[k+3];
                 if(a!=255)allOpaque=false;if(a==0)allVisible=false;
                 if(a==0)alpha0[j]++;else if(a<255)alphaPartial[j]++;
-                if(Math.Max(imgs[j].BGRA[k],Math.Max(imgs[j].BGRA[k+1],imgs[j].BGRA[k+2]))>=254)clipped[j]++;
+                if(a==255 && Math.Max(imgs[j].BGRA[k],Math.Max(imgs[j].BGRA[k+1],imgs[j].BGRA[k+2]))>=254)clipped[j]++;
                 if(a==255){ownOpaque[j]++;ownDisplay[j]+=Y(imgs[j].BGRA,k,false);ownLinear[j]+=Y(imgs[j].BGRA,k,true);}
             }
             if(allVisible)commonVisible++;
@@ -159,7 +159,7 @@ public static class LumaAudit {
              .Append(",\"ownOpaqueMeanLinearY_0_1\":").Append(N(ownOpaque[j]>0?ownLinear[j]/ownOpaque[j]:0))
              .Append(",\"commonOpaqueMeanDisplayY_0_255\":").Append(N(commonOpaque>0?255.0*commonDisplay[j]/commonOpaque:0))
              .Append(",\"commonOpaqueMeanLinearY_0_1\":").Append(N(commonOpaque>0?commonLinear[j]/commonOpaque:0))
-             .Append(",\"clippedChannelPixelsPct\":").Append(N(100.0*clipped[j]/total)).Append('}');
+             .Append(",\"clippedChannelPixelsPct\":").Append(N(ownOpaque[j]>0?100.0*clipped[j]/ownOpaque[j]:0)).Append('}');
         }
         b.Append("]}");return b.ToString();
     }
