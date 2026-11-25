@@ -1236,10 +1236,10 @@ public:
             context_->PSSetShader(nullptr,nullptr,0);
             // Static opaque walls, floors and other architectural meshes.
             if(vertexCount_){
-                if(!cullEnabled)context_->Draw(vertexCount_,0);
+                if(!cullEnabled)context_->DrawIndexed(indexCount_,0,0);
                 else{
                     UINT start=0,count=0;
-                    auto flush=[&]{if(count){context_->Draw(count,start);count=0;}};
+                    auto flush=[&]{if(count){context_->DrawIndexed(count,start,0);count=0;}};
                     for(const DrawChunk& chunk:chunks_){
                         if(!visibleChunk(chunk,activeCam)){flush();continue;}
                         if(count&&start+count!=chunk.first)flush();
@@ -1281,7 +1281,7 @@ public:
         }
         if(vertexCount_){
             if(!cullEnabled){
-                context_->DrawIndexed(indexCount_,0,0)
+                context_->DrawIndexed(indexCount_,0,0);
                 ++drawCalls;
                 submittedVertices=vertexCount_;
             }else{
