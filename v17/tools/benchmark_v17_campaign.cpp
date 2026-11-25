@@ -177,8 +177,7 @@ bool runRasterBlock(const Scene& scene,const ShadowMap& shadows,const Camera& ca
         }
     }
     const auto wall=Clock::now();
-    int submitted=0,received=0;
-    bool ok=true;
+    int submitted=0,received=0;    bool ok=true;
     for(int i=0;i<frames;++i){
         reason.clear();
         if(result.depth==1){
@@ -301,7 +300,9 @@ void report(const QJsonObject& system,const std::vector<Samples>& cases,
               "stream_fps,block_fps_median,block_fps_min,block_fps_max,"
               "gpu_draw_ms,gpu_transfer_ms,gpu_total_ms,cpu_submit_ms,"
               "cpu_map_wait_ms,cpu_pixel_convert_ms,triangles,draw_calls,"
-              "pixel_identical,status,error,image\n";
+              "geometry_prep_enabled,geometry_source_vertices,geometry_unique_vertices,"
+              "geometry_index_count,geometry_vertex_bytes,geometry_index_bytes,"
+              "geometry_prepare_ms,geometry_upload_ms,pixel_identical,status,error,image\n";
         for(const auto& c:cases){
             const auto j=c.json();rows.append(j);
             stream<<escapeCsv(c.scene)<<','<<escapeCsv(c.camera)<<','
@@ -316,6 +317,14 @@ void report(const QJsonObject& system,const std::vector<Samples>& cases,
                 <<j.value("gpuTotalMs").toDouble()<<','<<j.value("cpuSubmitMs").toDouble()<<','
                 <<j.value("cpuMapWaitMs").toDouble()<<','<<j.value("cpuPixelConvertMs").toDouble()<<','
                 <<j.value("submittedTriangles").toDouble()<<','<<j.value("gpuDrawCalls").toDouble()<<','
+                <<(c.geometryPreparationEnabled?"true":"false")<<','
+                <<j.value("geometrySourceVertices").toDouble()<<','
+                <<j.value("geometryUniqueVertices").toDouble()<<','
+                <<j.value("geometryIndexCount").toDouble()<<','
+                <<j.value("geometryVertexBytes").toDouble()<<','
+                <<j.value("geometryIndexBytes").toDouble()<<','
+                <<j.value("geometryPrepareMs").toDouble()<<','
+                <<j.value("geometryUploadMs").toDouble()<<','
                 <<(c.parity?"true":"false")<<','<<(c.ok?"ok":"failed")<<','
                 <<escapeCsv(c.error)<<','<<escapeCsv(c.image)<<'\n';
         }
@@ -357,8 +366,7 @@ void report(const QJsonObject& system,const std::vector<Samples>& cases,
         out<<"</table><p><small>Comparaison valide uniquement à qualité, scène et "
               "résolution égales. P50/P95 mesurent la latence de chaque image; "
               "FPS débit inclut remplissage et vidage du pipeline. Les mesures "
-              "de bloc permettent d'identifier la variation thermique.</small></p>"
-              "<h2>Autres sous-systèmes</h2><pre>"
+              "de bloc permettent d'identifier la variation thermique.</small></p>"              "<h2>Autres sous-systèmes</h2><pre>"
            <<QString::fromUtf8(QJsonDocument(sideTests).toJson(QJsonDocument::Indented)).toHtmlEscaped()
            <<"</pre></html>";
     }
@@ -537,8 +545,7 @@ int main(int argc,char** argv){
         out<<"  [detail] PBR "<<runtime.pbrBuildMs<<" ms ; instanciation "
            <<runtime.geometryBuildMs<<" ms ; BVH "<<runtime.bvhBuildMs
            <<" ms ; LumaTrace BVH4 "<<runtime.lumaTraceBvhBuildMs<<" ms"
-           <<(runtime.lumaTraceBvhError.isEmpty()?" prêt":" indisponible")<<"\n";
-        out.flush();
+           <<(runtime.lumaTraceBvhError.isEmpty()?" prêt":" indisponible")<<"\n";        out.flush();
         updateLighting(runtime.daylightHour);
         out<<"  [ombres] Preparation de la carte CPU...\n";out.flush();
         tick=Clock::now();
@@ -717,8 +724,7 @@ int main(int argc,char** argv){
                     cpuElapsed,entry.ok,QStringLiteral("%1 spp, %2 threads, %3x%4; %5 rounds x %6 frames")
                     .arg(1).arg(available).arg(cpuW).arg(cpuH).arg(cpuRounds).arg(cpuFrames)));
                 if(!entry.baseline.empty()){
-                    const QString name=QStringLiteral("images/full_scene%1_cpu_direct_%2x%3.png")
-                        .arg(sceneIndex).arg(cpuW).arg(cpuH);
+                    const QString name=QStringLiteral("images/full_scene%1_cpu_direct_%2x%3.png")                        .arg(sceneIndex).arg(cpuW).arg(cpuH);
                     if(writeImage(dir.filePath(name),entry.baseline,cpuW,cpuH))
                         entry.image=name;
                 }
