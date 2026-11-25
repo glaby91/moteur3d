@@ -36,7 +36,11 @@ try {
         } catch { Write-Warning "SCENE_VERSION.json unreadable; using release tag $($release.tag_name)." }
     }
     $stagedScene = Join-Path $stageRoot "benchmark-civic"
-    Copy-Item -LiteralPath $releaseScene.FullName -Destination $stagedScene -Recurse -Force
+    New-Item -ItemType Directory -Force -Path $stagedScene | Out-Null
+    Copy-Item -Path (Join-Path $releaseScene.FullName "*") -Destination $stagedScene -Recurse -Force
+    if (!(Test-Path -LiteralPath (Join-Path $stagedScene "scene.json") -PathType Leaf)) {
+        throw "Latest scene archive did not stage scene.json at the expected location."
+    }
     $destinationScene = Join-Path $Root "benchmark-civic"
     if (Test-Path -LiteralPath $destinationScene) { Remove-Item -LiteralPath $destinationScene -Recurse -Force }
     Move-Item -LiteralPath $stagedScene -Destination $destinationScene
