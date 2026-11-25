@@ -11,7 +11,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
-Add-Type -TypeDefinition @'
+$drawingAssembly = [System.Drawing.Bitmap].Assembly.Location
+Add-Type -ReferencedAssemblies @($drawingAssembly) -TypeDefinition @'
 using System;
 using System.Drawing;
 using System.Drawing.Imaging;
