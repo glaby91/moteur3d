@@ -11,7 +11,7 @@ if not exist "audit_luminosite.ps1" (
   pause
   exit /b 2
 )
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0audit_luminosite.ps1" -Root "%~dp0"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%~dp0audit_luminosite.ps1"
 set "RC=%ERRORLEVEL%"
 echo.
 if "%RC%"=="0" (
