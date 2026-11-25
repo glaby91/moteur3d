@@ -54,8 +54,8 @@ PreparedMesh<Vertex> prepareStaticMesh(const std::vector<Vertex>& source,
         return result;
 
     if(!enabled) {
-        result.vertices=source;
-        result.uniqueVertexCount=result.vertices.size();
+        // The renderer keeps using its original source vector directly.
+        result.uniqueVertexCount=source.size();
         result.valid=true;
         return result;
     }
