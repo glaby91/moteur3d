@@ -16,6 +16,7 @@
 #endif
 #include "m3d_engine.h"
 #include "m3d_vulkan_mesh.h"
+#include "../../experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_static_geometry_prepare.h"
 #include "m3d_vulkan_version.h"
 #include "m3d_vulkan_readback.h"
 #include "m3d_vulkan_mips.h"
@@ -177,8 +178,10 @@ class VulkanRaster final {
     int giHour0_=-1,giHour1_=-1;
     float giMix_=0.f;
     VkFramebuffer framebuffer_=VK_NULL_HANDLE;
-    Buffer vertices_,transparent_,boxTemplate_,boxInstances_,foliageTemplate_,foliageInstances_,uniform_,readback_;
-    uint32_t vertexCount_=0,transparentCount_=0,boxCount_=0,foliageCount_=0,foliageTemplateCount_=0;
+    Buffer vertices_,indices_,transparent_,boxTemplate_,boxInstances_,foliageTemplate_,foliageInstances_,uniform_,readback_;
+    uint32_t vertexCount_=0,indexCount_=0,transparentCount_=0,boxCount_=0,foliageCount_=0,foliageTemplateCount_=0;
+    bool staticGeometryPrepared_=false; double geometryPrepareMs_=0.,geometryUploadMs_=0.;
+    std::size_t sourceVertexCount_=0,uniqueVertexCount_=0;
     std::vector<vkmesh::TransparentTriangle> glass_;
     std::vector<size_t> glassOrder_; // reused across frames; preserves original sort order
     std::vector<Chunk> chunks_,boxChunks_,foliageChunks_;
@@ -856,19 +859,26 @@ class VulkanRaster final {
         }
         submit();free(stage);
     }
-    Buffer uploadVertices(const void* src,size_t bytes){
-        Buffer vertex=buffer(bytes,VK_BUFFER_USAGE_VERTEX_BUFFER_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+    Buffer uploadBuffer(const void* src,size_t bytes,VkBufferUsageFlags usage,
+                        VkAccessFlags destinationAccess){
+        Buffer vertex=buffer(bytes,usage|VK_BUFFER_USAGE_TRANSFER_DST_BIT,
                              VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
         Buffer stage=buffer(bytes,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
         memcpy(stage.mapped,src,bytes);flush(stage);
         begin();VkBufferCopy bc{};bc.size=bytes;
         vkCmdCopyBuffer(cmd_,stage.handle,vertex.handle,1,&bc);
         VkBufferMemoryBarrier b{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};
-        b.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;b.dstAccessMask=VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+        b.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;b.dstAccessMask=destinationAccess;
         b.srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;b.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
         b.buffer=vertex.handle;b.size=VK_WHOLE_SIZE;
         vkCmdPipelineBarrier(cmd_,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,0,0,nullptr,1,&b,0,nullptr);
         submit();free(stage);return vertex;
+    }
+    Buffer uploadVertices(const void* src,size_t bytes){
+        return uploadBuffer(src,bytes,VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT);
+    }
+    Buffer uploadIndices(const void* src,size_t bytes){
+        return uploadBuffer(src,bytes,VK_BUFFER_USAGE_INDEX_BUFFER_BIT,VK_ACCESS_INDEX_READ_BIT);
     }
     void updateDescriptors(){
         if(!uniform_.handle||!albedo_.view||!surface_.view||!shadow_.view||!gi0_.view||!gi1_.view)return;
@@ -1678,7 +1688,7 @@ class VulkanRaster final {
     }
     void rebuild(const Scene& scene,bool uploadPbr){
         if(scene.mat.size()>kMaxMaterials)throw std::runtime_error("Vulkan port: more than 256 materials");
-        free(vertices_);free(transparent_);free(boxTemplate_);free(boxInstances_);
+        free(vertices_);free(indices_);free(transparent_);free(boxTemplate_);free(boxInstances_);
         free(foliageTemplate_);free(foliageInstances_);
         fastBoxCache_=false;boxCpuCache_.clear();
         glass_.clear();chunks_.clear();boxChunks_.clear();foliageChunks_.clear();
@@ -1690,8 +1700,19 @@ class VulkanRaster final {
             throw std::runtime_error("Vulkan: scene contains no rasterizable geometry");
         if(mesh.vertices.size()+mesh.transparent.size()*3>12000000u)
             throw std::runtime_error("Vulkan scene exceeds 12M vertex safety limit");
-        vertexCount_=uint32_t(mesh.vertices.size());
-        if(vertexCount_)vertices_=uploadVertices(mesh.vertices.data(),size_t(vertexCount_)*sizeof(Vertex));
+        const auto prepareStarted=Clock::now();
+        const char* prepEnv=std::getenv("M3D_V17_STATIC_GEOMETRY_PREP");
+        const bool prepareEnabled=prepEnv&&std::strcmp(prepEnv,"1")==0;
+        auto prepared=static_geometry::prepareStaticMesh(mesh.vertices,prepareEnabled);
+        geometryPrepareMs_=ms(prepareStarted,Clock::now());
+        if(!prepared.valid)throw std::runtime_error("Vulkan static geometry preparation rejected an invalid triangle stream");
+        staticGeometryPrepared_=prepareEnabled;
+        sourceVertexCount_=prepared.sourceVertexCount;uniqueVertexCount_=prepared.uniqueVertexCount;
+        vertexCount_=uint32_t(prepared.vertices.size());indexCount_=uint32_t(prepared.indices.size());
+        const auto uploadStarted=Clock::now();
+        if(vertexCount_)vertices_=uploadVertices(prepared.vertices.data(),size_t(vertexCount_)*sizeof(Vertex));
+        if(indexCount_)indices_=uploadIndices(prepared.indices.data(),size_t(indexCount_)*sizeof(std::uint32_t));
+        geometryUploadMs_=ms(uploadStarted,Clock::now());
         if(!boxData.empty()){
             // Only pure instanced boxes use a host-visible persistent buffer.
             // Complex static scenes retain the faster GPU-local staging path.
@@ -1767,16 +1788,18 @@ class VulkanRaster final {
         if(transparentCount_)transparent_=buffer(size_t(transparentCount_)*sizeof(Vertex),
                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
         constexpr size_t chunkSize=4096*3;
-        for(size_t first=0;first<mesh.vertices.size();first+=chunkSize){
-            const size_t end=std::min(first+chunkSize,mesh.vertices.size());
+        for(size_t first=0;first<prepared.indices.size();first+=chunkSize){
+            const size_t end=std::min(first+chunkSize,prepared.indices.size());
             Chunk c;c.first=uint32_t(first);c.count=uint32_t(end-first);
-            const Vertex& v=mesh.vertices[first];
+            const Vertex& v=prepared.vertices[prepared.indices[first]];
             c.lo=c.hi={v.p[0],v.p[1],v.p[2]};
-            for(size_t i=first+1;i<end;i++)for(int axis=0;axis<3;axis++){
-                float* lo=axis==0?&c.lo.x:axis==1?&c.lo.y:&c.lo.z;
-                float* hi=axis==0?&c.hi.x:axis==1?&c.hi.y:&c.hi.z;
-                *lo=std::min(*lo,mesh.vertices[i].p[axis]);
-                *hi=std::max(*hi,mesh.vertices[i].p[axis]);
+            for(size_t i=first;i<end;i++){
+                const Vertex& indexed=prepared.vertices[prepared.indices[i]];
+                for(int axis=0;axis<3;axis++){
+                    float* lo=axis==0?&c.lo.x:axis==1?&c.lo.y:&c.lo.z;
+                    float* hi=axis==0?&c.hi.x:axis==1?&c.hi.y:&c.hi.z;
+                    *lo=std::min(*lo,indexed.p[axis]);*hi=std::max(*hi,indexed.p[axis]);
+                }
             }
             chunks_.push_back(c);
         }
@@ -1940,7 +1963,7 @@ public:
         if(imageAcquiredFence_)vkDestroyFence(device_,imageAcquiredFence_,nullptr);
         if(swapchain_)vkDestroySwapchainKHR(device_,swapchain_,nullptr);
         destroyRetiredSwapchains();
-        free(readback_);free(uniform_);free(vertices_);free(transparent_);free(boxTemplate_);free(boxInstances_);free(foliageTemplate_);free(foliageInstances_);
+        free(readback_);free(uniform_);free(vertices_);free(indices_);free(transparent_);free(boxTemplate_);free(boxInstances_);free(foliageTemplate_);free(foliageInstances_);
         free(color_);free(msColor_);free(depth_);free(albedo_);free(surface_);free(shadow_);
         free(detailAlbedo_);free(detailSurface_);
         free(gi0_);free(gi1_);
@@ -2049,12 +2072,13 @@ public:
             // retain their exact passes, and sky runs under transparent glass.
             // Transparent triangles are drawn once after the opaque color pass.
             auto drawOpaque=[&](bool depthOnly){
-                if(vertexCount_){
+                if(indexCount_){
                 vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,depthOnly?depthOpaque_:opaquePipeline_);
                 VkDeviceSize off=0;VkBuffer vb=vertices_.handle;
                 vkCmdBindVertexBuffers(cmd_,0,1,&vb,&off);
+                vkCmdBindIndexBuffer(cmd_,indices_.handle,0,VK_INDEX_TYPE_UINT32);
                 for(const Chunk& c:chunks_)if(visible(c,cam)){
-                    vkCmdDraw(cmd_,c.count,1,c.first,0);drawCalls++;
+                    vkCmdDrawIndexed(cmd_,c.count,1,c.first,0,0);drawCalls++;
                 }
             }
             if(boxCount_){
@@ -2159,7 +2183,7 @@ public:
                         if(log)log<<"frame="<<diagnosticFrames
                             <<" extent="<<w<<"x"<<h
                             <<" drawCalls="<<drawCalls
-                            <<" meshVertices="<<vertexCount_
+                            <<" meshVertices="<<vertexCount_<<" sourceVertices="<<sourceVertexCount_<<" indices="<<indexCount_<<" prep="<<(staticGeometryPrepared_?1:0)<<" prepMs="<<geometryPrepareMs_<<" uploadMs="<<geometryUploadMs_
                             <<" drawCallCount="<<drawCalls
                             <<" boxes="<<boxCount_<<" foliage="<<foliageCount_
                             <<" eye=("<<cam.eye.x<<","<<cam.eye.y<<","<<cam.eye.z<<")"
