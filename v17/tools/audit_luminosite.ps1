@@ -77,7 +77,7 @@ foreach ($name in $required.Keys) {
     if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw "Image $name absente : $path" }
 }
 Add-Type -AssemblyName System.Drawing
-Add-Type -TypeDefinition @"
+$lumaAuditSource = @"
 using System;
 using System.Drawing;
 using System.Drawing.Imaging;
@@ -165,6 +165,7 @@ public static class LumaAudit {
     }
 }
 "@
+Add-Type -TypeDefinition $lumaAuditSource -ReferencedAssemblies @([System.Drawing.Bitmap].Assembly.Location)
 $names = @("CPU","DX11","Vulkan","LumaTrace")
 $data = @()
 foreach ($name in $names) {
