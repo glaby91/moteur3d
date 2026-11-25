@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
+#include <filesystem>
 #include <vector>
 
 int main(int argc,char** argv){
@@ -20,6 +21,11 @@ int main(int argc,char** argv){
     if(!built||built.runtime.lumaTraceBvh4.primitiveCount==0){
         qCritical()<<"LumaTrace BVH preparation failed:"<<built.error;return 1;
     }
+    // Match the GUI, which points GI at <scene>.m3dgi. LumaTrace must still
+    // build and use its own live GPU one-bounce field if that file exists.
+    const QString scenePath=QString::fromLocal8Bit(argv[1]);
+    m3d::setRasterGiCachePath(std::filesystem::path(
+        (scenePath+QStringLiteral(".m3dgi")).toStdWString()));
     m3d::updateLighting(built.runtime.daylightHour);
     m3d::Stats shadowStats;
     const auto shadow=m3d::buildShadow(built.runtime.renderScene,shadowStats);
@@ -66,7 +72,7 @@ int main(int argc,char** argv){
     }
     const double poolLift=poolPixels?(poolBounce-poolDirect)/double(poolPixels):0.0;
     if(!directStats.gpu||!bounceStats.gpu||direct.size()!=size_t(w*h)||
-       bounced.size()!=size_t(w*h)||bounced!=cached||changed<8||poolLift<.20||poolBrighter<8){
+       bounced.size()!=size_t(w*h)||bounced!=cached||changed<8||poolLift<1.0||poolBrighter<8){
         qCritical()<<"LumaTrace bounce failed its pool-region check; changed pixels="<<changed
                    <<"; pool mean lift="<<poolLift<<"/255; brighter pool pixels="<<poolBrighter;
         if(!error.empty())qCritical()<<QString::fromStdWString(error);

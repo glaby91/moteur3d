@@ -1605,7 +1605,11 @@ private:
         lowFrame_=-1;highFrame_=-1;loadedGiFileRevision_=version;loadedLumaProbeMode_=lumaTrace;
         std::filesystem::path cachePath;
         {std::lock_guard<std::mutex> lock(giPathMutex);cachePath=giFilePath;}
-        if(!cachePath.empty()){
+        // Keep LumaTrace on its own GPU one-bounce path even when a matching
+        // offline CPU GI table exists beside the scene. Otherwise the table
+        // silently masks the new local GPU bounce and can preserve a stale,
+        // too-dark result. Other raster backends keep their baked-GI path.
+        if(!lumaTrace&&!cachePath.empty()){
             gibake::Table candidate;std::string reason;
             if(gibake::readFile(cachePath,candidate,reason)&&
                candidate.sceneHash==gibake::signature(scene)){
