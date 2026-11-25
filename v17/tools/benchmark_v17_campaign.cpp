@@ -485,9 +485,14 @@ int main(int argc,char** argv){
             {"msaaRequested",msaa},{"anisotropy",aniso},{"lodPercent",lod},
             {"culling",cull!=0},{"lodEnabled",dynamic!=0}
         }},
-        {"timings",cfg.fullBenchmark?"D3D11 and Vulkan preview/readback call latency plus CPU direct ray tracing; these are offscreen renderer timings, not Qt/native swapchain presentation FPS.":"D3D11 GPU timestamp (draw/copy); CPU Map wait and pixel conversion; per-frame and per-block statistics. Not onscreen FPS or vsync."},
+        {"timings",cfg.fullBenchmark?"D3D11, Vulkan and optional LumaTrace preview/readback call latency plus CPU direct ray tracing; offscreen timings, not native swapchain FPS.":"D3D11 GPU timestamp (draw/copy); CPU Map wait and pixel conversion; per-frame and per-block statistics. Not onscreen FPS or vsync."},
         {"limitations","No precise per-shader-stage costs, VRAM usage or Qt presentation timer. CPU scaling uses a deliberately small separate workload."}
     };
+    if(cfg.includeLumaTrace){
+        QJsonArray matrix=system.value("backendMatrix").toArray();
+        matrix.append(QStringLiteral("LumaTrace BVH4 preview/readback"));
+        system["backendMatrix"]=matrix;
+    }
     QFile revision(QCoreApplication::applicationDirPath()+"/REVISION.txt");
     if(revision.open(QIODevice::ReadOnly|QIODevice::Text))
         system["revision"]=QString::fromUtf8(revision.readAll()).trimmed().left(12);
