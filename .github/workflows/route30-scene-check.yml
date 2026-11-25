@@ -26,6 +26,13 @@ jobs:
         env:
           M3D_V16_FORCE_WARP: '1'
         run: |
+          Add-Type -AssemblyName System.Windows.Forms
+          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          Write-Host "CI desktop $bounds (session $((Get-Process -Id $PID).SessionId))"
+          if (($bounds.Width -lt 1280 -or $bounds.Height -lt 720) -and (Get-Command Set-DisplayResolution -ErrorAction SilentlyContinue)) {
+              try { Set-DisplayResolution -Width 1280 -Height 720 -Force -ErrorAction Stop }
+              catch { Write-Host "Desktop mode retained: $_" }
+          }
           $package = Join-Path $env:RUNNER_TEMP '17 PATCH'
           [IO.Directory]::CreateDirectory($package) | Out-Null
           Copy-Item "$env:QT_ROOT_DIR\bin\*.dll" $package

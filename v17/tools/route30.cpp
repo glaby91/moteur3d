@@ -35,28 +35,44 @@ LRESULT CALLBACK windowProc(HWND window, UINT message, WPARAM key, LPARAM data) 
     return DefWindowProcW(window, message, key, data);
 }
 
-HWND openRouteWindow() {
+HWND openRouteWindow(std::wstring& error) {
     WNDCLASSW wc{};
     wc.hInstance = GetModuleHandleW(nullptr);
     wc.lpfnWndProc = windowProc;
     wc.lpszClassName = L"CseWarpRoute30";
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    if (!RegisterClassW(&wc)) return nullptr;
-
-    constexpr DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU;
-    RECT bounds{0, 0, width, height};
-    if (!AdjustWindowRectEx(&bounds, style, FALSE, 0)) return nullptr;
-    const int w = bounds.right - bounds.left, h = bounds.bottom - bounds.top;
-    RECT work{};
-    if (!SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0)) return nullptr;
-    HWND window = CreateWindowExW(0, wc.lpszClassName, L"CSE WARP - Parcours 720p",
-        style, work.left + std::max(0L, (work.right - work.left - w) / 2),
-        work.top + std::max(0L, (work.bottom - work.top - h) / 2),
-        w, h, nullptr, nullptr, wc.hInstance, nullptr);
-    if (window) {
-        ShowWindow(window, SW_SHOWNORMAL);
-        UpdateWindow(window);
+    if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+        error = L"RegisterClassW failed: " + std::to_wstring(GetLastError());
+        return nullptr;
     }
+
+    const int screenW = GetSystemMetrics(SM_CXSCREEN), screenH = GetSystemMetrics(SM_CYSCREEN);
+    const int x = std::max(0, (screenW - width) / 2), y = std::max(0, (screenH - height) / 2);
+    HWND window = CreateWindowExW(WS_EX_APPWINDOW, wc.lpszClassName, L"CSE WARP - Parcours 720p",
+        WS_POPUP, x, y, width, height, nullptr, nullptr, wc.hInstance, nullptr);
+    if (!window) {
+        error = L"CreateWindowExW failed: " + std::to_wstring(GetLastError());
+        return nullptr;
+    }
+    // The first ShowWindow can inherit size/show flags from the console launcher.
+    // Size the borderless client explicitly after showing it.
+    ShowWindow(window, SW_SHOWNORMAL);
+    if (!SetWindowPos(window, HWND_TOP, x, y, width, height, SWP_SHOWWINDOW | SWP_NOSENDCHANGING)) {
+        error = L"SetWindowPos failed: " + std::to_wstring(GetLastError());
+        DestroyWindow(window);
+        return nullptr;
+    }
+    UpdateWindow(window);
+    RECT client{};
+    if (!GetClientRect(window, &client) || client.right != width || client.bottom != height) {
+        error = L"Native client is " + std::to_wstring(client.right) + L"x" + std::to_wstring(client.bottom)
+              + L" on a " + std::to_wstring(screenW) + L"x" + std::to_wstring(screenH)
+              + L" desktop (1280x720 required).";
+        DestroyWindow(window);
+        return nullptr;
+    }
+    std::cout << "Native client " << client.right << 'x' << client.bottom
+              << " on desktop " << screenW << 'x' << screenH << std::endl;
     return window;
 }
 
@@ -188,24 +204,22 @@ int main(int argc, char** argv) {
     QTextStream csv(&file);
     csv << "backend,camera,hour,width,height,frames_completed_30s,elapsed_s,frames_started,mean_render_ms,fps_30s,"
            "presentation,vsync,readback_buffers,status,error\n";
-    HWND window = openRouteWindow();
-    RECT client{};
-    if (!window || !GetClientRect(window, &client) || client.right != width || client.bottom != height) {
-        std::cerr << "A visible 1280x720 client window is required." << std::endl;
-        if (window) DestroyWindow(window);
-        return 7;
-    }
-    const Route route{rt, *it, shadow, window};
     bool allPassed = true;
     for (const Pass& pass : passes) {
-        const auto result = measure(route, pass);
-        if (pass.backend == Backend::vulkan) m3d::releaseVulkanDirectForCurrentThread();
-        else m3d::releaseDirectX11NativeForCurrentThread();
+        Result result;
+        // Each graphics API owns a dedicated HWND, as in the exploration window.
+        HWND window = openRouteWindow(result.error);
+        if (window) {
+            const Route route{rt, *it, shadow, window};
+            result = measure(route, pass);
+            if (pass.backend == Backend::vulkan) m3d::releaseVulkanDirectForCurrentThread();
+            else m3d::releaseDirectX11NativeForCurrentThread();
+            DestroyWindow(window);
+        }
         writeRow(csv, pass, result);
         allPassed = allPassed && result.error.empty();
         if (result.cancelled) break;
     }
-    DestroyWindow(window);
     if (csv.status() != QTextStream::Ok || !file.flush()) return 6;
     return allPassed ? 0 : 7;
 }
