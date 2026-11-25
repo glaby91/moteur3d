@@ -2667,8 +2667,8 @@ private:
             srvs[6]=mode?lumaProbeCoarseSrv_.Get():nullptr;
             ID3D11UnorderedAccessView* passUavs[]={nullptr,mode?lumaProbeUav_.Get():nullptr,
                 mode?nullptr:lumaProbeCoarseUav_.Get()};
-            context_->CSSetShaderResources(0,7,srvs);
             context_->CSSetUnorderedAccessViews(0,3,passUavs,nullptr);
+            context_->CSSetShaderResources(0,7,srvs);
             context_->Dispatch((12u*5u*12u+63u)/64u,1,1);return true;
         };
         // Pass 1: two broad samples per zone identify lit receivers.
