@@ -27,8 +27,9 @@ int main() {
     const std::vector<Vertex> source={a,b,c,a,c,d};
     const auto off=m3d::static_geometry::prepareStaticMesh(source,false);
     const auto on=m3d::static_geometry::prepareStaticMesh(source,true);
-    if(!check(off.valid&&off.vertices.size()==6&&off.indices.empty(),
-              "disabled preparation must preserve the original non-indexed stream"))return 1;
+    if(!check(off.valid&&off.vertices.empty()&&off.indices.empty()
+              &&source.size()==6,
+              "disabled preparation must leave the original stream untouched"))return 1;
     if(!check(on.valid&&on.vertices.size()==4&&on.indices.size()==6,
               "adjacent triangles must reuse identical vertices"))return 2;
     if(!check(on.indices[0]==on.indices[3]&&on.indices[2]==on.indices[4],
