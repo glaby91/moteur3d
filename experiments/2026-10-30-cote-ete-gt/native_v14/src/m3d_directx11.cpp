@@ -520,7 +520,7 @@ constexpr char kShaderPart2[] = R"(
         // Avoid the former 45% high-angle opaque cyan veil.
         float opacity=lerp(.08,.24,saturate(fresnelWater*1.75));
         if(reflectionControls.x>1.5){
-            float2 reflectionUv=i.p.xy*reflectionControls.yz+normal.xz*.012;
+            float2 reflectionUv=i.p.xy*reflectionControls.yz+normal.xz*.35;
             float3 reflectedScene=poolReflection.SampleLevel(probeSampler,saturate(reflectionUv),0).rgb;
             const float reflectionWeight=saturate(.22+.62*fresnelWater);
             color=lerp(color,reflectedScene,reflectionWeight);
