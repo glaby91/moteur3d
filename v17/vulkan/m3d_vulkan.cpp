@@ -2176,6 +2176,11 @@ public:
                 ++submittedFrames_;
             stats=Stats{};
             stats.gpu=true;stats.gpuDrawCalls=drawCalls;
+            stats.geometryPreparationEnabled=staticGeometryPrepared_;
+            stats.geometrySourceVertices=sourceVertexCount_;stats.geometryUniqueVertices=uniqueVertexCount_;
+            stats.geometryIndexCount=indexCount_;stats.geometryVertexBytes=uint64_t(vertexCount_)*sizeof(Vertex);
+            stats.geometryIndexBytes=uint64_t(indexCount_)*sizeof(std::uint32_t);
+            stats.geometryPrepareMs=geometryPrepareMs_;stats.geometryUploadMs=geometryUploadMs_;
             stats.gpuBoxInstances=boxCount_;
             stats.gpuFoliageInstances=foliageCount_;
             if(acquiredIndex>=0 && std::getenv("CSE_WARP_VK_SCENE_DIAGNOSTIC")){
