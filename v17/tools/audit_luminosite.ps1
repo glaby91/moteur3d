@@ -180,10 +180,9 @@ $tempRepo = Join-Path $env:TEMP "cse-warp-luminosity-$runId"
 $remotePath = "benchmarks/luminosity-audit/runs/$runId"
 & $git.Source clone --depth 1 --filter=blob:none --sparse --branch $Branch "https://github.com/glaby91/moteur3d.git" $tempRepo
 if ($LASTEXITCODE -ne 0) { throw "Clone de la branche $Branch impossible. L'archive locale reste disponible." }
-& $git.Source -C $tempRepo sparse-checkout init --cone
 & $git.Source -C $tempRepo sparse-checkout set "benchmarks/luminosity-audit"
 if ($LASTEXITCODE -ne 0) { throw "Initialisation sparse-checkout impossible." }
-$destination = Join-Path $tempRepo ($remotePath -replace "/","\\")
+$destination = Join-Path $tempRepo ($remotePath.Replace("/",[IO.Path]::DirectorySeparatorChar))
 New-Item -ItemType Directory -Force -Path $destination | Out-Null
 Copy-Item -Path (Join-Path $campaign.FullName "*") -Destination $destination -Recurse -Force
 & $git.Source -C $tempRepo config user.name "CSE WARP Benchmark"
