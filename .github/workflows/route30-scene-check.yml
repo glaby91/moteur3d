@@ -1,0 +1,93 @@
+name: Check route30 scene bootstrap on Windows
+on:
+  push:
+    branches: [benchmark/luminosity-audit-v1]
+    paths:
+      - v17/tools/route30.ps1
+      - v17/tools/LANCER_PARCOURS_30S.bat
+      - .github/workflows/route30-scene-check.yml
+permissions:
+  contents: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          sparse-checkout: v17/tools
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Launch the published BAT in a package without any scene
+        shell: powershell
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          $package = Join-Path $env:RUNNER_TEMP '17 PATCH'
+          [IO.Directory]::CreateDirectory($package) | Out-Null
+          Copy-Item "$env:QT_ROOT_DIR\bin\*.dll" $package
+          Copy-Item "$env:QT_ROOT_DIR\plugins\imageformats" $package -Recurse
+          Copy-Item v17/tools/LANCER_PARCOURS_30S.bat $package
+          $env:PATH = (($env:PATH -split ';') | Where-Object { $_ -and $_ -notlike "$env:QT_ROOT_DIR*" }) -join ';'
+          Remove-Item Env:QT_PLUGIN_PATH -ErrorAction SilentlyContinue
+          Push-Location $package
+          try {
+              if (Test-Path 'benchmark-civic') { throw 'Cold launch must start with no scene.' }
+              & $env:ComSpec /d /c 'call LANCER_PARCOURS_30S.bat <nul >route.log 2>&1'
+              $batCode = $LASTEXITCODE
+              $log = Get-Content -LiteralPath 'route.log' -Raw
+              Write-Host $log
+              if ($log -notmatch 'Telechargement : V17-scene' -or $log -notmatch 'Scene prete :') {
+                  throw 'The published BAT did not download and verify the scene.'
+              }
+              if (Test-Path 'benchmark-civic') { throw 'Installation was modified.' }
+              $out = Get-ChildItem 'benchmark-results' -Directory | Select-Object -First 1
+              $manifest = Get-Content (Join-Path $out.FullName 'SCENE_VERSION.json') -Raw | ConvertFrom-Json
+              $rows = @(Import-Csv (Join-Path $out.FullName 'resultats.csv'))
+              $dx = $rows | Where-Object backend -eq DX11
+              if (!$dx -or [int]$dx.frames_started -lt 1 -or [double]$dx.elapsed_s -lt 30 -or
+                  $dx.camera -ne 'v7_pool_fresco' -or [double]$dx.hour -ne 14.75) {
+                  throw 'The engine did not load the scene and render the actual timed DX11 route.'
+              }
+              if ($batCode -eq 0) {
+                  if (($rows.backend -join ',') -ne 'DX11,Vulkan,LumaTrace') { throw 'Missing backend.' }
+                  Add-Type -AssemblyName System.IO.Compression.FileSystem
+                  $zip = [IO.Compression.ZipFile]::OpenRead($out.FullName + '.zip')
+                  try {
+                      if (($zip.Entries.Name -notcontains 'SCENE_VERSION.json') -or
+                          ($zip.Entries.Name -notcontains 'resultats.csv')) { throw 'Incomplete result ZIP.' }
+                  } finally { $zip.Dispose() }
+              } elseif ($log -notmatch 'Vulkan warmup' -or
+                        $log -notmatch 'vulkan-1.dll unavailable|No hardware GPU exposing Vulkan|No Vulkan GPU/driver|create instance.*(-9|INCOMPATIBLE_DRIVER)') {
+                  throw "Unexpected engine failure ($batCode)."
+              }
+              "Real BAT, scene $($manifest.revision), DX11 WARP: $($dx.frames_started) frames started, $($dx.elapsed_s) s. Exit $batCode." | Add-Content $env:GITHUB_STEP_SUMMARY
+          } finally { Pop-Location }
+          exit 0
+      - name: Check scene reuse and repair with a broken installed scene
+        shell: powershell
+        run: |
+          . "$env:GITHUB_WORKSPACE\v17\tools\route30.ps1"
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $package = Join-Path $env:RUNNER_TEMP '17 PATCH'
+          $cache = Join-Path $package 'benchmark-tools\archives'
+          $local = Join-Path $package 'benchmark-civic'
+          [IO.Directory]::CreateDirectory($local) | Out-Null
+          $broken = Join-Path $local 'scene.json'
+          [IO.File]::WriteAllText($broken, 'incomplete local scene')
+          $stored = Get-ChildItem $cache -Filter 'V17-scene-*.zip' | Select-Object -First 1
+          $time = $stored.LastWriteTimeUtc
+          $size = $stored.Length
+          $reuse = Get-RouteScene $cache (Join-Path $env:RUNNER_TEMP 'verify reused')
+          if (!(Test-Path -LiteralPath $reuse.Path) -or (Get-Item $stored.FullName).LastWriteTimeUtc -ne $time) {
+              throw 'Verified archive was not reused.'
+          }
+          [IO.File]::WriteAllText($stored.FullName, 'truncated cache')
+          $repair = Get-RouteScene $cache (Join-Path $env:RUNNER_TEMP 'verify repaired')
+          if (!(Test-Path -LiteralPath $repair.Path) -or (Get-Item $stored.FullName).Length -ne $size -or
+              (Get-Content -LiteralPath $broken -Raw) -cne 'incomplete local scene') {
+              throw 'Cache repair or installed scene isolation failed.'
+          }
