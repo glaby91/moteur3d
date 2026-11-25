@@ -238,3 +238,10 @@ Elles restent nos jalons d'optimisation pour le complexe extrême.
 
 - [ ] Relever les temps GPU en millisecondes pour l’image complète et, lorsque les passes sont chronométrables séparément, pour le dessin, l’éclairage standard et la surcouche. Répéter après échauffement sur les mêmes vues et conserver médiane, P95 et captures.
 - [ ] Comparer A à B et C à D pour mesurer le gain du rangement à rendu équivalent. Comparer le surcoût d’activation C − A à D − B sur les vues appariées. Cette différence estime l’effet sur le coût additionnel du diffus et complète le chronométrage direct de la passe. Vérifier les captures entre A/B et C/D.
+
+### À faire — localiser les échantillons de la surcouche diffuse LumaTrace
+
+- [ ] Identifier dans le code où la surcouche évalue la lumière et comment elle la propage à la surface. Prévoir une capture de diagnostic montrant les positions réellement évaluées et la surface réceptrice. Compter séparément les triangles de la scène, ceux de la dalle et les échantillons de la surcouche sur cette dalle.
+- [ ] Comparer une dalle plane à deux triangles et la même dalle subdivisée, à dimensions, normales, matériau, caméra, exposition et éclairage identiques. Utiliser une lampe fixe et un panneau coloré pour rendre le rebond identifiable. Capturer chaque variante avec et sans surcouche.
+- [ ] Isoler la contribution ajoutée par différence en lumière linéaire. Mesurer la position de la tache dans le repère de la dalle, sa largeur et son intensité. Comparer au rebond CPU GI suffisamment convergé sur la même vue. Enregistrer le temps GPU avec et sans surcouche.
+- [ ] Reprendre la vue piscine où l’écart a été signalé. Vérifier si la subdivision change le placement ou seulement le détail. Si le décalage persiste, examiner le point de rebond, la surface réceptrice et les obstacles sur le trajet.
