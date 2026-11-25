@@ -279,7 +279,8 @@ public static class LumaRegionAudit {
 }
 "@
 
-function New-PoolTransmissionControl([string]$SourceRoot, [string]$DestinationRoot) {
+function New-PoolTransmissionControl([string]$SourceRoot, [string]$DestinationRoot, [double]$TransmissionValue = 0.0) {
+    if ($TransmissionValue -lt 0.0 -or $TransmissionValue -gt 1.0) { throw "Transmission hors plage [0,1] : $TransmissionValue" }
     $materialRoot = Join-Path $SourceRoot "materials"
     if (!(Test-Path -LiteralPath $materialRoot -PathType Container)) {
         throw "Dossier materials absent dans la scène : $materialRoot"
@@ -324,7 +325,7 @@ function New-PoolTransmissionControl([string]$SourceRoot, [string]$DestinationRo
     $sourcePrefix = $SourceRoot.TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)) + [IO.Path]::DirectorySeparatorChar
     $relative = $target.File.FullName.Substring($sourcePrefix.Length)
     $destinationFile = Join-Path $DestinationRoot $relative
-    $material.transmission = 0.0
+    $material.transmission = $TransmissionValue
     $json = $target.Document | ConvertTo-Json -Depth 100
     [IO.File]::WriteAllText($destinationFile,$json,[Text.UTF8Encoding]::new($false))
     $check = Get-Content -LiteralPath $destinationFile -Raw | ConvertFrom-Json
@@ -332,7 +333,7 @@ function New-PoolTransmissionControl([string]$SourceRoot, [string]$DestinationRo
     if ($checkMatches.Count -ne 1 -or
         [math]::Abs([double]$checkMatches[0].roughness - $baselineProperties.roughness) -gt 0.000001 -or
         [math]::Abs([double]$checkMatches[0].metallic - $baselineProperties.metallic) -gt 0.000001 -or
-        [math]::Abs([double]$checkMatches[0].transmission) -gt 0.000001 -or
+        [math]::Abs([double]$checkMatches[0].transmission - $TransmissionValue) -gt 0.000001 -or
         [math]::Abs([double]$checkMatches[0].ior - $baselineProperties.ior) -gt 0.000001) {
         throw "La validation du témoin transmission cse_pool_water a échoué."
     }
@@ -345,12 +346,12 @@ function New-PoolTransmissionControl([string]$SourceRoot, [string]$DestinationRo
         control = [ordered]@{
             roughness = $baselineProperties.roughness
             metallic = $baselineProperties.metallic
-            transmission = 0.0
+            transmission = $TransmissionValue
             ior = $baselineProperties.ior
         }
         changedProperty = "transmission"
         baseColorPreserved = $true
-        controlType = "transmission_off"
+        controlType = ("transmission_" + $TransmissionValue.ToString("0.###",[Globalization.CultureInfo]::InvariantCulture))
         sceneCopyValidated = $true
     }
 }
@@ -464,11 +465,11 @@ $report = [ordered]@{
 }
 # Controlled material variant: duplicate the same scene and raise only pool-water roughness.
 $controlSceneRoot = Join-Path $Root "benchmark-civic-control-transmission-water"
-$materialControl = New-PoolTransmissionControl $sceneRoot $controlSceneRoot
+$materialControl = New-PoolTransmissionControl $sceneRoot $controlSceneRoot 0.0
 $controlOutBase = Join-Path $campaign.FullName "control-transmission-water"
 New-Item -ItemType Directory -Force -Path $controlOutBase | Out-Null
 Write-Host ""
-Write-Host "Contrôle transmission: cse_pool_water $($materialControl.baseline.transmission) -> 0.0; IOR/rugosité inchangés"
+Write-Host "Niveaux testés: référence $($materialControl.baseline.transmission), contrôle 0.0, contrôle intermédiaire 0.5; IOR/rugosité inchangés"
 & $exe (Join-Path $controlSceneRoot "scene.json") $controlOutBase --lighting-audit --raster-msaa 1 --raster-anisotropy 8 --raster-lod-percent 100 --raster-culling 1 --raster-lod-enabled 0
 if ($LASTEXITCODE -ne 0) { throw "Le rendu témoin matériau a échoué (code $LASTEXITCODE)." }
 $controlCampaign = Get-ChildItem -LiteralPath $controlOutBase -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
@@ -489,38 +490,43 @@ if ([string]$controlEngine.cases[0].camera -ne [string]$engine.cases[0].camera) 
     throw "La caméra du rendu témoin diffère de la référence. Comparaison annulée."
 }
 $pairedControlMeasure = [LumaRegionAudit]::ComputePairedJson($data,$controlData) | ConvertFrom-Json
-$controlDeltaRows = foreach ($region in $pairedControlMeasure.regions) {
-    foreach ($backend in $region.backends) {
-        $black = $backend.composites | Where-Object { $_.background -eq "black" } | Select-Object -First 1
-        $midGray = $backend.composites | Where-Object { $_.background -eq "mid_gray" } | Select-Object -First 1
-        $white = $backend.composites | Where-Object { $_.background -eq "white" } | Select-Object -First 1
-        [pscustomobject]@{
-            region = $region.name; x = $region.x; y = $region.y; width = $region.width; height = $region.height
-            backend = $backend.backend
-            pairedOpaquePixels = $backend.pairedOpaquePixels
-            pairedOpaqueCoveragePct = $backend.pairedOpaqueCoveragePct
-            baselineMeanAlphaPct = $backend.baselineMeanAlphaPct
-            transmissionControlMeanAlphaPct = $backend.controlMeanAlphaPct
-            baselinePartialAlphaPct = $backend.baselinePartialAlphaPct
-            transmissionControlPartialAlphaPct = $backend.controlPartialAlphaPct
-            baselineMeanDisplayY_0_255 = $backend.baselineMeanDisplayY_0_255
-            transmissionControlMeanDisplayY_0_255 = $backend.controlMeanDisplayY_0_255
-            deltaDisplayPct = $backend.deltaDisplayPct
-            baselineMeanLinearY_0_1 = $backend.baselineMeanLinearY_0_1
-            transmissionControlMeanLinearY_0_1 = $backend.controlMeanLinearY_0_1
-            deltaLinearPct = $backend.deltaLinearPct
-            blackBaselineDisplayY = $black.baselineMeanDisplayY_0_255
-            blackControlDisplayY = $black.controlMeanDisplayY_0_255
-            blackCompositeDeltaPct = $black.deltaDisplayPct
-            midGrayBaselineDisplayY = $midGray.baselineMeanDisplayY_0_255
-            midGrayControlDisplayY = $midGray.controlMeanDisplayY_0_255
-            midGrayCompositeDeltaPct = $midGray.deltaDisplayPct
-            whiteBaselineDisplayY = $white.baselineMeanDisplayY_0_255
-            whiteControlDisplayY = $white.controlMeanDisplayY_0_255
-            whiteCompositeDeltaPct = $white.deltaDisplayPct
+function Convert-PairedMaterialRows($PairedMeasure, [double]$TargetTransmission, [double]$ReferenceTransmission) {
+    foreach ($region in $PairedMeasure.regions) {
+        foreach ($backend in $region.backends) {
+            $black = $backend.composites | Where-Object { $_.background -eq "black" } | Select-Object -First 1
+            $midGray = $backend.composites | Where-Object { $_.background -eq "mid_gray" } | Select-Object -First 1
+            $white = $backend.composites | Where-Object { $_.background -eq "white" } | Select-Object -First 1
+            [pscustomobject]@{
+                referenceTransmission = $ReferenceTransmission
+                targetTransmission = $TargetTransmission
+                region = $region.name; x = $region.x; y = $region.y; width = $region.width; height = $region.height
+                backend = $backend.backend
+                pairedOpaquePixels = $backend.pairedOpaquePixels
+                pairedOpaqueCoveragePct = $backend.pairedOpaqueCoveragePct
+                baselineMeanAlphaPct = $backend.baselineMeanAlphaPct
+                controlMeanAlphaPct = $backend.controlMeanAlphaPct
+                baselinePartialAlphaPct = $backend.baselinePartialAlphaPct
+                controlPartialAlphaPct = $backend.controlPartialAlphaPct
+                baselineMeanDisplayY_0_255 = $backend.baselineMeanDisplayY_0_255
+                controlMeanDisplayY_0_255 = $backend.controlMeanDisplayY_0_255
+                deltaDisplayPct = $backend.deltaDisplayPct
+                baselineMeanLinearY_0_1 = $backend.baselineMeanLinearY_0_1
+                controlMeanLinearY_0_1 = $backend.controlMeanLinearY_0_1
+                deltaLinearPct = $backend.deltaLinearPct
+                blackBaselineDisplayY = $black.baselineMeanDisplayY_0_255
+                blackControlDisplayY = $black.controlMeanDisplayY_0_255
+                blackCompositeDeltaPct = $black.deltaDisplayPct
+                midGrayBaselineDisplayY = $midGray.baselineMeanDisplayY_0_255
+                midGrayControlDisplayY = $midGray.controlMeanDisplayY_0_255
+                midGrayCompositeDeltaPct = $midGray.deltaDisplayPct
+                whiteBaselineDisplayY = $white.baselineMeanDisplayY_0_255
+                whiteControlDisplayY = $white.controlMeanDisplayY_0_255
+                whiteCompositeDeltaPct = $white.deltaDisplayPct
+            }
         }
     }
 }
+$controlDeltaRows = Convert-PairedMaterialRows $pairedControlMeasure 0.0 $materialControl.baseline.transmission
 
 $controlReport = [ordered]@{
     variant = "same scene/camera/lights/material; only cse_pool_water transmission set to 0.0"
@@ -572,6 +578,65 @@ $controlRoiRows = foreach ($region in $controlRegionMeasure.regions) {
 }
 $controlRoiRows | Export-Csv -LiteralPath (Join-Path $controlCampaign.FullName "luminosity_regions.csv") -NoTypeInformation -Encoding UTF8
 $controlDeltaRows | Export-Csv -LiteralPath (Join-Path $campaign.FullName "material_control_comparison.csv") -NoTypeInformation -Encoding UTF8
+
+# Midpoint transmission control for a compact three-level material response sweep.
+$midTransmission = 0.5
+$midSceneRoot = Join-Path $Root "benchmark-civic-control-transmission-0_5"
+$midMaterialControl = New-PoolTransmissionControl $sceneRoot $midSceneRoot $midTransmission
+$midOutBase = Join-Path $campaign.FullName "control-transmission-0_5"
+New-Item -ItemType Directory -Force -Path $midOutBase | Out-Null
+Write-Host ""
+Write-Host "Contrôle intermédiaire transmission: cse_pool_water $($materialControl.baseline.transmission) -> $midTransmission"
+& $exe (Join-Path $midSceneRoot "scene.json") $midOutBase --lighting-audit --raster-msaa 1 --raster-anisotropy 8 --raster-lod-percent 100 --raster-culling 1 --raster-lod-enabled 0
+if ($LASTEXITCODE -ne 0) { throw "Le rendu témoin transmission 0.5 a échoué (code $LASTEXITCODE)." }
+$midCampaign = Get-ChildItem -LiteralPath $midOutBase -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (!$midCampaign) { throw "Le moteur n'a pas créé de dossier de résultats pour transmission 0.5." }
+$midImages = Join-Path $midCampaign.FullName "images"
+foreach ($name in $required.Keys) {
+    $midImagePath = Join-Path $midImages $required[$name]
+    if (!(Test-Path -LiteralPath $midImagePath -PathType Leaf)) { throw "Image transmission 0.5 $name absente : $midImagePath" }
+}
+$midData = @()
+foreach ($name in $names) {
+    $midData += [LumaAudit]::Read($name,(Join-Path $midImages $required[$name]))
+}
+$midEngine = Get-Content -LiteralPath (Join-Path $midCampaign.FullName "summary.json") -Raw | ConvertFrom-Json
+if ([string]$midEngine.cases[0].camera -ne [string]$engine.cases[0].camera) {
+    throw "La caméra du rendu transmission 0.5 diffère de la référence. Comparaison annulée."
+}
+$midMeasure = [LumaAudit]::ComputeJson($midData) | ConvertFrom-Json
+$midRegionMeasure = [LumaRegionAudit]::ComputeJson($midData,"DX11") | ConvertFrom-Json
+$midPairedMeasure = [LumaRegionAudit]::ComputePairedJson($data,$midData) | ConvertFrom-Json
+$midDeltaRows = Convert-PairedMaterialRows $midPairedMeasure $midTransmission $midMaterialControl.baseline.transmission
+$midReport = [ordered]@{
+    variant = "same scene/camera/lights/material; only cse_pool_water transmission set to 0.5"
+    material = $midMaterialControl
+    camera = $midEngine.cases[0].camera
+    engineSummary = $midEngine
+    luminance = $midMeasure
+    roiReference = "DX11; each ROI is compared against the matching DX11 ROI"
+    regionalLuminance = $midRegionMeasure
+    pairedMaskMethod = $midPairedMeasure.mask
+    baselineToControlDelta = @($midDeltaRows)
+}
+$midReport | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath (Join-Path $midCampaign.FullName "material_control_audit.json") -Encoding UTF8
+$midMeasure.backends | Export-Csv -LiteralPath (Join-Path $midCampaign.FullName "luminosity_audit.csv") -NoTypeInformation -Encoding UTF8
+$midDeltaRows | Export-Csv -LiteralPath (Join-Path $midCampaign.FullName "material_control_comparison.csv") -NoTypeInformation -Encoding UTF8
+$midRoiRows = foreach ($region in $midRegionMeasure.regions) {
+    foreach ($backend in $region.backends) {
+        [pscustomobject]@{
+            region = $region.name; x = $region.x; y = $region.y; width = $region.width; height = $region.height
+            commonOpaquePixels = $region.commonOpaquePixels; commonOpaqueCoveragePct = $region.commonOpaqueCoveragePct
+            backend = $backend.backend; meanDisplayY_0_255 = $backend.meanDisplayY_0_255
+            meanLinearY_0_1 = $backend.meanLinearY_0_1; p50LinearY_0_1 = $backend.p50LinearY_0_1
+            p95LinearY_0_1 = $backend.p95LinearY_0_1
+            deltaDisplayPctVsDX11SameRegion = $backend.deltaDisplayPctVsReference
+            deltaLinearPctVsDX11SameRegion = $backend.deltaLinearPctVsReference
+        }
+    }
+}
+$midRoiRows | Export-Csv -LiteralPath (Join-Path $midCampaign.FullName "luminosity_regions.csv") -NoTypeInformation -Encoding UTF8
+@($controlDeltaRows) + @($midDeltaRows) | Export-Csv -LiteralPath (Join-Path $campaign.FullName "transmission_sweep.csv") -NoTypeInformation -Encoding UTF8
 Write-Host ""
 Write-Host "Mesures luminance (masque opaque commun, scène originale):"
 $measure.backends | Format-Table backend,ownOpaquePct,commonOpaqueMeanDisplayY_0_255,commonOpaqueMeanLinearY_0_1,alphaZeroPct -AutoSize
