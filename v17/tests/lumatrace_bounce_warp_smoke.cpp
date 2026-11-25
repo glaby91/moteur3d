@@ -51,9 +51,24 @@ int main(int argc,char** argv){
     }
     size_t changed=0;
     for(size_t i=0;i<direct.size()&&i<bounced.size();++i)changed+=direct[i]!=bounced[i];
+    // The bottom third of this fixed pool/fresco camera is the pool surface.
+    // Requiring a measurable lift there prevents unrelated scene pixels from
+    // making a broken fresque-to-water transfer look like a successful test.
+    double poolDirect=0.0,poolBounce=0.0;
+    size_t poolPixels=0,poolBrighter=0;
+    if(direct.size()==size_t(w*h)&&bounced.size()==size_t(w*h))
+    for(int y=112;y<170;++y)for(int x=24;x<w-24;++x){
+        const size_t i=size_t(y)*w+size_t(x);
+        const QRgb a=qRgb((direct[i]>>16)&255,(direct[i]>>8)&255,direct[i]&255);
+        const QRgb b=qRgb((bounced[i]>>16)&255,(bounced[i]>>8)&255,bounced[i]&255);
+        const int da=qGray(a),db=qGray(b);
+        poolDirect+=da;poolBounce+=db;poolBrighter+=db>da;++poolPixels;
+    }
+    const double poolLift=poolPixels?(poolBounce-poolDirect)/double(poolPixels):0.0;
     if(!directStats.gpu||!bounceStats.gpu||direct.size()!=size_t(w*h)||
-       bounced.size()!=size_t(w*h)||bounced!=cached||changed<8){
-        qCritical()<<"LumaTrace bounce was absent, unstable, or not GPU rendered; changed pixels="<<changed;
+       bounced.size()!=size_t(w*h)||bounced!=cached||changed<8||poolLift<.20||poolBrighter<8){
+        qCritical()<<"LumaTrace bounce failed its pool-region check; changed pixels="<<changed
+                   <<"; pool mean lift="<<poolLift<<"/255; brighter pool pixels="<<poolBrighter;
         if(!error.empty())qCritical()<<QString::fromStdWString(error);
         return 1;
     }
@@ -64,6 +79,7 @@ int main(int argc,char** argv){
         qCritical()<<"Could not save LumaTrace bounce image";return 1;
     }
     qInfo()<<"LumaTrace one-bounce WARP PASS; changed pixels="<<changed
+           <<"; pool mean lift="<<poolLift<<"/255; brighter pool pixels="<<poolBrighter
            <<"; cached image bit-identical";
     m3d::setRasterHybridLightingEnabled(false);
     return 0;
