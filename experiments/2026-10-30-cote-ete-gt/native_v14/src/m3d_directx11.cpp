@@ -1538,6 +1538,11 @@ public:
                 nativeStats->threads=0;
                 nativeStats->readbackBufferCount=0;
                 nativeStats->gpuDrawCalls=drawCalls;
+                nativeStats->geometryPreparationEnabled=staticGeometryPreparationEnabled_;
+                nativeStats->geometrySourceVertices=sourceVertexCount_;nativeStats->geometryUniqueVertices=uniqueVertexCount_;
+                nativeStats->geometryIndexCount=indexCount_;nativeStats->geometryVertexBytes=geometryVertexBytes_;
+                nativeStats->geometryIndexBytes=geometryIndexBytes_;nativeStats->geometryPrepareMs=geometryPrepareMs_;
+                nativeStats->geometryUploadMs=geometryUploadMs_;
                 nativeStats->gpuBoxInstances=submittedBoxInstances;
                 nativeStats->gpuEllipseInstances=submittedEllipseInstances;
                 nativeStats->gpuFoliageInstances=submittedFoliageInstances;
@@ -1580,6 +1585,11 @@ public:
         slot.submitted.gpu=true;slot.submitted.threads=0;
         slot.submitted.readbackBufferCount=depth;
         slot.submitted.gpuDrawCalls=drawCalls;
+        slot.submitted.geometryPreparationEnabled=staticGeometryPreparationEnabled_;
+        slot.submitted.geometrySourceVertices=sourceVertexCount_;slot.submitted.geometryUniqueVertices=uniqueVertexCount_;
+        slot.submitted.geometryIndexCount=indexCount_;slot.submitted.geometryVertexBytes=geometryVertexBytes_;
+        slot.submitted.geometryIndexBytes=geometryIndexBytes_;slot.submitted.geometryPrepareMs=geometryPrepareMs_;
+        slot.submitted.geometryUploadMs=geometryUploadMs_;
         slot.submitted.gpuBoxInstances=submittedBoxInstances;
         slot.submitted.gpuEllipseInstances=submittedEllipseInstances;
         slot.submitted.gpuFoliageInstances=submittedFoliageInstances;
@@ -2335,6 +2345,8 @@ private:
                 geometryData=packedLumaVertices.data();geometryStride=sizeof(GpuVertexLuma);
             }
             const size_t geometryBytes=prepared.vertices.size()*geometryStride;
+            geometryVertexBytes_=geometryBytes;
+            geometryIndexBytes_=useStaticGeometry?prepared.indices.size()*sizeof(uint32_t):0u;
             const auto geometryUploadStarted=Clock::now();
         if(geometryBytes>UINT_MAX){
             error=L"Géométrie GPU trop volumineuse pour un tampon DirectX 11.";
@@ -2935,6 +2947,7 @@ private:
     bool staticGeometryPreparationEnabled_=false;
     double geometryPrepareMs_=0.,geometryUploadMs_=0.;
     size_t sourceVertexCount_=0,uniqueVertexCount_=0;
+    uint64_t geometryVertexBytes_=0,geometryIndexBytes_=0;
     unsigned msaaPreference_=0,samplerAnisotropy_=16;
     bool boxInstancingEnabled_=false,ellipseInstancingEnabled_=false,foliageInstancingEnabled_=false,lumaTraceGeometryEnabled_=false;
     std::vector<uint32_t> lumaObjectToTriangle_;
