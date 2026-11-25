@@ -155,7 +155,7 @@ struct Samples {
 struct Config{
     int rounds=6,frames=12,warmup=2;
     bool smoke=false,simulation=false,allScenes=false,includeCpu=false,fullBenchmark=false;
-    bool geometryPrepEnabled=false;
+    bool geometryPrepEnabled=false,includeLumaTrace=false;
     RasterQualitySettings quality{};
     QString selected,baseDir;
 };
@@ -389,7 +389,7 @@ int main(int argc,char** argv){
               "[--frames 12] [--warmup 2] [--all-scenes] [--include-cpu] "
               "[--smoke] [--simulation] [--raster-msaa 1|2|4|8] [--raster-anisotropy 1|2|4|8|16] "
               "[--raster-lod-percent 50..200] [--raster-culling 0|1] "
-              "[--raster-lod-enabled 0|1] [--geometry-prep on|off]\n";
+              "[--raster-lod-enabled 0|1] [--geometry-prep on|off] [--include-lumatrace]\n";
         return 2;
     }
     Config cfg;
@@ -398,6 +398,10 @@ int main(int argc,char** argv){
     cfg.smoke=args.contains("--smoke");
     cfg.simulation=args.contains("--simulation");
     cfg.fullBenchmark=args.contains("--full-benchmark");
+    cfg.includeLumaTrace=args.contains("--include-lumatrace");
+    if(cfg.includeLumaTrace&&!cfg.fullBenchmark){
+        err<<"--include-lumatrace requires --full-benchmark\n";return 2;
+    }
     const int geometryPrepAt=args.indexOf("--geometry-prep");
     if(geometryPrepAt>=0){
         if(geometryPrepAt+1>=args.size() ||
@@ -469,6 +473,7 @@ int main(int argc,char** argv){
         {"rounds",cfg.rounds},{"framesPerRound",cfg.frames},{"warmup",cfg.warmup},
         {"smoke",cfg.smoke},{"simulation",cfg.simulation},
         {"fullBenchmark",cfg.fullBenchmark},{"includeCpuScaling",cfg.includeCpu},
+        {"includeLumaTrace",cfg.includeLumaTrace},
         {"geometryPreparationMode",cfg.geometryPrepEnabled?"on":"off"},
         {"backendMatrix",cfg.fullBenchmark?QJsonArray{QStringLiteral("D3D11 Raster preview/readback"),QStringLiteral("Vulkan Raster preview/readback"),QStringLiteral("CPU Ray Tracing PBR direct")}:QJsonArray{}},
         {"allScenes",cfg.allScenes},
@@ -600,9 +605,23 @@ int main(int argc,char** argv){
                     return renderVulkanPreview(runtime.renderScene,shadows,camera,
                         entry.w,entry.h,image,frameStats,why);
                 };
-                // Rotate the order across four paths so Vulkan is not always
-                // measured after every DX11 pass at a higher GPU temperature.
-                const int modeCount=cfg.fullBenchmark?4:3;
+                const size_t lumaIndex=cases.size();
+                if(cfg.fullBenchmark&&cfg.includeLumaTrace){
+                    Samples lumaCase;
+                    lumaCase.scene=sceneName;lumaCase.camera=preset.id;
+                    lumaCase.variant=QStringLiteral("LumaTrace BVH4 preview + readback");
+                    lumaCase.w=size.width();lumaCase.h=size.height();lumaCase.depth=1;
+                    lumaCase.requestedMsaa=msaa;
+                    cases.push_back(std::move(lumaCase));
+                }
+                const auto renderLumaTrace=[&](std::vector<uint32_t>& image,Stats& frameStats,
+                                               std::wstring& why){
+                    auto& entry=cases[lumaIndex];
+                    return renderLumaTracePreview(runtime.renderScene,runtime.lumaTraceBvh4,
+                        shadows,camera,entry.w,entry.h,image,frameStats,why);
+                };
+                // Rotate order over every enabled backend to reduce thermal bias.
+                const int modeCount=3+(cfg.fullBenchmark?1:0)+(cfg.includeLumaTrace?1:0);
                 for(int round=0;round<cfg.rounds;++round){
                     for(int order=0;order<modeCount;++order){
                         const int mode=(order+round)%modeCount;
@@ -615,6 +634,18 @@ int main(int argc,char** argv){
                             }else if(entry.ok){
                                 out<<"  "<<preset.id<<" "<<size.width()<<"x"<<size.height()
                                    <<" Vulkan round "<<(round+1)<<"/"<<cfg.rounds
+                                   <<" => "<<QString::number(entry.blockFps.back(),'f',2)
+                                   <<" renderer FPS (readback)\n";out.flush();
+                            }
+                        }else if(cfg.fullBenchmark&&cfg.includeLumaTrace&&mode==4){
+                            auto& entry=cases[lumaIndex];
+                            if(entry.ok&&!runSynchronousBlock(entry,round,cfg.frames,
+                                                               cfg.warmup,renderLumaTrace,frameCsv)){
+                                allOk=false;
+                                err<<"FAILED "<<sceneName<<" LumaTrace: "<<entry.error<<"\n";
+                            }else if(entry.ok){
+                                out<<"  "<<preset.id<<" "<<size.width()<<"x"<<size.height()
+                                   <<" LumaTrace round "<<(round+1)<<"/"<<cfg.rounds
                                    <<" => "<<QString::number(entry.blockFps.back(),'f',2)
                                    <<" renderer FPS (readback)\n";out.flush();
                             }
@@ -657,6 +688,15 @@ int main(int argc,char** argv){
                     auto& entry=cases[vkIndex];
                     if(!entry.baseline.empty()){
                         const QString name=QStringLiteral("images/full_scene%1_cam%2_%3x%4_vulkan.png")
+                            .arg(sceneIndex).arg(cameraIndex).arg(entry.w).arg(entry.h);
+                        if(writeImage(dir.filePath(name),entry.baseline,entry.w,entry.h))
+                            entry.image=name;
+                    }
+                }
+                if(cfg.fullBenchmark&&cfg.includeLumaTrace){
+                    auto& entry=cases[lumaIndex];
+                    if(!entry.baseline.empty()){
+                        const QString name=QStringLiteral("images/full_scene%1_cam%2_%3x%4_lumatrace.png")
                             .arg(sceneIndex).arg(cameraIndex).arg(entry.w).arg(entry.h);
                         if(writeImage(dir.filePath(name),entry.baseline,entry.w,entry.h))
                             entry.image=name;
