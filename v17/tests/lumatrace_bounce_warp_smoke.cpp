@@ -36,7 +36,7 @@ int main(int argc,char** argv){
     if(camera==built.runtime.cameras.cend()){
         qCritical()<<"The pool and fresco camera is missing from the scene";return 1;
     }
-    constexpr int w=320,h=180;
+    constexpr int w=960,h=540;
     const auto cam=m3d::v16::makeCamera(*camera,w,h);
     m3d::setRasterHybridLightingEnabled(false);
     std::vector<uint32_t> direct,bounced,cached;
@@ -66,7 +66,7 @@ int main(int argc,char** argv){
     double poolDeltaR=0.0,poolDeltaG=0.0,poolDeltaB=0.0,poolAbsDelta=0.0;
     size_t poolPixels=0,poolBrighter=0;
     if(direct.size()==size_t(w*h)&&bounced.size()==size_t(w*h))
-    for(int y=148;y<h;++y)for(int x=8;x<w-8;++x){
+    for(int y=h*37/45;y<h;++y)for(int x=w/40;x<w-w/40;++x){
         const size_t i=size_t(y)*w+size_t(x);
         const QRgb a=qRgb((direct[i]>>16)&255,(direct[i]>>8)&255,direct[i]&255);
         const QRgb b=qRgb((bounced[i]>>16)&255,(bounced[i]>>8)&255,bounced[i]&255);
