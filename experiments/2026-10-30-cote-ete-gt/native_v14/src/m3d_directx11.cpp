@@ -1,3 +1,6 @@
+Warning: truncated output (original token count: 43749)
+Total output lines: 2912
+
 #include "m3d_engine.h"
 #include "m3d_gi_bake.h"
 #include "m3d_lumatrace_bvh4.h"
@@ -397,6 +400,9 @@ constexpr char kShaderPart2[] = R"(
         specTint=lerp(specTint,float3(.24,.26,.28),saturate(glazing*1.8));
     }
     color += specTint * specular * (0.88+0.22*fresnel);
+    // LumaTrace supplies the same local diffuse terms with BVH occlusion;
+    // evaluating these again here doubled every direct point light.
+    if(peripheralControls.w<.5) {
     [loop] for (uint l = 0; l < lightCount; ++l) {
         float3 delta = lightPositionRadius[l].xyz - i.world;
         float radius = lightPositionRadius[l].w;
@@ -429,6 +435,7 @@ constexpr char kShaderPart2[] = R"(
         }
 #endif
     }
+    }
     if(hybridControls.x>0.5){
         // Indirect probes modify AMBIENT energy instead of adding an extra
         // full-strength light pass. This prevents washed-out concrete.
@@ -438,34 +445,40 @@ constexpr char kShaderPart2[] = R"(
             const float4 nextProbe=indirectProbesNext.SampleLevel(probeSampler,position,0);
             probe=lerp(probe,nextProbe,hybridControls.y);
         }
-        float skyVisibility=saturate(probe.a);
-        float upward=saturate(normal.y*.5+.5);
-        float existingAmbient=ambientEnergy;
-        // Normalize the time-dependent sky color so daylight changes hue,
-        // but doesn't create energy from a second hemispherical fill.
-        float skyMean=max(dot(indirectSky.rgb,float3(.333333,.333333,.333333)),.001);
-        float3 skyTint=lerp(float3(1.0,1.0,1.0),
-                            indirectSky.rgb/skyMean,.22);
-        // Retain up to 92% of the legacy ambient in open air, but only
-        // 48% in occluded interiors. Static probe volume interpolates in XYZ.
-        float3 accessibleSky=existingAmbient
-                             *lerp(.48,.92,skyVisibility)*skyTint;
-        // Low-energy, material-colored bounce gives warmth to nearby walls
-        // without washing out roofs. Decays in exposed outdoor probes.
-        float3 reflected=indirectBounce.rgb*probe.rgb
-                         *(.12+.18*(1.0-upward))
-                         *(.80-.30*skyVisibility);
-        float3 indirect=accessibleSky+reflected;
-        if(hybridControls.w>.5){
-            // The offline cache stores real surface-to-probe illumination.
-            // Do not re-color it using the old empirical sky/bounce terms.
-            indirect=max(probe.rgb,0.0);
+        if(hybridControls.w>1.5){
+            // LumaTrace's lightweight GPU cache contains one diffuse bounce
+            // from directly lit surfaces, bilinearly interpolated in space.
+            color+=base*max(probe.rgb,0.0);
+        }else{
+            float skyVisibility=saturate(probe.a);
+            float upward=saturate(normal.y*.5+.5);
+            float existingAmbient=ambientEnergy;
+            // Normalize the time-dependent sky color so daylight changes hue,
+            // but doesn't create energy from a second hemispherical fill.
+            float skyMean=max(dot(indirectSky.rgb,float3(.333333,.333333,.333333)),.001);
+            float3 skyTint=lerp(float3(1.0,1.0,1.0),
+                                indirectSky.rgb/skyMean,.22);
+            // Retain up to 92% of the legacy ambient in open air, but only
+            // 48% in occluded interiors. Static probe volume interpolates in XYZ.
+            float3 accessibleSky=existingAmbient
+                                 *lerp(.48,.92,skyVisibility)*skyTint;
+            // Low-energy, material-colored bounce gives warmth to nearby walls
+            // without washing out roofs. Decays in exposed outdoor probes.
+            float3 reflected=indirectBounce.rgb*probe.rgb
+                             *(.12+.18*(1.0-upward))
+                             *(.80-.30*skyVisibility);
+            float3 indirect=accessibleSky+reflected;
+            if(hybridControls.w>.5){
+                // The offline cache stores real surface-to-probe illumination.
+                // Do not re-color it using the old empirical sky/bounce terms.
+                indirect=max(probe.rgb,0.0);
+            }
+            color+=base*(indirect-existingAmbient);
+            // The existing shadow map and dynamic direct sun remain unchanged;
+            // gently tint only the direct contribution at warm solar hours.
+            float sunContribution=diffuseTerms.z*diffuse*shadowFactor*diffuseTerms.w;
+            color+=base*sunContribution*(indirectSun.rgb-1.0)*.40;
         }
-        color+=base*(indirect-existingAmbient);
-        // The existing shadow map and dynamic direct sun remain unchanged;
-        // gently tint only the direct contribution at warm solar hours.
-        float sunContribution=diffuseTerms.z*diffuse*shadowFactor*diffuseTerms.w;
-        color+=base*sunContribution*(indirectSun.rgb-1.0)*.40;
     }
     if(hybridControls.z>0.5){
         // Conservative display-referred shoulder, independently toggled.
@@ -893,14 +906,14 @@ public:
             error=L"Le BVH4 LumaTrace n’a pas été préparé pour cette scène.";return false;
         }
         if(!ensureDevice(error)||!ensureScene(scene,error,lumaBvh!=nullptr)||!ensureShadow(shadows,error)||
-           (hybrid&&!ensureProbeVolume(scene,error))||
-           (hybrid&&!ensureGiHours(error))||
            !ensureTargets(w,h,quality.msaaSamples,error)||
            (multires&&!ensureMultires(w,h,error))||
            !ensureAnisotropy(quality.anisotropy,error)||
            (nativeHwnd?!ensureSwapchain(nativeHwnd,w,h,error):
                         !ensureReadback(depth,w,h,error)))return false;
         if(lumaBvh&&!ensureLumaTrace(scene,*lumaBvh,error))return false;
+        if(hybrid&&!ensureProbeVolume(scene,error,lumaBvh!=nullptr))return false;
+        if(hybrid&&hasBakedGi_&&!ensureGiHours(error))return false;
         const unsigned slotIndex=nextReadbackSlot_;
         ReadbackSlot& slot=readbackSlots_[slotIndex];
         slot.cpuStarted=started;
@@ -933,7 +946,7 @@ public:
             cb.probeInvSpan[0]=probeInvSpan_.x;cb.probeInvSpan[1]=probeInvSpan_.y;cb.probeInvSpan[2]=probeInvSpan_.z;
             cb.hybridControls[0]=1.f;
             cb.hybridControls[1]=giHourMix_;
-            cb.hybridControls[3]=hasBakedGi_?1.f:0.f;
+            cb.hybridControls[3]=hasBakedGi_?1.f:(lumaBvh&&hasLumaProbeGI_?2.f:0.f);
         }
         cb.hybridControls[2]=tone?1.f:0.f;
         cb.colorControls[0]=balanced?1.f:0.f;
@@ -1101,6 +1114,7 @@ public:
         const float clear[4]={cb.sky[0],cb.sky[1],cb.sky[2],1.f};
         if(slot.queryReady){context_->Begin(slot.disjoint.Get());context_->End(slot.start.Get());}
         if(lumaBvh&&!dispatchLumaTrace(scene,error))return false;
+        if(lumaBvh&&hybrid&&!hasBakedGi_&&!dispatchLumaProbeVolume(error))return false;
         UINT submittedVertices=0,submittedBoxInstances=0;
         uint64_t drawCalls=0,submittedEllipseTriangles=0,submittedEllipseInstances=0;
         uint64_t submittedFoliageTriangles=0,submittedFoliageInstances=0;
@@ -1449,256 +1463,7 @@ public:
                 nativeStats->readbackBufferCount=0;
                 nativeStats->gpuDrawCalls=drawCalls;
                 nativeStats->gpuBoxInstances=submittedBoxInstances;
-                nativeStats->gpuEllipseInstances=submittedEllipseInstances;
-                nativeStats->gpuFoliageInstances=submittedFoliageInstances;
-                nativeStats->tests=submittedVertices/3+uint64_t(submittedBoxInstances)*12+
-                    submittedEllipseTriangles+submittedFoliageTriangles+transparent_.size();
-                nativeStats->ms=std::chrono::duration<double,std::milli>(
-                    Clock::now()-started).count();
-                nativeStats->cpuSubmitMs=nativeStats->ms;
-            }
-            return true;
-        }
-        // GPU timestamps surround the actual draw commands and the queued
-        // GPU copy. They do not include any CPU-side GetData/Map blocking.
-        if(slot.queryReady)context_->End(slot.afterDraw.Get());
-        if(multires){
-            context_->OMSetRenderTargets(0,nullptr,nullptr);
-            context_->CopyResource(slot.staging.Get(),mergeTex_.Get());
-        }else{
-        // V17 WARP lossless fast-path: no MSAA resolve is needed when
-        // sampleCount_ == 1. Copy the render target directly into staging,
-        // eliminating an entire full-frame GPU copy. Both textures are
-        // DXGI R8G8B8A8 compatible; no shading/LOD/pixel changes.
-        // Keep the old two-copy path selectable for strict SHA-256 A/B.
-        const char* legacyReadback=std::getenv("M3D_V17_LEGACY_DOUBLE_COPY");
-        if(sampleCount_>1){
-            context_->ResolveSubresource(resolve_.Get(),0,target_.Get(),0,DXGI_FORMAT_R8G8B8A8_UNORM);
-            context_->CopyResource(slot.staging.Get(),resolve_.Get());
-        }else if(legacyReadback&&std::strcmp(legacyReadback,"1")==0){
-            context_->CopyResource(resolve_.Get(),target_.Get());
-            context_->CopyResource(slot.staging.Get(),resolve_.Get());
-        }else{
-            context_->CopyResource(slot.staging.Get(),target_.Get());
-        }
-        }
-        if(slot.queryReady){
-            context_->End(slot.afterCopy.Get());
-            context_->End(slot.disjoint.Get());
-        }
-        slot.submitted={};
-        slot.submitted.gpu=true;slot.submitted.threads=0;
-        slot.submitted.readbackBufferCount=depth;
-        slot.submitted.gpuDrawCalls=drawCalls;
-        slot.submitted.gpuBoxInstances=submittedBoxInstances;
-        slot.submitted.gpuEllipseInstances=submittedEllipseInstances;
-        slot.submitted.gpuFoliageInstances=submittedFoliageInstances;
-        slot.submitted.tests=submittedVertices/3+uint64_t(submittedBoxInstances)*12
-            +submittedEllipseTriangles+submittedFoliageTriangles+transparent_.size();
-        slot.copyQueued=Clock::now();
-        slot.submitted.cpuSubmitMs=std::chrono::duration<double,std::milli>(
-            slot.copyQueued-started).count();
-        pending_.push_back(slotIndex);
-        lastSubmissionQualityBits_=qualityBits;
-        lastSubmissionHybrid_=hybrid;
-        lastSubmissionTone_=tone;
-        lastSubmissionBalanced_=balanced;
-        lastSubmissionExposure_=exposure;
-        lastSubmissionMultires_=multires;
-        nextReadbackSlot_=(slotIndex+1u)%readbackDepth_;
-        return true;
-    }
-    bool receive(std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error){
-        if(pending_.empty()){error=L"Aucune image GPU en attente.";return false;}
-        ReadbackSlot& slot=readbackSlots_[pending_.front()];
-        D3D11_MAPPED_SUBRESOURCE mapped{};
-        const auto mapStarted=Clock::now();
-        const HRESULT hr=context_->Map(slot.staging.Get(),0,D3D11_MAP_READ,0,&mapped);
-        if(FAILED(hr)){error=L"Lecture différée DirectX 11 impossible.";return false;}
-        const auto mapDone=Clock::now();
-        pixels.resize(size_t(slot.width)*size_t(slot.height));
-        const char* disableFastSwizzle=std::getenv("M3D_V17_DISABLE_FAST_SWIZZLE");
-        const bool fastSwizzle=!(disableFastSwizzle&&std::strcmp(disableFastSwizzle,"1")==0);
-        const char* skyCompositor=std::getenv("M3D_V17_SPLIT_SKY");
-        const bool preserveAlpha=skyCompositor&&std::strcmp(skyCompositor,"1")==0;
-        auto packPixel=[preserveAlpha](uint32_t rgba)->uint32_t {
-            uint32_t r=rgba&255u,g=(rgba>>8)&255u,b=(rgba>>16)&255u;
-            if(!preserveAlpha)return 0xff000000u|(r<<16)|(g<<8)|b;
-            const uint32_t a=(rgba>>24)&255u;
-            if(a==0)return 0;
-            if(a<255){
-                // GPU transparency was blended over transparent black.
-                // Convert the premultiplied color to straight ARGB32 for Qt.
-                r=std::min(255u,(r*255u+a/2u)/a);
-                g=std::min(255u,(g*255u+a/2u)/a);
-                b=std::min(255u,(b*255u+a/2u)/a);
-            }
-            return (a<<24)|(r<<16)|(g<<8)|b;
-        };
-        for(int y=0;y<slot.height;++y){
-            const uint8_t* row=static_cast<const uint8_t*>(mapped.pData)
-                +size_t(y)*mapped.RowPitch;
-            uint32_t* dest=pixels.data()+size_t(y)*slot.width;
-            if(fastSwizzle){
-                // Windows x64: R8G8B8A8_UNORM is a little-endian DWORD
-                // 0xAABBGGRR. QImage::Format_ARGB32 expects 0xFFRRGGBB.
-                // One aligned 32-bit load replaces three byte loads.
-                const uint32_t* src=reinterpret_cast<const uint32_t*>(row);
-                for(int x=0;x<slot.width;++x){
-                    const uint32_t rgba=src[x];
-                    dest[x]=packPixel(rgba);
-                }
-            }else{
-                // Unmodified reference path for pixel-exact A/B.
-                for(int x=0;x<slot.width;++x){
-                    const uint8_t* p=row+size_t(x)*4;
-                    const uint32_t rgba=uint32_t(p[0])|(uint32_t(p[1])<<8)
-                        |(uint32_t(p[2])<<16)|(uint32_t(p[3])<<24);
-                    dest[x]=packPixel(rgba);
-                }
-            }
-        }
-        context_->Unmap(slot.staging.Get(),0);
-        const auto finished=Clock::now();
-        stats=slot.submitted;
-        stats.ms=std::chrono::duration<double,std::milli>(finished-slot.cpuStarted).count();
-        stats.postMs=std::chrono::duration<double,std::milli>(finished-slot.copyQueued).count();
-        stats.cpuMapWaitMs=std::chrono::duration<double,std::milli>(mapDone-mapStarted).count();
-        stats.cpuPixelConvertMs=std::chrono::duration<double,std::milli>(finished-mapDone).count();
-        if(slot.queryReady){
-            D3D11_QUERY_DATA_TIMESTAMP_DISJOINT info{};
-            UINT64 begin=0,draw=0,copy=0;
-            const bool valid=context_->GetData(slot.disjoint.Get(),&info,sizeof(info),0)==S_OK
-                &&context_->GetData(slot.start.Get(),&begin,sizeof(begin),0)==S_OK
-                &&context_->GetData(slot.afterDraw.Get(),&draw,sizeof(draw),0)==S_OK
-                &&context_->GetData(slot.afterCopy.Get(),&copy,sizeof(copy),0)==S_OK;
-            if(valid&&!info.Disjoint&&info.Frequency>0&&begin<=draw&&draw<=copy){
-                const double ticksToMs=1000.0/double(info.Frequency);
-                stats.gpuDrawMs=double(draw-begin)*ticksToMs;
-                stats.gpuTransferMs=double(copy-draw)*ticksToMs;
-                stats.gpuTotalMs=double(copy-begin)*ticksToMs;
-                stats.gpuTimingValid=true;
-            }
-        }
-        pending_.pop_front();
-        return true;
-    }
-private:
-    bool ensureProbeVolume(const Scene& scene,std::wstring& error){
-        const uint64_t version=giFileRevision.load(std::memory_order_acquire);
-        if(probeSrv_&&loadedGiFileRevision_==version)return true;
-        probeSrv_.Reset();probeTexture_.Reset();
-        probeNextSrv_.Reset();probeNextTexture_.Reset();
-        bakedGi_=gibake::Table{};hasBakedGi_=false;
-        lowFrame_=-1;highFrame_=-1;loadedGiFileRevision_=version;
-        std::filesystem::path cachePath;
-        {std::lock_guard<std::mutex> lock(giPathMutex);cachePath=giFilePath;}
-        if(!cachePath.empty()){
-            gibake::Table candidate;std::string reason;
-            if(gibake::readFile(cachePath,candidate,reason)&&
-               candidate.sceneHash==gibake::signature(scene)){
-                bakedGi_=std::move(candidate);
-                hasBakedGi_=true;
-                probeOrigin_=bakedGi_.origin;
-                probeInvSpan_={1.f/std::max(.001f,bakedGi_.span.x),
-                               1.f/std::max(.001f,bakedGi_.span.y),
-                               1.f/std::max(.001f,bakedGi_.span.z)};
-                giTableLoaded.store(true,std::memory_order_release);
-                return true;
-            }
-        }
-        giTableLoaded.store(false,std::memory_order_release);
-        // Compatibility fallback if a scene has not yet been baked. This
-        // retains the V17.310 reference path exactly and is NOT real GI.
-        // The coarse fallback exposed probe-cell patches on large flat walls.
-        // Match the denser offline GI defaults while keeping render cost fixed.
-        constexpr UINT nx=24,ny=10,nz=24;
-        V lo{INF,INF,INF},hi{-INF,-INF,-INF};
-        for(const Obj& o:scene.obj){
-            const V a=o.mn,b=o.mx;
-            if(!std::isfinite(a.x)||!std::isfinite(a.y)||!std::isfinite(a.z)||
-               !std::isfinite(b.x)||!std::isfinite(b.y)||!std::isfinite(b.z)||
-               a.x>b.x||a.y>b.y||a.z>b.z)continue;
-            lo={std::min(lo.x,a.x),std::min(lo.y,a.y),std::min(lo.z,a.z)};
-            hi={std::max(hi.x,b.x),std::max(hi.y,b.y),std::max(hi.z,b.z)};
-        }
-        if(!std::isfinite(lo.x))lo={-5.f,-2.f,-5.f},hi={5.f,6.f,5.f};
-        const V dimensions=hi-lo;
-        const V padding={std::max(1.f,dimensions.x*.01f),
-                         std::max(1.f,dimensions.y*.03f),
-                         std::max(1.f,dimensions.z*.01f)};
-        probeOrigin_=lo-padding;
-        const V span=hi-lo+padding*2.f;
-        probeInvSpan_={1.f/std::max(span.x,.001f),
-                       1.f/std::max(span.y,.001f),
-                       1.f/std::max(span.z,.001f)};
-        const float maxRay=clampf(std::max(span.x,std::max(span.y,span.z))/12.f,6.f,25.f);
-        const std::array<V,8> directions={{
-            norm({0.f,1.f,0.f}),norm({.6f,.8f,0.f}),
-            norm({-.6f,.8f,0.f}),norm({0.f,.8f,.6f}),
-            norm({1.f,.2f,0.f}),norm({-1.f,.2f,0.f}),
-            norm({0.f,.2f,-1.f}),norm({0.f,-1.f,0.f})
-        }};
-        auto pigment=[&](int mi)->V{
-            if(mi<0||size_t(mi)>=scene.mat.size())return {.52f,.49f,.43f};
-            const Material& m=scene.mat[size_t(mi)];
-            if(!m.colorMip.empty()&&!m.colorMip.back().p.empty()){
-                const uint32_t c=m.colorMip.back().p.front();
-                return {float((c>>16)&255)/255.f,float((c>>8)&255)/255.f,float(c&255)/255.f};
-            }
-            if(!m.mip.empty()&&!m.mip.back().p.empty()){
-                const uint16_t c=m.mip.back().p.front();
-                return {float(c>>11)/31.f,float((c>>5)&63)/63.f,float(c&31)/31.f};
-            }
-            return {.52f,.49f,.43f};
-        };
-        std::vector<float> voxels(size_t(nx)*ny*nz*4u,0.f);
-        for(UINT z=0;z<nz;++z)for(UINT y=0;y<ny;++y)for(UINT x=0;x<nx;++x){
-            const V origin=probeOrigin_+V{span.x*(float(x)+.5f)/float(nx),
-                                           span.y*(float(y)+.5f)/float(ny),
-                                           span.z*(float(z)+.5f)/float(nz)};
-            V colors{};float reflectWeight=0.f,open=0.f;
-            for(size_t d=0;d<directions.size();++d){
-                Hit hit;
-                closest(scene,Ray{origin,directions[d]},hit,nullptr,false,-1,true);
-                if(hit.id<0||hit.t>maxRay){if(d<4)open+=1.f;continue;}
-                const float w=(1.f-hit.t/maxRay)*(d==7?1.15f:1.f);
-                colors=colors+pigment(hit.mat)*w;
-                reflectWeight+=w;
-            }
-            const V rgb=reflectWeight>.0001f?colors/reflectWeight:V{.38f,.39f,.42f};
-            const float impact=clampf(reflectWeight/4.f,0.f,1.f);
-            const size_t p=((size_t(z)*ny+y)*nx+x)*4u;
-            voxels[p+0]=rgb.x*impact;voxels[p+1]=rgb.y*impact;
-            voxels[p+2]=rgb.z*impact;voxels[p+3]=open*.25f;
-        }
-        D3D11_TEXTURE3D_DESC td{};
-        td.Width=nx;td.Height=ny;td.Depth=nz;td.MipLevels=1;
-        td.Format=DXGI_FORMAT_R32G32B32A32_FLOAT;
-        td.Usage=D3D11_USAGE_IMMUTABLE;td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
-        D3D11_SUBRESOURCE_DATA data{};
-        data.pSysMem=voxels.data();data.SysMemPitch=nx*4u*sizeof(float);
-        data.SysMemSlicePitch=nx*ny*4u*sizeof(float);
-        if(FAILED(device_->CreateTexture3D(&td,&data,&probeTexture_))||
-           FAILED(device_->CreateShaderResourceView(probeTexture_.Get(),nullptr,&probeSrv_))){
-            error=L"Échec de création des sondes d'éclairage indirect sur GPU.";
-            probeTexture_.Reset();probeSrv_.Reset();return false;
-        }
-        return true;
-    }
-    bool ensureGiHours(std::wstring& error){
-        if(!hasBakedGi_)return true;
-        unsigned lo=0,hi=0;float weight=0.f;
-        gibake::hourIndices(bakedGi_,solarHour,lo,hi,weight);
-        giHourMix_=weight;
-        if(lowFrame_==int(lo)&&highFrame_==int(hi)&&probeSrv_&&probeNextSrv_)
-            return true;
-        const UINT nx=bakedGi_.nx,ny=bakedGi_.ny,nz=bakedGi_.nz;
-        D3D11_TEXTURE3D_DESC td{};
-        td.Width=nx;td.Height=ny;td.Depth=nz;td.MipLevels=1;
-        td.Format=DXGI_FORMAT_R32G32B32A32_FLOAT;
-        td.Usage=D3D11_USAGE_IMMUTABLE;td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
-        const size_t frameLength=bakedGi_.voxelCount()*4u;
+                nativeStats->gpuEllipseInstances=submittedEllipseInstanc…3749 tokens truncated…   const size_t frameLength=bakedGi_.voxelCount()*4u;
         auto build=[&](unsigned index,ComPtr<ID3D11Texture3D>& texture,
                        ComPtr<ID3D11ShaderResourceView>& srv)->bool{
             texture.Reset();srv.Reset();
@@ -1935,6 +1700,9 @@ private:
         foliageVertexCounts_.fill(0);foliage_.clear();foliageInstanceCount_=0;
         lumaObjectToTriangle_.clear();lumaTriangleCount_=0;
         if(lumaTrace)lumaObjectToTriangle_.assign(scene.obj.size(),0xffffffffu);
+        probeSrv_.Reset();probeTexture_.Reset();probeNextSrv_.Reset();probeNextTexture_.Reset();
+        lumaProbeUav_.Reset();hasLumaProbeGI_=false;lumaProbeCacheValid_=false;
+        loadedGiFileRevision_=0;
         MeshBuilder mesh;
         std::vector<GpuBoxInstance> boxData;
         // V16 JSON geometry is triangulated for CPU/Compute, but the source
@@ -2411,11 +2179,15 @@ private:
         lumaTraceGeometryEnabled_=lumaTrace;
         return true;
     }
-    struct LumaParams { uint32_t counts[4];float lights[64][4],colors[64][4]; };
-    static_assert(sizeof(LumaParams)==2064,"LumaTrace HLSL constant packing");
+    struct LumaParams {
+        uint32_t counts[4];float lights[64][4],colors[64][4];uint32_t probeDims[4];
+        float probeOrigin[4],probeSpan[4],sunDirection[4],sunColor[4];uint32_t preservedLayers[64][4];
+    };
+    static_assert(sizeof(LumaParams)==3168,"LumaTrace HLSL constant packing");
     bool ensureLumaTrace(const Scene& scene,const LumaTraceBvh4& bvh,std::wstring& error){
         if(verticesSrv_&&lumaSceneIdentity_==scene.gpuCacheIdentity&&lumaSceneRevision_==scene.gpuCacheRevision&&
-           lumaBvhSrv_&&lumaOrderSrv_&&lumaRadianceSrv_&&lumaRadianceUav_&&lumaCompute_&&lumaParams_)return true;
+           lumaBvhSrv_&&lumaOrderSrv_&&lumaRadianceSrv_&&lumaRadianceUav_&&
+           lumaCompute_&&lumaProbeCompute_&&lumaParams_)return true;
         if(!verticesSrv_||!lumaTriangleCount_||bvh.nodes.empty()||bvh.primitiveCount!=scene.order.size()){
             error=L"LumaTrace BVH4 : géométrie ou table de primitives incompatible.";return false;}
         std::vector<uint32_t> order;order.reserve(scene.order.size());
@@ -2429,7 +2201,7 @@ private:
             d.MiscFlags=D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;d.StructureByteStride=stride;d.CPUAccessFlags=cpu;
             D3D11_SUBRESOURCE_DATA init{};init.pSysMem=data;
             return SUCCEEDED(device_->CreateBuffer(&d,data?&init:nullptr,&out));};
-        lumaRadianceCacheValid_=false;
+        lumaRadianceCacheValid_=false;lumaProbeCacheValid_=false;
         lumaBvhBuffer_.Reset();lumaOrderBuffer_.Reset();lumaRadianceBuffer_.Reset();
         lumaBvhSrv_.Reset();lumaOrderSrv_.Reset();lumaRadianceSrv_.Reset();lumaRadianceUav_.Reset();
         if(!makeBuffer(bvh.nodes.data(),bvh.nodes.size(),sizeof(LumaTraceBvh4Node),D3D11_BIND_SHADER_RESOURCE,D3D11_USAGE_IMMUTABLE,0,lumaBvhBuffer_)||
@@ -2441,26 +2213,26 @@ private:
             error=L"Création des vues GPU LumaTrace impossible.";return false;}
         D3D11_UNORDERED_ACCESS_VIEW_DESC ud{};ud.Format=DXGI_FORMAT_UNKNOWN;ud.ViewDimension=D3D11_UAV_DIMENSION_BUFFER;ud.Buffer.NumElements=lumaTriangleCount_;
         if(FAILED(device_->CreateUnorderedAccessView(lumaRadianceBuffer_.Get(),&ud,&lumaRadianceUav_))){error=L"UAV de radiance LumaTrace impossible.";return false;}
-        ComPtr<ID3DBlob> code,errors;HRESULT hr=D3DCompile(lumatrace_detail::kComputeShader,sizeof(lumatrace_detail::kComputeShader)-1,
-            "m3d_lumatrace_compute",nullptr,nullptr,"CSShadeTriangles","cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&code,&errors);
-        if(FAILED(hr)){
-            error=L"Compilation du compute shader LumaTrace impossible (HRESULT "+
-                std::to_wstring(uint32_t(hr))+L")";
-            if(errors&&errors->GetBufferPointer()){
-                error+=L": ";
-                const char* p=static_cast<const char*>(errors->GetBufferPointer());
-                const size_t n=std::min<size_t>(errors->GetBufferSize(),1024);
-                for(size_t i=0;i<n;++i)
-                    error.push_back(p[i]>=32&&p[i]<127?wchar_t(p[i]):L' ');
+        auto compileCompute=[&](const char* entry,const wchar_t* stage,
+                                ComPtr<ID3D11ComputeShader>& shader)->bool{
+            ComPtr<ID3DBlob> code,errors;
+            HRESULT hr=D3DCompile(lumatrace_detail::kComputeShader,sizeof(lumatrace_detail::kComputeShader)-1,
+                "m3d_lumatrace_compute",nullptr,nullptr,entry,"cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&code,&errors);
+            if(FAILED(hr)){
+                error=std::wstring(stage)+L" impossible (HRESULT "+std::to_wstring(uint32_t(hr))+L")";
+                if(errors&&errors->GetBufferPointer()){
+                    error+=L": ";const char* p=static_cast<const char*>(errors->GetBufferPointer());
+                    const size_t n=std::min<size_t>(errors->GetBufferSize(),1024);
+                    for(size_t i=0;i<n;++i)error.push_back(p[i]>=32&&p[i]<127?wchar_t(p[i]):L' ');
+                }
+                return false;
             }
-            return false;
-        }
-        hr=device_->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&lumaCompute_);
-        if(FAILED(hr)){
-            error=L"Création du compute shader LumaTrace impossible (HRESULT "+
-                std::to_wstring(uint32_t(hr))+L").";
-            return false;
-        }
+            hr=device_->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&shader);
+            if(FAILED(hr)){error=std::wstring(L"Création du shader ")+stage+L" impossible (HRESULT "+std::to_wstring(uint32_t(hr))+L").";return false;}
+            return true;
+        };
+        if(!compileCompute("CSShadeTriangles",L"compute LumaTrace direct",lumaCompute_)||
+           !compileCompute("CSBuildProbeVolume",L"compute de rebond LumaTrace",lumaProbeCompute_))return false;
         D3D11_BUFFER_DESC cd{};cd.ByteWidth=sizeof(LumaParams);cd.Usage=D3D11_USAGE_DYNAMIC;cd.BindFlags=D3D11_BIND_CONSTANT_BUFFER;cd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
         if(FAILED(device_->CreateBuffer(&cd,nullptr,&lumaParams_))){error=L"Constantes compute LumaTrace impossibles.";return false;}
         lumaNodeCount_=UINT(bvh.nodes.size());lumaOrderCount_=UINT(order.size());
@@ -2469,29 +2241,65 @@ private:
     bool dispatchLumaTrace(const Scene& scene,std::wstring& error){
         if(scene.root<0||size_t(scene.root)>=scene.node.size()){error=L"Racine BVH4 invalide.";return false;}
         LumaParams p{};p.counts[0]=lumaTriangleCount_;p.counts[1]=lumaOrderCount_;p.counts[2]=lumaNodeCount_;
-        const Node& root=scene.node[size_t(scene.root)];const V center=(root.mn+root.mx)*.5f;
-        auto appendLight=[&](V pos,float intensity,V color){
+        for(auto& row:p.preservedLayers)std::fill(std::begin(row),std::end(row),0xffffffffu);
+        p.probeDims[0]=24;p.probeDims[1]=10;p.probeDims[2]=24;
+        p.probeOrigin[0]=probeOrigin_.x;p.probeOrigin[1]=probeOrigin_.y;p.probeOrigin[2]=probeOrigin_.z;
+        p.probeSpan[0]=1.f/std::max(.001f,probeInvSpan_.x);
+        p.probeSpan[1]=1.f/std::max(.001f,probeInvSpan_.y);
+        p.probeSpan[2]=1.f/std::max(.001f,probeInvSpan_.z);
+        p.sunDirection[0]=sun.x;p.sunDirection[1]=sun.y;p.sunDirection[2]=sun.z;
+        const auto linearSrgb=[](float value){value=clampf(value/255.f,0.f,1.f);return value<=.04045f?value/12.92f:std::pow((value+.055f)/1.055f,2.4f);};
+        p.sunColor[0]=linearSrgb(sunTint.x);p.sunColor[1]=linearSrgb(sunTint.y);p.sunColor[2]=linearSrgb(sunTint.z);
+        p.sunColor[3]=daylight*.88f;
+        for(size_t m=0;m<preservedTextureLayers_.size();++m)if(preservedTextureLayers_[m]>=0)
+            p.preservedLayers[m>>2][m&3]=uint32_t(preservedTextureLayers_[m]);
+        auto appendLight=[&](const Light& light,float scale){
             if(p.counts[3]>=64)return;
             const uint32_t i=p.counts[3]++;
-            p.lights[i][0]=pos.x;p.lights[i][1]=pos.y;p.lights[i][2]=pos.z;p.lights[i][3]=intensity;
-            p.colors[i][0]=color.x/255.f;p.colors[i][1]=color.y/255.f;p.colors[i][2]=color.z/255.f;
+            p.lights[i][0]=light.p.x;p.lights[i][1]=light.p.y;p.lights[i][2]=light.p.z;p.lights[i][3]=light.radius;
+            p.colors[i][0]=linearSrgb(light.color.x);p.colors[i][1]=linearSrgb(light.color.y);
+            p.colors[i][2]=linearSrgb(light.color.z);p.colors[i][3]=light.intensity*scale;
         };
-        // Preserve the LumaTrace test pair, then prioritize scene exterior
-        // luminaires so the 64-source cap cannot silently drop the new row.
-        appendLight(center+V{1.4f,.75f,0.f},1.15f,{31,158,255});
-        appendLight(center+V{-1.4f,.75f,0.f},1.15f,{255,99,26});
-        for(const Light& l:pointLights)appendLight(l.p,l.intensity,l.color);
+        // Use only authored scene lights; the old cyan/orange pair were test
+        // lights placed at the scene center and polluted both lighting and GI.
+        for(const Light& l:pointLights)appendLight(l,1.f);
         for(const Light& l:scene.lights)if(l.exterior)
-            appendLight(l.p,l.intensity*lampFactor,l.color);
+            appendLight(l,lampFactor);
+        const float sceneLightScale=.42f+.58f*(1.f-daylight);
         for(const Light& l:scene.lights)if(!l.exterior)
-            appendLight(l.p,l.intensity,l.color);
+            appendLight(l,sceneLightScale);
         std::array<uint32_t,sizeof(LumaParams)/sizeof(uint32_t)> radianceKey{};std::memcpy(radianceKey.data(),&p,sizeof(p));
         if(lumaRadianceCacheValid_&&radianceKey==lumaRadianceKey_)return true;
         D3D11_MAPPED_SUBRESOURCE m{};if(FAILED(context_->Map(lumaParams_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m))){error=L"Upload constantes LumaTrace impossible.";return false;}
         std::memcpy(m.pData,&p,sizeof(p));context_->Unmap(lumaParams_.Get(),0);
-        ID3D11ShaderResourceView* srvs[]={verticesSrv_.Get(),lumaOrderSrv_.Get(),lumaBvhSrv_.Get()};ID3D11UnorderedAccessView* uavs[]={lumaRadianceUav_.Get()};ID3D11Buffer* cbs[]={lumaParams_.Get()};
-        context_->CSSetShader(lumaCompute_.Get(),nullptr,0);context_->CSSetShaderResources(0,3,srvs);context_->CSSetUnorderedAccessViews(0,1,uavs,nullptr);context_->CSSetConstantBuffers(0,1,cbs);context_->Dispatch((lumaTriangleCount_+63)/64,1,1);
-        ID3D11UnorderedAccessView* nu[]={nullptr};ID3D11ShaderResourceView* ns[]={nullptr,nullptr,nullptr};context_->CSSetUnorderedAccessViews(0,1,nu,nullptr);context_->CSSetShaderResources(0,3,ns);context_->CSSetShader(nullptr,nullptr,0);lumaRadianceKey_=radianceKey;lumaRadianceCacheValid_=true;return true;
+        ID3D11ShaderResourceView* noPixelRadiance[]={nullptr};context_->PSSetShaderResources(7,1,noPixelRadiance);
+        ID3D11ShaderResourceView* srvs[]={verticesSrv_.Get(),lumaOrderSrv_.Get(),lumaBvhSrv_.Get()};
+        ID3D11UnorderedAccessView* uavs[]={lumaRadianceUav_.Get(),nullptr};ID3D11Buffer* cbs[]={lumaParams_.Get()};
+        context_->CSSetShader(lumaCompute_.Get(),nullptr,0);context_->CSSetShaderResources(0,3,srvs);
+        context_->CSSetUnorderedAccessViews(0,2,uavs,nullptr);context_->CSSetConstantBuffers(0,1,cbs);
+        context_->Dispatch((lumaTriangleCount_+63)/64,1,1);
+        ID3D11UnorderedAccessView* nu[]={nullptr,nullptr};ID3D11ShaderResourceView* ns[]={nullptr,nullptr,nullptr,nullptr,nullptr,nullptr};
+        context_->CSSetUnorderedAccessViews(0,2,nu,nullptr);context_->CSSetShaderResources(0,6,ns);
+        context_->CSSetShader(nullptr,nullptr,0);lumaRadianceKey_=radianceKey;lumaRadianceCacheValid_=true;
+        lumaProbeCacheValid_=false;return true;
+    }
+    bool dispatchLumaProbeVolume(std::wstring& error){
+        if(!hasLumaProbeGI_||!lumaProbeUav_||!lumaProbeCompute_||!lumaRadianceSrv_||!albedo_){
+            error=L"Volume ou ressources du rebond GPU LumaTrace indisponibles.";return false;
+        }
+        if(lumaProbeCacheValid_&&lumaProbeKey_==lumaRadianceKey_)return true;
+        ID3D11ShaderResourceView* srvs[]={verticesSrv_.Get(),lumaOrderSrv_.Get(),lumaBvhSrv_.Get(),
+            lumaRadianceSrv_.Get(),albedo_.Get(),preservedAlbedo_?preservedAlbedo_.Get():albedo_.Get()};
+        ID3D11UnorderedAccessView* uavs[]={nullptr,lumaProbeUav_.Get()};ID3D11Buffer* cbs[]={lumaParams_.Get()};
+        ID3D11SamplerState* samplers[]={sampler_.Get()};
+        ID3D11ShaderResourceView* noPixelProbes[]={nullptr,nullptr};context_->PSSetShaderResources(4,2,noPixelProbes);
+        context_->CSSetShader(lumaProbeCompute_.Get(),nullptr,0);context_->CSSetShaderResources(0,6,srvs);
+        context_->CSSetUnorderedAccessViews(0,2,uavs,nullptr);context_->CSSetConstantBuffers(0,1,cbs);
+        context_->CSSetSamplers(0,1,samplers);context_->Dispatch((24u*10u*24u+63u)/64u,1,1);
+        ID3D11UnorderedAccessView* nu[]={nullptr,nullptr};ID3D11ShaderResourceView* ns[]={nullptr,nullptr,nullptr,nullptr,nullptr,nullptr};
+        ID3D11SamplerState* noSamplers[]={nullptr};context_->CSSetUnorderedAccessViews(0,2,nu,nullptr);
+        context_->CSSetShaderResources(0,6,ns);context_->CSSetSamplers(0,1,noSamplers);
+        context_->CSSetShader(nullptr,nullptr,0);lumaProbeKey_=lumaRadianceKey_;lumaProbeCacheValid_=true;return true;
     }
     bool ensureTargets(int w,int h,unsigned msaa,std::wstring& error) {
         if(w==width_&&h==height_&&target_&&msaaPreference_==msaa)return true;
@@ -2667,10 +2475,11 @@ private:
     ComPtr<ID3D11ShaderResourceView> verticesSrv_;
     ComPtr<ID3D11Buffer> lumaBvhBuffer_,lumaOrderBuffer_,lumaRadianceBuffer_,lumaParams_;
     ComPtr<ID3D11ShaderResourceView> lumaBvhSrv_,lumaOrderSrv_,lumaRadianceSrv_;
-    ComPtr<ID3D11UnorderedAccessView> lumaRadianceUav_;
-    ComPtr<ID3D11ComputeShader> lumaCompute_;
+    ComPtr<ID3D11UnorderedAccessView> lumaRadianceUav_,lumaProbeUav_;
+    ComPtr<ID3D11ComputeShader> lumaCompute_,lumaProbeCompute_;
     std::array<uint32_t,sizeof(LumaParams)/sizeof(uint32_t)> lumaRadianceKey_{};
-    bool lumaRadianceCacheValid_=false;
+    std::array<uint32_t,sizeof(LumaParams)/sizeof(uint32_t)> lumaProbeKey_{};
+    bool lumaRadianceCacheValid_=false,lumaProbeCacheValid_=false,hasLumaProbeGI_=false;
     std::array<ComPtr<ID3D11Buffer>,3> ellipseVertices_;
     std::array<UINT,3> ellipseVertexCounts_{{0,0,0}};
     std::vector<GpuEllipseInstance> ellipses_;
@@ -2684,7 +2493,7 @@ private:
         std::array<int32_t,256> layers{};layers.fill(-1);return layers;
     }();
     ComPtr<ID3D11ShaderResourceView> probeNextSrv_;
-    gibake::Table bakedGi_{};bool hasBakedGi_=false;
+    gibake::Table bakedGi_{};bool hasBakedGi_=false,loadedLumaProbeMode_=false;
     uint64_t loadedGiFileRevision_=0;
     int lowFrame_=-1,highFrame_=-1;
     float giHourMix_=0.f;

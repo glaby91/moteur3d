@@ -78,6 +78,19 @@ jobs:
           if (!(Test-Path (Join-Path $base "benchmark-civic/scene.json"))) { throw "The complex aquatique scene is missing" }
           windeployqt --release --no-translations "$base/moteur3d_v17.exe"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Compile focused LumaTrace WARP check
+        run: cmake --build build-v17-lumatrace --config Release --target v17_lumatrace_bounce_warp_smoke --parallel 4
+      - name: Simulate LumaTrace bounce on the latest scene
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          $smoke = Get-ChildItem -Path build-v17-lumatrace -Recurse -Filter v17_lumatrace_bounce_warp_smoke.exe | Select-Object -First 1
+          if (-not $smoke) { throw "The LumaTrace WARP smoke executable is missing" }
+          $scene = Join-Path "dist-v17-lumatrace" "benchmark-civic/scene.json"
+          $image = Join-Path $env:RUNNER_TEMP "lumatrace-bounce-latest-scene.png"
+          & $smoke.FullName $scene $image
+          if ($LASTEXITCODE -ne 0) { throw "LumaTrace WARP bounce simulation failed" }
       - name: Publish Windows x64 package
         uses: actions/upload-artifact@v6
         with:

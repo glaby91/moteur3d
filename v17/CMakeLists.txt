@@ -515,4 +515,13 @@ if(WIN32)
             "${CMAKE_CURRENT_BINARY_DIR}/v17-raster-warp.png")
     set_tests_properties(v17_d3d11_raster_warp PROPERTIES
         TIMEOUT 180 ENVIRONMENT "M3D_V16_FORCE_WARP=1")
+    # Focused WARP execution of LumaTrace's cached one-bounce path. The
+    # official scene package is supplied by the LumaTrace release workflow.
+    add_executable(v17_lumatrace_bounce_warp_smoke "tests/lumatrace_bounce_warp_smoke.cpp")
+    target_include_directories(v17_lumatrace_bounce_warp_smoke PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+    target_link_libraries(v17_lumatrace_bounce_warp_smoke PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
+    if(MSVC)
+        target_compile_options(v17_lumatrace_bounce_warp_smoke PRIVATE /O2 /EHsc /utf-8)
+    endif()
 endif()
