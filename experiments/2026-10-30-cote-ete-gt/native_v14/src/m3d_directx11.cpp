@@ -2319,9 +2319,9 @@ private:
         sourceVertexCount_=prepared.sourceVertexCount;uniqueVertexCount_=prepared.uniqueVertexCount;
         if(!prepared.vertices.empty()){
             constexpr size_t kChunkIndices=3u*4096u;
-            const size_t drawIndexCount=useStaticGeometry?prepared.indices.size():prepared.vertices.size();
+            const size_t drawIndexCount=useStaticGeometry?prepared.indices.size():mesh.vertices.size();
             const auto vertexAt=[&](size_t i)->const GpuVertex&{
-                return useStaticGeometry?prepared.vertices[prepared.indices[i]]:prepared.vertices[i];
+                return useStaticGeometry?prepared.vertices[prepared.indices[i]]:mesh.vertices[i];
             };
             for(size_t start=0;start<drawIndexCount;start+=kChunkIndices){
                 const size_t end=std::min(start+kChunkIndices,drawIndexCount);
@@ -2336,7 +2336,7 @@ private:
                 chunks_.push_back(chunk);
             }
             std::vector<GpuVertexLuma> packedLumaVertices;
-            const void* geometryData=prepared.vertices.data();
+            const void* geometryData=useStaticGeometry?static_cast<const void*>(prepared.vertices.data()):static_cast<const void*>(mesh.vertices.data());
             size_t geometryStride=sizeof(GpuVertex);
             if(lumaTrace){
                 packedLumaVertices.resize(prepared.vertices.size());
@@ -2349,7 +2349,7 @@ private:
                 }
                 geometryData=packedLumaVertices.data();geometryStride=sizeof(GpuVertexLuma);
             }
-            const size_t geometryBytes=prepared.vertices.size()*geometryStride;
+            const size_t geometryBytes=(useStaticGeometry?prepared.vertices.size():mesh.vertices.size())*geometryStride;
             geometryVertexBytes_=geometryBytes;
             geometryIndexBytes_=useStaticGeometry?prepared.indices.size()*sizeof(uint32_t):0u;
             const auto geometryUploadStarted=Clock::now();
@@ -2372,7 +2372,7 @@ private:
                 std::to_wstring(uint32_t(geometryResult))+L").";
             return false;
         }
-        vertexCount_=UINT(prepared.vertices.size());indexCount_=UINT(prepared.indices.size());
+        vertexCount_=UINT(useStaticGeometry?prepared.vertices.size():mesh.vertices.size());indexCount_=useStaticGeometry?UINT(prepared.indices.size()):0u;
         if(useStaticGeometry){
             D3D11_BUFFER_DESC indexDesc{};indexDesc.ByteWidth=UINT(prepared.indices.size()*sizeof(uint32_t));
             indexDesc.Usage=D3D11_USAGE_IMMUTABLE;indexDesc.BindFlags=D3D11_BIND_INDEX_BUFFER;
