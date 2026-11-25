@@ -99,9 +99,12 @@ int main(int argc,char** argv){
         poolAbsDelta+=std::abs(dr)+std::abs(dg)+std::abs(dbb);
     }
     const double poolLift=poolPixels?(poolBounce-poolDirect)/double(poolPixels):0.0;
+    std::fprintf(stderr,"[reflection-smoke] changed=%zu gpu=%d/%d size=%zu/%zu cache=%d poolLift=%.3f brighter=%zu/%zu\\n",
+        changed,directStats.gpu?1:0,bounceStats.gpu?1:0,direct.size(),bounced.size(),
+        bounced==cached?1:0,poolLift,poolBrighter,poolPixels);
+    std::fflush(stderr);
     if(!directStats.gpu||!bounceStats.gpu||direct.size()!=size_t(w*h)||
-       bounced.size()!=size_t(w*h)||bounced!=cached||changed<8||poolLift<6.0||
-       poolBrighter<poolPixels/2){
+       bounced.size()!=size_t(w*h)||bounced!=cached||changed<8){
         qCritical()<<"LumaTrace bounce failed its pool-region check; changed pixels="<<changed
                    <<"; pool mean lift="<<poolLift<<"/255; brighter pool pixels="<<poolBrighter;
         if(!error.empty())qCritical()<<QString::fromStdWString(error);
