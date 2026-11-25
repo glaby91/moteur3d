@@ -53,16 +53,14 @@ PreparedMesh<Vertex> prepareStaticMesh(const std::vector<Vertex>& source,
        source.size()>std::size_t(std::numeric_limits<std::uint32_t>::max()))
         return result;
 
-    result.indices.reserve(source.size());
     if(!enabled) {
         result.vertices=source;
-        for(std::size_t i=0;i<source.size();++i)
-            result.indices.push_back(static_cast<std::uint32_t>(i));
         result.uniqueVertexCount=result.vertices.size();
         result.valid=true;
         return result;
     }
 
+    result.indices.reserve(source.size());
     result.vertices.reserve(source.size());
     // Keep one index per hash in the common case; allocate a collision
     // chain only if two distinct vertices actually share a hash.
