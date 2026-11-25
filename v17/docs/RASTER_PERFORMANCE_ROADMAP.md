@@ -223,3 +223,18 @@ Elles restent nos jalons d'optimisation pour le complexe extrême.
 - [ ] Prévoir un interrupteur pour comparer le chemin actuel et le chemin optimisé. Consigner le chemin effectivement utilisé par DirectX 11 Raster, Vulkan Raster et LumaTrace BVH4.
 - [ ] Pour chacun des trois backends, répéter le même trajet avec et sans optimisation sur la même machine, avec scène, caméras, éclairage, résolution et qualité identiques. Rapporter séparément le temps de préparation, le temps total d’ouverture, la mémoire des tampons et le temps de rendu par image (médiane et P95 en ms après échauffement).
 - [ ] Vérifier la fidélité des images aux mêmes positions. Confirmer la tendance sur plusieurs scènes et matériels avant toute activation par défaut.
+
+### LumaTrace — mesurer l’effet du rangement des triangles sur l’éclairage diffus
+
+- [ ] Suivre dans le code les lectures de la surcouche des objets diffus et identifier les données qu’elle parcourt (indices du maillage, feuilles du BVH4, liste dédiée ou pixels). Vérifier si le rangement modifié atteint effectivement cette passe.
+- [ ] Exécuter les quatre configurations ci-dessous avec la même scène, le même trajet de caméra, les mêmes lampes, ombres et réglages de qualité. Garder l’éclairage standard actif dans les quatre cas.
+
+| Configuration | Géométrie | Surcouche diffuse |
+|---|---|---|
+| A | Actuelle | Désactivée |
+| B | Réorganisée | Désactivée |
+| C | Actuelle | Activée |
+| D | Réorganisée | Activée |
+
+- [ ] Relever les temps GPU en millisecondes pour l’image complète et, lorsque les passes sont chronométrables séparément, pour le dessin, l’éclairage standard et la surcouche. Répéter après échauffement sur les mêmes vues et conserver médiane, P95 et captures.
+- [ ] Comparer A à B et C à D pour mesurer le gain du rangement à rendu équivalent. Comparer le surcoût d’activation C − A à D − B sur les vues appariées. Cette différence estime l’effet sur le coût additionnel du diffus et complète le chronométrage direct de la passe. Vérifier les captures entre A/B et C/D.
