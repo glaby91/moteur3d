@@ -135,6 +135,9 @@ void main() {
    color=mix(color,vec3(.24,.57,.69),.07+fresnelWater*.20);
    color+=vec3(.19,.32,.37)*stripe*(.025+.13*fresnelWater);
    float opacity=mix(.08,.24,clamp(fresnelWater*1.75,0.0,1.0));
+   // Keep the water Fresnel appearance at full transmission while making
+   // authored transmission a continuous control down to a fully opaque surface.
+   opacity=1.0-(1.0-clamp(f.materialProps[m].z,0.0,1.0))*(1.0-opacity);
    if(f.misc.y<.5){
      color=color/(color+vec3(1.0));
      color=pow(max(color,vec3(0.0)),vec3(1.0/2.2));
