@@ -187,13 +187,13 @@ public static class LumaRegionAudit {
             regions.Add(Tuple.Create("grid_r"+(row+1)+"_c"+(col+1),(col*w)/3,(row*h)/3,((col+1)*w)/3,(row+1)*h/3));
         string[] bgNames=new string[]{"black","mid_gray","white"};
         double[] bgLinear=new double[]{0.0,Lin(128.0/255.0),1.0};
-        var b=new StringBuilder("{\\"mask\\":\\"Opaque-paired RGB compares pixels opaque in both captures for each backend; alpha coverage and linear-light composites include every pixel over fixed neutral backgrounds.\\",\\"compositeConvention\\":\\"Straight alpha; sRGB RGB decoded to linear, composited, then encoded to sRGB for display-Y.\\",\\"regions\\":[");
+        var b=new StringBuilder("{\"mask\":\"Opaque-paired RGB compares pixels opaque in both captures for each backend; alpha coverage and linear-light composites include every pixel over fixed neutral backgrounds.\",\"compositeConvention\":\"Straight alpha; sRGB RGB decoded to linear, composited, then encoded to sRGB for display-Y.\",\"regions\":[");
         for(int ri=0;ri<regions.Count;ri++) {
             if(ri>0)b.Append(',');
             var r=regions[ri];int x0=r.Item2,y0=r.Item3,x1=r.Item4,y1=r.Item5;
             long area=(long)(x1-x0)*(y1-y0);
-            b.Append("{\\"name\\":\\"").Append(r.Item1).Append("\\",\\"x\\":").Append(x0).Append(",\\"y\\":").Append(y0)
-             .Append(",\\"width\\":").Append(x1-x0).Append(",\\"height\\":").Append(y1-y0).Append(",\\"backends\\":[");
+            b.Append("{\"name\":\"").Append(r.Item1).Append("\",\"x\":").Append(x0).Append(",\"y\":").Append(y0)
+             .Append(",\"width\":").Append(x1-x0).Append(",\"height\":").Append(y1-y0).Append(",\"backends\":[");
             for(int j=0;j<baseline.Length;j++) {
                 if(j>0)b.Append(',');
                 int kControl=-1;
@@ -221,29 +221,29 @@ public static class LumaRegionAudit {
                 }
                 double md=opaqueCount>0?baseD/opaqueCount:0,ml=opaqueCount>0?baseL/opaqueCount:0;
                 double cd=opaqueCount>0?controlD/opaqueCount:0,cl=opaqueCount>0?controlL/opaqueCount:0;
-                b.Append("{\\"backend\\":\\"").Append(baseline[j].Name).Append("\\",\\"pairedOpaquePixels\\":").Append(opaqueCount)
+                b.Append("{\"backend\":\"").Append(baseline[j].Name).Append("\",\"pairedOpaquePixels\":").Append(opaqueCount)
                  .Append(",\"pairedOpaqueCoveragePct\":").Append(N(area>0?100.0*opaqueCount/area:0))
-                 .Append(",\\"baselineMeanAlphaPct\\":").Append(N(area>0?100.0*baseAlpha/area:0))
-                 .Append(",\\"controlMeanAlphaPct\\":").Append(N(area>0?100.0*controlAlpha/area:0))
-                 .Append(",\\"baselinePartialAlphaPct\\":").Append(N(area>0?100.0*basePartial/area:0))
-                 .Append(",\\"controlPartialAlphaPct\\":").Append(N(area>0?100.0*controlPartial/area:0))
-                 .Append(",\\"baselineMeanDisplayY_0_255\\":").Append(N(255.0*md))
-                 .Append(",\\"controlMeanDisplayY_0_255\\":").Append(N(255.0*cd))
-                 .Append(",\\"deltaDisplayPct\\":");
+                 .Append(",\"baselineMeanAlphaPct\":").Append(N(area>0?100.0*baseAlpha/area:0))
+                 .Append(",\"controlMeanAlphaPct\":").Append(N(area>0?100.0*controlAlpha/area:0))
+                 .Append(",\"baselinePartialAlphaPct\":").Append(N(area>0?100.0*basePartial/area:0))
+                 .Append(",\"controlPartialAlphaPct\":").Append(N(area>0?100.0*controlPartial/area:0))
+                 .Append(",\"baselineMeanDisplayY_0_255\":").Append(N(255.0*md))
+                 .Append(",\"controlMeanDisplayY_0_255\":").Append(N(255.0*cd))
+                 .Append(",\"deltaDisplayPct\":");
                 if(md>1e-12)b.Append(N(100.0*(cd/md-1.0)));else b.Append("null");
-                b.Append(",\\"baselineMeanLinearY_0_1\\":").Append(N(ml))
-                 .Append(",\\"controlMeanLinearY_0_1\\":").Append(N(cl))
-                 .Append(",\\"deltaLinearPct\\":");
+                b.Append(",\"baselineMeanLinearY_0_1\":").Append(N(ml))
+                 .Append(",\"controlMeanLinearY_0_1\":").Append(N(cl))
+                 .Append(",\"deltaLinearPct\":");
                 if(ml>1e-12)b.Append(N(100.0*(cl/ml-1.0)));else b.Append("null");
-                b.Append(",\\"composites\\":[");
+                b.Append(",\"composites\":[");
                 for(int bg=0;bg<bgNames.Length;bg++){
                     if(bg>0)b.Append(',');
                     double bcd=area>0?baseCompD[bg]/area:0,ccd=area>0?controlCompD[bg]/area:0;
                     double bcl=area>0?baseCompL[bg]/area:0,ccl=area>0?controlCompL[bg]/area:0;
-                    b.Append("{\\"background\\":\\"").Append(bgNames[bg]).Append("\\",\\"baselineMeanDisplayY_0_255\\":").Append(N(255.0*bcd))
-                     .Append(",\\"controlMeanDisplayY_0_255\\":").Append(N(255.0*ccd)).Append(",\\"deltaDisplayPct\\":");
+                    b.Append("{\"background\":\"").Append(bgNames[bg]).Append("\",\"baselineMeanDisplayY_0_255\":").Append(N(255.0*bcd))
+                     .Append(",\"controlMeanDisplayY_0_255\":").Append(N(255.0*ccd)).Append(",\"deltaDisplayPct\":");
                     if(bcd>1e-12)b.Append(N(100.0*(ccd/bcd-1.0)));else b.Append("null");
-                    b.Append(",\\"baselineMeanLinearY_0_1\\":").Append(N(bcl)).Append(",\\"controlMeanLinearY_0_1\\":").Append(N(ccl)).Append(",\\"deltaLinearPct\\":");
+                    b.Append(",\"baselineMeanLinearY_0_1\":").Append(N(bcl)).Append(",\"controlMeanLinearY_0_1\":").Append(N(ccl)).Append(",\"deltaLinearPct\":");
                     if(bcl>1e-12)b.Append(N(100.0*(ccl/bcl-1.0)));else b.Append("null");
                     b.Append('}');
                 }
