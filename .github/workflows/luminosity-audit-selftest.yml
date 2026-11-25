@@ -1,0 +1,19 @@
+name: Benchmark luminosity script self-test
+
+on:
+  push:
+    branches:
+      - benchmark/luminosity-audit-v1
+    paths:
+      - v17/tools/audit_luminosite.ps1
+      - .github/workflows/luminosity-audit-selftest.yml
+  workflow_dispatch:
+
+jobs:
+  powershell-self-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile metrics and run synthetic checks
+        shell: powershell
+        run: .\v17\tools\audit_luminosite.ps1 -SelfTest
