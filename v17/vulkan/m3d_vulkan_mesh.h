@@ -257,7 +257,11 @@ inline MeshBuilder build(const Scene& scene,std::vector<BoxInstance>* boxes=null
         const Obj& o=scene.obj[objectIndex];
         const uint32_t m=o.mat;
         const float scale=uvScaleForMaterial(scene,m);
-        mesh.transparentMaterial=m<scene.mat.size() && scene.mat[m].transmissionPercent>0;
+        const bool waterSurface=m<scene.mat.size() &&
+            (scene.mat[m].waterSurface ||
+             (!scene.mat[m].surfaceAuthored && scene.mat[m].name=="cse_pool_water"));
+        mesh.transparentMaterial=m<scene.mat.size() &&
+            (scene.mat[m].transmissionPercent>0 || waterSurface);
         switch(o.kind) {
           case Kind::Triangle:
             mesh.tri(o.a,o.b,o.c,o.n0,o.n1,o.n2,
