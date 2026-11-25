@@ -1673,6 +1673,7 @@ private:
         if(probeSrv_&&loadedGiFileRevision_==version&&loadedLumaProbeMode_==lumaTrace)return true;
         probeSrv_.Reset();probeTexture_.Reset();
         probeNextSrv_.Reset();probeNextTexture_.Reset();
+        lumaProbeCoarseSrv_.Reset();lumaProbeCoarseTexture_.Reset();lumaProbeCoarseUav_.Reset();
         lumaProbeUav_.Reset();hasLumaProbeGI_=false;lumaProbeCacheValid_=false;
         bakedGi_=gibake::Table{};hasBakedGi_=false;
         lowFrame_=-1;highFrame_=-1;loadedGiFileRevision_=version;loadedLumaProbeMode_=lumaTrace;
@@ -1740,6 +1741,15 @@ private:
             if(FAILED(device_->CreateUnorderedAccessView(probeTexture_.Get(),&ud,&lumaProbeUav_))){
                 error=L"Création de la cible GPU du rebond LumaTrace impossible.";
                 probeTexture_.Reset();probeSrv_.Reset();return false;
+            }
+            // Separate coarse results from the final volume: D3D11 forbids
+            // typed float4 loads directly from an RWTexture3D UAV.
+            if(FAILED(device_->CreateTexture3D(&td,nullptr,&lumaProbeCoarseTexture_))||
+               FAILED(device_->CreateShaderResourceView(lumaProbeCoarseTexture_.Get(),nullptr,&lumaProbeCoarseSrv_))||
+               FAILED(device_->CreateUnorderedAccessView(lumaProbeCoarseTexture_.Get(),&ud,&lumaProbeCoarseUav_))){
+                error=L"Création du stockage de repérage des zones LumaTrace impossible.";
+                lumaProbeCoarseTexture_.Reset();lumaProbeCoarseSrv_.Reset();lumaProbeCoarseUav_.Reset();
+                probeTexture_.Reset();probeSrv_.Reset();lumaProbeUav_.Reset();return false;
             }
             hasLumaProbeGI_=true;
             return true;
@@ -2034,6 +2044,7 @@ private:
         preservedAlbedo_.Reset();preservedTextureLayers_.fill(-1);
         probeSrv_.Reset();probeTexture_.Reset();
         probeNextSrv_.Reset();probeNextTexture_.Reset();
+        lumaProbeCoarseSrv_.Reset();lumaProbeCoarseTexture_.Reset();lumaProbeCoarseUav_.Reset();
         hasBakedGi_=false;bakedGi_=gibake::Table{};
         lowFrame_=-1;highFrame_=-1; // new scene/revision = reload GI cache
         boxVertices_.Reset();boxInstances_.Reset();boxInstanceCount_=0;
@@ -2048,6 +2059,7 @@ private:
         lumaObjectToTriangle_.clear();lumaTriangleCount_=0;
         if(lumaTrace)lumaObjectToTriangle_.assign(scene.obj.size(),0xffffffffu);
         probeSrv_.Reset();probeTexture_.Reset();probeNextSrv_.Reset();probeNextTexture_.Reset();
+        lumaProbeCoarseSrv_.Reset();lumaProbeCoarseTexture_.Reset();lumaProbeCoarseUav_.Reset();
         lumaProbeUav_.Reset();hasLumaProbeGI_=false;lumaProbeCacheValid_=false;
         loadedGiFileRevision_=0;
         MeshBuilder mesh;
@@ -2637,13 +2649,12 @@ private:
         }
         if(lumaProbeCacheValid_&&lumaProbeKey_==lumaRadianceKey_)return true;
         ID3D11ShaderResourceView* srvs[]={verticesSrv_.Get(),lumaOrderSrv_.Get(),lumaBvhSrv_.Get(),
-            lumaRadianceSrv_.Get(),albedo_.Get(),preservedAlbedo_?preservedAlbedo_.Get():albedo_.Get()};
-        ID3D11UnorderedAccessView* uavs[]={nullptr,lumaProbeUav_.Get()};ID3D11Buffer* cbs[]={lumaParams_.Get()};
+            lumaRadianceSrv_.Get(),albedo_.Get(),preservedAlbedo_?preservedAlbedo_.Get():albedo_.Get(),nullptr};
+        ID3D11Buffer* cbs[]={lumaParams_.Get()};
         ID3D11SamplerState* samplers[]={sampler_.Get()};
         ID3D11ShaderResourceView* noPixelProbes[]={nullptr,nullptr};context_->PSSetShaderResources(4,2,noPixelProbes);
-        context_->CSSetShader(lumaProbeCompute_.Get(),nullptr,0);context_->CSSetShaderResources(0,6,srvs);
-        context_->CSSetUnorderedAccessViews(0,2,uavs,nullptr);context_->CSSetConstantBuffers(0,1,cbs);
-        context_->CSSetSamplers(0,1,samplers);
+        context_->CSSetShader(lumaProbeCompute_.Get(),nullptr,0);
+        context_->CSSetConstantBuffers(0,1,cbs);context_->CSSetSamplers(0,1,samplers);
         D3D11_MAPPED_SUBRESOURCE mapped{};
         auto runProbePass=[&](uint32_t mode)->bool{
             LumaParams params=lumaParamsSnapshot_;params.probeDims[3]=mode;
@@ -2651,14 +2662,22 @@ private:
                 error=L"Upload des paramètres de zones LumaTrace impossible.";return false;
             }
             std::memcpy(mapped.pData,&params,sizeof(params));context_->Unmap(lumaParams_.Get(),0);
+            // Coarse writes to a staging UAV; refinement reads it via t6
+            // and writes the final irradiance volume via u1.
+            srvs[6]=mode?lumaProbeCoarseSrv_.Get():nullptr;
+            ID3D11UnorderedAccessView* passUavs[]={nullptr,mode?lumaProbeUav_.Get():nullptr,
+                mode?nullptr:lumaProbeCoarseUav_.Get()};
+            context_->CSSetShaderResources(0,7,srvs);
+            context_->CSSetUnorderedAccessViews(0,3,passUavs,nullptr);
             context_->Dispatch((12u*5u*12u+63u)/64u,1,1);return true;
         };
         // Pass 1: two broad samples per zone identify lit receivers.
         // Pass 2: four additional samples run only for zones with coarse hits.
         if(!runProbePass(0)||!runProbePass(1))return false;
-        ID3D11UnorderedAccessView* nu[]={nullptr,nullptr};ID3D11ShaderResourceView* ns[]={nullptr,nullptr,nullptr,nullptr,nullptr,nullptr};
-        ID3D11SamplerState* noSamplers[]={nullptr};context_->CSSetUnorderedAccessViews(0,2,nu,nullptr);
-        context_->CSSetShaderResources(0,6,ns);context_->CSSetSamplers(0,1,noSamplers);
+        ID3D11UnorderedAccessView* nu[]={nullptr,nullptr,nullptr};
+        ID3D11ShaderResourceView* ns[]={nullptr,nullptr,nullptr,nullptr,nullptr,nullptr,nullptr};
+        ID3D11SamplerState* noSamplers[]={nullptr};context_->CSSetUnorderedAccessViews(0,3,nu,nullptr);
+        context_->CSSetShaderResources(0,7,ns);context_->CSSetSamplers(0,1,noSamplers);
         context_->CSSetShader(nullptr,nullptr,0);lumaProbeKey_=lumaRadianceKey_;lumaProbeCacheValid_=true;return true;
     }
     bool ensureTargets(int w,int h,unsigned msaa,std::wstring& error) {
@@ -2856,7 +2875,7 @@ private:
     ComPtr<ID3D11ShaderResourceView> verticesSrv_;
     ComPtr<ID3D11Buffer> lumaBvhBuffer_,lumaOrderBuffer_,lumaRadianceBuffer_,lumaParams_;
     ComPtr<ID3D11ShaderResourceView> lumaBvhSrv_,lumaOrderSrv_,lumaRadianceSrv_;
-    ComPtr<ID3D11UnorderedAccessView> lumaRadianceUav_,lumaProbeUav_;
+    ComPtr<ID3D11UnorderedAccessView> lumaRadianceUav_,lumaProbeUav_,lumaProbeCoarseUav_;
     ComPtr<ID3D11ComputeShader> lumaCompute_,lumaProbeCompute_;
     LumaParams lumaParamsSnapshot_{};
     std::array<uint32_t,sizeof(LumaParams)/sizeof(uint32_t)> lumaRadianceKey_{};
@@ -2874,7 +2893,8 @@ private:
     std::array<int32_t,256> preservedTextureLayers_=[](){
         std::array<int32_t,256> layers{};layers.fill(-1);return layers;
     }();
-    ComPtr<ID3D11ShaderResourceView> probeNextSrv_;
+    ComPtr<ID3D11ShaderResourceView> probeNextSrv_,lumaProbeCoarseSrv_;
+    ComPtr<ID3D11Texture3D> lumaProbeCoarseTexture_;
     gibake::Table bakedGi_{};bool hasBakedGi_=false,loadedLumaProbeMode_=false;
     uint64_t loadedGiFileRevision_=0;
     int lowFrame_=-1,highFrame_=-1;

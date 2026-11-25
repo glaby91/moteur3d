@@ -15,6 +15,8 @@ Texture2DArray<float4> PreservedAlbedo : register(t5);
 SamplerState WrapSampler : register(s0);
 RWStructuredBuffer<float4> Radiance : register(u0);
 RWTexture3D<float4> ProbeOutput : register(u1);
+RWTexture3D<float4> CoarseProbeOutput : register(u2);
+Texture3D<float4> CoarseProbeTexture : register(t6);
 cbuffer Params : register(b0) {
  uint4 Counts;
  float4 Lights[64];
@@ -83,7 +85,7 @@ float3 directAtHit(uint id,float3 p,float3 n){
  uint3 cell=uint3(id%nx,(id/nx)%ny,id/(nx*ny));float3 uv=(float3(cell)+.5)/float3(nx,ny,nz);
  const bool refine=ProbeDims.w!=0;
  float4 coarse=0;
- if(refine){coarse=ProbeOutput[cell];if(coarse.a<=0.0)return;}
+ if(refine){coarse=CoarseProbeTexture.Load(int4(cell,0));if(coarse.a<=0.0)return;}
  float3 origin=ProbeOrigin.xyz+uv*ProbeSpan.xyz;float3 sum=0;uint hits=0;
  float rotation=(float)(id*747796405u+2891336453u)*2.3283064365386963e-10;
  const uint sampleCount=refine?kProbeRefineRayCount:kProbeCoarseRayCount;
@@ -104,8 +106,8 @@ float3 directAtHit(uint id,float3 p,float3 n){
  }
  if(!refine){
   // Coarse estimate; alpha stores the lit-hit fraction for the refinement gate.
-  ProbeOutput[cell]=float4(sum*(4.0/kProbeCoarseRayCount),
-                           (float)hits/kProbeCoarseRayCount);
+  CoarseProbeOutput[cell]=float4(sum*(4.0/kProbeCoarseRayCount),
+                                  (float)hits/kProbeCoarseRayCount);
  }else{
   // Restore the coarse sum from its normalized estimate, add the local samples,
   // then write one combined estimate for all six directions.
