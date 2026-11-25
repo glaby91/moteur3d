@@ -1455,8 +1455,12 @@ public:
             constexpr float reflectionPlaneY=.02f;
             const int reflectionW=std::max(1,w/2),reflectionH=std::max(1,h/2);
             Camera reflectionCam=cam;
-            const V target=cam.eye+cam.f*50.f;
+            V target=cam.eye+cam.f*50.f;
+            // Reflect both the eye and the look target across the water plane.
+            // Reflecting only the eye bends the virtual camera's view and makes
+            // the pool reflection slide out of the render texture at one side.
             reflectionCam.eye.y=2.f*reflectionPlaneY-cam.eye.y;
+            target.y=2.f*reflectionPlaneY-target.y;
             reflectionCam.f=norm(target-reflectionCam.eye);
             reflectionCam.r=norm(cross(reflectionCam.f,V{0,1,0}));
             reflectionCam.u=norm(cross(reflectionCam.r,reflectionCam.f));
