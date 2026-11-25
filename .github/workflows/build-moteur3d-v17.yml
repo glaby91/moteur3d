@@ -6,6 +6,7 @@ on:
       - master
       - feature/v17-realtime-architecture-roadmap-261110
       - feature/v17-380-global-architectural-rebuild-261112
+      - benchmark/luminosity-audit-v1
     paths:
       - 'v17/**'
       - 'v16/**'
@@ -425,6 +426,9 @@ jobs:
           Copy-Item "build-v17/Release/moteur3d_v17_benchmark.exe" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v17_gibake.exe" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v17_campaign.exe" "dist-v17/"
+          Copy-Item "v17/tools/LANCER_BENCHMARK_LUMINOSITE.bat" "dist-v17/"
+          Copy-Item "v17/tools/audit_luminosite.ps1" "dist-v17/"
+          Copy-Item "v17/tools/README_AUDIT_LUMINOSITE.md" "dist-v17/"
           Copy-Item "build-v17/v16/Release/moteur3d_v16.exe" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v16_core.dll" "dist-v17/"
           Copy-Item "build-v17/Release/cse_warp_v17.ico" "dist-v17/"
