@@ -43,3 +43,37 @@ jobs:
           "-DV17_GIT_SHA=$env:GITHUB_SHA"
       - name: Compile V17 application and shared engine
         run: cmake --build build-v17-water-fix --config Release --target moteur3d_v17 --parallel 4
+      - name: Assemble Windows package with latest official scene
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $base = "dist-v17-water-fix"
+          New-Item -ItemType Directory -Force $base | Out-Null
+          $sceneVersionPath = Join-Path $base "SCENE_VERSION.json"
+          Invoke-WebRequest -Uri "https://github.com/glaby91/moteur3d-scene/releases/latest/download/SCENE_VERSION.json" -OutFile $sceneVersionPath
+          $sceneVersion = Get-Content $sceneVersionPath -Raw | ConvertFrom-Json
+          if (-not $sceneVersion.revision -or -not $sceneVersion.scene) { throw "The latest scene release manifest is invalid" }
+          Invoke-WebRequest -Uri "https://github.com/glaby91/moteur3d-scene/releases/latest/download/V17-scene.zip" -OutFile (Join-Path $base "scene.zip")
+          Expand-Archive -Path (Join-Path $base "scene.zip") -DestinationPath $base -Force
+          Remove-Item (Join-Path $base "scene.zip") -Force
+          if (!(Test-Path (Join-Path $base "benchmark-civic/scene.json"))) { throw "The latest scene is missing" }
+          Set-Content -Path (Join-Path $base "REVISION.txt") -Value $env:GITHUB_SHA -NoNewline
+          $exe = Get-ChildItem -Path build-v17-water-fix -Recurse -Filter moteur3d_v17.exe | Select-Object -First 1
+          $core = Get-ChildItem -Path build-v17-water-fix -Recurse -Filter moteur3d_v16_core.dll | Select-Object -First 1
+          if (-not $exe -or -not $core) { throw "The V17 executable or shared engine DLL is missing" }
+          Copy-Item $exe.FullName (Join-Path $base "moteur3d_v17.exe") -Force
+          Copy-Item $core.FullName (Join-Path $base "moteur3d_v16_core.dll") -Force
+          $vulkanSource = Join-Path $exe.DirectoryName "vulkan"
+          if (!(Test-Path $vulkanSource)) { throw "The Vulkan SPIR-V shaders were not generated" }
+          New-Item -ItemType Directory -Force (Join-Path $base "vulkan") | Out-Null
+          Copy-Item (Join-Path $vulkanSource "*") (Join-Path $base "vulkan") -Force
+          windeployqt --release --no-translations "$base/moteur3d_v17.exe"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Upload downloadable Windows x64 package
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17-water-transmission-fix-Windows-x64
+          path: dist-v17-water-fix/
+          if-no-files-found: error
+          compression-level: 6
