@@ -43,6 +43,8 @@ jobs:
           "-DV17_GIT_SHA=$env:GITHUB_SHA"
       - name: Compile V17 application and shared engine
         run: cmake --build build-v17-water-fix --config Release --target moteur3d_v17 --parallel 4
+      - name: Compile campaign benchmark runner
+        run: cmake --build build-v17-water-fix --config Release --target moteur3d_v17_campaign --parallel 4
       - name: Assemble Windows package with latest official scene
         shell: pwsh
         env:
@@ -60,10 +62,15 @@ jobs:
           if (!(Test-Path (Join-Path $base "benchmark-civic/scene.json"))) { throw "The latest scene is missing" }
           Set-Content -Path (Join-Path $base "REVISION.txt") -Value $env:GITHUB_SHA -NoNewline
           $exe = Get-ChildItem -Path build-v17-water-fix -Recurse -Filter moteur3d_v17.exe | Select-Object -First 1
+          $campaign = Get-ChildItem -Path build-v17-water-fix -Recurse -Filter moteur3d_v17_campaign.exe | Select-Object -First 1
           $core = Get-ChildItem -Path build-v17-water-fix -Recurse -Filter moteur3d_v16_core.dll | Select-Object -First 1
-          if (-not $exe -or -not $core) { throw "The V17 executable or shared engine DLL is missing" }
+          if (-not $exe -or -not $campaign -or -not $core) { throw "The V17 app, campaign benchmark, or shared engine DLL is missing" }
           Copy-Item $exe.FullName (Join-Path $base "moteur3d_v17.exe") -Force
+          Copy-Item $campaign.FullName (Join-Path $base "moteur3d_v17_campaign.exe") -Force
           Copy-Item $core.FullName (Join-Path $base "moteur3d_v16_core.dll") -Force
+          Copy-Item "v17/tools/audit_luminosite.ps1" (Join-Path $base "audit_luminosite.ps1") -Force
+          Copy-Item "v17/LANCER_BENCH_PATCH_TRANSMISSION.bat" (Join-Path $base "LANCER_BENCH_PATCH_TRANSMISSION.bat") -Force
+          Copy-Item "v17/BENCH_PATCH_TRANSMISSION.md" (Join-Path $base "BENCH_PATCH_TRANSMISSION.md") -Force
           $vulkanSource = Join-Path $exe.DirectoryName "vulkan"
           if (!(Test-Path $vulkanSource)) { throw "The Vulkan SPIR-V shaders were not generated" }
           New-Item -ItemType Directory -Force (Join-Path $base "vulkan") | Out-Null
