@@ -71,9 +71,11 @@ une région pouvait être comparée à la moyenne du cadre complet. Le CSV conti
 couverture du masque, la luminance affichée et linéaire moyenne, les percentiles P50/P95
 et les écarts relatifs par case.
 
-Le script exécute aussi un auto-contrôle synthétique avant de finaliser le rapport :
+Le script exécute un auto-contrôle synthétique avant tout rendu :
 images identiques = 0 % d'écart et niveaux de gris 100 contre 50 = -50 % en luminance
 affichée. Le résultat est repris dans luminosity_audit.json.
+La même vérification est exécutée par GitHub Actions sur Windows à chaque modification du runner. Elle compile le code de mesure et vérifie les deux cas synthétiques sans télécharger de scène ni lancer le moteur.
+
 
 La grille est géométrique, pas sémantique : les cellules ne sont pas encore étiquetées
 « eau », « fresque » ou « sol ». Le runner actuel pilote une seule scène et une caméra
