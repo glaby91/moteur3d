@@ -160,6 +160,10 @@ struct FrameConstants {
     float colorControls[4];
     float peripheralControls[4];
     float reflectionControls[4];
+    float reflectionEye[3], reflectionTanHalf;
+    float reflectionForward[3], reflectionAspect;
+    float reflectionRight[3], reflectionPad0;
+    float reflectionUp[3], reflectionPad1;
 };
 
 // Independent sky constants avoid disturbing the existing PBR/shadow shader layout.
@@ -202,6 +206,10 @@ cbuffer Frame : register(b0) {
     float4 colorControls;
     float4 peripheralControls;
     float4 reflectionControls;
+    float3 reflectionEye; float reflectionTanHalf;
+    float3 reflectionForward; float reflectionAspect;
+    float3 reflectionRight; float reflectionPad0;
+    float3 reflectionUp; float reflectionPad1;
 };
 Texture2DArray<float4> albedo : register(t0);
 Texture2D<float> shadowDepth : register(t1);
@@ -520,11 +528,19 @@ constexpr char kShaderPart2[] = R"(
         // Avoid the former 45% high-angle opaque cyan veil.
         float opacity=lerp(.08,.24,saturate(fresnelWater*1.75));
         if(reflectionControls.x>1.5){
-            float2 reflectionUv=i.p.xy*reflectionControls.yz+normal.xz*.35;
-            float3 reflectedScene=poolReflection.SampleLevel(probeSampler,saturate(reflectionUv),0).rgb;
-            const float reflectionWeight=saturate(.22+.62*fresnelWater);
-            color=lerp(color,reflectedScene,reflectionWeight);
-            opacity=lerp(opacity,.62,saturate(fresnelWater*1.45));
+            float3 reflectedView=i.world-reflectionEye;
+            float reflectedDepth=dot(reflectedView,reflectionForward);
+            if(reflectedDepth>.08){
+                float reflectedNdcX=dot(reflectedView,reflectionRight)/(reflectedDepth*reflectionTanHalf);
+                float reflectedNdcY=dot(reflectedView,reflectionUp)*reflectionAspect/(reflectedDepth*reflectionTanHalf);
+                float2 reflectionUv=float2(.5+.5*reflectedNdcX,.5-.5*reflectedNdcY)+normal.xz*.35;
+                if(all(reflectionUv>=0.0)&&all(reflectionUv<=1.0)){
+                    float3 reflectedScene=poolReflection.SampleLevel(probeSampler,reflectionUv,0).rgb;
+                    const float reflectionWeight=saturate(.22+.62*fresnelWater);
+                    color=lerp(color,reflectedScene,reflectionWeight);
+                    opacity=lerp(opacity,.62,saturate(fresnelWater*1.45));
+                }
+            }
         }
         return float4(color,opacity);
     }
@@ -1441,6 +1457,11 @@ public:
             reflectionCam.f=norm(target-reflectionCam.eye);
             reflectionCam.r=norm(cross(reflectionCam.f,V{0,1,0}));
             reflectionCam.u=norm(cross(reflectionCam.r,reflectionCam.f));
+            cb.reflectionEye[0]=reflectionCam.eye.x;cb.reflectionEye[1]=reflectionCam.eye.y;cb.reflectionEye[2]=reflectionCam.eye.z;
+            cb.reflectionForward[0]=reflectionCam.f.x;cb.reflectionForward[1]=reflectionCam.f.y;cb.reflectionForward[2]=reflectionCam.f.z;
+            cb.reflectionRight[0]=reflectionCam.r.x;cb.reflectionRight[1]=reflectionCam.r.y;cb.reflectionRight[2]=reflectionCam.r.z;
+            cb.reflectionUp[0]=reflectionCam.u.x;cb.reflectionUp[1]=reflectionCam.u.y;cb.reflectionUp[2]=reflectionCam.u.z;
+            cb.reflectionTanHalf=reflectionCam.tanHalf;cb.reflectionAspect=reflectionCam.aspect;
             activeCam=reflectionCam;
             cb.reflectionControls[0]=1.f;
             cb.reflectionControls[3]=reflectionPlaneY;
