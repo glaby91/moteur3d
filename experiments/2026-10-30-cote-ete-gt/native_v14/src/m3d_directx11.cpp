@@ -1722,10 +1722,10 @@ private:
                        1.f/std::max(span.y,.001f),
                        1.f/std::max(span.z,.001f)};
         if(lumaTrace){
-            // LumaTrace gets a cached, low-resolution GPU irradiance volume.
-            // Eight deterministic rays per cell make one diffuse bounce; the
-            // raster shader trilinearly samples it for all visible fragments.
-            constexpr UINT nx=24,ny=10,nz=24;
+            // LumaTrace uses a coarse pass over 720 spatial zones, then
+            // refines only zones where the first rays hit lit geometry.
+            // The raster pass samples this shared volume on visible surfaces.
+            constexpr UINT nx=12,ny=5,nz=12;
             D3D11_TEXTURE3D_DESC td{};td.Width=nx;td.Height=ny;td.Depth=nz;td.MipLevels=1;
             td.Format=DXGI_FORMAT_R32G32B32A32_FLOAT;td.Usage=D3D11_USAGE_DEFAULT;
             td.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS;
@@ -2589,7 +2589,7 @@ private:
         if(scene.root<0||size_t(scene.root)>=scene.node.size()){error=L"Racine BVH4 invalide.";return false;}
         LumaParams p{};p.counts[0]=lumaTriangleCount_;p.counts[1]=lumaOrderCount_;p.counts[2]=lumaNodeCount_;
         for(auto& row:p.preservedLayers)std::fill(std::begin(row),std::end(row),0xffffffffu);
-        p.probeDims[0]=24;p.probeDims[1]=10;p.probeDims[2]=24;
+        p.probeDims[0]=12;p.probeDims[1]=5;p.probeDims[2]=12;p.probeDims[3]=0;
         p.probeOrigin[0]=probeOrigin_.x;p.probeOrigin[1]=probeOrigin_.y;p.probeOrigin[2]=probeOrigin_.z;
         p.probeSpan[0]=1.f/std::max(.001f,probeInvSpan_.x);
         p.probeSpan[1]=1.f/std::max(.001f,probeInvSpan_.y);
@@ -2615,6 +2615,7 @@ private:
         const float sceneLightScale=.42f+.58f*(1.f-daylight);
         for(const Light& l:scene.lights)if(!l.exterior)
             appendLight(l,sceneLightScale);
+        lumaParamsSnapshot_=p;
         std::array<uint32_t,sizeof(LumaParams)/sizeof(uint32_t)> radianceKey{};std::memcpy(radianceKey.data(),&p,sizeof(p));
         if(lumaRadianceCacheValid_&&radianceKey==lumaRadianceKey_)return true;
         D3D11_MAPPED_SUBRESOURCE m{};if(FAILED(context_->Map(lumaParams_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m))){error=L"Upload constantes LumaTrace impossible.";return false;}
@@ -2642,7 +2643,19 @@ private:
         ID3D11ShaderResourceView* noPixelProbes[]={nullptr,nullptr};context_->PSSetShaderResources(4,2,noPixelProbes);
         context_->CSSetShader(lumaProbeCompute_.Get(),nullptr,0);context_->CSSetShaderResources(0,6,srvs);
         context_->CSSetUnorderedAccessViews(0,2,uavs,nullptr);context_->CSSetConstantBuffers(0,1,cbs);
-        context_->CSSetSamplers(0,1,samplers);context_->Dispatch((24u*10u*24u+63u)/64u,1,1);
+        context_->CSSetSamplers(0,1,samplers);
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        auto runProbePass=[&](uint32_t mode)->bool{
+            LumaParams params=lumaParamsSnapshot_;params.probeDims[3]=mode;
+            if(FAILED(context_->Map(lumaParams_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped))){
+                error=L"Upload des paramètres de zones LumaTrace impossible.";return false;
+            }
+            std::memcpy(mapped.pData,&params,sizeof(params));context_->Unmap(lumaParams_.Get(),0);
+            context_->Dispatch((12u*5u*12u+63u)/64u,1,1);return true;
+        };
+        // Pass 1: two broad samples per zone identify lit receivers.
+        // Pass 2: four additional samples run only for zones with coarse hits.
+        if(!runProbePass(0)||!runProbePass(1))return false;
         ID3D11UnorderedAccessView* nu[]={nullptr,nullptr};ID3D11ShaderResourceView* ns[]={nullptr,nullptr,nullptr,nullptr,nullptr,nullptr};
         ID3D11SamplerState* noSamplers[]={nullptr};context_->CSSetUnorderedAccessViews(0,2,nu,nullptr);
         context_->CSSetShaderResources(0,6,ns);context_->CSSetSamplers(0,1,noSamplers);
@@ -2845,6 +2858,7 @@ private:
     ComPtr<ID3D11ShaderResourceView> lumaBvhSrv_,lumaOrderSrv_,lumaRadianceSrv_;
     ComPtr<ID3D11UnorderedAccessView> lumaRadianceUav_,lumaProbeUav_;
     ComPtr<ID3D11ComputeShader> lumaCompute_,lumaProbeCompute_;
+    LumaParams lumaParamsSnapshot_{};
     std::array<uint32_t,sizeof(LumaParams)/sizeof(uint32_t)> lumaRadianceKey_{};
     std::array<uint32_t,sizeof(LumaParams)/sizeof(uint32_t)> lumaProbeKey_{};
     bool lumaRadianceCacheValid_=false,lumaProbeCacheValid_=false,hasLumaProbeGI_=false;
