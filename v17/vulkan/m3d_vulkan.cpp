@@ -1708,10 +1708,10 @@ class VulkanRaster final {
         if(!prepared.valid)throw std::runtime_error("Vulkan static geometry preparation rejected an invalid triangle stream");
         staticGeometryPrepared_=prepareEnabled;
         sourceVertexCount_=prepared.sourceVertexCount;uniqueVertexCount_=prepared.uniqueVertexCount;
-        vertexCount_=uint32_t(prepared.vertices.size());indexCount_=uint32_t(prepared.indices.size());
+        vertexCount_=uint32_t(prepared.vertices.size());indexCount_=prepareEnabled?uint32_t(prepared.indices.size()):0u;
         const auto uploadStarted=Clock::now();
         if(vertexCount_)vertices_=uploadVertices(prepared.vertices.data(),size_t(vertexCount_)*sizeof(Vertex));
-        if(indexCount_)indices_=uploadIndices(prepared.indices.data(),size_t(indexCount_)*sizeof(std::uint32_t));
+        if(prepareEnabled&&indexCount_)indices_=uploadIndices(prepared.indices.data(),size_t(indexCount_)*sizeof(std::uint32_t));
         geometryUploadMs_=ms(uploadStarted,Clock::now());
         if(!boxData.empty()){
             // Only pure instanced boxes use a host-visible persistent buffer.
@@ -1788,13 +1788,17 @@ class VulkanRaster final {
         if(transparentCount_)transparent_=buffer(size_t(transparentCount_)*sizeof(Vertex),
                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
         constexpr size_t chunkSize=4096*3;
-        for(size_t first=0;first<prepared.indices.size();first+=chunkSize){
-            const size_t end=std::min(first+chunkSize,prepared.indices.size());
+        const size_t drawIndexCount=prepareEnabled?prepared.indices.size():prepared.vertices.size();
+        for(size_t first=0;first<drawIndexCount;first+=chunkSize){
+            const size_t end=std::min(first+chunkSize,drawIndexCount);
             Chunk c;c.first=uint32_t(first);c.count=uint32_t(end-first);
-            const Vertex& v=prepared.vertices[prepared.indices[first]];
-            c.lo=c.hi={v.p[0],v.p[1],v.p[2]};
+            const auto vertexAt=[&](size_t i)->const Vertex&{
+                return prepareEnabled?prepared.vertices[prepared.indices[i]]:prepared.vertices[i];
+            };
+            const Vertex& firstVertex=vertexAt(first);
+            c.lo=c.hi={firstVertex.p[0],firstVertex.p[1],firstVertex.p[2]};
             for(size_t i=first;i<end;i++){
-                const Vertex& indexed=prepared.vertices[prepared.indices[i]];
+                const Vertex& indexed=vertexAt(i);
                 for(int axis=0;axis<3;axis++){
                     float* lo=axis==0?&c.lo.x:axis==1?&c.lo.y:&c.lo.z;
                     float* hi=axis==0?&c.hi.x:axis==1?&c.hi.y:&c.hi.z;
@@ -2072,13 +2076,15 @@ public:
             // retain their exact passes, and sky runs under transparent glass.
             // Transparent triangles are drawn once after the opaque color pass.
             auto drawOpaque=[&](bool depthOnly){
-                if(indexCount_){
+                if(vertexCount_){
                 vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,depthOnly?depthOpaque_:opaquePipeline_);
                 VkDeviceSize off=0;VkBuffer vb=vertices_.handle;
                 vkCmdBindVertexBuffers(cmd_,0,1,&vb,&off);
-                vkCmdBindIndexBuffer(cmd_,indices_.handle,0,VK_INDEX_TYPE_UINT32);
+                if(staticGeometryPrepared_)vkCmdBindIndexBuffer(cmd_,indices_.handle,0,VK_INDEX_TYPE_UINT32);
                 for(const Chunk& c:chunks_)if(visible(c,cam)){
-                    vkCmdDrawIndexed(cmd_,c.count,1,c.first,0,0);drawCalls++;
+                    if(staticGeometryPrepared_)vkCmdDrawIndexed(cmd_,c.count,1,c.first,0,0);
+                    else vkCmdDraw(cmd_,c.count,1,c.first,0);
+                    drawCalls++;
                 }
             }
             if(boxCount_){
