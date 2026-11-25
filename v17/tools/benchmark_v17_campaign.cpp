@@ -94,6 +94,10 @@ struct Samples {
     QString error,image;
     double coldMs=0,wallMs=0;
     uint64_t submittedTriangles=0,drawCalls=0;
+    uint64_t geometrySourceVertices=0,geometryUniqueVertices=0,geometryIndexCount=0;
+    uint64_t geometryVertexBytes=0,geometryIndexBytes=0;
+    double geometryPrepareMs=0.,geometryUploadMs=0.;
+    bool geometryPreparationEnabled=false;
     std::vector<double> latency,gpuDraw,gpuTransfer,gpuTotal,cpuSubmit,cpuWait,cpuSwizzle,blockFps;
     std::vector<uint32_t> baseline;
     void add(const Stats& s){
@@ -106,6 +110,11 @@ struct Samples {
         cpuSubmit.push_back(s.cpuSubmitMs);
         cpuWait.push_back(s.cpuMapWaitMs);
         cpuSwizzle.push_back(s.cpuPixelConvertMs);
+        geometryPreparationEnabled=s.geometryPreparationEnabled;
+        geometrySourceVertices=s.geometrySourceVertices;geometryUniqueVertices=s.geometryUniqueVertices;
+        geometryIndexCount=s.geometryIndexCount;geometryVertexBytes=s.geometryVertexBytes;
+        geometryIndexBytes=s.geometryIndexBytes;geometryPrepareMs=s.geometryPrepareMs;
+        geometryUploadMs=s.geometryUploadMs;
         submittedTriangles=s.tests;drawCalls=s.gpuDrawCalls;
     }
     QJsonObject json() const{
@@ -129,6 +138,13 @@ struct Samples {
             {"cpuPixelConvertMs",mean(cpuSwizzle)},
             {"submittedTriangles",double(submittedTriangles)},
             {"gpuDrawCalls",double(drawCalls)},
+            {"geometryPreparationEnabled",geometryPreparationEnabled},
+            {"geometrySourceVertices",double(geometrySourceVertices)},
+            {"geometryUniqueVertices",double(geometryUniqueVertices)},
+            {"geometryIndexCount",double(geometryIndexCount)},
+            {"geometryVertexBytes",double(geometryVertexBytes)},
+            {"geometryIndexBytes",double(geometryIndexBytes)},
+            {"geometryPrepareMs",geometryPrepareMs},{"geometryUploadMs",geometryUploadMs},
             {"pixelIdentical",parity},{"status",ok?"ok":"failed"},
             {"error",error},{"image",image},
             {"memoryWorkingMiB",m.workingMiB},{"memoryPeakMiB",m.peakMiB}
@@ -139,6 +155,7 @@ struct Samples {
 struct Config{
     int rounds=6,frames=12,warmup=2;
     bool smoke=false,simulation=false,allScenes=false,includeCpu=false,fullBenchmark=false;
+    bool geometryPrepEnabled=false;
     RasterQualitySettings quality{};
     QString selected,baseDir;
 };
@@ -362,7 +379,7 @@ int main(int argc,char** argv){
               "[--frames 12] [--warmup 2] [--all-scenes] [--include-cpu] "
               "[--smoke] [--simulation] [--raster-msaa 1|2|4|8] [--raster-anisotropy 1|2|4|8|16] "
               "[--raster-lod-percent 50..200] [--raster-culling 0|1] "
-              "[--raster-lod-enabled 0|1]\n";
+              "[--raster-lod-enabled 0|1] [--geometry-prep on|off]\n";
         return 2;
     }
     Config cfg;
