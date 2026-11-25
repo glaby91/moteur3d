@@ -92,6 +92,16 @@ jobs:
           $image = Join-Path $env:RUNNER_TEMP "lumatrace-bounce-latest-scene.png"
           & $smoke.FullName $scene $image
           if ($LASTEXITCODE -ne 0) { throw "LumaTrace WARP bounce simulation failed" }
+      - name: Publish visual direct-versus-bounce comparison
+        uses: actions/upload-artifact@v6
+        with:
+          name: LumaTrace-bounce-WARP-comparison
+          path: |
+            ${{ runner.temp }}/lumatrace-bounce-latest-scene.png
+            ${{ runner.temp }}/lumatrace-bounce-latest-scene-direct.png
+            ${{ runner.temp }}/lumatrace-bounce-latest-scene-difference-x8.png
+          if-no-files-found: error
+          compression-level: 6
       - name: Publish Windows x64 package
         uses: actions/upload-artifact@v6
         with:

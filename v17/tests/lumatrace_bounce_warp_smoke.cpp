@@ -3,6 +3,8 @@
 #include "src/m3d_v16_bridge.h"
 
 #include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
 #include <QImage>
 #include <QDebug>
 #include <QString>
@@ -61,6 +63,7 @@ int main(int argc,char** argv){
     // Requiring a measurable lift there prevents unrelated scene pixels from
     // making a broken fresque-to-water transfer look like a successful test.
     double poolDirect=0.0,poolBounce=0.0;
+    double poolDeltaR=0.0,poolDeltaG=0.0,poolDeltaB=0.0,poolAbsDelta=0.0;
     size_t poolPixels=0,poolBrighter=0;
     if(direct.size()==size_t(w*h)&&bounced.size()==size_t(w*h))
     for(int y=112;y<170;++y)for(int x=24;x<w-24;++x){
@@ -69,6 +72,9 @@ int main(int argc,char** argv){
         const QRgb b=qRgb((bounced[i]>>16)&255,(bounced[i]>>8)&255,bounced[i]&255);
         const int da=qGray(a),db=qGray(b);
         poolDirect+=da;poolBounce+=db;poolBrighter+=db>da;++poolPixels;
+        const int dr=qRed(b)-qRed(a),dg=qGreen(b)-qGreen(a),dbb=qBlue(b)-qBlue(a);
+        poolDeltaR+=dr;poolDeltaG+=dg;poolDeltaB+=dbb;
+        poolAbsDelta+=std::abs(dr)+std::abs(dg)+std::abs(dbb);
     }
     const double poolLift=poolPixels?(poolBounce-poolDirect)/double(poolPixels):0.0;
     if(!directStats.gpu||!bounceStats.gpu||direct.size()!=size_t(w*h)||
@@ -78,15 +84,38 @@ int main(int argc,char** argv){
         if(!error.empty())qCritical()<<QString::fromStdWString(error);
         return 1;
     }
-    QImage image(w,h,QImage::Format_ARGB32);
-    for(int y=0;y<h;++y)
-        std::memcpy(image.scanLine(y),bounced.data()+size_t(y)*w,size_t(w)*sizeof(uint32_t));
-    if(!image.save(QString::fromLocal8Bit(argv[2]),"PNG")){
-        qCritical()<<"Could not save LumaTrace bounce image";return 1;
+    QImage directImage(w,h,QImage::Format_ARGB32),bounceImage(w,h,QImage::Format_ARGB32),
+        deltaImage(w,h,QImage::Format_ARGB32);
+    for(int y=0;y<h;++y){
+        auto* directRow=reinterpret_cast<QRgb*>(directImage.scanLine(y));
+        auto* bounceRow=reinterpret_cast<QRgb*>(bounceImage.scanLine(y));
+        auto* deltaRow=reinterpret_cast<QRgb*>(deltaImage.scanLine(y));
+        for(int x=0;x<w;++x){
+            const size_t i=size_t(y)*w+size_t(x);
+            const QRgb a=qRgb((direct[i]>>16)&255,(direct[i]>>8)&255,direct[i]&255);
+            const QRgb b=qRgb((bounced[i]>>16)&255,(bounced[i]>>8)&255,bounced[i]&255);
+            directRow[x]=a;bounceRow[x]=b;
+            deltaRow[x]=qRgb(std::min(255,std::max(0,128+(qRed(b)-qRed(a))*8)),
+                             std::min(255,std::max(0,128+(qGreen(b)-qGreen(a))*8)),
+                             std::min(255,std::max(0,128+(qBlue(b)-qBlue(a))*8)));
+        }
     }
-    qInfo()<<"LumaTrace one-bounce WARP PASS; changed pixels="<<changed
-           <<"; pool mean lift="<<poolLift<<"/255; brighter pool pixels="<<poolBrighter
-           <<"; cached image bit-identical";
+    const QString output=QString::fromLocal8Bit(argv[2]);
+    const QFileInfo outputInfo(output);
+    const QString stem=outputInfo.path()+QDir::separator()+outputInfo.completeBaseName();
+    const bool saved=directImage.save(stem+QStringLiteral("-direct.png"),"PNG")&&
+        bounceImage.save(output,"PNG")&&deltaImage.save(stem+QStringLiteral("-difference-x8.png"),"PNG");
+    if(!saved){qCritical()<<"Could not save LumaTrace comparison images";return 1;}
+    std::printf("LumaTrace WARP comparison: changed=%zu/%zu; pool grayscale lift=%.3f/255; ",
+        changed,direct.size(),poolLift);
+    std::printf("pool mean RGB delta=(%.3f, %.3f, %.3f); mean absolute RGB delta=%.3f/channel; ",
+        poolPixels?poolDeltaR/double(poolPixels):0.0,
+        poolPixels?poolDeltaG/double(poolPixels):0.0,
+        poolPixels?poolDeltaB/double(poolPixels):0.0,
+        poolPixels?poolAbsDelta/(3.0*double(poolPixels)):0.0);
+    std::printf("brighter pool pixels=%zu/%zu; cache bit-identical=%s\n",
+        poolBrighter,poolPixels,bounced==cached?"yes":"no");
+    std::fflush(stdout);
     m3d::setRasterHybridLightingEnabled(false);
     return 0;
 }
