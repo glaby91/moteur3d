@@ -91,9 +91,9 @@ function Invoke-Route30([string]$PackageRoot) {
         $env:QT_PLUGIN_PATH = (@($pluginRoots) + @($env:QT_PLUGIN_PATH) | Where-Object { $_ }) -join ';'
         $env:PATH = "$PackageRoot;$env:PATH"
 
-        $helperUrl = 'https://github.com/glaby91/moteur3d/releases/download/route30-03c456f42c5c6612c4cd07e8206c895dc7f9bfde/route30.zip'
-        $helperHash = '147b6a130fc56cd65301ca851d0df5126280deb23daa20b6a698e3d329309731'
-        $toolZip = Get-RouteArchive $cache 'route30' $helperUrl $helperHash 410505
+        $helperUrl = 'https://github.com/glaby91/moteur3d/releases/download/route30-acc231af94ff199e8ee4ad3836a3ff81b8b879fb/route30.zip'
+        $helperHash = '021e0d9e99e91030c99b614787e9a24320ab5a9d27b9c224306a470869487b2d'
+        $toolZip = Get-RouteArchive $cache 'route30' $helperUrl $helperHash 413900
         $bin = Join-Path $stage 'bin'
         [IO.Compression.ZipFile]::ExtractToDirectory($toolZip, $bin)
         $exe = Join-Path $bin 'route30.exe'
