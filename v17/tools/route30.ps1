@@ -2,7 +2,7 @@ param([string]$Root)
 $ErrorActionPreference='Stop'
 $scene=Join-Path $Root 'benchmark-civic\scene.json'
 if(!(Test-Path -LiteralPath $scene)){throw "Scene absente: $scene"}
-$release='8fbc70d9ff008304c6b83121bd290b2cdaec46c3'
+$release='f33ed2bf03ef7a2e068aeb93f0c4b91279553e95'
 $cache=Join-Path $Root "benchmark-tools\route30-$release"
 $exe=Join-Path $cache 'route30.exe'
 if(!(Test-Path $exe)){
