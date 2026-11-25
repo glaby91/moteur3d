@@ -1,0 +1,18 @@
+name: Luminance parity script
+
+on:
+  push:
+    branches: [codex/benchmark-luminance-parity]
+    paths:
+      - 'v17/benchmarks/luminance-parity/**'
+      - '.github/workflows/luminance-parity-script.yml'
+  workflow_dispatch:
+
+jobs:
+  powershell-self-test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile and exercise the PNG luminance analyzer
+        shell: powershell
+        run: ./v17/benchmarks/luminance-parity/RUN_BENCHMARK_LUMINOSITE.ps1 -SelfTest
