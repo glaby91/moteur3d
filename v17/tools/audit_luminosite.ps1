@@ -49,33 +49,6 @@ try {
 } finally {
     if (Test-Path -LiteralPath $stageRoot) { Remove-Item -LiteralPath $stageRoot -Recurse -Force }
 }
-$resultsRoot = Join-Path $Root "benchmark-results"
-if (!(Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Exécutable absent : $exe" }
-if (!(Test-Path -LiteralPath $scene -PathType Leaf)) { throw "Scène complète absente : $scene" }
-New-Item -ItemType Directory -Force -Path $resultsRoot | Out-Null
-$runId = Get-Date -Format "yyyyMMdd_HHmmss"
-$outBase = Join-Path $resultsRoot "run-$runId"
-New-Item -ItemType Directory -Force -Path $outBase | Out-Null
-Write-Host "CSE WARP - audit luminosité 4 moteurs"
-Write-Host "Scène: $scene"
-Write-Host "Caméra: v7_pool_fresco (repli automatique v4_piscine / première caméra)"
-Write-Host "Résolution: 1000 x 680 ; un échauffement + deux images mesurées"
-Write-Host "Backends: DX11, LumaTrace, Vulkan, CPU direct"
-& $exe $scene $outBase --lighting-audit --raster-msaa 1 --raster-anisotropy 8 --raster-lod-percent 100 --raster-culling 1 --raster-lod-enabled 0
-if ($LASTEXITCODE -ne 0) { throw "Le rendu moteur a échoué (code $LASTEXITCODE)." }
-$campaign = Get-ChildItem -LiteralPath $outBase -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
-if (!$campaign) { throw "Le moteur n'a pas créé de dossier de résultats." }
-$images = Join-Path $campaign.FullName "images"
-$required = [ordered]@{
-    CPU = "full_scene0_cpu_direct_1000x680.png"
-    DX11 = "scene0_cam0_1000x680_depth1.png"
-    Vulkan = "full_scene0_cam0_1000x680_vulkan.png"
-    LumaTrace = "full_scene0_cam0_1000x680_lumatrace.png"
-}
-foreach ($name in $required.Keys) {
-    $path = Join-Path $images $required[$name]
-    if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw "Image $name absente : $path" }
-}
 Add-Type -AssemblyName System.Drawing
 $lumaAuditSource = @"
 using System;
@@ -237,6 +210,36 @@ public static class LumaRegionAudit {
 }
 "@
 Add-Type -TypeDefinition $lumaAuditSource -ReferencedAssemblies @([System.Drawing.Bitmap].Assembly.Location)
+$roiSelfTest = [LumaRegionAudit]::SelfTest()
+Write-Host "Validation des métriques: $roiSelfTest"
+
+$resultsRoot = Join-Path $Root "benchmark-results"
+if (!(Test-Path -LiteralPath $exe -PathType Leaf)) { throw "Exécutable absent : $exe" }
+if (!(Test-Path -LiteralPath $scene -PathType Leaf)) { throw "Scène complète absente : $scene" }
+New-Item -ItemType Directory -Force -Path $resultsRoot | Out-Null
+$runId = Get-Date -Format "yyyyMMdd_HHmmss"
+$outBase = Join-Path $resultsRoot "run-$runId"
+New-Item -ItemType Directory -Force -Path $outBase | Out-Null
+Write-Host "CSE WARP - audit luminosité 4 moteurs"
+Write-Host "Scène: $scene"
+Write-Host "Caméra: v7_pool_fresco (repli automatique v4_piscine / première caméra)"
+Write-Host "Résolution: 1000 x 680 ; un échauffement + deux images mesurées"
+Write-Host "Backends: DX11, LumaTrace, Vulkan, CPU direct"
+& $exe $scene $outBase --lighting-audit --raster-msaa 1 --raster-anisotropy 8 --raster-lod-percent 100 --raster-culling 1 --raster-lod-enabled 0
+if ($LASTEXITCODE -ne 0) { throw "Le rendu moteur a échoué (code $LASTEXITCODE)." }
+$campaign = Get-ChildItem -LiteralPath $outBase -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (!$campaign) { throw "Le moteur n'a pas créé de dossier de résultats." }
+$images = Join-Path $campaign.FullName "images"
+$required = [ordered]@{
+    CPU = "full_scene0_cpu_direct_1000x680.png"
+    DX11 = "scene0_cam0_1000x680_depth1.png"
+    Vulkan = "full_scene0_cam0_1000x680_vulkan.png"
+    LumaTrace = "full_scene0_cam0_1000x680_lumatrace.png"
+}
+foreach ($name in $required.Keys) {
+    $path = Join-Path $images $required[$name]
+    if (!(Test-Path -LiteralPath $path -PathType Leaf)) { throw "Image $name absente : $path" }
+}
 $names = @("CPU","DX11","Vulkan","LumaTrace")
 $data = @()
 foreach ($name in $names) {
@@ -244,8 +247,6 @@ foreach ($name in $names) {
 }
 $measure = [LumaAudit]::ComputeJson($data) | ConvertFrom-Json
 $regionMeasure = [LumaRegionAudit]::ComputeJson($data,"DX11") | ConvertFrom-Json
-$roiSelfTest = [LumaRegionAudit]::SelfTest()
-Write-Host "Validation des métriques: $roiSelfTest"
 $engine = Get-Content -LiteralPath (Join-Path $campaign.FullName "summary.json") -Raw | ConvertFrom-Json
 $report = [ordered]@{
     audit = "CSE WARP V17 lighting parity"
