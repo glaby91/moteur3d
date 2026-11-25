@@ -170,7 +170,7 @@ public static class LumaRegionAudit {
 }
 "@
 
-function New-RoughPoolControl([string]$SourceRoot, [string]$DestinationRoot) {
+function New-PoolDiffuseControl([string]$SourceRoot, [string]$DestinationRoot) {
     $materialRoot = Join-Path $SourceRoot "materials"
     if (!(Test-Path -LiteralPath $materialRoot -PathType Container)) {
         throw "Dossier materials absent dans la scène : $materialRoot"
@@ -196,9 +196,17 @@ function New-RoughPoolControl([string]$SourceRoot, [string]$DestinationRoot) {
     }
     $target = $poolMaterialMatches[0]
     $material = $target.Document.materials[$target.Index]
-    if ($null -eq $material.roughness) { throw "Le matériau cse_pool_water n'a pas de propriété roughness." }
-    $originalRoughness = [double]$material.roughness
-    if ($originalRoughness -lt 0 -or $originalRoughness -gt 1) { throw "Roughness hors plage [0,1] : $originalRoughness" }
+    foreach ($property in @("roughness","metallic","transmission","ior")) {
+        if ($null -eq $material.$property) { throw "Le matériau cse_pool_water ne contient pas la propriété $property nécessaire au témoin diffus." }
+    }
+    $baselineProperties = [ordered]@{
+        roughness = [double]$material.roughness
+        metallic = [double]$material.metallic
+        transmission = [double]$material.transmission
+        ior = [double]$material.ior
+    }
+    if ($baselineProperties.roughness -lt 0 -or $baselineProperties.roughness -gt 1) { throw "Roughness hors plage [0,1] : $($baselineProperties.roughness)" }
+    $baseColorBefore = ($material.baseColor | ConvertTo-Json -Compress)
 
     if (Test-Path -LiteralPath $DestinationRoot) { Remove-Item -LiteralPath $DestinationRoot -Recurse -Force }
     New-Item -ItemType Directory -Force -Path $DestinationRoot | Out-Null
@@ -206,20 +214,29 @@ function New-RoughPoolControl([string]$SourceRoot, [string]$DestinationRoot) {
     $sourcePrefix = $SourceRoot.TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)) + [IO.Path]::DirectorySeparatorChar
     $relative = $target.File.FullName.Substring($sourcePrefix.Length)
     $destinationFile = Join-Path $DestinationRoot $relative
-    $material.roughness = 0.95
+    $material.roughness = 1.0
+    $material.metallic = 0.0
+    $material.transmission = 0.0
+    $material.ior = 1.0
     $json = $target.Document | ConvertTo-Json -Depth 100
     [IO.File]::WriteAllText($destinationFile,$json,[Text.UTF8Encoding]::new($false))
     $check = Get-Content -LiteralPath $destinationFile -Raw | ConvertFrom-Json
     $checkMatches = @($check.materials | Where-Object { [string]::Equals([string]$_.id,"cse_pool_water",[StringComparison]::OrdinalIgnoreCase) })
-    if ($checkMatches.Count -ne 1 -or [math]::Abs([double]$checkMatches[0].roughness - 0.95) -gt 0.000001) {
-        throw "La validation du matériau témoin cse_pool_water a échoué."
+    if ($checkMatches.Count -ne 1 -or [math]::Abs([double]$checkMatches[0].roughness - 1.0) -gt 0.000001 -or
+        [math]::Abs([double]$checkMatches[0].metallic) -gt 0.000001 -or
+        [math]::Abs([double]$checkMatches[0].transmission) -gt 0.000001 -or
+        [math]::Abs([double]$checkMatches[0].ior - 1.0) -gt 0.000001) {
+        throw "La validation du témoin diffus cse_pool_water a échoué."
     }
+    $baseColorAfter = ($checkMatches[0].baseColor | ConvertTo-Json -Compress)
+    if ($baseColorBefore -ne $baseColorAfter) { throw "La couleur de base a changé dans le témoin diffus." }
     return [pscustomobject]@{
         materialId = "cse_pool_water"
         materialFile = $relative.Replace("\","/")
-        baselineRoughness = $originalRoughness
-        controlRoughness = 0.95
-        otherMaterialPropertiesPreserved = $true
+        baseline = $baselineProperties
+        control = [ordered]@{ roughness = 1.0; metallic = 0.0; transmission = 0.0; ior = 1.0 }
+        baseColorPreserved = $true
+        controlType = "diffuse_only_approximation"
         sceneCopyValidated = $true
     }
 }
@@ -332,12 +349,12 @@ $report = [ordered]@{
     metricSelfTest = $roiSelfTest
 }
 # Controlled material variant: duplicate the same scene and raise only pool-water roughness.
-$controlSceneRoot = Join-Path $Root "benchmark-civic-control-rough-water"
-$materialControl = New-RoughPoolControl $sceneRoot $controlSceneRoot
-$controlOutBase = Join-Path $campaign.FullName "control-rough-water"
+$controlSceneRoot = Join-Path $Root "benchmark-civic-control-diffuse-water"
+$materialControl = New-PoolDiffuseControl $sceneRoot $controlSceneRoot
+$controlOutBase = Join-Path $campaign.FullName "control-diffuse-water"
 New-Item -ItemType Directory -Force -Path $controlOutBase | Out-Null
 Write-Host ""
-Write-Host "Contrôle matériau: cse_pool_water roughness $($materialControl.baselineRoughness) -> $($materialControl.controlRoughness)"
+Write-Host "Contrôle matériau: eau diffuse seule (roughness=1, metallic=0, transmission=0, IOR=1)"
 & $exe (Join-Path $controlSceneRoot "scene.json") $controlOutBase --lighting-audit --raster-msaa 1 --raster-anisotropy 8 --raster-lod-percent 100 --raster-culling 1 --raster-lod-enabled 0
 if ($LASTEXITCODE -ne 0) { throw "Le rendu témoin matériau a échoué (code $LASTEXITCODE)." }
 $controlCampaign = Get-ChildItem -LiteralPath $controlOutBase -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
@@ -368,11 +385,11 @@ $controlDeltaRows = foreach ($baseRegion in $regionMeasure.regions) {
             region = $baseRegion.name
             backend = $baseBackend.backend
             baselineMeanDisplayY_0_255 = $baseBackend.meanDisplayY_0_255
-            roughWaterMeanDisplayY_0_255 = $testBackend.meanDisplayY_0_255
+            diffuseControlMeanDisplayY_0_255 = $testBackend.meanDisplayY_0_255
             deltaDisplayY = $displayDelta
             deltaDisplayPct = if ([double]$baseBackend.meanDisplayY_0_255 -gt 0) { 100.0 * $displayDelta / [double]$baseBackend.meanDisplayY_0_255 } else { $null }
             baselineMeanLinearY_0_1 = $baseBackend.meanLinearY_0_1
-            roughWaterMeanLinearY_0_1 = $testBackend.meanLinearY_0_1
+            diffuseControlMeanLinearY_0_1 = $testBackend.meanLinearY_0_1
             deltaLinearY = $linearDelta
             deltaLinearPct = if ([double]$baseBackend.meanLinearY_0_1 -gt 0) { 100.0 * $linearDelta / [double]$baseBackend.meanLinearY_0_1 } else { $null }
             commonOpaqueCoverageBaselinePct = $baseRegion.commonOpaqueCoveragePct
@@ -381,7 +398,7 @@ $controlDeltaRows = foreach ($baseRegion in $regionMeasure.regions) {
     }
 }
 $controlReport = [ordered]@{
-    variant = "same scene/camera/lights; only cse_pool_water roughness changed"
+    variant = "same scene/camera/lights; cse_pool_water changed to diffuse-only approximation"
     material = $materialControl
     camera = $controlEngine.cases[0].camera
     engineSummary = $controlEngine
