@@ -1708,9 +1708,10 @@ class VulkanRaster final {
         if(!prepared.valid)throw std::runtime_error("Vulkan static geometry preparation rejected an invalid triangle stream");
         staticGeometryPrepared_=prepareEnabled;
         sourceVertexCount_=prepared.sourceVertexCount;uniqueVertexCount_=prepared.uniqueVertexCount;
-        vertexCount_=uint32_t(prepared.vertices.size());indexCount_=prepareEnabled?uint32_t(prepared.indices.size()):0u;
+        const auto& geometryVertices=prepareEnabled?prepared.vertices:mesh.vertices;
+        vertexCount_=uint32_t(geometryVertices.size());indexCount_=prepareEnabled?uint32_t(prepared.indices.size()):0u;
         const auto uploadStarted=Clock::now();
-        if(vertexCount_)vertices_=uploadVertices(prepared.vertices.data(),size_t(vertexCount_)*sizeof(Vertex));
+        if(vertexCount_)vertices_=uploadVertices(geometryVertices.data(),size_t(vertexCount_)*sizeof(Vertex));
         if(prepareEnabled&&indexCount_)indices_=uploadIndices(prepared.indices.data(),size_t(indexCount_)*sizeof(std::uint32_t));
         geometryUploadMs_=ms(uploadStarted,Clock::now());
         if(!boxData.empty()){
@@ -1788,12 +1789,12 @@ class VulkanRaster final {
         if(transparentCount_)transparent_=buffer(size_t(transparentCount_)*sizeof(Vertex),
                   VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
         constexpr size_t chunkSize=4096*3;
-        const size_t drawIndexCount=prepareEnabled?prepared.indices.size():prepared.vertices.size();
+        const size_t drawIndexCount=prepareEnabled?prepared.indices.size():geometryVertices.size();
         for(size_t first=0;first<drawIndexCount;first+=chunkSize){
             const size_t end=std::min(first+chunkSize,drawIndexCount);
             Chunk c;c.first=uint32_t(first);c.count=uint32_t(end-first);
             const auto vertexAt=[&](size_t i)->const Vertex&{
-                return prepareEnabled?prepared.vertices[prepared.indices[i]]:prepared.vertices[i];
+                return prepareEnabled?prepared.vertices[prepared.indices[i]]:geometryVertices[i];
             };
             const Vertex& firstVertex=vertexAt(first);
             c.lo=c.hi={firstVertex.p[0],firstVertex.p[1],firstVertex.p[2]};
