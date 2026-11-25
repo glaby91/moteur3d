@@ -275,7 +275,7 @@
     },
     {
       "id": "lumatrace_gpu_compute",
-      "revision": "005",
+      "revision": "006",
       "engines": [
         "v16",
         "v17"

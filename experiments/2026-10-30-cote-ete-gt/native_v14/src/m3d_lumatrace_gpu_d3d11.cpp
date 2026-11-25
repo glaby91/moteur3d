@@ -8,7 +8,9 @@
 #include <algorithm>
 #include <cstring>
 #include <limits>
+#include <map>
 #include <string>
+#include <tuple>
 #include <vector>
 
 namespace m3d { namespace lumatrace_gpu {
@@ -159,15 +161,90 @@ bool Compute::dispatch(ID3D11DeviceContext* context,ID3D11ShaderResourceView* ve
         params.colors[i][0]=color.x/255.f;params.colors[i][1]=color.y/255.f;
         params.colors[i][2]=color.z/255.f;params.colors[i][3]=intensity;
     };
-    // Keep the test pair, then prioritize authored exterior fixtures.
-    appendLight(center+V{1.4f,.75f,0.f},12.f,1.15f,{31,158,255});
-    appendLight(center+V{-1.4f,.75f,0.f},12.f,1.15f,{255,99,26});
-    for(const Light& light:pointLights)
+    // Turn luminous scene surfaces into a small set of cached local-light proxies.
+    // The existing BVH shadow queries and four deterministic bounce samples then
+    // handle their contribution once per unchanged light state, not per frame.
+    struct EmitterCell {
+        V weightedPosition{}, color{};
+        float area=0.f, intensity=0.f;
+    };
+    auto emissionOf=[](const Material& material,V& color,float& intensity)->bool {
+        if(material.emissionAuthored) {
+            color=material.emissionColor;
+            intensity=material.emissionIntensity;
+            return intensity>0.f;
+        }
+        const std::string& name=material.name;
+        if(name=="cse_pool_strip") {
+            color={.83f,.91f,1.f};intensity=.24f;
+        } else if(name=="cse_neon_red") {
+            color={1.f,.09f,.035f};intensity=1.65f;
+        } else if(name=="cse_neon_cyan") {
+            color={.03f,.89f,1.f};intensity=1.5f;
+        } else if(name=="cse_neon_gold") {
+            color={1.f,.72f,.24f};intensity=1.35f;
+        } else if(name=="lamp") {
+            color={1.f,166.f/255.f,91.f/255.f};intensity=2.65f*lampFactor;
+        } else if(name=="led") {
+            color={1.f,217.f/255.f,165.f/255.f};intensity=1.33f*lampFactor;
+        } else if(name=="taillight") {
+            color={1.f,28.f/255.f,12.f/255.f};intensity=1.25f*lampFactor;
+        } else return false;
+        return intensity>0.f;
+    };
+    using EmitterKey=std::tuple<uint32_t,int,int,int>;
+    std::map<EmitterKey,EmitterCell> emitterCells;
+    constexpr float emitterCellSize=4.f;
+    for(const Obj& object:scene.obj) {
+        if(object.kind!=Kind::Triangle || object.mat>=scene.mat.size())continue;
+        V sourceColor;float sourceIntensity=0.f;
+        if(!emissionOf(scene.mat[object.mat],sourceColor,sourceIntensity))continue;
+        const V areaVector=cross(object.b-object.a,object.c-object.a);
+        const float area=.5f*length(areaVector);
+        if(area<1.e-8f)continue;
+        const V centerPoint=(object.a+object.b+object.c)/3.f;
+        const EmitterKey key{
+            uint32_t(object.mat),
+            int(std::floor(centerPoint.x/emitterCellSize)),
+            int(std::floor(centerPoint.y/emitterCellSize)),
+            int(std::floor(centerPoint.z/emitterCellSize))};
+        EmitterCell& cell=emitterCells[key];
+        cell.weightedPosition=cell.weightedPosition+centerPoint*area;
+        cell.color=sourceColor;
+        cell.area+=area;
+        cell.intensity=sourceIntensity;
+    }
+    std::vector<std::pair<V,EmitterCell>> emitters;
+    emitters.reserve(emitterCells.size());
+    for(const auto& entry:emitterCells) {
+        const EmitterCell& cell=entry.second;
+        if(cell.area>0.f)emitters.push_back({cell.weightedPosition/cell.area,cell});
+    }
+    // Evenly retain at most sixteen samples along long strips. The scene's
+    // emissive meshes stay intact; only their low-cost lighting proxies are limited.
+    const size_t emitterCount=std::min<size_t>(16,emitters.size());
+    for(size_t i=0;i<emitterCount;++i) {
+        const size_t sourceIndex=emitterCount==1?0:
+            (i*(emitters.size()-1))/(emitterCount-1);
+        const auto& source=emitters[sourceIndex];
+        const float spread=std::sqrt(std::max(source.second.area,0.f));
+        const float radius=clampf(2.f+2.2f*spread,2.5f,8.f);
+        const float intensity=clampf(source.second.intensity*4.5f*
+            clampf(spread,.65f,1.5f),.5f,4.f);
+        appendLight(source.first,radius,intensity,source.second.color*255.f);
+    }
+    for(const Light& light:scene.lights)
         appendLight(light.p,light.radius,light.intensity,light.color);
-    for(const Light& light:scene.lights)if(light.exterior)
-        appendLight(light.p,light.radius,light.intensity*lampFactor,light.color);
-    for(const Light& light:scene.lights)if(!light.exterior)
-        appendLight(light.p,light.radius,light.intensity,light.color);
+
+    // Legacy world fixtures are used only when the scene has no authored source.
+    if(params.counts[3]==0) {
+        for(const Light& light:pointLights)
+            appendLight(light.p,light.radius,light.intensity,light.color);
+    }
+    if(params.counts[3]==0) {
+        appendLight(center+V{1.4f,.75f,0.f},12.f,1.15f,{31,158,255});
+        appendLight(center+V{-1.4f,.75f,0.f},12.f,1.15f,{255,99,26});
+    }
 
     // Trace the same sun direction used by the raster renderer through the BVH.
     // This makes LumaTrace's direct term produce real cast shadows and lets

@@ -1,13 +1,13 @@
 # CSE WARP — moteur 3D V17
 
-**Moteur : V17.006 · scène de référence courante : V17.623**
+**Moteur : V17.008 · scène de référence courante : V17.627**
 CSE WARP V17 réunit l’interface d’exploration, plusieurs backends de rendu, le noyau moteur partagé avec V16, les outils de benchmark et un mécanisme de mise à jour de scène. La V17 reste une version expérimentale : les performances et la présentation native doivent être mesurées sur le GPU visé.
 
-> **Branche par défaut :** `master`. La livraison V17.006 avec scène V17.623 est fusionnée dans cette branche; voir [BRANCH_STATUS.md](BRANCH_STATUS.md) pour le repère des branches moteur conservées.
+> **Branche par défaut :** `master`. La livraison V17.008 avec scène V17.627 est fusionnée dans cette branche; voir [BRANCH_STATUS.md](BRANCH_STATUS.md) pour le repère des branches moteur conservées.
 
 ## Scène de référence et paquet Windows
 
-La scène « Palais et coupole vitrée de la piscine » est maintenue séparément dans [`glaby91/moteur3d-scene`](https://github.com/glaby91/moteur3d-scene). La release courante est [V17.623](https://github.com/glaby91/moteur3d-scene/releases/tag/scene-V17.623-36). Le workflow moteur récupère la dernière release au début de la compilation, vérifie le manifeste de l’archive et son numéro de révision, charge la scène avec le moteur, puis place **la scène complète et son manifeste dans le même paquet Windows que le moteur**. Le paquet est ainsi utilisable hors ligne dès son extraction.
+La scène « Palais et coupole vitrée de la piscine » est maintenue séparément dans [`glaby91/moteur3d-scene`](https://github.com/glaby91/moteur3d-scene). La release courante est [V17.627](https://github.com/glaby91/moteur3d-scene/releases/tag/scene-V17.627-40). Le workflow moteur récupère la dernière release au début de la compilation, vérifie le manifeste de l’archive et son numéro de révision, charge la scène avec le moteur, puis place **la scène complète et son manifeste dans le même paquet Windows que le moteur**. Le paquet est ainsi utilisable hors ligne dès son extraction.
 
 Le programme vérifie ensuite les nouvelles releases en tâche de fond. Il ouvre immédiatement la scène locale trouvée ; la vérification réseau ne retarde pas le rendu. Une nouvelle version est proposée sans remplacer la scène en cours. Si l’utilisateur accepte, la nouvelle scène est installée dans les données utilisateur et un redémarrage est proposé. En l’absence de scène locale, le moteur propose de télécharger la release avant de démarrer. Une vérification indisponible laisse la scène locale utilisable.
 

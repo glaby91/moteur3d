@@ -1,6 +1,6 @@
 # CSE WARP Beta X — V17
 
-**Révision moteur : V17.007 · scène courante : V17.627.** La fenêtre dédiée indique maintenant les deux révisions. Le build Windows V17.007 récupère et valide la release V17.627 publiée dans le dépôt séparé `glaby91/moteur3d-scene`, puis l’empaquette avec le moteur. Au lancement, l’application ouvre la copie locale et vérifie en arrière-plan si une scène plus récente est publiée.
+**Révision moteur : V17.008 · scène courante : V17.627.** Les fenêtres moteur et rendu dédié affichent les deux révisions. Le build Windows V17.008 intègre la dernière scène publiée. LumaTrace utilise maintenant les surfaces lumineuses de la scène comme sources locales et réutilise leur éclairage calculé par triangle.
 
 **V17 réunit l’exploration temps réel, les backends CPU/GPU et le noyau partagé avec V16.** DX11 Raster est le choix temps réel général ; Vulkan et LumaTrace sont expérimentaux. Le chemin de présentation GPU directe est disponible sous Windows, avec Qt/QImage comme solution de repli. La CI WARP ne mesure pas les performances du GPU matériel.
 
