@@ -249,6 +249,12 @@ Elles restent nos jalons d'optimisation pour le complexe extrême.
 
 ### À faire — partager les tests de visibilité identiques entre triangles visibles
 
-- [ ] Relever les points réellement utilisés par la V17. Sur le dallage de la piscine, compter les tests de visibilité demandés et les trajets uniques pour une même image. Deux triangles coplanaires partageant une arête peuvent partager les tests aux deux sommets si l’origine après décalage, le point visé sur la source et les règles d’intersection sont identiques.
+Le shader V17 examiné au commit `96b281d` lance quatre rayons de rebond diffus depuis le centre de chaque triangle, dans quatre directions. Deux triangles adjacents ont des centres distincts. Conserver ce mode comme référence et chronométrer séparément les images avec recalcul de l’éclairage et celles qui réutilisent le cache.
+
+La simulation sur six maillages de la coupole V17.605 (5 448 triangles) concerne une variante d’ombre directe vers une lampe ponctuelle, avec trois sommets et un centre par triangle. Le partage par position et normale de face donne 15 084 tests contre 21 792, soit 6 708 tests potentiellement évités (30,8 %) avant filtrage de visibilité. Ce décompte géométrique ne mesure ni le temps GPU ni le gain sur une image complète.
+
+Ordre de travail : conserver la préparation géométrique comme premier chantier. Pour LumaTrace, mesurer ensuite le partage sur les ombres directes à qualité constante, puis évaluer séparément le budget adaptatif. Suivre en parallèle le diagnostic du placement du diffus par rapport au CPU GI.
+
+- [ ] Sur le dallage de la piscine, compter les tests de visibilité demandés et les trajets uniques pour une même image. Deux triangles coplanaires partageant une arête peuvent partager les tests aux deux sommets si l’origine après décalage, le point visé sur la source et les règles d’intersection sont identiques.
 - [ ] Comparer partage désactivé puis activé à échantillons fixes. Réutiliser le résultat de visibilité et conserver la réponse propre à chaque matériau. Mesurer les rayons effectivement tracés, la mémoire supplémentaire et le temps GPU total, recherche et synchronisation comprises. Contrôler les captures à réglages identiques.
 - [ ] Si les points actuels sont intérieurs aux triangles, évaluer séparément le passage à trois sommets partagés et un centre par triangle. Comparer visuellement les bords d’ombre en mouvement. Évaluer ensuite le budget adaptatif 0/1/2/4 indépendamment du partage.
