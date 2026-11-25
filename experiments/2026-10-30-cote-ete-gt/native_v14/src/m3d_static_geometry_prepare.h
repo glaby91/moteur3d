@@ -64,24 +64,41 @@ PreparedMesh<Vertex> prepareStaticMesh(const std::vector<Vertex>& source,
     }
 
     result.vertices.reserve(source.size());
-    std::unordered_map<std::uint64_t,std::vector<std::uint32_t>> buckets;
-    buckets.reserve(source.size());
+    // Keep one index per hash in the common case; allocate a collision
+    // chain only if two distinct vertices actually share a hash.
+    std::unordered_map<std::uint64_t,std::uint32_t> firstByHash;
+    std::unordered_map<std::uint64_t,std::vector<std::uint32_t>> collisions;
+    firstByHash.reserve(source.size());
     for(const Vertex& vertex:source) {
         const std::uint64_t hash=hashVertex(vertex);
-        auto& candidates=buckets[hash];
+        const auto found=firstByHash.find(hash);
         std::uint32_t index=std::numeric_limits<std::uint32_t>::max();
-        for(std::uint32_t candidate:candidates) {
-            if(sameVertex(result.vertices[candidate],vertex)) {
-                index=candidate;
-                break;
-            }
-        }
-        if(index==std::numeric_limits<std::uint32_t>::max()) {
-            if(result.vertices.size()>=std::size_t(std::numeric_limits<std::uint32_t>::max()))
-                return PreparedMesh<Vertex>{};
+        if(found==firstByHash.end()) {
             index=static_cast<std::uint32_t>(result.vertices.size());
             result.vertices.push_back(vertex);
-            candidates.push_back(index);
+            firstByHash.emplace(hash,index);
+        } else if(sameVertex(result.vertices[found->second],vertex)) {
+            index=found->second;
+        } else {
+            auto collision=collisions.find(hash);
+            if(collision!=collisions.end()) {
+                for(std::uint32_t candidate:collision->second) {
+                    if(sameVertex(result.vertices[candidate],vertex)) {
+                        index=candidate;
+                        break;
+                    }
+                }
+            }
+            if(index==std::numeric_limits<std::uint32_t>::max()) {
+                if(result.vertices.size()>=std::size_t(std::numeric_limits<std::uint32_t>::max()))
+                    return PreparedMesh<Vertex>{};
+                index=static_cast<std::uint32_t>(result.vertices.size());
+                result.vertices.push_back(vertex);
+                if(collision==collisions.end())
+                    collisions.emplace(hash,std::vector<std::uint32_t>{found->second,index});
+                else
+                    collision->second.push_back(index);
+            }
         }
         result.indices.push_back(index);
     }
