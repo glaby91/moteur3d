@@ -138,7 +138,7 @@ struct Samples {
 };
 struct Config{
     int rounds=6,frames=12,warmup=2;
-    bool smoke=false,simulation=false,allScenes=false,includeCpu=false,fullBenchmark=false;
+    bool smoke=false,simulation=false,allScenes=false,includeCpu=false,fullBenchmark=false,lightingAudit=false;
     RasterQualitySettings quality{};
     QString selected,baseDir;
 };
@@ -362,7 +362,7 @@ int main(int argc,char** argv){
               "[--frames 12] [--warmup 2] [--all-scenes] [--include-cpu] "
               "[--smoke] [--simulation] [--raster-msaa 1|2|4|8] [--raster-anisotropy 1|2|4|8|16] "
               "[--raster-lod-percent 50..200] [--raster-culling 0|1] "
-              "[--raster-lod-enabled 0|1]\n";
+              "[--raster-lod-enabled 0|1] [--lighting-audit]\n";
         return 2;
     }
     Config cfg;
@@ -371,6 +371,9 @@ int main(int argc,char** argv){
     cfg.smoke=args.contains("--smoke");
     cfg.simulation=args.contains("--simulation");
     cfg.fullBenchmark=args.contains("--full-benchmark");
+    cfg.lightingAudit=args.contains("--lighting-audit");
+    if(cfg.lightingAudit){cfg.fullBenchmark=true;cfg.rounds=1;cfg.frames=2;cfg.warmup=1;
+        qputenv("M3D_V17_SPLIT_SKY","1");}
     if(cfg.fullBenchmark)setRasterCloudTimeScale(0.f);
     if(cfg.smoke&&cfg.simulation){
         err<<"--smoke and --simulation cannot be combined\n";return 2;
@@ -393,6 +396,7 @@ int main(int argc,char** argv){
     // Functional full-scene WARP simulation; the normal full-quality
     // 2048px campaign is unchanged for native machine performance tests.
     if(cfg.simulation){cfg.rounds=2;cfg.frames=2;cfg.warmup=1;}
+    if(cfg.lightingAudit){cfg.rounds=1;cfg.frames=2;cfg.warmup=1;}
     int msaa=int(cfg.quality.msaaSamples),aniso=int(cfg.quality.anisotropy),
         lod=int(cfg.quality.lodQualityPercent),
         cull=int(cfg.quality.frustumCulling),dynamic=int(cfg.quality.dynamicLod);
@@ -433,8 +437,8 @@ int main(int argc,char** argv){
         {"rounds",cfg.rounds},{"framesPerRound",cfg.frames},{"warmup",cfg.warmup},
         {"smoke",cfg.smoke},{"simulation",cfg.simulation},
         {"fullBenchmark",cfg.fullBenchmark},{"includeCpuScaling",cfg.includeCpu},
-        {"backendMatrix",cfg.fullBenchmark?QJsonArray{QStringLiteral("D3D11 Raster preview/readback"),QStringLiteral("Vulkan Raster preview/readback"),QStringLiteral("CPU Ray Tracing PBR direct")}:QJsonArray{}},
-        {"allScenes",cfg.allScenes},
+        {"backendMatrix",cfg.fullBenchmark?QJsonArray{QStringLiteral("D3D11 Raster preview/readback"),QStringLiteral("Vulkan Raster preview/readback"),QStringLiteral("LumaTrace BVH4 preview/readback"),QStringLiteral("CPU Ray Tracing PBR direct")}:QJsonArray{}},
+        {"allScenes",cfg.allScenes},{"lightingAudit",cfg.lightingAudit},
         {"textureResolutionLimit",cfg.smoke||cfg.simulation?256:2048},
         {"simulationHardwareNote",cfg.simulation
            ?"WARP software GPU, 256px PBR, 256x144 and 480x270. Functional coverage only, not native FPS."
@@ -529,12 +533,14 @@ int main(int argc,char** argv){
             {"materialCount",int(runtime.renderScene.mat.size())},
             {"cameraCount",int(runtime.cameras.size())}});
         if(runtime.cameras.empty()){allOk=false;continue;}
-        const int cameras=cfg.smoke?1:std::min(2,int(runtime.cameras.size()));
-        const QVector<QSize> sizes=cfg.smoke
-            ?QVector<QSize>{QSize(320,180)}
-            :cfg.simulation
-                ?QVector<QSize>{QSize(256,144),QSize(480,270)}
-                :QVector<QSize>{QSize(1366,768),QSize(1920,1080)};
+        const int cameras=(cfg.smoke||cfg.lightingAudit)?1:std::min(2,int(runtime.cameras.size()));
+        const QVector<QSize> sizes=cfg.lightingAudit
+            ?QVector<QSize>{QSize(1000,680)}
+            :cfg.smoke
+                ?QVector<QSize>{QSize(320,180)}
+                :cfg.simulation
+                    ?QVector<QSize>{QSize(256,144),QSize(480,270)}
+                    :QVector<QSize>{QSize(1366,768),QSize(1920,1080)};
         for(int cameraIndex=0;cameraIndex<cameras;++cameraIndex){
             const auto& preset=runtime.cameras[cameraIndex];
             for(const QSize size:sizes){
@@ -549,6 +555,7 @@ int main(int argc,char** argv){
                     cases.push_back(std::move(entry));
                 }
                 size_t vkIndex=cases.size();
+                size_t lumaIndex=cases.size();
                 if(cfg.fullBenchmark){
                     Samples vkCase;
                     vkCase.scene=sceneName;vkCase.camera=preset.id;
@@ -556,6 +563,13 @@ int main(int argc,char** argv){
                     vkCase.w=size.width();vkCase.h=size.height();vkCase.depth=1;
                     vkCase.requestedMsaa=msaa;
                     cases.push_back(std::move(vkCase));
+                    lumaIndex=cases.size();
+                    Samples lumaCase;
+                    lumaCase.scene=sceneName;lumaCase.camera=preset.id;
+                    lumaCase.variant=QStringLiteral("LumaTrace BVH4 preview + readback");
+                    lumaCase.w=size.width();lumaCase.h=size.height();lumaCase.depth=1;
+                    lumaCase.requestedMsaa=msaa;
+                    cases.push_back(std::move(lumaCase));
                 }
                 const auto renderVulkan=[&](std::vector<uint32_t>& image,Stats& frameStats,
                                             std::wstring& why){
@@ -563,9 +577,20 @@ int main(int argc,char** argv){
                     return renderVulkanPreview(runtime.renderScene,shadows,camera,
                         entry.w,entry.h,image,frameStats,why);
                 };
-                // Rotate the order across four paths so Vulkan is not always
-                // measured after every DX11 pass at a higher GPU temperature.
-                const int modeCount=cfg.fullBenchmark?4:3;
+                const auto renderLumaTrace=[&](std::vector<uint32_t>& image,Stats& frameStats,
+                                                std::wstring& why){
+                    auto& entry=cases[lumaIndex];
+                    if(!runtime.lumaTraceBvhError.isEmpty()){
+                        why=runtime.lumaTraceBvhError.toStdWString();return false;
+                    }
+                    if(runtime.lumaTraceBvh4.nodes.empty()){
+                        why=L"LumaTrace BVH4 is empty";return false;
+                    }
+                    return renderLumaTracePreview(runtime.renderScene,runtime.lumaTraceBvh4,
+                        shadows,camera,entry.w,entry.h,image,frameStats,why);
+                };
+                // Rotate GPU backends so the same renderer is not always measured last.
+                const int modeCount=cfg.fullBenchmark?5:3;
                 for(int round=0;round<cfg.rounds;++round){
                     for(int order=0;order<modeCount;++order){
                         const int mode=(order+round)%modeCount;
@@ -578,6 +603,18 @@ int main(int argc,char** argv){
                             }else if(entry.ok){
                                 out<<"  "<<preset.id<<" "<<size.width()<<"x"<<size.height()
                                    <<" Vulkan round "<<(round+1)<<"/"<<cfg.rounds
+                                   <<" => "<<QString::number(entry.blockFps.back(),'f',2)
+                                   <<" renderer FPS (readback)\n";out.flush();
+                            }
+                        }else if(cfg.fullBenchmark&&mode==4){
+                            auto& entry=cases[lumaIndex];
+                            if(entry.ok&&!runSynchronousBlock(entry,round,cfg.frames,
+                                                               cfg.warmup,renderLumaTrace,frameCsv)){
+                                allOk=false;
+                                err<<"FAILED "<<sceneName<<" LumaTrace: "<<entry.error<<"\n";
+                            }else if(entry.ok){
+                                out<<"  "<<preset.id<<" "<<size.width()<<"x"<<size.height()
+                                   <<" LumaTrace round "<<(round+1)<<"/"<<cfg.rounds
                                    <<" => "<<QString::number(entry.blockFps.back(),'f',2)
                                    <<" renderer FPS (readback)\n";out.flush();
                             }
@@ -624,6 +661,13 @@ int main(int argc,char** argv){
                         if(writeImage(dir.filePath(name),entry.baseline,entry.w,entry.h))
                             entry.image=name;
                     }
+                    auto& luma=cases[lumaIndex];
+                    if(!luma.baseline.empty()){
+                        const QString name=QStringLiteral("images/full_scene%1_cam%2_%3x%4_lumatrace.png")
+                            .arg(sceneIndex).arg(cameraIndex).arg(luma.w).arg(luma.h);
+                        if(writeImage(dir.filePath(name),luma.baseline,luma.w,luma.h))
+                            luma.image=name;
+                    }
                 }
                 report(system,cases,side,dir,false);
             }
@@ -647,8 +691,8 @@ int main(int argc,char** argv){
                <<" : "<<cfg.rounds<<" series de mesure par nombre de threads\n";
             out.flush();
             const auto& preset=runtime.cameras.first();
-            const int cpuW=cfg.simulation?96:320;
-            const int cpuH=cfg.simulation?54:180;
+            const int cpuW=cfg.simulation?96:(cfg.lightingAudit?1000:320);
+            const int cpuH=cfg.simulation?54:(cfg.lightingAudit?680:180);
             const auto cam=m3d::v16::makeCamera(preset,cpuW,cpuH);
             std::vector<uint32_t> pixels;
             std::atomic<uint64_t> generation{1};
