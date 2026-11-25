@@ -27,7 +27,9 @@ cbuffer Params : register(b0) {
  uint4 PreservedLayers[64];
 };
 static const float kPi=3.14159265359;
-static const uint kProbeRayCount=8;
+static const uint kProbeCoarseRayCount=2;
+static const uint kProbeRefineRayCount=4;
+static const uint kProbeTotalRayCount=kProbeCoarseRayCount+kProbeRefineRayCount;
 bool bounds(Node n,float3 o,float3 invD,float maxT,out float nearT){
  float3 a=(n.lo-o)*invD,b=(n.hi-o)*invD,lo=min(a,b),hi=max(a,b);
  nearT=max(max(lo.x,lo.y),max(lo.z,0));return min(min(hi.x,hi.y),min(hi.z,maxT))>=nearT;}
@@ -79,26 +81,40 @@ float3 directAtHit(uint id,float3 p,float3 n){
 [numthreads(64,1,1)] void CSBuildProbeVolume(uint3 tid:SV_DispatchThreadID){
  uint id=tid.x;uint nx=ProbeDims.x,ny=ProbeDims.y,nz=ProbeDims.z;if(id>=nx*ny*nz)return;
  uint3 cell=uint3(id%nx,(id/nx)%ny,id/(nx*ny));float3 uv=(float3(cell)+.5)/float3(nx,ny,nz);
+ const bool refine=ProbeDims.w!=0;
+ float4 coarse=0;
+ if(refine){coarse=ProbeOutput[cell];if(coarse.a<=0.0)return;}
  float3 origin=ProbeOrigin.xyz+uv*ProbeSpan.xyz;float3 sum=0;uint hits=0;
  float rotation=(float)(id*747796405u+2891336453u)*2.3283064365386963e-10;
- [unroll]for(uint s=0;s<kProbeRayCount;++s){
-  float y=1-2*((s+.5)/kProbeRayCount);float r=sqrt(max(0,1-y*y));float phi=2*kPi*frac(rotation+s*.61803398875);
+ const uint sampleCount=refine?kProbeRefineRayCount:kProbeCoarseRayCount;
+ [unroll]for(uint s=0;s<sampleCount;++s){
+  // Interleave coarse and refinement samples across the same deterministic
+  // six-direction set so the first pass covers both hemispheres.
+  uint sampleIndex=refine?(s==0?0u:s==1?2u:s==2?3u:5u):(s==0?1u:4u);
+  float y=1-2*((sampleIndex+.5)/kProbeTotalRayCount);
+  float r=sqrt(max(0,1-y*y));float phi=2*kPi*frac(rotation+sampleIndex*.61803398875);
   float3 d=float3(cos(phi)*r,y,sin(phi)*r);uint hit;float t,u,v;
   if(!traceClosest(origin,d,1.e20,0xffffffff,hit,t,u,v))continue;
   float3 p=origin+d*t,n=normalAtHit(hit,u,v,d);float facing=saturate(dot(n,-d));if(facing<=0)continue;
-  // The raster shader lights surfaces with a broad ambient fill as well as
-  // explicit lamps and sun. Reuse a restrained equivalent here: otherwise
-  // surfaces with no point-light/sun hit (notably the pool-hall fresco) add no
-  // outgoing radiance and cannot tint nearby receivers. Keep the textured
-  // albedo lookup below; this is one cached diffuse transfer, not path tracing.
+  // The raster shader lights surfaces with ambient fill, lamps and sun.
+  // Record the hit surface's outgoing energy and its receiver zone.
   float3 irradiance=DirectRadiance[hit].rgb+sunlight(hit,p,n)+float3(.24,.24,.24);
   if(max(irradiance.x,max(irradiance.y,irradiance.z))<=1.e-5)continue;
   sum+=albedoAtHit(hit,u,v)*irradiance*facing;++hits;
  }
- // Uniform sphere samples approximate the diffuse hemisphere irradiance;
- // the modest scale restores the missing hemisphere energy without path tracing.
- float3 bounce=sum*(4.0/kProbeRayCount);
- ProbeOutput[cell]=float4(bounce,(float)hits/kProbeRayCount);
+ if(!refine){
+  // Coarse estimate; alpha stores the lit-hit fraction for the refinement gate.
+  ProbeOutput[cell]=float4(sum*(4.0/kProbeCoarseRayCount),
+                           (float)hits/kProbeCoarseRayCount);
+ }else{
+  // Restore the coarse sum from its normalized estimate, add the local samples,
+  // then write one combined estimate for all six directions.
+  float coarseHits=coarse.a*(float)kProbeCoarseRayCount;
+  float coarseWeight=(float)kProbeCoarseRayCount*.25;
+  float3 total=coarse.rgb*coarseWeight+sum;
+  ProbeOutput[cell]=float4(total*(4.0/kProbeTotalRayCount),
+                           (coarseHits+(float)hits)/(float)kProbeTotalRayCount);
+ }
 }
 )HLSL";
 }
