@@ -23,7 +23,7 @@ Le script vérifie la présence et la résolution des quatre PNG. Il calcule :
 - alpha transparent, alpha partiel et couverture opaque par backend ;
 - luminance Rec.709 affichée et linéaire sur les pixels opaques de chaque image ;
 - luminance sur le masque commun, constitué des pixels opaques dans les quatre PNG ;
-- proportion de pixels avec un canal proche de l'écrêtage.
+- proportion de pixels opaques avec un canal proche de l'écrêtage.
 
 Le masque commun évite de compter le ciel transparent DX11/LumaTrace comme du noir.
 Les résultats ne sont pas une calibration photométrique, mais une comparaison
