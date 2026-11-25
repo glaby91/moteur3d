@@ -469,7 +469,7 @@ $materialControl = New-PoolTransmissionControl $sceneRoot $controlSceneRoot 0.0
 $controlOutBase = Join-Path $campaign.FullName "control-transmission-water"
 New-Item -ItemType Directory -Force -Path $controlOutBase | Out-Null
 Write-Host ""
-Write-Host "Niveaux testés: référence $($materialControl.baseline.transmission), contrôle 0.0, contrôle intermédiaire 0.5; IOR/rugosité inchangés"
+Write-Host "Niveaux testés: référence $($materialControl.baseline.transmission), contrôle 0.5, contrôle 0.01 et contrôle 0.0; IOR/rugosité inchangés"
 & $exe (Join-Path $controlSceneRoot "scene.json") $controlOutBase --lighting-audit --raster-msaa 1 --raster-anisotropy 8 --raster-lod-percent 100 --raster-culling 1 --raster-lod-enabled 0
 if ($LASTEXITCODE -ne 0) { throw "Le rendu témoin matériau a échoué (code $LASTEXITCODE)." }
 $controlCampaign = Get-ChildItem -LiteralPath $controlOutBase -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
@@ -579,7 +579,7 @@ $controlRoiRows = foreach ($region in $controlRegionMeasure.regions) {
 $controlRoiRows | Export-Csv -LiteralPath (Join-Path $controlCampaign.FullName "luminosity_regions.csv") -NoTypeInformation -Encoding UTF8
 $controlDeltaRows | Export-Csv -LiteralPath (Join-Path $campaign.FullName "material_control_comparison.csv") -NoTypeInformation -Encoding UTF8
 
-# Midpoint transmission control for a compact three-level material response sweep.
+# Transmission controls at 0.5 and 0.01 complete a four-level response sweep including baseline and zero.
 $midTransmission = 0.5
 $midSceneRoot = Join-Path $Root "benchmark-civic-control-transmission-0_5"
 $midMaterialControl = New-PoolTransmissionControl $sceneRoot $midSceneRoot $midTransmission
@@ -636,7 +636,64 @@ $midRoiRows = foreach ($region in $midRegionMeasure.regions) {
     }
 }
 $midRoiRows | Export-Csv -LiteralPath (Join-Path $midCampaign.FullName "luminosity_regions.csv") -NoTypeInformation -Encoding UTF8
-@($controlDeltaRows) + @($midDeltaRows) | Export-Csv -LiteralPath (Join-Path $campaign.FullName "transmission_sweep.csv") -NoTypeInformation -Encoding UTF8
+# Near-zero positive transmission control to determine whether GPU behavior changes only at exactly zero.
+$epsilonTransmission = 0.01
+$epsilonSceneRoot = Join-Path $Root "benchmark-civic-control-transmission-0_01"
+$epsilonMaterialControl = New-PoolTransmissionControl $sceneRoot $epsilonSceneRoot $epsilonTransmission
+$epsilonOutBase = Join-Path $campaign.FullName "control-transmission-0_01"
+New-Item -ItemType Directory -Force -Path $epsilonOutBase | Out-Null
+Write-Host ""
+Write-Host "Contrôle faible transmission: cse_pool_water $($materialControl.baseline.transmission) -> $epsilonTransmission"
+& $exe (Join-Path $epsilonSceneRoot "scene.json") $epsilonOutBase --lighting-audit --raster-msaa 1 --raster-anisotropy 8 --raster-lod-percent 100 --raster-culling 1 --raster-lod-enabled 0
+if ($LASTEXITCODE -ne 0) { throw "Le rendu témoin transmission 0.01 a échoué (code $LASTEXITCODE)." }
+$epsilonCampaign = Get-ChildItem -LiteralPath $epsilonOutBase -Directory | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if (!$epsilonCampaign) { throw "Le moteur n'a pas créé de dossier de résultats pour transmission 0.01." }
+$epsilonImages = Join-Path $epsilonCampaign.FullName "images"
+foreach ($name in $required.Keys) {
+    $epsilonImagePath = Join-Path $epsilonImages $required[$name]
+    if (!(Test-Path -LiteralPath $epsilonImagePath -PathType Leaf)) { throw "Image transmission 0.01 $name absente : $epsilonImagePath" }
+}
+$epsilonData = @()
+foreach ($name in $names) {
+    $epsilonData += [LumaAudit]::Read($name,(Join-Path $epsilonImages $required[$name]))
+}
+$epsilonEngine = Get-Content -LiteralPath (Join-Path $epsilonCampaign.FullName "summary.json") -Raw | ConvertFrom-Json
+if ([string]$epsilonEngine.cases[0].camera -ne [string]$engine.cases[0].camera) {
+    throw "La caméra du rendu transmission 0.01 diffère de la référence. Comparaison annulée."
+}
+$epsilonMeasure = [LumaAudit]::ComputeJson($epsilonData) | ConvertFrom-Json
+$epsilonRegionMeasure = [LumaRegionAudit]::ComputeJson($epsilonData,"DX11") | ConvertFrom-Json
+$epsilonPairedMeasure = [LumaRegionAudit]::ComputePairedJson($data,$epsilonData) | ConvertFrom-Json
+$epsilonDeltaRows = Convert-PairedMaterialRows $epsilonPairedMeasure $epsilonTransmission $epsilonMaterialControl.baseline.transmission
+$epsilonReport = [ordered]@{
+    variant = "same scene/camera/lights/material; only cse_pool_water transmission set to 0.01"
+    material = $epsilonMaterialControl
+    camera = $epsilonEngine.cases[0].camera
+    engineSummary = $epsilonEngine
+    luminance = $epsilonMeasure
+    roiReference = "DX11; each ROI is compared against the matching DX11 ROI"
+    regionalLuminance = $epsilonRegionMeasure
+    pairedMaskMethod = $epsilonPairedMeasure.mask
+    baselineToControlDelta = @($epsilonDeltaRows)
+}
+$epsilonReport | ConvertTo-Json -Depth 16 | Set-Content -LiteralPath (Join-Path $epsilonCampaign.FullName "material_control_audit.json") -Encoding UTF8
+$epsilonMeasure.backends | Export-Csv -LiteralPath (Join-Path $epsilonCampaign.FullName "luminosity_audit.csv") -NoTypeInformation -Encoding UTF8
+$epsilonDeltaRows | Export-Csv -LiteralPath (Join-Path $epsilonCampaign.FullName "material_control_comparison.csv") -NoTypeInformation -Encoding UTF8
+$epsilonRoiRows = foreach ($region in $epsilonRegionMeasure.regions) {
+    foreach ($backend in $region.backends) {
+        [pscustomobject]@{
+            region = $region.name; x = $region.x; y = $region.y; width = $region.width; height = $region.height
+            commonOpaquePixels = $region.commonOpaquePixels; commonOpaqueCoveragePct = $region.commonOpaqueCoveragePct
+            backend = $backend.backend; meanDisplayY_0_255 = $backend.meanDisplayY_0_255
+            meanLinearY_0_1 = $backend.meanLinearY_0_1; p50LinearY_0_1 = $backend.p50LinearY_0_1
+            p95LinearY_0_1 = $backend.p95LinearY_0_1
+            deltaDisplayPctVsDX11SameRegion = $backend.deltaDisplayPctVsReference
+            deltaLinearPctVsDX11SameRegion = $backend.deltaLinearPctVsReference
+        }
+    }
+}
+$epsilonRoiRows | Export-Csv -LiteralPath (Join-Path $epsilonCampaign.FullName "luminosity_regions.csv") -NoTypeInformation -Encoding UTF8
+@($controlDeltaRows) + @($epsilonDeltaRows) + @($midDeltaRows) | Export-Csv -LiteralPath (Join-Path $campaign.FullName "transmission_sweep.csv") -NoTypeInformation -Encoding UTF8
 Write-Host ""
 Write-Host "Mesures luminance (masque opaque commun, scène originale):"
 $measure.backends | Format-Table backend,ownOpaquePct,commonOpaqueMeanDisplayY_0_255,commonOpaqueMeanLinearY_0_1,alphaZeroPct -AutoSize
