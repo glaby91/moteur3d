@@ -262,14 +262,14 @@ public:
             error=L"Le BVH4 LumaTrace n’a pas été préparé pour cette scène.";return false;
         }
         if(!ensureDevice(error)||!ensureScene(scene,error,lumaBvh)||!ensureShadow(shadows,error)||
-           (hybrid&&!ensureProbeVolume(scene,error))||
-           (hybrid&&!ensureGiHours(error))||
+           (hybrid&&!lumaBvh&&!ensureProbeVolume(scene,error))||
+           (hybrid&&!lumaBvh&&!ensureGiHours(error))||
            !ensureTargets(w,h,quality.msaaSamples,error)||
            (multires&&!ensureMultires(w,h,error))||
            !ensureAnisotropy(quality.anisotropy,error)||
            (nativeHwnd?!ensureSwapchain(nativeHwnd,w,h,error):
                         !ensureReadback(depth,w,h,error)))return false;
-        if(lumaBvh&&!lumaTraceCompute_.prepare(device_.Get(),*lumaBvh,lumaCpuScene_,error))return false;
+        if(lumaBvh&&!lumaTraceCompute_.prepare(device_.Get(),*lumaBvh,lumaCpuScene_,scene,error))return false;
         const unsigned slotIndex=nextReadbackSlot_;
         ReadbackSlot& slot=readbackSlots_[slotIndex];
         slot.cpuStarted=started;
@@ -298,11 +298,13 @@ public:
             cb.indirectSky[0]=ir.sky.x;cb.indirectSky[1]=ir.sky.y;cb.indirectSky[2]=ir.sky.z;
             cb.indirectBounce[0]=ir.bounce.x;cb.indirectBounce[1]=ir.bounce.y;cb.indirectBounce[2]=ir.bounce.z;
             cb.indirectSun[0]=ir.sun.x;cb.indirectSun[1]=ir.sun.y;cb.indirectSun[2]=ir.sun.z;
-            cb.probeOrigin[0]=probeOrigin_.x;cb.probeOrigin[1]=probeOrigin_.y;cb.probeOrigin[2]=probeOrigin_.z;
-            cb.probeInvSpan[0]=probeInvSpan_.x;cb.probeInvSpan[1]=probeInvSpan_.y;cb.probeInvSpan[2]=probeInvSpan_.z;
+            const V origin=lumaBvh?lumaTraceCompute_.probeOrigin():probeOrigin_;
+            const V invSpan=lumaBvh?lumaTraceCompute_.probeInvSpan():probeInvSpan_;
+            cb.probeOrigin[0]=origin.x;cb.probeOrigin[1]=origin.y;cb.probeOrigin[2]=origin.z;
+            cb.probeInvSpan[0]=invSpan.x;cb.probeInvSpan[1]=invSpan.y;cb.probeInvSpan[2]=invSpan.z;
             cb.hybridControls[0]=1.f;
             cb.hybridControls[1]=giHourMix_;
-            cb.hybridControls[3]=hasBakedGi_?1.f:0.f;
+            cb.hybridControls[3]=lumaBvh?2.f:(hasBakedGi_?1.f:0.f);
         }
         cb.hybridControls[2]=tone?1.f:0.f;
         cb.colorControls[0]=balanced?1.f:0.f;
@@ -469,7 +471,8 @@ public:
         context_->Unmap(skyConstants_.Get(),0);
         const float clear[4]={cb.sky[0],cb.sky[1],cb.sky[2],1.f};
         if(slot.queryReady){context_->Begin(slot.disjoint.Get());context_->End(slot.start.Get());}
-        if(lumaBvh&&!lumaTraceCompute_.dispatch(context_.Get(),verticesSrv_.Get(),indicesSrv_.Get(),scene,error))return false;
+        if(lumaBvh&&!lumaTraceCompute_.dispatch(context_.Get(),verticesSrv_.Get(),indicesSrv_.Get(),scene,
+            albedo_.Get(),preservedAlbedo_.Get(),sampler_.Get(),preservedTextureLayers_,hybrid,error))return false;
         UINT submittedVertices=0,submittedBoxInstances=0;
         uint64_t drawCalls=0,submittedEllipseTriangles=0,submittedEllipseInstances=0;
         uint64_t submittedFoliageTriangles=0,submittedFoliageInstances=0;
@@ -520,8 +523,8 @@ public:
             context_->VSSetConstantBuffers(0,1,&cbuff);
             context_->PSSetConstantBuffers(0,1,&cbuff);
             ID3D11ShaderResourceView* srvs[]={albedo_.Get(),shadowSrv_.Get(),
-                roughness_.Get(),normal_.Get(),hybrid?probeSrv_.Get():nullptr,
-                hybrid?(hasBakedGi_?probeNextSrv_.Get():probeSrv_.Get()):nullptr,
+                roughness_.Get(),normal_.Get(),hybrid?(lumaBvh?lumaTraceCompute_.probeSrv():probeSrv_.Get()):nullptr,
+                hybrid?(lumaBvh?lumaTraceCompute_.probeSrv():(hasBakedGi_?probeNextSrv_.Get():probeSrv_.Get())):nullptr,
                 preservedAlbedo_?preservedAlbedo_.Get():albedo_.Get(),
                 lumaBvh?lumaTraceCompute_.radianceSrv():nullptr};
             context_->PSSetShaderResources(0,8,srvs);
@@ -1332,6 +1335,7 @@ private:
         foliageInstances_.Reset();
         for(auto& buffer:foliageVertices_)buffer.Reset();
         foliageVertexCounts_.fill(0);foliage_.clear();foliageInstanceCount_=0;
+        lumaTraceCompute_.reset();
         lumaCpuScene_={};
         if(lumaTrace&&!prepareLumaTraceCpuScene(scene,*lumaBvh,lumaCpuScene_,error))
             return false;

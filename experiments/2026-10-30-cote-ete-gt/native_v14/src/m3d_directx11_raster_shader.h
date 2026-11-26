@@ -196,7 +196,7 @@ inline constexpr char kShaderPart2[] = R"(
         ambientEnergy=lerp(.055,.335,diffuseTerms.w)*lerp(.77,1.03,hemisphere);
         sunEnergy=.88*diffuse*sunlightVisibility*diffuseTerms.w;
     }
-    float3 color = base*(ambientEnergy+(peripheralControls.w>.5?0.0:sunEnergy))
+    float3 color = base*(ambientEnergy+sunEnergy)
                  + base*materialGlow[i.mat].rgb*materialGlow[i.mat].a;
     if(peripheralControls.w>.5 && i.primitiveId!=0xffffffff)
         color+=base*lumaTriangleRadiance[i.primitiveId].rgb;
@@ -275,6 +275,9 @@ inline constexpr char kShaderPart2[] = R"(
             const float4 nextProbe=indirectProbesNext.SampleLevel(probeSampler,position,0);
             probe=lerp(probe,nextProbe,hybridControls.y);
         }
+        if(hybridControls.w>1.5){
+            color+=base*max(probe.rgb,0.0);
+        }else{
         float skyVisibility=saturate(probe.a);
         float upward=saturate(normal.y*.5+.5);
         float existingAmbient=ambientEnergy;
@@ -303,6 +306,7 @@ inline constexpr char kShaderPart2[] = R"(
         // gently tint only the direct contribution at warm solar hours.
         float sunContribution=diffuseTerms.z*diffuse*shadowFactor*diffuseTerms.w;
         color+=base*sunContribution*(indirectSun.rgb-1.0)*.40;
+        }
     }
     if(hybridControls.z>0.5){
         // Conservative display-referred shoulder, independently toggled.

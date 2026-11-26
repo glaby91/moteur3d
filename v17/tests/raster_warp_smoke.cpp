@@ -74,8 +74,20 @@ int main(int argc,char** argv){
             return 1;
         }
     }
+    m3d::setRasterHybridLightingEnabled(true);
+    std::vector<uint32_t> probeReference;
+    for(bool enabled:{false,true}){
+        if(_putenv_s("M3D_V17_STATIC_GEOMETRY_PREP",enabled?"1":"0"))return 1;
+        std::vector<uint32_t> cold,warm;m3d::Stats stats{};
+        if(!m3d::renderLumaTracePreview(runtime.renderScene,runtime.lumaTraceBvh4,shadow,cam,256,144,cold,stats,error)||
+           !m3d::renderLumaTracePreview(runtime.renderScene,runtime.lumaTraceBvh4,shadow,cam,256,144,warm,stats,error)||
+           cold.size()!=256u*144u||cold!=warm||stats.geometryPreparationEnabled!=enabled||(enabled&&cold!=probeReference)){
+            qCritical()<<"LumaTrace probe cold/warm or indexed parity failed"<<QString::fromStdWString(error);return 1;}
+        if(!enabled)probeReference=cold;
+    }
+    m3d::setRasterHybridLightingEnabled(false);
     _putenv_s("M3D_V17_STATIC_GEOMETRY_PREP","");
-    qInfo()<<"DX11 and LumaTrace pixels identical with geometry preparation off/on";
+    qInfo()<<"DX11 and LumaTrace pixels identical with geometry preparation off/on, including probes";
     // Upload cache must be bit-exact against a forced GPU re-upload, even
     // after an in-place shadow change at the same resolution.
     if(_putenv_s("M3D_V17_DISABLE_SHADOW_UPLOAD_CACHE","1")!=0){

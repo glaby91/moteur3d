@@ -184,7 +184,7 @@
     },
     {
       "id": "d3d11_raster_shader",
-      "revision": "002",
+      "revision": "003",
       "engines": [
         "v16",
         "v17"
@@ -236,7 +236,7 @@
     },
     {
       "id": "d3d11_raster",
-      "revision": "007",
+      "revision": "009",
       "engines": [
         "v16",
         "v17"
@@ -275,13 +275,13 @@
     },
     {
       "id": "lumatrace_gpu_compute",
-      "revision": "007",
+      "revision": "009",
       "engines": [
         "v16",
         "v17"
       ],
       "optional": true,
-      "description": "DX11 GPU compute resources, shader compilation and dispatch; consumes CPU-prepared LumaTrace scene data",
+      "description": "DX11 GPU direct triangle radiance and two-pass spatial probe GI (restored from LumaTrace-008), supports indexed geometry.",
       "dependencies": [
         "lumatrace_cpu"
       ],

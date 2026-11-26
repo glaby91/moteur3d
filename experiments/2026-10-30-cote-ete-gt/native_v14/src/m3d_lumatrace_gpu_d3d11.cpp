@@ -7,6 +7,8 @@
 #include <d3dcompiler.h>
 #include <algorithm>
 #include <cstring>
+#include <cmath>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <string>
@@ -16,8 +18,10 @@
 namespace m3d { namespace lumatrace_gpu {
 
 void Compute::reset() noexcept {
-    bvhBuffer_.Reset();orderBuffer_.Reset();albedoBuffer_.Reset();radianceBuffer_.Reset();paramsBuffer_.Reset();
-    bvhSrv_.Reset();orderSrv_.Reset();albedoSrv_.Reset();radianceSrv_.Reset();radianceUav_.Reset();shader_.Reset();
+    bvhBuffer_.Reset();orderBuffer_.Reset();radianceBuffer_.Reset();paramsBuffer_.Reset();
+    bvhSrv_.Reset();orderSrv_.Reset();radianceSrv_.Reset();radianceUav_.Reset();shader_.Reset();
+    probeSrv_.Reset();coarseSrv_.Reset();probeUav_.Reset();coarseUav_.Reset();
+    probeTexture_.Reset();coarseTexture_.Reset();probeShader_.Reset();probeCacheValid_=false;
     triangleCount_=nodeCount_=orderCount_=0;
     sceneIdentity_=sceneRevision_=0;
     radianceCacheValid_=false;
@@ -49,17 +53,17 @@ bool Compute::makeSrv(ID3D11Device* device,ID3D11Buffer* buffer,UINT count,
 }
 
 bool Compute::prepare(ID3D11Device* device,const LumaTraceBvh4& bvh,
-                      const LumaTraceCpuScene& cpuScene,std::wstring& error) {
+                      const LumaTraceCpuScene& cpuScene,const Scene& scene,std::wstring& error) {
     const uint32_t triangleCount=cpuScene.triangleCount;
     if(!device||!triangleCount||bvh.nodes.empty()||
        bvh.primitiveCount!=cpuScene.primitiveOrder.size()||
-       cpuScene.triangleAlbedo.size()!=triangleCount){
+       scene.root<0||size_t(scene.root)>=scene.node.size()){
         error=L"LumaTrace BVH4 : géométrie ou table de primitives incompatible.";
         return false;
     }
     if(sceneIdentity_==cpuScene.sceneIdentity&&sceneRevision_==cpuScene.sceneRevision&&
-       triangleCount_==triangleCount&&bvhSrv_&&orderSrv_&&albedoSrv_&&radianceSrv_&&radianceUav_&&
-       shader_&&paramsBuffer_)return true;
+       triangleCount_==triangleCount&&bvhSrv_&&orderSrv_&&radianceSrv_&&radianceUav_&&
+       shader_&&probeShader_&&probeSrv_&&paramsBuffer_)return true;
 
     reset();
     if(!makeStructuredBuffer(device,bvh.nodes.data(),bvh.nodes.size(),
@@ -67,8 +71,6 @@ bool Compute::prepare(ID3D11Device* device,const LumaTraceBvh4& bvh,
             D3D11_USAGE_IMMUTABLE,bvhBuffer_)||
        !makeStructuredBuffer(device,cpuScene.primitiveOrder.data(),cpuScene.primitiveOrder.size(),sizeof(uint32_t),
             D3D11_BIND_SHADER_RESOURCE,D3D11_USAGE_IMMUTABLE,orderBuffer_)||
-       !makeStructuredBuffer(device,cpuScene.triangleAlbedo.data(),cpuScene.triangleAlbedo.size(),sizeof(std::array<float,4>),
-            D3D11_BIND_SHADER_RESOURCE,D3D11_USAGE_IMMUTABLE,albedoBuffer_)||
        !makeStructuredBuffer(device,nullptr,triangleCount,16,
             D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS,
             D3D11_USAGE_DEFAULT,radianceBuffer_)){
@@ -78,7 +80,6 @@ bool Compute::prepare(ID3D11Device* device,const LumaTraceBvh4& bvh,
     }
     if(!makeSrv(device,bvhBuffer_.Get(),UINT(bvh.nodes.size()),bvhSrv_)||
        !makeSrv(device,orderBuffer_.Get(),UINT(cpuScene.primitiveOrder.size()),orderSrv_)||
-       !makeSrv(device,albedoBuffer_.Get(),triangleCount,albedoSrv_)||
        !makeSrv(device,radianceBuffer_.Get(),triangleCount,radianceSrv_)){
         error=L"Création des vues GPU LumaTrace impossible.";
         reset();
@@ -94,30 +95,39 @@ bool Compute::prepare(ID3D11Device* device,const LumaTraceBvh4& bvh,
         return false;
     }
 
-    ComPtr<ID3DBlob> bytecode,diagnostics;
-    const HRESULT compile=D3DCompile(lumatrace_detail::kComputeShader,
-        sizeof(lumatrace_detail::kComputeShader)-1,"m3d_lumatrace_compute",nullptr,nullptr,
-        "CSShadeTriangles","cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,
-        &bytecode,&diagnostics);
-    if(FAILED(compile)){
-        error=L"Compilation du compute shader LumaTrace impossible (HRESULT "+
-              std::to_wstring(uint32_t(compile))+L")";
-        if(diagnostics&&diagnostics->GetBufferPointer()){
-            error+=L": ";
-            const char* message=static_cast<const char*>(diagnostics->GetBufferPointer());
-            const size_t length=std::min<size_t>(diagnostics->GetBufferSize(),1024);
-            for(size_t i=0;i<length;++i)
-                error.push_back(message[i]>=32&&message[i]<127?wchar_t(message[i]):L' ');
+    auto compileShader=[&](const char* entry,ComPtr<ID3D11ComputeShader>& output){
+        ComPtr<ID3DBlob> code,diagnostics;
+        HRESULT hr=D3DCompile(lumatrace_detail::kComputeShader,sizeof(lumatrace_detail::kComputeShader)-1,
+            "m3d_lumatrace_compute",nullptr,nullptr,entry,"cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&code,&diagnostics);
+        if(FAILED(hr)){
+            error=L"Compilation LumaTrace impossible (HRESULT "+std::to_wstring(uint32_t(hr))+L")";
+            if(diagnostics&&diagnostics->GetBufferPointer()){
+                error+=L": ";const char* msg=static_cast<const char*>(diagnostics->GetBufferPointer());
+                for(size_t i=0;i<std::min<size_t>(diagnostics->GetBufferSize(),1024);++i)
+                    error.push_back(msg[i]>=32&&msg[i]<127?wchar_t(msg[i]):L' ');
+            }
+            return false;
         }
-        reset();
-        return false;
+        hr=device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&output);
+        if(FAILED(hr)){error=L"Création du shader LumaTrace impossible.";return false;}return true;
+    };
+    if(!compileShader("CSShadeTriangles",shader_)||!compileShader("CSBuildProbeVolume",probeShader_)){reset();return false;}
+    D3D11_TEXTURE3D_DESC td{};td.Width=12;td.Height=5;td.Depth=12;td.MipLevels=1;
+    td.Format=DXGI_FORMAT_R32G32B32A32_FLOAT;td.Usage=D3D11_USAGE_DEFAULT;
+    td.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_UNORDERED_ACCESS;
+    auto volume=[&](ComPtr<ID3D11Texture3D>& texture,ComPtr<ID3D11ShaderResourceView>& srv,
+                    ComPtr<ID3D11UnorderedAccessView>& uav){
+        return SUCCEEDED(device->CreateTexture3D(&td,nullptr,&texture))&&
+            SUCCEEDED(device->CreateShaderResourceView(texture.Get(),nullptr,&srv))&&
+            SUCCEEDED(device->CreateUnorderedAccessView(texture.Get(),nullptr,&uav));
+    };
+    if(!volume(probeTexture_,probeSrv_,probeUav_)||!volume(coarseTexture_,coarseSrv_,coarseUav_)){
+        error=L"Allocation des volumes de sondes LumaTrace impossible.";reset();return false;
     }
-    if(FAILED(device->CreateComputeShader(bytecode->GetBufferPointer(),
-                                          bytecode->GetBufferSize(),nullptr,&shader_))){
-        error=L"Création du compute shader LumaTrace impossible.";
-        reset();
-        return false;
-    }
+    const Node& root=scene.node[size_t(scene.root)];
+    const V size=root.mx-root.mn;
+    const V padding={std::max(1.f,size.x*.01f),std::max(1.f,size.y*.03f),std::max(1.f,size.z*.01f)};
+    origin_=root.mn-padding;span_=size+padding*2.f;
     D3D11_BUFFER_DESC paramsDesc{};
     paramsDesc.ByteWidth=sizeof(Params);
     paramsDesc.Usage=D3D11_USAGE_DYNAMIC;
@@ -137,155 +147,71 @@ bool Compute::prepare(ID3D11Device* device,const LumaTraceBvh4& bvh,
 }
 
 bool Compute::dispatch(ID3D11DeviceContext* context,ID3D11ShaderResourceView* vertexStream,
-                       ID3D11ShaderResourceView* indices,const Scene& scene,std::wstring& error) {
-    if(!context||!vertexStream||!shader_||!paramsBuffer_||!radianceUav_||
-       !bvhSrv_||!orderSrv_||!albedoSrv_||!triangleCount_){
-        error=L"Ressources compute LumaTrace non préparées.";
-        return false;
+                       ID3D11ShaderResourceView* indices,const Scene& scene,ID3D11ShaderResourceView* albedo,
+                       ID3D11ShaderResourceView* preserved,ID3D11SamplerState* sampler,
+                       const std::array<int32_t,256>& layers,bool probes,std::wstring& error) {
+    if(!context||!vertexStream||!shader_||!paramsBuffer_||!radianceUav_||!bvhSrv_||!orderSrv_||
+       !triangleCount_||(probes&&(!albedo||!sampler||!probeShader_))){
+        error=L"Ressources compute LumaTrace non préparées.";return false;
     }
-    if(scene.root<0||size_t(scene.root)>=scene.node.size()){
-        error=L"Racine BVH4 invalide.";
-        return false;
-    }
-    Params params{};
-    params.geometryLayout[0]=indices?1u:0u;
-    params.counts[0]=triangleCount_;
-    params.counts[1]=orderCount_;
-    params.counts[2]=nodeCount_;
-    const Node& root=scene.node[size_t(scene.root)];
-    const V center=(root.mn+root.mx)*.5f;
-    auto appendLight=[&](V position,float radius,float intensity,V color){
-        if(params.counts[3]>=64)return;
-        const uint32_t i=params.counts[3]++;
-        params.lights[i][0]=position.x;params.lights[i][1]=position.y;
-        params.lights[i][2]=position.z;params.lights[i][3]=radius;
-        params.colors[i][0]=color.x/255.f;params.colors[i][1]=color.y/255.f;
-        params.colors[i][2]=color.z/255.f;params.colors[i][3]=intensity;
+    Params p{};p.geometryLayout[0]=indices?1u:0u;
+    p.counts[0]=triangleCount_;p.counts[1]=orderCount_;p.counts[2]=nodeCount_;
+    p.probeDims[0]=12;p.probeDims[1]=5;p.probeDims[2]=12;
+    p.probeOrigin[0]=origin_.x;p.probeOrigin[1]=origin_.y;p.probeOrigin[2]=origin_.z;
+    p.probeSpan[0]=span_.x;p.probeSpan[1]=span_.y;p.probeSpan[2]=span_.z;
+    auto linear=[](float v){v=clampf(v/255.f,0.f,1.f);return v<=.04045f?v/12.92f:std::pow((v+.055f)/1.055f,2.4f);};
+    p.sunDirection[0]=sun.x;p.sunDirection[1]=sun.y;p.sunDirection[2]=sun.z;
+    p.sunColor[0]=linear(sunTint.x);p.sunColor[1]=linear(sunTint.y);p.sunColor[2]=linear(sunTint.z);
+    p.sunColor[3]=daylight*.88f;
+    for(auto& row:p.preservedLayers)std::fill(std::begin(row),std::end(row),0xffffffffu);
+    for(size_t m=0;m<layers.size();++m)if(layers[m]>=0)p.preservedLayers[m>>2][m&3]=uint32_t(layers[m]);
+    auto append=[&](const Light& light,float scale){
+        if(p.counts[3]>=64)return;const uint32_t i=p.counts[3]++;
+        p.lights[i][0]=light.p.x;p.lights[i][1]=light.p.y;p.lights[i][2]=light.p.z;p.lights[i][3]=light.radius;
+        p.colors[i][0]=linear(light.color.x);p.colors[i][1]=linear(light.color.y);p.colors[i][2]=linear(light.color.z);
+        p.colors[i][3]=light.intensity*scale;
     };
-    // Turn luminous scene surfaces into a small set of cached local-light proxies.
-    // The existing BVH shadow queries and four deterministic bounce samples then
-    // handle their contribution once per unchanged light state, not per frame.
-    struct EmitterCell {
-        V weightedPosition{}, color{};
-        float area=0.f, intensity=0.f;
+    for(const Light& l:pointLights)append(l,1.f);
+    for(const Light& l:scene.lights)if(l.exterior)append(l,lampFactor);
+    for(const Light& l:scene.lights)if(!l.exterior)append(l,.42f+.58f*(1.f-daylight));
+    std::array<uint32_t,sizeof(Params)/sizeof(uint32_t)> key{};std::memcpy(key.data(),&p,sizeof(p));
+    auto upload=[&](const Params& params){
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        if(FAILED(context->Map(paramsBuffer_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped))){
+            error=L"Upload constantes LumaTrace impossible.";return false;}
+        std::memcpy(mapped.pData,&params,sizeof(params));context->Unmap(paramsBuffer_.Get(),0);return true;
     };
-    auto emissionOf=[](const Material& material,V& color,float& intensity)->bool {
-        if(material.emissionAuthored) {
-            color=material.emissionColor;
-            intensity=material.emissionIntensity;
-            return intensity>0.f;
-        }
-        const std::string& name=material.name;
-        if(name=="cse_pool_strip") {
-            color={.83f,.91f,1.f};intensity=.24f;
-        } else if(name=="cse_neon_red") {
-            color={1.f,.09f,.035f};intensity=1.65f;
-        } else if(name=="cse_neon_cyan") {
-            color={.03f,.89f,1.f};intensity=1.5f;
-        } else if(name=="cse_neon_gold") {
-            color={1.f,.72f,.24f};intensity=1.35f;
-        } else if(name=="lamp") {
-            color={1.f,166.f/255.f,91.f/255.f};intensity=2.65f*lampFactor;
-        } else if(name=="led") {
-            color={1.f,217.f/255.f,165.f/255.f};intensity=1.33f*lampFactor;
-        } else if(name=="taillight") {
-            color={1.f,28.f/255.f,12.f/255.f};intensity=1.25f*lampFactor;
-        } else return false;
-        return intensity>0.f;
+    auto unbind=[&](){
+        ID3D11ShaderResourceView* ns[8]{};ID3D11UnorderedAccessView* nu[3]{};ID3D11SamplerState* sm[1]{};
+        context->CSSetUnorderedAccessViews(0,3,nu,nullptr);context->CSSetShaderResources(0,8,ns);
+        context->CSSetSamplers(0,1,sm);context->CSSetShader(nullptr,nullptr,0);
     };
-    using EmitterKey=std::tuple<uint32_t,int,int,int>;
-    std::map<EmitterKey,EmitterCell> emitterCells;
-    constexpr float emitterCellSize=4.f;
-    for(const Obj& object:scene.obj) {
-        if(object.kind!=Kind::Triangle || object.mat>=scene.mat.size())continue;
-        V sourceColor;float sourceIntensity=0.f;
-        if(!emissionOf(scene.mat[object.mat],sourceColor,sourceIntensity))continue;
-        const V areaVector=cross(object.b-object.a,object.c-object.a);
-        const float area=.5f*length(areaVector);
-        if(area<1.e-8f)continue;
-        const V centerPoint=(object.a+object.b+object.c)/3.f;
-        const EmitterKey key{
-            uint32_t(object.mat),
-            int(std::floor(centerPoint.x/emitterCellSize)),
-            int(std::floor(centerPoint.y/emitterCellSize)),
-            int(std::floor(centerPoint.z/emitterCellSize))};
-        EmitterCell& cell=emitterCells[key];
-        cell.weightedPosition=cell.weightedPosition+centerPoint*area;
-        cell.color=sourceColor;
-        cell.area+=area;
-        cell.intensity=sourceIntensity;
-    }
-    std::vector<std::pair<V,EmitterCell>> emitters;
-    emitters.reserve(emitterCells.size());
-    for(const auto& entry:emitterCells) {
-        const EmitterCell& cell=entry.second;
-        if(cell.area>0.f)emitters.push_back({cell.weightedPosition/cell.area,cell});
-    }
-    // Evenly retain at most sixteen samples along long strips. The scene's
-    // emissive meshes stay intact; only their low-cost lighting proxies are limited.
-    const size_t emitterCount=std::min<size_t>(16,emitters.size());
-    for(size_t i=0;i<emitterCount;++i) {
-        const size_t sourceIndex=emitterCount==1?0:
-            (i*(emitters.size()-1))/(emitterCount-1);
-        const auto& source=emitters[sourceIndex];
-        const float spread=std::sqrt(std::max(source.second.area,0.f));
-        const float radius=clampf(2.f+2.2f*spread,2.5f,8.f);
-        const float intensity=clampf(source.second.intensity*4.5f*
-            clampf(spread,.65f,1.5f),.5f,4.f);
-        appendLight(source.first,radius,intensity,source.second.color*255.f);
-    }
-    for(const Light& light:scene.lights)
-        appendLight(light.p,light.radius,light.intensity,light.color);
-
-    // Legacy world fixtures are used only when the scene has no authored source.
-    if(params.counts[3]==0) {
-        for(const Light& light:pointLights)
-            appendLight(light.p,light.radius,light.intensity,light.color);
-    }
-    if(params.counts[3]==0) {
-        appendLight(center+V{1.4f,.75f,0.f},12.f,1.15f,{31,158,255});
-        appendLight(center+V{-1.4f,.75f,0.f},12.f,1.15f,{255,99,26});
-    }
-
-    // Trace the same sun direction used by the raster renderer through the BVH.
-    // This makes LumaTrace's direct term produce real cast shadows and lets
-    // the one-bounce rays carry daylight into the pool and covered surfaces.
-    const float daylight=std::max(0.f,std::sin(3.14159265359f*
-        clampf((solarHour-6.f)/13.f,0.f,1.f)));
-    params.sunDirection[0]=sun.x;params.sunDirection[1]=sun.y;
-    params.sunDirection[2]=sun.z;params.sunDirection[3]=0.f;
-    params.sunColor[0]=1.f;params.sunColor[1]=.97f;params.sunColor[2]=.91f;
-    params.sunColor[3]=.58f*daylight;
-
-    std::array<uint32_t,sizeof(Params)/sizeof(uint32_t)> key{};
-    std::memcpy(key.data(),&params,sizeof(params));
-    if(radianceCacheValid_&&key==radianceKey_)return true;
-
-    D3D11_MAPPED_SUBRESOURCE mapped{};
-    if(FAILED(context->Map(paramsBuffer_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped))){
-        error=L"Upload constantes LumaTrace impossible.";
-        return false;
-    }
-    std::memcpy(mapped.pData,&params,sizeof(params));
-    context->Unmap(paramsBuffer_.Get(),0);
-    ID3D11ShaderResourceView* srvs[]={vertexStream,orderSrv_.Get(),bvhSrv_.Get(),albedoSrv_.Get(),indices};
-    ID3D11UnorderedAccessView* uavs[]={radianceUav_.Get()};
     ID3D11Buffer* constants[]={paramsBuffer_.Get()};
-    context->CSSetShader(shader_.Get(),nullptr,0);
-    context->CSSetShaderResources(0,5,srvs);
-    context->CSSetUnorderedAccessViews(0,1,uavs,nullptr);
-    context->CSSetConstantBuffers(0,1,constants);
-    context->Dispatch((triangleCount_+63)/64,1,1);
-    ID3D11UnorderedAccessView* noUavs[]={nullptr};
-    ID3D11ShaderResourceView* noSrvs[5]{};
-    context->CSSetUnorderedAccessViews(0,1,noUavs,nullptr);
-    context->CSSetShaderResources(0,5,noSrvs);
-    context->CSSetShader(nullptr,nullptr,0);
-    radianceKey_=key;
-    radianceCacheValid_=true;
-    return true;
+    if(!radianceCacheValid_||key!=radianceKey_){
+        if(!upload(p))return false;
+        ID3D11ShaderResourceView* noRadiance[]={nullptr};context->PSSetShaderResources(7,1,noRadiance);
+        ID3D11ShaderResourceView* srvs[8]={vertexStream,orderSrv_.Get(),bvhSrv_.Get(),nullptr,nullptr,nullptr,nullptr,indices};
+        ID3D11UnorderedAccessView* uavs[]={radianceUav_.Get()};
+        context->CSSetShader(shader_.Get(),nullptr,0);context->CSSetConstantBuffers(0,1,constants);
+        context->CSSetShaderResources(0,8,srvs);context->CSSetUnorderedAccessViews(0,1,uavs,nullptr);
+        context->Dispatch((triangleCount_+63)/64,1,1);unbind();
+        radianceKey_=key;radianceCacheValid_=true;probeCacheValid_=false;
+    }
+    if(probes&&!probeCacheValid_){
+        ID3D11ShaderResourceView* noProbes[2]{};context->PSSetShaderResources(4,2,noProbes);
+        for(uint32_t mode=0;mode<2;++mode){
+            p.probeDims[3]=mode;if(!upload(p)){unbind();return false;}
+            ID3D11ShaderResourceView* srvs[8]={vertexStream,orderSrv_.Get(),bvhSrv_.Get(),
+                radianceSrv_.Get(),albedo,preserved?preserved:albedo,mode?coarseSrv_.Get():nullptr,indices};
+            ID3D11UnorderedAccessView* uavs[3]={nullptr,mode?probeUav_.Get():nullptr,mode?nullptr:coarseUav_.Get()};
+            context->CSSetShader(probeShader_.Get(),nullptr,0);context->CSSetConstantBuffers(0,1,constants);
+            context->CSSetSamplers(0,1,&sampler);context->CSSetShaderResources(0,8,srvs);
+            context->CSSetUnorderedAccessViews(0,3,uavs,nullptr);
+            context->Dispatch((12u*5u*12u+63u)/64u,1,1);unbind();
+        }
+        probeCacheValid_=true;
+    }return true;
 }
-
 } } // namespace m3d::lumatrace_gpu
 
 #endif // _WIN32

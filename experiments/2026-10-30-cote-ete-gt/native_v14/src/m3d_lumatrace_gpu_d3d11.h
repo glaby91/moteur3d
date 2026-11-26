@@ -25,35 +25,43 @@ using Microsoft::WRL::ComPtr;
 class Compute {
 public:
     bool prepare(ID3D11Device* device,const LumaTraceBvh4& bvh,
-                 const LumaTraceCpuScene& cpuScene,std::wstring& error);
+                 const LumaTraceCpuScene& cpuScene,const Scene& scene,std::wstring& error);
     bool dispatch(ID3D11DeviceContext* context,ID3D11ShaderResourceView* vertexStream,
-                  ID3D11ShaderResourceView* indices,const Scene& scene,std::wstring& error);
+                  ID3D11ShaderResourceView* indices,const Scene& scene,ID3D11ShaderResourceView* albedo,
+                  ID3D11ShaderResourceView* preserved,ID3D11SamplerState* sampler,
+                  const std::array<int32_t,256>& layers,bool probes,std::wstring& error);
     ID3D11ShaderResourceView* radianceSrv() const noexcept { return radianceSrv_.Get(); }
 
+    ID3D11ShaderResourceView* probeSrv() const noexcept { return probeSrv_.Get(); }
+    V probeOrigin() const noexcept { return origin_; }
+    V probeInvSpan() const noexcept { return {1.f/span_.x,1.f/span_.y,1.f/span_.z}; }
+    void reset() noexcept;
 private:
     struct alignas(16) Params {
         uint32_t counts[4];
         float lights[64][4],colors[64][4];
-        float sunDirection[4],sunColor[4];
+        uint32_t probeDims[4];
+        float probeOrigin[4],probeSpan[4],sunDirection[4],sunColor[4];
+        uint32_t preservedLayers[64][4];
         uint32_t geometryLayout[4];
     };
-    static_assert(sizeof(Params)==2112,"LumaTrace HLSL constant packing");
+    static_assert(sizeof(Params)==3184,"LumaTrace HLSL constant packing");
 
     bool makeStructuredBuffer(ID3D11Device* device,const void* data,size_t count,
                               UINT stride,UINT bind,D3D11_USAGE usage,
                               ComPtr<ID3D11Buffer>& output);
     bool makeSrv(ID3D11Device* device,ID3D11Buffer* buffer,UINT count,
                  ComPtr<ID3D11ShaderResourceView>& output);
-    void reset() noexcept;
-
-    ComPtr<ID3D11Buffer> bvhBuffer_,orderBuffer_,albedoBuffer_,radianceBuffer_,paramsBuffer_;
-    ComPtr<ID3D11ShaderResourceView> bvhSrv_,orderSrv_,albedoSrv_,radianceSrv_;
-    ComPtr<ID3D11UnorderedAccessView> radianceUav_;
-    ComPtr<ID3D11ComputeShader> shader_;
+    ComPtr<ID3D11Buffer> bvhBuffer_,orderBuffer_,radianceBuffer_,paramsBuffer_;
+    ComPtr<ID3D11ShaderResourceView> bvhSrv_,orderSrv_,radianceSrv_,probeSrv_,coarseSrv_;
+    ComPtr<ID3D11UnorderedAccessView> radianceUav_,probeUav_,coarseUav_;
+    ComPtr<ID3D11Texture3D> probeTexture_,coarseTexture_;
+    V origin_{},span_{1,1,1};
+    ComPtr<ID3D11ComputeShader> shader_,probeShader_;
     std::array<uint32_t,sizeof(Params)/sizeof(uint32_t)> radianceKey_{};
     uint32_t triangleCount_=0,nodeCount_=0,orderCount_=0;
     uint64_t sceneIdentity_=0,sceneRevision_=0;
-    bool radianceCacheValid_=false;
+    bool radianceCacheValid_=false,probeCacheValid_=false;
 };
 
 } } // namespace m3d::lumatrace_gpu
