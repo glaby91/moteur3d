@@ -27,7 +27,7 @@ public:
     bool prepare(ID3D11Device* device,const LumaTraceBvh4& bvh,
                  const LumaTraceCpuScene& cpuScene,std::wstring& error);
     bool dispatch(ID3D11DeviceContext* context,ID3D11ShaderResourceView* vertexStream,
-                  const Scene& scene,std::wstring& error);
+                  ID3D11ShaderResourceView* indices,const Scene& scene,std::wstring& error);
     ID3D11ShaderResourceView* radianceSrv() const noexcept { return radianceSrv_.Get(); }
 
 private:
@@ -35,8 +35,9 @@ private:
         uint32_t counts[4];
         float lights[64][4],colors[64][4];
         float sunDirection[4],sunColor[4];
+        uint32_t geometryLayout[4];
     };
-    static_assert(sizeof(Params)==2096,"LumaTrace HLSL constant packing");
+    static_assert(sizeof(Params)==2112,"LumaTrace HLSL constant packing");
 
     bool makeStructuredBuffer(ID3D11Device* device,const void* data,size_t count,
                               UINT stride,UINT bind,D3D11_USAGE usage,

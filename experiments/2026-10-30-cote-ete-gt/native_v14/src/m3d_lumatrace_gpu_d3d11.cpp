@@ -137,7 +137,7 @@ bool Compute::prepare(ID3D11Device* device,const LumaTraceBvh4& bvh,
 }
 
 bool Compute::dispatch(ID3D11DeviceContext* context,ID3D11ShaderResourceView* vertexStream,
-                       const Scene& scene,std::wstring& error) {
+                       ID3D11ShaderResourceView* indices,const Scene& scene,std::wstring& error) {
     if(!context||!vertexStream||!shader_||!paramsBuffer_||!radianceUav_||
        !bvhSrv_||!orderSrv_||!albedoSrv_||!triangleCount_){
         error=L"Ressources compute LumaTrace non préparées.";
@@ -148,6 +148,7 @@ bool Compute::dispatch(ID3D11DeviceContext* context,ID3D11ShaderResourceView* ve
         return false;
     }
     Params params{};
+    params.geometryLayout[0]=indices?1u:0u;
     params.counts[0]=triangleCount_;
     params.counts[1]=orderCount_;
     params.counts[2]=nodeCount_;
@@ -267,18 +268,18 @@ bool Compute::dispatch(ID3D11DeviceContext* context,ID3D11ShaderResourceView* ve
     }
     std::memcpy(mapped.pData,&params,sizeof(params));
     context->Unmap(paramsBuffer_.Get(),0);
-    ID3D11ShaderResourceView* srvs[]={vertexStream,orderSrv_.Get(),bvhSrv_.Get(),albedoSrv_.Get()};
+    ID3D11ShaderResourceView* srvs[]={vertexStream,orderSrv_.Get(),bvhSrv_.Get(),albedoSrv_.Get(),indices};
     ID3D11UnorderedAccessView* uavs[]={radianceUav_.Get()};
     ID3D11Buffer* constants[]={paramsBuffer_.Get()};
     context->CSSetShader(shader_.Get(),nullptr,0);
-    context->CSSetShaderResources(0,4,srvs);
+    context->CSSetShaderResources(0,5,srvs);
     context->CSSetUnorderedAccessViews(0,1,uavs,nullptr);
     context->CSSetConstantBuffers(0,1,constants);
     context->Dispatch((triangleCount_+63)/64,1,1);
     ID3D11UnorderedAccessView* noUavs[]={nullptr};
-    ID3D11ShaderResourceView* noSrvs[]={nullptr,nullptr,nullptr,nullptr};
+    ID3D11ShaderResourceView* noSrvs[5]{};
     context->CSSetUnorderedAccessViews(0,1,noUavs,nullptr);
-    context->CSSetShaderResources(0,4,noSrvs);
+    context->CSSetShaderResources(0,5,noSrvs);
     context->CSSetShader(nullptr,nullptr,0);
     radianceKey_=key;
     radianceCacheValid_=true;

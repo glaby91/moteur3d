@@ -1,4 +1,5 @@
 #include "m3d_engine.h"
+#include "m3d_static_geometry_prepare.h"
 #include "m3d_gi_bake.h"
 #include "m3d_lumatrace_bvh4.h"
 #include "m3d_directx11_raster_shader.h"
@@ -468,7 +469,7 @@ public:
         context_->Unmap(skyConstants_.Get(),0);
         const float clear[4]={cb.sky[0],cb.sky[1],cb.sky[2],1.f};
         if(slot.queryReady){context_->Begin(slot.disjoint.Get());context_->End(slot.start.Get());}
-        if(lumaBvh&&!lumaTraceCompute_.dispatch(context_.Get(),verticesSrv_.Get(),scene,error))return false;
+        if(lumaBvh&&!lumaTraceCompute_.dispatch(context_.Get(),verticesSrv_.Get(),indicesSrv_.Get(),scene,error))return false;
         UINT submittedVertices=0,submittedBoxInstances=0;
         uint64_t drawCalls=0,submittedEllipseTriangles=0,submittedEllipseInstances=0;
         uint64_t submittedFoliageTriangles=0,submittedFoliageInstances=0;
@@ -507,6 +508,7 @@ public:
             }
             UINT stride=lumaBvh?UINT(sizeof(GpuVertexLuma)):UINT(sizeof(GpuVertex)),offset=0;
             ID3D11Buffer* vb=vertices_.Get();
+            context_->IASetIndexBuffer(indexBuffer_.Get(),DXGI_FORMAT_R32_UINT,0);
             context_->IASetInputLayout(lumaBvh?lumaLayout_.Get():layout_.Get());
             context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
             context_->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
@@ -542,10 +544,10 @@ public:
             context_->PSSetShader(nullptr,nullptr,0);
             // Static opaque walls, floors and other architectural meshes.
             if(vertexCount_){
-                if(!cullEnabled)context_->Draw(vertexCount_,0);
+                if(!cullEnabled){if(staticGeometryPreparationEnabled_)context_->DrawIndexed(indexCount_,0,0);else context_->Draw(vertexCount_,0);}
                 else{
                     UINT start=0,count=0;
-                    auto flush=[&]{if(count){context_->Draw(count,start);count=0;}};
+                    auto flush=[&]{if(count){if(staticGeometryPreparationEnabled_)context_->DrawIndexed(count,start,0);else context_->Draw(count,start);count=0;}};
                     for(const DrawChunk& chunk:chunks_){
                         if(!visibleChunk(chunk,cam)){flush();continue;}
                         if(count&&start+count!=chunk.first)flush();
@@ -587,16 +589,17 @@ public:
         }
         if(vertexCount_){
             if(!cullEnabled){
-                context_->Draw(vertexCount_,0);
+                if(staticGeometryPreparationEnabled_)context_->DrawIndexed(indexCount_,0,0);
+                else context_->Draw(vertexCount_,0);
                 ++drawCalls;
-                submittedVertices=vertexCount_;
+                submittedVertices=staticGeometryPreparationEnabled_?indexCount_:vertexCount_;
             }else{
                 // Merge adjacent visible batches to avoid thousands of draw
                 // calls. A scene with every batch visible stays one Draw().
                 UINT start=0,count=0;
                 auto flush=[&]{
                     if(!count)return;
-                    context_->Draw(count,start);
+                    if(staticGeometryPreparationEnabled_)context_->DrawIndexed(count,start,0);else context_->Draw(count,start);
                     ++drawCalls;
                     submittedVertices+=count;
                     count=0;
@@ -806,7 +809,15 @@ public:
                 context_->End(slot.afterCopy.Get());
                 context_->End(slot.disjoint.Get());
             }
-            hr=swapchain_->Present(0,0); // unthrottled, no CPU readback
+            static const UINT syncInterval=[]() -> UINT {
+                const char* value=std::getenv("CSE_WARP_DX_BENCH_PRESENT_INTERVAL");
+                return value && std::strcmp(value,"1")==0 ? 1u : 0u;
+            }();
+            hr=swapchain_->Present(syncInterval,0);
+            if(syncInterval && hr==DXGI_STATUS_OCCLUDED){
+                error=L"DXGI presentation window is occluded.";
+                return false;
+            }
             if(FAILED(hr)){
                 error=L"DirectX 11 : échec de présentation DXGI.";
                 releasePresenter();return false;
@@ -817,6 +828,11 @@ public:
                 nativeStats->threads=0;
                 nativeStats->readbackBufferCount=0;
                 nativeStats->gpuDrawCalls=drawCalls;
+                nativeStats->geometryPreparationEnabled=staticGeometryPreparationEnabled_;
+                nativeStats->geometrySourceVertices=sourceVertexCount_;nativeStats->geometryUniqueVertices=uniqueVertexCount_;
+                nativeStats->geometryIndexCount=indexCount_;nativeStats->geometryVertexBytes=geometryVertexBytes_;
+                nativeStats->geometryIndexBytes=geometryIndexBytes_;nativeStats->geometryPrepareMs=geometryPrepareMs_;
+                nativeStats->geometryUploadMs=geometryUploadMs_;
                 nativeStats->gpuBoxInstances=submittedBoxInstances;
                 nativeStats->gpuEllipseInstances=submittedEllipseInstances;
                 nativeStats->gpuFoliageInstances=submittedFoliageInstances;
@@ -859,6 +875,11 @@ public:
         slot.submitted.gpu=true;slot.submitted.threads=0;
         slot.submitted.readbackBufferCount=depth;
         slot.submitted.gpuDrawCalls=drawCalls;
+        slot.submitted.geometryPreparationEnabled=staticGeometryPreparationEnabled_;
+        slot.submitted.geometrySourceVertices=sourceVertexCount_;slot.submitted.geometryUniqueVertices=uniqueVertexCount_;
+        slot.submitted.geometryIndexCount=indexCount_;slot.submitted.geometryVertexBytes=geometryVertexBytes_;
+        slot.submitted.geometryIndexBytes=geometryIndexBytes_;slot.submitted.geometryPrepareMs=geometryPrepareMs_;
+        slot.submitted.geometryUploadMs=geometryUploadMs_;
         slot.submitted.gpuBoxInstances=submittedBoxInstances;
         slot.submitted.gpuEllipseInstances=submittedEllipseInstances;
         slot.submitted.gpuFoliageInstances=submittedFoliageInstances;
@@ -1282,25 +1303,28 @@ private:
         const char* disableFoliage=std::getenv("M3D_V17_DISABLE_FOLIAGE_INSTANCING");
         const bool useFoliageInstancing=useInstancing &&
             !(disableFoliage && std::strcmp(disableFoliage,"1")==0);
+        const char* staticPrepEnv=std::getenv("M3D_V17_STATIC_GEOMETRY_PREP");
+        const bool useStaticGeometry=staticPrepEnv&&std::strcmp(staticPrepEnv,"1")==0;
         if(sceneKey_==scene.obj.data()&&objectCount_==scene.obj.size()&&
            (vertices_||boxInstances_||ellipseInstances_) &&
            boxInstancingEnabled_==useBoxInstancing &&
            ellipseInstancingEnabled_==useEllipseInstancing &&
            foliageInstancingEnabled_==useFoliageInstancing &&
+           staticGeometryPreparationEnabled_==useStaticGeometry &&
            lumaTraceGeometryEnabled_==lumaTrace &&
            sceneIdentity_==scene.gpuCacheIdentity &&
            sceneRevision_==scene.gpuCacheRevision)return true;
         // An edited scene may retain the same std::vector address: revision
         // tracking is required to refresh its GPU PBR/mesh resources.
-        vertices_.Reset();transparentVertices_.Reset();albedo_.Reset();
-        verticesSrv_.Reset();
+        vertices_.Reset();indexBuffer_.Reset();transparentVertices_.Reset();albedo_.Reset();
+        verticesSrv_.Reset();indicesSrv_.Reset();
         preservedAlbedo_.Reset();preservedTextureLayers_.fill(-1);
         probeSrv_.Reset();probeTexture_.Reset();
         probeNextSrv_.Reset();probeNextTexture_.Reset();
         hasBakedGi_=false;bakedGi_=gibake::Table{};
         lowFrame_=-1;highFrame_=-1; // new scene/revision = reload GI cache
         boxVertices_.Reset();boxInstances_.Reset();boxInstanceCount_=0;
-        roughness_.Reset();normal_.Reset();transparent_.clear();vertexCount_=0;
+        roughness_.Reset();normal_.Reset();transparent_.clear();vertexCount_=0;indexCount_=0;
         chunks_.clear();boxChunks_.clear();
         ellipseInstances_.Reset();
         for(auto& buffer:ellipseVertices_)buffer.Reset();
@@ -1539,49 +1563,50 @@ private:
             }
             foliageInstanceCount_=UINT(foliage_.size());
         }
-        if(!mesh.vertices.empty()){
-            // 4096 triangles per batch. Bounding boxes are derived from the
-            // real emitted vertices: this also works for complicated shapes,
-            // foliage and the appended world ground without OBJ assumptions.
-            constexpr size_t kChunkVertices=3u*4096u;
-            for(size_t start=0;start<mesh.vertices.size();start+=kChunkVertices){
-                const size_t end=std::min(start+kChunkVertices,mesh.vertices.size());
-                DrawChunk chunk;
-                chunk.first=UINT(start);
-                chunk.count=UINT(end-start);
-                const auto& first=mesh.vertices[start];
-                chunk.mn={first.p[0],first.p[1],first.p[2]};
-                chunk.mx=chunk.mn;
-                for(size_t i=start+1;i<end;++i){
-                    const auto& v=mesh.vertices[i];
-                    chunk.mn.x=std::min(chunk.mn.x,v.p[0]);
-                    chunk.mn.y=std::min(chunk.mn.y,v.p[1]);
-                    chunk.mn.z=std::min(chunk.mn.z,v.p[2]);
-                    chunk.mx.x=std::max(chunk.mx.x,v.p[0]);
-                    chunk.mx.y=std::max(chunk.mx.y,v.p[1]);
-                    chunk.mx.z=std::max(chunk.mx.z,v.p[2]);
+        const auto prepareStarted=Clock::now();
+        auto prepared=static_geometry::prepareStaticMesh(mesh.vertices,useStaticGeometry);
+        geometryPrepareMs_=std::chrono::duration<double,std::milli>(Clock::now()-prepareStarted).count();
+        if(!prepared.valid){error=L"Préparation de la géométrie statique DirectX 11 invalide.";return false;}
+        staticGeometryPreparationEnabled_=useStaticGeometry;
+        sourceVertexCount_=prepared.sourceVertexCount;uniqueVertexCount_=prepared.uniqueVertexCount;
+        const auto& geometryVertices=useStaticGeometry?prepared.vertices:mesh.vertices;
+        if(!geometryVertices.empty()){
+            constexpr size_t kChunkIndices=3u*4096u;
+            const size_t drawIndexCount=useStaticGeometry?prepared.indices.size():geometryVertices.size();
+            const auto vertexAt=[&](size_t i)->const GpuVertex&{
+                return useStaticGeometry?prepared.vertices[prepared.indices[i]]:geometryVertices[i];
+            };
+            for(size_t start=0;start<drawIndexCount;start+=kChunkIndices){
+                const size_t end=std::min(start+kChunkIndices,drawIndexCount);
+                DrawChunk chunk;chunk.first=UINT(start);chunk.count=UINT(end-start);
+                const auto& first=vertexAt(start);
+                chunk.mn={first.p[0],first.p[1],first.p[2]};chunk.mx=chunk.mn;
+                for(size_t i=start;i<end;++i){
+                    const auto& v=vertexAt(i);
+                    chunk.mn.x=std::min(chunk.mn.x,v.p[0]);chunk.mn.y=std::min(chunk.mn.y,v.p[1]);chunk.mn.z=std::min(chunk.mn.z,v.p[2]);
+                    chunk.mx.x=std::max(chunk.mx.x,v.p[0]);chunk.mx.y=std::max(chunk.mx.y,v.p[1]);chunk.mx.z=std::max(chunk.mx.z,v.p[2]);
                 }
                 chunks_.push_back(chunk);
             }
             std::vector<GpuVertexLuma> packedLumaVertices;
-        const void* geometryData=mesh.vertices.data();
-        size_t geometryStride=sizeof(GpuVertex);
-        if(lumaTrace){
-            packedLumaVertices.resize(mesh.vertices.size());
-            for(size_t i=0;i<mesh.vertices.size();++i){
-                const GpuVertex& source=mesh.vertices[i];
-                GpuVertexLuma& packed=packedLumaVertices[i];
-                std::copy(std::begin(source.p),std::end(source.p),std::begin(packed.p));
-                packed.normalPacked=packLumaNormal(source.n);
-                std::copy(std::begin(source.uv),std::end(source.uv),std::begin(packed.uv));
-                packed.material=source.material;
-                packed.primitiveId=source.primitiveId;
+            const void* geometryData=geometryVertices.data();
+            size_t geometryStride=sizeof(GpuVertex);
+            if(lumaTrace){
+                packedLumaVertices.resize(geometryVertices.size());
+                for(size_t i=0;i<geometryVertices.size();++i){
+                    const GpuVertex& source=geometryVertices[i];GpuVertexLuma& packed=packedLumaVertices[i];
+                    std::copy(std::begin(source.p),std::end(source.p),std::begin(packed.p));
+                    packed.normalPacked=packLumaNormal(source.n);
+                    std::copy(std::begin(source.uv),std::end(source.uv),std::begin(packed.uv));
+                    packed.material=source.material;packed.primitiveId=source.primitiveId;
+                }
+                geometryData=packedLumaVertices.data();geometryStride=sizeof(GpuVertexLuma);
             }
-            geometryData=packedLumaVertices.data();
-            geometryStride=sizeof(GpuVertexLuma);
-        }
-        const size_t geometryBytes=mesh.vertices.size()*geometryStride;
-        if(geometryBytes>UINT_MAX){
+            const size_t geometryBytes=geometryVertices.size()*geometryStride;
+            geometryVertexBytes_=geometryBytes;
+            geometryIndexBytes_=useStaticGeometry?prepared.indices.size()*sizeof(uint32_t):0u;
+            const auto geometryUploadStarted=Clock::now();
+        if(geometryBytes>UINT_MAX || geometryIndexBytes_>UINT_MAX){
             error=L"Géométrie GPU trop volumineuse pour un tampon DirectX 11.";
             return false;
         }
@@ -1600,7 +1625,25 @@ private:
                 std::to_wstring(uint32_t(geometryResult))+L").";
             return false;
         }
-        vertexCount_=UINT(mesh.vertices.size());
+        vertexCount_=UINT(geometryVertices.size());indexCount_=useStaticGeometry?UINT(prepared.indices.size()):0u;
+        if(useStaticGeometry){
+            D3D11_BUFFER_DESC indexDesc{};indexDesc.ByteWidth=UINT(prepared.indices.size()*sizeof(uint32_t));
+            indexDesc.Usage=D3D11_USAGE_IMMUTABLE;indexDesc.BindFlags=D3D11_BIND_INDEX_BUFFER | (lumaTrace?D3D11_BIND_SHADER_RESOURCE:0u);
+            D3D11_SUBRESOURCE_DATA indexInit{};indexInit.pSysMem=prepared.indices.data();
+            const HRESULT indexResult=device_->CreateBuffer(&indexDesc,&indexInit,&indexBuffer_);
+            if(FAILED(indexResult)){error=L"Allocation du tampon d’indices DirectX 11 impossible.";return false;}
+            if(lumaTrace){
+                D3D11_SHADER_RESOURCE_VIEW_DESC view{};
+                view.Format=DXGI_FORMAT_R32_UINT;
+                view.ViewDimension=D3D11_SRV_DIMENSION_BUFFER;
+                view.Buffer.NumElements=indexCount_;
+                if(FAILED(device_->CreateShaderResourceView(indexBuffer_.Get(),&view,&indicesSrv_))){
+                    error=L"Lecture des indices de géométrie impossible pour LumaTrace.";
+                    return false;
+                }
+            }
+        }
+        geometryUploadMs_=std::chrono::duration<double,std::milli>(Clock::now()-geometryUploadStarted).count();
         if(lumaTrace){
             D3D11_SHADER_RESOURCE_VIEW_DESC sv{};
             sv.Format=DXGI_FORMAT_R32_TYPELESS;
@@ -1957,7 +2000,7 @@ private:
     ComPtr<ID3D11PixelShader> ps_,mergePs_,skyPs_;
     ComPtr<ID3D11InputLayout> layout_,lumaLayout_,boxLayout_,ellipseLayout_;
     ComPtr<ID3D11Buffer> skyConstants_,constants_,vertices_,transparentVertices_,boxVertices_,boxInstances_,ellipseInstances_,foliageInstances_;
-    ComPtr<ID3D11ShaderResourceView> verticesSrv_;
+    ComPtr<ID3D11ShaderResourceView> verticesSrv_,indicesSrv_;
     std::array<ComPtr<ID3D11Buffer>,3> ellipseVertices_;
     std::array<UINT,3> ellipseVertexCounts_{{0,0,0}};
     std::vector<GpuEllipseInstance> ellipses_;
@@ -1989,7 +2032,12 @@ private:
     float lastSubmissionExposure_=1.f;
     ComPtr<ID3D11RenderTargetView> rtv_;ComPtr<ID3D11DepthStencilView> dsv_;
     std::vector<DrawChunk> chunks_,boxChunks_;
-    UINT boxInstanceCount_=0;
+    ComPtr<ID3D11Buffer> indexBuffer_;
+    UINT indexCount_=0,boxInstanceCount_=0;
+    bool staticGeometryPreparationEnabled_=false;
+    double geometryPrepareMs_=0.,geometryUploadMs_=0.;
+    size_t sourceVertexCount_=0,uniqueVertexCount_=0;
+    uint64_t geometryVertexBytes_=0,geometryIndexBytes_=0;
     unsigned msaaPreference_=0,samplerAnisotropy_=16;
     bool boxInstancingEnabled_=false,ellipseInstancingEnabled_=false,foliageInstancingEnabled_=false,lumaTraceGeometryEnabled_=false;
     LumaTraceCpuScene lumaCpuScene_;

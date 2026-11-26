@@ -51,6 +51,31 @@ int main(int argc,char** argv){
        first!=second || std::set<uint32_t>(first.begin(),first.end()).size()<64){
         qCritical()<<"Empty, incomplete or non-deterministic raster image";return 1;
     }
+    // Compare complete images after deduplication, including LumaTrace's BVH vertex reads.
+    const auto& runtime=built.runtime;
+    for(bool luma:{false,true}){
+        std::vector<uint32_t> unprepared,prepared;
+        for(bool enabled:{false,true}){
+            if(_putenv_s("M3D_V17_STATIC_GEOMETRY_PREP",enabled?"1":"0"))return 1;
+            m3d::Stats stats{};
+            auto& pixels=enabled?prepared:unprepared;
+            const bool ok=luma
+                ?m3d::renderLumaTracePreview(runtime.renderScene,runtime.lumaTraceBvh4,shadow,
+                                             cam,256,144,pixels,stats,error)
+                :m3d::renderDirectX11Preview(runtime.renderScene,shadow,cam,256,144,pixels,stats,error);
+            if(!ok || stats.geometryPreparationEnabled!=enabled || !stats.geometrySourceVertices ||
+               stats.geometryIndexCount!=(enabled?stats.geometrySourceVertices:0)){
+                qCritical()<<"Geometry mode did not reach renderer"<<luma<<enabled<<QString::fromStdWString(error);
+                return 1;
+            }
+        }
+        if(prepared.size()!=256u*144u || prepared!=unprepared){
+            qCritical()<<"Indexed geometry changed rendered pixels in"<<(luma?"LumaTrace":"DX11");
+            return 1;
+        }
+    }
+    _putenv_s("M3D_V17_STATIC_GEOMETRY_PREP","");
+    qInfo()<<"DX11 and LumaTrace pixels identical with geometry preparation off/on";
     // Upload cache must be bit-exact against a forced GPU re-upload, even
     // after an in-place shadow change at the same resolution.
     if(_putenv_s("M3D_V17_DISABLE_SHADOW_UPLOAD_CACHE","1")!=0){

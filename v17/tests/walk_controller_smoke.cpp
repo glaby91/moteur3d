@@ -113,6 +113,32 @@ int main(){
             "fast walking crossed solid wall (tunnelling at 7.5m/s)");
     require(fastWall.grounded,
             "fast walking lost ground contact against wall");
+    // A short first frame must not snap a rising player back to the floor.
+    State jumping{};
+    require(spawn(scene,{-3.f,1.7f,3.f},jumping),"jump spawn failed");
+    require(jump(jumping),"grounded jump rejected");
+    advance(scene,jumping,{},1.f/240.f);
+    require(!jumping.grounded && jumping.feet.y>0.f && !jump(jumping),
+            "first jump frame cancelled or allowed a double jump");
+    for(int i=0;i<120;++i)advance(scene,jumping,{},1.f/120.f);
+    require(jumping.grounded && std::abs(jumping.feet.y)<.01f,"jump did not land");
+
+    Scene tunnel{};
+    top(tunnel,-3,3,-3,3,0.f);
+    top(tunnel,-1,1,-1,1,1.45f);
+    done(tunnel);
+    State under{};
+    require(spawn(tunnel,{0.f,1.15f,0.f},under),"crouch spawn failed");
+    require(setCrouched(tunnel,under,true) && eye(under).y<1.1f,"crouch did not lower camera");
+    require(!setCrouched(tunnel,under,false),"stood through a low ceiling");
+    require(jump(under),"grounded crouch jump rejected");
+    float high=under.feet.y;
+    for(int i=0;i<120;++i){
+        advance(tunnel,under,{},1.f/120.f);
+        high=std::max(high,under.feet.y);
+    }
+    require(high>.1f && high+Settings{}.crouchedBodyHeight<=1.451f && under.grounded,
+            "crouched jump crossed the ceiling or failed to land");
     // V17.317: aerial 85-m camera must still resolve the real floor.
     State aerial{};
     require(spawn(scene,{0.f,85.f,2.f},aerial),"aerial preset failed to reach site");
