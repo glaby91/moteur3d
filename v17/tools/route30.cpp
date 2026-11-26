@@ -277,11 +277,14 @@ int main(int argc, char** argv) {
     m3d::ShadowMap nightShadow;
     if(adaptiveCampaign){
         m3d::updateLighting(23.f);nightShadow=m3d::buildShadow(rt.renderScene,stats);
+        // Match every transition pass to a day-to-night initial sensor state.
+        m3d::updateLighting(12.f);
         for(int phase=0;phase<6;++phase){m3d::updateLighting(17.f+phase*.8f);transitionShadows.push_back(m3d::buildShadow(rt.renderScene,stats));}
     }
     bool allPassed = true;
     for (const Pass& pass : campaign) {
         if(_putenv_s("M3D_V17_LUMA_ADAPTIVE",pass.adaptive?"1":"0"))return 2;
+        if(adaptiveCampaign)m3d::updateLighting(12.f);
         m3d::updateLighting(pass.profile==1?23.f:pass.profile==2?17.f:solarHour);
         Result result;
         // Each graphics API owns a dedicated HWND, as in the exploration window.

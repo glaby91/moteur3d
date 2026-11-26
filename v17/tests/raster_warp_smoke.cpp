@@ -81,6 +81,8 @@ int main(int argc,char** argv){
     if(!loaded){qCritical()<<loaded.error;return 1;}
     auto built=m3d::v16::buildRuntime(loaded.scene,512);
     if(!built || built.runtime.cameras.isEmpty()){qCritical()<<"No valid raster scene/camera";return 1;}
+    // Establish a reproducible daylight-sensor hysteresis state.
+    m3d::updateLighting(12.f);
     m3d::updateLighting(built.runtime.daylightHour);
     m3d::Stats shadowStats;
     const auto shadow=m3d::buildShadow(built.runtime.renderScene,shadowStats);
@@ -141,11 +143,14 @@ int main(int argc,char** argv){
     // Compare actual WARP output with the exact same geometry, probes and lighting.
     // The no-lamp fixture forces every valid opaque triangle through budget zero.
     auto noLamps=runtime.renderScene;noLamps.lights.clear();
+    const bool exteriorBeforeAdaptive=m3d::exteriorLightingEnabled();
     for(bool noLocal:{false,true}){
+        // Use the exported DLL API, never access the internal pointLights vector.
+        m3d::setExteriorLightingEnabled(exteriorBeforeAdaptive&&!noLocal);
         const auto& scene=noLocal?noLamps:runtime.renderScene;
         for(float hour:{14.75f,23.f}){
+            m3d::updateLighting(12.f);
             m3d::updateLighting(hour);
-            if(noLocal)m3d::pointLights.clear();
             m3d::Stats shadowInfo{};const auto shadowAB=m3d::buildShadow(scene,shadowInfo);
             std::vector<uint32_t> reference;
             for(bool enabled:{false,true,false}){
@@ -162,6 +167,8 @@ int main(int argc,char** argv){
         }
     }
     _putenv_s("M3D_V17_LUMA_ADAPTIVE","");
+    m3d::setExteriorLightingEnabled(exteriorBeforeAdaptive);
+    m3d::updateLighting(12.f);
     m3d::updateLighting(built.runtime.daylightHour);
     m3d::setRasterHybridLightingEnabled(false);
     _putenv_s("M3D_V17_STATIC_GEOMETRY_PREP","");
