@@ -13,7 +13,9 @@
 #define NOMINMAX
 #include <windows.h>
 #include <d3d11.h>
-#include <dxgi1_2.h>
+#include <dxgi1_4.h>
+#include <iostream>
+#include <iomanip>
 #include <d3dcompiler.h>
 #include <wrl/client.h>
 #include "m3d_lumatrace_gpu_d3d11.h"
@@ -31,6 +33,30 @@ using Microsoft::WRL::ComPtr;
 
 namespace m3d {
 namespace {
+// Read-only observations: no flush, GPU wait or change to rendering.
+void dxDiag(ID3D11Device* device,const char* phase,HRESULT hr=S_OK){
+    if(!device)return;
+    std::clog<<"[DXGI-DIAG] "<<phase<<" hr=0x"<<std::hex<<uint32_t(hr)
+             <<" removed=0x"<<uint32_t(device->GetDeviceRemovedReason())<<std::dec;
+    ComPtr<IDXGIDevice> dxgi;
+    ComPtr<IDXGIAdapter> adapter;
+    if(SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&dxgi))) &&
+       SUCCEEDED(dxgi->GetAdapter(&adapter))){
+        DXGI_ADAPTER_DESC desc{};
+        if(SUCCEEDED(adapter->GetDesc(&desc)))
+            std::clog<<" vendor="<<desc.VendorId<<" device="<<desc.DeviceId
+                     <<" dedicated="<<desc.DedicatedVideoMemory<<" shared="<<desc.SharedSystemMemory;
+        ComPtr<IDXGIAdapter3> a3;
+        if(SUCCEEDED(adapter.As(&a3))){
+            DXGI_QUERY_VIDEO_MEMORY_INFO local{},nonlocal{};
+            if(SUCCEEDED(a3->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_LOCAL,&local)))
+                std::clog<<" local_usage="<<local.CurrentUsage<<" local_budget="<<local.Budget;
+            if(SUCCEEDED(a3->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL,&nonlocal)))
+                std::clog<<" nonlocal_usage="<<nonlocal.CurrentUsage<<" nonlocal_budget="<<nonlocal.Budget;
+        }
+    }
+    std::clog<<std::endl;
+}
 using d3d11::GpuVertex;
 using d3d11::TransparentTriangle;
 using d3d11::MeshBuilder;
@@ -261,6 +287,7 @@ public:
         if(lumaBvh&&(lumaBvh->nodes.empty()||lumaBvh->primitiveCount==0)){
             error=L"Le BVH4 LumaTrace n’a pas été préparé pour cette scène.";return false;
         }
+        if(lumaBvh && device_)dxDiag(device_.Get(),"luma before ensure");
         if(!ensureDevice(error)||!ensureScene(scene,error,lumaBvh)||!ensureShadow(shadows,error)||
            (hybrid&&!ensureProbeVolume(scene,error))||
            (hybrid&&!ensureGiHours(error))||
@@ -269,7 +296,10 @@ public:
            !ensureAnisotropy(quality.anisotropy,error)||
            (nativeHwnd?!ensureSwapchain(nativeHwnd,w,h,error):
                         !ensureReadback(depth,w,h,error)))return false;
-        if(lumaBvh&&!lumaTraceCompute_.prepare(device_.Get(),*lumaBvh,lumaCpuScene_,error))return false;
+        if(lumaBvh)dxDiag(device_.Get(),"luma resources ready before compute prepare");
+        if(lumaBvh&&!lumaTraceCompute_.prepare(device_.Get(),*lumaBvh,lumaCpuScene_,error)){
+            dxDiag(device_.Get(),"luma prepare failed");return false;
+        }
         const unsigned slotIndex=nextReadbackSlot_;
         ReadbackSlot& slot=readbackSlots_[slotIndex];
         slot.cpuStarted=started;
@@ -469,7 +499,9 @@ public:
         context_->Unmap(skyConstants_.Get(),0);
         const float clear[4]={cb.sky[0],cb.sky[1],cb.sky[2],1.f};
         if(slot.queryReady){context_->Begin(slot.disjoint.Get());context_->End(slot.start.Get());}
-        if(lumaBvh&&!lumaTraceCompute_.dispatch(context_.Get(),verticesSrv_.Get(),indicesSrv_.Get(),scene,error))return false;
+        if(lumaBvh&&!lumaTraceCompute_.dispatch(context_.Get(),verticesSrv_.Get(),indicesSrv_.Get(),scene,error)){
+            dxDiag(device_.Get(),"luma dispatch failed");return false;
+        }
         UINT submittedVertices=0,submittedBoxInstances=0;
         uint64_t drawCalls=0,submittedEllipseTriangles=0,submittedEllipseInstances=0;
         uint64_t submittedFoliageTriangles=0,submittedFoliageInstances=0;
@@ -799,7 +831,8 @@ public:
             ComPtr<ID3D11Texture2D> backBuffer;
             HRESULT hr=swapchain_->GetBuffer(0,IID_PPV_ARGS(&backBuffer));
             if(FAILED(hr)){
-                error=L"DirectX 11 : tampon DXGI inaccessible.";
+                dxDiag(device_.Get(),"GetBuffer failed",hr);
+                error=L"DXGI GetBuffer HRESULT="+std::to_wstring(uint32_t(hr))+L"; removed="+std::to_wstring(uint32_t(device_->GetDeviceRemovedReason()));
                 releasePresenter();return false;
             }
             context_->CopyResource(backBuffer.Get(),gpuSource);
@@ -819,7 +852,8 @@ public:
                 return false;
             }
             if(FAILED(hr)){
-                error=L"DirectX 11 : échec de présentation DXGI.";
+                dxDiag(device_.Get(),"Present failed",hr);
+                error=L"DXGI Present HRESULT="+std::to_wstring(uint32_t(hr))+L"; removed="+std::to_wstring(uint32_t(device_->GetDeviceRemovedReason()));
                 releasePresenter();return false;
             }
             if(nativeStats){
