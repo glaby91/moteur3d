@@ -13,6 +13,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <thread>
 
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -203,12 +204,18 @@ int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     const auto args = app.arguments();
     bool prepareGeometry = true;
-    if (args.size() == 5 && args[3] == QStringLiteral("--geometry-prep") &&
-        (args[4] == QStringLiteral("on") || args[4] == QStringLiteral("off"))) {
-        prepareGeometry = args[4] == QStringLiteral("on");
-    } else if (args.size() != 3) {
-        std::cerr << "Usage: route30.exe scene.json resultats.csv [--geometry-prep on|off]\n";
-        return 2;
+    QString backendFilter=QStringLiteral("all");
+    if(args.size()<3)return 2;
+    for(int i=3;i<args.size();i+=2){
+        if(i+1>=args.size())return 2;
+        if(args[i]==QStringLiteral("--geometry-prep") &&
+            (args[i+1]==QStringLiteral("on")||args[i+1]==QStringLiteral("off")))
+            prepareGeometry=args[i+1]==QStringLiteral("on");
+        else if(args[i]==QStringLiteral("--backend") &&
+            (args[i+1]==QStringLiteral("all")||args[i+1]==QStringLiteral("DX11")||
+             args[i+1]==QStringLiteral("Vulkan")||args[i+1]==QStringLiteral("LumaTrace")))
+            backendFilter=args[i+1];
+        else return 2;
     }
     if (_putenv_s("M3D_V17_STATIC_GEOMETRY_PREP", prepareGeometry ? "1" : "0")) return 2;
     // Both native presenters pace on vertical blank. Only this process opts in.
@@ -233,8 +240,11 @@ int main(int argc, char** argv) {
            "geometry_source_vertices,geometry_unique_vertices,geometry_index_count\n";
     bool allPassed = true;
     for (const Pass& pass : passes) {
+        if(backendFilter!=QStringLiteral("all") && backendFilter!=QString::fromLatin1(pass.name))continue;
         Result result;
-        // Each graphics API owns a dedicated HWND, as in the exploration window.
+        // Dedicated worker lifetime also retires thread-local renderer resources
+        // before the next backend, outside the measured 30 seconds.
+        std::thread worker([&]{
         HWND window = openRouteWindow(result.error);
         if (window) {
             const Route route{rt, *it, shadow, window, prepareGeometry};
@@ -243,6 +253,8 @@ int main(int argc, char** argv) {
             else m3d::releaseDirectX11NativeForCurrentThread();
             DestroyWindow(window);
         }
+        });
+        worker.join();
         writeRow(csv, pass, result, prepareGeometry);
         allPassed = allPassed && result.error.empty();
         if (result.cancelled) break;

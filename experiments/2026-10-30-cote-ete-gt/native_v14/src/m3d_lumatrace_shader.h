@@ -146,7 +146,7 @@ float3 normalAtHit(uint id,float u,float v,float3 rayDirection){
  return dot(n,rayDirection)>0?-n:n;
 }
 [numthreads(64,1,1)] void CSShadeTriangles(uint3 tid:SV_DispatchThreadID){
- uint id=tid.x;if(id>=Counts.x)return;
+ uint id=GeometryLayout.y+tid.x;if(id>=Counts.x)return;
  Vertex a=loadVertex(id*3u),b=loadVertex(id*3u+1u),c=loadVertex(id*3u+2u);
  float3 p=(a.p+b.p+c.p)/3;
  float3 n=normalize(decodeNormal(a.normalPacked)+decodeNormal(b.normalPacked)+decodeNormal(c.normalPacked));

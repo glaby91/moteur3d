@@ -218,6 +218,7 @@ public:
     void releasePresenter() {
         if(context_ && swapchain_)context_->Flush();
         swapchain_.Reset();
+        if(context_)context_->Flush(); // retire deferred flip-model destruction
         nativeHwnd_=nullptr;
         nativeW_=nativeH_=0;
     }
@@ -799,7 +800,8 @@ public:
             ComPtr<ID3D11Texture2D> backBuffer;
             HRESULT hr=swapchain_->GetBuffer(0,IID_PPV_ARGS(&backBuffer));
             if(FAILED(hr)){
-                error=L"DirectX 11 : tampon DXGI inaccessible.";
+                error=L"DirectX 11 : DXGI GetBuffer failed; HRESULT="+std::to_wstring(uint32_t(hr))+
+                    L"; GetDeviceRemovedReason="+std::to_wstring(uint32_t(device_->GetDeviceRemovedReason()));
                 releasePresenter();return false;
             }
             context_->CopyResource(backBuffer.Get(),gpuSource);
@@ -819,7 +821,8 @@ public:
                 return false;
             }
             if(FAILED(hr)){
-                error=L"DirectX 11 : échec de présentation DXGI.";
+                error=L"DirectX 11 : DXGI Present failed; HRESULT="+std::to_wstring(uint32_t(hr))+
+                    L"; GetDeviceRemovedReason="+std::to_wstring(uint32_t(device_->GetDeviceRemovedReason()));
                 releasePresenter();return false;
             }
             if(nativeStats){
@@ -1316,6 +1319,8 @@ private:
            sceneRevision_==scene.gpuCacheRevision)return true;
         // An edited scene may retain the same std::vector address: revision
         // tracking is required to refresh its GPU PBR/mesh resources.
+        // Drop old pipeline references before allocating the replacement mesh.
+        context_->ClearState();
         vertices_.Reset();indexBuffer_.Reset();transparentVertices_.Reset();albedo_.Reset();
         verticesSrv_.Reset();indicesSrv_.Reset();
         preservedAlbedo_.Reset();preservedTextureLayers_.fill(-1);
@@ -1332,6 +1337,7 @@ private:
         foliageInstances_.Reset();
         for(auto& buffer:foliageVertices_)buffer.Reset();
         foliageVertexCounts_.fill(0);foliage_.clear();foliageInstanceCount_=0;
+        context_->Flush();
         lumaCpuScene_={};
         if(lumaTrace&&!prepareLumaTraceCpuScene(scene,*lumaBvh,lumaCpuScene_,error))
             return false;
