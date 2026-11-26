@@ -52,7 +52,8 @@ bool prepareLumaTraceCpuScene(const Scene& scene,const LumaTraceBvh4& bvh,
             return false;
         }
         const bool transparent=object.mat<scene.mat.size()&&
-            scene.mat[object.mat].transmissionPercent>0;
+            (scene.mat[object.mat].transmissionPercent>0 || scene.mat[object.mat].waterSurface ||
+             (!scene.mat[object.mat].surfaceAuthored && scene.mat[object.mat].name=="cse_pool_water"));
         if(!transparent) {
             if(out.triangleCount==noTriangle) {
                 out={};

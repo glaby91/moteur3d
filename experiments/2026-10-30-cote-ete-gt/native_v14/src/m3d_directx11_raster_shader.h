@@ -31,6 +31,11 @@ cbuffer Frame : register(b0) {
     float4 hybridControls;
     float4 colorControls;
     float4 peripheralControls;
+    float4 reflectionControls;
+    float3 reflectionEye; float reflectionTanHalf;
+    float3 reflectionForward; float reflectionAspect;
+    float3 reflectionRight; float reflectionPad0;
+    float3 reflectionUp; float reflectionPad1;
 };
 Texture2DArray<float4> albedo : register(t0);
 Texture2D<float> shadowDepth : register(t1);
@@ -40,6 +45,7 @@ Texture3D<float4> indirectProbes : register(t4);
 Texture3D<float4> indirectProbesNext : register(t5);
 Texture2DArray<float4> preservedAlbedo : register(t6);
 StructuredBuffer<float4> lumaTriangleRadiance : register(t7);
+Texture2D<float4> poolReflection : register(t8);
 SamplerState wrapSampler : register(s0);
 SamplerState probeSampler : register(s1);
 struct VSIn { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; uint mat:MATERIAL; uint primitiveId:TRIID; };
@@ -132,6 +138,8 @@ float4 PSMain(VSOut i):SV_TARGET {
     }
     float3 normal = normalize(i.n);
     const bool poolWater=materialEmission[i.mat].a < -0.5;
+    if(reflectionControls.x>.5 && reflectionControls.x<1.5 &&
+       (i.world.y<reflectionControls.w || poolWater || materialOpacity[i.mat].x<.45)) discard;
     // Dedicated animated-looking standing waves (static in world space) only on
     // the new translucent pool water. Avoid extra trig on every other material.
     if(poolWater && normal.y>0.75){
@@ -174,7 +182,6 @@ float4 PSMain(VSOut i):SV_TARGET {
     if (shadowPixel.x >= 2 && shadowPixel.y >= 2 && shadowPixel.x < int(shadowSize) - 2 && shadowPixel.y < int(shadowSize) - 2) {
         float visible = 0.0;
         [unroll] for (int sy = -1; sy <= 1; ++sy) [unroll] for (int sx = -1; sx <= 1; ++sx) { )";
-
 inline constexpr char kShaderPart2[] = R"(
             float storedDepth = shadowDepth.Load(int3(shadowPixel + int2(sx, sy), 0));
             visible += shadowDistance <= storedDepth + 0.095 ? 1.0 : 0.0;
@@ -229,8 +236,11 @@ inline constexpr char kShaderPart2[] = R"(
         specTint=lerp(specTint,float3(.24,.26,.28),saturate(glazing*1.8));
     }
     color += specTint * specular * (0.88+0.22*fresnel);
-    // LumaTrace supplies these direct lights with BVH visibility.
-    if(peripheralControls.w<=.5){
+    // Keep the raster fallback's diffuse point lights. In LumaTrace mode,
+    // visit local lights only for surfaces that can show a specular reflection.
+    const bool localSpecEligible=poolWater || materialOpacity[i.mat].x<.65 ||
+        roughness<.14 || (materialSpecular[i.mat].w>.08 && roughness<.50);
+    if(peripheralControls.w<.5 || localSpecEligible) {
     [loop] for (uint l = 0; l < lightCount; ++l) {
         float3 delta = lightPositionRadius[l].xyz - i.world;
         float radius = lightPositionRadius[l].w;
@@ -248,14 +258,23 @@ inline constexpr char kShaderPart2[] = R"(
         float distance2 = dot(delta, delta);
         [branch] if (radius > 0.0 && distance2 <= radius2 * 1.000001) {
 #endif
-            [branch] if (dot(normal, delta) > 0.0) {
-                float distanceToLight = length(delta);
-                if (distanceToLight < radius && distanceToLight > 0.0001) {
-                    float edge = 1.0 - distanceToLight / radius;
-                    float lambert = saturate(dot(normal, delta / distanceToLight));
-                    float3 localIrradiance=lightColorIntensity[l].rgb
-                        *(edge*edge*lightColorIntensity[l].a*lambert*.27);
+            float distanceToLight = length(delta);
+            if (distanceToLight < radius && distanceToLight > 0.0001) {
+                float edge = 1.0 - distanceToLight / radius;
+                float lambert = saturate(dot(normal, delta / distanceToLight));
+                float3 localIrradiance=lightColorIntensity[l].rgb
+                    *(edge*edge*lightColorIntensity[l].a*lambert*.27);
+                if(peripheralControls.w<.5)
                     color += colorControls.x>0.5 ? base*localIrradiance : localIrradiance;
+                if(localSpecEligible){
+                    float3 toLight=delta/distanceToLight;
+                    float3 reflectedPoint=reflect(-toLight,normal);
+                    float pointPower=clamp(specularPower,8.0,120.0);
+                    float pointSpec=pow(saturate(dot(viewDir,reflectedPoint)),pointPower)
+                        *max(materialSpecular[i.mat].x,.035)
+                        *edge*edge*lightColorIntensity[l].a*.27;
+                    color += specTint*lightColorIntensity[l].rgb*pointSpec
+                        *(0.88+0.22*fresnel);
                 }
             }
 #if defined(M3D_V17_OPTIMIZE_PIXELS)
@@ -276,36 +295,38 @@ inline constexpr char kShaderPart2[] = R"(
             probe=lerp(probe,nextProbe,hybridControls.y);
         }
         if(hybridControls.w>1.5){
+            // LumaTrace's lightweight GPU cache contains one diffuse bounce
+            // from directly lit surfaces, bilinearly interpolated in space.
             color+=base*max(probe.rgb,0.0);
         }else{
-        float skyVisibility=saturate(probe.a);
-        float upward=saturate(normal.y*.5+.5);
-        float existingAmbient=ambientEnergy;
-        // Normalize the time-dependent sky color so daylight changes hue,
-        // but doesn't create energy from a second hemispherical fill.
-        float skyMean=max(dot(indirectSky.rgb,float3(.333333,.333333,.333333)),.001);
-        float3 skyTint=lerp(float3(1.0,1.0,1.0),
-                            indirectSky.rgb/skyMean,.22);
-        // Retain up to 92% of the legacy ambient in open air, but only
-        // 48% in occluded interiors. Static probe volume interpolates in XYZ.
-        float3 accessibleSky=existingAmbient
-                             *lerp(.48,.92,skyVisibility)*skyTint;
-        // Low-energy, material-colored bounce gives warmth to nearby walls
-        // without washing out roofs. Decays in exposed outdoor probes.
-        float3 reflected=indirectBounce.rgb*probe.rgb
-                         *(.12+.18*(1.0-upward))
-                         *(.80-.30*skyVisibility);
-        float3 indirect=accessibleSky+reflected;
-        if(hybridControls.w>.5){
-            // The offline cache stores real surface-to-probe illumination.
-            // Do not re-color it using the old empirical sky/bounce terms.
-            indirect=max(probe.rgb,0.0);
-        }
-        color+=base*(indirect-existingAmbient);
-        // The existing shadow map and dynamic direct sun remain unchanged;
-        // gently tint only the direct contribution at warm solar hours.
-        float sunContribution=diffuseTerms.z*diffuse*shadowFactor*diffuseTerms.w;
-        color+=base*sunContribution*(indirectSun.rgb-1.0)*.40;
+            float skyVisibility=saturate(probe.a);
+            float upward=saturate(normal.y*.5+.5);
+            float existingAmbient=ambientEnergy;
+            // Normalize the time-dependent sky color so daylight changes hue,
+            // but doesn't create energy from a second hemispherical fill.
+            float skyMean=max(dot(indirectSky.rgb,float3(.333333,.333333,.333333)),.001);
+            float3 skyTint=lerp(float3(1.0,1.0,1.0),
+                                indirectSky.rgb/skyMean,.22);
+            // Retain up to 92% of the legacy ambient in open air, but only
+            // 48% in occluded interiors. Static probe volume interpolates in XYZ.
+            float3 accessibleSky=existingAmbient
+                                 *lerp(.48,.92,skyVisibility)*skyTint;
+            // Low-energy, material-colored bounce gives warmth to nearby walls
+            // without washing out roofs. Decays in exposed outdoor probes.
+            float3 reflected=indirectBounce.rgb*probe.rgb
+                             *(.12+.18*(1.0-upward))
+                             *(.80-.30*skyVisibility);
+            float3 indirect=accessibleSky+reflected;
+            if(hybridControls.w>.5){
+                // The offline cache stores real surface-to-probe illumination.
+                // Do not re-color it using the old empirical sky/bounce terms.
+                indirect=max(probe.rgb,0.0);
+            }
+            color+=base*(indirect-existingAmbient);
+            // The existing shadow map and dynamic direct sun remain unchanged;
+            // gently tint only the direct contribution at warm solar hours.
+            float sunContribution=diffuseTerms.z*diffuse*shadowFactor*diffuseTerms.w;
+            color+=base*sunContribution*(indirectSun.rgb-1.0)*.40;
         }
     }
     if(hybridControls.z>0.5){
@@ -334,7 +355,26 @@ inline constexpr char kShaderPart2[] = R"(
         color+=float3(.19,.32,.37)*stripe*(.025+.13*fresnelWater);
         // Underwater ladders must remain visible through the surface from the deck.
         // Avoid the former 45% high-angle opaque cyan veil.
-        const float opacity=lerp(.08,.24,saturate(fresnelWater*1.75));
+        float opacity=lerp(.08,.24,saturate(fresnelWater*1.75));
+        if(reflectionControls.x>1.5){
+            float3 reflectedView=i.world-reflectionEye;
+            float reflectedDepth=dot(reflectedView,reflectionForward);
+            if(reflectedDepth>.08){
+                float reflectedNdcX=dot(reflectedView,reflectionRight)/(reflectedDepth*reflectionTanHalf);
+                float reflectedNdcY=dot(reflectedView,reflectionUp)*reflectionAspect/(reflectedDepth*reflectionTanHalf);
+                float2 reflectionUv=float2(.5+.5*reflectedNdcX,.5-.5*reflectedNdcY)+normal.xz*.35;
+                if(all(reflectionUv>=0.0)&&all(reflectionUv<=1.0)){
+                    float3 reflectedScene=poolReflection.SampleLevel(probeSampler,reflectionUv,0).rgb;
+                    const float reflectionWeight=saturate(.22+.62*fresnelWater);
+                    color=lerp(color,reflectedScene,reflectionWeight);
+                    opacity=lerp(opacity,.62,saturate(fresnelWater*1.45));
+                }
+            }
+        }
+        // Transmission controls the water's opacity continuously; its Fresnel
+        // opacity remains the authored 100%-transmission appearance.
+        const float authoredTransmission=1.0-saturate(materialOpacity[i.mat].x);
+        opacity=1.0-authoredTransmission*(1.0-opacity);
         return float4(color,opacity);
     }
     return float4(color, materialOpacity[i.mat].x);
