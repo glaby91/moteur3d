@@ -1,5 +1,8 @@
 #requires -version 5.1
-param([string]$Root)
+param(
+    [string]$Root,
+    [ValidateSet('on','off')][string]$GeometryPrep = 'on'
+)
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -74,7 +77,8 @@ function Get-RouteScene($Cache, $Stage) {
     return [pscustomobject]@{ Path = $scenePath; Manifest = $versionPath }
 }
 
-function Invoke-Route30([string]$PackageRoot) {
+function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$PrepMode = 'on') {
+    $PrepMode = $PrepMode.ToLowerInvariant()
     $PackageRoot = (Resolve-Path -LiteralPath $PackageRoot).ProviderPath
     $cache = Join-Path $PackageRoot 'benchmark-tools\archives'
     $stage = Join-Path ([IO.Path]::GetTempPath()) ('warp-parcours-' + [guid]::NewGuid())
@@ -91,9 +95,9 @@ function Invoke-Route30([string]$PackageRoot) {
         $env:QT_PLUGIN_PATH = (@($pluginRoots) + @($env:QT_PLUGIN_PATH) | Where-Object { $_ }) -join ';'
         $env:PATH = "$PackageRoot;$env:PATH"
 
-        $helperUrl = 'https://github.com/glaby91/moteur3d/releases/download/route30-acc231af94ff199e8ee4ad3836a3ff81b8b879fb/route30.zip'
-        $helperHash = '021e0d9e99e91030c99b614787e9a24320ab5a9d27b9c224306a470869487b2d'
-        $toolZip = Get-RouteArchive $cache 'route30' $helperUrl $helperHash 413900
+        $helperUrl = 'https://github.com/glaby91/moteur3d/releases/download/route30-ee05a7f0d68a5c5c31a5d42fc7e3ddf29232c700/route30.zip'
+        $helperHash = '20e745099002a40091a4a2624f5757b1a8d63e7894f7288a4ab41ae392887739'
+        $toolZip = Get-RouteArchive $cache 'route30' $helperUrl $helperHash 423462
         $bin = Join-Path $stage 'bin'
         [IO.Compression.ZipFile]::ExtractToDirectory($toolZip, $bin)
         $exe = Join-Path $bin 'route30.exe'
@@ -102,8 +106,8 @@ function Invoke-Route30([string]$PackageRoot) {
         $versionPath = Join-Path $out 'SCENE_VERSION.json'
         Copy-Item -LiteralPath $scene.Manifest -Destination $versionPath
         $csv = Join-Path $out 'resultats.csv'
-        Write-Host 'Parcours GPU direct : 1280 x 720, VSync activee, 30 s par backend.'
-        & $exe $scene.Path $csv
+        Write-Host "Parcours GPU direct : 1280 x 720, VSync activee, 30 s par backend. Preparation des triangles : $PrepMode."
+        & $exe $scene.Path $csv --geometry-prep $PrepMode
         $engineExit = $LASTEXITCODE
         if (!(Test-Path -LiteralPath $csv -PathType Leaf)) {
             throw "Aucun CSV produit (code moteur $engineExit). Dossier : $out"
@@ -117,4 +121,4 @@ function Invoke-Route30([string]$PackageRoot) {
     }
 }
 
-if ($MyInvocation.InvocationName -ne '.') { Invoke-Route30 $Root }
+if ($MyInvocation.InvocationName -ne '.') { Invoke-Route30 -PackageRoot $Root -PrepMode $GeometryPrep }

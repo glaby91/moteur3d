@@ -25,6 +25,7 @@ jobs:
         shell: powershell
         env:
           M3D_V16_FORCE_WARP: '1'
+          M3D_V17_STATIC_GEOMETRY_PREP: '0'  # The normal BAT must explicitly enable preparation.
         run: |
           Add-Type -AssemblyName System.Windows.Forms
           $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
@@ -58,10 +59,17 @@ jobs:
               foreach ($row in $rows) {
                   if ($row.camera -ne 'v7_pool_fresco' -or [double]$row.hour -ne 14.75 -or
                       $row.width -ne '1280' -or $row.height -ne '720' -or
-                      $row.presentation -ne 'native_swapchain' -or $row.vsync -ne 'on') {
+                      $row.presentation -ne 'native_swapchain' -or $row.vsync -ne 'on' -or
+                      $row.geometry_prep_requested -ne 'on') {
                       throw "Wrong native route configuration for $($row.backend)."
                   }
                   if ($row.status -eq 'ok') {
+                      if ($row.geometry_prep_enabled -cne 'true' -or
+                          [long]$row.geometry_unique_vertices -le 0 -or
+                          [long]$row.geometry_unique_vertices -ge [long]$row.geometry_source_vertices -or
+                          [long]$row.geometry_index_count -ne [long]$row.geometry_source_vertices) {
+                          throw "Static triangles were not indexed on the official scene by $($row.backend)."
+                      }
                       if ($row.readback_buffers -ne '0' -or [int]$row.frames_completed_30s -lt 1 -or
                           [int]$row.frames_started -lt [int]$row.frames_completed_30s -or
                           [double]$row.elapsed_s -lt 30 -or [double]$row.mean_render_ms -le 0 -or
@@ -69,6 +77,8 @@ jobs:
                           throw "Invalid 30-second direct presentation measurement for $($row.backend)."
                       }
                   } elseif ($row.backend -ne 'Vulkan' -or $row.status -ne 'error' -or $row.fps_30s -or
+                            $row.geometry_prep_enabled -or $row.geometry_source_vertices -or
+                            $row.geometry_unique_vertices -or $row.geometry_index_count -or
                             $row.error -notmatch 'vulkan-1.dll unavailable|No hardware GPU exposing Vulkan|No Vulkan GPU/driver|create instance.*(-9|INCOMPATIBLE_DRIVER)') {
                       throw "Unexpected native presentation failure for $($row.backend): $($row.error)"
                   }
