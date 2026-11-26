@@ -1,5 +1,5 @@
-name: CSE WARP V17.010 — Windows x64 release
-run-name: CSE WARP V17.010 — Windows x64 (GitHub build ${{ github.run_number }})
+name: CSE WARP V17.010 — diagnostic 760 Windows x64
+run-name: CSE WARP V17.010 DIAG760 — Windows x64 (GitHub build ${{ github.run_number }})
 "on":
   push:
     branches:
@@ -940,13 +940,13 @@ jobs:
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.010-GitHub-${{ github.run_number }}-Windows-x64
+          name: CSE-WARP-V17.010-DIAG760-GitHub-${{ github.run_number }}-Windows-x64
           path: dist-v17/
           if-no-files-found: error
       - name: Upload fresco ray audit visualization
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.010-GitHub-${{ github.run_number }}-fresco-ray-audit
+          name: CSE-WARP-V17.010-DIAG760-GitHub-${{ github.run_number }}-fresco-ray-audit
           path: build-v17/fresco-ray-audit/
           if-no-files-found: error
       - name: Benchmark GI hors ligne — trois scènes, trois cuissons et sept relectures
@@ -1055,7 +1055,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.010-GitHub-${{ github.run_number }}-Total-Simulation-WARP
+          name: CSE-WARP-V17.010-DIAG760-GitHub-${{ github.run_number }}-Total-Simulation-WARP
           path: build-v17/total-simulation/
           if-no-files-found: warn
       # The V17-specific scene-switch and D3D11 benchmark smoke checks have

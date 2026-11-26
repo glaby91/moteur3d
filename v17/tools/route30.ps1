@@ -112,13 +112,27 @@ function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$
         Copy-Item -LiteralPath $scene.Manifest -Destination $versionPath
         $csv = Join-Path $out 'resultats.csv'
         Write-Host "Parcours GPU direct : 1280 x 720, VSync activee, 30 s par backend. Preparation des triangles : $PrepMode."
-        & $exe $scene.Path $csv --geometry-prep $PrepMode
-        $engineExit = $LASTEXITCODE
+        $log = Join-Path $out 'diagnostic.log'
+        $stdout = Join-Path $out 'stdout.log'
+        $stderr = Join-Path $out 'stderr.log'
+        $start = Get-Date
+        $process = Start-Process -FilePath $exe -ArgumentList @(('"{0}"' -f $scene.Path), ('"{0}"' -f $csv), '--geometry-prep', $PrepMode) -RedirectStandardOutput $stdout -RedirectStandardError $stderr -PassThru -Wait
+        $engineExit = $process.ExitCode
+        "ExitCode=$engineExit; start=$start; end=$(Get-Date); prep=$PrepMode" | Set-Content -LiteralPath $log
+        Get-Content -LiteralPath $stdout,$stderr | Add-Content -LiteralPath $log
+        Get-Content -LiteralPath $log
+        Get-CimInstance Win32_VideoController | Select-Object Name,DriverVersion,AdapterRAM | ConvertTo-Json | Set-Content (Join-Path $out 'gpu.json')
+        try {
+            Get-WinEvent -FilterHashtable @{LogName='System';StartTime=$start.AddSeconds(-10)} -ErrorAction Stop |
+                Where-Object { $_.ProviderName -match 'Display|DxgKrnl|nvlddmkm|igfx|amdkmdag|WHEA' } |
+                Select-Object TimeCreated,Id,ProviderName,Message | ConvertTo-Json -Depth 3 |
+                Set-Content (Join-Path $out 'gpu-events.json')
+        } catch { "No matching events or access unavailable: $_" | Set-Content (Join-Path $out 'gpu-events.json') }
         if (!(Test-Path -LiteralPath $csv -PathType Leaf)) {
             throw "Aucun CSV produit (code moteur $engineExit). Dossier : $out"
         }
         Get-Content -LiteralPath $csv
-        Compress-Archive -LiteralPath @($csv, $versionPath) -DestinationPath "$out.zip"
+        Compress-Archive -Path (Join-Path $out "*") -DestinationPath "$out.zip"
         if ($engineExit -ne 0) { throw "Campagne incomplete (code moteur $engineExit). Resultats : $out.zip" }
         Write-Host "Resultats : $out.zip"
     } finally {

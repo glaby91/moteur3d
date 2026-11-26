@@ -6,6 +6,8 @@
 
 #include <d3dcompiler.h>
 #include <algorithm>
+#include <iostream>
+#include <chrono>
 #include <cstring>
 #include <limits>
 #include <map>
@@ -275,7 +277,18 @@ bool Compute::dispatch(ID3D11DeviceContext* context,ID3D11ShaderResourceView* ve
     context->CSSetShaderResources(0,5,srvs);
     context->CSSetUnorderedAccessViews(0,1,uavs,nullptr);
     context->CSSetConstantBuffers(0,1,constants);
+    ComPtr<ID3D11Device> diagnosticDevice;
+    context->GetDevice(&diagnosticDevice);
+    std::clog<<"[LUMA-DIAG] dispatch begin triangles="<<triangleCount_
+             <<" nodes="<<nodeCount_<<" order="<<orderCount_
+             <<" groups="<<(triangleCount_+63)/64<<" lights="<<params.counts[3]
+             <<" indexed="<<params.geometryLayout[0]
+             <<" removed=0x"<<std::hex<<uint32_t(diagnosticDevice->GetDeviceRemovedReason())<<std::dec<<std::endl;
+    const auto submitStart=std::chrono::steady_clock::now();
     context->Dispatch((triangleCount_+63)/64,1,1);
+    std::clog<<"[LUMA-DIAG] dispatch submitted CPU ms="
+             <<std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-submitStart).count()
+             <<" removed=0x"<<std::hex<<uint32_t(diagnosticDevice->GetDeviceRemovedReason())<<std::dec<<std::endl;
     ID3D11UnorderedAccessView* noUavs[]={nullptr};
     ID3D11ShaderResourceView* noSrvs[5]{};
     context->CSSetUnorderedAccessViews(0,1,noUavs,nullptr);

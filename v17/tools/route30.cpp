@@ -203,6 +203,8 @@ int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     const auto args = app.arguments();
     bool prepareGeometry = true;
+    const QByteArray filter=qgetenv("CSE_WARP_DIAG_BACKEND");
+    const bool reverse=qgetenv("CSE_WARP_DIAG_REVERSE")=="1";
     if (args.size() == 5 && args[3] == QStringLiteral("--geometry-prep") &&
         (args[4] == QStringLiteral("on") || args[4] == QStringLiteral("off"))) {
         prepareGeometry = args[4] == QStringLiteral("on");
@@ -232,7 +234,9 @@ int main(int argc, char** argv) {
            "presentation,vsync,readback_buffers,status,error,geometry_prep_requested,geometry_prep_enabled,"
            "geometry_source_vertices,geometry_unique_vertices,geometry_index_count\n";
     bool allPassed = true;
-    for (const Pass& pass : passes) {
+    for (size_t index=0;index<3;++index) {
+        const Pass& pass=passes[reverse?2-index:index];
+        if(!filter.isEmpty()&&filter!=pass.name)continue;
         Result result;
         // Each graphics API owns a dedicated HWND, as in the exploration window.
         HWND window = openRouteWindow(result.error);
