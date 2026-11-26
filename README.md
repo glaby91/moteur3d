@@ -3,9 +3,13 @@
 **Moteur : V17.009 · scène de référence courante : V17.629**
 CSE WARP V17 réunit l’interface d’exploration, plusieurs backends de rendu, le noyau moteur partagé avec V16, les outils de benchmark et un mécanisme de mise à jour de scène. La V17 reste une version expérimentale : les performances et la présentation native doivent être mesurées sur le GPU visé.
 
-> **Branche par défaut :** `master`. La livraison V17.009 avec scène V17.629 est fusionnée dans cette branche; voir [BRANCH_STATUS.md](BRANCH_STATUS.md) pour le repère des branches moteur conservées.
+> La branche principale du moteur est `master`. [État des branches](BRANCH_STATUS.md)
 
 ## Scène de référence et paquet Windows
+
+**[Télécharger CSE WARP V17.009 pour Windows x64, build 759](https://github.com/glaby91/moteur3d/actions/runs/45736640875/artifacts/15080081395)**
+
+Extraire le ZIP puis lancer `LANCER_CSE_WARP.bat`. Le paquet contient la scène de la piscine V17.629. En mode marche au sol, maintenir `Ctrl` pour s’accroupir, appuyer sur `Espace` pour sauter et appuyer brièvement sur `Tab` ou `<` pour ouvrir ou fermer le Pip-Boy. La préparation des triangles est activée par défaut pour DirectX 11, Vulkan et LumaTrace. [Vérifications Windows de la build 759](https://github.com/glaby91/moteur3d/actions/runs/45736640875)
 
 La scène « Palais et coupole vitrée de la piscine » est maintenue séparément dans [`glaby91/moteur3d-scene`](https://github.com/glaby91/moteur3d-scene). La release courante est [V17.629](https://github.com/glaby91/moteur3d-scene/releases/tag/scene-V17.629-42). Le workflow moteur récupère la dernière release au début de la compilation, vérifie le manifeste de l’archive et son numéro de révision, charge la scène avec le moteur, puis place **la scène complète et son manifeste dans le même paquet Windows que le moteur**. Le paquet est ainsi utilisable hors ligne dès son extraction.
 
@@ -13,10 +17,10 @@ Le programme vérifie ensuite les nouvelles releases en tâche de fond. Il ouvre
 
 - Dépôt de la scène : [moteur3d-scene](https://github.com/glaby91/moteur3d-scene)
 - Release actuelle : [V17.629 — build 42](https://github.com/glaby91/moteur3d-scene/releases/tag/scene-V17.629-42)
-- Workflow de compilation du moteur : [CSE WARP V17 — Windows x64](https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v17.yml)
+- [Compilations Windows x64 de `master`](https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v17.yml?query=branch%3Amaster)
 - Révision emballée : `SCENE_REVISION.txt` et `SCENE_VERSION.json`, à la racine du paquet ainsi que dans `benchmark-civic/`.
 
-Le build historique [V17.003 #587](https://github.com/glaby91/moteur3d/actions/runs/45080722276) ne contient pas cette révision. Le paquet Windows V17.006 — build GitHub 683, avec la scène V17.623 — est disponible dans les artefacts du [workflow de compilation](https://github.com/glaby91/moteur3d/actions/runs/45493998985).
+Pour retrouver une ancienne compilation, consulter [V17.006, build 683 avec scène V17.623](https://github.com/glaby91/moteur3d/actions/runs/45493998985) ou [V17.003, build 587](https://github.com/glaby91/moteur3d/actions/runs/45080722276).
 
 ## Format de description des scènes
 
