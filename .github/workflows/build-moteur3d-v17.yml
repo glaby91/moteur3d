@@ -925,7 +925,7 @@ jobs:
           M3D_V16_FORCE_WARP: '1'
         run: |
           $exe = (Resolve-Path "dist-v17/moteur3d_v17.exe").Path
-          $scene = (Resolve-Path "scenes/v16/pavillon01/scene.json").Path
+          $scene = (Resolve-Path "dist-v17/benchmark-civic/scene.json").Path
           $process = Start-Process -FilePath $exe -ArgumentList "--smoke-walking-collisions", ('"{0}"' -f $scene) -PassThru -Wait -NoNewWindow
           if ($process.ExitCode -ne 0) { throw "Packaged exploration controls failed ($($process.ExitCode))." }
       - name: Upload V17 Windows application
