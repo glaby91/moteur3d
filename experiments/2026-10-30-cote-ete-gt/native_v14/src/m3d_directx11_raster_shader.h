@@ -36,6 +36,7 @@ cbuffer Frame : register(b0) {
     float3 reflectionForward; float reflectionAspect;
     float3 reflectionRight; float reflectionPad0;
     float3 reflectionUp; float reflectionPad1;
+    uint4 adaptiveZero[128];
 };
 Texture2DArray<float4> albedo : register(t0);
 Texture2D<float> shadowDepth : register(t1);
@@ -62,6 +63,12 @@ VSOut VSMain(VSIn i) {
     // pull geometry behind the near plane onto the near plane instead of clipping it.
     o.p = float4(nx * safeZ, ny * safeZ, depth, z);
     o.n = i.n; o.uv = i.uv; o.world=i.p; o.mat = min(i.mat, materialCount - 1);o.primitiveId=i.primitiveId;
+    // The pixel shader already skips local radiance for the sentinel.
+    // Preserve all other LumaTrace lighting controls and all draw calls.
+    [branch] if(padding.x>.5 && i.primitiveId!=0xffffffffu){
+        uint group=i.primitiveId>>8;uint word=group>>5;
+        if((adaptiveZero[word>>2][word&3u]&(1u<<(group&31u)))!=0u)o.primitiveId=0xffffffffu;
+    }
     return o;
 }
 struct VSBoxIn {
@@ -205,7 +212,7 @@ inline constexpr char kShaderPart2[] = R"(
     }
     float3 color = base*(ambientEnergy+sunEnergy)
                  + base*materialGlow[i.mat].rgb*materialGlow[i.mat].a;
-    if(peripheralControls.w>.5 && i.primitiveId!=0xffffffff)
+    [branch] if(peripheralControls.w>.5 && i.primitiveId!=0xffffffffu)
         color+=base*lumaTriangleRadiance[i.primitiveId].rgb;
     color += materialEmission[i.mat].rgb * max(materialEmission[i.mat].a,0.0);
     // The old warm (28,13,4) constant tinted *every* night material brown.

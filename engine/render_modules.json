@@ -184,7 +184,7 @@
     },
     {
       "id": "d3d11_raster_shader",
-      "revision": "005",
+      "revision": "006",
       "engines": [
         "v16",
         "v17"
@@ -236,7 +236,7 @@
     },
     {
       "id": "d3d11_raster",
-      "revision": "011",
+      "revision": "012",
       "engines": [
         "v16",
         "v17"
@@ -275,7 +275,7 @@
     },
     {
       "id": "lumatrace_gpu_compute",
-      "revision": "009",
+      "revision": "010",
       "engines": [
         "v16",
         "v17"
@@ -283,7 +283,8 @@
       "optional": true,
       "description": "DX11 GPU direct triangle radiance and two-pass spatial probe GI (restored from LumaTrace-008), supports indexed geometry.",
       "dependencies": [
-        "lumatrace_cpu"
+        "lumatrace_cpu",
+        "lumatrace_adaptive"
       ],
       "sources": [
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_gpu_d3d11.cpp",
@@ -322,6 +323,22 @@
       "sources": [
         "v17/vulkan/m3d_vulkan.cpp",
         "v17/vulkan/m3d_vulkan_stub.cpp"
+      ]
+    },
+    {
+      "id": "lumatrace_adaptive",
+      "revision": "001",
+      "engines": [
+        "v16",
+        "v17"
+      ],
+      "optional": true,
+      "description": "Conservative 256-triangle group local-radiance budget 0/1; default off.",
+      "dependencies": [
+        "lumatrace_cpu"
+      ],
+      "sources": [
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_adaptive.h"
       ]
     }
   ]

@@ -170,6 +170,7 @@ struct FrameConstants {
     float reflectionForward[3], reflectionAspect;
     float reflectionRight[3], reflectionPad0;
     float reflectionUp[3], reflectionPad1;
+    uint32_t adaptiveZero[512];
 };
 
 // Independent sky constants avoid disturbing the existing PBR/shadow shader layout.
@@ -277,7 +278,9 @@ public:
            !ensureAnisotropy(quality.anisotropy,error)||
            (nativeHwnd?!ensureSwapchain(nativeHwnd,w,h,error):
                         !ensureReadback(depth,w,h,error)))return false;
-        if(lumaBvh&&!lumaTraceCompute_.prepare(device_.Get(),*lumaBvh,lumaCpuScene_,scene,error))return false;
+        const char* adaptiveEnv=std::getenv("M3D_V17_LUMA_ADAPTIVE");
+        const bool adaptiveRequested=lumaBvh&&adaptiveEnv&&std::strcmp(adaptiveEnv,"1")==0;
+        if(lumaBvh&&!lumaTraceCompute_.prepare(device_.Get(),*lumaBvh,lumaCpuScene_,scene,adaptiveRequested,error))return false;
         const unsigned slotIndex=nextReadbackSlot_;
         ReadbackSlot& slot=readbackSlots_[slotIndex];
         slot.cpuStarted=started;
@@ -480,7 +483,12 @@ public:
         const float clear[4]={cb.sky[0],cb.sky[1],cb.sky[2],1.f};
         if(slot.queryReady){context_->Begin(slot.disjoint.Get());context_->End(slot.start.Get());}
         if(lumaBvh&&!lumaTraceCompute_.dispatch(context_.Get(),verticesSrv_.Get(),indicesSrv_.Get(),scene,
-            albedo_.Get(),preservedAlbedo_.Get(),sampler_.Get(),preservedTextureLayers_,hybrid,error))return false;
+            albedo_.Get(),preservedAlbedo_.Get(),sampler_.Get(),preservedTextureLayers_,hybrid,adaptiveRequested,error))return false;
+        const bool adaptiveEnabled=lumaBvh&&lumaTraceCompute_.adaptiveEnabled();
+        if(adaptiveEnabled){
+            cb.padding[0]=1.f;
+            std::memcpy(cb.adaptiveZero,lumaTraceCompute_.zeroMask().data(),sizeof(cb.adaptiveZero));
+        }
         UINT submittedVertices=0,submittedBoxInstances=0;
         uint64_t drawCalls=0,submittedEllipseTriangles=0,submittedEllipseInstances=0;
         uint64_t submittedFoliageTriangles=0,submittedFoliageInstances=0;
@@ -880,6 +888,9 @@ public:
                 nativeStats->gpuDrawCalls=drawCalls;
                 nativeStats->planarReflectionRendered=planarReflection;
                 nativeStats->lumaProbeLightingEnabled=lumaBvh&&hybrid;
+                nativeStats->lumaAdaptiveEnabled=adaptiveEnabled;
+                nativeStats->lumaAdaptiveZeroTriangles=adaptiveEnabled?lumaTraceCompute_.zeroTriangles():0;
+                nativeStats->lumaAdaptiveTriangleCount=lumaBvh?lumaTraceCompute_.triangleCount():0;
                 nativeStats->geometryPreparationEnabled=staticGeometryPreparationEnabled_;
                 nativeStats->geometrySourceVertices=sourceVertexCount_;nativeStats->geometryUniqueVertices=uniqueVertexCount_;
                 nativeStats->geometryIndexCount=indexCount_;nativeStats->geometryVertexBytes=geometryVertexBytes_;
@@ -929,6 +940,9 @@ public:
         slot.submitted.gpuDrawCalls=drawCalls;
         slot.submitted.planarReflectionRendered=planarReflection;
         slot.submitted.lumaProbeLightingEnabled=lumaBvh&&hybrid;
+        slot.submitted.lumaAdaptiveEnabled=adaptiveEnabled;
+        slot.submitted.lumaAdaptiveZeroTriangles=adaptiveEnabled?lumaTraceCompute_.zeroTriangles():0;
+        slot.submitted.lumaAdaptiveTriangleCount=lumaBvh?lumaTraceCompute_.triangleCount():0;
         slot.submitted.geometryPreparationEnabled=staticGeometryPreparationEnabled_;
         slot.submitted.geometrySourceVertices=sourceVertexCount_;slot.submitted.geometryUniqueVertices=uniqueVertexCount_;
         slot.submitted.geometryIndexCount=indexCount_;slot.submitted.geometryVertexBytes=geometryVertexBytes_;

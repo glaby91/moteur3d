@@ -5,6 +5,7 @@
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
 #include "src/m3d_directx11_mesh.h"
+#include "src/m3d_lumatrace_adaptive.h"
 #include <QCoreApplication>
 #include <QDebug>
 #include <QImage>
@@ -63,6 +64,18 @@ int main(int argc,char** argv){
                 }
             }
         }
+    }
+    {
+        using namespace m3d::lumatrace_adaptive;
+        std::vector<Bounds> b(2);b[0].add({0,0,0});b[0].add({1,1,1});
+        b[1].add({100,0,0});b[1].add({101,1,1});
+        float lights[64][4]{},colors[64][4]{};lights[0][3]=2;colors[0][0]=colors[0][3]=1;
+        Mask mask{};
+        if(classify(b,257,lights,colors,1,mask)!=1||mask[0]!=2u)return 1;
+        colors[0][3]=0;
+        if(classify(b,257,lights,colors,1,mask)!=257||mask[0]!=3u)return 1;
+        colors[0][3]=1;lights[0][0]=98;
+        if(classify(b,257,lights,colors,1,mask)!=256||mask[0]!=1u)return 1;
     }
     const auto loaded=m3d::v16::loadScene(QString::fromLocal8Bit(argv[1]));
     if(!loaded){qCritical()<<loaded.error;return 1;}
@@ -125,6 +138,31 @@ int main(int argc,char** argv){
             qCritical()<<"LumaTrace probe cold/warm or indexed parity failed"<<QString::fromStdWString(error);return 1;}
         if(!enabled)probeReference=cold;
     }
+    // Compare actual WARP output with the exact same geometry, probes and lighting.
+    // The no-lamp fixture forces every valid opaque triangle through budget zero.
+    auto noLamps=runtime.renderScene;noLamps.lights.clear();
+    for(bool noLocal:{false,true}){
+        const auto& scene=noLocal?noLamps:runtime.renderScene;
+        for(float hour:{14.75f,23.f}){
+            m3d::updateLighting(hour);
+            if(noLocal)m3d::pointLights.clear();
+            m3d::Stats shadowInfo{};const auto shadowAB=m3d::buildShadow(scene,shadowInfo);
+            std::vector<uint32_t> reference;
+            for(bool enabled:{false,true,false}){
+                if(_putenv_s("M3D_V17_LUMA_ADAPTIVE",enabled?"1":"0"))return 1;
+                std::vector<uint32_t> pixels;m3d::Stats stats{};
+                if(!m3d::renderLumaTracePreview(scene,runtime.lumaTraceBvh4,shadowAB,cam,256,144,pixels,stats,error)||
+                   stats.lumaAdaptiveEnabled!=enabled||!stats.lumaAdaptiveTriangleCount||
+                   (enabled&&noLocal&&stats.lumaAdaptiveZeroTriangles!=stats.lumaAdaptiveTriangleCount)||
+                   (!reference.empty()&&reference!=pixels)){
+                    qCritical()<<"Adaptive 0/1 WARP parity failed"<<hour<<noLocal<<enabled<<QString::fromStdWString(error);return 1;
+                }
+                reference=pixels;
+            }
+        }
+    }
+    _putenv_s("M3D_V17_LUMA_ADAPTIVE","");
+    m3d::updateLighting(built.runtime.daylightHour);
     m3d::setRasterHybridLightingEnabled(false);
     _putenv_s("M3D_V17_STATIC_GEOMETRY_PREP","");
     qInfo()<<"DX11 and LumaTrace pixels identical with geometry preparation off/on, including probes";

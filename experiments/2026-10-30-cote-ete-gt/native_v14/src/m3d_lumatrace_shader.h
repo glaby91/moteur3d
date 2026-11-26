@@ -17,6 +17,7 @@ cbuffer Params : register(b0) {
  float4 SunColor;
  uint4 PreservedLayers[64];
  uint4 GeometryLayout;
+ uint4 AdaptiveZero[128];
 };
 
 Buffer<uint> VertexIndices : register(t7);
@@ -80,6 +81,8 @@ float3 albedoAtHit(uint id,float u,float v){
 float3 directAtHit(uint id,float3 p,float3 n){
  float3 sum=sunlight(id,p,n);[loop]for(uint i=0;i<min(Counts.w,64u);++i)sum+=light(id,p,n,Lights[i],Colors[i]);return sum;}
 [numthreads(64,1,1)] void CSShadeTriangles(uint3 tid:SV_DispatchThreadID){uint id=tid.x;if(id>=Counts.x)return;
+ if(GeometryLayout.y!=0u){uint group=id>>8;uint word=group>>5;
+  if((AdaptiveZero[word>>2][word&3u]&(1u<<(group&31u)))!=0u){Radiance[id]=float4(0,0,0,1);return;}}
  Vertex a=loadVertex(id*3u),b=loadVertex(id*3u+1u),c=loadVertex(id*3u+2u);float3 p=(a.p+b.p+c.p)/3;
  float3 n=normalize(decodeNormal(a.normalPacked)+decodeNormal(b.normalPacked)+decodeNormal(c.normalPacked));float3 sum=0;
  [loop]for(uint i=0;i<min(Counts.w,64u);++i)sum+=light(id,p,n,Lights[i],Colors[i]);Radiance[id]=float4(sum,1);}

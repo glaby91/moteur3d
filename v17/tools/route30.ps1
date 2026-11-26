@@ -1,7 +1,8 @@
 #requires -version 5.1
 param(
     [string]$Root,
-    [ValidateSet('on','off')][string]$GeometryPrep = 'on'
+    [ValidateSet('on','off')][string]$GeometryPrep = 'on',
+    [switch]$AdaptiveAB
 )
 
 $ErrorActionPreference = 'Stop'
@@ -137,7 +138,7 @@ function Write-RouteSystemInfo([string]$PackageRoot, [string]$Exe, [string]$Prep
     $info | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $Path -Encoding UTF8
 }
 
-function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$PrepMode = 'on') {
+function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$PrepMode = 'on', [switch]$AdaptiveAB) {
     $PrepMode = $PrepMode.ToLowerInvariant()
     $PackageRoot = (Resolve-Path -LiteralPath $PackageRoot).ProviderPath
     # Persist machine metadata at launch, even if scene download or GPU startup fails.
@@ -173,7 +174,8 @@ function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$
         Copy-Item -LiteralPath $scene.Manifest -Destination $versionPath
         $csv = Join-Path $out 'resultats.csv'
         Write-Host "Parcours GPU direct : 1280 x 720, VSync desactivee, rebonds indirects actives, 30 s par backend. Preparation des triangles : $PrepMode."
-        & $exe $scene.Path $csv --geometry-prep $PrepMode
+        if ($AdaptiveAB) { & $exe $scene.Path $csv --geometry-prep $PrepMode --adaptive-ab }
+        else { & $exe $scene.Path $csv --geometry-prep $PrepMode }
         $engineExit = $LASTEXITCODE
         if (!(Test-Path -LiteralPath $csv -PathType Leaf)) {
             throw "Aucun CSV produit (code moteur $engineExit). Dossier : $out"
@@ -187,4 +189,4 @@ function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$
     }
 }
 
-if ($MyInvocation.InvocationName -ne '.') { Invoke-Route30 -PackageRoot $Root -PrepMode $GeometryPrep }
+if ($MyInvocation.InvocationName -ne '.') { Invoke-Route30 -PackageRoot $Root -PrepMode $GeometryPrep -AdaptiveAB:$AdaptiveAB }

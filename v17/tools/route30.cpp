@@ -13,6 +13,8 @@
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
+#include <vector>
+#include <iterator>
 
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -23,7 +25,7 @@ constexpr float solarHour = 14.75f;
 constexpr char cameraId[] = "v7_pool_fresco";
 
 enum class Backend { dx11, vulkan, lumaTrace };
-struct Pass { Backend backend; const char* name; };
+struct Pass { Backend backend; const char* name; bool adaptive=false; int profile=0; int repetition=0; };
 constexpr Pass passes[] = {{Backend::dx11, "DX11"}, {Backend::vulkan, "Vulkan"},
                            {Backend::lumaTrace, "LumaTrace"}};
 
@@ -92,6 +94,10 @@ struct Route {
     const m3d::ShadowMap& shadow;
     HWND window;
     bool prepareGeometry;
+    const std::vector<m3d::ShadowMap>* transitionShadows=nullptr;
+    bool adaptiveCampaign=false;
+    bool adaptive=false;
+    mutable size_t lastPhase=~size_t(0);
 };
 
 bool presentFrame(const Route& route, Backend backend, double seconds,
@@ -102,18 +108,24 @@ bool presentFrame(const Route& route, Backend backend, double seconds,
     pose.target.x += offset;
     const auto camera = m3d::v16::makeCamera(pose, width, height);
     const auto& scene = route.runtime.renderScene;
+    const m3d::ShadowMap* activeShadow=&route.shadow;
+    if(route.transitionShadows){
+        const size_t phase=std::min<size_t>(5,size_t(seconds/5.0));
+        if(route.lastPhase!=phase){m3d::updateLighting(17.f+phase*.8f);route.lastPhase=phase;}
+        activeShadow=&(*route.transitionShadows)[phase];
+    }
     bool presented = false;
     switch (backend) {
     case Backend::dx11:
-        presented = m3d::renderDirectX11Native(scene, route.shadow, camera, width, height,
+        presented = m3d::renderDirectX11Native(scene, *activeShadow, camera, width, height,
                                                route.window, stats, reason);
         break;
     case Backend::vulkan:
-        presented = m3d::renderVulkanDirectPresent(scene, route.shadow, camera, width, height,
+        presented = m3d::renderVulkanDirectPresent(scene, *activeShadow, camera, width, height,
                                                    route.window, stats, reason);
         break;
     case Backend::lumaTrace:
-        presented = m3d::renderLumaTraceNative(scene, route.runtime.lumaTraceBvh4, route.shadow, camera,
+        presented = m3d::renderLumaTraceNative(scene, route.runtime.lumaTraceBvh4, *activeShadow, camera,
                                                width, height, route.window, stats, reason);
         break;
     }
@@ -129,6 +141,7 @@ bool presentFrame(const Route& route, Backend backend, double seconds,
     if(presented&&backend==Backend::lumaTrace&&(!stats.planarReflectionRendered||!stats.lumaProbeLightingEnabled)){
         reason=L"LumaTrace pool benchmark requires planar reflection and indirect probe lighting.";return false;
     }
+    if(presented&&route.adaptiveCampaign&&stats.lumaAdaptiveEnabled!=route.adaptive){reason=L"Adaptive 0/1 mode mismatch.";return false;}
     return presented;
 }
 
@@ -138,6 +151,8 @@ struct Result {
     std::wstring error;
     bool cancelled = false;
     m3d::Stats lastFrame{};
+    std::vector<double> frameMs;
+    uint64_t zeroSum=0,triangleSum=0;
 };
 
 Result measure(const Route& route, const Pass& pass) {
@@ -167,15 +182,18 @@ Result measure(const Route& route, const Pass& pass) {
         const double t = std::chrono::duration<double>(before - start).count();
         if (!frame(t)) return result;
         const auto end = Clock::now();
-        result.renderSeconds += std::chrono::duration<double>(end - before).count();
+        const double seconds=std::chrono::duration<double>(end - before).count();
+        result.renderSeconds += seconds;
+        if(route.adaptiveCampaign){result.frameMs.push_back(seconds*1000.);result.zeroSum+=result.lastFrame.lumaAdaptiveZeroTriangles;result.triangleSum+=result.lastFrame.lumaAdaptiveTriangleCount;}
         if (end <= deadline) ++result.framesInWindow;
     }
     result.elapsed = std::chrono::duration<double>(Clock::now() - start).count();
     return result;
 }
 
-void writeRow(QTextStream& csv, const Pass& pass, const Result& r, bool prepareGeometry) {
-    csv << pass.name << ',' << cameraId << ',' << solarHour << ',' << width << ',' << height << ',';
+void writeRow(QTextStream& csv, const Pass& pass, const Result& r, bool prepareGeometry, bool adaptiveCampaign) {
+    const float hour=pass.profile==1?23.f:pass.profile==2?17.f:solarHour;
+    csv << pass.name << ',' << cameraId << ',' << hour << ',' << width << ',' << height << ',';
     if (r.error.empty()) {
         csv << r.framesInWindow << ',' << r.elapsed << ',' << r.framesStarted << ','
             << (1000.0 * r.renderSeconds / r.framesStarted) << ',' << (r.framesInWindow / durationSeconds)
@@ -198,6 +216,14 @@ void writeRow(QTextStream& csv, const Pass& pass, const Result& r, bool prepareG
     } else {
         csv << ",,,,,,";
     }
+    if(adaptiveCampaign){
+        csv << ',' << (pass.adaptive?"on":"off") << ',' << (pass.profile==0?"day":pass.profile==1?"night":"transition") << ',' << pass.repetition;
+        if(r.error.empty()&&!r.frameMs.empty()){
+            auto values=r.frameMs;std::sort(values.begin(),values.end());
+            auto pct=[&](double q){return values[size_t(std::ceil(q*values.size()))-1];};
+            csv << ',' << pct(.5) << ',' << pct(.95) << ',' << (r.triangleSum?100.*double(r.zeroSum)/double(r.triangleSum):0.) << ',' << r.lastFrame.lumaAdaptiveTriangleCount;
+        }else csv << ",,,,";
+    }
     csv << '\n';
     csv.flush();
 }
@@ -207,14 +233,15 @@ int main(int argc, char** argv) {
     SetProcessDPIAware();  // Physical client pixels on the primary monitor.
     QCoreApplication app(argc, argv);
     const auto args = app.arguments();
-    bool prepareGeometry = true;
-    if (args.size() == 5 && args[3] == QStringLiteral("--geometry-prep") &&
-        (args[4] == QStringLiteral("on") || args[4] == QStringLiteral("off"))) {
-        prepareGeometry = args[4] == QStringLiteral("on");
-    } else if (args.size() != 3) {
-        std::cerr << "Usage: route30.exe scene.json resultats.csv [--geometry-prep on|off]\n";
-        return 2;
+    bool prepareGeometry = true, adaptiveCampaign=false;
+    if(args.size()<3)return 2;
+    for(int i=3;i<args.size();++i){
+        if(args[i]==QStringLiteral("--adaptive-ab"))adaptiveCampaign=true;
+        else if(args[i]==QStringLiteral("--geometry-prep")&&i+1<args.size()&&
+                (args[i+1]==QStringLiteral("on")||args[i+1]==QStringLiteral("off")))prepareGeometry=args[++i]==QStringLiteral("on");
+        else {std::cerr<<"Usage: route30.exe scene.json resultats.csv [--geometry-prep on|off] [--adaptive-ab]\n";return 2;}
     }
+    if(_putenv_s("M3D_V17_LUMA_ADAPTIVE","0"))return 2;
     if (_putenv_s("M3D_V17_STATIC_GEOMETRY_PREP", prepareGeometry ? "1" : "0")) return 2;
     // Uncapped benchmark: never silently compare against a VSync-limited Vulkan pass.
     if (_putenv_s("CSE_WARP_DX_BENCH_PRESENT_INTERVAL", "0") ||
@@ -236,20 +263,38 @@ int main(int argc, char** argv) {
     QTextStream csv(&file);
     csv << "backend,camera,hour,width,height,frames_completed_30s,elapsed_s,frames_started,mean_render_ms,fps_30s,"
            "presentation,vsync,readback_buffers,status,error,geometry_prep_requested,geometry_prep_enabled,"
-           "geometry_source_vertices,geometry_unique_vertices,geometry_index_count,planar_reflection,luma_probe_lighting\n";
+           "geometry_source_vertices,geometry_unique_vertices,geometry_index_count,planar_reflection,luma_probe_lighting";
+    if(adaptiveCampaign)csv<<",adaptive_requested,profile,repetition,p50_present_ms,p95_present_ms,mean_zero_percent,triangle_count";
+    csv<<'\n';
+    std::vector<Pass> campaign;
+    if(adaptiveCampaign){
+        for(int profile=0;profile<3;++profile)for(int repeat=1;repeat<=4;++repeat)
+            for(bool on:{false,true})campaign.push_back({Backend::lumaTrace,on?"LumaTrace-ON":"LumaTrace-OFF",on!=(repeat%2==0),profile,repeat});
+        // Alternate A/B order to reduce thermal/clock drift. Name follows actual mode.
+        for(auto& pass:campaign)pass.name=pass.adaptive?"LumaTrace-ON":"LumaTrace-OFF";
+    }else campaign.assign(std::begin(passes),std::end(passes));
+    std::vector<m3d::ShadowMap> transitionShadows;
+    m3d::ShadowMap nightShadow;
+    if(adaptiveCampaign){
+        m3d::updateLighting(23.f);nightShadow=m3d::buildShadow(rt.renderScene,stats);
+        for(int phase=0;phase<6;++phase){m3d::updateLighting(17.f+phase*.8f);transitionShadows.push_back(m3d::buildShadow(rt.renderScene,stats));}
+    }
     bool allPassed = true;
-    for (const Pass& pass : passes) {
+    for (const Pass& pass : campaign) {
+        if(_putenv_s("M3D_V17_LUMA_ADAPTIVE",pass.adaptive?"1":"0"))return 2;
+        m3d::updateLighting(pass.profile==1?23.f:pass.profile==2?17.f:solarHour);
         Result result;
         // Each graphics API owns a dedicated HWND, as in the exploration window.
         HWND window = openRouteWindow(result.error);
         if (window) {
-            const Route route{rt, *it, shadow, window, prepareGeometry};
+            const Route route{rt,*it,pass.profile==1?nightShadow:shadow,window,prepareGeometry,
+                pass.profile==2?&transitionShadows:nullptr,adaptiveCampaign,pass.adaptive};
             result = measure(route, pass);
             if (pass.backend == Backend::vulkan) m3d::releaseVulkanDirectForCurrentThread();
             else m3d::releaseDirectX11NativeForCurrentThread();
             DestroyWindow(window);
         }
-        writeRow(csv, pass, result, prepareGeometry);
+        writeRow(csv, pass, result, prepareGeometry, adaptiveCampaign);
         allPassed = allPassed && result.error.empty();
         if (result.cancelled) break;
     }
