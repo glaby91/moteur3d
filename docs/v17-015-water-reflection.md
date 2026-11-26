@@ -1,0 +1,5 @@
+# V17.015 — water reflection coverage
+
+The original pool reflection used a fixed y=.02 m plane and a hard UV bounds check. The real V17.629 scene plane was not independently measured from its archive. This patch detects the dominant horizontal water plane from the transparent raster triangles at mesh rebuild, prefers cse_pool_water when present, groups within 1 mm and chooses the highest equal-area face. A single plane is supported; fragments on other planes do not receive this mirror. No per-frame mesh scan.
+
+Mirror camera reflects the exact eye and orthonormal basis, reverses reflected up to maintain handedness, and uses 1.10x tanHalf. Same half-resolution target. Shader bounds normal-induced UV distortion to +/- .04, within the .04545 per-axis guard band for points on the visible plane. This is not a generic mirror/refraction implementation. The existing below-plane clip, specular, Fresnel and probe lighting are preserved. Synthetic mesh and camera projection regression tests are included in the WARP smoke test. Actual scene screenshots and physical hardware performance remain to be verified.

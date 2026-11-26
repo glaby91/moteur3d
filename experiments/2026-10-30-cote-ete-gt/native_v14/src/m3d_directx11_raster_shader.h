@@ -356,7 +356,7 @@ inline constexpr char kShaderPart2[] = R"(
         // Underwater ladders must remain visible through the surface from the deck.
         // Avoid the former 45% high-angle opaque cyan veil.
         float opacity=lerp(.08,.24,saturate(fresnelWater*1.75));
-        if(reflectionControls.x>1.5 && abs(i.world.y-reflectionControls.w)<=.002 && abs(normal.y)>.5){
+        if(reflectionControls.x>1.5 && abs(i.world.y-reflectionControls.w)<=.002 ){
             float3 reflectedView=i.world-reflectionEye;
             float reflectedDepth=dot(reflectedView,reflectionForward);
             if(reflectedDepth>.08){
