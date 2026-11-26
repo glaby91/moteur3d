@@ -224,7 +224,19 @@ inline void advance(const Scene& scene,State& state,V motion,float dt,
         state.verticalVelocity=std::max(-22.f,state.verticalVelocity-cfg.gravity*dt);
         const float proposedY=previousY+state.verticalVelocity*dt;
         V landing{};
-        if(support(scene,state.feet.x,state.feet.z,
+        if(proposedY>previousY){
+            const float height=state.crouched?cfg.crouchedBodyHeight:cfg.bodyHeight;
+            constexpr float skin=.005f;
+            Hit overhead{};
+            closest(scene,Ray{state.feet+V{0.f,height-skin,0.f},{0.f,1.f,0.f}},
+                    overhead,nullptr,false,-1,false);
+            if(overhead.id>=0 && overhead.t<=proposedY-previousY+skin){
+                state.feet.y+=std::max(0.f,overhead.t-skin);
+                state.verticalVelocity=0.f;
+                return;
+            }
+        }
+        if(state.verticalVelocity<=0.f && support(scene,state.feet.x,state.feet.z,
                    previousY+.02f,proposedY-.02f,landing,cfg)){
             state.feet.y=landing.y;
             state.verticalVelocity=0.f;

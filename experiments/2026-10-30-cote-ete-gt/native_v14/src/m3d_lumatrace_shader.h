@@ -6,7 +6,10 @@ struct Node { float3 lo; uint c0; float3 hi; uint c1; uint c2,c3,first,count,chi
 float snorm10(uint bits){return (float)(bits&1023u)*(2.0/1023.0)-1.0;}
 float3 decodeNormal(uint packed){return normalize(float3(snorm10(packed),snorm10(packed>>10),snorm10(packed>>20)));}
 ByteAddressBuffer V : register(t0);
-Vertex loadVertex(uint id){
+cbuffer Params : register(b0) { uint4 Counts; float4 Lights[64]; float4 Colors[64]; float4 SunDirection; float4 SunColor; uint4 GeometryLayout; };
+Buffer<uint> VertexIndices : register(t4);
+Vertex loadVertex(uint sourceIndex){
+ uint id=GeometryLayout.x!=0u ? VertexIndices[sourceIndex] : sourceIndex;
  uint byteOffset=id*32u;Vertex v;
  v.p=float3(asfloat(V.Load(byteOffset)),asfloat(V.Load(byteOffset+4u)),asfloat(V.Load(byteOffset+8u)));
  v.normalPacked=V.Load(byteOffset+12u);
@@ -17,7 +20,6 @@ StructuredBuffer<uint> Order : register(t1);
 StructuredBuffer<Node> Bvh : register(t2);
 StructuredBuffer<float4> Albedo : register(t3);
 RWStructuredBuffer<float4> Radiance : register(u0);
-cbuffer Params : register(b0) { uint4 Counts; float4 Lights[64]; float4 Colors[64]; float4 SunDirection; float4 SunColor; };
 static const float kPi=3.14159265359;
 static const uint kBounceSamples=4;
 bool bounds(Node n,float3 o,float3 invD,float maxT,out float nearT){

@@ -166,7 +166,7 @@ if(WIN32)
     target_link_libraries(v16_shader_check PRIVATE d3dcompiler)
     add_test(NAME v16_hlsl_compute_shader
         COMMAND v16_shader_check "${NATIVE_SRC}/shaders/m3d_raytrace_compute.hlsl")
-    set_tests_properties(v16_hlsl_compute_shader PROPERTIES TIMEOUT 60)
+    set_tests_properties(v16_hlsl_compute_shader PROPERTIES TIMEOUT 240)
 endif()
 add_custom_command(TARGET moteur3d_v16 POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory

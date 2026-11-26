@@ -75,6 +75,12 @@ add_test(NAME v17_camera_diagnostic_roundtrip COMMAND v17_camera_diagnostic_smok
 add_executable(v17_scope_zoom_smoke "tests/scope_zoom_smoke.cpp")
 add_test(NAME v17_scope_zoom_hold_release COMMAND v17_scope_zoom_smoke)
 
+# Exact CPU-only checks for the reusable static indexed-geometry preparation.
+add_executable(v17_static_geometry_prepare_smoke
+    "tests/static_geometry_prepare_smoke.cpp")
+add_test(NAME v17_static_geometry_prepare_attributes
+    COMMAND v17_static_geometry_prepare_smoke)
+
 # No GPU or Windows runtime required to verify exact 2x2 sample budget.
 add_executable(v17_primary_quarter_smoke "tests/primary_quarter_smoke.cpp")
 add_test(NAME v17_primary_quarter_exact_budget COMMAND v17_primary_quarter_smoke)
@@ -440,6 +446,22 @@ else()
 endif()
 # The complete benchmark is a separate tool in the SAME Windows build:
 # no iterative recompilation is required to change rounds/cameras/buffers.
+if(WIN32)
+    add_executable(v17_route30 tools/route30.cpp)
+    target_include_directories(v17_route30 PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+    target_link_libraries(v17_route30 PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui user32)
+    set_target_properties(v17_route30 PROPERTIES OUTPUT_NAME route30)
+    if(TARGET v17_vulkan_spirv)
+        add_dependencies(v17_route30 v17_vulkan_spirv)
+        add_custom_command(TARGET v17_route30 POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:v17_route30>/vulkan"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                ${V17_VULKAN_SPIRV} "$<TARGET_FILE_DIR:v17_route30>/vulkan"
+            VERBATIM)
+    endif()
+endif()
+
 add_executable(moteur3d_v17_campaign
     "${CMAKE_CURRENT_SOURCE_DIR}/tools/benchmark_v17_campaign.cpp")
 target_include_directories(moteur3d_v17_campaign PRIVATE

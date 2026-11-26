@@ -738,6 +738,39 @@ public:
             const bool okAfterReturn=walkingModeBox_->isChecked()
                 &&walkingCollisionSyncPending_
                 &&prefs.value(QStringLiteral("Exploration/WalkingV17_600")).toBool();
+            // Drive the same canvas, keyboard filter and motion step as exploration.
+            freeCameraActive_=false;
+            toggleExploration();
+            frameTimer_.stop();
+            const V standingEye=freeCamera_.eye;
+            auto key=[this](QEvent::Type type,Qt::Key code){
+                QKeyEvent event(type,code,Qt::NoModifier);
+                QCoreApplication::sendEvent(canvas_,&event);
+            };
+            key(QEvent::KeyPress,Qt::Key_Control);
+            advanceExplorationFrame(1.f/60.f);
+            const bool crouched=walkingState_.crouched && freeCamera_.eye.y<standingEye.y-.5f;
+            key(QEvent::KeyRelease,Qt::Key_Control);
+            advanceExplorationFrame(1.f/60.f);
+            const bool stood=!walkingState_.crouched && std::abs(freeCamera_.eye.y-standingEye.y)<.02f;
+            key(QEvent::KeyPress,Qt::Key_Space);
+            key(QEvent::KeyRelease,Qt::Key_Space);
+            float peak=freeCamera_.eye.y;
+            for(int i=0;i<120;++i){
+                advanceExplorationFrame(1.f/120.f);
+                peak=std::max(peak,freeCamera_.eye.y);
+            }
+            const bool jumped=peak>standingEye.y+.35f && walkingState_.grounded &&
+                std::abs(freeCamera_.eye.y-standingEye.y)<.02f;
+            key(QEvent::KeyPress,Qt::Key_Less);
+            key(QEvent::KeyRelease,Qt::Key_Less);
+            const bool wristOpened=wristPanel_ && wristPanel_->isVisible();
+            key(QEvent::KeyPress,Qt::Key_Tab);
+            key(QEvent::KeyRelease,Qt::Key_Tab);
+            const bool wristClosed=wristPanel_ && !wristPanel_->isVisible();
+            stopExploration();
+            std::fprintf(stderr,"V17 CONTROLS crouch=%d stand=%d jump_and_land=%d wrist_open=%d wrist_close=%d\n",
+                int(crouched),int(stood),int(jumped),int(wristOpened),int(wristClosed));
             // Restore the prior preference after the smoke test.
             {
                 QSignalBlocker block(walkingModeBox_);
@@ -746,7 +779,7 @@ public:
             if(previous.isValid())prefs.setValue(QStringLiteral("Exploration/WalkingV17_600"),previous);
             else prefs.remove(QStringLiteral("Exploration/WalkingV17_600"));
             prefs.sync();
-            if(!okAfterSelect||!okAfterReturn){
+            if(!okAfterSelect||!okAfterReturn||!crouched||!stood||!jumped||!wristOpened||!wristClosed){
                 std::fprintf(stderr,
                     "V17 COLLISION PREFERENCE FAILED: afterSelect=%d afterReturn=%d\\n",
                     int(okAfterSelect),int(okAfterReturn));
@@ -1358,7 +1391,9 @@ private:
     }
     void frameTick(){
         if(!exploring_||!runtime_||!freeCameraActive_)return;
-        const float dt=std::min(0.08f,float(motionClock_.restart())/1000.f);
+        advanceExplorationFrame(std::min(0.08f,float(motionClock_.restart())/1000.f));
+    }
+    void advanceExplorationFrame(float dt){
         const float nextScope=cse::scope::advance(scopeBlend_,rightMouseHeld_,dt);
         if(nextScope!=scopeBlend_){
             scopeBlend_=nextScope;
@@ -1386,13 +1421,19 @@ private:
             // A recalled anomaly camera can be above a floor or behind a wall.
             // Keep its precise eye position until the user actually navigates.
             // Never reuse stale feet from before camera teleportation.
-            if(walkingCollisionSyncPending_ && length(move)>.01f){
+            const bool wantsCrouch=keysDown_.contains(Qt::Key_Control);
+            if(walkingCollisionSyncPending_ && length(move)<=.01f && !wantsCrouch && !jumpRequested_){
+                if(!watcher_.isRunning()){frameClock_.start();requestRender();}
+                return;
+            }
+            if(walkingCollisionSyncPending_){
                 walk::spawn(runtime_->renderScene,freeCamera_.eye,walkingState_);
                 freeCamera_.eye=walk::eye(walkingState_);
                 walkingCollisionSyncPending_=false;
                 updateLook();
             }
             if(poolLadderMotion_.active()){
+                jumpRequested_=false;
                 const bool climbing=poolLadderMotion_.up;
                 const auto p=poolLadderMotion_.advance(dt);
                 walkingState_.feet={p.x,p.y,p.z};
@@ -1411,6 +1452,7 @@ private:
             const V currentFeet=walkingState_.feet;
             if(scenePath_.contains(QStringLiteral("benchmark-civic"),Qt::CaseInsensitive) &&
                cse::pool_ladder::inWater({currentFeet.x,currentFeet.y,currentFeet.z})){
+                jumpRequested_=false;
                 const float speed=cse::exploration::speedMetersPerSecond(false)*.55f;
                 const V horizontalMotion=length(move)>.01f?norm(move)*(dt*speed):V{};
                 const auto p=cse::pool_ladder::walkInWater(
@@ -1421,7 +1463,6 @@ private:
                 if(!watcher_.isRunning()){frameClock_.start();requestRender();}
                 return;
             }
-            const bool wantsCrouch=keysDown_.contains(Qt::Key_Control);
             walk::setCrouched(runtime_->renderScene,walkingState_,wantsCrouch);
             if(jumpRequested_){
                 walk::jump(walkingState_);
@@ -4126,6 +4167,8 @@ void configureRuntimeEnvironment(){
     // Keep animated clouds in the interactive renderer, not offline benchmarks.
     qputenv("M3D_V17_ANIMATE_CLOUDS","1");
     qputenv("M3D_V17_SPLIT_SKY","1");
+    if(!qEnvironmentVariableIsSet("M3D_V17_STATIC_GEOMETRY_PREP"))
+        qputenv("M3D_V17_STATIC_GEOMETRY_PREP","1");
 }
 
 void configureApplicationMetadata(){

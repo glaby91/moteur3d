@@ -56,6 +56,11 @@ struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,dept
     double gpuDrawMs=0,gpuTransferMs=0,gpuTotalMs=0;
     double cpuSubmitMs=0,cpuMapWaitMs=0,cpuPixelConvertMs=0;
     uint32_t readbackBufferCount=1;
+    // Static geometry A/B telemetry: preparation and upload are separate from frame timing.
+    uint64_t geometrySourceVertices=0,geometryUniqueVertices=0,geometryIndexCount=0;
+    uint64_t geometryVertexBytes=0,geometryIndexBytes=0;
+    double geometryPrepareMs=0.,geometryUploadMs=0.;
+    bool geometryPreparationEnabled=false;
     bool gpuTimingValid=false;
     unsigned threads=1; bool avx2=false,gpu=false;
     // Number of actual primary BVH queries before pixel reconstruction.
