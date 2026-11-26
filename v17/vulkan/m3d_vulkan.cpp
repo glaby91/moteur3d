@@ -481,12 +481,19 @@ class VulkanRaster final {
         std::vector<VkPresentModeKHR> modes(nModes);
         if(nModes)vkcheck(vkGetPhysicalDeviceSurfacePresentModesKHR(physical_,displaySurface_,&nModes,
                                                                     modes.data()),"present modes");
-        // FIFO is always available; MAILBOX may reduce visible stutter
-        // without allowing tearing when available. No hidden CPU fallback.
+        // Prefer uncapped native presentation. FIFO is the only mandatory mode.
+        // An explicit IMMEDIATE benchmark request must not silently fall back.
         VkPresentModeKHR mode=VK_PRESENT_MODE_FIFO_KHR;
         const char* requestedMode=std::getenv("CSE_WARP_VK_BENCH_PRESENT_MODE");
-        if((!requestedMode || std::strcmp(requestedMode,"FIFO")!=0) &&
-           std::find(modes.begin(),modes.end(),VK_PRESENT_MODE_MAILBOX_KHR)!=modes.end())
+        const bool immediate=std::find(modes.begin(),modes.end(),VK_PRESENT_MODE_IMMEDIATE_KHR)!=modes.end();
+        const bool mailbox=std::find(modes.begin(),modes.end(),VK_PRESENT_MODE_MAILBOX_KHR)!=modes.end();
+        if(requestedMode&&std::strcmp(requestedMode,"IMMEDIATE")==0){
+            if(!immediate)throw std::runtime_error("VSync OFF benchmark requires Vulkan IMMEDIATE present mode (unsupported by driver)");
+            mode=VK_PRESENT_MODE_IMMEDIATE_KHR;
+        }else if(!requestedMode||!*requestedMode){
+            if(immediate)mode=VK_PRESENT_MODE_IMMEDIATE_KHR;
+            else if(mailbox)mode=VK_PRESENT_MODE_MAILBOX_KHR;
+        }else if(std::strcmp(requestedMode,"FIFO")!=0&&mailbox)
             mode=VK_PRESENT_MODE_MAILBOX_KHR;
         uint32_t requestedImages=3;
         if(const char* n=std::getenv("CSE_WARP_VK_BENCH_SWAP_IMAGES")){
@@ -540,7 +547,7 @@ class VulkanRaster final {
         swapExtent_=extent;swapFormat_=chosen.format;swapMode_=mode;swapDirty_=false;
         std::clog<<"[CSE WARP Vulkan] DIRECT DISPLAY via Win32 Vulkan swapchain: "
                  <<extent.width<<"x"<<extent.height
-                 <<" images="<<nImages<<" mode="<<(mode==VK_PRESENT_MODE_MAILBOX_KHR?"MAILBOX":"FIFO")
+                 <<" images="<<nImages<<" mode="<<(mode==VK_PRESENT_MODE_IMMEDIATE_KHR?"IMMEDIATE":mode==VK_PRESENT_MODE_MAILBOX_KHR?"MAILBOX":"FIFO")
                  <<" GPU blit, no QImage, no mapped readback\n";
     }
     uint32_t acquireSwapImage(){
@@ -2141,7 +2148,7 @@ public:
                 khronos::Sample sample{};
                 sample.width=uint32_t(w);sample.height=uint32_t(h);
                 sample.direct=acquiredIndex>=0;sample.swapchainImages=uint32_t(swapImages_.size());
-                sample.presentMode=sample.direct?(swapMode_==VK_PRESENT_MODE_MAILBOX_KHR?"MAILBOX":"FIFO"):"OFFSCREEN";
+                sample.presentMode=sample.direct?(swapMode_==VK_PRESENT_MODE_IMMEDIATE_KHR?"IMMEDIATE":swapMode_==VK_PRESENT_MODE_MAILBOX_KHR?"MAILBOX":"FIFO"):"OFFSCREEN";
                 sample.msaa=uint32_t(msaaSamples_);sample.objects=uint32_t(scene.obj.size());
                 sample.lights=uint32_t(std::min<size_t>(kLights,pointLights.size()+scene.lights.size()));
                 sample.sceneRevision=scene.gpuCacheRevision;sample.rebuilt=changed;

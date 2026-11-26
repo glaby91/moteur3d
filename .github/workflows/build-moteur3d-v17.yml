@@ -1,5 +1,5 @@
-name: CSE WARP V17.012 — Windows x64 release
-run-name: CSE WARP V17.012 — Windows x64 (GitHub build ${{ github.run_number }})
+name: CSE WARP V17.013 — Windows x64 release
+run-name: CSE WARP V17.013 — Windows x64 (GitHub build ${{ github.run_number }})
 "on":
   push:
     branches:
@@ -37,7 +37,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   windows:
-    name: Windows x64 — V17.012 and V16 regression tests
+    name: Windows x64 — V17.013 and V16 regression tests
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v5
@@ -882,7 +882,7 @@ jobs:
           & "dist-v17/moteur3d_v17_benchmark.exe" (Join-Path $target "scene.json") "build-v17/bundled-scene-smoke" --smoke --raster-msaa 1
           if ($LASTEXITCODE -ne 0) { throw "Packaged scene $($expected.revision) failed the V17 render smoke." }
           @"
-          CSE WARP V17.012 — moteur et scène de référence
+          CSE WARP V17.013 — moteur et scène de référence
           Scène incluse : $($expected.revision) — glaby91/moteur3d-scene
           Le moteur charge cette scène locale immédiatement. Il vérifie ensuite en arrière-plan si une version plus récente est publiée.
           Lancer LANCER_CSE_WARP.bat pour ouvrir le moteur.
@@ -940,13 +940,13 @@ jobs:
       - name: Upload V17 Windows application
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.012-GitHub-${{ github.run_number }}-Windows-x64
+          name: CSE-WARP-V17.013-GitHub-${{ github.run_number }}-Windows-x64
           path: dist-v17/
           if-no-files-found: error
       - name: Upload fresco ray audit visualization
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.012-GitHub-${{ github.run_number }}-fresco-ray-audit
+          name: CSE-WARP-V17.013-GitHub-${{ github.run_number }}-fresco-ray-audit
           path: build-v17/fresco-ray-audit/
           if-no-files-found: error
       - name: Benchmark GI hors ligne — trois scènes, trois cuissons et sept relectures
@@ -1055,7 +1055,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.012-GitHub-${{ github.run_number }}-Total-Simulation-WARP
+          name: CSE-WARP-V17.013-GitHub-${{ github.run_number }}-Total-Simulation-WARP
           path: build-v17/total-simulation/
           if-no-files-found: warn
       # The V17-specific scene-switch and D3D11 benchmark smoke checks have

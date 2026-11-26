@@ -99,19 +99,14 @@ function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$
         if (Test-Path -LiteralPath $exe -PathType Leaf) {
             Write-Host "Utilisation du moteur de parcours inclus dans le package V17."
         } else {
-            $helperUrl = 'https://github.com/glaby91/moteur3d/releases/download/route30-ee05a7f0d68a5c5c31a5d42fc7e3ddf29232c700/route30.zip'
-            $helperHash = '20e745099002a40091a4a2624f5757b1a8d63e7894f7288a4ab41ae392887739'
-            $toolZip = Get-RouteArchive $cache 'route30' $helperUrl $helperHash 423462
-            $bin = Join-Path $stage 'bin'
-            [IO.Compression.ZipFile]::ExtractToDirectory($toolZip, $bin)
-            $exe = Join-Path $bin 'route30.exe'
+            throw 'route30.exe manquant : utiliser le package V17 complet (ancienne version de secours incompatible avec VSync OFF).'
         }
         $out = Join-Path $PackageRoot ('benchmark-results\parcours30-' + (Get-Date -Format yyyyMMdd-HHmmssfff))
         [IO.Directory]::CreateDirectory($out) | Out-Null
         $versionPath = Join-Path $out 'SCENE_VERSION.json'
         Copy-Item -LiteralPath $scene.Manifest -Destination $versionPath
         $csv = Join-Path $out 'resultats.csv'
-        Write-Host "Parcours GPU direct : 1280 x 720, VSync activee, 30 s par backend. Preparation des triangles : $PrepMode."
+        Write-Host "Parcours GPU direct : 1280 x 720, VSync desactivee, 30 s par backend. Preparation des triangles : $PrepMode."
         & $exe $scene.Path $csv --geometry-prep $PrepMode
         $engineExit = $LASTEXITCODE
         if (!(Test-Path -LiteralPath $csv -PathType Leaf)) {

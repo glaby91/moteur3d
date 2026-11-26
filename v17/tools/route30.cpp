@@ -176,12 +176,12 @@ void writeRow(QTextStream& csv, const Pass& pass, const Result& r, bool prepareG
     if (r.error.empty()) {
         csv << r.framesInWindow << ',' << r.elapsed << ',' << r.framesStarted << ','
             << (1000.0 * r.renderSeconds / r.framesStarted) << ',' << (r.framesInWindow / durationSeconds)
-            << ",native_swapchain,on,0,ok,";
+            << ",native_swapchain,off,0,ok,";
         std::cout << pass.name << " " << r.framesInWindow << " presents / 30 s" << std::endl;
     } else {
         QString detail = QString::fromStdWString(r.error);
         detail.replace('"', QStringLiteral("\"\"")).replace('\r', ' ').replace('\n', ' ');
-        csv << ",,,,,native_swapchain,on,," << (r.cancelled ? "cancelled" : "error") << ",\"" << detail << '"';
+        csv << ",,,,,native_swapchain,unconfirmed,," << (r.cancelled ? "cancelled" : "error") << ",\"" << detail << '"';
         std::cerr << pass.name << ": " << QString::fromStdWString(r.error).toStdString() << std::endl;
     }
     csv << ',' << (prepareGeometry ? "on" : "off");
@@ -211,9 +211,9 @@ int main(int argc, char** argv) {
         return 2;
     }
     if (_putenv_s("M3D_V17_STATIC_GEOMETRY_PREP", prepareGeometry ? "1" : "0")) return 2;
-    // Both native presenters pace on vertical blank. Only this process opts in.
-    if (_putenv_s("CSE_WARP_DX_BENCH_PRESENT_INTERVAL", "1") ||
-        _putenv_s("CSE_WARP_VK_BENCH_PRESENT_MODE", "FIFO")) return 2;
+    // Uncapped benchmark: never silently compare against a VSync-limited Vulkan pass.
+    if (_putenv_s("CSE_WARP_DX_BENCH_PRESENT_INTERVAL", "0") ||
+        _putenv_s("CSE_WARP_VK_BENCH_PRESENT_MODE", "IMMEDIATE")) return 2;
     auto scene = m3d::v16::loadScene(args[1]);
     if (!scene) { std::cerr << scene.error.toStdString() << std::endl; return 3; }
     auto built = m3d::v16::buildRuntime(scene.scene, 2048);
