@@ -329,7 +329,7 @@ private:
 };
 class V17Window final : public QMainWindow {
 public:
-    explicit V17Window(QString scenePath,int textureResolution=2048)
+    explicit V17Window(QString scenePath,int textureResolution=2048,QString fallbackPath={})
         :textureResolution_(textureResolution){
         setWindowTitle(QStringLiteral("CSE WARP Beta X — V%1 Exploration")
             .arg(CSE_WARP_PRODUCT_VERSION));
@@ -601,7 +601,7 @@ public:
         // on a worker after show(), so Windows always shows the main window.
         canvas_->setPlaceholder(QStringLiteral("CSE WARP V17\nChargement de la scène…"));
         if(!scenePath.isEmpty())
-            QTimer::singleShot(0,this,[this,scenePath]{openScene(scenePath);});
+            QTimer::singleShot(0,this,[this,scenePath,fallbackPath]{openScene(scenePath,fallbackPath);});
     }
     // UI contract smoke: each renderer owns a unique top-level HWND.
     void smokeNativeUi(){
@@ -926,10 +926,11 @@ public:
             civicScene?sceneRevision_:QString{},this,
             [this](const QString& updatedPath){
                 QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-                settings.setValue(QStringLiteral("Scene/InstalledLatestPath"),updatedPath);
                 if(runtime_){
+                    settings.setValue(QStringLiteral("Scene/InstalledLatestPath"),updatedPath);
+                    settings.sync(); // The restarted process reads this preference immediately.
                     const bool started=QProcess::startDetached(
-                        QCoreApplication::applicationFilePath(),{updatedPath},
+                        QCoreApplication::applicationFilePath(),{},
                         QCoreApplication::applicationDirPath());
                     if(started){
                         statusBar()->showMessage(QStringLiteral(
@@ -1733,6 +1734,7 @@ private:
     bool sceneLoading_=false;
     uint64_t sceneLoadGeneration_=0;
     QString queuedScenePath_;
+    QString startupFallbackPath_;
     std::shared_ptr<std::atomic<uint64_t>> renderSerial_=std::make_shared<std::atomic<uint64_t>>(0);
     std::shared_ptr<v16::Runtime> runtime_;
     // The sun and scene geometry do not change when navigating cameras.
@@ -3290,8 +3292,9 @@ private:
         }
         statusBar()->showMessage(QStringLiteral("Matériaux enregistrés dans %1").arg(materialsPath_),15000);
     }
-    void openScene(const QString& path){
+    void openScene(const QString& path,const QString& fallbackPath={}){
         if(path.isEmpty())return;
+        startupFallbackPath_=fallbackPath;
         if(exploring_)stopExploration();
         freeCameraActive_=false;
         // Invalidates previous scene/camera frame without waiting on its GPU.
@@ -3369,6 +3372,15 @@ private:
             return; // obsolete load; never apply its resources to new scene
         }
         if(!outcome.error.isEmpty()||!outcome.runtime){
+            const QString details=QStringLiteral("%1\n%2")
+                .arg(QDir::toNativeSeparators(outcome.path),outcome.error);
+            qWarning().noquote()<<details;
+            if(!startupFallbackPath_.isEmpty()){
+                const QString fallback=std::exchange(startupFallbackPath_,QString{});
+                qWarning().noquote()<<"Retrying startup with"<<fallback;
+                openScene(fallback);
+                return;
+            }
             const QString pendingScene=property("v17.pendingSceneUpdatePath").toString();
             if(!pendingScene.isEmpty() &&
                QFileInfo(pendingScene).absoluteFilePath()==QFileInfo(outcome.path).absoluteFilePath())
@@ -3380,9 +3392,10 @@ private:
             if(explorationButton_)explorationButton_->setEnabled(bool(runtime_));
             canvas_->setPlaceholder(QStringLiteral("Chargement impossible : %1").arg(outcome.error));
             statusBar()->showMessage(QStringLiteral("Erreur de chargement : %1").arg(outcome.error));
-            QMessageBox::warning(this,QStringLiteral("Chargement de la scène"),outcome.error);
+            QMessageBox::warning(this,QStringLiteral("Chargement de la scène"),details);
             return;
         }
+        startupFallbackPath_.clear();
         const auto replacement=outcome.runtime;
         // Apply a complete, validated runtime in one GUI-thread transaction.
         renderSerial_->fetch_add(1);
@@ -4126,16 +4139,30 @@ private:
             }));
     }
 };
-QString defaultPath(){
+int localSceneRevision(const QString& path){
+    QFile file(path);
+    if(!file.open(QIODevice::ReadOnly))return -1;
+    const QString revision=QJsonDocument::fromJson(file.readAll()).object()
+        .value(QStringLiteral("revision")).toString().trimmed();
+    return V17SceneUpdateChecker::revisionNumber(revision);
+}
+QStringList defaultScenePaths(){
     QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
     const QString installedScene=settings.value(QStringLiteral("Scene/InstalledLatestPath")).toString();
-    if(!installedScene.isEmpty()&&QFileInfo::exists(installedScene))return installedScene;
-    if(!installedScene.isEmpty())settings.remove(QStringLiteral("Scene/InstalledLatestPath"));
     const QString app=QCoreApplication::applicationDirPath();
+    const QString bundledScene=app+QStringLiteral("/benchmark-civic/scene.json");
+    if(!installedScene.isEmpty()&&QFileInfo(installedScene).isFile()){
+        if(!QFileInfo(bundledScene).isFile()||QFileInfo(bundledScene)==QFileInfo(installedScene))
+            return {installedScene};
+        // Read the two small descriptors before building any geometry or textures.
+        // A newer user update wins. The packaged copy wins a revision tie.
+        if(localSceneRevision(installedScene)>localSceneRevision(bundledScene))
+            return {installedScene,bundledScene};
+        return {bundledScene,installedScene};
+    }
+    if(!installedScene.isEmpty())settings.remove(QStringLiteral("Scene/InstalledLatestPath"));
     const QStringList candidates{
-        // The clean package always opens the latest validated V8/V440 scene.
-        // Explicit CLI scene arguments still override the default.
-        app+QStringLiteral("/benchmark-civic/scene.json"),
+        bundledScene,
         app+QStringLiteral("/benchmark-civic/scene-v440-audit.json"),
         app+QStringLiteral("/scenes/v16/benchmark-civic/scene-v4.json"),
         QDir::currentPath()+QStringLiteral("/scenes/v16/benchmark-civic/scene-v4.json"),
@@ -4143,8 +4170,8 @@ QString defaultPath(){
         app+QStringLiteral("/scenes/v16/pavillon01/scene.json"),
         QDir::currentPath()+QStringLiteral("/scenes/v16/pavillon01/scene.json")
     };
-    for(const auto& path:candidates)if(QFileInfo::exists(path))return path;
-    return QString();
+    for(const auto& path:candidates)if(QFileInfo(path).isFile())return {path};
+    return {};
 }
 }
 namespace {
@@ -4156,6 +4183,7 @@ struct LaunchOptions {
     bool immersiveSmoke=false;
     bool nativeUiSmoke=false;
     QString scenePath;
+    QString fallbackScenePath;
     QString switchTargetPath;
     int textureResolution=2048;
 };
@@ -4199,8 +4227,13 @@ LaunchOptions parseLaunchOptions(int argc,char** argv){
     options.textureResolution=sceneSmoke?256:2048;
     if(options.switchSmoke)options.switchTargetPath=QString::fromLocal8Bit(argv[3]);
     if(!options.nativeUiSmoke){
-        options.scenePath=sceneSmoke?QString::fromLocal8Bit(argv[2])
-            :(argc>1?QString::fromLocal8Bit(argv[1]):defaultPath());
+        if(argc>1){
+            options.scenePath=QString::fromLocal8Bit(argv[sceneSmoke?2:1]);
+        }else{
+            const QStringList paths=defaultScenePaths();
+            options.scenePath=paths.value(0);
+            options.fallbackScenePath=paths.value(1);
+        }
     }
     return options;
 }
@@ -4224,7 +4257,7 @@ int main(int argc,char** argv){
     if(!icon.isNull())app.setWindowIcon(icon);
 
     const LaunchOptions options=parseLaunchOptions(argc,argv);
-    V17Window window(options.scenePath,options.textureResolution);
+    V17Window window(options.scenePath,options.textureResolution,options.fallbackScenePath);
     runSmokeChecks(window,options);
 
     if(!icon.isNull())window.setWindowIcon(icon);

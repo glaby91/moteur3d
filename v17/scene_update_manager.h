@@ -173,13 +173,15 @@ public:
         });
     }
 
-private:
     static int revisionNumber(const QString& revision) {
-        const auto match=QRegularExpression(QStringLiteral("^V17\\.(\\d+)$"))
-            .match(revision);
-        return match.hasMatch()?match.captured(1).toInt():-1;
+        static const QRegularExpression format(QStringLiteral("^V17\\.(\\d+)$"));
+        const auto match=format.match(revision);
+        bool ok=false;
+        const int number=match.captured(1).toInt(&ok);
+        return ok?number:-1;
     }
 
+private:
     void setStatus(const QString& text,int timeout=0) {
         if(auto* status=window_?window_->findChild<QStatusBar*>():nullptr)
             status->showMessage(text,timeout);

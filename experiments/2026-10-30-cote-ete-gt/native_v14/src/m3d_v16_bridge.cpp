@@ -691,7 +691,12 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
         }
         const int minimum=floorValue.isUndefined()?requested:floorValue.toInt();
         int size=std::min(maxTextureResolution,requested);
-        if(size<64||size>2048||(size&(size-1))){result.error="Invalid mip resolution";return result;}
+        if(size<64||size>2048||(size&(size-1))){
+            result.error=QStringLiteral("Invalid mip resolution for material '%1', texture set '%2': "
+                "requested %3, effective %4, limit %5. Expected a power of two from 64 to 2048.")
+                .arg(id,texId).arg(requested).arg(size).arg(maxTextureResolution);
+            return result;
+        }
         if(mode=="preserve"){
             // Explicit preservation may override global auto resolution, but
             // never invent missing texels or silently degrade quality.
