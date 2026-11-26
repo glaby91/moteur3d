@@ -106,7 +106,7 @@ function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$
         $versionPath = Join-Path $out 'SCENE_VERSION.json'
         Copy-Item -LiteralPath $scene.Manifest -Destination $versionPath
         $csv = Join-Path $out 'resultats.csv'
-        Write-Host "Parcours GPU direct : 1280 x 720, VSync desactivee, 30 s par backend. Preparation des triangles : $PrepMode."
+        Write-Host "Parcours GPU direct : 1280 x 720, VSync desactivee, rebonds indirects actives, 30 s par backend. Preparation des triangles : $PrepMode."
         & $exe $scene.Path $csv --geometry-prep $PrepMode
         $engineExit = $LASTEXITCODE
         if (!(Test-Path -LiteralPath $csv -PathType Leaf)) {

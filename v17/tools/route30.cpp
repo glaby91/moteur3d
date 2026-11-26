@@ -126,6 +126,9 @@ bool presentFrame(const Route& route, Backend backend, double seconds,
         reason = L"Native renderer did not apply the requested static geometry mode.";
         return false;
     }
+    if(presented&&backend==Backend::lumaTrace&&(!stats.planarReflectionRendered||!stats.lumaProbeLightingEnabled)){
+        reason=L"LumaTrace pool benchmark requires planar reflection and indirect probe lighting.";return false;
+    }
     return presented;
 }
 
@@ -189,9 +192,11 @@ void writeRow(QTextStream& csv, const Pass& pass, const Result& r, bool prepareG
         const auto& g = r.lastFrame;
         csv << ',' << (g.geometryPreparationEnabled ? "true" : "false")
             << ',' << g.geometrySourceVertices << ',' << g.geometryUniqueVertices
-            << ',' << g.geometryIndexCount;
+            << ',' << g.geometryIndexCount
+            << ',' << (g.planarReflectionRendered?"true":"false")
+            << ',' << (g.lumaProbeLightingEnabled?"true":"false");
     } else {
-        csv << ",,,,";
+        csv << ",,,,,,";
     }
     csv << '\n';
     csv.flush();
@@ -223,6 +228,7 @@ int main(int argc, char** argv) {
     if (it == rt.cameras.end()) { std::cerr << "Missing " << cameraId << std::endl; return 5; }
     m3d::updateLighting(solarHour);
     m3d::setRasterCloudTimeScale(0.f);
+    m3d::setRasterHybridLightingEnabled(true);
     m3d::Stats stats{};
     const auto shadow = m3d::buildShadow(rt.renderScene, stats);
     QFile file(args[2]);
@@ -230,7 +236,7 @@ int main(int argc, char** argv) {
     QTextStream csv(&file);
     csv << "backend,camera,hour,width,height,frames_completed_30s,elapsed_s,frames_started,mean_render_ms,fps_30s,"
            "presentation,vsync,readback_buffers,status,error,geometry_prep_requested,geometry_prep_enabled,"
-           "geometry_source_vertices,geometry_unique_vertices,geometry_index_count\n";
+           "geometry_source_vertices,geometry_unique_vertices,geometry_index_count,planar_reflection,luma_probe_lighting\n";
     bool allPassed = true;
     for (const Pass& pass : passes) {
         Result result;

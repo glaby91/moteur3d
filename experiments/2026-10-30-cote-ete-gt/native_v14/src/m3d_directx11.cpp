@@ -567,7 +567,8 @@ public:
         // not add CPU ray casting, material work, or per-triangle sorting.
         const char* zPrepassEnv=std::getenv("M3D_V17_EXPERIMENT_Z_PREPASS");
         const char* disableZPrepass=std::getenv("M3D_V17_DISABLE_Z_PREPASS");
-        const bool depthPrepass=!(disableZPrepass&&std::strcmp(disableZPrepass,"1")==0)
+        // The reflection pixel shader clips geometry below the water plane; a depth-only pass cannot.
+        const bool depthPrepass=cb.reflectionControls[0]!=1.f && !(disableZPrepass&&std::strcmp(disableZPrepass,"1")==0)
             &&!(zPrepassEnv&&std::strcmp(zPrepassEnv,"0")==0);
         if(depthPrepass){
             context_->OMSetRenderTargets(0,nullptr,ds);
@@ -887,6 +888,8 @@ public:
                 nativeStats->threads=0;
                 nativeStats->readbackBufferCount=0;
                 nativeStats->gpuDrawCalls=drawCalls;
+                nativeStats->planarReflectionRendered=planarReflection;
+                nativeStats->lumaProbeLightingEnabled=lumaBvh&&hybrid;
                 nativeStats->geometryPreparationEnabled=staticGeometryPreparationEnabled_;
                 nativeStats->geometrySourceVertices=sourceVertexCount_;nativeStats->geometryUniqueVertices=uniqueVertexCount_;
                 nativeStats->geometryIndexCount=indexCount_;nativeStats->geometryVertexBytes=geometryVertexBytes_;
@@ -934,6 +937,8 @@ public:
         slot.submitted.gpu=true;slot.submitted.threads=0;
         slot.submitted.readbackBufferCount=depth;
         slot.submitted.gpuDrawCalls=drawCalls;
+        slot.submitted.planarReflectionRendered=planarReflection;
+        slot.submitted.lumaProbeLightingEnabled=lumaBvh&&hybrid;
         slot.submitted.geometryPreparationEnabled=staticGeometryPreparationEnabled_;
         slot.submitted.geometrySourceVertices=sourceVertexCount_;slot.submitted.geometryUniqueVertices=uniqueVertexCount_;
         slot.submitted.geometryIndexCount=indexCount_;slot.submitted.geometryVertexBytes=geometryVertexBytes_;

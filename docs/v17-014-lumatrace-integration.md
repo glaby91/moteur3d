@@ -1,0 +1,7 @@
+# V17.014 — historical LumaTrace integration audit
+
+Reference ecff1714711b364ad233f9204dc36bf75a37645d. The two complete raster HLSL string bodies are identical to the reference, checked by exact string equality. Restored all historical raster water/transmission shading, local specular point-light highlights on water/glass/low roughness/metals, Fresnel, planar reflected scene at half resolution, matching C++ constant layout, sRGB RTV/SRV, depth target, per-pass camera/frustum/LOD/transparency sorting, and matching transparent primitive mapping. Keep the current indexed mesh, GPU probe cache, native presentation and controls. Disable depth-only prepass for the reflected view only (its clipping requires the pixel shader). Explicitly unbind t8 before reflection RTV.
+
+The historical reflected-scene texture is dedicated to water, not a general mirror for every window. Glass and polished materials receive the historical specular highlights, not full scene reflection or ray-traced refraction. General BVH-based specular reflections remain separate future work. Existing fixed water plane y=.02m is kept for this scene; the historical camera-edge artifact is not claimed fixed.
+
+route30 now enables indirect lighting and rejects a successful LumaTrace frame without both reflection and indirect lighting; CSV reports both flags. This validates execution, not visual correctness. Physical HD620 and visual comparison still required. No merge before validation.
