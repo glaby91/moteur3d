@@ -140,6 +140,15 @@ function Write-RouteSystemInfo([string]$PackageRoot, [string]$Exe, [string]$Prep
 function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$PrepMode = 'on') {
     $PrepMode = $PrepMode.ToLowerInvariant()
     $PackageRoot = (Resolve-Path -LiteralPath $PackageRoot).ProviderPath
+    # Persist machine metadata at launch, even if scene download or GPU startup fails.
+    $out = Join-Path $PackageRoot ('benchmark-results\parcours30-' + (Get-Date -Format yyyyMMdd-HHmmssfff))
+    [IO.Directory]::CreateDirectory($out) | Out-Null
+    $exe = Join-Path $PackageRoot 'route30.exe'
+    $systemInfoPath = Join-Path $out 'SYSTEM_INFO.json'
+    Write-Host "Dossier de resultats : $out"
+    Write-Host 'Collecte de la configuration materielle...'
+    Write-RouteSystemInfo $PackageRoot $exe $PrepMode $systemInfoPath
+    Write-Host "Configuration materielle : $systemInfoPath"
     $cache = Join-Path $PackageRoot 'benchmark-tools\archives'
     $stage = Join-Path ([IO.Path]::GetTempPath()) ('warp-parcours-' + [guid]::NewGuid())
     [IO.Directory]::CreateDirectory($stage) | Out-Null
@@ -155,20 +164,14 @@ function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$
         $env:QT_PLUGIN_PATH = (@($pluginRoots) + @($env:QT_PLUGIN_PATH) | Where-Object { $_ }) -join ';'
         $env:PATH = "$PackageRoot;$env:PATH"
 
-        $exe = Join-Path $PackageRoot 'route30.exe'
         if (Test-Path -LiteralPath $exe -PathType Leaf) {
             Write-Host "Utilisation du moteur de parcours inclus dans le package V17."
         } else {
             throw 'route30.exe manquant : utiliser le package V17 complet (ancienne version de secours incompatible avec VSync OFF).'
         }
-        $out = Join-Path $PackageRoot ('benchmark-results\parcours30-' + (Get-Date -Format yyyyMMdd-HHmmssfff))
-        [IO.Directory]::CreateDirectory($out) | Out-Null
         $versionPath = Join-Path $out 'SCENE_VERSION.json'
         Copy-Item -LiteralPath $scene.Manifest -Destination $versionPath
         $csv = Join-Path $out 'resultats.csv'
-        $systemInfoPath = Join-Path $out 'SYSTEM_INFO.json'
-        Write-RouteSystemInfo $PackageRoot $exe $PrepMode $systemInfoPath
-        Write-Host "Configuration materielle : $systemInfoPath"
         Write-Host "Parcours GPU direct : 1280 x 720, VSync desactivee, rebonds indirects actives, 30 s par backend. Preparation des triangles : $PrepMode."
         & $exe $scene.Path $csv --geometry-prep $PrepMode
         $engineExit = $LASTEXITCODE
