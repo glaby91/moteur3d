@@ -6,6 +6,9 @@
 
 #include <d3dcompiler.h>
 #include <algorithm>
+#include <chrono>
+#include <thread>
+#include <iostream>
 #include <cstring>
 #include <limits>
 #include <map>
@@ -261,26 +264,70 @@ bool Compute::dispatch(ID3D11DeviceContext* context,ID3D11ShaderResourceView* ve
     std::memcpy(key.data(),&params,sizeof(params));
     if(radianceCacheValid_&&key==radianceKey_)return true;
 
-    D3D11_MAPPED_SUBRESOURCE mapped{};
-    if(FAILED(context->Map(paramsBuffer_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped))){
-        error=L"Upload constantes LumaTrace impossible.";
+    // Keep each non-preemptible dispatch small, and retire it before submitting
+    // the next one. The absolute primitive ID and lighting math are unchanged.
+    // This avoids a multi-million-triangle dispatch exceeding the WDDM watchdog.
+    radianceCacheValid_=false;
+    ComPtr<ID3D11Device> device;
+    context->GetDevice(&device);
+    D3D11_QUERY_DESC queryDesc{};
+    queryDesc.Query=D3D11_QUERY_EVENT;
+    ComPtr<ID3D11Query> completed;
+    HRESULT hr=device->CreateQuery(&queryDesc,&completed);
+    if(FAILED(hr)){
+        error=L"LumaTrace CreateQuery HRESULT="+std::to_wstring(uint32_t(hr));
         return false;
     }
-    std::memcpy(mapped.pData,&params,sizeof(params));
-    context->Unmap(paramsBuffer_.Get(),0);
     ID3D11ShaderResourceView* srvs[]={vertexStream,orderSrv_.Get(),bvhSrv_.Get(),albedoSrv_.Get(),indices};
     ID3D11UnorderedAccessView* uavs[]={radianceUav_.Get()};
     ID3D11Buffer* constants[]={paramsBuffer_.Get()};
+    ID3D11ShaderResourceView* noRadiance=nullptr;
+    context->PSSetShaderResources(7,1,&noRadiance);
     context->CSSetShader(shader_.Get(),nullptr,0);
     context->CSSetShaderResources(0,5,srvs);
     context->CSSetUnorderedAccessViews(0,1,uavs,nullptr);
     context->CSSetConstantBuffers(0,1,constants);
-    context->Dispatch((triangleCount_+63)/64,1,1);
-    ID3D11UnorderedAccessView* noUavs[]={nullptr};
-    ID3D11ShaderResourceView* noSrvs[5]{};
-    context->CSSetUnorderedAccessViews(0,1,noUavs,nullptr);
-    context->CSSetShaderResources(0,5,noSrvs);
-    context->CSSetShader(nullptr,nullptr,0);
+    auto unbind=[&](){
+        ID3D11UnorderedAccessView* noUavs[]={nullptr};
+        ID3D11ShaderResourceView* noSrvs[5]{};
+        context->CSSetUnorderedAccessViews(0,1,noUavs,nullptr);
+        context->CSSetShaderResources(0,5,noSrvs);
+        context->CSSetShader(nullptr,nullptr,0);
+    };
+    constexpr uint32_t batchTriangles=8192;
+    std::clog<<"[CSE WARP LumaTrace] radiance triangles="<<triangleCount_
+             <<" batch="<<batchTriangles<<std::endl;
+    for(uint32_t first=0;first<triangleCount_;){
+        const uint32_t count=std::min(batchTriangles,triangleCount_-first);
+        params.geometryLayout[1]=first;
+        D3D11_MAPPED_SUBRESOURCE mapped{};
+        hr=context->Map(paramsBuffer_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped);
+        if(FAILED(hr)){
+            error=L"LumaTrace Map HRESULT="+std::to_wstring(uint32_t(hr))+
+                L"; device="+std::to_wstring(uint32_t(device->GetDeviceRemovedReason()));
+            unbind();return false;
+        }
+        std::memcpy(mapped.pData,&params,sizeof(params));
+        context->Unmap(paramsBuffer_.Get(),0);
+        context->Dispatch((count+63)/64,1,1);
+        context->End(completed.Get());
+        context->Flush();
+        const auto deadline=std::chrono::steady_clock::now()+std::chrono::seconds(30);
+        do {
+            hr=context->GetData(completed.Get(),nullptr,0,D3D11_ASYNC_GETDATA_DONOTFLUSH);
+            if(hr!=S_FALSE)break;
+            if(std::chrono::steady_clock::now()>=deadline)break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        } while(true);
+        if(hr!=S_OK){
+            error=L"LumaTrace radiance batch failed at triangle "+std::to_wstring(first)+
+                L"; HRESULT="+std::to_wstring(uint32_t(hr))+
+                L"; GetDeviceRemovedReason="+std::to_wstring(uint32_t(device->GetDeviceRemovedReason()));
+            unbind();return false;
+        }
+        first+=count;
+    }
+    unbind();
     radianceKey_=key;
     radianceCacheValid_=true;
     return true;

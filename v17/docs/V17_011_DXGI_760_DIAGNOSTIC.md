@@ -1,0 +1,5 @@
+# V17.011 — diagnostic build 760
+
+Build 759 → 760: no change in DXGI or LumaTrace code; scene startup selection and diagnostics changed. Three PCs report LumaTrace Present failure at warmup while DX11/Vulkan finish. A single radiance dispatch for the whole mesh is a plausible WDDM timeout, not a confirmed cause. This patch preserves absolute triangle IDs, samples and lighting, batches radiance into 8192 triangles and waits for each GPU event; reports HRESULT/device removal, clears stale resource references and isolates benchmark backends by thread lifetime. No readback of pixels is added. Initial radiance can take longer; cache-hit path is unchanged. Full physical GPU validation required.
+
+Test packaged route30.exe scene.json output.csv --geometry-prep on --backend LumaTrace, then all; compare ON/OFF and build 759, identical scene manifest, warmup and FPS. Preserve logs and CSV. Windows CI cannot establish HD620 watchdog behavior. Do not mark fixed until all three PCs pass. Test GUI LumaTrace and day/night separately.

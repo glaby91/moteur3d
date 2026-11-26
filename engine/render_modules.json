@@ -236,7 +236,7 @@
     },
     {
       "id": "d3d11_raster",
-      "revision": "007",
+      "revision": "008",
       "engines": [
         "v16",
         "v17"
@@ -275,7 +275,7 @@
     },
     {
       "id": "lumatrace_gpu_compute",
-      "revision": "007",
+      "revision": "008",
       "engines": [
         "v16",
         "v17"
