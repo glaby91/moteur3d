@@ -356,13 +356,15 @@ inline constexpr char kShaderPart2[] = R"(
         // Underwater ladders must remain visible through the surface from the deck.
         // Avoid the former 45% high-angle opaque cyan veil.
         float opacity=lerp(.08,.24,saturate(fresnelWater*1.75));
-        if(reflectionControls.x>1.5){
+        if(reflectionControls.x>1.5 && abs(i.world.y-reflectionControls.w)<=.002 && abs(normal.y)>.5){
             float3 reflectedView=i.world-reflectionEye;
             float reflectedDepth=dot(reflectedView,reflectionForward);
             if(reflectedDepth>.08){
                 float reflectedNdcX=dot(reflectedView,reflectionRight)/(reflectedDepth*reflectionTanHalf);
                 float reflectedNdcY=dot(reflectedView,reflectionUp)*reflectionAspect/(reflectedDepth*reflectionTanHalf);
-                float2 reflectionUv=float2(.5+.5*reflectedNdcX,.5-.5*reflectedNdcY)+normal.xz*.35;
+                // Keep normal distortion inside the 10% mirror guard band.
+                float2 reflectionUv=float2(.5+.5*reflectedNdcX,.5-.5*reflectedNdcY)
+                    + clamp(normal.xz*.35,-.04,.04);
                 if(all(reflectionUv>=0.0)&&all(reflectionUv<=1.0)){
                     float3 reflectedScene=poolReflection.SampleLevel(probeSampler,reflectionUv,0).rgb;
                     const float reflectionWeight=saturate(.22+.62*fresnelWater);

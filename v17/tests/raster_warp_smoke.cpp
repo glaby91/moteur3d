@@ -4,6 +4,7 @@
 #include "src/m3d_gi_bake.h"
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
+#include "src/m3d_directx11_mesh.h"
 #include <QCoreApplication>
 #include <QDebug>
 #include <QImage>
@@ -24,6 +25,45 @@ int main(int argc,char** argv){
     qInstallMessageHandler(logToStderr);
     QCoreApplication app(argc,argv);
     if(argc!=3){qCritical()<<"Expected scene.json and output.png";return 2;}
+    // Test the same helpers used by the renderer on synthetic water geometry:
+    // a box bottom/top, a vertical face, an unrelated larger water surface.
+    {
+        m3d::Scene scene;scene.mat.resize(2);
+        scene.mat[0].name="cse_pool_water";scene.mat[0].waterSurface=true;
+        scene.mat[1].waterSurface=true;
+        m3d::d3d11::MeshBuilder mesh;mesh.transparentMaterial=true;
+        auto tri=[&](m3d::V a,m3d::V b,m3d::V c,unsigned mat){
+            mesh.tri(a,b,c,{0,1,0},{0,1,0},{0,1,0},0,0,0,0,0,0,mat);
+        };
+        tri({0,.2f,0},{4,.2f,0},{0,.2f,4},0);
+        tri({0,.4f,0},{4,.4f,0},{0,.4f,4},0);
+        tri({0,.2f,0},{4,.2f,0},{0,.4f,0},0);
+        tri({0,5,0},{20,5,0},{0,5,20},1);
+        const auto plane=m3d::d3d11::findWaterReflectionPlane(scene,mesh.transparent);
+        if(!plane.valid||std::abs(plane.y-.4f)>1e-5f||
+           m3d::d3d11::findWaterReflectionPlane(scene,{}).valid){
+            qCritical()<<"Water reflection plane selection failed";return 1;
+        }
+        for(float pitch:{-.8f,-.2f,0.f,.3f,.8f}){
+            m3d::Camera c{};c.eye={0,2.3f,0};c.f={0,std::sin(pitch),std::cos(pitch)};
+            c.r=m3d::norm(m3d::cross(c.f,{0,1,0}));c.u=m3d::norm(m3d::cross(c.r,c.f));
+            c.aspect=16.f/9.f;c.tanHalf=1.f;
+            const auto mirror=m3d::d3d11::waterReflectionCamera(c,plane.y);
+            for(float x:{-.99f,0.f,.99f})for(float y:{-.99f,-.5f,0.f,.5f,.99f}){
+                const auto ray=c.f+c.r*(x*c.tanHalf)+c.u*(y*c.tanHalf/c.aspect);
+                if(ray.y>=-.001f)continue;
+                const auto point=c.eye+ray*((plane.y-c.eye.y)/ray.y);
+                const auto delta=point-mirror.eye;
+                const float z=m3d::dot(delta,mirror.f);
+                const float rx=m3d::dot(delta,mirror.r)/(z*mirror.tanHalf);
+                const float ry=m3d::dot(delta,mirror.u)*mirror.aspect/(z*mirror.tanHalf);
+                if(z<=0||std::abs(rx-x/1.10f)>1e-4f||std::abs(ry+y/1.10f)>1e-4f||
+                   .5f+.5f*std::abs(rx)+.04f>1.f||.5f+.5f*std::abs(ry)+.04f>1.f){
+                    qCritical()<<"Water reflection camera projection failed";return 1;
+                }
+            }
+        }
+    }
     const auto loaded=m3d::v16::loadScene(QString::fromLocal8Bit(argv[1]));
     if(!loaded){qCritical()<<loaded.error;return 1;}
     auto built=m3d::v16::buildRuntime(loaded.scene,512);

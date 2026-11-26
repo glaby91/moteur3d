@@ -17,6 +17,65 @@ struct TransparentTriangle { GpuVertex v[3]; V center; };
 inline void put(GpuVertex& v,V p,V n,float u,float vv,uint32_t mat) {
     v={{p.x,p.y,p.z},{n.x,n.y,n.z},{u,vv},mat,0};
 }
+
+// The actual transparent raster mesh is the source of truth. Select the
+// dominant horizontal water surface, preferring the authored pool material.
+// Coplanar triangles are grouped within 1 mm; equal-area box faces select
+// the upper face. Cache this result at mesh rebuild, not per frame.
+struct WaterReflectionPlane { bool valid=false; float y=0.f; };
+inline WaterReflectionPlane findWaterReflectionPlane(const Scene& scene,
+        const std::vector<TransparentTriangle>& triangles) {
+    struct Candidate { float y; double area; bool pool; };
+    std::vector<Candidate> candidates;
+    bool hasPool=false;
+    for(const auto& t:triangles){
+        const auto mat=t.v[0].material;
+        if(mat>=scene.mat.size())continue;
+        const auto& material=scene.mat[mat];
+        const bool pool=material.name=="cse_pool_water";
+        if(!(material.waterSurface||(!material.surfaceAuthored&&pool)))continue;
+        const V a{t.v[0].p[0],t.v[0].p[1],t.v[0].p[2]};
+        const V b{t.v[1].p[0],t.v[1].p[1],t.v[1].p[2]};
+        const V c{t.v[2].p[0],t.v[2].p[1],t.v[2].p[2]};
+        if(std::max({a.y,b.y,c.y})-std::min({a.y,b.y,c.y})>.001f)continue;
+        const float area=.5f*std::abs(cross(b-a,c-a).y);
+        if(!std::isfinite(area)||area<=1e-8f||!std::isfinite(a.y))continue;
+        candidates.push_back({(a.y+b.y+c.y)/3.f,area,pool});
+        hasPool=hasPool||pool;
+    }
+    std::sort(candidates.begin(),candidates.end(),[](const Candidate& a,const Candidate& b){return a.y<b.y;});
+    WaterReflectionPlane best{};
+    double bestArea=0.,area=0.,weightedY=0.;
+    float firstY=0.f;
+    auto finish=[&](){
+        if(area<=0.)return;
+        const float y=float(weightedY/area);
+        if(!best.valid||area>bestArea*(1.+1e-6)||(area>=bestArea*(1.-1e-6)&&y>best.y)){
+            best={true,y};bestArea=area;
+        }
+    };
+    for(const auto& candidate:candidates){
+        if(hasPool&&!candidate.pool)continue;
+        if(area>0.&&candidate.y-firstY>.001f){finish();area=0.;weightedY=0.;}
+        if(area==0.)firstY=candidate.y;
+        area+=candidate.area;weightedY+=candidate.area*candidate.y;
+    }
+    finish();
+    return best;
+}
+// A reflected orthonormal basis keeps the mirror projection exact even at
+// near-vertical pitch. The handedness change is compensated by reversing up.
+inline Camera waterReflectionCamera(const Camera& cam,float planeY){
+    Camera mirror=cam;
+    mirror.eye.y=2.f*planeY-cam.eye.y;
+    mirror.f={cam.f.x,-cam.f.y,cam.f.z};
+    mirror.r={cam.r.x,-cam.r.y,cam.r.z};
+    mirror.u={-cam.u.x,cam.u.y,-cam.u.z};
+    // 10% extra half-frustum coverage; target size remains unchanged.
+    mirror.tanHalf=cam.tanHalf*1.10f;
+    return mirror;
+}
+
 inline float uvScaleForMaterial(const Scene& scene,uint32_t mat) {
     if(mat<scene.mat.size()){
         const std::string& name=scene.mat[mat].name;

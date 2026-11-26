@@ -266,10 +266,9 @@ public:
         if(lumaBvh&&(lumaBvh->nodes.empty()||lumaBvh->primitiveCount==0)){
             error=L"Le BVH4 LumaTrace n’a pas été préparé pour cette scène.";return false;
         }
-        const bool planarReflection=lumaBvh&&std::any_of(scene.mat.begin(),scene.mat.end(),[](const Material& m){
-            return m.waterSurface||(!m.surfaceAuthored&&m.name=="cse_pool_water");
-        });
-        if(!ensureDevice(error)||!ensureScene(scene,error,lumaBvh)||!ensureShadow(shadows,error)||
+        if(!ensureDevice(error)||!ensureScene(scene,error,lumaBvh))return false;
+        const bool planarReflection=lumaBvh&&waterReflectionPlane_.valid;
+        if(!ensureShadow(shadows,error)||
            (planarReflection&&!ensureReflectionTarget(std::max(1,w/2),std::max(1,h/2),error))||
            (hybrid&&!lumaBvh&&!ensureProbeVolume(scene,error))||
            (hybrid&&!lumaBvh&&!ensureGiHours(error))||
@@ -794,20 +793,11 @@ public:
             return true;
         };
         if(planarReflection){
-            constexpr float reflectionPlaneY=.02f;
+            const float reflectionPlaneY=waterReflectionPlane_.y;
             ID3D11ShaderResourceView* noReflection[]={nullptr};
             context_->PSSetShaderResources(8,1,noReflection);
             const int reflectionW=std::max(1,w/2),reflectionH=std::max(1,h/2);
-            Camera reflectionCam=cam;
-            V target=cam.eye+cam.f*50.f;
-            // Reflect both the eye and the look target across the water plane.
-            // Reflecting only the eye bends the virtual camera's view and makes
-            // the pool reflection slide out of the render texture at one side.
-            reflectionCam.eye.y=2.f*reflectionPlaneY-cam.eye.y;
-            target.y=2.f*reflectionPlaneY-target.y;
-            reflectionCam.f=norm(target-reflectionCam.eye);
-            reflectionCam.r=norm(cross(reflectionCam.f,V{0,1,0}));
-            reflectionCam.u=norm(cross(reflectionCam.r,reflectionCam.f));
+            const Camera reflectionCam=d3d11::waterReflectionCamera(cam,reflectionPlaneY);
             cb.reflectionEye[0]=reflectionCam.eye.x;cb.reflectionEye[1]=reflectionCam.eye.y;cb.reflectionEye[2]=reflectionCam.eye.z;
             cb.reflectionForward[0]=reflectionCam.f.x;cb.reflectionForward[1]=reflectionCam.f.y;cb.reflectionForward[2]=reflectionCam.f.z;
             cb.reflectionRight[0]=reflectionCam.r.x;cb.reflectionRight[1]=reflectionCam.r.y;cb.reflectionRight[2]=reflectionCam.r.z;
@@ -1388,7 +1378,7 @@ private:
         hasBakedGi_=false;bakedGi_=gibake::Table{};
         lowFrame_=-1;highFrame_=-1; // new scene/revision = reload GI cache
         boxVertices_.Reset();boxInstances_.Reset();boxInstanceCount_=0;
-        roughness_.Reset();normal_.Reset();transparent_.clear();vertexCount_=0;indexCount_=0;
+        roughness_.Reset();normal_.Reset();transparent_.clear();waterReflectionPlane_={};vertexCount_=0;indexCount_=0;
         chunks_.clear();boxChunks_.clear();
         ellipseInstances_.Reset();
         for(auto& buffer:ellipseVertices_)buffer.Reset();
@@ -1724,6 +1714,7 @@ private:
             }
         }}
         if(!mesh.transparent.empty()){D3D11_BUFFER_DESC bd{};bd.ByteWidth=UINT(mesh.transparent.size()*3*sizeof(GpuVertex));bd.Usage=D3D11_USAGE_DYNAMIC;bd.BindFlags=D3D11_BIND_VERTEX_BUFFER;bd.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;if(FAILED(device_->CreateBuffer(&bd,nullptr,&transparentVertices_))){error=L"Allocation du tampon des surfaces transparentes impossible.";return false;}}
+        waterReflectionPlane_=lumaTrace?d3d11::findWaterReflectionPlane(scene,mesh.transparent):d3d11::WaterReflectionPlane{};
         transparent_=std::move(mesh.transparent);
         // Material textures arrive at different sizes (256..2048), but D3D11
         // Texture2DArray allocates EVERY slice at the largest width/height.
@@ -2113,6 +2104,7 @@ private:
     ComPtr<ID3D11DepthStencilView> reflectionDsv_;
     ComPtr<ID3D11ShaderResourceView> reflectionSrv_;
     int reflectionW_=0,reflectionH_=0;
+    d3d11::WaterReflectionPlane waterReflectionPlane_{};
     ComPtr<ID3D11ShaderResourceView> targetSrv_,resolveSrv_,lowSrv_;
     ComPtr<ID3D11RenderTargetView> lowRtv_,mergeRtv_;
     ComPtr<ID3D11DepthStencilView> lowDsv_;
