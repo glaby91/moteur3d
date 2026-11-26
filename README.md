@@ -5,6 +5,8 @@ CSE WARP V17 réunit l’interface d’exploration, plusieurs backends de rendu,
 
 > La branche principale du moteur est `master`. [État des branches](BRANCH_STATUS.md)
 
+[Audit historique et registre des optimisations (HTML → V17)](#audit-historique-et-registre-des-optimisations--26-novembre-2026)
+
 ## Scène de référence et paquet Windows
 
 **[Télécharger CSE WARP V17.009 pour Windows x64, build 759](https://github.com/glaby91/moteur3d/actions/runs/45736640875/artifacts/15080081395)**
@@ -249,3 +251,138 @@ La préparation des triangles statiques est **activée par défaut** dans l’ex
 **Validation du 26 novembre 2026.** Sur la scène V17.629, le parcours piscine de 30 s en 720p a confirmé `geometry_prep_enabled=true` et `readback_buffers=0` pour les trois backends. DX11 a présenté 691 images (23,03 FPS), Vulkan 884 (29,47 FPS) et LumaTrace 815 (27,17 FPS). Ces valeurs correspondent à un passage par backend sur la machine de test. [Révision du parcours validé](https://github.com/glaby91/moteur3d/commit/900bf11df4833e881141682741ae814202cf2403).
 
 Pour comparer avec la préparation désactivée, enregistrer le script à côté du BAT et lancer `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\route30.ps1 -Root . -GeometryPrep off` depuis ce dossier. Les deux modes utilisent le même exécutable et le même parcours. [Script du parcours](https://raw.githubusercontent.com/glaby91/moteur3d/master/v17/tools/route30.ps1).
+
+## Audit historique et registre des optimisations — 26 novembre 2026
+
+**Périmètre :** origines BASIC (2019), premiers moteurs HTML/JavaScript d’octobre 2026, V9–V13.16, portage natif V14–V15, V16 et V17 jusqu’à V17.010. Audit documentaire et statique, sans nouvelle compilation ni mesure. Les résultats anciens restent liés à leur scène, leur matériel et leurs paramètres. Ce registre distingue les acquis, les prototypes, les essais décevants et les propositions ; il ne certifie pas la présence de chaque optimisation dans la tête actuelle.
+
+### Historique algorithmique
+
+| Génération | Travaux et enseignements |
+|---|---|
+| BASIC 2019 | Triangles, couleurs, éclairage, lecture BMP ; patrimoine conservé. |
+| HTML initial (18 octobre) | Canvas, tri par profondeur moyenne, 32 buffers RGB565, prévisions N+1 à N+5, collisions simplifiées, patrouille. Les buffers futurs ne sont pas des rendus complets validés. |
+| Anti-stuttering | Tuiles 16×16, réutilisation des régions stables lorsque caméra et lumière sont fixes ; pré-rendu concurrent et reprojection Z désactivés après artefacts. Le compteur de copie Canvas (~40 ms) ne mesure pas la reprojection seule. |
+| V3–V4 | Carte Z lumineuse unique, cache statique, PCF, interpolation de deux cartes d'ombre pour stabiliser le mouvement. |
+| V5 | Z-buffer caméra par pixel, clipping proche, framebuffer RGBA ; test d'inversion de 2 310 triangles : 0 pixel différent sur 76 800 pour la pose testée. |
+| V6–V7 | Stress de tessellation ×10 (24 100 triangles), arbre détaillé, PCF 4×4, lissage de contours optionnel ; réutilisation du maillage natif pour les ombres. |
+| V8–V8.1 | RGB565, mipmaps 8–4096, UV perspective-correctes, filtrage, LOD par tuile et face ; suppression de subdivisions coplanaires ; Z puis texturage des seuls pixels visibles. |
+| V9–V9.2 | Ray casting analytique, BVH, candidats par tuile, un rayon par pixel interne ; arrêt anticipé PCF, cache matériaux, suppression d'allocations, LUT de brouillard ; ciel interpolé et résolution interne optionnelle. |
+| V9.3 | Banc N+1 Web Workers synthétique, étude du rendu par frontières de visibilité, cache de surfaces et reprojection contrôlée. |
+| V11–V13.16 | Scènes Côte été GT/restomod, nombreuses révisions HTML, modes FHD/upscale, contrat de backend CPU V13.15, workers V13.16 ; détail de chaque diff intermédiaire restant à auditer. |
+| V14–V15 | C++/Qt/Win32, BVH, tuiles multicœurs, SIMD AVX2/FMA3, AABB, PBR/HDR, débruitage, Compute HLSL, DX11 raster, détection DXR. |
+| V16 | Scènes modulaires, matériaux PBR, GGX/Schlick, espace linéaire, ACES/sRGB, GI CPU/GPU, cache indirect à demi-résolution, comparaison des backends. |
+| V17 | Exploration, instancing, LOD, Z-prepass, light culling, sondes et tables GI, Vulkan, présentation GPU native, LumaTrace BVH4, cache de radiance, préparation géométrique indexée, scène séparée et versioning modulaire. |
+
+Archives : [HTML et expérimentations](experiments/), [V9.2 archivée](https://github.com/glaby91/moteur3d/tree/archive/master-v9-before-warp-v17-261114), [V11–V13.16](experiments/2026-10-30-cote-ete-gt/), [audit V15](docs/audits/AUDIT_GLOBAL_MOTEUR3D_V15_2026-11-06.md), [audit V17 du 14 novembre](docs/audits/AUDIT_GLOBAL_CSE_WARP_FONCTIONNALITES_OPTIMISATIONS_2026-11-14.md), [audit du 18 novembre](docs/AUDIT_GLOBAL_MOTEUR3D_2026-11-18.md).
+
+### Résultats historiques à préserver
+
+| Expérience | Résultat | Limite / décision |
+|---|---|---|
+| V8.1 Z puis textures | 1 911 → 925 ms à 800×600 ; Z identique, erreur couleur max 2/255 | DOM/Canvas simulé ; conserver séparation visibilité/shading. |
+| V9.1 shading | 5 824 → 5 039 ms | Banc simulé ; conserver les courts-circuits exacts et caches. |
+| V9.2 demi-résolution | 10 932 → 2 915 ms à 1920×1200 affiché | Banc simulé, perte de résolution interne assumée. |
+| N+1, i5-7200U | 3 758 ms sans worker ; 4 428 / 4 904 / 5 733 ms avec 1/2/3 workers | Charge synthétique concurrente, pas de vraies images candidates ; ne pas multiplier les workers aveuglément. |
+| Rapture CPU FHD | 21,14 / 11,33 / 6,10 / 5,98 s avec 1/2/4/8 threads | Seulement ~2 % gagnés de 4 à 8 ; pool adapté au matériel. |
+| AABB rejet anticipé | 12–16 % sur un relevé | Reprofiler le chemin actuel. |
+| Feuilles AVX2 de 8 triangles | ~33 % de tests d'objets supplémentaires, gain non convaincant | Ne pas généraliser ; comparer feuilles sœurs et scalaire. |
+| CPU GI Pavillon FHD | 4,03 s à 1 spp ; 15,87 s à 4 spp ; 94,91 s à 16 spp/2 rebonds | Le grain à 64 spp restait signalé ; débruitage guidé à étudier. |
+| Triple buffering | +3,84 % débit moyen ; latence P50 35,60 → 91,58 ms | Ne pas imposer en exploration. |
+| Z-prepass HD620, 1366×768 MSAA2 | GPU draw 64,41 → 39,94 / 41,18 ms ; débit calcul +50–52 % | Trois PNG identiques par campagne ; trajet ciblé, pas toutes caméras. |
+| Multirésolution périphérique | ~12 % sur WARP dans une variante avec artefacts | Sous le seuil historique de 15 %, pas de généralisation. |
+| Parcours 30 s, 720p, scène V17.629 | DX11 23,03 FPS ; Vulkan 29,47 FPS ; LumaTrace 27,17 FPS | Mesure documentée le 26/11, un passage par backend, préparation ON et zéro readback ; pas une comparaison ON/OFF. |
+
+Sources : [V8.1](experiments/2026-10-19-v8-1-optimized-raster/README.md), [V9.2](experiments/2026-10-19-v9-2-fast-sky-16x10/README.md), [N+1](experiments/2026-10-29-v92-workers-4k-target/README.md), [Z-prepass HD620](docs/performance/V17.432-Z-PREPASS-RESULTATS-HD620-20261113.md), [campagne historique](docs/audits/AUDIT_GLOBAL_CSE_WARP_FONCTIONNALITES_OPTIMISATIONS_2026-11-14.md).
+
+### Registre des pistes d'amélioration
+
+Priorités proposées : P0 = fidélité/robustesse bloquante ; P1 = optimisation prioritaire sans perte visuelle ; P2 = expérimentation ciblée ; R = recherche séparée. Les statuts historiques ne valent pas certification de la V17.010.
+
+| Domaine | Piste | État / action |
+|---|---|---|
+| Visibilité | Z-buffer, clipping, Z-prepass | Acquis ; conserver test d'invariance à l'ordre des faces opaques, vérifier tous backends. |
+| Visibilité | Frustum/AABB, rejet spatial exact, tri opaque front-to-back | P1 : mesurer CPU/GPU, préserver les objets et ombres hors champ utiles. |
+| Visibilité | Occlusion hiérarchique (Hi-Z) | P1 : prototype conservateur, repli pour cas ambigus, mesurer le coût. |
+| Géométrie | Indexation, préparation statique, buffers persistants | P1 : préparation documentée active DX11/Vulkan/LumaTrace ; A/B à scène et parcours identiques. |
+| Géométrie | Instancing, regroupement matériaux, LOD projeté | P1 : vérifier présence et efficacité, sans modifier silhouettes ni transparences. |
+| Géométrie | Suppression subdivisions coplanaires redondantes | P1 : préserver normales, UV, matériaux, frontières, collisions et identifiants. |
+| Géométrie | Tessellation adaptative près des sources | P2 : mesurer le compromis radiance/coût ; ne pas densifier partout. |
+| Lumières | Boucle globale, limite de sources, rejet spatial | P1 : conserver les contributions réelles ; ne pas supprimer des lampes pour afficher un gain artificiel. |
+| Lumières | Frustum des sphères d'influence (PR 44) | Prototype ; benchmark sur master actuel. |
+| Lumières | Masques par tuile 32×32 (PR 45) | Prototype ; capacité historique 256 sources, mesurer coût CPU/upload. |
+| Lumières | Z-light culling / tiled ou clustered lighting | P1 : exploiter profondeur min/max du Z-prepass, vérifier transparences et absence de lumière perdue. |
+| Ombres | Cache carte Z, PCF anticipé, interpolation temporelle | P1 : réévaluer les optimisations V4/V9.1, mesurer lectures et stabilité. |
+| Matériaux | RGB565 historique, mipmaps, UV, cache PBR disque | P1 : contrôler formats, bande passante, intégrité et cache sans baisser la qualité. |
+| Matériaux | Normal mapping, GGX, Fresnel, transmission | P0 : parité et classification eau/verre, normales GLB, texture source, orientation et énergie. |
+| Matériaux | Reflet piscine / caméra miroir | P0 : vérifier plan, matrice miroir, projection, clipping, coordonnées et dépendance caméra ; cause non confirmée. |
+| Éclairage | Sondes 3D (16×8×16), 25 états horaires, table GI CPU | P2 : vérifier cache et fuites lumineuses, interpolation temporelle et cohérence d'énergie. |
+| Éclairage | GI GPU à demi-résolution | P2 : reconstruction guidée par profondeur/normales ; comparer au rendu complet. |
+| Éclairage | Débruitage CPU/GPU | P2 : guides albédo/normales/profondeur en HDR avant tone mapping ; préserver les détails. |
+| LumaTrace | BVH4, cache de radiance par triangle, quatre rayons diffus déterministes | P1 : profiler premier dispatch et réutilisation ; comparer au CPU de référence. |
+| LumaTrace | Regroupement des émissifs en cellules de 4 m, jusqu'à 16 sources d'appoint | P1 : valider projection des lampes, ombres, énergie, éviter double comptage. |
+| LumaTrace | Invalidation locale / progressive du cache, jour-nuit | P1 : distinguer géométrie, matériaux, lumière locale et soleil ; cohérence temporelle. |
+| LumaTrace | Interpolation de radiance, échantillonnage près des lampes, ombres de contact | P2 : vérifier fuites et discontinuités, budget de rayons fixe. |
+| LumaTrace | Transparences, spéculaire, deuxième rebond sélectif | P0 pour transparence ; P2 pour transport additionnel. Pas un path tracer complet. |
+| LumaTrace | BVH compact/quantifié, cache disque, calcul asynchrone | P2 : mesurer précision, mémoire, synchronisation et latence. |
+| CPU | Pool persistant, ordonnancement des tuiles, localité mémoire | P1 : adapter le nombre de workers au matériel. |
+| CPU | SIMD, SoA, AVX2/FMA3, feuilles sœurs, sélection adaptative | P2 : comparer au scalaire, ne pas présumer un gain. |
+| GPU | Ressources/shaders persistants, atlas, formats compacts | P1 : mesurer allocations et transferts, éviter recompilation par frame. |
+| GPU | Présentation DXGI / Vulkan WSI, zéro readback | Acquis documenté ; vérifier fallback Qt, resize, shutdown, temps GPU et latence écran. |
+| GPU | 1/2/3 buffers, staging, UMA, frames in flight | P2 : privilégier fluidité et latence, pas seulement débit. |
+| GPU | Vulkan vs DX11, durée de vie des ressources | P1 : profiler les mouvements et le cycle jour/nuit, vérifier absence de fuite. |
+| GPU | MSAA, resolve, copy, anisotropie | P1 : instrumenter séparément ; conserver qualité de référence. |
+| GPU | Multirésolution périphérique, résolution interne | P2 : options explicites, pas d'activation silencieuse. |
+| Temporel | 32 buffers et prédiction N+1–N+5 | R : préférer anticipation ciblée des ressources plutôt que calcul spéculatif concurrent massif. |
+| Temporel | Reprojection, régions stables, cache de surfaces | R : validation profondeur/identifiants, désocclusion et repli exact ; éviter les artefacts historiques. |
+| Recherche | Rendu par frontières de visibilité | R : prototype analytique réduit, mesurer coût des frontières et pixels ambigus avant extension. |
+| Recherche | PHOTON-RT adaptatif | R : le prototype PNG et le mode natif uniforme 25 % sont distincts ; véritable ordonnanceur adaptatif à valider. |
+| Recherche | OpenGL, DXR, FPGA/Z80 | R : conserver les prototypes ; DXR détecté mais pas de backend matériel validé ; FPGA nécessite étude des transferts. |
+| Scène | Photo2Scene, multivues, Gaussian Splatting | R : reconstruction d'assets distincte du rendu ; vérifier métrique/provenance. |
+| Robustesse | Jour/nuit, ciel interpolé, radio asynchrone | P1 : profiler les saccades, découpler les tâches longues et les invalidations. |
+| Robustesse | Scènes/versioning/manifestes, tests Release, packaging | P1 : tester réellement le démarrage, les contrôles et les transitions ; ne pas dépendre d'assertions désactivables. |
+| Robustesse | Linux, licences et provenance des assets | P2 : qualifier avant distribution. |
+
+Références de recherche : [rendu par frontières](experiments/2026-10-29-v92-workers-4k-target/CONCEPTION_RENDERING_PAR_FRONTIERES.md), [PHOTON-RT](docs/PHOTON_RT_ADAPTIVE.md), [CPU/FPGA](docs/CPU_FPGA_RENDER_BACKEND.md), [roadmap raster](v17/docs/RASTER_PERFORMANCE_ROADMAP.md), [LumaTrace one-bounce](v17/docs/V17_604_LUMATRACE_ONE_BOUNCE.md), [émissifs V17.008](v17/docs/V17_008_LUMATRACE_EMISSIVE_LIGHTS.md).
+
+### Inventaire des PR historiques (77 recensées)
+
+| Famille | Numéros |
+|---|---|
+| Temporel | 1 |
+| CPU/PBR/Compute | 2, 3, 5, 6, 7 |
+| Architecture V16 | 8 |
+| Photo2Scene | 9–15 |
+| Parité CPU/GPU | 16–20 |
+| Exploration DX11/OpenGL | 21, 22 |
+| Cache PBR/ombres | 23 |
+| Présentation/versioning | 26 |
+| GI et énergie | 27, 28, 30, 31 |
+| Navigation/distribution | 29, 32 |
+| Scène | 33, 35–38, 40, 43, 46, 49 |
+| Raster/lumières | 39, 41, 42, 44, 45 |
+| Z-prepass | 47, 48 |
+| HUD/audio/navigation | 51, 52, 53, 55 |
+| Anomalies | 56–60 |
+| Profilage/multirésolution | 61–63 |
+| Promotion master/enseigne | 64, 65 |
+| Vulkan/présentation native | 69, 71–73 |
+| Scène/GI/matériaux | 74–77 |
+| Versioning/HUD/radio | 78 |
+| LumaTrace et consolidation | 82–88 |
+| Préparation géométrique | 89, 90 |
+
+[Liste complète des pull requests](https://github.com/glaby91/moteur3d/pulls?q=is%3Apr). Une PR ouverte peut avoir été reprise dans une branche cumulative : vérifier son diff et son ascendance avant réintégration. L'inventaire n'est pas une revue ligne par ligne des 77 diffs.
+
+### Feuille de route proposée
+
+1. Geler la référence moteur/scène/build et reproduire les anomalies de lumière, réflexion piscine et transparence.
+2. Comparer préparation géométrique ON/OFF et Z-prepass ON/OFF sur le même parcours de 30 s, puis élargir à plusieurs caméras.
+3. Mesurer le Z-light culling et les masques de lumières par tuile avec contrôle strict de fidélité.
+4. Profiler l'invalidation LumaTrace au cycle jour/nuit ; expérimenter la mise à jour locale sans blocage.
+5. Réduire le coût de shading et de bande passante à qualité constante ; contrôler les temps GPU réels, P50/P95/P99 et latence de présentation.
+6. Reprendre PHOTON-RT, rendu par frontières et reprojection dans des branches de recherche isolées ; ne les promouvoir qu'après validation visuelle et matérielle.
+
+Objectif HD620 : 40–45 FPS (budget ~25–22,2 ms par image), non acquis. Objectif historique 4K/100 FPS : 10 ms par image, recherche à long terme sur matériel adapté. Aucun gain futur ne doit être annoncé avant mesure. Ne pas additionner les gains de campagnes hétérogènes ni assimiler WARP logiciel à un GPU matériel.
+
+État relevé le 26/11 : [code V17.010](https://github.com/glaby91/moteur3d/commit/ef5461e06a9b4326620f451575b1599f70426066), [PR 90 / V17.009](https://github.com/glaby91/moteur3d/pull/90), scène [V17.629 build 42](https://github.com/glaby91/moteur3d-scene/releases/tag/scene-V17.629-42). Le code le plus récent ne constitue pas à lui seul une preuve de publication d'un package validé.
