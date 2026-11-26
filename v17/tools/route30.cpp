@@ -91,16 +91,17 @@ struct Route {
     const m3d::v16::CameraPreset& origin;
     const m3d::ShadowMap& shadow;
     HWND window;
+    bool prepareGeometry;
 };
 
-bool presentFrame(const Route& route, Backend backend, double seconds, std::wstring& reason) {
+bool presentFrame(const Route& route, Backend backend, double seconds,
+                  m3d::Stats& stats, std::wstring& reason) {
     auto pose = route.origin;
     const float offset = static_cast<float>(2.7 * std::sin(6.283185307179586 * seconds / durationSeconds));
     pose.eye.x += offset;
     pose.target.x += offset;
     const auto camera = m3d::v16::makeCamera(pose, width, height);
     const auto& scene = route.runtime.renderScene;
-    m3d::Stats stats{};
     bool presented = false;
     switch (backend) {
     case Backend::dx11:
@@ -120,6 +121,11 @@ bool presentFrame(const Route& route, Backend backend, double seconds, std::wstr
         reason = L"Native GPU frame did not report zero pixel readback buffers.";
         return false;
     }
+    if (presented && (stats.geometryPreparationEnabled != route.prepareGeometry ||
+        stats.geometryIndexCount != (route.prepareGeometry ? stats.geometrySourceVertices : 0))) {
+        reason = L"Native renderer did not apply the requested static geometry mode.";
+        return false;
+    }
     return presented;
 }
 
@@ -128,6 +134,7 @@ struct Result {
     double elapsed = 0, renderSeconds = 0;
     std::wstring error;
     bool cancelled = false;
+    m3d::Stats lastFrame{};
 };
 
 Result measure(const Route& route, const Pass& pass) {
@@ -141,7 +148,7 @@ Result measure(const Route& route, const Pass& pass) {
             result.error = L"Route window closed or minimized.";
             return false;
         }
-        if (presentFrame(route, pass.backend, t, result.error)) return true;
+        if (presentFrame(route, pass.backend, t, result.lastFrame, result.error)) return true;
         if (result.error.empty()) result.error = L"Native presentation failed.";
         return false;
     };
@@ -164,19 +171,29 @@ Result measure(const Route& route, const Pass& pass) {
     return result;
 }
 
-void writeRow(QTextStream& csv, const Pass& pass, const Result& r) {
+void writeRow(QTextStream& csv, const Pass& pass, const Result& r, bool prepareGeometry) {
     csv << pass.name << ',' << cameraId << ',' << solarHour << ',' << width << ',' << height << ',';
     if (r.error.empty()) {
         csv << r.framesInWindow << ',' << r.elapsed << ',' << r.framesStarted << ','
             << (1000.0 * r.renderSeconds / r.framesStarted) << ',' << (r.framesInWindow / durationSeconds)
-            << ",native_swapchain,on,0,ok,\n";
+            << ",native_swapchain,on,0,ok,";
         std::cout << pass.name << " " << r.framesInWindow << " presents / 30 s" << std::endl;
     } else {
         QString detail = QString::fromStdWString(r.error);
         detail.replace('"', QStringLiteral("\"\"")).replace('\r', ' ').replace('\n', ' ');
-        csv << ",,,,,native_swapchain,on,," << (r.cancelled ? "cancelled" : "error") << ",\"" << detail << "\"\n";
+        csv << ",,,,,native_swapchain,on,," << (r.cancelled ? "cancelled" : "error") << ",\"" << detail << '"';
         std::cerr << pass.name << ": " << QString::fromStdWString(r.error).toStdString() << std::endl;
     }
+    csv << ',' << (prepareGeometry ? "on" : "off");
+    if (r.error.empty()) {
+        const auto& g = r.lastFrame;
+        csv << ',' << (g.geometryPreparationEnabled ? "true" : "false")
+            << ',' << g.geometrySourceVertices << ',' << g.geometryUniqueVertices
+            << ',' << g.geometryIndexCount;
+    } else {
+        csv << ",,,,";
+    }
+    csv << '\n';
     csv.flush();
 }
 } // namespace
@@ -184,11 +201,20 @@ void writeRow(QTextStream& csv, const Pass& pass, const Result& r) {
 int main(int argc, char** argv) {
     SetProcessDPIAware();  // Physical client pixels on the primary monitor.
     QCoreApplication app(argc, argv);
-    if (argc != 3) return 2;
+    const auto args = app.arguments();
+    bool prepareGeometry = true;
+    if (args.size() == 5 && args[3] == QStringLiteral("--geometry-prep") &&
+        (args[4] == QStringLiteral("on") || args[4] == QStringLiteral("off"))) {
+        prepareGeometry = args[4] == QStringLiteral("on");
+    } else if (args.size() != 3) {
+        std::cerr << "Usage: route30.exe scene.json resultats.csv [--geometry-prep on|off]\n";
+        return 2;
+    }
+    if (_putenv_s("M3D_V17_STATIC_GEOMETRY_PREP", prepareGeometry ? "1" : "0")) return 2;
     // Both native presenters pace on vertical blank. Only this process opts in.
     if (_putenv_s("CSE_WARP_DX_BENCH_PRESENT_INTERVAL", "1") ||
         _putenv_s("CSE_WARP_VK_BENCH_PRESENT_MODE", "FIFO")) return 2;
-    auto scene = m3d::v16::loadScene(app.arguments()[1]);
+    auto scene = m3d::v16::loadScene(args[1]);
     if (!scene) { std::cerr << scene.error.toStdString() << std::endl; return 3; }
     auto built = m3d::v16::buildRuntime(scene.scene, 2048);
     if (!built) { std::cerr << built.error.toStdString() << std::endl; return 4; }
@@ -199,24 +225,25 @@ int main(int argc, char** argv) {
     m3d::setRasterCloudTimeScale(0.f);
     m3d::Stats stats{};
     const auto shadow = m3d::buildShadow(rt.renderScene, stats);
-    QFile file(app.arguments()[2]);
+    QFile file(args[2]);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) { std::cerr << file.errorString().toStdString() << std::endl; return 6; }
     QTextStream csv(&file);
     csv << "backend,camera,hour,width,height,frames_completed_30s,elapsed_s,frames_started,mean_render_ms,fps_30s,"
-           "presentation,vsync,readback_buffers,status,error\n";
+           "presentation,vsync,readback_buffers,status,error,geometry_prep_requested,geometry_prep_enabled,"
+           "geometry_source_vertices,geometry_unique_vertices,geometry_index_count\n";
     bool allPassed = true;
     for (const Pass& pass : passes) {
         Result result;
         // Each graphics API owns a dedicated HWND, as in the exploration window.
         HWND window = openRouteWindow(result.error);
         if (window) {
-            const Route route{rt, *it, shadow, window};
+            const Route route{rt, *it, shadow, window, prepareGeometry};
             result = measure(route, pass);
             if (pass.backend == Backend::vulkan) m3d::releaseVulkanDirectForCurrentThread();
             else m3d::releaseDirectX11NativeForCurrentThread();
             DestroyWindow(window);
         }
-        writeRow(csv, pass, result);
+        writeRow(csv, pass, result, prepareGeometry);
         allPassed = allPassed && result.error.empty();
         if (result.cancelled) break;
     }
