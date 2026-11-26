@@ -77,6 +77,66 @@ function Get-RouteScene($Cache, $Stage) {
     return [pscustomobject]@{ Path = $scenePath; Manifest = $versionPath }
 }
 
+# Local hardware only. No host name, account, serial number or network identifier.
+# Collect before launching the renderer so metadata survives a shutdown hang.
+function Get-RouteSystemInfo([string]$PackageRoot, [string]$Exe, [string]$PrepMode) {
+    $warnings = New-Object 'System.Collections.Generic.List[string]'
+    $cpu = @()
+    $gpu = @()
+    $memory = @()
+    $system = $null
+    $os = $null
+    $build = $null
+    $exeHash = $null
+    $exeVersion = $null
+    try {
+        $cpu = @(Get-CimInstance -ClassName Win32_Processor -OperationTimeoutSec 10 -ErrorAction Stop |
+            Select-Object Name, Manufacturer, NumberOfCores, NumberOfLogicalProcessors, MaxClockSpeed)
+    } catch { $warnings.Add('CPU inventory unavailable') }
+    try {
+        $gpu = @(Get-CimInstance -ClassName Win32_VideoController -OperationTimeoutSec 10 -ErrorAction Stop |
+            Select-Object Name, DriverVersion, DriverDate, VideoProcessor, CurrentHorizontalResolution, CurrentVerticalResolution, CurrentRefreshRate, Status)
+    } catch { $warnings.Add('GPU inventory unavailable') }
+    try {
+        $memory = @(Get-CimInstance -ClassName Win32_PhysicalMemory -OperationTimeoutSec 10 -ErrorAction Stop |
+            Select-Object Capacity, Speed, ConfiguredClockSpeed, SMBIOSMemoryType)
+    } catch { $warnings.Add('Memory module inventory unavailable') }
+    try {
+        $system = Get-CimInstance -ClassName Win32_ComputerSystem -OperationTimeoutSec 10 -ErrorAction Stop |
+            Select-Object Manufacturer, Model, TotalPhysicalMemory, SystemType
+    } catch { $warnings.Add('System inventory unavailable') }
+    try {
+        $os = Get-CimInstance -ClassName Win32_OperatingSystem -OperationTimeoutSec 10 -ErrorAction Stop |
+            Select-Object Caption, Version, BuildNumber, OSArchitecture
+    } catch { $warnings.Add('Windows inventory unavailable') }
+    try {
+        $build = Get-Content -LiteralPath (Join-Path $PackageRoot 'BUILD_INFO.json') -Raw -Encoding UTF8 |
+            ConvertFrom-Json -ErrorAction Stop
+    } catch { $warnings.Add('Package BUILD_INFO.json unavailable or invalid') }
+    try {
+        $exeHash = (Get-FileHash -LiteralPath $Exe -Algorithm SHA256 -ErrorAction Stop).Hash.ToLowerInvariant()
+        $exeVersion = (Get-Item -LiteralPath $Exe -ErrorAction Stop).VersionInfo.FileVersion
+    } catch { $warnings.Add('Executable fingerprint unavailable') }
+    return [ordered]@{
+        schemaVersion = 1
+        capturedUtc = [DateTime]::UtcNow.ToString('o')
+        computer = $system
+        processors = $cpu
+        videoControllers = $gpu
+        physicalMemory = $memory
+        windows = $os
+        package = $build
+        benchmarkExecutable = [ordered]@{ fileName = 'route30.exe'; sha256 = $exeHash; fileVersion = $exeVersion }
+        benchmark = [ordered]@{ width = 1280; height = 720; geometryPreparation = $PrepMode; vsyncRequested = 'off'; indirectLightingRequested = $true }
+        warnings = @($warnings.ToArray())
+    }
+}
+
+function Write-RouteSystemInfo([string]$PackageRoot, [string]$Exe, [string]$PrepMode, [string]$Path) {
+    $info = Get-RouteSystemInfo $PackageRoot $Exe $PrepMode
+    $info | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $Path -Encoding UTF8
+}
+
 function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$PrepMode = 'on') {
     $PrepMode = $PrepMode.ToLowerInvariant()
     $PackageRoot = (Resolve-Path -LiteralPath $PackageRoot).ProviderPath
@@ -106,6 +166,9 @@ function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$
         $versionPath = Join-Path $out 'SCENE_VERSION.json'
         Copy-Item -LiteralPath $scene.Manifest -Destination $versionPath
         $csv = Join-Path $out 'resultats.csv'
+        $systemInfoPath = Join-Path $out 'SYSTEM_INFO.json'
+        Write-RouteSystemInfo $PackageRoot $exe $PrepMode $systemInfoPath
+        Write-Host "Configuration materielle : $systemInfoPath"
         Write-Host "Parcours GPU direct : 1280 x 720, VSync desactivee, rebonds indirects actives, 30 s par backend. Preparation des triangles : $PrepMode."
         & $exe $scene.Path $csv --geometry-prep $PrepMode
         $engineExit = $LASTEXITCODE
@@ -113,7 +176,7 @@ function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$
             throw "Aucun CSV produit (code moteur $engineExit). Dossier : $out"
         }
         Get-Content -LiteralPath $csv
-        Compress-Archive -LiteralPath @($csv, $versionPath) -DestinationPath "$out.zip"
+        Compress-Archive -LiteralPath @($csv, $versionPath, $systemInfoPath) -DestinationPath "$out.zip"
         if ($engineExit -ne 0) { throw "Campagne incomplete (code moteur $engineExit). Resultats : $out.zip" }
         Write-Host "Resultats : $out.zip"
     } finally {

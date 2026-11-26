@@ -1,0 +1,5 @@
+# Route30 system inventory
+
+The Windows PowerShell 5.1 launcher writes SYSTEM_INFO.json before starting route30.exe, alongside SCENE_VERSION.json and resultats.csv. The normal ZIP includes all three. If shutdown stalls, the inventory is still present in the result directory. No changes to rendering, benchmark duration or executable are required. The package BUILD_INFO.json supplies build provenance; the SHA-256 identifies the actual route30.exe. The separately recorded SCENE_VERSION.json is authoritative for the scene used.
+
+Inventory includes CPU model/core counts, all Windows video controllers and driver versions, physical RAM module capacity and reported speeds, total RAM, Windows version and computer manufacturer/model. CIM may report incomplete or unavailable values; warnings describe failed queries. GPU inventory does not prove which adapter a specific backend actually selected. No machine name, serial number, username or network address is collected. Values are local and no information is automatically sent to GitHub. CI tests only the metadata writer and its schema on the runner; real measurements are performed on the user's own PC.
