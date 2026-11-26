@@ -2,7 +2,8 @@
 param(
     [string]$Root,
     [ValidateSet('on','off')][string]$GeometryPrep = 'on',
-    [switch]$AdaptiveAB
+    [switch]$AdaptiveAB,
+    [switch]$AdaptiveTour
 )
 
 $ErrorActionPreference = 'Stop'
@@ -138,7 +139,7 @@ function Write-RouteSystemInfo([string]$PackageRoot, [string]$Exe, [string]$Prep
     $info | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $Path -Encoding UTF8
 }
 
-function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$PrepMode = 'on', [switch]$AdaptiveAB) {
+function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$PrepMode = 'on', [switch]$AdaptiveAB, [switch]$AdaptiveTour) {
     $PrepMode = $PrepMode.ToLowerInvariant()
     $PackageRoot = (Resolve-Path -LiteralPath $PackageRoot).ProviderPath
     # Persist machine metadata at launch, even if scene download or GPU startup fails.
@@ -172,9 +173,16 @@ function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$
         }
         $versionPath = Join-Path $out 'SCENE_VERSION.json'
         Copy-Item -LiteralPath $scene.Manifest -Destination $versionPath
+        $info = Get-Content -LiteralPath $systemInfoPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $actualScene = Get-Content -LiteralPath $versionPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $info | Add-Member -NotePropertyName testedScene -NotePropertyValue $actualScene -Force
+        $mode = if ($AdaptiveTour) { 'adaptive-tour-all-cameras' } elseif ($AdaptiveAB) { 'adaptive-ab-pool' } else { 'route30' }
+        $info.benchmark | Add-Member -NotePropertyName campaign -NotePropertyValue $mode -Force
+        $info | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $systemInfoPath -Encoding UTF8
         $csv = Join-Path $out 'resultats.csv'
         Write-Host "Parcours GPU direct : 1280 x 720, VSync desactivee, rebonds indirects actives, 30 s par backend. Preparation des triangles : $PrepMode."
-        if ($AdaptiveAB) { & $exe $scene.Path $csv --geometry-prep $PrepMode --adaptive-ab }
+        if ($AdaptiveTour) { Write-Host 'Circuit integral : toutes les cameras, quatre horaires fixes et transition jour/nuit.'; & $exe $scene.Path $csv --geometry-prep $PrepMode --adaptive-tour }
+        elseif ($AdaptiveAB) { & $exe $scene.Path $csv --geometry-prep $PrepMode --adaptive-ab }
         else { & $exe $scene.Path $csv --geometry-prep $PrepMode }
         $engineExit = $LASTEXITCODE
         if (!(Test-Path -LiteralPath $csv -PathType Leaf)) {
@@ -189,4 +197,4 @@ function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$
     }
 }
 
-if ($MyInvocation.InvocationName -ne '.') { Invoke-Route30 -PackageRoot $Root -PrepMode $GeometryPrep -AdaptiveAB:$AdaptiveAB }
+if ($MyInvocation.InvocationName -ne '.') { Invoke-Route30 -PackageRoot $Root -PrepMode $GeometryPrep -AdaptiveAB:$AdaptiveAB -AdaptiveTour:$AdaptiveTour }

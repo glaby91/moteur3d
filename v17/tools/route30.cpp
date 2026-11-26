@@ -15,12 +15,16 @@
 #include <iostream>
 #include <vector>
 #include <iterator>
+#include <set>
 
 namespace {
 using Clock = std::chrono::steady_clock;
 constexpr int width = 1280, height = 720;
 constexpr auto routeDuration = std::chrono::seconds(30);
 constexpr double durationSeconds = routeDuration.count();
+constexpr int tourZoneSeconds=6;
+constexpr float tourHours[]={8.f,14.75f,19.f,23.f,17.f};
+constexpr const char* tourProfiles[]={"morning","day","dusk","night","transition"};
 constexpr float solarHour = 14.75f;
 constexpr char cameraId[] = "v7_pool_fresco";
 
@@ -98,19 +102,31 @@ struct Route {
     bool adaptiveCampaign=false;
     bool adaptive=false;
     mutable size_t lastPhase=~size_t(0);
+    bool tour=false;
+    size_t zoneIndex=0,zoneCount=1;
+    double secondsPerZone=durationSeconds;
+    bool warmup=true;
 };
 
 bool presentFrame(const Route& route, Backend backend, double seconds,
                   m3d::Stats& stats, std::wstring& reason) {
     auto pose = route.origin;
-    const float offset = static_cast<float>(2.7 * std::sin(6.283185307179586 * seconds / durationSeconds));
-    pose.eye.x += offset;
-    pose.target.x += offset;
+    if(route.tour){
+        // Sweep at the authored eye point; no unvalidated movement through walls.
+        const float angle=float(.20943951024*std::sin(6.283185307179586*seconds/route.secondsPerZone));
+        const auto d=pose.target-pose.eye;
+        const float c=std::cos(angle),s=std::sin(angle);
+        pose.target=pose.eye+m3d::V{c*d.x+s*d.z,d.y,-s*d.x+c*d.z};
+    }else{
+        const float offset=static_cast<float>(2.7*std::sin(6.283185307179586*seconds/durationSeconds));
+        pose.eye.x+=offset;pose.target.x+=offset;
+    }
     const auto camera = m3d::v16::makeCamera(pose, width, height);
     const auto& scene = route.runtime.renderScene;
     const m3d::ShadowMap* activeShadow=&route.shadow;
     if(route.transitionShadows){
-        const size_t phase=std::min<size_t>(5,size_t(seconds/5.0));
+        const double fraction=route.tour?(double(route.zoneIndex)+seconds/route.secondsPerZone)/double(route.zoneCount):seconds/durationSeconds;
+        const size_t phase=std::min<size_t>(5,size_t(std::max(0.,fraction)*6.));
         if(route.lastPhase!=phase){m3d::updateLighting(17.f+phase*.8f);route.lastPhase=phase;}
         activeShadow=&(*route.transitionShadows)[phase];
     }
@@ -138,7 +154,7 @@ bool presentFrame(const Route& route, Backend backend, double seconds,
         reason = L"Native renderer did not apply the requested static geometry mode.";
         return false;
     }
-    if(presented&&backend==Backend::lumaTrace&&(!stats.planarReflectionRendered||!stats.lumaProbeLightingEnabled)){
+    if(presented&&backend==Backend::lumaTrace&&(!stats.lumaProbeLightingEnabled||(!route.tour&&!stats.planarReflectionRendered))){
         reason=L"LumaTrace pool benchmark requires planar reflection and indirect probe lighting.";return false;
     }
     if(presented&&route.adaptiveCampaign&&stats.lumaAdaptiveEnabled!=route.adaptive){reason=L"Adaptive 0/1 mode mismatch.";return false;}
@@ -153,13 +169,14 @@ struct Result {
     m3d::Stats lastFrame{};
     std::vector<double> frameMs;
     uint64_t zeroSum=0,triangleSum=0;
+    float hourStart=0,hourEnd=0;
 };
 
 Result measure(const Route& route, const Pass& pass) {
     Result result;
     const QString title = QStringLiteral("CSE WARP - %1 - Parcours 1280 x 720").arg(QString::fromLatin1(pass.name));
     SetWindowTextW(route.window, reinterpret_cast<LPCWSTR>(title.utf16()));
-    std::cout << pass.name << " warmup" << std::endl;
+    std::cout<<pass.name<<" / "<<route.origin.id.toStdString()<<" / "<<route.secondsPerZone<<" s"<<std::endl;
     auto frame = [&](double t) {
         if (!pollWindow(route.window)) {
             result.cancelled = true;
@@ -170,17 +187,21 @@ Result measure(const Route& route, const Pass& pass) {
         if (result.error.empty()) result.error = L"Native presentation failed.";
         return false;
     };
-    for (int i = 0; i < 2; ++i) {
-        if (!frame(0.0)) return result;
-    }
-    const auto start = Clock::now();
-    const auto deadline = start + routeDuration;
+    if(route.warmup)for(int i=0;i<2;++i){if(!frame(0.0))return result;}
+    const auto start=Clock::now();
+    const auto deadline=start+std::chrono::duration_cast<Clock::duration>(std::chrono::duration<double>(route.secondsPerZone));
     for (;;) {
         const auto before = Clock::now();
         if (before >= deadline) break;
         ++result.framesStarted;
         const double t = std::chrono::duration<double>(before - start).count();
         if (!frame(t)) return result;
+        if(route.tour){
+            const size_t phase=std::min<size_t>(5,size_t((double(route.zoneIndex)+t/route.secondsPerZone)/double(route.zoneCount)*6.));
+            const float hour=route.transitionShadows?17.f+phase*.8f:tourHours[pass.profile];
+            if(result.framesStarted==1)result.hourStart=hour;
+            result.hourEnd=hour;
+        }
         const auto end = Clock::now();
         const double seconds=std::chrono::duration<double>(end - before).count();
         result.renderSeconds += seconds;
@@ -188,17 +209,20 @@ Result measure(const Route& route, const Pass& pass) {
         if (end <= deadline) ++result.framesInWindow;
     }
     result.elapsed = std::chrono::duration<double>(Clock::now() - start).count();
+    if(!result.framesStarted||!result.framesInWindow)result.error=L"No frame completed in measurement window.";
     return result;
 }
 
-void writeRow(QTextStream& csv, const Pass& pass, const Result& r, bool prepareGeometry, bool adaptiveCampaign) {
+void writeRow(QTextStream& csv, const Pass& pass, const Result& r, bool prepareGeometry, bool adaptiveCampaign,
+              const QString& camera=QString::fromLatin1(cameraId),bool tour=false,size_t zoneIndex=0,size_t zoneCount=1) {
     const float hour=pass.profile==1?23.f:pass.profile==2?17.f:solarHour;
-    csv << pass.name << ',' << cameraId << ',' << hour << ',' << width << ',' << height << ',';
+    QString escapedCamera=camera;escapedCamera.replace('"',QStringLiteral("\"\""));
+    csv << pass.name << ",\"" << escapedCamera << "\"," << (tour?r.hourStart:hour) << ',' << width << ',' << height << ',';
     if (r.error.empty()) {
         csv << r.framesInWindow << ',' << r.elapsed << ',' << r.framesStarted << ','
-            << (1000.0 * r.renderSeconds / r.framesStarted) << ',' << (r.framesInWindow / durationSeconds)
+            << (1000.0 * r.renderSeconds / r.framesStarted) << ',' << (r.framesInWindow / (tour?tourZoneSeconds:durationSeconds))
             << ",native_swapchain,off,0,ok,";
-        std::cout << pass.name << " " << r.framesInWindow << " presents / 30 s" << std::endl;
+        std::cout << pass.name << " " << r.framesInWindow << " presents / " << (tour?tourZoneSeconds:durationSeconds) << " s" << std::endl;
     } else {
         QString detail = QString::fromStdWString(r.error);
         detail.replace('"', QStringLiteral("\"\"")).replace('\r', ' ').replace('\n', ' ');
@@ -217,13 +241,14 @@ void writeRow(QTextStream& csv, const Pass& pass, const Result& r, bool prepareG
         csv << ",,,,,,";
     }
     if(adaptiveCampaign){
-        csv << ',' << (pass.adaptive?"on":"off") << ',' << (pass.profile==0?"day":pass.profile==1?"night":"transition") << ',' << pass.repetition;
+        csv << ',' << (pass.adaptive?"on":"off") << ',' << (tour?tourProfiles[pass.profile]:pass.profile==0?"day":pass.profile==1?"night":"transition") << ',' << pass.repetition;
         if(r.error.empty()&&!r.frameMs.empty()){
             auto values=r.frameMs;std::sort(values.begin(),values.end());
             auto pct=[&](double q){return values[size_t(std::ceil(q*values.size()))-1];};
             csv << ',' << pct(.5) << ',' << pct(.95) << ',' << (r.triangleSum?100.*double(r.zeroSum)/double(r.triangleSum):0.) << ',' << r.lastFrame.lumaAdaptiveTriangleCount;
         }else csv << ",,,,";
     }
+    if(tour)csv<<','<<(zoneIndex+1)<<','<<zoneCount<<','<<tourZoneSeconds<<','<<r.hourStart<<','<<r.hourEnd;
     csv << '\n';
     csv.flush();
 }
@@ -233,13 +258,15 @@ int main(int argc, char** argv) {
     SetProcessDPIAware();  // Physical client pixels on the primary monitor.
     QCoreApplication app(argc, argv);
     const auto args = app.arguments();
-    bool prepareGeometry = true, adaptiveCampaign=false;
+    bool prepareGeometry = true, adaptiveCampaign=false,tour=false,planOnly=false;
     if(args.size()<3)return 2;
     for(int i=3;i<args.size();++i){
         if(args[i]==QStringLiteral("--adaptive-ab"))adaptiveCampaign=true;
+        else if(args[i]==QStringLiteral("--adaptive-tour")){adaptiveCampaign=true;tour=true;}
+        else if(args[i]==QStringLiteral("--tour-plan")){adaptiveCampaign=true;tour=true;planOnly=true;}
         else if(args[i]==QStringLiteral("--geometry-prep")&&i+1<args.size()&&
                 (args[i+1]==QStringLiteral("on")||args[i+1]==QStringLiteral("off")))prepareGeometry=args[++i]==QStringLiteral("on");
-        else {std::cerr<<"Usage: route30.exe scene.json resultats.csv [--geometry-prep on|off] [--adaptive-ab]\n";return 2;}
+        else {std::cerr<<"Usage: route30.exe scene.json resultats.csv [--geometry-prep on|off] [--adaptive-ab|--adaptive-tour|--tour-plan]\n";return 2;}
     }
     if(_putenv_s("M3D_V17_LUMA_ADAPTIVE","0"))return 2;
     if (_putenv_s("M3D_V17_STATIC_GEOMETRY_PREP", prepareGeometry ? "1" : "0")) return 2;
@@ -252,7 +279,25 @@ int main(int argc, char** argv) {
     if (!built) { std::cerr << built.error.toStdString() << std::endl; return 4; }
     const auto& rt = built.runtime;
     const auto it = std::find_if(rt.cameras.begin(), rt.cameras.end(), [](const auto& c) { return c.id == cameraId; });
-    if (it == rt.cameras.end()) { std::cerr << "Missing " << cameraId << std::endl; return 5; }
+    if(!tour&&it==rt.cameras.end()){std::cerr<<"Missing "<<cameraId<<std::endl;return 5;}
+    if(tour){
+        std::set<QString> ids;
+        for(const auto& c:rt.cameras){
+            const auto dir=c.target-c.eye;
+            if(c.id.isEmpty()||!ids.insert(c.id).second||!std::isfinite(dir.x)||!std::isfinite(dir.y)||!std::isfinite(dir.z)||
+               !std::isfinite(c.eye.x)||!std::isfinite(c.eye.y)||!std::isfinite(c.eye.z)||!std::isfinite(c.fov)||
+               m3d::dot(dir,dir)<1.e-8f){std::cerr<<"Invalid/duplicate tour camera "<<c.id.toStdString()<<std::endl;return 5;}
+        }
+        if(ids.empty()){std::cerr<<"No authored tour cameras"<<std::endl;return 5;}
+        std::cout<<"Tour: "<<ids.size()<<" cameras, 18 circuits, "<<ids.size()*18*tourZoneSeconds<<" measured seconds"<<std::endl;
+        for(const auto& c:rt.cameras)std::cout<<"  "<<c.id.toStdString()<<" / "<<c.name.toStdString()<<std::endl;
+        if(planOnly){
+            QFile plan(args[2]);if(!plan.open(QIODevice::WriteOnly|QIODevice::Text))return 6;
+            QTextStream out(&plan);out<<"zone_index,camera_id\n";
+            size_t n=0;for(const auto& c:rt.cameras){QString id=c.id;id.replace('"',QStringLiteral("\"\""));out<<++n<<",\""<<id<<"\"\n";}
+            out.flush();return out.status()==QTextStream::Ok&&plan.flush()?0:6;
+        }
+    }
     m3d::updateLighting(solarHour);
     m3d::setRasterCloudTimeScale(0.f);
     m3d::setRasterHybridLightingEnabled(true);
@@ -261,13 +306,18 @@ int main(int argc, char** argv) {
     QFile file(args[2]);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) { std::cerr << file.errorString().toStdString() << std::endl; return 6; }
     QTextStream csv(&file);
-    csv << "backend,camera,hour,width,height,frames_completed_30s,elapsed_s,frames_started,mean_render_ms,fps_30s,"
+    csv<<"backend,camera,hour,width,height,"<<(tour?"frames_completed_window":"frames_completed_30s")<<",elapsed_s,frames_started,mean_render_ms,"<<(tour?"fps_window":"fps_30s")<<","
            "presentation,vsync,readback_buffers,status,error,geometry_prep_requested,geometry_prep_enabled,"
            "geometry_source_vertices,geometry_unique_vertices,geometry_index_count,planar_reflection,luma_probe_lighting";
     if(adaptiveCampaign)csv<<",adaptive_requested,profile,repetition,p50_present_ms,p95_present_ms,mean_zero_percent,triangle_count";
+    if(tour)csv<<",zone_index,zone_count,window_seconds,hour_start,hour_end";
     csv<<'\n';
     std::vector<Pass> campaign;
-    if(adaptiveCampaign){
+    if(tour){
+        for(int repeat=1;repeat<=2;++repeat)for(int profile=0;profile<4;++profile)
+            for(bool on:{false,true}){const bool active=on!=(repeat%2==0);campaign.push_back({Backend::lumaTrace,active?"LumaTrace-ON":"LumaTrace-OFF",active,profile,repeat});}
+        for(bool active:{false,true})campaign.push_back({Backend::lumaTrace,active?"LumaTrace-ON":"LumaTrace-OFF",active,4,1});
+    }else if(adaptiveCampaign){
         for(int profile=0;profile<3;++profile)for(int repeat=1;repeat<=4;++repeat)
             for(bool on:{false,true})campaign.push_back({Backend::lumaTrace,on?"LumaTrace-ON":"LumaTrace-OFF",on!=(repeat%2==0),profile,repeat});
         // Alternate A/B order to reduce thermal/clock drift. Name follows actual mode.
@@ -275,6 +325,10 @@ int main(int argc, char** argv) {
     }else campaign.assign(std::begin(passes),std::end(passes));
     std::vector<m3d::ShadowMap> transitionShadows;
     m3d::ShadowMap nightShadow;
+    std::vector<m3d::ShadowMap> tourShadows;
+    if(tour){
+        for(int profile=0;profile<4;++profile){m3d::updateLighting(12.f);m3d::updateLighting(tourHours[profile]);tourShadows.push_back(m3d::buildShadow(rt.renderScene,stats));}
+    }
     if(adaptiveCampaign){
         m3d::updateLighting(23.f);nightShadow=m3d::buildShadow(rt.renderScene,stats);
         // Match every transition pass to a day-to-night initial sensor state.
@@ -285,7 +339,30 @@ int main(int argc, char** argv) {
     for (const Pass& pass : campaign) {
         if(_putenv_s("M3D_V17_LUMA_ADAPTIVE",pass.adaptive?"1":"0"))return 2;
         if(adaptiveCampaign)m3d::updateLighting(12.f);
-        m3d::updateLighting(pass.profile==1?23.f:pass.profile==2?17.f:solarHour);
+        m3d::updateLighting(tour?tourHours[pass.profile]:pass.profile==1?23.f:pass.profile==2?17.f:solarHour);
+        if(tour){
+            std::wstring windowError;
+            HWND window=openRouteWindow(windowError);
+            if(!window){std::cerr<<"Cannot create tour window"<<std::endl;return 7;}
+            const size_t count=size_t(rt.cameras.size());
+            bool cancelled=false;
+            for(size_t index=0;index<count;++index){
+                const auto& camera=rt.cameras[qsizetype(index)];
+                const bool transition=pass.profile==4;
+                const Route route{rt,camera,transition?transitionShadows.front():tourShadows[size_t(pass.profile)],
+                    window,prepareGeometry,transition?&transitionShadows:nullptr,true,pass.adaptive,
+                    ~size_t(0),true,index,count,double(tourZoneSeconds),index==0};
+                const Result result=measure(route,pass);
+                writeRow(csv,pass,result,prepareGeometry,true,camera.id,true,index,count);
+                allPassed=allPassed&&result.error.empty();
+                if(result.cancelled){cancelled=true;break;}
+                if(!result.error.empty())break;
+            }
+            m3d::releaseDirectX11NativeForCurrentThread();
+            DestroyWindow(window);
+            if(cancelled||!allPassed)break;
+            continue;
+        }
         Result result;
         // Each graphics API owns a dedicated HWND, as in the exploration window.
         HWND window = openRouteWindow(result.error);

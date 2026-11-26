@@ -501,7 +501,7 @@ jobs:
           Copy-Item "build-v17/Release/moteur3d_v17_benchmark.exe" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v17_gibake.exe" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v17_campaign.exe" "dist-v17/"
-          Copy-Item "build-v17/Release/route30.exe", "v17/tools/route30.ps1", "v17/tools/LANCER_PARCOURS_30S.bat", "v17/tools/LANCER_LUMATRACE_01_AB.bat" "dist-v17/"
+          Copy-Item "build-v17/Release/route30.exe", "v17/tools/route30.ps1", "v17/tools/LANCER_PARCOURS_30S.bat", "v17/tools/LANCER_LUMATRACE_01_AB.bat", "v17/tools/LANCER_LUMATRACE_01_PISCINE.bat" "dist-v17/"
           Copy-Item "build-v17/v16/Release/moteur3d_v16.exe" "dist-v17/"
           Copy-Item "build-v17/Release/moteur3d_v16_core.dll" "dist-v17/"
           Copy-Item "build-v17/Release/cse_warp_v17.ico" "dist-v17/"
@@ -603,6 +603,7 @@ jobs:
           }
           windeployqt --release --no-translations dist-v17/moteur3d_v17.exe
           windeployqt --release --no-translations dist-v17/moteur3d_v16.exe
+          if (!(Test-Path 'dist-v17/imageformats/qjpeg.dll' -PathType Leaf)) { throw 'Packaged Qt JPEG plugin missing' }
       - name: Validate latest V17 scene for final package
         shell: pwsh
         run: |
@@ -937,6 +938,15 @@ jobs:
               !(Test-Path "dist-v17/SCENE_VERSION.json")) {
             throw "The latest reference scene and both version manifests must be in the V17 package."
           }
+          foreach ($required in @('imageformats/qjpeg.dll','route30.exe','route30.ps1','LANCER_LUMATRACE_01_AB.bat','LANCER_LUMATRACE_01_PISCINE.bat')) {
+            if (!(Test-Path (Join-Path 'dist-v17' $required) -PathType Leaf)) { throw "Tour package missing: $required" }
+          }
+          $env:QT_PLUGIN_PATH = (Resolve-Path 'dist-v17').Path
+          & 'dist-v17/route30.exe' 'dist-v17/benchmark-civic/scene.json' 'build-v17/tour-plan.csv' --tour-plan
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path 'build-v17/tour-plan.csv')) { throw 'Full-scene camera plan failed' }
+          $tourPlan = @(Import-Csv 'build-v17/tour-plan.csv')
+          if ($tourPlan.Count -lt 2) { throw 'Full-scene benchmark must cover more than one camera' }
+          Get-Content 'build-v17/tour-plan.csv'
           @'
           @echo off
           cd /d "%~dp0"
