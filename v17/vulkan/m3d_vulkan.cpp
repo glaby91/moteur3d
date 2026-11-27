@@ -25,6 +25,7 @@
 #include "vulkan_dirty_policy.h"
 #include "../weather/clouds.h"
 #include "../atmosphere/atmosphere.h"
+#include "../../experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zmaterial.h"
 #include "../../experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_gi_bake.h"
 #include <vulkan/vulkan.h>
 #include <algorithm>
@@ -1816,6 +1817,7 @@ class VulkanRaster final {
         f.shadowRight[3]=shadows.dist;
         f.shadowUp[0]=shadows.up.x;f.shadowUp[1]=shadows.up.y;f.shadowUp[2]=shadows.up.z;
         f.shadowUp[3]=shadow_.width;
+        const bool zMaterialOn=zmaterial::enabled();
         for(size_t i=0;i<scene.mat.size()&&i<kMaxMaterials;i++){
             const Material& m=scene.mat[i];
             f.textureDetail[i][0]=float(protectedLayer_[i]);
@@ -1838,6 +1840,10 @@ class VulkanRaster final {
                 else if(name=="lamp"){emission={1.f,.65f,.36f};strength=2.65f*lampFactor;}
                 else if(name=="led"){emission={1.f,.85f,.65f};strength=1.33f*lampFactor;}
             }
+            const auto zm=zmaterial::prepare(m.metallic,m.roughnessScale,m.transmissionPercent==0,
+                f.textureDetail[i][1]>.5f,strength>0.f,zMaterialOn);
+            f.textureDetail[i][2]=zm.metal;
+            f.textureDetail[i][3]=zm.diffuse;
             f.emission[i][0]=emission.x;f.emission[i][1]=emission.y;f.emission[i][2]=emission.z;
             f.emission[i][3]=strength;
         }

@@ -101,7 +101,11 @@ void main() {
  float shade=visibility(world,receiverN);
 #endif
  float hemi=mix(0.75,1.1,clamp(n.y*0.5+0.5,0.0,1.0));
- vec3 color=base*((0.28+0.34*f.sun.w)*hemi+(0.56*ndotl)*shade);
+ float zmMetal=f.textureDetail[m].z;
+ float zmDiffuse=f.textureDetail[m].w;
+ vec3 diffuseBase=base*zmDiffuse;
+ float environmentEnergy=(0.28+0.34*f.sun.w)*hemi;
+ vec3 color=diffuseBase*(environmentEnergy+(0.56*ndotl)*shade);
 #ifdef CSE_WARP_VK_FAST_FRAGMENT
  // Specular is exactly zero for ndotl=0. Skip normalization, Fresnel and pow.
  if(ndotl>0.0) {
@@ -139,13 +143,21 @@ void main() {
    float radius=max(0.05,f.lightPos[i].w);
    float falloff=pow(clamp(1.0-dist/radius,0.0,1.0),2.0);
 #endif
-   color+=base*f.lightRgb[i].rgb*f.lightRgb[i].a*falloff*max(0.0,dot(n,normalize(delta)))*0.38;
+   color+=diffuseBase*f.lightRgb[i].rgb*f.lightRgb[i].a*falloff*max(0.0,dot(n,normalize(delta)))*0.38;
  }
  color+=f.emission[m].rgb*max(0.0,f.emission[m].a);
  if(f.giInfo.x>.5){
    vec3 p=clamp((world-f.giOrigin.xyz)*f.giInvSpan.xyz,vec3(0.0),vec3(1.0));
    vec3 irradiance=max(mix(texture(giCurrent,p),texture(giNext,p),f.giInfo.y).rgb,vec3(0.0));
-   color+=base*(irradiance-(0.28+0.34*f.sun.w)*hemi);
+   color+=diffuseBase*(irradiance-environmentEnergy);
+   environmentEnergy=dot(irradiance,vec3(.2126,.7152,.0722));
+ }
+ if(zmMetal>0.0){
+   vec3 v=normalize(f.eye.xyz-world);
+   float r=clamp(nm.a*f.materialProps[m].y,0.065,1.0);
+   float reflectedY=2.0*clamp(dot(n,v),0.0,1.0)*n.y-v.y;
+   float directional=1.0+0.55*(1.0-r*r)*clamp(reflectedY,-1.0,1.0);
+   color+=base*(zmMetal*max(environmentEnergy,0.0)*directional);
  }
  if(poolWater){
    vec3 v=normalize(f.eye.xyz-world);

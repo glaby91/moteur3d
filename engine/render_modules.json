@@ -4,7 +4,7 @@
   "modules": [
     {
       "id": "scene_runtime",
-      "revision": "002",
+      "revision": "003",
       "engines": [
         "v16",
         "v17"
@@ -12,7 +12,8 @@
       "optional": false,
       "sources": [
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_scene_v16.cpp",
-        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_v16_bridge.cpp"
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_v16_bridge.cpp",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zmaterial_catalog.h"
       ]
     },
     {
@@ -184,7 +185,7 @@
     },
     {
       "id": "d3d11_raster_shader",
-      "revision": "008",
+      "revision": "009",
       "engines": [
         "v16",
         "v17"
@@ -237,7 +238,7 @@
     },
     {
       "id": "d3d11_raster",
-      "revision": "017",
+      "revision": "018",
       "engines": [
         "v16",
         "v17"
@@ -255,7 +256,8 @@
       ],
       "sources": [
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp",
-        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_dx11_emission.h"
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_dx11_emission.h",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zmaterial.h"
       ]
     },
     {
@@ -310,7 +312,7 @@
     },
     {
       "id": "vulkan_raster",
-      "revision": "009",
+      "revision": "010",
       "engines": [
         "v16",
         "v17"

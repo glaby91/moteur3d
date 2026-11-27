@@ -2,6 +2,8 @@
 #include "m3d_csp001_bvh.h"
 #include "m3d_zreflect_catalog.h"
 #include "m3d_zreflect_cache.h"
+#include "m3d_zmaterial_catalog.h"
+#include <QSet>
 #include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -609,7 +611,20 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
     if(materialDocs.isEmpty()||meshes.isEmpty()||instanceDocs.isEmpty()){
         result.error="Missing meshes, instances or materials";return result;
     }
-    if(materialDocs.size()>256){result.error="Material count exceeds 256";return result;}
+    // Select instance references before allocating textures. Preserve author order.
+    QSet<QString> usedMaterials, declaredMaterials;
+    for(const auto& instance:instanceDocs)usedMaterials.insert(instance.value("material").toString());
+    QVector<QJsonObject> activeMaterials;
+    for(const auto& material:materialDocs){
+        const QString id=material.value("id").toString();
+        if(id.isEmpty()||declaredMaterials.contains(id)){result.error="Duplicate or missing material: "+id;return result;}
+        declaredMaterials.insert(id);
+        if(usedMaterials.contains(id))activeMaterials.append(material);
+    }
+    for(const auto& id:usedMaterials)if(!declaredMaterials.contains(id)){result.error="Unknown object material: "+id;return result;}
+    if(activeMaterials.isEmpty()||activeMaterials.size()>256){result.error="Active material count outside 1..256";return result;}
+    materialDocs=std::move(activeMaterials);
+    zmaterial::Catalog library;
     report(15,QStringLiteral("Préparation des textures PBR"));
     auto stageStarted=std::chrono::steady_clock::now();
     const auto stageElapsedMs=[&](){
@@ -617,7 +632,8 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
             std::chrono::steady_clock::now()-stageStarted).count();
     };
     int completedMaterials=0;
-    for(const auto& j:materialDocs){
+    for(auto j:materialDocs){
+        if(!library.resolve(j,result.error))return result;
         const QString id=j.value("id").toString();
         if(id.isEmpty()||result.runtime.materialIndex.contains(id)){
             result.error="Duplicate or missing material: "+id;return result;

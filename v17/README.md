@@ -1,6 +1,6 @@
 # CSE WARP Beta X — V17
 
-**Révision moteur : V17.029 · scène de référence CI : V17.631.** [Validation L01/L02](docs/L01_SOLAR_PCF_V17029.md). Les fenêtres moteur et rendu dédié affichent les deux révisions. Le paquet Windows contient le moteur et ses outils ; la scène est versionnée et distribuée séparément. LumaTrace utilise maintenant les surfaces lumineuses de la scène comme sources locales et réutilise leur éclairage calculé par triangle.
+**Révision expérimentale : V17.030 — Z Material 001 · base validée V17.029 · scène CI V17.631.** [Z Material](docs/ZMATERIAL_001.md). [Validation L01/L02](docs/L01_SOLAR_PCF_V17029.md). Les fenêtres moteur et rendu dédié affichent les deux révisions. Le paquet Windows contient le moteur et ses outils ; la scène est versionnée et distribuée séparément. LumaTrace utilise maintenant les surfaces lumineuses de la scène comme sources locales et réutilise leur éclairage calculé par triangle.
 
 **V17 réunit l’exploration temps réel, les backends CPU/GPU et le noyau partagé avec V16.** DX11 Raster est le choix temps réel général ; Vulkan et LumaTrace sont expérimentaux. Le chemin de présentation GPU directe est disponible sous Windows, avec Qt/QImage comme solution de repli. La CI WARP ne mesure pas les performances du GPU matériel.
 

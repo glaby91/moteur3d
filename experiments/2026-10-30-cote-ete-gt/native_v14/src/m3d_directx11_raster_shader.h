@@ -260,10 +260,15 @@ inline constexpr char kShaderPart2[] = R"(
         ambientEnergy=lerp(.055,.335,diffuseTerms.w)*lerp(.77,1.03,hemisphere);
         sunEnergy=.88*diffuse*sunlightVisibility*diffuseTerms.w;
     }
-    float3 color = base*(ambientEnergy+sunEnergy)
+    // Z Material: preserve the legacy shading of nonmetallic and optical surfaces.
+    const float zmMetal=materialTextureDetail[i.mat].y;
+    const float zmDiffuse=materialTextureDetail[i.mat].z;
+    const float3 diffuseBase=base*zmDiffuse;
+    float environmentEnergy=ambientEnergy;
+    float3 color = diffuseBase*(ambientEnergy+sunEnergy)
                  + base*materialGlow[i.mat].rgb*materialGlow[i.mat].a;
     [branch] if(peripheralControls.w>.5 && i.primitiveId!=0xffffffffu)
-        color+=base*lumaTriangleRadiance[i.primitiveId].rgb;
+        color+=diffuseBase*lumaTriangleRadiance[i.primitiveId].rgb;
     color += materialEmission[i.mat].rgb * max(materialEmission[i.mat].a,0.0);
     // The old warm (28,13,4) constant tinted *every* night material brown.
     // Keep a tiny near-neutral floor instead; actual lamps add local warmth.
@@ -271,6 +276,7 @@ inline constexpr char kShaderPart2[] = R"(
     float3 viewDir = normalize(eye - i.world);
     float3 reflectedLight = reflect(-normalize(lightDir), normal);
     float roughness = roughnessMap.Sample(wrapSampler, float3(i.uv, i.mat));
+    if(zmMetal>0.0) roughness=clamp(roughness*materialTextureDetail[i.mat].w,.04,1.0);
     float specularPower = materialSpecular[i.mat].y;
     if (materialSpecular[i.mat].z > 0.5) {
         specularPower = clamp(2.0 / max(roughness * roughness, 0.0001) - 2.0, 8.0, 80.0);
@@ -322,7 +328,7 @@ inline constexpr char kShaderPart2[] = R"(
                 float3 localIrradiance=lightColorIntensity[l].rgb
                     *(edge*edge*lightColorIntensity[l].a*lambert*.27);
                 if(peripheralControls.w<.5)
-                    color += colorControls.x>0.5 ? base*localIrradiance : localIrradiance;
+                    color += (colorControls.x>0.5 ? base*localIrradiance : localIrradiance)*zmDiffuse;
                 if(localSpecEligible){
                     float3 toLight=delta/distanceToLight;
                     float3 reflectedPoint=reflect(-toLight,normal);
@@ -354,7 +360,9 @@ inline constexpr char kShaderPart2[] = R"(
         if(hybridControls.w>1.5){
             // LumaTrace's lightweight GPU cache contains one diffuse bounce
             // from directly lit surfaces, bilinearly interpolated in space.
-            color+=base*max(probe.rgb,0.0);
+            const float3 bounce=max(probe.rgb,0.0);
+            color+=diffuseBase*bounce;
+            environmentEnergy+=dot(bounce,float3(.2126,.7152,.0722));
         }else{
             float skyVisibility=saturate(probe.a);
             float upward=saturate(normal.y*.5+.5);
@@ -379,12 +387,18 @@ inline constexpr char kShaderPart2[] = R"(
                 // Do not re-color it using the old empirical sky/bounce terms.
                 indirect=max(probe.rgb,0.0);
             }
-            color+=base*(indirect-existingAmbient);
+            color+=diffuseBase*(indirect-existingAmbient);
+            environmentEnergy=dot(indirect,float3(.2126,.7152,.0722));
             // The existing shadow map and dynamic direct sun remain unchanged;
             // gently tint only the direct contribution at warm solar hours.
             float sunContribution=diffuseTerms.z*diffuse*shadowFactor*diffuseTerms.w;
-            color+=base*sunContribution*(indirectSun.rgb-1.0)*.40;
+            color+=diffuseBase*sunContribution*(indirectSun.rgb-1.0)*.40;
         }
+    }
+    [branch] if(zmMetal>0.0){
+        const float reflectedY=2.0*saturate(dot(normal,viewDir))*normal.y-viewDir.y;
+        const float directional=1.0+0.55*(1.0-roughness*roughness)*clamp(reflectedY,-1.0,1.0);
+        color+=base*(zmMetal*max(environmentEnergy,0.0)*directional);
     }
     if(hybridControls.z>0.5){
         // Conservative display-referred shoulder, independently toggled.
