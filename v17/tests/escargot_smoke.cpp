@@ -85,5 +85,11 @@ int main(){
         for(auto id:shortIds)e::insertNeighbor(shortN,grid,x,y,id);
         if(!e::sameStencil(truth,shortN)||truth.distance!=shortN.distance)return 32;
     }
+    // Cloned traversal owns independent scratch but uses identical verified data.
+    b.nodes[0].primitiveCount=1;m3d::Scene stableScene=scene;
+    e::Traversal original(stableScene,b,owners),cloned(original);
+    if(!original.valid()||!cloned.valid())return 33;
+    for(int j=-20;j<=20;++j){m3d::Ray ray{{float(j)*.05f,0,0},{0,0,1}};e::HitSample a,bh;
+        if(original.closest(ray,.001f,a)!=cloned.closest(ray,.001f,bh)||a.object!=bh.object||a.primitive!=bh.primitive||a.depth!=bh.depth)return 34;}
     return 0;
 }

@@ -43,7 +43,7 @@ int main(int argc,char** argv){
     QJsonArray summary;int tested=0;uint64_t allChanged=0,allActive=0,allCoverage=0,allEffective=0;
     for(const QString id:{QString("v17_showcase_pool_634"),QString("v7_pool_fresco"),QString("v7_curtain_wall_detail"),QString("v8_stair_first_landing")}){
         auto it=std::find_if(rt.cameras.begin(),rt.cameras.end(),[&](const auto& c){return c.id==id;});if(it==rt.cameras.end()){qWarning()<<"Missing camera"<<id;continue;}
-        const auto cam=m3d::v16::makeCamera(*it,w,h);std::vector<uint32_t> a,b;std::vector<double> aTimes,bTimes;
+        const auto cam=m3d::v16::makeCamera(*it,w,h);std::vector<uint32_t> a,b;std::vector<double> aTimes,bTimes;std::vector<float> lastPacket;
         auto runA=[&](int index,bool record)->bool{
             m3d::Stats st;const auto t=Clock::now();
             if(!m3d::renderLumaTracePreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,a,st,err)){qCritical()<<QString::fromStdWString(err);return false;}
@@ -53,14 +53,14 @@ int main(int argc,char** argv){
         };
         auto runB=[&](int index,bool record)->bool{
             const auto t=Clock::now();auto frame=session.frame(cam,w,h,opt,false);if(!frame.ok){qCritical()<<QString::fromStdString(frame.error);return false;}
-            const auto atlasStart=Clock::now();const auto packet=e::packGpu(frame,scene,rt.objects.size());
+            const auto atlasStart=Clock::now();auto packet=e::packGpu(frame,scene,rt.objects.size());
             if(!packet.ok){qCritical()<<QString::fromStdString(packet.error);return false;}
             const uint64_t nonzero=packet.tiles; // recorded separately; not a pixel coverage count
             const double atlasMs=ms(atlasStart);const auto rasterStart=Clock::now();m3d::Stats st;
             if(!m3d::renderLumaTraceEscargotGpuPreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,packet.data,b,st,err)){qCritical()<<QString::fromStdWString(err);return false;}
             const double rasterMs=ms(rasterStart),elapsed=ms(t);if(st.zReflectActive!=0){qCritical()<<"Escargot unexpectedly submitted secondary views";return false;}
             if(!record)return true;bTimes.push_back(elapsed);allCoverage+=nonzero;
-            log<<id<<','<<index<<",B,"<<elapsed<<','<<rasterMs<<','<<frame.matrixMs<<','<<frame.compositionMs<<','<<atlasMs<<','<<st.zReflectActive<<','<<frame.rays<<','<<frame.candidates<<','<<frame.deferred<<','<<frame.completePaths<<','<<frame.unknownPaths<<','<<0<<','<<qulonglong(frame.textureSamples)<<','<<qulonglong(frame.reusedCells)<<','<<st.gpuTotalMs<<','<<int(st.gpuTimingValid)<<','<<frame.prepareMs<<','<<frame.candidateMs<<','<<frame.admissionMs<<','<<frame.totalMs<<','<<frame.staticCandidates<<','<<qulonglong(packet.data.size()*sizeof(float))<<','<<qulonglong(packet.tiles)<<','<<qulonglong(packet.layerLists)<<','<<qulonglong(packet.observations)<<','<<qulonglong(packet.affineLayers)<<','<<frame.rayWorkers<<'\n';return true;
+            log<<id<<','<<index<<",B,"<<elapsed<<','<<rasterMs<<','<<frame.matrixMs<<','<<frame.compositionMs<<','<<atlasMs<<','<<st.zReflectActive<<','<<frame.rays<<','<<frame.candidates<<','<<frame.deferred<<','<<frame.completePaths<<','<<frame.unknownPaths<<','<<0<<','<<qulonglong(frame.textureSamples)<<','<<qulonglong(frame.reusedCells)<<','<<st.gpuTotalMs<<','<<int(st.gpuTimingValid)<<','<<frame.prepareMs<<','<<frame.candidateMs<<','<<frame.admissionMs<<','<<frame.totalMs<<','<<frame.staticCandidates<<','<<qulonglong(packet.data.size()*sizeof(float))<<','<<qulonglong(packet.tiles)<<','<<qulonglong(packet.layerLists)<<','<<qulonglong(packet.observations)<<','<<qulonglong(packet.affineLayers)<<','<<frame.rayWorkers<<'\n';lastPacket=std::move(packet.data);return true;
         };
         if(!runA(-1,false)||!runB(-1,false))return 8;
         for(int j=0;j<repeats;++j){if(j%2==0){if(!runA(j,true)||!runB(j,true))return 9;}else{if(!runB(j,true)||!runA(j,true))return 9;}}
@@ -90,6 +90,7 @@ int main(int argc,char** argv){
         // Fixed-pose reuse diagnostic. Keep A/B cold preparation timings
         // unchanged; do not pass off this static case as a moving-camera gain.
         auto cachedPacket=e::packGpu(referenceFrame,scene,rt.objects.size());if(!cachedPacket.ok)return 17;
+        if(cachedPacket.data!=lastPacket){qCritical()<<"Serial/parallel optical observations differ"<<id;return 18;}
         std::vector<double> fixedTimes;std::vector<uint32_t> fixed;m3d::Stats fixedStats;
         for(int j=0;j<repeats;++j){const auto start=Clock::now();
             if(!m3d::renderLumaTraceEscargotGpuPreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,cachedPacket.data,fixed,fixedStats,err))return 17;

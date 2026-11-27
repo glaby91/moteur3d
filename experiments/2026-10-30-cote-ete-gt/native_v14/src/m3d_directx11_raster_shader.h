@@ -164,8 +164,9 @@ float4 escCoverageWeights(uint4 d,uint n){
     if(n==1u||d.x==0u)return float4(1,0,0,0);
     // Compact continuous-ish taper at stencil transitions. The floor
     // prevents the symmetric four-way tie from becoming singular.
-    float radius=float(d[n-1])+1.0;
-    [unroll]for(uint j=0;j<4;++j)if(j<n)w[j]=max(0.0,radius-float(d[j]));
+    float farthest=float(d[n-1]);
+    float radius=farthest+max(1.0,.125*farthest);
+    [unroll]for(uint j=0;j<4;++j)if(j<n)w[j]=max(0.0,radius-float(d[j]))/(1.0+float(d[j]));
     return w/max(dot(w,float4(1,1,1,1)),1e-6);
 }
 bool escGpuSample(VSOut i,out float3 reflected,out float coverage,out float weight){
