@@ -208,6 +208,44 @@ class DirectX11Preview {
         Clock::time_point cpuStarted{},copyQueued{};
         Stats submitted{};
     };
+    // Native presentation timing is asynchronous; never stall or flush for queries.
+    struct ReflectionTimer {
+        ComPtr<ID3D11Query> disjoint,begin,end;
+        bool pending=false;
+        uint64_t epoch=0;
+    };
+    std::array<ReflectionTimer,8> reflectionTimers_{};
+    uint64_t reflectionTimingEpoch_=0;
+    ReflectionTimer* acquireReflectionTimer(double& total,uint32_t& samples){
+        ReflectionTimer* available=nullptr;
+        for(auto& q:reflectionTimers_){
+            if(q.pending){
+                D3D11_QUERY_DATA_TIMESTAMP_DISJOINT d{};UINT64 a=0,b=0;
+                const auto hr=context_->GetData(q.disjoint.Get(),&d,sizeof(d),D3D11_ASYNC_GETDATA_DONOTFLUSH);
+                if(hr==S_FALSE)continue;
+                if(hr==S_OK){
+                    const auto ha=context_->GetData(q.begin.Get(),&a,sizeof(a),D3D11_ASYNC_GETDATA_DONOTFLUSH);
+                    const auto hb=context_->GetData(q.end.Get(),&b,sizeof(b),D3D11_ASYNC_GETDATA_DONOTFLUSH);
+                    if(ha==S_FALSE||hb==S_FALSE)continue;
+                    if(ha==S_OK&&hb==S_OK&&q.epoch==reflectionTimingEpoch_&&!d.Disjoint&&d.Frequency&&b>=a){
+                        total+=double(b-a)*1000./double(d.Frequency);++samples;
+                    }
+                }
+                q.pending=false;
+            }
+            if(!available)available=&q;
+        }
+        if(!available)return nullptr;
+        if(!available->disjoint||!available->begin||!available->end){
+            D3D11_QUERY_DESC desc{};desc.Query=D3D11_QUERY_TIMESTAMP_DISJOINT;
+            if(FAILED(device_->CreateQuery(&desc,available->disjoint.ReleaseAndGetAddressOf())))return nullptr;
+            desc.Query=D3D11_QUERY_TIMESTAMP;
+            if(FAILED(device_->CreateQuery(&desc,available->begin.ReleaseAndGetAddressOf()))||
+               FAILED(device_->CreateQuery(&desc,available->end.ReleaseAndGetAddressOf())))return nullptr;
+        }
+        available->epoch=reflectionTimingEpoch_;
+        return available;
+    }
 public:
     bool render(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,
                 std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error) {
@@ -229,6 +267,7 @@ public:
         return enqueue(scene,shadows,cam,w,h,1,error,hwnd,&stats,lumaBvh);
     }
     void releasePresenter() {
+        ++reflectionTimingEpoch_;
         if(context_ && swapchain_)context_->Flush();
         swapchain_.Reset();
         nativeHwnd_=nullptr;
@@ -840,6 +879,11 @@ public:
         // Secondary passes only render opaque geometry. No recursive reflections.
         ID3D11ShaderResourceView* noOptics[3]={nullptr,nullptr,nullptr};
         context_->PSSetShaderResources(8,3,noOptics);
+        double reflectionGpuSum=0.;uint32_t reflectionGpuSamples=0;
+        const char* timingEnv=std::getenv("M3D_V17_ZREFLECT_GPU_TIMING");
+        ReflectionTimer* timing=nativeHwnd&&anyReflection&&timingEnv&&std::strcmp(timingEnv,"1")==0
+            ?acquireReflectionTimer(reflectionGpuSum,reflectionGpuSamples):nullptr;
+        if(timing){context_->Begin(timing->disjoint.Get());context_->End(timing->begin.Get());}
         const auto reflectSubmitStart=Clock::now();
         for(size_t i=0;i<zActive_.size();++i){
             const auto id=zActive_[i].id;const auto& p=zRuntime_.patch(id);
@@ -849,13 +893,17 @@ public:
             cb.zClip[3]=-sign*float(p.offset)-(zRuntime_.water(id)?0.f:.001f);
             cb.zPlaneIds[3]=1.f;activeCam=m;
             cb.reflectionControls[0]=zRuntime_.water(id)?1.f:0.f; // water-specific clipping only
-            if(!drawScene(zTargets_[i].rtv.Get(),zTargets_[i].dsv.Get(),zTargets_[i].w,zTargets_[i].h,false,false))return false;
+            if(!drawScene(zTargets_[i].rtv.Get(),zTargets_[i].dsv.Get(),zTargets_[i].w,zTargets_[i].h,false,false)){
+                if(timing){context_->End(timing->end.Get());context_->End(timing->disjoint.Get());timing->pending=true;++reflectionTimingEpoch_;}
+                return false;
+            }
             context_->OMSetRenderTargets(0,nullptr,nullptr);
             cb.zPlaneIds[i]=float(id+1u);
             auto put4=[](float* dest,V v,float w){dest[0]=v.x;dest[1]=v.y;dest[2]=v.z;dest[3]=w;};
             put4(cb.zEye[i],m.eye,m.tanHalf);put4(cb.zForward[i],m.f,m.aspect);
             put4(cb.zRight[i],m.r,0);put4(cb.zUp[i],m.u,0);
         }
+        if(timing){context_->End(timing->end.Get());context_->End(timing->disjoint.Get());timing->pending=true;}
         const double reflectSubmitMs=zActive_.empty()?0.:std::chrono::duration<double,std::milli>(Clock::now()-reflectSubmitStart).count();
         cb.zPlaneIds[3]=0.f;activeCam=cam;
         cb.reflectionControls[0]=0.f;
@@ -929,7 +977,7 @@ public:
                 nativeStats->planarReflectionRendered=planarReflection;
                 nativeStats->zReflectActive=uint32_t(zActive_.size());nativeStats->zReflectCandidates=uint32_t(zStats.candidates);
                 nativeStats->zReflectNodeVisits=uint32_t(zStats.nodeVisits);nativeStats->zReflectDeferred=zDeferred;
-                nativeStats->zReflectTotal=zTotal;nativeStats->zReflectSelectUs=zSelectUs;nativeStats->zReflectSubmitMs=reflectSubmitMs;nativeStats->zReflectEnabled=zEnabled;
+                nativeStats->zReflectTotal=zTotal;nativeStats->zReflectSelectUs=zSelectUs;nativeStats->zReflectSubmitMs=reflectSubmitMs;nativeStats->zReflectGpuMs=reflectionGpuSum;nativeStats->zReflectGpuSamples=reflectionGpuSamples;nativeStats->zReflectEnabled=zEnabled;
                 nativeStats->lumaProbeLightingEnabled=lumaBvh&&hybrid;
                 nativeStats->lumaAdaptiveEnabled=adaptiveEnabled;
                 nativeStats->lumaAdaptiveZeroTriangles=adaptiveEnabled?lumaTraceCompute_.zeroTriangles():0;

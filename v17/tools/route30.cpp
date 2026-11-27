@@ -170,7 +170,7 @@ struct Result {
     m3d::Stats lastFrame{};
     std::vector<double> frameMs;
     uint64_t zeroSum=0,triangleSum=0,zActiveSum=0,zActiveFrames=0;
-    uint32_t zActiveMax=0,zDeferredMax=0;double zSelectSum=0;
+    uint32_t zActiveMax=0,zDeferredMax=0;double zSelectSum=0,zSubmitSum=0,zGpuSum=0;uint64_t zGpuSamples=0;
     float hourStart=0,hourEnd=0;
 };
 
@@ -210,6 +210,7 @@ Result measure(const Route& route, const Pass& pass) {
         const uint32_t zActive=result.lastFrame.zReflectActive;
         result.zActiveSum+=zActive;result.zActiveFrames+=zActive>0;result.zActiveMax=std::max(result.zActiveMax,zActive);
         result.zDeferredMax=std::max(result.zDeferredMax,result.lastFrame.zReflectDeferred);result.zSelectSum+=result.lastFrame.zReflectSelectUs;
+        result.zSubmitSum+=result.lastFrame.zReflectSubmitMs;result.zGpuSum+=result.lastFrame.zReflectGpuMs;result.zGpuSamples+=result.lastFrame.zReflectGpuSamples;
         if(route.adaptiveCampaign){result.frameMs.push_back(seconds*1000.);result.zeroSum+=result.lastFrame.lumaAdaptiveZeroTriangles;result.triangleSum+=result.lastFrame.lumaAdaptiveTriangleCount;}
         if (end <= deadline) ++result.framesInWindow;
     }
@@ -254,8 +255,9 @@ void writeRow(QTextStream& csv, const Pass& pass, const Result& r, bool prepareG
         }else csv << ",,,,";
     }
     if(r.error.empty()&&r.framesStarted)csv<<','<<(r.lastFrame.zReflectEnabled?"on":"off")<<','<<r.lastFrame.zReflectTotal
-        <<','<<r.zActiveMax<<','<<double(r.zActiveSum)/r.framesStarted<<','<<r.zActiveFrames<<','<<r.zDeferredMax<<','<<r.zSelectSum/r.framesStarted;
-    else csv<<",,,,,,,";
+        <<','<<r.zActiveMax<<','<<double(r.zActiveSum)/r.framesStarted<<','<<r.zActiveFrames<<','<<r.zDeferredMax<<','<<r.zSelectSum/r.framesStarted<<','<<r.zSubmitSum/r.framesStarted<<','<<r.zGpuSamples;
+    else csv<<",,,,,,,,,";
+    csv<<',';if(r.error.empty()&&r.zGpuSamples)csv<<r.zGpuSum/double(r.zGpuSamples);
     if(tour)csv<<','<<(zoneIndex+1)<<','<<zoneCount<<','<<tourZoneSeconds<<','<<r.hourStart<<','<<r.hourEnd;
     csv << '\n';
     csv.flush();
@@ -337,10 +339,11 @@ int main(int argc, char** argv) {
            "presentation,vsync,readback_buffers,status,error,geometry_prep_requested,geometry_prep_enabled,"
            "geometry_source_vertices,geometry_unique_vertices,geometry_index_count,planar_reflection,luma_probe_lighting";
     if(adaptiveCampaign)csv<<",adaptive_requested,profile,repetition,p50_present_ms,p95_present_ms,mean_zero_percent,triangle_count";
-    csv<<",zreflect_enabled,zreflect_total,zreflect_active_max,zreflect_active_mean,zreflect_frames_active,zreflect_deferred_max,zreflect_mean_select_us";
+    csv<<",zreflect_enabled,zreflect_total,zreflect_active_max,zreflect_active_mean,zreflect_frames_active,zreflect_deferred_max,zreflect_mean_select_us,zreflect_mean_submit_ms,zreflect_gpu_samples,zreflect_mean_gpu_ms";
     if(tour)csv<<",zone_index,zone_count,window_seconds,hour_start,hour_end";
     csv<<'\n';
     if(reflectCampaign){
+        if(_putenv_s("M3D_V17_ZREFLECT_GPU_TIMING","1"))return 2;
         bool ok=true;
         for(int repeat=1;repeat<=2;++repeat)for(const auto* c:reflectCameras)for(bool toggle:{false,true}){
             const bool on=toggle!=(repeat==2);
