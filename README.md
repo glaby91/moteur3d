@@ -64,25 +64,37 @@ Pour retrouver une ancienne compilation, consulter [V17.006, build 683 avec scè
 
 ## Linux natif — Vulkan x86_64
 
-**V17.031 — build Linux 5 validé (sans scène) sur `master` (27 novembre 2026).**
+**Portage Linux validé fonctionnellement — CSE WARP V17.031, build Linux 6, scène V17.634 (28 novembre 2026).**
 
-- [Validation GitHub Actions — build 5](https://github.com/glaby91/moteur3d/actions/runs/46080781410) : compilation Release native, shaders SPIR-V, tests Vulkan avec Mesa Lavapipe, contrôle des dépendances ICU/XCB, tests X11/TLS et packaging réussis.
-- [Télécharger CSE WARP V17.031 Linux/Vulkan x86_64](https://github.com/glaby91/moteur3d/actions/runs/46080781410/artifacts/15237236702) (artefact GitHub Actions, connexion GitHub requise ; durée de rétention limitée).
+- [Télécharger le package Linux complet (120 Mo)](https://github.com/glaby91/moteur3d/actions/runs/46081559773/artifacts/15236329498) : moteur, scène, shaders, catalogue Z Material, Qt 6.8.3, ICU, XCB et TLS. Artefact GitHub Actions à rétention limitée.
+- [Compilation native validée — build 6](https://github.com/glaby91/moteur3d/actions/runs/46081559773).
+- [Validation Vulkan sur la piscine Full HD — Ubuntu 24.04 / Mesa Lavapipe](https://github.com/glaby91/moteur3d/actions/runs/46083487533) · [PNG CPU/Vulkan et statistiques JSON](https://github.com/glaby91/moteur3d/actions/runs/46083487533/artifacts/15237877283).
 - [Dernières compilations Linux](https://github.com/glaby91/moteur3d/actions/workflows/build-linux-vulkan.yml) · [Documentation Linux/Vulkan](v17/docs/LINUX_VULKAN.md).
 
-Ubuntu 24.04 x86_64, Qt 6.8.3, Vulkan 1.3.204 minimum, GCC/CMake/Ninja. Même branche moteur que Windows, sans Wine ni DirectX. Vulkan est sélectionné par défaut ; les backends CPU restent disponibles. À partir du build suivant le build 5, le workflow Linux inclut également la dernière scène Reflect officielle au moment de la compilation (V17.634 au 27 novembre 2026), avec contrôle SHA-256 et manifeste de version. Les binaires, shaders, bibliothèques Qt et le catalogue Z Material sont inclus. La scène conserve son dépôt et son versioning indépendant via [moteur3d-scene](https://github.com/glaby91/moteur3d-scene/releases/latest).
+| Fonction | Validation |
+|---|---|
+| Application Qt native, démarrage X11, chargement de scène hors ligne | OK |
+| CPU Ray Tracing PBR direct | OK |
+| CPU illumination globale, 4 rebonds, 16 SPP | OK |
+| Vulkan Raster, scène complète, 1920 × 1080 | OK sur Mesa Lavapipe |
+| GPU physique Intel / AMD / NVIDIA | À valider |
+| Présentation Vulkan native X11 / Wayland sans relecture | Non portée |
 
-Après avoir extrait l'artefact GitHub (ZIP), extraire le fichier `.tar.gz`, puis :
+Test comparatif CI : scène V17.634, caméra `v7_pool_fresco`, 1920 × 1080, textures 2048, éclairage 14 h. CPU PBR direct : 9 714,26 ms ; Vulkan logiciel : première image 4 901,56 ms, suivantes 457,683 et 467,494 ms (moyenne 462,59 ms, soit ~2,16 FPS). Le ratio ~21× en régime stabilisé compare des techniques de rendu différentes et ne constitue ni une mesure sur GPU physique ni une preuve de parité visuelle. Écarts connus : Vulkan plus lumineux, ombres atténuées, réflexions dans l'eau différentes.
+
+Ubuntu 24.04 x86_64, Vulkan loader et périphérique API >= 1.3.204. Même moteur que Windows, sans Wine. Le package contient la dernière scène Reflect vérifiée par SHA-256 au moment du build ; la scène conserve son dépôt et son versioning indépendant via [moteur3d-scene](https://github.com/glaby91/moteur3d-scene/releases/latest).
+
+Après extraction du ZIP GitHub puis du fichier `.tar.gz` :
 
 ```bash
 sudo apt install libvulkan1 mesa-vulkan-drivers libgl1 libegl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0 unzip
-cd CSE-WARP-V17.031-Linux-Vulkan-GitHub-N-x86_64
+cd CSE-WARP-V17.031-Linux-Vulkan-GitHub-6-x86_64
 ./lancer.sh
 ```
 
-Remplacer `N` par le numéro du build téléchargé. Pour ouvrir directement la scène embarquée sans contrôle réseau au démarrage : `./lancer.sh benchmark-civic/scene.json` (disponible après validation du nouveau build). Le lancement normal conserve la vérification des mises à jour et la sélection de la scène locale la plus récente.
+Pour démarrer directement hors ligne avec la scène embarquée : `./lancer.sh benchmark-civic/scene.json`. Le lancement normal conserve la vérification des mises à jour et sélectionne la scène locale la plus récente.
 
-Sur NVIDIA, utiliser le pilote Vulkan adapté au GPU. Le rendu Vulkan est natif, mais la présentation Linux actuelle passe par QImage avec relecture GPU/CPU ; la swapchain X11/Wayland sans relecture reste à porter. DirectX 11 et LumaTrace GPU/Z Reflect ne sont pas disponibles sous Linux dans cette révision. La CI Lavapipe valide le fonctionnement logiciel Vulkan, pas les performances ni le rendu sur GPU physique ; validation matérielle et audio Linux encore à réaliser.
+Utiliser le pilote Vulkan adapté au GPU. Vulkan est sélectionné par défaut ; les modes CPU sont disponibles sans GPU. La présentation Linux passe par QImage avec relecture GPU/CPU. DirectX 11 et LumaTrace GPU/Z Reflect ne sont pas portés sous Linux. Validation GPU physique, audio et parité graphique encore à réaliser.
 
 ## Construire une scène V16/V17 — guide du créateur
 
