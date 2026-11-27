@@ -17,6 +17,7 @@ struct Options {
     int maxDimension=2048;
     uint64_t maxOutputCells=4ull*1024*1024;
     Mode mode=Mode::Reflection;
+    unsigned rayWorkers=4;
 };
 struct HitSample { uint32_t primitive=0, object=0; float depth=INF; V p{},n{},uv{},geometricNormal{}; };
 struct Value {
@@ -65,7 +66,7 @@ struct Result {
     uint64_t completeSearches=0,receiverSearches=0,partialTests=0,layerVisits=0,textureSamples=0,opaqueSkipped=0,coverageCells=0,fallbackCells=0;
     uint64_t reusedCells=0,composedCells=0,emptySpanCells=0;
     double matrixMs=0,compositionMs=0,prepareMs=0,candidateMs=0,admissionMs=0,totalMs=0;
-    uint32_t staticCandidates=0;
+    uint32_t staticCandidates=0,rayWorkers=1;
     bool ok=false;
     std::string error;
 };
@@ -86,5 +87,5 @@ inline bool validCamera(const Camera& c){
         std::abs(length(c.f)-1.f)<.001f&&std::abs(length(c.r)-1.f)<.001f&&std::abs(length(c.u)-1.f)<.001f&&
         std::abs(dot(c.f,c.r))<.001f&&std::abs(dot(c.f,c.u))<.001f&&std::abs(dot(c.r,c.u))<.001f;
 }
-inline bool validOptions(const Options& o){return o.rayBudget>0&&o.rayBudget<=1000000&&o.maxCrossings>0&&o.maxCrossings<=32&&o.maxDimension>0&&o.maxDimension<=4096&&o.maxOutputCells>0&&o.maxOutputCells<=16777216;}
+inline bool validOptions(const Options& o){return o.rayWorkers>=1&&o.rayWorkers<=8&&o.rayBudget>0&&o.rayBudget<=1000000&&o.maxCrossings>0&&o.maxCrossings<=32&&o.maxDimension>0&&o.maxDimension<=4096&&o.maxOutputCells>0&&o.maxOutputCells<=16777216;}
 }

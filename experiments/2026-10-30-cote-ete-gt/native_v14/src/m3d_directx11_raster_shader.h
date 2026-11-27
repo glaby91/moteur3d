@@ -158,6 +158,16 @@ void escNearest(uint start,uint count,int2 pixel,out uint4 addr,out uint4 dist,o
     }
     n=min(count,4u);if(n>0&&dist.x==0)n=1;
 }
+float4 escCoverageWeights(uint4 d,uint n){
+    float4 w=0;
+    if(n==0u)return w;
+    if(n==1u||d.x==0u)return float4(1,0,0,0);
+    // Compact continuous-ish taper at stencil transitions. The floor
+    // prevents the symmetric four-way tie from becoming singular.
+    float radius=float(d[n-1])+1.0;
+    [unroll]for(uint j=0;j<4;++j)if(j<n)w[j]=max(0.0,radius-float(d[j]));
+    return w/max(dot(w,float4(1,1,1,1)),1e-6);
+}
 bool escGpuSample(VSOut i,out float3 reflected,out float coverage,out float weight){
     reflected=0;coverage=0;weight=0;
     if(i.receiverId==0u||i.receiverId>uint(escPacket[1].x))return false;
@@ -188,6 +198,8 @@ bool escGpuSample(VSOut i,out float3 reflected,out float coverage,out float weig
     // tile, not a global optical surface cap.
     float4 uvDepthAlpha[64];float4 normalMat[64];uint masks[64];uint layerRefs[64];
     uint used=0;bool common=desc.w>.5;uint lanes=1;
+    float4 laneWeights=common?escCoverageWeights(rd,rn):float4(1,0,0,0);
+    const bool glass=materialOpacity[i.mat].x<.999&&materialEmission[i.mat].a>=-.5;
     [loop] for(uint l=0;l<uint(td.w);++l){
         uint base=uint(td.z)+7*l;float4 info=escPacket[base],bounds=escPacket[base+1];
         int2 q=pixel-int2(bounds.xy);if(any(q<0)||any(q>=int2(bounds.zw)))continue;
@@ -226,7 +238,11 @@ bool escGpuSample(VSOut i,out float3 reflected,out float coverage,out float weig
                 }
             }
         }
-        if(!common){alpha*=float(count)/n;mask=1u;}
+        if(!common){
+            float4 cw=escCoverageWeights(d,n);float support=0;
+            [unroll]for(uint j=0;j<4;++j)if(mask&(1u<<j))support+=cw[j];
+            alpha*=support;mask=1u;
+        }
         if(alpha<=0)continue;
         if(used>=64u)return false; // defensive: CPU packet validated
         uint k=used;
@@ -251,10 +267,20 @@ bool escGpuSample(VSOut i,out float3 reflected,out float coverage,out float weig
         if(layer>=0)color=preservedAlbedo.SampleLevel(probeSampler,float3(uv,layer),0).rgb;
         else if(emission.w>.5)color=albedo.SampleLevel(probeSampler,float3(uv,mat),0).rgb;
         else color=albedo.SampleLevel(wrapSampler,float3(uv,mat),0).rgb;
-        color=color*(.12+.35*lighting.w+.48*lighting.w*saturate(dot(nr.xyz,lighting.xyz)))+emission.xyz;
+        float3 sourceBase=color;
+        color=sourceBase*(.12+.35*lighting.w+.48*lighting.w*saturate(dot(nr.xyz,lighting.xyz)))+emission.xyz;
+        // Glass: use the existing LT diffuse bounce at the reconstructed
+        // source position, not an arbitrary boost to Fresnel or opacity.
+        // No extra light loop or optical ray. Depth is an approximation.
+        if(glass&&hybridControls.x>.5&&hybridControls.w>1.5){
+            float3 sourcePos=i.world+ray*val.z;
+            float3 uvw=saturate((sourcePos-probeOrigin.xyz)*probeInvSpan.xyz);
+            float3 bounce=max(indirectProbes.SampleLevel(probeSampler,uvw,0).rgb,0.0);
+            color+=sourceBase*materialTextureDetail[mat].z*bounce;
+        }
         [unroll]for(uint j=0;j<4;++j){if(j<lanes&&(masks[k]&(1u<<j)))acc[j]=float4(color*val.w,val.w)+acc[j]*(1-val.w);}
     }
-    float4 result=(acc[0]+acc[1]+acc[2]+acc[3])/max(1u,lanes);
+    float4 result=acc[0]*laneWeights.x+acc[1]*laneWeights.y+acc[2]*laneWeights.z+acc[3]*laneWeights.w;
     coverage=saturate(result.a);if(coverage<=.00001)return false;reflected=max(result.rgb/coverage,0);return true;
 }
 )";

@@ -76,6 +76,7 @@ inline Packet packGpu(const Result& frame,const Scene& scene,size_t objectCount)
     try{
         // [0]: light direction/day; [1]: max object ID, tile size, format, unused.
         // Two float4 per receiver, indexed by exact source-object ID.
+        p.data.reserve(4*std::min(kMaxRecords,std::max<size_t>(2+2*(objectCount+1),65536)));
         p.reserveRecords(2+2*(objectCount+1));float day;V sunDir;
         escargotLightingSnapshot(day,sunDir);p.vec(0,sunDir,day);p.set(1,float(objectCount),float(kTile),1,0);
         for(const auto& sf:frame.surfaces){
@@ -88,23 +89,36 @@ inline Packet packGpu(const Result& frame,const Scene& scene,size_t objectCount)
             p.set(rec,float(r.x),float(r.y),float(r.w),float(r.h));
             const bool coverage=sf.sameKnownSet&&std::all_of(sf.layers.begin(),sf.layers.end(),[](const auto& kv){return kv.second.partial.empty();});
             p.set(rec+1,float(tileBase),float(cols),float(sf.candidate.material+1),coverage?1.f:0.f);
-            std::vector<std::pair<const Layer*,Affine>> layers;
-            for(const auto& kv:sf.layers){auto a=affine(scene,kv.second);if(a.valid)++p.affineLayers;layers.emplace_back(&kv.second,a);}
+            struct LayerInfo {const Layer* l;Affine a;std::vector<const Value*> lookup;};
+            std::vector<LayerInfo> layers;layers.reserve(sf.layers.size());
+            // Bounded dense lookup removes repeated map searches across tiles.
+            const bool denseLookup=sf.samples.size()<=262144/std::max<size_t>(1,sf.layers.size());
+            for(const auto& kv:sf.layers){
+                auto a=affine(scene,kv.second);if(a.valid)++p.affineLayers;
+                LayerInfo info{&kv.second,a,{}};
+                if(denseLookup){info.lookup.resize(sf.samples.size(),nullptr);for(const auto& v:kv.second.measured)info.lookup[v.first]=&v.second;}
+                layers.push_back(std::move(info));
+            }
+            auto findValue=[](const LayerInfo& info,size_t id)->const Value*{
+                if(!info.lookup.empty())return info.lookup[id];
+                const auto it=info.l->measured.find(id);return it==info.l->measured.end()?nullptr:&it->second;
+            };
             for(int ty=0;ty<rows;++ty)for(int tx=0;tx<cols;++tx){
                 Rect tile{r.x+tx*kTile,r.y+ty*kTile,std::min(kTile,r.w-tx*kTile),std::min(kTile,r.h-ty*kTile)};
                 auto receivers=shortlist(sf,sf.receiverIndices,tile);
-                auto common=shortlist(sf,sf.completeIndices,tile);
+                auto common=coverage?std::vector<size_t>{}:shortlist(sf,sf.completeIndices,tile);
                 if(receivers.empty())continue;
-                struct Entry{const Layer* l;const Affine* a;std::vector<size_t> ids;};
+                struct Entry{const LayerInfo* info;std::vector<size_t> ids;};
                 std::vector<Entry> active;
                 for(const auto& item:layers){
-                    const auto& l=*item.first;if(!overlaps(l.bounds,tile))continue;
+                    const auto& l=*item.l;if(!overlaps(l.bounds,tile))continue;
                     // Complete paths share exactly the same ordered shortlist.
                     // Only partial paths need a separate spatial search.
-                    std::vector<size_t> ids=coverage?receivers:common;
-                    if(!coverage){ids.insert(ids.end(),l.partial.begin(),l.partial.end());ids=shortlist(sf,ids,tile);}
-                    if(std::none_of(ids.begin(),ids.end(),[&](size_t i){return l.measured.count(i)!=0;}))continue;
-                    active.push_back({&l,&item.second,std::move(ids)});
+                    std::vector<size_t> ids;
+                    if(!coverage){ids=common;if(!l.partial.empty()){ids.insert(ids.end(),l.partial.begin(),l.partial.end());ids=shortlist(sf,ids,tile);}}
+                    const auto& chosen=coverage?receivers:ids;
+                    if(std::none_of(chosen.begin(),chosen.end(),[&](size_t i){return findValue(item,i)!=nullptr;}))continue;
+                    active.push_back({&item,std::move(ids)});
                 }
                 if(active.empty())continue;
                 if(active.size()>kMaxTileLayers)throw std::runtime_error("Escargot tile exceeds 64 layers; no layers silently discarded");
@@ -113,18 +127,19 @@ inline Packet packGpu(const Result& frame,const Scene& scene,size_t objectCount)
                     p.add(s.position.x,s.position.y,s.position.z,s.receiverWeight);p.add(s.normal.x,s.normal.y,s.normal.z,s.receiverDepth);}
                 const auto layerStart=p.reserveRecords(active.size()*7);
                 for(size_t j=0;j<active.size();++j){
-                    const auto& entry=active[j];const auto& l=*entry.l;const auto& a=*entry.a;
+                    const auto& entry=active[j];const auto& l=*entry.info->l;const auto& a=entry.info->a;
+                    const auto& chosen=coverage?receivers:entry.ids;
                     const auto& mat=scene.mat[l.key.material];const auto first=p.size(),base=layerStart+7*j;
-                    p.set(base,float(first),float(entry.ids.size()),float(l.key.material),a.valid?1.f:0.f);
+                    p.set(base,float(first),float(chosen.size()),float(l.key.material),a.valid?1.f:0.f);
                     p.set(base+1,float(l.bounds.x),float(l.bounds.y),float(l.bounds.w),float(l.bounds.h));
                     p.vec(base+2,a.origin,a.u);p.vec(base+3,a.normal,a.v);p.vec(base+4,a.du);p.vec(base+5,a.dv);
                     p.vec(base+6,mat.emissionColor*std::max(0.f,mat.emissionIntensity),mat.imageAlbedo?1.f:0.f);
-                    for(auto id:entry.ids){const auto& s=sf.samples[id];auto it=l.measured.find(id);
-                        const bool hit=it!=l.measured.end();
+                    for(auto id:chosen){const auto& s=sf.samples[id];const auto* value=findValue(*entry.info,id);
+                        const bool hit=value!=nullptr;
                         if(!coverage)p.add(float(s.x),float(s.y),float(id),hit?1.f:0.f);
                         // On complete paths the receiver shortlist already
                         // supplies positions/IDs. Only 2 float4 per layer cell.
-                        if(hit){const auto& v=it->second;p.add(v.uv.x,v.uv.y,v.depth,v.opacity);p.vec(p.add(),v.normal,float(v.primitive+1u));}
+                        if(hit){const auto& v=*value;p.add(v.uv.x,v.uv.y,v.depth,v.opacity);p.vec(p.add(),v.normal,float(v.primitive+1u));}
                         else {p.add();p.add();}
                         ++p.observations;
                     }

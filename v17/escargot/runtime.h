@@ -1,6 +1,9 @@
 #pragma once
 #include "composite.h"
 #include <memory>
+#include <atomic>
+#include <future>
+#include <thread>
 namespace m3d::escargot {
 using FrameClock=std::chrono::steady_clock;
 inline double elapsedMs(FrameClock::time_point t){return std::chrono::duration<double,std::milli>(FrameClock::now()-t).count();}
@@ -41,12 +44,30 @@ public:
         std::map<uint32_t,uint32_t> quotas;for(const auto& item:admitted)quotas.emplace(item.object,item.budget);
         for(auto& item:c){auto it=quotas.find(item.object);if(it!=quotas.end())item.budget=it->second;}
         out.candidates=uint32_t(c.size());out.admissionMs=elapsedMs(t);t=FrameClock::now();
-        for(const auto& item:c){
-            Surface s;s.candidate=item;const uint64_t cells=uint64_t(item.bounds.w)*item.bounds.h;
-            if(!item.budget){s.deferred=true;++out.deferred;}
-            else{sampleSurface(s,*trace_,rt_.renderScene,cam,w,h,opt,out);makeLayers(s);out.outputCells+=cells;}
-            out.surfaces.push_back(std::move(s));
+        out.surfaces.resize(c.size());std::vector<size_t> jobs;
+        for(size_t i=0;i<c.size();++i){
+            auto& s=out.surfaces[i];s.candidate=c[i];
+            if(!c[i].budget){s.deferred=true;++out.deferred;}
+            else{jobs.push_back(i);out.outputCells+=uint64_t(c[i].bounds.w)*c[i].bounds.h;}
         }
+        // Large quotas first, original surface ordering unchanged. Each worker
+        // owns its traversal scratch/counters; all geometry is immutable.
+        std::stable_sort(jobs.begin(),jobs.end(),[&](size_t a,size_t b){return c[a].budget>c[b].budget;});
+        const unsigned workers=std::max(1u,std::min({opt.rayWorkers,std::max(1u,std::thread::hardware_concurrency()),
+            unsigned(jobs.size()),std::max(1u,opt.rayBudget/256u)}));
+        out.rayWorkers=workers;
+        std::atomic<size_t> next{0};
+        auto work=[&](){
+            Traversal local(*trace_);Result counters;
+            for(;;){const auto j=next.fetch_add(1,std::memory_order_relaxed);if(j>=jobs.size())break;
+                auto& s=out.surfaces[jobs[j]];sampleSurface(s,local,rt_.renderScene,cam,w,h,opt,counters);makeLayers(s);}
+            return counters;
+        };
+        auto merge=[&](const Result& r){out.rays+=r.rays;out.paths+=r.paths;out.measured+=r.measured;
+            out.completePaths+=r.completePaths;out.unknownPaths+=r.unknownPaths;};
+        std::vector<std::future<Result>> futures;futures.reserve(workers-1);
+        for(unsigned i=1;i<workers;++i)futures.push_back(std::async(std::launch::async,work));
+        merge(work());for(auto& future:futures)merge(future.get());
         out.matrixMs=elapsedMs(t);t=FrameClock::now();
         escargotLightingSnapshot(proxyDaylight,proxySun);
         if(composeCpu)for(auto& s:out.surfaces)if(!s.deferred)compose(s,rt_.renderScene,out);

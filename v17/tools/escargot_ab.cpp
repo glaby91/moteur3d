@@ -39,7 +39,7 @@ int main(int argc,char** argv){
     std::wstring err;if(!m3d::setRasterQualitySettings(quality,err)){qCritical()<<QString::fromStdWString(err);return 6;}
     m3d::updateLighting(rt.daylightHour);m3d::Stats shadowStats;const auto shadow=m3d::buildShadow(scene,shadowStats);
     QFile csv(out.filePath("frames.csv"));if(!csv.open(QIODevice::WriteOnly|QIODevice::Text))return 7;
-    QTextStream log(&csv);log<<"camera,iteration,mode,total_ms,raster_ms,matrix_ms,composition_ms,atlas_ms,secondary_cameras,rays,candidates,deferred,complete_paths,unknown_paths,atlas_nonzero,texture_samples,reused_cells,gpu_ms,gpu_timing_valid,prepare_once_ms,candidate_ms,admission_ms,escargot_total_ms,static_candidates,packet_bytes,packet_tiles,packet_layer_lists,packet_observations,affine_layers\n";
+    QTextStream log(&csv);log<<"camera,iteration,mode,total_ms,raster_ms,matrix_ms,composition_ms,atlas_ms,secondary_cameras,rays,candidates,deferred,complete_paths,unknown_paths,atlas_nonzero,texture_samples,reused_cells,gpu_ms,gpu_timing_valid,prepare_once_ms,candidate_ms,admission_ms,escargot_total_ms,static_candidates,packet_bytes,packet_tiles,packet_layer_lists,packet_observations,affine_layers,ray_workers\n";
     QJsonArray summary;int tested=0;uint64_t allChanged=0,allActive=0,allCoverage=0,allEffective=0;
     for(const QString id:{QString("v17_showcase_pool_634"),QString("v7_pool_fresco"),QString("v7_curtain_wall_detail"),QString("v8_stair_first_landing")}){
         auto it=std::find_if(rt.cameras.begin(),rt.cameras.end(),[&](const auto& c){return c.id==id;});if(it==rt.cameras.end()){qWarning()<<"Missing camera"<<id;continue;}
@@ -49,7 +49,7 @@ int main(int argc,char** argv){
             if(!m3d::renderLumaTracePreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,a,st,err)){qCritical()<<QString::fromStdWString(err);return false;}
             const auto elapsed=ms(t);if(!record)return true;
             aTimes.push_back(elapsed);allActive+=st.zReflectActive;
-            log<<id<<','<<index<<",A,"<<elapsed<<','<<elapsed<<",0,0,0,"<<st.zReflectActive<<",0,"<<st.zReflectCandidates<<','<<st.zReflectDeferred<<",0,0,0,0,0,"<<st.gpuTotalMs<<','<<int(st.gpuTimingValid)<<",0,0,0,0,0,0,0,0,0,0\n";return true;
+            log<<id<<','<<index<<",A,"<<elapsed<<','<<elapsed<<",0,0,0,"<<st.zReflectActive<<",0,"<<st.zReflectCandidates<<','<<st.zReflectDeferred<<",0,0,0,0,0,"<<st.gpuTotalMs<<','<<int(st.gpuTimingValid)<<",0,0,0,0,0,0,0,0,0,0,0\n";return true;
         };
         auto runB=[&](int index,bool record)->bool{
             const auto t=Clock::now();auto frame=session.frame(cam,w,h,opt,false);if(!frame.ok){qCritical()<<QString::fromStdString(frame.error);return false;}
@@ -60,7 +60,7 @@ int main(int argc,char** argv){
             if(!m3d::renderLumaTraceEscargotGpuPreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,packet.data,b,st,err)){qCritical()<<QString::fromStdWString(err);return false;}
             const double rasterMs=ms(rasterStart),elapsed=ms(t);if(st.zReflectActive!=0){qCritical()<<"Escargot unexpectedly submitted secondary views";return false;}
             if(!record)return true;bTimes.push_back(elapsed);allCoverage+=nonzero;
-            log<<id<<','<<index<<",B,"<<elapsed<<','<<rasterMs<<','<<frame.matrixMs<<','<<frame.compositionMs<<','<<atlasMs<<','<<st.zReflectActive<<','<<frame.rays<<','<<frame.candidates<<','<<frame.deferred<<','<<frame.completePaths<<','<<frame.unknownPaths<<','<<0<<','<<qulonglong(frame.textureSamples)<<','<<qulonglong(frame.reusedCells)<<','<<st.gpuTotalMs<<','<<int(st.gpuTimingValid)<<','<<frame.prepareMs<<','<<frame.candidateMs<<','<<frame.admissionMs<<','<<frame.totalMs<<','<<frame.staticCandidates<<','<<qulonglong(packet.data.size()*sizeof(float))<<','<<qulonglong(packet.tiles)<<','<<qulonglong(packet.layerLists)<<','<<qulonglong(packet.observations)<<','<<qulonglong(packet.affineLayers)<<'\n';return true;
+            log<<id<<','<<index<<",B,"<<elapsed<<','<<rasterMs<<','<<frame.matrixMs<<','<<frame.compositionMs<<','<<atlasMs<<','<<st.zReflectActive<<','<<frame.rays<<','<<frame.candidates<<','<<frame.deferred<<','<<frame.completePaths<<','<<frame.unknownPaths<<','<<0<<','<<qulonglong(frame.textureSamples)<<','<<qulonglong(frame.reusedCells)<<','<<st.gpuTotalMs<<','<<int(st.gpuTimingValid)<<','<<frame.prepareMs<<','<<frame.candidateMs<<','<<frame.admissionMs<<','<<frame.totalMs<<','<<frame.staticCandidates<<','<<qulonglong(packet.data.size()*sizeof(float))<<','<<qulonglong(packet.tiles)<<','<<qulonglong(packet.layerLists)<<','<<qulonglong(packet.observations)<<','<<qulonglong(packet.affineLayers)<<','<<frame.rayWorkers<<'\n';return true;
         };
         if(!runA(-1,false)||!runB(-1,false))return 8;
         for(int j=0;j<repeats;++j){if(j%2==0){if(!runA(j,true)||!runB(j,true))return 9;}else{if(!runB(j,true)||!runA(j,true))return 9;}}
@@ -77,7 +77,8 @@ int main(int argc,char** argv){
         allEffective+=effective;
         if(!save(out,id+"-B-empty-control.png",control,w,h))return 14;
         // Old CPU reference, deliberately outside A/B timing.
-        auto referenceFrame=session.frame(cam,w,h,opt,true);if(!referenceFrame.ok)return 16;
+        auto serialOpt=opt;serialOpt.rayWorkers=1;
+        auto referenceFrame=session.frame(cam,w,h,serialOpt,true);if(!referenceFrame.ok)return 16;
         const auto atlas=e::composeScreen(referenceFrame,w,h);
         std::vector<float> cpuColor(size_t(w)*h*4),cpuMeta(cpuColor.size());
         for(size_t i=0;i<atlas.size();++i){const auto& p=atlas[i];if(p.alpha<=0||p.weight<=0)continue;
@@ -86,16 +87,25 @@ int main(int argc,char** argv){
         }
         std::vector<uint32_t> cpuReference;m3d::Stats cpuStats;
         if(!m3d::renderLumaTraceEscargotPreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,cpuColor,cpuMeta,cpuReference,cpuStats,err)||!save(out,id+"-C-cpu-reference.png",cpuReference,w,h))return 16;
+        // Fixed-pose reuse diagnostic. Keep A/B cold preparation timings
+        // unchanged; do not pass off this static case as a moving-camera gain.
+        auto cachedPacket=e::packGpu(referenceFrame,scene,rt.objects.size());if(!cachedPacket.ok)return 17;
+        std::vector<double> fixedTimes;std::vector<uint32_t> fixed;m3d::Stats fixedStats;
+        for(int j=0;j<repeats;++j){const auto start=Clock::now();
+            if(!m3d::renderLumaTraceEscargotGpuPreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,cachedPacket.data,fixed,fixedStats,err))return 17;
+            fixedTimes.push_back(ms(start));
+            if(fixed!=b){qCritical()<<"Serial/parallel packet or fixed-pose reuse parity failed"<<id;return 18;}
+        }
         // A must remain stable after switching back from B.
         std::vector<uint32_t> again;m3d::Stats againStats;
         if(!m3d::renderLumaTracePreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,again,againStats,err)||again!=a){qCritical()<<"A/B restore parity failed"<<id;return 15;}
         if(!save(out,id+"-A-virtual.png",a,w,h)||!save(out,id+"-B-escargot.png",b,w,h)||!save(out,id+"-difference-x4.png",diff,w,h))return 11;
-        summary.append(QJsonObject{{"camera",id},{"A_p50_ms",quantile(aTimes,.50)},{"A_p95_ms",quantile(aTimes,.95)},{"B_p50_ms",quantile(bTimes,.50)},{"B_p95_ms",quantile(bTimes,.95)},{"changedPixels",double(changed)},{"escargotEffectivePixels",double(effective)},{"meanAbsChannelDifference",errorSum/(3*a.size())}});
+        summary.append(QJsonObject{{"camera",id},{"A_p50_ms",quantile(aTimes,.50)},{"A_p95_ms",quantile(aTimes,.95)},{"B_p50_ms",quantile(bTimes,.50)},{"B_p95_ms",quantile(bTimes,.95)},{"B_fixed_pose_reuse_p50_ms",quantile(fixedTimes,.50)},{"B_fixed_pose_reuse_p95_ms",quantile(fixedTimes,.95)},{"changedPixels",double(changed)},{"escargotEffectivePixels",double(effective)},{"meanAbsChannelDifference",errorSum/(3*a.size())}});
         qInfo()<<id<<"A p50"<<quantile(aTimes,.5)<<"B p50"<<quantile(bTimes,.5)<<"changed"<<qulonglong(changed)<<"effective Escargot pixels"<<qulonglong(effective);++tested;log.flush();
     }
     if(!tested||!allActive||!allCoverage||!allChanged||!allEffective){qCritical()<<"Invalid A/B: no active virtual camera, optical data or visible changes";return 12;}
     QFile json(out.filePath("summary.json"));if(!json.open(QIODevice::WriteOnly))return 13;
-    const QJsonObject report{{"scene",loaded.scene.revision},{"width",w},{"height",h},{"repeats",repeats},{"rayBudget",int(opt.rayBudget)},{"textureResolutionCap",256},{"msaaRequested",1},{"modeB","CPU sparse BVH observations + compact GPU four-neighbor reconstruction, no secondary cameras"},{"receiverMatch","exact source object ID + material + local tangent plane; no averaged receiver depth rejection"},{"sourceLighting","resident GPU textures + simplified proxy, not LT radiance"},{"atlasNonzeroNote","not applicable in GPU mode; use effective pixels and packet_tiles"},{"cpuReference","untimed C capture, prior CPU reconstruction and depth gate"},{"forceWarp",qEnvironmentVariable("M3D_V16_FORCE_WARP")},{"cameras",summary}};
+    const QJsonObject report{{"scene",loaded.scene.revision},{"width",w},{"height",h},{"repeats",repeats},{"rayBudget",int(opt.rayBudget)},{"textureResolutionCap",256},{"msaaRequested",1},{"modeB","CPU sparse BVH observations + compact GPU four-neighbor reconstruction, no secondary cameras"},{"receiverMatch","exact source object ID + material + local tangent plane; no averaged receiver depth rejection"},{"sourceLighting","resident GPU textures + simplified proxy, not LT radiance"},{"atlasNonzeroNote","not applicable in GPU mode; use effective pixels and packet_tiles"},{"cpuReference","untimed C capture, prior CPU reconstruction and depth gate, serial rays"},{"fixedPoseReuse","separate diagnostic: identical camera/scene/lighting, reuse CPU packet; includes GPU upload/render/readback, not moving-camera timing"},{"forceWarp",qEnvironmentVariable("M3D_V16_FORCE_WARP")},{"cameras",summary}};
     const auto bytes=QJsonDocument(report).toJson();if(json.write(bytes)!=bytes.size()||log.status()!=QTextStream::Ok)return 13;
     return 0;
 }
