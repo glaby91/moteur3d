@@ -36,7 +36,7 @@ int main(int argc,char** argv){
     m3d::updateLighting(rt.daylightHour);m3d::Stats shadowStats;const auto shadow=m3d::buildShadow(scene,shadowStats);
     QFile csv(out.filePath("frames.csv"));if(!csv.open(QIODevice::WriteOnly|QIODevice::Text))return 7;
     QTextStream log(&csv);log<<"camera,iteration,mode,total_ms,raster_ms,matrix_ms,composition_ms,atlas_ms,secondary_cameras,rays,candidates,deferred,complete_paths,unknown_paths,atlas_nonzero,texture_samples,reused_cells,gpu_ms,gpu_timing_valid\n";
-    QJsonArray summary;int tested=0;uint64_t allChanged=0,allActive=0,allCoverage=0;
+    QJsonArray summary;int tested=0;uint64_t allChanged=0,allActive=0,allCoverage=0,allEffective=0;
     for(const QString id:{QString("v17_showcase_pool_634"),QString("v7_pool_fresco"),QString("v7_curtain_wall_detail"),QString("v8_stair_first_landing")}){
         auto it=std::find_if(rt.cameras.begin(),rt.cameras.end(),[&](const auto& c){return c.id==id;});if(it==rt.cameras.end()){qWarning()<<"Missing camera"<<id;continue;}
         const auto cam=m3d::v16::makeCamera(*it,w,h);std::vector<uint32_t> a,b;std::vector<double> aTimes,bTimes;
@@ -68,11 +68,21 @@ int main(int argc,char** argv){
         for(size_t i=0;i<a.size();++i){int dr=std::abs(int((a[i]>>16)&255)-int((b[i]>>16)&255)),dg=std::abs(int((a[i]>>8)&255)-int((b[i]>>8)&255)),db=std::abs(int(a[i]&255)-int(b[i]&255));
             changed+=(dr||dg||db);errorSum+=dr+dg+db;diff[i]=0xff000000u|(uint32_t(std::min(255,dr*4))<<16)|(uint32_t(std::min(255,dg*4))<<8)|uint32_t(std::min(255,db*4));}
         allChanged+=changed;
+        // Negative control: suppress cameras AND send an empty atlas. A/B
+        // difference alone could only prove A's cameras were removed.
+        std::vector<float> empty(size_t(w)*h*4,0.f);std::vector<uint32_t> control;m3d::Stats controlStats;
+        if(!m3d::renderLumaTraceEscargotPreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,empty,empty,control,controlStats,err)||control.size()!=b.size()||controlStats.zReflectActive!=0)return 14;
+        uint64_t effective=0;for(size_t i=0;i<b.size();++i)effective+=((b[i]&0xffffffu)!=(control[i]&0xffffffu));
+        allEffective+=effective;
+        if(!save(out,id+"-B-empty-control.png",control,w,h))return 14;
+        // A must remain stable after switching back from B.
+        std::vector<uint32_t> again;m3d::Stats againStats;
+        if(!m3d::renderLumaTracePreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,again,againStats,err)||again!=a){qCritical()<<"A/B restore parity failed"<<id;return 15;}
         if(!save(out,id+"-A-virtual.png",a,w,h)||!save(out,id+"-B-escargot.png",b,w,h)||!save(out,id+"-difference-x4.png",diff,w,h))return 11;
-        summary.append(QJsonObject{{"camera",id},{"A_p50_ms",quantile(aTimes,.50)},{"A_p95_ms",quantile(aTimes,.95)},{"B_p50_ms",quantile(bTimes,.50)},{"B_p95_ms",quantile(bTimes,.95)},{"changedPixels",double(changed)},{"meanAbsChannelDifference",errorSum/(3*a.size())}});
+        summary.append(QJsonObject{{"camera",id},{"A_p50_ms",quantile(aTimes,.50)},{"A_p95_ms",quantile(aTimes,.95)},{"B_p50_ms",quantile(bTimes,.50)},{"B_p95_ms",quantile(bTimes,.95)},{"changedPixels",double(changed)},{"escargotEffectivePixels",double(effective)},{"meanAbsChannelDifference",errorSum/(3*a.size())}});
         qInfo()<<id<<"A p50"<<quantile(aTimes,.5)<<"B p50"<<quantile(bTimes,.5)<<"changed"<<qulonglong(changed);++tested;log.flush();
     }
-    if(!tested||!allActive||!allCoverage||!allChanged){qCritical()<<"Invalid A/B: no active virtual camera, optical data or visible changes";return 12;}
+    if(!tested||!allActive||!allCoverage||!allChanged||!allEffective){qCritical()<<"Invalid A/B: no active virtual camera, optical data or visible changes";return 12;}
     QFile json(out.filePath("summary.json"));if(!json.open(QIODevice::WriteOnly))return 13;
     const QJsonObject report{{"scene",loaded.scene.revision},{"width",w},{"height",h},{"repeats",repeats},{"rayBudget",int(opt.rayBudget)},{"textureResolutionCap",256},{"msaaRequested",1},{"modeB","CPU matrices + native LT pixel shader, no secondary cameras"},{"receiverMatch","approximate material and distance"},{"sourceLighting","simplified proxy, not LT radiance"},{"forceWarp",qEnvironmentVariable("M3D_V16_FORCE_WARP")},{"cameras",summary}};
     const auto bytes=QJsonDocument(report).toJson();if(json.write(bytes)!=bytes.size()||log.status()!=QTextStream::Ok)return 13;
