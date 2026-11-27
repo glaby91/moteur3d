@@ -1,0 +1,164 @@
+name: Validate packaged Linux Vulkan pool
+run-name: V17.031 Build 6 - Vulkan pool Full HD (Lavapipe)
+on:
+  push:
+    branches: [master]
+    paths: ['.github/workflows/validate-linux-vulkan-pool.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  pool:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ad188c9018e17c49f352f0c9370ea5f89b9902ff
+      - uses: actions/download-artifact@v5
+        with:
+          name: CSE-WARP-V17.031-Linux-Vulkan-GitHub-6-x86_64
+          run-id: 46081559773
+          github-token: ${{ github.token }}
+          path: artifact
+      - name: Install Vulkan software driver and probe build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libvulkan1 mesa-vulkan-drivers vulkan-tools libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xinput0 libpulse0
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: qtmultimedia
+          cache: true
+      - name: Extract exact validated engine and scene
+        run: |
+          set -euo pipefail
+          mkdir -p package results
+          tar -xzf artifact/CSE-WARP-V17.031-Linux-Vulkan-GitHub-6-x86_64.tar.gz -C package --strip-components=1
+          test -f package/benchmark-civic/scene.json
+          python3 - <<'PY'
+          import json
+          build=json.load(open('package/BUILD_INFO.json'))
+          scene=json.load(open('package/benchmark-civic/scene.json'))
+          assert build['sourceCommit']=='ad188c9018e17c49f352f0c9370ea5f89b9902ff'
+          assert build['productVersion']=='17.031' and scene['revision']=='V17.634'
+          print(build, scene['revision'])
+          PY
+          cp package/BUILD_INFO.json package/SCENE_VERSION.json results/
+          sha256sum package/libmoteur3d_v16_core.so > results/engine-sha256.txt
+      - name: Build only a diagnostic caller, not the engine
+        run: |
+          set -euo pipefail
+          mkdir -p probe
+          cat > probe/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.24)
+          project(VulkanPoolProbe LANGUAGES CXX)
+          set(CMAKE_CXX_STANDARD 17)
+          find_package(Qt6 REQUIRED COMPONENTS Core Gui)
+          add_executable(vulkan_pool_probe main.cpp)
+          target_include_directories(vulkan_pool_probe PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+          target_link_libraries(vulkan_pool_probe PRIVATE Qt6::Core Qt6::Gui "${CMAKE_CURRENT_SOURCE_DIR}/../package/libmoteur3d_v16_core.so")
+          set_target_properties(vulkan_pool_probe PROPERTIES SKIP_BUILD_RPATH TRUE)
+          CMAKE
+          cat > probe/main.cpp <<'CPP'
+          #include "m3d_engine.h"
+          #include "src/m3d_scene_v16.h"
+          #include "src/m3d_v16_bridge.h"
+          #include <QCoreApplication>
+          #include <QImage>
+          #include <QJsonObject>
+          #include <QJsonDocument>
+          #include <QJsonArray>
+          #include <QFile>
+          #include <QDir>
+          #include <chrono>
+          #include <iostream>
+          #include <algorithm>
+          #include <cstring>
+          using Clock=std::chrono::steady_clock;
+          double ms(Clock::time_point t){return std::chrono::duration<double,std::milli>(Clock::now()-t).count();}
+          int main(int argc,char** argv){
+            QCoreApplication app(argc,argv);
+            if(argc!=3)return 2;
+            const QString output=QString::fromLocal8Bit(argv[2]);
+            const auto loaded=m3d::v16::loadScene(QString::fromLocal8Bit(argv[1]));
+            if(!loaded){std::cerr<<loaded.error.toStdString()<<std::endl;return 3;}
+            auto t=Clock::now();
+            const auto built=m3d::v16::buildRuntime(loaded.scene,2048);
+            if(!built){std::cerr<<built.error.toStdString()<<std::endl;return 4;}
+            const double buildMs=ms(t);
+            const auto& rt=built.runtime;
+            const auto preset=std::find_if(rt.cameras.begin(),rt.cameras.end(),[](const auto& c){return c.id=="v7_pool_fresco";});
+            if(preset==rt.cameras.end()){for(const auto& c:rt.cameras)std::cerr<<c.id.toStdString()<<'\n';return 5;}
+            constexpr int w=1920,h=1080;
+            const auto camera=m3d::v16::makeCamera(*preset,w,h);
+            auto quality=m3d::rasterQualitySettings();quality.msaaSamples=1;quality.anisotropy=16;
+            quality.dynamicLod=false;quality.lodQualityPercent=200;quality.frustumCulling=true;
+            std::wstring error;
+            if(!m3d::setRasterQualitySettings(quality,error)){std::wcerr<<error<<std::endl;return 6;}
+            m3d::updateLighting(14.f);
+            m3d::setRasterCloudTimeScale(0.f);
+            m3d::Stats shadowStats{};
+            t=Clock::now();const auto shadow=m3d::buildShadow(rt.renderScene,shadowStats);
+            const double shadowMs=ms(t);
+            QJsonArray frames;
+            for(int i=0;i<3;++i){
+              std::vector<uint32_t> pixels;
+              m3d::Stats stats{};error.clear();
+              t=Clock::now();
+              if(!m3d::renderVulkanPreview(rt.renderScene,shadow,camera,w,h,pixels,stats,error)){
+                std::wcerr<<L"Vulkan failure: "<<error<<std::endl;return 7;
+              }
+              const double wall=ms(t);
+              if(pixels.size()!=size_t(w)*h)return 8;
+              auto range=std::minmax_element(pixels.begin(),pixels.end());
+              if(*range.first==*range.second)return 9;
+              if(i==0){
+                QImage image(w,h,QImage::Format_ARGB32);
+                std::memcpy(image.bits(),pixels.data(),pixels.size()*4);
+                if(!image.save(QDir(output).filePath("vulkan-pool-fhd.png"),"PNG"))return 10;
+              }
+              frames.append(QJsonObject{{"frame",i},{"wall_ms",wall},{"engine_ms",stats.ms},{"readback_ms",stats.postMs},{"gpu_timing_valid",stats.gpuTimingValid},{"draw_ms",stats.gpuDrawMs},{"draw_calls",double(stats.gpuDrawCalls)},{"geometry_prep",stats.geometryPreparationEnabled}});
+              std::cout<<"Vulkan pool FHD frame "<<i<<" "<<wall<<" ms"<<std::endl;
+            }
+            QJsonObject report{{"backend","Vulkan Raster via Mesa Lavapipe (software)"},{"scene",loaded.scene.revision},{"camera",preset->id},{"width",w},{"height",h},{"hour",14},{"texture_resolution",2048},{"msaa_requested",1},{"anisotropy_requested",16},{"scene_build_ms",buildMs},{"shadow_build_ms",shadowMs},{"triangles",double(rt.renderScene.obj.size())},{"frames",frames}};
+            QFile f(QDir(output).filePath("vulkan-results.json"));
+            if(!f.open(QIODevice::WriteOnly)||f.write(QJsonDocument(report).toJson())<0)return 11;
+            m3d::releaseVulkanPreviewForCurrentThread();
+            return 0;
+          }
+          CPP
+          cmake -S probe -B probe/build -G Ninja -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DCMAKE_BUILD_TYPE=Release
+          cmake --build probe/build
+          cp probe/build/vulkan_pool_probe package/
+      - name: Render actual pool through packaged Vulkan library
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$PWD/package:$PWD/package/qt/lib"
+          export QT_PLUGIN_PATH="$PWD/package/qt/plugins"
+          export QT_QPA_PLATFORM=offscreen
+          export CSE_WARP_VK_ALLOW_SOFTWARE_TEST=1
+          export M3D_V17_STATIC_GEOMETRY_PREP=1
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' | head -n 1)"
+          test -n "$VK_ICD_FILENAMES"
+          vulkaninfo --summary 2>&1 | tee results/vulkan-device.txt
+          cd package
+          timeout 900 ./vulkan_pool_probe benchmark-civic/scene.json ../results 2>&1 | tee ../results/vulkan-log.txt
+      - name: CPU direct reference, identical camera and hour
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$PWD/package:$PWD/package/qt/lib"
+          export QT_PLUGIN_PATH="$PWD/package/qt/plugins"
+          export QT_QPA_PLATFORM=offscreen
+          cd package
+          timeout 300 ./moteur3d_v17_benchmark benchmark-civic/scene.json ../results/cpu --cpu-direct-still --camera-id v7_pool_fresco --cpu-direct-width 1920 --cpu-direct-height 1080 --hour 14 2>&1 | tee ../results/cpu-log.txt
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: V17.031-Linux-Build6-Pool-Vulkan-Lavapipe
+          path: results/
+          if-no-files-found: error
