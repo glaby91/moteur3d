@@ -15,3 +15,6 @@ Production-grade planar clustering and zone dependency tables, multi-plane shade
 
 ## A/B and verification
 Set M3D_CSP001=0 to force local BVH reconstruction. Cache-hit progress label at 99%; bvhBuildMs includes read/validation, lumaTraceBvhBuildMs is zero on hit. Cache cap 128 MiB; oversized or incompatible scenes fall back. Added C++ smoke test for roundtrip, geometry mismatch, corruption and portrait projection (not compiled). Second review corrected horizontal FOV convention to exactly match HLSL, default dielectric candidate flood and legacy water sentinel. No claims of GPU timings or real-scene coverage.
+
+## Detailed follow-up register
+See [CSP001 / Z-Reflect roadmap](CSP001_ZREFLECT_ROADMAP.md) for the open tasks, dependencies and acceptance criteria. The roadmap does not authorize compilation or change runtime behavior.
