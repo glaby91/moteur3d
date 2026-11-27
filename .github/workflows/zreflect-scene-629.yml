@@ -6,6 +6,9 @@ on:
       - '.github/workflows/zreflect-scene-629.yml'
       - 'v17/tools/cse_scene_precompiler.cpp'
       - 'v17/tools/zreflect_scene_629_report.py'
+      - 'v17/CMakeLists.txt'
+      - 'v17/version.json'
+      - 'v17/tests/zreflect_index_smoke.cpp'
       - 'v17/config/zreflect-scene-V17.629.json'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zreflect_*.h'
   workflow_dispatch:
@@ -17,7 +20,7 @@ concurrency:
 jobs:
   simulate:
     runs-on: windows-2022
-    timeout-minutes: 40
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
@@ -46,17 +49,28 @@ jobs:
           arch: win64_msvc2022_64
           modules: qtmultimedia
           cache: true
-      - name: Configure diagnostic targets only
+      - name: Install Vulkan SDK for the Windows application
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: '1.4.309.0'
+          install_runtime: false
+          cache: true
+          stripdown: true
+          install_swiftshader: false
+      - name: Configure diagnostic and application targets
         shell: pwsh
         run: |
-          cmake -S v17 -B build-zreflect -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DV17_SCENE_SOURCE_DIR=$env:ZREFLECT_ROOT/benchmark-civic" -DM3D_REQUIRE_VULKAN=OFF
+          cmake -S v17 -B build-zreflect -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DV17_SCENE_SOURCE_DIR=$env:ZREFLECT_ROOT/benchmark-civic" -DM3D_REQUIRE_VULKAN=ON -DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER -DV17_GIT_SHA=$env:GITHUB_SHA
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Compile and test native diagnostic
         shell: pwsh
         run: |
-          cmake --build build-zreflect --config Release --target cse_scene_precompiler v17_zreflect_catalog_smoke --parallel 4
+          cmake --build build-zreflect --config Release --target cse_scene_precompiler v17_zreflect_catalog_smoke v17_zreflect_index_smoke v17_csp001_smoke --parallel 4
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          ctest --test-dir build-zreflect -C Release -R "^v17_zreflect_catalog_filter$" --output-on-failure --no-tests=error
+          $core = Get-ChildItem build-zreflect -Recurse -Filter moteur3d_v16_core.dll | Select-Object -First 1
+          if (!$core) { throw "Missing shared engine DLL" }
+          $env:PATH = "$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
+          ctest --test-dir build-zreflect -C Release -R "^(v17_zreflect_catalog_filter|v17_zreflect_spatial_60000|v17_csp001_roundtrip_visibility)$" --verbose --output-on-failure --no-tests=error
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Simulate all authored cameras, no camera cap
         shell: pwsh
@@ -78,4 +92,74 @@ jobs:
         with:
           name: ZReflect-V17.629-42-native-diagnostic
           path: zreflect-report/
+          if-no-files-found: error
+      - name: Build Windows application and local benchmark tools
+        shell: pwsh
+        run: |
+          cmake --build build-zreflect --config Release --target moteur3d_v17 v17_route30 moteur3d_v17_benchmark moteur3d_v17_campaign moteur3d_v17_benchui --parallel 4
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Assemble engine-only validation package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dist = "dist-zreflect"
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          $names = @("moteur3d_v17.exe","moteur3d_v16_core.dll","cse_scene_precompiler.exe","route30.exe","moteur3d_v17_benchmark.exe","moteur3d_v17_campaign.exe","moteur3d_v17_benchui.exe","v17_zreflect_index_smoke.exe")
+          foreach ($name in $names) {
+            $f = Get-ChildItem build-zreflect -Recurse -File -Filter $name | Select-Object -First 1
+            if (!$f) { throw "Missing compiled binary $name" }
+            Copy-Item $f.FullName $dist
+          }
+          $exe = Get-ChildItem build-zreflect -Recurse -File -Filter moteur3d_v17.exe | Select-Object -First 1
+          foreach ($name in @("audio","vulkan","shaders","render_modules.json","cse_warp_v17.ico")) {
+            $p = Join-Path $exe.DirectoryName $name
+            if (!(Test-Path $p)) { throw "Missing application resource $name" }
+            Copy-Item $p $dist -Recurse -Force
+          }
+          $bench = Get-ChildItem build-zreflect -Recurse -File -Filter cse_warp_v17_bench.ico | Select-Object -First 1
+          if (!$bench) { throw "Missing benchmark icon" }
+          Copy-Item $bench.FullName $dist
+          foreach ($name in @("route30.ps1","LANCER_PARCOURS_30S.bat","LANCER_LUMATRACE_01_AB.bat","LANCER_LUMATRACE_01_PISCINE.bat")) { Copy-Item "v17/tools/$name" $dist }
+          Copy-Item "v17/config/zreflect-scene-V17.629.json" $dist
+          Copy-Item "v17/docs/CSP001_ZREFLECT_AUTHOR_POLICY.md" $dist
+          Copy-Item "zreflect-report/summary.json" "$dist/zreflect-summary.json"
+          windeployqt --release --no-translations "$dist/moteur3d_v17.exe"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          foreach ($name in @("Qt6Core.dll","Qt6Gui.dll","Qt6Widgets.dll","platforms/qwindows.dll","imageformats/qjpeg.dll")) {
+            if (!(Test-Path (Join-Path $dist $name))) { throw "Qt deployment incomplete: $name" }
+          }
+          if (Test-Path "$dist/benchmark-civic") { throw "Engine-only package must not contain scene data" }
+          @'
+          @echo off
+          cd /d "%~dp0"
+          start "" "moteur3d_v17.exe"
+          '@ | Set-Content "$dist/LANCER_CSE_WARP.bat" -Encoding ascii
+          @'
+          @echo off
+          cd /d "%~dp0"
+          if "%~1"=="" (
+            echo Usage: drag V17.629 scene.json onto this BAT
+            pause
+            exit /b 2
+          )
+          cse_scene_precompiler.exe "%~1" --catalog-only --policy zreflect-scene-V17.629.json
+          exit /b %ERRORLEVEL%
+          '@ | Set-Content "$dist/LANCER_ZREFLECT_DIAGNOSTIC.bat" -Encoding ascii
+      - name: Verify packaged application controls and scene loading
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          $exe = (Resolve-Path "dist-zreflect/moteur3d_v17.exe").Path
+          $scene = (Resolve-Path "$env:ZREFLECT_ROOT/benchmark-civic/scene.json").Path
+          $process = Start-Process -FilePath $exe -ArgumentList "--smoke-walking-collisions", ('"{0}"' -f $scene) -PassThru -Wait -NoNewWindow
+          if ($process.ExitCode -ne 0) { throw "Packaged exploration controls failed ($($process.ExitCode))" }
+          & "dist-zreflect/route30.exe" $scene "zreflect-report/tour-plan.csv" --tour-plan
+          if ($LASTEXITCODE -or !(Test-Path "zreflect-report/tour-plan.csv")) { throw "Route plan failed" }
+      - name: Upload experimental Windows build (engine only)
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17.017-ZReflect-GitHub-${{ github.run_number }}-Windows-x64
+          path: dist-zreflect/
           if-no-files-found: error

@@ -2,6 +2,7 @@
 // Restrictive offline catalogue. It is not yet consumed by the GPU renderer.
 #include "m3d_v16_bridge.h"
 #include "m3d_zreflect_geometry.h"
+#include "m3d_zreflect_index.h"
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QHash>
@@ -78,39 +79,49 @@ inline QJsonObject catalogue(const v16::Runtime& rt,const v16::SceneDatabase& db
         // Unspecified objects remain hypothetical candidates only; production
         // authorization is not granted by this diagnostic.
         objects.append(QJsonObject{{"objectId",object.id},{"zoneHint",object.parent},{"material",object.material},
-            {"permission",permissionName(perm)},{"authorized",perm==Permission::Auto||perm==Permission::Enabled||water},
+            {"permission",permissionName(perm)},{"authorized",perm==Permission::Auto||perm==Permission::Enabled||water||mirror},
             {"firstTriangle",first},{"triangleCount",count},{"min",vec(bounds.lo)},{"max",vec(bounds.hi)},
             {"ior",mat.refractiveIndex},{"dielectricF0",dielectricF0(mat.refractiveIndex)},
             {"reflectivityPercent",int(mat.reflectivityPercent)},{"transmissionPercent",int(mat.transmissionPercent)},
             {"metallic",mat.metallic},{"roughnessNominal",rough},{"roughnessScale",mat.roughnessScale},{"waterSurface",water}});
         for(auto& patch:patches)mergePatch(groups,scene,std::move(patch),objectIndex,perm==Permission::Enabled);
     }
+    std::vector<const Group*> ordered;
+    std::vector<IndexedPlane> descriptors;
     for(const auto& kv:groups)for(const auto& g:kv.second){
+        descriptors.push_back({uint32_t(ordered.size()),g.patch.bounds});ordered.push_back(&g);
         const auto& p=g.patch;QJsonArray refs,triangles;for(int i:g.objects)refs.append(i);
         for(auto id:p.triangles)triangles.append(int(id));
-        int slot=int(planes.size());planes.append(QJsonObject{{"cameraId",slot},{"bufferId",slot},{"state","DORMANT"},
+        int slot=int(planes.size());planes.append(QJsonObject{{"cameraId",slot},{"bufferId",-1},{"state","DORMANT"},
             {"normal",vec(p.normal)},{"offset",p.offset},{"side",p.side},{"min",vec(p.bounds.lo)},{"max",vec(p.bounds.hi)},
             {"area",p.area},{"objects",refs},{"triangles",triangles},{"sun",true},{"sky",true},
             {"lightDependency","all-authored-conservative"}});
     }
-    // Per authored view, all eligible planes are evaluated. No top-three truncation.
+    // Real sparse query first; exhaustive reference is OFFLINE ONLY for regression.
+    SpatialIndex index;index.build(descriptors);std::vector<uint32_t> shortlist;
     for(const auto& preset:rt.cameras){
-        const Camera c=v16::makeCamera(preset,1280,720);int visible=0,selected=0,planeId=0;
-        QJsonArray projections;
-        for(const auto& kv:groups)for(const auto& g:kv.second){
-            double area=projectedPatch(scene,g.patch,c);
-            bool chosen=area>0&&(area>=policy.minProjected||g.explicitEnable);
-            if(area>0)++visible;
-            if(chosen)++selected;
-            projections.append(QJsonObject{{"cameraId",planeId++},{"projectedFraction",area},{"selected",chosen}});
+        const Camera c=v16::makeCamera(preset,1280,720);
+        const auto stats=index.query(c,shortlist);
+        QJsonArray projections,selectedIds;int visible=0,selected=0;bool parity=true;
+        std::vector<double> indexedAreas(ordered.size(),0.);
+        for(uint32_t id:shortlist){
+            const auto& g=*ordered[id];const double area=projectedPatch(scene,g.patch,c);indexedAreas[id]=area;
+            if(area>0){++visible;if(area>=policy.minProjected||g.explicitEnable){++selected;selectedIds.append(int(id));}}
         }
-        QJsonArray selectedIds;
-        for(const auto& v:projections){const auto p=v.toObject();if(p.value("selected").toBool())selectedIds.append(p.value("cameraId"));}
-        cameras.append(QJsonObject{{"id",preset.id},{"visible",visible},{"selectedUncapped",selected},{"activePlaneIds",selectedIds},{"projections",projections}});
+        // Compare against full reference only in the precompiler's diagnostic report.
+        for(size_t id=0;id<ordered.size();++id){
+            const auto& g=*ordered[id];const double area=projectedPatch(scene,g.patch,c);
+            if(std::abs(area-indexedAreas[id])>1.e-10)parity=false;
+            projections.append(QJsonObject{{"cameraId",int(id)},{"projectedFraction",area},
+                {"selected",area>0&&(area>=policy.minProjected||g.explicitEnable)}});
+        }
+        cameras.append(QJsonObject{{"id",preset.id},{"visible",visible},{"selectedUncapped",selected},
+            {"activePlaneIds",selectedIds},{"projections",projections},{"indexParity",parity},
+            {"indexNodeVisits",int(stats.nodeVisits)},{"indexPlaneTests",int(stats.planeTests)},{"indexCandidates",int(stats.candidates)}});
     }
     for(const auto& l:scene.lights)lights.append(QJsonObject{{"position",vec(l.p)},{"radius",l.radius},
         {"intensity",l.intensity},{"color",vec(l.color)},{"exterior",l.exterior}});
-    return {{"schema",1},{"catalogRevision",3},{"authorPolicy",manifest.value("zReflectAuthorPolicy").toObject()},{"revision",db.revision},{"status","diagnostic-only"},
+    return {{"schema",1},{"catalogRevision",4},{"authorPolicy",manifest.value("zReflectAuthorPolicy").toObject()},{"revision",db.revision},{"status","diagnostic-only"},
         {"objects",objects},{"planes",planes},{"lights",lights},{"rejected",diagnostics},{"cameraSimulation",cameras},
         {"policy",QJsonObject{{"maxNominalRoughness",policy.maxNominalRoughness},{"minArea",policy.minArea},
             {"minProjected",policy.minProjected},{"futureCameraLimit",int(policy.futureCameraLimit)},{"cameraLimitApplied",false}}},

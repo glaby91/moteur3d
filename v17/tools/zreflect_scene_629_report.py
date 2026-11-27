@@ -34,7 +34,7 @@ def verify_release(archive, manifest, root):
     return meta
 
 def summarize(catalog, meta, engine_commit):
-    require(catalog["revision"] == REV and catalog["catalogRevision"] == 3, "Wrong native catalogue revision")
+    require(catalog["revision"] == REV and catalog["catalogRevision"] == 4, "Wrong native catalogue revision")
     require(catalog["status"] == "diagnostic-only" and catalog["policy"]["cameraLimitApplied"] is False, "Unexpected active or capped diagnostic")
     counts = catalog["counts"]
     planes = catalog["planes"]
@@ -42,10 +42,12 @@ def summarize(catalog, meta, engine_commit):
     require(len(planes) == counts["planes"] and len(objects) == counts["eligibleObjects"], "Count mismatch")
     ids = {p["cameraId"] for p in planes}
     require(len(ids) == len(planes), "Duplicate planar camera ID")
-    require(all(p["state"] == "DORMANT" for p in planes), "Unexpected active render slot")
+    require(all(p["state"] == "DORMANT" and p["bufferId"] == -1 for p in planes), "Unexpected active render slot")
     views = catalog["cameraSimulation"]
     require(bool(views), "No authored camera views")
     for view in views:
+        require(view["indexParity"] is True, "Spatial index differs from exhaustive reference")
+        require(0 <= view["indexCandidates"] <= view["indexPlaneTests"] <= len(planes), "Invalid sparse query counters")
         proj = view["projections"]
         require(len(proj) == len(planes) and {p["cameraId"] for p in proj} == ids, "Incomplete projection inventory")
         require(all(p["projectedFraction"] >= 0 for p in proj), "Invalid projection")
