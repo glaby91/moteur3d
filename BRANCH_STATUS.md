@@ -2,7 +2,9 @@
 
 ## Référence principale — V17.031
 
-Promotion demandée après amélioration visuelle de V17.030 (L03 partiellement résolu), [CI V17.030 réussie](https://github.com/glaby91/moteur3d/actions/runs/46064723180). V17.031 ajoute le profil Ultra/LumaTrace et la caméra piscine V17.634. Validation matérielle de la V17.031 à effectuer. Les correctifs graphiques V17.030 sont repris sans modification. La branche `feature/v17-zmaterial-001` conserve la V17.030 testée. Les révisions DX11 018/009, Vulkan 010, LumaTrace 010/003, Scene Runtime 003 et Z Material 001 sont enregistrées.
+Promotion demandée après amélioration visuelle de V17.030 (L03 partiellement résolu), [CI V17.030 réussie](https://github.com/glaby91/moteur3d/actions/runs/46064723180). V17.031 ajoute le profil Ultra/LumaTrace et la caméra piscine V17.634. [Build 4 réussie](https://github.com/glaby91/moteur3d/actions/runs/46068889675), démarrage V17.031 confirmé par l'utilisateur. [Commit compilé et validé](https://github.com/glaby91/moteur3d/commit/64ecbb19c14d2d2ff12a92ab79890b686247551f). Les performances et anomalies L03–L05 restent à mesurer. Les correctifs graphiques V17.030 sont repris sans modification. La branche `feature/v17-zmaterial-001` conserve la V17.030 testée. Les révisions DX11 018/009, Vulkan 010, LumaTrace 010/003, Scene Runtime 003 et Z Material 001 sont enregistrées.
+
+[Audit rendu V17.031 et notation des backends](docs/audits/AUDIT_RENDU_V17_031_2026-11-27.md) : propositions uniquement, aucun changement de moteur.
 
 ## Dernière référence L01/L02 validée — 27 novembre 2026
 

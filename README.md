@@ -3,7 +3,7 @@
 **Moteur : V17.031 · scène de démarrage de référence : V17.634 · scène CI Z Reflect : V17.631 (version de scène indépendante)**
 CSE WARP V17 réunit l’interface d’exploration, plusieurs backends de rendu, le noyau moteur partagé avec V16, les outils de benchmark et un mécanisme de mise à jour de scène. La V17 reste une version expérimentale : les performances et la présentation native doivent être mesurées sur le GPU visé.
 
-> La branche principale du moteur est `master`. [État des branches](BRANCH_STATUS.md) · [Validation L01/L02 V17.029](v17/docs/L01_SOLAR_PCF_V17029.md) · [Build utilisateur validée](https://github.com/glaby91/moteur3d/actions/runs/46056898833).
+> La branche principale du moteur est `master`. [État des branches](BRANCH_STATUS.md) · [Validation L01/L02 V17.029](v17/docs/L01_SOLAR_PCF_V17029.md) · [Build V17.031 validée](https://github.com/glaby91/moteur3d/actions/runs/46068889675).
 
 **Accès rapide :** [Démarrage et profil](#v17031--profil-de-démarrage-et-philosophie-warp) · [Créer une scène](#construire-une-scène-v16v17--guide-du-créateur) · [Backends](#backends-disponibles) · [Compiler](#compiler) · [Benchmarks](#benchmarks-en-ligne-de-commande) · [Audit historique](#audit-historique-et-registre-des-optimisations--26-novembre-2026)
 
@@ -32,6 +32,22 @@ CSE WARP V17 réunit l’interface d’exploration, plusieurs backends de rendu,
 | Z Reflect / Z Atmosphere | 001 / 002 | Conservés, atmosphère opt-in |
 
 [Z Material 001 : architecture et benchmark](v17/docs/ZMATERIAL_001.md). Catalogue moteur unique de 8 192 références PBR synthétiques, maximum 256 matériaux actifs par scène ; textures de la scène et propriétés personnalisées prioritaires. Pas de nouveau fichier par scène. La V17.030 a passé les tests CI [build 1](https://github.com/glaby91/moteur3d/actions/runs/46064723180). L03 reste partiellement résolu : métal, lissage des normales et réflexions environnementales à étudier globalement. L04 (aliasing des arêtes) et L05 (scintillements) à diagnostiquer ; rendu périphérique à revoir après stabilisation de la qualité globale. Les mesures GPU réelles restent à effectuer.
+
+## Audit rendu V17.031 — 27 novembre 2026
+
+[Audit complet, simulations analytiques, registre AR01–AR17 et feuille de route](docs/audits/AUDIT_RENDU_V17_031_2026-11-27.md)
+
+| Backend | Note technique indicative /10 |
+|---|---:|
+| LumaTrace BVH4 | 7,7 |
+| DX11 Raster | 7,3 |
+| CPU GI 4 rebonds | 7,1 |
+| CPU GI 2 rebonds | 6,9 |
+| Vulkan Raster | 6,5 |
+| GPU DX11 Compute | 6,2 |
+| CPU PBR direct | 6,0 |
+
+Notes estimatives à poids égaux (visuel, matériaux, éclairage, efficacité, maturité), pas de nouveaux FPS mesurés. Constats majeurs : normales de faces du bridge, métallicité source des sondes LT ignorée, parité des réglages Vulkan (MSAA/anisotropie/exposition) et énergie solaire nocturne, sélection des lumières, cohérence des ombres et aliasing spéculaire. Priorités proposées : Z Normal 001, Z Material 002, harmonisation des backends, Z Light et stabilité temporelle. Aucun chantier implémenté. Le profil Ultra décrit plus haut correspond à la demande UI, pas à une garantie de réglages effectifs identiques entre backends.
 
 ## Scène de référence et paquet Windows
 
