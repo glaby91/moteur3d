@@ -15,6 +15,10 @@ Promotion demandée après amélioration visuelle de V17.030 (L03 partiellement 
 - La V17.025 de master était une tentative sur base ancienne V17.024, supersédée par V17.029. Aucun changement de scène ; la scène conserve son dépôt et sa version.
 - Les performances HD620 de V17.029 restent à mesurer.
 
+## Recherche Escargot (branche `experiment/v17-escargot-001` uniquement)
+
+[Z Escargot 001 / Debug 001](docs/research/Z_ESCARGOT_001.md), laboratoire de référence, base master V17.031 validée. Aucun lancement CI, compilation ou fusion autorisé par ce commit. Les deux modules sont expérimentaux et ne changent pas le rendu de production.
+
 ## Règle de développement anti-régression
 
 Avant tout changement, identifier la version effectivement validée, sa branche, son commit et sa build, comparer les branches, préserver les fonctionnalités cumulées, puis vérifier le diff, les versions et les tests. Une compilation réussie n'est pas une validation graphique. Ne pas repartir d'une branche historique simplement parce que son nom paraît officiel.

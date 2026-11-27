@@ -402,6 +402,43 @@
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zmaterial.h",
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zmaterial_catalog.h"
       ]
+    },
+    {
+      "id": "z_escargot",
+      "revision": "001",
+      "engines": [
+        "v17"
+      ],
+      "optional": true,
+      "description": "Experimental optical footprint/layer reconstruction CPU reference laboratory; not native renderer",
+      "dependencies": [
+        "lumatrace_cpu",
+        "z_material"
+      ],
+      "sources": [
+        "v17/escargot/types.h",
+        "v17/escargot/bvh4.h",
+        "v17/escargot/footprint.h",
+        "v17/escargot/sampling.h",
+        "v17/escargot/matrix.h",
+        "v17/escargot/composite.h",
+        "v17/escargot/runtime.h"
+      ]
+    },
+    {
+      "id": "z_escargot_debug",
+      "revision": "001",
+      "engines": [
+        "v17"
+      ],
+      "optional": true,
+      "description": "Standalone world-space snail/matrix debug geometry, no scene mutation",
+      "dependencies": [
+        "z_escargot"
+      ],
+      "sources": [
+        "v17/escargot/debug.h"
+      ]
     }
   ]
 }

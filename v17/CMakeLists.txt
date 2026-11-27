@@ -620,3 +620,12 @@ if(WIN32)
     set_tests_properties(v17_d3d11_raster_warp PROPERTIES
         TIMEOUT 180 ENVIRONMENT "M3D_V16_FORCE_WARP=1")
 endif()
+
+# Escargot research targets only; never built by the default application target.
+add_executable(v17_escargot_lab EXCLUDE_FROM_ALL tools/escargot_lab.cpp)
+target_include_directories(v17_escargot_lab PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+target_link_libraries(v17_escargot_lab PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
+add_executable(v17_escargot_smoke EXCLUDE_FROM_ALL tests/escargot_smoke.cpp)
+target_include_directories(v17_escargot_smoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+target_link_libraries(v17_escargot_smoke PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
+# Deliberately no add_test: absent executable must not break existing ctest.

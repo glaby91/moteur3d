@@ -49,6 +49,10 @@ CSE WARP V17 réunit l’interface d’exploration, plusieurs backends de rendu,
 
 Notes estimatives à poids égaux (visuel, matériaux, éclairage, efficacité, maturité), pas de nouveaux FPS mesurés. Constats majeurs : normales de faces du bridge, métallicité source des sondes LT ignorée, parité des réglages Vulkan (MSAA/anisotropie/exposition) et énergie solaire nocturne, sélection des lumières, cohérence des ombres et aliasing spéculaire. Priorités proposées : Z Normal 001, Z Material 002, harmonisation des backends, Z Light et stabilité temporelle. Aucun chantier implémenté. Le profil Ultra décrit plus haut correspond à la demande UI, pas à une garantie de réglages effectifs identiques entre backends.
 
+## Recherche Z Escargot — branche expérimentale
+
+[Spécification et laboratoire 001 / Debug 001](docs/research/Z_ESCARGOT_001.md). Empreintes optiques, rayons BVH4, calques par objet, moyenne de quatre voisins (zéros préservés), composition du fond vers le premier plan. Aucun raffinement, aucune caméra secondaire. Laboratoire CPU de référence non compilé ; intégration LT native à valider ensuite. Z Reflect et profil V17.031 inchangés.
+
 ## Scène de référence et paquet Windows
 
 **[Compilations Windows x64 de master](https://github.com/glaby91/moteur3d/actions/workflows/build-main-v17.yml)**

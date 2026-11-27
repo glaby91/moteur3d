@@ -1,0 +1,76 @@
+#pragma once
+#include "src/m3d_v16_bridge.h"
+#include <map>
+#include <tuple>
+#include <utility>
+namespace m3d::escargot {
+enum class Mode { Reflection, Refraction };
+enum class State : uint8_t { Unknown, Zero, Measured, Reconstructed };
+struct Rect {
+    int x=0,y=0,w=0,h=0;
+    bool valid() const {return w>0&&h>0;}
+    bool contains(int a,int b)const{return a>=x&&b>=y&&a<x+w&&b<y+h;}
+};
+struct Options {
+    uint32_t rayBudget=4096; // actual BVH queries, including primary and continuation
+    uint32_t maxCrossings=8; // safety bound per optical path, not surface count
+    int maxDimension=2048;
+    uint64_t maxOutputCells=4ull*1024*1024;
+    Mode mode=Mode::Reflection;
+};
+struct HitSample { uint32_t primitive=0, object=0; float depth=INF; V p{},n{},uv{}; };
+struct Value {
+    State state=State::Unknown;
+    uint32_t object=0,primitive=0,material=0;
+    float depth=0,visibility=0,opacity=0,weight=0;
+    V uv{},normal{};
+};
+struct LayerKey {
+    uint32_t object=0, crossing=0,material=0;
+    bool operator<(const LayerKey& k)const{return std::tie(object,crossing,material)<std::tie(k.object,k.crossing,k.material);}
+};
+struct Sample {
+    int x=0,y=0;
+    State receiver=State::Unknown;
+    V position{},normal{},direction{};
+    float receiverDepth=0,receiverWeight=0;
+    bool complete=false;
+    std::map<LayerKey,Value> values;
+};
+struct Candidate {
+    uint32_t object=0,material=0;
+    Rect bounds;
+    V lo{},hi{};
+    double priority=0;
+    uint32_t budget=0;
+};
+struct Layer { LayerKey key; Rect bounds; std::map<size_t,Value> measured; };
+struct Pixel { V rgb{}; float alpha=0,weight=0,receiverDepth=0; };
+struct Surface {
+    Candidate candidate;
+    int step=1,cols=0,rows=0;
+    std::vector<Sample> samples;
+    std::map<LayerKey,Layer> layers;
+    std::vector<Pixel> image; // tightly cropped footprint, no full screen per object
+    uint32_t queries=0;
+    bool deferred=false,complete=false;
+};
+struct Result {
+    std::vector<Surface> surfaces;
+    uint32_t rays=0, candidates=0,deferred=0,paths=0;
+    uint64_t measured=0,reconstructed=0,zero=0,outputCells=0;
+    double matrixMs=0,compositionMs=0;
+    bool ok=false;
+    std::string error;
+};
+inline bool finite(V v){return std::isfinite(v.x)&&std::isfinite(v.y)&&std::isfinite(v.z);}
+inline V mul(V a,V b){return {a.x*b.x,a.y*b.y,a.z*b.z};}
+inline float sat(float x){return clampf(x,0.f,1.f);}
+inline V reflect(V d,V n){return norm(d-n*(2.f*dot(d,n)));}
+inline bool refract(V d,V n,float eta,V& out){
+    const float c=clampf(-dot(d,n),0.f,1.f),k=1.f-eta*eta*(1.f-c*c);
+    if(k<0.f)return false;
+    out=norm(d*eta+n*(eta*c-std::sqrt(k)));return finite(out);
+}
+inline bool validOptions(const Options& o){return o.rayBudget>0&&o.rayBudget<=1000000&&o.maxCrossings>0&&o.maxCrossings<=32&&o.maxDimension>0&&o.maxDimension<=4096&&o.maxOutputCells>0&&o.maxOutputCells<=16777216;}
+}
