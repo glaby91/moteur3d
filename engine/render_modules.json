@@ -184,7 +184,7 @@
     },
     {
       "id": "d3d11_raster_shader",
-      "revision": "006",
+      "revision": "008",
       "engines": [
         "v16",
         "v17"
@@ -220,7 +220,7 @@
     },
     {
       "id": "d3d11_mesh",
-      "revision": "002",
+      "revision": "003",
       "engines": [
         "v16",
         "v17"
@@ -231,12 +231,13 @@
         "scene_runtime"
       ],
       "sources": [
-        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11_mesh.h"
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11_mesh.h",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_dx11_r001.h"
       ]
     },
     {
       "id": "d3d11_raster",
-      "revision": "013",
+      "revision": "017",
       "engines": [
         "v16",
         "v17"
@@ -249,10 +250,12 @@
         "d3d11_sky_shader",
         "d3d11_peripheral_composite",
         "lumatrace_gpu_compute",
-        "zreflect_optical"
+        "zreflect_optical",
+        "z_atmosphere"
       ],
       "sources": [
-        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp"
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_dx11_emission.h"
       ]
     },
     {
@@ -307,7 +310,7 @@
     },
     {
       "id": "vulkan_raster",
-      "revision": "006",
+      "revision": "009",
       "engines": [
         "v16",
         "v17"
@@ -319,7 +322,8 @@
         "vulkan_dirty_policy",
         "vulkan_mipmap",
         "vulkan_readback",
-        "vulkan_resources"
+        "vulkan_resources",
+        "z_atmosphere"
       ],
       "sources": [
         "v17/vulkan/m3d_vulkan.cpp",
@@ -362,6 +366,22 @@
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zreflect_policy.h",
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zreflect_runtime.h",
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zreflect_visibility.h"
+      ]
+    },
+    {
+      "id": "z_atmosphere",
+      "revision": "002",
+      "engines": [
+        "v16",
+        "v17"
+      ],
+      "optional": true,
+      "description": "Grain lumineux volumetrique additif, sans extinction ni voile",
+      "sources": [
+        "v17/atmosphere/atmosphere.h",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_dx11_atmosphere.h",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_dx11_atmosphere_shader.h",
+        "v17/vulkan/shaders/atmosphere.frag"
       ]
     }
   ]

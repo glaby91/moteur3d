@@ -81,6 +81,13 @@ add_executable(v17_static_geometry_prepare_smoke
 add_test(NAME v17_static_geometry_prepare_attributes
     COMMAND v17_static_geometry_prepare_smoke)
 
+add_executable(v17_atmosphere_smoke tests/atmosphere_smoke.cpp)
+add_test(NAME v17_atmosphere_math COMMAND v17_atmosphere_smoke)
+add_executable(v17_dx11_emission_smoke tests/dx11_emission_smoke.cpp)
+add_test(NAME v17_dx11_emission_five_checks COMMAND v17_dx11_emission_smoke)
+add_executable(v17_dx11_r001_smoke tests/dx11_r001_smoke.cpp)
+add_test(NAME v17_dx11_r001_five_checks COMMAND v17_dx11_r001_smoke)
+
 # No GPU or Windows runtime required to verify exact 2x2 sample budget.
 add_executable(v17_primary_quarter_smoke "tests/primary_quarter_smoke.cpp")
 add_test(NAME v17_primary_quarter_exact_budget COMMAND v17_primary_quarter_smoke)
@@ -100,6 +107,12 @@ add_executable(v17_zreflect_index_smoke tests/zreflect_index_smoke.cpp)
 target_include_directories(v17_zreflect_index_smoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
 add_test(NAME v17_zreflect_spatial_60000 COMMAND v17_zreflect_index_smoke)
 if(WIN32)
+    add_executable(v17_atmosphere_warp_ab tests/atmosphere_warp_ab.cpp)
+    target_link_libraries(v17_atmosphere_warp_ab PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
+    add_executable(v17_dx11_emission_warp_ab tests/dx11_emission_warp_ab.cpp)
+    target_link_libraries(v17_dx11_emission_warp_ab PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
+    add_executable(v17_dx11_r001_warp_ab tests/dx11_r001_warp_ab.cpp)
+    target_link_libraries(v17_dx11_r001_warp_ab PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
     add_executable(v17_zreflect_warp_ab tests/zreflect_warp_ab.cpp)
     target_link_libraries(v17_zreflect_warp_ab PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
 endif()
@@ -206,6 +219,21 @@ if(WIN32)
                     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/sky.${stage}"
                     VERBATIM)
                 list(APPEND V17_VULKAN_SPIRV "${skyOut}")
+            endforeach()
+            # Z Atmosphere depth-input fullscreen pass (single / MSAA).
+            foreach(mode IN ITEMS single ms)
+                if(mode STREQUAL "ms")
+                    set(fogSpv "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders/atmosphere_ms.frag.spv")
+                    set(fogDefine "-DZATM_MSAA=1")
+                else()
+                    set(fogSpv "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders/atmosphere.frag.spv")
+                    set(fogDefine "")
+                endif()
+                add_custom_command(OUTPUT "${fogSpv}"
+                    COMMAND "${V17_GLSLANG_VALIDATOR}" -V --target-env vulkan1.3 ${fogDefine}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/atmosphere.frag" -o "${fogSpv}"
+                    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/atmosphere.frag" VERBATIM)
+                list(APPEND V17_VULKAN_SPIRV "${fogSpv}")
             endforeach()
             # Two fragment variants from the same source. Optimized is the
             # runtime default; set CSE_WARP_VK_FAST_FRAGMENT=0 for reference A/B.

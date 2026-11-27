@@ -1,6 +1,6 @@
 # CSE WARP Beta X — V17
 
-**Révision moteur : V17.008 · scène courante : V17.627.** Les fenêtres moteur et rendu dédié affichent les deux révisions. Le build Windows V17.008 intègre la dernière scène publiée. LumaTrace utilise maintenant les surfaces lumineuses de la scène comme sources locales et réutilise leur éclairage calculé par triangle.
+**Révision moteur : V17.029 · scène de référence CI : V17.631.** [Validation L01/L02](docs/L01_SOLAR_PCF_V17029.md). Les fenêtres moteur et rendu dédié affichent les deux révisions. Le paquet Windows contient le moteur et ses outils ; la scène est versionnée et distribuée séparément. LumaTrace utilise maintenant les surfaces lumineuses de la scène comme sources locales et réutilise leur éclairage calculé par triangle.
 
 **V17 réunit l’exploration temps réel, les backends CPU/GPU et le noyau partagé avec V16.** DX11 Raster est le choix temps réel général ; Vulkan et LumaTrace sont expérimentaux. Le chemin de présentation GPU directe est disponible sous Windows, avec Qt/QImage comme solution de repli. La CI WARP ne mesure pas les performances du GPU matériel.
 
@@ -77,3 +77,6 @@ La radio tente d’abord le flux Internet de la station, avec délai et repli au
 La scène civique est maintenue séparément dans `moteur3d-scene`, puis empaquetée avec le moteur à la compilation. Au démarrage, CSE WARP cherche d’abord une scène déjà installée dans les données utilisateur, puis `benchmark-civic/scene.json` dans le paquet. Il charge immédiatement la scène locale trouvée ; la vérification GitHub ne retarde pas ce chargement.
 
 Avec une scène locale, la première vérification réseau asynchrone attend 10 minutes après le chargement ; les suivantes sont espacées de 30 minutes. Si une révision plus récente est publiée, le moteur propose de la télécharger et de redémarrer. La scène courante reste active jusqu’à l’acceptation ; le moteur ne charge pas une seconde scène par-dessus la première. Si aucune scène civique n’est installée, le moteur vérifie immédiatement le dépôt, propose le téléchargement et ne charge la scène qu’une fois. « Plus tard » mémorise la révision proposée et évite de répéter la même alerte ; une nouvelle publication sera signalée.
+
+## Z Atmosphere 002 (V17.028 expérimental)
+Grain lumineux additif très discret pour DirectX 11, LumaTrace et Vulkan, sans brouillard ni atténuation. [Architecture, paramètres, limites et essais](docs/ZATMOSPHERE_001.md).

@@ -1,5 +1,29 @@
 # État des branches — moteur CSE WARP
 
+## Référence officielle — 27 novembre 2026
+
+**V17.029**, validée visuellement par l'utilisateur sur DX11 Raster, Vulkan et LumaTrace. [Build Windows 5 réussie](https://github.com/glaby91/moteur3d/actions/runs/46056898833) · [Commit source testé](https://github.com/glaby91/moteur3d/commit/f8eebe88a7e7207c47065bc89d077140b2556a7d). La branche principale `master` reçoit le code exact de cette version, avec les mêmes tests CI et les scripts de lancement.
+
+- L01 (anneaux concentriques) et L02 (éclairage triangulaire) : résolues sur les trois backends. [Registre](v17/docs/L01_SOLAR_PCF_V17029.md).
+- DX11 R001, Z Atmosphere 002, Z Reflect, préparation géométrique et outils de benchmark conservés.
+- La V17.025 de master était une tentative sur base ancienne V17.024, supersédée par V17.029. Aucun changement de scène ; la scène conserve son dépôt et sa version.
+- Les performances HD620 de V17.029 restent à mesurer.
+
+## Règle de développement anti-régression
+
+Avant tout changement, identifier la version effectivement validée, sa branche, son commit et sa build, comparer les branches, préserver les fonctionnalités cumulées, puis vérifier le diff, les versions et les tests. Une compilation réussie n'est pas une validation graphique. Ne pas repartir d'une branche historique simplement parce que son nom paraît officiel.
+
+| Branche | Rôle |
+|---|---|
+| `master` | Référence principale V17.029 ; repartir de cette tête après contrôle du registre. |
+| `feature/v17-dx11-r001` | Source de la V17.029 validée ; historique de R001 et Z Atmosphere. |
+| `official/v17-lumatrace` | Référence historique, ne pas supposer à jour. |
+| `main` dans moteur3d-scene | Dépôt distinct de la scène. |
+
+## Historique précédent
+
+# État des branches — moteur CSE WARP
+
 État vérifié le 26 novembre 2026 après la compilation Windows de la V17.009.
 
 ## Repère immédiat

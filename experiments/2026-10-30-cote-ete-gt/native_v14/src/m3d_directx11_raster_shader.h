@@ -205,16 +205,20 @@ float4 PSMain(VSOut i):SV_TARGET {
         }
     }
     float diffuse = saturate(dot(normal, normalize(lightDir)));
-    float3 shadowOffset = i.world - shadowBase;
     float shadowFactor = 1.0;
+    // With zero solar energy, every use of shadowFactor is multiplied by
+    // daylight. Keep the legacy branch for LumaTrace and R001 A/B.
+    // Derivatives before R001's potentially divergent solar-energy branch.
+    float3 receiverN = cross(ddx(i.world), ddy(i.world));
+    [branch] if (!(reflectionControls.w > .5 && materialDiffuse[i.mat].w == 0.0)) {
+    float3 shadowOffset = i.world - shadowBase;
     float shadowScale = shadowSize / (2.0 * shadowSpan);
     float shadowCenter = shadowSize * 0.5 - 0.5;
     float2 shadowCoord = float2(dot(shadowOffset, shadowRight), dot(shadowOffset, shadowUp)) * shadowScale + shadowCenter;
     int2 shadowPixel = int2(floor(shadowCoord + 0.5));
     float shadowDistance = shadowDist - dot(shadowOffset, lightDir);
     // L01: compare every PCF tap at its own receiver-plane depth.
-    // Geometry derivatives exclude the material normal map and water waves.
-    float3 receiverN = cross(ddx(i.world), ddy(i.world));
+    // Geometric normal excludes the material normal map and water waves.
     float receiverDot = dot(receiverN, lightDir);
     float2 receiverSlope = float2(0.0, 0.0);
     float receiverBias = 0.095;
@@ -239,6 +243,7 @@ inline constexpr char kShaderPart2[] = R"(
             weightSum += weight;
         }
         shadowFactor = 0.16 + 0.84 * visible / max(weightSum, 0.0001);
+    }
     }
     float4 diffuseTerms = materialDiffuse[i.mat];
     // Cheap hemispherical sky fill: upward surfaces receive slightly more

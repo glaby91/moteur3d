@@ -1,9 +1,9 @@
 # CSE WARP — moteur 3D V17
 
-**Moteur : V17.024 · scène principale : V17.631**
+**Moteur : V17.029 · scène de référence CI : V17.631 (version de scène indépendante)**
 CSE WARP V17 réunit l’interface d’exploration, plusieurs backends de rendu, le noyau moteur partagé avec V16, les outils de benchmark et un mécanisme de mise à jour de scène. La V17 reste une version expérimentale : les performances et la présentation native doivent être mesurées sur le GPU visé.
 
-> La branche principale du moteur est `master`. [État des branches](BRANCH_STATUS.md)
+> La branche principale du moteur est `master`. [État des branches](BRANCH_STATUS.md) · [Validation L01/L02 V17.029](v17/docs/L01_SOLAR_PCF_V17029.md) · [Build utilisateur validée](https://github.com/glaby91/moteur3d/actions/runs/46056898833).
 
 [Audit historique et registre des optimisations (HTML → V17)](#audit-historique-et-registre-des-optimisations--26-novembre-2026)
 
@@ -125,6 +125,14 @@ Le coût n'est pas nul : une caméra miroir rasterise et éclaire une partie de 
 Benchmarks : `LANCER_PARCOURS_30S.bat` (DX11/Vulkan/LumaTrace), `LANCER_ZREFLECT_AB.bat` (16 mesures), `LANCER_ZREFLECT_MATRIX.bat` (32 mesures A/B/C/D), `LANCER_LUMATRACE_01_AB.bat` (circuit complet), `LANCER_LUMATRACE_01_PISCINE.bat`. Les scripts téléchargent la scène officielle et vérifient ses empreintes ; le CSV mesure les FPS, la sélection/soumission CPU, le temps GPU cumulé des reflets et les triangles par plan. SYSTEM_INFO.json identifie le matériel, la compilation et les options.
 
 Sources : [validation C](v17/docs/CSP001_ZREFLECT_V17023_VALIDATION.md), [matrice A/B/C/D](v17/docs/CSP001_ZREFLECT_V17022_MATRIX.md), [module adaptatif](v17/docs/LUMATRACE_ADAPTIVE_001.md). La CI principale vérifie les caches de la scène V17.631, les sélections, les quatre configurations et la parité pixel par pixel sur quatre vues WARP, ainsi que les plans de benchmark et les commandes d'exploration. L'ancien workflow exhaustif demeure disponible manuellement ; les tests matériels restent indispensables.
+
+## DirectX 11 — R001 validé sur HD620 (V17.025)
+
+Branche de développement validée, intégrée au moteur principal master V17.029. R001 reste ON par défaut pour DX11 Raster (A/B : `M3D_V17_DX11_R001=0`). AABB conservatif, masques partagés profondeur/couleur, filtrage des lumières hors champ ou sans énergie, suppression des lectures d'ombre à daylight nul, contrôles des limites. LumaTrace et la scène V17.631 ne sont pas modifiés.
+
+Benchmark HD620, 1366×768, MSAA 2x, 4 × 90 images OFF/ON/ON/OFF, trajectoire déterministe, preview matériel avec readback : **14,3576 → 16,7388 FPS (+16,59 %)** ; GPU draw 55,94 → 44,20 ms ; 12 captures PNG identiques par indice. CI Windows et huit tests WARP jour/nuit réussis. [Rapport R001](v17/docs/DX11_R001.md) · [Données comparatives](v17/docs/benchmarks/DX11_R001_COMPARAISON.csv) · [Compilation validée](https://github.com/glaby91/moteur3d/actions/runs/46008251282).
+
+**Pause décidée le 27/11/2026 :** pas de R002 ni d'autre chantier engagé. Conserver Geometry Prep, ordre des triangles, rendu indexé, instancing et Z Prepass ; aucune réorganisation de géométrie sans preuve préalable. Ombres GPU, backface sélectif, Z Light par tuiles, compression et transparences restent des pistes différées. Simulations et 3–5 vérifications avant toute compilation d'une future modification. Ne pas fusionner automatiquement vers master.
 
 ## Architecture modulaire
 
@@ -406,3 +414,6 @@ Références de recherche : [rendu par frontières](experiments/2026-10-29-v92-w
 Objectif HD620 : 40–45 FPS (budget ~25–22,2 ms par image), non acquis. Objectif historique 4K/100 FPS : 10 ms par image, recherche à long terme sur matériel adapté. Aucun gain futur ne doit être annoncé avant mesure. Ne pas additionner les gains de campagnes hétérogènes ni assimiler WARP logiciel à un GPU matériel.
 
 État relevé le 26/11 : [code V17.010](https://github.com/glaby91/moteur3d/commit/ef5461e06a9b4326620f451575b1599f70426066), [PR 90 / V17.009](https://github.com/glaby91/moteur3d/pull/90), scène [V17.629 build 42](https://github.com/glaby91/moteur3d-scene/releases/tag/scene-V17.629-42). Le code le plus récent ne constitue pas à lui seul une preuve de publication d'un package validé.
+
+### V17.026 — correctif matériaux émissifs DX11/LumaTrace
+Les déclarations d'émission de la scène sont désormais transmises au shader raster partagé. [Rapport et tests](v17/docs/DX11_EMISSION_V17026.md). R001 reste actif ; autres développements suspendus.
