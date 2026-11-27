@@ -315,7 +315,8 @@ public:
         }
         if(!ensureDevice(error)||!ensureScene(scene,error,lumaBvh))return false;
         const char* zOpt=std::getenv("M3D_V17_ZREFLECT");
-        const bool zEnabled=lumaBvh&&zOpt&&std::strcmp(zOpt,"1")==0;
+        // V17.024: production LumaTrace enables Z Reflect unless explicitly disabled.
+        const bool zEnabled=lumaBvh&&!(zOpt&&std::strcmp(zOpt,"0")==0);
         zActive_.clear();zreflect::QueryStats zStats{};
         const auto zStart=Clock::now();
         if(lumaBvh)zStats=zRuntime_.select(scene,cam,zActive_,zEnabled);

@@ -1,6 +1,6 @@
 # CSE WARP — moteur 3D V17
 
-**Moteur : V17.009 · scène de référence courante : V17.629**
+**Moteur : V17.024 · scène principale : V17.631**
 CSE WARP V17 réunit l’interface d’exploration, plusieurs backends de rendu, le noyau moteur partagé avec V16, les outils de benchmark et un mécanisme de mise à jour de scène. La V17 reste une version expérimentale : les performances et la présentation native doivent être mesurées sur le GPU visé.
 
 > La branche principale du moteur est `master`. [État des branches](BRANCH_STATUS.md)
@@ -9,18 +9,13 @@ CSE WARP V17 réunit l’interface d’exploration, plusieurs backends de rendu,
 
 ## Scène de référence et paquet Windows
 
-**[Télécharger CSE WARP V17.009 pour Windows x64, build 759](https://github.com/glaby91/moteur3d/actions/runs/45736640875/artifacts/15080081395)**
+**[Compilations Windows x64 de master](https://github.com/glaby91/moteur3d/actions/workflows/build-main-v17.yml)**
 
-Extraire le ZIP puis lancer `LANCER_CSE_WARP.bat`. Le paquet contient la scène de la piscine V17.629. En mode marche au sol, maintenir `Ctrl` pour s’accroupir, appuyer sur `Espace` pour sauter et appuyer brièvement sur `Tab` ou `<` pour ouvrir ou fermer le Pip-Boy. La préparation des triangles est activée par défaut pour DirectX 11, Vulkan et LumaTrace. [Vérifications Windows de la build 759](https://github.com/glaby91/moteur3d/actions/runs/45736640875)
+Extraire le ZIP dans son dossier de build nommé, puis lancer `LANCER_CSE_WARP.bat`. Le paquet contient le moteur et les outils, **pas la scène**, qui conserve son propre dépôt et son versioning. Au démarrage, le moteur vérifie la publication officielle avant de charger la scène locale ; en cas d'indisponibilité réseau, la scène locale reste utilisable. En l'absence de scène locale, accepter son téléchargement. Les vérifications suivantes sont asynchrones et proposent une mise à jour sans redémarrage forcé. Ctrl maintenu : accroupissement ; Espace : saut ; Tab ou < brièvement : Pip-Boy ; F2 : HUD.
 
-La scène « Palais et coupole vitrée de la piscine » est maintenue séparément dans [`glaby91/moteur3d-scene`](https://github.com/glaby91/moteur3d-scene). La release courante est [V17.629](https://github.com/glaby91/moteur3d-scene/releases/tag/scene-V17.629-42). Le workflow moteur récupère la dernière release au début de la compilation, vérifie le manifeste de l’archive et son numéro de révision, charge la scène avec le moteur, puis place **la scène complète et son manifeste dans le même paquet Windows que le moteur**. Le paquet est ainsi utilisable hors ligne dès son extraction.
-
-Le programme vérifie ensuite les nouvelles releases en tâche de fond. Il ouvre immédiatement la scène locale trouvée ; la vérification réseau ne retarde pas le rendu. Une nouvelle version est proposée sans remplacer la scène en cours. Si l’utilisateur accepte, la nouvelle scène est installée dans les données utilisateur et un redémarrage est proposé. En l’absence de scène locale, le moteur propose de télécharger la release avant de démarrer. Une vérification indisponible laisse la scène locale utilisable.
-
-- Dépôt de la scène : [moteur3d-scene](https://github.com/glaby91/moteur3d-scene)
-- Release actuelle : [V17.629 — build 42](https://github.com/glaby91/moteur3d-scene/releases/tag/scene-V17.629-42)
-- [Compilations Windows x64 de `master`](https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v17.yml?query=branch%3Amaster)
-- Révision emballée : `SCENE_REVISION.txt` et `SCENE_VERSION.json`, à la racine du paquet ainsi que dans `benchmark-civic/`.
+- [Scène principale V17.631](https://github.com/glaby91/moteur3d-scene/releases/tag/scene-reflect-V17.631) : géométrie V17.629, politique optique et caches BVH4/index schema 2 précalculés.
+- [Dernière scène officielle](https://github.com/glaby91/moteur3d-scene/releases/latest)
+- [Validation matérielle HD620 — V17.022/023](v17/docs/CSP001_ZREFLECT_V17023_VALIDATION.md).
 
 Pour retrouver une ancienne compilation, consulter [V17.006, build 683 avec scène V17.623](https://github.com/glaby91/moteur3d/actions/runs/45493998985) ou [V17.003, build 587](https://github.com/glaby91/moteur3d/actions/runs/45080722276).
 
@@ -102,9 +97,34 @@ La radio se pilote depuis le panneau latéral **SON AMBIANT** : démarrer/arrêt
 | **CPU Éclairage global — 4 rebonds** | Ray tracing CPU et davantage de rebonds GI | Calcul plus lourd, destiné aux rendus de qualité. |
 | **V17 GPU D3D11 Raster** | Rasterisation matérielle, profondeur et shaders | Backend recommandé pour explorer en temps réel. Éclairage raster approximatif. |
 | **V17 Vulkan Raster** | Rasterisation Vulkan | Expérimental ; dépend du pilote et de la disponibilité du SDK à la compilation. |
-| **LumaTrace BVH4 — éclairage GPU** | Préparation d’un BVH4 CPU puis parcours/calcul GPU | Mode expérimental d’éclairage direct, distinct d’un path tracer multi-rebonds. Géométrie incompatible : le benchmark l’enregistre comme ignorée avec motif. |
+| **LumaTrace BVH4 — éclairage GPU + Z Reflect** | Raster DX11 + Compute GPU BVH4, éclairage direct/indirect par sondes, réflexions planaires | Backend hybride temps réel, pas un path tracer multi-rebonds ni DXR. Z Reflect activé par défaut. |
 
 Sur Windows, l’option **Affichage GPU direct natif** permet aux backends DX11, Vulkan et LumaTrace de présenter dans leur propre fenêtre. Désactivez-la pour utiliser la sortie Qt/QImage. Vulkan peut rester indisponible si le SDK n’était pas présent à la compilation ou si le pilote ne permet pas son initialisation. Le menu indique l’état du backend.
+
+## LumaTrace — architecture hybride GPU
+
+LumaTrace s'appuie sur le pipeline raster Direct3D 11 pour la visibilité principale, les matériaux PBR, les textures, la profondeur et la présentation native. Les calculs massifs restent sur le GPU : compute HLSL, parcours BVH4, radiance directe par triangle et éclairage indirect approximé par sondes spatiales. La voie de sondes utilise deux passes et n'est pas un path tracer à rebonds arbitraires. Les données de scène et buffers indexés restent autant que possible résidents sur GPU ; en présentation native, aucune lecture des pixels vers le CPU n'est nécessaire. Le CPU prépare la géométrie, les index, les sélections et commandes ; il ne recalcule pas une image GPU. Les caches précalculés de la scène réduisent le travail au chargement. Le module adaptatif de budget 0/1 reste optionnel (`M3D_V17_LUMA_ADAPTIVE=1`), pas activé arbitrairement.
+
+### Z Reflect — réflexions planaires activées par défaut
+
+1. Le catalogue optique et son index spatial identifient les surfaces autorisées par le créateur de scène. La politique distingue AUTO et exclusions ; l'ascenseur est exclu de la réflexion planaire. La sonde partagée de l'ascenseur reste une déclaration, pas un rendu actif.
+2. Le CPU interroge les plans visibles, calcule leur surface projetée réelle (triangles découpés), réutilise le résultat à caméra strictement identique et retient les plans admissibles. Le HUD affiche `ZR ON actifs/total` ; les plans différés sont instrumentés. V17.631 comporte 5 plans, 121 objets candidats, 29 vues de référence ; 2 cibles partagées à demi-résolution sont disponibles à l'exécution. Ce plafond de ressources ne limite pas le catalogue.
+3. Une caméra miroir est calculée pour chaque plan actif. Eau et vitrage utilisent les mêmes cibles réutilisables. Frustum et filtrage CPU conservatif des blocs entièrement derrière le plan réduisent la géométrie soumise. Les passes secondaires sont opaques, sans récursion. Le Z Prepass principal reste actif ; le prépass miroir est désactivé par défaut (configuration C validée).
+4. La texture est composée dans le shader selon Fresnel, matériau et, pour l'eau, distorsion. Ce sont des reflets planaires, pas de vraie réfraction multi-interface ; les miroirs non planaires et sondes partagées ne sont pas implémentés.
+
+Le coût n'est pas nul : une caméra miroir rasterise et éclaire une partie de la scène une seconde fois. En 720p HD620, la campagne V17.022 a retenu C : 21,71 FPS moyens sur quatre vues contre 19,63 pour B ; 1,77 ms GPU de reflet piscine et 18,07 ms façade. Les valeurs ne garantissent pas les FPS de V17.024. Objectif à terme : conserver la crédibilité visuelle (notamment silhouettes d'arbres dans les vitrages) pour un coût marginal, idéalement 5–10 % du budget image. Z Warp (rayons ciblés en escargot, matrices adaptatives) est une piste différée [#94](https://github.com/glaby91/moteur3d/issues/94), non implémentée.
+
+| Option | Défaut / effet |
+|---|---|
+| `M3D_V17_ZREFLECT` | ON en LumaTrace ; 0 désactive les vitrages planaires, l'eau reste active |
+| `M3D_V17_ZREFLECT_CPU_CULL` | 1, filtrage conservatif miroir |
+| `M3D_V17_ZREFLECT_PREPASS` | 0, prépass miroir seul |
+| `M3D_V17_DISABLE_Z_PREPASS` | 0, contrôle global (ne pas confondre avec le prépass miroir) |
+| `M3D_V17_ZREFLECT_GPU_TIMING` | 1 pour activer les timestamps GPU non bloquants de réflexion native |
+
+Benchmarks : `LANCER_PARCOURS_30S.bat` (DX11/Vulkan/LumaTrace), `LANCER_ZREFLECT_AB.bat` (16 mesures), `LANCER_ZREFLECT_MATRIX.bat` (32 mesures A/B/C/D), `LANCER_LUMATRACE_01_AB.bat` (circuit complet), `LANCER_LUMATRACE_01_PISCINE.bat`. Les scripts téléchargent la scène officielle et vérifient ses empreintes ; le CSV mesure les FPS, la sélection/soumission CPU, le temps GPU cumulé des reflets et les triangles par plan. SYSTEM_INFO.json identifie le matériel, la compilation et les options.
+
+Sources : [validation C](v17/docs/CSP001_ZREFLECT_V17023_VALIDATION.md), [matrice A/B/C/D](v17/docs/CSP001_ZREFLECT_V17022_MATRIX.md), [module adaptatif](v17/docs/LUMATRACE_ADAPTIVE_001.md). La CI principale vérifie les caches de la scène V17.631, les sélections, les quatre configurations et la parité pixel par pixel sur quatre vues WARP, ainsi que les plans de benchmark et les commandes d'exploration. L'ancien workflow exhaustif demeure disponible manuellement ; les tests matériels restent indispensables.
 
 ## Architecture modulaire
 
@@ -128,7 +148,7 @@ Détails du découpage : [`v17/README.md`](v17/README.md) · [registre des modul
 
 ## Compiler
 
-La compilation de référence est le workflow [CSE WARP V17 — Windows x64](https://github.com/glaby91/moteur3d/actions/workflows/build-moteur3d-v17.yml). Il construit l’application, les backends optionnels disponibles, les outils, copie la dernière scène publiée après validation et produit un artefact Windows autonome.
+La compilation de référence est le workflow [CSE WARP V17 — Main Windows x64](https://github.com/glaby91/moteur3d/actions/workflows/build-main-v17.yml). Il construit l’application, les backends disponibles et les outils, vérifie la scène de référence épinglée et produit un artefact moteur sans scène.
 
 Pour compiler localement, installer Visual Studio 2022 avec C++ x64, CMake, Qt 6.8.3 (module Multimedia) et Vulkan SDK 1.3 ou ultérieur. Depuis la racine du dépôt :
 
@@ -139,7 +159,7 @@ cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 `
 cmake --build build-v17 --config Release --parallel 4
 ```
 
-Le workflow GitHub télécharge et contrôle la release de scène avant le packaging ; une compilation locale seule n’exécute pas automatiquement toutes les étapes de finition, d’audit et de packaging Windows de la CI.
+Le workflow principal télécharge la scène de référence validée pour les tests, sans la copier dans le paquet final. Une compilation locale seule n’exécute pas automatiquement toutes les étapes de contrôle et de packaging Windows de la CI.
 
 ## Benchmarks en ligne de commande
 
@@ -222,7 +242,7 @@ Les benchmarks d’aperçu lisent les pixels hors écran : ils ne mesurent ni la
 
 Le workflow Windows x64 compile V16 et V17, vérifie le paquet, charge et rend la scène publiée, puis produit les benchmarks et images de contrôle. Une CI verte valide les chemins exécutés sur le runner, pas la fluidité sur le GPU de l’utilisateur. Vulkan et LumaTrace restent expérimentaux ; les performances matérielles, la parité visuelle complète et les coûts de présentation native doivent être vérifiés séparément.
 
-La version **LumaTrace BVH4** est un backend d’éclairage GPU expérimental. Elle ne remplace pas le moteur CPU complet et ne constitue pas encore un path tracer multi-rebonds. Les résultats de benchmark doivent donc être lus comme des chemins distincts, pas comme une comparaison de qualité physique universelle.
+La version **LumaTrace BVH4** est un backend hybride d’éclairage GPU et de réflexions planaires. Elle ne remplace pas le moteur CPU complet et ne constitue pas encore un path tracer multi-rebonds. Les résultats de benchmark doivent donc être lus comme des chemins distincts, pas comme une comparaison de qualité physique universelle.
 
 ## Organisation du dépôt
 

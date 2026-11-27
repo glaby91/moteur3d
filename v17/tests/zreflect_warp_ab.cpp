@@ -57,6 +57,13 @@ int main(int argc,char** argv){
     const QString out=QString::fromLocal8Bit(argv[2]);
     if(!QImage(reinterpret_cast<const uchar*>(off.data()),w,h,w*4,QImage::Format_RGB32).save(out+"/zreflect-off.png")||
        !QImage(reinterpret_cast<const uchar*>(on.data()),w,h,w*4,QImage::Format_RGB32).save(out+"/zreflect-on.png"))return 11;
+    // Production default: exactly the explicit ON image, without any launch script.
+    std::vector<uint32_t> defaultOn;m3d::Stats defaultStats;
+    if(_putenv_s("M3D_V17_ZREFLECT","")||
+       !m3d::renderLumaTracePreview(r.renderScene,r.lumaTraceBvh4,shadow,c,w,h,defaultOn,defaultStats,err)||
+       defaultOn!=on||!defaultStats.zReflectEnabled||defaultStats.zReflectActive!=b.zReflectActive){
+        qCritical()<<"Default Z Reflect ON regression";return 26;
+    }
     // Water through the shared target must be rendered even with glazing OFF.
     std::vector<uint32_t> waterPixels;m3d::Stats waterStats;
     if(_putenv_s("M3D_V17_ZREFLECT","0")||!m3d::renderLumaTracePreview(r.renderScene,r.lumaTraceBvh4,shadow,poolCamera,w,h,waterPixels,waterStats,err)||

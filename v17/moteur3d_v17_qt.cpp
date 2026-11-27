@@ -2658,7 +2658,7 @@ private:
             QStringLiteral("CPU Éclairage global — 4 rebonds (qualité réglable)"),
             QStringLiteral("V17 GPU D3D11 Raster — exploration rapide"),
             QStringLiteral("V17 Vulkan Raster — expérimental (GPU matériel)"),
-            QStringLiteral("LumaTrace BVH4 — test (éclairage GPU)")
+            QStringLiteral("LumaTrace BVH4 — éclairage GPU + Z Reflect")
         });
 #ifndef _WIN32
         backendBox_->setItemData(1,0,Qt::UserRole-1);

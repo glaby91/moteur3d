@@ -1,9 +1,8 @@
-name: CSE WARP V17.016 — Windows x64 release
-run-name: CSE WARP V17.016 — Windows x64 (GitHub build ${{ github.run_number }})
+name: V17 legacy exhaustive Windows QA (manual / historical branches)
+run-name: V17 legacy QA — Windows x64 (GitHub build ${{ github.run_number }})
 "on":
   push:
     branches:
-      - master
       - feature/v17-diagnostic-dashboard-tab-20261123
       - feature/v17-realtime-architecture-roadmap-261110
       - feature/v17-380-global-architectural-rebuild-261112

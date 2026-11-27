@@ -51,7 +51,7 @@ function Get-RouteScene($Cache, $Stage) {
     $headers = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'CSE-WARP-Parcours30' }
     $releases = Invoke-RestMethod -Uri 'https://api.github.com/repos/glaby91/moteur3d-scene/releases?per_page=100' -Headers $headers
     $release = $releases | Where-Object {
-        $_.prerelease -and !$_.draft -and $_.tag_name -match '^scene-reflect-V17\.\d+$' -and
+        !$_.prerelease -and !$_.draft -and $_.tag_name -match '^scene-reflect-V17\.\d+$' -and
         (@($_.assets | Where-Object { $_.state -eq 'uploaded' -and $_.name -in @('V17-scene.zip','SCENE_VERSION.json') }).Count -eq 2)
     } | Sort-Object { [int]($_.tag_name -replace '^scene-reflect-V17\.', '') } -Descending | Select-Object -First 1
     if (!$release) { throw 'Aucune publication Reflect complete disponible.' }

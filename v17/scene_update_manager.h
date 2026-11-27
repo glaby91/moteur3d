@@ -76,7 +76,7 @@ public:
             const QRegularExpression reflectTag(QStringLiteral("^scene-reflect-(V17\\.\\d+)$"));
             for(const auto& value:releaseDocument.array()){
                 const auto candidate=value.toObject();
-                if(candidate.value("draft").toBool()||!candidate.value("prerelease").toBool())continue;
+                if(candidate.value("draft").toBool()||candidate.value("prerelease").toBool())continue;
                 const auto match=reflectTag.match(candidate.value("tag_name").toString());
                 const int revision=revisionNumber(match.captured(1));
                 bool manifest=false,archive=false;

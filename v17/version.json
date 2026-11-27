@@ -1,7 +1,7 @@
 {
   "engine": {
     "major": 17,
-    "build": 23
+    "build": 24
   },
   "renderModules": "../engine/render_modules.json"
 }

@@ -236,7 +236,7 @@
     },
     {
       "id": "d3d11_raster",
-      "revision": "012",
+      "revision": "013",
       "engines": [
         "v16",
         "v17"
@@ -248,7 +248,8 @@
         "d3d11_raster_shader",
         "d3d11_sky_shader",
         "d3d11_peripheral_composite",
-        "lumatrace_gpu_compute"
+        "lumatrace_gpu_compute",
+        "zreflect_optical"
       ],
       "sources": [
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp"
@@ -339,6 +340,28 @@
       ],
       "sources": [
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_lumatrace_adaptive.h"
+      ]
+    },
+    {
+      "id": "zreflect_optical",
+      "revision": "001",
+      "engines": [
+        "v16",
+        "v17"
+      ],
+      "optional": true,
+      "description": "Sparse optical catalogue/index, exact projected visibility cache, bounded shared water/glass planar reflection targets; enabled by default on LumaTrace V17.024.",
+      "dependencies": [
+        "scene_runtime"
+      ],
+      "sources": [
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zreflect_cache.h",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zreflect_catalog.h",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zreflect_geometry.h",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zreflect_index.h",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zreflect_policy.h",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zreflect_runtime.h",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zreflect_visibility.h"
       ]
     }
   ]
