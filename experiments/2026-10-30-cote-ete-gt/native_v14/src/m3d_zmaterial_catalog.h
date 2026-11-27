@@ -7,8 +7,27 @@
 #include <QJsonObject>
 #include <QRegularExpression>
 #include <QString>
+#include <QSet>
+#include <QVector>
+#include <utility>
 #include <cmath>
 namespace m3d::zmaterial {
+// Transactional selection: keep declaration order, never generate unused textures.
+inline bool selectActive(QVector<QJsonObject>& declared,const QVector<QJsonObject>& instances,QString& error){
+    QSet<QString> used,seen;
+    for(const auto& instance:instances)used.insert(instance.value("material").toString());
+    QVector<QJsonObject> active;
+    for(const auto& material:declared){
+        const QString id=material.value("id").toString();
+        if(id.isEmpty()||seen.contains(id)){error="Duplicate or missing material: "+id;return false;}
+        seen.insert(id);
+        if(used.contains(id))active.append(material);
+    }
+    for(const auto& id:used)if(!seen.contains(id)){error="Unknown object material: "+id;return false;}
+    if(active.isEmpty()||active.size()>256){error="Active material count outside 1..256";return false;}
+    declared=std::move(active);
+    return true;
+}
 // One compact external catalogue. Only explicitly referenced presets are expanded.
 class Catalog {
     QJsonObject families_;

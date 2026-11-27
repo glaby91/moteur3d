@@ -612,18 +612,7 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
         result.error="Missing meshes, instances or materials";return result;
     }
     // Select instance references before allocating textures. Preserve author order.
-    QSet<QString> usedMaterials, declaredMaterials;
-    for(const auto& instance:instanceDocs)usedMaterials.insert(instance.value("material").toString());
-    QVector<QJsonObject> activeMaterials;
-    for(const auto& material:materialDocs){
-        const QString id=material.value("id").toString();
-        if(id.isEmpty()||declaredMaterials.contains(id)){result.error="Duplicate or missing material: "+id;return result;}
-        declaredMaterials.insert(id);
-        if(usedMaterials.contains(id))activeMaterials.append(material);
-    }
-    for(const auto& id:usedMaterials)if(!declaredMaterials.contains(id)){result.error="Unknown object material: "+id;return result;}
-    if(activeMaterials.isEmpty()||activeMaterials.size()>256){result.error="Active material count outside 1..256";return result;}
-    materialDocs=std::move(activeMaterials);
+    if(!zmaterial::selectActive(materialDocs,instanceDocs,result.error))return result;
     zmaterial::Catalog library;
     report(15,QStringLiteral("Préparation des textures PBR"));
     auto stageStarted=std::chrono::steady_clock::now();

@@ -1,0 +1,17 @@
+{
+  "catalogue": 8192,
+  "opaque_benchmarked": 6912,
+  "special_not_benchmarked": 1280,
+  "orientations": 768,
+  "contexts": 6,
+  "cases": 31850496,
+  "metal_cases": 9437184,
+  "metal_mae_linear_points": {
+    "actuel": 6.073898790636947,
+    "sans_diffus": 13.749223757684426,
+    "uniforme": 3.1303908365686564,
+    "directionnel": 1.9275840206209123
+  },
+  "nonmetal_max_change": 0,
+  "reference": "Original internal laboratory synthetic cosine-power directional environment; not real shader execution"
+}

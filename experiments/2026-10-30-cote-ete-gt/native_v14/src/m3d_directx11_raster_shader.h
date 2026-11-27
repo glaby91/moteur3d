@@ -362,7 +362,7 @@ inline constexpr char kShaderPart2[] = R"(
             // from directly lit surfaces, bilinearly interpolated in space.
             const float3 bounce=max(probe.rgb,0.0);
             color+=diffuseBase*bounce;
-            environmentEnergy+=dot(bounce,float3(.2126,.7152,.0722));
+            if(zmMetal>0.0)environmentEnergy+=dot(bounce,float3(.2126,.7152,.0722));
         }else{
             float skyVisibility=saturate(probe.a);
             float upward=saturate(normal.y*.5+.5);
@@ -388,7 +388,7 @@ inline constexpr char kShaderPart2[] = R"(
                 indirect=max(probe.rgb,0.0);
             }
             color+=diffuseBase*(indirect-existingAmbient);
-            environmentEnergy=dot(indirect,float3(.2126,.7152,.0722));
+            if(zmMetal>0.0)environmentEnergy=dot(indirect,float3(.2126,.7152,.0722));
             // The existing shadow map and dynamic direct sun remain unchanged;
             // gently tint only the direct contribution at warm solar hours.
             float sunContribution=diffuseTerms.z*diffuse*shadowFactor*diffuseTerms.w;

@@ -75,12 +75,12 @@ jobs:
       - name: Compile and test native diagnostic
         shell: pwsh
         run: |
-          cmake --build build-zreflect --config Release --target cse_scene_precompiler v17_zreflect_catalog_smoke v17_zreflect_index_smoke v17_csp001_smoke v17_zreflect_warp_ab v17_dx11_r001_smoke v17_dx11_r001_warp_ab v17_dx11_emission_smoke v17_dx11_emission_warp_ab v17_atmosphere_smoke v17_atmosphere_warp_ab v17_vulkan_gpu_smoke --parallel 4
+          cmake --build build-zreflect --config Release --target v17_zmaterial_smoke cse_scene_precompiler v17_zreflect_catalog_smoke v17_zreflect_index_smoke v17_csp001_smoke v17_zreflect_warp_ab v17_dx11_r001_smoke v17_dx11_r001_warp_ab v17_dx11_emission_smoke v17_dx11_emission_warp_ab v17_atmosphere_smoke v17_atmosphere_warp_ab v17_vulkan_gpu_smoke --parallel 4
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $core = Get-ChildItem build-zreflect -Recurse -Filter moteur3d_v16_core.dll | Select-Object -First 1
           if (!$core) { throw "Missing shared engine DLL" }
           $env:PATH = "$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
-          ctest --test-dir build-zreflect -C Release -R "^(v17_zreflect_catalog_filter|v17_zreflect_spatial_60000|v17_csp001_roundtrip_visibility|v17_dx11_r001_five_checks|v17_dx11_emission_five_checks|v17_atmosphere_math)$" --verbose --output-on-failure --no-tests=error
+          ctest --test-dir build-zreflect -C Release -R "^(v17_zmaterial_runtime|v17_zreflect_catalog_filter|v17_zreflect_spatial_60000|v17_csp001_roundtrip_visibility|v17_dx11_r001_five_checks|v17_dx11_emission_five_checks|v17_atmosphere_math)$" --verbose --output-on-failure --no-tests=error
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Verify published optical catalogue and cache
         shell: pwsh

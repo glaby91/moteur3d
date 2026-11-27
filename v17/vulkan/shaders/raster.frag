@@ -150,7 +150,7 @@ void main() {
    vec3 p=clamp((world-f.giOrigin.xyz)*f.giInvSpan.xyz,vec3(0.0),vec3(1.0));
    vec3 irradiance=max(mix(texture(giCurrent,p),texture(giNext,p),f.giInfo.y).rgb,vec3(0.0));
    color+=diffuseBase*(irradiance-environmentEnergy);
-   environmentEnergy=dot(irradiance,vec3(.2126,.7152,.0722));
+   if(zmMetal>0.0)environmentEnergy=dot(irradiance,vec3(.2126,.7152,.0722));
  }
  if(zmMetal>0.0){
    vec3 v=normalize(f.eye.xyz-world);
