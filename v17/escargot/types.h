@@ -45,13 +45,15 @@ struct Candidate {
     double priority=0;
     uint32_t budget=0;
 };
-struct Layer { LayerKey key; Rect bounds; std::map<size_t,Value> measured; };
+struct Layer { LayerKey key; Rect bounds; std::map<size_t,Value> measured; std::vector<size_t> partial; };
 struct Pixel { V rgb{}; float alpha=0,weight=0,receiverDepth=0; };
 struct Surface {
     Candidate candidate;
     int step=1,cols=0,rows=0;
     std::vector<Sample> samples;
     std::map<LayerKey,Layer> layers;
+    std::vector<size_t> completeIndices,receiverIndices;
+    bool sameKnownSet=false;
     std::vector<Pixel> image; // tightly cropped footprint, no full screen per object
     uint32_t queries=0,completePaths=0,unknownPaths=0;
     bool deferred=false,complete=false;
@@ -60,6 +62,7 @@ struct Result {
     std::vector<Surface> surfaces;
     uint32_t rays=0, candidates=0,deferred=0,paths=0,completePaths=0,unknownPaths=0;
     uint64_t measured=0,reconstructed=0,zero=0,outputCells=0;
+    uint64_t completeSearches=0,receiverSearches=0,partialTests=0,layerVisits=0,textureSamples=0,opaqueSkipped=0;
     double matrixMs=0,compositionMs=0;
     bool ok=false;
     std::string error;

@@ -30,10 +30,13 @@ inline void compose(Surface& sf,const Scene& scene,Result& stats){
     std::vector<Value> values;values.reserve(sf.layers.size());
     for(int y=r.y;y<r.y+r.h;++y)for(int x=r.x;x<r.x+r.w;++x){
         auto& p=sf.image[size_t(y-r.y)*r.w+x-r.x];
-        if(!receiverAt(sf,x,y,p.receiverDepth,p.weight)){++stats.zero;continue;}
+        const auto complete=nearestComplete(sf,x,y);++stats.completeSearches;
+        auto receiver=complete;if(!sf.sameKnownSet){receiver=nearestReceiver(sf,x,y);++stats.receiverSearches;}
+        if(!receiverAt(sf,x,y,p.receiverDepth,p.weight,receiver)){++stats.zero;continue;}
         values.clear();
         for(const auto& kv:sf.layers){
-            auto v=reconstruct(sf,kv.second,x,y);
+            if(!kv.second.bounds.contains(x,y))continue;
+            ++stats.layerVisits;auto v=reconstruct(sf,kv.second,x,y,complete,&stats);
             if(v.state==State::Zero){++stats.zero;continue;}
             if(!v.object||v.visibility<=0||v.material>=scene.mat.size())continue;
             if(v.state==State::Reconstructed)++stats.reconstructed;
