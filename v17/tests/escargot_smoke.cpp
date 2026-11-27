@@ -3,18 +3,18 @@
 namespace e=m3d::escargot;
 int main(){
     for(int w=1;w<17;++w)for(int h=1;h<17;++h){auto order=e::spiral(w,h);std::set<size_t> ids(order.begin(),order.end());if(order.size()!=size_t(w*h)||ids.size()!=order.size()||*ids.rbegin()>=size_t(w*h))return 1;}
-    e::Surface sf;sf.candidate.bounds={0,0,5,5};sf.cols=2;sf.rows=2;sf.step=3;
+    e::Surface sf;sf.candidate.bounds={0,0,8,8};sf.cols=2;sf.rows=2;sf.step=4;
     sf.samples.resize(4);e::LayerKey key{1,0,0};
-    for(size_t i=0;i<4;++i){auto& s=sf.samples[i];s.x=int(i%2)*4;s.y=int(i/2)*4;s.receiver=e::State::Measured;s.complete=true;s.receiverDepth=2;s.receiverWeight=1;
+    for(size_t i=0;i<4;++i){auto& s=sf.samples[i];s.x=2+int(i%2)*4;s.y=2+int(i/2)*4;s.receiver=e::State::Measured;s.complete=true;s.receiverDepth=2;s.receiverWeight=1;
         e::Value v;v.object=1;v.state=e::State::Measured;v.depth=3;v.opacity=1;v.visibility=1;v.uv={float(i)*.1f,0,0};v.normal={0,1,0};s.values.emplace(key,v);}
-    e::makeLayers(sf);const auto& l=sf.layers.at(key);auto mid=e::reconstruct(sf,l,2,2);
+    e::makeLayers(sf);const auto& l=sf.layers.at(key);auto mid=e::reconstruct(sf,l,4,4);
     if(mid.state!=e::State::Reconstructed||std::abs(mid.uv.x-.15f)>1e-5f||mid.visibility!=1)return 2;
     sf.samples[0].values.clear();sf.layers.clear();e::makeLayers(sf);
-    auto zero=e::reconstruct(sf,sf.layers.at(key),0,0);if(zero.state!=e::State::Zero||zero.object)return 3;
-    mid=e::reconstruct(sf,sf.layers.at(key),2,2);if(mid.visibility!=.75f||std::abs(mid.uv.x-.2f)>1e-5f)return 4;
+    auto zero=e::reconstruct(sf,sf.layers.at(key),2,2);if(zero.state!=e::State::Zero||zero.object)return 3;
+    mid=e::reconstruct(sf,sf.layers.at(key),4,4);if(mid.visibility!=.75f||std::abs(mid.uv.x-.2f)>1e-5f)return 4;
     // Incomplete zero is unknown rather than an observed optical absence.
     sf.samples[0].complete=false;e::makeLayers(sf);
-    mid=e::reconstruct(sf,sf.layers.at(key),2,2);if(mid.visibility!=1)return 5;
+    mid=e::reconstruct(sf,sf.layers.at(key),4,4);if(mid.visibility!=1)return 5;
     std::vector<e::Candidate> c(9);for(auto& v:c)v.priority=1;e::distribute(c,13);uint32_t sum=0;for(auto v:c)sum+=v.budget;if(sum!=13)return 6;
     m3d::Scene scene;scene.mat.resize(1);m3d::Obj obj;obj.kind=m3d::Kind::Triangle;obj.a={-1,-1,2};obj.b={1,-1,2};obj.c={0,1,2};obj.n0=obj.n1=obj.n2={0,0,-1};scene.obj.push_back(obj);scene.order={0};
     m3d::LumaTraceBvh4 b;b.primitiveCount=1;m3d::LumaTraceBvh4Node n{};n.minX=-1;n.minY=-1;n.minZ=2;n.maxX=1;n.maxY=1;n.maxZ=2;n.primitiveCount=1;b.nodes.push_back(n);
@@ -29,19 +29,19 @@ int main(){
     e::LayerKey second{2,0,1};scene.mat.resize(2);scene.mat[0].colorMip.push_back({1,{0x00ff0000}});scene.mat[1].colorMip.push_back({1,{0x0000ff00}});
     for(auto& s:sf.samples){e::Value v;v.state=e::State::Measured;v.object=2;v.material=1;v.depth=1;v.visibility=v.opacity=v.weight=1;v.normal={0,1,0};s.values.emplace(second,v);}
     sf.layers.clear();e::makeLayers(sf);e::Result stats;e::compose(sf,scene,stats);
-    if(sf.image[12].rgb.y<=0||sf.image[12].rgb.x>1e-5f||sf.image[12].alpha!=1)return 12;
+    if(sf.image[36].rgb.y<=0||sf.image[36].rgb.x>1e-5f||sf.image[36].alpha!=1)return 12;
     // Complementary opaque source coverage must not produce an artificial alpha hole.
     for(size_t i=0;i<sf.samples.size();++i){
         auto& s=sf.samples[i];if(i<2)s.values.erase(second);else s.values.erase(key);
     }
     e::makeLayers(sf);e::compose(sf,scene,stats);
-    if(std::abs(sf.image[12].alpha-1.f)>1e-6f||sf.image[12].rgb.x<=0||sf.image[12].rgb.y<=0)return 13;
+    if(std::abs(sf.image[36].alpha-1.f)>1e-6f||sf.image[36].rgb.x<=0||sf.image[36].rgb.y<=0)return 13;
     // Thin footprint: every lattice cell exactly once.
     auto line=e::spiral(4096,1);std::set<size_t> unique(line.begin(),line.end());
     if(line.size()!=4096||unique.size()!=4096)return 14;
     // Invalid BVH must be diagnosed, not interpreted as all zero observations.
     b.nodes[0].primitiveCount=2;e::Traversal malformed(scene,b,owners);if(malformed.valid())return 15;
     // The exact observed zero cannot be replaced by the four-neighbor average.
-    if(e::reconstruct(sf,sf.layers.at(key),0,4).state!=e::State::Zero)return 16;
+    if(e::reconstruct(sf,sf.layers.at(key),2,6).state!=e::State::Zero)return 16;
     return 0;
 }

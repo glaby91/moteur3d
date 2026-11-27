@@ -31,13 +31,16 @@ inline void sampleSurface(Surface& sf,Traversal& trace,const Scene& scene,const 
     // Reserve room for two BVH queries per sample; extra transparent crossings
     // consume the same hard quota. No additional samples after the fixed pass.
     const uint32_t target=std::max(1u,quota/4); // reserve more than minimum for transparent paths
-    // Smallest admissible step at or above the former initial estimate.
-    // Monotonic cell count allows binary search instead of repeated increments.
+    // Exact old step choice; typical footprints need only a few increments.
+    // Fall back to binary search after eight failures on elongated rectangles.
     int lower=std::max(1,int(std::ceil(std::sqrt(double(r.w)*r.h/target)))),upper=std::max(r.w,r.h);
+    const auto countAt=[&](int step){return uint64_t((r.w+step-1)/step)*((r.h+step-1)/step);};
+    for(int k=0;k<8&&lower<upper;++k){
+        if(countAt(lower)<=target){upper=lower;break;}++lower;
+    }
     while(lower<upper){
         const int mid=lower+(upper-lower)/2;
-        const uint64_t count=uint64_t((r.w+mid-1)/mid)*((r.h+mid-1)/mid);
-        if(count>target)lower=mid+1;else upper=mid;
+        if(countAt(mid)>target)lower=mid+1;else upper=mid;
     }
     sf.step=lower;sf.cols=(r.w+sf.step-1)/sf.step;sf.rows=(r.h+sf.step-1)/sf.step;
     sf.samples.resize(size_t(sf.cols)*sf.rows);
@@ -87,9 +90,10 @@ inline void sampleSurface(Surface& sf,Traversal& trace,const Scene& scene,const 
             if(q<0)break;
             if(!q){s.complete=true;break;}
             low=src.depth;
-            // Do not reflect the same receiver's own triangle surfaces.
-            // One-interface refraction is explicit: exit bending is a later experiment.
-            if(src.object==sf.candidate.object)continue;
+            // Reflection can legitimately hit a distant part of a concave receiver.
+            // The initial epsilon prevents the origin triangle self-hit.
+            // One-interface refraction skips receiver exit; exit bending is future work.
+            if(opt.mode==Mode::Refraction&&src.object==sf.candidate.object)continue;
             const auto mid=scene.obj[src.primitive].mat;
             const auto& mat=scene.mat[mid];
             const LayerKey key{src.object,crossings[src.object]++,mid};
