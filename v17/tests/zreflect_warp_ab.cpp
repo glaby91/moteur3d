@@ -68,11 +68,20 @@ int main(int argc,char** argv){
         if(v==r.cameras.end())return 18;
         const auto view=m3d::v16::makeCamera(*v,w,h);
         std::vector<uint32_t> ref,opt;m3d::Stats x,y;
-        _putenv_s("M3D_V17_ZREFLECT","1");_putenv_s("M3D_V17_DISABLE_ZREFLECT_DEPTH_OPT","1");
+        _putenv_s("M3D_V17_ZREFLECT","1");
+        _putenv_s("M3D_V17_ZREFLECT_CPU_CULL","0");_putenv_s("M3D_V17_ZREFLECT_PREPASS","0");
         if(!m3d::renderLumaTracePreview(r.renderScene,r.lumaTraceBvh4,shadow,view,w,h,ref,x,err))return 19;
-        _putenv_s("M3D_V17_DISABLE_ZREFLECT_DEPTH_OPT","0");
-        if(!m3d::renderLumaTracePreview(r.renderScene,r.lumaTraceBvh4,shadow,view,w,h,opt,y,err))return 20;
-        if(ref!=opt||x.zReflectActive!=y.zReflectActive){qCritical()<<"Reflection depth/culling pixel parity failed"<<name;return 21;}
+        for(bool cull:{false,true})for(bool depth:{false,true}){
+            _putenv_s("M3D_V17_ZREFLECT_CPU_CULL",cull?"1":"0");_putenv_s("M3D_V17_ZREFLECT_PREPASS",depth?"1":"0");
+            if(!m3d::renderLumaTracePreview(r.renderScene,r.lumaTraceBvh4,shadow,view,w,h,opt,y,err))return 20;
+            if(ref!=opt||x.zReflectActive!=y.zReflectActive){qCritical()<<"Reflection matrix pixel parity failed"<<name<<cull<<depth;return 21;}
+            for(uint32_t i=0;i<y.zReflectActive&&i<2;++i){
+                const auto& a=x.zReflectPasses[i];const auto& b=y.zReflectPasses[i];
+                if(a.planeId!=b.planeId||b.cpuCull!=cull||b.depthPrepass!=depth||
+                   (!depth&&b.depthTriangles!=0)||(!cull&&a.colorTriangles!=b.colorTriangles)||
+                   b.colorTriangles>a.colorTriangles){qCritical()<<"Reflection matrix counters failed"<<name<<i;return 22;}
+            }
+        }
         qInfo()<<"Reflection pixel parity OK"<<name;
     }
     qInfo()<<"Unified water pass active/total"<<waterStats.zReflectActive<<waterStats.zReflectTotal;

@@ -16,6 +16,7 @@
 #include <vector>
 #include <iterator>
 #include <set>
+#include <map>
 
 namespace {
 using Clock = std::chrono::steady_clock;
@@ -27,6 +28,13 @@ constexpr float tourHours[]={8.f,14.75f,19.f,23.f,17.f};
 constexpr const char* tourProfiles[]={"morning","day","dusk","night","transition"};
 constexpr float solarHour = 14.75f;
 constexpr char cameraId[] = "v7_pool_fresco";
+struct ReflectConfig { const char* name; bool cull,depth; };
+constexpr ReflectConfig reflectConfigs[]={{"A",false,false},{"B",true,true},{"C",true,false},{"D",false,true}};
+bool setReflectConfig(const ReflectConfig& c){
+    return !_putenv_s("M3D_V17_ZREFLECT","1") &&
+           !_putenv_s("M3D_V17_ZREFLECT_CPU_CULL",c.cull?"1":"0") &&
+           !_putenv_s("M3D_V17_ZREFLECT_PREPASS",c.depth?"1":"0");
+}
 
 enum class Backend { dx11, vulkan, lumaTrace };
 struct Pass { Backend backend; const char* name; bool adaptive=false; int profile=0; int repetition=0; };
@@ -107,6 +115,7 @@ struct Route {
     double secondsPerZone=durationSeconds;
     bool warmup=true;
     bool reflectCampaign=false;
+    const ReflectConfig* reflectConfig=nullptr;
 };
 
 bool presentFrame(const Route& route, Backend backend, double seconds,
@@ -158,6 +167,15 @@ bool presentFrame(const Route& route, Backend backend, double seconds,
     if(presented&&backend==Backend::lumaTrace&&(!stats.lumaProbeLightingEnabled)){
         reason=L"LumaTrace benchmark requires indirect probe lighting.";return false;
     }
+    if(presented&&route.reflectConfig){
+        if(!stats.zReflectEnabled){reason=L"Matrix requires Z Reflect ON.";return false;}
+        for(uint32_t i=0;i<stats.zReflectActive&&i<2;++i){
+            const auto& p=stats.zReflectPasses[i];
+            if(p.cpuCull!=route.reflectConfig->cull||p.depthPrepass!=route.reflectConfig->depth){
+                reason=L"Actual reflection pass options do not match matrix configuration.";return false;
+            }
+        }
+    }
     if(presented&&route.adaptiveCampaign&&stats.lumaAdaptiveEnabled!=route.adaptive){reason=L"Adaptive 0/1 mode mismatch.";return false;}
     return presented;
 }
@@ -171,6 +189,9 @@ struct Result {
     std::vector<double> frameMs;
     uint64_t zeroSum=0,triangleSum=0,zActiveSum=0,zActiveFrames=0;
     uint32_t zActiveMax=0,zDeferredMax=0;double zSelectSum=0,zSubmitSum=0,zGpuSum=0;uint64_t zGpuSamples=0;
+    struct PlaneTotals { uint64_t frames=0,color=0,depth=0,cullFrames=0,prepassFrames=0; };
+    std::map<uint32_t,PlaneTotals> reflectPlanes;
+    uint64_t reflectColorSum=0,reflectDepthSum=0;
     float hourStart=0,hourEnd=0;
 };
 
@@ -211,6 +232,12 @@ Result measure(const Route& route, const Pass& pass) {
         result.zActiveSum+=zActive;result.zActiveFrames+=zActive>0;result.zActiveMax=std::max(result.zActiveMax,zActive);
         result.zDeferredMax=std::max(result.zDeferredMax,result.lastFrame.zReflectDeferred);result.zSelectSum+=result.lastFrame.zReflectSelectUs;
         result.zSubmitSum+=result.lastFrame.zReflectSubmitMs;result.zGpuSum+=result.lastFrame.zReflectGpuMs;result.zGpuSamples+=result.lastFrame.zReflectGpuSamples;
+        for(uint32_t i=0;i<zActive&&i<2;++i){
+            const auto& p=result.lastFrame.zReflectPasses[i];auto& sum=result.reflectPlanes[p.planeId];
+            ++sum.frames;sum.color+=p.colorTriangles;sum.depth+=p.depthTriangles;
+            sum.cullFrames+=p.cpuCull;sum.prepassFrames+=p.depthPrepass;
+            result.reflectColorSum+=p.colorTriangles;result.reflectDepthSum+=p.depthTriangles;
+        }
         if(route.adaptiveCampaign){result.frameMs.push_back(seconds*1000.);result.zeroSum+=result.lastFrame.lumaAdaptiveZeroTriangles;result.triangleSum+=result.lastFrame.lumaAdaptiveTriangleCount;}
         if (end <= deadline) ++result.framesInWindow;
     }
@@ -220,7 +247,7 @@ Result measure(const Route& route, const Pass& pass) {
 }
 
 void writeRow(QTextStream& csv, const Pass& pass, const Result& r, bool prepareGeometry, bool adaptiveCampaign,
-              const QString& camera=QString::fromLatin1(cameraId),bool tour=false,size_t zoneIndex=0,size_t zoneCount=1) {
+              const QString& camera=QString::fromLatin1(cameraId),bool tour=false,size_t zoneIndex=0,size_t zoneCount=1,const ReflectConfig* config=nullptr) {
     const float hour=pass.profile==1?23.f:pass.profile==2?17.f:solarHour;
     QString escapedCamera=camera;escapedCamera.replace('"',QStringLiteral("\"\""));
     csv << pass.name << ",\"" << escapedCamera << "\"," << (tour?r.hourStart:hour) << ',' << width << ',' << height << ',';
@@ -258,6 +285,20 @@ void writeRow(QTextStream& csv, const Pass& pass, const Result& r, bool prepareG
         <<','<<r.zActiveMax<<','<<double(r.zActiveSum)/r.framesStarted<<','<<r.zActiveFrames<<','<<r.zDeferredMax<<','<<r.zSelectSum/r.framesStarted<<','<<r.zSubmitSum/r.framesStarted<<','<<r.zGpuSamples;
     else csv<<",,,,,,,,,";
     csv<<',';if(r.error.empty()&&r.zGpuSamples)csv<<r.zGpuSum/double(r.zGpuSamples);
+    csv<<',';if(config)csv<<config->name;
+    csv<<',';if(config)csv<<(config->cull?"on":"off");
+    csv<<',';if(config)csv<<(config->depth?"on":"off");
+    csv<<',';if(r.error.empty()&&r.framesStarted)csv<<pass.repetition;
+    csv<<',';if(r.error.empty()&&r.framesStarted)csv<<double(r.reflectColorSum)/r.framesStarted;
+    csv<<',';if(r.error.empty()&&r.framesStarted)csv<<double(r.reflectDepthSum)/r.framesStarted;
+    // Per-plane summaries keyed by real plane ID, not a transient texture slot:
+    // id:active_frames:mean_color:mean_depth:cpu_cull_frames:prepass_frames
+    csv<<',';bool firstPlane=true;
+    if(r.error.empty())for(const auto& kv:r.reflectPlanes){
+        if(!firstPlane)csv<<';';firstPlane=false;const auto& p=kv.second;
+        csv<<kv.first<<':'<<p.frames<<':'<<double(p.color)/p.frames<<':'<<double(p.depth)/p.frames
+           <<':'<<p.cullFrames<<':'<<p.prepassFrames;
+    }
     if(tour)csv<<','<<(zoneIndex+1)<<','<<zoneCount<<','<<tourZoneSeconds<<','<<r.hourStart<<','<<r.hourEnd;
     csv << '\n';
     csv.flush();
@@ -268,17 +309,19 @@ int main(int argc, char** argv) {
     SetProcessDPIAware();  // Physical client pixels on the primary monitor.
     QCoreApplication app(argc, argv);
     const auto args = app.arguments();
-    bool prepareGeometry = true, adaptiveCampaign=false,tour=false,planOnly=false,reflectCampaign=false,reflectPlan=false;
+    bool prepareGeometry = true, adaptiveCampaign=false,tour=false,planOnly=false,reflectCampaign=false,reflectPlan=false,reflectMatrix=false;
     if(args.size()<3)return 2;
     for(int i=3;i<args.size();++i){
         if(args[i]==QStringLiteral("--zreflect-ab"))reflectCampaign=true;
         else if(args[i]==QStringLiteral("--zreflect-plan")){reflectCampaign=true;reflectPlan=true;}
+        else if(args[i]==QStringLiteral("--zreflect-matrix")){reflectCampaign=true;reflectMatrix=true;}
+        else if(args[i]==QStringLiteral("--zreflect-matrix-plan")){reflectCampaign=true;reflectMatrix=true;reflectPlan=true;}
         else if(args[i]==QStringLiteral("--adaptive-ab"))adaptiveCampaign=true;
         else if(args[i]==QStringLiteral("--adaptive-tour")){adaptiveCampaign=true;tour=true;}
         else if(args[i]==QStringLiteral("--tour-plan")){adaptiveCampaign=true;tour=true;planOnly=true;}
         else if(args[i]==QStringLiteral("--geometry-prep")&&i+1<args.size()&&
                 (args[i+1]==QStringLiteral("on")||args[i+1]==QStringLiteral("off")))prepareGeometry=args[++i]==QStringLiteral("on");
-        else {std::cerr<<"Usage: route30.exe scene.json resultats.csv [--geometry-prep on|off] [--adaptive-ab|--adaptive-tour|--tour-plan|--zreflect-ab|--zreflect-plan]\n";return 2;}
+        else {std::cerr<<"Usage: route30.exe scene.json resultats.csv [--geometry-prep on|off] [--adaptive-ab|--adaptive-tour|--tour-plan|--zreflect-ab|--zreflect-plan|--zreflect-matrix|--zreflect-matrix-plan]\n";return 2;}
     }
     if(reflectCampaign&&(adaptiveCampaign||tour||planOnly))return 2;
     if(_putenv_s("M3D_V17_LUMA_ADAPTIVE","0"))return 2;
@@ -321,9 +364,18 @@ int main(int argc, char** argv) {
         }
         if(reflectPlan){
             QFile file(args[2]);if(!file.open(QIODevice::WriteOnly|QIODevice::Text))return 6;
-            QTextStream out(&file);out<<"camera,zreflect,seconds,repetition\n";
-            for(int repeat=1;repeat<=2;++repeat)for(const auto* c:reflectCameras)for(bool on:{false,true})
-                out<<c->id<<','<<((on!=(repeat==2))?"on":"off")<<",30,"<<repeat<<'\n';
+            QTextStream out(&file);
+            if(reflectMatrix){
+                out<<"camera,zreflect,config,cpu_cull,prepass,seconds,repetition\n";
+                for(int repeat=1;repeat<=2;++repeat)for(const auto* c:reflectCameras)for(int j=0;j<4;++j){
+                    const auto& cfg=reflectConfigs[repeat==1?j:3-j];
+                    out<<c->id<<",on,"<<cfg.name<<','<<(cfg.cull?"on":"off")<<','<<(cfg.depth?"on":"off")<<",30,"<<repeat<<'\n';
+                }
+            }else{
+                out<<"camera,zreflect,seconds,repetition\n";
+                for(int repeat=1;repeat<=2;++repeat)for(const auto* c:reflectCameras)for(bool on:{false,true})
+                    out<<c->id<<','<<((on!=(repeat==2))?"on":"off")<<",30,"<<repeat<<'\n';
+            }
             out.flush();return out.status()==QTextStream::Ok&&file.flush()?0:6;
         }
     }
@@ -339,11 +391,33 @@ int main(int argc, char** argv) {
            "presentation,vsync,readback_buffers,status,error,geometry_prep_requested,geometry_prep_enabled,"
            "geometry_source_vertices,geometry_unique_vertices,geometry_index_count,planar_reflection,luma_probe_lighting";
     if(adaptiveCampaign)csv<<",adaptive_requested,profile,repetition,p50_present_ms,p95_present_ms,mean_zero_percent,triangle_count";
-    csv<<",zreflect_enabled,zreflect_total,zreflect_active_max,zreflect_active_mean,zreflect_frames_active,zreflect_deferred_max,zreflect_mean_select_us,zreflect_mean_submit_ms,zreflect_gpu_samples,zreflect_mean_gpu_ms";
+    csv<<",zreflect_enabled,zreflect_total,zreflect_active_max,zreflect_active_mean,zreflect_frames_active,zreflect_deferred_max,zreflect_mean_select_us,zreflect_mean_submit_ms,zreflect_gpu_samples,zreflect_mean_gpu_ms,zreflect_matrix_config,zreflect_cpu_cull_requested,zreflect_prepass_requested,zreflect_repetition,zreflect_mean_color_triangles,zreflect_mean_depth_triangles,zreflect_plane_stats";
     if(tour)csv<<",zone_index,zone_count,window_seconds,hour_start,hour_end";
     csv<<'\n';
     if(reflectCampaign){
         if(_putenv_s("M3D_V17_ZREFLECT_GPU_TIMING","1"))return 2;
+        if(reflectMatrix){
+            // Explicitly fix global switches so a previous terminal setting cannot confound this test.
+            if(_putenv_s("M3D_V17_DISABLE_FRUSTUM_CULLING","0")||
+               _putenv_s("M3D_V17_DISABLE_Z_PREPASS","0")||
+               _putenv_s("M3D_V17_EXPERIMENT_Z_PREPASS","1"))return 2;
+            constexpr const char* names[]={"LumaTrace-ZR-A","LumaTrace-ZR-B","LumaTrace-ZR-C","LumaTrace-ZR-D"};
+            for(int repeat=1;repeat<=2;++repeat)for(const auto* c:reflectCameras)for(int j=0;j<4;++j){
+                const int idx=repeat==1?j:3-j;const auto& cfg=reflectConfigs[idx];
+                if(!setReflectConfig(cfg))return 2;
+                const Pass pass{Backend::lumaTrace,names[idx],false,0,repeat};
+                Result result;HWND window=openRouteWindow(result.error);
+                if(window){
+                    Route route{rt,*c,shadow,window,prepareGeometry};
+                    route.reflectCampaign=true;route.reflectConfig=&cfg;
+                    result=measure(route,pass);
+                    m3d::releaseDirectX11NativeForCurrentThread();DestroyWindow(window);
+                }
+                writeRow(csv,pass,result,prepareGeometry,false,c->id,false,0,1,&cfg);
+                if(!result.error.empty()||result.cancelled)return 7;
+            }
+            return csv.status()==QTextStream::Ok&&file.flush()?0:6;
+        }
         bool ok=true;
         for(int repeat=1;repeat<=2;++repeat)for(const auto* c:reflectCameras)for(bool toggle:{false,true}){
             const bool on=toggle!=(repeat==2);

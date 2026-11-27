@@ -48,11 +48,18 @@ struct Ray { V o,d; };
 struct Hit { float t=INF; V p,n; int mat=-1,id=-1; };
 struct Camera { V eye,f,r,u; float tanHalf=0,aspect=1,pixelAngle=0,focusDistance=12,apertureRadius=0; };
 struct RendererCapabilities { bool dxrHardware=false; bool dxrBackend=false; };
+// Actual submitted triangles, not visibility or pixel-shader invocation estimates.
+struct ZReflectPassStats {
+    uint32_t planeId=0;
+    uint64_t colorTriangles=0,depthTriangles=0;
+    bool cpuCull=false,depthPrepass=false;
+};
 struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,depthReads=0,shadowRays=0; uint64_t simdRayPackets=0,simdTrianglePackets=0,simdTextureSamples=0,simdLightBatches=0; double ms=0,postMs=0,shadowMs=0;
     // DX11-only hardware counters; CPU/Compute paths leave these at zero.
     uint64_t gpuDrawCalls=0,gpuBoxInstances=0,gpuEllipseInstances=0,gpuFoliageInstances=0;
     bool planarReflectionRendered=false,lumaProbeLightingEnabled=false;
     uint32_t zReflectActive=0,zReflectCandidates=0,zReflectNodeVisits=0,zReflectDeferred=0,zReflectTotal=0;
+    ZReflectPassStats zReflectPasses[2]{};
     double zReflectSelectUs=0,zReflectSubmitMs=0,zReflectGpuMs=0; uint32_t zReflectGpuSamples=0; bool zReflectEnabled=false;
     bool lumaAdaptiveEnabled=false;
     uint64_t lumaAdaptiveZeroTriangles=0,lumaAdaptiveTriangleCount=0;

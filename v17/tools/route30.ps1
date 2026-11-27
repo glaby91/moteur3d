@@ -4,7 +4,8 @@ param(
     [ValidateSet('on','off')][string]$GeometryPrep = 'on',
     [switch]$AdaptiveAB,
     [switch]$AdaptiveTour,
-    [switch]$ZReflectAB
+    [switch]$ZReflectAB,
+    [switch]$ZReflectMatrix
 )
 
 $ErrorActionPreference = 'Stop'
@@ -145,7 +146,8 @@ function Write-RouteSystemInfo([string]$PackageRoot, [string]$Exe, [string]$Prep
     $info | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $Path -Encoding UTF8
 }
 
-function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$PrepMode = 'on', [switch]$AdaptiveAB, [switch]$AdaptiveTour, [switch]$ZReflectAB) {
+function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$PrepMode = 'on', [switch]$AdaptiveAB, [switch]$AdaptiveTour, [switch]$ZReflectAB, [switch]$ZReflectMatrix) {
+    if ($ZReflectMatrix -and ($ZReflectAB -or $AdaptiveAB -or $AdaptiveTour)) { throw 'Choisir une seule campagne.' }
     $PrepMode = $PrepMode.ToLowerInvariant()
     $PackageRoot = (Resolve-Path -LiteralPath $PackageRoot).ProviderPath
     # Persist machine metadata at launch, even if scene download or GPU startup fails.
@@ -182,12 +184,22 @@ function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$
         $info = Get-Content -LiteralPath $systemInfoPath -Raw -Encoding UTF8 | ConvertFrom-Json
         $actualScene = Get-Content -LiteralPath $versionPath -Raw -Encoding UTF8 | ConvertFrom-Json
         $info | Add-Member -NotePropertyName testedScene -NotePropertyValue $actualScene -Force
-        $mode = if ($ZReflectAB) { 'zreflect-ab-four-cameras' } elseif ($AdaptiveTour) { 'adaptive-tour-all-cameras' } elseif ($AdaptiveAB) { 'adaptive-ab-pool' } else { 'route30' }
+        $mode = if ($ZReflectMatrix) { 'zreflect-depth-cull-matrix' } elseif ($ZReflectAB) { 'zreflect-ab-four-cameras' } elseif ($AdaptiveTour) { 'adaptive-tour-all-cameras' } elseif ($AdaptiveAB) { 'adaptive-ab-pool' } else { 'route30' }
         $info.benchmark | Add-Member -NotePropertyName campaign -NotePropertyValue $mode -Force
+        $opt = [ordered]@{}
+        foreach ($key in @('M3D_V17_ZREFLECT','M3D_V17_DISABLE_ZREFLECT_DEPTH_OPT','M3D_V17_ZREFLECT_CPU_CULL','M3D_V17_ZREFLECT_PREPASS','M3D_V17_DISABLE_Z_PREPASS','M3D_V17_EXPERIMENT_Z_PREPASS','M3D_V17_DISABLE_FRUSTUM_CULLING','M3D_V17_DISABLE_LOD','M3D_V17_DISABLE_SHADER_OPT','M3D_V17_DISABLE_LIGHT_AABB_CULL','M3D_V17_PERIPHERAL_MULTIREZ')) {
+            $opt[$key] = [Environment]::GetEnvironmentVariable($key,'Process')
+        }
+        $info.benchmark | Add-Member -NotePropertyName inheritedOptions -NotePropertyValue $opt -Force
+        if ($ZReflectMatrix) {
+            $matrix = [ordered]@{ zReflect = 'on'; repeats = 2; seconds = 30; globalPrepass = 'on'; globalFrustumCull = 'on'; A = @{cpuCull='off';prepass='off'}; B = @{cpuCull='on';prepass='on'}; C = @{cpuCull='on';prepass='off'}; D = @{cpuCull='off';prepass='on'} }
+            $info.benchmark | Add-Member -NotePropertyName matrixOverrides -NotePropertyValue $matrix -Force
+        }
         $info | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $systemInfoPath -Encoding UTF8
         $csv = Join-Path $out 'resultats.csv'
         Write-Host "Parcours GPU direct : 1280 x 720, VSync desactivee, rebonds indirects actives, 30 s par backend. Preparation des triangles : $PrepMode."
-        if ($ZReflectAB) { Write-Host 'Z Reflect ON/OFF : quatre vues, deux repetitions par etat.'; & $exe $scene.Path $csv --geometry-prep $PrepMode --zreflect-ab }
+        if ($ZReflectMatrix) { Write-Host 'Z Reflect matrice A/B/C/D : quatre vues, deux repetitions, Z Reflect toujours ON.'; & $exe $scene.Path $csv --geometry-prep $PrepMode --zreflect-matrix }
+        elseif ($ZReflectAB) { Write-Host 'Z Reflect ON/OFF : quatre vues, deux repetitions par etat.'; & $exe $scene.Path $csv --geometry-prep $PrepMode --zreflect-ab }
         elseif ($AdaptiveTour) { Write-Host 'Circuit integral : toutes les cameras, quatre horaires fixes et transition jour/nuit.'; & $exe $scene.Path $csv --geometry-prep $PrepMode --adaptive-tour }
         elseif ($AdaptiveAB) { & $exe $scene.Path $csv --geometry-prep $PrepMode --adaptive-ab }
         else { & $exe $scene.Path $csv --geometry-prep $PrepMode }
@@ -204,4 +216,4 @@ function Invoke-Route30([string]$PackageRoot, [ValidateSet('on','off')][string]$
     }
 }
 
-if ($MyInvocation.InvocationName -ne '.') { Invoke-Route30 -PackageRoot $Root -PrepMode $GeometryPrep -AdaptiveAB:$AdaptiveAB -AdaptiveTour:$AdaptiveTour -ZReflectAB:$ZReflectAB }
+if ($MyInvocation.InvocationName -ne '.') { Invoke-Route30 -PackageRoot $Root -PrepMode $GeometryPrep -AdaptiveAB:$AdaptiveAB -AdaptiveTour:$AdaptiveTour -ZReflectAB:$ZReflectAB -ZReflectMatrix:$ZReflectMatrix }
