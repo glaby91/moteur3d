@@ -11,6 +11,18 @@ Date : 27 novembre 2026. Référence : V17.016 build 772, scène V17.629, HD 620
 - Développer par fonctions/module indépendants, sans régression des autres backends ni de la qualité. Aucun seuil agressif imposé avant mesure.
 - Référence performance : [benchmark complet 29 caméras, 522 fenêtres](../../docs/benchmarks/2026-11-26-v17.016-build772-hd620/README.md). Cible HD 620 40–45 FPS en 720p ; aucune promesse de gain avant mesures.
 
+## Autorité du créateur de scène sur Z-Reflect (nouvelle exigence)
+Le tri automatique de CSP001 identifie globalement les candidats optiques et leurs plans, mais il ne décide pas seul de l'autorisation artistique de créer des caméras supplémentaires. Le créateur de scène peut autoriser ou interdire explicitement cette fonctionnalité par objet, avec éventuellement des valeurs héritées du matériau ou de la scène. Une interdiction explicite de l'objet ne doit jamais être annulée par l'heuristique du moteur. Une autorisation permet le calcul mais ne force pas une passe GPU lorsque la surface est invisible ou non compatible avec la méthode plane.
+
+### Contrat de données proposé (à implémenter, noms provisoires)
+- `planarReflection`: `disabled` (pas de caméra dédiée), `enabled` (autorisation sous réserve de compatibilité), `auto` (le créateur délègue explicitement la sélection au moteur).
+- `visibleInPlanarReflections`: contrôle distinct permettant d'inclure/exclure un objet du contenu rendu par les caméras miroir, sans modifier sa visibilité dans la caméra principale. Valeur par défaut proposée : true.
+- `refraction`: contrôle optique distinct si nécessaire ; désactiver la caméra miroir ne doit pas supprimer la transmission, la réfraction, les reflets PBR ordinaires, l'éclairage ou les ombres.
+
+Priorité proposée : objet > matériau > politique de scène. En l'absence d'une décision explicite, inventaire automatique mais pas de nouvelle caméra dédiée ; conserver le comportement historique de l'eau pour les anciennes scènes sans politique déclarée. La migration vers une scène dotée d'une politique explicite doit respecter les refus de son auteur. Le choix par défaut pour les nouvelles scènes et les noms de champs sont des propositions, non un format déjà pris en charge.
+
+CSP001 conserve le diagnostic des candidats autorisés/refusés, la provenance de la décision, les coefficients optiques et les associations de plans. Une surface refusée ne reçoit pas de slot caméra/buffer dédié. Si plusieurs surfaces partagent un plan, une surface interdite ne doit pas échantillonner le buffer partagé même lorsqu'une autre surface l'utilise. La table doit distinguer les destinataires d'un reflet des objets pouvant apparaître dans ce reflet. Les changements de politique invalident les tables et caches concernés, y compris au repli local. Les exclusions de contenu des passes miroir sont des choix artistiques explicites, pas une optimisation automatique.
+
 ## État du socle (code écrit, pas compilé)
 | ID | Fonction | État réel |
 |---|---|---|
@@ -37,8 +49,9 @@ Priorités proposées P0 = validation indispensable, P1 = étape suivante, P2 = 
 | C05 | P2 | Précalcul disposition des sondes, dépendances statiques, éventuellement cache d'éclairage à heures discrètes | C04 | Parité de positions ; interpolation seulement si qualité jour/nuit validée |
 | C06 | P2 | Étudier précalcul de géométrie triangulée et PBR/mips compatibles afin de réduire aussi les étapes encore réalisées au démarrage | V02, C02 | Gain net temps téléchargement+chargement+RAM, pas de perte de détail |
 | R01 | P1 | Catalogue de production : vraie rugosité (texture/valeur), IOR, F0 RGB métallique/diélectrique, transmission, normales, emplacements, bornes, association objet/plan/zone | S05 | Pas d'objet arbitrairement exclu sur simple réflectivité de face ; données validées |
+| R10 | P1 | Contrôle auteur par objet/matériau/scène : autoriser, interdire ou déléguer les caméras miroir ; distinguer participation au rendu miroir et réfraction | R01 | Refus respectés par précompilation, fallback, regroupement coplanaire et shader ; compatibilité scènes anciennes ; tests de politique et d'héritage |
 | R02 | P1 | Clustering robuste de plans quelconques, normales et offsets, tolérances, surfaces coplanaires, triangles uniques, surfaces courbes exclues de la méthode plane sauf approximation validée | R01 | Plans horizontaux/verticaux/inclinés corrects ; pas de mélange de plans distincts |
-| R03 | P1 | Consommation runtime du catalogue précompilé, validation de dépendances et fallback local | R01–R02, C01 | Table réelle chargée et utilisée, absence/corruption sans crash ni reflet perdu |
+| R03 | P1 | Consommation runtime du catalogue précompilé, validation de dépendances et fallback local | R01–R02, R10, C01 | Table réelle chargée et utilisée, absence/corruption sans crash ni reflet perdu |
 | R04 | P1 | Caméras miroir généralisées : réflexion position/orientation de caméra principale sur chaque plan, clipping par plan, projection et échantillonnage cohérents | R03 | Tests géométriques et images sur eau, vitre, miroir vertical et plan incliné |
 | R05 | P1 | Gestion des buffers GPU par plan, allocation différée, pool borné, recyclage, invalidation au changement de scène/device | R04 | Pas de fuite, pas de buffer périmé, budget mémoire HD 620 vérifié |
 | R06 | P1 | Shader multi-plan : sélectionner le bon reflet par surface ; appliquer Fresnel, rugosité, métal et transmission dans le matériau, pas dans la texture commune | R04–R05 | Reflets indépendants corrects, coplanaires mutualisés, eau existante préservée |
@@ -59,7 +72,7 @@ Priorités proposées P0 = validation indispensable, P1 = étape suivante, P2 = 
 
 ## Ordre de livraison proposé
 1. V01–V03 : valider le socle sans ajouter d'autres fonctionnalités.
-2. C01–C04 et R01–R03 : tables précompilées et lues, sans changement optique non validé.
+2. C01–C04, R01, R10, R02–R03 : tables précompilées et lues, politique auteur appliquée avant le rendu multi-plan, sans changement optique non validé.
 3. R04–R07 : multi-plan avec buffers, rendu et sélection conservatrice.
 4. L01–L03 et R09 : tables lumineuses dynamiques, thread séparé, cache cohérent.
 5. R08, C05–C06, L04 et V04 : optimisations mesurées puis qualification finale.
