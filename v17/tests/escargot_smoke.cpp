@@ -43,5 +43,24 @@ int main(){
     b.nodes[0].primitiveCount=2;e::Traversal malformed(scene,b,owners);if(malformed.valid())return 15;
     // The exact observed zero cannot be replaced by the four-neighbor average.
     if(e::reconstruct(sf,sf.layers.at(key),2,6).state!=e::State::Zero)return 16;
+    // Compare run reuse with the same compositor forced to compute every cell.
+    auto reference=sf; e::Result referenceStats;e::compose(reference,scene,referenceStats,false);
+    e::Result optimizedStats;e::compose(sf,scene,optimizedStats,true);
+    if(reference.image.size()!=sf.image.size())return 17;
+    for(size_t i=0;i<sf.image.size();++i){
+        const auto& a=sf.image[i];const auto& b=reference.image[i];
+        if(a.rgb.x!=b.rgb.x||a.rgb.y!=b.rgb.y||a.rgb.z!=b.rgb.z||
+           a.alpha!=b.alpha||a.weight!=b.weight||a.receiverDepth!=b.receiverDepth)return 18;
+    }
+    if(!optimizedStats.reusedCells||referenceStats.reusedCells)return 19;
+    e::Neighbors na,nb;na.count=nb.count=1;na.ids[0]=nb.ids[0]=3;
+    na.distance[0]=0;nb.distance[0]=1;if(e::sameStencil(na,nb))return 20;
+    na.distance[0]=2;if(!e::sameStencil(na,nb))return 21;
+    // A completed missing source is zero even outside its observed bounds.
+    e::Layer remote;remote.bounds={7,7,1,1};
+    if(e::reconstruct(sf,remote,2,2).state!=e::State::Zero)return 22;
+    // Partial observation invalidates reuse (even if unrelated source).
+    sf.samples[0].complete=false;e::makeLayers(sf);e::Result partialStats;e::compose(sf,scene,partialStats);
+    if(partialStats.reusedCells)return 23;
     return 0;
 }

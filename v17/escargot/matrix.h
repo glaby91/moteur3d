@@ -28,6 +28,16 @@ struct Neighbors {
     std::array<int64_t,4> distance{};
     size_t count=0;
 };
+// The distance magnitudes do not enter the arithmetic average; only
+// the ordered IDs and exact-hit flag matter. Never reuse a measured cell
+// as an interpolated cell (or an explicitly observed zero as a hole).
+inline bool sameStencil(const Neighbors& a,const Neighbors& b){
+    if(a.count!=b.count)return false;
+    if(!a.count)return true;
+    if((a.distance[0]==0)!=(b.distance[0]==0))return false;
+    for(size_t i=0;i<a.count;++i)if(a.ids[i]!=b.ids[i])return false;
+    return true;
+}
 inline void insertNeighbor(Neighbors& out,const Surface& sf,int x,int y,size_t i){
     const auto& s=sf.samples[i];const int64_t dx=int64_t(s.x)-x,dy=int64_t(s.y)-y,d=dx*dx+dy*dy;
     size_t k=0;
@@ -68,7 +78,11 @@ inline Neighbors nearestReceiver(const Surface& sf,int x,int y){
     return nearest(sf,x,y,[](size_t,const Sample& s){return s.receiver!=State::Unknown;},sf.receiverIndices);
 }
 inline Value reconstruct(const Surface& sf,const Layer& l,int x,int y,const Neighbors& complete,Result* stats=nullptr){
-    if(!l.bounds.contains(x,y))return {};
+    if(!l.bounds.contains(x,y)){
+        Value v;
+        if(complete.count&&complete.distance[0]==0&&sf.samples[complete.ids[0]].complete)v.state=State::Zero;
+        return v;
+    }
     // Complete observations are common to ALL layers. Incomplete paths
     // are known only for layers that actually had a hit. Merge their sparse
     // positive IDs into the same exact top four, never invent an absence.

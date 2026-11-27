@@ -41,6 +41,7 @@ int main(int argc,char** argv){
         {"completeSearches",double(result.completeSearches)},{"receiverSearches",double(result.receiverSearches)},{"partialTests",double(result.partialTests)},
         {"layerVisits",double(result.layerVisits)},{"textureSamples",double(result.textureSamples)},{"opaqueSkipped",double(result.opaqueSkipped)},
         {"coverageCells",double(result.coverageCells)},{"fallbackCells",double(result.fallbackCells)},
+        {"reusedCells",double(result.reusedCells)},{"composedCells",double(result.composedCells)},{"emptySpanCells",double(result.emptySpanCells)},
         {"matrixMs",result.matrixMs},{"compositionMs",result.compositionMs},{"secondaryRasterPasses",0}};
     const auto bytes=QJsonDocument(data).toJson();if(report.write(bytes)!=bytes.size())return 8;
     QFile csv(out.filePath("matrices.csv"));if(!csv.open(QIODevice::WriteOnly|QIODevice::Text))return 8;
