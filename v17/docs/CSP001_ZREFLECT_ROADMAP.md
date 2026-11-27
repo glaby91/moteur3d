@@ -37,6 +37,9 @@ Le diagnostic V17.605 (archive source de V17.629, pas le ZIP final) a recensé 1
 - Objectif proposé : quelques grandes familles optiques par zone, pas des centaines de slots. Ne pas annoncer de nombre final avant analyse de V17.629 et clustering réel. Mesurer séparément les comptages à chaque filtre ; vérifier la qualité et les transitions. Les seuils ne sont pas des exigences définitives.
 Travaux à rattacher à R01, R02, R08 et R10, sans créer de nouvelle tâche ni changer le code à ce stade.
 
+## Essai R001 catalogue révision 2 — sans plafond actif
+Le plafond futur de trois est conservé dans la politique, mais non appliqué dans le diagnostic actuel. Nouveau filtre sur la rugosité nominale source (pas une mesure des mips), surface minimale et géométrie de plaque mince : épaisseur <= 0,15 m, <= 15 % de la plus petite dimension latérale, au moins 90 % de l'aire totale parallèle au plan dominant. Ces trois seuils géométriques supplémentaires sont des choix expérimentaux. Chaque face large admissible est enregistrée, seule la face supérieure de l'eau est retenue ; les faces avant/arrière des vitrages restent distinctes. Les surfaces réellement planes de moins de 1 m² peuvent être explicitement autorisées. Les objets courbes restent en PBR. Regroupement par plan et côté, tolérance 1 mm. Diagnostic par caméra 1280x720 : faces côté observateur, triangles découpés par frustum et somme des aires projetées, seuil 2 % sans occlusion, sans plafond. Les objets sans décision auteur sont analysés hypothétiquement ; pas d'autorisation effective de nouvelles caméras. Aucun shader multi-plan, buffer GPU ou comportement runtime nouveau : R03–R09 restent ouverts. Contrôle auteur partiel au catalogue ; politique complète R10 reste ouverte.
+ 
 ## État du socle (code écrit, pas compilé)
 | ID | Fonction | État réel |
 |---|---|---|
@@ -44,7 +47,7 @@ Travaux à rattacher à R01, R02, R08 et R10, sans créer de nouvelle tâche ni 
 | S02 | Lecture transactionnelle, SHA-256, validation structurelle, fallback, M3D_CSP001=0 | Implémenté en source |
 | S03 | CLI cse_scene_precompiler et raccord optionnel au ZIP scène | Implémenté en source, pas de workflow de production |
 | S04 | Rejet hors champ du miroir horizontal existant | Implémenté en source ; pas de culling par occlusion |
-| S05 | Inventaire optique, plans approximatifs, identifiants caméra/buffer dormants | Prototype diagnostic non consommé par le rendu |
+| S05 | Inventaire optique restrictif révision 2, plans, identifiants dormants, simulation des vues sans plafond | Prototype diagnostic non consommé par le rendu |
 | S06 | Smoke test C++ roundtrip/corruption/visibilité | Écrit, non exécuté |
 Les simulations indépendantes (100 000 AABB, 10 scénarios BVH) ne valident pas le C++ compilé ni la scène réelle. Aucun fichier de tables pour V17.629 n'a encore été produit.
 

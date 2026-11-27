@@ -93,6 +93,9 @@ target_link_libraries(cse_scene_precompiler PRIVATE moteur3d_v16_core Qt6::Core 
 add_executable(v17_csp001_smoke tests/csp001_smoke.cpp)
 target_link_libraries(v17_csp001_smoke PRIVATE moteur3d_v16_core Qt6::Core)
 add_test(NAME v17_csp001_roundtrip_visibility COMMAND v17_csp001_smoke)
+add_executable(v17_zreflect_catalog_smoke tests/zreflect_catalog_smoke.cpp)
+target_include_directories(v17_zreflect_catalog_smoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+add_test(NAME v17_zreflect_catalog_filter COMMAND v17_zreflect_catalog_smoke)
 
 # The Windows ICO is compiled into the EXE so Explorer/taskbar recognize V17.
 # Generate all 16..256px sizes from the local brand artwork; no external download.

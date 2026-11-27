@@ -1,107 +1,114 @@
 #pragma once
-// Offline optical catalogue; the renderer does not consume these experimental
-// planes yet. No object name dependency, except legacy water classification.
+// Restrictive offline catalogue. It is not yet consumed by the GPU renderer.
 #include "m3d_v16_bridge.h"
-#include "m3d_zreflect_visibility.h"
+#include "m3d_zreflect_geometry.h"
 #include <QJsonArray>
 #include <QJsonObject>
-#include <map>
-#include <array>
+#include <QHash>
 #include <set>
 namespace m3d::zreflect {
-struct Plane {
-    V normal{};float offset=0;Bounds bounds;double area=0;
-    std::set<int> objects;unsigned triangles=0;
-};
-using PlaneKey=std::array<int64_t,4>;
 inline QJsonArray vec(V v){return {v.x,v.y,v.z};}
-inline bool candidate(const Material& m){
-    // Default dielectric reflectivity (4%) is assigned to nearly every object
-    // by the loader. Do not turn all concrete triangles into mirror candidates.
-    // This threshold is for diagnostic inventory only, NOT render rejection.
-    return m.waterSurface||m.name=="cse_pool_water"||m.transmissionPercent>0||
-        m.metallic>.05f||m.reflectivityPercent>5||
-        m.roughnessScale<=.30f;
+inline Permission permission(const QJsonValue& value){
+    if(value.isUndefined())return Permission::Unspecified;
+    const auto s=value.toString();
+    if(s=="enabled")return Permission::Enabled;
+    if(s=="disabled")return Permission::Disabled;
+    if(s=="auto")return Permission::Auto;
+    return Permission::Invalid;
 }
-inline bool trianglePlane(const Obj& tri,V& n,float& d,double& area){
-    if(tri.kind!=Kind::Triangle)return false;
-    const V raw=cross(tri.b-tri.a,tri.c-tri.a);
-    const float len=length(raw);
-    if(!std::isfinite(len)||len<=1.e-7f)return false;
-    n=raw/len;
-    // Canonical sign: largest absolute component positive, so back/front
-    // winding of the same geometrical plane can share the same camera.
-    const float a[3]={std::abs(n.x),std::abs(n.y),std::abs(n.z)};
-    const float k=(a[0]>=a[1]&&a[0]>=a[2])?n.x:(a[1]>=a[2]?n.y:n.z);
-    if(k<0)n=n*-1.f;
-    d=dot(n,tri.a);area=.5*len;
-    return std::isfinite(d)&&std::abs(d)<1.e9f;
+inline Permission resolvePermission(const QJsonObject& object,const QJsonObject& material,const QJsonObject& manifest){
+    for(const auto& o:{object,material,manifest}){
+        auto p=permission(o.value("planarReflection"));if(p!=Permission::Unspecified)return p;
+    }
+    return Permission::Unspecified;
 }
-inline PlaneKey key(V n,float d){
-    return {std::llround(n.x*10000.),std::llround(n.y*10000.),
-        std::llround(n.z*10000.),std::llround(double(d)*1000.)};
+inline QString permissionName(Permission p){
+    switch(p){case Permission::Disabled:return "disabled";case Permission::Enabled:return "enabled";
+        case Permission::Auto:return "auto";case Permission::Invalid:return "invalid";default:return "unspecified";}
 }
-inline bool belongs(const Plane& p,const Obj& tri,V n){
-    if(dot(p.normal,n)<.999999f)return false;
-    for(V v:{tri.a,tri.b,tri.c})
-        if(std::abs(double(dot(p.normal,v))-p.offset)>.001)return false;
-    return true;
+inline QHash<QString,QJsonObject> authored(const v16::SceneDatabase& db,const QString& kind){
+    QHash<QString,QJsonObject> out;
+    for(const auto& sector:db.sectors)for(const auto& file:sector.resources.value(kind))
+        for(const auto& value:file.data.value(kind).toArray()){
+            auto item=value.toObject();out.insert(item.value("id").toString(),item);
+        }
+    return out;
 }
-inline void addTriangle(std::map<PlaneKey,std::vector<Plane>>& planes,const Obj& tri,int objectIndex){
-    V n;float d;double area;
-    if(!trianglePlane(tri,n,d,area))return;
-    auto& bucket=planes[key(n,d)];
-    Plane* selected=nullptr;
-    for(auto& p:bucket)if(belongs(p,tri,n)){selected=&p;break;}
-    if(!selected){bucket.emplace_back();selected=&bucket.back();selected->normal=n;selected->offset=d;}
-    selected->bounds.add(tri.a);selected->bounds.add(tri.b);selected->bounds.add(tri.c);
-    selected->area+=area;++selected->triangles;selected->objects.insert(objectIndex);
+struct Group{Patch patch;std::set<int> objects;bool explicitEnable=false;};
+inline void mergePatch(std::map<PlaneKey,std::vector<Group>>& groups,const Scene& scene,
+                       Patch p,int objectIndex,bool enabled){
+    auto& bucket=groups[key(p.normal,p.offset)];Group* g=nullptr;
+    for(auto& item:bucket){
+        if(item.patch.side!=p.side||dot(item.patch.normal,p.normal)<.999999f)continue;
+        bool compatible=true;
+        for(auto id:p.triangles)if(!samePlane(item.patch,scene.obj[id],p.normal)){compatible=false;break;}
+        if(compatible){g=&item;break;}
+    }
+    if(!g){bucket.emplace_back();g=&bucket.back();g->patch.normal=p.normal;g->patch.offset=p.offset;g->patch.side=p.side;}
+    g->patch.bounds.add(p.bounds.lo);g->patch.bounds.add(p.bounds.hi);
+    g->patch.area+=p.area;g->patch.triangles.insert(g->patch.triangles.end(),p.triangles.begin(),p.triangles.end());
+    g->objects.insert(objectIndex);g->explicitEnable|=enabled;
 }
-inline QJsonObject catalogue(const v16::Runtime& rt,const QString& revision){
-    QJsonArray objects,planes,lights;
-    std::map<PlaneKey,std::vector<Plane>> groups;
-    const auto& scene=rt.renderScene;
+inline QJsonObject catalogue(const v16::Runtime& rt,const v16::SceneDatabase& db,
+                            const QJsonObject& manifest,const Policy& policy={}){
+    const auto instances=authored(db,"instances"),materials=authored(db,"materials");
+    const auto& scene=rt.renderScene;QJsonArray objects,planes,lights,diagnostics,cameras;
+    std::map<PlaneKey,std::vector<Group>> groups;int optical=0,rejectedGeometry=0,refused=0;
     for(const auto& object:rt.objects){
-        const int first=object.firstTriangle,count=object.triangleCount;
+        const auto src=instances.value(object.id),matSrc=materials.value(object.material);
+        const auto perm=resolvePermission(src,matSrc,manifest);
+        if(perm==Permission::Disabled||perm==Permission::Invalid){++refused;continue;}
+        int first=object.firstTriangle,count=object.triangleCount;
         if(first<0||count<=0||size_t(first)>scene.obj.size()||size_t(count)>scene.obj.size()-size_t(first))continue;
-        const auto id=scene.obj[size_t(first)].mat;
-        if(id>=scene.mat.size()||!candidate(scene.mat[id]))continue;
+        const auto id=scene.obj[size_t(first)].mat;if(id>=scene.mat.size())continue;
         const auto& mat=scene.mat[id];
-        Bounds bounds;const int objectIndex=int(objects.size());
-        for(int k=0;k<count;++k){
-            const auto& tri=scene.obj[size_t(first+k)];
-            bounds.add(tri.mn);bounds.add(tri.mx);
+        const bool water=mat.waterSurface||(!mat.surfaceAuthored&&mat.name=="cse_pool_water");
+        // Nominal source roughness is not roughnessScale or sampled texture roughness.
+        double rough=matSrc.value("roughness").toDouble(.72);
+        const bool mirror=matSrc.value("opticalMirror").toBool(false);
+        if(!opticalEligible(water,mirror,double(mat.transmissionPercent)/100.,mat.metallic,rough,perm,policy))continue;
+        ++optical;
+        auto patches=extractSlab(scene,first,count,water,perm==Permission::Enabled,policy);
+        if(patches.empty()){
+            ++rejectedGeometry;diagnostics.append(QJsonObject{{"objectId",object.id},{"reason","non-planar-or-small"}});
+            continue;
         }
-        if(!bounds.valid||bounds.uncertain)continue;
-        // Smooth curved geometry can yield one plane per triangle. Drop
-        // singleton planes at the catalogue stage; no GPU activation implied.
-        for(int k=0;k<count;++k){
-            const auto& tri=scene.obj[size_t(first+k)];
-            if(tri.mat==id)addTriangle(groups,tri,objectIndex);
-        }
-        objects.append(QJsonObject{
-            {"objectId",object.id},{"zoneHint",object.parent},{"material",object.material},
+        Bounds bounds;for(const auto& patch:patches){bounds.add(patch.bounds.lo);bounds.add(patch.bounds.hi);}
+        const int objectIndex=int(objects.size());
+        // Unspecified objects remain hypothetical candidates only; production
+        // authorization is not granted by this diagnostic.
+        objects.append(QJsonObject{{"objectId",object.id},{"zoneHint",object.parent},{"material",object.material},
+            {"permission",permissionName(perm)},{"authorized",perm==Permission::Auto||perm==Permission::Enabled||water},
             {"firstTriangle",first},{"triangleCount",count},{"min",vec(bounds.lo)},{"max",vec(bounds.hi)},
             {"ior",mat.refractiveIndex},{"dielectricF0",dielectricF0(mat.refractiveIndex)},
             {"reflectivityPercent",int(mat.reflectivityPercent)},{"transmissionPercent",int(mat.transmissionPercent)},
-            {"metallic",mat.metallic},{"roughnessScale",mat.roughnessScale},{"waterSurface",mat.waterSurface}
-        });
+            {"metallic",mat.metallic},{"roughnessNominal",rough},{"roughnessScale",mat.roughnessScale},{"waterSurface",water}});
+        for(auto& patch:patches)mergePatch(groups,scene,std::move(patch),objectIndex,perm==Permission::Enabled);
     }
-    // Camera slots are logical, not actual D3D resources. Distinct coplanar
-    // patches share a candidate slot; nearby quantization bins may split.
-    for(const auto& entry:groups)for(const auto& plane:entry.second){
-        if(plane.triangles<2||plane.area<.005||plane.bounds.uncertain)continue;
-        QJsonArray refs;for(int i:plane.objects)refs.append(i);
-        const int slot=int(planes.size());
-        planes.append(QJsonObject{{"cameraId",slot},{"bufferId",slot},{"state","DORMANT"},
-            {"normal",vec(plane.normal)},{"offset",plane.offset},{"min",vec(plane.bounds.lo)},
-            {"max",vec(plane.bounds.hi)},{"area",plane.area},{"objects",refs},
-            {"sun",true},{"sky",true},{"lightDependency","all-authored-conservative"}});
+    for(const auto& kv:groups)for(const auto& g:kv.second){
+        const auto& p=g.patch;QJsonArray refs,triangles;for(int i:g.objects)refs.append(i);
+        for(auto id:p.triangles)triangles.append(int(id));
+        int slot=int(planes.size());planes.append(QJsonObject{{"cameraId",slot},{"bufferId",slot},{"state","DORMANT"},
+            {"normal",vec(p.normal)},{"offset",p.offset},{"side",p.side},{"min",vec(p.bounds.lo)},{"max",vec(p.bounds.hi)},
+            {"area",p.area},{"objects",refs},{"triangles",triangles},{"sun",true},{"sky",true},
+            {"lightDependency","all-authored-conservative"}});
     }
-    for(const auto& light:scene.lights)
-        lights.append(QJsonObject{{"position",vec(light.p)},{"radius",light.radius},
-            {"intensity",light.intensity},{"color",vec(light.color)},{"exterior",light.exterior}});
-    return {{"schema",1},{"revision",revision},{"status","diagnostic-only"},
-        {"objects",objects},{"planes",planes},{"lights",lights}};
+    // Per authored view, all eligible planes are evaluated. No top-three truncation.
+    for(const auto& preset:rt.cameras){
+        const Camera c=v16::makeCamera(preset,1280,720);int visible=0,selected=0;
+        for(const auto& kv:groups)for(const auto& g:kv.second){
+            double area=projectedPatch(scene,g.patch,c);
+            if(area>0){++visible;if(area>=policy.minProjected||g.explicitEnable)++selected;}
+        }
+        cameras.append(QJsonObject{{"id",preset.id},{"visible",visible},{"selectedUncapped",selected}});
+    }
+    for(const auto& l:scene.lights)lights.append(QJsonObject{{"position",vec(l.p)},{"radius",l.radius},
+        {"intensity",l.intensity},{"color",vec(l.color)},{"exterior",l.exterior}});
+    return {{"schema",1},{"catalogRevision",2},{"revision",db.revision},{"status","diagnostic-only"},
+        {"objects",objects},{"planes",planes},{"lights",lights},{"rejected",diagnostics},{"cameraSimulation",cameras},
+        {"policy",QJsonObject{{"maxNominalRoughness",policy.maxNominalRoughness},{"minArea",policy.minArea},
+            {"minProjected",policy.minProjected},{"futureCameraLimit",int(policy.futureCameraLimit)},{"cameraLimitApplied",false}}},
+        {"counts",QJsonObject{{"totalObjects",int(rt.objects.size())},{"opticalCandidates",optical},
+            {"rejectedGeometry",rejectedGeometry},{"authorRefused",refused},{"eligibleObjects",int(objects.size())},{"planes",int(planes.size())}}}};
 }
-} // namespace m3d::zreflect
+}
