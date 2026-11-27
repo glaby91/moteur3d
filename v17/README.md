@@ -78,5 +78,5 @@ La scène civique est maintenue séparément dans `moteur3d-scene`, puis empaque
 
 Avec une scène locale, la première vérification réseau asynchrone attend 10 minutes après le chargement ; les suivantes sont espacées de 30 minutes. Si une révision plus récente est publiée, le moteur propose de la télécharger et de redémarrer. La scène courante reste active jusqu’à l’acceptation ; le moteur ne charge pas une seconde scène par-dessus la première. Si aucune scène civique n’est installée, le moteur vérifie immédiatement le dépôt, propose le téléchargement et ne charge la scène qu’une fois. « Plus tard » mémorise la révision proposée et évite de répéter la même alerte ; une nouvelle publication sera signalée.
 
-## Z Atmosphere (V17.027 experimental)
-Opt-in GPU atmospheric filter for DirectX 11, LumaTrace and Vulkan. [Architecture, options, limits and tests](docs/ZATMOSPHERE_001.md).
+## Z Atmosphere 002 (V17.028 expérimental)
+Grain lumineux additif très discret pour DirectX 11, LumaTrace et Vulkan, sans brouillard ni atténuation. [Architecture, paramètres, limites et essais](docs/ZATMOSPHERE_001.md).

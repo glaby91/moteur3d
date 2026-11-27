@@ -986,7 +986,7 @@ public:
             if(!atmospherePass_.draw(device_.Get(),context_.Get(),atmosphereDepthSrv_.Get(),shadowSrv_.Get(),
                 sampleCount_>1?atmosphereResolveRtv_.Get():rtv_.Get(),raster_.Get(),scene,cam,shadows,
                 sampleCount_,unsigned(w),unsigned(h),atmosphereDensity,error))return false;
-            drawCalls+=2;
+            ++drawCalls;
         }
         // Native DXGI presentation: all transfers remain on the GPU. The
         // offscreen raster and MSAA targets are reused; no CPU staging,

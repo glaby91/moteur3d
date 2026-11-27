@@ -237,7 +237,7 @@
     },
     {
       "id": "d3d11_raster",
-      "revision": "016",
+      "revision": "017",
       "engines": [
         "v16",
         "v17"
@@ -310,7 +310,7 @@
     },
     {
       "id": "vulkan_raster",
-      "revision": "007",
+      "revision": "008",
       "engines": [
         "v16",
         "v17"
@@ -370,13 +370,13 @@
     },
     {
       "id": "z_atmosphere",
-      "revision": "001",
+      "revision": "002",
       "engines": [
         "v16",
         "v17"
       ],
       "optional": true,
-      "description": "Bounded volumetric scattering, GPU post-composite",
+      "description": "Grain lumineux volumetrique additif, sans extinction ni voile",
       "sources": [
         "v17/atmosphere/atmosphere.h",
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_dx11_atmosphere.h",

@@ -14,11 +14,13 @@ int main(int argc,char** argv){
     if(it==rt.cameras.end())return 5;
     constexpr int w=320,h=180;auto cam=m3d::v16::makeCamera(*it,w,h);
     _putenv_s("M3D_V17_ANIMATE_CLOUDS","0");_putenv_s("M3D_V17_PERIPHERAL_MULTIREZ","0");
-    _putenv_s("M3D_V17_ZATMOSPHERE_DENSITY",".012");
+    _putenv_s("M3D_V17_ZATMOSPHERE_DENSITY",".002");
+    unsigned changedFrames=0;
     m3d::setRasterHybridLightingEnabled(true);
     for(float hour:{14.75f,0.f}){
         m3d::updateLighting(hour);m3d::Stats ss;auto shadow=m3d::buildShadow(rt.renderScene,ss);
-        for(bool luma:{false,true}){
+        for(bool luma:{false,true})for(float offset:{0.f,.05f,.20f}){
+            cam=m3d::v16::makeCamera(*it,w,h);cam.eye=cam.eye+cam.r*offset;
             auto render=[&](bool on,std::vector<uint32_t>& pixels,m3d::Stats& stats){
                 _putenv_s("M3D_V17_ZATMOSPHERE",on?"1":"0");std::wstring error;
                 bool ok=luma?m3d::renderLumaTracePreview(rt.renderScene,rt.lumaTraceBvh4,shadow,cam,w,h,pixels,stats,error):
@@ -28,12 +30,25 @@ int main(int argc,char** argv){
             };
             std::vector<uint32_t> a,b,c;m3d::Stats x,y,z;
             if(!render(false,a,x)||!render(true,b,y)||!render(false,c,z))return 6;
-            if(a!=c||a==b||y.gpuDrawCalls!=x.gpuDrawCalls+2){qCritical()<<"Z Atmosphere A/B failed"<<luma<<hour<<x.gpuDrawCalls<<y.gpuDrawCalls;return 7;}
-            QString stem=QString::fromLocal8Bit(argv[2])+"/atmosphere-"+(luma?"luma":"dx11")+(hour==0?"-night":"-day");
+            if(a!=c||y.gpuDrawCalls!=x.gpuDrawCalls+1){qCritical()<<"Z Atmosphere A/B failed"<<luma<<hour<<x.gpuDrawCalls<<y.gpuDrawCalls;return 7;}
+            unsigned changed=0,maxDelta=0;double totalDelta=0;
+            for(size_t i=0;i<a.size();++i){
+                if(a[i]!=b[i])++changed;
+                for(unsigned shift:{0u,8u,16u}){
+                    int delta=int((b[i]>>shift)&255u)-int((a[i]>>shift)&255u);
+                    if(delta<0||delta>3){qCritical()<<"Grain non additif ou trop fort"<<delta<<luma<<hour<<offset;return 9;}
+                    maxDelta=std::max(maxDelta,unsigned(delta));totalDelta+=delta;
+                }
+            }
+            if(changed)++changedFrames;
+            if(totalDelta/(a.size()*3)>.12){qCritical()<<"Voile lumineux excessif";return 10;}
+            qInfo()<<"Grain: pixels modifies, delta maximal, moyenne"<<changed<<maxDelta<<totalDelta/(a.size()*3);
+            QString stem=QString::fromLocal8Bit(argv[2])+"/atmosphere-"+(luma?"luma":"dx11")+(hour==0?"-night":"-day")+"-"+QString::number(offset);
             if(!QImage(reinterpret_cast<const uchar*>(a.data()),w,h,w*4,QImage::Format_RGB32).save(stem+"-off.png")||
                !QImage(reinterpret_cast<const uchar*>(b.data()),w,h,w*4,QImage::Format_RGB32).save(stem+"-on.png"))return 8;
             qInfo()<<"Z Atmosphere OFF/ON/OFF parity OK"<<luma<<hour;
         }
     }
+    if(!changedFrames){qCritical()<<"Grain invisible apres quantification sur tous les essais";return 11;}
     return 0;
 }

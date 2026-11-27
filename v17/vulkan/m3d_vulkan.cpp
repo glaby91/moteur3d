@@ -1362,7 +1362,7 @@ class VulkanRaster final {
         VkPipelineShaderStageCreateInfo fogStages[2]={skyStages[0],skyStages[1]};fogStages[1].module=fogModule;
         VkPipelineDepthStencilStateCreateInfo fogDs=skyDepth;fogDs.depthTestEnable=VK_FALSE;fogDs.depthWriteEnable=VK_FALSE;
         VkPipelineColorBlendAttachmentState fogBlend{};fogBlend.blendEnable=VK_TRUE;
-        fogBlend.srcColorBlendFactor=VK_BLEND_FACTOR_ONE;fogBlend.dstColorBlendFactor=VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        fogBlend.srcColorBlendFactor=VK_BLEND_FACTOR_ONE;fogBlend.dstColorBlendFactor=VK_BLEND_FACTOR_ONE;
         fogBlend.colorBlendOp=VK_BLEND_OP_ADD;fogBlend.srcAlphaBlendFactor=VK_BLEND_FACTOR_ZERO;fogBlend.dstAlphaBlendFactor=VK_BLEND_FACTOR_ONE;fogBlend.alphaBlendOp=VK_BLEND_OP_ADD;
         fogBlend.colorWriteMask=VK_COLOR_COMPONENT_R_BIT|VK_COLOR_COMPONENT_G_BIT|VK_COLOR_COMPONENT_B_BIT|VK_COLOR_COMPONENT_A_BIT;
         VkPipelineColorBlendStateCreateInfo fogCb=cb;fogCb.pAttachments=&fogBlend;
