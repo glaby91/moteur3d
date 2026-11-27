@@ -623,7 +623,7 @@ public:
                 sceneUpdateChecker_->checkAtStartup(scenePath,revision,this,
                     [this,scenePath](const QString& updated){
                         setProperty("v17.pendingSceneUpdatePath",updated);openScene(updated,scenePath);
-                    },true,[this,scenePath,fallbackPath]{if(!scenePath.isEmpty())openScene(scenePath,fallbackPath);});
+                    },true,[this,scenePath,fallbackPath]{if(!scenePath.isEmpty())openScene(scenePath,fallbackPath);else canvas_->setPlaceholder(QStringLiteral("Aucune scène Reflect installée. Publication indisponible ou différée."));});
             });
     }
     // UI contract smoke: each renderer owns a unique top-level HWND.

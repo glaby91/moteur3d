@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -49,7 +50,7 @@ public:
         checking_=true;
         setStatus(QStringLiteral("Vérification de la scène de référence…"));
         QNetworkRequest request(QUrl(QStringLiteral(
-            "https://api.github.com/repos/glaby91/moteur3d-scene/releases/tags/scene-reflect-V17.630")));
+            "https://api.github.com/repos/glaby91/moteur3d-scene/releases?per_page=100")));
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                              QNetworkRequest::NoLessSafeRedirectPolicy);
         request.setRawHeader("Accept","application/vnd.github+json");
@@ -71,21 +72,40 @@ public:
             }
             QJsonParseError parsing;
             const auto releaseDocument=QJsonDocument::fromJson(releaseBytes,&parsing);
-            const auto release=releaseDocument.object();
+            QJsonObject release;int newest=-1;
+            const QRegularExpression reflectTag(QStringLiteral("^scene-reflect-(V17\\.\\d+)$"));
+            for(const auto& value:releaseDocument.array()){
+                const auto candidate=value.toObject();
+                if(candidate.value("draft").toBool()||!candidate.value("prerelease").toBool())continue;
+                const auto match=reflectTag.match(candidate.value("tag_name").toString());
+                const int revision=revisionNumber(match.captured(1));
+                bool manifest=false,archive=false;
+                for(const auto& a:candidate.value("assets").toArray()){
+                    const auto asset=a.toObject();
+                    if(asset.value("state").toString()!="uploaded")continue;
+                    manifest|=asset.value("name").toString()=="SCENE_VERSION.json";
+                    archive|=asset.value("name").toString()=="V17-scene.zip";
+                }
+                if(revision>newest&&manifest&&archive){newest=revision;release=candidate;}
+            }
             const QString tag=release.value(QStringLiteral("tag_name")).toString().trimmed();
-            QString manifestUrl,archiveUrl;
+            QString manifestUrl,archiveUrl,manifestDigest,archiveDigest;
             const auto assets=release.value(QStringLiteral("assets")).toArray();
             for(const auto& value:assets){
                 const auto asset=value.toObject();
                 const QString name=asset.value(QStringLiteral("name")).toString();
                 const QString url=asset.value(QStringLiteral("browser_download_url")).toString();
-                if(name==QStringLiteral("SCENE_VERSION.json"))manifestUrl=url;
-                else if(name==QStringLiteral("V17-scene.zip"))archiveUrl=url;
+                if(name==QStringLiteral("SCENE_VERSION.json")){manifestUrl=url;manifestDigest=asset.value("digest").toString();}
+                else if(name==QStringLiteral("V17-scene.zip")){archiveUrl=url;archiveDigest=asset.value("digest").toString();}
             }
             const QString releasePrefix=QStringLiteral(
                 "https://github.com/glaby91/moteur3d-scene/releases/download/");
             if(parsing.error!=QJsonParseError::NoError ||
                !QRegularExpression(QStringLiteral("^scene-reflect-V17\\.\\d+$")).match(tag).hasMatch() ||
+               !QRegularExpression(QStringLiteral("^sha256:[a-f0-9]{64}$")).match(manifestDigest).hasMatch() ||
+               !QRegularExpression(QStringLiteral("^sha256:[a-f0-9]{64}$")).match(archiveDigest).hasMatch() ||
+               manifestUrl!=releasePrefix+tag+"/SCENE_VERSION.json" ||
+               archiveUrl!=releasePrefix+tag+"/V17-scene.zip" ||
                !manifestUrl.startsWith(releasePrefix) ||
                !manifestUrl.endsWith(QStringLiteral("/SCENE_VERSION.json")) ||
                !archiveUrl.startsWith(releasePrefix) ||
@@ -104,7 +124,7 @@ public:
             manifestRequest.setTransferTimeout(5000);
             auto* manifestReply=network_->get(manifestRequest);
             connect(manifestReply,&QNetworkReply::finished,this,
-                    [this,manifestReply,archiveUrl,tag]{
+                    [this,manifestReply,archiveUrl,tag,manifestDigest,archiveDigest]{
                 const QByteArray bytes=manifestReply->readAll();
                 const auto manifestError=manifestReply->error();
                 const QString manifestErrorText=manifestReply->errorString();
@@ -122,7 +142,9 @@ public:
                 const auto document=QJsonDocument::fromJson(bytes,&manifestParsing);
                 const auto manifest=document.object();
                 const QString latest=manifest.value(QStringLiteral("revision")).toString().trimmed();
-                if(manifestParsing.error!=QJsonParseError::NoError ||
+                if(QStringLiteral("sha256:")+QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex())!=manifestDigest ||
+                   manifest.value("channel").toString()!="reflect" || manifest.value("tag").toString()!=tag ||
+                   manifestParsing.error!=QJsonParseError::NoError ||
                    manifest.value(QStringLiteral("repository")).toString()!=
                        QStringLiteral("glaby91/moteur3d-scene") ||
                    manifest.value(QStringLiteral("scene")).toString()!=
@@ -177,6 +199,7 @@ public:
                 }
                 settings.remove(QStringLiteral("SceneReflect/DeferredRevision"));
                 latestArchiveUrl_=archiveUrl;
+                expectedArchiveDigest_=archiveDigest;expectedManifestDigest_=manifestDigest;
                 downloading_=true;
                 beginDownload(latest,window_);
             });
@@ -254,7 +277,11 @@ private:
                     .arg(networkOk?QStringLiteral("écriture interrompue"):networkMessage));
                 return;
             }
-            extractAndValidate();
+            QFile archive(archivePath_);QCryptographicHash hash(QCryptographicHash::Sha256);
+            if(!archive.open(QIODevice::ReadOnly)||!hash.addData(&archive)||
+               QStringLiteral("sha256:")+QString::fromLatin1(hash.result().toHex())!=expectedArchiveDigest_){
+                archive.close();QFile::remove(archivePath_);fail(QStringLiteral("Empreinte SHA-256 de la scène invalide."));return;}
+            archive.close();extractAndValidate();
         });
     }
 
@@ -325,7 +352,10 @@ private:
             return;
         }
         QJsonParseError parsing;
-        const auto manifest=QJsonDocument::fromJson(manifestFile.readAll(),&parsing).object();
+        const auto manifestBytes=manifestFile.readAll();
+        const auto manifest=QJsonDocument::fromJson(manifestBytes,&parsing).object();
+        if(QStringLiteral("sha256:")+QString::fromLatin1(QCryptographicHash::hash(manifestBytes,QCryptographicHash::Sha256).toHex())!=expectedManifestDigest_){
+            fail(QStringLiteral("Le manifeste extrait diffère de la publication."));return;}
         const QString sceneRelative=manifest.value(QStringLiteral("scene")).toString();
         if(parsing.error!=QJsonParseError::NoError ||
            manifest.value(QStringLiteral("repository")).toString()!=QStringLiteral("glaby91/moteur3d-scene") ||
@@ -386,6 +416,7 @@ private:
     std::function<void()> keepLocal_;
     QString currentRevision_;
     QString latestArchiveUrl_;
+    QString expectedArchiveDigest_,expectedManifestDigest_;
     QString expectedRevision_;
     QString archivePath_;
     QString stagingPath_;

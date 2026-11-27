@@ -143,6 +143,14 @@ jobs:
           Copy-Item $bench.FullName $dist
           foreach ($name in @("route30.ps1","LANCER_PARCOURS_30S.bat","LANCER_LUMATRACE_01_AB.bat","LANCER_LUMATRACE_01_PISCINE.bat")) { Copy-Item "v17/tools/$name" $dist }
           Copy-Item "v17/config/zreflect-scene-V17.629.json" $dist
+          @'
+          @echo off
+          cd /d "%~dp0"
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\route30.ps1" -Root "." -ZReflectAB
+          set "RC=%ERRORLEVEL%"
+          pause
+          exit /b %RC%
+          '@ | Set-Content "$dist/LANCER_ZREFLECT_AB.bat" -Encoding ascii
           Copy-Item "v17/docs/CSP001_ZREFLECT_AUTHOR_POLICY.md" $dist
           Copy-Item "zreflect-report/summary.json" "$dist/zreflect-summary.json"
           Copy-Item "zreflect-report/zreflect-*.png" $dist
@@ -167,11 +175,11 @@ jobs:
           @echo off
           cd /d "%~dp0"
           if "%~1"=="" (
-            echo Usage: drag V17.629 scene.json onto this BAT
+            echo Usage: drag Reflect scene.json onto this BAT
             pause
             exit /b 2
           )
-          cse_scene_precompiler.exe "%~1" --catalog-only --policy zreflect-scene-V17.629.json
+          cse_scene_precompiler.exe "%~1" --catalog-only
           exit /b %ERRORLEVEL%
           '@ | Set-Content "$dist/LANCER_ZREFLECT_DIAGNOSTIC.bat" -Encoding ascii
       - name: Verify packaged application controls and scene loading
@@ -186,6 +194,8 @@ jobs:
           if ($process.ExitCode -ne 0) { throw "Packaged exploration controls failed ($($process.ExitCode))" }
           & "dist-zreflect/route30.exe" $scene "zreflect-report/tour-plan.csv" --tour-plan
           if ($LASTEXITCODE -or !(Test-Path "zreflect-report/tour-plan.csv")) { throw "Route plan failed" }
+          & "dist-zreflect/route30.exe" $scene "zreflect-report/zreflect-plan.csv" --zreflect-plan
+          if ($LASTEXITCODE -or @(Import-Csv "zreflect-report/zreflect-plan.csv").Count -ne 16) { throw "Reflect A/B plan failed" }
       - name: Upload experimental Windows build (engine only)
         uses: actions/upload-artifact@v6
         with:
