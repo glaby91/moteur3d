@@ -62,7 +62,7 @@ struct Result {
     std::vector<Surface> surfaces;
     uint32_t rays=0, candidates=0,deferred=0,paths=0,completePaths=0,unknownPaths=0;
     uint64_t measured=0,reconstructed=0,zero=0,outputCells=0;
-    uint64_t completeSearches=0,receiverSearches=0,partialTests=0,layerVisits=0,textureSamples=0,opaqueSkipped=0;
+    uint64_t completeSearches=0,receiverSearches=0,partialTests=0,layerVisits=0,textureSamples=0,opaqueSkipped=0,coverageCells=0,fallbackCells=0;
     double matrixMs=0,compositionMs=0;
     bool ok=false;
     std::string error;

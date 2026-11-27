@@ -107,7 +107,7 @@ inline bool receiverAt(const Surface& sf,int x,int y,float& depth,float& weight,
     depth=weight=0;size_t positive=0;
     for(size_t i=0;i<n.count;++i){const auto& s=sf.samples[n.ids[i]];if(s.receiver==State::Measured){depth+=s.receiverDepth;weight+=s.receiverWeight;++positive;}}
     if(!positive)return false;
-    depth/=float(positive);weight/=float(n.count);return true;
+    depth/=float(positive);weight/=float(positive);return true; // mask/alpha already accounts for absent receiver observations
 }
 inline bool receiverAt(const Surface& sf,int x,int y,float& depth,float& weight){
     return receiverAt(sf,x,y,depth,weight,nearestReceiver(sf,x,y));
