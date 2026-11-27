@@ -48,6 +48,44 @@ inline void insertNeighbor(Neighbors& out,const Surface& sf,int x,int y,size_t i
     for(size_t j=out.count-1;j>k;--j){out.ids[j]=out.ids[j-1];out.distance[j]=out.distance[j-1];}
     out.ids[k]=i;out.distance[k]=d;
 }
+class NeighborIndex {
+    struct Node {size_t id=0;int left=-1,right=-1;int minX=0,maxX=0,minY=0,maxY=0;};
+    const Surface& sf_;std::vector<Node> nodes_;int root_=-1;
+    int build(std::vector<size_t>& ids,size_t begin,size_t end,int axis){
+        if(begin==end)return -1;
+        const size_t mid=begin+(end-begin)/2;
+        std::nth_element(ids.begin()+begin,ids.begin()+mid,ids.begin()+end,[&](size_t a,size_t b){
+            const auto& x=sf_.samples[a];const auto& y=sf_.samples[b];
+            const int v=axis?x.y:x.x,w=axis?y.y:y.x;return v<w||(v==w&&a<b);
+        });
+        const auto id=ids[mid];const auto& s=sf_.samples[id];const int at=int(nodes_.size());
+        nodes_.push_back({id,-1,-1,s.x,s.x,s.y,s.y});
+        const int l=build(ids,begin,mid,1-axis),r=build(ids,mid+1,end,1-axis);
+        auto& n=nodes_[at];n.left=l;n.right=r;
+        for(int k:{l,r})if(k>=0){const auto& c=nodes_[k];n.minX=std::min(n.minX,c.minX);n.maxX=std::max(n.maxX,c.maxX);n.minY=std::min(n.minY,c.minY);n.maxY=std::max(n.maxY,c.maxY);}
+        return at;
+    }
+    int64_t distance(int id,int x,int y)const{
+        if(id<0)return std::numeric_limits<int64_t>::max();
+        const auto& n=nodes_[id];
+        const int64_t dx=std::max({int64_t(0),int64_t(n.minX)-x,int64_t(x)-n.maxX});
+        const int64_t dy=std::max({int64_t(0),int64_t(n.minY)-y,int64_t(y)-n.maxY});
+        return dx*dx+dy*dy;
+    }
+    void visit(int id,int x,int y,Neighbors& out)const{
+        if(id<0||(out.count==4&&distance(id,x,y)>out.distance[3]))return;
+        const auto& n=nodes_[id];insertNeighbor(out,sf_,x,y,n.id);
+        int l=n.left,r=n.right;if(distance(r,x,y)<distance(l,x,y))std::swap(l,r);
+        visit(l,x,y,out);visit(r,x,y,out);
+    }
+public:
+    NeighborIndex(const Surface& sf,const std::vector<size_t>& indices):sf_(sf){
+        if(indices.size()<16||indices.size()*4>=sf.samples.size())return;
+        auto ids=indices;nodes_.reserve(ids.size());root_=build(ids,0,ids.size(),0);
+    }
+    bool active()const{return root_>=0;}
+    Neighbors query(int x,int y)const{Neighbors out;visit(root_,x,y,out);return out;}
+};
 template<class Known> inline Neighbors nearest(const Surface& sf,int x,int y,Known known,const std::vector<size_t>& indices){
     Neighbors out;
     if(sf.cols<=0||sf.rows<=0||sf.step<=0||indices.empty())return out;
@@ -63,8 +101,14 @@ template<class Known> inline Neighbors nearest(const Surface& sf,int x,int y,Kno
     };
     for(int radius=0;radius<std::max(sf.cols,sf.rows);++radius){
         if(radius==0)visit(gx,gy);
-        else{for(int a=-radius;a<=radius;++a){visit(gx+a,gy-radius);visit(gx+a,gy+radius);}
-            for(int b=-radius+1;b<radius;++b){visit(gx-radius,gy+b);visit(gx+radius,gy+b);}}
+        else{
+            const int ax=std::max(-radius,-gx),bx=std::min(radius,sf.cols-1-gx);
+            if(gy-radius>=0)for(int a=ax;a<=bx;++a)visit(gx+a,gy-radius);
+            if(gy+radius<sf.rows)for(int a=ax;a<=bx;++a)visit(gx+a,gy+radius);
+            const int ay=std::max(-radius+1,-gy),by=std::min(radius-1,sf.rows-1-gy);
+            if(gx-radius>=0)for(int b=ay;b<=by;++b)visit(gx-radius,gy+b);
+            if(gx+radius<sf.cols)for(int b=ay;b<=by;++b)visit(gx+radius,gy+b);
+        }
         // Use strict inequality to retain deterministic ties. The last
         // shortened cell still has its center inside that cell.
         const int64_t lower=int64_t(radius)*sf.step;

@@ -1,5 +1,7 @@
 #pragma once
 #include "matrix.h"
+#include <future>
+#include <thread>
 namespace m3d::escargot {
 inline float linear(float x){x=sat(x);return x<=.04045f?x/12.92f:std::pow((x+.055f)/1.055f,2.4f);}
 template<size_t N> inline const std::array<float,N>& linearLut(){
@@ -50,17 +52,16 @@ inline std::vector<RowEvent> rowEvents(const std::vector<const Layer*>& layers){
         return a.enter<b.enter;
     });return events;
 }
-inline void compose(Surface& sf,const Scene& scene,Result& stats,bool reuse=true){
+inline void composeRows(Surface& sf,const Scene& scene,Result& stats,bool reuse,int firstRow,int endRow,
+                        const NeighborIndex& completeIndex,const NeighborIndex& receiverIndex){
     const Rect r=sf.candidate.bounds;
-    sf.image.clear();if(!r.valid()||sf.layers.empty())return;
-    sf.image.resize(size_t(r.w)*r.h);
     std::vector<Contribution> values;values.reserve(sf.layers.size());
     std::vector<const Layer*> rowLayers,active;rowLayers.reserve(sf.layers.size());active.reserve(sf.layers.size());
     // Cache only within an unchanged span, only if no partial layer may
     // alter its neighbors. No cross-frame reuse, no approximate cache.
     const bool noPartial=std::all_of(sf.layers.begin(),sf.layers.end(),[](const auto& kv){return kv.second.partial.empty();});
     const bool canReuse=reuse&&sf.sameKnownSet&&noPartial;
-    for(int y=r.y;y<r.y+r.h;++y){
+    for(int y=firstRow;y<endRow;++y){
         rowLayers.clear();active.clear();
         for(const auto& kv:sf.layers){const auto& b=kv.second.bounds;if(y>=b.y&&y<b.y+b.h)rowLayers.push_back(&kv.second);}
         const auto events=rowEvents(rowLayers);
@@ -76,13 +77,13 @@ inline void compose(Surface& sf,const Scene& scene,Result& stats,bool reuse=true
             bool cached=false;Neighbors previous{};Pixel previousPixel{};
             for(;x<end;++x){
             auto& p=sf.image[size_t(y-r.y)*r.w+x-r.x];
-            const auto complete=nearestComplete(sf,x,y);++stats.completeSearches;
+            const auto complete=completeIndex.active()?completeIndex.query(x,y):nearestComplete(sf,x,y);++stats.completeSearches;
             if(canReuse&&cached&&sameStencil(previous,complete)){
                 p=previousPixel;++stats.reusedCells;continue;
             }
             ++stats.composedCells;
             auto remember=[&]{if(canReuse){cached=true;previous=complete;previousPixel=p;}};
-            auto receiver=complete;if(!sf.sameKnownSet){receiver=nearestReceiver(sf,x,y);++stats.receiverSearches;}
+            auto receiver=complete;if(!sf.sameKnownSet){receiver=receiverIndex.active()?receiverIndex.query(x,y):nearestReceiver(sf,x,y);++stats.receiverSearches;}
             if(!receiverAt(sf,x,y,p.receiverDepth,p.weight,receiver)||p.weight<=0){++stats.zero;remember();continue;}
             values.clear();
             // A common four-observation coverage mask is exact for original
@@ -141,6 +142,36 @@ inline void compose(Surface& sf,const Scene& scene,Result& stats,bool reuse=true
             }
         }
     }
+}
+// Independent rows, immutable observations and lighting snapshot, disjoint
+// writes. Parallelism is deliberately bounded; small footprints stay serial.
+inline void mergeCompositionStats(Result& a,const Result& b){
+    a.reconstructed+=b.reconstructed;a.zero+=b.zero;
+    a.completeSearches+=b.completeSearches;a.receiverSearches+=b.receiverSearches;
+    a.partialTests+=b.partialTests;a.layerVisits+=b.layerVisits;
+    a.textureSamples+=b.textureSamples;a.opaqueSkipped+=b.opaqueSkipped;
+    a.coverageCells+=b.coverageCells;a.fallbackCells+=b.fallbackCells;
+    a.reusedCells+=b.reusedCells;a.composedCells+=b.composedCells;a.emptySpanCells+=b.emptySpanCells;
+}
+inline void compose(Surface& sf,const Scene& scene,Result& stats,bool reuse=true,unsigned workerLimit=4){
+    const Rect r=sf.candidate.bounds;
+    sf.image.clear();if(!r.valid()||sf.layers.empty())return;
+    sf.image.resize(size_t(r.w)*r.h);
+    const NeighborIndex completeIndex(sf,sf.completeIndices),receiverIndex(sf,sf.receiverIndices);
+    const unsigned workers=std::max(1u,std::min({workerLimit,std::max(1u,std::thread::hardware_concurrency()),
+        unsigned(r.h),unsigned(std::max<uint64_t>(1,uint64_t(r.w)*r.h/65536))}));
+    if(workers==1){composeRows(sf,scene,stats,reuse,r.y,r.y+r.h,completeIndex,receiverIndex);return;}
+    const float day=proxyDaylight;const V direction=proxySun;
+    std::vector<std::future<Result>> futures;futures.reserve(workers-1);
+    auto task=[&](unsigned i){
+        proxyDaylight=day;proxySun=direction;Result local;
+        const int y0=r.y+int(uint64_t(r.h)*i/workers),y1=r.y+int(uint64_t(r.h)*(i+1)/workers);
+        composeRows(sf,scene,local,reuse,y0,y1,completeIndex,receiverIndex);
+        return local;
+    };
+    for(unsigned i=1;i<workers;++i)futures.push_back(std::async(std::launch::async,task,i));
+    mergeCompositionStats(stats,task(0));
+    for(auto& future:futures)mergeCompositionStats(stats,future.get());
 }
 inline std::vector<Pixel> composeScreen(const Result& frame,int w,int h){
     // Diagnostic projection only. Native renderer must match actual receiving

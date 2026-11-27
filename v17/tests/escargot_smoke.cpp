@@ -69,5 +69,13 @@ int main(){
     if(!e::eligible(true,false,1,0,.8f,P::Unspecified,e::Mode::Reflection))return 27;
     if(e::eligible(true,true,1,1,0,P::Disabled,e::Mode::Reflection))return 28;
     if(!e::eligible(false,false,0,0,.9f,P::Enabled,e::Mode::Reflection))return 29;
+    // Exact sparse index versus existing exhaustive/ring reference.
+    e::Surface grid;grid.candidate.bounds={0,0,32,32};grid.cols=grid.rows=32;grid.step=1;grid.samples.resize(1024);
+    for(size_t i=0;i<grid.samples.size();++i){auto& s=grid.samples[i];s.x=int(i%32);s.y=int(i/32);s.complete=(i%19==0);}
+    e::makeLayers(grid);e::NeighborIndex index(grid,grid.completeIndices);if(!index.active())return 30;
+    for(int y=0;y<32;++y)for(int x=0;x<32;++x){
+        auto a=e::nearestComplete(grid,x,y),b=index.query(x,y);
+        if(!e::sameStencil(a,b)||a.distance!=b.distance)return 31;
+    }
     return 0;
 }
