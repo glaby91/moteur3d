@@ -49,6 +49,7 @@ Texture2D<float4> zReflection0 : register(t9);
 Texture2D<float4> zReflection1 : register(t10);
 Texture2D<float4> escColor : register(t11);
 Texture2D<float4> escMeta : register(t12);
+StructuredBuffer<float4> escPacket : register(t13);
 SamplerState wrapSampler : register(s0);
 SamplerState probeSampler : register(s1);
 struct VSIn { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; uint mat:MATERIAL; uint primitiveId:TRIID; uint receiverId:RECEIVERID; };
@@ -140,9 +141,119 @@ bool sampleOptical(VSOut i,float2 distortion,out float3 reflected){
     reflected=slot==0?zReflection0.SampleLevel(probeSampler,uv,0).rgb:zReflection1.SampleLevel(probeSampler,uv,0).rgb;
     return true;
 }
+// Compact exact top-four search. Integer pixel positions and stable sample
+// IDs preserve measured zeros and deterministic equidistant ties.
+void escNearest(uint start,uint count,int2 pixel,out uint4 addr,out uint4 dist,out uint n){
+    addr=0;dist=0xffffffffu;n=0;uint4 ids=0xffffffffu;
+    [loop] for(uint j=0;j<count;++j){
+        uint a=start+3*j;float4 v=escPacket[a];int2 d=int2(v.xy)-pixel;
+        uint dd=uint(dot(float2(d),float2(d))),id=uint(v.z);
+        [unroll] for(uint k=0;k<4;++k){
+            if(dd<dist[k]||(dd==dist[k]&&id<ids[k])){
+                [unroll] for(int m=3;m>0;--m){if(uint(m)>k){addr[m]=addr[m-1];dist[m]=dist[m-1];ids[m]=ids[m-1];}}
+                addr[k]=a;dist[k]=dd;ids[k]=id;break;
+            }
+        }
+    }
+    n=min(count,4u);if(n>0&&dist.x==0)n=1;
+}
+bool escGpuSample(VSOut i,out float3 reflected,out float coverage,out float weight){
+    reflected=0;coverage=0;weight=0;
+    if(i.receiverId==0u||i.receiverId>uint(escPacket[1].x))return false;
+    uint rec=2+2*i.receiverId;float4 rect=escPacket[rec],desc=escPacket[rec+1];
+    int2 pixel=int2(i.p.xy),local=pixel-int2(rect.xy);
+    if(desc.z!=float(i.mat+1u)||any(local<0)||any(local>=int2(rect.zw)))return false;
+    uint tileSize=uint(escPacket[1].y);if(tileSize==0u)return false;
+    uint2 tile=uint2(local)/tileSize;
+    float4 td=escPacket[uint(desc.x)+tile.y*uint(desc.y)+tile.x];
+    if(td.y<=0||td.w<=0)return false;
+    uint4 ra,rd;uint rn;escNearest(uint(td.x),uint(td.y),pixel,ra,rd,rn);
+    if(rn==1&&rd.x==0&&escPacket[ra.x].w<.5)return false;
+    float3 geom=normalize(i.n),view=normalize(i.world-eye);
+    if(dot(geom,view)>0)geom=-geom;
+    float3 ray=reflect(view,geom);float wr=0;uint positive=0;bool receiverMatch=false;
+    // Geometry is not reconstructed by averaging ray depths. Exact raster
+    // receiver ID and a local tangent-plane check reject unrelated faces.
+    [loop] for(uint j=0;j<rn;++j){
+        if(escPacket[ra[j]].w<.5)continue;
+        float4 pos=escPacket[ra[j]+1],normal=escPacket[ra[j]+2];
+        wr+=pos.w;++positive;
+        float3 delta=i.world-pos.xyz;
+        if(abs(dot(geom,normal.xyz))>.80&&abs(dot(delta,normal.xyz))<max(.025,.025*length(delta)))receiverMatch=true;
+    }
+    if(!positive||!receiverMatch)return false;weight=saturate(wr/positive);
+    // Each contributing source layer has its own top-four observations.
+    // Sort locally from far to near; 64 is a packet validation limit per
+    // tile, not a global optical surface cap.
+    float4 uvDepthAlpha[64];float4 normalMat[64];uint masks[64];uint layerRefs[64];
+    uint used=0;bool common=desc.w>.5;uint lanes=1;
+    [loop] for(uint l=0;l<uint(td.w);++l){
+        uint base=uint(td.z)+7*l;float4 info=escPacket[base],bounds=escPacket[base+1];
+        int2 q=pixel-int2(bounds.xy);if(any(q<0)||any(q>=int2(bounds.zw)))continue;
+        uint4 a,d;uint n;escNearest(uint(info.x),uint(info.y),pixel,a,d,n);if(!n)continue;
+        if(common)lanes=n;
+        float4 total=0;float3 normalSum=0;float2 uvSum=0,uvMin=float2(1e20,1e20),uvMax=-uvMin,seed=0;
+        uint count=0,uvCount=0,mask=0;float primitive=-1;
+        [loop] for(uint j=0;j<n;++j){
+            if(escPacket[a[j]].w<.5)continue;
+            float4 value=escPacket[a[j]+1],nr=escPacket[a[j]+2];
+            if(count==0){seed=value.xy;primitive=nr.w;}
+            ++count;mask|=1u<<j;total.zw+=value.zw;normalSum+=nr.xyz;
+            if(nr.w==primitive||all(abs(value.xy-seed)<.5)){uvSum+=value.xy;++uvCount;}
+            uvMin=min(uvMin,value.xy);uvMax=max(uvMax,value.xy);
+        }
+        if(!count)continue;
+        float2 uv=uvSum/max(1u,uvCount);float depth=total.z/count,alpha=saturate(total.w/count);
+        // A coherent planar UV chart has a continuous geometric transform.
+        // Four measured positives are required, no edge extrapolation beyond
+        // their local UV envelope. Exact samples retain their original UV.
+        if(info.w>.5&&n==4&&count==4&&uvCount==4){
+            float4 origin=escPacket[base+2],plane=escPacket[base+3];
+            float den=dot(ray,plane.xyz);
+            if(abs(den)>.00001){
+                float t=dot(origin.xyz-i.world,plane.xyz)/den;
+                if(t>0){
+                    float3 delta=i.world+ray*t-origin.xyz;
+                    float2 projected=float2(origin.w+dot(escPacket[base+4].xyz,delta),plane.w+dot(escPacket[base+5].xyz,delta));
+                    float2 margin=max((uvMax-uvMin)*.10,float2(.002,.002));
+                    if(all(projected>=uvMin-margin)&&all(projected<=uvMax+margin))uv=projected;
+                }
+            }
+        }
+        if(!common){alpha*=float(count)/n;mask=1u;}
+        if(alpha<=0)continue;
+        uint k=used; // packet bounds guarantee used < 64
+        [loop] while(k>0&&uvDepthAlpha[k-1].z<depth){
+            uvDepthAlpha[k]=uvDepthAlpha[k-1];normalMat[k]=normalMat[k-1];masks[k]=masks[k-1];layerRefs[k]=layerRefs[k-1];--k;
+        }
+        uvDepthAlpha[k]=float4(uv,depth,alpha);
+        normalMat[k]=float4(normalSum*rsqrt(max(dot(normalSum,normalSum),1e-12)),info.z);
+        masks[k]=mask;layerRefs[k]=base;++used;
+    }
+    uint blocked=0;
+    [loop] for(int k=int(used)-1;k>=0;--k){masks[k]&=~blocked;if(uvDepthAlpha[k].w>=1.0)blocked|=masks[k];}
+    float4 acc[4];[unroll]for(uint j=0;j<4;++j)acc[j]=0;
+    float4 lighting=escPacket[0];
+    [loop] for(uint k=0;k<used;++k){
+        if(!masks[k])continue;
+        float4 val=uvDepthAlpha[k],nr=normalMat[k],emission=escPacket[layerRefs[k]+6];
+        uint mat=uint(nr.w);float2 uv=val.xy;
+        if(emission.w>.5)uv=saturate(uv);
+        float layer=materialTextureDetail[mat].x;
+        float3 color;
+        if(layer>=0)color=preservedAlbedo.SampleLevel(probeSampler,float3(uv,layer),0).rgb;
+        else if(emission.w>.5)color=albedo.SampleLevel(probeSampler,float3(uv,mat),0).rgb;
+        else color=albedo.SampleLevel(wrapSampler,float3(uv,mat),0).rgb;
+        color=color*(.12+.35*lighting.w+.48*lighting.w*saturate(dot(nr.xyz,lighting.xyz)))+emission.xyz;
+        [unroll]for(uint j=0;j<4;++j){if(j<lanes&&(masks[k]&(1u<<j)))acc[j]=float4(color*val.w,val.w)+acc[j]*(1-val.w);}
+    }
+    float4 result=(acc[0]+acc[1]+acc[2]+acc[3])/max(1u,lanes);
+    coverage=saturate(result.a);if(coverage<=.00001)return false;reflected=max(result.rgb/coverage,0);return true;
+}
 bool sampleEscargot(VSOut i,out float3 reflected,out float coverage,out float weight){
     reflected=0;coverage=0;weight=0;
     if(zPlaneIds.z>=0||zPlaneIds.w>.5)return false;
+    if(zPlaneIds.z< -1.5)return escGpuSample(i,reflected,coverage,weight);
     int2 p=int2(i.p.xy);float4 m=escMeta.Load(int3(p,0));
     if(i.receiverId==0u||m.w!=float(i.receiverId)||m.y!=float(i.mat+1u)||m.x<=0)return false;
     float d=length(i.world-eye);

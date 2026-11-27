@@ -1,4 +1,5 @@
 #include "../escargot/debug.h"
+#include "../escargot/gpu_packet.h"
 #include <set>
 namespace e=m3d::escargot;
 int main(){
@@ -76,6 +77,13 @@ int main(){
     for(int y=0;y<32;++y)for(int x=0;x<32;++x){
         auto a=e::nearestComplete(grid,x,y),b=index.query(x,y);
         if(!e::sameStencil(a,b)||a.distance!=b.distance)return 31;
+    }
+    // Conservative tile shortlist must contain the exact top four for every cell.
+    e::Rect tile{4,7,13,17};auto shortIds=e::shortlist(grid,grid.completeIndices,tile);
+    for(int y=tile.y;y<tile.y+tile.h;++y)for(int x=tile.x;x<tile.x+tile.w;++x){
+        auto truth=e::nearestComplete(grid,x,y);e::Neighbors shortN;
+        for(auto id:shortIds)e::insertNeighbor(shortN,grid,x,y,id);
+        if(!e::sameStencil(truth,shortN)||truth.distance!=shortN.distance)return 32;
     }
     return 0;
 }

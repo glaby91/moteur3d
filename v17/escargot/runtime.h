@@ -26,7 +26,7 @@ public:
     }
     Prepared(const Prepared&)=delete;Prepared& operator=(const Prepared&)=delete;
     const std::vector<uint32_t>& owners()const{return owners_;}
-    Result frame(const Camera& cam,int w,int h,const Options& opt={}){
+    Result frame(const Camera& cam,int w,int h,const Options& opt={},bool composeCpu=true){
         const auto begin=FrameClock::now();Result out;out.prepareMs=prepareMs_;
         if(!error_.empty()){out.error=error_;return out;}
         if(rt_.renderScene.gpuCacheRevision!=revision_||opt.mode!=mode_){out.error="stale prepared scene/mode";return out;}
@@ -49,7 +49,7 @@ public:
         }
         out.matrixMs=elapsedMs(t);t=FrameClock::now();
         escargotLightingSnapshot(proxyDaylight,proxySun);
-        for(auto& s:out.surfaces)if(!s.deferred)compose(s,rt_.renderScene,out);
+        if(composeCpu)for(auto& s:out.surfaces)if(!s.deferred)compose(s,rt_.renderScene,out);
         out.compositionMs=elapsedMs(t);out.totalMs=elapsedMs(begin);out.ok=out.rays<=opt.rayBudget;return out;
     }
 };

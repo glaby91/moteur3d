@@ -168,6 +168,7 @@ bool renderLumaTraceNative(const Scene& s,const LumaTraceBvh4& bvh4,
     const ShadowMap& sm,const Camera& cam,int w,int h,void* hwnd,
     Stats& stats,std::wstring& error);
 bool renderLumaTraceEscargotPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring&);
+bool renderLumaTraceEscargotGpuPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring&);
 void releaseDirectX11NativeForCurrentThread();
 // Experimental Vulkan 1.0 Raster GPU backend; offscreen ARGB32 preview, shared Scene/Camera API.
 bool renderVulkanPreview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);
