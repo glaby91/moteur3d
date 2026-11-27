@@ -51,8 +51,8 @@ Texture2D<float4> escColor : register(t11);
 Texture2D<float4> escMeta : register(t12);
 SamplerState wrapSampler : register(s0);
 SamplerState probeSampler : register(s1);
-struct VSIn { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; uint mat:MATERIAL; uint primitiveId:TRIID; };
-struct VSOut { float4 p:SV_POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; float3 world:TEXCOORD1; nointerpolation uint mat:MATERIAL; nointerpolation uint primitiveId:TEXCOORD2; nointerpolation uint opticalId:TEXCOORD3; };
+struct VSIn { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; uint mat:MATERIAL; uint primitiveId:TRIID; uint receiverId:RECEIVERID; };
+struct VSOut { float4 p:SV_POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; float3 world:TEXCOORD1; nointerpolation uint mat:MATERIAL; nointerpolation uint primitiveId:TEXCOORD2; nointerpolation uint opticalId:TEXCOORD3; nointerpolation uint receiverId:TEXCOORD4; };
 VSOut VSMain(VSIn i) {
     VSOut o;
     float3 q = i.p - eye;
@@ -65,7 +65,7 @@ VSOut VSMain(VSIn i) {
     // pull geometry behind the near plane onto the near plane instead of clipping it.
     o.p = float4(nx * safeZ, ny * safeZ, depth, z);
     o.n = i.n; o.uv = i.uv; o.world=i.p; o.mat = min(i.mat, materialCount - 1);o.primitiveId=i.primitiveId;
-    o.opticalId=0u;
+    o.opticalId=0u;o.receiverId=i.receiverId;
     if(i.primitiveId!=0xffffffffu && (i.primitiveId&0x80000000u)!=0u){o.opticalId=(i.primitiveId&0x7fffffffu)+1u;o.primitiveId=0xffffffffu;}
     // The pixel shader already skips local radiance for the sentinel.
     // Preserve all other LumaTrace lighting controls and all draw calls.
@@ -106,7 +106,7 @@ VSOut VSBoxMain(VSBoxIn i) {
             :(abs(n.x)>=abs(n.z)?p.zy*i.uvScale:p.xy*i.uvScale);
     }
     VSIn raw;
-    raw.p=p;raw.n=n;raw.uv=uv;raw.mat=i.boxMat;raw.primitiveId=i.unusedPrimitiveId;
+    raw.p=p;raw.n=n;raw.uv=uv;raw.mat=i.boxMat;raw.primitiveId=i.unusedPrimitiveId;raw.receiverId=0u;
     return VSMain(raw);
 }
 struct VSEllipseIn {
@@ -120,7 +120,7 @@ VSOut VSEllipseMain(VSEllipseIn i) {
     raw.p=i.center+i.p*i.radii;
     raw.n=normalize(i.n/max(i.radii,float3(.00001,.00001,.00001)));
     raw.uv=i.uv;
-    raw.mat=i.ellipseMat;raw.primitiveId=i.unusedPrimitiveId;
+    raw.mat=i.ellipseMat;raw.primitiveId=i.unusedPrimitiveId;raw.receiverId=0u;
     return VSMain(raw);
 }
 // Common optical slot and projection; material supplies only distortion/composition.
@@ -144,7 +144,7 @@ bool sampleEscargot(VSOut i,out float3 reflected,out float coverage,out float we
     reflected=0;coverage=0;weight=0;
     if(zPlaneIds.z>=0||zPlaneIds.w>.5)return false;
     int2 p=int2(i.p.xy);float4 m=escMeta.Load(int3(p,0));
-    if(m.y!=float(i.mat+1u)||m.x<=0)return false;
+    if(i.receiverId==0u||m.w!=float(i.receiverId)||m.y!=float(i.mat+1u)||m.x<=0)return false;
     float d=length(i.world-eye);
     if(abs(m.x-d)>max(.03,.025*d))return false;
     float4 c=escColor.Load(int3(p,0));coverage=saturate(c.a);weight=saturate(m.z);

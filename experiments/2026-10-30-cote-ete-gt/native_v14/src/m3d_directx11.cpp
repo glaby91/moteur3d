@@ -120,9 +120,9 @@ struct GpuVertexLuma {
     float p[3];
     uint32_t normalPacked;
     float uv[2];
-    uint32_t material,primitiveId;
+    uint32_t material,primitiveId,receiverId;
 };
-static_assert(sizeof(GpuVertexLuma)==32,"LumaTrace packed vertex layout");
+static_assert(sizeof(GpuVertexLuma)==36,"LumaTrace packed vertex layout");
 uint32_t packLumaNormal(const float n[3]){
     const auto pack=[](float v)->uint32_t{
         const uint32_t q=uint32_t(std::lround((std::clamp(v,-1.f,1.f)*0.5f+0.5f)*1023.f));
@@ -1459,16 +1459,17 @@ private:
            error=L"Création shaders multires impossible.";return false;
         }
         if(FAILED(device_->CreateVertexShader(vsCode->GetBufferPointer(),vsCode->GetBufferSize(),nullptr,&vs_))||FAILED(device_->CreatePixelShader(psCode->GetBufferPointer(),psCode->GetBufferSize(),nullptr,&ps_))){error=L"Création des shaders DirectX 11 impossible.";return false;}
-        const D3D11_INPUT_ELEMENT_DESC input[]={{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,p),D3D11_INPUT_PER_VERTEX_DATA,0},{"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,n),D3D11_INPUT_PER_VERTEX_DATA,0},{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,offsetof(GpuVertex,uv),D3D11_INPUT_PER_VERTEX_DATA,0},{"MATERIAL",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertex,material),D3D11_INPUT_PER_VERTEX_DATA,0},{"TRIID",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertex,primitiveId),D3D11_INPUT_PER_VERTEX_DATA,0}};
-        if(FAILED(device_->CreateInputLayout(input,5,vsCode->GetBufferPointer(),vsCode->GetBufferSize(),&layout_))){error=L"Création du format de sommet DirectX 11 impossible.";return false;}
+        const D3D11_INPUT_ELEMENT_DESC input[]={{"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,p),D3D11_INPUT_PER_VERTEX_DATA,0},{"NORMAL",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertex,n),D3D11_INPUT_PER_VERTEX_DATA,0},{"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,offsetof(GpuVertex,uv),D3D11_INPUT_PER_VERTEX_DATA,0},{"MATERIAL",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertex,material),D3D11_INPUT_PER_VERTEX_DATA,0},{"TRIID",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertex,primitiveId),D3D11_INPUT_PER_VERTEX_DATA,0},{"RECEIVERID",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertex,receiverId),D3D11_INPUT_PER_VERTEX_DATA,0}};
+        if(FAILED(device_->CreateInputLayout(input,6,vsCode->GetBufferPointer(),vsCode->GetBufferSize(),&layout_))){error=L"Création du format de sommet DirectX 11 impossible.";return false;}
         const D3D11_INPUT_ELEMENT_DESC lumaInput[]={
             {"POSITION",0,DXGI_FORMAT_R32G32B32_FLOAT,0,offsetof(GpuVertexLuma,p),D3D11_INPUT_PER_VERTEX_DATA,0},
             {"NORMAL",0,DXGI_FORMAT_R10G10B10A2_UNORM,0,offsetof(GpuVertexLuma,normalPacked),D3D11_INPUT_PER_VERTEX_DATA,0},
             {"TEXCOORD",0,DXGI_FORMAT_R32G32_FLOAT,0,offsetof(GpuVertexLuma,uv),D3D11_INPUT_PER_VERTEX_DATA,0},
             {"MATERIAL",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertexLuma,material),D3D11_INPUT_PER_VERTEX_DATA,0},
-            {"TRIID",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertexLuma,primitiveId),D3D11_INPUT_PER_VERTEX_DATA,0}
+            {"TRIID",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertexLuma,primitiveId),D3D11_INPUT_PER_VERTEX_DATA,0},
+            {"RECEIVERID",0,DXGI_FORMAT_R32_UINT,0,offsetof(GpuVertexLuma,receiverId),D3D11_INPUT_PER_VERTEX_DATA,0}
         };
-        if(FAILED(device_->CreateInputLayout(lumaInput,5,vsCode->GetBufferPointer(),vsCode->GetBufferSize(),&lumaLayout_))){
+        if(FAILED(device_->CreateInputLayout(lumaInput,6,vsCode->GetBufferPointer(),vsCode->GetBufferSize(),&lumaLayout_))){
             error=L"Création du format de sommet compact LumaTrace impossible.";return false;
         }
         if(FAILED(device_->CreateVertexShader(boxVsCode->GetBufferPointer(),boxVsCode->GetBufferSize(),nullptr,&boxVs_))){
@@ -1659,6 +1660,7 @@ private:
         for(size_t objectIndex=0;objectIndex<scene.obj.size();++objectIndex){
             if(!skipSource.empty() && skipSource[objectIndex])continue;
             const Obj& o=scene.obj[objectIndex];
+            mesh.currentReceiverId=lumaTrace&&scene.escargotReceiverIds.size()==scene.obj.size()?scene.escargotReceiverIds[objectIndex]:0u;
             const uint32_t m=o.mat;
             if(m>=scene.mat.size()){error=L"DirectX 11 : indice de matériau invalide.";return false;}
             const float uvScale=uvScaleForMaterial(scene,m);
@@ -1710,7 +1712,7 @@ private:
         }
         // The optional V17 ground is not in Scene::order/BVH; leave it out of
         // LumaTrace's per-triangle radiance lookup while keeping raster output.
-        mesh.currentPrimitiveId=lumaTrace?0xffffffffu:0u;
+        mesh.currentPrimitiveId=lumaTrace?0xffffffffu:0u;mesh.currentReceiverId=0;
         mesh.ground(scene);
         if(mesh.limitExceeded){error=L"Scène trop grande pour l’aperçu DirectX 11 (limite de sécurité mémoire).";return false;}
         if(mesh.vertices.empty()&&mesh.transparent.empty()&&boxData.empty()&&ellipses_.empty()&&foliage_.empty()){
@@ -1858,7 +1860,7 @@ private:
                     std::copy(std::begin(source.p),std::end(source.p),std::begin(packed.p));
                     packed.normalPacked=packLumaNormal(source.n);
                     std::copy(std::begin(source.uv),std::end(source.uv),std::begin(packed.uv));
-                    packed.material=source.material;packed.primitiveId=source.primitiveId;
+                    packed.material=source.material;packed.primitiveId=source.primitiveId;packed.receiverId=source.receiverId;
                 }
                 geometryData=packedLumaVertices.data();geometryStride=sizeof(GpuVertexLuma);
             }

@@ -25,7 +25,14 @@ inline Rect projectBounds(V lo,V hi,const Camera& c,int w,int h){
     const int x1=int(std::ceil(clampf(maxx,0.f,float(w)))),y1=int(std::ceil(clampf(maxy,0.f,float(h))));
     return {x0,y0,x1-x0,y1-y0};
 }
-inline std::vector<Candidate> candidates(const v16::Runtime& rt,const v16::SceneDatabase& db,const Camera& cam,int w,int h,Mode mode){
+// Deliberate optical policy: ordinary dielectric Fresnel is not eligibility.
+inline bool eligible(bool water,bool mirror,float transmissionValue,float metal,float rough,zreflect::Permission perm,Mode mode){
+    if(perm==zreflect::Permission::Disabled||perm==zreflect::Permission::Invalid)return false;
+    if(mode==Mode::Refraction)return water||transmissionValue>=.10f;
+    if(water||mirror||perm==zreflect::Permission::Enabled)return true;
+    return (transmissionValue>=.10f&&rough<=.25f)||(metal>=.80f&&rough<=.25f);
+}
+inline std::vector<Candidate> staticCandidates(const v16::Runtime& rt,const v16::SceneDatabase& db,Mode mode){
     const auto instances=zreflect::authored(db,"instances"),materials=zreflect::authored(db,"materials");
     const auto& s=rt.renderScene;std::vector<Candidate> out;
     for(int i=0;i<rt.objects.size();++i){
@@ -35,19 +42,23 @@ inline std::vector<Candidate> candidates(const v16::Runtime& rt,const v16::Scene
         const auto perm=zreflect::resolvePermission(instances.value(o.id),authored,db.manifest);
         if(perm==zreflect::Permission::Disabled||perm==zreflect::Permission::Invalid)continue;
         const bool water=waterMaterial(mat);
-        const bool transparent=water||mat.transmissionPercent>0;
         const float rough=clampf(float(authored.value("roughness").toDouble(.72)),0.f,1.f);
-        const bool optical=mode==Mode::Refraction?transparent:
-            (transparent||mat.metallic>.15f||mat.reflectivityPercent>0||authored.value("opticalMirror").toBool()||perm==zreflect::Permission::Enabled);
-        if(!optical)continue;
+        if(!eligible(water,authored.value("opticalMirror").toBool(),transmission(mat),mat.metallic,rough,perm,mode))continue;
         V lo{INF,INF,INF},hi{-INF,-INF,-INF};
         for(int j=0;j<o.triangleCount;++j){const auto& t=s.obj[size_t(o.firstTriangle)+j];
             lo={std::min(lo.x,t.mn.x),std::min(lo.y,t.mn.y),std::min(lo.z,t.mn.z)};
             hi={std::max(hi.x,t.mx.x),std::max(hi.y,t.mx.y),std::max(hi.z,t.mx.z)};
         }
-        Rect r=projectBounds(lo,hi,cam,w,h);if(!r.valid())continue;
-        const double priority=std::sqrt(double(r.w)*r.h)*(.25+.75*(1-rough));
-        out.push_back({uint32_t(i)+1,mid,r,lo,hi,priority,0});
+        out.push_back({uint32_t(i)+1,mid,{},lo,hi,.25+.75*(1-rough),0});
+    }return out;
+}
+inline std::vector<Candidate> projectCandidates(const std::vector<Candidate>& catalogue,const Camera& cam,int w,int h){
+    std::vector<Candidate> out;out.reserve(catalogue.size());
+    for(auto c:catalogue){
+        c.bounds=projectBounds(c.lo,c.hi,cam,w,h);
+        if(!c.bounds.valid()||uint64_t(c.bounds.w)*c.bounds.h<16)continue;
+        c.priority*=std::sqrt(double(c.bounds.w)*c.bounds.h);
+        out.push_back(c);
     }
     // Deterministic, proportional allocation; budget is a query count, not a cap on surfaces.
     std::sort(out.begin(),out.end(),[](const Candidate& a,const Candidate& b){return a.priority>b.priority||(a.priority==b.priority&&a.object<b.object);});

@@ -12,8 +12,8 @@
 #include <vector>
 
 namespace m3d::d3d11 {
-struct GpuVertex { float p[3], n[3], uv[2]; uint32_t material,primitiveId; };
-static_assert(sizeof(GpuVertex)==40,"V17 raster vertex layout");
+struct GpuVertex { float p[3], n[3], uv[2]; uint32_t material,primitiveId,receiverId; };
+static_assert(sizeof(GpuVertex)==44,"V17 raster vertex layout");
 struct TransparentTriangle { GpuVertex v[3]; V center; };
 inline void put(GpuVertex& v,V p,V n,float u,float vv,uint32_t mat) {
     v={{p.x,p.y,p.z},{n.x,n.y,n.z},{u,vv},mat,0};
@@ -113,11 +113,11 @@ public:
     std::vector<TransparentTriangle> transparent;
     bool transparentMaterial=false;
     bool limitExceeded=false;
-    uint32_t currentPrimitiveId=0;
+    uint32_t currentPrimitiveId=0,currentReceiverId=0;
     void tri(V a,V b,V c,V na,V nb,V nc,float ua,float va,float ub,float vb,float uc,float vc,uint32_t mat) {
         if(vertices.size()+transparent.size()*3>12000000u-3u){limitExceeded=true;return;}
         GpuVertex v[3]{};put(v[0],a,na,ua,va,mat);put(v[1],b,nb,ub,vb,mat);put(v[2],c,nc,uc,vc,mat);
-        for(auto& vertex:v)vertex.primitiveId=currentPrimitiveId;
+        for(auto& vertex:v){vertex.primitiveId=currentPrimitiveId;vertex.receiverId=currentReceiverId;}
         if(transparentMaterial){TransparentTriangle t{};std::copy(v,v+3,t.v);t.center=(a+b+c)/3.f;transparent.push_back(t);}
         else vertices.insert(vertices.end(),v,v+3);
     }

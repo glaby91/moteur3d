@@ -62,5 +62,12 @@ int main(){
     // Partial observation invalidates reuse (even if unrelated source).
     sf.samples[0].complete=false;e::makeLayers(sf);e::Result partialStats;e::compose(sf,scene,partialStats);
     if(partialStats.reusedCells)return 23;
+    using P=m3d::zreflect::Permission;
+    if(e::eligible(false,false,0,.0f,.1f,P::Auto,e::Mode::Reflection))return 24;
+    if(!e::eligible(false,false,0,.9f,.15f,P::Auto,e::Mode::Reflection))return 25;
+    if(e::eligible(false,false,0,.9f,.5f,P::Auto,e::Mode::Reflection))return 26;
+    if(!e::eligible(true,false,1,0,.8f,P::Unspecified,e::Mode::Reflection))return 27;
+    if(e::eligible(true,true,1,1,0,P::Disabled,e::Mode::Reflection))return 28;
+    if(!e::eligible(false,false,0,0,.9f,P::Enabled,e::Mode::Reflection))return 29;
     return 0;
 }

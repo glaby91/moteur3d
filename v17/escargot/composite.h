@@ -150,7 +150,7 @@ inline std::vector<Pixel> composeScreen(const Result& frame,int w,int h){
         for(int y=0;y<r.h;++y)for(int x=0;x<r.w;++x){
             const auto& p=s.image[size_t(y)*r.w+x];if(p.alpha<=0||p.weight<=0)continue;
             auto& q=out[size_t(y+r.y)*w+x+r.x];
-            if(!q.alpha||p.receiverDepth<q.receiverDepth){q=p;q.receiverMaterial=s.candidate.material;}
+            if(!q.alpha||p.receiverDepth<q.receiverDepth){q=p;q.receiverMaterial=s.candidate.material;q.receiverObject=s.candidate.object;}
         }
     }return out;
 }

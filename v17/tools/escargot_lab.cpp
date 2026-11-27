@@ -42,7 +42,7 @@ int main(int argc,char** argv){
         {"layerVisits",double(result.layerVisits)},{"textureSamples",double(result.textureSamples)},{"opaqueSkipped",double(result.opaqueSkipped)},
         {"coverageCells",double(result.coverageCells)},{"fallbackCells",double(result.fallbackCells)},
         {"reusedCells",double(result.reusedCells)},{"composedCells",double(result.composedCells)},{"emptySpanCells",double(result.emptySpanCells)},
-        {"matrixMs",result.matrixMs},{"compositionMs",result.compositionMs},{"secondaryRasterPasses",0}};
+        {"prepareOnceMs",result.prepareMs},{"candidateMs",result.candidateMs},{"admissionMs",result.admissionMs},{"escargotTotalMs",result.totalMs},{"staticCandidates",int(result.staticCandidates)},{"matrixMs",result.matrixMs},{"compositionMs",result.compositionMs},{"secondaryRasterPasses",0}};
     const auto bytes=QJsonDocument(data).toJson();if(report.write(bytes)!=bytes.size())return 8;
     QFile csv(out.filePath("matrices.csv"));if(!csv.open(QIODevice::WriteOnly|QIODevice::Text))return 8;
     QTextStream rows(&csv);rows<<"receiver,sample,source,crossing,material,x,y,state,u,v,depth,visibility,opacity\n";

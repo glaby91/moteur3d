@@ -46,7 +46,7 @@ struct Candidate {
     uint32_t budget=0;
 };
 struct Layer { LayerKey key; Rect bounds; std::map<size_t,Value> measured; std::vector<size_t> partial; };
-struct Pixel { V rgb{}; float alpha=0,weight=0,receiverDepth=0; uint32_t receiverMaterial=0; };
+struct Pixel { V rgb{}; float alpha=0,weight=0,receiverDepth=0; uint32_t receiverMaterial=0,receiverObject=0; };
 struct Surface {
     Candidate candidate;
     int step=1,cols=0,rows=0;
@@ -64,7 +64,8 @@ struct Result {
     uint64_t measured=0,reconstructed=0,zero=0,outputCells=0;
     uint64_t completeSearches=0,receiverSearches=0,partialTests=0,layerVisits=0,textureSamples=0,opaqueSkipped=0,coverageCells=0,fallbackCells=0;
     uint64_t reusedCells=0,composedCells=0,emptySpanCells=0;
-    double matrixMs=0,compositionMs=0;
+    double matrixMs=0,compositionMs=0,prepareMs=0,candidateMs=0,admissionMs=0,totalMs=0;
+    uint32_t staticCandidates=0;
     bool ok=false;
     std::string error;
 };

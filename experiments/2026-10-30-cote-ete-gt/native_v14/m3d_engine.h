@@ -102,6 +102,8 @@ struct OpticalIndexNode { V lo{},hi{}; uint32_t begin=0,end=0,left=0,right=0; bo
 struct OpticalPlane { V normal{},lo{},hi{}; double offset=0,area=0; int side=0; bool forced=false; std::vector<uint32_t> triangles; };
 struct Scene { bool underwaterEnvironment=false; bool finiteGround=false; bool useLegacyWorldLights=true; std::vector<Obj> obj; std::vector<SourceBox> sourceBoxes; std::vector<SourceFoliage> sourceFoliage; std::vector<Node> node; std::vector<uint32_t> order; std::vector<Material> mat; std::vector<Light> lights; int32_t root=-1;
  std::vector<OpticalPlane> opticalPlanes;
+ // Optional experimental source-object IDs; zero = unassigned. Set before A/B mesh creation.
+ std::vector<uint32_t> escargotReceiverIds;
  std::vector<OpticalIndexNode> opticalIndexNodes;
  std::vector<uint32_t> opticalIndexOrder;
  // V16 builder assigns a unique identity after scene construction. Tracked scenes
