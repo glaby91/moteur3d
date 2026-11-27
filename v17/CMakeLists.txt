@@ -87,6 +87,10 @@ add_test(NAME v17_primary_quarter_exact_budget COMMAND v17_primary_quarter_smoke
 # Reuse the proven V16 CPU, Compute and raster engines, plus their tests.
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../v16" "${CMAKE_CURRENT_BINARY_DIR}/v16")
 
+# CSP001 offline compiler. Uses the same scene builder as the runtime.
+add_executable(cse_scene_precompiler tools/cse_scene_precompiler.cpp)
+target_link_libraries(cse_scene_precompiler PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
+
 # The Windows ICO is compiled into the EXE so Explorer/taskbar recognize V17.
 # Generate all 16..256px sizes from the local brand artwork; no external download.
 if(WIN32)

@@ -268,7 +268,8 @@ public:
             error=L"Le BVH4 LumaTrace n’a pas été préparé pour cette scène.";return false;
         }
         if(!ensureDevice(error)||!ensureScene(scene,error,lumaBvh))return false;
-        const bool planarReflection=lumaBvh&&waterReflectionPlane_.valid;
+        const bool planarReflection=lumaBvh&&waterReflectionPlane_.valid&&
+            zreflect::potentiallyVisible(waterReflectionPlane_.bounds,cam);
         if(!ensureShadow(shadows,error)||
            (planarReflection&&!ensureReflectionTarget(std::max(1,w/2),std::max(1,h/2),error))||
            (hybrid&&!lumaBvh&&!ensureProbeVolume(scene,error))||

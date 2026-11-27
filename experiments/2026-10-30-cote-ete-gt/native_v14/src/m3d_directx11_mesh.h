@@ -4,6 +4,7 @@
 // geometry preparation only; D3D11 device objects and frame submission stay in
 // the renderer module.
 #include "m3d_engine.h"
+#include "m3d_zreflect_visibility.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -22,7 +23,7 @@ inline void put(GpuVertex& v,V p,V n,float u,float vv,uint32_t mat) {
 // dominant horizontal water surface, preferring the authored pool material.
 // Coplanar triangles are grouped within 1 mm; equal-area box faces select
 // the upper face. Cache this result at mesh rebuild, not per frame.
-struct WaterReflectionPlane { bool valid=false; float y=0.f; };
+struct WaterReflectionPlane { bool valid=false; float y=0.f; zreflect::Bounds bounds; };
 inline WaterReflectionPlane findWaterReflectionPlane(const Scene& scene,
         const std::vector<TransparentTriangle>& triangles) {
     struct Candidate { float y; double area; bool pool; };
@@ -61,6 +62,15 @@ inline WaterReflectionPlane findWaterReflectionPlane(const Scene& scene,
         area+=candidate.area;weightedY+=candidate.area*candidate.y;
     }
     finish();
+    // Union of all eligible water triangles, not just the dominant plane.
+    // Conservative: never reject the view of another water patch near this plane.
+    if(best.valid)for(const auto& t:triangles){
+        const auto mat=t.v[0].material;
+        if(mat>=scene.mat.size()){best.bounds.uncertain=true;continue;}
+        const auto& material=scene.mat[mat];
+        if(!(material.waterSurface||(!material.surfaceAuthored&&material.name=="cse_pool_water")))continue;
+        for(const auto& v:t.v)best.bounds.add({v.p[0],v.p[1],v.p[2]});
+    }
     return best;
 }
 // A reflected orthonormal basis keeps the mirror projection exact even at

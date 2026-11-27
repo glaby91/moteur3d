@@ -1,4 +1,5 @@
 #include "m3d_v16_bridge.h"
+#include "m3d_csp001_bvh.h"
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QHash>
@@ -853,17 +854,23 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
     if(render.obj.empty()){result.error="No triangles generated";return result;}
     result.runtime.geometryBuildMs=stageElapsedMs();
     stageStarted=std::chrono::steady_clock::now();
-    render.order.resize(render.obj.size());
-    std::iota(render.order.begin(),render.order.end(),0u);
-    report(96,QStringLiteral("Construction de l'accélérateur BVH"));
-    render.root=buildBvh(render,0,int(render.order.size()));
-    result.runtime.bvhBuildMs=stageElapsedMs();
-    stageStarted=std::chrono::steady_clock::now();
-    std::wstring lumaError;
-    buildLumaTraceBvh4(render,result.runtime.lumaTraceBvh4,lumaError);
-    if(!lumaError.empty())
-        result.runtime.lumaTraceBvhError=QString::fromStdWString(lumaError);
-    result.runtime.lumaTraceBvhBuildMs=stageElapsedMs();
+    report(96,QStringLiteral("CSP001 : vérification du BVH précalculé"));
+    if(csp001::load(csp001::path(source.rootPath),render,result.runtime.lumaTraceBvh4)){
+        result.runtime.bvhBuildMs=stageElapsedMs();
+        result.runtime.lumaTraceBvhBuildMs=0;
+    }else{
+        render.order.resize(render.obj.size());
+        std::iota(render.order.begin(),render.order.end(),0u);
+        report(96,QStringLiteral("Construction de l'accélérateur BVH"));
+        render.root=buildBvh(render,0,int(render.order.size()));
+        result.runtime.bvhBuildMs=stageElapsedMs();
+        stageStarted=std::chrono::steady_clock::now();
+        std::wstring lumaError;
+        buildLumaTraceBvh4(render,result.runtime.lumaTraceBvh4,lumaError);
+        if(!lumaError.empty())
+            result.runtime.lumaTraceBvhError=QString::fromStdWString(lumaError);
+        result.runtime.lumaTraceBvhBuildMs=stageElapsedMs();
+    }
     report(100,QStringLiteral("Scène prête"));
     return result;
 }
