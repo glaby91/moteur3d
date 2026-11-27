@@ -24,7 +24,7 @@ public:
             descriptors.push_back({uint32_t(patches_.size()),patch.bounds});
             patches_.push_back(std::move(patch));forced_.push_back(p.forced);
         }
-        index_.build(descriptors);
+        if(!index_.restore(descriptors,scene.opticalIndexNodes,scene.opticalIndexOrder))index_.build(descriptors);
     }
     QueryStats select(const Scene& scene,const Camera& c,std::vector<ActivePlane>& out){
         out.clear();auto stats=index_.query(c,shortlist_);

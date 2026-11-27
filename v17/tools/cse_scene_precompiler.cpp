@@ -1,6 +1,7 @@
 #include "src/m3d_v16_bridge.h"
 #include "src/m3d_csp001_bvh.h"
 #include "src/m3d_zreflect_catalog.h"
+#include "src/m3d_zreflect_cache.h"
 #include <QCoreApplication>
 #include <QFileInfo>
 #include <QFile>
@@ -53,8 +54,21 @@ int main(int argc,char** argv){
     const auto root=loaded.scene.rootPath;
     if(!QDir(root).mkpath("precomputed")||
        (!catalogOnly&&!m3d::csp001::save(m3d::csp001::path(root),built.runtime.renderScene,built.runtime.lumaTraceBvh4))||
+       (!catalogOnly&&!m3d::zreflect::saveCache(m3d::zreflect::cachePath(root),built.runtime.renderScene,loaded.scene,manifest))||
        !writeInventory(root,built.runtime,loaded.scene,manifest)){
         log<<"CSP001 write failed\n";return 5;
+    }
+    if(!catalogOnly){
+        auto& s=built.runtime.renderScene;
+        const auto planeCount=s.opticalPlanes.size();
+        s.opticalPlanes.clear();s.opticalIndexNodes.clear();s.opticalIndexOrder.clear();
+        if(!m3d::zreflect::loadCache(m3d::zreflect::cachePath(root),s,loaded.scene,manifest)||s.opticalPlanes.size()!=planeCount){
+            log<<"Z Reflect sidecar roundtrip failed\n";return 6;
+        }
+        if(!m3d::csp001::load(m3d::csp001::path(root),s,built.runtime.lumaTraceBvh4)){
+            log<<"CSP001 sidecar roundtrip failed\n";return 7;
+        }
+        log<<"Precomputed BVH and optical index roundtrip OK; glass planes="<<planeCount<<'\n';
     }
     log<<(catalogOnly?"Z-Reflect diagnostic catalogue written\n":"CSP001 sidecars written\n");return 0;
 }

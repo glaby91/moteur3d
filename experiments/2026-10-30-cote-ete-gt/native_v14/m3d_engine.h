@@ -89,9 +89,12 @@ struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPe
     bool surfaceAuthored=false;
 };
 // Immutable, scene-authored optical patches. No GPU allocations per descriptor.
+struct OpticalIndexNode { V lo{},hi{}; uint32_t begin=0,end=0,left=0,right=0; bool leaf=true; };
 struct OpticalPlane { V normal{},lo{},hi{}; double offset=0,area=0; int side=0; bool forced=false; std::vector<uint32_t> triangles; };
 struct Scene { bool underwaterEnvironment=false; bool finiteGround=false; bool useLegacyWorldLights=true; std::vector<Obj> obj; std::vector<SourceBox> sourceBoxes; std::vector<SourceFoliage> sourceFoliage; std::vector<Node> node; std::vector<uint32_t> order; std::vector<Material> mat; std::vector<Light> lights; int32_t root=-1;
  std::vector<OpticalPlane> opticalPlanes;
+ std::vector<OpticalIndexNode> opticalIndexNodes;
+ std::vector<uint32_t> opticalIndexOrder;
  // V16 builder assigns a unique identity after scene construction. Tracked scenes
  // are immutable except for explicit editor mutations, which MUST call
  // markGpuContentChanged(). Legacy/untracked scenes (identity == 0) retain

@@ -1,6 +1,7 @@
 #include "m3d_v16_bridge.h"
 #include "m3d_csp001_bvh.h"
 #include "m3d_zreflect_catalog.h"
+#include "m3d_zreflect_cache.h"
 #include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -868,7 +869,12 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
             }
         }
     }
-    zreflect::catalogue(result.runtime,source,opticalManifest,{},&render.opticalPlanes);
+    if(zreflect::loadCache(zreflect::cachePath(source.rootPath),render,source,opticalManifest)){
+        qInfo()<<"Z Reflect: precalculated optical index loaded"<<render.opticalPlanes.size();
+    }else{
+        zreflect::catalogue(result.runtime,source,opticalManifest,{},&render.opticalPlanes);
+        qInfo()<<"Z Reflect: optical index fallback"<<render.opticalPlanes.size();
+    }
     result.runtime.geometryBuildMs=stageElapsedMs();
     stageStarted=std::chrono::steady_clock::now();
     report(96,QStringLiteral("CSP001 : vérification du BVH précalculé"));
