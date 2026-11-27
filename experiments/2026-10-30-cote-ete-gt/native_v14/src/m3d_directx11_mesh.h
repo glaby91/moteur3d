@@ -112,9 +112,10 @@ public:
     std::vector<GpuVertex> vertices;
     std::vector<TransparentTriangle> transparent;
     bool transparentMaterial=false;
+    bool limitExceeded=false;
     uint32_t currentPrimitiveId=0;
     void tri(V a,V b,V c,V na,V nb,V nc,float ua,float va,float ub,float vb,float uc,float vc,uint32_t mat) {
-        if(vertices.size()+transparent.size()*3>12000000u)return;
+        if(vertices.size()+transparent.size()*3>12000000u-3u){limitExceeded=true;return;}
         GpuVertex v[3]{};put(v[0],a,na,ua,va,mat);put(v[1],b,nb,ub,vb,mat);put(v[2],c,nc,uc,vc,mat);
         for(auto& vertex:v)vertex.primitiveId=currentPrimitiveId;
         if(transparentMaterial){TransparentTriangle t{};std::copy(v,v+3,t.v);t.center=(a+b+c)/3.f;transparent.push_back(t);}

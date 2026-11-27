@@ -1,0 +1,250 @@
+name: CSE WARP V17 — DX11 R001 Windows x64
+run-name: CSE WARP V17.025 — DX11 R001 (GitHub build ${{ github.run_number }})
+on:
+  push:
+    branches: [feature/v17-dx11-r001]
+    paths:
+      - 'v17/**'
+      - 'v16/**'
+      - 'engine/**'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/**'
+      - '.github/workflows/build-dx11-r001.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: cse-warp-dx11-r001-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  simulate:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download exact published scene
+        shell: pwsh
+        run: |
+          # Immutable validated reference, independent of the release promotion job.
+          $base = "https://github.com/glaby91/moteur3d-scene/releases/download/scene-reflect-V17.631"
+          $root = Join-Path $env:RUNNER_TEMP "zreflect-scene"
+          $zip = Join-Path $env:RUNNER_TEMP "V17-scene.zip"
+          $manifest = Join-Path $env:RUNNER_TEMP "SCENE_VERSION.json"
+          Invoke-WebRequest "$base/V17-scene.zip" -OutFile $zip
+          Invoke-WebRequest "$base/SCENE_VERSION.json" -OutFile $manifest
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne "b44972105f1af661586e9602899529de9d4fc4e1edd994099b28b6b174f3e45d") { throw "Scene archive digest mismatch" }
+          if ((Get-FileHash $manifest -Algorithm SHA256).Hash.ToLowerInvariant() -ne "ecbeb3f2fe66b22aa8badf3352cedbe2871827751b1c09a5be4a52c6e5b148b7") { throw "Scene manifest digest mismatch" }
+          Expand-Archive -LiteralPath $zip -DestinationPath $root
+          $meta = Get-Content $manifest -Raw | ConvertFrom-Json
+          $embedded = Join-Path $root "SCENE_VERSION.json"
+          if ($meta.revision -ne "V17.631" -or $meta.repository -ne "glaby91/moteur3d-scene" -or (Get-FileHash $embedded).Hash -ne (Get-FileHash $manifest).Hash) { throw "Reference scene manifest mismatch" }
+          $pre = Join-Path $root "benchmark-civic/precomputed"
+          $side = Get-Content (Join-Path $pre "manifest.json") -Raw | ConvertFrom-Json
+          foreach ($entry in $side.files.PSObject.Properties) {
+            $file = Join-Path $pre $entry.Name
+            if ((Get-FileHash $file).Hash.ToLowerInvariant() -ne $entry.Value.sha256) { throw "Invalid scene sidecar $($entry.Name)" }
+          }
+          "ZREFLECT_ROOT=$root" >> $env:GITHUB_ENV
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtmultimedia
+          cache: true
+      - name: Install Vulkan SDK for the Windows application
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: '1.4.309.0'
+          install_runtime: false
+          cache: true
+          stripdown: true
+          install_swiftshader: false
+      - name: Configure diagnostic and application targets
+        shell: pwsh
+        run: |
+          cmake -S v17 -B build-zreflect -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DV17_SCENE_SOURCE_DIR=$env:ZREFLECT_ROOT/benchmark-civic" -DM3D_REQUIRE_VULKAN=ON -DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER -DV17_GIT_SHA=$env:GITHUB_SHA
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Compile and test native diagnostic
+        shell: pwsh
+        run: |
+          cmake --build build-zreflect --config Release --target cse_scene_precompiler v17_zreflect_catalog_smoke v17_zreflect_index_smoke v17_csp001_smoke v17_zreflect_warp_ab v17_dx11_r001_smoke v17_dx11_r001_warp_ab --parallel 4
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          $core = Get-ChildItem build-zreflect -Recurse -Filter moteur3d_v16_core.dll | Select-Object -First 1
+          if (!$core) { throw "Missing shared engine DLL" }
+          $env:PATH = "$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
+          ctest --test-dir build-zreflect -C Release -R "^(v17_zreflect_catalog_filter|v17_zreflect_spatial_60000|v17_csp001_roundtrip_visibility|v17_dx11_r001_five_checks)$" --verbose --output-on-failure --no-tests=error
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Verify published optical catalogue and cache
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force zreflect-report | Out-Null
+          $pre = Join-Path $env:ZREFLECT_ROOT "benchmark-civic/precomputed"
+          $catalog = Get-Content (Join-Path $pre "zreflect-candidates.json") -Raw | ConvertFrom-Json
+          $index = (Get-Content (Join-Path $pre "zreflect-index.json") -Raw | ConvertFrom-Json).payload
+          if ($catalog.counts.eligibleObjects -ne 121 -or $catalog.counts.planes -ne 5 -or $index.schema -ne 2 -or $index.planes.Count -ne 5 -or $catalog.cameraSimulation.Count -ne 29) { throw "Optical reference mismatch" }
+          if (@($catalog.cameraSimulation | Where-Object { !$_.indexParity -or $_.selectedUncapped -gt 2 }).Count) { throw "Optical catalogue parity mismatch" }
+          Copy-Item (Join-Path $pre "zreflect-candidates.json") zreflect-report/
+          Copy-Item "$env:ZREFLECT_ROOT/SCENE_VERSION.json" zreflect-report/
+          @{ sceneRevision="V17.631"; engineCommit=$env:GITHUB_SHA; planes=5; eligibleObjects=121; authoredViews=29; archiveValidated=$true } | ConvertTo-Json | Set-Content zreflect-report/summary.json -Encoding utf8
+      - name: DX11 R001 real-scene pixel parity day and night
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          $exe = Get-ChildItem build-zreflect -Recurse -File -Filter v17_dx11_r001_warp_ab.exe | Select-Object -First 1
+          $core = Get-ChildItem build-zreflect -Recurse -File -Filter moteur3d_v16_core.dll | Select-Object -First 1
+          $env:PATH = "$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
+          & $exe.FullName "$env:ZREFLECT_ROOT/benchmark-civic/scene.json"
+          if ($LASTEXITCODE) { throw "DX11 R001 pixel parity failed" }
+      - name: Render real scene Z Reflect A/B on WARP
+        shell: pwsh
+        timeout-minutes: 15
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          $exe = Get-ChildItem build-zreflect -Recurse -File -Filter v17_zreflect_warp_ab.exe | Select-Object -First 1
+          $core = Get-ChildItem build-zreflect -Recurse -File -Filter moteur3d_v16_core.dll | Select-Object -First 1
+          if (!$exe -or !$core) { throw "Missing WARP A/B binaries" }
+          $env:PATH = "$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
+          & $exe.FullName "$env:ZREFLECT_ROOT/benchmark-civic/scene.json" (Resolve-Path zreflect-report).Path
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v6
+        with:
+          name: V17.631-dx11-r001-diagnostic
+          path: zreflect-report/
+          if-no-files-found: error
+      - name: Build Windows application and local benchmark tools
+        shell: pwsh
+        run: |
+          cmake --build build-zreflect --config Release --target moteur3d_v17 v17_route30 moteur3d_v17_benchmark moteur3d_v17_campaign moteur3d_v17_benchui moteur3d_v17_gibake moteur3d_v17_gpu_trajectory moteur3d_v16 --parallel 4
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Assemble engine-only validation package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # Parse and dot-source the benchmark script before packaging.
+          $tokens = $null
+          $parseErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "v17/tools/route30.ps1").Path, [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
+          . (Resolve-Path "v17/tools/route30.ps1").Path
+          if (!(Get-Command Invoke-Route30).Parameters.ContainsKey('ZReflectMatrix')) { throw "Missing Reflect matrix benchmark dispatch" }
+          $dist = "dist-zreflect"
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          @{ productVersion = "17.025"; githubActionsRun = "$env:GITHUB_RUN_ID"; githubRunNumber = "$env:GITHUB_RUN_NUMBER"; sourceCommit = "$env:GITHUB_SHA"; branch = "$env:GITHUB_REF_NAME" } | ConvertTo-Json | Set-Content "$dist/BUILD_INFO.json" -Encoding UTF8
+          $names = @("moteur3d_v17.exe","moteur3d_v16_core.dll","cse_scene_precompiler.exe","route30.exe","moteur3d_v17_benchmark.exe","moteur3d_v17_campaign.exe","moteur3d_v17_benchui.exe","moteur3d_v17_gibake.exe","moteur3d_v17_gpu_trajectory.exe","moteur3d_v16.exe","v17_zreflect_index_smoke.exe")
+          foreach ($name in $names) {
+            $f = Get-ChildItem build-zreflect -Recurse -File -Filter $name | Select-Object -First 1
+            if (!$f) { throw "Missing compiled binary $name" }
+            Copy-Item $f.FullName $dist
+          }
+          $exe = Get-ChildItem build-zreflect -Recurse -File -Filter moteur3d_v17.exe | Select-Object -First 1
+          foreach ($name in @("audio","vulkan","shaders","render_modules.json","cse_warp_v17.ico")) {
+            $p = Join-Path $exe.DirectoryName $name
+            if (!(Test-Path $p)) { throw "Missing application resource $name" }
+            Copy-Item $p $dist -Recurse -Force
+          }
+          $bench = Get-ChildItem build-zreflect -Recurse -File -Filter cse_warp_v17_bench.ico | Select-Object -First 1
+          if (!$bench) { throw "Missing benchmark icon" }
+          Copy-Item $bench.FullName $dist
+          foreach ($name in @("route30.ps1","LANCER_PARCOURS_30S.bat","LANCER_LUMATRACE_01_AB.bat","LANCER_LUMATRACE_01_PISCINE.bat")) { Copy-Item "v17/tools/$name" $dist }
+          Copy-Item "v17/config/zreflect-scene-V17.629.json" $dist
+          @'
+          @echo off
+          cd /d "%~dp0"
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\route30.ps1" -Root "." -ZReflectAB
+          set "RC=%ERRORLEVEL%"
+          pause
+          exit /b %RC%
+          '@ | Set-Content "$dist/LANCER_ZREFLECT_AB.bat" -Encoding ascii
+          @'
+          @echo off
+          cd /d "%~dp0"
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File ".\route30.ps1" -Root "." -ZReflectMatrix
+          set "RC=%ERRORLEVEL%"
+          pause
+          exit /b %RC%
+          '@ | Set-Content "$dist/LANCER_ZREFLECT_MATRIX.bat" -Encoding ascii
+          Copy-Item "v17/docs/CSP001_ZREFLECT_AUTHOR_POLICY.md" $dist
+          Copy-Item "v17/docs/CSP001_ZREFLECT_V17023_VALIDATION.md" $dist
+          Copy-Item "zreflect-report/summary.json" "$dist/zreflect-summary.json"
+          Copy-Item "zreflect-report/zreflect-*.png" $dist
+          Copy-Item README.md "$dist/README.md"
+          windeployqt --release --no-translations "$dist/moteur3d_v17.exe"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          foreach ($name in @("Qt6Core.dll","Qt6Gui.dll","Qt6Widgets.dll","platforms/qwindows.dll","imageformats/qjpeg.dll")) {
+            if (!(Test-Path (Join-Path $dist $name))) { throw "Qt deployment incomplete: $name" }
+          }
+          if (Test-Path "$dist/benchmark-civic") { throw "Engine-only package must not contain scene data" }
+          @'
+          @echo off
+          cd /d "%~dp0"
+          start "" "moteur3d_v17.exe"
+          '@ | Set-Content "$dist/LANCER_CSE_WARP.bat" -Encoding ascii
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set "M3D_V17_ZREFLECT=1"
+          start "" "moteur3d_v17.exe"
+          '@ | Set-Content "$dist/LANCER_CSE_WARP_ZREFLECT.bat" -Encoding ascii
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set "M3D_V17_ZREFLECT=0"
+          start "" "moteur3d_v17.exe"
+          '@ | Set-Content "$dist/LANCER_CSE_WARP_SANS_ZREFLECT.bat" -Encoding ascii
+          @'
+          @echo off
+          cd /d "%~dp0"
+          moteur3d_v17_campaign.exe %*
+          exit /b %ERRORLEVEL%
+          '@ | Set-Content "$dist/LANCER_BENCHMARK.bat" -Encoding ascii
+          @'
+          @echo off
+          cd /d "%~dp0"
+          if "%~1"=="" (
+            echo Usage: drag Reflect scene.json onto this BAT
+            pause
+            exit /b 2
+          )
+          cse_scene_precompiler.exe "%~1" --catalog-only
+          exit /b %ERRORLEVEL%
+          '@ | Set-Content "$dist/LANCER_ZREFLECT_DIAGNOSTIC.bat" -Encoding ascii
+      - name: Verify packaged application controls and scene loading
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          $exe = (Resolve-Path "dist-zreflect/moteur3d_v17.exe").Path
+          $scene = (Resolve-Path "$env:ZREFLECT_ROOT/benchmark-civic/scene.json").Path
+          $process = Start-Process -FilePath $exe -ArgumentList "--smoke-walking-collisions", ('"{0}"' -f $scene) -PassThru -Wait -NoNewWindow
+          if ($process.ExitCode -ne 0) { throw "Packaged exploration controls failed ($($process.ExitCode))" }
+          & "dist-zreflect/route30.exe" $scene "zreflect-report/tour-plan.csv" --tour-plan
+          if ($LASTEXITCODE -or !(Test-Path "zreflect-report/tour-plan.csv")) { throw "Route plan failed" }
+          & "dist-zreflect/route30.exe" $scene "zreflect-report/zreflect-plan.csv" --zreflect-plan
+          if ($LASTEXITCODE -or @(Import-Csv "zreflect-report/zreflect-plan.csv").Count -ne 16) { throw "Reflect A/B plan failed" }
+          & "dist-zreflect/route30.exe" $scene "zreflect-report/zreflect-matrix-plan.csv" --zreflect-matrix-plan
+          if ($LASTEXITCODE) { throw "Reflect matrix plan failed" }
+          $matrix = @(Import-Csv "zreflect-report/zreflect-matrix-plan.csv")
+          if ($matrix.Count -ne 32 -or @($matrix | Where-Object zreflect -ne 'on').Count -ne 0) { throw "Reflect matrix count/mode failed" }
+          foreach ($cfg in @('A','B','C','D')) {
+            if (@($matrix | Where-Object config -eq $cfg).Count -ne 8) { throw "Incorrect matrix coverage: $cfg" }
+          }
+      - name: Wrap files in named build directory
+        shell: pwsh
+        run: |
+          $name = "CSE-WARP-V17.025-DX11-R001-GitHub-${{ github.run_number }}-Windows-x64"
+          New-Item -ItemType Directory -Force build-package | Out-Null
+          Move-Item dist-zreflect (Join-Path build-package $name)
+      - name: Upload experimental Windows build (engine only)
+        uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17.025-DX11-R001-GitHub-${{ github.run_number }}-Windows-x64
+          path: build-package/
+          if-no-files-found: error

@@ -184,7 +184,7 @@
     },
     {
       "id": "d3d11_raster_shader",
-      "revision": "006",
+      "revision": "007",
       "engines": [
         "v16",
         "v17"
@@ -220,7 +220,7 @@
     },
     {
       "id": "d3d11_mesh",
-      "revision": "002",
+      "revision": "003",
       "engines": [
         "v16",
         "v17"
@@ -231,12 +231,13 @@
         "scene_runtime"
       ],
       "sources": [
-        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11_mesh.h"
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11_mesh.h",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_dx11_r001.h"
       ]
     },
     {
       "id": "d3d11_raster",
-      "revision": "013",
+      "revision": "014",
       "engines": [
         "v16",
         "v17"

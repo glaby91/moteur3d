@@ -205,8 +205,11 @@ float4 PSMain(VSOut i):SV_TARGET {
         }
     }
     float diffuse = saturate(dot(normal, normalize(lightDir)));
-    float3 shadowOffset = i.world - shadowBase;
     float shadowFactor = 1.0;
+    // With zero solar energy, every use of shadowFactor is multiplied by
+    // daylight. Keep the legacy branch for LumaTrace and R001 A/B.
+    [branch] if (!(reflectionControls.w > .5 && materialDiffuse[i.mat].w == 0.0)) {
+    float3 shadowOffset = i.world - shadowBase;
     float shadowScale = shadowSize / (2.0 * shadowSpan);
     float shadowCenter = shadowSize * 0.5 - 0.5;
     int2 shadowPixel = int2(round(float2(dot(shadowOffset, shadowRight), dot(shadowOffset, shadowUp)) * shadowScale + shadowCenter));
@@ -219,6 +222,7 @@ inline constexpr char kShaderPart2[] = R"(
             visible += shadowDistance <= storedDepth + 0.095 ? 1.0 : 0.0;
         }
         shadowFactor = 0.16 + 0.84 * visible / 9.0;
+    }
     }
     float4 diffuseTerms = materialDiffuse[i.mat];
     // Cheap hemispherical sky fill: upward surfaces receive slightly more
