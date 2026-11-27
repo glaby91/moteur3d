@@ -20,5 +20,13 @@ int main(){
     if(!extractSlab(small,0,1,false,false,p).empty())return 8;
     if(extractSlab(small,0,1,false,true,p).size()!=1)return 9;
     if(p.futureCameraLimit!=3)return 10;
+    // The two adjacent quantization bins must still share one coplanar patch.
+    Scene boundary;tri(boundary,{0,0,3.00049f},{1,0,3.00049f},{0,1,3.00049f});
+    tri(boundary,{1,0,3.00051f},{1,1,3.00051f},{0,1,3.00051f});
+    std::map<PlaneKey,std::vector<Patch>> buckets;
+    addTriangle(buckets,boundary.obj[0],0);addTriangle(buckets,boundary.obj[1],1);
+    if(buckets.size()!=1||buckets.begin()->second[0].triangles.size()!=2)return 11;
+    tri(boundary,{0,0,3.005f},{1,0,3.005f},{0,1,3.005f});
+    addTriangle(buckets,boundary.obj[2],2);if(buckets.size()!=2)return 12;
     std::cout<<"Z-Reflect restrictive policy and geometry OK\n";return 0;
 }

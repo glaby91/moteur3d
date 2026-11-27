@@ -37,14 +37,13 @@ inline QHash<QString,QJsonObject> authored(const v16::SceneDatabase& db,const QS
 struct Group{Patch patch;std::set<int> objects;bool explicitEnable=false;};
 inline void mergePatch(std::map<PlaneKey,std::vector<Group>>& groups,const Scene& scene,
                        Patch p,int objectIndex,bool enabled){
-    auto& bucket=groups[key(p.normal,p.offset)];Group* g=nullptr;
-    for(auto& item:bucket){
-        if(item.patch.side!=p.side||dot(item.patch.normal,p.normal)<.999999f)continue;
-        bool compatible=true;
-        for(auto id:p.triangles)if(!samePlane(item.patch,scene.obj[id],p.normal)){compatible=false;break;}
-        if(compatible){g=&item;break;}
-    }
-    if(!g){bucket.emplace_back();g=&bucket.back();g->patch.normal=p.normal;g->patch.offset=p.offset;g->patch.side=p.side;}
+    const auto k=key(p.normal,p.offset);
+    Group* g=neighboringMatch(groups,k,[&](const Group& item){
+        if(item.patch.side!=p.side||dot(item.patch.normal,p.normal)<.999999f)return false;
+        for(auto id:p.triangles)if(!samePlane(item.patch,scene.obj[id],p.normal))return false;
+        return true;
+    });
+    if(!g){auto& bucket=groups[k];bucket.emplace_back();g=&bucket.back();g->patch.normal=p.normal;g->patch.offset=p.offset;g->patch.side=p.side;}
     g->patch.bounds.add(p.bounds.lo);g->patch.bounds.add(p.bounds.hi);
     g->patch.area+=p.area;g->patch.triangles.insert(g->patch.triangles.end(),p.triangles.begin(),p.triangles.end());
     g->objects.insert(objectIndex);g->explicitEnable|=enabled;

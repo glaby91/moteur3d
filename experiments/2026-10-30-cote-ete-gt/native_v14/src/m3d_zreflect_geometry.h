@@ -23,6 +23,18 @@ inline bool trianglePlane(const Obj& tri,V& n,double& d,double& area){
 inline PlaneKey key(V n,double d){
     return {std::llround(n.x*10000.),std::llround(n.y*10000.),std::llround(n.z*10000.),std::llround(d*1000.)};
 }
+// Quantization is a broadphase only, never the proof of coplanarity.
+template<class Map,class Predicate>
+inline auto neighboringMatch(Map& groups,const PlaneKey& k,Predicate matches)
+    -> typename Map::mapped_type::value_type* {
+    for(int x=-1;x<=1;++x)for(int y=-1;y<=1;++y)
+    for(int z=-1;z<=1;++z)for(int d=-1;d<=1;++d){
+        PlaneKey neighbor={k[0]+x,k[1]+y,k[2]+z,k[3]+d};
+        auto it=groups.find(neighbor);if(it==groups.end())continue;
+        for(auto& entry:it->second)if(matches(entry))return &entry;
+    }
+    return nullptr;
+}
 inline bool samePlane(const Patch& p,const Obj& tri,V n){
     if(dot(p.normal,n)<.999999f)return false;
     for(V v:{tri.a,tri.b,tri.c})if(std::abs(double(dot(p.normal,v))-p.offset)>.001)return false;
@@ -30,9 +42,9 @@ inline bool samePlane(const Patch& p,const Obj& tri,V n){
 }
 inline void addTriangle(std::map<PlaneKey,std::vector<Patch>>& groups,const Obj& tri,uint32_t id){
     V n;double d,area;if(!trianglePlane(tri,n,d,area))return;
-    auto& bucket=groups[key(n,d)];Patch* p=nullptr;
-    for(auto& candidate:bucket)if(samePlane(candidate,tri,n)){p=&candidate;break;}
-    if(!p){bucket.emplace_back();p=&bucket.back();p->normal=n;p->offset=d;}
+    const auto k=key(n,d);
+    Patch* p=neighboringMatch(groups,k,[&](const Patch& candidate){return samePlane(candidate,tri,n);});
+    if(!p){auto& bucket=groups[k];bucket.emplace_back();p=&bucket.back();p->normal=n;p->offset=d;}
     p->area+=area;p->triangles.push_back(id);
     p->bounds.add(tri.a);p->bounds.add(tri.b);p->bounds.add(tri.c);
 }
