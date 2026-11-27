@@ -67,9 +67,9 @@ inline QJsonObject catalogue(const v16::Runtime& rt,const v16::SceneDatabase& db
         // Nominal source roughness is not roughnessScale or sampled texture roughness.
         double rough=matSrc.value("roughness").toDouble(.72);
         const bool mirror=matSrc.value("opticalMirror").toBool(false);
-        // First GPU stage supports exact transparent, non-water patches only.
-        if(runtimePlanes&&(water||mat.transmissionPercent==0||
-            !(perm==Permission::Auto||perm==Permission::Enabled)))continue;
+        // Runtime includes authorized water and glazing in the same plane catalogue.
+        if(runtimePlanes&&(!water&&mat.transmissionPercent==0||
+            !(water||perm==Permission::Auto||perm==Permission::Enabled)))continue;
         if(!opticalEligible(water,mirror,double(mat.transmissionPercent)/100.,mat.metallic,rough,perm,policy))continue;
         ++optical;
         auto patches=extractSlab(scene,first,count,water,perm==Permission::Enabled,policy);

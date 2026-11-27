@@ -32,10 +32,6 @@ cbuffer Frame : register(b0) {
     float4 colorControls;
     float4 peripheralControls;
     float4 reflectionControls;
-    float3 reflectionEye; float reflectionTanHalf;
-    float3 reflectionForward; float reflectionAspect;
-    float3 reflectionRight; float reflectionPad0;
-    float3 reflectionUp; float reflectionPad1;
     uint4 adaptiveZero[128];
     float4 zClip;
     float4 zPlaneIds;
@@ -49,7 +45,6 @@ Texture3D<float4> indirectProbes : register(t4);
 Texture3D<float4> indirectProbesNext : register(t5);
 Texture2DArray<float4> preservedAlbedo : register(t6);
 StructuredBuffer<float4> lumaTriangleRadiance : register(t7);
-Texture2D<float4> poolReflection : register(t8);
 Texture2D<float4> zReflection0 : register(t9);
 Texture2D<float4> zReflection1 : register(t10);
 SamplerState wrapSampler : register(s0);
@@ -126,6 +121,23 @@ VSOut VSEllipseMain(VSEllipseIn i) {
     raw.mat=i.ellipseMat;raw.primitiveId=i.unusedPrimitiveId;
     return VSMain(raw);
 }
+// Common optical slot and projection; material supplies only distortion/composition.
+bool sampleOptical(VSOut i,float2 distortion,out float3 reflected){
+    reflected=0;
+    if(i.opticalId==0u||zPlaneIds.w>.5||zPlaneIds.z<.5)return false;
+    int slot=-1;
+    if(i.opticalId==(uint)zPlaneIds.x)slot=0;
+    else if(zPlaneIds.z>1.5&&i.opticalId==(uint)zPlaneIds.y)slot=1;
+    if(slot<0)return false;
+    float3 q=i.world-zEye[slot].xyz;
+    float z=dot(q,zForward[slot].xyz);
+    if(z<=.08)return false;
+    float2 ndc=float2(dot(q,zRight[slot].xyz),dot(q,zUp[slot].xyz)*zForward[slot].w)/(z*zEye[slot].w);
+    float2 uv=float2(.5+.5*ndc.x,.5-.5*ndc.y)+distortion;
+    if(any(uv<0.0)||any(uv>1.0))return false;
+    reflected=slot==0?zReflection0.SampleLevel(probeSampler,uv,0).rgb:zReflection1.SampleLevel(probeSampler,uv,0).rgb;
+    return true;
+}
 float4 PSMain(VSOut i):SV_TARGET {
     if(zPlaneIds.w>.5 && dot(float4(i.world,1.0),zClip)<0.0) discard;
     // Smooth focus-lens / lighthouse geometry. The sharp center follows the
@@ -153,8 +165,8 @@ float4 PSMain(VSOut i):SV_TARGET {
     }
     float3 normal = normalize(i.n);
     const bool poolWater=materialEmission[i.mat].a < -0.5;
-    if(reflectionControls.x>.5 && reflectionControls.x<1.5 &&
-       (i.world.y<reflectionControls.w || poolWater || materialOpacity[i.mat].x<.45)) discard;
+    if(zPlaneIds.w>.5 && reflectionControls.x>.5 &&
+       (poolWater || materialOpacity[i.mat].x<.45)) discard;
     // Dedicated animated-looking standing waves (static in world space) only on
     // the new translucent pool water. Avoid extra trig on every other material.
     if(poolWater && normal.y>0.75){
@@ -371,22 +383,11 @@ inline constexpr char kShaderPart2[] = R"(
         // Underwater ladders must remain visible through the surface from the deck.
         // Avoid the former 45% high-angle opaque cyan veil.
         float opacity=lerp(.08,.24,saturate(fresnelWater*1.75));
-        if(reflectionControls.x>1.5 && abs(i.world.y-reflectionControls.w)<=.002 ){
-            float3 reflectedView=i.world-reflectionEye;
-            float reflectedDepth=dot(reflectedView,reflectionForward);
-            if(reflectedDepth>.08){
-                float reflectedNdcX=dot(reflectedView,reflectionRight)/(reflectedDepth*reflectionTanHalf);
-                float reflectedNdcY=dot(reflectedView,reflectionUp)*reflectionAspect/(reflectedDepth*reflectionTanHalf);
-                // Keep normal distortion inside the 10% mirror guard band.
-                float2 reflectionUv=float2(.5+.5*reflectedNdcX,.5-.5*reflectedNdcY)
-                    + clamp(normal.xz*.35,-.04,.04);
-                if(all(reflectionUv>=0.0)&&all(reflectionUv<=1.0)){
-                    float3 reflectedScene=poolReflection.SampleLevel(probeSampler,reflectionUv,0).rgb;
-                    const float reflectionWeight=saturate(.22+.62*fresnelWater);
-                    color=lerp(color,reflectedScene,reflectionWeight);
-                    opacity=lerp(opacity,.62,saturate(fresnelWater*1.45));
-                }
-            }
+        float3 reflectedScene;
+        if(sampleOptical(i,clamp(normal.xz*.35,-.04,.04),reflectedScene)){
+            const float reflectionWeight=saturate(.22+.62*fresnelWater);
+            color=lerp(color,reflectedScene,reflectionWeight);
+            opacity=lerp(opacity,.62,saturate(fresnelWater*1.45));
         }
         // Transmission controls the water's opacity continuously; its Fresnel
         // opacity remains the authored 100%-transmission appearance.
@@ -396,26 +397,13 @@ inline constexpr char kShaderPart2[] = R"(
     }
     // Fresnel-composite reflected opaque surroundings into original glass PBR.
     // The ordinary alpha blend still supplies transmission; this is NOT refraction.
-    if(i.opticalId!=0u && zPlaneIds.w<.5 && zPlaneIds.z>.5 && reflectionControls.x!=1.0){
-        int slot=-1;
-        if(i.opticalId==(uint)zPlaneIds.x)slot=0;
-        else if(zPlaneIds.z>1.5 && i.opticalId==(uint)zPlaneIds.y)slot=1;
-        if(slot>=0){
-            float3 q=i.world-zEye[slot].xyz;
-            float z=dot(q,zForward[slot].xyz);
-            if(z>.08){
-                float2 ndc=float2(dot(q,zRight[slot].xyz),dot(q,zUp[slot].xyz)*zForward[slot].w)/(z*zEye[slot].w);
-                float2 uv=float2(.5+.5*ndc.x,.5-.5*ndc.y);
-                if(all(uv>=0.0)&&all(uv<=1.0)){
-                    float3 reflected=slot==0?zReflection0.SampleLevel(probeSampler,uv,0).rgb:zReflection1.SampleLevel(probeSampler,uv,0).rgb;
-                    float f0=saturate(materialOpacity[i.mat].z);
-                    float f=f0+(1.0-f0)*pow(1.0-saturate(abs(dot(normal,viewDir))),5.0);
-                    float alpha=saturate(materialOpacity[i.mat].x);
-                    float combined=f+(1.0-f)*alpha;
-                    return float4((reflected*f+color*alpha*(1.0-f))/max(combined,.00001),combined);
-                }
-            }
-        }
+    float3 reflected;
+    if(sampleOptical(i,float2(0,0),reflected)){
+        float f0=saturate(materialOpacity[i.mat].z);
+        float f=f0+(1.0-f0)*pow(1.0-saturate(abs(dot(normal,viewDir))),5.0);
+        float alpha=saturate(materialOpacity[i.mat].x);
+        float combined=f+(1.0-f)*alpha;
+        return float4((reflected*f+color*alpha*(1.0-f))/max(combined,.00001),combined);
     }
     return float4(color, materialOpacity[i.mat].x);
 }

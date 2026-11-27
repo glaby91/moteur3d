@@ -155,8 +155,8 @@ bool presentFrame(const Route& route, Backend backend, double seconds,
         reason = L"Native renderer did not apply the requested static geometry mode.";
         return false;
     }
-    if(presented&&backend==Backend::lumaTrace&&(!stats.lumaProbeLightingEnabled||(!route.tour&&!route.reflectCampaign&&!stats.planarReflectionRendered))){
-        reason=L"LumaTrace pool benchmark requires planar reflection and indirect probe lighting.";return false;
+    if(presented&&backend==Backend::lumaTrace&&(!stats.lumaProbeLightingEnabled)){
+        reason=L"LumaTrace benchmark requires indirect probe lighting.";return false;
     }
     if(presented&&route.adaptiveCampaign&&stats.lumaAdaptiveEnabled!=route.adaptive){reason=L"Adaptive 0/1 mode mismatch.";return false;}
     return presented;
@@ -207,7 +207,7 @@ Result measure(const Route& route, const Pass& pass) {
         const auto end = Clock::now();
         const double seconds=std::chrono::duration<double>(end - before).count();
         result.renderSeconds += seconds;
-        const uint32_t zActive=result.lastFrame.zReflectActive+uint32_t(result.lastFrame.planarReflectionRendered);
+        const uint32_t zActive=result.lastFrame.zReflectActive;
         result.zActiveSum+=zActive;result.zActiveFrames+=zActive>0;result.zActiveMax=std::max(result.zActiveMax,zActive);
         result.zDeferredMax=std::max(result.zDeferredMax,result.lastFrame.zReflectDeferred);result.zSelectSum+=result.lastFrame.zReflectSelectUs;
         if(route.adaptiveCampaign){result.frameMs.push_back(seconds*1000.);result.zeroSum+=result.lastFrame.lumaAdaptiveZeroTriangles;result.triangleSum+=result.lastFrame.lumaAdaptiveTriangleCount;}

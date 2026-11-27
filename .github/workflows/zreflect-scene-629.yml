@@ -196,9 +196,15 @@ jobs:
           if ($LASTEXITCODE -or !(Test-Path "zreflect-report/tour-plan.csv")) { throw "Route plan failed" }
           & "dist-zreflect/route30.exe" $scene "zreflect-report/zreflect-plan.csv" --zreflect-plan
           if ($LASTEXITCODE -or @(Import-Csv "zreflect-report/zreflect-plan.csv").Count -ne 16) { throw "Reflect A/B plan failed" }
+      - name: Wrap files in named build directory
+        shell: pwsh
+        run: |
+          $name = "CSE-WARP-V17.020-ZReflect-GitHub-${{ github.run_number }}-Windows-x64"
+          New-Item -ItemType Directory -Force build-package | Out-Null
+          Move-Item dist-zreflect (Join-Path build-package $name)
       - name: Upload experimental Windows build (engine only)
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.019-ZReflect-GitHub-${{ github.run_number }}-Windows-x64
-          path: dist-zreflect/
+          name: CSE-WARP-V17.020-ZReflect-GitHub-${{ github.run_number }}-Windows-x64
+          path: build-package/
           if-no-files-found: error

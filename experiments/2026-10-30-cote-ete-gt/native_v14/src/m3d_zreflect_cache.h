@@ -41,7 +41,7 @@ inline bool saveCache(const QString& path,const Scene& scene,const v16::SceneDat
     for(auto i:oo)order.append(double(i));
     for(const auto& n:nn)nodes.append(QJsonObject{{"lo",vec(n.lo)},{"hi",vec(n.hi)},{"begin",double(n.begin)},
         {"end",double(n.end)},{"left",double(n.left)},{"right",double(n.right)},{"leaf",n.leaf}});
-    QJsonObject payload{{"schema",1},{"key",QString::fromLatin1(key)},{"planes",planes},{"nodes",nodes},{"order",order}};
+    QJsonObject payload{{"schema",2},{"key",QString::fromLatin1(key)},{"planes",planes},{"nodes",nodes},{"order",order}};
     const auto encoded=QJsonDocument(payload).toJson(QJsonDocument::Compact);
     const auto bytes=QJsonDocument(QJsonObject{{"payload",payload},{"sha256",QString::fromLatin1(hashBytes(encoded))}}).toJson(QJsonDocument::Compact);
     QSaveFile out(path);return out.open(QIODevice::WriteOnly)&&out.write(bytes)==bytes.size()&&out.commit();
@@ -51,7 +51,7 @@ inline bool loadCache(const QString& path,Scene& scene,const v16::SceneDatabase&
     QJsonParseError error;const auto doc=QJsonDocument::fromJson(f.readAll(),&error);
     if(error.error!=QJsonParseError::NoError||!doc.isObject())return false;
     const auto root=doc.object(),p=root.value("payload").toObject();
-    if(p.value("schema").toInt()!=1||root.value("sha256").toString().toLatin1()!=hashBytes(QJsonDocument(p).toJson(QJsonDocument::Compact)))return false;
+    if(p.value("schema").toInt()!=2||root.value("sha256").toString().toLatin1()!=hashBytes(QJsonDocument(p).toJson(QJsonDocument::Compact)))return false;
     const auto key=cacheKey(scene,db,manifest);
     if(key.isEmpty()||p.value("key").toString().toLatin1()!=key)return false;
     if(!p.value("planes").isArray()||!p.value("nodes").isArray()||!p.value("order").isArray())return false;
@@ -70,8 +70,10 @@ inline bool loadCache(const QString& path,Scene& scene,const v16::SceneDatabase&
         Bounds bounds;
         for(const auto& value:q.value("triangles").toArray()){
             uint32_t id;if(!parseU(value,id)||id>=scene.obj.size()||!used.insert(id).second)return false;
-            const auto& t=scene.obj[id];if(t.kind!=Kind::Triangle||t.mat>=scene.mat.size()||!scene.mat[t.mat].transmissionPercent||
-                scene.mat[t.mat].waterSurface||scene.mat[t.mat].name=="cse_pool_water"||!samePlane(patch,t,a.normal))return false;
+            const auto& t=scene.obj[id];if(t.kind!=Kind::Triangle||t.mat>=scene.mat.size()||!samePlane(patch,t,a.normal))return false;
+            const auto& m=scene.mat[t.mat];
+            const bool water=m.waterSurface||(!m.surfaceAuthored&&m.name=="cse_pool_water");
+            if(!water&&!m.transmissionPercent)return false;
             for(V v:{t.a,t.b,t.c})bounds.add(v);a.triangles.push_back(id);
         }
         if(a.triangles.empty()||!bounds.valid||!csp001::contains(a.lo,a.hi,bounds.lo,bounds.hi))return false;
