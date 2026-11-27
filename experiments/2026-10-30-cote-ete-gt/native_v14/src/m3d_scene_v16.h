@@ -17,6 +17,7 @@ struct Sector {
 struct SceneDatabase {
     QString name;
     QString revision;
+    QJsonObject manifest;
     QString rootPath; // canonical scene root for optional source-image PBR sets
     QVector<Sector> sectors;
 };

@@ -9,6 +9,11 @@ on:
       - 'v17/CMakeLists.txt'
       - 'v17/version.json'
       - 'v17/tests/zreflect_index_smoke.cpp'
+      - 'v17/tests/zreflect_warp_ab.cpp'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/m3d_engine.h'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11*'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_v16_bridge.cpp'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_scene_v16.*'
       - 'v17/config/zreflect-scene-V17.629.json'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zreflect_*.h'
   workflow_dispatch:
@@ -65,7 +70,7 @@ jobs:
       - name: Compile and test native diagnostic
         shell: pwsh
         run: |
-          cmake --build build-zreflect --config Release --target cse_scene_precompiler v17_zreflect_catalog_smoke v17_zreflect_index_smoke v17_csp001_smoke --parallel 4
+          cmake --build build-zreflect --config Release --target cse_scene_precompiler v17_zreflect_catalog_smoke v17_zreflect_index_smoke v17_csp001_smoke v17_zreflect_warp_ab --parallel 4
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $core = Get-ChildItem build-zreflect -Recurse -Filter moteur3d_v16_core.dll | Select-Object -First 1
           if (!$core) { throw "Missing shared engine DLL" }
@@ -88,6 +93,19 @@ jobs:
           Copy-Item "$env:ZREFLECT_ROOT/SCENE_VERSION.json" zreflect-report/
           Copy-Item "v17/config/zreflect-scene-V17.629.json" zreflect-report/
           Get-Content zreflect-report/summary.json -TotalCount 40
+      - name: Render real scene Z Reflect A/B on WARP
+        shell: pwsh
+        timeout-minutes: 15
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          $exe = Get-ChildItem build-zreflect -Recurse -File -Filter v17_zreflect_warp_ab.exe | Select-Object -First 1
+          $core = Get-ChildItem build-zreflect -Recurse -File -Filter moteur3d_v16_core.dll | Select-Object -First 1
+          if (!$exe -or !$core) { throw "Missing WARP A/B binaries" }
+          Copy-Item "v17/config/zreflect-scene-V17.629.json" $exe.DirectoryName -Force
+          $env:PATH = "$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
+          & $exe.FullName "$env:ZREFLECT_ROOT/benchmark-civic/scene.json" (Resolve-Path zreflect-report).Path
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v6
         with:
           name: ZReflect-V17.629-42-native-diagnostic
@@ -123,6 +141,7 @@ jobs:
           Copy-Item "v17/config/zreflect-scene-V17.629.json" $dist
           Copy-Item "v17/docs/CSP001_ZREFLECT_AUTHOR_POLICY.md" $dist
           Copy-Item "zreflect-report/summary.json" "$dist/zreflect-summary.json"
+          Copy-Item "zreflect-report/zreflect-*.png" $dist
           windeployqt --release --no-translations "$dist/moteur3d_v17.exe"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           foreach ($name in @("Qt6Core.dll","Qt6Gui.dll","Qt6Widgets.dll","platforms/qwindows.dll","imageformats/qjpeg.dll")) {
@@ -134,6 +153,12 @@ jobs:
           cd /d "%~dp0"
           start "" "moteur3d_v17.exe"
           '@ | Set-Content "$dist/LANCER_CSE_WARP.bat" -Encoding ascii
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set "M3D_V17_ZREFLECT=1"
+          start "" "moteur3d_v17.exe"
+          '@ | Set-Content "$dist/LANCER_CSE_WARP_ZREFLECT.bat" -Encoding ascii
           @'
           @echo off
           cd /d "%~dp0"
@@ -160,6 +185,6 @@ jobs:
       - name: Upload experimental Windows build (engine only)
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.017-ZReflect-GitHub-${{ github.run_number }}-Windows-x64
+          name: CSE-WARP-V17.018-ZReflect-GitHub-${{ github.run_number }}-Windows-x64
           path: dist-zreflect/
           if-no-files-found: error

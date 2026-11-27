@@ -1,5 +1,8 @@
 #include "m3d_v16_bridge.h"
 #include "m3d_csp001_bvh.h"
+#include "m3d_zreflect_catalog.h"
+#include <QCoreApplication>
+#include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QHash>
@@ -852,6 +855,20 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
                     .arg(completedInstances).arg(instanceDocs.size()));
     }
     if(render.obj.empty()){result.error="No triangles generated";return result;}
+    // Build authorized descriptors once, independently of the frame-time toggle.
+    auto opticalManifest=source.manifest;
+    if(source.revision=="V17.629"&&!opticalManifest.contains("zReflectAuthorPolicy")){
+        const QString name="zreflect-scene-V17.629.json";
+        for(const QString& folder:{source.rootPath,QCoreApplication::applicationDirPath()}){
+            QFile f(QDir(folder).filePath(name));if(!f.open(QIODevice::ReadOnly))continue;
+            QJsonParseError e;const auto d=QJsonDocument::fromJson(f.readAll(),&e);const auto policy=d.object();
+            if(e.error==QJsonParseError::NoError&&d.isObject()&&policy.value("schema").toInt()==1&&
+               policy.value("sceneRevision").toString()==source.revision&&policy.value("materialRules").isObject()){
+                opticalManifest.insert("zReflectAuthorPolicy",policy);break;
+            }
+        }
+    }
+    zreflect::catalogue(result.runtime,source,opticalManifest,{},&render.opticalPlanes);
     result.runtime.geometryBuildMs=stageElapsedMs();
     stageStarted=std::chrono::steady_clock::now();
     report(96,QStringLiteral("CSP001 : vérification du BVH précalculé"));

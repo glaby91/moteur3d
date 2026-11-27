@@ -40,6 +40,7 @@ LoadResult loadScene(const QString& manifestPath) {
         result.error = QStringLiteral("Missing sectors array");
         return result;
     }
+    result.scene.manifest = manifest;
     result.scene.name = manifest.value("name").toString();
     result.scene.revision = manifest.value("revision").toString().trimmed();
     static const QStringList kinds = {"geometry", "instances", "materials", "pbr",

@@ -52,6 +52,7 @@ struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,dept
     // DX11-only hardware counters; CPU/Compute paths leave these at zero.
     uint64_t gpuDrawCalls=0,gpuBoxInstances=0,gpuEllipseInstances=0,gpuFoliageInstances=0;
     bool planarReflectionRendered=false,lumaProbeLightingEnabled=false;
+    uint32_t zReflectActive=0,zReflectCandidates=0,zReflectNodeVisits=0,zReflectDeferred=0;
     bool lumaAdaptiveEnabled=false;
     uint64_t lumaAdaptiveZeroTriangles=0,lumaAdaptiveTriangleCount=0;
     // Hardware D3D11 timestamp results, independent of the CPU-side Map wait.
@@ -86,7 +87,10 @@ struct Material { std::string name; uint8_t reflectivityPercent=0,transmissionPe
     bool waterSurface=false;
     bool surfaceAuthored=false;
 };
+// Immutable, scene-authored optical patches. No GPU allocations per descriptor.
+struct OpticalPlane { V normal{},lo{},hi{}; double offset=0,area=0; int side=0; bool forced=false; std::vector<uint32_t> triangles; };
 struct Scene { bool underwaterEnvironment=false; bool finiteGround=false; bool useLegacyWorldLights=true; std::vector<Obj> obj; std::vector<SourceBox> sourceBoxes; std::vector<SourceFoliage> sourceFoliage; std::vector<Node> node; std::vector<uint32_t> order; std::vector<Material> mat; std::vector<Light> lights; int32_t root=-1;
+ std::vector<OpticalPlane> opticalPlanes;
  // V16 builder assigns a unique identity after scene construction. Tracked scenes
  // are immutable except for explicit editor mutations, which MUST call
  // markGpuContentChanged(). Legacy/untracked scenes (identity == 0) retain

@@ -6,6 +6,7 @@
 #include "m3d_directx11_sky_shader.h"
 #include "m3d_directx11_composite_shader.h"
 #include "m3d_directx11_mesh.h"
+#include "m3d_zreflect_runtime.h"
 #include "../../../../v17/weather/clouds.h"
 
 #if defined(_WIN32)
@@ -138,6 +139,13 @@ struct GpuEllipseInstance {
     float radii[3];float padding;
 };
 static_assert(sizeof(GpuEllipseInstance)==32,"D3D11 ellipsoid instance size");
+struct ZReflectTarget {
+    ComPtr<ID3D11Texture2D> tex,depth;
+    ComPtr<ID3D11RenderTargetView> rtv;
+    ComPtr<ID3D11DepthStencilView> dsv;
+    ComPtr<ID3D11ShaderResourceView> srv;
+    int w=0,h=0;
+};
 struct FrameConstants {
     float eye[3], tanHalf;
     float forward[3], aspect;
@@ -171,6 +179,9 @@ struct FrameConstants {
     float reflectionRight[3], reflectionPad0;
     float reflectionUp[3], reflectionPad1;
     uint32_t adaptiveZero[512];
+    float zClip[4]; // inward plane, zero outside secondary passes
+    float zPlaneIds[4]; // slot IDs + 1, count, secondary flag
+    float zEye[2][4],zForward[2][4],zRight[2][4],zUp[2][4];
 };
 
 // Independent sky constants avoid disturbing the existing PBR/shadow shader layout.
@@ -270,6 +281,17 @@ public:
         if(!ensureDevice(error)||!ensureScene(scene,error,lumaBvh))return false;
         const bool planarReflection=lumaBvh&&waterReflectionPlane_.valid&&
             zreflect::potentiallyVisible(waterReflectionPlane_.bounds,cam);
+        const char* zOpt=std::getenv("M3D_V17_ZREFLECT");
+        const bool zEnabled=lumaBvh&&zOpt&&std::strcmp(zOpt,"1")==0;
+        zActive_.clear();zreflect::QueryStats zStats{};
+        if(zEnabled)zStats=zRuntime_.select(scene,cam,zActive_);
+        // Two additional reusable slots, with the legacy water pass independent.
+        // Oversubscription is visible in telemetry; no global descriptor limit.
+        const uint32_t zDeferred=uint32_t(zActive_.size()>2?zActive_.size()-2:0);
+        if(zActive_.size()>2)zActive_.resize(2);
+        for(size_t i=0;i<zActive_.size();++i)
+            if(!ensureZTarget(zTargets_[i],std::max(1,w/2),std::max(1,h/2),error))return false;
+        const bool anyReflection=planarReflection||!zActive_.empty();
         if(!ensureShadow(shadows,error)||
            (planarReflection&&!ensureReflectionTarget(std::max(1,w/2),std::max(1,h/2),error))||
            (hybrid&&!lumaBvh&&!ensureProbeVolume(scene,error))||
@@ -412,6 +434,7 @@ public:
             cb.materialSpecular[m][0]=spec;cb.materialSpecular[m][1]=power;cb.materialSpecular[m][2]=scene.mat[m].roughnessMip.empty()?0.f:1.f;cb.materialSpecular[m][3]=metal;
             cb.materialOpacity[m][0]=1.f-float(scene.mat[m].transmissionPercent)/100.f;
             cb.materialOpacity[m][1]=scene.mat[m].normalMip.empty()?0.f:1.f;
+            cb.materialOpacity[m][2]=zreflect::dielectricF0(scene.mat[m].refractiveIndex);
             cb.materialDiffuse[m][0]=diffuseBase;cb.materialDiffuse[m][1]=diffuseDay;cb.materialDiffuse[m][2]=diffuseDirect;cb.materialDiffuse[m][3]=daylight;
             cb.materialEmission[m][0]=emissionR;cb.materialEmission[m][1]=emissionG;cb.materialEmission[m][2]=emissionB;cb.materialEmission[m][3]=emissionStrength;
         }
@@ -512,7 +535,7 @@ public:
                 error=L"Upload constantes de rendu impossible.";return false;
             }
             std::memcpy(mp.pData,&cb,sizeof(cb));context_->Unmap(constants_.Get(),0);
-            if(planarReflection){
+            if(anyReflection){
                 cloudCB.forward[0]=activeCam.f.x;cloudCB.forward[1]=activeCam.f.y;cloudCB.forward[2]=activeCam.f.z;
                 cloudCB.right[0]=activeCam.r.x;cloudCB.right[1]=activeCam.r.y;cloudCB.right[2]=activeCam.r.z;
                 cloudCB.up[0]=activeCam.u.x;cloudCB.up[1]=activeCam.u.y;cloudCB.up[2]=activeCam.u.z;
@@ -561,8 +584,10 @@ public:
                 hybrid?(lumaBvh?lumaTraceCompute_.probeSrv():(hasBakedGi_?probeNextSrv_.Get():probeSrv_.Get())):nullptr,
                 preservedAlbedo_?preservedAlbedo_.Get():albedo_.Get(),
                 lumaBvh?lumaTraceCompute_.radianceSrv():nullptr,
-                (planarReflection&&cb.reflectionControls[0]>1.5f)?reflectionSrv_.Get():nullptr};
-            context_->PSSetShaderResources(0,9,srvs);
+                (planarReflection&&cb.reflectionControls[0]>1.5f)?reflectionSrv_.Get():nullptr,
+                cb.zPlaneIds[3]<.5f&&cb.zPlaneIds[2]>.5f?zTargets_[0].srv.Get():nullptr,
+                cb.zPlaneIds[3]<.5f&&cb.zPlaneIds[2]>1.5f?zTargets_[1].srv.Get():nullptr};
+            context_->PSSetShaderResources(0,11,srvs);
             ID3D11SamplerState* samplers[]={sampler_.Get(),probeSampler_.Get()};
             context_->PSSetSamplers(0,2,samplers);
         
@@ -576,7 +601,7 @@ public:
         const char* zPrepassEnv=std::getenv("M3D_V17_EXPERIMENT_Z_PREPASS");
         const char* disableZPrepass=std::getenv("M3D_V17_DISABLE_Z_PREPASS");
         // The reflection pixel shader clips geometry below the water plane; a depth-only pass cannot.
-        const bool depthPrepass=cb.reflectionControls[0]!=1.f && !(disableZPrepass&&std::strcmp(disableZPrepass,"1")==0)
+        const bool depthPrepass=cb.reflectionControls[0]!=1.f && cb.zPlaneIds[3]<.5f && !(disableZPrepass&&std::strcmp(disableZPrepass,"1")==0)
             &&!(zPrepassEnv&&std::strcmp(zPrepassEnv,"0")==0);
         if(depthPrepass){
             context_->OMSetRenderTargets(0,nullptr,ds);
@@ -787,7 +812,7 @@ public:
             context_->VSSetShader(vs_.Get(),nullptr,0);
             context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
         }
-        if(!transparent_.empty()){
+        if(!transparent_.empty()&&cb.zPlaneIds[3]<.5f){
             std::sort(transparent_.begin(),transparent_.end(),[&](const TransparentTriangle& a,const TransparentTriangle& b){return dot(a.center-activeCam.eye,activeCam.f)>dot(b.center-activeCam.eye,activeCam.f);});
             D3D11_MAPPED_SUBRESOURCE transparentMap{};hr=context_->Map(transparentVertices_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&transparentMap);
             if(FAILED(hr)){error=L"Impossible de préparer les surfaces transparentes DirectX 11.";return false;}
@@ -801,6 +826,25 @@ public:
         }
             return true;
         };
+        // Secondary passes only render opaque geometry. No recursive reflections.
+        ID3D11ShaderResourceView* noOptics[3]={nullptr,nullptr,nullptr};
+        context_->PSSetShaderResources(8,3,noOptics);
+        for(size_t i=0;i<zActive_.size();++i){
+            const auto id=zActive_[i].id;const auto& p=zRuntime_.patch(id);
+            const auto m=zreflect::mirrorCamera(cam,p.normal,p.offset);
+            const float sign=zreflect::planeDistance(cam.eye,p)>=0?1.f:-1.f;
+            cb.zClip[0]=sign*p.normal.x;cb.zClip[1]=sign*p.normal.y;cb.zClip[2]=sign*p.normal.z;
+            cb.zClip[3]=-sign*float(p.offset)-.001f;
+            cb.zPlaneIds[3]=1.f;activeCam=m;
+            cb.reflectionControls[0]=0.f;
+            if(!drawScene(zTargets_[i].rtv.Get(),zTargets_[i].dsv.Get(),zTargets_[i].w,zTargets_[i].h,false,false))return false;
+            context_->OMSetRenderTargets(0,nullptr,nullptr);
+            cb.zPlaneIds[i]=float(id+1u);
+            auto put4=[](float* dest,V v,float w){dest[0]=v.x;dest[1]=v.y;dest[2]=v.z;dest[3]=w;};
+            put4(cb.zEye[i],m.eye,m.tanHalf);put4(cb.zForward[i],m.f,m.aspect);
+            put4(cb.zRight[i],m.r,0);put4(cb.zUp[i],m.u,0);
+        }
+        cb.zPlaneIds[3]=0.f;activeCam=cam;
         if(planarReflection){
             const float reflectionPlaneY=waterReflectionPlane_.y;
             ID3D11ShaderResourceView* noReflection[]={nullptr};
@@ -821,6 +865,7 @@ public:
             activeCam=cam;
             cb.reflectionControls[0]=2.f;
         }else cb.reflectionControls[0]=0.f;
+        cb.zPlaneIds[2]=float(zActive_.size());
         if(multires){
             if(!drawScene(lowRtv_.Get(),lowDsv_.Get(),lowW_,lowH_,false,true) ||
                !drawScene(rtv_.Get(),dsv_.Get(),w,h,true,false))return false;
@@ -888,6 +933,8 @@ public:
                 nativeStats->readbackBufferCount=0;
                 nativeStats->gpuDrawCalls=drawCalls;
                 nativeStats->planarReflectionRendered=planarReflection;
+                nativeStats->zReflectActive=uint32_t(zActive_.size());nativeStats->zReflectCandidates=uint32_t(zStats.candidates);
+                nativeStats->zReflectNodeVisits=uint32_t(zStats.nodeVisits);nativeStats->zReflectDeferred=zDeferred;
                 nativeStats->lumaProbeLightingEnabled=lumaBvh&&hybrid;
                 nativeStats->lumaAdaptiveEnabled=adaptiveEnabled;
                 nativeStats->lumaAdaptiveZeroTriangles=adaptiveEnabled?lumaTraceCompute_.zeroTriangles():0;
@@ -940,6 +987,8 @@ public:
         slot.submitted.readbackBufferCount=depth;
         slot.submitted.gpuDrawCalls=drawCalls;
         slot.submitted.planarReflectionRendered=planarReflection;
+        slot.submitted.zReflectActive=uint32_t(zActive_.size());slot.submitted.zReflectCandidates=uint32_t(zStats.candidates);
+        slot.submitted.zReflectNodeVisits=uint32_t(zStats.nodeVisits);slot.submitted.zReflectDeferred=zDeferred;
         slot.submitted.lumaProbeLightingEnabled=lumaBvh&&hybrid;
         slot.submitted.lumaAdaptiveEnabled=adaptiveEnabled;
         slot.submitted.lumaAdaptiveZeroTriangles=adaptiveEnabled?lumaTraceCompute_.zeroTriangles():0;
@@ -1406,6 +1455,14 @@ private:
         if(lumaTrace&&!prepareLumaTraceCpuScene(scene,*lumaBvh,lumaCpuScene_,error))
             return false;
         const uint32_t lumaTriangleCount=lumaTrace?lumaCpuScene_.triangleCount:0;
+        zRuntime_.build(scene);
+        std::vector<uint32_t> zTag;
+        if(lumaTrace&&!scene.opticalPlanes.empty()){
+            zTag.assign(scene.obj.size(),zreflect::noOptical);
+            for(size_t i=0;i<scene.opticalPlanes.size()&&i<0x7ffffffeu;++i)
+                for(uint32_t t:scene.opticalPlanes[i].triangles)
+                    if(t<zTag.size())zTag[t]=zreflect::opticalTag|uint32_t(i);
+        }
         MeshBuilder mesh;
         std::vector<GpuBoxInstance> boxData;
         // V16 JSON geometry is triangulated for CPU/Compute, but the source
@@ -1485,6 +1542,8 @@ private:
                     return false;
                 }
                 mesh.currentPrimitiveId=lumaCpuScene_.objectToTriangle[objectIndex];
+                if(mesh.transparentMaterial&&!zTag.empty()&&zTag[objectIndex]!=zreflect::noOptical)
+                    mesh.currentPrimitiveId=zTag[objectIndex];
             }else mesh.currentPrimitiveId=0;
             if(o.kind==Kind::Triangle)mesh.tri(o.a,o.b,o.c,o.n0,o.n1,o.n2,o.uv0.x,o.uv0.y,o.uv1.x,o.uv1.y,o.uv2.x,o.uv2.y,m);
             else if(o.kind==Kind::Box){
@@ -1947,6 +2006,24 @@ private:
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&depthTexture_))||FAILED(device_->CreateDepthStencilView(depthTexture_.Get(),nullptr,&dsv_))){error=L"Création du tampon de profondeur DirectX 11 impossible.";return false;}
         return true;
     }
+    bool ensureZTarget(ZReflectTarget& t,int w,int h,std::wstring& error){
+        if(t.rtv&&t.dsv&&t.srv&&t.w==w&&t.h==h)return true;
+        ZReflectTarget fresh;
+        D3D11_TEXTURE2D_DESC d{};d.Width=UINT(w);d.Height=UINT(h);d.MipLevels=1;d.ArraySize=1;
+        d.Format=DXGI_FORMAT_R8G8B8A8_TYPELESS;d.SampleDesc.Count=1;d.Usage=D3D11_USAGE_DEFAULT;
+        d.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
+        D3D11_RENDER_TARGET_VIEW_DESC r{};r.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;r.ViewDimension=D3D11_RTV_DIMENSION_TEXTURE2D;
+        D3D11_SHADER_RESOURCE_VIEW_DESC s{};s.Format=r.Format;s.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2D;s.Texture2D.MipLevels=1;
+        if(FAILED(device_->CreateTexture2D(&d,nullptr,&fresh.tex))||
+           FAILED(device_->CreateRenderTargetView(fresh.tex.Get(),&r,&fresh.rtv))||
+           FAILED(device_->CreateShaderResourceView(fresh.tex.Get(),&s,&fresh.srv))){
+            error=L"Z Reflect: color target allocation failed";return false;}
+        d.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;d.BindFlags=D3D11_BIND_DEPTH_STENCIL;
+        if(FAILED(device_->CreateTexture2D(&d,nullptr,&fresh.depth))||
+           FAILED(device_->CreateDepthStencilView(fresh.depth.Get(),nullptr,&fresh.dsv))){
+            error=L"Z Reflect: depth target allocation failed";return false;}
+        fresh.w=w;fresh.h=h;t=std::move(fresh);return true;
+    }
     bool ensureReflectionTarget(int w,int h,std::wstring& error){
         if(reflectionRtv_&&reflectionDsv_&&reflectionSrv_&&reflectionW_==w&&reflectionH_==h)return true;
         reflectionTex_.Reset();reflectionDepth_.Reset();reflectionRtv_.Reset();
@@ -2120,6 +2197,9 @@ private:
     ComPtr<ID3D11ShaderResourceView> reflectionSrv_;
     int reflectionW_=0,reflectionH_=0;
     d3d11::WaterReflectionPlane waterReflectionPlane_{};
+    zreflect::RuntimeOptics zRuntime_;
+    std::vector<zreflect::ActivePlane> zActive_;
+    std::array<ZReflectTarget,2> zTargets_;
     ComPtr<ID3D11ShaderResourceView> targetSrv_,resolveSrv_,lowSrv_;
     ComPtr<ID3D11RenderTargetView> lowRtv_,mergeRtv_;
     ComPtr<ID3D11DepthStencilView> lowDsv_;

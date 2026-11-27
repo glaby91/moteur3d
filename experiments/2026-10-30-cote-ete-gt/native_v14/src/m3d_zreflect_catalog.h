@@ -51,7 +51,7 @@ inline void mergePatch(std::map<PlaneKey,std::vector<Group>>& groups,const Scene
     g->objects.insert(objectIndex);g->explicitEnable|=enabled;
 }
 inline QJsonObject catalogue(const v16::Runtime& rt,const v16::SceneDatabase& db,
-                            const QJsonObject& manifest,const Policy& policy={}){
+                            const QJsonObject& manifest,const Policy& policy={},std::vector<OpticalPlane>* runtimePlanes=nullptr){
     const auto instances=authored(db,"instances"),materials=authored(db,"materials");
     const auto& scene=rt.renderScene;QJsonArray objects,planes,lights,diagnostics,cameras;
     std::map<PlaneKey,std::vector<Group>> groups;int optical=0,rejectedGeometry=0,refused=0;
@@ -67,6 +67,9 @@ inline QJsonObject catalogue(const v16::Runtime& rt,const v16::SceneDatabase& db
         // Nominal source roughness is not roughnessScale or sampled texture roughness.
         double rough=matSrc.value("roughness").toDouble(.72);
         const bool mirror=matSrc.value("opticalMirror").toBool(false);
+        // First GPU stage supports exact transparent, non-water patches only.
+        if(runtimePlanes&&(water||mat.transmissionPercent==0||
+            !(perm==Permission::Auto||perm==Permission::Enabled)))continue;
         if(!opticalEligible(water,mirror,double(mat.transmissionPercent)/100.,mat.metallic,rough,perm,policy))continue;
         ++optical;
         auto patches=extractSlab(scene,first,count,water,perm==Permission::Enabled,policy);
@@ -85,6 +88,14 @@ inline QJsonObject catalogue(const v16::Runtime& rt,const v16::SceneDatabase& db
             {"reflectivityPercent",int(mat.reflectivityPercent)},{"transmissionPercent",int(mat.transmissionPercent)},
             {"metallic",mat.metallic},{"roughnessNominal",rough},{"roughnessScale",mat.roughnessScale},{"waterSurface",water}});
         for(auto& patch:patches)mergePatch(groups,scene,std::move(patch),objectIndex,perm==Permission::Enabled);
+    }
+    if(runtimePlanes){
+        runtimePlanes->clear();
+        for(const auto& kv:groups)for(const auto& g:kv.second){
+            const auto& p=g.patch;
+            runtimePlanes->push_back({p.normal,p.bounds.lo,p.bounds.hi,p.offset,p.area,p.side,g.explicitEnable,p.triangles});
+        }
+        return {};
     }
     std::vector<const Group*> ordered;
     std::vector<IndexedPlane> descriptors;

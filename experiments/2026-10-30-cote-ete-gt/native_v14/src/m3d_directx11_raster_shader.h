@@ -37,6 +37,9 @@ cbuffer Frame : register(b0) {
     float3 reflectionRight; float reflectionPad0;
     float3 reflectionUp; float reflectionPad1;
     uint4 adaptiveZero[128];
+    float4 zClip;
+    float4 zPlaneIds;
+    float4 zEye[2],zForward[2],zRight[2],zUp[2];
 };
 Texture2DArray<float4> albedo : register(t0);
 Texture2D<float> shadowDepth : register(t1);
@@ -47,10 +50,12 @@ Texture3D<float4> indirectProbesNext : register(t5);
 Texture2DArray<float4> preservedAlbedo : register(t6);
 StructuredBuffer<float4> lumaTriangleRadiance : register(t7);
 Texture2D<float4> poolReflection : register(t8);
+Texture2D<float4> zReflection0 : register(t9);
+Texture2D<float4> zReflection1 : register(t10);
 SamplerState wrapSampler : register(s0);
 SamplerState probeSampler : register(s1);
 struct VSIn { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; uint mat:MATERIAL; uint primitiveId:TRIID; };
-struct VSOut { float4 p:SV_POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; float3 world:TEXCOORD1; nointerpolation uint mat:MATERIAL; nointerpolation uint primitiveId:TEXCOORD2; };
+struct VSOut { float4 p:SV_POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; float3 world:TEXCOORD1; nointerpolation uint mat:MATERIAL; nointerpolation uint primitiveId:TEXCOORD2; nointerpolation uint opticalId:TEXCOORD3; };
 VSOut VSMain(VSIn i) {
     VSOut o;
     float3 q = i.p - eye;
@@ -63,10 +68,12 @@ VSOut VSMain(VSIn i) {
     // pull geometry behind the near plane onto the near plane instead of clipping it.
     o.p = float4(nx * safeZ, ny * safeZ, depth, z);
     o.n = i.n; o.uv = i.uv; o.world=i.p; o.mat = min(i.mat, materialCount - 1);o.primitiveId=i.primitiveId;
+    o.opticalId=0u;
+    if(i.primitiveId!=0xffffffffu && (i.primitiveId&0x80000000u)!=0u){o.opticalId=(i.primitiveId&0x7fffffffu)+1u;o.primitiveId=0xffffffffu;}
     // The pixel shader already skips local radiance for the sentinel.
     // Preserve all other LumaTrace lighting controls and all draw calls.
-    [branch] if(padding.x>.5 && i.primitiveId!=0xffffffffu){
-        uint group=i.primitiveId>>8;uint word=group>>5;
+    [branch] if(padding.x>.5 && o.primitiveId!=0xffffffffu){
+        uint group=o.primitiveId>>8;uint word=group>>5;
         if((adaptiveZero[word>>2][word&3u]&(1u<<(group&31u)))!=0u)o.primitiveId=0xffffffffu;
     }
     return o;
@@ -120,6 +127,7 @@ VSOut VSEllipseMain(VSEllipseIn i) {
     return VSMain(raw);
 }
 float4 PSMain(VSOut i):SV_TARGET {
+    if(zPlaneIds.w>.5 && dot(float4(i.world,1.0),zClip)<0.0) discard;
     // Smooth focus-lens / lighthouse geometry. The sharp center follows the
     // camera's optical axis, with no rectangular hard cut or temporal reuse.
     // Mode 0: original full-frame, 1: low-res surround, 2: full-res focus.
@@ -385,6 +393,29 @@ inline constexpr char kShaderPart2[] = R"(
         const float authoredTransmission=1.0-saturate(materialOpacity[i.mat].x);
         opacity=1.0-authoredTransmission*(1.0-opacity);
         return float4(color,opacity);
+    }
+    // Fresnel-composite reflected opaque surroundings into original glass PBR.
+    // The ordinary alpha blend still supplies transmission; this is NOT refraction.
+    if(i.opticalId!=0u && zPlaneIds.w<.5 && zPlaneIds.z>.5 && reflectionControls.x!=1.0){
+        int slot=-1;
+        if(i.opticalId==(uint)zPlaneIds.x)slot=0;
+        else if(zPlaneIds.z>1.5 && i.opticalId==(uint)zPlaneIds.y)slot=1;
+        if(slot>=0){
+            float3 q=i.world-zEye[slot].xyz;
+            float z=dot(q,zForward[slot].xyz);
+            if(z>.08){
+                float2 ndc=float2(dot(q,zRight[slot].xyz),dot(q,zUp[slot].xyz)*zForward[slot].w)/(z*zEye[slot].w);
+                float2 uv=float2(.5+.5*ndc.x,.5-.5*ndc.y);
+                if(all(uv>=0.0)&&all(uv<=1.0)){
+                    float3 reflected=slot==0?zReflection0.SampleLevel(probeSampler,uv,0).rgb:zReflection1.SampleLevel(probeSampler,uv,0).rgb;
+                    float f0=saturate(materialOpacity[i.mat].z);
+                    float f=f0+(1.0-f0)*pow(1.0-saturate(abs(dot(normal,viewDir))),5.0);
+                    float alpha=saturate(materialOpacity[i.mat].x);
+                    float combined=f+(1.0-f)*alpha;
+                    return float4((reflected*f+color*alpha*(1.0-f))/max(combined,.00001),combined);
+                }
+            }
+        }
     }
     return float4(color, materialOpacity[i.mat].x);
 }
