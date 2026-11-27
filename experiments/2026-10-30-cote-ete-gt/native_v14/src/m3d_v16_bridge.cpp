@@ -2,6 +2,8 @@
 #include "m3d_csp001_bvh.h"
 #include "m3d_zreflect_catalog.h"
 #include "m3d_zreflect_cache.h"
+#include "m3d_zmaterial_catalog.h"
+#include <QSet>
 #include <QCoreApplication>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -609,7 +611,9 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
     if(materialDocs.isEmpty()||meshes.isEmpty()||instanceDocs.isEmpty()){
         result.error="Missing meshes, instances or materials";return result;
     }
-    if(materialDocs.size()>256){result.error="Material count exceeds 256";return result;}
+    // Select instance references before allocating textures. Preserve author order.
+    if(!zmaterial::selectActive(materialDocs,instanceDocs,result.error))return result;
+    zmaterial::Catalog library;
     report(15,QStringLiteral("Préparation des textures PBR"));
     auto stageStarted=std::chrono::steady_clock::now();
     const auto stageElapsedMs=[&](){
@@ -617,7 +621,8 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
             std::chrono::steady_clock::now()-stageStarted).count();
     };
     int completedMaterials=0;
-    for(const auto& j:materialDocs){
+    for(auto j:materialDocs){
+        if(!library.resolve(j,result.error))return result;
         const QString id=j.value("id").toString();
         if(id.isEmpty()||result.runtime.materialIndex.contains(id)){
             result.error="Duplicate or missing material: "+id;return result;

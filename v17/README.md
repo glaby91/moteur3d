@@ -1,6 +1,6 @@
 # CSE WARP Beta X — V17
 
-**Révision moteur : V17.029 · scène de référence CI : V17.631.** [Validation L01/L02](docs/L01_SOLAR_PCF_V17029.md). Les fenêtres moteur et rendu dédié affichent les deux révisions. Le paquet Windows contient le moteur et ses outils ; la scène est versionnée et distribuée séparément. LumaTrace utilise maintenant les surfaces lumineuses de la scène comme sources locales et réutilise leur éclairage calculé par triangle.
+**Révision moteur : V17.031 — Z Material 001 et profil de démarrage piscine V17.634 · scène CI V17.631.** [Z Material](docs/ZMATERIAL_001.md). [Validation L01/L02](docs/L01_SOLAR_PCF_V17029.md). Les fenêtres moteur et rendu dédié affichent les deux révisions. Le paquet Windows contient le moteur et ses outils ; la scène est versionnée et distribuée séparément. LumaTrace utilise maintenant les surfaces lumineuses de la scène comme sources locales et réutilise leur éclairage calculé par triangle.
 
 **V17 réunit l’exploration temps réel, les backends CPU/GPU et le noyau partagé avec V16.** DX11 Raster est le choix temps réel général ; Vulkan et LumaTrace sont expérimentaux. Le chemin de présentation GPU directe est disponible sous Windows, avec Qt/QImage comme solution de repli. La CI WARP ne mesure pas les performances du GPU matériel.
 
@@ -80,3 +80,7 @@ Avec une scène locale, la première vérification réseau asynchrone attend 10 
 
 ## Z Atmosphere 002 (V17.028 expérimental)
 Grain lumineux additif très discret pour DirectX 11, LumaTrace et Vulkan, sans brouillard ni atténuation. [Architecture, paramètres, limites et essais](docs/ZATMOSPHERE_001.md).
+
+## V17.031 — profil de démarrage
+
+LumaTrace BVH4, Ultra 8x MSAA, anisotropie 16x, LOD 200%, LOD adaptatif désactivé, exposition 0,85. Pose piscine exacte ajoutée en mémoire pour V17.634 ; pas de changement du dépôt scène. Voir le [README principal](../README.md#v17031--profil-de-démarrage-et-philosophie-warp) pour les options et l'état L03–L05. Les noyaux LumaTrace restent 010/003 ; DX11 raster 018, shader 009, Vulkan 010 et Z Material 001.

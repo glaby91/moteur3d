@@ -1,5 +1,5 @@
 name: CSE WARP V17 — Main Windows x64
-run-name: CSE WARP V17.029 — master (GitHub build ${{ github.run_number }})
+run-name: CSE WARP V17.031 — master (GitHub build ${{ github.run_number }})
 on:
   push:
     branches: [master]
@@ -24,6 +24,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Four Z Material preflight checks
+        shell: pwsh
+        run: python v17/materials/test_zmaterial.py
       - name: Download exact published scene
         shell: pwsh
         run: |
@@ -72,12 +75,12 @@ jobs:
       - name: Compile and test native diagnostic
         shell: pwsh
         run: |
-          cmake --build build-zreflect --config Release --target cse_scene_precompiler v17_zreflect_catalog_smoke v17_zreflect_index_smoke v17_csp001_smoke v17_zreflect_warp_ab v17_dx11_r001_smoke v17_dx11_r001_warp_ab v17_dx11_emission_smoke v17_dx11_emission_warp_ab v17_atmosphere_smoke v17_atmosphere_warp_ab v17_vulkan_gpu_smoke --parallel 4
+          cmake --build build-zreflect --config Release --target v17_zmaterial_smoke cse_scene_precompiler v17_zreflect_catalog_smoke v17_zreflect_index_smoke v17_csp001_smoke v17_zreflect_warp_ab v17_dx11_r001_smoke v17_dx11_r001_warp_ab v17_dx11_emission_smoke v17_dx11_emission_warp_ab v17_atmosphere_smoke v17_atmosphere_warp_ab v17_vulkan_gpu_smoke --parallel 4
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $core = Get-ChildItem build-zreflect -Recurse -Filter moteur3d_v16_core.dll | Select-Object -First 1
           if (!$core) { throw "Missing shared engine DLL" }
           $env:PATH = "$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
-          ctest --test-dir build-zreflect -C Release -R "^(v17_zreflect_catalog_filter|v17_zreflect_spatial_60000|v17_csp001_roundtrip_visibility|v17_dx11_r001_five_checks|v17_dx11_emission_five_checks|v17_atmosphere_math)$" --verbose --output-on-failure --no-tests=error
+          ctest --test-dir build-zreflect -C Release -R "^(v17_zmaterial_runtime|v17_zreflect_catalog_filter|v17_zreflect_spatial_60000|v17_csp001_roundtrip_visibility|v17_dx11_r001_five_checks|v17_dx11_emission_five_checks|v17_atmosphere_math)$" --verbose --output-on-failure --no-tests=error
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Verify published optical catalogue and cache
         shell: pwsh
@@ -168,7 +171,7 @@ jobs:
           if (!(Get-Command Invoke-Route30).Parameters.ContainsKey('ZReflectMatrix')) { throw "Missing Reflect matrix benchmark dispatch" }
           $dist = "dist-zreflect"
           New-Item -ItemType Directory -Force $dist | Out-Null
-          @{ productVersion = "17.029"; githubActionsRun = "$env:GITHUB_RUN_ID"; githubRunNumber = "$env:GITHUB_RUN_NUMBER"; sourceCommit = "$env:GITHUB_SHA"; branch = "$env:GITHUB_REF_NAME" } | ConvertTo-Json | Set-Content "$dist/BUILD_INFO.json" -Encoding UTF8
+          @{ productVersion = "17.031"; githubActionsRun = "$env:GITHUB_RUN_ID"; githubRunNumber = "$env:GITHUB_RUN_NUMBER"; sourceCommit = "$env:GITHUB_SHA"; branch = "$env:GITHUB_REF_NAME" } | ConvertTo-Json | Set-Content "$dist/BUILD_INFO.json" -Encoding UTF8
           $names = @("moteur3d_v17.exe","moteur3d_v16_core.dll","cse_scene_precompiler.exe","route30.exe","moteur3d_v17_benchmark.exe","moteur3d_v17_campaign.exe","moteur3d_v17_benchui.exe","moteur3d_v17_gibake.exe","moteur3d_v17_gpu_trajectory.exe","moteur3d_v16.exe","v17_zreflect_index_smoke.exe")
           foreach ($name in $names) {
             $f = Get-ChildItem build-zreflect -Recurse -File -Filter $name | Select-Object -First 1
@@ -207,6 +210,15 @@ jobs:
           Copy-Item "v17/docs/L01_SOLAR_PCF_V17029.md" $dist
           Copy-Item "zreflect-report/summary.json" "$dist/zreflect-summary.json"
           Copy-Item "zreflect-report/zreflect-*.png" $dist
+          New-Item -ItemType Directory -Force "$dist/materials" | Out-Null
+          Copy-Item "v17/materials/zmaterial8192.json" "$dist/materials/"
+          Copy-Item "v17/docs/ZMATERIAL_001.md" $dist
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set "M3D_V17_ZMATERIAL=0"
+          start "" "moteur3d_v17.exe"
+          '@ | Set-Content "$dist/LANCER_SANS_ZMATERIAL.bat" -Encoding ascii
           Copy-Item README.md "$dist/README.md"
           windeployqt --release --no-translations "$dist/moteur3d_v17.exe"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -279,12 +291,12 @@ jobs:
       - name: Wrap files in named build directory
         shell: pwsh
         run: |
-          $name = "CSE-WARP-V17.029-Main-GitHub-${{ github.run_number }}-Windows-x64"
+          $name = "CSE-WARP-V17.031-Main-GitHub-${{ github.run_number }}-Windows-x64"
           New-Item -ItemType Directory -Force build-package | Out-Null
           Move-Item dist-zreflect (Join-Path build-package $name)
       - name: Upload experimental Windows build (engine only)
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.029-Main-GitHub-${{ github.run_number }}-Windows-x64
+          name: CSE-WARP-V17.031-Main-GitHub-${{ github.run_number }}-Windows-x64
           path: build-package/
           if-no-files-found: error

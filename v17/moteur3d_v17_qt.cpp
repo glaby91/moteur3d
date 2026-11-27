@@ -1365,8 +1365,9 @@ private:
         // navigation of the large V8 scene. Temporarily lower AA to 2x ONLY
         // while moving. Restore the user's precise settings on exit.
         const auto adapter=gpuAdapterLabel();
-        if(adapter.contains(QStringLiteral("HD Graphics 620"),Qt::CaseInsensitive)
-           ||adapter.contains(QStringLiteral("UHD Graphics 620"),Qt::CaseInsensitive)){
+        if((!useDefaultShowcaseProfile() || qEnvironmentVariable("M3D_V17_HD620_INTERACTIVE_REDUCE")==QStringLiteral("1")) &&
+           (adapter.contains(QStringLiteral("HD Graphics 620"),Qt::CaseInsensitive)
+           ||adapter.contains(QStringLiteral("UHD Graphics 620"),Qt::CaseInsensitive))){
             const auto q=rasterQualitySettings();
             if(q.msaaSamples>2){
                 auto interactive=q;
@@ -1978,6 +1979,12 @@ private:
         openDiagnosticsDashboard();
     }
 
+    static bool useDefaultShowcaseProfile(){
+        const auto args=QCoreApplication::arguments();
+        return qEnvironmentVariable("CSE_WARP_VK_PROFILE_MODE")!=QStringLiteral("1") &&
+            qEnvironmentVariable("M3D_V17_LEGACY_STARTUP")!=QStringLiteral("1") &&
+            std::none_of(args.cbegin(),args.cend(),[](const QString& a){return a.startsWith(QStringLiteral("--smoke-"));});
+    }
     void displayRasterSettings(const RasterQualitySettings& q){
         const QSignalBlocker msaaBlocker(rasterMsaaBox_);
         const QSignalBlocker anisoBlocker(rasterAnisoBox_);
@@ -2671,9 +2678,8 @@ private:
         backendBox_->setItemData(5,QStringLiteral("Vulkan SDK absent lors de la compilation"),Qt::ToolTipRole);
 #endif
 #ifdef _WIN32
-        // Default Windows user path: native D3D11 raster with DXGI presentation.
-        // Vulkan and all CPU/compute options remain selectable.
-        backendBox_->setCurrentIndex(4);
+        // V17.031: LumaTrace showcase by default; explicit legacy/smoke paths stay DX11.
+        backendBox_->setCurrentIndex(useDefaultShowcaseProfile()?6:4);
 #endif
         // Keep the backend choice visible at 1366px: renderer names
         // previously consumed the entire top toolbar and hid the renderer.
@@ -2734,7 +2740,9 @@ private:
         sunHour_->setValue(14.75);
         sunHour_->setToolTip(QStringLiteral("Soleil et éclairage de 00 h à 24 h — aube, jour, crépuscule, nuit"));
         cloudAnimationBox_=new QCheckBox(QStringLiteral("Nuages animés sur le ciel"));
-        cloudAnimationBox_->setChecked(true);
+        cloudAnimationBox_->setChecked(backendBox_->currentIndex()!=6);
+        lumaTraceCloudDefaultApplied_=backendBox_->currentIndex()==6;
+        m3d::setRasterCloudsEnabled(cloudAnimationBox_->isChecked());
         cloudAnimationBox_->setToolTip(QStringLiteral(
             "Véritables cirrus calculés par le shader DirectX11. La scène reste nette."));
         dayNightCycleBox_=new QCheckBox(QStringLiteral("Simulation jour/nuit (24 h en 6 min)"));
@@ -2770,10 +2778,10 @@ private:
             "Adoucit les hautes lumières sans remonter les demi-teintes.\n"
             "Indépendant des sondes indirectes."));
         QSettings hybridPrefs(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-        hybridLightBox_->setChecked(hybridPrefs.value(QStringLiteral("Raster/HybridLighting"),true).toBool());
-        filmicToneBox_->setChecked(hybridPrefs.value(QStringLiteral("Raster/FilmicTonemap"),false).toBool());
-        colorEnergyBox_->setChecked(hybridPrefs.value(QStringLiteral("Raster/ColorEnergyBalance"),true).toBool());
-        colorExposureBox_->setValue(hybridPrefs.value(QStringLiteral("Raster/ColorExposure"),1.0).toDouble());
+        hybridLightBox_->setChecked(useDefaultShowcaseProfile()||hybridPrefs.value(QStringLiteral("Raster/HybridLighting"),true).toBool());
+        filmicToneBox_->setChecked(useDefaultShowcaseProfile()||hybridPrefs.value(QStringLiteral("Raster/FilmicTonemap"),false).toBool());
+        colorEnergyBox_->setChecked(useDefaultShowcaseProfile()||hybridPrefs.value(QStringLiteral("Raster/ColorEnergyBalance"),true).toBool());
+        colorExposureBox_->setValue(useDefaultShowcaseProfile()?0.85:hybridPrefs.value(QStringLiteral("Raster/ColorExposure"),1.0).toDouble());
         colorExposureBox_->setEnabled(colorEnergyBox_->isChecked());
         m3d::setRasterHybridLightingEnabled(hybridLightBox_->isChecked());
         m3d::setRasterFilmicTonemapEnabled(filmicToneBox_->isChecked());
@@ -2864,6 +2872,15 @@ private:
             initialQuality.lodQualityPercent=stored.value(QStringLiteral("Raster/LODPercent"),100).toUInt();
             initialQuality.frustumCulling=stored.value(QStringLiteral("Raster/Culling"),true).toBool();
             initialQuality.dynamicLod=stored.value(QStringLiteral("Raster/DynamicLOD"),true).toBool();
+        }
+        if(useDefaultShowcaseProfile()){
+            initialPreset=3;
+            initialQuality=rasterQualityProfile(RasterQualityProfile::Ultra);
+            initialQuality.msaaSamples=8;
+            initialQuality.anisotropy=16;
+            initialQuality.lodQualityPercent=200;
+            initialQuality.frustumCulling=true;
+            initialQuality.dynamicLod=false;
         }
         if(rasterMsaaBox_->findData(int(initialQuality.msaaSamples))<0||
            rasterAnisoBox_->findData(int(initialQuality.anisotropy))<0||
@@ -3474,6 +3491,24 @@ private:
                                            QRegularExpression::CaseInsensitiveOption));
             cameraBox_->addItem(name,i);
         }
+        // Preserve original quick-camera numbering. This engine-side pose is
+        // scoped to the civic scene revision; no scene resources are rewritten.
+        if(useDefaultShowcaseProfile() && sceneRevision==QStringLiteral("V17.634") &&
+           QFileInfo(outcome.path).fileName()==QStringLiteral("scene.json") &&
+           QFileInfo(outcome.path).absolutePath().endsWith(QStringLiteral("/benchmark-civic"),Qt::CaseInsensitive)){
+            v16::CameraPreset pool;
+            pool.id=QStringLiteral("v17_showcase_pool_634");
+            pool.name=QStringLiteral("Piscine — référence V17.031");
+            pool.eye={29.90612030029297f,2.245000123977661f,-18.339569091796875f};
+            pool.target={29.043092727661133f,2.286057472229004f,-18.843053817749023f};
+            pool.fov=61.f;
+            const int sourceIndex=int(runtime_->cameras.size());
+            runtime_->cameras.append(pool);
+            cameraBox_->addItem(pool.name,sourceIndex);
+            cameraBox_->setCurrentIndex(cameraBox_->count()-1);
+            const QSignalBlocker azimuthBlocker(azimuth_);
+            azimuth_->setValue(0);
+        }
         for(int i=0;i<quickCameraActions_.size();++i){
             const bool valid=i<visibleCameras.size();
             quickCameraActions_[i]->setEnabled(valid);
@@ -3492,14 +3527,12 @@ private:
             .arg(runtime_->renderScene.obj.size())
             .arg(runtime_->renderScene.mat.size())
             .arg(runtime_->textureResolution));
-        // The stress scene must start with the actual V17 DX11 Raster backend
-        // instead of CPU ray tracing, which scales poorly with 500k triangles.
+        // Explicit stress/benchmark profiles retain their legacy GPU backend.
         const bool isStressScene=QFileInfo(outcome.path).absolutePath().endsWith(
             QStringLiteral("/benchmark-civic"),Qt::CaseInsensitive);
         const bool extremeStress=QFileInfo(outcome.path).fileName()
             ==QStringLiteral("scene-extreme.json");
-        // Explicit benchmark launcher override only: ordinary scene launches
-        // keep their existing DX11 Raster default and user controls.
+        // Explicit Vulkan benchmark override; ordinary launches keep the selected backend.
         const bool vulkanProfile=isStressScene &&
             qEnvironmentVariable("CSE_WARP_VK_PROFILE_MODE")==QStringLiteral("1");
 #if defined(_WIN32) && M3D_V17_VULKAN_ENABLED
@@ -3509,7 +3542,7 @@ private:
             dayNightCycleBox_->setChecked(true); // exercise solar/shadow updates
         }else
 #endif
-        if(isStressScene)backendBox_->setCurrentIndex(4);
+        if(isStressScene&&!useDefaultShowcaseProfile())backendBox_->setCurrentIndex(4);
         sceneLoading_=false;
         selectBackendOutputWindow();
         canvas_->setPlaceholder(extremeStress

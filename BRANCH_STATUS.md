@@ -1,6 +1,10 @@
 # État des branches — moteur CSE WARP
 
-## Référence officielle — 27 novembre 2026
+## Référence principale — V17.031
+
+Promotion demandée après amélioration visuelle de V17.030 (L03 partiellement résolu), [CI V17.030 réussie](https://github.com/glaby91/moteur3d/actions/runs/46064723180). V17.031 ajoute le profil Ultra/LumaTrace et la caméra piscine V17.634. Validation matérielle de la V17.031 à effectuer. Les correctifs graphiques V17.030 sont repris sans modification. La branche `feature/v17-zmaterial-001` conserve la V17.030 testée. Les révisions DX11 018/009, Vulkan 010, LumaTrace 010/003, Scene Runtime 003 et Z Material 001 sont enregistrées.
+
+## Dernière référence L01/L02 validée — 27 novembre 2026
 
 **V17.029**, validée visuellement par l'utilisateur sur DX11 Raster, Vulkan et LumaTrace. [Build Windows 5 réussie](https://github.com/glaby91/moteur3d/actions/runs/46056898833) · [Commit source testé](https://github.com/glaby91/moteur3d/commit/f8eebe88a7e7207c47065bc89d077140b2556a7d). La branche principale `master` reçoit le code exact de cette version, avec les mêmes tests CI et les scripts de lancement.
 
@@ -15,7 +19,8 @@ Avant tout changement, identifier la version effectivement validée, sa branche,
 
 | Branche | Rôle |
 |---|---|
-| `master` | Référence principale V17.029 ; repartir de cette tête après contrôle du registre. |
+| `master` | Référence principale V17.031 ; repartir de cette tête après contrôle du registre et validation. |
+| `feature/v17-zmaterial-001` | V17.030, CI réussie et amélioration L03 constatée ; historique. |
 | `feature/v17-dx11-r001` | Source de la V17.029 validée ; historique de R001 et Z Atmosphere. |
 | `official/v17-lumatrace` | Référence historique, ne pas supposer à jour. |
 | `main` dans moteur3d-scene | Dépôt distinct de la scène. |

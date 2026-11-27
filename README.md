@@ -1,11 +1,37 @@
 # CSE WARP — moteur 3D V17
 
-**Moteur : V17.029 · scène de référence CI : V17.631 (version de scène indépendante)**
+**Moteur : V17.031 · scène de démarrage de référence : V17.634 · scène CI Z Reflect : V17.631 (version de scène indépendante)**
 CSE WARP V17 réunit l’interface d’exploration, plusieurs backends de rendu, le noyau moteur partagé avec V16, les outils de benchmark et un mécanisme de mise à jour de scène. La V17 reste une version expérimentale : les performances et la présentation native doivent être mesurées sur le GPU visé.
 
 > La branche principale du moteur est `master`. [État des branches](BRANCH_STATUS.md) · [Validation L01/L02 V17.029](v17/docs/L01_SOLAR_PCF_V17029.md) · [Build utilisateur validée](https://github.com/glaby91/moteur3d/actions/runs/46056898833).
 
 [Audit historique et registre des optimisations (HTML → V17)](#audit-historique-et-registre-des-optimisations--26-novembre-2026)
+
+## V17.031 — profil de démarrage et philosophie WARP
+
+**Recréer ce qui paraît réel, sans en avoir le coût.** Priorité à la cohérence visuelle, spatiale et temporelle, non à un pourcentage arbitraire de fidélité physique. Corriger les causes communes, précalculer et réutiliser les données ; préférer une approximation crédible et peu coûteuse si le calcul exact est trop lourd. Équilibrer CPU/GPU sans multiplier les transferts ni les synchronisations.
+
+### Profil de démarrage Windows
+
+- LumaTrace BVH4, Ultra, MSAA 8× demandé (repli matériel possible), anisotropie 16×, LOD 200 %, LOD adaptatif désactivé, culling conservatif activé.
+- Rebonds indirects, couleurs équilibrées et compression filmique actifs ; exposition 0,85. Nuages désactivés par défaut pour LumaTrace, Z Reflect et Z Material actifs ; Z Atmosphere reste opt-in.
+- Caméra piscine de la scène V17.634, ajoutée en mémoire côté moteur sans modification du dépôt scène : eye (29.90612030029297, 2.245000123977661, -18.339569091796875), target (29.043092727661133, 2.286057472229004, -18.843053817749023), FOV 61°. Les anciennes caméras et raccourcis sont conservés ; autres scènes gardent leurs vues d'origine.
+- Le profil Ultra est réappliqué au lancement normal (les contrôles restent modifiables pendant la session). `M3D_V17_LEGACY_STARTUP=1` restaure l'ancien démarrage ; `M3D_V17_HD620_INTERACTIVE_REDUCE=1` autorise la réduction temporaire du MSAA à 2× en exploration HD620. Le profil Vulkan explicite et les smokes restent inchangés. La qualité maximale peut fortement réduire les FPS sur HD620.
+- Pour exporter un cadrage : Fichier → Copier la position caméra (JSON). Le raccourci Ctrl+Maj+C peut être intercepté par la fenêtre GPU dédiée.
+
+### Corrections et modules cumulés
+
+| Élément | Révision | État |
+|---|---|---|
+| L01/L02, receiver-plane PCF | V17.029 | Validées visuellement DX11/Vulkan/LumaTrace |
+| DX11 raster / shader partagé | 018 / 009 | Z Material intégré |
+| Vulkan raster | 010 | Z Material intégré |
+| LumaTrace compute / CPU | 010 / 003 | Noyaux inchangés, bénéficie du shader partagé |
+| Z Material | 001 | V17.030 compilée ; amélioration visuelle L03 confirmée, problème métallique non entièrement résolu |
+| Scene runtime | 003 | Filtrage des matériaux actifs avant génération des textures |
+| Z Reflect / Z Atmosphere | 001 / 002 | Conservés, atmosphère opt-in |
+
+[Z Material 001 : architecture et benchmark](v17/docs/ZMATERIAL_001.md). Catalogue moteur unique de 8 192 références PBR synthétiques, maximum 256 matériaux actifs par scène ; textures de la scène et propriétés personnalisées prioritaires. Pas de nouveau fichier par scène. La V17.030 a passé les tests CI [build 1](https://github.com/glaby91/moteur3d/actions/runs/46064723180). L03 reste partiellement résolu : métal, lissage des normales et réflexions environnementales à étudier globalement. L04 (aliasing des arêtes) et L05 (scintillements) à diagnostiquer ; rendu périphérique à revoir après stabilisation de la qualité globale. Les mesures GPU réelles restent à effectuer.
 
 ## Scène de référence et paquet Windows
 

@@ -4,7 +4,7 @@
   "modules": [
     {
       "id": "scene_runtime",
-      "revision": "002",
+      "revision": "003",
       "engines": [
         "v16",
         "v17"
@@ -13,6 +13,9 @@
       "sources": [
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_scene_v16.cpp",
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_v16_bridge.cpp"
+      ],
+      "dependencies": [
+        "z_material"
       ]
     },
     {
@@ -184,7 +187,7 @@
     },
     {
       "id": "d3d11_raster_shader",
-      "revision": "008",
+      "revision": "009",
       "engines": [
         "v16",
         "v17"
@@ -237,7 +240,7 @@
     },
     {
       "id": "d3d11_raster",
-      "revision": "017",
+      "revision": "018",
       "engines": [
         "v16",
         "v17"
@@ -251,7 +254,8 @@
         "d3d11_peripheral_composite",
         "lumatrace_gpu_compute",
         "zreflect_optical",
-        "z_atmosphere"
+        "z_atmosphere",
+        "z_material"
       ],
       "sources": [
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp",
@@ -310,7 +314,7 @@
     },
     {
       "id": "vulkan_raster",
-      "revision": "009",
+      "revision": "010",
       "engines": [
         "v16",
         "v17"
@@ -323,7 +327,8 @@
         "vulkan_mipmap",
         "vulkan_readback",
         "vulkan_resources",
-        "z_atmosphere"
+        "z_atmosphere",
+        "z_material"
       ],
       "sources": [
         "v17/vulkan/m3d_vulkan.cpp",
@@ -382,6 +387,20 @@
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_dx11_atmosphere.h",
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_dx11_atmosphere_shader.h",
         "v17/vulkan/shaders/atmosphere.frag"
+      ]
+    },
+    {
+      "id": "z_material",
+      "revision": "001",
+      "engines": [
+        "v16",
+        "v17"
+      ],
+      "optional": false,
+      "description": "Shared CPU material preparation and external selective PBR catalogue; DX11/LumaTrace and Vulkan receiver shading",
+      "sources": [
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zmaterial.h",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zmaterial_catalog.h"
       ]
     }
   ]

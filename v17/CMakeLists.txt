@@ -81,6 +81,12 @@ add_executable(v17_static_geometry_prepare_smoke
 add_test(NAME v17_static_geometry_prepare_attributes
     COMMAND v17_static_geometry_prepare_smoke)
 
+add_executable(v17_zmaterial_smoke tests/zmaterial_smoke.cpp)
+target_link_libraries(v17_zmaterial_smoke PRIVATE Qt6::Core)
+add_custom_command(TARGET v17_zmaterial_smoke POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:v17_zmaterial_smoke>/materials"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/materials/zmaterial8192.json" "$<TARGET_FILE_DIR:v17_zmaterial_smoke>/materials/zmaterial8192.json")
+add_test(NAME v17_zmaterial_runtime COMMAND v17_zmaterial_smoke)
 add_executable(v17_atmosphere_smoke tests/atmosphere_smoke.cpp)
 add_test(NAME v17_atmosphere_math COMMAND v17_atmosphere_smoke)
 add_executable(v17_dx11_emission_smoke tests/dx11_emission_smoke.cpp)

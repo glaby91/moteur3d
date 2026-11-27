@@ -8,6 +8,7 @@
 #include "m3d_directx11_mesh.h"
 #include "m3d_dx11_r001.h"
 #include "m3d_dx11_emission.h"
+#include "m3d_zmaterial.h"
 #include "m3d_zreflect_runtime.h"
 #include "../../../../v17/weather/clouds.h"
 
@@ -389,6 +390,7 @@ public:
         cb.colorControls[1]=exposure;
         cb.peripheralControls[3]=lumaBvh?1.f:0.f;
         cb.reflectionControls[3]=dxR001?1.f:0.f;
+        const bool zMaterialOn=zmaterial::enabled();
         for(size_t m=0;m<scene.mat.size()&&m<256;m++){
             const std::string& name=scene.mat[m].name;
             if(preservedTextureLayers_[m]>=0)
@@ -478,6 +480,11 @@ public:
             // Generic scene-authored emission, shared by DX11 and LumaTrace.
             dx11::applyAuthoredEmission(scene.mat[m],emissionR,emissionG,emissionB,emissionStrength,strength);
             cb.materialGlow[m][0]=r;cb.materialGlow[m][1]=g;cb.materialGlow[m][2]=b;cb.materialGlow[m][3]=strength;
+            const auto zm=zmaterial::prepare(metal,scene.mat[m].roughnessScale,transmission==0.f,
+                emissionStrength<0.f,emissionStrength>0.f||strength>0.f,zMaterialOn);
+            cb.materialTextureDetail[m][1]=zm.metal;
+            cb.materialTextureDetail[m][2]=zm.diffuse;
+            cb.materialTextureDetail[m][3]=zm.roughScale;
             cb.materialSpecular[m][0]=spec;cb.materialSpecular[m][1]=power;cb.materialSpecular[m][2]=scene.mat[m].roughnessMip.empty()?0.f:1.f;cb.materialSpecular[m][3]=metal;
             cb.materialOpacity[m][0]=1.f-float(scene.mat[m].transmissionPercent)/100.f;
             cb.materialOpacity[m][1]=scene.mat[m].normalMip.empty()?0.f:1.f;
