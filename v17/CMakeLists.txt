@@ -81,6 +81,8 @@ add_executable(v17_static_geometry_prepare_smoke
 add_test(NAME v17_static_geometry_prepare_attributes
     COMMAND v17_static_geometry_prepare_smoke)
 
+add_executable(v17_atmosphere_smoke tests/atmosphere_smoke.cpp)
+add_test(NAME v17_atmosphere_math COMMAND v17_atmosphere_smoke)
 add_executable(v17_dx11_emission_smoke tests/dx11_emission_smoke.cpp)
 add_test(NAME v17_dx11_emission_five_checks COMMAND v17_dx11_emission_smoke)
 add_executable(v17_dx11_r001_smoke tests/dx11_r001_smoke.cpp)
@@ -105,6 +107,8 @@ add_executable(v17_zreflect_index_smoke tests/zreflect_index_smoke.cpp)
 target_include_directories(v17_zreflect_index_smoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
 add_test(NAME v17_zreflect_spatial_60000 COMMAND v17_zreflect_index_smoke)
 if(WIN32)
+    add_executable(v17_atmosphere_warp_ab tests/atmosphere_warp_ab.cpp)
+    target_link_libraries(v17_atmosphere_warp_ab PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
     add_executable(v17_dx11_emission_warp_ab tests/dx11_emission_warp_ab.cpp)
     target_link_libraries(v17_dx11_emission_warp_ab PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
     add_executable(v17_dx11_r001_warp_ab tests/dx11_r001_warp_ab.cpp)

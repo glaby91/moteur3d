@@ -237,7 +237,7 @@
     },
     {
       "id": "d3d11_raster",
-      "revision": "015",
+      "revision": "016",
       "engines": [
         "v16",
         "v17"
@@ -250,7 +250,8 @@
         "d3d11_sky_shader",
         "d3d11_peripheral_composite",
         "lumatrace_gpu_compute",
-        "zreflect_optical"
+        "zreflect_optical",
+        "z_atmosphere"
       ],
       "sources": [
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp",
@@ -309,7 +310,7 @@
     },
     {
       "id": "vulkan_raster",
-      "revision": "006",
+      "revision": "007",
       "engines": [
         "v16",
         "v17"
@@ -321,7 +322,8 @@
         "vulkan_dirty_policy",
         "vulkan_mipmap",
         "vulkan_readback",
-        "vulkan_resources"
+        "vulkan_resources",
+        "z_atmosphere"
       ],
       "sources": [
         "v17/vulkan/m3d_vulkan.cpp",
@@ -364,6 +366,22 @@
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zreflect_policy.h",
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zreflect_runtime.h",
         "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zreflect_visibility.h"
+      ]
+    },
+    {
+      "id": "z_atmosphere",
+      "revision": "001",
+      "engines": [
+        "v16",
+        "v17"
+      ],
+      "optional": true,
+      "description": "Bounded volumetric scattering, GPU post-composite",
+      "sources": [
+        "v17/atmosphere/atmosphere.h",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_dx11_atmosphere.h",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_dx11_atmosphere_shader.h",
+        "v17/vulkan/shaders/atmosphere.frag"
       ]
     }
   ]
