@@ -184,7 +184,7 @@
     },
     {
       "id": "d3d11_raster_shader",
-      "revision": "007",
+      "revision": "008",
       "engines": [
         "v16",
         "v17"
@@ -310,7 +310,7 @@
     },
     {
       "id": "vulkan_raster",
-      "revision": "008",
+      "revision": "009",
       "engines": [
         "v16",
         "v17"

@@ -1,5 +1,5 @@
 name: CSE WARP V17 — DX11 R001 Windows x64
-run-name: CSE WARP V17.028 — Z Atmosphere (GitHub build ${{ github.run_number }})
+run-name: CSE WARP V17.029 — Z Atmosphere + L01 (GitHub build ${{ github.run_number }})
 on:
   push:
     branches: [feature/v17-dx11-r001]
@@ -168,7 +168,7 @@ jobs:
           if (!(Get-Command Invoke-Route30).Parameters.ContainsKey('ZReflectMatrix')) { throw "Missing Reflect matrix benchmark dispatch" }
           $dist = "dist-zreflect"
           New-Item -ItemType Directory -Force $dist | Out-Null
-          @{ productVersion = "17.028"; githubActionsRun = "$env:GITHUB_RUN_ID"; githubRunNumber = "$env:GITHUB_RUN_NUMBER"; sourceCommit = "$env:GITHUB_SHA"; branch = "$env:GITHUB_REF_NAME" } | ConvertTo-Json | Set-Content "$dist/BUILD_INFO.json" -Encoding UTF8
+          @{ productVersion = "17.029"; githubActionsRun = "$env:GITHUB_RUN_ID"; githubRunNumber = "$env:GITHUB_RUN_NUMBER"; sourceCommit = "$env:GITHUB_SHA"; branch = "$env:GITHUB_REF_NAME" } | ConvertTo-Json | Set-Content "$dist/BUILD_INFO.json" -Encoding UTF8
           $names = @("moteur3d_v17.exe","moteur3d_v16_core.dll","cse_scene_precompiler.exe","route30.exe","moteur3d_v17_benchmark.exe","moteur3d_v17_campaign.exe","moteur3d_v17_benchui.exe","moteur3d_v17_gibake.exe","moteur3d_v17_gpu_trajectory.exe","moteur3d_v16.exe","v17_zreflect_index_smoke.exe")
           foreach ($name in $names) {
             $f = Get-ChildItem build-zreflect -Recurse -File -Filter $name | Select-Object -First 1
@@ -278,12 +278,12 @@ jobs:
       - name: Wrap files in named build directory
         shell: pwsh
         run: |
-          $name = "CSE-WARP-V17.028-ZATMOSPHERE-GitHub-${{ github.run_number }}-Windows-x64"
+          $name = "CSE-WARP-V17.029-ZATMOSPHERE-GitHub-${{ github.run_number }}-Windows-x64"
           New-Item -ItemType Directory -Force build-package | Out-Null
           Move-Item dist-zreflect (Join-Path build-package $name)
       - name: Upload experimental Windows build (engine only)
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.028-ZATMOSPHERE-GitHub-${{ github.run_number }}-Windows-x64
+          name: CSE-WARP-V17.029-ZATMOSPHERE-GitHub-${{ github.run_number }}-Windows-x64
           path: build-package/
           if-no-files-found: error
