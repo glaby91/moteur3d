@@ -7,6 +7,7 @@
 #include "m3d_directx11_composite_shader.h"
 #include "m3d_directx11_mesh.h"
 #include "m3d_dx11_r001.h"
+#include "m3d_dx11_emission.h"
 #include "m3d_zreflect_runtime.h"
 #include "../../../../v17/weather/clouds.h"
 
@@ -472,6 +473,8 @@ public:
                           +.14f*transmission);
             if(scene.mat[m].roughnessMip.empty())
                 power=clampf(2.f/(surfaceRough*surfaceRough)-2.f,8.f,80.f);
+            // Generic scene-authored emission, shared by DX11 and LumaTrace.
+            dx11::applyAuthoredEmission(scene.mat[m],emissionR,emissionG,emissionB,emissionStrength,strength);
             cb.materialGlow[m][0]=r;cb.materialGlow[m][1]=g;cb.materialGlow[m][2]=b;cb.materialGlow[m][3]=strength;
             cb.materialSpecular[m][0]=spec;cb.materialSpecular[m][1]=power;cb.materialSpecular[m][2]=scene.mat[m].roughnessMip.empty()?0.f:1.f;cb.materialSpecular[m][3]=metal;
             cb.materialOpacity[m][0]=1.f-float(scene.mat[m].transmissionPercent)/100.f;

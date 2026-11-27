@@ -237,7 +237,7 @@
     },
     {
       "id": "d3d11_raster",
-      "revision": "014",
+      "revision": "015",
       "engines": [
         "v16",
         "v17"
@@ -253,7 +253,8 @@
         "zreflect_optical"
       ],
       "sources": [
-        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp"
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_directx11.cpp",
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_dx11_emission.h"
       ]
     },
     {

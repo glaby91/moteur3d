@@ -414,3 +414,6 @@ Références de recherche : [rendu par frontières](experiments/2026-10-29-v92-w
 Objectif HD620 : 40–45 FPS (budget ~25–22,2 ms par image), non acquis. Objectif historique 4K/100 FPS : 10 ms par image, recherche à long terme sur matériel adapté. Aucun gain futur ne doit être annoncé avant mesure. Ne pas additionner les gains de campagnes hétérogènes ni assimiler WARP logiciel à un GPU matériel.
 
 État relevé le 26/11 : [code V17.010](https://github.com/glaby91/moteur3d/commit/ef5461e06a9b4326620f451575b1599f70426066), [PR 90 / V17.009](https://github.com/glaby91/moteur3d/pull/90), scène [V17.629 build 42](https://github.com/glaby91/moteur3d-scene/releases/tag/scene-V17.629-42). Le code le plus récent ne constitue pas à lui seul une preuve de publication d'un package validé.
+
+### V17.026 — correctif matériaux émissifs DX11/LumaTrace
+Les déclarations d'émission de la scène sont désormais transmises au shader raster partagé. [Rapport et tests](v17/docs/DX11_EMISSION_V17026.md). R001 reste actif ; autres développements suspendus.

@@ -1,5 +1,5 @@
 name: CSE WARP V17 — DX11 R001 Windows x64
-run-name: CSE WARP V17.025 — DX11 R001 (GitHub build ${{ github.run_number }})
+run-name: CSE WARP V17.026 — DX11 R001 (GitHub build ${{ github.run_number }})
 on:
   push:
     branches: [feature/v17-dx11-r001]
@@ -72,12 +72,12 @@ jobs:
       - name: Compile and test native diagnostic
         shell: pwsh
         run: |
-          cmake --build build-zreflect --config Release --target cse_scene_precompiler v17_zreflect_catalog_smoke v17_zreflect_index_smoke v17_csp001_smoke v17_zreflect_warp_ab v17_dx11_r001_smoke v17_dx11_r001_warp_ab --parallel 4
+          cmake --build build-zreflect --config Release --target cse_scene_precompiler v17_zreflect_catalog_smoke v17_zreflect_index_smoke v17_csp001_smoke v17_zreflect_warp_ab v17_dx11_r001_smoke v17_dx11_r001_warp_ab v17_dx11_emission_smoke v17_dx11_emission_warp_ab --parallel 4
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           $core = Get-ChildItem build-zreflect -Recurse -Filter moteur3d_v16_core.dll | Select-Object -First 1
           if (!$core) { throw "Missing shared engine DLL" }
           $env:PATH = "$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
-          ctest --test-dir build-zreflect -C Release -R "^(v17_zreflect_catalog_filter|v17_zreflect_spatial_60000|v17_csp001_roundtrip_visibility|v17_dx11_r001_five_checks)$" --verbose --output-on-failure --no-tests=error
+          ctest --test-dir build-zreflect -C Release -R "^(v17_zreflect_catalog_filter|v17_zreflect_spatial_60000|v17_csp001_roundtrip_visibility|v17_dx11_r001_five_checks|v17_dx11_emission_five_checks)$" --verbose --output-on-failure --no-tests=error
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Verify published optical catalogue and cache
         shell: pwsh
@@ -113,6 +113,22 @@ jobs:
           $env:PATH = "$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
           & $exe.FullName "$env:ZREFLECT_ROOT/benchmark-civic/scene.json" (Resolve-Path zreflect-report).Path
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Verify authored emission on actual V17.633 lamps (DX11 and LumaTrace WARP)
+        shell: pwsh
+        timeout-minutes: 15
+        env:
+          M3D_V16_FORCE_WARP: '1'
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP "emission-scene.zip"
+          $root = Join-Path $env:RUNNER_TEMP "emission-scene"
+          Invoke-WebRequest "https://github.com/glaby91/moteur3d-scene/releases/download/scene-reflect-V17.633/V17-scene.zip" -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne "58a5d5c4b678fb878eb783971ac9fd9ce5d317ff9612482e5d4fcd1499d0d7bc") { throw "Emission scene digest mismatch" }
+          Expand-Archive -LiteralPath $zip -DestinationPath $root
+          $exe = Get-ChildItem build-zreflect -Recurse -File -Filter v17_dx11_emission_warp_ab.exe | Select-Object -First 1
+          $core = Get-ChildItem build-zreflect -Recurse -File -Filter moteur3d_v16_core.dll | Select-Object -First 1
+          $env:PATH = "$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
+          & $exe.FullName "$root/benchmark-civic/scene.json" (Resolve-Path zreflect-report).Path
+          if ($LASTEXITCODE) { throw "Authored emission WARP A/B failed" }
       - uses: actions/upload-artifact@v6
         with:
           name: V17.631-dx11-r001-diagnostic
@@ -136,7 +152,7 @@ jobs:
           if (!(Get-Command Invoke-Route30).Parameters.ContainsKey('ZReflectMatrix')) { throw "Missing Reflect matrix benchmark dispatch" }
           $dist = "dist-zreflect"
           New-Item -ItemType Directory -Force $dist | Out-Null
-          @{ productVersion = "17.025"; githubActionsRun = "$env:GITHUB_RUN_ID"; githubRunNumber = "$env:GITHUB_RUN_NUMBER"; sourceCommit = "$env:GITHUB_SHA"; branch = "$env:GITHUB_REF_NAME" } | ConvertTo-Json | Set-Content "$dist/BUILD_INFO.json" -Encoding UTF8
+          @{ productVersion = "17.026"; githubActionsRun = "$env:GITHUB_RUN_ID"; githubRunNumber = "$env:GITHUB_RUN_NUMBER"; sourceCommit = "$env:GITHUB_SHA"; branch = "$env:GITHUB_REF_NAME" } | ConvertTo-Json | Set-Content "$dist/BUILD_INFO.json" -Encoding UTF8
           $names = @("moteur3d_v17.exe","moteur3d_v16_core.dll","cse_scene_precompiler.exe","route30.exe","moteur3d_v17_benchmark.exe","moteur3d_v17_campaign.exe","moteur3d_v17_benchui.exe","moteur3d_v17_gibake.exe","moteur3d_v17_gpu_trajectory.exe","moteur3d_v16.exe","v17_zreflect_index_smoke.exe")
           foreach ($name in $names) {
             $f = Get-ChildItem build-zreflect -Recurse -File -Filter $name | Select-Object -First 1
@@ -239,12 +255,12 @@ jobs:
       - name: Wrap files in named build directory
         shell: pwsh
         run: |
-          $name = "CSE-WARP-V17.025-DX11-R001-GitHub-${{ github.run_number }}-Windows-x64"
+          $name = "CSE-WARP-V17.026-DX11-R001-GitHub-${{ github.run_number }}-Windows-x64"
           New-Item -ItemType Directory -Force build-package | Out-Null
           Move-Item dist-zreflect (Join-Path build-package $name)
       - name: Upload experimental Windows build (engine only)
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.025-DX11-R001-GitHub-${{ github.run_number }}-Windows-x64
+          name: CSE-WARP-V17.026-DX11-R001-GitHub-${{ github.run_number }}-Windows-x64
           path: build-package/
           if-no-files-found: error
