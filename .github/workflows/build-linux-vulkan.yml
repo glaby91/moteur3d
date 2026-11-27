@@ -25,7 +25,7 @@ jobs:
       - name: Install Vulkan SDK tools and Linux Qt runtime dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libvulkan-dev glslang-tools vulkan-tools mesa-vulkan-drivers libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xinput0 libpulse0
+          sudo apt-get install -y ninja-build libvulkan-dev glslang-tools vulkan-tools mesa-vulkan-drivers libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xinput0 libpulse0 xvfb xauth libssl3t64
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
@@ -87,7 +87,28 @@ jobs:
             test -f "$source"
             cp -L -- "$source" "$dst/qt/lib/$soname"
           done
-          cp -a "$QT_ROOT_DIR/plugins"/platforms "$QT_ROOT_DIR/plugins"/imageformats "$QT_ROOT_DIR/plugins"/multimedia "$dst/qt/plugins/"
+          cp -a "$QT_ROOT_DIR/plugins"/platforms "$QT_ROOT_DIR/plugins"/imageformats "$QT_ROOT_DIR/plugins"/multimedia "$QT_ROOT_DIR/plugins"/tls "$dst/qt/plugins/"
+          # Ship XCB extension libraries required by Qt's xcb plugin, including
+          # cursor and its transitive image/render/util helpers. Keep the system
+          # X11 core, libc, graphics drivers and OpenSSL security updates on host.
+          LD_LIBRARY_PATH="$QT_ROOT_DIR/lib" ldd "$QT_ROOT_DIR/plugins/platforms/libqxcb.so" | tee qt-xcb-sdk-ldd.txt
+          awk '$2=="=>" && $3 ~ /^\// && ($1 ~ /^libxcb-.*\.so\./ || $1 ~ /^libxkbcommon-x11\.so\./) {print $1, $3}' qt-xcb-sdk-ldd.txt | sort -u > xcb-runtime.txt
+          grep -q '^libxcb-cursor\.so\.0 ' xcb-runtime.txt
+          mkdir -p "$dst/licenses"
+          while read -r soname source; do
+            test -f "$source"
+            cp -L -- "$source" "$dst/qt/lib/$soname"
+            # Retain distribution copyright and redistribution notices.
+            owner="$(dpkg-query -S "$source" 2>/dev/null | head -n 1 | cut -d: -f1 || true)"
+            if [ -z "$owner" ]; then
+              owner="$(dpkg-query -S "/lib/${source#/usr/lib/}" 2>/dev/null | head -n 1 | cut -d: -f1 || true)"
+            fi
+            if [ -n "$owner" ] && [ -f "/usr/share/doc/$owner/copyright" ]; then
+              cp -L "/usr/share/doc/$owner/copyright" "$dst/licenses/$owner.txt"
+            fi
+          done < xcb-runtime.txt
+          test -f "$dst/qt/lib/libxcb-cursor.so.0"
+          test -f "$dst/qt/plugins/tls/libqopensslbackend.so"
           cat > "$dst/lancer.sh" <<'SH'
           #!/usr/bin/env bash
           set -e
@@ -111,6 +132,51 @@ jobs:
               END {exit (!seen || bad)}
             ' linux-ldd.txt
           done
+          # Check the dynamically loaded plugins as well as the application.
+          for plugin in platforms/libqxcb.so tls/libqopensslbackend.so; do
+            env -u QT_ROOT_DIR -u QT_PLUGIN_PATH LD_LIBRARY_PATH="$runtime" ldd "$package/qt/plugins/$plugin"
+          done | tee linux-plugins-ldd.txt
+          ! grep -q 'not found' linux-plugins-ldd.txt
+          while read -r soname source; do
+            awk -v lib="$soname" -v dir="$package/qt/lib/" '
+              $1==lib && $2=="=>" {seen=1; if (index($3,dir)!=1) bad=1}
+              END {exit (!seen || bad)}
+            ' linux-plugins-ldd.txt
+          done < xcb-runtime.txt
+          # Real Qt X11 window and TLS backend initialization from packaged
+          # plugins, using a virtual X server. No network request is required.
+          probe="$RUNNER_TEMP/qt-package-probe"
+          mkdir -p "$probe"
+          cat > "$probe/CMakeLists.txt" <<'CMAKE'
+          cmake_minimum_required(VERSION 3.24)
+          project(QtPackageProbe LANGUAGES CXX)
+          find_package(Qt6 REQUIRED COMPONENTS Gui Network)
+          add_executable(qt_package_probe probe.cpp)
+          target_link_libraries(qt_package_probe PRIVATE Qt6::Gui Qt6::Network)
+          set_target_properties(qt_package_probe PROPERTIES SKIP_BUILD_RPATH TRUE)
+          CMAKE
+          cat > "$probe/probe.cpp" <<'CPP'
+          #include <QGuiApplication>
+          #include <QWindow>
+          #include <QSslSocket>
+          #include <QDebug>
+          int main(int argc, char **argv) {
+              QGuiApplication app(argc, argv);
+              QWindow window;
+              window.resize(320, 240);
+              window.show();
+              app.processEvents();
+              if (app.platformName() != QStringLiteral("xcb") || !window.isVisible() || !window.winId()) return 1;
+              if (!QSslSocket::setActiveBackend(QStringLiteral("openssl")) || !QSslSocket::supportsSsl()) return 2;
+              qInfo() << "XCB and TLS PASS" << QSslSocket::sslLibraryVersionString();
+              return 0;
+          }
+          CPP
+          cmake -S "$probe" -B "$probe/build" -G Ninja -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+          cmake --build "$probe/build"
+          xvfb-run -a env -u QT_ROOT_DIR -u QML2_IMPORT_PATH -u QML_IMPORT_PATH \
+            LD_LIBRARY_PATH="$runtime" QT_PLUGIN_PATH="$package/qt/plugins" \
+            QT_QPA_PLATFORM=xcb "$probe/build/qt_package_probe" 2>&1 | tee linux-xcb-tls-smoke.txt
           # Exercise the packaged binary and bundled libraries, not the build tree.
           icd="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' | head -n 1)"
           test -n "$icd"
@@ -136,3 +202,7 @@ jobs:
             linux-ldd.txt
             qt-sdk-ldd.txt
             vulkan-linux-package-smoke.png
+            qt-xcb-sdk-ldd.txt
+            xcb-runtime.txt
+            linux-plugins-ldd.txt
+            linux-xcb-tls-smoke.txt
