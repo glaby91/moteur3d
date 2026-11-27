@@ -124,6 +124,13 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          # Parse and dot-source the benchmark script before packaging.
+          $tokens = $null
+          $parseErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path "v17/tools/route30.ps1").Path, [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors.Count) { throw ($parseErrors | Out-String) }
+          . (Resolve-Path "v17/tools/route30.ps1").Path
+          if (!(Get-Command Invoke-Route30).Parameters.ContainsKey('ZReflectAB')) { throw "Missing Reflect benchmark dispatch" }
           $dist = "dist-zreflect"
           New-Item -ItemType Directory -Force $dist | Out-Null
           $names = @("moteur3d_v17.exe","moteur3d_v16_core.dll","cse_scene_precompiler.exe","route30.exe","moteur3d_v17_benchmark.exe","moteur3d_v17_campaign.exe","moteur3d_v17_benchui.exe","v17_zreflect_index_smoke.exe")
