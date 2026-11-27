@@ -34,17 +34,53 @@ jobs:
           arch: linux_gcc_64
           modules: qtmultimedia
           cache: true
-      - name: Resolve engine version and reference scene for build
+      - name: Resolve engine version and latest official Reflect scene
         run: |
           set -euo pipefail
           product="$(python3 -c 'import json; v=json.load(open("v17/version.json"))["engine"]; print("%d.%03d"%(v["major"],v["build"]))')"
           echo "V17_PRODUCT=$product" >> "$GITHUB_ENV"
-          base="https://github.com/glaby91/moteur3d-scene/releases/download/scene-reflect-V17.631"
-          curl --fail --location --retry 3 "$base/V17-scene.zip" -o "$RUNNER_TEMP/V17-scene.zip"
-          echo "b44972105f1af661586e9602899529de9d4fc4e1edd994099b28b6b174f3e45d  $RUNNER_TEMP/V17-scene.zip" | sha256sum -c -
+          curl --fail --location --retry 3 -H 'Accept: application/vnd.github+json' \
+            'https://api.github.com/repos/glaby91/moteur3d-scene/releases/latest' -o "$RUNNER_TEMP/scene-release.json"
+          # Resolve an immutable release URL and published SHA-256 values once.
+          python3 - "$RUNNER_TEMP/scene-release.json" "$GITHUB_ENV" <<'PY'
+          import json, re, sys
+          release = json.load(open(sys.argv[1]))
+          tag = release["tag_name"]
+          assert re.fullmatch(r"scene-reflect-V17\.\d+", tag), "Latest release is not a V17 Reflect scene"
+          assert not release["draft"] and not release["prerelease"]
+          assets = {a["name"]: a for a in release["assets"]}
+          base = f"https://github.com/glaby91/moteur3d-scene/releases/download/{tag}"
+          with open(sys.argv[2], "a") as env:
+              print(f"SCENE_TAG={tag}", file=env)
+              print(f"SCENE_REVISION={tag.removeprefix('scene-reflect-')}", file=env)
+              for name, key in [("V17-scene.zip","SCENE_ZIP"),("SCENE_VERSION.json","SCENE_MANIFEST")]:
+                  a = assets[name]
+                  assert a["browser_download_url"] == f"{base}/{name}"
+                  assert re.fullmatch(r"sha256:[a-f0-9]{64}", a["digest"])
+                  print(f"{key}_URL={a['browser_download_url']}", file=env)
+                  print(f"{key}_SHA={a['digest'][7:]}", file=env)
+          PY
+      - name: Download and verify exact scene release
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 "$SCENE_ZIP_URL" -o "$RUNNER_TEMP/V17-scene.zip"
+          curl --fail --location --retry 3 "$SCENE_MANIFEST_URL" -o "$RUNNER_TEMP/SCENE_VERSION.json"
+          echo "$SCENE_ZIP_SHA  $RUNNER_TEMP/V17-scene.zip" | sha256sum -c -
+          echo "$SCENE_MANIFEST_SHA  $RUNNER_TEMP/SCENE_VERSION.json" | sha256sum -c -
           mkdir -p "$RUNNER_TEMP/v17-scene"
           unzip -q "$RUNNER_TEMP/V17-scene.zip" -d "$RUNNER_TEMP/v17-scene"
-          test -f "$RUNNER_TEMP/v17-scene/benchmark-civic/scene.json"
+          cmp "$RUNNER_TEMP/SCENE_VERSION.json" "$RUNNER_TEMP/v17-scene/SCENE_VERSION.json"
+          python3 - "$RUNNER_TEMP/v17-scene" "$SCENE_REVISION" "$SCENE_TAG" <<'PY'
+          import json, pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          manifest = json.loads((root / "SCENE_VERSION.json").read_text())
+          scene = json.loads((root / "benchmark-civic/scene.json").read_text())
+          assert manifest["repository"] == "glaby91/moteur3d-scene"
+          assert manifest["channel"] == "reflect" and manifest["tag"] == sys.argv[3]
+          assert manifest["scene"] == "benchmark-civic/scene.json"
+          assert manifest["revision"] == scene["revision"] == sys.argv[2]
+          print("Verified bundled scene:", scene["revision"])
+          PY
       - name: Configure actual Vulkan backend
         run: |
           cmake -S v17 -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DM3D_REQUIRE_VULKAN=ON -DV17_CI_BUILD_NUMBER="$GITHUB_RUN_NUMBER" -DV17_GIT_SHA="$GITHUB_SHA" -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DV17_SCENE_SOURCE_DIR="$RUNNER_TEMP/v17-scene/benchmark-civic"
@@ -62,7 +98,7 @@ jobs:
           vulkaninfo --summary
           cd build-linux
           ./v17_vulkan_gpu_smoke "$GITHUB_WORKSPACE/vulkan-linux-smoke.png"
-      - name: Package versioned engine directory (no scene)
+      - name: Package versioned engine directory with verified scene
         run: |
           set -euo pipefail
           product="$V17_PRODUCT"
@@ -73,6 +109,14 @@ jobs:
           cp build-linux/libmoteur3d_v16_core.so "$dst/"
           cp -r build-linux/vulkan build-linux/audio build-linux/shaders "$dst/"
           cp build-linux/render_modules.json "$dst/"
+          # Keep the scene's original directory layout so startup finds it
+          # automatically and a newer installed user scene can still take precedence.
+          cp -a "$RUNNER_TEMP/v17-scene/benchmark-civic" "$dst/"
+          cp "$RUNNER_TEMP/SCENE_VERSION.json" "$dst/"
+          mkdir -p "$dst/materials"
+          cp v17/materials/zmaterial8192.json "$dst/materials/"
+          test -s "$dst/benchmark-civic/scene.json"
+          cmp "$dst/SCENE_VERSION.json" "$RUNNER_TEMP/v17-scene/SCENE_VERSION.json"
           cp v17/docs/LINUX_VULKAN.md "$dst/README.md"
           # Qt dependencies installed by CI are not assumed to exist on the user PC.
           mkdir -p "$dst/qt/lib" "$dst/qt/plugins"
@@ -118,7 +162,9 @@ jobs:
           exec ./moteur3d_v17 "$@"
           SH
           chmod +x "$dst/lancer.sh"
-          printf '{"productVersion":"%s","githubActionsRun":"%s","sourceCommit":"%s","platform":"linux-x86_64","backend":"Vulkan","presentation":"Qt QImage"}\n' "$product" "$GITHUB_RUN_ID" "$GITHUB_SHA" > "$dst/BUILD_INFO.json"
+          printf '{"productVersion":"%s","githubActionsRun":"%s","sourceCommit":"%s","platform":"linux-x86_64","backend":"Vulkan","presentation":"Qt QImage","bundledSceneRevision":"%s","bundledSceneArchiveSha256":"%s"}\n' "$product" "$GITHUB_RUN_ID" "$GITHUB_SHA" "$SCENE_REVISION" "$SCENE_ZIP_SHA" > "$dst/BUILD_INFO.json"
+          cp "$dst/BUILD_INFO.json" "$GITHUB_WORKSPACE/linux-build-info.json"
+          cp "$dst/SCENE_VERSION.json" "$GITHUB_WORKSPACE/linux-scene-version.json"
           # Validate the distributable in isolation from the Qt SDK environment.
           package="$(realpath "$dst")"
           runtime="$package:$package/qt/lib"
@@ -206,3 +252,5 @@ jobs:
             xcb-runtime.txt
             linux-plugins-ldd.txt
             linux-xcb-tls-smoke.txt
+            linux-build-info.json
+            linux-scene-version.json

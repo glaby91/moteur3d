@@ -64,21 +64,23 @@ Pour retrouver une ancienne compilation, consulter [V17.006, build 683 avec scè
 
 ## Linux natif — Vulkan x86_64
 
-**V17.031 — build Linux 3 validé sur `master` (27 novembre 2026).**
+**V17.031 — build Linux 5 validé (sans scène) sur `master` (27 novembre 2026).**
 
-- [Validation GitHub Actions — build 3](https://github.com/glaby91/moteur3d/actions/runs/46078586593) : compilation Release native, shaders SPIR-V, tests Vulkan avec Mesa Lavapipe, contrôle des dépendances et packaging réussis.
-- [Télécharger CSE WARP V17.031 Linux/Vulkan x86_64](https://github.com/glaby91/moteur3d/actions/runs/46078586593/artifacts/15235384989) (artefact GitHub Actions, connexion GitHub requise ; durée de rétention limitée).
+- [Validation GitHub Actions — build 5](https://github.com/glaby91/moteur3d/actions/runs/46080781410) : compilation Release native, shaders SPIR-V, tests Vulkan avec Mesa Lavapipe, contrôle des dépendances ICU/XCB, tests X11/TLS et packaging réussis.
+- [Télécharger CSE WARP V17.031 Linux/Vulkan x86_64](https://github.com/glaby91/moteur3d/actions/runs/46080781410/artifacts/15237236702) (artefact GitHub Actions, connexion GitHub requise ; durée de rétention limitée).
 - [Dernières compilations Linux](https://github.com/glaby91/moteur3d/actions/workflows/build-linux-vulkan.yml) · [Documentation Linux/Vulkan](v17/docs/LINUX_VULKAN.md).
 
-Ubuntu 24.04 x86_64, Qt 6.8.3, Vulkan 1.3.204 minimum, GCC/CMake/Ninja. Même branche moteur que Windows, sans Wine ni DirectX. Vulkan est sélectionné par défaut ; les backends CPU restent disponibles. Le package contient les binaires, les shaders et les bibliothèques Qt, mais pas la scène. La scène officielle reste distribuée séparément via [moteur3d-scene](https://github.com/glaby91/moteur3d-scene/releases/latest).
+Ubuntu 24.04 x86_64, Qt 6.8.3, Vulkan 1.3.204 minimum, GCC/CMake/Ninja. Même branche moteur que Windows, sans Wine ni DirectX. Vulkan est sélectionné par défaut ; les backends CPU restent disponibles. À partir du build suivant le build 5, le workflow Linux inclut également la dernière scène Reflect officielle au moment de la compilation (V17.634 au 27 novembre 2026), avec contrôle SHA-256 et manifeste de version. Les binaires, shaders, bibliothèques Qt et le catalogue Z Material sont inclus. La scène conserve son dépôt et son versioning indépendant via [moteur3d-scene](https://github.com/glaby91/moteur3d-scene/releases/latest).
 
 Après avoir extrait l'artefact GitHub (ZIP), extraire le fichier `.tar.gz`, puis :
 
 ```bash
-sudo apt install libvulkan1 mesa-vulkan-drivers libgl1 libegl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
-cd CSE-WARP-V17.031-Linux-Vulkan-GitHub-3-x86_64
+sudo apt install libvulkan1 mesa-vulkan-drivers libgl1 libegl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0 unzip
+cd CSE-WARP-V17.031-Linux-Vulkan-GitHub-N-x86_64
 ./lancer.sh
 ```
+
+Remplacer `N` par le numéro du build téléchargé. Pour ouvrir directement la scène embarquée sans contrôle réseau au démarrage : `./lancer.sh benchmark-civic/scene.json` (disponible après validation du nouveau build). Le lancement normal conserve la vérification des mises à jour et la sélection de la scène locale la plus récente.
 
 Sur NVIDIA, utiliser le pilote Vulkan adapté au GPU. Le rendu Vulkan est natif, mais la présentation Linux actuelle passe par QImage avec relecture GPU/CPU ; la swapchain X11/Wayland sans relecture reste à porter. DirectX 11 et LumaTrace GPU/Z Reflect ne sont pas disponibles sous Linux dans cette révision. La CI Lavapipe valide le fonctionnement logiciel Vulkan, pas les performances ni le rendu sur GPU physique ; validation matérielle et audio Linux encore à réaliser.
 
