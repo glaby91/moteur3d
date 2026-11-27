@@ -18,7 +18,7 @@ struct Options {
     uint64_t maxOutputCells=4ull*1024*1024;
     Mode mode=Mode::Reflection;
 };
-struct HitSample { uint32_t primitive=0, object=0; float depth=INF; V p{},n{},uv{}; };
+struct HitSample { uint32_t primitive=0, object=0; float depth=INF; V p{},n{},uv{},geometricNormal{}; };
 struct Value {
     State state=State::Unknown;
     uint32_t object=0,primitive=0,material=0;
@@ -34,7 +34,8 @@ struct Sample {
     State receiver=State::Unknown;
     V position{},normal{},direction{};
     float receiverDepth=0,receiverWeight=0;
-    bool complete=false;
+    bool complete=false, directionValid=false;
+    float primaryTransmission=1.f;
     std::map<LayerKey,Value> values;
 };
 struct Candidate {
@@ -52,12 +53,12 @@ struct Surface {
     std::vector<Sample> samples;
     std::map<LayerKey,Layer> layers;
     std::vector<Pixel> image; // tightly cropped footprint, no full screen per object
-    uint32_t queries=0;
+    uint32_t queries=0,completePaths=0,unknownPaths=0;
     bool deferred=false,complete=false;
 };
 struct Result {
     std::vector<Surface> surfaces;
-    uint32_t rays=0, candidates=0,deferred=0,paths=0;
+    uint32_t rays=0, candidates=0,deferred=0,paths=0,completePaths=0,unknownPaths=0;
     uint64_t measured=0,reconstructed=0,zero=0,outputCells=0;
     double matrixMs=0,compositionMs=0;
     bool ok=false;
@@ -71,6 +72,14 @@ inline bool refract(V d,V n,float eta,V& out){
     const float c=clampf(-dot(d,n),0.f,1.f),k=1.f-eta*eta*(1.f-c*c);
     if(k<0.f)return false;
     out=norm(d*eta+n*(eta*c-std::sqrt(k)));return finite(out);
+}
+inline bool waterMaterial(const Material& m){return m.surfaceAuthored?m.waterSurface:(m.waterSurface||m.name=="cse_pool_water");}
+inline float transmission(const Material& m){return waterMaterial(m)?1.f:sat(float(m.transmissionPercent)/100.f);}
+inline bool validCamera(const Camera& c){
+    return finite(c.eye)&&finite(c.f)&&finite(c.r)&&finite(c.u)&&
+        std::isfinite(c.tanHalf)&&std::isfinite(c.aspect)&&c.tanHalf>0&&c.aspect>0&&
+        std::abs(length(c.f)-1.f)<.001f&&std::abs(length(c.r)-1.f)<.001f&&std::abs(length(c.u)-1.f)<.001f&&
+        std::abs(dot(c.f,c.r))<.001f&&std::abs(dot(c.f,c.u))<.001f&&std::abs(dot(c.r,c.u))<.001f;
 }
 inline bool validOptions(const Options& o){return o.rayBudget>0&&o.rayBudget<=1000000&&o.maxCrossings>0&&o.maxCrossings<=32&&o.maxDimension>0&&o.maxDimension<=4096&&o.maxOutputCells>0&&o.maxOutputCells<=16777216;}
 }

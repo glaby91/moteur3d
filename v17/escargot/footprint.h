@@ -14,7 +14,7 @@ inline bool objectMap(const v16::Runtime& rt,std::vector<uint32_t>& owner){
 // Conservative screen footprint of world AABB. Clip the 12 edges at near plane;
 // if camera inside the box use full viewport. No secondary camera.
 inline Rect projectBounds(V lo,V hi,const Camera& c,int w,int h){
-    if(!finite(lo)||!finite(hi)||c.tanHalf<=0||c.aspect<=0)return {};
+    if(!finite(lo)||!finite(hi)||lo.x>hi.x||lo.y>hi.y||lo.z>hi.z||!validCamera(c)||w<=0||h<=0)return {};
     if(c.eye.x>=lo.x&&c.eye.x<=hi.x&&c.eye.y>=lo.y&&c.eye.y<=hi.y&&c.eye.z>=lo.z&&c.eye.z<=hi.z)return {0,0,w,h};
     V p[8];for(int i=0;i<8;++i){V q=V{(i&1)?hi.x:lo.x,(i&2)?hi.y:lo.y,(i&4)?hi.z:lo.z}-c.eye;p[i]={dot(q,c.r),dot(q,c.u),dot(q,c.f)};}
     float minx=INF,miny=INF,maxx=-INF,maxy=-INF;
@@ -34,7 +34,7 @@ inline std::vector<Candidate> candidates(const v16::Runtime& rt,const v16::Scene
         const auto& mat=s.mat[mid];auto authored=materials.value(o.material);
         const auto perm=zreflect::resolvePermission(instances.value(o.id),authored,db.manifest);
         if(perm==zreflect::Permission::Disabled||perm==zreflect::Permission::Invalid)continue;
-        const bool water=mat.waterSurface||(!mat.surfaceAuthored&&mat.name=="cse_pool_water");
+        const bool water=waterMaterial(mat);
         const bool transparent=water||mat.transmissionPercent>0;
         const float rough=clampf(float(authored.value("roughness").toDouble(.72)),0.f,1.f);
         const bool optical=mode==Mode::Refraction?transparent:
@@ -55,6 +55,7 @@ inline std::vector<Candidate> candidates(const v16::Runtime& rt,const v16::Scene
 }
 inline void distribute(std::vector<Candidate>& c,uint32_t budget){
     // Each admitted footprint needs at least one primary and one secondary query.
+    for(auto& item:c)item.budget=0;
     const size_t n=std::min(c.size(),size_t(budget/2));if(!n)return;
     double weight=0;for(size_t i=0;i<n;++i)weight+=c[i].priority;
     uint32_t left=budget-uint32_t(n)*2;
