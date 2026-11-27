@@ -29,6 +29,7 @@
 #include <deque>
 #include <cmath>
 #include <limits>
+#include "m3d_dx11_atmosphere.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -300,7 +301,8 @@ public:
         const int peripheralSetting=peripheralOverride.load(std::memory_order_acquire);
         const char* multiresEnv=peripheralSetting<0
             ?std::getenv("M3D_V17_PERIPHERAL_MULTIREZ"):nullptr;
-        const bool multires=(peripheralSetting==1 ||
+        const float atmosphereDensity=scene.underwaterEnvironment?0.f:atmosphere::density();
+        const bool multires=atmosphereDensity<=0.f&&(peripheralSetting==1 ||
             (peripheralSetting<0&&multiresEnv&&std::strcmp(multiresEnv,"1")==0))
             &&w>=320&&h>=240;
         if(!pending_.empty() &&
@@ -976,12 +978,22 @@ public:
             ID3D11ShaderResourceView* empty[]={nullptr,nullptr};
             context_->PSSetShaderResources(0,2,empty);
         }else if(!drawScene(rtv_.Get(),dsv_.Get(),w,h,false,false))return false;
+        // Apply atmosphere to primary camera only.
+        const bool atmosphereOn=atmosphereDensity>0.f;
+        if(atmosphereOn){
+            context_->OMSetRenderTargets(0,nullptr,nullptr);
+            if(sampleCount_>1)context_->ResolveSubresource(resolve_.Get(),0,target_.Get(),0,DXGI_FORMAT_R8G8B8A8_UNORM);
+            if(!atmospherePass_.draw(device_.Get(),context_.Get(),atmosphereDepthSrv_.Get(),shadowSrv_.Get(),
+                sampleCount_>1?atmosphereResolveRtv_.Get():rtv_.Get(),raster_.Get(),scene,cam,shadows,
+                sampleCount_,unsigned(w),unsigned(h),atmosphereDensity,error))return false;
+            drawCalls+=2;
+        }
         // Native DXGI presentation: all transfers remain on the GPU. The
         // offscreen raster and MSAA targets are reused; no CPU staging,
         // Map, swizzle, QImage or Qt painter is touched on this path.
         if(nativeHwnd){
             context_->OMSetRenderTargets(0,nullptr,nullptr);
-            if(sampleCount_>1&&!multires)
+            if(sampleCount_>1&&!multires&&!atmosphereOn)
                 context_->ResolveSubresource(resolve_.Get(),0,target_.Get(),0,
                                               DXGI_FORMAT_R8G8B8A8_UNORM);
             ID3D11Texture2D* gpuSource=multires?mergeTex_.Get():
@@ -1060,7 +1072,7 @@ public:
         // Keep the old two-copy path selectable for strict SHA-256 A/B.
         const char* legacyReadback=std::getenv("M3D_V17_LEGACY_DOUBLE_COPY");
         if(sampleCount_>1){
-            context_->ResolveSubresource(resolve_.Get(),0,target_.Get(),0,DXGI_FORMAT_R8G8B8A8_UNORM);
+            if(!atmosphereOn)context_->ResolveSubresource(resolve_.Get(),0,target_.Get(),0,DXGI_FORMAT_R8G8B8A8_UNORM);
             context_->CopyResource(slot.staging.Get(),resolve_.Get());
         }else if(legacyReadback&&std::strcmp(legacyReadback,"1")==0){
             context_->CopyResource(resolve_.Get(),target_.Get());
@@ -2074,6 +2086,7 @@ private:
         readbackDepth_=0;nextReadbackSlot_=0;
         width_=w;height_=h;msaaPreference_=msaa;
         target_.Reset();resolve_.Reset();rtv_.Reset();depthTexture_.Reset();dsv_.Reset();
+        atmosphereDepthSrv_.Reset();atmosphereResolveRtv_.Reset();
         targetSrv_.Reset();resolveSrv_.Reset();lowTex_.Reset();lowRtv_.Reset();
         lowSrv_.Reset();lowDepth_.Reset();lowDsv_.Reset();
         mergeTex_.Reset();mergeRtv_.Reset();lowW_=0;lowH_=0;
@@ -2100,13 +2113,19 @@ private:
         if(sampleCount_==1&&FAILED(device_->CreateShaderResourceView(target_.Get(),&srvDesc,&targetSrv_))){
             error=L"SRV couleur HD indisponible.";return false;
         }
-        td.SampleDesc.Count=1;td.SampleDesc.Quality=0;td.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+        td.SampleDesc.Count=1;td.SampleDesc.Quality=0;td.BindFlags=D3D11_BIND_SHADER_RESOURCE|D3D11_BIND_RENDER_TARGET;
         if(FAILED(device_->CreateTexture2D(&td,nullptr,&resolve_))){error=L"Création de la cible de résolution DirectX 11 impossible.";return false;}
         if(FAILED(device_->CreateShaderResourceView(resolve_.Get(),&srvDesc,&resolveSrv_))){
             error=L"SRV résolution MSAA indisponible.";return false;
         }
-        td.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;td.SampleDesc.Count=sampleCount_;td.SampleDesc.Quality=sampleQuality_;td.BindFlags=D3D11_BIND_DEPTH_STENCIL;
-        if(FAILED(device_->CreateTexture2D(&td,nullptr,&depthTexture_))||FAILED(device_->CreateDepthStencilView(depthTexture_.Get(),nullptr,&dsv_))){error=L"Création du tampon de profondeur DirectX 11 impossible.";return false;}
+        D3D11_RENDER_TARGET_VIEW_DESC fogRtv{};fogRtv.Format=DXGI_FORMAT_R8G8B8A8_UNORM_SRGB;fogRtv.ViewDimension=D3D11_RTV_DIMENSION_TEXTURE2D;
+        if(FAILED(device_->CreateRenderTargetView(resolve_.Get(),&fogRtv,&atmosphereResolveRtv_))){error=L"Z Atmosphere: resolve RTV indisponible.";return false;}
+        td.Format=DXGI_FORMAT_R24G8_TYPELESS;td.SampleDesc.Count=sampleCount_;td.SampleDesc.Quality=sampleQuality_;td.BindFlags=D3D11_BIND_DEPTH_STENCIL|D3D11_BIND_SHADER_RESOURCE;
+        D3D11_DEPTH_STENCIL_VIEW_DESC dv{};dv.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;dv.ViewDimension=sampleCount_>1?D3D11_DSV_DIMENSION_TEXTURE2DMS:D3D11_DSV_DIMENSION_TEXTURE2D;
+        D3D11_SHADER_RESOURCE_VIEW_DESC sv{};sv.Format=DXGI_FORMAT_R24_UNORM_X8_TYPELESS;sv.ViewDimension=sampleCount_>1?D3D11_SRV_DIMENSION_TEXTURE2DMS:D3D11_SRV_DIMENSION_TEXTURE2D;
+        if(sampleCount_==1)sv.Texture2D.MipLevels=1;
+        if(FAILED(device_->CreateTexture2D(&td,nullptr,&depthTexture_))||FAILED(device_->CreateDepthStencilView(depthTexture_.Get(),&dv,&dsv_))||
+           FAILED(device_->CreateShaderResourceView(depthTexture_.Get(),&sv,&atmosphereDepthSrv_))){error=L"Création du tampon de profondeur DirectX 11 impossible.";return false;}
         return true;
     }
     bool ensureZTarget(ZReflectTarget& t,int w,int h,std::wstring& error){
@@ -2276,7 +2295,9 @@ private:
     zreflect::RuntimeOptics zRuntime_;
     std::vector<zreflect::ActivePlane> zActive_;
     std::array<ZReflectTarget,2> zTargets_;
-    ComPtr<ID3D11ShaderResourceView> targetSrv_,resolveSrv_,lowSrv_;
+    ComPtr<ID3D11ShaderResourceView> targetSrv_,resolveSrv_,lowSrv_,atmosphereDepthSrv_;
+    ComPtr<ID3D11RenderTargetView> atmosphereResolveRtv_;
+    dx11::AtmospherePass atmospherePass_;
     ComPtr<ID3D11RenderTargetView> lowRtv_,mergeRtv_;
     ComPtr<ID3D11DepthStencilView> lowDsv_;
     int lowW_=0,lowH_=0;

@@ -216,6 +216,21 @@ if(WIN32)
                     VERBATIM)
                 list(APPEND V17_VULKAN_SPIRV "${skyOut}")
             endforeach()
+            # Z Atmosphere depth-input fullscreen pass (single / MSAA).
+            foreach(mode IN ITEMS single ms)
+                if(mode STREQUAL "ms")
+                    set(fogSpv "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders/atmosphere_ms.frag.spv")
+                    set(fogDefine "-DZATM_MSAA=1")
+                else()
+                    set(fogSpv "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders/atmosphere.frag.spv")
+                    set(fogDefine "")
+                endif()
+                add_custom_command(OUTPUT "${fogSpv}"
+                    COMMAND "${V17_GLSLANG_VALIDATOR}" -V --target-env vulkan1.3 ${fogDefine}
+                    "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/atmosphere.frag" -o "${fogSpv}"
+                    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/atmosphere.frag" VERBATIM)
+                list(APPEND V17_VULKAN_SPIRV "${fogSpv}")
+            endforeach()
             # Two fragment variants from the same source. Optimized is the
             # runtime default; set CSE_WARP_VK_FAST_FRAGMENT=0 for reference A/B.
             set(fast_frag_spv "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders/raster_fast.frag.spv")
