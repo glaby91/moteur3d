@@ -1,0 +1,105 @@
+name: V17 Linux x64 Vulkan
+run-name: CSE WARP V17 Linux Vulkan — build ${{ github.run_number }}
+on:
+  push:
+    branches: [master, integration/v17-main-linux-vulkan]
+    paths:
+      - 'v17/**'
+      - 'v16/**'
+      - 'engine/**'
+      - 'cmake/**'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/**'
+      - '.github/workflows/build-linux-vulkan.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: v17-linux-vulkan-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Vulkan SDK tools and Linux Qt runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libvulkan-dev glslang-tools vulkan-tools mesa-vulkan-drivers libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xinput0 libpulse0
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: qtmultimedia
+          cache: true
+      - name: Resolve engine version and reference scene for build
+        run: |
+          set -euo pipefail
+          product="$(python3 -c 'import json; v=json.load(open("v17/version.json"))["engine"]; print("%d.%03d"%(v["major"],v["build"]))')"
+          echo "V17_PRODUCT=$product" >> "$GITHUB_ENV"
+          base="https://github.com/glaby91/moteur3d-scene/releases/download/scene-reflect-V17.631"
+          curl --fail --location --retry 3 "$base/V17-scene.zip" -o "$RUNNER_TEMP/V17-scene.zip"
+          echo "b44972105f1af661586e9602899529de9d4fc4e1edd994099b28b6b174f3e45d  $RUNNER_TEMP/V17-scene.zip" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/v17-scene"
+          unzip -q "$RUNNER_TEMP/V17-scene.zip" -d "$RUNNER_TEMP/v17-scene"
+          test -f "$RUNNER_TEMP/v17-scene/benchmark-civic/scene.json"
+      - name: Configure actual Vulkan backend
+        run: |
+          cmake -S v17 -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DM3D_REQUIRE_VULKAN=ON -DV17_CI_BUILD_NUMBER="$GITHUB_RUN_NUMBER" -DV17_GIT_SHA="$GITHUB_SHA" -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DV17_SCENE_SOURCE_DIR="$RUNNER_TEMP/v17-scene/benchmark-civic"
+      - name: Compile engine, SPIR-V and Vulkan tests
+        run: |
+          cmake --build build-linux --parallel 4 --target moteur3d_v17 moteur3d_v17_benchmark moteur3d_v17_campaign v17_vulkan_gpu_smoke v17_vulkan_version_smoke v17_vulkan_mesh_smoke v17_vulkan_dirty_policy_smoke v17_vulkan_mipmap_smoke v17_vulkan_readback_smoke
+      - name: Check Vulkan CPU tests and actual shader rendering using Mesa lavapipe
+        env:
+          QT_QPA_PLATFORM: offscreen
+          CSE_WARP_VK_ALLOW_SOFTWARE_TEST: '1'
+        run: |
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' | head -n 1)"
+          test -n "$VK_ICD_FILENAMES"
+          ctest --test-dir build-linux --output-on-failure -R '^v17_vulkan_' --no-tests=error
+          vulkaninfo --summary
+          cd build-linux
+          ./v17_vulkan_gpu_smoke "$GITHUB_WORKSPACE/vulkan-linux-smoke.png"
+      - name: Package versioned engine directory (no scene)
+        run: |
+          set -euo pipefail
+          product="$V17_PRODUCT"
+          name="CSE-WARP-V${product}-Linux-Vulkan-GitHub-${GITHUB_RUN_NUMBER}-x86_64"
+          dst="dist-linux/$name"
+          mkdir -p "$dst"
+          cp build-linux/moteur3d_v17 build-linux/moteur3d_v17_benchmark build-linux/moteur3d_v17_campaign build-linux/v17_vulkan_gpu_smoke "$dst/"
+          cp build-linux/libmoteur3d_v16_core.so "$dst/"
+          cp -r build-linux/vulkan build-linux/audio build-linux/shaders "$dst/"
+          cp build-linux/render_modules.json "$dst/"
+          cp v17/docs/LINUX_VULKAN.md "$dst/README.md"
+          # Qt dependencies installed by CI are not assumed to exist on the user PC.
+          mkdir -p "$dst/qt/lib" "$dst/qt/plugins"
+          cp -a "$QT_ROOT_DIR/lib"/libQt6*.so* "$dst/qt/lib/"
+          cp -a "$QT_ROOT_DIR/plugins"/platforms "$QT_ROOT_DIR/plugins"/imageformats "$QT_ROOT_DIR/plugins"/multimedia "$dst/qt/plugins/"
+          cat > "$dst/lancer.sh" <<'SH'
+          #!/usr/bin/env bash
+          set -e
+          cd -- "$(dirname -- "$0")"
+          export LD_LIBRARY_PATH="$PWD:$PWD/qt/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+          export QT_PLUGIN_PATH="$PWD/qt/plugins"
+          exec ./moteur3d_v17 "$@"
+          SH
+          chmod +x "$dst/lancer.sh"
+          printf '{"productVersion":"%s","githubActionsRun":"%s","sourceCommit":"%s","platform":"linux-x86_64","backend":"Vulkan","presentation":"Qt QImage"}\n' "$product" "$GITHUB_RUN_ID" "$GITHUB_SHA" > "$dst/BUILD_INFO.json"
+          LD_LIBRARY_PATH="$PWD/$dst:$PWD/$dst/qt/lib" ldd "$dst/moteur3d_v17" | tee linux-ldd.txt
+          ! grep -q 'not found' linux-ldd.txt
+          tar -C dist-linux -czf "$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V${{ env.V17_PRODUCT }}-Linux-Vulkan-GitHub-${{ github.run_number }}-x86_64
+          path: CSE-WARP-V*-Linux-Vulkan-GitHub-*-x86_64.tar.gz
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: Linux-Vulkan-diagnostics
+          path: |
+            vulkan-linux-smoke.png
+            linux-ldd.txt

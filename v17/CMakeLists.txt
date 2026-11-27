@@ -189,12 +189,15 @@ if(MSVC)
 endif()
 # Vulkan 1.3.204 minimum Raster backend: compile native GLSL shaders to SPIR-V.
 # Pipeline assembly is done once per worker thread, not in the per-frame path.
-if(WIN32)
+if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Vulkan 1.3.204 QUIET)
     if(Vulkan_FOUND)
         find_program(V17_GLSLANG_VALIDATOR NAMES glslangValidator glslangValidator.exe
             HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/Bin32")
         if(NOT V17_GLSLANG_VALIDATOR)
+            if(M3D_REQUIRE_VULKAN)
+                message(FATAL_ERROR "glslangValidator is required to build Vulkan shaders")
+            endif()
             message(WARNING "Vulkan SDK present but glslangValidator not found: Vulkan preview requires SPIR-V shaders")
         else()
             set(V17_VULKAN_SPIRV)
@@ -236,6 +239,7 @@ if(WIN32)
                     set(fogDefine "")
                 endif()
                 add_custom_command(OUTPUT "${fogSpv}"
+                    COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/vulkan-shaders"
                     COMMAND "${V17_GLSLANG_VALIDATOR}" -V --target-env vulkan1.3 ${fogDefine}
                     "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/atmosphere.frag" -o "${fogSpv}"
                     DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/vulkan/shaders/atmosphere.frag" VERBATIM)
@@ -310,7 +314,7 @@ target_include_directories(v17_vulkan_mesh_smoke PRIVATE
 # A fixture-local groundMaterial() is supplied by mesh_smoke.cpp.
 # The actual shared engine DLL is still built/packaged and used by GPU tests.
 add_test(NAME v17_vulkan_mesh_tessellation COMMAND v17_vulkan_mesh_smoke)
-if(WIN32 AND Vulkan_FOUND)
+if(Vulkan_FOUND)
     add_executable(v17_vulkan_version_smoke "vulkan/tests/version_smoke.cpp")
     target_include_directories(v17_vulkan_version_smoke PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/vulkan")
@@ -342,6 +346,8 @@ if(WIN32 AND Vulkan_FOUND)
                 "$<TARGET_FILE_DIR:v17_vulkan_ab_bench>/vulkan"
             VERBATIM)
     endif()
+endif()
+if(WIN32 AND Vulkan_FOUND)
     # Khronos diagnostics run in the ORIGINAL Vulkan engine through native Win32 WSI.
     # Windows GUI subsystem prevents one persistent DOS window per test.
     # The native Vulkan render window is still visible and logs still redirect.
@@ -386,8 +392,8 @@ if(WIN32 AND Vulkan_FOUND)
 endif()
 
 # Repeatable original 30s PCM diagnostic loop; no copyright-sensitive downloads
-# and no external audio processing tool required by the Windows build.
-if(WIN32)
+# and no external audio processing tool required by the build.
+if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(V17_RADIO_TEST_WAV "${CMAKE_CURRENT_BINARY_DIR}/radio-assets/pripyat_radio.wav")
     add_custom_command(
@@ -414,9 +420,6 @@ add_custom_command(TARGET moteur3d_v17 POST_BUILD
       "${V17_RADIO_TEST_WAV}"
       "$<TARGET_FILE_DIR:moteur3d_v17>/audio/pripyat_radio.wav"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      "${V17_ICON}"
-      "$<TARGET_FILE_DIR:moteur3d_v17>/cse_warp_v17.ico"
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
       "$<TARGET_FILE:moteur3d_v16_core>"
       "$<TARGET_FILE_DIR:moteur3d_v17>"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
@@ -440,6 +443,15 @@ add_custom_command(TARGET moteur3d_v17 POST_BUILD
       "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14/src/shaders/m3d_raytrace_compute.hlsl"
       "$<TARGET_FILE_DIR:moteur3d_v17>/shaders/m3d_raytrace_compute.hlsl"
     VERBATIM)
+if(WIN32)
+    add_custom_command(TARGET moteur3d_v17 POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${V17_ICON}" "$<TARGET_FILE_DIR:moteur3d_v17>/cse_warp_v17.ico"
+        VERBATIM)
+endif()
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    set_target_properties(moteur3d_v17 PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
+endif()
 # Standalone V17 benchmark + GUI. The measured engine is the same
 # shared V16 DLL and native D3D11 raster path as the V17 exploration view.
 if(WIN32)
