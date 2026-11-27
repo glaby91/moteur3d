@@ -43,6 +43,8 @@ using d3d11::DrawChunk;
 using d3d11::makeFoliageTemplate;
 using d3d11::uvScaleForMaterial;
 using d3d11::visibleChunk;
+struct EscargotInput {const std::vector<float>* color;const std::vector<float>* meta;int w,h;};
+thread_local const EscargotInput* escargotInput=nullptr;
 // Single atomic configuration word: host and GUI may update quality while
 // the dedicated GPU worker is rendering. Each frame gets one full snapshot.
 // Bits: 0..7 MSAA, 8..15 anisotropy, 16..31 LOD quality percent,
@@ -324,10 +326,13 @@ public:
         if(!ensureDevice(error)||!ensureScene(scene,error,lumaBvh))return false;
         const char* zOpt=std::getenv("M3D_V17_ZREFLECT");
         // V17.024: production LumaTrace enables Z Reflect unless explicitly disabled.
-        const bool zEnabled=lumaBvh&&!(zOpt&&std::strcmp(zOpt,"0")==0);
+        const bool escEnabled=lumaBvh&&escargotInput!=nullptr;
+        if(escEnabled&&(escargotInput->w!=w||escargotInput->h!=h||multires)){error=L"Escargot incompatible dimensions/multires";return false;}
+        const bool zEnabled=lumaBvh&&!escEnabled&&!(zOpt&&std::strcmp(zOpt,"0")==0);
         zActive_.clear();zreflect::QueryStats zStats{};
         const auto zStart=Clock::now();
-        if(lumaBvh)zStats=zRuntime_.select(scene,cam,zActive_,zEnabled);
+        if(lumaBvh&&!escEnabled)zStats=zRuntime_.select(scene,cam,zActive_,zEnabled);
+        if(escEnabled&&!uploadEscargot(w,h,*escargotInput,error))return false;
         const double zSelectUs=lumaBvh?std::chrono::duration<double,std::micro>(Clock::now()-zStart).count():0.;
         const uint32_t zTotal=lumaBvh?uint32_t(scene.opticalPlanes.size()):0u;
         // Two shared slots for all optical surfaces, including water.
@@ -646,8 +651,9 @@ public:
                 lumaBvh?lumaTraceCompute_.radianceSrv():nullptr,
                 nullptr, // reserved t8, no dedicated water texture
                 cb.zPlaneIds[3]<.5f&&cb.zPlaneIds[2]>.5f?zTargets_[0].srv.Get():nullptr,
-                cb.zPlaneIds[3]<.5f&&cb.zPlaneIds[2]>1.5f?zTargets_[1].srv.Get():nullptr};
-            context_->PSSetShaderResources(0,11,srvs);
+                cb.zPlaneIds[3]<.5f&&cb.zPlaneIds[2]>1.5f?zTargets_[1].srv.Get():nullptr,
+                escEnabled?escColorSrv_.Get():nullptr,escEnabled?escMetaSrv_.Get():nullptr};
+            context_->PSSetShaderResources(0,13,srvs);
             ID3D11SamplerState* samplers[]={sampler_.Get(),probeSampler_.Get()};
             context_->PSSetSamplers(0,2,samplers);
         
@@ -960,7 +966,7 @@ public:
         const double reflectSubmitMs=zActive_.empty()?0.:std::chrono::duration<double,std::milli>(Clock::now()-reflectSubmitStart).count();
         cb.zPlaneIds[3]=0.f;activeCam=cam;
         cb.reflectionControls[0]=0.f;
-        cb.zPlaneIds[2]=float(zActive_.size());
+        cb.zPlaneIds[2]=escEnabled?-1.f:float(zActive_.size());
         if(multires){
             if(!drawScene(lowRtv_.Get(),lowDsv_.Get(),lowW_,lowH_,false,true) ||
                !drawScene(rtv_.Get(),dsv_.Get(),w,h,true,false))return false;
@@ -2302,6 +2308,25 @@ private:
     zreflect::RuntimeOptics zRuntime_;
     std::vector<zreflect::ActivePlane> zActive_;
     std::array<ZReflectTarget,2> zTargets_;
+    ComPtr<ID3D11Texture2D> escColor_,escMeta_;
+    ComPtr<ID3D11ShaderResourceView> escColorSrv_,escMetaSrv_;
+    int escW_=0,escH_=0;
+    bool uploadEscargot(int w,int h,const EscargotInput& input,std::wstring& error){
+        ID3D11ShaderResourceView* clear[2]={nullptr,nullptr};context_->PSSetShaderResources(11,2,clear);
+        if(!escColor_||!escMeta_||!escColorSrv_||!escMetaSrv_||escW_!=w||escH_!=h){
+            escColor_.Reset();escMeta_.Reset();escColorSrv_.Reset();escMetaSrv_.Reset();
+            D3D11_TEXTURE2D_DESC d{};d.Width=UINT(w);d.Height=UINT(h);d.MipLevels=1;d.ArraySize=1;
+            d.Format=DXGI_FORMAT_R32G32B32A32_FLOAT;d.SampleDesc.Count=1;d.Usage=D3D11_USAGE_DEFAULT;d.BindFlags=D3D11_BIND_SHADER_RESOURCE;
+            if(FAILED(device_->CreateTexture2D(&d,nullptr,escColor_.GetAddressOf()))||
+               FAILED(device_->CreateTexture2D(&d,nullptr,escMeta_.GetAddressOf()))||
+               FAILED(device_->CreateShaderResourceView(escColor_.Get(),nullptr,escColorSrv_.GetAddressOf()))||
+               FAILED(device_->CreateShaderResourceView(escMeta_.Get(),nullptr,escMetaSrv_.GetAddressOf()))){error=L"Escargot texture allocation failed";return false;}
+            escW_=w;escH_=h;
+        }
+        context_->UpdateSubresource(escColor_.Get(),0,nullptr,input.color->data(),UINT(w*16),0);
+        context_->UpdateSubresource(escMeta_.Get(),0,nullptr,input.meta->data(),UINT(w*16),0);
+        return true;
+    }
     ComPtr<ID3D11ShaderResourceView> targetSrv_,resolveSrv_,lowSrv_,atmosphereDepthSrv_;
     ComPtr<ID3D11RenderTargetView> atmosphereResolveRtv_;
     dx11::AtmospherePass atmospherePass_;
@@ -2394,6 +2419,14 @@ bool renderDirectX11Preview(const Scene& scene,const ShadowMap& shadows,const Ca
 bool renderLumaTracePreview(const Scene& scene,const LumaTraceBvh4& bvh,const ShadowMap& shadows,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error){
     return rasterThreadContext().renderLumaTrace(scene,bvh,shadows,cam,w,h,pixels,stats,error);
 }
+bool renderLumaTraceEscargotPreview(const Scene& scene,const LumaTraceBvh4& bvh,const ShadowMap& shadows,const Camera& cam,int w,int h,
+    const std::vector<float>& color,const std::vector<float>& metadata,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error){
+    if(w<=0||h<=0||w>4096||h>4096||color.size()!=size_t(w)*h*4||metadata.size()!=color.size()||escargotInput){error=L"Invalid Escargot buffers";return false;}
+    const EscargotInput input{&color,&metadata,w,h};
+    struct Reset {~Reset(){escargotInput=nullptr;}} reset;
+    escargotInput=&input;
+    return rasterThreadContext().renderLumaTrace(scene,bvh,shadows,cam,w,h,pixels,stats,error);
+}
 bool renderDirectX11Native(const Scene& scene,const ShadowMap& shadows,const Camera& cam,
                             int w,int h,void* hwnd,Stats& stats,std::wstring& error){
     return rasterThreadContext().present(scene,shadows,cam,w,h,
@@ -2445,6 +2478,7 @@ bool renderDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,
 bool renderDirectX11Native(const Scene&,const ShadowMap&,const Camera&,int,int,void*,Stats&,std::wstring& error){error=L"Présentation DXGI disponible uniquement sous Windows.";return false;}
 bool renderLumaTracePreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,std::vector<uint32_t>&,Stats&,std::wstring& error){error=L"LumaTrace DX11 disponible uniquement sous Windows.";return false;}
 bool renderLumaTraceNative(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,void*,Stats&,std::wstring& error){error=L"LumaTrace DX11 natif disponible uniquement sous Windows.";return false;}
+bool renderLumaTraceEscargotPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring& error){error=L"Escargot DX11 Windows only";return false;}
 void releaseDirectX11NativeForCurrentThread(){}
 bool enqueueDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,unsigned,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}
 bool receiveDirectX11Preview(std::vector<uint32_t>&,Stats&,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}

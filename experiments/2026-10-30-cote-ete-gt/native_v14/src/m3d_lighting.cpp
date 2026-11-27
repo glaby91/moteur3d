@@ -6,6 +6,7 @@ namespace m3d {
 V sun=norm({.70f,.78f,-.714f}),skyZenith={126,170,209},skyHorizon={244,185,134},sunTint={255,246,223};
 float daylight=1.f,lampFactor=0.f,solarHour=14.75f;
 std::vector<Light> pointLights;
+void escargotLightingSnapshot(float& day,V& direction){day=daylight;direction=sun;}
 namespace { std::atomic<bool> exteriorLighting{true}; bool sensorLightsOn=false; }
 void setExteriorLightingEnabled(bool enabled) noexcept { exteriorLighting.store(enabled,std::memory_order_relaxed); }
 bool exteriorLightingEnabled() noexcept { return exteriorLighting.load(std::memory_order_relaxed); }

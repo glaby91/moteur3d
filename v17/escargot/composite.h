@@ -24,9 +24,11 @@ inline V sourceTexture(const Material& m,V uv){
 }
 // Reference radiance proxy, not the existing LumaTrace lighting shader.
 // Crucially texture is sampled AFTER UV reconstruction and depth ordering.
+inline thread_local float proxyDaylight=1.f;
+inline thread_local V proxySun=norm({.70f,.78f,-.714f});
 inline V sourceColor(const Material& m,const Value& v){
     const V base=sourceTexture(m,v.uv);
-    const float diffuse=.12f+.35f*daylight+.48f*daylight*sat(dot(v.normal,sun));
+    const float diffuse=.12f+.35f*proxyDaylight+.48f*proxyDaylight*sat(dot(v.normal,proxySun));
     return base*diffuse+m.emissionColor*std::max(0.f,m.emissionIntensity);
 }
 struct Contribution {Value value;const Layer* layer=nullptr;uint8_t mask=0;};
@@ -148,7 +150,7 @@ inline std::vector<Pixel> composeScreen(const Result& frame,int w,int h){
         for(int y=0;y<r.h;++y)for(int x=0;x<r.w;++x){
             const auto& p=s.image[size_t(y)*r.w+x];if(p.alpha<=0||p.weight<=0)continue;
             auto& q=out[size_t(y+r.y)*w+x+r.x];
-            if(!q.alpha||p.receiverDepth<q.receiverDepth)q=p;
+            if(!q.alpha||p.receiverDepth<q.receiverDepth){q=p;q.receiverMaterial=s.candidate.material;}
         }
     }return out;
 }

@@ -46,7 +46,7 @@ struct Candidate {
     uint32_t budget=0;
 };
 struct Layer { LayerKey key; Rect bounds; std::map<size_t,Value> measured; std::vector<size_t> partial; };
-struct Pixel { V rgb{}; float alpha=0,weight=0,receiverDepth=0; };
+struct Pixel { V rgb{}; float alpha=0,weight=0,receiverDepth=0; uint32_t receiverMaterial=0; };
 struct Surface {
     Candidate candidate;
     int step=1,cols=0,rows=0;

@@ -27,6 +27,7 @@ inline Result run(const v16::Runtime& rt,const v16::SceneDatabase& db,const Came
         out.surfaces.push_back(std::move(s));
     }
     out.matrixMs=std::chrono::duration<double,std::milli>(Clock::now()-time).count();time=Clock::now();
+    escargotLightingSnapshot(proxyDaylight,proxySun);
     for(auto& s:out.surfaces)if(!s.deferred)compose(s,rt.renderScene,out);
     out.compositionMs=std::chrono::duration<double,std::milli>(Clock::now()-time).count();
     out.ok=out.rays<=opt.rayBudget;return out;

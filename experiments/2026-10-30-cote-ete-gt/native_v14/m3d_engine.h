@@ -127,6 +127,7 @@ extern V sun,skyZenith,skyHorizon,sunTint;
 extern float daylight,lampFactor,solarHour;
 extern std::vector<Light> pointLights;
 void updateLighting(float hour);
+void escargotLightingSnapshot(float& day,V& direction);
 void setExteriorLightingEnabled(bool enabled) noexcept;
 bool exteriorLightingEnabled() noexcept;
 bool loadScene(const std::filesystem::path& path,Scene& s,std::wstring& error);
@@ -164,6 +165,7 @@ bool renderLumaTracePreview(const Scene& s,const LumaTraceBvh4& bvh4,
 bool renderLumaTraceNative(const Scene& s,const LumaTraceBvh4& bvh4,
     const ShadowMap& sm,const Camera& cam,int w,int h,void* hwnd,
     Stats& stats,std::wstring& error);
+bool renderLumaTraceEscargotPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring&);
 void releaseDirectX11NativeForCurrentThread();
 // Experimental Vulkan 1.0 Raster GPU backend; offscreen ARGB32 preview, shared Scene/Camera API.
 bool renderVulkanPreview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);

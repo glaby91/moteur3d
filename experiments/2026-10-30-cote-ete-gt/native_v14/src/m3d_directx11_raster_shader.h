@@ -47,6 +47,8 @@ Texture2DArray<float4> preservedAlbedo : register(t6);
 StructuredBuffer<float4> lumaTriangleRadiance : register(t7);
 Texture2D<float4> zReflection0 : register(t9);
 Texture2D<float4> zReflection1 : register(t10);
+Texture2D<float4> escColor : register(t11);
+Texture2D<float4> escMeta : register(t12);
 SamplerState wrapSampler : register(s0);
 SamplerState probeSampler : register(s1);
 struct VSIn { float3 p:POSITION; float3 n:NORMAL; float2 uv:TEXCOORD0; uint mat:MATERIAL; uint primitiveId:TRIID; };
@@ -137,6 +139,17 @@ bool sampleOptical(VSOut i,float2 distortion,out float3 reflected){
     if(any(uv<0.0)||any(uv>1.0))return false;
     reflected=slot==0?zReflection0.SampleLevel(probeSampler,uv,0).rgb:zReflection1.SampleLevel(probeSampler,uv,0).rgb;
     return true;
+}
+bool sampleEscargot(VSOut i,out float3 reflected,out float coverage,out float weight){
+    reflected=0;coverage=0;weight=0;
+    if(zPlaneIds.z>=0||zPlaneIds.w>.5)return false;
+    int2 p=int2(i.p.xy);float4 m=escMeta.Load(int3(p,0));
+    if(m.y!=float(i.mat+1u)||m.x<=0)return false;
+    float d=length(i.world-eye);
+    if(abs(m.x-d)>max(.03,.025*d))return false;
+    float4 c=escColor.Load(int3(p,0));coverage=saturate(c.a);weight=saturate(m.z);
+    if(coverage<=.00001)return false;
+    reflected=max(c.rgb/coverage,0);return true;
 }
 // Same rejection for the reflected color and depth passes.
 void clipReflection(VSOut i){
@@ -428,10 +441,13 @@ inline constexpr char kShaderPart2[] = R"(
         // Avoid the former 45% high-angle opaque cyan veil.
         float opacity=lerp(.08,.24,saturate(fresnelWater*1.75));
         float3 reflectedScene;
-        if(sampleOptical(i,clamp(normal.xz*.35,-.04,.04),reflectedScene)){
-            const float reflectionWeight=saturate(.22+.62*fresnelWater);
+        float coverage=1.0,escWeight=0.0;
+        bool optical=sampleOptical(i,clamp(normal.xz*.35,-.04,.04),reflectedScene);
+        if(!optical)optical=sampleEscargot(i,reflectedScene,coverage,escWeight);
+        if(optical){
+            const float reflectionWeight=saturate(.22+.62*fresnelWater)*coverage;
             color=lerp(color,reflectedScene,reflectionWeight);
-            opacity=lerp(opacity,.62,saturate(fresnelWater*1.45));
+            opacity=lerp(opacity,.62,saturate(fresnelWater*1.45)*coverage);
         }
         // Transmission controls the water's opacity continuously; its Fresnel
         // opacity remains the authored 100%-transmission appearance.
@@ -448,6 +464,17 @@ inline constexpr char kShaderPart2[] = R"(
         float alpha=saturate(materialOpacity[i.mat].x);
         float combined=f+(1.0-f)*alpha;
         return float4((reflected*f+color*alpha*(1.0-f))/max(combined,.00001),combined);
+    }
+    float escCoverage,escWeight;
+    if(sampleEscargot(i,reflected,escCoverage,escWeight)){
+        const float alpha=saturate(materialOpacity[i.mat].x);
+        if(alpha<.999){
+            const float f0=saturate(materialOpacity[i.mat].z);
+            const float f=(f0+(1.0-f0)*pow(1.0-saturate(abs(dot(normal,viewDir))),5.0))*escCoverage;
+            const float combined=f+(1.0-f)*alpha;
+            return float4((reflected*f+color*alpha*(1.0-f))/max(combined,.00001),combined);
+        }
+        color=lerp(color,reflected,saturate(escWeight*escCoverage));
     }
     return float4(color, materialOpacity[i.mat].x);
 }
