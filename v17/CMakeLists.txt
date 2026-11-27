@@ -629,3 +629,8 @@ add_executable(v17_escargot_smoke EXCLUDE_FROM_ALL tests/escargot_smoke.cpp)
 target_include_directories(v17_escargot_smoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
 target_link_libraries(v17_escargot_smoke PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
 # Deliberately no add_test: absent executable must not break existing ctest.
+
+if(WIN32)
+    add_executable(v17_escargot_ab EXCLUDE_FROM_ALL tools/escargot_ab.cpp)
+    target_link_libraries(v17_escargot_ab PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
+endif()

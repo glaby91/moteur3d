@@ -1,0 +1,96 @@
+name: CSE WARP V17.031 — Escargot 001 A-B
+on:
+  push:
+    branches: [experiment/v17-escargot-001]
+    paths:
+      - '.github/workflows/escargot-ab-v17.yml'
+      - 'v17/escargot/**'
+      - 'v17/tools/escargot*'
+      - 'v17/tests/escargot_smoke.cpp'
+      - 'v17/CMakeLists.txt'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: escargot-ab-v17
+  cancel-in-progress: true
+jobs:
+  windows-ab:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+      - name: Download exact scene V17.634
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP "escargot-scene.zip"
+          $root = Join-Path $env:RUNNER_TEMP "escargot-scene"
+          Invoke-WebRequest "https://github.com/glaby91/moteur3d-scene/releases/download/scene-reflect-V17.634/V17-scene.zip" -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne "f975639311e5b5d48ae996ac1f4f986994b232befb29617290f51bdf2bfbb703") { throw "Scene digest mismatch" }
+          Expand-Archive -LiteralPath $zip -DestinationPath $root
+          "ESC_SCENE=$root/benchmark-civic" >> $env:GITHUB_ENV
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtmultimedia
+          cache: true
+      - name: Configure and compile Escargot lab and A-B
+        shell: pwsh
+        run: |
+          cmake -S v17 -B build-escargot -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DV17_SCENE_SOURCE_DIR=$env:ESC_SCENE" -DM3D_REQUIRE_VULKAN=OFF "-DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER" "-DV17_GIT_SHA=$env:GITHUB_SHA"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build build-escargot --config Release --target v17_escargot_smoke v17_escargot_lab v17_escargot_ab --parallel 4
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Native C++ smoke
+        shell: pwsh
+        run: |
+          $core = Get-ChildItem build-escargot -Recurse -File -Filter moteur3d_v16_core.dll | Select-Object -First 1
+          $smoke = Get-ChildItem build-escargot -Recurse -File -Filter v17_escargot_smoke.exe | Select-Object -First 1
+          if (!$core -or !$smoke) { throw "Missing binaries" }
+          $env:PATH="$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
+          & $smoke.FullName
+          if ($LASTEXITCODE) { throw "Escargot smoke failed: $LASTEXITCODE" }
+      - name: Package local A-B benchmark
+        shell: pwsh
+        run: |
+          $dist = "escargot-package"
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          foreach ($name in @("v17_escargot_ab.exe","v17_escargot_lab.exe","v17_escargot_smoke.exe","moteur3d_v16_core.dll")) {
+            $f = Get-ChildItem build-escargot -Recurse -File -Filter $name | Select-Object -First 1
+            if (!$f) { throw "Missing $name" }
+            Copy-Item $f.FullName $dist
+          }
+          Copy-Item v17/tools/LANCER_ESCARGOT_AB.bat $dist
+          Copy-Item docs/research/Z_ESCARGOT_001.md $dist
+          Copy-Item engine/render_modules.json $dist
+          New-Item -ItemType Directory -Force "$dist/materials" | Out-Null
+          Copy-Item v17/materials/zmaterial8192.json "$dist/materials/"
+          @{ engine="17.031"; module="Escargot001"; scene="V17.634"; commit=$env:GITHUB_SHA; run=$env:GITHUB_RUN_ID; nativePresentation=$false } | ConvertTo-Json | Set-Content "$dist/BUILD_INFO.json"
+          windeployqt --release --no-translations "$dist/v17_escargot_ab.exe"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17.031-Escargot-AB-Windows-x64
+          path: escargot-package/
+          if-no-files-found: error
+      - name: Real scene A-B (WARP diagnostic)
+        shell: pwsh
+        timeout-minutes: 25
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          New-Item -ItemType Directory -Force escargot-report | Out-Null
+          & ".\escargot-package\v17_escargot_ab.exe" "$env:ESC_SCENE/scene.json" (Resolve-Path escargot-report).Path 320 180 3 4096
+          if ($LASTEXITCODE) { throw "Escargot A/B failed: $LASTEXITCODE" }
+          Get-Content escargot-report/summary.json
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: Escargot-AB-V17.634-WARP-report
+          path: escargot-report/
+          if-no-files-found: warn

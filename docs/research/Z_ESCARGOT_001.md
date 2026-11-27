@@ -76,3 +76,9 @@ Script reproductible `v17/escargot/preflight_stencil.mjs` : modèle JavaScript i
 | Total | 114054 | 95276 | 66654 | 22712 | 24688 |
 
 Recherches de voisins 95276 → 89366 ; visites de calques 479535 → 325497 ; évaluations de texture synthétiques 445220 → 294613. Aucun raffinement, aucune modification de Z Reflect ni du moteur de production. Une grille dense n'offre pas de réutilisation utile ; les trajets incomplets conservent le calcul normal. Le gain temporel réel reste à mesurer lors d'une compilation autorisée. La moyenne de quatre voisins et ses limites de précision restent inchangées.
+
+## Premier benchmark A/B natif (expérimental)
+
+A = LumaTrace preview + Z Reflect ; B = même raster LT avec atlas Escargot CPU transféré au pixel shader, zéro caméra secondaire y compris eau. B ne fait pas de rendu secondaire. Le shader applique la contribution uniquement si matériau et profondeur du récepteur correspondent (tolérance 2,5 %, minimum 3 cm), approximation susceptible de produire des lacunes ou erreurs aux contours. La couleur source reste un proxy albédo/soleil/émission, non la radiance complète LT. Premier comparatif fonctionnel, non à qualité égale ni une validation du calcul GPU des matrices. Le mode normal de l'application ne fournit pas d'atlas. Preview utilise une lecture GPU->CPU dans les deux branches.
+
+Scène V17.634, quatre caméras si présentes, éclairage fixe, textures plafonnées 256, MSAA 1, warmup A/B, ordre alterné, CSV par image et PNG A/B/diff, P50/P95. Le temps B inclut calcul CPU et préparation/transfert des textures float4. CI Windows WARP 320×180, trois répétitions. Package local indépendant : glisser scene.json sur LANCER_ESCARGOT_AB.bat (1280×720, cinq répétitions, 4096 rayons par défaut, matériel réel). Arguments : scene, width, height, repeats, rays. Aucun résultat de compilation ou FPS affirmé avant vérification de CI.
