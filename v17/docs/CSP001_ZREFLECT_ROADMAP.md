@@ -97,3 +97,25 @@ Priorités proposées P0 = validation indispensable, P1 = étape suivante, P2 = 
 5. Occlusion avancée R08, C05–C06, L04 et V04 : optimisations mesurées puis qualification finale.
 
 À chaque incrément : mettre à jour les IDs, statut, commit, preuve de test et résultat mesuré. Ne jamais marquer « validé » sur une simulation seule. Garder les changements isolés ; aucune fusion ni compilation implicite. La scène préparatoire est sur [feature/csp001-scene-precompile](https://github.com/glaby91/moteur3d-scene/tree/feature/csp001-scene-precompile) (commit 7a7d0aa3346cb097fd4fb7c6a4100a931b3dbee8).
+
+## R11 — Qualité réglable des réflexions Z Reflect (décision du 27/11/2026)
+
+**Statut : à réaliser, P1 ; documentation uniquement.** Référence actuelle : V17.024 master / scène principale V17.631. Z Reflect est activé par défaut sous LumaTrace ; le pool runtime comporte deux cibles, actuellement à demi-résolution sans MSAA. Cette section actualise ce point du registre historique, sans modifier le budget de caméras ni la configuration C (filtrage CPU miroir actif, prépass miroir inactif).
+
+Ajouter deux réglages indépendants aux paramètres graphiques LumaTrace :
+- Résolution Z Reflect : 1/4, 1/2, 1/1 de chaque dimension du viewport principal (respectivement 6,25 %, 25 % et 100 % du nombre de pixels).
+- Anticrénelage FSAA des cibles miroir : aucun, MSAA x2, x4, x8, selon les capacités réelles du GPU et des formats couleur/profondeur. Le MSAA est la méthode proposée ; ne pas confondre avec le SSAA ni avec l'anticrénelage de la caméra principale.
+
+| Profil indicatif | Résolution linéaire | MSAA miroir |
+|---|---|---|
+| Performance | 1/4 | Aucun |
+| Équilibré (défaut conservé) | 1/2 | Aucun |
+| Qualité | 1/2 | x2 |
+| Haute qualité | 1/2 | x4 |
+| Ultra | 1/1 | Au choix, jusqu'à x8 si supporté |
+
+Les deux réglages restent indépendants, y compris 1/4 + MSAA et 1/1 sans MSAA. Une résolution de 1920 x 1080 donne des cibles de 480 x 270, 960 x 540 ou 1920 x 1080. Le nombre de pixels ou d'échantillons n'est pas une prédiction du temps GPU : les passes miroir conservent un coût géométrique et un coût de resolve.
+
+Contraintes d'intégration : modification en cours d'exécution sans redémarrage, sur le thread propriétaire GPU ; réallocation uniquement lors d'un changement de dimensions ou de MSAA, allocation différée des slots utilisés ; cible MSAA couleur/profondeur compatible puis resolve vers une texture mono-échantillon lisible par le shader PBR. Préserver le clipping, Fresnel, distorsion de l'eau, sélection optique, Z Prepass principal et les autres backends. Ne pas ajouter de readback GPU/CPU. Invalider les textures miroir concernées au changement de qualité et ne jamais réutiliser une texture incompatible. Signaler le niveau réellement supporté, sans repli silencieux. Ne pas modifier la scène pour ce réglage moteur.
+
+Validation avant clôture : parité pixel à pixel du défaut 1/2 sans MSAA avec la référence ; tests de tous les modes supportés, changement à chaud, redimensionnement, absence de fuite, reflets eau/vitrages, stabilité des contours d'arbres en mouvement, mémoire des cibles, temps GPU miroir (resolve compris), FPS/P95 et nombre de triangles soumis. Comparer à résolution principale, caméra, éclairage, configuration C et scène identiques. Mesurer en priorité sur HD620 puis GPU plus puissant quand disponible. L'objectif de coût miroir 5–10 % du budget image reste une cible, pas une garantie. Aucun changement automatique de qualité ni de plafond de caméras dans R11.
