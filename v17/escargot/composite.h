@@ -67,8 +67,9 @@ inline void compose(Surface& sf,const Scene& scene,Result& stats){
             }
             // Optical depth is local to this destination cell. Stable ties
             // follow the deterministic LayerKey order (map / row insertion).
-            std::stable_sort(values.begin(),values.end(),[](const Contribution& a,const Contribution& b){
-                return a.value.depth>b.value.depth;
+            if(values.size()>1)std::sort(values.begin(),values.end(),[](const Contribution& a,const Contribution& b){
+                if(a.value.depth!=b.value.depth)return a.value.depth>b.value.depth;
+                return a.layer->key<b.layer->key; // same deterministic order, no stable_sort scratch allocation
             });
             if(coverage){
                 ++stats.coverageCells;

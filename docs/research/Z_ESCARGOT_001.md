@@ -28,3 +28,25 @@ A = Z Reflect natif actuel ; B = Escargot ; C = hybride (uniquement si A/B le ju
 La version 001 est volontairement sans raffinement, cache temporel approximatif ni GPU annexe. Étape suivante après validation mathématique/compilation autorisée : calcul GPU de requêtes BVH4 avec calques compacts, composition dans raster LT natif, interrupteur A/B et overlay debug coloré. Puis seulement raffinement optionnel, réutilisation temporelle et comparaison hybride. La GTX 1050 Ti dédiée reste une plaisanterie/recherche facultative ; duplication des textures/BVH et synchronisation à mesurer.
 
 Limites de ce commit : code rédigé/relu statiquement, non compilé, non exécuté sur scène. Le laboratoire ne remplace pas la méthode actuelle ni ne modifie l'interface. Les choix de budgets initiaux et proxy lumineux sont hypothèses d'expérimentation, pas paramètres validés.
+
+## Revue en cinq passes — optimisations et simulations non compilées
+
+Même branche de recherche, révisions 001 conservées (aucune publication moteur). Les vérifications JavaScript reproduisent les sous-algorithmes ; ce ne sont ni des tests C++ exécutés ni des mesures GPU.
+
+| Passe | Changements | Vérification numérique |
+|---|---|---|
+| 1 — Géométrie | Validation BVH4 et indices, départ caméra au plan near réel, normale géométrique distincte de shading, tie-break par primitive, transmission primaire, eau explicite et biais secondaire réduit | 341 angles de projection near |
+| 2 — Budget | Quota par point de la grille fixe, admission mémoire avant distribution, état complet/inconnu et compteurs | 16 320 scénarios de coûts synthétiques, pas de dépassement ni de privation des points restants |
+| 3 — Matrices | Recherche exacte partagée des quatre voisins complets, fusion des observations positives partielles par calque, parcours dense ou creux | 21 600 requêtes top-4 et 21 600 fusions comparées au tri exhaustif ; scénario 12 calques : 280 800 recherches théoriques → 43 200 au maximum hors fusion partielle |
+| 4 — Composition | Masques de couverture communs, union des silhouettes opaques, suppression des lectures de textures totalement occultées, LUT sRGB, filtre de calques par ligne | 24 000 compositions aléatoires : 299 964 → 111 366 évaluations de couleur, erreur numérique maximale 0 sur modèle de référence ; deux couvertures disjointes donnent alpha 1, au lieu de 0,75 |
+| 5 — Contrôle/optimisation | Spirale bornée par rectangle, pas de grille par recherche binaire, tri sans stable_sort, CSV creux, métriques et debug des rayons, tests C++ ajoutés non lancés | 4096 grilles ; 30000 choix de pas identiques ; spirale 4096×1 : 16785409 → 4096 visites ; 259802 → 343349 évaluations de taille de grille sur l'échantillon |
+
+### Limite quantifiée de la moyenne 4 voisins (passe 5)
+
+Miroir plan z=0, caméra (0,0,2), source plane z=4 : intersection source (3x,3y,4). Grille 17×17, mesure tous les 4 pixels, 25 observations et 289 cellules. Les UV mesurés sont conservés exactement ; moyenne arithmétique des quatre voisins pour les trous : erreur UV euclidienne moyenne 0.06146, maximale 0.13975 (UV normalisés, référence analytique). Ce n'est pas une mesure sur la piscine. La moyenne n'est pas une interpolation affine exacte et peut produire du palier/décalage aux frontières. On la conserve conformément à la spécification 001 ; pas de raffinement automatique.
+
+### États, mémoire et export
+
+`samples.csv` contient les états de chaque échantillon et la complétude du trajet ; `matrices.csv` ne contient que les valeurs positives mesurées. Pour un calque absent de la seconde table : trajet complet = identifiant zéro explicite, trajet incomplet = inconnu. Pas de produit cartésien calques × points à écrire. Les matrices reconstruites ne servent jamais à alimenter une interpolation ultérieure. Les calques de trajets incomplets conservent le fallback de composition scalaire, avec approximation aux frontières. La couverture à quatre masques ne rajoute aucun rayon. La composition reste ordonnée par profondeur locale reconstruite ; pas d'affirmation d'exactitude pour les intersections complexes. Les données debug ne sont pas insérées dans la géométrie.
+
+`preflight_pass5.mjs` reproduit les tests de la cinquième passe en JavaScript (aucune compilation C++). Le test C++ `v17_escargot_smoke` est enrichi (zéros, couverture, BVH invalide, spirale mince) mais volontairement non exécuté. Le laboratoire demeure CPU, sans shader natif LT, sans raffinement ni cache temporel ; budgets, vitesse et qualité à valider sur scène et matériel réels.

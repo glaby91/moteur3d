@@ -51,7 +51,7 @@ Notes estimatives à poids égaux (visuel, matériaux, éclairage, efficacité, 
 
 ## Recherche Z Escargot — branche expérimentale
 
-[Spécification et laboratoire 001 / Debug 001](docs/research/Z_ESCARGOT_001.md). Empreintes optiques, rayons BVH4, calques par objet, moyenne de quatre voisins (zéros préservés), composition du fond vers le premier plan. Aucun raffinement, aucune caméra secondaire. Laboratoire CPU de référence non compilé ; intégration LT native à valider ensuite. Z Reflect et profil V17.031 inchangés.
+[Spécification et laboratoire 001 / Debug 001](docs/research/Z_ESCARGOT_001.md). Empreintes optiques, rayons BVH4, calques par objet, moyenne de quatre voisins (zéros préservés), composition du fond vers le premier plan. Aucun raffinement, aucune caméra secondaire. Laboratoire CPU de référence non compilé ; cinq passes d'optimisation et simulations analytiques documentées ; intégration LT native à valider ensuite. Z Reflect et profil V17.031 inchangés.
 
 ## Scène de référence et paquet Windows
 

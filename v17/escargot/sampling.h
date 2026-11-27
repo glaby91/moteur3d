@@ -9,10 +9,12 @@ inline std::vector<size_t> spiral(int cols,int rows){
     auto add=[&](int x,int y){if(x>=0&&y>=0&&x<cols&&y<rows)out.push_back(size_t(y)*cols+x);};
     add(cx,cy);
     for(int r=1;out.size()<size_t(cols)*rows;++r){
-        for(int x=-r+1;x<=r;++x)add(cx+x,cy-r);
-        for(int y=-r+1;y<=r;++y)add(cx+r,cy+y);
-        for(int x=r-1;x>=-r;--x)add(cx+x,cy+r);
-        for(int y=r-1;y>=-r;--y)add(cx-r,cy+y);
+        // Clip each side before iteration: a long thin footprint is O(cells+rings),
+        // not O(max(width,height)^2). Exactly the same in-bounds spiral order.
+        if(cy-r>=0)for(int x=std::max(-r+1,-cx);x<=std::min(r,cols-1-cx);++x)add(cx+x,cy-r);
+        if(cx+r<cols)for(int y=std::max(-r+1,-cy);y<=std::min(r,rows-1-cy);++y)add(cx+r,cy+y);
+        if(cy+r<rows)for(int x=std::min(r-1,cols-1-cx);x>=std::max(-r,-cx);--x)add(cx+x,cy+r);
+        if(cx-r>=0)for(int y=std::min(r-1,rows-1-cy);y>=std::max(-r,-cy);--y)add(cx-r,cy+y);
     }return out;
 }
 inline float opacity(const Material& m){return 1.f-transmission(m);}
@@ -29,9 +31,15 @@ inline void sampleSurface(Surface& sf,Traversal& trace,const Scene& scene,const 
     // Reserve room for two BVH queries per sample; extra transparent crossings
     // consume the same hard quota. No additional samples after the fixed pass.
     const uint32_t target=std::max(1u,quota/4); // reserve more than minimum for transparent paths
-    sf.step=std::max(1,int(std::ceil(std::sqrt(double(r.w)*r.h/target))));
-    auto dims=[&]{sf.cols=(r.w+sf.step-1)/sf.step;sf.rows=(r.h+sf.step-1)/sf.step;};
-    dims();while(uint64_t(sf.cols)*sf.rows>target){++sf.step;dims();}
+    // Smallest admissible step at or above the former initial estimate.
+    // Monotonic cell count allows binary search instead of repeated increments.
+    int lower=std::max(1,int(std::ceil(std::sqrt(double(r.w)*r.h/target)))),upper=std::max(r.w,r.h);
+    while(lower<upper){
+        const int mid=lower+(upper-lower)/2;
+        const uint64_t count=uint64_t((r.w+mid-1)/mid)*((r.h+mid-1)/mid);
+        if(count>target)lower=mid+1;else upper=mid;
+    }
+    sf.step=lower;sf.cols=(r.w+sf.step-1)/sf.step;sf.rows=(r.h+sf.step-1)/sf.step;
     sf.samples.resize(size_t(sf.cols)*sf.rows);
     for(int y=0;y<sf.rows;++y)for(int x=0;x<sf.cols;++x){
         auto& s=sf.samples[size_t(y)*sf.cols+x];

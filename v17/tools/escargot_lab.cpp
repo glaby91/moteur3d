@@ -37,21 +37,30 @@ int main(int argc,char** argv){
     QFile report(out.filePath("metrics.json"));if(!report.open(QIODevice::WriteOnly))return 8;
     const QJsonObject data{{"mode",options.mode==e::Mode::Reflection?"reflection":"refraction"},{"rayBudget",int(options.rayBudget)},{"rays",int(result.rays)},
         {"candidates",int(result.candidates)},{"deferred",int(result.deferred)},{"paths",int(result.paths)},{"measured",double(result.measured)},{"reconstructed",double(result.reconstructed)},{"zero",double(result.zero)},
-        {"outputCells",double(result.outputCells)},{"matrixMs",result.matrixMs},{"compositionMs",result.compositionMs},{"secondaryRasterPasses",0}};
+        {"outputCellsReserved",double(result.outputCells)},{"completePaths",int(result.completePaths)},{"unknownPaths",int(result.unknownPaths)},
+        {"completeSearches",double(result.completeSearches)},{"receiverSearches",double(result.receiverSearches)},{"partialTests",double(result.partialTests)},
+        {"layerVisits",double(result.layerVisits)},{"textureSamples",double(result.textureSamples)},{"opaqueSkipped",double(result.opaqueSkipped)},
+        {"coverageCells",double(result.coverageCells)},{"fallbackCells",double(result.fallbackCells)},
+        {"matrixMs",result.matrixMs},{"compositionMs",result.compositionMs},{"secondaryRasterPasses",0}};
     const auto bytes=QJsonDocument(data).toJson();if(report.write(bytes)!=bytes.size())return 8;
     QFile csv(out.filePath("matrices.csv"));if(!csv.open(QIODevice::WriteOnly|QIODevice::Text))return 8;
-    QTextStream rows(&csv);rows<<"receiver,source,crossing,material,x,y,state,complete,u,v,depth,visibility,opacity\n";
+    QTextStream rows(&csv);rows<<"receiver,sample,source,crossing,material,x,y,state,u,v,depth,visibility,opacity\n";
+    QFile samples(out.filePath("samples.csv"));if(!samples.open(QIODevice::WriteOnly|QIODevice::Text))return 8;
+    QTextStream observed(&samples);observed<<"receiver,sample,x,y,receiverState,complete,depth,weight\n";
     for(const auto& s:result.surfaces){
-        if(s.image.empty())continue;
-        if(!save(s.image,s.candidate.bounds.w,s.candidate.bounds.h,QString("receiver-%1.png").arg(s.candidate.object)))return 8;
-        // Persist original known cells, including explicit zeros for each
-        // layer. Unknown paths remain distinguishable, not fabricated misses.
-        for(const auto& kv:s.layers)for(size_t i=0;i<s.samples.size();++i){
-            const auto& p=s.samples[i];auto v=kv.second.measured.find(i);e::Value value;
-            if(v!=kv.second.measured.end())value=v->second;else if(p.complete)value.state=e::State::Zero;
-            rows<<s.candidate.object<<','<<kv.first.object<<','<<kv.first.crossing<<','<<kv.first.material<<','<<p.x<<','<<p.y<<','<<int(value.state)<<','<<int(p.complete)<<','<<value.uv.x<<','<<value.uv.y<<','<<value.depth<<','<<value.visibility<<','<<value.opacity<<'\n';
+        if(!s.image.empty()&&!save(s.image,s.candidate.bounds.w,s.candidate.bounds.h,QString("receiver-%1.png").arg(s.candidate.object)))return 8;
+        // Sparse export: measured positives only. For an absent layer record,
+        // complete sample => explicit zero; incomplete => unknown. Lossless
+        // semantics without writing a full layer x lattice Cartesian product.
+        for(size_t i=0;i<s.samples.size();++i){
+            const auto& p=s.samples[i];
+            observed<<s.candidate.object<<','<<qulonglong(i)<<','<<p.x<<','<<p.y<<','<<int(p.receiver)<<','<<int(p.complete)<<','<<p.receiverDepth<<','<<p.receiverWeight<<'\n';
+            for(const auto& kv:p.values){const auto& v=kv.second;
+                rows<<s.candidate.object<<','<<qulonglong(i)<<','<<kv.first.object<<','<<kv.first.crossing<<','<<kv.first.material<<','<<p.x<<','<<p.y<<','<<int(v.state)<<','<<v.uv.x<<','<<v.uv.y<<','<<v.depth<<','<<v.visibility<<','<<v.opacity<<'\n';
+            }
         }
     }
+    rows.flush();observed.flush();if(rows.status()!=QTextStream::Ok||observed.status()!=QTextStream::Ok)return 8;
     if(debug){std::ofstream obj(std::filesystem::path(out.filePath("escargots.obj").toStdWString()));if(!obj)return 8;e::debug::obj(obj,e::debug::geometry(result,debug));}
     log<<"Escargot queries="<<result.rays<<" / "<<options.rayBudget<<", candidates="<<result.candidates<<", deferred="<<result.deferred<<'\n';return 0;
 }

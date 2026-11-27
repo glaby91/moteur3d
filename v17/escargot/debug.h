@@ -33,7 +33,11 @@ inline std::vector<Line> geometry(const Result& result,uint32_t flags){
             for(auto k:spiral(sf.cols,sf.rows)){const auto& s=sf.samples[k];if(s.receiver!=State::Measured){prev=nullptr;continue;}if(prev)line(prev->position+n*.003f,s.position+n*.003f,id,state);prev=&s;}
         }
         for(const auto& s:sf.samples)if(s.receiver==State::Measured){
-            if(flags&Rays)line(s.position,s.position+s.direction*size*3.f,id,state);
+            if((flags&Rays)&&s.directionValid){
+                float far=0;for(const auto& v:s.values)far=std::max(far,v.second.depth);
+                // Actual observed optical segment, or a short direction marker on a miss.
+                line(s.position,s.position+s.direction*(far>0?far:size*3.f),id,s.complete?State::Measured:State::Unknown);
+            }
             if(flags&MatrixPoints)line(s.position,s.position+s.normal*.02f,id,state);
         }
     }return lines;
