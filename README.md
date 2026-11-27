@@ -126,6 +126,14 @@ Benchmarks : `LANCER_PARCOURS_30S.bat` (DX11/Vulkan/LumaTrace), `LANCER_ZREFLECT
 
 Sources : [validation C](v17/docs/CSP001_ZREFLECT_V17023_VALIDATION.md), [matrice A/B/C/D](v17/docs/CSP001_ZREFLECT_V17022_MATRIX.md), [module adaptatif](v17/docs/LUMATRACE_ADAPTIVE_001.md). La CI principale vérifie les caches de la scène V17.631, les sélections, les quatre configurations et la parité pixel par pixel sur quatre vues WARP, ainsi que les plans de benchmark et les commandes d'exploration. L'ancien workflow exhaustif demeure disponible manuellement ; les tests matériels restent indispensables.
 
+## DirectX 11 — R001 validé sur HD620 (V17.025)
+
+Branche de développement validée, moteur principal master V17.024 inchangé. R001 reste ON par défaut pour DX11 Raster (A/B : `M3D_V17_DX11_R001=0`). AABB conservatif, masques partagés profondeur/couleur, filtrage des lumières hors champ ou sans énergie, suppression des lectures d'ombre à daylight nul, contrôles des limites. LumaTrace et la scène V17.631 ne sont pas modifiés.
+
+Benchmark HD620, 1366×768, MSAA 2x, 4 × 90 images OFF/ON/ON/OFF, trajectoire déterministe, preview matériel avec readback : **14,3576 → 16,7388 FPS (+16,59 %)** ; GPU draw 55,94 → 44,20 ms ; 12 captures PNG identiques par indice. CI Windows et huit tests WARP jour/nuit réussis. [Rapport R001](v17/docs/DX11_R001.md) · [Données comparatives](v17/docs/benchmarks/DX11_R001_COMPARAISON.csv) · [Compilation validée](https://github.com/glaby91/moteur3d/actions/runs/46008251282).
+
+**Pause décidée le 27/11/2026 :** pas de R002 ni d'autre chantier engagé. Conserver Geometry Prep, ordre des triangles, rendu indexé, instancing et Z Prepass ; aucune réorganisation de géométrie sans preuve préalable. Ombres GPU, backface sélectif, Z Light par tuiles, compression et transparences restent des pistes différées. Simulations et 3–5 vérifications avant toute compilation d'une future modification. Ne pas fusionner automatiquement vers master.
+
 ## Architecture modulaire
 
 V16 et V17 assemblent les mêmes modules partagés ; la V17 n’est pas une deuxième copie indépendante du noyau. [`engine/render_modules.json`](engine/render_modules.json) sert de registre commun : identifiant, révision, sources, dépendances et caractère optionnel de chaque module. Une correction ciblée doit incrémenter le module concerné plutôt que modifier un numéro global sans traçabilité.
