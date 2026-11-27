@@ -99,9 +99,10 @@ inline Packet packGpu(const Result& frame,const Scene& scene,size_t objectCount)
                 std::vector<Entry> active;
                 for(const auto& item:layers){
                     const auto& l=*item.first;if(!overlaps(l.bounds,tile))continue;
-                    std::vector<size_t> ids=common;
-                    ids.insert(ids.end(),l.partial.begin(),l.partial.end());
-                    ids=shortlist(sf,ids,tile);
+                    // Complete paths share exactly the same ordered shortlist.
+                    // Only partial paths need a separate spatial search.
+                    std::vector<size_t> ids=coverage?receivers:common;
+                    if(!coverage){ids.insert(ids.end(),l.partial.begin(),l.partial.end());ids=shortlist(sf,ids,tile);}
                     if(std::none_of(ids.begin(),ids.end(),[&](size_t i){return l.measured.count(i)!=0;}))continue;
                     active.push_back({&l,&item.second,std::move(ids)});
                 }
@@ -119,8 +120,11 @@ inline Packet packGpu(const Result& frame,const Scene& scene,size_t objectCount)
                     p.vec(base+2,a.origin,a.u);p.vec(base+3,a.normal,a.v);p.vec(base+4,a.du);p.vec(base+5,a.dv);
                     p.vec(base+6,mat.emissionColor*std::max(0.f,mat.emissionIntensity),mat.imageAlbedo?1.f:0.f);
                     for(auto id:entry.ids){const auto& s=sf.samples[id];auto it=l.measured.find(id);
-                        const bool hit=it!=l.measured.end();p.add(float(s.x),float(s.y),float(id),hit?1.f:0.f);
-                        if(hit){const auto& v=it->second;p.add(v.uv.x,v.uv.y,v.depth,v.opacity);p.vec(p.add(),v.normal,float(v.primitive));}
+                        const bool hit=it!=l.measured.end();
+                        if(!coverage)p.add(float(s.x),float(s.y),float(id),hit?1.f:0.f);
+                        // On complete paths the receiver shortlist already
+                        // supplies positions/IDs. Only 2 float4 per layer cell.
+                        if(hit){const auto& v=it->second;p.add(v.uv.x,v.uv.y,v.depth,v.opacity);p.vec(p.add(),v.normal,float(v.primitive+1u));}
                         else {p.add();p.add();}
                         ++p.observations;
                     }

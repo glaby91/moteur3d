@@ -161,10 +161,10 @@ bool escGpuSample(VSOut i,out float3 reflected,out float coverage,out float weig
     reflected=0;coverage=0;weight=0;
     if(i.receiverId==0u||i.receiverId>uint(escPacket[1].x))return false;
     uint rec=2+2*i.receiverId;float4 rect=escPacket[rec],desc=escPacket[rec+1];
-    int2 pixel=int2(i.p.xy),local=pixel-int2(rect.xy);
-    if(desc.z!=float(i.mat+1u)||any(local<0)||any(local>=int2(rect.zw)))return false;
+    int2 pixel=int2(i.p.xy),localPixel=pixel-int2(rect.xy);
+    if(desc.z!=float(i.mat+1u)||any(localPixel<0)||any(localPixel>=int2(rect.zw)))return false;
     uint tileSize=uint(escPacket[1].y);if(tileSize==0u)return false;
-    uint2 tile=uint2(local)/tileSize;
+    uint2 tile=uint2(localPixel)/tileSize;
     float4 td=escPacket[uint(desc.x)+tile.y*uint(desc.y)+tile.x];
     if(td.y<=0||td.w<=0)return false;
     uint4 ra,rd;uint rn;escNearest(uint(td.x),uint(td.y),pixel,ra,rd,rn);
@@ -190,13 +190,18 @@ bool escGpuSample(VSOut i,out float3 reflected,out float coverage,out float weig
     [loop] for(uint l=0;l<uint(td.w);++l){
         uint base=uint(td.z)+7*l;float4 info=escPacket[base],bounds=escPacket[base+1];
         int2 q=pixel-int2(bounds.xy);if(any(q<0)||any(q>=int2(bounds.zw)))continue;
-        uint4 a,d;uint n;escNearest(uint(info.x),uint(info.y),pixel,a,d,n);if(!n)continue;
-        if(common)lanes=n;
+        uint4 a,d;uint n;
+        if(common){
+            n=rn;d=rd;lanes=rn;
+            a=uint(info.x)+2*((ra-uint(td.x))/3u);
+        }else escNearest(uint(info.x),uint(info.y),pixel,a,d,n);
+        if(!n)continue;
         float4 total=0;float3 normalSum=0;float2 uvSum=0,uvMin=float2(1e20,1e20),uvMax=-uvMin,seed=0;
         uint count=0,uvCount=0,mask=0;float primitive=-1;
         [loop] for(uint j=0;j<n;++j){
-            if(escPacket[a[j]].w<.5)continue;
-            float4 value=escPacket[a[j]+1],nr=escPacket[a[j]+2];
+            uint pos=a[j]+(common?0u:1u);
+            float4 value=escPacket[pos],nr=escPacket[pos+1];
+            if(nr.w<.5)continue; // primitive+1, zero = absent
             if(count==0){seed=value.xy;primitive=nr.w;}
             ++count;mask|=1u<<j;total.zw+=value.zw;normalSum+=nr.xyz;
             if(nr.w==primitive||all(abs(value.xy-seed)<.5)){uvSum+=value.xy;++uvCount;}
@@ -222,7 +227,8 @@ bool escGpuSample(VSOut i,out float3 reflected,out float coverage,out float weig
         }
         if(!common){alpha*=float(count)/n;mask=1u;}
         if(alpha<=0)continue;
-        uint k=used; // packet bounds guarantee used < 64
+        if(used>=64u)return false; // defensive: CPU packet validated
+        uint k=used;
         [loop] while(k>0&&uvDepthAlpha[k-1].z<depth){
             uvDepthAlpha[k]=uvDepthAlpha[k-1];normalMat[k]=normalMat[k-1];masks[k]=masks[k-1];layerRefs[k]=layerRefs[k-1];--k;
         }
