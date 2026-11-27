@@ -5,7 +5,7 @@ CSE WARP V17 réunit l’interface d’exploration, plusieurs backends de rendu,
 
 > La branche principale du moteur est `master`. [État des branches](BRANCH_STATUS.md) · [Validation L01/L02 V17.029](v17/docs/L01_SOLAR_PCF_V17029.md) · [Build V17.031 validée](https://github.com/glaby91/moteur3d/actions/runs/46068889675).
 
-**Accès rapide :** [Démarrage et profil](#v17031--profil-de-démarrage-et-philosophie-warp) · [Créer une scène](#construire-une-scène-v16v17--guide-du-créateur) · [Backends](#backends-disponibles) · [Compiler](#compiler) · [Benchmarks](#benchmarks-en-ligne-de-commande) · [Audit historique](#audit-historique-et-registre-des-optimisations--26-novembre-2026)
+**Accès rapide :** [Démarrage et profil](#v17031--profil-de-démarrage-et-philosophie-warp) · [Créer une scène](#construire-une-scène-v16v17--guide-du-créateur) · [Backends](#backends-disponibles) · [Compiler](#compiler) · [Linux/Vulkan](#linux-natif--vulkan-x86_64) · [Benchmarks](#benchmarks-en-ligne-de-commande) · [Audit historique](#audit-historique-et-registre-des-optimisations--26-novembre-2026)
 
 ## V17.031 — profil de démarrage et philosophie WARP
 
@@ -61,6 +61,26 @@ Extraire le ZIP dans son dossier de build nommé, puis lancer `LANCER_CSE_WARP.b
 - [Validation matérielle HD620 — V17.022/023](v17/docs/CSP001_ZREFLECT_V17023_VALIDATION.md).
 
 Pour retrouver une ancienne compilation, consulter [V17.006, build 683 avec scène V17.623](https://github.com/glaby91/moteur3d/actions/runs/45493998985) ou [V17.003, build 587](https://github.com/glaby91/moteur3d/actions/runs/45080722276).
+
+## Linux natif — Vulkan x86_64
+
+**V17.031 — build Linux 3 validé sur `master` (27 novembre 2026).**
+
+- [Validation GitHub Actions — build 3](https://github.com/glaby91/moteur3d/actions/runs/46078586593) : compilation Release native, shaders SPIR-V, tests Vulkan avec Mesa Lavapipe, contrôle des dépendances et packaging réussis.
+- [Télécharger CSE WARP V17.031 Linux/Vulkan x86_64](https://github.com/glaby91/moteur3d/actions/runs/46078586593/artifacts/15235384989) (artefact GitHub Actions, connexion GitHub requise ; durée de rétention limitée).
+- [Dernières compilations Linux](https://github.com/glaby91/moteur3d/actions/workflows/build-linux-vulkan.yml) · [Documentation Linux/Vulkan](v17/docs/LINUX_VULKAN.md).
+
+Ubuntu 24.04 x86_64, Qt 6.8.3, Vulkan 1.3.204 minimum, GCC/CMake/Ninja. Même branche moteur que Windows, sans Wine ni DirectX. Vulkan est sélectionné par défaut ; les backends CPU restent disponibles. Le package contient les binaires, les shaders et les bibliothèques Qt, mais pas la scène. La scène officielle reste distribuée séparément via [moteur3d-scene](https://github.com/glaby91/moteur3d-scene/releases/latest).
+
+Après avoir extrait l'artefact GitHub (ZIP), extraire le fichier `.tar.gz`, puis :
+
+```bash
+sudo apt install libvulkan1 mesa-vulkan-drivers libgl1 libegl1 libxkbcommon-x11-0 libxcb-cursor0 libpulse0
+cd CSE-WARP-V17.031-Linux-Vulkan-GitHub-3-x86_64
+./lancer.sh
+```
+
+Sur NVIDIA, utiliser le pilote Vulkan adapté au GPU. Le rendu Vulkan est natif, mais la présentation Linux actuelle passe par QImage avec relecture GPU/CPU ; la swapchain X11/Wayland sans relecture reste à porter. DirectX 11 et LumaTrace GPU/Z Reflect ne sont pas disponibles sous Linux dans cette révision. La CI Lavapipe valide le fonctionnement logiciel Vulkan, pas les performances ni le rendu sur GPU physique ; validation matérielle et audio Linux encore à réaliser.
 
 ## Construire une scène V16/V17 — guide du créateur
 
