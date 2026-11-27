@@ -34,6 +34,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <memory>
 #include <numeric>
 #include <stdexcept>
@@ -86,6 +87,10 @@ std::filesystem::path shaderFile(const char* name){
         roots.push_back(p/"vulkan");
         roots.push_back(p);
     }
+#elif defined(__linux__)
+    std::error_code ec;
+    const auto exe=std::filesystem::read_symlink("/proc/self/exe",ec);
+    if(!ec){roots.push_back(exe.parent_path()/"vulkan");roots.push_back(exe.parent_path());}
 #endif
     roots.push_back(std::filesystem::current_path()/"vulkan");
     roots.push_back(std::filesystem::current_path());
@@ -942,7 +947,9 @@ class VulkanRaster final {
         int best=-1;
         for(auto pd:devices){
             VkPhysicalDeviceProperties props{};vkGetPhysicalDeviceProperties(pd,&props);
-            if(props.deviceType==VK_PHYSICAL_DEVICE_TYPE_CPU)continue;
+            // Software ICD is only permitted by explicit opt-in for Linux CI.
+            const char* software=std::getenv("CSE_WARP_VK_ALLOW_SOFTWARE_TEST");
+            if(props.deviceType==VK_PHYSICAL_DEVICE_TYPE_CPU&&!(software&&std::strcmp(software,"1")==0))continue;
             std::clog<<"[CSE WARP Vulkan] Candidate GPU "<<props.deviceName<<" API="
                      <<VK_VERSION_MAJOR(props.apiVersion)<<"."
                      <<VK_VERSION_MINOR(props.apiVersion)<<"."
@@ -2183,12 +2190,17 @@ public:
 namespace {
 bool vulkanRuntimeAvailable(std::wstring& error){
     // Keep the successful loader reference alive through renderer teardown.
+#ifdef _WIN32
     static const HMODULE loader=LoadLibraryW(L"vulkan-1.dll");
     if(!loader){
         error=L"Vulkan runtime vulkan-1.dll unavailable. "
               L"Install a Vulkan 1.3-capable display driver or select DirectX 11.";
         return false;
     }
+#else
+    // libvulkan.so.1 is an explicit ELF dependency on Linux.
+    (void)error;
+#endif
     return true;
 }
 }

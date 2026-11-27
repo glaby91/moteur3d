@@ -37,9 +37,11 @@ if(WIN32)
     # from the DX11 raster frame path that consumes its radiance buffer.
     target_sources(moteur3d_v16_core PRIVATE "${M3D_LUMATRACE_GPU_SOURCE}")
     target_link_libraries(moteur3d_v16_core PUBLIC d3d11 d3d12 dxgi d3dcompiler)
-    # Experimental V17 Vulkan renderer lives in the shared engine DLL.
+endif()
+if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Vulkan renderer lives in the shared engine library on Windows and Linux.
     # An optional backend must not break the stock DX11-only V17 build.
-    option(M3D_REQUIRE_VULKAN "Require Vulkan SDK 1.3.204+ for native raster Windows CI" OFF)
+    option(M3D_REQUIRE_VULKAN "Require Vulkan SDK 1.3.204+ for native raster" OFF)
     find_package(Vulkan 1.3.204 QUIET)
     if(M3D_REQUIRE_VULKAN AND NOT Vulkan_FOUND)
         message(FATAL_ERROR "Vulkan SDK 1.3.204+ is mandatory for this build")

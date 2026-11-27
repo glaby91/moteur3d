@@ -1358,8 +1358,15 @@ private:
     void toggleExploration(){
         if(exploring_){stopExploration();return;}
         if(!runtime_||runtime_->cameras.isEmpty())return;
-        if(!supportsExplorationBackend(backendBox_->currentIndex()))
+        if(!supportsExplorationBackend(backendBox_->currentIndex())){
+#ifdef _WIN32
             backendBox_->setCurrentIndex(4);
+#elif M3D_V17_VULKAN_ENABLED
+            backendBox_->setCurrentIndex(5);
+#else
+            return;
+#endif
+        }
         if(!freeCameraActive_)activateFreeCamera();
         // An Intel HD 620 cannot reasonably sustain 8x MSAA during continuous
         // navigation of the large V8 scene. Temporarily lower AA to 2x ONLY
@@ -2663,7 +2670,6 @@ private:
 #ifndef _WIN32
         backendBox_->setItemData(1,0,Qt::UserRole-1);
         backendBox_->setItemData(4,0,Qt::UserRole-1);
-        backendBox_->setItemData(5,0,Qt::UserRole-1);
         backendBox_->setItemData(6,0,Qt::UserRole-1);
 #endif
 #if !M3D_V17_VULKAN_ENABLED
@@ -2674,6 +2680,8 @@ private:
         // Default Windows user path: native D3D11 raster with DXGI presentation.
         // Vulkan and all CPU/compute options remain selectable.
         backendBox_->setCurrentIndex(4);
+#elif M3D_V17_VULKAN_ENABLED
+        backendBox_->setCurrentIndex(5);
 #endif
         // Keep the backend choice visible at 1366px: renderer names
         // previously consumed the entire top toolbar and hid the renderer.
@@ -3509,7 +3517,15 @@ private:
             dayNightCycleBox_->setChecked(true); // exercise solar/shadow updates
         }else
 #endif
-        if(isStressScene)backendBox_->setCurrentIndex(4);
+        if(isStressScene){
+#ifdef _WIN32
+            backendBox_->setCurrentIndex(4);
+#elif M3D_V17_VULKAN_ENABLED
+            backendBox_->setCurrentIndex(5);
+#else
+            backendBox_->setCurrentIndex(0);
+#endif
+        }
         sceneLoading_=false;
         selectBackendOutputWindow();
         canvas_->setPlaceholder(extremeStress

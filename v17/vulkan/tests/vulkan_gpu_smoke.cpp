@@ -2,6 +2,7 @@
 #include "m3d_engine.h"
 #include <QImage>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 int main(int argc,char**argv){
