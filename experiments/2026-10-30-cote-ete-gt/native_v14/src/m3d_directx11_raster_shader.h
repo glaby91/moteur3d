@@ -209,16 +209,36 @@ float4 PSMain(VSOut i):SV_TARGET {
     float shadowFactor = 1.0;
     float shadowScale = shadowSize / (2.0 * shadowSpan);
     float shadowCenter = shadowSize * 0.5 - 0.5;
-    int2 shadowPixel = int2(round(float2(dot(shadowOffset, shadowRight), dot(shadowOffset, shadowUp)) * shadowScale + shadowCenter));
+    float2 shadowCoord = float2(dot(shadowOffset, shadowRight), dot(shadowOffset, shadowUp)) * shadowScale + shadowCenter;
+    int2 shadowPixel = int2(floor(shadowCoord + 0.5));
     float shadowDistance = shadowDist - dot(shadowOffset, lightDir);
+    // L01: compare every PCF tap at its own receiver-plane depth.
+    // Geometry derivatives exclude the material normal map and water waves.
+    float3 receiverN = cross(ddx(i.world), ddy(i.world));
+    float receiverDot = dot(receiverN, lightDir);
+    float2 receiverSlope = float2(0.0, 0.0);
+    float receiverBias = 0.095;
+    // Preserve the legacy bias at grazing/degenerate triangles.
+    if (abs(receiverDot) > 0.05 * length(receiverN)) {
+        receiverSlope = float2(dot(receiverN, shadowRight), dot(receiverN, shadowUp))
+                      / (receiverDot * shadowScale);
+        receiverBias = 0.005 + 0.000002 * abs(shadowDistance);
+    }
     if (shadowPixel.x >= 2 && shadowPixel.y >= 2 && shadowPixel.x < int(shadowSize) - 2 && shadowPixel.y < int(shadowSize) - 2) {
         float visible = 0.0;
+        float weightSum = 0.0;
         [unroll] for (int sy = -1; sy <= 1; ++sy) [unroll] for (int sx = -1; sx <= 1; ++sx) { )";
 inline constexpr char kShaderPart2[] = R"(
-            float storedDepth = shadowDepth.Load(int3(shadowPixel + int2(sx, sy), 0));
-            visible += shadowDistance <= storedDepth + 0.095 ? 1.0 : 0.0;
+            int2 tap = shadowPixel + int2(sx, sy);
+            float2 delta = float2(tap) - shadowCoord;
+            float2 tent = max(float2(0.0, 0.0), 1.5 - abs(delta));
+            float weight = tent.x * tent.y;
+            float storedDepth = shadowDepth.Load(int3(tap, 0));
+            float receiverDepth = shadowDistance + dot(receiverSlope, delta);
+            visible += weight * (receiverDepth <= storedDepth + receiverBias ? 1.0 : 0.0);
+            weightSum += weight;
         }
-        shadowFactor = 0.16 + 0.84 * visible / 9.0;
+        shadowFactor = 0.16 + 0.84 * visible / max(weightSum, 0.0001);
     }
     float4 diffuseTerms = materialDiffuse[i.mat];
     // Cheap hemispherical sky fill: upward surfaces receive slightly more

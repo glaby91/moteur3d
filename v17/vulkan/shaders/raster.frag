@@ -22,19 +22,35 @@ layout(set=0,binding=5) uniform sampler2DArray preservedNormalRough;
 layout(set=0,binding=6) uniform sampler3D giCurrent;
 layout(set=0,binding=7) uniform sampler3D giNext;
 const float pi=3.14159265;
-float visibility(vec3 p) {
+float visibility(vec3 p, vec3 receiverN) {
  if(f.shadowUp.w<2.0) return 1.0;
  vec3 d=p-f.shadowBase.xyz;
- vec2 sc=vec2(dot(d,f.shadowRight.xyz),dot(d,f.shadowUp.xyz))
-       *(f.shadowUp.w/(2.0*max(0.1,f.shadowBase.w)))+vec2(f.shadowUp.w*0.5-0.5);
- vec2 stepUV=vec2(1.0/f.shadowUp.w);
- vec2 at=(sc+0.5)*stepUV;
- if(any(lessThan(at,stepUV*2.0)) || any(greaterThan(at,vec2(1.0)-stepUV*2.0)))return 1.0;
- float dscene=f.shadowRight.w-dot(d,normalize(f.sun.xyz));
- float factor=0.0;
- for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++)
-   factor+= dscene <= texture(shadowMap,at+vec2(x,y)*stepUV).r+0.095?1.0:0.0;
- return 0.16+0.84*factor/9.0;
+ vec3 L=normalize(f.sun.xyz);
+ float scale=f.shadowUp.w/(2.0*max(0.1,f.shadowBase.w));
+ vec2 sc=vec2(dot(d,f.shadowRight.xyz),dot(d,f.shadowUp.xyz))*scale+vec2(f.shadowUp.w*0.5-0.5);
+ ivec2 center=ivec2(floor(sc+0.5));
+ if(any(lessThan(center,ivec2(2))) || any(greaterThanEqual(center,ivec2(int(f.shadowUp.w)-2))))return 1.0;
+ float dscene=f.shadowRight.w-dot(d,L);
+ // L01: same receiver-plane PCF as the DX11/LumaTrace raster shader.
+ float receiverDot=dot(receiverN,L);
+ vec2 slope=vec2(0.0);
+ float bias=0.095;
+ if(abs(receiverDot)>0.05*length(receiverN)){
+   slope=vec2(dot(receiverN,f.shadowRight.xyz),dot(receiverN,f.shadowUp.xyz))/(receiverDot*scale);
+   bias=0.005+0.000002*abs(dscene);
+ }
+ float factor=0.0, weightSum=0.0;
+ for(int y=-1;y<=1;y++) for(int x=-1;x<=1;x++){
+   ivec2 tap=center+ivec2(x,y);
+   vec2 delta=vec2(tap)-sc;
+   vec2 tent=max(vec2(0.0),vec2(1.5)-abs(delta));
+   float weight=tent.x*tent.y;
+   float stored=texelFetch(shadowMap,tap,0).r;
+   float receiverDepth=dscene+dot(slope,delta);
+   factor+=weight*(receiverDepth<=stored+bias?1.0:0.0);
+   weightSum+=weight;
+ }
+ return 0.16+0.84*factor/max(weightSum,0.0001);
 }
 void main() {
  int m=int(material);
@@ -74,13 +90,15 @@ void main() {
  }
  vec3 L=normalize(f.sun.xyz);
  float ndotl=max(dot(n,L),0.0);
+ // Derivatives must run before the optional divergent visibility branch.
+ vec3 receiverN=cross(dFdx(world),dFdy(world));
  // Preserve original shading when the experimental fast profile is disabled.
 #ifdef CSE_WARP_VK_FAST_FRAGMENT
  // A back-facing surface has zero direct sun and zero solar specular;
  // its 9-tap shadow filter cannot change the output.
- float shade=ndotl>0.0?visibility(world):1.0;
+ float shade=ndotl>0.0?visibility(world,receiverN):1.0;
 #else
- float shade=visibility(world);
+ float shade=visibility(world,receiverN);
 #endif
  float hemi=mix(0.75,1.1,clamp(n.y*0.5+0.5,0.0,1.0));
  vec3 color=base*((0.28+0.34*f.sun.w)*hemi+(0.56*ndotl)*shade);
