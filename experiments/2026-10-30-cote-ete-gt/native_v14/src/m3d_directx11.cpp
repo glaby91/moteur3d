@@ -640,14 +640,15 @@ public:
         const char* disableZPrepass=std::getenv("M3D_V17_DISABLE_Z_PREPASS");
         const bool secondary=cb.zPlaneIds[3]>.5f;
         const char* disableReflectOpt=std::getenv("M3D_V17_DISABLE_ZREFLECT_DEPTH_OPT");
-        const bool legacyOpt=!(disableReflectOpt&&std::strcmp(disableReflectOpt,"1")==0);
-        // Explicit independent settings override the legacy combined switch.
-        auto reflectOption=[&](const char* key){
+        const bool legacyDisabled=disableReflectOpt&&std::strcmp(disableReflectOpt,"1")==0;
+        // V17.023: measured configuration C. Explicit independent overrides
+        // retain all four benchmark modes; legacy disable=1 still disables both.
+        auto reflectOption=[&](const char* key,bool defaultEnabled){
             const char* v=std::getenv(key);
-            return v&&std::strcmp(v,"0")==0?false:v&&std::strcmp(v,"1")==0?true:legacyOpt;
+            return v&&std::strcmp(v,"0")==0?false:v&&std::strcmp(v,"1")==0?true:(!legacyDisabled&&defaultEnabled);
         };
-        const bool reflectionCull=secondary&&reflectOption("M3D_V17_ZREFLECT_CPU_CULL");
-        const bool reflectionDepth=secondary&&reflectOption("M3D_V17_ZREFLECT_PREPASS");
+        const bool reflectionCull=secondary&&reflectOption("M3D_V17_ZREFLECT_CPU_CULL",true);
+        const bool reflectionDepth=secondary&&reflectOption("M3D_V17_ZREFLECT_PREPASS",false);
         uint64_t reflectColorTriangles=0,reflectDepthTriangles=0;
         // Conservative support point of the AABB against the mirror clip plane.
         // A margin accommodates float interpolation; intersecting chunks survive.

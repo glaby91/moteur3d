@@ -82,7 +82,19 @@ int main(int argc,char** argv){
                    b.colorTriangles>a.colorTriangles){qCritical()<<"Reflection matrix counters failed"<<name<<i;return 22;}
             }
         }
-        qInfo()<<"Reflection pixel parity OK"<<name;
+        // Unset explicit options: the production default must be C, not B.
+        if(_putenv_s("M3D_V17_ZREFLECT_CPU_CULL","")||
+           _putenv_s("M3D_V17_ZREFLECT_PREPASS","")||
+           _putenv_s("M3D_V17_DISABLE_ZREFLECT_DEPTH_OPT",""))return 23;
+        if(!m3d::renderLumaTracePreview(r.renderScene,r.lumaTraceBvh4,shadow,view,w,h,opt,y,err)||
+           ref!=opt||x.zReflectActive!=y.zReflectActive)return 24;
+        for(uint32_t i=0;i<y.zReflectActive&&i<2;++i){
+            const auto& p=y.zReflectPasses[i];
+            if(!p.cpuCull||p.depthPrepass||p.depthTriangles!=0){
+                qCritical()<<"Reflection default C failed"<<name<<i;return 25;
+            }
+        }
+        qInfo()<<"Reflection pixel parity and default C OK"<<name;
     }
     qInfo()<<"Unified water pass active/total"<<waterStats.zReflectActive<<waterStats.zReflectTotal;
     return 0;

@@ -133,7 +133,7 @@ jobs:
           if (!(Get-Command Invoke-Route30).Parameters.ContainsKey('ZReflectMatrix')) { throw "Missing Reflect matrix benchmark dispatch" }
           $dist = "dist-zreflect"
           New-Item -ItemType Directory -Force $dist | Out-Null
-          @{ productVersion = "17.022"; githubActionsRun = "$env:GITHUB_RUN_ID"; githubRunNumber = "$env:GITHUB_RUN_NUMBER"; sourceCommit = "$env:GITHUB_SHA"; branch = "$env:GITHUB_REF_NAME" } | ConvertTo-Json | Set-Content "$dist/BUILD_INFO.json" -Encoding UTF8
+          @{ productVersion = "17.023"; githubActionsRun = "$env:GITHUB_RUN_ID"; githubRunNumber = "$env:GITHUB_RUN_NUMBER"; sourceCommit = "$env:GITHUB_SHA"; branch = "$env:GITHUB_REF_NAME" } | ConvertTo-Json | Set-Content "$dist/BUILD_INFO.json" -Encoding UTF8
           $names = @("moteur3d_v17.exe","moteur3d_v16_core.dll","cse_scene_precompiler.exe","route30.exe","moteur3d_v17_benchmark.exe","moteur3d_v17_campaign.exe","moteur3d_v17_benchui.exe","v17_zreflect_index_smoke.exe")
           foreach ($name in $names) {
             $f = Get-ChildItem build-zreflect -Recurse -File -Filter $name | Select-Object -First 1
@@ -168,6 +168,7 @@ jobs:
           exit /b %RC%
           '@ | Set-Content "$dist/LANCER_ZREFLECT_MATRIX.bat" -Encoding ascii
           Copy-Item "v17/docs/CSP001_ZREFLECT_AUTHOR_POLICY.md" $dist
+          Copy-Item "v17/docs/CSP001_ZREFLECT_V17023_VALIDATION.md" $dist
           Copy-Item "zreflect-report/summary.json" "$dist/zreflect-summary.json"
           Copy-Item "zreflect-report/zreflect-*.png" $dist
           windeployqt --release --no-translations "$dist/moteur3d_v17.exe"
@@ -222,12 +223,12 @@ jobs:
       - name: Wrap files in named build directory
         shell: pwsh
         run: |
-          $name = "CSE-WARP-V17.022-ZReflect-GitHub-${{ github.run_number }}-Windows-x64"
+          $name = "CSE-WARP-V17.023-ZReflect-GitHub-${{ github.run_number }}-Windows-x64"
           New-Item -ItemType Directory -Force build-package | Out-Null
           Move-Item dist-zreflect (Join-Path build-package $name)
       - name: Upload experimental Windows build (engine only)
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.022-ZReflect-GitHub-${{ github.run_number }}-Windows-x64
+          name: CSE-WARP-V17.023-ZReflect-GitHub-${{ github.run_number }}-Windows-x64
           path: build-package/
           if-no-files-found: error
