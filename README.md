@@ -5,7 +5,7 @@ CSE WARP V17 réunit l’interface d’exploration, plusieurs backends de rendu,
 
 > La branche principale du moteur est `master`. [État des branches](BRANCH_STATUS.md) · [Validation L01/L02 V17.029](v17/docs/L01_SOLAR_PCF_V17029.md) · [Build utilisateur validée](https://github.com/glaby91/moteur3d/actions/runs/46056898833).
 
-[Audit historique et registre des optimisations (HTML → V17)](#audit-historique-et-registre-des-optimisations--26-novembre-2026)
+**Accès rapide :** [Démarrage et profil](#v17031--profil-de-démarrage-et-philosophie-warp) · [Créer une scène](#construire-une-scène-v16v17--guide-du-créateur) · [Backends](#backends-disponibles) · [Compiler](#compiler) · [Benchmarks](#benchmarks-en-ligne-de-commande) · [Audit historique](#audit-historique-et-registre-des-optimisations--26-novembre-2026)
 
 ## V17.031 — profil de démarrage et philosophie WARP
 
@@ -37,39 +37,354 @@ CSE WARP V17 réunit l’interface d’exploration, plusieurs backends de rendu,
 
 **[Compilations Windows x64 de master](https://github.com/glaby91/moteur3d/actions/workflows/build-main-v17.yml)**
 
-Extraire le ZIP dans son dossier de build nommé, puis lancer `LANCER_CSE_WARP.bat`. Le paquet contient le moteur et les outils, **pas la scène**, qui conserve son propre dépôt et son versioning. Au démarrage, le moteur vérifie la publication officielle avant de charger la scène locale ; en cas d'indisponibilité réseau, la scène locale reste utilisable. En l'absence de scène locale, accepter son téléchargement. Les vérifications suivantes sont asynchrones et proposent une mise à jour sans redémarrage forcé. Ctrl maintenu : accroupissement ; Espace : saut ; Tab ou < brièvement : Pip-Boy ; F2 : HUD.
+Extraire le ZIP dans son dossier de build nommé, puis lancer `LANCER_CSE_WARP.bat`. Le paquet officiel contient le moteur, les outils et le catalogue Z Material, **pas la scène**, qui conserve son propre dépôt et son versioning. Au démarrage, le moteur vérifie la publication officielle avant de charger la scène locale ; en cas d'indisponibilité réseau, la scène locale reste utilisable. En l'absence de scène locale, accepter son téléchargement. Les vérifications suivantes sont asynchrones et proposent une mise à jour sans redémarrage forcé. Ctrl maintenu : accroupissement ; Espace : saut ; Tab ou < brièvement : Pip-Boy ; F2 : HUD.
 
-- [Scène principale V17.631](https://github.com/glaby91/moteur3d-scene/releases/tag/scene-reflect-V17.631) : géométrie V17.629, politique optique et caches BVH4/index schema 2 précalculés.
+- [Scène V17.634 — référence du cadrage piscine](https://github.com/glaby91/moteur3d-scene/releases/tag/scene-reflect-V17.634).
+- [Scène CI Z Reflect V17.631](https://github.com/glaby91/moteur3d-scene/releases/tag/scene-reflect-V17.631) : géométrie V17.629, politique optique et caches BVH4/index schema 2 précalculés.
 - [Dernière scène officielle](https://github.com/glaby91/moteur3d-scene/releases/latest)
 - [Validation matérielle HD620 — V17.022/023](v17/docs/CSP001_ZREFLECT_V17023_VALIDATION.md).
 
 Pour retrouver une ancienne compilation, consulter [V17.006, build 683 avec scène V17.623](https://github.com/glaby91/moteur3d/actions/runs/45493998985) ou [V17.003, build 587](https://github.com/glaby91/moteur3d/actions/runs/45080722276).
 
-## Format de description des scènes
+## Construire une scène V16/V17 — guide du créateur
 
-`scene.json` relie les ressources d’une scène par secteurs :
+Une scène est une base de données de ressources indépendantes, pas une succession d'images précalculées. Le même fichier est interprété par les backends CPU, Compute, DX11, Vulkan et LumaTrace. **Ne pas modifier le moteur pour ajouter un bâtiment, une texture, un objet ou un cadrage.** La scène peut être versionnée et publiée indépendamment de l'application.
 
-- **Géométrie** : sommets/triangles ou formes de base réutilisables.
-- **Instances** : géométrie, matériau, position, taille et rotation d’un objet.
-- **Matériaux et textures** : couleur, texture PBR, rugosité, aspect métallique et transparence.
-- **Éclairage** : sources visibles et lumières locales sont définies séparément, avec position, couleur, intensité, portée et groupe.
-- **Caméras** : vues prédéfinies, position, cible et champ de vision.
+### 1. Organisation et coordonnées
 
-Exemple schématique d’une instance d’arbre :
+```text
+ma-scene/
+  scene.json                 # manifeste unique
+  geometry/meshes.json       # modèles réutilisables
+  instances/objects.json     # objets placés dans le monde
+  materials/surfaces.json    # propriétés PBR et références
+  pbr/textures.json          # recettes et résolution des textures
+  lighting/day.json          # heure initiale et sources locales
+  cameras/views.json         # cadrages de départ
+  environment/site.json      # métadonnées facultatives
+  textures/                  # images externes facultatives
+  precomputed/               # caches générés, pas des sources d'édition
+```
+
+Toutes les références de fichiers sont relatives à la racine de la scène ; chemins absolus, fichiers manquants et sorties de racine (y compris liens symboliques) sont refusés. Le manifeste doit contenir `format: "m3d-scene-v16"` et un tableau `sectors`, avec des identifiants de secteur uniques. Chaque secteur référence des tableaux de chemins pour les catégories `geometry`, `instances`, `materials`, `pbr`, `lighting`, `cameras`, `environment`. Les secteurs servent à organiser les ressources : **ne pas supposer un streaming automatique par pièce ou une hiérarchie de transformations**. Le chargeur runtime agrège les ressources de tous les secteurs.
+
+- Unités : mètres ; Y vertical, X/Z horizontaux. Une caméra à hauteur d'homme se place environ 1,70 m au-dessus du sol fini.
+- Les instances de boîtes et sphères sont centrées sur leur position. Une dalle épaisse de 0,20 m dont le dessus est à Y=0 est centrée à Y=-0,10.
+- Les maillages importés utilisent leur origine locale comme pivot. `size` multiplie leurs coordonnées locales, alors que pour une boîte/sphère il représente les dimensions. Avec des sommets déjà exprimés en mètres, utiliser `size: [1,1,1]` pour conserver l'échelle.
+- `rotationY` est exprimé en degrés et appliqué autour de Y aux boîtes et aux maillages importés ; ne pas supposer des rotations X/Z ni une rotation effective des sphères et feuillages. `parent` est un regroupement logique, pas une transformation héritée.
+
+### 2. Définir la géométrie et placer les objets
+
+Le chargeur runtime lit `geometry.meshes[]` et `instances.instances[]`. Définir un modèle une fois, puis l'instancier autant que nécessaire. Les identifiants de modèles et de textures doivent être uniques à l'échelle de la scène (le chargeur peut écraser un doublon de modèle/texture) ; les doublons d'identifiants d'objets ou de matériaux sont rejetés. Un objet possède un identifiant, une référence de géométrie, un matériau, une position et une taille strictement positive.
+
+| Type de géométrie | Usage et limite actuelle |
+|---|---|
+| `box` | Murs, sols, poutres, vitrages plans ; 12 triangles par boîte, possibilités d'instancing côté GPU. |
+| `uv_sphere` | Objets ellipsoïdaux, végétation simple ; tessellation interne fixe (ne pas considérer les champs segments/rings comme pilotables dans le runtime actuel). |
+| `foliage_canopy` | Couronne végétale procédurale, géométrie déterministe. |
+| `triangle_mesh` | Maillage triangulé : sommets XYZ, faces à trois indices (base zéro), UV facultatives par sommet. Maximum 200 000 sommets et 80 000 faces par maillage importé dans le chargeur actuel. |
+
+Exemple de maillage local, à ajouter au tableau `meshes` :
 
 ```json
-{
-  "id": "arbre_01",
-  "parent": "Place/Arbres",
-  "geometry": "mesh_arbre_feuillu",
-  "material": "materiau_arbre",
-  "position": [12.0, 0.0, 35.0],
-  "size": [1.0, 1.0, 1.0],
-  "rotationY": 25
+{"id":"panneau","type":"triangle_mesh",
+ "vertices":[[-1,0,0],[1,0,0],[1,2,0],[-1,2,0]],
+ "faces":[[0,1,2],[0,2,3]],
+ "uv":[[0,0],[1,0],[1,1],[0,1]]}
+```
+
+**Pour un asset GLB/GLTF/OBJ externe**, convertir hors ligne en géométrie triangulée et UV compatibles, séparer les primitives par matériau, conserver l'échelle et le pivot, vérifier orientation des faces et coutures UV. Le runtime de scène ne charge pas directement un chemin GLB dans une instance. Le bridge actuel reconstruit une normale de face pour les triangles importés : les normales de sommet personnalisées du GLB ne sont pas encore conservées par ce format. C'est une limite réelle pour les surfaces courbes (L03-B), pas une raison de densifier tous les objets. Un champ `normals` ajouté au JSON ne résout pas cette limite sans évolution du chargeur.
+
+Construire d'abord la structure, puis les ouvertures et les volumes secondaires, ensuite les détails, les meubles et la végétation. Ne pas poser deux surfaces coplanaires l'une sur l'autre (risque de Z-fighting) ; éviter les triangles dégénérés, les faces internes inutiles et les petits détails géométriques pouvant être représentés par une texture normale. Garder les vrais reliefs de silhouette, les ouvertures et les surfaces de collision. Vérifier les pièces traversables en exploration.
+
+### 3. Matériaux, Z Material et textures
+
+Chaque instance référence un matériau par son identifiant de scène. Les propriétés PBR sont indépendantes du maillage :
+
+| Champ matériau | Interprétation |
+|---|---|
+| `id` | Identifiant unique de scène ; peut être partagé par plusieurs objets. |
+| `baseColor` | RGB normalisé 0–1, utilisé comme couleur albédo encodée sRGB pour la génération de texture. |
+| `roughness` | Rugosité nominale 0–1 ; basse = reflet plus concentré. |
+| `roughnessScale` | Multiplicateur de rugosité (défaut 1 ; borné à 0,01–2 par le bridge). |
+| `metallic` | 0–1 ; 0 diélectrique, 1 métallique. |
+| `transmission` | 0–1 ; 0 opaque. Ce n'est pas un moteur de réfraction exact. |
+| `ior` | Indice de réfraction (défaut 1,5 ; eau typiquement 1,333). |
+| `textureSet` | Identifiant obligatoire d'un jeu de textures présent dans `pbr.sets[]`. |
+| `libraryMaterial` | Référence facultative Z Material, ex. `inox_01_01` ; complète seulement les champs absents. |
+| `surfaceModel` | `"standard"` ou `"water"` ; classification explicite, préférable à une reconnaissance par nom. |
+| `emission` | Objet `{"color":[1,0.9,0.7],"intensity":2}` : RGB 0–1 et intensité 0–100 ; surface lumineuse. |
+| `planarReflection` | Autorisation optique `"auto"`, `"enabled"`, `"disabled"`. |
+| `textureDetail` | Politique de conservation de détail, par exemple `{"mode":"preserve","minResolution":1024}`. |
+
+**Z Material 001** : 64 familles × 8 couleurs × 16 rugosités = 8 192 références synthétiques, dans un seul [catalogue moteur](v17/materials/zmaterial8192.json). Format d'identifiant `famille_CC_RR` (CC 01–08 ; RR 01–16). Le catalogue est ouvert et parsé seulement si un matériau actif le référence ; les couleurs de bibliothèque linéaires sont converties en sRGB et les propriétés explicites du créateur sont prioritaires. Le jeu de textures reste propre à la scène. Aucun fichier Z Material n'est ajouté à chaque scène.
+
+Le CPU filtre les matériaux déclarés d'après les références des instances, préserve l'ordre des déclarations actives et génère les textures uniquement pour ces matériaux. **Maximum 256 identifiants de matériau actifs** (1–256 dans une scène rendue), même si plusieurs identifiants renvoient au même preset ; il n'y a pas de dédoublonnage automatique par égalité des propriétés. Une scène à 257 matériaux actifs est refusée. La table de constantes GPU existante contient les coefficients de shading ; leur préparation a encore lieu lors du remplissage des constantes par image, pas dans un cache permanent par matériau. Ne pas confondre le nombre de presets et les ressources GPU.
+
+Les jeux PBR choisissent `pattern` (par exemple `concrete`, `metal`, `wood`, `brick`, `glass`, `water`, `porcelain`, `smooth_plaster`, `fabric`, `foliage`, `lawn`) et `resolution` : puissance de deux de 64 à 2048, adaptée au détail nécessaire. Le bridge génère albédo, normales et rugosité, puis leur pyramide de mipmaps et peut réutiliser un cache PBR sur disque. Le champ historique `recipe` ne remplace pas `pattern` dans ce chemin. `imageFile` peut remplacer l'albédo par une image de la scène ; il ne constitue pas un import arbitraire de toutes les cartes PBR. Pour une fresque/enseigne, préserver le domaine UV et utiliser `textureDetail.mode: "preserve"` seulement si nécessaire ; `minResolution` doit être une puissance de deux et ne pas dépasser la résolution source. La politique du matériau prime sur celle du jeu PBR. Toutes les textures ne doivent pas être en 2048.
+
+### 4. Lumières, eau et réflexions
+
+Définir les sources visibles via une géométrie et un matériau émissif ; définir les lumières locales dans `lighting.lights[]` avec `position` en mètres, `radius`, `intensity` et `color` RGB **0–255** (contrairement aux couleurs de matériaux). Le champ `group: "exterior"` identifie une source extérieure pour le contrôle jour/nuit ; éviter de compter deux fois la même énergie entre émissif et lumière d'appoint. `hour` est l'heure initiale (le bridge accepte 6–19 à la lecture) ; le cycle solaire du moteur calcule son propre éclairage. Les champs historiques `sun`, `ambient` et certaines métadonnées `environment` ne doivent pas être présentés comme des commandes toutes exécutées par le runtime actuel. Le sol est une géométrie, pas une extension automatique de `groundSize`.
+
+Pour une piscine, séparer bassin, parois, fond et surface d'eau ; conserver la normale et les UV, utiliser `surfaceModel: "water"` et une transmission/IOR appropriés. Pour un vitrage, utiliser une géométrie plane avec `transmission` et rugosité adaptées. Pour un miroir, le matériau peut porter `opticalMirror: true`. Éviter de déclarer chaque tube métallique comme miroir planaire.
+
+Z Reflect respecte la décision du créateur : `planarReflection` sur l'instance > règle du matériau dans `scene.json.zReflectAuthorPolicy.materialRules` > propriété du matériau > défaut du manifeste. Exemple dans le manifeste (facultatif) :
+
+```json
+"zReflectAuthorPolicy": {
+  "schema": 1,
+  "sceneRevision": "V17.001",
+  "materialRules": {
+    "verre_fenetre": {"planarReflection": "auto"},
+    "verre_ascenseur": {"planarReflection": "disabled"}
+  },
+  "sharedProbes": []
 }
 ```
 
-L’origine de la géométrie compte autant que la position : si le pivot du modèle d’arbre est au milieu du tronc, `Y = 0` enterre une partie de l’arbre ; si le pivot est à la base, `Y = 0` peut poser le tronc au sol. Une géométrie source peut être réutilisée par de nombreuses instances. Les corrections de scène sont versionnées dans le dépôt de scène et republiées sous forme d’archive ; elles ne demandent pas de reconstruire l’application moteur.
+L'autorisation `enabled` ne garantit pas une caméra pour chaque surface : le moteur doit encore extraire un plan valide et le sélectionner suivant la vue et le budget de cibles. Les réflexions planaires ne sont pas de la réfraction multi-interface ; les sondes partagées déclarées restent non rendues. Ne pas ajouter de nouveau fichier de politique par scène si les propriétés existantes suffisent. [Politique optique et historique](v17/docs/CSP001_ZREFLECT_AUTHOR_POLICY.md).
+
+### 5. Exemple complet : un laboratoire simple à deux matériaux
+
+Créer les sept fichiers suivants. Il s'agit d'un exemple documentaire cohérent avec le chargeur V17.031, pas d'une scène dont le rendu a été exécuté dans cet audit. Le manifeste utilise une révision de scène d'exemple indépendante de la version du moteur. Les formats et clés sont issus du [Pavillon 01](scenes/v16/pavillon01/scene.json) et du runtime courant.
+
+<details>
+<summary>Afficher les sept fichiers JSON d'une scène minimale (sol et sphère inox)</summary>
+
+**`scene.json`**
+
+```json
+{
+  "format": "m3d-scene-v16",
+  "name": "Laboratoire matériaux",
+  "version": 1,
+  "revision": "V17.001",
+  "units": "m",
+  "sectors": [
+    {
+      "id": "laboratoire",
+      "geometry": [
+        "geometry/meshes.json"
+      ],
+      "instances": [
+        "instances/objects.json"
+      ],
+      "materials": [
+        "materials/surfaces.json"
+      ],
+      "pbr": [
+        "pbr/textures.json"
+      ],
+      "lighting": [
+        "lighting/day.json"
+      ],
+      "cameras": [
+        "cameras/views.json"
+      ]
+    }
+  ]
+}
+```
+
+**`geometry/meshes.json`**
+
+```json
+{
+  "format": "m3d-geometry-v1",
+  "units": "m",
+  "meshes": [
+    {
+      "id": "unit_box",
+      "type": "box",
+      "size": [
+        1,
+        1,
+        1
+      ],
+      "uv": "planar_per_face"
+    },
+    {
+      "id": "unit_sphere",
+      "type": "uv_sphere"
+    }
+  ]
+}
+```
+
+**`materials/surfaces.json`**
+
+```json
+{
+  "format": "m3d-materials-v1",
+  "materials": [
+    {
+      "id": "sol_beton",
+      "baseColor": [
+        0.65,
+        0.65,
+        0.63
+      ],
+      "roughness": 0.83,
+      "metallic": 0,
+      "transmission": 0,
+      "ior": 1.5,
+      "textureSet": "tex_beton"
+    },
+    {
+      "id": "inox_brosse",
+      "libraryMaterial": "inox_01_01",
+      "roughness": 0.35,
+      "textureSet": "tex_inox",
+      "planarReflection": "disabled"
+    }
+  ]
+}
+```
+
+**`pbr/textures.json`**
+
+```json
+{
+  "format": "m3d-pbr-v1",
+  "sets": [
+    {
+      "id": "tex_beton",
+      "material": "sol_beton",
+      "pattern": "concrete",
+      "resolution": 512
+    },
+    {
+      "id": "tex_inox",
+      "material": "inox_brosse",
+      "pattern": "metal",
+      "resolution": 512
+    }
+  ]
+}
+```
+
+**`instances/objects.json`**
+
+```json
+{
+  "format": "m3d-instances-v1",
+  "instances": [
+    {
+      "id": "dalle",
+      "parent": "Structure/Sol",
+      "geometry": "unit_box",
+      "material": "sol_beton",
+      "position": [
+        0,
+        -0.1,
+        0
+      ],
+      "size": [
+        12,
+        0.2,
+        12
+      ],
+      "rotationY": 0
+    },
+    {
+      "id": "sphere_inox",
+      "parent": "Essais/Metaux",
+      "geometry": "unit_sphere",
+      "material": "inox_brosse",
+      "position": [
+        0,
+        1,
+        0
+      ],
+      "size": [
+        2,
+        2,
+        2
+      ],
+      "rotationY": 0
+    }
+  ]
+}
+```
+
+**`lighting/day.json`**
+
+```json
+{
+  "format": "m3d-lighting-v1",
+  "hour": 14.75,
+  "lights": [
+    {
+      "position": [
+        -2,
+        3,
+        1
+      ],
+      "radius": 6,
+      "intensity": 1.3,
+      "color": [
+        255,
+        220,
+        185
+      ]
+    }
+  ]
+}
+```
+
+**`cameras/views.json`**
+
+```json
+{
+  "format": "m3d-cameras-v1",
+  "cameras": [
+    {
+      "id": "vue_01",
+      "name": "01 · Sphère inox",
+      "position": [
+        4,
+        1.7,
+        5
+      ],
+      "target": [
+        0,
+        1,
+        0
+      ],
+      "fovDegrees": 61
+    }
+  ]
+}
+```
+
+</details>
+
+Le sol supérieur est à Y=0 et la sphère de diamètre 2 m repose dessus. Les deux références de matériaux sont actives, pas les 8 192 presets. Changer de matériau ne demande ni duplication du maillage ni compilation moteur.
+
+### 6. Caméras, validation et précompilation
+
+Les caméras sont enregistrées dans `cameras.cameras[]` : `id`, `name`, `position`, `target`, `fovDegrees`. Elles définissent un point de vue métrique. Ajouter une caméra intérieure, extérieure et une vue des détails sensibles ; ne pas faire coïncider position et cible. Dans le JSON exporté par l'interface, `eye` correspond à `position`, `fovDeg` à `fovDegrees`. Le cadrage piscine V17.634 injecté au démarrage de V17.031 est une exception moteur de référence, pas une obligation de format pour d'autres scènes.
+
+Ouvrir le manifeste avec **Fichier → Ouvrir une scène V16 (scene.json)…**. Contrôler : géométrie/pivots, normales/UV, matériaux, collisions, éclairage jour et nuit, transparence, reflets, caméra en mouvement et stabilité des détails. Tester DX11, Vulkan et LumaTrace, comparer ponctuellement au CPU sans exiger un résultat physiquement identique. Exporter les poses de diagnostic via le menu Fichier.
+
+Depuis le dossier moteur extrait, préparer les accélérateurs hors ligne :
+
+```bat
+cse_scene_precompiler.exe "C:\scenes\ma-scene\scene.json"
+cse_scene_precompiler.exe "C:\scenes\ma-scene\scene.json" --catalog-only
+```
+
+La première commande charge la scène et produit `precomputed/csp001-bvh.bin`, `precomputed/zreflect-index.json` et `precomputed/zreflect-candidates.json`, puis contrôle leur relecture. La seconde est un diagnostic du catalogue optique ; elle ne remplace pas la précompilation complète. Le chargeur vérifie les caches et revient à la construction native si nécessaire. Recalculer après une modification pertinente de géométrie, matériaux ou politique optique, sans réutiliser manuellement des caches d'une autre révision. `M3D_CSP001=0` permet un A/B du BVH précalculé ; `M3D_V17_DISABLE_PBR_CACHE=1` un A/B du cache de textures.
+
+### 7. Publier et maintenir une scène
+
+- Conserver les sources lisibles, les images et la provenance/licence des assets ; versionner les ressources et garder les identifiants stables.
+- Pour une scène privée, le dossier suffit : aucun dépôt GitHub ni manifeste de publication supplémentaire n'est nécessaire.
+- Pour la scène civique officielle, publier dans le dépôt distinct [moteur3d-scene](https://github.com/glaby91/moteur3d-scene), avec une nouvelle révision de scène et le contrat de release `V17-scene.zip` + `SCENE_VERSION.json` identique dans l'archive et à côté. Précompiler les caches et vérifier leurs empreintes. L'archive officielle contient `benchmark-civic/scene.json` et les ressources relatives ; conserver les conventions du dépôt de scène et les contrôles d'intégrité de l'updater. Le moteur sélectionne les releases Reflect compatibles, pas arbitrairement la dernière release de tout type.
+- Valider avant publication : dossier autonome, fichiers JSON valides, références présentes, 256 matériaux actifs maximum, textures limitées, caches reproductibles, scènes chargées sur les backends cibles. Une correction de contenu ne demande pas de reconstruire le moteur, sauf si elle nécessite une évolution du format ou d'une fonctionnalité moteur.
+
+Sources : [chargeur de manifeste](experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_scene_v16.cpp) · [bridge runtime](experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_v16_bridge.cpp) · [précompilateur CSP001](v17/tools/cse_scene_precompiler.cpp) · [Z Material](v17/docs/ZMATERIAL_001.md) · [documentation historique des scènes V16](docs/V16-MODULAR-SCENE.md). Les documents historiques ne priment pas sur le code V17 actuel.
 
 ### Scène historique de Pripiat — place centrale
 
@@ -152,13 +467,19 @@ Benchmarks : `LANCER_PARCOURS_30S.bat` (DX11/Vulkan/LumaTrace), `LANCER_ZREFLECT
 
 Sources : [validation C](v17/docs/CSP001_ZREFLECT_V17023_VALIDATION.md), [matrice A/B/C/D](v17/docs/CSP001_ZREFLECT_V17022_MATRIX.md), [module adaptatif](v17/docs/LUMATRACE_ADAPTIVE_001.md). La CI principale vérifie les caches de la scène V17.631, les sélections, les quatre configurations et la parité pixel par pixel sur quatre vues WARP, ainsi que les plans de benchmark et les commandes d'exploration. L'ancien workflow exhaustif demeure disponible manuellement ; les tests matériels restent indispensables.
 
+## Z Material et Z Atmosphere — état actuel
+
+Z Material 001 améliore la restitution des métaux opaques non émissifs par pondération du diffus et approximation directionnelle de l'environnement ; les chemins optiques spéciaux sont conservés. DX11 et LumaTrace partagent le shader, Vulkan possède son implémentation. Le correctif ne crée ni rayon, ni caméra, ni lecture de texture ou tampon GPU supplémentaire. Le gain de cohérence visuelle constaté en V17.030 ne clôt pas L03 ; les 31 850 496 cas du [benchmark synthétique](v17/materials/benchmark_8192.py) ne mesurent ni FPS réels ni fidélité de l'image complète. Comparer avec `LANCER_SANS_ZMATERIAL.bat` (variable `M3D_V17_ZMATERIAL=0`).
+
+Z Atmosphere 002 est une passe additive de grains lumineux, pas une simulation volumétrique physique ni un brouillard. Désactivée par défaut ; `LANCER_ZATMOSPHERE.bat` ou `M3D_V17_ZATMOSPHERE=1` l'active ; gain par défaut 0,002. Aucun nouveau rayon BVH4, coût GPU à mesurer. [Description et limites](v17/docs/ZATMOSPHERE_001.md).
+
 ## DirectX 11 — R001 validé sur HD620 (V17.025)
 
-Branche de développement validée, intégrée au moteur principal master V17.029. R001 reste ON par défaut pour DX11 Raster (A/B : `M3D_V17_DX11_R001=0`). AABB conservatif, masques partagés profondeur/couleur, filtrage des lumières hors champ ou sans énergie, suppression des lectures d'ombre à daylight nul, contrôles des limites. LumaTrace et la scène V17.631 ne sont pas modifiés.
+Branche de développement validée, intégrée au moteur principal master V17.029. R001 reste ON par défaut pour DX11 Raster (A/B : `M3D_V17_DX11_R001=0`). AABB conservatif, masques partagés profondeur/couleur, filtrage des lumières hors champ ou sans énergie, suppression des lectures d'ombre à daylight nul, contrôles des limites. Cette optimisation R001 ciblait DX11 Raster ; les changements ultérieurs du shader partagé (L01/L02, Z Material) bénéficient également à LumaTrace. Aucun changement de scène dû à R001.
 
 Benchmark HD620, 1366×768, MSAA 2x, 4 × 90 images OFF/ON/ON/OFF, trajectoire déterministe, preview matériel avec readback : **14,3576 → 16,7388 FPS (+16,59 %)** ; GPU draw 55,94 → 44,20 ms ; 12 captures PNG identiques par indice. CI Windows et huit tests WARP jour/nuit réussis. [Rapport R001](v17/docs/DX11_R001.md) · [Données comparatives](v17/docs/benchmarks/DX11_R001_COMPARAISON.csv) · [Compilation validée](https://github.com/glaby91/moteur3d/actions/runs/46008251282).
 
-**Pause décidée le 27/11/2026 :** pas de R002 ni d'autre chantier engagé. Conserver Geometry Prep, ordre des triangles, rendu indexé, instancing et Z Prepass ; aucune réorganisation de géométrie sans preuve préalable. Ombres GPU, backface sélectif, Z Light par tuiles, compression et transparences restent des pistes différées. Simulations et 3–5 vérifications avant toute compilation d'une future modification. Ne pas fusionner automatiquement vers master.
+**Décision historique du 27/11/2026 (avant L01–L03) :** R002 différé. Conserver Geometry Prep, ordre des triangles, rendu indexé, instancing et Z Prepass ; aucune réorganisation de géométrie sans preuve préalable. Ombres GPU, backface sélectif, Z Light par tuiles, compression et transparences restent des pistes différées. Simulations et 3–5 vérifications avant toute compilation d'une future modification. Fusionner sur master uniquement après décision explicite et contrôles de non-régression.
 
 ## Architecture modulaire
 
@@ -184,16 +505,17 @@ Détails du découpage : [`v17/README.md`](v17/README.md) · [registre des modul
 
 La compilation de référence est le workflow [CSE WARP V17 — Main Windows x64](https://github.com/glaby91/moteur3d/actions/workflows/build-main-v17.yml). Il construit l’application, les backends disponibles et les outils, vérifie la scène de référence épinglée et produit un artefact moteur sans scène.
 
-Pour compiler localement, installer Visual Studio 2022 avec C++ x64, CMake, Qt 6.8.3 (module Multimedia) et Vulkan SDK 1.3 ou ultérieur. Depuis la racine du dépôt :
+Pour compiler localement, installer Visual Studio 2022 avec C++ x64, CMake 3.24 minimum, Qt 6.8.3 (module Multimedia) et le Vulkan SDK (CI : 1.4.309.0). Extraire d'abord une scène officielle, par exemple V17.634, dans un dossier extérieur au dépôt. La configuration exige un `scene.json` dans `V17_SCENE_SOURCE_DIR` : le répertoire historique `scenes/v16/benchmark-civic` ne contient pas la scène complète dans le dépôt principal. Depuis la racine du dépôt, en adaptant les chemins :
 
 ```powershell
 cmake -S v17 -B build-v17 -G "Visual Studio 17 2022" -A x64 `
   -DCMAKE_PREFIX_PATH="C:/Qt/6.8.3/msvc2022_64" `
+  -DV17_SCENE_SOURCE_DIR="C:/scenes/V17.634/benchmark-civic" `
   -DM3D_REQUIRE_VULKAN=ON
 cmake --build build-v17 --config Release --parallel 4
 ```
 
-Le workflow principal télécharge la scène de référence validée pour les tests, sans la copier dans le paquet final. Une compilation locale seule n’exécute pas automatiquement toutes les étapes de contrôle et de packaging Windows de la CI.
+Le workflow principal télécharge les scènes de référence épinglées (V17.631 optique, V17.633 émission, V17.634 atmosphère), vérifie leurs empreintes et distribue un paquet moteur sans scène. Le build CMake local copie la scène source dans son dossier de sortie ; il ne faut pas confondre cette sortie avec l'artefact officiel. Pour un essai local de matériaux de bibliothèque, copier aussi `v17/materials/zmaterial8192.json` dans `materials/` à côté de l'exécutable si absent (le packaging CI le fait). Une compilation locale seule n’exécute pas automatiquement toutes les étapes de contrôle et de packaging Windows de la CI.
 
 ## Benchmarks en ligne de commande
 
@@ -274,7 +596,7 @@ Les benchmarks d’aperçu lisent les pixels hors écran : ils ne mesurent ni la
 
 ## Validation et limites
 
-Le workflow Windows x64 compile V16 et V17, vérifie le paquet, charge et rend la scène publiée, puis produit les benchmarks et images de contrôle. Une CI verte valide les chemins exécutés sur le runner, pas la fluidité sur le GPU de l’utilisateur. Vulkan et LumaTrace restent expérimentaux ; les performances matérielles, la parité visuelle complète et les coûts de présentation native doivent être vérifiés séparément.
+Le workflow Windows x64 compile les cibles V16/V17 et les outils, vérifie le paquet, exécute les précontrôles Z Material, les diagnostics natifs, les tests R001, Z Reflect, émission et atmosphère sur WARP, ainsi que le chargement et les contrôles de navigation. Il ne réalise pas automatiquement une campagne FPS matérielle complète. Une CI verte valide les chemins exécutés sur le runner, pas la fluidité sur le GPU de l’utilisateur. Vulkan et LumaTrace restent expérimentaux ; les performances matérielles, la parité visuelle complète et les coûts de présentation native doivent être vérifiés séparément.
 
 La version **LumaTrace BVH4** est un backend hybride d’éclairage GPU et de réflexions planaires. Elle ne remplace pas le moteur CPU complet et ne constitue pas encore un path tracer multi-rebonds. Les résultats de benchmark doivent donc être lus comme des chemins distincts, pas comme une comparaison de qualité physique universelle.
 
@@ -283,7 +605,8 @@ La version **LumaTrace BVH4** est un backend hybride d’éclairage GPU et de r�
 - `v17/` : interface, intégration V17, backends, shaders, gestionnaire de scène et outils.
 - `v16/` : exécutable historique, benchmark et configuration du noyau partagé.
 - `engine/render_modules.json` : registre des modules partagés, versions et dépendances.
-- `scenes/v16/` : scènes/fixtures internes de test et benchmark ; la scène de référence actuelle est publiée séparément puis copiée dans le paquet compilé.
+- `v17/materials/` : catalogue Z Material 8192, précontrôles et benchmark numérique synthétique.
+- `scenes/v16/` : scènes/fixtures internes de test et benchmark ; la scène civique de référence est publiée séparément ; elle peut être copiée dans une sortie CMake locale, mais pas dans le paquet officiel moteur.
 - `experiments/` : code moteur partagé et prototypes conservés pour comparaison.
 - `.github/workflows/` : compilation, tests de chargement/rendu, packaging et publication des artefacts.
 - `docs/` et `v17/docs/` : architecture, validation, outils et protocoles de benchmark.
@@ -293,20 +616,22 @@ Références : [Guide moteur V17](v17/README.md) · [Full Benchmark](v17/docs/FU
 ## Benchmark de déplacement de 30 secondes
 
 1. Placer `LANCER_PARCOURS_30S.bat` à côté de `moteur3d_v17.exe`, dans le package Windows V17 décompressé avec ses DLL et ses plugins Qt. Le même BAT se réutilise à chaque campagne. [Télécharger le lanceur](https://raw.githubusercontent.com/glaby91/moteur3d/master/v17/tools/LANCER_PARCOURS_30S.bat).
-2. Double-cliquer sur le BAT. Le paquet V17.009 inclut le script PowerShell, `route30.exe` et le noyau partagé utilisé par l’exploration. Un BAT téléchargé seul récupère le script sur GitHub. Le script consulte la dernière publication de `glaby91/moteur3d-scene`, télécharge `V17-scene.zip` au premier lancement et affiche la révision chargée. La scène du package peut être absente ou incomplète. Le benchmark extrait sa propre copie avec les textures. Il conserve les archives dans `benchmark-tools/archives`, en contrôle la taille et le SHA-256 à chaque lancement et télécharge à nouveau toute archive incomplète. [Publications de la scène](https://github.com/glaby91/moteur3d-scene/releases/latest).
+2. Double-cliquer sur le BAT. Le paquet actuel inclut le script PowerShell, `route30.exe` et le noyau partagé utilisé par l’exploration. Un BAT téléchargé seul récupère le script sur GitHub. Le script consulte la dernière publication de `glaby91/moteur3d-scene`, télécharge `V17-scene.zip` au premier lancement et affiche la révision chargée. La scène du package peut être absente ou incomplète. Le benchmark extrait sa propre copie avec les textures. Il conserve les archives dans `benchmark-tools/archives`, en contrôle la taille et le SHA-256 à chaque lancement et télécharge à nouveau toute archive incomplète. [Publications de la scène](https://github.com/glaby91/moteur3d-scene/releases/latest).
 3. Pendant la campagne, garder la fenêtre de rendu visible. À la fin, récupérer `benchmark-results/parcours30-<date>.zip`. Il contient `SCENE_VERSION.json` et `resultats.csv`. Si un backend échoue, sa ligne indique l’erreur, les autres parcours continuent et le ZIP conserve les mesures réussies.
 
-DX11 Raster, Vulkan Raster et LumaTrace présentent directement les images dans une fenêtre de **1280 × 720 pixels**, via DXGI ou la swapchain Vulkan. La synchronisation verticale est activée sur les trois backends (intervalle 1 pour DXGI, FIFO pour Vulkan). Le benchmark contrôle à chaque image que le moteur rapporte zéro tampon de relecture. Les trois passages suivent le même mouvement latéral sinusoïdal devant la piscine et la fresque, à 14 h 45. Chacun commence par deux images d’échauffement avant les 30 secondes chronométrées.
+DX11 Raster, Vulkan Raster et LumaTrace présentent directement les images dans une fenêtre de **1280 × 720 pixels**, via DXGI ou la swapchain Vulkan. Dans le parcours actuel, la synchronisation verticale est désactivée (intervalle DXGI 0 et mode Vulkan IMMEDIATE demandé). Le benchmark ne doit pas comparer silencieusement un backend plafonné par VSync à un autre non plafonné. Le benchmark contrôle à chaque image que le moteur rapporte zéro tampon de relecture. Les trois passages suivent le même mouvement latéral sinusoïdal devant la piscine et la fresque, à 14 h 45. Chacun commence par deux images d’échauffement avant les 30 secondes chronométrées.
 
-Dans le CSV, `frames_completed_30s` compte les appels de présentation réussis avant la fin des 30 secondes et `fps_30s` vaut ce nombre divisé par 30. `mean_render_ms` mesure le temps écoulé côté application, y compris l’attente éventuelle de présentation et la dernière image commencée. Les mesures valides portent `presentation=native_swapchain`, `vsync=on` et `readback_buffers=0`. L’ancien parcours utilisait 1000 × 680 avec relecture GPU vers CPU. Le changement simultané de résolution et de présentation empêche d’en déduire le coût de la copie seule.
+Dans le CSV, `frames_completed_30s` compte les appels de présentation réussis avant la fin des 30 secondes et `fps_30s` vaut ce nombre divisé par 30. `mean_render_ms` mesure le temps écoulé côté application, y compris l’attente éventuelle de présentation et la dernière image commencée. Les mesures valides portent `presentation=native_swapchain`, `vsync=off` et `readback_buffers=0`. L’ancien parcours utilisait 1000 × 680 avec relecture GPU vers CPU. Le changement simultané de résolution et de présentation empêche d’en déduire le coût de la copie seule.
 
 La préparation des triangles statiques est **activée par défaut** dans l’exploration et dans ce parcours pour DX11, Vulkan et LumaTrace. Elle a lieu avant les 30 secondes chronométrées. Dans `resultats.csv`, `geometry_prep_requested=on` indique la demande et `geometry_prep_enabled=true` confirme son application par le backend. `geometry_source_vertices` et `geometry_unique_vertices` comptent les sommets avant et après préparation. `geometry_index_count` donne le nombre d’indices du maillage préparé. Les compteurs restent vides si le backend échoue.
 
-**Validation du 26 novembre 2026.** Sur la scène V17.629, le parcours piscine de 30 s en 720p a confirmé `geometry_prep_enabled=true` et `readback_buffers=0` pour les trois backends. DX11 a présenté 691 images (23,03 FPS), Vulkan 884 (29,47 FPS) et LumaTrace 815 (27,17 FPS). Ces valeurs correspondent à un passage par backend sur la machine de test. [Révision du parcours validé](https://github.com/glaby91/moteur3d/commit/900bf11df4833e881141682741ae814202cf2403).
+**Validation du 26 novembre 2026.** Sur la scène V17.629, le parcours piscine de 30 s en 720p a confirmé `geometry_prep_enabled=true` et `readback_buffers=0` pour les trois backends. DX11 a présenté 691 images (23,03 FPS), Vulkan 884 (29,47 FPS) et LumaTrace 815 (27,17 FPS). Ces valeurs correspondent à un passage historique par backend sur la machine de test, avec le protocole de cette révision ; elles ne sont pas des mesures du parcours actuel VSync OFF ni du profil Ultra V17.031. [Révision du parcours validé](https://github.com/glaby91/moteur3d/commit/900bf11df4833e881141682741ae814202cf2403).
 
 Pour comparer avec la préparation désactivée, enregistrer le script à côté du BAT et lancer `powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\route30.ps1 -Root . -GeometryPrep off` depuis ce dossier. Les deux modes utilisent le même exécutable et le même parcours. [Script du parcours](https://raw.githubusercontent.com/glaby91/moteur3d/master/v17/tools/route30.ps1).
 
 ## Audit historique et registre des optimisations — 26 novembre 2026
+
+**Archive de l'état au 26/11, non feuille de route active :** les validations et décisions plus récentes du début de ce README priment (notamment L01/L02 résolues et L03 partiel). Les anciennes mesures sont conservées sans les réinterpréter.
 
 **Périmètre :** origines BASIC (2019), premiers moteurs HTML/JavaScript d’octobre 2026, V9–V13.16, portage natif V14–V15, V16 et V17 jusqu’à V17.010. Audit documentaire et statique, sans nouvelle compilation ni mesure. Les résultats anciens restent liés à leur scène, leur matériel et leurs paramètres. Ce registre distingue les acquis, les prototypes, les essais décevants et les propositions ; il ne certifie pas la présence de chaque optimisation dans la tête actuelle.
 
@@ -437,9 +762,9 @@ Références de recherche : [rendu par frontières](experiments/2026-10-29-v92-w
 5. Réduire le coût de shading et de bande passante à qualité constante ; contrôler les temps GPU réels, P50/P95/P99 et latence de présentation.
 6. Reprendre PHOTON-RT, rendu par frontières et reprojection dans des branches de recherche isolées ; ne les promouvoir qu'après validation visuelle et matérielle.
 
-Objectif HD620 : 40–45 FPS (budget ~25–22,2 ms par image), non acquis. Objectif historique 4K/100 FPS : 10 ms par image, recherche à long terme sur matériel adapté. Aucun gain futur ne doit être annoncé avant mesure. Ne pas additionner les gains de campagnes hétérogènes ni assimiler WARP logiciel à un GPU matériel.
+Objectif historique HD620 : 40–45 FPS (budget ~25–22,2 ms par image), non acquis ; aucune cible chiffrée de fidélité physique ni de FPS n'est garantie en Ultra. Objectif historique 4K/100 FPS : 10 ms par image, recherche à long terme sur matériel adapté. Aucun gain futur ne doit être annoncé avant mesure. Ne pas additionner les gains de campagnes hétérogènes ni assimiler WARP logiciel à un GPU matériel.
 
 État relevé le 26/11 : [code V17.010](https://github.com/glaby91/moteur3d/commit/ef5461e06a9b4326620f451575b1599f70426066), [PR 90 / V17.009](https://github.com/glaby91/moteur3d/pull/90), scène [V17.629 build 42](https://github.com/glaby91/moteur3d-scene/releases/tag/scene-V17.629-42). Le code le plus récent ne constitue pas à lui seul une preuve de publication d'un package validé.
 
 ### V17.026 — correctif matériaux émissifs DX11/LumaTrace
-Les déclarations d'émission de la scène sont désormais transmises au shader raster partagé. [Rapport et tests](v17/docs/DX11_EMISSION_V17026.md). R001 reste actif ; autres développements suspendus.
+Les déclarations d'émission de la scène sont désormais transmises au shader raster partagé. [Rapport et tests](v17/docs/DX11_EMISSION_V17026.md). R001 reste actif ; cette note décrit l'état à la V17.026, supersédé par les évolutions V17.028 à V17.031.
