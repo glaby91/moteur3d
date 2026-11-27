@@ -138,8 +138,15 @@ bool sampleOptical(VSOut i,float2 distortion,out float3 reflected){
     reflected=slot==0?zReflection0.SampleLevel(probeSampler,uv,0).rgb:zReflection1.SampleLevel(probeSampler,uv,0).rgb;
     return true;
 }
-float4 PSMain(VSOut i):SV_TARGET {
+// Same rejection for the reflected color and depth passes.
+void clipReflection(VSOut i){
     if(zPlaneIds.w>.5 && dot(float4(i.world,1.0),zClip)<0.0) discard;
+    if(zPlaneIds.w>.5 && reflectionControls.x>.5 &&
+       (materialEmission[i.mat].a<-.5 || materialOpacity[i.mat].x<.45)) discard;
+}
+void PSReflectionDepth(VSOut i){clipReflection(i);}
+float4 PSMain(VSOut i):SV_TARGET {
+    clipReflection(i);
     // Smooth focus-lens / lighthouse geometry. The sharp center follows the
     // camera's optical axis, with no rectangular hard cut or temporal reuse.
     // Mode 0: original full-frame, 1: low-res surround, 2: full-res focus.
@@ -165,8 +172,6 @@ float4 PSMain(VSOut i):SV_TARGET {
     }
     float3 normal = normalize(i.n);
     const bool poolWater=materialEmission[i.mat].a < -0.5;
-    if(zPlaneIds.w>.5 && reflectionControls.x>.5 &&
-       (poolWater || materialOpacity[i.mat].x<.45)) discard;
     // Dedicated animated-looking standing waves (static in world space) only on
     // the new translucent pool water. Avoid extra trig on every other material.
     if(poolWater && normal.y>0.75){

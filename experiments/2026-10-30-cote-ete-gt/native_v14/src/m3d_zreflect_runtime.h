@@ -15,8 +15,18 @@ class RuntimeOptics {
     std::vector<Patch> patches_;
     std::vector<uint8_t> forced_,water_;
     std::vector<uint32_t> shortlist_;
+    Camera lastCamera_{};
+    bool selectionValid_=false,lastGlass_=false;
+    std::vector<ActivePlane> lastSelection_;
+    QueryStats lastStats_{};
+    static bool sameVector(V a,V b){return a.x==b.x&&a.y==b.y&&a.z==b.z;}
+    static bool sameProjection(const Camera& a,const Camera& b){
+        return sameVector(a.eye,b.eye)&&sameVector(a.f,b.f)&&sameVector(a.r,b.r)&&sameVector(a.u,b.u)&&
+            a.tanHalf==b.tanHalf&&a.aspect==b.aspect;
+    }
 public:
     void build(const Scene& scene){
+        selectionValid_=false;lastSelection_.clear();
         patches_.clear();forced_.clear();water_.clear();std::vector<IndexedPlane> descriptors;
         for(const auto& p:scene.opticalPlanes){
             Patch patch;patch.normal=p.normal;patch.offset=p.offset;patch.area=p.area;patch.side=p.side;
@@ -32,6 +42,9 @@ public:
         if(!index_.restore(descriptors,scene.opticalIndexNodes,scene.opticalIndexOrder))index_.build(descriptors);
     }
     QueryStats select(const Scene& scene,const Camera& c,std::vector<ActivePlane>& out,bool glassEnabled=true){
+        if(selectionValid_&&lastGlass_==glassEnabled&&sameProjection(lastCamera_,c)){
+            out=lastSelection_;return lastStats_;
+        }
         out.clear();auto stats=index_.query(c,shortlist_);
         for(uint32_t id:shortlist_){
             if(!glassEnabled&&!water_[id])continue;
@@ -40,7 +53,7 @@ public:
         }
         std::sort(out.begin(),out.end(),[](const ActivePlane& a,const ActivePlane& b){
             return a.projected>b.projected||(a.projected==b.projected&&a.id<b.id);
-        });return stats;
+        });lastCamera_=c;lastGlass_=glassEnabled;lastSelection_=out;lastStats_=stats;selectionValid_=true;return stats;
     }
     bool water(uint32_t id)const{return water_[id]!=0;}
     const Patch& patch(uint32_t id)const{return patches_[id];}

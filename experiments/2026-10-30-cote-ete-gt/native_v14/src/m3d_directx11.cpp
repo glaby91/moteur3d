@@ -597,12 +597,26 @@ public:
         // not add CPU ray casting, material work, or per-triangle sorting.
         const char* zPrepassEnv=std::getenv("M3D_V17_EXPERIMENT_Z_PREPASS");
         const char* disableZPrepass=std::getenv("M3D_V17_DISABLE_Z_PREPASS");
-        // The reflection pixel shader clips geometry below the water plane; a depth-only pass cannot.
-        const bool depthPrepass=cb.zPlaneIds[3]<.5f && !(disableZPrepass&&std::strcmp(disableZPrepass,"1")==0)
+        const bool secondary=cb.zPlaneIds[3]>.5f;
+        const char* disableReflectOpt=std::getenv("M3D_V17_DISABLE_ZREFLECT_DEPTH_OPT");
+        const bool reflectionOpt=secondary&&!(disableReflectOpt&&std::strcmp(disableReflectOpt,"1")==0);
+        // Conservative support point of the AABB against the mirror clip plane.
+        // A margin accommodates float interpolation; intersecting chunks survive.
+        auto visibleForPass=[&](const DrawChunk& chunk){
+            if(!visibleChunk(chunk,activeCam))return false;
+            if(!reflectionOpt)return true;
+            const auto& n=cb.zClip;
+            const double x=double(n[0])*(n[0]>=0?chunk.mx.x:chunk.mn.x);
+            const double y=double(n[1])*(n[1]>=0?chunk.mx.y:chunk.mn.y);
+            const double z=double(n[2])*(n[2]>=0?chunk.mx.z:chunk.mn.z);
+            const double d=n[3],margin=.01+1.e-5*(std::abs(x)+std::abs(y)+std::abs(z)+std::abs(d));
+            return !(x+y+z+d < -margin);
+        };
+        const bool depthPrepass=(!secondary||reflectionOpt) && !(disableZPrepass&&std::strcmp(disableZPrepass,"1")==0)
             &&!(zPrepassEnv&&std::strcmp(zPrepassEnv,"0")==0);
         if(depthPrepass){
             context_->OMSetRenderTargets(0,nullptr,ds);
-            context_->PSSetShader(nullptr,nullptr,0);
+            context_->PSSetShader(secondary?reflectionDepthPs_.Get():nullptr,nullptr,0);
             // Static opaque walls, floors and other architectural meshes.
             if(vertexCount_){
                 if(!cullEnabled){if(staticGeometryPreparationEnabled_)context_->DrawIndexed(indexCount_,0,0);else context_->Draw(vertexCount_,0);}
@@ -610,7 +624,7 @@ public:
                     UINT start=0,count=0;
                     auto flush=[&]{if(count){if(staticGeometryPreparationEnabled_)context_->DrawIndexed(count,start,0);else context_->Draw(count,start);count=0;}};
                     for(const DrawChunk& chunk:chunks_){
-                        if(!visibleChunk(chunk,activeCam)){flush();continue;}
+                        if(!visibleForPass(chunk)){flush();continue;}
                         if(count&&start+count!=chunk.first)flush();
                         if(!count)start=chunk.first;
                         count+=chunk.count;
@@ -633,7 +647,7 @@ public:
                         if(count){context_->DrawInstanced(36,count,0,first);count=0;}
                     };
                     for(const DrawChunk& chunk:boxChunks_){
-                        if(!visibleChunk(chunk,activeCam)){flush();continue;}
+                        if(!visibleForPass(chunk)){flush();continue;}
                         if(count&&first+count!=chunk.first)flush();
                         if(!count)first=chunk.first;
                         count+=chunk.count;
@@ -666,7 +680,7 @@ public:
                     count=0;
                 };
                 for(const DrawChunk& chunk:chunks_){
-                    if(!visibleChunk(chunk,activeCam)){flush();continue;}
+                    if(!visibleForPass(chunk)){flush();continue;}
                     if(count && start+count!=chunk.first)flush();
                     if(!count)start=chunk.first;
                     count+=chunk.count;
@@ -694,7 +708,7 @@ public:
                 UINT first=0,count=0;
                 auto flush=[&]{drawBoxes(first,count);count=0;};
                 for(const DrawChunk& chunk:boxChunks_){
-                    if(!visibleChunk(chunk,activeCam)){flush();continue;}
+                    if(!visibleForPass(chunk)){flush();continue;}
                     if(count && first+count!=chunk.first)flush();
                     if(!count)first=chunk.first;
                     count+=chunk.count;
@@ -718,7 +732,7 @@ public:
                 const float radius=std::max({sphere.radii[0],sphere.radii[1],sphere.radii[2]});
                 const DrawChunk bounds{0,0,{center.x-radius,center.y-radius,center.z-radius},
                                            {center.x+radius,center.y+radius,center.z+radius}};
-                if(cullEnabled&&!visibleChunk(bounds,activeCam))continue;
+                if(cullEnabled&&!visibleForPass(bounds))continue;
                 const float z=std::max(.10f,dot(center-activeCam.eye,activeCam.f));
                 const float projectedRadius=radius*float(pw)/(2.f*std::max(.01f,activeCam.tanHalf)*z);
                 const float lodScale=100.f/float(quality.lodQualityPercent);
@@ -771,7 +785,7 @@ public:
                 const float radius=std::max({plant.radii[0],plant.radii[1],plant.radii[2]});
                 const DrawChunk bounds{0,0,{center.x-radius,center.y-radius,center.z-radius},
                     {center.x+radius,center.y+radius,center.z+radius}};
-                if(cullEnabled&&!visibleChunk(bounds,activeCam))continue;
+                if(cullEnabled&&!visibleForPass(bounds))continue;
                 const float z=std::max(.10f,dot(center-activeCam.eye,activeCam.f));
                 const float projectedRadius=radius*float(pw)/(2.f*std::max(.01f,activeCam.tanHalf)*z);
                 const float lodScale=100.f/float(quality.lodQualityPercent);
@@ -826,6 +840,7 @@ public:
         // Secondary passes only render opaque geometry. No recursive reflections.
         ID3D11ShaderResourceView* noOptics[3]={nullptr,nullptr,nullptr};
         context_->PSSetShaderResources(8,3,noOptics);
+        const auto reflectSubmitStart=Clock::now();
         for(size_t i=0;i<zActive_.size();++i){
             const auto id=zActive_[i].id;const auto& p=zRuntime_.patch(id);
             const auto m=zreflect::mirrorCamera(cam,p.normal,p.offset);
@@ -841,6 +856,7 @@ public:
             put4(cb.zEye[i],m.eye,m.tanHalf);put4(cb.zForward[i],m.f,m.aspect);
             put4(cb.zRight[i],m.r,0);put4(cb.zUp[i],m.u,0);
         }
+        const double reflectSubmitMs=zActive_.empty()?0.:std::chrono::duration<double,std::milli>(Clock::now()-reflectSubmitStart).count();
         cb.zPlaneIds[3]=0.f;activeCam=cam;
         cb.reflectionControls[0]=0.f;
         cb.zPlaneIds[2]=float(zActive_.size());
@@ -913,7 +929,7 @@ public:
                 nativeStats->planarReflectionRendered=planarReflection;
                 nativeStats->zReflectActive=uint32_t(zActive_.size());nativeStats->zReflectCandidates=uint32_t(zStats.candidates);
                 nativeStats->zReflectNodeVisits=uint32_t(zStats.nodeVisits);nativeStats->zReflectDeferred=zDeferred;
-                nativeStats->zReflectTotal=zTotal;nativeStats->zReflectSelectUs=zSelectUs;nativeStats->zReflectEnabled=zEnabled;
+                nativeStats->zReflectTotal=zTotal;nativeStats->zReflectSelectUs=zSelectUs;nativeStats->zReflectSubmitMs=reflectSubmitMs;nativeStats->zReflectEnabled=zEnabled;
                 nativeStats->lumaProbeLightingEnabled=lumaBvh&&hybrid;
                 nativeStats->lumaAdaptiveEnabled=adaptiveEnabled;
                 nativeStats->lumaAdaptiveZeroTriangles=adaptiveEnabled?lumaTraceCompute_.zeroTriangles():0;
@@ -968,7 +984,7 @@ public:
         slot.submitted.planarReflectionRendered=planarReflection;
         slot.submitted.zReflectActive=uint32_t(zActive_.size());slot.submitted.zReflectCandidates=uint32_t(zStats.candidates);
         slot.submitted.zReflectNodeVisits=uint32_t(zStats.nodeVisits);slot.submitted.zReflectDeferred=zDeferred;
-                slot.submitted.zReflectTotal=zTotal;slot.submitted.zReflectSelectUs=zSelectUs;slot.submitted.zReflectEnabled=zEnabled;
+                slot.submitted.zReflectTotal=zTotal;slot.submitted.zReflectSelectUs=zSelectUs;slot.submitted.zReflectSubmitMs=reflectSubmitMs;slot.submitted.zReflectEnabled=zEnabled;
         slot.submitted.lumaProbeLightingEnabled=lumaBvh&&hybrid;
         slot.submitted.lumaAdaptiveEnabled=adaptiveEnabled;
         slot.submitted.lumaAdaptiveZeroTriangles=adaptiveEnabled?lumaTraceCompute_.zeroTriangles():0;
@@ -1287,6 +1303,10 @@ private:
             activeMacros,nullptr,"PSMain","ps_4_0",
             D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&psCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation du pixel shader DirectX 11 impossible");return false;}
+        ComPtr<ID3DBlob> reflectionDepthCode;
+        errors.Reset();hr=D3DCompile(shaderSource.c_str(),shaderSource.size(),"m3d_directx11_preview",nullptr,nullptr,"PSReflectionDepth","ps_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&reflectionDepthCode,&errors);
+        if(FAILED(hr)){error=shaderError(L"Compilation du Z Prepass miroir impossible");return false;}
+        if(FAILED(device_->CreatePixelShader(reflectionDepthCode->GetBufferPointer(),reflectionDepthCode->GetBufferSize(),nullptr,&reflectionDepthPs_))){error=L"Creation du Z Prepass miroir impossible";return false;}
         ComPtr<ID3DBlob> skyVsCode,skyPsCode;
         errors.Reset();
         hr=D3DCompile(dx11::shaders::sky::kCloudSkyShader,sizeof(dx11::shaders::sky::kCloudSkyShader)-1,"CSE_WARP_CloudSky",
@@ -2126,7 +2146,7 @@ private:
     HWND nativeHwnd_=nullptr;
     int nativeW_=0,nativeH_=0;
     ComPtr<ID3D11VertexShader> vs_,boxVs_,ellipseVs_,mergeVs_,skyVs_;
-    ComPtr<ID3D11PixelShader> ps_,mergePs_,skyPs_;
+    ComPtr<ID3D11PixelShader> ps_,mergePs_,skyPs_,reflectionDepthPs_;
     ComPtr<ID3D11InputLayout> layout_,lumaLayout_,boxLayout_,ellipseLayout_;
     ComPtr<ID3D11Buffer> skyConstants_,constants_,vertices_,transparentVertices_,boxVertices_,boxInstances_,ellipseInstances_,foliageInstances_;
     ComPtr<ID3D11ShaderResourceView> verticesSrv_,indicesSrv_;

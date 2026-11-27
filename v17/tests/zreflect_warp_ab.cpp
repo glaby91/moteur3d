@@ -25,6 +25,18 @@ int main(int argc,char** argv){
     const auto poolCamera=m3d::v16::makeCamera(*pool,w,h);
     index.select(r.renderScene,poolCamera,poolSelection,false);
     if(poolSelection.empty()||!index.water(poolSelection.front().id)){qCritical()<<"Visible pool plane not selected";return 13;}
+    // Check exact clipping against the original vector implementation for all authored views.
+    for(const auto& preset:r.cameras){
+        const auto view=m3d::v16::makeCamera(preset,w,h);
+        for(const auto& plane:r.renderScene.opticalPlanes)for(auto id:plane.triangles){
+            const auto& tri=r.renderScene.obj[id];
+            if(m3d::zreflect::projectedTriangle(tri,view)!=m3d::zreflect::projectedTriangleReference(tri,view)){
+                qCritical()<<"Projection parity failed"<<preset.id<<id;return 16;}
+        }
+        std::vector<m3d::zreflect::ActivePlane> one,two;index.select(r.renderScene,view,one);index.select(r.renderScene,view,two);
+        if(one.size()!=two.size())return 17;
+        for(size_t j=0;j<one.size();++j)if(one[j].id!=two[j].id||one[j].projected!=two[j].projected)return 17;
+    }
     const auto& p=index.patch(selected[0].id);const auto mirror=m3d::zreflect::mirrorCamera(c,p.normal,p.offset);
     if(std::abs(m3d::zreflect::planeDistance(c.eye,p)+m3d::zreflect::planeDistance(mirror.eye,p))>.001)return 8;
     m3d::updateLighting(12.f);m3d::updateLighting(r.daylightHour);m3d::setRasterHybridLightingEnabled(true);
@@ -50,6 +62,19 @@ int main(int argc,char** argv){
     if(_putenv_s("M3D_V17_ZREFLECT","0")||!m3d::renderLumaTracePreview(r.renderScene,r.lumaTraceBvh4,shadow,poolCamera,w,h,waterPixels,waterStats,err)||
        !waterStats.planarReflectionRendered||waterStats.zReflectActive!=1||waterStats.zReflectTotal!=5)return 14;
     if(!QImage(reinterpret_cast<const uchar*>(waterPixels.data()),w,h,w*4,QImage::Format_RGB32).save(out+"/zreflect-unified-water.png"))return 15;
+    // Pixel-exact regression gate for the new depth/culling pass.
+    for(const auto& name:{"v7_pool_fresco","v4_face","v7_curtain_wall_detail","v8_stair_first_landing"}){
+        const auto v=std::find_if(r.cameras.begin(),r.cameras.end(),[&](const auto& p){return p.id==name;});
+        if(v==r.cameras.end())return 18;
+        const auto view=m3d::v16::makeCamera(*v,w,h);
+        std::vector<uint32_t> ref,opt;m3d::Stats x,y;
+        _putenv_s("M3D_V17_ZREFLECT","1");_putenv_s("M3D_V17_DISABLE_ZREFLECT_DEPTH_OPT","1");
+        if(!m3d::renderLumaTracePreview(r.renderScene,r.lumaTraceBvh4,shadow,view,w,h,ref,x,err))return 19;
+        _putenv_s("M3D_V17_DISABLE_ZREFLECT_DEPTH_OPT","0");
+        if(!m3d::renderLumaTracePreview(r.renderScene,r.lumaTraceBvh4,shadow,view,w,h,opt,y,err))return 20;
+        if(ref!=opt||x.zReflectActive!=y.zReflectActive){qCritical()<<"Reflection depth/culling pixel parity failed"<<name;return 21;}
+        qInfo()<<"Reflection pixel parity OK"<<name;
+    }
     qInfo()<<"Unified water pass active/total"<<waterStats.zReflectActive<<waterStats.zReflectTotal;
     return 0;
 }

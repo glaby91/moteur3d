@@ -100,7 +100,7 @@ inline std::vector<V> clipPolygon(const std::vector<V>& p,V normal,float offset)
     }
     return out;
 }
-inline double projectedTriangle(const Obj& tri,const Camera& c){
+inline double projectedTriangleReference(const Obj& tri,const Camera& c){
     if(c.tanHalf<=0||c.aspect<=0)return 0;
     const float w=c.tanHalf,h=w/c.aspect;
     std::vector<V> p;for(V v:{tri.a,tri.b,tri.c}){V q=v-c.eye;p.push_back({dot(q,c.r),dot(q,c.u),dot(q,c.f)});}
@@ -111,6 +111,29 @@ inline double projectedTriangle(const Obj& tri,const Camera& c){
         V a=p[i],b=p[(i+1)%p.size()];
         area+=(double(a.x)*b.y-double(a.y)*b.x)/(double(a.z)*b.z*w*h);
     }
+    return std::isfinite(area)?std::min(1.,std::abs(area)/8.):0.;
+}
+// Same clipping arithmetic, no heap allocations per triangle.
+inline double projectedTriangle(const Obj& tri,const Camera& c){
+    if(c.tanHalf<=0||c.aspect<=0)return 0;
+    const float w=c.tanHalf,h=w/c.aspect;
+    std::array<V,16> p{},next{};size_t count=0;
+    for(V v:{tri.a,tri.b,tri.c}){V q=v-c.eye;p[count++]={dot(q,c.r),dot(q,c.u),dot(q,c.f)};}
+    bool overflow=false;
+    auto clip=[&](V normal,float offset){
+        size_t n=0;
+        for(size_t i=0;i<count;++i){
+            V a=p[i],b=p[(i+1)%count];float da=dot(a,normal)-offset,db=dot(b,normal)-offset;
+            if(n+2>next.size()){overflow=true;return;}
+            if(da>=0)next[n++]=a;
+            if((da>=0)!=(db>=0))next[n++]=a+(b-a)*(da/(da-db));
+        }
+        count=n;for(size_t i=0;i<count;++i)p[i]=next[i];
+    };
+    clip({0,0,1},.08f);if(overflow)return projectedTriangleReference(tri,c);
+    for(V n:{V{1,0,w},V{-1,0,w},V{0,1,h},V{0,-1,h}}){clip(n,0);if(overflow)return projectedTriangleReference(tri,c);if(count<3)return 0;}
+    double area=0;
+    for(size_t i=0;i<count;++i){V a=p[i],b=p[(i+1)%count];area+=(double(a.x)*b.y-double(a.y)*b.x)/(double(a.z)*b.z*w*h);}
     return std::isfinite(area)?std::min(1.,std::abs(area)/8.):0.;
 }
 inline double projectedPatch(const Scene& scene,const Patch& p,const Camera& c){
