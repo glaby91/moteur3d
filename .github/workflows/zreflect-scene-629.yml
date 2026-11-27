@@ -6,6 +6,7 @@ on:
       - '.github/workflows/zreflect-scene-629.yml'
       - 'v17/tools/cse_scene_precompiler.cpp'
       - 'v17/tools/zreflect_scene_629_report.py'
+      - 'v17/config/zreflect-scene-V17.629.json'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_zreflect_*.h'
   workflow_dispatch:
 permissions:
@@ -65,12 +66,13 @@ jobs:
           if (!$exe -or !$core) { throw "Missing diagnostic binary" }
           $env:PATH = "$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
           $env:M3D_CSP001 = "0"
-          & $exe.FullName "$env:ZREFLECT_ROOT/benchmark-civic/scene.json" --catalog-only
+          & $exe.FullName "$env:ZREFLECT_ROOT/benchmark-civic/scene.json" --catalog-only --policy "v17/config/zreflect-scene-V17.629.json"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           python v17/tools/zreflect_scene_629_report.py --archive "$env:RUNNER_TEMP/V17-scene.zip" --manifest "$env:RUNNER_TEMP/SCENE_VERSION.json" --root "$env:ZREFLECT_ROOT" --engine-commit $env:GITHUB_SHA --output zreflect-report/summary.json
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           Copy-Item "$env:ZREFLECT_ROOT/benchmark-civic/precomputed/zreflect-candidates.json" zreflect-report/
           Copy-Item "$env:ZREFLECT_ROOT/SCENE_VERSION.json" zreflect-report/
+          Copy-Item "v17/config/zreflect-scene-V17.629.json" zreflect-report/
           Get-Content zreflect-report/summary.json -TotalCount 40
       - uses: actions/upload-artifact@v6
         with:

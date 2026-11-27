@@ -51,12 +51,20 @@ def summarize(catalog, meta, engine_commit):
         require(all(p["projectedFraction"] >= 0 for p in proj), "Invalid projection")
         require(sum(p["selected"] for p in proj) == view["selectedUncapped"], "Selection mismatch")
         require(sum(p["projectedFraction"] > 0 for p in proj) == view["visible"], "Visibility mismatch")
+    author = catalog["authorPolicy"]
+    require(author["sceneTag"] == TAG and author["sceneSourceCommit"] == SCENE_COMMIT, "Wrong author policy")
+    require(all(o["material"] != "v614_lift_blue_glass" for o in objects), "Lift planar candidates remain")
+    require(counts["planes"] == 5 and counts["eligibleObjects"] == 121, "Unexpected optimized catalogue")
+    require(all(o["authorized"] for o in objects), "Unexpected unauthorized remaining candidate")
+    for view in views:
+        require(view["activePlaneIds"] == [p["cameraId"] for p in view["projections"] if p["selected"]], "Active list mismatch")
     distribution = Counter(v["selectedUncapped"] for v in views)
+    require(max(distribution) <= author["selection"]["targetActivePerPrimaryView"], "Authored view exceeds target; investigate, do not truncate")
     total = sum(v["selectedUncapped"] for v in views)
     return {
         "sceneTag": TAG, "sceneManifest": meta, "sceneArchiveSha256": ARCHIVE_SHA256,
         "engineCommit": engine_commit, "status": "CPU geometry diagnostic, no GPU timing",
-        "counts": counts, "policy": catalog["policy"], "authoredViewCount": len(views),
+        "counts": counts, "policy": catalog["policy"], "authorPolicy": author, "authoredViewCount": len(views),
         "selectedDistribution": dict(sorted(distribution.items())),
         "maxSelectedSimultaneous": max(distribution), "meanSelected": total / len(views),
         "viewsOverFutureLimit": sum(n for k,n in distribution.items() if k > catalog["policy"]["futureCameraLimit"]),

@@ -19,11 +19,31 @@ bool writeInventory(const QString& root,const m3d::v16::Runtime& rt,const m3d::v
 int main(int argc,char** argv){
     QCoreApplication app(argc,argv);QTextStream log(stderr);
     const auto args=app.arguments();
-    const bool catalogOnly=args.size()==3&&args[2]=="--catalog-only";
-    if(args.size()!=2&&!catalogOnly){log<<"Usage: cse_scene_precompiler <scene.json> [--catalog-only]\n";return 2;}
+    const bool catalogOnly=args.size()>=3&&args[2]=="--catalog-only";
+    const bool withPolicy=args.size()==5&&catalogOnly&&args[3]=="--policy";
+    if(args.size()!=2&&!(args.size()==3&&catalogOnly)&&!withPolicy){log<<"Usage: cse_scene_precompiler <scene.json> [--catalog-only [--policy file.json]]\n";return 2;}
     QFile manifestFile(args[1]);
     if(!manifestFile.open(QIODevice::ReadOnly))return 3;
-    const auto manifest=QJsonDocument::fromJson(manifestFile.readAll()).object();
+    auto manifest=QJsonDocument::fromJson(manifestFile.readAll()).object();
+    if(withPolicy){
+        QFile policyFile(args[4]);
+        if(!policyFile.open(QIODevice::ReadOnly)){log<<"Cannot read author policy\n";return 3;}
+        QJsonParseError err;const auto doc=QJsonDocument::fromJson(policyFile.readAll(),&err);
+        const auto policy=doc.object();
+        if(err.error!=QJsonParseError::NoError||!doc.isObject()||policy.value("schema").toInt()!=1||
+           policy.value("sceneRevision").toString()!=manifest.value("revision").toString()||
+           !policy.value("materialRules").isObject()||!policy.value("sharedProbes").isArray()){
+            log<<"Invalid or incompatible author policy\n";return 3;
+        }
+        const auto rules=policy.value("materialRules").toObject();
+        for(auto it=rules.begin();it!=rules.end();++it){
+            const auto p=m3d::zreflect::permission(it.value().toObject().value("planarReflection"));
+            if(p==m3d::zreflect::Permission::Invalid||p==m3d::zreflect::Permission::Unspecified){
+                log<<"Invalid material permission: "<<it.key()<<'\n';return 3;
+            }
+        }
+        manifest.insert("zReflectAuthorPolicy",policy);
+    }
     auto loaded=m3d::v16::loadScene(args[1]);
     if(!loaded){log<<loaded.error<<'\n';return 3;}
     auto built=m3d::v16::buildRuntime(loaded.scene,2048);

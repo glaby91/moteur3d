@@ -17,7 +17,8 @@ inline Permission permission(const QJsonValue& value){
     return Permission::Invalid;
 }
 inline Permission resolvePermission(const QJsonObject& object,const QJsonObject& material,const QJsonObject& manifest){
-    for(const auto& o:{object,material,manifest}){
+    const auto rule=manifest.value("zReflectAuthorPolicy").toObject().value("materialRules").toObject().value(material.value("id").toString()).toObject();
+    for(const auto& o:{object,rule,material,manifest}){
         auto p=permission(o.value("planarReflection"));if(p!=Permission::Unspecified)return p;
     }
     return Permission::Unspecified;
@@ -103,11 +104,13 @@ inline QJsonObject catalogue(const v16::Runtime& rt,const v16::SceneDatabase& db
             if(chosen)++selected;
             projections.append(QJsonObject{{"cameraId",planeId++},{"projectedFraction",area},{"selected",chosen}});
         }
-        cameras.append(QJsonObject{{"id",preset.id},{"visible",visible},{"selectedUncapped",selected},{"projections",projections}});
+        QJsonArray selectedIds;
+        for(const auto& v:projections){const auto p=v.toObject();if(p.value("selected").toBool())selectedIds.append(p.value("cameraId"));}
+        cameras.append(QJsonObject{{"id",preset.id},{"visible",visible},{"selectedUncapped",selected},{"activePlaneIds",selectedIds},{"projections",projections}});
     }
     for(const auto& l:scene.lights)lights.append(QJsonObject{{"position",vec(l.p)},{"radius",l.radius},
         {"intensity",l.intensity},{"color",vec(l.color)},{"exterior",l.exterior}});
-    return {{"schema",1},{"catalogRevision",3},{"revision",db.revision},{"status","diagnostic-only"},
+    return {{"schema",1},{"catalogRevision",3},{"authorPolicy",manifest.value("zReflectAuthorPolicy").toObject()},{"revision",db.revision},{"status","diagnostic-only"},
         {"objects",objects},{"planes",planes},{"lights",lights},{"rejected",diagnostics},{"cameraSimulation",cameras},
         {"policy",QJsonObject{{"maxNominalRoughness",policy.maxNominalRoughness},{"minArea",policy.minArea},
             {"minProjected",policy.minProjected},{"futureCameraLimit",int(policy.futureCameraLimit)},{"cameraLimitApplied",false}}},

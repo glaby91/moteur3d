@@ -1,0 +1,49 @@
+{
+  "schema": 1,
+  "sceneRevision": "V17.629",
+  "sceneTag": "scene-V17.629-42",
+  "sceneSourceCommit": "b01abf27cf96ee47867918a513c9f71a7222a976",
+  "materialRules": {
+    "v614_lift_blue_glass": {
+      "planarReflection": "disabled",
+      "reflectionProbe": "lift-west-shared"
+    },
+    "prp_window_glass": {
+      "planarReflection": "auto"
+    },
+    "cse_pool_water": {
+      "planarReflection": "auto"
+    }
+  },
+  "sharedProbes": [
+    {
+      "id": "lift-west-shared",
+      "mode": "environment-cubemap",
+      "center": [
+        -40,
+        5.915,
+        -34
+      ],
+      "influenceMin": [
+        -41.36,
+        0.55,
+        -35.56
+      ],
+      "influenceMax": [
+        -38.64,
+        11.28,
+        -32.44
+      ],
+      "update": "cached-on-lighting-or-scene-change",
+      "status": "planned-not-rendered",
+      "preservePbr": true,
+      "preserveTransmission": true
+    }
+  ],
+  "selection": {
+    "mode": "uncapped-diagnostic",
+    "targetActivePerPrimaryView": 2,
+    "globalCatalogueLimit": null,
+    "runtimeIndexRequired": true
+  }
+}
