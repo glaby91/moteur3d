@@ -1,0 +1,50 @@
+{
+  "sourceArchive": "parcours30-20261126-205922068.zip",
+  "archiveSha256": "b0bd1d04a0c1349188e27a8efc325922f5928a805776092c4fffda2fcec46b6c",
+  "originalCsvSha256": "0f9960c6861f514823beb5f9d9cdff4006471d28d27ec56f38b7f3cd558146ee",
+  "sourceMembers": [
+    "resultats.csv",
+    "SCENE_VERSION.json",
+    "SYSTEM_INFO.json"
+  ],
+  "testedEngine": {
+    "version": "17.016",
+    "build": 772,
+    "gitCommit": "c3c2e23c706c09159bf5855ede030f196671abd1",
+    "benchmarkSourceCommit": "361ce0f229ca0f09db5b801158c527f2186f66f4",
+    "route30Sha256": "f259c959f871de63a0d9f5603b2165388825b944c74ada3f9a0bc565271de675"
+  },
+  "testedScene": {
+    "revision": "V17.629",
+    "sourceCommit": "b01abf27cf96ee47867918a513c9f71a7222a976",
+    "repository": "glaby91/moteur3d-scene"
+  },
+  "packageSceneMetadata": "17.604",
+  "hardware": {
+    "model": "Dell Vostro 15-3568",
+    "cpu": "Intel Core i5-7200U",
+    "cores": 2,
+    "threads": 4,
+    "gpu": "Intel HD Graphics 620",
+    "driver": "31.0.101.2145",
+    "memory": "2 x 4 GiB DDR4, 2133 MT/s configured",
+    "os": "Windows 10 Pro x64 19045"
+  },
+  "protocol": {
+    "width": 1280,
+    "height": 720,
+    "cameras": 29,
+    "circuits": 18,
+    "secondsPerCamera": 6,
+    "vsync": "off",
+    "geometryPrep": true,
+    "readbackBuffers": 0,
+    "indirectProbes": true,
+    "triangles": 1311273,
+    "sourceVertices": 10852731,
+    "uniqueVertices": 5089120,
+    "geometryIndexCount": 10852731,
+    "planarReflectionRenderedRows": 522
+  },
+  "note": "Derived archive: 522 exact completed-frame counts and summaries, not a byte-for-byte copy of the original ZIP/CSV. Original source retained by operator."
+}
