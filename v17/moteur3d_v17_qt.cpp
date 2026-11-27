@@ -314,7 +314,7 @@ private:
         QFont f=p.font();f.setFamily(QStringLiteral("Consolas"));f.setPointSize(9);f.setBold(true);p.setFont(f);
         const QFontMetrics fm(f);int longest=0;
         for(const auto& line:lines)longest=std::max(longest,fm.horizontalAdvance(line));
-        const int pad=9,lh=fm.height()+3;
+        const int pad=5,lh=fm.height()+2;
         const int panelWidth=std::min(bounds.width()-24,longest+pad*2);
         const int panelHeight=lh*lines.size()+pad*2;
         const QRect panel(bounds.left()+12,bounds.bottom()-panelHeight-12,panelWidth,panelHeight);
@@ -522,6 +522,17 @@ public:
             }
             if(outcome.error.isEmpty()&&(outcome.directPresented||!outcome.image.isNull())){
                 lastPresentedRenderer_=outcome.renderer;
+                zReflectHud_.clear();
+                if(outcome.backendIndex==6){
+                    zReflectHud_=QStringLiteral("ZR %1 %2/%3").arg(outcome.zReflectEnabled?QStringLiteral("ON"):QStringLiteral("OFF"))
+                        .arg(outcome.zReflectActive).arg(outcome.zReflectTotal);
+                    const QString log=zReflectHud_+QStringLiteral(" deferred=%1").arg(outcome.zReflectDeferred);
+                    if(log!=lastZReflectLog_){
+                        qInfo().noquote()<<log<<"selection_us="<<outcome.zReflectSelectUs;
+                        lastZReflectLog_=log;
+                    }
+                    lastPresentedRenderer_=zReflectHud_+QStringLiteral(" | ")+lastPresentedRenderer_;
+                }
                 if(!lastPresentedRenderer_.contains(QStringLiteral("(swapchain)"))&&
                    !lastPresentedRenderer_.contains(QStringLiteral("(QImage)")))
                     lastPresentedRenderer_+=outcome.directPresented
@@ -600,8 +611,20 @@ public:
         // Return from the constructor immediately. The first scene is built
         // on a worker after show(), so Windows always shows the main window.
         canvas_->setPlaceholder(QStringLiteral("CSE WARP V17\nChargement de la scène…"));
-        if(!scenePath.isEmpty())
-            QTimer::singleShot(0,this,[this,scenePath,fallbackPath]{openScene(scenePath,fallbackPath);});
+        if(!scenePath.isEmpty()||QCoreApplication::arguments().size()==1)
+            QTimer::singleShot(0,this,[this,scenePath,fallbackPath]{
+                const bool automatic=QCoreApplication::arguments().size()==1;
+                const bool civic=scenePath.endsWith(QStringLiteral("/benchmark-civic/scene.json"),Qt::CaseInsensitive)||
+                    scenePath.endsWith(QStringLiteral("\\benchmark-civic\\scene.json"),Qt::CaseInsensitive);
+                if(!automatic||(!scenePath.isEmpty()&&!civic)){if(!scenePath.isEmpty())openScene(scenePath,fallbackPath);return;}
+                QFile f(scenePath);QString revision;
+                if(f.open(QIODevice::ReadOnly))revision=QJsonDocument::fromJson(f.readAll()).object().value("revision").toString();
+                if(!sceneUpdateChecker_)sceneUpdateChecker_=new V17SceneUpdateChecker(this);
+                sceneUpdateChecker_->checkAtStartup(scenePath,revision,this,
+                    [this,scenePath](const QString& updated){
+                        setProperty("v17.pendingSceneUpdatePath",updated);openScene(updated,scenePath);
+                    },true,[this,scenePath,fallbackPath]{if(!scenePath.isEmpty())openScene(scenePath,fallbackPath);});
+            });
     }
     // UI contract smoke: each renderer owns a unique top-level HWND.
     void smokeNativeUi(){
@@ -915,8 +938,8 @@ public:
             scenePath_.contains(QStringLiteral("benchmark-civic\\scene.json"),
                                 Qt::CaseInsensitive);
         if(!scenePath_.isEmpty()&&!civicScene)return;
-        if(!sceneUpdateChecker_){
-            sceneUpdateChecker_=new V17SceneUpdateChecker(this);
+        if(!sceneUpdateChecker_)sceneUpdateChecker_=new V17SceneUpdateChecker(this);
+        if(!sceneUpdateTimer_){
             sceneUpdateTimer_=new QTimer(this);
             sceneUpdateTimer_->setInterval(30*60*1000);
             connect(sceneUpdateTimer_,&QTimer::timeout,this,[this]{checkForLatestScene();});
@@ -927,22 +950,11 @@ public:
             [this](const QString& updatedPath){
                 QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
                 if(runtime_){
-                    settings.setValue(QStringLiteral("Scene/InstalledLatestPath"),updatedPath);
+                    settings.setValue(QStringLiteral("SceneReflect/InstalledLatestPath"),updatedPath);
                     settings.sync(); // The restarted process reads this preference immediately.
-                    const bool started=QProcess::startDetached(
-                        QCoreApplication::applicationFilePath(),{},
-                        QCoreApplication::applicationDirPath());
-                    if(started){
-                        statusBar()->showMessage(QStringLiteral(
-                            "Scène mise à jour : redémarrage de CSE WARP…"),5000);
-                        QApplication::quit();
-                    }else{
-                        statusBar()->showMessage(QStringLiteral(
-                            "Scène installée. Fermez puis relancez CSE WARP pour l’utiliser."),15000);
-                        QMessageBox::warning(this,QStringLiteral("Redémarrage nécessaire"),
-                            QStringLiteral("La nouvelle scène est installée, mais le redémarrage automatique "
-                                           "n’a pas pu démarrer. Relancez CSE WARP pour la charger."));
-                    }
+                    statusBar()->showMessage(QStringLiteral("Nouvelle scène installée : disponible au prochain démarrage."),15000);
+                    QMessageBox::information(this,QStringLiteral("Mise à jour de la scène"),
+                        QStringLiteral("La scène est installée. Redémarrez le moteur quand vous le souhaitez."));
                     return;
                 }
                 setProperty("v17.pendingSceneUpdatePath",updatedPath);
@@ -1735,6 +1747,7 @@ private:
     uint64_t sceneLoadGeneration_=0;
     QString queuedScenePath_;
     QString startupFallbackPath_;
+    QString zReflectHud_,lastZReflectLog_;
     std::shared_ptr<std::atomic<uint64_t>> renderSerial_=std::make_shared<std::atomic<uint64_t>>(0);
     std::shared_ptr<v16::Runtime> runtime_;
     // The sun and scene geometry do not change when navigating cameras.
@@ -3421,7 +3434,7 @@ private:
         if(!pendingScene.isEmpty() &&
            QFileInfo(pendingScene).absoluteFilePath()==QFileInfo(scenePath_).absoluteFilePath()){
             QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-            settings.setValue(QStringLiteral("Scene/InstalledLatestPath"),scenePath_);
+            settings.setValue(QStringLiteral("SceneReflect/InstalledLatestPath"),scenePath_);
             settings.remove(QStringLiteral("Scene/DeferredRevision"));
             setProperty("v17.pendingSceneUpdatePath",QString());
         }
@@ -3794,7 +3807,7 @@ private:
             if(canvas_){
                 nativeRendererOverlay_->move(canvas_->mapToGlobal(QPoint(12,12)));
                 const int width=std::max(220,canvas_->width()-24);
-                nativeRendererOverlay_->setFixedSize(width,34);
+                nativeRendererOverlay_->setFixedSize(width,26);
                 const QFontMetrics metrics(nativeRendererOverlay_->font());
                 nativeRendererOverlay_->setText(
                     metrics.elidedText(overlay,Qt::ElideRight,width-20));
@@ -4148,7 +4161,8 @@ int localSceneRevision(const QString& path){
 }
 QStringList defaultScenePaths(){
     QSettings settings(QStringLiteral("CSE WARP"),QStringLiteral("CSE WARP V17"));
-    const QString installedScene=settings.value(QStringLiteral("Scene/InstalledLatestPath")).toString();
+    QString installedScene=settings.value(QStringLiteral("SceneReflect/InstalledLatestPath")).toString();
+    if(!QFileInfo(installedScene).isFile())installedScene=settings.value(QStringLiteral("Scene/InstalledLatestPath")).toString();
     const QString app=QCoreApplication::applicationDirPath();
     const QString bundledScene=app+QStringLiteral("/benchmark-civic/scene.json");
     if(!installedScene.isEmpty()&&QFileInfo(installedScene).isFile()){
@@ -4160,7 +4174,7 @@ QStringList defaultScenePaths(){
             return {installedScene,bundledScene};
         return {bundledScene,installedScene};
     }
-    if(!installedScene.isEmpty())settings.remove(QStringLiteral("Scene/InstalledLatestPath"));
+    if(!installedScene.isEmpty())settings.remove(QStringLiteral("SceneReflect/InstalledLatestPath"));
     const QStringList candidates{
         bundledScene,
         app+QStringLiteral("/benchmark-civic/scene-v440-audit.json"),
@@ -4264,7 +4278,6 @@ int main(int argc,char** argv){
     window.show();
     const bool smokeRun=options.switchSmoke||options.repeatSmoke||options.walkingSmoke||
         options.scopeSmoke||options.immersiveSmoke||options.nativeUiSmoke;
-    if(options.scenePath.isEmpty()&&!smokeRun)
-        QTimer::singleShot(1200,&window,[&window]{window.checkForLatestScene();});
+    Q_UNUSED(smokeRun);
     return app.exec();
 }

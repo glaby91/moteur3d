@@ -284,7 +284,10 @@ public:
         const char* zOpt=std::getenv("M3D_V17_ZREFLECT");
         const bool zEnabled=lumaBvh&&zOpt&&std::strcmp(zOpt,"1")==0;
         zActive_.clear();zreflect::QueryStats zStats{};
+        const auto zStart=Clock::now();
         if(zEnabled)zStats=zRuntime_.select(scene,cam,zActive_);
+        const double zSelectUs=zEnabled?std::chrono::duration<double,std::micro>(Clock::now()-zStart).count():0.;
+        const uint32_t zTotal=lumaBvh?uint32_t(scene.opticalPlanes.size())+uint32_t(waterReflectionPlane_.valid):0u;
         // Two additional reusable slots, with the legacy water pass independent.
         // Oversubscription is visible in telemetry; no global descriptor limit.
         const uint32_t zDeferred=uint32_t(zActive_.size()>2?zActive_.size()-2:0);
@@ -935,6 +938,7 @@ public:
                 nativeStats->planarReflectionRendered=planarReflection;
                 nativeStats->zReflectActive=uint32_t(zActive_.size());nativeStats->zReflectCandidates=uint32_t(zStats.candidates);
                 nativeStats->zReflectNodeVisits=uint32_t(zStats.nodeVisits);nativeStats->zReflectDeferred=zDeferred;
+                nativeStats->zReflectTotal=zTotal;nativeStats->zReflectSelectUs=zSelectUs;nativeStats->zReflectEnabled=zEnabled;
                 nativeStats->lumaProbeLightingEnabled=lumaBvh&&hybrid;
                 nativeStats->lumaAdaptiveEnabled=adaptiveEnabled;
                 nativeStats->lumaAdaptiveZeroTriangles=adaptiveEnabled?lumaTraceCompute_.zeroTriangles():0;
@@ -989,6 +993,7 @@ public:
         slot.submitted.planarReflectionRendered=planarReflection;
         slot.submitted.zReflectActive=uint32_t(zActive_.size());slot.submitted.zReflectCandidates=uint32_t(zStats.candidates);
         slot.submitted.zReflectNodeVisits=uint32_t(zStats.nodeVisits);slot.submitted.zReflectDeferred=zDeferred;
+                slot.submitted.zReflectTotal=zTotal;slot.submitted.zReflectSelectUs=zSelectUs;slot.submitted.zReflectEnabled=zEnabled;
         slot.submitted.lumaProbeLightingEnabled=lumaBvh&&hybrid;
         slot.submitted.lumaAdaptiveEnabled=adaptiveEnabled;
         slot.submitted.lumaAdaptiveZeroTriangles=adaptiveEnabled?lumaTraceCompute_.zeroTriangles():0;

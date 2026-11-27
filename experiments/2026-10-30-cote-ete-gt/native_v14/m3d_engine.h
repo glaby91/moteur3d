@@ -52,7 +52,8 @@ struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,dept
     // DX11-only hardware counters; CPU/Compute paths leave these at zero.
     uint64_t gpuDrawCalls=0,gpuBoxInstances=0,gpuEllipseInstances=0,gpuFoliageInstances=0;
     bool planarReflectionRendered=false,lumaProbeLightingEnabled=false;
-    uint32_t zReflectActive=0,zReflectCandidates=0,zReflectNodeVisits=0,zReflectDeferred=0;
+    uint32_t zReflectActive=0,zReflectCandidates=0,zReflectNodeVisits=0,zReflectDeferred=0,zReflectTotal=0;
+    double zReflectSelectUs=0; bool zReflectEnabled=false;
     bool lumaAdaptiveEnabled=false;
     uint64_t lumaAdaptiveZeroTriangles=0,lumaAdaptiveTriangleCount=0;
     // Hardware D3D11 timestamp results, independent of the CPU-side Map wait.

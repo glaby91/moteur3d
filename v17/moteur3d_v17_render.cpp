@@ -209,6 +209,9 @@ bool renderCpuFallback(const Request& request,const m3d::Camera& camera,
 
 Result finalizeResult(const Request& request,Result result,RenderWork& work){
     result.milliseconds=work.stats.ms+work.shadowBuildMs;
+    result.zReflectActive=work.stats.zReflectActive+uint32_t(work.stats.planarReflectionRendered);
+    result.zReflectTotal=work.stats.zReflectTotal;result.zReflectDeferred=work.stats.zReflectDeferred;
+    result.zReflectSelectUs=work.stats.zReflectSelectUs;result.zReflectEnabled=work.stats.zReflectEnabled;
     result.renderer+=QStringLiteral(" — %1×%2").arg(request.width).arg(request.height);
     if(result.nativeFallback){
         result.renderer+=work.vulkan

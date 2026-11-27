@@ -47,7 +47,7 @@ function Get-RouteArchive($Cache, $Name, $Url, $Sha256, $Size) {
 function Get-RouteScene($Cache, $Stage) {
     Write-Host 'Recherche de la derniere scene publiee sur glaby91/moteur3d-scene...'
     $headers = @{ Accept = 'application/vnd.github+json'; 'User-Agent' = 'CSE-WARP-Parcours30' }
-    $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/glaby91/moteur3d-scene/releases/latest' -Headers $headers
+    $release = Invoke-RestMethod -Uri 'https://api.github.com/repos/glaby91/moteur3d-scene/releases/tags/scene-reflect-V17.630' -Headers $headers
     $archive = $release.assets | Where-Object name -eq 'V17-scene.zip' | Select-Object -First 1
     $version = $release.assets | Where-Object name -eq 'SCENE_VERSION.json' | Select-Object -First 1
     if (!$archive -or !$version) { throw "Release de scene incomplete : $($release.tag_name)" }
@@ -65,7 +65,7 @@ function Get-RouteScene($Cache, $Stage) {
     $manifest = Get-Content -LiteralPath $versionPath -Raw -Encoding UTF8 | ConvertFrom-Json
     if ($manifest.scene -ne 'benchmark-civic/scene.json' -or !$manifest.revision -or
         $manifest.repository -ne 'glaby91/moteur3d-scene' -or
-        $release.tag_name -notlike "scene-$($manifest.revision)-*") {
+        $release.tag_name -ne "scene-reflect-$($manifest.revision)") {
         throw "Le manifeste ne correspond pas a la scene annoncee : $($release.tag_name)"
     }
     $scenePath = Join-Path $directory $manifest.scene

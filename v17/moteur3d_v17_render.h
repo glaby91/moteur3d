@@ -25,6 +25,8 @@ struct Result {
     bool gpu=false;
     bool skyCompositing=false;
     bool directPresented=false;
+    uint32_t zReflectActive=0,zReflectTotal=0,zReflectDeferred=0;
+    double zReflectSelectUs=0; bool zReflectEnabled=false;
     bool nativeFallback=false;
     QString nativeFailure;
     QString nativeWindowDetails;

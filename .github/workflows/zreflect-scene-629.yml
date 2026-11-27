@@ -8,6 +8,10 @@ on:
       - 'v17/tools/zreflect_scene_629_report.py'
       - 'v17/CMakeLists.txt'
       - 'v17/version.json'
+      - 'v17/scene_update_manager.h'
+      - 'v17/moteur3d_v17_qt.cpp'
+      - 'v17/moteur3d_v17_render*'
+      - 'v17/tools/route30.*'
       - 'v17/tests/zreflect_index_smoke.cpp'
       - 'v17/tests/zreflect_warp_ab.cpp'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/m3d_engine.h'
@@ -185,6 +189,6 @@ jobs:
       - name: Upload experimental Windows build (engine only)
         uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.018-ZReflect-GitHub-${{ github.run_number }}-Windows-x64
+          name: CSE-WARP-V17.019-ZReflect-GitHub-${{ github.run_number }}-Windows-x64
           path: dist-zreflect/
           if-no-files-found: error
