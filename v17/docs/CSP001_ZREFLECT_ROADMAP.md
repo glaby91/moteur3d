@@ -23,6 +23,11 @@ Priorité proposée : objet > matériau > politique de scène. En l'absence d'un
 
 CSP001 conserve le diagnostic des candidats autorisés/refusés, la provenance de la décision, les coefficients optiques et les associations de plans. Une surface refusée ne reçoit pas de slot caméra/buffer dédié. Si plusieurs surfaces partagent un plan, une surface interdite ne doit pas échantillonner le buffer partagé même lorsqu'une autre surface l'utilise. La table doit distinguer les destinataires d'un reflet des objets pouvant apparaître dans ce reflet. Les changements de politique invalident les tables et caches concernés, y compris au repli local. Les exclusions de contenu des passes miroir sont des choix artistiques explicites, pas une optimisation automatique.
 
+## Budget de trois caméras miroir simultanées (décision auteur, 27/11/2026)
+Limiter à trois plans de réflexion sélectionnés simultanément pour le champ de la caméra principale. Il s'agit des caméras miroir supplémentaires Z-Reflect, pas des rayons de réfraction ni de la caméra principale. La sélection des miroirs est automatique parmi les surfaces autorisées par la politique auteur R10. Aucun passage GPU si aucun plan autorisé n'est potentiellement visible. Les surfaces coplanaires compatibles partagent un slot. Les objets hors zone mais visibles restent candidats.
+
+Proposition de classement à valider : agréger par plan la surface projetée visible et la contribution spéculaire estimée (Fresnel selon l'angle, rugosité, F0 métallique/diélectrique, éventuellement luminance du reflet), avec priorité aux vrais miroirs nets et grandes surfaces réfléchissantes ; ne pas éliminer un plan uniquement parce que son éclairage local est faible. Ordre déterministe en cas d'égalité. Hystérésis et maintien du plan sélectionné si les scores sont voisins, sans bloquer un nouveau plan nettement prioritaire. Le classement doit respecter les interdictions explicites ; ENABLED autorise, ne réserve pas un slot. Les autres plans utilisent le rendu PBR/sondes de secours (pas de texture miroir ancienne projetée incorrectement). Les caches valides réduisent les nouveaux rendus mais ne permettent pas d'excéder le plafond de trois plans sélectionnés. Un cache dormant supplémentaire peut subsister dans un pool borné sans être échantillonné. Mesurer la qualité des transitions entre plans et les cas de plus de trois candidats ; un reflet exact pour tous les plans visibles n'est pas garanti avec ce budget.
+
 ## État du socle (code écrit, pas compilé)
 | ID | Fonction | État réel |
 |---|---|---|
@@ -56,7 +61,7 @@ Priorités proposées P0 = validation indispensable, P1 = étape suivante, P2 = 
 | R05 | P1 | Gestion des buffers GPU par plan, allocation différée, pool borné, recyclage, invalidation au changement de scène/device | R04 | Pas de fuite, pas de buffer périmé, budget mémoire HD 620 vérifié |
 | R06 | P1 | Shader multi-plan : sélectionner le bon reflet par surface ; appliquer Fresnel, rugosité, métal et transmission dans le matériau, pas dans la texture commune | R04–R05 | Reflets indépendants corrects, coplanaires mutualisés, eau existante préservée |
 | R07 | P1 | Z-Reflect Spatial/Frustum : sélection conservatrice par zone et caméra, tous formats d'écran, surfaces visibles depuis zones voisines | R03–R06 | Tests limites frustum et caméra en mouvement ; zéro faux rejet dans cas de référence |
-| R08 | P2 | Z-Reflect Depth/Optical : occlusion fiable, contribution projetée et Fresnel, résolution adaptative, budget de passes, hystérésis | R07, V03 | Aucun popping ni disparition visible ; budget GPU et qualité comparés |
+| R08 | P1 | Z-Reflect Depth/Optical : sélection automatique des trois meilleurs plans autorisés au maximum, contribution projetée et Fresnel, résolution adaptative, hystérésis ; occlusion fiable en optimisation ultérieure | R07, R10, V03 | 0 à 3 plans sélectionnés et au plus 3 passes miroir par image ; test de 0/1/2/3/4+ candidats, coplanaires, interdictions, transitions stables et repli PBR ; coût GPU et qualité comparés |
 | L01 | P1 | Table lumineuse statique : soleil/ciel, lampes et dépendances de zones/plans ; ne pas assimiler zone du miroir à zone des objets reflétés | C04, R03 | Dépendances conservatrices, validation lampes extérieures/intérieures et objets réfléchis |
 | L02 | P1 | Gestionnaire lumière dynamique CPU : événements heure/soleil/ciel/lampe/intensité/couleur, recalcul ciblé, versions et snapshots immuables | L01 | Mise à jour cohérente sans accès concurrent aux globals ni blocage du rendu |
 | L03 | P1 | Thread secondaire : file coalescente bornée, annulation au changement de scène, cadence/priorité mesurées, publication atomique, repli conservatif | L02 | Tests transitions et reload, aucune course ni deadlock ; coût CPU mesuré sur 2c/4t |
@@ -73,8 +78,8 @@ Priorités proposées P0 = validation indispensable, P1 = étape suivante, P2 = 
 ## Ordre de livraison proposé
 1. V01–V03 : valider le socle sans ajouter d'autres fonctionnalités.
 2. C01–C04, R01, R10, R02–R03 : tables précompilées et lues, politique auteur appliquée avant le rendu multi-plan, sans changement optique non validé.
-3. R04–R07 : multi-plan avec buffers, rendu et sélection conservatrice.
+3. R04–R08 : multi-plan avec buffers, rendu, sélection conservatrice et plafond de trois plans ; occlusion avancée reportée.
 4. L01–L03 et R09 : tables lumineuses dynamiques, thread séparé, cache cohérent.
-5. R08, C05–C06, L04 et V04 : optimisations mesurées puis qualification finale.
+5. Occlusion avancée R08, C05–C06, L04 et V04 : optimisations mesurées puis qualification finale.
 
 À chaque incrément : mettre à jour les IDs, statut, commit, preuve de test et résultat mesuré. Ne jamais marquer « validé » sur une simulation seule. Garder les changements isolés ; aucune fusion ni compilation implicite. La scène préparatoire est sur [feature/csp001-scene-precompile](https://github.com/glaby91/moteur3d-scene/tree/feature/csp001-scene-precompile) (commit 7a7d0aa3346cb097fd4fb7c6a4100a931b3dbee8).
