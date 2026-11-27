@@ -32,7 +32,7 @@ public:
     bool valid()const{return valid_;}
     bool validate()const{
         if(b_.nodes.empty()||b_.primitiveCount!=s_.order.size()||owner_.size()!=s_.obj.size())return false;
-        std::vector<uint8_t> visited(b_.nodes.size(),0),slots(s_.order.size(),0),primitives(s_.obj.size(),0);
+        std::vector<uint8_t> visited(b_.nodes.size(),0),visitedOrderEntries(s_.order.size(),0),primitives(s_.obj.size(),0);
         std::vector<uint32_t> pending{0};
         while(!pending.empty()){
             const auto id=pending.back();pending.pop_back();
@@ -43,7 +43,7 @@ public:
                 if(n.childCount||n.firstPrimitive>s_.order.size()||n.primitiveCount>s_.order.size()-n.firstPrimitive)return false;
                 for(uint32_t i=0;i<n.primitiveCount;++i){
                     const auto at=n.firstPrimitive+i,id=s_.order[at];
-                    if(slots[at]++||id>=s_.obj.size()||primitives[id]++||!owner_[id])return false;
+                    if(visitedOrderEntries[at]++||id>=s_.obj.size()||primitives[id]++||!owner_[id])return false;
                     const auto& o=s_.obj[id];if(o.kind!=Kind::Triangle||o.mat>=s_.mat.size()||!finite(o.a)||!finite(o.b)||!finite(o.c))return false;
                 }
             }else{
@@ -52,7 +52,7 @@ public:
                 for(uint32_t i=0;i<n.childCount;++i)pending.push_back(kids[i]);
             }
         }
-        return std::find(visited.begin(),visited.end(),0)==visited.end()&&std::find(slots.begin(),slots.end(),0)==slots.end()&&std::find(primitives.begin(),primitives.end(),0)==primitives.end();
+        return std::find(visited.begin(),visited.end(),0)==visited.end()&&std::find(visitedOrderEntries.begin(),visitedOrderEntries.end(),0)==visitedOrderEntries.end()&&std::find(primitives.begin(),primitives.end(),0)==primitives.end();
     }
     bool closest(const Ray& ray,float low,HitSample& hit){
         hit={};hit.depth=INF;stack_.clear();
