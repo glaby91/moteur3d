@@ -19,7 +19,8 @@ bool writeInventory(const QString& root,const m3d::v16::Runtime& rt,const m3d::v
 int main(int argc,char** argv){
     QCoreApplication app(argc,argv);QTextStream log(stderr);
     const auto args=app.arguments();
-    if(args.size()!=2){log<<"Usage: cse_scene_precompiler <scene.json>\n";return 2;}
+    const bool catalogOnly=args.size()==3&&args[2]=="--catalog-only";
+    if(args.size()!=2&&!catalogOnly){log<<"Usage: cse_scene_precompiler <scene.json> [--catalog-only]\n";return 2;}
     QFile manifestFile(args[1]);
     if(!manifestFile.open(QIODevice::ReadOnly))return 3;
     const auto manifest=QJsonDocument::fromJson(manifestFile.readAll()).object();
@@ -31,9 +32,9 @@ int main(int argc,char** argv){
     }
     const auto root=loaded.scene.rootPath;
     if(!QDir(root).mkpath("precomputed")||
-       !m3d::csp001::save(m3d::csp001::path(root),built.runtime.renderScene,built.runtime.lumaTraceBvh4)||
+       (!catalogOnly&&!m3d::csp001::save(m3d::csp001::path(root),built.runtime.renderScene,built.runtime.lumaTraceBvh4))||
        !writeInventory(root,built.runtime,loaded.scene,manifest)){
         log<<"CSP001 write failed\n";return 5;
     }
-    log<<"CSP001 sidecars written\n";return 0;
+    log<<(catalogOnly?"Z-Reflect diagnostic catalogue written\n":"CSP001 sidecars written\n");return 0;
 }

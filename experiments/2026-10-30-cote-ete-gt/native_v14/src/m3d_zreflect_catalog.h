@@ -94,16 +94,20 @@ inline QJsonObject catalogue(const v16::Runtime& rt,const v16::SceneDatabase& db
     }
     // Per authored view, all eligible planes are evaluated. No top-three truncation.
     for(const auto& preset:rt.cameras){
-        const Camera c=v16::makeCamera(preset,1280,720);int visible=0,selected=0;
+        const Camera c=v16::makeCamera(preset,1280,720);int visible=0,selected=0,planeId=0;
+        QJsonArray projections;
         for(const auto& kv:groups)for(const auto& g:kv.second){
             double area=projectedPatch(scene,g.patch,c);
-            if(area>0){++visible;if(area>=policy.minProjected||g.explicitEnable)++selected;}
+            bool chosen=area>0&&(area>=policy.minProjected||g.explicitEnable);
+            if(area>0)++visible;
+            if(chosen)++selected;
+            projections.append(QJsonObject{{"cameraId",planeId++},{"projectedFraction",area},{"selected",chosen}});
         }
-        cameras.append(QJsonObject{{"id",preset.id},{"visible",visible},{"selectedUncapped",selected}});
+        cameras.append(QJsonObject{{"id",preset.id},{"visible",visible},{"selectedUncapped",selected},{"projections",projections}});
     }
     for(const auto& l:scene.lights)lights.append(QJsonObject{{"position",vec(l.p)},{"radius",l.radius},
         {"intensity",l.intensity},{"color",vec(l.color)},{"exterior",l.exterior}});
-    return {{"schema",1},{"catalogRevision",2},{"revision",db.revision},{"status","diagnostic-only"},
+    return {{"schema",1},{"catalogRevision",3},{"revision",db.revision},{"status","diagnostic-only"},
         {"objects",objects},{"planes",planes},{"lights",lights},{"rejected",diagnostics},{"cameraSimulation",cameras},
         {"policy",QJsonObject{{"maxNominalRoughness",policy.maxNominalRoughness},{"minArea",policy.minArea},
             {"minProjected",policy.minProjected},{"futureCameraLimit",int(policy.futureCameraLimit)},{"cameraLimitApplied",false}}},
