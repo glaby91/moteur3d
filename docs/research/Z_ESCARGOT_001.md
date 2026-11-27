@@ -52,3 +52,27 @@ Miroir plan z=0, caméra (0,0,2), source plane z=4 : intersection source (3x,3y,
 `preflight_pass5.mjs` reproduit les tests de la cinquième passe en JavaScript (aucune compilation C++). Le test C++ `v17_escargot_smoke` est enrichi (zéros, couverture, BVH invalide, spirale mince) mais volontairement non exécuté. Le laboratoire demeure CPU, sans shader natif LT, sans raffinement ni cache temporel ; budgets, vitesse et qualité à valider sur scène et matériel réels.
 
 Contrôle final : les réflexions de parties concaves d'un même objet ne sont plus écartées par principe ; la réfraction mono-interface garde son approximation de sortie. Le choix de pas hybride est identique au choix ancien sur les 30 000 cas ; aucun gain temporel natif revendiqué.
+
+## Cycle supplémentaire : optimisation / contrôle / simulation
+
+### Opti
+Les événements d'entrée/sortie des rectangles de calques découpent chaque ligne en intervalles semi-ouverts. La composition ignore les intervalles vides et ne parcourt que les calques actifs. Dans un intervalle inchangé, on réutilise le dernier pixel si le tuple **ordonné** des quatre observations originales et le statut exact/interpolé sont strictement identiques. Le cache est limité à l'intervalle, à l'image courante et aux trajets complets ; pas de cache approximatif, pas de rayon ajouté. Les lectures des textures sont toujours faites après reconstruction et classement par profondeur.
+
+### Check
+Les égalités à zéro, les échantillons exacts, les changements de calque, l'ordre des voisins (y compris égalités de distance), les chemins partiels et la profondeur sont traités séparément. Un zéro observé en dehors du rectangle d'un calque reste explicitement zéro. La réutilisation est désactivée dès que les ensembles d'observations diffèrent ou qu'un calque possède une observation positive partielle. Les valeurs RGB/alpha et les paramètres du récepteur sont conservés pour les pixels contributeurs. Dans un intervalle vide, les champs profondeur/poids inutilisés sont laissés à zéro ; les compteurs mesurent désormais les évaluations effectivement réalisées, pas le nombre logique de cellules reconstruites. Les tests C++ ajoutés comparent les sorties avec réutilisation active/inactive et protègent ces invariants ; ils n'ont pas été compilés ni exécutés.
+
+### Simu
+Script reproductible `v17/escargot/preflight_stencil.mjs` : modèle JavaScript indépendant, voisins par tri exhaustif, textures synthétiques, composition par profondeur et masques. Il reproduit les états et la logique de réutilisation, sans prétendre exécuter le C++ ni mesurer les FPS. 204 images synthétiques, 114054 pixels, 684324 composantes comparées (RGB prémultiplié, alpha, poids et profondeur utiles), erreur maximale 0. Les champs inutilisés à alpha zéro sont normalisés. Les gains comptent des opérations et ne tiennent pas compte du coût des événements/du cache.
+
+| Scénario | Cellules | Compositions avant | Après | Réutilisations | Intervalles vides (cellules) |
+|---|---:|---:|---:|---:|---:|
+| complete | 28553 | 28553 | 17252 | 11301 | 0 |
+| zero | 16562 | 16359 | 12169 | 3828 | 565 |
+| partial | 16897 | 16897 | 16365 | 532 | 0 |
+| sparse | 28698 | 10123 | 2688 | 1887 | 24123 |
+| ties | 16944 | 16944 | 11780 | 5164 | 0 |
+| dense | 6144 | 6144 | 6144 | 0 | 0 |
+| thin | 256 | 256 | 256 | 0 | 0 |
+| Total | 114054 | 95276 | 66654 | 22712 | 24688 |
+
+Recherches de voisins 95276 → 89366 ; visites de calques 479535 → 325497 ; évaluations de texture synthétiques 445220 → 294613. Aucun raffinement, aucune modification de Z Reflect ni du moteur de production. Une grille dense n'offre pas de réutilisation utile ; les trajets incomplets conservent le calcul normal. Le gain temporel réel reste à mesurer lors d'une compilation autorisée. La moyenne de quatre voisins et ses limites de précision restent inchangées.
