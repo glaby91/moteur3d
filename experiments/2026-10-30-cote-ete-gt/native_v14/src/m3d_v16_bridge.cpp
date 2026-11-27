@@ -855,9 +855,12 @@ BuildResult buildRuntime(const SceneDatabase& source,int maxTextureResolution,
     result.runtime.geometryBuildMs=stageElapsedMs();
     stageStarted=std::chrono::steady_clock::now();
     report(96,QStringLiteral("CSP001 : vérification du BVH précalculé"));
-    if(csp001::load(csp001::path(source.rootPath),render,result.runtime.lumaTraceBvh4)){
+    const char* cspMode=std::getenv("M3D_CSP001");
+    const bool cspEnabled=!(cspMode&&std::strcmp(cspMode,"0")==0);
+    if(cspEnabled&&csp001::load(csp001::path(source.rootPath),render,result.runtime.lumaTraceBvh4)){
         result.runtime.bvhBuildMs=stageElapsedMs();
         result.runtime.lumaTraceBvhBuildMs=0;
+        report(99,QStringLiteral("CSP001 : BVH précalculé chargé"));
     }else{
         render.order.resize(render.obj.size());
         std::iota(render.order.begin(),render.order.end(),0u);

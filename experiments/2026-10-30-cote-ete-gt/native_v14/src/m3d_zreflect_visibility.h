@@ -29,8 +29,9 @@ inline bool potentiallyVisible(const Bounds& b,const Camera& c){
        c.tanHalf<=0||c.aspect<=0)return true;
     // Camera basis must match shader projection. Both sides expanded by 1%;
     // no near/far or occlusion rejection, no arbitrary optical threshold.
-    const float h=c.tanHalf*1.01f,w=h*c.aspect;
-    if(!std::isfinite(w))return true;
+    // HLSL VSMain uses horizontal FOV: x/(z*tanHalf), y*aspect/(z*tanHalf).
+    const float w=c.tanHalf*1.01f,h=w/c.aspect;
+    if(!std::isfinite(w)||!std::isfinite(h))return true;
     return !(outside(b,c.eye,c.f*w+c.r)||outside(b,c.eye,c.f*w-c.r)||
              outside(b,c.eye,c.f*h+c.u)||outside(b,c.eye,c.f*h-c.u));
 }

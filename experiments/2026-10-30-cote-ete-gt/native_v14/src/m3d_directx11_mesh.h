@@ -64,11 +64,16 @@ inline WaterReflectionPlane findWaterReflectionPlane(const Scene& scene,
     finish();
     // Union of all eligible water triangles, not just the dominant plane.
     // Conservative: never reject the view of another water patch near this plane.
+    // Legacy shader tags this name even if authoring explicitly disabled water.
+    // An opaque instance is not in the transparent mesh: do not cull in that case.
+    for(const auto& material:scene.mat)
+        if(material.name=="cse_pool_water"&&material.surfaceAuthored&&!material.waterSurface)
+            best.bounds.uncertain=true;
     if(best.valid)for(const auto& t:triangles){
         const auto mat=t.v[0].material;
         if(mat>=scene.mat.size()){best.bounds.uncertain=true;continue;}
         const auto& material=scene.mat[mat];
-        if(!(material.waterSurface||(!material.surfaceAuthored&&material.name=="cse_pool_water")))continue;
+        if(!(material.waterSurface||material.name=="cse_pool_water"))continue;
         for(const auto& v:t.v)best.bounds.add({v.p[0],v.p[1],v.p[2]});
     }
     return best;

@@ -90,6 +90,9 @@ add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../v16" "${CMAKE_CURRENT_BINARY_DI
 # CSP001 offline compiler. Uses the same scene builder as the runtime.
 add_executable(cse_scene_precompiler tools/cse_scene_precompiler.cpp)
 target_link_libraries(cse_scene_precompiler PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
+add_executable(v17_csp001_smoke tests/csp001_smoke.cpp)
+target_link_libraries(v17_csp001_smoke PRIVATE moteur3d_v16_core Qt6::Core)
+add_test(NAME v17_csp001_roundtrip_visibility COMMAND v17_csp001_smoke)
 
 # The Windows ICO is compiled into the EXE so Explorer/taskbar recognize V17.
 # Generate all 16..256px sizes from the local brand artwork; no external download.

@@ -11,10 +11,11 @@
 #include <cmath>
 #include <limits>
 #include <vector>
+#include <utility>
 namespace m3d::csp001 {
 constexpr quint32 magic=0x43535031u, schema=1;
 constexpr quint32 maxPrimitives=12000000u;
-constexpr qint64 maxFileBytes=768ll*1024*1024;
+constexpr qint64 maxFileBytes=128ll*1024*1024; // larger scenes use legacy construction
 inline QString path(const QString& root){return QDir(root).filePath("precomputed/csp001-bvh.bin");}
 inline void configure(QDataStream& s){
     s.setVersion(QDataStream::Qt_6_0);s.setByteOrder(QDataStream::LittleEndian);
@@ -81,7 +82,7 @@ template<class N> inline bool validateTree(const Scene& scene,const std::vector<
     size_t visited=0,leaves=0;
     while(!work.empty()){
         const auto item=work.back();work.pop_back();
-        if(item.id>=nodes.size()||seen[item.id]||item.depth>48)return false;
+        if(item.id>=nodes.size()||seen[item.id]||item.depth>(maxChildren==4?20u:48u))return false;
         seen[item.id]=1;++visited;
         const auto t=view(nodes[item.id]);
         if(!validBox(t.lo,t.hi))return false;
@@ -132,7 +133,9 @@ inline bool save(const QString& file,const Scene& scene,const LumaTraceBvh4& bvh
     if(key.size()!=32||scene.root!=0||bvh.primitiveCount!=scene.order.size()||
        !validateOrder(scene,scene.order)||!validateTree(scene,scene.order,scene.node,2)||
        !validateTree(scene,scene.order,bvh.nodes,4))return false;
-    QByteArray payload;QDataStream s(&payload,QIODevice::WriteOnly);configure(s);
+    const quint64 expected=52ull+4ull*scene.order.size()+41ull*scene.node.size()+56ull*bvh.nodes.size();
+    if(expected>quint64(maxFileBytes-32))return false;
+    QByteArray payload;payload.reserve(qsizetype(expected));QDataStream s(&payload,QIODevice::WriteOnly);configure(s);
     s<<magic<<schema<<quint32(scene.order.size())<<quint32(scene.node.size())<<quint32(bvh.nodes.size());
     if(s.writeRawData(key.constData(),32)!=32)return false;
     for(auto id:scene.order)s<<quint32(id);
@@ -152,7 +155,8 @@ inline bool load(const QString& file,Scene& scene,LumaTraceBvh4& bvh){
     const auto digest=payload.right(32);payload.chop(32);
     if(QCryptographicHash::hash(payload,QCryptographicHash::Sha256)!=digest)return false;
     QDataStream s(payload);configure(s);
-    quint32 tag,ver,p,n,m;s>>tag>>ver>>p>>n>>m;
+    quint32 tag=0,ver=0,p=0,n=0,m=0;s>>tag>>ver>>p>>n>>m;
+    if(s.status()!=QDataStream::Ok)return false;
     if(tag!=magic||ver!=schema||p==0||p>maxPrimitives||p!=scene.obj.size()||
        n==0||m==0||n>2ull*p||m>n||
        quint64(payload.size())!=52ull+4ull*p+41ull*n+56ull*m)return false;
