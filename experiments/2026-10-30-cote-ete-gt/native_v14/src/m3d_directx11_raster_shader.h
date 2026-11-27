@@ -141,7 +141,8 @@ bool sampleOptical(VSOut i,float2 distortion,out float3 reflected){
     reflected=slot==0?zReflection0.SampleLevel(probeSampler,uv,0).rgb:zReflection1.SampleLevel(probeSampler,uv,0).rgb;
     return true;
 }
-// Compact exact top-four search. Integer pixel positions and stable sample
+)";
+inline constexpr char kEscargotGpuShader[] = R"(// Compact exact top-four search. Integer pixel positions and stable sample
 // IDs preserve measured zeros and deterministic equidistant ties.
 void escNearest(uint start,uint count,int2 pixel,out uint4 addr,out uint4 dist,out uint n){
     addr=0;dist=0xffffffffu;n=0;uint4 ids=0xffffffffu;
@@ -256,7 +257,8 @@ bool escGpuSample(VSOut i,out float3 reflected,out float coverage,out float weig
     float4 result=(acc[0]+acc[1]+acc[2]+acc[3])/max(1u,lanes);
     coverage=saturate(result.a);if(coverage<=.00001)return false;reflected=max(result.rgb/coverage,0);return true;
 }
-bool sampleEscargot(VSOut i,out float3 reflected,out float coverage,out float weight){
+)";
+inline constexpr char kShaderAfterEscargot[] = R"(bool sampleEscargot(VSOut i,out float3 reflected,out float coverage,out float weight){
     reflected=0;coverage=0;weight=0;
     if(zPlaneIds.z>=0||zPlaneIds.w>.5)return false;
     if(zPlaneIds.z< -1.5)return escGpuSample(i,reflected,coverage,weight);

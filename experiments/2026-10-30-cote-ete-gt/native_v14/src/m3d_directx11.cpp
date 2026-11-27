@@ -1383,7 +1383,9 @@ private:
         HRESULT hr=D3D11CreateDevice(nullptr,driver,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device_,&feature,&context_);
         if(FAILED(hr)){error=L"Aucun périphérique Direct3D 11 matériel n’est disponible.";return false;}
         // Keep each embedded HLSL literal below MSVC C2026 limits, then compile the unchanged source.
-        const std::string shaderSource = std::string(dx11::shaders::raster::kShader) + dx11::shaders::raster::kShaderPart2;
+        const std::string shaderSource = std::string(dx11::shaders::raster::kShader) +
+            dx11::shaders::raster::kEscargotGpuShader +
+            dx11::shaders::raster::kShaderAfterEscargot + dx11::shaders::raster::kShaderPart2;
         ComPtr<ID3DBlob> vsCode,boxVsCode,ellipseVsCode,psCode,errors;
         auto shaderError=[&](const wchar_t* prefix){
             std::wstring result(prefix);
