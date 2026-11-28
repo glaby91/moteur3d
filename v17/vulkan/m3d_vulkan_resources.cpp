@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <stdexcept>
 #include <string>
+#ifdef __APPLE__
+#include <iostream>
+#endif
 
 namespace m3d::vulkan::resources {
 namespace {
@@ -121,13 +124,40 @@ Texture createImage3D(VkDevice device,const VkPhysicalDeviceMemoryProperties& pr
     create.samples=VK_SAMPLE_COUNT_1_BIT;create.tiling=VK_IMAGE_TILING_OPTIMAL;
     create.usage=VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     create.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
+    try {
     check(vkCreateImage(device,&create,nullptr,&texture.image),"GI 3D image");
     VkMemoryRequirements requirements{};
     vkGetImageMemoryRequirements(device,texture.image,&requirements);
     VkMemoryAllocateInfo allocation{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
     allocation.allocationSize=requirements.size;
+#ifdef __APPLE__
+    // Optimal-tiling 3D images are never mapped by this renderer. On MoltenVK,
+    // choosing host-visible memory causes bindDeviceMemory to upload through
+    // replaceRegion in the Apple paravirtual GPU driver (Build 2 EXC_BAD_ACCESS).
+    // Use a strictly non-host-visible device-local type and dedicated binding.
+    uint32_t privateBits=0;
+    for(uint32_t i=0;i<properties.memoryTypeCount;++i){
+        const auto flags=properties.memoryTypes[i].propertyFlags;
+        if((flags&VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) &&
+           !(flags&(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT|VK_MEMORY_PROPERTY_PROTECTED_BIT)))
+            privateBits|=1u<<i;
+    }
+    if(!(requirements.memoryTypeBits&privateBits))
+        throw std::runtime_error("GI 3D: no compatible GPU-private Vulkan memory on macOS");
+    allocation.memoryTypeIndex=findMemoryType(properties,requirements.memoryTypeBits&privateBits,
+                                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VkMemoryDedicatedAllocateInfo dedicated{VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO};
+    dedicated.image=texture.image;
+    allocation.pNext=&dedicated;
+    std::clog<<"[CSE WARP Vulkan] GI 3D "<<width<<"x"<<height<<"x"<<depth
+             <<" private memory type="<<allocation.memoryTypeIndex
+             <<" flags="<<properties.memoryTypes[allocation.memoryTypeIndex].propertyFlags
+             <<" compatibleBits="<<requirements.memoryTypeBits
+             <<" bytes="<<allocation.allocationSize<<std::endl;
+#else
     allocation.memoryTypeIndex=findMemoryType(properties,requirements.memoryTypeBits,
                                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+#endif
     check(vkAllocateMemory(device,&allocation,nullptr,&texture.memory),"GI 3D memory");
     check(vkBindImageMemory(device,texture.image,texture.memory,0),"GI 3D bind");
     VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
@@ -136,6 +166,10 @@ Texture createImage3D(VkDevice device,const VkPhysicalDeviceMemoryProperties& pr
     view.subresourceRange.levelCount=1;view.subresourceRange.layerCount=1;
     check(vkCreateImageView(device,&view,nullptr,&texture.view),"GI 3D view");
     return texture;
+    }catch(...){
+        destroyTexture(device,texture);
+        throw;
+    }
 }
 
 void destroyTexture(VkDevice device,Texture& texture) noexcept {

@@ -351,6 +351,24 @@ class VulkanRaster final {
                                       forceArrayView,mipLevels,samples);
     }
     Texture image3D(uint32_t w,uint32_t h,uint32_t d){
+#ifdef __APPLE__
+        // Keep RGBA32F and trilinear sampling: unsupported hardware must fail
+        // explicitly rather than silently lower GI precision or disable it.
+        constexpr VkFormat format=VK_FORMAT_R32G32B32A32_SFLOAT;
+        constexpr VkImageUsageFlags usage=VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        VkFormatProperties formatProperties{};
+        vkGetPhysicalDeviceFormatProperties(physical_,format,&formatProperties);
+        constexpr VkFormatFeatureFlags required=VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT|
+            VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT|VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+        if((formatProperties.optimalTilingFeatures&required)!=required)
+            throw std::runtime_error("GI 3D RGBA32F sampled/linear/transfer format unsupported on macOS");
+        VkImageFormatProperties limits{};
+        vkcheck(vkGetPhysicalDeviceImageFormatProperties(physical_,format,VK_IMAGE_TYPE_3D,
+            VK_IMAGE_TILING_OPTIMAL,usage,0,&limits),"GI 3D RGBA32F image capabilities");
+        if(!w||!h||!d||w>limits.maxExtent.width||h>limits.maxExtent.height||d>limits.maxExtent.depth||
+           !(limits.sampleCounts&VK_SAMPLE_COUNT_1_BIT))
+            throw std::runtime_error("GI 3D dimensions or sample count unsupported on macOS");
+#endif
         return resources::createImage3D(device_,memoryTypes_,w,h,d);
     }
     void uploadProbe(Texture& t,const float* data,size_t bytes,bool uploaded){
