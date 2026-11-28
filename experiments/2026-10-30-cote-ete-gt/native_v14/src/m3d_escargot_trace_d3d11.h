@@ -229,10 +229,11 @@ void CSPaths(uint3 tid:SV_DispatchThreadID){
     uint i=tid.x;if(i>=queryCount)return;
     PathQuery path=paths[i];Query q=path.initial;
     uint used=0,crossings=0,error=0;bool secondary=false;
+    PathEvent first;first.q=q;first.hit=(Hit)0;
     precise float primaryTransmission=1.0;
     while(used<path.quota&&crossings<path.maxCrossings){
         Hit hit=traceOne(q);PathEvent ev;ev.q=q;ev.hit=hit;
-        events[path.offset+used]=ev;++used;++crossings;
+        if(used==0u)first=ev;else events[path.offset+used]=ev;++used;++crossings;
         if(hit.status>1u){error=1;break;}
         if(hit.status==0u)break;
         OpticalAttr a=optical[hit.primitive];
@@ -263,7 +264,7 @@ void CSPaths(uint3 tid:SV_DispatchThreadID){
     }
     // Every path has at least two reserved entries and at least one event.
     // Write count/error only after the actual path has terminated.
-    PathEvent first=events[path.offset];first.hit.pad.x=float(used);first.hit.pad.y=float(error);events[path.offset]=first;
+    first.hit.pad.x=float(used);first.hit.pad.y=float(error);events[path.offset]=first;
 }
 )";
 class TraceBatch {

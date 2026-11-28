@@ -30,7 +30,7 @@ public:
     }
     Prepared(const Prepared&)=delete;Prepared& operator=(const Prepared&)=delete;
     const std::vector<uint32_t>& owners()const{return owners_;}
-    Result frame(const Camera& cam,int w,int h,const Options& opt={},bool composeCpu=true,bool wavefront=false,bool gpuWave=false,WaveStats* waveStats=nullptr){
+    Result frame(const Camera& cam,int w,int h,const Options& opt={},bool composeCpu=true,bool wavefront=false,bool gpuWave=false,WaveStats* waveStats=nullptr,ResidentStats* residentStats=nullptr){
         const auto begin=FrameClock::now();Result out;out.prepareMs=prepareMs_;
         if(!error_.empty()){out.error=error_;return out;}
         if(rt_.renderScene.gpuCacheRevision!=revision_||opt.mode!=mode_){out.error="stale prepared scene/mode";return out;}
@@ -51,7 +51,13 @@ public:
             if(!c[i].budget){s.deferred=true;++out.deferred;}
             else{jobs.push_back(i);out.outputCells+=uint64_t(c[i].bounds.w)*c[i].bounds.h;}
         }
-        if(wavefront){
+        if(residentStats){
+            auto tracePaths=[&](const std::vector<EscargotPathQuery>& queries,std::vector<EscargotPathEvent>& events,EscargotPathTiming& timing,std::string& error){
+                std::wstring failure;if(!traceEscargotGpuPaths(rt_.renderScene,rt_.lumaTraceBvh4,queries,events,timing,failure)){error=std::string(failure.begin(),failure.end());return false;}return true;
+            };
+            if(!sampleResidentPaths(out.surfaces,rt_.renderScene,owners_,cam,w,h,opt,out,*residentStats,tracePaths))return out;
+            for(auto& s:out.surfaces)if(!s.deferred)makeLayers(s);
+        }else if(wavefront){
             WaveStats localStats;auto& ws=waveStats?*waveStats:localStats;ws={};
             auto traceBatch=[&](const std::vector<EscargotRayQuery>& queries,std::vector<HitSample>& hits,std::string& error){
                 hits.resize(queries.size());

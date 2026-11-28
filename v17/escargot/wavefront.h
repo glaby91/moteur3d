@@ -69,11 +69,8 @@ inline void advanceWave(WavePath& p,Surface& sf,Sample& s,const Scene& scene,con
     }
     if(p.crossings>=opt.maxCrossings)p.done=true;
 }
-// Trace callback returns HitSample in request order. GPU only supplies
-// actual intersections; there is no speculative ray, nor CPU fallback.
-template<class Trace>
-bool sampleWavefront(std::vector<Surface>& surfaces,const Scene& scene,const Camera& cam,int w,int h,const Options& opt,Result& stats,WaveStats& ws,Trace&& trace){
-    std::vector<WavePath> paths;paths.reserve(opt.rayBudget/2);
+inline bool initializeWavePaths(std::vector<Surface>& surfaces,const Camera& cam,int w,int h,const Options& opt,Result& stats,std::vector<WavePath>& paths){
+    paths.clear();paths.reserve(opt.rayBudget/2);
     uint64_t allocated=0;
     for(size_t i=0;i<surfaces.size();++i){
         auto& sf=surfaces[i];if(sf.deferred)continue;
@@ -87,6 +84,13 @@ bool sampleWavefront(std::vector<Surface>& surfaces,const Scene& scene,const Cam
             p.low=.08f/std::max(1e-6f,dot(p.ray.d,cam.f));paths.push_back(std::move(p));
         }
     }
+    return true;
+}
+// Trace callback returns HitSample in request order. GPU only supplies
+// actual intersections; there is no speculative ray, nor CPU fallback.
+template<class Trace>
+bool sampleWavefront(std::vector<Surface>& surfaces,const Scene& scene,const Camera& cam,int w,int h,const Options& opt,Result& stats,WaveStats& ws,Trace&& trace){
+    std::vector<WavePath> paths;if(!initializeWavePaths(surfaces,cam,w,h,opt,stats,paths))return false;
     std::vector<size_t> active;std::vector<EscargotRayQuery> queries;std::vector<HitSample> hits;
     active.reserve(paths.size());queries.reserve(paths.size());hits.reserve(paths.size());
     for(;;){
@@ -112,4 +116,63 @@ bool sampleWavefront(std::vector<Surface>& surfaces,const Scene& scene,const Cam
     }
     return true;
 }
+// Resident GPU paths: a single dispatch returns only the bounded transcript.
+// CPU uses it to build the existing sparse layers. No CPU intersection, and
+// no CPU decision is fed back into the GPU path after its launch.
+struct ResidentStats {EscargotPathTiming timing;uint32_t paths=0;uint64_t eventBytes=0;double reconstructionMs=0;};
+inline bool samePathQuery(const EscargotRayQuery& a,const EscargotRayQuery& b){
+    if(a.low!=b.low||a.previousPrimitive!=b.previousPrimitive)return false;
+    for(int k=0;k<3;++k)if(a.origin[k]!=b.origin[k]||a.direction[k]!=b.direction[k])return false;
+    return true;
+}
+template<class TracePaths>
+bool sampleResidentPaths(std::vector<Surface>& surfaces,const Scene& scene,const std::vector<uint32_t>& owners,
+    const Camera& cam,int w,int h,const Options& opt,Result& stats,ResidentStats& rs,TracePaths&& trace){
+    rs={};
+    if(opt.mode!=Mode::Reflection){stats.error="resident GPU paths currently support reflection only";return false;}
+    std::vector<WavePath> paths;if(!initializeWavePaths(surfaces,cam,w,h,opt,stats,paths))return false;
+    std::vector<EscargotPathQuery> input;input.reserve(paths.size());uint32_t offset=0;
+    for(const auto& p:paths){
+        const uint32_t count=std::min(p.quota,2*opt.maxCrossings);
+        if(count>opt.rayBudget-offset){stats.error="resident path quota overflow";return false;}
+        input.push_back({waveQuery(p),surfaces[p.surface].candidate.object,count,offset,opt.maxCrossings});offset+=count;
+    }
+    rs.paths=uint32_t(paths.size());
+    std::vector<EscargotPathEvent> events;
+    if(!input.empty()&&(!trace(input,events,rs.timing,stats.error)||events.size()!=offset)){
+        if(stats.error.empty())stats.error="resident path output size mismatch";return false;
+    }
+    rs.eventBytes=uint64_t(events.size())*sizeof(EscargotPathEvent);
+    const auto start=std::chrono::steady_clock::now();
+    // Read all paths only AFTER completion. Rebuild the CPU-side sparse
+    // representation, validating every GPU-generated continuation.
+    for(size_t i=0;i<paths.size();++i){
+        auto& p=paths[i];auto& sf=surfaces[p.surface];auto& s=sf.samples[p.sample];const auto& q=input[i];
+        const auto& header=events[q.offset].hit;
+        const float countValue=header.pad[0];
+        if(!std::isfinite(countValue)||countValue<1||countValue>q.quota||countValue!=std::floor(countValue)||header.pad[1]!=0){
+            stats.error="resident GPU path invalid event count or traversal failure";return false;
+        }
+        const uint32_t n=uint32_t(countValue);
+        for(uint32_t j=0;j<n;++j){
+            const auto& ev=events[q.offset+j];HitSample hit;
+            if(p.done||p.used>=p.quota||!samePathQuery(waveQuery(p),ev.query)){
+                stats.error="resident GPU continuation differs at path "+std::to_string(i)+" event "+std::to_string(j);return false;
+            }
+            if(!decodeWaveHit(scene,owners,ev.query,ev.hit,hit)){stats.error="invalid resident GPU hit";return false;}
+            ++p.used;++sf.queries;++stats.rays;
+            if(opt.captureQueries)sf.recorded.push_back({ev.query,hit.object?hit.primitive:0xffffffffu,hit.depth});
+            advanceWave(p,sf,s,scene,opt,hit,stats);
+        }
+        if(!p.done&&p.used<p.quota){stats.error="resident GPU path terminated before quota";return false;}
+    }
+    for(auto& sf:surfaces){
+        if(sf.deferred)continue;sf.complete=true;
+        for(const auto& s:sf.samples){if(s.complete)++sf.completePaths;else{++sf.unknownPaths;sf.complete=false;}}
+        stats.completePaths+=sf.completePaths;stats.unknownPaths+=sf.unknownPaths;
+    }
+    rs.reconstructionMs=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+    return true;
+}
+
 }
