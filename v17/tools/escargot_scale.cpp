@@ -34,7 +34,7 @@ static m3d::v16::SceneDatabase synthetic(int n,double aspect){
     material("source_yellow",xyz(.85,.75,.1),0,0,.75,false);
     meshes.append(QJsonObject{{"id","quad"},{"type","triangle_mesh"},{"vertices",QJsonArray{xyz(-.5,-.5,0),xyz(-.5,.5,0),xyz(.5,.5,0),xyz(.5,-.5,0)}},{"faces",QJsonArray{QJsonArray{0,1,2},QJsonArray{0,2,3}}},{"uv",QJsonArray{QJsonArray{0,0},QJsonArray{0,1},QJsonArray{1,1},QJsonArray{1,0}}}});
     auto add=[&](QString id,QString material,double x,double y,double z,double w,double h,bool mirror){
-        instances.append(QJsonObject{{"id",id},{"geometry","quad"},{"material",material},{"position",xyz(x,y,z)},{"size",xyz(w,h,1)},{"planarReflection",mirror?"enabled":"disabled"}});
+        instances.append(QJsonObject{{"id",id},{"geometry","quad"},{"material",material},{"position",xyz(x,y,z)},{"size",xyz(w,h,1)},{"rotationY",id.startsWith("source_")?180:0},{"planarReflection",mirror?"enabled":"disabled"}});
     };
     const int cols=n==1?1:n==5?5:n==10?5:n==20?5:10,rows=n/cols;
     const double tanHalf=std::tan(55.*3.141592653589793/360.);
@@ -49,7 +49,8 @@ static m3d::v16::SceneDatabase synthetic(int n,double aspect){
     add("backdrop","background",0,0,17,40,30,false);
     // Source wall behind the camera, wide enough for all mirror rays.
     // Three distinct colored stripes to expose UV/projection anomalies.
-    for(int i=0;i<9;++i)add(QString("source_%1").arg(i),QStringList{"source_red","source_blue","source_yellow"}[i%3],(i-4)*12.,0,-4,12,50,false);
+    const QString sourceMaterials[]={"source_red","source_blue","source_yellow"};
+    for(int i=0;i<9;++i)add(QString("source_%1").arg(i),sourceMaterials[i%3],(i-4)*12.,0,-4,12,50,false);
     auto resource=[&](QString kind,QString key,QJsonArray data){sector.resources[kind].append(m3d::v16::Resource{kind+".json",QJsonObject{{key,data}}});};
     resource("geometry","meshes",meshes);resource("materials","materials",mats);resource("instances","instances",instances);
     resource("pbr","sets",QJsonArray{QJsonObject{{"id","pbr"},{"resolution",64},{"pattern","plaster"}}});
@@ -98,8 +99,9 @@ static bool runView(m3d::v16::Runtime& rt,const m3d::v16::SceneDatabase& db,cons
     for(int m=0;m<3;++m)if(!run(m,-1,false))return false;
     // Six permutations balance position and immediate predecessor when reps is a multiple of six.
     const int orders[6][3]={{0,1,2},{1,2,0},{2,0,1},{0,2,1},{2,1,0},{1,0,2}};
-    for(int j=0;j<reps;++j)for(int m:orders[j%6])if(!run(m,j,true))return false;
-    const bool parity=stats[1].pixels==stats[2].pixels;
+    bool parity=stats[1].pixels==stats[2].pixels;
+    for(int j=0;j<reps;++j){for(int m:orders[j%6])if(!run(m,j,true))return false;
+        parity=parity&&stats[1].pixels==stats[2].pixels;}
     QJsonArray result;
     for(int m=0;m<3;++m){
         auto& x=stats[m];uint64_t changed=0,absolute=0;int maxError=0;
@@ -130,7 +132,7 @@ static bool runView(m3d::v16::Runtime& rt,const m3d::v16::SceneDatabase& db,cons
     }
     if(!save(out,id+"-empty.png",control,w,h))return false;
     const bool setupOk=n<=0||(int(candidates.size())==n&&int(scene.opticalPlanes.size())==n&&stats[0].active==uint32_t(std::min(n,2)));
-    summary.append(QJsonObject{{"view",id},{"requested_panels",n},{"catalog_planes",int(scene.opticalPlanes.size())},{"escargot_projected_candidates",int(candidates.size())},{"setup_valid",setupOk},{"F32_F16_pixel_parity",parity},{"modes",result}});
+    summary.append(QJsonObject{{"view",id},{"requested_panels",n},{"catalog_planes",int(scene.opticalPlanes.size())},{"escargot_projected_candidates",int(candidates.size())},{"setup_valid",setupOk},{"F32_F16_pixel_parity",parity},{"F32_vs_A_time_reduction_percent",100.*(1.-quantile(stats[1].wall,.5)/std::max(.000001,quantile(stats[0].wall,.5)))},{"F16_vs_A_time_reduction_percent",100.*(1.-quantile(stats[2].wall,.5)/std::max(.000001,quantile(stats[0].wall,.5)))},{"modes",result}});
     log.flush();coverage.flush();
     return setupOk&&parity;
 }
