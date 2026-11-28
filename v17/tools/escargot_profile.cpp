@@ -79,10 +79,13 @@ int main(int argc,char** argv){
                     else{
                         const auto& plan=planner.build(cam,shadow,cfg.w,cfg.h,m);
                         if(mode==2){
-                            auto sky=plan;sky.projectedKey=0;sky.projectedVertices.clear();
+                            m3d::EscargotPacketBuild sky;sky.rasterProjected=true;
+                            sky.projectedKey=plan.projectedKey|(uint64_t(1)<<63);
+                            sky.data=plan.data;sky.projectedRanges=plan.projectedRanges;
                             for(auto& r:sky.projectedRanges)r.first=r.opaque=r.transparent=0;
-                            // Copy above is intentional and included in wall time;
-                            // use GPU-only comparison to isolate composition.
+                            // No geometry copy and identical cache policy to full.
+                            // Planner still runs in both modes; compare GPU-only
+                            // and end-to-end timings independently.
                             ok=m3d::renderLumaTraceEscargotGpuBuiltNative(rt.renderScene,rt.lumaTraceBvh4,shadow,cam,cfg.w,cfg.h,hwnd,sky,st,bt,error);
                         }else ok=m3d::renderLumaTraceEscargotGpuBuiltNative(rt.renderScene,rt.lumaTraceBvh4,shadow,cam,cfg.w,cfg.h,hwnd,plan,st,bt,error);
                     }
