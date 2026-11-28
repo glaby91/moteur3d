@@ -5,9 +5,10 @@
 #include <memory>
 #include <iterator>
 #include <set>
+#include <chrono>
 namespace m3d::escargot::projected {
 constexpr uint32_t maxReceivers=4,rayBudget=768,triangleBudget=120000,maxSources=160;
-struct Metrics {uint32_t catalogue=0,patches=0,visible=0,water=0,rays=0,receivers=0,curved=0,deferred=0,sources=0,triangles=0,omitted=0,mini=0,lightingSamples=0;bool reused=false;};
+struct Metrics {uint32_t catalogue=0,patches=0,visible=0,water=0,rays=0,receivers=0,curved=0,deferred=0,sources=0,triangles=0,omitted=0,mini=0,lightingSamples=0;bool reused=false;double totalMs=0,receiverMs=0,discoverMs=0,rankMs=0,cullMs=0,sortMs=0,emitMs=0;uint64_t testedObjects=0,testedTriangles=0;};
 struct Plane {V p,n;bool valid=false;int side=0;};
 struct ReceiverPatch {Candidate candidate;Plane plane;double area=0;};
 inline V mirror(V p,Plane plane){return p-plane.n*(2.f*dot(p-plane.p,plane.n));}
@@ -149,11 +150,13 @@ public:
     }
     bool valid()const{return bool(trace_);}
     const EscargotPacketBuild& build(const Camera& c,const ShadowMap& sh,int w,int h,Metrics& m){
+        using Clock=std::chrono::steady_clock;const auto start=Clock::now();auto stage=start;
+        auto ms=[](Clock::time_point a){return std::chrono::duration<double,std::milli>(Clock::now()-a).count();};
         m=Metrics{};++frame_;float day;V sun;escargotLightingSnapshot(day,sun);
         std::array<float,16> key={c.eye.x,c.eye.y,c.eye.z,c.f.x,c.f.y,c.f.z,c.r.x,c.r.y,c.r.z,c.u.x,c.u.y,c.u.z,c.tanHalf,c.aspect,float(w),float(h)};
         const bool lightChanged=day_!=day||length(sun-sun_)>1e-5f;
         if(lightChanged){day_=day;sun_=sun;++epoch_;}
-        if(cacheValid_&&key==key_&&!lightChanged&&frame_%8!=0){m=cachedMetrics_;m.rays=m.mini=m.lightingSamples=0;m.reused=true;return cached_;}
+        if(cacheValid_&&key==key_&&!lightChanged&&frame_%8!=0){m=cachedMetrics_;m.rays=m.mini=m.lightingSamples=0;m.receiverMs=m.discoverMs=m.rankMs=m.cullMs=m.sortMs=m.emitMs=0;m.testedObjects=m.testedTriangles=0;m.totalMs=ms(start);m.reused=true;return cached_;}
         cached_=EscargotPacketBuild{};auto& plan=cached_;plan.rasterProjected=true;
         static std::atomic<uint64_t> nextKey{1};plan.projectedKey=nextKey.fetch_add(1,std::memory_order_relaxed);
         plan.data.resize((2+2*size_t(rt_.objects.size()))*4,0);plan.data[0]=float(rt_.objects.size());
@@ -179,13 +182,13 @@ public:
             if(admitted.size()>=maxReceivers){++m.deferred;continue;}
             used.insert(a.candidate.object);admitted.push_back(a);
         }
-        const auto& s=rt_.renderScene;
+        m.receiverMs=ms(stage);const auto& s=rt_.renderScene;
         for(size_t k=0;k<admitted.size();++k){
             const auto& a=admitted[k].candidate;auto p=admitted[k].plane;uint32_t quota=m.rays+(rayBudget-m.rays)/uint32_t(admitted.size()-k);
-            discover(a,p,c,w,h,quota,m);
+            stage=Clock::now();discover(a,p,c,w,h,quota,m);m.discoverMs+=ms(stage);stage=Clock::now();
             struct Ranked{uint32_t id;double score;bool seen;};
             std::vector<Ranked> ranked;auto& history=seen_[a.object];
-            for(const auto& b:sources_){if(b.id==a.object)continue;
+            for(const auto& b:sources_){if(b.id==a.object)continue;++m.testedObjects;
                 Rect r=intersection(a.bounds,mirroredBounds(b.lo,b.hi,p,c,w,h));if(!r.valid())continue;
                 const auto it=history.find(b.id);bool observed=it!=history.end();
                 // Geometry admits unobserved objects, so sparse misses are not holes.
@@ -193,7 +196,7 @@ public:
                 ranked.push_back({b.id,double(r.w)*r.h/(1.+.04*depth),observed});}
             std::sort(ranked.begin(),ranked.end(),[](const Ranked& x,const Ranked& y){
                 if(x.seen!=y.seen)return x.seen>y.seen;return x.score==y.score?x.id<y.id:x.score>y.score;});
-            std::vector<TriangleRef> opaque,transparent;
+            m.rankMs+=ms(stage);stage=Clock::now();std::vector<TriangleRef> opaque,transparent;
             const uint32_t limit=(triangleBudget-m.triangles)/uint32_t(admitted.size()-k);
             uint32_t count=0,usedSources=0;
             const float sign=dot(c.eye-p.p,p.n)>=0?1.f:-1.f;
@@ -201,7 +204,7 @@ public:
                 if(usedSources>=maxSources||count>=limit){++m.omitted;continue;}
                 uint32_t before=count;const auto opaqueBefore=opaque.size(),transparentBefore=transparent.size();
                 bool overflow=false;
-                for(int j=0;j<o.triangleCount;++j){uint32_t id=uint32_t(o.firstTriangle+j);const auto& t=s.obj[id];const auto& mat=s.mat[t.mat];
+                for(int j=0;j<o.triangleCount;++j){++m.testedTriangles;uint32_t id=uint32_t(o.firstTriangle+j);const auto& t=s.obj[id];const auto& mat=s.mat[t.mat];
                     if(waterMaterial(mat)||opacity(mat)<.001f)continue;
                     if(std::max({sign*dot(t.a-p.p,p.n),sign*dot(t.b-p.p,p.n),sign*dot(t.c-p.p,p.n)})<=.0001f)continue;
                     // Narrow footprint test using the reflected triangle AABB.
@@ -213,8 +216,8 @@ public:
                 if(overflow){opaque.resize(opaqueBefore);transparent.resize(transparentBefore);count=before;++m.omitted;continue;}
                 if(count>before){++usedSources;++m.sources;}
             }
-            std::sort(transparent.begin(),transparent.end(),[](const TriangleRef& x,const TriangleRef& y){return x.depth==y.depth?x.id<y.id:x.depth>y.depth;});
-            EscargotProjectedRange range;range.receiver=a.object;range.first=uint32_t(plan.projectedVertices.size()/10);
+            m.cullMs+=ms(stage);stage=Clock::now();std::sort(transparent.begin(),transparent.end(),[](const TriangleRef& x,const TriangleRef& y){return x.depth==y.depth?x.id<y.id:x.depth>y.depth;});
+            m.sortMs+=ms(stage);stage=Clock::now();EscargotProjectedRange range;range.receiver=a.object;range.first=uint32_t(plan.projectedVertices.size()/10);
             range.opaque=uint32_t(opaque.size()*3);range.transparent=uint32_t(transparent.size()*3);
             range.x=std::max(0,a.bounds.x-1);range.y=std::max(0,a.bounds.y-1);
             range.w=std::min(w,a.bounds.x+a.bounds.w+1)-range.x;range.h=std::min(h,a.bounds.y+a.bounds.h+1)-range.y;
@@ -223,9 +226,9 @@ public:
             plan.data[at]=float(plan.projectedRanges.size()+1);plan.data[at+1]=p.n.x;plan.data[at+2]=p.n.y;plan.data[at+3]=p.n.z;
             plan.data[4*(size_t(rt_.objects.size())+1+size_t(a.object))]=dot(p.p,p.n);
             plan.projectedRanges.push_back(range);m.triangles+=count;++m.receivers;
-            if(waterMaterial(s.mat[a.material]))++m.water;
+            if(waterMaterial(s.mat[a.material]))++m.water;m.emitMs+=ms(stage);
         }
-        key_=key;cacheValid_=true;cachedMetrics_=m;return cached_;
+        m.totalMs=ms(start);key_=key;cacheValid_=true;cachedMetrics_=m;return cached_;
     }
 };
 }

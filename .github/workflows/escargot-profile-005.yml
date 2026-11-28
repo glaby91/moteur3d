@@ -1,0 +1,134 @@
+name: CSE WARP — Object005 profiling
+on:
+  push:
+    branches: [experiment/v17-escargot-profile-005]
+    paths:
+      - '.github/workflows/escargot-profile-005.yml'
+      - 'v17/escargot/**'
+      - 'v17/tools/escargot*'
+      - 'v17/tests/escargot_smoke.cpp'
+      - 'v17/CMakeLists.txt'
+      - 'v17/moteur3d_v17_*.cpp'
+      - 'v17/moteur3d_v17_render.h'
+      - 'experiments/2026-10-30-cote-ete-gt/native_v14/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: escargot-profile-005
+  cancel-in-progress: true
+jobs:
+  windows-ab:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - name: Download exact scene V17.634
+        shell: pwsh
+        run: |
+          $zip = Join-Path $env:RUNNER_TEMP "escargot-scene.zip"
+          $root = Join-Path $env:RUNNER_TEMP "escargot-scene"
+          Invoke-WebRequest "https://github.com/glaby91/moteur3d-scene/releases/download/scene-reflect-V17.634/V17-scene.zip" -OutFile $zip
+          if ((Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() -ne "f975639311e5b5d48ae996ac1f4f986994b232befb29617290f51bdf2bfbb703") { throw "Scene digest mismatch" }
+          Expand-Archive -LiteralPath $zip -DestinationPath $root
+          "ESC_SCENE=$root/benchmark-civic" >> $env:GITHUB_ENV
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtmultimedia
+          cache: true
+      - name: Install Vulkan SDK for exploration application
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: '1.4.309.0'
+          install_runtime: false
+          cache: true
+          stripdown: true
+          install_swiftshader: false
+      - name: Configure Object005 projection build
+        shell: pwsh
+        run: |
+          cmake -S v17 -B build-escargot -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DV17_SCENE_SOURCE_DIR=$env:ESC_SCENE" -DM3D_REQUIRE_VULKAN=ON "-DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER" "-DV17_GIT_SHA=$env:GITHUB_SHA"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Compile exploration and integration smoke
+        shell: pwsh
+        run: |
+          cmake --build build-escargot --config Release --target moteur3d_v17 v17_escargot_profile --parallel 4
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Profile native GPU completion, three views, static and moving
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $exe = Get-ChildItem build-escargot -Recurse -File -Filter v17_escargot_profile.exe | Select-Object -First 1
+          $core = Get-ChildItem build-escargot -Recurse -File -Filter moteur3d_v16_core.dll | Select-Object -First 1
+          if (!$exe -or !$core) { throw "Missing profiling binaries" }
+          $env:PATH="$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
+          New-Item -ItemType Directory -Force object005-profile | Out-Null
+          & $exe.FullName "$env:ESC_SCENE/scene.json" "$PWD/object005-profile"
+          if ($LASTEXITCODE) { throw "Profiling failed: $LASTEXITCODE" }
+      - name: Assemble engine-only exploration package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dist = "escargot-exploration"
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          $exe = Get-ChildItem build-escargot -Recurse -File -Filter moteur3d_v17.exe | Select-Object -First 1
+          if (!$exe) { throw "Missing application" }
+          foreach ($name in @("moteur3d_v17.exe","moteur3d_v16_core.dll","audio","vulkan","shaders","render_modules.json","cse_warp_v17.ico")) {
+            $src = Join-Path $exe.DirectoryName $name
+            if (!(Test-Path $src)) { throw "Missing resource $name" }
+            Copy-Item $src $dist -Recurse -Force
+          }
+          New-Item -ItemType Directory -Force "$dist/materials" | Out-Null
+          Copy-Item v17/materials/zmaterial8192.json "$dist/materials/"
+          @{ engine="17.031"; module="Escargot Object 005 projected geometry experimental"; scene="V17.634"; commit=$env:GITHUB_SHA; run=$env:GITHUB_RUN_ID; nativePresentation=$true; rayBudget=768; mode="sparse discovery and projected geometry" } | ConvertTo-Json | Set-Content "$dist/BUILD_INFO.json"
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set "CSE_WARP_ESCARGOT=1"
+          set "CSE_WARP_ESCARGOT_OBJECT_GPU=0"
+          set "CSE_WARP_ESCARGOT_LEGACY_F16=0"
+          set "M3D_V17_ZREFLECT=1"
+          set "M3D_V16_FORCE_WARP="
+          if "%~1"=="" (
+            start "" "moteur3d_v17.exe"
+          ) else (
+            start "" "moteur3d_v17.exe" "%~1"
+          )
+          '@ | Set-Content "$dist/LANCER_ESCARGOT_OBJECT_005.bat" -Encoding ascii
+          $prof = Get-ChildItem build-escargot -Recurse -File -Filter v17_escargot_profile.exe | Select-Object -First 1
+          if (!$prof) { throw "Missing profiler" }
+          Copy-Item $prof.FullName "$dist/"
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set "M3D_V16_FORCE_WARP="
+          set "QT_QPA_PLATFORM=offscreen"
+          if "%~1"=="" (
+            echo Usage: glissez le fichier scene.json sur ce script
+            pause
+            exit /b 2
+          )
+          v17_escargot_profile.exe "%~1" "%~dp0object005-profile-hardware" --hardware
+          pause
+          '@ | Set-Content "$dist/PROFILER_ESCARGOT_005.bat" -Encoding ascii
+          windeployqt --release --no-translations "$dist/moteur3d_v17.exe"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          if (!(Test-Path "$dist/platforms/qwindows.dll")) { throw "Missing Qt Windows plugin" }
+          if (Test-Path "$dist/benchmark-civic") { throw "Unexpected scene in engine-only package" }
+      - uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-Object005-Profiler-Windows-x64
+          path: escargot-exploration/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: Escargot-Object005-profile-report
+          path: object005-profile/
+          if-no-files-found: warn

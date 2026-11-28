@@ -208,6 +208,44 @@ struct CloudConstants {
 
 
 
+// Explicit benchmark-only synchronous GPU timestamps; production submission
+// remains asynchronous. Completion event is independent of timestamp support.
+class EscargotFrameProfile {
+    using Clock=std::chrono::steady_clock;
+    ID3D11DeviceContext* c_=nullptr;
+    ComPtr<ID3D11Query> disjoint_,event_;
+    std::array<ComPtr<ID3D11Query>,5> ticks_;
+    bool timed_=false,open_=false;
+public:
+    EscargotFrameProfile(ID3D11Device* d,ID3D11DeviceContext* c,bool enabled){
+        if(!enabled)return;c_=c;D3D11_QUERY_DESC q{};q.Query=D3D11_QUERY_EVENT;
+        if(FAILED(d->CreateQuery(&q,event_.GetAddressOf())))return;
+        q.Query=D3D11_QUERY_TIMESTAMP_DISJOINT;
+        timed_=SUCCEEDED(d->CreateQuery(&q,disjoint_.GetAddressOf()));
+        q.Query=D3D11_QUERY_TIMESTAMP;
+        for(auto& t:ticks_)if(timed_&&FAILED(d->CreateQuery(&q,t.GetAddressOf())))timed_=false;
+    }
+    void start(){if(timed_){c_->Begin(disjoint_.Get());open_=true;mark(0);}}
+    void mark(size_t n){if(open_)c_->End(ticks_[n].Get());}
+    void finish(EscargotProfile& p){
+        if(!event_)return;
+        if(open_){mark(4);c_->End(disjoint_.Get());open_=false;}
+        c_->End(event_.Get());c_->Flush();const auto start=Clock::now();
+        BOOL ready=FALSE;HRESULT hr=S_FALSE;
+        while((hr=c_->GetData(event_.Get(),&ready,sizeof(ready),D3D11_ASYNC_GETDATA_DONOTFLUSH))==S_FALSE){
+            if(Clock::now()-start>std::chrono::seconds(30))break;Sleep(1);
+        }
+        p.waitMs=std::chrono::duration<double,std::milli>(Clock::now()-start).count();
+        p.completed=hr==S_OK&&ready;
+        if(!p.completed||!timed_)return;
+        D3D11_QUERY_DATA_TIMESTAMP_DISJOINT d{};UINT64 t[5]{};
+        if(c_->GetData(disjoint_.Get(),&d,sizeof(d),0)!=S_OK||d.Disjoint||!d.Frequency)return;
+        for(size_t i=0;i<5;++i)if(c_->GetData(ticks_[i].Get(),&t[i],sizeof(t[i]),0)!=S_OK||(i&&t[i]<t[i-1]))return;
+        double k=1000./double(d.Frequency);
+        p.computeGpuMs=(t[1]-t[0])*k;p.opticalGpuMs=(t[2]-t[1])*k;p.mainGpuMs=(t[3]-t[2])*k;p.copyGpuMs=(t[4]-t[3])*k;p.gpuTotalMs=(t[4]-t[0])*k;p.gpuValid=true;
+    }
+    ~EscargotFrameProfile(){if(open_)c_->End(disjoint_.Get());}
+};
 class DirectX11Preview {
     using Clock=std::chrono::steady_clock;
     struct ReadbackSlot {
@@ -355,8 +393,12 @@ public:
         const bool escProjected=escEnabled&&escargotInput->build&&escargotInput->build->rasterProjected;
         const bool escBuilt=escEnabled&&escargotInput->build&&!escDirect&&!escProjected;
         const bool escGpu=escEnabled&&(escargotInput->packet||escBuilt);
+        EscargotProfile escProfile{};const char* ep=std::getenv("CSE_WARP_ESCARGOT_PROFILE");
+        const bool profileEnabled=ep&&std::strcmp(ep,"1")==0;
         if(escProjected){
+            const auto mapStart=Clock::now();
             if(!uploadEscargotPacket(escargotInput->build->data,error,true))return false;
+            escProfile.mapMs=std::chrono::duration<double,std::milli>(Clock::now()-mapStart).count();
         }else if(escDirect){
             if(!objectPs_){error=objectShaderError_.empty()?L"Object GPU shader not enabled at device startup":objectShaderError_;return false;}
         }else if(escBuilt){
@@ -598,6 +640,7 @@ public:
         std::memcpy(cloudMapped.pData,&cloudCB,sizeof(cloudCB));
         context_->Unmap(skyConstants_.Get(),0);
         const float clear[4]={cb.sky[0],cb.sky[1],cb.sky[2],1.f};
+        EscargotFrameProfile frameProfile(device_.Get(),context_.Get(),profileEnabled);frameProfile.start();
         if(slot.queryReady){context_->Begin(slot.disjoint.Get());context_->End(slot.start.Get());}
         if(lumaBvh&&!lumaTraceCompute_.dispatch(context_.Get(),verticesSrv_.Get(),indicesSrv_.Get(),scene,
             albedo_.Get(),preservedAlbedo_.Get(),sampler_.Get(),preservedTextureLayers_,hybrid,adaptiveRequested,error))return false;
@@ -974,8 +1017,8 @@ public:
         ReflectionTimer* timing=nativeHwnd&&anyReflection&&timingEnv&&std::strcmp(timingEnv,"1")==0
             ?acquireReflectionTimer(reflectionGpuSum,reflectionGpuSamples):nullptr;
         if(timing){context_->Begin(timing->disjoint.Get());context_->End(timing->begin.Get());}
-        const auto reflectSubmitStart=Clock::now();
-        if(escProjected&&!projectedOptics_.render(device_.Get(),context_.Get(),*escargotInput->build,w,h,clear,constants_.Get(),albedo_.Get(),preservedAlbedo_?preservedAlbedo_.Get():albedo_.Get(),sampler_.Get(),probeSampler_.Get(),scissorRaster_.Get(),depth_.Get(),transparentDepth_.Get(),blend_.Get(),error))return false;
+        frameProfile.mark(1);const auto reflectSubmitStart=Clock::now();
+        if(escProjected&&!projectedOptics_.render(device_.Get(),context_.Get(),*escargotInput->build,w,h,clear,constants_.Get(),albedo_.Get(),preservedAlbedo_?preservedAlbedo_.Get():albedo_.Get(),sampler_.Get(),probeSampler_.Get(),scissorRaster_.Get(),depth_.Get(),transparentDepth_.Get(),blend_.Get(),escProfile,error))return false;
         for(size_t i=0;i<zActive_.size();++i){
             const auto id=zActive_[i].id;const auto& p=zRuntime_.patch(id);
             reflectSlot=i;reflectPasses[i].planeId=id;
@@ -996,6 +1039,7 @@ public:
             put4(cb.zRight[i],m.r,0);put4(cb.zUp[i],m.u,0);
         }
         if(timing){context_->End(timing->end.Get());context_->End(timing->disjoint.Get());timing->pending=true;}
+        frameProfile.mark(2);escProfile.opticalSubmitMs=std::chrono::duration<double,std::milli>(Clock::now()-reflectSubmitStart).count();
         const double reflectSubmitMs=zActive_.empty()?0.:std::chrono::duration<double,std::milli>(Clock::now()-reflectSubmitStart).count();
         cb.zPlaneIds[3]=0.f;activeCam=cam;
         cb.reflectionControls[0]=0.f;
@@ -1034,6 +1078,7 @@ public:
                 sampleCount_,unsigned(w),unsigned(h),atmosphereDensity,error))return false;
             ++drawCalls;
         }
+        frameProfile.mark(3);
         // Native DXGI presentation: all transfers remain on the GPU. The
         // offscreen raster and MSAA targets are reused; no CPU staging,
         // Map, swizzle, QImage or Qt painter is touched on this path.
@@ -1058,6 +1103,7 @@ public:
             }
             context_->CopyResource(backBuffer.Get(),gpuSource);
             backBuffer.Reset(); // flip-model swapchain must not retain the backbuffer
+            frameProfile.finish(escProfile);
             if(slot.queryReady){
                 context_->End(slot.afterDraw.Get());
                 context_->End(slot.afterCopy.Get());
@@ -1077,7 +1123,7 @@ public:
                 releasePresenter();return false;
             }
             if(nativeStats){
-                *nativeStats={};
+                *nativeStats={};nativeStats->escProfile=escProfile;
                 nativeStats->gpu=true;
                 nativeStats->threads=0;
                 nativeStats->readbackBufferCount=0;
@@ -1137,7 +1183,8 @@ public:
             context_->End(slot.afterCopy.Get());
             context_->End(slot.disjoint.Get());
         }
-        slot.submitted={};
+        frameProfile.finish(escProfile);
+        slot.submitted={};slot.submitted.escProfile=escProfile;
         slot.submitted.gpu=true;slot.submitted.threads=0;
         slot.submitted.readbackBufferCount=depth;
         slot.submitted.gpuDrawCalls=drawCalls;

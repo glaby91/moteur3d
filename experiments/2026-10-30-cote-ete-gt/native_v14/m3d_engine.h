@@ -54,7 +54,8 @@ struct ZReflectPassStats {
     uint64_t colorTriangles=0,depthTriangles=0;
     bool cpuCull=false,depthPrepass=false;
 };
-struct Stats { uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,depthReads=0,shadowRays=0; uint64_t simdRayPackets=0,simdTrianglePackets=0,simdTextureSamples=0,simdLightBatches=0; double ms=0,postMs=0,shadowMs=0;
+struct EscargotProfile {double mapMs=0,allocationMs=0,uploadMs=0,opticalSubmitMs=0,computeGpuMs=0,opticalGpuMs=0,mainGpuMs=0,copyGpuMs=0,gpuTotalMs=0,waitMs=0;uint64_t uploadBytes=0,layerPixels=0,scissorPixels=0;uint32_t draws=0;bool gpuValid=false,completed=false,cacheHit=false;};
+struct Stats { EscargotProfile escProfile{}; uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,depthReads=0,shadowRays=0; uint64_t simdRayPackets=0,simdTrianglePackets=0,simdTextureSamples=0,simdLightBatches=0; double ms=0,postMs=0,shadowMs=0;
     // DX11-only hardware counters; CPU/Compute paths leave these at zero.
     uint64_t gpuDrawCalls=0,gpuBoxInstances=0,gpuEllipseInstances=0,gpuFoliageInstances=0;
     bool planarReflectionRendered=false,lumaProbeLightingEnabled=false;

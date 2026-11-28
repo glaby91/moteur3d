@@ -1,6 +1,7 @@
 #pragma once
 #include "m3d_directx11_raster_shader.h"
 #include <array>
+#include <chrono>
 namespace m3d::escargot_gpu {
 inline constexpr char kProjectedPass[]=R"(
 struct ProjIn {float4 p:POSITION;float4 data:TEXCOORD0;float2 extra:TEXCOORD1;};
@@ -56,7 +57,8 @@ public:
     bool render(ID3D11Device* d,ID3D11DeviceContext* c,const EscargotPacketBuild& plan,int w,int h,const float clear[4],
         ID3D11Buffer* constants,ID3D11ShaderResourceView* albedo,ID3D11ShaderResourceView* preserved,
         ID3D11SamplerState* wrap,ID3D11SamplerState* clamp,ID3D11RasterizerState* raster,
-        ID3D11DepthStencilState* opaque,ID3D11DepthStencilState* transparent,ID3D11BlendState* blend,std::wstring& error){
+        ID3D11DepthStencilState* opaque,ID3D11DepthStencilState* transparent,ID3D11BlendState* blend,EscargotProfile& profile,std::wstring& error){
+        using Clock=std::chrono::steady_clock;auto started=Clock::now();
         if(device_!=d){*this=ProjectedOptics{};device_=d;}
         const auto count=plan.projectedVertices.size()/10;
         if(w<=0||h<=0||plan.projectedRanges.size()>4||plan.projectedVertices.size()%10||count>360000){error=L"Object005 projection budget exceeded";return false;}
@@ -69,7 +71,11 @@ public:
         ID3D11ShaderResourceView* none=nullptr;c->PSSetShaderResources(8,1,&none);
         if(plan.projectedRanges.empty())return true;
         if(!shaders(d,error)||!targets(d,w,h,uint32_t(plan.projectedRanges.size()),error))return false;
-        if(plan.projectedKey&&renderedKey_==plan.projectedKey&&std::equal(renderedClear_.begin(),renderedClear_.end(),clear))return true;
+        profile.allocationMs=std::chrono::duration<double,std::milli>(Clock::now()-started).count();
+        profile.layerPixels=uint64_t(w)*h*plan.projectedRanges.size();
+        for(const auto& r:plan.projectedRanges)profile.scissorPixels+=uint64_t(r.w)*r.h;
+        if(plan.projectedKey&&renderedKey_==plan.projectedKey&&std::equal(renderedClear_.begin(),renderedClear_.end(),clear)){profile.cacheHit=true;return true;}
+        started=Clock::now();
         renderedKey_=0;
         if(count){
             if(!vertices_||count>capacity_){capacity_=1;while(capacity_<count)capacity_*=2;
@@ -78,6 +84,7 @@ public:
             D3D11_MAPPED_SUBRESOURCE m{};if(FAILED(c->Map(vertices_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m))){error=L"Object005 vertices upload";return false;}
             std::memcpy(m.pData,plan.projectedVertices.data(),plan.projectedVertices.size()*sizeof(float));c->Unmap(vertices_.Get(),0);
         }
+        profile.uploadMs=std::chrono::duration<double,std::milli>(Clock::now()-started).count();profile.uploadBytes=plan.projectedVertices.size()*sizeof(float);
         D3D11_VIEWPORT vp{};vp.Width=float(w);vp.Height=float(h);vp.MaxDepth=1;c->RSSetViewports(1,&vp);
         c->RSSetState(raster);c->IASetInputLayout(layout_.Get());c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
         ID3D11Buffer* vb=vertices_.Get();UINT stride=40,offset=0;c->IASetVertexBuffers(0,1,&vb,&stride,&offset);
@@ -87,8 +94,8 @@ public:
         for(UINT i=0;i<plan.projectedRanges.size();++i){const auto& r=plan.projectedRanges[i];
             ID3D11RenderTargetView* target=rtv_[i].Get();c->OMSetRenderTargets(1,&target,dsv_.Get());c->ClearRenderTargetView(target,clear);c->ClearDepthStencilView(dsv_.Get(),D3D11_CLEAR_DEPTH,1,0);
             D3D11_RECT rect{r.x,r.y,r.x+r.w,r.y+r.h};c->RSSetScissorRects(1,&rect);
-            c->OMSetDepthStencilState(opaque,0);c->OMSetBlendState(nullptr,nullptr,0xffffffffu);if(r.opaque)c->Draw(r.opaque,r.first);
-            c->OMSetDepthStencilState(transparent,0);c->OMSetBlendState(blend,nullptr,0xffffffffu);if(r.transparent)c->Draw(r.transparent,r.first+r.opaque);
+            c->OMSetDepthStencilState(opaque,0);c->OMSetBlendState(nullptr,nullptr,0xffffffffu);if(r.opaque){c->Draw(r.opaque,r.first);++profile.draws;}
+            c->OMSetDepthStencilState(transparent,0);c->OMSetBlendState(blend,nullptr,0xffffffffu);if(r.transparent){c->Draw(r.transparent,r.first+r.opaque);++profile.draws;}
         }
         c->OMSetRenderTargets(0,nullptr,nullptr);c->OMSetBlendState(nullptr,nullptr,0xffffffffu);
         renderedKey_=plan.projectedKey;std::copy(clear,clear+4,renderedClear_.begin());return true;
