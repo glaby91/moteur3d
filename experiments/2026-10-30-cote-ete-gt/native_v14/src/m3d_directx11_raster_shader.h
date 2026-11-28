@@ -149,7 +149,7 @@ void escNearestScalar(uint start,uint count,int2 pixel,out uint4 addr,out uint4 
     addr=0;dist=0xffffffffu;uint4 ids=0xffffffffu;
     for(uint j=0;j<count;++j){
         uint a=start+3*j;float4 v=escPacket[a];int2 d=int2(v.xy)-pixel;
-        uint dd=uint(dot(float2(d),float2(d))),id=uint(v.z);
+        uint dd=uint(d.x*d.x+d.y*d.y),id=uint(v.z);
         if(!escLess(dd,id,dist.w,ids.w))continue;
         if(escLess(dd,id,dist.x,ids.x)){dist=uint4(dd,dist.xyz);ids=uint4(id,ids.xyz);addr=uint4(a,addr.xyz);}
         else if(escLess(dd,id,dist.y,ids.y)){dist=uint4(dist.x,dd,dist.yz);ids=uint4(ids.x,id,ids.yz);addr=uint4(addr.x,a,addr.yz);}
@@ -163,7 +163,7 @@ void escNearest(uint start,uint count,int2 pixel,out uint4 addr,out uint4 dist,o
     addr=0;dist=0xffffffffu;n=0;uint4 ids=0xffffffffu;
     [loop] for(uint j=0;j<count;++j){
         uint a=start+3*j;float4 v=escPacket[a];int2 d=int2(v.xy)-pixel;
-        uint dd=uint(dot(float2(d),float2(d))),id=uint(v.z);
+        uint dd=uint(d.x*d.x+d.y*d.y),id=uint(v.z);
         [unroll] for(uint k=0;k<4;++k){
             if(dd<dist[k]||(dd==dist[k]&&id<ids[k])){
                 [unroll] for(int m=3;m>0;--m){if(uint(m)>k){addr[m]=addr[m-1];dist[m]=dist[m-1];ids[m]=ids[m-1];}}
@@ -183,6 +183,81 @@ float4 escCoverageWeights(uint4 d,uint n){
     float radius=farthest+max(1.0,.125*farthest);
     [unroll]for(uint j=0;j<4;++j)if(j<n)w[j]=max(0.0,radius-float(d[j]))/(1.0+float(d[j]));
     return w/max(dot(w,float4(1,1,1,1)),1e-6);
+}
+// Shared reconstruction/shading preserves the original arithmetic and lane masks.
+bool escLayer(VSOut i,int2 pixel,float3 ray,float4 td,bool common,uint4 ra,uint4 rd,uint rn,uint base,
+    inout uint lanes,out float4 val,out float4 nrOut,out uint maskOut){
+    val=0;nrOut=0;maskOut=0;
+        float4 info=escPacket[base],bounds=escPacket[base+1];
+        int2 q=pixel-int2(bounds.xy);if(any(q<0)||any(q>=int2(bounds.zw)))return false;
+        uint4 a,d;uint n;
+        if(common){
+            n=rn;d=rd;lanes=rn;
+            a=uint(info.x)+2*((ra-uint(td.x))/3u);
+        }else escNearest(uint(info.x),uint(info.y),pixel,a,d,n);
+        if(!n)return false;
+        float4 total=0;float3 normalSum=0;float2 uvSum=0,uvMin=float2(1e20,1e20),uvMax=-uvMin,seed=0;
+        uint count=0,uvCount=0,mask=0;float primitive=-1;
+        [loop] for(uint j=0;j<n;++j){
+            uint pos=a[j]+(common?0u:1u);
+            float4 value=escPacket[pos],nr=escPacket[pos+1];
+            if(nr.w<.5)continue; // primitive+1, zero = absent
+            if(count==0){seed=value.xy;primitive=nr.w;}
+            ++count;mask|=1u<<j;total.zw+=value.zw;normalSum+=nr.xyz;
+            if(nr.w==primitive||all(abs(value.xy-seed)<.5)){uvSum+=value.xy;++uvCount;}
+            uvMin=min(uvMin,value.xy);uvMax=max(uvMax,value.xy);
+        }
+        if(!count)return false;
+        float2 uv=uvSum/max(1u,uvCount);float depth=total.z/count,alpha=saturate(total.w/count);
+        // A coherent planar UV chart has a continuous geometric transform.
+        // Four measured positives are required, no edge extrapolation beyond
+        // their local UV envelope. Exact samples retain their original UV.
+        if(info.w>.5&&n==4&&count==4&&uvCount==4){
+            float4 origin=escPacket[base+2],plane=escPacket[base+3];
+            float den=dot(ray,plane.xyz);
+            if(abs(den)>.00001){
+                float t=dot(origin.xyz-i.world,plane.xyz)/den;
+                if(t>0){
+                    float3 delta=i.world+ray*t-origin.xyz;
+                    float2 projected=float2(origin.w+dot(escPacket[base+4].xyz,delta),plane.w+dot(escPacket[base+5].xyz,delta));
+                    float2 margin=max((uvMax-uvMin)*.10,float2(.002,.002));
+                    if(all(projected>=uvMin-margin)&&all(projected<=uvMax+margin))uv=projected;
+                }
+            }
+        }
+        if(!common){
+            float4 cw=escCoverageWeights(d,n);float support=0;
+            [unroll]for(uint j=0;j<4;++j)if(mask&(1u<<j))support+=cw[j];
+            alpha*=support;mask=1u;
+        }
+        if(alpha<=0)return false;
+
+    val=float4(uv,depth,alpha);
+    nrOut=float4(normalSum*rsqrt(max(dot(normalSum,normalSum),1e-12)),info.z);
+    maskOut=mask;return true;
+}
+float3 escLayerColor(VSOut i,float3 ray,bool glass,float4 lighting,uint base,float4 val,float4 nr){
+        float4 emission=escPacket[base+6];
+        uint mat=uint(nr.w);float2 uv=val.xy;
+        if(emission.w>.5)uv=saturate(uv);
+        float layer=materialTextureDetail[mat].x;
+        float3 color;
+        if(layer>=0)color=preservedAlbedo.SampleLevel(probeSampler,float3(uv,layer),0).rgb;
+        else if(emission.w>.5)color=albedo.SampleLevel(probeSampler,float3(uv,mat),0).rgb;
+        else color=albedo.SampleLevel(wrapSampler,float3(uv,mat),0).rgb;
+        float3 sourceBase=color;
+        color=sourceBase*(.12+.35*lighting.w+.48*lighting.w*saturate(dot(nr.xyz,lighting.xyz)))+emission.xyz;
+        // Glass: use the existing LT diffuse bounce at the reconstructed
+        // source position, not an arbitrary boost to Fresnel or opacity.
+        // No extra light loop or optical ray. Depth is an approximation.
+        if(glass&&hybridControls.x>.5&&hybridControls.w>1.5){
+            float3 sourcePos=i.world+ray*val.z;
+            float3 uvw=saturate((sourcePos-probeOrigin.xyz)*probeInvSpan.xyz);
+            float3 bounce=max(indirectProbes.SampleLevel(probeSampler,uvw,0).rgb,0.0);
+            color+=sourceBase*materialTextureDetail[mat].z*bounce;
+        }
+
+    return color;
 }
 bool escGpuSample(VSOut i,out float3 reflected,out float coverage,out float weight){
     reflected=0;coverage=0;weight=0;
@@ -212,61 +287,33 @@ bool escGpuSample(VSOut i,out float3 reflected,out float coverage,out float weig
     // Each contributing source layer has its own top-four observations.
     // Sort locally from far to near; 64 is a packet validation limit per
     // tile, not a global optical surface cap.
-    float4 uvDepthAlpha[64];float4 normalMat[64];uint masks[64];uint layerRefs[64];
-    uint used=0;bool common=desc.w>.5;uint lanes=1;
+    bool common=desc.w>.5;uint lanes=1;
     float4 laneWeights=common?escCoverageWeights(rd,rn):float4(1,0,0,0);
     const bool glass=materialOpacity[i.mat].x<.999&&materialEmission[i.mat].a>=-.5;
+    if(uint(td.w)==1u){
+        uint base=uint(td.z),mask;float4 val,nr;
+        if(!escLayer(i,pixel,ray,td,common,ra,rd,rn,base,lanes,val,nr,mask))return false;
+        float3 color=escLayerColor(i,ray,glass,escPacket[0],base,val,nr);
+        // Same four-lane accumulation order as the general path.
+        float4 v=float4(color*val.w,val.w);
+        float4 a0=(lanes>0u&&(mask&1u))?v:0,a1=(lanes>1u&&(mask&2u))?v:0;
+        float4 a2=(lanes>2u&&(mask&4u))?v:0,a3=(lanes>3u&&(mask&8u))?v:0;
+        float4 result=a0*laneWeights.x+a1*laneWeights.y+a2*laneWeights.z+a3*laneWeights.w;
+        coverage=saturate(result.a);if(coverage<=.00001)return false;reflected=max(result.rgb/coverage,0);return true;
+    }
+    float4 uvDepthAlpha[64];float4 normalMat[64];uint masks[64];uint layerRefs[64];
+    uint used=0;
     [loop] for(uint l=0;l<uint(td.w);++l){
-        uint base=uint(td.z)+7*l;float4 info=escPacket[base],bounds=escPacket[base+1];
-        int2 q=pixel-int2(bounds.xy);if(any(q<0)||any(q>=int2(bounds.zw)))continue;
-        uint4 a,d;uint n;
-        if(common){
-            n=rn;d=rd;lanes=rn;
-            a=uint(info.x)+2*((ra-uint(td.x))/3u);
-        }else escNearest(uint(info.x),uint(info.y),pixel,a,d,n);
-        if(!n)continue;
-        float4 total=0;float3 normalSum=0;float2 uvSum=0,uvMin=float2(1e20,1e20),uvMax=-uvMin,seed=0;
-        uint count=0,uvCount=0,mask=0;float primitive=-1;
-        [loop] for(uint j=0;j<n;++j){
-            uint pos=a[j]+(common?0u:1u);
-            float4 value=escPacket[pos],nr=escPacket[pos+1];
-            if(nr.w<.5)continue; // primitive+1, zero = absent
-            if(count==0){seed=value.xy;primitive=nr.w;}
-            ++count;mask|=1u<<j;total.zw+=value.zw;normalSum+=nr.xyz;
-            if(nr.w==primitive||all(abs(value.xy-seed)<.5)){uvSum+=value.xy;++uvCount;}
-            uvMin=min(uvMin,value.xy);uvMax=max(uvMax,value.xy);
-        }
-        if(!count)continue;
-        float2 uv=uvSum/max(1u,uvCount);float depth=total.z/count,alpha=saturate(total.w/count);
-        // A coherent planar UV chart has a continuous geometric transform.
-        // Four measured positives are required, no edge extrapolation beyond
-        // their local UV envelope. Exact samples retain their original UV.
-        if(info.w>.5&&n==4&&count==4&&uvCount==4){
-            float4 origin=escPacket[base+2],plane=escPacket[base+3];
-            float den=dot(ray,plane.xyz);
-            if(abs(den)>.00001){
-                float t=dot(origin.xyz-i.world,plane.xyz)/den;
-                if(t>0){
-                    float3 delta=i.world+ray*t-origin.xyz;
-                    float2 projected=float2(origin.w+dot(escPacket[base+4].xyz,delta),plane.w+dot(escPacket[base+5].xyz,delta));
-                    float2 margin=max((uvMax-uvMin)*.10,float2(.002,.002));
-                    if(all(projected>=uvMin-margin)&&all(projected<=uvMax+margin))uv=projected;
-                }
-            }
-        }
-        if(!common){
-            float4 cw=escCoverageWeights(d,n);float support=0;
-            [unroll]for(uint j=0;j<4;++j)if(mask&(1u<<j))support+=cw[j];
-            alpha*=support;mask=1u;
-        }
-        if(alpha<=0)continue;
+        uint base=uint(td.z)+7*l;float4 val,nr;uint mask;
+        if(!escLayer(i,pixel,ray,td,common,ra,rd,rn,base,lanes,val,nr,mask))continue;
+        float depth=val.z;
         if(used>=64u)return false; // defensive: CPU packet validated
         uint k=used;
         [loop] while(k>0&&uvDepthAlpha[k-1].z<depth){
             uvDepthAlpha[k]=uvDepthAlpha[k-1];normalMat[k]=normalMat[k-1];masks[k]=masks[k-1];layerRefs[k]=layerRefs[k-1];--k;
         }
-        uvDepthAlpha[k]=float4(uv,depth,alpha);
-        normalMat[k]=float4(normalSum*rsqrt(max(dot(normalSum,normalSum),1e-12)),info.z);
+        uvDepthAlpha[k]=val;
+        normalMat[k]=nr;
         masks[k]=mask;layerRefs[k]=base;++used;
     }
     uint blocked=0;
@@ -275,25 +322,7 @@ bool escGpuSample(VSOut i,out float3 reflected,out float coverage,out float weig
     float4 lighting=escPacket[0];
     [loop] for(uint k=0;k<used;++k){
         if(!masks[k])continue;
-        float4 val=uvDepthAlpha[k],nr=normalMat[k],emission=escPacket[layerRefs[k]+6];
-        uint mat=uint(nr.w);float2 uv=val.xy;
-        if(emission.w>.5)uv=saturate(uv);
-        float layer=materialTextureDetail[mat].x;
-        float3 color;
-        if(layer>=0)color=preservedAlbedo.SampleLevel(probeSampler,float3(uv,layer),0).rgb;
-        else if(emission.w>.5)color=albedo.SampleLevel(probeSampler,float3(uv,mat),0).rgb;
-        else color=albedo.SampleLevel(wrapSampler,float3(uv,mat),0).rgb;
-        float3 sourceBase=color;
-        color=sourceBase*(.12+.35*lighting.w+.48*lighting.w*saturate(dot(nr.xyz,lighting.xyz)))+emission.xyz;
-        // Glass: use the existing LT diffuse bounce at the reconstructed
-        // source position, not an arbitrary boost to Fresnel or opacity.
-        // No extra light loop or optical ray. Depth is an approximation.
-        if(glass&&hybridControls.x>.5&&hybridControls.w>1.5){
-            float3 sourcePos=i.world+ray*val.z;
-            float3 uvw=saturate((sourcePos-probeOrigin.xyz)*probeInvSpan.xyz);
-            float3 bounce=max(indirectProbes.SampleLevel(probeSampler,uvw,0).rgb,0.0);
-            color+=sourceBase*materialTextureDetail[mat].z*bounce;
-        }
+        float4 val=uvDepthAlpha[k];float3 color=escLayerColor(i,ray,glass,lighting,layerRefs[k],val,normalMat[k]);
         [unroll]for(uint j=0;j<4;++j){if(j<lanes&&(masks[k]&(1u<<j)))acc[j]=float4(color*val.w,val.w)+acc[j]*(1-val.w);}
     }
     float4 result=acc[0]*laneWeights.x+acc[1]*laneWeights.y+acc[2]*laneWeights.z+acc[3]*laneWeights.w;
