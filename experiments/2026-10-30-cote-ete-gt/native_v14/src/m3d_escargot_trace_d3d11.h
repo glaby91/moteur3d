@@ -178,11 +178,12 @@ void CSTrace(uint3 tid:SV_DispatchThreadID){
 // Kept separate from the validated trace literal to respect MSVC's limit.
 inline constexpr char kPaths[] = R"(
 struct PathQuery { Query initial;uint receiver,quota,offset,maxCrossings; };
-struct PathEvent { Query q;Hit hit; };
+// One 32-byte record per hit, plus a single secondary ray header per path.
+struct PackedPathEvent {uint4 a,b;};
 struct OpticalAttr {float3 n0;uint owner;float3 n1;float transmission;float3 n2;float pad0;float3 geometric;float pad1;};
 StructuredBuffer<OpticalAttr> optical:register(t4);
 StructuredBuffer<PathQuery> paths:register(t5);
-RWStructuredBuffer<PathEvent> events:register(u1);
+RWStructuredBuffer<PackedPathEvent> events:register(u1);
 // Correct native sqrt to round-to-nearest-even for normal finite inputs.
 // Compare the squared midpoint with the exact integer radicand.
 float cpuSqrt(float x){
@@ -232,12 +233,16 @@ void CSPaths(uint3 tid:SV_DispatchThreadID){
     uint i=tid.x;if(i>=queryCount)return;
     PathQuery path=paths[i];Query q=path.initial;
     uint used=0,crossings=0,error=0;bool secondary=false;
-    PathEvent first;first.q=q;first.hit=(Hit)0;
+    PackedPathEvent first;first.a=0;first.b=0;
+    PackedPathEvent secondaryHeader;secondaryHeader.a=0;secondaryHeader.b=0;
+    uint secondaryStart=255u,base=path.offset+i;
     precise float primaryTransmission=1.0;
     float3 inverse=traceInverse(q.d);
     while(used<path.quota&&crossings<path.maxCrossings){
-        Hit hit=traceOnePrepared(q,inverse);PathEvent ev;ev.q=q;ev.hit=hit;
-        if(used==0u)first=ev;else events[path.offset+used]=ev;++used;++crossings;
+        Hit hit=traceOnePrepared(q,inverse);PackedPathEvent ev;
+        ev.a=uint4(hit.primitive,hit.status,asuint(hit.depth),asuint(hit.u));
+        ev.b=uint4(asuint(hit.v),asuint(q.low),q.previousPrimitive,0u);
+        if(used==0u)first=ev;else events[base+1u+used]=ev;++used;++crossings;
         if(hit.status>1u){error=1;break;}
         if(hit.status==0u)break;
         OpticalAttr a=optical[hit.primitive];
@@ -261,7 +266,8 @@ void CSPaths(uint3 tid:SV_DispatchThreadID){
             precise float3 pos=q.o+q.d*hit.depth;
             q.o=pos;q.d=direction;q.previousPrimitive=0xffffffffu;
             q.low=max(1e-6,4.76837158203125e-7*max(1.0,cpuLength(pos)));
-            secondary=true;crossings=0;
+            secondary=true;crossings=0;secondaryStart=used;
+            secondaryHeader.a=asuint(float4(q.o,q.low));secondaryHeader.b=uint4(asuint(q.d),q.previousPrimitive);
             if(used<path.quota)inverse=traceInverse(q.d);
         }else{
             if(1.0-a.transmission>=.999)break;
@@ -270,7 +276,8 @@ void CSPaths(uint3 tid:SV_DispatchThreadID){
     }
     // Every path has at least two reserved entries and at least one event.
     // Write count/error only after the actual path has terminated.
-    first.hit.pad.x=float(used);first.hit.pad.y=float(error);events[path.offset]=first;
+    first.b.w=used|(error<<8u)|(secondaryStart<<16u);
+    events[base]=secondaryHeader;events[base+1u]=first;
 }
 )";
 class TraceBatch {
@@ -394,13 +401,14 @@ public:
             if(!buffer(device,nullptr,input.size(),48,D3D11_BIND_SHADER_RESOURCE,pathInput_)||!srv(device,pathInput_.Get(),input.size(),pathInputSrv_)){error=L"Escargot path input allocation";return false;}
             pathCapacity_=input.size();
         }
-        if(eventCapacity_<count||!pathEventUav_||!pathReadback_){
+        const size_t packedCount=count+input.size(); // disjoint hit ranges with one header each
+        if(eventCapacity_<packedCount||!pathEventUav_||!pathReadback_){
             eventCapacity_=0;pathEventUav_.Reset();pathReadback_.Reset();
-            if(!buffer(device,nullptr,count,64,D3D11_BIND_UNORDERED_ACCESS,pathEvents_)){error=L"Escargot path event allocation";return false;}
-            D3D11_UNORDERED_ACCESS_VIEW_DESC u{};u.Format=DXGI_FORMAT_UNKNOWN;u.ViewDimension=D3D11_UAV_DIMENSION_BUFFER;u.Buffer.NumElements=UINT(count);
-            D3D11_BUFFER_DESC s{};s.ByteWidth=UINT(count*64);s.Usage=D3D11_USAGE_STAGING;s.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+            if(!buffer(device,nullptr,packedCount,32,D3D11_BIND_UNORDERED_ACCESS,pathEvents_)){error=L"Escargot path event allocation";return false;}
+            D3D11_UNORDERED_ACCESS_VIEW_DESC u{};u.Format=DXGI_FORMAT_UNKNOWN;u.ViewDimension=D3D11_UAV_DIMENSION_BUFFER;u.Buffer.NumElements=UINT(packedCount);
+            D3D11_BUFFER_DESC s{};s.ByteWidth=UINT(packedCount*32);s.Usage=D3D11_USAGE_STAGING;s.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
             if(FAILED(device->CreateUnorderedAccessView(pathEvents_.Get(),&u,&pathEventUav_))||FAILED(device->CreateBuffer(&s,nullptr,&pathReadback_))){error=L"Escargot path output allocation";return false;}
-            eventCapacity_=count;
+            eventCapacity_=packedCount;
         }
         if(!pathDisjoint_||!pathStart_||!pathEnd_){
             D3D11_QUERY_DESC desc{D3D11_QUERY_TIMESTAMP_DISJOINT,0};
@@ -424,11 +432,47 @@ public:
         ID3D11ShaderResourceView* nullViews[6]{};ID3D11UnorderedAccessView* nullUav=nullptr;ID3D11Buffer* nullCb=nullptr;
         context->CSSetUnorderedAccessViews(1,1,&nullUav,nullptr);context->CSSetShaderResources(0,6,nullViews);context->CSSetConstantBuffers(0,1,&nullCb);context->CSSetShader(nullptr,nullptr,0);
         // One copy and one blocking readback at the end of ALL optical paths.
-        context->CopyResource(pathReadback_.Get(),pathEvents_.Get());
+        D3D11_BOX eventRegion{0,0,0,UINT(packedCount*32),1,1};
+        context->CopySubresourceRegion(pathReadback_.Get(),0,0,0,0,pathEvents_.Get(),0,&eventRegion);
+        timing.transferredBytes=uint64_t(packedCount)*32;
         timing.submitMs=std::chrono::duration<double,std::milli>(Clock::now()-start).count();start=Clock::now();
         D3D11_MAPPED_SUBRESOURCE mapped{};
         if(FAILED(context->Map(pathReadback_.Get(),0,D3D11_MAP_READ,0,&mapped))){error=L"Escargot path readback";return false;}
-        output.resize(count);std::memcpy(output.data(),mapped.pData,count*sizeof(EscargotPathEvent));context->Unmap(pathReadback_.Get(),0);
+        // Expand to the existing diagnostic ABI. The GPU writes the actual
+        // low/previous on EVERY hit and the actual new origin/direction once.
+        // Initial origin/direction are immutable input, not recomputed.
+        output.resize(count);
+        const auto* bytes=static_cast<const unsigned char*>(mapped.pData);
+        auto read=[&](size_t at){std::array<uint32_t,8> v{};std::memcpy(v.data(),bytes+32*at,32);return v;};
+        auto asFloat=[](uint32_t v){float x;std::memcpy(&x,&v,4);return x;};
+        bool valid=true;
+        for(size_t i=0;i<input.size();++i){
+            const auto& path=input[i];const size_t base=size_t(path.offset)+i;
+            const auto first=read(base+1);const uint32_t flags=first[7],used=flags&255u,errorFlag=(flags>>8)&255u,secondaryStart=(flags>>16)&255u;
+            if(!used||used>path.quota||errorFlag||flags>>24||
+               (secondaryStart!=255u&&(!secondaryStart||secondaryStart>used))){
+                valid=false;break;
+            }
+            EscargotRayQuery secondary{};
+            if(secondaryStart<used){
+                const auto raw=read(base);
+                for(int k=0;k<3;++k){secondary.origin[k]=asFloat(raw[k]);secondary.direction[k]=asFloat(raw[k+4]);}
+                secondary.low=asFloat(raw[3]);secondary.previousPrimitive=raw[7];
+                const auto firstSecondary=read(base+1+secondaryStart);
+                if(raw[3]!=firstSecondary[5]||raw[7]!=firstSecondary[6]){valid=false;break;}
+            }
+            for(uint32_t j=0;j<used;++j){
+                const auto raw=j?read(base+1+j):first;
+                auto& ev=output[size_t(path.offset)+j];ev={};
+                ev.query=j>=secondaryStart?secondary:path.initial;
+                ev.query.low=asFloat(raw[5]);ev.query.previousPrimitive=raw[6];
+                ev.hit.primitive=raw[0];ev.hit.status=raw[1];ev.hit.depth=asFloat(raw[2]);
+                ev.hit.u=asFloat(raw[3]);ev.hit.v=asFloat(raw[4]);
+                if(j==0){ev.hit.pad[0]=float(used);ev.hit.pad[1]=float(errorFlag);}
+            }
+        }
+        context->Unmap(pathReadback_.Get(),0);
+        if(!valid){error=L"Invalid compact Escargot path transcript";return false;}
         timing.readbackMs=std::chrono::duration<double,std::milli>(Clock::now()-start).count();
         if(timestamp){
             D3D11_QUERY_DATA_TIMESTAMP_DISJOINT info{};UINT64 a=0,b=0;

@@ -142,7 +142,7 @@ bool sampleResidentPaths(std::vector<Surface>& surfaces,const Scene& scene,const
     if(!input.empty()&&(!trace(input,events,rs.timing,stats.error)||events.size()!=offset)){
         if(stats.error.empty())stats.error="resident path output size mismatch";return false;
     }
-    rs.eventBytes=uint64_t(events.size())*sizeof(EscargotPathEvent);
+    rs.eventBytes=rs.timing.transferredBytes?rs.timing.transferredBytes:uint64_t(events.size())*sizeof(EscargotPathEvent);
     const auto start=std::chrono::steady_clock::now();
     // Read all paths only AFTER completion. Rebuild the CPU-side sparse
     // representation, validating every GPU-generated continuation.
