@@ -59,6 +59,10 @@ int main(int argc,char** argv){
     QFile rayFile(out.filePath("gpu_bvh_mismatches.csv"));if(!rayFile.open(QIODevice::WriteOnly|QIODevice::Text))return 22;
     QTextStream rayLog(&rayFile);rayLog.setRealNumberPrecision(12);
     rayLog<<"camera,index,classification,previous_primitive,low,ox,oy,oz,dx,dy,dz,cpu_primitive,cpu_owner,cpu_depth,gpu_status,gpu_primitive,gpu_owner,gpu_depth,gpu_u,gpu_v,gpu_triangle_cpu_t,gpu_triangle_cpu_u,gpu_triangle_cpu_v,gpu_triangle_cpu_finite\n";
+    QFile waveFile(out.filePath("gpu_wavefront_frames.csv"));if(!waveFile.open(QIODevice::WriteOnly|QIODevice::Text))return 23;
+    QTextStream waveLog(&waveFile);waveLog<<"camera,iteration,total_ms,matrix_ms,trace_wall_ms,prepare_ms,dispatch_readback_ms,packet_ms,raster_ms,rays,batches,max_batch,complete_paths,unknown_paths,packet_bytes,secondary_cameras\n";
+    QFile waveDiffFile(out.filePath("gpu_wavefront_mismatches.csv"));if(!waveDiffFile.open(QIODevice::WriteOnly|QIODevice::Text))return 23;
+    QTextStream waveDiffLog(&waveDiffFile);waveDiffLog.setRealNumberPrecision(12);waveDiffLog<<"camera,iteration,surface,index,cpu_primitive,gpu_primitive,cpu_depth,gpu_depth,cpu_low,gpu_low,cpu_previous,gpu_previous,cpu_ox,cpu_oy,cpu_oz,gpu_ox,gpu_oy,gpu_oz,cpu_dx,cpu_dy,cpu_dz,gpu_dx,gpu_dy,gpu_dz\n";
     QJsonArray summary;int tested=0;uint64_t allChanged=0,allActive=0,allCoverage=0,allEffective=0;int gpuReplayFailed=0,waveFailed=0;
     for(const QString id:{QString("v17_showcase_pool_634"),QString("v7_pool_fresco"),QString("v7_curtain_wall_detail"),QString("v8_stair_first_landing")}){
         auto it=std::find_if(rt.cameras.begin(),rt.cameras.end(),[&](const auto& c){return c.id==id;});if(it==rt.cameras.end()){qWarning()<<"Missing camera"<<id;continue;}
@@ -204,7 +208,8 @@ int main(int argc,char** argv){
             if(!m3d::renderLumaTraceEscargotGpuPreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,dPacket.data,dPixels,st,err)||st.zReflectActive||dPixels.size()!=waveRef.size()){
                 waveOk=false;waveError=QString::fromStdWString(err);break;}
             const double rasterTime=ms(renderStart),total=ms(begin);
-            if(j>=0){dTimes.push_back(total);dMatrixTimes.push_back(matrixTime);dDispatchTimes.push_back(dStats.dispatchMs);dPackTimes.push_back(packTime);dRasterTimes.push_back(rasterTime);}
+            if(j>=0){dTimes.push_back(total);dMatrixTimes.push_back(matrixTime);dDispatchTimes.push_back(dStats.dispatchMs);dPackTimes.push_back(packTime);dRasterTimes.push_back(rasterTime);
+                waveLog<<id<<','<<j<<','<<total<<','<<matrixTime<<','<<dStats.traceMs<<','<<dStats.prepareMs<<','<<dStats.dispatchMs<<','<<packTime<<','<<rasterTime<<','<<waveGpu.rays<<','<<dStats.batches<<','<<dStats.maxBatch<<','<<waveGpu.completePaths<<','<<waveGpu.unknownPaths<<','<<qulonglong(dPacket.data.size()*sizeof(float))<<','<<st.zReflectActive<<'\n';}
             uint64_t packetDiff=std::max(dPacket.data.size(),wPacket.data.size())-std::min(dPacket.data.size(),wPacket.data.size());
             for(size_t k=0;k<std::min(dPacket.data.size(),wPacket.data.size());++k)packetDiff+=dPacket.data[k]!=wPacket.data[k];
             uint64_t pixelDiff=0,oldDiff=0;
@@ -219,6 +224,9 @@ int main(int argc,char** argv){
                     bool same=a.primitive==bq.primitive&&a.depth==bq.depth&&a.query.low==bq.query.low&&a.query.previousPrimitive==bq.query.previousPrimitive;
                     for(int axis=0;axis<3;++axis)same=same&&a.query.origin[axis]==bq.query.origin[axis]&&a.query.direction[axis]==bq.query.direction[axis];
                     queryDiff+=!same;
+                    if(!same&&j==-1){waveDiffLog<<id<<','<<j<<','<<qulonglong(k)<<','<<qulonglong(m)<<','<<a.primitive<<','<<bq.primitive<<','<<a.depth<<','<<bq.depth<<','<<a.query.low<<','<<bq.query.low<<','<<a.query.previousPrimitive<<','<<bq.query.previousPrimitive;
+                        for(float v:a.query.origin)waveDiffLog<<','<<v;for(float v:bq.query.origin)waveDiffLog<<','<<v;
+                        for(float v:a.query.direction)waveDiffLog<<','<<v;for(float v:bq.query.direction)waveDiffLog<<','<<v;waveDiffLog<<'\n';}
                 }
             }
             waveQueryDifferences=std::max(waveQueryDifferences,queryDiff);waveComparedQueries=std::max(waveComparedQueries,compared);
@@ -241,6 +249,7 @@ int main(int argc,char** argv){
     const QJsonObject report{{"scene",loaded.scene.revision},{"width",w},{"height",h},{"repeats",repeats},{"rayBudget",int(opt.rayBudget)},{"textureResolutionCap",256},{"msaaRequested",1},{"modeB","CPU sparse BVH observations + compact GPU four-neighbor reconstruction, no secondary cameras"},{"receiverMatch","exact source object ID + material + local tangent plane; no averaged receiver depth rejection"},{"sourceLighting","resident GPU textures + simplified proxy, not LT radiance"},{"atlasNonzeroNote","not applicable in GPU mode; use effective pixels and packet_tiles"},{"cpuReference","untimed C capture, prior CPU reconstruction and depth gate, serial rays"},{"fixedPoseReuse","separate diagnostic: identical camera/scene/lighting, reuse CPU packet; includes GPU upload/render/readback, not moving-camera timing"},{"residentPose","exact camera/light/scene/opt key; byte-identical GPU packet remains resident; includes raster/readback"},{"movingPose","three actual lateral shifts 2.5/5/7.5 cm, cache misses enforced"},{"gpuTrace","experimental native nearest-hit replay on same DX11 device and resident BVH nodes; full transparent triangle geometry/order, not active B path"},{"forceWarp",qEnvironmentVariable("M3D_V16_FORCE_WARP")},{"gpuReplayValidated",gpuReplayFailed==0},{"gpuReplayFailedViews",gpuReplayFailed},{"wavefrontValidated",waveFailed==0},{"wavefrontFailedViews",waveFailed},{"wavefrontMode","D: actual batched GPU intersections, CPU path state and packet assembly; W: identical fixed per-sample quotas with CPU intersections; B unchanged"},{"cameras",summary}};
     const auto bytes=QJsonDocument(report).toJson();if(json.write(bytes)!=bytes.size()||log.status()!=QTextStream::Ok)return 13;
     rayLog.flush();if(rayLog.status()!=QTextStream::Ok)return 22;
+    waveLog.flush();waveDiffLog.flush();if(waveLog.status()!=QTextStream::Ok||waveDiffLog.status()!=QTextStream::Ok)return 23;
     if(gpuReplayFailed){qWarning()<<"A/B captures saved, but native GPU BVH replay not validated";return 21;}
     if(waveFailed){qWarning()<<"A/B captures saved, but GPU wavefront parity not validated";return 23;}
     return 0;

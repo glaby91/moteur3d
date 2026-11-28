@@ -118,5 +118,39 @@ int main(){
     thin.obj[1]=t0;e::Traversal tied(thin,tree,thinOwners);
     if(!tied.closest(testRay,.001f,first)||first.primitive!=0)return 43;
     m3d::EscargotRayQuery defaultQuery{};if(defaultQuery.previousPrimitive!=0xffffffffu)return 44;
+    // Real CPU traversal through a transparent interface, then reflection
+    // through that interface onto an opaque source behind the camera.
+    m3d::Scene waveScene;waveScene.mat.resize(2);
+    waveScene.mat[0].transmissionPercent=100;waveScene.mat[1].transmissionPercent=0;
+    auto glass=obj,receiver=obj,source=obj;
+    glass.a.z=glass.b.z=glass.c.z=1.f;glass.mat=0;
+    receiver.mat=1;source.a.z=source.b.z=source.c.z=-1.f;source.mat=1;
+    waveScene.obj={glass,receiver,source};waveScene.order={2,1,0};
+    m3d::LumaTraceBvh4 waveTree;waveTree.primitiveCount=3;auto waveLeaf=n;
+    waveLeaf.minZ=-1.f;waveLeaf.maxZ=2.f;waveLeaf.primitiveCount=3;waveTree.nodes.push_back(waveLeaf);
+    std::vector<uint32_t> waveOwners{1,2,3};e::Traversal waveWalk(waveScene,waveTree,waveOwners);
+    if(!waveWalk.valid())return 45;
+    m3d::Camera waveCam{};waveCam.eye={0,0,0};waveCam.f={0,0,1};waveCam.r={1,0,0};waveCam.u={0,1,0};waveCam.tanHalf=.5f;waveCam.aspect=1;
+    auto runWave=[&](uint32_t budget,e::Result& result,e::WaveStats& ws){
+        e::Options opts;opts.rayBudget=budget;opts.captureQueries=true;
+        result.surfaces.resize(1);auto& surface=result.surfaces[0];surface.candidate.object=2;surface.candidate.material=1;surface.candidate.bounds={0,0,1,1};surface.candidate.budget=budget;
+        auto traceBatch=[&](const std::vector<m3d::EscargotRayQuery>& q,std::vector<e::HitSample>& hits,std::string&){
+            hits.resize(q.size());for(size_t i=0;i<q.size();++i)waveWalk.closest({{q[i].origin[0],q[i].origin[1],q[i].origin[2]},{q[i].direction[0],q[i].direction[1],q[i].direction[2]}},q[i].low,hits[i],q[i].previousPrimitive);
+            return true;
+        };
+        return e::sampleWavefront(result.surfaces,waveScene,waveCam,1,1,opts,result,ws,traceBatch);
+    };
+    e::Result fullWave;e::WaveStats fullStats;if(!runWave(8,fullWave,fullStats))return 46;
+    const auto& waveSample=fullWave.surfaces[0].samples[0];
+    if(fullWave.rays!=4||fullStats.batches!=4||fullWave.completePaths!=1||waveSample.receiver!=e::State::Measured||waveSample.values.size()!=2||waveSample.values.count({1,0,0})!=1||waveSample.values.count({3,0,1})!=1)return 47;
+    const auto& records=fullWave.surfaces[0].recorded;
+    if(records.size()!=4||records[0].primitive!=0||records[1].primitive!=1||records[2].primitive!=0||records[3].primitive!=2||records[1].query.previousPrimitive!=0||records[2].query.previousPrimitive!=0xffffffffu||records[3].query.previousPrimitive!=0)return 48;
+    e::Result limited;e::WaveStats limitedStats;if(!runWave(2,limited,limitedStats)||limited.rays!=2||limited.completePaths!=0||limited.unknownPaths!=1||limited.surfaces[0].samples[0].receiver!=e::State::Measured)return 49;
+    m3d::EscargotRayQuery q{{0,0,0},.001f,{0,0,1},0xffffffffu};
+    m3d::EscargotRayHit raw{};raw.primitive=0;raw.status=1;raw.depth=1;raw.u=.25f;raw.v=.5f;
+    e::HitSample decoded;
+    if(!e::decodeWaveHit(waveScene,waveOwners,q,raw,decoded)||decoded.object!=1||decoded.depth!=1||decoded.p.z!=1)return 50;
+    q.previousPrimitive=0;if(e::decodeWaveHit(waveScene,waveOwners,q,raw,decoded))return 51;
+    raw.status=2;if(e::decodeWaveHit(waveScene,waveOwners,q,raw,decoded))return 52;
     return 0;
 }
