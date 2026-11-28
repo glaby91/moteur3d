@@ -2,6 +2,7 @@
 #ifdef _WIN32
 #include "escargot/gpu_packet.h"
 #include "escargot/runtime.h"
+#include "escargot/object_projected.h"
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
@@ -34,6 +35,7 @@ struct ExplorationSession {
     uint64_t revision=0;
     std::unique_ptr<e::Prepared> prepared;
     std::vector<uint32_t> objectReceivers;
+    std::unique_ptr<e::projected::Session> projected;
 };
 BackendResult renderEscargotF16(const Request& request,const m3d::Camera& camera,
                                const m3d::ShadowMap& shadow){
@@ -51,7 +53,7 @@ BackendResult renderEscargotF16(const Request& request,const m3d::Camera& camera
     opt.rayBudget=4096;
     if(!session.prepared||session.runtime.lock()!=request.scene||
        session.database.lock()!=request.sceneDatabase||session.revision!=scene.gpuCacheRevision){
-        session.prepared.reset();
+        session.prepared.reset();session.projected.reset();
         session.runtime=request.scene;
         session.database=request.sceneDatabase;
         session.revision=scene.gpuCacheRevision;
@@ -61,6 +63,23 @@ BackendResult renderEscargotF16(const Request& request,const m3d::Camera& camera
     }
     const char* objectEnv=std::getenv("CSE_WARP_ESCARGOT_OBJECT_GPU");
     QString objectFailure;
+    const char* legacy=std::getenv("CSE_WARP_ESCARGOT_LEGACY_F16");
+    if(!(objectEnv&&std::strcmp(objectEnv,"1")==0)&&!(legacy&&std::strcmp(legacy,"1")==0)){
+        if(!session.projected)session.projected=std::make_unique<e::projected::Session>(rt,*request.sceneDatabase);
+        if(!session.projected->valid()){result.reason=L"Object005 invalid catalogue";return result;}
+        e::projected::Metrics m;
+        const auto& plan=session.projected->build(camera,shadow,request.width,request.height,m);
+        m3d::EscargotBuildTiming timing;
+        if(request.directPresent)result.ok=m3d::renderLumaTraceEscargotGpuBuiltNative(scene,rt.lumaTraceBvh4,shadow,camera,request.width,request.height,reinterpret_cast<void*>(request.nativeHandle),plan,result.stats,timing,result.reason);
+        else result.ok=m3d::renderLumaTraceEscargotGpuBuiltPreview(scene,rt.lumaTraceBvh4,shadow,camera,request.width,request.height,plan,result.pixels,result.stats,timing,result.reason);
+        if(!result.ok)return result; // Never silently switch to per-pixel BVH4.
+        result.stats.rays=m.rays;result.stats.primarySamples=m.rays;
+        result.stats.ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+        result.renderer=QStringLiteral("V17 LumaTrace BVH4 — Z Escargot Object 005 — %1 — rays %2 / tri %3 / omitted %4 / deferred %5")
+            .arg(request.directPresent?QStringLiteral("Direct GPU (swapchain)"):QStringLiteral("Qt (QImage)"))
+            .arg(m.rays).arg(m.triangles).arg(m.omitted).arg(m.deferred+m.curved);
+        return result;
+    }
     if(objectEnv&&std::strcmp(objectEnv,"1")==0){
         m3d::EscargotPacketBuild plan;plan.rasterDirect=true;plan.rasterReceivers=session.objectReceivers;
         m3d::EscargotBuildTiming timing;

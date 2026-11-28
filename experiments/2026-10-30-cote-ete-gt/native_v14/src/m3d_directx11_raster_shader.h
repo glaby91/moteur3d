@@ -45,6 +45,7 @@ Texture3D<float4> indirectProbes : register(t4);
 Texture3D<float4> indirectProbesNext : register(t5);
 Texture2DArray<float4> preservedAlbedo : register(t6);
 StructuredBuffer<float4> lumaTriangleRadiance : register(t7);
+Texture2DArray<float4> escProjected : register(t8);
 Texture2D<float4> zReflection0 : register(t9);
 Texture2D<float4> zReflection1 : register(t10);
 Texture2D<float4> escColor : register(t11);
@@ -332,6 +333,15 @@ bool escGpuSample(VSOut i,out float3 reflected,out float coverage,out float weig
 inline constexpr char kShaderAfterEscargot[] = R"(bool sampleEscargot(VSOut i,out float3 reflected,out float coverage,out float weight){
     reflected=0;coverage=0;weight=0;
     if(zPlaneIds.z>=0||zPlaneIds.w>.5)return false;
+    if(zPlaneIds.z< -3.5){
+        if(i.receiverId==0u||i.receiverId>uint(escPacket[0].x))return false;
+        uint slice=uint(escPacket[i.receiverId+1u].x);
+        if(!slice)return false;
+        reflected=escProjected.Load(int4(int2(i.p.xy),int(slice-1u),0)).rgb;
+        float f0=max(saturate(materialOpacity[i.mat].z),saturate(materialSpecular[i.mat].w)*.85);
+        weight=f0+(1-f0)*pow(1-saturate(abs(dot(normalize(i.n),normalize(eye-i.world)))),5.0);
+        coverage=1;return true;
+    }
 #ifdef CSE_ESCARGOT_RASTER_DIRECT
     if(zPlaneIds.z< -2.5)return escRasterOptical(i,reflected,coverage,weight);
 #endif
