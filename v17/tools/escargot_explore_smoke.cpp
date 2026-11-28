@@ -1,4 +1,5 @@
 #include "../moteur3d_v17_render.h"
+#include "../escargot/footprint.h"
 #include <QCoreApplication>
 #include <QDebug>
 #include <algorithm>
@@ -52,6 +53,38 @@ int main(int argc,char** argv){
         qCritical()<<"Object004 failure:"<<G.ok<<G.renderer<<QString::fromStdWString(G.reason)<<"zReflect"<<G.stats.zReflectActive<<"pixels"<<G.pixels.size();return 9;
     }
     if(A.pixels==G.pixels||F.pixels==G.pixels){qCritical()<<"Object004 image did not differ from A or F16";return 10;}
+    // Prove an optical signal, not just a different frame from Z Reflect.
+    // Both images have identical pipelines; only water eligibility changes.
+    namespace e=m3d::escargot;
+    m3d::EscargotPacketBuild emptyPlan,waterPlan;
+    emptyPlan.rasterDirect=waterPlan.rasterDirect=true;
+    emptyPlan.rasterReceivers.assign(size_t(rt.objects.size())+1,0);
+    waterPlan.rasterReceivers=emptyPlan.rasterReceivers;
+    for(const auto& c:e::staticCandidates(rt,*req.sceneDatabase,e::Mode::Reflection))
+        if(e::waterMaterial(rt.renderScene.mat[c.material]))waterPlan.rasterReceivers[c.object]=1;
+    std::vector<uint32_t> waterOff,waterOn;
+    auto optical=[&](const m3d::EscargotPacketBuild& plan,std::vector<uint32_t>& pixels){
+        m3d::Stats st;m3d::EscargotBuildTiming timing;std::wstring error;
+        if(!m3d::renderLumaTraceEscargotGpuBuiltPreview(rt.renderScene,rt.lumaTraceBvh4,shadow,cam,req.width,req.height,plan,pixels,st,timing,error)){
+            qCritical()<<"Optical signal render failed"<<QString::fromStdWString(error);return false;
+        }
+        return pixels.size()==A.pixels.size()&&!st.zReflectActive;
+    };
+    if(!optical(emptyPlan,waterOff)||!optical(waterPlan,waterOn))return 22;
+    uint64_t waterSignal=0,strongSignal=0;
+    for(size_t j=0;j<waterOn.size();++j){
+        const auto a=waterOn[j],b=waterOff[j];
+        waterSignal+=(a&0xffffffu)!=(b&0xffffffu);
+        int delta=0;for(int sh:{0,8,16})delta+=std::abs(int((a>>sh)&255)-int((b>>sh)&255));
+        strongSignal+=delta>=12;
+    }
+    qInfo()<<"Water optical signal: changed pixels"<<qulonglong(waterSignal)<<"strong pixels"<<qulonglong(strongSignal);
+    if(app.arguments().size()==3){
+        QDir out(app.arguments().at(2));QDir().mkpath(out.absolutePath());
+        QImage(reinterpret_cast<const uchar*>(waterOff.data()),req.width,req.height,req.width*4,QImage::Format_RGB32).save(out.filePath("water-off.png"));
+        QImage(reinterpret_cast<const uchar*>(waterOn.data()),req.width,req.height,req.width*4,QImage::Format_RGB32).save(out.filePath("water-on.png"));
+    }
+    if(waterSignal<100||strongSignal<20){qCritical()<<"Water reflection missing or too weak";return 23;}
     auto pose=*it;pose.eye.x+=.075f;pose.target.x+=.075f;
     auto moved=m3d::v16::makeCamera(pose,req.width,req.height);
     auto M=cse::v17render::renderLumaTrace(req,moved,shadow);
@@ -86,7 +119,7 @@ int main(int argc,char** argv){
         QDir out(app.arguments().at(2));if(!QDir().mkpath(out.absolutePath()))return 19;
         auto save=[&](const auto& r,const QString& name){return QImage(reinterpret_cast<const uchar*>(r.pixels.data()),req.width,req.height,req.width*4,QImage::Format_RGB32).save(out.filePath(name));};
         if(!save(A,"A.png")||!save(F,"F16.png")||!save(G,"Object004.png")||!save(M,"Object004-moved.png"))return 20;
-        QJsonObject report{{"A_ms",double(A.stats.ms)},{"F16_ms",double(F.stats.ms)},{"Object004_ms",double(G.stats.ms)},{"Object004_moved_ms",double(M.stats.ms)},{"native_A_submit_ms",double(nativeA.stats.ms)},{"native_Object004_submit_ms",double(nativeF.stats.ms)},{"native_readback",int(nativeF.stats.readbackBufferCount)},{"note","Single warm/cold smoke timings on software WARP, not hardware FPS. Pixel output differs from A and F16; movement and A restoration verified, not proof of visual parity."}};
+        QJsonObject report{{"A_ms",double(A.stats.ms)},{"F16_ms",double(F.stats.ms)},{"Object004_ms",double(G.stats.ms)},{"Object004_moved_ms",double(M.stats.ms)},{"native_A_submit_ms",double(nativeA.stats.ms)},{"native_Object004_submit_ms",double(nativeF.stats.ms)},{"native_readback",int(nativeF.stats.readbackBufferCount)},{"water_signal_pixels",double(waterSignal)},{"water_strong_signal_pixels",double(strongSignal)},{"note","Single warm/cold smoke timings on software WARP, not hardware FPS. Pixel output differs from A and F16; movement and A restoration verified, not proof of visual parity."}};
         QFile f(out.filePath("object004-summary.json"));if(!f.open(QIODevice::WriteOnly))return 21;f.write(QJsonDocument(report).toJson());
     }
     return 0;

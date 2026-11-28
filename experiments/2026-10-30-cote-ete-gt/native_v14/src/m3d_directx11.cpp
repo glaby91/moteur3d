@@ -773,9 +773,9 @@ public:
                 context_->VSSetShader(vs_.Get(),nullptr,0);
                 context_->IASetVertexBuffers(0,1,&vb,&stride,&offset);
             }
-            // Restore exact production opaque and transparency pipeline.
+            // Restore the selected color shader, including Object004, after Z-prepass.
             context_->OMSetRenderTargets(1,&rt,ds);
-            context_->PSSetShader(ps_.Get(),nullptr,0);
+            context_->PSSetShader(escDirect?objectPs_.Get():ps_.Get(),nullptr,0);
         }
         if(vertexCount_){
             if(!cullEnabled){
