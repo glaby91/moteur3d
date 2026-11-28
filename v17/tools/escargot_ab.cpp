@@ -11,11 +11,27 @@
 #include <QDebug>
 #include <cstdlib>
 #include <chrono>
+#include <iomanip>
+#include <limits>
 namespace e=m3d::escargot;
 using Clock=std::chrono::steady_clock;
 static double ms(Clock::time_point start){return std::chrono::duration<double,std::milli>(Clock::now()-start).count();}
 static bool save(const QDir& out,const QString& name,const std::vector<uint32_t>& p,int w,int h){
     return p.size()==size_t(w)*h&&QImage(reinterpret_cast<const uchar*>(p.data()),w,h,w*4,QImage::Format_RGB32).save(out.filePath(name));
+}
+// Re-evaluate a particular original triangle in CPU float, without the
+// low/high clipping, so repeated crossings and shared edges can be diagnosed.
+struct RawIntersection {float t=0,u=0,v=0;bool finite=false;};
+static RawIntersection rawIntersection(const m3d::Scene& scene,uint32_t primitive,const m3d::EscargotRayQuery& q){
+    RawIntersection hit;
+    if(primitive>=scene.obj.size())return hit;
+    const auto& o=scene.obj[primitive];
+    const m3d::V origin{q.origin[0],q.origin[1],q.origin[2]},dir{q.direction[0],q.direction[1],q.direction[2]};
+    const auto e=o.b-o.a,f=o.c-o.a,p=m3d::cross(dir,f);
+    const float det=m3d::dot(e,p);if(std::abs(det)<1e-10f)return hit;
+    const auto a=origin-o.a,z=m3d::cross(a,e);
+    hit.u=m3d::dot(a,p)/det;hit.v=m3d::dot(dir,z)/det;hit.t=m3d::dot(f,z)/det;
+    hit.finite=std::isfinite(hit.t)&&std::isfinite(hit.u)&&std::isfinite(hit.v);return hit;
 }
 static double quantile(std::vector<double> v,double q){std::sort(v.begin(),v.end());return v.empty()?0:v[size_t(std::ceil(q*v.size()))-1];}
 int main(int argc,char** argv){
@@ -40,6 +56,9 @@ int main(int argc,char** argv){
     m3d::updateLighting(rt.daylightHour);m3d::Stats shadowStats;const auto shadow=m3d::buildShadow(scene,shadowStats);
     QFile csv(out.filePath("frames.csv"));if(!csv.open(QIODevice::WriteOnly|QIODevice::Text))return 7;
     QTextStream log(&csv);log<<"camera,iteration,mode,total_ms,raster_ms,matrix_ms,composition_ms,atlas_ms,secondary_cameras,rays,candidates,deferred,complete_paths,unknown_paths,atlas_nonzero,texture_samples,reused_cells,gpu_ms,gpu_timing_valid,prepare_once_ms,candidate_ms,admission_ms,escargot_total_ms,static_candidates,packet_bytes,packet_tiles,packet_layer_lists,packet_observations,affine_layers,ray_workers\n";
+    QFile rayFile(out.filePath("gpu_bvh_mismatches.csv"));if(!rayFile.open(QIODevice::WriteOnly|QIODevice::Text))return 22;
+    QTextStream rayLog(&rayFile);rayLog.setRealNumberPrecision(12);
+    rayLog<<"camera,index,classification,low,ox,oy,oz,dx,dy,dz,cpu_primitive,cpu_owner,cpu_depth,gpu_status,gpu_primitive,gpu_owner,gpu_depth,gpu_u,gpu_v,gpu_triangle_cpu_t,gpu_triangle_cpu_u,gpu_triangle_cpu_v,gpu_triangle_cpu_finite\n";
     QJsonArray summary;int tested=0;uint64_t allChanged=0,allActive=0,allCoverage=0,allEffective=0;int gpuReplayFailed=0;
     for(const QString id:{QString("v17_showcase_pool_634"),QString("v7_pool_fresco"),QString("v7_curtain_wall_detail"),QString("v8_stair_first_landing")}){
         auto it=std::find_if(rt.cameras.begin(),rt.cameras.end(),[&](const auto& c){return c.id==id;});if(it==rt.cameras.end()){qWarning()<<"Missing camera"<<id;continue;}
@@ -123,15 +142,40 @@ int main(int argc,char** argv){
         // dispatch. This validates the GPU traversal, not a full GPU path solver.
         std::vector<m3d::EscargotRayQuery> queries;std::vector<e::RecordedQuery> reference;
         for(const auto& sf:referenceFrame.surfaces)for(const auto& q:sf.recorded){queries.push_back(q.query);reference.push_back(q);}
-        uint64_t gpuMismatch=0,gpuOverflow=0;double gpuPrepare=0,gpuQuery=0;
+        uint64_t gpuMismatch=0,gpuOverflow=0,nearLow=0,sameOwner=0,differentOwner=0,hitMiss=0,depthOnly=0;
+        double gpuPrepare=0,gpuQuery=0,warmPrepare=0,warmQuery=0;
         std::vector<m3d::EscargotRayHit> hits;
         bool gpuTraceOk=!queries.empty()&&m3d::traceEscargotGpuBatch(scene,rt.lumaTraceBvh4,queries,hits,gpuPrepare,gpuQuery,err)&&hits.size()==reference.size();
         if(gpuTraceOk){
-            for(size_t i=0;i<hits.size();++i){const auto& x=hits[i];const auto& y=reference[i];
+            for(size_t i=0;i<hits.size();++i){const auto& x=hits[i];const auto& y=reference[i];const auto& q=y.query;
                 if(x.status>1){++gpuOverflow;continue;}
-                const bool cpuHit=y.primitive!=0xffffffffu;
-                if(cpuHit!=(x.status==1)||(cpuHit&&(x.primitive!=y.primitive||std::abs(x.depth-y.depth)>std::max(.0001f,std::abs(y.depth)*.00001f))))++gpuMismatch;
+                const bool cpuHit=y.primitive!=0xffffffffu,gpuHit=x.status==1;
+                const bool mismatch=cpuHit!=gpuHit||(cpuHit&&gpuHit&&(x.primitive!=y.primitive||!std::isfinite(x.depth)||std::abs(x.depth-y.depth)>std::max(.0001f,std::abs(y.depth)*.00001f)));
+                if(!mismatch)continue;
+                ++gpuMismatch;
+                const auto owner=[&](uint32_t p){return p<scene.escargotReceiverIds.size()?scene.escargotReceiverIds[p]:0u;};
+                const uint32_t cpuOwner=cpuHit?owner(y.primitive):0u,gpuOwner=gpuHit?owner(x.primitive):0u;
+                const auto raw=rawIntersection(scene,x.primitive,q);
+                // Classify likely repeat of a just-crossed surface; not an exemption.
+                const float tolerance=std::max(.00001f,std::abs(q.low)*.000002f);
+                const bool near=gpuHit&&std::isfinite(x.depth)&&std::abs(x.depth-q.low)<=tolerance;
+                const char* category="depth_only";
+                if(near){++nearLow;category="near_low";}
+                else if(cpuHit!=gpuHit){++hitMiss;category="hit_miss";}
+                else if(x.primitive!=y.primitive){
+                    if(cpuOwner==gpuOwner){++sameOwner;category="same_owner";}
+                    else{++differentOwner;category="different_owner";}
+                }else ++depthOnly;
+                rayLog<<id<<','<<qulonglong(i)<<','<<category<<','<<q.low<<','<<q.origin[0]<<','<<q.origin[1]<<','<<q.origin[2]<<','<<q.direction[0]<<','<<q.direction[1]<<','<<q.direction[2]<<','<<y.primitive<<','<<cpuOwner<<','<<y.depth<<','<<x.status<<','<<x.primitive<<','<<gpuOwner<<','<<x.depth<<','<<x.u<<','<<x.v<<','<<raw.t<<','<<raw.u<<','<<raw.v<<','<<int(raw.finite)<<'\n';
             }
+            // Second dispatch on the same buffer to separate cold-start latency.
+            std::vector<m3d::EscargotRayHit> warmHits;std::wstring warmError;
+            if(!m3d::traceEscargotGpuBatch(scene,rt.lumaTraceBvh4,queries,warmHits,warmPrepare,warmQuery,warmError)||warmHits.size()!=hits.size()){
+                gpuTraceOk=false;err=warmError;
+            }else{
+                for(size_t i=0;i<hits.size();++i){const auto& a=hits[i];const auto& b=warmHits[i];if(a.status!=b.status||a.primitive!=b.primitive||a.depth!=b.depth||a.u!=b.u||a.v!=b.v){gpuTraceOk=false;err=L"GPU replay nondeterministic";break;}}
+            }
+            rayLog.flush();
         }else qWarning()<<"Experimental GPU trace unavailable"<<QString::fromStdWString(err);
         if(!gpuTraceOk||gpuOverflow||gpuMismatch)++gpuReplayFailed;
         const QString gpuTraceError=gpuTraceOk?QString():QString::fromStdWString(err);
@@ -140,13 +184,14 @@ int main(int argc,char** argv){
         std::vector<uint32_t> again;m3d::Stats againStats;
         if(!m3d::renderLumaTracePreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,again,againStats,err)||again!=a){qCritical()<<"A/B restore parity failed"<<id;return 15;}
         if(!save(out,id+"-A-virtual.png",a,w,h)||!save(out,id+"-B-escargot.png",b,w,h)||!save(out,id+"-difference-x4.png",diff,w,h))return 11;
-        summary.append(QJsonObject{{"camera",id},{"A_p50_ms",quantile(aTimes,.50)},{"A_p95_ms",quantile(aTimes,.95)},{"B_p50_ms",quantile(bTimes,.50)},{"B_p95_ms",quantile(bTimes,.95)},{"B_fixed_pose_reuse_p50_ms",quantile(fixedTimes,.50)},{"B_fixed_pose_reuse_p95_ms",quantile(fixedTimes,.95)},{"B_resident_p50_ms",quantile(residentTimes,.50)},{"B_resident_p95_ms",quantile(residentTimes,.95)},{"A_moving_p50_ms",quantile(moveA,.50)},{"B_moving_p50_ms",quantile(moveB,.50)},{"gpuTraceAvailable",gpuTraceOk},{"gpuTraceError",gpuTraceError},{"gpuTraceQueries",double(queries.size())},{"gpuTraceMismatches",double(gpuMismatch)},{"gpuTraceOverflow",double(gpuOverflow)},{"gpuTracePrepareMs",gpuPrepare},{"gpuTraceReplayMs",gpuQuery},{"changedPixels",double(changed)},{"escargotEffectivePixels",double(effective)},{"meanAbsChannelDifference",errorSum/(3*a.size())}});
+        summary.append(QJsonObject{{"camera",id},{"A_p50_ms",quantile(aTimes,.50)},{"A_p95_ms",quantile(aTimes,.95)},{"B_p50_ms",quantile(bTimes,.50)},{"B_p95_ms",quantile(bTimes,.95)},{"B_fixed_pose_reuse_p50_ms",quantile(fixedTimes,.50)},{"B_fixed_pose_reuse_p95_ms",quantile(fixedTimes,.95)},{"B_resident_p50_ms",quantile(residentTimes,.50)},{"B_resident_p95_ms",quantile(residentTimes,.95)},{"A_moving_p50_ms",quantile(moveA,.50)},{"B_moving_p50_ms",quantile(moveB,.50)},{"gpuTraceAvailable",gpuTraceOk},{"gpuTraceError",gpuTraceError},{"gpuTraceQueries",double(queries.size())},{"gpuTraceMismatches",double(gpuMismatch)},{"gpuTraceOverflow",double(gpuOverflow)},{"gpuTracePrepareMs",gpuPrepare},{"gpuTraceReplayMs",gpuQuery},{"gpuTraceWarmReplayMs",warmQuery},{"gpuMismatchNearLow",double(nearLow)},{"gpuMismatchSameOwner",double(sameOwner)},{"gpuMismatchDifferentOwner",double(differentOwner)},{"gpuMismatchHitMiss",double(hitMiss)},{"gpuMismatchDepthOnly",double(depthOnly)},{"changedPixels",double(changed)},{"escargotEffectivePixels",double(effective)},{"meanAbsChannelDifference",errorSum/(3*a.size())}});
         qInfo()<<id<<"A p50"<<quantile(aTimes,.5)<<"B p50"<<quantile(bTimes,.5)<<"changed"<<qulonglong(changed)<<"effective Escargot pixels"<<qulonglong(effective);++tested;log.flush();
     }
     if(!tested||!allActive||!allCoverage||!allChanged||!allEffective){qCritical()<<"Invalid A/B: no active virtual camera, optical data or visible changes";return 12;}
     QFile json(out.filePath("summary.json"));if(!json.open(QIODevice::WriteOnly))return 13;
     const QJsonObject report{{"scene",loaded.scene.revision},{"width",w},{"height",h},{"repeats",repeats},{"rayBudget",int(opt.rayBudget)},{"textureResolutionCap",256},{"msaaRequested",1},{"modeB","CPU sparse BVH observations + compact GPU four-neighbor reconstruction, no secondary cameras"},{"receiverMatch","exact source object ID + material + local tangent plane; no averaged receiver depth rejection"},{"sourceLighting","resident GPU textures + simplified proxy, not LT radiance"},{"atlasNonzeroNote","not applicable in GPU mode; use effective pixels and packet_tiles"},{"cpuReference","untimed C capture, prior CPU reconstruction and depth gate, serial rays"},{"fixedPoseReuse","separate diagnostic: identical camera/scene/lighting, reuse CPU packet; includes GPU upload/render/readback, not moving-camera timing"},{"residentPose","exact camera/light/scene/opt key; byte-identical GPU packet remains resident; includes raster/readback"},{"movingPose","three actual lateral shifts 2.5/5/7.5 cm, cache misses enforced"},{"gpuTrace","experimental native nearest-hit replay on same DX11 device and resident BVH nodes; full transparent triangle geometry/order, not active B path"},{"forceWarp",qEnvironmentVariable("M3D_V16_FORCE_WARP")},{"gpuReplayValidated",gpuReplayFailed==0},{"gpuReplayFailedViews",gpuReplayFailed},{"cameras",summary}};
     const auto bytes=QJsonDocument(report).toJson();if(json.write(bytes)!=bytes.size()||log.status()!=QTextStream::Ok)return 13;
+    rayLog.flush();if(rayLog.status()!=QTextStream::Ok)return 22;
     if(gpuReplayFailed){qWarning()<<"A/B captures saved, but native GPU BVH replay not validated";return 21;}
     return 0;
 }

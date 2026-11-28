@@ -24,7 +24,9 @@ RWStructuredBuffer<Hit> hits:register(u0);
 cbuffer Params:register(b0){uint queryCount,nodeCount,triangleCount,orderCount;}
 bool slab(float o,float d,float lo,float hi,inout float low,inout float high){
     if(abs(d)<1e-12)return o>=lo&&o<=hi;
-    float x=(lo-o)/d,y=(hi-o)/d;
+    precise float inverse=1.0/d;
+    precise float x=(lo-o)*inverse;
+    precise float y=(hi-o)*inverse;
     float l=min(x,y),h=max(x,y);
     l-=4.76837158203125e-7*max(1.0,abs(l));h+=4.76837158203125e-7*max(1.0,abs(h));
     low=max(low,l);high=min(high,h);return high>=low;
@@ -35,13 +37,29 @@ bool box(Node n,float3 o,float3 d,float low,float high,out float nearT){
     if(!slab(o.y,d.y,n.lo.y,n.hi.y,nearT,high))return false;
     return slab(o.z,d.z,n.lo.z,n.hi.z,nearT,high);
 }
+// Match CPU m3d::dot and m3d::cross, including evaluation order.
+float cpuDot(float3 a,float3 b){
+    precise float x=a.x*b.x,y=a.y*b.y,z=a.z*b.z;
+    precise float xy=x+y;
+    precise float result=xy+z;return result;
+}
+float3 cpuCross(float3 a,float3 b){
+    precise float x=a.y*b.z-a.z*b.y;
+    precise float y=a.z*b.x-a.x*b.z;
+    precise float z=a.x*b.y-a.y*b.x;
+    return float3(x,y,z);
+}
 bool hitTriangle(Triangle t,Query q,float high,out float depth,out float u,out float v){
     depth=0;u=0;v=0;
-    float3 e=t.b.xyz-t.a.xyz,f=t.c.xyz-t.a.xyz,p=cross(q.d,f);
-    float det=dot(e,p);if(abs(det)<1e-10)return false;
-    float3 a=q.o-t.a.xyz;u=dot(a,p)/det;if(u<0||u>1)return false;
-    float3 z=cross(a,e);v=dot(q.d,z)/det;if(v<0||u+v>1)return false;
-    depth=dot(f,z)/det;return isfinite(depth)&&depth>q.low&&depth<=high;
+    precise float3 e=t.b.xyz-t.a.xyz,f=t.c.xyz-t.a.xyz;
+    precise float3 p=cpuCross(q.d,f);
+    precise float det=cpuDot(e,p);if(abs(det)<1e-10)return false;
+    precise float3 a=q.o-t.a.xyz;
+    precise float uu=cpuDot(a,p)/det;u=uu;if(uu<0||uu>1)return false;
+    precise float3 z=cpuCross(a,e);
+    precise float vv=cpuDot(q.d,z)/det;v=vv;
+    precise float uv=uu+vv;if(vv<0||uv>1)return false;
+    precise float tt=cpuDot(f,z)/det;depth=tt;return isfinite(tt)&&tt>q.low&&tt<=high;
 }
 // Four-way sorting network: fixed five comparisons, no nested dynamic loop.
 // Push farthest first so the nearest node is popped first.
@@ -127,7 +145,7 @@ public:
         if(device_!=device){*this=TraceBatch{};device_=device;}
         if(!shader_){
             ComPtr<ID3DBlob> code,log;
-            HRESULT hr=D3DCompile(kTrace,sizeof(kTrace)-1,"EscargotTrace",nullptr,nullptr,"CSTrace","cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&code,&log);
+            HRESULT hr=D3DCompile(kTrace,sizeof(kTrace)-1,"EscargotTrace",nullptr,nullptr,"CSTrace","cs_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3|D3DCOMPILE_IEEE_STRICTNESS,0,&code,&log);
             if(FAILED(hr)){error=L"Escargot trace shader: ";if(log){const char* p=static_cast<const char*>(log->GetBufferPointer());for(size_t j=0;j<std::min<size_t>(log->GetBufferSize(),2048);++j)error.push_back(wchar_t(static_cast<unsigned char>(p[j])));}return false;}
             if(FAILED(device->CreateComputeShader(code->GetBufferPointer(),code->GetBufferSize(),nullptr,&shader_))){error=L"Escargot trace shader creation";return false;}
         }
