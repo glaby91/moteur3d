@@ -1,0 +1,98 @@
+[
+  {
+    "run": 46129493750,
+    "artifact": 15257163190,
+    "original": "optimized/vulkan-scene-2.png",
+    "sha256": "789a54e6fabf060c38ef13b3282a0d742af58e1c7b0625adc70a8e74ea5bcc30",
+    "original_size": [
+      640,
+      360
+    ],
+    "preview": "mac-build11-exterior.jpg",
+    "preview_size": [
+      640,
+      360
+    ],
+    "preview_sha256": "e193b7e399a90963e531b2cd697e50862cae4c1157069e78718faed1d812814f"
+  },
+  {
+    "run": 46095834402,
+    "artifact": 15243835709,
+    "original": "optimization/1920x1080/0/combined/frame-0.png",
+    "sha256": "b520286c068842bd23e6e427c0c41c7f60d02289cae286c07bbcc8ddad6f594a",
+    "original_size": [
+      1920,
+      1080
+    ],
+    "preview": "mac-build7-static.jpg",
+    "preview_size": [
+      960,
+      540
+    ],
+    "preview_sha256": "1e63756c4f7779cc75529619b9ef83b55c234c1c732d3b1e7bd973c99f78c510"
+  },
+  {
+    "run": 46095834402,
+    "artifact": 15243835709,
+    "original": "optimization/1920x1080/0/combined/frame-23.png",
+    "sha256": "5467ecd40a24ffea17964ba395ab6c9240dfdcc025013d25c8f3d904c19d2e89",
+    "original_size": [
+      1920,
+      1080
+    ],
+    "preview": "mac-build7-moving.jpg",
+    "preview_size": [
+      960,
+      540
+    ],
+    "preview_sha256": "29608aed671e1580c4c666d9bc87690ef09af35c0e6a1a67cacc13064ee71655"
+  },
+  {
+    "run": 46083487533,
+    "artifact": 15237877283,
+    "original": "vulkan-pool-fhd.png",
+    "sha256": "e276960ed526ca256545e2fd0f15bb6e697808e0dbfe906c55768961d19cdcf8",
+    "original_size": [
+      1920,
+      1080
+    ],
+    "preview": "linux-build6-pool.jpg",
+    "preview_size": [
+      960,
+      540
+    ],
+    "preview_sha256": "15727c598d24c7799fd0ab9868a39715443407b9e78d5d82f53e8a3a022583e6"
+  },
+  {
+    "run": 46088634614,
+    "artifact": 15239724092,
+    "original": "camera-1/camera.png",
+    "sha256": "5fdea35ccfdaaf8ac20708acdd97357203b4edb74233f750c170095a09c10762",
+    "original_size": [
+      1600,
+      1000
+    ],
+    "preview": "linux-build8-monument.jpg",
+    "preview_size": [
+      960,
+      600
+    ],
+    "preview_sha256": "b485b3d8384b008de0042c1cd9e4ce137c230573cb86c0d590430e0db0562edb"
+  },
+  {
+    "run": 46088634614,
+    "artifact": 15239724092,
+    "original": "camera-5/camera.png",
+    "sha256": "678f2db624358c16284971d150e32e15cb006025203b1da00d5923435d61788f",
+    "original_size": [
+      1600,
+      1000
+    ],
+    "preview": "linux-build8-hall.jpg",
+    "preview_size": [
+      960,
+      600
+    ],
+    "preview_sha256": "f0616dad259bbc409e1ab700bb31ceac8a8b3239054dec943037a41cf4a47843"
+  }
+]
