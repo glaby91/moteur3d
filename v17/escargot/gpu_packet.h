@@ -158,7 +158,7 @@ inline Packet packGpu(const Result& frame,const Scene& scene,size_t objectCount,
 // tile. GPU computes the exact conservative shortlists and final packet.
 // Source layer grouping/affine metadata remain CPU-side in this phase.
 struct BuildPlan {EscargotPacketBuild native;bool ok=false;std::string error;};
-inline BuildPlan planGpuBuild(const Result& frame,const Scene& scene,size_t objectCount,int tileSize=16,bool scalarNearest=true){
+inline BuildPlan planGpuBuild(const Result& frame,const Scene& scene,size_t objectCount,int tileSize=16,bool scalarNearest=true,bool regionSearch=true){
     BuildPlan plan;Packet p;
     try{
         if(tileSize!=8&&tileSize!=16&&tileSize!=32)throw std::runtime_error("Invalid optical tile size");
@@ -187,38 +187,53 @@ inline BuildPlan planGpuBuild(const Result& frame,const Scene& scene,size_t obje
         for(const auto& item:surfaces){
             const auto& sf=*item.sf;const auto r=sf.candidate.bounds;
             const bool coverage=p.data[4*(2+2*size_t(sf.candidate.object)+1)+3]>.5f;
-            const size_t receiverStart=p.size();
-            const size_t sourceBegin=p.size();
-            for(auto id:sf.receiverIndices){
-                const auto& s=sf.samples[id];p.add(float(s.x),float(s.y),float(id),s.receiver==State::Measured?1.f:0.f);
-                p.add(s.position.x,s.position.y,s.position.z,s.receiverWeight);p.add(s.normal.x,s.normal.y,s.normal.z,s.receiverDepth);
-            }
-            const size_t layerStart=p.reserveRecords(sf.layers.size()*7);size_t layerIndex=0;
+            struct SourceLayer {const Layer* l;Affine a;std::vector<size_t> ids;};
+            std::vector<SourceLayer> sourceLayers;sourceLayers.reserve(sf.layers.size());
             for(const auto& kv:sf.layers){
-                const auto& l=kv.second;const auto a=affine(scene,l);const auto& mat=scene.mat[l.key.material];
-                const size_t base=layerStart+7*layerIndex++,first=p.size();
-                std::vector<size_t> partialIds;
-                if(!coverage){partialIds=sf.completeIndices;partialIds.insert(partialIds.end(),l.partial.begin(),l.partial.end());}
-                const auto& chosen=coverage?sf.receiverIndices:partialIds;
-                p.set(base,float(first),float(chosen.size()),float(l.key.material),a.valid?1.f:0.f);
-                p.set(base+1,float(l.bounds.x),float(l.bounds.y),float(l.bounds.w),float(l.bounds.h));
-                p.vec(base+2,a.origin,a.u);p.vec(base+3,a.normal,a.v);p.vec(base+4,a.du);p.vec(base+5,a.dv);
-                p.vec(base+6,mat.emissionColor*std::max(0.f,mat.emissionIntensity),mat.imageAlbedo?1.f:0.f);
-                for(auto id:chosen){
-                    auto it=l.measured.find(id);const bool hit=it!=l.measured.end();const auto& s=sf.samples[id];
-                    if(!coverage)p.add(float(s.x),float(s.y),float(id),hit?1.f:0.f);
-                    if(hit){const auto& v=it->second;p.add(v.uv.x,v.uv.y,v.depth,v.opacity);p.vec(p.add(),v.normal,float(v.primitive+1u));}
-                    else{p.add();p.add();}
-                }
+                SourceLayer item{&kv.second,affine(scene,kv.second),{}};
+                if(!coverage){item.ids=sf.completeIndices;item.ids.insert(item.ids.end(),kv.second.partial.begin(),kv.second.partial.end());}
+                sourceLayers.push_back(std::move(item));
             }
-            allocationUpper+=uint64_t(p.size()-sourceBegin)*uint64_t(item.cols)*item.rows;
-            if(allocationUpper>std::numeric_limits<uint32_t>::max())throw std::runtime_error("Optical GPU allocator upper bound exceeds uint32");
-            for(int ty=0;ty<item.rows;++ty)for(int tx=0;tx<item.cols;++tx){
-                const size_t base=plan.native.jobBase+3*job++;
-                const size_t tileId=item.tileBase+size_t(ty)*item.cols+tx;
-                p.set(base,float(tileId),float(receiverStart),float(sf.receiverIndices.size()),float(layerStart));
-                p.set(base+1,float(sf.layers.size()),coverage?1.f:0.f,float(r.x+tx*tileSize),float(r.y+ty*tileSize));
-                p.set(base+2,float(std::min(tileSize,r.w-tx*tileSize)),float(std::min(tileSize,r.h-ty*tileSize)),0,0);
+            // Regions are only a conservative search index, never optical
+            // geometry or new samples. Keep original order and all ties.
+            const bool regional=regionSearch&&sf.receiverIndices.size()>=128&&item.cols*item.rows>16;
+            const int blockX=regional?std::max(1,128/tileSize):item.cols,blockY=regional?std::max(1,128/tileSize):item.rows;
+            for(int by=0;by<item.rows;by+=blockY)for(int bx=0;bx<item.cols;bx+=blockX){
+                const int ex=std::min(bx+blockX,item.cols),ey=std::min(by+blockY,item.rows);
+                const Rect region{r.x+bx*tileSize,r.y+by*tileSize,std::min(r.w,ex*tileSize)-bx*tileSize,std::min(r.h,ey*tileSize)-by*tileSize};
+                const auto receivers=regional?shortlist(sf,sf.receiverIndices,region):sf.receiverIndices;
+                const size_t receiverStart=p.size(),sourceBegin=p.size();
+                for(auto id:receivers){
+                    const auto& s=sf.samples[id];p.add(float(s.x),float(s.y),float(id),s.receiver==State::Measured?1.f:0.f);
+                    p.add(s.position.x,s.position.y,s.position.z,s.receiverWeight);p.add(s.normal.x,s.normal.y,s.normal.z,s.receiverDepth);
+                }
+                std::vector<const SourceLayer*> active;
+                for(const auto& l:sourceLayers)if(!regional||overlaps(l.l->bounds,region))active.push_back(&l);
+                const size_t layerStart=p.reserveRecords(active.size()*7);size_t layerIndex=0;
+                for(const auto* itemLayer:active){
+                    const auto& l=*itemLayer->l;const auto& a=itemLayer->a;const auto& mat=scene.mat[l.key.material];
+                    const size_t base=layerStart+7*layerIndex++,first=p.size();
+                    const auto chosen=coverage?receivers:(regional?shortlist(sf,itemLayer->ids,region):itemLayer->ids);
+                    p.set(base,float(first),float(chosen.size()),float(l.key.material),a.valid?1.f:0.f);
+                    p.set(base+1,float(l.bounds.x),float(l.bounds.y),float(l.bounds.w),float(l.bounds.h));
+                    p.vec(base+2,a.origin,a.u);p.vec(base+3,a.normal,a.v);p.vec(base+4,a.du);p.vec(base+5,a.dv);
+                    p.vec(base+6,mat.emissionColor*std::max(0.f,mat.emissionIntensity),mat.imageAlbedo?1.f:0.f);
+                    for(auto id:chosen){
+                        auto it=l.measured.find(id);const bool hit=it!=l.measured.end();const auto& s=sf.samples[id];
+                        if(!coverage)p.add(float(s.x),float(s.y),float(id),hit?1.f:0.f);
+                        if(hit){const auto& v=it->second;p.add(v.uv.x,v.uv.y,v.depth,v.opacity);p.vec(p.add(),v.normal,float(v.primitive+1u));}
+                        else{p.add();p.add();}
+                    }
+                }
+                allocationUpper+=uint64_t(p.size()-sourceBegin)*uint64_t(ex-bx)*(ey-by);
+                if(allocationUpper>std::numeric_limits<uint32_t>::max())throw std::runtime_error("Optical GPU allocator upper bound exceeds uint32");
+                for(int ty=by;ty<ey;++ty)for(int tx=bx;tx<ex;++tx){
+                    const size_t base=plan.native.jobBase+3*job++;
+                    const size_t tileId=item.tileBase+size_t(ty)*item.cols+tx;
+                    p.set(base,float(tileId),float(receiverStart),float(receivers.size()),float(layerStart));
+                    p.set(base+1,float(active.size()),coverage?1.f:0.f,float(r.x+tx*tileSize),float(r.y+ty*tileSize));
+                    p.set(base+2,float(std::min(tileSize,r.w-tx*tileSize)),float(std::min(tileSize,r.h-ty*tileSize)),0,0);
+                }
             }
         }
         // A bounded reusable 16 MiB output; explicit failure on overflow.
