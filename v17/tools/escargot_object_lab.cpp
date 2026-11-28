@@ -111,19 +111,29 @@ int main(int argc,char** argv){
             auto sample=[&](int x,int y){int i=y*W+x;if(samples[i]!=-3)return samples[i];if(!proj[i].valid)return samples[i]=-1;if(rays+2>uint64_t(budget))return -2;return samples[i]=visibility(trace,s,water,src,cam,proj[i],rays);};
             std::function<void(int,int,int,int)> refine=[&](int x0,int y0,int x1,int y1){
                 int xm=(x0+x1)/2,ym=(y0+y1)/2;int v[]={sample(x0,y0),sample(x1,y0),sample(x0,y1),sample(x1,y1),sample(xm,ym),sample(xm,y0),sample(xm,y1),sample(x0,ym),sample(x1,ym)};
-                bool diff=std::any_of(v,v+9,[&](int a){return a!=v[0];});
-                if(diff&&std::max(x1-x0,y1-y0)>2&&rays+2<=uint64_t(budget)){
+                bool diff=std::find(v,v+9,0)!=v+9&&std::find(v,v+9,1)!=v+9;
+                if(diff&&std::max(x1-x0,y1-y0)>2&&rays+36<=uint64_t(budget)){
                     for(int y=y0;y<=y1;y=ym+1){int b=y==y0?ym:y1;
                         for(int x=x0;x<=x1;x=xm+1){int a=x==x0?xm:x1;refine(x,y,a,b);if(a==x1)break;}if(b==y1)break;}return;
                 }
-                bool known=std::all_of(v,v+9,[](int a){return a>=0;});
+                int known=0,positive=0;for(int z:v)if(z>=0){known++;positive+=z;}
                 for(int y=y0;y<=y1;y++)for(int x=x0;x<=x1;x++){int i=y*W+x;if(!proj[i].valid)continue;
-                    if(!known){int z=sample(x,y);if(z>=0)mask[i]=float(z);continue;}
+                    if(!known)continue;
                     float u=x0==x1?0:float(x-x0)/(x1-x0),w=y0==y1?0:float(y-y0)/(y1-y0);
-                    mask[i]=(1-w)*((1-u)*v[0]+u*v[1])+w*((1-u)*v[2]+u*v[3]);
+                    float weights[]={(1-u)*(1-w),u*(1-w),(1-u)*w,u*w},sum=0,weight=0;
+                    for(int k=0;k<4;k++)if(v[k]>=0){sum+=weights[k]*v[k];weight+=weights[k];}
+                    mask[i]=weight>1e-6f?sum/weight:float(positive)/known;
+                    if(samples[i]>=0)mask[i]=float(samples[i]);
                 }
             };
-            for(int y=0;y<H;y+=16)for(int x=0;x<W;x+=16)refine(x,y,std::min(W-1,x+15),std::min(H-1,y+15));
+            // Global coarse pass first: reserve half the approximate query budget
+            // for refinement; visibility zero/outside/unknown never alter UV.
+            int step=1;while(double(step)*step<double(W)*H*36/budget)step*=2;
+            for(int y=0;y<H;y+=step)for(int x=0;x<W;x+=step){
+                int a=std::min(W-1,x+step-1),b=std::min(H-1,y+step-1),xm=(x+a)/2,ym=(y+b)/2;
+                for(int yy:{y,ym,b})for(int xx:{x,xm,a})sample(xx,yy);
+            }
+            for(int y=0;y<H;y+=step)for(int x=0;x<W;x+=step)refine(x,y,std::min(W-1,x+step-1),std::min(H-1,y+step-1));
             double maskMs=e::elapsedMs(start);QImage candidate(W,H,QImage::Format_ARGB32),oracle(W,H,QImage::Format_ARGB32),diagnostic(W,H,QImage::Format_RGB32);candidate.fill(0);oracle.fill(0);diagnostic.fill(qRgb(40,40,40));
             int covered=0,visible=0,fp=0,fn=0,unknown=0;
             for(int i=0;i<W*H;i++){if(truth[i]<0)continue;covered++;visible+=truth[i];float a=mask[i];if(a<0)unknown++;else{fp+=a>=.5f&&!truth[i];fn+=a<.5f&&truth[i];}
