@@ -69,16 +69,24 @@ jobs:
             -DCMAKE_BUILD_TYPE=Debug -DQT_HOST_PATH="$QT_HOST_PATH" -DANDROID_SDK_ROOT="$ANDROID_HOME" \
             -DANDROID_NDK_ROOT="$ANDROID_NDK_ROOT" -DANDROID_ABI="${{ matrix.abi }}" \
             -DANDROID_PLATFORM=android-35 -DQT_ANDROID_BUILD_ALL_ABIS=OFF \
-            -DQT_ANDROID_ABIS="${{ matrix.abi }}" -DQT_ANDROID_SDK_BUILD_TOOLS_REVISION=36.0.0 \
+            -DQT_ANDROID_ABIS="${{ matrix.abi }}" -DQT_ENABLE_VERBOSE_DEPLOYMENT=ON \
             -DCSE_ANDROID_PACKAGE_DIR="$RUNNER_TEMP/android-package" -DCSE_ANDROID_BUILD_ID="$GITHUB_SHA" \
             2>&1 | tee configure-android.log
+      - name: Preflight generated Qt deployment settings
+        run: |
+          set -euxo pipefail
+          python3 experiments/android-vulkan/check_package.py selftest
+          python3 experiments/android-vulkan/check_package.py deployment \
+            build-android/android-cse_android_probe-deployment-settings.json "${{ matrix.abi }}" \
+            "$RUNNER_TEMP/android-package" 2>&1 | tee deployment-android.log
       - name: Compile core and build diagnostic APK
         run: |
           set -euxo pipefail
           cmake --build build-android --target cse_android_probe --parallel 3 2>&1 | tee build-android.log
           cmake --build build-android --target apk --parallel 2 2>&1 | tee apk-android.log
-          apk="$(find build-android -type f -name '*.apk' -path '*/outputs/apk/*' | head -n 1)"
-          test -n "$apk"
+          apk=build-android/android-build/cse_android_probe.apk
+          test -s "$apk"
+          python3 experiments/android-vulkan/check_package.py apk "$apk" "${{ matrix.abi }}" "$RUNNER_TEMP/android-package" 2>&1 | tee verify-android.log
           mkdir -p package
           cp "$apk" package/CSE-WARP-Android-V17.031-${{ matrix.abi }}-probe.apk
           "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$apk" | tee package/badging.txt
@@ -87,6 +95,9 @@ jobs:
           grep -q 'assets/cse/vulkan/raster.vert.spv' package/apk-files.txt
           grep -q 'assets/cse/benchmark-civic/scene.json' package/apk-files.txt
           grep -q "package: name='org.csewarp.androidprobe'" package/badging.txt
+          grep -q "sdkVersion:'36'" package/badging.txt
+          grep -q "targetSdkVersion:'36'" package/badging.txt
+          grep -q "application-debuggable" package/badging.txt
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$apk"
           printf '%s\n' "$GITHUB_SHA" > package/SOURCE_SHA.txt
       - uses: actions/upload-artifact@v6
@@ -98,7 +109,11 @@ jobs:
         if: always()
         with:
           name: android-${{ matrix.abi }}-build-logs
-          path: '*-android.log'
+          path: |
+            *-android.log
+            build-android/android-cse_android_probe-deployment-settings.json
+            build-android/android-build/build.gradle
+            build-android/android-build/build/reports/problems/problems-report.html
           if-no-files-found: warn
   simulation:
     needs: apk

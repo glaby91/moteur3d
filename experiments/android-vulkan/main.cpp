@@ -100,11 +100,11 @@ class PortWindow final:public QWindow{
             if(!renderVulkanDirectPresent(scene_,shadow_,camera_,w,h,this,st,error,
                     reinterpret_cast<void*>(vulkanInstance()->vkInstance()),reinterpret_cast<uintptr_t>(surface)))
                 throw std::runtime_error(QString::fromStdWString(error).toStdString());
-            require(st.gpu&&st.gpuDrawCalls>0,"native Vulkan frame not submitted");
-            if(!reported_){reported_=true;qInfo()<<"CSE_ANDROID PASS WSI"<<w<<h<<"ms"<<st.ms;}
-            if(touchPending_){touchPending_=false;qInfo()<<"CSE_ANDROID PASS TOUCH_CAMERA";}
+            require(st.gpu&&st.gpuDrawCalls>0&&st.readbackBufferCount==0,"native Vulkan frame missing or CPU readback");
+            if(!reported_){reported_=true;qInfo().noquote()<<"CSE_ANDROID PASS WSI"<<w<<h<<"ms"<<st.ms<<"readback"<<st.readbackBufferCount;}
+            if(touchPending_){touchPending_=false;qInfo().noquote()<<"CSE_ANDROID PASS TOUCH_CAMERA";}
         }catch(const std::exception& ex){
-            failed_=true;releaseVulkanDirectForCurrentThread();qCritical()<<"CSE_ANDROID FAIL WSI"<<ex.what();
+            failed_=true;releaseVulkanDirectForCurrentThread();qCritical().noquote()<<"CSE_ANDROID FAIL WSI"<<ex.what();
         }
     }
 protected:
@@ -150,7 +150,7 @@ int main(int argc,char** argv){
 #ifdef CSE_ANDROID_EMULATOR_TEST
     // The x86_64 APK is explicitly an emulator-only diagnostic. ARM64 never opts in.
     qputenv("CSE_WARP_VK_ALLOW_SOFTWARE_TEST","1");
-    qInfo()<<"CSE_ANDROID EMULATOR_ONLY x86_64";
+    qInfo().noquote()<<"CSE_ANDROID EMULATOR_ONLY x86_64";
 #endif
     qputenv("CSE_WARP_VK_MSAA","1");
     try{
@@ -179,6 +179,6 @@ int main(int argc,char** argv){
 #endif
     }catch(const std::exception& e){
         releaseVulkanPreviewForCurrentThread();releaseVulkanDirectForCurrentThread();
-        qCritical()<<"CSE_ANDROID FAIL"<<e.what();return 1;
+        qCritical().noquote()<<"CSE_ANDROID FAIL"<<e.what();return 1;
     }
 }
