@@ -68,7 +68,7 @@ jobs:
         run: |
           cmake -S v17 -B build-escargot -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DV17_SCENE_SOURCE_DIR=$env:ESC_SCENE" -DM3D_REQUIRE_VULKAN=ON "-DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER" "-DV17_GIT_SHA=$env:GITHUB_SHA"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cmake --build build-escargot --config Release --target v17_escargot_object_lab v17_escargot_object_generic --parallel 4
+          cmake --build build-escargot --config Release --target v17_escargot_object_lab v17_escargot_object_generic v17_escargot_object_opt --parallel 4
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Real scene one-layer diagnostic
         shell: pwsh
@@ -90,6 +90,27 @@ jobs:
           $rc = $LASTEXITCODE
           if (Test-Path object-results/generic-summary.json) { Get-Content object-results/generic-summary.json }
           if ($rc) { throw "Generic geometry validation failed: $rc" }
+      - name: Optimization sweep (unchanged reference)
+        shell: pwsh
+        timeout-minutes: 35
+        run: |
+          $core = Get-ChildItem build-escargot -Recurse -File -Filter moteur3d_v16_core.dll | Select-Object -First 1
+          $exe = Get-ChildItem build-escargot -Recurse -File -Filter v17_escargot_object_opt.exe | Select-Object -First 1
+          if (!$core -or !$exe) { throw "Missing optimization diagnostic" }
+          $env:PATH="$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
+          & $exe.FullName "$env:ESC_SCENE/scene.json" "$PWD/object-results"
+          $rc = $LASTEXITCODE
+          if (Test-Path object-results/optimization-summary.json) {
+            $r = Get-Content object-results/optimization-summary.json -Raw | ConvertFrom-Json
+            $r | Select-Object testedPairPoses,geometryErrors,cropErrors,meshErrors | ConvertTo-Json
+            $r.variants | Group-Object variant | ForEach-Object {
+              [pscustomobject]@{variant=$_.Name;cases=$_.Count;totalMedianMs=($_.Group | Measure-Object medianMs -Sum).Sum;fallbackRays=($_.Group | Measure-Object fallbackRays -Sum).Sum;falseVisible=($_.Group | Measure-Object falseVisible -Sum).Sum;falseHidden=($_.Group | Measure-Object falseHidden -Sum).Sum;unknown=($_.Group | Measure-Object unknown -Sum).Sum;geometryResolved=($_.Group | Measure-Object geometryResolved -Sum).Sum}
+            } | ConvertTo-Json
+            $r.crop | ConvertTo-Json -Depth 4
+            $r.discoveryReuse | ConvertTo-Json -Depth 4
+            $r.allFaces | ConvertTo-Json -Depth 4
+          }
+          if ($rc) { throw "Optimization parity failed: $rc" }
       - uses: actions/upload-artifact@v6
         if: always()
         with:

@@ -648,3 +648,7 @@ target_link_libraries(v17_escargot_object_lab PRIVATE moteur3d_v16_core Qt6::Cor
 add_executable(v17_escargot_object_generic EXCLUDE_FROM_ALL tools/escargot_object_generic.cpp)
 target_include_directories(v17_escargot_object_generic PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
 target_link_libraries(v17_escargot_object_generic PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
+
+add_executable(v17_escargot_object_opt EXCLUDE_FROM_ALL tools/escargot_object_opt.cpp)
+target_include_directories(v17_escargot_object_opt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../experiments/2026-10-30-cote-ete-gt/native_v14")
+target_link_libraries(v17_escargot_object_opt PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
