@@ -3,7 +3,7 @@ run-name: CSE WARP macOS Vulkan commands 002 — ${{ github.run_number }}
 on:
   push:
     branches: ['perf/macos-vulkan-commands-002']
-    paths: ['.github/workflows/build-macos-vulkan.yml','v16/**','v17/**','engine/**','experiments/**']
+    paths: ['.github/workflows/qa-macos-vulkan-commands.yml','.github/workflows/build-macos-vulkan.yml','v16/**','v17/**','engine/**','experiments/**']
   workflow_dispatch:
 permissions:
   contents: read
@@ -142,7 +142,9 @@ jobs:
           run("navigation",["./moteur3d_v17","--smoke-walking-collisions","benchmark-civic/scene.json"],env,180)
           PY
           cat "$root/results/status.json" >> "$GITHUB_STEP_SUMMARY"
-      - name: Short stability validation (full command campaign only on manual dispatch)
+      - name: Vulkan command campaign (full on explicit request, short otherwise)
+        env:
+          FULL_CAMPAIGN: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[full-vulkan-campaign]')) }}
         run: |
           set -euo pipefail
           export VK_DRIVER_FILES="$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json"
@@ -150,7 +152,7 @@ jobs:
           export QT_QPA_PLATFORM=offscreen
           root="$PWD"
           cd build-macos
-          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+          if [ "$FULL_CAMPAIGN" = true ]; then
             python3 "$root/experiments/macos-metal-vulkan/command_campaign.py" "$root/results/commands"
           else
             python3 "$root/experiments/macos-metal-vulkan/command_stability.py" "$root/results/commands"
