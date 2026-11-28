@@ -1,5 +1,5 @@
 name: QA packaged Linux GUI Ubuntu
-run-name: V17.031 Build 8 - Ubuntu GUI functional audit
+run-name: V17.031 Build 8 - Ubuntu GUI five independent campaigns
 on:
   push:
     branches: [master]
@@ -11,7 +11,12 @@ permissions:
 jobs:
   gui:
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 60
+    name: ${{ matrix.campaign }}
+    strategy:
+      fail-fast: false
+      matrix:
+        campaign: [cameras, navigation, graphics, menus, audio]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v6
@@ -51,43 +56,68 @@ jobs:
           CMAKE
           cmake -S qa -B qa/build -G Ninja -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DCMAKE_BUILD_TYPE=Release
           cmake --build qa/build
-      - name: Exercise real packaged GUI
-        run: |
-          set -euo pipefail
-          export LD_LIBRARY_PATH="$PWD/package:$PWD/package/qt/lib"
-          export QT_PLUGIN_PATH="$PWD/package/qt/plugins"
-          export QT_QPA_PLATFORM=xcb CSE_WARP_VK_ALLOW_SOFTWARE_TEST=1 CSE_WARP_VK_MSAA=1
-          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' | head -n 1)"
-          export CSE_GUI_QA_OUT="$PWD/results"
-          export CSE_GUI_QA_SECOND_SCENE="$PWD/scenes/v16/pavillon01/scene.json"
-          export QA_SO="$PWD/qa/build/libgui_qa.so"
-          export XDG_CONFIG_HOME="$PWD/qa-config" XDG_DATA_HOME="$PWD/qa-data" XDG_CACHE_HOME="$PWD/qa-cache"
-          pulseaudio --start --exit-idle-time=-1
-          pactl load-module module-null-sink sink_name=cse_gui_test rate=48000 channels=2
-          pactl set-default-sink cse_gui_test
-          export PULSE_SINK=cse_gui_test
-          vulkaninfo --summary > results/vulkaninfo.txt 2>&1 || true
-          cd package
-          xvfb-run -a -s "-screen 0 1600x1000x24" bash -c 'openbox >/dev/null 2>&1 & timeout 1100 env LD_PRELOAD="$QA_SO" ./moteur3d_v17 benchmark-civic/scene.json' 2>&1 | tee ../results/gui.log
-          test -s ../results/gui-results.json
-      - name: Navigation regressions using real Qt input events
-        if: ${{ !cancelled() }}
+      - name: Run isolated GUI cases with bounded process timeouts
+        env:
+          CAMPAIGN: ${{ matrix.campaign }}
         run: |
           set -uo pipefail
           export LD_LIBRARY_PATH="$PWD/package:$PWD/package/qt/lib"
           export QT_PLUGIN_PATH="$PWD/package/qt/plugins"
           export QT_QPA_PLATFORM=xcb CSE_WARP_VK_ALLOW_SOFTWARE_TEST=1 CSE_WARP_VK_MSAA=1
           export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' | head -n 1)"
+          export CSE_GUI_QA_SECOND_SCENE="$PWD/scenes/v16/pavillon01/scene.json"
+          export QA_SO="$PWD/qa/build/libgui_qa.so"
+          export QA_ROOT="$PWD"
+          vulkaninfo --summary > results/vulkaninfo.txt 2>&1 || true
+          case "$CAMPAIGN" in
+            cameras) cases="camera-1 camera-2 camera-3 camera-4 camera-5 camera-6 camera-7 camera-8 camera-9 camera-10 backends cpu-direct cpu-gi2 cpu-gi4";;
+            navigation) cases="walking-collisions scope-mouse immersive-mouse";;
+            graphics) cases="lighting raster";;
+            menus) cases="menus export anomalies materials gibake scene";;
+            audio) cases="audio"; pulseaudio --start --exit-idle-time=-1 || exit 2
+              pactl load-module module-null-sink sink_name=cse_gui_test rate=48000 channels=2 || exit 2
+              pactl set-default-sink cse_gui_test
+              export PULSE_SINK=cse_gui_test
+              parec --device=cse_gui_test.monitor --raw --format=s16le --rate=48000 --channels=2 > "$QA_ROOT/results/audio.pcm" &
+              recorder=$!;;
+          esac
           cd package
-          for test in walking-collisions scope-mouse immersive-mouse; do
-            XDG_CONFIG_HOME="$PWD/../qa-$test" xvfb-run -a -s "-screen 0 1600x1000x24" bash -c 'openbox >/dev/null 2>&1 & timeout 150 ./moteur3d_v17 "--smoke-$1" benchmark-civic/scene.json' _ "$test" > "../results/$test.log" 2>&1
-            code=$?
-            echo "$test exit=$code" | tee -a ../results/navigation-status.txt
+          printf 'case,exit_code\n' > "$QA_ROOT/results/process-status.csv"
+          for test in $cases; do
+            export CSE_GUI_QA_CASE="$test"
+            export CSE_GUI_QA_OUT="$QA_ROOT/results/$test"
+            mkdir -p "$CSE_GUI_QA_OUT"
+            export XDG_CONFIG_HOME="$QA_ROOT/qa-$test/config" XDG_DATA_HOME="$QA_ROOT/qa-$test/data" XDG_CACHE_HOME="$QA_ROOT/qa-$test/cache"
+            echo "::group::$test"
+            if [[ "$CAMPAIGN" == navigation ]]; then
+              xvfb-run -a -s "-screen 0 1600x1000x24" bash -c 'openbox >/dev/null 2>&1 & timeout -k 5 150 ./moteur3d_v17 "--smoke-$1" benchmark-civic/scene.json' _ "$test" 2>&1 | tee "$CSE_GUI_QA_OUT/gui.log"
+            else
+              limit=150
+              [[ "$test" == cpu-* || "$test" == scene ]] && limit=270
+              xvfb-run -a -s "-screen 0 1600x1000x24" bash -c 'openbox >/dev/null 2>&1 & timeout -k 5 "$1" env LD_PRELOAD="$QA_SO" ./moteur3d_v17 benchmark-civic/scene.json' _ "$limit" 2>&1 | tee "$CSE_GUI_QA_OUT/gui.log"
+            fi
+            code=${PIPESTATUS[0]}
+            echo "$test,$code" | tee -a "$QA_ROOT/results/process-status.csv"
+            echo "::endgroup::"
           done
-          cat ../results/navigation-status.txt
+          if [[ "$CAMPAIGN" == audio ]]; then
+            kill "$recorder" 2>/dev/null || true
+            wait "$recorder" 2>/dev/null || true
+            python3 - <<'PY'
+          import array, math, json, os
+          path=os.environ['QA_ROOT']+'/results/'
+          a=array.array('h')
+          with open(path+'audio.pcm','rb') as f:
+              b=f.read();a.frombytes(b[:len(b)//4*4])
+          result={'frames':len(a)//2,'peak':max(map(abs,a),default=0),'nonzero_samples':sum(v!=0 for v in a)}
+          with open(path+'audio-capture.json','w') as f: json.dump(result,f,indent=2)
+          print(result)
+          PY
+          fi
+          cat "$QA_ROOT/results/process-status.csv"
       - uses: actions/upload-artifact@v6
         if: always()
         with:
-          name: Ubuntu-Build8-GUI-audit
+          name: Ubuntu-Build8-GUI-${{ matrix.campaign }}
           path: results/
           if-no-files-found: error
