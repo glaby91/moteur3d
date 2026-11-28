@@ -1,4 +1,5 @@
 #include "../escargot/runtime.h"
+#include "../escargot/object_visibility.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QImage>
@@ -103,37 +104,18 @@ int main(int argc,char** argv){
     for(int pose=0;pose<3;pose++){
         auto cp=*it;cp.eye.x+=.075f*pose;cp.target.x+=.075f*pose;cam=v16::makeCamera(cp,W,H);
         auto start=e::FrameClock::now();std::vector<Projection> proj(W*H);for(int y=0;y<H;y++)for(int x=0;x<W;x++)proj[y*W+x]=project(s,water,src,cam,x,y,W,H);
+        std::vector<int> domain;domain.reserve(W*H/8);
+        int x0=W,y0=H,x1=-1,y1=-1;
+        for(int i=0;i<W*H;++i)if(proj[i].valid){domain.push_back(i);x0=std::min(x0,i%W);x1=std::max(x1,i%W);y0=std::min(y0,i/W);y1=std::max(y1,i/W);}
         double projectMs=e::elapsedMs(start);
         // Dense visibility oracle at identical geometry/lighting; not timed as candidate.
         std::vector<int> truth(W*H,-1);uint64_t denseRays=0;for(int i=0;i<W*H;i++)if(proj[i].valid)truth[i]=visibility(trace,s,water,src,cam,proj[i],denseRays);
         for(int budget:{256,1024,4096}){
-            start=e::FrameClock::now();std::vector<int> samples(W*H,-3);std::vector<float> mask(W*H,-1);uint64_t rays=0;
-            auto sample=[&](int x,int y){int i=y*W+x;if(samples[i]!=-3)return samples[i];if(!proj[i].valid)return samples[i]=-1;if(rays+2>uint64_t(budget))return -2;return samples[i]=visibility(trace,s,water,src,cam,proj[i],rays);};
-            std::function<void(int,int,int,int)> refine=[&](int x0,int y0,int x1,int y1){
-                int xm=(x0+x1)/2,ym=(y0+y1)/2;int v[]={sample(x0,y0),sample(x1,y0),sample(x0,y1),sample(x1,y1),sample(xm,ym),sample(xm,y0),sample(xm,y1),sample(x0,ym),sample(x1,ym)};
-                bool diff=std::find(v,v+9,0)!=v+9&&std::find(v,v+9,1)!=v+9;
-                if(diff&&std::max(x1-x0,y1-y0)>2&&rays+36<=uint64_t(budget)){
-                    for(int y=y0;y<=y1;y=ym+1){int b=y==y0?ym:y1;
-                        for(int x=x0;x<=x1;x=xm+1){int a=x==x0?xm:x1;refine(x,y,a,b);if(a==x1)break;}if(b==y1)break;}return;
-                }
-                int known=0,positive=0;for(int z:v)if(z>=0){known++;positive+=z;}
-                for(int y=y0;y<=y1;y++)for(int x=x0;x<=x1;x++){int i=y*W+x;if(!proj[i].valid)continue;
-                    if(!known)continue;
-                    float u=x0==x1?0:float(x-x0)/(x1-x0),w=y0==y1?0:float(y-y0)/(y1-y0);
-                    float weights[]={(1-u)*(1-w),u*(1-w),(1-u)*w,u*w},sum=0,weight=0;
-                    for(int k=0;k<4;k++)if(v[k]>=0){sum+=weights[k]*v[k];weight+=weights[k];}
-                    mask[i]=weight>1e-6f?sum/weight:float(positive)/known;
-                    if(samples[i]>=0)mask[i]=float(samples[i]);
-                }
-            };
-            // Global coarse pass first: reserve half the approximate query budget
-            // for refinement; visibility zero/outside/unknown never alter UV.
-            int step=1;while(double(step)*step<double(W)*H*36/budget)step*=2;
-            for(int y=0;y<H;y+=step)for(int x=0;x<W;x+=step){
-                int a=std::min(W-1,x+step-1),b=std::min(H-1,y+step-1),xm=(x+a)/2,ym=(y+b)/2;
-                for(int yy:{y,ym,b})for(int xx:{x,xm,a})sample(xx,yy);
-            }
-            for(int y=0;y<H;y+=step)for(int x=0;x<W;x+=step)refine(x,y,std::min(W-1,x+step-1),std::min(H-1,y+step-1));
+            start=e::FrameClock::now();std::vector<float> mask(W*H,-1);uint64_t rays=0;
+            auto stats=e::object_visibility::reconstruct(W,domain,budget/2,[&](int i){
+                if(rays+2>uint64_t(budget))return -1;
+                return visibility(trace,s,water,src,cam,proj[i],rays);
+            },mask);
             double maskMs=e::elapsedMs(start);QImage candidate(W,H,QImage::Format_ARGB32),oracle(W,H,QImage::Format_ARGB32),diagnostic(W,H,QImage::Format_RGB32);candidate.fill(0);oracle.fill(0);diagnostic.fill(qRgb(40,40,40));
             int covered=0,visible=0,fp=0,fn=0,unknown=0;
             for(int i=0;i<W*H;i++){if(truth[i]<0)continue;covered++;visible+=truth[i];float a=mask[i];if(a<0)unknown++;else{fp+=a>=.5f&&!truth[i];fn+=a<.5f&&truth[i];}
@@ -143,8 +125,9 @@ int main(int argc,char** argv){
             }
             QString prefix=QString("pose%1-budget%2").arg(pose).arg(budget);
             if(!candidate.save(out.filePath(prefix+"-candidate.png"))||!oracle.save(out.filePath(prefix+"-oracle.png"))||!diagnostic.save(out.filePath(prefix+"-mask.png")))return 10;
-            results.append(QJsonObject{{"pose",pose},{"budget",budget},{"rays",double(rays)},{"denseRays",double(denseRays)},{"projected",covered},{"visibleOracle",visible},{"falseVisible",fp},{"falseHidden",fn},{"unknown",unknown},{"projectionMs",projectMs},{"maskMs",maskMs}});
-            if(!covered||!visible||rays>uint64_t(budget))return 11;
+            results.append(QJsonObject{{"pose",pose},{"budget",budget},{"rays",double(rays)},{"denseRays",double(denseRays)},{"projected",covered},{"visibleOracle",visible},{"falseVisible",fp},{"falseHidden",fn},{"unknown",unknown},{"projectionMs",projectMs},{"maskMs",maskMs},{"footprintX",x0},{"footprintY",y0},{"footprintW",x1-x0+1},{"footprintH",y1-y0+1},{"seedSamples",stats.seedSamples},{"measuredSamples",stats.measured},{"zeroSplits",stats.zeroSplits},{"zeroProbes",stats.zeroProbes},{"mixedSplits",stats.mixedSplits},{"otherSplits",stats.otherSplits},{"exhaustive",stats.exhaustive}});
+            if(!covered||!visible||rays>uint64_t(budget)||stats.seedSamples<std::min({32,covered,budget/2})||
+                (stats.exhaustive&&(fp||fn||unknown)))return 11;
         }
     }
     QJsonObject report{{"receiver",rt.objects[int(water.owner-1)].id},{"source",rt.objects[int(src.owner-1)].id},{"sourceMaterial",rt.objects[int(src.owner-1)].material},{"sourceChartTriangles",int(src.tris.size())},{"sourceObjectTriangles",rt.objects[int(src.owner-1)].triangleCount},{"waterChartTriangles",int(water.tris.size())},{"discoveryQueries",double(discovery)},{"lightingQueriesOnce",double(lightRays)},{"lightingSamples",9},{"cases",results},{"note","CPU optical diagnostic, one coplanar UV chart, transparent occluders treated as opaque; unknown mask is magenta; no GPU FPS claim"}};

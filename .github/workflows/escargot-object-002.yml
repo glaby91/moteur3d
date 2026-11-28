@@ -3,7 +3,7 @@ on:
   push:
     branches: [experiment/v17-escargot-object-002]
     paths:
-      - '.github/workflows/escargot-ab-v17.yml'
+      - '.github/workflows/escargot-object-002.yml'
       - 'v17/escargot/**'
       - 'v17/tools/escargot*'
       - 'v17/tests/escargot_smoke.cpp'
@@ -28,6 +28,15 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force object-results | Out-Null
           node v17/escargot/object_sim.mjs object-results/synthetic.json
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Compile and run standalone visibility test
+        shell: pwsh
+        run: |
+          cmake -S v17/escargot/object_visibility_test -B build-mask -G "Visual Studio 17 2022" -A x64
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build build-mask --config Release
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          & ".\build-mask\Release\object_visibility_test.exe" | Tee-Object object-results/visibility-test.txt
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Download exact scene V17.634
         shell: pwsh
