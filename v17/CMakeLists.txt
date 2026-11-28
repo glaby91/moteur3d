@@ -173,7 +173,17 @@ else()
         "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_d3d11.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_lumatrace.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_vulkan.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/radio_audio.cpp")
+        )
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_sources(moteur3d_v17 PRIVATE radio_audio_linux.cpp)
+        add_executable(v17_linux_audio_smoke tests/linux_audio_smoke.cpp radio_audio_linux.cpp)
+        target_include_directories(v17_linux_audio_smoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+        target_link_libraries(v17_linux_audio_smoke PRIVATE Qt6::Core Qt6::Multimedia)
+        set_target_properties(v17_linux_audio_smoke PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
+        add_test(NAME v17_linux_audio_spatial_math COMMAND v17_linux_audio_smoke)
+    else()
+        target_sources(moteur3d_v17 PRIVATE radio_audio.cpp)
+    endif()
 endif()
 target_include_directories(moteur3d_v17 PRIVATE
     "${CMAKE_CURRENT_BINARY_DIR}"

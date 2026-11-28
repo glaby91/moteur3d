@@ -25,7 +25,7 @@ jobs:
       - name: Install Vulkan SDK tools and Linux Qt runtime dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ninja-build libvulkan-dev glslang-tools vulkan-tools mesa-vulkan-drivers libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xinput0 libpulse0 xvfb xauth libssl3t64
+          sudo apt-get install -y ninja-build libvulkan-dev glslang-tools vulkan-tools mesa-vulkan-drivers libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xinput0 libpulse0 pulseaudio pulseaudio-utils xvfb xauth libssl3t64
       - uses: jurplel/install-qt-action@v4
         with:
           version: '6.8.3'
@@ -86,7 +86,7 @@ jobs:
           cmake -S v17 -B build-linux -G Ninja -DCMAKE_BUILD_TYPE=Release -DM3D_REQUIRE_VULKAN=ON -DV17_CI_BUILD_NUMBER="$GITHUB_RUN_NUMBER" -DV17_GIT_SHA="$GITHUB_SHA" -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DV17_SCENE_SOURCE_DIR="$RUNNER_TEMP/v17-scene/benchmark-civic"
       - name: Compile engine, SPIR-V and Vulkan tests
         run: |
-          cmake --build build-linux --parallel 4 --target moteur3d_v17 moteur3d_v17_benchmark moteur3d_v17_campaign v17_vulkan_gpu_smoke v17_vulkan_version_smoke v17_vulkan_mesh_smoke v17_vulkan_dirty_policy_smoke v17_vulkan_mipmap_smoke v17_vulkan_readback_smoke
+          cmake --build build-linux --parallel 4 --target moteur3d_v17 moteur3d_v17_benchmark moteur3d_v17_campaign v17_vulkan_gpu_smoke v17_vulkan_version_smoke v17_vulkan_mesh_smoke v17_vulkan_dirty_policy_smoke v17_vulkan_mipmap_smoke v17_vulkan_readback_smoke v17_linux_audio_smoke
       - name: Check Vulkan CPU tests and actual shader rendering using Mesa lavapipe
         env:
           QT_QPA_PLATFORM: offscreen
@@ -223,6 +223,44 @@ jobs:
           xvfb-run -a env -u QT_ROOT_DIR -u QML2_IMPORT_PATH -u QML_IMPORT_PATH \
             LD_LIBRARY_PATH="$runtime" QT_PLUGIN_PATH="$package/qt/plugins" \
             QT_QPA_PLATFORM=xcb "$probe/build/qt_package_probe" 2>&1 | tee linux-xcb-tls-smoke.txt
+          # Actual Linux PCM playback using a virtual PulseAudio device and its monitor.
+          pulseaudio --start --exit-idle-time=-1
+          module="$(pactl load-module module-null-sink sink_name=cse_warp_test rate=48000 channels=2)"
+          pactl set-default-sink cse_warp_test
+          pactl set-sink-volume cse_warp_test 100%
+          pactl set-sink-mute cse_warp_test 0
+          parec --device=cse_warp_test.monitor --raw --format=s16le --rate=48000 --channels=2 > linux-radio-capture.pcm &
+          recorder=$!
+          trap 'kill "$recorder" 2>/dev/null || true; pactl unload-module "$module" || true' EXIT
+          sleep 1
+          env -u QT_ROOT_DIR LD_LIBRARY_PATH="$runtime" QT_PLUGIN_PATH="$package/qt/plugins" \
+            QT_QPA_PLATFORM=offscreen PULSE_SINK=cse_warp_test \
+            "$GITHUB_WORKSPACE/build-linux/v17_linux_audio_smoke" "$package/audio/pripyat_radio.wav" 2>&1 | tee linux-radio-smoke.txt
+          sleep 1
+          kill "$recorder" 2>/dev/null || true
+          wait "$recorder" 2>/dev/null || true
+          pactl unload-module "$module"
+          trap - EXIT
+          python3 - <<'PY'
+          import array, math, json, sys
+          data=array.array('h')
+          with open('linux-radio-capture.pcm','rb') as f:
+              raw=f.read()
+          data.frombytes(raw[:len(raw)//4*4])
+          if sys.byteorder!='little': data.byteswap()
+          assert len(data)>=48000*2*4, 'not enough captured PCM'
+          blocks=[]
+          for start in range(0,len(data)-48000,24000):
+              l=data[start:start+24000:2];r=data[start+1:start+24000:2]
+              rms=lambda x: math.sqrt(sum(v*v for v in x)/len(x))
+              blocks.append([rms(l),rms(r)])
+          right=any(r>30 and r>l*4 for l,r in blocks)
+          left=any(l>30 and l>r*4 for l,r in blocks)
+          assert left and right, 'captured signal lacks left/right spatial transitions'
+          with open('linux-radio-results.json','w') as f:
+              json.dump({'device':'PulseAudio null sink monitor','rate':48000,'captured_frames':len(data)//2,'left_dominant':left,'right_dominant':right,'rms_blocks':blocks},f,indent=2)
+          print('Actual stereo PCM capture PASS',len(data)//2,'frames')
+          PY
           # Exercise the packaged binary and bundled libraries, not the build tree.
           icd="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' | head -n 1)"
           test -n "$icd"
@@ -254,3 +292,6 @@ jobs:
             linux-xcb-tls-smoke.txt
             linux-build-info.json
             linux-scene-version.json
+            linux-radio-smoke.txt
+            linux-radio-results.json
+            linux-radio-capture.pcm

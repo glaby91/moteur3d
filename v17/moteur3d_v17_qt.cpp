@@ -406,6 +406,14 @@ public:
         audioTimer_.setInterval(50); // 20 Hz spatial updates, independent from GPU images.
         connect(&audioTimer_,&QTimer::timeout,this,[this]{
             if(!radioPlaying_ || !runtime_)return;
+#ifdef __linux__
+            if(!radioStreamPending_&&!radioUsingStream_&&!radioAudio_.playing()){
+                stopRadio();
+                if(radioStatusLabel_)radioStatusLabel_->setText(
+                    QStringLiteral("Radio locale : sortie audio interrompue."));
+                return;
+            }
+#endif
             const auto pose=activeCameraPose();
             const float eye[3]{pose.eye.x,pose.eye.y,pose.eye.z};
             const float target[3]{pose.target.x,pose.target.y,pose.target.z};

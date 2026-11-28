@@ -8,7 +8,7 @@ struct RadioSpeaker {
     float position[3]{};
     float front[3]{};
 };
-// Optional, CPU-driven Windows spatial audio. The renderer never waits for audio.
+// Optional, CPU-driven spatial audio (XAudio2 Windows / Qt AudioSink Linux). The renderer never waits for audio.
 class RadioAudio {
 public:
     RadioAudio();
