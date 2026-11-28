@@ -1,6 +1,6 @@
 # Optimisation Vulkan macOS 001 — résultats Build 7
 
-**28 novembre 2026 — CSE WARP V17.031, Vulkan Raster 012 / Resources 003, scène V17.634.** CI réussie sur GPU Apple paravirtualisé via MoltenVK, macOS ARM64, hors écran, MSAA 1×. Branche expérimentale `test/macos-metal-vulkan`, sans fusion.
+**28 novembre 2026 — CSE WARP V17.031, Vulkan Raster 012 / Resources 003, scène V17.634.** CI réussie sur GPU Apple paravirtualisé via MoltenVK, macOS ARM64, hors écran, MSAA 1×. Validation historique sur `test/macos-metal-vulkan`, intégration dans `master` demandée le 28 novembre 2026.
 
 [Source testée](https://github.com/glaby91/moteur3d/commit/bd7e48b5190802ac3a1176b25f8241d668795bda) · [Build 7](https://github.com/glaby91/moteur3d/actions/runs/46095834402) · [Package](https://github.com/glaby91/moteur3d/actions/runs/46095834402/artifacts/15243449476) · [Diagnostics, mesures par image, CSV et PNG](https://github.com/glaby91/moteur3d/actions/runs/46095834402/artifacts/15243835709).
 
@@ -40,4 +40,4 @@ export CSE_WARP_VK_BGRA_READBACK=1
 ./lancer.sh benchmark-civic/scene.json
 ```
 
-Remettre les deux options à 0 pour la référence. Les options restent désactivées par défaut. Le package utilise QImage et un readback synchrone. La suite : présentation native, synchronisation asynchrone, test physique, MSAA supérieur, parcours plus long et vérification de la vraie GI. Aucune réduction de qualité ni fusion dans master.
+Remettre les deux options à 0 pour la référence. Les options restent désactivées par défaut. Le package utilise QImage et un readback synchrone. La suite : présentation native, synchronisation asynchrone, test physique, MSAA supérieur, parcours plus long et vérification de la vraie GI. Aucune réduction de qualité ; options toujours facultatives après intégration à master.

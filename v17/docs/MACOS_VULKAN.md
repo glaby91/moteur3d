@@ -1,6 +1,6 @@
 # Portage macOS ARM64 — validation expérimentale du 28 novembre 2026
 
-**CSE WARP V17.031, Build macOS 4, scène V17.634.** Validation fonctionnelle CI hors écran du backend Vulkan Raster via MoltenVK. Le portage reste sur `test/macos-metal-vulkan`, sans fusion dans `master`.
+**CSE WARP V17.031, Build macOS 4, scène V17.634.** Validation fonctionnelle CI hors écran du backend Vulkan Raster via MoltenVK. Portage historiquement validé sur `test/macos-metal-vulkan`, puis intégré à `master` sur décision explicite du 28 novembre 2026.
 
 - [Source exacte compilée](https://github.com/glaby91/moteur3d/commit/a49db9a2e21e937c16c959c87e3fad11cd722e9b)
 - [Build 4 — tests et compilation réussis](https://github.com/glaby91/moteur3d/actions/runs/46094113757)
@@ -82,9 +82,9 @@ Package non autonome, non signé/notarisé. Le script est fourni mais le package
 - Vraie table GI précalculée, rendu CPU et GI ARM64, audio local et radio réseau.
 - Tests sur Mac physique ; package autonome et vérification de ses dépendances.
 - Optimisations NEON éventuelles ; LumaTrace GPU et Compute DX11 non portés.
-- Régression Windows/Linux et comparaison avec la tête actuelle de master avant toute fusion.
+- Régression Windows/Linux sur le commit de fusion.
 
-Aucune fusion automatique. Le Build 4 constitue une référence de portage expérimental, pas une validation exhaustive.
+Fusion explicite demandée le 28 novembre 2026 ; le Build 4 constitue une référence de portage expérimental, pas une validation exhaustive.
 
 ## Optimisation 001 — Build 7
 

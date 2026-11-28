@@ -2,8 +2,8 @@ name: V17 macOS ARM64 Vulkan experimental
 run-name: CSE WARP macOS ARM64 MoltenVK build ${{ github.run_number }}
 on:
   push:
-    branches: ['test/macos-metal-vulkan']
-    paths: ['.github/workflows/build-macos-vulkan.yml','v16/**','v17/**','experiments/**']
+    branches: [master, 'test/macos-metal-vulkan']
+    paths: ['.github/workflows/build-macos-vulkan.yml','v16/**','v17/**','engine/**','experiments/**']
   workflow_dispatch:
 permissions:
   contents: read
@@ -143,6 +143,7 @@ jobs:
           PY
           cat "$root/results/status.json" >> "$GITHUB_STEP_SUMMARY"
       - name: macOS exact draw merging and BGRA A/B benchmark
+        if: github.ref != 'refs/heads/master' || github.event_name == 'workflow_dispatch'
         run: |
           set -euo pipefail
           export VK_DRIVER_FILES="$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json"
