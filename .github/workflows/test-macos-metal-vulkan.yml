@@ -1,0 +1,91 @@
+name: macOS Metal Vulkan feasibility
+run-name: CSE WARP - Apple Silicon Metal and Vulkan probe
+on:
+  push:
+    branches: ['test/macos-metal-vulkan']
+    paths: ['.github/workflows/test-macos-metal-vulkan.yml','experiments/macos-metal-vulkan/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  apple:
+    runs-on: macos-26
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - name: Inspect host and test native Metal
+        run: |
+          mkdir -p results
+          { sw_vers; uname -m; sysctl -n hw.model; xcodebuild -version; system_profiler SPDisplaysDataType; } > results/host.txt 2>&1
+          cat results/host.txt
+          test "$(uname -m)" = arm64
+          clang++ -std=c++17 -O2 -fobjc-arc -framework Foundation -framework Metal experiments/macos-metal-vulkan/metal.mm -o "$RUNNER_TEMP/metal-probe"
+          set +e
+          "$RUNNER_TEMP/metal-probe" results/metal.ppm 2>&1 | tee results/metal.log
+          code=${PIPESTATUS[0]}
+          echo "$code" > results/metal.exit
+      - name: Install official Vulkan SDK
+        env:
+          VERSION: '1.4.363.1'
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/vulkan-download"
+          mkdir -p "$work"
+          cd "$work"
+          curl --fail --location --retry 2 --max-time 240 "https://sdk.lunarg.com/sdk/download/$VERSION/mac/vulkansdk-macos-$VERSION.zip" -o sdk.zip
+          unzip -q sdk.zip
+          app="$(find "$work" -maxdepth 3 -name '*.app' -print -quit)"
+          test -n "$app"
+          exe="$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$app/Contents/Info.plist")"
+          "$app/Contents/MacOS/$exe" --root "$RUNNER_TEMP/VulkanSDK" --accept-licenses --default-answer --confirm-command install copy_only=1
+          sdk="$RUNNER_TEMP/VulkanSDK/macOS"
+          test -d "$sdk/include/vulkan"
+          echo "VULKAN_SDK=$sdk" >> "$GITHUB_ENV"
+          find "$sdk/share/vulkan/icd.d" -type f -maxdepth 1 -print | tee "$GITHUB_WORKSPACE/results/icds.txt"
+      - name: Compile SPIR-V and Vulkan loader probe
+        run: |
+          set -euo pipefail
+          src=experiments/macos-metal-vulkan
+          # Basic compute probe does not need SPIR-V 1.6 / maintenance4 LocalSizeId.
+          "$VULKAN_SDK/bin/glslangValidator" -V --target-env vulkan1.1 "$src/probe.comp" -o results/probe.spv
+          "$VULKAN_SDK/bin/spirv-val" --target-env vulkan1.1 results/probe.spv
+          clang++ -std=c++17 -O2 -I"$VULKAN_SDK/include" "$src/vulkan.cpp" -L"$VULKAN_SDK/lib" -lvulkan -Wl,-rpath,"$VULKAN_SDK/lib" -o "$RUNNER_TEMP/vulkan-probe"
+      - name: Test KosmicKrisp and MoltenVK independently
+        run: |
+          # Runner shell enables errexit; continue after individual ICD failure.
+          set +e
+          set -uo pipefail
+          export VK_LOADER_DEBUG=error,warn
+          export DYLD_LIBRARY_PATH="$VULKAN_SDK/lib"
+          for driver in kosmickrisp moltenvk; do
+            if [[ "$driver" == kosmickrisp ]]; then icd="$VULKAN_SDK/share/vulkan/icd.d/libkosmickrisp_icd.json"; else icd="$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json"; fi
+            if [[ ! -f "$icd" ]]; then echo "ICD missing: $icd" | tee "results/$driver.log"; echo 30 > "results/$driver.exit"; continue; fi
+            export VK_DRIVER_FILES="$icd"
+            cat "$icd" > "results/$driver-icd.json"
+            "$RUNNER_TEMP/vulkan-probe" results/probe.spv "results/$driver.ppm" 2>&1 | tee "results/$driver.log"
+            code=${PIPESTATUS[0]}
+            echo "$code" > "results/$driver.exit"
+            echo "$driver exit=$code"
+          done
+      - name: Summarize actual results
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json,pathlib,hashlib
+          p=pathlib.Path("results");p.mkdir(exist_ok=True)
+          report={}
+          for name in ("metal","kosmickrisp","moltenvk"):
+              f=p/(name+".exit");image=p/(name+".ppm")
+              report[name]={"exit_code":int(f.read_text()) if f.exists() else None,"sha256":hashlib.sha256(image.read_bytes()).hexdigest() if image.exists() else None}
+          print(json.dumps(report,indent=2));(p/"summary.json").write_text(json.dumps(report,indent=2))
+          PY
+          cat results/summary.json >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: macOS-Metal-Vulkan-feasibility
+          path: results/
+          if-no-files-found: error

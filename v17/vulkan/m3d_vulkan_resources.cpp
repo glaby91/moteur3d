@@ -5,6 +5,9 @@
 #include <algorithm>
 #include <stdexcept>
 #include <string>
+#ifdef __APPLE__
+#include <iostream>
+#endif
 
 namespace m3d::vulkan::resources {
 namespace {
@@ -77,6 +80,48 @@ void destroyBuffer(VkDevice device,Buffer& buffer) noexcept {
     buffer={};
 }
 
+namespace {
+// Every image constructed here uses optimal tiling and staging/readback buffers.
+// On Apple, avoid host-visible image backing: the paravirtual Metal driver
+// crashes when MoltenVK flushes such image memory during vkBindImageMemory.
+// The original policy is retained on Windows and Linux.
+void allocateOptimalImage(VkDevice device,const VkPhysicalDeviceMemoryProperties& properties,
+                          Texture& texture,const VkImageCreateInfo& create){
+    VkMemoryRequirements requirements{};
+    vkGetImageMemoryRequirements(device,texture.image,&requirements);
+    VkMemoryAllocateInfo allocation{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    allocation.allocationSize=requirements.size;
+#ifdef __APPLE__
+    uint32_t privateBits=0;
+    for(uint32_t i=0;i<properties.memoryTypeCount;++i){
+        const auto flags=properties.memoryTypes[i].propertyFlags;
+        if((flags&VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) &&
+           !(flags&(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT|VK_MEMORY_PROPERTY_PROTECTED_BIT)))
+            privateBits|=1u<<i;
+    }
+    if(!(requirements.memoryTypeBits&privateBits))
+        throw std::runtime_error("Optimal image: no compatible GPU-private Vulkan memory on macOS (format "+std::to_string(int(create.format))+")");
+    allocation.memoryTypeIndex=findMemoryType(properties,requirements.memoryTypeBits&privateBits,
+                                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    VkMemoryDedicatedAllocateInfo dedicated{VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO};
+    dedicated.image=texture.image;
+    allocation.pNext=&dedicated;
+    std::clog<<"[CSE WARP Vulkan] Optimal image "<<create.extent.width<<"x"<<create.extent.height<<"x"<<create.extent.depth
+             <<" layers="<<create.arrayLayers<<" mips="<<create.mipLevels<<" format="<<int(create.format)
+             <<" usage="<<create.usage<<" samples="<<int(create.samples)
+             <<" private memory type="<<allocation.memoryTypeIndex
+             <<" flags="<<properties.memoryTypes[allocation.memoryTypeIndex].propertyFlags
+             <<" compatibleBits="<<requirements.memoryTypeBits<<" bytes="<<allocation.allocationSize<<std::endl;
+#else
+    (void)create;
+    allocation.memoryTypeIndex=findMemoryType(properties,requirements.memoryTypeBits,
+                                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+#endif
+    check(vkAllocateMemory(device,&allocation,nullptr,&texture.memory),"allocate optimal image");
+    check(vkBindImageMemory(device,texture.image,texture.memory,0),"bind optimal image");
+}
+}
+
 Texture createImage(VkDevice device,const VkPhysicalDeviceMemoryProperties& properties,
                     uint32_t width,uint32_t height,uint32_t layers,VkFormat format,
                     VkImageUsageFlags usage,VkImageAspectFlags aspect,
@@ -91,15 +136,9 @@ Texture createImage(VkDevice device,const VkPhysicalDeviceMemoryProperties& prop
     create.extent={width,height,1};create.mipLevels=mipLevels;
     create.arrayLayers=layers;create.samples=samples;create.tiling=VK_IMAGE_TILING_OPTIMAL;
     create.usage=usage;create.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
+    try {
     check(vkCreateImage(device,&create,nullptr,&texture.image),"create image");
-    VkMemoryRequirements requirements{};
-    vkGetImageMemoryRequirements(device,texture.image,&requirements);
-    VkMemoryAllocateInfo allocation{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    allocation.allocationSize=requirements.size;
-    allocation.memoryTypeIndex=findMemoryType(properties,requirements.memoryTypeBits,
-                                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    check(vkAllocateMemory(device,&allocation,nullptr,&texture.memory),"allocate image");
-    check(vkBindImageMemory(device,texture.image,texture.memory,0),"bind image");
+    allocateOptimalImage(device,properties,texture,create);
     VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     view.image=texture.image;
     view.viewType=(forceArrayView||layers>1)?VK_IMAGE_VIEW_TYPE_2D_ARRAY:VK_IMAGE_VIEW_TYPE_2D;
@@ -107,6 +146,10 @@ Texture createImage(VkDevice device,const VkPhysicalDeviceMemoryProperties& prop
     view.subresourceRange.levelCount=mipLevels;view.subresourceRange.layerCount=layers;
     check(vkCreateImageView(device,&view,nullptr,&texture.view),"create view");
     return texture;
+    }catch(...){
+        destroyTexture(device,texture);
+        throw;
+    }
 }
 
 Texture createImage3D(VkDevice device,const VkPhysicalDeviceMemoryProperties& properties,
@@ -121,21 +164,19 @@ Texture createImage3D(VkDevice device,const VkPhysicalDeviceMemoryProperties& pr
     create.samples=VK_SAMPLE_COUNT_1_BIT;create.tiling=VK_IMAGE_TILING_OPTIMAL;
     create.usage=VK_IMAGE_USAGE_SAMPLED_BIT|VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     create.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
+    try {
     check(vkCreateImage(device,&create,nullptr,&texture.image),"GI 3D image");
-    VkMemoryRequirements requirements{};
-    vkGetImageMemoryRequirements(device,texture.image,&requirements);
-    VkMemoryAllocateInfo allocation{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
-    allocation.allocationSize=requirements.size;
-    allocation.memoryTypeIndex=findMemoryType(properties,requirements.memoryTypeBits,
-                                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    check(vkAllocateMemory(device,&allocation,nullptr,&texture.memory),"GI 3D memory");
-    check(vkBindImageMemory(device,texture.image,texture.memory,0),"GI 3D bind");
+    allocateOptimalImage(device,properties,texture,create);
     VkImageViewCreateInfo view{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
     view.image=texture.image;view.viewType=VK_IMAGE_VIEW_TYPE_3D;view.format=texture.format;
     view.subresourceRange.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
     view.subresourceRange.levelCount=1;view.subresourceRange.layerCount=1;
     check(vkCreateImageView(device,&view,nullptr,&texture.view),"GI 3D view");
     return texture;
+    }catch(...){
+        destroyTexture(device,texture);
+        throw;
+    }
 }
 
 void destroyTexture(VkDevice device,Texture& texture) noexcept {

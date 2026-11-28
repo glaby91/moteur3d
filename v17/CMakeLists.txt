@@ -174,12 +174,14 @@ else()
         "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_lumatrace.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/moteur3d_v17_render_vulkan.cpp"
         )
-    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    if(APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
         target_sources(moteur3d_v17 PRIVATE radio_audio_linux.cpp)
         add_executable(v17_linux_audio_smoke tests/linux_audio_smoke.cpp radio_audio_linux.cpp)
         target_include_directories(v17_linux_audio_smoke PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
         target_link_libraries(v17_linux_audio_smoke PRIVATE Qt6::Core Qt6::Multimedia)
-        set_target_properties(v17_linux_audio_smoke PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
+        if(NOT APPLE)
+            set_target_properties(v17_linux_audio_smoke PROPERTIES BUILD_RPATH "$ORIGIN" INSTALL_RPATH "$ORIGIN")
+        endif()
         add_test(NAME v17_linux_audio_spatial_math COMMAND v17_linux_audio_smoke)
     else()
         target_sources(moteur3d_v17 PRIVATE radio_audio.cpp)
@@ -199,11 +201,11 @@ if(MSVC)
 endif()
 # Vulkan 1.3.204 minimum Raster backend: compile native GLSL shaders to SPIR-V.
 # Pipeline assembly is done once per worker thread, not in the per-frame path.
-if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(WIN32 OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Vulkan 1.3.204 QUIET)
     if(Vulkan_FOUND)
         find_program(V17_GLSLANG_VALIDATOR NAMES glslangValidator glslangValidator.exe
-            HINTS "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/Bin32")
+            HINTS "$ENV{VULKAN_SDK}/bin" "$ENV{VULKAN_SDK}/Bin" "$ENV{VULKAN_SDK}/Bin32")
         if(NOT V17_GLSLANG_VALIDATOR)
             if(M3D_REQUIRE_VULKAN)
                 message(FATAL_ERROR "glslangValidator is required to build Vulkan shaders")
@@ -403,7 +405,7 @@ endif()
 
 # Repeatable original 30s PCM diagnostic loop; no copyright-sensitive downloads
 # and no external audio processing tool required by the build.
-if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(WIN32 OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
     set(V17_RADIO_TEST_WAV "${CMAKE_CURRENT_BINARY_DIR}/radio-assets/pripyat_radio.wav")
     add_custom_command(
@@ -641,4 +643,15 @@ if(WIN32)
             "${CMAKE_CURRENT_BINARY_DIR}/v17-raster-warp.png")
     set_tests_properties(v17_d3d11_raster_warp PROPERTIES
         TIMEOUT 180 ENVIRONMENT "M3D_V16_FORCE_WARP=1")
+endif()
+
+if(APPLE AND Vulkan_FOUND)
+    # A normal Mach-O executable keeps the same asset layout as Linux during this experiment.
+    set_target_properties(moteur3d_v17 PROPERTIES MACOSX_BUNDLE FALSE)
+    add_executable(v17_macos_scene_smoke "../experiments/macos-metal-vulkan/scene_smoke.cpp")
+    target_link_libraries(v17_macos_scene_smoke PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
+    add_dependencies(v17_macos_scene_smoke v17_vulkan_spirv)
+    add_executable(v17_macos_opt_bench "../experiments/macos-metal-vulkan/opt_bench.cpp")
+    target_link_libraries(v17_macos_opt_bench PRIVATE moteur3d_v16_core Qt6::Core Qt6::Gui)
+    add_dependencies(v17_macos_opt_bench v17_vulkan_spirv)
 endif()

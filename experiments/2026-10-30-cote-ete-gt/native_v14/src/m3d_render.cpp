@@ -9,6 +9,7 @@ static uint32_t packHdr(V c){
  return 0xff000000u|(encode(c.x)<<16)|(encode(c.y)<<8)|encode(c.z);
 }
 Stats render(const Scene&s,const ShadowMap&sm,const Camera&cam,int w,int h,std::vector<uint32_t>&pixels,unsigned threads,bool fog,const std::atomic<uint64_t>&generation,uint64_t token,unsigned samplesPerPixel,bool depthOfField,bool useAvx2,bool offlinePathTrace,unsigned maxBounces){
+ useAvx2=useAvx2&&avx2FmaAvailable();
  if(w<=0||h<=0||size_t(w)>SIZE_MAX/size_t(h))return {};
  pixels.resize(size_t(w)*size_t(h));
  // This opt-in mode runs one real primary BVH ray per 2x2 pixels.

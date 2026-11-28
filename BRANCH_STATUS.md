@@ -6,6 +6,12 @@ Promotion demandée après amélioration visuelle de V17.030 (L03 partiellement 
 
 [Audit rendu V17.031 et notation des backends](docs/audits/AUDIT_RENDU_V17_031_2026-11-27.md) : propositions uniquement, aucun changement de moteur.
 
+## Portage macOS expérimental — 28 novembre 2026
+
+Historique de la branche `test/macos-metal-vulkan` : V17.031 Build 4, [source validée](https://github.com/glaby91/moteur3d/commit/a49db9a2e21e937c16c959c87e3fad11cd722e9b), [CI réussie](https://github.com/glaby91/moteur3d/actions/runs/46094113757), scène V17.634. Vulkan Raster 011 / Resources 003, API GPU 1.3.357, MoltenVK 1.4.2. Validation hors écran, pas encore de vraie fenêtre ni de parité visuelle. [Documentation](v17/docs/MACOS_VULKAN.md). Intégration dans `master` demandée explicitement le 28 novembre 2026 ; tests de non-régression de la fusion à exécuter.
+
+Optimisation 001 : [Build 7 réussi](https://github.com/glaby91/moteur3d/actions/runs/46095834402), [source](https://github.com/glaby91/moteur3d/commit/bd7e48b5190802ac3a1176b25f8241d668795bda), Raster 012 / Resources 003. 384 images mesurées, 288/288 optimisées identiques, 1 508 → 36 draws statiques. [Résultats et données](v17/docs/MACOS_VULKAN_OPT_001.md). Options non activées par défaut ; Build 4 reste la référence de portage.
+
 ## Dernière référence L01/L02 validée — 27 novembre 2026
 
 **V17.029**, validée visuellement par l'utilisateur sur DX11 Raster, Vulkan et LumaTrace. [Build Windows 5 réussie](https://github.com/glaby91/moteur3d/actions/runs/46056898833) · [Commit source testé](https://github.com/glaby91/moteur3d/commit/f8eebe88a7e7207c47065bc89d077140b2556a7d). La branche principale `master` reçoit le code exact de cette version, avec les mêmes tests CI et les scripts de lancement.
@@ -21,7 +27,8 @@ Avant tout changement, identifier la version effectivement validée, sa branche,
 
 | Branche | Rôle |
 |---|---|
-| `master` | Référence principale V17.031 ; repartir de cette tête après contrôle du registre et validation. |
+| `master` | Référence principale V17.031 ; portage macOS ARM64 intégré, optimisations Apple optionnelles ; repartir de cette tête après contrôle du registre et validation. |
+| `test/macos-metal-vulkan` | Historique du portage et du benchmark macOS Build 7. |
 | `feature/v17-zmaterial-001` | V17.030, CI réussie et amélioration L03 constatée ; historique. |
 | `feature/v17-dx11-r001` | Source de la V17.029 validée ; historique de R001 et Z Atmosphere. |
 | `official/v17-lumatrace` | Référence historique, ne pas supposer à jour. |

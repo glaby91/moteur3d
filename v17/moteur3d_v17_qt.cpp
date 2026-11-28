@@ -406,7 +406,7 @@ public:
         audioTimer_.setInterval(50); // 20 Hz spatial updates, independent from GPU images.
         connect(&audioTimer_,&QTimer::timeout,this,[this]{
             if(!radioPlaying_ || !runtime_)return;
-#ifdef __linux__
+#if defined(__linux__) || defined(__APPLE__)
             if(!radioStreamPending_&&!radioUsingStream_&&!radioAudio_.playing()){
                 stopRadio();
                 if(radioStatusLabel_)radioStatusLabel_->setText(

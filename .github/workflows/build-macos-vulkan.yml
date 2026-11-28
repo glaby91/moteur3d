@@ -1,0 +1,262 @@
+name: V17 macOS ARM64 Vulkan experimental
+run-name: CSE WARP macOS ARM64 MoltenVK build ${{ github.run_number }}
+on:
+  push:
+    branches: [master, 'test/macos-metal-vulkan']
+    paths: ['.github/workflows/build-macos-vulkan.yml','v16/**','v17/**','engine/**','experiments/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: v17-macos-vulkan-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  mac:
+    runs-on: macos-26
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v5
+      - name: Host and tools
+        run: |
+          mkdir -p results
+          sw_vers | tee results/host.txt
+          uname -m | tee -a results/host.txt
+          test "$(uname -m)" = arm64
+          xcodebuild -version | tee -a results/host.txt
+          ninja --version
+          xcrun --sdk macosx --show-sdk-version
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.10.3'
+          host: mac
+          target: desktop
+          arch: clang_64
+          modules: qtmultimedia
+          cache: true
+      - name: Install official Vulkan SDK
+        env:
+          VERSION: '1.4.363.1'
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/vulkan-download"
+          mkdir -p "$work"
+          cd "$work"
+          curl --fail --location --retry 2 --max-time 240 "https://sdk.lunarg.com/sdk/download/$VERSION/mac/vulkansdk-macos-$VERSION.zip" -o sdk.zip
+          unzip -q sdk.zip
+          app="$(find "$work" -maxdepth 3 -name '*.app' -print -quit)"
+          test -n "$app"
+          exe="$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$app/Contents/Info.plist")"
+          "$app/Contents/MacOS/$exe" --root "$RUNNER_TEMP/VulkanSDK" --accept-licenses --default-answer --confirm-command install copy_only=1
+          sdk="$RUNNER_TEMP/VulkanSDK/macOS"
+          test -d "$sdk/include/vulkan"
+          echo "VULKAN_SDK=$sdk" >> "$GITHUB_ENV"
+          find "$sdk/share/vulkan/icd.d" -maxdepth 1 -type f -print | tee "$GITHUB_WORKSPACE/results/icds.txt"
+      - name: Resolve engine version and pinned benchmark scene V17.634
+        run: |
+          set -euo pipefail
+          product="$(python3 -c 'import json; v=json.load(open("v17/version.json"))["engine"]; print("%d.%03d"%(v["major"],v["build"]))')"
+          echo "V17_PRODUCT=$product" >> "$GITHUB_ENV"
+          # Match the validated Build 4; avoid rate-limited latest-release API.
+          cat >> "$GITHUB_ENV" <<'ENV'
+          SCENE_TAG=scene-reflect-V17.634
+          SCENE_REVISION=V17.634
+          SCENE_ZIP_URL=https://github.com/glaby91/moteur3d-scene/releases/download/scene-reflect-V17.634/V17-scene.zip
+          SCENE_ZIP_SHA=f975639311e5b5d48ae996ac1f4f986994b232befb29617290f51bdf2bfbb703
+          SCENE_MANIFEST_URL=https://github.com/glaby91/moteur3d-scene/releases/download/scene-reflect-V17.634/SCENE_VERSION.json
+          SCENE_MANIFEST_SHA=77d501dc6afa54f2a1793d1c26da8c0cd1645c0cc554636b417ecfcdf7ebcb73
+          ENV
+      - name: Download and verify exact scene release
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 "$SCENE_ZIP_URL" -o "$RUNNER_TEMP/V17-scene.zip"
+          curl --fail --location --retry 3 "$SCENE_MANIFEST_URL" -o "$RUNNER_TEMP/SCENE_VERSION.json"
+          echo "$SCENE_ZIP_SHA  $RUNNER_TEMP/V17-scene.zip" | shasum -a 256 -c -
+          echo "$SCENE_MANIFEST_SHA  $RUNNER_TEMP/SCENE_VERSION.json" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/v17-scene"
+          unzip -q "$RUNNER_TEMP/V17-scene.zip" -d "$RUNNER_TEMP/v17-scene"
+          cmp "$RUNNER_TEMP/SCENE_VERSION.json" "$RUNNER_TEMP/v17-scene/SCENE_VERSION.json"
+          python3 - "$RUNNER_TEMP/v17-scene" "$SCENE_REVISION" "$SCENE_TAG" <<'PY'
+          import json, pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          manifest = json.loads((root / "SCENE_VERSION.json").read_text())
+          scene = json.loads((root / "benchmark-civic/scene.json").read_text())
+          assert manifest["repository"] == "glaby91/moteur3d-scene"
+          assert manifest["channel"] == "reflect" and manifest["tag"] == sys.argv[3]
+          assert manifest["scene"] == "benchmark-civic/scene.json"
+          assert manifest["revision"] == scene["revision"] == sys.argv[2]
+          print("Verified bundled scene:", scene["revision"])
+          PY
+      - name: Configure actual engine
+        run: |
+          set -euo pipefail
+          export PATH="$VULKAN_SDK/bin:$PATH"
+          cmake -S v17 -B build-macos -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DM3D_REQUIRE_VULKAN=ON -DV17_CI_BUILD_NUMBER="$GITHUB_RUN_NUMBER" -DV17_GIT_SHA="$GITHUB_SHA" -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DV17_SCENE_SOURCE_DIR="$RUNNER_TEMP/v17-scene/benchmark-civic" 2>&1 | tee results/configure.log
+      - name: Compile actual engine, tools and original Vulkan shaders
+        run: |
+          set -euo pipefail
+          cmake --build build-macos --parallel 4 --target moteur3d_v17 moteur3d_v17_benchmark moteur3d_v17_campaign moteur3d_v17_gibake v17_vulkan_gpu_smoke v17_vulkan_version_smoke v17_vulkan_mesh_smoke v17_vulkan_dirty_policy_smoke v17_vulkan_mipmap_smoke v17_vulkan_readback_smoke v17_macos_scene_smoke v17_macos_opt_bench 2>&1 | tee results/build.log
+          file build-macos/moteur3d_v17 build-macos/v16/libmoteur3d_v16_core.dylib | tee results/binaries.txt
+      - name: Actual Vulkan raster and scene tests via MoltenVK (both profiles)
+        run: |
+          set -euo pipefail
+          export VK_DRIVER_FILES="$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json"
+          export DYLD_LIBRARY_PATH="$VULKAN_SDK/lib"
+          export QT_QPA_PLATFORM=offscreen CSE_WARP_VK_MSAA=1
+          root="$PWD"
+          cd build-macos
+          python3 - "$root/results" <<'PY'
+          import json, os, pathlib, signal, subprocess, sys, time
+          out=pathlib.Path(sys.argv[1])
+          results=[]
+          def run(name,args,env,limit):
+              start=time.monotonic()
+              print("BEGIN",name,flush=True)
+              with (out/(name+".log")).open("w") as log:
+                  p=subprocess.Popen(args,stdout=log,stderr=subprocess.STDOUT,env=env,start_new_session=True)
+                  try: code=p.wait(timeout=limit)
+                  except subprocess.TimeoutExpired:
+                      try: os.killpg(p.pid,signal.SIGKILL)
+                      except ProcessLookupError: pass
+                      p.wait()
+                      code=124
+              body=(out/(name+".log")).read_text(errors="replace")
+              print(body[:35000],flush=True)
+              results.append({"case":name,"exit_code":code,"wall_seconds":round(time.monotonic()-start,3)})
+              (out/"status.json").write_text(json.dumps(results,indent=2))
+              print("END",results[-1],flush=True)
+              return code
+          env=os.environ.copy()
+          run("ctest",["ctest","--output-on-failure","-R","^v17_vulkan_","--no-tests=error"],env,90)
+          for name,flag in [("optimized","1"),("baseline","0")]:
+              e=env.copy();e["CSE_WARP_VK_FAST_FRAGMENT"]=flag
+              png=out/(name+"-triangle.png")
+              args=["./v17_vulkan_gpu_smoke",str(png)]
+              code=run(name+"-triangle",args,e,90)
+              if code==0 and png.is_file() and png.stat().st_size>0:
+                  run(name+"-scene",["./v17_macos_scene_smoke","benchmark-civic/scene.json",str(out/name)],e,300)
+              else:
+                  results.append({"case":name+"-scene","exit_code":None,"reason":"triangle failed or image missing"})
+                  (out/"status.json").write_text(json.dumps(results,indent=2))
+                  if code==-11:
+                      run(name+"-lldb",["xcrun","lldb","--batch","-o","settings set target.disable-aslr false","-o","run","-k","thread backtrace all","--",*args],e,120)
+          run("navigation",["./moteur3d_v17","--smoke-walking-collisions","benchmark-civic/scene.json"],env,180)
+          PY
+          cat "$root/results/status.json" >> "$GITHUB_STEP_SUMMARY"
+      - name: macOS exact draw merging and BGRA A/B benchmark
+        if: github.ref != 'refs/heads/master' || github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          export VK_DRIVER_FILES="$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json"
+          export DYLD_LIBRARY_PATH="$VULKAN_SDK/lib"
+          export QT_QPA_PLATFORM=offscreen CSE_WARP_VK_MSAA=1 CSE_WARP_VK_FAST_FRAGMENT=1
+          export M3D_V17_ANIMATE_CLOUDS=0
+          root="$PWD"
+          cd build-macos
+          python3 - "$root/results/optimization" <<'PY'
+          import os, json, pathlib, subprocess, statistics, math, sys, signal
+          out=pathlib.Path(sys.argv[1]);out.mkdir(parents=True,exist_ok=True)
+          profiles={'reference':('0','0'),'merge':('1','0'),'bgra':('0','1'),'combined':('1','1')}
+          cases=[]
+          for repetition in range(2):
+              for width,height in [(640,360),(1920,1080)]:
+                  for name in (list(profiles) if repetition==0 else list(reversed(profiles))):
+                      dest=out/f'{width}x{height}'/str(repetition)/name
+                      dest.mkdir(parents=True,exist_ok=True)
+                      env=os.environ.copy()
+                      env['CSE_WARP_MAC_MERGE_DRAWS'],env['CSE_WARP_VK_BGRA_READBACK']=profiles[name]
+                      env['CSE_WARP_VK_KHRONOS_CSV']=str(dest/'telemetry.csv')
+                      print('BEGIN',width,height,repetition,name,flush=True)
+                      with (dest/'run.log').open('w') as log:
+                          p=subprocess.Popen(['./v17_macos_opt_bench','benchmark-civic/scene.json',str(dest),str(width),str(height)],env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+                          try: code=p.wait(timeout=180)
+                          except subprocess.TimeoutExpired:
+                              try: os.killpg(p.pid,signal.SIGKILL)
+                              except ProcessLookupError: pass
+                              p.wait();code=124
+                      print((dest/'run.log').read_text(errors='replace')[-16000:],flush=True)
+                      cases.append({'resolution':f'{width}x{height}','repetition':repetition,'profile':name,'exit':code})
+                      (out/'cases.json').write_text(json.dumps(cases,indent=2))
+          report=[]
+          for width,height in [(640,360),(1920,1080)]:
+              res=f'{width}x{height}'
+              for name in profiles:
+                  for phase in ('static','moving'):
+                      frames=[];same=0;compared=0
+                      for rep in range(2):
+                          a=out/res/str(rep)/name/'frames.json';b=out/res/str(rep)/'reference'/'frames.json'
+                          if not a.exists() or not b.exists(): continue
+                          ref={r['frame']:r for r in json.loads(b.read_text()) if r['phase']==phase}
+                          for r in json.loads(a.read_text()):
+                              if r['phase']!=phase:continue
+                              frames.append(r)
+                              if r['frame'] in ref:
+                                  compared+=1;same+=r['sha256']==ref[r['frame']]['sha256']
+                      if not frames:continue
+                      row={'resolution':res,'profile':name,'phase':phase,'frames':len(frames),'identical':same,'compared':compared}
+                      for field in ('wall_ms','submit_ms','fence_ms','readback_cpu_ms','draws'):
+                          values=sorted(r[field] for r in frames)
+                          row[field+'_median']=statistics.median(values)
+                          row[field+'_p95']=values[math.ceil(.95*len(values))-1]
+                      report.append(row)
+          (out/'summary.json').write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2),flush=True)
+          assert all(r['exit']==0 for r in cases),'Benchmark process failed; results are diagnostic'
+          assert len(report)==16,'Incomplete benchmark'
+          PY
+          cat "$root/results/optimization/summary.json" >> "$GITHUB_STEP_SUMMARY"
+      - name: Archive native experimental binaries and exact scene
+        run: |
+          set -euo pipefail
+          name="CSE-WARP-V${V17_PRODUCT}-macOS-ARM64-MoltenVK-build-$GITHUB_RUN_NUMBER"
+          dst="dist/$name"
+          mkdir -p "$dst"
+          cp build-macos/moteur3d_v17 build-macos/moteur3d_v17_benchmark build-macos/moteur3d_v17_campaign build-macos/moteur3d_v17_gibake build-macos/v17_vulkan_gpu_smoke build-macos/v17_macos_scene_smoke "$dst/"
+          cp build-macos/v16/libmoteur3d_v16_core.dylib "$dst/"
+          cp -R build-macos/vulkan build-macos/audio build-macos/shaders build-macos/benchmark-civic "$dst/"
+          cp build-macos/render_modules.json "$RUNNER_TEMP/SCENE_VERSION.json" "$dst/"
+          mkdir -p "$dst/materials"
+          cp v17/materials/zmaterial8192.json "$dst/materials/"
+          # Initial developer package requires local Qt and LunarG SDK. Do not label this standalone.
+          cat > "$dst/lancer.sh" <<'SH'
+          #!/bin/bash
+          set -e
+          cd "$(dirname "$0")"
+          : "${VULKAN_SDK:?Set VULKAN_SDK to your Vulkan SDK macOS directory}"
+          : "${QT_ROOT_DIR:?Set QT_ROOT_DIR to your Qt 6.10.3 macOS directory}"
+          export DYLD_LIBRARY_PATH="$PWD:$VULKAN_SDK/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+          export DYLD_FRAMEWORK_PATH="$QT_ROOT_DIR/lib${DYLD_FRAMEWORK_PATH:+:$DYLD_FRAMEWORK_PATH}"
+          export QT_PLUGIN_PATH="$QT_ROOT_DIR/plugins"
+          export VK_DRIVER_FILES="$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json"
+          exec ./moteur3d_v17 "$@"
+          SH
+          chmod +x "$dst/lancer.sh"
+          printf 'Experimental ARM64 developer package. Requires Qt 6.10.3 macOS (Multimedia) and LunarG Vulkan SDK 1.4.363.1. Set QT_ROOT_DIR and VULKAN_SDK, then ./lancer.sh benchmark-civic/scene.json. Not signed/notarized, no native WSI; Qt QImage presentation only.\n' > "$dst/README.txt"
+          otool -L "$dst/moteur3d_v17" "$dst/libmoteur3d_v16_core.dylib" | tee results/otool.txt
+          printf '{"productVersion":"%s","githubActionsRun":"%s","sourceCommit":"%s","platform":"macos-arm64","backend":"Vulkan/MoltenVK","sceneRevision":"%s","standalone":false}\n' "$V17_PRODUCT" "$GITHUB_RUN_ID" "$GITHUB_SHA" "$SCENE_REVISION" > "$dst/BUILD_INFO.json"
+          tar -C dist -czf "$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-macOS-ARM64-experimental
+          path: CSE-WARP-*-macOS-ARM64-MoltenVK-build-*.tar.gz
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: macOS-engine-diagnostics
+          path: results/
+          if-no-files-found: warn
+      - name: Require actual successful runtime checks
+        if: success()
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          root=pathlib.Path("results")
+          cases={r["case"]:r["exit_code"] for r in json.loads((root/"status.json").read_text())}
+          required=["ctest","optimized-triangle","baseline-triangle","optimized-scene","baseline-scene","navigation"]
+          missing=[k for k in required if cases.get(k)!=0]
+          for profile in ("optimized","baseline"):
+              for p in [root/(profile+"-triangle.png"),*(root/profile/("vulkan-scene-%d.png"%i) for i in range(3))]:
+                  if not p.is_file() or p.stat().st_size==0: missing.append(str(p))
+          print("Failed or missing checks:",missing)
+          assert not missing,"Runtime validation failed; artifacts remain diagnostic only"
+          PY
