@@ -254,6 +254,11 @@ class DirectX11Preview {
         return available;
     }
 public:
+    bool traceEscargotPaths(const Scene& scene,const LumaTraceBvh4& bvh,const std::vector<EscargotPathQuery>& q,std::vector<EscargotPathEvent>& events,EscargotPathTiming& timing,std::wstring& error){
+        if(!ensureDevice(error)||!ensureScene(scene,error,&bvh))return false;
+        if(!lumaTraceCompute_.prepare(device_.Get(),bvh,lumaCpuScene_,scene,false,error))return false;
+        return escTrace_.runPaths(device_.Get(),context_.Get(),lumaTraceCompute_.bvhSrv(),scene,bvh,q,events,timing,error);
+    }
     bool traceEscargot(const Scene& scene,const LumaTraceBvh4& bvh,const std::vector<EscargotRayQuery>& q,std::vector<EscargotRayHit>& hits,double& preparation,double& execution,std::wstring& error){
         if(!ensureDevice(error)||!ensureScene(scene,error,&bvh))return false;
         if(!lumaTraceCompute_.prepare(device_.Get(),bvh,lumaCpuScene_,scene,false,error))return false;
@@ -2474,6 +2479,9 @@ bool renderLumaTraceEscargotGpuPreview(const Scene& scene,const LumaTraceBvh4& b
     escargotInput=&input;
     return rasterThreadContext().renderLumaTrace(scene,bvh,shadows,cam,w,h,pixels,stats,error);
 }
+bool traceEscargotGpuPaths(const Scene& scene,const LumaTraceBvh4& bvh,const std::vector<EscargotPathQuery>& q,std::vector<EscargotPathEvent>& events,EscargotPathTiming& timing,std::wstring& error){
+    return rasterThreadContext().traceEscargotPaths(scene,bvh,q,events,timing,error);
+}
 bool traceEscargotGpuBatch(const Scene& scene,const LumaTraceBvh4& bvh,const std::vector<EscargotRayQuery>& q,std::vector<EscargotRayHit>& hits,double& preparation,double& execution,std::wstring& error){
     return rasterThreadContext().traceEscargot(scene,bvh,q,hits,preparation,execution,error);
 }
@@ -2538,6 +2546,7 @@ bool renderLumaTracePreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,c
 bool renderLumaTraceNative(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,void*,Stats&,std::wstring& error){error=L"LumaTrace DX11 natif disponible uniquement sous Windows.";return false;}
 bool renderLumaTraceEscargotPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring& error){error=L"Escargot DX11 Windows only";return false;}
 bool renderLumaTraceEscargotGpuPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring& error){error=L"Escargot GPU DX11 Windows only";return false;}
+bool traceEscargotGpuPaths(const Scene&,const LumaTraceBvh4&,const std::vector<EscargotPathQuery>&,std::vector<EscargotPathEvent>&,EscargotPathTiming&,std::wstring& error){error=L"Escargot GPU paths Windows only";return false;}
 bool traceEscargotGpuBatch(const Scene&,const LumaTraceBvh4&,const std::vector<EscargotRayQuery>&,std::vector<EscargotRayHit>&,double&,double&,std::wstring& error){error=L"Escargot GPU trace Windows only";return false;}
 bool renderLumaTraceEscargotGpuResidentPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring& error){error=L"Escargot GPU resident Windows only";return false;}
 void releaseDirectX11NativeForCurrentThread(){}

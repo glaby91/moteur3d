@@ -172,6 +172,11 @@ bool renderLumaTraceEscargotGpuPreview(const Scene&,const LumaTraceBvh4&,const S
 // Experimental query ABI: all original triangles, including transparent receivers.
 struct EscargotRayQuery { float origin[3];float low;float direction[3];uint32_t previousPrimitive=0xffffffffu; };
 struct EscargotRayHit { uint32_t primitive,status;float depth,u;float v;float pad[3]; };
+// One GPU invocation per independent optical path. Event ranges are disjoint.
+struct EscargotPathQuery { EscargotRayQuery initial;uint32_t receiver,quota,offset,maxCrossings; };
+struct EscargotPathEvent { EscargotRayQuery query;EscargotRayHit hit; }; // hit.pad[0] in first slot = event count, pad[1] = error flag
+struct EscargotPathTiming { double prepareMs=0,submitMs=0,readbackMs=0,gpuMs=0;bool gpuTimingValid=false; };
+bool traceEscargotGpuPaths(const Scene&,const LumaTraceBvh4&,const std::vector<EscargotPathQuery>&,std::vector<EscargotPathEvent>&,EscargotPathTiming&,std::wstring&);
 bool traceEscargotGpuBatch(const Scene&,const LumaTraceBvh4&,const std::vector<EscargotRayQuery>&,std::vector<EscargotRayHit>&,double&,double&,std::wstring&);
 bool renderLumaTraceEscargotGpuResidentPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring&);
 void releaseDirectX11NativeForCurrentThread();
