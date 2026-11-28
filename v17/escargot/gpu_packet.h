@@ -153,6 +153,78 @@ inline Packet packGpu(const Result& frame,const Scene& scene,size_t objectCount)
     return p;
 }
 
+// F input: one copy of each observation per receiver/layer, not one per
+// tile. GPU computes the exact conservative shortlists and final packet.
+// Source layer grouping/affine metadata remain CPU-side in this phase.
+struct BuildPlan {EscargotPacketBuild native;bool ok=false;std::string error;};
+inline BuildPlan planGpuBuild(const Result& frame,const Scene& scene,size_t objectCount,int tileSize=16,bool scalarNearest=true){
+    BuildPlan plan;Packet p;
+    try{
+        if(tileSize!=8&&tileSize!=16&&tileSize!=32)throw std::runtime_error("Invalid optical tile size");
+        if(objectCount>=kMaxRecords/2-2)throw std::runtime_error("Too many receiver IDs");
+        p.reserveRecords(2+2*(objectCount+1));float day;V sunDir;escargotLightingSnapshot(day,sunDir);
+        p.vec(0,sunDir,day);p.set(1,float(objectCount),float(tileSize),1,scalarNearest?1.f:0.f);
+        struct SurfaceJob {const Surface* sf;size_t tileBase;int cols,rows;};
+        std::vector<SurfaceJob> surfaces;uint64_t jobs=0;
+        for(const auto& sf:frame.surfaces){
+            if(sf.deferred||sf.layers.empty()||!sf.candidate.bounds.valid()||sf.receiverIndices.empty())continue;
+            const auto r=sf.candidate.bounds;auto object=sf.candidate.object;
+            if(!object||object>objectCount)throw std::runtime_error("Invalid receiver ID");
+            const int cols=(r.w+tileSize-1)/tileSize,rows=(r.h+tileSize-1)/tileSize;
+            const auto tileBase=p.reserveRecords(size_t(cols)*rows);
+            jobs+=uint64_t(cols)*rows;
+            if(jobs>65535ull*32)throw std::runtime_error("Too many optical tile jobs");
+            const bool coverage=sf.sameKnownSet&&std::all_of(sf.layers.begin(),sf.layers.end(),[](const auto& kv){return kv.second.partial.empty();});
+            const size_t rec=2+2*size_t(object);
+            p.set(rec,float(r.x),float(r.y),float(r.w),float(r.h));
+            p.set(rec+1,float(tileBase),float(cols),float(sf.candidate.material+1),coverage?1.f:0.f);
+            surfaces.push_back({&sf,tileBase,cols,rows});
+        }
+        plan.native.prefixRecords=uint32_t(p.size());
+        plan.native.jobBase=uint32_t(p.reserveRecords(size_t(jobs)*3));plan.native.jobCount=uint32_t(jobs);
+        size_t job=0;
+        for(const auto& item:surfaces){
+            const auto& sf=*item.sf;const auto r=sf.candidate.bounds;
+            const bool coverage=p.data[4*(2+2*size_t(sf.candidate.object)+1)+3]>.5f;
+            const size_t receiverStart=p.size();
+            for(auto id:sf.receiverIndices){
+                const auto& s=sf.samples[id];p.add(float(s.x),float(s.y),float(id),s.receiver==State::Measured?1.f:0.f);
+                p.add(s.position.x,s.position.y,s.position.z,s.receiverWeight);p.add(s.normal.x,s.normal.y,s.normal.z,s.receiverDepth);
+            }
+            const size_t layerStart=p.reserveRecords(sf.layers.size()*7);size_t layerIndex=0;
+            for(const auto& kv:sf.layers){
+                const auto& l=kv.second;const auto a=affine(scene,l);const auto& mat=scene.mat[l.key.material];
+                const size_t base=layerStart+7*layerIndex++,first=p.size();
+                std::vector<size_t> partialIds;
+                if(!coverage){partialIds=sf.completeIndices;partialIds.insert(partialIds.end(),l.partial.begin(),l.partial.end());}
+                const auto& chosen=coverage?sf.receiverIndices:partialIds;
+                p.set(base,float(first),float(chosen.size()),float(l.key.material),a.valid?1.f:0.f);
+                p.set(base+1,float(l.bounds.x),float(l.bounds.y),float(l.bounds.w),float(l.bounds.h));
+                p.vec(base+2,a.origin,a.u);p.vec(base+3,a.normal,a.v);p.vec(base+4,a.du);p.vec(base+5,a.dv);
+                p.vec(base+6,mat.emissionColor*std::max(0.f,mat.emissionIntensity),mat.imageAlbedo?1.f:0.f);
+                for(auto id:chosen){
+                    auto it=l.measured.find(id);const bool hit=it!=l.measured.end();const auto& s=sf.samples[id];
+                    if(!coverage)p.add(float(s.x),float(s.y),float(id),hit?1.f:0.f);
+                    if(hit){const auto& v=it->second;p.add(v.uv.x,v.uv.y,v.depth,v.opacity);p.vec(p.add(),v.normal,float(v.primitive+1u));}
+                    else{p.add();p.add();}
+                }
+            }
+            for(int ty=0;ty<item.rows;++ty)for(int tx=0;tx<item.cols;++tx){
+                const size_t base=plan.native.jobBase+3*job++;
+                const size_t tileId=item.tileBase+size_t(ty)*item.cols+tx;
+                p.set(base,float(tileId),float(receiverStart),float(sf.receiverIndices.size()),float(layerStart));
+                p.set(base+1,float(sf.layers.size()),coverage?1.f:0.f,float(r.x+tx*tileSize),float(r.y+ty*tileSize));
+                p.set(base+2,float(std::min(tileSize,r.w-tx*tileSize)),float(std::min(tileSize,r.h-ty*tileSize)),0,0);
+            }
+        }
+        // A bounded reusable 16 MiB output; explicit failure on overflow.
+        // Never truncate layers or discard known observations silently.
+        plan.native.maxRecords=1u<<20;
+        if(plan.native.prefixRecords>=plan.native.maxRecords)throw std::runtime_error("Optical tile header exceeds resident packet budget");
+        plan.native.data=std::move(p.data);plan.ok=true;
+    }catch(const std::exception& ex){plan.error=ex.what();}
+    return plan;
+}
 struct PacketKey {
     std::array<float,18> cameraLight{};
     uint64_t identity=0,revision=0,maxCells=0;

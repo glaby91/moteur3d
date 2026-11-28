@@ -144,7 +144,22 @@ bool sampleOptical(VSOut i,float2 distortion,out float3 reflected){
 )";
 inline constexpr char kEscargotGpuShader[] = R"(// Compact exact top-four search. Integer pixel positions and stable sample
 // IDs preserve measured zeros and deterministic equidistant ties.
+bool escLess(uint d,uint id,uint refD,uint refId){return d<refD||(d==refD&&id<refId);}
+void escNearestScalar(uint start,uint count,int2 pixel,out uint4 addr,out uint4 dist,out uint n){
+    addr=0;dist=0xffffffffu;uint4 ids=0xffffffffu;
+    for(uint j=0;j<count;++j){
+        uint a=start+3*j;float4 v=escPacket[a];int2 d=int2(v.xy)-pixel;
+        uint dd=uint(dot(float2(d),float2(d))),id=uint(v.z);
+        if(!escLess(dd,id,dist.w,ids.w))continue;
+        if(escLess(dd,id,dist.x,ids.x)){dist=uint4(dd,dist.xyz);ids=uint4(id,ids.xyz);addr=uint4(a,addr.xyz);}
+        else if(escLess(dd,id,dist.y,ids.y)){dist=uint4(dist.x,dd,dist.yz);ids=uint4(ids.x,id,ids.yz);addr=uint4(addr.x,a,addr.yz);}
+        else if(escLess(dd,id,dist.z,ids.z)){dist=uint4(dist.xy,dd,dist.z);ids=uint4(ids.xy,id,ids.z);addr=uint4(addr.xy,a,addr.z);}
+        else{dist.w=dd;ids.w=id;addr.w=a;}
+    }
+    n=min(count,4u);if(n>0&&dist.x==0)n=1;
+}
 void escNearest(uint start,uint count,int2 pixel,out uint4 addr,out uint4 dist,out uint n){
+    if(escPacket[1].w>.5){escNearestScalar(start,count,pixel,addr,dist,n);return;}
     addr=0;dist=0xffffffffu;n=0;uint4 ids=0xffffffffu;
     [loop] for(uint j=0;j<count;++j){
         uint a=start+3*j;float4 v=escPacket[a];int2 d=int2(v.xy)-pixel;
