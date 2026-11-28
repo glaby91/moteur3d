@@ -29,11 +29,17 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - uses: android-actions/setup-android@v3
       - name: Host shader tools and Android SDK
         run: |
           sudo apt-get update
           sudo apt-get install -y ninja-build glslang-tools spirv-tools
+          set -euo pipefail
+          command -v sdkmanager
+          sdkmanager --version
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018"
+          test -f "$ANDROID_HOME/ndk/27.2.12479018/source.properties"
+          test -x "$ANDROID_HOME/build-tools/36.0.0/aapt"
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
       - uses: jurplel/install-qt-action@v4
         with:
@@ -84,5 +90,5 @@ jobs:
           if-no-files-found: warn
   simulation:
     needs: apk
-    if: always() && !cancelled()
+    if: ${{ needs.apk.result == 'success' }}
     uses: ./.github/workflows/qa-android-vulkan.yml
