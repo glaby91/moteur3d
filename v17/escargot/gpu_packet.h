@@ -157,7 +157,7 @@ inline Packet packGpu(const Result& frame,const Scene& scene,size_t objectCount,
 // F input: one copy of each observation per receiver/layer, not one per
 // tile. GPU computes the exact conservative shortlists and final packet.
 // Source layer grouping/affine metadata remain CPU-side in this phase.
-struct BuildPlan {EscargotPacketBuild native;bool ok=false;std::string error;};
+struct BuildPlan {EscargotPacketBuild native;bool ok=false;std::string error;uint32_t regions=0,regionalSurfaces=0;bool regionalFallback=false;};
 inline BuildPlan planGpuBuild(const Result& frame,const Scene& scene,size_t objectCount,int tileSize=16,bool scalarNearest=true,bool regionSearch=true){
     BuildPlan plan;Packet p;
     try{
@@ -197,8 +197,10 @@ inline BuildPlan planGpuBuild(const Result& frame,const Scene& scene,size_t obje
             // Regions are only a conservative search index, never optical
             // geometry or new samples. Keep original order and all ties.
             const bool regional=regionSearch&&sf.receiverIndices.size()>=128&&item.cols*item.rows>16;
+            if(regional)++plan.regionalSurfaces;
             const int blockX=regional?std::max(1,128/tileSize):item.cols,blockY=regional?std::max(1,128/tileSize):item.rows;
             for(int by=0;by<item.rows;by+=blockY)for(int bx=0;bx<item.cols;bx+=blockX){
+                ++plan.regions;
                 const int ex=std::min(bx+blockX,item.cols),ey=std::min(by+blockY,item.rows);
                 const Rect region{r.x+bx*tileSize,r.y+by*tileSize,std::min(r.w,ex*tileSize)-bx*tileSize,std::min(r.h,ey*tileSize)-by*tileSize};
                 const auto receivers=regional?shortlist(sf,sf.receiverIndices,region):sf.receiverIndices;
@@ -242,6 +244,9 @@ inline BuildPlan planGpuBuild(const Result& frame,const Scene& scene,size_t obje
         if(plan.native.prefixRecords>=plan.native.maxRecords)throw std::runtime_error("Optical tile header exceeds resident packet budget");
         plan.native.data=std::move(p.data);plan.ok=true;
     }catch(const std::exception& ex){plan.error=ex.what();}
+    // Region duplication is bounded by the existing packet limit. On a
+    // large pathological footprint, preserve the exact nonregional plan.
+    if(!plan.ok&&regionSearch&&plan.regionalSurfaces){auto fallback=planGpuBuild(frame,scene,objectCount,tileSize,scalarNearest,false);fallback.regionalFallback=true;return fallback;}
     return plan;
 }
 inline bool logicalPacketEqual(const std::vector<float>& a,const std::vector<float>& b,std::string& why){
