@@ -68,7 +68,7 @@ jobs:
         run: |
           cmake -S v17 -B build-escargot -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DV17_SCENE_SOURCE_DIR=$env:ESC_SCENE" -DM3D_REQUIRE_VULKAN=ON "-DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER" "-DV17_GIT_SHA=$env:GITHUB_SHA"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cmake --build build-escargot --config Release --target v17_escargot_object_lab v17_escargot_object_generic v17_escargot_object_opt v17_escargot_object_combined --parallel 4
+          cmake --build build-escargot --config Release --target v17_escargot_object_lab v17_escargot_object_generic v17_escargot_object_opt v17_escargot_object_combined v17_escargot_object_compact --parallel 4
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Real scene one-layer diagnostic
         shell: pwsh
@@ -129,6 +129,25 @@ jobs:
             } | ConvertTo-Json
           }
           if ($rc) { throw "Combined parity failed: $rc" }
+      - name: Compact footprint and prepared geometry scaling test
+        shell: pwsh
+        timeout-minutes: 35
+        run: |
+          $core = Get-ChildItem build-escargot -Recurse -File -Filter moteur3d_v16_core.dll | Select-Object -First 1
+          $exe = Get-ChildItem build-escargot -Recurse -File -Filter v17_escargot_object_compact.exe | Select-Object -First 1
+          if (!$core -or !$exe) { throw "Missing compact diagnostic" }
+          $env:PATH="$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
+          New-Item -ItemType Directory -Force object-results/compact | Out-Null
+          & $exe.FullName "$env:ESC_SCENE/scene.json" "$PWD/object-results/compact"
+          $rc = $LASTEXITCODE
+          if (Test-Path object-results/compact/compact-summary.json) {
+            $r = Get-Content object-results/compact/compact-summary.json -Raw | ConvertFrom-Json
+            $r | Select-Object pairPoseResolutionCases,measuredRuns,coverageErrors,maskErrors,uvErrors,images,chartPreparationMs | ConvertTo-Json
+            $r.cases | Group-Object width,variant | ForEach-Object {
+              [pscustomobject]@{group=$_.Name;cases=$_.Count;totalMs=($_.Group | Measure-Object medianTotalMs -Sum).Sum;projectionMs=($_.Group | Measure-Object medianProjectionMs -Sum).Sum;visibilityMs=($_.Group | Measure-Object medianVisibilityMs -Sum).Sum;storageBytes=($_.Group | Measure-Object storageBytes -Sum).Sum;fallbackRays=($_.Group | Measure-Object fallbackRays -Sum).Sum;geometryResolved=($_.Group | Measure-Object geometryResolved -Sum).Sum;maskErrors=($_.Group | Measure-Object maskErrors -Sum).Sum;coverageErrors=($_.Group | Measure-Object coverageErrors -Sum).Sum;uvErrors=($_.Group | Measure-Object uvErrors -Sum).Sum}
+            } | ConvertTo-Json
+          }
+          if ($rc) { throw "Compact parity failed: $rc" }
       - uses: actions/upload-artifact@v6
         if: always()
         with:
