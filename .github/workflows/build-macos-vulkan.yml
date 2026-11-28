@@ -1,0 +1,168 @@
+name: V17 macOS ARM64 Vulkan experimental
+run-name: CSE WARP macOS ARM64 MoltenVK build ${{ github.run_number }}
+on:
+  push:
+    branches: ['test/macos-metal-vulkan']
+    paths: ['.github/workflows/build-macos-vulkan.yml','v16/**','v17/**','experiments/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: v17-macos-vulkan-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  mac:
+    runs-on: macos-26
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v5
+      - name: Host and tools
+        run: |
+          mkdir -p results
+          sw_vers | tee results/host.txt
+          uname -m | tee -a results/host.txt
+          test "$(uname -m)" = arm64
+          xcodebuild -version | tee -a results/host.txt
+          ninja --version
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: mac
+          target: desktop
+          arch: clang_64
+          modules: qtmultimedia
+          cache: true
+      - name: Install official Vulkan SDK
+        env:
+          VERSION: '1.4.363.1'
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/vulkan-download"
+          mkdir -p "$work"
+          cd "$work"
+          curl --fail --location --retry 2 --max-time 240 "https://sdk.lunarg.com/sdk/download/$VERSION/mac/vulkansdk-macos-$VERSION.zip" -o sdk.zip
+          unzip -q sdk.zip
+          app="$(find "$work" -maxdepth 3 -name '*.app' -print -quit)"
+          test -n "$app"
+          exe="$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$app/Contents/Info.plist")"
+          "$app/Contents/MacOS/$exe" --root "$RUNNER_TEMP/VulkanSDK" --accept-licenses --default-answer --confirm-command install copy_only=1
+          sdk="$RUNNER_TEMP/VulkanSDK/macOS"
+          test -d "$sdk/include/vulkan"
+          echo "VULKAN_SDK=$sdk" >> "$GITHUB_ENV"
+          find "$sdk/share/vulkan/icd.d" -maxdepth 1 -type f -print | tee "$GITHUB_WORKSPACE/results/icds.txt"
+      - name: Resolve engine version and latest official Reflect scene
+        run: |
+          set -euo pipefail
+          product="$(python3 -c 'import json; v=json.load(open("v17/version.json"))["engine"]; print("%d.%03d"%(v["major"],v["build"]))')"
+          echo "V17_PRODUCT=$product" >> "$GITHUB_ENV"
+          curl --fail --location --retry 3 -H 'Accept: application/vnd.github+json' \
+            'https://api.github.com/repos/glaby91/moteur3d-scene/releases/latest' -o "$RUNNER_TEMP/scene-release.json"
+          # Resolve an immutable release URL and published SHA-256 values once.
+          python3 - "$RUNNER_TEMP/scene-release.json" "$GITHUB_ENV" <<'PY'
+          import json, re, sys
+          release = json.load(open(sys.argv[1]))
+          tag = release["tag_name"]
+          assert re.fullmatch(r"scene-reflect-V17\.\d+", tag), "Latest release is not a V17 Reflect scene"
+          assert not release["draft"] and not release["prerelease"]
+          assets = {a["name"]: a for a in release["assets"]}
+          base = f"https://github.com/glaby91/moteur3d-scene/releases/download/{tag}"
+          with open(sys.argv[2], "a") as env:
+              print(f"SCENE_TAG={tag}", file=env)
+              print(f"SCENE_REVISION={tag.removeprefix('scene-reflect-')}", file=env)
+              for name, key in [("V17-scene.zip","SCENE_ZIP"),("SCENE_VERSION.json","SCENE_MANIFEST")]:
+                  a = assets[name]
+                  assert a["browser_download_url"] == f"{base}/{name}"
+                  assert re.fullmatch(r"sha256:[a-f0-9]{64}", a["digest"])
+                  print(f"{key}_URL={a['browser_download_url']}", file=env)
+                  print(f"{key}_SHA={a['digest'][7:]}", file=env)
+          PY
+      - name: Download and verify exact scene release
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 "$SCENE_ZIP_URL" -o "$RUNNER_TEMP/V17-scene.zip"
+          curl --fail --location --retry 3 "$SCENE_MANIFEST_URL" -o "$RUNNER_TEMP/SCENE_VERSION.json"
+          echo "$SCENE_ZIP_SHA  $RUNNER_TEMP/V17-scene.zip" | shasum -a 256 -c -
+          echo "$SCENE_MANIFEST_SHA  $RUNNER_TEMP/SCENE_VERSION.json" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/v17-scene"
+          unzip -q "$RUNNER_TEMP/V17-scene.zip" -d "$RUNNER_TEMP/v17-scene"
+          cmp "$RUNNER_TEMP/SCENE_VERSION.json" "$RUNNER_TEMP/v17-scene/SCENE_VERSION.json"
+          python3 - "$RUNNER_TEMP/v17-scene" "$SCENE_REVISION" "$SCENE_TAG" <<'PY'
+          import json, pathlib, sys
+          root = pathlib.Path(sys.argv[1])
+          manifest = json.loads((root / "SCENE_VERSION.json").read_text())
+          scene = json.loads((root / "benchmark-civic/scene.json").read_text())
+          assert manifest["repository"] == "glaby91/moteur3d-scene"
+          assert manifest["channel"] == "reflect" and manifest["tag"] == sys.argv[3]
+          assert manifest["scene"] == "benchmark-civic/scene.json"
+          assert manifest["revision"] == scene["revision"] == sys.argv[2]
+          print("Verified bundled scene:", scene["revision"])
+          PY
+      - name: Configure actual engine
+        run: |
+          set -euo pipefail
+          export PATH="$VULKAN_SDK/bin:$PATH"
+          cmake -S v17 -B build-macos -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DCMAKE_OSX_DEPLOYMENT_TARGET=13.0 -DM3D_REQUIRE_VULKAN=ON -DV17_CI_BUILD_NUMBER="$GITHUB_RUN_NUMBER" -DV17_GIT_SHA="$GITHUB_SHA" -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DV17_SCENE_SOURCE_DIR="$RUNNER_TEMP/v17-scene/benchmark-civic" 2>&1 | tee results/configure.log
+      - name: Compile actual engine, tools and original Vulkan shaders
+        run: |
+          set -euo pipefail
+          cmake --build build-macos --parallel 4 --target moteur3d_v17 moteur3d_v17_benchmark moteur3d_v17_campaign moteur3d_v17_gibake v17_vulkan_gpu_smoke v17_vulkan_version_smoke v17_vulkan_mesh_smoke v17_vulkan_dirty_policy_smoke v17_vulkan_mipmap_smoke v17_vulkan_readback_smoke v17_macos_scene_smoke 2>&1 | tee results/build.log
+          file build-macos/moteur3d_v17 build-macos/v16/libmoteur3d_v16_core.dylib | tee results/binaries.txt
+      - name: Actual Vulkan raster and scene tests via MoltenVK
+        run: |
+          set -uo pipefail
+          set +e
+          export VK_DRIVER_FILES="$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json"
+          export DYLD_LIBRARY_PATH="$VULKAN_SDK/lib"
+          export QT_QPA_PLATFORM=offscreen CSE_WARP_VK_MSAA=1
+          root="$PWD"
+          cd build-macos
+          ./v17_vulkan_gpu_smoke "$root/results/vulkan-triangle.png" 2>&1 | tee "$root/results/triangle.log"
+          echo "${PIPESTATUS[0]}" > "$root/results/triangle.exit"
+          ctest --output-on-failure -R '^v17_vulkan_' --no-tests=error 2>&1 | tee "$root/results/ctest.log"
+          echo "${PIPESTATUS[0]}" > "$root/results/ctest.exit"
+          ./v17_macos_scene_smoke benchmark-civic/scene.json "$root/results" 2>&1 | tee "$root/results/scene.log"
+          echo "${PIPESTATUS[0]}" > "$root/results/scene.exit"
+          ./moteur3d_v17 --smoke-walking-collisions benchmark-civic/scene.json 2>&1 | tee "$root/results/navigation.log"
+          echo "${PIPESTATUS[0]}" > "$root/results/navigation.exit"
+          exit 0
+      - name: Archive native experimental binaries and exact scene
+        run: |
+          set -euo pipefail
+          name="CSE-WARP-V${V17_PRODUCT}-macOS-ARM64-MoltenVK-build-$GITHUB_RUN_NUMBER"
+          dst="dist/$name"
+          mkdir -p "$dst"
+          cp build-macos/moteur3d_v17 build-macos/moteur3d_v17_benchmark build-macos/moteur3d_v17_campaign build-macos/moteur3d_v17_gibake build-macos/v17_vulkan_gpu_smoke build-macos/v17_macos_scene_smoke "$dst/"
+          cp build-macos/v16/libmoteur3d_v16_core.dylib "$dst/"
+          cp -R build-macos/vulkan build-macos/audio build-macos/shaders build-macos/benchmark-civic "$dst/"
+          cp build-macos/render_modules.json "$RUNNER_TEMP/SCENE_VERSION.json" "$dst/"
+          mkdir -p "$dst/materials"
+          cp v17/materials/zmaterial8192.json "$dst/materials/"
+          # Initial developer package requires local Qt and LunarG SDK. Do not label this standalone.
+          cat > "$dst/lancer.sh" <<'SH'
+          #!/bin/bash
+          set -e
+          cd "$(dirname "$0")"
+          : "${VULKAN_SDK:?Set VULKAN_SDK to your Vulkan SDK macOS directory}"
+          : "${QT_ROOT_DIR:?Set QT_ROOT_DIR to your Qt 6.8.3 macOS directory}"
+          export DYLD_LIBRARY_PATH="$PWD:$VULKAN_SDK/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
+          export DYLD_FRAMEWORK_PATH="$QT_ROOT_DIR/lib${DYLD_FRAMEWORK_PATH:+:$DYLD_FRAMEWORK_PATH}"
+          export QT_PLUGIN_PATH="$QT_ROOT_DIR/plugins"
+          export VK_DRIVER_FILES="$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json"
+          exec ./moteur3d_v17 "$@"
+          SH
+          chmod +x "$dst/lancer.sh"
+          printf 'Experimental ARM64 developer package. Requires Qt 6.8.3 macOS (Multimedia) and LunarG Vulkan SDK 1.4.363.1. Set QT_ROOT_DIR and VULKAN_SDK, then ./lancer.sh benchmark-civic/scene.json. Not signed/notarized, no native WSI; Qt QImage presentation only.\n' > "$dst/README.txt"
+          otool -L "$dst/moteur3d_v17" "$dst/libmoteur3d_v16_core.dylib" | tee results/otool.txt
+          printf '{"productVersion":"%s","githubActionsRun":"%s","sourceCommit":"%s","platform":"macos-arm64","backend":"Vulkan/MoltenVK","sceneRevision":"%s","standalone":false}\n' "$V17_PRODUCT" "$GITHUB_RUN_ID" "$GITHUB_SHA" "$SCENE_REVISION" > "$dst/BUILD_INFO.json"
+          tar -C dist -czf "$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-macOS-ARM64-experimental
+          path: CSE-WARP-*-macOS-ARM64-MoltenVK-build-*.tar.gz
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: macOS-engine-diagnostics
+          path: results/
+          if-no-files-found: warn

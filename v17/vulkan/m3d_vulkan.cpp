@@ -935,6 +935,18 @@ class VulkanRaster final {
 #else
             if(presentWindow_)throw std::runtime_error("Native Vulkan presentation is Windows-only");
 #endif
+#ifdef __APPLE__
+            uint32_t extensionCount=0;
+            vkcheck(vkEnumerateInstanceExtensionProperties(nullptr,&extensionCount,nullptr),"enumerate instance extensions");
+            std::vector<VkExtensionProperties> extensions(extensionCount);
+            vkcheck(vkEnumerateInstanceExtensionProperties(nullptr,&extensionCount,extensions.data()),"list instance extensions");
+            const char* portability=VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME;
+            for(const auto& extension:extensions)if(std::strcmp(extension.extensionName,portability)==0){
+                i.flags|=VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+                i.enabledExtensionCount=1;i.ppEnabledExtensionNames=&portability;
+                break;
+            }
+#endif
             vkcheck(vkCreateInstance(&i,nullptr,&instance_),"create instance");
         }
 #ifdef _WIN32
@@ -1064,6 +1076,18 @@ class VulkanRaster final {
         d.queueCreateInfoCount=1;d.pQueueCreateInfos=&queue;d.pEnabledFeatures=&enable;
         const char* swapchainExtension=VK_KHR_SWAPCHAIN_EXTENSION_NAME;
         if(displaySurface_){d.enabledExtensionCount=1;d.ppEnabledExtensionNames=&swapchainExtension;}
+#ifdef __APPLE__
+        uint32_t extensionCount=0;
+        vkcheck(vkEnumerateDeviceExtensionProperties(physical_,nullptr,&extensionCount,nullptr),"enumerate device extensions");
+        std::vector<VkExtensionProperties> extensions(extensionCount);
+        vkcheck(vkEnumerateDeviceExtensionProperties(physical_,nullptr,&extensionCount,extensions.data()),"list device extensions");
+        std::vector<const char*> enabledExtensions;
+        if(displaySurface_)enabledExtensions.push_back(swapchainExtension);
+        for(const auto& extension:extensions)
+            if(std::strcmp(extension.extensionName,"VK_KHR_portability_subset")==0)
+                enabledExtensions.push_back("VK_KHR_portability_subset");
+        d.enabledExtensionCount=uint32_t(enabledExtensions.size());d.ppEnabledExtensionNames=enabledExtensions.data();
+#endif
         vkcheck(vkCreateDevice(physical_,&d,nullptr,&device_),"create GPU device");
         if(displaySurface_){
             VkSemaphoreCreateInfo sem{VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
