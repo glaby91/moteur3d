@@ -1,0 +1,110 @@
+name: Android build 10 - simulation only
+run-name: Android build 10 - KVM retry on Ubuntu 22.04
+on:
+  push:
+    branches: ['test/android-vulkan-arm64']
+    paths: ['.github/workflows/retry-android-build10-simulation.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  emulator:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: 1b1dba32c26d99c49358292b8932c8ac7b80d0da
+      - uses: actions/download-artifact@v5
+        with:
+          name: android-x86_64-apk
+          path: apk
+          run-id: 46149707963
+          github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v5
+        with:
+          name: android-linux-reference
+          path: reference
+          run-id: 46149707963
+          github-token: ${{ github.token }}
+      - name: Verify unchanged build 10 APK provenance
+        run: |
+          set -euxo pipefail
+          test "$(git rev-parse HEAD)" = '1b1dba32c26d99c49358292b8932c8ac7b80d0da'
+          test "$(cat apk/SOURCE_SHA.txt)" = '1b1dba32c26d99c49358292b8932c8ac7b80d0da'
+          test -s apk/CSE-WARP-Android-V17.031-x86_64-probe.apk
+          sha256sum apk/*.apk
+      - name: Probe and initialize KVM with diagnostic evidence
+        shell: bash
+        run: |
+          mkdir -p android-evidence
+          exec > >(tee android-evidence/kvm-host.txt) 2>&1
+          set -euxo pipefail
+          uname -a
+          lscpu
+          id
+          lsmod | grep kvm || true
+          sudo modprobe kvm || true
+          if grep -qm1 GenuineIntel /proc/cpuinfo; then
+            sudo modprobe kvm_intel || true
+          elif grep -qm1 AuthenticAMD /proc/cpuinfo; then
+            sudo modprobe kvm_amd || true
+          fi
+          if [ -r /sys/class/misc/kvm/dev ] && [ ! -e /dev/kvm ]; then
+            IFS=: read -r major minor < /sys/class/misc/kvm/dev
+            sudo mknod /dev/kvm c "$major" "$minor"
+          fi
+          sudo udevadm trigger --name-match=kvm || true
+          sudo udevadm settle --timeout=15 || true
+          ls -l /dev/kvm || true
+          sudo dmesg | grep -iE 'kvm|virtualization' | tail -40 || true
+          if [ ! -c /dev/kvm ]; then
+            echo "::error::Runner has no KVM character device; Android QA cannot execute."
+            exit 1
+          fi
+          sudo chmod 0666 /dev/kvm
+          python3 - <<'PY'
+          import os, fcntl
+          fd=os.open("/dev/kvm",os.O_RDWR)
+          try:
+              assert fcntl.ioctl(fd,0xAE00,0)==12, "KVM API version mismatch"
+              vm=fcntl.ioctl(fd,0xAE01,0)
+              os.close(vm)
+              print("PASS KVM: opened device and created a real virtual machine")
+          finally:
+              os.close(fd)
+          PY
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v4.0.3
+        with:
+          packages: 'platform-tools'
+      - name: Install screenshot and comparison dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pil python3-numpy
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          cores: 4
+          ram-size: 4096M
+          disk-size: 12G
+          emulator-options: -no-window -gpu swiftshader -noaudio -no-boot-anim -no-snapshot -feature Vulkan
+          emulator-boot-timeout: 900
+          disable-animations: true
+          script: bash experiments/android-vulkan/qa_emulator.sh
+      - name: Compare with original build 10 reference
+        run: /usr/bin/python3 experiments/android-vulkan/compare_views.py reference android-evidence comparison
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: android-build10-retry-evidence
+          path: |
+            android-evidence/
+            comparison/
+          if-no-files-found: warn
