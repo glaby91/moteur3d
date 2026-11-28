@@ -158,7 +158,7 @@
     },
     {
       "id": "vulkan_resources",
-      "revision": "002",
+      "revision": "003",
       "engines": [
         "v16",
         "v17"
