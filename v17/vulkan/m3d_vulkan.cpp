@@ -2069,6 +2069,14 @@ public:
             if(displaySurface_){
                 createSwapchain(uint32_t(w),uint32_t(h));
                 w=int(swapExtent_.width);h=int(swapExtent_.height);
+#ifdef __ANDROID__
+                // Keep the physical swapchain native; only the offscreen raster targets change.
+                const char* scale=std::getenv("CSE_WARP_ANDROID_RENDER_SCALE");
+                int percent=100;
+                if(scale&&std::strcmp(scale,"75")==0)percent=75;
+                else if(scale&&std::strcmp(scale,"50")==0)percent=50;
+                w=std::max(1,w*percent/100);h=std::max(1,h*percent/100);
+#endif
             }
             const auto swapchainEnd=Clock::now();
             if(width_!=uint32_t(w)||height_!=uint32_t(h))targets(uint32_t(w),uint32_t(h));
@@ -2229,6 +2237,12 @@ public:
                 ++submittedFrames_;
             stats=Stats{};
             stats.gpu=true;stats.gpuDrawCalls=drawCalls;
+#ifdef __ANDROID__
+            stats.androidRenderWidth=uint32_t(w);stats.androidRenderHeight=uint32_t(h);
+            stats.androidSurfaceWidth=acquiredIndex>=0?swapExtent_.width:0;
+            stats.androidSurfaceHeight=acquiredIndex>=0?swapExtent_.height:0;
+            stats.androidMsaa=uint32_t(msaaSamples_);
+#endif
             stats.geometryPreparationEnabled=staticGeometryPrepared_;
             stats.geometrySourceVertices=sourceVertexCount_;stats.geometryUniqueVertices=uniqueVertexCount_;
             stats.geometryIndexCount=indexCount_;stats.geometryVertexBytes=uint64_t(vertexCount_)*sizeof(Vertex);

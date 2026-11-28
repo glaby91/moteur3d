@@ -43,15 +43,55 @@ wait_marker "CSE_ANDROID PASS TRIANGLE" 360
 wait_marker "CSE_ANDROID PASS SCENE" 600
 wait_marker "CSE_ANDROID PASS FIVE_VIEWS" 600
 wait_marker "CSE_ANDROID PASS WSI.*readback 0" 180
+wait_marker "CSE_ANDROID PASS HUD_DRAW 1920 1080" 120
 sleep 8
 adb exec-out screencap -p > android-evidence/screen-native.png
 adb shell input swipe 1150 400 1450 400 800
 wait_marker "CSE_ANDROID PASS TOUCH_CAMERA" 120
 adb exec-out screencap -p > android-evidence/screen-touch.png
 # A sustained left-half drag exercises actual walking, not just camera rotation.
-adb shell input swipe 400 700 400 430 2200
+adb shell input swipe 270 864 270 580 2200
 wait_marker "CSE_ANDROID PASS WALK_MOVE" 120
 adb exec-out screencap -p > android-evidence/screen-walk.png
+# Actual visible hit regions from WarpActivity, normalized to 1920x1080.
+adb shell input tap 1830 910
+wait_marker "CSE_ANDROID PASS JUMP_INPUT" 120
+adb exec-out screencap -p > android-evidence/screen-jump.png
+adb shell input tap 1625 910
+wait_marker "CSE_ANDROID PASS CROUCH_INPUT" 120
+adb exec-out screencap -p > android-evidence/screen-crouch.png
+adb shell input tap 1510 65
+wait_marker "CSE_ANDROID PASS HUD_HIDDEN" 60
+adb exec-out screencap -p > android-evidence/screen-hud-off.png
+adb shell input tap 1510 65
+wait_marker "CSE_ANDROID PASS HUD_SHOWN" 60
+adb shell input tap 1770 65
+wait_marker "CSE_ANDROID PASS MENU_VISIBLE" 60
+adb exec-out screencap -p > android-evidence/screen-menu.png
+adb shell input tap 960 320
+wait_marker "CSE_ANDROID PASS SCALE 75 1440 810 surface 1920 1080 readback 0" 180
+adb shell input tap 960 320
+wait_marker "CSE_ANDROID PASS SCALE 50 960 540 surface 1920 1080 readback 0" 180
+adb exec-out screencap -p > android-evidence/screen-scale50.png
+adb shell input tap 960 320
+wait_marker "CSE_ANDROID PASS SCALE 100 1920 1080 surface 1920 1080 readback 0" 180
+adb shell input tap 960 490
+wait_marker "CSE_ANDROID PASS MSAA requested 2 actual" 180
+adb shell input tap 960 490
+wait_marker "CSE_ANDROID PASS MSAA requested 4 actual" 180
+adb shell input tap 960 490
+wait_marker "CSE_ANDROID PASS MSAA requested 1 actual 1" 180
+adb shell input tap 960 660
+wait_marker "CSE_ANDROID PASS CAMERA_MENU" 120
+adb shell input tap 960 815
+wait_marker "CSE_ANDROID PASS SENSITIVITY 2" 60
+adb shell input tap 960 970
+wait_marker "CSE_ANDROID PASS MENU_CLOSED" 60
+adb shell input keyevent KEYCODE_HOME
+wait_marker "CSE_ANDROID PAUSED" 90
+adb shell monkey -p "$pkg" -c android.intent.category.LAUNCHER 1
+wait_marker "CSE_ANDROID PASS RESUME" 180
+adb exec-out screencap -p > android-evidence/screen-resume.png
 for name in triangle.png scene.png view-0.png view-1.png view-2.png view-3.png view-4.png views.json; do
   p="$(adb shell run-as "$pkg" find files -name "$name" | tr -d '\r' | head -n1)"
   test -n "$p"
@@ -60,7 +100,7 @@ done
 python3 - <<'PY'
 import pathlib, struct
 root = pathlib.Path("android-evidence")
-for name, expected in [("triangle.png", (320,180)), ("scene.png", (640,360)), ("screen-native.png", (1920,1080)), ("screen-touch.png", (1920,1080)), ("screen-walk.png", (1920,1080)), *[(f"view-{i}.png",(640,360)) for i in range(5)]]:
+for name, expected in [("triangle.png", (320,180)), ("scene.png", (640,360)), ("screen-native.png", (1920,1080)), ("screen-touch.png", (1920,1080)), ("screen-walk.png", (1920,1080)), *[(f"screen-{n}.png",(1920,1080)) for n in ("crouch","jump","hud-off","menu","scale50","resume")], *[(f"view-{i}.png",(640,360)) for i in range(5)]]:
     data = (root/name).read_bytes()
     assert data[:8] == b"\x89PNG\r\n\x1a\n" and data[12:16] == b"IHDR", name
     dims = struct.unpack(">II", data[16:24])
@@ -68,4 +108,20 @@ for name, expected in [("triangle.png", (320,180)), ("scene.png", (640,360)), ("
     assert data[-8:-4] == b"IEND", name
     print(name, dims, len(data), "bytes")
 PY
-echo "PASS emulator software Vulkan: triangle, five views, landscape, shared collision regression, native surface and touch walking (not tablet performance)" | tee android-evidence/result.txt
+/usr/bin/python3 - <<'PY'
+from PIL import Image
+import pathlib
+p=pathlib.Path("android-evidence")
+def accent_count(name, box):
+    image=Image.open(p/name).convert("RGB").crop(box)
+    return sum(abs(r-103)<=3 and abs(g-222)<=3 and abs(b-207)<=3 for r,g,b in image.getdata())
+# The opaque turquoise title and menu border must actually be visible in
+# system-composited screenshots, not merely announced by the Java view.
+visible=accent_count("screen-native.png",(30,20,1250,135))
+hidden=accent_count("screen-hud-off.png",(30,20,1250,135))
+menu=accent_count("screen-menu.png",(545,155,1375,1060))
+print("HUD accent pixels:",visible,"hidden:",hidden,"menu:",menu)
+assert visible>100 and visible>hidden+100, "HUD not visibly composited or hidden"
+assert menu>200, "menu not visibly composited"
+PY
+echo "PASS emulator software Vulkan: five views, landscape, native surface, walk, HUD/menu, crouch/jump input, render scale, MSAA selection, camera and resume (not tablet performance)" | tee android-evidence/result.txt

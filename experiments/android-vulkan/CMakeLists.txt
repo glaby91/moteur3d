@@ -27,7 +27,7 @@ if(ANDROID_ABI STREQUAL "x86_64")
 endif()
 set_target_properties(cse_android_probe PROPERTIES
     QT_ANDROID_PACKAGE_NAME "org.csewarp.androidprobe"
-    QT_ANDROID_APP_NAME "CSE WARP Android Port Probe"
+    QT_ANDROID_APP_NAME "CSE WARP"
     QT_ANDROID_VERSION_NAME "17.031"
     QT_ANDROID_VERSION_CODE 1
     QT_ANDROID_SDK_BUILD_TOOLS_REVISION "36.0.0"

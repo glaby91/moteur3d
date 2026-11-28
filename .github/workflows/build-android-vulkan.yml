@@ -72,7 +72,14 @@ jobs:
           data=template.read_text()
           assert data.count('android:screenOrientation="unspecified"')==1
           out=pathlib.Path(os.environ["RUNNER_TEMP"])/"android-package/AndroidManifest.xml"
-          out.write_text(data.replace('android:screenOrientation="unspecified"','android:screenOrientation="sensorLandscape"'))
+          data=data.replace('android:screenOrientation="unspecified"','android:screenOrientation="sensorLandscape"')
+          assert data.count('org.qtproject.qt.android.bindings.QtActivity')==1
+          data=data.replace('org.qtproject.qt.android.bindings.QtActivity','org.csewarp.androidprobe.WarpActivity')
+          out.write_text(data)
+          import shutil
+          java=out.parent/"src/org/csewarp/androidprobe/WarpActivity.java"
+          java.parent.mkdir(parents=True,exist_ok=True)
+          shutil.copy2("experiments/android-vulkan/java/WarpActivity.java",java)
           PY
       - name: Configure Android real engine
         run: |
@@ -119,6 +126,7 @@ jobs:
           grep -q "sdkVersion:'36'" package/badging.txt
           grep -q "targetSdkVersion:'36'" package/badging.txt
           grep -q "application-debuggable" package/badging.txt
+          grep -q "launchable-activity: name='org.csewarp.androidprobe.WarpActivity'" package/badging.txt
           "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify "$apk"
           printf '%s\n' "$GITHUB_SHA" > package/SOURCE_SHA.txt
       - uses: actions/upload-artifact@v6
