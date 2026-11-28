@@ -40,6 +40,12 @@ bool hitTriangle(Triangle t,Query q,float high,out float depth,out float u,out f
     float3 z=cross(a,e);v=dot(q.d,z)/det;if(v<0||u+v>1)return false;
     depth=dot(f,z)/det;return isfinite(depth)&&depth>q.low&&depth<=high;
 }
+// Four-way sorting network: fixed five comparisons, no nested dynamic loop.
+// Push farthest first so the nearest node is popped first.
+void compareFarFirst(inout uint4 child,inout float4 dist,uint a,uint b){
+    if(dist[a]<dist[b]){float t=dist[a];dist[a]=dist[b];dist[b]=t;
+        uint k=child[a];child[a]=child[b];child[b]=k;}
+}
 [numthreads(64,1,1)]
 void CSTrace(uint3 tid:SV_DispatchThreadID){
     uint i=tid.x;if(i>=queryCount)return;
@@ -63,17 +69,18 @@ void CSTrace(uint3 tid:SV_DispatchThreadID){
         }else{
             if(node.children<2||node.children>4){h.status=2;break;}
             uint4 kids=uint4(node.c0,node.c1,node.c2,node.c3);
-            uint4 child=0;float4 dist=0;uint count=0;
-            [unroll]for(uint j=0;j<4;++j)if(j<node.children){
-                uint k=kids[j];if(k>=nodeCount||k==id){h.status=2;break;}
-                float t;if(box(nodes[k],q.o,q.d,q.low,h.depth,t)){
-                    uint at=count;
-                    [loop]while(at>0&&dist[at-1]<t){child[at]=child[at-1];dist[at]=dist[at-1];--at;}
-                    child[at]=k;dist[at]=t;++count;
+            uint4 child=0;float4 dist=-3.402823466e38;uint count=0;
+            [loop]for(uint childIndex=0;childIndex<node.children;++childIndex){
+                uint k=kids[childIndex];if(k>=nodeCount||k==id){h.status=2;break;}
+                float childNear;if(box(nodes[k],q.o,q.d,q.low,h.depth,childNear)){
+                    child[count]=k;dist[count]=childNear;++count;
                 }
             }
             if(h.status==2||top+count>128){h.status=2;break;}
-            [loop]for(uint j=0;j<count;++j){stack[top]=child[j];stackNear[top++]=dist[j];}
+            compareFarFirst(child,dist,0,1);compareFarFirst(child,dist,2,3);
+            compareFarFirst(child,dist,0,2);compareFarFirst(child,dist,1,3);
+            compareFarFirst(child,dist,1,2);
+            [loop]for(uint pushIndex=0;pushIndex<count;++pushIndex){stack[top]=child[pushIndex];stackNear[top++]=dist[pushIndex];}
         }
     }
     hits[i]=h;
