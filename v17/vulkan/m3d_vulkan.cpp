@@ -72,6 +72,18 @@ struct alignas(16) Uniforms {
 };
 static_assert(sizeof(Uniforms)%16==0,"std140 uniform size must be aligned");
 struct Chunk {uint32_t first=0,count=0;V lo{},hi{};};
+struct DrawRange {uint32_t first=0,count=0;};
+template<typename Visible>
+void collectVisibleRanges(const std::vector<Chunk>& chunks,std::vector<DrawRange>& ranges,Visible visible){
+    ranges.clear();
+    for(const auto& chunk:chunks){
+        if(!chunk.count||!visible(chunk))continue;
+        if(!ranges.empty() && uint64_t(ranges.back().first)+ranges.back().count==chunk.first &&
+           uint64_t(ranges.back().count)+chunk.count<=UINT32_MAX)
+            ranges.back().count+=chunk.count;
+        else ranges.push_back({chunk.first,chunk.count});
+    }
+}
 std::vector<uint32_t> spirv(const std::filesystem::path& file){
     std::ifstream in(file,std::ios::binary|std::ios::ate);
     if(!in)throw std::runtime_error("Missing Vulkan SPIR-V shader: "+file.u8string());
@@ -184,6 +196,8 @@ class VulkanRaster final {
     std::vector<vkmesh::TransparentTriangle> glass_;
     std::vector<size_t> glassOrder_; // reused across frames; preserves original sort order
     std::vector<Chunk> chunks_,boxChunks_,foliageChunks_;
+    std::vector<DrawRange> visibleMesh_,visibleBoxes_,visibleFoliage_;
+    bool mergeVisibleDraws_=false;
     std::vector<uint32_t> stagingColors_;
     std::array<int32_t,kMaxMaterials> protectedLayer_{};
     uint32_t width_=0,height_=0;
@@ -1014,6 +1028,11 @@ class VulkanRaster final {
         adapter_=props_.deviceName;
         // Optional color-format experiment: BGRA8 matches Qt ARGB32 byte order
         // on little-endian Windows. Leave RGBA8 as the default reference.
+#ifdef __APPLE__
+        const char* mergeDraws=std::getenv("CSE_WARP_MAC_MERGE_DRAWS");
+        mergeVisibleDraws_=mergeDraws&&std::strcmp(mergeDraws,"1")==0;
+        std::clog<<"[CSE WARP Vulkan] macOS exact draw merging="<<mergeVisibleDraws_<<"\n";
+#endif
         const char* requestedBgra=std::getenv("CSE_WARP_VK_BGRA_READBACK");
         if(requestedBgra && std::strcmp(requestedBgra,"1")==0) {
             VkFormatProperties format{};
@@ -2062,6 +2081,13 @@ public:
             VkViewport viewport{0.f,0.f,float(w),float(h),0.f,1.f};
             VkRect2D scissor{{0,0},{uint32_t(w),uint32_t(h)}};
             const auto recordingStart=Clock::now();
+            // Same culling, same primitive order; share visibility across passes.
+            if(mergeVisibleDraws_){
+                const auto test=[&](const Chunk& c){return visible(c,cam);};
+                collectVisibleRanges(chunks_,visibleMesh_,test);
+                collectVisibleRanges(boxChunks_,visibleBoxes_,test);
+                collectVisibleRanges(foliageChunks_,visibleFoliage_,test);
+            }
             begin();
             vkCmdResetQueryPool(cmd_,queries_,0,3);
             vkCmdWriteTimestamp(cmd_,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,queries_,0);
@@ -2087,31 +2113,31 @@ public:
                 VkDeviceSize off=0;VkBuffer vb=vertices_.handle;
                 vkCmdBindVertexBuffers(cmd_,0,1,&vb,&off);
                 if(staticGeometryPrepared_)vkCmdBindIndexBuffer(cmd_,indices_.handle,0,VK_INDEX_TYPE_UINT32);
-                for(const Chunk& c:chunks_)if(visible(c,cam)){
-                    if(staticGeometryPrepared_)vkCmdDrawIndexed(cmd_,c.count,1,c.first,0,0);
-                    else vkCmdDraw(cmd_,c.count,1,c.first,0);
-                    drawCalls++;
-                }
+                const auto draw=[&](uint32_t first,uint32_t count){
+                    if(staticGeometryPrepared_)vkCmdDrawIndexed(cmd_,count,1,first,0,0);
+                    else vkCmdDraw(cmd_,count,1,first,0);
+                    ++drawCalls;
+                };
+                if(mergeVisibleDraws_){for(const auto& range:visibleMesh_)draw(range.first,range.count);}
+                else for(const Chunk& c:chunks_)if(visible(c,cam))draw(c.first,c.count);
             }
             if(boxCount_){
                 vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,depthOnly?depthBox_:boxPipeline_);
                 VkBuffer boxVBs[2]={boxTemplate_.handle,boxInstances_.handle};
                 VkDeviceSize boxOffsets[2]{0,0};
                 vkCmdBindVertexBuffers(cmd_,0,2,boxVBs,boxOffsets);
-                for(const Chunk& chunk:boxChunks_)if(visible(chunk,cam)){
-                    vkCmdDraw(cmd_,36,chunk.count,0,chunk.first);
-                    ++drawCalls;
-                }
+                const auto draw=[&](uint32_t first,uint32_t count){vkCmdDraw(cmd_,36,count,0,first);++drawCalls;};
+                if(mergeVisibleDraws_){for(const auto& range:visibleBoxes_)draw(range.first,range.count);}
+                else for(const Chunk& chunk:boxChunks_)if(visible(chunk,cam))draw(chunk.first,chunk.count);
             }
             if(foliageCount_){
                 vkCmdBindPipeline(cmd_,VK_PIPELINE_BIND_POINT_GRAPHICS,depthOnly?depthFoliage_:foliagePipeline_);
                 VkBuffer buffers[2]={foliageTemplate_.handle,foliageInstances_.handle};
                 VkDeviceSize offsets[2]{0,0};
                 vkCmdBindVertexBuffers(cmd_,0,2,buffers,offsets);
-                for(const Chunk& chunk:foliageChunks_)if(visible(chunk,cam)){
-                    vkCmdDraw(cmd_,foliageTemplateCount_,chunk.count,0,chunk.first);
-                    ++drawCalls;
-                }
+                const auto draw=[&](uint32_t first,uint32_t count){vkCmdDraw(cmd_,foliageTemplateCount_,count,0,first);++drawCalls;};
+                if(mergeVisibleDraws_){for(const auto& range:visibleFoliage_)draw(range.first,range.count);}
+                else for(const Chunk& chunk:foliageChunks_)if(visible(chunk,cam))draw(chunk.first,chunk.count);
             }
             };
             if(depthPrepassEnabled_)drawOpaque(true);

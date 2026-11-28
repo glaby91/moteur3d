@@ -106,7 +106,7 @@ jobs:
       - name: Compile actual engine, tools and original Vulkan shaders
         run: |
           set -euo pipefail
-          cmake --build build-macos --parallel 4 --target moteur3d_v17 moteur3d_v17_benchmark moteur3d_v17_campaign moteur3d_v17_gibake v17_vulkan_gpu_smoke v17_vulkan_version_smoke v17_vulkan_mesh_smoke v17_vulkan_dirty_policy_smoke v17_vulkan_mipmap_smoke v17_vulkan_readback_smoke v17_macos_scene_smoke 2>&1 | tee results/build.log
+          cmake --build build-macos --parallel 4 --target moteur3d_v17 moteur3d_v17_benchmark moteur3d_v17_campaign moteur3d_v17_gibake v17_vulkan_gpu_smoke v17_vulkan_version_smoke v17_vulkan_mesh_smoke v17_vulkan_dirty_policy_smoke v17_vulkan_mipmap_smoke v17_vulkan_readback_smoke v17_macos_scene_smoke v17_macos_opt_bench 2>&1 | tee results/build.log
           file build-macos/moteur3d_v17 build-macos/v16/libmoteur3d_v16_core.dylib | tee results/binaries.txt
       - name: Actual Vulkan raster and scene tests via MoltenVK (both profiles)
         run: |
@@ -154,6 +154,67 @@ jobs:
           run("navigation",["./moteur3d_v17","--smoke-walking-collisions","benchmark-civic/scene.json"],env,180)
           PY
           cat "$root/results/status.json" >> "$GITHUB_STEP_SUMMARY"
+      - name: macOS exact draw merging and BGRA A/B benchmark
+        run: |
+          set -euo pipefail
+          export VK_DRIVER_FILES="$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json"
+          export DYLD_LIBRARY_PATH="$VULKAN_SDK/lib"
+          export QT_QPA_PLATFORM=offscreen CSE_WARP_VK_MSAA=1 CSE_WARP_VK_FAST_FRAGMENT=1
+          export M3D_V17_ANIMATE_CLOUDS=0
+          root="$PWD"
+          cd build-macos
+          python3 - "$root/results/optimization" <<'PY'
+          import os, json, pathlib, subprocess, statistics, math, sys, signal
+          out=pathlib.Path(sys.argv[1]);out.mkdir(parents=True,exist_ok=True)
+          profiles={'reference':('0','0'),'merge':('1','0'),'bgra':('0','1'),'combined':('1','1')}
+          cases=[]
+          for repetition in range(2):
+              for width,height in [(640,360),(1920,1080)]:
+                  for name in (list(profiles) if repetition==0 else list(reversed(profiles))):
+                      dest=out/f'{width}x{height}'/str(repetition)/name
+                      dest.mkdir(parents=True,exist_ok=True)
+                      env=os.environ.copy()
+                      env['CSE_WARP_MAC_MERGE_DRAWS'],env['CSE_WARP_VK_BGRA_READBACK']=profiles[name]
+                      env['CSE_WARP_VK_KHRONOS_CSV']=str(dest/'telemetry.csv')
+                      print('BEGIN',width,height,repetition,name,flush=True)
+                      with (dest/'run.log').open('w') as log:
+                          p=subprocess.Popen(['./v17_macos_opt_bench','benchmark-civic/scene.json',str(dest),str(width),str(height)],env=env,stdout=log,stderr=subprocess.STDOUT,start_new_session=True)
+                          try: code=p.wait(timeout=180)
+                          except subprocess.TimeoutExpired:
+                              try: os.killpg(p.pid,signal.SIGKILL)
+                              except ProcessLookupError: pass
+                              p.wait();code=124
+                      print((dest/'run.log').read_text(errors='replace')[-16000:],flush=True)
+                      cases.append({'resolution':f'{width}x{height}','repetition':repetition,'profile':name,'exit':code})
+                      (out/'cases.json').write_text(json.dumps(cases,indent=2))
+          report=[]
+          for width,height in [(640,360),(1920,1080)]:
+              res=f'{width}x{height}'
+              for name in profiles:
+                  for phase in ('static','moving'):
+                      frames=[];same=0;compared=0
+                      for rep in range(2):
+                          a=out/res/str(rep)/name/'frames.json';b=out/res/str(rep)/'reference'/'frames.json'
+                          if not a.exists() or not b.exists(): continue
+                          ref={r['frame']:r for r in json.loads(b.read_text()) if r['phase']==phase}
+                          for r in json.loads(a.read_text()):
+                              if r['phase']!=phase:continue
+                              frames.append(r)
+                              if r['frame'] in ref:
+                                  compared+=1;same+=r['sha256']==ref[r['frame']]['sha256']
+                      if not frames:continue
+                      row={'resolution':res,'profile':name,'phase':phase,'frames':len(frames),'identical':same,'compared':compared}
+                      for field in ('wall_ms','submit_ms','fence_ms','readback_cpu_ms','draws'):
+                          values=sorted(r[field] for r in frames)
+                          row[field+'_median']=statistics.median(values)
+                          row[field+'_p95']=values[math.ceil(.95*len(values))-1]
+                      report.append(row)
+          (out/'summary.json').write_text(json.dumps(report,indent=2))
+          print(json.dumps(report,indent=2),flush=True)
+          assert all(r['exit']==0 for r in cases),'Benchmark process failed; results are diagnostic'
+          assert len(report)==16,'Incomplete benchmark'
+          PY
+          cat "$root/results/optimization/summary.json" >> "$GITHUB_STEP_SUMMARY"
       - name: Archive native experimental binaries and exact scene
         run: |
           set -euo pipefail

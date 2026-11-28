@@ -1,0 +1,3 @@
+# macOS Vulkan optimisation 001 — experimental A/B
+
+Reference: Build 4. Apple-only opt-in CSE_WARP_MAC_MERGE_DRAWS=1 merges adjacent visible ranges independently for mesh, box and foliage, sharing visibility across depth and color passes without changing culling or primitive order. Existing BGRA readback option tested separately and together. No shader, quality or default change before evidence. 4 profiles, 2 resolutions (640x360 and 1920x1080), 2 repetitions, 3 warmups + 12 static and 12 moving frames each. Exact ARGB32 hashes, PNG, median and P95 wall, submit, fence, readback, draw count and CSV. Virtualized GPU, not physical Mac performance. No native WSI change.
