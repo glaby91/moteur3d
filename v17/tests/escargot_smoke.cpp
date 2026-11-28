@@ -101,5 +101,22 @@ int main(){
     auto changedOpt=keyOpt;++changedOpt.rayBudget;
     if(keyA==e::packetKey(stableScene,keyCam,1280,720,changedOpt))return 38;
     stableScene.markGpuGeometryChanged();if(keyA==e::packetKey(stableScene,keyCam,1280,720,keyOpt))return 39;
+    // Two distinct transparent interfaces only one representable float apart.
+    // Skipping the previous triangle must NOT erase the next interface.
+    m3d::Scene thin;thin.mat.resize(1);
+    auto t0=obj,t1=obj;
+    const float adjacent=std::nextafter(2.f,std::numeric_limits<float>::infinity());
+    t1.a.z=t1.b.z=t1.c.z=adjacent;
+    thin.obj={t0,t1};thin.order={1,0};
+    m3d::LumaTraceBvh4 tree;tree.primitiveCount=2;auto leaf=n;leaf.maxZ=adjacent;leaf.primitiveCount=2;tree.nodes.push_back(leaf);
+    std::vector<uint32_t> thinOwners{1,2};
+    e::Traversal walk(thin,tree,thinOwners);m3d::Ray testRay{{0,0,0},{0,0,1}};e::HitSample first,next;
+    if(!walk.valid()||!walk.closest(testRay,.001f,first)||first.primitive!=0||first.depth!=2.f)return 40;
+    if(!walk.closest(testRay,first.depth,next,first.primitive)||next.primitive!=1||next.depth!=adjacent)return 41;
+    if(walk.closest(testRay,next.depth,first,next.primitive))return 42;
+    // Exact depth tie remains lowest original ID even if leaf order is reversed.
+    thin.obj[1]=t0;e::Traversal tied(thin,tree,thinOwners);
+    if(!tied.closest(testRay,.001f,first)||first.primitive!=0)return 43;
+    m3d::EscargotRayQuery defaultQuery{};if(defaultQuery.previousPrimitive!=0xffffffffu)return 44;
     return 0;
 }

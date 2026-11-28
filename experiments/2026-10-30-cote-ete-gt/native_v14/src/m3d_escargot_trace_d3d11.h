@@ -23,20 +23,19 @@ StructuredBuffer<Query> queries:register(t3);
 RWStructuredBuffer<Hit> hits:register(u0);
 cbuffer Params:register(b0){uint queryCount,nodeCount,triangleCount,orderCount;}
 float cpuDivide(float a,float b);
-bool slab(float o,float d,float lo,float hi,inout float low,inout float high){
+bool slab(float o,float d,float inverse,float lo,float hi,inout float low,inout float high){
     if(abs(d)<1e-12)return o>=lo&&o<=hi;
-    precise float inverse=cpuDivide(1.0,d);
     precise float x=(lo-o)*inverse;
     precise float y=(hi-o)*inverse;
     float l=min(x,y),h=max(x,y);
     l-=4.76837158203125e-7*max(1.0,abs(l));h+=4.76837158203125e-7*max(1.0,abs(h));
     low=max(low,l);high=min(high,h);return high>=low;
 }
-bool box(Node n,float3 o,float3 d,float low,float high,out float nearT){
+bool box(Node n,float3 o,float3 d,float3 inverse,float low,float high,out float nearT){
     nearT=low;
-    if(!slab(o.x,d.x,n.lo.x,n.hi.x,nearT,high))return false;
-    if(!slab(o.y,d.y,n.lo.y,n.hi.y,nearT,high))return false;
-    return slab(o.z,d.z,n.lo.z,n.hi.z,nearT,high);
+    if(!slab(o.x,d.x,inverse.x,n.lo.x,n.hi.x,nearT,high))return false;
+    if(!slab(o.y,d.y,inverse.y,n.lo.y,n.hi.y,nearT,high))return false;
+    return slab(o.z,d.z,inverse.z,n.lo.z,n.hi.z,nearT,high);
 }
 // Match CPU m3d::dot and m3d::cross, including evaluation order.
 float cpuDot(float3 a,float3 b){
@@ -119,19 +118,20 @@ bool hitTriangle(Triangle t,Query q,float high,out float depth,out float u,out f
 void compareFarFirst(inout uint a,inout float da,inout uint b,inout float db){
     if(da<db){float t=da;da=db;db=t;uint k=a;a=b;b=k;}
 }
-bool childDistance(uint k,uint parent,Query q,float high,out float distance){
+bool childDistance(uint k,uint parent,Query q,float3 inverse,float high,out float distance){
     distance=-3.402823466e38;
     if(k>=nodeCount||k==parent)return false;
     float t;
-    if(box(nodes[k],q.o,q.d,q.low,high,t))distance=t;
+    if(box(nodes[k],q.o,q.d,inverse,q.low,high,t))distance=t;
     return true;
 }
 [numthreads(64,1,1)]
 void CSTrace(uint3 tid:SV_DispatchThreadID){
     uint i=tid.x;if(i>=queryCount)return;
     Query q=queries[i];Hit h;h.primitive=0xffffffffu;h.status=0;h.depth=3.402823466e38;h.u=0;h.v=0;h.pad=0;
+    float3 inverse=float3(abs(q.d.x)<1e-12?0.0:cpuDivide(1.0,q.d.x),abs(q.d.y)<1e-12?0.0:cpuDivide(1.0,q.d.y),abs(q.d.z)<1e-12?0.0:cpuDivide(1.0,q.d.z));
     uint stack[128];float stackNear[128];uint top=0,visited=0;float n;
-    if(nodeCount>0&&box(nodes[0],q.o,q.d,q.low,h.depth,n)){stack[top]=0;stackNear[top++]=n;}
+    if(nodeCount>0&&box(nodes[0],q.o,q.d,inverse,q.low,h.depth,n)){stack[top]=0;stackNear[top++]=n;}
     while(top>0){
         --top;uint id=stack[top];float nearT=stackNear[top];
         if(id>=nodeCount||++visited>nodeCount){h.status=2;break;}
@@ -151,11 +151,11 @@ void CSTrace(uint3 tid:SV_DispatchThreadID){
             if(node.children<2||node.children>4){h.status=2;break;}
             uint k0=node.c0,k1=node.c1,k2=node.c2,k3=node.c3;
             float d0=-3.402823466e38,d1=d0,d2=d0,d3=d0;
-            bool ok0=childDistance(k0,id,q,h.depth,d0);
-            bool ok1=childDistance(k1,id,q,h.depth,d1);
+            bool ok0=childDistance(k0,id,q,inverse,h.depth,d0);
+            bool ok1=childDistance(k1,id,q,inverse,h.depth,d1);
             if(!ok0||!ok1){h.status=2;break;}
-            if(node.children>=3){if(!childDistance(k2,id,q,h.depth,d2)){h.status=2;break;}}
-            if(node.children==4){if(!childDistance(k3,id,q,h.depth,d3)){h.status=2;break;}}
+            if(node.children>=3){if(!childDistance(k2,id,q,inverse,h.depth,d2)){h.status=2;break;}}
+            if(node.children==4){if(!childDistance(k3,id,q,inverse,h.depth,d3)){h.status=2;break;}}
             compareFarFirst(k0,d0,k1,d1);compareFarFirst(k2,d2,k3,d3);
             compareFarFirst(k0,d0,k2,d2);compareFarFirst(k1,d1,k3,d3);
             compareFarFirst(k1,d1,k2,d2);
