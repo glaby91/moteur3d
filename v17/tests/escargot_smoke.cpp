@@ -152,5 +152,27 @@ int main(){
     if(!e::decodeWaveHit(waveScene,waveOwners,q,raw,decoded)||decoded.object!=1||decoded.depth!=1||decoded.p.z!=1)return 50;
     q.previousPrimitive=0;if(e::decodeWaveHit(waveScene,waveOwners,q,raw,decoded))return 51;
     raw.status=2;if(e::decodeWaveHit(waveScene,waveOwners,q,raw,decoded))return 52;
+    // Synthetic transcript of the known four-hit reflection, one final
+    // readback. Reconstruct without tracing new rays; reject corrupted query.
+    auto runResident=[&](bool corrupt,e::Result& result,e::ResidentStats& rs){
+        e::Options opts;opts.rayBudget=8;opts.captureQueries=true;
+        result.surfaces.resize(1);auto& surface=result.surfaces[0];surface.candidate.object=2;surface.candidate.material=1;surface.candidate.bounds={0,0,1,1};surface.candidate.budget=8;
+        unsigned calls=0;
+        auto transcript=[&](const std::vector<m3d::EscargotPathQuery>& paths,std::vector<m3d::EscargotPathEvent>& events,m3d::EscargotPathTiming&,std::string&){
+            ++calls;if(paths.size()!=1||paths[0].offset!=0||paths[0].quota!=8||!e::samePathQuery(paths[0].initial,records[0].query))return false;
+            events.resize(8);
+            for(size_t i=0;i<records.size();++i){auto& ev=events[i];ev.query=records[i].query;ev.hit.primitive=records[i].primitive;ev.hit.status=1;ev.hit.depth=records[i].depth;ev.hit.u=.25f;ev.hit.v=.5f;}
+            events[0].hit.pad[0]=4;events[0].hit.pad[1]=0;
+            if(corrupt)events[2].query.low+=.01f;
+            return true;
+        };
+        const bool ok=e::sampleResidentPaths(result.surfaces,waveScene,waveOwners,waveCam,1,1,opts,result,rs,transcript);
+        return calls==1&&ok;
+    };
+    e::Result residentResult;e::ResidentStats residentStats;
+    if(!runResident(false,residentResult,residentStats)||residentResult.rays!=4||residentResult.completePaths!=1||residentStats.paths!=1||residentStats.eventBytes!=8*sizeof(m3d::EscargotPathEvent))return 53;
+    if(residentResult.surfaces[0].samples[0].values.size()!=2)return 54;
+    e::Result rejected;e::ResidentStats rejectedStats;
+    if(runResident(true,rejected,rejectedStats)||rejected.error.empty())return 55;
     return 0;
 }
