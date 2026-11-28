@@ -2,6 +2,11 @@
 #include "m3d_engine.h"
 #include "src/m3d_scene_v16.h"
 #include "src/m3d_v16_bridge.h"
+#include "src/m3d_walk_controller.h"
+#include "reference_views.h"
+#include "../../v17/exploration_motion.h"
+#include <QElapsedTimer>
+#include <QEventPoint>
 #include <QGuiApplication>
 #include <QWindow>
 #include <QTimer>
@@ -25,6 +30,9 @@
 #endif
 
 using namespace m3d;
+#ifdef CSE_ANDROID_EMULATOR_TEST
+int cseAndroidWalkRegression();
+#endif
 static void require(bool ok,const char* message){if(!ok)throw std::runtime_error(message);}
 static QString extractAssets(){
     const QString root=QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
@@ -83,7 +91,41 @@ class PortWindow final:public QWindow{
     ShadowMap shadow_;
     Camera camera_;
     bool ready_=false,reported_=false,scheduled_=false,touchPending_=false,failed_=false;
+    walk::State walker_{};
+    QElapsedTimer tick_;
+    QTimer motionTimer_;
+    QPointF moveAnchor_,moveDelta_;
+    int moveId_=-1,lookId_=-1;
+    bool walking_=false,movePending_=false,jumpPending_=false,crouchPending_=false;
     QPointF last_;
+    void beginWalking(){
+        if(walking_)return;
+        walk::spawn(scene_,camera_.eye,walker_);
+        camera_.eye=walk::eye(walker_);walking_=true;
+    }
+    void stopInput(){moveId_=lookId_=-1;moveDelta_=QPointF{};}
+    void tickMotion(){
+        const float dt=std::min(.1f,float(tick_.restart())*.001f);
+        if(!isExposed()||failed_||!walking_||dt<=0.f)return;
+        if(moveId_<0&&walker_.grounded)return;
+        V motion{};
+        if(moveId_>=0){
+            const float range=std::max(30.f,float(height())*.14f);
+            float x=clampf(float(moveDelta_.x())/range,-1.f,1.f);
+            float y=clampf(float(-moveDelta_.y())/range,-1.f,1.f);
+            const float mag=std::sqrt(x*x+y*y);if(mag>1.f){x/=mag;y/=mag;}
+            V forward=norm(V{camera_.f.x,0,camera_.f.z});
+            V right=norm(cross(forward,V{0,1,0}));
+            motion=(forward*y+right*x)*(cse::exploration::speedMetersPerSecond(false)*dt);
+        }
+        V old=walker_.feet;
+        walk::advance(scene_,walker_,motion,dt);
+        camera_.eye=walk::eye(walker_);
+        if(length(walker_.feet-old)>.0001f){
+            if(moveId_>=0)movePending_=true;
+            schedule();
+        }
+    }
     void schedule(){
         if(!ready_||failed_||scheduled_||!isExposed())return;
         scheduled_=true;
@@ -103,12 +145,15 @@ class PortWindow final:public QWindow{
             require(st.gpu&&st.gpuDrawCalls>0&&st.readbackBufferCount==0,"native Vulkan frame missing or CPU readback");
             if(!reported_){reported_=true;qInfo().noquote()<<"CSE_ANDROID PASS WSI"<<w<<h<<"ms"<<st.ms<<"readback"<<st.readbackBufferCount;}
             if(touchPending_){touchPending_=false;qInfo().noquote()<<"CSE_ANDROID PASS TOUCH_CAMERA";}
+            if(movePending_){movePending_=false;qInfo().noquote()<<"CSE_ANDROID PASS WALK_MOVE";}
+            if(jumpPending_){jumpPending_=false;qInfo().noquote()<<"CSE_ANDROID PASS JUMP_INPUT";}
+            if(crouchPending_){crouchPending_=false;qInfo().noquote()<<"CSE_ANDROID PASS CROUCH_INPUT";}
         }catch(const std::exception& ex){
             failed_=true;releaseVulkanDirectForCurrentThread();qCritical().noquote()<<"CSE_ANDROID FAIL WSI"<<ex.what();
         }
     }
 protected:
-    void exposeEvent(QExposeEvent*) override{if(!isExposed())releaseVulkanDirectForCurrentThread();else schedule();}
+    void exposeEvent(QExposeEvent*) override{if(!isExposed()){stopInput();releaseVulkanDirectForCurrentThread();}else schedule();}
     void resizeEvent(QResizeEvent*) override{schedule();}
     bool event(QEvent* e) override{
         if(e->type()==QEvent::PlatformSurface){
@@ -116,20 +161,42 @@ protected:
             if(p->surfaceEventType()==QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed)
                 releaseVulkanDirectForCurrentThread();
         }
+        if(e->type()==QEvent::TouchCancel){stopInput();e->accept();return true;}
         if(e->type()==QEvent::TouchBegin||e->type()==QEvent::TouchUpdate||e->type()==QEvent::TouchEnd){
             auto* t=static_cast<QTouchEvent*>(e);
-            if(!t->points().isEmpty()){
-                const auto pos=t->points().first().position();
-                if(e->type()==QEvent::TouchUpdate&&ready_){
-                    auto delta=pos-last_;
-                    if(std::abs(delta.x())+std::abs(delta.y())>1){
-                        camera_.f=norm(camera_.f+camera_.r*float(delta.x()*.002)+camera_.u*float(-delta.y()*.002));
-                        camera_.r=norm(cross(camera_.f,V{0,1,0}));
-                        camera_.u=norm(cross(camera_.r,camera_.f));
-                        touchPending_=true;schedule();
+            for(const auto& point:t->points()){
+                const auto pos=point.position();const int id=point.id();
+                if(point.state()==QEventPoint::State::Pressed){
+                    if(pos.x()>width()*.80&&pos.y()>height()*.72){
+                        beginWalking();
+                        if(pos.x()>width()*.90){
+                            if(walk::jump(walker_)){jumpPending_=true;schedule();}
+                        }else if(walk::setCrouched(scene_,walker_,!walker_.crouched)){
+                            camera_.eye=walk::eye(walker_);crouchPending_=true;schedule();
+                        }
+                    }else if(pos.x()<width()*.45&&moveId_<0){
+                        beginWalking();moveId_=id;moveAnchor_=pos;moveDelta_=QPointF{};
+                    }else if(lookId_<0){lookId_=id;last_=pos;}
+                }else if(point.state()==QEventPoint::State::Updated){
+                    if(id==moveId_){
+                        moveDelta_=pos-moveAnchor_;
+                        // Apply a bounded input step even under a slow software renderer.
+                        tickMotion();
                     }
+                    if(id==lookId_){
+                        const auto delta=pos-last_;last_=pos;
+                        if(std::abs(delta.x())+std::abs(delta.y())>1){
+                            V next=norm(camera_.f+camera_.r*float(delta.x()*.002)+camera_.u*float(-delta.y()*.002));
+                            if(std::abs(next.y)<.98f){
+                                camera_.f=next;camera_.r=norm(cross(next,V{0,1,0}));
+                                camera_.u=norm(cross(camera_.r,next));touchPending_=true;schedule();
+                            }
+                        }
+                    }
+                }else if(point.state()==QEventPoint::State::Released){
+                    if(id==moveId_){moveId_=-1;moveDelta_=QPointF{};}
+                    if(id==lookId_)lookId_=-1;
                 }
-                last_=pos;
             }
             e->accept();return true;
         }
@@ -139,7 +206,9 @@ public:
     PortWindow(Scene scene,ShadowMap shadow,Camera camera,QVulkanInstance* instance):
         scene_(std::move(scene)),shadow_(std::move(shadow)),camera_(camera){
         setSurfaceType(QSurface::VulkanSurface);setVulkanInstance(instance);
-        setTitle(QStringLiteral("CSE WARP V17.031 Android Vulkan probe"));ready_=true;
+        setTitle(QStringLiteral("CSE WARP V17.031 Android Vulkan exploration"));ready_=true;
+        tick_.start();motionTimer_.setInterval(33);
+        QObject::connect(&motionTimer_,&QTimer::timeout,this,[this]{tickMotion();});motionTimer_.start();
     }
     ~PortWindow() override{releaseVulkanDirectForCurrentThread();}
 };
@@ -155,7 +224,11 @@ int main(int argc,char** argv){
     qputenv("CSE_WARP_VK_MSAA","1");
     try{
         auto root=extractAssets();
+#ifdef CSE_ANDROID_EMULATOR_TEST
+        require(cseAndroidWalkRegression()==0,"shared walk regression");
+        qInfo().noquote()<<"CSE_ANDROID PASS WALK_REGRESSION";
         triangle(QDir(root).filePath("triangle.png"));
+#endif
         auto loaded=v16::loadScene(QDir(root).filePath("benchmark-civic/scene.json"));
         require(bool(loaded),"load exact scene V17.634");
         auto built=v16::buildRuntime(loaded.scene,1024);
@@ -163,7 +236,11 @@ int main(int argc,char** argv){
         updateLighting(14.f);
         Stats shadowStats{};auto shadow=buildShadow(built.runtime.renderScene,shadowStats);
         auto camera=v16::makeCamera(built.runtime.cameras.first(),640,360);
+#ifdef CSE_ANDROID_EMULATOR_TEST
         imageTest(built.runtime.renderScene,shadow,camera,640,360,QDir(root).filePath("scene.png"),false);
+        cse::androidqa::renderViews(built.runtime,shadow,root);
+        qInfo().noquote()<<"CSE_ANDROID PASS FIVE_VIEWS";
+#endif
         releaseVulkanPreviewForCurrentThread();
 #if QT_CONFIG(vulkan)
         QVulkanInstance instance;instance.setApiVersion(QVersionNumber(1,3,204));

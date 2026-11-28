@@ -62,6 +62,18 @@ jobs:
           echo "QT_HOST_PATH=$host" >> "$GITHUB_ENV"
       - name: Verify scene archive and compile original Vulkan shaders
         run: python3 experiments/android-vulkan/stage_assets.py "$RUNNER_TEMP/android-package"
+      - name: Set landscape in the matching Qt manifest
+        run: |
+          python3 - <<'PY'
+          import os, pathlib
+          template=pathlib.Path(os.environ["QT_ROOT_DIR"])/"src/android/templates/AndroidManifest.xml"
+          if not template.is_file():
+              template=pathlib.Path(os.environ["QT_HOST_PATH"])/"src/android/templates/AndroidManifest.xml"
+          data=template.read_text()
+          assert data.count('android:screenOrientation="unspecified"')==1
+          out=pathlib.Path(os.environ["RUNNER_TEMP"])/"android-package/AndroidManifest.xml"
+          out.write_text(data.replace('android:screenOrientation="unspecified"','android:screenOrientation="sensorLandscape"'))
+          PY
       - name: Configure Android real engine
         run: |
           set -euxo pipefail
@@ -124,7 +136,60 @@ jobs:
             build-android/android-build/build.gradle
             build-android/android-build/build/reports/problems/problems-report.html
           if-no-files-found: warn
+  reference:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Linux Vulkan software reference
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build libvulkan-dev mesa-vulkan-drivers glslang-tools spirv-tools libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xinput0
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.10.3'
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          cache: true
+      - name: Compile and render same five poses
+        run: |
+          set -euxo pipefail
+          python3 experiments/android-vulkan/stage_assets.py "$RUNNER_TEMP/reference-package"
+          cmake -S experiments/android-vulkan/reference -B build-reference -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+          cmake --build build-reference --target cse_android_reference --parallel 3
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' | head -n1)"
+          test -n "$VK_ICD_FILENAMES"
+          QT_QPA_PLATFORM=offscreen ./build-reference/cse_android_reference "$RUNNER_TEMP/reference-package/assets/cse" "$GITHUB_WORKSPACE/reference-evidence"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: android-linux-reference
+          path: reference-evidence/
+          if-no-files-found: error
   simulation:
     needs: apk
     if: ${{ needs.apk.result == 'success' }}
     uses: ./.github/workflows/qa-android-vulkan.yml
+  compare:
+    needs: [reference, simulation]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v5
+        with:
+          name: android-linux-reference
+          path: reference
+      - uses: actions/download-artifact@v5
+        with:
+          name: android-emulator-vulkan-evidence
+          path: android
+      - name: Compare identical camera poses and report image differences
+        run: |
+          python3 -m pip install --break-system-packages pillow numpy
+          python3 experiments/android-vulkan/compare_views.py reference android comparison
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: android-linux-visual-comparison
+          path: comparison/
+          if-no-files-found: warn

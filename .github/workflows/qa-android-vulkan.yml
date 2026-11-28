@@ -7,7 +7,7 @@ permissions:
 jobs:
   emulator:
     runs-on: ubuntu-24.04
-    timeout-minutes: 40
+    timeout-minutes: 50
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v5

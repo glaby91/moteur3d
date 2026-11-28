@@ -22,6 +22,7 @@ target_link_libraries(cse_android_probe PRIVATE moteur3d_v16_core Qt6::Core Qt6:
 target_compile_options(cse_android_probe PRIVATE -O2)
 target_compile_definitions(cse_android_probe PRIVATE CSE_ANDROID_BUILD_ID="${CSE_ANDROID_BUILD_ID}")
 if(ANDROID_ABI STREQUAL "x86_64")
+    target_sources(cse_android_probe PRIVATE walk_regression.cpp)
     target_compile_definitions(cse_android_probe PRIVATE CSE_ANDROID_EMULATOR_TEST=1)
 endif()
 set_target_properties(cse_android_probe PROPERTIES
