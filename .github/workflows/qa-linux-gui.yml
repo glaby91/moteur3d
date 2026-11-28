@@ -1,0 +1,93 @@
+name: QA packaged Linux GUI Ubuntu
+run-name: V17.031 Build 8 - Ubuntu GUI functional audit
+on:
+  push:
+    branches: [master]
+    paths: ['.github/workflows/qa-linux-gui.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  gui:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v6
+        with:
+          name: CSE-WARP-V17.031-Linux-Vulkan-GitHub-8-x86_64
+          run-id: 46085728151
+          github-token: ${{ github.token }}
+          path: artifact
+      - name: Prepare Ubuntu desktop and Vulkan
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build mesa-vulkan-drivers vulkan-tools libvulkan1 libgl1-mesa-dev libegl1-mesa-dev libxkbcommon-dev libxkbcommon-x11-0 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-render-util0 libxcb-xinerama0 libxcb-xinput0 libpulse0 pulseaudio pulseaudio-utils xvfb xauth openbox
+          mkdir -p package results
+          tar -xzf artifact/*.tar.gz -C package --strip-components=1
+          cp package/BUILD_INFO.json results/
+          sudo sh -c 'printf "\n127.0.0.1 www.radioguide.fm radioguide.fm\n" >> /etc/hosts'
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          host: linux
+          target: desktop
+          arch: linux_gcc_64
+          modules: qtmultimedia
+          cache: true
+      - name: Compile only the Qt QA driver
+        run: |
+          mkdir -p qa
+          cp .github/qa/linux_gui_probe.cpp qa/
+          cat > qa/CMakeLists.txt <<'CMAKE'
+          cmake_minimum_required(VERSION 3.24)
+          project(GuiQa LANGUAGES CXX)
+          set(CMAKE_CXX_STANDARD 17)
+          find_package(Qt6 REQUIRED COMPONENTS Widgets)
+          add_library(gui_qa SHARED linux_gui_probe.cpp)
+          target_link_libraries(gui_qa PRIVATE Qt6::Widgets dl)
+          set_target_properties(gui_qa PROPERTIES SKIP_BUILD_RPATH TRUE)
+          CMAKE
+          cmake -S qa -B qa/build -G Ninja -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR" -DCMAKE_BUILD_TYPE=Release
+          cmake --build qa/build
+      - name: Exercise real packaged GUI
+        run: |
+          set -euo pipefail
+          export LD_LIBRARY_PATH="$PWD/package:$PWD/package/qt/lib"
+          export QT_PLUGIN_PATH="$PWD/package/qt/plugins"
+          export QT_QPA_PLATFORM=xcb CSE_WARP_VK_ALLOW_SOFTWARE_TEST=1 CSE_WARP_VK_MSAA=1
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' | head -n 1)"
+          export CSE_GUI_QA_OUT="$PWD/results"
+          export CSE_GUI_QA_SECOND_SCENE="$PWD/scenes/v16/pavillon01/scene.json"
+          export QA_SO="$PWD/qa/build/libgui_qa.so"
+          export XDG_CONFIG_HOME="$PWD/qa-config" XDG_DATA_HOME="$PWD/qa-data" XDG_CACHE_HOME="$PWD/qa-cache"
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=cse_gui_test rate=48000 channels=2
+          pactl set-default-sink cse_gui_test
+          export PULSE_SINK=cse_gui_test
+          vulkaninfo --summary > results/vulkaninfo.txt 2>&1 || true
+          cd package
+          xvfb-run -a -s "-screen 0 1600x1000x24" bash -c 'openbox >/dev/null 2>&1 & timeout 1100 env LD_PRELOAD="$QA_SO" ./moteur3d_v17 benchmark-civic/scene.json' 2>&1 | tee ../results/gui.log
+          test -s ../results/gui-results.json
+      - name: Navigation regressions using real Qt input events
+        if: ${{ !cancelled() }}
+        run: |
+          set -uo pipefail
+          export LD_LIBRARY_PATH="$PWD/package:$PWD/package/qt/lib"
+          export QT_PLUGIN_PATH="$PWD/package/qt/plugins"
+          export QT_QPA_PLATFORM=xcb CSE_WARP_VK_ALLOW_SOFTWARE_TEST=1 CSE_WARP_VK_MSAA=1
+          export VK_ICD_FILENAMES="$(find /usr/share/vulkan/icd.d -name 'lvp_icd*.json' | head -n 1)"
+          cd package
+          for test in walking-collisions scope-mouse immersive-mouse; do
+            XDG_CONFIG_HOME="$PWD/../qa-$test" xvfb-run -a -s "-screen 0 1600x1000x24" bash -c 'openbox >/dev/null 2>&1 & timeout 150 ./moteur3d_v17 "--smoke-$1" benchmark-civic/scene.json' _ "$test" > "../results/$test.log" 2>&1
+            code=$?
+            echo "$test exit=$code" | tee -a ../results/navigation-status.txt
+          done
+          cat ../results/navigation-status.txt
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: Ubuntu-Build8-GUI-audit
+          path: results/
+          if-no-files-found: error
