@@ -120,21 +120,24 @@ class ProjectedOptics {
         using Clock=std::chrono::steady_clock;auto start=Clock::now();
         const auto& blocks=plan.resident.blocks;
         if(w<=0||h<=0||plan.projectedRanges.size()>4||!plan.projectedVertices.empty()||blocks.size()>120000||plan.data.size()<8||plan.data.size()%4){error=L"Object007 invalid packet";return false;}
-        uint64_t total=0,next=0;const size_t objects=size_t(plan.data[0]);
+        uint64_t total=0,work=0,next=0;const size_t objects=size_t(plan.data[0]);
         if(objects+2>plan.data.size()/4||2*objects+2>plan.data.size()/4){error=L"Object007 invalid receiver table";return false;}
         for(const auto& r:plan.projectedRanges){
             if(!r.receiver||r.receiver>objects||r.blockFirst!=next||uint64_t(r.blockFirst)+r.blockOpaque+r.blockTransparent>blocks.size()||
                r.x<0||r.y<0||r.w<=0||r.h<=0||int64_t(r.x)+r.w>w||int64_t(r.y)+r.h>h){error=L"Object007 invalid draw range";return false;}
-            uint64_t solid=0,alpha=0;
+            uint64_t solid=0,alpha=0;uint32_t priorWidth=0;
             for(uint32_t k=0;k<r.blockOpaque+r.blockTransparent;++k){
                 const auto& b=blocks[r.blockFirst+k];const bool isAlpha=k>=r.blockOpaque;
                 if(!b.count||b.count>(isAlpha?1u:32u)||uint64_t(b.first)+b.count>scene.obj.size()){error=L"Object007 invalid source block";return false;}
-                (isAlpha?alpha:solid)+=b.count*3u;
+                const uint32_t width=escargotResidentWidth(b.count);
+                if(!isAlpha&&width<priorWidth){error=L"Object007 unsorted opaque blocks";return false;}
+                if(!isAlpha)priorWidth=width;
+                (isAlpha?alpha:solid)+=b.count*3u;work+=width*3u;
             }
             if(solid!=r.opaque||alpha!=r.transparent){error=L"Object007 block count mismatch";return false;}
             total+=solid+alpha;next+=r.blockOpaque+r.blockTransparent;
         }
-        if(next!=blocks.size()||total>360000){error=L"Object007 geometry budget exceeded";return false;}
+        if(next!=blocks.size()||total>360000||work>360000){error=L"Object007 geometry budget exceeded";return false;}
         ID3D11ShaderResourceView* none=nullptr;c->PSSetShaderResources(8,1,&none);
         if(plan.projectedRanges.empty())return true;
         const int tw=std::max(1,w*3/4),th=std::max(1,h*3/4);
@@ -171,7 +174,11 @@ class ProjectedOptics {
                 if(FAILED(c->Map(optical,0,D3D11_MAP_WRITE_DISCARD,0,&map))){error=L"Object007 plane upload";return false;}
                 std::memcpy(map.pData,&cb,sizeof(cb));c->Unmap(optical,0);c->DrawInstanced(verts,n,0,0);++profile.draws;profile.residentSubmittedVertices+=uint64_t(verts)*n;return true;};
             c->OMSetDepthStencilState(opaque,0);c->OMSetBlendState(nullptr,nullptr,0xffffffffu);
-            if(!draw(r.blockOpaque,r.blockFirst,96)){finish();return false;}
+            for(UINT start=0;start<r.blockOpaque;){
+                const UINT width=escargotResidentWidth(blocks[r.blockFirst+start].count);UINT end=start+1;
+                while(end<r.blockOpaque&&escargotResidentWidth(blocks[r.blockFirst+end].count)==width)++end;
+                if(!draw(end-start,r.blockFirst+start,width*3)){finish();return false;}start=end;
+            }
             c->OMSetDepthStencilState(transparent,0);c->OMSetBlendState(blend,nullptr,0xffffffffu);
             if(!draw(r.blockTransparent,r.blockFirst+r.blockOpaque,3)){finish();return false;}
         }

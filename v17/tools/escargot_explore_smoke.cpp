@@ -7,6 +7,7 @@
 #include <random>
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 #include <QDir>
 #include <QImage>
 #include <QJsonDocument>
@@ -21,6 +22,7 @@ int main(int argc,char** argv){
     qInstallMessageHandler([](QtMsgType,const QMessageLogContext&,const QString& message){
         const auto utf8=message.toUtf8();std::fprintf(stderr,"%s\n",utf8.constData());std::fflush(stderr);
     });
+    _putenv_s("CSE_WARP_ESCARGOT_RESIDENT_007","1");
     _putenv_s("CSE_WARP_ESCARGOT_OBJECT_GPU","1");
     auto loaded=m3d::v16::loadScene(app.arguments().at(1));
     if(!loaded){qCritical()<<loaded.error;return 3;}
@@ -144,7 +146,7 @@ int main(int argc,char** argv){
     }
     if(end!=pm.triangles*3)return 32;
     uint64_t blockTriangles=0;for(const auto& b:plan.resident.blocks){if(!b.count||b.count>32||uint64_t(b.first)+b.count>rt.renderScene.obj.size())return 36;blockTriangles+=b.count;}
-    if(blockTriangles!=pm.triangles)return 36;
+    if(blockTriangles!=pm.triangles||pm.submittedTriangles>e::projected::triangleBudget||pm.submittedTriangles<pm.triangles)return 36;
     // Same camera for 32 successive frames, then return from a moved camera.
     for(int i=0;i<32;++i){e::projected::Metrics t;const auto& same=project.build(cam,shadow,req.width,req.height,t);if(!t.reused||t.rays||same.projectedKey!=plan.projectedKey)return 37;}
     auto poseTest=*it;poseTest.eye.x+=.1f;poseTest.target.x+=.1f;

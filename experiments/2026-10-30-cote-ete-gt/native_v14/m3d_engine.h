@@ -179,6 +179,9 @@ struct EscargotPathEvent { EscargotRayQuery query;EscargotRayHit hit; }; // hit.
 struct EscargotPathTiming { double prepareMs=0,submitMs=0,readbackMs=0,gpuMs=0;bool gpuTimingValid=false;uint64_t transferredBytes=0; };
 // Compact source observations and tile jobs; final optical packet built on GPU.
 struct EscargotResidentBlock {uint32_t first=0,count=0;}; // original scene triangle range, <=32
+inline uint32_t escargotResidentWidth(uint32_t n) noexcept {
+    return n<=1?1u:n<=2?2u:n<=4?4u:n<=8?8u:n<=16?16u:32u;
+}
 struct EscargotProjectedRange {uint32_t receiver=0,first=0,opaque=0,transparent=0;int x=0,y=0,w=0,h=0;uint32_t blockFirst=0,blockOpaque=0,blockTransparent=0;};
 struct EscargotResidentLayout {bool enabled=false;std::vector<EscargotResidentBlock> blocks;};
 struct EscargotPacketBuild {bool rasterProjected=false;uint64_t projectedKey=0;std::vector<float> projectedVertices;std::vector<EscargotProjectedRange> projectedRanges;EscargotResidentLayout resident;std::vector<float> data;uint32_t prefixRecords=0,jobBase=0,jobCount=0,maxRecords=0;bool capturePacket=false;bool rasterDirect=false;std::vector<uint32_t> rasterReceivers;};

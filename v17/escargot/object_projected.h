@@ -8,7 +8,7 @@
 #include <chrono>
 namespace m3d::escargot::projected {
 constexpr uint32_t maxReceivers=4,rayBudget=768,triangleBudget=120000,maxSources=160;
-struct Metrics {uint32_t catalogue=0,patches=0,visible=0,water=0,rays=0,receivers=0,curved=0,deferred=0,sources=0,triangles=0,omitted=0,mini=0,lightingSamples=0;bool reused=false;double totalMs=0,receiverMs=0,discoverMs=0,rankMs=0,cullMs=0,sortMs=0,emitMs=0;uint64_t testedObjects=0,testedTriangles=0;};
+struct Metrics {uint32_t catalogue=0,patches=0,visible=0,water=0,rays=0,receivers=0,curved=0,deferred=0,sources=0,triangles=0,submittedTriangles=0,omitted=0,mini=0,lightingSamples=0;bool reused=false;double totalMs=0,receiverMs=0,discoverMs=0,rankMs=0,cullMs=0,sortMs=0,emitMs=0;uint64_t testedObjects=0,testedTriangles=0;};
 struct Plane {V p,n;bool valid=false;int side=0;};
 struct ReceiverPatch {Candidate candidate;Plane plane;double area=0;size_t index=0;};
 inline V mirror(V p,Plane plane){return p-plane.n*(2.f*dot(p-plane.p,plane.n));}
@@ -286,17 +286,17 @@ public:
             std::sort(ranked.begin(),ranked.end(),[](const Ranked& x,const Ranked& y){
                 if(x.seen!=y.seen)return x.seen>y.seen;return x.score==y.score?x.id<y.id:x.score>y.score;});
             m.rankMs+=ms(stage);stage=Clock::now();std::vector<TriangleRef> opaque,transparent;
-            const uint32_t limit=(triangleBudget-m.triangles)/uint32_t(admitted.size()-k);
+            const uint32_t limit=(triangleBudget-(gpuResident_?m.submittedTriangles:m.triangles))/uint32_t(admitted.size()-k);
             uint32_t count=0,usedSources=0;
             const float sign=dot(c.eye-p.p,p.n)>=0?1.f:-1.f;
             if(gpuResident_){
                 struct AlphaBlock{EscargotResidentBlock block;float depth;};
                 std::vector<EscargotResidentBlock> solid;
                 std::vector<AlphaBlock> alpha;
-                uint32_t opaqueCount=0,alphaCount=0;
+                uint32_t opaqueCount=0,alphaCount=0,cost=0;
                 for(const auto& b:ranked){
                     if(usedSources>=maxSources||count>=limit){++m.omitted;continue;}
-                    const auto oldSolid=solid.size(),oldAlpha=alpha.size();const uint32_t oldO=opaqueCount,oldA=alphaCount,oldCount=count;
+                    const auto oldSolid=solid.size(),oldAlpha=alpha.size();const uint32_t oldO=opaqueCount,oldA=alphaCount,oldCount=count,oldCost=cost;
                     bool overflow=false;
                     for(const auto& block:sourceBlocks_[b.id]){
                         // Coarse conservative box only; all individual plane/frustum clipping is GPU-side.
@@ -305,17 +305,19 @@ public:
                         const V n=p.n*sign;
                         const V support{n.x>=0?block.bounds.hi.x:block.bounds.lo.x,n.y>=0?block.bounds.hi.y:block.bounds.lo.y,n.z>=0?block.bounds.hi.z:block.bounds.lo.z};
                         if(dot(support-p.p,n)<-.001f)continue;
-                        if(block.draw.count>limit-count){overflow=true;break;}
+                        const uint32_t work=escargotResidentWidth(block.draw.count);
+                        if(work>limit-cost){overflow=true;break;}
                         if(block.alpha){
                             const auto& t=s.obj[block.draw.first];
                             alpha.push_back({block.draw,dot(mirror((t.a+t.b+t.c)/3.f,p)-c.eye,c.f)});alphaCount+=block.draw.count;
                         }else {solid.push_back(block.draw);opaqueCount+=block.draw.count;}
-                        count+=block.draw.count;
+                        count+=block.draw.count;cost+=work;
                     }
-                    if(overflow){solid.resize(oldSolid);alpha.resize(oldAlpha);opaqueCount=oldO;alphaCount=oldA;count=oldCount;++m.omitted;continue;}
+                    if(overflow){solid.resize(oldSolid);alpha.resize(oldAlpha);opaqueCount=oldO;alphaCount=oldA;count=oldCount;cost=oldCost;++m.omitted;continue;}
                     if(count>oldCount){++usedSources;++m.sources;}
                 }
                 m.cullMs+=ms(stage);stage=Clock::now();
+                std::stable_sort(solid.begin(),solid.end(),[](const EscargotResidentBlock& x,const EscargotResidentBlock& y){return escargotResidentWidth(x.count)<escargotResidentWidth(y.count);});
                 std::sort(alpha.begin(),alpha.end(),[](const AlphaBlock& x,const AlphaBlock& y){return x.depth==y.depth?x.block.first<y.block.first:x.depth>y.depth;});
                 m.sortMs+=ms(stage);stage=Clock::now();
                 EscargotProjectedRange r;r.receiver=a.object;r.first=m.triangles*3;r.opaque=opaqueCount*3;r.transparent=alphaCount*3;
@@ -327,7 +329,7 @@ public:
                 const size_t at=4*(size_t(a.object)+1);
                 plan.data[at]=float(plan.projectedRanges.size()+1);plan.data[at+1]=p.n.x;plan.data[at+2]=p.n.y;plan.data[at+3]=p.n.z;
                 plan.data[4*(size_t(rt_.objects.size())+1+size_t(a.object))]=dot(p.p,p.n);
-                plan.projectedRanges.push_back(r);m.triangles+=count;++m.receivers;
+                plan.projectedRanges.push_back(r);m.triangles+=count;m.submittedTriangles+=cost;++m.receivers;
                 if(waterMaterial(s.mat[a.material]))++m.water;m.emitMs+=ms(stage);
                 continue;
             }
