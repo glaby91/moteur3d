@@ -71,19 +71,20 @@ inline Affine affine(const Scene& scene,const Layer& l){
     }
     a.valid=true;return a;
 }
-inline Packet packGpu(const Result& frame,const Scene& scene,size_t objectCount){
+inline Packet packGpu(const Result& frame,const Scene& scene,size_t objectCount,int tileSize=kTile,bool scalarNearest=false){
     Packet p;
     try{
+        if(tileSize!=8&&tileSize!=16&&tileSize!=32)throw std::runtime_error("Invalid tile size");
         // [0]: light direction/day; [1]: max object ID, tile size, format, unused.
         // Two float4 per receiver, indexed by exact source-object ID.
         p.data.reserve(4*std::min(kMaxRecords,std::max<size_t>(2+2*(objectCount+1),65536)));
         p.reserveRecords(2+2*(objectCount+1));float day;V sunDir;
-        escargotLightingSnapshot(day,sunDir);p.vec(0,sunDir,day);p.set(1,float(objectCount),float(kTile),1,0);
+        escargotLightingSnapshot(day,sunDir);p.vec(0,sunDir,day);p.set(1,float(objectCount),float(tileSize),1,scalarNearest?1.f:0.f);
         for(const auto& sf:frame.surfaces){
             if(sf.deferred||sf.layers.empty()||!sf.candidate.bounds.valid())continue;
             const auto r=sf.candidate.bounds;const auto object=sf.candidate.object;
             if(!object||object>objectCount)throw std::runtime_error("Invalid receiver ID");
-            const int cols=(r.w+kTile-1)/kTile,rows=(r.h+kTile-1)/kTile;
+            const int cols=(r.w+tileSize-1)/tileSize,rows=(r.h+tileSize-1)/tileSize;
             const auto tileBase=p.reserveRecords(size_t(cols)*rows);
             const size_t rec=2+2*size_t(object);
             p.set(rec,float(r.x),float(r.y),float(r.w),float(r.h));
@@ -104,7 +105,7 @@ inline Packet packGpu(const Result& frame,const Scene& scene,size_t objectCount)
                 const auto it=info.l->measured.find(id);return it==info.l->measured.end()?nullptr:&it->second;
             };
             for(int ty=0;ty<rows;++ty)for(int tx=0;tx<cols;++tx){
-                Rect tile{r.x+tx*kTile,r.y+ty*kTile,std::min(kTile,r.w-tx*kTile),std::min(kTile,r.h-ty*kTile)};
+                Rect tile{r.x+tx*tileSize,r.y+ty*tileSize,std::min(tileSize,r.w-tx*tileSize),std::min(tileSize,r.h-ty*tileSize)};
                 auto receivers=shortlist(sf,sf.receiverIndices,tile);
                 auto common=coverage?std::vector<size_t>{}:shortlist(sf,sf.completeIndices,tile);
                 if(receivers.empty())continue;
@@ -182,11 +183,12 @@ inline BuildPlan planGpuBuild(const Result& frame,const Scene& scene,size_t obje
         }
         plan.native.prefixRecords=uint32_t(p.size());
         plan.native.jobBase=uint32_t(p.reserveRecords(size_t(jobs)*3));plan.native.jobCount=uint32_t(jobs);
-        size_t job=0;
+        size_t job=0;uint64_t allocationUpper=plan.native.prefixRecords;
         for(const auto& item:surfaces){
             const auto& sf=*item.sf;const auto r=sf.candidate.bounds;
             const bool coverage=p.data[4*(2+2*size_t(sf.candidate.object)+1)+3]>.5f;
             const size_t receiverStart=p.size();
+            const size_t sourceBegin=p.size();
             for(auto id:sf.receiverIndices){
                 const auto& s=sf.samples[id];p.add(float(s.x),float(s.y),float(id),s.receiver==State::Measured?1.f:0.f);
                 p.add(s.position.x,s.position.y,s.position.z,s.receiverWeight);p.add(s.normal.x,s.normal.y,s.normal.z,s.receiverDepth);
@@ -209,6 +211,8 @@ inline BuildPlan planGpuBuild(const Result& frame,const Scene& scene,size_t obje
                     else{p.add();p.add();}
                 }
             }
+            allocationUpper+=uint64_t(p.size()-sourceBegin)*uint64_t(item.cols)*item.rows;
+            if(allocationUpper>std::numeric_limits<uint32_t>::max())throw std::runtime_error("Optical GPU allocator upper bound exceeds uint32");
             for(int ty=0;ty<item.rows;++ty)for(int tx=0;tx<item.cols;++tx){
                 const size_t base=plan.native.jobBase+3*job++;
                 const size_t tileId=item.tileBase+size_t(ty)*item.cols+tx;
@@ -224,6 +228,35 @@ inline BuildPlan planGpuBuild(const Result& frame,const Scene& scene,size_t obje
         plan.native.data=std::move(p.data);plan.ok=true;
     }catch(const std::exception& ex){plan.error=ex.what();}
     return plan;
+}
+inline bool logicalPacketEqual(const std::vector<float>& a,const std::vector<float>& b,std::string& why){
+    auto valid=[](const std::vector<float>& p,size_t start,size_t count){return start<=p.size()/4&&count<=p.size()/4-start;};
+    auto equal=[&](size_t x,size_t y,size_t n){return valid(a,x,n)&&valid(b,y,n)&&std::equal(a.begin()+4*x,a.begin()+4*(x+n),b.begin()+4*y);};
+    if(a.size()<8||b.size()<8||!equal(0,0,2)){why="packet global header";return false;}
+    const size_t objects=size_t(a[4]);const int tileSize=int(a[5]);
+    if(tileSize<=0||objects>(a.size()/4-2)/2||objects>(b.size()/4-2)/2){why="packet object count";return false;}
+    for(size_t id=1;id<=objects;++id){
+        const size_t rec=2+2*id;if(!equal(rec,rec,2)){why="receiver header "+std::to_string(id);return false;}
+        const float* r=&a[4*rec];const float* desc=&a[4*(rec+1)];
+        if(r[2]<=0||r[3]<=0)continue;
+        const size_t cols=size_t(desc[1]),rows=(size_t(r[3])+tileSize-1)/tileSize,base=size_t(desc[0]);
+        const bool common=desc[3]>.5f;
+        for(size_t j=0;j<cols*rows;++j){
+            const size_t tile=base+j;if(!valid(a,tile,1)||!valid(b,tile,1)){why="tile range";return false;}
+            const float* ta=&a[4*tile],*tb=&b[4*tile];
+            if(ta[1]!=tb[1]||ta[3]!=tb[3]){why="tile counts "+std::to_string(tile);return false;}
+            if(ta[3]==0)continue;
+            if(!equal(size_t(ta[0]),size_t(tb[0]),3*size_t(ta[1]))){why="receiver observations "+std::to_string(tile);return false;}
+            for(size_t l=0;l<size_t(ta[3]);++l){
+                const size_t la=size_t(ta[2])+7*l,lb=size_t(tb[2])+7*l;
+                if(!valid(a,la,7)||!valid(b,lb,7)){why="layer range";return false;}
+                const float* x=&a[4*la],*y=&b[4*lb];
+                if(x[1]!=y[1]||x[2]!=y[2]||x[3]!=y[3]||!equal(la+1,lb+1,6)){why="layer descriptor "+std::to_string(tile);return false;}
+                if(!equal(size_t(x[0]),size_t(y[0]),size_t(x[1])*(common?2:3))){why="layer observations "+std::to_string(tile);return false;}
+            }
+        }
+    }
+    return true;
 }
 struct PacketKey {
     std::array<float,18> cameraLight{};

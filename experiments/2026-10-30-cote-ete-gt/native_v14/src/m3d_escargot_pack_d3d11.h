@@ -16,13 +16,10 @@ RWStructuredBuffer<float4> dst:register(u0);
 RWStructuredBuffer<uint> state:register(u1); // next record, error flags, tile count
 cbuffer Params:register(b0){uint jobBase,jobCount,capacity,sourceCount;}
 uint reserveRange(uint count){
-    uint old=state[0],seen=0;
-    while(true){
-        if(old>capacity||count>capacity-old){InterlockedOr(state[1],1u);return 0u;}
-        InterlockedCompareExchange(state[0],old,old+count,seen);
-        if(seen==old)return old;
-        old=seen;
-    }
+    // Host plan bounds the total attempted allocations below UINT_MAX.
+    uint old=0;InterlockedAdd(state[0],count,old);
+    if(old>capacity||count>capacity-old){InterlockedOr(state[1],1u);return 0u;}
+    return old;
 }
 uint minimumDistance(int2 p,int4 r){
     int2 d=max(int2(0,0),max(r.xy-p,p-(r.xy+r.zw-1)));
@@ -107,7 +104,7 @@ class PacketBuilder {
     ComPtr<ID3D11UnorderedAccessView> outputUav_,stateUav_;
     ComPtr<ID3D11Query> disjoint_,begin_,end_;
     size_t inputCapacity_=0,outputCapacity_=0;
-    bool timestamp_=false,pending_=false;
+    bool timestamp_=false,pending_=false,capture_=false;
     static double ms(Clock::time_point t){return std::chrono::duration<double,std::milli>(Clock::now()-t).count();}
     static bool buffer(ID3D11Device* d,UINT count,UINT stride,UINT bind,ComPtr<ID3D11Buffer>& b){
         D3D11_BUFFER_DESC desc{};desc.ByteWidth=count*stride;desc.StructureByteStride=stride;desc.Usage=D3D11_USAGE_DEFAULT;
@@ -162,6 +159,7 @@ public:
             if(FAILED(device->CreateQuery(&q,end_.ReleaseAndGetAddressOf())))end_.Reset();
         }
         timestamp_=disjoint_&&begin_&&end_;
+        capture_=p.capturePacket;
         timing.prepareMs=ms(start);start=Clock::now();
         ID3D11ShaderResourceView* clear=nullptr;context->PSSetShaderResources(13,1,&clear);
         D3D11_BOX dataBox{0,0,0,UINT(n*16),1,1},headerBox{0,0,0,p.prefixRecords*16,1,1};
@@ -193,7 +191,17 @@ public:
             }
         }
         timing.statusMs=ms(start);
-        if(state[1]){error=L"Escargot GPU packet build overflow/invalid layout, flags="+std::to_wstring(state[1]);return false;}
+        if(state[1]||state[0]>outputCapacity_){error=L"Escargot GPU packet build overflow/invalid layout, flags="+std::to_wstring(state[1]);return false;}
+        if(capture_){
+            // Untimed diagnostic only: read logical records after the image.
+            D3D11_BUFFER_DESC d{};d.ByteWidth=UINT(outputCapacity_*16);d.Usage=D3D11_USAGE_STAGING;d.CPUAccessFlags=D3D11_CPU_ACCESS_READ;
+            ComPtr<ID3D11Buffer> capture;
+            if(FAILED(device_->CreateBuffer(&d,nullptr,capture.GetAddressOf()))){error=L"Escargot packet diagnostic allocation";return false;}
+            context->CopyResource(capture.Get(),output_.Get());D3D11_MAPPED_SUBRESOURCE mapped{};
+            if(FAILED(context->Map(capture.Get(),0,D3D11_MAP_READ,0,&mapped))){error=L"Escargot packet diagnostic read";return false;}
+            timing.diagnosticPacket.resize(size_t(state[0])*4);std::memcpy(timing.diagnosticPacket.data(),mapped.pData,timing.diagnosticPacket.size()*sizeof(float));
+            context->Unmap(capture.Get(),0);
+        }
         return true;
     }
 };
