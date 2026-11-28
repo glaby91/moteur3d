@@ -61,6 +61,7 @@ jobs:
       - name: Interactive raster Object004 QImage and native swapchain A F16 Object004 moved A (WARP)
         shell: pwsh
         env:
+          CSE_WARP_ESCARGOT_OBJECT_GPU: '1'
           M3D_V16_FORCE_WARP: '1'
           M3D_V17_ZREFLECT: '1'
           M3D_V17_ZATMOSPHERE: '0'

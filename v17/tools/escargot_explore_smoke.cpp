@@ -3,6 +3,7 @@
 #include <QDebug>
 #include <algorithm>
 #include <cstdlib>
+#include <cstdio>
 #include <QDir>
 #include <QImage>
 #include <QJsonDocument>
@@ -14,6 +15,9 @@
 int main(int argc,char** argv){
     QCoreApplication app(argc,argv);
     if(app.arguments().size()<2||app.arguments().size()>3)return 2;
+    qInstallMessageHandler([](QtMsgType,const QMessageLogContext&,const QString& message){
+        const auto utf8=message.toUtf8();std::fprintf(stderr,"%s\n",utf8.constData());std::fflush(stderr);
+    });
     _putenv_s("CSE_WARP_ESCARGOT_OBJECT_GPU","1");
     auto loaded=m3d::v16::loadScene(app.arguments().at(1));
     if(!loaded){qCritical()<<loaded.error;return 3;}
@@ -45,9 +49,9 @@ int main(int argc,char** argv){
     _putenv_s("CSE_WARP_ESCARGOT_OBJECT_GPU","1");
     auto G=cse::v17render::renderLumaTrace(req,cam,shadow);
     if(!G.ok||G.stats.zReflectActive||!G.renderer.contains(QStringLiteral("Z Escargot Object 004"))||G.pixels.size()!=A.pixels.size()){
-        qCritical()<<G.renderer<<QString::fromStdWString(G.reason);return 9;
+        qCritical()<<"Object004 failure:"<<G.ok<<G.renderer<<QString::fromStdWString(G.reason)<<"zReflect"<<G.stats.zReflectActive<<"pixels"<<G.pixels.size();return 9;
     }
-    if(A.pixels==G.pixels||F.pixels==G.pixels)return 10;
+    if(A.pixels==G.pixels||F.pixels==G.pixels){qCritical()<<"Object004 image did not differ from A or F16";return 10;}
     auto pose=*it;pose.eye.x+=.075f;pose.target.x+=.075f;
     auto moved=m3d::v16::makeCamera(pose,req.width,req.height);
     auto M=cse::v17render::renderLumaTrace(req,moved,shadow);
@@ -55,7 +59,7 @@ int main(int argc,char** argv){
     req.escargot=false;
     auto restored=cse::v17render::renderLumaTrace(req,cam,shadow);
     if(!restored.ok||restored.pixels!=A.pixels)return 12;
-    qInfo()<<"Escargot exploration integration: A / F16 / moved F16 / A restore OK";
+    qInfo()<<"Escargot exploration integration: A / F16 / Object004 / moved Object004 / A restore OK";
     // Same real HWND for both modes; no full-frame staging or QImage fallback.
     RECT bounds{0,0,req.width,req.height};
     AdjustWindowRect(&bounds,WS_OVERLAPPEDWINDOW,FALSE);

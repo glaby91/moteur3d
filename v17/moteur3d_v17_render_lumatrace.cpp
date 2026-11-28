@@ -71,7 +71,9 @@ BackendResult renderEscargotF16(const Request& request,const m3d::Camera& camera
             result.renderer=request.directPresent?QStringLiteral("V17 LumaTrace BVH4 — Z Escargot Object 004 — Direct GPU (swapchain)"):QStringLiteral("V17 LumaTrace BVH4 — Z Escargot Object 004 — Qt (QImage)");
             return result;
         }
-        objectFailure=QString::fromStdWString(result.reason);result=BackendResult{};
+        objectFailure=QString::fromStdWString(result.reason);
+        if(objectFailure.isEmpty())objectFailure=QStringLiteral("Object004 output failed presentation validation");
+        result=BackendResult{};
     }
     e::ResidentStats resident;
     auto frame=session.prepared->frame(camera,request.width,request.height,opt,false,true,true,nullptr,&resident);
