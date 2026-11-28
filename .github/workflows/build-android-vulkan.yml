@@ -43,20 +43,30 @@ jobs:
           test -f "$ANDROID_HOME/ndk/27.2.12479018/source.properties"
           test -x "$ANDROID_HOME/build-tools/36.0.0/aapt"
           echo "ANDROID_NDK_ROOT=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
-      - uses: jurplel/install-qt-action@v4
+      - uses: actions/setup-python@v5
         with:
-          version: '6.10.3'
-          host: linux
-          target: android
-          arch: ${{ matrix.qt_arch }}
-          cache: true
+          python-version: '3.12'
+      - name: Install Qt 6.10.3 host tools and Android target from current repository
+        run: |
+          set -euxo pipefail
+          python -m pip install 'aqtinstall==3.3.0'
+          python -m aqt list-qt all_os android --arch 6.10.3
+          python -m aqt list-qt linux desktop --arch 6.10.3
+          python -m aqt install-qt linux desktop 6.10.3 linux_gcc_64 --outputdir "$RUNNER_TEMP/Qt"
+          python -m aqt install-qt all_os android 6.10.3 "${{ matrix.qt_arch }}" --outputdir "$RUNNER_TEMP/Qt"
+          host="$RUNNER_TEMP/Qt/6.10.3/gcc_64"
+          target="$RUNNER_TEMP/Qt/6.10.3/${{ matrix.qt_arch }}"
+          test -x "$target/bin/qt-cmake"
+          test -x "$host/bin/androiddeployqt"
+          echo "QT_ROOT_DIR=$target" >> "$GITHUB_ENV"
+          echo "QT_HOST_PATH=$host" >> "$GITHUB_ENV"
       - name: Verify scene archive and compile original Vulkan shaders
         run: python3 experiments/android-vulkan/stage_assets.py "$RUNNER_TEMP/android-package"
       - name: Configure Android real engine
         run: |
           set -euxo pipefail
           "$QT_ROOT_DIR/bin/qt-cmake" -S experiments/android-vulkan -B build-android -G Ninja \
-            -DCMAKE_BUILD_TYPE=Debug -DANDROID_SDK_ROOT="$ANDROID_HOME" \
+            -DCMAKE_BUILD_TYPE=Debug -DQT_HOST_PATH="$QT_HOST_PATH" -DANDROID_SDK_ROOT="$ANDROID_HOME" \
             -DANDROID_NDK_ROOT="$ANDROID_NDK_ROOT" -DANDROID_ABI="${{ matrix.abi }}" \
             -DANDROID_PLATFORM=android-35 -DQT_ANDROID_BUILD_ALL_ABIS=OFF \
             -DQT_ANDROID_ABIS="${{ matrix.abi }}" -DQT_ANDROID_SDK_BUILD_TOOLS_REVISION=36.0.0 \
