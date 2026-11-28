@@ -1,0 +1,78 @@
+name: Publish platform audit render gallery (no build)
+on:
+  push:
+    branches: [master]
+    paths: ['.github/workflows/publish-platform-audit-gallery.yml']
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: write
+jobs:
+  gallery:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: master
+      - uses: actions/download-artifact@v5
+        with:
+          name: macOS-engine-diagnostics
+          run-id: 46129493750
+          github-token: ${{ github.token }}
+          path: /tmp/platform-mac11
+      - uses: actions/download-artifact@v5
+        with:
+          name: macOS-engine-diagnostics
+          run-id: 46095834402
+          github-token: ${{ github.token }}
+          path: /tmp/platform-mac7
+      - uses: actions/download-artifact@v5
+        with:
+          name: V17.031-Linux-Build6-Pool-Vulkan-Lavapipe
+          run-id: 46083487533
+          github-token: ${{ github.token }}
+          path: /tmp/platform-linux6
+      - uses: actions/download-artifact@v5
+        with:
+          name: Ubuntu-Build8-GUI-cameras
+          run-id: 46088634614
+          github-token: ${{ github.token }}
+          path: /tmp/platform-linux8
+      - name: Verify original PNGs and prepare compact JPEG gallery
+        run: |
+          python3 -m pip install --quiet Pillow
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image
+          import hashlib, json
+          files = [
+              (46129493750, 15257163190, '/tmp/platform-mac11', 'optimized/vulkan-scene-2.png', 'mac-build11-exterior.jpg', '789a54e6fabf060c38ef13b3282a0d742af58e1c7b0625adc70a8e74ea5bcc30'),
+              (46095834402, 15243835709, '/tmp/platform-mac7', 'optimization/1920x1080/0/combined/frame-0.png', 'mac-build7-static.jpg', 'b520286c068842bd23e6e427c0c41c7f60d02289cae286c07bbcc8ddad6f594a'),
+              (46095834402, 15243835709, '/tmp/platform-mac7', 'optimization/1920x1080/0/combined/frame-23.png', 'mac-build7-moving.jpg', '5467ecd40a24ffea17964ba395ab6c9240dfdcc025013d25c8f3d904c19d2e89'),
+              (46083487533, 15237877283, '/tmp/platform-linux6', 'vulkan-pool-fhd.png', 'linux-build6-pool.jpg', 'e276960ed526ca256545e2fd0f15bb6e697808e0dbfe906c55768961d19cdcf8'),
+              (46088634614, 15239724092, '/tmp/platform-linux8', 'camera-1/camera.png', 'linux-build8-monument.jpg', '5fdea35ccfdaaf8ac20708acdd97357203b4edb74233f750c170095a09c10762'),
+              (46088634614, 15239724092, '/tmp/platform-linux8', 'camera-5/camera.png', 'linux-build8-hall.jpg', '678f2db624358c16284971d150e32e15cb006025203b1da00d5923435d61788f')
+          ]
+          out = Path('docs/platforms/renders')
+          out.mkdir(parents=True, exist_ok=True)
+          provenance = []
+          for run, artifact, root, relative, dest, digest in files:
+              src = Path(root) / relative
+              assert hashlib.sha256(src.read_bytes()).hexdigest() == digest, str(src)
+              with Image.open(src) as image:
+                  original = image.size
+                  image = image.convert('RGB')
+                  image.thumbnail((960, 600), Image.Resampling.LANCZOS)
+                  image.save(out/dest, quality=90, optimize=True)
+                  provenance.append(dict(run=run, artifact=artifact, original=relative, sha256=digest, original_size=original, preview=dest, preview_size=image.size, preview_sha256=hashlib.sha256((out/dest).read_bytes()).hexdigest()))
+          (out/'PROVENANCE.json').write_text(json.dumps(provenance, indent=2)+'\n')
+          PY
+      - name: Commit only documented render previews
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/platforms/renders
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "docs: preserve six verified macOS and Linux render previews"
+          git push origin HEAD:master

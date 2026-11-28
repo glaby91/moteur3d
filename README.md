@@ -64,6 +64,10 @@ Pour retrouver une ancienne compilation, consulter [V17.006, build 683 avec scè
 
 ## Linux natif — Vulkan x86_64
 
+**Mise à jour audit du 28/11/2026 :** [Build 11 validé](https://github.com/glaby91/moteur3d/actions/runs/46129493787) · [Package Linux Build 11](https://github.com/glaby91/moteur3d/actions/runs/46129493787/artifacts/15257341811) · **[Audit Linux, priorités et galerie](docs/platforms/LINUX_AUDIT.md)** · [Plan Vulkan 1.4](docs/platforms/VULKAN_14.md). Les tests CI restent logiciels (Lavapipe), GPU physique et WSI non validés.
+
+![Rendu Vulkan Linux — piscine, Build 6](docs/platforms/renders/linux-build6-pool.jpg)
+
 **Portage Linux validé fonctionnellement — CSE WARP V17.031, build Linux 8, scène V17.634 (28 novembre 2026).**
 
 - [Télécharger le package Linux complet (120 Mo)](https://github.com/glaby91/moteur3d/actions/runs/46085728151/artifacts/15238388787) : moteur, scène, shaders, catalogue Z Material, Qt 6.8.3, ICU, XCB et TLS. Artefact GitHub Actions à rétention limitée.
@@ -101,6 +105,10 @@ Pour démarrer directement hors ligne avec la scène embarquée : `./lancer.sh b
 Utiliser le pilote Vulkan adapté au GPU. Vulkan est sélectionné par défaut ; les modes CPU sont disponibles sans GPU. La présentation Linux passe par QImage avec relecture GPU/CPU. DirectX 11 et LumaTrace GPU/Z Reflect ne sont pas portés sous Linux. Audio local de secours validé via Qt AudioSink/PulseAudio virtuel ; écoute physique et flux Internet non validés. GPU physique et parité graphique encore à valider.
 
 ## macOS natif — ARM64 MoltenVK
+
+**Mise à jour audit du 28/11/2026 :** [Build 11 validé](https://github.com/glaby91/moteur3d/actions/runs/46129493750) · [Package Mac Build 11](https://github.com/glaby91/moteur3d/actions/runs/46129493750/artifacts/15256854128) · **[Audit macOS, priorités et galerie](docs/platforms/MACOS_AUDIT.md)** · [Plan Vulkan 1.4](docs/platforms/VULKAN_14.md). La campagne Commands 002 n'a pas validé la combinaison en performance ; conserver les réglages actuels.
+
+![Rendu Vulkan macOS — extérieur, Build 11](docs/platforms/renders/mac-build11-exterior.jpg)
 
 **Portage expérimental validé en CI hors écran — V17.031, macOS Build 4, scène V17.634, 28 novembre 2026.** Portage intégré à `master` sur décision du 28 novembre ; branche `test/macos-metal-vulkan` conservée comme historique.
 
