@@ -61,14 +61,22 @@ BackendResult renderEscargotF16(const Request& request,const m3d::Camera& camera
     if(!plan.ok){result.reason=QString::fromStdString(plan.error).toStdWString();return result;}
     plan.native.capturePacket=false;
     m3d::EscargotBuildTiming timing;
-    result.ok=m3d::renderLumaTraceEscargotGpuBuiltPreview(scene,rt.lumaTraceBvh4,shadow,camera,
-        request.width,request.height,plan.native,result.pixels,result.stats,timing,result.reason);
-    if(result.ok&&(result.stats.zReflectActive||result.pixels.size()!=size_t(request.width)*size_t(request.height))){
+    if(request.directPresent){
+        result.ok=m3d::renderLumaTraceEscargotGpuBuiltNative(scene,rt.lumaTraceBvh4,shadow,camera,
+            request.width,request.height,reinterpret_cast<void*>(request.nativeHandle),plan.native,result.stats,timing,result.reason);
+    }else{
+        result.ok=m3d::renderLumaTraceEscargotGpuBuiltPreview(scene,rt.lumaTraceBvh4,shadow,camera,
+            request.width,request.height,plan.native,result.pixels,result.stats,timing,result.reason);
+    }
+    if(result.ok&&(result.stats.zReflectActive||(request.directPresent?
+        result.stats.readbackBufferCount!=0:result.pixels.size()!=size_t(request.width)*size_t(request.height)))){
         result.ok=false;
         result.reason=L"Escargot: unexpected secondary camera or incomplete frame.";
     }
     result.stats.ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
-    if(result.ok)result.renderer=QStringLiteral("V17 LumaTrace BVH4 — Z Escargot G F16 — Qt (QImage)");
+    if(result.ok)result.renderer=request.directPresent?
+        QStringLiteral("V17 LumaTrace BVH4 — Z Escargot G F16 — Direct GPU (swapchain)"):
+        QStringLiteral("V17 LumaTrace BVH4 — Z Escargot G F16 — Qt (QImage)");
     return result;
 }
 } // namespace
@@ -88,14 +96,33 @@ BackendResult renderLumaTrace(const Request& request,const m3d::Camera& camera,
         result.reason=L"Le BVH4 LumaTrace n’a pas été construit pour cette scène.";
     }
 #ifdef _WIN32
-    else if(request.escargot&&!request.directPresent){
-        m3d::releaseDirectX11NativeForCurrentThread();
+    else if(request.escargot){
+        if(!request.directPresent)m3d::releaseDirectX11NativeForCurrentThread();
         result=renderEscargotF16(request,camera,shadow);
         if(!result.ok){
             const QString opticalError=QString::fromStdWString(result.reason);
             result.reason.clear();
+            // Optical failure must not change presentation. First recover on
+            // the same native swapchain using the approved Z Reflect path.
+            if(request.directPresent){
+                result.ok=m3d::renderLumaTraceNative(scene,snapshot.lumaTraceBvh4,shadow,camera,
+                    request.width,request.height,reinterpret_cast<void*>(request.nativeHandle),
+                    result.stats,result.reason);
+                if(result.ok){
+                    result.renderer=QStringLiteral("V17 LumaTrace BVH4 — Z Reflect (secours Escargot : %1) — Direct GPU (swapchain)").arg(opticalError);
+                    return result;
+                }
+                const QString nativeError=QString::fromStdWString(result.reason);
+                m3d::releaseDirectX11NativeForCurrentThread();
+                Request preview=request;preview.directPresent=false;
+                result=renderEscargotF16(preview,camera,shadow);
+                result.nativeFailure=nativeError;
+                if(result.ok){result.nativeFallback=true;return result;}
+            }
+            result.reason.clear();
             result.ok=m3d::renderLumaTracePreview(scene,snapshot.lumaTraceBvh4,shadow,camera,
                 request.width,request.height,result.pixels,result.stats,result.reason);
+            result.nativeFallback=request.directPresent&&result.ok;
             if(result.ok)result.renderer=QStringLiteral("V17 LumaTrace BVH4 — Z Reflect (secours Escargot : %1) — Qt (QImage)").arg(opticalError);
             else result.reason=L"Escargot: "+opticalError.toStdWString()+L"; Z Reflect: "+result.reason;
         }

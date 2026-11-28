@@ -180,6 +180,7 @@ struct EscargotPathTiming { double prepareMs=0,submitMs=0,readbackMs=0,gpuMs=0;b
 struct EscargotPacketBuild {std::vector<float> data;uint32_t prefixRecords=0,jobBase=0,jobCount=0,maxRecords=0;bool capturePacket=false;};
 struct EscargotBuildTiming {double prepareMs=0,submitMs=0,gpuMs=0,statusMs=0;uint32_t records=0,tiles=0;bool gpuTimingValid=false;std::vector<float> diagnosticPacket;};
 bool renderLumaTraceEscargotGpuBuiltPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const EscargotPacketBuild&,std::vector<uint32_t>&,Stats&,EscargotBuildTiming&,std::wstring&);
+bool renderLumaTraceEscargotGpuBuiltNative(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,void*,const EscargotPacketBuild&,Stats&,EscargotBuildTiming&,std::wstring&);
 bool traceEscargotGpuPaths(const Scene&,const LumaTraceBvh4&,const std::vector<EscargotPathQuery>&,std::vector<EscargotPathEvent>&,EscargotPathTiming&,std::wstring&);
 bool traceEscargotGpuBatch(const Scene&,const LumaTraceBvh4&,const std::vector<EscargotRayQuery>&,std::vector<EscargotRayHit>&,double&,double&,std::wstring&);
 bool renderLumaTraceEscargotGpuResidentPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring&);

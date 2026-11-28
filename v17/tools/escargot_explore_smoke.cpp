@@ -2,6 +2,8 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <algorithm>
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 
 int main(int argc,char** argv){
     QCoreApplication app(argc,argv);
@@ -43,5 +45,27 @@ int main(int argc,char** argv){
     auto restored=cse::v17render::renderLumaTrace(req,cam,shadow);
     if(!restored.ok||restored.pixels!=A.pixels)return 12;
     qInfo()<<"Escargot exploration integration: A / F16 / moved F16 / A restore OK";
+    // Same real HWND for both modes; no full-frame staging or QImage fallback.
+    RECT bounds{0,0,req.width,req.height};
+    AdjustWindowRect(&bounds,WS_OVERLAPPEDWINDOW,FALSE);
+    HWND hwnd=CreateWindowExW(0,L"STATIC",L"Escargot native integration",
+        WS_OVERLAPPEDWINDOW|WS_VISIBLE,0,0,bounds.right-bounds.left,bounds.bottom-bounds.top,
+        nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    if(!hwnd){qCritical()<<"Cannot create native test HWND"<<GetLastError();return 13;}
+    struct WindowGuard{HWND hwnd;~WindowGuard(){m3d::releaseDirectX11NativeForCurrentThread();DestroyWindow(hwnd);}} guard{hwnd};
+    req.nativeHandle=reinterpret_cast<quintptr>(hwnd);req.directPresent=true;
+    auto nativeA=cse::v17render::renderLumaTrace(req,cam,shadow);
+    const auto nativeOK=[](const auto& v){return v.ok&&!v.nativeFallback&&v.nativeFailure.isEmpty()&&v.pixels.empty()&&v.stats.readbackBufferCount==0;};
+    const auto nativeG=[&](const auto& v){return nativeOK(v)&&!v.stats.zReflectActive&&v.renderer.contains(QStringLiteral("Z Escargot G F16"))&&v.renderer.contains(QStringLiteral("swapchain"));};
+    if(!nativeOK(nativeA)){qCritical()<<nativeA.nativeFailure<<QString::fromStdWString(nativeA.reason);return 14;}
+    req.escargot=true;
+    auto nativeF=cse::v17render::renderLumaTrace(req,cam,shadow);
+    if(!nativeG(nativeF)){qCritical()<<nativeF.renderer<<nativeF.nativeFailure<<QString::fromStdWString(nativeF.reason);return 15;}
+    auto nativeMoved=cse::v17render::renderLumaTrace(req,moved,shadow);
+    if(!nativeG(nativeMoved))return 16;
+    req.escargot=false;
+    auto nativeRestore=cse::v17render::renderLumaTrace(req,cam,shadow);
+    if(!nativeOK(nativeRestore)||nativeRestore.stats.zReflectActive!=nativeA.stats.zReflectActive)return 17;
+    qInfo()<<"Native swapchain A / F16 / moved F16 / A restored, zero image readback";
     return 0;
 }

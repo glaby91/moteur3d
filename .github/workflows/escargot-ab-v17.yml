@@ -93,7 +93,7 @@ jobs:
         run: |
           cmake --build build-escargot --config Release --target moteur3d_v17 v17_escargot_explore_smoke --parallel 4
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-      - name: Interactive renderer integration A F16 moved F16 A (WARP)
+      - name: Interactive renderer QImage and native swapchain A F16 moved F16 A (WARP)
         shell: pwsh
         env:
           M3D_V16_FORCE_WARP: '1'
@@ -122,7 +122,7 @@ jobs:
           }
           New-Item -ItemType Directory -Force "$dist/materials" | Out-Null
           Copy-Item v17/materials/zmaterial8192.json "$dist/materials/"
-          @{ engine="17.031"; module="Escargot G F16 exploration"; scene="V17.634"; commit=$env:GITHUB_SHA; run=$env:GITHUB_RUN_ID; nativePresentation=$false; rayBudget=4096 } | ConvertTo-Json | Set-Content "$dist/BUILD_INFO.json"
+          @{ engine="17.031"; module="Escargot G F16 exploration"; scene="V17.634"; commit=$env:GITHUB_SHA; run=$env:GITHUB_RUN_ID; nativePresentation=$true; rayBudget=4096 } | ConvertTo-Json | Set-Content "$dist/BUILD_INFO.json"
           @'
           @echo off
           cd /d "%~dp0"
@@ -141,7 +141,7 @@ jobs:
           if (Test-Path "$dist/benchmark-civic") { throw "Unexpected scene in engine-only package" }
       - uses: actions/upload-artifact@v6
         with:
-          name: CSE-WARP-V17.031-Escargot-G-Exploration-Windows-x64
+          name: CSE-WARP-V17.031-Escargot-G-Exploration-Swapchain-Windows-x64
           path: escargot-exploration/
           if-no-files-found: error
       - name: Real scene A-B (WARP diagnostic)

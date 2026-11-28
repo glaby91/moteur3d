@@ -321,7 +321,9 @@ public:
         const char* multiresEnv=peripheralSetting<0
             ?std::getenv("M3D_V17_PERIPHERAL_MULTIREZ"):nullptr;
         const float atmosphereDensity=scene.underwaterEnvironment?0.f:atmosphere::density();
-        const bool multires=atmosphereDensity<=0.f&&(peripheralSetting==1 ||
+        const bool escEnabled=lumaBvh&&escargotInput!=nullptr;
+        // F16's stencil is defined in full-resolution pixel coordinates.
+        const bool multires=!escEnabled&&atmosphereDensity<=0.f&&(peripheralSetting==1 ||
             (peripheralSetting<0&&multiresEnv&&std::strcmp(multiresEnv,"1")==0))
             &&w>=320&&h>=240;
         if(!pending_.empty() &&
@@ -342,7 +344,6 @@ public:
         if(!ensureDevice(error)||!ensureScene(scene,error,lumaBvh))return false;
         const char* zOpt=std::getenv("M3D_V17_ZREFLECT");
         // V17.024: production LumaTrace enables Z Reflect unless explicitly disabled.
-        const bool escEnabled=lumaBvh&&escargotInput!=nullptr;
         if(escEnabled&&(escargotInput->w!=w||escargotInput->h!=h||multires)){error=L"Escargot incompatible dimensions/multires";return false;}
         const bool zEnabled=lumaBvh&&!escEnabled&&!(zOpt&&std::strcmp(zOpt,"0")==0);
         zActive_.clear();zreflect::QueryStats zStats{};
@@ -1027,6 +1028,12 @@ public:
         // Map, swizzle, QImage or Qt painter is touched on this path.
         if(nativeHwnd){
             context_->OMSetRenderTargets(0,nullptr,nullptr);
+            // Validate the small packet status before presenting. No image readback.
+            // Native callers never request the diagnostic full packet capture.
+            if(escBuilt&&!escBuild_.finish(context_.Get(),*escargotInput->buildTiming,error)){
+                if(slot.queryReady){context_->End(slot.afterDraw.Get());context_->End(slot.afterCopy.Get());context_->End(slot.disjoint.Get());}
+                return false;
+            }
             if(sampleCount_>1&&!multires&&!atmosphereOn)
                 context_->ResolveSubresource(resolve_.Get(),0,target_.Get(),0,
                                               DXGI_FORMAT_R8G8B8A8_UNORM);
@@ -2501,6 +2508,13 @@ bool renderLumaTraceEscargotGpuBuiltPreview(const Scene& scene,const LumaTraceBv
     struct Reset {~Reset(){escargotInput=nullptr;}} reset;escargotInput=&input;
     return rasterThreadContext().renderBuiltEscargot(scene,bvh,shadows,cam,w,h,pixels,stats,timing,error);
 }
+bool renderLumaTraceEscargotGpuBuiltNative(const Scene& scene,const LumaTraceBvh4& bvh,const ShadowMap& shadows,const Camera& cam,int w,int h,void* hwnd,
+    const EscargotPacketBuild& plan,Stats& stats,EscargotBuildTiming& timing,std::wstring& error){
+    if(w<=0||h<=0||w>4096||h>4096||!hwnd||escargotInput||plan.capturePacket){error=L"Invalid native Escargot GPU build request";return false;}
+    const EscargotInput input{nullptr,nullptr,w,h,nullptr,false,&plan,&timing};
+    struct Reset {~Reset(){escargotInput=nullptr;}} reset;escargotInput=&input;
+    return rasterThreadContext().present(scene,shadows,cam,w,h,reinterpret_cast<HWND>(hwnd),stats,error,&bvh);
+}
 bool renderLumaTraceEscargotGpuResidentPreview(const Scene& scene,const LumaTraceBvh4& bvh,const ShadowMap& shadows,const Camera& cam,int w,int h,
     const std::vector<float>& packet,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error){
     if(w<=0||h<=0||w>4096||h>4096||packet.size()<8||packet.size()%4||escargotInput){error=L"Invalid resident Escargot packet";return false;}
@@ -2565,6 +2579,7 @@ bool renderLumaTraceEscargotGpuPreview(const Scene&,const LumaTraceBvh4&,const S
 bool traceEscargotGpuPaths(const Scene&,const LumaTraceBvh4&,const std::vector<EscargotPathQuery>&,std::vector<EscargotPathEvent>&,EscargotPathTiming&,std::wstring& error){error=L"Escargot GPU paths Windows only";return false;}
 bool traceEscargotGpuBatch(const Scene&,const LumaTraceBvh4&,const std::vector<EscargotRayQuery>&,std::vector<EscargotRayHit>&,double&,double&,std::wstring& error){error=L"Escargot GPU trace Windows only";return false;}
 bool renderLumaTraceEscargotGpuBuiltPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const EscargotPacketBuild&,std::vector<uint32_t>&,Stats&,EscargotBuildTiming&,std::wstring& error){error=L"Escargot GPU packet build Windows only";return false;}
+bool renderLumaTraceEscargotGpuBuiltNative(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,void*,const EscargotPacketBuild&,Stats&,EscargotBuildTiming&,std::wstring& error){error=L"Escargot native GPU build Windows only";return false;}
 bool renderLumaTraceEscargotGpuResidentPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring& error){error=L"Escargot GPU resident Windows only";return false;}
 void releaseDirectX11NativeForCurrentThread(){}
 bool enqueueDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,unsigned,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}

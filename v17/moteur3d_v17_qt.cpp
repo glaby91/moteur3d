@@ -573,7 +573,7 @@ public:
             // The completion message itself also remains until another action.
             // Errors leave the last successful render time visible.
             const int completedBackend=outcome.backendIndex;
-            const bool directFallbackActive=!escargotSelected()&&directDisplayBox_&&directDisplayBox_->isChecked()&&
+            const bool directFallbackActive=directDisplayBox_&&directDisplayBox_->isChecked()&&
                 completedBackend>=0&&completedBackend<int(nativeDirectFailed_.size())&&
                 nativeDirectFailed_[size_t(completedBackend)];
             if(nativePresentationFailed||directFallbackActive){
@@ -2801,21 +2801,19 @@ private:
         form->addRow(directDisplayBox_);
         escargotBox_=new QCheckBox(QStringLiteral("Z Escargot G F16 — expérimental (F8)"));
         escargotBox_->setObjectName(QStringLiteral("v17EscargotF16"));
-        escargotBox_->setToolTip(QStringLiteral("Réflexions F16, 4096 requêtes, sans caméra secondaire. Affichage QImage uniquement ; F8 retourne à Z Reflect."));
+        escargotBox_->setToolTip(QStringLiteral("Réflexions F16, 4096 requêtes, sans caméra secondaire. Swapchain DX11 par défaut ; F8 retourne à Z Reflect sans changer la présentation."));
 #ifdef _WIN32
         escargotBox_->setEnabled(backendBox_->currentIndex()==6);
         escargotBox_->setChecked(qEnvironmentVariableIntValue("CSE_WARP_ESCARGOT")==1);
-        if(escargotSelected())directDisplayBox_->setEnabled(false);
 #else
         escargotBox_->setEnabled(false);
 #endif
         form->addRow(escargotBox_);
         connect(escargotBox_,&QCheckBox::toggled,this,[this](bool){
             if(!backendBox_||backendBox_->currentIndex()!=6)return;
-            directDisplayBox_->setEnabled(!escargotSelected());
+            // Keep the same HWND, swapchain and presentation option on F8.
             renderSerial_->fetch_add(1);
-            selectBackendOutputWindow();
-            restoreExplorationViewportFocus();
+            updateRendererStamp();
             requestRender();
         });
         form->addRow(QStringLiteral("Résolution"),qualityBox_);
@@ -3110,7 +3108,7 @@ private:
 #ifdef _WIN32
             if(escargotBox_)escargotBox_->setEnabled(index==6);
 #endif
-            directDisplayBox_->setEnabled(!escargotSelected()&&(index==4||index==6||(index==5&&vulkanDirectAvailable())));
+            directDisplayBox_->setEnabled(index==4||index==6||(index==5&&vulkanDirectAvailable()));
             directDisplayBox_->setToolTip(index==6
                 ?QStringLiteral("LumaTrace : présentation DX11 native. Les nuages sont coupés par défaut ; réactivez la case Nuages pour comparer.")
                 :(index==5
@@ -3655,7 +3653,7 @@ private:
 #ifdef _WIN32
         // Each native backend presents into its own backend-specific top-level
         // ImageView HWND; DXGI and Vulkan never share a target window.
-        if(escargotSelected()||!backendBox_||!directDisplayBox_||!directDisplayBox_->isChecked())return false;
+        if(!backendBox_||!directDisplayBox_||!directDisplayBox_->isChecked())return false;
         const int index=backendBox_->currentIndex();
         return (index==4||index==6||(index==5&&vulkanDirectAvailable()))&&
                !nativeDirectFailed_[size_t(index)];
@@ -3836,7 +3834,7 @@ private:
             requestedSize.setWidth(std::max(64,requestedSize.width()));
             requestedSize.setHeight(std::max(64,requestedSize.height()));
         }
-        const bool direct=!escargotSelected()&&(index==4||index==5||index==6)&&directDisplayBox_&&directDisplayBox_->isChecked();
+        const bool direct=(index==4||index==5||index==6)&&directDisplayBox_&&directDisplayBox_->isChecked();
         if(direct&&canvas_){
             const qreal dpr=canvas_->devicePixelRatioF();
             requestedSize=QSize(std::max(320,int(canvas_->width()*dpr)),
