@@ -1,5 +1,9 @@
 name: CSE WARP — Object007 profiling
 on:
+  push:
+    branches: [experiment/v17-escargot-gpu-007]
+    paths:
+      - '.github/workflows/escargot-resident-006.yml'
   workflow_dispatch:
 permissions:
   contents: read
