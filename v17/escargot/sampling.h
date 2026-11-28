@@ -24,10 +24,10 @@ inline float opticalWeight(const Material& m,V n,V d,Mode mode){
     const float f=f0+(1-f0)*std::pow(1-sat(-dot(n,d)),5.f);
     return mode==Mode::Reflection?sat(f):sat((1-f)*transmission(m));
 }
-inline void sampleSurface(Surface& sf,Traversal& trace,const Scene& scene,const Camera& cam,int w,int h,const Options& opt,Result& stats){
+inline bool initializeLattice(Surface& sf){
     const auto& r=sf.candidate.bounds;
     const uint32_t quota=sf.candidate.budget;
-    if(quota<2){sf.deferred=true;return;}
+    if(quota<2){sf.deferred=true;return false;}
     // Reserve room for two BVH queries per sample; extra transparent crossings
     // consume the same hard quota. No additional samples after the fixed pass.
     const uint32_t target=std::max(1u,quota/4); // reserve more than minimum for transparent paths
@@ -49,6 +49,11 @@ inline void sampleSurface(Surface& sf,Traversal& trace,const Scene& scene,const 
         s.x=r.x+x*sf.step+std::min(sf.step,r.w-x*sf.step)/2;
         s.y=r.y+y*sf.step+std::min(sf.step,r.h-y*sf.step)/2;
     }
+    return true;
+}
+inline void sampleSurface(Surface& sf,Traversal& trace,const Scene& scene,const Camera& cam,int w,int h,const Options& opt,Result& stats){
+    if(!initializeLattice(sf))return;
+    const uint32_t quota=sf.candidate.budget;
     uint32_t pathLimit=quota;
     auto query=[&](const Ray& ray,float low,HitSample& hit,uint32_t previous)->int{
         if(sf.queries>=pathLimit)return -1;

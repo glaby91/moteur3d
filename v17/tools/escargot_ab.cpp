@@ -59,7 +59,7 @@ int main(int argc,char** argv){
     QFile rayFile(out.filePath("gpu_bvh_mismatches.csv"));if(!rayFile.open(QIODevice::WriteOnly|QIODevice::Text))return 22;
     QTextStream rayLog(&rayFile);rayLog.setRealNumberPrecision(12);
     rayLog<<"camera,index,classification,previous_primitive,low,ox,oy,oz,dx,dy,dz,cpu_primitive,cpu_owner,cpu_depth,gpu_status,gpu_primitive,gpu_owner,gpu_depth,gpu_u,gpu_v,gpu_triangle_cpu_t,gpu_triangle_cpu_u,gpu_triangle_cpu_v,gpu_triangle_cpu_finite\n";
-    QJsonArray summary;int tested=0;uint64_t allChanged=0,allActive=0,allCoverage=0,allEffective=0;int gpuReplayFailed=0;
+    QJsonArray summary;int tested=0;uint64_t allChanged=0,allActive=0,allCoverage=0,allEffective=0;int gpuReplayFailed=0,waveFailed=0;
     for(const QString id:{QString("v17_showcase_pool_634"),QString("v7_pool_fresco"),QString("v7_curtain_wall_detail"),QString("v8_stair_first_landing")}){
         auto it=std::find_if(rt.cameras.begin(),rt.cameras.end(),[&](const auto& c){return c.id==id;});if(it==rt.cameras.end()){qWarning()<<"Missing camera"<<id;continue;}
         const auto cam=m3d::v16::makeCamera(*it,w,h);std::vector<uint32_t> a,b;std::vector<double> aTimes,bTimes;std::vector<float> lastPacket;
@@ -180,18 +180,68 @@ int main(int argc,char** argv){
         if(!gpuTraceOk||gpuOverflow||gpuMismatch)++gpuReplayFailed;
         const QString gpuTraceError=gpuTraceOk?QString():QString::fromStdWString(err);
         qInfo()<<id<<"GPU BVH replay"<<gpuTraceOk<<"queries"<<qulonglong(queries.size())<<"mismatches"<<qulonglong(gpuMismatch)<<"overflow"<<qulonglong(gpuOverflow)<<"ms"<<gpuQuery;
+        // D is a live path solver: only the queries for the current wave are
+        // submitted, and returned GPU hits drive every subsequent crossing.
+        // W uses the identical fixed-quota scheduler, but CPU intersections.
+        e::WaveStats wStats,dStats;auto waveOpt=opt;waveOpt.captureQueries=true;
+        auto wStart=Clock::now();auto waveCpu=session.frame(cam,w,h,waveOpt,false,true,false,&wStats);
+        const double waveCpuMatrix=ms(wStart);
+        if(!waveCpu.ok){qCritical()<<QString::fromStdString(waveCpu.error);return 23;}
+        auto wPacket=e::packGpu(waveCpu,scene,rt.objects.size());if(!wPacket.ok)return 23;
+        std::vector<uint32_t> waveRef;m3d::Stats wRender;
+        if(!m3d::renderLumaTraceEscargotGpuPreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,wPacket.data,waveRef,wRender,err)||!save(out,id+"-W-wavefront-cpu.png",waveRef,w,h))return 23;
+        std::vector<double> dTimes,dMatrixTimes,dDispatchTimes,dPackTimes,dRasterTimes;
+        uint64_t wavePacketDifferences=0,wavePixelDifferences=0,waveQueryDifferences=0,waveComparedQueries=0,oldBDifferences=0;
+        uint32_t waveRays=0,waveBatches=0,waveMaxBatch=0,waveComplete=0,waveUnknown=0;
+        bool waveOk=true;QString waveError;std::vector<uint32_t> dPixels;
+        for(int j=-1;j<repeats;++j){
+            const auto begin=Clock::now();auto waveGpu=session.frame(cam,w,h,waveOpt,false,true,true,&dStats);
+            const double matrixTime=ms(begin);
+            if(!waveGpu.ok){waveOk=false;waveError=QString::fromStdString(waveGpu.error);break;}
+            auto packStart=Clock::now();auto dPacket=e::packGpu(waveGpu,scene,rt.objects.size());const double packTime=ms(packStart);
+            if(!dPacket.ok){waveOk=false;waveError=QString::fromStdString(dPacket.error);break;}
+            m3d::Stats st;const auto renderStart=Clock::now();
+            if(!m3d::renderLumaTraceEscargotGpuPreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,dPacket.data,dPixels,st,err)||st.zReflectActive||dPixels.size()!=waveRef.size()){
+                waveOk=false;waveError=QString::fromStdWString(err);break;}
+            const double rasterTime=ms(renderStart),total=ms(begin);
+            if(j>=0){dTimes.push_back(total);dMatrixTimes.push_back(matrixTime);dDispatchTimes.push_back(dStats.dispatchMs);dPackTimes.push_back(packTime);dRasterTimes.push_back(rasterTime);}
+            uint64_t packetDiff=std::max(dPacket.data.size(),wPacket.data.size())-std::min(dPacket.data.size(),wPacket.data.size());
+            for(size_t k=0;k<std::min(dPacket.data.size(),wPacket.data.size());++k)packetDiff+=dPacket.data[k]!=wPacket.data[k];
+            uint64_t pixelDiff=0,oldDiff=0;
+            for(size_t k=0;k<dPixels.size();++k){pixelDiff+=dPixels[k]!=waveRef[k];oldDiff+=dPixels[k]!=b[k];}
+            wavePacketDifferences=std::max(wavePacketDifferences,packetDiff);wavePixelDifferences=std::max(wavePixelDifferences,pixelDiff);oldBDifferences=std::max(oldBDifferences,oldDiff);
+            uint64_t queryDiff=0,compared=0;
+            for(size_t k=0;k<waveCpu.surfaces.size();++k){
+                const auto& x=waveCpu.surfaces[k].recorded;const auto& y=waveGpu.surfaces[k].recorded;
+                queryDiff+=std::max(x.size(),y.size())-std::min(x.size(),y.size());
+                for(size_t m=0;m<std::min(x.size(),y.size());++m){
+                    ++compared;const auto& a=x[m];const auto& bq=y[m];
+                    bool same=a.primitive==bq.primitive&&a.depth==bq.depth&&a.query.low==bq.query.low&&a.query.previousPrimitive==bq.query.previousPrimitive;
+                    for(int axis=0;axis<3;++axis)same=same&&a.query.origin[axis]==bq.query.origin[axis]&&a.query.direction[axis]==bq.query.direction[axis];
+                    queryDiff+=!same;
+                }
+            }
+            waveQueryDifferences=std::max(waveQueryDifferences,queryDiff);waveComparedQueries=std::max(waveComparedQueries,compared);
+            waveRays=waveGpu.rays;waveBatches=dStats.batches;waveMaxBatch=dStats.maxBatch;waveComplete=waveGpu.completePaths;waveUnknown=waveGpu.unknownPaths;
+            if(waveGpu.rays!=waveCpu.rays||waveGpu.completePaths!=waveCpu.completePaths||waveGpu.unknownPaths!=waveCpu.unknownPaths){waveOk=false;waveError="path counters differ";break;}
+        }
+        if(!dPixels.empty()&&!save(out,id+"-D-wavefront-gpu.png",dPixels,w,h))return 23;
+        const bool waveParity=waveOk&&!wavePacketDifferences&&!wavePixelDifferences&&!waveQueryDifferences&&dTimes.size()==size_t(repeats);
+        if(!waveParity)++waveFailed;
+        qInfo()<<id<<"GPU wavefront"<<waveParity<<"rays"<<waveRays<<"batches"<<waveBatches<<"query diffs"<<qulonglong(waveQueryDifferences)<<"packet diffs"<<qulonglong(wavePacketDifferences)<<"pixel diffs"<<qulonglong(wavePixelDifferences)<<"p50"<<quantile(dTimes,.5)<<waveError;
         // A must remain stable after switching back from B.
         std::vector<uint32_t> again;m3d::Stats againStats;
         if(!m3d::renderLumaTracePreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,again,againStats,err)||again!=a){qCritical()<<"A/B restore parity failed"<<id;return 15;}
         if(!save(out,id+"-A-virtual.png",a,w,h)||!save(out,id+"-B-escargot.png",b,w,h)||!save(out,id+"-difference-x4.png",diff,w,h))return 11;
-        summary.append(QJsonObject{{"camera",id},{"A_p50_ms",quantile(aTimes,.50)},{"A_p95_ms",quantile(aTimes,.95)},{"B_p50_ms",quantile(bTimes,.50)},{"B_p95_ms",quantile(bTimes,.95)},{"B_fixed_pose_reuse_p50_ms",quantile(fixedTimes,.50)},{"B_fixed_pose_reuse_p95_ms",quantile(fixedTimes,.95)},{"B_resident_p50_ms",quantile(residentTimes,.50)},{"B_resident_p95_ms",quantile(residentTimes,.95)},{"A_moving_p50_ms",quantile(moveA,.50)},{"B_moving_p50_ms",quantile(moveB,.50)},{"gpuTraceAvailable",gpuTraceOk},{"gpuTraceError",gpuTraceError},{"gpuTraceQueries",double(queries.size())},{"gpuTraceMismatches",double(gpuMismatch)},{"gpuTraceOverflow",double(gpuOverflow)},{"gpuTracePrepareMs",gpuPrepare},{"gpuTraceReplayMs",gpuQuery},{"gpuTraceWarmReplayMs",warmQuery},{"gpuMismatchNearLow",double(nearLow)},{"gpuMismatchSameOwner",double(sameOwner)},{"gpuMismatchDifferentOwner",double(differentOwner)},{"gpuMismatchHitMiss",double(hitMiss)},{"gpuMismatchDepthOnly",double(depthOnly)},{"changedPixels",double(changed)},{"escargotEffectivePixels",double(effective)},{"meanAbsChannelDifference",errorSum/(3*a.size())}});
+        summary.append(QJsonObject{{"camera",id},{"A_p50_ms",quantile(aTimes,.50)},{"A_p95_ms",quantile(aTimes,.95)},{"B_p50_ms",quantile(bTimes,.50)},{"B_p95_ms",quantile(bTimes,.95)},{"B_fixed_pose_reuse_p50_ms",quantile(fixedTimes,.50)},{"B_fixed_pose_reuse_p95_ms",quantile(fixedTimes,.95)},{"B_resident_p50_ms",quantile(residentTimes,.50)},{"B_resident_p95_ms",quantile(residentTimes,.95)},{"A_moving_p50_ms",quantile(moveA,.50)},{"B_moving_p50_ms",quantile(moveB,.50)},{"gpuTraceAvailable",gpuTraceOk},{"gpuTraceError",gpuTraceError},{"gpuTraceQueries",double(queries.size())},{"gpuTraceMismatches",double(gpuMismatch)},{"gpuTraceOverflow",double(gpuOverflow)},{"gpuTracePrepareMs",gpuPrepare},{"gpuTraceReplayMs",gpuQuery},{"gpuTraceWarmReplayMs",warmQuery},{"gpuMismatchNearLow",double(nearLow)},{"gpuMismatchSameOwner",double(sameOwner)},{"gpuMismatchDifferentOwner",double(differentOwner)},{"gpuMismatchHitMiss",double(hitMiss)},{"gpuMismatchDepthOnly",double(depthOnly)},{"wavefrontValidated",waveParity},{"wavefrontError",waveError},{"D_p50_ms",quantile(dTimes,.50)},{"D_p95_ms",quantile(dTimes,.95)},{"D_matrix_p50_ms",quantile(dMatrixTimes,.50)},{"D_dispatch_p50_ms",quantile(dDispatchTimes,.50)},{"D_pack_p50_ms",quantile(dPackTimes,.50)},{"D_raster_p50_ms",quantile(dRasterTimes,.50)},{"W_cpu_matrix_ms",waveCpuMatrix},{"wavefrontRays",int(waveRays)},{"wavefrontCpuRays",int(waveCpu.rays)},{"wavefrontBatches",int(waveBatches)},{"wavefrontMaxBatch",int(waveMaxBatch)},{"wavefrontComplete",int(waveComplete)},{"wavefrontUnknown",int(waveUnknown)},{"wavefrontComparedQueries",double(waveComparedQueries)},{"wavefrontQueryDifferences",double(waveQueryDifferences)},{"wavefrontPacketDifferences",double(wavePacketDifferences)},{"wavefrontPixelDifferences",double(wavePixelDifferences)},{"wavefrontVsOldBPixelDifferences",double(oldBDifferences)},{"changedPixels",double(changed)},{"escargotEffectivePixels",double(effective)},{"meanAbsChannelDifference",errorSum/(3*a.size())}});
         qInfo()<<id<<"A p50"<<quantile(aTimes,.5)<<"B p50"<<quantile(bTimes,.5)<<"changed"<<qulonglong(changed)<<"effective Escargot pixels"<<qulonglong(effective);++tested;log.flush();
     }
     if(!tested||!allActive||!allCoverage||!allChanged||!allEffective){qCritical()<<"Invalid A/B: no active virtual camera, optical data or visible changes";return 12;}
     QFile json(out.filePath("summary.json"));if(!json.open(QIODevice::WriteOnly))return 13;
-    const QJsonObject report{{"scene",loaded.scene.revision},{"width",w},{"height",h},{"repeats",repeats},{"rayBudget",int(opt.rayBudget)},{"textureResolutionCap",256},{"msaaRequested",1},{"modeB","CPU sparse BVH observations + compact GPU four-neighbor reconstruction, no secondary cameras"},{"receiverMatch","exact source object ID + material + local tangent plane; no averaged receiver depth rejection"},{"sourceLighting","resident GPU textures + simplified proxy, not LT radiance"},{"atlasNonzeroNote","not applicable in GPU mode; use effective pixels and packet_tiles"},{"cpuReference","untimed C capture, prior CPU reconstruction and depth gate, serial rays"},{"fixedPoseReuse","separate diagnostic: identical camera/scene/lighting, reuse CPU packet; includes GPU upload/render/readback, not moving-camera timing"},{"residentPose","exact camera/light/scene/opt key; byte-identical GPU packet remains resident; includes raster/readback"},{"movingPose","three actual lateral shifts 2.5/5/7.5 cm, cache misses enforced"},{"gpuTrace","experimental native nearest-hit replay on same DX11 device and resident BVH nodes; full transparent triangle geometry/order, not active B path"},{"forceWarp",qEnvironmentVariable("M3D_V16_FORCE_WARP")},{"gpuReplayValidated",gpuReplayFailed==0},{"gpuReplayFailedViews",gpuReplayFailed},{"cameras",summary}};
+    const QJsonObject report{{"scene",loaded.scene.revision},{"width",w},{"height",h},{"repeats",repeats},{"rayBudget",int(opt.rayBudget)},{"textureResolutionCap",256},{"msaaRequested",1},{"modeB","CPU sparse BVH observations + compact GPU four-neighbor reconstruction, no secondary cameras"},{"receiverMatch","exact source object ID + material + local tangent plane; no averaged receiver depth rejection"},{"sourceLighting","resident GPU textures + simplified proxy, not LT radiance"},{"atlasNonzeroNote","not applicable in GPU mode; use effective pixels and packet_tiles"},{"cpuReference","untimed C capture, prior CPU reconstruction and depth gate, serial rays"},{"fixedPoseReuse","separate diagnostic: identical camera/scene/lighting, reuse CPU packet; includes GPU upload/render/readback, not moving-camera timing"},{"residentPose","exact camera/light/scene/opt key; byte-identical GPU packet remains resident; includes raster/readback"},{"movingPose","three actual lateral shifts 2.5/5/7.5 cm, cache misses enforced"},{"gpuTrace","experimental native nearest-hit replay on same DX11 device and resident BVH nodes; full transparent triangle geometry/order, not active B path"},{"forceWarp",qEnvironmentVariable("M3D_V16_FORCE_WARP")},{"gpuReplayValidated",gpuReplayFailed==0},{"gpuReplayFailedViews",gpuReplayFailed},{"wavefrontValidated",waveFailed==0},{"wavefrontFailedViews",waveFailed},{"wavefrontMode","D: actual batched GPU intersections, CPU path state and packet assembly; W: identical fixed per-sample quotas with CPU intersections; B unchanged"},{"cameras",summary}};
     const auto bytes=QJsonDocument(report).toJson();if(json.write(bytes)!=bytes.size()||log.status()!=QTextStream::Ok)return 13;
     rayLog.flush();if(rayLog.status()!=QTextStream::Ok)return 22;
     if(gpuReplayFailed){qWarning()<<"A/B captures saved, but native GPU BVH replay not validated";return 21;}
+    if(waveFailed){qWarning()<<"A/B captures saved, but GPU wavefront parity not validated";return 23;}
     return 0;
 }

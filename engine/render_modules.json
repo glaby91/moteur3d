@@ -410,7 +410,7 @@
         "v17"
       ],
       "optional": true,
-      "description": "Experimental optical layers, exact packet residency and native DX11 BVH4 nearest-hit replay",
+      "description": "Experimental optical layer reconstruction, resident packets and live batched GPU BVH4 wavefront",
       "dependencies": [
         "lumatrace_cpu",
         "z_material"
@@ -424,7 +424,8 @@
         "v17/escargot/composite.h",
         "v17/escargot/runtime.h",
         "v17/escargot/gpu_packet.h",
-        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_escargot_trace_d3d11.h"
+        "experiments/2026-10-30-cote-ete-gt/native_v14/src/m3d_escargot_trace_d3d11.h",
+        "v17/escargot/wavefront.h"
       ]
     },
     {
