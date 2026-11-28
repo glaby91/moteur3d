@@ -332,6 +332,9 @@ bool escGpuSample(VSOut i,out float3 reflected,out float coverage,out float weig
 inline constexpr char kShaderAfterEscargot[] = R"(bool sampleEscargot(VSOut i,out float3 reflected,out float coverage,out float weight){
     reflected=0;coverage=0;weight=0;
     if(zPlaneIds.z>=0||zPlaneIds.w>.5)return false;
+#ifdef CSE_ESCARGOT_RASTER_DIRECT
+    if(zPlaneIds.z< -2.5)return escRasterOptical(i,reflected,coverage,weight);
+#endif
     if(zPlaneIds.z< -1.5)return escGpuSample(i,reflected,coverage,weight);
     int2 p=int2(i.p.xy);float4 m=escMeta.Load(int3(p,0));
     if(i.receiverId==0u||m.w!=float(i.receiverId)||m.y!=float(i.mat+1u)||m.x<=0)return false;

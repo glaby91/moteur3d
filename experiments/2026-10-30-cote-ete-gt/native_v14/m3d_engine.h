@@ -177,7 +177,7 @@ struct EscargotPathQuery { EscargotRayQuery initial;uint32_t receiver,quota,offs
 struct EscargotPathEvent { EscargotRayQuery query;EscargotRayHit hit; }; // hit.pad[0] in first slot = event count, pad[1] = error flag
 struct EscargotPathTiming { double prepareMs=0,submitMs=0,readbackMs=0,gpuMs=0;bool gpuTimingValid=false;uint64_t transferredBytes=0; };
 // Compact source observations and tile jobs; final optical packet built on GPU.
-struct EscargotPacketBuild {std::vector<float> data;uint32_t prefixRecords=0,jobBase=0,jobCount=0,maxRecords=0;bool capturePacket=false;};
+struct EscargotPacketBuild {std::vector<float> data;uint32_t prefixRecords=0,jobBase=0,jobCount=0,maxRecords=0;bool capturePacket=false;bool rasterDirect=false;std::vector<uint32_t> rasterReceivers;};
 struct EscargotBuildTiming {double prepareMs=0,submitMs=0,gpuMs=0,statusMs=0;uint32_t records=0,tiles=0;bool gpuTimingValid=false;std::vector<float> diagnosticPacket;};
 bool renderLumaTraceEscargotGpuBuiltPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const EscargotPacketBuild&,std::vector<uint32_t>&,Stats&,EscargotBuildTiming&,std::wstring&);
 bool renderLumaTraceEscargotGpuBuiltNative(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,void*,const EscargotPacketBuild&,Stats&,EscargotBuildTiming&,std::wstring&);

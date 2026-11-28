@@ -22,6 +22,7 @@
 #include <wrl/client.h>
 #include "m3d_lumatrace_gpu_d3d11.h"
 #include "m3d_escargot_trace_d3d11.h"
+#include "m3d_escargot_raster_d3d11.h"
 #include "m3d_escargot_pack_d3d11.h"
 #include <cstddef>
 #include <cstdlib>
@@ -257,7 +258,7 @@ class DirectX11Preview {
 public:
     bool renderBuiltEscargot(const Scene& scene,const LumaTraceBvh4& bvh,const ShadowMap& shadows,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,EscargotBuildTiming& timing,std::wstring& error){
         if(!renderLumaTrace(scene,bvh,shadows,cam,w,h,pixels,stats,error))return false;
-        return escBuild_.finish(context_.Get(),timing,error);
+        return (escargotInput&&escargotInput->build&&escargotInput->build->rasterDirect)||escBuild_.finish(context_.Get(),timing,error);
     }
     bool traceEscargotPaths(const Scene& scene,const LumaTraceBvh4& bvh,const std::vector<EscargotPathQuery>& q,std::vector<EscargotPathEvent>& events,EscargotPathTiming& timing,std::wstring& error){
         if(!ensureDevice(error)||!ensureScene(scene,error,&bvh))return false;
@@ -349,9 +350,12 @@ public:
         zActive_.clear();zreflect::QueryStats zStats{};
         const auto zStart=Clock::now();
         if(lumaBvh&&!escEnabled)zStats=zRuntime_.select(scene,cam,zActive_,zEnabled);
-        const bool escBuilt=escEnabled&&escargotInput->build;
+        const bool escDirect=escEnabled&&escargotInput->build&&escargotInput->build->rasterDirect;
+        const bool escBuilt=escEnabled&&escargotInput->build&&!escDirect;
         const bool escGpu=escEnabled&&(escargotInput->packet||escBuilt);
-        if(escBuilt){
+        if(escDirect){
+            if(!objectPs_){error=objectShaderError_.empty()?L"Object GPU shader not enabled at device startup":objectShaderError_;return false;}
+        }else if(escBuilt){
             if(!escargotInput->buildTiming||!escBuild_.build(device_.Get(),context_.Get(),*escargotInput->build,*escargotInput->buildTiming,error))return false;
         }else if(escEnabled&&!(escGpu?uploadEscargotPacket(*escargotInput->packet,error,escargotInput->resident):uploadEscargot(w,h,*escargotInput,error)))return false;
         const double zSelectUs=lumaBvh?std::chrono::duration<double,std::micro>(Clock::now()-zStart).count():0.;
@@ -375,6 +379,7 @@ public:
         const char* adaptiveEnv=std::getenv("M3D_V17_LUMA_ADAPTIVE");
         const bool adaptiveRequested=lumaBvh&&adaptiveEnv&&std::strcmp(adaptiveEnv,"1")==0;
         if(lumaBvh&&!lumaTraceCompute_.prepare(device_.Get(),*lumaBvh,lumaCpuScene_,scene,adaptiveRequested,error))return false;
+        if(escDirect&&!objectOptics_.prepare(device_.Get(),context_.Get(),scene,*lumaBvh,escargotInput->build->rasterReceivers,error))return false;
         const unsigned slotIndex=nextReadbackSlot_;
         ReadbackSlot& slot=readbackSlots_[slotIndex];
         slot.cpuStarted=started;
@@ -661,7 +666,7 @@ public:
             context_->RSSetState(scissor?scissorRaster_.Get():raster_.Get());
             context_->OMSetDepthStencilState(depth_.Get(),0);
             context_->VSSetShader(vs_.Get(),nullptr,0);
-            context_->PSSetShader(ps_.Get(),nullptr,0);
+            context_->PSSetShader(escDirect?objectPs_.Get():ps_.Get(),nullptr,0);
             ID3D11Buffer* cbuff=constants_.Get();
             context_->VSSetConstantBuffers(0,1,&cbuff);
             context_->PSSetConstantBuffers(0,1,&cbuff);
@@ -673,9 +678,10 @@ public:
                 nullptr, // reserved t8, no dedicated water texture
                 cb.zPlaneIds[3]<.5f&&cb.zPlaneIds[2]>.5f?zTargets_[0].srv.Get():nullptr,
                 cb.zPlaneIds[3]<.5f&&cb.zPlaneIds[2]>1.5f?zTargets_[1].srv.Get():nullptr,
-                escEnabled&&!escGpu?escColorSrv_.Get():nullptr,escEnabled&&!escGpu?escMetaSrv_.Get():nullptr,
+                escEnabled&&!escGpu&&!escDirect?escColorSrv_.Get():nullptr,escEnabled&&!escGpu&&!escDirect?escMetaSrv_.Get():nullptr,
                 escGpu?(escBuilt?escBuild_.view():escPacketSrv_.Get()):nullptr};
             context_->PSSetShaderResources(0,14,srvs);
+            if(escDirect)objectOptics_.bind(context_.Get(),lumaTraceCompute_.bvhSrv());else escargot_gpu::RasterOptics::unbind(context_.Get());
             ID3D11SamplerState* samplers[]={sampler_.Get(),probeSampler_.Get()};
             context_->PSSetSamplers(0,2,samplers);
         
@@ -988,7 +994,7 @@ public:
         const double reflectSubmitMs=zActive_.empty()?0.:std::chrono::duration<double,std::milli>(Clock::now()-reflectSubmitStart).count();
         cb.zPlaneIds[3]=0.f;activeCam=cam;
         cb.reflectionControls[0]=0.f;
-        cb.zPlaneIds[2]=escGpu?-2.f:(escEnabled?-1.f:float(zActive_.size()));
+        cb.zPlaneIds[2]=escDirect?-3.f:(escGpu?-2.f:(escEnabled?-1.f:float(zActive_.size())));
         if(multires){
             if(!drawScene(lowRtv_.Get(),lowDsv_.Get(),lowW_,lowH_,false,true) ||
                !drawScene(rtv_.Get(),dsv_.Get(),w,h,true,false))return false;
@@ -1458,6 +1464,16 @@ private:
             activeMacros,nullptr,"PSMain","ps_4_0",
             D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&psCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation du pixel shader DirectX 11 impossible");return false;}
+        const char* objectEnv=std::getenv("CSE_WARP_ESCARGOT_OBJECT_GPU");
+        if(objectEnv&&std::strcmp(objectEnv,"1")==0){
+            try{
+                const std::string objectSource=std::string("#define CSE_ESCARGOT_RASTER_DIRECT 1\n")+dx11::shaders::raster::kShader+dx11::shaders::raster::kEscargotGpuShader+escargot_gpu::rasterTraceSource()+escargot_gpu::kRasterOptics+dx11::shaders::raster::kShaderAfterEscargot+dx11::shaders::raster::kShaderPart2;
+                ComPtr<ID3DBlob> objectCode;errors.Reset();
+                HRESULT objectHr=D3DCompile(objectSource.data(),objectSource.size(),"EscargotObjectRaster004",activeMacros,nullptr,"PSMain","ps_5_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&objectCode,&errors);
+                if(FAILED(objectHr))objectShaderError_=shaderError(L"Object GPU pixel shader compilation");
+                else if(FAILED(device_->CreatePixelShader(objectCode->GetBufferPointer(),objectCode->GetBufferSize(),nullptr,&objectPs_)))objectShaderError_=L"Object GPU pixel shader creation";
+            }catch(const std::exception&){objectShaderError_=L"Object GPU shader source assembly";}
+        }
         ComPtr<ID3DBlob> reflectionDepthCode;
         errors.Reset();hr=D3DCompile(shaderSource.c_str(),shaderSource.size(),"m3d_directx11_preview",nullptr,nullptr,"PSReflectionDepth","ps_4_0",D3DCOMPILE_OPTIMIZATION_LEVEL3,0,&reflectionDepthCode,&errors);
         if(FAILED(hr)){error=shaderError(L"Compilation du Z Prepass miroir impossible");return false;}
@@ -1609,7 +1625,7 @@ private:
         foliageInstances_.Reset();
         for(auto& buffer:foliageVertices_)buffer.Reset();
         foliageVertexCounts_.fill(0);foliage_.clear();foliageInstanceCount_=0;
-        lumaTraceCompute_.reset();escResidentPacket_.clear();escTrace_=escargot_gpu::TraceBatch{};escBuild_=escargot_gpu::PacketBuilder{};
+        lumaTraceCompute_.reset();escResidentPacket_.clear();escTrace_=escargot_gpu::TraceBatch{};escBuild_=escargot_gpu::PacketBuilder{};objectOptics_=escargot_gpu::RasterOptics{};objectPs_.Reset();objectShaderError_.clear();
         lumaCpuScene_={};
         if(lumaTrace&&!prepareLumaTraceCpuScene(scene,*lumaBvh,lumaCpuScene_,error))
             return false;
@@ -2348,6 +2364,9 @@ private:
     size_t escPacketCapacity_=0;
     std::vector<float> escResidentPacket_;
     escargot_gpu::TraceBatch escTrace_;
+    escargot_gpu::RasterOptics objectOptics_;
+    ComPtr<ID3D11PixelShader> objectPs_;
+    std::wstring objectShaderError_;
     escargot_gpu::PacketBuilder escBuild_;
     bool uploadEscargotPacket(const std::vector<float>& data,std::wstring& error,bool reuse=false){
         ID3D11ShaderResourceView* clear=nullptr;context_->PSSetShaderResources(13,1,&clear);

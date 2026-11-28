@@ -2,12 +2,19 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <algorithm>
+#include <cstdlib>
+#include <QDir>
+#include <QImage>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QFile>
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
 int main(int argc,char** argv){
     QCoreApplication app(argc,argv);
-    if(app.arguments().size()!=2)return 2;
+    if(app.arguments().size()<2||app.arguments().size()>3)return 2;
+    _putenv_s("CSE_WARP_ESCARGOT_OBJECT_GPU","1");
     auto loaded=m3d::v16::loadScene(app.arguments().at(1));
     if(!loaded){qCritical()<<loaded.error;return 3;}
     auto built=m3d::v16::buildRuntime(loaded.scene,256);
@@ -32,15 +39,19 @@ int main(int argc,char** argv){
     auto A=cse::v17render::renderLumaTrace(req,cam,shadow);
     if(!A.ok){qCritical()<<QString::fromStdWString(A.reason);return 8;}
     req.escargot=true;
+    _putenv_s("CSE_WARP_ESCARGOT_OBJECT_GPU","0");
+    auto F=cse::v17render::renderLumaTrace(req,cam,shadow);
+    if(!F.ok||F.stats.zReflectActive||!F.renderer.contains("Z Escargot G F16"))return 18;
+    _putenv_s("CSE_WARP_ESCARGOT_OBJECT_GPU","1");
     auto G=cse::v17render::renderLumaTrace(req,cam,shadow);
-    if(!G.ok||G.stats.zReflectActive||!G.renderer.contains(QStringLiteral("Z Escargot G F16"))||G.pixels.size()!=A.pixels.size()){
+    if(!G.ok||G.stats.zReflectActive||!G.renderer.contains(QStringLiteral("Z Escargot Object 004"))||G.pixels.size()!=A.pixels.size()){
         qCritical()<<G.renderer<<QString::fromStdWString(G.reason);return 9;
     }
-    if(A.pixels==G.pixels)return 10;
+    if(A.pixels==G.pixels||F.pixels==G.pixels)return 10;
     auto pose=*it;pose.eye.x+=.075f;pose.target.x+=.075f;
     auto moved=m3d::v16::makeCamera(pose,req.width,req.height);
     auto M=cse::v17render::renderLumaTrace(req,moved,shadow);
-    if(!M.ok||M.stats.zReflectActive||!M.renderer.contains(QStringLiteral("Z Escargot G F16"))||M.pixels==G.pixels)return 11;
+    if(!M.ok||M.stats.zReflectActive||!M.renderer.contains(QStringLiteral("Z Escargot Object 004"))||M.pixels==G.pixels)return 11;
     req.escargot=false;
     auto restored=cse::v17render::renderLumaTrace(req,cam,shadow);
     if(!restored.ok||restored.pixels!=A.pixels)return 12;
@@ -56,7 +67,7 @@ int main(int argc,char** argv){
     req.nativeHandle=reinterpret_cast<quintptr>(hwnd);req.directPresent=true;
     auto nativeA=cse::v17render::renderLumaTrace(req,cam,shadow);
     const auto nativeOK=[](const auto& v){return v.ok&&!v.nativeFallback&&v.nativeFailure.isEmpty()&&v.pixels.empty()&&v.stats.readbackBufferCount==0;};
-    const auto nativeG=[&](const auto& v){return nativeOK(v)&&!v.stats.zReflectActive&&v.renderer.contains(QStringLiteral("Z Escargot G F16"))&&v.renderer.contains(QStringLiteral("swapchain"));};
+    const auto nativeG=[&](const auto& v){return nativeOK(v)&&!v.stats.zReflectActive&&v.renderer.contains(QStringLiteral("Z Escargot Object 004"))&&v.renderer.contains(QStringLiteral("swapchain"));};
     if(!nativeOK(nativeA)){qCritical()<<nativeA.nativeFailure<<QString::fromStdWString(nativeA.reason);return 14;}
     req.escargot=true;
     auto nativeF=cse::v17render::renderLumaTrace(req,cam,shadow);
@@ -66,6 +77,13 @@ int main(int argc,char** argv){
     req.escargot=false;
     auto nativeRestore=cse::v17render::renderLumaTrace(req,cam,shadow);
     if(!nativeOK(nativeRestore)||nativeRestore.stats.zReflectActive!=nativeA.stats.zReflectActive)return 17;
-    qInfo()<<"Native swapchain A / F16 / moved F16 / A restored, zero image readback";
+    qInfo()<<"Native swapchain A / Object004 / moved Object004 / A restored, zero image readback";
+    if(app.arguments().size()==3){
+        QDir out(app.arguments().at(2));if(!QDir().mkpath(out.absolutePath()))return 19;
+        auto save=[&](const auto& r,const QString& name){return QImage(reinterpret_cast<const uchar*>(r.pixels.data()),req.width,req.height,req.width*4,QImage::Format_RGB32).save(out.filePath(name));};
+        if(!save(A,"A.png")||!save(F,"F16.png")||!save(G,"Object004.png")||!save(M,"Object004-moved.png"))return 20;
+        QJsonObject report{{"A_ms",double(A.stats.ms)},{"F16_ms",double(F.stats.ms)},{"Object004_ms",double(G.stats.ms)},{"Object004_moved_ms",double(M.stats.ms)},{"native_A_submit_ms",double(nativeA.stats.ms)},{"native_Object004_submit_ms",double(nativeF.stats.ms)},{"native_readback",int(nativeF.stats.readbackBufferCount)},{"note","Single warm/cold smoke timings on software WARP, not hardware FPS. Pixel output differs from A and F16; movement and A restoration verified, not proof of visual parity."}};
+        QFile f(out.filePath("object004-summary.json"));if(!f.open(QIODevice::WriteOnly))return 21;f.write(QJsonDocument(report).toJson());
+    }
     return 0;
 }

@@ -3,6 +3,8 @@
 #include "escargot/gpu_packet.h"
 #include "escargot/runtime.h"
 #include <chrono>
+#include <cstdlib>
+#include <cstring>
 #endif
 
 namespace cse::v17render {
@@ -31,6 +33,7 @@ struct ExplorationSession {
     std::weak_ptr<const m3d::v16::SceneDatabase> database;
     uint64_t revision=0;
     std::unique_ptr<e::Prepared> prepared;
+    std::vector<uint32_t> objectReceivers;
 };
 BackendResult renderEscargotF16(const Request& request,const m3d::Camera& camera,
                                const m3d::ShadowMap& shadow){
@@ -53,6 +56,22 @@ BackendResult renderEscargotF16(const Request& request,const m3d::Camera& camera
         session.database=request.sceneDatabase;
         session.revision=scene.gpuCacheRevision;
         session.prepared=std::make_unique<e::Prepared>(rt,*request.sceneDatabase,opt.mode);
+        session.objectReceivers.assign(size_t(rt.objects.size())+1,0);
+        for(const auto& c:e::staticCandidates(rt,*request.sceneDatabase,e::Mode::Reflection))session.objectReceivers[c.object]=1;
+    }
+    const char* objectEnv=std::getenv("CSE_WARP_ESCARGOT_OBJECT_GPU");
+    QString objectFailure;
+    if(objectEnv&&std::strcmp(objectEnv,"1")==0){
+        m3d::EscargotPacketBuild plan;plan.rasterDirect=true;plan.rasterReceivers=session.objectReceivers;
+        m3d::EscargotBuildTiming timing;
+        if(request.directPresent)result.ok=m3d::renderLumaTraceEscargotGpuBuiltNative(scene,rt.lumaTraceBvh4,shadow,camera,request.width,request.height,reinterpret_cast<void*>(request.nativeHandle),plan,result.stats,timing,result.reason);
+        else result.ok=m3d::renderLumaTraceEscargotGpuBuiltPreview(scene,rt.lumaTraceBvh4,shadow,camera,request.width,request.height,plan,result.pixels,result.stats,timing,result.reason);
+        if(result.ok&&!result.stats.zReflectActive&&(request.directPresent?result.stats.readbackBufferCount==0:result.pixels.size()==size_t(request.width)*request.height)){
+            result.stats.ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+            result.renderer=request.directPresent?QStringLiteral("V17 LumaTrace BVH4 — Z Escargot Object 004 — Direct GPU (swapchain)"):QStringLiteral("V17 LumaTrace BVH4 — Z Escargot Object 004 — Qt (QImage)");
+            return result;
+        }
+        objectFailure=QString::fromStdWString(result.reason);result=BackendResult{};
     }
     e::ResidentStats resident;
     auto frame=session.prepared->frame(camera,request.width,request.height,opt,false,true,true,nullptr,&resident);
@@ -77,6 +96,7 @@ BackendResult renderEscargotF16(const Request& request,const m3d::Camera& camera
     if(result.ok)result.renderer=request.directPresent?
         QStringLiteral("V17 LumaTrace BVH4 — Z Escargot G F16 — Direct GPU (swapchain)"):
         QStringLiteral("V17 LumaTrace BVH4 — Z Escargot G F16 — Qt (QImage)");
+    if(result.ok&&!objectFailure.isEmpty())result.renderer+=QStringLiteral(" — secours Object 004 : ")+objectFailure;
     return result;
 }
 } // namespace
