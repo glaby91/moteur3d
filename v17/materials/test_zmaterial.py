@@ -36,5 +36,5 @@ ui=(root/'v17/moteur3d_v17_qt.cpp').read_text(encoding='utf-8')
 for marker in ('backendBox_->setCurrentIndex(useDefaultShowcaseProfile()?6:4)', 'pool.eye={29.90612030029297f,2.245000123977661f,-18.339569091796875f}', 'pool.target={29.043092727661133f,2.286057472229004f,-18.843053817749023f}', 'pool.fov=61.f', 'initialQuality.msaaSamples=8', 'initialQuality.anisotropy=16', 'initialQuality.lodQualityPercent=200', 'initialQuality.dynamicLod=false', 'if(isStressScene&&!useDefaultShowcaseProfile())', 'M3D_V17_HD620_INTERACTIVE_REDUCE'):
  assert marker in ui, marker
 mods={x['id']:x['revision'] for x in json.loads((root/'engine/render_modules.json').read_text())['modules']}
-assert mods['z_material']=='001' and mods['d3d11_raster']=='018' and mods['d3d11_raster_shader']=='009' and mods['vulkan_raster']=='010' and mods['lumatrace_gpu_compute']=='010'
+assert mods['z_material']=='001' and mods['d3d11_raster']=='018' and mods['d3d11_raster_shader']=='009' and mods['vulkan_raster']=='012' and mods['lumatrace_gpu_compute']=='010'
 print('5: V17.031 startup and module manifest')
