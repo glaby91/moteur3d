@@ -389,7 +389,12 @@ public:
         const bool zEnabled=lumaBvh&&!escEnabled&&!(zOpt&&std::strcmp(zOpt,"0")==0);
         zActive_.clear();zreflect::QueryStats zStats{};
         const auto zStart=Clock::now();
-        if(lumaBvh&&!escEnabled)zStats=zRuntime_.select(scene,cam,zActive_,zEnabled);
+        // Production "Z Reflect off" intentionally retains water. The profiler
+        // needs a distinct, explicit all-optics-off control (including water).
+        char profileBaseOff[4]{};
+        const DWORD profileBaseLength=GetEnvironmentVariableA("CSE_WARP_ESCARGOT_PROFILE_BASE_OFF",profileBaseOff,DWORD(sizeof(profileBaseOff)));
+        const bool allOpticsOff=profileBaseLength==1&&profileBaseOff[0]=='1';
+        if(lumaBvh&&!escEnabled&&!allOpticsOff)zStats=zRuntime_.select(scene,cam,zActive_,zEnabled);
         const bool escDirect=escEnabled&&escargotInput->build&&escargotInput->build->rasterDirect;
         const bool escProjected=escEnabled&&escargotInput->build&&escargotInput->build->rasterProjected;
         const bool escBuilt=escEnabled&&escargotInput->build&&!escDirect&&!escProjected;

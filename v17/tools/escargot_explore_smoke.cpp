@@ -67,6 +67,19 @@ int main(int argc,char** argv){
     qInfo()<<"006 actual footprint parity"<<qulonglong(tests)<<"triangles, skipped groups"<<qulonglong(rejects);
     auto A=cse::v17render::renderLumaTrace(req,cam,shadow);
     if(!A.ok){qCritical()<<QString::fromStdWString(A.reason);return 8;}
+    // The normal toggle disables glass only. Test the separate benchmark
+    // override and restore the original process environment before A/F16/004/006.
+    char priorZ[64]{};const DWORD priorLen=GetEnvironmentVariableA("M3D_V17_ZREFLECT",priorZ,DWORD(sizeof(priorZ)));
+    if(priorLen>=sizeof(priorZ))return 35;
+    if(!SetEnvironmentVariableA("M3D_V17_ZREFLECT","0")||
+       !SetEnvironmentVariableA("CSE_WARP_ESCARGOT_PROFILE_BASE_OFF","1"))return 35;
+    auto noOptics=cse::v17render::renderLumaTrace(req,cam,shadow);
+    if(!SetEnvironmentVariableA("CSE_WARP_ESCARGOT_PROFILE_BASE_OFF",nullptr)||
+       !SetEnvironmentVariableA("M3D_V17_ZREFLECT",priorLen?priorZ:nullptr))return 35;
+    if(!noOptics.ok||noOptics.stats.zReflectActive||noOptics.stats.zReflectEnabled){
+        qCritical()<<"006 base-off isolation failed"<<noOptics.stats.zReflectActive;return 35;
+    }
+    qInfo()<<"006 base-off isolation verified (including water)";
     req.escargot=true;
     _putenv_s("CSE_WARP_ESCARGOT_OBJECT_GPU","0");
     _putenv_s("CSE_WARP_ESCARGOT_LEGACY_F16","1");

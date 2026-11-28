@@ -10,6 +10,7 @@
 #include <QImage>
 #include <chrono>
 #include <cstdlib>
+#include <cstdio>
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -18,6 +19,9 @@ using Clock=std::chrono::steady_clock;
 double ms(Clock::time_point t){return std::chrono::duration<double,std::milli>(Clock::now()-t).count();}
 int main(int argc,char** argv){
     QCoreApplication app(argc,argv);auto args=app.arguments();if(args.size()<3)return 2;
+    qInstallMessageHandler([](QtMsgType,const QMessageLogContext&,const QString& message){
+        const auto utf8=message.toUtf8();std::fprintf(stderr,"%s\n",utf8.constData());std::fflush(stderr);
+    });
     _putenv_s("CSE_WARP_ESCARGOT_PROFILE","1");
     _putenv_s("CSE_WARP_ESCARGOT_OBJECT_GPU","0");_putenv_s("CSE_WARP_ESCARGOT_LEGACY_F16","0");
     _putenv_s("M3D_V17_ZATMOSPHERE","0");
@@ -68,7 +72,8 @@ int main(int argc,char** argv){
             for(int mode=0;mode<4;++mode){
                 const QString name=mode==0?"base-off":mode==1?"ZReflect":mode==2?"006-sky":"006-full";
                 _putenv_s("M3D_V17_ZREFLECT",mode==1?"1":"0");
-                if(!SetEnvironmentVariableA("M3D_V17_ZREFLECT",mode==1?"1":"0"))return 13;
+                if(!SetEnvironmentVariableA("M3D_V17_ZREFLECT",mode==1?"1":"0")||
+                   !SetEnvironmentVariableA("CSE_WARP_ESCARGOT_PROFILE_BASE_OFF",mode==0?"1":"0"))return 13;
                 const auto prep=Clock::now();e::projected::Session planner(rt,loaded.scene);double prepMs=ms(prep);
                 if(!planner.valid())return 11;
                 for(int frame=-2;frame<reps;++frame){
@@ -92,7 +97,7 @@ int main(int argc,char** argv){
                         }else ok=m3d::renderLumaTraceEscargotGpuBuiltNative(rt.renderScene,rt.lumaTraceBvh4,shadow,cam,cfg.w,cfg.h,hwnd,plan,st,bt,error);
                     }
                     const double wall=ms(start);const auto& p=st.escProfile;
-                    if(!ok||!p.completed||st.readbackBufferCount!=0||(mode!=1&&st.zReflectActive!=0)||(mode<2&&st.zReflectEnabled!=(mode==1))){++failed;qCritical()<<preset->id<<name<<frame<<QString::fromStdWString(error)<<"completion"<<p.completed;}
+                    if(!ok||!p.completed||st.readbackBufferCount!=0||(mode!=1&&st.zReflectActive!=0)||(mode<2&&st.zReflectEnabled!=(mode==1))){++failed;qCritical()<<preset->id<<name<<frame<<QString::fromStdWString(error)<<"completion"<<p.completed<<"zreflect enabled"<<st.zReflectEnabled<<"active"<<st.zReflectActive<<"readback"<<st.readbackBufferCount;}
                     write({{"type","frame"},{"camera",preset->id},{"width",cfg.w},{"height",cfg.h},{"msaa",cfg.aa},{"moving",bool(moving)},{"mode",name},{"frame",frame},{"warmup",frame<0},{"ok",ok},{"completed",p.completed},{"gpu_valid",p.gpuValid},{"wall_ms",wall},{"planner_init_ms",prepMs},{"planner_ms",m.totalMs},{"receiver_ms",m.receiverMs},{"discover_ms",m.discoverMs},{"rank_ms",m.rankMs},{"cull_ms",m.cullMs},{"sort_ms",m.sortMs},{"emit_ms",m.emitMs},{"objects_tested",double(m.testedObjects)},{"triangles_tested",double(m.testedTriangles)},{"rays",int(m.rays)},{"sources",int(m.sources)},{"triangles",int(m.triangles)},{"omitted",int(m.omitted)},{"receivers",int(m.receivers)},{"deferred",int(m.deferred)},{"lighting_samples",int(m.lightingSamples)},{"planner_reused",m.reused},{"gpu_cached",p.cacheHit},{"map_ms",p.mapMs},{"alloc_ms",p.allocationMs},{"upload_ms",p.uploadMs},{"upload_bytes",double(p.uploadBytes)},{"layer_pixels",double(p.layerPixels)},{"scissor_pixels",double(p.scissorPixels)},{"optical_draws",int(p.draws)},{"optical_submit_ms",p.opticalSubmitMs},{"compute_gpu_ms",p.computeGpuMs},{"optical_gpu_ms",p.opticalGpuMs},{"main_gpu_ms",p.mainGpuMs},{"copy_gpu_ms",p.copyGpuMs},{"gpu_total_ms",p.gpuTotalMs},{"wait_ms",p.waitMs},{"native_readback",int(st.readbackBufferCount)},{"zreflect_active",int(st.zReflectActive)},{"zreflect_enabled",st.zReflectEnabled}});
                     ++records;
                 }
