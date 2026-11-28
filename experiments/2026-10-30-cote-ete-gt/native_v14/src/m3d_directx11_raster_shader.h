@@ -335,8 +335,10 @@ inline constexpr char kShaderAfterEscargot[] = R"(bool sampleEscargot(VSOut i,ou
     if(zPlaneIds.z>=0||zPlaneIds.w>.5)return false;
     if(zPlaneIds.z< -3.5){
         if(i.receiverId==0u||i.receiverId>uint(escPacket[0].x))return false;
-        uint slice=uint(escPacket[i.receiverId+1u].x);
+        float4 receiver=escPacket[i.receiverId+1u];uint slice=uint(receiver.x);
         if(!slice)return false;
+        float offset=escPacket[uint(escPacket[0].x)+1u+i.receiverId].x;
+        if(abs(dot(i.world,receiver.yzw)-offset)>.003)return false;
         reflected=escProjected.Load(int4(int2(i.p.xy),int(slice-1u),0)).rgb;
         float f0=max(saturate(materialOpacity[i.mat].z),saturate(materialSpecular[i.mat].w)*.85);
         weight=f0+(1-f0)*pow(1-saturate(abs(dot(normalize(i.n),normalize(eye-i.world)))),5.0);

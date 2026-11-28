@@ -78,6 +78,7 @@ BackendResult renderEscargotF16(const Request& request,const m3d::Camera& camera
         result.renderer=QStringLiteral("V17 LumaTrace BVH4 — Z Escargot Object 005 — %1 — rays %2 / tri %3 / omitted %4 / deferred %5")
             .arg(request.directPresent?QStringLiteral("Direct GPU (swapchain)"):QStringLiteral("Qt (QImage)"))
             .arg(m.rays).arg(m.triangles).arg(m.omitted).arg(m.deferred+m.curved);
+        if(!m.receivers)result.renderer+=QStringLiteral(" — catalogue %1 / patches %2 / visible %3").arg(m.catalogue).arg(m.patches).arg(m.visible);
         return result;
     }
     if(objectEnv&&std::strcmp(objectEnv,"1")==0){

@@ -7,8 +7,9 @@
 #include <set>
 namespace m3d::escargot::projected {
 constexpr uint32_t maxReceivers=4,rayBudget=768,triangleBudget=120000,maxSources=160;
-struct Metrics {uint32_t rays=0,receivers=0,curved=0,deferred=0,sources=0,triangles=0,omitted=0,mini=0,lightingSamples=0;bool reused=false;};
-struct Plane {V p,n;bool valid=false;};
+struct Metrics {uint32_t catalogue=0,patches=0,visible=0,water=0,rays=0,receivers=0,curved=0,deferred=0,sources=0,triangles=0,omitted=0,mini=0,lightingSamples=0;bool reused=false;};
+struct Plane {V p,n;bool valid=false;int side=0;};
+struct ReceiverPatch {Candidate candidate;Plane plane;double area=0;};
 inline V mirror(V p,Plane plane){return p-plane.n*(2.f*dot(p-plane.p,plane.n));}
 inline Plane planeFor(const Scene& s,const v16::ObjectInfo& o){
     Plane p;float best=0;
@@ -33,7 +34,7 @@ struct Seen{uint32_t last=0,hits=0;};
 struct TriangleRef{uint32_t id;float depth;};
 class Session {
     const v16::Runtime& rt_;std::vector<uint32_t> owners_;std::unique_ptr<Traversal> trace_;
-    std::vector<Candidate> catalogue_;std::vector<Plane> planes_;
+    std::vector<Candidate> catalogue_;std::vector<ReceiverPatch> patches_;
     std::vector<Source> sources_;std::map<uint32_t,std::map<uint32_t,Seen>> seen_;
     std::vector<std::array<float,3>> light_;std::vector<uint32_t> lightStamp_;
     uint32_t epoch_=1,frame_=0;float day_=-1;V sun_{};
@@ -48,16 +49,16 @@ class Session {
         }
         return .16f+.34f*day_+.50f*day_*sat(dot(norm(n),sun_))*shadow;
     }
-    uint32_t probe(const Candidate& r,const Camera& cam,int x,int y,int w,int h,uint32_t limit,Metrics& m){
+    uint32_t probe(const Candidate& r,Plane plane,const Camera& cam,int x,int y,int w,int h,uint32_t limit,Metrics& m){
         const auto& s=rt_.renderScene;Ray ray=screenRay(cam,x,y,w,h);
         HitSample hit;float low=.08f/std::max(1e-6f,dot(ray.d,cam.f));uint32_t previous=0xffffffffu;
         bool reached=false;
         for(int k=0;k<4&&m.rays<limit;++k){++m.rays;if(!trace_->closest(ray,low,hit,previous))return 0;
-            if(hit.object==r.object){reached=true;break;}
+            if(hit.object==r.object&&std::abs(dot(hit.p-plane.p,plane.n))<.003f){reached=true;break;}
             if(transmission(s.mat[s.obj[hit.primitive].mat])<.01f)return 0;
             low=hit.depth;previous=hit.primitive;}
         if(!reached)return 0;
-        const auto plane=planes_[r.object];ray={hit.p,reflect(ray.d,plane.n)};
+        ray={hit.p,reflect(ray.d,plane.n)};
         low=std::max(1e-5f,8.f*std::numeric_limits<float>::epsilon()*std::max(1.f,length(hit.p)));previous=0xffffffffu;
         uint32_t first=0;
         for(int k=0;k<8&&m.rays<limit;++k){++m.rays;if(!trace_->closest(ray,low,hit,previous))break;
@@ -66,7 +67,7 @@ class Session {
             low=hit.depth;previous=hit.primitive;}
         return first;
     }
-    void discover(const Candidate& r,const Camera& cam,int w,int h,uint32_t limit,Metrics& m){
+    void discover(const Candidate& r,Plane plane,const Camera& cam,int w,int h,uint32_t limit,Metrics& m){
         // Stratified discovery; unused budget is spent on mixed or zero cells.
         uint32_t seedLimit=m.rays+(limit-m.rays)*2/3;
         uint32_t v[5][5]{};
@@ -75,11 +76,11 @@ class Session {
         auto y=[&](float i){return b.y+std::clamp(int(i*b.h/5.f),0,b.h-1);};
         float phase=float(frame_%5)*.12f+.20f;
         for(int j=0;j<5&&m.rays<seedLimit;++j)for(int i=0;i<5&&m.rays<seedLimit;++i)
-            v[j][i]=probe(r,cam,x(i+phase),y(j+phase),w,h,seedLimit,m);
+            v[j][i]=probe(r,plane,cam,x(i+phase),y(j+phase),w,h,seedLimit,m);
         for(int pass=0;pass<2;++pass)for(int j=0;j<4&&m.rays<limit;++j)for(int i=0;i<4&&m.rays<limit;++i){
             bool mixed=v[j][i]!=v[j][i+1]||v[j][i]!=v[j+1][i]||v[j][i]!=v[j+1][i+1];
             bool zero=!v[j][i]&&!v[j][i+1]&&!v[j+1][i]&&!v[j+1][i+1];
-            if((pass==0&&mixed)||(pass==1&&zero)){++m.mini;probe(r,cam,x(i+phase+.5f),y(j+phase+.5f),w,h,limit,m);}
+            if((pass==0&&mixed)||(pass==1&&zero)){++m.mini;probe(r,plane,cam,x(i+phase+.5f),y(j+phase+.5f),w,h,limit,m);}
         }
         auto& a=seen_[r.object];for(auto it=a.begin();it!=a.end();)if(frame_-it->second.last>64)it=a.erase(it);else ++it;
     }
@@ -103,8 +104,42 @@ public:
         if(!objectMap(rt,owners_))return;
         trace_=std::make_unique<Traversal>(rt.renderScene,rt.lumaTraceBvh4,owners_);
         if(!trace_->valid()){trace_.reset();return;}
-        catalogue_=staticCandidates(rt,db,Mode::Reflection);planes_.resize(size_t(rt.objects.size())+1);
-        for(const auto& c:catalogue_)planes_[c.object]=planeFor(rt.renderScene,rt.objects[int(c.object)-1]);
+        catalogue_=staticCandidates(rt,db,Mode::Reflection);
+        // The production optical index already recognizes thin slabs and the top water face.
+        // Split merged planes by exact triangle ownership to preserve author permissions.
+        std::map<uint32_t,Candidate> allowed;for(const auto& c:catalogue_)allowed.emplace(c.object,c);
+        std::set<uint32_t> indexed;
+        for(const auto& p:rt.renderScene.opticalPlanes){
+            std::map<uint32_t,zreflect::Bounds> bounds;
+            std::map<uint32_t,double> area;
+            for(uint32_t id:p.triangles){
+                if(id>=owners_.size()||!allowed.count(owners_[id]))continue;
+                uint32_t owner=owners_[id];const auto& t=rt.renderScene.obj[id];
+                auto& b=bounds[owner];b.add(t.a);b.add(t.b);b.add(t.c);
+                area[owner]+=.5*length(cross(t.b-t.a,t.c-t.a));
+            }
+            for(const auto& kv:bounds){
+                auto c=allowed.at(kv.first);c.lo=kv.second.lo;c.hi=kv.second.hi;
+                if(kv.second.uncertain||area[kv.first]<=0||!finite(p.normal))continue;
+                patches_.push_back({c,{p.normal*float(p.offset),p.normal,true,p.side},area[kv.first]});
+                indexed.insert(kv.first);
+            }
+        }
+        // Non-indexed authored flat receivers are still supported. Do not
+        // accept arbitrary curved objects or bypass the existing permission.
+        for(const auto& c:catalogue_)if(!indexed.count(c.object)){
+            const auto& o=rt.objects[int(c.object)-1];
+            const auto& mat=rt.renderScene.mat[c.material];
+            auto slabs=zreflect::extractSlab(rt.renderScene,o.firstTriangle,o.triangleCount,waterMaterial(mat),true);
+            for(const auto& p:slabs){
+                auto a=c;a.lo=p.bounds.lo;a.hi=p.bounds.hi;
+                patches_.push_back({a,{p.normal*float(p.offset),p.normal,true,p.side},p.area});
+            }
+            if(slabs.empty()){
+                auto p=planeFor(rt.renderScene,o);
+                if(p.valid)patches_.push_back({c,p,1.});
+            }
+        }
         for(int i=0;i<rt.objects.size();++i){const auto& o=rt.objects[i];if(o.triangleCount<=0)continue;V lo{INF,INF,INF},hi{-INF,-INF,-INF};
             for(int j=0;j<o.triangleCount;++j){const auto& t=rt.renderScene.obj[size_t(o.firstTriangle)+j];
                 lo={std::min(lo.x,t.mn.x),std::min(lo.y,t.mn.y),std::min(lo.z,t.mn.z)};
@@ -121,17 +156,33 @@ public:
         if(cacheValid_&&key==key_&&!lightChanged&&frame_%8!=0){m=cachedMetrics_;m.rays=m.mini=m.lightingSamples=0;m.reused=true;return cached_;}
         cached_=EscargotPacketBuild{};auto& plan=cached_;plan.rasterProjected=true;
         static std::atomic<uint64_t> nextKey{1};plan.projectedKey=nextKey.fetch_add(1,std::memory_order_relaxed);
-        plan.data.resize((size_t(rt_.objects.size())+2)*4,0);plan.data[0]=float(rt_.objects.size());
-        auto candidates=projectCandidates(catalogue_,c,w,h);
-        std::stable_sort(candidates.begin(),candidates.end(),[&](const Candidate& a,const Candidate& b){
-            bool aw=waterMaterial(rt_.renderScene.mat[a.material]),bw=waterMaterial(rt_.renderScene.mat[b.material]);
-            return aw!=bw?aw:a.priority>b.priority;});
-        std::vector<Candidate> admitted;
-        for(const auto& a:candidates){if(!planes_[a.object].valid){++m.curved;continue;}if(admitted.size()>=maxReceivers){++m.deferred;continue;}admitted.push_back(a);}
+        plan.data.resize((2+2*size_t(rt_.objects.size()))*4,0);plan.data[0]=float(rt_.objects.size());
+        m.catalogue=uint32_t(catalogue_.size());m.patches=uint32_t(patches_.size());
+        std::vector<ReceiverPatch> candidates;
+        std::set<uint32_t> hasPatch;for(auto r:patches_){
+            hasPatch.insert(r.candidate.object);
+            if(r.plane.side&&r.plane.side*dot(c.eye-r.plane.p,r.plane.n)<-.001f)continue;
+            r.candidate.bounds=projectBounds(r.candidate.lo,r.candidate.hi,c,w,h);
+            if(!r.candidate.bounds.valid()||uint64_t(r.candidate.bounds.w)*r.candidate.bounds.h<16)continue;
+            r.candidate.priority*=std::sqrt(double(r.candidate.bounds.w)*r.candidate.bounds.h);
+            candidates.push_back(r);
+        }
+        m.visible=uint32_t(candidates.size());m.curved=m.catalogue-uint32_t(hasPatch.size());
+        std::stable_sort(candidates.begin(),candidates.end(),[&](const ReceiverPatch& a,const ReceiverPatch& b){
+            bool aw=waterMaterial(rt_.renderScene.mat[a.candidate.material]),bw=waterMaterial(rt_.renderScene.mat[b.candidate.material]);
+            if(aw!=bw)return aw;
+            if(a.candidate.priority!=b.candidate.priority)return a.candidate.priority>b.candidate.priority;
+            return a.area>b.area;});
+        std::vector<ReceiverPatch> admitted;std::set<uint32_t> used;
+        for(const auto& a:candidates){
+            if(used.count(a.candidate.object))continue;
+            if(admitted.size()>=maxReceivers){++m.deferred;continue;}
+            used.insert(a.candidate.object);admitted.push_back(a);
+        }
         const auto& s=rt_.renderScene;
         for(size_t k=0;k<admitted.size();++k){
-            const auto& a=admitted[k];auto p=planes_[a.object];uint32_t quota=m.rays+(rayBudget-m.rays)/uint32_t(admitted.size()-k);
-            discover(a,c,w,h,quota,m);
+            const auto& a=admitted[k].candidate;auto p=admitted[k].plane;uint32_t quota=m.rays+(rayBudget-m.rays)/uint32_t(admitted.size()-k);
+            discover(a,p,c,w,h,quota,m);
             struct Ranked{uint32_t id;double score;bool seen;};
             std::vector<Ranked> ranked;auto& history=seen_[a.object];
             for(const auto& b:sources_){if(b.id==a.object)continue;
@@ -168,8 +219,11 @@ public:
             range.x=std::max(0,a.bounds.x-1);range.y=std::max(0,a.bounds.y-1);
             range.w=std::min(w,a.bounds.x+a.bounds.w+1)-range.x;range.h=std::min(h,a.bounds.y+a.bounds.h+1)-range.y;
             for(const auto& t:opaque)appendProjectedTriangle(plan,t,p,c,sh,m);for(const auto& t:transparent)appendProjectedTriangle(plan,t,p,c,sh,m);
-            plan.data[4*(size_t(a.object)+1)]=float(plan.projectedRanges.size()+1);
+            const size_t at=4*(size_t(a.object)+1);
+            plan.data[at]=float(plan.projectedRanges.size()+1);plan.data[at+1]=p.n.x;plan.data[at+2]=p.n.y;plan.data[at+3]=p.n.z;
+            plan.data[4*(size_t(rt_.objects.size())+1+size_t(a.object))]=dot(p.p,p.n);
             plan.projectedRanges.push_back(range);m.triangles+=count;++m.receivers;
+            if(waterMaterial(s.mat[a.material]))++m.water;
         }
         key_=key;cacheValid_=true;cachedMetrics_=m;return cached_;
     }

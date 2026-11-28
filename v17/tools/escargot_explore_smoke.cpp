@@ -95,9 +95,9 @@ int main(int argc,char** argv){
     }
     e::projected::Session project(rt,*req.sceneDatabase);if(!project.valid())return 25;
     e::projected::Metrics pm;auto plan=project.build(cam,shadow,req.width,req.height,pm);
-    if(pm.rays>e::projected::rayBudget||pm.triangles>e::projected::triangleBudget||!pm.triangles||!pm.receivers||
+    if(pm.rays>e::projected::rayBudget||pm.triangles>e::projected::triangleBudget||!pm.triangles||!pm.receivers||!pm.water||
         plan.projectedVertices.size()!=size_t(pm.triangles)*30||plan.projectedRanges.size()!=pm.receivers){
-        qCritical()<<"Object005 invalid planner metrics"<<pm.rays<<pm.triangles<<pm.receivers;return 26;
+        qCritical()<<"Object005 invalid planner metrics"<<pm.rays<<pm.triangles<<pm.receivers<<"catalogue"<<pm.catalogue<<"patches"<<pm.patches<<"visible"<<pm.visible<<"water"<<pm.water;return 26;
     }
     uint32_t end=0;
     for(const auto& r:plan.projectedRanges){
@@ -176,7 +176,7 @@ int main(int argc,char** argv){
         QDir out(app.arguments().at(2));if(!QDir().mkpath(out.absolutePath()))return 19;
         auto save=[&](const auto& r,const QString& name){return QImage(reinterpret_cast<const uchar*>(r.pixels.data()),req.width,req.height,req.width*4,QImage::Format_RGB32).save(out.filePath(name));};
         if(!save(A,"A.png")||!save(F,"F16.png")||!save(G,"Object004.png")||!save(P,"Object005.png")||!save(M,"Object005-moved.png"))return 20;
-        QJsonObject report{{"A_ms",double(A.stats.ms)},{"F16_ms",double(F.stats.ms)},{"Object004_ms",double(G.stats.ms)},{"native_A_submit_ms",double(nativeA.stats.ms)},{"native_Object005_submit_ms",double(nativeF.stats.ms)},{"native_readback",int(nativeF.stats.readbackBufferCount)},{"Object005_ms",double(P.stats.ms)},{"Object005_cached_ms",double(again.stats.ms)},{"Object005_moved_ms",double(M.stats.ms)},{"Object005_rays",double(pm.rays)},{"Object005_triangles",double(pm.triangles)},{"Object005_omitted",double(pm.omitted)},{"Object005_signal_pixels",double(projectedSignal)},{"Object005_water_geometry_signal_pixels",double(geometrySignal)},{"water_signal_pixels",double(waterSignal)},{"water_strong_signal_pixels",double(strongSignal)},{"note","Single warm/cold smoke timings on software WARP, not hardware FPS. Pixel output differs from A and F16; movement and A restoration verified, not proof of visual parity."}};
+        QJsonObject report{{"A_ms",double(A.stats.ms)},{"F16_ms",double(F.stats.ms)},{"Object004_ms",double(G.stats.ms)},{"native_A_submit_ms",double(nativeA.stats.ms)},{"native_Object005_submit_ms",double(nativeF.stats.ms)},{"native_readback",int(nativeF.stats.readbackBufferCount)},{"Object005_ms",double(P.stats.ms)},{"Object005_cached_ms",double(again.stats.ms)},{"Object005_moved_ms",double(M.stats.ms)},{"Object005_catalogue",double(pm.catalogue)},{"Object005_patches",double(pm.patches)},{"Object005_visible_patches",double(pm.visible)},{"Object005_water_receivers",double(pm.water)},{"Object005_rays",double(pm.rays)},{"Object005_triangles",double(pm.triangles)},{"Object005_omitted",double(pm.omitted)},{"Object005_signal_pixels",double(projectedSignal)},{"Object005_water_geometry_signal_pixels",double(geometrySignal)},{"water_signal_pixels",double(waterSignal)},{"water_strong_signal_pixels",double(strongSignal)},{"note","Single warm/cold smoke timings on software WARP, not hardware FPS. Pixel output differs from A and F16; movement and A restoration verified, not proof of visual parity."}};
         QFile f(out.filePath("object005-summary.json"));if(!f.open(QIODevice::WriteOnly))return 21;f.write(QJsonDocument(report).toJson());
     }
     return 0;
