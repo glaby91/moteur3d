@@ -85,3 +85,7 @@ Package non autonome, non signé/notarisé. Le script est fourni mais le package
 - Régression Windows/Linux et comparaison avec la tête actuelle de master avant toute fusion.
 
 Aucune fusion automatique. Le Build 4 constitue une référence de portage expérimental, pas une validation exhaustive.
+
+## Optimisation 001 — Build 7
+
+[Résultats A/B et données pérennes](MACOS_VULKAN_OPT_001.md). La V17.031 Raster 012 conserve la correction mémoire du Build 4. Le Full HD hors écran est désormais testé, 384 images mesurées et 288 images optimisées identiques à la référence. Gains médians combinés ; options non activées par défaut. Les autres limites de validation ci-dessus restent d'actualité.
