@@ -169,6 +169,11 @@ bool renderLumaTraceNative(const Scene& s,const LumaTraceBvh4& bvh4,
     Stats& stats,std::wstring& error);
 bool renderLumaTraceEscargotPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring&);
 bool renderLumaTraceEscargotGpuPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring&);
+// Experimental query ABI: all original triangles, including transparent receivers.
+struct EscargotRayQuery { float origin[3];float low;float direction[3];float pad=0; };
+struct EscargotRayHit { uint32_t primitive,status;float depth,u;float v;float pad[3]; };
+bool traceEscargotGpuBatch(const Scene&,const LumaTraceBvh4&,const std::vector<EscargotRayQuery>&,std::vector<EscargotRayHit>&,double&,double&,std::wstring&);
+bool renderLumaTraceEscargotGpuResidentPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring&);
 void releaseDirectX11NativeForCurrentThread();
 // Experimental Vulkan 1.0 Raster GPU backend; offscreen ARGB32 preview, shared Scene/Camera API.
 bool renderVulkanPreview(const Scene& s,const ShadowMap& sm,const Camera& cam,int w,int h,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error);

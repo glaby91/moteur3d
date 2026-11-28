@@ -18,6 +18,7 @@ struct Options {
     uint64_t maxOutputCells=4ull*1024*1024;
     Mode mode=Mode::Reflection;
     unsigned rayWorkers=4;
+    bool captureQueries=false;
 };
 struct HitSample { uint32_t primitive=0, object=0; float depth=INF; V p{},n{},uv{},geometricNormal{}; };
 struct Value {
@@ -48,10 +49,12 @@ struct Candidate {
 };
 struct Layer { LayerKey key; Rect bounds; std::map<size_t,Value> measured; std::vector<size_t> partial; };
 struct Pixel { V rgb{}; float alpha=0,weight=0,receiverDepth=0; uint32_t receiverMaterial=0,receiverObject=0; };
+struct RecordedQuery {EscargotRayQuery query;uint32_t primitive;float depth;};
 struct Surface {
     Candidate candidate;
     int step=1,cols=0,rows=0;
     std::vector<Sample> samples;
+    std::vector<RecordedQuery> recorded;
     std::map<LayerKey,Layer> layers;
     std::vector<size_t> completeIndices,receiverIndices;
     bool sameKnownSet=false;

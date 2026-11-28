@@ -52,7 +52,9 @@ inline void sampleSurface(Surface& sf,Traversal& trace,const Scene& scene,const 
     uint32_t pathLimit=quota;
     auto query=[&](const Ray& ray,float low,HitSample& hit)->int{
         if(sf.queries>=pathLimit)return -1;
-        ++sf.queries;++stats.rays;return trace.closest(ray,low,hit)?1:0;
+        ++sf.queries;++stats.rays;const bool found=trace.closest(ray,low,hit);
+        if(opt.captureQueries)sf.recorded.push_back({{{ray.o.x,ray.o.y,ray.o.z},low,{ray.d.x,ray.d.y,ray.d.z},0},found?hit.primitive:0xffffffffu,hit.depth});
+        return found?1:0;
     };
     uint32_t remaining=uint32_t(sf.samples.size());
     for(size_t id:spiral(sf.cols,sf.rows)){

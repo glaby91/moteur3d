@@ -35,6 +35,9 @@ public:
     uint32_t zeroTriangles() const noexcept { return zeroTriangles_; }
     uint32_t triangleCount() const noexcept { return triangleCount_; }
     bool adaptiveEnabled() const noexcept { return adaptiveEnabled_; }
+    // Nodes retain original Scene::order leaf ranges; the opaque remap is
+    // deliberately not exposed as the optical primitive list.
+    ID3D11ShaderResourceView* bvhSrv() const noexcept { return bvhSrv_.Get(); }
     ID3D11ShaderResourceView* radianceSrv() const noexcept { return radianceSrv_.Get(); }
 
     ID3D11ShaderResourceView* probeSrv() const noexcept { return probeSrv_.Get(); }

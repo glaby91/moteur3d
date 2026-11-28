@@ -21,6 +21,7 @@
 #include <d3dcompiler.h>
 #include <wrl/client.h>
 #include "m3d_lumatrace_gpu_d3d11.h"
+#include "m3d_escargot_trace_d3d11.h"
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
@@ -43,7 +44,7 @@ using d3d11::DrawChunk;
 using d3d11::makeFoliageTemplate;
 using d3d11::uvScaleForMaterial;
 using d3d11::visibleChunk;
-struct EscargotInput {const std::vector<float>* color;const std::vector<float>* meta;int w,h;const std::vector<float>* packet=nullptr;};
+struct EscargotInput {const std::vector<float>* color;const std::vector<float>* meta;int w,h;const std::vector<float>* packet=nullptr;bool resident=false;};
 thread_local const EscargotInput* escargotInput=nullptr;
 // Single atomic configuration word: host and GUI may update quality while
 // the dedicated GPU worker is rendering. Each frame gets one full snapshot.
@@ -253,6 +254,11 @@ class DirectX11Preview {
         return available;
     }
 public:
+    bool traceEscargot(const Scene& scene,const LumaTraceBvh4& bvh,const std::vector<EscargotRayQuery>& q,std::vector<EscargotRayHit>& hits,double& preparation,double& execution,std::wstring& error){
+        if(!ensureDevice(error)||!ensureScene(scene,error,&bvh))return false;
+        if(!lumaTraceCompute_.prepare(device_.Get(),bvh,lumaCpuScene_,scene,false,error))return false;
+        return escTrace_.run(device_.Get(),context_.Get(),lumaTraceCompute_.bvhSrv(),scene,bvh,q,hits,preparation,execution,error);
+    }
     bool render(const Scene& scene,const ShadowMap& shadows,const Camera& cam,int w,int h,
                 std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error) {
         // The exported offline benchmark and PNG path are unchanged.
@@ -333,7 +339,7 @@ public:
         const auto zStart=Clock::now();
         if(lumaBvh&&!escEnabled)zStats=zRuntime_.select(scene,cam,zActive_,zEnabled);
         const bool escGpu=escEnabled&&escargotInput->packet;
-        if(escEnabled&&!(escGpu?uploadEscargotPacket(*escargotInput->packet,error):uploadEscargot(w,h,*escargotInput,error)))return false;
+        if(escEnabled&&!(escGpu?uploadEscargotPacket(*escargotInput->packet,error,escargotInput->resident):uploadEscargot(w,h,*escargotInput,error)))return false;
         const double zSelectUs=lumaBvh?std::chrono::duration<double,std::micro>(Clock::now()-zStart).count():0.;
         const uint32_t zTotal=lumaBvh?uint32_t(scene.opticalPlanes.size()):0u;
         // Two shared slots for all optical surfaces, including water.
@@ -1583,7 +1589,7 @@ private:
         foliageInstances_.Reset();
         for(auto& buffer:foliageVertices_)buffer.Reset();
         foliageVertexCounts_.fill(0);foliage_.clear();foliageInstanceCount_=0;
-        lumaTraceCompute_.reset();
+        lumaTraceCompute_.reset();escResidentPacket_.clear();escTrace_=escargot_gpu::TraceBatch{};
         lumaCpuScene_={};
         if(lumaTrace&&!prepareLumaTraceCpuScene(scene,*lumaBvh,lumaCpuScene_,error))
             return false;
@@ -2320,10 +2326,14 @@ private:
     ComPtr<ID3D11Buffer> escPacket_;
     ComPtr<ID3D11ShaderResourceView> escPacketSrv_;
     size_t escPacketCapacity_=0;
-    bool uploadEscargotPacket(const std::vector<float>& data,std::wstring& error){
+    std::vector<float> escResidentPacket_;
+    escargot_gpu::TraceBatch escTrace_;
+    bool uploadEscargotPacket(const std::vector<float>& data,std::wstring& error,bool reuse=false){
         ID3D11ShaderResourceView* clear=nullptr;context_->PSSetShaderResources(13,1,&clear);
         const size_t count=data.size()/4;
         if(count<2||count>4u*1024u*1024u||data.size()%4){error=L"Invalid Escargot packet";return false;}
+        if(reuse&&escPacket_&&escPacketSrv_&&escResidentPacket_.size()==data.size()&&std::memcmp(escResidentPacket_.data(),data.data(),data.size()*sizeof(float))==0)return true;
+        escResidentPacket_.clear();
         if(!escPacket_||!escPacketSrv_||count>escPacketCapacity_){
             escPacket_.Reset();escPacketSrv_.Reset();escPacketCapacity_=0;
             size_t capacity=2;while(capacity<count)capacity*=2;
@@ -2337,7 +2347,8 @@ private:
         }
         D3D11_MAPPED_SUBRESOURCE mapped{};
         if(FAILED(context_->Map(escPacket_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped))){error=L"Escargot packet map";return false;}
-        std::memcpy(mapped.pData,data.data(),data.size()*sizeof(float));context_->Unmap(escPacket_.Get(),0);return true;
+        std::memcpy(mapped.pData,data.data(),data.size()*sizeof(float));context_->Unmap(escPacket_.Get(),0);
+        if(reuse)escResidentPacket_=data;return true;
     }
     bool uploadEscargot(int w,int h,const EscargotInput& input,std::wstring& error){
         ID3D11ShaderResourceView* clear[2]={nullptr,nullptr};context_->PSSetShaderResources(11,2,clear);
@@ -2463,6 +2474,17 @@ bool renderLumaTraceEscargotGpuPreview(const Scene& scene,const LumaTraceBvh4& b
     escargotInput=&input;
     return rasterThreadContext().renderLumaTrace(scene,bvh,shadows,cam,w,h,pixels,stats,error);
 }
+bool traceEscargotGpuBatch(const Scene& scene,const LumaTraceBvh4& bvh,const std::vector<EscargotRayQuery>& q,std::vector<EscargotRayHit>& hits,double& preparation,double& execution,std::wstring& error){
+    return rasterThreadContext().traceEscargot(scene,bvh,q,hits,preparation,execution,error);
+}
+bool renderLumaTraceEscargotGpuResidentPreview(const Scene& scene,const LumaTraceBvh4& bvh,const ShadowMap& shadows,const Camera& cam,int w,int h,
+    const std::vector<float>& packet,std::vector<uint32_t>& pixels,Stats& stats,std::wstring& error){
+    if(w<=0||h<=0||w>4096||h>4096||packet.size()<8||packet.size()%4||escargotInput){error=L"Invalid resident Escargot packet";return false;}
+    const EscargotInput input{nullptr,nullptr,w,h,&packet,true};
+    struct Reset {~Reset(){escargotInput=nullptr;}} reset;
+    escargotInput=&input;
+    return rasterThreadContext().renderLumaTrace(scene,bvh,shadows,cam,w,h,pixels,stats,error);
+}
 bool renderDirectX11Native(const Scene& scene,const ShadowMap& shadows,const Camera& cam,
                             int w,int h,void* hwnd,Stats& stats,std::wstring& error){
     return rasterThreadContext().present(scene,shadows,cam,w,h,
@@ -2516,6 +2538,8 @@ bool renderLumaTracePreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,c
 bool renderLumaTraceNative(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,void*,Stats&,std::wstring& error){error=L"LumaTrace DX11 natif disponible uniquement sous Windows.";return false;}
 bool renderLumaTraceEscargotPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring& error){error=L"Escargot DX11 Windows only";return false;}
 bool renderLumaTraceEscargotGpuPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring& error){error=L"Escargot GPU DX11 Windows only";return false;}
+bool traceEscargotGpuBatch(const Scene&,const LumaTraceBvh4&,const std::vector<EscargotRayQuery>&,std::vector<EscargotRayHit>&,double&,double&,std::wstring& error){error=L"Escargot GPU trace Windows only";return false;}
+bool renderLumaTraceEscargotGpuResidentPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring& error){error=L"Escargot GPU resident Windows only";return false;}
 void releaseDirectX11NativeForCurrentThread(){}
 bool enqueueDirectX11Preview(const Scene&,const ShadowMap&,const Camera&,int,int,unsigned,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}
 bool receiveDirectX11Preview(std::vector<uint32_t>&,Stats&,std::wstring& error) {error=L"Le rendu DirectX 11 est disponible uniquement sous Windows.";return false;}

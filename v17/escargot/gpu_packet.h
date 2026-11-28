@@ -152,4 +152,28 @@ inline Packet packGpu(const Result& frame,const Scene& scene,size_t objectCount)
     }catch(const std::exception& ex){p.error=ex.what();p.ok=false;}
     return p;
 }
+
+struct PacketKey {
+    std::array<float,18> cameraLight{};
+    uint64_t identity=0,revision=0,maxCells=0;
+    int w=0,h=0,maxDimension=0;uint32_t budget=0,crossings=0,workers=0;Mode mode=Mode::Reflection;
+    bool operator==(const PacketKey& k)const{return cameraLight==k.cameraLight&&identity==k.identity&&revision==k.revision&&maxCells==k.maxCells&&
+        w==k.w&&h==k.h&&maxDimension==k.maxDimension&&budget==k.budget&&crossings==k.crossings&&workers==k.workers&&mode==k.mode;}
+};
+inline PacketKey packetKey(const Scene& scene,const Camera& cam,int w,int h,const Options& opt){
+    float day;V direction;escargotLightingSnapshot(day,direction);
+    PacketKey k;k.cameraLight={cam.eye.x,cam.eye.y,cam.eye.z,cam.f.x,cam.f.y,cam.f.z,cam.r.x,cam.r.y,cam.r.z,cam.u.x,cam.u.y,cam.u.z,cam.tanHalf,cam.aspect,day,direction.x,direction.y,direction.z};
+    k.identity=scene.gpuCacheIdentity;k.revision=scene.gpuCacheRevision;k.maxCells=opt.maxOutputCells;k.w=w;k.h=h;k.maxDimension=opt.maxDimension;k.budget=opt.rayBudget;k.crossings=opt.maxCrossings;k.workers=opt.rayWorkers;k.mode=opt.mode;return k;
+}
+class PacketCache {
+    PacketKey key_{};Packet packet_{};bool valid_=false;
+public:
+    const Packet& get(Prepared& session,const Scene& scene,size_t objectCount,const Camera& cam,int w,int h,const Options& opt,bool& reused){
+        auto key=packetKey(scene,cam,w,h,opt);reused=valid_&&key==key_;
+        if(reused)return packet_;
+        valid_=false;auto frame=session.frame(cam,w,h,opt,false);
+        if(!frame.ok){packet_={};packet_.error=frame.error;return packet_;}
+        packet_=packGpu(frame,scene,objectCount);if(packet_.ok){key_=key;valid_=true;}return packet_;
+    }
+};
 }

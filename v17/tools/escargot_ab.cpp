@@ -77,7 +77,7 @@ int main(int argc,char** argv){
         allEffective+=effective;
         if(!save(out,id+"-B-empty-control.png",control,w,h))return 14;
         // Old CPU reference, deliberately outside A/B timing.
-        auto serialOpt=opt;serialOpt.rayWorkers=1;
+        auto serialOpt=opt;serialOpt.rayWorkers=1;serialOpt.captureQueries=true;
         auto referenceFrame=session.frame(cam,w,h,serialOpt,true);if(!referenceFrame.ok)return 16;
         const auto atlas=e::composeScreen(referenceFrame,w,h);
         std::vector<float> cpuColor(size_t(w)*h*4),cpuMeta(cpuColor.size());
@@ -97,16 +97,52 @@ int main(int argc,char** argv){
             fixedTimes.push_back(ms(start));
             if(fixed!=b){qCritical()<<"Serial/parallel packet or fixed-pose reuse parity failed"<<id;return 18;}
         }
+        // Exact-pose CPU cache + resident GPU buffer. Warm once; no CPU
+        // reconstruction or GPU packet upload on the timed cache hits.
+        e::PacketCache residentCache;bool reused=false;
+        const auto& residentPacket=residentCache.get(session,scene,rt.objects.size(),cam,w,h,opt,reused);
+        if(reused||!residentPacket.ok||residentPacket.data!=lastPacket)return 19;
+        std::vector<uint32_t> resident;m3d::Stats residentStats;
+        if(!m3d::renderLumaTraceEscargotGpuResidentPreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,residentPacket.data,resident,residentStats,err)||resident!=b)return 19;
+        std::vector<double> residentTimes;
+        for(int j=0;j<repeats;++j){auto start=Clock::now();const auto& p=residentCache.get(session,scene,rt.objects.size(),cam,w,h,opt,reused);
+            if(!reused||!p.ok||!m3d::renderLumaTraceEscargotGpuResidentPreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,p.data,resident,residentStats,err)||resident!=b)return 19;
+            residentTimes.push_back(ms(start));
+        }
+        // Actual moving camera: cache must miss on each changed eye position.
+        std::vector<double> moveA,moveB;std::vector<uint32_t> movingPixels;m3d::Stats movingStats;
+        for(int j=1;j<=3;++j){auto shifted=cam;shifted.eye=cam.eye+cam.r*(.025f*float(j));
+            auto start=Clock::now();
+            if(!m3d::renderLumaTracePreview(scene,rt.lumaTraceBvh4,shadow,shifted,w,h,movingPixels,movingStats,err))return 20;
+            moveA.push_back(ms(start));start=Clock::now();
+            const auto& p=residentCache.get(session,scene,rt.objects.size(),shifted,w,h,opt,reused);
+            if(reused||!p.ok||!m3d::renderLumaTraceEscargotGpuResidentPreview(scene,rt.lumaTraceBvh4,shadow,shifted,w,h,p.data,movingPixels,movingStats,err))return 20;
+            moveB.push_back(ms(start));
+        }
+        // Replay the exact real optical CPU queries in a single native compute
+        // dispatch. This validates the GPU traversal, not a full GPU path solver.
+        std::vector<m3d::EscargotRayQuery> queries;std::vector<e::RecordedQuery> reference;
+        for(const auto& sf:referenceFrame.surfaces)for(const auto& q:sf.recorded){queries.push_back(q.query);reference.push_back(q);}
+        uint64_t gpuMismatch=0,gpuOverflow=0;double gpuPrepare=0,gpuQuery=0;
+        std::vector<m3d::EscargotRayHit> hits;
+        bool gpuTraceOk=!queries.empty()&&m3d::traceEscargotGpuBatch(scene,rt.lumaTraceBvh4,queries,hits,gpuPrepare,gpuQuery,err)&&hits.size()==reference.size();
+        if(gpuTraceOk){
+            for(size_t i=0;i<hits.size();++i){const auto& x=hits[i];const auto& y=reference[i];
+                if(x.status>1){++gpuOverflow;continue;}
+                const bool cpuHit=y.primitive!=0xffffffffu;
+                if(cpuHit!=(x.status==1)||(cpuHit&&(x.primitive!=y.primitive||std::abs(x.depth-y.depth)>std::max(.0001f,std::abs(y.depth)*.00001f))))++gpuMismatch;
+            }
+        }else qWarning()<<"Experimental GPU trace unavailable"<<QString::fromStdWString(err);
         // A must remain stable after switching back from B.
         std::vector<uint32_t> again;m3d::Stats againStats;
         if(!m3d::renderLumaTracePreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,again,againStats,err)||again!=a){qCritical()<<"A/B restore parity failed"<<id;return 15;}
         if(!save(out,id+"-A-virtual.png",a,w,h)||!save(out,id+"-B-escargot.png",b,w,h)||!save(out,id+"-difference-x4.png",diff,w,h))return 11;
-        summary.append(QJsonObject{{"camera",id},{"A_p50_ms",quantile(aTimes,.50)},{"A_p95_ms",quantile(aTimes,.95)},{"B_p50_ms",quantile(bTimes,.50)},{"B_p95_ms",quantile(bTimes,.95)},{"B_fixed_pose_reuse_p50_ms",quantile(fixedTimes,.50)},{"B_fixed_pose_reuse_p95_ms",quantile(fixedTimes,.95)},{"changedPixels",double(changed)},{"escargotEffectivePixels",double(effective)},{"meanAbsChannelDifference",errorSum/(3*a.size())}});
+        summary.append(QJsonObject{{"camera",id},{"A_p50_ms",quantile(aTimes,.50)},{"A_p95_ms",quantile(aTimes,.95)},{"B_p50_ms",quantile(bTimes,.50)},{"B_p95_ms",quantile(bTimes,.95)},{"B_fixed_pose_reuse_p50_ms",quantile(fixedTimes,.50)},{"B_fixed_pose_reuse_p95_ms",quantile(fixedTimes,.95)},{"B_resident_p50_ms",quantile(residentTimes,.50)},{"B_resident_p95_ms",quantile(residentTimes,.95)},{"A_moving_p50_ms",quantile(moveA,.50)},{"B_moving_p50_ms",quantile(moveB,.50)},{"gpuTraceAvailable",gpuTraceOk},{"gpuTraceQueries",double(queries.size())},{"gpuTraceMismatches",double(gpuMismatch)},{"gpuTraceOverflow",double(gpuOverflow)},{"gpuTracePrepareMs",gpuPrepare},{"gpuTraceReplayMs",gpuQuery},{"changedPixels",double(changed)},{"escargotEffectivePixels",double(effective)},{"meanAbsChannelDifference",errorSum/(3*a.size())}});
         qInfo()<<id<<"A p50"<<quantile(aTimes,.5)<<"B p50"<<quantile(bTimes,.5)<<"changed"<<qulonglong(changed)<<"effective Escargot pixels"<<qulonglong(effective);++tested;log.flush();
     }
     if(!tested||!allActive||!allCoverage||!allChanged||!allEffective){qCritical()<<"Invalid A/B: no active virtual camera, optical data or visible changes";return 12;}
     QFile json(out.filePath("summary.json"));if(!json.open(QIODevice::WriteOnly))return 13;
-    const QJsonObject report{{"scene",loaded.scene.revision},{"width",w},{"height",h},{"repeats",repeats},{"rayBudget",int(opt.rayBudget)},{"textureResolutionCap",256},{"msaaRequested",1},{"modeB","CPU sparse BVH observations + compact GPU four-neighbor reconstruction, no secondary cameras"},{"receiverMatch","exact source object ID + material + local tangent plane; no averaged receiver depth rejection"},{"sourceLighting","resident GPU textures + simplified proxy, not LT radiance"},{"atlasNonzeroNote","not applicable in GPU mode; use effective pixels and packet_tiles"},{"cpuReference","untimed C capture, prior CPU reconstruction and depth gate, serial rays"},{"fixedPoseReuse","separate diagnostic: identical camera/scene/lighting, reuse CPU packet; includes GPU upload/render/readback, not moving-camera timing"},{"forceWarp",qEnvironmentVariable("M3D_V16_FORCE_WARP")},{"cameras",summary}};
+    const QJsonObject report{{"scene",loaded.scene.revision},{"width",w},{"height",h},{"repeats",repeats},{"rayBudget",int(opt.rayBudget)},{"textureResolutionCap",256},{"msaaRequested",1},{"modeB","CPU sparse BVH observations + compact GPU four-neighbor reconstruction, no secondary cameras"},{"receiverMatch","exact source object ID + material + local tangent plane; no averaged receiver depth rejection"},{"sourceLighting","resident GPU textures + simplified proxy, not LT radiance"},{"atlasNonzeroNote","not applicable in GPU mode; use effective pixels and packet_tiles"},{"cpuReference","untimed C capture, prior CPU reconstruction and depth gate, serial rays"},{"fixedPoseReuse","separate diagnostic: identical camera/scene/lighting, reuse CPU packet; includes GPU upload/render/readback, not moving-camera timing"},{"residentPose","exact camera/light/scene/opt key; byte-identical GPU packet remains resident; includes raster/readback"},{"movingPose","three actual lateral shifts 2.5/5/7.5 cm, cache misses enforced"},{"gpuTrace","experimental native nearest-hit replay on same DX11 device and resident BVH nodes; full transparent triangle geometry/order, not active B path"},{"forceWarp",qEnvironmentVariable("M3D_V16_FORCE_WARP")},{"cameras",summary}};
     const auto bytes=QJsonDocument(report).toJson();if(json.write(bytes)!=bytes.size()||log.status()!=QTextStream::Ok)return 13;
     return 0;
 }
