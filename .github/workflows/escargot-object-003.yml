@@ -1,4 +1,4 @@
-name: Escargot Object 003 — multilayer parity
+name: Escargot Object 003 — transparent multilayer parity
 on:
   push:
     branches: [experiment/v17-escargot-multilayer-003]

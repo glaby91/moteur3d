@@ -1,0 +1,3 @@
+# Escargot Object 003 — transparent paths
+
+Independent branch while global Object 002 runs. First eligible reflective receiver through straight transparent primary crossings, then ordered secondary layers until opacity/escape or crossing limit. Compare scalar and shared packet intersections, IDs, exact UV, depth, transmission, composited proxy color and image. Crossing caps 4/8/16; exhausted paths explicitly unknown. Three camera presets, 320 and 640 width, two poses. Existing optical weight and opacity policy; no Snell refraction, no full stack of primary reflective receivers, no real PBR lighting or GPU integration. Previous primitive excluded on continuation, as in existing scalar traversal. No master changes.
