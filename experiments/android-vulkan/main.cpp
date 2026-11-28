@@ -150,7 +150,7 @@ int main(int argc,char** argv){
 #ifdef CSE_ANDROID_EMULATOR_TEST
     // The x86_64 APK is explicitly an emulator-only diagnostic. ARM64 never opts in.
     qputenv("CSE_WARP_VK_ALLOW_SOFTWARE_TEST","1");
-    qInfo().noquote()<<"CSE_ANDROID EMULATOR_ONLY x86_64";
+    qInfo().noquote()<<"CSE_ANDROID EMULATOR_ONLY x86_64; strict tablet policy unchanged";
 #endif
     qputenv("CSE_WARP_VK_MSAA","1");
     try{

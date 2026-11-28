@@ -43,6 +43,9 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+#if defined(__ANDROID__) && defined(__x86_64__) && defined(CSE_ANDROID_EMULATOR_TEST)
+#include <QDebug>
+#endif
 
 namespace m3d { namespace {
 namespace resources=vulkan::resources;
@@ -1004,7 +1007,14 @@ class VulkanRaster final {
                      <<VK_VERSION_MAJOR(props.apiVersion)<<"."
                      <<VK_VERSION_MINOR(props.apiVersion)<<"."
                      <<VK_VERSION_PATCH(props.apiVersion)<<"\n";
-            if(!vulkanVersion::supported(props.apiVersion))continue;
+            bool versionOk=vulkanVersion::supported(props.apiVersion);
+#if defined(__ANDROID__) && defined(__x86_64__) && defined(CSE_ANDROID_EMULATOR_TEST)
+            const bool swiftShaderCpu=props.deviceType==VK_PHYSICAL_DEVICE_TYPE_CPU &&
+                std::strcmp(props.deviceName,"SwiftShader Device (Subzero)")==0;
+            versionOk=vulkanVersion::diagnosticDeviceSupported(props.apiVersion,true,
+                software&&std::strcmp(software,"1")==0,swiftShaderCpu);
+#endif
+            if(!versionOk)continue;
             uint32_t qn=0;vkGetPhysicalDeviceQueueFamilyProperties(pd,&qn,nullptr);
             std::vector<VkQueueFamilyProperties> qs(qn);
             vkGetPhysicalDeviceQueueFamilyProperties(pd,&qn,qs.data());
@@ -1026,6 +1036,12 @@ class VulkanRaster final {
         vkGetPhysicalDeviceMemoryProperties(physical_,&memoryTypes_);
         vkGetPhysicalDeviceFeatures(physical_,&features_);
         adapter_=props_.deviceName;
+#if defined(__ANDROID__) && defined(__x86_64__) && defined(CSE_ANDROID_EMULATOR_TEST)
+        qInfo().noquote()<<"CSE_ANDROID DIAGNOSTIC_DEVICE"<<props_.deviceName
+            <<VK_API_VERSION_MAJOR(props_.apiVersion)<<VK_API_VERSION_MINOR(props_.apiVersion)
+            <<VK_API_VERSION_PATCH(props_.apiVersion)
+            <<"strict_minimum_met"<<vulkanVersion::supported(props_.apiVersion);
+#endif
         // Optional color-format experiment: BGRA8 matches Qt ARGB32 byte order
         // on little-endian Windows. Leave RGBA8 as the default reference.
 #ifdef __APPLE__

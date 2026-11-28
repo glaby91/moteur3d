@@ -72,6 +72,15 @@ jobs:
             -DQT_ANDROID_ABIS="${{ matrix.abi }}" -DQT_ENABLE_VERBOSE_DEPLOYMENT=ON \
             -DCSE_ANDROID_PACKAGE_DIR="$RUNNER_TEMP/android-package" -DCSE_ANDROID_BUILD_ID="$GITHUB_SHA" \
             2>&1 | tee configure-android.log
+      - name: Run isolated Vulkan version policy regression with actual NDK headers
+        run: |
+          set -euxo pipefail
+          inc="$ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/include"
+          mkdir -p "$RUNNER_TEMP/vulkan-host-headers"
+          cp -r "$inc/vulkan" "$inc/vk_video" "$RUNNER_TEMP/vulkan-host-headers/"
+          g++ -std=c++17 -Wall -Wextra -Werror -I "$RUNNER_TEMP/vulkan-host-headers" -I v17/vulkan \
+            experiments/android-vulkan/version_policy_smoke.cpp -o "$RUNNER_TEMP/version-policy"
+          "$RUNNER_TEMP/version-policy"
       - name: Preflight generated Qt deployment settings
         run: |
           set -euxo pipefail

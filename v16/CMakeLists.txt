@@ -36,6 +36,10 @@ elseif(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$" AND NOT CMAK
     list(FILTER M3D_RENDER_SOURCES EXCLUDE REGEX "/src/simd/avx2/")
 endif()
 add_library(moteur3d_v16_core SHARED ${M3D_RENDER_SOURCES})
+if(ANDROID AND ANDROID_ABI STREQUAL "x86_64")
+    # Dedicated emulator artifact; ARM64 and desktop never get this definition.
+    target_compile_definitions(moteur3d_v16_core PRIVATE CSE_ANDROID_EMULATOR_TEST=1)
+endif()
 if(WIN32)
     set_target_properties(moteur3d_v16_core PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()

@@ -36,6 +36,7 @@ wait_marker() {
   done
   echo "Missing marker: $marker"; return 1
 }
+wait_marker "CSE_ANDROID DIAGNOSTIC_DEVICE" 120
 wait_marker "CSE_ANDROID PASS TRIANGLE" 360
 wait_marker "CSE_ANDROID PASS SCENE" 600
 wait_marker "CSE_ANDROID PASS WSI.*readback 0" 180

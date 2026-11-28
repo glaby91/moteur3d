@@ -11,4 +11,10 @@ static_assert(VK_API_VERSION_MAJOR(minimum)==1 &&
 inline constexpr bool supported(uint32_t actual) noexcept {
     return VK_API_VERSION_VARIANT(actual)==0 && actual>=minimum;
 }
+// Exact Build 6 emulator exception, never used for tablet production or loader.
+inline constexpr bool diagnosticDeviceSupported(uint32_t actual,bool emulatorBuild,
+                                                bool softwareOptIn,bool swiftShaderCpu) noexcept {
+    return supported(actual) || (emulatorBuild && softwareOptIn && swiftShaderCpu &&
+                                  actual==VK_MAKE_API_VERSION(0,1,3,0));
+}
 }} // namespace m3d::vulkanVersion
