@@ -5,7 +5,7 @@ CSE WARP V17 réunit l’interface d’exploration, plusieurs backends de rendu,
 
 > La branche principale du moteur est `master`. [État des branches](BRANCH_STATUS.md) · [Validation L01/L02 V17.029](v17/docs/L01_SOLAR_PCF_V17029.md) · [Build V17.031 validée](https://github.com/glaby91/moteur3d/actions/runs/46068889675).
 
-**Accès rapide :** [Démarrage et profil](#v17031--profil-de-démarrage-et-philosophie-warp) · [Créer une scène](#construire-une-scène-v16v17--guide-du-créateur) · [Backends](#backends-disponibles) · [Compiler](#compiler) · [Linux/Vulkan](#linux-natif--vulkan-x86_64) · [Benchmarks](#benchmarks-en-ligne-de-commande) · [Audit historique](#audit-historique-et-registre-des-optimisations--26-novembre-2026)
+**Accès rapide :** [Démarrage et profil](#v17031--profil-de-démarrage-et-philosophie-warp) · [Créer une scène](#construire-une-scène-v16v17--guide-du-créateur) · [Backends](#backends-disponibles) · [Compiler](#compiler) · [Linux/Vulkan](#linux-natif--vulkan-x86_64) · [macOS/Vulkan](#macos-natif--arm64-moltenvk) · [Benchmarks](#benchmarks-en-ligne-de-commande) · [Audit historique](#audit-historique-et-registre-des-optimisations--26-novembre-2026)
 
 ## V17.031 — profil de démarrage et philosophie WARP
 
@@ -25,7 +25,7 @@ CSE WARP V17 réunit l’interface d’exploration, plusieurs backends de rendu,
 |---|---|---|
 | L01/L02, receiver-plane PCF | V17.029 | Validées visuellement DX11/Vulkan/LumaTrace |
 | DX11 raster / shader partagé | 018 / 009 | Z Material intégré |
-| Vulkan raster | 010 | Z Material intégré |
+| Vulkan raster | 011 (branche macOS) | Z Material intégré ; portage Apple expérimental |
 | LumaTrace compute / CPU | 010 / 003 | Noyaux inchangés, bénéficie du shader partagé |
 | Z Material | 001 | V17.030 compilée ; amélioration visuelle L03 confirmée, problème métallique non entièrement résolu |
 | Scene runtime | 003 | Filtrage des matériaux actifs avant génération des textures |
@@ -99,6 +99,18 @@ cd CSE-WARP-V17.031-Linux-Vulkan-GitHub-8-x86_64
 Pour démarrer directement hors ligne avec la scène embarquée : `./lancer.sh benchmark-civic/scene.json`. Le lancement normal conserve la vérification des mises à jour et sélectionne la scène locale la plus récente.
 
 Utiliser le pilote Vulkan adapté au GPU. Vulkan est sélectionné par défaut ; les modes CPU sont disponibles sans GPU. La présentation Linux passe par QImage avec relecture GPU/CPU. DirectX 11 et LumaTrace GPU/Z Reflect ne sont pas portés sous Linux. Audio local de secours validé via Qt AudioSink/PulseAudio virtuel ; écoute physique et flux Internet non validés. GPU physique et parité graphique encore à valider.
+
+## macOS natif — ARM64 MoltenVK
+
+**Portage expérimental validé en CI hors écran — V17.031, macOS Build 4, scène V17.634, 28 novembre 2026.** Branche `test/macos-metal-vulkan` uniquement.
+
+[Build 4](https://github.com/glaby91/moteur3d/actions/runs/46094113757) · [Package développeur ARM64 (71,1 Mo)](https://github.com/glaby91/moteur3d/actions/runs/46094113757/artifacts/15243415241) · [PNG et diagnostics](https://github.com/glaby91/moteur3d/actions/runs/46094113757/artifacts/15243255647) · [Documentation technique et historique](v17/docs/MACOS_VULKAN.md).
+
+Qt 6.10.3, SDK Vulkan 1.4.363.1, loader 1.4.363, API GPU 1.3.357 (minimum 1.3.204), MoltenVK 1.4.2. GPU Apple paravirtualisé, pas de Metal 4. Vulkan Raster 011 / Resources 003 : toutes les images optimal-tiling sont allouées en mémoire GPU privée dédiée sous Apple. Shaders et formats inchangés.
+
+Compilation ARM64 réussie, 5/5 tests unitaires Vulkan, deux triangles et six rendus de scène exportés en PNG, test des commandes de navigation de l'application Qt réussi. À 640 × 360, MSAA 1×, 1 508 appels de dessin, les deux dernières images optimisées prennent 21,40 et 17,90 ms. Mesures ponctuelles statiques, non FPS en déplacement. Présentation QImage offscreen ; vraie fenêtre macOS, Full HD, fidélité visuelle, audio et table GI réelle restent à valider.
+
+Le package nécessite Qt et le SDK Vulkan locaux ; voir le guide technique pour le lancement. Les artefacts Actions ont une rétention limitée. Pas de fusion dans master.
 
 ## Construire une scène V16/V17 — guide du créateur
 
