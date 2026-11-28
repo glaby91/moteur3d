@@ -68,7 +68,7 @@ jobs:
         run: |
           cmake -S v17 -B build-escargot -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DV17_SCENE_SOURCE_DIR=$env:ESC_SCENE" -DM3D_REQUIRE_VULKAN=ON "-DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER" "-DV17_GIT_SHA=$env:GITHUB_SHA"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
-          cmake --build build-escargot --config Release --target v17_escargot_object_lab --parallel 4
+          cmake --build build-escargot --config Release --target v17_escargot_object_lab v17_escargot_object_generic --parallel 4
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
       - name: Real scene one-layer diagnostic
         shell: pwsh
@@ -79,6 +79,17 @@ jobs:
           $env:PATH="$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
           & $exe.FullName "$env:ESC_SCENE/scene.json" "$PWD/object-results"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Generic discovery and geometric visibility A-B
+        shell: pwsh
+        run: |
+          $core = Get-ChildItem build-escargot -Recurse -File -Filter moteur3d_v16_core.dll | Select-Object -First 1
+          $exe = Get-ChildItem build-escargot -Recurse -File -Filter v17_escargot_object_generic.exe | Select-Object -First 1
+          if (!$core -or !$exe) { throw "Missing generic diagnostic binaries" }
+          $env:PATH="$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
+          & $exe.FullName "$env:ESC_SCENE/scene.json" "$PWD/object-results"
+          $rc = $LASTEXITCODE
+          if (Test-Path object-results/generic-summary.json) { Get-Content object-results/generic-summary.json }
+          if ($rc) { throw "Generic geometry validation failed: $rc" }
       - uses: actions/upload-artifact@v6
         if: always()
         with:
