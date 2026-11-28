@@ -4,8 +4,8 @@
 namespace m3d::escargot_gpu {
 inline constexpr char kProjectedPass[]=R"(
 struct ProjIn {float4 p:POSITION;float4 data:TEXCOORD0;float2 extra:TEXCOORD1;};
-struct ProjOut {float4 p:SV_POSITION;float2 uv:TEXCOORD0;float illum:TEXCOORD1;nointerpolation uint mat:MATERIAL;nointerpolation float alpha:TEXCOORD2;float clip:SV_ClipDistance0;};
-ProjOut VSProjected(ProjIn i){ProjOut o;o.p=i.p;o.uv=i.data.xy;o.illum=i.data.z;o.mat=uint(i.data.w);o.alpha=i.extra.x;o.clip=i.extra.y;return o;}
+struct ProjOut {float4 p:SV_POSITION;float2 uv:TEXCOORD0;float illum:TEXCOORD1;nointerpolation uint mat:MATERIAL;nointerpolation float alpha:TEXCOORD2;float planeDistance:SV_ClipDistance0;};
+ProjOut VSProjected(ProjIn i){ProjOut o;o.p=i.p;o.uv=i.data.xy;o.illum=i.data.z;o.mat=uint(i.data.w);o.alpha=i.extra.x;o.planeDistance=i.extra.y;return o;}
 float4 PSProjected(ProjOut i):SV_TARGET{
     float layer=materialTextureDetail[i.mat].x;
     float3 base=layer>=0?preservedAlbedo.Sample(probeSampler,float3(saturate(i.uv),layer)).rgb:albedo.Sample(wrapSampler,float3(i.uv,i.mat)).rgb;
@@ -52,13 +52,20 @@ class ProjectedOptics {
     }
 public:
     ID3D11ShaderResourceView* view()const{return srv_.Get();}
+    void invalidate(){renderedKey_=0;}
     bool render(ID3D11Device* d,ID3D11DeviceContext* c,const EscargotPacketBuild& plan,int w,int h,const float clear[4],
         ID3D11Buffer* constants,ID3D11ShaderResourceView* albedo,ID3D11ShaderResourceView* preserved,
         ID3D11SamplerState* wrap,ID3D11SamplerState* clamp,ID3D11RasterizerState* raster,
         ID3D11DepthStencilState* opaque,ID3D11DepthStencilState* transparent,ID3D11BlendState* blend,std::wstring& error){
         if(device_!=d){*this=ProjectedOptics{};device_=d;}
         const auto count=plan.projectedVertices.size()/10;
-        if(plan.projectedRanges.size()>4||plan.projectedVertices.size()%10||count>360000){error=L"Object005 projection budget exceeded";return false;}
+        if(w<=0||h<=0||plan.projectedRanges.size()>4||plan.projectedVertices.size()%10||count>360000){error=L"Object005 projection budget exceeded";return false;}
+        if(plan.data.size()<8||plan.data.size()%4){error=L"Object005 invalid receiver map";return false;}
+        for(const auto& r:plan.projectedRanges){
+            if(!r.receiver||uint64_t(r.receiver)+1>=plan.data.size()/4||uint64_t(r.first)+r.opaque+r.transparent>count||
+               r.first%3||r.opaque%3||r.transparent%3||r.x<0||r.y<0||r.w<=0||r.h<=0||
+               int64_t(r.x)+r.w>w||int64_t(r.y)+r.h>h){error=L"Object005 invalid draw range";return false;}
+        }
         ID3D11ShaderResourceView* none=nullptr;c->PSSetShaderResources(8,1,&none);
         if(plan.projectedRanges.empty())return true;
         if(!shaders(d,error)||!targets(d,w,h,uint32_t(plan.projectedRanges.size()),error))return false;
@@ -78,7 +85,6 @@ public:
         c->PSSetShaderResources(0,1,&albedo);c->PSSetShaderResources(6,1,&preserved);
         ID3D11SamplerState* samplers[]={wrap,clamp};c->PSSetSamplers(0,2,samplers);
         for(UINT i=0;i<plan.projectedRanges.size();++i){const auto& r=plan.projectedRanges[i];
-            if(uint64_t(r.first)+r.opaque+r.transparent>count||r.opaque%3||r.transparent%3){error=L"Object005 invalid draw range";return false;}
             ID3D11RenderTargetView* target=rtv_[i].Get();c->OMSetRenderTargets(1,&target,dsv_.Get());c->ClearRenderTargetView(target,clear);c->ClearDepthStencilView(dsv_.Get(),D3D11_CLEAR_DEPTH,1,0);
             D3D11_RECT rect{r.x,r.y,r.x+r.w,r.y+r.h};c->RSSetScissorRects(1,&rect);
             c->OMSetDepthStencilState(opaque,0);c->OMSetBlendState(nullptr,nullptr,0xffffffffu);if(r.opaque)c->Draw(r.opaque,r.first);

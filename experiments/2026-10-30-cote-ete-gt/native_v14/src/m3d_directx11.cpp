@@ -1630,7 +1630,7 @@ private:
         foliageInstances_.Reset();
         for(auto& buffer:foliageVertices_)buffer.Reset();
         foliageVertexCounts_.fill(0);foliage_.clear();foliageInstanceCount_=0;
-        lumaTraceCompute_.reset();escResidentPacket_.clear();escTrace_=escargot_gpu::TraceBatch{};escBuild_=escargot_gpu::PacketBuilder{};objectOptics_=escargot_gpu::RasterOptics{}; // shader belongs to the device, not the scene
+        lumaTraceCompute_.reset();escResidentPacket_.clear();escTrace_=escargot_gpu::TraceBatch{};escBuild_=escargot_gpu::PacketBuilder{};objectOptics_=escargot_gpu::RasterOptics{};projectedOptics_.invalidate(); // shaders belong to the device, not the scene
         lumaCpuScene_={};
         if(lumaTrace&&!prepareLumaTraceCpuScene(scene,*lumaBvh,lumaCpuScene_,error))
             return false;

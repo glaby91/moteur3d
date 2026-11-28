@@ -3,6 +3,7 @@
 #include <array>
 #include <atomic>
 #include <memory>
+#include <iterator>
 #include <set>
 namespace m3d::escargot::projected {
 constexpr uint32_t maxReceivers=4,rayBudget=768,triangleBudget=120000,maxSources=160;
@@ -82,7 +83,7 @@ class Session {
         }
         auto& a=seen_[r.object];for(auto it=a.begin();it!=a.end();)if(frame_-it->second.last>64)it=a.erase(it);else ++it;
     }
-    void emit(EscargotPacketBuild& plan,const TriangleRef& ref,Plane p,const Camera& c,const ShadowMap& sh,Metrics& m){
+    void appendProjectedTriangle(EscargotPacketBuild& plan,const TriangleRef& ref,Plane p,const Camera& c,const ShadowMap& sh,Metrics& m){
         const auto& t=rt_.renderScene.obj[ref.id];const auto& mat=rt_.renderScene.mat[t.mat];
         V pos[]={t.a,t.b,t.c},uv[]={t.uv0,t.uv1,t.uv2},n[]={t.n0,t.n1,t.n2};
         if(lightStamp_[ref.id]!=epoch_){
@@ -113,7 +114,7 @@ public:
     }
     bool valid()const{return bool(trace_);}
     const EscargotPacketBuild& build(const Camera& c,const ShadowMap& sh,int w,int h,Metrics& m){
-        ++frame_;float day;V sun;escargotLightingSnapshot(day,sun);
+        m=Metrics{};++frame_;float day;V sun;escargotLightingSnapshot(day,sun);
         std::array<float,16> key={c.eye.x,c.eye.y,c.eye.z,c.f.x,c.f.y,c.f.z,c.r.x,c.r.y,c.r.z,c.u.x,c.u.y,c.u.z,c.tanHalf,c.aspect,float(w),float(h)};
         const bool lightChanged=day_!=day||length(sun-sun_)>1e-5f;
         if(lightChanged){day_=day;sun_=sun;++epoch_;}
@@ -164,8 +165,9 @@ public:
             std::sort(transparent.begin(),transparent.end(),[](const TriangleRef& x,const TriangleRef& y){return x.depth==y.depth?x.id<y.id:x.depth>y.depth;});
             EscargotProjectedRange range;range.receiver=a.object;range.first=uint32_t(plan.projectedVertices.size()/10);
             range.opaque=uint32_t(opaque.size()*3);range.transparent=uint32_t(transparent.size()*3);
-            range.x=a.bounds.x;range.y=a.bounds.y;range.w=a.bounds.w;range.h=a.bounds.h;
-            for(const auto& t:opaque)emit(plan,t,p,c,sh,m);for(const auto& t:transparent)emit(plan,t,p,c,sh,m);
+            range.x=std::max(0,a.bounds.x-1);range.y=std::max(0,a.bounds.y-1);
+            range.w=std::min(w,a.bounds.x+a.bounds.w+1)-range.x;range.h=std::min(h,a.bounds.y+a.bounds.h+1)-range.y;
+            for(const auto& t:opaque)appendProjectedTriangle(plan,t,p,c,sh,m);for(const auto& t:transparent)appendProjectedTriangle(plan,t,p,c,sh,m);
             plan.data[4*(size_t(a.object)+1)]=float(plan.projectedRanges.size()+1);
             plan.projectedRanges.push_back(range);m.triangles+=count;++m.receivers;
         }
