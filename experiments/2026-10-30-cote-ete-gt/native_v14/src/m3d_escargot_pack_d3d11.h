@@ -41,6 +41,10 @@ uint shortlistLimit(uint start,uint count,int4 r){
     }
     return best.w;
 }
+uint popSelected(inout uint4 mask){
+    uint lane=mask.x?0u:(mask.y?1u:(mask.z?2u:3u));
+    uint bit=uint(firstbitlow(mask[lane]));mask[lane]&=mask[lane]-1u;return 32u*lane+bit;
+}
 bool overlaps(int4 a,int4 b){return all(a.xy<b.xy+b.zw)&&all(b.xy<a.xy+a.zw);}
 [numthreads(32,1,1)]
 void CSBuild(uint3 tid:SV_DispatchThreadID){
@@ -52,16 +56,22 @@ void CSBuild(uint3 tid:SV_DispatchThreadID){
     int4 rect=int4(int2(b.zw),int2(c.xy));
     if(!receiverCount||!layerCount)return;
     uint receiverLimit=shortlistLimit(receiverStart,receiverCount,rect),chosenReceivers=0;
-    for(uint j=0;j<receiverCount;++j)if(minimumDistance(int2(src[receiverStart+3*j].xy),rect)<=receiverLimit)++chosenReceivers;
+    // The shared receiver shortlist is also the exact common-layer stencil.
+    // Cache the selected source indices in four registers for small regions.
+    const bool maskable=receiverCount<=128u;uint4 selected=0;
+    for(uint j=0;j<receiverCount;++j)if(minimumDistance(int2(src[receiverStart+3*j].xy),rect)<=receiverLimit){
+        ++chosenReceivers;if(maskable)selected[j>>5]|=1u<<(j&31u);
+    }
     if(!chosenReceivers)return;
     uint overlapsCount=0;
     for(uint l=0;l<layerCount;++l)if(overlaps(int4(src[layerStart+7*l+1]),rect))++overlapsCount;
     if(!overlapsCount)return;
-    uint receiverDst=reserveRange(3*chosenReceivers),layerDst=reserveRange(7*min(overlapsCount,64u));
-    if(!receiverDst||!layerDst)return;
-    uint wr=0;
-    for(uint j=0;j<receiverCount;++j){
-        uint s=receiverStart+3*j;if(minimumDistance(int2(src[s].xy),rect)>receiverLimit)continue;
+    uint receiverDst=reserveRange(3*chosenReceivers+7*min(overlapsCount,64u));
+    if(!receiverDst)return;uint layerDst=receiverDst+3*chosenReceivers;
+    uint wr=0;uint4 copyMask=selected;
+    for(uint j=0;j<(maskable?chosenReceivers:receiverCount);++j){
+        uint index=j;if(maskable)index=popSelected(copyMask);
+        uint s=receiverStart+3*index;if(!maskable&&minimumDistance(int2(src[s].xy),rect)>receiverLimit)continue;
         uint t=receiverDst+3*wr++;dst[t]=src[s];dst[t+1]=src[s+1];dst[t+2]=src[s+2];
     }
     uint active=0;
@@ -74,7 +84,14 @@ void CSBuild(uint3 tid:SV_DispatchThreadID){
         uint positions=common?receiverStart:obsStart;
         uint limit=common?receiverLimit:shortlistLimit(positions,obsCount,rect);
         uint stride=common?2u:3u,count=0;bool hit=false;
-        for(uint k=0;k<obsCount;++k){
+        const bool sharedMask=common&&maskable;uint4 layerMask=selected;
+        if(sharedMask){
+            count=chosenReceivers;
+            for(uint k=0;k<count;++k){
+                uint index=popSelected(layerMask);
+                if(src[obsStart+2*index+1].w>.5){hit=true;break;}
+            }
+        }else for(uint k=0;k<obsCount;++k){
             if(minimumDistance(int2(src[positions+3*k].xy),rect)>limit)continue;
             ++count;
             if(src[obsStart+stride*k+stride-1].w>.5)hit=true;
@@ -85,10 +102,11 @@ void CSBuild(uint3 tid:SV_DispatchThreadID){
         uint layer=layerDst+7*active++;
         dst[layer]=float4(float(obsDst),float(count),info.zw);
         for(uint k=1;k<7;++k)dst[layer+k]=src[lb+k];
-        uint at=0;
-        for(uint k=0;k<obsCount;++k){
-            if(minimumDistance(int2(src[positions+3*k].xy),rect)>limit)continue;
-            uint from=obsStart+stride*k,to=obsDst+stride*at++;
+        uint at=0;layerMask=selected;
+        for(uint k=0;k<(sharedMask?count:obsCount);++k){
+            uint index=k;if(sharedMask)index=popSelected(layerMask);
+            if(!sharedMask&&minimumDistance(int2(src[positions+3*index].xy),rect)>limit)continue;
+            uint from=obsStart+stride*index,to=obsDst+stride*at++;
             dst[to]=src[from];dst[to+1]=src[from+1];if(!common)dst[to+2]=src[from+2];
         }
     }
