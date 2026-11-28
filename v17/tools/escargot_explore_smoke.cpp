@@ -4,6 +4,7 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <algorithm>
+#include <random>
 #include <cstdlib>
 #include <cstdio>
 #include <QDir>
@@ -42,6 +43,28 @@ int main(int argc,char** argv){
     m3d::updateLighting(rt.daylightHour);m3d::Stats shadowStats;
     auto shadow=m3d::buildShadow(rt.renderScene,shadowStats);
     const auto cam=m3d::v16::makeCamera(*it,req.width,req.height);
+    // Compiled C++ parity check against the actual legacy clipping function, with real camera axes.
+    namespace proj=m3d::escargot::projected;
+    using m3d::V;
+    std::mt19937 rng(0x600d);std::uniform_real_distribution<float> spread(-30.f,30.f),local(-2.f,2.f),extent(.001f,3.f);
+    std::uniform_int_distribution<int> sx(0,req.width-1),sy(0,req.height-1);
+    uint64_t rejects=0,tests=0;
+    for(int i=0;i<10000;++i){
+        const int x=sx(rng),y=sy(rng);const m3d::escargot::Rect footprint{x,y,1+sx(rng)%(req.width-x),1+sy(rng)%(req.height-y)};
+        const V center=cam.eye+V{spread(rng),spread(rng),spread(rng)};
+        std::array<proj::Box,32> boxes;proj::Box united{{std::numeric_limits<float>::infinity(),std::numeric_limits<float>::infinity(),std::numeric_limits<float>::infinity()},{-std::numeric_limits<float>::infinity(),-std::numeric_limits<float>::infinity(),-std::numeric_limits<float>::infinity()}};
+        for(auto& b:boxes){const V lo=center+V{local(rng),local(rng),local(rng)};b={lo,lo+V{extent(rng),extent(rng),extent(rng)}};proj::extendBox(united,b);}
+        const bool rejected=proj::outsideFootprint(united,cam,footprint,req.width,req.height);rejects+=rejected;
+        for(const auto& b:boxes){
+            const auto a=m3d::escargot::projectBounds(b.lo,b.hi,cam,req.width,req.height),f=proj::fastBounds(b,cam,req.width,req.height);++tests;
+            if(a.valid()!=f.valid()||(a.valid()&&(a.x!=f.x||a.y!=f.y||a.w!=f.w||a.h!=f.h))||(rejected&&proj::intersection(a,footprint).valid())){
+                qCritical()<<"006 footprint parity failure"<<i;return 33;
+            }
+        }
+    }
+    const proj::Box cameraBox{cam.eye-V{.001f,.001f,.001f},cam.eye+V{.001f,.001f,.001f}};
+    if(proj::outsideFootprint(cameraBox,cam,{0,0,1,1},req.width,req.height))return 34;
+    qInfo()<<"006 actual footprint parity"<<qulonglong(tests)<<"triangles, skipped groups"<<qulonglong(rejects);
     auto A=cse::v17render::renderLumaTrace(req,cam,shadow);
     if(!A.ok){qCritical()<<QString::fromStdWString(A.reason);return 8;}
     req.escargot=true;
@@ -90,19 +113,19 @@ int main(int argc,char** argv){
     if(waterSignal<100||strongSignal<20){qCritical()<<"Water reflection missing or too weak";return 23;}
     _putenv_s("CSE_WARP_ESCARGOT_OBJECT_GPU","0");
     auto P=cse::v17render::renderLumaTrace(req,cam,shadow);
-    if(!P.ok||P.stats.zReflectActive||!P.renderer.contains("Object 005")||P.stats.rays>e::projected::rayBudget||P.pixels.size()!=A.pixels.size()){
-        qCritical()<<"Object005 failed"<<P.ok<<P.renderer<<QString::fromStdWString(P.reason)<<"rays"<<qulonglong(P.stats.rays);return 24;
+    if(!P.ok||P.stats.zReflectActive||!P.renderer.contains("Object 006")||P.stats.rays>e::projected::rayBudget||P.pixels.size()!=A.pixels.size()){
+        qCritical()<<"Object006 failed"<<P.ok<<P.renderer<<QString::fromStdWString(P.reason)<<"rays"<<qulonglong(P.stats.rays);return 24;
     }
     e::projected::Session project(rt,*req.sceneDatabase);if(!project.valid())return 25;
     e::projected::Metrics pm;auto plan=project.build(cam,shadow,req.width,req.height,pm);
     if(pm.rays>e::projected::rayBudget||pm.triangles>e::projected::triangleBudget||!pm.triangles||!pm.receivers||!pm.water||
         plan.projectedVertices.size()!=size_t(pm.triangles)*30||plan.projectedRanges.size()!=pm.receivers){
-        qCritical()<<"Object005 invalid planner metrics"<<pm.rays<<pm.triangles<<pm.receivers<<"catalogue"<<pm.catalogue<<"patches"<<pm.patches<<"visible"<<pm.visible<<"water"<<pm.water;return 26;
+        qCritical()<<"Object006 invalid planner metrics"<<pm.rays<<pm.triangles<<pm.receivers<<"catalogue"<<pm.catalogue<<"patches"<<pm.patches<<"visible"<<pm.visible<<"water"<<pm.water;return 26;
     }
     uint32_t end=0;
     for(const auto& r:plan.projectedRanges){
         if(r.first!=end||r.opaque%3||r.transparent%3||r.x<0||r.y<0||r.w<=0||r.h<=0||r.x+r.w>req.width||r.y+r.h>req.height){
-            qCritical()<<"Object005 invalid projected layout"<<r.receiver;return 31;
+            qCritical()<<"Object006 invalid projected layout"<<r.receiver;return 31;
         }
         end+=r.opaque+r.transparent;
     }
@@ -114,7 +137,7 @@ int main(int argc,char** argv){
     for(size_t j=0;j<P.pixels.size();++j){int d=0;for(int shift:{0,8,16})d+=std::abs(int((P.pixels[j]>>shift)&255)-int((projectedOff[j]>>shift)&255));projectedSignal+=d>=12;}
     // Same projected path, identical camera/light; cached geometry uses zero queries.
     auto again=cse::v17render::renderLumaTrace(req,cam,shadow);
-    if(!again.ok||again.stats.rays||again.pixels!=P.pixels){qCritical()<<"Object005 cache mismatch"<<again.renderer<<qulonglong(again.stats.rays);return 28;}
+    if(!again.ok||again.stats.rays||again.pixels!=P.pixels){qCritical()<<"Object006 cache mismatch"<<again.renderer<<qulonglong(again.stats.rays);return 28;}
         // A sky-only pass has the same receiver map, Fresnel, opacity and sky fill.
     // The sole difference from the on-plan is the projected triangle geometry.
     auto skyOnly=plan;skyOnly.projectedKey=0;skyOnly.projectedVertices.clear();
@@ -137,19 +160,19 @@ int main(int argc,char** argv){
     qInfo()<<"Projected geometry signal on water:"<<qulonglong(geometrySignal)<<"rays"<<pm.rays<<"triangles"<<pm.triangles<<"omitted"<<pm.omitted;
     if(app.arguments().size()==3){
         QDir out(app.arguments().at(2));QDir().mkpath(out.absolutePath());
-        QImage(reinterpret_cast<const uchar*>(geometryOn.data()),req.width,req.height,req.width*4,QImage::Format_RGB32).save(out.filePath("Object005-water-geometry.png"));
-        QImage(reinterpret_cast<const uchar*>(geometrySky.data()),req.width,req.height,req.width*4,QImage::Format_RGB32).save(out.filePath("Object005-water-sky-only.png"));
-        QImage(reinterpret_cast<const uchar*>(P.pixels.data()),req.width,req.height,req.width*4,QImage::Format_RGB32).save(out.filePath("Object005.png"));
+        QImage(reinterpret_cast<const uchar*>(geometryOn.data()),req.width,req.height,req.width*4,QImage::Format_RGB32).save(out.filePath("Object006-water-geometry.png"));
+        QImage(reinterpret_cast<const uchar*>(geometrySky.data()),req.width,req.height,req.width*4,QImage::Format_RGB32).save(out.filePath("Object006-water-sky-only.png"));
+        QImage(reinterpret_cast<const uchar*>(P.pixels.data()),req.width,req.height,req.width*4,QImage::Format_RGB32).save(out.filePath("Object006.png"));
     }
-    if(projectedSignal<20||geometrySignal<20){qCritical()<<"Object005 missing geometric signal"<<qulonglong(projectedSignal)<<qulonglong(geometrySignal);return 29;}
+    if(projectedSignal<20||geometrySignal<20){qCritical()<<"Object006 missing geometric signal"<<qulonglong(projectedSignal)<<qulonglong(geometrySignal);return 29;}
     auto pose=*it;pose.eye.x+=.075f;pose.target.x+=.075f;
     auto moved=m3d::v16::makeCamera(pose,req.width,req.height);
     auto M=cse::v17render::renderLumaTrace(req,moved,shadow);
-    if(!M.ok||M.stats.zReflectActive||!M.renderer.contains(QStringLiteral("Z Escargot Object 005"))||M.pixels==P.pixels)return 11;
+    if(!M.ok||M.stats.zReflectActive||!M.renderer.contains(QStringLiteral("Z Escargot Object 006"))||M.pixels==P.pixels)return 11;
     req.escargot=false;
     auto restored=cse::v17render::renderLumaTrace(req,cam,shadow);
     if(!restored.ok||restored.pixels!=A.pixels)return 12;
-    qInfo()<<"Escargot exploration integration: A / F16 / Object004 / Object005 / moved Object005 / A restore OK";
+    qInfo()<<"Escargot exploration integration: A / F16 / Object004 / Object006 / moved Object006 / A restore OK";
     // Same real HWND for both modes; no full-frame staging or QImage fallback.
     RECT bounds{0,0,req.width,req.height};
     AdjustWindowRect(&bounds,WS_OVERLAPPEDWINDOW,FALSE);
@@ -161,7 +184,7 @@ int main(int argc,char** argv){
     req.nativeHandle=reinterpret_cast<quintptr>(hwnd);req.directPresent=true;
     auto nativeA=cse::v17render::renderLumaTrace(req,cam,shadow);
     const auto nativeOK=[](const auto& v){return v.ok&&!v.nativeFallback&&v.nativeFailure.isEmpty()&&v.pixels.empty()&&v.stats.readbackBufferCount==0;};
-    const auto nativeG=[&](const auto& v){return nativeOK(v)&&!v.stats.zReflectActive&&v.renderer.contains(QStringLiteral("Z Escargot Object 005"))&&v.renderer.contains(QStringLiteral("swapchain"));};
+    const auto nativeG=[&](const auto& v){return nativeOK(v)&&!v.stats.zReflectActive&&v.renderer.contains(QStringLiteral("Z Escargot Object 006"))&&v.renderer.contains(QStringLiteral("swapchain"));};
     if(!nativeOK(nativeA)){qCritical()<<nativeA.nativeFailure<<QString::fromStdWString(nativeA.reason);return 14;}
     req.escargot=true;
     auto nativeF=cse::v17render::renderLumaTrace(req,cam,shadow);
@@ -171,12 +194,12 @@ int main(int argc,char** argv){
     req.escargot=false;
     auto nativeRestore=cse::v17render::renderLumaTrace(req,cam,shadow);
     if(!nativeOK(nativeRestore)||nativeRestore.stats.zReflectActive!=nativeA.stats.zReflectActive)return 17;
-    qInfo()<<"Native swapchain A / Object005 / moved Object005 / A restored, zero image readback";
+    qInfo()<<"Native swapchain A / Object006 / moved Object006 / A restored, zero image readback";
     if(app.arguments().size()==3){
         QDir out(app.arguments().at(2));if(!QDir().mkpath(out.absolutePath()))return 19;
         auto save=[&](const auto& r,const QString& name){return QImage(reinterpret_cast<const uchar*>(r.pixels.data()),req.width,req.height,req.width*4,QImage::Format_RGB32).save(out.filePath(name));};
-        if(!save(A,"A.png")||!save(F,"F16.png")||!save(G,"Object004.png")||!save(P,"Object005.png")||!save(M,"Object005-moved.png"))return 20;
-        QJsonObject report{{"A_ms",double(A.stats.ms)},{"F16_ms",double(F.stats.ms)},{"Object004_ms",double(G.stats.ms)},{"native_A_submit_ms",double(nativeA.stats.ms)},{"native_Object005_submit_ms",double(nativeF.stats.ms)},{"native_readback",int(nativeF.stats.readbackBufferCount)},{"Object005_ms",double(P.stats.ms)},{"Object005_cached_ms",double(again.stats.ms)},{"Object005_moved_ms",double(M.stats.ms)},{"Object005_catalogue",double(pm.catalogue)},{"Object005_patches",double(pm.patches)},{"Object005_visible_patches",double(pm.visible)},{"Object005_water_receivers",double(pm.water)},{"Object005_rays",double(pm.rays)},{"Object005_triangles",double(pm.triangles)},{"Object005_omitted",double(pm.omitted)},{"Object005_signal_pixels",double(projectedSignal)},{"Object005_water_geometry_signal_pixels",double(geometrySignal)},{"water_signal_pixels",double(waterSignal)},{"water_strong_signal_pixels",double(strongSignal)},{"note","Single warm/cold smoke timings on software WARP, not hardware FPS. Pixel output differs from A and F16; movement and A restoration verified, not proof of visual parity."}};
+        if(!save(A,"A.png")||!save(F,"F16.png")||!save(G,"Object004.png")||!save(P,"Object006.png")||!save(M,"Object006-moved.png"))return 20;
+        QJsonObject report{{"A_ms",double(A.stats.ms)},{"F16_ms",double(F.stats.ms)},{"Object004_ms",double(G.stats.ms)},{"native_A_submit_ms",double(nativeA.stats.ms)},{"native_Object006_submit_ms",double(nativeF.stats.ms)},{"native_readback",int(nativeF.stats.readbackBufferCount)},{"Object006_ms",double(P.stats.ms)},{"Object006_cached_ms",double(again.stats.ms)},{"Object006_moved_ms",double(M.stats.ms)},{"Object006_catalogue",double(pm.catalogue)},{"Object006_patches",double(pm.patches)},{"Object006_visible_patches",double(pm.visible)},{"Object006_water_receivers",double(pm.water)},{"Object006_rays",double(pm.rays)},{"Object006_triangles",double(pm.triangles)},{"Object006_omitted",double(pm.omitted)},{"Object006_signal_pixels",double(projectedSignal)},{"Object006_water_geometry_signal_pixels",double(geometrySignal)},{"water_signal_pixels",double(waterSignal)},{"water_strong_signal_pixels",double(strongSignal)},{"note","Single warm/cold smoke timings on software WARP, not hardware FPS. Pixel output differs from A and F16; movement and A restoration verified, not proof of visual parity."}};
         QFile f(out.filePath("object005-summary.json"));if(!f.open(QIODevice::WriteOnly))return 21;f.write(QJsonDocument(report).toJson());
     }
     return 0;

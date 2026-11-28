@@ -58,6 +58,19 @@ jobs:
         run: |
           cmake --build build-escargot --config Release --target moteur3d_v17 v17_escargot_profile v17_escargot_explore_smoke --parallel 4
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Run compiled parity and optical integration smoke
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $exe = Get-ChildItem build-escargot -Recurse -File -Filter v17_escargot_explore_smoke.exe | Select-Object -First 1
+          $core = Get-ChildItem build-escargot -Recurse -File -Filter moteur3d_v16_core.dll | Select-Object -First 1
+          if (!$exe -or !$core) { throw "Missing integration binaries" }
+          $env:PATH="$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
+          New-Item -ItemType Directory -Force object006-smoke | Out-Null
+          & $exe.FullName "$env:ESC_SCENE/scene.json" "$PWD/object006-smoke"
+          if ($LASTEXITCODE) { throw "Object006 integration failed: $LASTEXITCODE" }
       - name: Profile native GPU completion, three views, static and moving
         shell: pwsh
         env:
@@ -131,4 +144,10 @@ jobs:
         with:
           name: Escargot-Object006-profile-report
           path: object006-profile/
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: Escargot-Object006-optical-smoke
+          path: object006-smoke/
           if-no-files-found: warn

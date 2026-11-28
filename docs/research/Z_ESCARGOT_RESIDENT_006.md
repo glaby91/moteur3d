@@ -11,3 +11,5 @@ Six-pass preflight:
 6. Fix process-wide Z Reflect toggle (Win32 environment); profile verifies disabled modes and logs flag, exterior prefers named garden/facade preset, hardware samples increased to 16 measured frames. Exterior optical activity must still be checked in report. WARP is not hardware performance.
 
 Remaining: full visual parity under motion, fine detail temporal stability (source selection policy intentionally unchanged in this first parity-focused optimization), actual GPU/CPU performance and compilation must be verified on CI and hardware. No new FPS claims.
+
+Follow-up guard: camera-inside union cannot be culled (legacy full-screen behavior). Added compiled C++ parity test for 320000 random AABBs using real scene camera; optical integration smoke exercises water geometry signal, static cache, moving view, native presentation and restoration before profiling. Results pending CI. The first preliminary run is superseded by this revision.

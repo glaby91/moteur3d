@@ -52,6 +52,9 @@ inline Rect fastBounds(Box b,const Camera& c,int w,int h){
 // This also works for near-plane crossings; the final per-triangle test remains authoritative.
 inline bool outsideFootprint(Box b,const Camera& c,Rect r,int w,int h){
     if(!finite(b.lo)||!finite(b.hi))return false;
+    // Legacy projectBounds returns the full viewport for a camera inside any child box.
+    // A containing union must never be rejected, even if it lies before the near plane.
+    if(c.eye.x>=b.lo.x&&c.eye.x<=b.hi.x&&c.eye.y>=b.lo.y&&c.eye.y<=b.hi.y&&c.eye.z>=b.lo.z&&c.eye.z<=b.hi.z)return false;
     const V lo=b.lo-c.eye,hi=b.hi-c.eye;
     const float scale=1.f+std::max({std::abs(lo.x),std::abs(lo.y),std::abs(lo.z),std::abs(hi.x),std::abs(hi.y),std::abs(hi.z)});
     auto outside=[&](V n,float threshold){
