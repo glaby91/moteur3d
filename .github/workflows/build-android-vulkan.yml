@@ -29,7 +29,9 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
+      - uses: android-actions/setup-android@v4.0.3
+        with:
+          packages: 'platform-tools'
       - name: Host shader tools and Android SDK
         run: |
           sudo apt-get update
