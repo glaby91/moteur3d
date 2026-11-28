@@ -3,7 +3,7 @@
 #include <set>
 #include <stdexcept>
 namespace m3d::escargot::object_global {
-struct WorkRay{Ray ray{};float low=0;};
+struct WorkRay{Ray ray{};float low=0;uint32_t previous=0xffffffffu;};
 struct Counters{uint64_t nodeLoads=0,boxTests=0,triangleTests=0,seedTests=0,seedHits=0,packets=0;};
 struct Slabs {
     float o[3],inv[3];bool parallel[3];
@@ -23,7 +23,7 @@ inline bool nodeBox(const LumaTraceBvh4Node& n,const Slabs& r,float low,float hi
     }near=low;return true;
 }
 inline void test(const Scene& s,const std::vector<uint32_t>& owners,uint32_t id,const WorkRay& r,HitSample& hit){
-    const auto& o=s.obj[id];if(o.kind!=Kind::Triangle)return;
+    if(id==r.previous)return;const auto& o=s.obj[id];if(o.kind!=Kind::Triangle)return;
     const V e=o.b-o.a,f=o.c-o.a,p=cross(r.ray.d,f);float det=dot(e,p);if(std::abs(det)<1e-10f)return;
     const V q=r.ray.o-o.a;float u=dot(q,p)/det;if(u<0||u>1)return;
     const V z=cross(q,e);float v=dot(r.ray.d,z)/det;if(v<0||u+v>1)return;
