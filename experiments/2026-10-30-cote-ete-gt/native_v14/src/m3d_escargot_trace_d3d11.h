@@ -3,6 +3,7 @@
 #include <d3d11.h>
 #include <d3dcompiler.h>
 #include <wrl/client.h>
+#include <algorithm>
 #include <chrono>
 #include <cstring>
 #include <limits>
@@ -31,7 +32,7 @@ bool box(Node n,float3 o,float3 d,float low,float high,out float nearT){
         nearT=max(nearT,l);high=min(high,h);if(high<nearT)return false;
     }return true;
 }
-bool triangle(Triangle t,Query q,float high,out float depth,out float u,out float v){
+bool hitTriangle(Triangle t,Query q,float high,out float depth,out float u,out float v){
     depth=0;u=0;v=0;
     float3 e=t.b.xyz-t.a.xyz,f=t.c.xyz-t.a.xyz,p=cross(q.d,f);
     float det=dot(e,p);if(abs(det)<1e-10)return false;
@@ -54,7 +55,7 @@ void CSTrace(uint3 tid:SV_DispatchThreadID){
             if(node.first>orderCount||node.count>orderCount-node.first){h.status=2;break;}
             [loop]for(uint j=0;j<node.count;++j){
                 uint p=order[node.first+j];if(p>=triangleCount){h.status=2;break;}
-                float t,u,v;if(triangle(triangles[p],q,h.depth,t,u,v)&&(t<h.depth||(t==h.depth&&p<h.primitive))){
+                float t,u,v;if(hitTriangle(triangles[p],q,h.depth,t,u,v)&&(t<h.depth||(t==h.depth&&p<h.primitive))){
                     h.primitive=p;h.status=1;h.depth=t;h.u=u;h.v=v;
                 }
             }
@@ -88,7 +89,7 @@ class TraceBatch {
     uint64_t identity_=0,revision_=0;const Scene* source_=nullptr;size_t capacity_=0;
     ID3D11Device* device_=nullptr;
     static bool buffer(ID3D11Device* device,const void* data,size_t count,UINT stride,UINT bind,ComPtr<ID3D11Buffer>& out){
-        if(!count||count>UINT_MAX/stride)return false;
+        if(!count||count>std::numeric_limits<UINT>::max()/stride)return false;
         D3D11_BUFFER_DESC desc{};desc.ByteWidth=UINT(count*stride);desc.StructureByteStride=stride;
         desc.MiscFlags=D3D11_RESOURCE_MISC_BUFFER_STRUCTURED;desc.Usage=data?D3D11_USAGE_IMMUTABLE:D3D11_USAGE_DEFAULT;desc.BindFlags=bind;
         D3D11_SUBRESOURCE_DATA init{};init.pSysMem=data;

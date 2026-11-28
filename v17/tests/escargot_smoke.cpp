@@ -91,5 +91,15 @@ int main(){
     if(!original.valid()||!cloned.valid())return 33;
     for(int j=-20;j<=20;++j){m3d::Ray ray{{float(j)*.05f,0,0},{0,0,1}};e::HitSample a,bh;
         if(original.closest(ray,.001f,a)!=cloned.closest(ray,.001f,bh)||a.object!=bh.object||a.primitive!=bh.primitive||a.depth!=bh.depth)return 34;}
+    // Exact cache key: camera, optics, dimensions and scene revision.
+    m3d::Camera keyCam{};keyCam.eye={1,2,3};keyCam.f={0,0,1};keyCam.r={1,0,0};keyCam.u={0,1,0};keyCam.tanHalf=.6f;
+    e::Options keyOpt;auto keyA=e::packetKey(stableScene,keyCam,1280,720,keyOpt);
+    if(!(keyA==e::packetKey(stableScene,keyCam,1280,720,keyOpt)))return 35;
+    auto shifted=keyCam;shifted.eye.x+=.025f;
+    if(keyA==e::packetKey(stableScene,shifted,1280,720,keyOpt))return 36;
+    if(keyA==e::packetKey(stableScene,keyCam,1279,720,keyOpt))return 37;
+    auto changedOpt=keyOpt;++changedOpt.rayBudget;
+    if(keyA==e::packetKey(stableScene,keyCam,1280,720,changedOpt))return 38;
+    stableScene.markGpuGeometryChanged();if(keyA==e::packetKey(stableScene,keyCam,1280,720,keyOpt))return 39;
     return 0;
 }

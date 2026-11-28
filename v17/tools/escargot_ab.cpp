@@ -106,8 +106,8 @@ int main(int argc,char** argv){
         if(!m3d::renderLumaTraceEscargotGpuResidentPreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,residentPacket.data,resident,residentStats,err)||resident!=b)return 19;
         std::vector<double> residentTimes;
         for(int j=0;j<repeats;++j){auto start=Clock::now();const auto& p=residentCache.get(session,scene,rt.objects.size(),cam,w,h,opt,reused);
-            if(!reused||!p.ok||!m3d::renderLumaTraceEscargotGpuResidentPreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,p.data,resident,residentStats,err)||resident!=b)return 19;
-            residentTimes.push_back(ms(start));
+            if(!reused||!p.ok||!m3d::renderLumaTraceEscargotGpuResidentPreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,p.data,resident,residentStats,err))return 19;
+            residentTimes.push_back(ms(start));if(resident!=b)return 19;
         }
         // Actual moving camera: cache must miss on each changed eye position.
         std::vector<double> moveA,moveB;std::vector<uint32_t> movingPixels;m3d::Stats movingStats;
@@ -133,11 +133,13 @@ int main(int argc,char** argv){
                 if(cpuHit!=(x.status==1)||(cpuHit&&(x.primitive!=y.primitive||std::abs(x.depth-y.depth)>std::max(.0001f,std::abs(y.depth)*.00001f))))++gpuMismatch;
             }
         }else qWarning()<<"Experimental GPU trace unavailable"<<QString::fromStdWString(err);
+        const QString gpuTraceError=gpuTraceOk?QString():QString::fromStdWString(err);
+        qInfo()<<id<<"GPU BVH replay"<<gpuTraceOk<<"queries"<<qulonglong(queries.size())<<"mismatches"<<qulonglong(gpuMismatch)<<"overflow"<<qulonglong(gpuOverflow)<<"ms"<<gpuQuery;
         // A must remain stable after switching back from B.
         std::vector<uint32_t> again;m3d::Stats againStats;
         if(!m3d::renderLumaTracePreview(scene,rt.lumaTraceBvh4,shadow,cam,w,h,again,againStats,err)||again!=a){qCritical()<<"A/B restore parity failed"<<id;return 15;}
         if(!save(out,id+"-A-virtual.png",a,w,h)||!save(out,id+"-B-escargot.png",b,w,h)||!save(out,id+"-difference-x4.png",diff,w,h))return 11;
-        summary.append(QJsonObject{{"camera",id},{"A_p50_ms",quantile(aTimes,.50)},{"A_p95_ms",quantile(aTimes,.95)},{"B_p50_ms",quantile(bTimes,.50)},{"B_p95_ms",quantile(bTimes,.95)},{"B_fixed_pose_reuse_p50_ms",quantile(fixedTimes,.50)},{"B_fixed_pose_reuse_p95_ms",quantile(fixedTimes,.95)},{"B_resident_p50_ms",quantile(residentTimes,.50)},{"B_resident_p95_ms",quantile(residentTimes,.95)},{"A_moving_p50_ms",quantile(moveA,.50)},{"B_moving_p50_ms",quantile(moveB,.50)},{"gpuTraceAvailable",gpuTraceOk},{"gpuTraceQueries",double(queries.size())},{"gpuTraceMismatches",double(gpuMismatch)},{"gpuTraceOverflow",double(gpuOverflow)},{"gpuTracePrepareMs",gpuPrepare},{"gpuTraceReplayMs",gpuQuery},{"changedPixels",double(changed)},{"escargotEffectivePixels",double(effective)},{"meanAbsChannelDifference",errorSum/(3*a.size())}});
+        summary.append(QJsonObject{{"camera",id},{"A_p50_ms",quantile(aTimes,.50)},{"A_p95_ms",quantile(aTimes,.95)},{"B_p50_ms",quantile(bTimes,.50)},{"B_p95_ms",quantile(bTimes,.95)},{"B_fixed_pose_reuse_p50_ms",quantile(fixedTimes,.50)},{"B_fixed_pose_reuse_p95_ms",quantile(fixedTimes,.95)},{"B_resident_p50_ms",quantile(residentTimes,.50)},{"B_resident_p95_ms",quantile(residentTimes,.95)},{"A_moving_p50_ms",quantile(moveA,.50)},{"B_moving_p50_ms",quantile(moveB,.50)},{"gpuTraceAvailable",gpuTraceOk},{"gpuTraceError",gpuTraceError},{"gpuTraceQueries",double(queries.size())},{"gpuTraceMismatches",double(gpuMismatch)},{"gpuTraceOverflow",double(gpuOverflow)},{"gpuTracePrepareMs",gpuPrepare},{"gpuTraceReplayMs",gpuQuery},{"changedPixels",double(changed)},{"escargotEffectivePixels",double(effective)},{"meanAbsChannelDifference",errorSum/(3*a.size())}});
         qInfo()<<id<<"A p50"<<quantile(aTimes,.5)<<"B p50"<<quantile(bTimes,.5)<<"changed"<<qulonglong(changed)<<"effective Escargot pixels"<<qulonglong(effective);++tested;log.flush();
     }
     if(!tested||!allActive||!allCoverage||!allChanged||!allEffective){qCritical()<<"Invalid A/B: no active virtual camera, optical data or visible changes";return 12;}
