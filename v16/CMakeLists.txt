@@ -27,7 +27,10 @@ m3d_render_module_source("${M3D_MODULE_MANIFEST}" lumatrace_gpu_compute 0
 configure_file("${M3D_MODULE_MANIFEST}"
     "${CMAKE_CURRENT_BINARY_DIR}/render_modules.json" COPYONLY)
 # ARM64 keeps the original scalar CPU path; AVX2 units are x86-only.
-if(APPLE AND CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
+if(ANDROID)
+    # Both diagnostic emulator and ARM64 tablet use the scalar reference.
+    list(FILTER M3D_RENDER_SOURCES EXCLUDE REGEX "/src/simd/avx2/")
+elseif(APPLE AND CMAKE_OSX_ARCHITECTURES STREQUAL "arm64")
     list(FILTER M3D_RENDER_SOURCES EXCLUDE REGEX "/src/simd/avx2/")
 elseif(APPLE AND CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$" AND NOT CMAKE_OSX_ARCHITECTURES)
     list(FILTER M3D_RENDER_SOURCES EXCLUDE REGEX "/src/simd/avx2/")
@@ -44,7 +47,7 @@ if(WIN32)
     target_sources(moteur3d_v16_core PRIVATE "${M3D_LUMATRACE_GPU_SOURCE}")
     target_link_libraries(moteur3d_v16_core PUBLIC d3d11 d3d12 dxgi d3dcompiler)
 endif()
-if(WIN32 OR APPLE OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(WIN32 OR APPLE OR ANDROID OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # Vulkan renderer lives in the shared engine library on Windows and Linux.
     # An optional backend must not break the stock DX11-only V17 build.
     option(M3D_REQUIRE_VULKAN "Require Vulkan SDK 1.3.204+ for native raster" OFF)
@@ -91,6 +94,10 @@ else()
         set_source_files_properties(${M3D_AVX_SOURCES} PROPERTIES COMPILE_OPTIONS "-mavx2;-mfma")
     endif()
     target_compile_options(moteur3d_v16_core PRIVATE -O2 -Wall -Wextra -Wpedantic)
+endif()
+if(ANDROID)
+    # Android APK has its own frontend; no desktop CLI executables are deployed.
+    return()
 endif()
 qt_add_executable(moteur3d_v16 WIN32 "${NATIVE_SRC}/moteur3d_v16_qt.cpp")
 target_link_libraries(moteur3d_v16 PRIVATE moteur3d_v16_core Qt6::Widgets Qt6::Concurrent)

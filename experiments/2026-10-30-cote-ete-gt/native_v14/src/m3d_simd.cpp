@@ -6,7 +6,9 @@
 
 namespace m3d {
 bool avx2FmaAvailable() noexcept {
-#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+#if defined(__ANDROID__)
+    return false;
+#elif defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
     int regs[4]{};
     __cpuidex(regs, 1, 0);
     constexpr int osxsave = 1 << 27, avx = 1 << 28, fma = 1 << 12;
@@ -23,7 +25,7 @@ bool avx2FmaAvailable() noexcept {
 }
 }
 
-#if !defined(__x86_64__) && !defined(__i386__) && !defined(_M_X64) && !defined(_M_IX86)
+#if defined(__ANDROID__) || (!defined(__x86_64__) && !defined(__i386__) && !defined(_M_X64) && !defined(_M_IX86))
 namespace m3d {
 // The dispatcher reports AVX2 unavailable on ARM. These scalar equivalents
 // keep all symbols linkable, even if a caller explicitly requests a packet.
