@@ -8,6 +8,8 @@ on:
       - 'v17/tools/escargot*'
       - 'v17/tests/escargot_smoke.cpp'
       - 'v17/CMakeLists.txt'
+      - 'v17/moteur3d_v17_*.cpp'
+      - 'v17/moteur3d_v17_render.h'
       - 'experiments/2026-10-30-cote-ete-gt/native_v14/**'
   workflow_dispatch:
 permissions:
@@ -38,10 +40,18 @@ jobs:
           arch: win64_msvc2022_64
           modules: qtmultimedia
           cache: true
+      - name: Install Vulkan SDK for exploration application
+        uses: jakoch/install-vulkan-sdk-action@v1
+        with:
+          vulkan_version: '1.4.309.0'
+          install_runtime: false
+          cache: true
+          stripdown: true
+          install_swiftshader: false
       - name: Configure and compile Escargot lab and A-B
         shell: pwsh
         run: |
-          cmake -S v17 -B build-escargot -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DV17_SCENE_SOURCE_DIR=$env:ESC_SCENE" -DM3D_REQUIRE_VULKAN=OFF "-DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER" "-DV17_GIT_SHA=$env:GITHUB_SHA"
+          cmake -S v17 -B build-escargot -G "Visual Studio 17 2022" -A x64 "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DV17_SCENE_SOURCE_DIR=$env:ESC_SCENE" -DM3D_REQUIRE_VULKAN=ON "-DV17_CI_BUILD_NUMBER=$env:GITHUB_RUN_NUMBER" "-DV17_GIT_SHA=$env:GITHUB_SHA"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           cmake --build build-escargot --config Release --target v17_escargot_smoke v17_escargot_lab v17_escargot_ab v17_escargot_scale --parallel 4
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
@@ -77,6 +87,62 @@ jobs:
         with:
           name: CSE-WARP-V17.031-Escargot-AB-Windows-x64
           path: escargot-package/
+          if-no-files-found: error
+      - name: Compile exploration and integration smoke
+        shell: pwsh
+        run: |
+          cmake --build build-escargot --config Release --target moteur3d_v17 v17_escargot_explore_smoke --parallel 4
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Interactive renderer integration A F16 moved F16 A (WARP)
+        shell: pwsh
+        env:
+          M3D_V16_FORCE_WARP: '1'
+          M3D_V17_ZREFLECT: '1'
+          M3D_V17_ZATMOSPHERE: '0'
+          QT_QPA_PLATFORM: offscreen
+        run: |
+          $exe = Get-ChildItem build-escargot -Recurse -File -Filter v17_escargot_explore_smoke.exe | Select-Object -First 1
+          $core = Get-ChildItem build-escargot -Recurse -File -Filter moteur3d_v16_core.dll | Select-Object -First 1
+          if (!$exe -or !$core) { throw "Missing integration binaries" }
+          $env:PATH="$($core.DirectoryName);$env:QT_ROOT_DIR/bin;$env:PATH"
+          & $exe.FullName "$env:ESC_SCENE/scene.json"
+          if ($LASTEXITCODE) { throw "Exploration integration failed: $LASTEXITCODE" }
+      - name: Assemble engine-only exploration package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dist = "escargot-exploration"
+          New-Item -ItemType Directory -Force $dist | Out-Null
+          $exe = Get-ChildItem build-escargot -Recurse -File -Filter moteur3d_v17.exe | Select-Object -First 1
+          if (!$exe) { throw "Missing application" }
+          foreach ($name in @("moteur3d_v17.exe","moteur3d_v16_core.dll","audio","vulkan","shaders","render_modules.json","cse_warp_v17.ico")) {
+            $src = Join-Path $exe.DirectoryName $name
+            if (!(Test-Path $src)) { throw "Missing resource $name" }
+            Copy-Item $src $dist -Recurse -Force
+          }
+          New-Item -ItemType Directory -Force "$dist/materials" | Out-Null
+          Copy-Item v17/materials/zmaterial8192.json "$dist/materials/"
+          @{ engine="17.031"; module="Escargot G F16 exploration"; scene="V17.634"; commit=$env:GITHUB_SHA; run=$env:GITHUB_RUN_ID; nativePresentation=$false; rayBudget=4096 } | ConvertTo-Json | Set-Content "$dist/BUILD_INFO.json"
+          @'
+          @echo off
+          cd /d "%~dp0"
+          set "CSE_WARP_ESCARGOT=1"
+          set "M3D_V17_ZREFLECT=1"
+          set "M3D_V16_FORCE_WARP="
+          if "%~1"=="" (
+            start "" "moteur3d_v17.exe"
+          ) else (
+            start "" "moteur3d_v17.exe" "%~1"
+          )
+          '@ | Set-Content "$dist/LANCER_ESCARGOT_EXPLORATION.bat" -Encoding ascii
+          windeployqt --release --no-translations "$dist/moteur3d_v17.exe"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          if (!(Test-Path "$dist/platforms/qwindows.dll")) { throw "Missing Qt Windows plugin" }
+          if (Test-Path "$dist/benchmark-civic") { throw "Unexpected scene in engine-only package" }
+      - uses: actions/upload-artifact@v6
+        with:
+          name: CSE-WARP-V17.031-Escargot-G-Exploration-Windows-x64
+          path: escargot-exploration/
           if-no-files-found: error
       - name: Real scene A-B (WARP diagnostic)
         shell: pwsh

@@ -143,6 +143,7 @@ bool renderGpuBackend(const Request& request,const m3d::Camera& camera,
                 :(result.directPresented
                     ?QStringLiteral("V17 D3D11 Raster — Direct GPU (swapchain)")
                     :QStringLiteral("V17 D3D11 Raster — affichage Qt (QImage)"));
+            if(!backend.renderer.isEmpty())result.renderer=std::move(backend.renderer);
             if(!work.vulkan&&!work.lumaTrace&&m3d::rasterHybridLightingEnabled())
                 result.renderer+=m3d::rasterGiCacheLoaded()
                     ?QStringLiteral(" — GI transport pré-calculée")

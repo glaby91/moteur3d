@@ -45,6 +45,8 @@ struct CpuShadowCache {
 
 struct Request {
     std::shared_ptr<m3d::v16::Runtime> scene;
+    std::shared_ptr<const m3d::v16::SceneDatabase> sceneDatabase;
+    bool escargot=false;
     std::shared_ptr<CpuShadowCache> shadowCache;
     std::shared_ptr<std::atomic<uint64_t>> serial;
     uint64_t generation=0;
@@ -84,6 +86,8 @@ struct BackendResult {
 
 BackendResult renderD3D11Raster(const Request&,const m3d::Camera&,const m3d::ShadowMap&);
 BackendResult renderVulkanRaster(const Request&,const m3d::Camera&,const m3d::ShadowMap&);
+// Install exact receiver IDs once, before publishing the runtime to render workers.
+bool prepareEscargotScene(m3d::v16::Runtime&);
 BackendResult renderLumaTrace(const Request&,const m3d::Camera&,const m3d::ShadowMap&);
 BackendResult renderD3D11Compute(const Request&,const m3d::Camera&);
 BackendResult renderCpu(const Request&,const m3d::Camera&,const m3d::ShadowMap&,bool shadowReused);

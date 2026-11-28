@@ -1,6 +1,78 @@
 #include "moteur3d_v17_render.h"
+#ifdef _WIN32
+#include "escargot/gpu_packet.h"
+#include "escargot/runtime.h"
+#include <chrono>
+#endif
 
 namespace cse::v17render {
+
+bool prepareEscargotScene(m3d::v16::Runtime& runtime){
+#ifdef _WIN32
+    std::vector<uint32_t> owners;
+    if(!m3d::escargot::objectMap(runtime,owners))return false;
+    runtime.renderScene.escargotReceiverIds=std::move(owners);
+    runtime.renderScene.markGpuGeometryChanged();
+    return true;
+#else
+    (void)runtime;
+    return false;
+#endif
+}
+
+#ifdef _WIN32
+namespace {
+namespace e=m3d::escargot;
+// Cache immutable catalogue/BVH references only; never reuse an optical image.
+// The request owns both inputs for the entire frame. Weak keys prevent holding
+// an obsolete large scene in the render worker after a scene switch.
+struct ExplorationSession {
+    std::weak_ptr<m3d::v16::Runtime> runtime;
+    std::weak_ptr<const m3d::v16::SceneDatabase> database;
+    uint64_t revision=0;
+    std::unique_ptr<e::Prepared> prepared;
+};
+BackendResult renderEscargotF16(const Request& request,const m3d::Camera& camera,
+                               const m3d::ShadowMap& shadow){
+    BackendResult result;
+    const auto start=std::chrono::steady_clock::now();
+    const auto& rt=*request.scene;
+    const auto& scene=rt.renderScene;
+    if(!request.sceneDatabase||scene.escargotReceiverIds.size()!=scene.obj.size()){
+        result.reason=L"Escargot: missing exact receiver ownership or authored scene.";
+        return result;
+    }
+    // Identical resident reflection path and packet construction to validated G.
+    thread_local ExplorationSession session;
+    e::Options opt;
+    opt.rayBudget=4096;
+    if(!session.prepared||session.runtime.lock()!=request.scene||
+       session.database.lock()!=request.sceneDatabase||session.revision!=scene.gpuCacheRevision){
+        session.prepared.reset();
+        session.runtime=request.scene;
+        session.database=request.sceneDatabase;
+        session.revision=scene.gpuCacheRevision;
+        session.prepared=std::make_unique<e::Prepared>(rt,*request.sceneDatabase,opt.mode);
+    }
+    e::ResidentStats resident;
+    auto frame=session.prepared->frame(camera,request.width,request.height,opt,false,true,true,nullptr,&resident);
+    if(!frame.ok){result.reason=QString::fromStdString(frame.error).toStdWString();return result;}
+    auto plan=e::planGpuBuild(frame,scene,rt.objects.size(),16,true);
+    if(!plan.ok){result.reason=QString::fromStdString(plan.error).toStdWString();return result;}
+    plan.native.capturePacket=false;
+    m3d::EscargotBuildTiming timing;
+    result.ok=m3d::renderLumaTraceEscargotGpuBuiltPreview(scene,rt.lumaTraceBvh4,shadow,camera,
+        request.width,request.height,plan.native,result.pixels,result.stats,timing,result.reason);
+    if(result.ok&&(result.stats.zReflectActive||result.pixels.size()!=size_t(request.width)*size_t(request.height))){
+        result.ok=false;
+        result.reason=L"Escargot: unexpected secondary camera or incomplete frame.";
+    }
+    result.stats.ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+    if(result.ok)result.renderer=QStringLiteral("V17 LumaTrace BVH4 — Z Escargot G F16 — Qt (QImage)");
+    return result;
+}
+} // namespace
+#endif
 
 BackendResult renderLumaTrace(const Request& request,const m3d::Camera& camera,
                               const m3d::ShadowMap& shadow){
@@ -14,7 +86,22 @@ BackendResult renderLumaTrace(const Request& request,const m3d::Camera& camera,
         result.reason=snapshot.lumaTraceBvhError.toStdWString();
     }else if(snapshot.lumaTraceBvh4.nodes.empty()){
         result.reason=L"Le BVH4 LumaTrace n’a pas été construit pour cette scène.";
-    }else if(request.directPresent){
+    }
+#ifdef _WIN32
+    else if(request.escargot&&!request.directPresent){
+        m3d::releaseDirectX11NativeForCurrentThread();
+        result=renderEscargotF16(request,camera,shadow);
+        if(!result.ok){
+            const QString opticalError=QString::fromStdWString(result.reason);
+            result.reason.clear();
+            result.ok=m3d::renderLumaTracePreview(scene,snapshot.lumaTraceBvh4,shadow,camera,
+                request.width,request.height,result.pixels,result.stats,result.reason);
+            if(result.ok)result.renderer=QStringLiteral("V17 LumaTrace BVH4 — Z Reflect (secours Escargot : %1) — Qt (QImage)").arg(opticalError);
+            else result.reason=L"Escargot: "+opticalError.toStdWString()+L"; Z Reflect: "+result.reason;
+        }
+    }
+#endif
+    else if(request.directPresent){
         result.ok=m3d::renderLumaTraceNative(scene,snapshot.lumaTraceBvh4,shadow,camera,
             request.width,request.height,reinterpret_cast<void*>(request.nativeHandle),
             result.stats,result.reason);

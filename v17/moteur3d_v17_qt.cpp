@@ -523,7 +523,7 @@ public:
             if(outcome.error.isEmpty()&&(outcome.directPresented||!outcome.image.isNull())){
                 lastPresentedRenderer_=outcome.renderer;
                 zReflectHud_.clear();
-                if(outcome.backendIndex==6){
+                if(outcome.backendIndex==6&&!outcome.renderer.contains(QStringLiteral("Z Escargot G F16"))){
                     zReflectHud_=QStringLiteral("ZR %1 %2/%3").arg(outcome.zReflectEnabled?QStringLiteral("ON"):QStringLiteral("OFF"))
                         .arg(outcome.zReflectActive).arg(outcome.zReflectTotal);
                     const QString log=zReflectHud_+QStringLiteral(" deferred=%1").arg(outcome.zReflectDeferred);
@@ -573,7 +573,7 @@ public:
             // The completion message itself also remains until another action.
             // Errors leave the last successful render time visible.
             const int completedBackend=outcome.backendIndex;
-            const bool directFallbackActive=directDisplayBox_&&directDisplayBox_->isChecked()&&
+            const bool directFallbackActive=!escargotSelected()&&directDisplayBox_&&directDisplayBox_->isChecked()&&
                 completedBackend>=0&&completedBackend<int(nativeDirectFailed_.size())&&
                 nativeDirectFailed_[size_t(completedBackend)];
             if(nativePresentationFailed||directFallbackActive){
@@ -997,6 +997,7 @@ private:
     QLabel* nativeRendererOverlay_=nullptr;
     QString lastPresentedRenderer_;
     QCheckBox* directDisplayBox_=nullptr;
+    QCheckBox* escargotBox_=nullptr;
     bool nativeReadyRetryQueued_=false;
     int nativeReadyAttempts_=0;
     QDockWidget* sceneExplorerDock_=nullptr;
@@ -1649,6 +1650,10 @@ protected:
         return QMainWindow::eventFilter(watched,event);
     }
     void keyPressEvent(QKeyEvent* e) override{
+        if(e->key()==Qt::Key_F8 && escargotBox_ && escargotBox_->isEnabled()){
+            if(!e->isAutoRepeat())escargotBox_->setChecked(!escargotBox_->isChecked());
+            e->accept();return;
+        }
         if(e->key()==Qt::Key_F11 && immersiveAction_){
             immersiveAction_->setChecked(!immersiveAction_->isChecked());
             e->accept();return;
@@ -1751,6 +1756,7 @@ private:
     QString zReflectHud_,lastZReflectLog_;
     std::shared_ptr<std::atomic<uint64_t>> renderSerial_=std::make_shared<std::atomic<uint64_t>>(0);
     std::shared_ptr<v16::Runtime> runtime_;
+    std::shared_ptr<const v16::SceneDatabase> sceneDatabase_;
     // The sun and scene geometry do not change when navigating cameras.
     // Reuse an identical shadow map across CPU renders of the same runtime.
     std::shared_ptr<cse::v17render::CpuShadowCache> cpuShadows_=
@@ -2793,6 +2799,25 @@ private:
         form->addRow(QStringLiteral("Caméra"),cameraBox_);
         form->addRow(QStringLiteral("Méthode de rendu"),backendBox_);
         form->addRow(directDisplayBox_);
+        escargotBox_=new QCheckBox(QStringLiteral("Z Escargot G F16 — expérimental (F8)"));
+        escargotBox_->setObjectName(QStringLiteral("v17EscargotF16"));
+        escargotBox_->setToolTip(QStringLiteral("Réflexions F16, 4096 requêtes, sans caméra secondaire. Affichage QImage uniquement ; F8 retourne à Z Reflect."));
+#ifdef _WIN32
+        escargotBox_->setEnabled(backendBox_->currentIndex()==6);
+        escargotBox_->setChecked(qEnvironmentVariableIntValue("CSE_WARP_ESCARGOT")==1);
+        if(escargotSelected())directDisplayBox_->setEnabled(false);
+#else
+        escargotBox_->setEnabled(false);
+#endif
+        form->addRow(escargotBox_);
+        connect(escargotBox_,&QCheckBox::toggled,this,[this](bool){
+            if(!backendBox_||backendBox_->currentIndex()!=6)return;
+            directDisplayBox_->setEnabled(!escargotSelected());
+            renderSerial_->fetch_add(1);
+            selectBackendOutputWindow();
+            restoreExplorationViewportFocus();
+            requestRender();
+        });
         form->addRow(QStringLiteral("Résolution"),qualityBox_);
         form->addRow(QStringLiteral("Échantillons CPU direct"),directSamples_);
         form->addRow(QStringLiteral("Échantillons GI"),giSamples_);
@@ -3082,7 +3107,10 @@ private:
                 cloudAnimationBox_->setChecked(false);
             }
             const bool gi=index==2||index==3;
-            directDisplayBox_->setEnabled(index==4||index==6||(index==5&&vulkanDirectAvailable()));
+#ifdef _WIN32
+            if(escargotBox_)escargotBox_->setEnabled(index==6);
+#endif
+            directDisplayBox_->setEnabled(!escargotSelected()&&(index==4||index==6||(index==5&&vulkanDirectAvailable())));
             directDisplayBox_->setToolTip(index==6
                 ?QStringLiteral("LumaTrace : présentation DX11 native. Les nuages sont coupés par défaut ; réactivez la case Nuages pour comparer.")
                 :(index==5
@@ -3391,6 +3419,7 @@ private:
                 });
             if(!build){outcome.error=build.error;return outcome;}
             outcome.runtime=std::make_shared<v16::Runtime>(std::move(build.runtime));
+            cse::v17render::prepareEscargotScene(*outcome.runtime);
             return outcome;
         }));
     }
@@ -3431,6 +3460,7 @@ private:
         renderSerial_->fetch_add(1);
         pending_=false;
         runtime_=replacement;
+        sceneDatabase_=std::make_shared<const v16::SceneDatabase>(outcome.database);
         lastImage_=QImage{};
         canvas_->setImage(QImage{});  // Do not keep displaying an old scene.
         canvas_->enableSkyCompositing(false);
@@ -3614,11 +3644,18 @@ private:
         return false;
 #endif
     }
+    bool escargotSelected() const{
+#ifdef _WIN32
+        return backendBox_&&backendBox_->currentIndex()==6&&escargotBox_&&escargotBox_->isChecked();
+#else
+        return false;
+#endif
+    }
     bool nativeDirectSelected() const{
 #ifdef _WIN32
         // Each native backend presents into its own backend-specific top-level
         // ImageView HWND; DXGI and Vulkan never share a target window.
-        if(!backendBox_||!directDisplayBox_||!directDisplayBox_->isChecked())return false;
+        if(escargotSelected()||!backendBox_||!directDisplayBox_||!directDisplayBox_->isChecked())return false;
         const int index=backendBox_->currentIndex();
         return (index==4||index==6||(index==5&&vulkanDirectAvailable()))&&
                !nativeDirectFailed_[size_t(index)];
@@ -3792,14 +3829,14 @@ private:
         QString name=backendBox_->currentText();
         if(index==4)name=QStringLiteral("V17 D3D11 Raster");
         else if(index==5)name=QStringLiteral("V17 Vulkan Raster");
-        else if(index==6)name=QStringLiteral("V17 LumaTrace BVH4");
+        else if(index==6)name=escargotSelected()?QStringLiteral("V17 LumaTrace BVH4 — Z Escargot G F16"):QStringLiteral("V17 LumaTrace BVH4");
         QSize requestedSize=qualityBox_?qualityBox_->currentData().toSize():QSize{};
         if(!requestedSize.isValid()||requestedSize.isEmpty()){
             requestedSize=canvas_?canvas_->size().boundedTo(QSize(1600,900)):QSize(1000,680);
             requestedSize.setWidth(std::max(64,requestedSize.width()));
             requestedSize.setHeight(std::max(64,requestedSize.height()));
         }
-        const bool direct=(index==4||index==5||index==6)&&directDisplayBox_&&directDisplayBox_->isChecked();
+        const bool direct=!escargotSelected()&&(index==4||index==5||index==6)&&directDisplayBox_&&directDisplayBox_->isChecked();
         if(direct&&canvas_){
             const qreal dpr=canvas_->devicePixelRatioF();
             requestedSize=QSize(std::max(320,int(canvas_->width()*dpr)),
@@ -4145,6 +4182,8 @@ private:
         const auto shadowCache=cpuShadows_;
         cse::v17render::Request renderRequest;
         renderRequest.scene=snapshot;
+        renderRequest.sceneDatabase=sceneDatabase_;
+        renderRequest.escargot=escargotSelected();
         renderRequest.shadowCache=shadowCache;
         renderRequest.serial=serial;
         renderRequest.generation=token;
