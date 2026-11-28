@@ -24,9 +24,10 @@ jobs:
           test "$(uname -m)" = arm64
           xcodebuild -version | tee -a results/host.txt
           ninja --version
+          xcrun --sdk macosx --show-sdk-version
       - uses: jurplel/install-qt-action@v4
         with:
-          version: '6.8.3'
+          version: '6.10.3'
           host: mac
           target: desktop
           arch: clang_64
@@ -143,7 +144,7 @@ jobs:
           set -e
           cd "$(dirname "$0")"
           : "${VULKAN_SDK:?Set VULKAN_SDK to your Vulkan SDK macOS directory}"
-          : "${QT_ROOT_DIR:?Set QT_ROOT_DIR to your Qt 6.8.3 macOS directory}"
+          : "${QT_ROOT_DIR:?Set QT_ROOT_DIR to your Qt 6.10.3 macOS directory}"
           export DYLD_LIBRARY_PATH="$PWD:$VULKAN_SDK/lib${DYLD_LIBRARY_PATH:+:$DYLD_LIBRARY_PATH}"
           export DYLD_FRAMEWORK_PATH="$QT_ROOT_DIR/lib${DYLD_FRAMEWORK_PATH:+:$DYLD_FRAMEWORK_PATH}"
           export QT_PLUGIN_PATH="$QT_ROOT_DIR/plugins"
@@ -151,7 +152,7 @@ jobs:
           exec ./moteur3d_v17 "$@"
           SH
           chmod +x "$dst/lancer.sh"
-          printf 'Experimental ARM64 developer package. Requires Qt 6.8.3 macOS (Multimedia) and LunarG Vulkan SDK 1.4.363.1. Set QT_ROOT_DIR and VULKAN_SDK, then ./lancer.sh benchmark-civic/scene.json. Not signed/notarized, no native WSI; Qt QImage presentation only.\n' > "$dst/README.txt"
+          printf 'Experimental ARM64 developer package. Requires Qt 6.10.3 macOS (Multimedia) and LunarG Vulkan SDK 1.4.363.1. Set QT_ROOT_DIR and VULKAN_SDK, then ./lancer.sh benchmark-civic/scene.json. Not signed/notarized, no native WSI; Qt QImage presentation only.\n' > "$dst/README.txt"
           otool -L "$dst/moteur3d_v17" "$dst/libmoteur3d_v16_core.dylib" | tee results/otool.txt
           printf '{"productVersion":"%s","githubActionsRun":"%s","sourceCommit":"%s","platform":"macos-arm64","backend":"Vulkan/MoltenVK","sceneRevision":"%s","standalone":false}\n' "$V17_PRODUCT" "$GITHUB_RUN_ID" "$GITHUB_SHA" "$SCENE_REVISION" > "$dst/BUILD_INFO.json"
           tar -C dist -czf "$name.tar.gz" "$name"
