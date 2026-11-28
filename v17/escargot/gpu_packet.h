@@ -236,14 +236,15 @@ inline bool logicalPacketEqual(const std::vector<float>& a,const std::vector<flo
     const size_t objects=size_t(a[4]);const int tileSize=int(a[5]);
     if(tileSize<=0||objects>(a.size()/4-2)/2||objects>(b.size()/4-2)/2){why="packet object count";return false;}
     for(size_t id=1;id<=objects;++id){
-        const size_t rec=2+2*id;if(!equal(rec,rec,2)){why="receiver header "+std::to_string(id);return false;}
-        const float* r=&a[4*rec];const float* desc=&a[4*(rec+1)];
+        const size_t rec=2+2*id;if(!equal(rec,rec,1)||!valid(a,rec+1,1)||!valid(b,rec+1,1)){why="receiver header "+std::to_string(id);return false;}
+        const float* r=&a[4*rec];const float* desc=&a[4*(rec+1)],*other=&b[4*(rec+1)];
+        if(desc[1]!=other[1]||desc[2]!=other[2]||desc[3]!=other[3]){why="receiver descriptor "+std::to_string(id);return false;}
         if(r[2]<=0||r[3]<=0)continue;
-        const size_t cols=size_t(desc[1]),rows=(size_t(r[3])+tileSize-1)/tileSize,base=size_t(desc[0]);
+        const size_t cols=size_t(desc[1]),rows=(size_t(r[3])+tileSize-1)/tileSize,base=size_t(desc[0]),otherBase=size_t(other[0]);
         const bool common=desc[3]>.5f;
         for(size_t j=0;j<cols*rows;++j){
-            const size_t tile=base+j;if(!valid(a,tile,1)||!valid(b,tile,1)){why="tile range";return false;}
-            const float* ta=&a[4*tile],*tb=&b[4*tile];
+            const size_t tile=base+j,otherTile=otherBase+j;if(!valid(a,tile,1)||!valid(b,otherTile,1)){why="tile range";return false;}
+            const float* ta=&a[4*tile],*tb=&b[4*otherTile];
             if(ta[1]!=tb[1]||ta[3]!=tb[3]){why="tile counts "+std::to_string(tile);return false;}
             if(ta[3]==0)continue;
             if(!equal(size_t(ta[0]),size_t(tb[0]),3*size_t(ta[1]))){why="receiver observations "+std::to_string(tile);return false;}

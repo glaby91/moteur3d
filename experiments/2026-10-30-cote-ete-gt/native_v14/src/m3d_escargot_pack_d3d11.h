@@ -9,7 +9,7 @@
 namespace m3d::escargot_gpu {
 using Microsoft::WRL::ComPtr;
 // Each thread owns one tile. Header copied once; dynamic ranges allocated
-// atomically with a saturating bound. No host readback before shading.
+// atomically with an explicit non-wrapping allocation bound. No host readback before shading.
 inline constexpr char kBuildPacket[] = R"(
 StructuredBuffer<float4> src:register(t0);
 RWStructuredBuffer<float4> dst:register(u0);

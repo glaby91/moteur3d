@@ -174,5 +174,19 @@ int main(){
     if(residentResult.surfaces[0].samples[0].values.size()!=2)return 54;
     e::Result rejected;e::ResidentStats rejectedStats;
     if(runResident(true,rejected,rejectedStats)||rejected.error.empty())return 55;
+    e::makeLayers(fullWave.surfaces[0]);
+    auto packet32=e::packGpu(fullWave,waveScene,3,32,false);
+    auto plan32=e::planGpuBuild(fullWave,waveScene,3,32,false);
+    auto plan16=e::planGpuBuild(fullWave,waveScene,3,16,true);
+    if(!packet32.ok||!plan32.ok||!plan16.ok||plan32.native.jobCount!=1||plan16.native.jobCount!=1)return 56;
+    std::string packetWhy;
+    if(!e::logicalPacketEqual(packet32.data,packet32.data,packetWhy))return 57;
+    auto relocated=packet32.data;
+    const size_t descRecord=2+2*2+1,oldTile=size_t(relocated[4*descRecord]),newTile=relocated.size()/4;
+    const std::array<float,4> tileCopy{relocated[4*oldTile],relocated[4*oldTile+1],relocated[4*oldTile+2],relocated[4*oldTile+3]};
+    relocated.insert(relocated.end(),tileCopy.begin(),tileCopy.end());relocated[4*descRecord]=float(newTile);
+    if(!e::logicalPacketEqual(packet32.data,relocated,packetWhy))return 58;
+    relocated[4*newTile+3]+=1;
+    if(e::logicalPacketEqual(packet32.data,relocated,packetWhy))return 59;
     return 0;
 }
