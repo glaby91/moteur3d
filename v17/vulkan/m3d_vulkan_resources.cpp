@@ -99,9 +99,20 @@ void allocateOptimalImage(VkDevice device,const VkPhysicalDeviceMemoryProperties
            !(flags&(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT|VK_MEMORY_PROPERTY_PROTECTED_BIT)))
             privateBits|=1u<<i;
     }
-    if(!(requirements.memoryTypeBits&privateBits))
+    uint32_t lazyBits=0;
+    if(create.usage&VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT){
+        for(uint32_t i=0;i<properties.memoryTypeCount;++i){
+            const auto flags=properties.memoryTypes[i].propertyFlags;
+            if((flags&(VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT))==
+               (VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|VK_MEMORY_PROPERTY_LAZILY_ALLOCATED_BIT) &&
+               !(flags&(VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_PROTECTED_BIT)))
+                lazyBits|=1u<<i;
+        }
+    }
+    const uint32_t allowed=(requirements.memoryTypeBits&lazyBits)?lazyBits:privateBits;
+    if(!(requirements.memoryTypeBits&allowed))
         throw std::runtime_error("Optimal image: no compatible GPU-private Vulkan memory on macOS (format "+std::to_string(int(create.format))+")");
-    allocation.memoryTypeIndex=findMemoryType(properties,requirements.memoryTypeBits&privateBits,
+    allocation.memoryTypeIndex=findMemoryType(properties,requirements.memoryTypeBits&allowed,
                                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
     VkMemoryDedicatedAllocateInfo dedicated{VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO};
     dedicated.image=texture.image;

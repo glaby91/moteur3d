@@ -158,7 +158,7 @@
     },
     {
       "id": "vulkan_resources",
-      "revision": "003",
+      "revision": "004",
       "engines": [
         "v16",
         "v17"
@@ -314,7 +314,7 @@
     },
     {
       "id": "vulkan_raster",
-      "revision": "012",
+      "revision": "013",
       "engines": [
         "v16",
         "v17"

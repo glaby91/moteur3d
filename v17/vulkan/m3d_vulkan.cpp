@@ -198,6 +198,7 @@ class VulkanRaster final {
     std::vector<Chunk> chunks_,boxChunks_,foliageChunks_;
     std::vector<DrawRange> visibleMesh_,visibleBoxes_,visibleFoliage_;
     bool mergeVisibleDraws_=false;
+    bool macBatchMipBarriers_=false,macBatchUploads_=false,macTransient_=false,macNoTimestamps_=false;
     std::vector<uint32_t> stagingColors_;
     std::array<int32_t,kMaxMaterials> protectedLayer_{};
     uint32_t width_=0,height_=0;
@@ -281,6 +282,7 @@ class VulkanRaster final {
         swap(activeDescriptorReady_,slot.descriptorReady);
     }
     void collectCompletedGpuTiming(){
+        if(macNoTimestamps_)return;
         uint64_t stamp[3]{};
         if(vkGetQueryPoolResults(device_,queries_,0,3,sizeof(stamp),stamp,
                                  sizeof(uint64_t),VK_QUERY_RESULT_64_BIT)==VK_SUCCESS &&
@@ -758,17 +760,15 @@ class VulkanRaster final {
         b.subresourceRange.levelCount=t.mips;b.subresourceRange.layerCount=t.layers;
         vkCmdPipelineBarrier(cmd_,srcStage,dstStage,0,0,nullptr,0,nullptr,1,&b);
     }
-    void uploadImage(Texture& tex,const void* src,size_t bytes){
-        Buffer stage=buffer(bytes,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
-        std::memcpy(stage.mapped,src,bytes);flush(stage);
-        begin();
+    // Record only; caller owns staging allocation and submission lifetime.
+    void recordImageUpload(Texture& tex,VkBuffer stage,VkDeviceSize offset){
         barrier(tex,VK_IMAGE_LAYOUT_UNDEFINED,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,0,VK_ACCESS_TRANSFER_WRITE_BIT,
                 VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT);
         VkBufferImageCopy region{};
         region.imageSubresource.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
         region.imageSubresource.layerCount=tex.layers;
-        region.imageExtent={tex.width,tex.height,1};
-        vkCmdCopyBufferToImage(cmd_,stage.handle,tex.image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&region);
+        region.imageExtent={tex.width,tex.height,1};region.bufferOffset=offset;
+        vkCmdCopyBufferToImage(cmd_,stage,tex.image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&region);
         if(tex.mips>1){
             // Generate all layers once at texture upload. Never generate mips per frame.
             auto moveLevel=[&](uint32_t level,VkImageLayout oldLayout,
@@ -800,6 +800,28 @@ class VulkanRaster final {
                 vkCmdBlitImage(cmd_,tex.image,VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                                tex.image,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,1,&b,VK_FILTER_LINEAR);
             }
+            if(macBatchMipBarriers_){
+                // All completed source mips share one layout and access mask.
+                // Preserve per-level dependencies during generation, combine only final transitions.
+                VkImageMemoryBarrier done[2]{};
+                for(auto& b:done){
+                    b.sType=VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+                    b.newLayout=VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                    b.dstAccessMask=VK_ACCESS_SHADER_READ_BIT;
+                    b.srcQueueFamilyIndex=b.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;
+                    b.image=tex.image;b.subresourceRange.aspectMask=VK_IMAGE_ASPECT_COLOR_BIT;
+                    b.subresourceRange.layerCount=tex.layers;
+                }
+                done[0].oldLayout=VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+                done[0].srcAccessMask=VK_ACCESS_TRANSFER_READ_BIT|VK_ACCESS_TRANSFER_WRITE_BIT;
+                done[0].subresourceRange.levelCount=tex.mips-1;
+                done[1].oldLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+                done[1].srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;
+                done[1].subresourceRange.baseMipLevel=tex.mips-1;
+                done[1].subresourceRange.levelCount=1;
+                vkCmdPipelineBarrier(cmd_,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+                    0,0,nullptr,0,nullptr,2,done);
+            }else{
             for(uint32_t i=0;i<tex.mips;i++){
                 const bool final=i+1==tex.mips;
                 moveLevel(i,final?VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL:VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
@@ -808,12 +830,38 @@ class VulkanRaster final {
                     VK_ACCESS_SHADER_READ_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,
                     VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
             }
+            }
         }else{
             barrier(tex,VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                     VK_ACCESS_TRANSFER_WRITE_BIT,VK_ACCESS_SHADER_READ_BIT,
                     VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT);
         }
-        submit();free(stage);
+    }
+    void uploadImage(Texture& tex,const void* src,size_t bytes){
+        Buffer stage=buffer(bytes,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+        try{
+            std::memcpy(stage.mapped,src,bytes);flush(stage);
+            begin();recordImageUpload(tex,stage.handle,0);submit();
+        }catch(...){vkDeviceWaitIdle(device_);free(stage);throw;}
+        free(stage);
+    }
+    void uploadImagePair(Texture& first,const void* a,size_t an,Texture& second,const void* b,size_t bn){
+        // Limit the peak staging memory and keep 4-byte texel offsets aligned.
+        constexpr VkDeviceSize cap=128ull*1024ull*1024ull;
+        const VkDeviceSize align=std::max<VkDeviceSize>(4,props_.limits.optimalBufferCopyOffsetAlignment);
+        const VkDeviceSize offset=(VkDeviceSize(an)+align-1)/align*align;
+        if(!macBatchUploads_||offset>cap||VkDeviceSize(bn)>cap-offset){
+            uploadImage(first,a,an);uploadImage(second,b,bn);return;
+        }
+        Buffer stage=buffer(offset+bn,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+        try{
+            auto* dst=static_cast<unsigned char*>(stage.mapped);
+            std::memcpy(dst,a,an);std::memcpy(dst+offset,b,bn);flush(stage);
+            begin();recordImageUpload(first,stage.handle,0);
+            recordImageUpload(second,stage.handle,offset);submit();
+        }catch(...){vkDeviceWaitIdle(device_);free(stage);throw;}
+        free(stage);
+        std::clog<<"[CSE WARP Vulkan] paired image upload bytes="<<offset+bn<<" submissions=1\n";
     }
     Buffer uploadBuffer(const void* src,size_t bytes,VkBufferUsageFlags usage,
                         VkAccessFlags destinationAccess){
@@ -1029,6 +1077,14 @@ class VulkanRaster final {
         // Optional color-format experiment: BGRA8 matches Qt ARGB32 byte order
         // on little-endian Windows. Leave RGBA8 as the default reference.
 #ifdef __APPLE__
+        const auto opt=[](const char* name){const char* v=std::getenv(name);return v&&std::strcmp(v,"1")==0;};
+        macBatchMipBarriers_=opt("CSE_WARP_MAC_BATCH_MIP_BARRIERS");
+        macBatchUploads_=opt("CSE_WARP_MAC_BATCH_UPLOADS");
+        macTransient_=opt("CSE_WARP_MAC_TRANSIENT");
+        macNoTimestamps_=opt("CSE_WARP_MAC_NO_TIMESTAMPS");
+        std::clog<<"[CSE WARP Vulkan] macOS commands: mip barriers="<<macBatchMipBarriers_
+                 <<" upload pairs="<<macBatchUploads_<<" transient="<<macTransient_
+                 <<" no timestamps="<<macNoTimestamps_<<"\n";
         const char* mergeDraws=std::getenv("CSE_WARP_MAC_MERGE_DRAWS");
         mergeVisibleDraws_=mergeDraws&&std::strcmp(mergeDraws,"1")==0;
         std::clog<<"[CSE WARP Vulkan] macOS exact draw merging="<<mergeVisibleDraws_<<"\n";
@@ -1452,10 +1508,23 @@ class VulkanRaster final {
         color_=image(w,h,1,colorFormat_,
                      VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT|VK_IMAGE_USAGE_TRANSFER_SRC_BIT|
                      VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_ASPECT_COLOR_BIT);
+        auto transientUsage=[&](VkFormat format,VkImageUsageFlags usage){
+            if(!macTransient_)return usage;
+            VkImageFormatProperties p{};
+            const VkImageUsageFlags candidate=usage|VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
+            if(vkGetPhysicalDeviceImageFormatProperties(physical_,format,VK_IMAGE_TYPE_2D,
+                VK_IMAGE_TILING_OPTIMAL,candidate,0,&p)==VK_SUCCESS &&
+                w<=p.maxExtent.width && h<=p.maxExtent.height && (p.sampleCounts&msaaSamples_)){
+                std::clog<<"[CSE WARP Vulkan] transient attachment format="<<int(format)<<" active=1\n";
+                return candidate;
+            }
+            std::clog<<"[CSE WARP Vulkan] transient attachment format="<<int(format)<<" active=0 unsupported\n";
+            return usage;
+        };
         if(msaaSamples_!=VK_SAMPLE_COUNT_1_BIT)
-            msColor_=image(w,h,1,colorFormat_,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
+            msColor_=image(w,h,1,colorFormat_,transientUsage(colorFormat_,VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT),
                            VK_IMAGE_ASPECT_COLOR_BIT,false,1,msaaSamples_);
-        depth_=image(w,h,1,depthFormat_,VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT|VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT,
+        depth_=image(w,h,1,depthFormat_,transientUsage(depthFormat_,VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT|VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT),
                      VK_IMAGE_ASPECT_DEPTH_BIT,false,1,msaaSamples_);
         VkImageView views[3]={msaaSamples_==VK_SAMPLE_COUNT_1_BIT?color_.view:msColor_.view,
                               depth_.view,color_.view};
@@ -1552,8 +1621,8 @@ class VulkanRaster final {
                 surf[index]=(n>>16&255u)|((n>>8&255u)<<8)|((n&255u)<<16)|(rv<<24);
             }
         }
-        uploadImage(albedo_,alb.data(),alb.size()*sizeof(uint32_t));
-        uploadImage(surface_,surf.data(),surf.size()*sizeof(uint32_t));
+        uploadImagePair(albedo_,alb.data(),alb.size()*sizeof(uint32_t),
+                        surface_,surf.data(),surf.size()*sizeof(uint32_t));
 
         // A separate GPU texture tier for any scene-authored 'preserve' material.
         // Only those materials consume high-resolution memory; default auto
@@ -1623,8 +1692,8 @@ class VulkanRaster final {
                     surfaceHigh[dst]=(n>>16&255u)|((n>>8&255u)<<8)|((n&255u)<<16)|(rv<<24);
                 }
             }
-            uploadImage(detailAlbedo_,albedoHigh.data(),albedoHigh.size()*sizeof(uint32_t));
-            uploadImage(detailSurface_,surfaceHigh.data(),surfaceHigh.size()*sizeof(uint32_t));
+            uploadImagePair(detailAlbedo_,albedoHigh.data(),albedoHigh.size()*sizeof(uint32_t),
+                            detailSurface_,surfaceHigh.data(),surfaceHigh.size()*sizeof(uint32_t));
             std::clog<<"[CSE WARP Vulkan] Protected texture tier: "<<protectedIds.size()
                      <<" materials, "<<highSide<<"x"<<highSide<<", "<<needed/(1024*1024)
                      <<" MiB, no distance-based LOD reduction\n";
@@ -2089,8 +2158,10 @@ public:
                 collectVisibleRanges(foliageChunks_,visibleFoliage_,test);
             }
             begin();
-            vkCmdResetQueryPool(cmd_,queries_,0,3);
-            vkCmdWriteTimestamp(cmd_,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,queries_,0);
+            if(!macNoTimestamps_){
+                vkCmdResetQueryPool(cmd_,queries_,0,3);
+                vkCmdWriteTimestamp(cmd_,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,queries_,0);
+            }
             VkClearValue clears[3]{};
             const V sky=scene.underwaterEnvironment?V{7,27,39}:skyHorizon*.65f+skyZenith*.35f;
             clears[0].color={{sky.x/255.f,sky.y/255.f,sky.z/255.f,1.f}};
@@ -2174,7 +2245,7 @@ public:
                 vkCmdDraw(cmd_,3,1,0,0);++drawCalls;
             }
             vkCmdEndRenderPass(cmd_);
-            vkCmdWriteTimestamp(cmd_,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,queries_,1);
+            if(!macNoTimestamps_)vkCmdWriteTimestamp(cmd_,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,queries_,1);
             if(acquiredIndex>=0)recordSwapchainBlit(uint32_t(acquiredIndex));
             if(acquiredIndex<0){
             VkBufferImageCopy bc{};
@@ -2191,7 +2262,7 @@ public:
             vkCmdPipelineBarrier(cmd_,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_HOST_BIT,0,
                                  0,nullptr,1,&barrier,0,nullptr);
             }
-            vkCmdWriteTimestamp(cmd_,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,queries_,2);
+            if(!macNoTimestamps_)vkCmdWriteTimestamp(cmd_,VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT,queries_,2);
             const auto recordingEnd=Clock::now();
             double submissionMs=0,waitMs=0;
             submit(&submissionMs,&waitMs,acquiredIndex);
@@ -2248,7 +2319,9 @@ public:
             stats.ms=ms(started,Clock::now());
             const auto freq=props_.limits.timestampPeriod;
             uint64_t stamps[3]{};
-            if(asyncFrames_ && frameSlotsReady_){
+            if(macNoTimestamps_){
+                stats.gpuTimingValid=false;
+            }else if(asyncFrames_ && frameSlotsReady_){
                 // Timestamps are harvested when the previous slot retires.
                 // Never block the render loop just to read a current-frame
                 // timestamp. GPU telemetry is delayed by up to two frames.
