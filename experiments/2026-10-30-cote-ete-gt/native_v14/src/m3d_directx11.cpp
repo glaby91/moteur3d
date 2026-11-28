@@ -382,7 +382,8 @@ public:
             error=L"Le BVH4 LumaTrace n’a pas été préparé pour cette scène.";return false;
         }
         if(!ensureDevice(error)||!ensureScene(scene,error,lumaBvh))return false;
-        const char* zOpt=std::getenv("M3D_V17_ZREFLECT");
+        char zValue[16]{};const DWORD zLength=GetEnvironmentVariableA("M3D_V17_ZREFLECT",zValue,DWORD(sizeof(zValue)));
+        const char* zOpt=(zLength>0&&zLength<sizeof(zValue))?zValue:nullptr;
         // V17.024: production LumaTrace enables Z Reflect unless explicitly disabled.
         if(escEnabled&&(escargotInput->w!=w||escargotInput->h!=h||multires)){error=L"Escargot incompatible dimensions/multires";return false;}
         const bool zEnabled=lumaBvh&&!escEnabled&&!(zOpt&&std::strcmp(zOpt,"0")==0);

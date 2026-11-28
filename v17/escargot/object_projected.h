@@ -10,7 +10,7 @@ namespace m3d::escargot::projected {
 constexpr uint32_t maxReceivers=4,rayBudget=768,triangleBudget=120000,maxSources=160;
 struct Metrics {uint32_t catalogue=0,patches=0,visible=0,water=0,rays=0,receivers=0,curved=0,deferred=0,sources=0,triangles=0,omitted=0,mini=0,lightingSamples=0;bool reused=false;double totalMs=0,receiverMs=0,discoverMs=0,rankMs=0,cullMs=0,sortMs=0,emitMs=0;uint64_t testedObjects=0,testedTriangles=0;};
 struct Plane {V p,n;bool valid=false;int side=0;};
-struct ReceiverPatch {Candidate candidate;Plane plane;double area=0;};
+struct ReceiverPatch {Candidate candidate;Plane plane;double area=0;size_t index=0;};
 inline V mirror(V p,Plane plane){return p-plane.n*(2.f*dot(p-plane.p,plane.n));}
 inline Plane planeFor(const Scene& s,const v16::ObjectInfo& o){
     Plane p;float best=0;
@@ -23,13 +23,54 @@ inline Plane planeFor(const Scene& s,const v16::ObjectInfo& o){
 }
 inline Rect intersection(Rect a,Rect b){int x=std::max(a.x,b.x),y=std::max(a.y,b.y);
     return {x,y,std::max(0,std::min(a.x+a.w,b.x+b.w)-x),std::max(0,std::min(a.y+a.h,b.y+b.h)-y)};}
-inline Rect mirroredBounds(V lo,V hi,Plane p,const Camera& c,int w,int h){
+struct Box {V lo,hi;};
+inline Box mirroredBox(V lo,V hi,Plane p){
     V a{INF,INF,INF},b{-INF,-INF,-INF};
     for(int i=0;i<8;++i){V q=mirror({(i&1)?hi.x:lo.x,(i&2)?hi.y:lo.y,(i&4)?hi.z:lo.z},p);
         a={std::min(a.x,q.x),std::min(a.y,q.y),std::min(a.z,q.z)};
         b={std::max(b.x,q.x),std::max(b.y,q.y),std::max(b.z,q.z)};}
-    return projectBounds(a,b,c,w,h);
+    return {a,b};
 }
+inline Rect mirroredBounds(V lo,V hi,Plane p,const Camera& c,int w,int h){
+    const auto b=mirroredBox(lo,hi,p);return projectBounds(b.lo,b.hi,c,w,h);
+}
+// Same projection for fully in-front boxes; near-plane intersections retain the exact old implementation.
+inline Rect fastBounds(Box b,const Camera& c,int w,int h){
+    if(!finite(b.lo)||!finite(b.hi)||b.lo.x>b.hi.x||b.lo.y>b.hi.y||b.lo.z>b.hi.z)return {};
+    float minx=INF,miny=INF,maxx=-INF,maxy=-INF;
+    for(int i=0;i<8;++i){const V q=V{(i&1)?b.hi.x:b.lo.x,(i&2)?b.hi.y:b.lo.y,(i&4)?b.hi.z:b.lo.z}-c.eye;
+        const float z=dot(q,c.f);if(z<.08f)return projectBounds(b.lo,b.hi,c,w,h);
+        const float x=(.5f+.5f*dot(q,c.r)/(z*c.tanHalf))*w,y=(.5f-.5f*dot(q,c.u)*c.aspect/(z*c.tanHalf))*h;
+        minx=std::min(minx,x);maxx=std::max(maxx,x);miny=std::min(miny,y);maxy=std::max(maxy,y);
+    }
+    if(!std::isfinite(minx)||!std::isfinite(miny)||maxx<=0||maxy<=0||minx>=w||miny>=h)return {};
+    const int x0=int(std::floor(clampf(minx,0.f,float(w)))),y0=int(std::floor(clampf(miny,0.f,float(h))));
+    const int x1=int(std::ceil(clampf(maxx,0.f,float(w)))),y1=int(std::ceil(clampf(maxy,0.f,float(h))));
+    return {x0,y0,x1-x0,y1-y0};
+}
+// Conservative hierarchy: reject only if all points of a union box are outside a padded footprint plane.
+// This also works for near-plane crossings; the final per-triangle test remains authoritative.
+inline bool outsideFootprint(Box b,const Camera& c,Rect r,int w,int h){
+    if(!finite(b.lo)||!finite(b.hi))return false;
+    const V lo=b.lo-c.eye,hi=b.hi-c.eye;
+    const float scale=1.f+std::max({std::abs(lo.x),std::abs(lo.y),std::abs(lo.z),std::abs(hi.x),std::abs(hi.y),std::abs(hi.z)});
+    auto outside=[&](V n,float threshold){
+        const V q{n.x>=0?hi.x:lo.x,n.y>=0?hi.y:lo.y,n.z>=0?hi.z:lo.z};
+        const float guard=1e-4f*scale*(1.f+std::abs(n.x)+std::abs(n.y)+std::abs(n.z));
+        return dot(q,n)<threshold-guard;
+    };
+    const float left=(2.f*(r.x-2)/w-1.f)*c.tanHalf,right=(2.f*(r.x+r.w+2)/w-1.f)*c.tanHalf;
+    const float top=(1.f-2.f*(r.y-2)/h)*c.tanHalf/c.aspect,bottom=(1.f-2.f*(r.y+r.h+2)/h)*c.tanHalf/c.aspect;
+    return outside(c.f,.08f)||outside(c.r-c.f*left,0)||outside(c.f*right-c.r,0)||outside(c.f*top-c.u,0)||outside(c.u-c.f*bottom,0);
+}
+inline void extendBox(Box& b,Box a){
+    b.lo={std::min(b.lo.x,a.lo.x),std::min(b.lo.y,a.lo.y),std::min(b.lo.z,a.lo.z)};
+    b.hi={std::max(b.hi.x,a.hi.x),std::max(b.hi.y,a.hi.y),std::max(b.hi.z,a.hi.z)};
+}
+constexpr size_t blockSize=32,cacheBytesPerReceiver=16u*1024u*1024u;
+struct CachedBounds {Box box;float low,high;};
+struct SourceBounds {std::vector<CachedBounds> triangles;std::vector<Box> blocks;};
+struct ReceiverBounds {size_t patch=std::numeric_limits<size_t>::max(),bytes=0;std::map<uint32_t,SourceBounds> sources;};
 struct Source{uint32_t id=0;V lo{},hi{};};
 struct Seen{uint32_t last=0,hits=0;};
 struct TriangleRef{uint32_t id;float depth;};
@@ -37,6 +78,26 @@ class Session {
     const v16::Runtime& rt_;std::vector<uint32_t> owners_;std::unique_ptr<Traversal> trace_;
     std::vector<Candidate> catalogue_;std::vector<ReceiverPatch> patches_;
     std::vector<Source> sources_;std::map<uint32_t,std::map<uint32_t,Seen>> seen_;
+    std::array<ReceiverBounds,maxReceivers> boundsCache_;
+    struct EmitCache {size_t patch=std::numeric_limits<size_t>::max();uint32_t epoch=0;float sign=0;std::vector<uint32_t> ids;std::vector<float> vertices;};
+    std::array<EmitCache,maxReceivers> emitCache_;
+    // Receiver slots are bounded; a different patch invalidates the slot.
+    const SourceBounds* cachedBounds(size_t slot,size_t patch,uint32_t source,Plane p){
+        auto& cache=boundsCache_[slot];if(cache.patch!=patch){cache=ReceiverBounds{};cache.patch=patch;}
+        auto found=cache.sources.find(source);if(found!=cache.sources.end())return &found->second;
+        const auto& o=rt_.objects[int(source)-1];const size_t n=size_t(o.triangleCount),blocks=(n+blockSize-1)/blockSize;
+        if(n>cacheBytesPerReceiver/sizeof(CachedBounds))return nullptr;
+        const size_t bytes=n*sizeof(CachedBounds)+blocks*sizeof(Box);
+        if(bytes>cacheBytesPerReceiver-cache.bytes)return nullptr;
+        SourceBounds data;data.triangles.reserve(n);data.blocks.reserve(blocks);
+        const auto& scene=rt_.renderScene;
+        for(size_t j=0;j<n;++j){const auto& tri=scene.obj[size_t(o.firstTriangle)+j];const Box b=mirroredBox(tri.mn,tri.mx,p);
+            const float a=dot(tri.a-p.p,p.n),d=dot(tri.b-p.p,p.n),e=dot(tri.c-p.p,p.n);
+            data.triangles.push_back({b,std::min({a,d,e}),std::max({a,d,e})});
+            if(j%blockSize==0)data.blocks.push_back(b);else extendBox(data.blocks.back(),b);
+        }
+        cache.bytes+=bytes;return &cache.sources.emplace(source,std::move(data)).first->second;
+    }
     std::vector<std::array<float,3>> light_;std::vector<uint32_t> lightStamp_;
     uint32_t epoch_=1,frame_=0;float day_=-1;V sun_{};
     std::array<float,16> key_{};bool cacheValid_=false;EscargotPacketBuild cached_;Metrics cachedMetrics_;
@@ -94,8 +155,9 @@ class Session {
         }
         const float sign=dot(c.eye-p.p,p.n)>=0?1.f:-1.f;
         for(int k=0;k<3;++k){
-            V q=mirror(pos[k],p)-c.eye;float z=dot(q,c.f);
-            const float data[]={dot(q,c.r)/c.tanHalf,dot(q,c.u)*c.aspect/c.tanHalf,(10000.f/(10000.f-.08f))*z-(10000.f*.08f)/(10000.f-.08f),z,
+            // Camera-independent mirrored world position; VS performs the exact clip transform.
+            const V q=mirror(pos[k],p);
+            const float data[]={q.x,q.y,q.z,1.f,
                 uv[k].x,uv[k].y,light_[ref.id][k],float(t.mat),opacity(mat),sign*dot(pos[k]-p.p,p.n)-.0001f};
             plan.projectedVertices.insert(plan.projectedVertices.end(),std::begin(data),std::end(data));
         }
@@ -146,6 +208,7 @@ public:
                 lo={std::min(lo.x,t.mn.x),std::min(lo.y,t.mn.y),std::min(lo.z,t.mn.z)};
                 hi={std::max(hi.x,t.mx.x),std::max(hi.y,t.mx.y),std::max(hi.z,t.mx.z)};}
             sources_.push_back({uint32_t(i)+1,lo,hi});}
+        for(size_t i=0;i<patches_.size();++i)patches_[i].index=i;
         light_.resize(rt.renderScene.obj.size());lightStamp_.resize(light_.size(),0);
     }
     bool valid()const{return bool(trace_);}
@@ -157,9 +220,10 @@ public:
         const bool lightChanged=day_!=day||length(sun-sun_)>1e-5f;
         if(lightChanged){day_=day;sun_=sun;++epoch_;}
         if(cacheValid_&&key==key_&&!lightChanged&&frame_%8!=0){m=cachedMetrics_;m.rays=m.mini=m.lightingSamples=0;m.receiverMs=m.discoverMs=m.rankMs=m.cullMs=m.sortMs=m.emitMs=0;m.testedObjects=m.testedTriangles=0;m.totalMs=ms(start);m.reused=true;return cached_;}
-        cached_=EscargotPacketBuild{};auto& plan=cached_;plan.rasterProjected=true;
+        cached_.projectedVertices.clear();cached_.projectedRanges.clear();auto& plan=cached_;plan.rasterProjected=true;
+        plan.projectedVertices.reserve(size_t(triangleBudget)*30);
         static std::atomic<uint64_t> nextKey{1};plan.projectedKey=nextKey.fetch_add(1,std::memory_order_relaxed);
-        plan.data.resize((2+2*size_t(rt_.objects.size()))*4,0);plan.data[0]=float(rt_.objects.size());
+        plan.data.assign((2+2*size_t(rt_.objects.size()))*4,0);plan.data[0]=float(rt_.objects.size());
         m.catalogue=uint32_t(catalogue_.size());m.patches=uint32_t(patches_.size());
         std::vector<ReceiverPatch> candidates;
         std::set<uint32_t> hasPatch;for(auto r:patches_){
@@ -204,14 +268,22 @@ public:
                 if(usedSources>=maxSources||count>=limit){++m.omitted;continue;}
                 uint32_t before=count;const auto opaqueBefore=opaque.size(),transparentBefore=transparent.size();
                 bool overflow=false;
-                for(int j=0;j<o.triangleCount;++j){++m.testedTriangles;uint32_t id=uint32_t(o.firstTriangle+j);const auto& t=s.obj[id];const auto& mat=s.mat[t.mat];
+                const SourceBounds* resident=cachedBounds(k,admitted[k].index,b.id,p);
+                for(int j=0;j<o.triangleCount;){
+                    const size_t local=size_t(j);
+                    if(resident&&local%blockSize==0&&outsideFootprint(resident->blocks[local/blockSize],c,a.bounds,w,h)){
+                        j+=int(std::min(blockSize,size_t(o.triangleCount-j)));continue;
+                    }
+                    ++m.testedTriangles;const uint32_t id=uint32_t(o.firstTriangle+j++);const auto& t=s.obj[id];const auto& mat=s.mat[t.mat];
                     if(waterMaterial(mat)||opacity(mat)<.001f)continue;
-                    if(std::max({sign*dot(t.a-p.p,p.n),sign*dot(t.b-p.p,p.n),sign*dot(t.c-p.p,p.n)})<=.0001f)continue;
-                    // Narrow footprint test using the reflected triangle AABB.
-                    Rect bounds=intersection(a.bounds,mirroredBounds(t.mn,t.mx,p,c,w,h));if(!bounds.valid())continue;
+                    if(resident){const auto& q=resident->triangles[local];if((sign>0?q.high:-q.low)<=.0001f)continue;}
+                    else if(std::max({sign*dot(t.a-p.p,p.n),sign*dot(t.b-p.p,p.n),sign*dot(t.c-p.p,p.n)})<=.0001f)continue;
+                    // Preserve the exact per-triangle footprint and source ordering.
+                    const Rect bounds=intersection(a.bounds,resident?fastBounds(resident->triangles[local].box,c,w,h):mirroredBounds(t.mn,t.mx,p,c,w,h));if(!bounds.valid())continue;
                     if(count==limit){overflow=true;break;}
-                    float depth=dot(mirror((t.a+t.b+t.c)/3.f,p)-c.eye,c.f);
-                    (opacity(mat)>=.999f?opaque:transparent).push_back({id,depth});++count;
+                    if(opacity(mat)>=.999f)opaque.push_back({id,0.f});
+                    else transparent.push_back({id,dot(mirror((t.a+t.b+t.c)/3.f,p)-c.eye,c.f)});
+                    ++count;
                 }
                 if(overflow){opaque.resize(opaqueBefore);transparent.resize(transparentBefore);count=before;++m.omitted;continue;}
                 if(count>before){++usedSources;++m.sources;}
@@ -221,7 +293,19 @@ public:
             range.opaque=uint32_t(opaque.size()*3);range.transparent=uint32_t(transparent.size()*3);
             range.x=std::max(0,a.bounds.x-1);range.y=std::max(0,a.bounds.y-1);
             range.w=std::min(w,a.bounds.x+a.bounds.w+1)-range.x;range.h=std::min(h,a.bounds.y+a.bounds.h+1)-range.y;
-            for(const auto& t:opaque)appendProjectedTriangle(plan,t,p,c,sh,m);for(const auto& t:transparent)appendProjectedTriangle(plan,t,p,c,sh,m);
+            auto& ec=emitCache_[k];
+            bool same=ec.patch==admitted[k].index&&ec.epoch==epoch_&&ec.sign==sign&&ec.ids.size()==opaque.size()+transparent.size();
+            if(same){size_t j=0;for(const auto& t:opaque)if(ec.ids[j++]!=t.id){same=false;break;}
+                if(same)for(const auto& t:transparent)if(ec.ids[j++]!=t.id){same=false;break;}}
+            if(same)plan.projectedVertices.insert(plan.projectedVertices.end(),ec.vertices.begin(),ec.vertices.end());
+            else {
+                const size_t first=plan.projectedVertices.size();
+                for(const auto& t:opaque)appendProjectedTriangle(plan,t,p,c,sh,m);
+                for(const auto& t:transparent)appendProjectedTriangle(plan,t,p,c,sh,m);
+                ec.patch=admitted[k].index;ec.epoch=epoch_;ec.sign=sign;ec.ids.clear();ec.ids.reserve(count);
+                for(const auto& t:opaque)ec.ids.push_back(t.id);for(const auto& t:transparent)ec.ids.push_back(t.id);
+                ec.vertices.assign(plan.projectedVertices.begin()+first,plan.projectedVertices.end());
+            }
             const size_t at=4*(size_t(a.object)+1);
             plan.data[at]=float(plan.projectedRanges.size()+1);plan.data[at+1]=p.n.x;plan.data[at+2]=p.n.y;plan.data[at+3]=p.n.z;
             plan.data[4*(size_t(rt_.objects.size())+1+size_t(a.object))]=dot(p.p,p.n);

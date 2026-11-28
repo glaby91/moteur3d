@@ -6,7 +6,7 @@ namespace m3d::escargot_gpu {
 inline constexpr char kProjectedPass[]=R"(
 struct ProjIn {float4 p:POSITION;float4 data:TEXCOORD0;float2 extra:TEXCOORD1;};
 struct ProjOut {float4 p:SV_POSITION;float2 uv:TEXCOORD0;float illum:TEXCOORD1;nointerpolation uint mat:MATERIAL;nointerpolation float alpha:TEXCOORD2;float planeDistance:SV_ClipDistance0;};
-ProjOut VSProjected(ProjIn i){ProjOut o;o.p=i.p;o.uv=i.data.xy;o.illum=i.data.z;o.mat=uint(i.data.w);o.alpha=i.extra.x;o.planeDistance=i.extra.y;return o;}
+ProjOut VSProjected(ProjIn i){ProjOut o;float3 q=i.p.xyz-eye;float z=dot(q,forward);o.p=float4(dot(q,right)/tanHalf,dot(q,up)*aspect/tanHalf,(farPlane/(farPlane-nearPlane))*z-(farPlane*nearPlane)/(farPlane-nearPlane),z);o.uv=i.data.xy;o.illum=i.data.z;o.mat=uint(i.data.w);o.alpha=i.extra.x;o.planeDistance=i.extra.y;return o;}
 float4 PSProjected(ProjOut i):SV_TARGET{
     float layer=materialTextureDetail[i.mat].x;
     float3 base=layer>=0?preservedAlbedo.Sample(probeSampler,float3(saturate(i.uv),layer)).rgb:albedo.Sample(wrapSampler,float3(i.uv,i.mat)).rgb;
@@ -17,18 +17,20 @@ float4 PSProjected(ProjOut i):SV_TARGET{
 class ProjectedOptics {
     ID3D11Device* device_=nullptr;
     ComPtr<ID3D11VertexShader> vs_;ComPtr<ID3D11PixelShader> ps_;
-    ComPtr<ID3D11InputLayout> layout_;ComPtr<ID3D11Buffer> vertices_;
+    ComPtr<ID3D11InputLayout> layout_;
+    struct ResidentLayer {ComPtr<ID3D11Buffer> vertices;UINT capacity=0;std::vector<float> data;};
+    std::array<ResidentLayer,4> resident_;
     ComPtr<ID3D11Texture2D> color_,depth_;
     ComPtr<ID3D11ShaderResourceView> srv_;ComPtr<ID3D11DepthStencilView> dsv_;
     ComPtr<ID3D11RenderTargetView> rtv_[4];
-    UINT capacity_=0;int w_=0,h_=0;uint32_t layers_=0;uint64_t renderedKey_=0;std::array<float,4> renderedClear_{};
+    int w_=0,h_=0;uint32_t layers_=0;uint64_t renderedKey_=0;std::array<float,4> renderedClear_{};
     bool shaders(ID3D11Device* d,std::wstring& error){
         if(vs_&&ps_&&layout_)return true;
         std::string source=std::string(dx11::shaders::raster::kShader)+kProjectedPass;
         ComPtr<ID3DBlob> v,p,e;
         auto compile=[&](const char* entry,const char* profile,ComPtr<ID3DBlob>& out){
-            e.Reset();if(SUCCEEDED(D3DCompile(source.data(),source.size(),"EscargotProjected005",nullptr,nullptr,entry,profile,D3DCOMPILE_OPTIMIZATION_LEVEL3,0,out.ReleaseAndGetAddressOf(),e.ReleaseAndGetAddressOf())))return true;
-            error=L"Object005 projection shader compilation";
+            e.Reset();if(SUCCEEDED(D3DCompile(source.data(),source.size(),"EscargotProjected006",nullptr,nullptr,entry,profile,D3DCOMPILE_OPTIMIZATION_LEVEL3,0,out.ReleaseAndGetAddressOf(),e.ReleaseAndGetAddressOf())))return true;
+            error=L"Object006 projection shader compilation";
             if(e){const char* a=static_cast<const char*>(e->GetBufferPointer());while(*a)error+=wchar_t(static_cast<unsigned char>(*a++));}return false;};
         if(!compile("VSProjected","vs_4_0",v)||!compile("PSProjected","ps_4_0",p))return false;
         D3D11_INPUT_ELEMENT_DESC elems[]={{"POSITION",0,DXGI_FORMAT_R32G32B32A32_FLOAT,0,0,D3D11_INPUT_PER_VERTEX_DATA,0},
@@ -36,24 +38,24 @@ class ProjectedOptics {
             {"TEXCOORD",1,DXGI_FORMAT_R32G32_FLOAT,0,32,D3D11_INPUT_PER_VERTEX_DATA,0}};
         if(FAILED(d->CreateVertexShader(v->GetBufferPointer(),v->GetBufferSize(),nullptr,vs_.ReleaseAndGetAddressOf()))||
            FAILED(d->CreatePixelShader(p->GetBufferPointer(),p->GetBufferSize(),nullptr,ps_.ReleaseAndGetAddressOf()))||
-           FAILED(d->CreateInputLayout(elems,3,v->GetBufferPointer(),v->GetBufferSize(),layout_.ReleaseAndGetAddressOf()))){error=L"Object005 projection pipeline creation";return false;}return true;
+           FAILED(d->CreateInputLayout(elems,3,v->GetBufferPointer(),v->GetBufferSize(),layout_.ReleaseAndGetAddressOf()))){error=L"Object006 projection pipeline creation";return false;}return true;
     }
     bool targets(ID3D11Device* d,int w,int h,uint32_t layers,std::wstring& error){
         if(srv_&&dsv_&&w_==w&&h_==h&&layers_==layers)return true;
         renderedKey_=0;color_.Reset();depth_.Reset();srv_.Reset();dsv_.Reset();for(auto& r:rtv_)r.Reset();w_=h_=0;layers_=0;
         D3D11_TEXTURE2D_DESC t{};t.Width=w;t.Height=h;t.MipLevels=1;t.ArraySize=layers;t.Format=DXGI_FORMAT_R8G8B8A8_UNORM;t.SampleDesc.Count=1;t.Usage=D3D11_USAGE_DEFAULT;t.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
-        if(FAILED(d->CreateTexture2D(&t,nullptr,color_.ReleaseAndGetAddressOf()))){error=L"Object005 color allocation";return false;}
+        if(FAILED(d->CreateTexture2D(&t,nullptr,color_.ReleaseAndGetAddressOf()))){error=L"Object006 color allocation";return false;}
         D3D11_SHADER_RESOURCE_VIEW_DESC sv{};sv.Format=t.Format;sv.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2DARRAY;sv.Texture2DArray.MipLevels=1;sv.Texture2DArray.ArraySize=layers;
-        if(FAILED(d->CreateShaderResourceView(color_.Get(),&sv,srv_.ReleaseAndGetAddressOf()))){error=L"Object005 color view";return false;}
+        if(FAILED(d->CreateShaderResourceView(color_.Get(),&sv,srv_.ReleaseAndGetAddressOf()))){error=L"Object006 color view";return false;}
         for(UINT i=0;i<layers;++i){D3D11_RENDER_TARGET_VIEW_DESC rv{};rv.Format=t.Format;rv.ViewDimension=D3D11_RTV_DIMENSION_TEXTURE2DARRAY;rv.Texture2DArray.ArraySize=1;rv.Texture2DArray.FirstArraySlice=i;
-            if(FAILED(d->CreateRenderTargetView(color_.Get(),&rv,rtv_[i].ReleaseAndGetAddressOf()))){error=L"Object005 layer view";return false;}}
+            if(FAILED(d->CreateRenderTargetView(color_.Get(),&rv,rtv_[i].ReleaseAndGetAddressOf()))){error=L"Object006 layer view";return false;}}
         t.ArraySize=1;t.Format=DXGI_FORMAT_D32_FLOAT;t.BindFlags=D3D11_BIND_DEPTH_STENCIL;
-        if(FAILED(d->CreateTexture2D(&t,nullptr,depth_.ReleaseAndGetAddressOf()))||FAILED(d->CreateDepthStencilView(depth_.Get(),nullptr,dsv_.ReleaseAndGetAddressOf()))){error=L"Object005 depth allocation";return false;}
+        if(FAILED(d->CreateTexture2D(&t,nullptr,depth_.ReleaseAndGetAddressOf()))||FAILED(d->CreateDepthStencilView(depth_.Get(),nullptr,dsv_.ReleaseAndGetAddressOf()))){error=L"Object006 depth allocation";return false;}
         w_=w;h_=h;layers_=layers;return true;
     }
 public:
     ID3D11ShaderResourceView* view()const{return srv_.Get();}
-    void invalidate(){renderedKey_=0;}
+    void invalidate(){renderedKey_=0;for(auto& layer:resident_)layer.data.clear();}
     bool render(ID3D11Device* d,ID3D11DeviceContext* c,const EscargotPacketBuild& plan,int w,int h,const float clear[4],
         ID3D11Buffer* constants,ID3D11ShaderResourceView* albedo,ID3D11ShaderResourceView* preserved,
         ID3D11SamplerState* wrap,ID3D11SamplerState* clamp,ID3D11RasterizerState* raster,
@@ -61,12 +63,12 @@ public:
         using Clock=std::chrono::steady_clock;auto started=Clock::now();
         if(device_!=d){*this=ProjectedOptics{};device_=d;}
         const auto count=plan.projectedVertices.size()/10;
-        if(w<=0||h<=0||plan.projectedRanges.size()>4||plan.projectedVertices.size()%10||count>360000){error=L"Object005 projection budget exceeded";return false;}
-        if(plan.data.size()<8||plan.data.size()%4){error=L"Object005 invalid receiver map";return false;}
+        if(w<=0||h<=0||plan.projectedRanges.size()>4||plan.projectedVertices.size()%10||count>360000){error=L"Object006 projection budget exceeded";return false;}
+        if(plan.data.size()<8||plan.data.size()%4){error=L"Object006 invalid receiver map";return false;}
         for(const auto& r:plan.projectedRanges){
             if(!r.receiver||uint64_t(r.receiver)+1>=plan.data.size()/4||uint64_t(r.first)+r.opaque+r.transparent>count||
                r.first%3||r.opaque%3||r.transparent%3||r.x<0||r.y<0||r.w<=0||r.h<=0||
-               int64_t(r.x)+r.w>w||int64_t(r.y)+r.h>h){error=L"Object005 invalid draw range";return false;}
+               int64_t(r.x)+r.w>w||int64_t(r.y)+r.h>h){error=L"Object006 invalid draw range";return false;}
         }
         ID3D11ShaderResourceView* none=nullptr;c->PSSetShaderResources(8,1,&none);
         if(plan.projectedRanges.empty())return true;
@@ -77,25 +79,33 @@ public:
         if(plan.projectedKey&&renderedKey_==plan.projectedKey&&std::equal(renderedClear_.begin(),renderedClear_.end(),clear)){profile.cacheHit=true;return true;}
         started=Clock::now();
         renderedKey_=0;
-        if(count){
-            if(!vertices_||count>capacity_){capacity_=1;while(capacity_<count)capacity_*=2;
-                D3D11_BUFFER_DESC b{};b.ByteWidth=capacity_*40;b.Usage=D3D11_USAGE_DYNAMIC;b.BindFlags=D3D11_BIND_VERTEX_BUFFER;b.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
-                if(FAILED(d->CreateBuffer(&b,nullptr,vertices_.ReleaseAndGetAddressOf()))){capacity_=0;error=L"Object005 vertices allocation";return false;}}
-            D3D11_MAPPED_SUBRESOURCE m{};if(FAILED(c->Map(vertices_.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&m))){error=L"Object005 vertices upload";return false;}
-            std::memcpy(m.pData,plan.projectedVertices.data(),plan.projectedVertices.size()*sizeof(float));c->Unmap(vertices_.Get(),0);
+        for(size_t i=0;i<plan.projectedRanges.size();++i){
+            const auto& r=plan.projectedRanges[i];auto& layer=resident_[i];const UINT n=r.opaque+r.transparent;
+            if(!n)continue;
+            const float* src=plan.projectedVertices.data()+size_t(r.first)*10;const size_t floats=size_t(n)*10,bytes=floats*sizeof(float);
+            if(layer.vertices&&layer.data.size()==floats&&std::memcmp(layer.data.data(),src,bytes)==0)continue;
+            if(!layer.vertices||n>layer.capacity){
+                layer.capacity=1;while(layer.capacity<n)layer.capacity*=2;
+                D3D11_BUFFER_DESC b{};b.ByteWidth=layer.capacity*40;b.Usage=D3D11_USAGE_DYNAMIC;b.BindFlags=D3D11_BIND_VERTEX_BUFFER;b.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
+                layer.data.clear();
+                if(FAILED(d->CreateBuffer(&b,nullptr,layer.vertices.ReleaseAndGetAddressOf()))){layer.capacity=0;error=L"Object006 vertices allocation";return false;}
+            }
+            D3D11_MAPPED_SUBRESOURCE mapped{};if(FAILED(c->Map(layer.vertices.Get(),0,D3D11_MAP_WRITE_DISCARD,0,&mapped))){layer.data.clear();error=L"Object006 vertices upload";return false;}
+            std::memcpy(mapped.pData,src,bytes);c->Unmap(layer.vertices.Get(),0);
+            layer.data.assign(src,src+floats);profile.uploadBytes+=bytes;
         }
-        profile.uploadMs=std::chrono::duration<double,std::milli>(Clock::now()-started).count();profile.uploadBytes=plan.projectedVertices.size()*sizeof(float);
+        profile.uploadMs=std::chrono::duration<double,std::milli>(Clock::now()-started).count();
         D3D11_VIEWPORT vp{};vp.Width=float(w);vp.Height=float(h);vp.MaxDepth=1;c->RSSetViewports(1,&vp);
         c->RSSetState(raster);c->IASetInputLayout(layout_.Get());c->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-        ID3D11Buffer* vb=vertices_.Get();UINT stride=40,offset=0;c->IASetVertexBuffers(0,1,&vb,&stride,&offset);
-        c->VSSetShader(vs_.Get(),nullptr,0);c->PSSetShader(ps_.Get(),nullptr,0);c->PSSetConstantBuffers(0,1,&constants);
+        c->VSSetShader(vs_.Get(),nullptr,0);c->VSSetConstantBuffers(0,1,&constants);c->PSSetShader(ps_.Get(),nullptr,0);c->PSSetConstantBuffers(0,1,&constants);
         c->PSSetShaderResources(0,1,&albedo);c->PSSetShaderResources(6,1,&preserved);
         ID3D11SamplerState* samplers[]={wrap,clamp};c->PSSetSamplers(0,2,samplers);
         for(UINT i=0;i<plan.projectedRanges.size();++i){const auto& r=plan.projectedRanges[i];
             ID3D11RenderTargetView* target=rtv_[i].Get();c->OMSetRenderTargets(1,&target,dsv_.Get());c->ClearRenderTargetView(target,clear);c->ClearDepthStencilView(dsv_.Get(),D3D11_CLEAR_DEPTH,1,0);
             D3D11_RECT rect{r.x,r.y,r.x+r.w,r.y+r.h};c->RSSetScissorRects(1,&rect);
-            c->OMSetDepthStencilState(opaque,0);c->OMSetBlendState(nullptr,nullptr,0xffffffffu);if(r.opaque){c->Draw(r.opaque,r.first);++profile.draws;}
-            c->OMSetDepthStencilState(transparent,0);c->OMSetBlendState(blend,nullptr,0xffffffffu);if(r.transparent){c->Draw(r.transparent,r.first+r.opaque);++profile.draws;}
+            ID3D11Buffer* vb=resident_[i].vertices.Get();UINT stride=40,offset=0;c->IASetVertexBuffers(0,1,&vb,&stride,&offset);
+            c->OMSetDepthStencilState(opaque,0);c->OMSetBlendState(nullptr,nullptr,0xffffffffu);if(r.opaque){c->Draw(r.opaque,0);++profile.draws;}
+            c->OMSetDepthStencilState(transparent,0);c->OMSetBlendState(blend,nullptr,0xffffffffu);if(r.transparent){c->Draw(r.transparent,r.opaque);++profile.draws;}
         }
         c->OMSetRenderTargets(0,nullptr,nullptr);c->OMSetBlendState(nullptr,nullptr,0xffffffffu);
         renderedKey_=plan.projectedKey;std::copy(clear,clear+4,renderedClear_.begin());return true;

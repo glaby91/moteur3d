@@ -66,7 +66,7 @@ BackendResult renderEscargotF16(const Request& request,const m3d::Camera& camera
     const char* legacy=std::getenv("CSE_WARP_ESCARGOT_LEGACY_F16");
     if(!(objectEnv&&std::strcmp(objectEnv,"1")==0)&&!(legacy&&std::strcmp(legacy,"1")==0)){
         if(!session.projected)session.projected=std::make_unique<e::projected::Session>(rt,*request.sceneDatabase);
-        if(!session.projected->valid()){result.reason=L"Object005 invalid catalogue";return result;}
+        if(!session.projected->valid()){result.reason=L"Object006 invalid catalogue";return result;}
         e::projected::Metrics m;
         const auto& plan=session.projected->build(camera,shadow,request.width,request.height,m);
         m3d::EscargotBuildTiming timing;
@@ -75,7 +75,7 @@ BackendResult renderEscargotF16(const Request& request,const m3d::Camera& camera
         if(!result.ok)return result; // Never silently switch to per-pixel BVH4.
         result.stats.rays=m.rays;result.stats.primarySamples=m.rays;
         result.stats.ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
-        result.renderer=QStringLiteral("V17 LumaTrace BVH4 — Z Escargot Object 005 — %1 — rays %2 / tri %3 / omitted %4 / deferred %5")
+        result.renderer=QStringLiteral("V17 LumaTrace BVH4 — Z Escargot Object 006 Resident — %1 — rays %2 / tri %3 / omitted %4 / deferred %5")
             .arg(request.directPresent?QStringLiteral("Direct GPU (swapchain)"):QStringLiteral("Qt (QImage)"))
             .arg(m.rays).arg(m.triangles).arg(m.omitted).arg(m.deferred+m.curved);
         if(!m.receivers)result.renderer+=QStringLiteral(" — catalogue %1 / patches %2 / visible %3").arg(m.catalogue).arg(m.patches).arg(m.visible);

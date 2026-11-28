@@ -41,6 +41,7 @@ int main(int argc,char** argv){
         const auto label=(c.id+" "+c.name).toLower();int v=0;
         for(const QString k:{"exterior","extérieur","exterieur","facade","façade","plaza","square","street","parvis","front","outside"})if(label.contains(k))v+=4;
         for(const QString k:{"interior","intérieur","pool","piscine","stair","landing","curtain","verriere","detail","inside"})if(label.contains(k))v-=8;
+        if(c.id==QStringLiteral("v600_garden_view"))v+=100;
         if(v>score){score=v;ext=&c;}
     }
     // Do not pretend that an interior preset is an exterior test. If a scene
@@ -58,15 +59,16 @@ int main(int argc,char** argv){
     HWND hwnd=CreateWindowExW(0,L"STATIC",L"Escargot Object005 profile",WS_OVERLAPPEDWINDOW|WS_VISIBLE,0,0,1300,760,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     if(!hwnd)return 9;
     struct Guard{HWND w;~Guard(){m3d::releaseDirectX11NativeForCurrentThread();DestroyWindow(w);}} guard{hwnd};
-    uint32_t failed=0,records=0;const int reps=4;
+    uint32_t failed=0,records=0;const int reps=hardware?16:4;
     for(const auto& cfg:configs){
         auto quality=m3d::rasterQualityProfile(m3d::RasterQualityProfile::Ultra);
         quality.msaaSamples=cfg.aa;quality.anisotropy=16;quality.dynamicLod=false;
         std::wstring error;if(!m3d::setRasterQualitySettings(quality,error)){qCritical()<<QString::fromStdWString(error);return 10;}
         for(const auto* preset:{pool,glass,ext})for(int moving=0;moving<2;++moving){
             for(int mode=0;mode<4;++mode){
-                const QString name=mode==0?"base-off":mode==1?"ZReflect":mode==2?"005-sky":"005-full";
+                const QString name=mode==0?"base-off":mode==1?"ZReflect":mode==2?"006-sky":"006-full";
                 _putenv_s("M3D_V17_ZREFLECT",mode==1?"1":"0");
+                if(!SetEnvironmentVariableA("M3D_V17_ZREFLECT",mode==1?"1":"0"))return 13;
                 const auto prep=Clock::now();e::projected::Session planner(rt,loaded.scene);double prepMs=ms(prep);
                 if(!planner.valid())return 11;
                 for(int frame=-2;frame<reps;++frame){
@@ -90,8 +92,8 @@ int main(int argc,char** argv){
                         }else ok=m3d::renderLumaTraceEscargotGpuBuiltNative(rt.renderScene,rt.lumaTraceBvh4,shadow,cam,cfg.w,cfg.h,hwnd,plan,st,bt,error);
                     }
                     const double wall=ms(start);const auto& p=st.escProfile;
-                    if(!ok||!p.completed||st.readbackBufferCount!=0){++failed;qCritical()<<preset->id<<name<<frame<<QString::fromStdWString(error)<<"completion"<<p.completed;}
-                    write({{"type","frame"},{"camera",preset->id},{"width",cfg.w},{"height",cfg.h},{"msaa",cfg.aa},{"moving",bool(moving)},{"mode",name},{"frame",frame},{"warmup",frame<0},{"ok",ok},{"completed",p.completed},{"gpu_valid",p.gpuValid},{"wall_ms",wall},{"planner_init_ms",prepMs},{"planner_ms",m.totalMs},{"receiver_ms",m.receiverMs},{"discover_ms",m.discoverMs},{"rank_ms",m.rankMs},{"cull_ms",m.cullMs},{"sort_ms",m.sortMs},{"emit_ms",m.emitMs},{"objects_tested",double(m.testedObjects)},{"triangles_tested",double(m.testedTriangles)},{"rays",int(m.rays)},{"sources",int(m.sources)},{"triangles",int(m.triangles)},{"omitted",int(m.omitted)},{"receivers",int(m.receivers)},{"deferred",int(m.deferred)},{"lighting_samples",int(m.lightingSamples)},{"planner_reused",m.reused},{"gpu_cached",p.cacheHit},{"map_ms",p.mapMs},{"alloc_ms",p.allocationMs},{"upload_ms",p.uploadMs},{"upload_bytes",double(p.uploadBytes)},{"layer_pixels",double(p.layerPixels)},{"scissor_pixels",double(p.scissorPixels)},{"optical_draws",int(p.draws)},{"optical_submit_ms",p.opticalSubmitMs},{"compute_gpu_ms",p.computeGpuMs},{"optical_gpu_ms",p.opticalGpuMs},{"main_gpu_ms",p.mainGpuMs},{"copy_gpu_ms",p.copyGpuMs},{"gpu_total_ms",p.gpuTotalMs},{"wait_ms",p.waitMs},{"native_readback",int(st.readbackBufferCount)},{"zreflect_active",int(st.zReflectActive)}});
+                    if(!ok||!p.completed||st.readbackBufferCount!=0||(mode!=1&&st.zReflectActive!=0)||(mode<2&&st.zReflectEnabled!=(mode==1))){++failed;qCritical()<<preset->id<<name<<frame<<QString::fromStdWString(error)<<"completion"<<p.completed;}
+                    write({{"type","frame"},{"camera",preset->id},{"width",cfg.w},{"height",cfg.h},{"msaa",cfg.aa},{"moving",bool(moving)},{"mode",name},{"frame",frame},{"warmup",frame<0},{"ok",ok},{"completed",p.completed},{"gpu_valid",p.gpuValid},{"wall_ms",wall},{"planner_init_ms",prepMs},{"planner_ms",m.totalMs},{"receiver_ms",m.receiverMs},{"discover_ms",m.discoverMs},{"rank_ms",m.rankMs},{"cull_ms",m.cullMs},{"sort_ms",m.sortMs},{"emit_ms",m.emitMs},{"objects_tested",double(m.testedObjects)},{"triangles_tested",double(m.testedTriangles)},{"rays",int(m.rays)},{"sources",int(m.sources)},{"triangles",int(m.triangles)},{"omitted",int(m.omitted)},{"receivers",int(m.receivers)},{"deferred",int(m.deferred)},{"lighting_samples",int(m.lightingSamples)},{"planner_reused",m.reused},{"gpu_cached",p.cacheHit},{"map_ms",p.mapMs},{"alloc_ms",p.allocationMs},{"upload_ms",p.uploadMs},{"upload_bytes",double(p.uploadBytes)},{"layer_pixels",double(p.layerPixels)},{"scissor_pixels",double(p.scissorPixels)},{"optical_draws",int(p.draws)},{"optical_submit_ms",p.opticalSubmitMs},{"compute_gpu_ms",p.computeGpuMs},{"optical_gpu_ms",p.opticalGpuMs},{"main_gpu_ms",p.mainGpuMs},{"copy_gpu_ms",p.copyGpuMs},{"gpu_total_ms",p.gpuTotalMs},{"wait_ms",p.waitMs},{"native_readback",int(st.readbackBufferCount)},{"zreflect_active",int(st.zReflectActive)},{"zreflect_enabled",st.zReflectEnabled}});
                     ++records;
                 }
                 qInfo()<<preset->id<<cfg.w<<cfg.aa<<moving<<name<<"profiled";
