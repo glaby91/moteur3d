@@ -1510,6 +1510,13 @@ class VulkanRaster final {
                      VK_IMAGE_USAGE_TRANSFER_DST_BIT,VK_IMAGE_ASPECT_COLOR_BIT);
         auto transientUsage=[&](VkFormat format,VkImageUsageFlags usage){
             if(!macTransient_)return usage;
+            // Both MSAA4 experiments failed image validation. Do not risk the
+            // unverified MSAA2/8 variants either. Keep the proven private
+            // non-transient attachments for all multisampled render passes.
+            if(msaaSamples_!=VK_SAMPLE_COUNT_1_BIT){
+                std::clog<<"[CSE WARP Vulkan] transient attachment active=0 MSAA safety fallback\n";
+                return usage;
+            }
             VkImageFormatProperties p{};
             const VkImageUsageFlags candidate=usage|VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT;
             if(vkGetPhysicalDeviceImageFormatProperties(physical_,format,VK_IMAGE_TYPE_2D,

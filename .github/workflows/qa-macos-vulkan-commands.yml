@@ -142,7 +142,7 @@ jobs:
           run("navigation",["./moteur3d_v17","--smoke-walking-collisions","benchmark-civic/scene.json"],env,180)
           PY
           cat "$root/results/status.json" >> "$GITHUB_STEP_SUMMARY"
-      - name: Run five independent command campaigns and combined candidate
+      - name: Short stability validation (full command campaign only on manual dispatch)
         run: |
           set -euo pipefail
           export VK_DRIVER_FILES="$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json"
@@ -150,7 +150,11 @@ jobs:
           export QT_QPA_PLATFORM=offscreen
           root="$PWD"
           cd build-macos
-          python3 "$root/experiments/macos-metal-vulkan/command_campaign.py" "$root/results/commands"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            python3 "$root/experiments/macos-metal-vulkan/command_campaign.py" "$root/results/commands"
+          else
+            python3 "$root/experiments/macos-metal-vulkan/command_stability.py" "$root/results/commands"
+          fi
       - uses: actions/upload-artifact@v6
         if: always()
         with:
