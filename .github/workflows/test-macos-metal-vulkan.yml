@@ -49,12 +49,16 @@ jobs:
         run: |
           set -euo pipefail
           src=experiments/macos-metal-vulkan
-          "$VULKAN_SDK/bin/glslangValidator" -V --target-env vulkan1.3 "$src/probe.comp" -o results/probe.spv
-          "$VULKAN_SDK/bin/spirv-val" --target-env vulkan1.3 results/probe.spv
+          # Basic compute probe does not need SPIR-V 1.6 / maintenance4 LocalSizeId.
+          "$VULKAN_SDK/bin/glslangValidator" -V --target-env vulkan1.1 "$src/probe.comp" -o results/probe.spv
+          "$VULKAN_SDK/bin/spirv-val" --target-env vulkan1.1 results/probe.spv
           clang++ -std=c++17 -O2 -I"$VULKAN_SDK/include" "$src/vulkan.cpp" -L"$VULKAN_SDK/lib" -lvulkan -Wl,-rpath,"$VULKAN_SDK/lib" -o "$RUNNER_TEMP/vulkan-probe"
       - name: Test KosmicKrisp and MoltenVK independently
         run: |
+          # Runner shell enables errexit; continue after individual ICD failure.
+          set +e
           set -uo pipefail
+          export VK_LOADER_DEBUG=error,warn
           export DYLD_LIBRARY_PATH="$VULKAN_SDK/lib"
           for driver in kosmickrisp moltenvk; do
             if [[ "$driver" == kosmickrisp ]]; then icd="$VULKAN_SDK/share/vulkan/icd.d/libkosmickrisp_icd.json"; else icd="$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json"; fi
@@ -62,7 +66,9 @@ jobs:
             export VK_DRIVER_FILES="$icd"
             cat "$icd" > "results/$driver-icd.json"
             "$RUNNER_TEMP/vulkan-probe" results/probe.spv "results/$driver.ppm" 2>&1 | tee "results/$driver.log"
-            echo "${PIPESTATUS[0]}" > "results/$driver.exit"
+            code=${PIPESTATUS[0]}
+            echo "$code" > "results/$driver.exit"
+            echo "$driver exit=$code"
           done
       - name: Summarize actual results
         if: always()
