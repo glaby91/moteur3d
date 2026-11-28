@@ -14,7 +14,7 @@ using Microsoft::WRL::ComPtr;
 inline constexpr char kTrace[] = R"(
 struct Node {float3 lo;uint c0;float3 hi;uint c1;uint c2,c3,first,count,children,pad;};
 struct Triangle {float4 a,b,c;};
-struct Query {float3 o;float low;float3 d;float pad;};
+struct Query {float3 o;float low;float3 d;uint previousPrimitive;};
 struct Hit {uint primitive,status;float depth,u,v;float3 pad;};
 StructuredBuffer<Node> nodes:register(t0);
 StructuredBuffer<uint> order:register(t1);
@@ -22,9 +22,10 @@ StructuredBuffer<Triangle> triangles:register(t2);
 StructuredBuffer<Query> queries:register(t3);
 RWStructuredBuffer<Hit> hits:register(u0);
 cbuffer Params:register(b0){uint queryCount,nodeCount,triangleCount,orderCount;}
+float cpuDivide(float a,float b);
 bool slab(float o,float d,float lo,float hi,inout float low,inout float high){
     if(abs(d)<1e-12)return o>=lo&&o<=hi;
-    precise float inverse=1.0/d;
+    precise float inverse=cpuDivide(1.0,d);
     precise float x=(lo-o)*inverse;
     precise float y=(hi-o)*inverse;
     float l=min(x,y),h=max(x,y);
@@ -49,17 +50,69 @@ float3 cpuCross(float3 a,float3 b){
     precise float z=a.x*b.y-a.y*b.x;
     return float3(x,y,z);
 }
+// DX11 float division may differ from CPU IEEE rounding by one ULP.
+// Correct the approximate quotient against exact integer midpoint bounds.
+// Normal finite operands/results only; exceptional inputs retain native
+// division. Products fit 49 bits, stored as low/high uint pairs.
+uint2 wideProduct(uint a,uint b){
+    uint a0=a&65535u,a1=a>>16,b0=b&65535u,b1=b>>16;
+    uint low0=a0*b0,mid=a0*b1+a1*b0;
+    uint lo=low0+(mid<<16);
+    return uint2(lo,a1*b1+(mid>>16)+uint(lo<low0));
+}
+int wideCompare(uint2 a,uint2 b){
+    if(a.y!=b.y)return a.y<b.y?-1:1;
+    if(a.x!=b.x)return a.x<b.x?-1:1;
+    return 0;
+}
+float packQuotient(uint signBits,int exponent,uint mantissa){
+    if(mantissa>=0x1000000u){mantissa>>=1;++exponent;}
+    return asfloat(signBits|(uint(exponent)<<23)|(mantissa&0x7fffffu));
+}
+float cpuDivide(float a,float b){
+    precise float approx=a/b;
+    uint aa=asuint(a),bb=asuint(b),ea=(aa>>23)&255u,eb=(bb>>23)&255u;
+    uint ma=(aa&0x7fffffu)|0x800000u,mb=(bb&0x7fffffu)|0x800000u;
+    uint sh=uint(ma<mb);
+    int exponent=int(ea)-int(eb)+127-int(sh);
+    if(ea==0u||eb==0u||ea==255u||eb==255u||exponent<=0||exponent>=254)return approx;
+    uint signBits=(aa^bb)&0x80000000u;
+    uint qb=asuint(approx)&0x7fffffffu;int qe=int(qb>>23);
+    uint qm=(qb&0x7fffffu)|0x800000u;
+    uint mantissa=qe==exponent?qm:(qe==exponent+1?0x1000000u:(qe==exponent-1?qm>>1:0u));
+    uint shiftCount=24u+sh;
+    uint2 numerator=uint2(ma<<shiftCount,ma>>(32u-shiftCount));
+    // Usually zero or one correction; exact midpoint and round-to-even.
+    if(mantissa>=0x7ffffeu&&mantissa<=0x1000002u){
+        for(uint attempt=0;attempt<3;++attempt){
+            int lower=wideCompare(numerator,wideProduct(2u*mantissa-1u,mb));
+            if(lower<0||(lower==0&&(mantissa&1u)!=0u)){--mantissa;continue;}
+            int upper=wideCompare(numerator,wideProduct(2u*mantissa+1u,mb));
+            if(upper>0||(upper==0&&(mantissa&1u)!=0u)){++mantissa;continue;}
+            return packQuotient(signBits,exponent,mantissa);
+        }
+    }
+    // Exact restoring division if the hardware estimate is unexpectedly far.
+    uint remainder=ma<<sh;mantissa=0;
+    for(uint bitIndex=0;bitIndex<24;++bitIndex){
+        mantissa<<=1;
+        if(remainder>=mb){mantissa|=1u;remainder-=mb;}
+        if(bitIndex!=23u)remainder<<=1;
+    }
+    if(2u*remainder>mb||(2u*remainder==mb&&(mantissa&1u)!=0u))++mantissa;
+    return packQuotient(signBits,exponent,mantissa);
+}
 bool hitTriangle(Triangle t,Query q,float high,out float depth,out float u,out float v){
     depth=0;u=0;v=0;
     precise float3 e=t.b.xyz-t.a.xyz,f=t.c.xyz-t.a.xyz;
     precise float3 p=cpuCross(q.d,f);
     precise float det=cpuDot(e,p);if(abs(det)<1e-10)return false;
     precise float3 a=q.o-t.a.xyz;
-    precise float uu=cpuDot(a,p)/det;u=uu;if(uu<0||uu>1)return false;
+    precise float uu=cpuDivide(cpuDot(a,p),det);u=uu;if(uu<0||uu>1)return false;
     precise float3 z=cpuCross(a,e);
-    precise float vv=cpuDot(q.d,z)/det;v=vv;
+    precise float vv=cpuDivide(cpuDot(q.d,z),det);v=vv;
     precise float uv=uu+vv;if(vv<0||uv>1)return false;
-    precise float tt=cpuDot(f,z)/det;depth=tt;return isfinite(tt)&&tt>q.low&&tt<=high;
+    precise float tt=cpuDivide(cpuDot(f,z),det);depth=tt;return isfinite(tt)&&tt>q.low&&tt<=high;
 }
 // Four-way sorting network: fixed five comparisons, no nested dynamic loop.
 // Push farthest first so the nearest node is popped first.
@@ -88,6 +141,7 @@ void CSTrace(uint3 tid:SV_DispatchThreadID){
             if(node.first>orderCount||node.count>orderCount-node.first){h.status=2;break;}
             for(uint j=0;j<node.count;++j){
                 uint p=order[node.first+j];if(p>=triangleCount){h.status=2;break;}
+                if(p==q.previousPrimitive)continue;
                 float t,u,v;if(hitTriangle(triangles[p],q,h.depth,t,u,v)&&(t<h.depth||(t==h.depth&&p<h.primitive))){
                     h.primitive=p;h.status=1;h.depth=t;h.u=u;h.v=v;
                 }

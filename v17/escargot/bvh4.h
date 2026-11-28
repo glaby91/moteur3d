@@ -66,7 +66,7 @@ public:
         }
         return std::find(visited.begin(),visited.end(),0)==visited.end()&&std::find(visitedOrderEntries.begin(),visitedOrderEntries.end(),0)==visitedOrderEntries.end()&&std::find(primitives.begin(),primitives.end(),0)==primitives.end();
     }
-    bool closest(const Ray& ray,float low,HitSample& hit){
+    bool closest(const Ray& ray,float low,HitSample& hit,uint32_t previousPrimitive=0xffffffffu){
         hit={};hit.depth=INF;stack_.clear();
         if(!valid_||!finite(ray.o)||!finite(ray.d)||!std::isfinite(low))return false;
         const Slabs slabs(ray);float near=0;if(!box(b_.nodes.front(),slabs,low,hit.depth,near))return false;
@@ -78,7 +78,7 @@ public:
             if(n.primitiveCount){
                 if(n.firstPrimitive>s_.order.size()||n.primitiveCount>s_.order.size()-n.firstPrimitive)return false;
                 for(uint32_t i=0;i<n.primitiveCount;++i){
-                    const uint32_t id=s_.order[n.firstPrimitive+i];if(id>=s_.obj.size()||id>=owner_.size()||!owner_[id])continue;
+                    const uint32_t id=s_.order[n.firstPrimitive+i];if(id==previousPrimitive)continue;if(id>=s_.obj.size()||id>=owner_.size()||!owner_[id])continue;
                     const auto& o=s_.obj[id];float t,u,v;
                     if(!tri(o,ray,low,hit.depth,t,u,v)||(hit.object&&t==hit.depth&&id>=hit.primitive))continue;
                     const float w=1-u-v;

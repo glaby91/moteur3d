@@ -58,7 +58,7 @@ int main(int argc,char** argv){
     QTextStream log(&csv);log<<"camera,iteration,mode,total_ms,raster_ms,matrix_ms,composition_ms,atlas_ms,secondary_cameras,rays,candidates,deferred,complete_paths,unknown_paths,atlas_nonzero,texture_samples,reused_cells,gpu_ms,gpu_timing_valid,prepare_once_ms,candidate_ms,admission_ms,escargot_total_ms,static_candidates,packet_bytes,packet_tiles,packet_layer_lists,packet_observations,affine_layers,ray_workers\n";
     QFile rayFile(out.filePath("gpu_bvh_mismatches.csv"));if(!rayFile.open(QIODevice::WriteOnly|QIODevice::Text))return 22;
     QTextStream rayLog(&rayFile);rayLog.setRealNumberPrecision(12);
-    rayLog<<"camera,index,classification,low,ox,oy,oz,dx,dy,dz,cpu_primitive,cpu_owner,cpu_depth,gpu_status,gpu_primitive,gpu_owner,gpu_depth,gpu_u,gpu_v,gpu_triangle_cpu_t,gpu_triangle_cpu_u,gpu_triangle_cpu_v,gpu_triangle_cpu_finite\n";
+    rayLog<<"camera,index,classification,previous_primitive,low,ox,oy,oz,dx,dy,dz,cpu_primitive,cpu_owner,cpu_depth,gpu_status,gpu_primitive,gpu_owner,gpu_depth,gpu_u,gpu_v,gpu_triangle_cpu_t,gpu_triangle_cpu_u,gpu_triangle_cpu_v,gpu_triangle_cpu_finite\n";
     QJsonArray summary;int tested=0;uint64_t allChanged=0,allActive=0,allCoverage=0,allEffective=0;int gpuReplayFailed=0;
     for(const QString id:{QString("v17_showcase_pool_634"),QString("v7_pool_fresco"),QString("v7_curtain_wall_detail"),QString("v8_stair_first_landing")}){
         auto it=std::find_if(rt.cameras.begin(),rt.cameras.end(),[&](const auto& c){return c.id==id;});if(it==rt.cameras.end()){qWarning()<<"Missing camera"<<id;continue;}
@@ -166,7 +166,7 @@ int main(int argc,char** argv){
                     if(cpuOwner==gpuOwner){++sameOwner;category="same_owner";}
                     else{++differentOwner;category="different_owner";}
                 }else ++depthOnly;
-                rayLog<<id<<','<<qulonglong(i)<<','<<category<<','<<q.low<<','<<q.origin[0]<<','<<q.origin[1]<<','<<q.origin[2]<<','<<q.direction[0]<<','<<q.direction[1]<<','<<q.direction[2]<<','<<y.primitive<<','<<cpuOwner<<','<<y.depth<<','<<x.status<<','<<x.primitive<<','<<gpuOwner<<','<<x.depth<<','<<x.u<<','<<x.v<<','<<raw.t<<','<<raw.u<<','<<raw.v<<','<<int(raw.finite)<<'\n';
+                rayLog<<id<<','<<qulonglong(i)<<','<<category<<','<<q.previousPrimitive<<','<<q.low<<','<<q.origin[0]<<','<<q.origin[1]<<','<<q.origin[2]<<','<<q.direction[0]<<','<<q.direction[1]<<','<<q.direction[2]<<','<<y.primitive<<','<<cpuOwner<<','<<y.depth<<','<<x.status<<','<<x.primitive<<','<<gpuOwner<<','<<x.depth<<','<<x.u<<','<<x.v<<','<<raw.t<<','<<raw.u<<','<<raw.v<<','<<int(raw.finite)<<'\n';
             }
             // Second dispatch on the same buffer to separate cold-start latency.
             std::vector<m3d::EscargotRayHit> warmHits;std::wstring warmError;

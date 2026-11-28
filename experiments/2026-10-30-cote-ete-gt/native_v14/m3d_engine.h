@@ -170,7 +170,7 @@ bool renderLumaTraceNative(const Scene& s,const LumaTraceBvh4& bvh4,
 bool renderLumaTraceEscargotPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring&);
 bool renderLumaTraceEscargotGpuPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring&);
 // Experimental query ABI: all original triangles, including transparent receivers.
-struct EscargotRayQuery { float origin[3];float low;float direction[3];float pad=0; };
+struct EscargotRayQuery { float origin[3];float low;float direction[3];uint32_t previousPrimitive=0xffffffffu; };
 struct EscargotRayHit { uint32_t primitive,status;float depth,u;float v;float pad[3]; };
 bool traceEscargotGpuBatch(const Scene&,const LumaTraceBvh4&,const std::vector<EscargotRayQuery>&,std::vector<EscargotRayHit>&,double&,double&,std::wstring&);
 bool renderLumaTraceEscargotGpuResidentPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const std::vector<float>&,std::vector<uint32_t>&,Stats&,std::wstring&);

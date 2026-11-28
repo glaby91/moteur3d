@@ -50,10 +50,10 @@ inline void sampleSurface(Surface& sf,Traversal& trace,const Scene& scene,const 
         s.y=r.y+y*sf.step+std::min(sf.step,r.h-y*sf.step)/2;
     }
     uint32_t pathLimit=quota;
-    auto query=[&](const Ray& ray,float low,HitSample& hit)->int{
+    auto query=[&](const Ray& ray,float low,HitSample& hit,uint32_t previous)->int{
         if(sf.queries>=pathLimit)return -1;
-        ++sf.queries;++stats.rays;const bool found=trace.closest(ray,low,hit);
-        if(opt.captureQueries)sf.recorded.push_back({{{ray.o.x,ray.o.y,ray.o.z},low,{ray.d.x,ray.d.y,ray.d.z},0},found?hit.primitive:0xffffffffu,hit.depth});
+        ++sf.queries;++stats.rays;const bool found=trace.closest(ray,low,hit,previous);
+        if(opt.captureQueries)sf.recorded.push_back({{{ray.o.x,ray.o.y,ray.o.z},low,{ray.d.x,ray.d.y,ray.d.z},previous},found?hit.primitive:0xffffffffu,hit.depth});
         return found?1:0;
     };
     uint32_t remaining=uint32_t(sf.samples.size());
@@ -63,14 +63,14 @@ inline void sampleSurface(Surface& sf,Traversal& trace,const Scene& scene,const 
         pathLimit=sf.queries+(quota-sf.queries)/remaining;
         --remaining;
         auto& s=sf.samples[id];const Ray primary=screenRay(cam,s.x,s.y,w,h);
-        HitSample hit;float low=.08f/std::max(1e-6f,dot(primary.d,cam.f));bool found=false,blocked=false;
+        HitSample hit;uint32_t previous=0xffffffffu;float low=.08f/std::max(1e-6f,dot(primary.d,cam.f));bool found=false,blocked=false;
         for(uint32_t crossing=0;crossing<opt.maxCrossings;++crossing){
-            const int q=query(primary,low,hit);if(q<0)break;
+            const int q=query(primary,low,hit,previous);if(q<0)break;
             if(!q){blocked=true;break;}
             if(hit.object==sf.candidate.object){found=true;break;}
             s.primaryTransmission*=transmission(scene.mat[scene.obj[hit.primitive].mat]);
             if(s.primaryTransmission<=.001f){blocked=true;break;}
-            low=hit.depth;
+            low=hit.depth;previous=hit.primitive;
         }
         if(!found){if(blocked){s.receiver=State::Zero;s.complete=true;}continue;}
         s.receiver=State::Measured;s.position=hit.p;s.receiverDepth=hit.depth;
@@ -86,12 +86,13 @@ inline void sampleSurface(Surface& sf,Traversal& trace,const Scene& scene,const 
         }
         s.directionValid=true;
         const Ray secondary{hit.p,s.direction};low=std::max(1e-6f,4.f*std::numeric_limits<float>::epsilon()*std::max(1.f,length(hit.p)));
+        previous=0xffffffffu; // new reflected/refracted ray, not a continuation of primary
         std::map<uint32_t,uint32_t> crossings;
         for(uint32_t j=0;j<opt.maxCrossings;++j){
-            HitSample src;const int q=query(secondary,low,src);
+            HitSample src;const int q=query(secondary,low,src,previous);
             if(q<0)break;
             if(!q){s.complete=true;break;}
-            low=src.depth;
+            low=src.depth;previous=src.primitive;
             // Reflection can legitimately hit a distant part of a concave receiver.
             // The initial epsilon prevents the origin triangle self-hit.
             // One-interface refraction skips receiver exit; exit bending is future work.
