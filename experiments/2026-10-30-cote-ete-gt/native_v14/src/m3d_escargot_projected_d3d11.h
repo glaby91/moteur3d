@@ -1,5 +1,6 @@
 #pragma once
 #include "m3d_directx11_raster_shader.h"
+#include <array>
 namespace m3d::escargot_gpu {
 inline constexpr char kProjectedPass[]=R"(
 struct ProjIn {float4 p:POSITION;float4 data:TEXCOORD0;float2 extra:TEXCOORD1;};
@@ -19,7 +20,7 @@ class ProjectedOptics {
     ComPtr<ID3D11Texture2D> color_,depth_;
     ComPtr<ID3D11ShaderResourceView> srv_;ComPtr<ID3D11DepthStencilView> dsv_;
     ComPtr<ID3D11RenderTargetView> rtv_[4];
-    UINT capacity_=0;int w_=0,h_=0;uint32_t layers_=0;
+    UINT capacity_=0;int w_=0,h_=0;uint32_t layers_=0;uint64_t renderedKey_=0;std::array<float,4> renderedClear_{};
     bool shaders(ID3D11Device* d,std::wstring& error){
         if(vs_&&ps_&&layout_)return true;
         std::string source=std::string(dx11::shaders::raster::kShader)+kProjectedPass;
@@ -38,7 +39,7 @@ class ProjectedOptics {
     }
     bool targets(ID3D11Device* d,int w,int h,uint32_t layers,std::wstring& error){
         if(srv_&&dsv_&&w_==w&&h_==h&&layers_==layers)return true;
-        color_.Reset();depth_.Reset();srv_.Reset();dsv_.Reset();for(auto& r:rtv_)r.Reset();w_=h_=0;layers_=0;
+        renderedKey_=0;color_.Reset();depth_.Reset();srv_.Reset();dsv_.Reset();for(auto& r:rtv_)r.Reset();w_=h_=0;layers_=0;
         D3D11_TEXTURE2D_DESC t{};t.Width=w;t.Height=h;t.MipLevels=1;t.ArraySize=layers;t.Format=DXGI_FORMAT_R8G8B8A8_UNORM;t.SampleDesc.Count=1;t.Usage=D3D11_USAGE_DEFAULT;t.BindFlags=D3D11_BIND_RENDER_TARGET|D3D11_BIND_SHADER_RESOURCE;
         if(FAILED(d->CreateTexture2D(&t,nullptr,color_.ReleaseAndGetAddressOf()))){error=L"Object005 color allocation";return false;}
         D3D11_SHADER_RESOURCE_VIEW_DESC sv{};sv.Format=t.Format;sv.ViewDimension=D3D11_SRV_DIMENSION_TEXTURE2DARRAY;sv.Texture2DArray.MipLevels=1;sv.Texture2DArray.ArraySize=layers;
@@ -61,6 +62,8 @@ public:
         ID3D11ShaderResourceView* none=nullptr;c->PSSetShaderResources(8,1,&none);
         if(plan.projectedRanges.empty())return true;
         if(!shaders(d,error)||!targets(d,w,h,uint32_t(plan.projectedRanges.size()),error))return false;
+        if(plan.projectedKey&&renderedKey_==plan.projectedKey&&std::equal(renderedClear_.begin(),renderedClear_.end(),clear))return true;
+        renderedKey_=0;
         if(count){
             if(!vertices_||count>capacity_){capacity_=1;while(capacity_<count)capacity_*=2;
                 D3D11_BUFFER_DESC b{};b.ByteWidth=capacity_*40;b.Usage=D3D11_USAGE_DYNAMIC;b.BindFlags=D3D11_BIND_VERTEX_BUFFER;b.CPUAccessFlags=D3D11_CPU_ACCESS_WRITE;
@@ -81,7 +84,8 @@ public:
             c->OMSetDepthStencilState(opaque,0);c->OMSetBlendState(nullptr,nullptr,0xffffffffu);if(r.opaque)c->Draw(r.opaque,r.first);
             c->OMSetDepthStencilState(transparent,0);c->OMSetBlendState(blend,nullptr,0xffffffffu);if(r.transparent)c->Draw(r.transparent,r.first+r.opaque);
         }
-        c->OMSetRenderTargets(0,nullptr,nullptr);c->OMSetBlendState(nullptr,nullptr,0xffffffffu);return true;
+        c->OMSetRenderTargets(0,nullptr,nullptr);c->OMSetBlendState(nullptr,nullptr,0xffffffffu);
+        renderedKey_=plan.projectedKey;std::copy(clear,clear+4,renderedClear_.begin());return true;
     }
 };
 }

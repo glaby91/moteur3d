@@ -1,6 +1,7 @@
 #pragma once
 #include "sampling.h"
 #include <array>
+#include <atomic>
 #include <memory>
 #include <set>
 namespace m3d::escargot::projected {
@@ -118,6 +119,7 @@ public:
         if(lightChanged){day_=day;sun_=sun;++epoch_;}
         if(cacheValid_&&key==key_&&!lightChanged&&frame_%8!=0){m=cachedMetrics_;m.rays=m.mini=m.lightingSamples=0;m.reused=true;return cached_;}
         cached_=EscargotPacketBuild{};auto& plan=cached_;plan.rasterProjected=true;
+        static std::atomic<uint64_t> nextKey{1};plan.projectedKey=nextKey.fetch_add(1,std::memory_order_relaxed);
         plan.data.resize((size_t(rt_.objects.size())+2)*4,0);plan.data[0]=float(rt_.objects.size());
         auto candidates=projectCandidates(catalogue_,c,w,h);
         std::stable_sort(candidates.begin(),candidates.end(),[&](const Candidate& a,const Candidate& b){
@@ -144,16 +146,19 @@ public:
             uint32_t count=0,usedSources=0;
             const float sign=dot(c.eye-p.p,p.n)>=0?1.f:-1.f;
             for(const auto& b:ranked){const auto& o=rt_.objects[int(b.id)-1];
-                if(usedSources>=maxSources||uint32_t(o.triangleCount)>limit-count){++m.omitted;continue;}
-                uint32_t before=count;
+                if(usedSources>=maxSources||count>=limit){++m.omitted;continue;}
+                uint32_t before=count;const auto opaqueBefore=opaque.size(),transparentBefore=transparent.size();
+                bool overflow=false;
                 for(int j=0;j<o.triangleCount;++j){uint32_t id=uint32_t(o.firstTriangle+j);const auto& t=s.obj[id];const auto& mat=s.mat[t.mat];
                     if(waterMaterial(mat)||opacity(mat)<.001f)continue;
                     if(std::max({sign*dot(t.a-p.p,p.n),sign*dot(t.b-p.p,p.n),sign*dot(t.c-p.p,p.n)})<=.0001f)continue;
                     // Narrow footprint test using the reflected triangle AABB.
                     Rect bounds=intersection(a.bounds,mirroredBounds(t.mn,t.mx,p,c,w,h));if(!bounds.valid())continue;
+                    if(count==limit){overflow=true;break;}
                     float depth=dot(mirror((t.a+t.b+t.c)/3.f,p)-c.eye,c.f);
                     (opacity(mat)>=.999f?opaque:transparent).push_back({id,depth});++count;
                 }
+                if(overflow){opaque.resize(opaqueBefore);transparent.resize(transparentBefore);count=before;++m.omitted;continue;}
                 if(count>before){++usedSources;++m.sources;}
             }
             std::sort(transparent.begin(),transparent.end(),[](const TriangleRef& x,const TriangleRef& y){return x.depth==y.depth?x.id<y.id:x.depth>y.depth;});

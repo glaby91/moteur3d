@@ -94,7 +94,7 @@ int main(int argc,char** argv){
     e::projected::Session project(rt,*req.sceneDatabase);if(!project.valid())return 25;
     e::projected::Metrics pm;auto plan=project.build(cam,shadow,req.width,req.height,pm);
     if(pm.rays>e::projected::rayBudget||pm.triangles>e::projected::triangleBudget||!pm.triangles||!pm.receivers)return 26;
-    auto empty=plan;empty.projectedRanges.clear();empty.projectedVertices.clear();std::fill(empty.data.begin()+4,empty.data.end(),0.f);
+    auto empty=plan;empty.projectedKey=0;empty.projectedRanges.clear();empty.projectedVertices.clear();std::fill(empty.data.begin()+4,empty.data.end(),0.f);
     std::vector<uint32_t> projectedOff;
     if(!optical(empty,projectedOff))return 27;
     uint64_t projectedSignal=0;
@@ -102,7 +102,33 @@ int main(int argc,char** argv){
     // Same projected path, identical camera/light; cached geometry uses zero queries.
     auto again=cse::v17render::renderLumaTrace(req,cam,shadow);
     if(!again.ok||again.stats.rays||again.pixels!=P.pixels)return 28;
-    if(projectedSignal<20)return 29;
+        // A sky-only pass has the same receiver map, Fresnel, opacity and sky fill.
+    // The sole difference from the on-plan is the projected triangle geometry.
+    auto skyOnly=plan;skyOnly.projectedKey=0;skyOnly.projectedVertices.clear();
+    for(auto& r:skyOnly.projectedRanges)r.first=r.opaque=r.transparent=0;
+    // Limit the geometry-on/sky-only comparison specifically to the water.
+    auto waterProjected=plan;waterProjected.projectedKey=0;
+    for(size_t id=1;id<=size_t(rt.objects.size());++id){
+        const auto& o=rt.objects[int(id)-1];
+        if(o.triangleCount<=0||o.firstTriangle<0||size_t(o.firstTriangle)>=rt.renderScene.obj.size()||!e::waterMaterial(rt.renderScene.mat[rt.renderScene.obj[o.firstTriangle].mat])){
+            waterProjected.data[4*(id+1)]=0;skyOnly.data[4*(id+1)]=0;
+        }
+    }
+    std::vector<uint32_t> geometryOn,geometrySky;
+    if(!optical(waterProjected,geometryOn)||!optical(skyOnly,geometrySky))return 30;
+    uint64_t geometrySignal=0;
+    for(size_t j=0;j<geometryOn.size();++j){
+        int d=0;for(int shift:{0,8,16})d+=std::abs(int((geometryOn[j]>>shift)&255)-int((geometrySky[j]>>shift)&255));
+        geometrySignal+=d>=12;
+    }
+    qInfo()<<"Projected geometry signal on water:"<<qulonglong(geometrySignal)<<"rays"<<pm.rays<<"triangles"<<pm.triangles<<"omitted"<<pm.omitted;
+    if(app.arguments().size()==3){
+        QDir out(app.arguments().at(2));QDir().mkpath(out.absolutePath());
+        QImage(reinterpret_cast<const uchar*>(geometryOn.data()),req.width,req.height,req.width*4,QImage::Format_RGB32).save(out.filePath("Object005-water-geometry.png"));
+        QImage(reinterpret_cast<const uchar*>(geometrySky.data()),req.width,req.height,req.width*4,QImage::Format_RGB32).save(out.filePath("Object005-water-sky-only.png"));
+        QImage(reinterpret_cast<const uchar*>(P.pixels.data()),req.width,req.height,req.width*4,QImage::Format_RGB32).save(out.filePath("Object005.png"));
+    }
+    if(projectedSignal<20||geometrySignal<20)return 29;
     auto pose=*it;pose.eye.x+=.075f;pose.target.x+=.075f;
     auto moved=m3d::v16::makeCamera(pose,req.width,req.height);
     auto M=cse::v17render::renderLumaTrace(req,moved,shadow);
@@ -137,7 +163,7 @@ int main(int argc,char** argv){
         QDir out(app.arguments().at(2));if(!QDir().mkpath(out.absolutePath()))return 19;
         auto save=[&](const auto& r,const QString& name){return QImage(reinterpret_cast<const uchar*>(r.pixels.data()),req.width,req.height,req.width*4,QImage::Format_RGB32).save(out.filePath(name));};
         if(!save(A,"A.png")||!save(F,"F16.png")||!save(G,"Object004.png")||!save(P,"Object005.png")||!save(M,"Object005-moved.png"))return 20;
-        QJsonObject report{{"A_ms",double(A.stats.ms)},{"F16_ms",double(F.stats.ms)},{"Object004_ms",double(G.stats.ms)},{"Object004_moved_ms",double(M.stats.ms)},{"native_A_submit_ms",double(nativeA.stats.ms)},{"native_Object004_submit_ms",double(nativeF.stats.ms)},{"native_readback",int(nativeF.stats.readbackBufferCount)},{"Object005_ms",double(P.stats.ms)},{"Object005_cached_ms",double(again.stats.ms)},{"Object005_moved_ms",double(M.stats.ms)},{"Object005_rays",double(pm.rays)},{"Object005_triangles",double(pm.triangles)},{"Object005_omitted",double(pm.omitted)},{"Object005_signal_pixels",double(projectedSignal)},{"water_signal_pixels",double(waterSignal)},{"water_strong_signal_pixels",double(strongSignal)},{"note","Single warm/cold smoke timings on software WARP, not hardware FPS. Pixel output differs from A and F16; movement and A restoration verified, not proof of visual parity."}};
+        QJsonObject report{{"A_ms",double(A.stats.ms)},{"F16_ms",double(F.stats.ms)},{"Object004_ms",double(G.stats.ms)},{"Object004_moved_ms",double(M.stats.ms)},{"native_A_submit_ms",double(nativeA.stats.ms)},{"native_Object004_submit_ms",double(nativeF.stats.ms)},{"native_readback",int(nativeF.stats.readbackBufferCount)},{"Object005_ms",double(P.stats.ms)},{"Object005_cached_ms",double(again.stats.ms)},{"Object005_moved_ms",double(M.stats.ms)},{"Object005_rays",double(pm.rays)},{"Object005_triangles",double(pm.triangles)},{"Object005_omitted",double(pm.omitted)},{"Object005_signal_pixels",double(projectedSignal)},{"Object005_water_geometry_signal_pixels",double(geometrySignal)},{"water_signal_pixels",double(waterSignal)},{"water_strong_signal_pixels",double(strongSignal)},{"note","Single warm/cold smoke timings on software WARP, not hardware FPS. Pixel output differs from A and F16; movement and A restoration verified, not proof of visual parity."}};
         QFile f(out.filePath("object005-summary.json"));if(!f.open(QIODevice::WriteOnly))return 21;f.write(QJsonDocument(report).toJson());
     }
     return 0;
