@@ -86,8 +86,9 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force escargot-report | Out-Null
           & ".\escargot-package\v17_escargot_ab.exe" "$env:ESC_SCENE/scene.json" (Resolve-Path escargot-report).Path 320 180 3 4096
-          if ($LASTEXITCODE) { throw "Escargot A/B failed: $LASTEXITCODE" }
-          Get-Content escargot-report/summary.json
+          $rc = $LASTEXITCODE
+          if (Test-Path escargot-report/summary.json) { Get-Content escargot-report/summary.json }
+          if ($rc) { throw "Escargot A/B failed: $rc" }
       - uses: actions/upload-artifact@v6
         if: always()
         with:
