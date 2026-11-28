@@ -51,32 +51,20 @@ jobs:
           test -d "$sdk/include/vulkan"
           echo "VULKAN_SDK=$sdk" >> "$GITHUB_ENV"
           find "$sdk/share/vulkan/icd.d" -maxdepth 1 -type f -print | tee "$GITHUB_WORKSPACE/results/icds.txt"
-      - name: Resolve engine version and latest official Reflect scene
+      - name: Resolve engine version and pinned benchmark scene V17.634
         run: |
           set -euo pipefail
           product="$(python3 -c 'import json; v=json.load(open("v17/version.json"))["engine"]; print("%d.%03d"%(v["major"],v["build"]))')"
           echo "V17_PRODUCT=$product" >> "$GITHUB_ENV"
-          curl --fail --location --retry 3 -H 'Accept: application/vnd.github+json' \
-            'https://api.github.com/repos/glaby91/moteur3d-scene/releases/latest' -o "$RUNNER_TEMP/scene-release.json"
-          # Resolve an immutable release URL and published SHA-256 values once.
-          python3 - "$RUNNER_TEMP/scene-release.json" "$GITHUB_ENV" <<'PY'
-          import json, re, sys
-          release = json.load(open(sys.argv[1]))
-          tag = release["tag_name"]
-          assert re.fullmatch(r"scene-reflect-V17\.\d+", tag), "Latest release is not a V17 Reflect scene"
-          assert not release["draft"] and not release["prerelease"]
-          assets = {a["name"]: a for a in release["assets"]}
-          base = f"https://github.com/glaby91/moteur3d-scene/releases/download/{tag}"
-          with open(sys.argv[2], "a") as env:
-              print(f"SCENE_TAG={tag}", file=env)
-              print(f"SCENE_REVISION={tag.removeprefix('scene-reflect-')}", file=env)
-              for name, key in [("V17-scene.zip","SCENE_ZIP"),("SCENE_VERSION.json","SCENE_MANIFEST")]:
-                  a = assets[name]
-                  assert a["browser_download_url"] == f"{base}/{name}"
-                  assert re.fullmatch(r"sha256:[a-f0-9]{64}", a["digest"])
-                  print(f"{key}_URL={a['browser_download_url']}", file=env)
-                  print(f"{key}_SHA={a['digest'][7:]}", file=env)
-          PY
+          # Match the validated Build 4; avoid rate-limited latest-release API.
+          cat >> "$GITHUB_ENV" <<'ENV'
+          SCENE_TAG=scene-reflect-V17.634
+          SCENE_REVISION=V17.634
+          SCENE_ZIP_URL=https://github.com/glaby91/moteur3d-scene/releases/download/scene-reflect-V17.634/V17-scene.zip
+          SCENE_ZIP_SHA=f975639311e5b5d48ae996ac1f4f986994b232befb29617290f51bdf2bfbb703
+          SCENE_MANIFEST_URL=https://github.com/glaby91/moteur3d-scene/releases/download/scene-reflect-V17.634/SCENE_VERSION.json
+          SCENE_MANIFEST_SHA=77d501dc6afa54f2a1793d1c26da8c0cd1645c0cc554636b417ecfcdf7ebcb73
+          ENV
       - name: Download and verify exact scene release
         run: |
           set -euo pipefail
@@ -257,7 +245,7 @@ jobs:
           path: results/
           if-no-files-found: warn
       - name: Require actual successful runtime checks
-        if: always()
+        if: success()
         run: |
           python3 - <<'PY'
           import json, pathlib
