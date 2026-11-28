@@ -125,9 +125,11 @@ bool childDistance(uint k,uint parent,Query q,float3 inverse,float high,out floa
     if(box(nodes[k],q.o,q.d,inverse,q.low,high,t))distance=t;
     return true;
 }
-Hit traceOne(Query q){
+float3 traceInverse(float3 d){
+    return float3(abs(d.x)<1e-12?0.0:cpuDivide(1.0,d.x),abs(d.y)<1e-12?0.0:cpuDivide(1.0,d.y),abs(d.z)<1e-12?0.0:cpuDivide(1.0,d.z));
+}
+Hit traceOnePrepared(Query q,float3 inverse){
     Hit h;h.primitive=0xffffffffu;h.status=0;h.depth=3.402823466e38;h.u=0;h.v=0;h.pad=0;
-    float3 inverse=float3(abs(q.d.x)<1e-12?0.0:cpuDivide(1.0,q.d.x),abs(q.d.y)<1e-12?0.0:cpuDivide(1.0,q.d.y),abs(q.d.z)<1e-12?0.0:cpuDivide(1.0,q.d.z));
     uint stack[128];float stackNear[128];uint top=0,visited=0;float n;
     if(nodeCount>0&&box(nodes[0],q.o,q.d,inverse,q.low,h.depth,n)){stack[top]=0;stackNear[top++]=n;}
     while(top>0){
@@ -167,6 +169,7 @@ Hit traceOne(Query q){
     }
     return h;
 }
+Hit traceOne(Query q){return traceOnePrepared(q,traceInverse(q.d));}
 [numthreads(64,1,1)]
 void CSTrace(uint3 tid:SV_DispatchThreadID){
     uint i=tid.x;if(i<queryCount)hits[i]=traceOne(queries[i]);
@@ -231,8 +234,9 @@ void CSPaths(uint3 tid:SV_DispatchThreadID){
     uint used=0,crossings=0,error=0;bool secondary=false;
     PathEvent first;first.q=q;first.hit=(Hit)0;
     precise float primaryTransmission=1.0;
+    float3 inverse=traceInverse(q.d);
     while(used<path.quota&&crossings<path.maxCrossings){
-        Hit hit=traceOne(q);PathEvent ev;ev.q=q;ev.hit=hit;
+        Hit hit=traceOnePrepared(q,inverse);PathEvent ev;ev.q=q;ev.hit=hit;
         if(used==0u)first=ev;else events[path.offset+used]=ev;++used;++crossings;
         if(hit.status>1u){error=1;break;}
         if(hit.status==0u)break;
@@ -247,7 +251,8 @@ void CSPaths(uint3 tid:SV_DispatchThreadID){
             precise float w=1.0-hit.u-hit.v;
             precise float3 nn=a.n0*w+a.n1*hit.u+a.n2*hit.v;
             float3 geometric=a.geometric;
-            precise float3 normal=cpuLength(nn)>1e-8?cpuNorm(nn):geometric;
+            precise float nnLength=cpuLength(nn);
+            precise float3 normal=nnLength>1e-8?float3(cpuDivide(nn.x,nnLength),cpuDivide(nn.y,nnLength),cpuDivide(nn.z,nnLength)):geometric;
             if(cpuDot(geometric,q.d)>=0.0)geometric=-geometric;
             if(cpuDot(normal,geometric)<0.0)normal=-normal;
             if(cpuDot(normal,q.d)>0.0)normal=geometric;
@@ -257,6 +262,7 @@ void CSPaths(uint3 tid:SV_DispatchThreadID){
             q.o=pos;q.d=direction;q.previousPrimitive=0xffffffffu;
             q.low=max(1e-6,4.76837158203125e-7*max(1.0,cpuLength(pos)));
             secondary=true;crossings=0;
+            if(used<path.quota)inverse=traceInverse(q.d);
         }else{
             if(1.0-a.transmission>=.999)break;
             q.low=hit.depth;q.previousPrimitive=hit.primitive;
