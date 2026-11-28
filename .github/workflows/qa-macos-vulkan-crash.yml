@@ -1,0 +1,146 @@
+name: macOS Build 2 Vulkan crash diagnostics
+run-name: CSE WARP macOS - independent shader A/B and LLDB
+on:
+  push:
+    branches: ['test/macos-metal-vulkan']
+    paths: ['.github/workflows/qa-macos-vulkan-crash.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  diagnose:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v6
+        with:
+          name: CSE-WARP-macOS-ARM64-experimental
+          run-id: 46092580858
+          github-token: ${{ github.token }}
+          path: downloaded
+      - name: Host and tools
+        run: |
+          mkdir -p results
+          sw_vers | tee results/host.txt
+          uname -m | tee -a results/host.txt
+          test "$(uname -m)" = arm64
+          xcodebuild -version | tee -a results/host.txt
+          ninja --version
+          xcrun --sdk macosx --show-sdk-version
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.10.3'
+          host: mac
+          target: desktop
+          arch: clang_64
+          modules: qtmultimedia
+          cache: true
+      - name: Install official Vulkan SDK
+        env:
+          VERSION: '1.4.363.1'
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/vulkan-download"
+          mkdir -p "$work"
+          cd "$work"
+          curl --fail --location --retry 2 --max-time 240 "https://sdk.lunarg.com/sdk/download/$VERSION/mac/vulkansdk-macos-$VERSION.zip" -o sdk.zip
+          unzip -q sdk.zip
+          app="$(find "$work" -maxdepth 3 -name '*.app' -print -quit)"
+          test -n "$app"
+          exe="$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$app/Contents/Info.plist")"
+          "$app/Contents/MacOS/$exe" --root "$RUNNER_TEMP/VulkanSDK" --accept-licenses --default-answer --confirm-command install copy_only=1
+          sdk="$RUNNER_TEMP/VulkanSDK/macOS"
+          test -d "$sdk/include/vulkan"
+          echo "VULKAN_SDK=$sdk" >> "$GITHUB_ENV"
+          find "$sdk/share/vulkan/icd.d" -maxdepth 1 -type f -print | tee "$GITHUB_WORKSPACE/results/icds.txt"
+      - name: Extract and verify exact Build 2
+        run: |
+          set -euo pipefail
+          mkdir -p package
+          archive="$(find downloaded -name '*.tar.gz' -print -quit)"
+          test -n "$archive"
+          tar -xzf "$archive" -C package --strip-components=1
+          python3 - <<'PY'
+          import json
+          p=json.load(open('package/BUILD_INFO.json'))
+          assert p['sourceCommit']=='b713862778cbd4ef7724717b960beb9d2edf1b82',p
+          assert str(p['githubActionsRun'])=='46092580858',p
+          print(p)
+          PY
+          cp package/BUILD_INFO.json results/
+          file package/v17_vulkan_gpu_smoke package/libmoteur3d_v16_core.dylib | tee results/binaries.txt
+          xcrun lldb --version
+      - name: Compare original shader profiles with isolated processes and LLDB
+        run: |
+          set -uo pipefail
+          set +e
+          root="$PWD"
+          cd package
+          export VK_DRIVER_FILES="$VULKAN_SDK/share/vulkan/icd.d/MoltenVK_icd.json"
+          export DYLD_LIBRARY_PATH="$PWD:$VULKAN_SDK/lib"
+          export DYLD_FRAMEWORK_PATH="$QT_ROOT_DIR/lib"
+          export QT_PLUGIN_PATH="$QT_ROOT_DIR/plugins"
+          export QT_QPA_PLATFORM=offscreen
+          export CSE_WARP_VK_MSAA=1
+          export VK_LOADER_DEBUG=error,warn
+          export PYTHONUNBUFFERED=1
+          python3 - "$root/results" <<'PY'
+          import os, pathlib, subprocess, sys, json, signal, time
+          result=pathlib.Path(sys.argv[1])
+          rows=[]
+          def run(name,command,env,limit):
+              print('BEGIN',name,flush=True)
+              with (result/(name+'.log')).open('w') as f:
+                  p=subprocess.Popen(command,stdout=f,stderr=subprocess.STDOUT,env=env,start_new_session=True)
+                  start=time.monotonic()
+                  try: code=p.wait(timeout=limit)
+                  except subprocess.TimeoutExpired:
+                      try: os.killpg(p.pid,signal.SIGKILL)
+                      except ProcessLookupError: pass
+                      p.wait()
+                      code=124
+              log=(result/(name+'.log')).read_text(errors='replace')
+              print(log[-45000:],flush=True)
+              row=dict(case=name,exit_code=code,wall_seconds=round(time.monotonic()-start,3))
+              rows.append(row)
+              (result/'status.json').write_text(json.dumps(rows,indent=2))
+              print('END',row,flush=True)
+              return code
+          for profile,flag in [('optimized','1'),('baseline','0')]:
+              env=os.environ.copy()
+              env['CSE_WARP_VK_FAST_FRAGMENT']=flag
+              image=result/(profile+'-triangle.png')
+              args=['./v17_vulkan_gpu_smoke',str(image)]
+              code=run(profile+'-triangle',args,env,90)
+              if code:
+                  # On crash, capture the faulting thread, other threads, libraries and PC.
+                  run(profile+'-lldb',['xcrun','lldb','--batch','-o','settings set target.disable-aslr false','-o','run','-k','thread backtrace all','-k','register read','-k','image list','-k','disassemble --pc --count 16','--',*args],env,120)
+              elif image.exists():
+                  run(profile+'-scene',['./v17_macos_scene_smoke','benchmark-civic/scene.json',str(result/profile)],env,240)
+          # Validation is separate so it cannot obscure the uninstrumented A/B.
+          env=os.environ.copy()
+          env['CSE_WARP_VK_FAST_FRAGMENT']='0'
+          layers=pathlib.Path(env['VULKAN_SDK'])/'share/vulkan/explicit_layer.d'
+          if any(layers.glob('*validation*.json')):
+              env['VK_LAYER_PATH']=str(layers)
+              env['VK_INSTANCE_LAYERS']='VK_LAYER_KHRONOS_validation'
+              run('baseline-validation',['./v17_vulkan_gpu_smoke',str(result/'validation-triangle.png')],env,90)
+          else:
+              rows.append({'case':'baseline-validation','exit_code':None,'reason':'validation layer manifest missing'})
+              (result/'status.json').write_text(json.dumps(rows,indent=2))
+          PY
+      - name: Collect macOS crash reports
+        if: always()
+        run: |
+          mkdir -p results/crash-reports
+          if [ -d "$HOME/Library/Logs/DiagnosticReports" ]; then
+            find "$HOME/Library/Logs/DiagnosticReports" -maxdepth 1 -type f \( -name '*v17_vulkan_gpu_smoke*' -o -name '*v17_macos_scene_smoke*' \) -exec cp {} results/crash-reports/ \;
+          fi
+          if [ -f results/status.json ]; then cat results/status.json >> "$GITHUB_STEP_SUMMARY"; fi
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: macOS-Build2-shader-AB-LLDB
+          path: results/
+          if-no-files-found: error
