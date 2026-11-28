@@ -50,9 +50,19 @@ adb shell input swipe 1150 400 1450 400 800
 wait_marker "CSE_ANDROID PASS TOUCH_CAMERA" 120
 adb exec-out screencap -p > android-evidence/screen-touch.png
 # A sustained left-half drag exercises actual walking, not just camera rotation.
-adb shell input swipe 270 864 270 580 2200
-wait_marker "CSE_ANDROID PASS WALK_MOVE" 120
+adb shell input swipe 270 850 270 1030 2500
+wait_marker "CSE_ANDROID INPUT MOVE_BEGIN" 60
+wait_marker "CSE_ANDROID INPUT MOVE_END metres" 60
+wait_marker "CSE_ANDROID PASS WALK_MOVE" 180
 adb exec-out screencap -p > android-evidence/screen-walk.png
+# Require measured horizontal displacement, not just a changed camera height.
+python3 - <<'PY'
+import re, pathlib
+log=pathlib.Path("android-evidence/stream-log.txt").read_text(errors="replace")
+values=[float(x) for x in re.findall(r"CSE_ANDROID INPUT MOVE_END metres ([0-9.eE+-]+)",log)]
+assert values and max(values)>0.05, values
+print("PASS horizontal walk displacement",max(values),"m")
+PY
 # Actual visible hit regions from WarpActivity, normalized to 1920x1080.
 adb shell input tap 1830 910
 wait_marker "CSE_ANDROID PASS JUMP_INPUT" 120

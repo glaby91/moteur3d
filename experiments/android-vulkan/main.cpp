@@ -110,6 +110,8 @@ class PortWindow final:public QWindow{
     bool walking_=false,movePending_=false,jumpPending_=false,crouchPending_=false;
     QPointF last_;
     float jumpStartY_=0.f;
+    bool gestureActive_=false,gestureFramePending_=false;
+    V gestureStartFeet_{};
     void publishHud(bool force=false){
         if(!force&&hudClock_.isValid()&&hudClock_.elapsed()<200)return;
         hudClock_.start();
@@ -157,7 +159,7 @@ class PortWindow final:public QWindow{
     bool uiPress(QPointF pos){
         const double x=pos.x()/std::max(1,width()),y=pos.y()/std::max(1,height());
         if(y<.12&&x>.86){
-            stopInput();menu_=!menu_;publishHud(true);
+            moveId_=lookId_=-1;moveDelta_=QPointF{};menu_=!menu_;publishHud(true);
             return true;
         }
         if(y<.12&&x>.73){
@@ -178,7 +180,7 @@ class PortWindow final:public QWindow{
         walk::spawn(scene_,camera_.eye,walker_);
         camera_.eye=walk::eye(walker_);walking_=true;
     }
-    void stopInput(){moveId_=lookId_=-1;moveDelta_=QPointF{};}
+    void stopInput(){moveId_=lookId_=-1;moveDelta_=QPointF{};gestureActive_=false;gestureFramePending_=false;}
     void tickMotion(){
         const float dt=std::min(.1f,float(tick_.restart())*.001f);
         if(!active_||!isExposed()||failed_||menu_||dt<=0.f)return;
@@ -201,14 +203,25 @@ class PortWindow final:public QWindow{
         walk::advance(scene_,walker_,motion,dt);
         camera_.eye=walk::eye(walker_);
         if(length(walker_.feet-old)>.0001f){
-            if(moveId_>=0)movePending_=true;
+            if(moveId_>=0&&length(V{walker_.feet.x-old.x,0.f,walker_.feet.z-old.z})>.0001f)movePending_=true;
             schedule();
         }
     }
     void schedule(){
         if(!active_||!ready_||failed_||scheduled_||!isExposed())return;
+#ifdef CSE_ANDROID_EMULATOR_TEST
+        // SwiftShader Full HD takes many seconds per frame. Keep the Qt input
+        // loop responsive throughout a gesture, then present its final pose.
+        if(gestureActive_){gestureFramePending_=true;return;}
+#endif
         scheduled_=true;
-        QTimer::singleShot(0,this,[this]{scheduled_=false;draw();});
+        QTimer::singleShot(0,this,[this]{
+            scheduled_=false;
+#ifdef CSE_ANDROID_EMULATOR_TEST
+            if(gestureActive_){gestureFramePending_=true;return;}
+#endif
+            draw();
+        });
     }
     void draw(){
         if(!active_||!isExposed()||!ready_||failed_||width()<1||height()<1)return;
@@ -255,9 +268,13 @@ protected:
             if(p->surfaceEventType()==QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed)
                 releaseVulkanDirectForCurrentThread();
         }
-        if(e->type()==QEvent::TouchCancel){stopInput();e->accept();return true;}
+        if(e->type()==QEvent::TouchCancel){stopInput();publishHud(true);schedule();e->accept();return true;}
         if(e->type()==QEvent::TouchBegin||e->type()==QEvent::TouchUpdate||e->type()==QEvent::TouchEnd){
             auto* t=static_cast<QTouchEvent*>(e);
+            if(e->type()==QEvent::TouchBegin){
+                // A new sequence must not inherit a stale point ID.
+                stopInput();gestureActive_=true;tick_.restart();
+            }
             for(const auto& point:t->points()){
                 const auto pos=point.position();const int id=point.id();
                 if(point.state()==QEventPoint::State::Pressed){
@@ -270,8 +287,9 @@ protected:
                             camera_.eye=walk::eye(walker_);crouchPending_=true;schedule();
                         }
                     }else if(pos.x()<width()*.45&&moveId_<0){
-                        beginWalking();moveId_=id;moveAnchor_=pos;moveDelta_=QPointF{};
-                    }else if(lookId_<0){lookId_=id;last_=pos;}
+                        beginWalking();moveId_=id;moveAnchor_=pos;moveDelta_=QPointF{};gestureStartFeet_=walker_.feet;
+                        qInfo().noquote()<<"CSE_ANDROID INPUT MOVE_BEGIN"<<id<<pos.x()<<pos.y()<<"grounded"<<walker_.grounded;
+                    }else if(lookId_<0){lookId_=id;last_=pos;qInfo().noquote()<<"CSE_ANDROID INPUT LOOK_BEGIN"<<id;}
                 }else if(point.state()==QEventPoint::State::Updated){
                     if(id==moveId_){
                         moveDelta_=pos-moveAnchor_;
@@ -289,9 +307,20 @@ protected:
                         }
                     }
                 }else if(point.state()==QEventPoint::State::Released){
-                    if(id==moveId_){moveId_=-1;moveDelta_=QPointF{};publishHud(true);}
+                    if(id==moveId_){
+                        const float travelled=length(V{walker_.feet.x-gestureStartFeet_.x,0.f,walker_.feet.z-gestureStartFeet_.z});
+                        qInfo().noquote()<<"CSE_ANDROID INPUT MOVE_END metres"<<travelled;
+                        moveId_=-1;moveDelta_=QPointF{};publishHud(true);
+                    }
                     if(id==lookId_)lookId_=-1;
                 }
+            }
+            if(e->type()==QEvent::TouchEnd){
+                const bool frame=gestureFramePending_||touchPending_||movePending_||crouchPending_||scalePending_||msaaPending_;
+                stopInput();
+                if(frame)schedule();
+                publishHud(true);
+                qInfo().noquote()<<"CSE_ANDROID INPUT GESTURE_END";
             }
             e->accept();return true;
         }
