@@ -41,9 +41,20 @@ uint shortlistLimit(uint start,uint count,int4 r){
     }
     return best.w;
 }
+// FXC cs_5_0 cannot dynamically address vector components as l-values.
+void markSelected(inout uint4 mask,uint index){
+    uint bit=1u<<(index&31u);
+    if(index<32u)mask.x|=bit;
+    else if(index<64u)mask.y|=bit;
+    else if(index<96u)mask.z|=bit;
+    else mask.w|=bit;
+}
 uint popSelected(inout uint4 mask){
-    uint lane=mask.x?0u:(mask.y?1u:(mask.z?2u:3u));
-    uint bit=uint(firstbitlow(mask[lane]));mask[lane]&=mask[lane]-1u;return 32u*lane+bit;
+    if(mask.x){uint bit=uint(firstbitlow(mask.x));mask.x&=mask.x-1u;return bit;}
+    if(mask.y){uint bit=uint(firstbitlow(mask.y));mask.y&=mask.y-1u;return 32u+bit;}
+    if(mask.z){uint bit=uint(firstbitlow(mask.z));mask.z&=mask.z-1u;return 64u+bit;}
+    if(mask.w){uint bit=uint(firstbitlow(mask.w));mask.w&=mask.w-1u;return 96u+bit;}
+    return 128u; // unreachable while the selected-count invariant holds
 }
 bool overlaps(int4 a,int4 b){return all(a.xy<b.xy+b.zw)&&all(b.xy<a.xy+a.zw);}
 [numthreads(32,1,1)]
@@ -60,7 +71,7 @@ void CSBuild(uint3 tid:SV_DispatchThreadID){
     // Cache the selected source indices in four registers for small regions.
     const bool maskable=receiverCount<=128u;uint4 selected=0;
     for(uint j=0;j<receiverCount;++j)if(minimumDistance(int2(src[receiverStart+3*j].xy),rect)<=receiverLimit){
-        ++chosenReceivers;if(maskable)selected[j>>5]|=1u<<(j&31u);
+        ++chosenReceivers;if(maskable)markSelected(selected,j);
     }
     if(!chosenReceivers)return;
     uint overlapsCount=0;
