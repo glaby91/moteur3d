@@ -75,12 +75,16 @@ struct CachedBounds {Box box;float low,high;};
 struct SourceBounds {std::vector<CachedBounds> triangles;std::vector<Box> blocks;};
 struct ReceiverBounds {size_t patch=std::numeric_limits<size_t>::max(),bytes=0;std::map<uint32_t,SourceBounds> sources;};
 struct Source{uint32_t id=0;V lo{},hi{};};
+struct ResidentSourceBlock{EscargotResidentBlock draw;Box bounds;bool alpha=false;};
+
 struct Seen{uint32_t last=0,hits=0;};
 struct TriangleRef{uint32_t id;float depth;};
 class Session {
     const v16::Runtime& rt_;std::vector<uint32_t> owners_;std::unique_ptr<Traversal> trace_;
     std::vector<Candidate> catalogue_;std::vector<ReceiverPatch> patches_;
     std::vector<Source> sources_;std::map<uint32_t,std::map<uint32_t,Seen>> seen_;
+    bool gpuResident_=false;
+    std::vector<std::vector<ResidentSourceBlock>> sourceBlocks_;
     std::array<ReceiverBounds,maxReceivers> boundsCache_;
     struct EmitCache {size_t patch=std::numeric_limits<size_t>::max();uint32_t epoch=0;float sign=0;std::vector<uint32_t> ids;std::vector<float> vertices;};
     std::array<EmitCache,maxReceivers> emitCache_;
@@ -139,7 +143,7 @@ class Session {
         const Rect b=r.bounds;
         auto x=[&](float i){return b.x+std::clamp(int(i*b.w/5.f),0,b.w-1);};
         auto y=[&](float i){return b.y+std::clamp(int(i*b.h/5.f),0,b.h-1);};
-        float phase=float(frame_%5)*.12f+.20f;
+        float phase=gpuResident_?.5f:float(frame_%5)*.12f+.20f;
         for(int j=0;j<5&&m.rays<seedLimit;++j)for(int i=0;i<5&&m.rays<seedLimit;++i)
             v[j][i]=probe(r,plane,cam,x(i+phase),y(j+phase),w,h,seedLimit,m);
         for(int pass=0;pass<2;++pass)for(int j=0;j<4&&m.rays<limit;++j)for(int i=0;i<4&&m.rays<limit;++i){
@@ -147,7 +151,7 @@ class Session {
             bool zero=!v[j][i]&&!v[j][i+1]&&!v[j+1][i]&&!v[j+1][i+1];
             if((pass==0&&mixed)||(pass==1&&zero)){++m.mini;probe(r,plane,cam,x(i+phase+.5f),y(j+phase+.5f),w,h,limit,m);}
         }
-        auto& a=seen_[r.object];for(auto it=a.begin();it!=a.end();)if(frame_-it->second.last>64)it=a.erase(it);else ++it;
+        if(!gpuResident_){auto& a=seen_[r.object];for(auto it=a.begin();it!=a.end();)if(frame_-it->second.last>64)it=a.erase(it);else ++it;}
     }
     void appendProjectedTriangle(EscargotPacketBuild& plan,const TriangleRef& ref,Plane p,const Camera& c,const ShadowMap& sh,Metrics& m){
         const auto& t=rt_.renderScene.obj[ref.id];const auto& mat=rt_.renderScene.mat[t.mat];
@@ -166,7 +170,7 @@ class Session {
         }
     }
 public:
-    Session(const v16::Runtime& rt,const v16::SceneDatabase& db):rt_(rt){
+    Session(const v16::Runtime& rt,const v16::SceneDatabase& db,bool gpuResident=false):rt_(rt),gpuResident_(gpuResident){
         if(!objectMap(rt,owners_))return;
         trace_=std::make_unique<Traversal>(rt.renderScene,rt.lumaTraceBvh4,owners_);
         if(!trace_->valid()){trace_.reset();return;}
@@ -212,7 +216,24 @@ public:
                 hi={std::max(hi.x,t.mx.x),std::max(hi.y,t.mx.y),std::max(hi.z,t.mx.z)};}
             sources_.push_back({uint32_t(i)+1,lo,hi});}
         for(size_t i=0;i<patches_.size();++i)patches_[i].index=i;
-        light_.resize(rt.renderScene.obj.size());lightStamp_.resize(light_.size(),0);
+        if(gpuResident_){
+            sourceBlocks_.resize(size_t(rt.objects.size())+1);
+            const auto& s=rt.renderScene;
+            for(const auto& source:sources_){
+                const auto& obj=rt.objects[int(source.id)-1];auto& out=sourceBlocks_[source.id];
+                for(int j=0;j<obj.triangleCount;++j){
+                    const uint32_t id=uint32_t(obj.firstTriangle+j);const auto& t=s.obj[id];const auto& mat=s.mat[t.mat];
+                    const float a=opacity(mat);if(waterMaterial(mat)||a<.001f)continue;
+                    const bool alpha=a<.999f;const Box box{t.mn,t.mx};
+                    // Exact alpha ordering remains available: one triangle per transparent block.
+                    // Opaque runs can contain up to 32 contiguous original triangles.
+                    if(!alpha&&!out.empty()&&!out.back().alpha&&out.back().draw.count<blockSize&&
+                       out.back().draw.first+out.back().draw.count==id){
+                        ++out.back().draw.count;extendBox(out.back().bounds,box);
+                    }else out.push_back({{id,1},box,alpha});
+                }
+            }
+        }else {light_.resize(rt.renderScene.obj.size());lightStamp_.resize(light_.size(),0);}
     }
     bool valid()const{return bool(trace_);}
     const EscargotPacketBuild& build(const Camera& c,const ShadowMap& sh,int w,int h,Metrics& m){
@@ -222,9 +243,10 @@ public:
         std::array<float,16> key={c.eye.x,c.eye.y,c.eye.z,c.f.x,c.f.y,c.f.z,c.r.x,c.r.y,c.r.z,c.u.x,c.u.y,c.u.z,c.tanHalf,c.aspect,float(w),float(h)};
         const bool lightChanged=day_!=day||length(sun-sun_)>1e-5f;
         if(lightChanged){day_=day;sun_=sun;++epoch_;}
-        if(cacheValid_&&key==key_&&!lightChanged&&frame_%8!=0){m=cachedMetrics_;m.rays=m.mini=m.lightingSamples=0;m.receiverMs=m.discoverMs=m.rankMs=m.cullMs=m.sortMs=m.emitMs=0;m.testedObjects=m.testedTriangles=0;m.totalMs=ms(start);m.reused=true;return cached_;}
-        cached_.projectedVertices.clear();cached_.projectedRanges.clear();auto& plan=cached_;plan.rasterProjected=true;
-        plan.projectedVertices.reserve(size_t(triangleBudget)*30);
+        if(cacheValid_&&key==key_&&(gpuResident_||(!lightChanged&&frame_%8!=0))){m=cachedMetrics_;m.rays=m.mini=m.lightingSamples=0;m.receiverMs=m.discoverMs=m.rankMs=m.cullMs=m.sortMs=m.emitMs=0;m.testedObjects=m.testedTriangles=0;m.totalMs=ms(start);m.reused=true;return cached_;}
+        cached_.projectedVertices.clear();cached_.projectedRanges.clear();cached_.resident.blocks.clear();auto& plan=cached_;plan.rasterProjected=true;plan.resident.enabled=gpuResident_;
+        if(!gpuResident_)plan.projectedVertices.reserve(size_t(triangleBudget)*30);
+        else seen_.clear(); // deterministic discovery: camera/scene, never elapsed frames or history
         static std::atomic<uint64_t> nextKey{1};plan.projectedKey=nextKey.fetch_add(1,std::memory_order_relaxed);
         plan.data.assign((2+2*size_t(rt_.objects.size()))*4,0);plan.data[0]=float(rt_.objects.size());
         m.catalogue=uint32_t(catalogue_.size());m.patches=uint32_t(patches_.size());
@@ -267,6 +289,48 @@ public:
             const uint32_t limit=(triangleBudget-m.triangles)/uint32_t(admitted.size()-k);
             uint32_t count=0,usedSources=0;
             const float sign=dot(c.eye-p.p,p.n)>=0?1.f:-1.f;
+            if(gpuResident_){
+                struct AlphaBlock{EscargotResidentBlock block;float depth;};
+                std::vector<EscargotResidentBlock> solid;
+                std::vector<AlphaBlock> alpha;
+                uint32_t opaqueCount=0,alphaCount=0;
+                for(const auto& b:ranked){
+                    if(usedSources>=maxSources||count>=limit){++m.omitted;continue;}
+                    const auto oldSolid=solid.size(),oldAlpha=alpha.size();const uint32_t oldO=opaqueCount,oldA=alphaCount,oldCount=count;
+                    bool overflow=false;
+                    for(const auto& block:sourceBlocks_[b.id]){
+                        // Coarse conservative box only; all individual plane/frustum clipping is GPU-side.
+                        const auto reflected=mirroredBox(block.bounds.lo,block.bounds.hi,p);
+                        if(outsideFootprint(reflected,c,a.bounds,w,h))continue;
+                        const V n=p.n*sign;
+                        const V support{n.x>=0?block.bounds.hi.x:block.bounds.lo.x,n.y>=0?block.bounds.hi.y:block.bounds.lo.y,n.z>=0?block.bounds.hi.z:block.bounds.lo.z};
+                        if(dot(support-p.p,n)<-.001f)continue;
+                        if(block.draw.count>limit-count){overflow=true;break;}
+                        if(block.alpha){
+                            const auto& t=s.obj[block.draw.first];
+                            alpha.push_back({block.draw,dot(mirror((t.a+t.b+t.c)/3.f,p)-c.eye,c.f)});alphaCount+=block.draw.count;
+                        }else {solid.push_back(block.draw);opaqueCount+=block.draw.count;}
+                        count+=block.draw.count;
+                    }
+                    if(overflow){solid.resize(oldSolid);alpha.resize(oldAlpha);opaqueCount=oldO;alphaCount=oldA;count=oldCount;++m.omitted;continue;}
+                    if(count>oldCount){++usedSources;++m.sources;}
+                }
+                m.cullMs+=ms(stage);stage=Clock::now();
+                std::sort(alpha.begin(),alpha.end(),[](const AlphaBlock& x,const AlphaBlock& y){return x.depth==y.depth?x.block.first<y.block.first:x.depth>y.depth;});
+                m.sortMs+=ms(stage);stage=Clock::now();
+                EscargotProjectedRange r;r.receiver=a.object;r.first=m.triangles*3;r.opaque=opaqueCount*3;r.transparent=alphaCount*3;
+                r.blockFirst=uint32_t(plan.resident.blocks.size());r.blockOpaque=uint32_t(solid.size());r.blockTransparent=uint32_t(alpha.size());
+                r.x=std::max(0,a.bounds.x-1);r.y=std::max(0,a.bounds.y-1);
+                r.w=std::min(w,a.bounds.x+a.bounds.w+1)-r.x;r.h=std::min(h,a.bounds.y+a.bounds.h+1)-r.y;
+                plan.resident.blocks.insert(plan.resident.blocks.end(),solid.begin(),solid.end());
+                for(const auto& b:alpha)plan.resident.blocks.push_back(b.block);
+                const size_t at=4*(size_t(a.object)+1);
+                plan.data[at]=float(plan.projectedRanges.size()+1);plan.data[at+1]=p.n.x;plan.data[at+2]=p.n.y;plan.data[at+3]=p.n.z;
+                plan.data[4*(size_t(rt_.objects.size())+1+size_t(a.object))]=dot(p.p,p.n);
+                plan.projectedRanges.push_back(r);m.triangles+=count;++m.receivers;
+                if(waterMaterial(s.mat[a.material]))++m.water;m.emitMs+=ms(stage);
+                continue;
+            }
             for(const auto& b:ranked){const auto& o=rt_.objects[int(b.id)-1];
                 if(usedSources>=maxSources||count>=limit){++m.omitted;continue;}
                 uint32_t before=count;const auto opaqueBefore=opaque.size(),transparentBefore=transparent.size();

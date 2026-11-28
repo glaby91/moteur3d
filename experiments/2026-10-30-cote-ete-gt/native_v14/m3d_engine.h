@@ -54,7 +54,7 @@ struct ZReflectPassStats {
     uint64_t colorTriangles=0,depthTriangles=0;
     bool cpuCull=false,depthPrepass=false;
 };
-struct EscargotProfile {double mapMs=0,allocationMs=0,uploadMs=0,opticalSubmitMs=0,computeGpuMs=0,opticalGpuMs=0,mainGpuMs=0,copyGpuMs=0,gpuTotalMs=0,waitMs=0;uint64_t uploadBytes=0,layerPixels=0,scissorPixels=0;uint32_t draws=0;bool gpuValid=false,completed=false,cacheHit=false;};
+struct EscargotProfile {double mapMs=0,allocationMs=0,uploadMs=0,opticalSubmitMs=0,computeGpuMs=0,opticalGpuMs=0,mainGpuMs=0,copyGpuMs=0,gpuTotalMs=0,waitMs=0;uint64_t uploadBytes=0,layerPixels=0,scissorPixels=0,residentGeometryBytes=0,residentSubmittedVertices=0;uint32_t draws=0;bool gpuValid=false,completed=false,cacheHit=false;};
 struct Stats { EscargotProfile escProfile{}; uint64_t rays=0,tests=0,aabb=0,nodes=0,hits=0,sky=0,texels=0,depthReads=0,shadowRays=0; uint64_t simdRayPackets=0,simdTrianglePackets=0,simdTextureSamples=0,simdLightBatches=0; double ms=0,postMs=0,shadowMs=0;
     // DX11-only hardware counters; CPU/Compute paths leave these at zero.
     uint64_t gpuDrawCalls=0,gpuBoxInstances=0,gpuEllipseInstances=0,gpuFoliageInstances=0;
@@ -178,8 +178,10 @@ struct EscargotPathQuery { EscargotRayQuery initial;uint32_t receiver,quota,offs
 struct EscargotPathEvent { EscargotRayQuery query;EscargotRayHit hit; }; // hit.pad[0] in first slot = event count, pad[1] = error flag
 struct EscargotPathTiming { double prepareMs=0,submitMs=0,readbackMs=0,gpuMs=0;bool gpuTimingValid=false;uint64_t transferredBytes=0; };
 // Compact source observations and tile jobs; final optical packet built on GPU.
-struct EscargotProjectedRange {uint32_t receiver=0,first=0,opaque=0,transparent=0;int x=0,y=0,w=0,h=0;};
-struct EscargotPacketBuild {bool rasterProjected=false;uint64_t projectedKey=0;std::vector<float> projectedVertices;std::vector<EscargotProjectedRange> projectedRanges;std::vector<float> data;uint32_t prefixRecords=0,jobBase=0,jobCount=0,maxRecords=0;bool capturePacket=false;bool rasterDirect=false;std::vector<uint32_t> rasterReceivers;};
+struct EscargotResidentBlock {uint32_t first=0,count=0;}; // original scene triangle range, <=32
+struct EscargotProjectedRange {uint32_t receiver=0,first=0,opaque=0,transparent=0;int x=0,y=0,w=0,h=0;uint32_t blockFirst=0,blockOpaque=0,blockTransparent=0;};
+struct EscargotResidentLayout {bool enabled=false;std::vector<EscargotResidentBlock> blocks;};
+struct EscargotPacketBuild {bool rasterProjected=false;uint64_t projectedKey=0;std::vector<float> projectedVertices;std::vector<EscargotProjectedRange> projectedRanges;EscargotResidentLayout resident;std::vector<float> data;uint32_t prefixRecords=0,jobBase=0,jobCount=0,maxRecords=0;bool capturePacket=false;bool rasterDirect=false;std::vector<uint32_t> rasterReceivers;};
 struct EscargotBuildTiming {double prepareMs=0,submitMs=0,gpuMs=0,statusMs=0;uint32_t records=0,tiles=0;bool gpuTimingValid=false;std::vector<float> diagnosticPacket;};
 bool renderLumaTraceEscargotGpuBuiltPreview(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,const EscargotPacketBuild&,std::vector<uint32_t>&,Stats&,EscargotBuildTiming&,std::wstring&);
 bool renderLumaTraceEscargotGpuBuiltNative(const Scene&,const LumaTraceBvh4&,const ShadowMap&,const Camera&,int,int,void*,const EscargotPacketBuild&,Stats&,EscargotBuildTiming&,std::wstring&);

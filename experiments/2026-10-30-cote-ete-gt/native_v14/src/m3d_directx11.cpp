@@ -1024,7 +1024,7 @@ public:
             ?acquireReflectionTimer(reflectionGpuSum,reflectionGpuSamples):nullptr;
         if(timing){context_->Begin(timing->disjoint.Get());context_->End(timing->begin.Get());}
         frameProfile.mark(1);const auto reflectSubmitStart=Clock::now();
-        if(escProjected&&!projectedOptics_.render(device_.Get(),context_.Get(),*escargotInput->build,w,h,clear,constants_.Get(),albedo_.Get(),preservedAlbedo_?preservedAlbedo_.Get():albedo_.Get(),sampler_.Get(),probeSampler_.Get(),scissorRaster_.Get(),depth_.Get(),transparentDepth_.Get(),blend_.Get(),escProfile,error))return false;
+        if(escProjected&&!projectedOptics_.render(device_.Get(),context_.Get(),scene,cam,shadows,shadowRevision_,shadowSrv_.Get(),*escargotInput->build,w,h,clear,constants_.Get(),albedo_.Get(),preservedAlbedo_?preservedAlbedo_.Get():albedo_.Get(),sampler_.Get(),probeSampler_.Get(),scissorRaster_.Get(),depth_.Get(),transparentDepth_.Get(),blend_.Get(),escProfile,error))return false;
         for(size_t i=0;i<zActive_.size();++i){
             const auto id=zActive_[i].id;const auto& p=zRuntime_.patch(id);
             reflectSlot=i;reflectPasses[i].planeId=id;
@@ -1458,6 +1458,7 @@ private:
                        count*sizeof(float))==0)return true;
         context_->UpdateSubresource(shadowTexture_.Get(),0,nullptr,
                                     shadows.d.data(),UINT(shadows.size*sizeof(float)),0);
+        ++shadowRevision_;
         if(cacheEnabled)shadowUploadCache_.assign(shadows.d.begin(),shadows.d.begin()+count);
         else shadowUploadCache_.clear();
         return true;
@@ -2409,7 +2410,7 @@ private:
     uint64_t loadedGiFileRevision_=0;
     int lowFrame_=-1,highFrame_=-1;
     float giHourMix_=0.f;
-    V probeOrigin_{},probeInvSpan_{};ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;std::vector<float> shadowUploadCache_;std::vector<TransparentTriangle> transparent_;
+    V probeOrigin_{},probeInvSpan_{};ComPtr<ID3D11Texture2D> shadowTexture_;int shadowSize_=0;uint64_t shadowRevision_=0;std::vector<float> shadowUploadCache_;std::vector<TransparentTriangle> transparent_;
     ComPtr<ID3D11Texture2D> target_,resolve_,depthTexture_,lowTex_,lowDepth_,mergeTex_;
     zreflect::RuntimeOptics zRuntime_;
     std::vector<zreflect::ActivePlane> zActive_;

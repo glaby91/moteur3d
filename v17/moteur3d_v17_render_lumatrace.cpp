@@ -33,6 +33,7 @@ struct ExplorationSession {
     std::weak_ptr<m3d::v16::Runtime> runtime;
     std::weak_ptr<const m3d::v16::SceneDatabase> database;
     uint64_t revision=0;
+    bool gpuResident=true;
     std::unique_ptr<e::Prepared> prepared;
     std::vector<uint32_t> objectReceivers;
     std::unique_ptr<e::projected::Session> projected;
@@ -51,21 +52,21 @@ BackendResult renderEscargotF16(const Request& request,const m3d::Camera& camera
     thread_local ExplorationSession session;
     e::Options opt;
     opt.rayBudget=4096;
-    if(!session.prepared||session.runtime.lock()!=request.scene||
+    const char* opt007=std::getenv("CSE_WARP_ESCARGOT_RESIDENT_007");
+    const bool gpuResident=!(opt007&&std::strcmp(opt007,"0")==0);
+    if(session.gpuResident!=gpuResident||session.runtime.lock()!=request.scene||
        session.database.lock()!=request.sceneDatabase||session.revision!=scene.gpuCacheRevision){
         session.prepared.reset();session.projected.reset();
         session.runtime=request.scene;
         session.database=request.sceneDatabase;
         session.revision=scene.gpuCacheRevision;
-        session.prepared=std::make_unique<e::Prepared>(rt,*request.sceneDatabase,opt.mode);
-        session.objectReceivers.assign(size_t(rt.objects.size())+1,0);
-        for(const auto& c:e::staticCandidates(rt,*request.sceneDatabase,e::Mode::Reflection))session.objectReceivers[c.object]=1;
+        session.gpuResident=gpuResident;session.objectReceivers.clear();
     }
     const char* objectEnv=std::getenv("CSE_WARP_ESCARGOT_OBJECT_GPU");
     QString objectFailure;
     const char* legacy=std::getenv("CSE_WARP_ESCARGOT_LEGACY_F16");
     if(!(objectEnv&&std::strcmp(objectEnv,"1")==0)&&!(legacy&&std::strcmp(legacy,"1")==0)){
-        if(!session.projected)session.projected=std::make_unique<e::projected::Session>(rt,*request.sceneDatabase);
+        if(!session.projected)session.projected=std::make_unique<e::projected::Session>(rt,*request.sceneDatabase,gpuResident);
         if(!session.projected->valid()){result.reason=L"Object006 invalid catalogue";return result;}
         e::projected::Metrics m;
         const auto& plan=session.projected->build(camera,shadow,request.width,request.height,m);
@@ -75,13 +76,14 @@ BackendResult renderEscargotF16(const Request& request,const m3d::Camera& camera
         if(!result.ok)return result; // Never silently switch to per-pixel BVH4.
         result.stats.rays=m.rays;result.stats.primarySamples=m.rays;
         result.stats.ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
-        result.renderer=QStringLiteral("V17 LumaTrace BVH4 — Z Escargot Object 006 Resident — %1 — rays %2 / tri %3 / omitted %4 / deferred %5")
+        result.renderer=(gpuResident?QStringLiteral("V17 LumaTrace BVH4 — Z Escargot Object 007 GPU — %1 — rays %2 / tri %3 / omitted %4 / deferred %5"):QStringLiteral("V17 LumaTrace BVH4 — Z Escargot Object 006 Resident — %1 — rays %2 / tri %3 / omitted %4 / deferred %5"))
             .arg(request.directPresent?QStringLiteral("Direct GPU (swapchain)"):QStringLiteral("Qt (QImage)"))
             .arg(m.rays).arg(m.triangles).arg(m.omitted).arg(m.deferred+m.curved);
         if(!m.receivers)result.renderer+=QStringLiteral(" — catalogue %1 / patches %2 / visible %3").arg(m.catalogue).arg(m.patches).arg(m.visible);
         return result;
     }
     if(objectEnv&&std::strcmp(objectEnv,"1")==0){
+        if(session.objectReceivers.empty()){session.objectReceivers.assign(size_t(rt.objects.size())+1,0);for(const auto& c:e::staticCandidates(rt,*request.sceneDatabase,e::Mode::Reflection))session.objectReceivers[c.object]=1;}
         m3d::EscargotPacketBuild plan;plan.rasterDirect=true;plan.rasterReceivers=session.objectReceivers;
         m3d::EscargotBuildTiming timing;
         if(request.directPresent)result.ok=m3d::renderLumaTraceEscargotGpuBuiltNative(scene,rt.lumaTraceBvh4,shadow,camera,request.width,request.height,reinterpret_cast<void*>(request.nativeHandle),plan,result.stats,timing,result.reason);
@@ -96,6 +98,7 @@ BackendResult renderEscargotF16(const Request& request,const m3d::Camera& camera
         result=BackendResult{};
     }
     e::ResidentStats resident;
+    if(!session.prepared)session.prepared=std::make_unique<e::Prepared>(rt,*request.sceneDatabase,opt.mode);
     auto frame=session.prepared->frame(camera,request.width,request.height,opt,false,true,true,nullptr,&resident);
     if(!frame.ok){result.reason=QString::fromStdString(frame.error).toStdWString();return result;}
     auto plan=e::planGpuBuild(frame,scene,rt.objects.size(),16,true);
