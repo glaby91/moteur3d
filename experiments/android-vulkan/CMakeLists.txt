@@ -12,6 +12,8 @@ if(NOT EXISTS "${CSE_ANDROID_PACKAGE_DIR}/assets/cse/index.txt")
     message(FATAL_ERROR "Run stage_assets.py before configuring")
 endif()
 find_package(Qt6 6.10 REQUIRED COMPONENTS Core Gui Widgets Concurrent)
+# Android deployment paths contain TARGET_FILE generator expressions.
+qt_policy(SET QTP0002 NEW)
 find_package(Vulkan 1.3.204 REQUIRED)
 get_filename_component(REPO "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
 add_subdirectory("${REPO}/v16" "${CMAKE_CURRENT_BINARY_DIR}/v16")
